@@ -49,7 +49,7 @@ fn bounce_of(seconds: f64, rate: f64, clock: ExportClock) -> Bounce<NodeKey, Buf
     Bounce::project()
         .master_buffers()
         .channels(ChannelLayout::STEREO)
-        .range(Range::Seconds(Seconds(0.0), Seconds(seconds)))
+        .range(Range::Seconds(Seconds::new(0.0), Seconds::new(seconds)))
         .sample_rate(SampleRate::of(rate))
         .clock(clock)
         .latency(BounceLatency::Keep)
@@ -277,16 +277,20 @@ fn instrument_at(rate: f64, hosting: Hosting) {
         } else {
             midi::note_off(MidiChannel::FIRST, 60, 0)
         };
-        TimedMidiEvent::new(Beat(beat), event).unwrap()
+        TimedMidiEvent::new(Beat::new(beat), event).unwrap()
     };
     session
         .midi()
-        .play_clip(probe, Beat(0.0), vec![note(1.0, true), note(2.0, false)])
+        .play_clip(
+            probe,
+            Beat::new(0.0),
+            vec![note(1.0, true), note(2.0, false)],
+        )
         .expect("the plugin takes a clip");
     let _ = session.update();
 
     let timeline = Arc::new(OfflineTimeline::new(&OfflineTimelineConfig {
-        start_beat: Beat(0.0),
+        start_beat: Beat::new(0.0),
         tempo_map: Arc::new(tutti_tempo::TempoMap::constant(Bpm::of(90.0)).expect("a tempo")),
         sample_rate: SampleRate::of(rate),
         loop_range: None,

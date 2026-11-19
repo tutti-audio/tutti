@@ -41,7 +41,7 @@ fn bounce_of(seconds: f64, rate: f64, clock: ExportClock) -> Bounce<NodeKey, Buf
     Bounce::project()
         .master_buffers()
         .channels(ChannelLayout::STEREO)
-        .range(Range::Seconds(Seconds(0.0), Seconds(seconds)))
+        .range(Range::Seconds(Seconds::new(0.0), Seconds::new(seconds)))
         .sample_rate(SampleRate::of(rate))
         .clock(clock)
         .latency(BounceLatency::Keep)
@@ -89,7 +89,7 @@ fn session() -> DetachedSession {
 /// A timeline at `tempo` BPM from beat 0, at the export's rate.
 fn timeline(tempo: f64) -> Arc<OfflineTimeline> {
     Arc::new(OfflineTimeline::new(&OfflineTimelineConfig {
-        start_beat: Beat(0.0),
+        start_beat: Beat::new(0.0),
         tempo_map: Arc::new(tutti_tempo::TempoMap::constant(Bpm::of(tempo)).expect("a tempo")),
         sample_rate: SampleRate::of(RATE),
         loop_range: None,
@@ -120,7 +120,7 @@ fn a_node_export_follows_a_90_bpm_timeline() {
             .unwrap();
     }
     let voice = {
-        let source = MemorySource::placed(Arc::new(wave), VoiceWindow::from(Beat(3.0)))
+        let source = MemorySource::placed(Arc::new(wave), VoiceWindow::from(Beat::new(3.0)))
             .expect("a placeable wave");
         let (node, _params) = session.graph().add(source);
         session.graph().connect(node, Root).unwrap();
@@ -132,7 +132,7 @@ fn a_node_export_follows_a_90_bpm_timeline() {
             wave.append(Interleaved::new(&[tone(i)], wave.layout()).unwrap())
                 .unwrap();
         }
-        let source = MemorySource::placed(Arc::new(wave), VoiceWindow::from(Beat(0.0)))
+        let source = MemorySource::placed(Arc::new(wave), VoiceWindow::from(Beat::new(0.0)))
             .expect("a placeable wave");
         session.graph().add(source).0
     };
@@ -228,7 +228,7 @@ fn streamer_on(
 
 /// The live voice of the stream `reader` reads, placed at `beat`.
 fn disk_voice(reader: StreamReader<f32>, beat: f64) -> DiskVoice<f32> {
-    DiskVoice::from_reader(reader, VoiceWindow::from(Beat(beat)))
+    DiskVoice::from_reader(reader, VoiceWindow::from(Beat::new(beat)))
 }
 
 fn node_of(source: VoiceSource<f32>) -> VoiceNode<f32> {
@@ -269,7 +269,7 @@ fn a_disk_voice_exports_its_file_from_its_beat_and_matches_memory() {
                 .unwrap();
         }
         let memory = node_of(VoiceSource::Memory(
-            MemorySource::placed(Arc::new(wave), VoiceWindow::from(Beat(3.0)))
+            MemorySource::placed(Arc::new(wave), VoiceWindow::from(Beat::new(3.0)))
                 .expect("a placeable wave"),
         ));
         let graph = session.graph();
@@ -420,7 +420,7 @@ fn live_disk_playback_is_untouched_while_its_voice_exports() {
                     None,
                 ));
                 live.render(BLOCK, PlanesMut::from_vecs(&mut block).unwrap());
-                live_clock.advance(Samples(BLOCK));
+                live_clock.advance(Samples::new(BLOCK));
                 heard.extend_from_slice(&block[0]);
                 assert!(heard.len() < len, "the live side ran out of file first");
                 if heard.len() > SETTLED {

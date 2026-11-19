@@ -54,7 +54,7 @@ fn a_sampler_node_added_to_the_graph_follows_the_sessions_tempo_map() {
         wave.append(Interleaved::new(&[i as f32 / 131_072.0], wave.layout()).unwrap())
             .unwrap();
     }
-    let source = MemorySource::placed(Arc::new(wave), VoiceWindow::from(Beat(0.0)))
+    let source = MemorySource::placed(Arc::new(wave), VoiceWindow::from(Beat::new(0.0)))
         .expect("a placeable wave");
     let mut pool = VoicePool::new();
     pool.insert(SlotId(1), source, Playback::default());
@@ -64,7 +64,7 @@ fn a_sampler_node_added_to_the_graph_follows_the_sessions_tempo_map() {
             [(0.0, 120.0), (1.0, 60.0)]
                 .into_iter()
                 .map(|(beat, bpm)| TempoPoint {
-                    beat: Beat(beat),
+                    beat: Beat::new(beat),
                     tempo: Bpm::of(bpm),
                     transition: Transition::Step,
                 }),

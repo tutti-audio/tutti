@@ -107,7 +107,8 @@ fn a_route_onto_an_edge_modulates_the_sum_by_the_analytic_amount() {
     assert!(plain.iter().all(|&x| x == A + B), "unity before any route");
 
     let mut m = s.mods_mut();
-    m.range(edge, Amplitude(-2.0)..Amplitude(2.0)).unwrap();
+    m.range(edge, Amplitude::new(-2.0)..Amplitude::new(2.0))
+        .unwrap();
     let source = m.macro_(0.5);
     let route = m
         .route(RouteSpec::new(source, edge, Depth::of(0.25)))
@@ -129,17 +130,17 @@ fn a_route_onto_an_edge_modulates_the_sum_by_the_analytic_amount() {
     settle(&mut s);
     figure(&mut s, 0.5, "the macro moved");
 
-    s.set(gain(&s, edge).to(Amplitude(-0.25))).unwrap();
+    s.set(gain(&s, edge).to(Amplitude::new(-0.25))).unwrap();
     settle(&mut s);
     figure(&mut s, -0.75, "the knob moved");
 
     // The range is the route's span too: `-0.25 + 0.25 * -0.5 * 2`.
-    s.set(RangeTarget::of(edge).to(Amplitude(-2.0)..Amplitude(0.0)))
+    s.set(RangeTarget::of(edge).to(Amplitude::new(-2.0)..Amplitude::new(0.0)))
         .unwrap();
     settle(&mut s);
     figure(&mut s, -0.5, "within the range");
     // Span 2.25: `-0.25 - 0.28125` is below the range's floor.
-    s.set(RangeTarget::of(edge).to(Amplitude(-0.25)..Amplitude(2.0)))
+    s.set(RangeTarget::of(edge).to(Amplitude::new(-0.25)..Amplitude::new(2.0)))
         .unwrap();
     settle(&mut s);
     figure(&mut s, -0.25, "clamped to the range");
@@ -176,7 +177,8 @@ fn the_base_is_the_lanes_knob_and_a_route_returns_to_it() {
     figure(&mut s, 0.5, "the base, before any route");
 
     let mut m = s.mods_mut();
-    m.range(edge, Amplitude(-2.0)..Amplitude(2.0)).unwrap();
+    m.range(edge, Amplitude::new(-2.0)..Amplitude::new(2.0))
+        .unwrap();
     let source = m.macro_(0.5);
     let route = m
         .route(RouteSpec::new(source, edge, Depth::of(0.5)))

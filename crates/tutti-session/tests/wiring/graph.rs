@@ -73,7 +73,7 @@ impl Knob {
 
     fn at(drive: f64) -> Self {
         Self {
-            drive: Param::new(Drive(drive)),
+            drive: Param::new(Drive::new(drive)),
             _token: None,
         }
     }
@@ -158,7 +158,7 @@ impl<const N: usize> Late<N> {
 
 impl<const N: usize> Node for Late<N> {
     fn shape(&self) -> Shape {
-        Shape::through_unassigned(ChannelLayout::MONO).with_latency(Latency::new(Samples(N)))
+        Shape::through_unassigned(ChannelLayout::MONO).with_latency(Latency::new(Samples::new(N)))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -441,7 +441,7 @@ fn a_crossfade_on_a_removed_node_is_refused_naming_it() {
         .crossfade(
             knob,
             Params(Knob::at(3.0)),
-            Seconds(0.005),
+            Seconds::new(0.005),
             FadeLaw::EqualAmplitude,
         )
         .expect_err("the node is gone");
@@ -471,7 +471,7 @@ fn a_crossfade_refused_busy_during_a_re_prepare_lands_on_a_later_update() {
     // The rate changes on the running graph: the first half is sent, and
     // the executor has not run it yet.
     s.graph().set_sample_rate(SampleRate::SR_44K1);
-    let fade = Seconds(0.005);
+    let fade = Seconds::new(0.005);
     let waiting =
         match s
             .graph()
@@ -514,7 +514,7 @@ fn a_crossfade_refused_busy_during_a_re_prepare_lands_on_a_later_update() {
     assert!(controls.set(UnitParam::Drive, 8.0));
     side.tick(InterleavedMut::one_frame(&mut out).unwrap());
     assert_eq!(out[0], 8.0, "its controls steer it");
-    s.set(knob.drive().to(Drive(9.0))).unwrap();
+    s.set(knob.drive().to(Drive::new(9.0))).unwrap();
     side.tick(InterleavedMut::one_frame(&mut out).unwrap());
     assert_eq!(out[0], 9.0, "and its params are addressed");
 }
@@ -537,7 +537,7 @@ fn removing_a_node_purges_the_crossfades_parked_on_it() {
     let waiting = s.graph().crossfade(
         knob,
         Params(Knob::at(3.0).holding(&token)),
-        Seconds(0.005),
+        Seconds::new(0.005),
         FadeLaw::EqualAmplitude,
     );
     assert!(matches!(waiting, Ok(Crossfade::Waiting(_))), "{waiting:?}");
@@ -574,7 +574,7 @@ fn a_crossfade_on_a_poisoned_graph_is_refused() {
     let refused = s.graph().crossfade(
         knob,
         Params(Knob::at(3.0)),
-        Seconds(0.005),
+        Seconds::new(0.005),
         FadeLaw::EqualAmplitude,
     );
     assert!(refused.is_err(), "{refused:?}");
@@ -606,7 +606,7 @@ fn every_param_write_path_reaches_a_fork() {
         .unwrap();
     let _ = s.update();
 
-    s.set(k0.drive().to(Drive(5.0))).unwrap();
+    s.set(k0.drive().to(Drive::new(5.0))).unwrap();
     assert!(c1.set(UnitParam::Drive, 4.0));
     let mut live = [0.0f32; 2];
     s.render_frame(InterleavedMut::one_frame(&mut live).unwrap());
@@ -697,10 +697,10 @@ fn an_offline_session_renders_a_sines_analytic_rms() {
     let mut s = Session::builder()
         .sample_rate(RATE)
         .outputs(ChannelLayout::MONO)
-        .max_block(MaxBlock::of(Samples(512)))
+        .max_block(MaxBlock::of(Samples::new(512)))
         .build()
         .expect("builds");
-    let (osc, _) = s.graph().add(ForkByClone(Osc::sine(Hz(1_000.0))));
+    let (osc, _) = s.graph().add(ForkByClone(Osc::sine(Hz::new(1_000.0))));
     for c in 0..s.graph_ref().outputs() {
         s.graph()
             .connect(osc.out(0), Root::output(c))
@@ -734,10 +734,10 @@ fn a_latent_branch_is_compensated_on_the_other_to_the_sample() {
     const N: usize = 37;
     let mut s = Session::builder()
         .sample_rate(RATE)
-        .max_block(MaxBlock::of(Samples(256)))
+        .max_block(MaxBlock::of(Samples::new(256)))
         .build()
         .expect("builds");
-    let (osc, _) = s.graph().add(ForkByClone(Osc::sine(Hz(440.0))));
+    let (osc, _) = s.graph().add(ForkByClone(Osc::sine(Hz::new(440.0))));
     let (late, _) = s.graph().add(ForkByClone(Late::<N>::new()));
     s.graph()
         .set_sources_hard(InPort::new(late, 0), [OutPort::new(osc, 0)])
@@ -749,10 +749,10 @@ fn a_latent_branch_is_compensated_on_the_other_to_the_sample() {
         .set_sources_hard(Root::output(1), [OutPort::new(late, 0)])
         .unwrap();
     let _ = s.update();
-    assert_eq!(s.latency(), Samples(N), "the total is published");
+    assert_eq!(s.latency(), Samples::new(N), "the total is published");
     assert_eq!(
         s.compensation().to_vec().as_slice(),
-        [Samples(N), Samples(0)],
+        [Samples::new(N), Samples::new(0)],
         "the dry channel pre-rolls by the latent one's latency"
     );
 
@@ -911,7 +911,7 @@ fn the_update_sweeps_each_nodes_reclaimer_while_it_is_in_the_graph() {
         .crossfade(
             node,
             Published::new(),
-            Seconds(0.0),
+            Seconds::new(0.0),
             FadeLaw::EqualAmplitude,
         )
         .expect("the node is in the graph")
@@ -941,7 +941,7 @@ fn the_update_sweeps_each_nodes_reclaimer_while_it_is_in_the_graph() {
             .replace(
                 node,
                 ForkByClone(Const::mono(0.0)),
-                Seconds(0.0),
+                Seconds::new(0.0),
                 FadeLaw::EqualAmplitude
             )
             .is_ok()
@@ -972,7 +972,7 @@ fn park_a_retired_slot(s: &mut DetachedSession, handle: &tutti_sampler::VoicePoo
     use tutti_sampler::{MemorySource, Playback, SlotId, VoiceWindow};
     let source = MemorySource::placed(
         Arc::new(tutti_buffers::Wave::new(1, SampleRate::SR_48K)),
-        VoiceWindow::from(tutti_units::Beat(0.0)),
+        VoiceWindow::from(tutti_units::Beat::new(0.0)),
     )
     .expect("a placeable wave");
     handle

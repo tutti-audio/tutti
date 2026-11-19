@@ -9,7 +9,7 @@ use tutti_units::{Mix, Samples, Seconds, Tail, UnitAddr, UnitParam};
 
 fn session() -> Session {
     Session::builder()
-        .max_block(MaxBlock::of(Samples(256)))
+        .max_block(MaxBlock::of(Samples::new(256)))
         .build()
         .expect("builds")
 }
@@ -24,7 +24,7 @@ fn a_write_reaches_the_decay_it_names() {
         FdnControls::DEFAULT,
     ));
     let at = |i| UnitAddr::new(UnitParam::Decay, i);
-    s.set(node.decay_at(1).to(Seconds(5.0))).unwrap();
+    s.set(node.decay_at(1).to(Seconds::new(5.0))).unwrap();
     s.set(node.freeze().to(true)).unwrap();
     assert_eq!(cells.get(at(1)), Some(5.0), "low");
     assert_eq!(cells.get(at(0)), Some(2.0), "mid untouched");
@@ -72,8 +72,8 @@ fn the_plate_is_a_session_node_with_its_params_and_ceiling() {
     let (node, cells) = s
         .graph()
         .add::<PlateReverbNode<f32>>(PlateReverbNode::<f32>::from(PlateReverbConfig::new()));
-    s.set(node.decay().to(Seconds(5.0))).unwrap();
-    s.set(node.diffusion().to(Mix(0.25))).unwrap();
+    s.set(node.decay().to(Seconds::new(5.0))).unwrap();
+    s.set(node.diffusion().to(Mix::new(0.25))).unwrap();
     assert_eq!(cells.get(UnitParam::Decay), Some(5.0));
     assert_eq!(cells.get(UnitParam::Diffusion), Some(0.25));
     assert_eq!(cells.get(UnitParam::Damping), Some(0.0005), "untouched");

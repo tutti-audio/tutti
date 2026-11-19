@@ -30,12 +30,12 @@ struct Opener(Writer);
 
 impl InputOpener<f64> for Opener {
     fn open(&mut self, _: &MicConfig, rate: SampleRate) -> tutti_cpal::Result<OpenedInput<f64>> {
-        let (ring, writer) = InletRing::pair(ChannelLayout::STEREO, Samples(1 << 16), rate);
+        let (ring, writer) = InletRing::pair(ChannelLayout::STEREO, Samples::new(1 << 16), rate);
         *self.0.lock().unwrap() = Some(writer);
         Ok(OpenedInput {
             ring,
             keep: Box::new(()) as Box<dyn Any + Send>,
-            lead: Samples(0),
+            lead: Samples::new(0),
         })
     }
 }
@@ -97,7 +97,7 @@ fn an_f64_take_reads_back_as_a_clip_holding_a_figure_f32_rounds_away() {
             .push_interleaved(Interleaved::new(&frame, ChannelLayout::STEREO).unwrap());
         drop(guard);
         events.extend(session.update());
-        stream.render_block(Samples(BLOCK)).expect("open");
+        stream.render_block(Samples::new(BLOCK)).expect("open");
         events.extend(session.update());
         std::thread::yield_now();
     }
@@ -109,10 +109,10 @@ fn an_f64_take_reads_back_as_a_clip_holding_a_figure_f32_rounds_away() {
             _ => None,
         })
         .expect("finished");
-    assert_eq!(done.frames(), Samples(200));
+    assert_eq!(done.frames(), Samples::new(200));
 
     let wave = tutti_codec::read_wave::<f64>(done.path().expect("a file")).expect("reads");
-    assert_eq!(wave.len(), Samples(200));
+    assert_eq!(wave.len(), Samples::new(200));
     assert!((0..200).all(|i| wave.at(0, i) == FINE && wave.at(1, i) == -FINE));
 
     let clip = done.clip::<f64>().expect("a clip of the file");
@@ -132,7 +132,7 @@ fn an_f64_take_reads_back_as_a_clip_holding_a_figure_f32_rounds_away() {
     let mut heard = Vec::new();
     for _ in 0..8 {
         let _ = session.update();
-        heard.extend(stream.render_block(Samples(BLOCK)).expect("open"));
+        heard.extend(stream.render_block(Samples::new(BLOCK)).expect("open"));
     }
     assert!(heard.contains(&FINE), "the clip plays FINE unrounded");
     assert!(heard.iter().all(|&x| x.abs() <= FINE));

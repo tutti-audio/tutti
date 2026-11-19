@@ -85,8 +85,8 @@ fn placed(
 #[test]
 fn a_window_set_is_pending_until_the_update_then_places_the_voice() {
     let mut s = offline();
-    let (clip, handle) = placed(&mut s, Beat(2.0));
-    let beat_one = Some(VoiceWindow::from(Beat(1.0)));
+    let (clip, handle) = placed(&mut s, Beat::new(2.0));
+    let beat_one = Some(VoiceWindow::from(Beat::new(1.0)));
 
     s.set(clip.window().to(beat_one)).unwrap();
     assert_eq!(
@@ -96,7 +96,7 @@ fn a_window_set_is_pending_until_the_update_then_places_the_voice() {
     );
     assert_eq!(
         *handle.window_cell().current(),
-        Some(VoiceWindow::from(Beat(2.0))),
+        Some(VoiceWindow::from(Beat::new(2.0))),
         "the node's cell holds the window in force"
     );
     s.play().expect("room");
@@ -107,7 +107,7 @@ fn a_window_set_is_pending_until_the_update_then_places_the_voice() {
     );
 
     let mut s = offline();
-    let (clip, handle) = placed(&mut s, Beat(2.0));
+    let (clip, handle) = placed(&mut s, Beat::new(2.0));
     s.set(clip.window().to(beat_one)).unwrap();
     let _ = s.update();
     assert_eq!(*handle.window_cell().current(), beat_one);
@@ -193,10 +193,10 @@ fn play_on_a_placed_voice_is_refused_and_a_free_running_one_plays_its_own_cursor
 #[test]
 fn two_window_writes_before_an_update_publish_once_and_the_second_wins() {
     let mut s = offline();
-    let (clip, handle) = placed(&mut s, Beat(2.0));
+    let (clip, handle) = placed(&mut s, Beat::new(2.0));
     let before = handle.window_cell().seq();
-    let second = Some(VoiceWindow::from(Beat(3.0)));
-    s.set(clip.window().to(Some(VoiceWindow::from(Beat(1.0)))))
+    let second = Some(VoiceWindow::from(Beat::new(3.0)));
+    s.set(clip.window().to(Some(VoiceWindow::from(Beat::new(1.0)))))
         .unwrap();
     s.set(clip.window().to(second)).unwrap();
     let _ = s.update();
@@ -212,7 +212,7 @@ fn two_window_writes_before_an_update_publish_once_and_the_second_wins() {
 #[test]
 fn a_pending_window_write_to_a_removed_node_never_publishes() {
     let mut s = offline();
-    let (clip, handle) = placed(&mut s, Beat(2.0));
+    let (clip, handle) = placed(&mut s, Beat::new(2.0));
     let (seq, in_force) = (handle.window_cell().seq(), handle.window_cell().current());
     s.set(clip.window().to(None)).unwrap();
     s.remove(clip).unwrap();
@@ -232,10 +232,10 @@ fn a_pending_window_write_to_a_removed_node_never_publishes() {
 #[test]
 fn a_block_adopting_a_written_window_does_not_allocate() {
     let mut s = offline();
-    let (clip, _) = placed(&mut s, Beat(2.0));
+    let (clip, _) = placed(&mut s, Beat::new(2.0));
     s.play().expect("room");
     let _ = render(&s, 1_024);
-    s.set(clip.window().to(Some(VoiceWindow::from(Beat(0.0)))))
+    s.set(clip.window().to(Some(VoiceWindow::from(Beat::new(0.0)))))
         .unwrap();
     let _ = s.update();
     let mut buf = vec![0.0f32; 512 * 2];
@@ -293,7 +293,7 @@ impl Rig {
             }
             (Clip::new(wave).expect("a placeable wave"), None)
         };
-        let (clip, handle) = s.graph().add(clip.at(Beat(0.0)));
+        let (clip, handle) = s.graph().add(clip.at(Beat::new(0.0)));
         for port in 0..2 {
             s.graph()
                 .set_sources_hard(Root::output(port), [OutPort::new(clip.erase(), 0)])

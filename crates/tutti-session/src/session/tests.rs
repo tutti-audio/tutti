@@ -29,7 +29,7 @@ fn an_update_frees_what_a_block_held_across_a_replacement() {
     let slot = MeterSlot::following_meter(Some(s.transport.settings().project_meter().clone()));
     let meter = s.transport_handle().meter();
     let old = Arc::new(MeterMap::new([MeterChange::new(
-        Beat(0.0),
+        Beat::new(0.0),
         TimeSignature::of(3, 4),
     )]));
     let gone = Arc::downgrade(&old);
@@ -59,7 +59,7 @@ fn detached() -> Session<&'static str, crate::Detached> {
 
 fn meter_of(numerator: u32) -> Arc<MeterMap> {
     Arc::new(MeterMap::new([MeterChange::new(
-        Beat(0.0),
+        Beat::new(0.0),
         TimeSignature::of(numerator, 4),
     )]))
 }

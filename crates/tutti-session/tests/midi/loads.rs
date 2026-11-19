@@ -92,7 +92,7 @@ fn a_format_1_file_lands_each_track_with_its_clip_and_the_shared_timeline() {
 
     // 500 000 microseconds a quarter: two quarters are one second.
     let tempo = loaded.tempo().expect("one timeline");
-    assert_eq!(tempo.seconds_at(Beat(2.0)), Seconds(1.0));
+    assert_eq!(tempo.seconds_at(Beat::new(2.0)), Seconds::new(1.0));
     let meter = loaded.meter().expect("one timeline");
     let changes = meter.current();
     assert_eq!(changes.changes().len(), 1);
@@ -121,8 +121,8 @@ fn a_format_2_file_has_no_common_timeline_and_each_track_its_own_tempo() {
     assert_eq!(loaded.tempo().unwrap_err(), NoCommonTimelineError::PerTrack);
     assert_eq!(loaded.meter().unwrap_err(), NoCommonTimelineError::PerTrack);
     let (first, second) = (loaded.track(0).unwrap(), loaded.track(1).unwrap());
-    assert_eq!(first.tempo.seconds_at(Beat(1.0)), Seconds(0.5));
-    assert_eq!(second.tempo.seconds_at(Beat(1.0)), Seconds(1.0));
+    assert_eq!(first.tempo.seconds_at(Beat::new(1.0)), Seconds::new(0.5));
+    assert_eq!(second.tempo.seconds_at(Beat::new(1.0)), Seconds::new(1.0));
     assert_eq!(first.events.len(), 2);
 }
 
@@ -161,8 +161,8 @@ fn a_repaired_file_reports_what_the_read_added() {
     assert!(report.dropped.is_empty());
     assert!(!report.is_clean());
     assert_eq!(
-        loaded.tempo().unwrap().seconds_at(Beat(2.0)),
-        Seconds(1.0),
+        loaded.tempo().unwrap().seconds_at(Beat::new(2.0)),
+        Seconds::new(1.0),
         "the 120 beats a minute the repair added"
     );
 }
@@ -181,7 +181,7 @@ fn an_event_with_no_packet_is_reported_at_its_beat() {
     let loaded = load(&mut session(), write(dir.path(), "esc.mid", &bytes)).expect("loads");
     let dropped = &loaded.report().dropped;
     assert_eq!(dropped.len(), 1);
-    assert_eq!((dropped[0].track, dropped[0].beat), (0, Beat(0.5)));
+    assert_eq!((dropped[0].track, dropped[0].beat), (0, Beat::new(0.5)));
     assert_eq!(dropped[0].why, TimelineDrop::BareEscape);
     assert_eq!(loaded.track(0).unwrap().events.len(), 2);
 }
@@ -199,7 +199,7 @@ fn a_time_signature_no_meter_holds_is_reported_at_its_beat() {
     let loaded = load(&mut session(), write(dir.path(), "zero.mid", &bytes)).expect("loads");
     let refused = &loaded.report().refused_time_signatures;
     assert_eq!(refused.len(), 1);
-    assert_eq!((refused[0].0, refused[0].1.beat), (None, Beat(2.0)));
+    assert_eq!((refused[0].0, refused[0].1.beat), (None, Beat::new(2.0)));
     assert_eq!(refused[0].1.numerator, 0);
     assert!(!loaded.report().is_clean());
     assert_eq!(loaded.meter().unwrap().current().changes().len(), 1);

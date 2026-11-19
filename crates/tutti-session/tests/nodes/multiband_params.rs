@@ -64,9 +64,11 @@ fn rig() -> (
         .build()
         .expect("builds");
     let g = s.graph();
-    let (low, _) = g.add(ForkByClone(Osc::sine(Hz(LOW)).with_amplitude(Amplitude(A))));
+    let (low, _) = g.add(ForkByClone(
+        Osc::sine(Hz::new(LOW)).with_amplitude(Amplitude::new(A)),
+    ));
     let (high, _) = g.add(ForkByClone(
-        Osc::sine(Hz(HIGH)).with_amplitude(Amplitude(A)),
+        Osc::sine(Hz::new(HIGH)).with_amplitude(Amplitude::new(A)),
     ));
     let (mb, controls) =
         g.add(MultibandCompressorNode::<f32>::new(ChannelLayout::STEREO, 2).unwrap());
@@ -134,7 +136,7 @@ fn a_write_to_band_1_moves_band_1_only() {
     assert!((l - expected(LOW, 0.0, 0.0)).abs() < 1e-5, "{l}");
     assert!((r - expected(HIGH, 0.0, 0.0)).abs() < 1e-5, "{r}");
 
-    s.set(mb.gain_db_at(1).to(Db(6.0))).unwrap();
+    s.set(mb.gain_db_at(1).to(Db::new(6.0))).unwrap();
     let (l, r) = measure(&mut s);
     assert!(
         (l - expected(LOW, 0.0, 6.0)).abs() < 1e-5,
@@ -142,7 +144,7 @@ fn a_write_to_band_1_moves_band_1_only() {
     );
     assert!((r - expected(HIGH, 0.0, 6.0)).abs() < 1e-5, "{r}");
 
-    s.set(mb.gain_db_at(0).to(Db(-9.0))).unwrap();
+    s.set(mb.gain_db_at(0).to(Db::new(-9.0))).unwrap();
     let (l, r) = measure(&mut s);
     assert!((l - expected(LOW, -9.0, 6.0)).abs() < 1e-5, "{l}");
     assert!(
@@ -197,29 +199,29 @@ fn the_meter_of_band_1_follows_its_threshold() {
     let (mut s, mb, controls) = rig();
     for band in 0..2 {
         s.set((
-            mb.ratio_at(band).to(CompressionRatio(2.0)),
-            mb.release_at(band).to(Seconds(0.001)),
-            mb.attack_at(band).to(Seconds(0.001)),
+            mb.ratio_at(band).to(CompressionRatio::new(2.0)),
+            mb.release_at(band).to(Seconds::new(0.001)),
+            mb.attack_at(band).to(Seconds::new(0.001)),
         ))
         .unwrap();
     }
-    s.set(mb.threshold_at(0).to(Db(0.0))).unwrap();
-    s.set(mb.threshold_at(1).to(Db(-30.0))).unwrap();
+    s.set(mb.threshold_at(0).to(Db::new(0.0))).unwrap();
+    s.set(mb.threshold_at(1).to(Db::new(-30.0))).unwrap();
     render(&mut s, 9_600);
     assert!(
-        controls.gain_reduction_db(1) > Db(3.0),
+        controls.gain_reduction_db(1) > Db::new(3.0),
         "{:?}",
         controls.gain_reduction_db(1)
     );
     assert!(
-        controls.gain_reduction_db(0) < Db(1e-2),
+        controls.gain_reduction_db(0) < Db::new(1e-2),
         "{:?}",
         controls.gain_reduction_db(0)
     );
-    s.set(mb.threshold_at(1).to(Db(0.0))).unwrap();
+    s.set(mb.threshold_at(1).to(Db::new(0.0))).unwrap();
     render(&mut s, 9_600);
     assert!(
-        controls.gain_reduction_db(1) < Db(1e-4),
+        controls.gain_reduction_db(1) < Db::new(1e-4),
         "{:?}",
         controls.gain_reduction_db(1)
     );
@@ -243,7 +245,7 @@ fn a_route_to_band_1_modulates_band_1_only() {
     let (mut s, mb, _) = rig();
     let band1 = mb.gain_db_at(1);
     let mut m = s.mods_mut();
-    m.range(band1, Db(-24.0)..Db(24.0)).unwrap();
+    m.range(band1, Db::new(-24.0)..Db::new(24.0)).unwrap();
     let lfo = m.lfo(Lfo::sine().rate(BeatsPerCycle::of(0.5)));
     m.route(RouteSpec::new(lfo, band1, Depth::of(0.25)))
         .unwrap();
@@ -299,12 +301,12 @@ fn a_route_to_band_1_modulates_band_1_only() {
 #[test]
 fn a_fork_keeps_each_index_to_itself() {
     let (mut s, mb, _) = rig();
-    s.set(mb.gain_db_at(0).to(Db(-6.0))).unwrap();
-    s.set(mb.gain_db_at(1).to(Db(6.0))).unwrap();
+    s.set(mb.gain_db_at(0).to(Db::new(-6.0))).unwrap();
+    s.set(mb.gain_db_at(1).to(Db::new(6.0))).unwrap();
     render(&mut s, 128);
     let mut fork = s.graph_ref().testing().fork_live().expect("the node forks");
-    s.set(mb.gain_db_at(0).to(Db(12.0))).unwrap();
-    s.set(mb.gain_db_at(1).to(Db(-12.0))).unwrap();
+    s.set(mb.gain_db_at(0).to(Db::new(12.0))).unwrap();
+    s.set(mb.gain_db_at(1).to(Db::new(-12.0))).unwrap();
 
     let mut out = [vec![0.0; 24_064 + 9_600], vec![0.0; 24_064 + 9_600]];
     fork.render(128, PlanesMut::from_vecs(&mut out).unwrap());
@@ -334,13 +336,13 @@ fn a_fork_keeps_each_index_to_itself() {
 #[test]
 fn a_crossover_write_moves_the_split() {
     let (mut s, mb, _) = rig();
-    s.set(mb.gain_db_at(1).to(Db(-60.0))).unwrap();
+    s.set(mb.gain_db_at(1).to(Db::new(-60.0))).unwrap();
     let (l, _) = measure(&mut s);
     // Band 1 muted by 60 dB: the left is band 0's share alone.
     let (lp, hp) = shares(LOW);
     assert!((l - A * (lp + hp * gain(-60.0))).abs() < 1e-5, "{l}");
 
-    s.set(mb.cutoff_at(0).to(Hz(150.0))).unwrap();
+    s.set(mb.cutoff_at(0).to(Hz::new(150.0))).unwrap();
     let (l, _) = measure(&mut s);
     let x4 = ((PI * LOW / RATE).tan() / (PI * 150.0 / RATE).tan()).powi(4);
     let want = A * (1.0 / (1.0 + x4) + x4 / (1.0 + x4) * gain(-60.0));

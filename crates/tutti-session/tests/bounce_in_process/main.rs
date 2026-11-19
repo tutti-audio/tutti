@@ -29,7 +29,7 @@ const RATE: SampleRate = SampleRate::SR_48K;
 fn offline_session() -> Session {
     Session::builder()
         .sample_rate(RATE)
-        .max_block(MaxBlock::of(Samples(128)))
+        .max_block(MaxBlock::of(Samples::new(128)))
         .build()
         .expect("an offline session builds")
 }
@@ -62,7 +62,7 @@ fn an_in_process_instrument_without_a_live_render_mode_bounces_its_clip() {
         .expect("the shared plugin loads in process");
     session.graph().connect(node, Root).unwrap();
     let on = tutti_midi_runtime::TimedMidiEvent::new(
-        Beat(1.0),
+        Beat::new(1.0),
         Message::midi2(
             MidiChannel::FIRST,
             Voice2::note_on(NoteNumber::of(60), NoteVelocity::MAX),
@@ -71,12 +71,12 @@ fn an_in_process_instrument_without_a_live_render_mode_bounces_its_clip() {
     .unwrap();
     session
         .midi()
-        .play_clip(node, Beat(0.0), vec![on])
+        .play_clip(node, Beat::new(0.0), vec![on])
         .expect("the plugin takes a clip");
     let _ = session.update();
     // 90 BPM: beat 1 is 2/3 s in, inside the 1.5 s bounced.
     let timeline = Arc::new(OfflineTimeline::new(&OfflineTimelineConfig {
-        start_beat: Beat(0.0),
+        start_beat: Beat::new(0.0),
         tempo_map: Arc::new(TempoMap::constant(Bpm::of(90.0)).expect("a tempo")),
         sample_rate: RATE,
         loop_range: None,
@@ -84,7 +84,7 @@ fn an_in_process_instrument_without_a_live_render_mode_bounces_its_clip() {
     let bounce = Bounce::project()
         .master_buffers()
         .channels(ChannelLayout::STEREO)
-        .range(Range::Seconds(Seconds(0.0), Seconds(1.5)))
+        .range(Range::Seconds(Seconds::new(0.0), Seconds::new(1.5)))
         .sample_rate(RATE)
         .clock(ExportClock::timeline(timeline))
         .latency(BounceLatency::Keep)

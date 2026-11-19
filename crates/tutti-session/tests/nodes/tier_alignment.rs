@@ -83,8 +83,8 @@ fn render(tier: Tier) -> (Vec<f32>, Vec<f32>, Samples) {
     // The latent path, on output 2.
     let (src, _) = s.graph().add(ForkByClone(Const::mono(1.0)));
     let (eff, _) = s.graph().add(LimiterNode::<f32>::mono(LimiterControls {
-        threshold: Db(-1.0),
-        ceiling: Db(-0.3),
+        threshold: Db::new(-1.0),
+        ceiling: Db::new(-0.3),
         ..LimiterControls::DEFAULT
     }));
     s.graph()
@@ -115,7 +115,7 @@ fn render(tier: Tier) -> (Vec<f32>, Vec<f32>, Samples) {
                 assert!(Instant::now() < deadline, "the stream did not open");
                 std::thread::sleep(Duration::from_millis(1));
             };
-            let voice = DiskVoice::from_reader(reader, VoiceWindow::from(Beat(1.0)));
+            let voice = DiskVoice::from_reader(reader, VoiceWindow::from(Beat::new(1.0)));
             (s.graph().add(voice).0.erase(), Some(stream))
         }
         Tier::Memory => {
@@ -125,7 +125,7 @@ fn render(tier: Tier) -> (Vec<f32>, Vec<f32>, Samples) {
                     .unwrap();
             }
             let source =
-                MemorySource::placed(std::sync::Arc::new(wave), VoiceWindow::from(Beat(1.0)))
+                MemorySource::placed(std::sync::Arc::new(wave), VoiceWindow::from(Beat::new(1.0)))
                     .expect("a placeable wave");
             (s.graph().add(source).0.erase(), None)
         }
@@ -146,7 +146,7 @@ fn render(tier: Tier) -> (Vec<f32>, Vec<f32>, Samples) {
     );
     assert_eq!(
         s.compensation().preroll(2),
-        Some(Samples(0)),
+        Some(Samples::new(0)),
         "the latent path is the one the rest wait for"
     );
     assert!(

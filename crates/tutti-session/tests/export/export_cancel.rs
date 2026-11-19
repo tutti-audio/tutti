@@ -96,7 +96,7 @@ fn file_request(path: &Path, normalize: Option<Normalize>) -> Bounce<NodeKey, Fi
     }
 }
 
-const TOTAL: Samples = Samples(BLOCKS * 1024);
+const TOTAL: Samples = Samples::new(BLOCKS * 1024);
 
 /// A cancel from inside the render stops it at the end of that block, the
 /// outcome is `Cancelled`, the partial file is gone, the token is released
@@ -137,7 +137,7 @@ fn a_cancel_stops_the_render_and_frees_the_session() {
     assert!(!path.exists(), "no partial file");
     let seen = handle.progress().unwrap();
     assert_eq!(seen.stage(), Stage::Rendering);
-    assert_eq!(seen.frames(), Some((Samples(0), TOTAL)));
+    assert_eq!(seen.frames(), Some((Samples::new(0), TOTAL)));
 
     // The next export is not refused, and runs to its end.
     r.session.bounce(file_request(&path, None)).unwrap();
@@ -180,7 +180,10 @@ fn progress_ends_at_one_in_the_finalizing_stage() {
     let dir = tempfile::tempdir().unwrap();
     let mut r = rig(usize::MAX);
 
-    for (name, normalize) in [("p.wav", None), ("n.wav", Some(Normalize::peak(Db(-6.0))))] {
+    for (name, normalize) in [
+        ("p.wav", None),
+        ("n.wav", Some(Normalize::peak(Db::new(-6.0)))),
+    ] {
         let job = r
             .session
             .bounce_start(file_request(&dir.path().join(name), normalize))
@@ -210,7 +213,7 @@ fn with_stem(r: &Rig, dir: &Path, normalize: bool) -> Bounce<NodeKey, FileMaster
         .master(dir.join("master.wav"), FORMAT)
         .stem_with(tutti_session::Stem::new(r.node, dir.join("stem.wav"), FORMAT).gain(gain));
     if normalize {
-        bounce.normalize(Normalize::peak(Db(-6.0)))
+        bounce.normalize(Normalize::peak(Db::new(-6.0)))
     } else {
         bounce
     }

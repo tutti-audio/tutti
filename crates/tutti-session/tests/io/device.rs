@@ -47,12 +47,12 @@ fn the_session_publishes_the_meter_and_taps_its_callback_feeds() {
     let mut tap = session
         .graph()
         .taps()
-        .open_output(Samples(1_024))
+        .open_output(Samples::new(1_024))
         .expect("the sources exist");
     let _ = session.update();
     let mut meter = session.take_master_meter().expect("declared at the build");
     stream
-        .render_block(Samples(64))
+        .render_block(Samples::new(64))
         .expect("the stream is open");
     let mut frames = 0;
     let mut one = [0.0f32; 2];
@@ -84,7 +84,7 @@ fn the_session_reads_the_load_its_callback_measures() {
         .expect("builds with no device");
     for _ in 0..3 {
         stream
-            .render_block(Samples(64))
+            .render_block(Samples::new(64))
             .expect("the stream is open");
     }
     let meter = session.load_meter_mut().expect("a device's engine");
@@ -105,10 +105,10 @@ fn a_rerate_keeps_the_published_compensation_in_step_with_the_plan() {
         .device(Default::default())
         .build_device_on(spec_at(48_000.0), driver)
         .expect("builds with no device");
-    let (osc, _) = s.graph().add(ForkByClone(Osc::sine(Hz(1_000.0))));
+    let (osc, _) = s.graph().add(ForkByClone(Osc::sine(Hz::new(1_000.0))));
     let (lim, _) = s.graph().add(LimiterNode::<f32>::mono(LimiterControls {
-        threshold: Db(0.0),
-        ceiling: Db(0.0),
+        threshold: Db::new(0.0),
+        ceiling: Db::new(0.0),
         ..LimiterControls::DEFAULT
     }));
     s.graph()
@@ -121,7 +121,7 @@ fn a_rerate_keeps_the_published_compensation_in_step_with_the_plan() {
         .set_sources_hard(Root::output(1), [OutPort::new(lim, 0)])
         .unwrap();
     let _ = s.update();
-    old.render_block(Samples(480)).expect("open");
+    old.render_block(Samples::new(480)).expect("open");
     let _ = s.update();
 
     let in_step = |s: &LiveSession, what: &str| -> Samples {
@@ -143,7 +143,7 @@ fn a_rerate_keeps_the_published_compensation_in_step_with_the_plan() {
         lim
     };
     let at48 = in_step(&s, "48 kHz");
-    assert!(at48 > Samples(0), "a lookahead to compensate");
+    assert!(at48 > Samples::new(0), "a lookahead to compensate");
 
     let (driver, new) = ManualStreamDriver::new();
     s.restart_on(spec_at(96_000.0), driver, None, None)
@@ -155,10 +155,14 @@ fn a_rerate_keeps_the_published_compensation_in_step_with_the_plan() {
     );
     assert_eq!(s.sample_rate(), SampleRate::SR_96K);
     let at96 = in_step(&s, "96 kHz, before the first block");
-    assert_eq!(at96, Samples(2 * at48.0), "the lookahead is a time");
+    assert_eq!(
+        at96,
+        Samples::new(2 * at48.get()),
+        "the lookahead is a time"
+    );
 
     for _ in 0..4 {
-        new.render_block(Samples(960)).expect("open");
+        new.render_block(Samples::new(960)).expect("open");
         let _ = s.update();
     }
     in_step(&s, "96 kHz, after");
@@ -469,7 +473,7 @@ fn a_refused_restart_keeps_the_old_spec_and_is_retried_later() {
     let err = session.restart_on(
         spec_at(96_000.0),
         driver,
-        Some(MaxBlock::of(Samples(16_384))),
+        Some(MaxBlock::of(Samples::new(16_384))),
         None,
     );
     assert!(err.is_err());
@@ -764,7 +768,7 @@ fn the_heard_tap_reopens_at_the_width_of_the_device_after_a_restart() {
         .build_device_on(spec_at(48_000.0), driver)
         .expect("builds with no device");
     let across = s
-        .open_heard_tap(Samples(1_024))
+        .open_heard_tap(Samples::new(1_024))
         .expect("opens")
         .reader()
         .expect("the audio thread is not behind");
@@ -777,20 +781,28 @@ fn the_heard_tap_reopens_at_the_width_of_the_device_after_a_restart() {
     );
     let (driver, new) = ManualStreamDriver::new();
     s.restart_on(six, driver, None, None).expect("restarts");
-    new.render_block(Samples(64)).expect("open");
-    assert_eq!(across.available(), Samples(0), "the old width gets nothing");
-    assert_eq!(across.take_lost(), Samples(64), "and counts the block lost");
+    new.render_block(Samples::new(64)).expect("open");
+    assert_eq!(
+        across.available(),
+        Samples::new(0),
+        "the old width gets nothing"
+    );
+    assert_eq!(
+        across.take_lost(),
+        Samples::new(64),
+        "and counts the block lost"
+    );
 
     drop(across);
     let after = s
-        .open_heard_tap(Samples(1_024))
+        .open_heard_tap(Samples::new(1_024))
         .expect("reopens")
         .reader()
         .expect("the audio thread is not behind");
     assert_eq!(after.width(), 6, "the device's width now");
-    new.render_block(Samples(64)).expect("open");
-    assert_eq!(after.available(), Samples(64));
-    assert_eq!(after.take_lost(), Samples(0));
+    new.render_block(Samples::new(64)).expect("open");
+    assert_eq!(after.available(), Samples::new(64));
+    assert_eq!(after.take_lost(), Samples::new(0));
 }
 
 /// **The session lists the outputs once**, and a listing that could not
@@ -996,7 +1008,7 @@ fn a_waiting_declaration_the_device_no_longer_places_is_refused_and_retried_on_a
     let _ = session.update();
     session.declare_root_topology(Some(stereo.clone())).unwrap();
     let _ = session.update();
-    stream.render_block(Samples(64)).expect("open");
+    stream.render_block(Samples::new(64)).expect("open");
     // Four buses place on six channels, so the declaration is taken, and waits.
     session.declare_root_topology(Some(buses.clone())).unwrap();
     assert_eq!(session.root_topology_status(), RootTopologyStatus::Pending);
@@ -1008,7 +1020,7 @@ fn a_waiting_declaration_the_device_no_longer_places_is_refused_and_retried_on_a
         .restart_on(spec_at(48_000.0), driver, None, None)
         .expect("the root in force places on stereo");
     for _ in 0..5 {
-        narrow.render_block(Samples(64)).expect("open");
+        narrow.render_block(Samples::new(64)).expect("open");
         let _ = session.update();
     }
     assert!(
@@ -1079,7 +1091,7 @@ fn a_panic_in_the_render_is_a_device_fault_event() {
     let _ = session.update();
 
     let block = stream
-        .render_block(Samples(64))
+        .render_block(Samples::new(64))
         .expect("the stream is open");
     assert!(
         block.iter().all(|&s| s == 0.0),
@@ -1142,7 +1154,7 @@ fn start_when_listed(retry_startup: bool) -> Vec<DeviceSelector> {
             .expect("the device is listed: a start is due")
             .expect("the start builds");
         assert!(
-            stream.render_block(Samples(64)).is_some(),
+            stream.render_block(Samples::new(64)).is_some(),
             "the stream runs after the start"
         );
         // The session takes the same source over.
@@ -1151,7 +1163,7 @@ fn start_when_listed(retry_startup: bool) -> Vec<DeviceSelector> {
     } else {
         assert!(ran.is_none(), "retry_startup is off: no start");
         assert!(
-            stream.render_block(Samples(64)).is_none(),
+            stream.render_block(Samples::new(64)).is_none(),
             "no stream was started"
         );
     }

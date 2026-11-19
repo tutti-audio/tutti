@@ -212,7 +212,7 @@ const HOST_TARGET: TargetKey = TargetKey::param(1, ParamAddr::Unit(UnitParam::Cu
 impl HostDecl {
     fn new(range: bool) -> Self {
         Self {
-            sources: vec![(SourceKey(1), Lfo::sine().rate(Hz(3.0)).into())],
+            sources: vec![(SourceKey(1), Lfo::sine().rate(Hz::new(3.0)).into())],
             routes: vec![(
                 RouteKey(2),
                 RouteDecl {
@@ -347,7 +347,7 @@ fn a_refusal_names_the_node_and_the_param() {
     let (probe, _) = s.graph().add(ProbeUnit::new(500.0));
     let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);
     let mut m = s.mods_mut();
-    let lfo = m.lfo(Lfo::sine().rate(Hz(2.0)));
+    let lfo = m.lfo(Lfo::sine().rate(Hz::new(2.0)));
     m.range_raw(cutoff, 0.0, 1_000.0).unwrap();
     m.route(RouteSpec::new(lfo, cutoff, Depth::of(0.5)))
         .unwrap();
@@ -402,7 +402,7 @@ fn a_route_onto_an_unranged_target_is_refused_at_the_call() {
     let (probe, _) = s.graph().add(ProbeUnit::new(500.0));
     let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);
     let mut m = s.mods_mut();
-    let lfo = m.lfo(Lfo::sine().rate(Hz(2.0)));
+    let lfo = m.lfo(Lfo::sine().rate(Hz::new(2.0)));
     assert_eq!(
         m.route(RouteSpec::new(lfo, cutoff, Depth::of(0.5))),
         Err(RouteError::UndeclaredRange {
@@ -464,7 +464,7 @@ fn removing_a_node_through_the_graph_forgets_its_declarations() {
     let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);
     let mut m = s.mods_mut();
     m.range_raw(cutoff, 0.0, 1_000.0).unwrap();
-    let lfo = m.lfo(Lfo::sine().rate(Hz(2.0)));
+    let lfo = m.lfo(Lfo::sine().rate(Hz::new(2.0)));
     m.route(RouteSpec::new(lfo, cutoff, Depth::of(0.5)))
         .unwrap();
     settle(&mut s);
@@ -488,7 +488,7 @@ fn removing_a_node_forgets_its_declarations() {
     let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);
     let mut m = s.mods_mut();
     m.range_raw(cutoff, 0.0, 1_000.0).unwrap();
-    let lfo = m.lfo(Lfo::sine().rate(Hz(2.0)));
+    let lfo = m.lfo(Lfo::sine().rate(Hz::new(2.0)));
     m.route(RouteSpec::new(lfo, cutoff, Depth::of(0.5)))
         .unwrap();
     settle(&mut s);
@@ -522,7 +522,7 @@ const LATE: usize = 100;
 impl tutti_graph::Node for Late {
     fn shape(&self) -> tutti_graph::Shape {
         tutti_graph::Shape::source_unassigned(ChannelLayout::MONO)
-            .with_latency(tutti_units::Latency::new(Samples(LATE)))
+            .with_latency(tutti_units::Latency::new(Samples::new(LATE)))
     }
     fn prepare(&mut self, _: &tutti_graph::Prepare) {}
     fn process(
@@ -551,7 +551,11 @@ fn a_re_apply_that_moves_the_latency_publishes_it() {
     let mut s = offline();
     let (late, _) = s.graph().add(ForkByClone(Late));
     let _ = s.update();
-    assert_eq!(s.latency(), Samples(0), "precondition: nothing latent out");
+    assert_eq!(
+        s.latency(),
+        Samples::new(0),
+        "precondition: nothing latent out"
+    );
 
     let (probe, _) = s.graph().add(ProbeUnit::new(500.0));
     s.graph()
@@ -574,11 +578,15 @@ fn a_re_apply_that_moves_the_latency_publishes_it() {
                 [unresolved(TargetName::Own(cutoff.into()))],
                 "precondition: the lane waits for the re-apply"
             );
-            assert_eq!(s.latency(), Samples(0), "precondition: no lane yet");
+            assert_eq!(s.latency(), Samples::new(0), "precondition: no lane yet");
         }
     }
     assert_eq!(s.mod_state().problems().next(), None, "the lane is built");
-    assert_eq!(s.latency(), Samples(LATE), "the re-apply's plan, published");
+    assert_eq!(
+        s.latency(),
+        Samples::new(LATE),
+        "the re-apply's plan, published"
+    );
     assert_eq!(
         s.compensation().to_vec().as_slice(),
         s.graph_ref()
@@ -603,7 +611,7 @@ fn an_update_frees_a_program_a_block_held_across_a_route_edit() {
     let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);
     let mut m = s.mods_mut();
     m.range_raw(cutoff, 0.0, 1_000.0).unwrap();
-    let lfo = m.lfo(Lfo::sine().rate(Hz(2.0)));
+    let lfo = m.lfo(Lfo::sine().rate(Hz::new(2.0)));
     let route = m
         .route(RouteSpec::new(lfo, cutoff, Depth::of(0.5)))
         .unwrap();
@@ -633,8 +641,9 @@ fn an_own_edit_after_a_steady_state_applies() {
     let (probe, _) = s.graph().add(ProbeUnit::new(500.0));
     let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);
     let mut m = s.mods_mut();
-    m.range(probe.cutoff(), Hz(0.0)..Hz(1_000.0)).unwrap();
-    let lfo = m.lfo(Lfo::sine().rate(Hz(2.0)));
+    m.range(probe.cutoff(), Hz::new(0.0)..Hz::new(1_000.0))
+        .unwrap();
+    let lfo = m.lfo(Lfo::sine().rate(Hz::new(2.0)));
     let route = m
         .route(RouteSpec::new(lfo, cutoff, Depth::of(0.5)))
         .unwrap();
@@ -658,7 +667,7 @@ fn an_own_edit_after_a_steady_state_applies() {
         "the polarity edit is republished"
     );
 
-    s.set(probe.cutoff().range().to(Hz(0.0)..Hz(2_000.0)))
+    s.set(probe.cutoff().range().to(Hz::new(0.0)..Hz::new(2_000.0)))
         .unwrap();
     let _ = s.update();
     let range = s

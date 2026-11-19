@@ -62,7 +62,7 @@ fn session_with_outputs(outputs: usize) -> DetachedSession {
 fn bounce_at(seconds: f64, rate: f64) -> Bounce<NodeKey, BufferMaster> {
     Bounce::project()
         .master_buffers()
-        .range(Range::Seconds(Seconds(0.0), Seconds(seconds)))
+        .range(Range::Seconds(Seconds::new(0.0), Seconds::new(seconds)))
         .sample_rate(SampleRate::of(rate))
         .channels(ChannelLayout::STEREO)
         .clock(ExportClock::frozen())
@@ -129,8 +129,12 @@ fn refused(session: &mut DetachedSession, bounce: Bounce<NodeKey, BufferMaster>)
 /// two cannot pass for each other. Returns the filter's key.
 fn chain(session: &mut DetachedSession) -> NodeKey {
     let graph = session.graph();
-    let (osc, _) = graph.add(ForkByClone(Osc::saw(Hz(110.0))));
-    let (filter, _params) = graph.add(SvfFilterNode::new(SvfType::LowPass, Hz(800.0), Q(1.0)));
+    let (osc, _) = graph.add(ForkByClone(Osc::saw(Hz::new(110.0))));
+    let (filter, _params) = graph.add(SvfFilterNode::new(
+        SvfType::LowPass,
+        Hz::new(800.0),
+        Q::new(1.0),
+    ));
     graph
         .set_sources_hard(InPort::new(filter, 0), [OutPort::new(osc, 0)])
         .unwrap();
@@ -156,9 +160,12 @@ fn chain_fresh(seconds: f64) -> (Vec<Vec<f32>>, Vec<Vec<f32>>) {
     use tutti_transport::FrozenClock;
     let render = |master: bool| {
         let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::STEREO);
-        let osc = g.add(Osc::saw(Hz(110.0)));
-        let (filter, _params) =
-            g.add_with_controls(SvfFilterNode::new(SvfType::LowPass, Hz(800.0), Q(1.0)));
+        let osc = g.add(Osc::saw(Hz::new(110.0)));
+        let (filter, _params) = g.add_with_controls(SvfFilterNode::new(
+            SvfType::LowPass,
+            Hz::new(800.0),
+            Q::new(1.0),
+        ));
         g.connect(osc, 0, filter, 0).connect_output(filter, 0, 0);
         g.connect_output(if master { osc } else { filter }, 0, 1);
         let (editor, executor) = g
@@ -171,9 +178,9 @@ fn chain_fresh(seconds: f64) -> (Vec<Vec<f32>>, Vec<Vec<f32>>) {
             &mut graph,
             &Job::new(
                 rate,
-                Seconds(seconds).to_samples(rate),
-                Samples(0),
-                Samples(0),
+                Seconds::new(seconds).to_samples(rate),
+                Samples::new(0),
+                Samples::new(0),
             )
             .expect("a render"),
             &FrozenClock,
@@ -247,8 +254,8 @@ const TAIL: usize = 300;
 impl Node for Late {
     fn shape(&self) -> Shape {
         Shape::source_unassigned(ChannelLayout::MONO)
-            .with_latency(tutti_units::Latency::new(Samples(LATE)))
-            .with_tail(Tail::Finite(Samples(TAIL)))
+            .with_latency(tutti_units::Latency::new(Samples::new(LATE)))
+            .with_tail(Tail::Finite(Samples::new(TAIL)))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -284,7 +291,7 @@ fn latency_and_tail_come_from_the_graph() {
         buffers(seconds)
             .latency(BounceLatency::Graph)
             .tail(tutti_session::BounceTail::Graph {
-                cap: Samples(48_000).to_seconds(SampleRate::of(RATE)),
+                cap: Samples::new(48_000).to_seconds(SampleRate::of(RATE)),
             }),
     );
     assert_eq!(planes[0].len(), frames + TAIL, "the tail");
@@ -299,7 +306,7 @@ fn latency_and_tail_come_from_the_graph() {
     let planes = render(
         &mut session,
         buffers(seconds).tail(tutti_session::BounceTail::Graph {
-            cap: Samples(4_800).to_seconds(SampleRate::of(RATE)),
+            cap: Samples::new(4_800).to_seconds(SampleRate::of(RATE)),
         }),
     );
     assert_eq!(
@@ -367,7 +374,7 @@ fn a_prepare_hook_that_swaps_the_editor_fails_the_export() {
 #[test]
 fn a_graph_with_no_outputs_says_so() {
     let mut session = session_with_outputs(0);
-    let (node, _) = session.graph().add(ForkByClone(Osc::sine(Hz(220.0))));
+    let (node, _) = session.graph().add(ForkByClone(Osc::sine(Hz::new(220.0))));
     for with_stem in [false, true] {
         let bounce = if with_stem {
             buffers(0.01).stem_with(Stem::buffers(node.erase()))
@@ -497,7 +504,7 @@ fn the_prepare_hook_sees_the_callers_timeline() {
     let (mut session, node) = graph_with_one_node_on();
     // A deliberately un-default transport: neither 120 BPM nor beat 0.
     let timeline = Arc::new(OfflineTimeline::new(&OfflineTimelineConfig {
-        start_beat: tutti_units::Beat(16.0),
+        start_beat: tutti_units::Beat::new(16.0),
         tempo_map: Arc::new(
             tutti_tempo::TempoMap::constant(tutti_units::Bpm::of(90.0)).expect("a tempo"),
         ),
@@ -535,7 +542,7 @@ fn a_master_exports_prepare_hook_sees_the_callers_timeline() {
 
     let (mut session, _node) = graph_with_one_node_on();
     let timeline = Arc::new(OfflineTimeline::new(&OfflineTimelineConfig {
-        start_beat: tutti_units::Beat(4.0),
+        start_beat: tutti_units::Beat::new(4.0),
         tempo_map: Arc::new(
             tutti_tempo::TempoMap::constant(tutti_units::Bpm::of(90.0)).expect("a tempo"),
         ),
@@ -709,7 +716,7 @@ fn an_unrouted_unforkable_node_does_not_refuse_a_master_export() {
 fn an_unforkable_node_refuses_the_export_by_key() {
     let mut session = session();
     let (mic, _) = session.graph().add(tutti_graph::Unforkable(Mic));
-    let (osc, _) = session.graph().add(ForkByClone(Osc::sine(Hz(220.0))));
+    let (osc, _) = session.graph().add(ForkByClone(Osc::sine(Hz::new(220.0))));
     session
         .graph()
         .set_sources_hard(Root::output(0), [OutPort::new(mic, 0)])
@@ -747,8 +754,11 @@ fn an_unforkable_node_refuses_the_export_by_key() {
 #[test]
 fn a_live_audio_inlet_refuses_the_bounce_by_key() {
     let mut session = session();
-    let (ring, _producer) =
-        tutti_graph::InletRing::pair(ChannelLayout::STEREO, Samples(256), SampleRate::of(RATE));
+    let (ring, _producer) = tutti_graph::InletRing::pair(
+        ChannelLayout::STEREO,
+        Samples::new(256),
+        SampleRate::of(RATE),
+    );
     let inlet = session.graph().add_inlet(ring).expect("the graph's rate");
     session.graph().connect(inlet, Root).unwrap().hard();
     match refused(&mut session, buffers(0.05)) {

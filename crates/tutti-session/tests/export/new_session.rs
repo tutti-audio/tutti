@@ -22,7 +22,7 @@ fn a_session_from_new_bounces_a_node_and_renders() {
         .bounce(
             Bounce::project()
                 .master_buffers()
-                .range(Range::Seconds(Seconds(0.0), Seconds(0.05)))
+                .range(Range::Seconds(Seconds::new(0.0), Seconds::new(0.05)))
                 .latency(BounceLatency::Keep)
                 .tail(BounceTail::None),
         )
