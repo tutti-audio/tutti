@@ -24,7 +24,7 @@ fn dry() -> Rig {
 }
 
 /// A unit prepared by a graph at `rate`, the way `Node::prepare` re-rates it.
-fn prepared_at(rate: SampleRate) -> SoundFontUnit {
+fn prepared_at(rate: SampleRate) -> SoundFontUnit<f32> {
     let mut unit = SoundFontUnit::new(timgm6mb(), Settings::new()).unwrap();
     unit.prepare(&Prepare::new(rate, MaxBlock::of(Samples(64))));
     unit
@@ -32,7 +32,7 @@ fn prepared_at(rate: SampleRate) -> SoundFontUnit {
 
 #[test]
 fn a_graph_re_rates_the_unit_within_16_to_192_khz_and_leaves_it_outside() {
-    let initial = SoundFontUnit::new(timgm6mb(), Settings::new())
+    let initial = SoundFontUnit::<f32>::new(timgm6mb(), Settings::new())
         .unwrap()
         .sample_rate();
     for hz in [16_000_u32, 48_000, 192_000] {
@@ -76,8 +76,8 @@ fn a_pool_of_one_voice_gives_way_to_the_next_note() {
 #[test]
 fn a_polyphony_past_the_maximum_is_refused_and_the_maximum_builds() {
     let at = |voices: usize| Settings::new().with_polyphony(Polyphony::of(voices));
-    assert!(SoundFontUnit::new(timgm6mb(), at(1)).is_ok());
-    assert!(SoundFontUnit::new(timgm6mb(), at(Polyphony::MAX)).is_ok());
+    assert!(SoundFontUnit::<f32>::new(timgm6mb(), at(1)).is_ok());
+    assert!(SoundFontUnit::<f32>::new(timgm6mb(), at(Polyphony::MAX)).is_ok());
     for too_many in [Polyphony::MAX + 1, usize::MAX] {
         assert_eq!(Polyphony::new(too_many), None, "{too_many}");
         assert_eq!(
@@ -864,7 +864,7 @@ fn a_font_with_nothing_playable_is_refused() {
             zones: vec![vec![]],
         }],
     );
-    let error = SoundFontUnit::new(font, Settings::new()).unwrap_err();
+    let error = SoundFontUnit::<f32>::new(font, Settings::new()).unwrap_err();
     assert!(matches!(error, Error::NoPlayablePreset), "{error:?}");
 }
 

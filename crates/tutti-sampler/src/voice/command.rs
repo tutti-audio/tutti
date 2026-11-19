@@ -20,10 +20,10 @@ use super::memory_source::{MemorySource, VoiceWindow};
 use super::pool::{DrainCounters, PoolDrops, Retired};
 use super::slot::{stretch_values_want_filter, stretch_wanted};
 use super::types::{Direction, Playback, SlotId, Voice, VoiceSource};
+use crate::SamplerFloat;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::Wave;
 use tutti_graph::ParamSet;
-use tutti_rt::RingFloat;
 use tutti_rt::{AtomicSampleRate, Param};
 use tutti_rt::{LockExt, Publisher, PushError, RingReader, RingWriter};
 use tutti_units::{Amplitude, Cents, PlaybackRate, SampleRate, StretchFactor};
@@ -73,7 +73,7 @@ pub(super) const COMMAND_CAPACITY: usize = 64;
 /// allocated control-side: that is why the two stretch-carrying variants
 /// have the filter handed to them rather than constructing one. Each is one
 /// of the handle's methods.
-pub(crate) enum VoiceCommand<F: RingFloat = f32> {
+pub(crate) enum VoiceCommand<F: SamplerFloat = f32> {
     /// Add a voice by handing the reader a fully-formed [`Voice`]: a
     /// [`VoiceSource`] (in-memory `MemorySource` or
     /// streaming `DiskVoice`) plus its
@@ -114,7 +114,7 @@ pub(crate) enum VoiceCommand<F: RingFloat = f32> {
         /// Unboxed, as `UpdateStretch`'s is: moving a `Unit` out of a `Box`
         /// frees the box, a deallocation on the audio thread. A `Unit` moves as
         /// a pointer anyway (its state is boxed inside it).
-        stretch: Option<stretch::Unit>,
+        stretch: Option<stretch::Unit<F>>,
     },
     /// Retire the slot with this id, filter and all.
     ///
@@ -232,19 +232,19 @@ pub(crate) enum VoiceCommand<F: RingFloat = f32> {
         /// pure atomics) or when the update turns stretching off.
         ///
         /// Unboxed, unlike [`AddVoice::stretch`](Self::AddVoice::stretch).
-        /// `PlaybackSlot::stretch` is an `Option<stretch::Unit>`, so a `Box` here
+        /// `PlaybackSlot::stretch` is an `Option<stretch::Unit<F>>`, so a `Box` here
         /// would have to be unboxed to install it — and moving out of a `Box`
         /// frees the box, in the drain, on the audio thread. That is a 56-byte
         /// free the no-alloc guard catches. `AddVoice` gets away with a `Box`
         /// only because `VoiceCommand` is sized to its largest variant and that
         /// one is already the largest; here the box buys nothing.
-        stretch: Option<stretch::Unit>,
+        stretch: Option<stretch::Unit<F>>,
     },
 }
 
 // Hand-rolled: `ReplaceWave` carries a non-`Debug` `Arc<Wave>` (summarize it by
 // frame count); `AddVoice`'s `Box<Voice>` is `Debug`, forwarded as-is.
-impl<F: RingFloat> std::fmt::Debug for VoiceCommand<F> {
+impl<F: SamplerFloat> std::fmt::Debug for VoiceCommand<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::AddVoice { id, voice, stretch } => f
@@ -309,7 +309,7 @@ impl<F: RingFloat> std::fmt::Debug for VoiceCommand<F> {
 /// or direction only when this names that slot's stream, so whether a setting
 /// reached a stream is decided from the command itself, never from what the
 /// handle believed the slot held. Only [`VoicePoolHandle::send`] builds one.
-pub(crate) struct Queued<F: RingFloat = f32> {
+pub(crate) struct Queued<F: SamplerFloat = f32> {
     pub(crate) cmd: VoiceCommand<F>,
     pub(crate) forwarded: Option<StreamId>,
 }
@@ -415,7 +415,7 @@ impl SendError {
 /// handle.set_window(VoiceWindow::from(tutti_units::Beat::new(1.0)));
 /// ```
 #[derive(Clone, Debug)]
-pub struct VoiceNodeHandle<F: RingFloat = f32> {
+pub struct VoiceNodeHandle<F: SamplerFloat = f32> {
     /// What the handle publishes besides the gain, shared with the node
     /// (which reads it once per block) and with its fork source (which reads
     /// it at fork time).
@@ -457,7 +457,7 @@ pub(crate) struct Steering {
 
 pub(crate) type SteeringCell = Publisher<Steering>;
 
-impl<F: RingFloat> VoiceNodeHandle<F> {
+impl<F: SamplerFloat> VoiceNodeHandle<F> {
     pub(crate) fn new(
         steering: SteeringCell,
         gain: Param<Amplitude>,
@@ -605,7 +605,7 @@ impl<F: RingFloat> VoiceNodeHandle<F> {
 /// stream per refused streaming add. A loop sent for such an id reaches a
 /// stream nothing plays, and the drain finds no slot to record it on.
 #[derive(Clone, Debug)]
-pub struct VoicePoolHandle<F: RingFloat = f32> {
+pub struct VoicePoolHandle<F: SamplerFloat = f32> {
     /// Pushes into the pool's bounded command ring. A handle is `Clone` and
     /// several control threads send, so the one writer sits behind a lock no
     /// audio thread ever takes.
@@ -652,14 +652,14 @@ pub(crate) type SlotStreams<F = f32> = Arc<Mutex<HashMap<SlotId, Arc<Mutex<Strea
 /// were before the call.
 #[derive(Debug, thiserror::Error)]
 #[error("{error}")]
-pub struct StreamingAddError<F: RingFloat = f32> {
+pub struct StreamingAddError<F: SamplerFloat = f32> {
     /// Why the add was refused, with the command (the voice) it carried.
     pub error: SendError,
     /// The stream that was to steer the voice, handed back.
     pub stream: Stream<F>,
 }
 
-impl<F: RingFloat> VoicePoolHandle<F> {
+impl<F: SamplerFloat> VoicePoolHandle<F> {
     /// Frees everything the audio thread has retired since the last call — removed
     /// slots, surplus stretch filters and replaced waves alike.
     ///
@@ -930,7 +930,7 @@ impl<F: RingFloat> VoicePoolHandle<F> {
         id: SlotId,
         mut voice: Box<Voice<F>>,
         mut stream: Stream<F>,
-        stretch: Option<stretch::Unit>,
+        stretch: Option<stretch::Unit<F>>,
     ) -> Result<(), Box<StreamingAddError<F>>> {
         if self.writer().is_full() {
             let error = SendError::Full;
@@ -1068,7 +1068,7 @@ impl<F: RingFloat> VoicePoolHandle<F> {
                 voice,
                 stretch: None,
             } if stretch_wanted(&voice.play) => {
-                let unit = stretch::Unit::with_channels(self.rate.load(), self.channels);
+                let unit = stretch::Unit::<F>::with_channels(self.rate.load(), self.channels);
                 unit.set_stretch_factor(voice.play.stretch);
                 unit.set_pitch_cents(voice.play.pitch);
                 VoiceCommand::AddVoice {
@@ -1090,7 +1090,7 @@ impl<F: RingFloat> VoicePoolHandle<F> {
                 pitch_cents,
                 stretch: None,
             } if stretch_values_want_filter(stretch_factor, pitch_cents) => {
-                let unit = stretch::Unit::with_channels(self.rate.load(), self.channels);
+                let unit = stretch::Unit::<F>::with_channels(self.rate.load(), self.channels);
                 unit.set_stretch_factor(stretch_factor);
                 unit.set_pitch_cents(pitch_cents);
                 VoiceCommand::UpdateStretch {
@@ -1107,7 +1107,7 @@ impl<F: RingFloat> VoicePoolHandle<F> {
 
 /// Frees what the control side retired and no block holds, without publishing
 /// (the placement windows a replacement left behind); control thread, from the owner's tick.
-impl<F: RingFloat> tutti_rt::Reclaim for VoiceNodeHandle<F> {
+impl<F: SamplerFloat> tutti_rt::Reclaim for VoiceNodeHandle<F> {
     fn reclaim(&self) -> usize {
         self.steering.reclaim()
     }
@@ -1117,7 +1117,7 @@ impl<F: RingFloat> tutti_rt::Reclaim for VoiceNodeHandle<F> {
 /// ([`collect_retired`](VoicePoolHandle::collect_retired)), so the pool's
 /// owner's tick keeps the retire ring from filling; control thread only. Nothing a
 /// reader pins is left over: it returns 0.
-impl<F: RingFloat> tutti_rt::Reclaim for VoicePoolHandle<F> {
+impl<F: SamplerFloat> tutti_rt::Reclaim for VoicePoolHandle<F> {
     fn reclaim(&self) -> usize {
         self.collect_retired();
         0

@@ -245,10 +245,19 @@ impl KeyBitset {
 /// assert_eq!(offs, [Ump([0x2080_3c00, 0, 0, 0])]);
 /// assert!(held.is_empty());
 /// ```
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct Held {
     keys: Box<KeyBitset>,
     controllers: Box<HeldControllers>,
+}
+
+impl core::fmt::Debug for Held {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("Held")
+            .field("notes", &self.keys.len())
+            .field("controllers", &self.controllers.len())
+            .finish()
+    }
 }
 
 impl Held {
@@ -683,6 +692,18 @@ mod tests {
         held.pay(|_| unreachable!("nothing is owed now"));
         assert!(held.is_empty());
         assert!(!held.owing());
+    }
+
+    /// **Debug prints counts**, not the tables.
+    #[test]
+    fn debug_prints_the_counts_of_what_is_held() {
+        let mut held = Held::new();
+        held.observe(on(G0, 0, 60));
+        held.observe(Message::midi1(
+            Address::first(MidiChannel::of(0)),
+            Voice1::control_change(CCNumber::SUSTAIN, U7::of(127)),
+        ));
+        assert_eq!(format!("{held:?}"), "Held { notes: 1, controllers: 1 }");
     }
 
     /// **A union holds what either held, once each**, and `pop` takes the

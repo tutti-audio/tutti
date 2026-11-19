@@ -14,7 +14,7 @@ use tutti_session::Root;
 
 use std::sync::Arc;
 
-use support::{clap_probe, plugin_server};
+use support::clap_probe;
 use tutti_export::Produced;
 
 use tutti_buffers::ChannelLayout;
@@ -99,7 +99,7 @@ fn session_with_probe_at(
     // The plugin's file is probed before its variables are set.
     crate::pooled::prime(&PluginRef::file(&path).expect("a plugin file"));
     let mut env = ScopedEnv::new();
-    env.set("TUTTI_PLUGIN_SERVER", plugin_server());
+    env.set("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server());
     env.set("TUTTI_CLAP_PROBE_RENDER_MODE", mode.to_string());
     if hosting == Hosting::InProcess {
         // The plugin reads its switches when its image is first loaded into this

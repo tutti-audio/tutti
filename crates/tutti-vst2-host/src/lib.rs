@@ -232,6 +232,7 @@ use vst::{midi, scratch};
 mod error;
 pub mod types;
 
+mod arrangement;
 mod control;
 mod controller;
 mod editor;
@@ -246,6 +247,7 @@ mod state;
 mod time_info;
 mod transport_cell;
 
+pub use arrangement::{ArrangementError, Negotiation};
 pub use controller::Vst2Controller;
 pub use error::{LoadStage, Result, Vst2Error};
 pub use loaded::Vst2Loaded;

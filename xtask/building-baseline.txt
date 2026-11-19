@@ -204,13 +204,11 @@ tutti-midi-protocol  ctor-result  crates/tutti-midi-protocol/src/universal/machi
 tutti-midi-runtime  with-prefix  crates/tutti-midi-runtime/src/live/ingest_node.rs::MidiIngestNode::with_mpe
 tutti-midi-runtime  with-prefix  crates/tutti-midi-runtime/src/outbound/jr_timestamp.rs::JrStream::with_clock
 tutti-midi-runtime  setter  crates/tutti-midi-runtime/src/clock_map.rs::ClockMap::set_rate
-tutti-midi-runtime  setter  crates/tutti-midi-runtime/src/live/ingest_node.rs::MidiIngestControls::set_mpe_mode
 tutti-midi-runtime  setter  crates/tutti-midi-runtime/src/live/ingest_node.rs::MidiIngestControls::set_mpe_profile
 tutti-midi-runtime  setter  crates/tutti-midi-runtime/src/live/input_inlets.rs::InputInlets::set_clock
 tutti-midi-runtime  setter  crates/tutti-midi-runtime/src/live/input_inlets.rs::InputInlets::set_lead
 tutti-midi-runtime  setter  crates/tutti-midi-runtime/src/live/mpe_ingest.rs::MpeIngest::set_mode
 tutti-midi-runtime  setter  crates/tutti-midi-runtime/src/live/mpe_ingest.rs::MpeIngest::set_profile
-tutti-midi-runtime  setter  crates/tutti-midi-runtime/src/live/transform_node.rs::MpeTransformControls::set_mode
 tutti-midi-runtime  node-ctor  crates/tutti-midi-runtime/src/live/ingest_node.rs::MidiIngestNode::new
 tutti-midi-runtime  node-ctor  crates/tutti-midi-runtime/src/live/transform_node.rs::MpeTransformNode::new
 tutti-midi-runtime  node-ctor  crates/tutti-midi-runtime/src/outbound/out_node.rs::MidiOutNode::new
@@ -474,7 +472,6 @@ tutti-session  setter  crates/tutti-session/src/graph.rs::Graph::set_sample_rate
 tutti-session  setter  crates/tutti-session/src/graph.rs::Graph::set_sources
 tutti-session  setter  crates/tutti-session/src/graph.rs::Graph::set_sources_hard
 tutti-session  setter  crates/tutti-session/src/instrument.rs::InstrumentHandle::set_gain
-tutti-session  setter  crates/tutti-session/src/midi.rs::Midi::set_mpe
 tutti-session  setter  crates/tutti-session/src/midi.rs::Midi::set_route_fallback
 tutti-session  setter  crates/tutti-session/src/midi.rs::Midi::set_routes
 tutti-session  setter  crates/tutti-session/src/modulation.rs::Mods::set_source

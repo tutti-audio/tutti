@@ -6,7 +6,7 @@
 //! shares the Discovery *body* format, so [`DiscoveryData`] serves both.
 
 use bitflags::bitflags;
-use tutti_ump::{DeviceIdentity, FunctionBlockId, U7, U28};
+use tutti_ump::{DeviceIdentity, FunctionBlockId, U7};
 
 /// Sub-ID#2: Discovery message (M2-101 §5.5).
 pub const SUB_ID2_DISCOVERY: u8 = 0x70;
@@ -68,6 +68,19 @@ impl MaxSysexSize {
     pub const INITIATOR_MIN: u32 = 512;
     /// The largest, 28 bits: four 7-bit bytes.
     pub const MAX: u32 = 0x0FFF_FFFF;
+
+    /// The four 7-bit wire bytes, least significant first (§5.5.3). The size
+    /// is at most 28 bits, so each byte is the 7 bits its place holds.
+    #[must_use]
+    pub(crate) const fn to_le7(self) -> [u8; 4] {
+        let size = self.get();
+        [
+            (size & 0x7F) as u8,
+            ((size >> 7) & 0x7F) as u8,
+            ((size >> 14) & 0x7F) as u8,
+            ((size >> 21) & 0x7F) as u8,
+        ]
+    }
 }
 
 /// The body of a Discovery / Discovery Reply message (M2-101 Tables 6 and 8):
@@ -151,11 +164,7 @@ impl DiscoveryData {
                 .map(|b| b.get()),
         );
         out.extend(self.categories.bits().to_le_bytes());
-        out.extend(
-            U28::new(self.max_sysex_size.get())
-                .expect("a SysEx size is 28 bits")
-                .to_le7(),
-        );
+        out.extend(self.max_sysex_size.to_le7());
         let Some(path) = self.output_path_id else {
             return;
         };

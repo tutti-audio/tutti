@@ -21,7 +21,8 @@ use tutti_units::{Beat, Bpm, Frame, Moment, SampleRate, Samples};
 
 use crate::common;
 use tutti_fixtures::midi;
-use tutti_midi_protocol::{MtcRate, Recipient};
+use tutti_midi_protocol::{MpeMode, MtcRate, Recipient};
+use tutti_rt::Publisher;
 use tutti_ump::{Address, BendValue, ControlValue, Flex, Message, NoteKeyEvent, System, Voice2};
 fn note_on(ch: u8, note: u8) -> Ump {
     midi::note_on(MidiChannel::of(ch), note, 0x8000)
@@ -250,11 +251,8 @@ fn bend_range(device: &mut EventInletWriter, block: u64) {
 fn the_mpe_bend_range_fan_out_processes_without_allocating() {
     let (mut ed, mut exec) =
         Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(512))));
-    ed.insert(
-        NodeKey(1),
-        "in",
-        MidiIngestNode::new().with_mpe(tutti_fixtures::midi::lower_zone(15)),
-    );
+    let mode = Publisher::new(tutti_fixtures::midi::lower_zone(15));
+    ed.insert(NodeKey(1), "in", MidiIngestNode::new().with_mpe(&mode));
     let mut dev = device(&mut ed, 4);
     let mut out = common::sink(&mut ed, 1, &[(1, 15)]);
     ed.commit().unwrap();
@@ -308,11 +306,8 @@ fn gesture(device: &mut EventInletWriter, block: u64) {
 fn the_mpe_expression_paths_process_without_allocating() {
     let (mut ed, mut exec) =
         Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(512))));
-    ed.insert(
-        NodeKey(1),
-        "in",
-        MidiIngestNode::new().with_mpe(tutti_fixtures::midi::lower_zone(15)),
-    );
+    let mode = Publisher::new(tutti_fixtures::midi::lower_zone(15));
+    ed.insert(NodeKey(1), "in", MidiIngestNode::new().with_mpe(&mode));
     let mut dev = device(&mut ed, 4);
     let mut out = common::sink(&mut ed, 1, &[(1, 2)]);
     ed.commit().unwrap();
@@ -366,7 +361,8 @@ fn mcm(device: &mut EventInletWriter, block: u64, upper: bool) {
 fn an_mpe_mode_change_and_an_mcm_process_without_allocating() {
     let (mut ed, mut exec) =
         Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(512))));
-    let controls = ed.insert(NodeKey(1), "in", MidiIngestNode::new()).controls;
+    let cell = Publisher::new(MpeMode::Disabled);
+    ed.insert(NodeKey(1), "in", MidiIngestNode::new().with_mpe(&cell));
     let mut dev = device(&mut ed, 4);
     let mut out = common::sink(&mut ed, 1, &[(1, 15)]);
     ed.commit().unwrap();
@@ -382,7 +378,7 @@ fn an_mpe_mode_change_and_an_mcm_process_without_allocating() {
     ];
     let mut reached = 0;
     for i in 0..50 {
-        controls.set_mpe_mode(modes[i % 2]);
+        cell.publish(modes[i % 2]);
         // The device's thread pushes the block's message: upper on the odd
         // blocks, as the first (warm-up) block's was.
         mcm(&mut dev, i as u64 + 1, i % 2 == 1);
@@ -390,7 +386,7 @@ fn an_mpe_mode_change_and_an_mcm_process_without_allocating() {
             exec.process(512, &t, &[], &mut []);
             reached += out.poll_into(&mut drain);
         });
-        tutti_rt::Reclaim::reclaim(&controls);
+        cell.reclaim();
     }
     // Each block's adoption resets the upper master (channel 15), and every
     // other block's upper MCM resets it again.
@@ -712,13 +708,8 @@ fn the_event_inlet_with_a_full_list_processes_without_allocating() {
 fn the_mpe_transform_node_processes_without_allocating() {
     let (mut ed, mut exec) =
         Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(512))));
-    let controls = ed
-        .insert(
-            NodeKey(1),
-            "mpe",
-            MpeTransformNode::new(tutti_fixtures::midi::lower_zone(15)),
-        )
-        .controls;
+    let cell = Publisher::new(tutti_fixtures::midi::lower_zone(15));
+    ed.insert(NodeKey(1), "mpe", MpeTransformNode::new(&cell));
     let mut dev = device(&mut ed, 4);
     let mut out = common::sink(&mut ed, 1, &[(1, 0)]);
     ed.commit().unwrap();
@@ -747,14 +738,14 @@ fn the_mpe_transform_node_processes_without_allocating() {
     ];
     let mut reached = 0;
     for b in 1..=50u64 {
-        controls.set_mode(modes[(b % 2) as usize]);
+        cell.publish(modes[(b % 2) as usize]);
         gesture(&mut dev, b);
         manager(&mut dev, b);
         assert_no_alloc::assert_no_alloc(|| {
             exec.process(512, &t, &[], &mut []);
             reached += out.poll_into(&mut drain);
         });
-        tutti_rt::Reclaim::reclaim(&controls);
+        cell.reclaim();
     }
     assert!(reached > 50 * 16, "the fan-out reached the port: {reached}");
     assert_eq!(out.dropped(), 0);

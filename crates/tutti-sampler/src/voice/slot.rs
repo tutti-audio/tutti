@@ -15,8 +15,8 @@ use crate::stretch;
 
 use super::clock::BlockClock;
 use super::types::{Playback, SlotId, Voice, VoiceSource};
+use crate::SamplerFloat;
 use tutti_buffers::ChannelLayout;
-use tutti_rt::RingFloat;
 use tutti_units::{Cents, ReadRate, SamplePosition, SampleRate, Samples, StretchFactor};
 
 /// The first frame of a wave: before it a stretch filter's priming reads
@@ -44,7 +44,7 @@ const WAVE_START: SamplePosition = SamplePosition::new(0.0);
 /// about which slot is live is decided by the owner. Sharing the name across the
 /// two crates invited reading one crate's stealing rules into the other's, so
 /// the name says which job this is.
-pub(crate) struct PlaybackSlot<F: RingFloat = f32> {
+pub(crate) struct PlaybackSlot<F: SamplerFloat = f32> {
     /// Addresses this slot for every command after the add. `SlotId(0)` on a
     /// `VoiceNode`, whose single voice has nothing to disambiguate.
     pub(crate) id: SlotId,
@@ -79,7 +79,7 @@ pub(crate) struct PlaybackSlot<F: RingFloat = f32> {
     /// installed with it, and a later change goes through
     /// [`PlaybackSlot::set_stretch`], which writes both. The unit stores
     /// them clamped to its range.
-    pub(crate) stretch: Option<stretch::Unit>,
+    pub(crate) stretch: Option<stretch::Unit<F>>,
     /// Width the stretch unit must be built at, remembered so a later
     /// materialisation matches the reader rather than defaulting.
     pub(crate) channels: ChannelLayout,
@@ -89,7 +89,7 @@ pub(crate) struct PlaybackSlot<F: RingFloat = f32> {
     pub(crate) sample_rate: SampleRate,
 }
 
-impl<F: RingFloat> PlaybackSlot<F> {
+impl<F: SamplerFloat> PlaybackSlot<F> {
     /// Build a slot at an explicit width.
     ///
     /// # Width is explicit at every call site
@@ -217,8 +217,8 @@ impl<F: RingFloat> PlaybackSlot<F> {
         &mut self,
         stretch_factor: StretchFactor,
         pitch_cents: Cents,
-        incoming: Option<stretch::Unit>,
-    ) -> Option<stretch::Unit> {
+        incoming: Option<stretch::Unit<F>>,
+    ) -> Option<stretch::Unit<F>> {
         self.voice.play.stretch = stretch_factor;
         self.voice.play.pitch = pitch_cents;
         let surplus = match (self.stretch.is_some(), incoming) {

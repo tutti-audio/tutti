@@ -37,8 +37,8 @@ fn a_timeout_wait_ack_lays_out_table_61() {
         chunk: Some(ChunkNo::of(0x81)),
     });
     assert_eq!(wait.ack_sub_id2.get(), 0x34);
-    assert_eq!(wait.status_code.get(), 0x10);
-    assert_eq!(wait.status_data.get(), 0x1E);
+    assert_eq!(wait.status.code().get(), 0x10);
+    assert_eq!(wait.status.data().get(), 0x1E);
     assert_eq!(raw(&wait.details), [0x2A, 0x01, 0x01, 0, 0]);
     assert_eq!(TimeoutWait::of(0x1E).duration(), Duration::from_secs(3));
     assert_eq!(TimeoutWait::of(0x3C).duration(), Duration::from_secs(6));
@@ -68,8 +68,8 @@ fn a_flow_control_ack_lays_out_table_94() {
         request_id: id(),
         chunk: ChunkNo::of(300),
     });
-    assert_eq!(next.status_code.get(), 0x11);
-    assert_eq!(next.status_data.get(), 0);
+    assert_eq!(next.status.code().get(), 0x11);
+    assert_eq!(next.status.data().get(), 0);
     // 300 is 0b10_0101100: low seven bits 0x2C, then 2.
     assert_eq!(raw(&next.details), [0x2A, 0x2C, 0x02, 0, 0]);
 }
@@ -86,7 +86,7 @@ fn a_resend_nak_lays_out_table_97() {
         PeTransaction::Set,
     );
     assert_eq!(resend.nak_sub_id2.get(), 0x36);
-    assert_eq!(resend.status_code.get(), 0x12);
+    assert_eq!(resend.status.code().get(), 0x12);
     assert_eq!(raw(&resend.details), [0x2A, 7, 0, 0, 0]);
 }
 
@@ -104,9 +104,9 @@ fn a_terminate_nak_says_who_ends_the_transaction() {
             PeTransaction::Get,
         )
     };
-    assert_eq!(by(PeTerminator::Responder).status_code.get(), 0x20);
-    assert_eq!(by(PeTerminator::Responder).status_data.get(), 0);
-    assert_eq!(by(PeTerminator::Initiator).status_data.get(), 1);
+    assert_eq!(by(PeTerminator::Responder).status.code().get(), 0x20);
+    assert_eq!(by(PeTerminator::Responder).status.data().get(), 0);
+    assert_eq!(by(PeTerminator::Initiator).status.data().get(), 1);
 }
 
 // M2-101 Table 16 and M2-103 §12.2.3: 0x21 out of sequence, 0x41 malformed and
@@ -121,8 +121,8 @@ fn the_failure_naks_carry_their_codes() {
     ] {
         let n = nak(signal, PeTransaction::Subscription);
         assert_eq!(n.nak_sub_id2.get(), 0x38);
-        assert_eq!(n.status_code.get(), code);
-        assert_eq!(n.status_data.get(), 0);
+        assert_eq!(n.status.code().get(), code);
+        assert_eq!(n.status.data().get(), 0);
         assert_eq!(raw(&n.details)[0], 0x2A);
     }
 }
@@ -170,11 +170,11 @@ fn every_signal_reads_back_from_its_message() {
 // another branch, are not read as a signal.
 #[test]
 fn other_acks_and_naks_are_not_signals() {
-    let plain = Ack::new(U7::of(0x34), Ack::STATUS_ACK);
+    let plain = Ack::new(U7::of(0x34), AckStatus::Ack);
     assert_eq!(PeSignal::from_ack(&plain), None);
-    let profile = Ack::new(U7::of(0x20), Ack::STATUS_TIMEOUT_WAIT);
+    let profile = Ack::new(U7::of(0x20), AckStatus::TimeoutWait(TimeoutWait::of(5)));
     assert_eq!(PeSignal::from_ack(&profile), None);
-    let busy = Nak::new(U7::of(0x34), Nak::STATUS_BUSY);
+    let busy = Nak::new(U7::of(0x34), NakStatus::Busy(TimeoutWait::of(5)));
     assert_eq!(PeSignal::from_nak(&busy), None);
 }
 

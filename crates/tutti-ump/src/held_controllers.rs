@@ -44,7 +44,7 @@ const HELD: u16 = 0x1f;
 /// )));
 /// assert_eq!(held.closes().count(), 1);
 /// ```
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct HeldControllers {
     /// The held bits in the low byte, and the ones whose lift is owed in the
     /// high byte (the same bits).
@@ -61,6 +61,15 @@ impl Default for HeldControllers {
     }
 }
 
+impl core::fmt::Debug for HeldControllers {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("HeldControllers")
+            .field("held", &self.len)
+            .field("owing", &self.owing)
+            .finish_non_exhaustive()
+    }
+}
+
 impl HeldControllers {
     /// Nothing held.
     #[must_use]
@@ -70,6 +79,12 @@ impl HeldControllers {
             len: 0,
             owing: false,
         }
+    }
+
+    /// How many controllers are held.
+    #[must_use]
+    pub const fn len(&self) -> usize {
+        self.len as usize
     }
 
     /// Whether no controller is held.

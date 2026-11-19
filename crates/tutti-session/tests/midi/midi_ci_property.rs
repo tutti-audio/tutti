@@ -103,7 +103,7 @@ impl PePeer {
     fn send(&self, fake: &FakeCounters, actions: Vec<ResponderAction>, now: Instant) {
         for action in actions {
             if let ResponderAction::Send(message) = action {
-                for ump in message.packets(MidiGroup::FIRST) {
+                for ump in message.packets(MidiGroup::FIRST).unwrap() {
                     assert!(fake.send_input(EndpointId::from_raw(RAW), ump, now));
                 }
             }
@@ -141,7 +141,8 @@ impl PePeer {
                         to: header.source,
                         data,
                     }
-                    .packets(MidiGroup::FIRST),
+                    .packets(MidiGroup::FIRST)
+                    .unwrap(),
                 );
                 continue;
             }
@@ -184,7 +185,7 @@ impl PePeer {
             }
             for action in self.responder.on_message(&decoded, now) {
                 if let ResponderAction::Send(message) = action {
-                    answers.extend(message.packets(MidiGroup::FIRST));
+                    answers.extend(message.packets(MidiGroup::FIRST).unwrap());
                 }
             }
         }
@@ -379,6 +380,7 @@ fn a_fetch_whose_peer_leaves_before_it_answers_is_disconnected() {
         target: muid,
     })
     .packets(MidiGroup::FIRST)
+    .unwrap()
     {
         let now = wire.start + Duration::from_millis(wire.ms);
         assert!(wire.fake.send_input(EndpointId::from_raw(RAW), ump, now));
@@ -949,6 +951,7 @@ fn a_peer_that_leaves_ends_its_leases_as_ended_by_the_peer() {
         target: muid,
     })
     .packets(MidiGroup::FIRST)
+    .unwrap()
     {
         let now = wire.now();
         assert!(wire.fake.send_input(EndpointId::from_raw(RAW), ump, now));

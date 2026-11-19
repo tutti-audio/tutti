@@ -106,7 +106,7 @@ fn a_reserved_status_is_unread_in_both_messages_and_nakked_generic() {
         let Some(CiMessage::Nak { nak, .. }) = unread.nak(Muid::of(9)) else {
             panic!("a NAK");
         };
-        assert_eq!(nak.status_code, Nak::STATUS_NAK);
+        assert_eq!(nak.status, NakStatus::Nak);
         assert_eq!(nak.nak_sub_id2.get(), message.sub_id2());
     }
 }
