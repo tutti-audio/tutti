@@ -1,26 +1,25 @@
-//! Mock-server integration tests for `PluginHandle`.
-//!
-//! Each test stands up a real [`tutti_plugin_ipc::PluginBridge`] against a
-//! mock plugin-server running on a std thread over an interprocess
-//! socket, then drives `PluginHandle` IPC round-trips through it. The
-//! `respond` callback lets each test script the server's replies.
+//! The plugin handle over a served plugin, against a hand-written mock
+//! `plugin-server` on the wire: what the handle's round-trips carry and how it
+//! answers a server that is silent, late or unsolicited. They live here because
+//! the wire is this crate's, and `tutti-plugin-host`, which holds the handle,
+//! names no hosting.
 
-#[path = "../../../tests/support/param_reads.rs"]
+#[path = "../../tutti-plugin-host/tests/support/param_reads.rs"]
 mod param_reads;
 use param_reads::ParamReads as _;
-#[path = "../../../tests/support/param_list.rs"]
+#[path = "../../tutti-plugin-host/tests/support/param_list.rs"]
 mod param_list;
+use crate::AudioSlab;
+use crate::PluginBridge;
+use crate::SlabLayout;
+use crate::unique_socket_path;
+use crate::{BridgeEvent, BridgeThread};
+use crate::{BridgeMessage, HostMessage, PROTOCOL_VERSION};
 use param_list::ParamList as _;
 use std::sync::Arc;
 use tutti_buffers::FloatWidth;
 use tutti_fixtures::main_thread;
 use tutti_plugin_host::PluginHandle;
-use tutti_plugin_ipc::AudioSlab;
-use tutti_plugin_ipc::PluginBridge;
-use tutti_plugin_ipc::SlabLayout;
-use tutti_plugin_ipc::unique_socket_path;
-use tutti_plugin_ipc::{BridgeEvent, BridgeThread};
-use tutti_plugin_ipc::{BridgeMessage, HostMessage, PROTOCOL_VERSION};
 use tutti_plugin_types::{
     ChannelLayout, Features, LoadedPlugin, ParameterInfo, PluginBus, PluginDescriptor, PluginTail,
     Samples,
@@ -30,19 +29,34 @@ use tutti_units::Normalized;
 use tutti_units::ParamId;
 use tutti_units::SampleRate;
 
+/// The editor loader of a plugin that has none to load: every load fails by name.
+fn no_editor(
+    _: tutti_plugin_types::MainThreadMarker,
+    _: &tutti_plugin_types::MainWorkHandle,
+    path: &std::path::Path,
+    _: tutti_plugin_types::PluginFormat,
+    _: &tutti_plugin_types::Load,
+) -> tutti_plugin_types::BridgeResult<Box<dyn tutti_plugin_types::Editor>> {
+    Err(tutti_plugin_types::BridgeError::LoadFailed {
+        path: Some(path.to_path_buf()),
+        stage: tutti_plugin_types::LoadStage::Opening,
+        reason: "no editor in these tests".into(),
+    })
+}
+
 /// A handle over `bridge` as a served plugin's control serves it, with a guard
 /// that owns no subprocess.
 fn handle_over(
     bridge: Arc<PluginBridge>,
-    slab: tutti_plugin_ipc::SlabWriter,
-    replies: tutti_plugin_ipc::Replies,
+    slab: crate::SlabWriter,
+    replies: crate::Replies,
     descriptor: PluginDescriptor,
     loaded: LoadedPlugin,
 ) -> PluginHandle {
-    let guard = Arc::new(tutti_plugin_ipc::ProcessGuard::for_test(
-        tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source"),
+    let guard = Arc::new(crate::ProcessGuard::for_test(
+        crate::unique_socket_path().expect("the OS has a random source"),
     ));
-    let ipc = tutti_plugin_ipc::Ipc::new(tutti_plugin_ipc::IpcParts {
+    let ipc = crate::Ipc::new(crate::IpcParts {
         bridge,
         guard,
         descriptor: descriptor.clone(),
@@ -94,7 +108,7 @@ fn recv_host_msg(stream: &interprocess::local_socket::Stream) -> HostMessage {
 /// Send a `BridgeMessage` to an interprocess socket (blocking).
 fn send_bridge_msg(stream: &interprocess::local_socket::Stream, msg: &BridgeMessage) {
     let mut stream = stream;
-    tutti_plugin_ipc::write_frame(&mut stream, msg).unwrap();
+    crate::write_frame(&mut stream, msg).unwrap();
 }
 
 /// Accepts the host's audio connection and then its control one, as the
@@ -147,14 +161,14 @@ fn handle_with_mock_server(
 
     let path = unique_socket_path().expect("the OS has a random source");
     let _ = std::fs::remove_file(&path);
-    let name = tutti_plugin_ipc::socket_name(&path).unwrap();
+    let name = crate::socket_name(&path).unwrap();
     let listener = ListenerOptions::new().name(name).create_sync().unwrap();
 
     // The test writes no audio: the slab is kept for the served plugin it builds.
     let slab = AudioSlab::create(
         unique_shm_name("handle"),
         SlabLayout {
-            slots: tutti_plugin_ipc::RING_SLOTS as u32,
+            slots: crate::RING_SLOTS as u32,
             samples_per_channel: 512,
             format: FloatWidth::F32,
             inputs: vec![ChannelLayout::STEREO],
@@ -166,12 +180,12 @@ fn handle_with_mock_server(
         path.clone(),
         tutti_plugin_types::Origin::new("test.vst3", tutti_plugin_types::Load::new()),
         tutti_plugin_types::PluginFormat::Vst3,
-        Some(tutti_plugin_ipc::EditorLoader::new(
-            crate::format::gui::load_gui_instance,
+        Some(crate::EditorLoader::new(
+            no_editor,
             tutti_fixtures::detached_work(),
         )),
         SampleRate::SR_48K,
-        Arc::new(tutti_plugin_ipc::ServerWatch::new()),
+        Arc::new(crate::ServerWatch::new()),
         tutti_plugin_types::Timeouts::default(),
     )
     .unwrap();
@@ -235,14 +249,14 @@ fn handle_with_multi_reply_server(
 
     let path = unique_socket_path().expect("the OS has a random source");
     let _ = std::fs::remove_file(&path);
-    let name = tutti_plugin_ipc::socket_name(&path).unwrap();
+    let name = crate::socket_name(&path).unwrap();
     let listener = ListenerOptions::new().name(name).create_sync().unwrap();
 
     // The test writes no audio: the slab is kept for the served plugin it builds.
     let slab = AudioSlab::create(
         unique_shm_name("handle-multi"),
         SlabLayout {
-            slots: tutti_plugin_ipc::RING_SLOTS as u32,
+            slots: crate::RING_SLOTS as u32,
             samples_per_channel: 512,
             format: FloatWidth::F32,
             inputs: vec![ChannelLayout::STEREO],
@@ -254,12 +268,12 @@ fn handle_with_multi_reply_server(
         path.clone(),
         tutti_plugin_types::Origin::new("test.vst3", tutti_plugin_types::Load::new()),
         tutti_plugin_types::PluginFormat::Vst3,
-        Some(tutti_plugin_ipc::EditorLoader::new(
-            crate::format::gui::load_gui_instance,
+        Some(crate::EditorLoader::new(
+            no_editor,
             tutti_fixtures::detached_work(),
         )),
         SampleRate::SR_48K,
-        Arc::new(tutti_plugin_ipc::ServerWatch::new()),
+        Arc::new(crate::ServerWatch::new()),
         tutti_plugin_types::Timeouts::default(),
     )
     .unwrap();
@@ -520,7 +534,7 @@ fn handle_get_parameter_value() {
 #[test]
 fn handle_open_editor_errors_for_missing_plugin() {
     // open_editor loads the plugin GUI in-process (not via IPC), so with
-    // a bogus plugin path it must surface a structured error rather than panic.
+    // no editor to load it must surface a structured error rather than panic.
     let (handle, _bridge_handle, _server_thread) = handle_with_mock_server(|_| None);
     assert!(
         handle
