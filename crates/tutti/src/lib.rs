@@ -716,8 +716,7 @@ pub mod midi {
     pub use tutti_midi_hardware::MidiHardwareError;
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_hardware::{
-        InputTiming, NotAChannelCount, ProcessChange, ReportAsk, Reporter,
-        WatchFailure,
+        InputTiming, NotAChannelCount, ProcessChange, ReportAsk, Reporter, WatchFailure,
     };
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_hardware::{MidiThread, NotFound, SeedError};
@@ -794,8 +793,8 @@ pub mod midi {
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_hardware::{
         ChannelCount, ChannelSwitcher, CiChange, CiPeerInfo, DeviceQuery, Errno, ErrnoOutOfRange,
-        InputFault, MidiHardwareOptions, PeerId, PeerProfiles, PeerRef, ProfileError, ProfileSwitch,
-        ProfilesChange, Switcher, WholeSwitcher,
+        InputFault, MidiHardwareOptions, PeerError, PeerId, PeerProfiles, PeerRef, ProfileError,
+        ProfileSwitch, ProfilesChange, Switcher, WholeSwitcher,
     };
     #[cfg(all(feature = "session", feature = "midi-hardware"))]
     pub use tutti_session::{
@@ -840,9 +839,7 @@ pub mod midi {
             UnixSeconds, UpdateKind,
         };
         #[cfg(feature = "midi-hardware")]
-        pub use tutti_midi_hardware::{
-            PropertyAsk, PropertyCall, PropertyChange, PropertyPeer,
-        };
+        pub use tutti_midi_hardware::{PropertyAsk, PropertyCall, PropertyChange, PropertyPeer};
         #[cfg(all(feature = "session", feature = "midi-hardware"))]
         pub use tutti_session::{
             GetProperty, ListedResource, PeFailure, ResourcePeer, SetProperty, Subscribe,
