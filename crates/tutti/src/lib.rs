@@ -211,7 +211,7 @@ pub use tutti_session::{ClipEventsTarget, HarmonyTarget, MpeModeTarget, OutputLa
 #[cfg(all(feature = "session", feature = "device"))]
 pub use tutti_session::{Device, DeviceClock, DeviceEvent, LiveSession};
 #[cfg(all(feature = "session", feature = "sampler"))]
-pub use tutti_session::{DirectionTarget, LoopingTarget, WindowTarget};
+pub use tutti_session::{DirectionTarget, LoopingTarget, SpeedTarget, WindowTarget};
 #[cfg(all(feature = "session", feature = "capture"))]
 pub use tutti_session::{
     Input, InputConfig, Punch, Recorded, Take, TakeError, TakeEvent, TakeTarget, Trim,

@@ -454,6 +454,10 @@ pub struct VoiceNodeHandle<F: SamplerFloat> {
     pub(crate) looping: SteerCell<Option<Loop>>,
     /// The voice's direction, held as the loop is.
     pub(crate) direction: SteerCell<Direction>,
+    /// The voice's varispeed: the cell the node reads once per block, on
+    /// either tier (a streamed voice's node writes it into the stream's
+    /// playback cells).
+    pub(crate) speed: Publisher<PlaybackRate>,
     /// The latest steering, which the setters edit under the lock and
     /// publish: two handles racing never lose each other's field.
     latest: Arc<Mutex<Steering>>,
@@ -468,9 +472,8 @@ pub struct VoiceNodeHandle<F: SamplerFloat> {
 }
 
 /// What a [`VoiceNode`](super::node::VoiceNode)'s handle publishes besides
-/// the gain, the window, the loop and the direction, latest wins. A field is
-/// `None` until the handle first sets it, and the node keeps what it was
-/// built with until then.
+/// the gain, the window, the loop, the direction and the speed, latest wins:
+/// the play state.
 ///
 /// The handle publishes (control thread); the node lends the cell once per
 /// block, and applies what differs from what it last applied; the fork
@@ -483,7 +486,6 @@ pub struct VoiceNodeHandle<F: SamplerFloat> {
 /// last, and nothing else rides with it to be ordered against.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(crate) struct Steering {
-    pub(crate) speed: Option<PlaybackRate>,
     /// Whether the handle has stopped the voice.
     pub(crate) stopped: bool,
     /// How many times the handle has played the voice: each one starts a
@@ -500,6 +502,7 @@ impl<F: SamplerFloat> VoiceNodeHandle<F> {
         window: Publisher<Option<VoiceWindow>>,
         looping: SteerCell<Option<Loop>>,
         direction: SteerCell<Direction>,
+        speed: Publisher<PlaybackRate>,
         gain: Param<Amplitude>,
         params: ParamSet,
         stream: Option<Stream<F>>,
@@ -510,6 +513,7 @@ impl<F: SamplerFloat> VoiceNodeHandle<F> {
             window,
             looping,
             direction,
+            speed,
             gain,
             params,
             stream: stream.map(|s| Arc::new(Mutex::new(s))),
@@ -573,10 +577,15 @@ impl<F: SamplerFloat> VoiceNodeHandle<F> {
         self.stream.as_ref().map(|s| s.lock_recover().status())
     }
 
-    /// Sets the voice's varispeed (pitch follows the rate), from the node's
-    /// next block on, on either tier.
-    pub fn set_speed(&self, speed: PlaybackRate) {
-        self.steer(|s| s.speed = Some(speed));
+    /// The cell holding the voice's varispeed (pitch follows the rate), on
+    /// either tier.
+    ///
+    /// The node lends it once per block and applies a change, so a speed
+    /// published twice between two blocks plays the second. A fork of the node
+    /// taken after a publish starts from it. The session writes it
+    /// (`sampler.speed()`); a host driving a node by hand publishes into it.
+    pub fn speed_cell(&self) -> &Publisher<PlaybackRate> {
+        &self.speed
     }
 
     /// Starts a free-running voice, or resumes one [`stop`](Self::stop)ped:
@@ -1157,6 +1166,7 @@ impl<F: SamplerFloat> tutti_rt::Reclaim for VoiceNodeHandle<F> {
             + self.window.reclaim()
             + self.looping.reclaim()
             + self.direction.reclaim()
+            + self.speed.reclaim()
     }
 }
 

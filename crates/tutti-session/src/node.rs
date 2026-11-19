@@ -399,13 +399,13 @@ impl<F: tutti_polysynth::SynthFloat> SessionNode<F> for tutti_polysynth::PolySyn
 }
 
 /// The values of a voice node that the session's verbs reach: its window,
-/// loop and direction, each a published cell of its handle.
+/// loop, direction and speed, each a published cell of its handle.
 #[cfg(feature = "sampler")]
 fn voice_slots<F: tutti_sampler::SamplerFloat>(
     node: NodeKey,
     controls: &tutti_sampler::VoiceNodeHandle<F>,
 ) -> NodeSlots {
-    use crate::value::{PublishedSlot, SlotId};
+    use crate::value::{PublishedSlot, SlotId, SpeedCell};
     NodeSlots::of(
         SlotId::Window(node),
         PublishedSlot::new(controls.window_cell().clone()),
@@ -417,6 +417,10 @@ fn voice_slots<F: tutti_sampler::SamplerFloat>(
     .and(
         SlotId::Direction(node),
         PublishedSlot::new(controls.direction_cell().clone()),
+    )
+    .and(
+        SlotId::Speed(node),
+        PublishedSlot::new(SpeedCell(controls.speed_cell().clone())),
     )
 }
 
