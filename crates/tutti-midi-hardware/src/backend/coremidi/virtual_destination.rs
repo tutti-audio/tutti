@@ -81,7 +81,7 @@ impl UmpVirtualDestination {
         }
         Self::stamped(
             spec.name().as_str(),
-            spec.protocol(),
+            spec.protocol,
             move |event, arrived| {
                 // A full inlet counts the drop itself; a log line would run on
                 // CoreMIDI's thread.
@@ -115,13 +115,14 @@ impl UmpVirtualDestination {
         F: FnMut(Ump, tutti_platform::Instant) + Send + 'static,
     {
         // The device watch's client starts before this endpoint's (`hub_first`).
-        super::hub_first();
-        let destination = UmpDestination::new(name, protocol_of(protocol), move |time, event| {
-            on_event(
-                event,
-                super::host_time::Pairing::now().instant_of_stamp(time),
-            );
-        })?;
+        let client = super::hub_first()?;
+        let destination =
+            UmpDestination::new(client, name, protocol_of(protocol), move |time, event| {
+                on_event(
+                    event,
+                    super::host_time::Pairing::now().instant_of_stamp(time),
+                );
+            })?;
 
         debug!(name, ?protocol, "Created virtual MIDI destination");
         Ok(Self {

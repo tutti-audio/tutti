@@ -1,10 +1,9 @@
 //! Watching CoreMIDI for devices that come and go.
 //!
 //! CoreMIDI delivers a client's notifications on the run loop of the thread
-//! that created it. One process-wide client on one thread, started on first use
-//! and never ended, serves every watch: coremidi 0.9 never disposes a `Client`
-//! on drop (its `Drop` is commented out), so a client per `Devices` would leak
-//! one, and the block it holds, for each open. A watch is a registration with
+//! that created it. One `SharedClient` on one thread, started on first use and
+//! never ended, serves every watch: a client per `Devices` would accumulate,
+//! since a CoreMIDI client is never disposed. A watch is a registration with
 //! that hub, and dropping it removes the registration.
 //!
 //! On a notification that the device setup changed, each registered watch
@@ -31,13 +30,12 @@ use tutti_platform::Instant;
 use tutti_rt::LockExt;
 
 use core_foundation::runloop::CFRunLoop;
-use coremidi::{Client, Notification};
 
 use crate::devices::ChangeSink;
 use crate::devices::reporter::Reporter;
 use crate::endpoints::{NoWatch, Watch};
 use crate::error::{MidiHardwareError, MidiThread, Result};
-use tutti_coremidi_ffi::{Operation, OsStatus};
+use tutti_coremidi_ffi::SharedClient;
 use tutti_midi_device::OsDevice;
 use tutti_platform::spawn_named;
 
@@ -140,20 +138,30 @@ impl Hub {
     }
 }
 
-/// The hub, started on first use, or why there is none (CoreMIDI refused the
-/// client). A refusal is not kept: the next watch tries again.
-pub(super) fn hub() -> Result<&'static Hub> {
-    static HUB: Mutex<Option<&'static Hub>> = Mutex::new(None);
+/// The hub and its client, started on first use, or why there is none (CoreMIDI
+/// refused the client). A refusal is not kept: the next watch tries again.
+fn started() -> Result<(&'static Hub, SharedClient)> {
+    static HUB: Mutex<Option<(&'static Hub, SharedClient)>> = Mutex::new(None);
     let mut slot = HUB.lock_recover();
-    if let Some(hub) = *slot {
-        return Ok(hub);
+    if let Some(started) = *slot {
+        return Ok(started);
     }
     let started = start_hub()?;
     *slot = Some(started);
     Ok(started)
 }
 
-fn start_hub() -> Result<&'static Hub> {
+/// The hub, started on first use.
+pub(super) fn hub() -> Result<&'static Hub> {
+    started().map(|(hub, _)| hub)
+}
+
+/// The process's CoreMIDI client, made by the hub thread on first use.
+pub(super) fn client() -> Result<SharedClient> {
+    started().map(|(_, client)| client)
+}
+
+fn start_hub() -> Result<(&'static Hub, SharedClient)> {
     {
         let hub: &'static Hub = Box::leak(Box::new(Hub {
             watches: Mutex::new(Vec::new()),
@@ -162,23 +170,16 @@ fn start_hub() -> Result<&'static Hub> {
         let (ready, started) = mpsc::channel();
         // The hub thread lives as long as the process: no owner stops it.
         spawn_named(MidiThread::DeviceWatch.name(), None, move |_| {
-            let client = tutti_coremidi_ffi::create_client(|| {
-                Client::new_with_notifications("tutti-midi-watch", move |n: &Notification| {
-                    if matches!(
-                        n,
-                        Notification::SetupChanged
-                            | Notification::ObjectAdded(_)
-                            | Notification::ObjectRemoved(_)
-                            | Notification::PropertyChanged(_)
-                    ) {
-                        hub.notify();
-                    }
-                })
-                .map_err(OsStatus::new)
+            let client = SharedClient::start("tutti-midi-watch", move |notification| {
+                if notification.changes_devices() {
+                    hub.notify();
+                }
             });
-            let _ = ready.send(client.as_ref().map(|_| ()).map_err(|s| *s));
+            let _ = ready.send(client);
             // The client lives as long as the process.
-            let Ok(_client) = client else { return };
+            if client.is_err() {
+                return;
+            }
             let mut looks = IdleLooks::new(Instant::now());
             loop {
                 let started = Instant::now();
@@ -201,10 +202,8 @@ fn start_hub() -> Result<&'static Hub> {
         })?
         .detach();
         match started.recv() {
-            Ok(Ok(())) => Ok(hub),
-            Ok(Err(status)) => {
-                Err(tutti_coremidi_ffi::Error::call(Operation::CreateClient, status).into())
-            }
+            Ok(Ok(client)) => Ok((hub, client)),
+            Ok(Err(error)) => Err(error.into()),
             Err(_) => Err(MidiHardwareError::ThreadEnded {
                 thread: MidiThread::DeviceWatch,
             }),

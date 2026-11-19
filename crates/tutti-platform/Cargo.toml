@@ -40,6 +40,7 @@ windows = { version = "0.62", features = [
 
 [dev-dependencies]
 assert_no_alloc = { version = "1", default-features = false }
+tempfile = "3.10"
 
 # `MainThreadMarker::new` against the process's real main thread: the default harness
 # runs every test on a spawned thread.

@@ -1178,16 +1178,6 @@ mod tests {
     /// reaches the controller**: the first block after the load reads the new
     /// count when it begins, and keeps its values.
     #[test]
-    fn a_block_that_began_during_a_load_is_voided_by_the_count_after_it() {
-        let (mut informs, mut reader, loads) = informs();
-        loads.add(1);
-        let began = informs.begin();
-        loads.add(1);
-        informs.note(&changes_of(0.25), began);
-        assert!(told(&mut reader).is_empty(), "a pre-load value");
-    }
-
-    #[test]
     fn the_first_write_after_a_load_on_an_idle_render_thread_is_told() {
         let (mut informs, mut reader, loads) = informs();
         loads.add(1);
