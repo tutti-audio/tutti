@@ -24,6 +24,7 @@ pub const UMP_VERSION: UmpVersion = UmpVersion { major: 1, minor: 1 };
 /// and the Product Instance Id it declares (M2-104 §7.1.3 to §7.1.5), the parts
 /// an [`Endpoint`] built with [`Endpoint::local`] takes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct MidiIdentity {
     /// The Device Identity (M2-104 §7.1.3), which MIDI-CI Discovery also
     /// announces.
@@ -36,6 +37,7 @@ pub struct MidiIdentity {
 
 /// What an Endpoint supports (M2-104 §7.1.2).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Capabilities {
     /// Sends and receives the MIDI 1.0 Protocol (`M1`).
     pub midi1: bool,
@@ -53,6 +55,11 @@ pub struct Capabilities {
 /// [`Capabilities`] and may say neither; this is what an Endpoint declares of
 /// itself.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(
+    feature = "serde",
+    serde(try_from = "Capabilities", into = "Capabilities")
+)]
 pub struct Supports(Capabilities);
 
 /// Why [`Supports::new`] refuses: neither Protocol is supported.
@@ -109,6 +116,11 @@ impl TryFrom<Capabilities> for Supports {
 /// One Function Block (M2-104 §7.1.8): a set of Groups that act as one
 /// function of the Endpoint.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(
+    feature = "serde",
+    serde(try_from = "wire::BlockDocument", into = "wire::BlockDocument")
+)]
 pub struct FunctionBlock {
     id: FunctionBlockId,
     active: bool,
@@ -553,6 +565,11 @@ impl Configuration {
 
 /// What one UMP Endpoint declares and has active (M2-104 §7.1).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(
+    feature = "serde",
+    serde(try_from = "wire::EndpointDocument", into = "wire::EndpointDocument")
+)]
 pub struct Endpoint {
     pub(crate) version: UmpVersion,
     pub(crate) capabilities: Capabilities,
@@ -1115,6 +1132,156 @@ fn send_instance_id(out: &mut impl Extend<Ump>, id: &ProductInstanceId) {
 
 fn send(out: &mut impl Extend<Ump>, stream: Stream) {
     out.extend(std::iter::once(Ump::from(Message::Stream(stream))));
+}
+
+/// An Endpoint document that is not an Endpoint: its blocks do not agree with
+/// the count it declares.
+#[cfg(feature = "serde")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum NotAnEndpoint {
+    /// Two blocks have one number.
+    #[error("two Function Blocks are numbered {0}")]
+    Repeated(u8),
+    /// A block is numbered at or past the count the Endpoint declares.
+    #[error("Function Block {id} is past the {declared} the Endpoint declares")]
+    PastCount {
+        /// The block's number.
+        id: u8,
+        /// The declared count.
+        declared: u8,
+    },
+}
+
+#[cfg(feature = "serde")]
+mod wire {
+    //! The documents of a block and an Endpoint: plain fields that read back
+    //! through the checks of their parts.
+
+    use tutti_ump::{
+        BlockDirection, DeviceIdentity, FirstGroup, FunctionBlockCount, FunctionBlockId, GroupSpan,
+        Midi1Port, StreamConfig, UiHint, UmpVersion,
+    };
+
+    use super::{
+        BlockError, Capabilities, Endpoint, FunctionBlock, MAX_FUNCTION_BLOCKS, NotAnEndpoint,
+    };
+    use crate::name::{BlockName, EndpointName, ProductInstanceId};
+
+    #[derive(serde::Serialize, serde::Deserialize)]
+    pub(super) struct BlockDocument {
+        pub id: FunctionBlockId,
+        pub active: bool,
+        pub direction: BlockDirection,
+        pub ui_hint: UiHint,
+        pub midi1: Midi1Port,
+        pub first_group: FirstGroup,
+        pub groups: GroupSpan,
+        pub midi_ci_version: u8,
+        pub max_sysex8_streams: u8,
+        pub name: Option<BlockName>,
+    }
+
+    impl From<FunctionBlock> for BlockDocument {
+        fn from(block: FunctionBlock) -> Self {
+            Self {
+                id: block.id,
+                active: block.active,
+                direction: block.direction,
+                ui_hint: block.ui_hint,
+                midi1: block.midi1,
+                first_group: block.first_group,
+                groups: block.groups,
+                midi_ci_version: block.midi_ci_version,
+                max_sysex8_streams: block.max_sysex8_streams,
+                name: block.name,
+            }
+        }
+    }
+
+    impl TryFrom<BlockDocument> for FunctionBlock {
+        type Error = BlockError;
+
+        fn try_from(document: BlockDocument) -> Result<Self, BlockError> {
+            let builder = Self::builder(
+                document.id,
+                document.direction,
+                document.first_group,
+                document.groups,
+            )
+            .active(document.active)
+            .ui_hint(document.ui_hint)
+            .midi1(document.midi1)
+            .midi_ci(document.midi_ci_version, document.max_sysex8_streams);
+            let builder = match document.name {
+                Some(name) => builder.name(name),
+                None => builder,
+            };
+            builder.build()
+        }
+    }
+
+    #[derive(serde::Serialize, serde::Deserialize)]
+    pub(super) struct EndpointDocument {
+        pub version: UmpVersion,
+        pub capabilities: Capabilities,
+        pub active: StreamConfig,
+        pub identity: Option<DeviceIdentity>,
+        pub name: Option<EndpointName>,
+        pub instance_id: Option<ProductInstanceId>,
+        pub static_function_blocks: bool,
+        pub declared_blocks: FunctionBlockCount,
+        pub blocks: Vec<FunctionBlock>,
+    }
+
+    impl From<Endpoint> for EndpointDocument {
+        fn from(endpoint: Endpoint) -> Self {
+            Self {
+                version: endpoint.version,
+                capabilities: endpoint.capabilities,
+                active: endpoint.active,
+                identity: endpoint.identity,
+                name: endpoint.name,
+                instance_id: endpoint.instance_id,
+                static_function_blocks: endpoint.static_function_blocks,
+                declared_blocks: endpoint.declared_blocks,
+                blocks: endpoint.blocks.into_iter().flatten().collect(),
+            }
+        }
+    }
+
+    impl TryFrom<EndpointDocument> for Endpoint {
+        type Error = NotAnEndpoint;
+
+        fn try_from(document: EndpointDocument) -> Result<Self, NotAnEndpoint> {
+            let mut blocks = [None; MAX_FUNCTION_BLOCKS];
+            for block in document.blocks {
+                let id = block.id.get();
+                if id >= document.declared_blocks.get() {
+                    return Err(NotAnEndpoint::PastCount {
+                        id,
+                        declared: document.declared_blocks.get(),
+                    });
+                }
+                let slot = &mut blocks[usize::from(id)];
+                if slot.is_some() {
+                    return Err(NotAnEndpoint::Repeated(id));
+                }
+                *slot = Some(block);
+            }
+            Ok(Self {
+                version: document.version,
+                capabilities: document.capabilities,
+                active: document.active,
+                identity: document.identity,
+                name: document.name,
+                instance_id: document.instance_id,
+                static_function_blocks: document.static_function_blocks,
+                declared_blocks: document.declared_blocks,
+                blocks,
+            })
+        }
+    }
 }
 
 #[cfg(test)]

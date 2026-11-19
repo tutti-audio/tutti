@@ -14,8 +14,6 @@ tutti_units::ranged! {
     /// The most bytes a decoded body may have: the caller's bound on what a peer
     /// can make it allocate, since a few bytes of zlib inflate to a great many.
     #[derive(Eq, Hash, PartialOrd, Ord)]
-    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-    #[cfg_attr(feature = "serde", serde(try_from = "usize", into = "usize"))]
     BodyLimit(usize), NotABodyLimit, "a body limit (at least 1)", |raw| raw >= 1
 }
 

@@ -17,7 +17,6 @@ members = [
     "crates/tutti-buffers",
     "crates/tutti-cpal",
     "crates/tutti-units",
-    "crates/tutti-types",
     "crates/tutti-music",
     "crates/tutti-codec",
     "crates/tutti-rt",

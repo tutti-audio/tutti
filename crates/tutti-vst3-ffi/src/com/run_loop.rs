@@ -66,7 +66,7 @@ pub(crate) type PlugFrameInterfaces = (
 /// The interface ids this platform answers beyond the common ones.
 pub(crate) const RUN_LOOP_IIDS: &[vst3::Steinberg::TUID] = &[vst3::Steinberg::Linux::IRunLoop_iid];
 
-tutti_types::id! {
+tutti_rt::id! {
     /// Which plugin instance a registration belongs to.
     ///
     /// The module's run loop is shared by every plugin made from it, and the
@@ -81,7 +81,7 @@ tutti_types::id! {
 impl Owner {
     /// A new owner, distinct from every other in the process.
     pub(crate) fn next() -> Self {
-        static NEXT: tutti_types::Mint = tutti_types::Mint::new();
+        static NEXT: tutti_rt::Mint = tutti_rt::Mint::new();
         Self::mint(&NEXT)
     }
 }

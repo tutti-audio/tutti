@@ -145,8 +145,12 @@ pub use ci::{
     is_set_profile_on, mcoded7, send_level, split_message, volume_gain,
 };
 
+#[cfg(feature = "serde")]
+pub use ci::SavedStateError;
 pub use connection::{Action, Connection, Ending, MAX_ATTEMPTS, NAME_GRACE, STEP_TIMEOUT};
 pub use dialect::{ChannelVoice, Dialect, Expression, JrTimestamps, Midi1Rate, NoDialect};
+#[cfg(feature = "serde")]
+pub use endpoint::NotAnEndpoint;
 pub use endpoint::{
     BlockError, BlockField, Capabilities, ChangeError, Configuration, Endpoint, EndpointChange,
     FunctionBlock, FunctionBlockBuilder, MAX_FUNCTION_BLOCKS, MidiIdentity, NoProtocol, Reply,

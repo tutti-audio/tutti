@@ -35,7 +35,7 @@ wide = { version = "1.6", default-features = false }
 
 tutti-units = { version = "0.0.1", path = "../tutti-units", default-features = false }
 tutti-music = { version = "0.0.1", path = "../tutti-music", default-features = false }
-tutti-types = { version = "0.0.1", path = "../tutti-types", default-features = false }
+tutti-rt = { version = "0.0.1", path = "../tutti-rt", default-features = false }
 # The float the synth is generic over, and the buffer views `Renderer::render_input` takes.
 tutti-buffers = { version = "0.0.1", path = "../tutti-buffers" }
 # `Law`, the shape of the portamento glide.
@@ -56,7 +56,6 @@ criterion.workspace = true
 serde = "1"
 tutti-units = { path = "../tutti-units", default-features = false, features = ["serde"] }
 tutti-music = { path = "../tutti-music", default-features = false, features = ["serde"] }
-tutti-types = { path = "../tutti-types", default-features = false, features = ["serde"] }
 tutti-fixtures = { path = "../../testing/tutti-fixtures" }
 assert_no_alloc = { version = "1", default-features = false }
 tutti-midi-runtime = { path = "../tutti-midi-runtime", default-features = false }

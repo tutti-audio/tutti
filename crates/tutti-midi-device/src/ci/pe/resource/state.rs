@@ -36,8 +36,6 @@ tutti_units::ranged! {
 tutti_units::ranged! {
     /// The size of a state in bytes, the `size` of a StateList entry (M2-111 §2.3).
     #[derive(Eq, Hash, PartialOrd, Ord)]
-    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-    #[cfg_attr(feature = "serde", serde(try_from = "u64", into = "u64"))]
     StateSize(u64), NotAStateSize, "a state size (below 2^63)",
     |raw| raw <= 0x7FFF_FFFF_FFFF_FFFF
 }
@@ -691,12 +689,32 @@ impl SavedState {
     }
 }
 
+/// A saved state whose document does not read back: a field fails the check of
+/// its type.
+#[cfg(feature = "serde")]
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum SavedStateError {
+    /// The state id is not one.
+    #[error("{0:?} is not a state id")]
+    StateId(String),
+    /// The media type is not one.
+    #[error("{0:?} is not a media type")]
+    MediaType(String),
+    /// The revision is not one.
+    #[error("{0:?} is not a revision")]
+    Rev(String),
+    /// The bytes are not the state of the media type.
+    #[error("the state's bytes do not read back: {0}")]
+    State(#[source] PeDataError),
+}
+
 #[cfg(feature = "serde")]
 mod wire {
     //! The document of a saved state: plain fields that read back through the
     //! checks of their types.
 
-    use super::{PeState, SavedState, StateId, StateRev, UnixSeconds};
+    use super::{PeState, SavedState, SavedStateError, StateId, StateRev, UnixSeconds};
     use crate::ci::pe::limits::MediaType;
     use tutti_ump::DeviceIdentity;
 
@@ -725,22 +743,22 @@ mod wire {
     }
 
     impl TryFrom<Wire> for SavedState {
-        type Error = String;
+        type Error = SavedStateError;
 
-        fn try_from(wire: Wire) -> Result<Self, String> {
+        fn try_from(wire: Wire) -> Result<Self, SavedStateError> {
             let state_id = StateId::new(&wire.state_id)
-                .ok_or_else(|| format!("{:?} is not a state id", wire.state_id))?;
+                .ok_or_else(|| SavedStateError::StateId(wire.state_id.clone()))?;
             let media_type = wire
                 .media_type
                 .as_deref()
-                .map(|m| MediaType::new(m).ok_or_else(|| format!("{m:?} is not a media type")))
+                .map(|m| MediaType::new(m).ok_or_else(|| SavedStateError::MediaType(m.to_owned())))
                 .transpose()?;
-            let mut state =
-                PeState::from_wire(media_type.as_ref(), &wire.bytes).map_err(|e| e.to_string())?;
+            let mut state = PeState::from_wire(media_type.as_ref(), &wire.bytes)
+                .map_err(SavedStateError::State)?;
             state.rev = wire
                 .rev
                 .as_deref()
-                .map(|r| StateRev::new(r).ok_or_else(|| format!("{r:?} is not a revision")))
+                .map(|r| StateRev::new(r).ok_or_else(|| SavedStateError::Rev(r.to_owned())))
                 .transpose()?;
             state.timestamp = wire.timestamp;
             Ok(Self::new(wire.device, state_id, state))

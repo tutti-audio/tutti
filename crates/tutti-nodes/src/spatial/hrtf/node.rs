@@ -7,7 +7,7 @@ use tutti_buffers::BusTopology;
 use tutti_buffers::{MonoMut, StereoPlanes};
 use tutti_dsp::{FftFloat, HRTF_LATENCY, HRTF_STEP, HrtfBinaural, HrtfBinauralError};
 use tutti_graph::{Cx, IntoNode, Io, Node, NodeParts, ParamNode, ParamSet, Prepare, Shape, Status};
-use tutti_types::Param;
+use tutti_rt::Param;
 use tutti_units::Latency;
 use tutti_units::UnitParam;
 use tutti_units::{Azimuth, Direction, Elevation, Mix, SampleRate, Samples, Tail};

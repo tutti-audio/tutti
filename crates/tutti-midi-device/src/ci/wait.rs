@@ -21,8 +21,6 @@ tutti_units::ranged! {
     /// How long a Timeout Wait asks to keep a transaction open: 0 to 127 tenths of
     /// a second, 0 to 12.7 s (M2-101 Table 14, M2-103 §12.2.1).
     #[derive(Eq, Hash)]
-    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-    #[cfg_attr(feature = "serde", serde(try_from = "u8", into = "u8"))]
     TimeoutWait(u8), NotATimeoutWait, "a timeout wait (0 to 127 tenths of a second)",
     |raw| raw <= 127
 }

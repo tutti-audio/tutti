@@ -32,7 +32,7 @@ use std::sync::Arc;
 use std::sync::mpsc::sync_channel;
 use std::time::{Duration, Instant};
 use tutti_plugin_types::{MainThreadMarker, MainWorkHandle, StateUse};
-use tutti_types::ParkedSampleRate;
+use tutti_rt::ParkedSampleRate;
 
 use parking_lot::Mutex;
 

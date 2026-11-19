@@ -49,7 +49,7 @@ tutti-units = { version = "0.0.1", path = "../tutti-units" }
 tutti-music = { version = "0.0.1", path = "../tutti-music" }
 
 # The graph, for a plugin node's own `ForkSource` (fork by state
-# transfer). No cycle: `tutti-graph` names only `tutti-types`, `tutti-rt` and `tutti-ump`.
+# transfer). No cycle: `tutti-graph` names only `tutti-units`, `tutti-rt` and `tutti-ump`.
 tutti-graph = { version = "0.0.1", path = "../tutti-graph" }
 
 # The process edge: the wire, the slab, the server's launch and the client of a

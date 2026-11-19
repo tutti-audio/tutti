@@ -3,28 +3,28 @@ use tutti_fixtures::midi;
 use tutti_midi_protocol::widen_velocity;
 use tutti_ump::{U7, Utility};
 
-/// The node adopts the mode last asked for on its next block.
+/// The node adopts the mode last published to its cell on its next block.
 #[test]
-fn the_node_adopts_the_mode_last_asked_for() {
-    let parts = IntoNode::<f32>::into_parts(MidiIngestNode::new());
-    let controls = parts.controls;
+fn the_node_adopts_the_mode_last_published() {
     let lower = tutti_fixtures::midi::lower_zone(15);
     let upper = tutti_fixtures::midi::upper_zone(7);
-    controls.set_mpe_mode(lower);
-    controls.clone().set_mpe_mode(upper);
+    let cell = Publisher::new(MpeMode::Disabled);
+    let mut node = MidiIngestNode::new().with_mpe(&cell);
+    assert_eq!(node.device.mode, MpeMode::Disabled);
+    cell.publish(lower);
+    cell.publish(upper);
 
-    // A node over the same request, reading it through a reader of its
-    // own, as the inserted one is.
-    let mut node = MidiIngestNode {
-        mpe_request: controls.request.reader(),
-        mpe_request_cell: controls.request.clone(),
-        ..MidiIngestNode::new()
-    };
-    node.device.adopt(node.mpe_request.lend().mode);
-    assert_eq!(node.device.mode, upper, "the node adopts it");
+    let mode = node.mpe_mode.as_mut().map(|reader| *reader.lend());
+    assert!(node.device.adopt(mode), "a new mode is adopted");
+    assert_eq!(node.device.mode, upper);
+    let mode = node.mpe_mode.as_mut().map(|reader| *reader.lend());
+    assert!(
+        !node.device.adopt(mode),
+        "the mode in force is not adopted again"
+    );
 }
 
-/// **A request the node held across the next `set_mpe_mode` is freed by
+/// **A request the node held across the next `set_mpe_profile` is freed by
 /// the next `reclaim`**, with no further publish.
 #[test]
 fn reclaim_frees_a_request_a_block_held_across_the_next() {
@@ -37,7 +37,16 @@ fn reclaim_frees_a_request_a_block_held_across_the_next() {
     {
         // A block in progress across the request.
         let _held = node.mpe_request.lend();
-        controls.set_mpe_mode(tutti_fixtures::midi::lower_zone(15));
+        controls.set_mpe_profile(
+            MidiGroup::FIRST,
+            Some(tutti_midi_protocol::MpeZones::single(
+                tutti_midi_protocol::MpeZoneConfig::profile(
+                    tutti_ump::MpeZoneSpan::new(MidiChannel::of(0), tutti_ump::MpeChannels::of(4))
+                        .unwrap(),
+                    tutti_midi_protocol::PitchBendSensitivity::MPE_PROFILE_DEFAULT,
+                ),
+            )),
+        );
     }
     assert_eq!(controls.request.retired_len(), 1, "pinned until a scan");
     assert_eq!(tutti_rt::Reclaim::reclaim(&controls), 0);

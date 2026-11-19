@@ -57,7 +57,7 @@ pub(super) fn check(tree: &dyn Tree, args: &[String]) -> Report {
 
     r.say("==> chained tutti_X::tutti_Y:: paths");
     // A tutti crate reached THROUGH another tutti crate. The trailing `::` is
-    // required so a bare `pub use tutti_types;` (the declaration being
+    // required so a bare `pub use tutti_rt;` (the declaration being
     // removed, which lives in exactly one place per crate) is not itself
     // reported here.
     let hits = grep(tree, &scanned, chained);
@@ -198,7 +198,7 @@ mod tests {
             "tutti_A::tutti_b::",
             "tutti_a:: tutti_b::",
             "tutti::tutti_b::",
-            "pub use tutti_types;",
+            "pub use tutti_rt;",
         ] {
             assert!(!chained(miss), "{miss}");
         }

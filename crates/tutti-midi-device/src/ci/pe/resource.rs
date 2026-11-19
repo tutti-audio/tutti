@@ -48,6 +48,8 @@ pub use server::{
 pub use simple::{
     PeBasicChannelRx, PeBasicChannelTx, PeChannelMode, PeCurrentMode, PeExternalSync, PeLocalOn,
 };
+#[cfg(feature = "serde")]
+pub use state::SavedStateError;
 pub use state::{
     Arrival, CommonState, GetStateError, NotAStateSize, NotUnixSeconds, PeState, PeStateEntry,
     PeStateList, RefusedAt, RestoreError, SavedState, StateDevice, StateId, StateRev, StateSize,

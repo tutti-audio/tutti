@@ -26,7 +26,7 @@ tutti-buffers = { version = "0.0.1", path = "../tutti-buffers" }
 # the builder inserts (the click) and modulation applies (`Modulation`).
 tutti-units = { version = "0.0.1", path = "../tutti-units", default-features = false }
 tutti-music = { version = "0.0.1", path = "../tutti-music", default-features = false }
-tutti-types = { version = "0.0.1", path = "../tutti-types", default-features = false }
+atomic_float = "1.1"
 tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false }
 tutti-graph = { version = "0.0.1", path = "../tutti-graph" }
 tutti-transport = { version = "0.0.1", path = "../tutti-transport" }

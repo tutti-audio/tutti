@@ -51,6 +51,14 @@ pub trait AEffectExt {
     /// the same `AEffect`.
     unsafe fn get_editor(&self) -> &mut Option<Box<dyn Editor>>;
 
+    /// The words the arrangements of `effGetSpeakerArrangement` are kept in. Only works for
+    /// plugins created using this library.
+    ///
+    /// # Safety
+    /// `self.user` must point at the `PluginCache` this library installed, and the caller
+    /// must not invoke this concurrently with any other accessor on the same `AEffect`.
+    unsafe fn get_arrangement_words(&self) -> &mut [Vec<u32>; 2];
+
     /// Drop the Plugin object. Only works for plugins created using this library.
     ///
     /// # Safety
@@ -83,6 +91,12 @@ impl AEffectExt for AEffect {
         // SAFETY: the caller upholds this fn's `# Safety` contract: `user` is the
         // `PluginCache` this library installed, with no concurrent accessor.
         unsafe { &mut (*(self.user as *mut PluginCache)).editor }
+    }
+
+    unsafe fn get_arrangement_words(&self) -> &mut [Vec<u32>; 2] {
+        // SAFETY: the caller upholds this fn's `# Safety` contract: `user` is the
+        // `PluginCache` this library installed, with no concurrent accessor.
+        unsafe { &mut (*(self.user as *mut PluginCache)).arrangement_words }
     }
 
     unsafe fn drop_plugin(&mut self) {

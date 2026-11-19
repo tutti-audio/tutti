@@ -355,9 +355,8 @@ pub enum Meta {
 /// The slowest tempo the wire holds: 24 bits of microseconds per quarter.
 const MAX_MICROS_PER_QUARTER: u32 = 0x00FF_FFFF;
 
-/// Microseconds in a minute: the numerator of the tempo relation, a Set Tempo
-/// being microseconds per quarter note.
-const MICROS_PER_MINUTE: f64 = 60_000_000.0;
+/// Microseconds in a second: a Set Tempo is microseconds per quarter note.
+const MICROS_PER_SECOND: f64 = 1_000_000.0;
 
 impl Meta {
     /// A Set Tempo for `bpm`, rounded to the wire's microsecond. The wire
@@ -365,7 +364,7 @@ impl Meta {
     /// writes the shortest, 1 (the wire's zero means no valid tempo), and
     /// one below about 3.6 BPM the longest.
     pub fn tempo(bpm: Bpm) -> Self {
-        let micros = (MICROS_PER_MINUTE / bpm.get()).round() as u32;
+        let micros = (bpm.beat_period().get() * MICROS_PER_SECOND).round() as u32;
         Self::Tempo {
             micros_per_quarter: MicrosPerQuarter::of(micros.clamp(1, MAX_MICROS_PER_QUARTER)),
             extra: Box::default(),
@@ -378,9 +377,9 @@ impl Meta {
         match self {
             Self::Tempo {
                 micros_per_quarter, ..
-            } if micros_per_quarter.get() != 0 => {
-                Bpm::new(MICROS_PER_MINUTE / f64::from(micros_per_quarter.get()))
-            }
+            } if micros_per_quarter.get() != 0 => Bpm::from_beat_period(Seconds::new(
+                f64::from(micros_per_quarter.get()) / MICROS_PER_SECOND,
+            )),
             _ => None,
         }
     }

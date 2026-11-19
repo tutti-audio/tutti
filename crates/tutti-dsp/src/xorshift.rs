@@ -1,6 +1,7 @@
 //! Marsaglia's xorshift32 generator.
 
 use std::num::NonZeroU32;
+use tutti_buffers::Float;
 
 /// A xorshift32 pseudo-random generator (Marsaglia 2003, shifts 13, 17, 5): a
 /// period of 2^32 - 1 over the nonzero words.
@@ -37,18 +38,20 @@ impl Xorshift32 {
         x
     }
 
-    /// A word as a uniform draw in `[0, 1]`: `word / u32::MAX`, in `f32`.
+    /// A word as a uniform draw in `[0, 1)` of the width `F`: `word / 2^32` truncated to the
+    /// float's own resolution (`2^-24` at `f32`, `2^-32` at `f64`), never `1`. The one crossing
+    /// from an integer word to data, [`Float::from_fraction_bits`].
     #[inline]
     #[must_use]
-    pub fn to_unit(word: u32) -> f32 {
-        word as f32 / u32::MAX as f32
+    pub fn to_unit<F: Float>(word: u32) -> F {
+        F::from_fraction_bits(u64::from(word) << 32)
     }
 
-    /// A word as a uniform draw in `[-1, 1]`: `2 * to_unit(word) - 1`.
+    /// A word as a uniform draw in `[-1, 1)` of the width `F`: `2 * to_unit(word) - 1`.
     #[inline]
     #[must_use]
-    pub fn to_bipolar(word: u32) -> f32 {
-        2.0 * Self::to_unit(word) - 1.0
+    pub fn to_bipolar<F: Float>(word: u32) -> F {
+        F::lit(2.0) * Self::to_unit::<F>(word) - F::lit(1.0)
     }
 }
 

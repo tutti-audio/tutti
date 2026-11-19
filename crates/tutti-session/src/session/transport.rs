@@ -165,6 +165,14 @@ impl<K: AppKey, C: Clock> Session<K, C> {
         self.transport.click
     }
 
+    /// The session's MPE mode as a target, written with [`set`](Self::set)
+    /// and read with [`get`](Self::get).
+    #[cfg(feature = "midi")]
+    #[must_use]
+    pub const fn mpe(&self) -> crate::MpeModeTarget {
+        crate::MpeModeTarget::new()
+    }
+
     /// The metronome's targets: its level and when it sounds, written with
     /// [`set`](Self::set) and read with [`get`](Self::get).
     #[must_use]

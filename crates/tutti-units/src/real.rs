@@ -19,6 +19,10 @@ use core::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Rem, Sub, S
 /// assert_eq!(<f32 as Real>::sqrt(4.0), 2.0);
 /// assert_eq!(<f64 as Real>::exp(0.0), 1.0);
 /// ```
+///
+/// Data of the width crosses from four places: [`from_unit`](Real::from_unit) (a quantity),
+/// [`from_design`](Real::from_design) (a computed figure), [`lit`](Real::lit) (a literal) and
+/// [`from_count`](Real::from_count) (a count).
 pub trait Real:
     sealed::Sealed
     + Copy
@@ -109,6 +113,18 @@ pub trait Real:
     /// ```
     #[must_use]
     fn lit(x: f64) -> Self;
+    /// A count as data of this width: exact up to `2^MANTISSA_DIGITS` (`2^24` at `f32`, `2^53`
+    /// at `f64`) and rounded to nearest above that. The one crossing from an integer count (a
+    /// frame index, a block length) to data.
+    ///
+    /// ```
+    /// use tutti_units::Real;
+    ///
+    /// assert_eq!(f32::from_count(1 << 24), 16_777_216.0);
+    /// assert_eq!(f64::from_count(u32::MAX), 4_294_967_295.0);
+    /// ```
+    #[must_use]
+    fn from_count(n: u32) -> Self;
     /// The absolute value.
     #[must_use]
     fn abs(self) -> Self;
@@ -236,6 +252,10 @@ macro_rules! real_impl {
             #[inline]
             fn lit(x: f64) -> Self {
                 x as $t
+            }
+            #[inline]
+            fn from_count(n: u32) -> Self {
+                n as $t
             }
             #[inline]
             fn exp_m1(self) -> Self {
@@ -427,6 +447,17 @@ mod tests {
     fn lit_is_the_literal_at_the_width() {
         assert_eq!(f32::lit(0.1), 0.1f32);
         assert_eq!(f64::lit(0.1), 0.1);
+    }
+
+    #[test]
+    fn a_count_is_exact_to_the_mantissa_and_rounds_to_nearest_above() {
+        assert_eq!(f32::from_count(0), 0.0);
+        assert_eq!(f64::from_count(0), 0.0);
+        assert_eq!(f32::from_count(1 << 24), 16_777_216.0);
+        assert_eq!(f64::from_count(1 << 24), 16_777_216.0);
+        assert_eq!(f32::from_count((1 << 24) + 1), 16_777_216.0, "ties to even");
+        assert_eq!(f64::from_count((1 << 24) + 1), 16_777_217.0);
+        assert_eq!(f64::from_count(u32::MAX), 4_294_967_295.0);
     }
 
     #[test]

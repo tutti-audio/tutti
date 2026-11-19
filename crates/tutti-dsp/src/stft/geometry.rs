@@ -7,6 +7,7 @@
 //! The derived quantities (hop count, bin count, frame times) are computed from
 //! it, never stored beside it, so they cannot contradict it.
 
+use tutti_buffers::Float;
 use tutti_units::{Hz, SampleRate, Samples, Seconds};
 
 use crate::stft::error::{Result, StftError};
@@ -275,8 +276,9 @@ impl StftGeometry {
     /// the same apparent cost.
     #[inline]
     #[must_use]
-    pub fn window_coefficients(self) -> Vec<f32> {
-        self.window_fn.coefficients(self.window.get())
+    pub fn window_coefficients<F: Float>(self) -> Vec<F> {
+        let design = self.window_fn.coefficients(self.window.get());
+        design.into_iter().map(F::from_design).collect()
     }
 
     /// The DC gain this grid's forward transform leaves in every magnitude.
@@ -292,8 +294,8 @@ impl StftGeometry {
     /// multiply by" being two methods is how one of them gets used by mistake.
     #[inline]
     #[must_use]
-    pub fn magnitude_gain(self) -> f32 {
-        self.window_fn.coherent_gain() * self.window.get().max(1) as f32
+    pub fn magnitude_gain<F: Float>(self) -> F {
+        F::from_design(self.window_fn.coherent_gain() * self.window.get().max(1) as f64)
     }
 }
 

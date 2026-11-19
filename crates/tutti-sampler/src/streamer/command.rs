@@ -13,7 +13,7 @@ use super::open::Opened;
 use crate::voice::Direction;
 use crate::{Loop, OpenError};
 
-tutti_types::id! {
+tutti_rt::id! {
     /// One open stream's identity: minted on the control side when the open is
     /// asked for ([`DiskStreamer::open`](crate::DiskStreamer::open)), never
     /// reused, and what every command about the stream names. A host is
