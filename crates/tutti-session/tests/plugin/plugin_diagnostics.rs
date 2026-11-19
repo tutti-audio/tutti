@@ -33,7 +33,7 @@ fn render_block(s: &Session) {
 #[cfg(feature = "clap")]
 mod clap {
     use super::*;
-    use crate::support::{clap_probe, plugin_server};
+    use crate::support::clap_probe;
     use tutti_graph::{BusError, ForkByClone};
     use tutti_nodes::testing::Const;
     use tutti_session::ConnectError;
@@ -48,7 +48,7 @@ mod clap {
     fn loaded(layout: Option<&str>) -> (Session, Key<AnyPlugin>) {
         // The plugin's file is probed before its variables are set.
         crate::pooled::prime(&PluginRef::file(clap_probe()).expect("a plugin file"));
-        set_env("TUTTI_PLUGIN_SERVER", plugin_server());
+        set_env("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server());
         if let Some(layout) = layout {
             set_env("TUTTI_CLAP_PROBE_PORT_LAYOUT", layout);
         }
