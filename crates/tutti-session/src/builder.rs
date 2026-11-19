@@ -390,14 +390,14 @@ impl<F: SessionFloat> SessionBuilder<Offline<F>> {
         )?;
         Self::clock_midi(&parts, &engine);
         self.declare(&mut parts.graph)?;
-        let heard = engine.heard_taps();
+        let taps = engine.heard_taps();
         let mut engine = engine;
         let load = engine.take_load_meter();
         let clock = engine.block_clock();
         let mut session = self.session(parts, crate::clock::OfflineEngine { engine }, true)?;
         session.output.load = load;
         session.transport.handle.set_clock(clock);
-        session.output.taps = Some((heard, layout));
+        session.output.taps = Some((taps, layout));
         Ok(session)
     }
 
@@ -488,7 +488,7 @@ impl<F: SessionFloat> SessionBuilder<SystemClock<F>> {
         Self::clock_midi(&parts, &engine);
         self.declare(&mut parts.graph)?;
         let load = engine.take_load_meter();
-        let heard = engine.heard_taps();
+        let taps = engine.heard_taps();
         let clock = engine.block_clock();
         let spec = tutti_engine::OutputSpec::new(rate, layout, F::FORMAT).with_quantum(max_block);
         let mut host = tutti_engine::StreamHost::new(
@@ -507,7 +507,7 @@ impl<F: SessionFloat> SessionBuilder<SystemClock<F>> {
             true,
         )?;
         session.output.load = load;
-        session.output.taps = Some((heard, layout));
+        session.output.taps = Some((taps, layout));
         // The outputs are timed by the session's one clock reader and the
         // stream's latency, which the timer reports as zero.
         #[cfg(feature = "midi")]

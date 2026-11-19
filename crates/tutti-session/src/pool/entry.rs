@@ -91,12 +91,12 @@ pub trait PoolEntry<S: Float = f32>: Send + 'static {
     /// [`load`](Self::load): the recall of a parked hold reloads. A kind that
     /// saves state before it releases and restores it on that load does so
     /// through its own load.
-    fn park(loaded: Self::Loaded) -> Retention<Self::Loaded> {
+    fn retain(loaded: Self::Loaded) -> Retention<Self::Loaded> {
         Retention::Keep(loaded)
     }
 }
 
-/// What [`PoolEntry::park`] decides for a loaded value.
+/// What [`PoolEntry::retain`] decides for a loaded value.
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum Retention<T> {
@@ -472,7 +472,7 @@ pub(crate) struct Item<K, S: Float> {
     pub(crate) load: Load<Value, S>,
     pub(crate) reload: Reload<S>,
     pub(crate) lost: fn(&Value) -> bool,
-    pub(crate) park: fn(Value) -> Option<Value>,
+    pub(crate) retain: fn(Value) -> Option<Value>,
     /// The file the load reads, as the entry declared it.
     pub(crate) file: Option<PathBuf>,
     pub(crate) share: Option<Cloner>,
@@ -615,11 +615,11 @@ where
         .map(|loaded| Box::new(loaded.clone()) as Value)
 }
 
-/// `E`'s [`park`](PoolEntry::park) over an erased value: the value back when the
+/// `E`'s [`retain`](PoolEntry::retain) over an erased value: the value back when the
 /// kind keeps it.
-fn park<E: PoolEntry<S>, S: Float>(value: Value) -> Option<Value> {
+fn retain<E: PoolEntry<S>, S: Float>(value: Value) -> Option<Value> {
     match value.downcast::<E::Loaded>() {
-        Ok(loaded) => match E::park(*loaded) {
+        Ok(loaded) => match E::retain(*loaded) {
             Retention::Keep(loaded) => Some(Box::new(loaded) as Value),
             Retention::Release => None,
         },
@@ -665,7 +665,7 @@ impl<K, S: Float> Item<K, S> {
             identity: Box::new(entry.identity()),
             load: entry.load().erase(),
             lost: lost::<E, S>,
-            park: park::<E, S>,
+            retain: retain::<E, S>,
             file: entry.file().map(Path::to_path_buf),
             share,
             reload: Box::new(move || entry.load().erase()),

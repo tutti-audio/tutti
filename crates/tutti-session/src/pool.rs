@@ -11,7 +11,7 @@
 //!
 //! Holds have a depth ([`PoolConfig::live_holds`]): the newest snapshot holds
 //! keep their entries live, and an entry only older holds keep is **parked**
-//! when its kind says so ([`PoolEntry::park`]): its value is released and its
+//! when its kind says so ([`PoolEntry::retain`]): its value is released and its
 //! handles read closed, and declaring the key again loads it afresh. A node's
 //! hold never parks.
 //!
@@ -229,7 +229,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// This is the one place the pool reads file metadata: [`pool`](Self::pool)
     /// never does, so a key declared after its file changed shares the loaded
     /// entry until the next refresh, and a plugin binary that changed on disk
-    /// or a provided asset is never detected. The result lands in a later
+    /// or a provided asset is never detected. The result arrives in a later
     /// [`update`](Self::update) as a [`RefreshReport`], or as the job's failure.
     /// Dropping the job cancels the reloads the check would start.
     pub fn refresh_pool(&mut self) -> crate::Job<RefreshPool> {

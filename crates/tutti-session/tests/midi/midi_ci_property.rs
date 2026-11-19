@@ -220,7 +220,7 @@ struct Wire {
     peer: PePeer,
     start: Instant,
     ms: u64,
-    landed: Vec<JobOutput>,
+    outputs: Vec<JobOutput>,
     /// What the updates noticed of resources, in order.
     changed: Vec<(ResourceId, ResourceFact)>,
 }
@@ -250,7 +250,7 @@ impl Wire {
             peer: PePeer::new(store, requests),
             start: Instant::now(),
             ms: 0,
-            landed: Vec::new(),
+            outputs: Vec::new(),
             changed: Vec::new(),
         };
         wire.run(120);
@@ -268,7 +268,7 @@ impl Wire {
         let now = self.start + Duration::from_millis(self.ms);
         for event in update_at(&mut self.s, now) {
             match event {
-                SessionEvent::JobDone(landed) => self.landed.push(landed),
+                SessionEvent::JobDone(output) => self.outputs.push(output),
                 SessionEvent::ResourceChanged { id, fact } => self.changed.push((id, fact)),
                 _ => {}
             }
@@ -278,7 +278,7 @@ impl Wire {
     }
 
     fn result<J: JobKind>(&mut self, job: &Job<J>) -> Option<Result<J::Output, J::Error>> {
-        self.landed.iter_mut().find_map(|landed| landed.take(job))
+        self.outputs.iter_mut().find_map(|output| output.take(job))
     }
 
     /// The Resource the peer's ResourceList names `resource`, as the port's info
@@ -330,7 +330,7 @@ fn a_write_lands_status_200_and_the_peer_holds_the_data() {
     let job = wire.listed(&PeResource::LocalOn).write(on(true));
     wire.run(60);
     let Some(Ok(status)) = wire.result(&job) else {
-        panic!("a status: {:?}", wire.landed);
+        panic!("a status: {:?}", wire.outputs);
     };
     assert_eq!(status.code(), 200);
     assert_eq!(wire.peer.asked, [Asked::Set("LocalOn".to_owned())]);
@@ -346,7 +346,7 @@ fn a_fetch_the_peer_answers_404_is_a_status_not_a_nak() {
     let job = wire.listed(&PeResource::DeviceInfo).fetch();
     wire.run(60);
     let Some(Err(PeerError::Refused(PeFailure::Status(status, header)))) = wire.result(&job) else {
-        panic!("a status: {:?}", wire.landed);
+        panic!("a status: {:?}", wire.outputs);
     };
     assert_eq!(status.code(), 404);
     assert_eq!(status, PeStatus::NotFound);
@@ -439,7 +439,7 @@ fn a_write_of_another_resources_data_ends_at_the_call_and_sends_nothing() {
     let Some(Err(PeerError::Refused(PeFailure::NotSent(CallError::Refused(refused))))) =
         wire.result(&job)
     else {
-        panic!("not sent: {:?}", wire.landed);
+        panic!("not sent: {:?}", wire.outputs);
     };
     assert!(
         matches!(refused, RequestRefused::DataOfAnotherResource { .. }),
@@ -517,7 +517,7 @@ fn a_fetch_of_a_resource_that_needs_a_res_id_is_not_sent() {
     let Some(Err(PeerError::Refused(PeFailure::NotSent(CallError::Refused(refused))))) =
         wire.result(&job)
     else {
-        panic!("not sent: {:?}", wire.landed);
+        panic!("not sent: {:?}", wire.outputs);
     };
     assert!(
         matches!(refused, RequestRefused::ResIdRequired(_)),
@@ -587,7 +587,7 @@ fn a_write_of_a_read_only_resource_is_not_sent_with_the_rule_it_broke() {
     let Some(Err(PeerError::Refused(PeFailure::NotSent(CallError::Refused(refused))))) =
         wire.result(&job)
     else {
-        panic!("not sent: {:?}", wire.landed);
+        panic!("not sent: {:?}", wire.outputs);
     };
     assert!(
         matches!(refused, RequestRefused::CannotSet { .. }),
@@ -946,7 +946,7 @@ fn a_subscribe_to_a_resource_the_entry_forbids_is_not_sent() {
     let Some(Err(PeerError::Refused(PeFailure::NotSent(CallError::Refused(refused))))) =
         wire.result(&job)
     else {
-        panic!("not sent: {:?}", wire.landed);
+        panic!("not sent: {:?}", wire.outputs);
     };
     assert!(
         matches!(refused, RequestRefused::CannotSubscribe(_)),

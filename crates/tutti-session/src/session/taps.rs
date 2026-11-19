@@ -57,7 +57,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// # Errors
     ///
     /// [`SessionOutputTapError::Detached`] on a session without an engine;
-    /// [`SessionOutputTapError::Tap`]`(NotOpen)` when no heard tap is open (never opened, or
+    /// [`SessionOutputTapError::Tap`]`(NotOpen)` when no output tap is open (never opened, or
     /// closed already); nothing changes.
     pub fn close_output_tap(&self) -> Result<(), SessionOutputTapError> {
         let (taps, _) = self

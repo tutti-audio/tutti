@@ -402,9 +402,9 @@ impl<K: AppKey> ValueState<K> {
     }
 }
 
-/// The session's values for any control-side thread: `Clone + Send`, it
-/// borrows nothing, so a UI thread writes and reads while the session thread
-/// runs. Never for an audio or MIDI callback: a call takes the value lock.
+/// The session's clone-able write handle for values, beside `ValueState` and
+/// `ValueTable`: `Clone + Send`, it borrows nothing, so a UI thread writes
+/// and reads while the session thread runs. Never for an audio or MIDI callback: a call takes the value lock.
 ///
 /// Once the session is gone, every call answers
 /// [`ValueErrorKind::Closed`].

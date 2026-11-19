@@ -178,9 +178,9 @@ fn a_pending_that_ends_as_disconnected_lands_its_property_calls_disconnected() {
         }));
     }
     pending.end(Ended::Disconnected);
-    let mut landed: Vec<_> = queue.lock().unwrap().drain(..).collect();
+    let mut outputs: Vec<_> = queue.lock().unwrap().drain(..).collect();
     for job in &jobs {
-        let result = landed.iter_mut().find_map(|l| l.take(job));
+        let result = outputs.iter_mut().find_map(|l| l.take(job));
         assert_eq!(result, Some(Err(PeerError::Disconnected)));
     }
 }

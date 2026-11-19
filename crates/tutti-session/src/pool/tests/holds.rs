@@ -39,7 +39,7 @@ impl PoolEntry for Device {
         life.clone()
     }
 
-    fn park(_: u32) -> Retention<u32> {
+    fn retain(_: u32) -> Retention<u32> {
         Retention::Release
     }
 }

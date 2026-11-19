@@ -65,7 +65,7 @@ pub struct InputConfig {
     /// The manual trim of a take's placement, for a device that misreports its
     /// latency: set once per input and kept across restarts, so it is on the
     /// config and not on the [`Input`] (a plain value naming a node). It is one
-    /// of the terms a take states ([`TakeLatency::offset`](crate::TakeLatency::offset)).
+    /// of the latency a take states ([`TakeLatency::offset`](crate::TakeLatency::offset)).
     pub offset: Trim,
 }
 

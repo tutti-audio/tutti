@@ -4,7 +4,7 @@
 //! check) returns a [`Job<J>`](Job). Its kind `J` names the answer: `J::Output`
 //! on success, `J::Error` on failure. The answer lands once, in an
 //! [`update`](Session::update), as a [`SessionEvent::JobDone`] the app reads
-//! with [`JobOutput::take`]; or [`Job::wait`] runs updates until it lands and
+//! with [`JobOutput::take`]; or [`Job::wait`] runs updates until it finishes and
 //! returns it, the one blocking door. Dropping the job cancels it: its result,
 //! if the work still finishes, is discarded.
 //!

@@ -139,12 +139,12 @@ impl PeFailure {
 #[derive(Clone)]
 pub(crate) struct PortLink {
     shared: Weak<InputShared>,
-    landed: JobOutputQueue,
+    outputs: JobOutputQueue,
 }
 
 impl PortLink {
-    pub(crate) fn new(shared: Weak<InputShared>, landed: JobOutputQueue) -> Self {
-        Self { shared, landed }
+    pub(crate) fn new(shared: Weak<InputShared>, outputs: JobOutputQueue) -> Self {
+        Self { shared, outputs }
     }
 
     /// A job for `request`, queued for the next poll, or already ended when
@@ -160,7 +160,7 @@ impl PortLink {
     where
         J: crate::JobKind<Error = PeerError<E>>,
     {
-        let (job, ticket) = Ticket::new(&self.landed);
+        let (job, ticket) = Ticket::new(&self.outputs);
         match self.shared.upgrade() {
             None => ticket.land(Err(PeerError::Disconnected)),
             Some(shared) => shared.push(request, ticket, lists, make),
@@ -170,7 +170,7 @@ impl PortLink {
 
     /// A job that ended at the call, as `error`.
     fn failed<J: crate::JobKind>(&self, error: J::Error) -> Job<J> {
-        let (job, ticket) = Ticket::new(&self.landed);
+        let (job, ticket) = Ticket::new(&self.outputs);
         ticket.land(Err(error));
         job
     }

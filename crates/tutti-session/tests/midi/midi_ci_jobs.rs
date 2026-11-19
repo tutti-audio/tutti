@@ -32,7 +32,7 @@ struct Wire {
     seen: Seen,
     start: Instant,
     ms: u64,
-    landed: Vec<JobOutput>,
+    outputs: Vec<JobOutput>,
 }
 
 impl Wire {
@@ -63,7 +63,7 @@ impl Wire {
             seen,
             start: Instant::now(),
             ms: 0,
-            landed: Vec::new(),
+            outputs: Vec::new(),
         };
         wire.run(60);
         wire
@@ -81,8 +81,8 @@ impl Wire {
         self.ms += by;
         let now = self.start + Duration::from_millis(self.ms);
         for event in update_at(&mut self.s, now) {
-            if let SessionEvent::JobDone(landed) = event {
-                self.landed.push(landed);
+            if let SessionEvent::JobDone(output) = event {
+                self.outputs.push(output);
             }
         }
         self.peer.answer(&self.fake, now);
@@ -91,7 +91,7 @@ impl Wire {
 
     /// What `job` landed with, once.
     fn result<J: JobKind>(&mut self, job: &Job<J>) -> Option<Result<J::Output, J::Error>> {
-        self.landed.iter_mut().find_map(|landed| landed.take(job))
+        self.outputs.iter_mut().find_map(|output| output.take(job))
     }
 
     /// The Profile the peer lists on Channel 1, as the port's info reads now.
@@ -168,7 +168,7 @@ fn a_switch_the_peer_naks_is_refused_with_its_nak() {
     let job = wire.profile().enable(four());
     wire.run(30);
     let Some(Err(PeerError::Refused(nak))) = wire.result(&job) else {
-        panic!("a refusal: {:?}", wire.landed);
+        panic!("a refusal: {:?}", wire.outputs);
     };
     assert_eq!(nak.status, NakStatus::ProfileNotSupported);
     assert_eq!(wire.state(), ProfileState::Disabled);
@@ -238,7 +238,7 @@ fn a_dropped_switch_lands_nothing_and_the_peers_answer_still_applies() {
     let mut wire = Wire::new(Reply::Answer, Reply::Answer);
     drop(wire.profile().enable(four()));
     wire.run(30);
-    assert!(wire.landed.is_empty(), "{:?}", wire.landed);
+    assert!(wire.outputs.is_empty(), "{:?}", wire.outputs);
     assert_eq!(wire.state(), ProfileState::Enabled);
 }
 
@@ -273,7 +273,7 @@ fn a_report_the_peer_naks_is_refused_with_its_nak() {
     let job = wire.reporter().request(everything());
     wire.run(30);
     let Some(Err(PeerError::Refused(nak))) = wire.result(&job) else {
-        panic!("a refusal: {:?}", wire.landed);
+        panic!("a refusal: {:?}", wire.outputs);
     };
     assert_eq!(nak.status, NakStatus::Terminate(PeTerminator::Responder));
 }

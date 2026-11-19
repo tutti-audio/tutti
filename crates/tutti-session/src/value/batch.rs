@@ -27,7 +27,7 @@ impl std::fmt::Debug for dyn Staged {
     }
 }
 
-/// One target's final value in a batch, with the cell it lands through.
+/// One target's final value in a batch, with the cell it is stored through.
 struct Slot<T: Store> {
     id: TargetId,
     cell: T::Cell,
