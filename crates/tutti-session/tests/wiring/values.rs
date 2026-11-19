@@ -1,4 +1,4 @@
-//! The session's value verbs: `set` and `get` over targets, `Knobs`, and the errors they
+//! The session's value verbs: `set` and `get` over targets, `Values`, and the errors they
 //! answer. Every figure is an analytic one: a write is read back as written.
 
 use std::cell::Cell;
@@ -13,7 +13,7 @@ use tutti_nodes::{
 };
 use tutti_rt::Param;
 use tutti_session::{
-    Assign, DetachedSession, Knobs, ParamTarget, Session, SetRefusal, TargetInfo, ValueErrorKind,
+    Assign, DetachedSession, ParamTarget, Session, SetRefusal, TargetInfo, ValueErrorKind, Values,
 };
 use tutti_units::{CompressionRatio, Db, Hz, Q, SampleRate, Seconds, UnitAddr, UnitParam};
 
@@ -171,20 +171,20 @@ fn a_non_finite_value_is_refused_and_lands_nothing() {
 }
 
 /// **A value call from inside a `modify` is `Reentrant`**, whether it goes through the
-/// session or a `Knobs`, a read or a write, and the call that holds the lock still
+/// session or a `Values`, a read or a write, and the call that holds the lock still
 /// lands.
 #[test]
 fn a_value_call_inside_a_modify_is_reentrant() {
     let mut s = detached();
     let lp = filter(&mut s, 1_000.0);
-    let knobs = s.knobs();
+    let values = s.values();
     let seen = Cell::new(0);
     let inside = |h: &Hz| {
         let kinds = [
             s.get(lp.cutoff()).unwrap_err().kind,
             s.set(lp.cutoff().to(Hz::new(1.0))).unwrap_err().kind,
-            knobs.get(lp.cutoff()).unwrap_err().kind,
-            knobs.set(lp.cutoff().to(Hz::new(1.0))).unwrap_err().kind,
+            values.get(lp.cutoff()).unwrap_err().kind,
+            values.set(lp.cutoff().to(Hz::new(1.0))).unwrap_err().kind,
         ];
         seen.set(
             kinds
@@ -203,12 +203,12 @@ fn a_value_call_inside_a_modify_is_reentrant() {
 
 /// **A panic in a `modify` lands nothing and leaves the value lock usable**: the batch's
 /// earlier items are not written, and the next call, through the session and through a
-/// `Knobs`, takes the lock.
+/// `Values`, takes the lock.
 #[test]
 fn a_panic_in_a_modify_lands_nothing_and_leaves_the_lock_usable() {
     let mut s = detached();
     let lp = filter(&mut s, 1_000.0);
-    let knobs = s.knobs();
+    let values = s.values();
     let unwound = catch_unwind(AssertUnwindSafe(|| {
         let _ = s.set((
             lp.q().to(Q::new(3.0)),
@@ -222,26 +222,26 @@ fn a_panic_in_a_modify_lands_nothing_and_leaves_the_lock_usable() {
         (Hz::new(1_000.0), Q::new(0.75))
     );
     s.set(lp.cutoff().to(Hz::new(2.0))).unwrap();
-    knobs.set(lp.q().to(Q::new(1.0))).unwrap();
+    values.set(lp.q().to(Q::new(1.0))).unwrap();
     assert_eq!(
-        knobs.get((lp.cutoff(), lp.q())).unwrap(),
+        values.get((lp.cutoff(), lp.q())).unwrap(),
         (Hz::new(2.0), Q::new(1.0))
     );
 }
 
 /// **A node that is gone is `NoSuchTarget`, naming its key**, on a read and on a write,
-/// through the session and through a `Knobs`.
+/// through the session and through a `Values`.
 #[test]
 fn a_removed_node_is_no_such_target_and_names_its_key() {
     let mut s = detached();
     let lp = filter(&mut s, 1_000.0);
-    let knobs = s.knobs();
+    let values = s.values();
     s.graph().remove(lp).unwrap();
     for e in [
         s.get(lp.cutoff()).unwrap_err(),
-        knobs.get(lp.cutoff()).unwrap_err(),
+        values.get(lp.cutoff()).unwrap_err(),
         s.set(lp.cutoff().to(Hz::new(1.0))).unwrap_err(),
-        knobs.set(lp.cutoff().to(Hz::new(1.0))).unwrap_err(),
+        values.set(lp.cutoff().to(Hz::new(1.0))).unwrap_err(),
         s.get(lp.cutoff().info()).unwrap_err(),
     ] {
         assert_eq!(e.kind, ValueErrorKind::NoSuchTarget);
@@ -250,18 +250,18 @@ fn a_removed_node_is_no_such_target_and_names_its_key() {
     }
 }
 
-/// **`Knobs` answers `Closed` once the session is gone**, and the whole call's position
+/// **`Values` answers `Closed` once the session is gone**, and the whole call's position
 /// is 0.
 #[test]
-fn knobs_are_closed_once_the_session_is_gone() {
+fn values_are_closed_once_the_session_is_gone() {
     let mut s = detached();
     let lp = filter(&mut s, 1_000.0);
-    let knobs = s.knobs();
-    let other = knobs.clone();
-    assert_eq!(knobs.get(lp.cutoff()).unwrap(), Hz::new(1_000.0));
+    let values = s.values();
+    let other = values.clone();
+    assert_eq!(values.get(lp.cutoff()).unwrap(), Hz::new(1_000.0));
     drop(s);
     for e in [
-        knobs.get(lp.cutoff()).unwrap_err(),
+        values.get(lp.cutoff()).unwrap_err(),
         other.set(lp.cutoff().to(Hz::new(1.0))).unwrap_err(),
     ] {
         assert_eq!(e.kind, ValueErrorKind::Closed);
@@ -271,7 +271,7 @@ fn knobs_are_closed_once_the_session_is_gone() {
 }
 
 /// **A `Seconds` param is not narrowed to an `f32`**: a figure an `f32` cannot hold is
-/// read back exactly, through the session and through a `Knobs`, and an edit sees it
+/// read back exactly, through the session and through a `Values`, and an edit sees it
 /// whole.
 #[test]
 fn a_seconds_param_keeps_its_full_width() {
@@ -283,7 +283,9 @@ fn a_seconds_param_keeps_its_full_width() {
 
     s.set(attack.to(Seconds::new(wide))).unwrap();
     assert_eq!(s.get(attack).unwrap(), Seconds::new(wide));
-    s.knobs().set(attack.to(Seconds::new(wide + 1e-9))).unwrap();
+    s.values()
+        .set(attack.to(Seconds::new(wide + 1e-9)))
+        .unwrap();
     assert_eq!(s.get(attack).unwrap(), Seconds::new(wide + 1e-9));
     s.set(attack.modify(|a| *a + Seconds::new(1e-9))).unwrap();
     assert_eq!(s.get(attack).unwrap(), Seconds::new(wide + 2e-9));
@@ -369,17 +371,17 @@ fn info_reads_the_address_and_the_default() {
     );
 }
 
-/// **`Knobs` is `Clone + Send`**, and a thread holding one writes what the session reads.
+/// **`Values` is `Clone + Send`**, and a thread holding one writes what the session reads.
 #[test]
-fn knobs_are_clone_and_send_and_write_across_threads() {
+fn values_are_clone_and_send_and_write_across_threads() {
     fn assert_clone_send<T: Clone + Send>() {}
-    assert_clone_send::<Knobs>();
-    assert_clone_send::<Knobs<String>>();
+    assert_clone_send::<Values>();
+    assert_clone_send::<Values<String>>();
 
     let mut s = detached();
     let lp = filter(&mut s, 1_000.0);
-    let knobs = s.knobs();
-    std::thread::spawn(move || knobs.set(lp.cutoff().to(Hz::new(123.0))).unwrap())
+    let values = s.values();
+    std::thread::spawn(move || values.set(lp.cutoff().to(Hz::new(123.0))).unwrap())
         .join()
         .unwrap();
     assert_eq!(s.get(lp.cutoff()).unwrap(), Hz::new(123.0));

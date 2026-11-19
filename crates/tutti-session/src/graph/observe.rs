@@ -65,7 +65,7 @@ pub(super) struct Held<F: Float> {
 /// The heard tap (what the output sounds like, after the engine's declick
 /// fader) is not here: it is a writer in the engine's output buffer, which
 /// the graph does not own, so it is
-/// [`Session::open_heard_tap`](crate::Session::open_heard_tap).
+/// [`Session::open_output_tap`](crate::Session::open_output_tap).
 #[derive(Debug)]
 pub struct Taps<'g, F: Float = f32> {
     pub(super) graph: &'g mut Graph<F>,
@@ -94,7 +94,7 @@ impl<F: Float> Taps<'_, F> {
     /// This is the **plan tap**: an op of the graph, so it sees the signal
     /// before the engine's declick fader and the fold to the device width, on
     /// any ports at any width. To record what the output sounds like, with the
-    /// fade, open [`Session::open_heard_tap`](crate::Session::open_heard_tap)
+    /// fade, open [`Session::open_output_tap`](crate::Session::open_output_tap)
     /// instead (the default for a recording); this is the explicit choice of
     /// the graph's own signal. A block the engine refuses (rendered silent)
     /// writes no frames here and counts none lost, since the op did not run;
@@ -166,7 +166,7 @@ impl<F: Float> Taps<'_, F> {
     /// This is the signal the graph produces, before the engine's declick
     /// fader and the fold to the device's width; see [`open`](Self::open)
     /// for what that means at a transport stop. To record what is heard, with
-    /// the fade, use [`Session::open_heard_tap`](crate::Session::open_heard_tap).
+    /// the fade, use [`Session::open_output_tap`](crate::Session::open_output_tap).
     ///
     /// Refuses with [`MissingSource`] when an output names a source that does
     /// not exist now (an output wired to a port the node does not have); only

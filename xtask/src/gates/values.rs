@@ -1,7 +1,7 @@
 //! `check-values`: a value is written with `set` on a target, not by a setter, and what
 //! is not yet so is a row of [`LIST`].
 //!
-//! An app writes a value one way: `Session::set` or `Knobs::set` over an assignment built
+//! An app writes a value one way: `Session::set` or `Values::set` over an assignment built
 //! from a target. The gate reads every `crates/tutti-session/src/**/*.rs` (not a `tests`
 //! directory, a `tests.rs` file or a `#[cfg(test)]` item), comments and literals blanked,
 //! and finds the public functions that write a value another way:
@@ -42,7 +42,7 @@ pub(super) const ALLOW: &[(&str, &str)] = &[
         "the one write: it takes assignments built from targets",
     ),
     (
-        "Knobs::set",
+        "Values::set",
         "the session's write for any control-side thread: the same assignments",
     ),
 ];
@@ -339,7 +339,7 @@ pub(super) fn check(tree: &dyn Tree, min_files: usize, min_units: usize) -> Repo
     if !new.is_empty() {
         r.fail(
             "check-values: FAIL (a value is written with `set` on a target: `Session::set` or \
-             `Knobs::set` over `target.to(v)` or `target.modify(f)`; a public `set_*`, a `set`, or \
+             `Values::set` over `target.to(v)` or `target.modify(f)`; a public `set_*`, a `set`, or \
              a `()`-returning method that takes a unit is a row of the list or the gate's ALLOW):",
         );
         new.into_iter()
@@ -382,14 +382,14 @@ mod tests {
     const SESSION: &str = "crates/tutti-session/src/session.rs";
     const KNOBS: &str = "crates/tutti-session/src/knobs.rs";
     const ONE_WAY: &str =
-        "impl Session { pub fn set(&self, a: u8) {} }\nimpl Knobs { pub fn set(&self, a: u8) {} }";
+        "impl Session { pub fn set(&self, a: u8) {} }\nimpl Values { pub fn set(&self, a: u8) {} }";
 
     fn run(files: &[(&str, &str)], list: &str) -> Report {
         let mut all: Vec<(&str, &str)> = files.to_vec();
         all.push((LIST, list));
         all.push((HZ, "pub struct Hz(pub f32);\npub struct Seconds(pub f64);"));
         all.push((SESSION, "impl Session { pub fn set(&self, a: u8) {} }"));
-        all.push((KNOBS, "impl Knobs { pub fn set(&self, a: u8) {} }"));
+        all.push((KNOBS, "impl Values { pub fn set(&self, a: u8) {} }"));
         check(&Mem::with(&all), 0, 0)
     }
 
@@ -510,7 +510,7 @@ mod tests {
             0,
         );
         assert!(fails_on(&r, "Session::set"));
-        assert!(fails_on(&r, "Knobs::set"));
+        assert!(fails_on(&r, "Values::set"));
     }
 
     #[test]

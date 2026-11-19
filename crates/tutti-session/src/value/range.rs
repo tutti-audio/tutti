@@ -141,7 +141,7 @@ impl<U: Scalar> sealed::Sealed for RangeTarget<U> {
 impl<U: Scalar> Target for RangeTarget<U> {
     type Value = Range<U>;
 }
-impl<U: Scalar> sealed::Land for RangeTarget<U> {
+impl<U: Scalar> sealed::Store for RangeTarget<U> {
     type Cell = SlotCell<Range<U>>;
 
     fn resolve(self, params: &Params) -> Option<(Self::Cell, Range<U>)> {
@@ -154,7 +154,7 @@ impl<U: Scalar> sealed::Land for RangeTarget<U> {
         cell.check(value)
     }
 
-    fn land(cell: &Self::Cell, value: &Range<U>) {
+    fn store(cell: &Self::Cell, value: &Range<U>) {
         cell.store(value);
     }
 }

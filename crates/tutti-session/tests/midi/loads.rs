@@ -1,5 +1,5 @@
 //! A MIDI file load is a job: `Midi::load_midi` returns a `Job<LoadMidi>` at
-//! once and the `LoadedMidi` lands through `Landed::take` in `update()`, or
+//! once and the `LoadedMidi` arrives through `JobOutput::take` in `update()`, or
 //! `Job::wait` returns it. Each track arrives as a clip value built on the
 //! worker. A SoundFont is a pool entry, loaded the pool's way.
 //!
@@ -234,7 +234,7 @@ fn a_missing_file_lands_a_read_error() {
     );
 }
 
-/// The result lands in `update()` through `Landed::take`, each load with its
+/// The result arrives in `update()` through `JobOutput::take`, each load with its
 /// own job and file.
 #[test]
 fn two_loads_land_in_update_each_for_its_own_job() {
@@ -265,9 +265,9 @@ fn two_loads_land_in_update_each_for_its_own_job() {
     while got_a.is_none() || got_b.is_none() {
         assert!(Instant::now() < deadline, "the loads never landed");
         for event in s.update() {
-            if let SessionEvent::Landed(mut landed) = event {
-                got_a = got_a.or(landed.take(&ja));
-                got_b = got_b.or(landed.take(&jb));
+            if let SessionEvent::JobDone(mut output) = event {
+                got_a = got_a.or(output.take(&ja));
+                got_b = got_b.or(output.take(&jb));
             }
         }
         std::thread::yield_now();

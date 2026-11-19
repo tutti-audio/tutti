@@ -44,11 +44,11 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// A declaration that changes the root crossfades: the old root's outputs
     /// fade out and the new root's fade in over the declick length (5 ms),
     /// both rendering the same nodes, so a change of layout never steps the
-    /// sound. [`.hard()`](RootDeclaration::hard) on the returned declaration
+    /// sound. [`.unfaded()`](RootDeclaration::unfaded) on the returned declaration
     /// cuts at one block instead.
     ///
     /// A declaration made while a root crossfade runs, and not
-    /// [`hard`](RootDeclaration::hard), waits: it is checked at the call (the
+    /// [`unfaded`](RootDeclaration::unfaded), waits: it is checked at the call (the
     /// errors below are named here), and held until the running fade ends. The
     /// newest such declaration wins. The first [`update`](Self::update) after
     /// the fade has ended applies it, and the root's width and readers
@@ -66,7 +66,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// device no longer places it when it is applied,
     /// [`root_topology_status`](Self::root_topology_status) is `Refused` with
     /// the error and the root in force stays. A
-    /// [`hard`](RootDeclaration::hard) declaration applies at once and drops
+    /// [`unfaded`](RootDeclaration::unfaded) declaration applies at once and drops
     /// the waiting one. An export of the master
     /// places the file from the declaration (`tutti_export::Setup::root`, set by the export's fork).
     ///
@@ -160,7 +160,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// engine (a detached one).
     #[must_use]
     pub fn output_device(&self) -> Option<crate::OutputPlacement> {
-        let (_, layout) = self.output.heard.as_ref()?;
+        let (_, layout) = self.output.taps.as_ref()?;
         self.graph.output_placement(*layout)
     }
 }

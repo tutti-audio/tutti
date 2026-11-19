@@ -263,7 +263,7 @@ fn a_job_dropped_before_its_worker_starts_pushes_no_chunk_and_lands_nothing() {
     let landed = s
         .update()
         .iter()
-        .filter(|event| matches!(event, crate::SessionEvent::Landed(_)))
+        .filter(|event| matches!(event, crate::SessionEvent::JobDone(_)))
         .count();
     assert_eq!(landed, 0);
 }
