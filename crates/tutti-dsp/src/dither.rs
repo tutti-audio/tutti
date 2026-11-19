@@ -14,9 +14,9 @@ use tutti_units::Amplitude;
 /// The probability density of the noise a [`DitherNoise`] adds.
 #[derive(Debug, Clone, Copy, PartialEq, Hash, Eq)]
 pub enum DitherShape {
-    /// One uniform draw, in `[-0.5, 0.5]` LSB: a variance of `lsb² / 12`.
+    /// One uniform draw, in `[-0.5, 0.5)` LSB: a variance of `lsb² / 12`.
     Rectangular,
-    /// Two uniform draws subtracted (TPDF), in `[-1, 1]` LSB, which
+    /// Two uniform draws subtracted (TPDF), in `(-1, 1)` LSB, which
     /// decorrelates the noise from the signal in a way a single draw does not: a
     /// variance of `lsb² / 6`.
     Triangular,
@@ -46,35 +46,35 @@ impl DitherNoise {
     /// Add noise of `shape`, scaled to `lsb` (one least significant bit of the
     /// target depth in the `[-1, 1]` float domain), to every sample of `audio` in place.
     ///
-    /// One draw per sample, in frame order and channel order within a frame. A draw is an
-    /// `f32` (the 32-bit word's nearest `f32` over `2^32 - 1`) widened exactly into `F` and
-    /// scaled by the `lsb`, narrowed to `F` once per call, so a block of `f32` and one of `f64`
-    /// get the same noise.
+    /// One draw per sample, in frame order and channel order within a frame. A draw is the
+    /// 32-bit word's top bits as a uniform value of `F` ([`Xorshift32::to_unit`]), scaled by
+    /// the `lsb` crossed once with [`Real::from_unit`](tutti_units::Real::from_unit), so a block
+    /// of `f32` has draws on a `2^-24` grid and one of `f64` on a `2^-32` grid.
     pub fn apply<F: Float>(
         &mut self,
         shape: DitherShape,
         lsb: Amplitude,
         mut audio: InterleavedMut<'_, F>,
     ) {
-        let lsb = F::from_f64(lsb.get());
+        let lsb = F::from_unit(lsb);
         for s in audio.samples_mut() {
             let noise = match shape {
-                DitherShape::Rectangular => self.rectangular(),
-                DitherShape::Triangular => self.triangular(),
+                DitherShape::Rectangular => self.rectangular::<F>(),
+                DitherShape::Triangular => self.triangular::<F>(),
             };
-            *s += F::from_f32(noise) * lsb;
+            *s += noise * lsb;
         }
     }
 
     #[inline]
-    fn rectangular(&mut self) -> f32 {
-        0.5 * Xorshift32::to_bipolar(self.rng.next_u32())
+    fn rectangular<F: Float>(&mut self) -> F {
+        Xorshift32::to_unit::<F>(self.rng.next_u32()) - F::lit(0.5)
     }
 
     #[inline]
-    fn triangular(&mut self) -> f32 {
-        let r1 = Xorshift32::to_unit(self.rng.next_u32());
-        let r2 = Xorshift32::to_unit(self.rng.next_u32());
+    fn triangular<F: Float>(&mut self) -> F {
+        let r1 = Xorshift32::to_unit::<F>(self.rng.next_u32());
+        let r2 = Xorshift32::to_unit::<F>(self.rng.next_u32());
         r1 - r2
     }
 }

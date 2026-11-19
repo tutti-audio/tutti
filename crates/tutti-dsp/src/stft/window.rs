@@ -54,13 +54,15 @@ pub trait Window {
     /// *not* the same point, which is what makes the window tile. A symmetric
     /// window duplicates its endpoint and breaks the overlap-add sum — the exact
     /// defect the eighth copy of Hann had.
-    fn at(&self, t: f32) -> f32;
+    fn at(&self, t: f64) -> f64;
 
     /// `size` points, sampled at `i / size`.
     ///
-    /// `size == 0` yields an empty window; `size == 1` does not divide by zero.
-    fn coefficients(&self, size: usize) -> Vec<f32> {
-        (0..size).map(|i| self.at(i as f32 / size as f32)).collect()
+    /// `size == 0` yields an empty window; `size == 1` does not divide by zero. The window is
+    /// designed in `f64`; a caller crosses each coefficient once into its own float with
+    /// [`Real::from_design`](tutti_units::Real::from_design).
+    fn coefficients(&self, size: usize) -> Vec<f64> {
+        (0..size).map(|i| self.at(i as f64 / size as f64)).collect()
     }
 
     /// `∫₀¹ w(t) dt` — the DC gain a forward transform leaves in every
@@ -69,21 +71,21 @@ pub trait Window {
     /// The default integrates numerically. An implementor with a closed form
     /// should override it: this is used to scale a display, and a value that
     /// drifts with the sample count makes a dB window untunable.
-    fn coherent_gain(&self) -> f32 {
+    fn coherent_gain(&self) -> f64 {
         const SAMPLES: usize = 4096;
-        self.coefficients(SAMPLES).iter().sum::<f32>() / SAMPLES as f32
+        self.coefficients(SAMPLES).iter().sum::<f64>() / SAMPLES as f64
     }
 
     /// The smallest overlap factor `window / hop` at which `w²` sums flat.
     ///
     /// The default searches powers of two — the only ratios a grid can express,
     /// since the hop must divide the window. Returns the first that is flat
-    /// within `1e-4`, or 16 if none is.
+    /// within `1e-9`, or 16 if none is.
     fn cola_overlap(&self) -> usize {
         const N: usize = 64;
         [1usize, 2, 4, 8, 16]
             .into_iter()
-            .find(|&r| cola_ripple(self, N, r) < 1e-4)
+            .find(|&r| cola_ripple(self, N, r) < 1e-9)
             .unwrap_or(16)
     }
 }
@@ -94,11 +96,11 @@ pub trait Window {
 ///
 /// Shared by [`Window::cola_overlap`]'s default and the tests, so the property
 /// the trait *claims* and the property the tests *check* are one function.
-pub(crate) fn cola_ripple<W: Window + ?Sized>(window: &W, size: usize, overlap: usize) -> f32 {
+pub(crate) fn cola_ripple<W: Window + ?Sized>(window: &W, size: usize, overlap: usize) -> f64 {
     let hop = (size / overlap).max(1);
     let w = window.coefficients(size);
     let frames = 4 * overlap;
-    let mut acc = vec![0.0f32; frames * hop + size];
+    let mut acc = vec![0.0f64; frames * hop + size];
     for f in 0..frames {
         for (i, &v) in w.iter().enumerate() {
             acc[f * hop + i] += v * v;
@@ -111,8 +113,8 @@ pub(crate) fn cola_ripple<W: Window + ?Sized>(window: &W, size: usize, overlap: 
     }
     let (lo, hi) = interior
         .iter()
-        .fold((f32::MAX, f32::MIN), |(lo, hi), &v| (lo.min(v), hi.max(v)));
-    (hi - lo) / hi.max(f32::MIN_POSITIVE)
+        .fold((f64::MAX, f64::MIN), |(lo, hi), &v| (lo.min(v), hi.max(v)));
+    (hi - lo) / hi.max(f64::MIN_POSITIVE)
 }
 
 /// A generalized cosine window: `w(t) = Σₖ (−1)ᵏ aₖ cos(2πkt)`.
@@ -124,24 +126,24 @@ pub(crate) fn cola_ripple<W: Window + ?Sized>(window: &W, size: usize, overlap: 
 ///
 /// `Copy + PartialEq` despite holding a slice, and both are load-bearing:
 /// [`crate::StftGeometry`] derives them and lives inside four stored types, so a
-/// `Box<dyn Window>` field there is not available. `&'static [f32]` compares by
+/// `Box<dyn Window>` field there is not available. `&'static [f64]` compares by
 /// *contents*, so two windows with the same coefficients are equal wherever
 /// their slices live.
 ///
-/// **Not `Eq` or `Hash`**, because `f32` is neither. If a document type ever
+/// **Not `Eq` or `Hash`**, because `f64` is neither. If a document type ever
 /// needs to hash a window, it wants a serializable *name* — a small enum in the
 /// crate that owns the document — rather than these coefficients; the two are
 /// different jobs, and this one is the maths.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CosineWindow {
     /// `a₀, a₁, …`, applied with alternating sign. Never empty.
-    terms: &'static [f32],
+    terms: &'static [f64],
 }
 
 /// The coefficients of the product of Blackman-Harris with itself.
-const SQUARED_BLACKMAN_HARRIS: [f32; 7] = {
-    let a = [0.35875f32, 0.48829, 0.14128, 0.01168];
-    let mut b = [0.0f32; 7];
+const SQUARED_BLACKMAN_HARRIS: [f64; 7] = {
+    let a = [0.35875f64, 0.48829, 0.14128, 0.01168];
+    let mut b = [0.0f64; 7];
     let mut j = 0;
     while j < 4 {
         let mut k = 0;
@@ -165,7 +167,7 @@ impl CosineWindow {
     /// silences the signal rather than tapering it. `const`, so a bad constant
     /// fails the build rather than the audio.
     #[must_use]
-    pub const fn new(terms: &'static [f32]) -> Self {
+    pub const fn new(terms: &'static [f64]) -> Self {
         assert!(
             !terms.is_empty(),
             "a cosine window needs at least one coefficient"
@@ -218,8 +220,8 @@ impl CosineWindow {
     /// `[−0.5, 0.5]`, the periodic window shifted half a period (the sign
     /// `(−1)ᵏ` becomes the shift), peak at `x = 0` and zero at `x = ±0.5` for
     /// Hann and Blackman. For a symmetric kernel evaluated at an offset, where
-    /// [`at`](Window::at)'s `f32` phase over `[0, 1)` would round the offset.
-    /// The coefficients are the `f32` constants widened. `x` outside the range
+    /// [`at`](Window::at)'s phase over `[0, 1)` would round the offset.
+    /// `x` outside the range
     /// repeats with period 1; a caller bounds it.
     #[inline]
     #[must_use]
@@ -228,7 +230,7 @@ impl CosineWindow {
         self.terms
             .iter()
             .enumerate()
-            .map(|(k, &a)| f64::from(a) * libm::cos(k as f64 * phase))
+            .map(|(k, &a)| a * libm::cos(k as f64 * phase))
             .sum()
     }
 
@@ -249,14 +251,14 @@ impl Default for CosineWindow {
 
 impl Window for CosineWindow {
     #[inline]
-    fn at(&self, t: f32) -> f32 {
-        let phase = core::f32::consts::TAU * t;
+    fn at(&self, t: f64) -> f64 {
+        let phase = core::f64::consts::TAU * t;
         self.terms
             .iter()
             .enumerate()
             .map(|(k, &a)| {
                 let sign = if k % 2 == 0 { 1.0 } else { -1.0 };
-                sign * a * libm::cosf(k as f32 * phase)
+                sign * a * libm::cos(k as f64 * phase)
             })
             .sum()
     }
@@ -273,7 +275,7 @@ impl Window for CosineWindow {
     /// reads between 0.6 dB (Hamming) and 6 dB (rectangular) off — with nothing
     /// erroring.
     #[inline]
-    fn coherent_gain(&self) -> f32 {
+    fn coherent_gain(&self) -> f64 {
         self.terms[0]
     }
 
@@ -296,6 +298,9 @@ impl Window for CosineWindow {
     /// each is flat at its own overlap (≤ 6e-16) and ripples at half of it
     /// (2.1% for Blackman, 42% for Hamming). `the_cola_rule_is_tight` pins both
     /// halves.
+    ///
+    /// Flat to `f64` rounding: the cosine windows are exactly COLA once the overlap passes their
+    /// harmonics.
     ///
     /// Derived rather than tabulated: Blackman at 4, by analogy with its
     /// raised-cosine neighbours, would ripple by 2.1%.

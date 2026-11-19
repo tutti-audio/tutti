@@ -13,7 +13,7 @@
 //! `LfoShape` and `Waveform` are re-exported so `use tutti_nodes::LfoShape`
 //! resolves here.
 
-use tutti_units::{Real, UnitParam};
+use tutti_units::UnitParam;
 
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::Float;
@@ -221,8 +221,10 @@ impl LfoNode {
 
     /// The wave at `cycles` plus the phase offset, with the depth applied.
     #[inline]
-    fn evaluate(&self, cycles: f64, offset: PhaseIncrement, depth: f32) -> f32 {
-        self.wave.raw_at(cycles + offset.get(), false) * depth
+    fn evaluate<F: Float>(&self, cycles: f64, offset: PhaseIncrement, depth: F) -> F {
+        // `Waveform::raw_at` reads `f32`: the wave widens exactly and crosses into the lane's
+        // format once per frame, until the waveform is `f64`.
+        F::from_design(f64::from(self.wave.raw_at(cycles + offset.get(), false))) * depth
     }
 }
 
@@ -258,16 +260,15 @@ impl<F: Float> Node<F> for LfoNode {
         // non-finite driven frame reads the cell instead: a NaN rate would
         // leave the phase NaN for good. The cell crosses into the lane's format once
         // per block.
-        let depth_cell = f32::from_unit(self.depth.load());
+        let depth_cell = F::from_unit(self.depth.load());
         let depth_lane = self
             .declared_param::<{ UnitParam::Depth as u16 }, _>(&io)
             .frames();
         let depth_at = |i: usize| {
             depth_lane
-                // `Depth` holds an `f32`, so a driven depth narrows to it.
-                .map(|l| l[i].to_f32())
+                .map(|l| l[i])
                 .filter(|v| v.is_finite())
-                .map_or(depth_cell, |v| v.clamp(-1.0, 1.0))
+                .map_or(depth_cell, |v| v.clamp(F::lit(-1.0), F::lit(1.0)))
         };
         let offset = self.phase_offset;
         match self.clock {
@@ -295,9 +296,7 @@ impl<F: Float> Node<F> for LfoNode {
                         step_of = (rate, lfo_step(rate, per_hz));
                     }
                     let cycles = self.cycle as f64 + f64::from_phase(self.phase);
-                    // `Waveform::raw_at` and `Depth` are `f32`: the sample widens exactly, until
-                    // the waveform and `Depth` are `f64`.
-                    *o = F::from_f32(self.evaluate(cycles, offset, depth_at(i)));
+                    *o = self.evaluate(cycles, offset, depth_at(i));
                     let next = self.phase.advance(step_of.1);
                     // A step above half a cycle is a step back (its two's complement), and
                     // a carry out of the add is a cycle completed, a borrow one undone.
@@ -313,8 +312,7 @@ impl<F: Float> Node<F> for LfoNode {
                 let out = io.output(0);
                 cx.env.for_each_beat(|i, beat| {
                     let cycles = beat.cycles_in(beats_per_cycle);
-                    // As above: the `f32` wave widens exactly.
-                    out[i] = F::from_f32(self.evaluate(cycles, offset, depth_at(i)));
+                    out[i] = self.evaluate(cycles, offset, depth_at(i));
                 });
             }
         }
