@@ -683,7 +683,7 @@ fn the_pre_delay_moves_two_frames_a_chunk_and_lands_exactly() {
         assert!(moved <= 2.0 + 1e-3, "chunk {chunk}: moved {moved}");
         last = now;
         assert_eq!(
-            now == ReadPosition::from_frames(Samples(4_800)),
+            now == ReadPosition::from_frames(Samples::new(4_800)),
             chunk == 2_400,
             "chunk {chunk}: {now:?}"
         );

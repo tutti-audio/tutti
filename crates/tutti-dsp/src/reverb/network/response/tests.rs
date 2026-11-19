@@ -407,9 +407,9 @@ fn the_l1_norm_is_exact_for_a_comb_and_a_bound_for_a_mixing_loop() {
 #[test]
 fn a_fir_has_no_response_and_no_l1_bound() {
     let n = network(vec![Stage::Fir(crate::reverb::network::FirSummary {
-        length: tutti_units::Samples(100),
-        onset: tutti_units::Samples(0),
-        latency: tutti_units::Samples(0),
+        length: tutti_units::Samples::new(100),
+        onset: tutti_units::Samples::new(0),
+        latency: tutti_units::Samples::new(0),
         rt60: [Seconds::new(1.0); 3],
         energy: 1.0,
     })]);
@@ -474,7 +474,7 @@ fn the_pre_delay_is_a_delay() {
         }])
         .unwrap(),
     })]);
-    n.pre_delay = tutti_units::Samples(100);
+    n.pre_delay = tutti_units::Samples::new(100);
     assert!(close(at(&n, 0.5), delay(0.5, 100.0)));
 }
 

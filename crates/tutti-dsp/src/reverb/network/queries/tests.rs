@@ -51,7 +51,7 @@ fn the_tail_is_pre_delay_transit_and_the_decay_to_the_floor() {
         &[line(48_000.0, Absorption::Gain(g))],
         Matrix::Diagonal,
     ))]);
-    n.pre_delay = Samples(4_800);
+    n.pre_delay = Samples::new(4_800);
     let seconds = |floor| match n.tail(Db::new(floor)) {
         Ring::Finite(s) => s.get(),
         Ring::Unbounded => panic!("a damped line rings out"),
@@ -355,9 +355,9 @@ fn the_densities_are_the_modes_per_hertz_and_the_echoes_per_second() {
     );
     assert_eq!(e(&mixed, 5.0), 1_000.0, "capped at one echo per frame");
     let fir = FirSummary {
-        length: Samples(500),
-        onset: Samples(0),
-        latency: Samples(64),
+        length: Samples::new(500),
+        onset: Samples::new(0),
+        latency: Samples::new(64),
         rt60: [Seconds::new(1.0); 3],
         energy: 1.0,
     };
@@ -373,15 +373,15 @@ fn the_densities_are_the_modes_per_hertz_and_the_echoes_per_second() {
 #[test]
 fn a_fir_reports_its_summary() {
     let fir = FirSummary {
-        length: Samples(24_000),
-        onset: Samples(100),
-        latency: Samples(256),
+        length: Samples::new(24_000),
+        onset: Samples::new(100),
+        latency: Samples::new(256),
         rt60: [Seconds::new(2.0), Seconds::new(1.5), Seconds::new(1.0)],
         energy: 1.0,
     };
     let n = network(&[Stage::Fir(fir)]);
     assert_eq!(Band::ALL.map(|b| n.rt60(b).get()), [2.0, 1.5, 1.0]);
-    assert_eq!(n.latency(), Samples(256));
+    assert_eq!(n.latency(), Samples::new(256));
     assert_eq!(n.tail(Db::new(-60.0)), Ring::Finite(Seconds::new(0.5)));
     assert_eq!(n.min_delay(), Some(SampleSpan::of(100.0)));
     assert_eq!(network(&[]).latency(), Samples::ZERO);
@@ -411,7 +411,7 @@ fn the_shortest_path_decides_the_direct_path() {
     let mut n = network(&[comb.clone(), ap]);
     assert_eq!(n.min_delay(), Some(SampleSpan::of(100.0)));
     assert!(!n.has_direct_path());
-    n.pre_delay = Samples(20);
+    n.pre_delay = Samples::new(20);
     assert_eq!(n.min_delay(), Some(SampleSpan::of(120.0)));
     // A lattice at g = 0 is a plain delay, no direct path; Freeverb's form
     // keeps its -1 at g = 0 and is direct.
@@ -474,12 +474,16 @@ fn a_capacity_measures_every_figure_of_its_network() {
         .push(Gains::filled(Gain::UNITY, 2).unwrap())
         .unwrap();
     let mut n = network(&[Stage::Fdn(f)]);
-    n.pre_delay = Samples(10);
+    n.pre_delay = Samples::new(10);
     let b = NetworkCapacity::need(&n, Db::new(-60.0));
     assert_eq!((b.lines, b.stages, b.taps, b.outputs), (2, 1, 0, 1));
     assert_eq!(
         (b.line, b.delay, b.pre_delay),
-        (SampleSpan::of(202.0), SampleSpan::of(302.0), Samples(10))
+        (
+            SampleSpan::of(202.0),
+            SampleSpan::of(302.0),
+            Samples::new(10)
+        )
     );
 }
 

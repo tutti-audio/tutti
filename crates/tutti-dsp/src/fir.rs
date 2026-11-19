@@ -299,13 +299,13 @@ impl Fir {
     /// The number of taps; always odd.
     #[must_use]
     pub fn len(&self) -> Samples {
-        Samples(self.taps.len())
+        Samples::new(self.taps.len())
     }
 
     /// The group delay, `(len - 1) / 2` samples at every frequency.
     #[must_use]
     pub fn delay(&self) -> Samples {
-        Samples((self.taps.len() - 1) / 2)
+        Samples::new((self.taps.len() - 1) / 2)
     }
 }
 
