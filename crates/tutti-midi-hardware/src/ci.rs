@@ -169,8 +169,9 @@ use tutti_midi_ci::{
     MaxSysexSize, ProcessAction, ProcessError, ProcessFeatures, ProcessInitiator, ProfileAction,
     ProfileInitiator, ProfileRequestError, ResourceInitiator, ResourceResponder, ResourceStore,
 };
-use tutti_midi_device::{DeviceId, EntropyError, EntropyWords};
+use tutti_midi_device::DeviceId;
 use tutti_rt::CounterWriter;
+use tutti_rt::SplitMix64;
 use tutti_ump::{DeviceIdentity, MidiGroup, SysexAssembler, SysexStep, Ump};
 
 use crate::answer::{Answer, ReportEnd};
@@ -213,7 +214,7 @@ pub(crate) struct CiChanges {
     /// How the requests asked of peers ended.
     pub(crate) answers: Vec<(PeerId, Answer)>,
     /// The Groups whose device could not start, with why.
-    pub(crate) unstarted: Vec<(MidiGroup, EntropyError)>,
+    pub(crate) unstarted: Vec<(MidiGroup, getrandom::Error)>,
     /// The CI messages the output refused in this step.
     pub(crate) refused: Losses,
 }
@@ -330,10 +331,12 @@ type Entropy = Box<dyn FnMut() -> u32 + Send>;
 ///
 /// # Errors
 ///
-/// [`EntropyError`] when the operating system has no random bytes to seed it.
-fn entropy() -> Result<Entropy, EntropyError> {
-    let mut words = EntropyWords::from_os()?;
-    Ok(Box::new(move || words.next_word()))
+/// [`getrandom::Error`] when the operating system has no random bytes to seed it.
+fn entropy() -> Result<Entropy, getrandom::Error> {
+    let mut seed = [0u8; 8];
+    getrandom::fill(&mut seed)?;
+    let mut words = SplitMix64::new(u64::from_le_bytes(seed));
+    Ok(Box::new(move || words.next_u32()))
 }
 
 /// One MIDI-CI Device on its Group.
@@ -700,7 +703,7 @@ impl Running {
     fn start(
         groups: &[MidiGroup],
         identity: DeviceIdentity,
-        entropy: &mut impl FnMut() -> Result<Entropy, EntropyError>,
+        entropy: &mut impl FnMut() -> Result<Entropy, getrandom::Error>,
         now: Instant,
         out: &mut OpenOutput,
     ) -> (Self, CiChanges) {
@@ -760,7 +763,7 @@ impl Running {
     fn reconcile(
         &mut self,
         groups: &[MidiGroup],
-        entropy: &mut impl FnMut() -> Result<Entropy, EntropyError>,
+        entropy: &mut impl FnMut() -> Result<Entropy, getrandom::Error>,
         now: Instant,
         out: &mut OpenOutput,
         changes: &mut CiChanges,
@@ -816,13 +819,13 @@ impl Running {
 ///
 /// # Errors
 ///
-/// [`EntropyError`] when `entropy` gives none for the MUID: the operating
+/// [`getrandom::Error`] when `entropy` gives none for the MUID: the operating
 /// system has no random bytes.
 fn start_device(
     identity: DeviceIdentity,
-    entropy: &mut impl FnMut() -> Result<Entropy, EntropyError>,
+    entropy: &mut impl FnMut() -> Result<Entropy, getrandom::Error>,
     now: Instant,
-) -> Result<(CiDevice<Entropy>, Vec<CiAction>), EntropyError> {
+) -> Result<(CiDevice<Entropy>, Vec<CiAction>), getrandom::Error> {
     Ok(CiDevice::new(
         identity,
         CATEGORIES,
@@ -1367,12 +1370,12 @@ mod tests {
 
     /// An entropy source that refuses draws `from..to` (counted from 1) and
     /// gives every other, with the count it keeps.
-    fn refusing(from: usize, to: usize) -> impl FnMut() -> Result<Entropy, EntropyError> {
+    fn refusing(from: usize, to: usize) -> impl FnMut() -> Result<Entropy, getrandom::Error> {
         let mut draws = 0;
         move || {
             draws += 1;
             if (from..to).contains(&draws) {
-                Err(EntropyError::unavailable())
+                Err(getrandom::Error::UNSUPPORTED)
             } else {
                 entropy()
             }
@@ -1408,7 +1411,7 @@ mod tests {
 
         let (mut running, first) =
             Running::start(&[G0, G1], identity(), &mut source, at(0), &mut out);
-        assert_eq!(first.unstarted, [(G1, EntropyError::unavailable())]);
+        assert_eq!(first.unstarted, [(G1, getrandom::Error::UNSUPPORTED)]);
         let _ = counters.take_sent(raw);
 
         // A peer's Discovery arrives on Group 0 in two polls; Group 1 is refused
@@ -1466,8 +1469,8 @@ mod tests {
         assert_eq!(
             first.unstarted,
             [
-                (G0, EntropyError::unavailable()),
-                (G1, EntropyError::unavailable())
+                (G0, getrandom::Error::UNSUPPORTED),
+                (G1, getrandom::Error::UNSUPPORTED)
             ]
         );
         assert!(!running.is_idle(), "the Groups still wait to start");
@@ -1500,10 +1503,10 @@ mod tests {
         assert_eq!(first.unstarted.len(), 1);
         let mut changes = CiChanges::default();
         running.reconcile(&[G1], &mut source, now, &mut out, &mut changes);
-        assert_eq!(changes.unstarted, [(G1, EntropyError::unavailable())]);
+        assert_eq!(changes.unstarted, [(G1, getrandom::Error::UNSUPPORTED)]);
         let mut changes = CiChanges::default();
         running.reconcile(&[G0, G1], &mut source, now, &mut out, &mut changes);
-        assert_eq!(changes.unstarted, [(G0, EntropyError::unavailable())]);
+        assert_eq!(changes.unstarted, [(G0, getrandom::Error::UNSUPPORTED)]);
     }
 
     // A CI message the output cannot take is counted, not dropped without a

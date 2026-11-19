@@ -418,12 +418,6 @@ pub(super) const ALLOW: &[Allow] = &[
         "reading OS entropy: the failure is the OS's, not a value's",
     ),
     ty(
-        "crates/tutti-midi-device/",
-        "EntropyWords::from_os",
-        CTOR,
-        "reading OS entropy: the failure is the OS's, not a value's",
-    ),
-    ty(
         "crates/tutti-midi-ci/src/pe/resource/fields.rs",
         "",
         RANGE,

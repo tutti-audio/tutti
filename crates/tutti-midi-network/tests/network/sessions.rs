@@ -4,8 +4,6 @@
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::time::{Duration, Instant};
 
-use tutti_midi_device::EntropyError;
-
 use tutti_midi_network::{
     Admission, AuthChallenge, AuthFailure, AuthMethods, AuthState, Bye, ByeReason, Client, Command,
     Credentials, DatagramBuilder, Digest, EndedBy, Event, Fec, Host, HostConfig, IdleInterval,
@@ -419,13 +417,13 @@ fn a_client_with_no_matching_credentials_is_told_there_is_no_matching_method() {
 
 static NONCE_CALLS: AtomicU8 = AtomicU8::new(0);
 
-fn counting_nonce() -> Result<Nonce, EntropyError> {
+fn counting_nonce() -> Result<Nonce, getrandom::Error> {
     let n = NONCE_CALLS.fetch_add(1, Ordering::SeqCst);
     Ok(Nonce::new([b'a' + n; 16]).unwrap())
 }
 
-fn no_nonce() -> Result<Nonce, EntropyError> {
-    Err(EntropyError::unavailable())
+fn no_nonce() -> Result<Nonce, getrandom::Error> {
+    Err(getrandom::Error::UNSUPPORTED)
 }
 
 // A Host that cannot get random bytes for a challenge refuses the Invitation
@@ -441,7 +439,7 @@ fn a_host_without_a_nonce_refuses_the_invitation_that_needs_one() {
     sim.connect();
     assert!(sim.host_events.contains(&Event::NonceUnavailable {
         peer: client_addr(),
-        error: EntropyError::unavailable(),
+        error: getrandom::Error::UNSUPPORTED,
     }));
     assert_ne!(sim.client.state(), SessionState::Established);
 }

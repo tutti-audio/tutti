@@ -22,7 +22,6 @@ serde = ["dep:serde", "tutti-ump/serde", "tutti-midi-ci/serde"]
 
 [dependencies]
 bitflags = "2"
-getrandom = { workspace = true }
 thiserror = { workspace = true, features = ["std"] }
 tutti-units = { version = "0.0.1", path = "../tutti-units", default-features = false }
 tutti-midi-ci = { version = "0.0.1", path = "../tutti-midi-ci", default-features = false }
