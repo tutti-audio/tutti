@@ -31,6 +31,7 @@ use tutti_midi_protocol::{ChannelResponse, MpeZones, PitchBendSensitivity};
 use tutti_ump::{MidiChannel, MidiGroup, MpeOverlap};
 
 use crate::ci::PeerId;
+use crate::peer::{PeerError, PeerRef};
 
 tutti_units::ranged! {
     /// The Channels a Profile is asked to use when it is enabled on a Channel: the
@@ -48,9 +49,7 @@ impl ChannelCount {
 /// What a peer's Profiles are at one address, as of when it was read.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Listed {
-    device: DeviceId,
-    group: MidiGroup,
-    muid: Muid,
+    at: PeerRef,
     profile: ProfileId,
     entry: ProfileEntry,
 }
@@ -93,9 +92,7 @@ pub(crate) enum Switch {
 /// from, so it cannot be sent to another.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProfileSwitch {
-    pub(crate) device: DeviceId,
-    pub(crate) group: MidiGroup,
-    pub(crate) muid: Muid,
+    pub(crate) at: PeerRef,
     pub(crate) profile: ProfileId,
     pub(crate) switch: Switch,
 }
@@ -104,16 +101,19 @@ impl ProfileSwitch {
     /// The input device the switch was made from.
     #[must_use]
     pub const fn device(&self) -> &DeviceId {
-        &self.device
+        self.at.device()
     }
 
     /// The peer the switch is for.
     #[must_use]
     pub const fn peer(&self) -> PeerId {
-        PeerId {
-            group: self.group,
-            muid: self.muid,
-        }
+        self.at.peer()
+    }
+
+    /// The peer, as every handle of MIDI-CI names one.
+    #[must_use]
+    pub const fn at(&self) -> &PeerRef {
+        &self.at
     }
 
     /// What the peer is asked: the Profile and the address, on or off.
@@ -136,16 +136,14 @@ impl ProfileSwitch {
     ///
     /// # Errors
     ///
-    /// [`ProfileError::NoSuchPeer`] when no peer of `peers` is the switch's,
+    /// [`PeerError::NoSuchPeer`] (as [`ProfileError::Peer`]) when no peer of
+    /// `peers` is the switch's,
     /// [`ProfileError::NotListed`] when it no longer lists the Profile there.
     pub fn check<'a>(
         &self,
         peers: impl IntoIterator<Item = &'a PeerProfiles>,
     ) -> Result<(), ProfileError> {
-        let peer = peers
-            .into_iter()
-            .find(|p| p.group() == self.group && p.muid() == self.muid)
-            .ok_or(ProfileError::NoSuchPeer)?;
+        let peer = self.at.find(peers, |p| &p.at)?;
         let address = match self.switch {
             Switch::On(target) => target.address(),
             Switch::Off(address) => address,
@@ -160,9 +158,7 @@ impl ProfileSwitch {
 impl Listed {
     fn on(&self, target: ProfileTarget) -> ProfileSwitch {
         ProfileSwitch {
-            device: self.device.clone(),
-            group: self.group,
-            muid: self.muid,
+            at: self.at.clone(),
             profile: self.profile,
             switch: Switch::On(target),
         }
@@ -170,9 +166,7 @@ impl Listed {
 
     fn off(&self, address: CiDeviceId) -> ProfileSwitch {
         ProfileSwitch {
-            device: self.device.clone(),
-            group: self.group,
-            muid: self.muid,
+            at: self.at.clone(),
             profile: self.profile,
             switch: Switch::Off(address),
         }
@@ -304,9 +298,7 @@ impl Switcher {
 /// them. Shared by pointer, so a held one stays as it was.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PeerProfiles {
-    pub(crate) device: DeviceId,
-    pub(crate) group: MidiGroup,
-    pub(crate) muid: Muid,
+    pub(crate) at: PeerRef,
     pub(crate) known: bool,
     pub(crate) table: ProfileTable,
 }
@@ -315,19 +307,25 @@ impl PeerProfiles {
     /// The input device the peer was found on.
     #[must_use]
     pub const fn device(&self) -> &DeviceId {
-        &self.device
+        self.at.device()
     }
 
     /// The Group of the connection the peer answered on.
     #[must_use]
     pub const fn group(&self) -> MidiGroup {
-        self.group
+        self.at.peer().group
     }
 
     /// The peer's MUID.
     #[must_use]
     pub const fn muid(&self) -> Muid {
-        self.muid
+        self.at.peer().muid
+    }
+
+    /// The peer, as every handle of MIDI-CI names one.
+    #[must_use]
+    pub const fn at(&self) -> &PeerRef {
+        &self.at
     }
 
     /// Whether the peer's Profile Inquiry ended with its final Reply, so the
@@ -371,9 +369,7 @@ impl PeerProfiles {
         self.table.addresses().flat_map(move |address| {
             self.table.profiles(address).map(move |(profile, entry)| {
                 let listed = Listed {
-                    device: self.device.clone(),
-                    group: self.group,
-                    muid: self.muid,
+                    at: self.at.clone(),
                     profile,
                     entry: *entry,
                 };
@@ -469,13 +465,10 @@ impl ProfilesChange {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
 #[non_exhaustive]
 pub enum ProfileError {
-    /// The device the switch was made from is no longer an open input.
-    #[error("the device is not an open input")]
-    NotOpen,
-    /// The peer is not one found on that input with Profile Configuration
-    /// (it was lost, or never declared the category).
-    #[error("no such MIDI-CI peer with Profile Configuration on that input")]
-    NoSuchPeer,
+    /// The peer cannot be asked at all: the input is closed, or the peer is not
+    /// one it lists for Profile Configuration.
+    #[error(transparent)]
+    Peer(#[from] PeerError),
     /// The peer does not list that Profile at that address now (the handle is
     /// older than a Removed Report).
     #[error("the peer does not list that Profile at that address")]
