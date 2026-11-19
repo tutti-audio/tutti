@@ -115,8 +115,8 @@ impl Member {
         }
     }
 
-    /// The device's MUID changed: the Responder is for the new one, over the
-    /// store as the peers left it, and holds no Subscription.
+    /// The device's MUID changed: the Responder is for the new one, is handed
+    /// the session's store on each call, and holds no Subscription.
     pub(super) fn renew_property(&mut self, new: Muid) {
         self.server = responder(new);
     }
