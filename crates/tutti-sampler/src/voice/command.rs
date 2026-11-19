@@ -24,8 +24,8 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::Wave;
 use tutti_graph::ParamSet;
 use tutti_rt::RingFloat;
+use tutti_rt::{AtomicSampleRate, Param};
 use tutti_rt::{LockExt, Publisher, PushError, RingReader, RingWriter};
-use tutti_types::{AtomicSampleRate, Param};
 use tutti_units::{Amplitude, Cents, PlaybackRate, SampleRate, StretchFactor};
 
 /// A node's sample rate, shared with its handle: the node stores it when it

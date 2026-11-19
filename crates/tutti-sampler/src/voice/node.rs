@@ -27,9 +27,9 @@ use tutti_graph::{
     Cx, ForkCause, ForkMode, ForkSource, Forked, IntoNode, Io, Node, NodeParts, ParamSet, Prepare,
     Shape, Status,
 };
+use tutti_rt::Param;
 use tutti_rt::{Reader, RingFloat};
 use tutti_transport::TempoReader;
-use tutti_types::Param;
 use tutti_units::{Amplitude, SampleRate, Tail, UnitParam};
 
 /// One [`Voice`] as a graph node in its own right: zero inputs, `channels`

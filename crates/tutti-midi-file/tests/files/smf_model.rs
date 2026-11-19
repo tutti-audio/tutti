@@ -567,6 +567,16 @@ fn a_tempo_above_the_wire_range_writes_the_fastest_quarter() {
             extra: Box::default(),
         }
     );
+    // SMF 1.0 Set Tempo is microseconds per quarter: 120 BPM is a 0.5 s quarter.
+    let at_120 = Meta::tempo(Bpm::of(120.0));
+    assert_eq!(
+        at_120,
+        Meta::Tempo {
+            micros_per_quarter: MicrosPerQuarter::of(500_000),
+            extra: Box::default(),
+        }
+    );
+    assert_eq!(at_120.bpm(), Some(Bpm::of(120.0)));
     // 174 BPM is not a whole microsecond: the wire quantises it.
     let Meta::Tempo {
         micros_per_quarter, ..

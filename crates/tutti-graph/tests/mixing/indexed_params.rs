@@ -27,7 +27,7 @@ use tutti_graph::{
     ParamSegment, ParamSet, Prepare, Shape, Status, TransportPosition, param_parts,
 };
 use tutti_graph::{OutPort, Source};
-use tutti_types::Param;
+use tutti_rt::Param;
 use tutti_units::{Db, Samples, UnitAddr, UnitParam};
 
 /// `Threshold` of band 0 and of band 1: the same kind, two indices.

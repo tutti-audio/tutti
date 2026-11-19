@@ -12,6 +12,7 @@ use std::fmt;
 use std::ops::Range;
 use std::sync::Arc;
 
+use atomic_float::AtomicF64;
 use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_buffers::{Float, Mono, Planes, PlanesMut};
 use tutti_dsp::{
@@ -22,7 +23,7 @@ use tutti_graph::{
     Cost, Cx, IntoNode, Io, MAX_PARAM_PORTS, Node, NodeParts, ParamNode, ParamSet, Prepare, Shape,
     Status,
 };
-use tutti_types::{AtomicF64, Param};
+use tutti_rt::Param;
 use tutti_units::{CompressionRatio, Db, Hz, SampleRate};
 use tutti_units::{Seconds, Tail, UnitParam};
 

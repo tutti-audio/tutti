@@ -13,7 +13,7 @@ pub(crate) struct Staged {
 
 impl Staged {
     pub(crate) fn beside(target: &Path) -> Self {
-        static NEXT: tutti_types::Mint = tutti_types::Mint::new();
+        static NEXT: tutti_rt::Mint = tutti_rt::Mint::new();
         let name = target
             .file_name()
             .map_or_else(|| "export".to_owned(), |n| n.to_string_lossy().into_owned());

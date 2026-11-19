@@ -1,6 +1,6 @@
 //! The velocity field of a MIDI 2.0 Note On or Note Off.
 
-use tutti_units::Normalized;
+use tutti_units::Velocity;
 
 /// The 16-bit velocity of a MIDI 2.0 Note On or Note Off (M2-104 section 7.4.2).
 ///
@@ -52,20 +52,21 @@ impl NoteVelocity {
         self.0
     }
 
-    /// The velocity as a position on `0..=1`: `get() / 0xFFFF`.
+    /// The velocity as a [`Velocity`] on `0..=1`: `get() / 0xFFFF`.
     #[inline]
     #[must_use]
-    pub fn normalized(self) -> Normalized {
-        Normalized::clamped(f64::from(self.0) / f64::from(u16::MAX))
+    pub fn velocity(self) -> Velocity {
+        Velocity::new_clamped(f64::from(self.0) / f64::from(u16::MAX))
     }
 
-    /// The velocity at position `n` of the 16-bit range: `round(n * 0xFFFF)`.
-    /// Inverse of [`normalized`](Self::normalized).
+    /// The field at `velocity` of the 16-bit range: `round(velocity * 0xFFFF)`.
+    /// Inverse of [`velocity`](Self::velocity).
     #[inline]
     #[must_use]
-    pub fn from_normalized(n: Normalized) -> Self {
-        // `n` is on `0..=1`, so the rounded product fits the 16-bit wire field.
-        Self(libm::round(n.get() * f64::from(u16::MAX)) as u16)
+    pub fn from_velocity(velocity: Velocity) -> Self {
+        // The float-to-integer cast saturates, so a velocity outside `0..=1`
+        // lands on `MIN` or `MAX`.
+        Self(libm::round(velocity.get() * f64::from(u16::MAX)) as u16)
     }
 }
 

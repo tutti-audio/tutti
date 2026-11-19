@@ -16,11 +16,11 @@ use tutti_graph::{
     Unforkable,
 };
 use tutti_nodes::testing::{Const, Osc, Through};
+use tutti_rt::Param;
 use tutti_session::{
     Crossfade, CrossfadeRefused, DetachedSession, EventInPort, Feeder, InPort, OutPort,
     RemoveError, Root, Session, SessionEvent, SessionNode, root_width,
 };
-use tutti_types::Param;
 use tutti_units::{Drive, Hz, Real, SampleRate, Samples, Seconds};
 use tutti_units::{Latency, UnitParam};
 

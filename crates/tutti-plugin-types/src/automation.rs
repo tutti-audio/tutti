@@ -211,7 +211,7 @@ impl ParameterQueue {
 /// Deserialize through [`ParameterQueue::normalize`].
 ///
 /// **Hand-written rather than derived**, for the same reason `TimeSignature`'s
-/// is in `tutti-types`: a derived impl writes `points` straight through, and
+/// is in `tutti-music`: a derived impl writes `points` straight through, and
 /// deserialization is the one place with no caller to maintain the ordering the
 /// field's doc promises. A peer handing over an unsorted or negatively-offset
 /// queue reaches a plugin unmodified — VST3's `IParamValueQueue::getPoint` and

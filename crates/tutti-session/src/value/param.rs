@@ -6,7 +6,7 @@ use std::marker::PhantomData;
 use std::sync::atomic::Ordering;
 
 use tutti_graph::{NodeKey, ParamUnit};
-use tutti_types::ParamCell;
+use tutti_rt::ParamCell;
 use tutti_units::{ParamAddr, UnitAddr};
 
 use super::batch::Describe;

@@ -10,6 +10,7 @@ use std::sync::Arc;
 use tutti_buffers::MaxBlock;
 use tutti_curve::Exponent;
 
+use atomic_float::AtomicF64;
 use tutti_buffers::ChannelLayout;
 use tutti_curve::{Breakpoint, Trajectory};
 use tutti_graph::NodeKey;
@@ -25,7 +26,6 @@ use tutti_modulation::{
 };
 use tutti_music::FrameClock;
 use tutti_nodes::automation::{ControlLaneNode, LaneControls};
-use tutti_types::AtomicF64;
 use tutti_units::{
     Beat, BeatsPerCycle, Bpm, Depth, Frame, Hz, Normalized, ParamId, ParamKey, Phase,
     PhaseIncrement, SampleRate, Samples, UnitParam,
