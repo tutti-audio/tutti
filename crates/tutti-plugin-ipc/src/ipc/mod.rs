@@ -58,7 +58,7 @@ use tutti_plugin_types::{
     ProcessWake, Refused, Reopen, Request, RestartRules, ResyncKind, SampleRate, Samples,
     StateError, StateUse, Stuck, Widths,
 };
-use tutti_types::AtomicSampleRate;
+use tutti_rt::AtomicSampleRate;
 use tutti_units::ParamId;
 
 use crate::subprocess::swap_slab;

@@ -199,7 +199,7 @@ pub const GAIN_DB_MAX: f64 = 12.0;
 ///
 /// `10^(dB/20)` — the ordinary decibel-to-amplitude conversion, spelled here
 /// rather than taken from a unit type because this crate is a bare `clap-sys`
-/// fixture with no `tutti-types` dependency, and giving a test fixture the
+/// fixture with no tutti dependency, and giving a test fixture the
 /// engine's vocabulary would let a bug in that vocabulary hide itself.
 pub fn gain_amplitude() -> f32 {
     ensure_values_init();

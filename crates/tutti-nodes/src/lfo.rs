@@ -18,7 +18,7 @@ use tutti_units::{Real, UnitParam};
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::Float;
 use tutti_graph::{Cx, IntoNode, Io, Node, NodeParts, ParamNode, ParamSet, Prepare, Shape, Status};
-use tutti_types::Param;
+use tutti_rt::Param;
 use tutti_units::{BeatsPerCycle, Depth, Hz, PhaseIncrement, PhaseStep, RunningPhase, SampleRate};
 use tutti_units::{Latency, Tail};
 

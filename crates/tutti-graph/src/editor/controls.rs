@@ -2,7 +2,7 @@
 //! gains and fades, pass states, modes and mixes.
 
 use tutti_buffers::Float;
-use tutti_types::ParamCell;
+use tutti_rt::ParamCell;
 use tutti_units::{Amplitude, Mix};
 
 use super::{CommitError, Editor};

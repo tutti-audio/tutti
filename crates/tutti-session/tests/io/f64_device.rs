@@ -6,8 +6,8 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::SampleFormat;
 use tutti_engine::{ManualStreamDriver, OutputSpec};
 use tutti_graph::{ForkByClone, Params};
+use tutti_rt::Param;
 use tutti_session::{Root, Session};
-use tutti_types::Param;
 use tutti_units::{Amplitude, SampleRate, Samples};
 
 #[path = "../support/f64_nodes.rs"]

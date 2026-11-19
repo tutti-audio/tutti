@@ -13,7 +13,7 @@ use tutti_graph::{
     ParamIn, ParamNode, ParamRamp, ParamRange, ParamSegment, ParamSet, Params, Prepare, Shape,
     Source, Status, TransportPosition, declare_params,
 };
-use tutti_types::Param;
+use tutti_rt::Param;
 use tutti_units::{Azimuth, Hz, ParamKey, Samples, UnitParam};
 
 /// One part in 2^40 above one: past `f32`'s 24-bit significand, inside `f64`'s 53.
