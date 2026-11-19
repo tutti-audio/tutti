@@ -1,12 +1,12 @@
 //! [`PeData`]: the Property Data of a Resource, typed.
 
 use super::super::limits::MediaType;
-use super::super::tree::{PeJson, PeJsonError};
+use super::super::tree::PeJson;
 use super::super::value::PeExtra;
 use super::channels::PeChannelList;
 use super::controllers::{PeAllCtrlList, PeChCtrlList, PeCtrlMapList};
 use super::entry::PeResourceList;
-use super::fields::{PeDataError, PeDataFault};
+use super::fields::{InvalidValue, PeDataError, PeDataFault};
 use super::info::{PeDeviceInfo, PeJsonSchema};
 use super::kind::PeResource;
 use super::programs::{PeModeList, PeProgramList};
@@ -270,7 +270,7 @@ impl PeData {
                 None => {
                     return Err(PeDataError::new(
                         other.as_str(),
-                        PeDataFault::NotValid("resource"),
+                        PeDataFault::NotValid(InvalidValue::ResourceIsTyped),
                     ));
                 }
             },
@@ -296,7 +296,7 @@ impl PeData {
         match media_type.filter(|m| !is_json(m)) {
             None => {
                 let json = PeJson::try_from(bytes).map_err(|e| {
-                    PeDataError::new(resource.as_str(), PeDataFault::NotValid(json_fault(&e)))
+                    PeDataError::new(resource.as_str(), PeDataFault::NotValid(e.into()))
                 })?;
                 Self::decode(resource, &json)
             }
@@ -304,7 +304,10 @@ impl PeData {
                 PeOpaque::binary(resource.clone(), media_type.clone(), bytes.to_vec())
                     .map(Self::Opaque)
                     .ok_or_else(|| {
-                        PeDataError::new(resource.as_str(), PeDataFault::NotValid("media type"))
+                        PeDataError::new(
+                            resource.as_str(),
+                            PeDataFault::NotValid(InvalidValue::ResourceIsTyped),
+                        )
                     })
             }
         }
@@ -348,10 +351,6 @@ impl PeData {
         }
         Self::decode(resource, &PeJson::Array(all))
     }
-}
-
-fn json_fault(_: &PeJsonError) -> &'static str {
-    "JSON text"
 }
 
 macro_rules! convert {

@@ -4,7 +4,7 @@
 use super::super::header::PeEncoding;
 use super::super::limits::{MediaType, ResourceName};
 use super::super::tree::{PeJson, PeObject};
-use super::fields::{Fields, PeDataError, PeDataFault, PeExtensions, list, text};
+use super::fields::{Fields, PeDataError, PeDataFault, PeExtensions, UnlistedText, list, text};
 use super::kind::{CanSet, PeResource};
 use super::link::{PeColumn, flag};
 
@@ -228,18 +228,15 @@ impl ResourceEntry {
     pub(super) fn from_json(json: &PeJson) -> Result<Self, PeDataError> {
         let mut f = Fields::new(json, "resource entry")?;
         let name = f.required("resource", "a string", text)?.to_owned();
-        let resource = ResourceName::new(&name)
+        let resource = ResourceName::try_from(name)
             .map(|n| PeResource::from_name(&n))
-            .ok_or_else(|| f.fail("resource", PeDataFault::NotValid("resource name")))?;
+            .map_err(|e| f.invalid("resource", e))?;
         let defaults = Self::bare(resource.clone());
         let mut builder = Self::builder(resource)
             .can_get(flag(&mut f, "canGet", defaults.can_get)?)
             .can_set(
                 f.optional("canSet", "a string", text)?
-                    .map(|t| {
-                        CanSet::new(t)
-                            .ok_or_else(|| f.fail("canSet", PeDataFault::NotValid("canSet")))
-                    })
+                    .map(|t| CanSet::try_from(t).map_err(|e| f.invalid("canSet", e)))
                     .transpose()?
                     .unwrap_or(defaults.can_set),
             )
@@ -249,17 +246,15 @@ impl ResourceEntry {
             .require_res_id(flag(&mut f, "requireResId", defaults.require_res_id)?)
             .can_paginate(flag(&mut f, "canPaginate", defaults.can_paginate)?);
         let types = list(&mut f, "mediaTypes", |j| {
-            j.as_str()
-                .and_then(MediaType::new)
-                .ok_or(PeDataFault::NotValid("media type"))
+            let text = j.as_str().ok_or(PeDataFault::WrongType("a string"))?;
+            MediaType::try_from(text).map_err(|e| PeDataFault::NotValid(e.into()))
         })?;
         if !types.is_empty() {
             builder = builder.media_types(types);
         }
         let encodings = list(&mut f, "encodings", |j| {
-            j.as_str()
-                .and_then(encoding_of)
-                .ok_or(PeDataFault::NotValid("encoding"))
+            let text = j.as_str().ok_or(PeDataFault::WrongType("a string"))?;
+            encoding_of(text).map_err(|e| PeDataFault::NotValid(e.into()))
         })?;
         if !encodings.is_empty() {
             builder = builder.encodings(encodings);
@@ -275,7 +270,7 @@ impl ResourceEntry {
         let entry = builder
             .columns(columns)
             .build_received()
-            .map_err(|(e, field)| f.fail(field, PeDataFault::NotValid(entry_what(&e))))?;
+            .map_err(|(e, field)| f.invalid(field, e))?;
         Ok(Self {
             extensions: f.finish()?,
             ..entry
@@ -524,22 +519,9 @@ impl ResourceEntry {
     }
 }
 
-/// What an [`EntryError`] refuses, in the words of [`PeDataFault::NotValid`].
-fn entry_what(error: &EntryError) -> &'static str {
-    match error {
-        EntryError::ListsItself => "entry: ResourceList does not list itself",
-        EntryError::NotOverridable { .. } => "entry: a default that is not to be overridden",
-        EntryError::NotAList(_) => "entry: a List Resource property of a Resource that is none",
-        EntryError::SchemaIncomplete(_) => "entry: a schema with a title and a type",
-        EntryError::FlowControlWithoutTransaction(_) => "entry: Flow Control and its transaction",
-        EntryError::Duplicate(_) => "entry: a list without repeats",
-        EntryError::Empty(_) => "entry: a list that is not empty",
-    }
-}
-
 /// The encoding a ResourceList names. The spec spells Mcoded7 with a capital C
 /// once (M2-103 Table 82), so the names are read without regard to case.
-fn encoding_of(text: &str) -> Option<PeEncoding> {
+fn encoding_of(text: &str) -> Result<PeEncoding, UnlistedText> {
     [
         PeEncoding::Ascii,
         PeEncoding::Mcoded7,
@@ -547,6 +529,9 @@ fn encoding_of(text: &str) -> Option<PeEncoding> {
     ]
     .into_iter()
     .find(|e| e.as_str().eq_ignore_ascii_case(text))
+    .ok_or(UnlistedText {
+        allowed: &["ASCII", "Mcoded7", "zlib+Mcoded7"],
+    })
 }
 
 /// The Property Data of ResourceList: an entry for each Resource of the device,
@@ -600,7 +585,7 @@ impl PeResourceList {
             if entry.resource == PeResource::ResourceList {
                 return Err(PeDataError::new(
                     "ResourceList",
-                    PeDataFault::NotValid("entry: ResourceList does not list itself"),
+                    PeDataFault::NotValid(EntryError::ListsItself.into()),
                 ));
             }
             out.0.push(entry);

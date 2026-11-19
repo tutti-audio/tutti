@@ -2,7 +2,9 @@
 
 use super::super::limits::{PropertyName, ResourceId, ResourceName};
 use super::super::tree::{PeJson, PeObject};
-use super::fields::{Fields, PeDataError, PeDataFault, PeExtensions, RoleName, boolean, text};
+use super::fields::{
+    Fields, PeDataError, PeDataFault, PeExtensions, RoleName, UnlistedText, boolean, text,
+};
 use super::kind::PeResource;
 
 /// How a Link is used (`role`, M2-103 §13.1, M2-117 §3.4.1).
@@ -37,11 +39,18 @@ impl ConfirmType {
             Self::YesNo => "yesno",
         }
     }
+}
 
-    fn new(text: &str) -> Option<Self> {
+impl TryFrom<&str> for ConfirmType {
+    type Error = UnlistedText;
+
+    fn try_from(text: &str) -> Result<Self, UnlistedText> {
         [Self::OkCancel, Self::YesNo]
             .into_iter()
             .find(|c| c.as_str() == text)
+            .ok_or(UnlistedText {
+                allowed: &["okcancel", "yesno"],
+            })
     }
 }
 
@@ -67,8 +76,12 @@ impl ConfirmIcon {
             Self::Question => "question",
         }
     }
+}
 
-    fn new(text: &str) -> Option<Self> {
+impl TryFrom<&str> for ConfirmIcon {
+    type Error = UnlistedText;
+
+    fn try_from(text: &str) -> Result<Self, UnlistedText> {
         [
             Self::Exclamation,
             Self::Warning,
@@ -77,6 +90,9 @@ impl ConfirmIcon {
         ]
         .into_iter()
         .find(|c| c.as_str() == text)
+        .ok_or(UnlistedText {
+            allowed: &["exclamation", "warning", "information", "question"],
+        })
     }
 }
 
@@ -205,15 +221,12 @@ impl PeLink {
     pub(super) fn from_json(json: &PeJson) -> Result<Self, PeDataError> {
         let mut f = Fields::new(json, "link")?;
         let name = f.required("resource", "a string", text)?.to_owned();
-        let resource = ResourceName::new(&name)
+        let resource = ResourceName::try_from(name)
             .map(|n| PeResource::from_name(&n))
-            .ok_or_else(|| f.fail("resource", PeDataFault::NotValid("resource name")))?;
+            .map_err(|e| f.invalid("resource", e))?;
         let res_id = f
             .optional("resId", "a string", text)?
-            .map(|t| {
-                ResourceId::new(t)
-                    .ok_or_else(|| f.fail("resId", PeDataFault::NotValid("resource id")))
-            })
+            .map(|t| ResourceId::try_from(t).map_err(|e| f.invalid("resId", e)))
             .transpose()?;
         let title = f.optional("title", "a string", |j| text(j).map(str::to_owned))?;
         let role_text = f.optional("role", "a string", |j| text(j).map(str::to_owned))?;
@@ -222,11 +235,9 @@ impl PeLink {
             Some("cluster") => Some(LinkRole::Cluster),
             Some("simpleAction") => Some(LinkRole::Simple(read_simple(&mut f)?)),
             Some("selectorAction") => Some(LinkRole::Selector(read_selector(&mut f)?)),
-            Some(other) => {
-                Some(LinkRole::Other(RoleName::new(other).ok_or_else(|| {
-                    f.fail("role", PeDataFault::NotValid("link role"))
-                })?))
-            }
+            Some(other) => Some(LinkRole::Other(
+                RoleName::try_from(other).map_err(|e| f.invalid("role", e))?,
+            )),
         };
         Ok(Self {
             resource,
@@ -243,17 +254,11 @@ fn read_simple(f: &mut Fields<'_>) -> Result<SimpleAction, PeDataError> {
     let message = f.optional("confirmMsg", "a string", |j| text(j).map(str::to_owned))?;
     let kind = f
         .optional("confirmType", "a string", text)?
-        .map(|t| {
-            ConfirmType::new(t)
-                .ok_or_else(|| f.fail("confirmType", PeDataFault::NotValid("confirm type")))
-        })
+        .map(|t| ConfirmType::try_from(t).map_err(|e| f.invalid("confirmType", e)))
         .transpose()?;
     let icon = f
         .optional("confirmIcon", "a string", text)?
-        .map(|t| {
-            ConfirmIcon::new(t)
-                .ok_or_else(|| f.fail("confirmIcon", PeDataFault::NotValid("confirm icon")))
-        })
+        .map(|t| ConfirmIcon::try_from(t).map_err(|e| f.invalid("confirmIcon", e)))
         .transpose()?;
     let confirmation = match (message, kind, icon) {
         (Some(message), kind, icon) => Some(Confirmation {
@@ -272,19 +277,16 @@ fn read_simple(f: &mut Fields<'_>) -> Result<SimpleAction, PeDataError> {
 
 fn read_selector(f: &mut Fields<'_>) -> Result<SelectorAction, PeDataError> {
     let action = f.required("actionResource", "a string", text)?.to_owned();
-    let action_resource = ResourceName::new(&action)
+    let action_resource = ResourceName::try_from(action)
         .map(|n| PeResource::from_name(&n))
-        .ok_or_else(|| f.fail("actionResource", PeDataFault::NotValid("resource name")))?;
+        .map_err(|e| f.invalid("actionResource", e))?;
     let action_res_id = f
         .optional("actionResId", "a string", text)?
-        .map(|t| {
-            ResourceId::new(t)
-                .ok_or_else(|| f.fail("actionResId", PeDataFault::NotValid("resource id")))
-        })
+        .map(|t| ResourceId::try_from(t).map_err(|e| f.invalid("actionResId", e)))
         .transpose()?;
     let selected = f.required("selectedProperty", "a string", text)?.to_owned();
-    let selected_property = PropertyName::new(&selected)
-        .ok_or_else(|| f.fail("selectedProperty", PeDataFault::NotValid("property name")))?;
+    let selected_property =
+        PropertyName::try_from(selected).map_err(|e| f.invalid("selectedProperty", e))?;
     Ok(SelectorAction {
         action_resource,
         action_res_id,
@@ -329,12 +331,12 @@ impl PeColumn {
         let link = f.optional("link", "a string", text)?.map(str::to_owned);
         let title = f.optional("title", "a string", |j| text(j).map(str::to_owned))?;
         let source = match (property, link) {
-            (Some(p), None) => PropertyName::new(&p)
+            (Some(p), None) => PropertyName::try_from(p)
                 .map(ColumnSource::Property)
-                .ok_or_else(|| f.fail("property", PeDataFault::NotValid("property name")))?,
-            (None, Some(l)) => ResourceName::new(&l)
+                .map_err(|e| f.invalid("property", e))?,
+            (None, Some(l)) => ResourceName::try_from(l)
                 .map(|n| ColumnSource::Link(PeResource::from_name(&n)))
-                .ok_or_else(|| f.fail("link", PeDataFault::NotValid("resource name")))?,
+                .map_err(|e| f.invalid("link", e))?,
             (None, None) => return Err(f.fail("property", PeDataFault::Missing)),
             (Some(_), Some(_)) => return Err(f.fail("link", PeDataFault::Conflicts("property"))),
         };

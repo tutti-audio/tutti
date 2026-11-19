@@ -4,7 +4,7 @@
 use tutti_ump::MidiChannel;
 
 use super::super::tree::PeJson;
-use super::fields::{ModeId, PeDataError, PeDataFault, PeMidiMode};
+use super::fields::{ModeId, PeDataError, PeDataFault, PeMidiMode, narrowed};
 
 /// The Property Data of CurrentMode: the id of the Mode in use (M2-106 §3).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -48,9 +48,9 @@ impl PeCurrentMode {
         let text = json
             .as_str()
             .ok_or_else(|| wrong("CurrentMode", "a string"))?;
-        ModeId::new(text)
+        ModeId::try_from(text)
             .map(Self)
-            .ok_or_else(|| PeDataError::new("CurrentMode", PeDataFault::NotValid("mode id")))
+            .map_err(|e| PeDataError::new("CurrentMode", PeDataFault::NotValid(e.into())))
     }
 }
 
@@ -63,11 +63,9 @@ impl PeChannelMode {
         let PeJson::Integer(n) = json else {
             return Err(wrong("ChannelMode", "an integer"));
         };
-        u8::try_from(*n)
-            .ok()
-            .and_then(PeMidiMode::new)
+        PeMidiMode::try_from(*n)
             .map(Self)
-            .ok_or_else(|| PeDataError::new("ChannelMode", PeDataFault::NotValid("MIDI mode")))
+            .map_err(|e| PeDataError::new("ChannelMode", PeDataFault::NotValid(e.into())))
     }
 }
 
@@ -80,10 +78,8 @@ fn channel_from(resource: &'static str, json: &PeJson) -> Result<MidiChannel, Pe
     let PeJson::Integer(n) = json else {
         return Err(wrong(resource, "an integer"));
     };
-    u8::try_from(*n - 1)
-        .ok()
-        .and_then(MidiChannel::new)
-        .ok_or_else(|| PeDataError::new(resource, PeDataFault::NotValid("channel, 1 to 16")))
+    narrowed::<u8, MidiChannel>(*n - 1)
+        .map_err(|e| PeDataError::new(resource, PeDataFault::NotValid(e)))
 }
 
 impl PeBasicChannelRx {
