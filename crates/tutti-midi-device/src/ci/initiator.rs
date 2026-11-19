@@ -68,6 +68,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::time::Instant;
 use std::vec::Vec;
 
+use super::Initiator;
 use super::TimeoutWait;
 use super::handshake::Handshake;
 use super::link::Link;
@@ -796,6 +797,24 @@ impl ProfileInitiator {
         message: impl FnOnce(CiHeader, Muid) -> CiMessage,
     ) -> ProfileAction {
         ProfileAction::Send(self.link.message(address, message))
+    }
+}
+
+impl Initiator for ProfileInitiator {
+    type Action = ProfileAction;
+
+    fn deadline(&self) -> Option<Instant> {
+        Self::deadline(self)
+    }
+
+    /// A message needs no clock here: the waits end in
+    /// [`on_timeout`](Self::on_timeout).
+    fn on_message(&mut self, decoded: &Decoded, _now: Instant) -> Vec<ProfileAction> {
+        Self::on_message(self, decoded)
+    }
+
+    fn on_timeout(&mut self, now: Instant) -> Vec<ProfileAction> {
+        Self::on_timeout(self, now)
     }
 }
 

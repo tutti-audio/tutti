@@ -15,7 +15,7 @@ use tutti_midi_device::{
 };
 use tutti_ump::MidiGroup;
 
-use super::{CiChanges, Member, Running};
+use super::{CiChanges, Member, Running, expire_all, hear_all};
 use crate::answer::Answer;
 use crate::properties::{PropertyAsk, PropertyCall, PropertyChange};
 
@@ -147,10 +147,7 @@ impl Member {
         let heard: Vec<_> = if route == Route::Responder {
             Vec::new()
         } else {
-            self.properties
-                .iter_mut()
-                .map(|(&muid, initiator)| (muid, initiator.on_message(decoded, now)))
-                .collect()
+            hear_all(&mut self.properties, decoded, now)
         };
         for (muid, actions) in heard {
             self.carry_out_property(muid, actions, sends, changes);
@@ -215,13 +212,7 @@ impl Member {
             let served = self.server.on_timeout(store, now);
             self.carry_out_served(served, sends, changes);
         }
-        let ended: Vec<_> = self
-            .properties
-            .iter_mut()
-            .filter(|(_, initiator)| initiator.deadline().is_some_and(|at| now >= at))
-            .map(|(&muid, initiator)| (muid, initiator.on_timeout(now)))
-            .collect();
-        for (muid, actions) in ended {
+        for (muid, actions) in expire_all(&mut self.properties, now) {
             self.carry_out_property(muid, actions, sends, changes);
         }
     }

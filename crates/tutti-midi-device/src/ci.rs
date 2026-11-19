@@ -41,6 +41,7 @@ mod endpoint;
 mod escape;
 mod gm2;
 mod handshake;
+mod initiate;
 mod initiator;
 mod link;
 mod pe;
@@ -76,6 +77,7 @@ pub use drum_map::{
 };
 pub use endpoint::{EndpointInfo, EndpointStatus};
 pub use gm2::{Gm2ChannelCount, Gm2FunctionBlock, Gm2Role, Gm2SingleChannel, NotAGm2ChannelCount};
+pub use initiate::Initiator;
 pub use initiator::{
     EnabledMpeZones, ProfileAction, ProfileChange, ProfileEntry, ProfileInitiator, ProfileOutcome,
     ProfileRequest, ProfileRequestError, ProfileTable,

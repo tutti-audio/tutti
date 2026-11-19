@@ -46,6 +46,7 @@
 use std::time::Instant;
 use std::vec::Vec;
 
+use super::Initiator;
 use super::handshake::Handshake;
 use super::link::Link;
 use super::{PEER_REPLY_TIMEOUT, TimeoutWait};
@@ -339,6 +340,22 @@ impl ProcessInitiator {
         message: impl FnOnce(CiHeader, Muid) -> CiMessage,
     ) -> ProcessAction {
         ProcessAction::Send(self.link.message(address, message))
+    }
+}
+
+impl Initiator for ProcessInitiator {
+    type Action = ProcessAction;
+
+    fn deadline(&self) -> Option<Instant> {
+        Self::deadline(self)
+    }
+
+    fn on_message(&mut self, decoded: &Decoded, now: Instant) -> Vec<ProcessAction> {
+        Self::on_message(self, decoded, now)
+    }
+
+    fn on_timeout(&mut self, now: Instant) -> Vec<ProcessAction> {
+        Self::on_timeout(self, now)
     }
 }
 
