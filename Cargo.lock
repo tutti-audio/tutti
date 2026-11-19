@@ -3061,6 +3061,7 @@ version = "0.0.1"
 dependencies = [
  "assert_no_alloc",
  "libc",
+ "tempfile",
  "thiserror 2.0.21",
  "thread-priority",
  "web-time",
