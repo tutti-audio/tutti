@@ -27,8 +27,8 @@ use core::fmt;
 use tutti_curve::Law;
 use tutti_music::Adsr;
 use tutti_units::{
-    Ballistics, Beat, BeatsPerCycle, Depth, ParamAddr, PhaseIncrement, PlayReading, SamplePosition,
-    SampleRate, Samples, Seconds,
+    Ballistics, Beat, BeatsPerCycle, Depth, ParamAddr, ParamId, PhaseIncrement, PlayReading,
+    SamplePosition, SampleRate, Samples, Seconds,
 };
 
 use tutti_rt::SplitMix64;
@@ -565,21 +565,21 @@ pub fn compile(
         }
     }
     let mut taken: BTreeSet<SourceId> = nodes.values().map(|n| n.id).collect();
-    let mut next = prev.map_or(0, |p| p.next_source.0);
+    let mut next = prev.map_or(0, |p| p.next_source.get().get());
     for (&key, source) in &sources {
         if let Some(kind) = signal_kind(source) {
             if nodes.contains_key(&key) {
                 continue;
             }
             // Past `u32::MAX` the ids wrap; one still held is skipped.
-            while taken.contains(&SourceId(next)) {
+            while taken.contains(&next_id(next)) {
                 next = next.wrapping_add(1);
             }
-            taken.insert(SourceId(next));
+            taken.insert(next_id(next));
             nodes.insert(
                 key,
                 SignalSource {
-                    id: SourceId(next),
+                    id: next_id(next),
                     kind,
                 },
             );
@@ -676,11 +676,16 @@ pub fn compile(
         nodes,
         edges,
         clocks,
-        next_source: SourceId(next),
+        next_source: next_id(next),
     })
 }
 
 /// `items` keyed, refusing a duplicate key.
+/// The source id numbered `n`: the allocator counts in `u32` and hands out ids.
+fn next_id(n: u32) -> SourceId {
+    SourceId::new(ParamId::new(n))
+}
+
 fn index<K: Ord + Copy, V>(
     items: &[(K, V)],
     dup: impl Fn(K) -> CompileError,

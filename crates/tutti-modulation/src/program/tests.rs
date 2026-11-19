@@ -6,7 +6,7 @@ use super::*;
 use tutti_curve::{Breakpoint, Trajectory};
 use tutti_curve::{Curvature, Exponent};
 use tutti_rt::{Param, SplitMix64};
-use tutti_units::{Azimuth, Hz, UnitParam};
+use tutti_units::{Azimuth, Hz, ParamId, UnitParam};
 
 // The 1e-12 bounds: each figure is at most 50 f64 operations on values of at most 10
 // (the phase argument of 3 cycles times 2 pi, the span 3), each rounding at most 2^-53 (1.1e-16)
@@ -251,12 +251,12 @@ fn an_inputs_offset_is_depth_times_span_times_x() {
     let inputs = vec![
         InputLayer {
             id: LayerId(1),
-            source: SourceId(40),
+            source: SourceId::new(ParamId::new(40)),
             amount: amount(0.5),
         },
         InputLayer {
             id: LayerId(2),
-            source: SourceId(41),
+            source: SourceId::new(ParamId::new(41)),
             amount: Amount {
                 depth: Depth::of(0.25),
                 polarity: Polarity::Unipolar,
@@ -662,7 +662,7 @@ fn new_refuses_what_a_lane_cannot_hold() {
     );
     let input = |id| InputLayer {
         id: LayerId(id),
-        source: SourceId(1),
+        source: SourceId::new(ParamId::new(1)),
         amount: amount(0.1),
     };
     assert_eq!(

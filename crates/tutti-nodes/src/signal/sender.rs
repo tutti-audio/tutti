@@ -7,7 +7,7 @@ use tutti_graph::{
     Cost, Cx, EventKind, Io, Node, Offset, ParamEvent, ParamSegment, Prepare, Shape, Status,
 };
 use tutti_modulation::{ControlSource, Leg, SourceId};
-use tutti_units::{Frame, ParamId, Samples};
+use tutti_units::{Frame, Samples};
 
 use super::PlayWalk;
 
@@ -57,7 +57,7 @@ impl Flight {
 
 /// A **control source's node**: walks the graph's play clock (`Cx::play_at`,
 /// the node's input time) and sends what its [`ControlSource`] produces as
-/// segments addressed `ParamAddr::Id(source.0)`, for every control lane that
+/// segments addressed `ParamAddr::Id(source.get())`, for every control lane that
 /// reads `source`.
 ///
 /// - **Its stops**, in this order on one frame: a play start (the source's
@@ -80,7 +80,7 @@ impl Flight {
 #[derive(Clone, Debug)]
 pub struct SourceNode<S: ControlSource> {
     source: S,
-    id: u32,
+    id: SourceId,
     /// Its audio input's width ([`ChannelLayout::EMPTY`]: none).
     input: ChannelLayout,
     flight: Option<Flight>,
@@ -97,7 +97,7 @@ impl<S: ControlSource> SourceNode<S> {
     pub(crate) fn with_source(id: SourceId, source: S, input: ChannelLayout) -> Self {
         Self {
             source,
-            id: id.0,
+            id,
             input,
             flight: None,
             owed: false,
@@ -119,12 +119,12 @@ impl<S: ControlSource> SourceNode<S> {
 
     /// The source id its segments are addressed to.
     pub fn source(&self) -> SourceId {
-        SourceId(self.id)
+        self.id
     }
 
     fn segment(&self, leg: Leg) -> ParamSegment {
         ParamSegment::by_id(
-            ParamId::new(self.id),
+            self.id.get(),
             leg.piece.from,
             leg.piece.to,
             Samples::new(0),

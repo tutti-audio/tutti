@@ -8,7 +8,7 @@ use tutti_modulation::{Adsr, NoteAdsr, SignalKind, SignalSource, SourceId};
 use super::{SourceNode, SourcePorts};
 
 /// A **note envelope**: an ADSR driven by its MIDI input ([`NoteAdsr`]),
-/// sent raw in `[0, 1]` as segments addressed `ParamAddr::Id(source.0)`
+/// sent raw in `[0, 1]` as segments addressed `ParamAddr::Id(source.get())`
 /// for every control lane that reads `source`.
 ///
 /// - **Exact, no grid**: one segment at each note-on and note-off and at
