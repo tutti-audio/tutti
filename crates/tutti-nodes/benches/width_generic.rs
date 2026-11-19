@@ -36,7 +36,7 @@ const SR: SampleRate = SampleRate::SR_48K;
 /// Planar, `channels` × `BLOCK`.
 fn noise_block(channels: usize) -> Vec<[f32; BLOCK]> {
     let mut buf = vec![[0.0f32; BLOCK]; channels];
-    let mut stream = tutti_fixtures::Noise::from_state(0x2545_f491);
+    let mut stream = tutti_fixtures::Noise::seeded(0x2545_f491);
     for ch in &mut buf {
         for s in ch.iter_mut() {
             *s = stream.next().expect("endless");
