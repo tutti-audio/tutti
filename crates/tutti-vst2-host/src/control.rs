@@ -1,6 +1,7 @@
 //! The control surface of a VST2 plugin in the shared vocabulary, implemented by
 //! [`Vst2Loaded`] and, through it, by [`Vst2Controller`](crate::Vst2Controller).
 
+use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_plugin_types::MainThreadMarker;
 use tutti_plugin_types::features::probed;
 use tutti_plugin_types::{
@@ -9,7 +10,6 @@ use tutti_plugin_types::{
     ParameterInfo, PluginBus, PluginBuses, PluginClass, PluginDescriptor, PluginError,
     PluginResult, Preset, PresetId, RenderMode, RenderModeSupport, Request, StateUse, WindowHandle,
 };
-use tutti_types::{ChannelLayout, ChannelTopology};
 use tutti_units::Normalized;
 use tutti_units::ParamId;
 

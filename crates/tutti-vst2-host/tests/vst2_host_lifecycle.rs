@@ -25,12 +25,12 @@ use tutti_graph::UmpAt;
 use tutti_rt::LockExt;
 
 use keyboard_types::{Code, Key, KeyState, Modifiers, NamedKey};
+use tutti_buffers::{Bed, ChannelTopology, Speaker};
 use tutti_graph::Offset;
 use tutti_plugin_types::{
     ContentScale, Control, Controller, EditorWindow, KeyEvent, KeyUse, ModifierConvention,
     ParamEdit, Request,
 };
-use tutti_types::{Bed, ChannelTopology, Speaker};
 use tutti_ump::MidiChannel;
 use tutti_units::Normalized;
 use tutti_units::ParamId;

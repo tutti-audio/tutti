@@ -7,8 +7,8 @@
 //! between [`ChannelTopology`] and the ABI's [`SpeakerArrangement`].
 
 use thiserror::Error;
+use tutti_buffers::{ChannelTopology, Speaker, Speakers};
 use tutti_plugin_types::MainThreadMarker;
-use tutti_types::{ChannelTopology, Speaker, Speakers};
 use tutti_vst2_ffi::speaker::{
     MAX_ARRANGEMENT_CHANNELS, Speaker as Vst2Speaker, SpeakerArrangement,
 };
@@ -221,7 +221,7 @@ pub(crate) fn topology_of(arrangement: &SpeakerArrangement) -> Option<ChannelTop
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tutti_types::{AmbisonicFormat, AmbisonicOrder, Bed, ChannelLayout};
+    use tutti_buffers::{AmbisonicFormat, AmbisonicOrder, Bed, ChannelLayout};
     use tutti_vst2_ffi::api::SpeakerArrangementType as Kind;
 
     /// The engine's own beds map to the SDK's named arrangements: `kSpeakerArrMono`,
