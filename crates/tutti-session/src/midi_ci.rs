@@ -31,7 +31,7 @@
 
 use std::sync::Weak;
 
-use tutti_midi_device::{
+use tutti_midi_ci::{
     BodyLimit, CallError, CiDeviceId, Nak, PeData, PeOutcome, PeReply, PeResource, PeSignal,
     PeStatus, PeTerminator, ProfileId, ProfileOutcome, ProfileRequest, ProfileState, ReportRequest,
     ResourceEntry, ResourceFailure, ResourceGet, ResourceSet, ResourceTarget,
@@ -261,7 +261,7 @@ impl ListedProfile {
     /// The Channel count of the peer's last Enabled or Disabled Report of it, if
     /// a Version 2 peer sent one.
     #[must_use]
-    pub const fn channels(&self) -> Option<tutti_midi_device::ProfileChannels> {
+    pub const fn channels(&self) -> Option<tutti_midi_ci::ProfileChannels> {
         match self {
             Self::Channel(p) => p.inner.channels(),
             Self::Whole(p) => p.inner.channels(),
@@ -335,7 +335,7 @@ impl WholeProfile {
 
     /// Whether it is the Group's or the Function Block's.
     #[must_use]
-    pub const fn whole(&self) -> tutti_midi_device::Whole {
+    pub const fn whole(&self) -> tutti_midi_ci::Whole {
         self.inner.whole()
     }
 }
@@ -508,7 +508,7 @@ impl ListedResource {
         }
     }
 
-    fn not_sent<J>(&self, refused: tutti_midi_device::RequestRefused) -> Job<J>
+    fn not_sent<J>(&self, refused: tutti_midi_ci::RequestRefused) -> Job<J>
     where
         J: crate::JobKind<Error = PeerError<PeFailure>>,
     {
@@ -980,7 +980,7 @@ impl Pending {
         };
         if matches!(
             error,
-            CallError::Pe(tutti_midi_device::PeError::TooManyRequests { .. })
+            CallError::Pe(tutti_midi_ci::PeError::TooManyRequests { .. })
         ) {
             self.properties[at].set_sent(false);
             if !self.full.contains(&peer) {
@@ -1002,7 +1002,7 @@ impl Pending {
         link: &PortLink,
         peer: PeerId,
         resource: &PeResource,
-        subscribe_id: &tutti_midi_device::SubscribeId,
+        subscribe_id: &tutti_midi_ci::SubscribeId,
     ) {
         // The slot is gone only when the peer's calls ended (it was lost, or its
         // port closed), and a Subscription lives in the peer's Initiator, which
@@ -1031,8 +1031,8 @@ impl Pending {
     }
 
     /// What a Subscription's peer sent, or the Initiator found, of its data.
-    pub(crate) fn event(&mut self, peer: PeerId, event: &tutti_midi_device::ResourceEvent) {
-        use tutti_midi_device::ResourceEvent;
+    pub(crate) fn event(&mut self, peer: PeerId, event: &tutti_midi_ci::ResourceEvent) {
+        use tutti_midi_ci::ResourceEvent;
         match event {
             ResourceEvent::Updated {
                 subscribe_id, data, ..

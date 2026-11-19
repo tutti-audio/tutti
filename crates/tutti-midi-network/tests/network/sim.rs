@@ -4,7 +4,8 @@
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
-use tutti_midi_device::{EndpointName, EntropyError, ProductInstanceId};
+use tutti_midi_ci::{EndpointName, ProductInstanceId};
+use tutti_midi_device::EntropyError;
 use tutti_midi_network::{
     Client, Command, Credentials, EndpointIdentity, Event, Host, HostConfig, NetworkEndpoint,
     Nonce, SessionConfig, Transmit, parse,

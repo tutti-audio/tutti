@@ -11,7 +11,7 @@
 
 use std::time::Instant;
 
-use tutti_midi_device::{
+use tutti_midi_ci::{
     CiDeviceId, DetailsData, InquiryTarget, Nak, ProfileAction, ProfileId, ProfileInitiator,
     ProfileOutcome, ProfileRequestError,
 };

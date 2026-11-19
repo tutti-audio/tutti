@@ -6,7 +6,8 @@ use crate::HardwareMidiInputs;
 use crate::capability::OsEndpoint;
 use crate::devices::reporter::{Reporter, os_devices};
 use crate::test_support::{FakeBackend, FakeCounters, endpoint};
-use tutti_midi_device::{Identity, ProductInstanceId};
+use tutti_midi_ci::ProductInstanceId;
+use tutti_midi_device::Identity;
 use tutti_midi_runtime::DeviceWriters;
 
 /// Long enough to be a failure, not a race: a wake returns at once.

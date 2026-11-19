@@ -8,7 +8,7 @@ use tutti_graph::{
 use tutti_units::{Db, Hz, Q};
 
 use super::svf::SvfFilterNode;
-use tutti_dsp::{Lanes, SvfControls, SvfType};
+use tutti_dsp::{SimdLanes, SvfControls, SvfType};
 
 /// Parametric EQ band: an [`SvfFilterNode`] at one channel. 1 input, 1
 /// output.
@@ -22,11 +22,11 @@ use tutti_dsp::{Lanes, SvfControls, SvfType};
 ///
 /// `F` is the float of the graph it runs in.
 #[derive(Clone, Debug)]
-pub struct EqBandNode<F: Float + Lanes> {
+pub struct EqBandNode<F: Float + SimdLanes> {
     svf: SvfFilterNode<F>,
 }
 
-impl<F: Float + Lanes> EqBandNode<F> {
+impl<F: Float + SimdLanes> EqBandNode<F> {
     /// Builds a band of `filter_type` at
     /// `frequency`, `q` and `gain_db`.
     ///
@@ -54,7 +54,7 @@ impl<F: Float + Lanes> EqBandNode<F> {
     }
 }
 
-impl<F: Float + Lanes> Node<F> for EqBandNode<F> {
+impl<F: Float + SimdLanes> Node<F> for EqBandNode<F> {
     /// Mono in and out. Unlike the bare filter it declares no modulatable
     /// params: a band is set, not swept.
     /// Its tail is the inner filter's: [`Tail::Unknown`](tutti_units::Tail::Unknown).
@@ -77,7 +77,7 @@ impl<F: Float + Lanes> Node<F> for EqBandNode<F> {
     }
 }
 
-impl<F: Float + Lanes> ParamNode<F> for EqBandNode<F> {
+impl<F: Float + SimdLanes> ParamNode<F> for EqBandNode<F> {
     /// The inner filter's: cutoff, Q and gain.
     fn param_set(&self) -> ParamSet {
         self.svf.param_set()
@@ -91,7 +91,7 @@ impl<F: Float + Lanes> ParamNode<F> for EqBandNode<F> {
 }
 
 /// A band has the params of the filter inside it, in its units.
-impl<F: Float + Lanes, const P: u16> HasParam<P> for EqBandNode<F>
+impl<F: Float + SimdLanes, const P: u16> HasParam<P> for EqBandNode<F>
 where
     SvfFilterNode<F>: HasParam<P>,
 {
@@ -100,7 +100,7 @@ where
 
 /// Inserted as the inner filter is: its [`ParamSet`] as its controls, and a
 /// fork from the values last set through it.
-impl<F: Float + Lanes> IntoNode<F> for EqBandNode<F> {
+impl<F: Float + SimdLanes> IntoNode<F> for EqBandNode<F> {
     type Controls = ParamSet;
 
     fn into_parts(self) -> NodeParts<ParamSet, F> {

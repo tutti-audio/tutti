@@ -15,7 +15,7 @@
 //! receiver (Bank Select, Program Change, volume, System Exclusive), each
 //! behind its own DCS. It holds at most one Set Tempo and one Set Time
 //! Signature (sections 6.1 to 6.1.2), both at delta 0. A leading Set Profile On
-//! is a [`ProfileOnRequest`](tutti_midi_device::ProfileOnRequest) (section
+//! is a [`ProfileOnRequest`](tutti_midi_ci::ProfileOnRequest) (section
 //! 6.2), and one that does not read is
 //! refused. The DCS before Start of Clip is the header's last gap, and with the
 //! others sets the total time allocated to the Clip Configuration Header
@@ -45,7 +45,7 @@
 
 use std::vec::Vec;
 
-use tutti_midi_device::{NotSetProfileOn, is_property_exchange};
+use tutti_midi_ci::{NotSetProfileOn, is_property_exchange};
 use tutti_ump::{
     DeltaTicks, Flex, FlexTextKind, Form, Message, Stream, SysexStatus, TicksPerQuarterNote, Ump,
     Utility,

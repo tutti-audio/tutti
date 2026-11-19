@@ -98,7 +98,10 @@ fn hostile() -> Vec<CompressorControls> {
 }
 
 /// A bank at `rate` at rest on `c`: aimed and landed, nothing gliding.
-fn bank_at<F: Float + Lanes + Lerp>(c: &CompressorControls, rate: SampleRate) -> CompressorBank<F> {
+fn bank_at<F: Float + SimdLanes + Lerp>(
+    c: &CompressorControls,
+    rate: SampleRate,
+) -> CompressorBank<F> {
     let mut bank = CompressorBank::new(rate);
     bank.aim(c);
     bank.settle();
@@ -117,7 +120,7 @@ fn runner(c: &CompressorControls) -> CompressorBank<f32> {
 
 /// `audio` (one slice per channel) through `bank`, keyed by `key`, with `lane` as the
 /// threshold lane when given, in calls of at most `block` frames.
-fn run_in<F: Float + Lanes + Lerp>(
+fn run_in<F: Float + SimdLanes + Lerp>(
     bank: &mut CompressorBank<F>,
     audio: &[&[F]],
     key: &[&[F]],
@@ -147,7 +150,7 @@ fn run_in<F: Float + Lanes + Lerp>(
 }
 
 /// [`run_in`] in calls of [`CHUNK`] frames.
-fn run<F: Float + Lanes + Lerp>(
+fn run<F: Float + SimdLanes + Lerp>(
     bank: &mut CompressorBank<F>,
     audio: &[&[F]],
     key: &[&[F]],

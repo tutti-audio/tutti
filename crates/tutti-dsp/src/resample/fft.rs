@@ -255,7 +255,7 @@ impl<F: FftFloat> FftResampler<F> {
     ///
     /// # Errors
     /// [`ResampleError::BufferMismatch`] when the planes are too few or too short.
-    pub fn process_into_buffer(
+    pub fn process(
         &mut self,
         wave_in: Planes<'_, F>,
         mut wave_out: PlanesMut<'_, '_, F>,

@@ -6,7 +6,7 @@
 //! that time), mixed by an orthogonal reflection `A = I - 2 v v^T`, with an
 //! input pre-delay, a slow modulation of the line lengths, a stereo output
 //! (even lines left, odd right) with a width and a wet gain, and, if the design
-//! is [`freezable`](FdnLayout::freezable), a freeze: every gain exactly one and
+//! is [`Freezable`](FreezeMode::Freezable), a freeze: every gain exactly one and
 //! the input gated off, so the network is lossless and its tail never ends.
 //!
 //! **Diffusion** is the vector `v`: from one axis (no line feeds another,
@@ -96,7 +96,7 @@ pub struct FdnControls {
     pub width: StereoWidth,
     /// The wet gain.
     pub wet: Db,
-    /// Holds the tail; ignored by a design that is not freezable.
+    /// Holds the tail; ignored by a layout that is [`FreezeMode::Decaying`].
     pub freeze: bool,
 }
 
@@ -122,8 +122,21 @@ impl Default for FdnControls {
     }
 }
 
-/// What a feedback delay network is built to: its lines, its longest decay and whether it
-/// can freeze. Mono in, stereo out.
+/// Whether a feedback delay network can hold its tail: the [`FdnControls::freeze`] control is
+/// live only on a [`Freezable`](Self::Freezable) layout.
+///
+/// A freezable layout has an unbounded tail reach, so a node of it never has a finite tail to
+/// declare to an export (which spends the whole cap): freeze is opt-in for that reason.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum FreezeMode {
+    /// The tail always decays: the freeze control is ignored and the tail is finite.
+    Decaying,
+    /// The freeze control holds the tail: every gain is exactly one and the input is gated off.
+    Freezable,
+}
+
+/// What a feedback delay network is built to: its lines, its longest decay and its
+/// [`FreezeMode`]. Mono in, stereo out.
 ///
 /// A control outside its range is clamped and a non-finite one takes the
 /// [`FdnControls::DEFAULT`] value, so every control gives a stable network.
@@ -131,7 +144,7 @@ impl Default for FdnControls {
 pub struct FdnLayout {
     lines: usize,
     max_decay: Seconds,
-    freezable: bool,
+    freeze_mode: FreezeMode,
 }
 
 impl FdnLayout {
@@ -139,19 +152,20 @@ impl FdnLayout {
     const LINES: usize = 8;
 
     /// A design of `lines` lines (2 to 16, even: half feed each ear), RT60s up
-    /// to `max_decay`, which holds its tail on a freeze if `freezable`. `None`
+    /// to `max_decay`, which holds its tail on a freeze if `freeze_mode` is
+    /// [`Freezable`](FreezeMode::Freezable). `None`
     /// when `lines` is out of range (`max_decay` is range-checked by its type).
     ///
     /// **A design that can freeze has an unbounded tail reach**, so a node
     /// of it never has a finite tail to declare to an export (which spends the
     /// whole cap): freeze is opt-in for that reason.
     #[must_use]
-    pub fn new(lines: usize, max_decay: MaxDecay, freezable: bool) -> Option<Self> {
+    pub fn new(lines: usize, max_decay: MaxDecay, freeze_mode: FreezeMode) -> Option<Self> {
         let ok = (2..=LENGTHS.len()).contains(&lines) && lines.is_multiple_of(2);
         ok.then_some(Self {
             lines,
             max_decay: max_decay.get(),
-            freezable,
+            freeze_mode,
         })
     }
 
@@ -163,8 +177,8 @@ impl FdnLayout {
 
     /// Whether the freeze control does anything.
     #[must_use]
-    pub fn freezable(&self) -> bool {
-        self.freezable
+    pub fn freeze_mode(&self) -> FreezeMode {
+        self.freeze_mode
     }
 }
 
@@ -185,12 +199,12 @@ impl FdnLayout {
 }
 
 impl Default for FdnLayout {
-    /// Eight lines, RT60s up to 8 s, not freezable.
+    /// Eight lines, RT60s up to 8 s, [`FreezeMode::Decaying`].
     fn default() -> Self {
         Self {
             lines: Self::LINES,
             max_decay: MaxDecay::DEFAULT.get(),
-            freezable: false,
+            freeze_mode: FreezeMode::Decaying,
         }
     }
 }
@@ -224,7 +238,7 @@ impl FdnLayout {
     /// allocation.
     pub fn design_into(&self, c: &FdnControls, rate: SampleRate, out: &mut Network) {
         let d = FdnControls::DEFAULT;
-        let freeze = self.freezable && c.freeze;
+        let freeze = self.freeze_mode == FreezeMode::Freezable && c.freeze;
         let rt60 = [
             c.decay[1], // low
             c.decay[0], // mid
@@ -366,7 +380,7 @@ impl FdnLayout {
         self.design_into(&worst, rate, &mut network);
         let mut b = NetworkCapacity::need(&network, TAIL_FLOOR);
         b.tail = match b.tail {
-            _ if self.freezable => Ring::Unbounded,
+            _ if self.freeze_mode == FreezeMode::Freezable => Ring::Unbounded,
             Ring::Finite(t) => Ring::Finite(Seconds::new(t.get() * self.rounding_margin(rate))),
             other => other,
         };
