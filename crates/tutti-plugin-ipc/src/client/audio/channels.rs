@@ -486,15 +486,17 @@ impl Channels {
 /// The producing end of the audio-response ring, owned by the bridge thread:
 /// a push can come from nowhere else, which makes the ring single-producer.
 /// A full ring drops the newest response and the ring counts it.
-pub(super) struct ResponseWriter {
+pub(crate) struct ResponseWriter {
     ring: RingWriter<AudioResponse>,
 }
 
 /// The consuming end of the audio-response ring, owned by whatever collects
 /// chunks (the pipeline's batcher): a pop can come from nowhere else, which
 /// makes the ring single-consumer.
+#[must_use]
 pub struct Replies {
-    /// Boxed: the reader's cached indices are large, and `Ipc` moves by value.
+    /// Boxed so `Refused<Ipc>` (an `Err` of `Ipc::activate_anywhere`) stays under
+    /// clippy's `result_large_err`: the reader's cached indices are large.
     ring: Box<RingReader<AudioResponse>>,
 }
 
@@ -504,15 +506,8 @@ impl std::fmt::Debug for Replies {
     }
 }
 
-/// Replies no bridge thread feeds, for a pipeline test that needs a
-/// consumer end and nothing behind it.
-#[cfg(test)]
-pub(crate) fn idle_replies() -> Replies {
-    response_ring().1
-}
-
 /// A new response ring, its two ends and the count of responses it lost.
-pub(super) fn response_ring() -> (ResponseWriter, Replies, Counter<u64>) {
+pub(crate) fn response_ring() -> (ResponseWriter, Replies, Counter<u64>) {
     let (writer, reader) = ring(RESPONSE_QUEUE_SIZE, Overflow::DropNewest);
     let lost = writer.losses();
     (

@@ -426,8 +426,10 @@ pub struct Ipc {
     slab: SlabWriter,
     /// The consuming end of the bridge's response ring, handed to each
     /// activation's pipeline and back.
-    /// (A `Mutex` only so `Ipc` is `Sync`: a reader end is not, and nothing
-    /// locks it: an activation takes it by value.)
+    /// A `Mutex` only for `Ipc: Sync`, which `impl AnyThread for Ipc` (`Send + Sync`)
+    /// and the contract tests that call `Control` on an `Ipc` require, and a
+    /// ring reader is not `Sync`. Nothing locks it: an activation takes it by
+    /// value (`into_inner`).
     replies: Mutex<Replies>,
     /// The sequence the slab's next chunk carries: the slab outlives each
     /// activation's batcher, so the sequence does too.

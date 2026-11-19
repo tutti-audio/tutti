@@ -815,7 +815,7 @@ impl Batcher {
 mod tests {
     use super::*;
     use crate::AudioSlab;
-    use crate::client::audio::idle_replies;
+    use crate::client::audio::response_ring;
     use tutti_plugin_types::MAX_CHUNK;
 
     /// A real slab's input writer, `samples` frames per channel, stereo both
@@ -882,7 +882,7 @@ mod tests {
         }
         server.publish(1);
         // Three output rows over a two-channel slab.
-        let mut b = Batcher::new(2, 3, FloatWidth::F32, MAX_CHUNK, writer, idle_replies());
+        let mut b = Batcher::new(2, 3, FloatWidth::F32, MAX_CHUNK, writer, response_ring().1);
         b.chunk = 8;
         // The refusal is a `Copy` error: nothing is allocated on the audio
         // thread to report it.
@@ -983,7 +983,7 @@ mod tests {
             FloatWidth::F32,
             MAX_CHUNK,
             slab(MAX_CHUNK),
-            idle_replies(),
+            response_ring().1,
         );
         assert_eq!(b.expect_seq, None);
         assert_eq!(b.next_seq, 1, "0 means 'never published' in the slab");
@@ -1002,7 +1002,7 @@ mod tests {
             FloatWidth::F32,
             MAX_CHUNK,
             slab(MAX_CHUNK),
-            idle_replies(),
+            response_ring().1,
         )
         .with_counters(Arc::clone(&counters));
         for seq in 1..=FATES as u64 {
@@ -1028,7 +1028,7 @@ mod tests {
             FloatWidth::F32,
             MAX_CHUNK,
             slab(MAX_CHUNK),
-            idle_replies(),
+            response_ring().1,
         );
         b.next_seq = 100;
         b.expect_seq = Some(99);
@@ -1067,7 +1067,7 @@ mod tests {
             FloatWidth::F32,
             MAX_CHUNK,
             slab(MAX_CHUNK),
-            idle_replies(),
+            response_ring().1,
         );
 
         let mut pre_seek = Vec::new();
@@ -1114,7 +1114,7 @@ mod tests {
             FloatWidth::F32,
             MAX_CHUNK,
             slab(MAX_CHUNK),
-            idle_replies(),
+            response_ring().1,
         );
         b.prepare(Samples(1024), Some(Samples(480)));
         assert_eq!(Samples(b.chunk()), Samples(480));
@@ -1129,7 +1129,7 @@ mod tests {
         b.prepare(Samples(32), None);
         assert_eq!(Samples(b.chunk()), Samples(32));
 
-        let mut small_slab = Batcher::new(2, 2, FloatWidth::F32, 16, slab(16), idle_replies());
+        let mut small_slab = Batcher::new(2, 2, FloatWidth::F32, 16, slab(16), response_ring().1);
         small_slab.prepare(Samples(1024), None);
         assert_eq!(Samples(small_slab.chunk()), Samples(16));
     }
@@ -1145,7 +1145,7 @@ mod tests {
             FloatWidth::F32,
             MAX_CHUNK,
             slab(MAX_CHUNK),
-            idle_replies(),
+            response_ring().1,
         );
         b.next_seq = 7;
         b.expect_seq = Some(6);

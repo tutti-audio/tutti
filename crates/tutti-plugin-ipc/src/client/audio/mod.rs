@@ -84,9 +84,7 @@ impl Submitted {
 use ask::ask;
 use channels::Channels;
 pub use channels::Replies;
-#[cfg(test)]
-pub(crate) use channels::idle_replies;
-use channels::response_ring;
+pub(crate) use channels::response_ring;
 pub(crate) use channels::{FATES, Fate};
 use lifecycle::Lifecycle;
 use messages::{AudioResponse, Command};
