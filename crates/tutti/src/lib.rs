@@ -190,8 +190,9 @@ pub use tutti_session::{Analyze, AnalyzeError, Audio, AudioContext, AudioInput};
 #[cfg(feature = "session")]
 pub use tutti_session::{
     AnyAssign, AnyTarget, Assign, ClickTargets, ClickVolumeTarget, Effective, Info, IntoAssign,
-    IntoRead, Knobs, MeterTarget, Modify, Moved, OutputPolicyTarget, ParamTarget, ScalarTarget,
-    SetRefusal, SettingTarget, Target, TargetInfo, TempoTarget, ValueError, ValueErrorKind,
+    IntoRead, Knobs, LoopTarget, MeterTarget, Modify, Moved, OutputPolicyTarget, ParamTarget,
+    ScalarTarget, SetRefusal, SettingTarget, Target, TargetInfo, TempoTarget, ValueError,
+    ValueErrorKind,
 };
 #[cfg(feature = "session")]
 pub use tutti_session::{

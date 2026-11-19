@@ -13,8 +13,8 @@ use tutti_music::MeterMap;
 use tutti_nodes::{ClickLevel, ClickSettings, MetronomeMode};
 use tutti_rt::{LockExt, Setting, SettingWord};
 use tutti_tempo::TempoMap;
-use tutti_transport::{ProjectMeter, TransportSettings};
-use tutti_units::Amplitude;
+use tutti_transport::{LoopEdit, LoopRegion, ProjectMeter, Transport, TransportSettings};
+use tutti_units::{Amplitude, At};
 
 use super::error::SetRefusal;
 use super::state::Params;
@@ -27,6 +27,8 @@ pub enum SlotId {
     Tempo,
     /// The project's meter.
     Meter,
+    /// The loop region.
+    Loop,
     /// The click's level.
     ClickVolume,
     /// When the click sounds.
@@ -86,8 +88,8 @@ pub struct NodeSlots(pub(crate) Vec<(SlotId, Erased)>);
 impl NodeSlots {
     /// `slot` as the value `id` names.
     #[cfg(feature = "midi")]
-    pub(crate) fn of<V: 'static>(id: SlotId, slot: SlotCell<V>) -> Self {
-        Self(vec![(id, erase(slot))])
+    pub(crate) fn of<C: Held>(id: SlotId, slot: Arc<PublishedSlot<C>>) -> Self {
+        Self(vec![(id, erase_staged(slot))])
     }
 }
 
@@ -97,16 +99,75 @@ impl std::fmt::Debug for NodeSlots {
     }
 }
 
-/// What a slot is registered as: the type-erased [`SlotCell`] of its value.
-pub(crate) type Erased = Box<dyn Any + Send + Sync>;
+/// What a slot is registered as: the type-erased [`SlotCell`] of its value,
+/// and, for a staging slot, the handle the update publishes it through.
+pub(crate) struct Erased {
+    cell: Box<dyn Any + Send + Sync>,
+    stage: Option<Arc<dyn Stage>>,
+}
 
+impl std::fmt::Debug for Erased {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Erased")
+            .field("staging", &self.stage.is_some())
+            .finish_non_exhaustive()
+    }
+}
+
+/// An atomic slot: its writes land at once.
 pub(crate) fn erase<V: 'static>(slot: SlotCell<V>) -> Erased {
-    Box::new(slot)
+    Erased {
+        cell: Box::new(slot),
+        stage: None,
+    }
+}
+
+/// A [`PublishedSlot`]: its writes wait for [`Params::publish_pending`].
+pub(crate) fn erase_staged<C: Held>(slot: Arc<PublishedSlot<C>>) -> Erased {
+    Erased {
+        cell: Box::new(Arc::clone(&slot) as SlotCell<C::Value>),
+        stage: Some(slot),
+    }
+}
+
+/// A slot whose writes wait in a pending value until the update.
+/// Control side only: every call runs under the value lock.
+pub(crate) trait Stage: Send + Sync + 'static {
+    /// Publishes the pending value, if there is one.
+    fn publish_pending(&self);
+
+    /// Drops the pending value, if there is one.
+    #[cfg(feature = "midi")]
+    fn discard_pending(&self);
 }
 
 impl Params {
     fn slot<V: 'static>(&self, id: SlotId) -> Option<SlotCell<V>> {
-        self.slots.get(&id)?.downcast_ref::<SlotCell<V>>().cloned()
+        self.slots
+            .get(&id)?
+            .cell
+            .downcast_ref::<SlotCell<V>>()
+            .cloned()
+    }
+
+    /// Drops the pending value of each slot in `ids`.
+    #[cfg(feature = "midi")]
+    pub(super) fn discard_pending(&self, ids: &[SlotId]) {
+        for id in ids {
+            if let Some(stage) = self.slots.get(id).and_then(|erased| erased.stage.as_ref()) {
+                stage.discard_pending();
+            }
+        }
+    }
+
+    /// Publishes every pending value, in [`SlotId`] order: the tempo before
+    /// the meter, the session's own before a node's, a node's by key.
+    pub(super) fn publish_pending(&self) {
+        for erased in self.slots.values() {
+            if let Some(stage) = &erased.stage {
+                stage.publish_pending();
+            }
+        }
     }
 }
 
@@ -154,11 +215,14 @@ macro_rules! slot_target {
 }
 
 slot_target!(
-    /// The project's tempo: the map the engine takes at the next block, as
+    /// The project's tempo: the map the engine takes at the first block after
+    /// the next [`Session::update`](crate::Session::update), as
     /// `session.transport_handle().tempo()` names it.
     ///
     /// A constant tempo is a one-step map, `tempo.to(TempoMap::constant(bpm)?)`;
-    /// a map by value works as it stands. A read answers the map in force.
+    /// a map by value works as it stands. A write is staged, a later one
+    /// replacing it, and published with the meter and the other staged values
+    /// by the update; a read answers the staged map, else the one in force.
     /// A write is refused with [`SetRefusal::Following`] while the session
     /// follows a live tempo.
     TempoTarget,
@@ -168,10 +232,31 @@ slot_target!(
 
 slot_target!(
     /// The project's meter, which the metronome and every hosted plugin read
-    /// once per block, as `session.transport_handle().meter()` names it.
+    /// once per block, as `session.transport_handle().meter()` names it. A
+    /// write is staged and published by the next
+    /// [`Session::update`](crate::Session::update), as the tempo's is; a read
+    /// answers the staged meter, else the one in force.
     MeterTarget,
     Arc<MeterMap>,
     SlotId::Meter
+);
+
+slot_target!(
+    /// The loop region: its bounds, kept while looping is disarmed, and
+    /// whether looping is armed ([`LoopRegion`]), as
+    /// `session.transport_handle().looping()` names it.
+    ///
+    /// A write is staged and published by the next
+    /// [`Session::update`](crate::Session::update) as one edit for the next
+    /// block, so the engine takes the bounds and the arming together; a
+    /// read answers the pending region, else the one sent and not yet
+    /// applied, else the one the engine last published. Disarm
+    /// with `looping.modify(|r| LoopRegion::new(r.bounds(), false))`. A
+    /// change at a frame or beat is a [`LoopEdit`] scheduled on the
+    /// transport.
+    LoopTarget,
+    LoopRegion,
+    SlotId::Loop
 );
 
 slot_target!(
@@ -276,10 +361,13 @@ node_slot_target!(
     /// them, pairs each note-off with its note-on and builds the chase table
     /// where the clip is built.
     ///
-    /// The clip is the node's from its next block, which ends the notes the
-    /// last one left sounding. A value equal to the clip in force (the same
-    /// events and note pairing) changes nothing, so rebuilding the same clip
-    /// cuts no note. A read answers the clip in force.
+    /// A write is staged and published by the next
+    /// [`Session::update`](crate::Session::update); the clip is the node's
+    /// from its next block after that, which ends the notes the last one left
+    /// sounding. A value equal to the clip in force (the same events and note
+    /// pairing) changes nothing, so rebuilding the same clip cuts no note. A
+    /// read answers the staged clip, else the one in force. A write to a node
+    /// removed before the update is dropped.
     ClipEventsTarget,
     Arc<tutti_midi_runtime::ClipEvents>,
     ClipEvents
@@ -292,9 +380,12 @@ node_slot_target!(
     /// built by collecting [`TimedHarmony`](tutti_midi_runtime::TimedHarmony)s
     /// in any order.
     ///
-    /// The changes are the node's from its next block, which re-states the
-    /// context in force on that block's first frame. A value equal to the
-    /// changes in force changes nothing. A read answers the changes in force.
+    /// A write is staged and published by the next
+    /// [`Session::update`](crate::Session::update); the changes are the node's
+    /// from its next block after that, which re-states the context in force
+    /// on that block's first frame. A value equal to the changes in force
+    /// changes nothing. A read answers the staged changes, else the ones in
+    /// force.
     HarmonyTarget,
     Arc<tutti_midi_runtime::HarmonyChanges>,
     Harmony
@@ -419,15 +510,89 @@ target_builders!([T: SettingWord + PartialEq + Send + Sync + 'static] SettingTar
 
 // The session's cells.
 
+/// A control side that holds one published value: what a [`PublishedSlot`]
+/// reads, checks and replaces it through.
+pub(crate) trait Held: Send + Sync + 'static {
+    /// The value in force.
+    type Value: Clone + Send + Sync + 'static;
+
+    /// The value now.
+    fn current(&self) -> Self::Value;
+
+    /// Whether `value` may be published, when it is written and when it is
+    /// published.
+    fn check(&self, _: &Self::Value) -> Result<(), SetRefusal> {
+        Ok(())
+    }
+
+    /// Publishes `value`; an equal one may change nothing. Whether it was
+    /// taken: a refusal leaves the value pending for the next update.
+    fn replace(&self, value: &Self::Value) -> bool;
+}
+
+/// A value held through its control side ([`Held`]). A write stages a
+/// pending value, a later one replacing it; [`Slot::load`] answers the
+/// pending value, else the one in force; the update publishes the pending
+/// value ([`Params::publish_pending`]).
+pub(crate) struct PublishedSlot<C: Held> {
+    cell: C,
+    pending: std::sync::Mutex<Option<C::Value>>,
+}
+
+impl<C: Held> PublishedSlot<C> {
+    pub(crate) fn new(cell: C) -> Arc<Self> {
+        Arc::new(Self {
+            cell,
+            pending: std::sync::Mutex::new(None),
+        })
+    }
+}
+
+impl<C: Held> Slot<C::Value> for PublishedSlot<C> {
+    fn load(&self) -> C::Value {
+        let pending = self.pending.lock_recover().clone();
+        pending.unwrap_or_else(|| self.cell.current())
+    }
+
+    fn check(&self, value: &C::Value) -> Result<(), SetRefusal> {
+        self.cell.check(value)
+    }
+
+    fn store(&self, value: &C::Value) {
+        *self.pending.lock_recover() = Some(value.clone());
+    }
+}
+
+impl<C: Held> Stage for PublishedSlot<C> {
+    #[cfg(feature = "midi")]
+    fn discard_pending(&self) {
+        *self.pending.lock_recover() = None;
+    }
+
+    fn publish_pending(&self) {
+        let mut pending = self.pending.lock_recover();
+        let Some(value) = pending.take() else {
+            return;
+        };
+        // A value written before the check's ground changed (a live tempo
+        // took the map) is dropped, as its write would now be refused.
+        if self.cell.check(&value).is_ok() && !self.cell.replace(&value) {
+            *pending = Some(value);
+        }
+    }
+}
+
 /// The tempo map, in the transport's settings.
-pub(crate) struct TempoSlot {
+pub(crate) struct TempoCell {
     pub settings: TransportSettings,
     /// Whether a live tempo owns the map.
     pub following: Arc<std::sync::atomic::AtomicBool>,
 }
 
-impl Slot<Arc<TempoMap>> for TempoSlot {
-    fn load(&self) -> Arc<TempoMap> {
+impl Held for TempoCell {
+    type Value = Arc<TempoMap>;
+
+    fn current(&self) -> Arc<TempoMap> {
         self.settings.tempo_map()
     }
 
@@ -438,40 +603,72 @@ impl Slot<Arc<TempoMap>> for TempoSlot {
         Ok(())
     }
 
-    fn store(&self, value: &Arc<TempoMap>) {
+    fn replace(&self, value: &Arc<TempoMap>) -> bool {
         self.settings.set_tempo_map(Arc::clone(value));
+        true
     }
 }
 
 /// The meter, published to the metronome and every plugin following it.
-pub(crate) struct MeterSlot(pub ProjectMeter);
+impl Held for ProjectMeter {
+    type Value = Arc<MeterMap>;
 
-impl Slot<Arc<MeterMap>> for MeterSlot {
-    fn load(&self) -> Arc<MeterMap> {
-        self.0.current()
+    fn current(&self) -> Arc<MeterMap> {
+        Self::current(self)
     }
 
-    fn check(&self, _: &Arc<MeterMap>) -> Result<(), SetRefusal> {
-        Ok(())
-    }
-
-    fn store(&self, value: &Arc<MeterMap>) {
-        self.0.set_meter(Arc::clone(value));
+    fn replace(&self, value: &Arc<MeterMap>) -> bool {
+        self.set_meter(Arc::clone(value));
+        true
     }
 }
 
-/// A node's control side that holds one published value: what a
-/// [`PublishedSlot`] reads and replaces it through.
-#[cfg(feature = "midi")]
-pub(crate) trait Held: Send + Sync + 'static {
-    /// The value in force.
-    type Value;
+/// The loop region, which the engine owns: a write is one edit scheduled for
+/// the next block. The value read is the region sent and not yet applied,
+/// else the region the engine last published: the sent one is forgotten once
+/// the reading equals it or no scheduled command is left in flight, so an
+/// edit timed later shows through the reading.
+pub(crate) struct LoopCell {
+    transport: Transport,
+    sent: std::sync::Mutex<Option<LoopRegion>>,
+}
 
-    /// The value now.
-    fn current(&self) -> Self::Value;
+impl LoopCell {
+    pub(crate) fn new(transport: Transport) -> Self {
+        Self {
+            transport,
+            sent: std::sync::Mutex::new(None),
+        }
+    }
+}
 
-    /// Replaces the value; an equal one changes nothing.
-    fn replace(&self, value: &Self::Value);
+impl Held for LoopCell {
+    type Value = LoopRegion;
+
+    fn current(&self) -> LoopRegion {
+        let motion = self.transport.motion();
+        let reading = motion.loop_region();
+        let mut sent = self.sent.lock_recover();
+        match *sent {
+            Some(region) if region != reading && motion.scheduled_outstanding() > 0 => region,
+            _ => {
+                *sent = None;
+                reading
+            }
+        }
+    }
+
+    fn replace(&self, value: &LoopRegion) -> bool {
+        let landed = self
+            .transport
+            .motion()
+            .schedule(At::NextBlock, LoopEdit::region(*value))
+            .is_ok();
+        if landed {
+            *self.sent.lock_recover() = Some(*value);
+        }
+        landed
+    }
 }
 
 #[cfg(feature = "midi")]
@@ -482,8 +679,9 @@ impl Held for tutti_midi_runtime::MidiClipControls {
         Self::current(self)
     }
 
-    fn replace(&self, value: &Self::Value) {
+    fn replace(&self, value: &Self::Value) -> bool {
         self.set(Arc::clone(value));
+        true
     }
 }
 
@@ -495,8 +693,9 @@ impl Held for tutti_midi_runtime::HarmonyControls {
         Self::current(self)
     }
 
-    fn replace(&self, value: &Self::Value) {
+    fn replace(&self, value: &Self::Value) -> bool {
         self.set(Arc::clone(value));
+        true
     }
 }
 
@@ -510,34 +709,11 @@ impl<T: Copy + PartialEq + Send + Sync + 'static> Held for tutti_rt::Publisher<T
         *tutti_rt::Publisher::current(self)
     }
 
-    fn replace(&self, value: &T) {
+    fn replace(&self, value: &T) -> bool {
         if *tutti_rt::Publisher::current(self) != *value {
             self.publish(*value);
         }
-    }
-}
-
-/// A value a node reads through a published cell, written through its
-/// control side ([`Held`]), which publishes when the value differs from the
-/// one in force.
-#[cfg(feature = "midi")]
-pub(crate) struct PublishedSlot<C>(pub C);
-
-#[cfg(feature = "midi")]
-impl<C: Held> Slot<C::Value> for PublishedSlot<C>
-where
-    C::Value: Send + Sync + 'static,
-{
-    fn load(&self) -> C::Value {
-        self.0.current()
-    }
-
-    fn check(&self, _: &C::Value) -> Result<(), SetRefusal> {
-        Ok(())
-    }
-
-    fn store(&self, value: &C::Value) {
-        self.0.replace(value);
+        true
     }
 }
 
@@ -670,27 +846,32 @@ mod tests {
     use tutti_midi_protocol::MpeMode;
     use tutti_rt::Publisher;
 
-    /// **A value equal to the one in force publishes nothing**: the cell's
-    /// publish number moves for a different value and holds for an equal one.
+    /// **A value equal to the one in force publishes nothing**: once the
+    /// stage publishes, the cell's publish number moves for a different value
+    /// and holds for an equal one.
     #[test]
     fn an_equal_value_publishes_nothing_and_a_different_one_publishes() {
         let cell = Publisher::new(MpeMode::Disabled);
-        let slot = PublishedSlot(cell.clone());
+        let slot = PublishedSlot::new(cell.clone());
         let lower = tutti_fixtures::midi::lower_zone(3);
         let start = cell.seq();
         slot.store(&MpeMode::Disabled);
+        slot.publish_pending();
         assert_eq!(cell.seq(), start);
         slot.store(&lower);
+        slot.publish_pending();
         assert_eq!(cell.seq(), start + 1);
         slot.store(&lower);
+        slot.publish_pending();
         assert_eq!(cell.seq(), start + 1);
 
         let controls =
             tutti_graph::IntoNode::<f32>::into_parts(tutti_midi_runtime::MidiClipNode::new([]))
                 .controls;
-        let slot = PublishedSlot(controls.clone());
+        let slot = PublishedSlot::new(controls.clone());
         let before = controls.current();
         slot.store(&Arc::new(tutti_midi_runtime::ClipEvents::default()));
+        slot.publish_pending();
         assert!(
             Arc::ptr_eq(&controls.current(), &before),
             "an equal clip, by value, publishes nothing"

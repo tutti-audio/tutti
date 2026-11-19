@@ -1074,10 +1074,12 @@ fn the_sessions_mpe_mode_reaches_a_ports_ingest() {
     assert_eq!(registered(&seen), 0);
 
     s.set(s.mpe().to(midi::lower_zone(3))).unwrap();
+    let _ = s.update();
     blocks(&s, 2);
     assert_eq!(registered(&seen), 7);
 
     s.set(s.mpe().to(midi::lower_zone(3))).unwrap();
+    let _ = s.update();
     blocks(&s, 2);
     assert_eq!(registered(&seen), 7, "the same mode: nothing sent");
 }

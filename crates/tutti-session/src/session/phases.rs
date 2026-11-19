@@ -46,9 +46,13 @@ pub enum Phase {
     /// onto the graph, staging what is new for the commit. A refusal is
     /// `SessionEvent::Modulation`.
     Modulation,
-    /// The output policy staged since the last update, applied
-    /// ([`Session::policy`]); then the commit, iff the graph was edited since
-    /// the last one, and the compensation of the plan it sent (or of a re-prepare's resumed plan)
+    /// The values written since the last update that wait for it published
+    /// (the tempo map, the meter, the loop region, a clip's events, a
+    /// harmony node's changes), together and in a fixed order: the tempo,
+    /// the meter, the loop, then each node's by key. Then the output policy
+    /// staged since the last update, applied ([`Session::policy`]); then the
+    /// commit, iff the graph was edited since the last one, and the
+    /// compensation of the plan it sent (or of a re-prepare's resumed plan)
     /// published.
     Commit,
     /// Modulation's re-apply and resyncs: while a
@@ -217,6 +221,9 @@ impl<K: AppKey, C: Clock> Session<K, C> {
                 self.jobs.report_landed(out);
             }
             Phase::Commit => {
+                // First: the plan this phase sends and the blocks after it
+                // read the values this update publishes.
+                self.values.publish_pending();
                 self.apply_output_policy();
                 let sent = self.graph.is_edited() && self.commit_reporting(out);
                 self.graph.report_commit(out);
