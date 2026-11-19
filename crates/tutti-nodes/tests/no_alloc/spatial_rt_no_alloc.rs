@@ -271,7 +271,7 @@ fn vbap_every_bed_under_hostile_cells_and_lanes_is_allocation_free_finite_and_bo
         assert!(!health.1, "{bed:?}: the LFE was fed");
         assert!(health.2 <= 1.0 + 1e-3, "{bed:?}: power sum {}", health.2);
 
-        // Held: lanes off, a mono fold at an ordinary bearing, the glide
+        // Held: lanes off, a mono fold at an ordinary bearing, the ramp
         // past; every frame is the unit power of its gains (0.5^2 for the
         // folded input 0.5), within a hair.
         for k in 0..4 {

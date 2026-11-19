@@ -9,7 +9,7 @@ use tutti_units::SampleRate;
 
 use super::{Spawned, events, state};
 use crate::pool::table::{Hold, HoldKind};
-use crate::{Declared, Life, Load, Parking, PoolConfig, PoolEntry, PoolKey, Session};
+use crate::{Declared, Life, Load, PoolConfig, PoolEntry, PoolKey, Retention, Session};
 
 /// A kind with something live behind it: it releases when parked, and loads
 /// again when declared after.
@@ -39,8 +39,8 @@ impl PoolEntry for Device {
         life.clone()
     }
 
-    fn park(_: u32) -> Parking<u32> {
-        Parking::Release
+    fn retain(_: u32) -> Retention<u32> {
+        Retention::Release
     }
 }
 

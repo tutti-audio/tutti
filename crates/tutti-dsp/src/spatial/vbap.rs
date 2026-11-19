@@ -1,10 +1,10 @@
 //! The VBAP block kernel: the speaker gains of one direction, and one output
-//! channel rendered along a glide between two of them.
+//! channel rendered along a ramp between two of them.
 //!
 //! The caller reads its controls on the grid ([`COEFF_INTERVAL`](crate::COEFF_INTERVAL) frames, counted
 //! from its last reset), hands [`VbapKernel::gains`] the bearing, height, width
-//! and spread of the grid point, glides from the previous grid point's gains to
-//! these ([`Glide`]), and renders each speaker's channel with
+//! and spread of the grid point, ramps from the previous grid point's gains to
+//! these ([`Ramp`]), and renders each speaker's channel with
 //! [`VbapGains::process_channel`].
 
 use tutti_buffers::MAX_CHANNELS;
@@ -12,7 +12,7 @@ use tutti_buffers::{Float, Fold, Mono, MonoMut};
 use tutti_units::{ArcDegrees, Azimuth, Elevation, Gain, Spread, StereoWidth};
 
 use crate::design::along;
-use crate::{Glide, Lerp};
+use crate::{Lerp, Ramp};
 
 mod error;
 mod layout;
@@ -33,7 +33,7 @@ const WIDTH_HALF_ANGLE: ArcDegrees = ArcDegrees::new(15.0);
 /// so a huge one cannot overflow the offset.
 const MAX_WIDTH: StereoWidth = StereoWidth::new(180.0 / WIDTH_HALF_ANGLE.get());
 
-/// One direction's speaker gains, as an end of a glide between two grid points.
+/// One direction's speaker gains, as an end of a ramp between two grid points.
 ///
 /// `mono` records which branch produced them: a mono set is one gain vector
 /// (`a`) applied to the folded pair, a stereo set is two: `a` for the left
@@ -49,7 +49,7 @@ impl VbapGains {
     /// Speaker `s`'s gains as a (left, right) pair, whatever the branch.
     ///
     /// A mono set weighs each channel by half its gain (`fold(l, r) * g` is
-    /// `l * g/2 + r * g/2` up to rounding), which is what lets a glide cross
+    /// `l * g/2 + r * g/2` up to rounding), which is what lets a ramp cross
     /// from one branch to the other without a step.
     #[inline]
     pub fn pair(&self, s: usize) -> (Gain, Gain) {
@@ -61,12 +61,12 @@ impl VbapGains {
         }
     }
 
-    /// Render one output channel along `glide`: speaker `speaker`'s gain, read
+    /// Render one output channel along `ramp`: speaker `speaker`'s gain, read
     /// at step `first` for the first frame of `out` and one step on for each
     /// frame after, applied to the stereo pair (`left`, `right`) into `out`. No
     /// speaker (the LFE) is silence.
     ///
-    /// A frame reads `glide.at(step)` in closed form (the target from its last
+    /// A frame reads `ramp.at(step)` in closed form (the target from its last
     /// step on), so a segment of frames that starts at step `first` renders the
     /// same bits however it is cut into calls. `first` is one past the steps the
     /// frames before it have used: the first frame after an aim reads step 1,
@@ -80,7 +80,7 @@ impl VbapGains {
     /// instead of stepping.
     #[inline]
     pub fn process_channel<F: Float>(
-        glide: &Glide<VbapGains>,
+        ramp: &Ramp<VbapGains>,
         first: u32,
         speaker: Option<usize>,
         fold: &Fold<F>,
@@ -93,8 +93,8 @@ impl VbapGains {
             out.fill(F::ZERO);
             return;
         };
-        let (from, to, n) = (&glide.from, &glide.to, glide.n);
-        // The gain at step `k`, `Glide::at`'s rule (the target from the last step on)
+        let (from, to, n) = (&ramp.from, &ramp.to, ramp.n);
+        // The gain at step `k`, `Ramp::at`'s rule (the target from the last step on)
         // for one speaker's pair: `at` would blend all of the set for each frame. The ends
         // cross to `F` once per call and the blend runs in `F`.
         let blend = |from: F, to: F, k: u32| {
@@ -106,7 +106,7 @@ impl VbapGains {
         };
         let steps = first..;
         // A pair of ends that are the same bits is a held gain, which skips the
-        // blend (`-0.0` and `+0.0` differ in bits, so a sign change is a glide).
+        // blend (`-0.0` and `+0.0` differ in bits, so a sign change is a ramp).
         if from.mono && to.mono {
             let (g_from, g_to) = (from.a[s], to.a[s]);
             let mono = |l: F, r: F| {
@@ -146,8 +146,8 @@ impl VbapGains {
     }
 }
 
-/// A glide between two gain sets: each speaker's (left, right) pair blended
-/// linearly, so the glide is a chord between two unit-power vectors and a
+/// A ramp between two gain sets: each speaker's (left, right) pair blended
+/// linearly, so the ramp is a chord between two unit-power vectors and a
 /// mono set crosses to a stereo one without a step. Two mono sets stay mono.
 impl Lerp for VbapGains {
     fn lerp(&self, to: &Self, k: u32, n: u32) -> Self {
@@ -172,7 +172,7 @@ impl Lerp for VbapGains {
     }
 }
 
-/// A glide of a bearing is a glide along the short arc
+/// A ramp of a bearing is a ramp along the short arc
 /// ([`Azimuth::lerp_shortest`]): from 170 to -170 it passes through 180, never
 /// through the front.
 impl Lerp for Azimuth {
@@ -181,7 +181,7 @@ impl Lerp for Azimuth {
     }
 }
 
-/// A glide of a height is a line.
+/// A ramp of a height is a line.
 impl Lerp for Elevation {
     fn lerp(&self, to: &Self, k: u32, n: u32) -> Self {
         Elevation::lerp(*self, *to, f64::from(k) / f64::from(n))

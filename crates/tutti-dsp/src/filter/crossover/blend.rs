@@ -1,4 +1,4 @@
-//! [`CrossoverBlend`]: the value a crossover's glide moves, the band count and the
+//! [`CrossoverBlend`]: the value a crossover's ramp moves, the band count and the
 //! integrator gain of each split, and the blend of two of them.
 
 use core::f64::consts::SQRT_2;
@@ -84,7 +84,7 @@ impl Tpt {
     }
 }
 
-/// What a [`CrossoverBank`](super::CrossoverBank)'s glide moves: the band count and
+/// What a [`CrossoverBank`](super::CrossoverBank)'s ramp moves: the band count and
 /// the integrator gain of each split, from a [`CrossoverModel`](super::CrossoverModel)
 /// ([`blend`](super::CrossoverModel::blend)).
 ///

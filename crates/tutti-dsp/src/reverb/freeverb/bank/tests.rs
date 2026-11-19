@@ -21,10 +21,10 @@ fn impulse(len: usize) -> Vec<f32> {
     x
 }
 
-/// `x` through `bank` in blocks of `block`, `glides` carried across them: `(left, right)`.
+/// `x` through `bank` in blocks of `block`, `ramps` carried across them: `(left, right)`.
 fn run(
     bank: &mut FreeverbBank<f32>,
-    glides: &mut FreeverbGlides<f32>,
+    ramps: &mut FreeverbRamps<f32>,
     x: &[f32],
     block: usize,
 ) -> (Vec<f32>, Vec<f32>) {
@@ -36,7 +36,7 @@ fn run(
         let (l, r) = (&mut out.0[at..end], &mut out.1[at..end]);
         let mut outs: [&mut [f32]; 2] = [l, r];
         bank.process(
-            glides,
+            ramps,
             Planes::new(&a).unwrap(),
             PlanesMut::new(&mut outs).unwrap(),
         );
@@ -45,13 +45,13 @@ fn run(
     out
 }
 
-/// A bank at `rate` with `c` aimed and landed.
-fn settled(rate: SampleRate, c: &FreeverbControls) -> (FreeverbBank<f32>, FreeverbGlides<f32>) {
+/// A bank at `rate` with `c` set and at rest.
+fn settled(rate: SampleRate, c: &FreeverbControls) -> (FreeverbBank<f32>, FreeverbRamps<f32>) {
     let bank = FreeverbBank::<f32>::new(rate);
-    let mut glides = bank.glides();
-    bank.aim(&mut glides, c);
-    glides.settle();
-    (bank, glides)
+    let mut ramps = bank.ramps();
+    bank.retarget(&mut ramps, c);
+    ramps.jump_to_target();
+    (bank, ramps)
 }
 
 /// A comb's impulse response from its definition: the loop `v[n] = x[n] + g s[n]` with `s` the
@@ -210,8 +210,8 @@ fn the_tunings_and_the_stereo_spread_are_freeverbs() {
 /// 44.1 kHz, and out of the right 23 frames later, and nothing before.
 #[test]
 fn the_right_channel_sounds_23_frames_after_the_left() {
-    let (mut bank, mut glides) = settled(RATE, &FreeverbControls::GENERAL_MIDI);
-    let (l, r) = run(&mut bank, &mut glides, &impulse(1_300), 64);
+    let (mut bank, mut ramps) = settled(RATE, &FreeverbControls::GENERAL_MIDI);
+    let (l, r) = run(&mut bank, &mut ramps, &impulse(1_300), 64);
     assert!(l[..1116].iter().all(|&s| s == 0.0));
     assert!(l[1116].abs() > 0.01);
     assert!(r[..1139].iter().all(|&s| s == 0.0));
@@ -223,8 +223,8 @@ fn the_right_channel_sounds_23_frames_after_the_left() {
 /// all-passes' direct paths, `(-1)^4`.
 #[test]
 fn the_input_is_scaled_by_the_fixed_gain() {
-    let (mut bank, mut glides) = settled(RATE, &FreeverbControls::GENERAL_MIDI);
-    let (l, _) = run(&mut bank, &mut glides, &impulse(1_200), 64);
+    let (mut bank, mut ramps) = settled(RATE, &FreeverbControls::GENERAL_MIDI);
+    let (l, _) = run(&mut bank, &mut ramps, &impulse(1_200), 64);
     assert!((l[1116] - 0.015).abs() < 1e-6, "{}", l[1116]);
     assert_eq!(FreeverbBank::<f32>::FIXED_GAIN, Gain::new(0.015));
 }
@@ -270,7 +270,7 @@ fn a_comb_falls_sixty_decibels_in_the_schroeder_rt60() {
 #[test]
 fn the_tail_is_the_rt60_of_the_longest_comb_plus_the_chain() {
     let gm = FreeverbControls::GENERAL_MIDI;
-    let (mut bank, mut glides) = settled(RATE, &gm);
+    let (mut bank, mut ramps) = settled(RATE, &gm);
     let Tail::Finite(tail) = bank.tail_of(&gm) else {
         panic!("a finite tail")
     };
@@ -293,7 +293,7 @@ fn the_tail_is_the_rt60_of_the_longest_comb_plus_the_chain() {
     );
     assert!(tail.get() as f64 > 1.5 * RATE.get(), "past one RT60");
     let len = tail.get() + 20_000;
-    let (l, r) = run(&mut bank, &mut glides, &impulse(len), 512);
+    let (l, r) = run(&mut bank, &mut ramps, &impulse(len), 512);
     let peak = l.iter().chain(&r).fold(0.0f32, |m, s| m.max(s.abs()));
     let last = |from: usize| {
         l[from..]
@@ -319,29 +319,29 @@ fn the_tail_is_the_rt60_of_the_longest_comb_plus_the_chain() {
 }
 
 /// A room size and a damping that move mid-stream move the combs' feedback and damping over
-/// the 20 ms glide, a chunk at a time, and land on the new figures exactly: each chunk's
+/// the 20 ms ramp, a chunk at a time, and land on the new figures exactly: each chunk's
 /// change is the distance over the steps (20 ms at 48 kHz in chunks of 32 frames is 30), the
 /// first is far from the target, and the figure is the target at the last step and not
 /// before.
 #[test]
-fn a_moving_room_glides_its_combs_a_chunk_at_a_time() {
+fn a_moving_room_ramps_its_combs_a_chunk_at_a_time() {
     let rate = SampleRate::SR_48K;
     let (from_c, to_c) = (controls(0.2, 0.1), controls(0.9, 0.9));
-    let (mut bank, mut glides) = settled(rate, &from_c);
+    let (mut bank, mut ramps) = settled(rate, &from_c);
     let x = vec![0.25f32; FreeverbBank::<f32>::CHUNK];
-    let chunk = |bank: &mut FreeverbBank<f32>, glides: &mut FreeverbGlides<f32>| {
-        run(bank, glides, &x, FreeverbBank::<f32>::CHUNK);
+    let chunk = |bank: &mut FreeverbBank<f32>, ramps: &mut FreeverbRamps<f32>| {
+        run(bank, ramps, &x, FreeverbBank::<f32>::CHUNK);
         let c = &bank.combs[0][0];
         (c.feedback, c.damp1)
     };
-    let (from, from_damp) = chunk(&mut bank, &mut glides);
+    let (from, from_damp) = chunk(&mut bank, &mut ramps);
     assert_eq!(from, f32::from_unit(from_c.feedback()));
-    bank.aim(&mut glides, &to_c);
+    bank.retarget(&mut ramps, &to_c);
     let (to, to_damp) = (f32::from_unit(to_c.feedback()), to_c.damping() as f32);
     let steps = 30;
     let mut last = from;
     for k in 1..=steps {
-        let (f, dmp) = chunk(&mut bank, &mut glides);
+        let (f, dmp) = chunk(&mut bank, &mut ramps);
         assert!(
             ((f - last) - (to - from) / steps as f32).abs() < 1e-5,
             "step {k}: {last} -> {f}"
@@ -353,11 +353,11 @@ fn a_moving_room_glides_its_combs_a_chunk_at_a_time() {
             );
         }
         if k < steps {
-            assert!(f != to && dmp != to_damp, "landed early at {k}");
+            assert!(f != to && dmp != to_damp, "arrived early at {k}");
         }
         last = f;
     }
-    assert_eq!(chunk(&mut bank, &mut glides), (to, to_damp));
+    assert_eq!(chunk(&mut bank, &mut ramps), (to, to_damp));
     assert!(from != to && from_damp != to_damp);
 }
 
@@ -369,9 +369,9 @@ fn any_block_size_gives_the_same_bits() {
         .map(|n| ((n * 13 + 5) % 100) as f32 / 50.0 - 1.0)
         .collect();
     let render = |block: usize| {
-        let (mut bank, mut glides) = settled(RATE, &controls(0.2, 0.1));
-        bank.aim(&mut glides, &controls(0.9, 0.7));
-        run(&mut bank, &mut glides, &x, block)
+        let (mut bank, mut ramps) = settled(RATE, &controls(0.2, 0.1));
+        bank.retarget(&mut ramps, &controls(0.9, 0.7));
+        run(&mut bank, &mut ramps, &x, block)
     };
     let whole = render(x.len());
     assert!(whole.0.iter().any(|&s| s != 0.0));
@@ -386,24 +386,24 @@ fn any_block_size_gives_the_same_bits() {
 #[test]
 fn a_reset_bank_is_a_fresh_one_and_a_clone_shares_nothing() {
     let c = controls(0.7, 0.3);
-    let (mut used, mut glides) = settled(RATE, &c);
-    run(&mut used, &mut glides, &vec![1.0; 5_017], 100);
+    let (mut used, mut ramps) = settled(RATE, &c);
+    run(&mut used, &mut ramps, &vec![1.0; 5_017], 100);
     used.reset();
-    let (mut fresh, mut fresh_glides) = settled(RATE, &c);
-    let mut glides = used.glides();
-    used.aim(&mut glides, &c);
-    glides.settle();
+    let (mut fresh, mut fresh_ramps) = settled(RATE, &c);
+    let mut ramps = used.ramps();
+    used.retarget(&mut ramps, &c);
+    ramps.jump_to_target();
     assert_eq!(
-        run(&mut used, &mut glides, &impulse(4_000), 64),
-        run(&mut fresh, &mut fresh_glides, &impulse(4_000), 64)
+        run(&mut used, &mut ramps, &impulse(4_000), 64),
+        run(&mut fresh, &mut fresh_ramps, &impulse(4_000), 64)
     );
     let mut copy = used.clone();
-    let mut copy_glides = glides;
-    let more = run(&mut used, &mut glides, &impulse(2_000), 64);
-    assert_eq!(run(&mut copy, &mut copy_glides, &impulse(2_000), 64), more);
+    let mut copy_ramps = ramps;
+    let more = run(&mut used, &mut ramps, &impulse(2_000), 64);
+    assert_eq!(run(&mut copy, &mut copy_ramps, &impulse(2_000), 64), more);
     copy.reset();
     assert!(
-        run(&mut used, &mut glides, &vec![0.0; 100], 64)
+        run(&mut used, &mut ramps, &vec![0.0; 100], 64)
             .0
             .iter()
             .any(|&s| s != 0.0),
@@ -419,30 +419,30 @@ fn two_input_channels_are_averaged_and_one_output_plane_is_the_left() {
         .map(|n| ((n * 7) % 19) as f32 / 9.0 - 1.0)
         .collect();
     let setup = || {
-        let (bank, mut glides) = settled(RATE, &controls(0.3, 0.2));
-        bank.aim(&mut glides, &controls(0.8, 0.5));
-        (bank, glides)
+        let (bank, mut ramps) = settled(RATE, &controls(0.3, 0.2));
+        bank.retarget(&mut ramps, &controls(0.8, 0.5));
+        (bank, ramps)
     };
-    let (mut bank, mut glides) = setup();
-    let want = run(&mut bank, &mut glides, &x, 128);
+    let (mut bank, mut ramps) = setup();
+    let want = run(&mut bank, &mut ramps, &x, 128);
     // Two channels are averaged: the same signal twice is itself.
-    let (mut bank, mut glides) = setup();
+    let (mut bank, mut ramps) = setup();
     let twice = [x.as_slice(), x.as_slice()];
     let (mut l2, mut r2) = (vec![0.0f32; x.len()], vec![0.0f32; x.len()]);
     let mut outs: [&mut [f32]; 2] = [&mut l2, &mut r2];
     bank.process(
-        &mut glides,
+        &mut ramps,
         Planes::new(&twice).unwrap(),
         PlanesMut::new(&mut outs).unwrap(),
     );
     assert_eq!((l2, r2), want);
     // One output plane is the left.
-    let (mut bank, mut glides) = setup();
+    let (mut bank, mut ramps) = setup();
     let one_in = [x.as_slice()];
     let mut left = vec![0.0f32; x.len()];
     let mut outs: [&mut [f32]; 1] = [&mut left];
     bank.process(
-        &mut glides,
+        &mut ramps,
         Planes::new(&one_in).unwrap(),
         PlanesMut::new(&mut outs).unwrap(),
     );
@@ -455,20 +455,20 @@ fn two_input_channels_are_averaged_and_one_output_plane_is_the_left() {
 #[test]
 fn the_tail_falls_far_below_its_floor_and_a_huge_input_stays_finite() {
     let c = controls(1.0, 0.0);
-    let (mut bank, mut glides) = settled(RATE, &c);
+    let (mut bank, mut ramps) = settled(RATE, &c);
     let Tail::Finite(tail) = bank.tail_of(&c) else {
         panic!("finite")
     };
-    let (l, r) = run(&mut bank, &mut glides, &impulse(tail.get() * 3), 512);
+    let (l, r) = run(&mut bank, &mut ramps, &impulse(tail.get() * 3), 512);
     assert!(
         l[tail.get() * 2..]
             .iter()
             .chain(&r[tail.get() * 2..])
             .all(|&s| s.abs() < 1e-5)
     );
-    let (mut bank, mut glides) = settled(RATE, &c);
+    let (mut bank, mut ramps) = settled(RATE, &c);
     let loud = vec![1e30f32; 4_000];
-    let (l, r) = run(&mut bank, &mut glides, &loud, 64);
+    let (l, r) = run(&mut bank, &mut ramps, &loud, 64);
     assert!(l.iter().chain(&r).all(|s| s.is_finite()));
 }
 
@@ -478,7 +478,7 @@ fn the_tail_falls_far_below_its_floor_and_a_huge_input_stays_finite() {
 #[test]
 fn an_absurd_rate_neither_hangs_nor_allocates_without_bound() {
     for hz in [1.0f64, 50.0, 97.0] {
-        let (mut bank, mut glides) = settled(SampleRate::of(hz), &FreeverbControls::GENERAL_MIDI);
+        let (mut bank, mut ramps) = settled(SampleRate::of(hz), &FreeverbControls::GENERAL_MIDI);
         let whole = hz.round();
         let scale = |t: usize| ((whole / 44_100.0 * t as f64).round() as usize).max(1);
         for (side, spread) in [(0, 0), (1, 23)] {
@@ -489,7 +489,7 @@ fn an_absurd_rate_neither_hangs_nor_allocates_without_bound() {
                 assert_eq!(a.buffer.len(), scale(t + spread), "{hz} Hz all-pass");
             }
         }
-        let (l, r) = run(&mut bank, &mut glides, &impulse(2_000), 64);
+        let (l, r) = run(&mut bank, &mut ramps, &impulse(2_000), 64);
         assert!(l.iter().chain(&r).all(|s| s.is_finite()), "{hz} Hz");
         assert!(l.iter().chain(&r).any(|&s| s != 0.0), "{hz} Hz sounds");
     }
@@ -510,9 +510,9 @@ fn the_render_schroeder_rt60_lies_between_the_shortest_and_longest_comb_t60() {
     let c = controls(0.5, 0.0);
     let g = c.feedback().get();
     let comb_t60 = |l: f64| -3.0 * l / (RATE.get() * libm::log10(g));
-    let (mut bank, mut glides) = settled(RATE, &c);
+    let (mut bank, mut ramps) = settled(RATE, &c);
     let frames = (4.0 * comb_t60(1640.0) * RATE.get()) as usize;
-    let (l, r) = run(&mut bank, &mut glides, &impulse(frames), 512);
+    let (l, r) = run(&mut bank, &mut ramps, &impulse(frames), 512);
     let mut energy = vec![0.0f64; frames];
     let mut total = 0.0;
     for i in (0..frames).rev() {
@@ -540,12 +540,12 @@ fn the_render_schroeder_rt60_lies_between_the_shortest_and_longest_comb_t60() {
 /// `x` through an `f64` bank in one call: `(left, right)`.
 fn run_wide(
     bank: &mut FreeverbBank<f64>,
-    glides: &mut FreeverbGlides<f64>,
+    ramps: &mut FreeverbRamps<f64>,
     x: &[f64],
 ) -> [Vec<f64>; 2] {
     let (mut l, mut r) = (vec![0.0f64; x.len()], vec![0.0f64; x.len()]);
     bank.process(
-        glides,
+        ramps,
         Planes::new(&[x]).unwrap(),
         PlanesMut::new(&mut [&mut l[..], &mut r[..]]).unwrap(),
     );
@@ -612,11 +612,11 @@ fn an_f64_freeverb_returns_the_fixed_gain_times_the_input_at_each_comb_length() 
     let mut x = vec![0.0f64; 1_300];
     x[0] = x0;
     let bank = FreeverbBank::<f64>::new(SampleRate::SR_44K1);
-    let mut glides = bank.glides();
+    let mut ramps = bank.ramps();
     let mut bank = bank;
-    bank.aim(&mut glides, &controls(0.5, 0.5));
-    glides.settle();
-    let [left, _] = run_wide(&mut bank, &mut glides, &x);
+    bank.retarget(&mut ramps, &controls(0.5, 0.5));
+    ramps.jump_to_target();
+    let [left, _] = run_wide(&mut bank, &mut ramps, &x);
     let mut want = vec![0.0f64; 1_300];
     for at in [1_116, 1_188, 1_277] {
         want[at] = x0 * g;
@@ -636,11 +636,11 @@ fn an_f64_freeverb_is_linear() {
     let mix: Vec<f64> = x.iter().zip(&y).map(|(x, y)| a * x + b * y).collect();
     let render = |input: &[f64]| {
         let bank = FreeverbBank::<f64>::new(SampleRate::SR_44K1);
-        let mut glides = bank.glides();
+        let mut ramps = bank.ramps();
         let mut bank = bank;
-        bank.aim(&mut glides, &controls(0.7, 0.3));
-        glides.settle();
-        run_wide(&mut bank, &mut glides, input)
+        bank.retarget(&mut ramps, &controls(0.7, 0.3));
+        ramps.jump_to_target();
+        run_wide(&mut bank, &mut ramps, input)
     };
     let (rx, ry, rm) = (render(&x), render(&y), render(&mix));
     for c in 0..2 {

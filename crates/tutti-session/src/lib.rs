@@ -167,8 +167,8 @@ pub use device::{
 #[cfg(feature = "plugin")]
 pub use editor::{Editor, EditorCallError, Opened};
 pub use error::{
-    ConnectError, DeclarationError, Error, HeardTapError, InletError, NoSuchNode, RemoveError,
-    Result, TempoError,
+    ConnectError, DeclarationError, Error, InletError, NoSuchNode, RemoveError, Result,
+    SessionOutputTapError, TempoError,
 };
 #[cfg(feature = "midi")]
 pub use error::{MidiError, RouteDeclarer};
@@ -185,7 +185,7 @@ pub use graph::{
 pub use input::{Input, InputConfig, InputOpener, OpenedInput, Trim};
 #[cfg(feature = "midi")]
 pub use instrument::{AddedInstrument, AnyNode, InstrumentHandle, NotInstrument};
-pub use job::{Job, JobId, JobKind, JobStatus, Landed, WaitError, WorkerError};
+pub use job::{Job, JobId, JobKind, JobOutput, JobStatus, WaitError, WorkerError};
 pub use jobs::Task;
 pub use key::{
     Bus, BusSink, Channel, Connection, Edge, Event, EventEdge, EventInPort, EventOutPort,
@@ -237,9 +237,9 @@ pub(crate) use pool::Pool;
 #[cfg(all(feature = "sampler", codec))]
 pub use pool::{AudioEntry, AudioFile, StreamInfo, Tier, audio_file};
 pub use pool::{
-    Declared, HandleError, IntoPool, Life, Load, LoadError, OpenCx, Owned, Parking, PoolConfig,
-    PoolEntry, PoolError, PoolEvent, PoolJobError, PoolKey, PoolLoaded, PoolOutcome, PoolReport,
-    PoolSet, PoolState, RefreshPool, RefreshReport, RetryError, Sharing, WhenLoadedError,
+    Declared, HandleError, IntoPool, Life, Load, LoadError, OpenCx, Owned, PoolConfig, PoolEntry,
+    PoolError, PoolEvent, PoolJobError, PoolKey, PoolLoaded, PoolOutcome, PoolReport, PoolSet,
+    PoolState, RefreshPool, RefreshReport, Retention, RetryError, Sharing, WhenLoadedError,
     stranded_loads,
 };
 #[cfg(feature = "plugin")]
@@ -282,7 +282,7 @@ pub use switch::ClockError;
 #[cfg(feature = "capture")]
 pub use take::{
     Armed, InFlight, Placement, Punch, PunchError, Recorded, Rolling, Start, Take, TakeEnd,
-    TakeError, TakeEvent, TakeId, TakeTarget, Terms, Window,
+    TakeError, TakeEvent, TakeId, TakeLatency, TakeTarget, Window,
 };
 #[cfg(all(feature = "midi", feature = "analyze"))]
 pub use transcribe::{LevelVelocity, NoteCents, NoteMapping, clip_from_notes, harmony_from_chords};
@@ -309,10 +309,10 @@ pub use value::MidiPolicyTarget;
 pub use value::OutputPolicyTarget;
 pub use value::{
     AnyAssign, AnyTarget, Assign, AutomationTarget, ClickTargets, ClickVolumeTarget, CurveTarget,
-    DepthTarget, Effective, GainTarget, GainTargetError, Info, IntoAssign, IntoRead, Knobs,
-    LoopTarget, MacroTarget, MeterTarget, MixTarget, ModeTarget, Modify, Moved, NodeSlots,
-    ParamTarget, PolarityTarget, RangeTarget, RateTarget, ScalarTarget, SetRefusal, SettingTarget,
-    Target, TargetInfo, TempoTarget, ValueError, ValueErrorKind,
+    DepthTarget, Effective, GainTarget, GainTargetError, Info, IntoAssign, IntoRead, LoopTarget,
+    MacroTarget, MeterTarget, MixTarget, ModeTarget, Modify, Modulatable, NodeSlots, ParamTarget,
+    PolarityTarget, RangeTarget, RateTarget, ScalarTarget, SetRefusal, SettingTarget, Target,
+    TargetInfo, TempoTarget, ValueError, ValueErrorKind, Values,
 };
 #[cfg(feature = "midi")]
 pub use value::{ClipEventsTarget, HarmonyTarget, MpeModeTarget, OutputLatencyTarget};

@@ -16,10 +16,10 @@
 //!
 //! A circular param ([`UnitParam::is_circular`], `Azimuth`) is wrapped onto
 //! `-180..180`, never clamped, and its moves take the short arc. **The port's
-//! frames jump by 360 where a move crosses the seam**: a glide from 170 to
+//! frames jump by 360 where a move crosses the seam**: a ramp from 170 to
 //! -170 reads ..., 179.9, -179.9, ... a step of about 360 between neighbouring
 //! frames though the bearing moved a fraction of a degree. A consumer that
-//! smooths or interpolates the value must glide on the arc
+//! smooths or interpolates the value must ramp on the arc
 //! ([`UnitParam::arc`], [`Azimuth::shortest_arc_to`]) and wrap on read, not
 //! subtract frames.
 //!
@@ -526,7 +526,7 @@ impl<'a, F: Float> ParamInput<'a, F> {
     /// - the frame a ramp or segment in flight arrives on (from there it
     ///   holds its end).
     ///
-    /// Read after the port's delay, as the values are. A base's glide, a
+    /// Read after the port's delay, as the values are. A base's ramp, a
     /// connection's declick and the range clamp make none. Empty when nothing
     /// modulates it. At most one per frame, so never more than the block's
     /// length.

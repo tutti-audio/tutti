@@ -1,6 +1,6 @@
-use rand::rngs::StdRng;
-use rand::{RngExt, SeedableRng};
+use crate::testing::uniform;
 use tutti_buffers::{Mono, Planes, PlanesMut};
+use tutti_rt::SplitMix64;
 use tutti_units::Db;
 
 use super::*;
@@ -29,12 +29,12 @@ fn controls(db: f64) -> BrickwallControls {
 /// The ceilings the tests run at: a grid across the range and seeded draws.
 fn ceilings() -> Vec<f64> {
     let mut all = vec![-96.0, -60.0, -24.0, -6.0, -0.3, 0.0, 3.0, 12.0];
-    let mut rng = StdRng::seed_from_u64(24);
-    all.extend((0..64).map(|_| rng.random_range(-80.0..20.0)));
+    let mut rng = SplitMix64::new(24);
+    all.extend((0..64).map(|_| uniform(&mut rng, -80.0, 20.0)));
     all
 }
 
-/// A bank aimed at `controls`, rendering `x` on both channels, held or with `lane`, in
+/// A bank set to `controls`, rendering `x` on both channels, held or with `lane`, in
 /// blocks of `block`.
 fn render_blocks(
     controls: BrickwallControls,
@@ -43,7 +43,7 @@ fn render_blocks(
     block: usize,
 ) -> Vec<Vec<f32>> {
     let mut bank = BrickwallBank::<f32>::new();
-    bank.aim(&controls);
+    bank.retarget(&controls);
     let mut out = vec![vec![0.0f32; x.len()]; 2];
     let mut start = 0;
     while start < x.len() {
@@ -63,7 +63,7 @@ fn render_blocks(
     out
 }
 
-/// `xs` on one channel through a bank aimed at `db`.
+/// `xs` on one channel through a bank set to `db`.
 fn through(db: f64, xs: &[f32]) -> Vec<f32> {
     render_blocks(controls(db), xs, None, 64).remove(0)
 }
@@ -112,9 +112,9 @@ fn the_ceiling_is_the_amplitude_of_the_decibels() {
 /// identity inside the ceiling.
 #[test]
 fn the_bank_is_the_clamp_and_its_four_consequences() {
-    let mut rng = StdRng::seed_from_u64(8);
+    let mut rng = SplitMix64::new(8);
     let mut xs: Vec<f32> = vec![0.0, -0.0, 1.0, -1.0, 0.5, 1e-30, 1e30, f32::MAX, f32::MIN];
-    xs.extend((0..200).map(|_| rng.random_range(-4.0..4.0)));
+    xs.extend((0..200).map(|_| uniform(&mut rng, -4.0, 4.0)));
     xs.extend((-400..=400).map(|i| i as f32 * 0.01));
     let negated: Vec<f32> = xs.iter().map(|x| -x).collect();
     for db in ceilings() {
@@ -150,7 +150,7 @@ fn infinite_ceilings_pass_everything_and_mute() {
     );
 }
 
-/// The render is the clamp of the definition at the aimed ceiling, whatever the block cut
+/// The render is the clamp of the definition at the set ceiling, whatever the block cut
 /// (1, 17, 64, 512 frames) and on every channel.
 #[test]
 fn the_render_is_the_clamp_at_any_block() {
@@ -175,7 +175,7 @@ fn the_render_is_the_clamp_at_any_block() {
 }
 
 /// A fed ceiling is read **per frame**: frame `i` is clamped at the amplitude of
-/// `lane[i]` dB, a NaN frame at the aimed ceiling, and `+-inf` frames are
+/// `lane[i]` dB, a NaN frame at the set ceiling, and `+-inf` frames are
 /// ceilings. Whatever the block cut.
 #[test]
 fn a_fed_ceiling_is_read_per_frame() {
@@ -251,7 +251,7 @@ fn an_f64_brickwall_clamps_at_the_f64_amplitude_and_passes_what_is_inside() {
     let x = wide_signal(64);
     let render = |db: f64| -> Vec<f64> {
         let mut bank = BrickwallBank::<f64>::new();
-        bank.aim(&controls(db));
+        bank.retarget(&controls(db));
         let mut y = vec![0.0f64; x.len()];
         bank.process(
             BrickwallLanes::default(),
@@ -274,7 +274,7 @@ fn an_f64_brickwall_clamps_at_the_f64_amplitude_and_passes_what_is_inside() {
 fn an_f32_ceiling_of_800_db_passes_an_infinity_unchanged() {
     let x = [1.0e30f32, -3.0, 0.0, f32::INFINITY, f32::NEG_INFINITY];
     let mut bank = BrickwallBank::<f32>::new();
-    bank.aim(&controls(800.0));
+    bank.retarget(&controls(800.0));
     let mut y = [0.0f32; 5];
     bank.process(
         BrickwallLanes::default(),

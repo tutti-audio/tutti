@@ -626,44 +626,30 @@ fn a_refused_rebuild_is_retried_with_no_rate() {
     assert_eq!(rig.state.stage(), Stage::Active);
 }
 
-/// **An edit the full ring refused arrives, latest value only, when the idle
-/// pass retries.**
+/// **Writes to one parameter before a block arrive as its latest value, once;
+/// a block with nothing new sends nothing.**
 #[test]
-fn a_refused_edit_is_retried_on_the_next_tick() {
+fn writes_before_a_block_arrive_as_the_latest_value_per_parameter() {
     let mut rig = Rig::new();
-    rig.plugin.edit_capacity(1);
-    rig.op(HostOp::Activate(prepare(48_000.0)));
     let (a, b) = (ParamId::new(1), ParamId::new(2));
     rig.plugin.declare(&[(a, false), (b, false)]);
-    rig.lifecycle
-        .control()
-        .expect("the plugin is there")
-        .set_parameter(main(), a, Normalized::of(0.1))
-        .expect("a declared, writable parameter");
-    // The ring holds one: these are refused, `b` twice.
-    rig.lifecycle
-        .control()
-        .expect("the plugin is there")
-        .set_parameter(main(), b, Normalized::of(0.2))
-        .expect("a declared, writable parameter");
-    rig.lifecycle
-        .control()
-        .expect("the plugin is there")
-        .set_parameter(main(), b, Normalized::of(0.9))
-        .expect("a declared, writable parameter");
+    rig.op(HostOp::Activate(prepare(48_000.0)));
+    for (id, value) in [(a, 0.1), (b, 0.2), (b, 0.9)] {
+        rig.lifecycle
+            .control()
+            .expect("the plugin is there")
+            .set_parameter(main(), id, Normalized::of(value))
+            .expect("a declared, writable parameter");
+    }
     rig.plugin.clear_calls();
     rig.render(64).unwrap();
     assert_eq!(
         rig.plugin.calls(),
-        [Call::Edit(a, Normalized::of(0.1)), Call::Process(64)]
-    );
-
-    rig.plugin.clear_calls();
-    rig.tick();
-    rig.render(64).unwrap();
-    assert_eq!(
-        rig.plugin.calls(),
-        [Call::Edit(b, Normalized::of(0.9)), Call::Process(64)]
+        [
+            Call::Edit(a, Normalized::of(0.1)),
+            Call::Edit(b, Normalized::of(0.9)),
+            Call::Process(64)
+        ]
     );
     assert_eq!(
         rig.lifecycle

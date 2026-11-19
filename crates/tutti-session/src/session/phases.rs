@@ -285,9 +285,9 @@ impl<K: AppKey, C: Clock> Session<K, C> {
                 // Any thread that owns the session: what it frees is
                 // tables, meters, programs and clips, never a unit. A tap
                 // or meter whose reader was dropped goes out of the next plan.
-                self.graph.reap_taps();
-                self.graph.reap_event_taps();
-                self.graph.reap_meters();
+                self.graph.prune_taps();
+                self.graph.prune_event_taps();
+                self.graph.prune_meters();
                 self.output.reclaim();
                 self.reclaim();
                 self.graph.drain_rt_log();

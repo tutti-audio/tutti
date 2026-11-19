@@ -1,5 +1,5 @@
 //! [`FdnBank`]: the feedback delay network over buffers views, with the parameters that
-//! sound as [`Glide`]s ([`FdnGlides`]).
+//! sound as [`Ramp`]s ([`FdnRamps`]).
 //!
 //! `N` delay lines read with linear interpolation (so a length may move), a
 //! three-band absorption in each loop, a mix `A = I - 2 m v v^T` (`m` is 1 for a
@@ -9,24 +9,24 @@
 //! exactly the network's.
 //!
 //! **Chunks.** The render counts [`CHUNK`](FdnBank::CHUNK) frames from the last reset, and
-//! works once at each chunk's start: every glide takes a step, and the chunk's constants are
+//! works once at each chunk's start: every ramp takes a step, and the chunk's constants are
 //! read from them (the line lengths, the absorption gains, the reflection vector, the
 //! modulation's two ends the lengths are interpolated between). The chunks are counted from
 //! the first frame since the last reset, not from a call's edge, so the output does not
-//! depend on how the input is cut into calls. The *design* is not the bank's: the caller aims
-//! the glides ([`aim`](FdnBank::aim)) when its controls move, on a grid of its own.
+//! depend on how the input is cut into calls. The *design* is not the bank's: the caller retargets
+//! the ramps ([`retarget`](FdnBank::retarget)) when its controls move, on a grid of its own.
 //!
-//! **Retargeting ramps.** `aim` only sets targets. Every parameter that sounds (the loop
+//! **Retargeting ramps.** `retarget` only sets targets. Every parameter that sounds (the loop
 //! gains, the reflection vector (renormalised to its length every chunk) and its mix `m`,
 //! the input and output gains, the wet gain, the width and the modulation depth) is a
-//! [`Glide`] that moves to it in a fixed 20 ms of whole chunks, landing on it exactly; a
+//! [`Ramp`] that moves to it in a fixed 20 ms of whole chunks, landing on it exactly; a
 //! length moves at a bounded half frame a chunk (about 1.6% of a frame a frame, a pitch bend
 //! of 27 cents), and the pre-delay at two.
 //!
 //! **Lines in flight.** A gain is designed for the length its line is moving to. While a line
 //! is still `L'` frames long and its design is for `L`, each band's gain is raised to `L' / L`
 //! at the chunk's start, so the decay stays the designed RT60 at whatever length the line has
-//! (`begin_chunk` derives it). A landed line runs the designed gains unchanged.
+//! (`begin_chunk` derives it). An at-rest line runs the designed gains unchanged.
 //!
 //! **The mix.** The identity of a diagonal network and the reflection of a
 //! mixing one have determinants +1 and -1, so no path of orthogonal matrices
@@ -36,7 +36,7 @@
 //! switches at the end of a ramp that leaves a mixing matrix (when `v` has
 //! reached line 0, where `I - 2 v v^T` flips one line's sign) and at the start
 //! of one that reaches it. Every step of a ramp is then orthogonal, `v` moves
-//! between unit vectors (a diagonal network aims it at line 0), and a mixing
+//! between unit vectors (a diagonal network points it at line 0), and a mixing
 //! network is bit-identical to a recurrence without `m`. The switch is a step in
 //! the sign of line 0's loop, as the model's own matrix steps between
 //! `Diagonal` and the first `Reflection` near line 0.
@@ -51,7 +51,7 @@
 //! is scaled to peak at 0.9999 at most, so the loop cannot grow.
 //!
 //! **Format.** The state and the views are the bank's float `F`. The loop gains and the
-//! one-poles are designed in `f64` and cross to `F` once per design ([`FdnBank::aim`]). A pole
+//! one-poles are designed in `f64` and cross to `F` once per design ([`FdnBank::retarget`]). A pole
 //! is within `1 - p` of 1 at a low crossover (`p` of 200 Hz at 192 kHz is 6.5e-3), so a one-pole
 //! stores its complement `c = 1 - p`, solved with `expm1`, and runs `q += c (x - q)`. A loop
 //! gain is not stored as a complement: a line's gain is `g = 10^(-3 L / (fs T))` for its own
@@ -73,7 +73,7 @@ use crate::design::along;
 use crate::onepole::{cutoff_complement, cutoff_pole};
 use crate::reverb::network::{Absorption, Band, Matrix, Network, Stage};
 use crate::reverb::{CHUNK, ramp, tail_of};
-use crate::{Glide, Lerp, Ring, Steps, System, TAIL_FLOOR};
+use crate::{Lerp, Ramp, Ring, Steps, System, TAIL_FLOOR};
 
 /// The shortest a line reads at: one frame.
 const ONE_FRAME: ReadPosition = ReadPosition::from_frames(Samples::new(1));
@@ -82,8 +82,8 @@ const LENGTH_STEP: f64 = 0.5;
 /// How far the pre-delay moves in a chunk, in frames.
 const PRE_STEP: f64 = 2.0;
 
-/// The coefficient point a design asks for, as [`FdnBank::aim`] writes it: the values
-/// [`FdnGlides`] glide to, before any rate is applied. Sized for the most lines the bank was
+/// The coefficient point a design asks for, as [`FdnBank::retarget`] writes it: the values
+/// [`FdnRamps`] ramp to, before any rate is applied. Sized for the most lines the bank was
 /// built for; its fields from line `n` on are not read but for the input and output gains,
 /// which a smaller network closes.
 #[derive(Clone, Debug)]
@@ -133,57 +133,57 @@ impl<F: Float> Target<F> {
     }
 }
 
-/// What a [`FdnBank`] approaches: every sounding parameter a [`Glide`] (each at its own
+/// What a [`FdnBank`] approaches: every sounding parameter a [`Ramp`] (each at its own
 /// rate: a length and the pre-delay by a distance, the rest by 20 ms), and the few that jump
 /// (the line count, the modulation rate, the absorption's poles).
 ///
-/// Aimed by [`FdnBank::aim`], stepped once a chunk by [`FdnBank::process`]. A glide steps
-/// before its chunk runs: the first chunk after an aim reads step 1.
+/// Retargeted by [`FdnBank::retarget`], stepped once a chunk by [`FdnBank::process`]. A ramp steps
+/// before its chunk runs: the first chunk after a `retarget` reads step 1.
 #[derive(Clone, Debug)]
-pub struct FdnGlides<F: Float> {
+pub struct FdnRamps<F: Float> {
     /// The steps of the 20 ms ramp of a gain, at the rate prepared for.
     ramp: Steps,
-    /// The lines in use: 0 until the first aim, and the bank is silent.
+    /// The lines in use: 0 until the first `retarget`, and the bank is silent.
     n: usize,
     rate: Hz,
     /// The absorption one-poles' complements `1 - pole`.
     complement: [F; 2],
     crossover: [Hz; 2],
 
-    len: Vec<Glide<ReadPosition>>,
-    /// The length the gains are designed for, glided with them over the ramp: the gains in
+    len: Vec<Ramp<ReadPosition>>,
+    /// The length the gains are designed for, ramped with them over the ramp: the gains in
     /// flight are a blend of two designs, each for its own length.
-    design_len: Vec<Glide<ReadPosition>>,
-    pre_len: Glide<ReadPosition>,
-    depth: Glide<F>,
-    gain: Vec<[Glide<F>; 3]>,
-    v: Vec<Glide<F>>,
+    design_len: Vec<Ramp<ReadPosition>>,
+    pre_len: Ramp<ReadPosition>,
+    depth: Ramp<F>,
+    gain: Vec<[Ramp<F>; 3]>,
+    v: Vec<Ramp<F>>,
     /// The length of `v` the network asks for (1 for every design here): the
     /// reflection is renormalised to it every chunk, so it is orthogonal at
     /// every step of a ramp and not only at its ends.
-    v_len: Glide<F>,
+    v_len: Ramp<F>,
     /// `m` of `I - 2 m v v^T`: 0 for a diagonal network, 1 for a reflection. Only
     /// its target and whether it is moving are read (see the module docs): the
-    /// bank's `m` is 1 while it ramps or aims at 1, else 0.
-    mix: Glide<F>,
-    input: Vec<Glide<F>>,
-    out: Vec<[Glide<F>; 2]>,
-    wet: Glide<F>,
-    width: Glide<F>,
+    /// bank's `m` is 1 while it ramps or targets 1, else 0.
+    mix: Ramp<F>,
+    input: Vec<Ramp<F>>,
+    out: Vec<[Ramp<F>; 2]>,
+    wet: Ramp<F>,
+    width: Ramp<F>,
 }
 
-impl<F: Float + Lerp> FdnGlides<F> {
+impl<F: Float + Lerp> FdnRamps<F> {
     fn new(lines: usize, ramp: Steps, t: &Target<F>) -> Self {
-        let rest = Glide::landed(F::ZERO);
+        let rest = Ramp::new(F::ZERO);
         Self {
             ramp,
             n: 0,
             rate: Hz::new(0.5),
             complement: t.complement,
             crossover: t.crossover,
-            len: vec![Glide::landed(ONE_FRAME); lines],
-            design_len: vec![Glide::landed(ONE_FRAME); lines],
-            pre_len: Glide::landed(ReadPosition::START),
+            len: vec![Ramp::new(ONE_FRAME); lines],
+            design_len: vec![Ramp::new(ONE_FRAME); lines],
+            pre_len: Ramp::new(ReadPosition::START),
             depth: rest,
             gain: vec![[rest; 3]; lines],
             v: vec![rest; lines],
@@ -192,11 +192,11 @@ impl<F: Float + Lerp> FdnGlides<F> {
             input: vec![rest; lines],
             out: vec![[rest; 2]; lines],
             wet: rest,
-            width: Glide::landed(F::ONE),
+            width: Ramp::new(F::ONE),
         }
     }
 
-    fn glides(&mut self) -> impl Iterator<Item = &mut Glide<F>> {
+    fn ramps(&mut self) -> impl Iterator<Item = &mut Ramp<F>> {
         self.gain
             .iter_mut()
             .flatten()
@@ -212,56 +212,57 @@ impl<F: Float + Lerp> FdnGlides<F> {
             ])
     }
 
-    /// Lands on the targets now.
-    pub fn settle(&mut self) {
-        self.glides().for_each(Glide::settle);
-        self.lengths().for_each(Glide::settle);
+    /// Jumps to the targets now.
+    pub fn jump_to_target(&mut self) {
+        self.ramps().for_each(Ramp::jump_to_target);
+        self.lengths().for_each(Ramp::jump_to_target);
     }
 
-    /// Takes one step of every glide.
+    /// Takes one step of every ramp.
     fn step(&mut self) {
-        self.glides().for_each(|g| g.advance(1));
+        self.ramps().for_each(|g| g.advance(1));
         self.lengths().for_each(|g| g.advance(1));
     }
 
-    /// The glides of a length: the lines', the gains' design lengths and the pre-delay.
-    fn lengths(&mut self) -> impl Iterator<Item = &mut Glide<ReadPosition>> {
+    /// The ramps of a length: the lines', the gains' design lengths and the pre-delay.
+    fn lengths(&mut self) -> impl Iterator<Item = &mut Ramp<ReadPosition>> {
         self.len
             .iter_mut()
             .chain(&mut self.design_len)
             .chain([&mut self.pre_len])
     }
 
-    /// Aims every glide at the target's value with its own rate: a length by
+    /// Aims every ramp at the target's value with its own rate: a length by
     /// [`LENGTH_STEP`] a chunk, the pre-delay by [`PRE_STEP`], every other gain in the ramp.
     /// The lines from `n` on keep their gains and lengths; their input and output gains close.
-    fn aim(&mut self, t: &Target<F>) {
+    fn retarget(&mut self, t: &Target<F>) {
         let ramp = self.ramp;
         let n = t.n;
         self.n = n;
         self.crossover = t.crossover;
         self.complement = t.complement;
         for j in 0..n {
-            self.len[j].aim_position(t.len[j], Steps::Rate(LENGTH_STEP));
-            self.design_len[j].aim_position(t.len[j], ramp);
+            self.len[j].retarget_position(t.len[j], Steps::Rate(LENGTH_STEP));
+            self.design_len[j].retarget_position(t.len[j], ramp);
             for (s, &g) in self.gain[j].iter_mut().zip(&t.gain[j]) {
-                s.aim_by(g, ramp);
+                s.retarget_by(g, ramp);
             }
-            self.v[j].aim_by(t.v[j], ramp);
+            self.v[j].retarget_by(t.v[j], ramp);
         }
         for j in 0..self.input.len() {
-            self.input[j].aim_by(t.input[j], ramp);
+            self.input[j].retarget_by(t.input[j], ramp);
             for (s, &g) in self.out[j].iter_mut().zip(&t.out[j]) {
-                s.aim_by(g, ramp);
+                s.retarget_by(g, ramp);
             }
         }
-        self.v_len.aim_by(t.v_len, ramp);
-        self.mix.aim_by(t.mix, ramp);
-        self.depth.aim_by(t.depth, ramp);
+        self.v_len.retarget_by(t.v_len, ramp);
+        self.mix.retarget_by(t.mix, ramp);
+        self.depth.retarget_by(t.depth, ramp);
         self.rate = t.rate;
-        self.pre_len.aim_position(t.pre_len, Steps::Rate(PRE_STEP));
-        self.wet.aim_by(t.wet, ramp);
-        self.width.aim_by(t.width, ramp);
+        self.pre_len
+            .retarget_position(t.pre_len, Steps::Rate(PRE_STEP));
+        self.wet.retarget_by(t.wet, ramp);
+        self.width.retarget_by(t.width, ramp);
     }
 }
 
@@ -313,7 +314,7 @@ pub struct FdnBank<F: Float> {
     into: usize,
     state: State<F>,
     /// The controls the design in `network` is of: a design is made once however many of
-    /// [`aim`](Self::aim) and [`tail_of`](Self::tail_of) ask for it.
+    /// [`retarget`](Self::retarget) and [`tail_of`](Self::tail_of) ask for it.
     designed: Option<FdnControls>,
     /// Where a design is made and the coefficient point it asks for, so the audio thread
     /// builds neither.
@@ -322,8 +323,8 @@ pub struct FdnBank<F: Float> {
 }
 
 impl<F: Float + Lerp> FdnBank<F> {
-    /// The frames between a glide's steps: the chunk. A caller that designs on a grid of
-    /// its own can align it here, so a retarget lands on a chunk's start.
+    /// The frames between a ramp's steps: the chunk. A caller that designs on a grid of
+    /// its own can align it here, so a new target lands on a chunk's start.
     pub const CHUNK: usize = CHUNK;
 
     /// A silent bank of `layout` at `rate`. Allocates: build it on the control side.
@@ -369,11 +370,11 @@ impl<F: Float + Lerp> FdnBank<F> {
         bank
     }
 
-    /// The glides of this bank, at rest and aimed at nothing: its first [`aim`](Self::aim)
+    /// The ramps of this bank, at rest and set to nothing: its first [`retarget`](Self::retarget)
     /// is the caller's to land.
     #[must_use]
-    pub fn glides(&self) -> FdnGlides<F> {
-        FdnGlides::new(self.max_lines, ramp(self.rate), &self.target)
+    pub fn ramps(&self) -> FdnRamps<F> {
+        FdnRamps::new(self.max_lines, ramp(self.rate), &self.target)
     }
 
     /// How long it rings at its worst: the layout's longest decay, or unbounded for a layout
@@ -392,23 +393,23 @@ impl<F: Float + Lerp> FdnBank<F> {
         }
     }
 
-    /// How long `controls` ring from now, with `glides` as they are: the network's own tail
+    /// How long `controls` ring from now, with `ramps` as they are: the network's own tail
     /// at the floor plus the pre-delay still to fall, which is at most the ceiling
     /// ([`tail`](Self::tail)): the node clamps to it through its clock. No allocation; the
     /// audio state is not touched.
     ///
     /// The decay does not stretch while a line is in flight (the gains follow the length, see
-    /// [`process`](Self::process)), so the design's tail is the tail. The pre-delay glide adds
+    /// [`process`](Self::process)), so the design's tail is the tail. The pre-delay ramp adds
     /// what it still has to fall: a pre-delay at `P'` frames with the target `P` delays the
     /// input into the loop by up to `P' - P` more, and `P' <= ` the longest pre-delay, which
     /// the ceiling's worst design already has.
-    pub fn tail_of(&mut self, glides: &FdnGlides<F>, controls: &FdnControls) -> Tail {
+    pub fn tail_of(&mut self, ramps: &FdnRamps<F>, controls: &FdnControls) -> Tail {
         self.design(controls);
         let Ring::Finite(t) = self.network.tail(TAIL_FLOOR) else {
             return tail_of(Ring::Unbounded, self.rate);
         };
         let pre = self.network.pre_delay.min(Samples::new(self.pre_cap - 4));
-        let behind = glides.pre_len.now().saturating_sub(pre);
+        let behind = ramps.pre_len.now().saturating_sub(pre);
         let seconds = t.get() + behind.span().to_seconds(self.rate).get();
         tail_of(Ring::Finite(Seconds::new(seconds)), self.rate)
     }
@@ -426,13 +427,13 @@ impl<F: Float + Lerp> FdnBank<F> {
         self.into = 0;
     }
 
-    /// Aims `glides` at the design of `controls`: the first recirculating stage's lines,
-    /// matrix, outputs, pre-delay, wet gain and width, each as the value its glide moves to.
+    /// Aims `ramps` at the design of `controls`: the first recirculating stage's lines,
+    /// matrix, outputs, pre-delay, wet gain and width, each as the value its ramp moves to.
     /// No allocation.
-    pub fn aim(&mut self, glides: &mut FdnGlides<F>, controls: &FdnControls) {
+    pub fn retarget(&mut self, ramps: &mut FdnRamps<F>, controls: &FdnControls) {
         self.design(controls);
         if self.coefficients() {
-            glides.aim(&self.target);
+            ramps.retarget(&self.target);
         }
     }
 
@@ -529,8 +530,8 @@ impl<F: Float + Lerp> FdnBank<F> {
         true
     }
 
-    /// The constants of the chunk that starts now, from the glides' step.
-    fn begin_chunk(&mut self, c: &FdnGlides<F>) {
+    /// The constants of the chunk that starts now, from the ramps' step.
+    fn begin_chunk(&mut self, c: &FdnRamps<F>) {
         let s = &mut self.state;
         let n = c.n;
         let depth: f64 = c.depth.now().into();
@@ -549,8 +550,8 @@ impl<F: Float + Lerp> FdnBank<F> {
             // The gains are designed for a length `L`: a loop of `L` frames loses 60 dB in `T`
             // seconds at `g = 10^(-3 L / (fs T))` a trip. The same `T` at the `L'` frames the
             // line is now takes `g^(L' / L)`, since `(g^(L'/L))^(fs T / L') = g^(fs T / L)`: each
-            // band's gain is raised to `L' / L` while the length is in flight, and a landed line
-            // runs the designed gains as they are. `L` is the design length the gains glide
+            // band's gain is raised to `L' / L` while the length is in flight, and an at-rest line
+            // runs the designed gains as they are. `L` is the design length the gains ramp
             // with (the gain in flight is a blend of two designs), so the ramp is continuous. The
             // power is taken in `f64` and each band crosses once.
             let gains = c.gain[j].map(|g| g.now());
@@ -584,13 +585,13 @@ impl<F: Float + Lerp> FdnBank<F> {
     }
 
     /// Runs `input` into `output`, the same number of frames: the input channels averaged to
-    /// one, the wet signal on the first two output channels. `glides` steps at each chunk's
+    /// one, the wet signal on the first two output channels. `ramps` steps at each chunk's
     /// start, so a call that ends inside a chunk goes on in the next. A channel of `output`
-    /// past the second is not touched; before the first [`aim`](Self::aim) the output is
+    /// past the second is not touched; before the first [`retarget`](Self::retarget) the output is
     /// silent. No allocation.
     pub fn process(
         &mut self,
-        glides: &mut FdnGlides<F>,
+        ramps: &mut FdnRamps<F>,
         input: Planes<'_, F>,
         mut output: PlanesMut<'_, '_, F>,
     ) {
@@ -607,7 +608,7 @@ impl<F: Float + Lerp> FdnBank<F> {
         let mut left = planes.next().map(|p| &mut p.into_samples_mut()[..frames]);
         let mut right = planes.next().map(|p| &mut p.into_samples_mut()[..frames]);
 
-        let n = glides.n;
+        let n = ramps.n;
         if n == 0 {
             for y in left.iter_mut().chain(right.iter_mut()) {
                 y.fill(F::ZERO);
@@ -615,13 +616,13 @@ impl<F: Float + Lerp> FdnBank<F> {
             return;
         }
         let scale = F::from_design(1.0 / width.max(1) as f64);
-        let p = glides.complement;
+        let p = ramps.complement;
         let (two, half) = (F::ONE + F::ONE, F::lit(0.5));
         let mut d = [F::ZERO; 16];
         for i in 0..frames {
             if self.into == 0 {
-                glides.step();
-                self.begin_chunk(glides);
+                ramps.step();
+                self.begin_chunk(ramps);
             }
             let s = &mut self.state;
             let t = along::<F>(self.into as u32, Self::CHUNK as u32);
@@ -679,11 +680,11 @@ impl<F: Float + Lerp> FdnBank<F> {
     /// state of a frozen network (the absorption's one-poles are not read while every gain is
     /// 1). For the tests.
     #[cfg(test)]
-    pub(crate) fn state_energy(&self, glides: &FdnGlides<F>) -> f64 {
+    pub(crate) fn state_energy(&self, ramps: &FdnRamps<F>) -> f64 {
         let s = &self.state;
-        (0..glides.n)
+        (0..ramps.n)
             .map(|j| {
-                let len = glides.len[j].now().frames().get();
+                let len = ramps.len[j].now().frames().get();
                 (1..=len)
                     .map(|i| {
                         let x = s.lines[j].back(i);

@@ -226,7 +226,7 @@ struct PortLanes<'a, F: Float> {
 /// each band is compressed on its own, and the bands are summed.
 ///
 /// `channels` in, `channels` out; the algorithm, its crossover and phase, its grid and its
-/// glides are [`MultibandBank`]'s, which this node runs. Zero latency and
+/// ramps are [`MultibandBank`]'s, which this node runs. Zero latency and
 /// [`Tail::Unknown`] (the crossover's sections ring after the input stops), so it never
 /// parks.
 ///
@@ -260,7 +260,7 @@ struct PortLanes<'a, F: Float> {
 /// they are a block-rate on/off a lane would only flap, and with them the ports would pass
 /// the graph's 32.
 ///
-/// A [`reset`](Node::reset) and a clone (a fork) start from silence, and the next aim lands
+/// A [`reset`](Node::reset) and a clone (a fork) start from silence, and the next retarget lands
 /// whole, as a fresh node's first does. A block whose output holds a NaN or an infinity is
 /// passed on as rendered and resets the node after it, its meters back at unity, so nothing
 /// non-finite is latched.
@@ -292,7 +292,7 @@ struct Rig {
 /// The node prepared for one rate and block size.
 struct Tuned<F: Float + SimdLanes + Lerp> {
     bank: MultibandBank<F>,
-    /// The settings the bank was last aimed at.
+    /// The settings the bank was last set to.
     applied: Option<MultibandSettings>,
     rate: SampleRate,
     /// Frames rendered since the last reset: where the stream grid's points fall.
@@ -421,7 +421,7 @@ impl<F: Float + SimdLanes + Lerp> Tuned<F> {
 
     /// Aims the bank at `settings`.
     fn apply(&mut self, settings: MultibandSettings) {
-        self.bank.aim(&settings);
+        self.bank.retarget(&settings);
         self.applied = Some(settings);
     }
 
@@ -454,7 +454,7 @@ impl<F: Float + SimdLanes + Lerp> Tuned<F> {
 
     /// Renders the block cut at the grid points of the stream, the block beginning at
     /// stream frame `position`: each grid point reads the controls at its frame, and one
-    /// that moved aims the bank before the frames after it render. The stretches that did
+    /// that moved retargets the bank before the frames after it render. The stretches that did
     /// not move render together, in one call.
     fn render_steps(
         &mut self,
@@ -690,8 +690,8 @@ mod tests {
     // The tests other than the `f64` ones pin the `f32` instantiation, the session's audio
     // format, so their tolerances are `f32`'s.
 
-    /// Frames a 5 ms glide takes at 48 kHz.
-    const GLIDE: usize = 240;
+    /// Frames a 5 ms ramp takes at 48 kHz.
+    const RAMP: usize = 240;
     /// The crossover's flatness tolerance: the `f32` rounding of the input, each band and the
     /// sum, which the lock-in only averages down.
     const TOL: f64 = 1e-6;
@@ -976,7 +976,7 @@ mod tests {
         assert!((meter - reduction).abs() < 1e-3, "{meter} vs {reduction}");
     }
 
-    /// Toggling the bypass glides the band to unity over 5 ms (240 frames at 48 kHz), and the
+    /// Toggling the bypass ramps the band to unity over 5 ms (240 frames at 48 kHz), and the
     /// compressor keeps running meanwhile.
     ///
     /// DC 0.5 through band 0 at -30 dB, 2:1 is reduced by `(30 - 6.02) / 2` dB: 0.1253
@@ -985,7 +985,7 @@ mod tests {
     /// *running* detector's gain (0.1253 again, to 1e-3: a detector reset by
     /// the bypass would end near 0.5).
     #[test]
-    fn toggling_bypass_glides_and_keeps_the_compressor_warm() {
+    fn toggling_bypass_ramps_and_keeps_the_compressor_warm() {
         let (n, c) = node(2);
         let b0 = c.band(0);
         b0.set_threshold(-30.0);
@@ -995,31 +995,31 @@ mod tests {
         let mut n = prepared(n);
         render_chunked(&mut n, &[vec![0.5f32; SETTLE]], 512);
         let reduced = 0.5 * libm::pow(10.0, -(30.0 + 20.0 * libm::log10(0.5)) / 2.0 / 20.0);
-        let step = (0.5 - reduced) / GLIDE as f64;
+        let step = (0.5 - reduced) / RAMP as f64;
 
         b0.set_bypass(true);
-        let up = render_chunked(&mut n, &[vec![0.5f32; GLIDE]], 64).remove(0);
+        let up = render_chunked(&mut n, &[vec![0.5f32; RAMP]], 64).remove(0);
         assert!(
             (up[0] as f64 - reduced).abs() <= 1.5 * step,
             "first {}",
             up[0]
         );
-        assert!((up[GLIDE - 1] - 0.5).abs() < 1e-6, "last {}", up[GLIDE - 1]);
+        assert!((up[RAMP - 1] - 0.5).abs() < 1e-6, "last {}", up[RAMP - 1]);
         assert!(up.windows(2).all(|w| w[1] >= w[0]), "monotone rise");
         // Held bypassed for a while, then released.
         render_chunked(&mut n, &[vec![0.5f32; 4_800]], 512);
         assert_eq!(n.gain_reduction_db(0), Db::UNITY);
         b0.set_bypass(false);
-        let down = render_chunked(&mut n, &[vec![0.5f32; GLIDE]], 64).remove(0);
+        let down = render_chunked(&mut n, &[vec![0.5f32; RAMP]], 64).remove(0);
         assert!(
             (down[0] - 0.5).abs() as f64 <= 1.5 * step,
             "first {}",
             down[0]
         );
         assert!(
-            (down[GLIDE - 1] as f64 - reduced).abs() < 1e-3,
+            (down[RAMP - 1] as f64 - reduced).abs() < 1e-3,
             "last {}",
-            down[GLIDE - 1]
+            down[RAMP - 1]
         );
         assert!(down.windows(2).all(|w| w[1] <= w[0]), "monotone fall");
     }
@@ -1088,9 +1088,9 @@ mod tests {
         let mut n = prepared(n);
         render_chunked(&mut n, &[vec![0.5f32; SETTLE]], 512);
         c.band(1).set_solo(false);
-        let y = render_chunked(&mut n, &[vec![0.5f32; GLIDE]], 64).remove(0);
-        assert!(y[0].abs() <= 1.5 * 0.5 / GLIDE as f32, "first {}", y[0]);
-        assert!((y[GLIDE - 1] - 0.5).abs() < 1e-6, "last {}", y[GLIDE - 1]);
+        let y = render_chunked(&mut n, &[vec![0.5f32; RAMP]], 64).remove(0);
+        assert!(y[0].abs() <= 1.5 * 0.5 / RAMP as f32, "first {}", y[0]);
+        assert!((y[RAMP - 1] - 0.5).abs() < 1e-6, "last {}", y[RAMP - 1]);
         assert!(y.windows(2).all(|w| w[1] >= w[0]), "monotone rise");
     }
 
@@ -1182,20 +1182,20 @@ mod tests {
     /// from the old level to 0 in 240 equal steps, so the first frame is
     /// within a step and a half of 0.5 and the last is 0.
     #[test]
-    fn a_solo_glides_the_mute() {
+    fn a_solo_ramps_the_mute() {
         let (n, c) = node(2);
         unity(&c);
         let mut n = prepared(n);
         let settle = vec![0.5f32; SETTLE];
         render_chunked(&mut n, &[settle], 512);
         c.band(1).set_solo(true);
-        let y = render_chunked(&mut n, &[vec![0.5f32; GLIDE]], 64).remove(0);
+        let y = render_chunked(&mut n, &[vec![0.5f32; RAMP]], 64).remove(0);
         assert!(
-            (y[0] - 0.5).abs() <= 1.5 * 0.5 / GLIDE as f32,
+            (y[0] - 0.5).abs() <= 1.5 * 0.5 / RAMP as f32,
             "first {}",
             y[0]
         );
-        assert!(y[GLIDE - 1].abs() < 1e-6, "last {}", y[GLIDE - 1]);
+        assert!(y[RAMP - 1].abs() < 1e-6, "last {}", y[RAMP - 1]);
         assert!(y.windows(2).all(|w| w[1] <= w[0]), "monotone fall");
     }
 
@@ -1619,7 +1619,7 @@ mod tests {
         assert!((amp(&mut n) - 0.5).abs() < 2e-3);
         c.set_crossover(0, Hz::new(5_000.0));
         let a = amp(&mut n);
-        assert!(a > 0.99, "the consistent set landed: {a}");
+        assert!(a > 0.99, "the consistent set arrived: {a}");
     }
 
     /// A driven make-up port moves its own band: band 1 alone heard (band 0
@@ -1767,7 +1767,7 @@ mod tests {
     }
     /// A cell write reaches the render at the next grid point of the stream, not at the next
     /// block: a makeup written when the stream stands 8 frames past a grid point leaves the
-    /// 8 frames to the next one as they were, and from there the makeup glides over its 240
+    /// 8 frames to the next one as they were, and from there the makeup ramps over its 240
     /// frames, frame `k` at `12 k / 240` dB.
     ///
     /// Unity bands over a settled DC of 0.5, all in band 0.
@@ -1791,7 +1791,7 @@ mod tests {
             );
         }
         for k in 1..=16 {
-            let want = 0.5 * libm::pow(10.0, 12.0 * k as f64 / GLIDE as f64 / 20.0);
+            let want = 0.5 * libm::pow(10.0, 12.0 * k as f64 / RAMP as f64 / 20.0);
             let got = f64::from(y[7 + k]);
             assert!((got - want).abs() < 1e-5, "step {k}: {got} vs {want}");
         }

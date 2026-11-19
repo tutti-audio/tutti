@@ -51,8 +51,8 @@ use crate::{DeviceEvent, DeviceRestart, SessionEvent};
 ///
 /// Every attempt counts a strike, whatever came of it. The wait before the
 /// next is `base * 2^(strikes - 1)`, at most `max`; strikes clear after
-/// `settle` of quiet once that wait is over. A device that flaps faster than
-/// `settle` is therefore retried every `max`, not on every change.
+/// `quiet` once that wait is over. A device that flaps faster than
+/// `quiet` is therefore retried every `max`, not on every change.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Backoff {
     /// The wait after the first attempt.
@@ -60,7 +60,7 @@ pub struct Backoff {
     /// The longest wait.
     pub max: Duration,
     /// How long without an attempt (after the wait) clears the strikes.
-    pub settle: Duration,
+    pub quiet: Duration,
 }
 
 impl Default for Backoff {
@@ -68,7 +68,7 @@ impl Default for Backoff {
         Self {
             base: Duration::from_millis(500),
             max: Duration::from_secs(30),
-            settle: Duration::from_secs(10),
+            quiet: Duration::from_secs(10),
         }
     }
 }
@@ -95,7 +95,7 @@ pub struct DevicePolicy {
     /// "changes" and only a fault can move the stream. Opening every PCM
     /// every poll is a cost the host opts into, and a restart can meet `EBUSY` from that probe: a counted
     /// strike, then the backoff. A host that is recording should leave this
-    /// off, or hold restarts ([`Session::hold_device_restarts`](crate::Session::hold_device_restarts)):
+    /// off, or hold restarts ([`Session::pause_device_restarts`](crate::Session::pause_device_restarts)):
     /// a restart can change the rate mid-take.
     pub follow_default: bool,
     /// The device the host chose explicitly is reopened when it returns.
@@ -222,7 +222,7 @@ impl Follow {
     fn decide(&mut self, view: &Snapshot, now: Instant) -> Option<DeviceRestart> {
         if self
             .not_before
-            .is_some_and(|t| now >= t + self.policy.backoff.settle)
+            .is_some_and(|t| now >= t + self.policy.backoff.quiet)
         {
             self.strikes = 0;
             self.not_before = None;

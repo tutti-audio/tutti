@@ -361,7 +361,7 @@ fn a_live_node_has_its_layouts_params() {
 /// A cell that moves lands on the stream's grid, whatever the blocks: the decay, the size and
 /// the diffusion written between two blocks at frame 1024 (a multiple of every block below)
 /// give the same render in blocks of 1, 16, 64, 128 and 1024 (the node against itself under
-/// cuts), because the reader takes each whole at the grid and the bank's glides are on the
+/// cuts), because the reader takes each whole at the grid and the bank's ramps are on the
 /// stream's chunks, not a block's. And the move is heard.
 #[test]
 fn a_moved_cell_lands_on_the_grid_whatever_the_blocks() {
@@ -567,7 +567,7 @@ fn a_size_on_the_move_is_not_parked_while_it_still_rings() {
 /// A node frozen from the start with no input, then thawed, renders its ring-out in silence
 /// and parks: and what wakes is a fresh node, bit for bit. The kernel has rendered all along
 /// without hearing a sample, so a park that resets only a node that heard input leaves its
-/// grid, its modulation phases and its glides where the thaw left them.
+/// grid, its modulation phases and its ramps where the thaw left them.
 #[test]
 fn a_node_frozen_without_input_wakes_fresh_after_the_thaw_parks() {
     let frozen = FdnControls {

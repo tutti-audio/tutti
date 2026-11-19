@@ -108,7 +108,7 @@ fn rig() -> Rig {
         out: named(1),
     }));
     let (sink, _) = g.add(Unforkable(Pass { input: named(1) }));
-    g.set_sources_hard(Root::output(0), [OutPort::new(sink, 0)])
+    g.set_sources_unfaded(Root::output(0), [OutPort::new(sink, 0)])
         .unwrap();
     let _ = s.update();
     assert!(!s.graph_ref().is_edited());
@@ -138,13 +138,13 @@ fn connecting_and_disconnecting_a_bus_edge_round_trips() {
 
     g.connect(OutPort::new(r.own, 0), InPort::new(r.sink, 0))
         .unwrap()
-        .hard();
+        .unfaded();
     assert!(all_are(&out0(&mut r.s), 0.125));
 
     let g = r.s.graph();
     g.connect(BusSource::Node(bus(r.stereo)), bus(r.sink))
         .unwrap()
-        .hard();
+        .unfaded();
     assert!(g.is_edited());
     assert_eq!(
         g.bus_sources(BusRef::new(r.sink, 0)).unwrap(),
@@ -153,7 +153,7 @@ fn connecting_and_disconnecting_a_bus_edge_round_trips() {
     // A second connect of the same edge is the same edge.
     g.connect(BusSource::Node(bus(r.stereo)), bus(r.sink))
         .unwrap()
-        .hard();
+        .unfaded();
     assert_eq!(g.bus_sources(BusRef::new(r.sink, 0)).unwrap().len(), 1);
     // The fold (0.5 * 0.25 + 0.5 * 0.75) summed with the ordinary source
     // (bus edge's node sorts first): (0.125 + 0.375) + 0.125.
@@ -163,11 +163,11 @@ fn connecting_and_disconnecting_a_bus_edge_round_trips() {
 
     let g = r.s.graph();
     assert!(
-        g.disconnect_hard(BusSource::Node(bus(r.stereo)), bus(r.sink))
+        g.disconnect_unfaded(BusSource::Node(bus(r.stereo)), bus(r.sink))
             .unwrap()
     );
     assert!(
-        !g.disconnect_hard(BusSource::Node(bus(r.stereo)), bus(r.sink))
+        !g.disconnect_unfaded(BusSource::Node(bus(r.stereo)), bus(r.sink))
             .unwrap()
     );
     assert!(g.is_edited());
@@ -270,7 +270,7 @@ fn a_lane_has_no_gain_target_and_a_removed_node_takes_its_bus_edges() {
     let g = r.s.graph();
     g.connect(BusSource::Node(bus(r.stereo)), bus(r.sink))
         .unwrap()
-        .hard();
+        .unfaded();
     let lane = Edge::new(OutPort::new(r.stereo, 0), InPort::new(r.sink, 0));
     assert_eq!(
         g.gain_target(lane.source(), lane.sink()),
@@ -325,7 +325,7 @@ fn a_bus_into_the_declared_root_renders_the_itu_rows() {
     let g = s.graph();
     g.connect(BusSource::Node(bus(src)), Root)
         .expect("5.1 folds to stereo")
-        .hard();
+        .unfaded();
     assert!(g.is_edited());
     assert_eq!(g.bus_sources(Root).unwrap(), [BusSource::Node(bus(src))]);
     let [l, r] = stereo_block(&mut s);
@@ -336,8 +336,14 @@ fn a_bus_into_the_declared_root_renders_the_itu_rows() {
     assert!(all_are(&r, right), "{:?}", &r[..2]);
 
     let g = s.graph();
-    assert!(g.disconnect_hard(BusSource::Node(bus(src)), Root).unwrap());
-    assert!(!g.disconnect_hard(BusSource::Node(bus(src)), Root).unwrap());
+    assert!(
+        g.disconnect_unfaded(BusSource::Node(bus(src)), Root)
+            .unwrap()
+    );
+    assert!(
+        !g.disconnect_unfaded(BusSource::Node(bus(src)), Root)
+            .unwrap()
+    );
     assert!(g.is_edited());
     let [l, r] = stereo_block(&mut s);
     assert!(all_are(&l, 0.0) && all_are(&r, 0.0));
@@ -372,7 +378,7 @@ fn a_refused_commit_is_an_event_of_its_update() {
     s.graph()
         .connect(BusSource::Node(bus(src.erase())), Root)
         .unwrap()
-        .hard();
+        .unfaded();
     let refused = |events: Vec<SessionEvent>| {
         events
             .iter()
@@ -426,7 +432,7 @@ fn a_redeclared_root_relowers_its_edges_and_a_misfit_refuses_the_commit() {
     s.graph()
         .connect(BusSource::Node(bus(src.erase())), Root)
         .unwrap()
-        .hard();
+        .unfaded();
     let [l, r] = stereo_block(&mut s);
     assert!(all_are(&l, 0.25) && all_are(&r, 0.75));
 
@@ -435,7 +441,7 @@ fn a_redeclared_root_relowers_its_edges_and_a_misfit_refuses_the_commit() {
     // is the identity, so the render is the same).
     s.declare_root_topology(Some(ChannelTopology::unassigned(layout(2))))
         .expect("an unassigned pair")
-        .hard();
+        .unfaded();
     assert!(s.graph_ref().is_edited());
     let [l, r] = stereo_block(&mut s);
     assert!(all_are(&l, 0.25) && all_are(&r, 0.75));
@@ -443,7 +449,7 @@ fn a_redeclared_root_relowers_its_edges_and_a_misfit_refuses_the_commit() {
     // A cut: the render is read at the first block after it.
     s.declare_root_topology(Some(smpte(1)))
         .expect("mono")
-        .hard();
+        .unfaded();
     assert!(s.graph_ref().is_edited());
     let [l, _] = stereo_block(&mut s);
     assert!(all_are(&l, 0.5), "{:?}", &l[..2]);

@@ -323,6 +323,8 @@ mod measure;
 mod meters;
 #[cfg(test)]
 mod range_contracts;
+#[cfg(test)]
+mod test_rng;
 
 pub use analyses::align::{AlignConfig, Alignment, align};
 pub use analyses::chord::{

@@ -2,8 +2,8 @@
 //! at most one block of output, and every block after that block is finite, for every
 //! effect `KernelNode` runs and the multiband compressor that runs kernels.
 
-use tutti_buffers::Planes;
 use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
+use tutti_buffers::{Float, Planes};
 use tutti_dsp::{
     FdnControls, FdnLayout, FreeverbControls, FreezeMode, LadderType, ShapeKind, Stages, SvfType,
 };
@@ -23,6 +23,7 @@ use tutti_nodes::{
     EnvelopeFilterConfig, EnvelopeFilterNode, TiltFilterConfig, TiltFilterNode,
     TransientShaperConfig, TransientShaperNode,
 };
+use tutti_rt::SplitMix64;
 use tutti_units::{
     BitDepth, Db, Drive, Feedback, Frame, HoldFactor, Hz, Mix, Q, Resonance, SampleRate, Samples,
     Seconds, Semitones,
@@ -236,11 +237,8 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
 }
 
 /// Deterministic noise on `-0.5..0.5`.
-fn noise(state: &mut u32) -> f32 {
-    *state ^= *state << 13;
-    *state ^= *state >> 17;
-    *state ^= *state << 5;
-    (*state as f32 / u32::MAX as f32) - 0.5
+fn noise(rng: &mut SplitMix64) -> f32 {
+    f32::from_fraction_bits(rng.next_u64()) - 0.5
 }
 
 /// Drives `node` with noise, `bad` at frame 17 of block [`POISONED`] on every input channel,
@@ -249,13 +247,13 @@ fn poisoned_blocks(node: Box<dyn Node>, bad: f32) -> Vec<u64> {
     let mut node = node;
     node.prepare(&Prepare::new(SR, MaxBlock::of(Samples::new(BLOCK))));
     let width = usize::from(node.shape().audio_in().count());
-    let mut state = 0x9E37_79B9u32;
+    let mut rng = SplitMix64::new(1);
     let mut out = Vec::new();
     for block in 0..BLOCKS {
         let mut planes = vec![vec![0.0f32; BLOCK]; width];
         for plane in &mut planes {
             for s in plane.iter_mut() {
-                *s = noise(&mut state);
+                *s = noise(&mut rng);
             }
             if block == POISONED {
                 plane[17] = bad;

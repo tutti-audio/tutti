@@ -1,5 +1,13 @@
 //! Signal helpers for the unit tests.
 
+use tutti_buffers::Float;
+use tutti_rt::SplitMix64;
+
+/// The next value of `rng`, uniform over `[lo, hi)` on the `2^-MANTISSA_DIGITS` grid.
+pub(crate) fn uniform<F: Float>(rng: &mut SplitMix64, lo: F, hi: F) -> F {
+    lo + (hi - lo) * F::from_fraction_bits(rng.next_u64())
+}
+
 /// The complex amplitude of the `hz` component of `x`, as `(re, im)` of
 /// `2/N * sum(x[n] * e^(-j w n))` (a unit sine at phase 0 reads `(0, -1)`).
 ///
@@ -25,11 +33,9 @@ pub(crate) fn amplitude_at<S: Copy + Into<f64>>(x: &[S], hz: f64, rate: f64) -> 
 
 /// `frames` of seeded uniform noise in `-level..=level`.
 pub(crate) fn noise(seed: u64, frames: usize, level: f32) -> Vec<f32> {
-    use rand::{RngExt, SeedableRng, rngs::StdRng};
-
-    let mut rng = StdRng::seed_from_u64(seed);
+    let mut rng = SplitMix64::new(seed);
     (0..frames)
-        .map(|_| rng.random_range(-level..=level))
+        .map(|_| uniform(&mut rng, -level, level))
         .collect()
 }
 

@@ -8,8 +8,7 @@ use tutti_units::{Hz, Q, SampleRate, Samples};
 
 use super::gain_pass::{CHUNK, level};
 use crate::{
-    COEFF_INTERVAL, Glide, Lerp, SimdLanes, SvfBank, SvfCoefficients, SvfControls, SvfModel,
-    SvfType,
+    COEFF_INTERVAL, Lerp, Ramp, SimdLanes, SvfBank, SvfCoefficients, SvfControls, SvfModel, SvfType,
 };
 
 /// The filter a compressor's or a gate's detector hears its key through: a type of the
@@ -51,12 +50,12 @@ impl KeyFilter {
 }
 
 /// A detector's key filter at a rate: an [`SvfBank`] over the key's channels and the
-/// coefficients it glides to, one grid period ([`COEFF_INTERVAL`]) a design.
+/// coefficients it ramps to, one grid period ([`COEFF_INTERVAL`]) a design.
 #[derive(Clone, Debug)]
 pub(super) struct KeyStage<F: Float + SimdLanes> {
     ty: SvfType,
     bank: SvfBank<F>,
-    coefficients: Glide<SvfCoefficients<F>>,
+    coefficients: Ramp<SvfCoefficients<F>>,
     rate: SampleRate,
 }
 
@@ -67,13 +66,13 @@ impl<F: Float + SimdLanes + Lerp> KeyStage<F> {
         Self {
             ty,
             bank: SvfBank::new(width),
-            coefficients: Glide::landed(Self::design(
+            coefficients: Ramp::new(Self::design(
                 ty,
                 KeyFilter::DEFAULT_CUTOFF,
                 KeyFilter::DEFAULT_Q,
                 rate,
             ))
-            .by(COEFF_INTERVAL as u32),
+            .steps(COEFF_INTERVAL as u32),
             rate,
         }
     }
@@ -88,21 +87,21 @@ impl<F: Float + SimdLanes + Lerp> KeyStage<F> {
         SvfCoefficients::from(&SvfModel::new(controls, rate))
     }
 
-    /// Silence in the filter's state, and the coefficients landed.
+    /// Silence in the filter's state, and the coefficients at rest.
     pub(super) fn reset(&mut self) {
         self.bank.reset();
-        self.coefficients.settle();
+        self.coefficients.jump_to_target();
     }
 
     /// Lands the coefficients on their design now.
-    pub(super) fn settle(&mut self) {
-        self.coefficients.settle();
+    pub(super) fn jump_to_target(&mut self) {
+        self.coefficients.jump_to_target();
     }
 
-    /// Aims at `cutoff` and `q`: the coefficients glide there over one grid period.
-    pub(super) fn aim(&mut self, cutoff: Hz, q: Q) {
+    /// Aims at `cutoff` and `q`: the coefficients ramp there over one grid period.
+    pub(super) fn retarget(&mut self, cutoff: Hz, q: Q) {
         self.coefficients
-            .aim(Self::design(self.ty, cutoff, q, self.rate));
+            .retarget(Self::design(self.ty, cutoff, q, self.rate));
     }
 
     /// The key's level at each frame of `frames`, into `out` (as long as `frames`, at most

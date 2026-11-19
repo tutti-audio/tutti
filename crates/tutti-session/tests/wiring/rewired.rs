@@ -72,8 +72,8 @@ fn a_connect_and_the_loss_of_the_last_source_are_each_reported_once() {
     assert_eq!(rewired(&s.update()), [], "unwired nodes: nothing moved");
 
     let g = s.graph();
-    g.connect(OutPort::new(a, 0), x.input(2)).unwrap().hard();
-    g.connect(x.out(2), Root::output(0)).unwrap().hard();
+    g.connect(OutPort::new(a, 0), x.input(2)).unwrap().unfaded();
+    g.connect(x.out(2), Root::output(0)).unwrap().unfaded();
     let events = s.update();
     assert_eq!(
         rewired(&events),
@@ -82,7 +82,8 @@ fn a_connect_and_the_loss_of_the_last_source_are_each_reported_once() {
     assert_eq!(rewired(&s.update()), [], "reported once");
 
     let g = s.graph();
-    g.disconnect_hard(OutPort::new(a, 0), x.input(2)).unwrap();
+    g.disconnect_unfaded(OutPort::new(a, 0), x.input(2))
+        .unwrap();
     assert_eq!(
         rewired(&s.update()),
         [(x.erase(), wired(0b100, 0b100), wired(0, 0b100))],

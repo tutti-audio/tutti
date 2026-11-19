@@ -14,7 +14,7 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 /// Waveshaping distortion of any width: `N` audio inputs and `N` outputs, every channel
 /// shaped alone by the same curve at the same drive.
 ///
-/// A [`KernelNode`] over [`DistortionKernel`], the curves and the drive's glide being
+/// A [`KernelNode`] over [`DistortionKernel`], the curves and the drive's ramp being
 /// [`WaveshaperBank`]'s; this file holds the cell and how the graph reaches it. The curve
 /// ([`ShapeKind`]) is fixed at construction: a node with another one is another node.
 ///
@@ -27,9 +27,9 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 /// was.
 ///
 /// **It is read per frame** when the graph drives it: a lane on its port is the bank's own, and a
-/// frame of it that is not finite reads the drive in force: the cell's, gliding to its value. A
+/// frame of it that is not finite reads the drive in force: the cell's, ramping to its value. A
 /// cell that moves is sampled at the stream grid (16 frames from the last reset, [`Kernel::GRID`])
-/// and glides over [`GAIN_GLIDE`](tutti_dsp::GAIN_GLIDE), 5 ms, so a write is no step at a block's
+/// and ramps over [`GAIN_RAMP`](tutti_dsp::GAIN_RAMP), 5 ms, so a write is no step at a block's
 /// edge and renders the same whatever the blocks.
 ///
 /// # Oversampling
@@ -40,7 +40,7 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 /// cascade, through the curve and back down, so the harmonics the down-sampler's stopband
 /// removes never fold. The cascade's round trip is a whole number of frames, which the node
 /// declares as its latency, and its ring-out, as many frames again, as its tail. The drive's
-/// glide runs at the oversampled rate, and a drive fed per frame holds across the frames of
+/// ramp runs at the oversampled rate, and a drive fed per frame holds across the frames of
 /// each input frame. Without oversampling or antialiasing the node is memoryless: it declares no
 /// latency and no tail, a silent input is a silent output.
 ///
@@ -60,7 +60,7 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 /// value last set through its [`ParamSet`](tutti_graph::ParamSet). The graph prepares it at
 /// the device rate before its first block.
 ///
-/// `F` is the float of the graph it runs in, and of the drive's glide, the curve, the
+/// `F` is the float of the graph it runs in, and of the drive's ramp, the curve, the
 /// antialiasing history and the oversampling.
 pub type DistortionNode<F> = KernelNode<DistortionKernel<F>>;
 
@@ -148,8 +148,8 @@ pub struct DistortionKernel<F: Float> {
     input: BusTopology,
     /// The bank, at the rate it shapes at: the oversampled one when there is oversampling.
     bank: WaveshaperBank<F>,
-    /// Whether the first retarget after `prepare` has landed.
-    landed: bool,
+    /// Whether the first retarget after `prepare` has been applied.
+    applied: bool,
     /// What the node was asked to shape at.
     factor: Option<OversamplingFactor>,
     /// The oversampling, once prepared at a rate its filters can be designed for.
@@ -166,7 +166,7 @@ impl<F: Float + Lerp> DistortionKernel<F> {
             kind,
             input,
             bank: WaveshaperBank::<F>::new(kind, SampleRate::SR_48K),
-            landed: false,
+            applied: false,
             factor: None,
             oversampled: None,
             antialiasing: Antialiasing::Off,
@@ -308,23 +308,23 @@ impl<F: Float + Lerp> Kernel for DistortionKernel<F> {
             .as_ref()
             .map_or(rate, |o| o.plan.high_rate());
         self.bank = WaveshaperBank::<F>::new(self.kind, shaping).antialiasing(self.antialiasing);
-        self.landed = false;
+        self.applied = false;
     }
 
     /// Silence, and the next design lands at once, as a fresh node's first does.
     fn reset(&mut self) {
         self.bank.reset();
-        self.landed = false;
+        self.applied = false;
         for state in self.oversampled.iter_mut().flat_map(|o| &mut o.channels) {
             state.reset();
         }
     }
 
     fn retarget(&mut self, controls: &WaveshaperControls) {
-        self.bank.aim(controls);
-        if !self.landed {
-            self.bank.settle();
-            self.landed = true;
+        self.bank.retarget(controls);
+        if !self.applied {
+            self.bank.jump_to_target();
+            self.applied = true;
         }
     }
 
@@ -339,8 +339,8 @@ impl<F: Float + Lerp> Kernel for DistortionKernel<F> {
             Some(oversampled) => oversampled.render(&mut self.bank, lane, input, output),
             None => self.bank.process(lane, input, output),
         }
-        // A design after a render is a move, which glides.
-        self.landed = true;
+        // A design after a render is a move, which ramps.
+        self.applied = true;
     }
 
     /// The cascade's round trip, in base frames, and the antialiasing's delay rounded to a
@@ -372,7 +372,7 @@ impl<F: Float + Lerp> Kernel for DistortionKernel<F> {
 mod tests {
     use super::*;
     use crate::test_support::{
-        RATE, amplitude_at, assert_cell_glides, drive_block, prepared, render_change,
+        RATE, amplitude_at, assert_cell_ramps, drive_block, prepared, render_change,
         render_chunked, sine,
     };
     use tutti_graph::contract::{assert_param_fork, drive};
@@ -474,11 +474,11 @@ mod tests {
         );
     }
 
-    /// A cell written between blocks glides on the stream clock, whatever the blocks, and the
-    /// glide is the line from the old drive to the new over `GAIN_GLIDE`: frame `i` of a hard
+    /// A cell written between blocks ramps on the stream clock, whatever the blocks, and the
+    /// ramp is the line from the old drive to the new over `GAIN_RAMP`: frame `i` of a hard
     /// clip of `0.2` is `0.2 (1 + 2 (i + 1) / n)`, and the frames after it are `0.6`.
     #[test]
-    fn a_drive_written_between_blocks_glides_over_the_glide() {
+    fn a_drive_written_between_blocks_ramps_over_the_ramp() {
         let make =
             || DistortionNode::<f32>::with_channels(1u16, ShapeKind::HardClip, Drive::new(1.0));
         let change = |n: &DistortionNode<f32>| {
@@ -486,9 +486,9 @@ mod tests {
         };
         let before = vec![0.2f32; 64];
         let after = vec![0.2f32; 600];
-        assert_cell_glides(make, change, &[&before], &[&after], "drive");
+        assert_cell_ramps(make, change, &[&before], &[&after], "drive");
         let (_, out) = render_change(make, change, &[&before], &[&after], 64);
-        let n = tutti_dsp::GAIN_GLIDE.to_samples_ceil(RATE).get();
+        let n = tutti_dsp::GAIN_RAMP.to_samples_ceil(RATE).get();
         for (i, &y) in out[0].iter().enumerate().take(n) {
             let want = 0.2 * (1.0 + 2.0 * (i + 1) as f64 / n as f64);
             assert!((f64::from(y) - want).abs() < 1e-6, "frame {i}: {y}");
@@ -540,7 +540,7 @@ mod tests {
         drive_block(&mut n, &[&x]);
         assert!(n.param_set().set(UnitParam::Drive, 3.0));
         let mid = drive_block(&mut n, &[&x[..10]]);
-        assert!(mid[0][9] < 0.2 * 3.0, "still gliding");
+        assert!(mid[0][9] < 0.2 * 3.0, "still ramping");
         Node::reset(&mut n);
         let out = drive_block(&mut n, &[&x]);
         assert!(out[0].iter().all(|&y| y == 0.2 * 3.0));

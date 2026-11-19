@@ -882,13 +882,13 @@ fn the_render_is_independent_of_the_block_length() {
 
 /// A moving source renders the same whatever the block length, provided the
 /// commanded position changes at the same frame: a step reads the position
-/// of the block that completes it and glides toward it step by step, and
+/// of the block that completes it and ramps toward it step by step, and
 /// each step's crossfade ramps over the step's own 128 frames, so neither
 /// depends on where the blocks fall. (The position is read once per block,
 /// so a move between two frames inside a block lands at that block's end;
 /// that is why the moves here sit on frames every block length below
 /// starts a block at, and mid-step: 320 and 832 are not multiples of 128.)
-/// The source jumps across the sphere twice, so the aim glides through
+/// The source jumps across the sphere twice, so the aim ramps through
 /// many faces and every step crossfades.
 #[test]
 fn a_moving_source_is_independent_of_the_block_length() {

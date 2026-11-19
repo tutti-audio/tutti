@@ -42,7 +42,7 @@ impl<F: Float> Editor<F> {
     ///   ranges, sends nothing either.
     /// - **No declick.** The value steps to the new bound on the block's
     ///   first frame, as it did when a range change was a commit. A host
-    ///   that wants a range to glide moves it in steps, or drives the param
+    ///   that wants a range to ramp moves it in steps, or drives the param
     ///   instead.
     /// - **Cost.** A publish and a map lookup on the control side (the
     ///   publish allocates the new range; [`reclaim`](Self::reclaim) frees

@@ -12,7 +12,7 @@ pub(super) const CHUNK: usize = 64;
 
 /// How long a makeup (or a gate's range) that moves takes to arrive: 5 ms, counted on the
 /// stream, so the de-zipper does not depend on the block.
-pub const GAIN_GLIDE: Seconds = Seconds::new(0.005);
+pub const GAIN_RAMP: Seconds = Seconds::new(0.005);
 
 /// The level an infinite sample is held to: `f32::MAX` (770 dB) at both widths, so the level's
 /// dB, and the gain over it, stay finite at the narrowest float.

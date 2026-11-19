@@ -147,7 +147,7 @@ fn a_flapping_device_is_held_by_the_backoff() {
         backoff: Backoff {
             base: Duration::from_millis(500),
             max: Duration::from_secs(4),
-            settle: Duration::from_secs(10),
+            quiet: Duration::from_secs(10),
         },
         ..on()
     };
@@ -188,7 +188,7 @@ fn a_flapping_device_is_held_by_the_backoff() {
     );
 }
 
-/// After `settle` of quiet the strikes clear: a loss after a long calm is
+/// After `quiet` the strikes clear: a loss after a long calm is
 /// answered at once, and the wait that follows is the base again, not the
 /// one the old strikes had grown.
 #[test]

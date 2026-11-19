@@ -28,8 +28,8 @@
 //! exactly silent that many frames after the input is), and gain on silence is silence.
 //!
 //! The threshold and the ceiling are the two controls read **per frame** when the graph
-//! drives them ([`LimiterLanes`]); a frame that is not finite falls back to the aimed
-//! value. Every coefficient lands whole: a glided ceiling would let a sample past the new
+//! drives them ([`LimiterLanes`]); a frame that is not finite falls back to the set
+//! value. Every coefficient lands whole: a ramped ceiling would let a sample past the new
 //! one.
 //!
 //! A reset leaves the envelope **unset** (`+inf`, no history), and the first frame takes
@@ -202,15 +202,15 @@ fn lookahead_frames(lookahead: Lookahead, rate: SampleRate) -> usize {
         .clamp(1, MAX_LOOKAHEAD_FRAMES)
 }
 
-/// What aiming a limiter at a set of controls designs: the curve, the levels a frame nobody
+/// What retargeting a limiter to a set of controls designs: the curve, the levels a frame nobody
 /// drives falls back to, and the release as a one-pole pole.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Design<F: Float> {
-    /// The transfer curve at the aimed threshold and ceiling, for a block no lane drives.
+    /// The transfer curve at the set threshold and ceiling, for a block no lane drives.
     curve: FloatCurve<F>,
-    /// What a frame nobody drives (or a non-finite one) is: the aimed threshold in dB.
+    /// What a frame nobody drives (or a non-finite one) is: the set threshold in dB.
     threshold: F,
-    /// And the aimed ceiling in dB, held within `LANE_DB_LIMIT`.
+    /// And the set ceiling in dB, held within `LANE_DB_LIMIT`.
     ceiling: F,
     /// `LANE_DB_LIMIT` in dB.
     lane_limit: F,
@@ -254,10 +254,10 @@ impl<F: Float> Design<F> {
 
 /// The per-frame lanes a limiter reads beside its audio, in the bank's float, each `None`
 /// where nothing drives it. A lane is at least as long as the frames a call renders;
-/// a frame past its end is not driven. A frame that is not finite is the aimed value (a
+/// a frame past its end is not driven. A frame that is not finite is the set value (a
 /// lane value of `+-inf` is not a level to divide by: the curve in dB would make a NaN of
 /// it, which the envelope would keep); a finite one is held within 300 dB either way. The
-/// aimed value a frame falls back to keeps its meaning (`-inf` ceiling mutes, `+inf`
+/// set value a frame falls back to keeps its meaning (`-inf` ceiling mutes, `+inf`
 /// threshold is a gain of 0, `-inf` threshold limits everything) but for a ceiling above
 /// 300 dB, which is held at 300.
 #[derive(Clone, Copy, Debug, Default)]
@@ -323,7 +323,7 @@ impl<F: Float> LimiterBank<F> {
     /// figure for its default attenuation), adds 0.0002 dB; the sum rounds up to 0.56 dB.
     pub const TRUE_PEAK_MARGIN: Db = Db::new(0.56);
 
-    /// A silent limiter `width` channels wide at `rate`, looking `lookahead` ahead, aimed
+    /// A silent limiter `width` channels wide at `rate`, looking `lookahead` ahead, set
     /// at [`LimiterControls::DEFAULT`]. Allocates: build it on the control side.
     #[must_use]
     pub fn new(width: ChannelLayout, lookahead: Lookahead, rate: SampleRate) -> Self {
@@ -416,7 +416,7 @@ impl<F: Float> LimiterBank<F> {
     }
 
     /// Designs `controls` and lands them whole. No allocation.
-    pub fn aim(&mut self, controls: &LimiterControls) {
+    pub fn retarget(&mut self, controls: &LimiterControls) {
         self.design = Design::of(controls, self.rate);
     }
 
@@ -429,7 +429,7 @@ impl<F: Float> LimiterBank<F> {
         if lanes.threshold.is_none() && lanes.ceiling.is_none() {
             return self.design.curve.gain(peak);
         }
-        // A lane's finite value, held within `LANE_DB_LIMIT` either way; else the aimed
+        // A lane's finite value, held within `LANE_DB_LIMIT` either way; else the set
         // value, held only where it can overflow or cancel: a ceiling at most
         // `LANE_DB_LIMIT` (a `+inf` or 1e30 dB one would make an infinite gain), and a
         // threshold as it is (`-inf` leaves every signal over it, `+inf` none, a gain of 0).

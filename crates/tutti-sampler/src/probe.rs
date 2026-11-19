@@ -73,19 +73,6 @@ pub struct SampleFacts {
     pub streamable: bool,
 }
 
-impl SampleFacts {
-    /// This file's length in frames, or `Samples::new(0)` when unknown.
-    ///
-    /// A convenience for the common "how big is it" question. Deliberately does
-    /// not hide the `None`: a caller deciding residency must distinguish
-    /// "empty" from "unmeasurable", so this is for display and rough sizing
-    /// rather than for policy. Policy reads [`frames`](Self::frames).
-    #[must_use]
-    pub fn frames_or_zero(&self) -> Samples {
-        self.frames.unwrap_or(Samples::new(0))
-    }
-}
-
 /// Errors a probe can report. Terminal: none of these fix themselves on retry.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
@@ -209,24 +196,9 @@ mod tests {
     fn a_missing_file_is_an_error_not_a_default() {
         // The alternative — returning zeroed facts — would let a caller build a
         // voice on a file that is not there and hear nothing, with no error
-        // anywhere. Same reasoning as `frames_or_zero` refusing to hide `None`.
+        // anywhere.
         let err = probe("/nonexistent/nowhere.wav").unwrap_err();
         assert!(matches!(err, ProbeError::Unreadable { .. }));
-    }
-
-    #[test]
-    fn frames_or_zero_does_not_hide_an_unknown_length() {
-        // The convenience and the policy field disagree on purpose: one is for
-        // display, the other for decisions.
-        let unknown = SampleFacts {
-            frames: None,
-            sample_rate: SampleRate::SR_48K,
-            layout: ChannelLayout::STEREO,
-            topology: ChannelTopology::assumed(ChannelLayout::STEREO),
-            streamable: false,
-        };
-        assert_eq!(unknown.frames_or_zero(), Samples::new(0));
-        assert_eq!(unknown.frames, None, "the policy field stays honest");
     }
 
     /// An unstreamable file is not an error — it is a legitimate verdict that

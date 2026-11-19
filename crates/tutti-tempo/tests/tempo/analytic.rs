@@ -5,7 +5,7 @@
 //! too. None of it reaches the platform's libm, so the figures hold on any
 //! target.
 
-use crate::common::{Lcg, R, pt};
+use crate::common::{R, Rng, pt};
 use tutti_tempo::{TempoError, TempoMap, TempoPoint, Transition};
 use tutti_units::{Beat, Bpm, Frame, Seconds};
 
@@ -178,7 +178,7 @@ fn seconds_agree_with_numeric_integration() {
 /// frame to beat to frame, over 200 000 random queries.
 #[test]
 fn long_session_round_trip() {
-    let mut rng = Lcg(7);
+    let mut rng = Rng::new(7);
     let mut pts = vec![];
     for i in 0..20_000 {
         let shape = match (rng.next() * 3.0) as u32 {
@@ -365,7 +365,7 @@ fn refusals() {
 /// through one view agree with cold lookups, bit for bit.
 #[test]
 fn a_views_hint_agrees_with_cold_lookup() {
-    let mut rng = Lcg(11);
+    let mut rng = Rng::new(11);
     let pts: Vec<_> = (0..300)
         .map(|i| {
             let shape = [
@@ -458,7 +458,7 @@ fn a_first_ramp_extrapolates_at_its_first_tempo() {
 /// for about 5% of tempos).
 #[test]
 fn a_tempo_at_its_point_is_the_given_tempo_to_the_bit() {
-    let mut rng = Lcg(3);
+    let mut rng = Rng::new(3);
     let n = 10_000;
     let pts: Vec<_> = (0..n)
         .map(|i| {

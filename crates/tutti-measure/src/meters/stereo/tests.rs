@@ -184,10 +184,11 @@ fn ragged_planes_cannot_be_paired() {
 
 #[test]
 fn independent_noise_is_near_zero() {
-    use rand::{RngExt, SeedableRng};
-    let mut rng = rand::rngs::StdRng::seed_from_u64(0xC0FFEE);
-    let left: Vec<f32> = (0..20000).map(|_| rng.random_range(-1.0..1.0)).collect();
-    let right: Vec<f32> = (0..20000).map(|_| rng.random_range(-1.0..1.0)).collect();
+    use crate::test_rng::uniform;
+    use tutti_rt::SplitMix64;
+    let mut rng = SplitMix64::new(0xC0FFEE);
+    let left: Vec<f32> = (0..20000).map(|_| uniform(&mut rng, -1.0, 1.0)).collect();
+    let right: Vec<f32> = (0..20000).map(|_| uniform(&mut rng, -1.0, 1.0)).collect();
 
     let reading = correlate(pair(&left, &right));
     assert!(reading.correlation.get().abs() < 0.05);

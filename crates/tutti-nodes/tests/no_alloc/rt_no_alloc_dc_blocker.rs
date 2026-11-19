@@ -1,5 +1,5 @@
 //! Regression gate: the DC blocker must not allocate per block, held and with its corner
-//! moved between blocks (the pole glide).
+//! moved between blocks (the pole ramp).
 
 use tutti_buffers::ChannelLayout;
 use tutti_graph::contract::BlockRig;

@@ -207,7 +207,7 @@ fn a_reset_node_renders_as_a_fresh_one() {
     assert!(a.iter().flatten().flatten().any(|&s| s != 0.0));
 }
 
-/// A moved cell lands on the 32-frame grid and the bank's glides are on the stream's chunks,
+/// A moved cell lands on the 32-frame grid and the bank's ramps are on the stream's chunks,
 /// not a block's: a move mid-stream gives the same render in blocks of 1, 16, 64 and 128 as in
 /// one block of 1024, and the move is heard.
 #[test]

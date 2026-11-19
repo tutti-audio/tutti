@@ -1,8 +1,8 @@
 use super::*;
 use crate::fold_uneven;
-use rand::rngs::StdRng;
-use rand::{RngExt, SeedableRng};
+use crate::test_rng::uniform;
 use std::f64::consts::TAU;
+use tutti_rt::SplitMix64;
 use tutti_units::Samples;
 use tutti_units::{Amplitude, SampleRate};
 
@@ -213,8 +213,8 @@ fn blocks_of_any_size_give_identical_frames() {
             band: band(375.0, 12_000.0),
         })
         .spectrogram(FrameCount(6));
-    let mut rng = StdRng::seed_from_u64(7);
-    let signal: Vec<f32> = (0..9_000).map(|_| rng.random_range(-1.0..1.0)).collect();
+    let mut rng = SplitMix64::new(7);
+    let signal: Vec<f32> = (0..9_000).map(|_| uniform(&mut rng, -1.0, 1.0)).collect();
     let read = |block: usize| {
         let mut state = meter(&cfg);
         for chunk in signal.chunks(block) {
@@ -250,9 +250,9 @@ fn averaging_converges_to_the_mean_noise_power() {
     let tau = Seconds::new(1.0);
     let cfg = config(size, size).smoothing(Smoothing::Average(SpectrumTime::of(tau)));
     let sigma = 0.1f64;
-    let mut rng = StdRng::seed_from_u64(0x5eed);
+    let mut rng = SplitMix64::new(0x5eed);
     let mut gauss = || {
-        let (u, v): (f64, f64) = (rng.random_range(1e-12..1.0), rng.random_range(0.0..1.0));
+        let (u, v): (f64, f64) = (uniform(&mut rng, 1e-12, 1.0), uniform(&mut rng, 0.0, 1.0));
         sigma * (-2.0 * u.ln()).sqrt() * (TAU * v).cos()
     };
     let frames = 600;
