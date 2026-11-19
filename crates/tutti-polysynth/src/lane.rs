@@ -8,7 +8,7 @@
 use core::fmt::Debug;
 use core::ops::{AddAssign, BitAnd, Neg};
 use tutti_buffers::Float;
-use tutti_dsp::Lanes;
+use tutti_dsp::SimdLanes;
 use tutti_rt::SplitMix64;
 use wide::{f32x8, f64x4};
 
@@ -32,9 +32,9 @@ impl SynthFloat for f64 {
 /// once over `f32x8` and `f64x4`.
 ///
 /// A comparison answers a mask lane (all bits set where true), which [`pick`](Self::pick)
-/// selects with and `&` combines. Sealed through [`Lanes`].
+/// selects with and `&` combines. Sealed through [`SimdLanes`].
 pub trait Lane:
-    Lanes + Neg<Output = Self> + AddAssign + BitAnd<Output = Self> + Debug + Send + Sync + 'static
+    SimdLanes + Neg<Output = Self> + AddAssign + BitAnd<Output = Self> + Debug + Send + Sync + 'static
 {
     /// One lane's float.
     type Scalar: Float;

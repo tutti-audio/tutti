@@ -24,10 +24,12 @@ members = [
     "crates/tutti-ump",
     "crates/tutti-midi-protocol",
     "crates/tutti-voicing",
+    # MIDI-CI: the codec, `CiDevice`, the initiators, Property Exchange and the profile tables.
+    "crates/tutti-midi-ci",
     "crates/tutti-midi-device",
     # Network MIDI 2.0 over UDP: the wire format, the Client and Host session
     # machines (no sockets), a `std::net` driver and mDNS discovery.
-    # Depends on `tutti-ump` and `tutti-midi-device` alone.
+    # Depends on `tutti-ump`, `tutti-midi-ci` and `tutti-midi-device` alone.
     "crates/tutti-midi-network",
     "crates/tutti-graph",
     "crates/tutti-modulation",

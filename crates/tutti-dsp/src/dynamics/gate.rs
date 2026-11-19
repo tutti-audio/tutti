@@ -27,10 +27,10 @@ use tutti_buffers::{Float, Mono, Planes, PlanesMut};
 use tutti_units::{Amplitude, Db, Hz, Q, SampleRate, Seconds};
 
 use super::curves::{db_gain, gate_gain_at, level_db};
+use super::gain_pass::{CHUNK, GAIN_GLIDE, floored, key_levels};
 use super::key_filter::{KeyFilter, KeyStage};
-use super::shared::{CHUNK, GAIN_GLIDE, floored, key_levels};
 use crate::follower::{Follower, Smoothed};
-use crate::{Glide, Lanes, Lerp, Steps};
+use crate::{Glide, Lerp, SimdLanes, Steps};
 
 /// The controls of a [`GateBank`].
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -141,7 +141,7 @@ pub struct GateLanes<'a, F: Float> {
 /// Built on the control side for one rate; the state, the views and the lane are `F`, the
 /// graph's float. Nothing it holds grows.
 #[derive(Clone, Debug)]
-pub struct GateBank<F: Float + Lanes> {
+pub struct GateBank<F: Float + SimdLanes> {
     design: Design<F>,
     /// The closed gain in dB, gliding over [`GAIN_GLIDE`].
     range: Glide<F>,
@@ -156,7 +156,7 @@ pub struct GateBank<F: Float + Lanes> {
     key: Option<KeyStage<F>>,
 }
 
-impl<F: Float + Lanes + Lerp> GateBank<F> {
+impl<F: Float + SimdLanes + Lerp> GateBank<F> {
     /// A gate that passes everything at `rate`, to be aimed.
     #[must_use]
     pub fn new(rate: SampleRate) -> Self {

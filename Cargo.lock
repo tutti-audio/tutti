@@ -2464,6 +2464,7 @@ dependencies = [
  "tutti-graph",
  "tutti-measure",
  "tutti-metering",
+ "tutti-midi-ci",
  "tutti-midi-device",
  "tutti-midi-file",
  "tutti-midi-hardware",
@@ -2783,7 +2784,7 @@ version = "0.0.0"
 dependencies = [
  "tutti-codec",
  "tutti-fixtures",
- "tutti-midi-device",
+ "tutti-midi-ci",
  "tutti-midi-file",
  "tutti-midi-protocol",
  "tutti-ump",
@@ -2851,11 +2852,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "tutti-midi-device"
+name = "tutti-midi-ci"
 version = "0.0.1"
 dependencies = [
  "bitflags 2.13.2",
- "getrandom",
  "miniz_oxide",
  "proptest",
  "serde",
@@ -2869,13 +2869,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "tutti-midi-device"
+version = "0.0.1"
+dependencies = [
+ "bitflags 2.13.2",
+ "getrandom",
+ "proptest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tutti-fixtures",
+ "tutti-midi-ci",
+ "tutti-ump",
+ "tutti-units",
+]
+
+[[package]]
 name = "tutti-midi-file"
 version = "0.0.1"
 dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "tutti-fixtures",
- "tutti-midi-device",
+ "tutti-midi-ci",
  "tutti-midi-protocol",
  "tutti-music",
  "tutti-tempo",
@@ -2901,6 +2917,7 @@ dependencies = [
  "tutti-coremidi-ffi",
  "tutti-fixtures",
  "tutti-graph",
+ "tutti-midi-ci",
  "tutti-midi-device",
  "tutti-midi-hardware",
  "tutti-midi-protocol",
@@ -2920,6 +2937,7 @@ dependencies = [
  "sha2",
  "thiserror 2.0.21",
  "tutti-fixtures",
+ "tutti-midi-ci",
  "tutti-midi-device",
  "tutti-ump",
  "tutti-units",
@@ -2954,6 +2972,7 @@ dependencies = [
  "tutti-engine",
  "tutti-fixtures",
  "tutti-graph",
+ "tutti-midi-ci",
  "tutti-midi-device",
  "tutti-midi-protocol",
  "tutti-music",
@@ -3100,6 +3119,8 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "tracing",
+ "tutti-clap-test-plugin",
+ "tutti-fixtures",
  "tutti-plugin-ipc-ffi",
  "tutti-plugin-types",
  "tutti-rt",
@@ -3351,6 +3372,7 @@ dependencies = [
  "tutti-graph",
  "tutti-measure",
  "tutti-metering",
+ "tutti-midi-ci",
  "tutti-midi-device",
  "tutti-midi-file",
  "tutti-midi-hardware",

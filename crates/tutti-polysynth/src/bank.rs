@@ -39,7 +39,7 @@ use crate::kernel::{self, MAX_INCREMENT};
 use crate::lane::{Lane, SynthFloat};
 use crate::{Adsr, FilterType, OscillatorType, SvfMode, UnisonVoices};
 use tutti_dsp::{
-    LadderCoefficients, LadderCoeffs, LadderType, Lanes, SvfCoefficients, SvfCoeffs, SvfType,
+    LadderCoefficients, LadderDesign, LadderType, SimdLanes, SvfCoefficients, SvfDesign, SvfType,
     ladder_step, svf_step,
 };
 use tutti_rt::SplitMix64;
@@ -298,7 +298,7 @@ impl<F: SynthFloat> VoiceBank<F> {
                 };
                 // The output mix depends on the tap and `Q` alone, so any
                 // cutoff gives the same `m`.
-                let c = SvfCoeffs::new(ty, Hz::new(1000.0), q, Db::new(0.0), sample_rate);
+                let c = SvfDesign::new(ty, Hz::new(1000.0), q, Db::new(0.0), sample_rate);
                 Filter::Svf {
                     ty,
                     q,
@@ -474,11 +474,11 @@ impl<F: SynthFloat> VoiceBank<F> {
         let coef = match self.filter {
             Filter::None => return,
             Filter::Svf { ty, q, .. } => {
-                let s = SvfCoeffs::new(ty, cutoff, q, Db::new(0.0), self.sample_rate);
+                let s = SvfDesign::new(ty, cutoff, q, Db::new(0.0), self.sample_rate);
                 [s.d, s.a2, s.a3].map(F::from_design)
             }
             Filter::Ladder => {
-                let l = LadderCoeffs::new(cutoff, resonance, self.sample_rate);
+                let l = LadderDesign::new(cutoff, resonance, self.sample_rate);
                 [l.g / (1.0 + l.g), l.k, 0.0].map(F::from_design)
             }
         };

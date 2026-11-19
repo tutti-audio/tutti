@@ -97,12 +97,11 @@ mod tests;
 pub use capability_view::TransportView;
 pub(crate) use capability_view::is_declined;
 
-use crate::host::loadable::Loadable;
-use crate::host::plugin_ref::PluginRef;
 use std::sync::Arc;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::FloatWidth;
 use tutti_graph::{IntoNode, Node, NodeParts, Shape};
+use tutti_plugin_db::{Loadable, PluginRef};
 use tutti_plugin_host::{
     InProcClient, InvalidateSink, ParameterChangeSink, PluginControls, PluginHandle, PluginNode,
     Rebinder, RefreshSink, TransportSink, client_over,

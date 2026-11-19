@@ -83,7 +83,7 @@ fn hostile() -> Vec<GateControls> {
 }
 
 /// A bank at `rate` at rest on `c`: aimed and landed, nothing gliding.
-fn bank_at<F: Float + Lanes + Lerp>(c: &GateControls, rate: SampleRate) -> GateBank<F> {
+fn bank_at<F: Float + SimdLanes + Lerp>(c: &GateControls, rate: SampleRate) -> GateBank<F> {
     let mut bank = GateBank::new(rate);
     bank.aim(c);
     bank.settle();
@@ -102,7 +102,7 @@ fn runner(c: &GateControls) -> GateBank<f32> {
 
 /// `audio` (one slice per channel) through `bank`, keyed by `key`, with `lane` as the
 /// threshold lane when given, in calls of at most `block` frames.
-fn run_in<F: Float + Lanes + Lerp>(
+fn run_in<F: Float + SimdLanes + Lerp>(
     bank: &mut GateBank<F>,
     audio: &[&[F]],
     key: &[&[F]],
@@ -132,7 +132,7 @@ fn run_in<F: Float + Lanes + Lerp>(
 }
 
 /// [`run_in`] in calls of [`CHUNK`] frames.
-fn run<F: Float + Lanes + Lerp>(
+fn run<F: Float + SimdLanes + Lerp>(
     bank: &mut GateBank<F>,
     audio: &[&[F]],
     key: &[&[F]],
@@ -142,7 +142,7 @@ fn run<F: Float + Lanes + Lerp>(
 }
 
 /// One channel of `audio` and of the key, as the stereo pair the tests run.
-fn run_mono<F: Float + Lanes + Lerp>(
+fn run_mono<F: Float + SimdLanes + Lerp>(
     bank: &mut GateBank<F>,
     audio: &[F],
     key: &[F],

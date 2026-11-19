@@ -31,10 +31,12 @@ use tutti_units::{
     SampleRate, Samples, Seconds,
 };
 
+use tutti_rt::SplitMix64;
+
 use crate::curve::Curve;
 use crate::program::{
     Amount, Clock, ControlProgram, DepthBy, InputLayer, Layer, LayerId, ProgramError, ProgramTime,
-    RateAnchor, SourceId, Waveform, splitmix64,
+    RateAnchor, SourceId, Waveform,
 };
 use crate::shape::Polarity;
 
@@ -469,10 +471,10 @@ const MACRO_CLOCK: Clock = Clock::Beats {
 /// The [`LayerId`] of `route`'s layer, scaled by `depth_by` (if any).
 /// Stable: keys only, so an edit that keeps both keys keeps the id.
 pub fn layer_id(route: RouteKey, depth_by: Option<RouteKey>) -> LayerId {
-    let h = splitmix64(route.0);
+    let h = SplitMix64::mix(route.0);
     LayerId(match depth_by {
         None => h,
-        Some(d) => splitmix64(h ^ splitmix64(d.0 ^ 0xD1B5_4A32_D192_ED03)),
+        Some(d) => SplitMix64::mix(h ^ SplitMix64::mix(d.0 ^ 0xD1B5_4A32_D192_ED03)),
     })
 }
 

@@ -467,7 +467,7 @@ impl PoolEntry for PluginEntry {
                 return Load::on_worker(move || Err(LoadError::Unresolved(unresolved)));
             }
         };
-        let placement = loadable.placement();
+        let placement = tutti_plugin::catalog::placement(&loadable);
         let request = PluginLoad {
             loadable,
             rate: cx.rate,

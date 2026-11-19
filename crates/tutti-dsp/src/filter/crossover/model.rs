@@ -9,8 +9,8 @@
 use tutti_units::{Db, Hz, SampleRate, Samples};
 
 use super::bands::{CrossoverError, MAX_BANDS, MAX_SPLITS, SOLVE_CEILING, check_bands, validate};
-use super::coefficients::Tpt;
-use super::{CrossoverCoefficients, CrossoverControls};
+use super::blend::Tpt;
+use super::{CrossoverBlend, CrossoverControls};
 use crate::design::prewarp;
 use crate::filter::biquad::{decay_ring, section_l1};
 use crate::{Complex64, Lti, Ring, System};
@@ -25,7 +25,7 @@ fn solve_split(hz: Hz, rate: SampleRate) -> Tpt {
 /// The design of a Linkwitz-Riley crossover: its sample rate, the frequencies its
 /// coefficients are solved at and those coefficients. A value without state; the
 /// crossover that runs it keeps the integrators and the glide between two of these
-/// ([`coefficients`](Self::coefficients)).
+/// ([`blend`](Self::blend)).
 ///
 /// It is an [`Lti`] with one input and one output a band, lowest first: the bands
 /// are at -6.02 dB at their crossover and sum to unit magnitude.
@@ -110,10 +110,10 @@ impl CrossoverModel {
         }
     }
 
-    /// The coefficients the sections run at: each split's integrator gain `tan(pi f / rate)`.
+    /// The blend value the crossover's glide moves: each split's integrator gain `tan(pi f / rate)`.
     #[must_use]
-    pub fn coefficients(&self) -> CrossoverCoefficients {
-        CrossoverCoefficients {
+    pub fn blend(&self) -> CrossoverBlend {
+        CrossoverBlend {
             bands: self.bands,
             split: self.coeffs,
         }
