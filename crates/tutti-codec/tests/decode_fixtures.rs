@@ -293,8 +293,12 @@ fn seek_lands_on_the_whole_file_load_frames() {
         let starts = [1, 700, len / 3, len - 100];
 
         let check = |dec: &mut FileIn, start: usize, how: &str| {
-            dec.seek(Samples(start)).expect("seek");
-            assert_eq!(dec.cursor(), Samples(start), "{name}: cursor after seek");
+            dec.seek(Samples::new(start)).expect("seek");
+            assert_eq!(
+                dec.cursor(),
+                Samples::new(start),
+                "{name}: cursor after seek"
+            );
             let want = 257.min(len - start);
             let mut out = vec![0.0f32; want * ch];
             assert_eq!(

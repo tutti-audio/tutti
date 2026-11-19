@@ -84,7 +84,7 @@ fn full_sequential_read_matches_full_load() {
     while pos < frames {
         let end = (pos + chunk).min(frames);
         let n = pull_into(&mut dec, got[pos..end].as_flattened_mut());
-        assert_eq!(n, Pull::Frames(Samples(end - pos)));
+        assert_eq!(n, Pull::Frames(Samples::new(end - pos)));
         pos = end;
     }
 
@@ -110,11 +110,11 @@ fn seek_then_poll_matches_slice() {
 
     let start = 12_345u64;
     let len = 2_000usize;
-    dec.seek(Samples(start as usize)).expect("seek");
-    assert_eq!(dec.cursor(), Samples(start as usize));
+    dec.seek(Samples::new(start as usize)).expect("seek");
+    assert_eq!(dec.cursor(), Samples::new(start as usize));
     let mut got = vec![[0.0f32; 2]; len];
     let n = pull_into(&mut dec, got.as_flattened_mut());
-    assert_eq!(n, Pull::Frames(Samples(len)));
+    assert_eq!(n, Pull::Frames(Samples::new(len)));
 
     for i in 0..len {
         let e = expected[start as usize + i];
@@ -141,13 +141,13 @@ fn poll_past_eof_returns_short_count() {
     // Straddle EOF: seek to 500 before the end, then ask for 1000 frames.
     let start = (frames - 500) as u64;
     let len = 1000usize;
-    dec.seek(Samples(start as usize)).expect("seek");
+    dec.seek(Samples::new(start as usize)).expect("seek");
     // Pre-fill with a sentinel so we can assert the untouched tail stays put.
     let mut got = vec![[1.0f32; 2]; len];
     let n = pull_into(&mut dec, got.as_flattened_mut());
     assert_eq!(
         n,
-        Pull::Frames(Samples(500)),
+        Pull::Frames(Samples::new(500)),
         "only 500 frames of real audio remain"
     );
 
@@ -209,7 +209,7 @@ fn a_truncated_flac_is_a_fault_not_a_clean_end() {
     let mut frames = 0;
     loop {
         match fill_sequential(&mut dec, &mut buf) {
-            Ok(Samples(0)) => panic!("a fault must surface as Err, not as a bare end"),
+            Ok(n) if n == Samples::ZERO => panic!("a fault must surface as Err, not as a bare end"),
             Ok(n) => frames += n.get(),
             Err(e) => {
                 assert!(e.to_string().contains("frame count"), "{e}");
@@ -221,7 +221,7 @@ fn a_truncated_flac_is_a_fault_not_a_clean_end() {
     assert!(dec.error().is_some());
     assert!(fill_sequential(&mut dec, &mut buf).is_err(), "sticky");
     assert_eq!(pull_into(&mut dec, &mut buf), Pull::Failed);
-    dec.seek(Samples(0)).expect("seek");
+    dec.seek(Samples::new(0)).expect("seek");
     assert!(dec.error().is_none(), "a successful seek clears the fault");
     let _ = std::fs::remove_file(&path);
 }
@@ -317,7 +317,7 @@ fn a_mid_stream_decode_error_keeps_the_frames_before_it() {
     let mut first = vec![0.0f32; 4096 * 2];
     assert_eq!(
         pull_into(&mut clean, &mut first),
-        Pull::Frames(Samples(4096))
+        Pull::Frames(Samples::new(4096))
     );
 
     // Fail on the packet after the first: the first packet's frames are
@@ -341,13 +341,16 @@ fn a_mid_stream_decode_error_keeps_the_frames_before_it() {
         &{
             let mut c = FileIn::<f32>::open(&path).expect("open");
             let mut v = vec![0.0f32; got * 2];
-            assert_eq!(pull_into(&mut c, &mut v), Pull::Frames(Samples(got)));
+            assert_eq!(pull_into(&mut c, &mut v), Pull::Frames(Samples::new(got)));
             v
         }[..]
     );
 
     let mut dec = open(1);
-    assert_eq!(pull_into(&mut dec, &mut buf), Pull::Frames(Samples(got)));
+    assert_eq!(
+        pull_into(&mut dec, &mut buf),
+        Pull::Frames(Samples::new(got))
+    );
     assert_eq!(pull_into(&mut dec, &mut buf), Pull::Failed);
     let _ = std::fs::remove_file(&path);
 }
@@ -375,7 +378,7 @@ fn a_decode_fault_reads_as_failed_through_the_trait() {
     let (frames, stop) = frames_then_stop(&mut dec);
     assert!(frames > 0 && frames < total, "{frames} of {total}");
     assert_eq!(stop, Stop::Failed);
-    dec.seek(Samples(0)).expect("seek");
+    dec.seek(Samples::new(0)).expect("seek");
     let mut buf = vec![0.0f32; 1024 * 2];
     assert!(
         matches!(pull_into(&mut dec, &mut buf), Pull::Frames(_)),
@@ -634,7 +637,7 @@ fn a_view_of_another_width_is_refused_and_untouched() {
             other => panic!("expected Width, got {other:?}"),
         }
         assert_eq!(buf, [7i16; 12], "{view:?}: the view is untouched");
-        assert_eq!(file.cursor(), Samples(0), "nothing was consumed");
+        assert_eq!(file.cursor(), Samples::new(0), "nothing was consumed");
     }
     let _ = std::fs::remove_file(&path);
 }

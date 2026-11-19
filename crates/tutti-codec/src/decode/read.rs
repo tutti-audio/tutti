@@ -354,7 +354,7 @@ fn decode<S: Sample>(mut reader: Box<dyn FormatReader>) -> Result<Wave<S>, Decod
     // Pre-allocate using the metadata frame count when available (WAV, FLAC).
     let mut wave: Option<Wave<S>> = total_frames.map(|total| {
         let mut wave = Wave::with_placement(topology, placement, sample_rate);
-        wave.reserve(Samples(reserved_frames(total, wave.channels())));
+        wave.reserve(Samples::new(reserved_frames(total, wave.channels())));
         wave
     });
 
