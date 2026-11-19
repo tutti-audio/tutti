@@ -132,7 +132,7 @@ fn one_block_matches_single_frames_at_non_unity_speed() {
     let wave = ramp_wave(256, 44100.0);
     let build = || {
         let mut u = MemorySource::new(Arc::clone(&wave)).expect("a placeable wave");
-        u.set_speed(PlaybackRate::new(1.5));
+        u.set_speed(PlaybackRate::of(1.5));
         u
     };
     assert_blocks_match_frames(build(), build(), 32, None, "free-running @1.5x");
@@ -148,7 +148,7 @@ fn one_block_matches_single_frames_when_placed() {
         MemorySource::with_config(
             Arc::clone(&wave),
             MemorySourceConfig {
-                speed: PlaybackRate::new(0.5),
+                speed: PlaybackRate::of(0.5),
                 placement: Some(VoiceWindow::default()),
                 ..Default::default()
             },
@@ -187,7 +187,7 @@ fn placed_unit(wave: &Arc<Wave>, rate: f64) -> MemorySource<f32> {
     MemorySource::with_config(
         Arc::clone(wave),
         MemorySourceConfig {
-            speed: PlaybackRate::new(rate),
+            speed: PlaybackRate::of(rate),
             placement: Some(VoiceWindow::default()),
             ..Default::default()
         },
@@ -361,7 +361,7 @@ fn a_loop_reads_through_its_seam_at_a_fractional_rate() {
     let wave = ramp_wave(64, 44_100.0);
     let mut u = MemorySource::new(wave).expect("a placeable wave");
     u.set_loop(Some(loop_frames(10, 20, 0)));
-    u.set_speed(PlaybackRate::new(0.5));
+    u.set_speed(PlaybackRate::of(0.5));
     u.trigger_at(SamplePosition::new(19.5));
     let ticks = frames(&mut u, None, 3);
     let v = |frame: usize| (frame + 1) as f32;
@@ -392,7 +392,7 @@ fn a_rate_change_lands_on_the_next_block() {
     let mut u = placed_unit(&wave, 1.0);
     let first = block(&mut u, Some(&transport), 16);
     transport.advance(16, SampleRate::of(SR));
-    u.set_speed(PlaybackRate::new(2.0));
+    u.set_speed(PlaybackRate::of(2.0));
     let second = block(&mut u, Some(&transport), 16);
     for w in first.windows(2) {
         assert!((w[1].0 - w[0].0 - 1.0).abs() < 1e-3, "1x steps 1");
@@ -603,7 +603,7 @@ fn config_default_matches_new() {
     // Default config must reproduce `new`'s audible baseline: unity gain,
     // normal speed, one-shot — NOT the newtypes' zero default.
     assert_eq!(sampler.gain(), Amplitude::new(1.0));
-    assert_eq!(sampler.speed(), PlaybackRate::new(1.0));
+    assert_eq!(sampler.speed(), PlaybackRate::of(1.0));
     assert!(!sampler.loop_().is_some());
 }
 
@@ -667,7 +667,7 @@ fn speed_2x_advances_twice_as_fast() {
 
     let mut normal = MemorySource::new(Arc::clone(&wave)).expect("a placeable wave");
     let mut fast = MemorySource::new(wave).expect("a placeable wave");
-    fast.set_speed(PlaybackRate::new(2.0));
+    fast.set_speed(PlaybackRate::of(2.0));
 
     let mut out = [0.0f32; 2];
     for _ in 0..10 {
@@ -755,7 +755,7 @@ fn setting_a_window_places_the_source() {
 fn window_rate_matches_the_gate_and_excludes_src_ratio() {
     let wave = ramp_wave(200_000, 48_000.0);
     let mut sampler = MemorySource::new(wave).expect("a placeable wave");
-    sampler.set_speed(PlaybackRate::new(2.0));
+    sampler.set_speed(PlaybackRate::of(2.0));
     sampler.set_render_rate(SampleRate::SR_44K1);
 
     // Varispeed alone: the gate already resolved the file rate.
@@ -849,7 +849,7 @@ fn looping_overshoot_at_double_speed() {
     let wave = ramp_wave(10, 44100.0);
     let mut sampler = MemorySource::new(wave).expect("a placeable wave");
     sampler.set_loop(Some(loop_frames(0, 10, 0)));
-    sampler.set_speed(PlaybackRate::new(2.0));
+    sampler.set_speed(PlaybackRate::of(2.0));
 
     let mut out = [0.0f32; 2];
     // 5 ticks at speed=2 → position advances 0,2,4,6,8 → after tick 5
@@ -1014,7 +1014,7 @@ fn clone_preserves_state() {
         wave,
         MemorySourceConfig {
             gain: Amplitude::new(0.75),
-            speed: PlaybackRate::new(1.5),
+            speed: PlaybackRate::of(1.5),
             loop_: Some(loop_frames(0, 100, 0)),
             ..Default::default()
         },
@@ -1024,7 +1024,7 @@ fn clone_preserves_state() {
 
     let cloned = sampler.clone();
     assert_eq!(cloned.gain(), Amplitude::new(0.75));
-    assert_eq!(cloned.speed(), PlaybackRate::new(1.5));
+    assert_eq!(cloned.speed(), PlaybackRate::of(1.5));
     assert!(cloned.loop_().is_some());
     assert!(cloned.is_playing());
     assert_eq!(cloned.position(), SamplePosition::new(42.0));

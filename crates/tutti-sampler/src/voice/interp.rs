@@ -996,7 +996,7 @@ mod tests {
             (96_000.0, 0.25),
         ] {
             let src = SrcRatio::for_rates(SampleRate::of(file_rate), SampleRate::of(session));
-            let rate = PlaybackRate::new(speed);
+            let rate = PlaybackRate::of(speed);
             let transport = TransportPosition::new(true, Bpm::of(120.0), Beat::new(4.0), None);
 
             // Memory's split: the wave's own rate, times varispeed alone.

@@ -77,8 +77,7 @@ use crate::convert::widen;
 use crate::framing::{Framing, check_frame_count, check_hop_within, check_overlap};
 use crate::meters::onset::{DetectionFunction, OnsetConfig, OnsetPlan, onset_lag, run};
 use crate::meters::silence::FiniteLevel;
-use crate::{Error, Meter, Result};
-use tutti_dsp::FftScratch;
+use crate::{Error, Meter, Region, Result};
 use tutti_dsp::{median, median_of_sorted};
 use tutti_units::ranged;
 
@@ -329,30 +328,13 @@ pub struct NoteEvent {
     /// The median pitch's distance from `note`, `-50..=50` [`Cents`]: the
     /// pitch-bend amount.
     pub cents: Cents,
-    /// The first sample of the note.
-    pub start: Samples,
-    /// One past the last sample of the note; `end > start`.
-    pub end: Samples,
+    /// The samples the note spans. Never empty: `build_note` yields no note
+    /// whose end is not past its start.
+    pub span: Region,
     /// The loudest frame RMS wholly inside the note, in dBFS (the loudest frame
     /// it holds, for a note shorter than a YIN frame). See [`VelocityRange`]
     /// for a MIDI velocity.
     pub velocity: Db,
-}
-
-impl NoteEvent {
-    /// The note's length in [`Samples`]; zero if `end` is not past `start`.
-    #[inline]
-    #[must_use]
-    pub fn len(&self) -> Samples {
-        Samples::new(self.end.get().saturating_sub(self.start.get()))
-    }
-
-    /// Whether the note spans nothing; never true of a transcribed note.
-    #[inline]
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.end <= self.start
-    }
 }
 
 /// A linear-in-dB map from a note's level to a MIDI velocity: `floor` and
@@ -428,7 +410,6 @@ pub fn transcribe<S: Sample>(
     cfg: &NoteConfig,
     samples: Mono<'_, S>,
     rate: impl Into<SampleRate>,
-    fft: &mut FftScratch<f64>,
 ) -> Result<Vec<NoteEvent>> {
     let cfg = &cfg.plan(rate.into())?;
     let samples = &widen(samples.samples());
@@ -454,7 +435,7 @@ pub fn transcribe<S: Sample>(
 
     let track = yin_track_at(&cfg.yin, samples, cfg.hop)?;
     let levels = levels_at(cfg, samples)?;
-    let onsets: Vec<Samples> = run(cfg.onset, samples, fft)
+    let onsets: Vec<Samples> = run(cfg.onset, samples)
         .finish()
         .iter()
         .map(|o| cfg.attack(o.position))
@@ -511,10 +492,10 @@ fn levels_at(cfg: &NotePlan, samples: &[f64]) -> Result<Vec<Amplitude>> {
 /// [`Error::NonPositiveFrequency`] for a voiced frequency of zero or below.
 pub fn notes_from_track(
     cfg: &NoteConfig,
-    rate: impl Into<SampleRate>,
     track: &[PitchEstimate],
     levels: &[Amplitude],
     onsets: &[Samples],
+    rate: impl Into<SampleRate>,
 ) -> Result<Vec<NoteEvent>> {
     segment(&cfg.plan(rate.into())?, track, levels, onsets)
 }
@@ -553,8 +534,7 @@ fn segment(
         for (i, piece) in pieces.iter().enumerate() {
             let next_split = pieces.get(i + 1).and_then(|p| p.split);
             if let Some(note) = build_note(cfg, &frames, &run, piece, next_split)
-                && note.len() >= cfg.min_length
-                && !note.is_empty()
+                && note.span.len() >= cfg.min_length
             {
                 notes.push(note);
             }
@@ -788,8 +768,7 @@ fn build_note(
     Some(NoteEvent {
         note,
         cents: bend,
-        start: Samples::new(start),
-        end: Samples::new(end),
+        span: Region::new(Samples::new(start), Samples::new(end))?,
         velocity: level.to_db(),
     })
 }

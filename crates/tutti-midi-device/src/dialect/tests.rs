@@ -6,13 +6,13 @@ use tutti_ump::{
 };
 
 use super::*;
-use crate::Initiator;
-use crate::ci::{
+use crate::endpoint::{Capabilities, FunctionBlock, Supports};
+use tutti_fixtures::midi;
+use tutti_midi_ci::Initiator;
+use tutti_midi_ci::{
     CI_VERSION, CiMessage, CiVersion, Decoded, Muid, ProfileChannels, ProfileInitiator,
     ProfileTarget,
 };
-use crate::endpoint::{Capabilities, FunctionBlock, Supports};
-use tutti_fixtures::midi;
 
 const OURS: u32 = 0x0100_0001;
 const PEER: u32 = 0x0200_0002;

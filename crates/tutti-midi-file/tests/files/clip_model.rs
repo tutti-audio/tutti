@@ -5,9 +5,7 @@
 use crate::common::{self, metrical, track};
 
 use tutti_fixtures::midi;
-use tutti_midi_device::{
-    NotSetProfileOn, ProfileChannels, ProfileId, ProfileOnRequest, ProfileTarget,
-};
+use tutti_midi_ci::{NotSetProfileOn, ProfileChannels, ProfileId, ProfileOnRequest, ProfileTarget};
 use tutti_midi_file::{
     ClipFileError, FileEvent, Meta, MidiFile, MidiFileKind, ReadError, SmfDivision, Tick, Track,
     TracksError,

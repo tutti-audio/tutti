@@ -2,28 +2,24 @@ use super::*;
 
 const RATE: SampleRate = SampleRate::SR_44K1;
 
-fn stft(samples: &[f64], request: StftRequest, fft: &mut FftScratch<f64>) -> Result<Stft> {
-    super::stft(request, Mono::new(samples), RATE, fft)
+fn stft(samples: &[f64], config: StftConfig) -> Result<Stft> {
+    super::stft(&config, Mono::new(samples), SampleRange::All, RATE)
 }
 
-fn stft_magnitude(
-    samples: &[f64],
-    request: StftRequest,
-    fft: &mut FftScratch<f64>,
-) -> Result<StftMagnitude> {
-    super::stft_magnitude(request, Mono::new(samples), RATE, fft)
+fn stft_magnitude(samples: &[f64], config: StftConfig) -> Result<StftMagnitude> {
+    super::stft_magnitude(&config, Mono::new(samples), SampleRange::All, RATE)
 }
 
-fn stft_polar(
-    samples: &[f64],
-    request: StftRequest,
-    fft: &mut FftScratch<f64>,
-) -> Result<StftPolar> {
-    super::stft_polar(request, Mono::new(samples), RATE, fft)
+fn stft_polar(samples: &[f64], config: StftConfig) -> Result<StftPolar> {
+    super::stft_polar(&config, Mono::new(samples), SampleRange::All, RATE)
 }
 
-fn istft(transform: &Stft, fft: &mut FftScratch<f64>) -> Vec<f64> {
-    super::istft(transform, fft)
+fn span(start: usize, end: usize) -> Region {
+    Region::new(Samples::new(start), Samples::new(end)).expect("an ascending span")
+}
+
+fn istft(transform: &Stft) -> Vec<f64> {
+    super::istft(transform)
 }
 
 fn tone(len: usize, freq: f64, sample_rate: f64) -> Vec<f64> {
@@ -41,11 +37,9 @@ fn tone(len: usize, freq: f64, sample_rate: f64) -> Vec<f64> {
 #[test]
 fn a_tone_lands_in_the_expected_bin() {
     let samples = tone(8192, 440.0, 44100.0);
-    let mut fft = FftScratch::new();
     let result = stft(
         &samples,
-        StftRequest::new(Samples::new(2048usize), Samples::new(512usize)),
-        &mut fft,
+        StftConfig::new(Samples::new(2048usize), Samples::new(512usize)),
     )
     .unwrap();
 
@@ -70,14 +64,12 @@ fn a_tone_lands_in_the_expected_bin() {
 #[test]
 fn stft_round_trips_through_istft() {
     let samples = tone(8192, 440.0, 44100.0);
-    let mut fft = FftScratch::new();
     let transform = stft(
         &samples,
-        StftRequest::new(Samples::new(2048usize), Samples::new(512usize)),
-        &mut fft,
+        StftConfig::new(Samples::new(2048usize), Samples::new(512usize)),
     )
     .unwrap();
-    let resynth = istft(&transform, &mut fft);
+    let resynth = istft(&transform);
 
     // Compare the steady-state interior: the edges ramp in and out because
     // fewer windows overlap there.
@@ -97,8 +89,7 @@ fn stft_round_trips_through_istft() {
 #[test]
 fn a_decimated_request_is_refused_by_the_invertible_path() {
     let samples = tone(200_000, 440.0, 44100.0);
-    let mut fft = FftScratch::new();
-    let request = StftRequest::new(Samples::new(2048usize), Samples::new(512usize)).hop(
+    let request = StftConfig::new(Samples::new(2048usize), Samples::new(512usize)).hop(
         HopPolicy::TargetFrames {
             frames: FrameCount(64),
             min_hop: Samples::new(1usize),
@@ -107,13 +98,13 @@ fn a_decimated_request_is_refused_by_the_invertible_path() {
 
     // The hop this resolves to is far wider than the window.
     assert!(matches!(
-        stft(&samples, request, &mut fft),
+        stft(&samples, request),
         Err(Error::Dsp(tutti_dsp::StftError::HopExceedsWindow { .. }))
             | Err(Error::Dsp(tutti_dsp::StftError::NotColaCompliant { .. }))
     ));
 
     // The display path accepts it and yields a type with no inverse.
-    let display = stft_magnitude(&samples, request, &mut fft).unwrap();
+    let display = stft_magnitude(&samples, request).unwrap();
     let frames = display.frames().get();
     assert!(
         (32..=128).contains(&frames),
@@ -127,7 +118,7 @@ fn a_decimated_request_is_refused_by_the_invertible_path() {
 #[test]
 fn a_requests_window_shape_reaches_its_geometry() {
     let len = Samples::new(200_000);
-    let request = StftRequest::new(Samples::new(2048usize), Samples::new(512usize))
+    let request = StftConfig::new(Samples::new(2048usize), Samples::new(512usize))
         .window_fn(CosineWindow::HAMMING);
 
     assert_eq!(
@@ -151,12 +142,11 @@ fn a_requests_window_shape_reaches_its_geometry() {
 #[test]
 fn a_window_that_needs_more_overlap_is_refused_only_where_it_matters() {
     let samples = tone(200_000, 440.0, 44100.0);
-    let mut fft = FftScratch::new();
-    let request = StftRequest::new(Samples::new(2048usize), Samples::new(512usize))
+    let request = StftConfig::new(Samples::new(2048usize), Samples::new(512usize))
         .window_fn(CosineWindow::BLACKMAN);
 
     assert!(matches!(
-        stft(&samples, request, &mut fft),
+        stft(&samples, request),
         Err(Error::Dsp(tutti_dsp::StftError::NotColaCompliant {
             window_fn: CosineWindow::BLACKMAN,
             ..
@@ -164,22 +154,20 @@ fn a_window_that_needs_more_overlap_is_refused_only_where_it_matters() {
     ));
 
     // Analysable, just not invertible.
-    assert!(stft_magnitude(&samples, request, &mut fft).is_ok());
+    assert!(stft_magnitude(&samples, request).is_ok());
 
     // And at the overlap Blackman asks for, it inverts.
-    let deeper = StftRequest::new(Samples::new(2048usize), Samples::new(256usize))
+    let deeper = StftConfig::new(Samples::new(2048usize), Samples::new(256usize))
         .window_fn(CosineWindow::BLACKMAN);
-    assert!(stft(&samples, deeper, &mut fft).is_ok());
+    assert!(stft(&samples, deeper).is_ok());
 }
 
 #[test]
 fn normalized_magnitudes_carry_their_peak() {
     let samples = tone(4096, 440.0, 44100.0);
-    let mut fft = FftScratch::new();
     let polar = stft_polar(
         &samples,
-        StftRequest::new(Samples::new(1024usize), Samples::new(256usize)),
-        &mut fft,
+        StftConfig::new(Samples::new(1024usize), Samples::new(256usize)),
     )
     .unwrap();
 
@@ -199,37 +187,27 @@ fn normalized_magnitudes_carry_their_peak() {
 #[test]
 fn a_range_analyzes_only_its_span() {
     let samples = tone(16384, 440.0, 44100.0);
-    let mut fft = FftScratch::new();
 
     let whole = stft(
         &samples,
-        StftRequest::new(Samples::new(2048usize), Samples::new(512usize)),
-        &mut fft,
+        StftConfig::new(Samples::new(2048usize), Samples::new(512usize)),
     )
     .unwrap();
-    let part = stft(
-        &samples,
-        StftRequest::new(Samples::new(2048usize), Samples::new(512usize)).range(
-            SampleRange::Span {
-                start: Samples::new(0usize),
-                end: Samples::new(8192usize),
-            },
-        ),
-        &mut fft,
+    let part = super::stft(
+        &StftConfig::new(Samples::new(2048usize), Samples::new(512usize)),
+        Mono::new(&samples),
+        SampleRange::Span(span(0, 8192)),
+        RATE,
     )
     .unwrap();
 
     assert!(part.frames().get() < whole.frames().get());
     // A span past the end clamps rather than panicking.
-    let clamped = stft(
-        &samples,
-        StftRequest::new(Samples::new(2048usize), Samples::new(512usize)).range(
-            SampleRange::Span {
-                start: Samples::new(0usize),
-                end: Samples::new(99_999usize),
-            },
-        ),
-        &mut fft,
+    let clamped = super::stft(
+        &StftConfig::new(Samples::new(2048usize), Samples::new(512usize)),
+        Mono::new(&samples),
+        SampleRange::Span(span(0, 99_999)),
+        RATE,
     )
     .unwrap();
     assert_eq!(clamped.frames(), whole.frames());
@@ -238,17 +216,15 @@ fn a_range_analyzes_only_its_span() {
 #[test]
 fn masking_requires_a_matching_shape() {
     let samples = tone(8192, 440.0, 44100.0);
-    let mut fft = FftScratch::new();
     let transform = stft(
         &samples,
-        StftRequest::new(Samples::new(2048usize), Samples::new(512usize)),
-        &mut fft,
+        StftConfig::new(Samples::new(2048usize), Samples::new(512usize)),
     )
     .unwrap();
 
     let wrong = Grid::filled(Complex64::default(), FrameCount(2), tutti_dsp::BinCount(3));
     assert_eq!(
-        transform.resynthesize_masked::<f64>(&wrong, &mut fft),
+        transform.resynthesize_masked::<f64>(&wrong),
         Err(Error::GridShapeDisagreement)
     );
 
@@ -258,8 +234,8 @@ fn masking_requires_a_matching_shape() {
         transform.bins().frames(),
         transform.bins().bins(),
     );
-    let masked: Vec<f64> = transform.resynthesize_masked(&neutral, &mut fft).unwrap();
-    let plain = istft(&transform, &mut fft);
+    let masked: Vec<f64> = transform.resynthesize_masked(&neutral).unwrap();
+    let plain = istft(&transform);
     for (a, b) in masked.iter().zip(&plain) {
         assert!((a - b).abs() < 1e-12);
     }
@@ -268,11 +244,9 @@ fn masking_requires_a_matching_shape() {
 #[test]
 fn an_empty_mask_erases_the_signal() {
     let samples = tone(8192, 440.0, 44100.0);
-    let mut fft = FftScratch::new();
     let transform = stft(
         &samples,
-        StftRequest::new(Samples::new(2048usize), Samples::new(512usize)),
-        &mut fft,
+        StftConfig::new(Samples::new(2048usize), Samples::new(512usize)),
     )
     .unwrap();
 
@@ -281,7 +255,7 @@ fn an_empty_mask_erases_the_signal() {
         transform.bins().frames(),
         transform.bins().bins(),
     );
-    let erased: Vec<f64> = transform.resynthesize_masked(&silence, &mut fft).unwrap();
+    let erased: Vec<f64> = transform.resynthesize_masked(&silence).unwrap();
     for s in erased {
         assert!(s.abs() < 1e-9);
     }
@@ -290,14 +264,12 @@ fn an_empty_mask_erases_the_signal() {
 #[test]
 fn input_shorter_than_one_window_yields_no_frames() {
     let samples = tone(100, 440.0, 44100.0);
-    let mut fft = FftScratch::new();
     let result = stft(
         &samples,
-        StftRequest::new(Samples::new(2048usize), Samples::new(512usize)),
-        &mut fft,
+        StftConfig::new(Samples::new(2048usize), Samples::new(512usize)),
     )
     .unwrap();
 
     assert_eq!(result.frames(), FrameCount(0));
-    assert!(istft(&result, &mut fft).is_empty());
+    assert!(istft(&result).is_empty());
 }

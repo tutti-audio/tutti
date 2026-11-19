@@ -49,7 +49,7 @@ fn interpolation_places_a_peak_to_a_fiftieth_of_a_bin() {
 const INTERP_BIAS_BINS: f64 = 0.02;
 
 fn run(x: &[f64], cfg: &ChromaConfig) -> Chroma {
-    chroma(cfg, Mono::new(x), RATE, &mut FftScratch::new()).unwrap()
+    chroma(cfg, Mono::new(x), RATE).unwrap()
 }
 
 fn cfg() -> ChromaConfig {
@@ -303,15 +303,14 @@ fn the_framing_and_band_are_validated() {
     // The rate decides what the terminals accept: a band of under three
     // bins, or one above Nyquist.
     let x = sine(440.0, 8192, 0.5);
-    let mut fft = FftScratch::new();
     let narrow = cfg().band(FrequencyBand::new(Hz::new(100.0), Hz::new(110.0)).unwrap());
     assert!(matches!(
-        chroma(&narrow, Mono::new(&x), RATE, &mut fft),
+        chroma(&narrow, Mono::new(&x), RATE),
         Err(Error::EmptyFrequencyRange { .. })
     ));
     let wide = cfg().band(FrequencyBand::new(Hz::new(100.0), Hz::new(12_000.0)).unwrap());
     assert!(matches!(
-        chroma(&wide, Mono::new(&x), RATE, &mut fft),
+        chroma(&wide, Mono::new(&x), RATE),
         Err(Error::AboveNyquist { .. })
     ));
     assert!(matches!(
@@ -329,24 +328,15 @@ fn the_framing_and_band_are_validated() {
 /// Bad input is an error, and a refused call computes nothing.
 #[test]
 fn bad_input_is_refused() {
-    let mut fft = FftScratch::new();
     let mut x = sine(440.0, 8192, 0.5);
-    let one_shot = |x: &[f64], cfg: &ChromaConfig, fft: &mut FftScratch<f64>| {
-        chroma(cfg, Mono::new(x), RATE, fft)
-    };
+    let one_shot = |x: &[f64], cfg: &ChromaConfig| chroma(cfg, Mono::new(x), RATE);
     x[100] = f64::NAN;
-    assert_eq!(
-        one_shot(&x, &cfg(), &mut fft).unwrap_err(),
-        Error::NonFiniteInput
-    );
+    assert_eq!(one_shot(&x, &cfg()).unwrap_err(), Error::NonFiniteInput);
     x[100] = f64::INFINITY;
-    assert_eq!(
-        one_shot(&x, &cfg(), &mut fft).unwrap_err(),
-        Error::NonFiniteInput
-    );
+    assert_eq!(one_shot(&x, &cfg()).unwrap_err(), Error::NonFiniteInput);
     x[100] = 0.25;
     assert_eq!(
-        one_shot(&x[..4095], &cfg(), &mut fft).unwrap_err(),
+        one_shot(&x[..4095], &cfg()).unwrap_err(),
         Error::InsufficientInput {
             needed: Samples::new(4096),
             got: Samples::new(4095)
@@ -355,17 +345,14 @@ fn bad_input_is_refused() {
     let tiny = cfg().framing(framing(64, 1));
     let long = vec![0.0; MAX_FRAMES.get() + 64];
     assert!(matches!(
-        one_shot(&long, &tiny, &mut fft),
+        one_shot(&long, &tiny),
         Err(Error::TooManyFrames { .. })
     ));
     // A NaN between two frames is in no window but is still refused.
     let sparse = cfg().framing(framing(64, 128));
     let mut gap = sine(440.0, 512, 0.5);
     gap[100] = f64::NAN;
-    assert_eq!(
-        one_shot(&gap, &sparse, &mut fft).unwrap_err(),
-        Error::NonFiniteInput
-    );
+    assert_eq!(one_shot(&gap, &sparse).unwrap_err(), Error::NonFiniteInput);
 }
 
 /// A 16-bit buffer folds at its nominal level: the chroma of the integer
@@ -376,7 +363,7 @@ fn an_integer_buffer_folds_at_its_nominal_level() {
         .iter()
         .map(|&v| (v * f64::from(i16::MAX)) as i16)
         .collect();
-    let c = chroma(&cfg(), Mono::new(&x), RATE, &mut FftScratch::new()).unwrap();
+    let c = chroma(&cfg(), Mono::new(&x), RATE).unwrap();
     assert_eq!(c.mean()[9], 1.0);
 }
 

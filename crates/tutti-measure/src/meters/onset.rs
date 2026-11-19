@@ -371,16 +371,15 @@ impl<S: Sample> Meter for OnsetMeter<S> {
     /// threshold, closer than the minimum gap resolved to the stronger.
     fn finish(self) -> Vec<Onset> {
         let mut onsets = pick_peaks(&self.plan, &self.novelty);
-        suppress_close_onsets(&mut onsets, self.plan.min_gap);
+        suppress_close_onsets(self.plan.min_gap, &mut onsets);
         onsets
     }
 }
 
 /// Detects onsets across a whole buffer at `rate`.
 ///
-/// Feeds one [`OnsetMeter`] the buffer, so the two cannot drift. `fft` is the
-/// caller's scratch, lent to the meter for the call so its plans are reused. A
-/// buffer shorter than one window yields no onsets.
+/// Feeds one [`OnsetMeter`] the buffer, so the two cannot drift. A buffer
+/// shorter than one window yields no onsets.
 ///
 /// # Errors
 ///
@@ -390,20 +389,16 @@ pub fn detect_onsets<S: Sample>(
     cfg: &OnsetConfig,
     samples: Mono<'_, S>,
     rate: impl Into<SampleRate>,
-    fft: &mut FftScratch<f64>,
 ) -> Result<Vec<Onset>> {
     let plan = cfg.plan(rate.into())?;
-    Ok(run(plan, &widen(samples.samples()), fft).finish())
+    Ok(run(plan, &widen(samples.samples())).finish())
 }
 
-/// A meter for `plan` fed `samples`, with the caller's scratch lent to it: the
-/// whole-buffer run of the crate's own callers (tempo, notes), which hold a
-/// resolved plan and `f64` samples.
-pub(crate) fn run(plan: OnsetPlan, samples: &[f64], fft: &mut FftScratch<f64>) -> OnsetMeter<f64> {
+/// A meter for `plan` fed `samples`: the whole-buffer run of the crate's own
+/// callers (tempo, notes), which hold a resolved plan and `f64` samples.
+pub(crate) fn run(plan: OnsetPlan, samples: &[f64]) -> OnsetMeter<f64> {
     let mut meter = OnsetMeter::<f64>::new(plan);
-    core::mem::swap(&mut meter.fft, fft);
     meter.feed(samples, |_| {});
-    core::mem::swap(&mut meter.fft, fft);
     meter
 }
 
@@ -415,7 +410,7 @@ pub(crate) fn run(plan: OnsetPlan, samples: &[f64], fft: &mut FftScratch<f64>) -
 /// Order-independent: the gap is a distance, so an unsorted list is compared
 /// correctly rather than underflowing. `pick_peaks` emits ascending positions,
 /// but this is public and takes a plain `Vec`, so it cannot assume that.
-pub fn suppress_close_onsets(onsets: &mut Vec<Onset>, min_gap: Samples) {
+pub fn suppress_close_onsets(min_gap: Samples, onsets: &mut Vec<Onset>) {
     if onsets.len() < 2 {
         return;
     }

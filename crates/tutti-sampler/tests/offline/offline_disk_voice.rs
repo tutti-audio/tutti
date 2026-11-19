@@ -448,7 +448,7 @@ fn a_varispeed_change_lands_on_a_forks_next_block() {
     let clock = clock_at(SR);
     let mut first = fork(&voice, SR);
     let left = render(&mut *first.node, &clock, 32);
-    voice.set_speed(tutti_units::PlaybackRate::new(2.0));
+    voice.set_speed(tutti_units::PlaybackRate::of(2.0));
     // A fork's controls are a snapshot: the 2x reaches a fork taken after it.
     let mut second = fork(&voice, SR);
     let right = render(&mut *second.node, &clock, 32);
@@ -746,7 +746,7 @@ fn a_fork_matches_the_memory_tier_bit_for_bit() {
             _second = Some((second, second_reader));
         }
         let mut voice = live_voice(reader, 1.0);
-        voice.set_speed(tutti_units::PlaybackRate::new(case.speed));
+        voice.set_speed(tutti_units::PlaybackRate::of(case.speed));
         if case.reverse {
             reverse(&mut rig);
         }
@@ -759,7 +759,7 @@ fn a_fork_matches_the_memory_tier_bit_for_bit() {
         let mut source =
             tutti_sampler::MemorySource::placed(Arc::new(wave), VoiceWindow::from(Beat::new(1.0)))
                 .expect("a placeable wave");
-        source.set_speed(tutti_units::PlaybackRate::new(case.speed));
+        source.set_speed(tutti_units::PlaybackRate::of(case.speed));
         source.set_loop(case.loop_);
         let mut memory: Box<dyn Node> = if case.reverse {
             Box::new(VoiceNode::with_channels(

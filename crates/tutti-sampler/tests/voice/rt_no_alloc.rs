@@ -435,7 +435,7 @@ fn voice_nodes_at_max_block_512_in_ragged_blocks_are_allocation_free() {
     let looped = |speed: f64| {
         let (source, mut play) = placed_parts(&wave, 1.0);
         play.loop_ = Some(loop_frames(1_000, 30_000, 256));
-        play.speed = PlaybackRate::new(speed);
+        play.speed = PlaybackRate::of(speed);
         (source, play)
     };
     let mut pool = VoicePool::new();

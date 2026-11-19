@@ -1,8 +1,7 @@
 use super::*;
-use crate::{StftRequest, stft_magnitude};
+use crate::{SampleRange, StftConfig, stft_magnitude};
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 use tutti_buffers::Mono;
-use tutti_dsp::FftScratch;
 use tutti_units::SampleRate;
 use tutti_units::Samples;
 
@@ -10,12 +9,12 @@ const RATE: f64 = 48_000.0;
 const WINDOW: usize = 2048;
 
 fn magnitudes_of(samples: &[f64]) -> StftMagnitude {
-    let request = StftRequest::new(Samples::new(WINDOW), Samples::new(WINDOW / 2));
+    let config = StftConfig::new(Samples::new(WINDOW), Samples::new(WINDOW / 2));
     stft_magnitude(
-        request,
+        &config,
         Mono::new(samples),
+        SampleRange::All,
         SampleRate::of(RATE),
-        &mut FftScratch::new(),
     )
     .unwrap()
 }
@@ -41,7 +40,7 @@ fn sine(hz: f64, len: usize) -> Vec<f64> {
 fn a_sine_centroid_is_its_frequency_within_a_bin() {
     for hz in [1000.0f64, 3517.0, 9000.0] {
         let stft = magnitudes_of(&sine(hz, 16_384));
-        let features = spectral_features(&stft, 0.85);
+        let features = spectral_features(0.85, &stft);
         assert!(!features.is_empty());
         for f in &features {
             assert!(
@@ -58,13 +57,13 @@ fn a_sine_centroid_is_its_frequency_within_a_bin() {
 fn noise_is_flat_a_sine_is_not() {
     let mut rng = StdRng::seed_from_u64(42);
     let noise: Vec<f64> = (0..65_536).map(|_| rng.random_range(-1.0..1.0)).collect();
-    let flat = spectral_features(&magnitudes_of(&noise), 0.85);
+    let flat = spectral_features(0.85, &magnitudes_of(&noise));
     let mean: f64 = flat.iter().map(|f| f.flatness).sum::<f64>() / flat.len() as f64;
     // The geometric mean of an exponential power distribution sits at
     // exp(-gamma) = 0.56 of its mean.
     assert!((0.5..0.62).contains(&mean), "noise flatness {mean}");
 
-    let tone = spectral_features(&magnitudes_of(&sine(1000.0, 16_384)), 0.85);
+    let tone = spectral_features(0.85, &magnitudes_of(&sine(1000.0, 16_384)));
     assert!(tone.iter().all(|f| f.flatness < 1e-3), "{tone:?}");
 }
 
@@ -75,7 +74,7 @@ fn the_grid_helper_applies_the_kernels_row_by_row() {
     let stft = magnitudes_of(&sine(2000.0, 8192));
     let width = stft.geometry().bin_frequency(BinIndex(1));
     let grid = stft.magnitudes().grid();
-    let features = spectral_features(&stft, 0.5);
+    let features = spectral_features(0.5, &stft);
     assert_eq!(features.len(), grid.frames().get());
     for (frame, f) in grid.frames().indices().zip(&features) {
         let row = grid.row(frame);

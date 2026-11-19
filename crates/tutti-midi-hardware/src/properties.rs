@@ -9,7 +9,7 @@
 //! or never answered. The handle is a snapshot: the peer may be lost before the
 //! request is sent, and that is refused ([`PeerError::NoSuchPeer`]).
 //!
-//! As the Responder it serves a [`ResourceStore`](tutti_midi_device::ResourceStore)
+//! As the Responder it serves a [`ResourceStore`](tutti_midi_ci::ResourceStore)
 //! ([`MidiSession::serve_properties`](crate::MidiSession::serve_properties)),
 //! empty until the app gives one: it answers a peer's Capabilities Inquiry,
 //! Get, Set and Subscription, and tells what a peer changed
@@ -25,10 +25,12 @@
 use std::num::NonZeroU32;
 use std::sync::Arc;
 
-use tutti_midi_device::{
-    DeviceId, Muid, PeResource, PeResourceList, ResourceEvent, ResourceGet, ResourceSet,
-    ResponderEvent, SubscribeId,
+use tutti_midi_ci::Muid;
+use tutti_midi_ci::{
+    PeResource, PeResourceList, ResourceEvent, ResourceGet, ResourceSet, ResponderEvent,
+    SubscribeId,
 };
+use tutti_midi_device::DeviceId;
 use tutti_ump::MidiGroup;
 
 use crate::peer::{PeerError, PeerRef};
@@ -89,23 +91,23 @@ impl PropertyPeer {
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
 pub enum PropertyCall {
-    /// A Get ([`ResourceInitiator::get`](tutti_midi_device::ResourceInitiator::get)).
+    /// A Get ([`ResourceInitiator::get`](tutti_midi_ci::ResourceInitiator::get)).
     Get(ResourceGet),
     /// A Get of a whole List Resource, `page_size` entries at a time
-    /// ([`ResourceInitiator::get_list`](tutti_midi_device::ResourceInitiator::get_list)).
+    /// ([`ResourceInitiator::get_list`](tutti_midi_ci::ResourceInitiator::get_list)).
     GetList {
         /// The Resource.
         get: ResourceGet,
         /// How many entries a page asks for.
         page_size: NonZeroU32,
     },
-    /// A Set ([`ResourceInitiator::set`](tutti_midi_device::ResourceInitiator::set)).
+    /// A Set ([`ResourceInitiator::set`](tutti_midi_ci::ResourceInitiator::set)).
     Set(ResourceSet),
     /// A Subscription to a Resource
-    /// ([`ResourceInitiator::subscribe`](tutti_midi_device::ResourceInitiator::subscribe)).
+    /// ([`ResourceInitiator::subscribe`](tutti_midi_ci::ResourceInitiator::subscribe)).
     Subscribe(ResourceGet),
     /// The end of a Subscription
-    /// ([`ResourceInitiator::unsubscribe`](tutti_midi_device::ResourceInitiator::unsubscribe)).
+    /// ([`ResourceInitiator::unsubscribe`](tutti_midi_ci::ResourceInitiator::unsubscribe)).
     Unsubscribe(SubscribeId),
 }
 

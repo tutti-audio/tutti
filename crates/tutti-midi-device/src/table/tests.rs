@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, HashMap};
 use proptest::prelude::*;
 
 use super::*;
-use crate::ProductInstanceId;
+use tutti_midi_ci::ProductInstanceId;
 
 fn handle(n: u64) -> EndpointId {
     EndpointId::from_raw(n)
