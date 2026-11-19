@@ -910,7 +910,7 @@ const CHECK_FEATURES: &[&str] = &[
 const TEST_FEATURES: &[&str] = &[
     r#"cargo build --locked -p tutti-plugin-server --no-default-features --features clap,vst3"#,
     r#"cargo build --locked -p tutti-plugin-probe"#,
-    r#"cargo nextest run --locked --all-features -p tutti-cpal -p tutti-session -p tutti -p tutti-codec -p tutti-ump -p tutti-midi-protocol -p tutti-midi-device -p tutti-tempo -p tutti-measure -p tutti-buffers -p tutti-plugin-types -p tutti-plugin-db -p tutti-plugin-contract"#,
+    r#"cargo nextest run --locked --all-features -p tutti-cpal -p tutti-session -p tutti -p tutti-codec -p tutti-ump -p tutti-midi-protocol -p tutti-midi-ci -p tutti-midi-device -p tutti-tempo -p tutti-measure -p tutti-buffers -p tutti-plugin-types -p tutti-plugin-db -p tutti-plugin-contract"#,
     r#"cargo nextest run --locked -p tutti-midi-hardware --all-features"#,
     r#"cargo build --locked -p tutti-plugin-server"#,
     r#"cargo nextest run --locked -p tutti-plugin --features clap,vst2,serde"#,

@@ -36,7 +36,7 @@ pub fn random_bytes<const N: usize>() -> Result<[u8; N], EntropyError> {
 }
 
 /// A stream of random 32-bit words, seeded once from the operating system: the
-/// source of the MUIDs of a [`CiDevice`](crate::CiDevice), which asks for a
+/// source of the MUIDs of a [`CiDevice`](tutti_midi_ci::CiDevice), which asks for a
 /// word as often as a collision needs one and so cannot fail at each.
 ///
 /// The words are SplitMix64's high halves: well spread, not secret.

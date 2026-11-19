@@ -686,21 +686,24 @@ pub mod plugin {
 #[cfg(feature = "midi")]
 pub mod midi {
     #[cfg(feature = "midi-hardware")]
-    pub use tutti_midi_device::EndpointId;
-    #[cfg(feature = "midi-hardware")]
-    pub use tutti_midi_device::{
+    pub use tutti_midi_ci::{
         ChannelControllers, ChannelsDetail, CiCategories, CiDeviceId, CiPeer, DataControl,
-        DetailsData, DiscoveryData, EnabledMpeZones, Identity, InquiryTarget, InstanceIdError,
-        ManufacturerProfile, MaxSysexSize, MessageText, Muid, Nak, NakStatus, NameError,
-        NotADataControl, NotADeviceId, NotAMuid, NotASysexSize, NotProfileChannels, NoteData,
-        PortDirection, ProcessError, ProcessFeatures, ProductInstanceId, ProfileChange,
-        ProfileDataError, ProfileEntry, ProfileOutcome, ProfileRequest, ProfileRequestError,
-        ProfileState, ProfileTable, ReportRequest, ReportScope, SpecificData, StandardProfile,
-        SystemMessages, WinMmDevice,
+        DetailsData, DiscoveryData, EnabledMpeZones, InquiryTarget, InstanceIdError,
+        ManufacturerProfile, MaxSysexSize, MessageText, Nak, NakStatus, NameError, NotADataControl,
+        NotADeviceId, NotASysexSize, NotProfileChannels, NoteData, ProcessError, ProcessFeatures,
+        ProductInstanceId, ProfileChange, ProfileDataError, ProfileEntry, ProfileOutcome,
+        ProfileRequest, ProfileRequestError, ProfileState, ProfileTable, ReportRequest,
+        ReportScope, SpecificData, StandardProfile, SystemMessages,
     };
-    pub use tutti_midi_device::{
+    #[cfg(feature = "midi-hardware")]
+    pub use tutti_midi_ci::{Muid, NotAMuid};
+    pub use tutti_midi_ci::{
         NotSetProfileOn, ProfileChannels, ProfileId, ProfileOnRequest, ProfileTarget,
     };
+    #[cfg(feature = "midi-hardware")]
+    pub use tutti_midi_device::EndpointId;
+    #[cfg(feature = "midi-hardware")]
+    pub use tutti_midi_device::{Identity, PortDirection, WinMmDevice};
     pub use tutti_midi_file::{
         Altered, Converted, DropReason, Dropped, Layout, Lead, LeadTrack, LyricChange,
         MalformedMeta, MetricalSequence, MetricalSequences, MetricalView, MicrosPerQuarter,
@@ -790,9 +793,10 @@ pub mod midi {
     };
 
     #[cfg(feature = "midi-hardware")]
+    pub use tutti_midi_ci::{EndpointName, Name, Whole};
+    #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_device::{
-        DeviceId as MidiDeviceId, DeviceInfo, EndpointName, Learned, Match, MidiIdentity, Name,
-        SavedDevice, Whole,
+        DeviceId as MidiDeviceId, DeviceInfo, Learned, Match, MidiIdentity, SavedDevice,
     };
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_hardware::{
@@ -811,11 +815,11 @@ pub mod midi {
     /// Under `plugin` alone it holds only the `MediaType` a `PeerState` carries.
     #[cfg(any(feature = "midi-hardware", feature = "plugin"))]
     pub mod property {
-        pub use tutti_midi_device::MediaType;
+        pub use tutti_midi_ci::MediaType;
         #[cfg(feature = "midi-hardware")]
-        pub use tutti_midi_device::mcoded7::Mcoded7Error;
+        pub use tutti_midi_ci::mcoded7::Mcoded7Error;
         #[cfg(feature = "midi-hardware")]
-        pub use tutti_midi_device::{
+        pub use tutti_midi_ci::{
             Ack, AckStatus, ActionError, BodyLimit, BufferLimit, CallError, CallId, CanSet,
             CcIndex, ChangeKind, ChunkNo, ClusterKind, ColumnSource, ConfirmIcon, ConfirmType,
             Confirmation, CtrlControl, CtrlKind, CtrlRange, CtrlValueKind, CustomResource,

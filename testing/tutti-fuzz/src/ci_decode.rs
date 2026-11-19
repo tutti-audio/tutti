@@ -1,4 +1,5 @@
-use tutti_midi_device::{CiMessage, Decoded, Muid};
+use tutti_midi_ci::Muid;
+use tutti_midi_ci::{CiMessage, Decoded};
 use tutti_ump::MidiGroup;
 
 /// Decodes `data` as a MIDI-CI payload (the bytes inside a SysEx, from `0x7E`).

@@ -9,7 +9,7 @@ use crate::common::{self, metrical, sequences};
 use crate::support::{Division, RawEvent, build_smf};
 use std::sync::Arc;
 
-use tutti_midi_device::{ProfileId, ProfileOnRequest, ProfileTarget};
+use tutti_midi_ci::{ProfileId, ProfileOnRequest, ProfileTarget};
 use tutti_midi_file::{
     FileEvent, Meta, MidiFile, OutOfOrder, ReadError, Refusal, SmfDivision, TextKind, Tick,
     TimelineDrop, Track, TrackPart, TracksError,

@@ -163,12 +163,13 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use tutti_graph::{Losses, Offset};
-use tutti_midi_device::{
-    CiAction, CiCategories, CiDevice, CiHeader, CiMessage, CiPeer, Decoded, DeviceId, EntropyError,
-    EntropyWords, Initiator, MaxSysexSize, Muid, ProcessAction, ProcessError, ProcessFeatures,
-    ProcessInitiator, ProfileAction, ProfileInitiator, ProfileRequestError, ResourceInitiator,
-    ResourceResponder, ResourceStore,
+use tutti_midi_ci::Muid;
+use tutti_midi_ci::{
+    CiAction, CiCategories, CiDevice, CiHeader, CiMessage, CiPeer, Decoded, Initiator,
+    MaxSysexSize, ProcessAction, ProcessError, ProcessFeatures, ProcessInitiator, ProfileAction,
+    ProfileInitiator, ProfileRequestError, ResourceInitiator, ResourceResponder, ResourceStore,
 };
+use tutti_midi_device::{DeviceId, EntropyError, EntropyWords};
 use tutti_rt::CounterWriter;
 use tutti_ump::{DeviceIdentity, MidiGroup, SysexAssembler, SysexStep, Ump};
 
@@ -347,7 +348,7 @@ struct Member {
     properties: BTreeMap<Muid, ResourceInitiator>,
     /// The Subscription messages of a peer still arriving that are the Initiator's
     /// (an update, or the end of a Subscription it holds), by peer and Request ID.
-    updates: Vec<(Muid, tutti_midi_device::PeRequestId)>,
+    updates: Vec<(Muid, tutti_midi_ci::PeRequestId)>,
     /// The Responder that serves the device's store to those peers.
     server: ResourceResponder,
 }
@@ -1309,7 +1310,8 @@ fn send(out: &mut OpenOutput, sends: &[(MidiGroup, CiMessage)]) -> Losses {
 mod tests {
     use std::time::Duration;
 
-    use tutti_midi_device::{CiCategories, DiscoveryData, EndpointId, PortDirection};
+    use tutti_midi_ci::{CiCategories, DiscoveryData};
+    use tutti_midi_device::{EndpointId, PortDirection};
     use tutti_ump::{ManufacturerId, SoftwareRevision, U7};
 
     use super::*;
@@ -1534,13 +1536,13 @@ mod tests {
     /// The initiator `init` and the Responder `server` trade messages until
     /// neither has more to say; the initiator's events are returned.
     fn trade(
-        init: &mut tutti_midi_device::ResourceInitiator,
+        init: &mut tutti_midi_ci::ResourceInitiator,
         server: &mut ResourceResponder,
         store: &mut ResourceStore,
-        first: Vec<tutti_midi_device::ResourceAction>,
+        first: Vec<tutti_midi_ci::ResourceAction>,
         now: Instant,
-    ) -> Vec<tutti_midi_device::ResourceEvent> {
-        use tutti_midi_device::{ResourceAction, ResponderAction};
+    ) -> Vec<tutti_midi_ci::ResourceEvent> {
+        use tutti_midi_ci::{ResourceAction, ResponderAction};
         let mut events = Vec::new();
         let mut actions = first;
         for _ in 0..40 {
@@ -1571,7 +1573,7 @@ mod tests {
     // one Group is read through another, and by the app.
     #[test]
     fn a_set_through_one_group_is_read_through_another_and_by_the_app() {
-        use tutti_midi_device::{
+        use tutti_midi_ci::{
             CanSet, PeCapabilities, PeData, PeLocalOn, PeReassemblyLimits, PeResource, PeSettings,
             ResourceEntry, ResourceEvent, ResourceGet, ResourceInitiator, ResourceSet,
             ResourceTarget, SimultaneousRequests,
@@ -1595,10 +1597,10 @@ mod tests {
             capabilities: PeCapabilities::new(SimultaneousRequests::of(2)),
             peer_max_sysex: max,
             reassembly: PeReassemblyLimits {
-                streams: tutti_midi_device::StreamLimit::of(4),
-                bytes: tutti_midi_device::BufferLimit::of(1 << 16),
+                streams: tutti_midi_ci::StreamLimit::of(4),
+                bytes: tutti_midi_ci::BufferLimit::of(1 << 16),
             },
-            body_limit: tutti_midi_device::BodyLimit::of(1 << 16),
+            body_limit: tutti_midi_ci::BodyLimit::of(1 << 16),
         };
         let target = ResourceTarget::try_from(PeResource::LocalOn).unwrap();
         let mut ends = Vec::new();
@@ -1654,7 +1656,7 @@ mod tests {
     #[test]
     fn a_request_for_a_peer_that_is_gone_is_reported_not_dropped() {
         use crate::properties::PropertyCall;
-        use tutti_midi_device::{
+        use tutti_midi_ci::{
             CiDeviceId, DataControl, ProfileId, ReportRequest, ReportScope, ResourceGet,
             ResourceTarget,
         };
@@ -1682,7 +1684,7 @@ mod tests {
                 [(
                     id,
                     Answer::SwitchLost {
-                        request: tutti_midi_device::ProfileRequest::SetOff {
+                        request: tutti_midi_ci::ProfileRequest::SetOff {
                             address: CiDeviceId::Group,
                             profile
                         }
@@ -1696,8 +1698,8 @@ mod tests {
             let request = ReportRequest::new(
                 DataControl::Full,
                 ReportScope::Group {
-                    controllers: tutti_midi_device::ChannelControllers::all(),
-                    notes: tutti_midi_device::NoteData::all(),
+                    controllers: tutti_midi_ci::ChannelControllers::all(),
+                    notes: tutti_midi_ci::NoteData::all(),
                 },
             );
             running.start_reports(
@@ -1712,7 +1714,7 @@ mod tests {
                 "{group:?}"
             );
             let call = PropertyCall::Get(ResourceGet::new(
-                ResourceTarget::try_from(tutti_midi_device::PeResource::LocalOn).unwrap(),
+                ResourceTarget::try_from(tutti_midi_ci::PeResource::LocalOn).unwrap(),
             ));
             running.start_properties(
                 &mut vec![PropertyAsk {

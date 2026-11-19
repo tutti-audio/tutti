@@ -42,6 +42,7 @@ tutti-midi-runtime = { version = "0.0.1", path = "../tutti-midi-runtime", defaul
 tutti-midi-file = { version = "0.0.1", path = "../tutti-midi-file", optional = true }
 tutti-midi-hardware = { version = "0.0.1", path = "../tutti-midi-hardware", optional = true }
 tutti-midi-device = { version = "0.0.1", path = "../tutti-midi-device", optional = true }
+tutti-midi-ci = { version = "0.0.1", path = "../tutti-midi-ci", optional = true }
 tutti-midi-protocol = { version = "0.0.1", path = "../tutti-midi-protocol", optional = true }
 tutti-sf2 = { version = "0.0.1", path = "../tutti-sf2", optional = true }
 tutti-export = { version = "0.0.1", path = "../tutti-export", default-features = false, optional = true }
@@ -138,11 +139,12 @@ record = ["session", "tutti-session/record", "encode-wav"]
 midi = [
     "dep:tutti-midi-protocol",
     "dep:tutti-midi-device",
+    "dep:tutti-midi-ci",
     "dep:tutti-midi-file",
     "dep:tutti-midi-runtime",
     "tutti-session?/midi",
 ]
-midi-hardware = ["midi", "dep:tutti-midi-hardware", "dep:tutti-midi-device", "tutti-session?/midi-hardware"]
+midi-hardware = ["midi", "dep:tutti-midi-hardware", "dep:tutti-midi-device", "dep:tutti-midi-ci", "tutti-session?/midi-hardware"]
 
 # --- subsystems -------------------------------------------------------------
 #

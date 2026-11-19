@@ -1,7 +1,8 @@
 use std::time::Instant;
 
-use tutti_midi_device::{
-    CiDeviceId, CiHeader, CiMessage, Decoded, DetailsData, Initiator, Muid, Nak, NakStatus,
+use tutti_midi_ci::Muid;
+use tutti_midi_ci::{
+    CiDeviceId, CiHeader, CiMessage, Decoded, DetailsData, Initiator, Nak, NakStatus,
     ProfileAction, ProfileId,
 };
 use tutti_midi_protocol::{ControllerSupport, PitchBendSupport};
@@ -19,9 +20,9 @@ fn initiator() -> (ProfileInitiator, Instant) {
         &Decoded::Message(CiMessage::ProfileReply {
             header: CiHeader::new(Muid::of(PEER)),
             to: Muid::of(OURS),
-            profiles: tutti_midi_device::ProfileLists::new(
-                tutti_midi_device::ProfileList::try_from(vec![ProfileId::MPE]).unwrap(),
-                tutti_midi_device::ProfileList::default(),
+            profiles: tutti_midi_ci::ProfileLists::new(
+                tutti_midi_ci::ProfileList::try_from(vec![ProfileId::MPE]).unwrap(),
+                tutti_midi_ci::ProfileList::default(),
             ),
         }),
         now,

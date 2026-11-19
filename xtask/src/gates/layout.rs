@@ -56,10 +56,10 @@ pub(super) const LAYERS: &[&[&str]] = &[
         "tutti-coremidi-ffi",
         "tutti-winmm-ffi",
         "tutti-midi-protocol",
-        "tutti-midi-device",
+        "tutti-midi-ci",
         "tutti-curve",
     ],
-    &["tutti-rt"],
+    &["tutti-rt", "tutti-midi-device"],
     &[
         "tutti-midi-network",
         "tutti-graph",
@@ -108,7 +108,11 @@ const ONLY: &[(&str, &[&str])] = &[
         "tutti-midi-protocol",
         &["tutti-ump", "tutti-music", "tutti-units"],
     ),
-    ("tutti-midi-device", &["tutti-ump", "tutti-units"]),
+    ("tutti-midi-ci", &["tutti-ump", "tutti-units"]),
+    (
+        "tutti-midi-device",
+        &["tutti-midi-ci", "tutti-ump", "tutti-units"],
+    ),
     // The OS edges: the UMP types for what the spec defines, nothing else.
     ("tutti-alsa-ffi", &["tutti-ump"]),
     ("tutti-coremidi-ffi", &["tutti-ump"]),
@@ -120,7 +124,12 @@ const ONLY: &[(&str, &[&str])] = &[
     ("tutti-rt", &["tutti-units", "tutti-buffers"]),
     (
         "tutti-midi-network",
-        &["tutti-ump", "tutti-midi-device", "tutti-units"],
+        &[
+            "tutti-ump",
+            "tutti-midi-ci",
+            "tutti-midi-device",
+            "tutti-units",
+        ],
     ),
     ("tutti-metering", &["tutti-units"]),
     // The staged files' `Mint` and the encoders' worker threads (`spawn_named`).
@@ -257,10 +266,10 @@ pub(super) const WINNOW_HOMES: &[(&str, &[&str])] = &[
         ],
     ),
     (
-        "tutti-midi-device",
+        "tutti-midi-ci",
         &[
-            "crates/tutti-midi-device/src/ci/read.rs",
-            "crates/tutti-midi-device/src/ci/pe/json.rs",
+            "crates/tutti-midi-ci/src/read.rs",
+            "crates/tutti-midi-ci/src/pe/json.rs",
         ],
     ),
 ];
@@ -701,7 +710,7 @@ mod tests {
     fn a_layered_workspace_passes() {
         let r = run(&base());
         assert!(r.passed(), "{:?}", r.findings);
-        assert_eq!(r.out[0], "check-layout: ok (6 members, 50 ranked)");
+        assert_eq!(r.out[0], "check-layout: ok (6 members, 51 ranked)");
     }
 
     #[test]
@@ -985,26 +994,26 @@ mod tests {
         assert!(check(&m, &NoCargo).findings.iter().any(|l| {
             l.contains("crates/tutti-midi-protocol/src/universal.rs names winnow outside")
         }));
-        // The MIDI-CI grammar is the device crate's one parser module.
+        // The MIDI-CI grammar is the MIDI-CI crate's one parser module.
         m.files.insert(
-            "crates/tutti-midi-device/src/ci/read.rs".into(),
+            "crates/tutti-midi-ci/src/read.rs".into(),
             "use winnow::Parser;\n".into(),
         );
         assert!(
             check(&m, &NoCargo)
                 .findings
                 .iter()
-                .all(|l| !l.contains("tutti-midi-device/src/ci/read.rs"))
+                .all(|l| !l.contains("tutti-midi-ci/src/read.rs"))
         );
         m.files.insert(
-            "crates/tutti-midi-device/src/ci.rs".into(),
+            "crates/tutti-midi-ci/src/lib.rs".into(),
             "use winnow::Parser;\n".into(),
         );
         assert!(
             check(&m, &NoCargo)
                 .findings
                 .iter()
-                .any(|l| l.contains("crates/tutti-midi-device/src/ci.rs names winnow outside"))
+                .any(|l| l.contains("crates/tutti-midi-ci/src/lib.rs names winnow outside"))
         );
     }
 
