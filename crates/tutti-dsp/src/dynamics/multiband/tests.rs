@@ -61,11 +61,11 @@ fn unity(freqs: &[f64]) -> MultibandSettings {
 }
 
 /// `audio` (one slice per channel) through `k` in calls of `chunk` frames, band `b`'s
-/// threshold lane `lanes[b]` where given.
+/// threshold control signal `signals[b]` where given.
 fn run_in<F: Float + SimdLanes + Lerp>(
     k: &mut MultibandBank<F>,
     audio: &[&[F]],
-    lanes: [Option<&[F]>; MAX_BANDS],
+    signals: [Option<&[F]>; MAX_BANDS],
     chunk: usize,
 ) -> Vec<Vec<F>> {
     let n = audio[0].len();
@@ -75,9 +75,9 @@ fn run_in<F: Float + SimdLanes + Lerp>(
         let end = (at + chunk).min(n);
         let a: Vec<&[F]> = audio.iter().map(|c| &c[at..end]).collect();
         let mut outs: Vec<&mut [F]> = out.iter_mut().map(|c| &mut c[at..end]).collect();
-        let mut driven = MultibandLanes::default();
-        for (slot, lane) in driven.thresholds.iter_mut().zip(lanes) {
-            *slot = lane.map(|l| Mono::new(&l[at..end]));
+        let mut driven = MultibandSignals::default();
+        for (slot, signal) in driven.thresholds.iter_mut().zip(signals) {
+            *slot = signal.map(|l| Mono::new(&l[at..end]));
         }
         k.process(
             driven,
@@ -510,7 +510,7 @@ fn the_linked_gain_follows_the_loudest_channel() {
 /// A band's follower is the compressor's one-pole: after one attack time on a settled level
 /// the reduction has closed `1 - 1/e` of its way to the curve.
 ///
-/// The level is a settled constant and the step is the threshold lane dropping from +20 dB
+/// The level is a settled constant and the step is the threshold control signal dropping from +20 dB
 /// (nothing to reduce) to -30 dB, so the target reduction jumps at once and the crossover
 /// has no transient of its own to blur it.
 #[test]
@@ -565,11 +565,11 @@ fn the_meter_reports_the_deepest_reduction_since_the_last_read() {
     assert_eq!(k.take_reading().band(3), None);
 }
 
-/// Each band reads its own threshold lane per frame: driving band 0's lane low reduces band
-/// 0 and no other, a frame that is not finite falls back to the set threshold, and a lane
+/// Each band reads its own threshold control signal per frame: driving band 0's control signal low reduces band
+/// 0 and no other, a frame that is not finite falls back to the set threshold, and a control signal
 /// in `f64` reads as the same dB.
 #[test]
-fn a_band_reads_its_own_threshold_lane() {
+fn a_band_reads_its_own_threshold_signal() {
     let mut set = unity(&[200.0, 3_000.0]);
     for b in &mut set.bands {
         *b = band(0.0, 0.0, 4.0, 0.001, 0.05, 0.0);
@@ -585,23 +585,23 @@ fn a_band_reads_its_own_threshold_lane() {
     let d0 = reading.band(0).unwrap().get();
     assert!((d0 - want).abs() < 0.05, "{d0} vs {want}");
     assert!(reading.band(1).unwrap().get() < 1e-3 && reading.band(2).unwrap().get() < 1e-3);
-    // A lane that is NaN reads as the set threshold (0 dB): nothing to reduce.
+    // A control signal that is NaN reads as the set threshold (0 dB): nothing to reduce.
     let nan = vec![f32::NAN; len];
     let mut k = bank(1, 3);
     k.retarget(&set);
     run_in(&mut k, &[&x], [Some(&nan), None, None, None], 256);
     assert_eq!(k.take_reading().band(0).unwrap(), Db::UNITY);
-    // The same lane in f64 over f64 audio.
+    // The same control signal in f64 over f64 audio.
     let mut k = MultibandBank::<f64>::new(ChannelLayout::MONO, 3, RATE).unwrap();
     k.retarget(&set);
     let (x64, low64) = (vec![0.5f64; len], vec![-30.0f64; len]);
     let mut out = vec![0.0f64; len];
-    let mut lanes = MultibandLanes::<f64>::default();
-    lanes.thresholds[0] = Some(Mono::new(&low64));
+    let mut signals = MultibandSignals::<f64>::default();
+    signals.thresholds[0] = Some(Mono::new(&low64));
     let planes = [&x64[..]];
     let mut outs = [&mut out[..]];
     k.process(
-        lanes,
+        signals,
         Planes::new(&planes).unwrap(),
         PlanesMut::new(&mut outs).unwrap(),
     );
@@ -610,7 +610,7 @@ fn a_band_reads_its_own_threshold_lane() {
 }
 
 /// Any split of a stream into calls gives the same bits: the controls move at fixed frames
-/// (a split, a ratio, a makeup, a bypass and a solo), the audio is wide, a threshold lane is
+/// (a split, a ratio, a makeup, a bypass and a solo), the audio is wide, a threshold control signal is
 /// driven, and the calls are every length from one frame to the whole stream.
 #[test]
 fn any_call_length_gives_the_same_bits() {
@@ -625,7 +625,7 @@ fn any_call_length_gives_the_same_bits() {
                 .collect()
         })
         .collect();
-    let lane: Vec<f32> = (0..len).map(|n| -40.0 + (n % 97) as f32 * 0.2).collect();
+    let signal: Vec<f32> = (0..len).map(|n| -40.0 + (n % 97) as f32 * 0.2).collect();
     let mut first = unity(&[300.0, 2_000.0, 8_000.0]);
     first.bands[0] = band(-30.0, 6.0, 4.0, 0.002, 0.02, 3.0);
     first.bands[2] = band(-25.0, 0.0, 2.0, 0.001, 0.05, -2.0);
@@ -644,7 +644,12 @@ fn any_call_length_gives_the_same_bits() {
             let end = cuts.get(i + 1).map_or(len, |c| c.0);
             k.retarget(&set);
             let a: Vec<&[f32]> = audio.iter().map(|c| &c[at..end]).collect();
-            let got = run_in(&mut k, &a, [Some(&lane[at..end]), None, None, None], chunk);
+            let got = run_in(
+                &mut k,
+                &a,
+                [Some(&signal[at..end]), None, None, None],
+                chunk,
+            );
             for (o, g) in out.iter_mut().zip(got) {
                 o[at..end].copy_from_slice(&g);
             }
@@ -717,22 +722,22 @@ fn a_reset_bank_renders_as_a_fresh_one() {
     );
 }
 
-/// A threshold lane that ends inside a chunk drives the frames it has and no others: with
-/// instant followers, frames up to the lane's end are reduced by the curve at the lane's
+/// A threshold control signal that ends inside a chunk drives the frames it has and no others: with
+/// instant followers, frames up to the control signal's end are reduced by the curve at the control signal's
 /// -30 dB and the frames after it are at the set 0 dB threshold, unreduced, chunk or not.
 #[test]
-fn a_lane_that_ends_inside_a_chunk_drives_its_own_frames() {
+fn a_signal_that_ends_inside_a_chunk_drives_its_own_frames() {
     let mut set = unity(&[200.0, 3_000.0]);
     set.bands[0] = band(0.0, 0.0, 4.0, 0.0, 0.0, 0.0);
     let mut k = bank(1, 3);
     k.retarget(&set);
     run(&mut k, &[&vec![0.5f32; SETTLE]]);
-    // 70 frames of lane over 300 of audio: the end falls inside the second chunk of 64.
-    let lane = vec![-30.0f32; 70];
+    // 70 frames of control signal over 300 of audio: the end falls inside the second chunk of 64.
+    let signal = vec![-30.0f32; 70];
     let x = vec![0.5f32; 300];
     let mut out = vec![0.0f32; 300];
-    let mut driven = MultibandLanes::default();
-    driven.thresholds[0] = Some(Mono::new(&lane));
+    let mut driven = MultibandSignals::default();
+    driven.thresholds[0] = Some(Mono::new(&signal));
     let (ins, mut outs) = ([&x[..]], [&mut out[..]]);
     k.process(
         driven,
@@ -744,7 +749,7 @@ fn a_lane_that_ends_inside_a_chunk_drives_its_own_frames() {
         assert!((f64::from(y) - reduced).abs() < 1e-4, "frame {i}: {y}");
     }
     for (i, &y) in out.iter().enumerate().skip(70) {
-        assert!((y - 0.5).abs() < 1e-4, "frame {i} past the lane: {y}");
+        assert!((y - 0.5).abs() < 1e-4, "frame {i} past the signal: {y}");
     }
 }
 
@@ -828,7 +833,7 @@ fn an_f64_multiband_under_every_threshold_is_the_crossover_sum() {
     });
     let mut out = vec![0.0f64; n];
     k.process(
-        MultibandLanes::default(),
+        MultibandSignals::default(),
         Planes::new(&[&x[..]]).unwrap(),
         PlanesMut::new(&mut [&mut out[..]]).unwrap(),
     );

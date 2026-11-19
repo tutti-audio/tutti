@@ -25,28 +25,21 @@ use tutti_graph::{EventEdge, EventIn, EventOut, GraphSpec, Unforkable};
 use tutti_units::{Amplitude, Samples};
 
 use tutti_graph::Node;
+use tutti_rt::SplitMix64;
 
 const MAX_BLOCK: usize = 128;
 
-/// xorshift64* — the graph is a pure function of the seed, so a failing
+/// A seeded stream: the graph is a pure function of the seed, so a failing
 /// proptest case replays exactly.
 #[derive(Clone)]
-struct Rng(u64);
+struct Rng(SplitMix64);
 
 impl Rng {
     fn new(seed: u64) -> Self {
-        Self(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1)
-    }
-    fn next(&mut self) -> u64 {
-        let mut x = self.0;
-        x ^= x >> 12;
-        x ^= x << 25;
-        x ^= x >> 27;
-        self.0 = x;
-        x.wrapping_mul(0x2545_F491_4F6C_DD1D)
+        Self(SplitMix64::new(seed))
     }
     fn below(&mut self, n: u64) -> u64 {
-        self.next() % n.max(1)
+        self.0.next_u64() % n.max(1)
     }
     fn chance(&mut self, percent: u64) -> bool {
         self.below(100) < percent
@@ -196,7 +189,7 @@ fn wire_node(desc: &mut Desc, j: usize, rng: &mut Rng) {
         // the compiled op sums in `Edge` order, silent addends skipped, and
         // the reference folds from `+0.0`. A hub is wider than `MAX_PORTS`
         // when enough earlier outputs exist (a chain of sum ops).
-        let mut fan = std::mem::replace(&mut desc.fan, Rng(1));
+        let mut fan = std::mem::replace(&mut desc.fan, Rng::new(1));
         let mut set: Vec<Edge> = edge.into_iter().collect();
         if fan.chance(35) {
             let hub = fan.chance(15);
@@ -285,7 +278,7 @@ fn wire_outputs(desc: &mut Desc, rng: &mut Rng) {
         }));
     // A channel now and then sums several sources, aligned to the output time
     // each on its own.
-    let mut fan = std::mem::replace(&mut desc.fan, Rng(1));
+    let mut fan = std::mem::replace(&mut desc.fan, Rng::new(1));
     for ch in 0..desc.spec.topology.outputs.len() {
         if desc.spec.topology.outputs[ch].is_empty() || !fan.chance(35) {
             continue;

@@ -9,7 +9,7 @@ use tutti_dsp::{FreeverbBank, FreeverbControls, FreeverbRamps, Lerp};
 use tutti_graph::{Bus, BusRole, Buses, Cost, MAX_NODE_TAIL, Shape};
 use tutti_units::{Mix, SampleRate, Tail};
 
-use crate::kernel::{ControlLanes, Kernel, KernelNode};
+use crate::kernel::{ControlSignals, Kernel, KernelNode};
 
 /// Freeverb as a graph node: mono in, stereo out, wet only.
 ///
@@ -171,7 +171,7 @@ impl<F: Float + Lerp> Kernel for FreeverbKernel<F> {
     fn render(
         &mut self,
         input: Planes<'_, F>,
-        _: ControlLanes<'_, F>,
+        _: ControlSignals<'_, F>,
         output: PlanesMut<'_, '_, F>,
     ) {
         if let Some(r) = &mut self.running {

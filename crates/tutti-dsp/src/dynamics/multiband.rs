@@ -13,8 +13,8 @@
 //!
 //! The crossover ramps to each design over a grid period of [`COEFF_INTERVAL`] frames, as
 //! [`CrossoverBank`]'s does; each compressor's detector lands whole, and the makeups and the
-//! two weights ramp over [`GAIN_RAMP`]. Each band's threshold is a per-frame lane
-//! ([`MultibandLanes`]).
+//! two weights ramp over [`GAIN_RAMP`]. Each band's threshold is a per-frame control signal
+//! ([`MultibandSignals`]).
 //!
 //! The controls are `MultibandSettings` and `BandSettings`, not `*Controls`: the node's
 //! `MultibandControls` (its handle on the params and meters) is a different type.
@@ -28,7 +28,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::{Float, Mono, Planes, PlanesMut};
 use tutti_units::{Db, Hz, SampleRate, Samples};
 
-use super::compressor::{CompressorBank, CompressorControls, CompressorLanes};
+use super::compressor::{CompressorBank, CompressorControls, CompressorSignals};
 use super::gain_pass::{CHUNK, GAIN_RAMP};
 use crate::{
     COEFF_INTERVAL, CrossoverBank, CrossoverBlend, CrossoverControls, CrossoverError,
@@ -98,11 +98,11 @@ impl Default for MultibandSettings {
     }
 }
 
-/// The per-frame lanes a multiband reads beside its audio, in the bank's float, `None` where
-/// nothing drives them. A lane is at least as long as the frames a call renders; a frame past
+/// The per-frame control signals a multiband reads beside its audio, in the bank's float, `None` where
+/// nothing drives them. A control signal is at least as long as the frames a call renders; a frame past
 /// its end is not driven.
 #[derive(Clone, Copy, Debug, Default)]
-pub struct MultibandLanes<'a, F: Float> {
+pub struct MultibandSignals<'a, F: Float> {
     /// Band `b`'s threshold in dB. A frame that is not finite is the set threshold.
     pub thresholds: [Option<Mono<'a, F>>; MAX_BANDS],
 }
@@ -212,7 +212,7 @@ impl<F: Float> Scratch<F> {
 /// A multiband compressor of `bands` bands over a fixed width: the crossover, a
 /// [`CompressorBank`] a band, and the weights that bypass and solo.
 ///
-/// Built on the control side for one rate; the state, the views and the lanes are `F`, the
+/// Built on the control side for one rate; the state, the views and the control signals are `F`, the
 /// graph's float. Nothing it holds grows.
 #[derive(Clone, Debug)]
 pub struct MultibandBank<F: Float + SimdLanes + Lerp> {
@@ -354,7 +354,7 @@ impl<F: Float + SimdLanes + Lerp> MultibandBank<F> {
     /// allocation.
     pub fn process(
         &mut self,
-        lanes: MultibandLanes<'_, F>,
+        signals: MultibandSignals<'_, F>,
         input: Planes<'_, F>,
         mut output: PlanesMut<'_, '_, F>,
     ) {
@@ -362,7 +362,7 @@ impl<F: Float + SimdLanes + Lerp> MultibandBank<F> {
         let mut start = 0;
         while start < frames {
             let end = (start + CHUNK).min(frames);
-            self.chunk(&lanes, &input, &mut output, start..end);
+            self.chunk(&signals, &input, &mut output, start..end);
             start = end;
         }
     }
@@ -370,7 +370,7 @@ impl<F: Float + SimdLanes + Lerp> MultibandBank<F> {
     /// Runs frames `at` of the views, at most [`CHUNK`] of them.
     fn chunk(
         &mut self,
-        lanes: &MultibandLanes<'_, F>,
+        signals: &MultibandSignals<'_, F>,
         input: &Planes<'_, F>,
         output: &mut PlanesMut<'_, '_, F>,
         at: Range<usize>,
@@ -404,7 +404,7 @@ impl<F: Float + SimdLanes + Lerp> MultibandBank<F> {
         }
         let mut by = [F::ZERO; CHUNK];
         let mut au = [F::ZERO; CHUNK];
-        let mut lane = [F::ZERO; CHUNK];
+        let mut signal = [F::ZERO; CHUNK];
         // The bands are `width` planes each, band-major.
         for (b, band_planes) in scratch.bands.chunks(width).take(self.bands).enumerate() {
             {
@@ -415,17 +415,17 @@ impl<F: Float + SimdLanes + Lerp> MultibandBank<F> {
                     return;
                 };
                 let band = band.slice(frames.clone());
-                // A frame past the lane's end is not finite, so not driven.
-                let threshold = lanes.thresholds[b].map(|l| {
+                // A frame past the control signal's end is not finite, so not driven.
+                let threshold = signals.thresholds[b].map(|l| {
                     let all = l.samples();
                     let driven = &all[at.start.min(all.len())..at.end.min(all.len())];
-                    for (i, t) in lane[..n].iter_mut().enumerate() {
+                    for (i, t) in signal[..n].iter_mut().enumerate() {
                         *t = driven.get(i).copied().unwrap_or(F::NAN);
                     }
-                    Mono::new(&lane[..n])
+                    Mono::new(&signal[..n])
                 });
                 self.compressors[b].process(
-                    CompressorLanes { threshold },
+                    CompressorSignals { threshold },
                     band,
                     band,
                     squeezed.slice_mut(frames.clone()),
