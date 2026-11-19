@@ -534,6 +534,20 @@ impl Unsolicited {
     }
 }
 
+impl ControlCommand {
+    /// Whether the command has no reply: its caller learns nothing of its fate
+    /// but from the counts.
+    pub(super) fn is_fire_and_forget(&self) -> bool {
+        matches!(
+            self,
+            Self::SetParameter { .. }
+                | Self::SetAutomationState { .. }
+                | Self::SetTrackInfo { .. }
+                | Self::CloseEditor
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

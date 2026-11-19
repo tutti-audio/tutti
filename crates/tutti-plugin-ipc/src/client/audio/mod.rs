@@ -405,6 +405,11 @@ impl AudioBridge {
 
     /// Queues a parameter write for the plugin. Realtime-safe; `false` when the
     /// queue was full or the plugin is dead.
+    ///
+    /// Ordered one way against blocks: it never reaches the server ahead of a
+    /// block submitted before it, but it may land after a block submitted after
+    /// it (the write is on the control lane, which a block does not wait for, so
+    /// a stuck control request cannot stall audio).
     pub(crate) fn set_parameter_rt(&self, param_id: ParamId, value: Normalized) -> bool {
         !self.lifecycle.is_crashed()
             && self
@@ -589,7 +594,11 @@ impl AudioBridge {
         // block is judged against a stale `newest` and dropped as if it were two
         // blocks old.
         self.channels.note_submitted(seq);
-        match self.channels.try_push_block(AudioCommand::Process(payload)) {
+        let pushed = self.channels.try_push_block(AudioCommand::Process(payload));
+        if pushed.is_ok() {
+            self.channels.note_pushed(seq);
+        }
+        match pushed {
             Ok(()) if params => Submitted::BlockAndParams,
             Ok(()) => Submitted::Block,
             Err(cmd) => {
@@ -614,6 +623,10 @@ impl AudioBridge {
     /// The plugin's state for `state_use`, read through the server. Blocks while
     /// it travels: up to a stalled transfer's wait for a request already owed,
     /// then for as long as the transfer makes progress.
+    ///
+    /// Ordered one way against blocks: the request is sent after the blocks
+    /// submitted before it have been answered, so it sees what they did; blocks
+    /// submitted after it may be sent first.
     ///
     /// # Errors
     ///

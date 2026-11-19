@@ -230,15 +230,19 @@ fn audio_loop(
     let mut inbox = Unsolicited::with_lifecycle(lifecycle.clone());
     let mut failed = false;
     while live(lifecycle) {
+        // Read before the pop: a block pushed after this read is not counted,
+        // and one counted was queued, so an empty queue means it was dealt with.
+        let pushed = channels.pushed();
         let Some(cmd) = channels.pop_block() else {
             // Idle: a setting asked for meanwhile is applied now.
             if let Some(setting) = channels.take_request(None) {
                 apply_setting(channels, lifecycle, setting);
                 continue;
             }
-            // Nothing queued: every block submitted so far has been dealt with,
-            // which a control command waiting for the blocks before it may rely on.
-            channels.note_handled(channels.newest_submitted());
+            // Nothing queued: every block pushed before the look above has been
+            // dealt with, which a control command waiting for the blocks before
+            // it may rely on.
+            channels.note_handled(pushed);
             channels.progress().notify();
             // Sleep on the doorbell: `push_block` rings it the instant a block
             // arrives, so the socket round-trip starts immediately. The ring
@@ -342,7 +346,12 @@ fn control_loop(
                 tracing::warn!(
                     "a control command was not sent: the blocks before it were not dealt with in time"
                 );
-                held = None;
+                // A command with no reply to tell its caller is counted.
+                if let Some((stamped, _)) = held.take()
+                    && stamped.cmd.is_fire_and_forget()
+                {
+                    channels.note_command_refused();
+                }
             }
             continue;
         } else {
