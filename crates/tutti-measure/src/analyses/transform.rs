@@ -213,7 +213,7 @@ impl Stft {
     /// Returns [`Error::GridShapeDisagreement`] if `mask` does not
     /// match this transform's `frames x bins` shape.
     pub fn resynthesize_masked<S: Sample>(&self, mask: &Grid<Complex64>) -> Result<Vec<S>> {
-        if !self.bins.same_shape_as(mask) {
+        if !self.bins.has_same_shape(mask) {
             return Err(Error::GridShapeDisagreement);
         }
         let masked: Vec<Complex64> = self

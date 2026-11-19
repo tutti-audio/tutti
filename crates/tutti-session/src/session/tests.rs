@@ -3,14 +3,14 @@ use std::sync::Arc;
 use tutti_buffers::ChannelLayout;
 use tutti_music::{MeterChange, MeterMap, TimeSignature};
 use tutti_tempo::TempoMap;
-use tutti_transport::MeterSlot;
+use tutti_transport::TimeSignatureSlot;
 use tutti_units::{Beat, SampleRate};
 
 use crate::Session;
 
 /// **The update's `Reclaim` phase frees what a block held across a
 /// replacement**, in a cell nothing publishes to again: the meter a
-/// following plugin slot (a `MeterSlot`, as a plugin node holds) read when
+/// following plugin slot (a `TimeSignatureSlot`, as a plugin node holds) read when
 /// the project meter changed. A held `Loan` stands in for a block in
 /// progress across the publish.
 ///
@@ -26,7 +26,8 @@ fn an_update_frees_what_a_block_held_across_a_replacement() {
         .expect("builds");
     let _ = s.update();
 
-    let slot = MeterSlot::following_meter(Some(s.transport.settings().project_meter().clone()));
+    let slot =
+        TimeSignatureSlot::following_meter(Some(s.transport.settings().project_meter().clone()));
     let meter = s.transport_handle().meter();
     let old = Arc::new(MeterMap::new([MeterChange::new(
         Beat::new(0.0),

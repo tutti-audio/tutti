@@ -4,7 +4,7 @@ use super::*;
 
 unit! {
     /// Frequency in Hertz. Used for filter cutoffs, LFO rates, EQ centers.
-    pub struct Hz(pub f64): Unit, Ordered, Bounded, Additive, Scalable, Ratio;
+    pub struct Hz(f64): Unit, Ordered, Bounded, Additive, Scalable, Ratio;
 }
 
 unit! {
@@ -17,7 +17,7 @@ unit! {
     /// 0.24 ms apart at one hour, more than a frame at 48 kHz past about
     /// 256 s.) A DSP kernel that runs in `f32` narrows once at its edge
     /// (`secs.get() as f32`), where the value is a short control time.
-    pub struct Seconds(pub f64): Unit, Ordered, Bounded, Additive, Scalable, Ratio;
+    pub struct Seconds(f64): Unit, Ordered, Bounded, Additive, Scalable, Ratio;
 }
 
 impl Hz {

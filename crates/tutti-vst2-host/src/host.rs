@@ -36,7 +36,7 @@
 //!   (process thread, main thread, other). The first two are written
 //!   before the opcode that tells the plugin, so a query from inside
 //!   `effSetSampleRate` reads the new figure.
-//! - `io_changed` and `update_display` raise [`Request`]s on a [`RequestWord`]
+//! - `io_changed` and `update_display` raise [`Request`]s on an [`AtomicRequestFlags`]
 //!   for the main thread to act on (`audioMasterIOChanged` is the plugin's
 //!   one notice that its pins, latency or tail moved, so it raises all
 //!   three), and `io_changed` answers 1; `can_do` answers what the host really
@@ -59,7 +59,7 @@ use tutti_plugin_types::{
     AutomationMode, MainThreadMarker, Request, RescanScope, WireMidi, sysex_packets,
 };
 use tutti_rt::AtomicSampleRate;
-use tutti_rt::{RequestWord, Tally, TallyWriter, tally};
+use tutti_rt::{AtomicRequestFlags, Tally, TallyWriter, tally};
 use tutti_ump::MidiGroup;
 use tutti_units::SampleRate;
 use vst::api::{AutomationState, ProcessLevel, Supported};
@@ -194,7 +194,7 @@ pub(crate) struct HostState {
     /// the plugin may call from its audio thread, where a re-read dispatching
     /// opcodes would be wrong. A request is a level, so ten changes between
     /// two passes are one re-read.
-    requests: RequestWord,
+    requests: AtomicRequestFlags,
     /// The size the plugin last asked the editor window to take
     /// (`audioMasterSizeWindow`): width in the high 32 bits, height in the low, `0` for none.
     /// The latest request wins, as a request is a level; the main thread takes it with
@@ -249,7 +249,7 @@ impl HostState {
             offline: std::sync::atomic::AtomicBool::new(false),
             process_thread: AtomicUsize::new(0),
             automation: AtomicU8::new(0),
-            requests: RequestWord::new(),
+            requests: AtomicRequestFlags::new(),
             size_request: AtomicU64::new(0),
             current_id,
             main_thread: std::thread::current().id(),
@@ -276,7 +276,7 @@ impl HostState {
     }
 
     /// The requests the plugin raised, for the main thread to take.
-    pub(crate) fn requests(&self) -> &RequestWord {
+    pub(crate) fn requests(&self) -> &AtomicRequestFlags {
         &self.requests
     }
 

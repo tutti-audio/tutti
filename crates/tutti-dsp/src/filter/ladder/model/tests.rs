@@ -19,7 +19,7 @@ fn model(ty: LadderType, fc: f64, res: f64) -> LadderModel {
 }
 
 fn coefficients(freq: Hz, res: Resonance) -> LadderCoefficients<f64> {
-    LadderCoefficients::from(&LadderCoeffs::new(freq, res, RATE))
+    LadderCoefficients::from(&LadderDesign::new(freq, res, RATE))
 }
 
 fn at(m: &LadderModel, f: f64) -> Complex64 {

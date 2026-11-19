@@ -195,14 +195,14 @@ fn note_on(o: Offset) -> Event {
 fn ramp_7(o: Offset) -> ParamEvent {
     ParamEvent::ramp(
         o,
-        ParamRamp::foreign(ParamId::new(PARAMS[0]), 0.5, Samples::new(0)),
+        ParamRamp::by_id(ParamId::new(PARAMS[0]), 0.5, Samples::new(0)),
     )
 }
 
 fn ramp_9(o: Offset) -> ParamEvent {
     ParamEvent::ramp(
         o,
-        ParamRamp::foreign(ParamId::new(PARAMS[1]), 0.25, Samples::new(0)),
+        ParamRamp::by_id(ParamId::new(PARAMS[1]), 0.25, Samples::new(0)),
     )
 }
 

@@ -2703,6 +2703,7 @@ dependencies = [
  "thiserror 2.0.21",
  "tutti-buffers",
  "tutti-fixtures",
+ "tutti-rt",
  "tutti-units",
  "wide",
 ]
@@ -2872,7 +2873,6 @@ name = "tutti-midi-device"
 version = "0.0.1"
 dependencies = [
  "bitflags 2.13.2",
- "getrandom",
  "proptest",
  "serde",
  "serde_json",
@@ -2907,6 +2907,7 @@ dependencies = [
  "assert_no_alloc",
  "core-foundation",
  "coremidi",
+ "getrandom",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
@@ -2931,13 +2932,13 @@ dependencies = [
 name = "tutti-midi-network"
 version = "0.0.1"
 dependencies = [
+ "getrandom",
  "mdns-sd",
  "proptest",
  "sha2",
  "thiserror 2.0.21",
  "tutti-fixtures",
  "tutti-midi-ci",
- "tutti-midi-device",
  "tutti-ump",
  "tutti-units",
 ]
@@ -3118,6 +3119,8 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "tracing",
+ "tutti-clap-test-plugin",
+ "tutti-fixtures",
  "tutti-plugin-ipc-ffi",
  "tutti-plugin-types",
  "tutti-rt",

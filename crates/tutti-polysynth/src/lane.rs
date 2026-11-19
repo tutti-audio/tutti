@@ -8,8 +8,9 @@
 use core::fmt::Debug;
 use core::ops::{AddAssign, BitAnd, Neg};
 use tutti_buffers::Float;
-use tutti_dsp::Lanes;
-use wide::{f32x8, f64x4, i32x4, u32x4, u32x8};
+use tutti_dsp::SimdLanes;
+use tutti_rt::SplitMix64;
+use wide::{f32x8, f64x4};
 
 /// A float the synth renders in.
 ///
@@ -31,14 +32,14 @@ impl SynthFloat for f64 {
 /// once over `f32x8` and `f64x4`.
 ///
 /// A comparison answers a mask lane (all bits set where true), which [`pick`](Self::pick)
-/// selects with and `&` combines. Sealed through [`Lanes`].
+/// selects with and `&` combines. Sealed through [`SimdLanes`].
 pub trait Lane:
-    Lanes + Neg<Output = Self> + AddAssign + BitAnd<Output = Self> + Debug + Send + Sync + 'static
+    SimdLanes + Neg<Output = Self> + AddAssign + BitAnd<Output = Self> + Debug + Send + Sync + 'static
 {
     /// One lane's float.
     type Scalar: Float;
     /// The noise generators of every lane, advanced together.
-    type Rng: Copy + Debug + Send + Sync + 'static;
+    type Rng: Clone + Debug + Send + Sync + 'static;
 
     /// How many voices a group holds.
     const LANES: usize;
@@ -87,16 +88,15 @@ pub trait Lane:
     /// The lanes' sum.
     fn sum(self) -> Self::Scalar;
 
-    /// One generator per lane, seeded from `seed` in lane order. Each seed is nonzero.
-    fn seed_rng(seed: impl FnMut() -> u32) -> Self::Rng;
-    /// Advance every lane's [`Xorshift32`](tutti_dsp::Xorshift32) one step and return white
-    /// noise in `-1.0..1.0`.
+    /// One generator per lane, seeded from `seed` in lane order.
+    fn seed_rng(seed: impl FnMut() -> u64) -> Self::Rng;
+    /// Advance every lane's [`SplitMix64`] one step and return white noise in `-1.0..1.0`.
     fn white(state: &mut Self::Rng) -> Self;
 }
 
 impl Lane for f32x8 {
     type Scalar = f32;
-    type Rng = u32x8;
+    type Rng = [SplitMix64; 8];
 
     const LANES: usize = 8;
     const ZERO: Self = f32x8::ZERO;
@@ -163,28 +163,19 @@ impl Lane for f32x8 {
         self.reduce_add()
     }
 
-    fn seed_rng(mut seed: impl FnMut() -> u32) -> u32x8 {
-        u32x8::new(core::array::from_fn(|_| seed()))
+    fn seed_rng(mut seed: impl FnMut() -> u64) -> [SplitMix64; 8] {
+        core::array::from_fn(|_| SplitMix64::new(seed()))
     }
 
-    /// The top 23 bits become the mantissa of a float in `1.0..2.0`, which maps
-    /// linearly onto the output range with no division and no bias toward zero.
     #[inline(always)]
-    fn white(state: &mut u32x8) -> Self {
-        let mut x = *state;
-        x ^= x << 13;
-        x ^= x >> 17;
-        x ^= x << 5;
-        *state = x;
-        let bits = (x >> 9) | u32x8::splat(0x3F80_0000);
-        let one_to_two: f32x8 = wide::bytemuck::cast(bits);
-        one_to_two + one_to_two - f32x8::splat(3.0)
+    fn white(state: &mut [SplitMix64; 8]) -> Self {
+        f32x8::new(state.each_mut().map(bipolar))
     }
 }
 
 impl Lane for f64x4 {
     type Scalar = f64;
-    type Rng = u32x4;
+    type Rng = [SplitMix64; 4];
 
     const LANES: usize = 4;
     const ZERO: Self = f64x4::ZERO;
@@ -251,22 +242,21 @@ impl Lane for f64x4 {
         self.reduce_add()
     }
 
-    fn seed_rng(mut seed: impl FnMut() -> u32) -> u32x4 {
-        u32x4::new(core::array::from_fn(|_| seed()))
+    fn seed_rng(mut seed: impl FnMut() -> u64) -> [SplitMix64; 4] {
+        core::array::from_fn(|_| SplitMix64::new(seed()))
     }
 
-    /// The top 31 bits as an integer, scaled by `2^-30` and centred: exact in `f64`,
-    /// uniform on `-1.0..1.0` with no bias toward zero.
     #[inline(always)]
-    fn white(state: &mut u32x4) -> Self {
-        let mut x = *state;
-        x ^= x << 13;
-        x ^= x >> 17;
-        x ^= x << 5;
-        *state = x;
-        let top: i32x4 = wide::bytemuck::cast(x >> 1);
-        f64x4::from_i32x4(top) * f64x4::splat(1.0 / f64::from(1_u32 << 30)) - f64x4::ONE
+    fn white(state: &mut [SplitMix64; 4]) -> Self {
+        f64x4::new(state.each_mut().map(bipolar))
     }
+}
+
+/// One uniform draw in `[-1, 1)` of the width `F`: `2u - 1` over the unit draw `u`, which
+/// [`Float::from_fraction_bits`] takes from the word's high bits at the float's own resolution.
+#[inline(always)]
+fn bipolar<F: Float>(rng: &mut SplitMix64) -> F {
+    F::lit(2.0) * F::from_fraction_bits(rng.next_u64()) - F::lit(1.0)
 }
 
 #[cfg(test)]

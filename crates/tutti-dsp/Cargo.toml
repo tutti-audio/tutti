@@ -15,9 +15,11 @@ workspace = true
 
 [dependencies]
 tutti-buffers = { version = "0.0.1", path = "../tutti-buffers" }
+# `SplitMix64`, the one pseudo-random generator, behind the dither and noise sources.
+tutti-rt = { version = "0.0.1", path = "../tutti-rt", default-features = false }
 # The unit vocabulary (Hz / Seconds / Samples / Amplitude / Confidence / …),
 # `ChannelLayout`, `Interleaved` and the downmix helpers. Nothing here needs
-# the engine runtime, so it and `tutti-buffers` are the only tutti edges.
+# the engine runtime, so these are the only tutti edges.
 tutti-units = { version = "0.0.1", path = "../tutti-units", default-features = false }
 
 # `RealFft` (`fft/real.rs`), the one real-input FFT of the convolver, the
@@ -31,8 +33,8 @@ rustfft = { version = "6.4", default-features = false }
 # The filters' models call `libm`'s pure-Rust transcendentals (the crossover's `tan`), so results do not depend on the platform's C math library.
 libm = "0.2.15"
 
-# `f32x8`, so the filter steps written over `Lanes` run eight voices of the
-# polysynth's lane bank at a time (`filter/lanes.rs`). Same version as `Cargo.lock`'s.
+# `f32x8`, so the filter steps written over `SimdLanes` run eight voices of the
+# polysynth's lane bank at a time (`filter/simd_lanes.rs`). Same version as `Cargo.lock`'s.
 wide = { version = "1.6", default-features = false }
 
 # The `Error` enum's Display/Error impls.

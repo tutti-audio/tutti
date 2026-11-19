@@ -26,7 +26,7 @@ use core::f64::consts::PI;
 
 use tutti_units::{Db, Drive, Hz, Resonance, SampleRate, Samples};
 
-use super::{LadderCoeffs, LadderType};
+use super::{LadderDesign, LadderType};
 use crate::filter::biquad::decay_ring;
 use crate::{Complex64, Lti, Ring, System};
 
@@ -64,7 +64,7 @@ impl LadderControls {
     /// a NaN is held off only until another control moves); a node reads its cells
     /// through `LastGood`, which does.
     #[must_use]
-    pub fn moved_from(&self, applied: &Self) -> bool {
+    pub fn differs_from(&self, applied: &Self) -> bool {
         const FREQ_EPS: f64 = 0.01;
         const RES_EPS: f64 = 0.0001;
         self.ty != applied.ty
@@ -90,21 +90,21 @@ impl LadderControls {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct LadderModel {
     controls: LadderControls,
-    coeffs: LadderCoeffs,
+    design: LadderDesign,
     rate: SampleRate,
 }
 
 impl LadderModel {
     /// The model of `controls` at `rate`; the drive is a gain on the input of the
     /// linearised system. Total: a non-finite control takes the default's, the
-    /// cutoff and resonance are clamped as [`LadderCoeffs::new`] clamps them and a
+    /// cutoff and resonance are clamped as [`LadderDesign::new`] clamps them and a
     /// negative drive is 0.
     #[must_use]
     pub fn new(controls: LadderControls, rate: SampleRate) -> Self {
         let controls = controls.sanitized();
         Self {
             controls,
-            coeffs: LadderCoeffs::new(controls.freq, controls.res, rate),
+            design: LadderDesign::new(controls.freq, controls.res, rate),
             rate,
         }
     }
@@ -129,13 +129,13 @@ impl LadderModel {
 
     /// The coefficients the ladder is solved at.
     #[must_use]
-    pub(crate) fn coeffs(&self) -> &LadderCoeffs {
-        &self.coeffs
+    pub(crate) fn design(&self) -> &LadderDesign {
+        &self.design
     }
 
     /// The stage gain `g / (1 + g)`.
     fn g1(&self) -> f64 {
-        self.coeffs.g / (1.0 + self.coeffs.g)
+        self.design.g / (1.0 + self.design.g)
     }
 
     /// The stage `L` at `z^-1 = zi`.
@@ -149,7 +149,7 @@ impl LadderModel {
     fn at(&self, zi: Complex64) -> Complex64 {
         let l = self.stage(zi);
         let l2 = l * l;
-        let u = self.controls.drive.get() / (1.0 + self.coeffs.k * l2 * l2);
+        let u = self.controls.drive.get() / (1.0 + self.design.k * l2 * l2);
         let one_minus = 1.0 - l;
         u * match self.controls.ty {
             LadderType::LP12 => l2,
@@ -167,7 +167,7 @@ impl LadderModel {
     fn poles(&self) -> [Complex64; 4] {
         let g1 = self.g1();
         let p = 1.0 - 2.0 * g1;
-        let c = self.coeffs.k * g1.powi(4);
+        let c = self.design.k * g1.powi(4);
         // Monic coefficients of z^4 .. z^0: (z-p)^4 + c (z+1)^4, over 1 + c.
         let a = [
             1.0,
@@ -244,7 +244,7 @@ impl Lti for LadderModel {
     /// takes that axis onto the unit circle, so the measured radius is not needed
     /// (and its rounding cannot move the threshold).
     fn is_stable(&self) -> bool {
-        self.coeffs.k < 4.0
+        self.design.k < 4.0
     }
 
     /// Infinity: the linearisation has no bound the model can state (past the

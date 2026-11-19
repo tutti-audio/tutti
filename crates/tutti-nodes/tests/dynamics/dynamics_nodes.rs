@@ -6,7 +6,7 @@
 use tutti_buffers::Planes;
 use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_dsp::{CompressorControls, GateControls, LimiterControls};
-use tutti_graph::contract::{Driven, assert_honest_tail, drive, drive_input, prepared};
+use tutti_graph::contract::{Driven, assert_declared_tail, drive, drive_input, prepared};
 use tutti_graph::{Env, Node, ParamNode, PlayClock, Status, TransportChanges, TransportPosition};
 use tutti_nodes::{
     BrickwallLimiterNode, CompressorNode, DynamicEqConfig, DynamicEqNode, GateNode, KeySource,
@@ -496,7 +496,7 @@ fn the_limiter_reports_its_lookahead_as_latency_and_never_parks() {
         "the impulse leaves the delay once, on frame {frames}"
     );
 
-    assert_honest_tail(&mut make(), rate);
+    assert_declared_tail(&mut make(), rate);
 }
 
 /// The key is the input bus with the sidechain role, after the audio's, as wide: a compressor and a gate keyed

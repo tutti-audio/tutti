@@ -239,7 +239,7 @@ fn an_f64_resampler_passes_dc_at_unity_to_f64_precision() {
     let mut produced = 0;
     for _ in 0..6 {
         produced = r
-            .process_into_buffer(
+            .process(
                 Planes::from_vecs(&input).unwrap(),
                 PlanesMut::from_vecs(&mut out).unwrap(),
             )
@@ -265,7 +265,7 @@ fn an_f32_resampler_passes_dc_at_unity_to_the_transforms_rounding() {
     let mut produced = 0;
     for _ in 0..6 {
         produced = r
-            .process_into_buffer(
+            .process(
                 Planes::from_vecs(&input).unwrap(),
                 PlanesMut::from_vecs(&mut out).unwrap(),
             )

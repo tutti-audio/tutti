@@ -255,7 +255,7 @@ take reports the real `F`.
 ```rust
 let input = s.add_input(InputConfig::default().channels(&[0, 1]))?; // S1: MicIn + inlet, reopened on restart
 s.graph().connect(input.node(), eq)?;                              // monitoring is ordinary wiring
-let take = s.record(&input, Punch::at(Beat(16.0)).until(Beat(48.0)), "take1.wav")?; // Take<Armed>
+let take = s.record(&input, Punch::at(Beat::new(16.0)).until(Beat::new(48.0)), "take1.wav")?; // Take<Armed>
 // update() reports SessionEvent::Take(TakeEvent::{Started, Finished, Failed}) for it
 let done = take.finish()?;                       // Recorded: path, start, the terms, lost frames
 s.graph().replace(input.node(), done.clip()?)?;  // the take, where it was played; a bounce can fork it
@@ -360,7 +360,7 @@ order, one PR per step, each deleting what it replaces. It supersedes tasks
    buffer), the plumbing behind tutti-session's `testing` feature
    (`Graph::testing()`, `take_audio_side`, `AudioSide`) or `pub(crate)`, and the
    failure rule (every query, wire removal and modulation call that names a node
-   that is not there is a `Result`); S8: `HeardOpen::Retry` for a busy audio thread,
+   that is not there is a `Result`); S8: `OutputTapOpen::Retry` for a busy audio thread,
    a `LoadMeter` with one reader, and tutti-cpal's one listing,
    `DeviceHost::snapshot`. Then the deferred chase injection (built): a chase whose
    takeover is delayed by a fade is held in the queued crossfade, its injection

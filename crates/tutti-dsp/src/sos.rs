@@ -15,7 +15,7 @@ mod tilt;
 use tutti_units::{Db, Hz, SampleRate, Samples, Seconds};
 
 use crate::filter::{integrator_gains, section_l1};
-use crate::{Biquad, Complex64, Lti, Ring, SvfCoeffs, System, svf_step};
+use crate::{Biquad, Complex64, Lti, Ring, SvfDesign, System, svf_step};
 
 pub use bank::{MAX_SECTIONS, SosBank, SosCoefficients};
 pub use bell::MatchedBell;
@@ -65,7 +65,7 @@ impl Sos {
 /// section's own, `k = 2`, and a zero cancelling the second: `H(s) = (c0 + c1 s) / (1 + s)`
 /// is `(c1 s^2 + (c0 + c1) s + c0) / (1 + s)^2`.
 #[must_use]
-pub(crate) fn svf_form(b: &Biquad) -> SvfCoeffs {
+pub(crate) fn svf_form(b: &Biquad) -> SvfDesign {
     let (g, k, [m0, m1, m2]) = if b.a2 == 0.0 && b.b2 == 0.0 {
         let g = (1.0 + b.a1) / (1.0 - b.a1);
         let c0 = (g + 1.0) * (b.b0 + b.b1) / (2.0 * g);
@@ -82,7 +82,7 @@ pub(crate) fn svf_form(b: &Biquad) -> SvfCoeffs {
         (g, k, [m0, m1, m2])
     };
     let [d, a2, a3] = integrator_gains(g, k);
-    SvfCoeffs {
+    SvfDesign {
         g,
         k,
         d,

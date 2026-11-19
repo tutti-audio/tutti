@@ -53,8 +53,8 @@ impl Node for Probe {
         for (range, events) in io.sub_blocks(0) {
             for p in events.params() {
                 let target = match p.kind {
-                    ParamKind::Ramp(r) => r.foreign_target(ID),
-                    ParamKind::Segment(s) => s.foreign_target(ID),
+                    ParamKind::Ramp(r) => r.target_by_id(ID),
+                    ParamKind::Segment(s) => s.target_by_id(ID),
                 }
                 .expect("this test addresses its one id");
                 self.level = (target / 100.0) as f32;
@@ -92,12 +92,12 @@ fn tag(t: u32) -> EventKind {
 
 /// A step of param `ID` to `target`, as a ramp.
 fn ramp(target: f64) -> ParamKind {
-    ParamKind::Ramp(ParamRamp::foreign(ID, target, Samples::new(0)))
+    ParamKind::Ramp(ParamRamp::by_id(ID, target, Samples::new(0)))
 }
 
 /// The same as a zero-length segment.
 fn segment(target: f64) -> ParamKind {
-    ParamKind::Segment(ParamSegment::foreign(
+    ParamKind::Segment(ParamSegment::by_id(
         ID,
         target,
         target,

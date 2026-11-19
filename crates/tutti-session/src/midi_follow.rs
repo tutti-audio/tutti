@@ -640,7 +640,7 @@ impl ClockFollow {
             self.core.kind(),
             rolling,
             &stand,
-            cx.settings.tempo_in_force(),
+            cx.settings.current_tempo(),
             &map,
             out,
         );

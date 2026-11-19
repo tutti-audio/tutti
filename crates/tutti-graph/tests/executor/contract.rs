@@ -24,7 +24,7 @@ use tutti_buffers::MaxBlock;
 use tutti_buffers::ChannelLayout;
 use tutti_fixtures::midi;
 use tutti_graph::contract::{
-    Detect, Emitter, Excite, Lookahead, MAX_BLOCK, OFFSETS, ParamEcho, Path, Pulse, Row,
+    Detect, Emitter, Excite, ImpulseSource, Lookahead, MAX_BLOCK, OFFSETS, ParamEcho, Path, Row,
     SAMPLE_RATE,
 };
 use tutti_graph::{
@@ -50,8 +50,8 @@ fn pulse() -> Excite {
 
 fn pulse_row() -> Row {
     Row::new(
-        "Pulse",
-        || Box::new(Pulse::new(Latency::ZERO)),
+        "ImpulseSource",
+        || Box::new(ImpulseSource::new(Latency::ZERO)),
         pulse(),
         Detect::Exact(vec![1.0]),
     )
@@ -59,8 +59,8 @@ fn pulse_row() -> Row {
 
 fn latent_pulse_row() -> Row {
     Row::new(
-        "Pulse, 37 frames of latency",
-        || Box::new(Pulse::new(Latency::new(Samples::new(37)))),
+        "ImpulseSource, 37 frames of latency",
+        || Box::new(ImpulseSource::new(Latency::new(Samples::new(37)))),
         pulse(),
         Detect::Exact(vec![1.0]),
     )
@@ -74,8 +74,8 @@ fn latent_pulse_row() -> Row {
 /// path, ragged schedules included.
 fn chunked_pulse_row() -> Row {
     Row::new(
-        "Pulse at Frames(8), own grid",
-        || Box::new(Pulse::new(Latency::ZERO).with_resolution(Resolution::Frames(8))),
+        "ImpulseSource at Frames(8), own grid",
+        || Box::new(ImpulseSource::new(Latency::ZERO).with_resolution(Resolution::Frames(8))),
         pulse(),
         Detect::Exact(vec![1.0]),
     )
@@ -84,8 +84,8 @@ fn chunked_pulse_row() -> Row {
 /// Declares `Block` and takes every event at its block's first frame.
 fn block_pulse_row() -> Row {
     Row::new(
-        "Pulse at Block",
-        || Box::new(Pulse::new(Latency::ZERO).with_resolution(Resolution::Block)),
+        "ImpulseSource at Block",
+        || Box::new(ImpulseSource::new(Latency::ZERO).with_resolution(Resolution::Block)),
         pulse(),
         Detect::Exact(vec![1.0]),
     )
@@ -482,36 +482,39 @@ fn the_transport_harnesses_hand_the_node_their_transport() {
 /// the ring.
 #[test]
 fn the_tail_contract_catches_a_report_that_is_too_short() {
-    use common::Ringer;
-    use tutti_graph::contract::{assert_honest_tail, prepared};
+    use common::RingingNode;
+    use tutti_graph::contract::{assert_declared_tail, prepared};
     let rate = tutti_graph::contract::SAMPLE_RATE;
     let ceiling = Tail::Finite(Samples::new(1000));
-    let check = |r: Ringer| {
+    let check = |r: RingingNode| {
         let mut node = prepared(r, rate, 64);
-        catch_unwind(AssertUnwindSafe(|| assert_honest_tail(&mut node, rate))).is_ok()
+        catch_unwind(AssertUnwindSafe(|| assert_declared_tail(&mut node, rate))).is_ok()
     };
-    assert!(check(Ringer::new(ceiling, 300, 300)));
-    assert!(check(Ringer::new(ceiling, 300, 400)), "long errs safe");
+    assert!(check(RingingNode::new(ceiling, 300, 300)));
+    assert!(check(RingingNode::new(ceiling, 300, 400)), "long errs safe");
     assert!(
-        check(Ringer::new(ceiling, 300, 299)),
+        check(RingingNode::new(ceiling, 300, 299)),
         "exact: sound through frame T"
     );
-    assert!(check(Ringer::new(ceiling, 300, 300).wide(2)));
+    assert!(check(RingingNode::new(ceiling, 300, 300).wide(2)));
     assert!(check(
-        Ringer::new(ceiling, 300, 300).with_latency(Samples::new(37))
+        RingingNode::new(ceiling, 300, 300).with_latency(Samples::new(37))
     ));
-    assert!(check(Ringer::new(
+    assert!(check(RingingNode::new(
         Tail::Unbounded,
         300,
         common::REPORT_UNBOUNDED
     )));
     assert!(
-        !check(Ringer::new(ceiling, 300, 150)),
+        !check(RingingNode::new(ceiling, 300, 150)),
         "reports half its ring"
     );
-    assert!(!check(Ringer::new(ceiling, 300, 298)), "one frame short");
     assert!(
-        !check(Ringer::new(
+        !check(RingingNode::new(ceiling, 300, 298)),
+        "one frame short"
+    );
+    assert!(
+        !check(RingingNode::new(
             Tail::Finite(Samples::new(100)),
             300,
             common::NO_REPORT

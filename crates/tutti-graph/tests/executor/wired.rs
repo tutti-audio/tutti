@@ -464,7 +464,7 @@ fn a_fade_out_keeps_the_input_wired_until_the_commit_that_removes_the_edge() {
     assert_eq!(seen.read().0, 0b1, "fading, still wired");
     assert!(ed.spec().has_edge(id), "held until the fade is reported");
     assert!(
-        ed.settle_fades(),
+        ed.finish_fades(),
         "the fade ended and the edge left the spec"
     );
     let report = ed.commit().expect("commits");

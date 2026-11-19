@@ -29,10 +29,10 @@ use tutti_buffers::{Float, Mono, Planes, PlanesMut};
 use tutti_units::{Db, Hz, SampleRate, Samples};
 
 use super::compressor::{CompressorBank, CompressorControls, CompressorLanes};
-use super::shared::{CHUNK, GAIN_GLIDE};
+use super::gain_pass::{CHUNK, GAIN_GLIDE};
 use crate::{
-    COEFF_INTERVAL, CrossoverBank, CrossoverCoefficients, CrossoverControls, CrossoverError,
-    CrossoverModel, Glide, Lanes, Lerp, Steps,
+    COEFF_INTERVAL, CrossoverBank, CrossoverBlend, CrossoverControls, CrossoverError,
+    CrossoverModel, Glide, Lerp, SimdLanes, Steps,
 };
 
 /// The most bands.
@@ -215,15 +215,15 @@ impl<F: Float> Scratch<F> {
 /// Built on the control side for one rate; the state, the views and the lanes are `F`, the
 /// graph's float. Nothing it holds grows.
 #[derive(Clone, Debug)]
-pub struct MultibandBank<F: Float + Lanes + Lerp> {
+pub struct MultibandBank<F: Float + SimdLanes + Lerp> {
     width: usize,
     bands: usize,
     rate: SampleRate,
     crossover: CrossoverBank<F>,
     /// The model the controls design, in place.
     model: CrossoverModel,
-    /// The coefficients in flight over one grid period.
-    coefficients: Glide<CrossoverCoefficients>,
+    /// The blend in flight over one grid period.
+    blend: Glide<CrossoverBlend>,
     compressors: [CompressorBank<F>; MAX_BANDS],
     /// 1 while the band is bypassed, else 0, gliding over [`GAIN_GLIDE`]: a per-sample weight
     /// in `F`.
@@ -240,7 +240,7 @@ pub struct MultibandBank<F: Float + Lanes + Lerp> {
     scratch: Scratch<F>,
 }
 
-impl<F: Float + Lanes + Lerp> MultibandBank<F> {
+impl<F: Float + SimdLanes + Lerp> MultibandBank<F> {
     /// A multiband of `bands` bands over `width` at `rate`, splitting and summing until it
     /// is aimed. Allocates: build it on the control side.
     ///
@@ -276,7 +276,7 @@ impl<F: Float + Lanes + Lerp> MultibandBank<F> {
             bands,
             rate,
             crossover: CrossoverBank::new(width),
-            coefficients: Glide::landed(model.coefficients()).by(COEFF_INTERVAL as u32),
+            blend: Glide::landed(model.blend()).by(COEFF_INTERVAL as u32),
             model,
             compressors: core::array::from_fn(|_| CompressorBank::new(rate)),
             bypass: [Glide::landed(F::ZERO); MAX_BANDS],
@@ -301,7 +301,7 @@ impl<F: Float + Lanes + Lerp> MultibandBank<F> {
         self.crossover.reset();
         self.model
             .design_into(&CrossoverControls::octaves(self.rate), self.rate);
-        self.coefficients = Glide::landed(self.model.coefficients()).by(COEFF_INTERVAL as u32);
+        self.blend = Glide::landed(self.model.blend()).by(COEFF_INTERVAL as u32);
         self.compressors = core::array::from_fn(|_| CompressorBank::new(self.rate));
         self.bypass = [Glide::landed(F::ZERO); MAX_BANDS];
         self.audible = [Glide::landed(F::ONE); MAX_BANDS];
@@ -316,7 +316,7 @@ impl<F: Float + Lanes + Lerp> MultibandBank<F> {
     /// [`new`](Self::new) or [`reset`](Self::reset) lands whole. No allocation.
     pub fn aim(&mut self, controls: &MultibandSettings) {
         self.model.design_into(&controls.crossover, self.rate);
-        self.coefficients.aim(self.model.coefficients());
+        self.blend.aim(self.model.blend());
         let bands = &controls.bands[..self.bands];
         let any_solo = bands.iter().any(|b| b.solo);
         let steps = Steps::Fixed(self.steps);
@@ -326,7 +326,7 @@ impl<F: Float + Lanes + Lerp> MultibandBank<F> {
             self.audible[b].aim_by(flag(!any_solo || band.solo), steps);
         }
         if !self.landed {
-            self.coefficients.settle();
+            self.blend.settle();
             for b in 0..self.bands {
                 self.compressors[b].settle();
                 self.bypass[b].settle();
@@ -397,7 +397,7 @@ impl<F: Float + Lanes + Lerp> MultibandBank<F> {
                 return;
             };
             self.crossover.process(
-                &mut self.coefficients,
+                &mut self.blend,
                 heard.slice(frames.clone()),
                 split.slice_mut(frames.clone()),
             );

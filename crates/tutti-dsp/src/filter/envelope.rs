@@ -12,7 +12,7 @@
 //! with `depth_octaves = depth / 12` semitones. A positive depth opens the filter as the
 //! level rises (an auto-wah on a band-pass, a swell on a low-pass); a negative one closes it.
 //! The cutoff is held within 1 Hz and just under the Nyquist, as an
-//! [`SvfCoeffs`](super::SvfCoeffs) holds it.
+//! [`SvfDesign`](super::SvfDesign) holds it.
 //!
 //! # When it is designed
 //!
@@ -35,7 +35,7 @@ use super::SvfBank;
 use super::svf::{SvfCoefficients, SvfControls, SvfModel, SvfType};
 use crate::dynamics::{floored, key_levels};
 use crate::follower::{Follower, Smoothed};
-use crate::{COEFF_INTERVAL, Glide, Lanes, Lerp};
+use crate::{COEFF_INTERVAL, Glide, Lerp, SimdLanes};
 
 /// The frames between designs: the grid period.
 const GRID: Samples = Samples::new(COEFF_INTERVAL);
@@ -86,7 +86,7 @@ impl Default for EnvelopeFilterControls {
 /// Built on the control side for one response and one rate; the envelope and the filter run in
 /// `F`, the graph's float. Nothing it holds grows.
 #[derive(Clone, Debug)]
-pub struct EnvelopeFilterBank<F: Float + Lanes> {
+pub struct EnvelopeFilterBank<F: Float + SimdLanes> {
     ty: SvfType,
     rate: SampleRate,
     follower: Follower<F>,
@@ -99,7 +99,7 @@ pub struct EnvelopeFilterBank<F: Float + Lanes> {
     phase: Samples,
 }
 
-impl<F: Float + Lanes + Lerp> EnvelopeFilterBank<F> {
+impl<F: Float + SimdLanes + Lerp> EnvelopeFilterBank<F> {
     /// A bank `width` channels wide of the response `ty` at `rate`, at the default controls.
     /// Allocates: build it on the control side.
     #[must_use]

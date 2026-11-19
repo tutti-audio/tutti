@@ -120,16 +120,16 @@ fn presentation_latency_is_recorded_per_bus_not_per_unit() {
 
     assert_eq!(
         last_presentation_latency(&au, Scope::OUTPUT.raw(), 0),
-        Some(out0.0),
+        Some(out0.get()),
     );
     assert_eq!(
         last_presentation_latency(&au, Scope::OUTPUT.raw(), 1),
-        Some(out1.0),
+        Some(out1.get()),
         "output bus 1 must not receive bus 0's value"
     );
     assert_eq!(
         last_presentation_latency(&au, Scope::INPUT.raw(), 0),
-        Some(in0.0),
+        Some(in0.get()),
         "the input scope must not receive the output scope's value"
     );
     // Nothing was written globally, and `None` is how the probe spells that —

@@ -191,7 +191,7 @@ fn two_hundred_moving_parameters_do_not_allocate() {
         for (k, frame) in [(0u32, 0usize), (1, 32)] {
             let at = Offset::of(Samples::new(frame), Samples::new(64));
             for id in 0..PARAMS {
-                let ramp = ParamRamp::foreign(ParamId::new(id), value(b, k, id), Samples::new(0));
+                let ramp = ParamRamp::by_id(ParamId::new(id), value(b, k, id), Samples::new(0));
                 events.push(ParamEvent::ramp(at, ramp));
             }
         }

@@ -15,8 +15,8 @@
 //! owns the unit (see [`crate::listener`]). Reading `kAudioUnitProperty_Latency`
 //! from there would be a property call on a unit the owning thread may be
 //! rendering through, so the callback records only *that* something changed, as
-//! a bit of a [`RequestWord`], and the main thread does the read when it takes
-//! the word, between blocks (`Control::take_requests`). One bit each: a latency
+//! a flag of an [`AtomicRequestFlags`], and the main thread does the read when it takes
+//! the flags, between blocks (`Control::take_requests`). One flag each: a latency
 //! change and a parameter-list change have different consequences downstream,
 //! and collapsing them would make every mode switch re-pull the whole parameter
 //! list.
@@ -25,11 +25,11 @@ use std::sync::Arc;
 
 use tutti_au_ffi::property::{Latency, ParameterList, TailTime};
 use tutti_au_ffi::{AuEvent, AuParameterListener, EventAddress, Property, Unit};
-use tutti_plugin_types::{Request, RequestWord, RescanScope};
+use tutti_plugin_types::{AtomicRequestFlags, Request, RescanScope};
 
 use crate::edits::{Edit, ReportedEdits};
 
-/// A live property-change registration on the AU, raising bits of the word it
+/// A live property-change registration on the AU, raising flags of the set it
 /// was made with.
 ///
 /// Held by [`AuLoaded`](crate::AuLoaded), declared before the unit so the
@@ -73,7 +73,7 @@ impl PropertyWatch {
     /// queue received them.
     pub(crate) fn install(
         unit: &Unit,
-        requests: Arc<RequestWord>,
+        requests: Arc<AtomicRequestFlags>,
         edits: Arc<ReportedEdits>,
         parameters: impl IntoIterator<Item = u32>,
     ) -> Option<Self> {

@@ -18,7 +18,8 @@ use crate::{
 };
 use tutti_buffers::ChannelLayout;
 use tutti_dsp::{
-    DelayControls, FdnControls, FdnLayout, FreeverbControls, LadderType, ShapeKind, Stages, SvfType,
+    DelayControls, FdnControls, FdnLayout, FreeverbControls, FreezeMode, LadderType, ShapeKind,
+    Stages, SvfType,
 };
 use tutti_fixtures::signal::{assert_close_f64, wide_signal};
 use tutti_graph::IntoNode;
@@ -340,7 +341,7 @@ fn the_linear_nodes_satisfy_superposition() {
     assert_linear(
         || {
             FdnNode::<f64>::live(
-                FdnLayout::new(8, tutti_dsp::MaxDecay::DEFAULT, false).unwrap(),
+                FdnLayout::new(8, tutti_dsp::MaxDecay::DEFAULT, FreezeMode::Decaying).unwrap(),
                 FdnControls::DEFAULT,
             )
         },

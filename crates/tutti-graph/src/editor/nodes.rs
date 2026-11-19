@@ -7,7 +7,7 @@ use tutti_buffers::Float;
 use tutti_units::{Latency, Tail};
 
 use super::outlets::Closed;
-use super::{CommitError, Editor, Placed, Unwired};
+use super::{CommitError, Editor, Inserted, Unwired};
 use crate::bus_edge::{BusRef, BusSource};
 use crate::fade::Fade;
 use crate::fork::ForkSource;
@@ -26,7 +26,7 @@ impl<F: Float> Editor<F> {
     /// The node is prepared now, and its [`NodeSpec`] is written from its
     /// shape. Edges and params already recorded for `key` are kept, except
     /// the wiring to a port the new shape lacks: that is removed from the
-    /// spec and returned in [`Placed::unwired`] (audio, event, feedback and
+    /// spec and returned in [`Inserted::unwired`] (audio, event, feedback and
     /// bus edges, whether `key` is their source or their sink), and nothing
     /// fails on a narrower shape. A port is the same port by its index
     /// within its kind, and a bus by its index and band; wiring to a port
@@ -45,7 +45,7 @@ impl<F: Float> Editor<F> {
         key: NodeKey,
         kind: &str,
         node: N,
-    ) -> Placed<N::Controls> {
+    ) -> Inserted<N::Controls> {
         let NodeParts {
             node: mut unit,
             controls,
@@ -56,7 +56,7 @@ impl<F: Float> Editor<F> {
         unit.prepare(&self.prepare);
         let shape = unit.shape();
         let unwired = self.place(key, kind, unit, wake, shape, fork);
-        Placed { controls, unwired }
+        Inserted { controls, unwired }
     }
 
     /// Adds a unit already prepared for this editor's [`Prepare`](crate::Prepare), without
@@ -121,7 +121,7 @@ impl<F: Float> Editor<F> {
         key: NodeKey,
         node: N,
         fade: Fade,
-    ) -> Result<Placed<N::Controls>, CommitError> {
+    ) -> Result<Inserted<N::Controls>, CommitError> {
         self.check_poisoned()?;
         if self.is_repreparing() {
             return Err(CommitError::Repreparing);
@@ -179,7 +179,7 @@ impl<F: Float> Editor<F> {
         // the incoming shape lacks, as at an insert: they are unwired.
         let unwired = self.place(key, kind, unit, wake, shape, fork);
         self.placements.set_fade(key, fade);
-        Ok(Placed { controls, unwired })
+        Ok(Inserted { controls, unwired })
     }
 
     /// [`replace`](Self::replace) where it can fade, and a plain placement at
@@ -191,7 +191,7 @@ impl<F: Float> Editor<F> {
     /// refusal for want of it.
     ///
     /// Either way the placement unwires what the new shape lacks, as
-    /// [`insert`](Self::insert) does, and returns it in [`Placed::unwired`].
+    /// [`insert`](Self::insert) does, and returns it in [`Inserted::unwired`].
     /// A shape that fits the running unit's ports and buses has none to
     /// unwire but edges recorded since the last commit.
     ///
@@ -212,7 +212,7 @@ impl<F: Float> Editor<F> {
         key: NodeKey,
         node: N,
         fade: Fade,
-    ) -> Result<Placed<N::Controls>, CommitError> {
+    ) -> Result<Inserted<N::Controls>, CommitError> {
         self.check_poisoned()?;
         if self.is_repreparing() {
             return Err(CommitError::Repreparing);
@@ -253,7 +253,7 @@ impl<F: Float> Editor<F> {
         if fits {
             self.placements.set_fade(key, fade);
         }
-        Ok(Placed { controls, unwired })
+        Ok(Inserted { controls, unwired })
     }
 
     /// Write a prepared unit at `key` with a fresh generation — the common
@@ -369,7 +369,7 @@ impl<F: Float> Editor<F> {
     /// ceiling only from the next commit, and a node's
     /// [`report_tail`](crate::Io::report_tail) is clamped to whichever
     /// ceiling the executor holds, so it always fits within it
-    /// (`contract::assert_honest_tail` applies unchanged).
+    /// (`contract::assert_declared_tail` applies unchanged).
     ///
     /// **Who holds the figure.** Between this call and the unit's next
     /// [`prepare`](crate::Node::prepare) or re-prepare this call is the
@@ -432,7 +432,7 @@ impl<F: Float> Editor<F> {
     /// instead of cut: every audio edge or bus edge that leaves `key` and has
     /// been sent in a plan is marked [`EdgeFade::Out`] and stays, so the node
     /// keeps rendering while it fades, and the node goes (in
-    /// [`settle_fades`](Self::settle_fades)) once the last of them has. Its
+    /// [`finish_fades`](Self::finish_fades)) once the last of them has. Its
     /// input edges, event edges, params and gain drivers go at once: what is
     /// heard is the output's fade. Returns whether the node was removed now,
     /// which is when no such edge was sent.

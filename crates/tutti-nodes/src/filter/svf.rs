@@ -9,7 +9,7 @@
 
 use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
 use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_dsp::{Glide, Lanes, SvfBank, SvfCoefficients, SvfControls, SvfModel, SvfType};
+use tutti_dsp::{Glide, SimdLanes, SvfBank, SvfCoefficients, SvfControls, SvfModel, SvfType};
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
 use tutti_units::{Db, Hz, Q, SampleRate, Tail};
 
@@ -31,22 +31,22 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 /// # use tutti_buffers::Planes;
 /// use tutti_buffers::MaxBlock;
 /// use tutti_units::{Hz, Q, UnitParam};
-/// use tutti_graph::{Prepare, Solo};
+/// use tutti_graph::{Prepare, Standalone};
 /// use tutti_nodes::{SvfFilterNode, SvfType};
 /// use tutti_units::{SampleRate, Samples};
 ///
 /// let filter = SvfFilterNode::<f32>::new(SvfType::LowPass, Hz::new(800.0), Q::new(0.707));
-/// let mut solo = Solo::new(filter, Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64))));
-/// let out = solo.render_input(Planes::new(&[&[1.0; 64]]).unwrap());
+/// let mut standalone = Standalone::new(filter, Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64))));
+/// let out = standalone.render_input(Planes::new(&[&[1.0; 64]]).unwrap());
 /// assert_eq!(out.len(), 1);
 ///
 /// // Move the cutoff on the running node; it glides over the next block.
-/// assert!(solo.controls().set(UnitParam::Cutoff, 2_000.0));
+/// assert!(standalone.controls().set(UnitParam::Cutoff, 2_000.0));
 /// ```
 ///
 /// Cutoff ([`Hz`]), [`Q`] and gain ([`Db`]) are live [`Params`](crate::Params) shared across
 /// clones. A held value costs nothing: the model is designed again only when one
-/// moves past a small dead-band ([`SvfControls::moved_from`]). The filter is
+/// moves past a small dead-band ([`SvfControls::differs_from`]). The filter is
 /// designed on a 16-frame grid counted from the last reset, at each segment's
 /// first frame, and the coefficients ramp linearly to that solve over the segment,
 /// so an automated cutoff glides rather than stepping, arrives within 16 frames
@@ -83,7 +83,7 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 /// before its first block. Rendering allocates nothing.
 pub type SvfFilterNode<F> = KernelNode<SvfKernel<F>>;
 
-impl<F: Float + Lanes> SvfFilterNode<F> {
+impl<F: Float + SimdLanes> SvfFilterNode<F> {
     /// A mono filter (1 in, 1 out) of `filter_type` at `frequency` cutoff and
     /// resonance `q`, with 0 dB gain.
     ///
@@ -144,7 +144,7 @@ const GLIDE_STEPS: u32 = 16;
 /// The state-variable filter as a [`Kernel`]: an [`SvfBank`] in the float `F`
 /// and the glide of the coefficients every channel shares.
 #[derive(Clone, Debug)]
-pub struct SvfKernel<F: Float + Lanes> {
+pub struct SvfKernel<F: Float + SimdLanes> {
     input: BusTopology,
     bank: SvfBank<F>,
     /// The coefficients in flight; the first design after `prepare` lands at once.
@@ -153,7 +153,7 @@ pub struct SvfKernel<F: Float + Lanes> {
     landed: bool,
 }
 
-impl<F: Float + Lanes> SvfKernel<F> {
+impl<F: Float + SimdLanes> SvfKernel<F> {
     /// A filter on the bus `input`, its output where it is. Allocates the state. Its
     /// coefficients until `prepare` are a placeholder at 48 kHz: an unprepared node renders
     /// nothing, and `prepare` designs for the rate it is given.
@@ -173,7 +173,7 @@ impl<F: Float + Lanes> SvfKernel<F> {
     }
 }
 
-impl<F: Float + Lanes> Kernel for SvfKernel<F> {
+impl<F: Float + SimdLanes> Kernel for SvfKernel<F> {
     type Float = F;
     type Set = SvfSet;
 
@@ -238,7 +238,7 @@ control_set! {
     GainDb => Db = gain;
 
     fn moved(&self, applied: &SvfControls, target: &SvfControls) -> bool {
-        target.moved_from(applied)
+        target.differs_from(applied)
     }
 
     fn defaults(&self) -> SvfControls {

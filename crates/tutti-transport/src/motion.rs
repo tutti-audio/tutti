@@ -12,7 +12,7 @@
 //! | output | consumer | why it can't be read from the FSM directly |
 //! |---|---|---|
 //! | `motion` (crate-private) | the transport's `Timeline`, and the session's playhead | the FSM is the engine's |
-//! | `seek` ([`SeekSlot`]) | `TransportClock` | consumed once per buffer |
+//! | `seek` ([`PendingSeek`]) | `TransportClock` | consumed once per buffer |
 //!
 //! The settings half — tempo, recording — lives in
 //! [`TransportSettings`] and is not routed through
@@ -29,8 +29,8 @@ use crossbeam_queue::ArrayQueue;
 use super::fsm::{DeclickOutcome, TransitionResult, TransportFsm};
 use super::loop_region::{LoopOwner, LoopReader, LoopRegion};
 use super::settings::TransportSettings;
-use super::state::SeekSlot;
-use super::timed::{Schedule, TimedError, TransportCommand};
+use super::state::PendingSeek;
+use super::timed::{CommandQueue, TimedError, TransportCommand};
 use std::sync::atomic::AtomicU8;
 use tutti_units::At;
 use tutti_units::Beat;
@@ -52,14 +52,14 @@ pub enum FadeOut {
     Immediate,
 }
 
-/// What the transport should be doing once a locate lands.
+/// What the transport should be doing once a locate completes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub enum Then {
+pub enum AfterLocate {
     /// Stay (or become) stopped at the target.
     #[default]
     Stop,
-    /// Roll from the target.
-    Roll,
+    /// Play from the target.
+    Play,
     /// Keep whatever the transport was doing — a locate while rolling keeps
     /// rolling, a locate while stopped stays stopped.
     Keep,
@@ -91,7 +91,7 @@ pub enum MotionEvent {
         /// Whether to ramp the output down before jumping.
         fade: FadeOut,
         /// What the transport should be doing once the jump lands.
-        then: Then,
+        then: AfterLocate,
     },
     /// Begin scrubbing forward.
     FastForward,
@@ -123,7 +123,7 @@ impl MotionEvent {
         Self::Locate {
             beat,
             fade: FadeOut::Declick,
-            then: Then::Keep,
+            then: AfterLocate::Keep,
         }
     }
 
@@ -132,7 +132,7 @@ impl MotionEvent {
         Self::Locate {
             beat,
             fade: FadeOut::Declick,
-            then: Then::Roll,
+            then: AfterLocate::Play,
         }
     }
 
@@ -146,7 +146,7 @@ impl MotionEvent {
         Self::Locate {
             beat,
             fade: FadeOut::Declick,
-            then: Then::Stop,
+            then: AfterLocate::Stop,
         }
     }
 }
@@ -163,13 +163,13 @@ pub struct MotionFsm {
     /// reaching the engine.
     motion: Arc<AtomicU8>,
     /// Pending absolute jump. Consumed by `TransportClock` once per buffer.
-    pub(crate) seek: SeekSlot,
+    pub(crate) seek: PendingSeek,
     /// The FSM writes the playhead on a locate, and pausedness tracks motion,
     /// so it needs the settings it publishes into.
     settings: TransportSettings,
     /// Every command, applied by the engine on its frame. See
     /// [`schedule`](Self::schedule).
-    timed: Schedule,
+    timed: CommandQueue,
     /// The one FSM and loop region, while no [`MotionAudio`] holds them. A
     /// capacity-one queue: [`audio`](Self::audio) pops it, the audio half's
     /// drop pushes it back, so their state outlives the engine that ran
@@ -209,9 +209,9 @@ impl MotionFsm {
         });
         Self {
             motion: Arc::new(AtomicU8::new(MotionState::Stopped.into())),
-            seek: SeekSlot::new(),
+            seek: PendingSeek::new(),
             settings,
-            timed: Schedule::new(),
+            timed: CommandQueue::new(),
             home,
             loop_region,
         }
@@ -345,7 +345,7 @@ impl MotionFsm {
     }
 
     /// The command queue, for the engine.
-    pub(crate) fn timed(&self) -> &Schedule {
+    pub(crate) fn timed(&self) -> &CommandQueue {
         &self.timed
     }
 
@@ -416,7 +416,7 @@ pub(crate) struct MotionAudio {
     /// The loop region. `None` only once handed back.
     owner: Option<LoopOwner>,
     motion: Arc<AtomicU8>,
-    seek: SeekSlot,
+    seek: PendingSeek,
     settings: TransportSettings,
     /// Where the FSM goes back to; `None` once it has.
     home: Option<Arc<ArrayQueue<Home>>>,
@@ -581,26 +581,26 @@ pub(crate) fn is_declicking(motion: MotionState) -> bool {
 #[cfg(test)]
 pub(crate) mod harness {
     use super::*;
-    use crate::timed::ScheduleAudio;
+    use crate::timed::CommandQueueAudio;
 
     /// The audio half the engine would own, with the queue its walk applies
     /// from: `drain` applies what was sent, in send order, as a block whose
     /// commands are all due at its first frame.
     pub(crate) struct Audio {
         motion: MotionAudio,
-        queue: ScheduleAudio,
+        queue: CommandQueueAudio,
     }
 
     impl Audio {
         pub(crate) fn of(m: &MotionFsm) -> Self {
             Self {
                 motion: m.audio().expect("no engine holds it"),
-                queue: ScheduleAudio::new(m.timed().clone()),
+                queue: CommandQueueAudio::new(m.timed().clone()),
             }
         }
 
         pub(crate) fn drain(&mut self) {
-            self.queue.gather();
+            self.queue.drain_commands();
             while let Some(i) =
                 (0..self.queue.pending().len()).min_by_key(|&i| self.queue.pending()[i].seq())
             {
@@ -679,7 +679,7 @@ mod tests {
 
     /// A completed fade settles the machine itself, not only the mirror: a
     /// declicked seek while rolling ends rolling, so the next scrub-bar seek
-    /// (`Then::Keep`) keeps rolling too.
+    /// (`AfterLocate::Keep`) keeps rolling too.
     #[test]
     fn a_seek_after_a_completed_declicked_seek_keeps_rolling() {
         let (m, mut a) = fsm();

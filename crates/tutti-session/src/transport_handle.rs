@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use tutti_engine::BlockClockReader;
-use tutti_transport::{FadeOut, LoopRegion, MotionEvent, Then, TimedError, Transport};
+use tutti_transport::{AfterLocate, FadeOut, LoopRegion, MotionEvent, TimedError, Transport};
 use tutti_units::{At, Beat};
 
 use crate::Playhead;
@@ -148,7 +148,7 @@ impl TransportHandle {
             event,
             MotionEvent::Play
                 | MotionEvent::Locate {
-                    then: Then::Roll,
+                    then: AfterLocate::Play,
                     ..
                 }
         );
@@ -164,7 +164,8 @@ impl TransportHandle {
             match event {
                 MotionEvent::Play
                 | MotionEvent::Locate {
-                    then: Then::Roll, ..
+                    then: AfterLocate::Play,
+                    ..
                 } => self.record(true),
                 MotionEvent::Stop { .. } => self.record(false),
                 _ => {}

@@ -145,7 +145,7 @@ fn declaring_buses_changes_no_plan() {
         } else {
             Buses::NONE
         };
-        *shape = common::rebused(*shape, inputs, buses);
+        *shape = common::with_buses(*shape, inputs, buses);
     }
     assert_ne!(plain, placed, "the shapes differ in their buses");
 
@@ -196,7 +196,7 @@ fn declaring_buses_changes_no_plan() {
     assert_eq!(a.compensation(), b.compensation());
     assert_eq!(a.values(PortKind::Audio), b.values(PortKind::Audio));
     assert_eq!(a.units().len(), b.units().len());
-    let bare = |s: Shape| common::rebused(s, Buses::NONE, Buses::NONE);
+    let bare = |s: Shape| common::with_buses(s, Buses::NONE, Buses::NONE);
     for (x, y) in a.units().iter().zip(b.units()) {
         assert_eq!((x.key, x.arrival), (y.key, y.arrival));
         assert_eq!(bare(x.shape), bare(y.shape));

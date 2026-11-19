@@ -6,7 +6,7 @@
 //
 //     unit! {
 //         /// docs
-//         pub struct Db(pub f64): Unit, Ordered, Bounded, Additive, Signed;
+//         pub struct Db(f64): Unit, Ordered, Bounded, Additive, Signed;
 //     }
 //
 // Every float quantity also gets `finite_or`.

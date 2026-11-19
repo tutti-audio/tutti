@@ -4,7 +4,7 @@
 
 use tutti_buffers::Float;
 use tutti_dsp::{
-    Lanes, PanLaw, SOLVE_CEILING, SvfCoefficients, SvfControls, SvfModel, SvfType, pan_gains,
+    PanLaw, SOLVE_CEILING, SimdLanes, SvfCoefficients, SvfControls, SvfModel, SvfType, pan_gains,
     svf_step,
 };
 use tutti_sf2::{SamplePool, Side};
@@ -49,7 +49,7 @@ use crate::volume_envelope::VolumeEnvelope;
 /// up to [`SvfControls::MAX_Q`] (a resonance of about 60 dB; the model clamps
 /// `q` there and a larger resonance peaks at that cap), and a resonance of 1
 /// (0 dB) is `q = 1 / sqrt(2)`, Butterworth.
-fn low_pass<F: Float + Lanes>(
+fn low_pass<F: Float + SimdLanes>(
     cutoff: Hz,
     resonance: Amplitude,
     rate: SampleRate,
@@ -117,7 +117,7 @@ struct GlideRun {
 /// the mix ramps between.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
-pub(crate) struct Voice<F: Float + Lanes> {
+pub(crate) struct Voice<F: Float + SimdLanes> {
     vol_env: VolumeEnvelope,
     mod_env: ModulationEnvelope,
 
@@ -197,7 +197,7 @@ pub(crate) struct Voice<F: Float + Lanes> {
     voice_length: usize,
 }
 
-impl<F: Float + Lanes> Voice<F> {
+impl<F: Float + SimdLanes> Voice<F> {
     pub(crate) fn new(settings: &Render) -> Self {
         Self {
             vol_env: VolumeEnvelope::new(settings),
@@ -881,7 +881,7 @@ mod tests {
     /// The left mix gain of a voice at `rate` the `last`th chunk after its key-off over the
     /// `first`th's, with the font's one zone struck at velocity 127 and run through its
     /// attack to full level before the key-off.
-    fn gain_ratio_after_release<F: Float + Lanes>(
+    fn gain_ratio_after_release<F: Float + SimdLanes>(
         font: &tutti_sf2::SoundFont,
         rate: SampleRate,
         first: usize,
@@ -923,7 +923,7 @@ mod tests {
     /// The envelope is a closed form of the time, so no float stalls it. A one-pole `e <- r e`
     /// with `r = exp(-5 ln 10 / (R fs))` would: at `f32`, `1 - r = 5.9e-7` sits on a grid of
     /// `2^-24 = 6e-8`, so the pole's exponent is wrong by up to 5%.
-    fn deviation_at_the_longest_release<F: Float + Lanes>() -> f64 {
+    fn deviation_at_the_longest_release<F: Float + SimdLanes>() -> f64 {
         let rate = SampleRate::SR_192K;
         let release = 2f64.powf(8000.0 / 1200.0);
         let (first, last) = (1, (25.0 * rate.get() / 8.0) as usize);

@@ -23,7 +23,7 @@ fn one_import_renders_a_block() {
     use tutti_nodes::testing::Osc;
 
     let mut session = Session::new(SampleRate::SR_48K).expect("builds");
-    let (tone, _) = session.graph().add(ForkByClone(Osc::sine(Hz(440.0))));
+    let (tone, _) = session.graph().add(ForkByClone(Osc::sine(Hz::new(440.0))));
     session
         .graph()
         .connect(tone, Root)
@@ -46,9 +46,12 @@ fn one_import_renders_a_block() {
 /// rather than failing somewhere downstream.
 #[test]
 fn the_measurement_vocabulary_arrives_and_converts() {
-    assert!((Db(-6.0).to_amplitude().get() - 0.501).abs() < 0.01);
-    assert_eq!(Seconds(1.0).to_samples(SampleRate::SR_48K).get(), 48_000);
-    assert_eq!(Cents(1200.0).to_semitones().get(), 12.0);
+    assert!((Db::new(-6.0).to_amplitude().get() - 0.501).abs() < 0.01);
+    assert_eq!(
+        Seconds::new(1.0).to_samples(SampleRate::SR_48K).get(),
+        48_000
+    );
+    assert_eq!(Cents::new(1200.0).to_semitones().get(), 12.0);
     assert_eq!(ChannelLayout::STEREO.count(), 2);
 }
 
@@ -83,7 +86,7 @@ fn a_session_bounces_to_buffers_through_the_umbrella() {
         .bounce(
             Bounce::project()
                 .master_buffers()
-                .range(Range::Seconds(Seconds(0.0), Seconds(0.01))),
+                .range(Range::Seconds(Seconds::new(0.0), Seconds::new(0.01))),
         )
         .expect("a DC graph renders")
         .into_master()
@@ -104,7 +107,7 @@ fn a_timed_transport_program_needs_only_the_root() {
     transport
         .motion()
         .schedule(
-            At::Beat(Beat(16.0)),
+            At::Beat(Beat::new(16.0)),
             TransportCommand::Motion(MotionEvent::stop()),
         )
         .expect("room");
@@ -112,7 +115,7 @@ fn a_timed_transport_program_needs_only_the_root() {
 
     let map = MeterMap::default();
     let bar: BarNumber = map.bar_numbers()[0];
-    assert_eq!(Meter::bar_start(&map, bar), Beat(0.0));
+    assert_eq!(Meter::bar_start(&map, bar), Beat::new(0.0));
 }
 
 /// A tempo map is built from `tutti::tempo` alone and published to the
@@ -121,12 +124,12 @@ fn a_timed_transport_program_needs_only_the_root() {
 #[test]
 fn a_tempo_map_is_built_and_published_through_the_facade() {
     let map = tutti::tempo::TempoMap::builder(Bpm::of(120.0))
-        .ramp_time_to(Beat(4.0), Bpm::of(180.0))
+        .ramp_time_to(Beat::new(4.0), Bpm::of(180.0))
         .build()
         .expect("a map");
     let rate = SampleRate::SR_48K;
     assert_eq!(
-        map.view(rate).frame_at_or_after(Beat(4.0)),
+        map.view(rate).frame_at_or_after(Beat::new(4.0)),
         Frame::new(76_800)
     );
     let transport = Transport::new(rate);

@@ -123,7 +123,7 @@ impl<S: ControlSource> SourceNode<S> {
     }
 
     fn segment(&self, leg: Leg) -> ParamSegment {
-        ParamSegment::foreign(
+        ParamSegment::by_id(
             ParamId::new(self.id),
             leg.piece.from,
             leg.piece.to,

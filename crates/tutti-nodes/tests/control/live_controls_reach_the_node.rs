@@ -26,7 +26,7 @@
 
 use tutti_buffers::MaxBlock;
 use tutti_buffers::Planes;
-use tutti_graph::{Fade, FadeLaw, IntoNode, NodeMode, Prepare, Solo};
+use tutti_graph::{Fade, FadeLaw, IntoNode, NodeMode, Prepare, Standalone};
 use tutti_nodes::{EqBandNode, SvfType};
 use tutti_units::UnitParam;
 use tutti_units::{Db, Hz, Q, SampleRate, Samples};
@@ -40,7 +40,7 @@ fn band(gain: f64) -> EqBandNode<f32> {
 /// Energy of the band's response to a 1 kHz tone at its centre — the
 /// band's effect on a signal (a +24 dB bell multiplies it by ~250; bypassed
 /// or flat, it is the tone's own).
-fn energy<C>(solo: &mut Solo<C>) -> f32 {
+fn energy<C>(solo: &mut Standalone<C>) -> f32 {
     let x: Vec<f32> = (0..2048)
         .map(|i| ((std::f64::consts::TAU * 1_000.0 * i as f64 / 48_000.0).sin()) as f32)
         .collect();
@@ -50,8 +50,8 @@ fn energy<C>(solo: &mut Solo<C>) -> f32 {
         .sum()
 }
 
-fn solo<N: IntoNode>(node: N) -> Solo<N::Controls> {
-    Solo::new(node, Prepare::new(RATE, MaxBlock::of(Samples::new(64))))
+fn solo<N: IntoNode>(node: N) -> Standalone<N::Controls> {
+    Standalone::new(node, Prepare::new(RATE, MaxBlock::of(Samples::new(64))))
 }
 
 /// **The instrument works**: an active +24 dB bell and a bypassed one render
