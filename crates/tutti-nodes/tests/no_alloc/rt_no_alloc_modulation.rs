@@ -22,7 +22,8 @@ use tutti_nodes::{
 };
 use tutti_ump::{MidiChannel, U7};
 use tutti_units::{
-    Ballistics, BeatsPerCycle, Feedback, Hz, PhaseIncrement, Real, SampleRate, Seconds, UnitParam,
+    Ballistics, BeatsPerCycle, Feedback, Hz, ParamId, PhaseIncrement, Real, SampleRate, Seconds,
+    UnitParam,
 };
 
 /// A node through `BlockRig`: its inputs an alternating signal of
@@ -1061,7 +1062,7 @@ fn signal_graph(max: usize) -> (tutti_graph::Editor, tutti_graph::Executor) {
     ed.commit().expect("commits");
     for k in 0..2 * CHAINS {
         let (src, node) = (NodeKey(3000 + k as u64), NodeKey(4000 + k as u64));
-        let id = SourceId(k as u32);
+        let id = SourceId::new(ParamId::new(k as u32));
         if k < CHAINS {
             ed.insert(
                 src,

@@ -14,7 +14,7 @@ use tutti_graph::{
 };
 use tutti_modulation::{
     CONTROL_GRID, Clock, ControlProgram, CurveSegment, DepthSnapshot, MAX_LANE_INPUTS, ProgramTime,
-    Waveform,
+    SourceId, Waveform,
 };
 use tutti_rt::ParamCell;
 use tutti_rt::{Publisher, Reader};
@@ -263,7 +263,7 @@ struct Flight {
 /// An event input's current segment.
 #[derive(Clone, Copy)]
 struct Input {
-    source: u32,
+    source: SourceId,
     seg: ParamSegment,
     recv: Frame,
 }
@@ -544,7 +544,7 @@ impl Input {
     /// (fractional): the port's own arithmetic on a frame, `f64` between.
     fn value(&self, at: f64, base: Frame) -> f64 {
         let since = base.get() as f64 + at - self.recv.get() as f64;
-        let id = ParamId::new(self.source);
+        let id = self.source.get();
         let (from, to) = (
             self.seg.start_by_id(id).unwrap_or(0.0),
             self.seg.target_by_id(id).unwrap_or(0.0),
@@ -607,7 +607,7 @@ impl Block<'_> {
                 .inputs
                 .iter()
                 .flatten()
-                .find(|i| i.source == l.source.0)
+                .find(|i| i.source == l.source)
                 .map(|i| i.value(at, self.base()));
         }
         out
@@ -634,7 +634,7 @@ impl Block<'_> {
                 walk.inputs
                     .iter()
                     .flatten()
-                    .find(|i| i.source == l.source.0)
+                    .find(|i| i.source == l.source)
                     .and_then(|i| i.arrives_in(at, self.base()))
             })
             .min_by(f64::total_cmp)
@@ -955,21 +955,21 @@ impl Block<'_> {
     }
 
     /// Whether the program reads source `id`.
-    fn reads(&self, id: u32) -> bool {
-        self.program.inputs().iter().any(|l| l.source.0 == id)
+    fn reads(&self, id: SourceId) -> bool {
+        self.program.inputs().iter().any(|l| l.source == id)
     }
 
     /// The segment `e` carries for a source the program reads, if any: the
     /// only events that are inputs (anything else is ignored, and is no
     /// point).
-    fn input_of(&self, e: &ParamEvent) -> Option<(u32, ParamSegment)> {
+    fn input_of(&self, e: &ParamEvent) -> Option<(SourceId, ParamSegment)> {
         let ParamKind::Segment(seg) = e.kind else {
             return None;
         };
         let ParamAddr::Id(id) = seg.addr() else {
             return None;
         };
-        let id = id.get();
+        let id = SourceId::new(id);
         self.reads(id).then_some((id, seg))
     }
 
@@ -979,7 +979,7 @@ impl Block<'_> {
     /// program reads (`process` frees the rest when it takes a program),
     /// and a program reads at most [`MAX_LANE_INPUTS`] sources, so a source
     /// it reads always finds one.
-    fn take_input(&self, walk: &mut Walk, id: u32, seg: ParamSegment, recv: Frame) {
+    fn take_input(&self, walk: &mut Walk, id: SourceId, seg: ParamSegment, recv: Frame) {
         if !self.reads(id) {
             return;
         }
@@ -1068,7 +1068,7 @@ impl<F: Float> Node<F> for ControlLaneNode {
             // source id a later program reuses starts from nothing, never from the
             // segment a removed source left.
             for slot in &mut self.walk.inputs {
-                if slot.is_some_and(|i| !program.inputs().iter().any(|l| l.source.0 == i.source)) {
+                if slot.is_some_and(|i| !program.inputs().iter().any(|l| l.source == i.source)) {
                     *slot = None;
                 }
             }

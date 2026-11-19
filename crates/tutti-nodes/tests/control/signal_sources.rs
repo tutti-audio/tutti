@@ -30,8 +30,8 @@ use tutti_nodes::automation::ControlLaneNode;
 use tutti_nodes::{EnvelopeFollowerNode, NoteEnvelopeNode};
 use tutti_ump::NoteVelocity;
 use tutti_units::{
-    Amplitude, Ballistics, Beat, Bpm, Depth, Frame, Hz, ParamKey, SampleRate, Samples, Seconds,
-    UnitParam,
+    Amplitude, Ballistics, Beat, Bpm, Depth, Frame, Hz, ParamId, ParamKey, SampleRate, Samples,
+    Seconds, UnitParam,
 };
 
 const RATE: f64 = 48_000.0;
@@ -352,7 +352,7 @@ fn lane_to_probe(
     ed.commit().expect("commits");
     let input = InputLayer {
         id: LayerId(1),
-        source: SourceId(source),
+        source: SourceId::new(ParamId::new(source)),
         amount: Amount {
             depth: Depth::of(depth),
             polarity: Polarity::Bipolar,
@@ -469,7 +469,7 @@ fn pole(tau: f32) -> f64 {
 
 fn follower(source: u32, attack: f64, release: f64, width: ChannelLayout) -> EnvelopeFollowerNode {
     EnvelopeFollowerNode::new(
-        SourceId(source),
+        SourceId::new(ParamId::new(source)),
         Ballistics::new(Seconds::new(attack), Seconds::new(release)).unwrap(),
         width,
     )
@@ -492,7 +492,7 @@ fn envelope_rig(max: usize, plan: Vec<(u64, [u32; 4])>, adsr: Adsr) -> (Editor, 
     ed.insert(
         NodeKey(2),
         "envelope",
-        ForkByClone(NoteEnvelopeNode::new(SourceId(1), adsr)),
+        ForkByClone(NoteEnvelopeNode::new(SourceId::new(ParamId::new(1)), adsr)),
     );
     wire_events(&mut ed, 1, 2);
     tap(&mut ed, 2, 3);
@@ -625,7 +625,7 @@ fn a_follower_and_a_note_envelope_reset_at_play_start() {
         NodeKey(5),
         "envelope",
         ForkByClone(NoteEnvelopeNode::new(
-            SourceId(6),
+            SourceId::new(ParamId::new(6)),
             adsr(0.001, 0.002, 0.6, 0.01),
         )),
     );
@@ -717,13 +717,13 @@ fn a_note_envelopes_stages_land_on_their_frames() {
         let (mut ed, mut exec) = editor(128);
         ed.insert(NodeKey(1), "midi", ForkByClone(Midi { plan: plan.clone() }));
         let decl = SignalSource {
-            id: SourceId(3),
+            id: SourceId::new(ParamId::new(3)),
             kind: SignalKind::NoteEnvelope {
                 adsr: adsr(0.01, 0.02, 0.5, 0.03),
             },
         };
         let node = NoteEnvelopeNode::from_decl(&decl).expect("a note envelope");
-        assert_eq!(node.source(), SourceId(3));
+        assert_eq!(node.source(), SourceId::new(ParamId::new(3)));
         ed.insert(NodeKey(2), "envelope", ForkByClone(node));
         wire_events(&mut ed, 1, 2);
         tap(&mut ed, 2, 3);
@@ -789,25 +789,25 @@ fn a_note_envelopes_stages_land_on_their_frames() {
 #[test]
 fn from_decl_builds_its_own_kind() {
     let f = SignalSource {
-        id: SourceId(9),
+        id: SourceId::new(ParamId::new(9)),
         kind: SignalKind::Follower {
             attack: Seconds::new(0.01),
             release: Seconds::new(0.1),
         },
     };
     let n = SignalSource {
-        id: SourceId(4),
+        id: SourceId::new(ParamId::new(4)),
         kind: SignalKind::NoteEnvelope {
             adsr: adsr(0.01, 0.1, 0.5, 0.2),
         },
     };
     let node = EnvelopeFollowerNode::from_decl(&f, ChannelLayout::STEREO).expect("a follower");
-    assert_eq!(node.source(), SourceId(9));
+    assert_eq!(node.source(), SourceId::new(ParamId::new(9)));
     assert_eq!(Node::<f32>::shape(&node).audio_in(), ChannelLayout::STEREO);
     assert!(EnvelopeFollowerNode::from_decl(&n, ChannelLayout::MONO).is_none());
     assert_eq!(
         NoteEnvelopeNode::from_decl(&n).map(|n| n.source()),
-        Some(SourceId(4))
+        Some(SourceId::new(ParamId::new(4)))
     );
     assert!(NoteEnvelopeNode::from_decl(&f).is_none());
 }
@@ -916,7 +916,7 @@ fn an_export_is_the_live_render_for_signal_sources() {
         NodeKey(6),
         "envelope",
         ForkByClone(NoteEnvelopeNode::new(
-            SourceId(4),
+            SourceId::new(ParamId::new(4)),
             adsr(0.002, 0.003, 0.4, 0.2),
         )),
     );
