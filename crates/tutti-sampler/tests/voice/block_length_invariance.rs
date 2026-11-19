@@ -244,7 +244,7 @@ fn playbacks() -> Vec<(&'static str, Playback)> {
         (
             "varispeed",
             Playback {
-                speed: PlaybackRate::new(1.37),
+                speed: PlaybackRate::of(1.37),
                 ..Default::default()
             },
         ),

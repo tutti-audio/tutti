@@ -353,7 +353,7 @@ fn pool_knobs(
     for (i, built) in sources.into_iter().enumerate() {
         let id = SlotId(i as u128 + 1);
         let play = Playback {
-            speed: PlaybackRate::new(speed),
+            speed: PlaybackRate::of(speed),
             stretch: StretchFactor::new(stretch),
             loop_: knobs.loop_,
             ..Default::default()
