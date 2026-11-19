@@ -125,7 +125,7 @@ fn mirror(verts: &[[f32; 3]], v: usize) -> usize {
 
 /// Deterministic decaying noise, distinct per `seed`.
 fn shape(seed: usize, len: usize) -> Vec<f32> {
-    Noise::from_state(0x9e37_79b9_u32.wrapping_mul(seed as u32 + 1))
+    Noise::seeded(seed as u32)
         .take(len)
         .enumerate()
         .map(|(i, x)| x * (-(i as f32) / 40.0).exp())
@@ -823,7 +823,7 @@ fn a_vertexs_hrir_energy_reaches_the_output_ear_by_ear() {
 
 /// Deterministic noise in `[-1, 1)`.
 fn noise(len: usize) -> Vec<f32> {
-    Noise::from_state(0x1234_5678).take(len).collect()
+    Noise::seeded(0x1234_5678).take(len).collect()
 }
 
 /// `input` rendered in blocks of `block` frames from `start`, the source
