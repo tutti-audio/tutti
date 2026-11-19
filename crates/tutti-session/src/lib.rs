@@ -307,8 +307,6 @@ pub use tutti_ump::{MidiChannel, MidiGroup};
 #[cfg(feature = "midi-hardware")]
 pub use value::MidiPolicyTarget;
 pub use value::OutputPolicyTarget;
-#[cfg(feature = "sampler")]
-pub use value::WindowTarget;
 pub use value::{
     AnyAssign, AnyTarget, Assign, AutomationTarget, ClickTargets, ClickVolumeTarget, CurveTarget,
     DepthTarget, Effective, GainTarget, GainTargetError, Info, IntoAssign, IntoRead, Knobs,
@@ -318,5 +316,7 @@ pub use value::{
 };
 #[cfg(feature = "midi")]
 pub use value::{ClipEventsTarget, HarmonyTarget, MpeModeTarget, OutputLatencyTarget};
+#[cfg(feature = "sampler")]
+pub use value::{DirectionTarget, LoopingTarget, WindowTarget};
 #[cfg(feature = "device")]
 pub use watch::{Backoff, DevicePolicy, DeviceWatch, Follow, FollowEvent};

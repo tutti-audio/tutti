@@ -259,9 +259,8 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use super::*;
-    use crate::streamer::StreamerGone;
     use crate::streamer::command::StreamId;
-    use crate::streamer::stream::StreamerPort;
+    use crate::streamer::stream::{PortClosed, StreamerPort};
 
     /// Both drivers are `Sync` (a host may hold a `DiskStreamer` as a shared resource), with
     /// the hand-stepped cycle held plainly: a compile-time check.
@@ -391,7 +390,7 @@ mod tests {
             port.send(StreamerCommand::Close {
                 stream: StreamId::of(1)
             }),
-            Err(StreamerGone),
+            Err(PortClosed),
             "a streamer dropped before it started"
         );
 
@@ -410,7 +409,7 @@ mod tests {
             port.send(StreamerCommand::Close {
                 stream: StreamId::of(1)
             }),
-            Err(StreamerGone)
+            Err(PortClosed)
         );
     }
 
@@ -444,7 +443,7 @@ mod tests {
         drop(streamer);
         assert_eq!(
             done_rx.recv_timeout(Duration::from_secs(10)),
-            Ok(Err(StreamerGone)),
+            Ok(Err(PortClosed)),
             "the waiting send must return once the streamer is gone, and say so"
         );
         waiter.join().unwrap();
@@ -475,7 +474,7 @@ mod tests {
             StreamerPort::new(tx).send(StreamerCommand::Close {
                 stream: StreamId::of(1)
             }),
-            Err(StreamerGone)
+            Err(PortClosed)
         );
     }
 }

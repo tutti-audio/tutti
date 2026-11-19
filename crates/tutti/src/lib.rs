@@ -178,8 +178,6 @@ pub use tutti_plugin_types::{PluginFailure, PresetError, PresetId, StateUse};
 pub use tutti_session::MidiPolicyTarget;
 #[cfg(all(feature = "session", feature = "plugin"))]
 pub use tutti_session::Params as PluginParams;
-#[cfg(all(feature = "session", feature = "sampler"))]
-pub use tutti_session::WindowTarget;
 #[cfg(all(feature = "session", feature = "plugin"))]
 pub use tutti_session::{
     AddPluginError, AnyPlugin, Diagnostics, ListedPreset, LoadPreset, Opened, Plugin, PluginBuses,
@@ -212,6 +210,8 @@ pub use tutti_session::{
 pub use tutti_session::{ClipEventsTarget, HarmonyTarget, MpeModeTarget, OutputLatencyTarget};
 #[cfg(all(feature = "session", feature = "device"))]
 pub use tutti_session::{Device, DeviceClock, DeviceEvent, LiveSession};
+#[cfg(all(feature = "session", feature = "sampler"))]
+pub use tutti_session::{DirectionTarget, LoopingTarget, WindowTarget};
 #[cfg(all(feature = "session", feature = "capture"))]
 pub use tutti_session::{
     Input, InputConfig, Punch, Recorded, Take, TakeError, TakeEvent, TakeTarget, Trim,
@@ -526,14 +526,14 @@ pub mod codec {
 #[cfg(feature = "sampler")]
 pub mod sampler {
     pub use tutti_sampler::{
-        Block, Direction as PlaybackDirection, Error, OpenError, Placement as ClipPlacement,
-        RefusedPlacement, SamplerFloat, Stream, StreamFault, StreamFile, StreamId, StreamPhase,
-        StreamReader, StreamStatus, VoiceNodeHandle,
+        Block, Direction as PlaybackDirection, Error, GUARD_FRAMES, OpenError,
+        Placement as ClipPlacement, RefusedPlacement, SamplerFloat, Stream, StreamFault,
+        StreamFile, StreamId, StreamPhase, StreamReader, StreamStatus, VoiceNodeHandle,
     };
     // A file's probe needs a decoder.
     pub use tutti_sampler::{
-        Loop, LoopError, PlaceError, PlayError, Playback, SendError, StreamerGone,
-        StreamingAddError, VoiceWindow,
+        Loop, LoopError, PlaceError, PlayError, Playback, SendError, SteerCell, StreamingAddError,
+        VoiceWindow,
     };
     #[cfg(any(
         feature = "decode-wav",

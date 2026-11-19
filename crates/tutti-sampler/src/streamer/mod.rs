@@ -28,6 +28,7 @@ mod open;
 mod prefetch;
 mod record;
 mod status;
+mod steer;
 mod step;
 mod stream;
 mod thread;
@@ -38,8 +39,7 @@ pub(crate) use cells::Cells;
 pub use command::StreamId;
 pub(crate) use command::StreamerCommand;
 pub(crate) use config::BufferConfig;
-#[cfg(test)]
-pub(crate) use loops::GUARD_FRAMES;
+pub use loops::GUARD_FRAMES;
 #[cfg(test)]
 pub(crate) use loops::RingControl;
 pub(crate) use loops::{Arrangement, RingMap, straight};
@@ -54,10 +54,11 @@ pub(crate) use bell::StreamerSender;
 // and the one failure every stream-control command can report.
 pub use block::Block;
 pub(crate) use block::RingReader;
-pub use control::{StreamFile, StreamerGone};
+pub use control::StreamFile;
 pub use open::{Open, OpenError, Opening, Placement, RefusedPlacement, StreamReader};
 pub(crate) use status::StatusCell;
 pub use status::{StreamFault, StreamPhase, StreamStatus};
+pub use steer::SteerCell;
 pub use stream::Stream;
 pub(crate) use stream::StreamerPort;
 
@@ -417,12 +418,12 @@ mod tests {
         let mut sampler =
             DiskStreamer::<_, f32>::by_hand(SampleRate::SR_48K, Default::default()).unwrap();
         let opening = sampler.open(&path, Placement::HEAD);
-        let (mut stream, reader) =
+        let (stream, reader) =
             crate::testing::settle(&mut sampler, opening).expect("the file opens");
         for fade in [0usize, 500] {
             stream
-                .set_loop(Some(loop_frames(10_000, 20_000, fade)))
-                .expect("the streamer is alive");
+                .looping_cell()
+                .publish(Some(loop_frames(10_000, 20_000, fade)));
             let _ = sampler.step_until_settled(1_000);
         }
         let window = reader.ring.window();

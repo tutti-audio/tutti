@@ -193,12 +193,12 @@ fn dropping_a_stream_frees_the_ring_in_the_streamers_step() {
 /// never owns published state.
 #[test]
 fn a_block_that_ends_after_a_publish_frees_nothing() {
-    let (_dir, mut streamer, mut stream, mut reader) = stream();
+    let (_dir, mut streamer, stream, mut reader) = stream();
     let none = || Samples::new(0)..Samples::new(0);
     let block = reader.block(Samples::new(0), [none(), none()]);
     stream
-        .set_loop(Some(loop_frames(1_000, 3_000, 0)))
-        .expect("the streamer lives");
+        .looping_cell()
+        .publish(Some(loop_frames(1_000, 3_000, 0)));
     let _ = streamer.step_once();
 
     let frees = frees_during(|| drop(block));

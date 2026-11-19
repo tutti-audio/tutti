@@ -63,8 +63,6 @@ pub use range::RangeTarget;
 pub(crate) use range::{Bounds, RangeSlot};
 #[cfg(feature = "midi-hardware")]
 pub use slot::MidiPolicyTarget;
-#[cfg(feature = "sampler")]
-pub use slot::WindowTarget;
 pub(crate) use slot::{
     Cell, ClickVolumeSlot, LoopCell, PublishedSlot, SettingSlot, SlotCell, SlotId, TempoCell,
 };
@@ -74,6 +72,8 @@ pub use slot::{
 };
 #[cfg(feature = "midi")]
 pub use slot::{ClipEventsTarget, HarmonyTarget, MpeModeTarget, OutputLatencyTarget};
+#[cfg(feature = "sampler")]
+pub use slot::{DirectionTarget, LoopingTarget, WindowTarget};
 pub use state::Knobs;
 pub(crate) use state::{ValueState, ValueTable};
 pub(crate) use target::target_builders;

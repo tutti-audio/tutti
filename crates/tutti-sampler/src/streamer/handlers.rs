@@ -25,8 +25,9 @@ use super::loops::{LeadIn, Mapping, RingLoop, apply_mapping, buffer_size_for_fil
 use super::metrics::Metrics;
 use super::open::{OpenError, Opened};
 use super::prefetch::RegionBuffer;
-use super::record::{Cmd, Effect, Record, Streams, step};
+use super::record::{Cmd, Record, Streams, step};
 use super::status::StatusCell;
+use super::steer::SteerCell;
 use crate::Loop;
 use crate::nonempty;
 use crate::voice::Direction;
@@ -158,15 +159,6 @@ pub(super) fn handle_command<F: RingFloat>(
         }
         StreamerCommand::Close { stream } => {
             let _ = step(&mut local.streams, Cmd::Close(stream));
-        }
-
-        StreamerCommand::SetStreamLoop { stream, looped } => {
-            handle_loop(stream, Some(looped), config, local);
-        }
-        StreamerCommand::ClearStreamLoop { stream } => handle_loop(stream, None, config, local),
-
-        StreamerCommand::SetDirection { stream, direction } => {
-            handle_direction(stream, direction, config, local);
         }
         StreamerCommand::SessionRate => local.streams.rerate(shared.session_rate.get()),
     }
@@ -444,6 +436,10 @@ fn build_stream<F: RingFloat>(
     // the writer holds it whole.
     let file = Arc::new(StreamFile::new(file_path, file_sr, whole));
     let control = ring.control_cell();
+    // The loop and direction the control side asks for: the record reads
+    // them, the stream's handle (and the voice node, for a node) publishes.
+    let looping = SteerCell::ringing(None::<Loop>, Arc::clone(&shared.bell));
+    let direction = SteerCell::ringing(Direction::Forward, Arc::clone(&shared.bell));
     let record = Record::new(
         producer,
         Arc::clone(&cells),
@@ -451,6 +447,8 @@ fn build_stream<F: RingFloat>(
         Samples::new(file_length as usize),
         pin,
         Arc::clone(&status),
+        looping.reader(),
+        direction.reader(),
     );
     Ok((
         record,
@@ -462,6 +460,8 @@ fn build_stream<F: RingFloat>(
             status,
             file,
             control,
+            looping,
+            direction,
             place,
             width,
             bell: Arc::clone(&shared.bell),
@@ -469,40 +469,39 @@ fn build_stream<F: RingFloat>(
     ))
 }
 
-/// Set (`Some(ask)`) or clear (`None`) a stream's loop: the driver's half of
-/// [`Effect::Loop`], which the pure step issues for a live stream only.
+/// Takes the loop and direction each live stream's control side now asks for:
+/// the cells its voice steers are the streamer's to read, and a change is
+/// applied here, once, as the ring's mapping.
 ///
-/// The new mapping goes through [`apply_mapping`]: free when it changes no
-/// frame the ring holds, else a switch the reader crosses (see `loops`'
-/// module docs) — heard where the memory tier hears it when that is far
-/// enough ahead, else just past the block the reader is in, crossfaded. A
-/// reversed stream ignores its loop, so there the change is only stored.
+/// A loop goes through [`apply_mapping`]: free when it changes no frame the
+/// ring holds, else a switch the reader crosses (see `loops`' module docs)
+/// — heard where the memory tier hears it when that is far enough ahead, else
+/// just past the block the reader is in, crossfaded. A reversed stream
+/// ignores its loop, so there the change is only stored.
 ///
 /// Only the frames the loop needs are read — its fade's lead-in, and its body
 /// when it is short (`RingLoop::capture`), through the region's decoder: a
 /// loop change never decodes the whole file. A lead-in that cannot be read
 /// plays the loop hard, is logged, and is what the ring's published control
-/// says is applied (so a fork plays it hard too).
-fn handle_loop<F: RingFloat>(
-    stream: StreamId,
-    ask: Option<Loop>,
-    config: &BufferConfig,
-    local: &mut Local<F>,
-) {
-    let Some(&Effect::Loop(id, ask)) = step(&mut local.streams, Cmd::Loop(stream, ask)).first()
-    else {
-        return;
-    };
-    let Some(record) = local.streams.get_mut(id) else {
-        return;
-    };
-    // The capture reads the file, so it runs contained like a refill.
-    let _ = record.contained(|record| capture_loop(record, ask, config));
+/// says is applied (so a fork plays it hard too). The file work runs
+/// contained like a refill.
+pub(super) fn follow_steering<F: RingFloat>(config: &BufferConfig, local: &mut Local<F>) {
+    for record in local.streams.records_mut() {
+        if !record.is_live() {
+            continue;
+        }
+        if let Some(ask) = record.loop_asked() {
+            let _ = record.contained(|record| capture_loop(record, ask, config));
+        }
+        if let Some(direction) = record.direction_asked() {
+            let _ = record.contained(|record| turn(record, direction, config));
+        }
+    }
     local.streams.reap();
 }
 
 /// Captures `ask` into `record`'s ring and records it as applied: the file
-/// work of [`handle_loop`].
+/// work of [`follow_steering`]'s loop.
 fn capture_loop<F: RingFloat>(record: &mut Record<F>, ask: Option<Loop>, config: &BufferConfig) {
     let len = record.file_frames.get();
     let rate = record.cells.read_rate();
@@ -535,40 +534,22 @@ fn capture_loop<F: RingFloat>(record: &mut Record<F>, ask: Option<Loop>, config:
     writer.ring().publish_loop(recorded);
 }
 
-/// Turn a stream to `direction`: the driver's half of [`Effect::Direction`],
-/// which the pure step issues for a live stream only.
+/// Turn a stream to `direction`.
 ///
 /// Reverse is a mapping (the file mirrored, the loop ignored), so the change is
 /// [`apply_mapping`]'s: a switch the reader crossfades across just past the
 /// block it is in. The direction is the published map's own, so the one
 /// publish carries it to the voice and to a fork.
-fn handle_direction<F: RingFloat>(
-    stream: StreamId,
-    direction: Direction,
-    config: &BufferConfig,
-    local: &mut Local<F>,
-) {
-    let Some(&Effect::Direction(id, direction)) =
-        step(&mut local.streams, Cmd::Direction(stream, direction)).first()
-    else {
+fn turn<F: RingFloat>(record: &mut Record<F>, direction: Direction, config: &BufferConfig) {
+    let reverse = direction.is_reverse();
+    let rate = record.cells.read_rate();
+    let writer = &mut record.out;
+    if writer.content().current.reverse == reverse {
         return;
+    }
+    let new = Mapping {
+        reverse,
+        ..writer.content().current.clone()
     };
-    let Some(record) = local.streams.get_mut(id) else {
-        return;
-    };
-    let fade = config.seek_crossfade_frames;
-    let _ = record.contained(|record| {
-        let reverse = direction.is_reverse();
-        let rate = record.cells.read_rate();
-        let writer = &mut record.out;
-        if writer.content().current.reverse == reverse {
-            return;
-        }
-        let new = Mapping {
-            reverse,
-            ..writer.content().current.clone()
-        };
-        apply_mapping(writer, new, fade, rate);
-    });
-    local.streams.reap();
+    apply_mapping(writer, new, config.seek_crossfade_frames, rate);
 }

@@ -1,5 +1,4 @@
-//! What a stream plays ([`StreamFile`], what an export fork reads), and the error
-//! a command send reports.
+//! What a stream plays ([`StreamFile`], what an export fork reads).
 //!
 //! The control side of a stream is [`Stream`](crate::Stream); the reader it
 //! hands its voice is the reply of its open ([`Opening`](crate::Opening)).
@@ -9,22 +8,6 @@ use std::sync::Arc;
 
 use tutti_buffers::{Float, Wave};
 use tutti_units::SampleRate;
-
-/// The streamer thread is gone, so a stream-control command was discarded.
-///
-/// There is one failure mode and it is permanent: a blocking send waits
-/// out a full queue and fails only once the queue is closed, which happens
-/// when the streamer thread exits or its streamer is dropped. Every later
-/// command fails the same way, so a caller that sees this should stop rather
-/// than retry.
-///
-/// It is an error type rather than a silent `let _ =` because swallowing it
-/// leaves a dead streamer accepting `Stream`/`Loop`/`Stop` indefinitely and
-/// doing nothing — indistinguishable, from the caller's side, from working
-/// playback.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-#[error("streamer thread is gone; the command was discarded")]
-pub struct StreamerGone;
 
 /// The file a stream plays: where it is, its own rate and, when the streamer
 /// holds it decoded whole, the wave.

@@ -220,9 +220,9 @@ pub use voice::{
 pub(crate) mod streamer;
 
 pub use streamer::{
-    Block, DiskStreamer, DiskStreamerConfig, Open, OpenError, Opening, Placement, RefusedPlacement,
-    Running, Stream, StreamFault, StreamFile, StreamId, StreamPhase, StreamReader, StreamStatus,
-    StreamerGone,
+    Block, DiskStreamer, DiskStreamerConfig, GUARD_FRAMES, Open, OpenError, Opening, Placement,
+    RefusedPlacement, Running, SteerCell, Stream, StreamFault, StreamFile, StreamId, StreamPhase,
+    StreamReader, StreamStatus,
 };
 
 // The hand-driven streamer cycle, alongside `DiskStreamer::by_hand`: its driver

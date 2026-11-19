@@ -591,7 +591,7 @@ impl<F: Float> MemorySource<F> {
     }
 
     /// Sets the loop, or clears it with `None` (one-shot playback). In-memory
-    /// only: a stream's loop is the stream's (`Stream::set_loop`), which is
+    /// only: a stream's loop is the stream's (`Stream::looping_cell`), which is
     /// why this is inherent rather than a shared trait method.
     ///
     /// The loop plays whole frames, and the fade leads into the loop's start:

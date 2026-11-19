@@ -148,8 +148,8 @@ fn a_loop_refuses_an_empty_or_reversed_span_and_a_crossfade_that_does_not_fit() 
 fn a_looped_memory_voice_repeats_the_span() {
     let (mut node, handle) = memory_node();
     handle
-        .set_loop(Some(loop_frames(300, 700, 0)))
-        .expect("a memory voice never fails");
+        .looping_cell()
+        .publish(Some(loop_frames(300, 700, 0)));
     let got = render_with(&mut node, FRAMES);
     assert_frames("memory", &got, |n| looped_frame(n, 300, 700));
 }
@@ -164,8 +164,8 @@ fn a_looped_disk_voice_repeats_the_span() {
     let voice = DiskVoice::from_reader(reader, window());
     let (mut node, handle) = VoiceNode::streaming(voice, stream, Playback::default()).with_handle();
     handle
-        .set_loop(Some(loop_frames(300, 700, 0)))
-        .expect("the streamer lives");
+        .looping_cell()
+        .publish(Some(loop_frames(300, 700, 0)));
     let _ = streamer.step_until_settled(1_000);
     let got = render_with(&mut node, FRAMES);
     assert_frames("disk", &got, |n| looped_frame(n, 300, 700));
