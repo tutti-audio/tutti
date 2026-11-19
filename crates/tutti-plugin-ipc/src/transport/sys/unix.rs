@@ -4,8 +4,11 @@
 use super::control::ControlStream;
 use interprocess::local_socket::traits::Stream as _;
 use interprocess::local_socket::{GenericFilePath, Name, Stream, ToFsName as _};
+use std::io::{Read, Write};
 use std::os::fd::{AsFd, OwnedFd};
+use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 
 /// Converts a host-chosen socket path into the local-socket name for this
@@ -90,6 +93,88 @@ impl Watch {
     }
 }
 
+/// The ringing side of a control thread's wait ([`control_bell`]): wakes the
+/// wait from any thread, the audio thread included.
+///
+/// A non-blocking socket pair whose read end the wait polls beside the control
+/// stream; a ring writes one byte, so the wait ends at once. It takes no lock and
+/// allocates nothing.
+#[derive(Clone)]
+pub struct ControlBell {
+    tx: Arc<UnixStream>,
+}
+
+impl ControlBell {
+    /// Ends the control thread's wait now, or its next one.
+    pub fn ring(&self) {
+        // A full socket already holds a byte the thread has not read: its wait
+        // ends either way.
+        let _ = (&*self.tx).write(&[1]);
+    }
+}
+
+/// The waiting side of a control thread's wait ([`control_bell`]).
+pub struct ControlWait {
+    rx: UnixStream,
+}
+
+/// What ended a [`ControlWait::wait`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Woken {
+    /// The control stream has something to read (or hung up: the read says).
+    pub stream: bool,
+    /// The bell rang.
+    pub rung: bool,
+}
+
+/// A control thread's bell and its wait.
+///
+/// # Errors
+///
+/// The OS refused the socket pair.
+pub fn control_bell() -> std::io::Result<(ControlBell, ControlWait)> {
+    let (tx, rx) = UnixStream::pair()?;
+    tx.set_nonblocking(true)?;
+    rx.set_nonblocking(true)?;
+    Ok((ControlBell { tx: Arc::new(tx) }, ControlWait { rx }))
+}
+
+impl ControlWait {
+    /// Waits up to `timeout` (`None`: for ever) for `stream` to have something
+    /// to read or for the bell to ring, in one `poll`, and returns the instant
+    /// either happens. A ring is cleared.
+    ///
+    /// # Errors
+    ///
+    /// The OS refused the wait.
+    pub fn wait(
+        &self,
+        stream: &ControlStream,
+        timeout: Option<Duration>,
+    ) -> std::io::Result<Woken> {
+        let Stream::UdSocket(socket) = stream;
+        let ready = loop {
+            match tutti_plugin_ipc_ffi::wait_readable_either(
+                socket.as_fd(),
+                self.rx.as_fd(),
+                timeout,
+            ) {
+                // A signal during the wait is not a failure; wait again.
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                other => break other?,
+            }
+        };
+        if ready.second {
+            let mut scratch = [0u8; 64];
+            while matches!((&self.rx).read(&mut scratch), Ok(n) if n > 0) {}
+        }
+        Ok(Woken {
+            stream: ready.first,
+            rung: ready.second,
+        })
+    }
+}
+
 /// How a blocked read is made to return so the deadline can be re-checked.
 pub(super) enum Wakeup {
     /// `SO_RCVTIMEO`. The kernel blocks for the poll interval before returning
@@ -135,6 +220,55 @@ impl Wakeup {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use interprocess::local_socket::ListenerOptions;
+    use interprocess::local_socket::traits::Listener as _;
+
+    /// **The control wait ends on a ring or on a byte from the peer, and says
+    /// which**: nothing ends a zero wait, a ring is cleared by the wait that
+    /// reads it, and a byte stays until it is read.
+    #[test]
+    fn the_control_wait_ends_on_a_ring_or_a_byte_and_says_which() {
+        let dir = tempfile::tempdir().expect("a temporary directory");
+        let path = dir.path().join("wait.sock");
+        let name = crate::transport::control::socket_name(&path).expect("a name");
+        let listener = ListenerOptions::new()
+            .name(name)
+            .create_sync()
+            .expect("listen");
+        let host = crate::transport::control::connect(&path).expect("connect");
+        let mut peer = listener.accept().expect("accept");
+        let (bell, wait) = control_bell().expect("a bell");
+        let now = Some(Duration::ZERO);
+
+        assert_eq!(wait.wait(&host, now).expect("wait"), Woken::default());
+        bell.ring();
+        let rung = Woken {
+            stream: false,
+            rung: true,
+        };
+        assert_eq!(wait.wait(&host, now).expect("wait"), rung);
+        assert_eq!(
+            wait.wait(&host, now).expect("wait"),
+            Woken::default(),
+            "the ring was cleared"
+        );
+
+        peer.write_all(&[1]).expect("a byte");
+        let heard = Woken {
+            stream: true,
+            rung: false,
+        };
+        assert_eq!(
+            wait.wait(&host, Some(Duration::from_secs(60)))
+                .expect("wait"),
+            heard
+        );
+        assert_eq!(
+            wait.wait(&host, now).expect("wait"),
+            heard,
+            "unread: still there"
+        );
+    }
 
     /// A temporary directory too deep for a socket address moves the socket
     /// to a short one, which a listener binds and a client connects to; one
