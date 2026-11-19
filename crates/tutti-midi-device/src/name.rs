@@ -147,7 +147,6 @@ impl<const N: usize> Name<N> {
         Self::held(&text.as_bytes()[..end]).ok()
     }
 
-
     /// The text.
     #[must_use]
     pub fn as_str(&self) -> &str {
