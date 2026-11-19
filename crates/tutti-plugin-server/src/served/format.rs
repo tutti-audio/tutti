@@ -7,7 +7,9 @@
 //! it: the pool it serves a plugin's thread-pool extension on, what it drops
 //! unread, and how a write waiting for a block is delivered early.
 
-use tutti_plugin_types::{InProcess, Lifecycle, MainThreadMarker, OutOfProcess, ParamEdit, Request};
+use tutti_plugin_types::{
+    InProcess, Lifecycle, MainThreadMarker, OutOfProcess, ParamEdit, Request,
+};
 
 /// What the server does to a loaded plugin of format `Self`, beyond what the
 /// format's [`OutOfProcess::load_served`] and its `Control` give.

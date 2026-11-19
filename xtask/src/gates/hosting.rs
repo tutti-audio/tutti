@@ -320,7 +320,8 @@ mod tests {
         let r = check(&tree(HOST_OK, formats, SUITE_OK));
         assert_eq!(r.findings.len(), 3);
         assert!(
-            r.findings[1].contains("ClapLoaded implements InProcess, but no contract format loads it")
+            r.findings[1]
+                .contains("ClapLoaded implements InProcess, but no contract format loads it")
         );
     }
 

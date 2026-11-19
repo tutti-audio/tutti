@@ -1,3 +1,7 @@
 //! The contract against VST2.
 
-tutti_plugin_contract::contract!(tutti_plugin_contract::Vst2, gaps = 2, hostings = [InProcess]);
+tutti_plugin_contract::contract!(
+    tutti_plugin_contract::Vst2,
+    gaps = 2,
+    hostings = [InProcess]
+);

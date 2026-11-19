@@ -5,8 +5,8 @@ use std::path::Path;
 
 use tutti_plugin_types::bundle::{ModuleKind, native_module_path};
 use tutti_plugin_types::{
-    Describe, InProcess, MainThreadMarker, MainWorkHandle, PluginDescriptor, PluginFormat, PluginId,
-    PluginRef, PluginResult,
+    Describe, InProcess, MainThreadMarker, MainWorkHandle, PluginDescriptor, PluginFormat,
+    PluginId, PluginRef, PluginResult,
 };
 
 use crate::control::plugin_error;

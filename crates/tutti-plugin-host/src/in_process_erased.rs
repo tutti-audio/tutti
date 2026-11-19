@@ -6,7 +6,8 @@
 //! with an arm per format and a macro that lists them.
 
 use crate::{
-    InProcessClient, NodeControls, PluginNode, PluginTimeSignature, RebindError, Rebinder, Settlement,
+    InProcessClient, NodeControls, PluginNode, PluginTimeSignature, RebindError, Rebinder,
+    Settlement,
 };
 use tutti_graph::{IntoNode, NodeParts};
 use tutti_plugin_types::{InProcess, Layout, MainThreadMarker, RenderMode};
@@ -207,4 +208,9 @@ macro_rules! opaque_debug {
     )+};
 }
 
-opaque_debug!(AnyInProcessClient, InProcessNode, InProcessRebinder, InProcessRebuilt);
+opaque_debug!(
+    AnyInProcessClient,
+    InProcessNode,
+    InProcessRebinder,
+    InProcessRebuilt
+);

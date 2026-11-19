@@ -8,8 +8,8 @@
 use dpi::Size;
 use tutti_plugin_types::{
     AutomationMode, ContentScale, Control, Editor, EditorCapabilities, EditorError, EditorWindow,
-    InProcess, KeyEvent, KeyUse, MainThreadMarker, MainWorkHandle, ParamEdit, PluginError, PluginRef,
-    PluginResult, WindowHandle,
+    InProcess, KeyEvent, KeyUse, MainThreadMarker, MainWorkHandle, ParamEdit, PluginError,
+    PluginRef, PluginResult, WindowHandle,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;

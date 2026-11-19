@@ -4,8 +4,8 @@
 use std::path::Path;
 
 use tutti_plugin_types::{
-    Describe, InProcess, MainThreadMarker, MainWorkHandle, OutOfProcess, PluginDescriptor, PluginId,
-    PluginRef, PluginResult,
+    Describe, InProcess, MainThreadMarker, MainWorkHandle, OutOfProcess, PluginDescriptor,
+    PluginId, PluginRef, PluginResult,
 };
 
 use crate::editor_instance::AuEditorInstance;

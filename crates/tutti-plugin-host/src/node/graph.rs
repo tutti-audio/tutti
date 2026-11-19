@@ -39,8 +39,8 @@ use super::client::{InProcessClient, Inputs, PluginNode, Rendered, render_with};
 use crate::{Call, NodeControls, Snapshot, param_input, transport_info};
 use tutti_plugin_types::{BlockStatus, ProcessOutput, Processing};
 use tutti_plugin_types::{
-    ChannelTable, ChordChanges, ChordValue, ExpressiveContext, Features, InProcess, Loaded, Processor,
-    ScaleChanges, ScaleValue, TransportInfo, WireMidi, silence,
+    ChannelTable, ChordChanges, ChordValue, ExpressiveContext, Features, InProcess, Loaded,
+    Processor, ScaleChanges, ScaleValue, TransportInfo, WireMidi, silence,
 };
 
 /// A side's handles: one per bus and one for the ports past them.

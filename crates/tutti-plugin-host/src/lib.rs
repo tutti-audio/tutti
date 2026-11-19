@@ -40,7 +40,9 @@ mod walk_tests;
 pub use control_handle::{MainThreadControl, PluginHandle, PluginStatus};
 pub use controls::{ForkedSources, NodeControls, PluginControls, PluginReports};
 pub use fork_state::ForkState;
-pub use in_process_erased::{AnyInProcessClient, Commit, InProcessNode, InProcessRebinder, InProcessRebuilt};
+pub use in_process_erased::{
+    AnyInProcessClient, Commit, InProcessNode, InProcessRebinder, InProcessRebuilt,
+};
 pub use listeners::{
     InvalidateSink, Listener, ParameterChangeSink, PluginSignal, RefreshSink, Subscription,
     TransportSink,

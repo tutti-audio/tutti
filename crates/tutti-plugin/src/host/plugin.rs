@@ -13,7 +13,9 @@ use tutti_plugin_types::{MainThreadMarker, MainWorkHandle};
 use tutti_rt::LockExt;
 
 use crate::host::node::PluginClient;
-use tutti_plugin_host::{AnyInProcessClient, Commit, InProcessNode, InProcessRebinder, PluginHandle};
+use tutti_plugin_host::{
+    AnyInProcessClient, Commit, InProcessNode, InProcessRebinder, PluginHandle,
+};
 use tutti_plugin_ipc::AudioConfig;
 use tutti_plugin_types::BridgeResult;
 use tutti_plugin_types::PluginFormat;

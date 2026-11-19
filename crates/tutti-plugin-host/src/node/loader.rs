@@ -17,8 +17,8 @@ use crate::PluginHandle;
 use crate::{ParameterChangeSink, PluginControls};
 use tutti_plugin_types::{BridgeError, BridgeResult, StateError};
 use tutti_plugin_types::{
-    Features, InProcess, LoadStage, Loaded, LoadedPlugin, PluginDescriptor, PluginRef, PluginTooWide,
-    Prepare,
+    Features, InProcess, LoadStage, Loaded, LoadedPlugin, PluginDescriptor, PluginRef,
+    PluginTooWide, Prepare,
 };
 use tutti_units::ParamId;
 
