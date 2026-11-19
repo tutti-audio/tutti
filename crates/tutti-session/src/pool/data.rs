@@ -1,20 +1,41 @@
 //! The data entries: a file or a SoundFont read whole, loaded once, shared by
 //! its `Arc`.
 
-use std::path::PathBuf;
 use std::sync::Arc;
+
+use tutti_platform::{Asset, Identity};
 
 use crate::pool::entry::{Declared, Life, Load, LoadError, PoolEntry, Sharing};
 
 /// A wave file: [`audio_file`]'s entry, decoded whole (resident) or probed for
 /// a disk stream ([`streamed`](Declared::streamed)).
 ///
-/// Its identity is the path and the tier ([`Tier`]).
+/// Its identity is the asset's (see [`audio_file`]) and the tier ([`Tier`]).
 #[cfg(all(feature = "sampler", codec))]
 #[derive(Clone, Debug)]
 pub struct AudioFile {
-    path: PathBuf,
+    asset: Asset,
     tier: Tier,
+}
+
+/// What tells one declared asset from another, as [`PoolEntry::Identity`]: its
+/// [`Identity`] as it was when the entry was declared (a file's carries its stamp, so a file rewritten
+/// since is another entry), or, for an asset with no identity, its
+/// [`name`](Asset::name).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AssetKey {
+    /// The asset's identity.
+    Identity(Identity),
+    /// The asset's name, for one with no identity.
+    Name(String),
+}
+
+impl AssetKey {
+    fn of(asset: &Asset) -> Self {
+        asset
+            .identity()
+            .map_or_else(|| Self::Name(asset.name()), Self::Identity)
+    }
 }
 
 /// Where a file's samples are read from: half of [`AudioFile`]'s identity.
@@ -49,25 +70,25 @@ pub enum AudioEntry<S: tutti_buffers::Float = f32> {
     Resident(Arc<tutti_buffers::Wave<S>>),
     /// The file's header, read; its samples stay on disk until a stream opens
     /// ([`Session::open_stream`](crate::Session::open_stream) over
-    /// [`StreamInfo::path`]).
+    /// [`StreamInfo::asset`]).
     Streamed(Arc<StreamInfo>),
 }
 
-/// What a streamed [`audio_file`] entry's header says: the file and what the
+/// What a streamed [`audio_file`] entry's header says: the asset and what the
 /// sampler can do with it.
 #[cfg(all(feature = "sampler", codec))]
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct StreamInfo {
-    path: PathBuf,
+    asset: Asset,
     facts: tutti_sampler::SampleFacts,
 }
 
 #[cfg(all(feature = "sampler", codec))]
 impl StreamInfo {
-    /// The file the entry declared.
+    /// The asset the entry declared.
     #[must_use]
-    pub fn path(&self) -> &std::path::Path {
-        &self.path
+    pub const fn asset(&self) -> &Asset {
+        &self.asset
     }
 
     /// The file's header: length, rate and channels. The file is streamable, or
@@ -91,15 +112,19 @@ impl AudioFile {
     pub const STREAM_ABOVE_BYTES: u64 = 32 * 1024 * 1024;
 }
 
-/// Declares the wave file at `path` under `key`, decoded whole; the entry reads
-/// as [`AudioEntry::Resident`]. Another key declared with the same path shares
-/// the one decode, and every handle is the same `Arc`.
+/// Declares the wave `asset` (a path, or bytes) under `key`, decoded whole; the
+/// entry reads as [`AudioEntry::Resident`]. Another key declared with the same
+/// asset shares the one decode, and every handle is the same `Arc`.
+///
+/// Two declarations are of the same asset when their [`Identity`]s are equal
+/// (the path and its stamp, for a file) taken when each is declared; an asset
+/// with none is the same as another of the same [`name`](Asset::name).
 #[cfg(all(feature = "sampler", codec))]
-pub fn audio_file<K>(key: K, path: impl Into<PathBuf>) -> Declared<K, AudioFile, Sharing> {
+pub fn audio_file<K>(key: K, asset: impl Into<Asset>) -> Declared<K, AudioFile, Sharing> {
     Declared::shared(
         key,
         AudioFile {
-            path: path.into(),
+            asset: asset.into(),
             tier: Tier::Resident,
         },
     )
@@ -140,28 +165,28 @@ impl<K, M> Declared<K, AudioFile, M> {
 
 #[cfg(all(feature = "sampler", codec))]
 impl<S: tutti_buffers::Float> PoolEntry<S> for AudioFile {
-    type Identity = (PathBuf, Tier);
+    type Identity = (AssetKey, Tier);
     type Loaded = AudioEntry<S>;
     type Handle = AudioEntry<S>;
 
     fn identity(&self) -> Self::Identity {
-        (self.path.clone(), self.tier)
+        (AssetKey::of(&self.asset), self.tier)
     }
 
     fn load(&self) -> Load<Self::Loaded, S> {
-        let (path, tier) = (self.path.clone(), self.tier);
+        let (asset, tier) = (self.asset.clone(), self.tier);
         Load::on_worker(move || match tier {
-            Tier::Resident => resident::<S>(path),
+            Tier::Resident => resident::<S>(asset),
             Tier::Streamed => {
-                let facts = probe(&path)?;
+                let facts = probe(&asset)?;
                 if facts.streamable {
-                    Ok(streamed(path, facts))
+                    Ok(streamed(asset, facts))
                 } else {
-                    Err(LoadError::NotStreamable(path))
+                    Err(LoadError::NotStreamable(asset.name()))
                 }
             }
             Tier::Auto { above } => {
-                let facts = probe(&path)?;
+                let facts = probe(&asset)?;
                 // A decoded wave's size in bytes, saturating: a count past
                 // `u64` is past any threshold.
                 let wide = |n: usize| u64::try_from(n).unwrap_or(u64::MAX);
@@ -171,16 +196,16 @@ impl<S: tutti_buffers::Float> PoolEntry<S> for AudioFile {
                         .saturating_mul(wide(size_of::<S>()))
                 });
                 if facts.streamable && bytes > above {
-                    Ok(streamed(path, facts))
+                    Ok(streamed(asset, facts))
                 } else {
-                    resident::<S>(path)
+                    resident::<S>(asset)
                 }
             }
         })
     }
 
-    fn file(&self) -> Option<&std::path::Path> {
-        Some(&self.path)
+    fn asset(&self) -> Option<Asset> {
+        Some(self.asset.clone())
     }
 
     fn handle(loaded: &Self::Loaded, _: &Life) -> Self::Handle {
@@ -189,62 +214,73 @@ impl<S: tutti_buffers::Float> PoolEntry<S> for AudioFile {
 }
 
 #[cfg(all(feature = "sampler", codec))]
-fn probe(path: &std::path::Path) -> Result<tutti_sampler::SampleFacts, LoadError> {
-    tutti_sampler::probe(path).map_err(|error| LoadError::Probe(Arc::new(error)))
+fn probe(asset: &Asset) -> Result<tutti_sampler::SampleFacts, LoadError> {
+    tutti_sampler::probe(asset.clone()).map_err(|error| LoadError::Probe(Arc::new(error)))
 }
 
 #[cfg(all(feature = "sampler", codec))]
 fn streamed<S: tutti_buffers::Float>(
-    path: PathBuf,
+    asset: Asset,
     facts: tutti_sampler::SampleFacts,
 ) -> AudioEntry<S> {
-    AudioEntry::Streamed(Arc::new(StreamInfo { path, facts }))
+    AudioEntry::Streamed(Arc::new(StreamInfo { asset, facts }))
 }
 
 #[cfg(all(feature = "sampler", codec))]
-fn resident<S: tutti_buffers::Float>(path: PathBuf) -> Result<AudioEntry<S>, LoadError> {
-    tutti_codec::read_wave::<S>(path)
+fn resident<S: tutti_buffers::Float>(asset: Asset) -> Result<AudioEntry<S>, LoadError> {
+    tutti_codec::read_wave::<S>(asset)
         .map(|wave| AudioEntry::Resident(Arc::new(wave)))
         .map_err(|error| LoadError::Decode(Arc::new(error)))
 }
 
-/// A SoundFont file, parsed: [`soundfont`]'s entry.
+/// A SoundFont, parsed: [`soundfont`]'s entry.
 ///
-/// Its identity is the path.
+/// Its identity is the asset's (see [`soundfont`]).
 #[cfg(feature = "soundfont")]
 #[derive(Clone, Debug)]
 pub struct SoundFontFile {
-    path: PathBuf,
+    asset: Asset,
 }
 
-/// Declares the SoundFont at `path` under `key`. Another key declared with the
-/// same path shares the one parse, and every handle is the same `Arc`.
+/// Declares the SoundFont `asset` (a path, or bytes) under `key`. Another key
+/// declared with the same asset shares the one parse, and every handle is the
+/// same `Arc`. Two declarations are of the same asset as [`audio_file`]'s are.
 #[cfg(feature = "soundfont")]
-pub fn soundfont<K>(key: K, path: impl Into<PathBuf>) -> Declared<K, SoundFontFile, Sharing> {
-    Declared::shared(key, SoundFontFile { path: path.into() })
+pub fn soundfont<K>(key: K, asset: impl Into<Asset>) -> Declared<K, SoundFontFile, Sharing> {
+    Declared::shared(
+        key,
+        SoundFontFile {
+            asset: asset.into(),
+        },
+    )
 }
 
 #[cfg(feature = "soundfont")]
 impl<S: tutti_buffers::Float> PoolEntry<S> for SoundFontFile {
-    type Identity = PathBuf;
+    type Identity = AssetKey;
     type Loaded = Arc<tutti_sf2::SoundFont>;
     type Handle = Arc<tutti_sf2::SoundFont>;
 
-    fn identity(&self) -> PathBuf {
-        self.path.clone()
+    fn identity(&self) -> AssetKey {
+        AssetKey::of(&self.asset)
     }
 
     fn load(&self) -> Load<Self::Loaded, S> {
-        let path = self.path.clone();
+        let asset = self.asset.clone();
         Load::on_worker(move || {
-            tutti_sf2::SoundFont::open(path)
+            asset
+                .open()
+                .map_err(tutti_sf2::Error::from)
+                .and_then(|reader| {
+                    tutti_sf2::SoundFont::from_reader(std::io::BufReader::new(reader))
+                })
                 .map(Arc::new)
                 .map_err(|error| LoadError::SoundFont(Arc::new(error)))
         })
     }
 
-    fn file(&self) -> Option<&std::path::Path> {
-        Some(&self.path)
+    fn asset(&self) -> Option<Asset> {
+        Some(self.asset.clone())
     }
 
     fn handle(loaded: &Self::Loaded, _: &Life) -> Self::Handle {

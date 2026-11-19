@@ -77,6 +77,7 @@ use crate::error::Result;
 use decode::Seams;
 use handlers::Handles;
 use thread::Built;
+use tutti_platform::Asset;
 use tutti_rt::Mint;
 use tutti_rt::RingFloat;
 use tutti_units::SampleRate;
@@ -289,7 +290,7 @@ impl<F: RingFloat> DiskStreamer<Manual<F>, F> {
 }
 
 impl<D, F: RingFloat> DiskStreamer<D, F> {
-    /// Opens `path` as a new stream, its reader starting at `place`, and
+    /// Opens `asset` as a new stream, its reader starting at `place`, and
     /// answers with an [`PendingOpen`]: poll it for the stream's [`Stream`] and its
     /// one [`StreamReader`]. The voice is as wide as the file
     /// ([`voice_width`](crate::voice_width)); [`open_into`](Self::open_into)
@@ -301,8 +302,8 @@ impl<D, F: RingFloat> DiskStreamer<D, F> {
     /// Control thread. It waits while the streamer's queue is full, as every
     /// stream command does. A streamer that is gone answers
     /// [`OpenError::StreamerGone`] at the first poll.
-    pub fn open(&self, path: &std::path::Path, place: Placement) -> PendingOpen<F> {
-        self.open_as(path, place, None)
+    pub fn open(&self, asset: impl Into<Asset>, place: Placement) -> PendingOpen<F> {
+        self.open_as(asset.into(), place, None)
     }
 
     /// [`open`](Self::open) for a voice `width` channels wide: the file's
@@ -317,16 +318,16 @@ impl<D, F: RingFloat> DiskStreamer<D, F> {
     /// [`OpenError::Placement`], and nothing is opened.
     pub fn open_into(
         &self,
-        path: &std::path::Path,
+        asset: impl Into<Asset>,
         place: Placement,
         width: tutti_buffers::ChannelLayout,
     ) -> PendingOpen<F> {
-        self.open_as(path, place, Some(width))
+        self.open_as(asset.into(), place, Some(width))
     }
 
     fn open_as(
         &self,
-        path: &std::path::Path,
+        asset: Asset,
         place: Placement,
         width: Option<tutti_buffers::ChannelLayout>,
     ) -> PendingOpen<F> {
@@ -336,7 +337,7 @@ impl<D, F: RingFloat> DiskStreamer<D, F> {
         // a gone streamer reaches the caller: the answer is disconnected.
         let _ = self.streamer_tx.send(StreamerCommand::Open {
             id,
-            file_path: path.to_path_buf(),
+            asset,
             start: place.frame(),
             width,
             reply,
@@ -431,8 +432,11 @@ mod tests {
             window.1 > 40_000,
             "the loop plays on past its end: {window:?}"
         );
+        let key = Asset::from(path.as_path())
+            .identity()
+            .expect("a file has an identity");
         assert!(
-            sampler.cache().get(&path).is_none(),
+            sampler.cache().get(&key).is_none(),
             "a loop change decoded the whole file"
         );
     }

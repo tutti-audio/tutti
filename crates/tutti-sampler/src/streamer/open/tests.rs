@@ -139,7 +139,7 @@ fn a_ready_reader_has_registered_its_control_before_it_is_returned() {
 fn a_missing_file_fails_with_io() {
     let dir = tempfile::tempdir().expect("a temp dir");
     let mut streamer = manual();
-    let opening = streamer.open(&dir.path().join("nothing.wav"), Placement::HEAD);
+    let opening = streamer.open(dir.path().join("nothing.wav"), Placement::HEAD);
     assert_eq!(
         wait_for_open(&mut streamer, opening).err(),
         Some(OpenError::Io(std::io::ErrorKind::NotFound))

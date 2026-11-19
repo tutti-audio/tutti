@@ -45,11 +45,11 @@
 //! Every count crossing this module is in frames; the stride never leaks
 //! out.
 
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use tutti_buffers::{BufferError, Interleaved, InterleavedMut, Wave};
 use tutti_buffers::{ChannelLayout, ChannelTopology};
+use tutti_platform::Asset;
 use tutti_rt::{MAX_POS_RING_FRAMES, PosReader, PosRing, PosWriter, Publisher, Reader};
 use tutti_units::Samples;
 
@@ -70,7 +70,7 @@ pub(crate) const HISTORY_FRAMES: u64 = 4;
 /// reader.
 pub(crate) struct Ring<F: RingFloat> {
     region_id: StreamId,
-    file_path: PathBuf,
+    asset: Asset,
     channels: ChannelLayout,
     /// Which speaker each of the file's channels feeds. The ring itself is at
     /// the file's width and order; the placement the voice reads it by is built
@@ -328,9 +328,9 @@ impl<F: RingFloat> RegionOut<F> {
         self.writer.set_play(play);
     }
 
-    /// The file this region streams.
-    pub(crate) fn file_path(&self) -> &Path {
-        &self.ring.file_path
+    /// What this region streams.
+    pub(crate) fn asset(&self) -> &Asset {
+        &self.ring.asset
     }
 
     pub(crate) fn region_id(&self) -> StreamId {
@@ -363,7 +363,7 @@ impl<F: RingFloat> RegionOut<F> {
                     self.fault_logged = true;
                     tracing::warn!(
                         "read of {} refused: the buffer is not whole frames of the file's width",
-                        self.ring.file_path.display()
+                        self.ring.asset.name()
                     );
                 }
                 return false;
@@ -380,7 +380,7 @@ impl<F: RingFloat> RegionOut<F> {
                 self.fault_logged = true;
                 tracing::warn!(
                     "decode fault at frame {at} of {}: {fault}; the stream plays silence from there",
-                    self.ring.file_path.display()
+                    self.ring.asset.name()
                 );
             }
             return false;
@@ -439,11 +439,11 @@ impl RegionBuffer {
     #[cfg(test)]
     pub(crate) fn with_capacity<F: RingFloat>(
         region_id: StreamId,
-        file_path: PathBuf,
+        asset: impl Into<Asset>,
         capacity: usize,
         channels: impl Into<ChannelLayout>,
     ) -> (RegionOut<F>, SharedReader<F>, PosReader<F>) {
-        Self::with_fade(region_id, file_path, capacity, channels, Samples::new(0))
+        Self::with_fade(region_id, asset, capacity, channels, Samples::new(0))
     }
 
     /// [`with_capacity`](Self::with_capacity), whose readers crossfade over
@@ -451,21 +451,21 @@ impl RegionBuffer {
     #[cfg(test)]
     pub(crate) fn with_fade<F: RingFloat>(
         region_id: StreamId,
-        file_path: PathBuf,
+        asset: impl Into<Asset>,
         capacity: usize,
         channels: impl Into<ChannelLayout>,
         fade_frames: Samples,
     ) -> (RegionOut<F>, SharedReader<F>, PosReader<F>) {
         let layout = nonempty(channels.into());
         let topology = ChannelTopology::assumed(layout);
-        Self::for_file(region_id, file_path, capacity, topology, None, fade_frames)
+        Self::for_file(region_id, asset, capacity, topology, None, fade_frames)
     }
 
     /// `RegionBuffer::with_capacity` for a file `len` long (`None`: not known), whose
     /// readers crossfade over `fade_frames` output frames at a jump.
     pub(crate) fn for_file<F: RingFloat>(
         region_id: StreamId,
-        file_path: PathBuf,
+        asset: impl Into<Asset>,
         capacity: usize,
         topology: ChannelTopology,
         len: Option<Samples>,
@@ -481,7 +481,7 @@ impl RegionBuffer {
             .expect("`nonempty` gave a layout of at least one channel");
         let ring = Arc::new(Ring {
             region_id,
-            file_path,
+            asset: asset.into(),
             channels,
             #[cfg(test)]
             topology,
@@ -517,6 +517,7 @@ impl RegionBuffer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     /// `frames` frames at `channels`, sample `c` of frame `f` carrying
     /// `f * channels + c`, so a rotation or a tear is a wrong value.

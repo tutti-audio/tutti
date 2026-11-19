@@ -4,11 +4,10 @@
 use std::any::TypeId;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
-use std::path::PathBuf;
 use std::sync::{Arc, Weak};
 
 use tutti_buffers::Float;
-use tutti_platform::MainThreadMarker;
+use tutti_platform::{Asset, Identity, MainThreadMarker};
 
 use crate::job::Ticket;
 use crate::pool::config::PoolConfig;
@@ -19,7 +18,6 @@ use crate::pool::entry::{
 use crate::pool::key::PoolKey;
 use crate::pool::refresh::{Checked, RefreshReport};
 use crate::pool::report::{PoolOutcome, PoolReport};
-use crate::pool::stamp::Stamp;
 use crate::{Clock, PoolLoaded, SessionEvent};
 
 /// Where a pool entry stands.
@@ -206,11 +204,11 @@ struct Slot<S: Float> {
     parked: bool,
     /// What the kind does with the value when the entry parks.
     retain: fn(Value) -> Option<Value>,
-    /// The file the load reads.
-    file: Option<PathBuf>,
-    /// The file's stamp as the worker took it before the load that made the
+    /// What the load reads.
+    asset: Option<Asset>,
+    /// The asset's identity as the worker took it before the load that made the
     /// loaded value read it.
-    stamp: Option<Stamp>,
+    loaded_from: Option<Identity>,
     life: Life,
     loaded: Option<Value>,
     state: PoolState,
@@ -296,16 +294,16 @@ struct Flight {
     share: Option<Cloner>,
     /// The load has a stage on the main thread.
     needs_main: bool,
-    /// The stamp the worker took of the entries' file.
-    stamp: Option<Stamp>,
+    /// The identity the worker took of the entries' asset.
+    loaded_from: Option<Identity>,
 }
 
-/// A worker stage the pool let start: its flight, the stage, and the file the
-/// worker stamps before running it.
+/// A worker stage the pool let start: its flight, the stage, and the asset whose
+/// identity the worker takes before running it.
 pub(crate) struct Worker {
     pub(crate) flight: u64,
     pub(crate) work: Box<dyn FnOnce() -> Result<Staged, LoadError> + Send>,
-    pub(crate) file: Option<PathBuf>,
+    pub(crate) asset: Option<Asset>,
 }
 
 /// A worker stage waiting for a free worker.
@@ -529,7 +527,7 @@ impl<A: crate::AppKey, C: Clock> Pool<A, C> {
             reload,
             lost,
             retain,
-            file,
+            asset,
             share,
             ..
         } = item;
@@ -549,8 +547,8 @@ impl<A: crate::AppKey, C: Clock> Pool<A, C> {
                     pins: Arc::new(()),
                     parked: false,
                     retain,
-                    file,
-                    stamp: None,
+                    asset,
+                    loaded_from: None,
                     life: Life::new(),
                     loaded: None,
                     state: PoolState::Loading,
@@ -572,7 +570,7 @@ impl<A: crate::AppKey, C: Clock> Pool<A, C> {
         slot.reload = reload;
         slot.lost = lost;
         slot.retain = retain;
-        slot.file = file;
+        slot.asset = asset;
         slot.share = share;
         if slot.parked {
             // Its value was released: the recall loads it again.
@@ -616,10 +614,10 @@ impl<A: crate::AppKey, C: Clock> Pool<A, C> {
             Stage::Loading
         };
         if self.slots[key].share.is_some() {
-            if let Some((copy, stamp)) = self.sibling_value(key) {
+            if let Some((copy, loaded_from)) = self.sibling_value(key) {
                 let slot = self.slots.get_mut(key).expect("the slot is declared");
                 slot.generation = generation;
-                self.land_slot(key, Ok(copy), stamp);
+                self.land_slot(key, Ok(copy), loaded_from);
                 return None;
             }
             if let Some(flight) = self.sibling_flight(key) {
@@ -645,7 +643,7 @@ impl<A: crate::AppKey, C: Clock> Pool<A, C> {
                 stage,
                 share: slot.share,
                 needs_main,
-                stamp: None,
+                loaded_from: None,
             },
         );
         Some(Start {
@@ -655,8 +653,8 @@ impl<A: crate::AppKey, C: Clock> Pool<A, C> {
     }
 
     /// A copy of the value another key's entry of `key`'s kind and identity
-    /// has loaded, with the stamp it was read under.
-    fn sibling_value(&self, key: &PoolKey) -> Option<(Value, Option<Stamp>)> {
+    /// has loaded, with the identity it was read under.
+    fn sibling_value(&self, key: &PoolKey) -> Option<(Value, Option<Identity>)> {
         let own = &self.slots[key];
         self.slots.iter().find_map(|(other, slot)| {
             let alike = other != key
@@ -671,7 +669,7 @@ impl<A: crate::AppKey, C: Clock> Pool<A, C> {
                     .as_ref()
                     .filter(|value| !(slot.lost)(value))
                     .and_then(|value| own.share?(value))
-                    .map(|copy| (copy, slot.stamp.clone()))
+                    .map(|copy| (copy, slot.loaded_from.clone()))
             } else {
                 None
             }
@@ -780,23 +778,27 @@ impl<A: crate::AppKey, C: Clock> Pool<A, C> {
             let Queued { flight, work } = self.queue.pop_front()?;
             if self.live(flight) {
                 self.running += 1;
-                let file = self.flights.get(&flight).and_then(|flight_| {
+                let asset = self.flights.get(&flight).and_then(|flight_| {
                     flight_
                         .targets
                         .iter()
-                        .find_map(|key| self.slots.get(key)?.file.clone())
+                        .find_map(|key| self.slots.get(key)?.asset.clone())
                 });
-                return Some(Worker { flight, work, file });
+                return Some(Worker {
+                    flight,
+                    work,
+                    asset,
+                });
             }
             self.flights.remove(&flight);
         }
         None
     }
 
-    /// The stamp the worker took of a flight's file before its load read it.
-    pub(crate) fn stamped(&mut self, flight: u64, stamp: Option<Stamp>) {
+    /// The identity the worker took of a flight's asset before its load read it.
+    pub(crate) fn stamped(&mut self, flight: u64, loaded_from: Option<Identity>) {
         if let Some(flight_) = self.flights.get_mut(&flight) {
-            flight_.stamp = stamp;
+            flight_.loaded_from = loaded_from;
         }
     }
 
@@ -848,7 +850,7 @@ impl<A: crate::AppKey, C: Clock> Pool<A, C> {
         let Some(Flight {
             targets,
             share,
-            stamp,
+            loaded_from,
             ..
         }) = self.flights.remove(&flight)
         else {
@@ -874,12 +876,17 @@ impl<A: crate::AppKey, C: Clock> Pool<A, C> {
                     .expect("a flight of several entries shares its kind's value")),
                 Err(error) => Err(error.clone()),
             };
-            self.land_slot(key, copy, stamp.clone());
+            self.land_slot(key, copy, loaded_from.clone());
         }
-        self.land_slot(last, done, stamp);
+        self.land_slot(last, done, loaded_from);
     }
 
-    fn land_slot(&mut self, key: &PoolKey, done: Result<Value, LoadError>, stamp: Option<Stamp>) {
+    fn land_slot(
+        &mut self,
+        key: &PoolKey,
+        done: Result<Value, LoadError>,
+        loaded_from: Option<Identity>,
+    ) {
         let Some(slot) = self.slots.get_mut(key) else {
             return;
         };
@@ -891,7 +898,7 @@ impl<A: crate::AppKey, C: Clock> Pool<A, C> {
         let event = match done {
             Ok(value) => {
                 slot.loaded = Some(value);
-                slot.stamp = stamp;
+                slot.loaded_from = loaded_from;
                 slot.state = PoolState::Loaded;
                 if reloaded {
                     PoolEvent::Reloaded
@@ -900,7 +907,7 @@ impl<A: crate::AppKey, C: Clock> Pool<A, C> {
                 }
             }
             Err(error) => {
-                slot.stamp = None;
+                slot.loaded_from = None;
                 slot.state = PoolState::Failed(error.clone());
                 PoolEvent::Failed(error)
             }
@@ -1138,18 +1145,20 @@ impl<A: crate::AppKey, C: Clock> Pool<A, C> {
         self.last_when
     }
 
-    /// The declared, loaded entries that read a file, with the file and the
-    /// stamp it was read under, `None` for one whose stat failed at its load
+    /// The declared, loaded entries that read an asset, with the asset and the
+    /// identity it was read under, `None` for one whose stat failed at its load
     /// (the refresh tries again).
-    pub(crate) fn stamped_files(&self) -> Vec<(PoolKey, PathBuf, Option<Stamp>)> {
+    pub(crate) fn stamped_files(&self) -> Vec<(PoolKey, Asset, Option<Identity>)> {
         self.slots
             .iter()
             .filter(|(_, slot)| slot.declared && matches!(slot.state, PoolState::Loaded))
-            .filter_map(|(key, slot)| Some((key.clone(), slot.file.clone()?, slot.stamp.clone())))
+            .filter_map(|(key, slot)| {
+                Some((key.clone(), slot.asset.clone()?, slot.loaded_from.clone()))
+            })
             .collect()
     }
 
-    /// Loads again each entry whose file's stamp moved from the one it was
+    /// Loads again each entry whose asset's identity moved from the one it was
     /// read under, and reports what moved and what could not be read. An entry
     /// that changed since the check began (reloaded, undeclared, failed) is
     /// left alone.
@@ -1160,14 +1169,16 @@ impl<A: crate::AppKey, C: Clock> Pool<A, C> {
         let mut refreshed = RefreshReport::default();
         for Checked { key, was, now } in checked {
             let current = self.slots.get(&key).is_some_and(|slot| {
-                slot.declared && matches!(slot.state, PoolState::Loaded) && slot.stamp == was
+                slot.declared && matches!(slot.state, PoolState::Loaded) && slot.loaded_from == was
             });
             if !current {
                 continue;
             }
             match now {
-                Ok(now) if Some(&now) == was.as_ref() => {}
-                Ok(_) => refreshed.reloaded.push(key),
+                Ok(Some(now)) if Some(&now) == was.as_ref() => {}
+                Ok(Some(_)) => refreshed.reloaded.push(key),
+                // No identity to compare: the asset is not watched.
+                Ok(None) => {}
                 Err(kind) => refreshed.unreadable.push((key, kind)),
             }
         }
