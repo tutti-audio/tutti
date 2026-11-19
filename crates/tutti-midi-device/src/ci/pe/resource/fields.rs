@@ -3,18 +3,22 @@
 //! manufacturer-specific properties, and the reader of an object's properties.
 
 use std::fmt;
+use std::num::TryFromIntError;
 
-use tutti_ump::{Bank, U7};
+use tutti_ump::{Bank, MidiChannelOutOfRange, U7};
 
-use super::super::limits::{PeTextError, PropertyName, text_type};
-use super::super::tree::{PeJson, PeObject};
+use super::super::limits::{PeTextError, PropertyName, PropertyNameError, text_type};
+use super::super::tree::{PeJson, PeJsonError, PeObject};
+use super::controllers::ListedTwice;
+use super::entry::EntryError;
+use super::state::NotUnixSeconds;
 
 tutti_units::ranged! {
     /// A MIDI Channel of a Function Block: 1 to 256, counted from the first
     /// Channel of the first Group of the block and on across its Groups
     /// (M2-105 Table 10, M2-117 Table 5).
     #[derive(Eq, Hash, PartialOrd, Ord)]
-    PeChannel(u16), NotAPeChannel, "a channel of a function block (1 to 256)",
+    PeChannel(u16), NotAPeChannel: Eq, "a channel of a function block (1 to 256)",
     |raw| raw >= 1 && raw <= 256
 }
 
@@ -22,21 +26,21 @@ tutti_units::ranged! {
     /// The priority of a controller: 1, the most important, to 5, hidden
     /// (M2-117 §2.1.1.1).
     #[derive(Eq, Hash, PartialOrd, Ord)]
-    Priority(u8), NotAPriority, "a priority (1 to 5)", |raw| raw >= 1 && raw <= 5
+    Priority(u8), NotAPriority: Eq, "a priority (1 to 5)", |raw| raw >= 1 && raw <= 5
 }
 
 tutti_units::ranged! {
     /// The significant bits of a 32-bit controller value: 1 to 32 (M2-117
     /// Table 5).
     #[derive(Eq, Hash, PartialOrd, Ord)]
-    SignificantBits(u8), NotSignificantBits, "a count of significant bits (1 to 32)",
+    SignificantBits(u8), NotSignificantBits: Eq, "a count of significant bits (1 to 32)",
     |raw| raw >= 1 && raw <= 32
 }
 
 tutti_units::ranged! {
     /// The number of steps of a stepped controller (M2-117 Table 5): at least 1.
     #[derive(Eq, Hash, PartialOrd, Ord)]
-    StepCount(u32), NotAStepCount, "a step count (at least 1)", |raw| raw >= 1
+    StepCount(u32), NotAStepCount: Eq, "a step count (at least 1)", |raw| raw >= 1
 }
 
 // Owned: the type has no bound, or counts characters, which no byte-bounded
@@ -163,6 +167,30 @@ impl PeMidiMode {
     }
 }
 
+/// A raw number that is not a MIDI mode: outside 1 to 4.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("{0} is not a MIDI mode (1 to 4)")]
+pub struct NotAPeMidiMode(pub i64);
+
+impl TryFrom<i64> for PeMidiMode {
+    type Error = NotAPeMidiMode;
+
+    fn try_from(number: i64) -> Result<Self, NotAPeMidiMode> {
+        u8::try_from(number)
+            .ok()
+            .and_then(Self::new)
+            .ok_or(NotAPeMidiMode(number))
+    }
+}
+
+/// Text that is none of the values a closed set of property values names.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("not one of {}", .allowed.join(", "))]
+pub struct UnlistedText {
+    /// The values the property has.
+    pub allowed: &'static [&'static str],
+}
+
 macro_rules! text_enum {
     ($(#[$meta:meta])* $name:ident { $($(#[$vmeta:meta])* $variant:ident = $text:literal),+ $(,)? }) => {
         $(#[$meta])*
@@ -183,9 +211,17 @@ macro_rules! text_enum {
             /// The variant a property value names, or `None` for other text.
             #[must_use]
             pub fn new(text: &str) -> Option<Self> {
+                Self::try_from(text).ok()
+            }
+        }
+
+        impl TryFrom<&str> for $name {
+            type Error = UnlistedText;
+
+            fn try_from(text: &str) -> Result<Self, UnlistedText> {
                 match text {
-                    $($text => Some(Self::$variant),)+
-                    _ => None,
+                    $($text => Ok(Self::$variant),)+
+                    _ => Err(UnlistedText { allowed: &[$($text),+] }),
                 }
             }
         }
@@ -268,6 +304,16 @@ pub(super) fn ints(values: &[u8]) -> PeJson {
     )
 }
 
+/// The integer `n` as the `T` of raw width `R`.
+pub(super) fn narrowed<R, T>(n: i64) -> Result<T, InvalidValue>
+where
+    R: TryFrom<i64, Error = TryFromIntError>,
+    T: TryFrom<R>,
+    InvalidValue: From<T::Error>,
+{
+    Ok(T::try_from(R::try_from(n)?)?)
+}
+
 /// An array of `N` 7-bit integers.
 pub(super) fn u7_array<const N: usize>(json: &PeJson) -> Option<[U7; N]> {
     let items = json.as_array()?;
@@ -296,7 +342,7 @@ pub struct PeDataError {
 }
 
 /// What is wrong with a property of Property Data.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum PeDataFault {
     /// The property is required and absent, or empty where the spec requires it
@@ -307,18 +353,88 @@ pub enum PeDataFault {
     #[error("not {0}")]
     WrongType(&'static str),
     /// The value is of the type and outside the range or form the spec allows.
-    #[error("not a valid {0}")]
-    NotValid(&'static str),
+    #[error("not valid: {0}")]
+    NotValid(InvalidValue),
     /// Two properties the spec does not allow together.
     #[error("not allowed with {0}")]
     Conflicts(&'static str),
-    /// A property whose name is neither one the Resource has nor a
-    /// manufacturer-specific one.
-    #[error("not a property name of Property Exchange")]
-    BadName,
     /// The entry of a list is not an object.
     #[error("not an object")]
     NotAnObject,
+}
+
+/// Why a value of the right JSON type is not valid: the error of the type that
+/// refuses it, or the form of the spec that it breaks where no type holds it.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum InvalidValue {
+    /// A text that breaks the limit of its text type.
+    #[error(transparent)]
+    Text(#[from] PeTextError),
+    /// A text that is no property name.
+    #[error(transparent)]
+    PropertyName(#[from] PropertyNameError),
+    /// A text that none of the values of a closed set.
+    #[error(transparent)]
+    Unlisted(#[from] UnlistedText),
+    /// A number that is no Channel of a Function Block.
+    #[error(transparent)]
+    FunctionBlockChannel(#[from] NotAPeChannel),
+    /// A number that is no MIDI Channel.
+    #[error(transparent)]
+    MidiChannel(#[from] MidiChannelOutOfRange),
+    /// A number that is no MIDI mode.
+    #[error(transparent)]
+    MidiMode(#[from] NotAPeMidiMode),
+    /// A number that is no controller priority.
+    #[error(transparent)]
+    Priority(#[from] NotAPriority),
+    /// A number that is no count of significant bits.
+    #[error(transparent)]
+    SignificantBits(#[from] NotSignificantBits),
+    /// A number that is no step count.
+    #[error(transparent)]
+    StepCount(#[from] NotAStepCount),
+    /// A number that is no time in Unix seconds.
+    #[error(transparent)]
+    UnixSeconds(#[from] NotUnixSeconds),
+    /// An integer outside the width of the value it is read as.
+    #[error("the integer does not fit the width of the value")]
+    Width(#[from] TryFromIntError),
+    /// Text that is not JSON of the Property Exchange form.
+    #[error(transparent)]
+    Json(#[from] PeJsonError),
+    /// A ResourceList entry the rules of Property Exchange refuse.
+    #[error(transparent)]
+    Entry(#[from] EntryError),
+    /// A controller list with a controller listed twice.
+    #[error(transparent)]
+    ListedTwice(#[from] ListedTwice),
+    /// Three bytes that are no Manufacturer id: a one-byte id followed by a
+    /// non-zero byte, or `00 00 00` (M2-104 §7.1.3).
+    #[error("the bytes are no Manufacturer id")]
+    ManufacturerId,
+    /// A `ctrlIndex` that does not fit the `ctrlType` (M2-117 Table 5).
+    #[error("the index does not fit the controller type")]
+    ControllerIndex,
+    /// A `paramPath` that is no JSON Pointer of at most 256 bytes (M2-117
+    /// Table 5).
+    #[error("the path is no JSON Pointer of at most 256 bytes")]
+    ParamPath,
+    /// A `minMax` whose minimum is above its maximum (M2-117 Table 5).
+    #[error("the minimum is above the maximum")]
+    MinAboveMax,
+    /// A `defaultCCMap` of a controller that is not a Control Change (M2-117
+    /// Table 20).
+    #[error("only a Control Change takes the flag")]
+    NotControlChange,
+    /// Data of a Resource that has a JSON form, held in none.
+    #[error("the data has no JSON form")]
+    NoJsonForm,
+    /// Data of a Resource the spec defines, where only a Resource without a
+    /// definition holds data of any form.
+    #[error("the Resource is defined, so its data has a type")]
+    ResourceIsTyped,
 }
 
 /// Where in Property Data a fault is: what holds it (a Resource, or an entry of
@@ -460,6 +576,11 @@ impl<'a> Fields<'a> {
         PeDataError::new(Place::of(self.what).property(name), fault)
     }
 
+    /// The fault of the property `name` whose value is invalid for `why`.
+    pub(super) fn invalid(&self, name: &str, why: impl Into<InvalidValue>) -> PeDataError {
+        self.fail(name, PeDataFault::NotValid(why.into()))
+    }
+
     fn take(&mut self, name: &str) -> Option<&'a PeJson> {
         let at = self.left.iter().position(|(n, _)| *n == name)?;
         Some(self.left.remove(at).1)
@@ -501,12 +622,15 @@ impl<'a> Fields<'a> {
     ///
     /// # Errors
     ///
-    /// [`PeDataFault::BadName`] for a name that is no property name.
+    /// [`PeDataFault::NotValid`] for a name that is no property name.
     pub(super) fn finish(self) -> Result<PeExtensions, PeDataError> {
         let mut extensions = PeExtensions::default();
         for (name, value) in self.left {
-            let valid = PropertyName::new(name).ok_or_else(|| {
-                PeDataError::new(Place::of(self.what).property(name), PeDataFault::BadName)
+            let valid = PropertyName::try_from(name).map_err(|e| {
+                PeDataError::new(
+                    Place::of(self.what).property(name),
+                    PeDataFault::NotValid(e.into()),
+                )
             })?;
             if valid.as_str().starts_with("x-") {
                 // The name starts `x-`, so the insert cannot refuse it.
