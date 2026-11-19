@@ -1,7 +1,7 @@
-use rand::rngs::StdRng;
-use rand::{RngExt, SeedableRng};
+use crate::testing::{noise, uniform};
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::{Mono, Planes, PlanesMut};
+use tutti_rt::SplitMix64;
 use tutti_units::{Db, SampleRate, Seconds};
 
 use super::*;
@@ -34,12 +34,12 @@ fn reachable() -> Vec<LimiterControls> {
             }
         }
     }
-    let mut rng = StdRng::seed_from_u64(24);
+    let mut rng = SplitMix64::new(24);
     all.extend((0..64).map(|_| {
         controls(
-            rng.random_range(-40.0..6.0),
-            rng.random_range(-20.0..3.0),
-            rng.random_range(0.0..1.0),
+            uniform(&mut rng, -40.0, 6.0),
+            uniform(&mut rng, -20.0, 3.0),
+            uniform(&mut rng, 0.0, 1.0),
         )
     }));
     all
@@ -124,14 +124,6 @@ fn run(bank: &mut LimiterBank<f32>, audio: &[&[f32]]) -> Vec<Vec<f32>> {
 /// The same signal on both channels, run with no lane.
 fn run_mono(bank: &mut LimiterBank<f32>, audio: &[f32]) -> Vec<f32> {
     run(bank, &[audio, audio]).remove(0)
-}
-
-/// `frames` of seeded noise in `-level..=level`.
-fn noise(seed: u64, frames: usize, level: f32) -> Vec<f32> {
-    let mut rng = StdRng::seed_from_u64(seed);
-    (0..frames)
-        .map(|_| rng.random_range(-level..=level))
-        .collect()
 }
 
 /// A level of `db` as an amplitude, from the definition.

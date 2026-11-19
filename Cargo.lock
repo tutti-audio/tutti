@@ -2698,7 +2698,6 @@ name = "tutti-dsp"
 version = "0.0.1"
 dependencies = [
  "libm",
- "rand",
  "rustfft",
  "thiserror 2.0.21",
  "tutti-buffers",
