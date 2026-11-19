@@ -1032,6 +1032,40 @@ fn a_value_that_is_not_finite_is_refused() {
     );
 }
 
+/// A finite phase past `MAX_CLOCK_PHASE` is refused by name, in either clock: two such
+/// phases of opposite sign (`+1e308`, `-1e308`) would make a carried anchor's jump `inf`
+/// and the next sum `inf - inf`. The bound itself compiles.
+#[test]
+fn a_clock_phase_past_the_bound_is_refused() {
+    let t1 = [(target(1), ranged(0.0, 1.0))];
+    let seconds = |phase: f64| Clock::Seconds {
+        rate: Hz::new(1.0),
+        phase: PhaseIncrement::new(phase),
+        anchor: None,
+    };
+    let beat = |phase: f64| Clock::Beats {
+        per_cycle: BeatsPerCycle::of(1.0),
+        phase: PhaseIncrement::new(phase),
+    };
+    for c in [
+        seconds(1e308),
+        seconds(-1e308),
+        beat(1e308),
+        beat(-MAX_CLOCK_PHASE * 2.0),
+    ] {
+        let unrouted = [(SourceKey(1), lfo(LfoShape::Sine, c))];
+        assert_eq!(
+            run(&unrouted, &[], &t1),
+            Err(CompileError::PhaseOutOfRange(SourceKey(1))),
+            "{c:?}"
+        );
+    }
+    for c in [seconds(MAX_CLOCK_PHASE), beat(-MAX_CLOCK_PHASE)] {
+        let unrouted = [(SourceKey(1), lfo(LfoShape::Sine, c))];
+        assert!(run(&unrouted, &[], &t1).is_ok(), "{c:?}");
+    }
+}
+
 /// A depth route's scaler reads its own LFO's dated clock, not the scaled
 /// LFO's: with a seconds-LFO scaler at another rate than the scaled one,
 /// the layer's `DepthBy` clock is `clocks[scaler]`, before and after a

@@ -590,8 +590,9 @@ mod tests {
         );
     }
 
-    /// The rounding bound of an `f32` render of a value in `[-1, 1]`: half an ulp, `2^-24`.
-    const F32_HALF_ULP: f64 = 5.960_464_477_539_063e-8;
+    /// The unit roundoff of `f32`, `2^-24`: the bound on the relative error of one rounding,
+    /// so on the absolute error of a value in `[-1, 1]`.
+    const F32_ROUNDOFF: f64 = 5.960_464_477_539_063e-8;
 
     fn random(seed: u64) -> Waveform {
         Waveform::Shape {
@@ -702,7 +703,7 @@ mod tests {
         );
         for k in 1..8 {
             assert!(
-                (f64::from(smooth[k * 256]) - w.raw_at(k as f64 - 1.0, false)).abs() < F32_HALF_ULP
+                (f64::from(smooth[k * 256]) - w.raw_at(k as f64 - 1.0, false)).abs() < F32_ROUNDOFF
             );
         }
     }
@@ -725,7 +726,7 @@ mod tests {
             let got = render_at(LfoNode::from(lfo), stopped_at(beat), 1)[0];
             let want = wave.raw_at(beat / 2.0 + 0.25, false);
             assert!(
-                (f64::from(got) - want).abs() < F32_HALF_ULP,
+                (f64::from(got) - want).abs() < F32_ROUNDOFF,
                 "beat {beat}: {got} vs {want}"
             );
         }
@@ -735,7 +736,7 @@ mod tests {
             let want = wave.raw_at(i as f64 / 256.0 + 0.25, false);
             let got = f64::from(free[i]);
             assert!(
-                (got - want).abs() < F32_HALF_ULP,
+                (got - want).abs() < F32_ROUNDOFF,
                 "frame {i}: {got} vs {want}"
             );
         }
@@ -826,17 +827,24 @@ mod tests {
         assert!(out[10] != out[110] && out[110] != out[210]);
     }
 
-    /// In an `f64` graph a free-running sawtooth at `1/64` of the rate is the ramp `k / 32 - 1`
-    /// of its first cycle. The wave and the depth are `f64` (`Waveform::raw_at`, `Depth`), so
-    /// this pins the node's plumbing in an `f64` graph, with nothing narrowed.
+    /// In an `f64` graph a free-running sine at a third of the rate is `sin(2 pi k / 3)`. The
+    /// wave and the depth are `f64` (`Waveform::raw_at`, `Depth`), so every frame holds the
+    /// closed form to `F64_TOLERANCE`, and a frame is not what an `f32` narrowing leaves (a
+    /// non-dyadic value, which `f32` cannot hold to 1e-9).
     #[test]
     fn in_an_f64_graph_the_lfo_writes_its_wave_unnarrowed() {
         use crate::test_support::{F64_TOLERANCE, RATE, render_f64};
-        let node = LfoNode::new(LfoShape::Sawtooth).with_rate(Hz::new(RATE.get() / 64.0));
+        let node = LfoNode::new(LfoShape::Sine).with_rate(Hz::new(RATE.get() / 3.0));
         let out = render_f64(node, RATE, &[], 64);
-        for (k, &got) in out[0].iter().enumerate().skip(1) {
-            let want = k as f64 / 32.0 - 1.0;
-            assert!((got - want).abs() <= F64_TOLERANCE, "frame {k}");
+        let mut beyond_f32 = false;
+        for (k, &got) in out[0].iter().enumerate() {
+            let want = (core::f64::consts::TAU * k as f64 / 3.0).sin();
+            assert!(
+                (got - want).abs() <= F64_TOLERANCE,
+                "frame {k}: {got} vs {want}"
+            );
+            beyond_f32 |= (got - f64::from(got as f32)).abs() > 1e-9;
         }
+        assert!(beyond_f32, "no frame is finer than an f32");
     }
 }

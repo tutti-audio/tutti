@@ -336,11 +336,16 @@ pub struct Compiled {
 }
 
 /// A clock holds no NaN: `compile` refuses a rate, period or phase that is
-/// not finite (an infinite phase would make a carried anchor's jump
-/// `inf − inf`), and an anchor's phase is a finite `Clock::cycles` plus
-/// phase jumps that are each a difference of two finite `f64`s, so their
-/// `f64` sum stays finite.
+/// not finite, and a phase whose magnitude exceeds [`MAX_CLOCK_PHASE`]. An
+/// anchor's phase is a finite `Clock::cycles` plus phase jumps, each a
+/// difference of two phases within that bound, so at most `2 * MAX_CLOCK_PHASE`
+/// (2^41): the sum stays finite for fewer than 2^900 edits, never `inf − inf`.
 impl Eq for Compiled {}
+
+/// The largest magnitude of a declared clock phase, in cycles (2^40): far past
+/// any musical offset, and small enough that a carried anchor's phase jumps
+/// (differences of two phases) stay finite.
+pub const MAX_CLOCK_PHASE: f64 = 1_099_511_627_776.0;
 
 /// Why [`compile`] refused, by name.
 ///
@@ -382,6 +387,11 @@ pub enum CompileError {
     /// whose points do not ascend in `[0, 1)` with finite values.
     #[error("source {}: a param out of its domain", .0.0)]
     BadSource(SourceKey),
+    /// A source whose clock phase is finite but past
+    /// [`MAX_CLOCK_PHASE`] cycles in magnitude: a phase jump between two such
+    /// edits could overflow.
+    #[error("source {}: a clock phase past MAX_CLOCK_PHASE cycles", .0.0)]
+    PhaseOutOfRange(SourceKey),
     /// An LFO declared with a rate anchor: anchors are the compiler's.
     #[error("source {}: a rate anchor is the compiler's to set", .0.0)]
     AnchorDeclared(SourceKey),
@@ -700,6 +710,12 @@ fn check_source(key: SourceKey, source: &Source) -> Result<(), CompileError> {
                     rate.get().is_finite() && phase.get().is_finite()
                 }
             };
+            let phase = match *clock {
+                Clock::Beats { phase, .. } | Clock::Seconds { phase, .. } => phase.get(),
+            };
+            if ok_clock && phase.abs() > MAX_CLOCK_PHASE {
+                return Err(CompileError::PhaseOutOfRange(key));
+            }
             let ok_wave = match wave {
                 Waveform::Shape { .. } => true,
                 Waveform::Const(v) => v.is_finite(),

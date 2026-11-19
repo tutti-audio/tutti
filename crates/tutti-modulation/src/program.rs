@@ -951,7 +951,7 @@ fn hash_cycle(n: f64, seed: u64) -> f64 {
     hash_bipolar((n as i64).wrapping_add(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) as i64))
 }
 
-/// Map an integer index to a stable pseudo-random value in `[-1, 1]`
+/// Map an integer index to a stable pseudo-random value in `[-1, 1)`
 /// ([`splitmix64`]).
 ///
 /// Addressable rather than sequential: the value for index `n` is
@@ -961,7 +961,7 @@ fn hash_cycle(n: f64, seed: u64) -> f64 {
 #[inline]
 pub(crate) fn hash_bipolar(n: i64) -> f64 {
     let z = splitmix64(n as u64);
-    // Top 53 bits → [0, 1) → [-1, 1].
+    // Top 53 bits → [0, 1) → [-1, 1).
     ((z >> 11) as f64 / (1u64 << 53) as f64) * 2.0 - 1.0
 }
 

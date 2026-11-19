@@ -2,10 +2,15 @@
 //! figures.
 
 use super::*;
+
 use tutti_curve::{Breakpoint, Trajectory};
 use tutti_curve::{Curvature, Exponent};
 use tutti_rt::Param;
 use tutti_units::{Azimuth, Hz, UnitParam};
+
+// The 1e-12 bounds: each figure is at most 50 f64 operations on values of at most 10
+// (the phase argument of 3 cycles times 2 pi, the span 3), each rounding at most 2^-53 (1.1e-16)
+// relative, so under 5e-14 absolute; 1e-12 leaves a factor 20 for libm's last-place error.
 
 const SR: f64 = 48_000.0;
 
