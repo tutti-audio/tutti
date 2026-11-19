@@ -263,7 +263,7 @@ mod tests {
     use crate::test_support::drive_kernel;
     use tutti_buffers::ChannelLayout;
     use tutti_dsp::{ChannelTimes, Routing};
-    use tutti_graph::contract::{assert_honest_tail, assert_param_fork, drive, prepared};
+    use tutti_graph::contract::{assert_declared_tail, assert_param_fork, drive, prepared};
     use tutti_graph::{Node, ParamNode};
     use tutti_units::{Gain, Latency, Samples, Tail, UnitParam};
 
@@ -715,7 +715,7 @@ mod tests {
             64,
         );
         assert_eq!(node.shape().tail, Tail::Unknown);
-        assert_honest_tail(&mut node, RATE);
+        assert_declared_tail(&mut node, RATE);
     }
 
     /// An `f64` block through a `DelayKernel::<f64>` at a whole delay `d` is the loop

@@ -356,12 +356,12 @@ fn a_closed_meter_leaves_no_op() {
     assert!(a.is_closed(), "the writer was freed with the old plan");
 }
 
-/// A dropped reader is reaped once, its op leaves the plan at the next
+/// A dropped reader is pruned once, its op leaves the plan at the next
 /// commit, and its cells are freed on the control side (a writer dropped in a
 /// block is a debug panic). Rendering with nobody reading writes nothing
 /// anyone sees and allocates nothing.
 #[test]
-fn a_reader_dropped_is_reaped_and_its_cells_freed_off_the_audio_thread() {
+fn a_reader_dropped_is_pruned_and_its_cells_freed_off_the_audio_thread() {
     let mut r = rig(1, true);
     constants(&mut r, &[0.5]);
     let m =
@@ -373,8 +373,8 @@ fn a_reader_dropped_is_reaped_and_its_cells_freed_off_the_audio_thread() {
     for _ in 0..3 {
         block(&mut r, 64);
     }
-    assert_eq!(r.ed.reap_meters(), 1);
-    assert_eq!(r.ed.reap_meters(), 0, "reaped once");
+    assert_eq!(r.ed.prune_meters(), 1);
+    assert_eq!(r.ed.prune_meters(), 0, "pruned once");
     commit(&mut r);
     assert_eq!(meter_ops(&r).1, 0);
     block(&mut r, 64);
@@ -593,12 +593,12 @@ fn a_narrowed_node_silences_the_lanes_past_its_width_and_commits() {
 }
 
 /// The pulse source: 1.0 for its first `len` frames, then silence.
-struct Pulse {
+struct Burst {
     len: usize,
     done: usize,
 }
 
-impl Node for Pulse {
+impl Node for Burst {
     fn shape(&self) -> Shape {
         Shape::source_unassigned(ChannelLayout::MONO)
     }
@@ -626,8 +626,8 @@ impl Node for Pulse {
 #[test]
 fn the_master_reads_at_the_outputs_time() {
     let mut r = rig(1, false);
-    r.ed.insert(NodeKey(1), "pulse", Unforkable(Pulse { len: 50, done: 0 }));
-    r.ed.insert(NodeKey(2), "pulse", Unforkable(Pulse { len: 50, done: 0 }));
+    r.ed.insert(NodeKey(1), "pulse", Unforkable(Burst { len: 50, done: 0 }));
+    r.ed.insert(NodeKey(2), "pulse", Unforkable(Burst { len: 50, done: 0 }));
     r.ed.insert(NodeKey(3), "lag", Forkable(Kind::Lag { latency: 30 }));
     r.ed.spec_mut().topology.edges.insert(
         InPort {

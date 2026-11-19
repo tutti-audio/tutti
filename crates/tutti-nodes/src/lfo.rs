@@ -377,7 +377,7 @@ mod tests {
     use super::*;
     use tutti_buffers::MaxBlock;
     use tutti_graph::contract::{Direct, assert_param_fork};
-    use tutti_graph::{Solo, TransportPosition};
+    use tutti_graph::{Standalone, TransportPosition};
     use tutti_units::UnitParam;
     use tutti_units::{Beat, Bpm, Samples};
 
@@ -421,7 +421,7 @@ mod tests {
     /// `transport` as its own (advancing, when it rolls, by the block).
     fn render_at(node: LfoNode, transport: TransportPosition, n: usize) -> Vec<f32> {
         let rate = SampleRate::SR_48K;
-        let mut solo = Solo::new(node, Prepare::new(rate, MaxBlock::of(Samples::new(256))));
+        let mut solo = Standalone::new(node, Prepare::new(rate, MaxBlock::of(Samples::new(256))));
         solo.renderer_mut().set_transport_fn(move |frame| {
             let mut clock = tutti_music::FrameClock::new(transport.beat(), transport.tempo, rate);
             if transport.playing {

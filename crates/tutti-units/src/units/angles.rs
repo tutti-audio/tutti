@@ -22,7 +22,7 @@ unit! {
     /// and no `clamp` (constraining a bearing to a range is what
     /// [`wrap`](Self::wrap) does correctly and what a saturating clamp does
     /// wrongly). Displacements are [`ArcDegrees`].
-    pub struct Azimuth(pub f64): Unit, Signed;
+    pub struct Azimuth(f64): Unit, Signed;
 }
 // `Neg` is meaningful — mirroring a bearing across the front axis, which is how
 // a left/right flip is expressed. Everything else is a named method:
@@ -88,7 +88,7 @@ unit! {
     /// straight up does not continue over the top and come out behind you at
     /// this layer, it stops. So ordering and `clamp` — traps on a circle — are
     /// exactly right here.
-    pub struct Elevation(pub f64): Unit, Ordered, Bounded, Signed;
+    pub struct Elevation(f64): Unit, Ordered, Bounded, Signed;
 }
 // NOT `Additive`: `Elevation + Elevation` is a position sum with no
 // origin, and it would also bypass the pole clamp. `tilt_by` is the addition.
@@ -154,7 +154,7 @@ unit! {
     /// is, this names how far to turn. Being a displacement, it has the full
     /// algebra its positions cannot have — two rotations compose, and a
     /// rotation scales.
-    pub struct ArcDegrees(pub f64): Unit, Ordered, Bounded, Additive, Signed, Scalable;
+    pub struct ArcDegrees(f64): Unit, Ordered, Bounded, Additive, Signed, Scalable;
 }
 // Deliberately NOT `Affine(ArcDegrees)`, though the pair looks
 // exactly like `Beat`/`BeatDuration` and the ability would expand cleanly. The
@@ -189,7 +189,7 @@ unit! {
     ///
     /// Turns rather than radians because that is what a shape table is indexed
     /// by; [`to_radians`](Self::to_radians) converts at the trig call.
-    pub struct Phase(pub f64): Unit, Ordered;
+    pub struct Phase(f64): Unit, Ordered;
 }
 // NOT `Bounded`: clamping a phase is never the right answer — a phase
 // past the end of a cycle belongs at the *start* of the next one, not pinned to
@@ -276,7 +276,7 @@ unit! {
     ///
     /// Signed: a negative increment runs a modulator backwards, which is
     /// exactly the case a sign-preserving `%` or `.fract()` wrap gets wrong.
-    pub struct PhaseIncrement(pub f64): Unit, Ordered, Bounded, Additive, Signed, Scalable;
+    pub struct PhaseIncrement(f64): Unit, Ordered, Bounded, Additive, Signed, Scalable;
 }
 // Deliberately NOT `Affine(PhaseIncrement)`, for the same reason
 // `Azimuth` declines it: the generated `+` does not wrap, and an unwrapped
@@ -385,7 +385,7 @@ unit! {
     /// three are bare `f64` at the call site, and feeding one where another is
     /// expected is silent: the oscillator keeps running, just at the wrong
     /// rate. It sounds like detuning, not like a bug.
-    pub struct Radians(pub f64): Unit, Additive, Signed, Scalable;
+    pub struct Radians(f64): Unit, Additive, Signed, Scalable;
 }
 // NOT `Ordered` / `Bounded`, for the reason `Azimuth` gives: a
 // circle has no ends, so `Radians(6.2) < Radians(0.1)` is false while the two

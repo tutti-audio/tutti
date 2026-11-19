@@ -5,7 +5,6 @@ use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
 use tutti_midi_ci::{EndpointName, ProductInstanceId};
-use tutti_midi_device::EntropyError;
 use tutti_midi_network::{
     Client, Command, Credentials, EndpointIdentity, Event, Host, HostConfig, NetworkEndpoint,
     Nonce, SessionConfig, Transmit, parse,
@@ -34,7 +33,7 @@ pub fn fixed_nonce() -> Nonce {
 }
 
 /// The nonce source of a Host that issues [`fixed_nonce`] every time.
-pub fn fixed_nonce_source() -> Result<Nonce, EntropyError> {
+pub fn fixed_nonce_source() -> Result<Nonce, getrandom::Error> {
     Ok(fixed_nonce())
 }
 
@@ -76,7 +75,7 @@ impl Sim {
         host: HostConfig,
         credentials: Credentials,
         client: SessionConfig,
-        nonces: fn() -> Result<Nonce, EntropyError>,
+        nonces: fn() -> Result<Nonce, getrandom::Error>,
     ) -> Self {
         let now = Instant::now();
         Self {

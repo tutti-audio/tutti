@@ -54,9 +54,7 @@ use crate::{HardwareMidiInputs, InputFault};
 use tutti_graph::EventInletNode;
 use tutti_midi_ci::ProductInstanceId;
 use tutti_midi_ci::{CiDeviceId, ProfileChange, ProfileId};
-use tutti_midi_device::{
-    DeviceId, DeviceInfo, EntropyError, Learned, MidiIdentity, SavedDevice, random_bytes,
-};
+use tutti_midi_device::{DeviceId, DeviceInfo, Learned, MidiIdentity, SavedDevice};
 use tutti_midi_runtime::{InputInlets, InputWriters};
 use tutti_ump::{GroupSpan, MidiGroup};
 
@@ -279,7 +277,7 @@ pub enum Polled {
     /// system gave no random bytes for its MUID. It is reported once until the
     /// device starts, and again if the Group leaves the device's Groups and
     /// returns; the Group is tried again at every poll.
-    CiNotStarted(DeviceId, MidiGroup, EntropyError),
+    CiNotStarted(DeviceId, MidiGroup, getrandom::Error),
 }
 
 impl MidiSession {
@@ -676,7 +674,12 @@ impl MidiSession {
         if self.generated_instance.is_none()
             && who.is_some_and(|who| who.identity.instance.is_none())
         {
-            self.generated_instance = random_bytes().ok().map(ProductInstanceId::from_random);
+            self.generated_instance = {
+                let mut bytes = [0u8; 16];
+                getrandom::fill(&mut bytes)
+                    .ok()
+                    .map(|()| ProductInstanceId::from_random(bytes))
+            };
         }
         self.presented = who;
     }

@@ -86,14 +86,14 @@ impl Held {
     pub(crate) fn drain_upto(&mut self, events: &mut Vec<Event>, max: usize) -> usize {
         let start = events.len();
         let room = |e: &Vec<Event>| e.len() < e.capacity() && e.len() - start < max;
-        let lifted = self.0.controllers_mut().lift_while(None, |ump| {
+        let released = self.0.controllers_mut().release_while(None, |ump| {
             if !room(events) {
                 return false;
             }
             events.push(Self::event(ump));
             true
         });
-        if !lifted {
+        if !released {
             return events.len() - start;
         }
         let keys = self.0.keys_mut();

@@ -61,7 +61,7 @@ use super::Curve;
 /// ```
 /// use tutti_buffers::MaxBlock;
 /// use tutti_units::{Amplitude, Beat, Bpm, SampleRate, Samples};
-/// use tutti_graph::{Prepare, Solo, TransportPosition};
+/// use tutti_graph::{Prepare, Standalone, TransportPosition};
 /// use tutti_nodes::automation::{Trajectory, AutomationLaneNode, Breakpoint};
 ///
 /// let mut trajectory: Trajectory<Amplitude> = Trajectory::new();
@@ -70,10 +70,10 @@ use super::Curve;
 ///
 /// // No inputs, one output (the curve's value).
 /// let lane = AutomationLaneNode::new(trajectory);
-/// let mut solo = Solo::<_, f32>::new(lane, Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64))));
-/// solo.renderer_mut()
+/// let mut standalone = Standalone::<_, f32>::new(lane, Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64))));
+/// standalone.renderer_mut()
 ///     .set_transport(TransportPosition::new(false, Bpm::of(120.0), Beat::new(2.0), None));
-/// let out = solo.render(1);
+/// let out = standalone.render(1);
 /// assert!((out[0][0] - 0.5).abs() < 1e-3, "midpoint of a 0..1 ramp, got {}", out[0][0]);
 /// ```
 pub struct AutomationLaneNode {
@@ -204,7 +204,7 @@ mod tests {
     use std::sync::atomic::Ordering;
     use tutti_buffers::MaxBlock;
     use tutti_curve::{Breakpoint, Trajectory};
-    use tutti_graph::{Solo, TransportPosition};
+    use tutti_graph::{Standalone, TransportPosition};
     use tutti_units::{Bpm, Hz, SampleRate, Samples};
 
     fn ramp_trajectory() -> Trajectory<Hz> {
@@ -218,7 +218,7 @@ mod tests {
     /// `frames` of `lane` through a graph at 48 kHz in one block, the
     /// transport `transport` at the block's start.
     fn render(lane: AutomationLaneNode, transport: TransportPosition, frames: usize) -> Vec<f32> {
-        let mut solo = Solo::new(
+        let mut solo = Standalone::new(
             lane,
             Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(frames))),
         );

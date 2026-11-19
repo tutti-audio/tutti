@@ -273,7 +273,7 @@ fn tail_time_is_readable_before_initialize() {
     let tail = au
         .get_tail_time()
         .expect("tail time must be readable in the Loaded state");
-    assert!(tail.get() > 1.0, "got {}s", tail.0);
+    assert!(tail.get() > 1.0, "got {}s", tail.get());
 }
 
 // ----------------------------------------------------------- host callbacks

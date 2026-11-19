@@ -65,7 +65,7 @@ fn automation_reaches_the_plugin_through_its_event_input() {
         .render_mode(render::TAG_ONLY)
         .gain_enabled(true);
     let probe = load_probe(SAMPLE_RATE);
-    let automation = ControlLaneNode::for_foreign(
+    let automation = ControlLaneNode::by_id(
         GAIN,
         ControlProgram::from_curve(Arc::new(Constant(0.75))),
         None,
@@ -280,7 +280,7 @@ fn follows(
 #[test]
 fn a_scheduled_segment_drives_a_plugin_parameter_to_its_end() {
     const AT: u64 = 300;
-    let seg = ParamSegment::foreign(
+    let seg = ParamSegment::by_id(
         GAIN,
         0.5,
         0.75,
@@ -308,15 +308,15 @@ fn a_scheduled_segment_drives_a_plugin_parameter_to_its_end() {
 #[test]
 fn a_shaped_ramp_drives_a_plugin_parameter_along_its_shape() {
     const AT: u64 = 300;
-    let step = ParamRamp::foreign(GAIN, 0.5, Samples::new(0));
-    let ramp = ParamRamp::foreign(GAIN, 0.75, Samples::new(1000))
+    let step = ParamRamp::by_id(GAIN, 0.5, Samples::new(0));
+    let ramp = ParamRamp::by_id(GAIN, 0.75, Samples::new(1000))
         .with_shape(Law::PowerIn(Exponent::of(2.0)));
     let (out, latency) = render_gain(
         None,
         &[(100, ParamKind::Ramp(step)), (AT, ParamKind::Ramp(ramp))],
         10,
     );
-    let seg = ParamSegment::foreign(
+    let seg = ParamSegment::by_id(
         GAIN,
         0.5,
         0.75,
@@ -340,14 +340,14 @@ fn a_shaped_ramp_drives_a_plugin_parameter_along_its_shape() {
 fn an_interrupting_ramp_stops_a_segment_on_a_plugin() {
     const AT: u64 = 300;
     const CUT: u64 = 800;
-    let seg = ParamSegment::foreign(
+    let seg = ParamSegment::by_id(
         GAIN,
         0.5,
         0.75,
         Samples::new(1000),
         Law::PowerIn(Exponent::of(2.0)),
     );
-    let ramp = ParamRamp::foreign(GAIN, 0.25, Samples::new(0));
+    let ramp = ParamRamp::by_id(GAIN, 0.25, Samples::new(0));
     let (out, latency) = render_gain(
         None,
         &[(AT, ParamKind::Segment(seg)), (CUT, ParamKind::Ramp(ramp))],
@@ -364,7 +364,7 @@ fn an_interrupting_ramp_stops_a_segment_on_a_plugin() {
 }
 
 /// **An automation lane drives a plugin parameter along its curve.** A lane
-/// sending an exponential trajectory as segments (`for_foreign`) gives what a
+/// sending an exponential trajectory as segments (`by_id`) gives what a
 /// scheduled segment gives: the gain follows the curve within one point
 /// spacing and lands exactly on the end gain on the trajectory's last frame.
 #[test]
@@ -377,7 +377,7 @@ fn a_lane_drives_a_plugin_parameter_along_its_curve() {
     ));
     // 120 BPM at 48 kHz: 24 000 frames a beat, so frame 1500.
     env.add_breakpoint(Breakpoint::new(Beat::new(0.0625), Hz::new(0.75)));
-    let lane = ControlLaneNode::for_foreign(
+    let lane = ControlLaneNode::by_id(
         GAIN,
         ControlProgram::from_curve(Arc::new(env.clone())),
         None,

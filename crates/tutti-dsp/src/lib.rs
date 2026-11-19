@@ -116,8 +116,7 @@
 //! - **Control and small kernels**: [`Glide`], a value that moves to its target in steps
 //!   (with [`Lerp`] and [`Steps`]); [`smooth_toward`], the one-pole step; [`COEFF_INTERVAL`] and
 //!   [`CHANNEL_GROUP`], the solve interval and channel grouping of the filter banks; [`lerp`],
-//!   [`cubic_hermite`] and [`parabolic_peak`]; [`rms`]; [`Xorshift32`], a seeded noise
-//!   source.
+//!   [`cubic_hermite`] and [`parabolic_peak`]; [`rms`].
 //!
 //! ## Scope
 //!
@@ -176,7 +175,6 @@ mod stft;
 #[cfg(test)]
 mod testing;
 mod viterbi;
-mod xorshift;
 
 pub use bands::{log_band_edges, octave_band_edges};
 pub use beat::track_beat_frames;
@@ -269,4 +267,3 @@ pub use stft::window::{CosineWindow, Window};
 pub use tremolo::{AutoPan, AutoPanControls, Tremolo, TremoloControls};
 pub use viterbi::sticky_viterbi;
 pub use waveshape::{Antialiasing, ShapeKind, WaveshaperBank, WaveshaperControls};
-pub use xorshift::Xorshift32;

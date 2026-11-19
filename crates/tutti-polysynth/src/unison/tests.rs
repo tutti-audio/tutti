@@ -133,6 +133,29 @@ fn test_phase_randomization() {
     assert!(!all_same, "Phases should be randomized");
 }
 
+/// Two engines of one config draw the same phases, and the voices of one draw have distinct ones.
+#[test]
+fn drawn_phases_are_the_same_for_a_seed_and_distinct_per_voice() {
+    let draw = || -> Vec<f64> {
+        UnisonEngine::new(UnisonConfig {
+            voice_count: UnisonVoices::of(8),
+            phase_randomize: true,
+            ..Default::default()
+        })
+        .randomize_phases()
+        .iter()
+        .map(|p| p.phase_offset.get())
+        .collect()
+    };
+    let (a, b) = (draw(), draw());
+    assert_eq!(a, b, "a seed reproduces its phases");
+    for (i, x) in a.iter().take(8).enumerate() {
+        for y in &a[..i] {
+            assert_ne!(x, y, "two voices drew one phase");
+        }
+    }
+}
+
 #[test]
 fn test_config_update() {
     let mut unison = UnisonEngine::new(UnisonConfig {

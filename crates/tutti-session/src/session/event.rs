@@ -144,7 +144,7 @@ pub enum SessionEvent {
         /// output port owns: events a plugin took in and did not deliver, a
         /// scheduled command that did not fit.
         port: Option<u16>,
-        /// How many events were refused or withheld.
+        /// How many events were refused or skipped.
         count: u64,
         /// How many of them a node says it then wrote (a note-off it sent
         /// again): `count - recovered` never arrived, summed over updates.

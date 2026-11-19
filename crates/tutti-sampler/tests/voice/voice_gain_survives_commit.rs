@@ -37,7 +37,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::Wave;
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    EventOut, ForkMode, ForkTarget, ParamIn, ParamRange, Prepare, Solo, TransportPosition,
+    EventOut, ForkMode, ForkTarget, ParamIn, ParamRange, Prepare, Standalone, TransportPosition,
 };
 use tutti_modulation::{Amount, Clock, ControlProgram, Law, Layer, LayerId, Polarity};
 use tutti_nodes::automation::ControlLaneNode;
@@ -79,7 +79,7 @@ fn rolling(frame: Frame) -> TransportPosition {
 /// transport renders silence, and every gain comparison in this file would
 /// compare 0.0 against 0.0. A setup without a rolling clock fails on the
 /// guard below, which is what it is for.
-fn solo_voice() -> Solo<VoiceNodeHandle<f32>> {
+fn solo_voice() -> Standalone<VoiceNodeHandle<f32>> {
     let voice = Voice {
         source: VoiceSource::Memory(
             MemorySource::placed(flat_wave(48_000), VoiceWindow::from(Beat::new(0.0)))
@@ -87,7 +87,7 @@ fn solo_voice() -> Solo<VoiceNodeHandle<f32>> {
         ),
         play: Playback::default(),
     };
-    let mut solo = Solo::new(
+    let mut solo = Standalone::new(
         VoiceNode::with_channels(voice, ChannelLayout::MONO),
         Prepare::new(RATE, MaxBlock::of(Samples::new(BLOCK))),
     );
@@ -96,7 +96,7 @@ fn solo_voice() -> Solo<VoiceNodeHandle<f32>> {
 }
 
 /// Every sample of the next block.
-fn block(solo: &mut Solo<VoiceNodeHandle<f32>>) -> Vec<f32> {
+fn block(solo: &mut Standalone<VoiceNodeHandle<f32>>) -> Vec<f32> {
     solo.render(BLOCK).swap_remove(0)
 }
 
@@ -301,7 +301,7 @@ fn drive_volume(ed: &mut tutti_graph::Editor, at: ParamIn, knob: tutti_rt::Param
 /// cell still holds 0.25.
 #[test]
 fn a_lane_drives_a_memory_sources_gain_around_its_cell() {
-    let mut s = Solo::new(
+    let mut s = Standalone::new(
         MemorySource::with_channels(flat_wave(48_000), ChannelLayout::MONO)
             .expect("a placeable wave"),
         Prepare::new(RATE, MaxBlock::of(Samples::new(BLOCK))),

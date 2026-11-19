@@ -33,7 +33,7 @@ Two things that turned up while doing tier 5, neither on this list:
 - **`samples_per_beat`'s missing guard was worse than "unreachable".** The
   audit called it a deletion candidate because it has no production callers.
   Mutation-testing the fix shows the old form returned
-  `Samples(18446744073709551615)` — `usize::MAX`, from `inf` through a
+  `Samples::new(18446744073709551615)` — `usize::MAX`, from `inf` through a
   saturating cast, as a frame count. Typing it beat deleting it: the next
   caller would have found that the hard way.
 
@@ -115,7 +115,7 @@ are not the same number.
 **Measured in the synth** on `Tuning::just_intonation`, note 60, full up-bend:
 
 ```
-held Hz(297.00003) vs struck Hz(296.33002)   — 3.9 cents apart
+held Hz::new(297.00003) vs struck Hz::new(296.33002)   — 3.9 cents apart
 ```
 
 (An earlier estimate in this document said 11.7 cents. That came from a

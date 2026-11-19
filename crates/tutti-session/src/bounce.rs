@@ -107,7 +107,7 @@ pub enum Range {
     Frames(Frame, Frame),
 }
 
-/// `Beat(0.0)..Beat(8.0)` is [`Range::Beats`]: the span from one beat to the
+/// `Beat::new(0.0)..Beat::new(8.0)` is [`Range::Beats`]: the span from one beat to the
 /// other, end exclusive as a Rust range is.
 impl From<std::ops::Range<Beat>> for Range {
     fn from(r: std::ops::Range<Beat>) -> Self {
@@ -115,7 +115,7 @@ impl From<std::ops::Range<Beat>> for Range {
     }
 }
 
-/// `Seconds(0.0)..Seconds(2.0)` is [`Range::Seconds`].
+/// `Seconds::new(0.0)..Seconds::new(2.0)` is [`Range::Seconds`].
 impl From<std::ops::Range<Seconds>> for Range {
     fn from(r: std::ops::Range<Seconds>) -> Self {
         Self::Seconds(r.start, r.end)
@@ -2154,7 +2154,7 @@ mod tests {
         assert!(out[0].iter().all(|&s| s == 0.5), "the edit is heard");
     }
 
-    /// **`Beat(a)..Beat(b)` is the range from beat `a` to beat `b`**, and the
+    /// **`Beat::new(a)..Beat::new(b)` is the range from beat `a` to beat `b`**, and the
     /// same for seconds and frames.
     #[test]
     fn a_rust_range_is_a_range() {

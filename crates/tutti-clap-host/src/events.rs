@@ -47,7 +47,7 @@ pub(crate) const EDIT_CAPACITY: usize = 256;
 
 use crate::types::RtNoteExpressions;
 use tutti_midi_protocol::{
-    Narrower, PitchBendSensitivity, Translator, narrow, narrow_velocity, widen,
+    Midi1Translator, Midi2Translator, PitchBendSensitivity, narrow, narrow_velocity, widen,
 };
 use tutti_ump::ControlValue;
 use tutti_ump::{
@@ -651,7 +651,7 @@ impl ClapEvent {
     /// raw MIDI-1 bytes. Returns `None` for non-MIDI variants (NoteExpression,
     /// ParamValue, etc.).
     #[must_use]
-    pub fn to_midi(&self, translator: &mut Translator) -> Option<WireMidi> {
+    pub fn to_midi(&self, translator: &mut Midi2Translator) -> Option<WireMidi> {
         match self {
             ClapEvent::NoteOn(e) => {
                 let (channel, note) = note_address(e.channel, e.key, e.note_id)?;
@@ -849,7 +849,7 @@ impl InputRooms {
 
     /// Room for the MIDI a node sent at most `event_input` events a block can
     /// stage: each event is one UMP, and each UMP narrows to at most
-    /// [`Narrower::MAX_MESSAGES`] MIDI 1.0 messages, one event each, so no
+    /// [`Midi1Translator::MAX_MESSAGES`] MIDI 1.0 messages, one event each, so no
     /// block the graph sends is refused.
     ///
     /// `event_input` is the bound the node is declared for
@@ -861,7 +861,7 @@ impl InputRooms {
     /// 154 KB for the MIDI share, whatever the block.
     #[must_use]
     pub const fn for_port(event_input: NonZeroU32) -> Self {
-        Self::new((event_input.get() as usize).saturating_mul(Narrower::MAX_MESSAGES))
+        Self::new((event_input.get() as usize).saturating_mul(Midi1Translator::MAX_MESSAGES))
     }
 
     /// The parameter events one
@@ -941,7 +941,7 @@ pub struct InputEventList {
     notes: PerNoteState,
     /// The MIDI 2.0 to MIDI 1.0 state of every `clap_event_midi` sent: which
     /// parameter and bank each channel of each Group has had selected.
-    narrower: Narrower,
+    midi1_translator: Midi1Translator,
     /// The input note ports the plugin has: a Group is note port `group`.
     ports: usize,
     /// Bit `n` is set when note port `n` takes the MIDI dialect only.
@@ -983,7 +983,7 @@ impl InputEventList {
             midi_dropped: 0,
             refused: 0,
             notes: Self::per_note_state(1),
-            narrower: Narrower::new(),
+            midi1_translator: Midi1Translator::new(),
             ports: 1,
             midi_ports: 0,
             midi_capable: u16::MAX,
@@ -1028,7 +1028,7 @@ impl InputEventList {
             .enumerate()
             .fold(0, |mask, (port, &midi)| mask | (u16::from(midi) << port));
         self.notes = Self::per_note_state(ports);
-        self.narrower.reset();
+        self.midi1_translator.reset();
     }
 
     /// Sets which input note ports declare the MIDI dialect, one entry each
@@ -1063,11 +1063,13 @@ impl InputEventList {
     }
 
     /// The events one block's MIDI room holds: its messages over
-    /// [`Narrower::MAX_MESSAGES`], the bound [`InputRooms::for_port`] was
+    /// [`Midi1Translator::MAX_MESSAGES`], the bound [`InputRooms::for_port`] was
     /// built from. `None` for a list with no MIDI room.
     #[must_use]
     pub fn event_input(&self) -> Option<NonZeroU32> {
-        NonZeroU32::new(u32::try_from(self.midi_room / Narrower::MAX_MESSAGES).unwrap_or(u32::MAX))
+        NonZeroU32::new(
+            u32::try_from(self.midi_room / Midi1Translator::MAX_MESSAGES).unwrap_or(u32::MAX),
+        )
     }
 
     /// How many more MIDI events the block can stage: the MIDI room less
@@ -1142,12 +1144,12 @@ impl InputEventList {
 
     /// The plugin is being reset: it has forgotten its notes and its MIDI 1.0
     /// state. Drops what was held per note (every value, every note that still
-    /// responds, every bend sensitivity), resets the narrower, and
+    /// responds, every bend sensitivity), resets the MIDI 1.0 translator, and
     /// drops the open SysEx ([`reset_sysex`](Self::reset_sysex)). Never
     /// allocates.
     pub fn reset_midi(&mut self) {
         self.notes.clear();
-        self.narrower.reset();
+        self.midi1_translator.reset();
         self.sysex.reset();
     }
 
@@ -1188,7 +1190,7 @@ impl InputEventList {
     /// event for it. Every other CLAP-less message with a MIDI 1.0 form (a
     /// controller, channel pitch bend and pressure, a program change, an RPN
     /// or NRPN) is `clap_event_midi` bytes through the list's
-    /// [`Narrower`]: an RPN or NRPN is the Control Changes of M2-104
+    /// [`Midi1Translator`]: an RPN or NRPN is the Control Changes of M2-104
     /// Appendix D.2.3 and a Program Change with a bank is Bank Select MSB and LSB
     /// then the Program Change (D.2.4). UMP variants
     /// without a CLAP or MIDI 1.0 form are silently skipped. Add a block's MIDI
@@ -1335,7 +1337,7 @@ impl InputEventList {
             }
             // CC, channel pitch bend, channel pressure, program change (its bank
             // as Control Changes), and every RPN and NRPN: MIDI 1.0 bytes.
-            // CLAP has no event for a relative controller; the narrower sends
+            // CLAP has no event for a relative controller; the MIDI 1.0 translator sends
             // nothing for it.
             Voice2::ControlChange { .. }
             | Voice2::PitchBend(_)
@@ -1351,18 +1353,18 @@ impl InputEventList {
     }
 
     /// `message` as `clap_event_midi` on its Group's note port, through the
-    /// narrower: all of its messages fit the list's room or none is staged (a
+    /// The MIDI 1.0 translator: all of its messages fit the list's room or none is staged (a
     /// bank is not sent without its program).
     fn add_bytes(&mut self, time: u32, address: Address, message: Message) {
         let Some(port) = self.port_of(address) else {
             return;
         };
-        // One feed sends at most `Narrower::MAX_MESSAGES` messages.
-        let mut staged: RtVec<[u8; 3], { Narrower::MAX_MESSAGES }> = RtVec::new();
-        self.narrower.feed(message, |bytes| {
+        // One feed sends at most `Midi1Translator::MAX_MESSAGES` messages.
+        let mut staged: RtVec<[u8; 3], { Midi1Translator::MAX_MESSAGES }> = RtVec::new();
+        self.midi1_translator.feed(message, |bytes| {
             staged.push(bytes.padded());
         });
-        // A feed past the bound is the narrower's bug, never a block's data:
+        // A feed past the bound is the MIDI 1.0 translator's bug, never a block's data:
         // it is counted rather than sent short.
         if staged.is_overflowed() {
             self.midi_dropped += 1;
@@ -2102,7 +2104,7 @@ impl OutputEventList {
     /// and expressions that make no message (vibrato and expression included).
     pub fn fill_midi_events(
         &mut self,
-        translator: &mut Translator,
+        translator: &mut Midi2Translator,
         out: &mut RtMidiEvents,
     ) -> usize {
         out.clear();
@@ -2611,7 +2613,7 @@ mod tests {
 
     /// **The room `InputRooms::for_port` gives holds every message a full
     /// port narrows to.** A port of 64 UMPs, each a Program Change with a bank
-    /// (three MIDI 1.0 messages, so under `Narrower::MAX_MESSAGES`), stages
+    /// (three MIDI 1.0 messages, so under `Midi1Translator::MAX_MESSAGES`), stages
     /// all 192 messages with none refused; one more UMP past the port's room
     /// is the only thing that would be.
     #[test]
@@ -2634,16 +2636,16 @@ mod tests {
         }
         assert_eq!(list.midi_dropped(), 0);
         assert_eq!(list.events().len(), UMPS * 3);
-        assert!(list.events().len() <= UMPS * Narrower::MAX_MESSAGES);
+        assert!(list.events().len() <= UMPS * Midi1Translator::MAX_MESSAGES);
     }
 
     /// **A list built from a declared bound of `n` events holds `n` x
-    /// `Narrower::MAX_MESSAGES` MIDI events**: that many note-ons stage with
+    /// `Midi1Translator::MAX_MESSAGES` MIDI events**: that many note-ons stage with
     /// none dropped, and one more is refused and counted.
     #[test]
     fn a_declared_bound_sizes_the_midi_room_to_exactly_its_messages() {
         const N: u32 = 8;
-        let room = N as usize * Narrower::MAX_MESSAGES;
+        let room = N as usize * Midi1Translator::MAX_MESSAGES;
         let mut list = InputEventList::new(InputRooms::for_port(NonZeroU32::new(N).unwrap()));
         let note = (at(0), midi::note_on(MidiChannel::FIRST, 60, 0x8000));
         for _ in 0..room {
@@ -2749,7 +2751,7 @@ mod tests {
     #[test]
     fn a_plugin_midi1_note_on_at_velocity_zero_is_a_note_off_at_half() {
         let midi = ClapEvent::midi(4, 0, [0x93, 61, 0])
-            .to_midi(&mut Translator::new())
+            .to_midi(&mut Midi2Translator::new())
             .expect("converts");
         assert_eq!(midi.offset, 4);
         match message(&midi) {
@@ -2858,7 +2860,7 @@ mod tests {
     }
 
     /// **A refused message leaves an MPE note's member channel as it was**: the
-    /// narrower's note allocation survives a message the list has no port for,
+    /// The MIDI 1.0 translator's note allocation survives a message the list has no port for,
     /// so the note's per-note bend still goes to its channel (M2-104 D.2.8).
     #[test]
     fn a_refused_message_keeps_an_mpe_notes_channel() {
@@ -2873,7 +2875,7 @@ mod tests {
         )
         .unwrap();
         let mut list = InputEventList::new(InputRooms::new(1024));
-        list.narrower = Narrower::with_mode(TranslationMode {
+        list.midi1_translator = Midi1Translator::with_mode(TranslationMode {
             extremes: ExtremeValues::Scaled,
             per_note: PerNoteTranslation::Mpe(zone),
         });
@@ -2940,12 +2942,12 @@ mod tests {
         output.events.push(ClapEvent::note_on(2, 1, 60, 0.75));
         output.events.push(ClapEvent::note_off(3, 1, 60, 0.5));
         let mut pool = RtMidiEvents::new();
-        output.fill_midi_events(&mut Translator::new(), &mut pool);
+        output.fill_midi_events(&mut Midi2Translator::new(), &mut pool);
         let filled = pool.len();
         assert!(filled > 15, "{filled} events");
         assert_no_alloc::assert_no_alloc(|| {
             for _ in 0..4 {
-                output.fill_midi_events(&mut Translator::new(), &mut pool);
+                output.fill_midi_events(&mut Midi2Translator::new(), &mut pool);
             }
         });
         assert_eq!(pool.len(), filled);
@@ -3058,14 +3060,14 @@ mod tests {
     fn a_note_events_channel_and_key_are_masked_to_the_wire_widths() {
         // Channel 19 is 3 in 4 bits, key 130 is 2 in 7 bits.
         let wire = ClapEvent::note_on(5, 19, 130, 0.5)
-            .to_midi(&mut Translator::new())
+            .to_midi(&mut Midi2Translator::new())
             .unwrap();
         assert_eq!(
             fx::key_of(&wire.ump),
             Some((MidiChannel::of(3), NoteNumber::of(2), true))
         );
         let wire = ClapEvent::note_off(5, 31, 255, 0.5)
-            .to_midi(&mut Translator::new())
+            .to_midi(&mut Midi2Translator::new())
             .unwrap();
         assert_eq!(
             fx::key_of(&wire.ump),
@@ -3898,7 +3900,7 @@ mod tests {
     fn expressions_return_as_their_per_note_controller_numbers() {
         let controller = |ty| {
             let clap = per_note_expression(0, ty, MidiChannel::of(1), NoteNumber::of(64), 0.5)?;
-            match message(&clap.to_midi(&mut Translator::new())?) {
+            match message(&clap.to_midi(&mut Midi2Translator::new())?) {
                 Message::Midi2(_, Voice2::RegisteredPerNote { controller, .. }) => Some(controller),
                 other => panic!("expected a registered per-note controller, got {other:?}"),
             }
@@ -3930,7 +3932,7 @@ mod tests {
             )
             .expect("Volume is a named CLAP dimension");
             let midi = clap
-                .to_midi(&mut Translator::new())
+                .to_midi(&mut Midi2Translator::new())
                 .expect("volume -> midi");
             match message(&midi) {
                 Message::Midi2(_, Voice2::RegisteredPerNote { value, .. }) => {
@@ -4045,7 +4047,7 @@ mod tests {
         )
         .expect("Tuning is a named CLAP dimension");
         let midi = clap
-            .to_midi(&mut Translator::new())
+            .to_midi(&mut Midi2Translator::new())
             .expect("tuning -> midi");
         assert_eq!(midi.offset, 7);
         match message(&midi) {
@@ -4242,7 +4244,7 @@ mod tests {
         // The CLAP → MIDI-2 direction must preserve release velocity too.
         let clap = ClapEvent::note_off(2, 1, 48, 0.5);
         let midi = clap
-            .to_midi(&mut Translator::new())
+            .to_midi(&mut Midi2Translator::new())
             .expect("note off -> midi");
         match message(&midi) {
             Message::Midi2(_, Voice2::NoteOff { velocity, .. }) => {
@@ -4289,7 +4291,9 @@ mod tests {
 
         // A generic CLAP Midi event carrying raw MIDI-1 CC bytes (0xB1, 74, 100).
         let clap = ClapEvent::midi(0, 0, [0xB1, 74, 100]);
-        let midi = clap.to_midi(&mut Translator::new()).expect("cc decodes");
+        let midi = clap
+            .to_midi(&mut Midi2Translator::new())
+            .expect("cc decodes");
         match message(&midi) {
             Message::Midi2(address, Voice2::ControlChange { controller, value }) => {
                 assert_eq!(address.channel.get(), 1);
@@ -4305,7 +4309,9 @@ mod tests {
         // A System real-time message (Timing Clock 0xF8) has no CV form and must
         // pass through `widened` unchanged, not be dropped or promoted.
         let clap = ClapEvent::midi(0, 0, [0xF8, 0, 0]);
-        let midi = clap.to_midi(&mut Translator::new()).expect("clock decodes");
+        let midi = clap
+            .to_midi(&mut Midi2Translator::new())
+            .expect("clock decodes");
         assert!(
             matches!(message(&midi), Message::System(_, System::TimingClock)),
             "timing clock should stay a System Real-Time message"
@@ -4318,7 +4324,7 @@ mod tests {
         // the note and full-width velocity (no 7-bit squash).
         let clap = ClapEvent::note_on(3, 2, 64, 0.75);
         let midi = clap
-            .to_midi(&mut Translator::new())
+            .to_midi(&mut Midi2Translator::new())
             .expect("note on -> midi");
         assert_eq!(midi.offset, 3);
         match message(&midi) {
@@ -4350,7 +4356,7 @@ mod tests {
         }
 
         let mut pool = RtMidiEvents::new();
-        output.fill_midi_events(&mut Translator::new(), &mut pool);
+        output.fill_midi_events(&mut Midi2Translator::new(), &mut pool);
 
         assert_eq!(
             pool.len(),
@@ -4381,7 +4387,7 @@ mod tests {
 
         let mut pool = RtMidiEvents::new();
         for _ in 0..256 {
-            output.fill_midi_events(&mut Translator::new(), &mut pool);
+            output.fill_midi_events(&mut Midi2Translator::new(), &mut pool);
             assert_eq!(pool.len(), RT_MIDI_CAPACITY);
             assert_eq!(pool.remaining(), 0);
         }
@@ -4492,7 +4498,7 @@ mod tests {
             .push(ClapEvent::note_on(6, 2, 62, 1.0).addressed(40, -1));
 
         let mut pool = RtMidiEvents::new();
-        let lost = list.fill_midi_events(&mut Translator::new(), &mut pool);
+        let lost = list.fill_midi_events(&mut Midi2Translator::new(), &mut pool);
         assert_eq!(lost, 2, "the two events from ports with no Group");
         let groups: Vec<u8> = pool
             .iter()
@@ -4517,7 +4523,7 @@ mod tests {
     #[test]
     fn a_parameter_run_assembles_across_blocks() {
         let cc = |controller, value| ClapEvent::midi(0, 0, [0xB0, controller, value]);
-        let mut translator = Translator::new();
+        let mut translator = Midi2Translator::new();
         let mut pool = RtMidiEvents::new();
 
         let mut first = OutputEventList::new(OutputRooms::new(256).params(64, &[]));
@@ -4543,7 +4549,7 @@ mod tests {
     #[test]
     fn a_run_through_a_full_list_still_assembles() {
         let cc = |controller, value| ClapEvent::midi(0, 0, [0xB0, controller, value]);
-        let mut translator = Translator::new();
+        let mut translator = Midi2Translator::new();
         let mut pool = RtMidiEvents::new();
         let mut first = OutputEventList::new(OutputRooms::new(256).params(64, &[]));
         for key in 0..RT_MIDI_CAPACITY as i16 {
@@ -4584,7 +4590,7 @@ mod tests {
             list.events.push(e);
         }
         let mut pool = RtMidiEvents::new();
-        let lost = list.fill_midi_events(&mut Translator::new(), &mut pool);
+        let lost = list.fill_midi_events(&mut Midi2Translator::new(), &mut pool);
         assert!(pool.is_empty());
         assert_eq!(lost, 3, "each is counted as lost MIDI");
     }
@@ -4632,14 +4638,14 @@ mod tests {
         // A status byte that is no message.
         list.events.push(ClapEvent::midi(0, 0, [0x00, 1, 2]));
         let mut pool = RtMidiEvents::new();
-        let lost = list.fill_midi_events(&mut Translator::new(), &mut pool);
+        let lost = list.fill_midi_events(&mut Midi2Translator::new(), &mut pool);
         assert!(pool.is_empty());
         assert_eq!(lost, 7, "each is counted as lost MIDI");
 
         // An RPN select is held by the translator, which is no loss.
         let mut held = OutputEventList::new(OutputRooms::new(256).params(64, &[]));
         held.events.push(ClapEvent::midi(0, 0, [0xB0, 101, 0]));
-        let lost = held.fill_midi_events(&mut Translator::new(), &mut pool);
+        let lost = held.fill_midi_events(&mut Midi2Translator::new(), &mut pool);
         assert_eq!(lost, 0);
     }
 

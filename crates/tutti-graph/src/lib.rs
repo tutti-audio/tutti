@@ -691,14 +691,14 @@ pub mod testing;
 mod time;
 mod wake;
 
-pub use builder::{GraphBuilder, Renderer, Solo};
+pub use builder::{GraphBuilder, Renderer, Standalone};
 pub use command::{CANCEL_CAPACITY, COMMAND_CAPACITY, CommandId, ScheduleError, Scheduled};
 pub use compile::{CompileError, CycleEdge, Shapes, VerifyError, compile};
 pub use controls::{ParamFork, ParamNode, ParamSet, ParamSetBuilder, Params, param_parts};
 pub use cost::{Cost, Schedule, Work};
 pub use declare::{HasParam, HasParams, ParamUnit, Scalar};
 pub use editor::{
-    CloseError, CommitError, Editor, Limits, MissingSource, Placed, Rewired, RootGate, Unwired,
+    CloseError, CommitError, Editor, Inserted, Limits, MissingSource, Rewired, RootGate, Unwired,
 };
 pub use event::{
     Event, EventDensity, EventKind, EventOrderError, EventRejected, EventWriter, Harmony,

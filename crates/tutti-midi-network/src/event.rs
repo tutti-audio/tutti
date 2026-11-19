@@ -2,7 +2,6 @@
 
 use std::net::SocketAddr;
 
-use tutti_midi_device::EntropyError;
 use tutti_ump::Ump;
 
 use crate::{ByeReason, EndpointIdentity, Header, NakReason, SequenceNumber};
@@ -100,7 +99,7 @@ pub enum Event {
         /// The peer's address.
         peer: SocketAddr,
         /// Why the operating system gave no random bytes.
-        error: EntropyError,
+        error: getrandom::Error,
     },
     /// A Client's authentication did not succeed.
     AuthenticationFailed {
