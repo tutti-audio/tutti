@@ -65,7 +65,7 @@ let (sine, _) = session
     .add(OscillatorNode::sine(Hz::new(440.0)).with_level(Amplitude::new(0.25)));
 ```
 
-Here we add an [`OscillatorNode`](../api/tutti_nodes/struct.OscillatorNode.html)
+Here we add an [`OscillatorNode`](../api/tutti/nodes/struct.OscillatorNode.html)
 that plays a sine wave 440 times a second, the A above middle C. In return
 the session hands us `sine`, a key we will use to talk about this oscillator
 from now on.
