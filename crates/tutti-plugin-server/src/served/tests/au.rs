@@ -50,9 +50,9 @@ impl Served<AuLoaded> {
         }
     }
 
-    /// The word the unit's property listener raises, for a test that needs to
+    /// The request flags the unit's property listener raises, for a test that needs to
     /// say a change no installed unit will make on request.
-    fn requests_for_test(&self) -> std::sync::Arc<tutti_plugin_types::RequestWord> {
+    fn requests_for_test(&self) -> std::sync::Arc<tutti_plugin_types::AtomicRequestFlags> {
         std::sync::Arc::clone(self.loaded_ref().expect("the unit is loaded").requests())
     }
 

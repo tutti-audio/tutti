@@ -31,7 +31,7 @@ pub fn extra(i: usize) -> ParamId {
 /// A host's value for plugin parameter `id`: a foreign control lane whose
 /// knob is at `value`, in the plugin's normalisation (doc 014 §5). It sends
 /// its knob on its first block and whenever the knob moves
-/// (`LaneControls::set_knob`), and again on `LaneControls::resync`.
+/// (`LaneControls::set_value`), and again on `LaneControls::resync`.
 pub fn knob(id: ParamId, value: f32) -> ControlLaneNode {
     ControlLaneNode::by_id(
         id,

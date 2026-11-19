@@ -2,10 +2,10 @@
 //! park.
 
 use std::sync::Arc;
-use tutti_rt::{RequestBit, RequestWord};
+use tutti_rt::{AtomicRequestFlags, RequestFlag};
 
 /// The one request a wake notifies.
-const WAKE: RequestBit = RequestBit::of(0);
+const WAKE: RequestFlag = RequestFlag::of(0);
 
 /// A handle that wakes one node the executor parked.
 ///
@@ -31,7 +31,7 @@ const WAKE: RequestBit = RequestBit::of(0);
 /// the executor's copy is dropped on the control side with the node
 /// (`NodeBox`), so the audio thread never frees it.
 #[derive(Clone, Debug, Default)]
-pub struct Wake(Arc<RequestWord>);
+pub struct Wake(Arc<AtomicRequestFlags>);
 
 impl Wake {
     /// A handle on a fresh flag. Control thread: allocates.

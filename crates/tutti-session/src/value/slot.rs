@@ -947,7 +947,7 @@ impl Slot<Amplitude> for ClickVolumeSlot {
 
     fn store(&self, value: &Amplitude) {
         let level = ClickLevel::new(*value).expect("`check` accepted the level");
-        self.0.store_volume(level);
+        self.0.set_volume(level);
     }
 }
 

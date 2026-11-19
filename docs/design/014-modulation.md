@@ -261,7 +261,7 @@ a NaN anywhere in a layer, so a program is `Eq`. `value_at` and
 
 | | Native param port | Plugin parameter |
 |---|---|---|
-| Knob | **The node's own `Param` cell** (`ParamSet::cell`, `crates/tutti-graph/src/controls.rs:113`), cloned into the lane at creation and loaded once per block (a `ParamCell`: an `f32` unit's `AtomicF32`, or an `f64` unit's (`Seconds`) `AtomicF64` read as an `f32`, the one narrowing on the modulation path). `write_param` writes it; nothing else does. | A lane-owned `AtomicF32`, written by `LaneControls::set_knob` (the API's writes and the plugin's GUI edits, §8.2) |
+| Knob | **The node's own `Param` cell** (`ParamSet::cell`, `crates/tutti-graph/src/controls.rs:113`), cloned into the lane at creation and loaded once per block (a `ParamCell`: an `f32` unit's `AtomicF32`, or an `f64` unit's (`Seconds`) `AtomicF64` read as an `f32`, the one narrowing on the modulation path). `write_param` writes it; nothing else does. | A lane-owned `AtomicF32`, written by `LaneControls::set_value` (the API's writes and the plugin's GUI edits, §8.2) |
 | Range | **The port's range cell** (`Editor::set_param_range`, already a store with no commit, `editor.rs:904`). The port clamps per frame. The lane holds a read handle to the same cell (`ParamRanges` holds a `PackedAtomic<ParamRange>` per port, with a public accessor) and loads it once per block for the span only. | A lane-owned `PackedAtomic<ParamRange>`, loaded once per block for the span and for the clamp, which splits pieces at crossings (§2) |
 | Program | `ArcLend<ControlProgram>` (`LaneControls::publish`) | same |
 
@@ -443,7 +443,7 @@ the 32-byte event are unchanged.
 | Tail | `Tail::Unbounded` |
 | Latency | none; modulation lag is musical delay (§6) |
 | Cost | `Cost::Moderate`, measured (§5.3); `Light` was the estimate |
-| Controls | `LaneControls`: `publish`, the knob (a native `Param` cell, or `set_knob`), `set_range` for a plugin lane (called by the reconciler, not by a host), `thinned()`, `truncated()`, `unranged()` |
+| Controls | `LaneControls`: `publish`, the knob (a native `Param` cell, or `set_value`), `set_range` for a plugin lane (called by the reconciler, not by a host), `blocks_thinned()`, `blocks_truncated()`, `blocks_unranged()` |
 | Fork | the last published program (`Arc`), knob and range values at the gather, the address; fresh state (§5.6) |
 
 **Arrival.** With an input behind a latent path, the lane's arrival can be
@@ -598,7 +598,7 @@ the whole 200-lane graph took about 0.74 ms a block.
 **Overload.** Points exceed 256 only past 4096-frame blocks or past 128
 corners in one block. The lane then keeps every corner, thins the grid
 (every other point, then every fourth, …) and counts it
-(`LaneControls::thinned()`). A thinned block can differ between live and
+(`LaneControls::blocks_thinned()`). A thinned block can differ between live and
 export; it is counted, never silent. Exports therefore render in blocks of
 at most 4096 frames (§13).
 
@@ -1098,7 +1098,7 @@ The rules, as designed:
 | Depth, polarity, curve, rate, wave; an LFO route added or removed | recompile one target, republish one program; no commit, no phase reset |
 | A follower route added | republish; one event edge (a commit) |
 | Range (`Changed<ModRange>`) | a store: `Editor::set_param_range` (native) or `set_range` (plugin) |
-| Knob (`AudioParam`, `write_param`) | one store into the node's `Param` cell; a plugin lane's `set_knob` |
+| Knob (`AudioParam`, `write_param`) | one store into the node's `Param` cell; a plugin lane's `set_value` |
 | Automation curve | republish |
 | Nothing (a steady frame) | a comparison of the inputs (`Modulation::skipped`) |
 
@@ -1116,7 +1116,7 @@ which design 015 moved to `tutti-plugin`,
 callback, which queues each report, and hands back the `ParamRead` job
 that fills the mirror; `plugin_param_edits`, in
 `GraphReconcileSystems::Spawn`, writes them into the mirror and the lane's
-knob, `ModulationState::set_knob`. Under automation the curve decides the
+knob, `ModulationState::set_value`. Under automation the curve decides the
 base, so the knob shows again when the automation or its take goes.
 Design 015 moved the mirror into `tutti-session`'s plugin record and
 the drain into its `Phase::Plugins`.)

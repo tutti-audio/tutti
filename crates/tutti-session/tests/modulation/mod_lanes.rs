@@ -362,7 +362,7 @@ fn a_knob_written_after_a_route_edit_is_the_knob() {
     let b = render(&mut side, 2_048, 128);
 
     assert_eq!(
-        s.mod_state().lane(cutoff.key()).expect("a lane").1.knob(),
+        s.mod_state().lane(cutoff.key()).expect("a lane").1.value(),
         Some(700.0)
     );
     let tol = lfo_tolerance(0.2, 2.0);
@@ -986,7 +986,7 @@ fn an_added_synth_is_a_modulation_target() {
     // is what the lane reads, value for value.
     for v in [0.37, 0.81] {
         assert!(params.set(UnitParam::Volume, v));
-        assert_eq!(lane.knob(), Some(v), "its knob is the synth's volume cell");
+        assert_eq!(lane.value(), Some(v), "its knob is the synth's volume cell");
     }
 }
 
