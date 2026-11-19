@@ -257,10 +257,11 @@ impl PeState {
     /// `application/octet-stream`.
     #[must_use]
     pub fn octets(bytes: Vec<u8>) -> Self {
-        let media_type = MediaType::new("application/octet-stream")
-            .unwrap_or_else(|| unreachable!("a valid media type"));
         Self {
-            body: OpaqueBody::Binary { media_type, bytes },
+            body: OpaqueBody::Binary {
+                media_type: MediaType::OCTET_STREAM,
+                bytes,
+            },
             rev: None,
             timestamp: None,
         }
@@ -519,11 +520,9 @@ impl ResourceEntry {
 
     /// The builder of the entry of State, with those defaults.
     pub(super) fn device_state_builder() -> ResourceEntryBuilder {
-        let octets = MediaType::new("application/octet-stream")
-            .unwrap_or_else(|| unreachable!("a valid media type"));
         Self::builder(PeResource::State)
             .encodings(vec![PeEncoding::Mcoded7])
-            .media_types(vec![octets])
+            .media_types(vec![MediaType::OCTET_STREAM])
     }
 
     /// The entry of StateList.

@@ -135,6 +135,8 @@ mod session;
 mod switch;
 #[cfg(feature = "capture")]
 mod take;
+#[cfg(all(feature = "midi", feature = "analyze"))]
+mod transcribe;
 mod transport_handle;
 mod value;
 #[cfg(feature = "device")]
@@ -277,6 +279,8 @@ pub use take::{
     Armed, InFlight, Placement, Punch, PunchError, Recorded, Rolling, Start, Take, TakeEnd,
     TakeError, TakeEvent, TakeId, TakeTarget, Terms, Window,
 };
+#[cfg(all(feature = "midi", feature = "analyze"))]
+pub use transcribe::{LevelVelocity, NoteCents, NoteMapping, clip_from_notes, harmony_from_chords};
 pub use transport_handle::TransportHandle;
 #[cfg(any(feature = "record", feature = "export"))]
 pub use tutti_dsp::DitherShape;
@@ -305,6 +309,6 @@ pub use value::{
     SettingTarget, Target, TargetInfo, TempoTarget, ValueError, ValueErrorKind,
 };
 #[cfg(feature = "midi")]
-pub use value::{ClipEventsTarget, HarmonyTarget, OutputLatencyTarget};
+pub use value::{ClipEventsTarget, HarmonyTarget, MpeModeTarget, OutputLatencyTarget};
 #[cfg(feature = "device")]
 pub use watch::{Backoff, DevicePolicy, DeviceWatch, Follow, FollowEvent};

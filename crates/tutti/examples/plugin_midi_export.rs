@@ -224,7 +224,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             // SAFETY: set before the first server or probe is spawned, while
             // `main` is the only thread.
             unsafe {
-                std::env::set_var("TUTTI_PLUGIN_SERVER", support::plugin_server());
+                std::env::set_var("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server());
                 std::env::set_var("TUTTI_PLUGIN_PROBE", tutti_fixtures::plugin_probe());
             }
             reference(main, &std::env::temp_dir())?
@@ -251,7 +251,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("tutti-5-2-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let mut env = tutti_fixtures::ScopedEnv::new();
-        env.set("TUTTI_PLUGIN_SERVER", super::support::plugin_server());
+        env.set("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server());
         env.set("TUTTI_PLUGIN_PROBE", tutti_fixtures::plugin_probe());
         let written =
             super::reference(tutti_fixtures::main_thread(), &dir).expect("the example runs");
@@ -282,7 +282,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("tutti-5-2-notes-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let mut env = tutti_fixtures::ScopedEnv::new();
-        env.set("TUTTI_PLUGIN_SERVER", super::support::plugin_server());
+        env.set("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server());
         env.set("TUTTI_PLUGIN_PROBE", tutti_fixtures::plugin_probe());
         let midi = dir.join("phrase.mid");
         super::phrase(&midi).unwrap();

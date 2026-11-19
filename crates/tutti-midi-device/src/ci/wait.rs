@@ -3,7 +3,7 @@
 
 use std::time::Duration;
 
-use super::Ack;
+use super::{Ack, AckStatus};
 use crate::deadline::Pending;
 
 /// How long an Initiator waits on a peer's answer where the specification gives
@@ -42,10 +42,9 @@ impl TimeoutWait {
     /// tenths of a second), or `None` for any other ACK.
     #[must_use]
     pub fn from_ack(ack: &Ack) -> Option<Self> {
-        if ack.status_code == Ack::STATUS_TIMEOUT_WAIT {
-            Self::new(ack.status_data.get())
-        } else {
-            None
+        match ack.status {
+            AckStatus::TimeoutWait(wait) => Some(wait),
+            _ => None,
         }
     }
 

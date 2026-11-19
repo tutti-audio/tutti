@@ -256,12 +256,13 @@ fn open_routes_a_vst2_to_the_in_process_backend() {
     let _ = std::fs::remove_file(&staged);
 }
 
-/// VST2 reports no speaker placement, and the handle says so plainly.
+/// A VST2 plugin no one proposed an arrangement to reports no speaker placement, and the
+/// handle says so plainly.
 ///
 /// The end-to-end half of `LayoutSupport`: a real plugin, loaded through the
-/// real path, reporting `None` because the format has no way to be asked —
-/// `effSetSpeakerArrangement` needs a `VstSpeakerArrangement` struct the
-/// forked bindings do not define, and the host never sends it.
+/// real path, reporting `None` because the host never asked it —
+/// `Vst2Loaded::negotiate_arrangement` is the only call that does, and the handle
+/// has no call that reaches it.
 ///
 /// Worth an integration test rather than only a unit one: the unit tests build
 /// a `LoadedPlugin` by hand, so they would still pass if the VST2 loader
@@ -277,7 +278,7 @@ fn a_vst2_plugin_reports_no_channel_topology() {
     assert_eq!(
         handle.layout_support(),
         LayoutSupport::None,
-        "VST2 cannot be asked for speaker placement, so nothing may claim it can"
+        "no arrangement was negotiated, so nothing may claim a placement"
     );
     assert_eq!(handle.input_buses()[0].topology, None);
     assert_eq!(handle.output_buses()[0].topology, None);

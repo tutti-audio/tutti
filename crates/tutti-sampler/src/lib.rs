@@ -195,6 +195,13 @@ mod lanes;
 // voice-playback concern: it owns no source and imports nothing from `voice`.
 pub mod stretch;
 
+/// A bound alias, with a blanket impl: a [`Float`](tutti_buffers::Float) the sampler's
+/// voices run in, `f32` or `f64`, which a ring holds and the stretcher's FFT
+/// transforms.
+pub trait SamplerFloat: tutti_rt::RingFloat + tutti_dsp::FftFloat {}
+
+impl<F: tutti_rt::RingFloat + tutti_dsp::FftFloat> SamplerFloat for F {}
+
 // DSP leaves + value types from `voice`, usable as plain
 // `tutti_graph` nodes. The streamer's `LruCache` /
 // `StreamPin` are internal machinery a consumer never constructs, so they stay

@@ -3,7 +3,7 @@
 //! map, and a JR Timestamp into the host time of the message it precedes
 //! (M2-104 §7.2.2).
 //!
-//! A sender's clock counts [`TICK_HZ`] ticks a second in 16 bits, so it wraps
+//! A sender's clock counts [`TICK_RATE`] ticks a second in 16 bits, so it wraps
 //! every 2.097 s, and a clock message arrives at least every 250 ms with the
 //! jitter of the connection. The receiver keeps the last [`WINDOW`] clock
 //! messages as pairs of (unwrapped sender time, arrival) and fits one line
@@ -11,7 +11,7 @@
 //!
 //! - **Drift** is the slope of a least-squares fit, used once the window spans
 //!   [`DRIFT_SPAN`] and while it stays within [`MAX_DRIFT`] of 1; otherwise the
-//!   sender's clock is taken as exactly [`TICK_HZ`], since a short span or heavy
+//!   sender's clock is taken as exactly [`TICK_RATE`], since a short span or heavy
 //!   jitter would read jitter as drift.
 //! - **Offset** is the line's lowest point: a message is never sent after it
 //!   arrives, so the arrival nearest the line is the one with the least delay,
@@ -30,8 +30,24 @@
 
 use std::time::{Duration, Instant};
 
-/// The sender clock's ticks per second (M2-104 §7.2.2.1: ticks of 1/31250 s).
-pub const TICK_HZ: u32 = 31_250;
+use tutti_units::{SampleRate, Seconds};
+
+/// The sender clock's tick rate (M2-104 §7.2.2.1: ticks of 1/31250 s).
+pub const TICK_RATE: SampleRate = SampleRate::of(31_250.0);
+
+/// The time `ticks` sender ticks take.
+#[must_use]
+pub fn tick_time(ticks: u16) -> Seconds {
+    ticks_to_seconds(f64::from(ticks))
+}
+
+fn ticks_to_seconds(ticks: f64) -> Seconds {
+    Seconds(ticks / TICK_RATE.get())
+}
+
+fn seconds_to_ticks(seconds: Seconds) -> f64 {
+    seconds.get() * TICK_RATE.get()
+}
 
 /// How many JR Clock messages the fit keeps: 3.2 s of them at the 100 ms
 /// cadence a sender may use, and 8 s at the 250 ms ceiling.
@@ -66,7 +82,7 @@ const STALE_AFTER: Duration = LOST_AFTER;
 /// readings has seen almost no jitter, so without it the ordinary shrinking of
 /// a connection's delay reads as a clock that jumped, and restarts keep the
 /// window too short to fit a drift.
-const MIN_JITTER_TOLERANCE: f64 = 0.001;
+const MIN_JITTER_TOLERANCE: Seconds = Seconds(0.001);
 
 /// A sender clock's wrap, in ticks.
 const WRAP: f64 = 65_536.0;
@@ -101,7 +117,7 @@ pub enum Unmapped {
 }
 
 /// The host time of a message a JR Timestamp precedes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 #[must_use = "an `Arrival` outcome means the message keeps its arrival time"]
 #[non_exhaustive]
 pub enum JrTime {
@@ -113,7 +129,7 @@ pub enum JrTime {
         /// How far above the line the window's arrivals lie, at most: the
         /// delay that renders every message after its arrival, if the jitter
         /// holds.
-        jitter: Duration,
+        jitter: Seconds,
     },
     /// The timestamp cannot be mapped: the message is placed at its arrival.
     Arrival(Unmapped),
@@ -128,7 +144,10 @@ impl JrTime {
             // `jitter` is a spread of arrivals over the window, seconds at
             // most, so the sum is past `Instant`'s range only for an `at` that
             // is already at its end, where `at` is kept.
-            Self::Sent { at, jitter } => at.checked_add(jitter).unwrap_or(at),
+            Self::Sent { at, jitter } => Duration::try_from_secs_f64(jitter.get())
+                .ok()
+                .and_then(|jitter| at.checked_add(jitter))
+                .unwrap_or(at),
             Self::Arrival(_) => arrival,
         }
     }
@@ -159,7 +178,7 @@ pub enum ClockHeard {
 #[derive(Clone, Copy, Debug)]
 struct Reading {
     ticks: i64,
-    at: f64,
+    at: Seconds,
 }
 
 /// A sender's clock on the host's; see the module.
@@ -194,8 +213,8 @@ impl Default for JrReceiver {
 struct Line {
     ticks0: i64,
     slope: f64,
-    offset: f64,
-    jitter: f64,
+    offset: Seconds,
+    jitter: Seconds,
 }
 
 impl JrReceiver {
@@ -203,7 +222,10 @@ impl JrReceiver {
     #[must_use]
     pub const fn new() -> Self {
         Self {
-            window: [Reading { ticks: 0, at: 0.0 }; WINDOW],
+            window: [Reading {
+                ticks: 0,
+                at: Seconds::ZERO,
+            }; WINDOW],
             len: 0,
             start: 0,
             origin: None,
@@ -292,10 +314,10 @@ impl JrReceiver {
         let (Some(origin), Some(line)) = (self.origin, self.fit) else {
             return false;
         };
-        let sent = line.slope * (ticks - line.ticks0) as f64 / f64::from(TICK_HZ) + line.offset;
+        let sent = ticks_to_seconds((ticks - line.ticks0) as f64) * line.slope + line.offset;
         let age = seconds_from(origin, arrival) - sent;
-        age < -(line.jitter.max(MIN_JITTER_TOLERANCE) + 1.0 / f64::from(TICK_HZ))
-            || age > STALE_AFTER.as_secs_f64()
+        age + line.jitter.max(MIN_JITTER_TOLERANCE) + ticks_to_seconds(1.0) < Seconds::ZERO
+            || age > Seconds(STALE_AFTER.as_secs_f64())
     }
 
     /// Takes a JR Timestamp of sender time `ticks` that arrived at `arrival`: it
@@ -330,16 +352,18 @@ impl JrReceiver {
         };
         // The sender time the line gives at the arrival, and the timestamp's
         // wrap nearest it.
-        let seen = (seconds_from(origin, arrival) - line.offset) / line.slope * f64::from(TICK_HZ)
+        let seen = seconds_to_ticks((seconds_from(origin, arrival) - line.offset) / line.slope)
             + line.ticks0 as f64;
         let wraps = ((seen - f64::from(ticks)) / WRAP).round();
         let sender = f64::from(ticks) + wraps * WRAP;
-        let host = line.slope * (sender - line.ticks0 as f64) / f64::from(TICK_HZ) + line.offset;
+        let host = ticks_to_seconds(sender - line.ticks0 as f64) * line.slope + line.offset;
         let sent = instant_at(origin, host).map(|at| at.min(arrival));
-        let jitter = Duration::try_from_secs_f64(line.jitter);
-        match (sent, jitter) {
-            (Some(at), Ok(jitter)) => JrTime::Sent { at, jitter },
-            _ => JrTime::Arrival(Unmapped::OutOfRange),
+        match sent {
+            Some(at) => JrTime::Sent {
+                at,
+                jitter: line.jitter,
+            },
+            None => JrTime::Arrival(Unmapped::OutOfRange),
         }
     }
 
@@ -354,20 +378,22 @@ impl JrReceiver {
     /// The line through the window: `None` while it is empty.
     fn fit_window(&self) -> Option<Line> {
         let first = self.readings().next()?;
-        let x = |r: Reading| (r.ticks - first.ticks) as f64 / f64::from(TICK_HZ);
+        let x = |r: Reading| ticks_to_seconds((r.ticks - first.ticks) as f64);
         let n = self.len as f64;
         let (mx, my) = self
             .readings()
-            .fold((0.0, 0.0), |(sx, sy), r| (sx + x(r), sy + r.at));
+            .fold((Seconds::ZERO, Seconds::ZERO), |(sx, sy), r| {
+                (sx + x(r), sy + r.at)
+            });
         let (mx, my) = (mx / n, my / n);
         let (cov, var) = self.readings().fold((0.0, 0.0), |(c, v), r| {
-            let dx = x(r) - mx;
-            (c + dx * (r.at - my), v + dx * dx)
+            let dx = (x(r) - mx).get();
+            (c + dx * (r.at - my).get(), v + dx * dx)
         });
-        let span = self.readings().last().map_or(0.0, x);
+        let span = self.readings().last().map_or(Seconds::ZERO, x);
         let fitted = cov / var;
         let slope = if self.len >= 2
-            && span >= DRIFT_SPAN.as_secs_f64()
+            && span.get() >= DRIFT_SPAN.as_secs_f64()
             && var > 0.0
             && (fitted - 1.0).abs() <= MAX_DRIFT
         {
@@ -375,10 +401,10 @@ impl JrReceiver {
         } else {
             1.0
         };
-        let mut low = f64::INFINITY;
-        let mut high = f64::NEG_INFINITY;
+        let mut low = Seconds(f64::INFINITY);
+        let mut high = Seconds(f64::NEG_INFINITY);
         for r in self.readings() {
-            let offset = r.at - slope * x(r);
+            let offset = r.at - x(r) * slope;
             low = low.min(offset);
             high = high.max(offset);
         }
@@ -392,19 +418,19 @@ impl JrReceiver {
 }
 
 /// Seconds from `origin` to `at`, negative before it.
-fn seconds_from(origin: Instant, at: Instant) -> f64 {
+fn seconds_from(origin: Instant, at: Instant) -> Seconds {
     match at.checked_duration_since(origin) {
-        Some(after) => after.as_secs_f64(),
-        None => -origin.duration_since(at).as_secs_f64(),
+        Some(after) => Seconds(after.as_secs_f64()),
+        None => Seconds(-origin.duration_since(at).as_secs_f64()),
     }
 }
 
 /// The instant `seconds` after `origin`, `None` where it is not one.
-fn instant_at(origin: Instant, seconds: f64) -> Option<Instant> {
-    if seconds >= 0.0 {
-        origin.checked_add(Duration::try_from_secs_f64(seconds).ok()?)
+fn instant_at(origin: Instant, seconds: Seconds) -> Option<Instant> {
+    if seconds.get() >= 0.0 {
+        origin.checked_add(Duration::try_from_secs_f64(seconds.get()).ok()?)
     } else {
-        origin.checked_sub(Duration::try_from_secs_f64(-seconds).ok()?)
+        origin.checked_sub(Duration::try_from_secs_f64(-seconds.get()).ok()?)
     }
 }
 

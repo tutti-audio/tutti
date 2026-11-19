@@ -44,10 +44,11 @@ use vst::editor::{Editor, KeyCode};
 // not `Plugin` ones.
 use vst::host::Host as _;
 use vst::plugin::{CanDo, HostCallback, Info, Plugin, PluginParameters};
+use vst::speaker::{Speaker, SpeakerArrangement};
 
 pub use capture::{
-    CapturedEvent, CapturedKey, MAX_CAPTURED_EVENTS, ProcessCapture, ProcessEntry,
-    tutti_vst2_probe_capture, tutti_vst2_probe_reset_capture,
+    CapturedArrangement, CapturedEvent, CapturedKey, MAX_CAPTURED_EVENTS, MAX_CAPTURED_SPEAKERS,
+    ProcessCapture, ProcessEntry, tutti_vst2_probe_capture, tutti_vst2_probe_reset_capture,
 };
 pub use config::{ProbeConfig, channel_tag};
 pub use switches::CanDoAnswer;
@@ -296,6 +297,32 @@ struct ProbePlugin {
     host: HostCallback,
     config: ProbeConfig,
     params: Arc<ProbeParameters>,
+    /// The arrangements the plugin holds: its pins at construction, then what it accepted.
+    arrangements: std::sync::Mutex<(SpeakerArrangement, SpeakerArrangement)>,
+}
+
+/// The arrangement of `channels` channels the probe starts with: mono, stereo, or that many
+/// undefined channels.
+fn default_arrangement(channels: i32) -> SpeakerArrangement {
+    SpeakerArrangement::new(match channels {
+        0 => Vec::new(),
+        1 => vec![Speaker::Mono],
+        2 => vec![Speaker::Left, Speaker::Right],
+        n => vec![Speaker::Undefined; n.max(0) as usize],
+    })
+}
+
+/// `arrangement`'s type, channel count and speaker numbers for the capture.
+fn capture_arrangement(arrangement: &SpeakerArrangement) -> capture::CapturedArrangement {
+    let mut captured = capture::CapturedArrangement {
+        kind: arrangement.kind() as i32,
+        channels: arrangement.speakers().len() as i32,
+        speakers: [0; MAX_CAPTURED_SPEAKERS],
+    };
+    for (slot, speaker) in captured.speakers.iter_mut().zip(arrangement.speakers()) {
+        *slot = speaker.raw();
+    }
+    captured
 }
 
 impl ProbePlugin {
@@ -390,11 +417,47 @@ impl Plugin for ProbePlugin {
             config.serviced_programs,
             host,
         ));
+        let arrangements = std::sync::Mutex::new((
+            default_arrangement(config.inputs),
+            default_arrangement(config.outputs),
+        ));
         Self {
             host,
             config,
             params,
+            arrangements,
         }
+    }
+
+    /// Records what the host proposed, and answers by the [`switches::arrangement_mode`].
+    fn set_speaker_arrangement(
+        &mut self,
+        input: &SpeakerArrangement,
+        output: &SpeakerArrangement,
+    ) -> bool {
+        capture::with_capture(|cap| {
+            cap.arrangement_sets = cap.arrangement_sets.saturating_add(1);
+            cap.arrangement_input = capture_arrangement(input);
+            cap.arrangement_output = capture_arrangement(output);
+            cap.arrangement_while_resumed = switches::is_resumed();
+        });
+        let mut held = self.arrangements.lock_recover();
+        match switches::arrangement_mode() {
+            switches::ArrangementMode::Accept | switches::ArrangementMode::AcceptUnreadable => {
+                *held = (input.clone(), output.clone());
+                true
+            }
+            switches::ArrangementMode::Refuse => false,
+            switches::ArrangementMode::AcceptButKeep => true,
+        }
+    }
+
+    fn speaker_arrangement(&self) -> Option<(SpeakerArrangement, SpeakerArrangement)> {
+        capture::with_capture(|cap| cap.arrangement_gets = cap.arrangement_gets.saturating_add(1));
+        if switches::arrangement_mode() == switches::ArrangementMode::AcceptUnreadable {
+            return None;
+        }
+        Some(self.arrangements.lock_recover().clone())
     }
 
     /// Records `effBeginSetProgram` so a test can check the bracket's *order*,

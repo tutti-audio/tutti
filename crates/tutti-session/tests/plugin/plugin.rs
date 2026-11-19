@@ -27,7 +27,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tutti_buffers::MaxBlock;
 
-use support::{clap_probe, plugin_server};
+use support::clap_probe;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::ForkByClone;
@@ -70,7 +70,7 @@ fn session_built(
 ) -> Session {
     // The probe of the plugin's file runs before any fault variable is set.
     crate::pooled::prime(&PluginRef::file(clap_probe()).expect("a plugin file"));
-    set_env("TUTTI_PLUGIN_SERVER", plugin_server());
+    set_env("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server());
     set_env(
         "TUTTI_CLAP_PROBE_OFFLINE_EXTRA_LATENCY",
         OFFLINE_EXTRA.to_string(),

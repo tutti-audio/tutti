@@ -318,3 +318,14 @@ fn the_identity_is_written_in_the_tables_order() {
         [0x00, 0x21, 0x09, 0x34, 0x24, 0x55, 0x00, 1, 2, 3, 4]
     );
 }
+
+/// M2-101 §5.5.3: the size is four 7-bit bytes, least significant first.
+#[test]
+fn a_max_sysex_size_is_four_seven_bit_bytes_least_significant_first() {
+    assert_eq!(MaxSysexSize::of(128).to_le7(), [0x00, 0x01, 0x00, 0x00]);
+    assert_eq!(
+        MaxSysexSize::of(0x0123_4567).to_le7(),
+        [0x67, 0x0A, 0x0D, 0x09]
+    );
+    assert_eq!(MaxSysexSize::of(MaxSysexSize::MAX).to_le7(), [0x7F; 4]);
+}

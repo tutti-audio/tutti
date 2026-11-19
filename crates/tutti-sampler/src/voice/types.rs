@@ -10,8 +10,8 @@ use super::disk_voice::DiskVoice;
 use super::fault::FirstError;
 use super::loop_span::Loop;
 use super::memory_source::{MemorySource, VoiceWindow};
+use crate::SamplerFloat;
 use tutti_graph::{ForkCause, ForkMode, Node, RenderMode};
-use tutti_rt::RingFloat;
 use tutti_units::{Amplitude, Cents, PlaybackRate, SampleRate, StretchFactor, Tail};
 
 /// Whether anything can still steer a voice node: the live node, which a
@@ -101,7 +101,7 @@ impl From<bool> for Direction {
     clippy::large_enum_variant,
     reason = "the voice is built once on the control thread and read in place; boxing the memory tier would put a pointer chase in front of every per-sample read, the cost the enum exists to avoid"
 )]
-pub enum VoiceSource<F: RingFloat = f32> {
+pub enum VoiceSource<F: SamplerFloat = f32> {
     /// The whole source is resident in memory.
     Memory(MemorySource<F>),
     /// The source streams incrementally from the streamer's ring.
@@ -110,7 +110,7 @@ pub enum VoiceSource<F: RingFloat = f32> {
 
 // Hand-rolled: both variants wrap non-`Debug`-deriving units (`MemorySource` /
 // `DiskVoice`), each with its own hand-rolled summary Debug.
-impl<F: RingFloat> std::fmt::Debug for VoiceSource<F> {
+impl<F: SamplerFloat> std::fmt::Debug for VoiceSource<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Memory(s) => f.debug_tuple("Memory").field(s).finish(),
@@ -119,7 +119,7 @@ impl<F: RingFloat> std::fmt::Debug for VoiceSource<F> {
     }
 }
 
-impl<F: RingFloat> Clone for VoiceSource<F> {
+impl<F: SamplerFloat> Clone for VoiceSource<F> {
     fn clone(&self) -> Self {
         match self {
             Self::Memory(s) => Self::Memory(s.clone()),
@@ -128,7 +128,7 @@ impl<F: RingFloat> Clone for VoiceSource<F> {
     }
 }
 
-impl<F: RingFloat> VoiceSource<F> {
+impl<F: SamplerFloat> VoiceSource<F> {
     /// Run the source at the owner's rate and render mode (what `prepare`
     /// does to the source as a node of its own: the memory tier's conversion,
     /// the disk tier's step and its file read's permission). Allocation-free:
@@ -234,14 +234,14 @@ impl Default for Playback {
 /// One voice's playback state — what a [`VoicePool`](super::VoicePool) stores
 /// per slot.
 #[derive(Debug)]
-pub struct Voice<F: RingFloat = f32> {
+pub struct Voice<F: SamplerFloat = f32> {
     /// The audio itself, resident or streaming.
     pub source: VoiceSource<F>,
     /// The control intent applied to [`source`](Self::source).
     pub play: Playback,
 }
 
-impl<F: RingFloat> Clone for Voice<F> {
+impl<F: SamplerFloat> Clone for Voice<F> {
     fn clone(&self) -> Self {
         Self {
             source: self.source.clone(),
@@ -250,7 +250,7 @@ impl<F: RingFloat> Clone for Voice<F> {
     }
 }
 
-impl<F: RingFloat> Voice<F> {
+impl<F: SamplerFloat> Voice<F> {
     /// A copy of this voice for a fork of the node holding it, sharing
     /// nothing with it: a memory voice with its own gain cell (at the value
     /// it holds), a disk voice reading its file itself

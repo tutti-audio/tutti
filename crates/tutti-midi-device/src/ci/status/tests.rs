@@ -28,7 +28,7 @@ fn nak_round_trips() {
     let msg = CiMessage::Nak {
         header: header(),
         to: Muid::of(DST),
-        nak: Nak::new(U7::of(SUB_ID2_DISCOVERY), Nak::STATUS_VERSION_NOT_SUPPORTED),
+        nak: Nak::new(U7::of(SUB_ID2_DISCOVERY), NakStatus::VersionNotSupported),
     };
     assert_eq!(CiMessage::decode(&msg.encode()), Decoded::Message(msg));
 }
@@ -37,10 +37,12 @@ fn nak_round_trips() {
 fn nak_carries_its_version_2_details_and_text() {
     // Table 15's Version-2 trailer: 5 detail bytes, a 2-byte LSB-first
     // length, then that many text bytes. All of it must survive.
-    let nak = Nak::new(U7::of(SUB_ID2_DISCOVERY), Nak::STATUS_MALFORMED)
-        .with_status_data(U7::of(9))
-        .with_details([1, 2, 3, 4, 5].map(U7::of))
-        .with_message(text("body one byte short"));
+    let nak = Nak::new(
+        U7::of(SUB_ID2_DISCOVERY),
+        NakStatus::Busy(TimeoutWait::of(9)),
+    )
+    .with_details([1, 2, 3, 4, 5].map(U7::of))
+    .with_message(text("body one byte short"));
     let msg = CiMessage::Nak {
         header: header(),
         to: Muid::of(DST),
@@ -52,7 +54,7 @@ fn nak_carries_its_version_2_details_and_text() {
     // 127 bytes survives (a peer that declared a larger receive size may send
     // it): read from the wire, whole, and written back as it was.
     let long = "e".repeat(300);
-    let mut body = vec![0x34, Nak::STATUS_RETRY.get(), 0, 0, 0, 0, 0, 0];
+    let mut body = vec![0x34, NakStatus::Retry.code().get(), 0, 0, 0, 0, 0, 0];
     body.extend_from_slice(&[(300 & 0x7F) as u8, (300 >> 7) as u8]);
     body.extend_from_slice(long.as_bytes());
     let nak = Nak::decode_body(&body).expect("decodes");
@@ -68,46 +70,81 @@ fn an_empty_pre_1_2_nak_still_decodes() {
     // defaults rather than the message being rejected.
     let nak = Nak::decode_body(&[]).expect("empty NAK decodes");
     assert_eq!(nak.nak_sub_id2, U7::of(0));
-    assert_eq!(nak.status_code, Nak::STATUS_NAK);
+    assert_eq!(nak.status, NakStatus::Nak);
     assert_eq!(nak.details, [U7::of(0); 5]);
     assert!(nak.message.is_empty());
 
     // ...and a v1-length NAK (the three original bytes) too.
     let nak = Nak::decode_body(&[SUB_ID2_DISCOVERY, 0x04, 0x00]).expect("v1 NAK decodes");
-    assert_eq!(nak.status_code, Nak::STATUS_PROFILE_NOT_SUPPORTED);
+    assert_eq!(nak.status, NakStatus::ProfileNotSupported);
     assert!(nak.message.is_empty());
 }
 
-// §5.11.2 Table 16 and §5.10.2 Table 14, every code with its value.
+// §5.11.2 Table 16 and §5.10.2 Table 14, every status with its code and data.
 #[test]
-fn the_status_codes_are_the_tables() {
+fn the_statuses_are_the_tables_codes_and_data() {
     let nak = [
-        (Nak::STATUS_NAK, 0x00),
-        (Nak::STATUS_MESSAGE_NOT_SUPPORTED, 0x01),
-        (Nak::STATUS_VERSION_NOT_SUPPORTED, 0x02),
-        (Nak::STATUS_NOT_IN_USE, 0x03),
-        (Nak::STATUS_PROFILE_NOT_SUPPORTED, 0x04),
-        (Nak::STATUS_RESEND_LAST_CHUNK, 0x12),
-        (Nak::STATUS_TERMINATE, 0x20),
-        (Nak::STATUS_CHUNKS_OUT_OF_SEQUENCE, 0x21),
-        (Nak::STATUS_RETRY, 0x40),
-        (Nak::STATUS_MALFORMED, 0x41),
-        (Nak::STATUS_TIMEOUT, 0x42),
-        (Nak::STATUS_BUSY, 0x43),
+        (NakStatus::Nak, 0x00, 0x00),
+        (NakStatus::MessageNotSupported, 0x01, 0x00),
+        (NakStatus::VersionNotSupported, 0x02, 0x00),
+        (NakStatus::NotInUse, 0x03, 0x00),
+        (NakStatus::ProfileNotSupported, 0x04, 0x00),
+        (NakStatus::ResendLastChunk, 0x12, 0x00),
+        (NakStatus::Terminate(PeTerminator::Responder), 0x20, 0x00),
+        (NakStatus::Terminate(PeTerminator::Initiator), 0x20, 0x01),
+        (NakStatus::ChunksOutOfSequence, 0x21, 0x00),
+        (NakStatus::Retry, 0x40, 0x00),
+        (NakStatus::Malformed, 0x41, 0x00),
+        (NakStatus::Timeout, 0x42, 0x00),
+        (NakStatus::Busy(TimeoutWait::of(127)), 0x43, 127),
     ];
-    for (code, raw) in nak {
-        assert_eq!(code.get(), raw);
+    for (status, code, data) in nak {
+        assert_eq!((status.code().get(), status.data().get()), (code, data));
+        assert_eq!(NakStatus::from_wire(U7::of(code), U7::of(data)), status);
     }
-    assert_eq!(Ack::STATUS_ACK.get(), 0x00);
-    assert_eq!(Ack::STATUS_TIMEOUT_WAIT.get(), 0x10);
-    assert_eq!(Ack::STATUS_FLOW_CONTROL_NEXT_CHUNKS.get(), 0x11);
+    let ack = [
+        (AckStatus::Ack, 0x00, 0x00),
+        (AckStatus::TimeoutWait(TimeoutWait::of(25)), 0x10, 25),
+        (AckStatus::FlowControlNextChunks, 0x11, 0x00),
+    ];
+    for (status, code, data) in ack {
+        assert_eq!((status.code().get(), status.data().get()), (code, data));
+        assert_eq!(AckStatus::from_wire(U7::of(code), U7::of(data)), status);
+    }
+}
+
+// M1: a status the tables do not name, or name with other data, is kept as it
+// came: every code and data pair reads back as itself.
+#[test]
+fn every_code_and_data_pair_reads_back_as_itself() {
+    for code in 0..=127 {
+        for data in 0..=127 {
+            let (code, data) = (U7::of(code), U7::of(data));
+            let nak = NakStatus::from_wire(code, data);
+            assert_eq!((nak.code(), nak.data()), (code, data));
+            let ack = AckStatus::from_wire(code, data);
+            assert_eq!((ack.code(), ack.data()), (code, data));
+        }
+    }
+}
+
+// Table 16, 0x20: only data 0 and 1 name a terminator; another data is no
+// Terminate.
+#[test]
+fn a_terminate_nak_with_other_data_is_not_a_terminate() {
+    assert_eq!(
+        NakStatus::from_wire(U7::of(0x20), U7::of(2)),
+        NakStatus::Other {
+            code: U7::of(0x20),
+            data: U7::of(2)
+        }
+    );
 }
 
 // §5.10, Table 13: sub-ID#2 0x7D, then the body NAK has.
 #[test]
 fn an_ack_round_trips_with_its_sub_id_and_body() {
-    let ack = Ack::new(U7::of(0x34), Ack::STATUS_TIMEOUT_WAIT)
-        .with_status_data(U7::of(25)) // 2.5 s
+    let ack = Ack::new(U7::of(0x34), AckStatus::TimeoutWait(TimeoutWait::of(25))) // 2.5 s
         .with_details([7, 0, 3, 0, 0].map(U7::of))
         .with_message(text("Accepted Beat"));
     let msg = CiMessage::Ack {
@@ -126,7 +163,7 @@ fn an_ack_round_trips_with_its_sub_id_and_body() {
 #[test]
 fn a_text_that_runs_past_the_message_is_malformed() {
     let mut body = Vec::new();
-    Nak::new(U7::of(1), Nak::STATUS_NAK)
+    Nak::new(U7::of(1), NakStatus::Nak)
         .with_message(text("abc"))
         .encode_body(&mut body);
     assert!(Nak::decode_body(&body).is_some());
@@ -219,7 +256,7 @@ fn a_text_is_held_to_103_escaped_bytes() {
 #[test]
 fn a_text_round_trips_through_a_nak() {
     for s in ["", "plain", "Pièce ♪ 5\n\\ \u{1F600} \t", "/\\u0041"] {
-        let nak = Nak::new(U7::of(1), Nak::STATUS_NAK).with_message(text(s));
+        let nak = Nak::new(U7::of(1), NakStatus::Nak).with_message(text(s));
         let msg = CiMessage::Nak {
             header: header(),
             to: Muid::of(DST),

@@ -1,0 +1,74 @@
+//! The unit at the `f64` graph float: a struck note sounds in the dry pair and, once let go,
+//! the unit is idle within the tail it declares, with the dry pair exact silence.
+
+use std::sync::Arc;
+
+use tutti_fixtures::midi;
+use tutti_graph::contract::Direct;
+use tutti_graph::{Event, Node, Offset, Status};
+use tutti_sf2::SoundFont;
+use tutti_soundfont::{Settings, SoundFontUnit};
+use tutti_ump::MidiChannel;
+use tutti_units::{SampleRate, Samples, Tail};
+
+const BLOCK: usize = 64;
+
+fn font() -> Arc<SoundFont> {
+    let path = tutti_fixtures::asset("soundfonts/TimGM6mb.sf2");
+    let mut file = std::fs::File::open(&path).unwrap_or_else(|e| {
+        panic!(
+            "committed test soundfont missing at {}: {e}",
+            path.display()
+        )
+    });
+    Arc::new(SoundFont::from_reader(&mut file).expect("the test soundfont parses"))
+}
+
+/// A note held for a second is audible in both channels of the dry pair, every sample finite;
+/// let go, the unit reports `Idle` within its declared tail (a frame count at the unit's rate)
+/// and the dry pair it then writes is exact zeros.
+#[test]
+fn an_f64_unit_sounds_a_note_and_idles_within_its_declared_tail() {
+    let rate = SampleRate::SR_48K;
+    let unit = SoundFontUnit::<f64>::new(font(), Settings::new()).expect("the unit builds");
+    let Tail::Finite(tail) = unit.shape().tail else {
+        panic!("the font's releases are finite");
+    };
+    let mut direct = Direct::<_, f64>::with_format(unit, rate, BLOCK);
+    let at = Offset::ZERO;
+    direct.events(
+        0,
+        &[Event::midi(
+            at,
+            midi::note_on(MidiChannel::FIRST, 60, 0xFFFF),
+        )],
+    );
+    let mut peak = [0.0_f64; 2];
+    for _ in 0..rate.get() as usize / BLOCK {
+        direct.block();
+        for (c, peak) in peak.iter_mut().enumerate() {
+            for &x in direct.output().plane(c).samples() {
+                assert!(x.is_finite());
+                *peak = peak.max(x.abs());
+            }
+        }
+        direct.events(0, &[]);
+    }
+    assert!(peak.iter().all(|&p| p > 1e-3), "peaks {peak:?}");
+
+    direct.events(
+        0,
+        &[Event::midi(at, midi::note_off(MidiChannel::FIRST, 60, 0))],
+    );
+    let blocks = (tail + Samples(BLOCK)).get() / BLOCK + 1;
+    let mut status = Status::Modified;
+    for _ in 0..blocks {
+        status = direct.block();
+        direct.events(0, &[]);
+    }
+    assert_eq!(
+        status,
+        Status::Idle,
+        "after the declared tail of {tail:?} frames"
+    );
+}
