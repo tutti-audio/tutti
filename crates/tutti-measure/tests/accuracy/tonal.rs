@@ -62,21 +62,23 @@ fn config() -> ChromaConfig {
 }
 
 /// The chromagram of `x` at this file's rate.
-fn chroma(x: &[f32], cfg: &ChromaConfig, fft: &mut FftScratch) -> Result<Chroma> {
+fn chroma(x: &[f32], cfg: &ChromaConfig, fft: &mut FftScratch<f64>) -> Result<Chroma> {
     tutti_measure::chroma(cfg, Mono::new(x), SampleRate::of(SR), fft)
 }
 
-fn mean_chroma(x: &[f32], cfg: &ChromaConfig) -> [f32; 12] {
-    chroma(x, cfg, &mut FftScratch::new()).unwrap().mean()
+fn mean_chroma(x: &[f32], cfg: &ChromaConfig) -> [f64; 12] {
+    chroma(x, cfg, &mut FftScratch::<f64>::new())
+        .unwrap()
+        .mean()
 }
 
 fn key_of(x: &[f32], cfg: &ChromaConfig) -> Key {
-    let c = chroma(x, cfg, &mut FftScratch::new()).unwrap();
+    let c = chroma(x, cfg, &mut FftScratch::<f64>::new()).unwrap();
     estimate_key(c.grid(), KeyProfile::Krumhansl).unwrap().key
 }
 
 /// The classes of the `n` largest columns, ascending.
-fn top(c: &[f32; 12], n: usize) -> Vec<usize> {
+fn top(c: &[f64; 12], n: usize) -> Vec<usize> {
     let mut order: Vec<usize> = (0..12).collect();
     order.sort_by(|&a, &b| c[b].total_cmp(&c[a]));
     let mut t = order[..n].to_vec();
@@ -103,7 +105,7 @@ fn a_triad_of_sines_has_chroma_at_its_classes() {
 
     let only = mean_chroma(&x, &config().harmonics(Harmonics::of(1)));
     assert_eq!(top(&only, 3), [0, 4, 7]);
-    let sidelobes = 6.0 * 10f32.powf(-3.1);
+    let sidelobes = 6.0 * 10f64.powf(-3.1);
     for (class, &v) in only.iter().enumerate() {
         if [0, 4, 7].contains(&class) {
             assert!(v > 0.9, "{class} {v}");
@@ -128,7 +130,7 @@ fn a_triad_of_sines_is_the_chord_c_major() {
     let mut x = vec![0.0; SR as usize * 2];
     chord_tones(&mut x, 0, 2.0, 0, false, 1);
     let cfg = config();
-    let c = chroma(&x, &cfg, &mut FftScratch::new()).unwrap();
+    let c = chroma(&x, &cfg, &mut FftScratch::<f64>::new()).unwrap();
     let spans = detect_chords(&c, &ChordConfig::new()).unwrap();
     assert_eq!(spans.len(), 1);
     assert_eq!(
@@ -146,7 +148,7 @@ fn a_triad_of_sines_is_the_chord_c_major() {
 /// the key up exactly `k`, for every `k`.
 #[test]
 fn everything_rotates_by_the_transposition() {
-    let mut fft = FftScratch::new();
+    let mut fft = FftScratch::<f64>::new();
     for k in 0..12 {
         let mut x = vec![0.0; SR as usize * 2];
         chord_tones(&mut x, 0, 2.0, k, true, 4);
@@ -220,7 +222,7 @@ fn a_detuned_scale_resolves_and_its_tuning_is_read() {
     let interpolation = 1200.0 * (1.0 + 0.02 * width / C4).log2();
     for (partials, tolerance) in [(1, interpolation), (4, interpolation + 1.955)] {
         let x = melody(&C_MAJOR_SCALE, 0.5, partials, 30.0);
-        let c = chroma(&x, &cfg, &mut FftScratch::new()).unwrap();
+        let c = chroma(&x, &cfg, &mut FftScratch::<f64>::new()).unwrap();
         let tuning = c.tuning().get();
         assert!((tuning - 30.0).abs() <= tolerance, "{partials}: {tuning}");
         let key = estimate_key(c.grid(), KeyProfile::Krumhansl).unwrap().key;
@@ -234,7 +236,12 @@ fn a_detuned_scale_resolves_and_its_tuning_is_read() {
     }
     // Fixed tuning is reported as given.
     let fixed = cfg.tuning(Tuning::Fixed(TuningOffset::of(Cents(12.0))));
-    let c = chroma(&melody(&[0], 0.5, 1, 0.0), &fixed, &mut FftScratch::new()).unwrap();
+    let c = chroma(
+        &melody(&[0], 0.5, 1, 0.0),
+        &fixed,
+        &mut FftScratch::<f64>::new(),
+    )
+    .unwrap();
     assert_eq!(c.tuning(), Cents(12.0));
 }
 
@@ -261,7 +268,7 @@ fn a_progression_has_its_boundaries_where_the_chords_change() {
     for (i, &(root, _)) in progression.iter().enumerate() {
         chord_tones(&mut x, i * each, secs, root, false, 4);
     }
-    let mut fft = FftScratch::new();
+    let mut fft = FftScratch::<f64>::new();
     for (window, hop) in [
         (2048, 512),
         (4096, 1024),
@@ -304,7 +311,7 @@ fn a_progression_has_its_boundaries_where_the_chords_change() {
 #[test]
 fn silence_noise_and_bad_input() {
     let cfg = config();
-    let mut fft = FftScratch::new();
+    let mut fft = FftScratch::<f64>::new();
     let silent = chroma(&vec![0.0; SR as usize], &cfg, &mut fft).unwrap();
     assert!(silent.grid().as_slice().iter().all(|&v| v == 0.0));
     assert_eq!(
@@ -322,7 +329,7 @@ fn silence_noise_and_bad_input() {
     assert!(noisy.grid().as_slice().iter().all(|v| v.is_finite()));
     assert!(detect_chords(&noisy, &chords).unwrap().is_empty());
     let sure = |x: &[f32]| {
-        let c = chroma(x, &cfg, &mut FftScratch::new()).unwrap();
+        let c = chroma(x, &cfg, &mut FftScratch::<f64>::new()).unwrap();
         estimate_key(c.grid(), KeyProfile::Krumhansl)
             .unwrap()
             .confidence

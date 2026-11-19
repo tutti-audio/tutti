@@ -11,24 +11,24 @@ fn framing(window: usize, hop: usize) -> Framing {
     Framing::new(Samples(window), Samples(hop))
 }
 
-fn sine(freq: f64, len: usize, amp: f64) -> Vec<f32> {
+fn sine(freq: f64, len: usize, amp: f64) -> Vec<f64> {
     (0..len)
-        .map(|i| (amp * (std::f64::consts::TAU * freq * i as f64 / 22_050.0).sin()) as f32)
+        .map(|i| amp * (std::f64::consts::TAU * freq * i as f64 / 22_050.0).sin())
         .collect()
 }
 
 /// Largest error of the interpolated peak position, in bins, over a sweep
 /// of a sine across one bin.
-fn worst_offset_error(interp: impl Fn(f32, f32, f32) -> (f64, f32)) -> f64 {
+fn worst_offset_error(interp: impl Fn(f64, f64, f64) -> (f64, f64)) -> f64 {
     let g = geometry(4096, 4096);
     let (window, mut fft) = (g.window_coefficients(), FftScratch::new());
     let mut worst = 0.0f64;
     for step in 0..40 {
         let bin = 100.0 + f64::from(step) / 40.0;
         let x = sine(bin * 22_050.0 / 4096.0, 4096, 0.5);
-        let mut spectrum = vec![Complex32::default(); 2049];
+        let mut spectrum = vec![Complex64::default(); 2049];
         fft.forward(Mono::new(&x), &window, &mut spectrum);
-        let mags: Vec<f32> = spectrum.iter().map(|b| b.norm()).collect();
+        let mags: Vec<f64> = spectrum.iter().map(|b| b.norm()).collect();
         let top = (1..2048).fold(1, |b, i| if mags[i] > mags[b] { i } else { b });
         let (offset, _) = interp(mags[top - 1], mags[top], mags[top + 1]);
         worst = worst.max((top as f64 + offset - bin).abs());
@@ -48,7 +48,7 @@ fn interpolation_places_a_peak_to_a_fiftieth_of_a_bin() {
 /// The bin error bound above, as a fraction of a bin.
 const INTERP_BIAS_BINS: f64 = 0.02;
 
-fn run(x: &[f32], cfg: &ChromaConfig) -> Chroma {
+fn run(x: &[f64], cfg: &ChromaConfig) -> Chroma {
     chroma(cfg, Mono::new(x), RATE, &mut FftScratch::new()).unwrap()
 }
 
@@ -75,7 +75,7 @@ fn a_frame_is_normalized_by_its_largest_column() {
     for level in [0.1, 0.9] {
         let c = run(&sine(440.0, 8192, level), &cfg());
         for row in c.grid().rows() {
-            assert_eq!(row.iter().copied().fold(0.0, f32::max), 1.0);
+            assert_eq!(row.iter().copied().fold(0.0, f64::max), 1.0);
             assert!(row.iter().all(|&v| (0.0..=1.0).contains(&v)));
         }
     }
@@ -88,7 +88,7 @@ fn a_frame_is_normalized_by_its_largest_column() {
 #[test]
 fn a_peak_votes_for_its_subharmonics_down_to_the_band_floor() {
     let c = run(&sine(392.0, 8192, 0.5), &cfg()).mean();
-    assert!((c[7] - 1.0).abs() < 1e-6);
+    assert!((c[7] - 1.0).abs() < 1e-9);
     assert!((c[0] - 0.225).abs() < 0.01, "{c:?}");
     for (i, &v) in c.iter().enumerate() {
         if i != 0 && i != 7 {
@@ -112,7 +112,7 @@ fn peaks_outside_the_band_are_not_folded() {
 fn the_harmonic_decay_weighs_the_subharmonic_votes() {
     let cfg = cfg().harmonic_decay(HarmonicDecay::of(0.3));
     let c = run(&sine(392.0, 8192, 0.5), &cfg).mean();
-    assert!((c[7] - 1.0).abs() < 1e-6);
+    assert!((c[7] - 1.0).abs() < 1e-9);
     assert!((c[0] - 0.09 / 1.3).abs() < 0.01, "{c:?}");
 }
 
@@ -121,7 +121,7 @@ fn the_harmonic_decay_weighs_the_subharmonic_votes() {
 #[test]
 fn peaks_under_the_floor_do_not_vote() {
     let strong = sine(440.0, 8192, 0.5);
-    let x: Vec<f32> = strong
+    let x: Vec<f64> = strong
         .iter()
         .zip(sine(330.0, 8192, 0.5 * 10f64.powf(-50.0 / 20.0)))
         .map(|(a, b)| a + b)
@@ -179,7 +179,7 @@ fn a_fixed_tuning_moves_the_fold() {
 /// and frame count to the bit.
 #[test]
 fn a_meter_at_a_fixed_tuning_is_the_one_shot() {
-    let x: Vec<f32> = sine(440.0, 12_000, 0.5)
+    let x: Vec<f64> = sine(440.0, 12_000, 0.5)
         .iter()
         .zip(sine(660.0, 12_000, 0.3))
         .map(|(a, b)| a + b)
@@ -216,7 +216,7 @@ fn a_meter_at_a_fixed_tuning_is_the_one_shot() {
 /// whole buffer give the same mean and tuning bit for bit.
 #[test]
 fn an_estimating_meter_does_not_depend_on_the_chunking() {
-    let x: Vec<f32> = sine(440.0 * (25.0f64 / 1200.0).exp2(), 12_000, 0.5)
+    let x: Vec<f64> = sine(440.0 * (25.0f64 / 1200.0).exp2(), 12_000, 0.5)
         .iter()
         .zip(sine(660.0, 12_000, 0.3))
         .map(|(a, b)| a + b)
@@ -256,7 +256,7 @@ fn a_refused_chunk_keeps_the_carry_and_reset_reads_fresh() {
     meter.push(Mono::new(&x), &mut Vec::new()).unwrap();
     let (mean, tuning) = (meter.mean(), meter.tuning());
     let mut nan = x.clone();
-    nan[7] = f32::NAN;
+    nan[7] = f64::NAN;
     assert_eq!(
         meter.push(Mono::new(&nan), &mut Vec::new()),
         Err(Error::NonFiniteInput)
@@ -272,7 +272,7 @@ fn a_refused_chunk_keeps_the_carry_and_reset_reads_fresh() {
 /// against the bins it holds, where the rate binds.
 #[test]
 fn the_framing_and_band_are_validated() {
-    let at = |window, hop| Measure::<f32>::measure(&cfg().framing(framing(window, hop)), RATE);
+    let at = |window, hop| Measure::<f64>::measure(&cfg().framing(framing(window, hop)), RATE);
     assert!(matches!(at(32, 8), Err(Error::WindowOutOfRange { .. })));
     assert!(matches!(
         at(1 << 19, 1 << 17),
@@ -315,7 +315,7 @@ fn the_framing_and_band_are_validated() {
         Err(Error::AboveNyquist { .. })
     ));
     assert!(matches!(
-        Measure::<f32>::measure(&wide, RATE),
+        Measure::<f64>::measure(&wide, RATE),
         Err(Error::AboveNyquist { .. })
     ));
     // A low rate clamps the default band to Nyquist instead of failing.
@@ -331,14 +331,15 @@ fn the_framing_and_band_are_validated() {
 fn bad_input_is_refused() {
     let mut fft = FftScratch::new();
     let mut x = sine(440.0, 8192, 0.5);
-    let one_shot =
-        |x: &[f32], cfg: &ChromaConfig, fft: &mut FftScratch| chroma(cfg, Mono::new(x), RATE, fft);
-    x[100] = f32::NAN;
+    let one_shot = |x: &[f64], cfg: &ChromaConfig, fft: &mut FftScratch<f64>| {
+        chroma(cfg, Mono::new(x), RATE, fft)
+    };
+    x[100] = f64::NAN;
     assert_eq!(
         one_shot(&x, &cfg(), &mut fft).unwrap_err(),
         Error::NonFiniteInput
     );
-    x[100] = f32::INFINITY;
+    x[100] = f64::INFINITY;
     assert_eq!(
         one_shot(&x, &cfg(), &mut fft).unwrap_err(),
         Error::NonFiniteInput
@@ -360,7 +361,7 @@ fn bad_input_is_refused() {
     // A NaN between two frames is in no window but is still refused.
     let sparse = cfg().framing(framing(64, 128));
     let mut gap = sine(440.0, 512, 0.5);
-    gap[100] = f32::NAN;
+    gap[100] = f64::NAN;
     assert_eq!(
         one_shot(&gap, &sparse, &mut fft).unwrap_err(),
         Error::NonFiniteInput
@@ -373,7 +374,7 @@ fn bad_input_is_refused() {
 fn an_integer_buffer_folds_at_its_nominal_level() {
     let x: Vec<i16> = sine(440.0, 8192, 0.5)
         .iter()
-        .map(|&v| (v * f32::from(i16::MAX)) as i16)
+        .map(|&v| (v * f64::from(i16::MAX)) as i16)
         .collect();
     let c = chroma(&cfg(), Mono::new(&x), RATE, &mut FftScratch::new()).unwrap();
     assert_eq!(c.mean()[9], 1.0);
