@@ -63,5 +63,5 @@ extern "C" fn fire(_timer: CFRunLoopTimerRef, info: *mut c_void) {
     // time, so nothing else reads it.
     let tick = unsafe { &mut *info.cast::<Tick>() };
     // A panic must not unwind into CoreFoundation's frames.
-    let _ = catch_unwind(AssertUnwindSafe(|| tick()));
+    let _ = catch_unwind(AssertUnwindSafe(tick));
 }
