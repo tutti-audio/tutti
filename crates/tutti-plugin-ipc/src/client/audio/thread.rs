@@ -13,17 +13,18 @@
 use super::ListenerSlot;
 #[cfg(test)]
 use super::channels::response_ring;
-use super::channels::{Channels, ResponseWriter, Waits};
+use super::channels::{Channels, ResponseWriter, Stamped, Waits};
 use super::dispatch::{
     Lane, Owed, apply_setting, handle_audio, handle_control, handle_setting, read_news,
 };
 use super::lifecycle::Lifecycle;
-use super::messages::{AudioCommand, AudioResponse, BridgeEvent, Unsolicited};
+use super::messages::{AudioCommand, AudioResponse, BridgeEvent, ControlCommand, Unsolicited};
 use super::payload_pool::PayloadPool;
 use crate::HostMessage;
 use crate::transport::control::{self as ipc, ControlStream, ControlWait};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 use tutti_plugin_types::{BridgeError, PluginFailure};
 use tutti_rt::{Sleeper, ThreadHandle};
 
@@ -235,6 +236,10 @@ fn audio_loop(
                 apply_setting(channels, lifecycle, setting);
                 continue;
             }
+            // Nothing queued: every block submitted so far has been dealt with,
+            // which a control command waiting for the blocks before it may rely on.
+            channels.note_handled(channels.newest_submitted());
+            channels.progress().notify();
             // Sleep on the doorbell: `push_block` rings it the instant a block
             // arrives, so the socket round-trip starts immediately. The ring
             // cannot be lost and `shutdown` rings it too, so there is no
@@ -242,7 +247,9 @@ fn audio_loop(
             channels.wait_for_block(sleeper, || !live(lifecycle));
             continue;
         };
-        // The settings asked for before this block go before it.
+        // The settings asked for before a block go before it. A `Reset` takes
+        // none: it clears the plugin's signal history, which no setting changes
+        // the need for, and the next block applies them.
         if let AudioCommand::Process(payload) = &cmd {
             while let Some(setting) = channels.take_request(Some(payload.seq)) {
                 apply_setting(channels, lifecycle, setting);
@@ -298,27 +305,55 @@ fn control_loop(
         Ok(watch) => channels.set_probe(Arc::new(watch)),
         Err(e) => tracing::warn!("the bridge cannot watch the control connection: {e}"),
     }
+    // The control command taken off its queue and not yet sent, with the end of
+    // its wait for the blocks before it.
+    let mut held: Option<(Stamped<ControlCommand>, std::time::Instant)> = None;
     while live(lifecycle) {
+        if held.is_none() {
+            held = channels.pop_control().map(|cmd| {
+                let wait = crate::Wake::deadline_in(lifecycle.timeouts().settle_wait());
+                (cmd, wait)
+            });
+        }
         // A setting first: the audio lane's blocks wait for it.
         let result = if let Some((setting, applied)) = channels.take_setting() {
             // A command's turn reads the news that comes during it too.
             channels.set_news();
             handle_setting(setting, applied, &mut lane, channels, &mut inbox, lifecycle)
+        } else if let Some((stamped, deadline)) =
+            held.take_if(|(c, _)| channels.handled() >= c.after)
+        {
+            // **A command is sent after the blocks submitted before it**, as
+            // the one thread used to do: the audio lane has sent or skipped the
+            // block it follows.
+            let _ = deadline;
+            channels.set_news();
+            handle_control(stamped.cmd, &mut lane, channels, &mut inbox, lifecycle)
+        } else if let Some((stamped, deadline)) = &held {
+            // Not yet: wait for the audio lane (or a setting it is holding the
+            // block for, the end of the bridge, the command's own bound). A
+            // command the blocks never let through is failed, never sent out of
+            // order: its caller is told, by the reply's drop, that none comes.
+            let after = stamped.after;
+            channels.progress().wait_until(*deadline, || {
+                channels.handled() >= after || channels.setting_waiting() || !live(lifecycle)
+            });
+            if crate::Wake::deadline_in(Duration::ZERO) >= *deadline && channels.handled() < after {
+                tracing::warn!(
+                    "a control command was not sent: the blocks before it were not dealt with in time"
+                );
+                held = None;
+            }
+            continue;
         } else {
-            match channels.pop_control() {
-                Some(cmd) => {
+            match wait.wait(&lane.stream, None) {
+                Ok(woken) if woken.stream => {
                     channels.set_news();
-                    handle_control(cmd, &mut lane, channels, &mut inbox, lifecycle)
+                    read_news(&mut lane, channels, &mut inbox)
                 }
-                None => match wait.wait(&lane.stream, None) {
-                    Ok(woken) if woken.stream => {
-                        channels.set_news();
-                        read_news(&mut lane, channels, &mut inbox)
-                    }
-                    // A ring: look at the queue and the stop condition again.
-                    Ok(_) => continue,
-                    Err(e) => Err(BridgeError::Io(e)),
-                },
+                // A ring: look at the queue and the stop condition again.
+                Ok(_) => continue,
+                Err(e) => Err(BridgeError::Io(e)),
             }
         };
         drain_unsolicited(&mut inbox, channels, listener);
@@ -456,7 +491,7 @@ fn drain_with_errors(channels: &Channels, owed: &mut Owed) {
 /// Drop every queued control-lane command: a request's caller, holding the
 /// other end of its reply, is told at once that none is coming.
 fn drop_controls(channels: &Channels) {
-    while let Some(cmd) = channels.pop_control() {
+    while let Some(Stamped { cmd, .. }) = channels.pop_control() {
         drop(cmd);
     }
 }

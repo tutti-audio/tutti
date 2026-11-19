@@ -458,7 +458,7 @@ impl AudioBridge {
     /// lane holds the blocks submitted after it until the plugin has answered or
     /// its deadline passes. A change the bridge then gave up on is counted
     /// ([`unapplied_settings`](Self::unapplied_settings)) and logged.
-    pub(crate) fn set_sample_rate_rt(&self, rate: SampleRate) -> bool {
+    pub(crate) fn set_sample_rate(&self, rate: SampleRate) -> bool {
         // Publish before requesting, so both the staleness bound and
         // the bridge thread's reply timeout track the new period from here on.
         self.channels.set_sample_rate(rate);
@@ -479,12 +479,11 @@ impl AudioBridge {
     /// bridge then gave up on is counted
     /// ([`unapplied_settings`](Self::unapplied_settings)) and logged.
     ///
-    /// Named `_rt` like its neighbours, though the audio thread is not the
-    /// expected caller: a bounce sets this once from the control thread before it
-    /// starts pulling. The blocks submitted before it are sent first; a mode that
-    /// overtook an in-flight block would apply to audio the caller thought was
-    /// already rendered.
-    pub fn set_render_mode_rt(&self, mode: tutti_plugin_types::RenderMode) -> bool {
+    /// Not for the audio thread (a lock): a bounce sets this once from the
+    /// control thread before it starts pulling. The blocks submitted before it
+    /// are sent first; a mode that overtook an in-flight block would apply to
+    /// audio the caller thought was already rendered.
+    pub fn set_render_mode(&self, mode: tutti_plugin_types::RenderMode) -> bool {
         if self.lifecycle.is_crashed() {
             return false;
         }
@@ -501,7 +500,7 @@ impl AudioBridge {
     }
 
     /// The render mode the host last queued for the plugin
-    /// ([`set_render_mode_rt`](Self::set_render_mode_rt)): what the host asked
+    /// ([`set_render_mode`](Self::set_render_mode)): what the host asked
     /// for, not what the plugin accepted. Realtime until it queues another.
     pub fn render_mode(&self) -> tutti_plugin_types::RenderMode {
         self.lifecycle.render_mode()

@@ -713,7 +713,7 @@ fn an_unprompted_event_reaches_the_listener_while_no_command_waits() {
     assert!(
         mock.bridge
             .audio()
-            .set_render_mode_rt(tutti_plugin_types::RenderMode::Realtime)
+            .set_render_mode(tutti_plugin_types::RenderMode::Realtime)
     );
     tutti_fixtures::wait_until(
         "the server's unprompted latency change to be heard",
@@ -771,7 +771,7 @@ fn a_layout_with_absurdly_many_buses_is_dropped_on_receipt() {
     assert!(
         mock.bridge
             .audio()
-            .set_render_mode_rt(tutti_plugin_types::RenderMode::Realtime)
+            .set_render_mode(tutti_plugin_types::RenderMode::Realtime)
     );
     tutti_fixtures::wait_until("the real layout", NOTICE_TIMEOUT, || {
         !layouts.lock().is_empty()
@@ -1259,7 +1259,7 @@ fn a_refused_rate_is_reported_without_crashing_the_bridge() {
         }
         _ => Action::Silent,
     });
-    assert!(mock.bridge.audio().set_sample_rate_rt(SampleRate::SR_96K));
+    assert!(mock.bridge.audio().set_sample_rate(SampleRate::SR_96K));
     tutti_fixtures::wait_until("a rate refusal to be recorded", NOTICE_TIMEOUT, || {
         mock.bridge.audio().rate_refusal().is_some()
     });
@@ -1272,7 +1272,7 @@ fn a_refused_rate_is_reported_without_crashing_the_bridge() {
         "a refusal is not a crash"
     );
 
-    assert!(mock.bridge.audio().set_sample_rate_rt(SampleRate::SR_48K));
+    assert!(mock.bridge.audio().set_sample_rate(SampleRate::SR_48K));
     tutti_fixtures::wait_until("a rate refusal to be cleared", NOTICE_TIMEOUT, || {
         mock.bridge.audio().rate_refusal().is_none()
     });
@@ -1298,7 +1298,7 @@ fn an_unanswered_rate_change_is_a_refusal_and_its_late_answer_clears_it() {
         }
         _ => Action::Silent,
     });
-    assert!(mock.bridge.audio().set_sample_rate_rt(SampleRate::SR_96K));
+    assert!(mock.bridge.audio().set_sample_rate(SampleRate::SR_96K));
     tutti_fixtures::wait_until("a rate refusal to be recorded", NOTICE_TIMEOUT, || {
         mock.bridge.audio().rate_refusal().is_some()
     });
@@ -1367,12 +1367,12 @@ fn a_late_rate_answer_does_not_override_a_later_one() {
                 _ => Action::Silent,
             }
         });
-    assert!(mock.bridge.audio().set_sample_rate_rt(SampleRate::SR_96K));
+    assert!(mock.bridge.audio().set_sample_rate(SampleRate::SR_96K));
     tutti_fixtures::wait_until("a rate refusal to be recorded", NOTICE_TIMEOUT, || {
         mock.bridge.audio().rate_refusal().is_some()
     });
     // B, queued behind A's wait; its answer follows A's on the stream.
-    assert!(mock.bridge.audio().set_sample_rate_rt(SampleRate::SR_88K2));
+    assert!(mock.bridge.audio().set_sample_rate(SampleRate::SR_88K2));
     release.send(()).expect("the mock is listening");
     tutti_fixtures::wait_until("B's refusal to be recorded", NOTICE_TIMEOUT, || {
         mock.bridge
@@ -1405,7 +1405,7 @@ fn dropping_the_bridge_ends_a_hung_rate_change() {
         }
         Action::Silent
     });
-    assert!(mock.bridge.audio().set_sample_rate_rt(SampleRate::SR_96K));
+    assert!(mock.bridge.audio().set_sample_rate(SampleRate::SR_96K));
     // The request is on the wire, so the bridge thread is in the wait.
     request_seen
         .recv_timeout(NOTICE_TIMEOUT)
@@ -2178,4 +2178,72 @@ fn a_block_completes_while_a_control_request_is_outstanding() {
         query.join().expect("the query's thread"),
         Some(Normalized::of(0.5))
     );
+}
+
+/// **A control command pushed after a block reaches the server after it.** With
+/// a thread per lane nothing else orders them: the audio lane is held for a
+/// render mode's fence (the control mock holds it), a block and then an
+/// automation mode are pushed, and once the fence is answered the control lane
+/// has the command to send while the audio lane is still waking to send the
+/// block. The server's log must read mode, fence, block, command; a bridge
+/// that does not make the command wait for the block logs it before the block.
+#[test]
+fn a_control_command_pushed_after_a_block_reaches_the_server_after_it() {
+    let log = Arc::new(std::sync::Mutex::new(Vec::<&'static str>::new()));
+    let (fence_seen, fence_rx) = crossbeam_channel::bounded(1);
+    let (release_tx, release) = crossbeam_channel::bounded::<()>(1);
+    let audio = {
+        let log = Arc::clone(&log);
+        move |msg: HostMessage| {
+            if matches!(msg, HostMessage::ProcessAudio(_)) {
+                log.lock().unwrap().push("block");
+            }
+            answer_blocks(msg)
+        }
+    };
+    let control = {
+        let log = Arc::clone(&log);
+        move |msg: HostMessage| match msg {
+            HostMessage::SetRenderMode { .. } => {
+                log.lock().unwrap().push("mode");
+                Action::Silent
+            }
+            HostMessage::GetCurrentPreset => {
+                log.lock().unwrap().push("fence");
+                fence_seen.send(()).expect("the test listens");
+                release.recv().expect("the test releases the fence");
+                Action::Reply(Box::new(applied_fence()))
+            }
+            HostMessage::SetAutomationState { .. } => {
+                log.lock().unwrap().push("command");
+                Action::Silent
+            }
+            _ => Action::Silent,
+        }
+    };
+    let mut mock = MockServer::start_lanes("control-after-block", audio, control);
+
+    assert!(
+        mock.bridge
+            .audio()
+            .set_render_mode(tutti_plugin_types::RenderMode::Offline)
+    );
+    submit_block(&mock.bridge, 1);
+    fence_rx
+        .recv_timeout(NOTICE_TIMEOUT)
+        .expect("the control lane is held in the fence");
+    assert_eq!(
+        mock.bridge
+            .audio()
+            .set_automation_state_rt(tutti_plugin_types::AutomationMode::Reading),
+        tutti_plugin_types::Delivered::Yes
+    );
+    release_tx.send(()).expect("the control lane is waiting");
+    tutti_fixtures::wait_until("the block to be answered", NOTICE_TIMEOUT, || {
+        answered(&mut mock, 1)
+    });
+    tutti_fixtures::wait_until("the command to reach the server", NOTICE_TIMEOUT, || {
+        log.lock().unwrap().contains(&"command")
+    });
+    assert_eq!(*log.lock().unwrap(), ["mode", "fence", "block", "command"]);
 }

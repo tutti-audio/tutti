@@ -150,7 +150,7 @@ impl Processor for IpcProcessor {
         self.params = ParameterChanges::reserved_bridged(queues, points);
         self.pending = BlockPayload::new(rate);
         // A refused rate command is counted (`PluginControls::refused_commands`).
-        let _ = self.link.bridge.audio().set_sample_rate_rt(rate);
+        let _ = self.link.bridge.audio().set_sample_rate(rate);
         self.link.set_rate(rate);
         // A fork's graph is compiled from the shape read right after this, and
         // a plugin may move its latency when its rate or render mode changes
