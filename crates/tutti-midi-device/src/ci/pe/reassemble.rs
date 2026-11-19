@@ -19,8 +19,6 @@ tutti_units::ranged! {
     /// The most messages received at once from all peers: 1 to 128, the Request IDs
     /// there are (M2-103 §5.3). A message past it is refused.
     #[derive(Eq, Hash, PartialOrd, Ord)]
-    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-    #[cfg_attr(feature = "serde", serde(try_from = "u8", into = "u8"))]
     StreamLimit(u8), NotAStreamLimit, "a stream limit (1 to 128)", |raw| raw >= 1 && raw <= 128
 }
 
@@ -33,8 +31,6 @@ tutti_units::ranged! {
     /// The most bytes buffered across all the messages being received, Header Data
     /// and Property Data together.
     #[derive(Eq, Hash, PartialOrd, Ord)]
-    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-    #[cfg_attr(feature = "serde", serde(try_from = "usize", into = "usize"))]
     BufferLimit(usize), NotABufferLimit, "a buffer limit (at least 1)", |raw| raw >= 1
 }
 

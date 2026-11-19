@@ -77,7 +77,6 @@ fn the_message_data_control_is_closed_over_table_44() {
     assert_eq!(u8::from(DataControl::Full), 0x7F);
 }
 
-#[cfg(feature = "serde")]
 #[test]
 fn the_data_control_is_a_range_checked_value() {
     use tutti_fixtures::{RangeContract, check_range_contract};
