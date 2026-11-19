@@ -518,6 +518,10 @@ impl Catalog {
     /// `PluginId` holds no version, so there is nothing to compare a plugin's
     /// [`version`](PluginDescriptor::version) with, and no near match.
     ///
+    /// A row whose file no longer exists is skipped, so a plugin moved on disk
+    /// resolves to its new file once a scan has found it, while its old row
+    /// waits for [`prune_missing`](Self::prune_missing).
+    ///
     /// A blacklisted file keeps no descriptors, so its plugins resolve
     /// [`Missing`](Resolved::Missing). A plugin blacklisted after this call is
     /// refused by the [`Loadable`] when the load opens it. To load a blacklisted
@@ -529,7 +533,7 @@ impl Catalog {
         let mut found: Vec<PluginRef> = self
             .db
             .plugins()
-            .filter(|p| p.id == Some(id))
+            .filter(|p| p.id == Some(id) && FileFacts::read(p.path).exists)
             .map(|p| p.plugin_ref())
             .collect();
         found.sort_by(|a, b| a.path().cmp(b.path()));
@@ -1082,6 +1086,40 @@ mod tests {
             resolved.bind(),
             Err(BindError::Ambiguous(c)) if c.len() == 2
         ));
+    }
+
+    /// **A moved plugin resolves to its new file**: the old row, whose file is
+    /// gone, is skipped rather than making the id ambiguous.
+    #[test]
+    fn a_row_whose_file_is_gone_is_not_a_candidate() {
+        use tutti_plugin_types::{PluginClass, PluginDescriptor};
+        let dir = tempfile::TempDir::new().unwrap();
+        let (old, new) = (dir.path().join("Old.clap"), dir.path().join("New.clap"));
+        let mut db = PluginDb::new();
+        for path in [&old, &new] {
+            std::fs::write(path, b"x").unwrap();
+            db.apply(RowChange::put(
+                key(path),
+                FileRow::probed(PluginFormat::Clap, &FileFacts::read(path))
+                    .plugins(vec![Described {
+                        id: Some(clap("moved")),
+                        descriptor: PluginDescriptor::new("moved", PluginClass::Unknown),
+                    }])
+                    .build()
+                    .expect("ids of the row's format"),
+            ));
+        }
+        let new_key = key(&new);
+        std::fs::remove_file(&old).unwrap();
+        let plugins = Catalog::new(db, CatalogConfig::new("/nonexistent"), |_| Ok(()));
+
+        let Resolved::Exact(found) = plugins.resolve(&clap("moved")) else {
+            panic!("the stale row made the id ambiguous");
+        };
+        assert_eq!(found.plugin().path(), new_key);
+
+        std::fs::remove_file(&new).unwrap();
+        assert!(matches!(plugins.resolve(&clap("moved")), Resolved::Missing));
     }
 
     /// The real edge: `prune_missing` stats each row's path and removes only

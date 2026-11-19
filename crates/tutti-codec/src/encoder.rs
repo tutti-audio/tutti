@@ -105,6 +105,16 @@ impl<W: Write + Seek + Send + 'static> Inner<W> {
     }
 }
 
+/// [`Error::WavTooLarge`] when `frames` is past the spec's format's limit.
+pub(crate) fn check_planned(spec: &Spec, frames: Samples) -> Result<()> {
+    match spec.format().max_frames(spec.layout()) {
+        Some(limit_frames) if frames.get() as u64 > limit_frames => {
+            Err(Error::WavTooLarge { limit_frames })
+        }
+        _ => Ok(()),
+    }
+}
+
 impl<W: Write + Seek + Send + 'static> Encoder<W> {
     /// Starts a file of `spec` in `sink`, writing its header.
     ///
@@ -336,11 +346,7 @@ impl Encoder<BufWriter<File>> {
         path: impl AsRef<Path>,
         frames: Samples,
     ) -> Result<Self> {
-        if let Some(limit_frames) = spec.format().max_frames(spec.layout())
-            && frames.get() as u64 > limit_frames
-        {
-            return Err(Error::WavTooLarge { limit_frames });
-        }
+        check_planned(spec, frames)?;
         Self::create_file(spec, path)
     }
 }

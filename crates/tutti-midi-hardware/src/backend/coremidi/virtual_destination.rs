@@ -78,7 +78,7 @@ impl UmpVirtualDestination {
         }
         Self::stamped(
             spec.name().as_str(),
-            spec.protocol(),
+            spec.protocol,
             move |event, arrived| {
                 // A full inlet counts the drop itself; a log line would run on
                 // CoreMIDI's thread.

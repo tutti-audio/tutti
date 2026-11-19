@@ -28,8 +28,6 @@
 //! helper. All decode/seek/file I/O runs on the streamer thread; the audio
 //! thread never touches this type.
 
-use std::path::Path;
-
 use symphonia::core::codecs::audio::well_known::CODEC_ID_FLAC;
 use symphonia::core::errors::{Error, SeekErrorKind};
 use symphonia::core::formats::{FormatReader, SeekMode, SeekTo};
@@ -42,8 +40,9 @@ use tutti_units::{SampleRate, Samples};
 
 use super::error::convert;
 use super::placement::topology_of;
-use super::read::{PacketDecoder, first_audio_track, probe_path, sample_rate_of, total_frames_of};
+use super::read::{PacketDecoder, first_audio_track, probe_asset, sample_rate_of, total_frames_of};
 use crate::DecodeError;
+use tutti_platform::Asset;
 
 /// A frame count from the file's `u64`, saturating where `usize` is narrower.
 fn frames(n: u64) -> Samples {
@@ -189,18 +188,25 @@ impl<S: Sample> FileIn<S> {
         self.seekable
     }
 
-    /// Opens `path` at its first audio track, positioned at frame 0.
+    /// Opens `src` (a path, or bytes in memory) at its first audio track,
+    /// positioned at frame 0.
     ///
     /// Probes the container and creates a decoder; no audio is decoded yet.
-    /// It reads the same track [`read_wave`](crate::read_wave) decodes.
+    /// It reads the same track [`read_wave`](crate::read_wave) decodes. The
+    /// reader the asset opens is owned for the life of the `FileIn`, and must
+    /// seek (a seek is how the file's frames are found).
     ///
     /// # Errors
     ///
-    /// A [`DecodeError`] if the file cannot be opened, its container is not one
+    /// A [`DecodeError`] if the source cannot be opened, its container is not one
     /// this build reads, it has no audio track this build can decode, or the
     /// track states no sample rate ([`DecodeError::NoSampleRate`]).
-    pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, DecodeError> {
-        let reader = probe_path(path.as_ref()).map_err(convert)?;
+    pub fn open(src: impl Into<Asset>) -> Result<Self, DecodeError> {
+        Self::start(probe_asset(&src.into()).map_err(convert)?)
+    }
+
+    /// The decoder over a probed container's first audio track.
+    fn start(reader: Box<dyn FormatReader>) -> Result<Self, DecodeError> {
         let (track, params) = first_audio_track(&*reader)?;
         let track_id = track.id;
 

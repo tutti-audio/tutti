@@ -783,6 +783,7 @@ fn a_list_that_does_not_paginate_is_got_whole() {
 /// An Initiator whose peer is the test: it answers what the test says.
 pub(super) struct Script {
     pub(super) init: ResourceInitiator,
+    start: Instant,
     pub(super) now: Instant,
     pub(super) events: Vec<ResourceEvent>,
     pub(super) sent: Vec<CiMessage>,
@@ -796,6 +797,7 @@ impl Script {
             ResourceInitiator::new(Muid::of(OURS), Muid::of(PEER), initiator_settings(512), now);
         let mut script = Self {
             init,
+            start: now,
             now,
             events: Vec::new(),
             sent: Vec::new(),
@@ -813,6 +815,11 @@ impl Script {
         script.events.clear();
         script.sent.clear();
         script
+    }
+
+    /// The instant the script began at.
+    pub(super) fn start(&self) -> Instant {
+        self.start
     }
 
     pub(super) fn take(&mut self, actions: Vec<ResourceAction>) {

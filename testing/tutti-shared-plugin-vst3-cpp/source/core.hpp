@@ -164,6 +164,7 @@ struct Core
 			bool ringing = age >= onset && age <= onset + length;
 			for (size_t c = 0; c < nOut; ++c)
 			{
+				// The Rust twin's xorshift32 (core.rs): same shifts, same seed, same hiss.
 				noise ^= noise << 13; noise ^= noise >> 17; noise ^= noise << 5;
 				float n = (float (noise) / float (UINT32_MAX) * 2.f - 1.f) * hiss;
 				out[c][i] = S ((ringing ? kRingLevel : 0.f) + n);

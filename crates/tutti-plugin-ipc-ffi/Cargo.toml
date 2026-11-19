@@ -19,6 +19,8 @@ memmap2 = "0.9"
 # The header's per-architecture cache-line padding.
 crossbeam-utils = "0.8"
 thiserror = "2"
+# `spawn_named`: the host-watch thread; `Instant`, the one clock type.
+tutti-platform = { version = "0.0.1", path = "../tutti-platform" }
 
 [target.'cfg(unix)'.dependencies]
 # `poll`, `kill(pid, 0)` and `O_NOFOLLOW`, without a hand-written call.
@@ -42,7 +44,3 @@ windows-sys = { workspace = true, features = [
 #     cargo test -p tutti-plugin-ipc-ffi --release --lib loom_model   (with the loom cfg flag set)
 [target.'cfg(loom)'.dependencies]
 loom = "0.7"
-
-[dev-dependencies]
-# `Instant`, the one clock type.
-tutti-platform = { path = "../tutti-platform" }

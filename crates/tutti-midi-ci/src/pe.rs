@@ -116,8 +116,9 @@ pub use chunk::{
 };
 pub use flow::{PE_TIMEOUT, PeAnswer, PeMessageKind, PeSignal, PeTerminator, PeTransaction};
 pub use header::{
-    PE_MAX_HEADER_LEN, PeEncoding, PeEndedBy, PeHeader, PeHeaderError, PeHeaderTooLong, PePage,
-    PeReply, PeRequest, PeSetScope, PeStatus, PeStatusClass, PeSubscription, PeUpdateCommand,
+    PE_MAX_HEADER_LEN, PeCacheTime, PeEncoding, PeEndedBy, PeHeader, PeHeaderError,
+    PeHeaderTooLong, PePage, PeReply, PeRequest, PeSetScope, PeStatus, PeStatusClass,
+    PeSubscription, PeUpdateCommand,
 };
 pub use initiator::{
     PeAction, PeCall, PeCapabilitiesFailure, PeChange, PeError, PeGet, PeInitiator, PeKind,

@@ -1,13 +1,14 @@
 //! Decoding a file into a [`Wave`], and reading its header without decoding.
 //!
-//! The entry points are [`read_wave`], [`read_wave_metadata`] and
-//! [`read_wave_bytes`]. Decoded samples are held to the
-//! generator of the committed fixtures by `tests/decode_fixtures.rs`.
+//! The entry points are [`read_wave`] and [`read_wave_metadata`], each over an
+//! [`Asset`]. Decoded samples are held to the generator of the committed fixtures
+//! by `tests/decode_fixtures.rs`.
 
 use std::any::Any;
-use std::fs::File;
-use std::path::Path;
+use std::io::{Read, Seek, SeekFrom};
+use std::sync::{Mutex, PoisonError};
 use tutti_buffers::{I24, Planes, Sample, SampleFormat, Wave};
+use tutti_platform::Asset;
 use tutti_units::{SampleRate, Samples};
 
 use symphonia::core::audio::sample::{SampleFormat as FileFormat, i24};
@@ -216,17 +217,69 @@ pub(super) fn total_frames_of(track: &Track, params: &AudioCodecParameters) -> O
         .map(|valid| valid + u64::from(delay) + u64::from(track.padding.unwrap_or(0)))
 }
 
-/// Open `path` and probe its container, hinting the format from the extension.
+/// Opens `asset` and probes its container, hinting the format from the asset's
+/// extension.
 ///
-/// The head every path-based entry point shares; `FileIn::open` and
+/// The head every entry point shares; `FileIn::open` and
 /// [`read_wave_metadata`] stop here, [`read_wave`] decodes on from it.
-pub(super) fn probe_path(path: &Path) -> Result<Box<dyn FormatReader>, Error> {
+///
+/// symphonia's [`MediaSource`] is `Sync`; a reader that is only `Send` is made
+/// so by a [`Mutex`] that is never locked (it is reached through `get_mut`).
+pub(super) fn probe_asset(asset: &Asset) -> Result<Box<dyn FormatReader>, Error> {
     let mut hint = Hint::new();
-    if let Some(extension_str) = path.extension().and_then(|e| e.to_str()) {
-        hint.with_extension(extension_str);
+    if let Some(extension) = asset.extension() {
+        hint.with_extension(extension);
     }
-    let source: Box<dyn MediaSource> = Box::new(File::open(path).map_err(Error::IoError)?);
-    probe_source(source, &hint)
+    let mut reader = asset.open().map_err(Error::IoError)?;
+    // The length is what lets a container (Ogg) find its last page, and so its
+    // frame count.
+    let start = reader.stream_position().map_err(Error::IoError)?;
+    let len = reader.seek(SeekFrom::End(0)).map_err(Error::IoError)?;
+    reader
+        .seek(SeekFrom::Start(start))
+        .map_err(Error::IoError)?;
+    let source = Reader {
+        reader: Mutex::new(reader),
+        len,
+    };
+    probe_source(Box::new(source), &hint)
+}
+
+/// A `Read + Seek + Send` source as a [`MediaSource`].
+struct Reader<R> {
+    reader: Mutex<R>,
+    /// The source's length in bytes.
+    len: u64,
+}
+
+impl<R> Reader<R> {
+    fn get(&mut self) -> &mut R {
+        self.reader
+            .get_mut()
+            .unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+impl<R: Read> Read for Reader<R> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        self.get().read(buf)
+    }
+}
+
+impl<R: Seek> Seek for Reader<R> {
+    fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
+        self.get().seek(pos)
+    }
+}
+
+impl<R: Read + Seek + Send> MediaSource for Reader<R> {
+    fn is_seekable(&self) -> bool {
+        true
+    }
+
+    fn byte_len(&self) -> Option<u64> {
+        Some(self.len)
+    }
 }
 
 fn probe_source(
@@ -271,7 +324,8 @@ pub(super) fn sample_rate_of(params: &AudioCodecParameters) -> Result<SampleRate
         .ok_or(DecodeError::NoSampleRate)
 }
 
-/// Decodes the first audio track of the file at `path` into memory, as `S`.
+/// Decodes the first audio track of `src` (a path, or bytes in memory) into
+/// memory, as `S`.
 ///
 /// Requires a decode feature (`decode-wav`, `decode-flac`, `decode-mp3` or
 /// `decode-ogg`). Supported formats are whatever those enable; see
@@ -291,22 +345,22 @@ pub(super) fn sample_rate_of(params: &AudioCodecParameters) -> Result<SampleRate
 ///
 /// # Errors
 ///
-/// A [`DecodeError`] if the file cannot be opened, its container is not one
+/// A [`DecodeError`] if the source cannot be opened, its container is not one
 /// this build reads, it has no audio track, the track states no sample
 /// rate ([`DecodeError::NoSampleRate`]), or a packet fails to decode.
 ///
 /// # Examples
 ///
 /// ```no_run
-/// let wave = tutti_codec::read_wave::<f32>("kick.wav")?;
+/// let wave = tutti_codec::read_wave::<f32>("kick.wav")?; // or bytes: `Vec<u8>`, `Arc<[u8]>`
 /// println!("{} channels, {} s", wave.channels(), wave.duration());
 /// # Ok::<(), tutti_codec::DecodeError>(())
 /// ```
-pub fn read_wave<S: Sample>(path: impl AsRef<Path>) -> Result<Wave<S>, DecodeError> {
-    decode(probe_path(path.as_ref()).map_err(convert)?)
+pub fn read_wave<S: Sample>(src: impl Into<Asset>) -> Result<Wave<S>, DecodeError> {
+    decode(probe_asset(&src.into()).map_err(convert)?)
 }
 
-/// Reads an audio file's frame count, sample rate, channel count and
+/// Reads an audio source's frame count, sample rate, channel count and
 /// sample format without decoding any audio.
 ///
 /// Works for every format [`read_wave`] can read, and is fast enough for
@@ -314,11 +368,16 @@ pub fn read_wave<S: Sample>(path: impl AsRef<Path>) -> Result<Wave<S>, DecodeErr
 ///
 /// # Errors
 ///
-/// A [`DecodeError`] if the file cannot be opened, its container is not one
+/// A [`DecodeError`] if the source cannot be opened, its container is not one
 /// this build reads, it has no audio track, or the track states no sample
 /// rate ([`DecodeError::NoSampleRate`]).
-pub fn read_wave_metadata(path: impl AsRef<Path>) -> Result<WaveMetadata, DecodeError> {
-    let reader = probe_path(path.as_ref()).map_err(convert)?;
+///
+pub fn read_wave_metadata(src: impl Into<Asset>) -> Result<WaveMetadata, DecodeError> {
+    metadata_of(probe_asset(&src.into()).map_err(convert)?)
+}
+
+/// The metadata of a probed container's first audio track.
+fn metadata_of(reader: Box<dyn FormatReader>) -> Result<WaveMetadata, DecodeError> {
     let (track, params) = first_audio_track(&*reader)?;
     let (topology, placement) = topology_of(params.channels.as_ref());
     Ok(WaveMetadata {
@@ -328,17 +387,6 @@ pub fn read_wave_metadata(path: impl AsRef<Path>) -> Result<WaveMetadata, Decode
         placement,
         format: native_format(params),
     })
-}
-
-/// Decodes the first audio track of a complete file held in memory. There
-/// is no extension hint, so the container is identified from the bytes
-/// alone.
-///
-/// # Errors
-///
-/// As [`read_wave`].
-pub fn read_wave_bytes<S: Sample>(bytes: Vec<u8>) -> Result<Wave<S>, DecodeError> {
-    decode(probe_source(Box::new(std::io::Cursor::new(bytes)), &Hint::new()).map_err(convert)?)
 }
 
 /// Decode the first audio track of a probed container to its end.

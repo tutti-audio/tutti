@@ -3,6 +3,7 @@
 //! writer around them.
 
 use std::num::NonZeroU32;
+use std::time::Duration;
 
 use super::PeFlowControl;
 use super::json;
@@ -299,6 +300,31 @@ impl PeRequest {
     }
 }
 
+/// How long the Initiator keeps Property Data: the whole seconds of a `cacheTime`
+/// (§7.4.3, Table 14), so a fraction of a second cannot be written.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct PeCacheTime(u32);
+
+impl PeCacheTime {
+    /// `secs` seconds; 0 is no caching.
+    #[must_use]
+    pub const fn from_secs(secs: u32) -> Self {
+        Self(secs)
+    }
+
+    /// The whole seconds.
+    #[must_use]
+    pub const fn as_secs(self) -> u32 {
+        self.0
+    }
+}
+
+impl From<PeCacheTime> for Duration {
+    fn from(time: PeCacheTime) -> Self {
+        Self::from_secs(time.0.into())
+    }
+}
+
 /// A reply to an inquiry or to a Subscription message (§7.3, Table 14).
 #[derive(Clone, Debug, PartialEq)]
 pub struct PeReply {
@@ -308,8 +334,8 @@ pub struct PeReply {
     pub message: Option<PeMessage>,
     /// The encoding of the Property Data.
     pub mutual_encoding: Option<PeEncoding>,
-    /// The seconds the Property Data may be cached (§7.4.3).
-    pub cache_time_secs: Option<u32>,
+    /// How long the Property Data may be cached (§7.4.3).
+    pub cache_time: Option<PeCacheTime>,
     /// The objects a List Resource holds, whatever the pagination (§8.6.2).
     pub total_count: Option<u32>,
     /// The Subscription a reply to Start Subscription assigns (§11.1).
@@ -328,7 +354,7 @@ impl PeReply {
             status,
             message: None,
             mutual_encoding: None,
-            cache_time_secs: None,
+            cache_time: None,
             total_count: None,
             subscribe_id: None,
             media_type: None,
@@ -347,7 +373,7 @@ impl PeReply {
                 .ok_or(PeHeaderError::InvalidValue("status"))?,
             message: props.string("message", PeMessage::new)?,
             mutual_encoding: props.string("mutualEncoding", PeEncoding::new)?,
-            cache_time_secs: props.unsigned("cacheTime")?,
+            cache_time: props.unsigned("cacheTime")?.map(PeCacheTime::from_secs),
             total_count: props.unsigned("totalCount")?,
             subscribe_id: props.string("subscribeId", SubscribeId::new)?,
             media_type: props.string("mediaType", MediaType::new)?,
@@ -361,8 +387,8 @@ impl PeReply {
             out.text("message", message.as_str());
         }
         write_encoding(out, self.mutual_encoding);
-        if let Some(secs) = self.cache_time_secs {
-            out.integer("cacheTime", secs.into());
+        if let Some(time) = self.cache_time {
+            out.integer("cacheTime", time.as_secs().into());
         }
         if let Some(count) = self.total_count {
             out.integer("totalCount", count.into());

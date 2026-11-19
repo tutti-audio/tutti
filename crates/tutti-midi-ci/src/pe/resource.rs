@@ -1,6 +1,7 @@
 //! The standard Resources of Property Exchange, typed (M2-103 §8 to §14, M2-105
 //! to M2-109, M2-111, M2-112, M2-117).
 
+mod cache;
 mod channels;
 mod client;
 mod controllers;
