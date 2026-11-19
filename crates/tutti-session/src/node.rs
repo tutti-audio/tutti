@@ -4,9 +4,6 @@
 use tutti_buffers::Float;
 use tutti_graph::{ForkByClone, IntoNode, Node, NodeKey, ParamNode, ParamSet, Params, Unforkable};
 
-#[cfg(feature = "midi")]
-use std::sync::Arc;
-
 use crate::NodeSlots;
 
 /// A node that may enter a session's graph: it declares its own ports (event
@@ -330,8 +327,7 @@ impl<F: Float> SessionNode<F> for tutti_midi_runtime::MidiClipNode {
     fn slots(node: NodeKey, controls: &tutti_midi_runtime::MidiClipControls) -> NodeSlots {
         NodeSlots::of(
             crate::value::SlotId::ClipEvents(node),
-            Arc::new(crate::value::PublishedSlot(controls.clone()))
-                as crate::value::SlotCell<Arc<tutti_midi_runtime::ClipEvents>>,
+            crate::value::PublishedSlot::new(controls.clone()),
         )
     }
 
@@ -357,8 +353,7 @@ impl<F: Float> SessionNode<F> for tutti_midi_runtime::HarmonyNode {
     fn slots(node: NodeKey, controls: &tutti_midi_runtime::HarmonyControls) -> NodeSlots {
         NodeSlots::of(
             crate::value::SlotId::Harmony(node),
-            Arc::new(crate::value::PublishedSlot(controls.clone()))
-                as crate::value::SlotCell<Arc<tutti_midi_runtime::HarmonyChanges>>,
+            crate::value::PublishedSlot::new(controls.clone()),
         )
     }
 

@@ -305,8 +305,8 @@ pub use value::MidiPolicyTarget;
 pub use value::OutputPolicyTarget;
 pub use value::{
     AnyAssign, AnyTarget, Assign, ClickTargets, ClickVolumeTarget, Effective, Info, IntoAssign,
-    IntoRead, Knobs, MeterTarget, Modify, Moved, NodeSlots, ParamTarget, ScalarTarget, SetRefusal,
-    SettingTarget, Target, TargetInfo, TempoTarget, ValueError, ValueErrorKind,
+    IntoRead, Knobs, LoopTarget, MeterTarget, Modify, Moved, NodeSlots, ParamTarget, ScalarTarget,
+    SetRefusal, SettingTarget, Target, TargetInfo, TempoTarget, ValueError, ValueErrorKind,
 };
 #[cfg(feature = "midi")]
 pub use value::{ClipEventsTarget, HarmonyTarget, MpeModeTarget, OutputLatencyTarget};

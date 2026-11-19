@@ -190,8 +190,9 @@ pub use tutti_session::{Analyze, AnalyzeError, Audio, AudioContext, AudioInput};
 #[cfg(feature = "session")]
 pub use tutti_session::{
     AnyAssign, AnyTarget, Assign, ClickTargets, ClickVolumeTarget, Effective, Info, IntoAssign,
-    IntoRead, Knobs, MeterTarget, Modify, Moved, OutputPolicyTarget, ParamTarget, ScalarTarget,
-    SetRefusal, SettingTarget, Target, TargetInfo, TempoTarget, ValueError, ValueErrorKind,
+    IntoRead, Knobs, LoopTarget, MeterTarget, Modify, Moved, OutputPolicyTarget, ParamTarget,
+    ScalarTarget, SetRefusal, SettingTarget, Target, TargetInfo, TempoTarget, ValueError,
+    ValueErrorKind,
 };
 #[cfg(feature = "session")]
 pub use tutti_session::{
@@ -656,8 +657,8 @@ pub mod plugin {
     /// holds.
     pub mod catalog {
         pub use tutti_plugin::catalog::{
-            AudioConfig, CatalogConfig, NO_SCAN_DIRS, PluginDb, PluginDescriptor, PluginId, Scan,
-            ScanPoll, ScanResult,
+            AudioConfig, CatalogConfig, PluginDb, PluginDescriptor, PluginId, Scan, ScanPoll,
+            ScanResult,
         };
         pub use tutti_plugin_types::PluginRole;
     }

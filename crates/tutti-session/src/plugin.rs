@@ -3246,15 +3246,13 @@ mod tests {
     /// the blacklist's refusal, and nothing is opened.
     #[test]
     fn a_reload_of_a_plugin_blacklisted_since_its_load_is_refused() {
-        use tutti_plugin::catalog::{Catalog, CatalogConfig, NO_SCAN_DIRS, PluginDb};
+        use tutti_plugin::catalog::{Catalog, CatalogConfig, PluginDb};
         let file =
             std::env::temp_dir().join(format!("tutti-reload-bl-{}.clap", std::process::id()));
         std::fs::write(&file, b"x").unwrap();
-        let mut catalog = Catalog::new(
-            PluginDb::new(),
-            CatalogConfig::new("/nonexistent", NO_SCAN_DIRS),
-            |_| Ok(()),
-        );
+        let mut catalog = Catalog::new(PluginDb::new(), CatalogConfig::new("/nonexistent"), |_| {
+            Ok(())
+        });
         let plugin = PluginRef::file(&file).expect("a plugin file");
         let loadable = Loadable::uncatalogued(plugin.clone()).under(&catalog);
         let mut rig = rig(None);

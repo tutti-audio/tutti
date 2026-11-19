@@ -10,6 +10,7 @@
 //! user-held handle has dropped).
 
 use crate::{BridgeConfig, BridgeThread, Reaped, ServerWatch};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tutti_plugin_ipc_ffi::ExitWait;
@@ -42,7 +43,10 @@ pub struct ProcessGuard {
     watch: Arc<ServerWatch>,
     exit_thread: Option<ThreadHandle<()>>,
     _bridge_thread: Option<BridgeThread>,
-    config: BridgeConfig,
+    /// The control socket's file, removed when the guard drops.
+    socket_path: PathBuf,
+    /// How long a server told to shut down has to end before it is killed.
+    shutdown: Duration,
 }
 
 impl std::fmt::Debug for ProcessGuard {
@@ -62,7 +66,7 @@ impl ProcessGuard {
     ///
     /// The exit thread cannot start: a server whose end nobody watches is not
     /// run, and `process` is killed and reaped as it drops.
-    pub fn launched(process: Reaped, config: BridgeConfig) -> std::io::Result<Self> {
+    pub fn launched(process: Reaped, config: &BridgeConfig) -> std::io::Result<Self> {
         let watch = Arc::new(ServerWatch::new());
         let wait = Arc::new(process.exit_wait());
         let process = Arc::new(Mutex::new(Some(process)));
@@ -78,7 +82,8 @@ impl ProcessGuard {
             watch,
             exit_thread: Some(spawned?),
             _bridge_thread: None,
-            config,
+            socket_path: config.socket_path.clone(),
+            shutdown: config.timeouts.shutdown,
         })
     }
 
@@ -118,14 +123,15 @@ impl ProcessGuard {
     /// `handle_over` in `tutti-plugin`'s mock-server tests, and by this
     /// crate's own for `Ipc`.
     #[cfg(any(test, feature = "testing"))]
-    pub fn for_test(config: BridgeConfig) -> Self {
+    pub fn for_test(socket_path: PathBuf) -> Self {
         Self {
             process: Arc::new(Mutex::new(None)),
             wait: None,
             watch: Arc::new(ServerWatch::new()),
             exit_thread: None,
             _bridge_thread: None,
-            config,
+            socket_path,
+            shutdown: Duration::ZERO,
         }
     }
 }
@@ -151,7 +157,7 @@ impl Drop for ProcessGuard {
             // A server nobody told to shut down (a failed launch) has no
             // plugin to wait for.
             let grace = if shutting_down {
-                self.config.timeouts.shutdown
+                self.shutdown
             } else {
                 Duration::ZERO
             };
@@ -175,7 +181,7 @@ impl Drop for ProcessGuard {
         }
         // Stops (again) and joins.
         drop(self.exit_thread.take());
-        let _ = std::fs::remove_file(&self.config.socket_path);
+        let _ = std::fs::remove_file(&self.socket_path);
     }
 }
 
@@ -269,7 +275,7 @@ mod tests {
         let child = command.spawn().expect("the child spawns");
         ProcessGuard::launched(
             Reaped::new(child),
-            BridgeConfig::at(crate::unique_socket_path().expect("the OS has a random source")),
+            &BridgeConfig::at(crate::unique_socket_path().expect("the OS has a random source")),
         )
         .expect("the exit thread starts")
     }

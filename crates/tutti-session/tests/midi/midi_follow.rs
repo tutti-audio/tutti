@@ -481,7 +481,7 @@ fn the_apps_tempo_is_refused_while_following() {
     let (mut s, _fake) = rig();
     let project = s.tempo_map();
     follow(&mut s, MidiGroup::FIRST, false);
-    let refused = crate::tempo::set_tempo(&s, Bpm::of(90.0)).unwrap_err();
+    let refused = crate::tempo::set_tempo(&mut s, Bpm::of(90.0)).unwrap_err();
     assert_eq!(refused.kind, ValueErrorKind::Refused(SetRefusal::Following));
     assert_eq!(refused.at, 0);
     assert!(
@@ -489,5 +489,37 @@ fn the_apps_tempo_is_refused_while_following() {
         "a refusal publishes nothing"
     );
     s.midi().unfollow_tempo().expect("was following");
-    assert_eq!(crate::tempo::set_tempo(&s, Bpm::of(90.0)), Ok(()));
+    assert_eq!(crate::tempo::set_tempo(&mut s, Bpm::of(90.0)), Ok(()));
+}
+
+/// **A tempo staged before a follow never publishes over what the unfollow
+/// restores**: a write staged and not updated, then a follow and an unfollow
+/// with no update between, leaves the project's map in force after the
+/// update; and a read while following is not the staged map.
+#[test]
+fn a_tempo_staged_before_following_is_dropped_not_published_over_the_restored_map() {
+    let (mut s, _fake) = rig();
+    let project = s.tempo_map();
+    let tempo = s.transport_handle().tempo();
+    let staged = Arc::new(TempoMap::constant(Bpm::of(90.0)).unwrap());
+    s.set(tempo.to(Arc::clone(&staged))).unwrap();
+
+    let input = input(&s);
+    s.midi()
+        .follow_tempo(FollowTempo {
+            input,
+            group: MidiGroup::FIRST,
+            meter: false,
+        })
+        .expect("follows");
+    assert!(
+        !Arc::ptr_eq(&s.get(tempo).unwrap(), &staged),
+        "a read while following is not the staged map"
+    );
+    s.midi().unfollow_tempo().expect("was following");
+    let _ = s.update();
+    assert!(
+        Arc::ptr_eq(&s.tempo_map(), &project),
+        "the staged map did not publish over the restored one"
+    );
 }

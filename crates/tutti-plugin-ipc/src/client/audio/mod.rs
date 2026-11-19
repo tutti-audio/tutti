@@ -25,23 +25,25 @@ mod progress;
 mod thread;
 
 use crate::ServerWatch;
-use crate::protocol::{
-    ChordChanges, MidiEventVec, NoteExpressionChanges, NoteExpressionIntChanges,
-    NoteExpressionTextChanges, ParamId, ParameterChanges, ParameterInfo, Preset, PresetId,
-    ScaleChanges, SlabLayout, TransportChanges, TransportInfo,
-};
+use crate::SlabLayout;
 use dpi::Size;
 use tutti_plugin_types::{
     BlockStatus, BridgeResult, ContentScale, Delivered, EditorError, PluginFailure, StateError,
     StateUse,
 };
+use tutti_plugin_types::{
+    ChordChanges, MidiEventVec, NoteExpressionChanges, NoteExpressionIntChanges,
+    NoteExpressionTextChanges, ParameterChanges, ParameterInfo, Preset, PresetId, ScaleChanges,
+    TransportChanges, TransportInfo,
+};
 use tutti_units::Normalized;
+use tutti_units::ParamId;
 use tutti_units::SampleRate;
 
 /// VST3 sequencer-context inputs for one process block, bundled to keep
 /// `AudioBridge::submit`'s signature manageable. All default to empty.
 #[derive(Debug, Default, Clone)]
-pub struct HarmonyInputs {
+pub(crate) struct HarmonyInputs {
     /// Chord changes in the block.
     pub chords: ChordChanges,
     /// Scale changes in the block.
@@ -54,7 +56,7 @@ pub struct HarmonyInputs {
 
 /// What `AudioBridge::submit` did with a block.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Submitted {
+pub(crate) struct Submitted {
     /// The bridge accepted the block (its output is collectable later).
     pub block: bool,
     /// The block carries the caller's parameter changes (trivially, when
@@ -340,7 +342,7 @@ impl AudioBridge {
     /// same forever, a full queue may take the very next call — and a `bool`
     /// merged them into one "not delivered" that a caller could only report,
     /// never act on.
-    pub fn set_automation_state_rt(&self, mode: crate::protocol::AutomationMode) -> Delivered {
+    pub fn set_automation_state_rt(&self, mode: tutti_plugin_types::AutomationMode) -> Delivered {
         if self.lifecycle.is_crashed() {
             return Delivered::PluginDead;
         }
@@ -380,7 +382,7 @@ impl AudioBridge {
     /// pulling. Riding the same queue is what keeps it ordered against the
     /// blocks around it — a mode that overtook an in-flight block would apply
     /// to audio the caller thought was already rendered.
-    pub fn set_render_mode_rt(&self, mode: crate::protocol::RenderMode) -> bool {
+    pub fn set_render_mode_rt(&self, mode: tutti_plugin_types::RenderMode) -> bool {
         let queued = !self.lifecycle.is_crashed()
             && self.channels.push_command(Command::SetRenderMode { mode });
         if queued {
@@ -392,7 +394,7 @@ impl AudioBridge {
     /// The render mode the host last queued for the plugin
     /// ([`set_render_mode_rt`](Self::set_render_mode_rt)): what the host asked
     /// for, not what the plugin accepted. Realtime until it queues another.
-    pub fn render_mode(&self) -> crate::protocol::RenderMode {
+    pub fn render_mode(&self) -> tutti_plugin_types::RenderMode {
         self.lifecycle.render_mode()
     }
 

@@ -3,8 +3,8 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::BusChannels;
 use tutti_buffers::FloatWidth;
+use tutti_plugin_types::BusChannels;
 
 /// Shared-memory slab descriptor: the shape both processes must agree on before
 /// either maps a byte.
@@ -118,8 +118,8 @@ impl SlabLayout {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::ChannelLayout;
     use crate::transport::shm::RING_SLOTS;
+    use tutti_plugin_types::ChannelLayout;
 
     fn layout(inputs: &[ChannelLayout], outputs: &[ChannelLayout]) -> SlabLayout {
         SlabLayout {

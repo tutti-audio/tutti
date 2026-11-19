@@ -23,10 +23,15 @@ fn map_at(t0: Instant) -> ClockMap {
     ClockMap::new(R48, ClockReading::new(t0, Frame::new(0)))
 }
 
+fn secs(d: Duration) -> Seconds {
+    Seconds(d.as_secs_f64())
+}
+
 fn terms(audio: Option<Duration>, device: Duration, offset: f64) -> OutputTerms {
     OutputTerms {
-        audio_output: audio,
-        latency: OutputLatency::new(device, OutputOffset::new(Seconds(offset)).unwrap()).unwrap(),
+        audio_output: audio.map(secs),
+        latency: OutputLatency::new(secs(device), OutputOffset::new(Seconds(offset)).unwrap())
+            .unwrap(),
     }
 }
 
@@ -117,6 +122,25 @@ fn a_frame_the_clock_cannot_place_is_sent_now() {
     );
 }
 
+/// **An audio latency that is no time (NaN, negative infinity, beyond what an
+/// `Instant` holds) is sent now**, never a panic: `OutputTerms` carries any
+/// `Seconds` its caller reports.
+#[test]
+fn an_audio_latency_that_is_no_time_is_sent_now() {
+    let t0 = base();
+    for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, 1e30, -1e30] {
+        let plan = OutputPlan::new(OutputTerms {
+            audio_output: Some(Seconds(bad)),
+            latency: OutputLatency::default(),
+        });
+        assert_eq!(
+            plan.place(Frame::new(4_800), Some(&map_at(t0)), t0 - ms(10)),
+            Placement::Send(SendAt::Now),
+            "{bad}"
+        );
+    }
+}
+
 /// **An unreported audio latency is not a zero.** With the term unknown the
 /// terms are incomplete and the send time omits only that term; once it is
 /// known the term is in, by exactly its value.
@@ -179,6 +203,10 @@ fn an_output_offset_keeps_the_range_checked_shape() {
 /// A device latency over the same bound is refused.
 #[test]
 fn a_device_latency_beyond_a_second_is_refused() {
-    assert!(OutputLatency::new(ms(1000), OutputOffset::ZERO).is_some());
-    assert!(OutputLatency::new(ms(1001), OutputOffset::ZERO).is_none());
+    assert!(OutputLatency::new(Seconds(1.0), OutputOffset::ZERO).is_some());
+    assert!(OutputLatency::new(Seconds(1.001), OutputOffset::ZERO).is_none());
+    // Seconds holds what a Duration cannot: none of these is a latency.
+    for bad in [-0.001, f64::NAN, f64::INFINITY] {
+        assert!(OutputLatency::new(Seconds(bad), OutputOffset::ZERO).is_none());
+    }
 }

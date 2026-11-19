@@ -3,7 +3,7 @@
 
 use crate::ServerWatch;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tutti_plugin_types::PluginFailure;
 use tutti_rt::LockExt;
@@ -105,13 +105,13 @@ impl OfflineWait {
 
     /// The latched rate refusal, if any.
     pub fn refusal(&self) -> Option<(SampleRate, String)> {
-        lock(&self.refusal).clone()
+        self.refusal.lock_recover().clone()
     }
 
     /// Latch a rate refusal: the fork renders silence, at once, for the rest
     /// of the render.
     pub(crate) fn latch_refusal(&self, refusal: (SampleRate, String)) {
-        let mut slot = lock(&self.refusal);
+        let mut slot = self.refusal.lock_recover();
         if slot.is_none() {
             *slot = Some(refusal);
         }
@@ -122,10 +122,6 @@ impl OfflineWait {
     pub fn server_died(&self) -> bool {
         self.server.is_dead()
     }
-}
-
-fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
-    m.lock_recover()
 }
 
 #[cfg(test)]

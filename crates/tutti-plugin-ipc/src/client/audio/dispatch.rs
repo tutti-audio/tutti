@@ -6,17 +6,16 @@ use super::messages::{AudioResponse, Command, Unsolicited};
 use super::payload_pool::PayloadPool;
 use super::progress::StateProgress;
 use crate::error::unexpected_message;
-use crate::protocol::{
-    BridgeMessage, HostMessage, ParamId, ParameterChanges, ParameterPoint, ParameterQueue,
-    ProcessAudioData,
-};
 use crate::transport::control::{self as ipc, ControlStream, PartialFrame};
 use crate::transport::shm::RING_SLOTS;
 use crate::transport::state_chunk::{self, ChunkError, Reassembler};
+use crate::{BridgeMessage, HostMessage, ProcessAudioData};
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 use tutti_plugin_types::MidiIntake;
 use tutti_plugin_types::{BridgeError, BridgeResult, ResyncKind, StateError};
+use tutti_plugin_types::{ParameterChanges, ParameterPoint, ParameterQueue};
+use tutti_units::ParamId;
 use tutti_units::SampleRate;
 
 /// How many block periods the bridge thread will wait for a `ProcessAudio`
@@ -1083,8 +1082,8 @@ fn absorb(inbox: &mut Unsolicited, msg: BridgeMessage) -> Option<BridgeMessage> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::ParamId;
     use tutti_plugin_types::Timeouts;
+    use tutti_units::ParamId;
 
     fn processed(seq: u64) -> BridgeMessage {
         BridgeMessage::AudioProcessed {
@@ -1260,7 +1259,7 @@ mod tests {
     fn carried_values_take_real_slots_at_the_pool_budget_without_allocating() {
         const PARAMS: usize = 2_000;
         const UNMOVED: usize = 10;
-        let room = crate::protocol::ParameterQueue::chunk_room(512);
+        let room = tutti_plugin_types::ParameterQueue::chunk_room(512);
         let moved = PARAMS - UNMOVED;
         let full = moved - ParameterChanges::POOLED_QUEUES..moved;
         let addr = |i: usize| ParamId::new((i as i32) as u32);

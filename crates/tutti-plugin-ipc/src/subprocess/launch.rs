@@ -6,9 +6,9 @@ use super::Reaped;
 use crate::ProcessGuard;
 use crate::config::BridgeConfig;
 use crate::error::unexpected_message;
-use crate::protocol::{BridgeMessage, HostMessage, LoadedPlugin, PluginDescriptor, StagedState};
 use crate::transport::control::{self as ipc, ControlStream};
 use crate::transport::shm::{AudioSlab, SlabLayout, SlabWriter};
+use crate::{BridgeMessage, HostMessage, StagedState};
 use std::path::Path;
 use std::process::Command;
 use std::time::{Duration, Instant};
@@ -18,6 +18,7 @@ use tutti_plugin_types::StateUse;
 use tutti_plugin_types::Timeouts;
 use tutti_plugin_types::{BridgeError, BridgeResult};
 use tutti_plugin_types::{Helper, Load, Locator, PluginFormat};
+use tutti_plugin_types::{LoadedPlugin, PluginDescriptor};
 use tutti_units::SampleRate;
 
 /// How long to wait between connect attempts.
@@ -140,7 +141,7 @@ pub(super) fn launch_with_state(
     state_use: StateUse,
 ) -> BridgeResult<LaunchedServer> {
     config.timeouts.validate()?;
-    let server = ProcessGuard::launched(spawn_process(locator, config)?, config.clone())
+    let server = ProcessGuard::launched(spawn_process(locator, config)?, config)
         .map_err(BridgeError::ExitUnwatched)?;
 
     // The guard is borrowed, not moved: the connect retry asks its watch so a
@@ -522,10 +523,10 @@ fn next_shm_name() -> BridgeResult<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::ChannelLayout;
     use crate::transport::shm::RING_SLOTS;
     use std::path::PathBuf;
     use std::process::Child;
+    use tutti_plugin_types::ChannelLayout;
     use tutti_plugin_types::Timeouts;
 
     /// A failed launch must not leave the subprocess running.
@@ -1099,11 +1100,9 @@ mod tests {
         // The listener above stands in for the server, so there is no child to
         // watch — but `handshake` takes a guard to notice a spawn that died. A
         // lingering stand-in stays alive for the whole test; the guard kills it.
-        let stand_in = ProcessGuard::launched(
-            Reaped::new(spawn_stand_in(StandIn::Lingers)),
-            config.clone(),
-        )
-        .expect("the exit thread starts");
+        let stand_in =
+            ProcessGuard::launched(Reaped::new(spawn_stand_in(StandIn::Lingers)), &config)
+                .expect("the exit thread starts");
         let err = handshake(&config, &stand_in)
             .expect_err("a stale server must not complete the handshake");
         drop(stand_in);
@@ -1128,7 +1127,7 @@ mod tests {
     /// covered is a handshake path that forgets to call the gate at all.
     #[test]
     fn a_stale_v3_server_is_refused_with_a_named_version_error() {
-        use crate::protocol::PROTOCOL_VERSION;
+        use crate::PROTOCOL_VERSION;
 
         const STALE_VERSION: u32 = 3;
         assert_ne!(
@@ -1165,7 +1164,7 @@ mod tests {
     /// block-status wire change bumped the version.
     #[test]
     fn a_server_from_before_the_block_status_is_refused() {
-        use crate::protocol::PROTOCOL_VERSION;
+        use crate::PROTOCOL_VERSION;
 
         const BEFORE_STATUS: u32 = 31;
         let err = handshake_against(
@@ -1221,7 +1220,7 @@ mod tests {
 
         let mut child = spawn_stand_in(StandIn::BindsOnByte(path.clone()));
         let mut release = child.stdin.take().expect("the stand-in's stdin is piped");
-        let stand_in = ProcessGuard::launched(Reaped::new(child), BridgeConfig::at(path.clone()))
+        let stand_in = ProcessGuard::launched(Reaped::new(child), &BridgeConfig::at(path.clone()))
             .expect("the exit thread starts");
 
         let (running, is_running) = std::sync::mpsc::channel();
@@ -1262,7 +1261,7 @@ mod tests {
         // that dies on a missing dynamic library.
         let dead = ProcessGuard::launched(
             Reaped::new(spawn_stand_in(StandIn::Exits)),
-            BridgeConfig::at(path.clone()),
+            &BridgeConfig::at(path.clone()),
         )
         .expect("the exit thread starts");
 

@@ -151,7 +151,7 @@ fn rig(map: &Arc<TempoMap>, mtc: bool) -> Rig {
     ed.insert(
         NodeKey(1),
         "clock",
-        SyncOut::new(tutti_ump::MidiGroup::FIRST).messages(SyncMessages {
+        SyncOut::new(tutti_ump::MidiGroup::FIRST).sending(SyncMessages {
             clock: true,
             mtc,
             ..SyncMessages::OFF

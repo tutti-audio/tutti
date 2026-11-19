@@ -49,15 +49,16 @@ fn skipped(dir: &str) -> bool {
 
 /// Lowest first. A normal or build dependency must land in a strictly lower layer.
 pub(super) const LAYERS: &[&[&str]] = &[
+    &["tutti-units", "tutti-plugin-ipc-ffi"],
+    &["tutti-music", "tutti-ump", "tutti-buffers"],
     &[
         "tutti-alsa-ffi",
         "tutti-coremidi-ffi",
         "tutti-winmm-ffi",
-        "tutti-units",
-        "tutti-plugin-ipc-ffi",
+        "tutti-midi-protocol",
+        "tutti-midi-device",
+        "tutti-curve",
     ],
-    &["tutti-music", "tutti-ump", "tutti-buffers"],
-    &["tutti-midi-protocol", "tutti-midi-device", "tutti-curve"],
     &["tutti-rt"],
     &[
         "tutti-midi-network",
@@ -108,6 +109,10 @@ const ONLY: &[(&str, &[&str])] = &[
         &["tutti-ump", "tutti-music", "tutti-units"],
     ),
     ("tutti-midi-device", &["tutti-ump", "tutti-units"]),
+    // The OS edges: the UMP types for what the spec defines, nothing else.
+    ("tutti-alsa-ffi", &["tutti-ump"]),
+    ("tutti-coremidi-ffi", &["tutti-ump"]),
+    ("tutti-winmm-ffi", &[]),
     ("tutti-ump", &["tutti-units"]),
     // The unit vocabulary a `Gauge<U>` and a `Param<U>` hold (`Reading` for a `Unit`), the
     // channel layout a position ring is written in and the `Sample` formats the
@@ -858,6 +863,31 @@ mod tests {
         assert!(r.findings.iter().any(|l| l.contains(
             "tutti-metering may depend on [\"tutti-units\"] only; it depends on {\"tutti-ump\"}"
         )));
+    }
+
+    #[test]
+    fn an_os_edge_names_the_ump_types_only() {
+        let os = |dir, krate, dep| {
+            let mut v = base();
+            v.push(("crates/tutti-music", "tutti-music", ""));
+            v.push((dir, krate, dep));
+            run(&v)
+        };
+        for (dir, krate) in [
+            ("crates/tutti-alsa-ffi", "tutti-alsa-ffi"),
+            ("crates/tutti-coremidi-ffi", "tutti-coremidi-ffi"),
+        ] {
+            let r = os(dir, krate, "[dependencies]\ntutti-ump = { path = \"x\" }\n");
+            assert!(r.passed(), "{:?}", r.findings);
+            let r = os(
+                dir,
+                krate,
+                "[dependencies]\ntutti-music = { path = \"x\" }\n",
+            );
+            assert!(r.findings.iter().any(|l| l.contains(&format!(
+                "{krate} may depend on [\"tutti-ump\"] only; it depends on {{\"tutti-music\"}}"
+            ))));
+        }
     }
 
     #[test]

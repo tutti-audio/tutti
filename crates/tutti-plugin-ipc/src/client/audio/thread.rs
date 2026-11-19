@@ -8,7 +8,7 @@ use super::dispatch::{Lane, Lanes, Owed, handle};
 use super::lifecycle::Lifecycle;
 use super::messages::{AudioResponse, BridgeEvent, Command, Unsolicited};
 use super::payload_pool::PayloadPool;
-use crate::protocol::HostMessage;
+use crate::HostMessage;
 use crate::transport::control::{self as ipc, ControlStream};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -254,16 +254,16 @@ fn watch_control(
 /// the message, and the first is actionable.
 fn expect_ready(stream: &mut ControlStream) -> Result<(), PluginFailure> {
     match ipc::recv(stream) {
-        Ok(crate::protocol::BridgeMessage::Ready { protocol_version })
+        Ok(crate::BridgeMessage::Ready { protocol_version })
             if crate::protocol::check_protocol_version(protocol_version).is_ok() =>
         {
             Ok(())
         }
         other => {
             let source = match other {
-                Ok(crate::protocol::BridgeMessage::Ready { protocol_version }) => {
+                Ok(crate::BridgeMessage::Ready { protocol_version }) => {
                     BridgeError::ProtocolMismatch {
-                        expected: crate::protocol::PROTOCOL_VERSION,
+                        expected: crate::PROTOCOL_VERSION,
                         got: protocol_version,
                     }
                 }
@@ -398,12 +398,12 @@ fn drain_with_errors(channels: &Channels) {
 mod tests {
     use super::*;
     use crate::client::audio::messages::{ProcessPayload, UNSOLICITED_PARAMS};
-    use crate::protocol::ParamId;
     use std::sync::Arc;
     use tutti_fixtures::midi;
     use tutti_plugin_types::ResyncKind;
     use tutti_ump::MidiChannel;
     use tutti_units::Normalized;
+    use tutti_units::ParamId;
     use tutti_units::SampleRate;
 
     /// **A crash's drain counts the queued chunks' MIDI.**
