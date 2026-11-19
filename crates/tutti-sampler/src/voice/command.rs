@@ -455,13 +455,15 @@ pub struct VoiceNodeHandle<F: SamplerFloat> {
     /// The gain by address ([`UnitParam::Volume`](tutti_units::UnitParam)),
     /// for a host that sets params by address.
     pub(crate) params: ParamSet,
-    /// The stream that feeds a disk voice, with its loop set through it.
+    /// The stream that feeds a disk voice, whose loop and direction cells the
+    /// handle's are.
     stream: Option<Arc<Mutex<Stream<F>>>>,
 }
 
 /// What a [`VoiceNode`](super::node::VoiceNode)'s handle publishes besides
-/// the gain, latest wins. A field is `None` until the handle first sets it,
-/// and the node keeps what it was built with until then.
+/// the gain, the window, the loop and the direction, latest wins. A field is
+/// `None` until the handle first sets it, and the node keeps what it was
+/// built with until then.
 ///
 /// The handle publishes (control thread); the node lends the cell once per
 /// block, and applies what differs from what it last applied; the fork
