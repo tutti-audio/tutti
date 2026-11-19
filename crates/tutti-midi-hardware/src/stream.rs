@@ -95,9 +95,10 @@ use crate::ci::{
     Ci, CiChange, CiChanges, CiPeerInfo, Heard, PeerId, groups_after_settle, groups_of_a_midi1_port,
 };
 use crate::devices::OpenOutput;
-use crate::process::{self, ProcessChange, ReportAsk, ReportError};
+use crate::peer::PeerError;
+use crate::process::{self, ProcessChange, ReportAsk};
 use crate::profiles::{ProfileError, ProfileSwitch, ProfilesChange, Snapshot};
-use crate::properties::{self, PropertyAsk, PropertyChange, PropertyError};
+use crate::properties::{self, PropertyAsk, PropertyChange};
 use crate::session::Presented;
 use tutti_midi_device::DeviceId;
 
@@ -510,12 +511,12 @@ impl Negotiation {
     }
 
     /// Asks that a peer be made a Property Exchange call at the next poll.
-    pub(crate) fn ask_property(&mut self, ask: PropertyAsk) -> Result<(), PropertyError> {
+    pub(crate) fn ask_property(&mut self, ask: PropertyAsk) -> Result<(), PeerError> {
         self.ci.ask_property(ask)
     }
 
     /// Asks that a peer be sent a MIDI Message Report request at the next poll.
-    pub(crate) fn report(&mut self, ask: ReportAsk) -> Result<(), ReportError> {
+    pub(crate) fn report(&mut self, ask: ReportAsk) -> Result<(), PeerError> {
         self.ci.report(ask)
     }
 

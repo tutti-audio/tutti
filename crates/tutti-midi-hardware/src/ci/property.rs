@@ -15,7 +15,7 @@ use tutti_midi_device::{
 };
 use tutti_ump::MidiGroup;
 
-use super::{CiChanges, Member, PeerId, Running};
+use super::{CiChanges, Member, Running};
 use crate::answer::Answer;
 use crate::properties::{PropertyAsk, PropertyCall, PropertyChange};
 
@@ -234,7 +234,7 @@ impl Member {
         sends: &mut Vec<(MidiGroup, CiMessage)>,
         changes: &mut CiChanges,
     ) {
-        let muid = ask.peer.muid;
+        let muid = ask.peer.muid();
         let Some(initiator) = self.properties.get_mut(&muid) else {
             changes.answers.push((
                 self.peer_id(muid),
@@ -350,12 +350,13 @@ impl Running {
     ) {
         let mut sends = Vec::new();
         for ask in asks.drain(..) {
-            let Some(member) = self.members.iter_mut().find(|m| m.group == ask.peer.group) else {
+            let Some(member) = self
+                .members
+                .iter_mut()
+                .find(|m| m.group == ask.peer.group())
+            else {
                 changes.answers.push((
-                    PeerId {
-                        group: ask.peer.group,
-                        muid: ask.peer.muid,
-                    },
+                    ask.peer.at().peer(),
                     Answer::PropertyLost {
                         call: Box::new(ask.call.clone()),
                     },

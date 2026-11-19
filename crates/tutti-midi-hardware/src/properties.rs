@@ -7,7 +7,7 @@
 //! its ResourceList, and lists those that answered. A request is made only from
 //! such a handle, so an app cannot ask a peer that never declared the category
 //! or never answered. The handle is a snapshot: the peer may be lost before the
-//! request is sent, and that is refused ([`PropertyError::NoSuchPeer`]).
+//! request is sent, and that is refused ([`PeerError::NoSuchPeer`]).
 //!
 //! As the Responder it serves a [`ResourceStore`](tutti_midi_device::ResourceStore)
 //! ([`MidiSession::serve_properties`](crate::MidiSession::serve_properties)),
@@ -31,13 +31,13 @@ use tutti_midi_device::{
 };
 use tutti_ump::MidiGroup;
 
+use crate::peer::{PeerError, PeerRef};
+
 /// A peer that declared Property Exchange and answered its Capabilities Inquiry:
 /// the handle a [`PropertyAsk`] is made from.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PropertyPeer {
-    pub(crate) device: DeviceId,
-    pub(crate) group: MidiGroup,
-    pub(crate) muid: Muid,
+    pub(crate) at: PeerRef,
     pub(crate) resources: Arc<PeResourceList>,
 }
 
@@ -49,28 +49,29 @@ impl PropertyPeer {
         &self.resources
     }
 
-    /// Whether `other` is the same peer of the same input: the ResourceList each
-    /// was read with does not matter.
-    pub(crate) fn is(&self, other: &Self) -> bool {
-        self.device == other.device && self.group == other.group && self.muid == other.muid
-    }
-
     /// The input device the peer was found on.
     #[must_use]
     pub const fn device(&self) -> &DeviceId {
-        &self.device
+        self.at.device()
     }
 
     /// The Group of the connection the peer answered on.
     #[must_use]
     pub const fn group(&self) -> MidiGroup {
-        self.group
+        self.at.peer().group
     }
 
     /// The peer's MUID.
     #[must_use]
     pub const fn muid(&self) -> Muid {
-        self.muid
+        self.at.peer().muid
+    }
+
+    /// The peer, as every handle of MIDI-CI names one: the ResourceList the
+    /// handle was read with does not matter to it.
+    #[must_use]
+    pub const fn at(&self) -> &PeerRef {
+        &self.at
     }
 
     /// A request that the peer take `call`
@@ -150,16 +151,12 @@ impl PropertyAsk {
     ///
     /// # Errors
     ///
-    /// [`PropertyError::NoSuchPeer`] when it is not.
+    /// [`PeerError::NoSuchPeer`] when it is not.
     pub(crate) fn check<'a>(
         &self,
         peers: impl IntoIterator<Item = &'a PropertyPeer>,
-    ) -> Result<(), PropertyError> {
-        if peers.into_iter().any(|peer| peer.is(&self.peer)) {
-            Ok(())
-        } else {
-            Err(PropertyError::NoSuchPeer)
-        }
+    ) -> Result<(), PeerError> {
+        self.peer.at.find(peers, |peer| &peer.at).map(|_| ())
     }
 }
 
@@ -184,17 +181,4 @@ pub enum PropertyChange {
     /// The peer is gone (lost, or MIDI-CI ended): its Initiator and its
     /// Subscriptions went with it.
     Dropped,
-}
-
-/// A [`PropertyAsk`] that cannot be made.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
-#[non_exhaustive]
-pub enum PropertyError {
-    /// The device the request was made from is no longer an open input.
-    #[error("the device is not an open input")]
-    NotOpen,
-    /// The peer is not one found on that input that answered its Property
-    /// Exchange Capabilities (it was lost, or never did).
-    #[error("no such MIDI-CI peer with Property Exchange on that input")]
-    NoSuchPeer,
 }

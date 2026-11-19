@@ -174,11 +174,12 @@ use tutti_ump::{DeviceIdentity, MidiGroup, SysexAssembler, SysexStep, Ump};
 
 use crate::answer::{Answer, ReportEnd};
 use crate::devices::OpenOutput;
-use crate::process::{self, ProcessChange, ReportAsk, ReportError, Reporter};
+use crate::peer::{PeerError, PeerRef};
+use crate::process::{self, ProcessChange, ReportAsk, Reporter};
 use crate::profiles::{
     PeerProfiles, ProfileError, ProfileSwitch, ProfilesChange, Snapshot, Switch,
 };
-use crate::properties::{self, PropertyAsk, PropertyChange, PropertyError, PropertyPeer};
+use crate::properties::{self, PropertyAsk, PropertyChange, PropertyPeer};
 use crate::stream::DeviceStream;
 
 mod property;
@@ -554,7 +555,7 @@ impl Ci {
 
     /// Asks that the peer of `ask` be sent its request at the next poll, after
     /// checking it is still one that supports MIDI Message Report.
-    pub(crate) fn report(&mut self, ask: ReportAsk) -> Result<(), ReportError> {
+    pub(crate) fn report(&mut self, ask: ReportAsk) -> Result<(), PeerError> {
         ask.check(self.reporters.iter())?;
         self.reports.push(ask);
         Ok(())
@@ -567,7 +568,7 @@ impl Ci {
 
     /// Asks that the call of `ask` be made of its peer at the next poll, after
     /// checking it is still one that answered its Capabilities.
-    pub(crate) fn ask_property(&mut self, ask: PropertyAsk) -> Result<(), PropertyError> {
+    pub(crate) fn ask_property(&mut self, ask: PropertyAsk) -> Result<(), PeerError> {
         ask.check(self.property_peers.iter())?;
         self.calls.push(ask);
         Ok(())
@@ -590,9 +591,7 @@ impl Ci {
                     .initiators
                     .iter()
                     .map(|(&muid, initiator)| PeerProfiles {
-                        device: self.device.clone(),
-                        group: member.group,
-                        muid,
+                        at: member.peer_ref(&self.device, muid),
                         known: initiator.is_known(),
                         table: initiator.table().clone(),
                     })
@@ -617,9 +616,7 @@ impl Ci {
                             .is_some_and(|f| f.contains(ProcessFeatures::MIDI_MESSAGE_REPORT))
                     })
                     .map(|(&muid, _)| Reporter {
-                        device: self.device.clone(),
-                        group: member.group,
-                        muid,
+                        at: member.peer_ref(&self.device, muid),
                     })
             })
             .collect()
@@ -638,9 +635,7 @@ impl Ci {
                     .iter()
                     .filter(|(_, initiator)| initiator.transactions().capabilities().is_some())
                     .map(|(&muid, initiator)| PropertyPeer {
-                        device: self.device.clone(),
-                        group: member.group,
-                        muid,
+                        at: member.peer_ref(&self.device, muid),
                         resources: Arc::new(initiator.resource_list().cloned().unwrap_or_default()),
                     })
             })
@@ -916,12 +911,13 @@ impl Running {
     ) {
         let mut sends = Vec::new();
         for switch in queue.drain(..) {
-            let Some(member) = self.members.iter_mut().find(|m| m.group == switch.group) else {
+            let Some(member) = self
+                .members
+                .iter_mut()
+                .find(|m| m.group == switch.at.peer().group)
+            else {
                 changes.answers.push((
-                    PeerId {
-                        group: switch.group,
-                        muid: switch.muid,
-                    },
+                    switch.at.peer(),
                     Answer::SwitchLost {
                         request: switch.request(),
                     },
@@ -946,14 +942,14 @@ impl Running {
     ) {
         let mut sends = Vec::new();
         for ask in asks.drain(..) {
-            let Some(member) = self.members.iter_mut().find(|m| m.group == ask.peer.group) else {
-                changes.answers.push((
-                    PeerId {
-                        group: ask.peer.group,
-                        muid: ask.peer.muid,
-                    },
-                    Answer::ReportLost,
-                ));
+            let Some(member) = self
+                .members
+                .iter_mut()
+                .find(|m| m.group == ask.peer.at.peer().group)
+            else {
+                changes
+                    .answers
+                    .push((ask.peer.at.peer(), Answer::ReportLost));
                 continue;
             };
             member.start_report(&ask, now, &mut sends, changes);
@@ -1010,6 +1006,10 @@ impl Member {
                 _ => {}
             }
         }
+    }
+
+    fn peer_ref(&self, device: &DeviceId, muid: Muid) -> PeerRef {
+        PeerRef::new(device.clone(), self.peer_id(muid))
     }
 
     const fn peer_id(&self, muid: Muid) -> PeerId {
@@ -1128,20 +1128,20 @@ impl Member {
         sends: &mut Vec<(MidiGroup, CiMessage)>,
         changes: &mut CiChanges,
     ) {
-        let Some(initiator) = self.process.get_mut(&ask.peer.muid) else {
+        let Some(initiator) = self.process.get_mut(&ask.peer.muid()) else {
             changes
                 .answers
-                .push((self.peer_id(ask.peer.muid), Answer::ReportLost));
+                .push((self.peer_id(ask.peer.muid()), Answer::ReportLost));
             return;
         };
         match initiator.report(ask.request, now) {
-            Ok(actions) => self.carry_out_process(ask.peer.muid, actions, sends, changes),
+            Ok(actions) => self.carry_out_process(ask.peer.muid(), actions, sends, changes),
             // The session sends a report only once the one in flight has
             // ended; a second here has no answer of its own.
             Err(ProcessError::AlreadyAsking) => {}
             Err(ProcessError::NotSupported) => changes
                 .answers
-                .push((self.peer_id(ask.peer.muid), Answer::ReportUnsupported)),
+                .push((self.peer_id(ask.peer.muid()), Answer::ReportUnsupported)),
             Err(_) => {}
         }
     }
@@ -1228,9 +1228,9 @@ impl Member {
         sends: &mut Vec<(MidiGroup, CiMessage)>,
         changes: &mut CiChanges,
     ) {
-        let Some(initiator) = self.initiators.get_mut(&switch.muid) else {
+        let Some(initiator) = self.initiators.get_mut(&switch.at.peer().muid) else {
             changes.answers.push((
-                self.peer_id(switch.muid),
+                self.peer_id(switch.at.peer().muid),
                 Answer::SwitchLost {
                     request: switch.request(),
                 },
@@ -1242,7 +1242,7 @@ impl Member {
             Switch::Off(address) => initiator.set_off(address, switch.profile, now),
         };
         match started {
-            Ok(actions) => self.carry_out(switch.muid, actions, sends, changes),
+            Ok(actions) => self.carry_out(switch.at.peer().muid, actions, sends, changes),
             // The session sends a switch of a Profile at an address only once
             // the one in flight has ended; a second here has no answer of its
             // own.
@@ -1685,9 +1685,7 @@ mod tests {
             let mut changes = CiChanges::default();
             running.start_switches(
                 &mut vec![ProfileSwitch {
-                    device: device.clone(),
-                    group,
-                    muid,
+                    at: PeerRef::new(device.clone(), id),
                     profile,
                     switch: Switch::Off(CiDeviceId::Group),
                 }],
@@ -1709,9 +1707,7 @@ mod tests {
                 "{group:?}"
             );
             let peer = Reporter {
-                device: device.clone(),
-                group,
-                muid,
+                at: PeerRef::new(device.clone(), id),
             };
             let request = ReportRequest::new(
                 DataControl::Full,
@@ -1737,9 +1733,7 @@ mod tests {
             running.start_properties(
                 &mut vec![PropertyAsk {
                     peer: PropertyPeer {
-                        device: device.clone(),
-                        group,
-                        muid,
+                        at: PeerRef::new(device.clone(), id),
                         resources: Arc::default(),
                     },
                     call: call.clone(),

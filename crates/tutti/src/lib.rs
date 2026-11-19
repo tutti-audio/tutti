@@ -716,7 +716,7 @@ pub mod midi {
     pub use tutti_midi_hardware::MidiHardwareError;
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_hardware::{
-        InputTiming, NotAChannelCount, ProcessChange, ReportAsk, ReportError, Reporter,
+        InputTiming, NotAChannelCount, ProcessChange, ReportAsk, Reporter,
         WatchFailure,
     };
     #[cfg(feature = "midi-hardware")]
@@ -794,7 +794,7 @@ pub mod midi {
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_hardware::{
         ChannelCount, ChannelSwitcher, CiChange, CiPeerInfo, DeviceQuery, Errno, ErrnoOutOfRange,
-        InputFault, MidiHardwareOptions, PeerId, PeerProfiles, ProfileError, ProfileSwitch,
+        InputFault, MidiHardwareOptions, PeerId, PeerProfiles, PeerRef, ProfileError, ProfileSwitch,
         ProfilesChange, Switcher, WholeSwitcher,
     };
     #[cfg(all(feature = "session", feature = "midi-hardware"))]
@@ -841,7 +841,7 @@ pub mod midi {
         };
         #[cfg(feature = "midi-hardware")]
         pub use tutti_midi_hardware::{
-            PropertyAsk, PropertyCall, PropertyChange, PropertyError, PropertyPeer,
+            PropertyAsk, PropertyCall, PropertyChange, PropertyPeer,
         };
         #[cfg(all(feature = "session", feature = "midi-hardware"))]
         pub use tutti_session::{
