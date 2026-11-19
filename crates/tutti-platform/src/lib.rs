@@ -19,6 +19,8 @@
 //!   thread whose body gets a [`StopToken`]; its [`ThreadHandle`] stops and
 //!   joins on drop (or within a bound, `stop_within`) and reports a panic once
 //!   ([`Panicked`]).
+//! - [`Executor`] — where tutti's background futures run: on threads, on a caller's
+//!   `poll`, or on a host's executor.
 //! - [`MainThreadMarker`] — proof that the holder is on the process's main
 //!   thread, made only where the OS says so (`!Send`, `!Sync`).
 //! - [`with_no_denormals`] — runs a closure with subnormals flushed to zero and
@@ -51,6 +53,7 @@
 
 mod clock;
 mod denormals;
+mod executor;
 mod main_thread;
 mod priority;
 mod sleep;
@@ -58,6 +61,7 @@ mod thread;
 
 pub use clock::monotonic_ns;
 pub use denormals::with_no_denormals;
+pub use executor::Executor;
 pub use main_thread::MainThreadMarker;
 pub use priority::{PriorityOutcome, PriorityRequest, Scheduling, request_priority};
 pub use sleep::sleep_until_ns;
