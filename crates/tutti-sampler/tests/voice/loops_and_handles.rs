@@ -358,3 +358,28 @@ fn a_free_running_voice_refuses_stretch_until_it_is_placed() {
         .set_stretch(id, StretchFactor::new(2.0), Cents::new(0.0))
         .expect("a placed voice stretches");
 }
+
+/// **`play` starts a free-running voice a reset left stopped**: after the
+/// node is reset (which rewinds and stops its cursor) it is silent until
+/// `play`, which sounds it from the ramp's first frame. The transport rolls on
+/// across the blocks, so nothing else flushes the voice.
+#[test]
+fn play_restarts_a_free_running_voice_after_a_reset() {
+    use tutti_graph::Node;
+    let (node, handle) = free_node(Playback::default()).with_handle();
+    let mut node = tutti_sampler::testing::prepared(node, RATE, BLOCK);
+    let t = rolling();
+    let mut block = |node: &mut VoiceNode<f32>| {
+        let out = tutti_sampler::testing::block(node, &t, RATE, BLOCK).swap_remove(0);
+        t.advance(BLOCK as i64, RATE);
+        out
+    };
+    assert_frames("before the reset", &block(&mut node), |n| n);
+    node.reset();
+    assert!(
+        block(&mut node).iter().all(|&g| g == 0.0),
+        "stopped by the reset"
+    );
+    handle.play().expect("a free-running voice");
+    assert_frames("after play", &block(&mut node), |n| n);
+}
