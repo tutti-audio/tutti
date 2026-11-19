@@ -121,7 +121,7 @@ fn is_stale(seq: u64, newest: u64) -> bool {
 /// there is what paired a block with its predecessor's reply, and a query with
 /// a stale `AudioProcessed`.
 ///
-/// Owned by `pump` and passed in, rather than living in [`Channels`]: only the
+/// Owned by `pump` and passed in, rather than living in [`Channels`](super::channels::Channels): only the
 /// bridge thread ever reads or writes it, so an `Arc<AtomicU32>` would advertise
 /// a sharing that does not exist. The [`PartialFrame`] must have exactly this
 /// scope for a different reason — it describes a position in *this* connection's
@@ -254,7 +254,7 @@ impl Owed {
     /// rejects it) but its MIDI-out is the plugin's real output and the socket
     /// is its only path. Dropping it silently loses notes from any block whose
     /// reply ran late. Only a block's counts as late
-    /// ([`Channels::note_late`]): the counters are about blocks.
+    /// ([`Channels::note_late`](super::channels::Channels::note_late)): the counters are about blocks.
     ///
     /// A block's reply naming a block never sent is no owed reply: it is
     /// handed back as the answer, for the caller to refuse.
