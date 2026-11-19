@@ -64,15 +64,6 @@ pub enum MidiReport {
         /// What happened.
         change: tutti_midi_hardware::ProcessChange,
     },
-    /// A [`Midi::load_file`](crate::Midi::load_file) ended: the file, or why
-    /// not.
-    FileLoaded {
-        /// The id `load_file` returned.
-        load: crate::MidiLoad,
-        /// The file read, or the read's error ([`MidiError::Read`](crate::MidiError::Read))
-        /// or the job's ([`MidiError::Job`](crate::MidiError::Job)).
-        file: Result<tutti_midi_file::MidiFile, crate::MidiError>,
-    },
     /// A tempo the session follows ([`Midi::follow_tempo`](crate::Midi::follow_tempo))
     /// was published: a Set Tempo of the followed Group, as a step in the
     /// project's tempo map at the start of the next block. A source that

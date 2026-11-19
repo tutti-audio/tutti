@@ -716,8 +716,6 @@ pub(crate) struct MidiState {
     fallback: Option<NodeKey>,
     /// Names the session's own route rules.
     minted: Mint,
-    /// Names the [`MidiLoad`]s.
-    loads: Mint,
     /// The sinks the last route compile fed.
     routed: BTreeSet<NodeKey>,
     /// Whether a host's last `set_routes` declared any rule or fallback:
@@ -1105,14 +1103,6 @@ fn compile_feeds<'r, T: Copy + Ord + 'r, F: Float>(
     }
 }
 
-tutti_rt::id! {
-    /// A file load a [`Midi`] started, named so the event that lands it can be
-    /// matched to the call: [`Midi::load_file`] returns one, and
-    /// [`MidiReport::FileLoaded`] carries it. The session mints it; it names
-    /// nothing else.
-    pub struct MidiLoad;
-}
-
 /// The session's MIDI: live inputs, clips, the hardware
 /// input's routes and the outputs. [`Session::midi`](crate::Session::midi)
 /// hands it out; what it edits goes out with the next update's commit.
@@ -1148,32 +1138,6 @@ impl<'a, F: Float> Midi<'a, F> {
 }
 
 impl<F: Float> Midi<'_, F> {
-    fn next_load(&self) -> MidiLoad {
-        MidiLoad::mint(&self.state.loads)
-    }
-
-    /// Reads the MIDI file at `path` on the session's spawner. Returns at
-    /// once; the result lands as [`MidiReport::FileLoaded`] with the returned
-    /// id in a later [`Session::update`](crate::Session::update), on the
-    /// thread that calls `update()`. A file that cannot be read lands as
-    /// [`MidiError::Read`], a job that did not finish as [`MidiError::Job`].
-    #[must_use = "the id matches the event that lands the load"]
-    pub fn load_file(&mut self, path: impl Into<std::path::PathBuf>) -> MidiLoad {
-        let load = self.next_load();
-        let path = path.into();
-        self.jobs.submit(
-            move || tutti_midi_file::MidiFile::read(path),
-            move |_, done, events| {
-                let file = match done {
-                    Ok(read) => read.map_err(MidiError::from),
-                    Err(failed) => Err(failed.into()),
-                };
-                events.push(MidiReport::FileLoaded { load, file }.into());
-            },
-        );
-        load
-    }
-
     /// `target`, if it takes MIDI: it is in the graph with an event input.
     fn takes_midi(&self, target: NodeKey) -> Result<()> {
         if self.graph.node_event_inputs(target).is_ok_and(|n| n > 0) {
@@ -1271,7 +1235,7 @@ impl<F: Float> Midi<'_, F> {
     /// clip's own start, in any order; the `packets` of a file's
     /// [`MetricalView::timeline`](tutti_midi_file::MetricalView::timeline) are
     /// the `(Beat, Ump)` pairs they are built from, and
-    /// [`play_file`](Self::play_file) does that for a file. The clip reads its
+    /// a loaded file's tracks are played with [`play_track`](Self::play_track). The clip reads its
     /// block's `Env`, so a note lands on its frame through seeks and loop
     /// wraps, and **a bounce contains it**: an export forks the clip with its
     /// target, where the keys of a live input are not in one.
@@ -1310,13 +1274,21 @@ impl<F: Float> Midi<'_, F> {
             .into_iter()
             .map(|e| e.shifted(by).ok_or(MidiError::BeatNotFinite(at)))
             .collect::<Result<Vec<_>>>()?;
+        let events: Arc<ClipEvents> = Arc::new(events.into_iter().collect());
+        self.install_clip(target, events)
+    }
+
+    /// Plays the clip `events` on `target`: the clip it has, replaced in
+    /// place, or a new one fed into its event input.
+    fn install_clip(&mut self, target: NodeKey, events: Arc<ClipEvents>) -> Result<()> {
         let clip = match self.clip(target) {
             Some(clip) => {
-                self.publish_clip(clip, events.into_iter().collect())?;
+                self.publish_clip(clip, events)?;
                 clip.erase()
             }
             None => {
-                let (clip, _) = self.graph.add(MidiClipNode::new(events));
+                let (clip, _) = self.graph.add(MidiClipNode::new([]));
+                self.publish_clip(clip, events)?;
                 let clip = clip.erase();
                 // The clip's MIDI is classic MPE until the transform says
                 // otherwise: it is the one holder of the zones.
@@ -1342,41 +1314,26 @@ impl<F: Float> Midi<'_, F> {
         Ok(())
     }
 
-    /// Plays the MIDI file `file` on `target` through its clip, `at` the beat
-    /// the file's beat 0 lands on: [`play_clip`](Self::play_clip) over the
-    /// file's one timeline
-    /// ([`MetricalView::timeline`](tutti_midi_file::MetricalView::timeline)), with
-    /// its looping and bounce behaviour. A file arrives from
-    /// [`load_file`](Self::load_file) as [`MidiReport::FileLoaded`]. The
-    /// System Exclusive events the timeline lists as dropped are not played
-    /// and are counted in a `tracing` warning.
+    /// Plays a loaded track on `target` through its clip: its events from
+    /// the transport's beat 0, with [`play_clip`](Self::play_clip)'s clip,
+    /// looping and bounce behaviour. The track is the one
+    /// [`load_midi`](Self::load_midi) landed
+    /// ([`LoadedMidi::track`](crate::LoadedMidi::track)); its events are built
+    /// already, so this publishes a shared value and converts nothing.
     ///
     /// # Errors
     ///
-    /// As [`play_clip`](Self::play_clip). A file of independent sequences (format
-    /// 2) has no one timeline, and a file in SMPTE time has no beats: neither
-    /// has a [`MetricalView`](tutti_midi_file::MetricalView) to pass.
-    pub fn play_file(
+    /// [`MidiError::NoEventInput`] when `target` is not in the graph or takes
+    /// no MIDI; [`MidiError::ClipEvents`] when the target's clip cannot be
+    /// written (nothing changes).
+    pub fn play_track(
         &mut self,
         target: impl Into<NodeKey>,
-        at: Beat,
-        file: tutti_midi_file::MetricalView<'_>,
+        track: &crate::LoadedTrack,
     ) -> Result<()> {
-        let timeline = file.timeline();
-        if !timeline.dropped.is_empty() {
-            tracing::warn!(
-                dropped = timeline.dropped.len(),
-                "the file's System Exclusive events with no SysEx7 packet are not played"
-            );
-        }
-        let events = timeline
-            .packets
-            .into_iter()
-            .map(|(beat, packet)| {
-                TimedMidiEvent::new(beat, packet).ok_or(MidiError::BeatNotFinite(beat))
-            })
-            .collect::<Result<Vec<_>>>()?;
-        self.play_clip(target, at, events)
+        let target = target.into();
+        self.takes_midi(target)?;
+        self.install_clip(target, Arc::clone(&track.events))
     }
 
     /// Empties `target`'s clip, ending the notes it left sounding. The clip
@@ -1396,10 +1353,14 @@ impl<F: Float> Midi<'_, F> {
     }
 
     /// Writes `events` as the events of `clip`, through the clip's target.
-    fn publish_clip(&self, clip: Key<MidiClipNode>, events: ClipEvents) -> Result<()> {
+    fn publish_clip(
+        &self,
+        clip: Key<MidiClipNode>,
+        events: impl Into<Arc<ClipEvents>>,
+    ) -> Result<()> {
         self.graph
             .value_table()
-            .write(clip.events().to(events))
+            .write(clip.events().to(events.into()))
             .map_err(MidiError::ClipEvents)
     }
 

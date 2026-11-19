@@ -180,40 +180,38 @@ fn stopping_a_clip_that_is_not_there_names_the_target() {
     ));
 }
 
-/// **A file plays as a clip at the beat it is given**: a note on its beat 1,
-/// in a file played from beat 1, sounds at beat 2 (frame 48 000); a file in
-/// SMPTE time has no metrical view to play.
+/// **A loaded track plays as a clip on the transport's timeline**: a note on
+/// the file's beat 2 sounds at 48 000 frames at 120 beats a minute.
 #[test]
-fn a_file_plays_at_the_beat_it_is_given_and_smpte_time_has_no_view_to_play() {
+fn a_loaded_track_plays_its_events_at_their_beats() {
     use tutti_midi_file::SmfDivision;
     use tutti_midi_file::{Layout, LeadTrack, MidiFile, Tick, Track};
     use tutti_ump::U7;
     let track = Track::new().note(
-        Tick(480),
-        Tick(720),
+        Tick(960),
+        Tick(1200),
         MidiChannel::FIRST,
         NoteNumber::of(62),
         U7::of(100),
     );
     let file = MidiFile::smf(
         SmfDivision::per_quarter(480),
-        Layout::Format0(LeadTrack::new(track.clone())),
+        Layout::Format0(LeadTrack::new(track)),
     )
     .unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("one.mid");
+    file.write(&path).unwrap();
     let mut s = offline();
     let (synth, seen) = tap(&mut s);
+    let job = s.midi().load_midi(path);
+    let loaded = job.wait(&mut s).unwrap();
     s.midi()
-        .play_file(synth, Beat(1.0), file.timebase().metrical().unwrap())
+        .play_track(synth, loaded.track(0).unwrap())
         .unwrap();
     let _ = s.update();
     roll(&s, 49_000);
     assert_eq!(note_ons(&seen), vec![(48_000, 62)]);
-
-    // SMPTE time (-25 frames a second, 40 ticks a frame: `E7 28`) has seconds
-    // and no beats to play on: it has no metrical view to pass.
-    let smpte = MidiFile::from_bytes(b"MThd\0\0\0\x06\0\0\0\x01\xE7\x28MTrk\0\0\0\x04\0\xFF\x2F\0")
-        .unwrap();
-    assert!(smpte.timebase().metrical().is_none());
 }
 
 /// **A target that takes no MIDI is refused**: a node with no event input,

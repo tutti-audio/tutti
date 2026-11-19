@@ -763,16 +763,18 @@ pub mod midi {
     };
 
     /// The session's one MIDI error (`tutti_session::MidiError`): each cause
-    /// (hardware, file, send, route) is its source.
+    /// (hardware, send, route) is its source.
     #[cfg(feature = "session")]
     pub use tutti_session::MidiError as Error;
     #[cfg(feature = "session")]
     pub use tutti_session::RouteDeclarer;
     #[cfg(feature = "session")]
     pub use tutti_session::{
-        AddedInstrument, AnyNode, FollowClock, FollowMachineControl, FollowTempo, InstrumentHandle,
-        Midi, MidiLoad, MidiReport, MidiRouteId, MidiRouteRule, MidiSink, MidiSinkEntry,
-        MidiSinkInfo, NotInstrument, SinkLoaded, SinkOptions, Stamping, TakePlacement, midi_sink,
+        AddedInstrument, AnyNode, DroppedEvent, FollowClock, FollowMachineControl, FollowTempo,
+        InstrumentHandle, LoadMidi, LoadMidiError, LoadReport, LoadedMidi, LoadedTrack, Midi,
+        MidiReport, MidiRouteId, MidiRouteRule, MidiSink, MidiSinkEntry, MidiSinkInfo,
+        NoCommonTimelineError, NoSuchTrackError, NotInstrument, SinkLoaded, SinkOptions, Stamping,
+        TakePlacement, midi_sink,
     };
     #[cfg(all(feature = "session", feature = "midi-hardware"))]
     pub use tutti_session::{

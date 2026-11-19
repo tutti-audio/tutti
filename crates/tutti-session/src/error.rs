@@ -187,15 +187,6 @@ pub enum ConnectError {
 #[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum MidiError {
-    /// A MIDI file could not be read.
-    #[error("MIDI file: {0}")]
-    Read(#[from] tutti_midi_file::ReadError),
-
-    /// A session job did not finish ([`Midi::load_file`](crate::Midi::load_file)):
-    /// its work panicked, or the spawner dropped it.
-    #[error("MIDI load: {0}")]
-    Job(#[from] crate::WorkerError),
-
     /// There is no route rule with this id ([`Midi::unroute`](crate::Midi::unroute)):
     /// removed already, or never added.
     #[error("no MIDI route {0:?}")]

@@ -96,6 +96,8 @@ mod midi_ci;
 mod midi_follow;
 #[cfg(feature = "midi-hardware")]
 mod midi_hardware;
+#[cfg(feature = "midi")]
+mod midi_load;
 #[cfg(feature = "midi-hardware")]
 mod midi_port;
 #[cfg(all(feature = "midi", not(feature = "midi-hardware")))]
@@ -190,7 +192,7 @@ pub use key::{
     RootDeclaration, Weighted, Wire,
 };
 #[cfg(feature = "midi")]
-pub use midi::{Midi, MidiLoad, MidiRouteId, MidiRouteRule, Stamping, TakePlacement};
+pub use midi::{Midi, MidiRouteId, MidiRouteRule, Stamping, TakePlacement};
 #[cfg(feature = "midi-hardware")]
 pub use midi_ci::{
     ChannelProfile, GetProperty, ListedProfile, ListedResource, PeFailure, ProfilePeer, ReportPeer,
@@ -199,6 +201,11 @@ pub use midi_ci::{
 };
 #[cfg(feature = "midi")]
 pub use midi_follow::{FollowClock, FollowMachineControl, FollowTempo};
+#[cfg(feature = "midi")]
+pub use midi_load::{
+    DroppedEvent, LoadMidi, LoadMidiError, LoadReport, LoadedMidi, LoadedTrack,
+    NoCommonTimelineError, NoSuchTrackError,
+};
 #[cfg(feature = "midi-hardware")]
 pub use midi_port::{
     InputLoaded, MidiInput, MidiInputEntry, MidiInputInfo, MidiOutput, MidiOutputEntry,
