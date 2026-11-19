@@ -427,7 +427,7 @@ impl<K: crate::AppKey, F: crate::SessionFloat> Session<K, DeviceClock<F>> {
             let undone = self.with_device(|session, device| undo(session, device, old));
             if undone.is_err() {
                 let prepared = self.graph.prepared();
-                self.device_mut().driver.settle(&prepared);
+                self.device_mut().driver.sync_to_graph(&prepared);
             }
             self.reports
                 .faults_restarted(self.device().faults().count());
