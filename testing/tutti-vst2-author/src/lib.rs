@@ -1,11 +1,13 @@
 //! The plugin-authoring half of the old `vst-tutti` crate, for the test plugins.
 //!
-//! `tutti-vst2-ffi` is the host half (the ABI types, the loader, the host callback,
-//! the buffers). This crate is what a VST2 *plugin* needs on top: `plugin_main!`,
-//! `main` (which builds the `AEffect`), the plugin-side dispatcher, `PluginCache`
-//! and the `util` helpers. It re-exports the ffi crate's modules, so a plugin
-//! names `vst::api`, `vst::plugin::Plugin`, ... from one place. Derived from vst-rs
-//! 0.3.0 (MIT, see `LICENSE`).
+//! `tutti-vst2-ffi` is the host half (the ABI types, the loader, the host callback).
+//! This crate is what a VST2 *plugin* needs on top: the `Plugin` and `PluginParameters`
+//! traits, `HostCallback`, `Editor` and `ChannelInfo`
+//! (`plugin`, `editor`, `channels`), `plugin_main!`, `main` (which builds the
+//! `AEffect`), the plugin-side dispatcher, `PluginCache` and the `util` helpers. The
+//! shared items are re-exported from the ffi crate, so a plugin names `vst::api`,
+//! `vst::plugin::Plugin`, ... from one place. Derived from vst-rs 0.3.0 (MIT, see
+//! `LICENSE`).
 //!
 //! It is a test-only crate (`publish = false`): the only plugin the engine ships
 //! tests against is the reference plugin built on it.
@@ -18,11 +20,14 @@ extern crate tracing;
 
 use std::ptr;
 
-pub use tutti_vst2_ffi::{api, buffer, channels, editor, event, host, plugin, speaker};
+pub use tutti_vst2_ffi::{api, buffer, host, speaker};
 
 mod aeffect;
 mod cache;
+pub mod channels;
 mod dispatch;
+pub mod editor;
+pub mod plugin;
 #[cfg(test)]
 mod plugin_tests;
 pub mod shell;
