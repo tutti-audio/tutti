@@ -39,16 +39,17 @@ fn a_scanned_link_to_a_differently_named_target_loads_by_its_catalog_key() {
     );
     let result = result.expect("the wait ended on a result");
     assert!(result.failures.is_empty(), "{:?}", result.failures);
-    let (listed, descriptor) = catalog.iter().next().expect("the link is one row");
+    let (listed, _) = catalog.iter().next().expect("the link is one row");
     assert_eq!(listed.path(), tutti_plugin_db::canonical_path(&target));
-    let id = PluginId::new(PluginFormat::Clap, descriptor.id.clone());
+    let id = listed.id().cloned().expect("the scan read the plugin's id");
+    assert!(matches!(id, PluginId::Clap(_)), "{id:?}");
 
     let loadable = catalog
         .resolve(&id)
         .bind()
         .expect("the scanned id is in the catalog")
         .hosting(Hosting::OutOfProcess);
-    assert_eq!(loadable.format(), PluginFormat::Clap);
+    assert_eq!(loadable.format(), Ok(PluginFormat::Clap));
     let mut env = tutti_fixtures::ScopedEnv::new();
     env.set("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server());
     let plugin = Plugin::open(
@@ -59,8 +60,8 @@ fn a_scanned_link_to_a_differently_named_target_loads_by_its_catalog_key() {
     )
     .expect("the target loads as CLAP, though its extension names VST2");
 
-    assert_eq!(plugin.descriptor().id, id.id);
-    assert_eq!(plugin.plugin().format(), PluginFormat::Clap);
+    assert_eq!(plugin.plugin().id(), Some(&id));
+    assert_eq!(plugin.plugin().format(), Ok(PluginFormat::Clap));
     assert_eq!(plugin.plugin().path(), listed.path());
     assert!(plugin.handle().server_pid().is_some());
 }

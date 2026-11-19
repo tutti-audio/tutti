@@ -50,8 +50,7 @@ fn notes_state() -> Vec<u8> {
 /// that dropped an event, so a note dropped unplayed fails it.
 fn an_in_process_instrument_without_a_live_render_mode_bounces_its_clip() {
     let real = tutti_fixtures::cdylib("tutti_shared_plugin", "tutti-shared-plugin");
-    let plugin = PluginRef::file(tutti_fixtures::publish_with_extension(&real, "clap"))
-        .expect("a plugin file");
+    let plugin = PluginRef::file(tutti_fixtures::publish_with_extension(&real, "clap"));
     let mut session = offline_session();
     let request = Spec::new(plugin.clone())
         .hosting(Hosting::InProcess)

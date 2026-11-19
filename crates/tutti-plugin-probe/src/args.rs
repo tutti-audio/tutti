@@ -5,7 +5,7 @@ use std::ffi::OsString;
 use std::path::PathBuf;
 use std::time::Duration;
 use thiserror::Error;
-use tutti_plugin_types::PluginFormat;
+use tutti_plugin_types::{PluginFormat, PluginId};
 
 /// The usage text.
 pub const USAGE: &str = "usage: plugin-probe <plugin-path> <result-file> [--as <format>] \
@@ -38,9 +38,9 @@ pub struct Measure {
 pub struct StateFile {
     /// The file the plugin's own `save_state` wrote.
     pub file: PathBuf,
-    /// `--plugin`: the descriptor id of the plugin the state is for; `None` is the
-    /// file's only plugin.
-    pub plugin: Option<String>,
+    /// `--plugin`: the id of the plugin the state is for; `None` is the file's
+    /// only plugin.
+    pub plugin: Option<PluginId>,
 }
 
 /// Why a command line was not read.
@@ -157,7 +157,7 @@ fn flags(
                     return Err(Flag::Repeated("--plugin"));
                 }
                 let v = value(&mut args, "--plugin")?;
-                plugin = Some(read("--plugin", &v, |s| Some(s.to_owned()))?);
+                plugin = Some(read("--plugin", &v, |s| s.parse().ok())?);
             }
             "--budget" => {
                 if budget.is_some() {
@@ -236,7 +236,7 @@ mod tests {
             "--state",
             "s.bin",
             "--plugin",
-            "id-1",
+            "clap.id-1",
             "--budget",
             "30",
         ])
@@ -247,7 +247,7 @@ mod tests {
             Some(Measure {
                 state: Some(StateFile {
                     file: "s.bin".into(),
-                    plugin: Some("id-1".into()),
+                    plugin: Some(PluginId::Clap("id-1".into())),
                 }),
                 budget: Some(Duration::from_secs(30)),
             })
@@ -284,11 +284,11 @@ mod tests {
             wrong(Flag::NeedsMeasure("--budget"))
         );
         assert_eq!(
-            flags_after_names(&["--measure", "--plugin", "id"]),
+            flags_after_names(&["--measure", "--plugin", "clap.id"]),
             wrong(Flag::NeedsState)
         );
         assert_eq!(
-            flags_after_names(&["--plugin", "id"]),
+            flags_after_names(&["--plugin", "clap.id"]),
             wrong(Flag::NeedsState)
         );
     }
@@ -313,9 +313,9 @@ mod tests {
                     "--state",
                     "a",
                     "--plugin",
-                    "x",
+                    "clap.x",
                     "--plugin",
-                    "y",
+                    "clap.y",
                 ]
                 .as_slice(),
                 "--plugin",
@@ -341,6 +341,11 @@ mod tests {
         assert_eq!(
             flags_after_names(&["--as"]),
             wrong(Flag::MissingValue("--as"))
+        );
+        assert_eq!(
+            flags_after_names(&["--measure", "--state", "s", "--plugin", "synth"]),
+            wrong(Flag::BadValue("--plugin", "synth".into())),
+            "a plugin id starts with its format"
         );
         assert_eq!(
             flags_after_names(&["--measure", "--budget", "soon"]),

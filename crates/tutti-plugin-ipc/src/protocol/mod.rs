@@ -122,7 +122,10 @@ pub(crate) mod wire;
 ///   a `Bpm`, a `Beat` for the playhead and the bar, a `LoopRange`), one position
 ///   for each of the quarter and beat pairs, and the cycle as an optional region
 ///   in place of the cycle-active flag.
-pub const PROTOCOL_VERSION: u32 = 45;
+/// - **Version 46** replaces `LoadPlugin`'s `load` (a string choice of plugin)
+///   with `plugin`, an optional `PluginId`, and `PluginLoaded` names the plugin
+///   it opened (`id`); a descriptor carries no id.
+pub const PROTOCOL_VERSION: u32 = 46;
 
 /// Largest control-socket frame body either end will allocate for, in bytes.
 ///
@@ -200,9 +203,9 @@ mod tests {
     use tutti_buffers::FloatWidth;
 
     use tutti_plugin_types::{
-        ChordValue, Load, MidiEventVec, NoteExpressionIntValue, NoteExpressionTextValue,
-        ParameterInfo, PluginFormat, PluginTail, Preset, PresetId, RenderMode, Samples, ScaleValue,
-        TransportInfo, WireMidi,
+        ChordValue, MidiEventVec, NoteExpressionIntValue, NoteExpressionTextValue, ParameterInfo,
+        PluginFormat, PluginId, PluginTail, Preset, PresetId, RenderMode, Samples, ScaleValue,
+        TransportInfo, Uid, WireMidi,
     };
     use tutti_ump::{CCNumber, ControlValue, Message, MidiChannel, NoteVelocity, U7, Ump, Voice2};
     use tutti_units::{Normalized, ParamId, SampleRate};
@@ -329,7 +332,7 @@ mod tests {
         let load = postcard::to_allocvec(&HostMessage::LoadPlugin {
             path: PathBuf::new(),
             format: PluginFormat::Clap,
-            load: Load::new(),
+            plugin: None,
             sample_rate: SampleRate::SR_48K,
             block_size: 64,
             preferred_format: FloatWidth::F32,
@@ -812,7 +815,10 @@ mod tests {
         let msg = HostMessage::LoadPlugin {
             path: PathBuf::from("/test/reverb.so"),
             format: PluginFormat::Vst3,
-            load: Load::new().plugin("vst3.00112233-44556677-8899AABB-CCDDEEFF"),
+            plugin: Some(PluginId::Vst3(Uid::new([
+                0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD,
+                0xEE, 0xFF,
+            ]))),
             sample_rate: SampleRate::SR_96K,
             block_size: 1024,
             preferred_format: FloatWidth::F64,
@@ -827,7 +833,7 @@ mod tests {
             HostMessage::LoadPlugin {
                 path,
                 format,
-                load,
+                plugin,
                 sample_rate,
                 block_size,
                 preferred_format,
@@ -840,7 +846,7 @@ mod tests {
                     "the format crosses the wire, whatever the path's extension"
                 );
                 assert_eq!(
-                    load.chosen(),
+                    plugin.map(|id| id.to_string()).as_deref(),
                     Some("vst3.00112233-44556677-8899AABB-CCDDEEFF"),
                     "the choice crosses the wire"
                 );

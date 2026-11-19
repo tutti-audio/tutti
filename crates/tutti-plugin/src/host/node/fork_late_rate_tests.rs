@@ -64,9 +64,9 @@ fn a_late_rate_answer_does_not_silence_an_offline_fork() {
             )
         },
         &tutti_fixtures::detached_work(),
-        &crate::catalog::Loadable::uncatalogued(
-            crate::catalog::PluginRef::file(tutti_fixtures::clap_probe()).expect("a plugin file"),
-        ),
+        &crate::catalog::Loadable::uncatalogued(crate::catalog::PluginRef::file(
+            tutti_fixtures::clap_probe(),
+        )),
         SampleRate::of(LOAD_RATE),
     )
     .expect("load the reference CLAP plugin through a real plugin-server");

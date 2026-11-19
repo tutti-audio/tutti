@@ -17,8 +17,8 @@ use crate::PluginHandle;
 use crate::{ParameterChangeSink, PluginControls};
 use tutti_plugin_types::{BridgeError, BridgeResult, StateError};
 use tutti_plugin_types::{
-    Features, InProcess, Load, LoadStage, Loaded, LoadedPlugin, PluginDescriptor, PluginTooWide,
-    Prepare,
+    Features, InProcess, LoadStage, Loaded, LoadedPlugin, PluginDescriptor, PluginRef,
+    PluginTooWide, Prepare,
 };
 use tutti_units::ParamId;
 
@@ -78,8 +78,8 @@ impl<L: Loaded + 'static> LoadClientError<L> {
 ///
 /// `tutti-plugin`'s `Plugin::open` calls this for `.vst` files
 /// when the `vst2` feature is on; call it directly for another [`InProcess`]
-/// format, or to get the concrete [`InProcessClient`] type. `load` names the
-/// plugin in a file that holds several. Insert the client's node
+/// format, or to get the concrete [`InProcessClient`] type. `plugin` names the
+/// file and, in one that holds several, the plugin in it. Insert the client's node
 /// ([`bind`](InProcessClient::bind), then `Editor::insert`). The node and handle
 /// share the plugin
 /// instance; drop both to drop the plugin. Editors are opened through the
@@ -98,8 +98,7 @@ impl<L: Loaded + 'static> LoadClientError<L> {
 pub fn load_client<L, F>(
     main: MainThreadMarker,
     work: &MainWorkHandle,
-    path: &Path,
-    load: &Load,
+    plugin: &PluginRef,
     sample_rate: impl Into<tutti_units::SampleRate>,
 ) -> Result<(InProcessClient<L, F>, PluginHandle), LoadClientError<L>>
 where
@@ -107,7 +106,7 @@ where
     L::Processor: 'static,
     F: Float,
 {
-    load_client_restoring(main, work, path, load, sample_rate, None)
+    load_client_restoring(main, work, plugin, sample_rate, None)
         .map(|(client, handle, _)| (client, handle))
 }
 
@@ -121,8 +120,7 @@ where
 pub fn load_client_restoring<L, F>(
     main: MainThreadMarker,
     work: &MainWorkHandle,
-    path: &Path,
-    load: &Load,
+    plugin: &PluginRef,
     sample_rate: impl Into<tutti_units::SampleRate>,
     restore: Option<&mut dyn FnMut(&mut L) -> std::result::Result<(), StateError>>,
 ) -> Result<
@@ -139,11 +137,11 @@ where
     F: Float,
 {
     let sample_rate = sample_rate.into();
+    let path = plugin.path();
     let (inner, rt, restored) = Instance::<L>::load(
         main,
         work,
-        path,
-        load,
+        plugin,
         sample_rate,
         MAX_BLOCK_SIZE,
         F::WIDTH,

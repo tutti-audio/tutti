@@ -20,7 +20,7 @@ use tutti_fixtures::main_thread;
 use tutti_plugin_ipc::{
     AudioSlab, BridgeMessage, HostMessage, ProcessAudioData, read_frame, write_frame,
 };
-use tutti_plugin_types::{BridgeError, BridgeResult, ContentScale, Load};
+use tutti_plugin_types::{BridgeError, BridgeResult, ContentScale};
 
 use super::{Native, Stream, serve_every};
 
@@ -209,7 +209,7 @@ fn load_message() -> HostMessage {
     HostMessage::LoadPlugin {
         path: std::path::PathBuf::from(crate::test_utils::clap_probe_path()),
         format: tutti_plugin_types::PluginFormat::Clap,
-        load: Load::new(),
+        plugin: None,
         sample_rate: tutti_plugin_types::SampleRate::SR_44K1,
         block_size: 512,
         preferred_format: FloatWidth::F32,

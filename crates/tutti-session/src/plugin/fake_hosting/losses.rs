@@ -34,7 +34,7 @@ fn handle() -> (PluginHandle, FakePlugin) {
 }
 
 fn plugin() -> tutti_plugin::catalog::PluginRef {
-    tutti_plugin::catalog::PluginRef::file("fake.clap").expect("a plugin file")
+    tutti_plugin::catalog::PluginRef::file("fake.clap")
 }
 
 /// What a test drives of one node: its controls' counters.

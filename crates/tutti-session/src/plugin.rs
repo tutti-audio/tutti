@@ -2654,12 +2654,7 @@ mod tests {
                 .add(tutti_graph::ForkByClone(tutti_nodes::testing::Const::mono(
                     0.0,
                 )));
-        super::fake_hosting::host(
-            &mut session,
-            node,
-            handle,
-            PluginRef::file("fake.clap").expect("a plugin file"),
-        );
+        super::fake_hosting::host(&mut session, node, handle, PluginRef::file("fake.clap"));
         let node = node.erase();
         // The load's parameter read is not what these tests count jobs of.
         session
@@ -2734,7 +2729,7 @@ mod tests {
         /// whose load resolves in process (CLAP, `Hosting::InProcess`).
         #[cfg(feature = "clap")]
         fn recovering_in_process(&mut self) {
-            let plugin = PluginRef::file("fake.clap").expect("a plugin file");
+            let plugin = PluginRef::file("fake.clap");
             self.recovering(
                 plugin.clone(),
                 Loadable::uncatalogued(plugin).hosting(Hosting::InProcess),
@@ -2986,11 +2981,8 @@ mod tests {
                 Default::default(),
                 Default::default(),
             );
-            let mut record = HostedPlugin::new(
-                outgoing,
-                PluginRef::file("fake.clap").expect("a plugin file"),
-                node_controls(),
-            );
+            let mut record =
+                HostedPlugin::new(outgoing, PluginRef::file("fake.clap"), node_controls());
             let mut yard = Graveyard::default();
             let node = NodeKey::fresh();
             let mut editor = yard.editors.make(node, record.handle.clone(), main);
@@ -3326,7 +3318,7 @@ mod tests {
         let mut catalog = Catalog::new(PluginDb::new(), CatalogConfig::new("/nonexistent"), |_| {
             Ok(())
         });
-        let plugin = PluginRef::file(&file).expect("a plugin file");
+        let plugin = PluginRef::file(&file);
         let loadable = Loadable::uncatalogued(plugin.clone()).under(&catalog);
         let mut rig = rig(None);
         rig.recovering(plugin, loadable);
@@ -3383,7 +3375,7 @@ mod tests {
         plugin_a.accepts.store(false, SeqCst);
         let mut hosted = HostedPlugin::new(
             outgoing.clone(),
-            PluginRef::file("fake.clap").expect("a plugin file"),
+            PluginRef::file("fake.clap"),
             node_controls(),
         );
         hosted
@@ -3419,7 +3411,7 @@ mod tests {
         plugin_a.refuses.store(true, SeqCst);
         let mut hosted = HostedPlugin::new(
             outgoing.clone(),
-            PluginRef::file("fake.clap").expect("a plugin file"),
+            PluginRef::file("fake.clap"),
             node_controls(),
         );
         hosted

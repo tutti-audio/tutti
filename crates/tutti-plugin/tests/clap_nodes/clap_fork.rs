@@ -133,7 +133,15 @@ fn a_fork_renders_like_the_live_instance_from_its_state() {
             tutti_transport::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
         )
         .expect("the probe forks");
-    assert_eq!(fork.descriptor().id, probe.client.descriptor().id);
+    assert!(
+        probe.client.plugin().id().is_some(),
+        "the live plugin names itself"
+    );
+    assert_eq!(
+        fork.plugin().id(),
+        probe.client.plugin().id(),
+        "the fork is the live plugin"
+    );
 
     const BLOCKS: usize = 40;
     let mut fork = Rig::new(fork, SAMPLE_RATE, BLOCK);
@@ -1367,7 +1375,7 @@ fn a_live_fork_of_a_served_plugin_told_offline_is_offline() {
 fn a_served_restore_loads_the_preset_and_the_state_into_a_fresh_served_instance() {
     use tutti_plugin_host::ForkState;
     use tutti_plugin_ipc::{Ipc, unique_socket_path};
-    use tutti_plugin_types::{Load, PluginFormat, PresetId, RenderMode, StateUse};
+    use tutti_plugin_types::{PluginFormat, PresetId, RenderMode, StateUse};
 
     let _lock = machine_lock();
     let _env = env().preset_load();
@@ -1384,7 +1392,7 @@ fn a_served_restore_loads_the_preset_and_the_state_into_a_fresh_served_instance(
     let launched = Ipc::launch(
         BridgeConfig::at(unique_socket_path().expect("a socket path")),
         &tutti_plugin_ipc::LoadRequest {
-            origin: &tutti_plugin_types::Origin::new(tutti_fixtures::clap_probe(), Load::new()),
+            origin: &tutti_plugin_types::PluginRef::file(tutti_fixtures::clap_probe()),
             format: PluginFormat::Clap,
             rate: SampleRate::of(SAMPLE_RATE),
             restore: None,

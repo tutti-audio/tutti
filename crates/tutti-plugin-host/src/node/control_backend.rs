@@ -403,8 +403,8 @@ where
 mod off_main_tests {
     use tutti_fixtures::main_thread;
     use tutti_plugin_types::{
-        AutomationMode, AutomationModeError, Load, MainWork, MainWorkHandle, RenderMode,
-        StateError, StateUse,
+        AutomationMode, AutomationModeError, MainWork, MainWorkHandle, RenderMode, StateError,
+        StateUse,
     };
     use tutti_units::Normalized;
     use tutti_units::ParamId;
@@ -433,8 +433,7 @@ mod off_main_tests {
         let (client, handle) = crate::load_client::<Vst2Loaded, f32>(
             main_thread(),
             work,
-            tutti_fixtures::vst2_probe(),
-            &Load::new(),
+            &tutti_plugin_types::PluginRef::file(tutti_fixtures::vst2_probe()),
             SampleRate::SR_48K,
         )
         .unwrap_or_else(|e| panic!("in-process load of the probe: {e:?}"));

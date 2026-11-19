@@ -39,10 +39,7 @@ fn the_served_control_and_any_thread_answer_alike() {
             tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source"),
         ),
         &tutti_plugin_ipc::LoadRequest {
-            origin: &tutti_plugin_types::Origin::new(
-                tutti_fixtures::clap_probe(),
-                tutti_plugin_types::Load::new(),
-            ),
+            origin: &tutti_plugin_types::PluginRef::file(tutti_fixtures::clap_probe()),
             format: tutti_plugin_types::PluginFormat::Clap,
             rate: SampleRate::SR_48K,
             restore: None,
@@ -124,10 +121,7 @@ fn a_live_served_load_reaches_the_plugin_in_the_context_it_names() {
             tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source"),
         ),
         &tutti_plugin_ipc::LoadRequest {
-            origin: &tutti_plugin_types::Origin::new(
-                tutti_fixtures::clap_probe(),
-                tutti_plugin_types::Load::new(),
-            ),
+            origin: &tutti_plugin_types::PluginRef::file(tutti_fixtures::clap_probe()),
             format: tutti_plugin_types::PluginFormat::Clap,
             rate: SampleRate::SR_48K,
             restore: None,
@@ -175,10 +169,7 @@ fn a_client_with_no_editor_loader_asks_the_real_server_for_its_editor() {
             tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source"),
         ),
         &tutti_plugin_ipc::LoadRequest {
-            origin: &tutti_plugin_types::Origin::new(
-                tutti_fixtures::clap_probe(),
-                tutti_plugin_types::Load::new(),
-            ),
+            origin: &tutti_plugin_types::PluginRef::file(tutti_fixtures::clap_probe()),
             format: tutti_plugin_types::PluginFormat::Clap,
             rate: SampleRate::SR_48K,
             restore: None,
@@ -221,10 +212,7 @@ fn a_served_bypass_write_is_lost_when_the_link_is_dead() {
             tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source"),
         ),
         &tutti_plugin_ipc::LoadRequest {
-            origin: &tutti_plugin_types::Origin::new(
-                tutti_fixtures::clap_probe(),
-                tutti_plugin_types::Load::new(),
-            ),
+            origin: &tutti_plugin_types::PluginRef::file(tutti_fixtures::clap_probe()),
             format: tutti_plugin_types::PluginFormat::Clap,
             rate: SampleRate::SR_48K,
             restore: None,
@@ -272,10 +260,7 @@ fn a_normal_teardown_leaves_the_forks_watch_alive() {
             tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source"),
         ),
         &tutti_plugin_ipc::LoadRequest {
-            origin: &tutti_plugin_types::Origin::new(
-                tutti_fixtures::clap_probe(),
-                tutti_plugin_types::Load::new(),
-            ),
+            origin: &tutti_plugin_types::PluginRef::file(tutti_fixtures::clap_probe()),
             format: tutti_plugin_types::PluginFormat::Clap,
             rate: SampleRate::SR_48K,
             restore: None,

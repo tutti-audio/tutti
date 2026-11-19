@@ -28,7 +28,6 @@
 
 use std::hint::black_box;
 use tutti_fixtures::main_thread;
-use tutti_plugin_types::Load;
 use tutti_vst2_host::Vst2Loaded;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
@@ -45,8 +44,7 @@ fn unit() -> Direct<PluginNode<Vst2Loaded>> {
     let (unit, _handle) = load_client::<Vst2Loaded, f32>(
         main_thread(),
         &tutti_fixtures::detached_work(),
-        tutti_fixtures::vst2_probe(),
-        &Load::new(),
+        &tutti_plugin_types::PluginRef::file(tutti_fixtures::vst2_probe()),
         SampleRate::of(SR),
     )
     .expect("the reference VST2 plugin must be built — see tutti-fixtures");

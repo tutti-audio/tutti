@@ -28,8 +28,8 @@ pub use tutti_plugin_types::{
 /// decay, truncating every reverb.
 #[derive(Debug, Clone)]
 pub struct PluginInfo {
-    /// Stable identifier built from the plugin's `unique_id`.
-    pub id: String,
+    /// The plugin's `unique_id`, as the unsigned number a [`PluginId::Vst2`](tutti_plugin_types::PluginId) holds.
+    pub id: u32,
     /// Display name from `effGetEffectName`, or the file stem if the plugin
     /// declares none.
     pub name: String,

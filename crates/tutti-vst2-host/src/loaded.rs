@@ -16,7 +16,7 @@ use tutti_plugin_types::{MainThreadMarker, MainWorkHandle, PluginError};
 use vst::host::{PluginInstance, PluginLoadError, PluginLoader};
 use vst::plugin::Category;
 
-use tutti_plugin_types::{PluginDescriptor, PluginVersion};
+use tutti_plugin_types::{PluginDescriptor, PluginId, PluginRef, PluginVersion};
 
 use crate::error::{LoadStage, Result, Vst2Error};
 use crate::host::{HostState, MIDI_OUT_QUEUE_CAPACITY, PARAM_QUEUE_CAPACITY, ParameterChange};
@@ -204,7 +204,7 @@ pub struct Vst2Loaded {
     descriptor: PluginDescriptor,
     /// The module opened and the choice of plugin in it (a shell's sub-plugin, as
     /// `vst2.<uniqueID>`), what a reopen loads again.
-    pub(crate) origin: tutti_plugin_types::Origin,
+    pub(crate) origin: PluginRef,
     /// The collector of this plugin's owner, which a reopen gives its new instance.
     pub(crate) work: MainWorkHandle,
 }
@@ -302,14 +302,17 @@ impl Vst2Loaded {
     pub fn describe_all(
         main: MainThreadMarker,
         path: impl AsRef<Path>,
-    ) -> Result<Vec<PluginDescriptor>> {
+    ) -> Result<Vec<(PluginId, PluginDescriptor)>> {
         let path = path.as_ref();
         // Every instance here closes on this thread before the next opens, so its
         // collector never receives work.
         let (_collector, work) = tutti_plugin_types::MainWork::new();
         let first = Self::load(main, &work, path)?;
         if first.metadata.category != Vst2Category::Shell {
-            return Ok(vec![first.descriptor.clone()]);
+            return Ok(vec![(
+                PluginId::Vst2(first.metadata.id),
+                first.descriptor.clone(),
+            )]);
         }
         let subs = first.instance.shell_plugins(main);
         let shell = first.metadata.clone();
@@ -324,18 +327,20 @@ impl Vst2Loaded {
         Ok(subs
             .into_iter()
             .map(|sub| match Self::load_plugin(main, &work, path, sub.id) {
-                Ok(loaded) => loaded.descriptor.clone(),
-                Err(_) => PluginDescriptor {
-                    id: format!("vst2.{}", sub.id),
-                    name: sub.name,
-                    vendor: shell.vendor.clone(),
-                    version: PluginVersion::Absent,
-                    class: tutti_plugin_types::PluginClass::Vst2 {
-                        category: Vst2Category::Unasked,
+                Ok(loaded) => (PluginId::Vst2(sub.id as u32), loaded.descriptor.clone()),
+                Err(_) => (
+                    PluginId::Vst2(sub.id as u32),
+                    PluginDescriptor {
+                        name: sub.name,
+                        vendor: shell.vendor.clone(),
+                        version: PluginVersion::Absent,
+                        class: tutti_plugin_types::PluginClass::Vst2 {
+                            category: Vst2Category::Unasked,
+                        },
+                        editor: tutti_plugin_types::EditorPresence::Unknown,
+                        measured: None,
                     },
-                    editor: tutti_plugin_types::EditorPresence::Unknown,
-                    measured: None,
-                },
+                ),
             })
             .collect())
     }
@@ -457,7 +462,7 @@ impl Vst2Loaded {
         // every instrument as a MIDI source.
         let emits_midi = resolve(instance.can_do(main, CanDo::SendMidiEvent), midi_out_pins);
         let mut metadata = PluginInfo {
-            id: format!("vst2.{}", info.unique_id),
+            id: info.unique_id as u32, // the bits of the signed `unique_id`
             name: info.name.clone(),
             vendor: info.vendor.clone(),
             version: PluginVersion::Integer(info.version),
@@ -479,21 +484,20 @@ impl Vst2Loaded {
         metadata.has_editor = instance.has_editor();
         let descriptor = crate::control::descriptor_of(&metadata);
         if let Some(id) = chosen
-            && metadata.id != format!("vst2.{id}")
+            && metadata.id != id as u32
         {
             return Err(Vst2Error::LoadFailed {
                 path: path.to_path_buf(),
                 stage: LoadStage::Instantiation,
                 reason: format!(
-                    "the file has no plugin `vst2.{id}` (it created `{}`)",
-                    metadata.id
+                    "the file has no plugin `{}` (it created `{}`)",
+                    PluginId::Vst2(id as u32),
+                    PluginId::Vst2(metadata.id)
                 ),
             });
         }
-        let load = match chosen {
-            Some(id) => tutti_plugin_types::Load::new().plugin(format!("vst2.{id}")),
-            None => tutti_plugin_types::Load::new(),
-        };
+        // By id even when the load named none, so a reopen takes the same plugin.
+        let origin = PluginRef::new(resolved, PluginId::Vst2(metadata.id));
 
         Ok(Self {
             instance,
@@ -508,7 +512,7 @@ impl Vst2Loaded {
             kept: None,
             metadata,
             descriptor,
-            origin: tutti_plugin_types::Origin::new(resolved, load),
+            origin,
             work: work.clone(),
         })
     }

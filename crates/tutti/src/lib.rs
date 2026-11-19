@@ -173,9 +173,9 @@ pub use tutti_codec::{Format, Pcm};
 #[cfg(feature = "session")]
 pub use tutti_graph::NodeKey;
 #[cfg(feature = "plugin")]
-pub use tutti_plugin_db::{Catalog, Hosting, PluginRef};
+pub use tutti_plugin_db::{Catalog, Hosting};
 #[cfg(feature = "plugin")]
-pub use tutti_plugin_types::{PluginFailure, PresetError, PresetId, StateUse};
+pub use tutti_plugin_types::{PluginFailure, PluginRef, PresetError, PresetId, StateUse};
 #[cfg(all(feature = "session", feature = "midi-hardware"))]
 pub use tutti_session::MidiPolicyTarget;
 #[cfg(all(feature = "session", feature = "plugin"))]
@@ -653,7 +653,7 @@ pub mod plugin {
     pub use tutti_plugin_types::{
         AuComponentType, AutomationModeError, Axis, BlockCounts, BridgeError, BridgeResult,
         ClapFeature, ContentScale, ControlRole, EditorPresence, EmptyVersionText, Helper,
-        InvalidContentScale, KeyEvent, KeyUse, LatencyVerdict, Load, Locator, Measured, NotChecked,
+        InvalidContentScale, KeyEvent, KeyUse, LatencyVerdict, Locator, Measured, NotChecked,
         ParamFlags, ParamRange, ParamSteps, ParamUnit, ParameterInfo, PlainUnit, PluginClass,
         PluginError, PluginFormat, PluginTooWide, PluginVersion, ProbeConfig, StateError,
         StateHash, TailVerdict, UnknownExtension, Verdict, VersionText, Vst2Category, Vst3PlugType,
@@ -671,8 +671,12 @@ pub mod plugin {
     /// holds.
     pub mod catalog {
         pub use tutti_plugin::catalog::AudioConfig;
-        pub use tutti_plugin_db::{CatalogConfig, PluginDb, Scan, ScanPoll, ScanResult};
-        pub use tutti_plugin_types::{PluginDescriptor, PluginId, PluginRole};
+        pub use tutti_plugin_db::{
+            CatalogConfig, FormatMismatch, PluginDb, Probed, Scan, ScanPoll, ScanResult,
+        };
+        pub use tutti_plugin_types::{
+            Described, FourCc, PluginDescriptor, PluginId, PluginIdError, PluginRole, Uid,
+        };
     }
 }
 

@@ -34,7 +34,7 @@ pub enum ProbeRefusal {
     #[error("{plugin}: the plugin refused the state: {reason}")]
     StateRefused {
         /// The id of the plugin that refused.
-        plugin: String,
+        plugin: crate::PluginId,
         /// The plugin's own reason.
         reason: String,
     },
@@ -50,8 +50,8 @@ pub enum ProbeRefusal {
     #[error("the file would not load: {0}")]
     Describe(String),
     /// `--plugin` names a plugin the file does not hold.
-    #[error("the file holds no plugin {0:?}")]
-    UnknownPlugin(String),
+    #[error("the file holds no plugin {0}")]
+    UnknownPlugin(crate::PluginId),
     /// A state is given with no plugin named, and the file holds several: it would
     /// go to one of them by position, which no caller asked for.
     #[error("a state with no plugin named, and the file holds {count} plugins")]
@@ -145,8 +145,8 @@ pub enum MeasureFailure {
 /// A plugin of the file the probe described and could not measure, and why.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Unmeasured {
-    /// The plugin's descriptor id.
-    pub plugin: String,
+    /// The plugin's id.
+    pub plugin: crate::PluginId,
     /// Why it has no measurement.
     pub failure: MeasureFailure,
 }

@@ -43,12 +43,15 @@ fn session() -> Session {
 
 /// What a scan reports for the bundle's plugin `id`.
 fn entry_ref(path: &std::path::Path, id: &str) -> PluginRef {
-    let descriptor = PluginDescriptor::new(id, id, PluginClass::Unknown);
-    PluginRef::from(&PluginEntry {
+    let id = PluginId::Clap(id.into());
+    let descriptor = PluginDescriptor::new(id.to_string(), PluginClass::Unknown);
+    PluginEntry {
         path,
         format: PluginFormat::Clap,
+        id: Some(&id),
         descriptor: &descriptor,
-    })
+    }
+    .plugin_ref()
 }
 
 /// **A scanned plugin loads as itself, not as its file's first.** The bundle's
@@ -65,20 +68,17 @@ fn the_second_plugin_of_a_bundle_loads_by_its_entry() {
         .load_plugin_blocking(main, Spec::new(entry_ref(&path, second_id())))
         .expect("the second plugin loads");
     let hosted = s.plugin_view(second).unwrap();
-    assert_eq!(hosted.descriptor().id, second_id());
-    assert_eq!(hosted.plugin().id(), Some(second_id()));
+    assert_eq!(crate::pooled::clap_id(hosted.plugin()), second_id());
+    assert_eq!(crate::pooled::clap_id(hosted.plugin()), second_id());
 
     let first = s
-        .load_plugin_blocking(
-            main,
-            Spec::new(PluginRef::file(&path).expect("a plugin file")),
-        )
+        .load_plugin_blocking(main, Spec::new(PluginRef::file(&path)))
         .expect("the file's first plugin loads");
     let hosted = s.plugin_view(first).unwrap();
-    assert_eq!(hosted.descriptor().id, first_id());
+    assert_eq!(crate::pooled::clap_id(hosted.plugin()), first_id());
     assert_eq!(
-        hosted.plugin().id(),
-        Some(first_id()),
+        crate::pooled::clap_id(hosted.plugin()),
+        first_id(),
         "the record names the plugin the file's first turned out to be"
     );
 }
@@ -127,8 +127,8 @@ fn a_state_is_refused_by_another_plugin() {
     // The entry's declaration. The key an entry is declared under is never
     // pooled here: the declaration is built and its state checked, nothing more.
     const UNPOOLED: u8 = 0;
-    let (catalog, _id, _dir) = catalog_of(&PluginRef::file(&path).expect("a plugin file"));
-    let id_of = |id: &str| PluginId::new(PluginFormat::Clap, id);
+    let (catalog, _id, _dir) = catalog_of(&PluginRef::file(&path));
+    let id_of = |id: &str| PluginId::Clap(id.into());
     let refused = s
         .plugin_entry(UNPOOLED, &id_of(second_id()), &catalog)
         .initial_state(from_first.clone())
@@ -136,7 +136,7 @@ fn a_state_is_refused_by_another_plugin() {
     let SavedPeer::Plugin(expected) = refused.expected() else {
         panic!("a plugin: {:?}", refused.expected());
     };
-    assert_eq!(expected.id(), Some(second_id()));
+    assert_eq!(crate::pooled::clap_id(expected), second_id());
     assert_eq!(refused.found(), from_first.peer());
     assert!(
         refused.to_string().contains(first_id()) && refused.to_string().contains(second_id()),

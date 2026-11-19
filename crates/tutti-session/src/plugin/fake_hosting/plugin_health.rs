@@ -108,7 +108,7 @@ fn session_with(cause: Option<PluginFailure>) -> (DetachedSession, NodeKey) {
         &mut s,
         node,
         handle_with(cause),
-        tutti_plugin::catalog::PluginRef::file("fake.clap").expect("a plugin file"),
+        tutti_plugin::catalog::PluginRef::file("fake.clap"),
     );
     // The insert is an edit: send it, so the flag starts clear.
     s.commit();
@@ -316,7 +316,7 @@ fn session_reporting() -> (
         &mut s,
         node,
         handle,
-        tutti_plugin::catalog::PluginRef::file("fake.clap").expect("a plugin file"),
+        tutti_plugin::catalog::PluginRef::file("fake.clap"),
     );
     s.commit();
     (s, node.erase(), params, refresh, invalidate)

@@ -11,7 +11,7 @@
 //! opt-in, so a format that writes neither impl is hostable nowhere. Every impl
 //! is listed in the plugin contract's `hostings` (`cargo xtask check-hosting`).
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use tutti_platform::Instant;
 
 use dpi::Size;
@@ -19,84 +19,11 @@ use tutti_plugin_ipc_ffi::Ready;
 
 use crate::{
     AutomationMode, ContentScale, EditorCapabilities, EditorError, KeyEvent, KeyUse, Loaded,
-    MainThreadMarker, MainWorkHandle, ParamEdit, PluginDescriptor, PluginError, PluginResult,
-    Request, Wakeups, WindowHandle,
+    MainThreadMarker, MainWorkHandle, ParamEdit, PluginDescriptor, PluginError, PluginId,
+    PluginRef, PluginResult, Request, Wakeups, WindowHandle,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
-
-/// What to load from a plugin file: which plugin, when the file exports
-/// several.
-///
-/// Rate, block size and sample format are the activation's
-/// ([`Prepare`](crate::Prepare)), and a state to restore is a
-/// [`Control::load_state`](crate::Control::load_state) on the loaded plugin, so
-/// a load needs only the choice of plugin.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct Load {
-    plugin: Option<String>,
-}
-
-impl Load {
-    /// The file's first plugin.
-    #[must_use]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// The plugin with this id in a file that exports several: the
-    /// [`PluginDescriptor::id`](crate::PluginDescriptor) the scan reports, whatever the
-    /// format: a CLAP plugin id, a VST3 class id (`vst3.<class id>`), an AU
-    /// descriptor id (`au.<type>.<subtype>.<manufacturer>`), a VST2 plugin's
-    /// `vst2.<uniqueID>` (the sub-plugin of a shell; a file that is no shell holds
-    /// the one plugin, which a choice of another id refuses).
-    #[must_use]
-    pub fn plugin(mut self, id: impl Into<String>) -> Self {
-        self.plugin = Some(id.into());
-        self
-    }
-
-    /// The chosen plugin, if one was named.
-    #[must_use]
-    pub fn chosen(&self) -> Option<&str> {
-        self.plugin.as_deref()
-    }
-}
-
-/// Where an instance came from: the file that was opened and the [`Load`]
-/// that chose the plugin in it. What [`Reopen`] loads again.
-///
-/// The path is the file the format opened (a module, or a library a format
-/// was pointed at in place of its bundle), so a reopen opens the same one.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Origin {
-    path: PathBuf,
-    load: Load,
-}
-
-impl Origin {
-    /// The file `path`, with the plugin `load` chose in it.
-    #[must_use]
-    pub fn new(path: impl Into<PathBuf>, load: Load) -> Self {
-        Self {
-            path: path.into(),
-            load,
-        }
-    }
-
-    /// The file that was opened.
-    #[must_use]
-    pub fn path(&self) -> &Path {
-        &self.path
-    }
-
-    /// The choice of plugin in it.
-    #[must_use]
-    pub fn load(&self) -> &Load {
-        &self.load
-    }
-}
 
 /// The format can run in the host's own process.
 #[diagnostic::on_unimplemented(
@@ -109,8 +36,9 @@ pub trait InProcess: Loaded {
     ///
     /// # Errors
     ///
-    /// The file cannot be opened, the chosen plugin is not in it, or the
-    /// plugin refuses to be created.
+    /// The file cannot be opened, the chosen plugin is not in it, the id names a
+    /// plugin of another format ([`PluginRef::id_for`]), or the plugin refuses
+    /// to be created.
     ///
     /// `work` is the collector of the instance's owner: a drop that finds
     /// itself off the main thread hands its close there (see
@@ -118,13 +46,14 @@ pub trait InProcess: Loaded {
     fn load_in_process(
         main: MainThreadMarker,
         work: &MainWorkHandle,
-        path: &Path,
-        load: &Load,
+        plugin: &PluginRef,
     ) -> PluginResult<Self>;
 
     /// Where this instance came from, however it was loaded: what [`Reopen`]
-    /// loads again.
-    fn origin(&self) -> &Origin;
+    /// loads again. The file is the one the format opened (a module, or a
+    /// library a format was pointed at in place of its bundle), and the id is
+    /// the plugin's, filled in when the load chose none.
+    fn origin(&self) -> &PluginRef;
 
     /// The collector this instance hands a close to from a drop off the main
     /// thread: what [`Reopen`] gives the instance it loads.
@@ -143,7 +72,7 @@ pub trait InProcess: Loaded {
     note = "implement `Describe` only if the file can be read without activating a plugin"
 )]
 pub trait Describe: Loaded {
-    /// The descriptor of every plugin in the file at `path`, in the file's own
+    /// Every plugin in the file at `path`, with its id, in the file's own
     /// order. `main` is the caller's proof that it is on the main thread, which a
     /// format that loads to describe needs and the others ignore.
     ///
@@ -152,7 +81,10 @@ pub trait Describe: Loaded {
     /// [`PluginError::Load`] at the stage the format's loader refused the file
     /// (a path that is no file or bundle for the format included), or another
     /// [`PluginError`] for a refusal with no stage.
-    fn describe(main: MainThreadMarker, path: &Path) -> PluginResult<Vec<PluginDescriptor>>;
+    fn describe(
+        main: MainThreadMarker,
+        path: &Path,
+    ) -> PluginResult<Vec<(PluginId, PluginDescriptor)>>;
 }
 
 /// The format can be served from another process, with its editor elsewhere.
@@ -177,8 +109,7 @@ pub trait OutOfProcess: Loaded {
     fn load_served(
         main: MainThreadMarker,
         work: &MainWorkHandle,
-        path: &Path,
-        load: &Load,
+        plugin: &PluginRef,
     ) -> PluginResult<Self>;
 
     /// What the host calls to build the editor instance. It is never
@@ -190,18 +121,17 @@ pub trait OutOfProcess: Loaded {
     fn load_editor(
         main: MainThreadMarker,
         work: &MainWorkHandle,
-        path: &Path,
-        load: &Load,
+        plugin: &PluginRef,
     ) -> PluginResult<Self::Editor>;
 }
 
 /// A loaded plugin can be loaded again the same way, in the same hosting: what
 /// a fork of the graph needs before it copies the state across.
 ///
-/// Every [`InProcess`] format has it, from its [`Origin`]; an out-of-process
+/// Every [`InProcess`] format has it, from its [`origin`](InProcess::origin); an out-of-process
 /// hosting implements it by starting a new server.
 pub trait Reopen: Loaded {
-    /// A fresh instance from the same file and [`Load`], not activated, with
+    /// A fresh instance of the same plugin, not activated, with
     /// none of this one's state.
     ///
     /// # Errors
@@ -212,8 +142,7 @@ pub trait Reopen: Loaded {
 
 impl<L: InProcess> Reopen for L {
     fn reopen(&self, main: MainThreadMarker) -> PluginResult<Self> {
-        let origin = self.origin();
-        L::load_in_process(main, self.main_work(), origin.path(), origin.load())
+        L::load_in_process(main, self.main_work(), self.origin())
     }
 }
 

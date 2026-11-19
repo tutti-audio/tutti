@@ -18,7 +18,7 @@ use tutti_plugin_types::MAX_CHUNK;
 use tutti_plugin_types::StateUse;
 use tutti_plugin_types::Timeouts;
 use tutti_plugin_types::{BridgeError, BridgeResult};
-use tutti_plugin_types::{Helper, Locator, Origin, PluginFormat};
+use tutti_plugin_types::{Helper, Locator, PluginFormat, PluginId, PluginRef};
 use tutti_plugin_types::{LoadedPlugin, PluginDescriptor};
 use tutti_units::SampleRate;
 
@@ -35,6 +35,9 @@ pub struct LaunchedServer {
     /// The server process, killed and reaped when this drops, and the watch
     /// on whether it is alive.
     pub server: ProcessGuard,
+    /// The plugin the server opened: the one the request chose, or the file's
+    /// first.
+    pub id: PluginId,
     /// Catalog identity (name, vendor, class, editor).
     pub descriptor: PluginDescriptor,
     /// Engine-wiring data from instantiation (bus widths, latency, f64).
@@ -54,6 +57,7 @@ impl std::fmt::Debug for LaunchedServer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LaunchedServer")
             .field("server", &self.server)
+            .field("id", &self.id)
             .field("descriptor", &self.descriptor)
             .field("loaded", &self.loaded)
             .field("format", &self.format)
@@ -67,7 +71,7 @@ impl std::fmt::Debug for LaunchedServer {
 #[derive(Debug, Clone, Copy)]
 pub struct LoadRequest<'a> {
     /// The file and the plugin chosen in it.
-    pub origin: &'a Origin,
+    pub origin: &'a PluginRef,
     /// The format that opens the file.
     pub format: PluginFormat,
     /// The sample rate the plugin is activated at.
@@ -132,7 +136,7 @@ pub(super) fn launch_with(
     format: PluginFormat,
     sample_rate: SampleRate,
 ) -> BridgeResult<LaunchedServer> {
-    let origin = Origin::new(plugin_path, tutti_plugin_types::Load::new());
+    let origin = PluginRef::file(plugin_path);
     launch_with_state(
         locator,
         config,
@@ -176,7 +180,7 @@ pub(super) fn launch_with_state(
             (Some(Ok(())), Some(restore)) => Some(restore.staged()),
             _ => None,
         };
-        let (descriptor, loaded, format, loaded_error) =
+        let (id, descriptor, loaded, format, loaded_error) =
             load_plugin(&mut stream, config, request, &shm_name, declared)?;
         let state_restore = match staged {
             Some(Err(e)) => Some(Err(e)),
@@ -184,12 +188,13 @@ pub(super) fn launch_with_state(
             None => None,
         };
         let slab = setup_shm(&mut stream, config, &loaded, format, shm_name)?;
-        Ok((descriptor, loaded, format, slab, state_restore))
+        Ok((id, descriptor, loaded, format, slab, state_restore))
     })(&server);
 
     match result {
-        Ok((descriptor, loaded, format, slab, state_restore)) => Ok(LaunchedServer {
+        Ok((id, descriptor, loaded, format, slab, state_restore)) => Ok(LaunchedServer {
             server,
+            id,
             descriptor: *descriptor,
             loaded,
             format,
@@ -346,6 +351,7 @@ fn load_plugin(
     shm_name: &str,
     state: Option<StagedState>,
 ) -> BridgeResult<(
+    PluginId,
     Box<PluginDescriptor>,
     LoadedPlugin,
     FloatWidth,
@@ -356,7 +362,7 @@ fn load_plugin(
         &HostMessage::LoadPlugin {
             path: request.origin.path().to_path_buf(),
             format: request.format,
-            load: request.origin.load().clone(),
+            plugin: request.origin.id().cloned(),
             sample_rate: request.rate,
             block_size: config.max_buffer_size,
             preferred_format: config.preferred_format,
@@ -379,11 +385,12 @@ fn load_plugin(
         match reply {
             BridgeMessage::RestoringState => phase = LoadPhase::Restoring,
             BridgeMessage::PluginLoaded {
+                id,
                 descriptor,
                 loaded,
                 negotiated_format,
                 state_error,
-            } => return Ok((descriptor, loaded, negotiated_format, state_error)),
+            } => return Ok((id, descriptor, loaded, negotiated_format, state_error)),
             BridgeMessage::Error { message } => {
                 return Err(BridgeError::load_from_server(
                     request.origin.path(),
@@ -680,10 +687,7 @@ mod tests {
             },
             ..BridgeConfig::at(crate::unique_socket_path().expect("the OS has a random source"))
         };
-        let origin = Origin::new(
-            tutti_fixtures::clap_probe(),
-            tutti_plugin_types::Load::new(),
-        );
+        let origin = PluginRef::file(tutti_fixtures::clap_probe());
         launch_with_state(
             &Locator::at(tutti_fixtures::plugin_server()),
             &config,
@@ -1396,10 +1400,7 @@ mod tests {
 
         let config =
             BridgeConfig::at(crate::unique_socket_path().expect("the OS has a random source"));
-        let origin = Origin::new(
-            tutti_fixtures::clap_probe(),
-            tutti_plugin_types::Load::new(),
-        );
+        let origin = PluginRef::file(tutti_fixtures::clap_probe());
         let launched = launch_with_state(
             &Locator::at(tutti_fixtures::plugin_server()),
             &config,

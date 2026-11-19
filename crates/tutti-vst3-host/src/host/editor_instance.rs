@@ -5,13 +5,11 @@
 //! the plugin server: the host mirrors parameters and state into it and
 //! collects the edits the user makes in it.
 
-use std::path::Path;
-
 use dpi::Size;
 use tutti_plugin_types::{
     AutomationMode, ContentScale, Control, Editor, EditorCapabilities, EditorError, EditorWindow,
-    InProcess, KeyEvent, KeyUse, Load, MainThreadMarker, MainWorkHandle, ParamEdit, PluginError,
-    PluginResult, WindowHandle,
+    InProcess, KeyEvent, KeyUse, MainThreadMarker, MainWorkHandle, ParamEdit, PluginError,
+    PluginRef, PluginResult, WindowHandle,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -51,11 +49,10 @@ impl Vst3Editor {
     pub(crate) fn load(
         main: MainThreadMarker,
         work: &MainWorkHandle,
-        path: &Path,
-        load: &Load,
+        plugin: &PluginRef,
     ) -> PluginResult<Self> {
         Ok(Self {
-            inner: Vst3Loaded::load_in_process(main, work, path, load)?,
+            inner: Vst3Loaded::load_in_process(main, work, plugin)?,
             edits: Vec::new(),
             dirty: false,
         })

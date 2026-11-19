@@ -13,7 +13,7 @@ use std::sync::Arc;
 use tutti_buffers::LayoutError;
 use tutti_clap_ffi::{AudioPortInfo, Bundle, DescriptorInfo, LoadError, PortKind, Stage};
 use tutti_plugin_types::{BusChannels, ChannelLayout, EditorPresence, PluginVersion};
-use tutti_plugin_types::{Load, MainThreadMarker, MainWorkHandle, Origin};
+use tutti_plugin_types::{MainThreadMarker, MainWorkHandle, PluginId, PluginRef};
 
 /// What to load: which library of a bundle and which plugin of the library.
 #[derive(Debug, Clone, Default)]
@@ -148,9 +148,9 @@ impl ClapLoaded {
         let plugin_info = info_of(&bundle.descriptors()[index]);
         // The file opened and the plugin chosen in it, by id even when the
         // load named none, so a reopen takes the same one.
-        let origin = Origin::new(
+        let origin = PluginRef::new(
             options.library.as_deref().unwrap_or(bundle_path),
-            Load::new().plugin(bundle.descriptors()[index].id.clone()),
+            PluginId::Clap(bundle.descriptors()[index].id.clone()),
         );
 
         let host_state = Arc::new(HostState::new(main));

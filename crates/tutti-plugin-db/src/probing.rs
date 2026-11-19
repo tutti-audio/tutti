@@ -6,8 +6,8 @@ use std::path::Path;
 use std::time::Duration;
 use tracing::debug;
 use tutti_platform::StopToken;
+use tutti_plugin_types::Described;
 use tutti_plugin_types::Locator;
-use tutti_plugin_types::PluginDescriptor;
 use tutti_plugin_types::PluginFormat;
 use tutti_plugin_types::ProbeError;
 
@@ -34,7 +34,7 @@ pub struct Probing {
 pub fn probe_fn(
     config: &CatalogConfig,
     how: Probing,
-) -> impl Fn(&Path, PluginFormat, &StopToken) -> Result<Vec<PluginDescriptor>, ProbeFailure>
+) -> impl Fn(&Path, PluginFormat, &StopToken) -> Result<Vec<Described>, ProbeFailure>
 + Send
 + Sync
 + 'static {
@@ -50,7 +50,7 @@ pub fn probe_fn(
         } else {
             probe_metadata_with(&locator, path, format, timeout, stop)
         };
-        interpret_probe(probed, path, format, how.fallback)
+        interpret_probe(probed, path, how.fallback)
     }
 }
 
@@ -58,11 +58,10 @@ pub fn probe_fn(
 /// fallback rule is testable without a subprocess — a test that spawns a real
 /// probe depends on whether `target/debug/` happens to be warm.
 fn interpret_probe(
-    result: Result<Vec<PluginDescriptor>, ProbeError>,
+    result: Result<Vec<Described>, ProbeError>,
     path: &Path,
-    format: PluginFormat,
     fallback: bool,
-) -> Result<Vec<PluginDescriptor>, ProbeFailure> {
+) -> Result<Vec<Described>, ProbeFailure> {
     match result {
         Ok(plugins) => Ok(plugins),
         // The only error that means "we could not look", as opposed to "we looked
@@ -72,7 +71,7 @@ fn interpret_probe(
                 "plugin-probe not available, using filename metadata for {:?}",
                 path
             );
-            Ok(vec![probe_plugin_fallback(path, format)])
+            Ok(vec![probe_plugin_fallback(path)])
         }
         Err(error) => Err(error.into()),
     }
@@ -96,19 +95,14 @@ mod tests {
     #[test]
     fn probe_without_a_probe_binary_falls_back_to_filename_metadata() {
         let path = Path::new("/plugins/Plain.vst3");
-        let plugins = interpret_probe(
-            Err(ProbeError::ProbeNotFound),
-            path,
-            PluginFormat::Vst3,
-            true,
-        )
-        .expect("a missing plugin-probe is a fallback, not an error");
-        let [descriptor] = plugins.as_slice() else {
+        let plugins = interpret_probe(Err(ProbeError::ProbeNotFound), path, true)
+            .expect("a missing plugin-probe is a fallback, not an error");
+        let [Described { id, descriptor }] = plugins.as_slice() else {
             panic!("the filename names one plugin: {plugins:?}");
         };
 
         assert_eq!(descriptor.name, "Plain");
-        assert_eq!(descriptor.id, "vst3.plain");
+        assert_eq!(id, &None, "no id is read from a file name");
         assert!(
             matches!(descriptor.class, PluginClass::Unknown),
             "an unprobed plugin must not claim a category, got {:?}",
@@ -126,7 +120,7 @@ mod tests {
             stage: LoadStage::Opening,
             reason: "dlopen failed".into(),
         };
-        let failure = interpret_probe(Err(refusal.clone().into()), path, PluginFormat::Vst3, true)
+        let failure = interpret_probe(Err(refusal.clone().into()), path, true)
             .expect_err("a refusal must not be reported as successful metadata");
 
         assert_eq!(failure.error, ProbeError::Refused(refusal));
@@ -140,7 +134,6 @@ mod tests {
         let failure = interpret_probe(
             Err(ProbeError::ProbeNotFound),
             Path::new("/plugins/Plain.vst3"),
-            PluginFormat::Vst3,
             false,
         )
         .expect_err("no fallback was asked for");

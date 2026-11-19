@@ -48,12 +48,11 @@ use tutti_units::{SampleRate, Samples};
 fn no_editor(
     _: tutti_plugin_types::MainThreadMarker,
     _: &tutti_plugin_types::MainWorkHandle,
-    path: &std::path::Path,
+    plugin: &tutti_plugin_types::PluginRef,
     _: tutti_plugin_types::PluginFormat,
-    _: &tutti_plugin_types::Load,
 ) -> tutti_plugin_types::BridgeResult<Box<dyn tutti_plugin_types::Editor>> {
     Err(tutti_plugin_types::BridgeError::LoadFailed {
-        path: Some(path.to_path_buf()),
+        path: Some(plugin.path().to_path_buf()),
         stage: tutti_plugin_types::LoadStage::Opening,
         reason: "no editor in these tests".into(),
     })
@@ -283,7 +282,7 @@ fn bridge_with_server_mode(
 
     let (bridge, bridge_thread, replies) = PluginBridge::new(
         path.clone(),
-        tutti_plugin_types::Origin::new("test.vst3", tutti_plugin_types::Load::new()),
+        tutti_plugin_types::PluginRef::file("test.vst3"),
         tutti_plugin_types::PluginFormat::Vst3,
         Some(crate::EditorLoader::new(
             no_editor,
@@ -819,7 +818,7 @@ fn bridge_with_no_server() -> (Arc<PluginBridge>, BridgeThread, SlabWriter, Repl
 
     let (bridge, bridge_thread, replies) = PluginBridge::new(
         path,
-        tutti_plugin_types::Origin::new("test.vst3", tutti_plugin_types::Load::new()),
+        tutti_plugin_types::PluginRef::file("test.vst3"),
         tutti_plugin_types::PluginFormat::Vst3,
         Some(crate::EditorLoader::new(
             no_editor,
@@ -1555,7 +1554,7 @@ fn stamped_server(stall: Stall, first_only: bool, rate: SampleRate) -> Rig {
 
     let (bridge, bridge_thread, replies) = PluginBridge::new(
         path.clone(),
-        tutti_plugin_types::Origin::new("test.vst3", tutti_plugin_types::Load::new()),
+        tutti_plugin_types::PluginRef::file("test.vst3"),
         tutti_plugin_types::PluginFormat::Vst3,
         Some(crate::EditorLoader::new(
             no_editor,
@@ -1823,7 +1822,7 @@ fn a_refused_chunk_reports_its_midi_lost() {
         AudioSlab::create(tutti_fixtures::unique_name("test_refused"), stereo_layout()).unwrap();
     let (bridge, _thread, replies) = PluginBridge::new(
         path,
-        tutti_plugin_types::Origin::new("test.vst3", tutti_plugin_types::Load::new()),
+        tutti_plugin_types::PluginRef::file("test.vst3"),
         tutti_plugin_types::PluginFormat::Vst3,
         Some(crate::EditorLoader::new(
             no_editor,
@@ -1961,7 +1960,7 @@ fn two_stale_blocks(
     let listener = ListenerOptions::new().name(name).create_sync().unwrap();
     let (bridge, thread, _replies) = PluginBridge::new(
         path.clone(),
-        tutti_plugin_types::Origin::new("test.vst3", tutti_plugin_types::Load::new()),
+        tutti_plugin_types::PluginRef::file("test.vst3"),
         tutti_plugin_types::PluginFormat::Vst3,
         Some(crate::EditorLoader::new(
             no_editor,

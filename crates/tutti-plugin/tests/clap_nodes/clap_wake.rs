@@ -27,7 +27,6 @@ use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_clap_host::ClapLoaded;
 use tutti_clap_test_plugin::{ClapProbe, ClapSwitch, StatusMode, WOKEN_LEVEL};
 use tutti_graph::{GraphBuilder, Prepare, Renderer};
-use tutti_plugin_types::Load;
 use tutti_units::{SampleRate, Samples};
 
 /// How long a wake that never comes is waited for.
@@ -74,8 +73,7 @@ fn in_process_the_next_block_after_a_request_from_another_thread_runs_the_plugin
     let (client, _handle) = tutti_plugin_host::load_client::<ClapLoaded, f32>(
         main_thread(),
         &tutti_fixtures::detached_work(),
-        tutti_fixtures::clap_probe(),
-        &Load::new(),
+        &tutti_plugin_types::PluginRef::file(tutti_fixtures::clap_probe()),
         SampleRate::of(SAMPLE_RATE),
     )
     .expect("the reference plugin loads in process");

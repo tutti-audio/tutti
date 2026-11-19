@@ -240,7 +240,7 @@ impl PluginInfo {
         &self.plugin
     }
 
-    /// The plugin's descriptor: id, name, vendor, version.
+    /// The plugin's descriptor: name, vendor, version.
     #[must_use]
     pub const fn descriptor(&self) -> &PluginDescriptor {
         &self.descriptor

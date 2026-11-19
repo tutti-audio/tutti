@@ -37,8 +37,8 @@ use std::path::{Path, PathBuf};
 use tutti::midi::{MidiChannel, MidiFile, NoteNumber, Tick, Timebase, Track};
 use tutti::session::{Master, PoolEvent};
 use tutti::{
-    Beat, Bounce, Bpm, Format, MaxBlock, NodeKey, Pcm, PeerState, PluginRef, Range, Root,
-    SampleRate, Samples, Session, SessionEvent, Written,
+    Beat, Bounce, Bpm, Format, MaxBlock, NodeKey, Pcm, PeerState, Range, Root, SampleRate, Samples,
+    Session, SessionEvent, Written,
 };
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -60,7 +60,7 @@ fn load(
     plugin: &Path,
     state: Option<Vec<u8>>,
 ) -> Result<tutti::Key<tutti::AnyPlugin>, Box<dyn std::error::Error>> {
-    use tutti::plugin::catalog::{CatalogConfig, PluginDb, PluginId, ScanPoll};
+    use tutti::plugin::catalog::{CatalogConfig, PluginDb, ScanPoll};
     let dir = tempfile::TempDir::new()?;
     let mut catalog =
         tutti::Catalog::new(PluginDb::new(), CatalogConfig::new(dir.path()), |_| Ok(()));
@@ -79,8 +79,11 @@ fn load(
         return Err(format!("the plugin did not probe: {failure:?}").into());
     }
     let entry = catalog.entries().next().ok_or("the file lists no plugin")?;
-    let id = PluginId::new(entry.format, entry.descriptor.id.clone());
-    let plugin = PluginRef::from(&entry);
+    let id = entry
+        .id
+        .cloned()
+        .ok_or("the scan could not read the plugin's id")?;
+    let plugin = entry.plugin_ref();
     let mut declared = s.plugin_entry("synth", &id, &catalog);
     if let Some(bytes) = state {
         declared = declared.initial_state(PeerState::of_plugin(plugin, bytes))?;

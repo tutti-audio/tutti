@@ -419,7 +419,7 @@ fn the_server_is_sent_the_schedule_on_the_chunks_frames() {
 #[test]
 fn a_served_plugin_reopens_and_restores_off_the_main_thread() {
     use tutti_plugin_ipc::{BridgeConfig, Ipc, LoadRequest};
-    use tutti_plugin_types::{Control, Origin};
+    use tutti_plugin_types::PluginRef;
     let _machine = machine_lock();
     let mut env = tutti_fixtures::ScopedEnv::new();
     env.set("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server());
@@ -428,10 +428,7 @@ fn a_served_plugin_reopens_and_restores_off_the_main_thread() {
             tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source"),
         ),
         &LoadRequest {
-            origin: &Origin::new(
-                tutti_fixtures::clap_probe(),
-                tutti_plugin_types::Load::new(),
-            ),
+            origin: &PluginRef::file(tutti_fixtures::clap_probe()),
             format: tutti_plugin_types::PluginFormat::Clap,
             rate: SR,
             restore: None,
@@ -467,7 +464,11 @@ fn a_served_plugin_reopens_and_restores_off_the_main_thread() {
         "a server of its own"
     );
     assert_ne!(first_pid, None);
-    assert_eq!(second.ipc.info().id, first.info().id, "the same plugin");
+    assert_eq!(
+        second.ipc.origin().expect("an origin").origin.id(),
+        first.origin().expect("an origin").origin.id(),
+        "the same plugin"
+    );
 }
 
 /// **The plugin a launch chose is the plugin a reopen loads** (a fork of the
@@ -477,7 +478,7 @@ fn a_served_plugin_reopens_and_restores_off_the_main_thread() {
 #[test]
 fn a_chosen_plugin_is_the_one_a_reopen_loads() {
     use tutti_plugin_ipc::{BridgeConfig, Ipc, LoadRequest};
-    use tutti_plugin_types::{Control, Load, Origin};
+    use tutti_plugin_types::{PluginId, PluginRef};
     let _machine = machine_lock();
     let mut env = tutti_fixtures::ScopedEnv::new();
     env.set("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server());
@@ -489,7 +490,7 @@ fn a_chosen_plugin_is_the_one_a_reopen_loads() {
             tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source"),
         ),
         &LoadRequest {
-            origin: &Origin::new(tutti_fixtures::clap_probe(), Load::new().plugin(second)),
+            origin: &PluginRef::new(tutti_fixtures::clap_probe(), PluginId::Clap(second.into())),
             format: tutti_plugin_types::PluginFormat::Clap,
             rate: SR,
             restore: None,
@@ -501,12 +502,16 @@ fn a_chosen_plugin_is_the_one_a_reopen_loads() {
     )
     .expect("the factory's second plugin loads in a real server")
     .ipc;
-    assert_eq!(first.info().id, second, "the chosen plugin loaded");
+    assert_eq!(
+        first.origin().expect("an origin").origin.id(),
+        Some(&PluginId::Clap(second.into())),
+        "the chosen plugin loaded"
+    );
 
     let reopened = first.reopen_restoring(None).expect("the reopen launches");
     assert_eq!(
-        reopened.ipc.info().id,
-        second,
+        reopened.ipc.origin().expect("an origin").origin.id(),
+        Some(&PluginId::Clap(second.into())),
         "the reopen loads the chosen plugin, not the file's first"
     );
 }

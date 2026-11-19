@@ -830,7 +830,7 @@ fn load_and_metadata() {
     let instance = load_probe();
     let meta = instance.loaded().metadata();
     assert!(!meta.name.is_empty());
-    assert!(!meta.id.is_empty());
+    assert_ne!(meta.id, 0);
     assert!(instance.loaded().pins().1.count() > 0);
 }
 

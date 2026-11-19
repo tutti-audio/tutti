@@ -190,7 +190,7 @@ fn session_keyed() -> (DetachedSession, Key<AnyPlugin>, Arc<Fake>, RefreshSink) 
         &mut s,
         node,
         handle,
-        tutti_plugin::catalog::PluginRef::file("fake.clap").expect("a plugin file"),
+        tutti_plugin::catalog::PluginRef::file("fake.clap"),
     );
     s.commit();
     (s, key, fake, refresh)
@@ -797,7 +797,7 @@ fn replace_with(s: &mut DetachedSession, node: NodeKey, fake: &Arc<Fake>, plugin
     );
     let (controls, _) =
         PluginControls::new(Samples::new(0), PluginTail::default(), SampleRate::SR_48K);
-    let plugin = tutti_plugin::catalog::PluginRef::file(plugin).expect("a plugin file");
+    let plugin = tutti_plugin::catalog::PluginRef::file(plugin);
     let hosted = s.graph.plugins.get_mut(&node).expect("a hosted plugin");
     let outgoing = hosted.replace_hosted(handle, (*controls).clone(), plugin);
     outgoing.retire().settle(node, &mut s.graph.graveyard);

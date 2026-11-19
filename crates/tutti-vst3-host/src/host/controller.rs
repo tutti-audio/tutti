@@ -629,9 +629,11 @@ impl Loaded for Vst3Loaded {
         let state = self
             .save_state(main, tutti_plugin_types::StateUse::Project)
             .ok();
-        let options = match self.origin.load().chosen() {
-            Some(class) => super::loaded::LoadOptions::new().class_id(class),
-            None => super::loaded::LoadOptions::new(),
+        let options = match self.origin.id() {
+            Some(tutti_plugin_types::PluginId::Vst3(class)) => {
+                super::loaded::LoadOptions::new().class_id(*class)
+            }
+            _ => super::loaded::LoadOptions::new(),
         };
         let mut fresh = match Vst3Loaded::load(main, &self.work, self.origin.path(), options) {
             Ok(fresh) => fresh,

@@ -15,7 +15,6 @@
 use crate::param_reads::ParamReads as _;
 use std::sync::Mutex;
 use tutti_fixtures::main_thread;
-use tutti_plugin_types::Load;
 use tutti_vst2_host::Vst2Loaded;
 
 use tutti_fixtures::midi;
@@ -38,8 +37,7 @@ fn process_steady_state_does_not_allocate() {
     let (unit, handle) = tutti_plugin_host::load_client::<Vst2Loaded, f32>(
         main_thread(),
         &tutti_fixtures::pumped_work(),
-        tutti_fixtures::vst2_probe(),
-        &Load::new(),
+        &tutti_plugin_types::PluginRef::file(tutti_fixtures::vst2_probe()),
         SampleRate::SR_48K,
     )
     .expect("load failed");
@@ -78,8 +76,7 @@ fn process_with_a_meter_does_not_allocate() {
     let (unit, handle) = tutti_plugin_host::load_client::<Vst2Loaded, f32>(
         main_thread(),
         &tutti_fixtures::pumped_work(),
-        tutti_fixtures::vst2_probe(),
-        &Load::new(),
+        &tutti_plugin_types::PluginRef::file(tutti_fixtures::vst2_probe()),
         SampleRate::SR_48K,
     )
     .expect("load failed");
@@ -106,8 +103,7 @@ fn process_with_midi_does_not_allocate() {
     let (unit, handle) = tutti_plugin_host::load_client::<Vst2Loaded, f32>(
         main_thread(),
         &tutti_fixtures::pumped_work(),
-        tutti_fixtures::vst2_probe(),
-        &Load::new(),
+        &tutti_plugin_types::PluginRef::file(tutti_fixtures::vst2_probe()),
         SampleRate::SR_48K,
     )
     .expect("load failed");
@@ -173,8 +169,7 @@ fn two_hundred_moving_parameters_do_not_allocate() {
     let loaded = tutti_plugin_host::load_client::<Vst2Loaded, f32>(
         main_thread(),
         &tutti_fixtures::pumped_work(),
-        tutti_fixtures::vst2_probe(),
-        &Load::new(),
+        &tutti_plugin_types::PluginRef::file(tutti_fixtures::vst2_probe()),
         SampleRate::SR_48K,
     );
     // SAFETY: as above.
@@ -230,8 +225,7 @@ fn an_idle_pump_does_not_allocate() {
     let (unit, handle) = tutti_plugin_host::load_client::<Vst2Loaded, f32>(
         main_thread(),
         &tutti_fixtures::pumped_work(),
-        tutti_fixtures::vst2_probe(),
-        &Load::new(),
+        &tutti_plugin_types::PluginRef::file(tutti_fixtures::vst2_probe()),
         SampleRate::SR_48K,
     )
     .expect("load failed");

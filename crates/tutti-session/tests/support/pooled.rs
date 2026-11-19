@@ -102,11 +102,23 @@ pub fn catalog_of(plugin: &PluginRef) -> (Catalog, PluginId, tempfile::TempDir) 
     let id = catalog
         .entries()
         .filter(|entry| entry.path == file)
-        .map(|entry| entry.descriptor.id.clone())
+        .filter_map(|entry| entry.id.cloned())
         .find(|id| plugin.id().is_none_or(|wanted| wanted == id))
         .expect("the probed file lists the plugin");
-    let id = PluginId::new(plugin.format(), id);
     (catalog, id, dir)
+}
+
+/// The CLAP id of the plugin `plugin` names: the text a test compares with the
+/// reference plugin's constants.
+///
+/// # Panics
+///
+/// When the ref names no plugin, or one of another format.
+pub fn clap_id(plugin: &PluginRef) -> &str {
+    match plugin.id() {
+        Some(PluginId::Clap(id)) => id,
+        other => panic!("a CLAP plugin: {other:?}"),
+    }
 }
 
 /// A plugin loaded through the pool and in a node, in one call.
@@ -143,7 +155,7 @@ static KEYS: AtomicU64 = AtomicU64::new(0);
 /// file and the id a ref names.
 struct Primed {
     file: PathBuf,
-    id: Option<String>,
+    id: Option<PluginId>,
     catalog: Catalog,
     plugin_id: PluginId,
     _dir: tempfile::TempDir,
@@ -156,7 +168,7 @@ static PRIMED: Mutex<Vec<Primed>> = Mutex::new(Vec::new());
 pub fn prime(plugin: &PluginRef) {
     let mut primed = PRIMED.lock_recover();
     let file = tutti_plugin_db::canonical_path(plugin.path());
-    let id = plugin.id().map(str::to_owned);
+    let id = plugin.id().cloned();
     if !primed.iter().any(|p| p.file == file && p.id == id) {
         let (catalog, plugin_id, dir) = catalog_of(plugin);
         primed.push(Primed {
@@ -179,7 +191,7 @@ impl<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>> LoadPlugin 
         let key = {
             let primed = PRIMED.lock_recover();
             let file = tutti_plugin_db::canonical_path(spec.plugin.path());
-            let id = spec.plugin.id().map(str::to_owned);
+            let id = spec.plugin.id().cloned();
             let found = primed
                 .iter()
                 .find(|p| p.file == file && p.id == id)

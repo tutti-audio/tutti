@@ -6,10 +6,9 @@
 //! editor-only second instance here through `load_editor`; each
 //! lives in its format's host crate.
 
-use std::path::Path;
-use tutti_plugin_types::{BridgeError, BridgeResult, PluginFormat};
+use tutti_plugin_types::LoadStage;
+use tutti_plugin_types::{BridgeError, BridgeResult, PluginFormat, PluginRef};
 use tutti_plugin_types::{Editor, MainThreadMarker, MainWorkHandle};
-use tutti_plugin_types::{Load, LoadStage};
 
 // The one platform seam, built with a format host: the platform decides how an
 // Audio Unit's editor is loaded (`audio_unit`), and nothing else here names a
@@ -31,18 +30,18 @@ mod platform;
 pub(crate) fn load_gui_instance(
     main: MainThreadMarker,
     work: &MainWorkHandle,
-    path: &Path,
+    plugin: &PluginRef,
     format: PluginFormat,
-    load: &Load,
 ) -> BridgeResult<Box<dyn Editor>> {
     // A build whose only format here is AU has no arm that reads them.
-    let _ = (main, work, load);
+    let _ = (main, work);
+    let path = plugin.path();
     match format {
         #[cfg(feature = "vst3")]
-        PluginFormat::Vst3 => editor::<tutti_vst3_host::Vst3Loaded>(main, work, path, load, "VST3"),
+        PluginFormat::Vst3 => editor::<tutti_vst3_host::Vst3Loaded>(main, work, plugin, "VST3"),
         #[cfg(feature = "clap")]
-        PluginFormat::Clap => editor::<tutti_clap_host::ClapLoaded>(main, work, path, load, "CLAP"),
-        PluginFormat::AudioUnit => platform::audio_unit(main, work, path, load),
+        PluginFormat::Clap => editor::<tutti_clap_host::ClapLoaded>(main, work, plugin, "CLAP"),
+        PluginFormat::AudioUnit => platform::audio_unit(main, work, plugin),
         PluginFormat::Vst2 => Err(BridgeError::LoadFailed {
             path: Some(path.to_path_buf()),
             stage: LoadStage::Opening,
@@ -66,15 +65,14 @@ pub(crate) fn load_gui_instance(
 fn editor<L: tutti_plugin_types::OutOfProcess>(
     main: MainThreadMarker,
     work: &MainWorkHandle,
-    path: &Path,
-    load: &Load,
+    plugin: &PluginRef,
     format: &str,
 ) -> BridgeResult<Box<dyn Editor>>
 where
     L::Editor: 'static,
 {
-    let editor = L::load_editor(main, work, path, load).map_err(|e| BridgeError::LoadFailed {
-        path: Some(path.to_path_buf()),
+    let editor = L::load_editor(main, work, plugin).map_err(|e| BridgeError::LoadFailed {
+        path: Some(plugin.path().to_path_buf()),
         stage: LoadStage::Opening,
         reason: format!("{format} GUI-only load failed: {e}"),
     })?;
@@ -86,12 +84,11 @@ where
 pub(crate) fn load_gui_instance(
     _main: MainThreadMarker,
     _work: &MainWorkHandle,
-    path: &Path,
+    plugin: &PluginRef,
     _format: PluginFormat,
-    _load: &Load,
 ) -> BridgeResult<Box<dyn Editor>> {
     Err(BridgeError::LoadFailed {
-        path: Some(path.to_path_buf()),
+        path: Some(plugin.path().to_path_buf()),
         stage: LoadStage::Opening,
         reason: "In-process GUI support not built (no format feature enabled: \
                  vst3, clap or au)"

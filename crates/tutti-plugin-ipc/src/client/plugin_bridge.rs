@@ -3,9 +3,9 @@
 use super::audio::{AudioBridge, BridgeThread, Replies};
 use super::editor_site::EditorSite;
 use crate::ServerWatch;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
-use tutti_plugin_types::{BridgeResult, Delivered, Editor, Load, Origin, PluginFormat, Timeouts};
+use tutti_plugin_types::{BridgeResult, Delivered, Editor, PluginFormat, PluginRef, Timeouts};
 use tutti_plugin_types::{MainThreadMarker, MainWorkHandle, StateError};
 use tutti_units::{Normalized, ParamId, SampleRate};
 
@@ -43,14 +43,13 @@ pub struct EditorLoader {
     work: MainWorkHandle,
 }
 
-/// How an [`EditorLoader`] makes an editor: the work collector, the file, the
-/// format that opens it and the plugin chosen in it.
+/// How an [`EditorLoader`] makes an editor: the work collector, the plugin (its
+/// file and the id chosen in it) and the format that opens it.
 type EditorLoad = fn(
     MainThreadMarker,
     &MainWorkHandle,
-    &Path,
+    &PluginRef,
     PluginFormat,
-    &Load,
 ) -> BridgeResult<Box<dyn Editor>>;
 
 impl EditorLoader {
@@ -64,11 +63,10 @@ impl EditorLoader {
     pub(super) fn load(
         &self,
         main: MainThreadMarker,
-        path: &Path,
+        plugin: &PluginRef,
         format: PluginFormat,
-        load: &Load,
     ) -> BridgeResult<Box<dyn Editor>> {
-        (self.load)(main, &self.work, path, format, load)
+        (self.load)(main, &self.work, plugin, format)
     }
 }
 
@@ -99,7 +97,7 @@ impl PluginBridge {
     /// The bridge thread cannot be spawned, or `timeouts` has a zero deadline.
     pub fn new(
         socket_path: PathBuf,
-        origin: Origin,
+        origin: PluginRef,
         format: PluginFormat,
         load_editor: Option<EditorLoader>,
         sample_rate: SampleRate,

@@ -44,7 +44,7 @@ const FIRE: usize = 100;
 /// the first server is spawned, from the test's own thread.
 fn set_server() {
     // The plugin's file is probed before its variables are set.
-    crate::pooled::prime(&PluginRef::file(clap_probe()).expect("a plugin file"));
+    crate::pooled::prime(&PluginRef::file(clap_probe()));
     unsafe {
         std::env::set_var("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server());
         std::env::set_var("TUTTI_CLAP_PROBE_RENDER_MODE", "1");
@@ -94,7 +94,7 @@ fn rig(mode: NodeMode) -> Rig {
     let plugin = s
         .load_plugin_blocking(
             tutti_fixtures::main_thread(),
-            Spec::new(PluginRef::file(clap_probe()).expect("a plugin file")),
+            Spec::new(PluginRef::file(clap_probe())),
         )
         .expect("the reference CLAP plugin loads");
     let g = s.graph();

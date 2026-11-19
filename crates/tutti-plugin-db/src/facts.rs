@@ -71,7 +71,7 @@ pub(crate) fn is_blacklisted_and_unchanged(row: &FileRow, facts: &FileFacts) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tutti_plugin_types::{PluginClass, PluginDescriptor};
+    use tutti_plugin_types::{Described, PluginClass, PluginDescriptor, PluginId};
 
     use std::time::Duration;
 
@@ -90,11 +90,13 @@ mod tests {
     }
 
     fn healthy(mtime: Option<Mtime>) -> FileRow {
-        FileRow::probed(
-            PluginFormat::Clap,
-            &facts(mtime),
-            vec![PluginDescriptor::new("id", "name", PluginClass::Unknown)],
-        )
+        FileRow::probed(PluginFormat::Clap, &facts(mtime))
+            .plugins(vec![Described {
+                id: Some(PluginId::Clap("id".into())),
+                descriptor: PluginDescriptor::new("name", PluginClass::Unknown),
+            }])
+            .build()
+            .expect("ids of the row's format")
     }
 
     fn bad(mtime: Option<Mtime>) -> FileRow {

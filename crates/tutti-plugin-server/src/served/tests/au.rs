@@ -5,20 +5,18 @@ use tutti_au_host::AuLoaded;
 use tutti_buffers::{FloatWidth, InputOutput};
 
 impl Served<AuLoaded> {
-    /// `load_first` for the plugin `load` chooses, in
+    /// `load_first` for the plugin `plugin` names, in
     /// 32-bit.
     fn load_with(
         main: MainThreadMarker,
-        path: &Path,
-        load: &Load,
+        plugin: &PluginRef,
         rate: f64,
         block: usize,
     ) -> PluginResult<Self> {
         Self::load(
             main,
             &tutti_fixtures::detached_work(),
-            path,
-            load,
+            plugin,
             SampleRate::of(rate),
             block,
             FloatWidth::F32,
@@ -85,26 +83,27 @@ impl Served<AuLoaded> {
 ///
 /// `AU_SAMPLE_PLUGIN` overrides the choice with a bundle path (its first
 /// Audio Unit) for a machine that has something more interesting installed.
-fn au_fixture() -> (String, Load) {
-    fn loadable(path: &str, load: &Load) -> bool {
-        AuInstance::load_with(main_thread(), Path::new(path), load, 44100.0, 512).is_ok()
+fn au_fixture() -> PluginRef {
+    fn loadable(plugin: &PluginRef) -> bool {
+        AuInstance::load_with(main_thread(), plugin, 44100.0, 512).is_ok()
     }
 
     if let Ok(named) = std::env::var("AU_SAMPLE_PLUGIN") {
+        let plugin = PluginRef::file(&named);
         assert!(
-            loadable(&named, &Load::new()),
+            loadable(&plugin),
             "AU_SAMPLE_PLUGIN={named} names a bundle whose first unit would not load"
         );
-        return (named, Load::new());
+        return plugin;
     }
     const BUNDLE: &str = "/System/Library/Components/CoreAudio.component";
     const FALLBACK: &str = "au.aufx.lmtr.appl";
-    let load = Load::new().plugin(FALLBACK);
+    let plugin = PluginRef::new(BUNDLE, FALLBACK.parse().expect("an AU id"));
     assert!(
-        loadable(BUNDLE, &load),
+        loadable(&plugin),
         "{FALLBACK} in {BUNDLE} would not load; macOS ships it, so this host cannot load an AU"
     );
-    (BUNDLE.to_string(), load)
+    plugin
 }
 
 /// An AU latency, tail or parameter-list change must reach the drained
@@ -124,8 +123,8 @@ fn au_fixture() -> (String, Load) {
 #[test]
 fn an_au_property_change_reaches_the_event_list() {
     let _lock = crate::test_utils::plugin_load_lock();
-    let (fixture, load) = au_fixture();
-    let mut plugin = AuInstance::load_with(main_thread(), Path::new(&fixture), &load, 44100.0, 512)
+    let fixture = au_fixture();
+    let mut plugin = AuInstance::load_with(main_thread(), &fixture, 44100.0, 512)
         .expect("the AU fixture resolved but would not load");
 
     // Nothing pending: the drain must be empty, or the assertions below
@@ -181,8 +180,8 @@ fn an_au_property_change_reaches_the_event_list() {
 #[test]
 fn an_au_latency_poll_refreshes_the_cached_wiring() {
     let _lock = crate::test_utils::plugin_load_lock();
-    let (fixture, load) = au_fixture();
-    let mut au = AuInstance::load_with(main_thread(), Path::new(&fixture), &load, 44100.0, 512)
+    let fixture = au_fixture();
+    let mut au = AuInstance::load_with(main_thread(), &fixture, 44100.0, 512)
         .expect("the AU fixture resolved but would not load");
 
     // Poison the cache before polling. Without this the test cannot fail:
@@ -243,8 +242,7 @@ const CORE_AUDIO: &str = "/System/Library/Components/CoreAudio.component";
 fn delay() -> AuInstance {
     AuInstance::load_with(
         main_thread(),
-        Path::new(CORE_AUDIO),
-        &Load::new().plugin("au.aufx.dely.appl"),
+        &PluginRef::new(CORE_AUDIO, "au.aufx.dely.appl".parse().expect("an AU id")),
         RATE,
         512,
     )
@@ -323,9 +321,12 @@ fn a_loaded_unit_reports_its_wiring_and_capabilities() {
         "an effect takes no MIDI"
     );
     assert!(
-        au.descriptor().id.starts_with("au."),
-        "{}",
-        au.descriptor().id
+        matches!(
+            au.origin().id(),
+            Some(tutti_plugin_types::PluginId::Au { .. })
+        ),
+        "{:?}",
+        au.origin().id()
     );
 }
 
@@ -465,6 +466,7 @@ fn a_unit_without_the_callbacks_is_not_published_to() {
     );
 
     let mut au = AuInstance {
+        origin: tutti_plugin_types::InProcess::origin(&loaded).clone(),
         lifecycle: Lifecycle::new(loaded),
         state: Lifecycle::<AuLoaded>::initial_state(),
         hand: Hand::local(),

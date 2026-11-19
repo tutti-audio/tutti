@@ -72,7 +72,7 @@ pub const AU_MANUFACTURER: [u8; 4] = *b"Tutt";
 pub const AU_NAME: &str = "Tutti: Shared Test Plugin";
 /// The version, `major << 16 | minor << 8 | bugfix`.
 pub const AU_VERSION: u32 = 0x0001_0000;
-/// The descriptor id a `Load` names it by: `au.<type>.<subtype>.<manufacturer>`.
+/// The text of the unit's `PluginId`: `au.<type>.<subtype>.<manufacturer>`.
 pub const AU_ID: &str = "au.aumf.Tshp.Tutt";
 
 /// The parameters of `ParametersForOverview`: the unit's headline controls.

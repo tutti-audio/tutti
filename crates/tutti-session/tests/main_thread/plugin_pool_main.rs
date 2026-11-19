@@ -16,7 +16,6 @@ use tutti_clap_test_plugin::{ClapProbe, ClapSwitch, Site, ThreadAnswer};
 use tutti_buffers::MaxBlock;
 use tutti_plugin::catalog::{Catalog, CatalogConfig, Hosting, Locator, PluginId};
 use tutti_plugin_db::{PluginDb, ScanPoll};
-use tutti_plugin_types::PluginFormat;
 use tutti_session::{
     JobStatus, LoadError, Peer, PoolError, PoolEvent, PoolState, Presence, Session, SessionEvent,
 };
@@ -41,18 +40,20 @@ fn deactivation() -> ThreadAnswer {
 }
 
 fn second_id() -> PluginId {
-    PluginId::new(
-        PluginFormat::Clap,
+    PluginId::Clap(
         tutti_clap_test_plugin::SECOND_PLUGIN_ID
             .to_str()
-            .expect("utf-8"),
+            .expect("utf-8")
+            .into(),
     )
 }
 
 fn id() -> PluginId {
-    PluginId::new(
-        PluginFormat::Clap,
-        tutti_clap_test_plugin::PLUGIN_ID.to_str().expect("utf-8"),
+    PluginId::Clap(
+        tutti_clap_test_plugin::PLUGIN_ID
+            .to_str()
+            .expect("utf-8")
+            .into(),
     )
 }
 
@@ -265,7 +266,10 @@ fn a_changed_identity_swaps_an_in_process_node() {
     let node = s.add_pooled_plugin(&"fx").unwrap();
     let first = s.plugin(&"fx").unwrap();
     let second = tutti_clap_test_plugin::SECOND_PLUGIN_ID.to_str().unwrap();
-    assert_ne!(s.plugin_view(node).unwrap().descriptor().id, second);
+    assert_ne!(
+        crate::pooled::clap_id(s.plugin_view(node).unwrap().plugin()),
+        second
+    );
 
     s.pool(
         s.plugin_entry("fx", &second_id(), &catalog)
@@ -274,7 +278,7 @@ fn a_changed_identity_swaps_an_in_process_node() {
     .unwrap();
     assert!(matches!(next_event(&mut s, "fx"), PoolEvent::Reloaded));
     let deadline = Instant::now() + Duration::from_secs(10);
-    while s.plugin_view(node).unwrap().descriptor().id != second {
+    while crate::pooled::clap_id(s.plugin_view(node).unwrap().plugin()) != second {
         assert!(Instant::now() < deadline, "the node never swapped");
         let _ = s.update();
         thread::sleep(Duration::from_millis(2));
@@ -296,7 +300,7 @@ fn an_in_process_swap_to_other_ports_fails_the_entry() {
     .unwrap();
     assert!(matches!(next_event(&mut s, "fx"), PoolEvent::Loaded));
     let node = s.add_pooled_plugin(&"fx").unwrap();
-    let before = s.plugin_view(node).unwrap().descriptor().id.clone();
+    let before = crate::pooled::clap_id(s.plugin_view(node).unwrap().plugin()).to_owned();
 
     // The next plugin opened has the probe's aux-bus layout.
     probe().set(ClapSwitch::PortLayout, 1);
@@ -323,7 +327,10 @@ fn an_in_process_swap_to_other_ports_fails_the_entry() {
         ),
         "{events:?}"
     );
-    assert_eq!(s.plugin_view(node).unwrap().descriptor().id, before);
+    assert_eq!(
+        crate::pooled::clap_id(s.plugin_view(node).unwrap().plugin()),
+        before
+    );
     // The unused plugin was closed where the refusal ran, on the main thread,
     // and the graph still commits.
     let closed = deactivation();
@@ -366,7 +373,10 @@ fn an_in_process_swap_waits_for_the_main_thread() {
     )
     .unwrap();
     assert!(matches!(next_event(&mut s, "fx"), PoolEvent::Reloaded));
-    assert_ne!(s.plugin_view(node).unwrap().descriptor().id, second);
+    assert_ne!(
+        crate::pooled::clap_id(s.plugin_view(node).unwrap().plugin()),
+        second
+    );
 
     // Off the main thread the re-prepare resumes, and the swap still waits.
     let mut s = thread::spawn(move || {
@@ -380,7 +390,7 @@ fn an_in_process_swap_waits_for_the_main_thread() {
         }
         let _ = s.update();
         assert_ne!(
-            s.plugin_view(node).unwrap().descriptor().id,
+            crate::pooled::clap_id(s.plugin_view(node).unwrap().plugin()),
             second,
             "an update off the main thread does not swap an in-process plugin"
         );
@@ -389,7 +399,10 @@ fn an_in_process_swap_waits_for_the_main_thread() {
     .join()
     .unwrap();
     let _ = s.update();
-    assert_eq!(s.plugin_view(node).unwrap().descriptor().id, second);
+    assert_eq!(
+        crate::pooled::clap_id(s.plugin_view(node).unwrap().plugin()),
+        second
+    );
     s.close(tutti_fixtures::main_thread());
 }
 
@@ -974,9 +987,9 @@ fn an_inserted_served_plugin_that_grows_its_ports_gets_a_wider_node() {
             tutti_plugin::unique_socket_path().expect("the OS has a random source"),
         ),
         &tutti_fixtures::detached_work(),
-        &tutti_plugin::catalog::Loadable::uncatalogued(
-            tutti_plugin::catalog::PluginRef::file(clap_probe()).expect("a plugin file"),
-        ),
+        &tutti_plugin::catalog::Loadable::uncatalogued(tutti_plugin::catalog::PluginRef::file(
+            clap_probe(),
+        )),
         SampleRate::SR_48K,
     )
     .expect("the reference plugin loads");

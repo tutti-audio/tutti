@@ -118,7 +118,7 @@ fn host_loads_probe_and_reports_declared_metadata() {
 
     // The exact string, not "non-empty": that is what catches a host reading
     // `AEffect::uniqueId` at the wrong offset or with the wrong signedness.
-    assert_eq!(meta.id, format!("vst2.{PROBE_UNIQUE_ID}"));
+    assert_eq!(meta.id, PROBE_UNIQUE_ID as u32);
     assert_eq!(meta.name, "Tutti VST2 Probe");
     assert_eq!(meta.vendor, "Tutti");
     // The probe's defaults: stereo in, stereo out, four parameters.

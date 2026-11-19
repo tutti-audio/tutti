@@ -33,7 +33,7 @@ pub enum LoadCause {
     /// The bundle has no audio class with the requested id.
     #[error("no audio class with id {wanted:?}; this bundle exports {offered:?}")]
     ClassNotFound {
-        /// The class id asked for (`vst3.<class id>`).
+        /// The class id asked for (a [`Uid`](tutti_plugin_types::Uid)'s text).
         wanted: String,
         /// The audio classes the bundle does export, each as its id and name.
         offered: Vec<String>,
@@ -130,12 +130,12 @@ mod tests {
         assert!(err.to_string().contains("Plugin file not found"));
 
         let missing = LoadCause::ClassNotFound {
-            wanted: "vst3.0000".into(),
-            offered: vec!["vst3.1111 (\"Delay\")".into()],
+            wanted: "00000000-00000000-00000000-00000000".into(),
+            offered: vec!["11111111-11111111-11111111-11111111 (\"Delay\")".into()],
         };
         let text = missing.to_string();
         assert!(
-            text.contains("vst3.0000") && text.contains("Delay"),
+            text.contains("00000000-00000000") && text.contains("Delay"),
             "{text}"
         );
     }
