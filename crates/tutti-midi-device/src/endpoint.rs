@@ -625,17 +625,16 @@ impl Endpoint {
         endpoint
     }
 
-    /// The Endpoint with the Protocol and JR Timestamps in use now set, for an
-    /// Endpoint whose state is reported rather than one that was asked
-    /// (§7.1.6.3).
-    ///
-    /// The Protocol in use is one the Endpoint supports and a JR direction is
-    /// on only where it supports it (§7.1.2): each part of `active` it does
-    /// not support keeps its value, as a Stream Configuration Request is
-    /// taken ([`Endpoint::reply`]).
+    /// The Endpoint with the Protocol and JR Timestamps in force now recorded
+    /// (§7.1.6.3): what is happening on the link, reported by an OS, a
+    /// peer's Notification or the owner of the port. It is not a request, so
+    /// it may exceed what this Endpoint advertises (a peer that sends JR
+    /// Timestamps to an Endpoint that did not offer to receive them): a
+    /// request is taken through [`Endpoint::reply`], which keeps the parts the
+    /// Endpoint does not support (§7.1.6.1 step 3).
     #[must_use]
-    pub fn in_use(mut self, active: StreamConfig) -> Self {
-        self.configure(active);
+    pub const fn in_use(mut self, active: StreamConfig) -> Self {
+        self.active = active;
         self
     }
 

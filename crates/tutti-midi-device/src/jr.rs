@@ -117,7 +117,7 @@ pub enum Unmapped {
 }
 
 /// The host time of a message a JR Timestamp precedes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 #[must_use = "an `Arrival` outcome means the message keeps its arrival time"]
 #[non_exhaustive]
 pub enum JrTime {
@@ -129,7 +129,7 @@ pub enum JrTime {
         /// How far above the line the window's arrivals lie, at most: the
         /// delay that renders every message after its arrival, if the jitter
         /// holds.
-        jitter: Duration,
+        jitter: Seconds,
     },
     /// The timestamp cannot be mapped: the message is placed at its arrival.
     Arrival(Unmapped),
@@ -144,7 +144,10 @@ impl JrTime {
             // `jitter` is a spread of arrivals over the window, seconds at
             // most, so the sum is past `Instant`'s range only for an `at` that
             // is already at its end, where `at` is kept.
-            Self::Sent { at, jitter } => at.checked_add(jitter).unwrap_or(at),
+            Self::Sent { at, jitter } => Duration::try_from_secs_f64(jitter.get())
+                .ok()
+                .and_then(|jitter| at.checked_add(jitter))
+                .unwrap_or(at),
             Self::Arrival(_) => arrival,
         }
     }
@@ -355,10 +358,12 @@ impl JrReceiver {
         let sender = f64::from(ticks) + wraps * WRAP;
         let host = ticks_to_seconds(sender - line.ticks0 as f64) * line.slope + line.offset;
         let sent = instant_at(origin, host).map(|at| at.min(arrival));
-        let jitter = Duration::try_from_secs_f64(line.jitter.get());
-        match (sent, jitter) {
-            (Some(at), Ok(jitter)) => JrTime::Sent { at, jitter },
-            _ => JrTime::Arrival(Unmapped::OutOfRange),
+        match sent {
+            Some(at) => JrTime::Sent {
+                at,
+                jitter: line.jitter,
+            },
+            None => JrTime::Arrival(Unmapped::OutOfRange),
         }
     }
 

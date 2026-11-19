@@ -13,7 +13,7 @@
 //! here rather than restated; the blocks are `tutti-midi-device`'s `FunctionBlock`.
 
 use tutti_midi_device::{Capabilities, Endpoint, EndpointId, FunctionBlock, Identity, Supports};
-use tutti_ump::Protocol;
+use tutti_ump::{Protocol, StreamConfig};
 
 /// What an endpoint can carry, and the blocks it declares.
 ///
@@ -113,6 +113,11 @@ impl UmpCapability {
                 tx_jr: false,
             }))
         };
+        endpoint = endpoint.in_use(StreamConfig {
+            protocol,
+            rx_jr: false,
+            tx_jr: false,
+        });
         for block in &self.blocks {
             endpoint = endpoint.block(*block);
         }

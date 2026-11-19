@@ -104,6 +104,7 @@ fn send_times_recovered_within_a_quarter_of_the_jitter_over_200_ppm_drift() {
             let JrTime::Sent { at, jitter: spread } = time else {
                 unreachable!()
             };
+            let spread = Duration::from_secs_f64(spread.get());
             assert!(at <= arrival, "a message is never sent after it arrives");
             assert!(spread <= jitter, "the spread is the jitter's at most");
         }
@@ -257,6 +258,7 @@ fn render_time_is_after_every_arrival_within_the_observed_delays() {
         let JrTime::Sent { jitter: spread, .. } = time else {
             panic!("locked: {time:?}")
         };
+        let spread = Duration::from_secs_f64(spread.get());
         // The window holds both delays; a fitted slope adds a little.
         assert!(
             spread + tick >= jitter && spread <= jitter.mul_f64(1.25),
@@ -415,7 +417,7 @@ fn the_interval_between_clocks_says_nothing_of_the_link() {
         panic!("locked");
     };
     let bound = Duration::from_micros(64);
-    assert!(jitter <= bound, "{jitter:?}");
+    assert!(jitter.get() <= bound.as_secs_f64(), "{jitter:?}");
     let error = at
         .duration_since(link.send(sent))
         .max(link.send(sent).duration_since(at));

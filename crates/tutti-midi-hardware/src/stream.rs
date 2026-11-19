@@ -637,11 +637,8 @@ impl Negotiation {
         let mut replies: Vec<Ump> = Vec::new();
         if let Run::Done { stream, .. } = &self.run {
             let in_force = mirrored(stream.endpoint.active());
-            // The presented Endpoint takes what it supports of the
-            // configuration in force (`Endpoint::in_use`).
-            let taken = answering.endpoint.in_use(in_force);
-            if answering.endpoint.active() != taken.active() {
-                answering.endpoint = taken;
+            if answering.endpoint.active() != in_force {
+                answering.endpoint = answering.endpoint.in_use(in_force);
                 if answering.told {
                     ask(
                         &mut answering.endpoint,
