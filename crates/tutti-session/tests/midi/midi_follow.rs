@@ -1,5 +1,5 @@
 //! The session follows a live Flex Set Tempo and Set Time Signature a fake device sends the UMP, the
-//! session reads it from the ingest node's tap in `Phase::Poll`, places it at the
+//! session reads it from the input node's tap in `Phase::Poll`, places it at the
 //! next block start and publishes the overlay maps, and the engine renders under
 //! them.
 
@@ -42,7 +42,7 @@ fn rig_with(groups: Option<MidiGroup>) -> (Session, FakeCounters) {
     (s, fake)
 }
 
-/// The ingest node of the input port `"keys"`, which a follower reads.
+/// The input node of the input port `"keys"`, which a follower reads.
 fn input(s: &Session) -> tutti_graph::NodeKey {
     s.midi_input(&"keys").expect("loaded").node()
 }
@@ -240,7 +240,7 @@ fn without_a_follow_a_flex_tempo_changes_nothing() {
     assert_eq!(s.playhead().tempo(), Bpm::of(120.0));
 
     // The silence was the follow's: the same message, sent once the session
-    // follows, is heard through the same device and ingest node.
+    // follows, is heard through the same device and input node.
     follow(&mut s, MidiGroup::FIRST, false);
     send(&fake, flex_tempo(MidiGroup::FIRST, 75.0));
     let found = until_followed(&mut s);

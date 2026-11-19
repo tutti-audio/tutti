@@ -749,7 +749,7 @@ fn the_old_driver_renders_its_last_block_before_the_new_one_its_first() {
 }
 
 /// What an open MIDI port is across a switch: the pool entry stays loaded, the
-/// port's ingest node stays the graph's, and the device stays connected.
+/// port's input node stays the graph's, and the device stays connected.
 #[cfg(feature = "midi-hardware")]
 mod midi_ports {
     use tutti_midi_device::EndpointId;
@@ -781,7 +781,7 @@ mod midi_ports {
         Message::System(MidiGroup::FIRST, System::TimingClock).into()
     }
 
-    /// **An open input port keeps its entry, its ingest node and its device
+    /// **An open input port keeps its entry, its input node and its device
     /// across a switch in both directions**: the entry is still `Loaded`, the
     /// handle names the same node and the graph holds it, the device still
     /// takes a message, and no pool failure is reported for it.
@@ -797,7 +797,7 @@ mod midi_ports {
         let events = live.update();
         assert!(matches!(live.pool_state(&"keys"), Some(PoolState::Loaded)));
         assert_eq!(live.midi_input(&"keys").expect("loaded").node(), node);
-        assert!(live.graph_ref().contains(node), "the ingest node stays");
+        assert!(live.graph_ref().contains(node), "the input node stays");
         assert!(
             !events
                 .iter()

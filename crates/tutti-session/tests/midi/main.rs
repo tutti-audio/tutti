@@ -22,7 +22,7 @@ mod midi_ci_jobs;
 // Property Exchange with a MIDI-CI peer as typed jobs: a Get and a Set of a listed Resource.
 #[cfg(feature = "midi-hardware")]
 mod midi_ci_property;
-// MIDI ports as pool entries: absent, replugged, ambiguous, released, per-port ingest.
+// MIDI ports as pool entries: absent, replugged, ambiguous, released, per-port input node.
 #[cfg(feature = "midi-hardware")]
 mod midi_ports;
 // A MIDI input handle reads the timing of its clock map and its resyncs.

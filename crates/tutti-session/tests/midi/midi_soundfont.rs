@@ -24,7 +24,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_fixtures::midi;
 use tutti_graph::{EventCapacity, NodeKey};
-use tutti_midi_runtime::MidiIngestNode;
+use tutti_midi_runtime::MidiInputNode;
 use tutti_session::Stamp;
 use tutti_session::{EventInPort, MidiRouteRule, Session};
 use tutti_sf2::SoundFont;
@@ -182,14 +182,14 @@ fn preview_still_sounds_under_an_installed_clip() {
 }
 
 /// How loud a note on channel 2 through a hardware device's inlet comes out,
-/// with a rule routing `channel` to the synth: the ingest node's channel port
+/// with a rule routing `channel` to the synth: the input node's channel port
 /// is wired to the synth's event input (`Midi::set_routes` → the session's feeds
 /// → an event edge), rendered through the graph.
 fn routed_level(channel: MidiChannel) -> f32 {
     let (mut s, synth) = rig();
-    // The device's inlet, wired to the ingest node's one event input.
+    // The device's inlet, wired to the input node's one event input.
     let (inlet, mut device) = s.graph().open_event_inlet(EventCapacity::of(64));
-    let (input, _) = s.graph().add(MidiIngestNode::new());
+    let (input, _) = s.graph().add(MidiInputNode::new());
     s.graph()
         .connect(inlet.events_out(), EventInPort::new(input, 0))
         .unwrap();

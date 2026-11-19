@@ -1,5 +1,5 @@
 //! A session with an input port and an output port renders a block without
-//! allocating, events flowing: a device's notes through its ingest node to a
+//! allocating, events flowing: a device's notes through its input node to a
 //! routed synth, and the session's clock through the output port's node.
 
 use std::sync::Arc;
@@ -92,7 +92,7 @@ fn an_input_and_an_output_port_render_without_allocating() {
     let _ = s.update();
     assert!(
         heard.load(Ordering::Relaxed) >= 200,
-        "the device's notes reached the routed synth through the ingest node: {}",
+        "the device's notes reached the routed synth through the input node: {}",
         heard.load(Ordering::Relaxed)
     );
     assert!(

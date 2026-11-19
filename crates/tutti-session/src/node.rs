@@ -362,11 +362,11 @@ impl<F: Float> SessionNode<F> for tutti_midi_runtime::HarmonyNode {
     }
 }
 
-/// The MIDI ingest: its `MidiIngestControls`, no params; the Profile zones
+/// The MIDI input node: its `MidiInputControls`, no params; the Profile zones
 /// it replaced freed by its reclaimer.
 #[cfg(feature = "midi")]
-impl<F: Float> SessionNode<F> for tutti_midi_runtime::MidiIngestNode {
-    fn reclaimer(controls: &tutti_midi_runtime::MidiIngestControls) -> Reclaims {
+impl<F: Float> SessionNode<F> for tutti_midi_runtime::MidiInputNode {
+    fn reclaimer(controls: &tutti_midi_runtime::MidiInputControls) -> Reclaims {
         Reclaims::of(controls)
     }
 }
@@ -533,7 +533,7 @@ mod tests {
         {
             assert!(keeps_one(tutti_midi_runtime::MidiClipNode::new([])));
             assert!(keeps_one(tutti_midi_runtime::HarmonyNode::new([])));
-            assert!(keeps_one(tutti_midi_runtime::MidiIngestNode::new()));
+            assert!(keeps_one(tutti_midi_runtime::MidiInputNode::new()));
         }
         #[cfg(feature = "sampler")]
         {

@@ -11,12 +11,12 @@ use crate::midi::OutputTiming;
 pub(crate) struct Ports;
 
 impl Ports {
-    /// No input port has an ingest node.
+    /// No input port has an input node.
     pub(crate) fn input_nodes(&self) -> Vec<NodeKey> {
         Vec::new()
     }
 
-    /// No node is an input port's ingest node.
+    /// No node is an input port's input node.
     pub(crate) fn is_input_node(&self, _node: NodeKey) -> bool {
         false
     }

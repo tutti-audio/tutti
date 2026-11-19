@@ -46,7 +46,7 @@
 //!
 //! [`open`](InputInlets::open) makes one inlet for one input: the [`DeviceInput`]
 //! its thread pushes through, and the [`EventInletNode`] the graph's owner adds
-//! to the graph and wires to the input's ingest node. Nothing is shared between
+//! to the graph and wires to the input's input node. Nothing is shared between
 //! inputs but the clock and the lead, so there is no table of slots and no cap.
 
 use std::num::NonZeroU64;

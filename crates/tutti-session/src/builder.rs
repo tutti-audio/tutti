@@ -773,7 +773,7 @@ impl<C: Clock> SessionBuilder<C> {
     /// Open the OS MIDI layer: its devices are listed by
     /// [`Midi::devices`](crate::Midi::devices) and opened by the pool's
     /// [`midi_input`](crate::midi_input) and [`midi_output`](crate::midi_output)
-    /// entries, each input feeding the graph through an ingest node and an event
+    /// entries, each input feeding the graph through an input node and an event
     /// inlet of its own, with `options` (where input times come from). Who the
     /// session is on the wire (MIDI-CI, its UMP Endpoint) is the session's
     /// [`MidiPolicy`](crate::MidiPolicy). Default off.
@@ -936,7 +936,7 @@ impl<C: Clock> SessionBuilder<C> {
         let (click, _settings) = graph.add(ClickNode::new(&transport, Arc::clone(&click_settings)));
 
         // The engine's MIDI as graph nodes: the sync node (sends nothing until a
-        // host sets its messages). An input port's ingest node and an output's
+        // host sets its messages). An input port's input node and an output's
         // node are made when their pool entries load, and the sync node feeds
         // each output.
         #[cfg(feature = "midi")]
