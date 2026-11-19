@@ -2840,6 +2840,7 @@ dependencies = [
  "tutti-fixtures",
  "tutti-graph",
  "tutti-music",
+ "tutti-rt",
  "tutti-units",
 ]
 
