@@ -95,10 +95,9 @@ impl MidiPart {
             SlotId::OutputLatency,
             self.state.output_latency_cell() as SlotCell<tutti_midi_runtime::OutputLatency>,
         );
-        table.provide(
+        table.provide_staged(
             SlotId::MpeMode,
-            Arc::new(crate::value::PublishedSlot(self.state.mpe().clone()))
-                as SlotCell<tutti_midi_protocol::MpeMode>,
+            crate::value::PublishedSlot::new(self.state.mpe().clone()),
         );
     }
 

@@ -320,7 +320,7 @@ fn mtc_quarter_frames_lock_and_play_from_their_position() {
 fn a_beat_clock_follower_owns_the_tempo_and_mtc_does_not() {
     let (mut s, _fake) = rig();
     follow(&mut s, ClockKind::Mtc);
-    assert!(crate::tempo::set_tempo(&s, Bpm::of(100.0)).is_ok());
+    assert!(crate::tempo::set_tempo(&mut s, Bpm::of(100.0)).is_ok());
     let node = input(&s);
     s.midi()
         .follow_tempo(FollowTempo {
@@ -333,7 +333,7 @@ fn a_beat_clock_follower_owns_the_tempo_and_mtc_does_not() {
 
     follow(&mut s, ClockKind::BeatClock);
     assert_eq!(
-        crate::tempo::set_tempo(&s, Bpm::of(100.0))
+        crate::tempo::set_tempo(&mut s, Bpm::of(100.0))
             .unwrap_err()
             .kind,
         ValueErrorKind::Refused(SetRefusal::Following)
@@ -356,7 +356,7 @@ fn a_beat_clock_follower_owns_the_tempo_and_mtc_does_not() {
             .iter()
             .any(|e| matches!(e, SessionEvent::Midi(MidiReport::ClockUnfollowed)))
     );
-    assert!(crate::tempo::set_tempo(&s, Bpm::of(100.0)).is_ok());
+    assert!(crate::tempo::set_tempo(&mut s, Bpm::of(100.0)).is_ok());
 }
 
 /// **A command the transport refuses is counted, and reported**: with the

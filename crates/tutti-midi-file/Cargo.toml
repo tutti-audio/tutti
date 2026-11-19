@@ -20,6 +20,7 @@ thiserror = { workspace = true, features = ["std"] }
 tutti-midi-device = { version = "0.0.1", path = "../tutti-midi-device" }
 tutti-midi-protocol = { version = "0.0.1", path = "../tutti-midi-protocol" }
 
+tutti-music = { version = "0.0.1", path = "../tutti-music" }
 tutti-tempo = { version = "0.0.1", path = "../tutti-tempo" }
 tutti-units = { version = "0.0.1", path = "../tutti-units", default-features = false }
 tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false }

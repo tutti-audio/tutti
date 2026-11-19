@@ -17,10 +17,8 @@
 //!
 //! let mut catalog = Catalog::new(
 //!     PluginDb::new(), // or the one the app deserialized
-//!     CatalogConfig::new(
-//!         PathBuf::from("/my/app/state"),
-//!         vec![PathBuf::from("/Library/Audio/Plug-Ins/VST3")],
-//!     ),
+//!     CatalogConfig::new(PathBuf::from("/my/app/state"))
+//!         .scan_dirs([PathBuf::from("/Library/Audio/Plug-Ins/VST3")]),
 //!     |db| {
 //!         // Write `db` wherever the app keeps it.
 //!         let _ = db;
@@ -815,11 +813,7 @@ mod tests {
         let mut db = PluginDb::new();
         // Rows are keyed by canonical path, as a scan keys them.
         db.apply(RowChange::put(key(path), row));
-        Catalog::new(
-            db,
-            CatalogConfig::new("/nonexistent", crate::catalog::NO_SCAN_DIRS),
-            |_| Ok(()),
-        )
+        Catalog::new(db, CatalogConfig::new("/nonexistent"), |_| Ok(()))
     }
 
     /// **A catalog names each plugin of a bundle, and `info` finds the one the
@@ -1142,11 +1136,7 @@ mod tests {
                 ),
             ));
         }
-        let plugins = Catalog::new(
-            db,
-            CatalogConfig::new("/nonexistent", crate::catalog::NO_SCAN_DIRS),
-            |_| Ok(()),
-        );
+        let plugins = Catalog::new(db, CatalogConfig::new("/nonexistent"), |_| Ok(()));
 
         let resolved = plugins.resolve(&PluginId::new(PluginFormat::Clap, "twice"));
 
@@ -1181,11 +1171,7 @@ mod tests {
                 ),
             ));
         }
-        let mut plugins = Catalog::new(
-            db,
-            CatalogConfig::new("/nonexistent", crate::catalog::NO_SCAN_DIRS),
-            |_| Ok(()),
-        );
+        let mut plugins = Catalog::new(db, CatalogConfig::new("/nonexistent"), |_| Ok(()));
 
         assert_eq!(plugins.prune_missing(), vec![gone]);
         assert_eq!(plugins.iter().count(), 1);
@@ -1196,7 +1182,7 @@ mod tests {
     #[test]
     fn the_persistence_receives_the_recovered_blacklist_before_the_pedal_goes() {
         let dir = tempfile::TempDir::new().unwrap();
-        let config = CatalogConfig::new(dir.path(), crate::catalog::NO_SCAN_DIRS);
+        let config = CatalogConfig::new(dir.path());
         let crashy = dir.path().join("Crashy.vst3");
         std::fs::write(&crashy, b"x").unwrap();
         std::fs::write(config.pedal_path(), crashy.to_str().unwrap()).unwrap();
@@ -1223,7 +1209,7 @@ mod tests {
     #[test]
     fn a_failing_persistence_keeps_the_pedal_armed_and_reports_its_error() {
         let dir = tempfile::TempDir::new().unwrap();
-        let config = CatalogConfig::new(dir.path(), crate::catalog::NO_SCAN_DIRS);
+        let config = CatalogConfig::new(dir.path());
         let crashy = dir.path().join("Crashy.vst3");
         std::fs::write(&crashy, b"x").unwrap();
         std::fs::write(config.pedal_path(), crashy.to_str().unwrap()).unwrap();
@@ -1257,7 +1243,7 @@ mod tests {
     #[test]
     fn the_save_after_a_rescan_does_not_block_the_owner() {
         let dir = tempfile::TempDir::new().unwrap();
-        let config = CatalogConfig::new(dir.path(), crate::catalog::NO_SCAN_DIRS);
+        let config = CatalogConfig::new(dir.path());
         let (started_tx, started_rx) = crossbeam_channel::bounded::<()>(8);
         let (release_tx, release_rx) = crossbeam_channel::bounded::<()>(1);
         let writes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -1302,7 +1288,7 @@ mod tests {
     #[test]
     fn unblacklist_and_remove_drop_the_retained_sentinel_entry() {
         let dir = tempfile::TempDir::new().unwrap();
-        let config = CatalogConfig::new(dir.path(), crate::catalog::NO_SCAN_DIRS);
+        let config = CatalogConfig::new(dir.path());
         let (a, b) = (dir.path().join("A.vst3"), dir.path().join("B.vst3"));
         std::fs::write(&a, b"x").unwrap();
         std::fs::write(&b, b"x").unwrap();
@@ -1338,11 +1324,8 @@ mod tests {
             std::fs::write(&real, b"x").unwrap();
             let alias = dir.path().join("Alias.vst3");
             std::os::unix::fs::symlink(&real, &alias).unwrap();
-            let mut plugins = Catalog::new(
-                PluginDb::new(),
-                CatalogConfig::new(dir.path(), crate::catalog::NO_SCAN_DIRS),
-                |_| Ok(()),
-            );
+            let mut plugins =
+                Catalog::new(PluginDb::new(), CatalogConfig::new(dir.path()), |_| Ok(()));
 
             plugins.blacklist(&alias, "boom");
 
@@ -1362,11 +1345,8 @@ mod tests {
             std::fs::write(&file, b"x").unwrap();
             let alias_dir = dir.path().join("alias");
             std::os::unix::fs::symlink(&real_dir, &alias_dir).unwrap();
-            let mut plugins = Catalog::new(
-                PluginDb::new(),
-                CatalogConfig::new(dir.path(), crate::catalog::NO_SCAN_DIRS),
-                |_| Ok(()),
-            );
+            let mut plugins =
+                Catalog::new(PluginDb::new(), CatalogConfig::new(dir.path()), |_| Ok(()));
             plugins.blacklist(&file, "boom");
             plugins.blacklist(real_dir.join("Also.vst3"), "boom");
             std::fs::remove_file(&file).unwrap();
@@ -1390,7 +1370,7 @@ mod tests {
             std::fs::write(real.join("B.vst3"), b"x").unwrap();
             let root = dir.path().join("root");
             std::os::unix::fs::symlink(&real, &root).unwrap();
-            let config = CatalogConfig::new(&root, crate::catalog::NO_SCAN_DIRS);
+            let config = CatalogConfig::new(&root);
             std::fs::write(config.pedal_path(), root.join("A.vst3").to_str().unwrap()).unwrap();
             let mut plugins = Catalog::new(PluginDb::new(), config, |_| Ok(()));
 

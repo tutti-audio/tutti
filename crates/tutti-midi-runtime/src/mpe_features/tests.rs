@@ -36,7 +36,7 @@ fn reply(data: &[u8]) -> Decoded {
     })
 }
 
-fn outcome(actions: Vec<ProfileAction>) -> Outcome {
+fn outcome(actions: Vec<ProfileAction>) -> ProfileOutcome {
     let [ProfileAction::Resolved { outcome, .. }] = &actions[..] else {
         panic!("one resolved request, got {actions:?}");
     };
@@ -93,17 +93,17 @@ fn an_unreadable_refused_or_unanswered_reply_is_a_typed_error() {
     ] {
         let data = DetailsData::new(bad.to_vec()).unwrap();
         assert_eq!(
-            mpe_features(&Outcome::Details(data.clone())),
+            mpe_features(&ProfileOutcome::Details(data.clone())),
             Err(MpeFeaturesError::Unreadable(data))
         );
     }
     let nak = Nak::new(tutti_ump::U7::of(0x28), NakStatus::ProfileNotSupported);
     assert_eq!(
-        mpe_features(&Outcome::Refused(nak.clone())),
+        mpe_features(&ProfileOutcome::Refused(nak.clone())),
         Err(MpeFeaturesError::Refused(nak))
     );
     assert_eq!(
-        mpe_features(&Outcome::TimedOut),
+        mpe_features(&ProfileOutcome::TimedOut),
         Err(MpeFeaturesError::TimedOut)
     );
 }

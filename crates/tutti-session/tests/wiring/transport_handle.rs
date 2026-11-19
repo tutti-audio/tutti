@@ -4,7 +4,7 @@ use tutti_buffers::InterleavedMut;
 use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_music::LoopRange;
 use tutti_session::{Session, TransportHandle};
-use tutti_transport::{FadeOut, MotionEvent, TimedError};
+use tutti_transport::{FadeOut, LoopRegion, MotionEvent, TimedError};
 use tutti_units::{At, Beat, Bpm, Frame, Samples};
 
 fn offline() -> Session {
@@ -28,8 +28,8 @@ const _: () = assert_send_clone::<TransportHandle>();
 /// next block reads rolling and the playhead has moved past the origin.
 #[test]
 fn a_handle_on_another_thread_rolls_the_session_transport() {
-    let s = offline();
-    crate::tempo::set_tempo(&s, Bpm::of(60.0)).expect("not following");
+    let mut s = offline();
+    crate::tempo::set_tempo(&mut s, Bpm::of(60.0)).expect("not following");
     let handle = s.transport_handle();
     std::thread::spawn(move || handle.play().unwrap())
         .join()
@@ -162,18 +162,21 @@ fn a_handle_counts_and_cancels_scheduled_commands() {
     assert!(!s.playhead().playing(), "the cancelled play never fires");
 }
 
-/// **A handle reads the loop region the session sets and clears.**
+/// **A handle reads the loop region the session sets and disarms.**
 #[test]
 fn a_handle_reads_the_loop_region() {
-    let s = offline();
+    let mut s = offline();
     let handle = s.transport_handle();
     let range = LoopRange::try_from(Beat(0.0)..Beat(1.0)).unwrap();
-    s.set_loop(range).unwrap();
+    let looping = handle.looping();
+    s.set(looping.to(LoopRegion::new(range, true))).unwrap();
+    let _published = s.update();
     render(&s, 1);
     let region = handle.loop_region();
     assert_eq!(region.bounds(), range);
     assert!(region.is_armed());
-    s.clear_loop().unwrap();
+    s.set(looping.to(LoopRegion::new(range, false))).unwrap();
+    let _published = s.update();
     render(&s, 1);
     let region = handle.loop_region();
     assert_eq!(region.bounds(), range, "the bounds are kept");

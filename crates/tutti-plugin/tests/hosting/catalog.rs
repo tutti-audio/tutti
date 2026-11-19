@@ -44,7 +44,7 @@ fn scan_picks_up_a_new_file() {
     std::fs::create_dir(&scanned_dir).expect("the scanned directory");
     let mut catalog = Catalog::new(
         PluginDb::new(),
-        CatalogConfig::new(dir.path(), vec![scanned_dir.clone()]),
+        CatalogConfig::new(dir.path()).scan_dirs(vec![scanned_dir.clone()]),
         |_| Ok(()),
     );
     // The files the catalog holds a row for: one row per file, whatever the
@@ -92,7 +92,8 @@ fn catalog_with_one_plugin(dir: &tempfile::TempDir) -> (Catalog, std::path::Path
     std::fs::copy(tutti_fixtures::clap_probe(), &file).expect("drop a plugin in");
     let catalog = Catalog::new(
         PluginDb::new(),
-        CatalogConfig::new(dir.path(), vec![scanned_dir])
+        CatalogConfig::new(dir.path())
+            .scan_dirs(vec![scanned_dir])
             .probe_locator(Locator::at(tutti_fixtures::plugin_probe())),
         |_| Ok(()),
     );
@@ -218,8 +219,9 @@ mod stand_in_probe {
         std::fs::create_dir(&scanned_dir).expect("the scanned directory");
         let file = scanned_dir.join("Only.clap");
         std::fs::copy(tutti_fixtures::clap_probe(), &file).expect("drop a plugin in");
-        let mut config =
-            CatalogConfig::new(dir.path(), vec![scanned_dir]).probe_locator(Locator::at(script));
+        let mut config = CatalogConfig::new(dir.path())
+            .scan_dirs(vec![scanned_dir])
+            .probe_locator(Locator::at(script));
         if let Some(timeout) = probe_timeout {
             config = config.probe_timeout(timeout).measure_timeout(timeout);
         }
@@ -360,7 +362,7 @@ fn register_names_a_missing_probe_binary() {
     use tutti_plugin_types::ProbeError;
     let dir = tempfile::TempDir::new().expect("a scratch directory");
     let (catalog, file) = catalog_with_one_plugin(&dir);
-    let config = CatalogConfig::new(dir.path(), tutti_plugin::catalog::NO_SCAN_DIRS)
+    let config = CatalogConfig::new(dir.path())
         .probe_locator(Locator::at(dir.path().join("no-such-plugin-probe")));
     drop(catalog);
     let mut catalog = Catalog::new(PluginDb::new(), config, |_| Ok(()));
@@ -436,7 +438,7 @@ fn measure_names_a_missing_probe_binary() {
     use tutti_plugin_types::ProbeError;
     let dir = tempfile::TempDir::new().expect("a scratch directory");
     let (_, file) = catalog_with_one_plugin(&dir);
-    let config = CatalogConfig::new(dir.path(), tutti_plugin::catalog::NO_SCAN_DIRS)
+    let config = CatalogConfig::new(dir.path())
         .probe_locator(Locator::at(dir.path().join("no-such-plugin-probe")));
     let mut catalog = Catalog::new(PluginDb::new(), config, |_| Ok(()));
 
@@ -476,8 +478,7 @@ mod links {
     }
 
     fn catalog_with(dir: &Path, locator: Locator) -> Catalog {
-        let config =
-            CatalogConfig::new(dir, tutti_plugin::catalog::NO_SCAN_DIRS).probe_locator(locator);
+        let config = CatalogConfig::new(dir).probe_locator(locator);
         Catalog::new(PluginDb::new(), config, |_| Ok(()))
     }
 
@@ -548,7 +549,9 @@ mod links {
         std::fs::create_dir(&scanned).expect("the scanned directory");
         std::os::unix::fs::symlink(&target, scanned.join("Foo.clap")).expect("a link");
         let (locator, log) = logging_probe(dir.path());
-        let config = CatalogConfig::new(dir.path(), vec![scanned]).probe_locator(locator);
+        let config = CatalogConfig::new(dir.path())
+            .scan_dirs(vec![scanned])
+            .probe_locator(locator);
         let mut catalog = Catalog::new(PluginDb::new(), config, |_| Ok(()));
 
         let result = scan(&mut catalog);
@@ -582,7 +585,8 @@ mod links {
         let scanned = dir.path().join("plugins");
         std::fs::create_dir(&scanned).expect("the scanned directory");
         std::os::unix::fs::symlink(&target, scanned.join("Foo.clap")).expect("a link");
-        let config = CatalogConfig::new(dir.path(), vec![scanned])
+        let config = CatalogConfig::new(dir.path())
+            .scan_dirs(vec![scanned])
             .probe_locator(Locator::at(tutti_fixtures::plugin_probe()));
         let mut catalog = Catalog::new(PluginDb::new(), config, |_| Ok(()));
         let result = scan(&mut catalog);

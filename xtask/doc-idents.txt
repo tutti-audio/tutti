@@ -69,7 +69,6 @@
 1 crates/tutti-nodes/src/strip.rs
 1 crates/tutti-plugin-host/src/control_handle.rs
 1 crates/tutti-plugin-host/src/node/width_error.rs
-1 crates/tutti-plugin-ipc/src/client/composite.rs
 1 crates/tutti-plugin-ipc/src/protocol/envelope.rs
 1 crates/tutti-plugin-ipc/src/protocol/frame.rs
 1 crates/tutti-plugin-ipc/src/transport/sys/unix.rs
@@ -141,7 +140,7 @@
 1 crates/tutti-vst3-host/tests/host/integration_tests.rs
 3 crates/tutti-vst3-host/tests/support/audio-probe/README.md
 9 crates/tutti-vst3-host/tests/support/conformance.rs
-39 docs/engineering-notes.md
+37 docs/engineering-notes.md
 5 docs/style-guide.md
 1 testing/tutti-clap-test-plugin/src/lib.rs
 3 testing/tutti-clap-test-plugin/src/params_state.rs

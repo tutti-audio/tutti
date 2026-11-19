@@ -1,8 +1,8 @@
 use tutti_ump::ManufacturerId;
 use tutti_ump::{
     BlockDirection, BlockFilter, BlockSelect, DeviceIdentity, DiscoveryFilter, FirstGroup,
-    FunctionBlockId, GroupSpan, Message, Midi1Port, Protocol, SoftwareRevision, Stream,
-    StreamConfig, U7, UiHint, Ump,
+    FunctionBlockId, FunctionBlockInfo, GroupSpan, Message, Midi1Port, OsFunctionBlock, Protocol,
+    SoftwareRevision, Stream, StreamConfig, U7, UiHint, Ump, read_function_block,
 };
 
 use super::*;
@@ -220,7 +220,7 @@ fn a_discovery_of_a_lower_version_is_read_as_that_version_defines_it() {
         let reply = device().reply(Message::Stream(older), &mut out);
         assert_eq!(
             (reply, out.len()),
-            (Reply::Ignored, 0),
+            (EndpointReply::Ignored, 0),
             "version {major}.{minor}"
         );
     }
@@ -447,7 +447,10 @@ fn a_message_that_is_not_a_request_is_not_answered() {
         Message::Stream(Stream::StreamConfigurationNotification(e.active())),
         &mut out,
     );
-    assert_eq!((noop, notification), (Reply::Ignored, Reply::Ignored));
+    assert_eq!(
+        (noop, notification),
+        (EndpointReply::Ignored, EndpointReply::Ignored)
+    );
     assert!(out.is_empty());
 }
 
@@ -534,7 +537,7 @@ fn a_block_is_replaced_by_number_and_the_count_follows_the_highest() {
     assert!(e.function_block(id(0)).is_none());
 }
 
-fn replied(endpoint: &mut Endpoint, stream: Stream) -> Reply {
+fn replied(endpoint: &mut Endpoint, stream: Stream) -> EndpointReply {
     endpoint.reply(Message::Stream(stream), &mut Vec::new())
 }
 
@@ -555,13 +558,13 @@ fn a_request_is_reported_as_granted_or_reduced() {
     };
     assert_eq!(
         replied(&mut e, request(Protocol::Midi2, true, false)),
-        Reply::Configured(Configuration::Granted(granted))
+        EndpointReply::Configured(Configuration::Granted(granted))
     );
     let asked = StreamConfig {
         tx_jr: true,
         ..granted
     };
-    let reduced = Reply::Configured(Configuration::Reduced {
+    let reduced = EndpointReply::Configured(Configuration::Reduced {
         asked,
         active: granted,
     });
@@ -569,14 +572,14 @@ fn a_request_is_reported_as_granted_or_reduced() {
         replied(&mut e, request(Protocol::Midi2, true, true)),
         reduced
     );
-    let Reply::Configured(c) = reduced else {
+    let EndpointReply::Configured(c) = reduced else {
         unreachable!()
     };
     assert_eq!(c.active(), granted);
     // A reserved Protocol is a part not done.
     assert!(matches!(
         replied(&mut e, request(midi::reserved_protocol(7), true, false)),
-        Reply::Configured(Configuration::Reduced { .. })
+        EndpointReply::Configured(Configuration::Reduced { .. })
     ));
 }
 
@@ -584,13 +587,13 @@ fn a_request_is_reported_as_granted_or_reduced() {
 #[test]
 fn a_discovery_is_answered_even_for_a_block_that_is_absent() {
     let mut e = device();
-    assert_eq!(replied(&mut e, discovery(NONE)), Reply::Answered);
+    assert_eq!(replied(&mut e, discovery(NONE)), EndpointReply::Answered);
     assert_eq!(
         replied(
             &mut e,
             block_discovery(BlockSelect::One(id(30)), true, true)
         ),
-        Reply::Answered
+        EndpointReply::Answered
     );
 }
 
@@ -1050,4 +1053,196 @@ fn a_merger_after_discovery_uses_only_stream_ids_below_the_count() {
     let mut got = done;
     got.sort();
     assert_eq!(got, sources);
+}
+
+/// The numbers an OS holds of a block that holds together: block 3, Groups 4
+/// and 5, bidirectional, a MIDI-CI version and two SysEx 8 streams.
+fn os() -> OsFunctionBlock {
+    OsFunctionBlock {
+        active: true,
+        id: 3,
+        direction: 3,
+        ui_hint: UiHint::Both,
+        midi1: 0,
+        first_group: 4,
+        groups_spanned: 2,
+        midi_ci_version: 2,
+        max_sysex8_streams: 2,
+    }
+}
+
+/// The Function Block Info the OS numbers `block` read as.
+fn read(block: OsFunctionBlock) -> FunctionBlockInfo {
+    read_function_block(block)
+}
+
+fn info() -> FunctionBlockInfo {
+    read(os())
+}
+
+/// `from_info` is strict: each field the block cannot hold is refused with the
+/// error that names it, and nothing is repaired.
+#[test]
+fn from_info_refuses_what_the_block_cannot_hold() {
+    let out_of_range = |field| Err(BlockError::OutOfRange { field });
+    let refused = |block: OsFunctionBlock| FunctionBlock::from_info(&read(block), None);
+    assert_eq!(
+        refused(OsFunctionBlock { id: 32, ..os() }),
+        out_of_range(BlockField::Id)
+    );
+    assert_eq!(
+        refused(OsFunctionBlock {
+            first_group: 16,
+            ..os()
+        }),
+        out_of_range(BlockField::FirstGroup)
+    );
+    assert_eq!(
+        refused(OsFunctionBlock {
+            groups_spanned: 0,
+            ..os()
+        }),
+        out_of_range(BlockField::Groups)
+    );
+    assert_eq!(
+        refused(OsFunctionBlock {
+            groups_spanned: 17,
+            ..os()
+        }),
+        out_of_range(BlockField::Groups)
+    );
+    assert_eq!(
+        refused(OsFunctionBlock {
+            first_group: 15,
+            ..os()
+        }),
+        Err(BlockError::PastGroup16 {
+            first_group: FirstGroup::of(15),
+            groups: GroupSpan::of(2)
+        })
+    );
+    assert_eq!(
+        refused(OsFunctionBlock {
+            direction: 0,
+            ..os()
+        }),
+        Err(BlockError::ReservedDirection)
+    );
+    assert_eq!(
+        refused(OsFunctionBlock {
+            direction: 2,
+            ui_hint: UiHint::Receiver,
+            ..os()
+        }),
+        Err(BlockError::UiHintContradictsDirection {
+            direction: BlockDirection::Output,
+            hint: UiHint::Receiver
+        })
+    );
+    assert_eq!(
+        refused(OsFunctionBlock { midi1: 3, ..os() }),
+        Err(BlockError::ReservedMidi1Port)
+    );
+    assert_eq!(
+        refused(OsFunctionBlock { midi1: 2, ..os() }),
+        Err(BlockError::Midi1PortSpansGroups {
+            groups: GroupSpan::of(2)
+        })
+    );
+    assert_eq!(
+        FunctionBlock::from_info(&info(), Some("a\0b")),
+        Err(BlockError::Name(NameError::Nul))
+    );
+    assert_eq!(
+        FunctionBlock::from_info(&info(), Some("\u{FEFF}a")),
+        Err(BlockError::Name(NameError::Bom))
+    );
+    assert_eq!(
+        FunctionBlock::from_info(&info(), Some(&"x".repeat(92))),
+        Err(BlockError::Name(NameError::TooLong { max: 91 }))
+    );
+}
+
+/// A block that holds together reads back field for field, with its name.
+#[test]
+fn from_info_keeps_every_field_of_a_block_that_holds() {
+    let block = FunctionBlock::from_info(&info(), Some("Keys")).unwrap();
+    assert_eq!(block.info(), info());
+    assert_eq!(block.name().map(BlockName::as_str), Some("Keys"));
+    assert_eq!(
+        FunctionBlock::from_info(&info(), None).unwrap().name(),
+        None
+    );
+}
+
+/// The reading a receiver gives a peer's Function Block Info is lenient where
+/// `from_info` refuses (§7.1.8): a contradicting hint reads as unknown, a
+/// reserved or multi-Group MIDI 1.0 port as not a port. What no block can hold
+/// is still refused.
+#[test]
+fn the_wire_reading_repairs_what_from_info_refuses() {
+    let contradicting = read(OsFunctionBlock {
+        direction: 1,
+        ui_hint: UiHint::Sender,
+        ..os()
+    });
+    assert!(FunctionBlock::from_info(&contradicting, None).is_err());
+    let block = FunctionBlock::received(&contradicting, None).unwrap();
+    assert_eq!(block.ui_hint(), UiHint::Unknown);
+    assert_eq!(block.direction(), BlockDirection::Input);
+
+    for midi1 in [3, 1] {
+        let spanning = read(OsFunctionBlock { midi1, ..os() });
+        assert!(FunctionBlock::from_info(&spanning, None).is_err());
+        assert_eq!(
+            FunctionBlock::received(&spanning, None).unwrap().midi1(),
+            Midi1Port::No
+        );
+    }
+    let one_group = read(OsFunctionBlock {
+        midi1: 2,
+        groups_spanned: 1,
+        ..os()
+    });
+    assert_eq!(
+        FunctionBlock::received(&one_group, None).unwrap().midi1(),
+        Midi1Port::Restricted
+    );
+    for refused in [
+        OsFunctionBlock { id: 32, ..os() },
+        OsFunctionBlock {
+            first_group: 16,
+            ..os()
+        },
+        OsFunctionBlock {
+            groups_spanned: 0,
+            ..os()
+        },
+        OsFunctionBlock {
+            direction: 0,
+            ..os()
+        },
+    ] {
+        assert_eq!(FunctionBlock::received(&read(refused), None), None);
+    }
+}
+
+/// A name an OS reports is display text: the block is kept whatever it holds.
+/// One over 91 bytes is cut, and one with a NUL or a Byte Order Mark is
+/// dropped while the block stays.
+#[test]
+fn received_keeps_the_block_whatever_its_name_holds() {
+    let name = |text: &str| {
+        FunctionBlock::received(&info(), Some(text))
+            .map(|b| b.name().map(BlockName::as_str).map(str::to_owned))
+    };
+    assert_eq!(name("Keys"), Some(Some("Keys".to_owned())));
+    assert_eq!(
+        name("\u{FEFF}Keys"),
+        Some(None),
+        "a BOM drops the name only"
+    );
+    assert_eq!(name("a\0b"), Some(None), "a NUL drops the name only");
+    let long = FunctionBlock::received(&info(), Some(&"x".repeat(200))).unwrap();
+    assert_eq!(long.name().map(|n| n.as_str().len()), Some(91));
 }

@@ -69,7 +69,7 @@
 //! never narrowed, and a 64-bit block through a 32-bit wire is narrowed once.
 
 use crate::OfflineWait;
-use crate::{AudioSlab, FATES, Fate, HarmonyInputs, PluginBridge, SlabWriter};
+use crate::{AudioBridge, AudioSlab, FATES, Fate, HarmonyInputs, SlabWriter};
 use std::ops::Range;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
@@ -326,13 +326,9 @@ pub trait Chunks {
     /// [`payload`](Self::payload), with its `midi` MIDI events: they never
     /// reach the plugin.
     fn refused(&mut self, _midi: usize) {}
-    /// The plugin's MIDI-out for the chunk the ring now holds, at that
-    /// chunk's frames, sorted: handed over once, as its output starts to
-    /// play.
-    fn midi_out(&mut self, events: &MidiEventVec);
     /// What the plugin said of itself at the end of the chunk the ring now
-    /// holds (CLAP's process status), handed over with its
-    /// [`midi_out`](Self::midi_out). [`BlockStatus::Continue`] when the reply
+    /// holds (CLAP's process status), handed over as its output starts to
+    /// play. [`BlockStatus::Continue`] when the reply
     /// had not arrived by the time the chunk was collected: a status that is
     /// late is not applied, and the caller errs long.
     fn status(&mut self, _status: BlockStatus) {}
@@ -512,7 +508,7 @@ impl Batcher {
     /// and then stalls before replying is therefore seen at its reply or at the
     /// budget, where a poll of the slab saw it at the publish. An export that
     /// waits for a block's MIDI waits for the reply anyway.
-    fn await_output(&mut self, bridge: &PluginBridge) {
+    fn await_output(&mut self, bridge: &AudioBridge) {
         let (Some(watch), Some(seq)) = (&self.offline_wait, self.expect_seq) else {
             return;
         };
@@ -595,7 +591,7 @@ impl Batcher {
     /// the audio would come out silent either way — but relying on that makes
     /// correct behaviour a *coincidence* of the sequence numbering rather than a
     /// decision. One relaxed atomic load, already on this path.
-    fn collectable(&self, bridge: &PluginBridge) -> Option<u64> {
+    fn collectable(&self, bridge: &AudioBridge) -> Option<u64> {
         if bridge.is_crashed() {
             return None;
         }
@@ -613,9 +609,9 @@ impl Batcher {
     /// be answered — the time the pipeline exists to give the plugin.
     ///
     /// The chunk's MIDI-out comes with it: its reply (and any earlier one that
-    /// missed its own collection, at frame 0) is drained into `reply`, handed
-    /// to `host` once and then emitted as the ring plays it (`process`).
-    fn collect(&mut self, bridge: &PluginBridge, host: &mut impl Chunks) {
+    /// missed its own collection, at frame 0) is drained into `reply` and
+    /// emitted to `host` as the ring plays it (`process`).
+    fn collect(&mut self, bridge: &AudioBridge, host: &mut impl Chunks) {
         self.reply.clear();
         self.said = BlockStatus::Continue;
         self.watch_late(bridge);
@@ -647,7 +643,6 @@ impl Batcher {
             e.offset = e.offset.min(last);
         }
         tutti_plugin_types::insertion_sort_by_key(&mut self.reply, |e| e.offset);
-        host.midi_out(&self.reply);
         host.status(self.said);
         self.expect_seq = None;
         self.counters.in_flight.store(0, Ordering::Release);
@@ -686,7 +681,7 @@ impl Batcher {
     /// learned within the last [`FATES`] chunks is
     /// [`unanswered`](ChunkCounters::unanswered). Relaxed adds and loads of
     /// the slab's sequence words and the bridge's fate words: RT-safe.
-    fn watch_late(&mut self, bridge: &PluginBridge) {
+    fn watch_late(&mut self, bridge: &AudioBridge) {
         for seq in &mut self.unanswered {
             if *seq == 0 {
                 continue;
@@ -721,7 +716,7 @@ impl Batcher {
     /// channels are still being copied, and half of this chunk spliced onto
     /// half of the previous one sounds almost right — far worse than
     /// silence), and hand the chunk and its payload to the bridge.
-    fn submit(&mut self, bridge: &PluginBridge, host: &mut impl Chunks) {
+    fn submit(&mut self, bridge: &AudioBridge, host: &mut impl Chunks) {
         self.watch_late(bridge);
         let chunk = self.chunk;
         let seq = self.next_seq;
@@ -751,8 +746,8 @@ impl Batcher {
             p.transport,
             p.changes,
         );
-        host.handed_off(submitted.params);
-        if submitted.block {
+        host.handed_off(submitted.took_params());
+        if submitted.accepted() {
             self.next_seq += 1;
             self.expect_seq = Some(seq);
             self.counters.in_flight.store(seq, Ordering::Release);
@@ -773,7 +768,7 @@ impl Batcher {
     /// is not written.
     pub fn process<S: Float>(
         &mut self,
-        bridge: &PluginBridge,
+        bridge: &AudioBridge,
         io: &mut InputOutput<'_, S>,
         host: &mut impl Chunks,
     ) {

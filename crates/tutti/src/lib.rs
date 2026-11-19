@@ -190,8 +190,9 @@ pub use tutti_session::{Analyze, AnalyzeError, Audio, AudioContext, AudioInput};
 #[cfg(feature = "session")]
 pub use tutti_session::{
     AnyAssign, AnyTarget, Assign, ClickTargets, ClickVolumeTarget, Effective, Info, IntoAssign,
-    IntoRead, Knobs, MeterTarget, Modify, Moved, OutputPolicyTarget, ParamTarget, ScalarTarget,
-    SetRefusal, SettingTarget, Target, TargetInfo, TempoTarget, ValueError, ValueErrorKind,
+    IntoRead, Knobs, LoopTarget, MeterTarget, Modify, Moved, OutputPolicyTarget, ParamTarget,
+    ScalarTarget, SetRefusal, SettingTarget, Target, TargetInfo, TempoTarget, ValueError,
+    ValueErrorKind,
 };
 #[cfg(feature = "session")]
 pub use tutti_session::{
@@ -656,8 +657,8 @@ pub mod plugin {
     /// holds.
     pub mod catalog {
         pub use tutti_plugin::catalog::{
-            AudioConfig, CatalogConfig, NO_SCAN_DIRS, PluginDb, PluginDescriptor, PluginId, Scan,
-            ScanPoll, ScanResult,
+            AudioConfig, CatalogConfig, PluginDb, PluginDescriptor, PluginId, Scan, ScanPoll,
+            ScanResult,
         };
         pub use tutti_plugin_types::PluginRole;
     }
@@ -688,10 +689,10 @@ pub mod midi {
         ChannelControllers, ChannelsDetail, CiCategories, CiDeviceId, CiPeer, DataControl,
         DetailsData, DiscoveryData, EnabledMpeZones, Identity, InquiryTarget, ManufacturerProfile,
         MaxSysexSize, MessageText, Muid, Nak, NakStatus, NameError, NotADataControl, NotADeviceId,
-        NotAMuid, NotASysexSize, NotProfileChannels, NoteData, Outcome, PortDirection,
-        ProcessError, ProcessFeatures, ProductInstanceId, ProfileChange, ProfileDataError,
-        ProfileEntry, ProfileState, ProfileTable, ReportRequest, ReportScope, Request,
-        RequestError, SpecificData, StandardProfile, SystemMessages, WinMmDevice,
+        NotAMuid, NotASysexSize, NotProfileChannels, NoteData, PortDirection, ProcessError,
+        ProcessFeatures, ProductInstanceId, ProfileChange, ProfileDataError, ProfileEntry,
+        ProfileOutcome, ProfileRequest, ProfileRequestError, ProfileState, ProfileTable,
+        ReportRequest, ReportScope, SpecificData, StandardProfile, SystemMessages, WinMmDevice,
     };
     pub use tutti_midi_device::{
         NotSetProfileOn, ProfileChannels, ProfileId, ProfileOnRequest, ProfileTarget,
@@ -701,10 +702,10 @@ pub mod midi {
         MalformedMeta, MetricalSequence, MetricalSequences, MetricalView, MicrosPerQuarter,
         MicrosPerQuarterOutOfRange, MidiFileKind, Moved, Normalized, OtherMetaKind,
         OtherMetaKindOutOfRange, OtherSmfFormat, OtherSmfFormatOutOfRange, OutOfOrder, PairedNote,
-        Pattern, Placement, SmfDivision, SmfPart, SmfTicksPerFrame, SmfTicksPerFrameOutOfRange,
-        SmfTicksPerQuarter, SmfTicksPerQuarterOutOfRange, SmpteFractionalFrames,
-        SmpteFractionalFramesOutOfRange, SmpteOffset, SmpteSequence, SmpteSequences, SmpteView,
-        SysEx, TextKind, Timebase, Timeline, TimelineDrop, WriteOptions,
+        Pattern, Placement, RefusedTimeSignature, SmfDivision, SmfPart, SmfTicksPerFrame,
+        SmfTicksPerFrameOutOfRange, SmfTicksPerQuarter, SmfTicksPerQuarterOutOfRange,
+        SmpteFractionalFrames, SmpteFractionalFramesOutOfRange, SmpteOffset, SmpteSequence,
+        SmpteSequences, SmpteView, SysEx, TextKind, Timebase, Timeline, TimelineDrop, WriteOptions,
     };
     pub use tutti_midi_file::{
         ClipFileError, ReadError, Refusal, SmfParseError, ToClipError, TrackPart, TracksError,
@@ -767,16 +768,18 @@ pub mod midi {
     };
 
     /// The session's one MIDI error (`tutti_session::MidiError`): each cause
-    /// (hardware, file, send, route) is its source.
+    /// (hardware, send, route) is its source.
     #[cfg(feature = "session")]
     pub use tutti_session::MidiError as Error;
     #[cfg(feature = "session")]
     pub use tutti_session::RouteDeclarer;
     #[cfg(feature = "session")]
     pub use tutti_session::{
-        AddedInstrument, AnyNode, FollowClock, FollowMachineControl, FollowTempo, InstrumentHandle,
-        Midi, MidiLoad, MidiReport, MidiRouteId, MidiRouteRule, MidiSink, MidiSinkEntry,
-        MidiSinkInfo, NotInstrument, SinkLoaded, SinkOptions, Stamping, TakePlacement, midi_sink,
+        AddedInstrument, AnyNode, DroppedEvent, FollowClock, FollowMachineControl, FollowTempo,
+        InstrumentHandle, LoadMidi, LoadMidiError, LoadReport, LoadedMidi, LoadedTrack, Midi,
+        MidiReport, MidiRouteId, MidiRouteRule, MidiSink, MidiSinkEntry, MidiSinkInfo,
+        NoCommonTimelineError, NotInstrument, SinkLoaded, SinkOptions, Stamping, TakePlacement,
+        TrackError, midi_sink,
     };
     #[cfg(all(feature = "session", feature = "midi-hardware"))]
     pub use tutti_session::{

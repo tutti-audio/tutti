@@ -1,5 +1,10 @@
 //! The session's graph: wiring, buses, edge gain, latency, the root and the scene render.
 
+/// Inert outside `assert_no_alloc`, so every test here may also gate a closure on
+/// allocating nothing.
+#[global_allocator]
+static A: assert_no_alloc::AllocDisabler = assert_no_alloc::AllocDisabler;
+
 mod block_dates;
 mod bus_edges;
 mod compensation;
@@ -22,6 +27,7 @@ mod root_reopen;
 mod root_topology;
 mod scene_render;
 mod session_targets;
+mod staged_values;
 mod system_clock;
 #[path = "../support/tempo.rs"]
 mod tempo;
