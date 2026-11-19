@@ -274,7 +274,7 @@ pub use channels::{ChannelTable, MAX_BLOCK_CHANNELS, PluginTooWide, sanitize, si
 pub use classification::{ClapFeature, PluginRole, Vst2Category, Vst3PlugType, Vst3SubCategories};
 pub use descriptor::{AuComponentType, Described, EditorPresence, PluginClass, PluginDescriptor};
 pub use driver::{Hand, Lifecycle, Seat, Successor};
-pub use edit_slots::{EditReader, EditWriter, UnknownParam, edit_slots};
+pub use edit_slots::{EditReader, EditWriter, UnknownParam, edit_slots, epoch_before};
 pub use editor::{
     AspectRatio, ContentScale, EditorCapabilities, EditorError, EditorUnit, InvalidContentScale,
     KeyEvent, KeyUse, ModifierConvention, ResizeHints, WindowHandle,

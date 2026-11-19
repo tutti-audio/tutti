@@ -141,6 +141,24 @@ impl<T: Pod> SeqSlotsWriter<T> {
     }
 }
 
+/// Reads the epoch of a slot array from any thread ([`SeqSlotsReader::epoch_watch`]).
+#[derive(Clone)]
+pub struct EpochWatch(Arc<AtomicU32>);
+
+impl EpochWatch {
+    /// The epoch now, as [`SeqSlotsReader::epoch`] reads it. Wait-free.
+    #[must_use]
+    pub fn get(&self) -> u32 {
+        self.0.load(Ordering::Acquire)
+    }
+}
+
+impl std::fmt::Debug for EpochWatch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EpochWatch").finish_non_exhaustive()
+    }
+}
+
 /// The one reader of an array of sequence slots.
 pub struct SeqSlotsReader<T: Pod> {
     cells: Vec<SeqReader<Stamped<T>>>,
@@ -159,9 +177,32 @@ impl<T: Pod> SeqSlotsReader<T> {
     /// value of its latest write, skipping what [`new_epoch`](SeqSlotsWriter::new_epoch)
     /// made stale. Reads each slot once and never retries: a slot a write
     /// overlaps is read on the next drain. Never allocates, locks or waits.
-    pub fn drain(&mut self, apply: impl FnMut(usize, T)) {
+    pub fn drain(&mut self, mut apply: impl FnMut(usize, T)) {
+        self.drain_in_epoch(|slot, value, _| apply(slot, value));
+    }
+
+    /// [`drain`](Self::drain), handing `apply` the epoch the drain observed
+    /// beside each value: the one every value it yields was checked against, so
+    /// a caller that keeps a value past the drain knows which epoch it is
+    /// valid in ([`epoch`](Self::epoch) says which is current later).
+    pub fn drain_in_epoch(&mut self, apply: impl FnMut(usize, T, u32)) {
         self.collect();
         self.finish(apply);
+    }
+
+    /// The epoch now: the number of [`new_epoch`](SeqSlotsWriter::new_epoch)
+    /// calls so far, as a wrapping serial.
+    #[must_use]
+    pub fn epoch(&self) -> u32 {
+        self.epoch.load(Ordering::Acquire)
+    }
+
+    /// A handle that reads the epoch without the reader: the one word the writer's
+    /// `new_epoch` bumps, so a thread that does not hold the reader (the reader
+    /// is claimed elsewhere) still learns that a reset happened.
+    #[must_use]
+    pub fn epoch_watch(&self) -> EpochWatch {
+        EpochWatch(Arc::clone(&self.epoch))
     }
 
     /// Phase one: reads every slot a write has changed into the scratch buffer.
@@ -193,7 +234,7 @@ impl<T: Pod> SeqSlotsReader<T> {
 
     /// Phases two and three: loads the epoch once, after every read, and applies
     /// the collected cells it does not make stale.
-    fn finish(&mut self, mut apply: impl FnMut(usize, T)) {
+    fn finish(&mut self, mut apply: impl FnMut(usize, T, u32)) {
         if self.scratch.is_empty() {
             return;
         }
@@ -204,7 +245,7 @@ impl<T: Pod> SeqSlotsReader<T> {
         for (slot, stamped) in self.scratch.drain(..) {
             let (value, written) = (stamped.value, stamped.epoch);
             if !before(written, epoch) {
-                apply(slot, value);
+                apply(slot, value, epoch);
             }
         }
     }

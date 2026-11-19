@@ -103,14 +103,42 @@ impl EditReader {
     /// made stale. Reads each slot once and never retries: a slot a write
     /// overlaps is read on the next call. Never allocates, locks or waits.
     pub fn drain(&mut self, mut apply: impl FnMut(ParamId, Normalized)) {
+        self.drain_in_epoch(|id, value, _| apply(id, value));
+    }
+
+    /// [`drain`](Self::drain), handing `apply` the epoch the drain observed
+    /// beside each value, the one every write it yields was checked against. A
+    /// caller that keeps a write past the drain (a chunk that has not gone yet)
+    /// compares that epoch with [`epoch`](Self::epoch) later, with
+    /// [`epoch_before`], and drops the write a reset has made stale since.
+    pub fn drain_in_epoch(&mut self, mut apply: impl FnMut(ParamId, Normalized, u32)) {
         let ids = &self.ids;
-        self.slots.drain(|slot, value| {
+        self.slots.drain_in_epoch(|slot, value, epoch| {
             // `clamped` is the range contract's hot-path form: every value came
             // from a `Normalized`, so it changes nothing, and the audio thread
             // must not panic.
-            apply(ids[slot], Normalized::clamped(value));
+            apply(ids[slot], Normalized::clamped(value), epoch);
         });
     }
+
+    /// The epoch now: it moves with each [`EditWriter::reset`].
+    #[must_use]
+    pub fn epoch(&self) -> u32 {
+        self.slots.epoch()
+    }
+
+    /// A handle that reads the epoch from any thread, without the reader.
+    #[must_use]
+    pub fn epoch_watch(&self) -> tutti_rt::EpochWatch {
+        self.slots.epoch_watch()
+    }
+}
+
+/// Whether epoch `a` is before epoch `b`, as the serial numbers
+/// [`EditReader::epoch`] and [`EditReader::drain_in_epoch`] give.
+#[must_use]
+pub const fn epoch_before(a: u32, b: u32) -> bool {
+    (a.wrapping_sub(b) as i32) < 0
 }
 
 #[cfg(test)]
@@ -161,6 +189,23 @@ mod tests {
         writer.reset();
         writer.write(id(1), Normalized::of(0.75)).unwrap();
         assert_eq!(drained(&mut reader), [(id(1), 0.75)]);
+    }
+
+    /// **The epoch a drain yields a write in is before the one a reset makes
+    /// current**, so a write kept past the drain is known stale.
+    #[test]
+    fn a_reset_moves_the_epoch_past_the_one_a_drain_observed() {
+        let (mut writer, mut reader) = edit_slots([id(1)]);
+        writer.write(id(1), Normalized::of(0.25)).unwrap();
+        let mut seen = None;
+        reader.drain_in_epoch(|_, _, epoch| seen = Some(epoch));
+        let drained_in = seen.expect("the write was yielded");
+        assert!(!epoch_before(drained_in, reader.epoch()), "still current");
+        writer.reset();
+        assert!(
+            epoch_before(drained_in, reader.epoch()),
+            "stale after a reset"
+        );
     }
 
     /// **A write to an undeclared id is refused at the call**, naming it.
