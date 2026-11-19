@@ -44,7 +44,7 @@ fn a_new_epoch_inside_a_drain_voids_what_it_had_read() {
     reader.collect();
     writer.new_epoch();
     let mut applied = Vec::new();
-    reader.finish(|slot, value| applied.push((slot, value)));
+    reader.finish(|slot, value, _| applied.push((slot, value)));
     assert!(applied.is_empty(), "{applied:?}");
 }
 
@@ -82,4 +82,32 @@ fn a_wide_value_round_trips() {
     let mut got = Vec::new();
     reader.drain(|slot, value| got.push((slot, value)));
     assert_eq!(got, [(0, [1, 2, 3])]);
+}
+
+/// **The epoch watch sees a new epoch without the reader**: a thread that does
+/// not hold the reader learns of a reset from the word the writer bumps.
+#[test]
+fn an_epoch_watch_sees_a_new_epoch_without_the_reader() {
+    let (mut writer, reader) = seq_slots::<f64>(1);
+    let watch = reader.epoch_watch();
+    assert_eq!(watch.get(), reader.epoch());
+    writer.new_epoch();
+    assert_eq!(watch.get(), 1);
+    assert_eq!(reader.epoch(), 1);
+}
+
+/// **A drain says which epoch it checked its values against**, so a value kept
+/// past it is known stale once the epoch moves on.
+#[test]
+fn a_drain_in_epoch_yields_the_epoch_it_checked() {
+    let (mut writer, mut reader) = seq_slots::<f64>(1);
+    writer.write(0, 1.0);
+    let mut seen = Vec::new();
+    reader.drain_in_epoch(|slot, value, epoch| seen.push((slot, value, epoch)));
+    assert_eq!(seen, [(0, 1.0, 0)]);
+    writer.new_epoch();
+    writer.write(0, 2.0);
+    seen.clear();
+    reader.drain_in_epoch(|slot, value, epoch| seen.push((slot, value, epoch)));
+    assert_eq!(seen, [(0, 2.0, 1)]);
 }
