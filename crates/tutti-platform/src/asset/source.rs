@@ -76,7 +76,9 @@ pub trait Open: Send + Sync {
     fn name(&self) -> String;
 
     /// The key a cache holds this source's decode under. `None`, the default,
-    /// is a source nothing caches.
+    /// is a source nothing caches, and that a pool refresh opens to check it
+    /// can still be read: for a source behind a network, every refresh is one
+    /// open.
     fn identity(&self) -> Option<Identity> {
         None
     }
@@ -217,7 +219,8 @@ impl Asset {
 /// Two assets are equal when they are the same source, decided without I/O:
 ///
 /// - paths are equal when their `PathBuf`s are, so two assets of one path are
-///   equal whatever the file holds now;
+///   equal whatever the file holds now. The comparison is lexical, with no
+///   canonicalisation: `a/./kick.wav` and `a/kick.wav` are two assets;
 /// - bytes are equal when one is a clone of the other: the id minted when the
 ///   bytes were wrapped is the key, so two assets of equal bytes are not;
 /// - an `Arc<dyn Open>` is equal to another of the same `Arc` (its data
