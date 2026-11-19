@@ -53,15 +53,15 @@ fn a_max_delay_keeps_the_range_checked_shape() {
 #[test]
 fn a_max_delay_is_a_line_of_the_exact_ceiling_of_its_frames() {
     let max = MaxDelay::of(Seconds::new(0.1));
-    assert_eq!(max.frames(SampleRate::SR_48K), Samples(4800));
-    assert_eq!(max.frames(SampleRate::SR_44K1), Samples(4410));
+    assert_eq!(max.frames(SampleRate::SR_48K), Samples::new(4800));
+    assert_eq!(max.frames(SampleRate::SR_44K1), Samples::new(4410));
     assert_eq!(
         MaxDelay::of(MaxDelay::CAP).frames(SampleRate::SR_192K),
-        Samples(1_920_000)
+        Samples::new(1_920_000)
     );
     assert_eq!(
         max.frames(SampleRate::of(1e15)),
-        Samples(crate::delay::max_delay::MAX_FRAMES)
+        Samples::new(crate::delay::max_delay::MAX_FRAMES)
     );
 }
 

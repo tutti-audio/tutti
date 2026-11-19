@@ -41,21 +41,21 @@
 //!     oscillator: OscillatorType::Saw,
 //!     polyphony: NonZeroUsize::new(8).unwrap(),
 //!     filter: FilterType::Moog {
-//!         cutoff: Hz(2000.0),
-//!         resonance: Resonance(0.7),
+//!         cutoff: Hz::new(2000.0),
+//!         resonance: Resonance::new(0.7),
 //!     },
 //!     envelope: Adsr {
-//!         attack: Seconds(0.01),
-//!         decay: Seconds(0.2),
-//!         sustain: Amplitude(0.6),
-//!         release: Seconds(0.3),
+//!         attack: Seconds::new(0.01),
+//!         decay: Seconds::new(0.2),
+//!         sustain: Amplitude::new(0.6),
+//!         release: Seconds::new(0.3),
 //!     },
 //!     ..Default::default()
 //! });
 //!
 //! // Into the graph: no audio input, stereo out, one MIDI event input (wire a
 //! // clip or a keyboard's queue node to it with `GraphSpec::connect_events`).
-//! let (mut editor, _executor) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(512))));
+//! let (mut editor, _executor) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(512))));
 //! let synth_key = NodeKey(1);
 //! let params = editor.insert(synth_key, "synth", synth).controls;
 //! editor.spec_mut().topology.set_outputs((0..2)

@@ -22,7 +22,7 @@
 //! // The factor is clamped to `MIN..=MAX` at construction — an out-of-range
 //! // request saturates rather than being rejected.
 //! stretched.set_stretch_factor(StretchFactor::new_clamped(2.0)); // half speed
-//! stretched.set_pitch_cents(Cents(1200.0));                      // up an octave
+//! stretched.set_pitch_cents(Cents::new(1200.0));                      // up an octave
 //!
 //! // One frame in, one frame out; the vocoder's latency means early frames
 //! // are the window filling rather than stretched audio.

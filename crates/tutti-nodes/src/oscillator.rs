@@ -40,10 +40,10 @@ use tutti_units::{Amplitude, Hz, SampleRate, Tail, UnitParam};
 /// use tutti_buffers::{ChannelLayout, MaxBlock};
 ///
 /// let mut g = GraphBuilder::new(ChannelLayout::MONO, ChannelLayout::MONO);
-/// let tone = g.add_with_controls(Params(OscillatorNode::sine(Hz(440.0)).with_level(Amplitude(0.5))));
+/// let tone = g.add_with_controls(Params(OscillatorNode::sine(Hz::new(440.0)).with_level(Amplitude::new(0.5))));
 /// g.pipe_output(tone.0);
 /// let mut r = g
-///     .renderer(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))))
+///     .renderer(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64))))
 ///     .expect("builds");
 /// let out = r.render_input(Planes::new(&[&[0.0; 64]]).unwrap());
 /// assert_eq!(out[0][0], 0.0);

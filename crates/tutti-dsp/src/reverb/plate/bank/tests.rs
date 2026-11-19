@@ -242,14 +242,14 @@ fn a_lattice_has_the_direct_term_minus_g_and_unit_energy() {
     for (what, design, direct) in [("input 1", input[0], -0.75), ("decay 1", decay1, 0.70)] {
         // The lattice under test runs in `f32`: the coefficient narrows once.
         let (d, g) = (design.delay.get() as usize, design.gain.get() as f32);
-        let mut ring = line(Samples(d));
+        let mut ring = line(Samples::new(d));
         let y: Vec<f32> = (0..80 * d)
             .map(|n| {
                 let y = lattice(
                     &mut ring,
                     if n == 0 { 1.0 } else { 0.0 },
                     g,
-                    ReadPosition::from_frames(Samples(d)),
+                    ReadPosition::from_frames(Samples::new(d)),
                 );
                 ring.advance();
                 y
@@ -356,7 +356,7 @@ fn an_f64_lattice_is_the_all_pass_equation() {
     let got: Vec<f64> = x
         .iter()
         .map(|&x| {
-            let y = lattice(&mut ring, x, g, ReadPosition::from_frames(Samples(d)));
+            let y = lattice(&mut ring, x, g, ReadPosition::from_frames(Samples::new(d)));
             ring.advance();
             y
         })

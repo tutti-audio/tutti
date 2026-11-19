@@ -41,33 +41,33 @@ pub struct ChunkSize {
 impl ChunkSize {
     /// 512 frames, undivided.
     pub const N512: Self = Self {
-        chunk: Samples(512),
+        chunk: Samples::new(512),
         sub_chunks: 1,
     };
     /// 1024 frames in 2 — the default.
     pub const N1024: Self = Self {
-        chunk: Samples(1024),
+        chunk: Samples::new(1024),
         sub_chunks: 2,
     };
     /// 2048 frames in 4.
     pub const N2048: Self = Self {
-        chunk: Samples(2048),
+        chunk: Samples::new(2048),
         sub_chunks: 4,
     };
     /// 4096 frames in 8.
     pub const N4096: Self = Self {
-        chunk: Samples(4096),
+        chunk: Samples::new(4096),
         sub_chunks: 8,
     };
 
     /// Shortest chunk that still admits a subdivision.
     pub const MIN: Self = Self {
-        chunk: Samples(64),
+        chunk: Samples::new(64),
         sub_chunks: 1,
     };
     /// Longest chunk before the filter's latency dominates a short render.
     pub const MAX: Self = Self {
-        chunk: Samples(32768),
+        chunk: Samples::new(32768),
         sub_chunks: 32,
     };
 
@@ -85,12 +85,12 @@ impl ChunkSize {
     /// sizes are those units, not powers of two.
     #[must_use]
     pub const fn new(chunk: Samples, sub_chunks: usize) -> Option<Self> {
-        if !chunk.0.is_power_of_two()
-            || chunk.0 < Self::MIN.chunk.0
-            || chunk.0 > Self::MAX.chunk.0
+        if !chunk.get().is_power_of_two()
+            || chunk.get() < Self::MIN.chunk.get()
+            || chunk.get() > Self::MAX.chunk.get()
             || sub_chunks == 0
             || sub_chunks > Self::MAX.sub_chunks
-            || !chunk.0.is_multiple_of(sub_chunks)
+            || !chunk.get().is_multiple_of(sub_chunks)
         {
             return None;
         }
@@ -159,7 +159,7 @@ pub fn resampled_frames(
     if !needs_resampling(source_rate, target_rate) {
         return input;
     }
-    Samples(scaled(input.get(), target_rate.get() / source_rate.get()))
+    Samples::new(scaled(input.get(), target_rate.get() / source_rate.get()))
 }
 
 /// The most input frames one block of the converter can span, which bounds how

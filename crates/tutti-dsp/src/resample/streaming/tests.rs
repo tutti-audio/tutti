@@ -53,9 +53,9 @@ fn the_length_is_the_rounded_ratio_however_the_input_is_blocked() {
                     resampled_frames(
                         SampleRate::from_hz(from).unwrap(),
                         SampleRate::from_hz(to).unwrap(),
-                        Samples(n)
+                        Samples::new(n)
                     ),
-                    Samples(want),
+                    Samples::new(want),
                     "{from}->{to} n={n}: the stated length is the stream's"
                 );
                 for block in BLOCKINGS {
@@ -175,20 +175,26 @@ fn resample(planes: &[Vec<f32>], from: u32, to: u32, chunk: ChunkSize) -> Vec<Ve
 #[test]
 fn a_chunk_size_must_be_a_power_of_two_that_its_subdivision_divides() {
     assert!(
-        ChunkSize::new(Samples(1000), 2).is_none(),
+        ChunkSize::new(Samples::new(1000), 2).is_none(),
         "not a power of 2"
     );
     assert!(
-        ChunkSize::new(Samples(1024), 0).is_none(),
+        ChunkSize::new(Samples::new(1024), 0).is_none(),
         "zero sub-chunks"
     );
-    assert!(ChunkSize::new(Samples(32), 1).is_none(), "below MIN");
-    assert!(ChunkSize::new(Samples(65536), 1).is_none(), "above MAX");
+    assert!(ChunkSize::new(Samples::new(32), 1).is_none(), "below MIN");
     assert!(
-        ChunkSize::new(Samples(1024), 3).is_none(),
+        ChunkSize::new(Samples::new(65536), 1).is_none(),
+        "above MAX"
+    );
+    assert!(
+        ChunkSize::new(Samples::new(1024), 3).is_none(),
         "3 does not divide 1024"
     );
-    assert_eq!(ChunkSize::new(Samples(1024), 2), Some(ChunkSize::N1024));
+    assert_eq!(
+        ChunkSize::new(Samples::new(1024), 2),
+        Some(ChunkSize::N1024)
+    );
 }
 
 /// Every preset must be constructible through `new` — if one is not, the
@@ -211,7 +217,7 @@ fn every_preset_satisfies_its_own_constructor() {
 fn an_impulse_keeps_its_position() {
     let n = 8192;
     let at = 1000usize;
-    let plane = impulse_at(Samples(n), Samples(at));
+    let plane = impulse_at(Samples::new(n), Samples::new(at));
 
     for q in [
         ChunkSize::N512,
@@ -240,7 +246,7 @@ fn an_impulse_keeps_its_position() {
 #[test]
 fn the_tail_is_flushed_not_truncated() {
     let n = 4096;
-    let plane = impulse_at(Samples(n), Samples(n - 1));
+    let plane = impulse_at(Samples::new(n), Samples::new(n - 1));
     let out = resample(&[plane], 44100, 48000, ChunkSize::N1024);
     let tail_peak = out[0]
         .iter()
@@ -285,7 +291,7 @@ fn tone(hz: f64, rate: f64, n: usize, amp: f32) -> Vec<f32> {
         Hz::new(hz),
         Amplitude::new(f64::from(amp)),
         SampleRate::of(rate),
-        Samples(n),
+        Samples::new(n),
     )
 }
 
@@ -425,7 +431,7 @@ fn length_and_latency_match_the_documented_values() {
     let r = FftResampler::<f32>::new(44_100, 48_000, 1024, 2, 1).unwrap();
     assert_eq!(r.output_delay(), 320);
     for q in ChunkSize::PRESETS {
-        let plane = impulse_at(Samples(8192), Samples(1000));
+        let plane = impulse_at(Samples::new(8192), Samples::new(1000));
         let out = resample(&[plane], 44_100, 48_000, q);
         let peak = out[0]
             .iter()
@@ -622,8 +628,8 @@ fn rates_of_one_whole_hz_are_no_conversion() {
     assert!(needs_resampling(hz(44_100.0), hz(48_000.0)));
     assert!(needs_resampling(hz(0.4), hz(0.4)));
     assert_eq!(
-        resampled_frames(hz(44_100.0), hz(44_100.2), Samples(1_000_000)),
-        Samples(1_000_000)
+        resampled_frames(hz(44_100.0), hz(44_100.2), Samples::new(1_000_000)),
+        Samples::new(1_000_000)
     );
 }
 
