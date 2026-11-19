@@ -13,7 +13,7 @@ use tutti_plugin_types::{
     ProcessOutput, Processor, Reopen, Samples, TransportChange, TransportInfo,
 };
 use tutti_plugin_types::{ParamEdit, Request};
-use tutti_ump::{MidiChannel, MidiGroup};
+use tutti_ump::{MidiChannel, MidiGroup, NoteVelocity};
 use tutti_units::Normalized;
 
 use crate::spec::{self, Mode, Param};
@@ -22,7 +22,7 @@ use crate::{
     transcript,
 };
 use tutti_fixtures::midi;
-use tutti_midi_protocol::widen_velocity;
+
 use tutti_ump::U7;
 
 fn read<C: Control + ?Sized>(c: &C, param: Param) -> Option<f64> {
@@ -65,7 +65,7 @@ fn note(offset: usize, on: bool) -> UmpAt {
         midi::note_on(
             tutti_ump::Address::new(group, channel),
             60,
-            widen_velocity(U7::of(100)).get(),
+            NoteVelocity::from(U7::of(100)).get(),
         )
     } else {
         midi::note_off(tutti_ump::Address::new(group, channel), 60, 0)

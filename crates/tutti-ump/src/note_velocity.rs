@@ -2,6 +2,8 @@
 
 use tutti_units::Velocity;
 
+use crate::{U7, U14, scale};
+
 /// The 16-bit velocity of a MIDI 2.0 Note On or Note Off (M2-104 section 7.4.2).
 ///
 /// This is the wire's 16-bit field, `0` to `0xFFFF`, and not a MIDI 1.0
@@ -31,7 +33,7 @@ impl NoteVelocity {
     /// Velocity 0.
     pub const MIN: Self = Self(0);
 
-    /// Velocity `0x8000`, the midpoint of the range: M2-115 section 3 widens a
+    /// Velocity `0x8000`, the midpoint of the range: M2-115 section 3 upscales a
     /// MIDI 1.0 velocity of 64 to it.
     pub const CENTER: Self = Self(0x8000);
 
@@ -67,6 +69,61 @@ impl NoteVelocity {
         // The float-to-integer cast saturates, so a velocity outside `0..=1`
         // lands on `MIN` or `MAX`.
         Self(libm::round(velocity.get() * f64::from(u16::MAX)) as u16)
+    }
+}
+
+impl NoteVelocity {
+    /// The velocity as 7 bits: the top 7 bits, the downscale of M2-115 section
+    /// 3.4 as a plain right shift.
+    ///
+    /// A nonzero velocity below `0x0200` is 0, which MIDI 1.0 reads as a Note
+    /// Off. A Note On goes through [`to_note_on_u7`](Self::to_note_on_u7)
+    /// instead.
+    #[inline]
+    #[must_use]
+    pub fn to_u7(self) -> U7 {
+        // `>> 9` leaves 7 bits: the mask removes nothing.
+        U7::masked((self.0 >> 9) as u8)
+    }
+
+    /// The velocity as 7 bits, never 0: a MIDI 1.0 Note On with velocity 0 is a
+    /// Note Off, so a nonzero velocity below `0x0200` is 1, the lowest audible
+    /// Note On velocity.
+    #[inline]
+    #[must_use]
+    pub fn to_note_on_u7(self) -> U7 {
+        self.to_u7().max(U7::of(1))
+    }
+}
+
+/// A 7-bit velocity as the 16-bit field of a Note On or Note Off, scaled
+/// Min-Center-Max (M2-115 section 3.4): 0 stays 0, 64 is `0x8000` and 127 is
+/// `0xFFFF`. [`to_u7`](NoteVelocity::to_u7) is its right shift back.
+///
+/// This is the named way from a MIDI 1.0 velocity to a MIDI 2.0 one:
+/// `NoteVelocity::new(100)` is a velocity of 100 out of 65535, not a MIDI 1.0
+/// 100.
+///
+/// # Examples
+///
+/// ```
+/// use tutti_ump::{NoteVelocity, U7};
+///
+/// assert_eq!(NoteVelocity::from(U7::of(100)).get(), 51492);
+/// ```
+impl From<U7> for NoteVelocity {
+    #[inline]
+    fn from(velocity: U7) -> Self {
+        Self(scale::upscale(u32::from(velocity.get()), 7, 16) as u16)
+    }
+}
+
+/// A 14-bit velocity (a MIDI 1.0 High Resolution Velocity Prefix and velocity)
+/// as the 16-bit field, scaled Min-Center-Max.
+impl From<U14> for NoteVelocity {
+    #[inline]
+    fn from(velocity: U14) -> Self {
+        Self(scale::upscale(u32::from(velocity.get()), 14, 16) as u16)
     }
 }
 

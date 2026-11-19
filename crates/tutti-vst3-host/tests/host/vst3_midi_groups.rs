@@ -8,12 +8,12 @@
 
 use tutti_fixtures::midi;
 use tutti_graph::{Offset, UmpAt};
-use tutti_midi_protocol::{PitchBendSensitivity, widen_value};
+use tutti_midi_protocol::PitchBendSensitivity;
 use tutti_ump::{
-    Address, Attribute, Message, MidiChannel, MidiGroup, NoteId, NoteNumber, NoteVelocity,
-    PerNoteManagement, Rpn, Ump, Voice2,
+    Address, Attribute, ControlValue, Message, MidiChannel, MidiGroup, NoteId, NoteNumber,
+    NoteVelocity, PerNoteManagement, Rpn, Ump, Voice2,
 };
-use tutti_ump::{Bank, ControlValue, RegisteredPerNoteController, System, U7};
+use tutti_ump::{Bank, RegisteredPerNoteController, System, U7};
 use tutti_units::Samples;
 use tutti_vst3_ffi::{EventKind, EventList};
 use tutti_vst3_host::{InputEvents, Stager};
@@ -164,7 +164,7 @@ fn two_groups_land_on_event_buses_zero_and_one() {
             midi::cc(
                 Address::new(group(1), ch(0)),
                 tutti_ump::CCNumber::BRIGHTNESS,
-                widen_value(U7::of(100)).get(),
+                ControlValue::from(U7::of(100)).get(),
             ),
         ],
     );
@@ -208,7 +208,7 @@ fn a_group_without_an_event_bus_is_dropped_and_counted() {
             midi::cc(
                 Address::new(group(2), ch(0)),
                 tutti_ump::CCNumber::BRIGHTNESS,
-                widen_value(U7::of(1)).get(),
+                ControlValue::from(U7::of(1)).get(),
             ),
             Ump::from(Message::System(group(1), System::TimingClock)),
         ],

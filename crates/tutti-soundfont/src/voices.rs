@@ -6,7 +6,7 @@
 
 use tutti_buffers::Float;
 use tutti_dsp::Lanes;
-use tutti_midi_protocol::narrow_note_on_velocity;
+
 use tutti_sf2::{SamplePool, SoundFont};
 use tutti_ump::{MidiChannel, NoteVelocity};
 use tutti_units::{Amplitude, Semitones};
@@ -97,7 +97,7 @@ impl<F: Float + Lanes> Voices<F> {
                         &RegionPair::new(preset_zone, instrument_zone),
                         i32::from(channel.get()),
                         i32::from(key.get()),
-                        i32::from(narrow_note_on_velocity(NoteVelocity::new(velocity)).get()),
+                        i32::from(NoteVelocity::new(velocity).to_note_on_u7().get()),
                     );
                     voice.tune(tune);
                     voice.glide(glide);

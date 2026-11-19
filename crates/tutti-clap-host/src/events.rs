@@ -46,9 +46,7 @@ use tutti_units::{Normalized, Semitones, Velocity};
 pub(crate) const EDIT_CAPACITY: usize = 256;
 
 use crate::types::RtNoteExpressions;
-use tutti_midi_protocol::{
-    Midi1Translator, Midi2Translator, PitchBendSensitivity, narrow, narrow_velocity, widen,
-};
+use tutti_midi_protocol::{Midi1Translator, Midi2Translator, PitchBendSensitivity, narrow, widen};
 use tutti_ump::ControlValue;
 use tutti_ump::{
     Address, Message, MidiChannel, MidiGroup, NoteId, NoteNumber, NoteVelocity, Rpn,
@@ -473,9 +471,7 @@ impl ClapEvent {
         // The 16-bit velocity the event came from, narrowed by the shift of
         // M2-115 section 3.4. A note-on at velocity 0 is a note-off in
         // MIDI 1.0, so the lowest audible note-on velocity is 1.
-        let narrowed = narrow_velocity(NoteVelocity::from_velocity(Velocity::new_clamped(
-            e.velocity,
-        )));
+        let narrowed = NoteVelocity::from_velocity(Velocity::new_clamped(e.velocity)).to_u7();
         let velocity = if note_on && narrowed.get() == 0 {
             U7::of(1)
         } else {
@@ -2371,7 +2367,7 @@ mod tests {
 
     use tutti_graph::Offset;
     use tutti_plugin_types::{MIDI_STACK_CAPACITY, RT_MIDI_CAPACITY};
-    use tutti_ump::{CCNumber, Sysex8StreamIds, System};
+    use tutti_ump::{CCNumber, ControlValue, NoteVelocity, Sysex8StreamIds, System};
     use tutti_units::Samples;
 
     /// The per-note bend range a plugin's emitted tuning is put at: the MPE
@@ -2519,7 +2515,7 @@ mod tests {
 
     // (`use super::*` is already in scope from the top of this module.)
     use tutti_fixtures::midi;
-    use tutti_midi_protocol::{widen_value, widen_velocity};
+
     use tutti_ump::{Bank, BendValue, Sysex7Packets, parse_exact};
     use tutti_units::Bipolar;
 
@@ -4298,7 +4294,7 @@ mod tests {
             Message::Midi2(address, Voice2::ControlChange { controller, value }) => {
                 assert_eq!(address.channel.get(), 1);
                 assert_eq!(controller.get(), 74);
-                assert_eq!(value, widen_value(U7::of(100)));
+                assert_eq!(value, ControlValue::from(U7::of(100)));
             }
             other => panic!("expected CV2 ControlChange, got {other:?}"),
         }
@@ -4402,7 +4398,7 @@ mod tests {
         // 7-bit velocity 64, widened (M2-115).
         let mid = (
             at(0),
-            midi::note_on(ch, 62, widen_velocity(U7::of(64)).get()),
+            midi::note_on(ch, 62, NoteVelocity::from(U7::of(64)).get()),
         );
         let quiet = (at(0), midi::note_on(ch, 61, 1));
         let off = (at(0), midi::note_off(ch, 60, 0));

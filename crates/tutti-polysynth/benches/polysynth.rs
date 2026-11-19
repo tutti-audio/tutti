@@ -39,13 +39,14 @@ use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_m
 use tutti_curve::Law;
 use tutti_graph::contract::Direct;
 use tutti_graph::{Event, Offset};
-use tutti_midi_protocol::widen_velocity;
+
 use tutti_polysynth::{
     Adsr, FilterType, GlideTime, OscillatorType, PolySynth, PortamentoConfig, PortamentoMode,
     SvfMode, SynthConfig, UnisonConfig,
 };
 use tutti_ump::{
-    Address, CCNumber, Message, MidiChannel, MidiGroup, NoteNumber, U7, U14, Ump, Voice1, Voice2,
+    Address, CCNumber, Message, MidiChannel, MidiGroup, NoteNumber, NoteVelocity, U7, U14, Ump,
+    Voice1, Voice2,
 };
 use tutti_ump::{BendValue, ControlValue};
 use tutti_units::{Amplitude, Hz, Normalized, Q, Resonance, SampleRate, Samples, Seconds};
@@ -94,7 +95,7 @@ fn held(cfg: SynthConfig, n: usize) -> Direct<PolySynth<f32>> {
                         // voice allocator collapse them.
                         36 + (i as u8 % 60),
                     ),
-                    widen_velocity(U7::of(100)),
+                    NoteVelocity::from(U7::of(100)),
                 ),
             ))
         })

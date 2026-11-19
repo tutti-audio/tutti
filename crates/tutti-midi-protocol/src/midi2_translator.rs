@@ -2,7 +2,7 @@
 //! [`Midi2Translator`] an input edge runs once.
 
 use crate::scale;
-use crate::voice::{widen, widen_velocity};
+use crate::voice::widen;
 use tutti_ump::{
     Address, Attribute, Bank, CCNumber, ControlValue, Message, MidiChannel, MidiGroup,
     NoteVelocity, U7, U14, Ump, Voice1, Voice2,
@@ -293,12 +293,8 @@ impl Channel {
     /// are cleared once the Note On or Note Off is parsed).
     fn velocity(&mut self, high: U7) -> NoteVelocity {
         match self.velocity_low.take() {
-            Some(low) => NoteVelocity::new(scale::upscale(
-                u32::from(U14::from_halves(high, low).get()),
-                14,
-                16,
-            ) as u16),
-            None => widen_velocity(high),
+            Some(low) => NoteVelocity::from(U14::from_halves(high, low)),
+            None => NoteVelocity::from(high),
         }
     }
 }
@@ -405,16 +401,16 @@ fn flush(channel: &mut Channel, send: &mut impl FnMut(Voice2)) {
 fn emit(channel: &mut Channel, lsb: Option<U7>, send: &mut impl FnMut(Voice2)) {
     channel.pending = false;
     let half = |v: Option<U7>| v.unwrap_or(U7::of(0));
-    let data = u32::from(U14::from_halves(half(channel.msb), half(lsb)).get());
+    let data = U14::from_halves(half(channel.msb), half(lsb));
     let voice = match channel.kind {
         Kind::None => return,
         Kind::Registered => {
             let Number { bank, index } = channel.rpn;
-            let value = ControlValue::new(if scale::zero_extended(index) {
-                data << 18
+            let value = if scale::zero_extended(index) {
+                ControlValue::new(u32::from(data.get()) << 18)
             } else {
-                scale::upscale(data, 14, 32)
-            });
+                ControlValue::from(data)
+            };
             Voice2::Registered { bank, index, value }
         }
         Kind::Assignable => {
@@ -422,7 +418,7 @@ fn emit(channel: &mut Channel, lsb: Option<U7>, send: &mut impl FnMut(Voice2)) {
             Voice2::Assignable {
                 bank,
                 index,
-                value: ControlValue::new(scale::upscale(data, 14, 32)),
+                value: ControlValue::from(data),
             }
         }
     };

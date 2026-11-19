@@ -28,7 +28,7 @@ use tutti_graph::UmpAt;
 use crate::support::Hand;
 use tutti_fixtures::midi;
 use tutti_graph::Offset;
-use tutti_midi_protocol::widen_velocity;
+
 use tutti_sf2::SoundFont;
 use tutti_soundfont::{Polyphony, Settings, SoundFontUnit};
 use tutti_ump::{
@@ -62,7 +62,7 @@ fn at(offset: usize) -> Offset {
 }
 
 fn note_on(key: u8, offset: usize) -> UmpAt {
-    let velocity = widen_velocity(U7::of(100)).get(); // 7-bit 100, widened (M2-115)
+    let velocity = NoteVelocity::from(U7::of(100)).get(); // 7-bit 100, widened (M2-115)
     (at(offset), midi::note_on(MidiChannel::FIRST, key, velocity))
 }
 
@@ -375,7 +375,7 @@ fn cc(channel: u8, controller: CCNumber, value: u8) -> Ump {
 }
 
 fn drum(key: u8, offset: usize) -> UmpAt {
-    let velocity = widen_velocity(U7::of(100)).get(); // 7-bit 100, widened (M2-115)
+    let velocity = NoteVelocity::from(U7::of(100)).get(); // 7-bit 100, widened (M2-115)
     (at(offset), midi::note_on(MidiChannel::of(9), key, velocity))
 }
 

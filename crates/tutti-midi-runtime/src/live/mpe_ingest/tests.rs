@@ -2,9 +2,10 @@ use super::*;
 use crate::test_support::at;
 use tutti_fixtures::midi;
 use tutti_graph::UmpAt;
-use tutti_midi_protocol::{MpeZoneConfig, MpeZones, widen_bend, widen_value, widen_velocity};
+use tutti_midi_protocol::{MpeZoneConfig, MpeZones};
 use tutti_ump::{
-    Address, CCNumber, Message, MpeChannels, MpeZoneSpan, NoteKeyEvent, U7, U14, Voice2,
+    Address, BendValue, CCNumber, ControlValue, Message, MpeChannels, MpeZoneSpan, NoteKeyEvent,
+    NoteVelocity, U7, U14, Voice2,
 };
 use tutti_units::Semitones;
 
@@ -39,14 +40,17 @@ fn note_on(channel: u8, note: u8, vel_u7: u8) -> UmpAt {
         midi::note_on(
             MidiChannel::of(channel),
             note,
-            widen_velocity(U7::of(vel_u7)).get(),
+            NoteVelocity::from(U7::of(vel_u7)).get(),
         ),
     )
 }
 fn pitch_bend14(channel: u8, bend14: u16) -> UmpAt {
     at(
         0,
-        midi::pitch_bend(MidiChannel::of(channel), widen_bend(U14::of(bend14)).get()),
+        midi::pitch_bend(
+            MidiChannel::of(channel),
+            BendValue::from(U14::of(bend14)).get(),
+        ),
     )
 }
 fn cc(channel: u8, cc_num: CCNumber, value_u7: u8) -> UmpAt {
@@ -55,7 +59,7 @@ fn cc(channel: u8, cc_num: CCNumber, value_u7: u8) -> UmpAt {
         midi::cc(
             MidiChannel::of(channel),
             cc_num,
-            widen_value(U7::of(value_u7)).get(),
+            ControlValue::from(U7::of(value_u7)).get(),
         ),
     )
 }
@@ -539,13 +543,13 @@ fn a_groups_member_channels_hold_notes_of_their_own() {
     let mut ingest = MpeIngest::new(tutti_fixtures::midi::lower_zone(15));
     let group2 = MidiGroup::of(1);
     let channel = MidiChannel::of(2);
-    let bend = widen_bend(U14::of(16383)).get();
+    let bend = BendValue::from(U14::of(16383)).get();
     ingest.translated(&at(
         0,
         midi::note_on(
             Address::new(group2, channel),
             60,
-            widen_velocity(U7::of(100)).get(),
+            NoteVelocity::from(U7::of(100)).get(),
         ),
     ));
     let first_group = at(0, midi::pitch_bend(channel, bend));
@@ -634,7 +638,7 @@ fn a_member_bend_before_the_note_on_is_the_notes_start() {
     assert!(matches!(
         out[0],
         (2, Voice2::PerNotePitchBend { note, value })
-            if note.get() == 60 && value == widen_bend(U14::of(16383))
+            if note.get() == 60 && value == BendValue::from(U14::of(16383))
     ));
     assert!(matches!(out[1], (2, Voice2::NoteOn { .. })));
 }
@@ -658,7 +662,7 @@ fn member_pressure_and_cc74_before_the_note_on_are_the_notes_start() {
     assert!(matches!(
         out[1],
         (3, Voice2::AssignablePerNote { note, controller: 74, value })
-            if note.get() == 64 && value == widen_value(U7::of(64))
+            if note.get() == 64 && value == ControlValue::from(U7::of(64))
     ));
     assert!(matches!(out[2], (3, Voice2::NoteOn { .. })));
 }

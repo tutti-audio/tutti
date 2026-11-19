@@ -2,14 +2,15 @@ use super::*;
 use tutti_fixtures::midi;
 use tutti_graph::Offset;
 use tutti_graph::UmpAt;
-use tutti_midi_protocol::{channel_voice, narrow_velocity};
-use tutti_midi_protocol::{widen_bend, widen_value};
+use tutti_midi_protocol::channel_voice;
+
 use tutti_plugin_types::{NoteExpressionType, NoteExpressionValue};
+use tutti_ump::RegisteredPerNoteController;
 use tutti_ump::{
-    Address, CCNumber, Message, MidiChannel, MidiGroup, NoteId, NoteNumber, NoteVelocity,
-    PerNoteManagement, Sysex7Packets, SysexStatus, System, U7, U14, Ump, Voice2,
+    Address, BendValue, CCNumber, ControlValue, Message, MidiChannel, MidiGroup, NoteId,
+    NoteNumber, NoteVelocity, PerNoteManagement, Sysex7Packets, SysexStatus, System, U7, U14, Ump,
+    Voice2,
 };
-use tutti_ump::{BendValue, ControlValue, RegisteredPerNoteController};
 use tutti_units::{Bipolar, Samples};
 use tutti_vst3_ffi::EventList;
 
@@ -153,7 +154,7 @@ fn note_off_lands_in_note_off_variant() {
     };
     assert_eq!(note, NoteNumber::of(72));
     assert!(
-        narrow_velocity(velocity).get() > 0,
+        velocity.to_u7().get() > 0,
         "release velocity was dropped on the way back from the plugin"
     );
 }
@@ -185,7 +186,11 @@ fn a_huge_frame_offset_saturates_rather_than_going_negative() {
 fn poly_pressure_lands_in_poly_pressure_variant() {
     let event = (
         at(0),
-        midi::poly_pressure(MidiChannel::of(1), 60, widen_value(U7::of(100)).get()),
+        midi::poly_pressure(
+            MidiChannel::of(1),
+            60,
+            ControlValue::from(U7::of(100)).get(),
+        ),
     );
     let (id, vst3) = encode_live(&event);
     let vst3 = vst3.expect("PolyPressure should convert");
@@ -214,9 +219,9 @@ fn unmapped_channel_messages_are_dropped_and_counted_never_sent_as_data() {
         midi::cc(
             MidiChannel::of(2),
             CCNumber::BRIGHTNESS,
-            widen_value(U7::of(100)).get(),
+            ControlValue::from(U7::of(100)).get(),
         ),
-        midi::pitch_bend(MidiChannel::FIRST, widen_bend(U14::of(8192)).get()),
+        midi::pitch_bend(MidiChannel::FIRST, BendValue::from(U14::of(8192)).get()),
         midi::program_change(MidiChannel::of(9), 42, None),
     ];
     for (i, ump) in events.into_iter().enumerate() {
@@ -529,7 +534,7 @@ fn per_note_pitch_bend_becomes_tuning_expression() {
     // bound to the noteId of the note sounding on (5, 67).
     let event = (
         at(12),
-        midi::per_note_pitch_bend(MidiChannel::of(5), 67, widen_bend(U14::of(8192)).get()),
+        midi::per_note_pitch_bend(MidiChannel::of(5), 67, BendValue::from(U14::of(8192)).get()),
     );
     let (id, vst3) = encode_live(&event);
     let vst3 = vst3.expect("per-note bend should map");
@@ -625,7 +630,7 @@ fn per_note_controller_maps_known_indices_only() {
             Voice2::AssignablePerNote {
                 note: NoteNumber::of(60),
                 controller: 74,
-                value: widen_value(U7::of(100)),
+                value: ControlValue::from(U7::of(100)),
             },
         )),
     );
@@ -651,7 +656,7 @@ fn per_note_controller_maps_known_indices_only() {
             Voice2::AssignablePerNote {
                 note: NoteNumber::of(60),
                 controller: 33,
-                value: widen_value(U7::of(100)),
+                value: ControlValue::from(U7::of(100)),
             },
         )),
     );

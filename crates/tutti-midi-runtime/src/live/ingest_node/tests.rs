@@ -1,7 +1,7 @@
 use super::*;
 use tutti_fixtures::midi;
-use tutti_midi_protocol::widen_velocity;
-use tutti_ump::{U7, Utility};
+
+use tutti_ump::{NoteVelocity, U7, Utility};
 
 /// The node adopts the mode last published to its cell on its next block.
 #[test]
@@ -72,7 +72,11 @@ fn a_listener_takes_its_channel_and_the_channelless_port() {
 fn events_leave_on_their_channels_port() {
     let first = MidiInputPorts::FIRST_GROUP;
     // 7-bit velocity 100, widened (M2-115).
-    let on = midi::note_on(MidiChannel::of(9), 60, widen_velocity(U7::of(100)).get());
+    let on = midi::note_on(
+        MidiChannel::of(9),
+        60,
+        NoteVelocity::from(U7::of(100)).get(),
+    );
     assert_eq!(first.port_of(&on), Some(9));
     let clock = Ump::from(Message::System(
         tutti_ump::MidiGroup::FIRST,
@@ -97,7 +101,7 @@ fn a_group_has_ports_of_its_own() {
         midi::note_on(
             tutti_ump::Address::new(MidiGroup::of(group), MidiChannel::of(channel)),
             60,
-            widen_velocity(U7::of(100)).get(),
+            NoteVelocity::from(U7::of(100)).get(),
         )
     };
     assert_eq!(two.port_of(&note(0, 1)), Some(1));
@@ -135,7 +139,11 @@ fn sent_at_arrival(reset: bool) -> usize {
     let (mut writer, epochs) = DeviceEpochs::new();
     let node = MidiIngestNode::new().following(&epochs);
     let mut d = Direct::new(node, SampleRate::SR_48K, 64);
-    let on = midi::note_on(MidiChannel::of(0), 60, widen_velocity(U7::of(100)).get());
+    let on = midi::note_on(
+        MidiChannel::of(0),
+        60,
+        NoteVelocity::from(U7::of(100)).get(),
+    );
     d.events(0, &[Event::midi(Offset::ZERO, on)]);
     d.block();
     if reset {
