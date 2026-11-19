@@ -81,7 +81,7 @@ struct Sent {
 fn map(points: &[(f64, f64, Transition)]) -> Arc<TempoMap> {
     Arc::new(
         TempoMap::new(points.iter().map(|&(beat, bpm, shape)| TempoPoint {
-            beat: Beat(beat),
+            beat: Beat::new(beat),
             tempo: Bpm::of(bpm),
             transition: shape,
         }))
@@ -146,7 +146,7 @@ struct Rig {
 fn rig(map: &Arc<TempoMap>, mtc: bool) -> Rig {
     let (mut ed, exec): (Editor, Executor) = Editor::new(Prepare::new(
         SampleRate::of(SR),
-        MaxBlock::of(Samples(MAX_BLOCK)),
+        MaxBlock::of(Samples::new(MAX_BLOCK)),
     ));
     ed.insert(
         NodeKey(1),
@@ -214,7 +214,7 @@ impl Rig {
 /// A play from `start`, rendered for `frames` in `block`-sized blocks.
 fn play(map: &Arc<TempoMap>, start: f64, frames: usize, block: usize) -> Vec<Sent> {
     let rig = rig(map, false);
-    rig.send(MotionEvent::play_from(Beat(start)));
+    rig.send(MotionEvent::play_from(Beat::new(start)));
     let mut sent = Vec::new();
     rig.render(frames, block, &mut sent);
     sent
@@ -369,11 +369,11 @@ fn the_ticks_do_not_depend_on_the_block_size() {
 #[test]
 fn a_locate_inside_a_ramp_sends_one_song_position_then_the_maps_ticks() {
     let rig = rig(&ramp(), false);
-    rig.send(MotionEvent::play_from(Beat(0.0)));
+    rig.send(MotionEvent::play_from(Beat::new(0.0)));
     let mut sent = Vec::new();
     rig.render(96_000, 512, &mut sent);
     rig.send(MotionEvent::Locate {
-        beat: Beat(3.0),
+        beat: Beat::new(3.0),
         fade: FadeOut::Immediate,
         then: Then::Keep,
     });
@@ -411,7 +411,7 @@ fn mtc_keeps_wall_clock_time_across_a_ramp() {
     let frames = 4 * 48_000;
     let run = |block: usize| {
         let rig = rig(&ramp(), true);
-        rig.send(MotionEvent::play_from(Beat(0.0)));
+        rig.send(MotionEvent::play_from(Beat::new(0.0)));
         let mut sent = Vec::new();
         rig.render(frames, block, &mut sent);
         sent

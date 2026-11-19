@@ -38,7 +38,7 @@ impl TestTransport {
     }
     fn set_loop(&self, start: f64, end: f64) {
         *self.looping.lock().unwrap() =
-            Some(LoopRange::new(Beat(start), Beat(end)).expect("a loop"));
+            Some(LoopRange::new(Beat::new(start), Beat::new(end)).expect("a loop"));
     }
     fn set_beat(&self, b: f64) {
         self.beat.store(b, Ordering::Release);
@@ -50,7 +50,7 @@ impl TestTransport {
         TransportPosition::new(
             self.playing.load(Ordering::Acquire),
             self.tempo,
-            Beat(self.beat.load(Ordering::Acquire)),
+            Beat::new(self.beat.load(Ordering::Acquire)),
             *self.looping.lock().unwrap(),
         )
     }
@@ -92,7 +92,7 @@ impl Rig {
             self.messages,
             loan.as_deref(),
             &self.transport.now(),
-            Samples(block_size),
+            Samples::new(block_size),
             &mut |e| {
                 self.out.0.lock().unwrap().push(e);
             },
@@ -820,7 +820,8 @@ fn play_layout(from: f64, region: (f64, f64), mtc: bool, lens: &[usize]) -> Vec<
         tutti_units::Beat::new(region.0),
         tutti_units::Beat::new(region.1),
     );
-    let mut host = tutti_music::FrameClock::new(Beat(from), Bpm::of(120.0), SampleRate::SR_48K);
+    let mut host =
+        tutti_music::FrameClock::new(Beat::new(from), Bpm::of(120.0), SampleRate::SR_48K);
     let mut frame = 0u64;
     let mut out = Vec::new();
     for &len in lens {
@@ -831,7 +832,7 @@ fn play_layout(from: f64, region: (f64, f64), mtc: bool, lens: &[usize]) -> Vec<
                 .into_iter()
                 .map(|e| (frame + u64::from(e.0.get()), e)),
         );
-        host.advance(Samples(len), looping);
+        host.advance(Samples::new(len), looping);
         frame += len as u64;
     }
     out
@@ -969,9 +970,13 @@ fn every_event_goes_out_on_the_masters_group() {
     transport.set_beat(8.0);
     transport.set_playing(true);
     let mut events = Vec::new();
-    cm.tick(messages, None, &transport.now(), Samples(4096), &mut |e| {
-        events.push(e)
-    });
+    cm.tick(
+        messages,
+        None,
+        &transport.now(),
+        Samples::new(4096),
+        &mut |e| events.push(e),
+    );
     let statuses: std::collections::BTreeSet<u8> = events
         .iter()
         .map(|(_, ump)| ((ump.0[0] >> 16) & 0xFF) as u8)
@@ -1199,8 +1204,8 @@ fn flex_master(clock: bool) -> (FlexMaster, ProjectMeter, Collected) {
 
 /// One block of `frames` frames at `beat` and `tempo`, playing.
 fn play(cm: &mut FlexMaster, out: &Collected, tempo: f64, beat: f64, frames: usize) {
-    let transport = TransportPosition::new(true, Bpm::of(tempo), Beat(beat), None);
-    cm.tick(&transport, Samples(frames), &mut |e| {
+    let transport = TransportPosition::new(true, Bpm::of(tempo), Beat::new(beat), None);
+    cm.tick(&transport, Samples::new(frames), &mut |e| {
         out.0.lock().unwrap().push(e);
     });
 }
@@ -1308,7 +1313,7 @@ fn set_time_signature_with_clock_goes_out_on_a_bar_boundary() {
         1
     );
     meter.set_meter(MeterMap::new([MeterChange::new(
-        Beat(0.0),
+        Beat::new(0.0),
         TimeSignature::of(3, 4),
     )]));
     play(&mut cm, &out, 120.0, 1.5, 48_000);
@@ -1328,7 +1333,7 @@ fn set_time_signature_without_clock_goes_out_on_a_bar_boundary() {
     let first = flexes(&drain_all(&out));
     assert!(first.contains(&(0, time_signature(4, 2))));
     meter.set_meter(MeterMap::new([MeterChange::new(
-        Beat(0.0),
+        Beat::new(0.0),
         TimeSignature::of(7, 8),
     )]));
     // 7/8 is 3.5 beats a bar: the boundary after beat 1.5 is beat 3.5, frame
@@ -1391,7 +1396,7 @@ fn map(changes: &[(f64, u32, u32)]) -> MeterMap {
     MeterMap::new(
         changes
             .iter()
-            .map(|&(beat, n, d)| MeterChange::new(Beat(beat), TimeSignature::of(n, d))),
+            .map(|&(beat, n, d)| MeterChange::new(Beat::new(beat), TimeSignature::of(n, d))),
     )
 }
 
@@ -1417,7 +1422,7 @@ fn bar_lines_off_the_dyadic_beats_are_walked_by_number_and_end() {
         let mut expected = Vec::new();
         let mut stated = None;
         for n in 1.. {
-            let line = meter_map.bar_start(tutti_units::BarNumber(n));
+            let line = meter_map.bar_start(tutti_units::BarNumber::new(n));
             let frame = (line.get() * 24_000.0).round() as usize;
             if frame >= frames {
                 break;
@@ -1501,9 +1506,9 @@ fn a_locate_while_playing_states_the_meter_at_the_next_bar_line() {
 #[test]
 fn the_passes_of_a_looped_block_restate_nothing() {
     let (mut cm, _meter, out) = flex_master(true);
-    let looping = LoopRange::new(Beat(0.0), Beat(1.0)).expect("a loop");
-    let transport = TransportPosition::new(true, Bpm::of(120.0), Beat(0.0), Some(looping));
-    cm.tick(&transport, Samples(72_000), &mut |e| {
+    let looping = LoopRange::new(Beat::new(0.0), Beat::new(1.0)).expect("a loop");
+    let transport = TransportPosition::new(true, Bpm::of(120.0), Beat::new(0.0), Some(looping));
+    cm.tick(&transport, Samples::new(72_000), &mut |e| {
         out.0.lock().unwrap().push(e);
     });
     let events = drain_all(&out);

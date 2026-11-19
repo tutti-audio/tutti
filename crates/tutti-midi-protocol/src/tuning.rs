@@ -77,7 +77,8 @@ impl TuningFrequency {
     /// 00 00`, is 69, A440 at master tuning's centre); `None` for no change.
     #[must_use]
     pub fn pitch(self) -> Option<Semitones> {
-        (!self.is_no_change()).then(|| Semitones(f64::from(self.0) / f64::from(FRACTION_STEPS)))
+        (!self.is_no_change())
+            .then(|| Semitones::new(f64::from(self.0) / f64::from(FRACTION_STEPS)))
     }
 
     /// The word nearest `pitch` (semitones above note 0), saturating at note 0
@@ -376,8 +377,8 @@ impl OctaveOffsets {
     #[must_use]
     pub fn offset(&self, class: usize) -> Cents {
         match self {
-            Self::Cents(bytes) => Cents(f64::from(bytes[class % 12].get()) - 64.0),
-            Self::Fine(words) => Cents(
+            Self::Cents(bytes) => Cents::new(f64::from(bytes[class % 12].get()) - 64.0),
+            Self::Fine(words) => Cents::new(
                 (f64::from(words[class % 12].get()) - 8192.0) * 200.0 / f64::from(FRACTION_STEPS),
             ),
         }
@@ -456,7 +457,7 @@ mod tests {
     #[test]
     fn a_word_is_a_pitch_in_sixteen_thousandths_of_a_semitone() {
         let a = TuningFrequency::from_parts(U7::of(0x45), U14::of(0));
-        assert_eq!(a.pitch(), Some(Semitones(69.0)));
+        assert_eq!(a.pitch(), Some(Semitones::new(69.0)));
         let under = TuningFrequency::from_parts(U7::of(0x44), U14::of(0x3FFF));
         assert_eq!(under.get() + 1, a.get());
         let step = a.pitch().unwrap().get() - under.pitch().unwrap().get();
@@ -488,13 +489,13 @@ mod tests {
     #[test]
     fn nearest_saturates_and_never_says_no_change() {
         assert_eq!(
-            TuningFrequency::nearest(Semitones(1000.0)),
+            TuningFrequency::nearest(Semitones::new(1000.0)),
             TuningFrequency::TOP
         );
-        assert_eq!(TuningFrequency::nearest(Semitones(-3.0)).get(), 0);
-        assert_eq!(TuningFrequency::nearest(Semitones(f64::NAN)).get(), 0);
+        assert_eq!(TuningFrequency::nearest(Semitones::new(-3.0)).get(), 0);
+        assert_eq!(TuningFrequency::nearest(Semitones::new(f64::NAN)).get(), 0);
         assert_eq!(
-            TuningFrequency::nearest(Semitones(69.0)),
+            TuningFrequency::nearest(Semitones::new(69.0)),
             TuningFrequency::equal(NoteNumber::of(69))
         );
     }
@@ -516,12 +517,12 @@ mod tests {
     #[test]
     fn octave_offsets_follow_the_stated_scales() {
         let one = OctaveOffsets::Cents([0, 0x40, 0x7F, 0, 0, 0, 0, 0, 0, 0, 0, 0].map(U7::of));
-        assert_eq!(one.offset(0), Cents(-64.0));
-        assert_eq!(one.offset(1), Cents(0.0));
-        assert_eq!(one.offset(2), Cents(63.0));
+        assert_eq!(one.offset(0), Cents::new(-64.0));
+        assert_eq!(one.offset(1), Cents::new(0.0));
+        assert_eq!(one.offset(2), Cents::new(63.0));
         let two = OctaveOffsets::Fine([0, 0x2000, 0x3FFF, 0, 0, 0, 0, 0, 0, 0, 0, 0].map(U14::of));
-        assert_eq!(two.offset(0), Cents(-100.0));
-        assert_eq!(two.offset(1), Cents(0.0));
+        assert_eq!(two.offset(0), Cents::new(-100.0));
+        assert_eq!(two.offset(1), Cents::new(0.0));
         assert!((two.offset(2).get() - 8191.0 * 0.012207).abs() < 1e-2);
     }
 
