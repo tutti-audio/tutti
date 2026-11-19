@@ -157,7 +157,7 @@ fn f32_rectangular_noise_has_the_variance_of_a_uniform() {
     let var_bound = factor * sigma2 * (0.8 / N as f64).sqrt();
     let mean_bound = factor * (sigma2 / N as f64).sqrt();
     let mut s = vec![0.0f32; N];
-    apply(
+    process_mono(
         &mut DitherNoise::new(),
         DitherShape::Rectangular,
         LSB,
