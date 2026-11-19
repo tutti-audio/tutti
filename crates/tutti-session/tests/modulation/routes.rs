@@ -178,7 +178,7 @@ fn recording_where_nothing_is_automated_is_refused() {
     );
     assert!(m.take_mut(a).is_none());
 
-    m.automate(a, Arc::new(Trajectory::<Hz>::default()));
+    assert!(m.automate(a, Arc::new(Trajectory::<Hz>::default())));
     m.record(a, take()).unwrap();
     assert!(m.take_mut(a).is_some());
 }

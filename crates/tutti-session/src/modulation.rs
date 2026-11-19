@@ -1726,6 +1726,8 @@ impl Mods<'_> {
     /// place of its knob: whether it did. A target that is already automated
     /// keeps its curve and answers `false`: the curve then is the target's
     /// value ([`ParamTarget::automation`](crate::ParamTarget::automation)).
+    /// That holds for a lane declared in another unit too.
+    #[must_use = "`false` says the lane was already declared and its curve kept"]
     pub fn automate<U: crate::Scalar>(
         &mut self,
         target: impl Into<ModTarget>,

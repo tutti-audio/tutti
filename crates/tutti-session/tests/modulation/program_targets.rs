@@ -5,7 +5,9 @@
 
 use std::sync::Arc;
 
-use tutti_modulation::{Clock, Law, Lfo, LfoRate, Polarity, ProgramTime, Waveform, shape};
+use tutti_modulation::{
+    Clock, Law, Lfo, LfoRate, Polarity, ProgramTime, RATE_ANCHOR_MARGIN, Waveform, shape,
+};
 use tutti_nodes::automation::{Breakpoint, Trajectory};
 use tutti_session::{ModRouteId, ModSourceId, ParamRef, RouteSpec, ValueErrorKind};
 use tutti_units::{Beat, BeatsPerCycle, Bipolar, Depth, Hz, SamplePosition, SampleRate, UnitParam};
@@ -76,7 +78,11 @@ fn a_route_polarity_and_curve_land_at_the_update_as_the_shaped_offset() {
             .amount
             .offset(0.5f32, 1_000.0)
     };
-    let near = |got: f64, want: f64| assert!((got - want).abs() < 1e-3, "{got} is not {want}");
+    // The depth is stored as an `f32`: a few ulps of the figure's own size.
+    let near = |got: f64, want: f64| {
+        let bound = 4.0 * f64::from(f32::EPSILON) * want.abs().max(1.0);
+        assert!((got - want).abs() < bound, "{got} is not {want}");
+    };
     near(offset(&s), 200.0);
 
     s.set(route.polarity().to(Polarity::Unipolar)).unwrap();
@@ -97,7 +103,7 @@ fn a_route_polarity_and_curve_land_at_the_update_as_the_shaped_offset() {
     ))
     .unwrap();
     let _ = s.update();
-    near(offset(&s), 0.0);
+    assert_eq!(offset(&s), 0.0);
     assert_eq!(program(&s, cutoff).layers()[0].amount.curve, Law::Hold);
 }
 
@@ -192,7 +198,11 @@ fn an_lfo_rate_set_lands_at_the_update_and_the_phase_continues() {
     assert_eq!(rate, Hz(5.0));
     assert_eq!(anchor.prev_rate, Hz(2.0));
     let at = anchor.at.get() as f64;
-    assert!(at > 0.0, "the anchor is past the frames already played");
+    let played = 1_024.0; // rendered before the update that dates the anchor
+    assert!(
+        at >= played + RATE_ANCHOR_MARGIN.get() as f64,
+        "the anchor is a margin past the frames already played"
+    );
     assert!(
         (anchor.phase - 2.0 * at / RATE).abs() < 1e-9,
         "the anchor holds where 2 Hz left the phase: {} cycles",
@@ -244,6 +254,35 @@ fn an_lfo_rate_in_beats_per_cycle_is_bar_locked() {
     assert!((clock.cycles(&at(6.0)).unwrap() - 1.75).abs() < 1e-12);
 }
 
+/// **A change of beats per cycle is bar-locked, with no anchor**: the layer is
+/// at `beat / per_cycle` cycles on either side of the update, so the phase at
+/// a beat follows the new span at once.
+#[test]
+fn an_lfo_beats_rate_change_is_bar_locked_with_no_anchor() {
+    let (mut s, mut side) = rig(1);
+    let (cutoff, lfo, _) = scene(
+        &mut s,
+        &mut side,
+        |m| m.lfo(Lfo::sine().rate(BeatsPerCycle::of(4.0))),
+        0.5,
+    );
+    s.set(lfo.rate().to(LfoRate::Beats(BeatsPerCycle::of(2.0))))
+        .unwrap();
+    let _ = s.update();
+    let clock = clock(&s, cutoff);
+    assert!(
+        matches!(clock, Clock::Beats { .. }),
+        "no anchor on a beats clock"
+    );
+    let at = ProgramTime {
+        beat: Beat(3.0),
+        play: SamplePosition(0.0),
+        play_epoch: 0,
+        rate: SampleRate::of(RATE),
+    };
+    assert!((clock.cycles(&at).unwrap() - 1.5).abs() < 1e-12);
+}
+
 /// **A macro stays a constant when its value is set, so its lane stays steady**:
 /// every layer is a `Waveform::Const` of the new value, which is what keeps the
 /// lane from walking a grid.
@@ -272,7 +311,9 @@ fn a_macro_set_keeps_the_lane_steady() {
 fn a_target_the_source_does_not_have_is_refused_at_the_call() {
     let (mut s, mut side) = rig(1);
     let (cutoff, knob, route) = scene(&mut s, &mut side, |m| m.macro_(0.5), 0.4);
-    let refused = |r: Result<(), tutti_session::ValueError<&'static str>>| r.unwrap_err().kind;
+    fn refused<T>(r: Result<T, tutti_session::ValueError<&'static str>>) -> ValueErrorKind {
+        r.err().expect("refused").kind
+    }
     assert_eq!(
         refused(s.set(knob.rate().to(LfoRate::Hz(Hz(1.0))))),
         ValueErrorKind::NoSuchTarget
@@ -327,7 +368,7 @@ fn blocks_adopting_a_republished_program_and_curve_do_not_allocate() {
     let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);
     let mut m = s.mods_mut();
     m.range_raw(cutoff, 0.0, 1_000.0).unwrap();
-    m.automate(cutoff, Arc::new(ramp(100.0, 900.0)));
+    assert!(m.automate(cutoff, Arc::new(ramp(100.0, 900.0))));
     let lfo = m.lfo(Lfo::sine().rate(Hz(2.0)));
     let route = m
         .route(RouteSpec::new(lfo, cutoff, Depth::of(0.5)))
@@ -336,13 +377,14 @@ fn blocks_adopting_a_republished_program_and_curve_do_not_allocate() {
         let _ = s.update();
     }
     let mut block = vec![0.0f32; 128];
-    let mut render = |s: &tutti_session::Session| {
+    let render = |s: &tutti_session::Session, block: &mut Vec<f32>| {
         s.render(
-            &mut tutti_buffers::InterleavedMut::new(&mut block, tutti_buffers::ChannelLayout::MONO)
+            &mut tutti_buffers::InterleavedMut::new(block, tutti_buffers::ChannelLayout::MONO)
                 .unwrap(),
         );
     };
-    render(&s);
+    render(&s, &mut block);
+    let before = block.clone();
 
     s.set((
         route.polarity().to(Polarity::Unipolar),
@@ -355,9 +397,16 @@ fn blocks_adopting_a_republished_program_and_curve_do_not_allocate() {
     let _ = s.update();
     assert_no_alloc::assert_no_alloc(|| {
         for _ in 0..8 {
-            render(&s);
+            render(&s, &mut block);
         }
     });
+    let gap = (block[127] - before[127]).abs();
+    assert!(
+        gap > 100.0,
+        "the republished program and curve were adopted: {} against {}",
+        block[127],
+        before[127]
+    );
 }
 
 /// **An automation curve set lands at the update, and the param's value at a

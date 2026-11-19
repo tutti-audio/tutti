@@ -16,7 +16,7 @@ use std::sync::{Arc, Mutex};
 use tutti_modulation::{Clock, Curve, Law, LfoRate, Polarity, Source, TargetKey};
 use tutti_nodes::automation::Trajectory;
 use tutti_rt::LockExt;
-use tutti_units::{Bipolar, Hz, Real};
+use tutti_units::{Bipolar, Real};
 
 use super::error::SetRefusal;
 use super::param::ParamTarget;
@@ -94,12 +94,11 @@ impl Held for RateField {
                 clock: Clock::Beats { per_cycle, .. },
                 ..
             } => LfoRate::Beats(per_cycle),
-            // The slot is registered only while the source is an LFO.
             Source::Lfo {
                 clock: Clock::Seconds { rate, .. },
                 ..
             } => LfoRate::Hz(rate),
-            _ => LfoRate::Hz(Hz(0.0)),
+            _ => unreachable!("the slot is unregistered before the source stops being an LFO"),
         }
     }
 
@@ -140,8 +139,7 @@ impl Held for MacroField {
     fn current(&self) -> Bipolar {
         match self.0.get() {
             Source::Macro { value } => Bipolar::clamped(f64::from(value)),
-            // The slot is registered only while the source is a macro.
-            _ => Bipolar::ZERO,
+            _ => unreachable!("the slot is unregistered before the source stops being a macro"),
         }
     }
 
@@ -189,8 +187,9 @@ keyed_slot_target!(
 keyed_slot_target!(
     /// An LFO's rate ([`LfoRate`]: cycles per second, or beats per cycle), as
     /// [`ModSourceId::rate`] names it. Staged and published as
-    /// [`PolarityTarget`] is; the lanes it reaches take the new rate from a
-    /// dated anchor, so the LFO's phase continues across the update.
+    /// [`PolarityTarget`] is. The phase continues across the update for an Hz
+    /// to Hz change, which the lanes take from a dated anchor; a beats clock is
+    /// bar-locked, so a change to or from one jumps to where the beat puts it.
     ///
     /// A source that is not an LFO has no rate target: a call that names it
     /// fails with `NoSuchTarget`.

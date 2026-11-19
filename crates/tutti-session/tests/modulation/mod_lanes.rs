@@ -454,7 +454,7 @@ fn a_take_suspends_the_automation_then_restores_it() {
     lane.add_breakpoint(Breakpoint::new(Beat(0.0), Hz(800.0)));
     let mut m = s.mods_mut();
     m.range_raw(cutoff, 0.0, 1_000.0).unwrap();
-    m.automate(cutoff, Arc::new(lane));
+    assert!(m.automate(cutoff, Arc::new(lane)));
     settle(&mut s);
     let last = |out: &[Vec<f32>]| *out[0].last().expect("rendered");
     assert_eq!(
