@@ -687,12 +687,13 @@ pub mod midi {
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_device::{
         ChannelControllers, ChannelsDetail, CiCategories, CiDeviceId, CiPeer, DataControl,
-        DetailsData, DiscoveryData, EnabledMpeZones, Identity, InquiryTarget, ManufacturerProfile,
-        MaxSysexSize, MessageText, Muid, Nak, NakStatus, NameError, NotADataControl, NotADeviceId,
-        NotAMuid, NotASysexSize, NotProfileChannels, NoteData, PortDirection, ProcessError,
-        ProcessFeatures, ProductInstanceId, ProfileChange, ProfileDataError, ProfileEntry,
-        ProfileOutcome, ProfileRequest, ProfileRequestError, ProfileState, ProfileTable,
-        ReportRequest, ReportScope, SpecificData, StandardProfile, SystemMessages, WinMmDevice,
+        DetailsData, DiscoveryData, EnabledMpeZones, Identity, InquiryTarget, InstanceIdError,
+        ManufacturerProfile, MaxSysexSize, MessageText, Muid, Nak, NakStatus, NameError,
+        NotADataControl, NotADeviceId, NotAMuid, NotASysexSize, NotProfileChannels, NoteData,
+        PortDirection, ProcessError, ProcessFeatures, ProductInstanceId, ProfileChange,
+        ProfileDataError, ProfileEntry, ProfileOutcome, ProfileRequest, ProfileRequestError,
+        ProfileState, ProfileTable, ReportRequest, ReportScope, SpecificData, StandardProfile,
+        SystemMessages, WinMmDevice,
     };
     pub use tutti_midi_device::{
         NotSetProfileOn, ProfileChannels, ProfileId, ProfileOnRequest, ProfileTarget,

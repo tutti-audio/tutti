@@ -138,14 +138,17 @@ fn a_refused_text_says_why() {
     );
     assert_eq!(EndpointName::parse("a\0b"), Err(NameError::Nul));
     assert_eq!(EndpointName::parse("\u{FEFF}Keys"), Err(NameError::Bom));
-    assert_eq!(ProductInstanceId::parse("a\0"), Err(NameError::Nul));
+    assert_eq!(
+        ProductInstanceId::parse("a\0"),
+        Err(InstanceIdError::NotPrintableAscii)
+    );
     assert_eq!(
         ProductInstanceId::parse("caf\u{e9}"),
-        Err(NameError::NotPrintableAscii)
+        Err(InstanceIdError::NotPrintableAscii)
     );
     assert_eq!(
         ProductInstanceId::parse(&"a".repeat(43)),
-        Err(NameError::TooLong { max: 42 })
+        Err(InstanceIdError::TooLong { max: 42 })
     );
     assert_eq!(
         MessageText::try_from("a".repeat(104).as_str()),
@@ -227,4 +230,90 @@ fn a_truncated_name_still_refuses_a_nul_and_a_bom() {
     assert_eq!(BlockName::truncated("\u{FEFF}a"), None);
     let long_with_nul = format!("{}\0", "a".repeat(200));
     assert_eq!(BlockName::truncated(&long_with_nul), None);
+}
+
+/// A multibyte character that would straddle the bound is refused whole: 90
+/// bytes and an e-acute is 92, 89 and one is exactly 91.
+#[test]
+fn a_character_straddling_the_bound_is_refused_not_split() {
+    let straddling = format!("{}é", "a".repeat(90));
+    assert_eq!(
+        BlockName::new(&straddling),
+        None,
+        "an e-acute across byte 91 is refused"
+    );
+    assert_eq!(
+        BlockName::parse(&straddling),
+        Err(NameError::TooLong { max: 91 })
+    );
+    let exact = format!("{}é", "a".repeat(89));
+    assert_eq!(BlockName::new(&exact).unwrap().as_bytes().len(), 91);
+}
+
+/// `new`, `try_from` and `from_str` agree on every case, for a name and an Id.
+#[test]
+fn new_try_from_and_from_str_agree() {
+    let cases = [
+        "",
+        "Keys",
+        "a\0b",
+        "\u{FEFF}Keys",
+        "Cafe\u{301}",
+        "caf\u{e9}",
+        &"a".repeat(42),
+        &"a".repeat(43),
+        &"a".repeat(98),
+        &"a".repeat(99),
+    ];
+    for case in cases {
+        assert_eq!(
+            EndpointName::new(case),
+            EndpointName::try_from(case).ok(),
+            "{case:?}"
+        );
+        assert_eq!(
+            EndpointName::new(case),
+            case.parse::<EndpointName>().ok(),
+            "{case:?}"
+        );
+        assert_eq!(
+            ProductInstanceId::new(case),
+            ProductInstanceId::try_from(case).ok(),
+            "{case:?}"
+        );
+        assert_eq!(
+            ProductInstanceId::new(case),
+            case.parse::<ProductInstanceId>().ok(),
+            "{case:?}"
+        );
+    }
+}
+
+#[cfg(feature = "serde")]
+mod serde_text {
+    use super::*;
+
+    /// A name and an Id serialise as their bare text and read back; a decode
+    /// that is not a name is refused.
+    #[test]
+    fn the_text_types_round_trip_as_text_and_refuse_a_bad_decode() {
+        let name = EndpointName::new("Cafe\u{301}").unwrap();
+        assert_eq!(serde_json::to_string(&name).unwrap(), "\"Caf\u{e9}\"");
+        assert_eq!(
+            serde_json::from_str::<EndpointName>("\"Caf\u{e9}\"").unwrap(),
+            name
+        );
+        let id = ProductInstanceId::new("SN-0001").unwrap();
+        assert_eq!(serde_json::to_string(&id).unwrap(), "\"SN-0001\"");
+        assert_eq!(
+            serde_json::from_str::<ProductInstanceId>("\"SN-0001\"").unwrap(),
+            id
+        );
+        assert!(serde_json::from_str::<EndpointName>(&format!("\"{}\"", "a".repeat(99))).is_err());
+        assert!(serde_json::from_str::<EndpointName>("\"\\u0000\"").is_err());
+        assert!(serde_json::from_str::<ProductInstanceId>("\"caf\u{e9}\"").is_err());
+        assert!(
+            serde_json::from_str::<ProductInstanceId>(&format!("\"{}\"", "a".repeat(43))).is_err()
+        );
+    }
 }

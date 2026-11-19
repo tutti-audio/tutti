@@ -1,7 +1,7 @@
 //! [`Command`]: one Command Packet (M2-124 section 5.4) as a value, with the
 //! one writer and the one reader of its bytes.
 
-use tutti_midi_device::{EndpointName, NameError, ProductInstanceId};
+use tutti_midi_device::{EndpointName, InstanceIdError, NameError, ProductInstanceId};
 use tutti_ump::{Ump, split_stream};
 
 use tutti_units::{Text, TextError};
@@ -634,7 +634,7 @@ pub enum ParseError {
     Name(#[source] NameError),
     /// The Product Instance Id is not a valid Id.
     #[error("the Product Instance Id is invalid")]
-    InstanceId(#[source] NameError),
+    InstanceId(#[source] InstanceIdError),
     /// A text is empty or too long for its field, or holds a NUL.
     #[error("a text is not valid for its field")]
     Text(#[source] TextError),

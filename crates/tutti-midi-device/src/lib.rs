@@ -164,5 +164,5 @@ pub use id::{DeviceId, DeviceInfo, EndpointId, Identity, PortDirection, WinMmDev
 pub use inquiry::{INQUIRY_ATTEMPTS, INQUIRY_TIMEOUT, IdentityInquiry, InquiryAction};
 pub use jr::{ClockHeard, JrLock, JrReceiver, JrTime, TICK_RATE, Unmapped, tick_time};
 pub use learned::{Learned, Match, SavedDevice};
-pub use name::{BlockName, EndpointName, Name, NameError, ProductInstanceId};
+pub use name::{BlockName, EndpointName, InstanceIdError, Name, NameError, ProductInstanceId};
 pub use table::{BindPolicy, DeviceEvent, DeviceTable, OsChange, OsDevice, Resolved};
