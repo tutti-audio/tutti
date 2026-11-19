@@ -136,8 +136,8 @@ fn a_group_has_ports_of_its_own() {
 fn sent_at_arrival(reset: bool) -> usize {
     use tutti_graph::Event;
     use tutti_graph::contract::Direct;
-    let (mut writer, generations) = DeviceGeneration::new();
-    let node = MidiInputNode::new().following(&generations);
+    let (mut writer, generation) = DeviceGeneration::new();
+    let node = MidiInputNode::new().following(&generation);
     let mut d = Direct::new(node, SampleRate::SR_48K, 64);
     let on = midi::note_on(
         MidiChannel::of(0),

@@ -626,7 +626,7 @@ fn held_notes_are_released_when_the_device_is_unplugged() {
 }
 
 /// **Every input port has an input node of its own, and there is no cap**: ten
-/// devices (the fixed ingest took eight) are ten live ports on ten nodes, and
+/// devices (the fixed input node took eight) are ten live ports on ten nodes, and
 /// each device's note reaches a synth routed to all of them.
 #[test]
 fn every_input_port_has_its_own_input_node() {
@@ -1060,11 +1060,11 @@ fn registered(seen: &Seen) -> usize {
 
 /// **The session's MPE mode reaches a port's input node**: with no mode the
 /// routed synth hears no bend range; once `session.mpe()` is written with a
-/// lower zone of three members, the ingest sends the zone's seven default
+/// lower zone of three members, the input node sends the zone's seven default
 /// bend ranges (the master's, and a channel's and a per-note one on each
 /// member) from the next block, and writing the same mode again sends none.
 #[test]
-fn the_sessions_mpe_mode_reaches_a_ports_ingest() {
+fn the_sessions_mpe_mode_reaches_a_ports_input_node() {
     let (mut s, fake) = session();
     plug(&fake, 1, "Keys", PortDirection::Input);
     let _ = s.update();

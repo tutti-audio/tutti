@@ -35,7 +35,7 @@
 //! same translation as any other message, in three cases:
 //!
 //! - *The device changed or went.* Built [`following`](MidiInputNode::following)
-//!   the [`DeviceGeneration`] that track its input's device, the node compares the
+//!   the [`DeviceGeneration`] that tracks its input's device, the node compares the
 //!   generation (which the control side moves as each device arrives and as it
 //!   departs) with the one it last saw every block. A change releases
 //!   everything the old device held, at the block's first frame, then starts
@@ -258,9 +258,9 @@ const PORTS_PER_GROUP: usize = MIDI_INPUT_PORTS;
 pub struct MidiInputNode {
     /// The device's translation state.
     device: Device,
-    /// The device's generations ([`MidiInputNode::following`]); `None` for a node
+    /// The device's generation ([`MidiInputNode::following`]); `None` for a node
     /// that follows none, whose device is always present and never restarts.
-    generations: Option<DeviceGeneration>,
+    generation: Option<DeviceGeneration>,
     /// What the block sends: the translated events, which may outnumber the
     /// ones read (a member channel's bend range fans out over its zone).
     out: Box<[UmpAt]>,
@@ -322,7 +322,7 @@ struct Device {
     /// The generation this state was last reset at.
     generation: u64,
     /// Whether a device is there: an event of none is not read. Always for a
-    /// node that follows no generations.
+    /// node that follows no generation.
     present: bool,
     /// What the device started and has not ended, as it sent it.
     held: Held,
@@ -466,7 +466,7 @@ impl MidiInputNode {
             device: Device::new(MpeMode::Disabled),
             profiles: NO_PROFILES,
             profiles_seq: 0,
-            generations: None,
+            generation: None,
             out: vec![BLANK; tutti_graph::note_off_room(MIDI_INPUT_EVENT_CAPACITY)]
                 .into_boxed_slice(),
             ports: MidiInputPorts::FIRST_GROUP,
@@ -476,19 +476,19 @@ impl MidiInputNode {
         }
     }
 
-    /// Follows the device `generations` says is behind the node's event input: each
+    /// Follows the device `generation` says is behind the node's event input: each
     /// block the node reads the generation (an acquire load of a cell the control
     /// side stores to when a device comes or goes), and when it changed it
     /// releases what the device held, starts over, and hears nothing while no
     /// device is there. Without it a device is there from the first block. The
-    /// node starts at the generation the generations are at now, whatever it is, so a node
+    /// node starts at the generation stands at now, whatever it is, so a node
     /// built before any device has arrived treats its device as present until
     /// the first change (it has sent nothing to release), and one built while a
     /// device is there releases nothing at its first block.
     #[must_use]
-    pub fn following(mut self, generations: &DeviceGeneration) -> Self {
-        self.device.generation = generations.generation();
-        self.generations = Some(generations.clone());
+    pub fn following(mut self, generation: &DeviceGeneration) -> Self {
+        self.device.generation = generation.generation();
+        self.generation = Some(generation.clone());
         self
     }
 
@@ -652,8 +652,8 @@ impl<F: Float> Node<F> for MidiInputNode {
         }
         // A device that arrived or left: what the one before held is ended
         // before anything else of the input is read.
-        if let Some(generations) = &self.generations {
-            let generation = generations.generation();
+        if let Some(cell) = &self.generation {
+            let generation = cell.generation();
             if generation != device.generation {
                 device.release(None, Offset::ZERO, &mut staging);
                 device.restart(generation);
@@ -701,10 +701,10 @@ impl<F: Float> Node<F> for MidiInputNode {
         // What the control side may wait for, stored once this block's events are
         // pushed: nothing is owed. A release that did not fit the block stays
         // owed (`Staging::whole` refuses it whole) and a push a port refuses is
-        // counted by the executor, so an generation settles only for what was sent or
+        // counted by the executor, so a generation settles only for what was sent or
         // counted.
         let settled = self
-            .generations
+            .generation
             .as_ref()
             .filter(|_| device.owing == 0)
             .map(|_| device.generation);
@@ -726,8 +726,8 @@ impl<F: Float> Node<F> for MidiInputNode {
                 .event_out(port)
                 .push(Event::midi(offset_of(ev, block_len), ev.1));
         }
-        if let (Some(generations), Some(generation)) = (&self.generations, settled) {
-            generations.settle(generation);
+        if let (Some(cell), Some(handled)) = (&self.generation, settled) {
+            cell.settle(handled);
         }
         Status::Modified
     }

@@ -1,5 +1,5 @@
 //! Regression gate for RT-safety: the MIDI border nodes process a block
-//! without allocating, events flowing — a device inlet's through the ingest
+//! without allocating, events flowing — a device inlet's through the input node
 //! node's translation onto its ports, a control thread's through the event
 //! inlet into the event tap's ring, and the sync node's clock, timecode and
 //! Machine Control.
@@ -28,7 +28,7 @@ fn note_on(ch: u8, note: u8) -> Ump {
     midi::note_on(MidiChannel::of(ch), note, 0x8000)
 }
 
-/// A device's inlet (key `inlet`) feeding the first event input of the ingest
+/// A device's inlet (key `inlet`) feeding the first event input of the input node
 /// node at key 1: what the device's thread pushes into.
 fn device(ed: &mut Editor, inlet: u64) -> EventInletWriter {
     let (node, writer) = EventInletNode::pair(LIVE_INLET_CAPACITY);
@@ -163,8 +163,8 @@ fn the_border_nodes_process_without_allocating() {
     assert!(tempos > 0 && meters > 0, "{tempos} tempos, {meters} meters");
 }
 
-/// **A device's departure and arrival process without allocating**: the ingest
-/// node that follows its generations releases what the departing device held,
+/// **A device's departure and arrival process without allocating**: the input node
+/// node that follows its generation releases what the departing device held,
 /// restarts for the next, pays what it owes and settles, block after block.
 #[test]
 fn a_generation_change_processes_without_allocating() {
@@ -172,12 +172,12 @@ fn a_generation_change_processes_without_allocating() {
         SampleRate::SR_48K,
         MaxBlock::of(Samples::new(512)),
     ));
-    let (mut writer, generations) = DeviceGeneration::new();
+    let (mut writer, generation) = DeviceGeneration::new();
     writer.arrive();
     ed.insert(
         NodeKey(1),
         "in",
-        MidiInputNode::new().following(&generations),
+        MidiInputNode::new().following(&generation),
     );
     let mut dev = device(&mut ed, 4);
     let mut out = common::sink(&mut ed, 1, &[(1, 0), (1, 3), (1, 6), (1, 9)]);
@@ -211,7 +211,7 @@ fn a_generation_change_processes_without_allocating() {
     assert!(offs > 0, "the departures released the keys they held");
     writer.depart();
     exec.process(512, &t, &[], &mut []);
-    assert!(generations.is_settled(), "the last departure was handled");
+    assert!(generation.is_idle(), "the last departure was handled");
 }
 
 /// **A device output's node passes events without allocating.**
@@ -371,7 +371,7 @@ fn mcm(device: &mut EventInletWriter, block: u64, upper: bool) {
 }
 
 /// The input node adopts a host-set MPE mode, sends its zones' reset ranges
-/// and applies an MCM from the wire (rebuilding the ingest and sending that
+/// and applies an MCM from the wire (rebuilding the input node and sending that
 /// zone's reset) without allocating: before each gated block the host asks
 /// for a dual zone other than the one in force (outside the gate: a publish
 /// is control-side), and the wire alternates upper and lower MCMs.
@@ -855,7 +855,7 @@ fn machine_control_out_of_a_sync_node_processes_without_allocating() {
 }
 
 /// **`reset` allocates nothing**: the executor calls it on the audio thread as
-/// a node leaves bypass, on the ingest and sync nodes alike, after real
+/// a node leaves bypass, on the input node and sync nodes alike, after real
 /// traffic (a sync node that has sent clock, timecode, Machine Control and Flex
 /// holds state in each) and not only on a fresh node.
 #[test]
@@ -863,7 +863,7 @@ fn resetting_the_border_nodes_allocates_nothing() {
     use tutti_graph::contract::Direct;
 
     let rate = SampleRate::SR_48K;
-    let mut ingest = Direct::new(MidiInputNode::new(), rate, 64);
+    let mut input = Direct::new(MidiInputNode::new(), rate, 64);
     let sync = SyncOut::new(MidiGroup::FIRST).sending(SyncMessages {
         clock: true,
         mtc: true,
@@ -889,7 +889,7 @@ fn resetting_the_border_nodes_allocates_nothing() {
     };
     assert!(traffic(&mut sync) > 0, "the node has state to forget");
     assert_no_alloc::assert_no_alloc(|| {
-        tutti_graph::Node::<f32>::reset(&mut *ingest.node);
+        tutti_graph::Node::<f32>::reset(&mut *input.node);
         tutti_graph::Node::<f32>::reset(&mut *sync.node);
     });
     assert!(traffic(&mut sync) > 0, "and works after the reset");

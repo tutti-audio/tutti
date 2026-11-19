@@ -35,7 +35,7 @@ use tutti_ump::{Message, MidiChannel, Ump, Utility};
 use tutti_units::{Frame, SampleRate, Samples};
 
 const RATE: f64 = 48_000.0;
-const INGEST: NodeKey = NodeKey(1);
+const INPUT: NodeKey = NodeKey(1);
 
 /// A graph holding an input node over the inlets of `inputs`, its channel-0
 /// port under an event tap, and the engine's part of the block clock.
@@ -62,13 +62,13 @@ impl Rig {
         ));
         // An input node for each port, the first one's channel 0 under the tap.
         for (input, node) in ports.into_iter().enumerate() {
-            let ingest = NodeKey(INGEST.0 + 1000 * input as u64);
-            editor.insert(ingest, "in", MidiInputNode::new());
+            let input_node = NodeKey(INPUT.0 + 1000 * input as u64);
+            editor.insert(input_node, "in", MidiInputNode::new());
             let key = NodeKey(100 + input as u64);
             editor.insert(key, "inlet", node);
             editor.spec_mut().connect_events(
                 EventIn {
-                    node: ingest,
+                    node: input_node,
                     port: 0,
                 },
                 EventEdge::Direct(EventOut { node: key, port: 0 }),
@@ -78,7 +78,7 @@ impl Rig {
             .open_event_tap(
                 EventTapId::of(1),
                 EventOut {
-                    node: INGEST,
+                    node: INPUT,
                     port: 0,
                 },
                 TapAlign::Raw,

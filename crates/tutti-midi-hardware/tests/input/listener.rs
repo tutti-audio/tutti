@@ -21,7 +21,7 @@ const SETTLE: Duration = Duration::from_millis(100);
 const RATE: f64 = 44_100.0;
 const BLOCK: usize = 64;
 const SINK: NodeKey = EventRig::SINK;
-const INGEST: NodeKey = NodeKey(2);
+const INPUT: NodeKey = NodeKey(2);
 
 pub struct Listener {
     rig: EventRig,
@@ -40,20 +40,20 @@ impl Listener {
 
     /// As [`over`](Self::over), with the engine's input node between the
     /// inlets and the log: a MIDI 1.0 message arrives translated.
-    pub fn over_ingest(inlets: &Arc<InputInlets>) -> Self {
+    pub fn over_input(inlets: &Arc<InputInlets>) -> Self {
         Self::build(inlets, true)
     }
 
-    fn build(inlets: &Arc<InputInlets>, ingest: bool) -> Self {
-        // The sink hears the one inlet's event input, or, behind the ingest
+    fn build(inlets: &Arc<InputInlets>, input: bool) -> Self {
+        // The sink hears the one inlet's event input, or, behind the input
         // node, each output port of its first Group.
         let ports = tutti_midi_runtime::MidiInputPorts::FIRST_GROUP.count();
-        let slots = if ingest { ports } else { 1 };
+        let slots = if input { ports } else { 1 };
         let mut rig = EventRig::new(RATE, BLOCK, slots as u16);
-        if ingest {
-            rig.editor.insert(INGEST, "ingest", MidiInputNode::new());
+        if input {
+            rig.editor.insert(INPUT, "input", MidiInputNode::new());
             for port in 0..ports as u16 {
-                rig.feed(INGEST, port, port);
+                rig.feed(INPUT, port, port);
             }
         }
         rig.commit();
@@ -64,7 +64,7 @@ impl Listener {
             clock,
             origin: Instant::now(),
             frames: 0,
-            entry: if ingest { INGEST } else { SINK },
+            entry: if input { INPUT } else { SINK },
         }
     }
 

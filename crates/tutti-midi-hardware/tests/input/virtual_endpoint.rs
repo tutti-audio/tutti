@@ -202,7 +202,7 @@ fn the_published_endpoint_record_carries_the_protocol_and_the_blocks() {
 fn a_midi1_destination_reports_midi1_and_its_messages_arrive_widened() {
     let spec = spec("midi1").with_protocol(VirtualProtocol::Midi1);
     let inlets = InputInlets::new(EventCapacity::of(8), Duration::ZERO);
-    let mut listener = Listener::over_ingest(&inlets);
+    let mut listener = Listener::over_input(&inlets);
     let ports = HardwareMidiInputs::new(std::sync::Arc::clone(&inlets));
     let (producer, inlet) = ports.open_input_port("virtual");
     listener.attach(inlet);

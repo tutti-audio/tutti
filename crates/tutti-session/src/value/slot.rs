@@ -590,7 +590,7 @@ slot_target!(
     /// ([`SessionBuilder::mpe_mode`](crate::SessionBuilder::mpe_mode)),
     /// `Disabled` by default.
     ///
-    /// It is one value for everything that follows it: each input's ingest
+    /// It is one value for everything that follows it: each input's input node
     /// and each clip's MPE transform (the node [`Midi::play_clip`](crate::Midi::play_clip)
     /// wires between a clip and its target) adopts it at its next block, and
     /// a clip played later starts in it. A new mode stops and resets the

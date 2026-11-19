@@ -859,7 +859,7 @@ impl MidiState {
         edits.graph || edits.routes
     }
 
-    /// Compiles the session's own route rules onto every input port's ingest
+    /// Compiles the session's own route rules onto every input port's input node
     /// node.
     pub(crate) fn compile_session_feeds<F: Float>(
         &mut self,

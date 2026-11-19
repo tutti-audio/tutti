@@ -284,7 +284,7 @@ pub(crate) struct InputShared {
     cells: InputReaders,
     /// What the port's input node lost: translated events its mailbox had no
     /// room for. The node outlives every connection.
-    ingest: MidiInputControls,
+    input: MidiInputControls,
 }
 
 /// What a handle asked of the device, for the session to send at its next poll,
@@ -646,7 +646,7 @@ impl MidiInput {
     #[must_use]
     pub fn losses(&self) -> Losses {
         self.shared.cells.lost.get()
-            + self.shared.ingest.losses()
+            + self.shared.input.losses()
             + self.shared.cells.inlet.get()
             + self.shared.cells.ci_refused.get()
     }
@@ -776,10 +776,10 @@ struct InputPort {
     shared: Arc<InputShared>,
     node: NodeKey,
     controls: MidiInputControls,
-    /// The one writer of the node's generations.
+    /// The one writer of the node's generation.
     writer: GenerationWriter,
-    /// The node's half of them.
-    generations: DeviceGeneration,
+    /// The node's half of it.
+    generation: DeviceGeneration,
     /// The inlet node of the open connection, in the graph.
     inlet: Option<NodeKey>,
     /// What the entry was declared with: what a returning device is matched on.
@@ -814,7 +814,7 @@ struct OutputPort {
 /// An input node that is going: its device's notes are being released.
 struct Retiring {
     node: NodeKey,
-    generations: DeviceGeneration,
+    generation: DeviceGeneration,
 }
 
 /// The ports of the session, and what they are opened with.
@@ -1106,7 +1106,7 @@ impl Ports {
             self.notices.extend(port.pending.take_notices());
             self.retiring.push(Retiring {
                 node: port.node,
-                generations: port.generations.clone(),
+                generation: port.generation.clone(),
             });
             edits.graph = true;
             edits.routes = true;
@@ -1123,7 +1123,7 @@ impl Ports {
         edits.graph |= self.outputs.len() != before;
         self.retiring.retain(|going| {
             // The node's block that released the notes has run.
-            let done = going.generations.is_settled();
+            let done = going.generation.is_idle();
             if done {
                 // A host that removed the node itself leaves nothing to take.
                 let _ = graph.remove(going.node);
@@ -1494,14 +1494,14 @@ impl<F: tutti_buffers::Float> crate::Midi<'_, F> {
             Resolved::Missing => None,
         };
         let found = found.filter(|info| info.direction.is_input());
-        let (writer, generations) = DeviceGeneration::new();
+        let (writer, generation) = DeviceGeneration::new();
         let layout = self
             .nodes
             .map_or(MidiInputPorts::FIRST_GROUP, |n| n.input_ports);
         let node = tutti_midi_runtime::MidiInputNode::new()
             .hearing(layout)
             .with_mpe(self.state.mpe())
-            .following(&generations);
+            .following(&generation);
         let (key, controls) = self.graph.add(node);
         let node = key.erase();
         let token = Arc::new(());
@@ -1510,7 +1510,7 @@ impl<F: tutti_buffers::Float> crate::Midi<'_, F> {
         let (writers, cells) = InputWriters::new();
         drop(writers);
         let landed = self.jobs.queue();
-        let ingest = controls.clone();
+        let input = controls.clone();
         let pending = Pending::new(ids);
         let shared = Arc::new_cyclic(|weak| {
             let link = PortLink::new(weak.clone(), landed);
@@ -1523,7 +1523,7 @@ impl<F: tutti_buffers::Float> crate::Midi<'_, F> {
                 requests: Mutex::new(Inbox::default()),
                 link,
                 cells,
-                ingest,
+                input,
             }
         });
         self.state.ports.inputs.push(InputPort {
@@ -1532,7 +1532,7 @@ impl<F: tutti_buffers::Float> crate::Midi<'_, F> {
             node,
             controls,
             writer,
-            generations,
+            generation,
             inlet: None,
             saved,
             open: None,

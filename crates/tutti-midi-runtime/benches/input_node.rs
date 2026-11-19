@@ -45,12 +45,12 @@ fn wire() -> Vec<Ump> {
         .collect()
 }
 
-/// An executor over an input node that follows a one-input set of generations, and
+/// An executor over an input node that follows a one-input generation, and
 /// the device's end of its inlet.
 fn rig() -> (Executor, DeviceInput) {
     let inlets = InputInlets::new(EventCapacity::of(4_096), Duration::ZERO);
     let (device, inlet) = inlets.open();
-    let (mut writer, generations) = DeviceGeneration::new();
+    let (mut writer, generation) = DeviceGeneration::new();
     writer.arrive();
     let (mut editor, exec) = Editor::new(Prepare::new(
         SampleRate::SR_48K,
@@ -58,8 +58,8 @@ fn rig() -> (Executor, DeviceInput) {
     ));
     editor.insert(
         NodeKey(1),
-        "ingest",
-        MidiInputNode::new().following(&generations),
+        "input_node",
+        MidiInputNode::new().following(&generation),
     );
     editor.insert(NodeKey(2), "inlet", inlet);
     editor.spec_mut().connect_events(
@@ -87,9 +87,9 @@ fn block(exec: &mut Executor) {
     exec.process(BLOCK, &TransportPosition::default(), &[], &mut []);
 }
 
-fn ingest(c: &mut Criterion) {
+fn input_node(c: &mut Criterion) {
     let wire = wire();
-    let mut group = c.benchmark_group("ingest");
+    let mut group = c.benchmark_group("input_node");
     group.bench_function("push", |b| {
         b.iter_batched(
             rig,
@@ -128,5 +128,5 @@ fn ingest(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, ingest);
+criterion_group!(benches, input_node);
 criterion_main!(benches);

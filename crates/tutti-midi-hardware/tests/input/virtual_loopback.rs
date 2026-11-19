@@ -120,7 +120,7 @@ fn what_a_session_output_sends_reaches_a_virtual_destination_in_order() {
 fn a_midi1_destination_delivers_what_the_input_node_widens() {
     let spec = spec("midi1").with_protocol(VirtualProtocol::Midi1);
     let inlets = InputInlets::new(EventCapacity::of(64), Duration::ZERO);
-    let mut graph = Listener::over_ingest(&inlets);
+    let mut graph = Listener::over_input(&inlets);
     let io = MidiSession::open(inlets, MidiHardwareOptions::new()).expect("a session");
     let (producer, inlet) = Arc::clone(io.ports()).open_input_port("virtual");
     graph.attach(inlet);

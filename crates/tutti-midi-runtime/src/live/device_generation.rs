@@ -5,7 +5,7 @@
 //! The input's **generation** counts the comings and goings of its devices: each
 //! [`arrive`](GenerationWriter::arrive) and each [`depart`](GenerationWriter::depart)
 //! moves it on, and it is odd while a device is there and even while none is. A
-//! node built [`following`](crate::MidiInputNode::following) the generations
+//! node built [`following`](crate::MidiInputNode::following) the generation
 //! compares the generation every block. A change ends what the device before it
 //! started: the notes it held and the pedals and bends it left are released
 //! downstream at the block's first frame, and its half-sent RPN and MPE state
@@ -14,9 +14,9 @@
 //!
 //! The node answers with the generation it has handled once its release has been
 //! pushed to the node's ports and nothing is left owing
-//! ([`is_settled`](DeviceGeneration::is_settled)), so the control side can take a
+//! ([`is_idle`](DeviceGeneration::is_idle)), so the control side can take a
 //! node out of the graph after its device's notes have been released, not
-//! before. A node that is never processed never settles.
+//! before. A node that is never processed never goes idle.
 //!
 //! **One control-side writer.** [`DeviceGeneration::new`] returns the node's half
 //! ([`DeviceGeneration`], cheap to clone, which reads) with the one [`GenerationWriter`]
@@ -73,7 +73,7 @@ impl DeviceGeneration {
     /// it owed for it: what a node about to be taken out of the graph waits for.
     /// After a [`depart`](GenerationWriter::depart) it is false until a block has run.
     #[must_use]
-    pub fn is_settled(&self) -> bool {
+    pub fn is_idle(&self) -> bool {
         self.cell.settled.load(Ordering::Acquire) == self.cell.generation.load(Ordering::Acquire)
     }
 

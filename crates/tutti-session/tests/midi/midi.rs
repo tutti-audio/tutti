@@ -797,7 +797,7 @@ fn two_devices_are_two_ports_and_one_leaving_takes_only_its_own() {
 }
 
 /// **A port that is removed with a key held ends the key downstream, once**
-/// (MIDI 1.0 Detailed Specification p. 24: individual Note Offs): the ingest
+/// (MIDI 1.0 Detailed Specification p. 24: individual Note Offs): the input node
 /// node releases what the device held at its next block, and the executor's
 /// close of the inlet's edge, which would send the same Note Off at the next
 /// update, finds a device that is gone and is not heard.
@@ -1662,7 +1662,7 @@ impl MpePeer {
     }
 }
 
-/// **A device that enables the MPE Profile switches its input's ingest to the
+/// **A device that enables the MPE Profile switches its input's input node to the
 /// Profile's rules, and disabling it switches back** (M2-120 sections 3.3,
 /// 3.5 and Table 15). The session asks a peer to enable the Profile on
 /// Channel 1 with four Channels; the Enabled Report is the zone, so the zone
@@ -1733,7 +1733,7 @@ fn a_devices_enabling_the_mpe_profile_switches_its_inputs_rules() {
     };
     assert_eq!(all[0].state(), ProfileState::Disabled);
 
-    // The device speaks MIDI 1.0, which the ingest widens.
+    // The device speaks MIDI 1.0, which the input node widens.
     let omni_off = |channel: u8| {
         midi::m1_cc(
             MidiChannel::of(channel),

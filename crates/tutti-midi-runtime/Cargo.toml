@@ -53,7 +53,7 @@ name = "clip_node"
 harness = false
 
 [[bench]]
-name = "ingest"
+name = "input_node"
 harness = false
 
 [package.metadata.docs.rs]

@@ -362,7 +362,7 @@ impl<F: Float> SessionNode<F> for tutti_midi_runtime::HarmonyNode {
     }
 }
 
-/// The MIDI ingest: its `MidiInputControls`, no params; the Profile zones
+/// The MIDI input node: its `MidiInputControls`, no params; the Profile zones
 /// it replaced freed by its reclaimer.
 #[cfg(feature = "midi")]
 impl<F: Float> SessionNode<F> for tutti_midi_runtime::MidiInputNode {
