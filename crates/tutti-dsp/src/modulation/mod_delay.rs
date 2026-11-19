@@ -329,8 +329,8 @@ impl<F: Float + Lerp> ModDelayBank<F> {
     /// takes the block's steps from the glides. Each delay is floored at one frame where it is
     /// read.
     ///
-    /// Each channel is [`delay_step`] at its delay: the line's own tap scaled by the feedback
-    /// added to the input. Channel `c` of `input` feeds channel `c` of `output`; a channel
+    /// Each channel is a feedback delay at its delay: the line's own tap scaled by the
+    /// feedback added to the input. Channel `c` of `input` feeds channel `c` of `output`; a channel
     /// past the bank's width, or past the narrower of the two views, is not touched. The
     /// feedback glide's values must stay below 1 ([`Feedback::MAX_STABLE`] is the bound
     /// [`design`](Self::design) holds them to). No allocation.
