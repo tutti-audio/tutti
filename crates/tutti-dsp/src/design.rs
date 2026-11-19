@@ -8,8 +8,8 @@ use tutti_units::{Hz, Normalized, SampleRate, Samples};
 #[inline]
 pub(crate) fn along<F: Float>(k: u32, n: u32) -> F {
     F::from_unit(Normalized::progress(
-        Samples(k as usize),
-        Samples(n as usize),
+        Samples::new(k as usize),
+        Samples::new(n as usize),
     ))
 }
 

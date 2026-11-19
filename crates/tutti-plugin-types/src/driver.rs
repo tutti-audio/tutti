@@ -31,10 +31,10 @@ use crate::{
 #[derive(Debug)]
 pub struct Hand<P> {
     /// `None` for a local hand.
-    end: Option<tutti_rt::Hand<P>>,
+    end: Option<tutti_rt::Handoff<P>>,
     /// The control end [`install`](Self::install) named: it replaces `end` the
     /// next time the Processor is held here.
-    successor: Option<tutti_rt::Hand<P>>,
+    successor: Option<tutti_rt::Handoff<P>>,
     _processor: PhantomData<fn() -> P>,
 }
 
@@ -125,7 +125,7 @@ impl<P> Hand<P> {
 /// Dropping one nobody installed does nothing: the realtime end it was made
 /// with is empty and polls nothing.
 #[derive(Debug)]
-pub struct Successor<P>(tutti_rt::Hand<P>);
+pub struct Successor<P>(tutti_rt::Handoff<P>);
 
 impl<P: Send> Successor<P> {
     /// A new realtime end, and the control end that lends to it. The end stays
@@ -419,13 +419,15 @@ impl<L: Loaded> Lifecycle<L> {
                 seat: Seat::Held(_),
                 ..
             } => Reply::Returned,
-            Self::Active { seat, .. } => match hand.end.as_mut().and_then(tutti_rt::Hand::recall) {
-                Some(processor) => {
-                    *seat = Seat::Held(processor);
-                    Reply::Returned
+            Self::Active { seat, .. } => {
+                match hand.end.as_mut().and_then(tutti_rt::Handoff::recall) {
+                    Some(processor) => {
+                        *seat = Seat::Held(processor);
+                        Reply::Returned
+                    }
+                    None => Reply::Lent,
                 }
-                None => Reply::Lent,
-            },
+            }
             _ => Reply::NotActive,
         }
     }

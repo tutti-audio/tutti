@@ -3757,7 +3757,7 @@ Decisions:
    primitives are generic (no graph types), and `tutti-graph`'s dependency
    limits did not change.
 3. **`SeqCst` fences, not `SeqCst` accesses**, for the pool's store-load
-   pairs (the gate's close against a helper's entry; a sleeper's flag against
+   pairs (the gate's close against a helper's entry; a parker's flag against
    the gate's open): loom models fences exactly and treats `SeqCst` accesses
    as `AcqRel`, under which the first version of the gate failed its model.
    `RtPublish` made the same choice.

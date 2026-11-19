@@ -1,17 +1,17 @@
 use super::*;
 
 fn geo(window: usize, hop: usize) -> StftGeometry {
-    StftGeometry::new(SampleRate::SR_44K1, Samples(window), Samples(hop)).unwrap()
+    StftGeometry::new(SampleRate::SR_44K1, Samples::new(window), Samples::new(hop)).unwrap()
 }
 
 #[test]
 fn rejects_a_zero_window_a_zero_hop_and_a_non_positive_rate() {
     assert_eq!(
-        StftGeometry::new(SampleRate::SR_44K1, Samples(0), Samples(512)),
+        StftGeometry::new(SampleRate::SR_44K1, Samples::new(0), Samples::new(512)),
         Err(StftError::ZeroWindow)
     );
     assert_eq!(
-        StftGeometry::new(SampleRate::SR_44K1, Samples(2048), Samples(0)),
+        StftGeometry::new(SampleRate::SR_44K1, Samples::new(2048), Samples::new(0)),
         Err(StftError::ZeroHop)
     );
 }
@@ -20,14 +20,15 @@ fn rejects_a_zero_window_a_zero_hop_and_a_non_positive_rate() {
 /// reconstruction — decimated display grids sample sparsely on purpose.
 #[test]
 fn a_hop_wider_than_the_window_analyses_but_does_not_invert() {
-    let sparse = StftGeometry::new(SampleRate::SR_44K1, Samples(2048), Samples(8192)).unwrap();
+    let sparse =
+        StftGeometry::new(SampleRate::SR_44K1, Samples::new(2048), Samples::new(8192)).unwrap();
     assert!(!sparse.frames_overlap());
 
     assert_eq!(
-        StftGeometry::cola(SampleRate::SR_44K1, Samples(2048), Samples(8192)),
+        StftGeometry::cola(SampleRate::SR_44K1, Samples::new(2048), Samples::new(8192)),
         Err(StftError::HopExceedsWindow {
-            window: Samples(2048),
-            hop: Samples(8192),
+            window: Samples::new(2048),
+            hop: Samples::new(8192),
         })
     );
 }
@@ -37,22 +38,24 @@ fn a_hop_wider_than_the_window_analyses_but_does_not_invert() {
 #[test]
 fn cola_refuses_what_new_accepts() {
     // 4x overlap: fine for both.
-    assert!(StftGeometry::cola(SampleRate::SR_44K1, Samples(2048), Samples(512)).is_ok());
+    assert!(StftGeometry::cola(SampleRate::SR_44K1, Samples::new(2048), Samples::new(512)).is_ok());
 
     // 2x overlap: analysable, not invertible.
-    assert!(StftGeometry::new(SampleRate::SR_44K1, Samples(2048), Samples(1024)).is_ok());
+    assert!(StftGeometry::new(SampleRate::SR_44K1, Samples::new(2048), Samples::new(1024)).is_ok());
     assert_eq!(
-        StftGeometry::cola(SampleRate::SR_44K1, Samples(2048), Samples(1024)),
+        StftGeometry::cola(SampleRate::SR_44K1, Samples::new(2048), Samples::new(1024)),
         Err(StftError::NotColaCompliant {
-            window: Samples(2048),
-            hop: Samples(1024),
+            window: Samples::new(2048),
+            hop: Samples::new(1024),
             window_fn: CosineWindow::HANN,
         })
     );
 
     // Hop does not divide the window: analysable, not invertible.
-    assert!(StftGeometry::new(SampleRate::SR_44K1, Samples(2048), Samples(500)).is_ok());
-    assert!(StftGeometry::cola(SampleRate::SR_44K1, Samples(2048), Samples(500)).is_err());
+    assert!(StftGeometry::new(SampleRate::SR_44K1, Samples::new(2048), Samples::new(500)).is_ok());
+    assert!(
+        StftGeometry::cola(SampleRate::SR_44K1, Samples::new(2048), Samples::new(500)).is_err()
+    );
 }
 
 /// **A grid that is COLA for one window is not automatically COLA for
@@ -63,18 +66,18 @@ fn cola_refuses_what_new_accepts() {
 /// shape laid over it.
 #[test]
 fn a_hann_cola_grid_may_not_be_cola_for_another_window() {
-    let hop = Samples(512);
-    assert!(StftGeometry::cola(SampleRate::SR_44K1, Samples(2048), hop).is_ok());
+    let hop = Samples::new(512);
+    assert!(StftGeometry::cola(SampleRate::SR_44K1, Samples::new(2048), hop).is_ok());
 
     assert_eq!(
         StftGeometry::cola_with(
             SampleRate::SR_44K1,
-            Samples(2048),
+            Samples::new(2048),
             hop,
             CosineWindow::BLACKMAN
         ),
         Err(StftError::NotColaCompliant {
-            window: Samples(2048),
+            window: Samples::new(2048),
             hop,
             window_fn: CosineWindow::BLACKMAN,
         }),
@@ -85,8 +88,8 @@ fn a_hann_cola_grid_may_not_be_cola_for_another_window() {
     assert!(
         StftGeometry::cola_with(
             SampleRate::SR_44K1,
-            Samples(2048),
-            Samples(256),
+            Samples::new(2048),
+            Samples::new(256),
             CosineWindow::BLACKMAN
         )
         .is_ok()
@@ -98,8 +101,8 @@ fn a_hann_cola_grid_may_not_be_cola_for_another_window() {
 /// exists to give callers a way to avoid.
 #[test]
 fn the_builder_can_produce_a_non_cola_grid() {
-    let hann =
-        StftGeometry::cola(SampleRate::SR_44K1, Samples(2048), Samples(512)).expect("hann 4x");
+    let hann = StftGeometry::cola(SampleRate::SR_44K1, Samples::new(2048), Samples::new(512))
+        .expect("hann 4x");
     assert!(hann.is_cola());
 
     let blackman = hann.with_window_fn(CosineWindow::BLACKMAN);
@@ -113,7 +116,7 @@ fn the_builder_can_produce_a_non_cola_grid() {
 #[test]
 fn a_grid_carries_both_a_window_length_and_a_window_shape() {
     let g = geo(2048, 512);
-    assert_eq!(g.window(), Samples(2048));
+    assert_eq!(g.window(), Samples::new(2048));
     assert_eq!(g.window_fn(), CosineWindow::HANN);
     assert_eq!(g.window_coefficients::<f32>().len(), 2048);
 }
@@ -165,15 +168,15 @@ fn frames_and_output_length_round_trip() {
     let g = geo(2048, 512);
 
     // Shorter than one window yields no frames at all.
-    assert_eq!(g.frames_for(Samples(2047)), FrameCount(0));
-    assert_eq!(g.output_len(FrameCount(0)), Samples(0));
+    assert_eq!(g.frames_for(Samples::new(2047)), FrameCount(0));
+    assert_eq!(g.output_len(FrameCount(0)), Samples::new(0));
 
-    assert_eq!(g.frames_for(Samples(2048)), FrameCount(1));
-    assert_eq!(g.output_len(FrameCount(1)), Samples(2048));
+    assert_eq!(g.frames_for(Samples::new(2048)), FrameCount(1));
+    assert_eq!(g.output_len(FrameCount(1)), Samples::new(2048));
 
     // Each additional frame adds exactly one hop.
-    assert_eq!(g.frames_for(Samples(2048 + 512)), FrameCount(2));
-    assert_eq!(g.output_len(FrameCount(2)), Samples(2048 + 512));
+    assert_eq!(g.frames_for(Samples::new(2048 + 512)), FrameCount(2));
+    assert_eq!(g.output_len(FrameCount(2)), Samples::new(2048 + 512));
 }
 
 #[test]
@@ -194,11 +197,11 @@ fn latency_is_exact() {
 /// 441 Hz at 44100 Hz on 1000 points is exactly bin 10; the frequency of bin 10.5 is 463.05 Hz.
 #[test]
 fn a_frequency_on_a_bin_boundary_is_a_whole_bin() {
-    let g = StftGeometry::new(SampleRate::SR_44K1, Samples(1000), Samples(250)).unwrap();
+    let g = StftGeometry::new(SampleRate::SR_44K1, Samples::new(1000), Samples::new(250)).unwrap();
     assert_eq!(g.bin_of(Hz::new(441.0)), 10.0);
     assert_eq!(g.bin_of(Hz::new(441.0)).ceil(), 10.0);
     assert_eq!(g.frequency_of(10.5), Hz::new(463.05));
-    let g = StftGeometry::new(SampleRate::SR_48K, Samples(1024), Samples(256)).unwrap();
+    let g = StftGeometry::new(SampleRate::SR_48K, Samples::new(1024), Samples::new(256)).unwrap();
     assert_eq!(g.bin_of(Hz::new(46.875)), 1.0);
     assert_eq!(g.frequency_of(3.0), Hz::new(140.625));
 }
@@ -207,13 +210,13 @@ fn a_frequency_on_a_bin_boundary_is_a_whole_bin() {
 /// 1000 points is bin 10.0000000023, whose ceiling is 11.
 #[test]
 fn an_edge_just_past_a_boundary_keeps_its_side() {
-    let g = StftGeometry::new(SampleRate::SR_44K1, Samples(1000), Samples(250)).unwrap();
+    let g = StftGeometry::new(SampleRate::SR_44K1, Samples::new(1000), Samples::new(250)).unwrap();
     assert_eq!(g.bin_of(Hz::new(441.000_000_1)).ceil(), 11.0);
 }
 
 /// A frame advances `hop / rate` seconds: 480 / 48000 = 0.01 s.
 #[test]
 fn the_frame_interval_is_the_hop_over_the_rate() {
-    let g = StftGeometry::new(SampleRate::SR_48K, Samples(2048), Samples(480)).unwrap();
+    let g = StftGeometry::new(SampleRate::SR_48K, Samples::new(2048), Samples::new(480)).unwrap();
     assert!((g.frame_interval().get() - 0.01).abs() < 1e-15);
 }

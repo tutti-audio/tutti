@@ -265,8 +265,8 @@ impl<F: FftFloat> FftResampler<F> {
         let needed = ready * self.fft_size_out;
         if wave_in.channels() != self.channels
             || wave_out.channels() != self.channels
-            || wave_in.frames().0 < self.chunk_size_in
-            || wave_out.frames().0 < needed
+            || wave_in.frames().get() < self.chunk_size_in
+            || wave_out.frames().get() < needed
         {
             return Err(ResampleError::BufferMismatch {
                 channels: self.channels,

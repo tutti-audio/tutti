@@ -102,7 +102,7 @@ mod tests {
     /// streamer's next cycle clears it.
     #[test]
     fn a_publish_to_a_streamed_cell_wakes_the_streamer() {
-        let (bell, _sleeper) = Bell::new();
+        let (bell, _parker) = Bell::new();
         let streamed = SteerCell::ringing(0u8, Arc::clone(&bell));
         let resident = SteerCell::new(0u8);
         assert!(!bell.has_work());

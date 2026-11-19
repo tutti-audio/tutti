@@ -18,7 +18,7 @@
 //!   while it was held (a `Mutex`'s poison rule: panicking now, and not
 //!   panicking when the guard was taken). Only the holder writes the word while it is `HELD`, so a
 //!   store is exact. The audio side that releases signals nothing: waiters poll,
-//!   because a wake-up that cannot lock would need a doorbell per waiter and
+//!   because a wake-up that cannot lock would need an unparker per waiter and
 //!   the wait is a control-side rarity.
 //!
 //! # Identity

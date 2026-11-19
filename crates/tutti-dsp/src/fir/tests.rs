@@ -124,9 +124,9 @@ fn the_length_is_odd_and_follows_the_estimate() {
     .unwrap();
     let estimate = ((65.0 - 7.95) / (2.285 * 2.0 * PI * 1_000.0 / RATE) + 1.0).ceil() as usize;
     let want = estimate | 1;
-    assert_eq!(fir.len(), Samples(want));
+    assert_eq!(fir.len(), Samples::new(want));
     assert_eq!(fir.len().get() % 2, 1);
-    assert_eq!(fir.delay(), Samples((want - 1) / 2));
+    assert_eq!(fir.delay(), Samples::new((want - 1) / 2));
 }
 
 /// Passband within the Kaiser ripple `δ = 10^(-A/20)` and stopband at or below

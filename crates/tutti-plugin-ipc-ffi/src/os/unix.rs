@@ -51,7 +51,7 @@ pub struct Readable {
 
 /// Waits up to `timeout` (`None`: for ever) for either of two descriptors to
 /// become readable, in one `poll(2)` that allocates nothing: the wait of a
-/// thread that serves a connection and is woken by a doorbell's descriptor.
+/// thread that serves a connection and is woken by a bell's descriptor.
 /// Both `false` on a timeout.
 ///
 /// # Errors

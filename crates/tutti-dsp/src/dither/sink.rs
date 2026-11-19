@@ -13,7 +13,7 @@ use crate::dither::{DitherNoise, DitherShape};
 ///
 /// A longer write goes through in pieces of this size. The noise advances once
 /// per sample in order, so the split changes nothing in what is written.
-const CHUNK: Samples = Samples(1024);
+const CHUNK: Samples = Samples::new(1024);
 
 /// One least significant bit of the sample format `I` in the `[-1, 1]` float
 /// domain, or silence for a float format, which has none.

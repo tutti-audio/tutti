@@ -61,11 +61,11 @@
 //! - [`drain_clock()`] — counts the drains the audio side begins, so the
 //!   control side can tell which of its writes a block has surely taken.
 //! - [`handoff()`] — one value that moves between a control thread and the
-//!   audio thread at a block boundary ([`Hand`] lends and recalls, [`Rt`]
+//!   audio thread at a block boundary ([`Handoff`] lends and recalls, [`Rt`]
 //!   trades).
-//! - [`doorbell()`], [`Doorbell`] and [`Sleeper`] — wake one parked thread from
-//!   the audio thread (a futex wake only if a sleeper is parked), with no
-//!   wake-up lost between the sleeper's check and its park.
+//! - [`parker()`], [`Unparker`] and [`Parker`] — wake one parked thread from
+//!   the audio thread (a futex wake only if the parker is parked), with no
+//!   wake-up lost between the parker's check and its park.
 //! - [`RenderCount`] — the renders of one thing in flight, and a `quiescent`
 //!   check so a thread that cleared what they read frees only when none can
 //!   still read it.
@@ -176,12 +176,12 @@ mod claim_lock;
 mod clock;
 mod denormals;
 mod dirty_set;
-mod doorbell;
 mod drain_clock;
 mod exclusive;
 mod fault_latch;
 mod gauge;
 mod handoff;
+mod parker;
 // `id!` is `#[macro_export]`ed: the one way any crate writes an id, used as
 // `tutti_rt::id!`.
 mod id;
@@ -217,7 +217,6 @@ pub use claim_lock::{Claim, ClaimGuard};
 pub use clock::monotonic_ns;
 pub use denormals::with_no_denormals;
 pub use dirty_set::{DirtyIndex, DirtySet, Taken};
-pub use doorbell::{Doorbell, Sleeper, doorbell};
 pub use drain_clock::{DrainBeat, DrainMark, DrainWatch, drain_clock};
 pub use exclusive::Exclusive;
 pub use fault_latch::{Cause, Drained, FaultLatch};
@@ -225,7 +224,7 @@ pub use gauge::{
     Count, Counter, CounterWriter, Gauge, GaugeWriter, Reading, Tally, TallyWriter, Words, counter,
     gauge, tally,
 };
-pub use handoff::{Hand, Rt, handoff};
+pub use handoff::{Handoff, Rt, handoff};
 pub use job_gate::JobGate;
 pub use last_out::{LastOut, Party};
 pub use level_cell::{LevelReader, LevelSpan, LevelWriter, level_cell};
@@ -234,6 +233,7 @@ pub use main_thread::MainThreadMarker;
 pub use mint::Mint;
 pub use packed_atomic::PackedAtomic;
 pub use param::{Param, Param64, ParamCell};
+pub use parker::{Parker, Unparker, parker};
 pub use pos_ring::{
     MAX_POS_RING_FRAMES, MAX_POS_RING_POSITION, PosClaim, PosFrame, PosReader, PosRing, PosWriter,
     RingFloat, RingSample, RingWindow,

@@ -12,7 +12,7 @@ use tutti_units::Hz;
 /// use tutti_dsp::log_band_edges;
 /// use tutti_units::Hz;
 ///
-/// let edges = log_band_edges(Hz(100.0), Hz(10_000.0), 2);
+/// let edges = log_band_edges(Hz::new(100.0), Hz::new(10_000.0), 2);
 /// assert_eq!(edges.len(), 3);
 /// assert!((edges[1].get() - 1000.0).abs() < 1e-9);
 /// ```
@@ -39,8 +39,8 @@ pub fn log_band_edges(lo: Hz, hi: Hz, count: usize) -> Vec<Hz> {
 /// use tutti_units::Hz;
 ///
 /// // Two whole octaves fit in 100..=500 (a third would end at 800).
-/// let edges = octave_band_edges(Hz(100.0), Hz(500.0), 1);
-/// assert_eq!(edges, [Hz(100.0), Hz(200.0), Hz(400.0)]);
+/// let edges = octave_band_edges(Hz::new(100.0), Hz::new(500.0), 1);
+/// assert_eq!(edges, [Hz::new(100.0), Hz::new(200.0), Hz::new(400.0)]);
 /// ```
 #[must_use]
 pub fn octave_band_edges(lo: Hz, hi: Hz, per_octave: usize) -> Vec<Hz> {

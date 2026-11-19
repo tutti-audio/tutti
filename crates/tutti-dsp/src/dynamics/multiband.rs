@@ -388,7 +388,7 @@ impl<F: Float + Lanes + Lerp> MultibandBank<F> {
         for plane in &mut scratch.sum {
             plane[..n].fill(F::ZERO);
         }
-        let frames = Samples(0)..Samples(n);
+        let frames = Samples::new(0)..Samples::new(n);
         {
             let (Ok(heard), Ok(mut split)) = (
                 Planes::from_vecs(&scratch.input),
