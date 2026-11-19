@@ -3463,6 +3463,7 @@ dependencies = [
  "thiserror 2.0.21",
  "tutti-fixtures",
  "tutti-music",
+ "tutti-rt",
  "tutti-units",
 ]
 
@@ -3536,6 +3537,7 @@ dependencies = [
  "libm",
  "thiserror 2.0.21",
  "tutti-midi-protocol",
+ "tutti-rt",
  "tutti-ump",
  "tutti-units",
 ]
