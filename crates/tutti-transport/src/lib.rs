@@ -40,15 +40,17 @@ use tutti_buffers::{Float, Planes, PlanesMut};
 pub use audio::{Applied, AudioTaken, TransportAudio};
 pub use handle::Transport;
 pub use loop_region::{LoopEdit, LoopRegion};
-pub use motion::{FadeOut, MotionEvent, MotionFsm, MotionState, Then};
+pub use motion::{AfterLocate, FadeOut, MotionEvent, MotionFsm, MotionState};
 pub use offline::{OfflineTimeline, OfflineTimelineConfig};
-pub use project_meter::{MeterSlot, MeterSlotCell, MeterSlotReader, ProjectMeter};
+pub use project_meter::{
+    ProjectMeter, TimeSignatureCell, TimeSignatureSlot, TimeSignatureSlotReader,
+};
 pub use settings::TransportSettings;
 pub use tempo_reader::TempoReader;
 pub use timed::{IMMEDIATE_RESERVE, SCHEDULE_CAPACITY, Scheduled, TimedError, TransportCommand};
 
 pub use timeline::{OfflineClock, OfflineTransport, Timeline};
-pub use walk::TempoAhead;
+pub use walk::UpcomingTempo;
 
 /// A clock an offline render drives, one block at a time.
 ///

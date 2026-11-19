@@ -96,7 +96,7 @@ pub struct TransportSettings {
     /// last took it, which for a constant map ignores wiggles smaller than its
     /// hysteresis. Written by the clock; what a beat must be resolved with
     /// to agree with it.
-    pub(crate) tempo_in_force: Arc<AtomicBpm>,
+    pub(crate) current_tempo: Arc<AtomicBpm>,
     /// The project's meter: what the metronome and every hosted plugin read
     /// once per block. Owned here, beside the tempo map, so the transport is
     /// the one place the project's tempo and meter are held
@@ -117,7 +117,7 @@ impl TransportSettings {
             in_preroll: Arc::new(AtomicBool::new(false)),
             paused: Arc::new(AtomicBool::new(true)),
             steady_time: Arc::new(AtomicI64::new(0)),
-            tempo_in_force: Arc::new(AtomicBpm::new(Bpm::default())),
+            current_tempo: Arc::new(AtomicBpm::new(Bpm::default())),
             meter: ProjectMeter::default(),
         }
     }
@@ -132,8 +132,8 @@ impl TransportSettings {
 
     /// The tempo the clock is actually running at (see the field).
     #[must_use]
-    pub fn tempo_in_force(&self) -> Bpm {
-        self.tempo_in_force.load(Ordering::Acquire)
+    pub fn current_tempo(&self) -> Bpm {
+        self.current_tempo.load(Ordering::Acquire)
     }
 
     /// Samples elapsed since the stream started. Free-running: never reset by a

@@ -3,7 +3,7 @@
 //! The metronome and every hosted plugin read the same musical meter, once per
 //! block. Each reader reads **one** cell whose identity is fixed when the node
 //! is built: the metronome the project's own ([`ProjectMeter`]), a plugin node
-//! its own [`MeterSlot`]. A slot follows at most one project meter, and a
+//! its own [`TimeSignatureSlot`]. A slot follows at most one project meter, and a
 //! [`ProjectMeter::set_meter`] publishes into the project's cell and into
 //! every following slot before it returns.
 //!
@@ -29,21 +29,21 @@ use tutti_rt::{Loan, LockExt, Publisher, Reader};
 
 /// What a following node reads: the project's meter, or none (the node then
 /// reads 4/4 from bar 0).
-pub type MeterSlotCell = Publisher<Option<Arc<MeterMap>>>;
+pub type TimeSignatureCell = Publisher<Option<Arc<MeterMap>>>;
 
-/// A reader of a [`MeterSlotCell`]: what a following node lends through,
-/// once per block ([`MeterSlot::reader`]).
+/// A reader of a [`TimeSignatureCell`]: what a following node lends through,
+/// once per block ([`TimeSignatureSlot::reader`]).
 ///
 /// `Clone` registers a new reader on the same cell: it locks and may
 /// allocate, so clone on the control side, never on the audio thread.
 #[derive(Debug)]
-pub struct MeterSlotReader {
+pub struct TimeSignatureSlotReader {
     reader: Reader<Option<Arc<MeterMap>>>,
     /// The cell `reader` is registered on: a clone registers through it.
-    cell: MeterSlotCell,
+    cell: TimeSignatureCell,
 }
 
-impl MeterSlotReader {
+impl TimeSignatureSlotReader {
     /// Borrows the slot's meter until the [`Loan`] drops. Wait-free; once per
     /// block, never parked across blocks.
     #[must_use = "a loan dropped at once reads nothing"]
@@ -52,7 +52,7 @@ impl MeterSlotReader {
     }
 }
 
-impl Clone for MeterSlotReader {
+impl Clone for TimeSignatureSlotReader {
     fn clone(&self) -> Self {
         Self {
             reader: self.cell.reader(),
@@ -216,17 +216,17 @@ impl std::fmt::Debug for ProjectMeter {
 /// [`unfollow`](Self::unfollow): each a publish into that cell. A clone is
 /// another handle on the same slot.
 #[derive(Clone)]
-pub struct MeterSlot(Arc<SlotInner>);
+pub struct TimeSignatureSlot(Arc<SlotInner>);
 
 struct SlotInner {
-    cell: MeterSlotCell,
+    cell: TimeSignatureCell,
     /// The project meter followed, for the control side
-    /// ([`following`](MeterSlot::following)). The audio thread never takes
+    /// ([`following`](TimeSignatureSlot::following)). The audio thread never takes
     /// this lock.
     follows: Mutex<Option<ProjectMeter>>,
 }
 
-impl Default for MeterSlot {
+impl Default for TimeSignatureSlot {
     /// Following nothing.
     fn default() -> Self {
         Self(Arc::new(SlotInner {
@@ -236,7 +236,7 @@ impl Default for MeterSlot {
     }
 }
 
-impl MeterSlot {
+impl TimeSignatureSlot {
     /// A slot following `meter`, or nothing.
     pub fn following_meter(meter: Option<ProjectMeter>) -> Self {
         let slot = Self::default();
@@ -299,24 +299,24 @@ impl MeterSlot {
     }
 
     /// The cell the node reads, once per block.
-    pub fn cell(&self) -> MeterSlotCell {
+    pub fn cell(&self) -> TimeSignatureCell {
         self.0.cell.clone()
     }
 
     /// A reader registered on [`cell`](Self::cell): what the node lends
     /// through, registered at its build. Control thread: registering may
     /// allocate.
-    pub fn reader(&self) -> MeterSlotReader {
-        MeterSlotReader {
+    pub fn reader(&self) -> TimeSignatureSlotReader {
+        TimeSignatureSlotReader {
             reader: self.0.cell.reader(),
             cell: self.0.cell.clone(),
         }
     }
 }
 
-impl std::fmt::Debug for MeterSlot {
+impl std::fmt::Debug for TimeSignatureSlot {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("MeterSlot")
+        f.debug_struct("TimeSignatureSlot")
             .field("following", &self.is_following())
             .finish()
     }
@@ -351,7 +351,7 @@ mod tests {
     }
 
     /// What a node reading `slot` sees this block.
-    fn read(slot: &MeterSlot) -> Option<Arc<MeterMap>> {
+    fn read(slot: &TimeSignatureSlot) -> Option<Arc<MeterMap>> {
         Option::clone(&slot.reader().lend())
     }
 
@@ -370,7 +370,7 @@ mod tests {
     fn set_meter_reaches_every_follower_before_it_returns() {
         let project = ProjectMeter::new(MeterMap::default());
         let mut click = project.reader();
-        let slots: Vec<MeterSlot> = (0..3).map(|_| MeterSlot::default()).collect();
+        let slots: Vec<TimeSignatureSlot> = (0..3).map(|_| TimeSignatureSlot::default()).collect();
         for slot in &slots {
             assert!(read(slot).is_none(), "a new slot follows nothing");
             slot.follow(project.clone());
@@ -413,7 +413,7 @@ mod tests {
     #[test]
     fn following_the_same_meter_again_lists_the_slot_once() {
         let project = ProjectMeter::default();
-        let slot = MeterSlot::default();
+        let slot = TimeSignatureSlot::default();
         for _ in 0..5 {
             slot.follow(project.clone());
         }
@@ -431,8 +431,8 @@ mod tests {
     #[test]
     fn a_dropped_slot_leaves_the_list() {
         let project = ProjectMeter::default();
-        let kept = MeterSlot::following_meter(Some(project.clone()));
-        let dropped = MeterSlot::following_meter(Some(project.clone()));
+        let kept = TimeSignatureSlot::following_meter(Some(project.clone()));
+        let dropped = TimeSignatureSlot::following_meter(Some(project.clone()));
         let weak = Arc::downgrade(&dropped.0);
         drop(dropped);
         assert!(weak.upgrade().is_none(), "the list holds no strong count");
@@ -450,7 +450,7 @@ mod tests {
         let gone = Arc::downgrade(&old);
         let project = ProjectMeter::new(MeterMap::clone(&old));
         project.set_meter(old);
-        let slot = MeterSlot::following_meter(Some(project.clone()));
+        let slot = TimeSignatureSlot::following_meter(Some(project.clone()));
         let (mut metronome, mut node) = (project.reader(), slot.reader());
         {
             // A block in progress on each reader across the replacement.

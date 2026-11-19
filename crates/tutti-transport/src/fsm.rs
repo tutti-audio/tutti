@@ -4,7 +4,7 @@
 //! machine that decides transitions, and `TransitionResult` is what it hands
 //! back for the engine's `MotionAudio` to publish.
 
-use super::motion::{FadeOut, MotionEvent, Then};
+use super::motion::{AfterLocate, FadeOut, MotionEvent};
 use tutti_units::Beat;
 
 /// What the transport is doing.
@@ -285,9 +285,9 @@ impl TransportFsm {
                 // during a fade means "whatever the fade was heading for",
                 // not "mid-fade".
                 let landing = match then {
-                    Then::Roll => S::Rolling,
-                    Then::Stop => S::Stopped,
-                    Then::Keep => match self.motion {
+                    AfterLocate::Play => S::Rolling,
+                    AfterLocate::Stop => S::Stopped,
+                    AfterLocate::Keep => match self.motion {
                         S::Rolling | S::FastForward | S::Rewind => S::Rolling,
                         S::Stopped | S::DeclickToStop | S::DeclickToLocate => S::Stopped,
                     },
@@ -472,7 +472,7 @@ mod tests {
             MotionEvent::Locate {
                 beat: Beat::new(2.0),
                 fade: FadeOut::Immediate,
-                then: Then::Keep,
+                then: AfterLocate::Keep,
             },
             MotionEvent::FastForward,
             MotionEvent::Rewind,

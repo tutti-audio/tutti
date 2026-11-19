@@ -13,8 +13,8 @@ use super::handle::Transport;
 use super::motion::{MotionAudio, is_declicking};
 use super::settings::TransportSettings;
 use super::tempo_reader::TempoReader;
-use super::timed::{ScheduleAudio, Scheduled, TransportCommand};
-use super::walk::TempoAhead;
+use super::timed::{CommandQueueAudio, Scheduled, TransportCommand};
+use super::walk::UpcomingTempo;
 use std::sync::atomic::Ordering;
 use tutti_tempo::TempoMap;
 use tutti_units::{Beat, BeatDuration, Bpm, SampleRate, Seconds};
@@ -69,7 +69,7 @@ pub struct TransportAudio {
     /// The untimed inputs, read at a block's start and carried across the
     /// commands in it.
     control: Control,
-    schedule: ScheduleAudio,
+    schedule: CommandQueueAudio,
     settings: TransportSettings,
     /// The published tempo map, lent once per block and only when
     /// [`seen`](Self::seen) is behind the publisher's count.
@@ -128,7 +128,7 @@ impl TransportAudio {
             tempo_map,
             seen,
             stepped,
-            schedule: ScheduleAudio::new(transport.motion.timed().clone()),
+            schedule: CommandQueueAudio::new(transport.motion.timed().clone()),
             motion,
             settings,
         })
@@ -139,8 +139,8 @@ impl TransportAudio {
     /// [`try_send`](super::MotionFsm::try_send), which is `At::NextBlock`)
     /// into the pending list, dropping what it cancelled. Call at the start
     /// of each walk.
-    pub fn gather(&mut self) {
-        self.schedule.gather();
+    pub fn drain_commands(&mut self) {
+        self.schedule.drain_commands();
     }
 
     /// The scheduled commands sent and not yet applied.
@@ -214,25 +214,29 @@ impl TransportAudio {
         frames: usize,
         from: &tutti_graph::TransportPosition,
         free: usize,
-    ) -> TempoAhead {
+    ) -> UpcomingTempo {
         if !self.stepped {
-            return TempoAhead::NONE;
+            return UpcomingTempo::NONE;
         }
         self.with_map(|clock, map| clock.ahead(frames, from, map, free))
     }
 
     /// The transport at the clock's current frame, after
-    /// [`advance`](Self::advance) rolled to a tempo change from
+    /// [`advance`](Self::advance) stopped at a tempo change from
     /// [`tempo_ahead`](Self::tempo_ahead): the tempo and segment the walk
     /// took there. The inputs read at the block's start stay.
-    pub fn restate(&mut self) -> tutti_graph::TransportPosition {
+    pub fn position_after_tempo_change(&mut self) -> tutti_graph::TransportPosition {
         self.begin(false)
     }
 
     /// Applies pending command `i` (late or not: counted when late), then
     /// reports the transport from this frame on under it. The command's own
     /// effect only; the inputs read at the block's start stay.
-    pub fn fire(&mut self, i: usize, late: bool) -> (Applied, tutti_graph::TransportPosition) {
+    pub fn apply_command(
+        &mut self,
+        i: usize,
+        late: bool,
+    ) -> (Applied, tutti_graph::TransportPosition) {
         let cmd = self.schedule.take(i, late).command();
         self.motion.apply(cmd);
         let applied = self.settle();
@@ -243,7 +247,7 @@ impl TransportAudio {
     }
 
     /// Advances the playhead `frames` under `from`, the transport the last
-    /// [`begin_block`](Self::begin_block) or [`fire`](Self::fire) reported.
+    /// [`begin_block`](Self::begin_block) or [`apply_command`](Self::apply_command) reported.
     pub fn advance(&mut self, frames: usize, from: &tutti_graph::TransportPosition) {
         self.with_map(|clock, map| clock.advance(frames, from, map));
     }
@@ -339,16 +343,16 @@ mod tests {
             .schedule(At::Beat(tutti_units::Beat::new(1000.0)), MotionEvent::Play)
             .expect("room");
         let mut first = t.audio(SampleRate::SR_48K).expect("first");
-        first.gather();
+        first.drain_commands();
         assert_eq!(first.pending().len(), 1);
         drop(first);
 
         let mut next = t.audio(SampleRate::SR_48K).expect("handed back on drop");
-        next.gather();
+        next.drain_commands();
         assert_eq!(next.pending().len(), 1, "carried over");
         assert_eq!(t.motion.scheduled_outstanding(), 1);
         assert!(!t.is_rolling());
-        let _ = next.fire(0, false);
+        let _ = next.apply_command(0, false);
         assert_eq!(t.motion.scheduled_outstanding(), 0);
         assert!(t.is_rolling(), "the carried command fired");
     }
@@ -365,13 +369,13 @@ mod tests {
         t.motion
             .schedule(At::NextBlock, MotionEvent::stop_unfaded())
             .expect("room");
-        a.gather();
+        a.drain_commands();
         assert_eq!(a.pending().len(), 2);
         assert_eq!(t.motion.scheduled_outstanding(), 2);
-        let _ = a.fire(0, true);
+        let _ = a.apply_command(0, true);
         assert_eq!(t.motion.scheduled_outstanding(), 1);
         assert_eq!(t.motion.late_command_count(), 1);
-        let _ = a.fire(0, false);
+        let _ = a.apply_command(0, false);
         assert_eq!(t.motion.scheduled_outstanding(), 0);
         assert_eq!(t.motion.late_command_count(), 1);
         assert!(!t.is_rolling(), "play then stop");
@@ -404,9 +408,9 @@ mod tests {
         t.motion
             .schedule(At::NextBlock, MotionEvent::Play)
             .expect("room");
-        a.gather();
+        a.drain_commands();
         let _ = a.begin_block();
-        let _ = a.fire(0, false);
+        let _ = a.apply_command(0, false);
         (t, a)
     }
 
@@ -462,9 +466,9 @@ mod tests {
         t.motion
             .schedule(At::NextBlock, MotionEvent::Play)
             .expect("room");
-        a.gather();
+        a.drain_commands();
         let _ = a.begin_block();
-        let _ = a.fire(0, false);
+        let _ = a.apply_command(0, false);
         let _ = roll(&mut a, 24_000); // beat 1 at 120
         let ended = {
             let blk = a.begin_block();

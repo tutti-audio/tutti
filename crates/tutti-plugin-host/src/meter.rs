@@ -1,6 +1,6 @@
 //! The project meter a plugin node reads its time signature and bar with.
 
-use tutti_transport::{MeterSlot, MeterSlotReader, ProjectMeter};
+use tutti_transport::{ProjectMeter, TimeSignatureSlot, TimeSignatureSlotReader};
 
 /// A plugin node's meter: the project meter it reads once per block for the
 /// time-signature and bar fields of the transport it tells the plugin.
@@ -15,7 +15,7 @@ use tutti_transport::{MeterSlot, MeterSlotReader, ProjectMeter};
 /// # One cell, fixed when the node is built
 ///
 /// The node reads one cell of its own, through a reader registered on it when
-/// the node is built ([`MeterSlot::reader`]), holding the project's [`MeterMap`](tutti_music::MeterMap) or
+/// the node is built ([`TimeSignatureSlot::reader`]), holding the project's [`MeterMap`](tutti_music::MeterMap) or
 /// nothing. Installing a meter makes the slot *follow* a [`ProjectMeter`]:
 /// the project meter publishes into the slot now, and on every
 /// [`ProjectMeter::set_meter`] after, so a meter edit reaches the metronome
@@ -27,7 +27,7 @@ use tutti_transport::{MeterSlot, MeterSlotReader, ProjectMeter};
 /// playback retires the old value for the control side to free, and the
 /// audio thread never holds the last strong count.
 #[derive(Clone, Default)]
-pub struct PluginMeter(MeterSlot);
+pub struct PluginMeter(TimeSignatureSlot);
 
 impl PluginMeter {
     /// Give the node the project meter: it follows `meter`, so an edit the
@@ -70,7 +70,7 @@ impl PluginMeter {
     /// the node when it is built. Control thread: registering may allocate.
     /// A lend through it is wait-free, allocates nothing, and frees nothing
     /// when it drops.
-    pub fn reader(&self) -> MeterSlotReader {
+    pub fn reader(&self) -> TimeSignatureSlotReader {
         self.0.reader()
     }
 
@@ -78,7 +78,7 @@ impl PluginMeter {
     /// test of a host's sweep can hold a block's borrow across a clear.
     /// Control thread: registering may allocate. Not API.
     #[doc(hidden)]
-    pub fn probe_reader(&self) -> MeterSlotReader {
+    pub fn probe_reader(&self) -> TimeSignatureSlotReader {
         self.0.reader()
     }
 
@@ -98,7 +98,7 @@ impl PluginMeter {
     /// A handle on a new slot following `meter`, or nothing: an in-process
     /// fork's.
     pub(crate) fn holding(meter: Option<ProjectMeter>) -> Self {
-        Self(MeterSlot::following_meter(meter))
+        Self(TimeSignatureSlot::following_meter(meter))
     }
 }
 
