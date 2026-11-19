@@ -284,7 +284,7 @@ fn stored_a1_step(fc: Hz) -> impl Fn(&mut [f32; 2], f32) -> f32 {
 
 /// The sweep of cutoffs about the documented extreme, 4 to 6 Hz in steps of 10 mHz.
 fn extreme_cutoffs() -> impl Iterator<Item = Hz> {
-    (0..=200).map(|i| Hz(4.0 + f64::from(i) * 0.01))
+    (0..=200).map(|i| Hz::new(4.0 + f64::from(i) * 0.01))
 }
 
 /// Storing `a1 = 1 / (1 + g (g + k))` in `f32` rounds it by up to half an ulp below 1, `2^-25 =
@@ -334,17 +334,17 @@ fn the_complement_keeps_the_damping_of_a_low_cutoff_to_the_f32_ulp() {
 #[test]
 fn a_five_hz_high_pass_at_192_khz_holds_its_gain_and_noise_in_f32() {
     let whole = EXTREME_RATE.get() as usize;
-    let tau = 1.0 / (prewarp(Hz(5.0), EXTREME_RATE) * core::f64::consts::SQRT_2);
+    let tau = 1.0 / (prewarp(Hz::new(5.0), EXTREME_RATE) * core::f64::consts::SQRT_2);
     let sigma = 2f64.powi(-24) / 12f64.sqrt() * (3.0 * tau).sqrt();
     let bound = 1.5 * (2.0 * (whole as f64).ln()).sqrt() * sigma;
-    let (error, worst) = high_pass_at_the_cutoff(Hz(5.0), complement_step(Hz(5.0)));
+    let (error, worst) = high_pass_at_the_cutoff(Hz::new(5.0), complement_step(Hz::new(5.0)));
     assert!(
         error * core::f64::consts::FRAC_1_SQRT_2 < bound,
         "|H(fc)| error {error:e}"
     );
     assert!(worst < bound, "deviation {worst:e} over {bound:e}");
 
-    let worst_cutoff = Hz(4.03);
+    let worst_cutoff = Hz::new(4.03);
     let (with_d, _) = high_pass_at_the_cutoff(worst_cutoff, complement_step(worst_cutoff));
     let (with_a1, _) = high_pass_at_the_cutoff(worst_cutoff, stored_a1_step(worst_cutoff));
     assert!(

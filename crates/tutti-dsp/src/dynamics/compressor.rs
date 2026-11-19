@@ -81,7 +81,7 @@ impl Default for CompressorControls {
 
 /// The most makeup, in dB, a compressor applies: 10^(400/20) is 1e20, so the gain of a
 /// makeup and a reduction stays finite whatever either is.
-const MAX_MAKEUP: Db = Db(400.0);
+const MAX_MAKEUP: Db = Db::new(400.0);
 
 /// A compressor at one set of controls and one rate: the controls made runnable.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -259,7 +259,7 @@ impl<F: Float + Lanes + Lerp> CompressorBank<F> {
     /// [`reset`](Self::reset)), in dB and positive; [`Db::UNITY`] is none. A **measurement**,
     /// for a reduction meter. No allocation.
     pub fn take_deepest(&mut self) -> Db {
-        Db(core::mem::replace(&mut self.deepest, F::ZERO).into())
+        Db::new(core::mem::replace(&mut self.deepest, F::ZERO).into())
     }
 
     /// Runs `input` into `output`, scaled by one gain from the loudest channel of `key`.

@@ -11,7 +11,7 @@ use crate::testing::noise;
 
 /// The ceiling the `f32` clip runs at: the amplitude of `db`, narrowed once.
 fn ceiling_of(db: f64) -> f32 {
-    Db(db).to_amplitude().get() as f32
+    Db::new(db).to_amplitude().get() as f32
 }
 
 /// The ceiling a fed `f32` lane value runs at: `10^(db / 20)` computed in `f32`, as the per-frame
@@ -21,7 +21,9 @@ fn fed_ceiling_of(db: f32) -> f32 {
 }
 
 fn controls(db: f64) -> BrickwallControls {
-    BrickwallControls { ceiling: Db(db) }
+    BrickwallControls {
+        ceiling: Db::new(db),
+    }
 }
 
 /// The ceilings the tests run at: a grid across the range and seeded draws.
@@ -260,7 +262,7 @@ fn an_f64_brickwall_clamps_at_the_f64_amplitude_and_passes_what_is_inside() {
     };
     assert_close_f64(
         &render(-20.0),
-        &vec![Db(-20.0).to_amplitude().get(); x.len()],
+        &vec![Db::new(-20.0).to_amplitude().get(); x.len()],
         1e-15,
     );
     assert_close_f64(&render(0.0), &x, 0.0);

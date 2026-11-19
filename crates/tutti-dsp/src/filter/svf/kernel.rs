@@ -82,7 +82,7 @@ impl SvfCoeffs {
     /// The largest gain, in dB either way, [`new`](Self::new) solves for. A
     /// gain further out is this one: 200 dB is a factor of 10^10 in
     /// amplitude, past anything audible, and keeps every coefficient finite.
-    pub const MAX_GAIN: Db = Db(200.0);
+    pub const MAX_GAIN: Db = Db::new(200.0);
 
     /// Computes SVF filter coefficients from parameters (pure function, no state).
     ///
@@ -102,7 +102,7 @@ impl SvfCoeffs {
         let sample_rate = sample_rate.into();
         // `tan` diverges at Nyquist itself, so the cutoff stops just short of it.
         let fc = freq.clamp(
-            Hz(1.0),
+            Hz::new(1.0),
             sample_rate.nyquist_scaled(crate::filter::NYQUIST_MARGIN),
         );
         let g0 = prewarp(fc, sample_rate);
@@ -117,7 +117,7 @@ impl SvfCoeffs {
             gain_db.clamp(-Self::MAX_GAIN, Self::MAX_GAIN)
         };
         // The half-gain amplitude `10^(dB / 40)` is half the decibels.
-        let a = Db(0.5 * gain_db.get()).to_amplitude().get();
+        let a = Db::new(0.5 * gain_db.get()).to_amplitude().get();
 
         // RBJ cookbook shapes: a bell's damping is `1/(Q*A)`, and a shelf's
         // midpoint (half the dB gain) sits at `fc`, so its prototype is tuned

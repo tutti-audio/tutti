@@ -12,7 +12,7 @@ pub(super) const CHUNK: usize = 64;
 
 /// How long a makeup (or a gate's range) that moves takes to arrive: 5 ms, counted on the
 /// stream, so the de-zipper does not depend on the block.
-pub const GAIN_GLIDE: Seconds = Seconds(0.005);
+pub const GAIN_GLIDE: Seconds = Seconds::new(0.005);
 
 /// The level an infinite sample is held to: `f32::MAX` (770 dB) at both widths, so the level's
 /// dB, and the gain over it, stay finite at the narrowest float.
@@ -43,7 +43,7 @@ pub(crate) fn key_levels<F: Float>(key: &Planes<'_, F>, frames: Range<usize>, ou
 
 /// The widest knee, in dB, a detector's curve runs: the knee term `(1 - 1/ratio) x^2 / (2 knee)`
 /// with `x` inside the knee is at most `knee / 2`, and `x^2` stays finite.
-pub(super) const MAX_KNEE: Db = Db(400.0);
+pub(super) const MAX_KNEE: Db = Db::new(400.0);
 
 /// The attack and release a control pair names, as a valid [`Ballistics`]: a time under 0 or
 /// NaN reads as 0 (instant) and an infinite one holds (coefficient 0), as
@@ -53,7 +53,7 @@ pub(crate) fn floored(attack: Seconds, release: Seconds) -> Ballistics {
     // `max` reads NaN and a negative time as 0. `clamp` caps +inf at `f64::MAX` seconds, whose
     // coefficient is 0 at every rate: `t * rate` overflows to infinity above 1 Hz, and below
     // it `exp(-1 / (t * rate))` of a subnormal exponent is exactly 1.
-    let time = |t: Seconds| Seconds(t.get().max(0.0).clamp(0.0, f64::MAX));
+    let time = |t: Seconds| Seconds::new(t.get().max(0.0).clamp(0.0, f64::MAX));
     Ballistics::new(time(attack), time(release))
         .expect("a time floored at 0 and capped at f64::MAX is finite and not negative")
 }

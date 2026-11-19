@@ -80,9 +80,9 @@ fn rbj_db(ty: SvfType, fc: f64, q: f64, gain_db: f64, rate: f64, f: f64) -> f64 
 fn measured_db(ty: SvfType, fc: f64, q: f64, gain_db: f64, rate: f64, f: f64) -> f64 {
     let c = SvfCoefficients::<f64>::from(&SvfCoeffs::new(
         ty,
-        Hz(fc),
-        Q(q),
-        Db(gain_db),
+        Hz::new(fc),
+        Q::new(q),
+        Db::new(gain_db),
         SampleRate::of(rate),
     ));
     let mut st = [0.0f64; 2];
@@ -202,16 +202,16 @@ fn test_svf_coeffs_bell_zero_gain_is_unity() {
 fn cutoff_and_q_are_not_interchangeable() {
     let right = SvfCoeffs::new(
         SvfType::LowPass,
-        Hz(1000.0),
-        Q(0.707),
+        Hz::new(1000.0),
+        Q::new(0.707),
         Db::UNITY,
         SampleRate::SR_44K1,
     );
     // What the transposed call computes: a 0.707 Hz cutoff at Q 1000.
     let swapped = SvfCoeffs::new(
         SvfType::LowPass,
-        Hz(0.707),
-        Q(1000.0),
+        Hz::new(0.707),
+        Q::new(1000.0),
         Db::UNITY,
         SampleRate::SR_44K1,
     );

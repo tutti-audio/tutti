@@ -52,7 +52,7 @@ impl CrossoverControls {
     /// any rate.
     pub(crate) fn octaves(rate: SampleRate) -> Self {
         Self {
-            frequencies: core::array::from_fn(|i| Hz(rate.get() * 0.002 * (1 << i) as f64)),
+            frequencies: core::array::from_fn(|i| Hz::new(rate.get() * 0.002 * (1 << i) as f64)),
         }
     }
 }

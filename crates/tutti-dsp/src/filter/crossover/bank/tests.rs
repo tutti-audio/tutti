@@ -10,7 +10,7 @@ use crate::{Complex64, CrossoverControls, CrossoverModel, SOLVE_CEILING};
 const RATE: SampleRate = SampleRate::SR_48K;
 
 fn model(freqs: &[f64]) -> CrossoverModel {
-    let f: Vec<Hz> = freqs.iter().map(|&f| Hz(f)).collect();
+    let f: Vec<Hz> = freqs.iter().map(|&f| Hz::new(f)).collect();
     CrossoverModel::new(&f, RATE).unwrap()
 }
 
@@ -406,7 +406,13 @@ fn the_bands_stay_within_the_models_bound() {
     use crate::Lti;
     for set in [[20.0f64, 21.0], [23_000.0, 23_900.0], [100.0, 20_000.0]] {
         let controls = CrossoverControls {
-            frequencies: [Hz(set[0]), Hz(set[1]), Hz::ZERO, Hz::ZERO, Hz::ZERO],
+            frequencies: [
+                Hz::new(set[0]),
+                Hz::new(set[1]),
+                Hz::ZERO,
+                Hz::ZERO,
+                Hz::ZERO,
+            ],
         };
         let m = CrossoverModel::designed(3, &controls, RATE).unwrap();
         let noise: Vec<f64> = (0..20_000)
@@ -467,7 +473,7 @@ fn a_five_hz_split_at_192_khz_holds_its_bands_and_noise_in_f32() {
     const FC: f64 = 5.0;
     let whole = FS as usize;
     let w = 2.0 * PI * FC / FS;
-    let model = CrossoverModel::new(&[Hz(FC)], SampleRate::of(FS)).unwrap();
+    let model = CrossoverModel::new(&[Hz::new(FC)], SampleRate::of(FS)).unwrap();
     let input: Vec<f32> = (0..2 * whole)
         .map(|n| libm::sin(w * n as f64) as f32)
         .collect();

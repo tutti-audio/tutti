@@ -62,7 +62,7 @@ impl GateControls {
     /// A gate that passes everything: threshold at -40 dB, no times and a range of 0 dB.
     /// What a non-finite control falls back to.
     pub const DEFAULT: Self = Self {
-        threshold: Db(-40.0),
+        threshold: Db::new(-40.0),
         attack: Seconds::ZERO,
         hold: Seconds::ZERO,
         release: Seconds::ZERO,
@@ -104,7 +104,7 @@ impl<F: Float> Design<F> {
         let threshold = c.threshold.finite_or(d.threshold);
         // A NaN hold reads as 0 (`max` ignores it); an infinite one saturates to the
         // longest count. `floored` floors the attack and release.
-        let hold = Seconds(c.hold.get().max(0.0));
+        let hold = Seconds::new(c.hold.get().max(0.0));
         let ballistics = Follower::of(floored(c.attack, c.release), rate);
         Self {
             threshold: threshold.to_amplitude(),
