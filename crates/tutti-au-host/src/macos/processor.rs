@@ -600,7 +600,7 @@ impl AuProcessor {
     pub fn render_planes<S: Float>(&mut self, io: &mut InputOutput<'_, S>) -> Result<()> {
         // A block too long for a `u32` saturates, which no block size admits: it is refused
         // like any other oversize block, before anything is staged.
-        let frames = u32::try_from(io.frames().0).unwrap_or(u32::MAX);
+        let frames = u32::try_from(io.frames().get()).unwrap_or(u32::MAX);
         self.check_block(frames)?;
         let (input, mut output) = io.split();
         self.rendering.renderer.stage_input(input);
@@ -733,7 +733,7 @@ impl AuProcessor {
         // goes in first. A block with no transport withdraws the last one.
         match ctx.transport {
             Some(transport) => {
-                self.publish_transport(transport, buffer.frames().0);
+                self.publish_transport(transport, buffer.frames().get());
             }
             None => self.withdraw_transport(),
         }
