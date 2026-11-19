@@ -1102,10 +1102,10 @@ Each stage is one PR that stays green. Line figures are estimates.
      the ratio the streamer's own, derived on a rate event, and the registry
      went with `RtState` (its note).
    - **The driver typestate is `DiskStreamer<D = Running>`** with `Built`
-     (private), `Running` (a thread; `Drop` stops it) and `ByHand`
-     (`test-support`; `step_once`, `step_until_settled`). The manual/hand-stepped
+     (private), `Running` (a thread; `Drop` stops it) and `Manual`
+     (`test-support`; `step`, `step_until_idle`). The manual/hand-stepped
      driver stays: it is how a test counts cycles instead of waiting for them, and
-     the pure step does not replace the refill. Calling `step_once` on a running
+     the pure step does not replace the refill. Calling `step` on a running
      streamer does not compile (`compile_fail` doctest and twin); a built
      streamer that is never started is just dropped (its queue disconnects).
      Build time `Built::start` still panics on a failed spawn: the fallible
@@ -1134,7 +1134,7 @@ Each stage is one PR that stays green. Line figures are estimates.
    fork's record, `step` answering a loop for any live stream, `handle_loop`
    applying to the first record, the duplicate check, the phase set in `Opened`,
    the phase check on a loop, `retire` dropping in the drain, the replacing adds
-   removed from the full-channel test, `step_once` moved to every state (the
+   removed from the full-channel test, `step` moved to every state (the
    `compile_fail` doctest), `Stream` made `Clone`. Ported, assertions
    unchanged: `tier_parity`, `live_loop`, `offline_disk_voice`,
    `tier_alignment`, `block_length_invariance`, `export_fork_sampler`,

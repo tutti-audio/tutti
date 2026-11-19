@@ -23,7 +23,7 @@ tutti_rt::id! {
 }
 
 /// Where the streamer answers an open: one cell, written once by the streamer
-/// and read once by [`Opening::poll`](crate::Opening::poll).
+/// and read once by [`PendingOpen::poll`](crate::PendingOpen::poll).
 pub(crate) type Reply<F> = Sender<Result<Opened<F>, OpenError>>;
 
 /// What the decode thread made of a file: the whole wave, or why there is none.
