@@ -853,7 +853,7 @@ fn legacy_cc_out_decodes_to_midi() {
     match m.ump.decode().expect("UMP") {
         Message::Midi2(address, Voice2::ControlChange { controller, value }) => {
             assert_eq!((address.channel.get(), controller.get()), (3, 74));
-            // M2-115 section 3.3 widens 100 to `0xC924_9249`.
+            // M2-115 section 3.3 upscales 100 to `0xC924_9249`.
             assert_eq!(value, ControlValue::new(0xC924_9249));
         }
         other => panic!("expected CC, got {other:?}"),
@@ -872,7 +872,7 @@ fn legacy_cc_out_decodes_to_midi() {
         other => panic!("expected PitchBend, got {other:?}"),
     }
 
-    // Poly pressure: value = note, value2 = pressure, widened from 7 bits.
+    // Poly pressure: value = note, value2 = pressure, upscaled from 7 bits.
     let pp = Event::at(
         0,
         Payload::LegacyCcOut(legacy_cc(kCtrlPolyPressure as u8, 3, 60, 0x21)),
@@ -1040,7 +1040,7 @@ mod message {
         (at(7), Ump::from(message))
     }
 
-    /// A MIDI 1.0 Note On at velocity 0 widens to a Note Off at velocity
+    /// A MIDI 1.0 Note On at velocity 0 translates to a Note Off at velocity
     /// 0x8000 (M2-104 v1.1.2 D.3.1), which VST3 carries as the release
     /// velocity `0x8000 / 0xFFFF`, about 0.5. It was a release velocity of 0.
     #[test]
@@ -1295,7 +1295,7 @@ mod message {
         );
     }
 
-    /// A MIDI 1.0 message a plugin sends as raw bytes is widened on the way
+    /// A MIDI 1.0 message a plugin sends as raw bytes is translated on the way
     /// in: a Note On at velocity 0 is a Note Off at 0x8000, and a system
     /// message is forwarded unchanged.
     #[test]
@@ -1603,7 +1603,7 @@ mod message {
                 })
                 .collect()
         });
-        // M2-115 §3.3: 100 widens to 100 << 9 plus its low six bits repeated,
+        // M2-115 §3.3: 100 upscales to 100 << 9 plus its low six bits repeated,
         // 0b110100 << 3 | 0b110100 >> 3 | 0b110100 >> 9.. = 51492.
         let velocity = (f64::from(51492_u16) / 65535.0) as f32;
         assert_eq!(

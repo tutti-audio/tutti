@@ -71,7 +71,7 @@ fn a_listener_takes_its_channel_and_the_channelless_port() {
 #[test]
 fn events_leave_on_their_channels_port() {
     let first = MidiInputPorts::FIRST_GROUP;
-    // 7-bit velocity 100, widened (M2-115).
+    // 7-bit velocity 100, upscaled (M2-115).
     let on = midi::note_on(
         MidiChannel::of(9),
         60,

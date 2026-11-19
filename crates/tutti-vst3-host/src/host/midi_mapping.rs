@@ -206,7 +206,7 @@ pub(crate) struct MappedController {
 /// parameter expects, or `None` if the event is not a
 /// mappable controller (CC / channel pressure / pitch bend).
 ///
-/// The packet is read through [`channel_voice`]; a MIDI 1.0 message is widened
+/// The packet is read through [`channel_voice`]; a MIDI 1.0 message is translated
 /// so MIDI-2 controllers keep their full width here. `IMidiMapping` is
 /// addressed by bus and channel, and the table is the plugin's answer for
 /// event bus 0 ([`scan`]), so only Group 0 maps: a controller

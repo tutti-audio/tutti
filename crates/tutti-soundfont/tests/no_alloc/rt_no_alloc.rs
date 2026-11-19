@@ -62,7 +62,7 @@ fn at(offset: usize) -> Offset {
 }
 
 fn note_on(key: u8, offset: usize) -> UmpAt {
-    let velocity = NoteVelocity::from(U7::of(100)).get(); // 7-bit 100, widened (M2-115)
+    let velocity = NoteVelocity::from(U7::of(100)).get(); // 7-bit 100, upscaled (M2-115)
     (at(offset), midi::note_on(MidiChannel::FIRST, key, velocity))
 }
 
@@ -242,7 +242,7 @@ fn soundfont_every_decoded_message_is_allocation_free() {
             velocity: NoteVelocity::CENTER,
             attribute: Attribute::Pitch(60 << 9),
         }),
-        // Nonzero, and narrows to 0: floored at 1, not a Note Off.
+        // Nonzero, and downscales to 0: floored at 1, not a Note Off.
         m2(Voice2::NoteOn {
             note,
             velocity: NoteVelocity::new(1),
@@ -375,7 +375,7 @@ fn cc(channel: u8, controller: CCNumber, value: u8) -> Ump {
 }
 
 fn drum(key: u8, offset: usize) -> UmpAt {
-    let velocity = NoteVelocity::from(U7::of(100)).get(); // 7-bit 100, widened (M2-115)
+    let velocity = NoteVelocity::from(U7::of(100)).get(); // 7-bit 100, upscaled (M2-115)
     (at(offset), midi::note_on(MidiChannel::of(9), key, velocity))
 }
 

@@ -1,5 +1,5 @@
 //! The wire form against M2-104: a MIDI 1.0 endpoint is never sent type `0x4`,
-//! a Registered Controller narrows to the four Control Changes of Appendix D.2.3
+//! a Registered Controller translates to the four Control Changes of Appendix D.2.3
 //! through one MIDI 1.0 translator, and JR goes only where it is enabled.
 
 use super::*;
@@ -214,11 +214,11 @@ fn jr_goes_only_where_the_configuration_enables_it() {
             tx_jr: false,
         };
         let mut wire = Wire::new(off);
-        let narrowed = convert(&mut wire, &[note]);
+        let translated = convert(&mut wire, &[note]);
         let music = if protocol == Protocol::Midi2 {
             vec![note]
         } else {
-            narrowed
+            translated
         };
         assert_eq!(convert(&mut wire, &[jr[0], note, jr[1]]), music);
         wire.set_config(StreamConfig { rx_jr: true, ..off });
@@ -333,7 +333,7 @@ fn a_change_of_protocol_drops_an_mpe_notes_channel() {
 }
 
 /// **A send time stays with its event through the conversion:** an RPN that
-/// narrows to several MIDI 1.0 packets sends every one of them at the event's
+/// translates to several MIDI 1.0 packets sends every one of them at the event's
 /// time, and a neighbour keeps its own.
 #[test]
 fn a_send_time_stays_with_its_event_through_the_conversion() {
@@ -343,16 +343,16 @@ fn a_send_time_stays_with_its_event_through_the_conversion() {
     let mut wire = Wire::new(MIDI1);
     wire.convert(&[rpn_event, after]);
     let sends: Vec<SendAt> = wire.batch().iter().map(|o| o.send).collect();
-    assert!(sends.len() > 2, "an RPN narrows to several packets");
+    assert!(sends.len() > 2, "an RPN translates to several packets");
     let first_now = sends.iter().position(|s| *s == SendAt::Now).unwrap();
     assert!(sends[..first_now].iter().all(|s| *s == SendAt::At(t)));
     assert!(
         first_now > 1,
-        "the narrowed RPN is more than one packet, all at its time"
+        "the translated RPN is more than one packet, all at its time"
     );
 }
 
-/// **A registered controller narrowed to MIDI 1.0 is one message**: the Control
+/// **A registered controller translated to MIDI 1.0 is one message**: the Control
 /// Changes that select it and set its value go whole or not at all, because a
 /// receiver left with the controller selected and no value is wrong until the
 /// next one. A sink with room for two of the four takes none, and one with room

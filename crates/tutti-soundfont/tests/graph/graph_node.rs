@@ -42,7 +42,7 @@ fn graph(unit: SoundFontUnit<f32>, rate: f64, frame: u64) -> (Editor, Executor) 
         MaxBlock::of(Samples::new(BLOCK)),
     ));
     let beat = Beat::new(frame as f64 / (rate / 2.0));
-    let velocity = NoteVelocity::from(U7::of(100)).get(); // 7-bit 100, widened (M2-115)
+    let velocity = NoteVelocity::from(U7::of(100)).get(); // 7-bit 100, upscaled (M2-115)
     let on = midi::note_on(MidiChannel::FIRST, 60, velocity);
     ed.insert(
         NodeKey(1),

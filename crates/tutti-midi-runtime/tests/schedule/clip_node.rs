@@ -776,10 +776,10 @@ fn a_controller_at_rest_is_not_resent_at_a_stop() {
     assert_eq!(late, vec![(64, pedal(1, s, 0))]);
 }
 
-/// **A loop wrap lifts the pedal after ending the notes it held.** The loop
+/// **A loop wrap releases the pedal after ending the notes it held.** The loop
 /// is beat [0, 1): note 60 and the sustain pedal go down at timeline frame
 /// 23 850; the block that wraps at its frame 100 (executor frame 200) ends the
-/// note, then lifts the pedal, on that frame (M1 p. 31; A-5 for the order).
+/// note, then releases the pedal, on that frame (M1 p. 31; A-5 for the order).
 #[test]
 fn a_loop_wrap_lifts_the_pedal_after_the_note_off() {
     let clip = MidiClipNode::new([
@@ -798,7 +798,7 @@ fn a_loop_wrap_lifts_the_pedal_after_the_note_off() {
     );
 }
 
-/// **A seek lifts the pedal and centres the bend where the jump happens,
+/// **A seek releases the pedal and centres the bend where the jump happens,
 /// then chases them to where the timeline holds them.** Playback seeks to
 /// beat 4 at frame 200 of a 512-frame block, with the pedal down and the
 /// bend off centre: both are returned at frame 200, after the note-off; the

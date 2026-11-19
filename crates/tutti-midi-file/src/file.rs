@@ -1210,7 +1210,7 @@ impl Track {
                     });
                 }
             } else {
-                // A MIDI 1.0 Note On widens (`channel_voice`), a MIDI 2.0 one
+                // A MIDI 1.0 Note On translates (`channel_voice`), a MIDI 2.0 one
                 // keeps its 16 bits; a MIDI 2.0 Note On at velocity 0 is
                 // neither a start nor an end.
                 if let Some((_, Voice2::NoteOn { velocity, .. })) = channel_voice(ump)
@@ -1261,7 +1261,7 @@ pub struct PairedNote {
     pub channel: MidiChannel,
     /// The key.
     pub note: NoteNumber,
-    /// The Note On velocity at MIDI 2.0 width: a MIDI 1.0 velocity is widened
+    /// The Note On velocity at MIDI 2.0 width: a MIDI 1.0 velocity is translated
     /// by the specification's scaling, so this is lossless in both directions.
     pub velocity: NoteVelocity,
     /// Where the note starts.

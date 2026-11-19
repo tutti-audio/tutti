@@ -2267,7 +2267,7 @@ mod tests {
     // ---- velocity zero ---------------------------------------------------
 
     /// A MIDI 1.0 Note On at velocity 0 is a Note Off (MIDI 1.0 Detailed
-    /// Specification; `widen` makes it one); a MIDI 2.0 Note On at velocity 0
+    /// Specification; `Voice2::from` makes it one); a MIDI 2.0 Note On at velocity 0
     /// is a Note On (M2-104 section 7.4.2), played as quietly as there is.
     #[test]
     fn velocity_zero_is_an_off_in_midi1_and_an_on_in_midi2() {

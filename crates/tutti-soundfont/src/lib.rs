@@ -85,15 +85,15 @@
 //!
 //! The event input carries UMP, MIDI 1.0 and MIDI 2.0 messages; the player takes
 //! MIDI 1.0 values for its controllers, and keeps a note's velocity at 16 bits only
-//! until it is narrowed for the voice. A MIDI 1.0 message is widened to its MIDI 2.0 form first, and
-//! every MIDI 2.0 value is narrowed with `tutti_midi_protocol::narrow_*`, which
-//! keeps the top bits (a plain right shift, M2-115 section 3.4).
+//! until it is read at MIDI 1.0 resolution for the voice. A MIDI 1.0 message is translated to its MIDI 2.0 form first, and
+//! every MIDI 2.0 value is read back with `NoteVelocity::to_u7`, `ControlValue::to_u7` and `BendValue::to_u14`, which
+//! keep the top bits (a plain right shift, M2-115 section 3.4).
 //!
 //! - Applied: note-on, note-off, control change, channel pitch bend, program
 //!   change and its bank (the bank's MSB, as CC 0 sets it), and the registered
 //!   controllers pitch bend sensitivity, fine tuning and coarse tuning (RPN 0, 1
 //!   and 2). A note-on of velocity 0 is a note-off, and a
-//!   nonzero velocity that narrows to 0 sounds at 1.
+//!   nonzero velocity that downscales to 0 sounds at 1.
 //! - Not used: a note-off's release velocity, which a SoundFont does not read.
 //! - Dropped: anything MIDI 1.0 cannot express (per-note pitch bend, per-note
 //!   controllers, per-note management), channel and key pressure, which no generator

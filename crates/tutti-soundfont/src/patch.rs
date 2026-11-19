@@ -38,7 +38,7 @@ impl Patch for PresetPatch<'_> {
         velocity: u16,
         spec: &mut dyn FnMut(VoiceSpec),
     ) {
-        // A region's range is 7 bits: the 16-bit velocity is narrowed as the
+        // A region's range is 7 bits: the 16-bit velocity is downscaled as the
         // voice's will be, and never to a Note Off's 0.
         let velocity = NoteVelocity::new(velocity).to_note_on_u7();
         let preset = &self.font.presets()[self.preset];

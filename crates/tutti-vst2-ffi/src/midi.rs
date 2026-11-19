@@ -161,7 +161,7 @@ pub fn to_midi(event: &crate::api::MidiEvent) -> Option<WireMidi> {
 
 /// Serializes a Tutti UMP [`WireMidi`] to a VST2 `crate::api::MidiEvent`.
 ///
-/// MIDI 1.0 boundary. VST2 is a MIDI-1-only host: `midi1_of` narrows a MIDI
+/// MIDI 1.0 boundary. VST2 is a MIDI-1-only host: `midi1_of` translates a MIDI
 /// 2.0 channel voice message with the spec's Min-Center-Max downscale
 /// (`tutti_midi_protocol::midi1`), so no precision is lost beyond MIDI-1's
 /// inherent width. Translated: NoteOn/Off, CC, channel pitch bend,
@@ -175,7 +175,7 @@ pub fn to_midi(event: &crate::api::MidiEvent) -> Option<WireMidi> {
 /// of them, through a [`Midi1Translator`] that keeps the stream's state.
 pub fn from_midi(event: &WireMidi) -> Option<crate::api::MidiEvent> {
     let mut messages = [[0u8; 3]; MAX_MESSAGES];
-    match narrowed(&mut Midi1Translator::new(), event.ump, &mut messages) {
+    match midi1_messages(&mut Midi1Translator::new(), event.ump, &mut messages) {
         1 => Some(midi_event(event.offset, messages[0], true)),
         _ => None,
     }
@@ -188,7 +188,7 @@ const MAX_MESSAGES: usize = 4;
 /// The MIDI 1.0 messages `ump` stands for through `midi1_translator`, in send order, into
 /// `out`; how many. None when it has no MIDI 1.0 form (a per-note controller, a
 /// relative controller) or does not decode.
-fn narrowed(
+fn midi1_messages(
     midi1_translator: &mut Midi1Translator,
     ump: Ump,
     out: &mut [[u8; 3]; MAX_MESSAGES],
@@ -487,7 +487,7 @@ impl MidiSendBuffer {
             // and all of them fit or none is staged (a bank is not sent
             // without its program).
             let mut messages = [[0u8; 3]; MAX_MESSAGES];
-            let n = narrowed(&mut self.midi1_translator, *ev, &mut messages);
+            let n = midi1_messages(&mut self.midi1_translator, *ev, &mut messages);
             if self.order.len() + n > self.room {
                 self.events_dropped.add(n as u64);
                 continue;
@@ -979,7 +979,7 @@ mod tests {
             Message::Midi2(address, Voice2::ControlChange { controller, value }) => {
                 assert_eq!(address.channel, MidiChannel::of(1));
                 assert_eq!(controller, CCNumber::of(74));
-                // Widened to 32-bit, not left as 7-bit.
+                // Upscaled to 32-bit, not left as 7-bit.
                 assert_eq!(value, ControlValue::from(U7::of(100)));
             }
             other => panic!("expected CV2 ControlChange, got {other:?}"),
@@ -1484,8 +1484,8 @@ mod tests {
         };
         use tutti_ump::{
             Address, Attribute, BendValue, ControlValue, ExtremeValues, Message, NoteNumber,
+            NoteVelocity, Voice2,
         };
-        use tutti_ump::{NoteVelocity, Voice2};
         let zone = MpeZoneConfig::lower(
             2,
             PitchBendSensitivity::MPE_MASTER_DEFAULT,
