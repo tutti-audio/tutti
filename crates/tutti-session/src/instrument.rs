@@ -34,6 +34,7 @@
 //! thread), stamped with a [`Stamp`](tutti_graph::Stamp), and a gain is a store into the strip's
 //! volume cell. Neither takes `&mut` of anything in the graph.
 
+use tutti_buffers::Float;
 use tutti_graph::NodeKey;
 use tutti_graph::{EventInletNode, Instrument, ParamSet};
 use tutti_midi_runtime::{LIVE_INLET_CAPACITY, MidiKeys};
@@ -185,21 +186,20 @@ impl<N: ?Sized> InstrumentHandle<N> {
     /// Sets the gain after the instrument's main pair, a linear amplitude.
     /// A store into the strip's cell, read once per block.
     pub fn set_gain(&self, gain: Amplitude) {
-        // The param cell is an `f32` word: the gain narrows once.
         self.strip_params.set(UnitParam::Volume, gain.get());
     }
 }
 
 /// What [`Session::add_instrument`] hands back: the instrument's handle and
 /// the controls its node was added with.
-pub struct AddedInstrument<I: Instrument + SessionNode> {
+pub struct AddedInstrument<I: Instrument<F> + SessionNode<F>, F: Float> {
     /// The instrument, playable, and wired to the master.
     pub handle: InstrumentHandle<I>,
     /// The node's controls (`SessionNode::Controls`).
     pub controls: I::Controls,
 }
 
-impl<I: Instrument + SessionNode> std::fmt::Debug for AddedInstrument<I>
+impl<I: Instrument<F> + SessionNode<F>, F: Float> std::fmt::Debug for AddedInstrument<I, F>
 where
     I::Controls: std::fmt::Debug,
 {
@@ -211,12 +211,11 @@ where
     }
 }
 
-/// `f32` because the instruments (`PolySynth`, the SoundFont unit) are `Node<f32>` only.
-impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
+impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// Adds `instrument` to the graph, makes it playable and wires its strip
     /// to the master, so a note sent through its keys is heard. It holds no MPE
     /// zones: classic MPE reaches it already rewritten as per-note messages, by the
-    /// session's transforms ([`Midi::set_mpe`](crate::Midi::set_mpe)).
+    /// session's transforms (`session.mpe()`).
     ///
     /// A strip is a stereo pair, so a master of another width refuses the wire
     /// ([`ConnectError::Width`](crate::ConnectError::Width)): add the instrument
@@ -229,10 +228,10 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
     /// no event input or lacks the output its main pair names, or the wire's
     /// [`ConnectError`](crate::ConnectError) (the instrument is removed again in
     /// both cases).
-    pub fn add_instrument<I: Instrument + SessionNode>(
+    pub fn add_instrument<I: Instrument<C::Float> + SessionNode<C::Float>>(
         &mut self,
         instrument: I,
-    ) -> Result<AddedInstrument<I>, crate::Error> {
+    ) -> Result<AddedInstrument<I, C::Float>, crate::Error> {
         let added = self.add_instrument_unwired(instrument)?;
         if let Err(e) = self.graph().connect(added.handle.out(), Root) {
             let node = added.handle.node().erase();
@@ -256,10 +255,10 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
     /// [`Error::NotInstrument`](crate::Error::NotInstrument) when its shape has
     /// no event input or lacks the output its main pair names (the node is
     /// removed again).
-    pub fn add_instrument_unwired<I: Instrument + SessionNode>(
+    pub fn add_instrument_unwired<I: Instrument<C::Float> + SessionNode<C::Float>>(
         &mut self,
         instrument: I,
-    ) -> Result<AddedInstrument<I>, crate::Error> {
+    ) -> Result<AddedInstrument<I, C::Float>, crate::Error> {
         let main = instrument.main_outputs();
         let (node, controls) = self.graph().add(instrument);
         match self.instrument_at(node, main) {
@@ -341,8 +340,8 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
             }
         }
         #[cfg(feature = "plugin")]
-        if let Ok(plugin) = self.plugin_view(node) {
-            let role = plugin.descriptor().class.role();
+        if let Some(hosted) = self.graph.plugins.get(&node) {
+            let role = hosted.handle.descriptor().class.role();
             if role != tutti_plugin_types::PluginRole::Instrument {
                 return Err(why(NotInstrument::Plugin(role)));
             }

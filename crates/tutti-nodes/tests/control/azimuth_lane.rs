@@ -7,6 +7,8 @@
 
 use std::sync::Arc;
 
+use atomic_float::AtomicF64;
+use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_curve::{Breakpoint, Law, Trajectory};
 use tutti_graph::{
     Cx, Editor, EventOut, Executor, ForkByClone, Io, Node, NodeKey, ParamIn, ParamInput,
@@ -16,7 +18,6 @@ use tutti_graph::{OutPort, Source};
 use tutti_modulation::{Amount, Clock, ControlProgram, Layer, LayerId, Polarity, Waveform};
 use tutti_music::FrameClock;
 use tutti_nodes::automation::ControlLaneNode;
-use tutti_types::{AtomicF64, ChannelLayout, MaxBlock};
 use tutti_units::{ArcDegrees, Azimuth, Beat, Bpm, Depth, SampleRate, Samples, UnitParam};
 
 const RATE: f64 = 48_000.0;

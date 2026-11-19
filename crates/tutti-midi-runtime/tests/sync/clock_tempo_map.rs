@@ -23,16 +23,16 @@
 //! within `E` of 0 or of 1.
 
 use std::sync::Arc;
-use tutti_types::MaxBlock;
+use tutti_buffers::MaxBlock;
 
 use crate::common;
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_engine::Engine;
 use tutti_graph::{Editor, Executor, NodeKey, Prepare};
 use tutti_midi_runtime::{SyncMessages, SyncOut};
 use tutti_tempo::{TempoMap, TempoPoint, Transition};
 use tutti_transport::{FadeOut, MotionEvent, Then, Transport};
-use tutti_types::ChannelLayout;
 use tutti_ump::{Message, System, U14};
 use tutti_units::{Beat, Bpm, SampleRate, Samples};
 
@@ -151,7 +151,7 @@ fn rig(map: &Arc<TempoMap>, mtc: bool) -> Rig {
     ed.insert(
         NodeKey(1),
         "clock",
-        SyncOut::new(tutti_ump::MidiGroup::FIRST).messages(SyncMessages {
+        SyncOut::new(tutti_ump::MidiGroup::FIRST).sending(SyncMessages {
             clock: true,
             mtc,
             ..SyncMessages::OFF

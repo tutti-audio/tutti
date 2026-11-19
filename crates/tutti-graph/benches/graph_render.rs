@@ -26,15 +26,15 @@
 //! ```
 
 use std::hint::black_box;
-use tutti_types::MaxBlock;
+use tutti_buffers::MaxBlock;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
+use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_graph::{
     Cx, Editor, Executor, Io, Node, Prepare, Shape, Status, TransportPosition, Unforkable,
 };
 use tutti_graph::{Edge, InPort, OutPort, Source};
-use tutti_types::ChannelLayout;
 use tutti_units::{SampleRate, Samples, Tail};
 
 const SR: f64 = 48_000.0;

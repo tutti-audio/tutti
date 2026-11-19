@@ -32,8 +32,8 @@
 use std::sync::Weak;
 
 use tutti_midi_device::{
-    BodyLimit, CallError, CiDeviceId, Nak, Outcome, PeData, PeOutcome, PeReply, PeResource,
-    PeSignal, PeStatus, PeTerminator, ProfileId, ProfileState, ReportRequest, Request,
+    BodyLimit, CallError, CiDeviceId, Nak, PeData, PeOutcome, PeReply, PeResource, PeSignal,
+    PeStatus, PeTerminator, ProfileId, ProfileOutcome, ProfileRequest, ProfileState, ReportRequest,
     ResourceEntry, ResourceFailure, ResourceGet, ResourceSet, ResourceTarget,
 };
 use tutti_midi_hardware::{
@@ -335,7 +335,7 @@ impl WholeProfile {
 
     /// Whether it is the Group's or the Function Block's.
     #[must_use]
-    pub const fn whole(&self) -> tutti_midi_hardware::Whole {
+    pub const fn whole(&self) -> tutti_midi_device::Whole {
         self.inner.whole()
     }
 }
@@ -950,7 +950,7 @@ impl Pending {
     fn end_switch(
         &mut self,
         peer: PeerId,
-        request: &Request,
+        request: &ProfileRequest,
         result: &Result<ProfileState, PeerError<Nak>>,
     ) {
         let key = (peer, switch_at(request));
@@ -1132,20 +1132,19 @@ fn end_slot<R, J: crate::JobKind>(
 
 /// Where and which Profile a request switches: a Set On and a Set Off of one
 /// Profile at one address wait for the same slot.
-fn switch_at(request: &Request) -> Option<(CiDeviceId, ProfileId)> {
+fn switch_at(request: &ProfileRequest) -> Option<(CiDeviceId, ProfileId)> {
     match request {
-        Request::SetOn { address, profile } | Request::SetOff { address, profile } => {
-            Some((*address, *profile))
-        }
+        ProfileRequest::SetOn { address, profile }
+        | ProfileRequest::SetOff { address, profile } => Some((*address, *profile)),
         _ => None,
     }
 }
 
-fn switched(outcome: &Outcome) -> Result<ProfileState, PeerError<Nak>> {
+fn switched(outcome: &ProfileOutcome) -> Result<ProfileState, PeerError<Nak>> {
     match outcome {
-        Outcome::Reported { state, .. } => Ok(*state),
-        Outcome::Refused(nak) => Err(PeerError::Refused(nak.clone())),
-        Outcome::TimedOut => Err(PeerError::TimedOut),
+        ProfileOutcome::Reported { state, .. } => Ok(*state),
+        ProfileOutcome::Refused(nak) => Err(PeerError::Refused(nak.clone())),
+        ProfileOutcome::TimedOut => Err(PeerError::TimedOut),
         // An answer that is not a switch's ends no switch.
         _ => Err(PeerError::Disconnected),
     }

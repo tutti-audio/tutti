@@ -27,13 +27,12 @@ tutti-plugin-types = { version = "0.0.1", path = "../tutti-plugin-types" }
 tutti-plugin-ipc-ffi = { version = "0.0.1", path = "../tutti-plugin-ipc-ffi" }
 tutti-units = { version = "0.0.1", path = "../tutti-units" }
 tutti-music = { version = "0.0.1", path = "../tutti-music" }
-tutti-types = { version = "0.0.1", path = "../tutti-types" }
 tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
 tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false }
 tutti-voicing = { version = "0.0.1", path = "../tutti-voicing" }
 # `Pool`, the worker-pool contract `clap.thread-pool` requests are served on
 # (`ClapLoaded::set_thread_pool`). No cycle: `tutti-graph` names only
-# `tutti-types`.
+# `tutti-units`, `tutti-rt` and `tutti-ump`.
 tutti-graph = { version = "0.0.1", path = "../tutti-graph" }
 # The sample width `Float` and the block view `InputOutput` a block is processed in.
 tutti-buffers = { version = "0.0.1", path = "../tutti-buffers" }

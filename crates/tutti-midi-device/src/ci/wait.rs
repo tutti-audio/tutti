@@ -1,9 +1,10 @@
 //! The Timeout Wait ACK (M2-101 §5.10, Table 14): how long it asks, and how a
 //! transaction's deadline takes it.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use super::Ack;
+use super::{Ack, AckStatus};
+use crate::deadline::Pending;
 
 /// How long an Initiator waits on a peer's answer where the specification gives
 /// no limit: 3 seconds. A Profile Inquiry, Set Profile On or Off, or Details
@@ -20,8 +21,6 @@ tutti_units::ranged! {
     /// How long a Timeout Wait asks to keep a transaction open: 0 to 127 tenths of
     /// a second, 0 to 12.7 s (M2-101 Table 14, M2-103 §12.2.1).
     #[derive(Eq, Hash)]
-    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-    #[cfg_attr(feature = "serde", serde(try_from = "u8", into = "u8"))]
     TimeoutWait(u8), NotATimeoutWait, "a timeout wait (0 to 127 tenths of a second)",
     |raw| raw <= 127
 }
@@ -43,17 +42,16 @@ impl TimeoutWait {
     /// tenths of a second), or `None` for any other ACK.
     #[must_use]
     pub fn from_ack(ack: &Ack) -> Option<Self> {
-        if ack.status_code == Ack::STATUS_TIMEOUT_WAIT {
-            Self::new(ack.status_data.get())
-        } else {
-            None
+        match ack.status {
+            AckStatus::TimeoutWait(wait) => Some(wait),
+            _ => None,
         }
     }
 
     /// Adds this wait to a transaction's deadline (M2-103 §12.2.1: the wait is
     /// added to the current timeout period).
-    pub(crate) fn extend(self, deadline: &mut Instant) {
-        *deadline += self.duration();
+    pub(crate) fn extend(self, wait: &mut Pending) {
+        wait.extend(self.duration());
     }
 }
 

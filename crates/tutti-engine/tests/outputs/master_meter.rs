@@ -4,14 +4,14 @@
 //! tests, where the callback fed a stereo-folded meter; the fold tests became
 //! per-channel ones (the meter does not fold).
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
+use tutti_buffers::MaxBlock;
 use tutti_engine::Engine;
 use tutti_graph::{Editor, MeterReader, Prepare};
 use tutti_graph::{MeterId, MeterSpec, NodeKey};
 use tutti_graph::{OutPort, Source};
 use tutti_transport::Transport;
-use tutti_types::ChannelLayout;
-use tutti_types::MaxBlock;
 use tutti_units::{SampleRate, Samples};
 
 const RATE: f64 = 48_000.0;
@@ -325,9 +325,9 @@ fn a_block_longer_than_the_capacity_is_measured_whole() {
 #[test]
 fn a_stereo_root_folds_to_a_stereo_device_unchanged() {
     let mut folded = [0.0f32; 2];
-    let stereo = tutti_types::ChannelLayout::STEREO;
-    let fold =
-        tutti_graph::fold_to_width(&tutti_types::ChannelTopology::assumed(stereo), stereo).unwrap();
+    let stereo = tutti_buffers::ChannelLayout::STEREO;
+    let fold = tutti_graph::fold_to_width(&tutti_buffers::ChannelTopology::assumed(stereo), stereo)
+        .unwrap();
     fold.frame(&[0.25, -0.75], &mut folded);
     assert!(fold.is_identity());
     assert_eq!(

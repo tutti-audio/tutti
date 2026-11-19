@@ -21,12 +21,14 @@
 
 use std::ops::Range;
 use std::sync::Arc;
+use tutti_buffers::{ChannelLayout, ChannelTopology, Speaker};
 use tutti_buffers::{Float, Fold, FoldEnd, FoldError, MonoMut, Planes, Sample, Wave};
 use tutti_dsp::cubic_hermite;
 use tutti_graph::fold_to_width;
 use tutti_music::{TimelineSegment, first_frame_at_or_after, snap_to_whole_frame};
-use tutti_types::{ChannelLayout, ChannelTopology, Speaker};
-use tutti_units::{Beat, BeatDuration, Bpm, Frame, ReadRate, SamplePosition, SampleRate, Samples};
+use tutti_units::{
+    Beat, BeatDuration, Bpm, Frame, ReadPosition, ReadRate, SamplePosition, SampleRate, Samples,
+};
 
 use super::clock::{BlockClock, Run, Wrap};
 use super::loop_span::LoopSpan;
@@ -470,20 +472,25 @@ pub(crate) fn tap(idx: usize, last: usize, t: usize) -> usize {
 
 /// A position's whole frame and the fraction past it, as every tap layout
 /// ([`tap_indices`], and a loop's, `LoopSpan::taps`) takes them.
+///
+/// The fraction rounds to the nearest [`ReadPosition`] step (`2^-32` frame) and
+/// splits through [`Float::split_position`]: it is that fraction truncated to the
+/// width's resolution, so it is below 1 at every position and in every width.
+/// So the position is read to within `2^-33` frame in `f64` and `2^-24` in `f32`.
+/// A position within half a step of frame `n` is frame `n` at fraction 0, where
+/// the kernel returns the tap as it is, so reads agree for positions within half
+/// a step of a whole frame, whatever rounding got them there.
 #[inline]
 pub(crate) fn split_position<F: Float>(position: SamplePosition) -> (usize, F) {
-    let mut idx = position.get().floor() as usize;
-    let mut frac = F::from_f64(position.fract());
-    // A fraction a hair under 1 rounds to 1.0 in `f32`: "frame n, all the
-    // way to n + 1", which the cubic returns as frame n + 1 only to within
-    // an ulp. It *is* frame n + 1 at `t` = 0, where the kernel returns the
-    // tap exactly. (A position n - e inside a block, which no snap on the
-    // block's origin reaches, landed here.)
-    if frac >= F::ONE {
-        idx += 1;
-        frac = F::ZERO;
+    let mut idx = position.floor().get() as usize;
+    // `fract` is below 1, so the rounded count is at most one whole frame.
+    let mut count = (position.fract() * ReadPosition::COUNTS_PER_FRAME + 0.5) as u64;
+    if count >= 1 << ReadPosition::FRACTION_BITS {
+        idx = idx.saturating_add(1);
+        count = 0;
     }
-    (idx, frac)
+    let (_, fraction) = F::split_position(ReadPosition::from_count(count));
+    (idx, fraction)
 }
 
 /// Read one frame of a looped `wave` at `pos` (placed on the loop, `looped`
@@ -537,9 +544,9 @@ pub(crate) fn read_looped_frame<S: Sample, F: Float>(
 /// has no centre to name, so the sample goes to every channel, as it always
 /// did; so does a width of one or two, where the rule is exactly that, and a
 /// frame of any width other than the one the spread was built for. A width past
-/// [`MAX_CHANNELS`](tutti_types::MAX_CHANNELS) is built for that many, the most a reader writes.
+/// [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS) is built for that many, the most a reader writes.
 #[derive(Debug, Clone, PartialEq)]
-pub struct MonoSpread<F: Float = f32> {
+pub struct MonoSpread<F: Float> {
     /// `None`: to every channel. Otherwise the fold of one channel into the
     /// destination.
     fold: Option<Fold<F>>,
@@ -645,9 +652,9 @@ impl<F: Float> MonoSpread<F> {
 }
 
 /// The stack a wave's channels are gathered into when a fold reads them: twice
-/// [`MAX_CHANNELS`](tutti_types::MAX_CHANNELS), and more than the 20 speakers
+/// [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS), and more than the 20 speakers
 /// the vocabulary names, so any placed wave fits.
-pub const MAX_WAVE_CHANNELS: usize = 2 * tutti_types::MAX_CHANNELS;
+pub const MAX_WAVE_CHANNELS: usize = 2 * tutti_buffers::MAX_CHANNELS;
 
 /// Where the channels of a wave go in a frame of some width.
 ///
@@ -659,9 +666,9 @@ pub const MAX_WAVE_CHANNELS: usize = 2 * tutti_types::MAX_CHANNELS;
 /// can refuse); the per-frame and per-block writes are allocation-free.
 ///
 /// The frame is the one a reader writes: its width is the node's, at most
-/// [`MAX_CHANNELS`](tutti_types::MAX_CHANNELS) (a wider node's remaining channels are silent).
+/// [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS) (a wider node's remaining channels are silent).
 #[derive(Debug, Clone, PartialEq)]
-pub enum Place<F: Float = f32> {
+pub enum Place<F: Float> {
     /// A mono wave placed by its spread, or a wave read channel for channel.
     Native(MonoSpread<F>),
     /// A wave that is not mono and not already the frame's order and width,
@@ -688,7 +695,7 @@ impl<F: Float> Place<F> {
     /// The placement of `wave` into a frame of `width` channels.
     ///
     /// Control side: it allocates. `width` is capped at
-    /// [`MAX_CHANNELS`](tutti_types::MAX_CHANNELS), the most a reader writes.
+    /// [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS), the most a reader writes.
     ///
     /// # Errors
     ///
@@ -831,9 +838,9 @@ pub(crate) fn interpolate_taps<F: Float>(
 mod tests {
     use super::*;
     use tutti_buffers::Interleaved;
+    use tutti_buffers::MAX_CHANNELS;
     use tutti_graph::{Env, Offset, TransportChanges, TransportPosition};
     use tutti_music::LoopRange;
-    use tutti_types::MAX_CHANNELS;
     use tutti_units::{PlaybackRate, Seconds, SrcRatio};
 
     /// [`super::read_frame`] with the placement a reader of `out`'s width has.
@@ -855,6 +862,87 @@ mod tests {
         let mut out = [0.0f32; 2];
         read_frame(wave, position, &mut out);
         (out[0], out[1])
+    }
+
+    /// A position whole frames in is those whole frames and its own fraction,
+    /// at any whole frame a ring position can hold (up to 2^40) and in both
+    /// widths. The fractions are multiples of 2^-12, which `f64` still holds at
+    /// 2^40 whole frames and `f32` holds at any whole frame (it is only the
+    /// fraction, a 12-bit number), so the figure is exact.
+    #[test]
+    fn a_far_position_splits_into_its_whole_frame_and_its_exact_fraction() {
+        for whole in [0usize, 1 << 23, 1 << 31, 1 << 40] {
+            for k in [1u32, 2048, 4095] {
+                let fraction = f64::from(k) / 4096.0;
+                let position = SamplePosition(whole as f64 + fraction);
+                let (idx, f) = split_position::<f32>(position);
+                assert_eq!((idx, f64::from(f)), (whole, fraction), "f32, {position:?}");
+                let (idx, f) = split_position::<f64>(position);
+                assert_eq!((idx, f), (whole, fraction), "f64, {position:?}");
+            }
+        }
+    }
+
+    /// A fraction the width cannot hold is the position's, within the width's
+    /// step: the position rounds to a `2^-32` step (half a step off at most,
+    /// `2^-33`, either way) and the split truncates it to 24 bits for `f32`
+    /// (down by under `2^-24`). Swept over positions at 1e5 frames, where `f64` itself
+    /// holds a fraction to `2^-36`, so the fraction `f64` reports is the position's.
+    #[test]
+    fn a_fraction_the_width_cannot_hold_is_within_its_step() {
+        let (below, above) = (2.0_f64.powi(-33), 2.0_f64.powi(-24) + 2.0_f64.powi(-33));
+        let mut worst = 0.0f64;
+        for i in 0..4000u32 {
+            let position = SamplePosition(100_000.0 + f64::from(i) * 0.000_731);
+            let want = position.fract();
+            let (_, f) = split_position::<f32>(position);
+            let error = want - f64::from(f);
+            assert!((-below..above).contains(&error), "{position:?}: {error:e}");
+            worst = worst.max(error);
+            let (_, f) = split_position::<f64>(position);
+            assert!((want - f).abs() <= 2.0_f64.powi(-33), "{position:?}");
+        }
+        assert!(
+            worst > 2.0_f64.powi(-26),
+            "the sweep reaches the truncation: {worst:e}"
+        );
+    }
+
+    /// A ramp of `0.25` per frame read at a fractional position is the ramp's
+    /// closed form `0.25 * position`: the cubic reproduces a line, so the figure is
+    /// the position's, not the kernel's. The error is bounded by four steps of the
+    /// width at the value (the taps' sum and the blend each round, and the
+    /// fraction is the position's to its step).
+    fn a_ramp_read_at_a_fraction_is_the_closed_form<S: Sample + Float>(step: f64) {
+        let mut wave = Wave::<S>::new(1, SampleRate::SR_48K);
+        for i in 0..8192 {
+            wave.append(
+                Interleaved::new(&[S::from_design(0.25 * i as f64)], wave.layout()).unwrap(),
+            )
+            .unwrap();
+        }
+        let wave = Arc::new(wave);
+        let place = Place::<S>::for_wave(&wave, ChannelLayout::try_from(1usize).unwrap())
+            .expect("a placeable wave");
+        let position = 5000.3125;
+        let mut out = [S::ZERO];
+        super::read_frame(&wave, &place, SamplePosition(position), &mut out);
+        let want = 0.25 * position;
+        let got: f64 = out[0].into();
+        assert!(
+            (got - want).abs() <= 4.0 * step * want,
+            "{got} against {want}"
+        );
+    }
+
+    #[test]
+    fn a_resident_f32_ramp_read_at_a_fraction_is_the_closed_form() {
+        a_ramp_read_at_a_fraction_is_the_closed_form::<f32>(2.0_f64.powi(-24));
+    }
+
+    #[test]
+    fn a_resident_f64_ramp_read_at_a_fraction_is_the_closed_form() {
+        a_ramp_read_at_a_fraction_is_the_closed_form::<f64>(2.0_f64.powi(-53));
     }
 
     /// A position a hair under a whole frame reads that frame exactly.
@@ -1206,7 +1294,7 @@ mod tests {
 
     /// A wave of `topology` with `frames` copies of `frame`, so an interpolated
     /// read at any position is the frame itself (a cubic through equal taps).
-    fn constant_wave(topology: tutti_types::ChannelTopology, frame: &[f32]) -> Wave {
+    fn constant_wave(topology: tutti_buffers::ChannelTopology, frame: &[f32]) -> Wave {
         let mut w = Wave::with_topology(topology, SampleRate::SR_48K);
         for _ in 0..16 {
             w.append(Interleaved::new(frame, w.layout()).unwrap())
@@ -1220,7 +1308,7 @@ mod tests {
     /// source and a voice over it are refused too.
     #[test]
     fn a_file_with_an_unnamed_channel_is_refused() {
-        use tutti_types::{ChannelTopology, Speaker::*};
+        use tutti_buffers::{ChannelTopology, Speaker::*};
         let lfe2 =
             ChannelTopology::new([FrontLeft, FrontRight, FrontCenter, LowFrequency, Unknown(5)])
                 .unwrap();
@@ -1258,7 +1346,7 @@ mod tests {
     /// straight.
     #[test]
     fn a_wav_seven_one_is_permuted_to_the_engines_order() {
-        use tutti_types::{ChannelTopology, Speaker::*};
+        use tutti_buffers::{ChannelTopology, Speaker::*};
         let wav = ChannelTopology::new([
             FrontLeft,
             FrontRight,
@@ -1291,7 +1379,7 @@ mod tests {
     /// order to fold to) is `Unplaced`.
     #[test]
     fn a_named_file_wider_than_the_cap_is_refused() {
-        use tutti_types::Speaker::*;
+        use tutti_buffers::Speaker::*;
         let twenty = ChannelTopology::new([
             FrontLeft,
             FrontRight,
@@ -1330,7 +1418,7 @@ mod tests {
         let mut frame = [0.0f32; 12];
         frame[8] = 1.0; // top front left
         let w = Arc::new(constant_wave(
-            tutti_types::ChannelTopology::assumed(ChannelLayout::from(12u16)),
+            tutti_buffers::ChannelTopology::assumed(ChannelLayout::from(12u16)),
             &frame,
         ));
         let place = Place::for_wave(&w, ChannelLayout::from(8u16)).unwrap();
@@ -1382,7 +1470,7 @@ mod tests {
                 .err(),
             Some(PlaceError::Fold(FoldError::Unplaced {
                 channel: 5,
-                speaker: tutti_types::Speaker::Unassigned
+                speaker: tutti_buffers::Speaker::Unassigned
             }))
         );
         assert!(

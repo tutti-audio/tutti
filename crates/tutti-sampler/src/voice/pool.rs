@@ -8,7 +8,7 @@
 use crate::nonempty;
 use crate::streamer::StreamId;
 use crate::stretch;
-use tutti_types::MAX_CHANNELS;
+use tutti_buffers::MAX_CHANNELS;
 
 use super::clock::{BlockClock, Clock};
 use super::command::{
@@ -18,17 +18,18 @@ use super::loop_span::Loop;
 use super::memory_source::MemorySource;
 use super::slot::{PlaybackSlot, stretch_wanted};
 use super::types::{Playback, Reach, SlotId, Voice, VoiceSource};
+use crate::SamplerFloat;
 use crate::lanes::{BlockScratch, UNPREPARED_FRAMES};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::Wave;
 use tutti_graph::{
     Cx, ForkCause, ForkMode, ForkSource, Forked, IntoNode, Io, Node, NodeParts, Prepare,
     RenderMode, Shape, Status,
 };
-use tutti_rt::{Overflow, RingFloat, RingReader, RingWriter, ring};
+use tutti_rt::{Overflow, RingReader, RingWriter, ring};
 use tutti_transport::TempoReader;
-use tutti_types::ChannelLayout;
 use tutti_units::{SampleRate, Tail};
 
 // ---------------------------------------------------------------------------
@@ -75,7 +76,7 @@ use tutti_units::{SampleRate, Tail};
     clippy::large_enum_variant,
     reason = "the payloads exist to be received and dropped on the control thread, never read; boxing the large variant would re-add the audio-thread free this type exists to avoid"
 )]
-pub(crate) enum Retired<F: RingFloat = f32> {
+pub(crate) enum Retired<F: SamplerFloat> {
     /// A slot removed by `VoiceCommand::Remove`, filter and all.
     Slot(PlaybackSlot<F>),
     /// A stretch filter the sender built for an `UpdateStretch` that turned out
@@ -89,7 +90,7 @@ pub(crate) enum Retired<F: RingFloat = f32> {
     /// Unboxed: boxing it would mean allocating on the control thread and
     /// *deallocating* on the audio one, which is the hazard this type exists to
     /// avoid.
-    Stretch(stretch::Unit),
+    Stretch(stretch::Unit<F>),
     /// A wave a `ReplaceWave` let go of: the one a memory slot swapped out,
     /// or the new one when no memory slot took it.
     ///
@@ -106,7 +107,7 @@ pub(crate) enum Retired<F: RingFloat = f32> {
     /// filter there. Counted as [`PoolDrops::voices_refused`].
     Refused {
         voice: Box<Voice<F>>,
-        stretch: Option<stretch::Unit>,
+        stretch: Option<stretch::Unit<F>>,
     },
 }
 
@@ -207,7 +208,7 @@ pub(crate) enum LoopRoute {
     Stream(StreamId),
 }
 
-impl<F: RingFloat> Voice<F> {
+impl<F: SamplerFloat> Voice<F> {
     /// Where this voice's loop is applied.
     pub(crate) fn loop_route(&self) -> LoopRoute {
         match &self.source {
@@ -262,7 +263,7 @@ pub struct PoolTooWide {
 /// Both source tiers live here side by side, as the `Memory` / `Disk` arms of
 /// [`VoiceSource`]; the slot's read forks on that enum rather than on a trait,
 /// which is what keeps a per-tier difference visible at the call site.
-pub struct VoicePool<F: RingFloat = f32> {
+pub struct VoicePool<F: SamplerFloat> {
     /// The resident slots, one per voice, summed in order. Reserved to
     /// `MAX_RESIDENT_VOICES` at construction, and the audio-thread
     /// `AddVoice` drain never grows it: an add for a new slot once it is full
@@ -343,7 +344,7 @@ pub struct VoicePool<F: RingFloat = f32> {
 
 // Hand-rolled: `voices` holds non-`Debug` `PlaybackSlot`s (each wraps a sampler +
 // stretch DSP). Print the slot count + scalars rather than the slot internals.
-impl<F: RingFloat> std::fmt::Debug for VoicePool<F> {
+impl<F: SamplerFloat> std::fmt::Debug for VoicePool<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("VoicePool")
             .field("voices", &self.voices.len())
@@ -352,7 +353,7 @@ impl<F: RingFloat> std::fmt::Debug for VoicePool<F> {
     }
 }
 
-impl<F: RingFloat> VoicePool<F> {
+impl<F: SamplerFloat> VoicePool<F> {
     /// A pool with no command queue and no retirement ring yet (both
     /// dead): [`with_handle`](Self::with_handle) or
     /// [`into_parts`](IntoNode::into_parts) makes them.
@@ -646,7 +647,7 @@ impl<F: RingFloat> VoicePool<F> {
     /// voice's direction is the stream's too, so it is only recorded.
     pub(crate) fn insert_voice(&mut self, id: SlotId, voice: Voice<F>) {
         let stretch = stretch_wanted(&voice.play).then(|| {
-            let unit = stretch::Unit::with_channels(self.sample_rate, self.channels);
+            let unit = stretch::Unit::<F>::with_channels(self.sample_rate, self.channels);
             unit.set_stretch_factor(voice.play.stretch);
             unit.set_pitch_cents(voice.play.pitch);
             unit
@@ -663,7 +664,7 @@ impl<F: RingFloat> VoicePool<F> {
         &mut self,
         id: SlotId,
         mut voice: Box<Voice<F>>,
-        stretch: Option<stretch::Unit>,
+        stretch: Option<stretch::Unit<F>>,
     ) {
         if let Some(i) = self.voices.iter().position(|s| s.id == id) {
             let old = self.voices.swap_remove(i);
@@ -839,7 +840,7 @@ impl<F: RingFloat> VoicePool<F> {
     }
 }
 
-impl<F: RingFloat> Clone for VoicePool<F> {
+impl<F: SamplerFloat> Clone for VoicePool<F> {
     /// A copy of the voices and settings, with no command ring and no
     /// retirement ring of its own: a copy draining the live handle's
     /// commands would steal edits from the audio thread (a ring's one reader
@@ -877,13 +878,13 @@ impl<F: RingFloat> Clone for VoicePool<F> {
     }
 }
 
-impl<F: RingFloat> Default for VoicePool<F> {
+impl<F: SamplerFloat> Default for VoicePool<F> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<F: RingFloat> Node<F> for VoicePool<F> {
+impl<F: SamplerFloat> Node<F> for VoicePool<F> {
     /// No inputs, [`channels`](Self::channels) outputs; a source (fed out of
     /// band, through its queue), never skipped, with the ring-out of
     /// `ring_out`.
@@ -963,7 +964,7 @@ impl<F: RingFloat> Node<F> for VoicePool<F> {
 
 /// A pool's fork: the voices it was built with, copied, while no command has
 /// reached it (see "As a graph node").
-struct PoolFork<F: RingFloat> {
+struct PoolFork<F: SamplerFloat> {
     channels: ChannelLayout,
     tempo: Option<TempoReader>,
     /// The voices the pool held when it became a node, by slot.
@@ -980,7 +981,7 @@ struct PoolFork<F: RingFloat> {
 )]
 struct PoolCommanded;
 
-impl<F: RingFloat> ForkSource<F> for PoolFork<F> {
+impl<F: SamplerFloat> ForkSource<F> for PoolFork<F> {
     fn fork(&self, mode: ForkMode) -> Result<Forked<F>, ForkCause> {
         if self.counters.commanded() {
             return Err(ForkCause::new(PoolCommanded));
@@ -995,7 +996,7 @@ impl<F: RingFloat> ForkSource<F> for PoolFork<F> {
     }
 }
 
-impl<F: RingFloat> IntoNode<F> for VoicePool<F> {
+impl<F: SamplerFloat> IntoNode<F> for VoicePool<F> {
     type Controls = VoicePoolHandle<F>;
 
     fn into_parts(self) -> NodeParts<VoicePoolHandle<F>, F> {

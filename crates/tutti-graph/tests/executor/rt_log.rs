@@ -6,13 +6,13 @@
 use tutti_graph::testing as common;
 
 use common::{TestPool, prepare, test_pool};
+use tutti_buffers::ChannelLayout;
 use tutti_graph::contract::Direct;
 use tutti_graph::{
     Cx, Editor, Executor, Io, LogFilter, Node, NodeKey, Prepare, RtLevel, RtLogReaders, RtRecord,
     RtTarget, RtValue, Shape, Status, TransportPosition, Unforkable,
 };
 use tutti_graph::{OutPort, Source};
-use tutti_types::ChannelLayout;
 use tutti_units::{Frame, SampleRate, Tail};
 
 /// Sites are statics: coalescing compares the literal's address, which the

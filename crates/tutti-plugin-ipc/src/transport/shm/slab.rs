@@ -4,7 +4,7 @@
 //! Layout is **mono-planar** — one contiguous region per channel, addressed by
 //! index — not interleaved, because the plugin ABIs it feeds are deinterleaved
 //! and the memcpy must stay a straight per-channel copy with no transpose. It is
-//! a transport, not an edge (`tutti_types`' `Source`/`Sink`).
+//! a transport, not an edge (`tutti_buffers`' `Source`/`Sink`).
 //!
 //! # Why shared memory
 //!
@@ -66,12 +66,13 @@
 //! means "these are block `seq`'s samples", and torn audio cannot leak out.
 //!
 
-use crate::protocol::{BusChannels, ChannelLayout, SlabLayout};
+use crate::SlabLayout;
 use std::sync::Arc;
 use tutti_buffers::Float;
 use tutti_buffers::FloatWidth;
 use tutti_plugin_types::MAX_BLOCK_CHANNELS;
 use tutti_plugin_types::{BridgeError, BridgeResult, SlabAccessError, SlabLayoutError};
+use tutti_plugin_types::{BusChannels, ChannelLayout};
 
 use tutti_plugin_ipc_ffi::{
     Direction, MappingWriter, RING_SLOTS, SLAB_HEADER_BYTES, SharedMapping, slot_for,
@@ -510,8 +511,8 @@ fn check_layout(layout: &SlabLayout) -> Result<usize, SlabLayoutError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::ChannelLayout;
     use tutti_buffers::FloatWidth;
+    use tutti_plugin_types::ChannelLayout;
 
     /// A real two-bus-per-direction layout. Deliberately *asymmetric* (3 in, 2
     /// out): built at base 0 with equal widths, an offset error that swapped the

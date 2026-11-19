@@ -4,12 +4,12 @@
 
 use std::sync::Arc;
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_music::{MeterChange, MeterMap, TimeSignature};
 use tutti_nodes::MetronomeMode;
 use tutti_session::{OutPort, Root, Session, SetRefusal, ValueErrorKind};
 use tutti_tempo::TempoMap;
-use tutti_types::ChannelLayout;
 use tutti_units::{Amplitude, Beat, Bpm, SampleRate};
 
 fn offline() -> Session {
@@ -31,11 +31,12 @@ fn ramped() -> TempoMap {
 /// A write of a map is read back whole, and a constant tempo is a one-step map.
 #[test]
 fn a_tempo_map_written_is_the_map_read_back() {
-    let s = offline();
+    let mut s = offline();
     let tempo = s.transport_handle().tempo();
     let map = Arc::new(ramped());
     s.set(tempo.to(Arc::clone(&map))).unwrap();
     assert_eq!(s.get(tempo).unwrap(), map);
+    let _ = s.update();
     assert_eq!(s.tempo_map(), map, "the engine's map is the one written");
 
     s.set(tempo.to(TempoMap::constant(Bpm::of(90.0)).unwrap()))

@@ -14,7 +14,7 @@
 //! solves one direction's [`VbapGains`] (the mono fold of a narrow width, two virtual
 //! sources otherwise, the last solve kept), and [`VbapGains::render_channel`] renders one
 //! output channel along a [`Glide`](crate::Glide) between two of them. A [`SpeakerLayout`] of
-//! a [`Bed`](tutti_types::Bed) is [`SpeakerLayout::from_bed`]: the speakers sit where
+//! a [`Bed`](tutti_buffers::Bed) is [`SpeakerLayout::from_bed`]: the speakers sit where
 //! the bed's one table puts them.
 //!
 //! The mathematics is Pulkki's (1997): a source direction `p` is the sum of

@@ -10,7 +10,7 @@
 //! so the smoothed pair contradicts the invariant the kernel guarantees.
 
 use tutti_buffers::{Sample, StereoPlanes};
-use tutti_dsp::Smoother;
+use tutti_dsp::smooth_toward;
 use tutti_units::{Amplitude, Ballistics, Correlation, Db, Seconds, StereoBalance, StereoWidth};
 
 /// Mid/side and per-channel levels.
@@ -109,13 +109,13 @@ pub fn correlate<S: Sample>(planes: StereoPlanes<'_, S>) -> StereoReading {
     }
     let (left, right) = (planes.left(), planes.right());
 
-    // f64 accumulators: these sums run over whole blocks and f32 loses
-    // precision quickly on the squared terms.
+    // Un-centred f64 accumulators over the whole block: the correlation is
+    // `Σlr / sqrt(Σll·Σrr)`, so no mean is removed and nothing cancels.
     let (mut sum_ll, mut sum_rr, mut sum_lr) = (0.0f64, 0.0, 0.0);
     let (mut sum_mid, mut sum_side) = (0.0f64, 0.0f64);
 
     for i in 0..n {
-        let (l, r) = (left[i].to_f64(), right[i].to_f64());
+        let (l, r) = (left[i].convert_to::<f64>(), right[i].convert_to::<f64>());
         sum_ll += l * l;
         sum_rr += r * r;
         sum_lr += l * r;
@@ -212,9 +212,9 @@ impl StereoSmoother {
     /// smoothed correlation afterwards, so the two cannot disagree.
     pub fn push(&mut self, instant: StereoReading, dt: Seconds) -> StereoReading {
         let cfg = self.cfg;
-        let smooth = |old: f64, new: f64| Smoother::toward(old, new, cfg.coeff_over(new > old, dt));
+        let smooth = |old: f64, new: f64| smooth_toward(old, new, cfg.coeff_over(new > old, dt));
         let smooth_level = |old: Amplitude, new: Amplitude| {
-            Amplitude(Smoother::toward(
+            Amplitude(smooth_toward(
                 old.get(),
                 new.get(),
                 cfg.coeff_over(new > old, dt),

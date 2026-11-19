@@ -18,7 +18,7 @@
 //!
 //! It closes the held keys of a cut edge all at once; the executor writes as
 //! many closes as the flush room takes and spreads the rest over the blocks
-//! that follow, a pedal up first in each table, so their streams agree only
+//! that follow, the controls first in each table, so their streams agree only
 //! when the closes fit.
 //!
 //! It has no crossfade model: `set_graph` takes a replace as a plain swap, so
@@ -129,8 +129,8 @@ use crate::spec::{EventEdge, EventIn, EventOut, ValidGraph};
 use crate::time::Offset;
 use tutti_ump::ControlValue;
 use tutti_ump::{
-    Address, CCNumber, Message, MidiChannel, MidiGroup, NoteNumber, NoteVelocity, U7, Ump, Voice1,
-    Voice2,
+    Address, BendValue, CCNumber, Message, MidiChannel, MidiGroup, NoteNumber, NoteVelocity, U7,
+    U14, Ump, Voice1, Voice2,
 };
 use tutti_units::PlayReading;
 
@@ -2321,7 +2321,7 @@ impl<F: Float> RefMode<F> {
             && self
                 .held_in
                 .iter()
-                .all(|h| h.notes.is_empty() && h.pedals.is_empty())
+                .all(|h| h.notes.is_empty() && h.controls.is_empty())
     }
 
     /// This block's mix: the one the previous block was given is where the
@@ -2420,14 +2420,32 @@ type RefNote = (bool, u8, u8, NoteNumber);
 #[derive(Debug, Default)]
 struct RefHeld {
     notes: BTreeSet<RefNote>,
-    /// `(MIDI 2.0, group, channel)` with the pedal down.
-    pedals: BTreeSet<(bool, u8, u8)>,
+    /// `(MIDI 2.0, group, channel, control)` off its normal position: the
+    /// control is the index in [`HOLD_PEDALS`], or [`BEND`] for the pitch bend.
+    controls: BTreeSet<(bool, u8, u8, u8)>,
 }
+
+/// The hold controllers, in control order: sustain, sostenuto, soft pedal, hold 2.
+const HOLD_PEDALS: [CCNumber; 4] = [
+    CCNumber::of(64),
+    CCNumber::of(66),
+    CCNumber::of(67),
+    CCNumber::of(69),
+];
+const BEND: u8 = 4;
 
 enum RefKey {
     On(RefNote),
     Off(RefNote),
-    Pedal(bool, u8, u8, bool),
+    /// `(MIDI 2.0, group, channel, control, off its normal position)`.
+    Control(bool, u8, u8, u8, bool),
+}
+
+fn pedal_of(controller: CCNumber) -> Option<u8> {
+    HOLD_PEDALS
+        .iter()
+        .position(|&p| p == controller)
+        .map(|i| i as u8)
 }
 
 fn ref_key(e: &Event) -> Option<RefKey> {
@@ -2443,9 +2461,9 @@ fn ref_key(e: &Event) -> Option<RefKey> {
                 }
                 Voice1::NoteOn { note, .. } => Some(RefKey::On((false, g, c, note))),
                 Voice1::NoteOff { note, .. } => Some(RefKey::Off((false, g, c, note))),
-                Voice1::ControlChange { controller, value } if controller == CCNumber::SUSTAIN => {
-                    Some(RefKey::Pedal(false, g, c, value.get() >= 64))
-                }
+                Voice1::ControlChange { controller, value } => pedal_of(controller)
+                    .map(|bit| RefKey::Control(false, g, c, bit, value.get() >= 64)),
+                Voice1::PitchBend(b) => Some(RefKey::Control(false, g, c, BEND, b != U14::CENTER)),
                 _ => None,
             }
         }
@@ -2454,8 +2472,10 @@ fn ref_key(e: &Event) -> Option<RefKey> {
             match v {
                 Voice2::NoteOn { note, .. } => Some(RefKey::On((true, g, c, note))),
                 Voice2::NoteOff { note, .. } => Some(RefKey::Off((true, g, c, note))),
-                Voice2::ControlChange { controller, value } if controller == CCNumber::SUSTAIN => {
-                    Some(RefKey::Pedal(true, g, c, value >= ControlValue::CENTER))
+                Voice2::ControlChange { controller, value } => pedal_of(controller)
+                    .map(|bit| RefKey::Control(true, g, c, bit, value >= ControlValue::CENTER)),
+                Voice2::PitchBend(b) => {
+                    Some(RefKey::Control(true, g, c, BEND, b != BendValue::CENTER))
                 }
                 _ => None,
             }
@@ -2474,11 +2494,11 @@ impl RefHeld {
                 Some(RefKey::Off(k)) => {
                     self.notes.remove(&k);
                 }
-                Some(RefKey::Pedal(m2, g, c, down)) => {
-                    if down {
-                        self.pedals.insert((m2, g, c));
+                Some(RefKey::Control(m2, g, c, bit, off_normal)) => {
+                    if off_normal {
+                        self.controls.insert((m2, g, c, bit));
                     } else {
-                        self.pedals.remove(&(m2, g, c));
+                        self.controls.remove(&(m2, g, c, bit));
                     }
                 }
                 None => {}
@@ -2490,39 +2510,45 @@ impl RefHeld {
     fn close_upto(&mut self, offset: Offset, max: usize) -> Vec<Event> {
         let mut out = self.closing(offset);
         out.truncate(max);
-        let pedals = out.len().min(self.pedals.len());
-        for _ in 0..pedals {
-            self.pedals.pop_first();
+        let controls = out.len().min(self.controls.len());
+        for _ in 0..controls {
+            self.controls.pop_first();
         }
-        for _ in pedals..out.len() {
+        for _ in controls..out.len() {
             self.notes.pop_first();
         }
         out
     }
 
-    /// Pedals up, then every note off, at one offset.
+    /// Controls returned, then every note off, at one offset.
     fn closing(&self, offset: Offset) -> Vec<Event> {
         let mut out = Vec::new();
         let addr = |g: u8, c: u8| Address {
             group: MidiGroup::of(g),
             channel: MidiChannel::of(c),
         };
-        for &(m2, g, c) in &self.pedals {
-            let cc = CCNumber::SUSTAIN;
+        for &(m2, g, c, bit) in &self.controls {
+            let pedal = HOLD_PEDALS.get(usize::from(bit)).copied();
             let msg = if m2 {
                 Message::Midi2(
                     addr(g, c),
-                    Voice2::ControlChange {
-                        controller: cc,
-                        value: ControlValue::MIN,
+                    match pedal {
+                        Some(controller) => Voice2::ControlChange {
+                            controller,
+                            value: ControlValue::MIN,
+                        },
+                        None => Voice2::PitchBend(BendValue::CENTER),
                     },
                 )
             } else {
                 Message::Midi1(
                     addr(g, c),
-                    Voice1::ControlChange {
-                        controller: cc,
-                        value: U7::of(0),
+                    match pedal {
+                        Some(controller) => Voice1::ControlChange {
+                            controller,
+                            value: U7::of(0),
+                        },
+                        None => Voice1::PitchBend(U14::CENTER),
                     },
                 )
             };

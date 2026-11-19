@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use tutti_plugin::catalog::{
-    Catalog, CatalogConfig, DEFAULT_MEASURE_TIMEOUT, DEFAULT_PROBE_TIMEOUT, Locator, NO_SCAN_DIRS,
+    Catalog, CatalogConfig, DEFAULT_MEASURE_TIMEOUT, DEFAULT_PROBE_TIMEOUT, Locator,
     PluginDescriptor, PluginRef, ProbeFailure, ScanPoll,
 };
 use tutti_plugin_contract::{
@@ -32,13 +32,14 @@ use tutti_plugin_types::{
     TailVerdict,
 };
 use tutti_plugin_types::{ProbeDeath, ProbeError, ProbeExit, ProbeOutcome, ProbeRefusal};
+use tutti_vst2_author::shell::{ALPHA_ID, ALPHA_NAME, BETA_ID, BETA_NAME};
 use tutti_vst2_host::Vst2Loaded;
 
 /// A catalog whose probes run in the `plugin-probe` built in this profile, named
 /// through [`Locator::at`], so nothing writes the process-global environment. Its
 /// sentinel lives in `dir`.
 fn config(dir: &Path) -> CatalogConfig {
-    CatalogConfig::new(dir, NO_SCAN_DIRS).probe_locator(Locator::at(tutti_fixtures::plugin_probe()))
+    CatalogConfig::new(dir).probe_locator(Locator::at(tutti_fixtures::plugin_probe()))
 }
 
 /// Runs the catalog task `start` makes to its end and returns the database it
@@ -203,12 +204,12 @@ fn served_id(plugin: &PluginRef) -> String {
     env.set("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server());
     let Launched { ipc, .. } = Ipc::launch(
         IpcConfig::at(tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source")),
-        plugin.path().to_path_buf(),
-        plugin.format(),
-        plugin.load(),
-        SampleRate::SR_48K,
-        None,
-        tutti_plugin_types::StateUse::Project,
+        &tutti_plugin_ipc::LoadRequest {
+            origin: &tutti_plugin_types::Origin::new(plugin.path(), plugin.load()),
+            format: plugin.format(),
+            rate: SampleRate::SR_48K,
+            restore: None,
+        },
         Some(tutti_plugin_ipc::EditorLoader::new(
             no_editor,
             tutti_fixtures::detached_work(),
@@ -268,11 +269,8 @@ fn a_served_vst3_load_picks_the_class_its_ref_names() {
 /// above.
 #[test]
 fn a_vst2_shell_is_probed_as_its_sub_plugins() {
-    // The shell's sub-plugins: `uniqueID`s spelt as four-character codes, and names, as
-    // `tutti-vst2-shell-plugin` declares them (a dev-dependency to be built, not linked:
-    // its entry point would clash with the shared plugin's).
-    let alpha = i32::from_be_bytes(*b"SHAL");
-    let beta = i32::from_be_bytes(*b"SHBE");
+    // The shell plugin itself is a dev-dependency to be built, not linked: its entry point
+    // would clash with the shared plugin's. Its ids and names come from the author crate.
     let dir = tempfile::tempdir().unwrap();
     let real = tutti_fixtures::cdylib("tutti_vst2_shell_plugin", "tutti-vst2-shell-plugin");
     let path = vst2_named(&dir, "shell.vst", real);
@@ -285,8 +283,8 @@ fn a_vst2_shell_is_probed_as_its_sub_plugins() {
     assert_eq!(
         found,
         [
-            (format!("vst2.{alpha}"), "Shell Alpha".to_string()),
-            (format!("vst2.{beta}"), "Shell Beta".to_string()),
+            (format!("vst2.{ALPHA_ID}"), ALPHA_NAME.to_string()),
+            (format!("vst2.{BETA_ID}"), BETA_NAME.to_string()),
         ]
     );
 

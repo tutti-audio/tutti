@@ -26,10 +26,10 @@ use tutti_sampler::testing::loop_frames;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::Wave;
 use tutti_graph::{Env, Node, TransportChanges, contract};
 use tutti_sampler::{Direction, MemorySource, MemorySourceConfig, Playback, SlotId, VoicePool};
-use tutti_types::ChannelLayout;
 use tutti_units::{Amplitude, Beat, Bpm, Frame, SamplePosition, SampleRate, Samples};
 
 const SR: f64 = 48_000.0;
@@ -130,7 +130,7 @@ fn render(node: &mut dyn Node, blocks: usize) -> Vec<f32> {
 /// `MemorySource` — the source has no direction verb, and `apply_direction` is
 /// a deliberate no-op on the memory tier. So exercising it means going through a
 /// pool, which is also the assembly a real render uses.
-fn reversed_pool(wave: Arc<Wave>, direction: Direction) -> (VoicePool, Arc<Clock>) {
+fn reversed_pool(wave: Arc<Wave>, direction: Direction) -> (VoicePool<f32>, Arc<Clock>) {
     let clock = Clock::new();
     // Placed, not free-running. `PlaybackSlot` reads `seated_position()`, which
     // needs a timeline; without one the slot returns early and emits silence, so
@@ -159,7 +159,7 @@ fn reversed_pool(wave: Arc<Wave>, direction: Direction) -> (VoicePool, Arc<Clock
 }
 
 /// Render a placed pool, advancing its clock once per block.
-fn render_placed(pool: &mut VoicePool, clock: &Clock, blocks: usize) -> Vec<f32> {
+fn render_placed(pool: &mut VoicePool<f32>, clock: &Clock, blocks: usize) -> Vec<f32> {
     let mut out = Vec::with_capacity(blocks * BLOCK);
     for _ in 0..blocks {
         out.extend(clock.block(pool).swap_remove(0));
@@ -420,7 +420,7 @@ fn loop_is_continuous(len: usize, start: f64, end: f64, fade: usize) {
 /// Looping is driven by the source's own position accumulator, not by a
 /// playhead — the wrap happens in `MemorySource`'s free-running arm. So this
 /// deliberately does *not* attach a timeline.
-fn looping_source(wave: Arc<Wave>, start: f64, end: f64, xfade: usize) -> MemorySource {
+fn looping_source(wave: Arc<Wave>, start: f64, end: f64, xfade: usize) -> MemorySource<f32> {
     let mut source = MemorySource::with_config(
         wave,
         MemorySourceConfig {

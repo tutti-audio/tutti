@@ -49,12 +49,12 @@ use std::sync::mpsc::{Receiver, channel};
 use std::sync::{Arc, OnceLock};
 
 use thiserror::Error;
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::{Float, Interleaved, InterleavedMut, Sink, SinkFailed};
 use tutti_codec::{FileOut, Format, Spec};
 use tutti_engine::StreamLatency;
 use tutti_graph::{MissingSource, NodeKey, TapAlign, TapReader};
 use tutti_tempo::TempoMap;
-use tutti_types::ChannelLayout;
 use tutti_units::{At, Beat, Frame, SampleRate, Samples, Seconds};
 
 use crate::WorkerError;
@@ -65,7 +65,7 @@ use crate::{Input, Session, SessionEvent, Trim};
 /// How many frames the pump moves a pass.
 const PASS_FRAMES: usize = 1024;
 
-tutti_types::id! {
+tutti_rt::id! {
     /// One take of a session: the number [`TakeEvent`]s carry.
     pub struct TakeId;
 }
@@ -511,7 +511,8 @@ impl Recorded {
     /// The take as a clip, in the session's float, that starts where it
     /// belongs ([`Placement::start_beat`]): add it to the graph, in place of
     /// the input if you like (`graph.replace(input.node(), done.clip()?)`), and
-    /// a bounce can fork it.
+    /// a bounce can fork it. Present with the `sampler` feature and a
+    /// `tutti-codec` `decode-*` feature on.
     ///
     /// # Errors
     ///
@@ -520,8 +521,8 @@ impl Recorded {
     /// back (a format whose decoder is not built in);
     /// [`Error::Place`](crate::Error::Place) for a wave the sampler cannot
     /// place.
-    #[cfg(feature = "sampler")]
-    pub fn clip<F: tutti_rt::RingFloat>(&self) -> crate::Result<tutti_sampler::Clip<F>> {
+    #[cfg(all(feature = "sampler", codec))]
+    pub fn clip<F: tutti_sampler::SamplerFloat>(&self) -> crate::Result<tutti_sampler::Clip<F>> {
         let path = self.path().ok_or(TakeError::NoFile)?;
         let wave = tutti_codec::read_wave::<F>(path)?;
         Ok(tutti_sampler::Clip::new(wave)?.at(self.placement.start_beat))

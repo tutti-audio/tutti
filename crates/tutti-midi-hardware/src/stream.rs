@@ -1,7 +1,7 @@
 //! What a device's UMP Stream conversation settled: [`DeviceStream`], and the
 //! [`Negotiation`] that runs it (M2-104 §7.1.6.1, Table 4 steps 2 to 4).
 //!
-//! A [`Connection`] is the pure state machine; this is the part that has a
+//! A [`EndpointDiscovery`] is the pure state machine; this is the part that has a
 //! wire. One runs for each input the session opens on a device that is a UMP
 //! Endpoint and has an output to send on:
 //!
@@ -50,7 +50,7 @@
 //! # What is asked for
 //!
 //! The MIDI 2.0 Protocol where the device offers it, else MIDI 1.0
-//! ([`Connection::with_wanted`] narrows the request to what the Endpoint
+//! ([`EndpointDiscovery::with_wanted`] narrows the request to what the Endpoint
 //! supports), with **JR Timestamps off to the device** (RXJR is never asked
 //! for) and, from the device, off unless the input was opened with
 //! [`InputTiming::JitterReduction`]. Input time then comes from the OS's
@@ -67,7 +67,7 @@
 //! A device that answered goes on being heard: a Stream Configuration
 //! Notification moves the Protocol and JR in use, and (when the Endpoint did
 //! not declare its Function Blocks static) a Function Block Info or Name
-//! changes a block (`Connection::on_message`, `Action::Changed`). A change is
+//! changes a block (`EndpointDiscovery::on_message`, `DiscoveryAction::Changed`). A change is
 //! returned by [`MidiSession::poll`](crate::MidiSession::poll) as the settle
 //! is, and what the output sends in follows it, and where the input's event
 //! times come from follows its TXJR.
@@ -78,10 +78,10 @@ use std::time::Instant;
 use tutti_graph::{Losses, Offset};
 use tutti_midi_device::ResourceStore;
 use tutti_midi_device::{
-    Action, Capabilities, Connection, Ending, Endpoint, EntropyError, IdentityInquiry,
-    InquiryAction, Learned, Reply, Supports,
+    Capabilities, DiscoveryAction, DiscoveryEnding, Endpoint, EndpointDiscovery, EndpointReply,
+    EntropyError, IdentityInquiry, InquiryAction, Learned, Supports,
 };
-use tutti_midi_protocol::{Addressed, Read, Universal, read};
+use tutti_midi_protocol::{Addressed, Universal, UniversalRead, read};
 use tutti_midi_runtime::Outgoing;
 use tutti_rt::CounterWriter;
 use tutti_ump::{
@@ -232,7 +232,7 @@ impl DeviceStream {
     }
 }
 
-/// One device's negotiation: its [`Connection`], while one runs, and the output
+/// One device's negotiation: its [`EndpointDiscovery`], while one runs, and the output
 /// it sends on. Control side.
 pub(crate) struct Negotiation {
     os: Endpoint,
@@ -395,7 +395,7 @@ impl Asking {
             return None;
         };
         match read(self.assembler.message(done)) {
-            Read::Universal(Addressed {
+            UniversalRead::Universal(Addressed {
                 message: Universal::IdentityReply(identity),
                 ..
             }) => Some(identity),
@@ -407,12 +407,12 @@ impl Asking {
 enum Run {
     /// Decided to ask, not yet started: the first poll starts it.
     Idle,
-    Asking(Box<Connection>),
+    Asking(Box<EndpointDiscovery>),
     /// Settled. `listening` is the connection of a device that answered, which
     /// still hears what it changes; a device described by the OS has none.
     Done {
         stream: Box<DeviceStream>,
-        listening: Option<Box<Connection>>,
+        listening: Option<Box<EndpointDiscovery>>,
     },
 }
 
@@ -675,7 +675,7 @@ impl Negotiation {
                         | Stream::FunctionBlockDiscovery { .. }
                         | Stream::StreamConfigurationRequest(_)
                 )
-                && let Reply::Configured(configuration) =
+                && let EndpointReply::Configured(configuration) =
                     answering.endpoint.reply(message, &mut replies)
             {
                 granted = Some(configuration.active());
@@ -766,7 +766,7 @@ impl Negotiation {
         let wanted = self.timing.wanted();
         match &mut self.run {
             Run::Idle => {
-                let (connection, first) = Connection::with_wanted(wanted, now);
+                let (connection, first) = EndpointDiscovery::with_wanted(wanted, now);
                 actions.push(first);
                 self.run = Run::Asking(Box::new(connection));
             }
@@ -785,7 +785,7 @@ impl Negotiation {
                 let mut changed = false;
                 for &ump in incoming {
                     if let Ok(message) = ump.decode() {
-                        changed |= connection.on_message(message, now) == Action::Changed;
+                        changed |= connection.on_message(message, now) == DiscoveryAction::Changed;
                     }
                 }
                 let mut reported = None;
@@ -816,9 +816,9 @@ impl Negotiation {
         }
         for action in actions {
             match action {
-                Action::Wait | Action::Changed => {}
-                Action::Send(ump) => self.send(ump),
-                Action::Settled(ending) => return self.settle(ending),
+                DiscoveryAction::Wait | DiscoveryAction::Changed => {}
+                DiscoveryAction::Send(ump) => self.send(ump),
+                DiscoveryAction::Settled(ending) => return self.settle(ending),
             }
         }
         None
@@ -830,19 +830,19 @@ impl Negotiation {
         queue(&mut self.out, ump, false);
     }
 
-    fn settle(&mut self, ending: Ending) -> Option<DeviceStream> {
+    fn settle(&mut self, ending: DiscoveryEnding) -> Option<DeviceStream> {
         let Run::Asking(connection) = &self.run else {
             return None;
         };
         let (stream, listening) = match ending {
-            Ending::Negotiated => (
+            DiscoveryEnding::Negotiated => (
                 DeviceStream {
                     endpoint: *connection.endpoint(),
                     basis: Basis::Negotiated,
                 },
                 Some(connection.clone()),
             ),
-            Ending::Midi1Fallback => (
+            DiscoveryEnding::Midi1Fallback => (
                 DeviceStream {
                     endpoint: described(&self.os),
                     basis: Basis::Unanswered,

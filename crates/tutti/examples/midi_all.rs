@@ -20,13 +20,12 @@
 use tutti::midi::{
     self, AddedInstrument, FileEvent, Layout, LeadTrack, Message, MidiChannel, MidiFile, MidiGroup,
     MidiHardwareOptions, MidiRouteRule, MpeMode, MpeZoneConfig, MpeZones, NoteNumber, NoteVelocity,
-    PitchBendSensitivity, SmfDivision, TakePlacement, Tick, TicksPerQuarterNote, Timebase, Track,
-    U7, Voice1,
+    PitchBendSensitivity, SmfDivision, TakePlacement, Tick, TicksPerQuarterNote, Track, U7, Voice1,
 };
 use tutti::polysynth::{PolySynth, SynthConfig};
 use tutti::{
-    Beat, ChannelLayout, Error, EventCapacity, Frame, InterleavedMut, MaxBlock, SampleRate,
-    Samples, Session, SessionEvent, Stamp,
+    ChannelLayout, Error, EventCapacity, Frame, InterleavedMut, MaxBlock, SampleRate, Samples,
+    Session, SessionEvent, Stamp,
 };
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -106,7 +105,7 @@ fn run() -> Result<Outcome, Box<dyn std::error::Error>> {
         None,
     )
     .ok_or("one lower zone")?;
-    s.midi().set_mpe(MpeMode::Zones(zone));
+    s.set(s.mpe().to(MpeMode::Zones(zone)))?;
 
     // A synth as an instrument: its strip is wired to the master.
     let AddedInstrument {
@@ -117,14 +116,15 @@ fn run() -> Result<Outcome, Box<dyn std::error::Error>> {
     let mut take = s.midi().record(synth.node(), EventCapacity::of(256))?;
 
     // A clip from a file's timeline: the packets it holds at their beats.
-    let file = file()?;
-    let Timebase::Metrical(metrical) = file.timebase() else {
-        return Err(
-            "the file has no one beat timeline (SMPTE frames, or format 2 sequences) to play on"
-                .into(),
-        );
-    };
-    s.midi().play_file(synth.node(), Beat(0.0), metrical)?;
+    // The load is a job on the session's worker, which converts each track to
+    // a clip value; `wait` runs updates until it lands.
+    let path = std::env::temp_dir().join(format!("tutti-midi-all-{}.mid", std::process::id()));
+    file()?.write(&path)?;
+    let job = s.midi().load_midi(&path);
+    let loaded = job.wait(&mut s);
+    std::fs::remove_file(&path)?;
+    let loaded = loaded?;
+    s.midi().play_track(synth.node(), loaded.track(0)?)?;
 
     // Live notes, through the handle's keys: a MIDI 2.0 note with its
     // 16-bit velocity, and a decoded `Message`, which `push` takes as it takes

@@ -26,7 +26,7 @@ tutti-buffers = { version = "0.0.1", path = "../tutti-buffers" }
 # the builder inserts (the click) and modulation applies (`Modulation`).
 tutti-units = { version = "0.0.1", path = "../tutti-units", default-features = false }
 tutti-music = { version = "0.0.1", path = "../tutti-music", default-features = false }
-tutti-types = { version = "0.0.1", path = "../tutti-types", default-features = false }
+atomic_float = "1.1"
 tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false }
 tutti-graph = { version = "0.0.1", path = "../tutti-graph" }
 tutti-transport = { version = "0.0.1", path = "../tutti-transport" }
@@ -64,8 +64,9 @@ tutti-export = { version = "0.0.1", path = "../tutti-export", default-features =
 # `DecodeError` (in `Error::Decode`, whatever decoders are on) and `Format`,
 # the file format a bounce names (`Bounce::format`). No codec feature.
 tutti-codec = { version = "0.0.1", path = "../tutti-codec" }
-# `DitherSink`, the dither a recording opts into (the one an export uses), and
-# the `DitherShape` a bounce names.
+# `DitherSink`, the dither a recording opts into (the one an export uses), the
+# `DitherShape` a bounce names, and the `Lerp` and `Lanes` bounds of the
+# General MIDI setup and the SoundFont unit in any float.
 tutti-dsp = { version = "0.0.1", path = "../tutti-dsp", default-features = false, optional = true }
 tutti-plugin = { version = "0.0.1", path = "../tutti-plugin", optional = true }
 # The control handle, the node's controls and the host policy over a handle
@@ -105,7 +106,7 @@ serde = [
 sampler = ["dep:tutti-sampler"]
 # `Session::analyze`: an offline analysis job over a wave or a file.
 analyze = ["dep:tutti-measure"]
-soundfont = ["midi", "dep:tutti-soundfont", "dep:tutti-sf2"]
+soundfont = ["midi", "dep:tutti-soundfont", "dep:tutti-sf2", "dep:tutti-dsp"]
 synth = ["midi", "dep:tutti-polysynth"]
 # Export. `export` is the offline renderer and WAV, which is pure Rust; FLAC and
 # AIFF are pure Rust and opt-in (`encode-flac`, `encode-aiff`), and `encode-vorbis` is the one path to C (the

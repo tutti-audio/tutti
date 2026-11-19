@@ -24,13 +24,14 @@
 use crate::support;
 use crate::support::{EncodeConfig, ExportConfig, RenderConfig, write_buffers};
 use tutti_buffers::Float;
+use tutti_buffers::MaxBlock;
 use tutti_buffers::{Interleaved, Mono};
-use tutti_types::MaxBlock;
 
 use std::sync::Arc;
 use tutti_units::Seconds;
 
 use crate::support::{render_normalized_to_file, render_to_buffers, render_to_file};
+use tutti_buffers::{Bed, ChannelLayout};
 use tutti_codec::{Format, Pcm};
 use tutti_dsp::DitherShape;
 use tutti_export::{Error, GRAPH_MAX_BLOCK, Normalize, RenderGraph, Rendered, Resample, Setup};
@@ -39,7 +40,6 @@ use tutti_nodes::testing::{Const, Osc, vbap_mix};
 use tutti_tempo::TempoMap;
 use tutti_transport::FrozenClock;
 use tutti_transport::{OfflineTimeline, OfflineTimelineConfig};
-use tutti_types::{Bed, ChannelLayout};
 use tutti_units::{Amplitude, Azimuth, Beat, Bpm, Hz, SampleRate};
 use tutti_units::{Db, Samples};
 
@@ -689,7 +689,7 @@ fn timeline() -> Arc<OfflineTimeline> {
 /// A voice placed at beat 0, pitched by `cents`, in a `VoicePool` (the node a
 /// clip track renders). It reads whatever transport its blocks' `Env` carry:
 /// here, the render clock's.
-fn placed_pool(cents: f64) -> tutti_sampler::VoicePool {
+fn placed_pool(cents: f64) -> tutti_sampler::VoicePool<f32> {
     use tutti_sampler::{MemorySource, Playback, SlotId, VoicePool, VoiceWindow};
     let source =
         MemorySource::placed(tone(), VoiceWindow::from(Beat(0.0))).expect("a placeable wave");

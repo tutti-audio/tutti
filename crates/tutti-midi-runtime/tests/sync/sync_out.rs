@@ -48,7 +48,7 @@ struct Rig {
 
 impl Rig {
     fn new(group: MidiGroup, messages: SyncMessages) -> Self {
-        Self::over(SyncOut::new(group).messages(messages))
+        Self::over(SyncOut::new(group).sending(messages))
     }
 
     fn over(node: SyncOut) -> Self {
@@ -399,7 +399,7 @@ fn a_fork_sends_what_the_live_node_sent_at_the_fork() {
         .insert(
             NodeKey(1),
             "sync",
-            SyncOut::new(G).messages(SyncMessages::OFF),
+            SyncOut::new(G).sending(SyncMessages::OFF),
         )
         .controls;
     rig.feed(NodeKey(1), 0, 0);
@@ -432,7 +432,7 @@ fn flex_states_the_tempo_and_the_nodes_meter_once() {
     let mut rig = Rig::over(
         SyncOut::new(G)
             .meter(move || meter.reader())
-            .messages(SyncMessages {
+            .sending(SyncMessages {
                 flex: true,
                 ..SyncMessages::OFF
             }),
@@ -502,7 +502,7 @@ fn reset_forgets_what_was_seen_and_keeps_what_is_sent() {
         sysex(&sent.iter().map(|&u| (0, u)).collect::<Vec<_>>()) == [(0, PLAY.to_vec())]
     };
 
-    let mut d = Direct::new(SyncOut::new(G).messages(both), SampleRate::SR_48K, 64);
+    let mut d = Direct::new(SyncOut::new(G).sending(both), SampleRate::SR_48K, 64);
     assert!(!drive(&mut d, rolling(Beat(1.0))).is_empty());
     let run_on = drive(&mut d, rolling(beat(1.0, 64)));
     assert!(!continues(&run_on), "a run-on is no play edge");
@@ -512,7 +512,7 @@ fn reset_forgets_what_was_seen_and_keeps_what_is_sent() {
     assert!(!after.is_empty(), "the messages set are still set");
 
     let mut kept = Direct::new(
-        SyncOut::new(G).messages(mmc(MtcRate::Fps30)),
+        SyncOut::new(G).sending(mmc(MtcRate::Fps30)),
         SampleRate::SR_48K,
         64,
     );
@@ -522,7 +522,7 @@ fn reset_forgets_what_was_seen_and_keeps_what_is_sent() {
     );
     assert!(plays(&drive(&mut kept, rolling(Beat(0.0)))));
     let mut reset = Direct::new(
-        SyncOut::new(G).messages(mmc(MtcRate::Fps30)),
+        SyncOut::new(G).sending(mmc(MtcRate::Fps30)),
         SampleRate::SR_48K,
         64,
     );
@@ -568,7 +568,7 @@ fn an_mmc_locate_on_a_loop_wrap_is_on_the_next_blocks_first_frame() {
 /// `918.75 k`: 0, 919, 1 838, 2 757 (2 756.25), 3 675 (exactly).
 #[test]
 fn a_44_1_khz_graph_ticks_every_918_75_frames() {
-    let mut rig = Rig::at(44_100.0, SyncOut::new(G).messages(clock()));
+    let mut rig = Rig::at(44_100.0, SyncOut::new(G).sending(clock()));
     let got = rig.block(BLOCK, rolling(Beat(0.0)), &[]);
     let ticks: Vec<u64> = systems(&got, |m| (m == System::TimingClock).then_some(()))
         .iter()
@@ -608,6 +608,59 @@ fn mtc_sends_without_the_beat_clock() {
     assert!(clock_bytes.is_empty(), "{clock_bytes:?}");
 }
 
+/// **With MTC on and the Beat Clock off, a locate states the new time as an MTC
+/// Full Message and sends no Song Position Pointer and no Stop.** Song Position
+/// (`F2`) and Stop (`FC`) belong to the Beat Clock (M1 p.30 and p.31: Song
+/// Position counts MIDI beats of the sequence, Stop halts a sequencer's
+/// clock-driven play), and a receiver slaved to time code takes its position
+/// from the Full Message (M1 p.52) and keeps rolling. At 30 fps (hours byte
+/// `0x60`) a jump to beat 40 on frame 300 of a block is `00:00:20:00` on that
+/// frame, and a loop wrap on frame 2 400 of a block is the loop's start, beat
+/// 2.0, `00:00:01:00`, on its frame; neither is followed by a System message
+/// other than the Quarter Frames.
+#[test]
+fn a_locate_or_a_wrap_with_mtc_and_no_clock_sends_no_song_position_and_no_stop() {
+    use tutti_music::LoopRange;
+    let mut rig = Rig::new(
+        G,
+        SyncMessages {
+            mtc: true,
+            rate: MtcRate::Fps30,
+            ..SyncMessages::OFF
+        },
+    );
+    let not_time_code = |events: &[(u64, Ump)]| {
+        systems(events, |m| match m {
+            System::TimeCode(_) => None,
+            other => Some(other),
+        })
+    };
+    let first = rig.block(BLOCK, rolling(Beat(0.0)), &[]);
+    assert!(not_time_code(&first).is_empty(), "{first:?}");
+
+    let from = BLOCK as u64;
+    let jump = rig.block(
+        BLOCK,
+        rolling(beat(0.0, BLOCK)),
+        &[(300, rolling(Beat(40.0)))],
+    );
+    assert_eq!(sysex(&jump), [(from + 300, full_message(0x60, 20, 0))]);
+    assert!(not_time_code(&jump).is_empty(), "{jump:?}");
+
+    let looping = Some(LoopRange::new(Beat(2.0), Beat(2.1)).expect("a loop"));
+    let start = TransportPosition::new(true, Bpm::of(120.0), Beat(2.0), looping);
+    let wrap = rig.block(BLOCK, start, &[]);
+    let from = 2 * BLOCK as u64;
+    assert_eq!(
+        sysex(&wrap),
+        [
+            (from, full_message(0x60, 1, 0)),
+            (from + 2400, full_message(0x60, 1, 0))
+        ]
+    );
+    assert!(not_time_code(&wrap).is_empty(), "{wrap:?}");
+}
+
 /// **A forked sync node states the real meter**, not a constant one: the fork
 /// registers its own reader on the cell the live node reads. A 3/4 meter is a
 /// Set Time Signature of 3, 2^2, 8 thirty-seconds on the start frame.
@@ -625,7 +678,7 @@ fn a_fork_states_the_live_nodes_meter() {
         "sync",
         SyncOut::new(G)
             .meter(move || meter.reader())
-            .messages(SyncMessages {
+            .sending(SyncMessages {
                 flex: true,
                 ..SyncMessages::OFF
             }),

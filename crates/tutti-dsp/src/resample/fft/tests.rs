@@ -1,5 +1,15 @@
 use super::*;
 use crate::Window;
+use tutti_buffers::Float;
+use tutti_units::Normalized;
+
+/// [`sinc_design`] at unity gain, each tap crossed once into `F`.
+fn sinc_filter<F: Float>(npoints: usize, f_cutoff: Normalized) -> Vec<F> {
+    sinc_design(npoints, f_cutoff, 1.0)
+        .into_iter()
+        .map(F::from_design)
+        .collect()
+}
 
 /// The cutoff fit lands on the values rubato documents for it: 0.894 at 128
 /// taps and 0.947 at 256, each within 0.001. Worked by hand from the fit's
@@ -9,14 +19,14 @@ use crate::Window;
 #[test]
 fn the_cutoff_fit_matches_its_documented_values() {
     assert!(
-        (cutoff::<f32>(128) - 0.894).abs() < 0.001,
+        (cutoff(128).get() - 0.894).abs() < 0.001,
         "{}",
-        cutoff::<f32>(128)
+        cutoff(128).get()
     );
     assert!(
-        (cutoff::<f32>(256) - 0.947).abs() < 0.001,
+        (cutoff(256).get() - 0.947).abs() < 0.001,
         "{}",
-        cutoff::<f32>(256)
+        cutoff(256).get()
     );
 }
 
@@ -28,7 +38,7 @@ fn the_cutoff_fit_matches_its_documented_values() {
 #[test]
 fn the_filter_has_the_squared_windows_transition_and_stopband() {
     let n = 256;
-    let taps = sinc_filter::<f32>(n, 0.9);
+    let taps = sinc_filter::<f32>(n, Normalized::clamped(0.9));
     let gain_db = |rel: f64| {
         let (mut re, mut im) = (0.0f64, 0.0f64);
         for (i, &t) in taps.iter().enumerate() {
@@ -50,7 +60,7 @@ fn the_filter_has_the_squared_windows_transition_and_stopband() {
 /// peaks there.
 #[test]
 fn the_sinc_has_unity_dc_gain_and_peaks_at_its_centre() {
-    let taps = sinc_filter::<f32>(441, 0.9);
+    let taps = sinc_filter::<f32>(441, Normalized::clamped(0.9));
     let sum: f32 = taps.iter().sum();
     assert!((sum - 1.0).abs() < 1e-5, "sum {sum}");
     let peak = taps
@@ -156,7 +166,7 @@ fn response_db(taps: &[f32], rel: f64) -> f64 {
 fn the_filter_passes_to_its_cutoff_and_stops_at_the_taps_precision_floor() {
     let n = 256usize;
     let fc = 0.5f64;
-    let taps = sinc_filter(n, fc as f32);
+    let taps = sinc_filter::<f32>(n, Normalized::clamped(fc));
 
     for k in 0..=40 {
         let rel = f64::from(k) / 40.0 * (fc - 0.1);
@@ -193,7 +203,7 @@ fn the_filter_passes_to_its_cutoff_and_stops_at_the_taps_precision_floor() {
             .enumerate()
             .map(|(i, &v)| {
                 let t = std::f64::consts::TAU * b * (i as f64 - (n / 2) as f64) / n as f64;
-                f64::from(v) * t.cos()
+                v * t.cos()
             })
             .sum()
     };
@@ -239,4 +249,33 @@ fn an_f64_resampler_passes_dc_at_unity_to_f64_precision() {
     for (i, &v) in out[0][..produced].iter().enumerate() {
         assert!((v - 1.0).abs() < 1e-10, "frame {i}: {v}");
     }
+}
+
+/// At `f32` a constant input is a constant output of the same level once the filter has
+/// filled: the low-pass sums to 1 in the design (`f64`), so the passband gain is 1 up to the
+/// `f32` rounding of the chain. A transform of `N = 2 * 640` points is `log2 N = 10.3` butterfly
+/// stages, each adding a relative error of half an ulp (`2^-24`) in the worst case, forward and
+/// inverse, and the filter product and the overlap add one more each: the bound is
+/// `(2 * 11 + 2) * 2^-24`.
+#[test]
+fn an_f32_resampler_passes_dc_at_unity_to_the_transforms_rounding() {
+    let mut r = FftResampler::<f32>::new(44_100, 48_000, 1024, 2, 1).unwrap();
+    let input = vec![vec![1.0f32; r.input_frames_next()]];
+    let mut out = vec![vec![0.0f32; r.output_frames_max()]];
+    let mut produced = 0;
+    for _ in 0..6 {
+        produced = r
+            .process_into_buffer(
+                Planes::from_vecs(&input).unwrap(),
+                PlanesMut::from_vecs(&mut out).unwrap(),
+            )
+            .unwrap();
+    }
+    assert!(produced > 0);
+    let bound = 24.0 * 2f64.powi(-24);
+    let worst = out[0][..produced]
+        .iter()
+        .map(|&v| (f64::from(v) - 1.0).abs())
+        .fold(0.0, f64::max);
+    assert!(worst < bound, "worst {worst:e} vs bound {bound:e}");
 }

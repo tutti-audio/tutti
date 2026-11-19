@@ -71,8 +71,9 @@ use std::vec::Vec;
 use super::TimeoutWait;
 use super::handshake::Handshake;
 use super::link::Link;
+use crate::deadline::Pending;
 
-use tutti_ump::U7;
+use tutti_ump::{MpeChannels, MpeOverlap, MpeZoneSet, MpeZoneSpan, U7};
 
 use super::{
     Ack, CiDeviceId, CiHeader, CiMessage, CiVersion, Decoded, Destination, DetailsData,
@@ -89,7 +90,7 @@ fn details_name(details: [u8; 5], profile: ProfileId) -> bool {
 
 /// A request in flight: what [`ProfileAction::Resolved`] names.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Request {
+pub enum ProfileRequest {
     /// A Set Profile On.
     SetOn {
         /// Where.
@@ -115,7 +116,7 @@ pub enum Request {
     },
 }
 
-impl Request {
+impl ProfileRequest {
     fn address(&self) -> CiDeviceId {
         match self {
             Self::SetOn { address, .. }
@@ -145,10 +146,10 @@ impl Request {
     }
 }
 
-/// How a [`Request`] ended.
+/// How a [`ProfileRequest`] ended.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum Outcome {
+pub enum ProfileOutcome {
     /// A Set Profile On or Off was answered by a Report: the state the peer says
     /// the Profile is in now (it is the state asked for unless the peer could not
     /// comply) and its Channel count, 0 for a Group or Function Block address or a
@@ -161,7 +162,7 @@ pub enum Outcome {
     },
     /// A Details Inquiry was answered with this data.
     Details(DetailsData),
-    /// The peer sent a NAK: [`Nak::status_code`] says why ([`Nak::STATUS_PROFILE_NOT_SUPPORTED`]
+    /// The peer sent a NAK: [`Nak::status`] says why ([`NakStatus::ProfileNotSupported`](super::NakStatus::ProfileNotSupported)
     /// for a Profile it does not have at that address).
     Refused(Nak),
     /// [`PEER_REPLY_TIMEOUT`] passed with no answer.
@@ -208,9 +209,9 @@ pub enum ProfileAction {
     /// A request ended.
     Resolved {
         /// Which.
-        request: Request,
+        request: ProfileRequest,
         /// How.
-        outcome: Outcome,
+        outcome: ProfileOutcome,
     },
     /// Profile Specific Data arrived (§7.12), uninterpreted.
     SpecificData {
@@ -225,7 +226,7 @@ pub enum ProfileAction {
 
 /// A request that cannot be made.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
-pub enum RequestError {
+pub enum ProfileRequestError {
     /// The same request, or a Set On or Off of the same Profile at the same
     /// address, is still waiting for its answer.
     #[error("a request for that Profile at that address is already in flight")]
@@ -252,6 +253,15 @@ impl ProfileEntry {
     pub const fn channels(&self) -> Option<ProfileChannels> {
         self.channels
     }
+}
+
+/// The MPE Profile zones a [`ProfileTable`] has enabled, and the ones it left out.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct EnabledMpeZones {
+    /// The zones held together, or `None` with no zone.
+    pub zones: Option<MpeZoneSet>,
+    /// Each zone left out, as the overlap with the zone held that refused it.
+    pub refused: Vec<MpeOverlap>,
 }
 
 /// The Profiles a peer supports, per address.
@@ -288,6 +298,49 @@ impl ProfileTable {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.addresses.is_empty()
+    }
+
+    /// The zones of the MPE Profile (M2-120) enabled, lowest Manager first: one
+    /// per Channel the Profile is enabled on, with the Number of Channels its
+    /// Enabled Report gave. A Profile enabled without a count (a Version 1 peer
+    /// sends none), or with one that makes no zone (fewer than two Channels, or
+    /// past Channel 16), is not a zone, and a zone sharing a Channel with a lower
+    /// one is left out (section 3.4) and listed in
+    /// [`refused`](EnabledMpeZones::refused).
+    ///
+    /// This is the lenient reading, for a caller that follows the zones a peer
+    /// enabled and skips the rest (a live input). A caller that must refuse a
+    /// peer whose Profiles make no zone (building a [`Dialect`](crate::Dialect))
+    /// wants the strict one.
+    #[must_use]
+    pub fn mpe_zones(&self) -> EnabledMpeZones {
+        let mut found = EnabledMpeZones::default();
+        for address in self.addresses() {
+            let CiDeviceId::Channel(manager) = address else {
+                continue;
+            };
+            let Some(entry) = self.get(address, ProfileId::MPE) else {
+                continue;
+            };
+            let zone = (entry.state() == ProfileState::Enabled)
+                .then(|| entry.channels())
+                .flatten()
+                .and_then(|count| u8::try_from(count.get()).ok())
+                .and_then(MpeChannels::new)
+                .and_then(|count| MpeZoneSpan::new(manager, count));
+            let Some(zone) = zone else { continue };
+            found.zones = match found.zones {
+                None => Some(MpeZoneSet::single(zone)),
+                Some(held) => match held.with(zone) {
+                    Ok(joined) => Some(joined),
+                    Err(overlap) => {
+                        found.refused.push(overlap);
+                        Some(held)
+                    }
+                },
+            };
+        }
+        found
     }
 
     /// Sets one entry; whether it differs from what was there.
@@ -340,9 +393,9 @@ impl ProfileTable {
 }
 
 #[derive(Clone, Debug)]
-struct Pending {
-    request: Request,
-    deadline: Instant,
+struct InFlight {
+    request: ProfileRequest,
+    wait: Pending,
 }
 
 /// The Initiator of Profile Configuration with one peer.
@@ -353,7 +406,7 @@ pub struct ProfileInitiator {
     /// The Profile Inquiry: waiting with the addresses that replied, or answered
     /// by the final Reply.
     inquiry: Handshake<(), BTreeSet<CiDeviceId>>,
-    pending: Vec<Pending>,
+    pending: Vec<InFlight>,
 }
 
 impl ProfileInitiator {
@@ -406,16 +459,16 @@ impl ProfileInitiator {
     ///
     /// # Errors
     ///
-    /// [`RequestError::AlreadyAsking`] when a Set On or Off of that Profile at
+    /// [`ProfileRequestError::AlreadyAsking`] when a Set On or Off of that Profile at
     /// that address is waiting.
     pub fn set_on(
         &mut self,
         target: ProfileTarget,
         profile: ProfileId,
         now: Instant,
-    ) -> Result<Vec<ProfileAction>, RequestError> {
+    ) -> Result<Vec<ProfileAction>, ProfileRequestError> {
         let address = target.address();
-        self.begin(Request::SetOn { address, profile }, now)?;
+        self.begin(ProfileRequest::SetOn { address, profile }, now)?;
         Ok(vec![self.send(address, |header, to| {
             CiMessage::SetProfileOn {
                 source: header.source,
@@ -431,14 +484,14 @@ impl ProfileInitiator {
     ///
     /// # Errors
     ///
-    /// [`RequestError::AlreadyAsking`] as for [`set_on`](Self::set_on).
+    /// [`ProfileRequestError::AlreadyAsking`] as for [`set_on`](Self::set_on).
     pub fn set_off(
         &mut self,
         address: CiDeviceId,
         profile: ProfileId,
         now: Instant,
-    ) -> Result<Vec<ProfileAction>, RequestError> {
-        self.begin(Request::SetOff { address, profile }, now)?;
+    ) -> Result<Vec<ProfileAction>, ProfileRequestError> {
+        self.begin(ProfileRequest::SetOff { address, profile }, now)?;
         Ok(vec![self.send(address, |header, to| {
             CiMessage::SetProfileOff {
                 header,
@@ -452,16 +505,16 @@ impl ProfileInitiator {
     ///
     /// # Errors
     ///
-    /// [`RequestError::AlreadyAsking`] when the same inquiry is waiting.
+    /// [`ProfileRequestError::AlreadyAsking`] when the same inquiry is waiting.
     pub fn details(
         &mut self,
         address: CiDeviceId,
         profile: ProfileId,
         target: InquiryTarget,
         now: Instant,
-    ) -> Result<Vec<ProfileAction>, RequestError> {
+    ) -> Result<Vec<ProfileAction>, ProfileRequestError> {
         self.begin(
-            Request::Details {
+            ProfileRequest::Details {
                 address,
                 profile,
                 target,
@@ -482,11 +535,12 @@ impl ProfileInitiator {
     /// with nothing waiting.
     #[must_use]
     pub fn deadline(&self) -> Option<Instant> {
-        self.inquiry
-            .deadline()
-            .into_iter()
-            .chain(self.pending.iter().map(|pending| pending.deadline))
-            .min()
+        Pending::earliest(
+            self.inquiry
+                .wait()
+                .into_iter()
+                .chain(self.pending.iter().map(|pending| pending.wait)),
+        )
     }
 
     /// Time has passed: everything whose wait is over ends. Calling it early is
@@ -498,11 +552,11 @@ impl ProfileInitiator {
         }
         let (expired, waiting): (Vec<_>, Vec<_>) = std::mem::take(&mut self.pending)
             .into_iter()
-            .partition(|pending| now >= pending.deadline);
+            .partition(|pending| pending.wait.expired(now));
         self.pending = waiting;
         actions.extend(expired.into_iter().map(|pending| ProfileAction::Resolved {
             request: pending.request,
-            outcome: Outcome::TimedOut,
+            outcome: ProfileOutcome::TimedOut,
         }));
         actions
     }
@@ -577,7 +631,7 @@ impl ProfileInitiator {
             } if from_peer && to_us => {
                 let at = self.pending.iter().position(|pending| {
                     pending.request
-                        == Request::Details {
+                        == ProfileRequest::Details {
                             address,
                             profile: *profile,
                             target: *target,
@@ -587,7 +641,7 @@ impl ProfileInitiator {
                     let pending = self.pending.remove(at);
                     actions.push(ProfileAction::Resolved {
                         request: pending.request,
-                        outcome: Outcome::Details(data.clone()),
+                        outcome: ProfileOutcome::Details(data.clone()),
                     });
                 }
             }
@@ -666,7 +720,7 @@ impl ProfileInitiator {
             let pending = self.pending.remove(at);
             actions.push(ProfileAction::Resolved {
                 request: pending.request,
-                outcome: Outcome::Reported { state, channels },
+                outcome: ProfileOutcome::Reported { state, channels },
             });
         }
     }
@@ -677,9 +731,9 @@ impl ProfileInitiator {
         let original = ack.ack_sub_id2.get();
         if original == SUB_ID2_PROFILE_INQUIRY {
             if address == CiDeviceId::FunctionBlock
-                && let Some(deadline) = self.inquiry.deadline_mut()
+                && let Some(pending) = self.inquiry.wait_mut()
             {
-                wait.extend(deadline);
+                wait.extend(pending);
             }
             return;
         }
@@ -689,7 +743,7 @@ impl ProfileInitiator {
                 && p.request.address() == address
                 && details_name(details, p.request.profile())
         }) {
-            wait.extend(&mut pending.deadline);
+            wait.extend(&mut pending.wait);
         }
     }
 
@@ -713,12 +767,12 @@ impl ProfileInitiator {
             let pending = self.pending.remove(at);
             actions.push(ProfileAction::Resolved {
                 request: pending.request,
-                outcome: Outcome::Refused(nak.clone()),
+                outcome: ProfileOutcome::Refused(nak.clone()),
             });
         }
     }
 
-    fn begin(&mut self, request: Request, now: Instant) -> Result<(), RequestError> {
+    fn begin(&mut self, request: ProfileRequest, now: Instant) -> Result<(), ProfileRequestError> {
         let clash = self.pending.iter().any(|pending| {
             pending.request == request
                 || (request.is_set()
@@ -727,11 +781,11 @@ impl ProfileInitiator {
                     && pending.request.profile() == request.profile())
         });
         if clash {
-            return Err(RequestError::AlreadyAsking);
+            return Err(ProfileRequestError::AlreadyAsking);
         }
-        self.pending.push(Pending {
+        self.pending.push(InFlight {
             request,
-            deadline: now + PEER_REPLY_TIMEOUT,
+            wait: Pending::after(now, PEER_REPLY_TIMEOUT),
         });
         Ok(())
     }

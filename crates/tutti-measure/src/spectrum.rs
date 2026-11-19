@@ -71,11 +71,11 @@ use crate::convert::{all_finite, for_blocks};
 use crate::framing::{Framing, check_hop_within, check_nyquist, check_overlap, check_window};
 use crate::{Error, Measure, Meter, Result};
 use tutti_dsp::BinIndex;
-use tutti_dsp::Complex32;
+use tutti_dsp::Complex64;
 use tutti_dsp::FftScratch;
 use tutti_dsp::FrameCount;
-use tutti_dsp::Smoother;
 use tutti_dsp::StftGeometry;
+use tutti_dsp::smooth_toward;
 use tutti_units::ranged;
 
 /// The smallest and largest window accepted.
@@ -85,7 +85,7 @@ const WINDOWS: RangeInclusive<Samples> = Samples(64)..=Samples(1 << 16);
 const MAX_BANDS: usize = 4096;
 
 /// The most cells (columns times outputs) a spectrogram may hold: 16 MiB of
-/// `f32`.
+/// `f64`.
 const MAX_SPECTROGRAM_CELLS: usize = 1 << 22;
 
 /// The sample rates accepted, in hertz.
@@ -93,11 +93,12 @@ const MIN_RATE: SampleRate = SampleRate::of(1.0);
 const MAX_RATE: SampleRate = SampleRate::of(10_000_000.0);
 
 /// Power clamp: +200 dB.
-const MAX_POWER: f32 = 1e20;
+const MAX_POWER: f64 = 1e20;
 
-/// Smoothed power under this is set to zero, so a release does not run the
-/// float unit through subnormals.
-const POWER_EPSILON: f32 = 1e-30;
+/// Smoothed power under this (-300 dB re 1, far under any level's floor) is set
+/// to zero, so a long release ends at silence instead of decaying through
+/// subnormals.
+const POWER_EPSILON: f64 = 1e-30;
 
 ranged! {
     /// A time constant or a hold: within `0..=3600` seconds.
@@ -474,24 +475,24 @@ impl SpectrumPlan {
 /// Pushing allocates nothing once the meter is built, but each frame is a
 /// transform and every output is smoothed, so it belongs on the consumer side of
 /// a tap, not in an audio callback.
-pub struct SpectrumMeter<S: Sample = f32> {
+pub struct SpectrumMeter<S: Sample> {
     cfg: SpectrumPlan,
-    fft: FftScratch,
-    window: Vec<f32>,
+    fft: FftScratch<f64>,
+    window: Vec<f64>,
     /// The first bin of each band and one past the last; empty for bins.
     band_bins: Vec<usize>,
     frequencies: Vec<Hz>,
     /// The last `window` samples; the next to write is at `write`.
-    ring: Vec<f32>,
+    ring: Vec<f64>,
     write: usize,
     /// The ring unrolled oldest first, for the transform.
-    frame: Vec<f32>,
-    spectrum: Vec<Complex32>,
+    frame: Vec<f64>,
+    spectrum: Vec<Complex64>,
     fed: u64,
     next_due: u64,
     frames: u64,
     /// Smoothed linear power per output.
-    power: Vec<f32>,
+    power: Vec<f64>,
     levels: Vec<Db>,
     peaks: Vec<Db>,
     /// The level each peak last rose to, and the frames since.
@@ -527,7 +528,7 @@ impl<S: Sample> SpectrumMeter<S> {
                 .map(|k| cfg.geometry.bin_frequency(BinIndex(k)))
                 .collect(),
         };
-        let mut spectrum = vec![Complex32::default(); cfg.bins()];
+        let mut spectrum = vec![Complex64::default(); cfg.bins()];
         // Plans the transform and sizes its scratch.
         fft.forward(Mono::new(&vec![0.0; size]), &vec![0.0; size], &mut spectrum);
         let mut state = Self {
@@ -624,10 +625,10 @@ impl<S: Sample> SpectrumMeter<S> {
 
         // `4 |X|^2 / (g N)^2`: a sine of amplitude `a` on a bin reads `a^2`. DC,
         // and Nyquist of an even window, have no image: `|X|^2 / (g N)^2`.
-        let gain = f64::from(cfg.geometry.magnitude_gain());
-        let scale = (4.0 / (gain * gain)) as f32;
+        let gain = cfg.geometry.magnitude_gain::<f64>();
+        let scale = 4.0 / (gain * gain);
         let size = self.ring.len();
-        let power = |k: usize, bin: &Complex32| {
+        let power = |k: usize, bin: &Complex64| {
             let lone = k == 0 || (size.is_multiple_of(2) && k == size / 2);
             clamp_power(bin.norm_sqr() * if lone { scale / 4.0 } else { scale })
         };
@@ -649,18 +650,18 @@ impl<S: Sample> SpectrumMeter<S> {
                 clamp_power(
                     band.iter()
                         .enumerate()
-                        .map(|(j, b)| f64::from(power(lo + j, b)))
-                        .sum::<f64>() as f32,
+                        .map(|(j, b)| power(lo + j, b))
+                        .sum::<f64>(),
                 )
             };
-            let coefficient = smoothing.coeff_over(raw > self.power[i], dt) as f32;
+            let coefficient = smoothing.coeff_over(raw > self.power[i], dt);
             // A coefficient of 1 is no smoothing; assigning keeps the
             // reading exact where `old + (new - old)` would round against
             // a louder previous frame.
             let smoothed = if first || coefficient >= 1.0 {
                 raw
             } else {
-                Smoother::toward(self.power[i], raw, coefficient)
+                smooth_toward(self.power[i], raw, coefficient)
             };
             self.power[i] = if smoothed < POWER_EPSILON {
                 0.0
@@ -695,7 +696,7 @@ impl<S: Sample> SpectrumMeter<S> {
 /// A power kept finite and within `0..=MAX_POWER`; a NaN or infinity from
 /// overflow in the transform reads as the maximum.
 #[inline]
-fn clamp_power(p: f32) -> f32 {
+fn clamp_power(p: f64) -> f64 {
     if p.is_finite() {
         p.min(MAX_POWER)
     } else {
@@ -703,12 +704,12 @@ fn clamp_power(p: f32) -> f32 {
     }
 }
 
-/// [`Db::from_power`], at least `floor`; zero power reads the floor. The power is an `f32`
+/// [`Db::from_power`], at least `floor`; zero power reads the floor. The power is an `f64`
 /// transform figure.
 #[inline]
-fn to_db(power: f32, floor: Db) -> Db {
+fn to_db(power: f64, floor: Db) -> Db {
     if power > 0.0 {
-        Db::from_power(f64::from(power)).max(floor)
+        Db::from_power(power).max(floor)
     } else {
         floor
     }
@@ -717,7 +718,7 @@ fn to_db(power: f32, floor: Db) -> Db {
 impl<S: Sample> SpectrumMeter<S> {
     /// Feeds samples and analyses each frame that completes in them, calling
     /// `each` after every one.
-    fn step(&mut self, block: &[f32], mut each: impl FnMut()) {
+    fn step(&mut self, block: &[f64], mut each: impl FnMut()) {
         let size = self.ring.len();
         let mut rest = block;
         while !rest.is_empty() {

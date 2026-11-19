@@ -25,9 +25,7 @@
 //!
 //! `push` takes an [`Interleaved`] — the shape a render loop already
 //! has, carrying its own width. Results come back as [`Db`]: LUFS and dBTP
-//! are both decibel readings, and the f32 that `Db` carries is ~3× finer than a
-//! 24-bit LSB at any level these reach, so nothing measurable is lost by not
-//! keeping them `f64`.
+//! are both decibel readings.
 //!
 //! # Weighted by placement
 //!
@@ -35,7 +33,7 @@
 //! where it stands (ITU-R BS.1770-5, Annex 3, Table 4): 1.41 when its elevation
 //! is under 30 degrees and its azimuth is within 60 to 120 degrees either side,
 //! else 1.0; the LFE adds no loudness (its peak still counts). The angles are the bed's own
-//! ([`Bed::direction`](tutti_types::Bed::direction)), so a 5.1's side speakers (M+110 and M-110) weigh 1.41 and a
+//! ([`Bed::direction`](tutti_buffers::Bed::direction)), so a 5.1's side speakers (M+110 and M-110) weigh 1.41 and a
 //! 7.1's rear speakers (M+135 and M-135) and every upper speaker weigh 1.0, as Table 5
 //! lists them. A quad's side speakers (VST3's FL FR SL SR) stand for the bed's
 //! M+-135 backs and weigh 1.0. `ebur128` has no free weights, so each speaker is given the
@@ -45,8 +43,8 @@
 use core::marker::PhantomData;
 
 use ebur128::{Channel, EbuR128, Mode};
+use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_buffers::{Interleaved, Sample};
-use tutti_types::{ChannelLayout, ChannelTopology};
 use tutti_units::{Amplitude, Db, Direction, SampleRate, Samples};
 
 use crate::convert::{BLOCK, Discard, all_finite, for_blocks, run_len};
@@ -97,7 +95,7 @@ impl<S: Sample> Measure<S> for LoudnessConfig {
     ///
     /// [`Error::AmbisonicLoudness`] for an ambisonic topology;
     /// [`Error::UnplacedLoudnessChannels`] for speakers that are not a
-    /// [`Bed`](tutti_types::Bed)'s, whose angles are unknown;
+    /// [`Bed`](tutti_buffers::Bed)'s, whose angles are unknown;
     /// [`Error::MeterUnavailable`] when `ebur128` cannot meter the rate.
     fn measure(&self, rate: SampleRate) -> Result<LoudnessMeter<S>> {
         let labels = channel_labels(&self.topology)?;
@@ -203,7 +201,7 @@ impl Loudness {
 /// Wraps `EbuR128`, which accumulates internally. Not for the audio thread: the
 /// meter keeps the gating blocks of the whole run, so it grows with the audio
 /// and allocates.
-pub struct LoudnessMeter<S: Sample = f32> {
+pub struct LoudnessMeter<S: Sample> {
     layout: ChannelLayout,
     meter: EbuR128,
     sample: PhantomData<fn(S)>,
@@ -253,7 +251,7 @@ impl<S: Sample> Meter for LoudnessMeter<S> {
         for_blocks(chunk.samples(), chunk.channels(), |block| {
             // The width was checked above, and the block is whole frames, so
             // the meter takes it; a metering miss must not fail a render.
-            let _ = meter.add_frames_f32(block);
+            let _ = meter.add_frames_f64(block);
         });
         Ok(())
     }
@@ -331,7 +329,7 @@ impl<S: Sample> Measure<S> for TruePeakConfig {
 /// Not for the audio thread: the meter's own buffers allocate as it grows. A
 /// push widens the chunk to the meter's `f64` in blocks of a scratch built with
 /// the meter, and allocates nothing itself.
-pub struct TruePeakMeter<S: Sample = f32> {
+pub struct TruePeakMeter<S: Sample> {
     layout: ChannelLayout,
     meter: EbuR128,
     /// One block of a chunk widened to the meter's `f64`.
@@ -377,7 +375,7 @@ impl<S: Sample> Meter for TruePeakMeter<S> {
         for part in chunk.samples().chunks(run) {
             let widened = &mut self.scratch[..part.len()];
             for (slot, s) in widened.iter_mut().zip(part) {
-                *slot = s.to_f64();
+                *slot = s.convert_to::<f64>();
             }
             let _ = self.meter.add_frames_f64(widened);
         }
@@ -534,7 +532,7 @@ impl WindowedReading {
 /// Each push yields the [`WindowedReading`] after it, and
 /// [`finish`](Meter::finish) reads the last one. Not for the audio thread (see
 /// [`push`](Meter::push)).
-pub struct WindowedMeter<S: Sample = f32> {
+pub struct WindowedMeter<S: Sample> {
     layout: ChannelLayout,
     rate: SampleRate,
     meter: EbuR128,
@@ -608,7 +606,7 @@ impl<S: Sample> Meter for WindowedMeter<S> {
     /// stream is cut. A chunk may be empty.
     ///
     /// A push allocates nothing once the meter is built (the meter's
-    /// `add_frames_f32` and its momentary, short-term and true-peak getters,
+    /// `add_frames_f64` and its momentary, short-term and true-peak getters,
     /// counted in `tests/alloc/windowed_loudness.rs` for the locked `ebur128`),
     /// but it is not a realtime-safe call: each reads both windows over their
     /// whole length, three seconds of every channel for the short-term one, so
@@ -639,7 +637,7 @@ impl<S: Sample> Meter for WindowedMeter<S> {
         let channels = chunk.channels();
         let mut rejected = false;
         for_blocks(chunk.samples(), channels, |block| {
-            if self.meter.add_frames_f32(block).is_err() {
+            if self.meter.add_frames_f64(block).is_err() {
                 rejected = true;
             } else {
                 self.frames += (block.len() / channels) as u64;

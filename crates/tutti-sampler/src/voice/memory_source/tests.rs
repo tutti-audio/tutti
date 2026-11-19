@@ -2,9 +2,9 @@ use super::*;
 use crate::VoiceWindow;
 use crate::testing::MockTransport;
 use crate::testing::loop_frames;
+use tutti_buffers::MaxBlock;
 use tutti_buffers::Mono;
 use tutti_buffers::Planes;
-use tutti_types::MaxBlock;
 use tutti_units::Bpm;
 use tutti_units::UnitParam;
 use tutti_units::{Samples, Seconds};
@@ -36,26 +36,26 @@ const SR: f64 = 44_100.0;
 /// One block of `n` frames of `unit` under `t` (a stopped transport when
 /// `None`: a free-running source reads none), at [`SR`]; the transport
 /// is not moved. Every output channel, planar.
-fn planes(unit: &mut MemorySource, t: Option<&MockTransport>, n: usize) -> Vec<Vec<f32>> {
+fn planes(unit: &mut MemorySource<f32>, t: Option<&MockTransport>, n: usize) -> Vec<Vec<f32>> {
     let stopped = MockTransport::stopped(Beat::new(0.0), Bpm::of(120.0));
     crate::testing::block(unit, t.unwrap_or(&stopped), SampleRate::of(SR), n)
 }
 
 /// [`planes`]' first two channels, as `(left, right)` frames (a mono
 /// node's one channel twice).
-fn block(unit: &mut MemorySource, t: Option<&MockTransport>, n: usize) -> Vec<(f32, f32)> {
+fn block(unit: &mut MemorySource<f32>, t: Option<&MockTransport>, n: usize) -> Vec<(f32, f32)> {
     let p = planes(unit, t, n);
     let r = p.len().min(2) - 1;
     (0..n).map(|i| (p[0][i], p[r][i])).collect()
 }
 
 /// `n` one-frame blocks, the transport not moved between them.
-fn frames(unit: &mut MemorySource, t: Option<&MockTransport>, n: usize) -> Vec<(f32, f32)> {
+fn frames(unit: &mut MemorySource<f32>, t: Option<&MockTransport>, n: usize) -> Vec<(f32, f32)> {
     (0..n).map(|_| block(unit, t, 1)[0]).collect()
 }
 
 /// One one-frame block into `out` (its channels, as many as `out` holds).
-fn frame_into(unit: &mut MemorySource, t: Option<&MockTransport>, out: &mut [f32]) {
+fn frame_into(unit: &mut MemorySource<f32>, t: Option<&MockTransport>, out: &mut [f32]) {
     let p = planes(unit, t, 1);
     for (o, c) in out.iter_mut().zip(p) {
         *o = c[0];
@@ -83,8 +83,8 @@ fn frame_into(unit: &mut MemorySource, t: Option<&MockTransport>, out: &mut [f32
 /// no matter what the code does. So does a render that is silent (a
 /// playhead past the wave's end), which is why the frames must vary.
 fn assert_blocks_match_frames(
-    mut a: MemorySource,
-    mut b: MemorySource,
+    mut a: MemorySource<f32>,
+    mut b: MemorySource<f32>,
     n: usize,
     transport: Option<&Arc<MockTransport>>,
     case: &str,
@@ -183,7 +183,7 @@ fn one_block_matches_single_frames_across_a_loop_wrap() {
 // all. A read deriving position without the rate plays a placed voice at
 // 1x no matter what speed was set, and the equivalence pair stays green.
 
-fn placed_unit(wave: &Arc<Wave>, rate: f64) -> MemorySource {
+fn placed_unit(wave: &Arc<Wave>, rate: f64) -> MemorySource<f32> {
     MemorySource::with_config(
         Arc::clone(wave),
         MemorySourceConfig {
@@ -456,7 +456,7 @@ fn a_stopped_clock_silences_a_placed_read() {
     for single in [false, true] {
         let transport = MockTransport::rolling(Beat::new(0.25), Bpm::of(120.0));
         let mut u = placed_unit(&wave, 1.0);
-        let blk = |u: &mut MemorySource| {
+        let blk = |u: &mut MemorySource<f32>| {
             if single {
                 frames(u, Some(&transport), 64)
             } else {

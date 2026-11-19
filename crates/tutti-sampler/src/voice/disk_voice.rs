@@ -17,12 +17,12 @@
 use std::ops::Range;
 use std::sync::Arc;
 
+use crate::SamplerFloat;
+use tutti_buffers::{ChannelLayout, MAX_CHANNELS};
 use tutti_graph::{
     Cx, ForkCause, ForkFaultKind, ForkHealth, ForkMode, ForkSource, Forked, IntoNode, Io, Node,
     NodeParts, Prepare, RenderMode, Shape, Status, declick_frames,
 };
-use tutti_rt::RingFloat;
-use tutti_types::{ChannelLayout, MAX_CHANNELS};
 use tutti_units::{Amplitude, PlaybackRate, ReadRate, SamplePosition, SampleRate, SrcRatio, Tail};
 
 use super::clock::{BlockClock, Clock};
@@ -45,7 +45,7 @@ use tutti_transport::TempoReader;
 ///
 /// It is not a graph node: it knows neither where on the timeline it plays
 /// nor its file. A [`DiskVoice`] is, and forks.
-pub struct DiskSource<F: RingFloat = f32> {
+pub struct DiskSource<F: SamplerFloat> {
     /// Boxed: a voice in a pool should not carry the reader's jump state
     /// inline (it is built on the control thread, where the box is).
     read: Box<LiveRead<F>>,
@@ -61,7 +61,7 @@ pub struct DiskSource<F: RingFloat = f32> {
 }
 
 // Hand-rolled: `read` holds the ring and `shared_state` an `Arc<Cells>`.
-impl<F: RingFloat> std::fmt::Debug for DiskSource<F> {
+impl<F: SamplerFloat> std::fmt::Debug for DiskSource<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DiskSource")
             .field("has_shared_state", &self.shared_state.is_some())
@@ -69,7 +69,7 @@ impl<F: RingFloat> std::fmt::Debug for DiskSource<F> {
     }
 }
 
-impl<F: RingFloat> Clone for DiskSource<F> {
+impl<F: SamplerFloat> Clone for DiskSource<F> {
     fn clone(&self) -> Self {
         Self {
             read: self.read.clone(),
@@ -80,7 +80,7 @@ impl<F: RingFloat> Clone for DiskSource<F> {
     }
 }
 
-impl<F: RingFloat> DiskSource<F> {
+impl<F: SamplerFloat> DiskSource<F> {
     /// A source over `consumer` through its one position `reader` (test rings),
     /// at the ring's own width.
     #[cfg(test)]
@@ -136,7 +136,7 @@ impl<F: RingFloat> DiskSource<F> {
     }
 }
 
-impl<F: RingFloat> DiskSource<F> {
+impl<F: SamplerFloat> DiskSource<F> {
     /// Let go of the live stream: the ring's reader, and
     /// the control cell. A copy severed so never touches the live stream.
     fn sever(&mut self) {
@@ -201,7 +201,7 @@ pub struct DiskVoiceConfig {
 /// (it reads its render's `Env`), read as the memory tier reads it; see
 /// `offline_read`. That path blocks on file I/O and is never taken live: a
 /// live fork of a disk voice is refused.
-pub struct DiskVoice<F: RingFloat = f32> {
+pub struct DiskVoice<F: SamplerFloat> {
     inner: DiskSource<F>,
     /// The playback controls: the streamer's cell, shared with `inner`, while
     /// live; a private snapshot of it in a fork.
@@ -262,7 +262,7 @@ pub struct DiskVoice<F: RingFloat = f32> {
 /// when the fork is taken (a loop set later on the stream is not a copy this
 /// would have missed).
 #[derive(Clone)]
-struct Origin<F: RingFloat> {
+struct Origin<F: SamplerFloat> {
     file: Arc<StreamFile<F>>,
     status: Arc<StatusCell>,
 }
@@ -270,7 +270,7 @@ struct Origin<F: RingFloat> {
 /// A forked disk voice's own playback: the file it reads, the direction it
 /// reads in, and where its failures go.
 #[derive(Clone, Debug, Default)]
-struct Offline<F: RingFloat> {
+struct Offline<F: SamplerFloat> {
     /// The direction the stream played in when the fork was taken.
     direction: Direction,
     /// The file, from the streamer's record when the fork was taken. `None`
@@ -323,7 +323,7 @@ impl ForkHealth for VoiceHealth {
     }
 }
 
-impl<F: RingFloat> std::fmt::Debug for DiskVoice<F> {
+impl<F: SamplerFloat> std::fmt::Debug for DiskVoice<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DiskVoice")
             .field("inner", &self.inner)
@@ -335,7 +335,7 @@ impl<F: RingFloat> std::fmt::Debug for DiskVoice<F> {
     }
 }
 
-impl<F: RingFloat> Clone for DiskVoice<F> {
+impl<F: SamplerFloat> Clone for DiskVoice<F> {
     /// A copy sharing the stream (the ring, without its reader: see
     /// `LiveRead`) and the control cell. Not a fork: see
     /// `fork_copy`.
@@ -359,7 +359,7 @@ impl<F: RingFloat> Clone for DiskVoice<F> {
     }
 }
 
-impl<F: RingFloat> DiskVoice<F> {
+impl<F: SamplerFloat> DiskVoice<F> {
     /// Places a `DiskSource`'s stream on the timeline.
     ///
     /// Construction (streamer stream registration, ring allocation) happens on
@@ -823,7 +823,7 @@ impl<F: RingFloat> DiskVoice<F> {
     }
 }
 
-impl<F: RingFloat> DiskVoice<F> {
+impl<F: SamplerFloat> DiskVoice<F> {
     /// This voice reading the project's tempo map through `tempo`
     /// ([`TransportSettings::tempo_reader`](tutti_transport::TransportSettings::tempo_reader)).
     /// Over a map whose tempo changes, how long a placed voice has played is
@@ -838,7 +838,7 @@ impl<F: RingFloat> DiskVoice<F> {
     }
 }
 
-impl<F: RingFloat> Node<F> for DiskVoice<F> {
+impl<F: SamplerFloat> Node<F> for DiskVoice<F> {
     /// No inputs, the file's width out; a source, never skipped. It plays its
     /// window of the transport, as a placed memory voice does, so it has no
     /// ring-out.
@@ -935,9 +935,9 @@ impl DiskVoiceControls {
 /// A disk voice's fork: [`DiskVoice::fork_copy`] of a template that shares
 /// the stream's file, status and cells with the live voice (never its ring
 /// reader), taken when the fork is.
-struct DiskVoiceFork<F: RingFloat>(DiskVoice<F>);
+struct DiskVoiceFork<F: SamplerFloat>(DiskVoice<F>);
 
-impl<F: RingFloat> ForkSource<F> for DiskVoiceFork<F> {
+impl<F: SamplerFloat> ForkSource<F> for DiskVoiceFork<F> {
     fn fork(&self, mode: ForkMode) -> Result<Forked<F>, ForkCause> {
         if matches!(mode, ForkMode::Live) {
             return Err(ForkCause::new(LiveDiskFork));
@@ -952,7 +952,7 @@ impl<F: RingFloat> ForkSource<F> for DiskVoiceFork<F> {
     }
 }
 
-impl<F: RingFloat> IntoNode<F> for DiskVoice<F> {
+impl<F: SamplerFloat> IntoNode<F> for DiskVoice<F> {
     type Controls = DiskVoiceControls;
 
     fn into_parts(self) -> NodeParts<DiskVoiceControls, F> {

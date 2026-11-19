@@ -12,6 +12,8 @@ use std::fmt;
 use std::ops::Range;
 use std::sync::Arc;
 
+use atomic_float::AtomicF64;
+use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_buffers::{Float, Mono, Planes, PlanesMut};
 use tutti_dsp::{
     BandSettings, BankShape, COEFF_INTERVAL, CompressorControls, CrossoverControls, CrossoverError,
@@ -21,8 +23,7 @@ use tutti_graph::{
     Cost, Cx, IntoNode, Io, MAX_PARAM_PORTS, Node, NodeParts, ParamNode, ParamSet, Prepare, Shape,
     Status,
 };
-use tutti_types::{AtomicF64, Param};
-use tutti_types::{BusTopology, ChannelLayout};
+use tutti_rt::Param;
 use tutti_units::{CompressionRatio, Db, Hz, SampleRate};
 use tutti_units::{Seconds, Tail, UnitParam};
 
@@ -1366,7 +1367,7 @@ mod tests {
         let mut fork = forked.node;
         fork.prepare(&Prepare::new(
             RATE,
-            tutti_types::MaxBlock::of(tutti_units::Samples(1024)),
+            tutti_buffers::MaxBlock::of(tutti_units::Samples(1024)),
         ));
         let out = render_chunked(fork.as_mut(), &[vec![0.5f32; SETTLE]], 512);
         let reduction = (20.0 * libm::log10(0.5) + 20.0) * 0.75;
@@ -1393,7 +1394,7 @@ mod tests {
         let mut parts = n.into_parts();
         parts.node.prepare(&Prepare::new(
             RATE,
-            tutti_types::MaxBlock::of(tutti_units::Samples(1024)),
+            tutti_buffers::MaxBlock::of(tutti_units::Samples(1024)),
         ));
         render_chunked(parts.node.as_mut(), &[vec![0.5f32; SETTLE]], 512);
         let reduction = (20.0 * libm::log10(0.5) + 20.0) * 0.75;

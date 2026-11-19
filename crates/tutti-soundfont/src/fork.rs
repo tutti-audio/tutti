@@ -23,23 +23,25 @@
 //! live unit reached through MIDI after the template was taken (a program
 //! change, a CC) — the clip replays whatever of that it holds.
 
+use tutti_buffers::Float;
+use tutti_dsp::Lanes;
 use tutti_graph::{ForkCause, ForkMode, ForkSource, Forked};
 
 use crate::SoundFontUnit;
 
 /// The fork source a [`SoundFontUnit`] is inserted with: the template in the
 /// module docs.
-pub(crate) struct SoundFontFork {
-    template: SoundFontUnit,
+pub(crate) struct SoundFontFork<F: Float + Lanes> {
+    template: SoundFontUnit<F>,
 }
 
-impl ForkSource for SoundFontFork {
-    fn fork(&self, _mode: ForkMode) -> Result<Forked, ForkCause> {
+impl<F: Float + Lanes> ForkSource<F> for SoundFontFork<F> {
+    fn fork(&self, _mode: ForkMode) -> Result<Forked<F>, ForkCause> {
         Ok(Forked::new(Box::new(self.template.fork_instance())))
     }
 }
 
-impl SoundFontUnit {
+impl<F: Float + Lanes> SoundFontUnit<F> {
     /// Returns a fresh unit for a fork of the graph this one plays in (an
     /// offline export, for example).
     ///
@@ -53,7 +55,7 @@ impl SoundFontUnit {
     /// A unit inserted into a graph registers its own fork source, so a graph
     /// fork needs no call to this; it is for hosts building a copy by hand.
     #[must_use]
-    pub fn fork_instance(&self) -> SoundFontUnit {
+    pub fn fork_instance(&self) -> SoundFontUnit<F> {
         let mut fork = self.clone();
         fork.release_all();
         fork
@@ -63,7 +65,7 @@ impl SoundFontUnit {
     /// clone, costing a second copy of the synthesizer's voice
     /// state — not of the SoundFont — for as long as the node is in the
     /// graph.
-    pub(crate) fn fork_template(&self) -> SoundFontFork {
+    pub(crate) fn fork_template(&self) -> SoundFontFork<F> {
         SoundFontFork {
             template: self.clone(),
         }
@@ -73,8 +75,8 @@ impl SoundFontUnit {
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
+    use tutti_buffers::MaxBlock;
     use tutti_buffers::Planes;
-    use tutti_types::MaxBlock;
 
     use tutti_graph::contract::drive_input;
     use tutti_graph::{
@@ -105,7 +107,7 @@ mod tests {
     }
 
     /// A unit on preset `preset`.
-    fn unit(soundfont: &Arc<SoundFont>, preset: U7) -> SoundFontUnit {
+    fn unit(soundfont: &Arc<SoundFont>, preset: U7) -> SoundFontUnit<f32> {
         let settings = Settings::new();
         let mut unit =
             SoundFontUnit::new(Arc::clone(soundfont), settings).expect("the unit builds");

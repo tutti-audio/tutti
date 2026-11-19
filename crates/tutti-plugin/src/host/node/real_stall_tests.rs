@@ -32,11 +32,11 @@
 //! later taken back off the socket*.
 
 use std::time::{Duration, Instant};
+use tutti_buffers::MaxBlock;
 use tutti_buffers::Planes;
-use tutti_types::MaxBlock;
 
+use tutti_buffers::ChannelLayout;
 use tutti_graph::{GraphBuilder, Prepare, Renderer};
-use tutti_types::ChannelLayout;
 use tutti_units::{SampleRate, Samples};
 
 use crate::PluginClient;
@@ -258,7 +258,7 @@ fn a_real_plugin_that_stops_answering_is_abandoned_and_later_drained() {
 
     // --- Release, and let the drain happen.
     release_the_block();
-    let late_before = bridge.block_counts().late;
+    let late_before = bridge.audio().block_counts().late;
     let mut collected = 0;
     let deadline = Instant::now() + Duration::from_secs(60);
     while Instant::now() < deadline {
@@ -266,9 +266,9 @@ fn a_real_plugin_that_stops_answering_is_abandoned_and_later_drained() {
         // The released plugin works through what it was sent; the next block
         // comes once it has answered one, or an owed reply has been collected.
         await_answer_or(&controls, "the released plugin to answer", || {
-            bridge.block_counts().late > late_before
+            bridge.audio().block_counts().late > late_before
         });
-        collected = bridge.block_counts().late - late_before;
+        collected = bridge.audio().block_counts().late - late_before;
         if collected > 0 {
             break;
         }
@@ -344,7 +344,7 @@ fn an_unstressed_plugin_abandons_few_blocks_and_collects_no_more_than_it_owed() 
         "an unstressed plugin stays alive"
     );
 
-    let abandoned = bridge.block_counts().abandoned;
+    let abandoned = bridge.audio().block_counts().abandoned;
     // A quarter of the blocks. The budget is 4 periods (5.3 ms at 64/48k), the
     // probe's work is a passthrough, and each block follows the server's
     // answer to the one before. So an ordinary block is abandoned only if its
@@ -588,6 +588,6 @@ fn the_controls_count_the_bridges_dropped_midi_too() {
     let (_, note) = dump_and_note();
     feed(&mut unit, &[note, note]);
     unit.node.reset();
-    bridge.dropped_midi_cell().writer().add(5);
+    bridge.audio().dropped_midi_cell().writer().add(5);
     assert_eq!(controls.dropped_midi_in(), 2 + 5);
 }

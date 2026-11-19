@@ -2,27 +2,14 @@
 
 use crate::capability::{OsEndpoint, from_os, legacy};
 use tutti_alsa_ffi::{Client, PortCaps, PortEntry, UmpEndpoint};
-use tutti_midi_device::{Endpoint, Identity};
+use tutti_midi_device::{Endpoint, Identity, PortDirection};
 
-/// Which direction an endpoint is being listed for.
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(super) enum BlockDirection {
-    /// Ports we can read from — they must be subscribe-readable.
-    Input,
-    /// Ports we can write to.
-    Output,
-}
-
-impl BlockDirection {
-    /// Whether a port allows this direction: a port that is readable but not
-    /// *subscribe*-readable cannot be connected to, so listing it would offer the
-    /// user a device that fails to open.
-    fn listed(self, caps: PortCaps) -> bool {
-        match self {
-            BlockDirection::Input => caps.can_read_from(),
-            BlockDirection::Output => caps.can_write_to(),
-        }
-    }
+/// Whether a port allows `direction`: a port that is readable but not
+/// *subscribe*-readable cannot be connected to, so listing it would offer the
+/// user a device that fails to open.
+fn allows(direction: PortDirection, caps: PortCaps) -> bool {
+    (!direction.is_input() || caps.can_read_from())
+        && (!direction.is_output() || caps.can_write_to())
 }
 
 #[cfg(test)]
@@ -43,7 +30,7 @@ mod tests;
 /// present, and the next call walks again and finds it. Only a change report
 /// must be whole, since a short one would remove devices that are still there
 /// ([`both`]).
-pub(super) fn endpoints(seq: &Client, direction: BlockDirection) -> Vec<OsEndpoint> {
+pub(super) fn endpoints(seq: &Client, direction: PortDirection) -> Vec<OsEndpoint> {
     walk(seq, [direction]).lists.into_iter().flatten().collect()
 }
 
@@ -57,7 +44,7 @@ pub(super) fn both(seq: &Client) -> Option<(Vec<OsEndpoint>, Vec<OsEndpoint>)> {
     let Walk {
         lists: [inputs, outputs],
         complete,
-    } = walk(seq, [BlockDirection::Input, BlockDirection::Output]);
+    } = walk(seq, [PortDirection::Input, PortDirection::Output]);
     complete.then_some((inputs, outputs))
 }
 
@@ -70,7 +57,7 @@ struct Walk<const N: usize> {
 }
 
 /// One list per entry of `directions`, in order.
-fn walk<const N: usize>(seq: &Client, directions: [BlockDirection; N]) -> Walk<N> {
+fn walk<const N: usize>(seq: &Client, directions: [PortDirection; N]) -> Walk<N> {
     let mut out: [Vec<OsEndpoint>; N] = std::array::from_fn(|_| Vec::new());
     // `-ENOENT` is the last client or port. A client that exits mid-walk answers
     // `-ENXIO` (`snd_seq_ioctl_query_next_port`): not the end of its ports, so
@@ -81,7 +68,7 @@ fn walk<const N: usize>(seq: &Client, directions: [BlockDirection; N]) -> Walk<N
     }
     for port in found.ports {
         let caps = port.caps;
-        let listed = |d: BlockDirection| d.listed(caps);
+        let listed = |d: PortDirection| allows(d, caps);
         if !directions.iter().any(|&d| listed(d)) {
             continue;
         }

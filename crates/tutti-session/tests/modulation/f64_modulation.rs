@@ -2,10 +2,11 @@
 //! a figure `f32` cannot: the lane's segments are `f32` by spec, the audio
 //! they scale is `f64`.
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::{ForkByClone, Params};
+use tutti_rt::Param;
 use tutti_session::{OutPort, ParamRef, Root, RouteSpec, Session};
-use tutti_types::{ChannelLayout, Param};
 use tutti_units::{Amplitude, Depth, SampleRate, UnitParam};
 
 #[path = "../support/f64_nodes.rs"]

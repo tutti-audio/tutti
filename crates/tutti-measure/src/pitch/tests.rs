@@ -5,33 +5,36 @@ use tutti_units::SampleRate;
 const SR: SampleRate = SampleRate::SR_48K;
 const N: usize = 4096;
 
-fn sine(freq: Hz, amp: f64) -> Vec<f32> {
+fn sine(freq: Hz, amp: f64) -> Vec<f64> {
     tutti_fixtures::signal::sine(
         freq,
         tutti_units::Amplitude(amp),
         SR,
         tutti_units::Samples(N),
     )
+    .into_iter()
+    .map(f64::from)
+    .collect()
 }
 
-fn saw(freq: Hz, amp: f32) -> Vec<f32> {
+fn saw(freq: Hz, amp: f64) -> Vec<f64> {
     let f = freq.get();
     (0..N)
         .map(|i| {
             let phase = (f * i as f64 / SR.get()).fract();
-            ((2.0 * phase - 1.0) * f64::from(amp)) as f32
+            (2.0 * phase - 1.0) * amp
         })
         .collect()
 }
 
-fn white_noise() -> Vec<f32> {
+fn white_noise() -> Vec<f64> {
     let mut state = 0x2545_F491_4F6C_DD1Du64;
     (0..N)
         .map(|_| {
             state = state
                 .wrapping_mul(6364136223846793005)
                 .wrapping_add(1442695040888963407);
-            (((state >> 33) as f64 / (1u64 << 31) as f64) - 1.0) as f32 * 0.5
+            (((state >> 33) as f64 / (1u64 << 31) as f64) - 1.0) * 0.5
         })
         .collect()
 }
@@ -44,7 +47,7 @@ fn period_samples(freq: Hz) -> f64 {
     SR.get() / freq.get()
 }
 
-fn fill_cmndf(det: &mut PitchDetector, samples: &[f32]) -> (usize, usize) {
+fn fill_cmndf(det: &mut PitchDetector, samples: &[f64]) -> (usize, usize) {
     let (min_period, max_period) = det.periods(samples.len());
     det.compute_difference(samples, max_period);
     det.compute_cumulative_mean(max_period);
@@ -57,7 +60,7 @@ fn cmndf_equals_one_at_lag_zero() {
     let mut det = detector();
     fill_cmndf(&mut det, &sine(Hz(440.0), 1.0));
     assert!(
-        (det.cumulative_mean[0] - 1.0).abs() < f32::EPSILON,
+        (det.cumulative_mean[0] - 1.0).abs() < f64::EPSILON,
         "d'(0) must be 1 by definition, got {}",
         det.cumulative_mean[0]
     );
@@ -71,7 +74,7 @@ fn cmndf_dips_below_threshold_at_the_true_period() {
     let mut det = detector();
     fill_cmndf(&mut det, &sine(freq, 1.0));
     assert!(
-        f64::from(det.cumulative_mean[tau]) < det.cfg.threshold.get(),
+        det.cumulative_mean[tau] < det.cfg.threshold.get(),
         "d'({tau}) = {} was not below threshold {}",
         det.cumulative_mean[tau],
         det.cfg.threshold.get()
@@ -99,7 +102,7 @@ fn first_local_minimum_beats_a_deeper_later_dip() {
         "precondition: the 2T dip ({dip_2t}) must be deeper than the T dip ({dip_t})"
     );
     assert!(
-        f64::from(dip_t) < det.cfg.threshold.get(),
+        dip_t < det.cfg.threshold.get(),
         "precondition: the fundamental dip {dip_t} must be below threshold"
     );
 
@@ -140,8 +143,8 @@ fn parabolic_interpolation_recovers_a_half_sample_period() {
 #[test]
 fn aperiodic_buffers_are_unvoiced() {
     for (label, samples) in [
-        ("zeros", vec![0.0f32; N]),
-        ("dc", vec![0.5f32; N]),
+        ("zeros", vec![0.0f64; N]),
+        ("dc", vec![0.5f64; N]),
         ("noise", white_noise()),
     ] {
         let mut det = detector();
@@ -208,16 +211,16 @@ fn the_difference_function_matches_its_definition() {
     for tau in [1usize, 17, 50, 100, 200, max_period] {
         let direct: f64 = (0..window)
             .map(|j| {
-                let d = f64::from(x[j]) - f64::from(x[j + tau]);
+                let d = x[j] - x[j + tau];
                 d * d
             })
             .sum();
-        let got = f64::from(det.difference[tau]);
+        let got = det.difference[tau];
         assert!(
-            (got - direct).abs() < 1e-3 * direct.max(1.0),
+            (got - direct).abs() < 1e-9 * direct.max(1.0),
             "tau {tau}: {got} vs {direct}"
         );
     }
-    assert!(det.difference[100] < 1e-3, "{}", det.difference[100]);
+    assert!(det.difference[100] < 1e-9, "{}", det.difference[100]);
     assert!(det.difference[50] > 100.0, "{}", det.difference[50]);
 }

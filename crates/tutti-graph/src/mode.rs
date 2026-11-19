@@ -106,8 +106,9 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
 
+use atomic_float::AtomicF64;
 use tutti_curve::FadeLaw;
-use tutti_types::{AtomicF64, ParamCell};
+use tutti_rt::ParamCell;
 use tutti_units::{Mix, Samples, UnitAddr, UnitParam};
 
 use crate::NodeKey;
@@ -1042,7 +1043,7 @@ impl<F: Float> ModeState<F> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tutti_types::ChannelLayout;
+    use tutti_buffers::ChannelLayout;
     use tutti_units::{Latency, Samples};
 
     /// [`DECLICK`](crate::DECLICK) at 48 kHz.

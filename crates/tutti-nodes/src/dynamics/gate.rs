@@ -1,12 +1,12 @@
 //! The noise gate [`GateNode`]: closes below a threshold, keyed from a side-chain or from
 //! its own signal.
 
+use tutti_buffers::{BusTopology, MaxBlock};
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{
     COEFF_INTERVAL, GateBank, GateControls, GateLanes, KeyFilter, KeySource, Lanes, Lerp,
 };
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
-use tutti_types::{BusTopology, MaxBlock};
 use tutti_units::{Db, Hz, Q, SampleRate, Seconds, Tail};
 
 use crate::kernel::{ControlLanes, Kernel, KernelNode};
@@ -490,7 +490,7 @@ mod tests {
     #[test]
     fn the_constructors_and_the_key_choice_are_the_port_layout() {
         let c = four(-20.0, 0.001, 0.01, 0.1);
-        let wide = BusTopology::assumed(tutti_types::ChannelLayout::from(4u16))
+        let wide = BusTopology::assumed(tutti_buffers::ChannelLayout::from(4u16))
             .expect("at most one bus wide");
         for (node, inputs, outputs) in [
             (

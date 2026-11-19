@@ -4,13 +4,13 @@
 use std::num::NonZeroUsize;
 use std::path::Path;
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::{Float, Interleaved, Mono, Wave};
 use tutti_fixtures::signal;
 use tutti_measure::{
     ChromaConfig, FiniteLevel, FrequencyBand, Meter, PeakBlocks, PeakConfig, SilenceConfig,
     VectorscopeConfig,
 };
-use tutti_types::ChannelLayout;
 use tutti_units::{Amplitude, Db, Hz, SampleRate, Samples, Seconds};
 
 use super::{Analyze, AnalyzeError};
@@ -41,12 +41,12 @@ fn peak_blocks(samples_per_block: usize) -> PeakConfig {
     PeakConfig::new(Samples(samples_per_block))
 }
 
-fn land<A>(
+fn land<A, S: Float>(
     session: &mut DetachedSession,
-    job: &Job<Analyze<A>>,
+    job: &Job<Analyze<A, S>>,
 ) -> Result<<A::Meter as Meter>::Output, AnalyzeError>
 where
-    A: tutti_measure::Measure + 'static,
+    A: tutti_measure::Measure<S> + 'static,
     <A::Meter as Meter>::Output: Send + 'static,
 {
     job.wait(session)
@@ -71,7 +71,7 @@ fn a_sine_of_half_amplitude_has_a_peak_of_half_streamed_from_a_file() {
     let path = dir.path().join("sine.wav");
     let samples = signal::sine(Hz(1000.0), Amplitude(0.5), RATE, Samples(48_000));
     write(&path, RATE, 1, &samples);
-    let job = s.analyze(path.as_path(), peak_blocks(512));
+    let job = s.analyze::<f32, _>(path.as_path(), peak_blocks(512));
     let blocks = land(&mut s, &job).unwrap();
     assert!((peak_of(&blocks) - 0.5).abs() < 1e-6);
     // 48 000 frames in blocks of 512: 93 whole blocks and a part.
@@ -90,7 +90,7 @@ fn a_peak_past_the_first_chunks_is_found_in_its_block_across_chunk_edges() {
     samples[early] = 0.25;
     samples[late] = -0.75;
     write(&path, RATE, 1, &samples);
-    let job = s.analyze(path, peak_blocks(1000));
+    let job = s.analyze::<f32, _>(path, peak_blocks(1000));
     let blocks = land(&mut s, &job).unwrap();
     let found: Vec<(usize, f64)> = blocks
         .channel(0)
@@ -114,7 +114,7 @@ fn a_stereo_file_keeps_each_channels_peak() {
     samples[2 * (CHUNK_FRAMES + 3)] = 0.5;
     samples[2 * (frames - 1) + 1] = 0.125;
     write(&path, RATE, 2, &samples);
-    let job = s.analyze(path, peak_blocks(256));
+    let job = s.analyze::<f32, _>(path, peak_blocks(256));
     let blocks = land(&mut s, &job).unwrap();
     let peak = |channel: usize| {
         blocks
@@ -136,7 +136,7 @@ fn a_band_above_the_files_nyquist_fails_the_job_with_the_meters_error() {
     let rate = SampleRate::SR_8K;
     write(&path, rate, 1, &vec![0.0; 8_000]);
     let band = FrequencyBand::new(Hz(100.0), Hz(20_000.0)).unwrap();
-    let job = s.analyze(path, ChromaConfig::new().band(band));
+    let job = s.analyze::<f32, _>(path, ChromaConfig::new().band(band));
     let failed = land(&mut s, &job).unwrap_err();
     assert!(
         matches!(
@@ -157,8 +157,8 @@ fn a_stereo_analysis_of_mono_audio_fails_with_the_widths() {
         matches!(
             failed,
             AnalyzeError::Width { needs, found }
-                if needs == tutti_types::ChannelLayout::STEREO
-                    && found == tutti_types::ChannelLayout::MONO
+                if needs == tutti_buffers::ChannelLayout::STEREO
+                    && found == tutti_buffers::ChannelLayout::MONO
         ),
         "{failed:?}"
     );
@@ -170,7 +170,7 @@ fn a_file_that_cannot_be_opened_fails_with_the_decode_error() {
     let mut s = session();
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("missing.wav");
-    let job = s.analyze(path, peak_blocks(512));
+    let job = s.analyze::<f32, _>(path, peak_blocks(512));
     let failed = land(&mut s, &job).unwrap_err();
     assert!(matches!(failed, AnalyzeError::Decode(_)), "{failed:?}");
 }
@@ -205,7 +205,7 @@ struct Counting(std::sync::Arc<std::sync::atomic::AtomicUsize>);
 
 struct CountingMeter(std::sync::Arc<std::sync::atomic::AtomicUsize>);
 
-impl tutti_measure::Measure for Counting {
+impl tutti_measure::Measure<f32> for Counting {
     type Context = ();
     type Meter = CountingMeter;
 
@@ -272,7 +272,7 @@ struct ChannelPeaks;
 
 struct ChannelPeaksMeter([f32; 2]);
 
-impl tutti_measure::Measure for ChannelPeaks {
+impl tutti_measure::Measure<f32> for ChannelPeaks {
     type Context = ();
     type Meter = ChannelPeaksMeter;
 

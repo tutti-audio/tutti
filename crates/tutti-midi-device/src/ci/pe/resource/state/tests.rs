@@ -336,7 +336,9 @@ fn a_reply_header_with_a_bad_timestamp_is_refused() {
         )
         .unwrap();
     let error = PeState::octets(vec![1]).read_header(&extra).unwrap_err();
-    assert_eq!(error.place, "State.timestamp");
+    assert_eq!(error.place.what(), "State");
+    assert_eq!(error.place.at_property(), Some("timestamp"));
+    assert_eq!(error.place.to_string(), "State.timestamp");
     let mut extra = PeExtra::default();
     extra
         .insert(PropertyName::new("timestamp").unwrap(), PeJson::Integer(-3))
@@ -540,14 +542,14 @@ impl Device {
 }
 
 impl StateDevice for Device {
-    fn judge(&mut self, _: &StateId, arrival: Arrival<'_>) -> Verdict {
+    fn judge(&mut self, _: &StateId, arrival: Arrival<'_>) -> StateVerdict {
         match arrival {
             Arrival::Prefix(prefix) => {
                 self.asked.lock().unwrap().push((prefix.len(), false));
                 *self.seen.lock().unwrap() = prefix.to_vec();
                 match self.refuse_prefix_from {
-                    Some(at) if prefix.len() >= at => Verdict::Refuse,
-                    _ => Verdict::Undecided,
+                    Some(at) if prefix.len() >= at => StateVerdict::Refuse,
+                    _ => StateVerdict::Undecided,
                 }
             }
             Arrival::Whole(state) => {
@@ -556,9 +558,9 @@ impl StateDevice for Device {
                     .unwrap()
                     .push((state.to_wire().1.len(), true));
                 if self.refuse_whole {
-                    Verdict::Refuse
+                    StateVerdict::Refuse
                 } else {
-                    Verdict::Sound
+                    StateVerdict::Sound
                 }
             }
         }

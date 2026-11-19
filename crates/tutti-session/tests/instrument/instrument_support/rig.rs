@@ -1,11 +1,11 @@
 //! A session with one instrument in it, played and rendered a block at a time.
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
+use tutti_buffers::MaxBlock;
 use tutti_graph::NodeKey;
 use tutti_session::Root;
 use tutti_session::{InstrumentHandle, Session};
-use tutti_types::ChannelLayout;
-use tutti_types::MaxBlock;
 use tutti_ump::Ump;
 use tutti_units::Moment;
 use tutti_units::{SampleRate, Samples};

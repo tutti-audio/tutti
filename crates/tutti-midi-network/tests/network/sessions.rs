@@ -162,7 +162,9 @@ fn an_unanswered_invitation_is_cancelled_with_a_bye_after_the_timeout() {
             .count()
             >= 5
     );
-    assert!(sent.contains(&Command::Bye(Bye::new(ByeReason::InvitationCanceled))));
+    assert!(sent.contains(&Command::Bye(Box::new(Bye::new(
+        ByeReason::InvitationCanceled
+    )))));
     sim.advance(Duration::from_secs(6));
     assert_eq!(sim.client.state(), SessionState::Idle);
     assert!(sim.client_events.contains(&Event::Closed {
@@ -199,7 +201,7 @@ fn a_malformed_invitation_is_a_protocol_error_bye() {
     sim.flush();
     assert_eq!(
         sim.commands(Direction::HostToClient),
-        vec![Command::Bye(Bye::new(ByeReason::ProtocolError))]
+        vec![Command::Bye(Box::new(Bye::new(ByeReason::ProtocolError)))]
     );
 }
 
@@ -224,7 +226,7 @@ fn a_host_at_its_limit_turns_a_newcomer_away_with_too_many_sessions() {
         .collect();
     assert_eq!(
         commands,
-        vec![Command::Bye(Bye::new(ByeReason::TooManySessions))]
+        vec![Command::Bye(Box::new(Bye::new(ByeReason::TooManySessions)))]
     );
     assert_eq!(sim.host.state(client_addr()), SessionState::Established);
 }
@@ -238,7 +240,9 @@ fn an_accepted_reply_with_no_invitation_gets_a_bye_for_no_pending_invitation() {
     sim.flush();
     assert_eq!(
         sim.commands(Direction::ClientToHost),
-        vec![Command::Bye(Bye::new(ByeReason::NoPendingInvitation))]
+        vec![Command::Bye(Box::new(Bye::new(
+            ByeReason::NoPendingInvitation
+        )))]
     );
 }
 
@@ -323,7 +327,9 @@ fn a_wrong_secret_is_answered_after_a_delay_and_the_client_gives_up() {
     }));
     assert!(
         sim.commands(Direction::ClientToHost)
-            .contains(&Command::Bye(Bye::new(ByeReason::InvitationCanceled)))
+            .contains(&Command::Bye(Box::new(Bye::new(
+                ByeReason::InvitationCanceled
+            ))))
     );
     assert_eq!(sim.host.state(client_addr()), SessionState::Idle);
 }
@@ -388,7 +394,7 @@ fn five_failed_digests_end_the_invitation_with_authentication_failed() {
             .unwrap()
             .map(Result::unwrap)
         {
-            saw_bye |= c == Command::Bye(Bye::new(ByeReason::AuthenticationFailed));
+            saw_bye |= c == Command::Bye(Box::new(Bye::new(ByeReason::AuthenticationFailed)));
         }
     }
     assert!(saw_bye);
@@ -505,7 +511,9 @@ fn an_authenticated_invitation_without_an_invitation_is_rejected_for_no_prior_in
     sim.flush();
     assert_eq!(
         sim.commands(Direction::HostToClient),
-        vec![Command::Bye(Bye::new(ByeReason::NoPriorInvitation))]
+        vec![Command::Bye(Box::new(Bye::new(
+            ByeReason::NoPriorInvitation
+        )))]
     );
 }
 
@@ -1341,7 +1349,7 @@ fn a_silent_peer_ends_the_session_with_a_timeout_bye_that_is_repeated() {
     let byes = sim
         .commands(Direction::ClientToHost)
         .into_iter()
-        .filter(|c| *c == Command::Bye(Bye::new(ByeReason::Timeout)))
+        .filter(|c| *c == Command::Bye(Box::new(Bye::new(ByeReason::Timeout))))
         .count();
     assert!(
         byes >= 2,
@@ -1451,7 +1459,7 @@ fn a_bye_from_a_peer_in_no_session_is_still_answered() {
     let mut sim = Sim::open();
     sim.host.on_message(
         client_addr(),
-        &datagram(&Command::Bye(Bye::new(ByeReason::UserTerminated))),
+        &datagram(&Command::Bye(Box::new(Bye::new(ByeReason::UserTerminated)))),
         sim.now,
     );
     sim.flush();
@@ -1484,7 +1492,9 @@ fn data_outside_a_session_gets_a_bye_for_session_not_established() {
     sim.flush();
     assert_eq!(
         sim.commands(Direction::HostToClient),
-        vec![Command::Bye(Bye::new(ByeReason::SessionNotEstablished))]
+        vec![Command::Bye(Box::new(Bye::new(
+            ByeReason::SessionNotEstablished
+        )))]
     );
     assert!(Sim::umps(&sim.host_events).is_empty());
 }
@@ -1577,7 +1587,7 @@ fn an_unanswered_reset_ends_the_session_with_a_timeout_bye() {
     sim.advance(Duration::from_secs(6));
     assert!(
         sim.commands(Direction::ClientToHost)
-            .contains(&Command::Bye(Bye::new(ByeReason::Timeout)))
+            .contains(&Command::Bye(Box::new(Bye::new(ByeReason::Timeout))))
     );
 }
 
@@ -1590,7 +1600,9 @@ fn a_reset_outside_a_session_gets_a_bye_for_session_not_established() {
     sim.flush();
     assert_eq!(
         sim.commands(Direction::HostToClient),
-        vec![Command::Bye(Bye::new(ByeReason::SessionNotEstablished))]
+        vec![Command::Bye(Box::new(Bye::new(
+            ByeReason::SessionNotEstablished
+        )))]
     );
 }
 
@@ -1646,7 +1658,7 @@ fn a_client_ignores_datagrams_from_any_address_but_its_host() {
     let stranger = "10.0.0.77:1".parse().unwrap();
     sim.client.on_message(
         stranger,
-        &datagram(&Command::Bye(Bye::new(ByeReason::UserTerminated))),
+        &datagram(&Command::Bye(Box::new(Bye::new(ByeReason::UserTerminated)))),
         sim.now,
     );
     sim.flush();
@@ -1673,7 +1685,9 @@ fn a_stranger_that_is_not_inviting_is_answered_statelessly_and_costs_the_host_no
     let data = Command::UmpData(UmpData::new(SequenceNumber::ZERO, &[note_on(60)]).unwrap());
     assert_eq!(
         replies(&mut sim, &datagram(&data)),
-        vec![Command::Bye(Bye::new(ByeReason::SessionNotEstablished))]
+        vec![Command::Bye(Box::new(Bye::new(
+            ByeReason::SessionNotEstablished
+        )))]
     );
     assert_eq!(sim.host.session_count(), 0);
     assert_eq!(
@@ -1683,7 +1697,9 @@ fn a_stranger_that_is_not_inviting_is_answered_statelessly_and_costs_the_host_no
     assert_eq!(sim.host.session_count(), 0);
     assert_eq!(
         replies(&mut sim, &datagram(&Command::SessionReset)),
-        vec![Command::Bye(Bye::new(ByeReason::SessionNotEstablished))]
+        vec![Command::Bye(Box::new(Bye::new(
+            ByeReason::SessionNotEstablished
+        )))]
     );
     assert_eq!(sim.host.session_count(), 0);
     assert_eq!(sim.host.state(stranger), SessionState::Idle);

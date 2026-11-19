@@ -7,7 +7,7 @@
 //! event with its absolute frame. 120 BPM at 48 kHz: a beat is 24 000 frames.
 
 use std::sync::{Arc, Mutex};
-use tutti_types::MaxBlock;
+use tutti_buffers::MaxBlock;
 
 use crate::common::{beat_of, connect, rolling};
 use tutti_graph::NodeKey;
@@ -32,7 +32,7 @@ struct Sink(Seen);
 
 impl Node for Sink {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(tutti_types::ChannelLayout::MONO).with_events(1, 0)
+        Shape::source_unassigned(tutti_buffers::ChannelLayout::MONO).with_events(1, 0)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {

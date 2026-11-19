@@ -24,7 +24,7 @@ serde = ["dep:serde"]
 
 # Drive the streamer's cycle by hand instead of by its thread.
 #
-# Exposes `DiskStreamer::manual` + `step_once`, which run the *same*
+# Exposes `DiskStreamer::by_hand` + `step_once`, which run the *same*
 # `StreamerCycle::step` the streamer thread runs. Also exposes `testing`: a transport a
 # test moves between blocks, and the
 # block driver that hands a node its `Env` (which needs `tutti-graph`'s
@@ -45,7 +45,6 @@ tutti-graph = { version = "0.0.1", path = "../tutti-graph" }
 tutti-buffers = { version = "0.0.1", path = "../tutti-buffers" }
 tutti-units = { version = "0.0.1", path = "../tutti-units", default-features = false }
 tutti-music = { version = "0.0.1", path = "../tutti-music", default-features = false }
-tutti-types = { version = "0.0.1", path = "../tutti-types", default-features = false }
 
 # The project's tempo map, and the reader a placed voice lends it through: over
 # a map that changes, how long the playhead took from a clip's start to now is

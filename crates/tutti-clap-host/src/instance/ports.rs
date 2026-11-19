@@ -17,8 +17,8 @@ use clap_sys::ext::note_ports::{
     CLAP_NOTE_DIALECT_MIDI2,
 };
 use clap_sys::ext::voice_info::CLAP_VOICE_INFO_SUPPORTS_OVERLAPPING_NOTES;
+use tutti_buffers::{AmbisonicNormalization, AmbisonicOrdering, ChannelTopology};
 use tutti_plugin_types::MainThreadMarker;
-use tutti_types::{AmbisonicNormalization, AmbisonicOrdering, ChannelTopology};
 use tutti_units::Samples;
 
 /// CLAP's constant for `ordering`.
@@ -320,7 +320,7 @@ impl ClapLoaded {
     /// `None` for the same reason: the plugin has no `clap.surround` extension
     /// or no `get_channel_map`, which is distinct from answering with no
     /// channels. Nothing is lost in the conversion — a position this crate
-    /// cannot name arrives as [`Speaker::Unknown`](tutti_types::Speaker::Unknown)
+    /// cannot name arrives as [`Speaker::Unknown`](tutti_buffers::Speaker::Unknown)
     /// and keeps its channel's slot.
     pub(crate) fn surround_topology(
         &self,

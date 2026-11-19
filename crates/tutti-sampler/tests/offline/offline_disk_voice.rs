@@ -20,7 +20,7 @@ use tutti_sampler::testing::loop_frames;
 use std::cell::Cell;
 use std::path::Path;
 use std::sync::Arc;
-use tutti_types::MaxBlock;
+use tutti_buffers::MaxBlock;
 
 use tutti_graph::{Env, ForkHealth, ForkMode, IntoNode, Node, Prepare, TransportChanges, contract};
 use tutti_music::{FrameClock, LoopRange};
@@ -59,19 +59,22 @@ fn write_ramp(path: &Path, rate: u32, frames: usize) {
 /// A hand-stepped streamer and the handle of the stream it streams: both are
 /// held while the voice plays (dropping the handle ends the stream).
 struct Rig {
-    streamer: DiskStreamer<ByHand>,
-    stream: Stream,
+    streamer: DiskStreamer<ByHand<f32>, f32>,
+    stream: Stream<f32>,
 }
 
 /// A hand-stepped disk streamer streaming `path`, primed, and the stream's
 /// reader.
-fn streamer_on(path: &Path) -> (Rig, StreamReader) {
+fn streamer_on(path: &Path) -> (Rig, StreamReader<f32>) {
     streamer_with(path, Default::default())
 }
 
 /// [`streamer_on`], with `config`.
-fn streamer_with(path: &Path, config: tutti_sampler::DiskStreamerConfig) -> (Rig, StreamReader) {
-    let mut streamer = DiskStreamer::manual(SampleRate::of(SR), config).expect("builds");
+fn streamer_with(
+    path: &Path,
+    config: tutti_sampler::DiskStreamerConfig,
+) -> (Rig, StreamReader<f32>) {
+    let mut streamer = DiskStreamer::by_hand(SampleRate::of(SR), config).expect("builds");
     let opening = streamer.open(path, Placement::HEAD);
     let (stream, reader) = settle(&mut streamer, opening).expect("the file opens");
     (Rig { streamer, stream }, reader)
@@ -91,7 +94,7 @@ fn reverse(rig: &mut Rig) {
 }
 
 /// The live voice of the stream `reader` reads, placed at `beat`.
-fn live_voice(reader: StreamReader, beat: f64) -> DiskVoice {
+fn live_voice(reader: StreamReader<f32>, beat: f64) -> DiskVoice<f32> {
     DiskVoice::from_reader(reader, VoiceWindow::from(Beat(beat)))
 }
 
@@ -161,7 +164,7 @@ fn fork_unprepared(node: impl IntoNode) -> Fork {
 
 /// Fork `voice` for a render at `rate`, as a graph fork does: forked, then
 /// prepared.
-fn fork(voice: &DiskVoice, rate: f64) -> Fork {
+fn fork(voice: &DiskVoice<f32>, rate: f64) -> Fork {
     let mut f = fork_unprepared(voice.clone());
     f.node.prepare(
         &Prepare::new(SampleRate::of(rate), MaxBlock::of(Samples(BLOCK)))

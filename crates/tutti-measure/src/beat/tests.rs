@@ -26,7 +26,7 @@ fn tables_never_outgrow_the_curve() {
     assert_eq!(gap_bounds(20.0, 1000), (10, 40));
     assert_eq!(kernel_half(2.0, 1000), 6);
     // And a period too long for any gap tracks without a beat chain.
-    let mut curve = vec![0.0f32; 1000];
+    let mut curve = vec![0.0f64; 1000];
     curve[10] = 1.0;
     assert!(track(&curve, 1e12, 100.0).len() <= 1);
 }

@@ -12,21 +12,22 @@
 //! [`ParamNode`], inserted through [`tutti_graph::param_parts`], so a fork
 //! starts from the values last set through the set (see `src/fork.rs`).
 
+use tutti_buffers::BusTopology;
 use tutti_graph::{
     Chase, Cx, IntoNode, Io, Node, NodeParts, ParamNode, ParamSet, Prepare, Shape, Status,
 };
-use tutti_types::BusTopology;
 use tutti_units::UnitParam;
 use tutti_units::{Amplitude, CentsSpan, Spread};
 use tutti_voicing::Voicing;
 
 use super::PolySynth;
+use crate::lane::SynthFloat;
 
 // The params a `PolySynth` lets the graph modulate, in port order: master
 // volume and, with a unison engine, detune and stereo spread. Each is
 // block-rate in the synth (read once per block), so a driven port is read the
 // same way: its value on the block's last frame.
-tutti_graph::declare_params!([] PolySynth, n {
+tutti_graph::declare_params!([F: SynthFloat] PolySynth<F>, n {
     Volume => Amplitude = &n.master_volume,
     Detune => CentsSpan = n.unison.as_ref().map(|u| u.detune()),
     StereoSpread => Spread = n.unison.as_ref().map(|u| u.spread()),
@@ -44,7 +45,7 @@ tutti_graph::declare_params!([] PolySynth, n {
 /// 38 ns, under the two classes' geometric middle (45); 20 would be over.
 pub(super) const MODERATE_LANES: usize = 16;
 
-impl PolySynth {
+impl<F: SynthFloat> PolySynth<F> {
     /// What the synth declares to the cost model: `Moderate` up to
     /// [`MODERATE_LANES`] oscillator lanes, `Heavy` past them.
     ///
@@ -62,7 +63,7 @@ impl PolySynth {
     }
 }
 
-impl Node for PolySynth {
+impl<F: SynthFloat> Node<F> for PolySynth<F> {
     /// No audio in, stereo out, one MIDI event input; the release as its
     /// tail. Events land on their frame ([`Resolution::Sample`](tutti_graph::Resolution::Sample)).
     fn shape(&self) -> Shape {
@@ -83,7 +84,7 @@ impl Node for PolySynth {
 
     /// Always [`Status::Modified`]: the synth sounds after its input's last
     /// event (its release), so the executor must never park it.
-    fn process(&mut self, _cx: &Cx<'_>, mut io: Io<'_>) -> Status {
+    fn process(&mut self, _cx: &Cx<'_>, mut io: Io<'_, F>) -> Status {
         let frames = io.frames();
         if frames == 0 {
             return Status::Modified;
@@ -109,7 +110,7 @@ impl Node for PolySynth {
                     }
                     self.last_volume
                 },
-                |lane| Amplitude(f64::from(lane)),
+                |lane| Amplitude(lane.into()),
             );
         let volume = Self::clamp_volume(volume);
         let (_, mut outputs) = io.split();
@@ -149,7 +150,7 @@ impl Node for PolySynth {
     }
 }
 
-impl ParamNode for PolySynth {
+impl<F: SynthFloat> ParamNode<F> for PolySynth<F> {
     /// `Volume` (the master gain, as a linear amplitude), and — only when
     /// this synth has a unison engine — `Detune` (cents) and `StereoSpread`
     /// (0..1): the cells the synth reads once per block, which a host
@@ -168,17 +169,17 @@ impl ParamNode for PolySynth {
 /// fork that starts from the values last set through it
 /// ([`tutti_graph::param_parts`]; see the `fork` module docs for what a fork
 /// carries).
-impl IntoNode for PolySynth {
+impl<F: SynthFloat> IntoNode<F> for PolySynth<F> {
     type Controls = ParamSet;
 
-    fn into_parts(self) -> NodeParts<ParamSet> {
+    fn into_parts(self) -> NodeParts<ParamSet, F> {
         tutti_graph::param_parts(self)
     }
 }
 
-/// The synth is an instrument: MIDI on event input 0, its stereo pair on
-/// outputs 0 and 1.
-impl tutti_graph::Instrument for PolySynth {}
+/// The synth is an instrument in any width it renders in: MIDI on event input 0, its
+/// stereo pair on outputs 0 and 1.
+impl<F: SynthFloat> tutti_graph::Instrument<F> for PolySynth<F> {}
 
 #[cfg(test)]
 mod tests;

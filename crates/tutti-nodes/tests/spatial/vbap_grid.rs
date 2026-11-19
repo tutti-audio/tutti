@@ -4,12 +4,12 @@
 
 // These tests pin the `f32` instantiation, the session's audio format, so their tolerances are `f32`'s.
 
+use tutti_buffers::Bed;
 use tutti_buffers::Planes;
 use tutti_graph::ParamNode;
 use tutti_graph::contract::{drive, prepared};
 use tutti_nodes::VbapPannerNode;
 use tutti_nodes::testing::aim;
-use tutti_types::Bed;
 use tutti_units::{Azimuth, Elevation, SampleRate, UnitParam};
 
 const RATE: SampleRate = SampleRate::SR_48K;

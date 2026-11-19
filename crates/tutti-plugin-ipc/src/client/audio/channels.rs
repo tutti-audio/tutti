@@ -1,7 +1,9 @@
 //! Lock-free message bus between audio thread and bridge thread.
 //!
 //! Two queues survive at this level: the command queue (audio thread → bridge
-//! thread) and the audio-response queue (bridge thread → audio thread, RT).
+//! thread) and the audio-response ring (bridge thread → audio thread, RT). The
+//! ring's ends are owned, not shared: [`ResponseWriter`] by the bridge thread
+//! and [`Replies`] by the pipeline that collects chunks.
 //! Reply-bearing commands carry their own per-request `Reply<T>` so each
 //! response is routed back to its specific caller — no shared
 //! control-response queue, no risk of mismatched responses.
@@ -16,8 +18,11 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use tutti_plugin_types::BlockCounts;
-use tutti_rt::{Doorbell, LockExt, Sleeper, Tally, TallyWriter, doorbell, tally};
-use tutti_types::AtomicSampleRate;
+use tutti_rt::AtomicSampleRate;
+use tutti_rt::{
+    Counter, Doorbell, LockExt, Overflow, PackedAtomic, RingReader, RingWriter, Sleeper, Tally,
+    TallyWriter, doorbell, ring, tally,
+};
 use tutti_units::SampleRate;
 
 /// How many commands the audio thread can queue before `push_command` fails.
@@ -29,7 +34,6 @@ const RESPONSE_QUEUE_SIZE: usize = 128;
 #[derive(Clone)]
 pub(super) struct Channels {
     commands: Arc<ArrayQueue<Command>>,
-    audio_responses: Arc<ArrayQueue<AudioResponse>>,
     /// The newest block sequence the audio thread has submitted. Owned here
     /// rather than on the batcher because the *bridge* thread is what reads it,
     /// to decide whether a dequeued block is still worth sending.
@@ -75,11 +79,6 @@ pub(super) struct Channels {
     leaked_buffers: Tally<u64>,
     /// The writer of `leaked_buffers`, minted in `new`.
     leaked_writer: TallyWriter<u64>,
-    /// Audio responses the bridge thread could not queue for the audio
-    /// thread (the response queue was full), ever.
-    responses_lost: Tally<u64>,
-    /// The bridge thread's writer of `responses_lost`, minted in `new`.
-    responses_lost_writer: TallyWriter<u64>,
     /// How many replies the bridge thread has taken from the plugin, ever,
     /// on time or owed. With [`abandoned`](Self::abandoned) the hang
     /// verdict's input (`PluginHandle::block_counts`): a hang is abandoned
@@ -146,13 +145,14 @@ pub(crate) enum Fate {
 /// nothing. Written by the bridge thread alone, read on the audio thread.
 ///
 /// Each word stands alone and nothing is published through it (the audio is
-/// gated by the slab's sequence words), so the accesses are `Relaxed`: a
-/// reader sees a fate or not yet, and tries again at its next look.
-struct Fates([AtomicU64; FATES]);
+/// gated by the slab's sequence words), so a reader sees a fate or not yet,
+/// and tries again at its next look. The cell's `Acquire`/`Release` is its
+/// own contract and nothing here relies on it.
+struct Fates([PackedAtomic<u64>; FATES]);
 
 impl Fates {
     fn new() -> Self {
-        Self(std::array::from_fn(|_| AtomicU64::new(0)))
+        Self(std::array::from_fn(|_| PackedAtomic::new(0)))
     }
 
     /// Stores `seq`'s fate, unless the word already holds a newer chunk's: a
@@ -160,27 +160,53 @@ impl Fates {
     /// [`FATES`] chunks) must not erase the newer fate. A plain load decides:
     /// only the bridge thread writes.
     fn record(&self, seq: u64, fate: Fate) {
-        let code = match fate {
-            Fate::Published => 1,
-            Fate::Refused => 2,
-            Fate::Skipped => 3,
-        };
         let word = &self.0[(seq % FATES as u64) as usize];
-        if word.load(Ordering::Relaxed) >> 2 > seq {
+        if unpack(word.load()).0 > seq {
             return;
         }
-        word.store(seq << 2 | code, Ordering::Relaxed);
+        word.store(pack(seq, fate.code()));
     }
 
     fn get(&self, seq: u64) -> Option<Fate> {
-        let word = self.0[(seq % FATES as u64) as usize].load(Ordering::Relaxed);
-        if word >> 2 != seq {
+        let (held, code) = unpack(self.0[(seq % FATES as u64) as usize].load());
+        if held != seq {
             return None;
         }
-        match word & 3 {
-            1 => Some(Fate::Published),
-            2 => Some(Fate::Refused),
-            3 => Some(Fate::Skipped),
+        Fate::from_code(code)
+    }
+}
+
+/// Bits of a [`Fates`] word that hold the fate's code; the sequence is above.
+const CODE_BITS: u32 = 2;
+
+/// The word for `seq` with fate `code`: the code in the low [`CODE_BITS`] bits,
+/// the sequence above them.
+fn pack(seq: u64, code: u64) -> u64 {
+    seq << CODE_BITS | code
+}
+
+/// The sequence and the fate code a [`pack`]ed word holds; code 0 is an empty
+/// word's.
+fn unpack(word: u64) -> (u64, u64) {
+    (word >> CODE_BITS, word & ((1 << CODE_BITS) - 1))
+}
+
+impl Fate {
+    /// The fate's code in a word: 1, 2 or 3, never 0 (an empty word's).
+    fn code(self) -> u64 {
+        match self {
+            Self::Published => 1,
+            Self::Refused => 2,
+            Self::Skipped => 3,
+        }
+    }
+
+    /// The fate a [`code`](Self::code) stands for; `None` for 0.
+    fn from_code(code: u64) -> Option<Self> {
+        match code {
+            1 => Some(Self::Published),
+            2 => Some(Self::Refused),
+            3 => Some(Self::Skipped),
             _ => None,
         }
     }
@@ -192,11 +218,10 @@ impl Channels {
     pub(super) fn new(sample_rate: SampleRate, progress: Arc<crate::Wake>) -> (Self, Sleeper) {
         let (bell, sleeper) = doorbell();
         let (dropped_param_events, dropped_midi, skipped) = (tally(), tally(), tally());
-        let (abandoned, late, commands_refused, leaked_buffers, responses_lost) =
-            (tally(), tally(), tally(), tally(), tally());
+        let (abandoned, late, commands_refused, leaked_buffers) =
+            (tally(), tally(), tally(), tally());
         let channels = Self {
             commands: Arc::new(ArrayQueue::new(COMMAND_QUEUE_SIZE)),
-            audio_responses: Arc::new(ArrayQueue::new(RESPONSE_QUEUE_SIZE)),
             newest_seq: Arc::new(AtomicU64::new(0)),
             bell,
             sample_rate: Arc::new(AtomicSampleRate::new(sample_rate)),
@@ -209,8 +234,6 @@ impl Channels {
             commands_refused,
             leaked_writer: leaked_buffers.writer(),
             leaked_buffers,
-            responses_lost_writer: responses_lost.writer(),
-            responses_lost,
             replies: Arc::new(AtomicU64::new(0)),
             param_events_writer: dropped_param_events.writer(),
             dropped_param_events,
@@ -390,11 +413,6 @@ impl Channels {
         self.leaked_buffers.clone()
     }
 
-    /// The cell of audio responses lost to a full response queue.
-    pub(super) fn responses_lost_cell(&self) -> Tally<u64> {
-        self.responses_lost.clone()
-    }
-
     /// Record `n` dropped unsolicited parameter events. Bridge thread only; a
     /// count nothing branches on.
     pub(super) fn note_dropped_param_events(&self, n: u64) {
@@ -479,14 +497,6 @@ impl Channels {
         self.commands.pop()
     }
 
-    /// Queues a response for the audio thread; a full queue counts it lost.
-    pub(super) fn push_audio_response(&self, resp: AudioResponse) {
-        if self.audio_responses.push(resp).is_err() {
-            self.responses_lost_writer.add(1);
-        }
-        self.progress.notify();
-    }
-
     /// The gate a waiter on the bridge's progress sleeps on.
     pub(super) fn progress(&self) -> &Arc<crate::Wake> {
         &self.progress
@@ -497,15 +507,99 @@ impl Channels {
     pub(super) fn turn_done(&self) {
         self.progress.notify();
     }
+}
 
-    pub(super) fn pop_audio_response(&self) -> Option<AudioResponse> {
-        self.audio_responses.pop()
+/// The producing end of the audio-response ring, owned by the bridge thread:
+/// a push can come from nowhere else, which makes the ring single-producer.
+/// A full ring drops the newest response and the ring counts it.
+pub(crate) struct ResponseWriter {
+    ring: RingWriter<AudioResponse>,
+}
+
+/// The consuming end of the audio-response ring, owned by whatever collects
+/// chunks (the pipeline's batcher): a pop can come from nowhere else, which
+/// makes the ring single-consumer.
+#[must_use]
+pub struct Replies {
+    ring: RingReader<AudioResponse>,
+}
+
+impl std::fmt::Debug for Replies {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Replies").finish_non_exhaustive()
+    }
+}
+
+/// A new response ring, its two ends and the count of responses it lost.
+pub(crate) fn response_ring() -> (ResponseWriter, Replies, Counter<u64>) {
+    let (writer, reader) = ring(RESPONSE_QUEUE_SIZE, Overflow::DropNewest);
+    let lost = writer.losses();
+    (
+        ResponseWriter { ring: writer },
+        Replies { ring: reader },
+        lost,
+    )
+}
+
+impl Replies {
+    /// The oldest queued response.
+    pub(super) fn pop(&mut self) -> Option<AudioResponse> {
+        self.ring.pop()
+    }
+}
+
+/// What the bridge thread holds: the shared channels and the producing end of
+/// the response ring, which is the thread's alone.
+pub(super) struct BridgeSide {
+    channels: Channels,
+    responses: ResponseWriter,
+}
+
+impl BridgeSide {
+    pub(super) fn new(channels: Channels, responses: ResponseWriter) -> Self {
+        Self {
+            channels,
+            responses,
+        }
+    }
+
+    /// Queues a response for the audio thread; a full ring drops it and
+    /// counts it lost.
+    pub(super) fn push_audio_response(&mut self, resp: AudioResponse) {
+        // The ring counts the response it refuses (`Overflow::DropNewest`).
+        let _ = self.responses.ring.push(resp);
+        self.channels.progress().notify();
+    }
+}
+
+impl std::ops::Deref for BridgeSide {
+    type Target = Channels;
+    fn deref(&self) -> &Channels {
+        &self.channels
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **A fates word is the code in its low two bits and the sequence above
+    /// them**: a literal word, the round trip at the edges of the sequence, and
+    /// every code.
+    #[test]
+    fn a_fates_word_holds_the_code_low_and_the_sequence_above() {
+        assert_eq!(pack(5, 3), 0b10111);
+        assert_eq!(unpack(0b10111), (5, 3));
+        let max = u64::MAX >> CODE_BITS;
+        for seq in [0, 1, FATES as u64, max] {
+            for fate in [Fate::Published, Fate::Refused, Fate::Skipped] {
+                let (held, code) = unpack(pack(seq, fate.code()));
+                assert_eq!((held, Fate::from_code(code)), (seq, Some(fate)));
+            }
+        }
+        assert_eq!(Fate::from_code(0), None, "an empty word holds no fate");
+        assert_eq!(unpack(0), (0, 0));
+    }
 
     fn channels() -> (Channels, Sleeper) {
         Channels::new(SampleRate::SR_48K, Arc::default())
@@ -586,9 +680,9 @@ mod tests {
         while !c.bell.is_asleep() {
             std::thread::yield_now();
         }
-        assert_no_alloc::assert_no_alloc(|| assert!(c.push_command(Command::Shutdown)));
+        assert_no_alloc::assert_no_alloc(|| assert!(c.push_command(Command::Reset)));
         let got = rx.recv_timeout(PATIENCE).expect("the push woke the bridge");
-        assert!(matches!(got, Command::Shutdown));
+        assert!(matches!(got, Command::Reset));
         stop.store(true, Ordering::Release);
         c.wake();
         t.join().unwrap();
@@ -608,7 +702,7 @@ mod tests {
             for _ in 0..(i % 64) {
                 std::hint::spin_loop();
             }
-            assert!(c.push_command(Command::Shutdown));
+            assert!(c.push_command(Command::Reset));
             rx.recv_timeout(PATIENCE)
                 .unwrap_or_else(|_| panic!("hand-off {i} was never woken"));
         }
@@ -639,7 +733,7 @@ mod tests {
     fn a_full_command_queue_counts_each_refusal() {
         let (c, _sleeper) = channels();
         for _ in 0..COMMAND_QUEUE_SIZE {
-            assert!(c.push_command(Command::Shutdown));
+            assert!(c.push_command(Command::Reset));
         }
         assert_eq!(
             c.commands_refused_cell().get(),
@@ -648,23 +742,25 @@ mod tests {
         );
         assert_no_alloc::assert_no_alloc(|| {
             for _ in 0..3 {
-                assert!(!c.push_command(Command::Shutdown));
+                assert!(!c.push_command(Command::Reset));
             }
         });
         assert_eq!(c.commands_refused_cell().get(), 3);
     }
 
-    /// **A response the full response queue refuses is counted lost.**
+    /// **A response the full response ring refuses is counted lost.**
     #[test]
-    fn a_full_response_queue_counts_each_loss() {
+    fn a_full_response_ring_counts_each_loss() {
         let (c, _sleeper) = channels();
+        let (writer, _replies, lost) = response_ring();
+        let mut side = BridgeSide::new(c, writer);
         let resp = || AudioResponse::Error { seq: None };
         for _ in 0..RESPONSE_QUEUE_SIZE {
-            c.push_audio_response(resp());
+            side.push_audio_response(resp());
         }
-        assert_eq!(c.responses_lost_cell().get(), 0);
-        c.push_audio_response(resp());
-        c.push_audio_response(resp());
-        assert_eq!(c.responses_lost_cell().get(), 2);
+        assert_eq!(lost.get(), 0);
+        side.push_audio_response(resp());
+        side.push_audio_response(resp());
+        assert_eq!(lost.get(), 2);
     }
 }

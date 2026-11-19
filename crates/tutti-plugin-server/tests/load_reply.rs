@@ -94,11 +94,8 @@ fn start_server() -> (Server, Stream) {
 /// [`start_server`], and the socket it serves. The server is this process's
 /// child and takes this process for its host.
 fn start_server_for_this_process() -> (Server, Stream, PathBuf) {
-    // The default config makes a fresh socket path that fits a socket address.
-    let socket = tutti_plugin_ipc::BridgeConfig::at(
-        tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source"),
-    )
-    .socket_path;
+    // A fresh socket path that fits a socket address.
+    let socket = tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source");
 
     let mut server = Server(
         Command::new(env!("CARGO_BIN_EXE_plugin-server"))
@@ -107,7 +104,7 @@ fn start_server_for_this_process() -> (Server, Stream, PathBuf) {
                 tutti_plugin_ipc_ffi::HOST_PID_ENV,
                 std::process::id().to_string(),
             )
-            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
             .spawn()
             .expect("spawn plugin-server"),
     );
@@ -191,7 +188,8 @@ fn a_load_that_names_a_plugin_loads_that_plugin_in_the_server() {
     drop(server);
 }
 
-/// Waits for the server to end and returns its status and what it printed.
+/// Waits for the server to end and returns its status and what it logged (to
+/// standard error).
 fn ended(server: &mut Server) -> (std::process::ExitStatus, String) {
     let mut status = None;
     tutti_fixtures::wait_until("the server to end", Duration::from_secs(60), || {
@@ -199,8 +197,8 @@ fn ended(server: &mut Server) -> (std::process::ExitStatus, String) {
         status.is_some()
     });
     let mut printed = String::new();
-    std::io::Read::read_to_string(&mut server.0.stdout.take().expect("piped"), &mut printed)
-        .expect("what the server printed");
+    std::io::Read::read_to_string(&mut server.0.stderr.take().expect("piped"), &mut printed)
+        .expect("what the server logged");
     (status.expect("the wait ended on a status"), printed)
 }
 
@@ -219,12 +217,9 @@ fn a_shutdown_in_the_handshake_releases_the_plugin() {
     ));
 
     write_frame(&mut stream, &HostMessage::Shutdown).expect("send Shutdown");
-    let (status, printed) = ended(&mut server);
-    assert!(status.success(), "{status:?}");
-    assert!(
-        !printed.contains("leaking the plugin"),
-        "the plugin was leaked: {printed}"
-    );
+    let (status, logged) = ended(&mut server);
+    // Not 3 (`EXIT_PLUGIN_LEAKED`): the plugin was destroyed, not leaked.
+    assert_eq!(status.code(), Some(0), "{status:?}: {logged}");
 }
 
 /// **A handshake frame that does not decode ends the server, with that cause
@@ -257,10 +252,7 @@ fn a_host_that_ends_in_the_control_phase_shuts_the_server_down() {
     use std::io::BufRead as _;
 
     let (_not_a_plugin, good) = fixtures();
-    let socket = tutti_plugin_ipc::BridgeConfig::at(
-        tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source"),
-    )
-    .socket_path;
+    let socket = tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source");
     let dir = tempfile::tempdir().expect("a scratch directory");
     let log = dir.path().join("server.log");
     // The shell is the host until its input closes: it states its own pid, prints

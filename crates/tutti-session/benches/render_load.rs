@@ -122,13 +122,13 @@ impl Variant {
     }
 }
 
+use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_buffers::{InterleavedMut, Mono};
 use tutti_graph::{Cost, Cx, Event, Io, Node, Offset, Prepare, Shape, Status, Unforkable};
 use tutti_nodes::{BusStripNode, ConvolverNode, LimiterControls, LimiterNode};
 use tutti_polysynth::{Adsr, FilterType, OscillatorType, PolySynth, SynthConfig};
 use tutti_sampler::{MemorySource, Playback, SlotId, VoicePool, VoiceWindow};
 use tutti_session::{InPort, OutPort, Root, Session, Workers};
-use tutti_types::{ChannelLayout, MaxBlock};
 use tutti_ump::{Message, MidiChannel, NoteNumber, NoteVelocity, Ump, Voice2};
 use tutti_units::{
     Amplitude, Beat, Cents, Db, Hz, PlaybackRate, Resonance, SampleRate, Samples, Seconds,

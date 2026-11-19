@@ -1,11 +1,11 @@
 //! `Graph::open_inlet`: audio a thread of your own pushes into the graph, the
 //! mirror of the tap.
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::Interleaved;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::InletRing;
 use tutti_session::{InletError, OutPort, Root, Session};
-use tutti_types::ChannelLayout;
 use tutti_units::{SampleRate, Samples};
 
 const RATE: SampleRate = SampleRate::SR_48K;

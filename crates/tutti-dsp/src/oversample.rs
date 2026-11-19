@@ -58,8 +58,8 @@
 
 use std::sync::Arc;
 
+use tutti_buffers::MaxBlock;
 use tutti_buffers::{Float, Mono, MonoMut, Sample};
-use tutti_types::MaxBlock;
 use tutti_units::{Db, Hz, SampleRate, Samples};
 
 use crate::{FirDesign, FirError, FirResponse};
@@ -295,8 +295,8 @@ impl OversamplingPlan {
             .taps
             .iter()
             .map(|s| StageTaps {
-                outer: s.outer.iter().map(|&t| F::from_f64(t)).collect(),
-                centre: F::from_f64(s.centre),
+                outer: s.outer.iter().map(|&t| F::from_design(t)).collect(),
+                centre: F::from_design(s.centre),
                 delay: s.delay,
             })
             .collect();

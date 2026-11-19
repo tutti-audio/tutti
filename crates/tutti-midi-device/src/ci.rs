@@ -24,7 +24,9 @@
 
 use std::vec::Vec;
 
-use tutti_ump::{MidiChannel, MidiGroup, Sysex7Packets, U7, U28, UNIVERSAL_NON_REAL_TIME, Ump};
+use tutti_ump::{
+    MidiChannel, MidiGroup, Sysex7Packets, SysexError, U7, U28, UNIVERSAL_NON_REAL_TIME, Ump,
+};
 
 use crate::name::ProductInstanceId;
 
@@ -75,9 +77,11 @@ pub use drum_map::{
 pub use endpoint::{EndpointInfo, EndpointStatus};
 pub use gm2::{Gm2ChannelCount, Gm2FunctionBlock, Gm2Role, Gm2SingleChannel, NotAGm2ChannelCount};
 pub use initiator::{
-    Outcome, ProfileAction, ProfileChange, ProfileEntry, ProfileInitiator, ProfileTable, Request,
-    RequestError,
+    EnabledMpeZones, ProfileAction, ProfileChange, ProfileEntry, ProfileInitiator, ProfileOutcome,
+    ProfileRequest, ProfileRequestError, ProfileTable,
 };
+#[cfg(feature = "serde")]
+pub use pe::SavedStateError;
 pub use pe::{
     ActionError, Arrival, BodyLimit, BufferLimit, CallError, CallId, CanSet, CcIndex, ChangeKind,
     ChunkNo, ChunkPosition, ChunkTotal, ClusterKind, ColumnSource, CommonState, ConfirmIcon,
@@ -100,16 +104,16 @@ pub use pe::{
     PeReassemblyError, PeReassemblyLimits, PeReceived, PeRefused, PeReply, PeRequest, PeRequestId,
     PeResource, PeResourceList, PeResponse, PeSet, PeSetScope, PeSettings, PeSignal, PeState,
     PeStateEntry, PeStateList, PeStatus, PeStatusClass, PeStep, PeSubscribed, PeSubscription,
-    PeTerminator, PeText, PeTransaction, PeUnreadable, PeUpdateCommand, PeVersion, Priority,
+    PeTerminator, PeText, PeTransaction, PeUnreadable, PeUpdateCommand, PeVersion, Place, Priority,
     PropertyName, PublishError, RefusedAt, RequestRefused, ResIdUse, ResourceAction,
     ResourceDefaults, ResourceEntry, ResourceEntryBuilder, ResourceEvent, ResourceFailure,
     ResourceGet, ResourceId, ResourceInitiator, ResourceName, ResourceResponder, ResourceSet,
     ResourceStore, ResourceTarget, ResponderAction, ResponderEvent, ResponderSettings,
     RestoreError, RoleName, SUB_ID2_PE_CAPABILITIES_INQUIRY, SUB_ID2_PE_CAPABILITIES_REPLY,
     SUB_ID2_PE_NOTIFY, SavedState, SelectorAction, SetBody, SignificantBits, SimpleAction,
-    SimultaneousRequests, StateDevice, StateId, StateRev, StateSize, StateStamp, StepCount,
-    StoreError, StreamLimit, SubscribeId, TypeHint, UnixSeconds, UpdateKind, Verdict, WrongDevice,
-    decode_body, encode_body, mcoded7, split_message,
+    SimultaneousRequests, StateDevice, StateId, StateRev, StateSize, StateStamp, StateVerdict,
+    StepCount, StoreError, StreamLimit, SubscribeId, TypeHint, UnixSeconds, UpdateKind,
+    WrongDevice, decode_body, encode_body, mcoded7, split_message,
 };
 pub use process::{
     ChannelControllers, DataControl, NotADataControl, NoteData, ProcessFeatures, ReportScope,
@@ -127,7 +131,7 @@ pub use profile::{
     SUB_ID2_SET_PROFILE_OFF, SUB_ID2_SET_PROFILE_ON, SpecificData, StandardProfile,
 };
 pub use rotary::{RotaryControl, RotarySpeaker, RotaryValue};
-pub use status::{Ack, Nak};
+pub use status::{Ack, AckStatus, Nak, NakStatus};
 pub use text::MessageText;
 pub use two_state::{SwitchMeaning, TwoState};
 pub use wait::{NotATimeoutWait, PEER_REPLY_TIMEOUT, TimeoutWait};
@@ -198,8 +202,6 @@ tutti_units::ranged! {
     /// (error code 0x02), so a value with one set is not a version a message
     /// carries; Message Format Version 0x00 is deprecated (§5.4).
     #[derive(Eq, PartialOrd, Ord, Hash)]
-    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-    #[cfg_attr(feature = "serde", serde(try_from = "u8", into = "u8"))]
     CiVersion(u8), NotAVersion, "a MIDI-CI message format version (0x01 to 0x1F)",
     |raw| raw != 0 && raw & 0xE0 == 0
 }
@@ -210,8 +212,6 @@ tutti_units::ranged! {
 /// `00` to `0F` address MIDI Channels 1 to 16, `7E` the Group and `7F` the
 /// Function Block; `10` to `7D` are reserved, and a reserved value is not one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "serde", serde(try_from = "u8", into = "u8"))]
 pub enum CiDeviceId {
     /// One MIDI Channel of the Group (`0x00..=0x0F`).
     Channel(MidiChannel),
@@ -248,6 +248,24 @@ impl CiDeviceId {
     }
 }
 
+/// A Device ID that is no Channel: the whole Group or the whole Function Block.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Whole {
+    /// The Group, not channelized (`0x7E`).
+    Group,
+    /// The Function Block, not channelized (`0x7F`).
+    FunctionBlock,
+}
+
+impl From<Whole> for CiDeviceId {
+    fn from(whole: Whole) -> Self {
+        match whole {
+            Whole::Group => Self::Group,
+            Whole::FunctionBlock => Self::FunctionBlock,
+        }
+    }
+}
+
 /// A raw value that is not a Device ID.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 #[error("{:#04x} is not a MIDI-CI Device ID (reserved)", .0)]
@@ -277,8 +295,6 @@ tutti_units::ranged! {
     /// address is a [`Destination`], not a `Muid`. A MUID is drawn from an OS random
     /// source by whoever owns the device; this type only checks one.
     #[derive(Eq, Hash, PartialOrd, Ord)]
-    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-    #[cfg_attr(feature = "serde", serde(try_from = "u32", into = "u32"))]
     Muid(u32), NotAMuid, "a MUID (past 28 bits, reserved, or broadcast)",
     |raw| raw < 0x0FFF_FF00
 }
@@ -386,15 +402,14 @@ impl CiHeader {
     }
 }
 
-/// `payload` as SysEx7 packets on `group`. Every byte a CI message encodes is
-/// 7-bit: the fields are `U7`, the MUIDs and sizes are cut to 7-bit bytes and a
-/// text is ASCII.
-fn sysex7_packets(group: MidiGroup, payload: &[u8]) -> std::vec::IntoIter<Ump> {
-    Sysex7Packets::from_payload(group, payload)
-        .into_iter()
-        .flatten()
+/// `payload` as SysEx7 packets on `group`, or the first byte that is not 7-bit.
+/// Every byte a CI message encodes is 7-bit (the fields are `U7`, the MUIDs
+/// and sizes are cut to 7-bit bytes and a text is ASCII), so a refusal is a
+/// codec fault, and it is returned rather than sent short.
+fn sysex7_packets(group: MidiGroup, payload: &[u8]) -> Result<std::vec::IntoIter<Ump>, SysexError> {
+    Ok(Sysex7Packets::from_payload(group, payload)?
         .collect::<Vec<_>>()
-        .into_iter()
+        .into_iter())
 }
 
 /// Appends the preamble (§5.2.1): `7E device_id 0D sub_id2 version`, the Source
@@ -875,7 +890,12 @@ impl CiMessage {
     /// `Complete`, or a `Start`, `Continue`s and an `End`. It allocates once,
     /// for the payload; a MIDI 1.0 byte stream frames
     /// [`encode`](Self::encode)'s bytes with `tutti_ump::frame` instead.
-    pub fn packets(&self, group: MidiGroup) -> std::vec::IntoIter<Ump> {
+    ///
+    /// # Errors
+    ///
+    /// [`SysexError::NotSevenBit`] when a byte of the encoding is 128 or more,
+    /// which no message of this type encodes: a message is never sent short.
+    pub fn packets(&self, group: MidiGroup) -> Result<std::vec::IntoIter<Ump>, SysexError> {
         sysex7_packets(group, &self.encode())
     }
 
@@ -1196,19 +1216,19 @@ pub enum UnreadReason {
 }
 
 impl UnreadReason {
-    /// The NAK Status Code Table 16 gives this: `0x02` (version not
+    /// The NAK status Table 16 gives this: `0x02` (version not
     /// supported) for a version the Device cannot read (§5.3 names reserved
     /// bits; version 0 is tutti's reading), `0x01` (message not
     /// supported), else `0x41` (message malformed).
     #[must_use]
-    pub(crate) fn nak_status(self) -> U7 {
+    pub(crate) fn nak_status(self) -> NakStatus {
         match self {
-            Self::ReservedVersionBits | Self::VersionZero => Nak::STATUS_VERSION_NOT_SUPPORTED,
-            Self::UnsupportedMessage => Nak::STATUS_MESSAGE_NOT_SUPPORTED,
+            Self::ReservedVersionBits | Self::VersionZero => NakStatus::VersionNotSupported,
+            Self::UnsupportedMessage => NakStatus::MessageNotSupported,
             // §5.8: a device that cannot provide the information for the given
             // Status replies with a NAK: the generic one, which is not retried.
-            Self::ReservedStatus => Nak::STATUS_NAK,
-            _ => Nak::STATUS_MALFORMED,
+            Self::ReservedStatus => NakStatus::Nak,
+            _ => NakStatus::Malformed,
         }
     }
 }

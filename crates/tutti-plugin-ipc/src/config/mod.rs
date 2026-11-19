@@ -18,4 +18,4 @@ pub mod catalog;
 
 pub(crate) use bridge::unique_name;
 pub use bridge::{BridgeConfig, RandomSourceError, unique_socket_path};
-pub use catalog::{AudioConfig, CatalogConfig, NO_SCAN_DIRS};
+pub use catalog::{AudioConfig, CatalogConfig};

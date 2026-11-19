@@ -70,14 +70,12 @@ pub(super) const ALLOW: &[(&str, usize, &str)] = &[
         1,
         PLUGINS,
     ),
-    ("crates/tutti-plugin-ipc/src/config/bridge.rs", 2, PLUGINS),
     ("crates/tutti-plugin-ipc/src/ipc/tests.rs", 4, PLUGINS),
     (
         "crates/tutti-plugin-ipc/src/subprocess/launch.rs",
         8,
         PLUGINS,
     ),
-    ("crates/tutti-plugin-probe/src/lib.rs", 3, PLUGINS),
     ("crates/tutti-plugin-types/src/bundle.rs", 13, PLUGINS),
     ("crates/tutti-plugin-types/src/editor.rs", 2, PLUGINS),
     (
@@ -187,7 +185,7 @@ fn mentions_platform(text: &str) -> bool {
 pub(super) fn owner(krate: &str) -> Option<&'static str> {
     const CORE_CRATES: &[&str] = &[
         "tutti-units",
-        "tutti-types",
+        "tutti-music",
         "tutti-rt",
         "tutti-graph",
         "tutti-engine",

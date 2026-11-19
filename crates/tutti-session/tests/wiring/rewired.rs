@@ -3,13 +3,13 @@
 //! last. A commit that moves nothing reports nothing, and a node it leaves
 //! alone is not listed.
 
+use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_graph::{
     Bus, BusRole, Buses, Cx, ForkByClone, Io, Node, NodeKey, Prepare, Shape, Status, Wired,
     WiredMask,
 };
 use tutti_nodes::testing::Const;
 use tutti_session::{OutPort, Root, Session, SessionEvent};
-use tutti_types::{BusTopology, ChannelLayout};
 
 /// A stereo main bus and a mono aux bus on each side: ports 0 and 1 are the
 /// main bus, port 2 the aux.

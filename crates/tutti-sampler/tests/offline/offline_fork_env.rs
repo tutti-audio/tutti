@@ -17,8 +17,9 @@ use tutti_buffers::Mono;
 use tutti_sampler::VoiceWindow;
 
 use std::sync::Arc;
-use tutti_types::MaxBlock;
+use tutti_buffers::MaxBlock;
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::Wave;
 use tutti_graph::NodeKey;
 use tutti_graph::{
@@ -27,7 +28,6 @@ use tutti_graph::{
 };
 use tutti_graph::{OutPort, Source};
 use tutti_sampler::{MemorySource, Playback, SlotId, Voice, VoiceNode, VoicePool, VoiceSource};
-use tutti_types::ChannelLayout;
 use tutti_units::{Beat, Bpm, SampleRate, Samples};
 
 const RATE: SampleRate = SampleRate::SR_44K1;
@@ -43,11 +43,11 @@ fn ramp_wave() -> Arc<Wave> {
     ))
 }
 
-fn placed() -> MemorySource {
+fn placed() -> MemorySource<f32> {
     MemorySource::placed(ramp_wave(), VoiceWindow::from(Beat::new(0.0))).expect("a placeable wave")
 }
 
-fn voice() -> Voice {
+fn voice() -> Voice<f32> {
     Voice {
         source: VoiceSource::Memory(placed()),
         play: Playback::default(),

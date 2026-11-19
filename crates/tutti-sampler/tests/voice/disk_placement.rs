@@ -20,16 +20,16 @@ use tutti_sampler::VoiceWindow;
 use tutti_sampler::testing::loop_frames;
 
 use std::path::Path;
-use tutti_types::MaxBlock;
+use tutti_buffers::MaxBlock;
 
 use tutti_buffers::FoldError;
+use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_graph::contract;
 use tutti_sampler::testing::{MockTransport, settle};
 use tutti_sampler::{
     ByHand, Direction, DiskStreamer, DiskVoice, Loop, OpenError, PlaceError, Placement, Stream,
     StreamReader,
 };
-use tutti_types::{ChannelLayout, ChannelTopology};
 use tutti_units::{Beat, Bpm, SampleRate};
 
 const SR: f64 = 48_000.0;
@@ -82,11 +82,11 @@ fn open(
     path: &Path,
     width: Option<ChannelLayout>,
 ) -> (
-    DiskStreamer<ByHand>,
-    Result<(Stream, StreamReader), OpenError>,
+    DiskStreamer<ByHand<f32>, f32>,
+    Result<(Stream<f32>, StreamReader<f32>), OpenError>,
 ) {
     let mut streamer =
-        DiskStreamer::manual(SampleRate::of(SR), Default::default()).expect("builds");
+        DiskStreamer::by_hand(SampleRate::of(SR), Default::default()).expect("builds");
     let opening = match width {
         Some(width) => streamer.open_into(path, Placement::HEAD, width),
         None => streamer.open(path, Placement::HEAD),
@@ -104,8 +104,8 @@ fn open(
 /// A hand-stepped streamer and the handle of the stream it streams: both are
 /// held while the voice plays (dropping the handle ends the stream).
 struct Rig {
-    streamer: DiskStreamer<ByHand>,
-    stream: Stream,
+    streamer: DiskStreamer<ByHand<f32>, f32>,
+    stream: Stream<f32>,
 }
 
 /// A file written to a temp dir and streamed into a frame of `frame` channels
@@ -114,7 +114,7 @@ fn stream_into(
     channels: u16,
     mask: u32,
     frame: Option<ChannelLayout>,
-) -> (tempfile::TempDir, Rig, StreamReader) {
+) -> (tempfile::TempDir, Rig, StreamReader<f32>) {
     let dir = tempfile::tempdir().expect("a temp dir");
     let path = dir.path().join("placed.wav");
     write_wav(&path, channels, mask);
@@ -124,18 +124,18 @@ fn stream_into(
 }
 
 /// A file written to a temp dir and streamed at its own width.
-fn stream(channels: u16, mask: u32) -> (tempfile::TempDir, Rig, StreamReader) {
+fn stream(channels: u16, mask: u32) -> (tempfile::TempDir, Rig, StreamReader<f32>) {
     stream_into(channels, mask, None)
 }
 
 /// The voice that plays `reader`, placed at beat 0 for the file's length.
-fn voice_of(reader: StreamReader) -> DiskVoice {
+fn voice_of(reader: StreamReader<f32>) -> DiskVoice<f32> {
     DiskVoice::from_reader(reader, VoiceWindow::from(Beat::new(0.0)))
 }
 
 /// The last block of a few rendered from `voice`, planar: the ring is full and
 /// the start-up is over.
-fn settled_block(voice: DiskVoice) -> Vec<Vec<f32>> {
+fn settled_block(voice: DiskVoice<f32>) -> Vec<Vec<f32>> {
     let mut voice = contract::prepared(voice, SampleRate::of(SR), BLOCK);
     let clock = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
     let mut last = Vec::new();
@@ -170,7 +170,7 @@ fn a_wav_order_seven_one_is_permuted_to_the_engines_order() {
     let (_dir, _streamer, reader) = stream(8, WAV_7_1);
     let voice = voice_of(reader);
     let file = {
-        use tutti_types::Speaker::*;
+        use tutti_buffers::Speaker::*;
         ChannelTopology::new([
             FrontLeft,
             FrontRight,
@@ -286,12 +286,12 @@ struct Fixture {
     mask: u32,
     /// The decoder's names for the file's channels, pinned so a change in how
     /// a mask-less file is named fails here and not as a wrong figure.
-    speakers: &'static [tutti_types::Speaker],
+    speakers: &'static [tutti_buffers::Speaker],
     want: [f32; 8],
 }
 
 fn fixtures() -> [Fixture; 3] {
-    use tutti_types::Speaker::*;
+    use tutti_buffers::Speaker::*;
     let m = <f32 as tutti_buffers::Float>::MINUS_3_DB;
     let v = value;
     [
@@ -374,7 +374,7 @@ fn fixtures() -> [Fixture; 3] {
 }
 
 /// A file with a Fixture's shape, streamed.
-fn stream_fixture(f: &Fixture) -> (tempfile::TempDir, Rig, StreamReader) {
+fn stream_fixture(f: &Fixture) -> (tempfile::TempDir, Rig, StreamReader<f32>) {
     let (dir, rig, reader) = stream_into(f.channels, f.mask, Some(ChannelLayout::from(8u16)));
     assert_eq!(
         tutti_codec::FileIn::<f32>::open(dir.path().join("placed.wav"))
@@ -433,7 +433,7 @@ fn render(node: &mut dyn tutti_graph::Node, clock: &MockTransport, n: usize) -> 
 }
 
 /// Fork `voice` as an export does, not yet prepared.
-fn fork_unprepared(voice: &DiskVoice) -> Box<dyn tutti_graph::Node> {
+fn fork_unprepared(voice: &DiskVoice<f32>) -> Box<dyn tutti_graph::Node> {
     use tutti_graph::{ForkMode, IntoNode};
     voice
         .clone()
@@ -468,12 +468,12 @@ impl tutti_graph::Node for Boxed {
 }
 
 /// [`fork_unprepared`], prepared.
-fn fork(voice: &DiskVoice) -> Box<dyn tutti_graph::Node> {
+fn fork(voice: &DiskVoice<f32>) -> Box<dyn tutti_graph::Node> {
     let mut node = fork_unprepared(voice);
     node.prepare(
         &tutti_graph::Prepare::new(
             SampleRate::of(SR),
-            tutti_types::MaxBlock::of(tutti_units::Samples(BLOCK)),
+            tutti_buffers::MaxBlock::of(tutti_units::Samples(BLOCK)),
         )
         .with_render_mode(tutti_graph::RenderMode::Offline),
     );
@@ -546,7 +546,7 @@ fn a_fork_placed_read_is_allocation_free() {
                 &mut *direct.node,
                 &tutti_graph::Prepare::new(
                     SampleRate::of(SR),
-                    tutti_types::MaxBlock::of(tutti_units::Samples(BLOCK)),
+                    tutti_buffers::MaxBlock::of(tutti_units::Samples(BLOCK)),
                 )
                 .with_render_mode(tutti_graph::RenderMode::Offline),
             );

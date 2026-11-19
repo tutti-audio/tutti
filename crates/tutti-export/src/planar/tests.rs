@@ -1,7 +1,7 @@
 use super::append;
 use crate::Error;
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::{BufferError, Interleaved};
-use tutti_types::ChannelLayout;
 
 /// A block of another width than the planes is refused, and no plane grows.
 #[test]

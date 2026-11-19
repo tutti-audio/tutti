@@ -27,7 +27,7 @@ use std::time::Duration;
 use tutti_graph::UmpAt;
 
 use tutti_graph::Offset;
-use tutti_midi_device::TICK_HZ;
+use tutti_midi_device::TICK_RATE;
 use tutti_ump::{Message, Ump, Utility};
 use tutti_units::{Frame, SampleRate, Samples, Seconds};
 
@@ -49,7 +49,7 @@ impl JrClock {
     #[inline]
     pub(crate) fn ticks_at(&self, frame: Frame) -> u16 {
         // ticks = frames * (JR_ticks/sec) / (frames/sec)
-        let ticks = (frame.get() as f64) * f64::from(TICK_HZ) / self.sample_rate.get();
+        let ticks = (frame.get() as f64) * TICK_RATE.get() / self.sample_rate.get();
         (ticks as u64 & 0xFFFF) as u16
     }
 }

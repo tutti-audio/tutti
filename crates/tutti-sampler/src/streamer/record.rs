@@ -48,7 +48,7 @@ pub(super) enum Phase {
 /// One open stream: everything the streamer holds for it.
 ///
 /// Dropping it ends the stream (module docs).
-pub(super) struct Record<F: RingFloat = f32> {
+pub(super) struct Record<F: RingFloat> {
     phase: Phase,
     /// The ring's writer, the decoder and the resident wave.
     pub(super) out: RegionOut<F>,
@@ -70,7 +70,7 @@ pub(super) struct Record<F: RingFloat = f32> {
     /// How full the ring was at the last refill, as a fraction of its
     /// capacity: what the loop asks whether the stream is healthy by. A ring
     /// occupancy, not audio, so no sample format or unit applies.
-    fill: f32,
+    fill: f64,
     /// Its work panicked: faulted, and removed at the end of the cycle
     /// ([`Streams::reap`]).
     dead: bool,
@@ -155,7 +155,7 @@ impl<F: RingFloat> Record<F> {
     }
 
     /// How full the ring was at the last refill (0 before the first).
-    pub(super) fn fill(&self) -> f32 {
+    pub(super) fn fill(&self) -> f64 {
         self.fill
     }
 
@@ -182,7 +182,7 @@ impl<F: RingFloat> Drop for Record<F> {
 }
 
 /// A command as the pure step sees it: data, with the file work already done.
-pub(super) enum Cmd<F: RingFloat = f32> {
+pub(super) enum Cmd<F: RingFloat> {
     /// A stream the driver has built, in [`Phase::Opening`].
     Open(Box<Record<F>>),
     /// The open's reader reached its caller: the stream is [`Phase::Live`].
@@ -217,7 +217,7 @@ pub(super) enum Effect {
 /// `&mut Record` (`par_iter_mut` needs `Send`, not `Sync`), a session has tens
 /// of streams, and a command finds its stream by a scan of ids that are
 /// minted once and never reused.
-pub(super) struct Streams<F: RingFloat = f32> {
+pub(super) struct Streams<F: RingFloat> {
     records: Vec<Record<F>>,
     /// What the last step asked of the driver.
     effects: Vec<Effect>,

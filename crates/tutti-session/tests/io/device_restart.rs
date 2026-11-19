@@ -8,6 +8,7 @@
 //! The plugin half is `plugin_latency.rs`'s, the MIDI clock's is
 //! `device_midi_clock.rs`'s.
 
+use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_engine::{ManualStream, ManualStreamDriver, OutputSpec};
 use tutti_graph::NodeKey;
 use tutti_graph::{FadeLaw, ForkByClone};
@@ -15,7 +16,6 @@ use tutti_nodes::testing::{Osc, Through};
 use tutti_nodes::{LimiterControls, LimiterNode};
 use tutti_session::{Crossfade, Error, InPort, LiveSession, OutPort, Root, Session};
 use tutti_transport::MotionEvent;
-use tutti_types::{ChannelLayout, MaxBlock};
 use tutti_units::{At, Db, Frame, Hz, SampleRate, Samples, Seconds};
 
 const OLD: f64 = 44_100.0;
@@ -342,7 +342,7 @@ fn a_restart_after_a_failed_hook_recovers_on_the_old_device() {
 /// stream is restarted onto it.
 #[test]
 fn a_restart_the_hook_refuses_leaves_the_device_placement_as_it_was() {
-    use tutti_types::{Bed, Placement};
+    use tutti_buffers::{Bed, Placement};
     let (mut s, _old, _osc, lim) = engine();
     let before = s.output_device().expect("an engine renders it");
     assert_eq!(before.placement, Placement::Assumed);

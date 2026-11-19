@@ -16,6 +16,7 @@
 //! - the plugin's queries of the host (vendor strings, latencies) and its editor's edits;
 //! - `effEditIdle` reaches an open editor;
 //! - editor keys reach an open editor, and its answer is reported;
+//! - a speaker arrangement is proposed to a suspended plugin and read back;
 //! - a block longer than the announced maximum is split before the plugin.
 
 use std::sync::{Mutex, MutexGuard};
@@ -24,6 +25,7 @@ use tutti_graph::UmpAt;
 use tutti_rt::LockExt;
 
 use keyboard_types::{Code, Key, KeyState, Modifiers, NamedKey};
+use tutti_buffers::{Bed, ChannelTopology, Speaker};
 use tutti_graph::Offset;
 use tutti_plugin_types::{
     ContentScale, Control, Controller, EditorWindow, KeyEvent, KeyUse, ModifierConvention,
@@ -32,7 +34,10 @@ use tutti_plugin_types::{
 use tutti_ump::MidiChannel;
 use tutti_units::Normalized;
 use tutti_units::ParamId;
-use tutti_vst2_host::{Samples, TimeSignature, TransportInfo, Vst2Loaded, Vst2ProcessContext};
+use tutti_vst2_host::{
+    ArrangementError, Negotiation, Samples, TimeSignature, TransportInfo, Vst2Loaded,
+    Vst2ProcessContext,
+};
 use tutti_vst2_test_plugin::ProcessCapture;
 
 #[path = "support/active.rs"]
@@ -65,6 +70,8 @@ const PROBE_ENV_KEYS: &[&str] = &[
     "TUTTI_VST2_PROBE_EDITOR",
     "TUTTI_VST2_PROBE_OPEN_INPUTS",
     "TUTTI_VST2_PROBE_OPEN_PARAMS",
+    "TUTTI_VST2_PROBE_INPUTS",
+    "TUTTI_VST2_PROBE_OUTPUTS",
 ];
 
 fn clear_probe_env() {
@@ -729,6 +736,259 @@ fn editor_keys_reach_an_open_editor_and_its_answer_is_reported() {
 
     instance.loaded_mut().close_editor(main_thread());
     set_key_consumed(false);
+}
+
+// ---------------------------------------------------------------------------
+// effSetSpeakerArrangement / effGetSpeakerArrangement
+// ---------------------------------------------------------------------------
+
+/// How the probe answers a proposal: its `ArrangementMode` as a number.
+const ARRANGEMENT_ACCEPT: i32 = 0;
+const ARRANGEMENT_REFUSE: i32 = 1;
+const ARRANGEMENT_ACCEPT_BUT_KEEP: i32 = 2;
+const ARRANGEMENT_ACCEPT_UNREADABLE: i32 = 3;
+
+fn set_arrangement_mode(mode: i32) {
+    probe_call(b"tutti_vst2_probe_set_arrangement_mode\0", |sym| {
+        // SAFETY: the probe exports this symbol with exactly this signature.
+        let f: extern "C" fn(i32) = unsafe { std::mem::transmute(*sym) };
+        f(mode);
+    });
+}
+
+/// The probe loaded and left suspended, with `inputs` and `outputs` pins.
+fn load_suspended(inputs: &str, outputs: &str) -> Vst2Loaded {
+    reset_probe();
+    clear_probe_env();
+    // SAFETY: callers hold `PROBE_LOCK`.
+    unsafe {
+        std::env::set_var("TUTTI_VST2_PROBE_INPUTS", inputs);
+        std::env::set_var("TUTTI_VST2_PROBE_OUTPUTS", outputs);
+    }
+    let loaded = Vst2Loaded::load(
+        main_thread(),
+        &tutti_fixtures::detached_work(),
+        tutti_fixtures::vst2_probe(),
+    )
+    .unwrap_or_else(|e| panic!("the probe must load: {e:?}"));
+    clear_probe_env();
+    loaded
+}
+
+fn swapped() -> ChannelTopology {
+    ChannelTopology::new([Speaker::FrontRight, Speaker::FrontLeft]).expect("no repeat")
+}
+
+/// A suspended plugin is proposed the input in `value` and the output in `ptr`, as the SDK's
+/// arrangements: mono in and 5.1 out reach the plugin as `kSpeakerArrMono` with `kSpeakerM`
+/// and `kSpeakerArr51` with `L R C Lfe Ls Rs` (numbers 1 to 6), before any
+/// `effMainsChanged`, and the buses show what the plugin holds.
+#[test]
+fn a_proposal_reaches_a_suspended_plugin_in_the_sdks_arrangement() {
+    let _guard = lock_probe();
+    let mut loaded = load_suspended("1", "6");
+
+    let verdict = loaded
+        .negotiate_arrangement(
+            main_thread(),
+            &Bed::Mono.topology(),
+            &Bed::Surround51.topology(),
+        )
+        .expect("both layouts map");
+    assert_eq!(verdict, Negotiation::Accepted);
+
+    let cap = read_capture();
+    assert_eq!(cap.arrangement_sets, 1);
+    assert!(
+        !cap.arrangement_while_resumed,
+        "set while the plugin is suspended"
+    );
+    assert_eq!(cap.arrangement_gets, 1, "read back once");
+    assert_eq!(
+        (cap.arrangement_input.kind, cap.arrangement_input.channels),
+        (0, 1),
+        "the input is kSpeakerArrMono"
+    );
+    assert_eq!(cap.arrangement_input.speakers[0], 0, "kSpeakerM");
+    assert_eq!(
+        (cap.arrangement_output.kind, cap.arrangement_output.channels),
+        (15, 6),
+        "the output is kSpeakerArr51"
+    );
+    assert_eq!(cap.arrangement_output.speakers[..6], [1, 2, 3, 4, 5, 6]);
+
+    let wiring = loaded.wiring(main_thread());
+    assert_eq!(wiring.inputs[0].placement(), Some(&Bed::Mono.topology()));
+    assert_eq!(
+        wiring.outputs[0].placement(),
+        Some(&Bed::Surround51.topology())
+    );
+}
+
+/// A plugin that agrees but cannot be read back is `Unconfirmed`, not `Accepted`: the host
+/// asked (`effGetSpeakerArrangement` was dispatched) and observed nothing, and the buses
+/// report the proposal.
+#[test]
+fn an_agreeing_plugin_that_cannot_be_read_back_is_unconfirmed() {
+    let _guard = lock_probe();
+    let mut loaded = load_suspended("2", "2");
+    set_arrangement_mode(ARRANGEMENT_ACCEPT_UNREADABLE);
+
+    let verdict = loaded.negotiate_arrangement(main_thread(), &swapped(), &Bed::Stereo.topology());
+    set_arrangement_mode(ARRANGEMENT_ACCEPT);
+
+    assert_eq!(verdict, Ok(Negotiation::Unconfirmed));
+    assert_eq!(read_capture().arrangement_gets, 1, "the read was tried");
+    let wiring = loaded.wiring(main_thread());
+    assert_eq!(wiring.inputs[0].placement(), Some(&swapped()));
+    assert_eq!(wiring.outputs[0].placement(), Some(&Bed::Stereo.topology()));
+}
+
+/// The proposal precedes activation: a negotiated plugin that is then activated saw the set
+/// while suspended, and `effMainsChanged(1)` only afterwards (one resume, after the set).
+#[test]
+fn a_negotiated_plugin_is_activated_after_the_proposal() {
+    let _guard = lock_probe();
+    let mut loaded = load_suspended("2", "2");
+    loaded
+        .negotiate_arrangement(
+            main_thread(),
+            &Bed::Stereo.topology(),
+            &Bed::Stereo.topology(),
+        )
+        .expect("both layouts map");
+    assert_eq!(read_capture().resume_count, 0, "suspended after the set");
+
+    let _active = Active::activate(
+        loaded,
+        active::prepare_for(SAMPLE_RATE, BLOCK, tutti_buffers::FloatWidth::F32),
+    )
+    .unwrap_or_else(|(_, e)| panic!("the probe activates: {e:?}"));
+
+    let cap = read_capture();
+    assert_eq!(cap.arrangement_sets, 1);
+    assert!(
+        !cap.arrangement_while_resumed,
+        "the set saw a suspended plugin"
+    );
+    assert_eq!(cap.resume_count, 1, "and the resume came after it");
+}
+
+/// A plugin that returns 0 keeps its own layout: the verdict is a refusal, and the buses show
+/// the arrangement it kept (stereo `L R`), not the swapped pair that was proposed.
+#[test]
+fn a_refusing_plugin_is_reported_and_the_buses_show_what_it_kept() {
+    let _guard = lock_probe();
+    let mut loaded = load_suspended("2", "2");
+    set_arrangement_mode(ARRANGEMENT_REFUSE);
+
+    let verdict = loaded.negotiate_arrangement(main_thread(), &swapped(), &swapped());
+    set_arrangement_mode(ARRANGEMENT_ACCEPT);
+
+    assert_eq!(verdict, Ok(Negotiation::Refused));
+    let cap = read_capture();
+    assert_eq!(
+        cap.arrangement_input.kind, -2,
+        "the swapped pair is kSpeakerArrUserDefined"
+    );
+    assert_eq!(cap.arrangement_input.speakers[..2], [2, 1]);
+    let wiring = loaded.wiring(main_thread());
+    assert_eq!(wiring.inputs[0].placement(), Some(&Bed::Stereo.topology()));
+    assert_eq!(wiring.outputs[0].placement(), Some(&Bed::Stereo.topology()));
+}
+
+/// A plugin that returns 1 and reads back something other than the proposal has not kept it:
+/// the verdict is a refusal, found by the read-back and not by the return value.
+#[test]
+fn a_plugin_that_reads_back_another_layout_is_reported_as_refusing() {
+    let _guard = lock_probe();
+    let mut loaded = load_suspended("2", "2");
+    set_arrangement_mode(ARRANGEMENT_ACCEPT_BUT_KEEP);
+
+    let verdict = loaded.negotiate_arrangement(main_thread(), &swapped(), &Bed::Stereo.topology());
+    set_arrangement_mode(ARRANGEMENT_ACCEPT);
+
+    assert_eq!(verdict, Ok(Negotiation::Refused));
+    let wiring = loaded.wiring(main_thread());
+    assert_eq!(
+        wiring.inputs[0].placement(),
+        Some(&Bed::Stereo.topology()),
+        "the input holds what the plugin kept"
+    );
+}
+
+/// A kept arrangement of another width than the pins is not a placement of the bus.
+#[test]
+fn a_kept_arrangement_of_another_width_places_nothing() {
+    let _guard = lock_probe();
+    let mut loaded = load_suspended("2", "2");
+
+    let verdict = loaded.negotiate_arrangement(
+        main_thread(),
+        &Bed::Mono.topology(),
+        &Bed::Stereo.topology(),
+    );
+
+    assert_eq!(verdict, Ok(Negotiation::Accepted));
+    let wiring = loaded.wiring(main_thread());
+    assert_eq!(
+        wiring.inputs[0].channels.count(),
+        2,
+        "the pins decide the width"
+    );
+    assert_eq!(wiring.inputs[0].placement(), None);
+    assert_eq!(wiring.outputs[0].placement(), Some(&Bed::Stereo.topology()));
+}
+
+/// Before a negotiation no bus is placed: nothing has been asked of the plugin.
+#[test]
+fn a_bus_is_unplaced_until_a_negotiation() {
+    let _guard = lock_probe();
+    let loaded = load_suspended("2", "2");
+
+    let wiring = loaded.wiring(main_thread());
+
+    assert_eq!(wiring.inputs[0].placement(), None);
+    assert_eq!(wiring.outputs[0].placement(), None);
+    assert_eq!(read_capture().arrangement_gets, 0, "and nothing was read");
+}
+
+/// A layout VST 2 has no speaker for is refused with a named error and nothing is sent.
+#[test]
+fn an_unmapped_layout_is_refused_and_nothing_is_sent() {
+    let _guard = lock_probe();
+    let mut loaded = load_suspended("2", "2");
+    let unnamed =
+        ChannelTopology::new([Speaker::FrontLeft, Speaker::Unknown(9)]).expect("no repeat");
+
+    let verdict = loaded.negotiate_arrangement(main_thread(), &unnamed, &Bed::Stereo.topology());
+
+    assert_eq!(
+        verdict,
+        Err(ArrangementError::UnmappedSpeaker(Speaker::Unknown(9)))
+    );
+    assert_eq!(read_capture().arrangement_sets, 0);
+    assert_eq!(
+        loaded.wiring(main_thread()).inputs[0].placement(),
+        None,
+        "no negotiation, no placement"
+    );
+}
+
+/// A resumed plugin is not sent an arrangement.
+#[test]
+fn a_resumed_plugin_is_refused_the_proposal() {
+    let _guard = lock_probe();
+    let mut instance = load(512);
+
+    let verdict = instance.loaded_mut().negotiate_arrangement(
+        main_thread(),
+        &Bed::Stereo.topology(),
+        &Bed::Stereo.topology(),
+    );
+
+    assert_eq!(verdict, Err(ArrangementError::Resumed));
+    assert_eq!(read_capture().arrangement_sets, 0);
 }
 
 // ---------------------------------------------------------------------------

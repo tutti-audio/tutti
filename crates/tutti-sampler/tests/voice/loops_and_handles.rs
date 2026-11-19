@@ -64,10 +64,16 @@ fn rolling() -> Arc<MockTransport> {
 }
 
 /// A hand-driven streamer, with the ramp's stream open and primed.
-fn streaming(dir: &Path) -> (DiskStreamer<ByHand>, Stream, tutti_sampler::StreamReader) {
+fn streaming(
+    dir: &Path,
+) -> (
+    DiskStreamer<ByHand<f32>, f32>,
+    Stream<f32>,
+    tutti_sampler::StreamReader<f32>,
+) {
     let path = dir.join("ramp.wav");
     write_ramp(&path);
-    let mut streamer = DiskStreamer::manual(SampleRate::of(SR), DiskStreamerConfig::default())
+    let mut streamer = DiskStreamer::by_hand(SampleRate::of(SR), DiskStreamerConfig::default())
         .expect("streamer builds");
     let opening = streamer.open(&path, Placement::HEAD);
     let (stream, reader) = settle(&mut streamer, opening).expect("the file opens");
@@ -79,14 +85,14 @@ fn window() -> VoiceWindow {
 }
 
 /// A memory voice node over the ramp, and its handle.
-fn memory_node() -> (VoiceNode, VoiceNodeHandle) {
+fn memory_node() -> (VoiceNode<f32>, VoiceNodeHandle<f32>) {
     let source = MemorySource::placed(ramp(), window()).expect("a placeable wave");
     VoiceNode::with_channels(
         tutti_sampler::Voice {
             source: VoiceSource::Memory(source),
             play: Playback::default(),
         },
-        tutti_types::ChannelLayout::MONO,
+        tutti_buffers::ChannelLayout::MONO,
     )
     .with_handle()
 }
@@ -166,11 +172,11 @@ fn a_looped_disk_voice_repeats_the_span() {
 }
 
 /// `frames` of `node`, prepared, from beat 0.
-fn render_with(node: &mut VoiceNode, frames: usize) -> Vec<f32> {
+fn render_with(node: &mut VoiceNode<f32>, frames: usize) -> Vec<f32> {
     use tutti_graph::Node;
     node.prepare(&tutti_graph::Prepare::new(
         RATE,
-        tutti_types::MaxBlock::of(Samples::new(BLOCK)),
+        tutti_buffers::MaxBlock::of(Samples::new(BLOCK)),
     ));
     play(node, &rolling(), RATE, frames, BLOCK).swap_remove(0)
 }
@@ -186,7 +192,7 @@ fn a_disk_voice_added_to_a_pool_keeps_its_loop_and_direction() {
         let dir = tempfile::tempdir().expect("a temp dir");
         let (mut streamer, stream, reader) = streaming(dir.path());
         let voice = DiskVoice::from_reader(reader, window());
-        let (pool, handle) = VoicePool::with_channels(tutti_types::ChannelLayout::MONO)
+        let (pool, handle) = VoicePool::with_channels(tutti_buffers::ChannelLayout::MONO)
             .expect("mono is a width")
             .with_handle();
         let play = Playback {
@@ -223,7 +229,7 @@ fn a_disk_voice_added_to_a_pool_keeps_its_loop_and_direction() {
 
 /// `FRAMES` of `pool` from beat 0, the streamer stepped between blocks as a
 /// running one is, so a stream that turns or loops has its ring refilled.
-fn play_pool(pool: &mut VoicePool, streamer: &mut DiskStreamer<ByHand>) -> Vec<f32> {
+fn play_pool(pool: &mut VoicePool<f32>, streamer: &mut DiskStreamer<ByHand<f32>, f32>) -> Vec<f32> {
     let t = rolling();
     let mut out = Vec::new();
     while out.len() < FRAMES {

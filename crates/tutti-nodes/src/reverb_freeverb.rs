@@ -3,10 +3,10 @@
 //! [`FreeverbBank`] is the combs and all-passes over buffers views (the lines, the glides);
 //! this file holds the kernel that aims it, the cells and how the graph reaches them.
 
+use tutti_buffers::{BusTopology, MaxBlock};
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{FreeverbBank, FreeverbControls, FreeverbGlides, Lerp};
 use tutti_graph::{Bus, BusRole, Buses, Cost, MAX_NODE_TAIL, Shape};
-use tutti_types::{BusTopology, MaxBlock};
 use tutti_units::{Mix, SampleRate, Tail};
 
 use crate::kernel::{ControlLanes, Kernel, KernelNode};
@@ -211,8 +211,8 @@ mod tests {
     // format, so their tolerances are `f32`'s.
     use super::*;
     use crate::test_support::drive_kernel;
+    use tutti_buffers::MaxBlock;
     use tutti_fixtures::signal::{assert_close_f64, wide_signal};
-    use tutti_types::MaxBlock;
     use tutti_units::Samples;
 
     /// An `f64` block through a `FreeverbKernel::<f64>` at 44.1 kHz: the unit impulse of the

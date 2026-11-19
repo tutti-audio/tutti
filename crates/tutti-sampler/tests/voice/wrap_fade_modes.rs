@@ -16,7 +16,7 @@ use tutti_buffers::Interleaved;
 use tutti_sampler::VoiceWindow;
 
 use std::sync::Arc;
-use tutti_types::MaxBlock;
+use tutti_buffers::MaxBlock;
 
 use tutti_graph::NodeKey;
 use tutti_graph::{Editor, Executor, Prepare, TransportPosition, WorkerPool};

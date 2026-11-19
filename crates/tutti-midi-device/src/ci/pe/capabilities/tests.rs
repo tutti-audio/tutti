@@ -214,7 +214,6 @@ fn an_unused_sub_id2_is_unsupported_and_a_broadcast_pe_message_is_misaddressed()
     ));
 }
 
-#[cfg(feature = "serde")]
 #[test]
 fn the_request_count_is_a_range_checked_value() {
     use tutti_fixtures::{RangeContract, check_range_contract};

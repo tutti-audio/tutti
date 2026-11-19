@@ -34,7 +34,7 @@
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use tutti_types::MaxBlock;
+use tutti_buffers::MaxBlock;
 
 mod support;
 

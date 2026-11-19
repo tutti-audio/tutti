@@ -7,11 +7,9 @@
 use tutti_buffers::Float;
 use tutti_midi_device::DeviceInfo;
 use tutti_midi_device::MidiIdentity;
-use tutti_midi_hardware::Presented;
-use tutti_midi_runtime::MidiInputPorts;
 
+use crate::Policy;
 use crate::midi::Midi;
-use crate::{Clock, Policy, Session};
 
 /// Who the session is on the wire: the identity it presents to every MIDI
 /// device with an input and an output, set through
@@ -95,28 +93,6 @@ pub(crate) fn policy_cell(attached: bool) -> std::sync::Arc<crate::value::Cell<M
         }
         Ok(())
     })
-}
-
-impl<K: crate::AppKey, C: Clock> Session<K, C> {
-    /// Makes the OS MIDI layer present what the policy says, in
-    /// [`Phase::Poll`](crate::Phase::Poll), before the devices are stepped.
-    pub(crate) fn apply_midi_policy(&mut self) {
-        let groups = self
-            .midi
-            .as_ref()
-            .map_or(MidiInputPorts::FIRST_GROUP, |nodes| nodes.input_ports)
-            .groups();
-        let wanted = self
-            .midi_policy
-            .current()
-            .identity
-            .map(|identity| Presented { identity, groups });
-        if let Some(io) = &mut self.midi_io
-            && io.presented() != wanted
-        {
-            io.present(wanted);
-        }
-    }
 }
 
 impl<F: Float> Midi<'_, F> {

@@ -132,6 +132,8 @@ pub use reassemble::{
     PeReassembler, PeReassemblyError, PeReassemblyLimits, PeReceived, PeRefused, PeStep,
     StreamLimit,
 };
+#[cfg(feature = "serde")]
+pub use resource::SavedStateError;
 pub use resource::{
     ActionError, Arrival, CallError, CallId, CanSet, CcIndex, ChangeKind, ClusterKind,
     ColumnSource, CommonState, ConfirmIcon, ConfirmType, Confirmation, CtrlControl, CtrlKind,
@@ -143,13 +145,13 @@ pub use resource::{
     PeCluster, PeColumn, PeController, PeCtrl, PeCtrlMapEntry, PeCtrlMapList, PeCurrentMode,
     PeData, PeDataError, PeDataFault, PeDeviceInfo, PeExtensions, PeExternalSync, PeJsonSchema,
     PeLink, PeLocalOn, PeMidiMode, PeModeEntry, PeModeList, PeOpaque, PeProgramEntry,
-    PeProgramList, PeResource, PeResourceList, PeState, PeStateEntry, PeStateList, PeText,
+    PeProgramList, PeResource, PeResourceList, PeState, PeStateEntry, PeStateList, PeText, Place,
     Priority, PublishError, RefusedAt, RequestRefused, ResIdUse, ResourceAction, ResourceDefaults,
     ResourceEntry, ResourceEntryBuilder, ResourceEvent, ResourceFailure, ResourceGet,
     ResourceInitiator, ResourceResponder, ResourceSet, ResourceStore, ResourceTarget,
     ResponderAction, ResponderEvent, ResponderSettings, RestoreError, RoleName, SavedState,
     SelectorAction, SetBody, SignificantBits, SimpleAction, StateDevice, StateId, StateRev,
-    StateSize, StateStamp, StepCount, StoreError, TypeHint, UnixSeconds, UpdateKind, Verdict,
+    StateSize, StateStamp, StateVerdict, StepCount, StoreError, TypeHint, UnixSeconds, UpdateKind,
     WrongDevice,
 };
 pub use tree::{PE_JSON_MAX_DEPTH, PeDecimal, PeJson, PeJsonError, PeObject};

@@ -25,8 +25,9 @@ use super::data::PeData;
 use super::fields::PeDataError;
 use super::kind::{CanSet, PeResource};
 use super::request::ResourceTarget;
-use super::state::{Arrival, PeState, RefusedAt, StateDevice, StateId, Verdict};
+use super::state::{Arrival, PeState, RefusedAt, StateDevice, StateId, StateVerdict};
 use super::store::{ResourceStore, StoreError};
+use crate::deadline;
 use crate::{CiHeader, CiMessage, Decoded, Destination, MaxSysexSize, Muid, TimeoutWait};
 
 /// The most resends of a chunk, whether for a NAK or for the lack of an ACK,
@@ -143,13 +144,13 @@ pub enum PublishError {
     #[error("the data is of {data} and the target is {target}")]
     DataOfAnotherResource {
         /// The Resource of the data.
-        data: String,
+        data: PeResource,
         /// The target.
-        target: String,
+        target: PeResource,
     },
     /// The store holds no data to change.
     #[error("{0} has no data to change")]
-    NoData(String),
+    NoData(PeResource),
     /// A change cannot be made to the data.
     #[error(transparent)]
     Change(#[from] PartialError),
@@ -182,7 +183,7 @@ struct Outgoing {
     peer: Muid,
     id: PeRequestId,
     sub: SubscribeId,
-    deadline: Instant,
+    wait: deadline::Pending,
 }
 
 /// What waits for a free Request ID of a peer: one item per Subscription, which
@@ -214,7 +215,7 @@ struct Stream {
     /// How many chunks have been sent: the last is the one waiting for its ACK.
     sent: usize,
     resends: u8,
-    deadline: Instant,
+    wait: deadline::Pending,
 }
 
 /// An inquiry held while its Resource is busy.
@@ -455,8 +456,9 @@ impl ResourceResponder {
     pub fn deadline(&self) -> Option<Instant> {
         self.outgoing
             .iter()
-            .map(|o| o.deadline)
-            .chain(self.streams.iter().map(|s| s.deadline))
+            .map(|o| o.wait)
+            .chain(self.streams.iter().map(|s| s.wait))
+            .map(deadline::Pending::deadline)
             .chain(self.deferred.iter().map(|d| d.renew))
             .chain(self.reassembler.next_deadline())
             .min()
@@ -473,7 +475,7 @@ impl ResourceResponder {
         }
         let (live, expired): (Vec<_>, Vec<_>) = std::mem::take(&mut self.outgoing)
             .into_iter()
-            .partition(|o| o.deadline > now);
+            .partition(|o| !o.wait.expired(now));
         self.outgoing = live;
         for o in expired {
             self.release(o.peer, o.id);
@@ -503,7 +505,7 @@ impl ResourceResponder {
     fn streams_timed_out(&mut self, now: Instant, out: &mut Vec<ResponderAction>) {
         let mut at = 0;
         while at < self.streams.len() {
-            if self.streams[at].deadline > now {
+            if !self.streams[at].wait.expired(now) {
                 at += 1;
                 continue;
             }
@@ -524,7 +526,7 @@ impl ResourceResponder {
     fn resend(&mut self, at: usize, now: Instant, out: &mut Vec<ResponderAction>) {
         let s = &mut self.streams[at];
         s.resends += 1;
-        s.deadline = now + PE_TIMEOUT;
+        s.wait.restart(now, PE_TIMEOUT);
         let (peer, chunk) = (s.peer, s.chunks[s.sent - 1].clone());
         self.send_chunks(peer, PeMessageKind::GET_REPLY, vec![chunk], out);
     }
@@ -594,7 +596,7 @@ impl ResourceResponder {
                 };
                 match signal {
                     PeSignal::TimeoutWait { wait, .. } => {
-                        wait.extend(&mut self.streams[at].deadline);
+                        wait.extend(&mut self.streams[at].wait);
                     }
                     PeSignal::SendNext { chunk, .. } => {
                         let s = &mut self.streams[at];
@@ -609,7 +611,7 @@ impl ResourceResponder {
                         let next = s.chunks[s.sent].clone();
                         s.sent += 1;
                         s.resends = 0;
-                        s.deadline = now + PE_TIMEOUT;
+                        s.wait.restart(now, PE_TIMEOUT);
                         self.send_chunks(peer, PeMessageKind::GET_REPLY, vec![next], out);
                     }
                     PeSignal::Resend { .. } => {
@@ -642,7 +644,7 @@ impl ResourceResponder {
                 };
                 match signal {
                     PeSignal::TimeoutWait { wait, .. } => {
-                        wait.extend(&mut self.outgoing[at].deadline);
+                        wait.extend(&mut self.outgoing[at].wait);
                     }
                     PeSignal::SendNext { .. } | PeSignal::Resend { .. } => {}
                     PeSignal::Terminate { .. }
@@ -740,7 +742,7 @@ impl ResourceResponder {
         let Some(prefix) = prefix else {
             return false;
         };
-        if device.judge(&id, Arrival::Prefix(&prefix)) != Verdict::Refuse {
+        if device.judge(&id, Arrival::Prefix(&prefix)) != StateVerdict::Refuse {
             return false;
         }
         self.reassembler
@@ -861,7 +863,7 @@ impl ResourceResponder {
                 chunks,
                 sent: 1,
                 resends: 0,
-                deadline: now + PE_TIMEOUT,
+                wait: deadline::Pending::after(now, PE_TIMEOUT),
             });
             self.send_chunks(peer, kind, vec![first], out);
         } else {
@@ -1095,7 +1097,7 @@ impl ResourceResponder {
             .ok_or_else(|| refusal(PeStatus::BadRequest, "State needs a resId"))?;
         let mut state = state;
         if let Some(device) = self.device.as_mut() {
-            if device.judge(&id, Arrival::Whole(&state)) == Verdict::Refuse {
+            if device.judge(&id, Arrival::Whole(&state)) == StateVerdict::Refuse {
                 out.push(ResponderAction::Event(ResponderEvent::StateRefused {
                     peer,
                     state_id: id,
@@ -1125,7 +1127,7 @@ impl ResourceResponder {
             .store()
             .get(target)
             .cloned()
-            .ok_or_else(|| PublishError::NoData(target.resource().as_str().to_owned()))?;
+            .ok_or_else(|| PublishError::NoData(target.resource().clone()))?;
         let json = held.to_json().ok_or_else(|| {
             PeDataError::new(
                 target.resource().as_str(),
@@ -1277,8 +1279,8 @@ impl ResourceResponder {
     ) -> Result<Vec<ResponderAction>, PublishError> {
         if data.resource() != *target.resource() {
             return Err(PublishError::DataOfAnotherResource {
-                data: data.resource().as_str().to_owned(),
-                target: target.resource().as_str().to_owned(),
+                data: data.resource(),
+                target: target.resource().clone(),
             });
         }
         self.store().put(target.res_id().cloned(), data.clone())?;
@@ -1494,7 +1496,7 @@ impl ResourceResponder {
             peer,
             id,
             sub: sub.clone(),
-            deadline: now + PE_TIMEOUT,
+            wait: deadline::Pending::after(now, PE_TIMEOUT),
         });
         self.send_chunks(peer, PeMessageKind::SUBSCRIPTION_INQUIRY, chunks, out);
     }

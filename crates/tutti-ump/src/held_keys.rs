@@ -1,7 +1,11 @@
-//! The tables an edge keeps of what a source has started: a bit per [`NoteKey`] and
-//! a position per [`Lane`].
+//! What a source has started and not ended: a bit per [`NoteKey`], the controllers
+//! per [`Lane`], and [`Held`], the two together.
 
-use crate::{Address, MidiChannel, MidiGroup, NoteKey, Protocol};
+use alloc::boxed::Box;
+
+use crate::{
+    Address, HeldControllers, MidiChannel, MidiGroup, NoteKey, NoteKeyEvent, Protocol, Ump,
+};
 
 /// A channel of one protocol: the position of a (protocol, Group, Channel) in a
 /// table of 512 entries, MIDI 1.0 lanes first. The index is the one a
@@ -79,73 +83,6 @@ impl Lane {
 }
 
 const WORDS: usize = 1 << 10;
-
-/// A set of [`Lane`]s: one bit for each of the 512, kept in lane order. The
-/// default is the empty set.
-///
-/// ```
-/// use tutti_ump::{Address, Lane, LaneSet, MidiChannel, Protocol};
-///
-/// let lane = Lane::new(Protocol::Midi2, Address::first(MidiChannel::of(3))).unwrap();
-/// let mut down = LaneSet::new();
-/// assert!(down.insert(lane));
-/// assert_eq!(down.iter().collect::<Vec<_>>(), [lane]);
-/// ```
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
-pub struct LaneSet([u64; Lane::COUNT / 64]);
-
-impl LaneSet {
-    /// The empty set.
-    #[must_use]
-    pub const fn new() -> Self {
-        Self([0; Lane::COUNT / 64])
-    }
-
-    /// Adds `lane`; whether it was not there.
-    pub fn insert(&mut self, lane: Lane) -> bool {
-        let (word, bit) = (lane.index() >> 6, 1u64 << (lane.index() & 63));
-        let added = self.0[word] & bit == 0;
-        self.0[word] |= bit;
-        added
-    }
-
-    /// Removes `lane`; whether it was there.
-    pub fn remove(&mut self, lane: Lane) -> bool {
-        let (word, bit) = (lane.index() >> 6, 1u64 << (lane.index() & 63));
-        let removed = self.0[word] & bit != 0;
-        self.0[word] &= !bit;
-        removed
-    }
-
-    /// Whether `lane` is in the set.
-    #[must_use]
-    pub fn contains(&self, lane: Lane) -> bool {
-        self.0[lane.index() >> 6] & (1u64 << (lane.index() & 63)) != 0
-    }
-
-    /// Whether no lane is in the set.
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.0 == [0; Lane::COUNT / 64]
-    }
-
-    /// Empties the set.
-    pub fn clear(&mut self) {
-        self.0 = [0; Lane::COUNT / 64];
-    }
-
-    /// Adds every lane of `other`.
-    pub fn union_with(&mut self, other: &Self) {
-        for (a, b) in self.0.iter_mut().zip(&other.0) {
-            *a |= b;
-        }
-    }
-
-    /// The lanes, in lane order.
-    pub fn iter(&self) -> impl Iterator<Item = Lane> + '_ {
-        Lane::all().filter(|&lane| self.contains(lane))
-    }
-}
 
 /// A set of [`NoteKey`]s: one bit for each of the 65536 packed keys, 8 KiB, kept in
 /// key order. It holds no allocation: a caller that wants it off the stack boxes
@@ -269,10 +206,160 @@ impl KeyBitset {
     }
 }
 
+/// What a source has started and not ended: the notes down and the controllers
+/// (the hold pedals and the pitch bend) off their normal position. Whoever sits
+/// on a source's edge folds every message the source sent into it
+/// ([`observe`](Self::observe)) and, when the source ends, lets go of what it
+/// held as the messages that end it ([`release`](Self::release)).
+///
+/// **What a release sends, and why not All Notes Off.** Per held key a Note
+/// Off, in the protocol the key was started in; then, for each hold pedal
+/// (CC 64, 66, 67, 69) that is down a pedal-up and for each pitch bend off
+/// centre a centred bend, in the protocol it was sent in. Nothing channelwide
+/// (CC 120, 121, 123): a channel is shared, because several sources merge into
+/// one listener's fan-in, so a channelwide message from one source would end
+/// another's notes and reset another's wheel. MIDI 1.0 Detailed Specification
+/// 4.2.1 also says that recognising All Notes Off is not required of a
+/// receiver and that notes should first be turned off by individual Note-Off
+/// messages (p. 24), so the individual offs are what every receiver
+/// understands. The notes come first and the controllers after, because a pedal
+/// that is down holds a note through a Note Off or All Notes Off until it is
+/// lifted (Appendix A-5), so the pedal-up lets go of the notes just ended;
+/// p. 31 (Stop) and RP-015 (Reset All Controllers) name the pedals and the
+/// pitch wheel as what returns to its normal position.
+///
+/// A release may be asked for one Group: a Group is one cable of a device
+/// (M2-104 section 2.1.2, Appendix B.1), and what Active Sensing or a System
+/// Reset says of a cable is about that cable's Group.
+///
+/// The tables are boxed, 8 KiB of keys and 1 KiB of controllers, allocated in
+/// [`new`](Self::new). Nothing else allocates.
+///
+/// ```
+/// use tutti_ump::{Held, Ump};
+///
+/// let mut held = Held::new();
+/// held.observe(Ump([0x2090_3c64, 0, 0, 0])); // Note On, group 0, channel 0, key 60
+/// let mut offs = Vec::new();
+/// assert!(held.release(None, |ump| { offs.push(ump); true }));
+/// assert_eq!(offs, [Ump([0x2080_3c00, 0, 0, 0])]);
+/// assert!(held.is_empty());
+/// ```
+#[derive(Clone, Default)]
+pub struct Held {
+    keys: Box<KeyBitset>,
+    controllers: Box<HeldControllers>,
+}
+
+impl core::fmt::Debug for Held {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("Held")
+            .field("notes", &self.keys.len())
+            .field("controllers", &self.controllers.len())
+            .finish()
+    }
+}
+
+impl Held {
+    /// Nothing held. Control thread: allocates.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// The notes down.
+    #[must_use]
+    pub fn keys(&self) -> &KeyBitset {
+        &self.keys
+    }
+
+    /// The notes down, for a caller that walks and ends them itself.
+    pub fn keys_mut(&mut self) -> &mut KeyBitset {
+        &mut self.keys
+    }
+
+    /// The controllers off their normal position.
+    #[must_use]
+    pub fn controllers(&self) -> &HeldControllers {
+        &self.controllers
+    }
+
+    /// The controllers off their normal position, for a caller that lifts them
+    /// itself.
+    pub fn controllers_mut(&mut self) -> &mut HeldControllers {
+        &mut self.controllers
+    }
+
+    /// Whether nothing is held.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.keys.is_empty() && self.controllers.is_empty()
+    }
+
+    /// Forgets everything held, sending nothing.
+    pub fn clear(&mut self) {
+        self.keys.clear();
+        self.controllers.clear();
+    }
+
+    /// Adds everything `other` holds.
+    pub fn union_with(&mut self, other: &Self) {
+        self.keys.union_with(&other.keys);
+        self.controllers.union_with(&other.controllers);
+    }
+
+    /// Folds in a message the source sent. A note on starts its key (and a
+    /// note off ends it, a MIDI 1.0 Note On at velocity 0 included); a pedal
+    /// or bend off its normal position is held, and back at it is let go.
+    /// Anything else changes nothing.
+    #[inline]
+    pub fn observe(&mut self, ump: impl Into<Ump>) {
+        let ump = ump.into();
+        match ump.note_key_event() {
+            Some(NoteKeyEvent::On(key)) => {
+                self.keys.insert(key);
+            }
+            Some(NoteKeyEvent::Off(key)) => {
+                self.keys.remove(key);
+            }
+            Some(NoteKeyEvent::Sustain { .. }) | None => {}
+        }
+        self.controllers.observe(ump);
+    }
+
+    /// Hands `accept` the message that ends each thing held (all of `group`'s
+    /// Group, or every Group's for `None`): each note's Note Off in key order,
+    /// then each controller's return, and forgets what `accept` takes
+    /// (`true`). Stops at the first it refuses (`false`), which stays held with
+    /// everything after it, so a receiver with no room now is asked again.
+    /// Returns whether everything in scope was taken. Allocates nothing.
+    pub fn release(
+        &mut self,
+        group: Option<MidiGroup>,
+        mut accept: impl FnMut(Ump) -> bool,
+    ) -> bool {
+        let mut next = 0;
+        while let Some(key) = self.keys.next_from(next) {
+            next = u32::from(key.index()) + 1;
+            if group.is_some_and(|g| key.address().group != g) {
+                continue;
+            }
+            if !accept(Ump::note_off(key)) {
+                return false;
+            }
+            self.keys.remove(key);
+        }
+        self.controllers.lift_while(group, accept)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::NoteNumber;
+    use crate::{
+        BendValue, CCNumber, ControlValue, Message, NoteNumber, NoteVelocity, U7, U14, Voice1,
+        Voice2,
+    };
 
     fn key(protocol: Protocol, index: usize, note: u8) -> NoteKey {
         let address = Address::from_index(index).unwrap();
@@ -345,23 +432,6 @@ mod tests {
     }
 
     #[test]
-    fn a_lane_set_holds_lanes_in_order_and_unions() {
-        let lane = |i| Lane::from_index(i).unwrap();
-        let (mut a, mut b) = (LaneSet::new(), LaneSet::new());
-        assert!(a.insert(lane(300)));
-        assert!(!a.insert(lane(300)));
-        b.insert(lane(2));
-        b.insert(lane(511));
-        a.union_with(&b);
-        assert_eq!(a.iter().map(Lane::index).collect::<Vec<_>>(), [2, 300, 511]);
-        assert!(a.remove(lane(300)));
-        assert!(!a.remove(lane(300)));
-        a.clear();
-        assert!(a.is_empty());
-        assert_eq!(Lane::all().count(), Lane::COUNT);
-    }
-
-    #[test]
     fn a_lane_is_the_protocol_then_the_address_and_names_both_back() {
         let address = Address::from_index(0x2B).unwrap();
         let m1 = Lane::new(Protocol::Midi1, address).unwrap();
@@ -379,5 +449,284 @@ mod tests {
         assert_eq!(Lane::from_index(511).map(Lane::index), Some(511));
         assert_eq!(Lane::from_index(512), None);
         assert_eq!(key(Protocol::Midi2, 0x2B, 5).lane(), m2);
+    }
+
+    const G0: MidiGroup = MidiGroup::FIRST;
+    const G1: MidiGroup = MidiGroup::of(1);
+
+    fn on(group: MidiGroup, channel: u8, note: u8) -> Ump {
+        let address = Address::new(group, MidiChannel::of(channel));
+        Message::midi2(
+            address,
+            Voice2::note_on(NoteNumber::of(note), NoteVelocity::MAX),
+        )
+        .into()
+    }
+
+    fn off(group: MidiGroup, channel: u8, note: u8) -> Ump {
+        let address = Address::new(group, MidiChannel::of(channel));
+        Ump::note_off(NoteKey::new(Protocol::Midi2, address, NoteNumber::of(note)).unwrap())
+    }
+
+    fn drain(held: &mut Held, group: Option<MidiGroup>) -> Vec<Ump> {
+        let mut out = Vec::new();
+        assert!(held.release(group, |u| {
+            out.push(u);
+            true
+        }));
+        out
+    }
+
+    /// Whether nothing is held: a release that is refused its first message
+    /// keeps everything, so it only probes.
+    fn is_empty(held: &mut Held) -> bool {
+        let mut any = false;
+        held.release(None, |_| {
+            any = true;
+            false
+        });
+        !any
+    }
+
+    /// **A release ends exactly what was started**: two keys down and one up,
+    /// the release is one Note Off for the key still down; a second release has
+    /// nothing to send.
+    #[test]
+    fn a_release_ends_the_keys_still_down_and_only_those() {
+        let mut held = Held::new();
+        held.observe(on(G0, 0, 60));
+        held.observe(on(G0, 0, 64));
+        held.observe(Message::midi2(
+            Address::new(G0, MidiChannel::of(0)),
+            Voice2::note_off(NoteNumber::of(60), NoteVelocity::MIN),
+        ));
+        assert_eq!(drain(&mut held, None), [off(G0, 0, 64)]);
+        assert!(is_empty(&mut held));
+        assert!(drain(&mut held, None).is_empty());
+    }
+
+    /// **A MIDI 1.0 Note On at velocity 0 is an off** (MIDI 1.0 Detailed
+    /// Specification, Note On): the key it names is not held; the same bytes in
+    /// MIDI 2.0 are a note on (M2-104 section 7.4.2).
+    #[test]
+    fn a_midi1_note_on_at_velocity_zero_ends_the_key() {
+        let mut held = Held::new();
+        let m1_on = |v: u8| {
+            Ump::from(Message::midi1(
+                MidiChannel::of(2),
+                Voice1::note_on(NoteNumber::of(60), U7::of(v)),
+            ))
+        };
+        held.observe(m1_on(100));
+        assert!(!is_empty(&mut held));
+        held.observe(m1_on(0));
+        assert!(is_empty(&mut held));
+    }
+
+    /// **A release for one Group leaves the other's alone** (a Group is a cable,
+    /// M2-104 section 2.1.2): notes on Groups 1 and 2, release Group 2, and
+    /// Group 1's note is still held.
+    /// Spec: m2-104/2.1.2#2
+    #[test]
+    fn a_release_for_one_group_leaves_the_others_held() {
+        let mut held = Held::new();
+        held.observe(on(G0, 0, 60));
+        held.observe(on(G1, 0, 61));
+        held.observe(Message::midi1(
+            Address::new(G1, MidiChannel::of(0)),
+            Voice1::control_change(CCNumber::SUSTAIN, U7::of(127)),
+        ));
+        let sent = drain(&mut held, Some(G1));
+        assert_eq!(sent.len(), 2, "{sent:?}");
+        assert_eq!(sent[0], off(G1, 0, 61));
+        assert!(!is_empty(&mut held));
+        assert_eq!(drain(&mut held, Some(G0)), [off(G0, 0, 60)]);
+    }
+
+    /// **A receiver with no room is asked again for what it refused**: refusing
+    /// the second of three keys leaves it and the third held, and the next
+    /// release sends exactly those.
+    #[test]
+    fn a_refused_release_stays_held_for_the_next() {
+        let mut held = Held::new();
+        for n in [60, 61, 62] {
+            held.observe(on(G0, 0, n));
+        }
+        let mut taken = 0;
+        let done = held.release(None, |_| {
+            taken += 1;
+            taken < 2
+        });
+        assert!(!done);
+        assert_eq!(taken, 2);
+        assert_eq!(drain(&mut held, None), [off(G0, 0, 61), off(G0, 0, 62)]);
+    }
+
+    /// **Notes first, then every hold pedal and the bend** (MIDI 1.0 Detailed
+    /// Specification Appendix A-5: a pedal that is down defeats the offs), each
+    /// one a message in the protocol it was sent in: Group 3 channel 6 holds a
+    /// key, the four pedals and an off-centre bend in MIDI 1.0 and in MIDI 2.0.
+    /// The release is the two Note Offs, then for each protocol CC 64, 66, 67
+    /// and 69 at 0 (MIDI 1.0 Detailed Specification, Control Change messages:
+    /// Damper Pedal (Sustain), Sostenuto, Soft Pedal, Hold 2) and the bend at its
+    /// centre (0x2000 in MIDI 1.0, 0x80000000 in MIDI 2.0), as these words.
+    #[test]
+    fn a_release_lifts_every_pedal_and_centres_the_bend_message_by_message() {
+        let address = Address::new(MidiGroup::of(3), MidiChannel::of(6));
+        let mut held = Held::new();
+        for cc in [64, 66, 67, 69] {
+            let cc = CCNumber::of(cc);
+            held.observe(Message::midi1(
+                address,
+                Voice1::control_change(cc, U7::of(127)),
+            ));
+            held.observe(Message::midi2(
+                address,
+                Voice2::control_change(cc, ControlValue::MAX),
+            ));
+        }
+        held.observe(Message::midi1(address, Voice1::PitchBend(U14::of(0))));
+        held.observe(Message::midi2(
+            address,
+            Voice2::PitchBend(BendValue::new(0)),
+        ));
+        held.observe(Message::midi1(
+            address,
+            Voice1::note_on(NoteNumber::of(60), U7::of(100)),
+        ));
+        let m1 = |word: u32| Ump([0x2000_0000 | 0x0306_0000 | word, 0, 0, 0]);
+        let m2 = |word: u32, data: u32| Ump([0x4000_0000 | 0x0306_0000 | word, data, 0, 0]);
+        assert_eq!(
+            drain(&mut held, None),
+            [
+                m1(0x0080_3c00),
+                m1(0x00b0_4000),
+                m1(0x00b0_4200),
+                m1(0x00b0_4300),
+                m1(0x00b0_4500),
+                m1(0x00e0_0040),
+                m2(0x00b0_4000, 0),
+                m2(0x00b0_4200, 0),
+                m2(0x00b0_4300, 0),
+                m2(0x00b0_4500, 0),
+                m2(0x00e0_0000, 0x8000_0000),
+            ]
+        );
+        assert!(is_empty(&mut held));
+    }
+
+    /// **A pedal is held from the middle of its range** (MIDI 1.0 Detailed
+    /// Specification, Control Change messages: 0 to 63 off, 64 to 127 on; MIDI
+    /// 2.0 the upper half of 32 bits) and a bend from any value but its centre.
+    #[test]
+    fn a_controller_is_held_from_its_midpoint_and_let_go_back_at_normal() {
+        let address = Address::first(MidiChannel::of(0));
+        let cc = |v: u8| {
+            Message::midi1(
+                address,
+                Voice1::control_change(CCNumber::SUSTAIN, U7::of(v)),
+            )
+        };
+        let cc2 = |v: u32| {
+            Message::midi2(
+                address,
+                Voice2::control_change(CCNumber::SUSTAIN, ControlValue::new(v)),
+            )
+        };
+        let mut held = HeldControllers::new();
+        for (message, down) in [
+            (cc(63), false),
+            (cc(64), true),
+            (cc(0), false),
+            (cc2(0x7fff_ffff), false),
+            (cc2(0x8000_0000), true),
+            (cc2(0), false),
+        ] {
+            held.observe(message.into());
+            assert_eq!(!held.is_empty(), down, "{message:?}");
+        }
+        let bend = Message::midi1(address, Voice1::PitchBend(U14::CENTER));
+        held.observe(bend.into());
+        assert!(held.is_empty());
+        held.observe(Message::midi1(address, Voice1::PitchBend(U14::of(0x2001))).into());
+        assert_eq!(held.closes().count(), 1);
+        held.observe(bend.into());
+        assert!(held.is_empty());
+    }
+
+    /// **A refused lift is owed until it is paid, and a new value forgets it**:
+    /// three controllers held, the second refused, so it and the third are owed
+    /// and still held; a pay that takes one and refuses the next leaves the last
+    /// owed; a lift the source then supersedes is no longer owed.
+    #[test]
+    fn a_refused_lift_is_owed_until_paid_and_a_new_value_forgets_it() {
+        let address = Address::first(MidiChannel::of(0));
+        let mut held = HeldControllers::new();
+        for cc in [64, 66, 67] {
+            held.observe(
+                Message::midi1(
+                    address,
+                    Voice1::control_change(CCNumber::of(cc), U7::of(127)),
+                )
+                .into(),
+            );
+        }
+        let mut offered = Vec::new();
+        held.lift_all(|_, owed| {
+            offered.push(owed);
+            offered.len() < 2
+        });
+        assert_eq!(offered, [false, false, false]);
+        assert!(held.owing());
+        assert_eq!(held.closes().count(), 2);
+        let mut taken = 0;
+        held.pay(|_| {
+            taken += 1;
+            taken < 2
+        });
+        assert_eq!(held.closes().count(), 1);
+        assert!(held.owing());
+        held.observe(
+            Message::midi1(address, Voice1::control_change(CCNumber::of(67), U7::of(0))).into(),
+        );
+        held.pay(|_| unreachable!("nothing is owed now"));
+        assert!(held.is_empty());
+        assert!(!held.owing());
+    }
+
+    /// **Debug prints counts**, not the tables.
+    #[test]
+    fn debug_prints_the_counts_of_what_is_held() {
+        let mut held = Held::new();
+        held.observe(on(G0, 0, 60));
+        held.observe(Message::midi1(
+            Address::first(MidiChannel::of(0)),
+            Voice1::control_change(CCNumber::SUSTAIN, U7::of(127)),
+        ));
+        assert_eq!(format!("{held:?}"), "Held { notes: 1, controllers: 1 }");
+    }
+
+    /// **A union holds what either held, once each**, and `pop` takes the
+    /// lowest first.
+    #[test]
+    fn a_union_holds_each_controller_once_and_pop_takes_the_first() {
+        let address = Address::first(MidiChannel::of(0));
+        let down = |cc: u8| {
+            Ump::from(Message::midi1(
+                address,
+                Voice1::control_change(CCNumber::of(cc), U7::of(127)),
+            ))
+        };
+        let (mut a, mut b) = (HeldControllers::new(), HeldControllers::new());
+        a.observe(down(66));
+        b.observe(down(66));
+        b.observe(down(64));
+        a.union_with(&b);
+        assert_eq!(a.closes().count(), 2);
+        let first = a.pop().unwrap();
+        assert_eq!(first, Ump([0x2000_0000 | 0x00b0_4000, 0, 0, 0]));
+        assert_eq!(a.closes().count(), 1);
+        a.clear();
+        assert_eq!(a.pop(), None);
     }
 }

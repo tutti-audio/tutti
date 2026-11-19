@@ -101,12 +101,11 @@ crates/             everything shipped, directory name = package name
   tutti-units       # The unit newtypes (`Hz`, `Seconds`, `Beat`, ...), `Samples`,
                     #   `Latency`, `Tail`. `no_std`, no alloc, no atomics; no
                     #   workspace dependency; forbids `unsafe`.
-  tutti-types       # Channel layouts, `Param<U>`, ids. Names only tutti-units;
-                    #   forbids `unsafe`.
   tutti-music       # Notes, meter, loop ranges, the frame clock, `Adsr`. `no_std`
                     #   + alloc; names only tutti-units; forbids `unsafe`.
   tutti-rt          # Real-time-safe shared-memory primitives: the lock-free and
-                    #   `unsafe` runtime structure, every loom model, `Publisher`.
+                    #   `unsafe` runtime structure, every loom model, `Publisher`;
+                    #   `Param<U>` and the ids.
   tutti-graph       # The graph: `Node` contract, Topology->Plan compiler (PDC),
                     #   executor. Design doc 013.
   tutti-transport   # Transport: tempo, loop, motion state machine, timed commands
@@ -116,7 +115,7 @@ crates/             everything shipped, directory name = package name
   tutti-codec       # File codecs: the encoders and FileOut, the decoder (Wave, FileIn).
   tutti-modulation         # Pure modulation: the route compiler, curves. Audio-free.
   tutti-export      # Offline rendering and export
-  tutti-dsp         # Pure algorithms over slices. Names only tutti-units, tutti-types and tutti-buffers.
+  tutti-dsp         # Pure algorithms over slices. Names only tutti-units and tutti-buffers.
   tutti-nodes       # DSP nodes (LFO, dynamics, convolution, automation, VBAP and HRTF panners).
   tutti-sampler     # Sample playback (streaming, audition)
   tutti-polysynth   # Polyphonic subtractive/wavetable synth
@@ -191,8 +190,7 @@ Non-scalar state handed from a control thread to the audio thread — a routing
 table, a `MeterMap`, a coefficient set — goes through
 `tutti_rt::{Publisher, Reader, Loan}`, re-exported from the `arc-lend` crate
 (github.com/tutti-audio/arc-lend, <https://docs.rs/arc-lend>). Scalars
-keep using `Param<U>`. (It was `RtPublish`/`RtRef` in `tutti-types` until it
-moved into its own crate.)
+keep using `Param<U>`.
 
 **The invariant: the audio thread never holds an owning handle to published
 state.** A reading thread lends through a `Reader`, registered on the cell
@@ -325,8 +323,7 @@ for that crate is an `unsafe fn`, which is `no_denormals`. Ours is safe because
 the engine owns every caller and the audit above, and it stays a module in
 `tutti-rt`. That crate holds the engine's runtime primitives, not this function
 alone, and is `publish = false`: it is reachable only by workspace
-crates and consumers that take the repository as a git dependency, no more
-than when it sat in `tutti-types`. Publishing
+crates and consumers that take the repository as a git dependency. Publishing
 `tutti-rt` would raise the question again.
 
 ## Two buffer vocabularies — edges vs graph nodes
@@ -777,6 +774,39 @@ may be lost are dropped and counted, never a note-off or a panic (CC 120, 123)
 while anything else can go (a note that began does not hang), and a due event is
 never held up by later ones.
 `a_rate_change_keeps_the_note_on_its_frame` and the two cases after it pin it.
+
+## The plugin process: isolation, and how a server ends
+
+Out-of-process hosting gives **crash and hang isolation**. It is **not a security
+boundary**: the server runs as the host's user, so a plugin in it can do what
+that user can do, including `ptrace` the host or write its memory (a probe did,
+with `ptrace_scope` 0). Anything that needs a boundary needs a sandbox, which is
+a separate, opt-in piece.
+
+- **Linux host:** `BridgeConfig::protect_host_memory` clears the host's dumpable
+  flag (PR_SET_DUMPABLE 0) before its first server is spawned, which closes
+  that. It is opt-in because the flag also stops the host dumping core and a
+  same-user debugger or crash handler attaching to it; those are the app's to
+  give up. It is one call in `tutti-plugin-ipc-ffi`, and a no-op elsewhere.
+- **macOS host:** the hardened runtime of the app's signing gives the same
+  protection. It is the app's job; tutti does nothing for it.
+- **A server's end:** the guard's drop sends `Shutdown` and waits
+  `Timeouts::shutdown` on the OS's exit wake, then kills. The kill is `SIGKILL`
+  of the server's process group on unix (a server leads its own group, so the
+  helpers a plugin spawned go with it), and a Job Object with
+  kill-on-close on Windows (the kernel ends the server when the host does). A
+  server that is not told to shut down (a launch that failed) is killed at once.
+- **Windows binding fails open, with a gap:** if the Job Object cannot be made or
+  the server cannot be assigned to it, the load goes on (refusing every plugin
+  for it is worse) and logs a warning; the server's own watch on the host is
+  then what ends it. The assignment follows the spawn, so a process the server
+  started before it must stay outside the job. Closing that gap takes a
+  suspended spawn and a resume of its main thread, which std does not offer.
+- **The server's own teardown is bounded:** a stopped render thread is given
+  3 s, and one still inside the plugin ends the process outright (a plugin that
+  never returns from a block cannot be destroyed). A partial audio frame is
+  given 2 s past its first byte. A session that leaked a plugin exits with
+  `EXIT_PLUGIN_LEAKED`.
 
 ## A plugin's state is restored before it is activated
 

@@ -2,14 +2,14 @@
 //! own topology (which port feeds which), not from a render.
 
 use std::sync::Arc;
+use tutti_buffers::MaxBlock;
 use tutti_session::InPort;
-use tutti_types::MaxBlock;
 
+use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_session::{GeneralMidi, NodeMode, OutPort, Root, Session};
 use tutti_sf2::SoundFont;
 use tutti_soundfont::{Settings, SoundFontUnit};
-use tutti_types::ChannelLayout;
 use tutti_units::{SampleRate, Samples, Tail};
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -22,7 +22,7 @@ fn offline_session() -> Session {
         .expect("an offline session builds")
 }
 
-fn unit() -> SoundFontUnit {
+fn unit() -> SoundFontUnit<f32> {
     let path = tutti_fixtures::asset("soundfonts/TimGM6mb.sf2");
     let mut file = std::fs::File::open(&path).expect("the test font is in the checkout");
     let font = Arc::new(SoundFont::from_reader(&mut file).expect("the test font parses"));
@@ -273,7 +273,7 @@ fn a_note_through_the_setup_rings_out_within_the_summed_tails() {
 /// A setup on a font of one zone with a 0.25 s release, its mix on the graph's
 /// outputs, and a function that renders a block of it and returns the peak of
 /// both channels.
-fn short_release_setup() -> (Session, GeneralMidi) {
+fn short_release_setup() -> (Session, GeneralMidi<f32>) {
     use tutti_fixtures::sf2::{Inst, Preset, bytes, generator};
     let font = Arc::new(
         SoundFont::from_reader(&mut std::io::Cursor::new(bytes(

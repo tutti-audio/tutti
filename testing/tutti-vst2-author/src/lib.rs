@@ -18,13 +18,14 @@ extern crate tracing;
 
 use std::ptr;
 
-pub use tutti_vst2_ffi::{api, buffer, channels, editor, event, host, plugin};
+pub use tutti_vst2_ffi::{api, buffer, channels, editor, event, host, plugin, speaker};
 
 mod aeffect;
 mod cache;
 mod dispatch;
 #[cfg(test)]
 mod plugin_tests;
+pub mod shell;
 pub mod util;
 
 use api::consts::VST_MAGIC;

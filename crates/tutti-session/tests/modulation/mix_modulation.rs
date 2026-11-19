@@ -10,17 +10,16 @@
 //! `depth * macro * span`, clamped to the range; every figure is exact in
 //! `f32`).
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::{Cx, ForkByClone, Io, Node, NodeKey, Prepare, Shape, Status};
-use tutti_modulation::Macro;
 use tutti_nodes::ReconcileError;
 use tutti_nodes::testing::Const;
 use tutti_session::{
     InPort, MixRef, ModRefusal, ModTarget, OutPort, ParamRef, PassError, Problem, Root, RouteSpec,
     Session, TargetName,
 };
-use tutti_types::ChannelLayout;
-use tutti_units::{Depth, Mix, UnitParam};
+use tutti_units::{Bipolar, Depth, Mix, UnitParam};
 
 const BLOCK: usize = 128;
 /// The constant source's level.
@@ -136,11 +135,11 @@ fn a_route_onto_a_mix_modulates_around_the_base_set_mix_writes() {
         "the base, not the lane"
     );
 
-    s.mods_mut().set_source(source, Macro(-0.5)).unwrap();
+    s.set(source.value().to(Bipolar::of(-0.5))).unwrap();
     settle(&mut s);
     figure(&mut s, 0.25, "the macro moved");
 
-    s.mods_mut().set_source(source, Macro(0.5)).unwrap();
+    s.set(source.value().to(Bipolar::of(0.5))).unwrap();
     s.graph().set_mix(node, Mix::new(0.875)).expect("a node");
     settle(&mut s);
     figure(&mut s, 1.0, "clamped to the blend");

@@ -12,9 +12,9 @@
 //! steps of a frame in [`PHASES`] order.
 //!
 //! ```
-//! use tutti_types::MaxBlock;
+//! use tutti_buffers::MaxBlock;
 //! use tutti_units::{Hz, SampleRate, Samples};
-//! use tutti_types::ChannelLayout;
+//! use tutti_buffers::ChannelLayout;
 //! use tutti_buffers::InterleavedMut;
 //! use tutti_graph::ForkByClone;
 //! use tutti_nodes::testing::Osc;
@@ -96,6 +96,8 @@ mod midi_ci;
 mod midi_follow;
 #[cfg(feature = "midi-hardware")]
 mod midi_hardware;
+#[cfg(feature = "midi")]
+mod midi_load;
 #[cfg(feature = "midi-hardware")]
 mod midi_port;
 #[cfg(all(feature = "midi", not(feature = "midi-hardware")))]
@@ -135,6 +137,8 @@ mod session;
 mod switch;
 #[cfg(feature = "capture")]
 mod take;
+#[cfg(all(feature = "midi", feature = "analyze"))]
+mod transcribe;
 mod transport_handle;
 mod value;
 #[cfg(feature = "device")]
@@ -190,7 +194,7 @@ pub use key::{
     RootDeclaration, Weighted, Wire,
 };
 #[cfg(feature = "midi")]
-pub use midi::{Midi, MidiLoad, MidiRouteId, MidiRouteRule, Stamping, TakePlacement};
+pub use midi::{Midi, MidiRouteId, MidiRouteRule, Stamping, TakePlacement};
 #[cfg(feature = "midi-hardware")]
 pub use midi_ci::{
     ChannelProfile, GetProperty, ListedProfile, ListedResource, PeFailure, ProfilePeer, ReportPeer,
@@ -199,6 +203,11 @@ pub use midi_ci::{
 };
 #[cfg(feature = "midi")]
 pub use midi_follow::{FollowClock, FollowMachineControl, FollowTempo};
+#[cfg(feature = "midi")]
+pub use midi_load::{
+    DroppedEvent, LoadMidi, LoadMidiError, LoadReport, LoadedMidi, LoadedTrack,
+    NoCommonTimelineError, TrackError,
+};
 #[cfg(feature = "midi-hardware")]
 pub use midi_port::{
     InputLoaded, MidiInput, MidiInputEntry, MidiInputInfo, MidiOutput, MidiOutputEntry,
@@ -277,6 +286,8 @@ pub use take::{
     Armed, InFlight, Placement, Punch, PunchError, Recorded, Rolling, Start, Take, TakeEnd,
     TakeError, TakeEvent, TakeId, TakeTarget, Terms, Window,
 };
+#[cfg(all(feature = "midi", feature = "analyze"))]
+pub use transcribe::{LevelVelocity, NoteCents, NoteMapping, clip_from_notes, harmony_from_chords};
 pub use transport_handle::TransportHandle;
 #[cfg(any(feature = "record", feature = "export"))]
 pub use tutti_dsp::DitherShape;
@@ -300,11 +311,12 @@ pub use tutti_ump::{MidiChannel, MidiGroup};
 pub use value::MidiPolicyTarget;
 pub use value::OutputPolicyTarget;
 pub use value::{
-    AnyAssign, AnyTarget, Assign, ClickTargets, ClickVolumeTarget, Effective, Info, IntoAssign,
-    IntoRead, Knobs, MeterTarget, Modify, Moved, NodeSlots, ParamTarget, ScalarTarget, SetRefusal,
+    AnyAssign, AnyTarget, Assign, AutomationTarget, ClickTargets, ClickVolumeTarget, CurveTarget,
+    Effective, Info, IntoAssign, IntoRead, Knobs, LoopTarget, MacroTarget, MeterTarget, Modify,
+    Moved, NodeSlots, ParamTarget, PolarityTarget, RateTarget, ScalarTarget, SetRefusal,
     SettingTarget, Target, TargetInfo, TempoTarget, ValueError, ValueErrorKind,
 };
 #[cfg(feature = "midi")]
-pub use value::{ClipEventsTarget, HarmonyTarget, OutputLatencyTarget};
+pub use value::{ClipEventsTarget, HarmonyTarget, MpeModeTarget, OutputLatencyTarget};
 #[cfg(feature = "device")]
 pub use watch::{Backoff, DevicePolicy, DeviceWatch, Follow, FollowEvent};

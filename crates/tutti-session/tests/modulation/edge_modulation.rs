@@ -11,10 +11,10 @@
 
 use crate::common;
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::ForkByClone;
 use tutti_session::{Edge, ModTarget, OutPort, ParamRef, Root, RouteSpec, Session};
-use tutti_types::ChannelLayout;
 use tutti_units::{Amplitude, Depth, SampleRate, UnitParam};
 
 use common::probe::Pulse;
@@ -112,8 +112,7 @@ fn a_route_onto_an_edge_modulates_the_sum_by_the_analytic_amount() {
     };
     figure(&mut s, 1.5, "knob + offset");
 
-    s.mods_mut()
-        .set_source(source, tutti_modulation::Macro(-0.5))
+    s.set(source.value().to(tutti_units::Bipolar::of(-0.5)))
         .unwrap();
     settle(&mut s);
     figure(&mut s, 0.5, "the macro moved");

@@ -59,13 +59,13 @@ use crate::yin::YinPlan;
 pub(crate) struct PitchDetector {
     /// The validated range, rate and threshold this detector runs at.
     cfg: YinPlan,
-    difference: Vec<f32>,
-    cumulative_mean: Vec<f32>,
-    fft: FftScratch,
-    correlator: Correlator,
+    difference: Vec<f64>,
+    cumulative_mean: Vec<f64>,
+    fft: FftScratch<f64>,
+    correlator: Correlator<f64>,
     /// The circular cross-correlation `r(τ) = Σ_j x[j]*x[j+τ]`, `fft_size`
     /// points.
-    correlation: Vec<f32>,
+    correlation: Vec<f64>,
     /// Prefix sums of the squared input, for the windowed energies.
     cum_sq: Vec<f64>,
 }
@@ -96,7 +96,7 @@ impl PitchDetector {
     }
 
     /// Needs at least `buffer_size()` samples.
-    pub(crate) fn detect(&mut self, samples: &[f32]) -> PitchResult {
+    pub(crate) fn detect(&mut self, samples: &[f64]) -> PitchResult {
         let (min_period, max_period) = self.periods(samples.len());
 
         if samples.len() < max_period * 2 || max_period <= min_period {
@@ -115,7 +115,7 @@ impl PitchDetector {
         let frequency = Hz(self.cfg.sample_rate().get() / refined_period);
         // Clamped rather than wrapped raw: `Confidence` is a 0..=1 reading, and
         // this is the one place the aperiodicity inversion could leave the range.
-        let confidence = Confidence::new_clamped(f64::from(1.0 - aperiodicity));
+        let confidence = Confidence::new_clamped(1.0 - aperiodicity);
 
         PitchResult {
             frequency,
@@ -141,7 +141,7 @@ impl PitchDetector {
     ///
     /// `r(τ) = Σ_{j=0}^{W-1} x[j]*x[j+τ]` is the cross-correlation of
     /// `x[0..W+max_period]` against `x[0..W]`, taken by the [`Correlator`].
-    fn compute_difference(&mut self, samples: &[f32], max_period: usize) {
+    fn compute_difference(&mut self, samples: &[f64], max_period: usize) {
         let window = max_period;
         let usable = samples.len().min(window + max_period);
 
@@ -149,7 +149,7 @@ impl PitchDetector {
         let cum_sq = &mut self.cum_sq;
         cum_sq[0] = 0.0;
         for i in 0..usable {
-            cum_sq[i + 1] = cum_sq[i] + (samples[i] as f64) * (samples[i] as f64);
+            cum_sq[i + 1] = cum_sq[i] + samples[i] * samples[i];
         }
         let cum_sq = &*cum_sq;
 
@@ -178,9 +178,9 @@ impl PitchDetector {
 
         let e0 = energy(0, window);
         for tau in 1..=max_period {
-            let autocorr = f64::from(self.correlation[tau]);
+            let autocorr = self.correlation[tau];
             let e_tau = energy(tau, window);
-            self.difference[tau] = (e0 + e_tau - 2.0 * autocorr).max(0.0) as f32;
+            self.difference[tau] = (e0 + e_tau - 2.0 * autocorr).max(0.0);
         }
     }
 
@@ -188,11 +188,11 @@ impl PitchDetector {
     fn compute_cumulative_mean(&mut self, max_period: usize) {
         self.cumulative_mean[0] = 1.0;
 
-        let mut running_sum = 0.0f32;
+        let mut running_sum = 0.0f64;
         for tau in 1..=max_period {
             running_sum += self.difference[tau];
             if running_sum > 1e-10 {
-                self.cumulative_mean[tau] = self.difference[tau] * tau as f32 / running_sum;
+                self.cumulative_mean[tau] = self.difference[tau] * tau as f64 / running_sum;
             } else {
                 self.cumulative_mean[tau] = 1.0;
             }
@@ -202,11 +202,11 @@ impl PitchDetector {
     /// YIN step 4: return the FIRST local minimum below threshold (not the global
     /// minimum) to prevent octave errors from subharmonic detection.
     /// Returns (period, aperiodicity).
-    fn find_best_period_full(&self, min_period: usize, max_period: usize) -> (usize, f32) {
+    fn find_best_period_full(&self, min_period: usize, max_period: usize) -> (usize, f64) {
         let mut tau = min_period;
 
         while tau < max_period {
-            if f64::from(self.cumulative_mean[tau]) < self.cfg.threshold.get() {
+            if self.cumulative_mean[tau] < self.cfg.threshold.get() {
                 // Walk to the local minimum
                 while tau + 1 < max_period
                     && self.cumulative_mean[tau + 1] < self.cumulative_mean[tau]
@@ -252,7 +252,7 @@ impl PitchDetector {
             -self.cumulative_mean[tau],
             -self.cumulative_mean[tau + 1],
         );
-        tau as f64 + f64::from(peak.offset)
+        tau as f64 + peak.offset
     }
 }
 

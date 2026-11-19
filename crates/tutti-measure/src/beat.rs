@@ -24,10 +24,10 @@ const SMOOTH_PERIOD_FRACTION: f64 = 1.0 / 32.0;
 const TRIM_FRACTION: f64 = 0.5;
 
 /// A frame starts the chain once its score reaches this share of the maximum.
-const START_FRACTION: f32 = 0.01;
+const START_FRACTION: f64 = 0.01;
 
 /// A final candidate must reach this share of the median final-candidate score.
-const TAIL_FRACTION: f32 = 0.5;
+const TAIL_FRACTION: f64 = 0.5;
 
 /// Beat frames over `novelty`, with beats `period` frames apart.
 ///
@@ -36,7 +36,7 @@ const TAIL_FRACTION: f32 = 0.5;
 /// `period` is in frames and may be fractional; `tightness` is the weight of
 /// the gap penalty against the novelty score (0 turns the period off).
 /// Returns ascending frame indices; empty for a flat or too short curve.
-pub(crate) fn track(novelty: &[f32], period: f64, tightness: f32) -> Vec<usize> {
+pub(crate) fn track(novelty: &[f64], period: f64, tightness: f64) -> Vec<usize> {
     let n = novelty.len();
     let local = local_score(novelty, period);
     if n == 0 || local.is_empty() || period.is_nan() || period < 2.0 {
@@ -45,16 +45,16 @@ pub(crate) fn track(novelty: &[f32], period: f64, tightness: f32) -> Vec<usize> 
 
     let (lo, hi) = gap_bounds(period, n);
     // `penalty[t - lo]` is the cost of a gap of `t` frames.
-    let penalty: Vec<f32> = (lo..=hi)
-        .map(|t| -tightness * libm::log(t as f64 / period).powi(2) as f32)
+    let penalty: Vec<f64> = (lo..=hi)
+        .map(|t| -tightness * libm::log(t as f64 / period).powi(2))
         .collect();
 
-    let threshold = START_FRACTION * local.iter().copied().fold(0.0f32, f32::max);
-    let mut cumulative = vec![0.0f32; n];
+    let threshold = START_FRACTION * local.iter().copied().fold(0.0f64, f64::max);
+    let mut cumulative = vec![0.0f64; n];
     let mut backlink = vec![usize::MAX; n];
     let mut chain_open = false;
     for i in 0..n {
-        let mut best: Option<(usize, f32)> = None;
+        let mut best: Option<(usize, f64)> = None;
         for t in lo..=hi.min(i) {
             let score = cumulative[i - t] + penalty[t - lo];
             if best.is_none_or(|(_, b)| score > b) {
@@ -102,14 +102,10 @@ fn kernel_half(sigma: f64, len: usize) -> isize {
 
 /// The novelty scaled to unit standard deviation and smoothed by a Gaussian
 /// of `period / 32` frames. Empty when the curve has no spread.
-fn local_score(novelty: &[f32], period: f64) -> Vec<f32> {
+fn local_score(novelty: &[f64], period: f64) -> Vec<f64> {
     let n = novelty.len() as f64;
-    let mean = novelty.iter().map(|&v| f64::from(v)).sum::<f64>() / n;
-    let var = novelty
-        .iter()
-        .map(|&v| (f64::from(v) - mean).powi(2))
-        .sum::<f64>()
-        / n;
+    let mean = novelty.iter().copied().sum::<f64>() / n;
+    let var = novelty.iter().map(|&v| (v - mean).powi(2)).sum::<f64>() / n;
     let std = var.sqrt();
     if std.is_nan() || std <= 0.0 || !std.is_finite() {
         return Vec::new();
@@ -129,9 +125,9 @@ fn local_score(novelty: &[f32], period: f64) -> Vec<f32> {
                     usize::try_from(i + k)
                         .ok()
                         .and_then(|j| novelty.get(j))
-                        .map(|&v| w * f64::from(v) / std)
+                        .map(|&v| w * v / std)
                 })
-                .sum::<f64>() as f32
+                .sum::<f64>()
         })
         .collect()
 }
@@ -139,11 +135,11 @@ fn local_score(novelty: &[f32], period: f64) -> Vec<f32> {
 /// The last frame the backtrace should start from: the final local maximum of
 /// the cumulative score that reaches half the median of all local maxima, so
 /// a trailing stretch of silence does not drag the chain out to the end.
-fn last_beat(cumulative: &[f32]) -> usize {
+fn last_beat(cumulative: &[f64]) -> usize {
     let n = cumulative.len();
     let maxima: Vec<usize> = local_maxima(cumulative, 0..n).collect();
-    let scores: Vec<f32> = maxima.iter().map(|&i| cumulative[i]).collect();
-    let median = median(&scores).unwrap_or(0.0) as f32;
+    let scores: Vec<f64> = maxima.iter().map(|&i| cumulative[i]).collect();
+    let median = median(&scores).unwrap_or(0.0);
     let threshold = TAIL_FRACTION * median;
     maxima
         .iter()
@@ -155,13 +151,13 @@ fn last_beat(cumulative: &[f32]) -> usize {
 
 /// Drops weak beats from both ends, judged on the local score smoothed over
 /// five beats by a Hann window.
-fn trim(beats: &mut Vec<usize>, local: &[f32]) {
-    const HANN5: [f32; 5] = [0.0, 0.5, 1.0, 0.5, 0.0];
+fn trim(beats: &mut Vec<usize>, local: &[f64]) {
+    const HANN5: [f64; 5] = [0.0, 0.5, 1.0, 0.5, 0.0];
     if beats.is_empty() {
         return;
     }
-    let scores: Vec<f32> = beats.iter().map(|&b| local[b]).collect();
-    let smooth: Vec<f32> = (0..scores.len())
+    let scores: Vec<f64> = beats.iter().map(|&b| local[b]).collect();
+    let smooth: Vec<f64> = (0..scores.len())
         .map(|i| {
             HANN5
                 .iter()
@@ -176,8 +172,8 @@ fn trim(beats: &mut Vec<usize>, local: &[f32]) {
         })
         .collect();
     let cut = TRIM_FRACTION * rms(Mono::new(&smooth)).get();
-    let first = smooth.iter().position(|&s| f64::from(s) >= cut);
-    let last = smooth.iter().rposition(|&s| f64::from(s) >= cut);
+    let first = smooth.iter().position(|&s| s >= cut);
+    let last = smooth.iter().rposition(|&s| s >= cut);
     match (first, last) {
         (Some(f), Some(l)) => {
             beats.truncate(l + 1);

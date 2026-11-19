@@ -1,13 +1,13 @@
-use tutti_types::ChannelLayout;
+use tutti_buffers::ChannelLayout;
 use tutti_units::Amplitude;
 
 use super::{PeakBlock, PeakBlocks};
 
-fn block(v: f32) -> PeakBlock {
+fn block(v: f64) -> PeakBlock {
     PeakBlock {
         min: -v,
         max: v,
-        rms: Amplitude(f64::from(v / 2.0)),
+        rms: Amplitude(v / 2.0),
     }
 }
 
@@ -16,7 +16,7 @@ fn block(v: f32) -> PeakBlock {
 #[test]
 fn peak_blocks_round_trip_through_serde() {
     let blocks = PeakBlocks {
-        blocks: (1..=6).map(|i| block(i as f32 / 8.0)).collect(),
+        blocks: (1..=6).map(|i| block(i as f64 / 8.0)).collect(),
         layout: ChannelLayout::STEREO,
         per_channel: 3,
     };
@@ -31,7 +31,7 @@ fn peak_blocks_round_trip_through_serde() {
 #[test]
 fn stored_blocks_of_the_wrong_length_are_refused() {
     let blocks = PeakBlocks {
-        blocks: (1..=6).map(|i| block(i as f32 / 8.0)).collect(),
+        blocks: (1..=6).map(|i| block(i as f64 / 8.0)).collect(),
         layout: ChannelLayout::STEREO,
         per_channel: 3,
     };

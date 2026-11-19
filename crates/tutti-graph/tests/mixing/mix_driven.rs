@@ -21,12 +21,12 @@ use std::collections::BTreeMap;
 use std::sync::atomic::Ordering;
 
 use common::{Kind, Pair, SpecBehaviour, bits, driver_value, input_signal, prepare};
+use tutti_buffers::ChannelLayout;
 use tutti_graph::{
     CompileError, CycleEdge, Edge, Editor, EventOut, ForkMode, ForkTarget, GraphInvalid, GraphSpec,
     InPort, NodeKey, NodeMix, NodeMode, OutPort, ParamIn, ParamPorts, ParamPortsError, ParamRange,
     Source, Topology, TransportPosition, ValidGraph, compile,
 };
-use tutti_types::ChannelLayout;
 use tutti_units::{Mix, Tail, UnitAddr, UnitParam};
 
 const BLOCK: usize = 32;

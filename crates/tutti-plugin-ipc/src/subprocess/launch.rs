@@ -6,18 +6,19 @@ use super::Reaped;
 use crate::ProcessGuard;
 use crate::config::BridgeConfig;
 use crate::error::unexpected_message;
-use crate::protocol::{BridgeMessage, HostMessage, LoadedPlugin, PluginDescriptor, StagedState};
 use crate::transport::control::{self as ipc, ControlStream};
 use crate::transport::shm::{AudioSlab, SlabLayout, SlabWriter};
+use crate::{BridgeMessage, HostMessage, StagedState};
 use std::path::Path;
-use std::process::{Child, Command};
+use std::process::Command;
 use std::time::{Duration, Instant};
 use tutti_buffers::FloatWidth;
 use tutti_plugin_types::MAX_CHUNK;
 use tutti_plugin_types::StateUse;
 use tutti_plugin_types::Timeouts;
 use tutti_plugin_types::{BridgeError, BridgeResult};
-use tutti_plugin_types::{Helper, Load, Locator, PluginFormat};
+use tutti_plugin_types::{Helper, Locator, Origin, PluginFormat};
+use tutti_plugin_types::{LoadedPlugin, PluginDescriptor};
 use tutti_units::SampleRate;
 
 /// How long to wait between connect attempts.
@@ -60,6 +61,41 @@ impl std::fmt::Debug for LaunchedServer {
     }
 }
 
+/// What a launch loads: the plugin, the format that opens it, the rate it
+/// starts at and the state it starts from.
+#[derive(Debug, Clone, Copy)]
+pub struct LoadRequest<'a> {
+    /// The file and the plugin chosen in it.
+    pub origin: &'a Origin,
+    /// The format that opens the file.
+    pub format: PluginFormat,
+    /// The sample rate the plugin is activated at.
+    pub rate: SampleRate,
+    /// The state to restore before the plugin is activated, if any.
+    pub restore: Option<Restore<'a>>,
+}
+
+/// State a launch restores into the plugin before it is activated, the order
+/// every format allows and a plugin that takes its mode from the state at
+/// activation needs.
+#[derive(Debug, Clone, Copy)]
+pub struct Restore<'a> {
+    /// The state's bytes.
+    pub state: &'a [u8],
+    /// What the state was saved for.
+    pub state_use: StateUse,
+}
+
+impl Restore<'_> {
+    /// The declaration the load carries once the server has the state staged.
+    fn staged(&self) -> StagedState {
+        StagedState {
+            len: self.state.len() as u64,
+            state_use: self.state_use,
+        }
+    }
+}
+
 /// Spawn a plugin-server and bring it to the point where the RT bridge thread
 /// can connect.
 ///
@@ -74,25 +110,8 @@ impl std::fmt::Debug for LaunchedServer {
 ///
 /// The server cannot be found or spawned, it does not connect or answer the
 /// handshake in time, or it fails to load the plugin.
-pub fn launch(
-    config: &BridgeConfig,
-    plugin_path: &Path,
-    format: PluginFormat,
-    load: &Load,
-    sample_rate: SampleRate,
-    state: Option<&[u8]>,
-    state_use: StateUse,
-) -> BridgeResult<LaunchedServer> {
-    launch_with_state(
-        &Locator::Search,
-        config,
-        plugin_path,
-        format,
-        load,
-        sample_rate,
-        state,
-        state_use,
-    )
+pub fn launch(config: &BridgeConfig, request: &LoadRequest<'_>) -> BridgeResult<LaunchedServer> {
+    launch_with_state(&Locator::Search, config, request)
 }
 
 /// [`launch`], with the server binary named explicitly rather than searched
@@ -112,37 +131,31 @@ pub(super) fn launch_with(
     format: PluginFormat,
     sample_rate: SampleRate,
 ) -> BridgeResult<LaunchedServer> {
+    let origin = Origin::new(plugin_path, tutti_plugin_types::Load::new());
     launch_with_state(
         locator,
         config,
-        plugin_path,
-        format,
-        &Load::new(),
-        sample_rate,
-        None,
-        StateUse::Project,
+        &LoadRequest {
+            origin: &origin,
+            format,
+            rate: sample_rate,
+            restore: None,
+        },
     )
 }
 
-/// `launch_with`, restoring `state` into the plugin before it is activated:
-/// staged ahead of the load (`HostMessage::StageStateChunk`), applied by the
-/// server between opening the plugin and activating it, so the activation, and
-/// the reply's buses and latency, are the state's. `state_use` is what the
-/// state was saved for.
+/// `launch_with`, restoring the request's state into the plugin before it is
+/// activated: staged ahead of the load (`HostMessage::StageStateChunk`),
+/// applied by the server between opening the plugin and activating it, so the
+/// activation, and the reply's buses and latency, are the state's.
 pub(super) fn launch_with_state(
     locator: &Locator,
     config: &BridgeConfig,
-    plugin_path: &Path,
-    format: PluginFormat,
-    load: &Load,
-    sample_rate: SampleRate,
-    state: Option<&[u8]>,
-    state_use: StateUse,
+    request: &LoadRequest<'_>,
 ) -> BridgeResult<LaunchedServer> {
     config.timeouts.validate()?;
-    let server =
-        ProcessGuard::launched(Reaped::new(spawn_process(locator, config)?), config.clone())
-            .map_err(BridgeError::ExitUnwatched)?;
+    let server = ProcessGuard::launched(spawn_process(locator, config)?, config)
+        .map_err(BridgeError::ExitUnwatched)?;
 
     // The guard is borrowed, not moved: the connect retry asks its watch so a
     // server that died on startup is reported at once, and the teardown below
@@ -154,27 +167,16 @@ pub(super) fn launch_with_state(
         // is a refusal like any other: the plugin loads at its defaults. A stage
         // that got no answer is not: the stream may have a late reply in flight,
         // so the launch ends.
-        let staged = match state {
-            Some(state) => Some(stage_state(&mut stream, config, state)?),
+        let staged = match &request.restore {
+            Some(restore) => Some(stage_state(&mut stream, config, restore.state)?),
             None => None,
         };
-        let declared = match (&staged, state) {
-            (Some(Ok(())), Some(state)) => Some(StagedState {
-                len: state.len() as u64,
-                state_use,
-            }),
+        let declared = match (&staged, &request.restore) {
+            (Some(Ok(())), Some(restore)) => Some(restore.staged()),
             _ => None,
         };
-        let (descriptor, loaded, format, loaded_error) = load_plugin(
-            &mut stream,
-            config,
-            plugin_path,
-            format,
-            load,
-            sample_rate,
-            &shm_name,
-            declared,
-        )?;
+        let (descriptor, loaded, format, loaded_error) =
+            load_plugin(&mut stream, config, request, &shm_name, declared)?;
         let state_restore = match staged {
             Some(Err(e)) => Some(Err(e)),
             Some(Ok(())) => Some(loaded_error.map_or(Ok(()), Err)),
@@ -203,20 +205,45 @@ pub(super) fn launch_with_state(
     }
 }
 
-fn spawn_process(locator: &Locator, config: &BridgeConfig) -> BridgeResult<Child> {
+/// Starts the server as the leader of a process group of its own, in the
+/// host's kill-on-close job on Windows, so its helpers and the server itself
+/// end with it.
+fn spawn_process(locator: &Locator, config: &BridgeConfig) -> BridgeResult<Reaped> {
     let server_path = locator
         .resolve(Helper::Server)
         .ok_or(BridgeError::ServerNotFound)?;
     tracing::debug!("spawning plugin-server: {}", server_path.display());
-    Command::new(server_path)
+    if config.protect_host_memory {
+        protect_host_memory_once();
+    }
+    let mut command = Command::new(server_path);
+    command
         .arg(&config.socket_path)
         .env(
             tutti_plugin_ipc_ffi::HOST_PID_ENV,
             std::process::id().to_string(),
         )
-        .stderr(std::process::Stdio::inherit())
-        .spawn()
-        .map_err(BridgeError::Io)
+        .stderr(std::process::Stdio::inherit());
+    tutti_plugin_ipc_ffi::own_group(&mut command);
+    let child = command.spawn().map_err(BridgeError::Io)?;
+    // A host that cannot bind the server to its own end still hosts: the server
+    // then outlives a host that dies, which its own watch on the host ends. A
+    // child spawned before the assignment stays outside the job.
+    if let Err(e) = tutti_plugin_ipc_ffi::bind_to_host(&child) {
+        tracing::warn!("the server is not bound to the host's end: {e}");
+    }
+    Ok(Reaped::leading_group(child))
+}
+
+/// Clears the host's dumpable flag, once for the process, at the first server
+/// it spawns ([`BridgeConfig::protect_host_memory`]).
+fn protect_host_memory_once() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        if let Err(e) = tutti_plugin_ipc_ffi::protect_host_memory() {
+            tracing::warn!("the host's memory is not protected from its plugins: {e}");
+        }
+    });
 }
 
 /// Connect as soon as the server is listening, rather than after a fixed wait.
@@ -281,7 +308,7 @@ fn handshake(config: &BridgeConfig, server: &ProcessGuard) -> BridgeResult<Contr
 }
 
 /// Which wait a `LoadPlugin` reply is under: the open (library, instance,
-/// init) has the bridge's call window; once the server says it has begun
+/// init) has the load window ([`Timeouts::load`]); once the server says it has begun
 /// restoring staged state the restore has a window of its own and answers for
 /// a failure.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -294,7 +321,7 @@ impl LoadPhase {
     /// How long the next reply may take in this phase.
     fn window(self, timeouts: &Timeouts) -> Duration {
         match self {
-            Self::Opening => timeouts.call,
+            Self::Opening => timeouts.load,
             Self::Restoring => timeouts.state_restore,
         }
     }
@@ -314,10 +341,7 @@ impl LoadPhase {
 fn load_plugin(
     stream: &mut ControlStream,
     config: &BridgeConfig,
-    plugin_path: &Path,
-    format: PluginFormat,
-    load: &Load,
-    sample_rate: SampleRate,
+    request: &LoadRequest<'_>,
     shm_name: &str,
     state: Option<StagedState>,
 ) -> BridgeResult<(
@@ -329,10 +353,10 @@ fn load_plugin(
     ipc::send(
         stream,
         &HostMessage::LoadPlugin {
-            path: plugin_path.to_path_buf(),
-            format,
-            load: load.clone(),
-            sample_rate,
+            path: request.origin.path().to_path_buf(),
+            format: request.format,
+            load: request.origin.load().clone(),
+            sample_rate: request.rate,
             block_size: config.max_buffer_size,
             preferred_format: config.preferred_format,
             shm_name: shm_name.to_string(),
@@ -360,7 +384,10 @@ fn load_plugin(
                 state_error,
             } => return Ok((descriptor, loaded, negotiated_format, state_error)),
             BridgeMessage::Error { message } => {
-                return Err(BridgeError::load_from_server(plugin_path, message));
+                return Err(BridgeError::load_from_server(
+                    request.origin.path(),
+                    message,
+                ));
             }
             ref other => return Err(unexpected_message("PluginLoaded", other)),
         }
@@ -481,7 +508,7 @@ pub(crate) fn swap_slab(
     }
     let shm_name = next_shm_name()?;
     let slab = AudioSlab::create(shm_name.clone(), layout.clone())?;
-    if bridge.setup_shared_memory(shm_name, layout) {
+    if bridge.audio().setup_shared_memory(shm_name, layout) {
         Ok(Some(slab))
     } else {
         Err(BridgeError::SlabRefused)
@@ -498,9 +525,10 @@ fn next_shm_name() -> BridgeResult<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::ChannelLayout;
     use crate::transport::shm::RING_SLOTS;
     use std::path::PathBuf;
+    use std::process::Child;
+    use tutti_plugin_types::ChannelLayout;
     use tutti_plugin_types::Timeouts;
 
     /// A failed launch must not leave the subprocess running.
@@ -651,16 +679,22 @@ mod tests {
             },
             ..BridgeConfig::at(crate::unique_socket_path().expect("the OS has a random source"))
         };
-        let plugin = tutti_fixtures::clap_probe();
+        let origin = Origin::new(
+            tutti_fixtures::clap_probe(),
+            tutti_plugin_types::Load::new(),
+        );
         launch_with_state(
             &Locator::at(tutti_fixtures::plugin_server()),
             &config,
-            plugin,
-            PluginFormat::Clap,
-            &Load::new(),
-            SampleRate::SR_48K,
-            Some(&[0u8; 16]),
-            StateUse::Project,
+            &LoadRequest {
+                origin: &origin,
+                format: PluginFormat::Clap,
+                rate: SampleRate::SR_48K,
+                restore: Some(Restore {
+                    state: &[0u8; 16],
+                    state_use: StateUse::Project,
+                }),
+            },
         )
     }
 
@@ -781,15 +815,17 @@ mod tests {
         );
     }
 
-    /// The window of the wait a `LoadPlugin` reply is under: `call` while the
-    /// plugin opens, `state_restore` once the server says it is restoring, and
-    /// only a restore's failure is the state's.
+    /// The window of the wait a `LoadPlugin` reply is under: `load` while the
+    /// plugin opens (a sampler's initialisation is a healthy load, not a generic
+    /// call), `state_restore` once the server says it is restoring, and only a
+    /// restore's failure is the state's.
     #[test]
     fn a_restore_is_waited_on_for_its_own_window() {
         let mut t = Timeouts::default();
         t.call = Duration::from_secs(1);
+        t.load = Duration::from_secs(7);
         t.state_restore = Duration::from_secs(20);
-        assert_eq!(LoadPhase::Opening.window(&t), Duration::from_secs(1));
+        assert_eq!(LoadPhase::Opening.window(&t), Duration::from_secs(7));
         assert_eq!(LoadPhase::Restoring.window(&t), Duration::from_secs(20));
 
         let timed_out = || BridgeError::Timeout {
@@ -1072,11 +1108,9 @@ mod tests {
         // The listener above stands in for the server, so there is no child to
         // watch — but `handshake` takes a guard to notice a spawn that died. A
         // lingering stand-in stays alive for the whole test; the guard kills it.
-        let stand_in = ProcessGuard::launched(
-            Reaped::new(spawn_stand_in(StandIn::Lingers)),
-            config.clone(),
-        )
-        .expect("the exit thread starts");
+        let stand_in =
+            ProcessGuard::launched(Reaped::new(spawn_stand_in(StandIn::Lingers)), &config)
+                .expect("the exit thread starts");
         let err = handshake(&config, &stand_in)
             .expect_err("a stale server must not complete the handshake");
         drop(stand_in);
@@ -1101,7 +1135,7 @@ mod tests {
     /// covered is a handshake path that forgets to call the gate at all.
     #[test]
     fn a_stale_v3_server_is_refused_with_a_named_version_error() {
-        use crate::protocol::PROTOCOL_VERSION;
+        use crate::PROTOCOL_VERSION;
 
         const STALE_VERSION: u32 = 3;
         assert_ne!(
@@ -1138,7 +1172,7 @@ mod tests {
     /// block-status wire change bumped the version.
     #[test]
     fn a_server_from_before_the_block_status_is_refused() {
-        use crate::protocol::PROTOCOL_VERSION;
+        use crate::PROTOCOL_VERSION;
 
         const BEFORE_STATUS: u32 = 31;
         let err = handshake_against(
@@ -1194,7 +1228,7 @@ mod tests {
 
         let mut child = spawn_stand_in(StandIn::BindsOnByte(path.clone()));
         let mut release = child.stdin.take().expect("the stand-in's stdin is piped");
-        let stand_in = ProcessGuard::launched(Reaped::new(child), BridgeConfig::at(path.clone()))
+        let stand_in = ProcessGuard::launched(Reaped::new(child), &BridgeConfig::at(path.clone()))
             .expect("the exit thread starts");
 
         let (running, is_running) = std::sync::mpsc::channel();
@@ -1235,7 +1269,7 @@ mod tests {
         // that dies on a missing dynamic library.
         let dead = ProcessGuard::launched(
             Reaped::new(spawn_stand_in(StandIn::Exits)),
-            BridgeConfig::at(path.clone()),
+            &BridgeConfig::at(path.clone()),
         )
         .expect("the exit thread starts");
 
@@ -1361,15 +1395,19 @@ mod tests {
 
         let config =
             BridgeConfig::at(crate::unique_socket_path().expect("the OS has a random source"));
+        let origin = Origin::new(
+            tutti_fixtures::clap_probe(),
+            tutti_plugin_types::Load::new(),
+        );
         let launched = launch_with_state(
             &Locator::at(tutti_fixtures::plugin_server()),
             &config,
-            tutti_fixtures::clap_probe(),
-            PluginFormat::Clap,
-            &Load::new(),
-            SampleRate::SR_48K,
-            None,
-            StateUse::Project,
+            &LoadRequest {
+                origin: &origin,
+                format: PluginFormat::Clap,
+                rate: SampleRate::SR_48K,
+                restore: None,
+            },
         )
         .expect("the reference plugin launches");
         let guard = &launched.server;

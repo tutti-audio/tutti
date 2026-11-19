@@ -1,11 +1,11 @@
 use super::*;
 use crate::fold_uneven;
 use std::f32::consts::TAU;
-use tutti_types::{AmbisonicFormat, AmbisonicOrder, Bed, Speaker};
+use tutti_buffers::{AmbisonicFormat, AmbisonicOrder, Bed, Speaker};
 use tutti_units::{Amplitude, Azimuth, Elevation};
 
 /// Pushes one chunk to a windowed meter and returns the reading it yields.
-fn read(state: &mut WindowedMeter, chunk: Interleaved<'_>) -> Result<WindowedReading> {
+fn read(state: &mut WindowedMeter<f32>, chunk: Interleaved<'_>) -> Result<WindowedReading> {
     let mut readings = Vec::new();
     state.push(chunk, &mut readings)?;
     assert_eq!(readings.len(), 1, "one reading per accepted push");
@@ -496,7 +496,7 @@ fn bad_settings_and_input_are_errors() {
     let cfg = windowed_cfg(48_000.0);
     let mut state = cfg.0.measure(cfg.1).unwrap();
     let tone = windowed_sine(48_000.0, 0.5, |_| 0.1);
-    let fed = |state: &mut WindowedMeter, buf: &[f32]| {
+    let fed = |state: &mut WindowedMeter<f32>, buf: &[f32]| {
         read(state, Interleaved::new(buf, ChannelLayout::STEREO).unwrap())
     };
     fed(&mut state, &tone).unwrap();

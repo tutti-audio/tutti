@@ -5,8 +5,8 @@ use std::io::BufWriter;
 use std::path::Path;
 
 use std::marker::PhantomData;
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::{Interleaved, Sample, Sink, SinkFailed};
-use tutti_types::ChannelLayout;
 use tutti_units::SampleRate;
 
 use crate::encoder::Encoder;
@@ -65,7 +65,7 @@ use crate::spec::Spec;
 /// use tutti_codec::{FileOut, Format, Pcm, Spec};
 /// use tutti_buffers::{Interleaved, Sink};
 /// use tutti_units::SampleRate;
-/// use tutti_types::ChannelLayout;
+/// use tutti_buffers::ChannelLayout;
 ///
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// let dir = tempfile::tempdir()?;

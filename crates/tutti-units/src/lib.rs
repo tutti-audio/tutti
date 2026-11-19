@@ -5,7 +5,7 @@
 //! duplicating: the `Unit` marker trait, the quantities themselves (`Hz`,
 //! `Seconds`, `Db`, `Beat`, `Bpm`, `SampleRate`, ...), the bar counts `BarNumber` and `BarCount`, the integer frame count
 //! `Samples` and its partners `Frame` and `At`, the `Latency` and `Tail` a node
-//! reports, and `UnitParam`, the name of the quantity a parameter carries. Use
+//! reports, `Text`, a bounded UTF-8 string held inline, and `UnitParam`, the name of the quantity a parameter carries. Use
 //! it directly when you need only the vocabulary (a crate that only needs
 //! `Beat`); otherwise reach it through the `tutti` umbrella.
 //!
@@ -78,7 +78,7 @@
 //! Off by default (`default = []`).
 //!
 //! - `serde`: `Serialize`/`Deserialize` on the unit newtypes, `Samples`,
-//!   `Resyncs`, `Frame`, `Latency` and `Tail`. Not `UnitParam`.
+//!   `Resyncs`, `Frame`, `Latency`, `Tail` and `Text`. Not `UnitParam`.
 #![forbid(unsafe_code)]
 #![cfg_attr(not(test), no_std)]
 #![deny(missing_docs)]
@@ -109,6 +109,7 @@ mod play;
 mod resyncs;
 mod samples;
 mod tail;
+mod text;
 mod unit_param;
 
 pub use bars::{BarCount, BarNumber};
@@ -120,6 +121,7 @@ pub use real::Real;
 pub use resyncs::Resyncs;
 pub use samples::Samples;
 pub use tail::Tail;
+pub use text::{Text, TextError};
 pub use unit_param::{ParamAddr, ParamId, ParamKey, UnitAddr, UnitParam, UnitParamOutOfRange};
 pub use units::Quantity;
 pub use units::{

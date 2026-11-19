@@ -24,8 +24,8 @@ use crate::spec::Spec;
 use crate::writer::FormatWriter;
 use mask::channel_mask;
 use std::io::{Seek, SeekFrom, Write};
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::{I24, Interleaved, Sample};
-use tutti_types::ChannelLayout;
 
 const KSDATAFORMAT_SUBTYPE_PCM: [u8; 16] = [
     0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x80, 0x00, 0x00, 0xAA, 0x00, 0x38, 0x9B, 0x71,

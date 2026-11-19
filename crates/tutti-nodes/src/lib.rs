@@ -102,7 +102,7 @@
 //!
 //! ```rust
 //! # use tutti_buffers::Planes;
-//! use tutti_types::MaxBlock;
+//! use tutti_buffers::MaxBlock;
 //! use tutti_units::{Hz, Q, UnitParam};
 //! use tutti_graph::{Prepare, Solo};
 //! use tutti_nodes::{SvfFilterNode, SvfType};
@@ -165,7 +165,7 @@
 //! The `tutti` crate re-exports this one as `tutti::nodes`;
 //! `tutti-polysynth`, `tutti-export` and `tutti-plugin` build on
 //! it. It re-exports the unit types (`Hz`, `Db`, `Seconds`, …) from `tutti-units` and
-//! `Param` from `tutti-types`.
+//! `Param` from `tutti-rt`.
 //!
 //! ## Features
 //!
@@ -252,7 +252,7 @@ mod f64_graph;
 #[cfg(test)]
 mod test_support;
 
-pub use tutti_types::Param;
+pub use tutti_rt::Param;
 pub use tutti_units::{
     Amplitude, ArcDegrees, Azimuth, BitDepth, Bpm, Cents, CentsSpan, CompressionRatio, Db, Depth,
     Drive, Elevation, Feedback, HoldFactor, Hz, Mix, Q, Resonance, SampleRate, Seconds, Semitones,

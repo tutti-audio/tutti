@@ -421,8 +421,8 @@ jobs:
 
       # Some of these properties exist only with `debug_assertions` off: `tutti-graph`'s executor guards assert in
       # debug and render silence in release.
-      - name: Test tutti-units, tutti-types, tutti-rt and tutti-graph (release)
-        run: cargo nextest run --locked --release -p tutti-units -p tutti-types -p tutti-rt -p tutti-graph
+      - name: Test tutti-units, tutti-rt and tutti-graph (release)
+        run: cargo nextest run --locked --release -p tutti-units -p tutti-rt -p tutti-graph
 
       # nextest does not run doctests and does not say so; these are the only tests of the `///` examples.
       - name: Doctests
@@ -470,7 +470,7 @@ jobs:
   miri:
     name: miri (tutti-rt)
     needs: changes
-    # `tutti-rt` names `tutti-units` and `tutti-types` only for vocabulary (`ranged!`, `ChannelLayout`), so the `loom` filter covers what miri reads of them.
+    # `tutti-rt` names `tutti-units` and `tutti-buffers` only for vocabulary (`ranged!`, `ChannelLayout`), so the `loom` filter covers what miri reads of them.
     if: needs.changes.outputs.loom == 'true' && needs.changes.outputs.full == 'true'
     runs-on: ubuntu-24.04
     # About 10 minutes on main; a hang fails here, not at GitHub's cap. Slow pure-arithmetic tests shrink under `cfg!(miri)`.

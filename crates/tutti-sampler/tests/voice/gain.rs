@@ -33,10 +33,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use tutti_buffers::Interleaved;
 use tutti_buffers::Planes;
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::Wave;
 use tutti_graph::{Env, Node, TransportChanges, contract};
 use tutti_sampler::{MemorySource, MemorySourceConfig, Playback, SlotId, VoicePool};
-use tutti_types::ChannelLayout;
 use tutti_units::{Amplitude, Beat, Bpm, Frame, SamplePosition, SampleRate, Samples};
 
 const SR: f64 = 48_000.0;
@@ -105,7 +105,7 @@ fn dc_wave(len: usize) -> Arc<Wave> {
 }
 
 /// A placed voice in a pool at `play_gain`, plus the clock driving it.
-fn pool_at_gain(play_gain: f64) -> (VoicePool, Arc<Clock>) {
+fn pool_at_gain(play_gain: f64) -> (VoicePool<f32>, Arc<Clock>) {
     let clock = Clock::new();
     let source = MemorySource::with_config(
         dc_wave(SR as usize),
@@ -130,7 +130,7 @@ fn pool_at_gain(play_gain: f64) -> (VoicePool, Arc<Clock>) {
 }
 
 /// Render a placed pool, advancing its clock once per block. Returns channel 0.
-fn render_placed(pool: &mut VoicePool, clock: &Clock, blocks: usize) -> Vec<f32> {
+fn render_placed(pool: &mut VoicePool<f32>, clock: &Clock, blocks: usize) -> Vec<f32> {
     let mut out = Vec::with_capacity(blocks * BLOCK);
     for _ in 0..blocks {
         out.extend(clock.block(pool).swap_remove(0));

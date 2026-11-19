@@ -6,10 +6,10 @@
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use tutti_buffers::MaxBlock;
 use tutti_graph::UmpAt;
 use tutti_midi_runtime::{MidiOut, Outgoing, Taken};
 use tutti_session::{Session, midi_sink};
-use tutti_types::MaxBlock;
 use tutti_ump::{Message, MidiGroup, System, Ump};
 use tutti_units::{SampleRate, Samples};
 
@@ -75,6 +75,6 @@ fn the_midi_clock_reaches_the_output_on_the_timers_blocks() {
         .midi()
         .output_terms()
         .expect("the system clock times the out");
-    assert_eq!(terms.audio_output, Some(Duration::ZERO));
+    assert_eq!(terms.audio_output, Some(tutti_units::Seconds(0.0)));
     assert!(terms.is_complete());
 }

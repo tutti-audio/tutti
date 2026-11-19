@@ -1,6 +1,6 @@
 //! A name no other test in the machine picks.
 
-use tutti_types::Mint;
+use tutti_rt::Mint;
 
 /// `<prefix>_<pid>_<n>`: unique across the processes a test run starts (the
 /// process id) and across the calls of one process (a counter).

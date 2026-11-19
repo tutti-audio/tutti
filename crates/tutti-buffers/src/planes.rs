@@ -1,11 +1,11 @@
 //! [`Planes`] and [`PlanesMut`]: one equal-length run per channel.
 
+use crate::ChannelLayout;
 use crate::{BufferError, Mono, MonoMut, Sample, bounds};
 use alloc::vec::Vec;
 use core::fmt;
 use core::iter::FusedIterator;
 use core::ops::Range;
-use tutti_types::ChannelLayout;
 use tutti_units::Samples;
 
 /// Checks the planes' width and that every plane is as long as the first,

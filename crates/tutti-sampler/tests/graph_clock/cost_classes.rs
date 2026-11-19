@@ -8,8 +8,8 @@ use tutti_buffers::Interleaved;
 use tutti_sampler::VoiceWindow;
 
 use std::sync::Arc;
+use tutti_buffers::MaxBlock;
 use tutti_fixtures::signal::plane_bits as bits;
-use tutti_types::MaxBlock;
 
 use tutti_graph::NodeKey;
 use tutti_graph::WorkerPool;
@@ -45,7 +45,7 @@ fn tone(secs: f64) -> Arc<Wave> {
     Arc::new(w)
 }
 
-fn stretched(wave: &Arc<Wave>) -> VoiceNode {
+fn stretched(wave: &Arc<Wave>) -> VoiceNode<f32> {
     VoiceNode::new(Voice {
         source: VoiceSource::Memory(
             MemorySource::placed(Arc::clone(wave), VoiceWindow::from(Beat(0.0)))

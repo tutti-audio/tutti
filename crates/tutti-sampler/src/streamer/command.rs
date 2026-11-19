@@ -6,14 +6,14 @@ use std::sync::Arc;
 use crossbeam_channel::Sender;
 use tutti_buffers::Wave;
 
+use tutti_buffers::ChannelLayout;
 use tutti_rt::RingFloat;
-use tutti_types::ChannelLayout;
 
 use super::open::Opened;
 use crate::voice::Direction;
 use crate::{Loop, OpenError};
 
-tutti_types::id! {
+tutti_rt::id! {
     /// One open stream's identity: minted on the control side when the open is
     /// asked for ([`DiskStreamer::open`](crate::DiskStreamer::open)), never
     /// reused, and what every command about the stream names. A host is
@@ -25,10 +25,10 @@ tutti_types::id! {
 
 /// Where the streamer answers an open: one cell, written once by the streamer
 /// and read once by [`Opening::poll`](crate::Opening::poll).
-pub(crate) type Reply<F = f32> = Sender<Result<Opened<F>, OpenError>>;
+pub(crate) type Reply<F> = Sender<Result<Opened<F>, OpenError>>;
 
 /// What the decode thread made of a file: the whole wave, or why there is none.
-pub(crate) struct Decoded<F: RingFloat = f32>(pub(crate) Result<Arc<Wave<F>>, OpenError>);
+pub(crate) struct Decoded<F: RingFloat>(pub(crate) Result<Arc<Wave<F>>, OpenError>);
 
 impl<F: RingFloat> std::fmt::Debug for Decoded<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -41,7 +41,7 @@ impl<F: RingFloat> std::fmt::Debug for Decoded<F> {
 
 /// Command sent to the Streamer thread.
 #[derive(Debug)]
-pub(crate) enum StreamerCommand<F: RingFloat = f32> {
+pub(crate) enum StreamerCommand<F: RingFloat> {
     /// Open `file_path` as stream `id`, its window starting at frame `start`,
     /// and answer on `reply`.
     Open {

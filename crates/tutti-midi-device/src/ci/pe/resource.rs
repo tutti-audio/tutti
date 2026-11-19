@@ -31,8 +31,8 @@ pub use entry::{EntryError, PeResourceList, ResourceEntry, ResourceEntryBuilder}
 pub use fields::{
     ClusterKind, CtrlKind, CtrlValueKind, ModeId, NotAPeChannel, NotAPriority, NotAStepCount,
     NotSignificantBits, NotVendorName, ParamPath, PeBankProgram, PeChannel, PeDataError,
-    PeDataFault, PeExtensions, PeMidiMode, PeText, Priority, RoleName, SignificantBits, StepCount,
-    TypeHint,
+    PeDataFault, PeExtensions, PeMidiMode, PeText, Place, Priority, RoleName, SignificantBits,
+    StepCount, TypeHint,
 };
 pub use info::{PeDeviceInfo, PeJsonSchema};
 pub use kind::{CanSet, CustomResource, PeResource, ResIdUse, ResourceDefaults};
@@ -48,10 +48,12 @@ pub use server::{
 pub use simple::{
     PeBasicChannelRx, PeBasicChannelTx, PeChannelMode, PeCurrentMode, PeExternalSync, PeLocalOn,
 };
+#[cfg(feature = "serde")]
+pub use state::SavedStateError;
 pub use state::{
     Arrival, CommonState, GetStateError, NotAStateSize, NotUnixSeconds, PeState, PeStateEntry,
     PeStateList, RefusedAt, RestoreError, SavedState, StateDevice, StateId, StateRev, StateSize,
-    StateStamp, UnixSeconds, Verdict, WrongDevice,
+    StateStamp, StateVerdict, UnixSeconds, WrongDevice,
 };
 pub use store::{ResourceStore, StoreError};
 

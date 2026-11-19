@@ -32,6 +32,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use tutti_graph::{EventOut, NodeKey};
@@ -39,7 +40,7 @@ use tutti_modulation::{
     Curve, Declarations, Follower, Law, Lfo, Macro, NoteEnvelope, Polarity, RouteDecl, RouteKey,
     RouteTarget, Source, SourceKey, TargetDecl, TargetKey,
 };
-use tutti_nodes::automation::{LaneControls, RecordMode, Recorder};
+use tutti_nodes::automation::{LaneControls, RecordMode, Recorder, Trajectory};
 use tutti_nodes::{Feed, ReconcileError};
 use tutti_units::{Depth, ParamAddr, ParamId, UnitAddr, UnitParam};
 
@@ -50,6 +51,10 @@ use crate::RangeError;
 use tutti_buffers::Float;
 
 use crate::graph::Graph;
+use crate::value::{
+    Automation, AutomationCell, AutomationField, Declared, Edited, Field, MacroField,
+    PublishedSlot, RateField, SlotId, ValueTable,
+};
 
 /// How long a modulation target may stay unresolved before it is logged:
 /// today's 240 frames at 60 Hz (design 015 §4.4). A target waits an update
@@ -235,7 +240,7 @@ impl Ranged for MixRef {
     type Unit = tutti_units::Mix;
 }
 
-tutti_types::id! {
+tutti_rt::id! {
     /// A modulation source the session declared, named. Minted by [`Mods`]
     /// (`lfo`, `macro_`, `follower`, ...), never built: a value is one this
     /// session returned, so it names a source that was declared, and a removed
@@ -252,12 +257,12 @@ tutti_types::id! {
     /// Nor mint one:
     ///
     /// ```compile_fail,E0624
-    /// let _ = tutti_session::ModSourceId::mint(&tutti_types::Mint::new());
+    /// let _ = tutti_session::ModSourceId::mint(&tutti_rt::Mint::new());
     /// ```
     pub struct ModSourceId;
 }
 
-tutti_types::id! {
+tutti_rt::id! {
     /// A modulation route the session declared, named; as [`ModSourceId`] is for
     /// a source: minted by [`Mods::route`], found again through
     /// [`ModsView::routes`] and [`ModsView::routes_to`].
@@ -271,13 +276,13 @@ tutti_types::id! {
     /// Nor mint one:
     ///
     /// ```compile_fail,E0624
-    /// let _ = tutti_session::ModRouteId::mint(&tutti_types::Mint::new());
+    /// let _ = tutti_session::ModRouteId::mint(&tutti_rt::Mint::new());
     /// ```
     pub struct ModRouteId;
 }
 
 /// The source `key` names: a key of the session's own declarations is minted
-/// from a [`Mint`](tutti_types::Mint), so it is never 0.
+/// from a [`Mint`](tutti_rt::Mint), so it is never 0.
 fn source_id(key: SourceKey) -> ModSourceId {
     ModSourceId::new(key.0).expect("a key the session minted is not 0")
 }
@@ -514,13 +519,10 @@ impl<U: crate::Scalar> AutomationTake<U> {
                 && self.recorder.mode().stops_on_release())
     }
 
-    /// The finished trajectory, as the automation curve it becomes.
+    /// The finished trajectory: the automation curve it becomes.
     #[must_use]
-    pub fn finish(self) -> Arc<dyn Curve>
-    where
-        U: Send + Sync + 'static,
-    {
-        Arc::new(self.recorder.finish())
+    pub fn finish(self) -> Trajectory<U> {
+        self.recorder.finish()
     }
 }
 
@@ -529,7 +531,9 @@ impl<U: crate::Scalar> AutomationTake<U> {
 /// again.
 trait OpenTake: std::fmt::Debug + Send {
     fn is_done(&mut self) -> bool;
-    fn finish(self: Box<Self>) -> Arc<dyn Curve>;
+    /// Makes the trajectory the curve of `cell`, which automates the take's
+    /// unit (`Mods::record` took no other).
+    fn finish_into(self: Box<Self>, cell: &dyn AutomationCell);
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
 }
 
@@ -537,8 +541,10 @@ impl<U: crate::Scalar> OpenTake for AutomationTake<U> {
     fn is_done(&mut self) -> bool {
         AutomationTake::is_done(self)
     }
-    fn finish(self: Box<Self>) -> Arc<dyn Curve> {
-        AutomationTake::finish(*self)
+    fn finish_into(self: Box<Self>, cell: &dyn AutomationCell) {
+        if let Some(cell) = cell.as_any().downcast_ref::<Automation<U>>() {
+            cell.set(Arc::new(AutomationTake::finish(*self)));
+        }
     }
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
@@ -849,20 +855,38 @@ enum OwnFeed {
 
 #[derive(Debug)]
 struct OwnSource {
-    source: Source,
+    /// The source in force: its rate or macro value is the target of
+    /// `ModSourceId::rate` or `value`.
+    source: Arc<Declared<Source>>,
     feed: Option<OwnFeed>,
 }
 
 /// A route the session declared: the reconciler's declaration, and the target
-/// the caller named (the declaration has only its key).
-#[derive(Clone, Copy, Debug)]
+/// the caller named (the declaration has only its key). Its polarity and
+/// curve are the targets' (`ModRouteId::polarity`, `curve`): `decl` holds
+/// their values as declared, and [`decl`](Self::decl) the ones in force.
+#[derive(Debug)]
 struct OwnRoute {
     decl: RouteDecl,
     target: ModTarget,
+    polarity: Arc<Declared<Polarity>>,
+    curve: Arc<Declared<Law>>,
+}
+
+impl OwnRoute {
+    /// The reconciler's declaration, with the polarity and curve in force.
+    fn decl(&self) -> RouteDecl {
+        RouteDecl {
+            polarity: self.polarity.get(),
+            curve: self.curve.get(),
+            ..self.decl
+        }
+    }
 }
 
 struct OwnAutomation {
-    curve: Arc<dyn Curve>,
+    /// The curve in force: the target of `ParamTarget::automation`.
+    cell: Arc<dyn AutomationCell>,
     take: Option<Box<dyn OpenTake>>,
 }
 
@@ -875,10 +899,15 @@ impl std::fmt::Debug for OwnAutomation {
 }
 
 /// The session's own declarations, made through [`Mods`].
-#[derive(Default, Debug)]
+#[derive(Debug)]
 pub(crate) struct OwnMods {
+    /// Where the targets of the declarations are registered.
+    table: Arc<ValueTable>,
+    /// Set by a target's landing: the declarations are built again at the
+    /// next apply.
+    edited: Edited,
     /// Names sources, routes and edges alike.
-    minted: tutti_types::Mint,
+    minted: tutti_rt::Mint,
     sources: BTreeMap<SourceKey, OwnSource>,
     routes: BTreeMap<RouteKey, OwnRoute>,
     ranges: BTreeMap<TargetKey, (f64, f64)>,
@@ -916,6 +945,66 @@ impl OwnDeclarations {
 }
 
 impl OwnMods {
+    pub(crate) fn new(table: Arc<ValueTable>) -> Self {
+        Self {
+            table,
+            edited: Arc::new(AtomicBool::new(false)),
+            minted: tutti_rt::Mint::new(),
+            sources: BTreeMap::new(),
+            routes: BTreeMap::new(),
+            ranges: BTreeMap::new(),
+            automation: BTreeMap::new(),
+            edge_keys: BTreeMap::new(),
+            edge_refs: BTreeMap::new(),
+            built: None,
+        }
+    }
+
+    /// Registers the targets of route `id`.
+    fn provide_route(&self, id: ModRouteId, route: &OwnRoute) {
+        self.table.provide_staged(
+            SlotId::RoutePolarity(id),
+            PublishedSlot::new(Field(Arc::clone(&route.polarity))),
+        );
+        self.table.provide_staged(
+            SlotId::RouteCurve(id),
+            PublishedSlot::new(Field(Arc::clone(&route.curve))),
+        );
+    }
+
+    /// Registers the target `source` has: an LFO's rate, a macro's value.
+    fn provide_source(&self, id: ModSourceId, source: &Arc<Declared<Source>>) {
+        match source.get() {
+            Source::Lfo { .. } => self.table.provide_staged(
+                SlotId::SourceRate(id),
+                PublishedSlot::new(RateField(Arc::clone(source))),
+            ),
+            Source::Macro { .. } => self.table.provide_staged(
+                SlotId::SourceValue(id),
+                PublishedSlot::new(MacroField(Arc::clone(source))),
+            ),
+            Source::Follower { .. } | Source::NoteEnvelope { .. } => {}
+        }
+    }
+
+    /// Forgets the targets of source `id`, and what was written to them.
+    fn retire_source(&self, id: ModSourceId) {
+        self.table
+            .unprovide(&[SlotId::SourceRate(id), SlotId::SourceValue(id)]);
+    }
+
+    /// Forgets the targets of the routes `ids`, and what was written to them.
+    fn retire_routes(&self, ids: impl IntoIterator<Item = RouteKey>) {
+        let slots: Vec<SlotId> = ids
+            .into_iter()
+            .flat_map(|key| {
+                let id = route_id(key);
+                [SlotId::RoutePolarity(id), SlotId::RouteCurve(id)]
+            })
+            .collect();
+        self.table.unprovide(&slots);
+    }
+
     pub(crate) fn is_empty(&self) -> bool {
         self.sources.is_empty()
             && self.routes.is_empty()
@@ -979,7 +1068,7 @@ impl OwnMods {
             if automation.take.as_mut().is_some_and(|take| take.is_done())
                 && let Some(take) = automation.take.take()
             {
-                automation.curve = take.finish();
+                take.finish_into(&*automation.cell);
                 // A take becomes done through `Mods` (closed, or
                 // released), which already cleared it; cleared here
                 // too so the build never depends on that.
@@ -996,6 +1085,10 @@ impl OwnMods {
     /// Builds the declarations if they may have changed since the last
     /// build ([`built`](Self::built) then holds them).
     fn build(&mut self) {
+        // A target landed since the last build: its field is read again.
+        if self.edited.swap(false, Ordering::AcqRel) {
+            self.built = None;
+        }
         if self.built.is_none() {
             self.built = Some(self.declarations());
         }
@@ -1006,14 +1099,14 @@ impl OwnMods {
             sources: self
                 .sources
                 .iter()
-                .map(|(&k, s)| (k, s.source.clone()))
+                .map(|(&k, s)| (k, s.source.get()))
                 .collect(),
-            routes: self.routes.iter().map(|(&k, r)| (k, r.decl)).collect(),
+            routes: self.routes.iter().map(|(&k, r)| (k, r.decl())).collect(),
             targets: declare_targets(
                 self.ranges.iter().map(|(&k, &(min, max))| (k, min, max)),
                 self.automation.iter().map(|(&k, a)| {
                     // An open take: the knob (the gesture) drives the param.
-                    (k, a.take.is_none().then(|| Arc::clone(&a.curve)))
+                    (k, a.take.is_none().then(|| a.cell.curve()))
                 }),
             ),
         }
@@ -1038,9 +1131,24 @@ impl OwnMods {
             TargetKey::Edge(k) => dead.contains(k),
         };
         self.ranges.retain(|t, _| !gone(t));
+        let unautomated: Vec<SlotId> = self
+            .automation
+            .keys()
+            .filter(|t| gone(t))
+            .map(|&t| SlotId::Automation(t))
+            .collect();
         self.automation.retain(|t, _| !gone(t));
-        self.routes
-            .retain(|_, r| !matches!(r.decl.to, RouteTarget::Param(t) if gone(&t)));
+        self.table.unprovide(&unautomated);
+        let lost: Vec<RouteKey> = self
+            .routes
+            .iter()
+            .filter(|(_, r)| matches!(r.decl.to, RouteTarget::Param(t) if gone(&t)))
+            .map(|(&k, _)| k)
+            .collect();
+        for key in &lost {
+            self.routes.remove(key);
+        }
+        self.retire_routes(lost);
     }
 }
 
@@ -1075,10 +1183,10 @@ pub(crate) struct ModSession {
 }
 
 impl ModSession {
-    pub(crate) fn new(warn_after: Duration) -> Self {
+    pub(crate) fn new(warn_after: Duration, table: Arc<ValueTable>) -> Self {
         Self {
             state: ModState::new(warn_after),
-            own: OwnMods::default(),
+            own: OwnMods::new(table),
         }
     }
 
@@ -1326,8 +1434,8 @@ impl OwnRoute {
             source: source_id(self.decl.source),
             target: self.target,
             depth: self.decl.depth,
-            polarity: self.decl.polarity,
-            curve: self.decl.curve,
+            polarity: self.polarity.get(),
+            curve: self.curve.get(),
         }
     }
 }
@@ -1336,7 +1444,7 @@ impl OwnSource {
     fn info(&self, key: SourceKey) -> SourceInfo {
         SourceInfo {
             id: source_id(key),
-            source: self.source.clone(),
+            source: self.source.get(),
             fed_by: match self.feed {
                 Some(OwnFeed::Audio(node) | OwnFeed::Events(node, _)) => Some(node),
                 None => None,
@@ -1346,7 +1454,9 @@ impl OwnSource {
 }
 
 /// A route of the session's own declarations, to edit in place
-/// ([`Mods::route_of`]). What it changes the next update applies.
+/// ([`Mods::route_of`]): its depth. What it changes the next update applies.
+/// Its polarity and curve are values
+/// ([`ModRouteId::polarity`], [`ModRouteId::curve`]).
 #[derive(Debug)]
 pub struct RouteMut<'a> {
     id: ModRouteId,
@@ -1363,18 +1473,6 @@ impl RouteMut<'_> {
     /// Sets the depth, a fraction of the target's range.
     pub fn set_depth(&mut self, depth: Depth) -> &mut Self {
         self.route.decl.depth = depth;
-        self
-    }
-
-    /// Sets how the source's value maps onto the span.
-    pub fn set_polarity(&mut self, polarity: Polarity) -> &mut Self {
-        self.route.decl.polarity = polarity;
-        self
-    }
-
-    /// Sets the law that shapes the source's value.
-    pub fn set_curve(&mut self, curve: Law) -> &mut Self {
-        self.route.decl.curve = curve;
         self
     }
 }
@@ -1407,8 +1505,11 @@ impl Mods<'_> {
 
     fn add_source(&mut self, source: Source, feed: Option<OwnFeed>) -> ModSourceId {
         let key = SourceKey(self.own.mint());
+        let id = source_id(key);
+        let source = Declared::new(source, &self.own.edited);
+        self.own.provide_source(id, &source);
         self.own.sources.insert(key, OwnSource { source, feed });
-        source_id(key)
+        id
     }
 
     /// A source of any kind with no node to feed (an LFO, a macro).
@@ -1444,9 +1545,12 @@ impl Mods<'_> {
         self.add_source(envelope.into(), Some(OwnFeed::Events(midi, port)))
     }
 
-    /// Replaces `id`'s source, keeping what feeds it: a macro's value, an
-    /// LFO's rate. An edit of a time function republishes the lanes it
-    /// reaches, with no commit and no phase reset.
+    /// Replaces `id`'s source, keeping what feeds it, as a declaration: a
+    /// source of another kind, or an LFO of another shape. The value an LFO's
+    /// rate or a macro's position later takes is
+    /// [`ModSourceId::rate`] or [`ModSourceId::value`]; one staged and not
+    /// yet published is dropped with the source it was for. The lanes it
+    /// reaches are republished with no commit.
     ///
     /// # Errors
     ///
@@ -1457,13 +1561,13 @@ impl Mods<'_> {
         id: ModSourceId,
         source: impl Into<Source>,
     ) -> Result<(), NoSuchModSource> {
-        match self.own.sources.get_mut(&SourceKey(id.get())) {
-            Some(s) => {
-                s.source = source.into();
-                Ok(())
-            }
-            None => Err(NoSuchModSource(id)),
-        }
+        let Some(s) = self.own.sources.get(&SourceKey(id.get())) else {
+            return Err(NoSuchModSource(id));
+        };
+        self.own.retire_source(id);
+        s.source.set(source.into());
+        self.own.provide_source(id, &s.source);
+        Ok(())
     }
 
     /// Removes a source and the routes from it.
@@ -1477,7 +1581,18 @@ impl Mods<'_> {
         if self.own.sources.remove(&key).is_none() {
             return Err(NoSuchModSource(id));
         }
-        self.own.routes.retain(|_, r| r.decl.source != key);
+        self.own.retire_source(id);
+        let lost: Vec<RouteKey> = self
+            .own
+            .routes
+            .iter()
+            .filter(|(_, r)| r.decl.source == key)
+            .map(|(&k, _)| k)
+            .collect();
+        for route in &lost {
+            self.own.routes.remove(route);
+        }
+        self.own.retire_routes(lost);
         Ok(())
     }
 
@@ -1505,23 +1620,24 @@ impl Mods<'_> {
             });
         }
         let key = RouteKey(self.own.mint());
-        self.own.routes.insert(
-            key,
-            OwnRoute {
-                decl: RouteDecl {
-                    source,
-                    to: RouteTarget::Param(target_key),
-                    depth: spec.depth,
-                    polarity: spec.polarity,
-                    curve: spec.curve,
-                },
-                target: spec.target,
+        let route = OwnRoute {
+            decl: RouteDecl {
+                source,
+                to: RouteTarget::Param(target_key),
+                depth: spec.depth,
+                polarity: spec.polarity,
+                curve: spec.curve,
             },
-        );
+            target: spec.target,
+            polarity: Declared::new(spec.polarity, &self.own.edited),
+            curve: Declared::new(spec.curve, &self.own.edited),
+        };
+        self.own.provide_route(route_id(key), &route);
+        self.own.routes.insert(key, route);
         Ok(route_id(key))
     }
 
-    /// The route `id`, to edit in place: its depth, polarity or curve.
+    /// The route `id`, to edit in place: its depth.
     ///
     /// # Errors
     ///
@@ -1540,8 +1656,12 @@ impl Mods<'_> {
     /// [`NoSuchModRoute`] when this session declared no route `id` (removed
     /// already, or went with its source); nothing changes.
     pub fn remove_route(&mut self, id: ModRouteId) -> Result<(), NoSuchModRoute> {
-        match self.own.routes.remove(&RouteKey(id.get())) {
-            Some(_) => Ok(()),
+        let key = RouteKey(id.get());
+        match self.own.routes.remove(&key) {
+            Some(_) => {
+                self.own.retire_routes([key]);
+                Ok(())
+            }
             None => Err(NoSuchModRoute(id)),
         }
     }
@@ -1601,18 +1721,37 @@ impl Mods<'_> {
         self.own.ranges.remove(&key).is_some()
     }
 
-    /// `target` follows `curve` (frozen: a trajectory) where it has a value,
-    /// in place of its knob. Replaces the automation it had.
-    pub fn automate(&mut self, target: impl Into<ModTarget>, curve: Arc<dyn Curve>) {
+    /// Declares `target`'s automation, a lane that follows `curve` (a
+    /// trajectory in the unit of the target's value) where it has a value, in
+    /// place of its knob: whether it did. A target that is already automated
+    /// keeps its curve and answers `false`: the curve then is the target's
+    /// value ([`ParamTarget::automation`](crate::ParamTarget::automation)).
+    /// That holds for a lane declared in another unit too.
+    #[must_use = "`false` says the lane was already declared and its curve kept"]
+    pub fn automate<U: crate::Scalar>(
+        &mut self,
+        target: impl Into<ModTarget>,
+        curve: Arc<Trajectory<U>>,
+    ) -> bool {
         let key = self.own.key_of(target.into());
+        if self.own.automation.contains_key(&key) {
+            return false;
+        }
+        let cell = Automation::<U>::new(curve, &self.own.edited);
+        self.own.table.provide_staged(
+            SlotId::Automation(key),
+            PublishedSlot::new(AutomationField(Arc::clone(&cell))),
+        );
         self.own
             .automation
-            .insert(key, OwnAutomation { curve, take: None });
+            .insert(key, OwnAutomation { cell, take: None });
+        true
     }
 
     /// Takes `target`'s automation away (and any take on it).
     pub fn clear_automation(&mut self, target: impl Into<ModTarget>) -> bool {
         let key = self.own.key_of(target.into());
+        self.own.table.unprovide(&[SlotId::Automation(key)]);
         self.own.automation.remove(&key).is_some()
     }
 
@@ -1635,11 +1774,11 @@ impl Mods<'_> {
         let target = target.into();
         let key = self.own.key_of(target);
         match self.own.automation.get_mut(&key) {
-            Some(automation) => {
+            Some(automation) if automation.cell.as_any().is::<Automation<T::Unit>>() => {
                 automation.take = Some(Box::new(take));
                 Ok(())
             }
-            None => Err(NoAutomation { target }),
+            _ => Err(NoAutomation { target }),
         }
     }
 

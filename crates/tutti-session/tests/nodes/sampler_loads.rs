@@ -6,13 +6,13 @@
 use std::path::Path;
 use std::time::{Duration, Instant};
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_sampler::{OpenError, Placement, StreamPhase};
 use tutti_session::{
     AudioEntry, OutPort, PoolState, Root, SamplerError, SamplerEvent, SamplerLoad, Session,
     SessionEvent, audio_file,
 };
-use tutti_types::ChannelLayout;
 use tutti_units::{Beat, SampleRate};
 
 const RATE: f64 = 48_000.0;
@@ -121,7 +121,7 @@ fn a_session_without_a_streamer_refuses_an_open_at_the_call() {
 
 /// The clip over the file's `audio_file` entry, declared in `tier`: the wave of
 /// a resident entry, the stream a streamed entry's path opens.
-fn clip_of(path: &Path, streamed: bool) -> tutti_sampler::Clip {
+fn clip_of(path: &Path, streamed: bool) -> tutti_sampler::Clip<f32> {
     let mut s = session();
     let entry = audio_file("ramp", path);
     s.pool(if streamed { entry.streamed() } else { entry })
@@ -151,7 +151,7 @@ fn clip_of(path: &Path, streamed: bool) -> tutti_sampler::Clip {
 
 /// Renders `clip` at beat 0 on a rolling session for `frames` frames,
 /// waiting first for a streamed clip's ring to prime.
-fn play(clip: tutti_sampler::Clip, frames: usize) -> Vec<f32> {
+fn play(clip: tutti_sampler::Clip<f32>, frames: usize) -> Vec<f32> {
     let mut s = session();
     let (key, handle) = s.graph().add(clip);
     s.graph()

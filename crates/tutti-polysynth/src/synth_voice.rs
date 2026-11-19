@@ -18,6 +18,7 @@
 
 use crate::Portamento;
 use crate::bank::VoiceBank;
+use crate::lane::SynthFloat;
 use crate::mpe::{MpeControl, SLIDE_CENTER};
 use crate::tuning::A4_FREQ;
 use crate::unison::MAX_UNISON_VOICES;
@@ -26,7 +27,8 @@ use crate::{MpeVoiceState, UnisonEngine, UnisonVoiceParams, UnisonVoices};
 use tutti_dsp::{PanLaw, pan_gains};
 use tutti_ump::{MidiChannel, NoteNumber};
 use tutti_units::{
-    Amplitude, Depth, Hz, Pan, Phase, PhaseIncrement, Resonance, SampleRate, Seconds, Semitones,
+    Amplitude, Depth, Hz, Normalized, Pan, Phase, PhaseIncrement, Resonance, SampleRate, Seconds,
+    Semitones, Velocity,
 };
 use tutti_voicing::{ChannelState, DEFAULT_MODULATION_RANGE};
 
@@ -46,7 +48,7 @@ enum GateEdge {
 pub(crate) struct SynthVoice {
     note: NoteNumber,
     channel: MidiChannel,
-    velocity: f32,
+    velocity: Velocity,
     gate: bool,
     edge: GateEdge,
     /// Jump the lanes' pitch and filter to their targets at the next control
@@ -70,15 +72,15 @@ pub(crate) struct SynthVoice {
     /// lane: the SVF's `Q` is fixed for the synth, so CC71 reaches only
     /// [`FilterType::Moog`], as it always has.
     base_filter_resonance: Resonance,
-    velocity_mod_value: f32,
+    velocity_mod_value: Velocity,
     /// Normalized CC74 (Brightness) position, `0..1` centered at `0.5` — a
     /// controller value, not a frequency. Mapped onto `base_filter_cutoff` as
     /// a `4^(v - 0.5)` factor in `modulated_cutoff`.
-    cc_cutoff_value: f32,
+    cc_cutoff_value: Normalized,
     /// Normalized CC71 (Resonance) position, `0..1` with `0.0` inactive — a
     /// controller value, not a `Resonance`. Blends `base_filter_resonance`
     /// toward the 0.95 ceiling in `modulated_resonance`.
-    cc_resonance_value: f64,
+    cc_resonance_value: Normalized,
     filter_mod: FilterModConfig,
     lfo_phase: Phase,
     envelope_level: Amplitude,
@@ -104,14 +106,15 @@ pub(crate) struct SynthVoice {
 /// 2 section 3.3.4's square law (`gain in dB = 40 * log10(cc7/127)`) on their
 /// product, relative to the defaults (Volume 100, Expression 127), so a channel
 /// that has been told nothing sounds at the voice's own level.
-fn channel_level(channel: &ChannelState) -> f32 {
-    let relative = channel.volume() * channel.expression() / ChannelState::DEFAULT_LEVEL;
-    relative * relative
+fn channel_level(channel: &ChannelState) -> Amplitude {
+    let relative = f64::from(channel.volume()) * f64::from(channel.expression())
+        / f64::from(ChannelState::DEFAULT_LEVEL);
+    Amplitude(relative * relative)
 }
 
 /// The cutoff factor of a control `x` off its centre: `4^x`, two octaves per unit.
-fn two_octave_factor(x: f32) -> f64 {
-    (Semitones::OCTAVE * (2.0 * f64::from(x))).to_pitch_ratio()
+fn two_octave_factor(x: f64) -> f64 {
+    (Semitones::OCTAVE * (2.0 * x)).to_pitch_ratio()
 }
 
 /// The channel's pan (CC 10) as a pair of gains on a voice's own: RP-036's
@@ -161,7 +164,7 @@ impl SynthVoice {
     }
     /// `1.0` while the key (or a pedal) holds the gate open, `0.0` after.
     #[cfg(test)]
-    pub(crate) fn gate_value(&self) -> f32 {
+    pub(crate) fn gate_value(&self) -> f64 {
         if self.gate { 1.0 } else { 0.0 }
     }
     #[cfg(test)]
@@ -171,9 +174,9 @@ impl SynthVoice {
 
     /// The voice's amplitude right now: its envelope times its gain. What the
     /// allocator compares when it steals the quietest voice.
-    pub(crate) fn output_level(
+    pub(crate) fn output_level<F: SynthFloat>(
         &self,
-        bank: &VoiceBank,
+        bank: &VoiceBank<F>,
         index: usize,
         channel: &ChannelState,
     ) -> Amplitude {
@@ -200,7 +203,7 @@ impl SynthVoice {
 
     /// Whether the voice has finished: gate closed, no edge pending, and the
     /// envelope's release run out on its lanes.
-    pub(crate) fn is_finished(&self, bank: &VoiceBank, index: usize) -> bool {
+    pub(crate) fn is_finished<F: SynthFloat>(&self, bank: &VoiceBank<F>, index: usize) -> bool {
         !self.gate && self.edge == GateEdge::None && bank.is_idle(bank.lane(index, 0))
     }
 
@@ -224,7 +227,7 @@ impl SynthVoice {
         Self {
             note: NoteNumber::default(),
             channel: MidiChannel::FIRST,
-            velocity: 0.0,
+            velocity: Velocity::SILENT,
             gate: false,
             edge: GateEdge::None,
             snap_tone: false,
@@ -233,9 +236,9 @@ impl SynthVoice {
             pitch: A4_FREQ,
             base_filter_cutoff,
             base_filter_resonance,
-            velocity_mod_value: 1.0,
-            cc_cutoff_value: 0.5,
-            cc_resonance_value: 0.0,
+            velocity_mod_value: Velocity::MAX,
+            cc_cutoff_value: Normalized::of(0.5),
+            cc_resonance_value: Normalized::of(0.0),
             filter_mod: config.filter_mod,
             lfo_phase: Phase::START,
             envelope_level: Amplitude::SILENT,
@@ -257,7 +260,7 @@ impl SynthVoice {
         &mut self,
         note: NoteNumber,
         channel: MidiChannel,
-        velocity: f32,
+        velocity: Velocity,
         base_freq: impl Into<Hz>,
     ) {
         let base_freq = base_freq.into();
@@ -293,16 +296,16 @@ impl SynthVoice {
     pub(crate) fn reset(&mut self) {
         self.note = NoteNumber::default();
         self.channel = MidiChannel::FIRST;
-        self.velocity = 0.0;
+        self.velocity = Velocity::SILENT;
         self.envelope_level = Amplitude::SILENT;
         self.active = false;
         self.gate = false;
         self.edge = GateEdge::None;
         self.snap_tone = false;
         self.snap_gain = false;
-        self.velocity_mod_value = 1.0;
-        self.cc_cutoff_value = 0.5;
-        self.cc_resonance_value = 0.0;
+        self.velocity_mod_value = Velocity::MAX;
+        self.cc_cutoff_value = Normalized::of(0.5);
+        self.cc_resonance_value = Normalized::of(0.0);
         self.lfo_phase = Phase::START;
         self.mpe.reset();
         self.base_note_freq = A4_FREQ;
@@ -390,9 +393,9 @@ impl SynthVoice {
     ///
     /// Modulation is evaluated here, once per control step, and the bank ramps
     /// the lanes to it.
-    pub(crate) fn drive(
+    pub(crate) fn drive<F: SynthFloat>(
         &mut self,
-        bank: &mut VoiceBank,
+        bank: &mut VoiceBank<F>,
         index: usize,
         frames: usize,
         unison: Option<&UnisonEngine>,
@@ -457,11 +460,13 @@ impl SynthVoice {
     /// Velocity, pressure (the note's and the channel's), per-note gain and the
     /// channel's Volume and Expression, combined.
     fn voice_gain(&self, channel: &ChannelState) -> Amplitude {
-        let (pressure_gain, note_gain) = self.mpe.gain_factors(channel.pressure());
-        // The factors are `f32` figures: their product widens once.
-        Amplitude(f64::from(
-            self.velocity * pressure_gain * note_gain * channel_level(channel),
-        ))
+        let factors = self.mpe.gain_factors(channel.pressure());
+        Amplitude(
+            self.velocity.get()
+                * factors.pressure.get()
+                * factors.note.get()
+                * channel_level(channel).get(),
+        )
     }
 
     /// The cutoff every modulation source leaves, advancing the filter LFO by
@@ -493,7 +498,7 @@ impl SynthVoice {
 
         if fm.velocity_depth > Depth::of(0.0) {
             let depth = fm.velocity_depth.get();
-            let vel_mult = 1.0 - depth * 0.5 + f64::from(self.velocity_mod_value) * depth * 0.5;
+            let vel_mult = 1.0 - depth * 0.5 + self.velocity_mod_value.get() * depth * 0.5;
             cutoff *= vel_mult;
         }
 
@@ -508,14 +513,13 @@ impl SynthVoice {
             cutoff *= 1.0 + lfo_val * fm.lfo_depth.get() * 0.5;
         }
 
-        if self.cc_cutoff_value != 0.5 {
-            cutoff *= two_octave_factor(self.cc_cutoff_value - 0.5);
+        if self.cc_cutoff_value != Normalized::of(0.5) {
+            cutoff *= two_octave_factor(self.cc_cutoff_value.get() - 0.5);
         }
 
         // Slide modulates the cutoff around its center.
         if let Some(slide) = self.mpe.effective_slide() {
-            // The cutoff is `f32`: the offset narrows once.
-            cutoff *= two_octave_factor((slide.get() - SLIDE_CENTER.get()) as f32);
+            cutoff *= two_octave_factor(slide.get() - SLIDE_CENTER.get());
         }
 
         cutoff
@@ -524,29 +528,29 @@ impl SynthVoice {
     /// The ladder resonance after CC71, which blends the base toward a 0.95
     /// ceiling.
     fn modulated_resonance(&self) -> Resonance {
-        if self.cc_resonance_value == 0.0 {
+        if self.cc_resonance_value == Normalized::of(0.0) {
             return self.base_filter_resonance;
         }
         let base = self.base_filter_resonance.get();
         let max_res = 0.95;
-        Resonance(base + self.cc_resonance_value * (max_res - base))
+        Resonance(base + self.cc_resonance_value.get() * (max_res - base))
     }
 
     /// CC 74 and CC 71 positions. Observability for tests.
     #[cfg(test)]
-    pub(crate) fn sound_controllers(&self) -> (f32, f64) {
+    pub(crate) fn sound_controllers(&self) -> (Normalized, Normalized) {
         (self.cc_cutoff_value, self.cc_resonance_value)
     }
 
-    pub(crate) fn set_velocity_mod(&mut self, value: f32) {
+    pub(crate) fn set_velocity_mod(&mut self, value: Velocity) {
         self.velocity_mod_value = value;
     }
 
-    pub(crate) fn set_cc_cutoff(&mut self, value: f32) {
+    pub(crate) fn set_cc_cutoff(&mut self, value: Normalized) {
         self.cc_cutoff_value = value;
     }
 
-    pub(crate) fn set_filter_resonance(&mut self, value: f64) {
+    pub(crate) fn set_filter_resonance(&mut self, value: Normalized) {
         self.cc_resonance_value = value;
     }
 

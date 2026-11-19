@@ -12,13 +12,13 @@ use tutti_buffers::Interleaved;
 use tutti_buffers::Planes;
 
 use std::sync::Arc;
+use tutti_buffers::MaxBlock;
 use tutti_graph::declick_frames;
-use tutti_types::MaxBlock;
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::Wave;
 use tutti_graph::{Env, Node, Offset, Prepare, TransportChanges, TransportPosition, contract};
 use tutti_music::{FrameClock, LoopRange};
-use tutti_types::ChannelLayout;
 use tutti_units::{Beat, BeatDuration, Bpm, Frame, SampleRate, Samples};
 
 use super::memory_source::MemorySource;
@@ -69,9 +69,9 @@ enum Host {
 }
 
 enum Hosted {
-    Pool(VoicePool),
-    Node(MemorySource),
-    Voice(Option<VoiceNode>),
+    Pool(VoicePool<f32>),
+    Node(MemorySource<f32>),
+    Voice(Option<VoiceNode<f32>>),
 }
 
 /// Runs a test on each [`Host`], as `name::pool` and `name::node`.

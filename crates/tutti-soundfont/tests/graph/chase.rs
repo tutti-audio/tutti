@@ -6,6 +6,7 @@
 
 use std::sync::{Arc, Mutex};
 
+use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_fixtures::midi;
 use tutti_graph::{
     Buses, Chase, Cx, Editor, EventCapacity, EventEdge, EventIn, EventInletNode, EventInletWriter,
@@ -17,7 +18,6 @@ use tutti_midi_protocol::widen_velocity;
 use tutti_polysynth::{PolySynth, SynthConfig};
 use tutti_sf2::SoundFont;
 use tutti_soundfont::{Settings, SoundFontUnit};
-use tutti_types::{ChannelLayout, MaxBlock};
 use tutti_ump::{
     Address, Bank, BendValue, CCNumber, Message, MidiChannel, MidiGroup, U7, Ump, Voice2,
 };
@@ -33,7 +33,7 @@ fn font() -> Arc<SoundFont> {
     Arc::new(SoundFont::from_reader(&mut file).expect("parses"))
 }
 
-fn unit() -> SoundFontUnit {
+fn unit() -> SoundFontUnit<f32> {
     SoundFontUnit::new(font(), Settings::new()).expect("builds")
 }
 

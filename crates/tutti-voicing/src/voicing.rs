@@ -55,7 +55,7 @@ use alloc::vec::Vec;
 use core::num::{NonZeroU16, NonZeroUsize};
 
 use tutti_midi_protocol::{
-    GeneralMidi, Heard, KeyTable, Timing, TuningMessage, Universal, narrow_value,
+    GeneralMidiMode, Heard, KeyTable, Timing, TuningMessage, Universal, narrow_value,
 };
 use tutti_ump::{
     Address, Attribute, CCNumber, Message, MidiChannel, MidiGroup, NoteId, NoteNumber,
@@ -1043,7 +1043,7 @@ impl Voicing {
     }
 
     /// General MIDI System On or Off (see [`universal`](Self::universal)).
-    fn general_midi(&mut self, mode: GeneralMidi) {
+    fn general_midi(&mut self, mode: GeneralMidiMode) {
         for i in 0..self.notes.len() {
             let id = self.notes[i].id;
             self.push(Command::Cut(id));
@@ -1051,8 +1051,8 @@ impl Voicing {
         self.forget_notes();
         self.per_note.clear();
         let range = match mode {
-            GeneralMidi::On => GENERAL_MIDI_BEND_RANGE,
-            GeneralMidi::Off => self.rules.bend_range,
+            GeneralMidiMode::On => GENERAL_MIDI_BEND_RANGE,
+            GeneralMidiMode::Off => self.rules.bend_range,
         };
         self.channels = [ChannelState::new(range); CHANNELS];
         self.tuning.clear_octave();

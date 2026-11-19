@@ -1,9 +1,9 @@
 //! [`StereoPlanes`]: exactly two equal-length planes.
 
+use crate::ChannelLayout;
 use crate::{BufferError, Mono, Sample, bounds};
 use core::fmt;
 use core::ops::Range;
-use tutti_types::ChannelLayout;
 use tutti_units::Samples;
 
 /// Two equal-length channel planes: the deinterleaved stereo pair that

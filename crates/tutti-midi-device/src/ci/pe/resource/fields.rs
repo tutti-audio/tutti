@@ -14,8 +14,6 @@ tutti_units::ranged! {
     /// Channel of the first Group of the block and on across its Groups
     /// (M2-105 Table 10, M2-117 Table 5).
     #[derive(Eq, Hash, PartialOrd, Ord)]
-    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-    #[cfg_attr(feature = "serde", serde(try_from = "u16", into = "u16"))]
     PeChannel(u16), NotAPeChannel, "a channel of a function block (1 to 256)",
     |raw| raw >= 1 && raw <= 256
 }
@@ -24,8 +22,6 @@ tutti_units::ranged! {
     /// The priority of a controller: 1, the most important, to 5, hidden
     /// (M2-117 §2.1.1.1).
     #[derive(Eq, Hash, PartialOrd, Ord)]
-    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-    #[cfg_attr(feature = "serde", serde(try_from = "u8", into = "u8"))]
     Priority(u8), NotAPriority, "a priority (1 to 5)", |raw| raw >= 1 && raw <= 5
 }
 
@@ -33,8 +29,6 @@ tutti_units::ranged! {
     /// The significant bits of a 32-bit controller value: 1 to 32 (M2-117
     /// Table 5).
     #[derive(Eq, Hash, PartialOrd, Ord)]
-    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-    #[cfg_attr(feature = "serde", serde(try_from = "u8", into = "u8"))]
     SignificantBits(u8), NotSignificantBits, "a count of significant bits (1 to 32)",
     |raw| raw >= 1 && raw <= 32
 }
@@ -42,8 +36,6 @@ tutti_units::ranged! {
 tutti_units::ranged! {
     /// The number of steps of a stepped controller (M2-117 Table 5): at least 1.
     #[derive(Eq, Hash, PartialOrd, Ord)]
-    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-    #[cfg_attr(feature = "serde", serde(try_from = "u32", into = "u32"))]
     StepCount(u32), NotAStepCount, "a step count (at least 1)", |raw| raw >= 1
 }
 
@@ -286,8 +278,8 @@ pub(super) fn u7_array<const N: usize>(json: &PeJson) -> Option<[U7; N]> {
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[error("{place}: {fault}")]
 pub struct PeDataError {
-    /// The property, or the Resource when the whole Property Data is the fault.
-    pub place: String,
+    /// Where the fault is.
+    pub place: Place,
     /// What is wrong with it.
     pub fault: PeDataFault,
 }
@@ -318,8 +310,62 @@ pub enum PeDataFault {
     NotAnObject,
 }
 
+/// Where in Property Data a fault is: what holds it (a Resource, or an entry of
+/// one), and the property of it when one is at fault, so the whole Property
+/// Data is the fault when there is none.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Place {
+    what: String,
+    property: Option<String>,
+}
+
+impl Place {
+    /// The Resource, or the entry of one, as a whole.
+    #[must_use]
+    pub fn of(what: impl Into<String>) -> Self {
+        Self {
+            what: what.into(),
+            property: None,
+        }
+    }
+
+    /// The property `name` of it.
+    #[must_use]
+    pub fn property(mut self, name: impl Into<String>) -> Self {
+        self.property = Some(name.into());
+        self
+    }
+
+    /// What holds the fault: a Resource, or an entry of one.
+    #[must_use]
+    pub fn what(&self) -> &str {
+        &self.what
+    }
+
+    /// The property at fault, or `None` when the whole of [`what`](Self::what) is.
+    #[must_use]
+    pub fn at_property(&self) -> Option<&str> {
+        self.property.as_deref()
+    }
+}
+
+impl fmt::Display for Place {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.property {
+            Some(property) => write!(f, "{}.{property}", self.what),
+            None => f.write_str(&self.what),
+        }
+    }
+}
+
+impl From<&str> for Place {
+    fn from(what: &str) -> Self {
+        Self::of(what)
+    }
+}
+
 impl PeDataError {
-    pub(super) fn new(place: impl Into<String>, fault: PeDataFault) -> Self {
+    pub(super) fn new(place: impl Into<Place>, fault: PeDataFault) -> Self {
         Self {
             place: place.into(),
             fault,
@@ -406,7 +452,7 @@ impl<'a> Fields<'a> {
     }
 
     pub(super) fn fail(&self, name: &str, fault: PeDataFault) -> PeDataError {
-        PeDataError::new(format!("{}.{name}", self.what), fault)
+        PeDataError::new(Place::of(self.what).property(name), fault)
     }
 
     fn take(&mut self, name: &str) -> Option<&'a PeJson> {
@@ -455,7 +501,7 @@ impl<'a> Fields<'a> {
         let mut extensions = PeExtensions::default();
         for (name, value) in self.left {
             let valid = PropertyName::new(name).ok_or_else(|| {
-                PeDataError::new(format!("{}.{name}", self.what), PeDataFault::BadName)
+                PeDataError::new(Place::of(self.what).property(name), PeDataFault::BadName)
             })?;
             if valid.as_str().starts_with("x-") {
                 // The name starts `x-`, so the insert cannot refuse it.

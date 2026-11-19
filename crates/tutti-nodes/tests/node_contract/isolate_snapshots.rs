@@ -14,6 +14,7 @@
 //! `a_fork_freezes_a_live_curve`) and the `testing` stimulus nodes.
 
 use tutti_buffers::Mono;
+use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_graph::ParamNode;
 use tutti_graph::contract::IsolateRow;
 use tutti_nodes::{
@@ -33,7 +34,6 @@ use tutti_nodes::{
     PlateReverbConfig, PlateReverbNode, StereoWidthConfig, StereoWidthNode, TiltFilterConfig,
     TiltFilterNode,
 };
-use tutti_types::{BusTopology, ChannelLayout};
 use tutti_units::{
     Amplitude, CompressionRatio, Db, Depth, Drive, Feedback, Hz, Q, Resonance, Samples, Seconds,
     Semitones, StereoWidth, UnitAddr, UnitParam,
@@ -485,7 +485,7 @@ fn bus_strip() {
     IsolateRow::new("BusStripNode (stereo)", BusStripNode::stereo)
         .control("volume", |s| s.set_volume(Amplitude(0.5)))
         .control("balance", |s| {
-            assert!(s.param_set().set(UnitParam::Balance, -0.7))
+            assert!(ParamNode::<f32>::param_set(s).set(UnitParam::Balance, -0.7))
         })
         .check();
 }

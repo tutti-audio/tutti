@@ -187,15 +187,6 @@ pub enum ConnectError {
 #[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum MidiError {
-    /// A MIDI file could not be read.
-    #[error("MIDI file: {0}")]
-    Read(#[from] tutti_midi_file::ReadError),
-
-    /// A session job did not finish ([`Midi::load_file`](crate::Midi::load_file)):
-    /// its work panicked, or the spawner dropped it.
-    #[error("MIDI load: {0}")]
-    Job(#[from] crate::WorkerError),
-
     /// There is no route rule with this id ([`Midi::unroute`](crate::Midi::unroute)):
     /// removed already, or never added.
     #[error("no MIDI route {0:?}")]
@@ -342,9 +333,9 @@ pub enum Error {
         /// The root generation in force.
         root: tutti_graph::RootId,
         /// The root's channels.
-        width: tutti_types::ChannelLayout,
+        width: tutti_buffers::ChannelLayout,
         /// The device's channels.
-        device: tutti_types::ChannelLayout,
+        device: tutti_buffers::ChannelLayout,
         /// Why the fold is refused.
         source: tutti_buffers::FoldError,
     },
@@ -358,7 +349,7 @@ pub enum Error {
         /// The map in force.
         map: tutti_engine::OutputMap,
         /// The device's channels.
-        device: tutti_types::ChannelLayout,
+        device: tutti_buffers::ChannelLayout,
         /// What the map broke on.
         source: tutti_engine::RoutingError,
     },

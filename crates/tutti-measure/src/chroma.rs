@@ -12,7 +12,7 @@
 //!
 //! Column `k` of a frame is `PitchClass::ALL[k]`, so column 0 is C. A frame is
 //! divided by its largest column, so each reads `0..=1` with a peak of exactly
-//! 1: a plain `f32` rather than a unit, because no unit covers a relative
+//! 1: a plain `f64` rather than a unit, because no unit covers a relative
 //! energy and `Confidence` is an estimator's certainty. A frame whose strongest
 //! in-band partial is under -90 dBFS holds no pitch and reads all zero,
 //! never NaN; the floor is absolute because a relative one would call the
@@ -58,12 +58,12 @@ use tutti_buffers::{Mono, Sample};
 use tutti_music::Note;
 use tutti_units::{Cents, Db, Hz, SampleRate, Samples, Semitones};
 
-use crate::convert::{all_finite, for_blocks, to_f32};
+use crate::convert::{all_finite, for_blocks, widen};
 use crate::framing::{
     FrameCutter, Framing, check_frame_count, check_nyquist, check_overlap, check_window,
 };
 use crate::{Error, Measure, Meter, Result};
-use tutti_dsp::Complex32;
+use tutti_dsp::Complex64;
 use tutti_dsp::FftScratch;
 use tutti_dsp::StftGeometry;
 use tutti_dsp::parabolic_peak;
@@ -94,13 +94,14 @@ ranged! {
 ranged! {
     /// The weight of a subharmonic, per order past the first: finite and in
     /// `(0, 1]`.
-    HarmonicDecay(f32), HarmonicDecayError, "a harmonic decay within (0, 1]",
+    HarmonicDecay(f64), HarmonicDecayError, "a harmonic decay within (0, 1]",
     |raw| raw > 0.0 && raw <= 1.0
 }
 
 ranged! {
     /// How far under a frame's strongest peak a peak is still counted: within
-    /// `-120..=0` dB, the f32 range of a magnitude ratio.
+    /// `-120..=0` dB, a practical bound: a peak a million times under the
+    /// strongest is below any spectrum's resolution.
     PeakFloor(Db), PeakFloorError, "a peak floor within -120..=0 dB",
     |raw| raw.get() >= -120.0 && raw.get() <= 0.0
 }
@@ -346,19 +347,18 @@ impl ChromaPlan {
 
     /// Calls `visit(frequency, energy)` for each peak of `magnitudes` that
     /// counts, and returns false, calling nothing, for a frame with no pitch.
-    fn peaks(&self, magnitudes: &[f32], mut visit: impl FnMut(f64, f32)) -> bool {
+    fn peaks(&self, magnitudes: &[f64], mut visit: impl FnMut(f64, f64)) -> bool {
         // The terminals check the band before any frame is folded.
         let Ok((lo, hi)) = self.band_bins() else {
             return false;
         };
-        let top = magnitudes[lo..=hi].iter().copied().fold(0.0f32, f32::max);
+        let top = magnitudes[lo..=hi].iter().copied().fold(0.0f64, f64::max);
         // A sine of amplitude `a` reads `a * magnitude_gain / 2`.
-        let amplitude = 2.0 * f64::from(top) / f64::from(self.geometry.magnitude_gain());
+        let amplitude = 2.0 * top / self.geometry.magnitude_gain::<f64>();
         if amplitude.is_nan() || amplitude < SILENCE_FLOOR.to_amplitude().get() {
             return false;
         }
-        // The magnitudes are `f32`: the floor's ratio narrows once.
-        let floor = top * self.peak_floor.get().to_amplitude().get() as f32;
+        let floor = top * self.peak_floor.get().to_amplitude().get();
         // A floor that compares false with a peak (a NaN) keeps none.
         for i in local_maxima(magnitudes, lo..hi + 1).filter(|&i| magnitudes[i] >= floor) {
             let m = magnitudes[i];
@@ -372,16 +372,16 @@ impl ChromaPlan {
     }
 
     /// Adds a peak's distance from the equal-tempered grid to `sums`.
-    fn tune(frequency: f64, energy: f32, sums: &mut TuningSums) {
+    fn tune(frequency: f64, energy: f64, sums: &mut TuningSums) {
         let off = off_grid(frequency);
         let turn = off * std::f64::consts::TAU;
-        let w = f64::from(energy);
+        let w = energy;
         sums.cos += w * libm::cos(turn);
         sums.sin += w * libm::sin(turn);
     }
 
     /// Folds a peak into the twelve classes at `tuning` semitones sharp.
-    fn fold(&self, frequency: f64, energy: f32, tuning: Semitones, frame: &mut [f32; CLASSES]) {
+    fn fold(&self, frequency: f64, energy: f64, tuning: Semitones, frame: &mut [f64; CLASSES]) {
         let mut weight = energy;
         for order in 1..=self.harmonics.get() {
             let sub = frequency / order as f64;
@@ -417,10 +417,10 @@ fn class_of(frequency: f64, tuning: Semitones) -> usize {
 /// Parabolic interpolation of the log magnitude through three bins, whose
 /// middle one is the peak: its offset from the middle bin, within
 /// `-0.5..=0.5`, and the magnitude there.
-fn interpolate(below: f32, mid: f32, above: f32) -> (f64, f32) {
-    let ln = |m: f32| libm::log(f64::from(m).max(TINY));
+fn interpolate(below: f64, mid: f64, above: f64) -> (f64, f64) {
+    let ln = |m: f64| libm::log(m.max(TINY));
     let peak = parabolic_peak(ln(below), ln(mid), ln(above));
-    (peak.offset, libm::exp(peak.value) as f32)
+    (peak.offset, libm::exp(peak.value))
 }
 
 /// The energy-weighted circular mean of the peaks' off-grid distances, kept as
@@ -447,7 +447,7 @@ impl TuningSums {
 /// A chromagram: a `frames x 12` grid and the tuning it was folded with.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Chroma {
-    grid: Grid<f32>,
+    grid: Grid<f64>,
     tuning: Cents,
     framing: Framing,
 }
@@ -455,7 +455,7 @@ pub struct Chroma {
 impl Chroma {
     /// A chroma of `grid` taken at `framing`, with `tuning`.
     #[cfg(test)]
-    pub(crate) fn new(grid: Grid<f32>, tuning: Cents, framing: Framing) -> Self {
+    pub(crate) fn new(grid: Grid<f64>, tuning: Cents, framing: Framing) -> Self {
         Self {
             grid,
             tuning,
@@ -466,7 +466,7 @@ impl Chroma {
     /// One row per frame, one column per pitch class from C, each `0..=1`.
     #[inline]
     #[must_use]
-    pub fn grid(&self) -> &Grid<f32> {
+    pub fn grid(&self) -> &Grid<f64> {
         &self.grid
     }
 
@@ -480,7 +480,7 @@ impl Chroma {
 
     /// The mean of the frames, per class; all zero for no frames.
     #[must_use]
-    pub fn mean(&self) -> [f32; CLASSES] {
+    pub fn mean(&self) -> [f64; CLASSES] {
         mean_of_rows(&self.grid)
     }
 
@@ -493,19 +493,19 @@ impl Chroma {
 }
 
 /// The per-column mean of a `frames x 12` grid; all zero for no frames.
-pub(crate) fn mean_of_rows(grid: &Grid<f32>) -> [f32; CLASSES] {
+pub(crate) fn mean_of_rows(grid: &Grid<f64>) -> [f64; CLASSES] {
     let mut sum = [0.0f64; CLASSES];
     for row in grid.rows() {
         for (s, &v) in sum.iter_mut().zip(row) {
-            *s += f64::from(v);
+            *s += v;
         }
     }
     mean_of(&sum, grid.frames())
 }
 
-fn mean_of(sum: &[f64; CLASSES], frames: FrameCount) -> [f32; CLASSES] {
+fn mean_of(sum: &[f64; CLASSES], frames: FrameCount) -> [f64; CLASSES] {
     let n = frames.get().max(1) as f64;
-    sum.map(|s| (s / n) as f32)
+    sum.map(|s| s / n)
 }
 
 /// What a run of frames carries: a running mean and the tuning sums, and the
@@ -513,9 +513,9 @@ fn mean_of(sum: &[f64; CLASSES], frames: FrameCount) -> [f32; CLASSES] {
 #[derive(Debug, Clone)]
 struct ChromaFold {
     plan: ChromaPlan,
-    window: Vec<f32>,
-    spectrum: Vec<Complex32>,
-    magnitudes: Vec<f32>,
+    window: Vec<f64>,
+    spectrum: Vec<Complex64>,
+    magnitudes: Vec<f64>,
     sum: [f64; CLASSES],
     frames: FrameCount,
     sums: TuningSums,
@@ -528,7 +528,7 @@ impl ChromaFold {
         Self {
             plan,
             window: plan.geometry.window_coefficients(),
-            spectrum: vec![Complex32::default(); window / 2 + 1],
+            spectrum: vec![Complex64::default(); window / 2 + 1],
             magnitudes: vec![0.0; window / 2 + 1],
             sum: [0.0; CLASSES],
             frames: FrameCount(0),
@@ -544,7 +544,7 @@ impl ChromaFold {
     }
 
     /// The mean of the frames folded so far, per class.
-    fn mean(&self) -> [f32; CLASSES] {
+    fn mean(&self) -> [f64; CLASSES] {
         mean_of(&self.sum, self.frames)
     }
 
@@ -558,7 +558,7 @@ impl ChromaFold {
     }
 
     /// Leaves the magnitudes of `samples`, one frame, in `self.magnitudes`.
-    fn transform(&mut self, samples: &[f32], fft: &mut FftScratch) {
+    fn transform(&mut self, samples: &[f64], fft: &mut FftScratch<f64>) {
         fft.forward(Mono::new(samples), &self.window, &mut self.spectrum);
         for (m, bin) in self.magnitudes.iter_mut().zip(&self.spectrum) {
             *m = bin.norm();
@@ -568,11 +568,11 @@ impl ChromaFold {
     /// Folds one frame of `samples` (exactly one finite window) and adds it to
     /// the running mean. Returns the frame's chroma, `0..=1` per class, zero
     /// for a frame with no pitch.
-    fn fold_frame(&mut self, samples: &[f32], fft: &mut FftScratch) -> [f32; CLASSES] {
+    fn fold_frame(&mut self, samples: &[f64], fft: &mut FftScratch<f64>) -> [f64; CLASSES] {
         self.transform(samples, fft);
         let plan = self.plan;
 
-        let mut frame = [0.0f32; CLASSES];
+        let mut frame = [0.0f64; CLASSES];
         let tuning = match plan.tuning {
             Tuning::Fixed(offset) => offset.get(),
             Tuning::Estimate => {
@@ -584,14 +584,14 @@ impl ChromaFold {
         let tuning = tuning.to_semitones();
         plan.peaks(&self.magnitudes, |f, e| plan.fold(f, e, tuning, &mut frame));
 
-        let max = frame.iter().copied().fold(0.0f32, f32::max);
+        let max = frame.iter().copied().fold(0.0f64, f64::max);
         if max > 0.0 {
             frame.iter_mut().for_each(|v| *v /= max);
         } else {
             frame = [0.0; CLASSES];
         }
         for (s, &v) in self.sum.iter_mut().zip(&frame) {
-            *s += f64::from(v);
+            *s += v;
         }
         self.frames = FrameCount(self.frames.get() + 1);
         frame
@@ -605,7 +605,7 @@ pub struct ChromaFrame {
     pub frame: Samples,
     /// The frame's chroma, `0..=1` per pitch class from C; all zero for a frame
     /// with no pitch.
-    pub bins: [f32; CLASSES],
+    pub bins: [f64; CLASSES],
 }
 
 /// The reading of a [`ChromaMeter`]: the mean of the frames folded and the
@@ -614,7 +614,7 @@ pub struct ChromaFrame {
 pub struct ChromaSummary {
     /// The mean of the frames, per pitch class from C; all zero before the
     /// first frame.
-    pub mean: [f32; CLASSES],
+    pub mean: [f64; CLASSES],
     /// The tuning in use: the config's fixed value, or the estimate from the
     /// peaks seen.
     pub tuning: Cents,
@@ -635,10 +635,10 @@ pub struct ChromaSummary {
 /// there), and its cost is a transform per frame: fit for a consumer thread
 /// that drains a tap, not for an audio callback.
 #[derive(Debug)]
-pub struct ChromaMeter<S: Sample = f32> {
+pub struct ChromaMeter<S: Sample> {
     fold: ChromaFold,
     cutter: FrameCutter,
-    fft: FftScratch,
+    fft: FftScratch<f64>,
     sample: PhantomData<fn(S)>,
 }
 
@@ -649,7 +649,7 @@ impl<S: Sample> ChromaMeter<S> {
         // Plans the transform and sizes its scratch, so a push allocates
         // nothing.
         let window = plan.geometry.window().get();
-        let mut spectrum = vec![Complex32::default(); window / 2 + 1];
+        let mut spectrum = vec![Complex64::default(); window / 2 + 1];
         fft.forward(Mono::new(&vec![0.0; window]), &fold.window, &mut spectrum);
         Self {
             cutter: FrameCutter::new(Framing::new(plan.geometry.window(), plan.geometry.hop())),
@@ -661,7 +661,7 @@ impl<S: Sample> ChromaMeter<S> {
 
     /// Takes finite samples and folds each frame they complete, calling `each`
     /// with the frame's chroma.
-    fn feed(&mut self, block: &[f32], mut each: impl FnMut(ChromaFrame)) {
+    fn feed(&mut self, block: &[f64], mut each: impl FnMut(ChromaFrame)) {
         let Self {
             fold, cutter, fft, ..
         } = self;
@@ -677,7 +677,7 @@ impl<S: Sample> ChromaMeter<S> {
     /// The mean of the frames folded so far, per class; all zero before the
     /// first.
     #[must_use]
-    pub fn mean(&self) -> [f32; CLASSES] {
+    pub fn mean(&self) -> [f64; CLASSES] {
         self.fold.mean()
     }
 
@@ -750,13 +750,13 @@ pub fn chroma<S: Sample>(
     cfg: &ChromaConfig,
     samples: Mono<'_, S>,
     rate: impl Into<SampleRate>,
-    fft: &mut FftScratch,
+    fft: &mut FftScratch<f64>,
 ) -> Result<Chroma> {
     let plan = cfg.plan(rate.into())?;
-    if !all_finite(samples.samples()) {
+    let samples = widen(samples.samples());
+    if !samples.iter().all(|v| v.is_finite()) {
         return Err(Error::NonFiniteInput);
     }
-    let samples = to_f32(samples.samples());
     let window = plan.geometry.window().get();
     if samples.len() < window {
         return Err(Error::InsufficientInput {
@@ -788,7 +788,7 @@ pub fn chroma<S: Sample>(
         tuning: Tuning::Fixed(tuning),
         ..plan
     };
-    let mut meter: ChromaMeter = ChromaMeter::new(fixed);
+    let mut meter = ChromaMeter::<f64>::new(fixed);
     core::mem::swap(&mut meter.fft, fft);
     let mut data = Vec::with_capacity(frames.get() * CLASSES);
     meter.feed(&samples, |frame| data.extend_from_slice(&frame.bins));

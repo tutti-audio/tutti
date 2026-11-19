@@ -9,11 +9,11 @@
 //! turn, so two stages invert a sine: half the dry and half the wet cancel
 //! (the phaser's notch), which a graph's 50% mix would render as silence.
 
+use tutti_buffers::BusTopology;
 use tutti_buffers::Planes;
 use tutti_fixtures::signal::sine;
 use tutti_graph::contract::{drive, prepared};
 use tutti_nodes::{PhaserControls, PhaserNode, Stages, Stagger, SweepRange};
-use tutti_types::BusTopology;
 use tutti_units::{Amplitude, Depth, Feedback, Hz, SampleRate, Samples};
 
 // These tests pin the `f32` instantiation, the session's audio format, so their tolerances

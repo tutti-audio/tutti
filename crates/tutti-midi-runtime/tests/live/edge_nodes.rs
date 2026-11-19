@@ -5,7 +5,7 @@
 //! Beat Clock, timecode and Machine Control on the frames the transport reaches, a
 //! start inside a block included.
 
-use tutti_types::MaxBlock;
+use tutti_buffers::MaxBlock;
 
 use crate::common;
 use tutti_graph::{Stamp, UmpAt};
@@ -17,7 +17,7 @@ use tutti_graph::{
     ForkTarget, Offset, Prepare, TransportChanges, TransportPosition,
 };
 use tutti_midi_protocol::{
-    MpeZoneConfig, MpeZones, MtcRate, PitchBendSensitivity, Recipient, channel_voice,
+    MpeMode, MpeZoneConfig, MpeZones, MtcRate, PitchBendSensitivity, Recipient, channel_voice,
     widen_velocity,
 };
 use tutti_midi_runtime::{
@@ -25,6 +25,7 @@ use tutti_midi_runtime::{
     MachineControlEvent, MachineControlFollower, MidiIngestNode, MidiInputPorts, MidiOutNode,
     MpeTransformNode, SyncMessages, SyncOut,
 };
+use tutti_rt::Publisher;
 use tutti_ump::{
     Address, CCNumber, Message, MidiChannel, MidiGroup, MpeChannels, MpeZoneSpan, NoteKeyEvent,
     NoteNumber, System, U7, U14, Ump, Voice2,
@@ -44,7 +45,7 @@ use tutti_fixtures::{EventRig, Seen};
 
 /// A sync node on the first Group, sending `messages`.
 fn sync(messages: SyncMessages) -> SyncOut {
-    SyncOut::new(G).messages(messages)
+    SyncOut::new(G).sending(messages)
 }
 
 /// A source at key 1 whose `ports` event outputs each feed the sink's input
@@ -142,7 +143,7 @@ impl Ingest {
         self
     }
 
-    fn with_mpe(mut self, mode: tutti_midi_protocol::MpeMode) -> Self {
+    fn with_mpe(mut self, mode: &Publisher<MpeMode>) -> Self {
         self.node = self.node.with_mpe(mode);
         self
     }
@@ -695,9 +696,13 @@ fn a_requested_mpe_mode_is_adopted_once() {
         vec![bend],
         vec![bend],
     ]);
-    let (_ed, mut exec, controls, seen) = ingest(Ingest::new(wire), MIDI_INPUT_PORTS as u16, 512);
-    let mode = midi::lower_zone(6);
-    controls.set_mpe_mode(mode);
+    let cell = Publisher::new(MpeMode::Disabled);
+    let (_ed, mut exec, _controls, seen) = ingest(
+        Ingest::new(wire).with_mpe(&cell),
+        MIDI_INPUT_PORTS as u16,
+        512,
+    );
+    cell.publish(midi::lower_zone(6));
     for _ in 0..3 {
         block(&mut exec, 512);
     }
@@ -890,8 +895,13 @@ fn a_host_set_modes_reset_goes_ahead_of_the_blocks_events() {
         ),
     );
     let wire = Script::new(vec![vec![range]]);
-    let (_ed, mut exec, controls, seen) = ingest(Ingest::new(wire), MIDI_INPUT_PORTS as u16, 512);
-    controls.set_mpe_mode(midi::lower_zone(6));
+    let cell = Publisher::new(MpeMode::Disabled);
+    let (_ed, mut exec, _controls, seen) = ingest(
+        Ingest::new(wire).with_mpe(&cell),
+        MIDI_INPUT_PORTS as u16,
+        512,
+    );
+    cell.publish(midi::lower_zone(6));
     block(&mut exec, 512);
     let seen = seen.lock().unwrap();
     let mut ranges = BendRanges::default();
@@ -930,7 +940,7 @@ fn a_member_bend_range_fans_out_over_the_zones_ports() {
         cc_ev(2, CCNumber::DATA_ENTRY_LSB, 0),
         note(1, 60, 5),
     ]]);
-    let node = Ingest::new(wire).with_mpe(midi::lower_zone(7));
+    let node = Ingest::new(wire).with_mpe(&Publisher::new(midi::lower_zone(7)));
     let (_ed, mut exec, _c, seen) = ingest(node, MIDI_INPUT_PORTS as u16, 512);
     block(&mut exec, 512);
     let seen = seen.lock().unwrap();
@@ -978,7 +988,7 @@ fn a_fan_out_with_no_room_is_dropped_whole_and_counted() {
         note(1, 61, 509),
     ]);
     assert_eq!(batch.len(), MIDI_INPUT_EVENT_CAPACITY);
-    let node = Ingest::new(Script::new(vec![batch])).with_mpe(midi::lower_zone(7));
+    let node = Ingest::new(Script::new(vec![batch])).with_mpe(&Publisher::new(midi::lower_zone(7)));
     let (_ed, mut exec, controls, seen) = ingest(node, MIDI_INPUT_PORTS as u16, 512);
     block(&mut exec, 512);
     let seen = seen.lock().unwrap();
@@ -1009,7 +1019,7 @@ fn a_note_off_has_room_past_the_capacity() {
     ]);
     batch.extend((0..4).map(|k| at(508 + k, midi::note_off(MidiChannel::of(1), 61 + k as u8, 0))));
     assert_eq!(batch.len(), MIDI_INPUT_EVENT_CAPACITY);
-    let node = Ingest::new(Script::new(vec![batch])).with_mpe(midi::lower_zone(7));
+    let node = Ingest::new(Script::new(vec![batch])).with_mpe(&Publisher::new(midi::lower_zone(7)));
     let (_ed, mut exec, controls, seen) = ingest(node, MIDI_INPUT_PORTS as u16, 512);
     block(&mut exec, 512);
     let seen = seen.lock().unwrap();
@@ -1410,7 +1420,7 @@ fn a_short_loop_in_a_long_block_is_counted_past_the_cap() {
 /// block, pushed through an event inlet into the node's input, and a sink that
 /// logs what the node sends.
 fn transform(
-    mode: tutti_midi_protocol::MpeMode,
+    mode: &Publisher<MpeMode>,
     script: Script,
 ) -> (
     Editor,
@@ -1418,6 +1428,14 @@ fn transform(
     tutti_midi_runtime::MpeTransformControls,
     Seen,
 ) {
+    transform_over(MpeTransformNode::new(mode), script)
+}
+
+/// [`transform`] over any node that stands where the transform does.
+fn transform_over<N: tutti_graph::IntoNode>(
+    node: N,
+    script: Script,
+) -> (Editor, Executor, N::Controls, Seen) {
     let (inlet, mut writer) = EventInletNode::pair(EventCapacity::of(4096));
     for (block, batch) in script.0.iter().enumerate() {
         for &(offset, ump) in batch {
@@ -1425,7 +1443,7 @@ fn transform(
             writer.push(Stamp::Frame(frame), ump).expect("room");
         }
     }
-    rig_with(MpeTransformNode::new(mode), 1, 512, |ed| {
+    rig_with(node, 1, 512, |ed| {
         ed.insert(NodeKey(3), "inlet", inlet);
         ed.spec_mut().connect_events(
             EventIn {
@@ -1471,7 +1489,7 @@ fn the_transform_node_folds_a_member_and_fans_out_a_managers_pedal() {
         ),
         cc_at(20, 0, CCNumber::SUSTAIN, 127),
     ]]);
-    let (_ed, mut exec, _c, seen) = transform(midi::lower_zone(3), wire);
+    let (_ed, mut exec, _c, seen) = transform(&Publisher::new(midi::lower_zone(3)), wire);
     block(&mut exec, 512);
     // The zone's default bend ranges go first, ahead of the Group's first event:
     // the master's, and on each of three members the channel's and the per-note one.
@@ -1498,28 +1516,28 @@ fn the_transform_node_folds_a_member_and_fans_out_a_managers_pedal() {
     assert_eq!(pedals, [0, 1, 2, 3]);
 }
 
-/// **A mode set through the controls is adopted at the next block, once**: the
+/// **A mode published to the session's cell is adopted at the next block, once**: the
 /// transform starts disabled, so a member's bend passes as a channel bend; the
 /// lower zone then set, the zone's reset ranges go first (thirteen registered
 /// controllers, as the ingest node sends), once however many blocks follow, and
 /// the member's bend then folds per-note.
 #[test]
-fn a_mode_set_through_the_transforms_controls_is_adopted_once() {
+fn a_mode_published_to_the_transforms_cell_is_adopted_once() {
     let member = MidiChannel::of(1);
     let bend = at(0, midi::pitch_bend(member, 0xC000_0000));
     let note = at(
         0,
         midi::note_on(member, 60, widen_velocity(U7::of(100)).get()),
     );
-    let (_ed, mut exec, controls, seen) = transform(
-        tutti_midi_protocol::MpeMode::Disabled,
+    let cell = Publisher::new(MpeMode::Disabled);
+    let (_ed, mut exec, _controls, seen) = transform(
+        &cell,
         Script::new(vec![vec![bend], vec![note, bend], vec![bend]]),
     );
     block(&mut exec, 512);
     assert!(matches!(voices(&seen)[..], [(1, Voice2::PitchBend(_))]));
     seen.lock().unwrap().clear();
-    controls.set_mode(midi::lower_zone(6));
-    assert_eq!(controls.mode(), midi::lower_zone(6));
+    cell.publish(midi::lower_zone(6));
     block(&mut exec, 512);
     block(&mut exec, 512);
     let got = voices(&seen);
@@ -1549,7 +1567,7 @@ fn a_reset_transform_sends_the_zones_ranges_again() {
         midi::cc(MidiChannel::FIRST, CCNumber::SUSTAIN, 0),
     );
     let mut d = Direct::new(
-        tutti_midi_runtime::MpeTransformNode::new(midi::lower_zone(3)),
+        tutti_midi_runtime::MpeTransformNode::new(&Publisher::new(midi::lower_zone(3))),
         SampleRate::SR_48K,
         256,
     );
@@ -1568,4 +1586,57 @@ fn a_reset_transform_sends_the_zones_ranges_again() {
     assert_eq!(ranges(&mut d), 0, "told once");
     tutti_graph::Node::<f32>::reset(&mut *d.node);
     assert_eq!(ranges(&mut d), 7, "after the reset");
+}
+
+/// **A fork is a transform in the mode the cell held when it was forked, and
+/// does not follow the cell after it**: a fork of a transform whose session
+/// cell holds `Disabled`, the lower zone then written, still passes a member's
+/// bend as a channel bend and sends no zone ranges, where the live transform
+/// adopts the zone.
+#[test]
+fn a_fork_keeps_the_mode_it_was_forked_in() {
+    use tutti_graph::{ForkMode, NodeParts, Unforkable};
+    let member = MidiChannel::of(1);
+    let bend = at(0, midi::pitch_bend(member, 0xC000_0000));
+    let note = at(
+        0,
+        midi::note_on(member, 60, widen_velocity(U7::of(100)).get()),
+    );
+    let script = || Script::new(vec![vec![note, bend], vec![bend]]);
+    let cell = Publisher::new(MpeMode::Disabled);
+    let NodeParts { fork, .. } =
+        tutti_graph::IntoNode::<f32>::into_parts(MpeTransformNode::new(&cell));
+    let forked = fork
+        .expect("a transform forks")
+        .fork(ForkMode::Live)
+        .expect("forks");
+    cell.publish(midi::lower_zone(6));
+
+    let (_ed, mut exec, (), seen) = transform_over(Unforkable(forked.node), script());
+    block(&mut exec, 512);
+    block(&mut exec, 512);
+    let got = voices(&seen);
+    assert!(
+        !got.iter().any(|(_, v)| matches!(
+            v,
+            Voice2::Registered { .. } | Voice2::PerNotePitchBend { .. }
+        )),
+        "the fork stays disabled: {got:?}"
+    );
+    assert_eq!(
+        got.iter()
+            .filter(|(_, v)| matches!(v, Voice2::PitchBend(_)))
+            .count(),
+        2,
+        "{got:?}"
+    );
+
+    // The live transform over the same cell adopts the zone.
+    let (_ed, mut exec, _c, seen) = transform_over(MpeTransformNode::new(&cell), script());
+    block(&mut exec, 512);
+    assert!(
+        voices(&seen)
+            .iter()
+            .any(|(_, v)| matches!(v, Voice2::Registered { .. }))
+    );
 }

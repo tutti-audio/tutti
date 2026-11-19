@@ -34,7 +34,7 @@ impl From<RandomSourceError> for BridgeError {
 /// plugin wire they speak.
 ///
 /// The directory is the temporary one when the path fits a Unix socket
-/// address there (`socket_path_in`), so a long `TMPDIR` (a deep worktree, or
+/// address there (`transport::socket_path_in`), so a long `TMPDIR` (a deep worktree, or
 /// macOS's per-user `/var/folders/…/T/`) moves the socket rather than failing
 /// the launch.
 ///
@@ -42,36 +42,10 @@ impl From<RandomSourceError> for BridgeError {
 ///
 /// The operating system's random source cannot be read.
 pub fn unique_socket_path() -> Result<PathBuf, RandomSourceError> {
-    Ok(socket_path_in(
+    Ok(crate::transport::socket_path_in(
         &std::env::temp_dir(),
         &format!("{}.sock", unique_name("tutti-bridge")?),
     ))
-}
-
-/// The longest socket path every Unix takes: `sun_path` is 104 bytes on macOS
-/// and the BSDs and 108 on Linux, and the path needs a terminating NUL in it.
-/// One figure for all, so a path that fits on Linux fits on macOS too.
-const SOCKET_PATH_MAX: usize = 103;
-
-/// `name` in the first of `temp`, `$XDG_RUNTIME_DIR` and `/tmp` where the whole
-/// path fits [`SOCKET_PATH_MAX`]. `/tmp` always fits a name
-/// [`unique_socket_path`] makes. On Windows the socket is a named pipe named by
-/// `name` alone ([`socket_name`](crate::transport::control::socket_name)), so
-/// the directory is `temp`'s whatever its length.
-///
-/// `$XDG_RUNTIME_DIR` comes before `/tmp` because it is the user's own (mode
-/// 0700); `temp` comes first because it is the one the user chose.
-fn socket_path_in(temp: &std::path::Path, name: &str) -> PathBuf {
-    let fits = |p: &PathBuf| cfg!(windows) || p.as_os_str().len() <= SOCKET_PATH_MAX;
-    let runtime = std::env::var_os("XDG_RUNTIME_DIR")
-        .map(PathBuf::from)
-        .filter(|d| d.is_absolute());
-    std::iter::once(temp.to_path_buf())
-        .chain(runtime)
-        .chain(std::iter::once(PathBuf::from("/tmp")))
-        .map(|dir| dir.join(name))
-        .find(fits)
-        .unwrap_or_else(|| temp.join(name))
 }
 
 /// `stem`, this process's id, a count shared by every name this process
@@ -84,7 +58,7 @@ fn socket_path_in(temp: &std::path::Path, name: &str) -> PathBuf {
 ///
 /// The operating system's random source cannot be read.
 pub(crate) fn unique_name(stem: &str) -> Result<String, RandomSourceError> {
-    static COUNTER: tutti_types::Mint = tutti_types::Mint::new();
+    static COUNTER: tutti_rt::Mint = tutti_rt::Mint::new();
     Ok(format!(
         "{stem}-{}-{}-{}",
         std::process::id(),
@@ -139,6 +113,16 @@ pub struct BridgeConfig {
     /// Sample format to request; the subprocess replies with what it negotiated.
     #[serde(default = "crate::protocol::default_format")]
     pub preferred_format: FloatWidth,
+    /// Clear the host's dumpable flag (Linux: PR_SET_DUMPABLE 0) before the
+    /// first server is spawned, so a plugin, which runs as the same user, cannot
+    /// `ptrace` the host or write its memory. Off by default: the flag also
+    /// stops the host dumping core and an unprivileged debugger or crash
+    /// handler attaching to it, which is the app's to choose. Irreversible for the
+    /// process: the flag stays cleared, and a later `false` does not undo an
+    /// earlier `true`. Nothing elsewhere
+    /// (macOS's hardened runtime is the app's signing).
+    #[serde(default)]
+    pub protect_host_memory: bool,
 }
 
 impl BridgeConfig {
@@ -157,6 +141,7 @@ impl BridgeConfig {
             max_buffer_size: 8192,
             timeouts: Timeouts::default(),
             preferred_format: FloatWidth::F32,
+            protect_host_memory: false,
         }
     }
 }
@@ -198,47 +183,6 @@ mod tests {
             unguessable().expect("a random source"),
             "two draws should differ"
         );
-    }
-
-    /// A temporary directory too deep for a socket address moves the socket
-    /// to a short one, which a listener binds and a client connects to; one
-    /// that fits keeps it. A deep `TMPDIR` (a worktree's scratch directory,
-    /// macOS's `/var/folders/…/T/`) failed the plugin server's launch with
-    /// "local socket name length exceeds capacity of sun_path".
-    #[cfg(unix)]
-    #[test]
-    fn a_deep_temporary_directory_moves_the_socket() {
-        use interprocess::local_socket::ListenerOptions;
-        use interprocess::local_socket::traits::Listener as _;
-
-        let base = tempfile::tempdir().expect("a temporary directory");
-        let deep = base.path().join("d".repeat(SOCKET_PATH_MAX));
-        std::fs::create_dir_all(&deep).expect("the deep directory");
-        let name = format!(
-            "{}.sock",
-            unique_name("tutti-bridge").expect("a random source")
-        );
-
-        let path = socket_path_in(&deep, &name);
-        assert!(!path.starts_with(&deep), "{path:?}");
-        assert!(path.as_os_str().len() <= SOCKET_PATH_MAX, "{path:?}");
-
-        let listener = ListenerOptions::new()
-            .name(crate::transport::control::socket_name(&path).expect("a name"))
-            .create_sync()
-            .expect("the moved path binds");
-        let connect = path.clone();
-        let client = std::thread::spawn(move || crate::transport::control::connect(&connect));
-        let _peer = listener.accept().expect("a peer");
-        client
-            .join()
-            .expect("no panic")
-            .expect("the client connects");
-        drop(listener);
-        let _ = std::fs::remove_file(&path);
-
-        let root = std::path::Path::new("/");
-        assert_eq!(socket_path_in(root, &name), root.join(&name));
     }
 
     /// A partial-update construction is the exact shape `to_bridge_config` uses,

@@ -5,6 +5,7 @@
 use std::sync::Arc;
 
 use crate::common::{Seen, Tap, blocks, offline};
+use tutti_buffers::ChannelLayout;
 use tutti_fixtures::midi;
 use tutti_graph::{
     Cx, EventCapacity, ForkByClone, Instrument, IntoNode, Io, Node, NodeParts, Prepare, Shape,
@@ -12,7 +13,6 @@ use tutti_graph::{
 };
 use tutti_midi_runtime::TimedMidiEvent;
 use tutti_session::{MidiError, Session, SessionNode, TakePlacement};
-use tutti_types::ChannelLayout;
 #[cfg(feature = "serde")]
 use tutti_ump::MidiGroup;
 use tutti_ump::{MidiChannel, NoteNumber, NoteVelocity, Voice2};
@@ -39,7 +39,7 @@ impl IntoNode for Probe {
         self.0.into_parts()
     }
 }
-impl Instrument for Probe {}
+impl Instrument<f32> for Probe {}
 impl SessionNode for Probe {
     fn reclaimer(_: &()) -> tutti_session::Reclaims {
         tutti_session::Reclaims::Nothing
@@ -296,7 +296,7 @@ fn a_clip_plays_through_the_sessions_mpe_mode() {
         .sample_rate(SampleRate::SR_48K)
         .build()
         .expect("builds");
-    assert_eq!(s.midi().mpe(), midi::lower_zone(3));
+    assert_eq!(s.get(s.mpe()).unwrap(), midi::lower_zone(3));
     let (target, seen) = crate::common::tap(&mut s);
     s.midi().play_clip(target, Beat(0.0), mpe_clip()).unwrap();
     play_for(&mut s, 40);
@@ -317,19 +317,19 @@ fn a_clip_plays_through_the_sessions_mpe_mode() {
     assert_eq!(pedals, [0, 1, 2, 3]);
 }
 
-/// **`set_mpe` reaches a clip already in the graph**: a session that began with
+/// **A write of the MPE mode reaches a clip already in the graph**: a session that began with
 /// no MPE plays its clip with the manager's pedal on one channel; after
-/// `set_mpe` the same clip's pedal is the zone's, since the transform the clip
+/// the write the same clip's pedal is the zone's, since the transform the clip
 /// was wired through took the new mode. (The mode used to reach only a synth
 /// added afterwards.)
 #[test]
-fn set_mpe_reaches_a_clip_already_in_the_graph() {
+fn the_mpe_mode_reaches_a_clip_already_in_the_graph() {
     let mut s = crate::common::offline();
     let (target, seen) = crate::common::tap(&mut s);
     s.midi().play_clip(target, Beat(0.0), mpe_clip()).unwrap();
     let _ = s.update();
-    s.midi().set_mpe(midi::lower_zone(3));
-    assert_eq!(s.midi().mpe(), midi::lower_zone(3));
+    s.set(s.mpe().to(midi::lower_zone(3))).unwrap();
+    assert_eq!(s.get(s.mpe()).unwrap(), midi::lower_zone(3));
     play_for(&mut s, 40);
     let got = voices(&seen);
     let pedals = got
@@ -366,7 +366,7 @@ fn a_clips_transform_goes_with_the_clip_and_follows_a_retarget() {
     s.midi().retarget(clip, second).unwrap();
     assert!(s.midi().clip(first).is_none());
     assert_eq!(s.midi().clip(second).map(|k| k.erase()), Some(clip));
-    s.midi().set_mpe(midi::lower_zone(3));
+    s.set(s.mpe().to(midi::lower_zone(3))).unwrap();
     play_for(&mut s, 40);
     assert!(
         !voices(&seen).is_empty(),

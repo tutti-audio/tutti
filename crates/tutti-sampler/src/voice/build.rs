@@ -3,10 +3,11 @@
 
 use std::sync::Arc;
 
-use tutti_types::ChannelLayout;
+use tutti_buffers::ChannelLayout;
 
 use super::memory_source::{MemorySource, VoiceWindow};
 use super::types::{Playback, Voice, VoiceSource};
+use crate::SamplerFloat;
 use crate::{PlaceError, Wave};
 
 /// Builds an in-memory voice from a decoded wave.
@@ -28,12 +29,12 @@ use crate::{PlaceError, Wave};
 /// with a channel no speaker names (a `Speaker::Unknown` in its topology) is
 /// refused here rather than played with a channel in the wrong place or
 /// dropped.
-pub fn memory_voice(
-    wave: Arc<Wave>,
+pub fn memory_voice<F: SamplerFloat>(
+    wave: Arc<Wave<F>>,
     width: ChannelLayout,
     play: Playback,
     window: VoiceWindow,
-) -> Result<Voice, PlaceError> {
+) -> Result<Voice<F>, PlaceError> {
     let source = MemorySource::with_channels(wave, width)?.placed_at(window);
     Ok(Voice {
         source: VoiceSource::Memory(source),
@@ -46,7 +47,7 @@ pub fn memory_voice(
 
 /// The width a voice should run at, given what the file has.
 ///
-/// Clamped to [`MAX_CHANNELS`](tutti_types::MAX_CHANNELS) because that is the sampler's own
+/// Clamped to [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS) because that is the sampler's own
 /// per-read stack ceiling — deliberately equal to the graph root's, since a
 /// voice wider than the root can render is a voice nobody can hear.
 ///
@@ -64,7 +65,7 @@ pub fn voice_width(file: ChannelLayout) -> ChannelLayout {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tutti_types::MAX_CHANNELS;
+    use tutti_buffers::MAX_CHANNELS;
 
     /// `voice_width` is the file's own width clamped to `1..=MAX_CHANNELS`
     /// — the device is deliberately not consulted, or a voice would be narrowed

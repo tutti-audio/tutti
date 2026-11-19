@@ -9,13 +9,14 @@
 use std::ops::Range;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::{Float, Wave};
 use tutti_graph::{
     Cx, FadeLaw, IntoNode, Io, Node, NodeParts, ParamNode, ParamSet, Prepare, Shape, Status,
     param_parts,
 };
+use tutti_rt::{Param, Param64};
 use tutti_transport::TempoReader;
-use tutti_types::{ChannelLayout, Param, Param64};
 use tutti_units::UnitParam;
 use tutti_units::{
     Amplitude, Beat, BeatDuration, PlaybackRate, ReadRate, SamplePosition, SampleRate, Samples,
@@ -29,9 +30,9 @@ use super::interp::{
 use super::loop_span::{Loop, LoopSpan};
 use super::slot::Piece;
 use super::types::Direction;
-use crate::lanes::{Gather, Lane, UNPREPARED_FRAMES, audible, scale};
+use crate::lanes::{Gather, Lane, UNPREPARED_FRAMES, audible_gain, scale};
 use crate::{PlaceError, nonempty};
-use tutti_types::MAX_CHANNELS;
+use tutti_buffers::MAX_CHANNELS;
 
 /// The span of timeline a voice occupies: where it starts, and how long it
 /// lasts.
@@ -158,7 +159,7 @@ impl Default for MemorySourceConfig {
 /// change in [`set_loop`](Self::set_loop) — the audio thread drains
 /// the pool's loop command inline. The one exception is
 /// [`set_wave`](Self::set_wave), which is control-thread only.
-pub struct MemorySource<F: Float = f32> {
+pub struct MemorySource<F: Float> {
     wave: Arc<Wave<F>>,
     position: Param64<SamplePosition>,
 
@@ -1230,12 +1231,10 @@ impl<F: Float> MemorySource<F> {
     }
 
     /// The gain this block renders at: the driven port's, else the cell's.
-    /// A NaN or infinite one is silence ([`audible`]).
+    /// A NaN or infinite one is silence ([`audible_gain`]).
     #[inline]
     fn block_gain(&self) -> F {
-        audible(F::from_f64(
-            self.driven_gain.unwrap_or_else(|| self.gain.load()).get(),
-        ))
+        audible_gain(self.driven_gain.unwrap_or_else(|| self.gain.load()))
     }
 
     /// Scale a frame by this unit's gain.
@@ -1286,7 +1285,7 @@ fn crossfade_wraps<F: Float, H: AsMut<[F]>>(
             let i = at - base;
             let (g_out, g_in) =
                 FadeLaw::EqualPower.gains(Samples(wrap.ago + at - run.start), Samples(wrap.len));
-            let (g_out, g_in) = (F::from_f64(g_out.get()), F::from_f64(g_in.get()));
+            let (g_out, g_in) = (F::from_unit(g_out), F::from_unit(g_in));
             let g_in = if own_start { F::ONE } else { g_in };
             // A tail that has ended leaves the head to finish its ramp.
             let sounding = positions[i].is_some();
@@ -1422,7 +1421,7 @@ impl<F: Float> Node<F> for MemorySource<F> {
         self.driven_gain = self
             .declared_param::<{ UnitParam::Volume as u16 }, _>(&io)
             .last_frame()
-            .map(|v| Amplitude(v.to_f64().max(0.0)));
+            .map(|v| Amplitude(Into::<f64>::into(v).max(0.0)));
         // Lent for the block and given back after it: the render borrows the
         // whole source.
         let mut reader = self.tempo.take();

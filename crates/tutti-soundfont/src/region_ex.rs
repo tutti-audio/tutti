@@ -59,7 +59,7 @@ impl RegionEx {
                 region.key_number_to_volume_envelope_decay(),
                 key,
             );
-        let sustain = SoundFontMath::decibels_to_linear(-region.sustain_volume_envelope());
+        let sustain = (-region.sustain_volume_envelope()).to_amplitude();
         let release = region.release_time();
 
         envelope.start(delay, attack, hold, decay, sustain, release);
@@ -74,7 +74,7 @@ impl RegionEx {
         // According to the implementation of TinySoundFont, the attack time should be adjusted by the velocity.
 
         let delay = region.delay_modulation_envelope();
-        let attack = region.attack_modulation_envelope() * ((145 - velocity) as f32 / 144_f32);
+        let attack = region.attack_modulation_envelope() * (f64::from(145 - velocity) / 144.0);
         let hold = region.hold_modulation_envelope()
             * SoundFontMath::key_number_to_multiplying_factor(
                 region.key_number_to_modulation_envelope_hold(),
@@ -85,7 +85,7 @@ impl RegionEx {
                 region.key_number_to_modulation_envelope_decay(),
                 key,
             );
-        let sustain = 1_f32 - region.sustain_modulation_envelope() / 100_f32;
+        let sustain = region.sustain_modulation_envelope();
         let release = region.release_modulation_envelope();
 
         envelope.start(delay, attack, hold, decay, sustain, release);

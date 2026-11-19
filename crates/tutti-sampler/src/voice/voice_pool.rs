@@ -19,10 +19,10 @@ use super::types::*;
 use crate::streamer::StreamId;
 use crossbeam_channel::bounded;
 use std::sync::{Arc, Mutex};
+use tutti_buffers::ChannelLayout;
+use tutti_buffers::MaxBlock;
 use tutti_buffers::Wave;
 use tutti_graph::{IntoNode, Node, NodeParts, Prepare};
-use tutti_types::ChannelLayout;
-use tutti_types::MaxBlock;
 use tutti_units::SampleRate;
 use tutti_units::{Amplitude, Beat, Cents, Seconds, StretchFactor};
 
@@ -79,7 +79,7 @@ fn make_wave(samples: usize) -> Arc<Wave> {
 
 /// Send an in-memory voice through the one `AddVoice` path — the test-setup
 /// mirror of the timeline's `promote_pending_clip_waves` emit.
-fn add_ram_clip(handle: &VoicePoolHandle, id: SlotId, sampler: MemorySource) {
+fn add_ram_clip(handle: &VoicePoolHandle<f32>, id: SlotId, sampler: MemorySource<f32>) {
     handle
         .send(VoiceCommand::AddVoice {
             id,
@@ -388,7 +388,7 @@ fn a_transport_seek_flushes_stretch_state() {
     // moves — a frozen playhead would make every frame re-derive the same
     // position, so the source would emit a constant and the vocoder would
     // have nothing to synthesise from.
-    let drive = |unit: &mut VoicePool, n: usize| {
+    let drive = |unit: &mut VoicePool<f32>, n: usize| {
         let mut peak = 0.0f32;
         let mut out = [0.0f32; 1];
         for _ in 0..n {
@@ -468,7 +468,7 @@ fn a_transport_seek_flushes_a_standalone_voice_node() {
         "test is vacuous unless the stretch path is live"
     );
 
-    let drive = |node: &mut VoiceNode, n: usize| {
+    let drive = |node: &mut VoiceNode<f32>, n: usize| {
         let mut peak = 0.0f32;
         let mut out = [0.0f32; 1];
         for _ in 0..n {
@@ -1423,12 +1423,12 @@ fn loop_on_a_streamerless_streaming_voice_is_not_recorded() {
 
 /// A streaming voice over a ring whose writer is gone: enough for a loop
 /// to be set on its stream, which reads only the tier and the ring's stream.
-fn streaming_voice() -> Voice {
+fn streaming_voice() -> Voice<f32> {
     streaming_voice_of(1)
 }
 
 /// [`streaming_voice`] over stream `StreamId::of(region)`.
-fn streaming_voice_of(region: u64) -> Voice {
+fn streaming_voice_of(region: u64) -> Voice<f32> {
     use crate::streamer::{Cells, RegionBuffer, StreamId};
     use crate::voice::disk_voice::{DiskSource, DiskVoice, DiskVoiceConfig};
 
@@ -1453,12 +1453,12 @@ fn streaming_voice_of(region: u64) -> Voice {
     }
 }
 
-fn loop_on(id: SlotId) -> VoiceCommand {
+fn loop_on(id: SlotId) -> VoiceCommand<f32> {
     loop_to(id, 64)
 }
 
 /// The loop command `[0, end)` for slot `id`.
-fn loop_to(id: SlotId, end: usize) -> VoiceCommand {
+fn loop_to(id: SlotId, end: usize) -> VoiceCommand<f32> {
     VoiceCommand::UpdateLoop {
         id,
         setting: Some(loop_frames(0, end, 0)),
@@ -1466,7 +1466,7 @@ fn loop_to(id: SlotId, end: usize) -> VoiceCommand {
 }
 
 /// One block of `pool`, at [`SR`] on a rolling clock.
-fn one_block(pool: &mut VoicePool) {
+fn one_block(pool: &mut VoicePool<f32>) {
     let transport = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
     let mut out = [0.0f32; 2];
     tick(pool, &transport, SR, &mut out);
@@ -1478,15 +1478,15 @@ fn one_block(pool: &mut VoicePool) {
 fn test_streamer(
     capacity: usize,
 ) -> (
-    crate::streamer::StreamerPort,
-    crossbeam_channel::Receiver<crate::streamer::StreamerCommand>,
+    crate::streamer::StreamerPort<f32>,
+    crossbeam_channel::Receiver<crate::streamer::StreamerCommand<f32>>,
 ) {
     let (tx, rx) = bounded(capacity);
     (crate::streamer::StreamerPort::new(tx), rx)
 }
 
 /// The stream of `voice` on `port`: a handle whose commands the test sees.
-fn stream_of(voice: &Voice, port: &crate::streamer::StreamerPort) -> crate::Stream {
+fn stream_of(voice: &Voice<f32>, port: &crate::streamer::StreamerPort<f32>) -> crate::Stream<f32> {
     let VoiceSource::Disk(disk) = &voice.source else {
         unreachable!("a streaming voice")
     };
@@ -1495,10 +1495,10 @@ fn stream_of(voice: &Voice, port: &crate::streamer::StreamerPort) -> crate::Stre
 
 /// Adds `voice` at `id` with a stream on `port`.
 fn add_with_stream(
-    handle: &VoicePoolHandle,
+    handle: &VoicePoolHandle<f32>,
     id: SlotId,
-    voice: Voice,
-    port: &crate::streamer::StreamerPort,
+    voice: Voice<f32>,
+    port: &crate::streamer::StreamerPort<f32>,
 ) {
     let stream = stream_of(&voice, port);
     let VoiceSource::Disk(disk) = voice.source else {
@@ -1509,7 +1509,7 @@ fn add_with_stream(
         .expect("the command queue has room in a test");
 }
 
-fn looped(mut voice: Voice) -> Voice {
+fn looped(mut voice: Voice<f32>) -> Voice<f32> {
     voice.play.loop_ = Some(loop_frames(0, 64, 0));
     voice
 }
@@ -1805,7 +1805,7 @@ fn a_stream_ends_when_its_voice_is_removed_or_replaced() {
     );
 }
 
-fn add(id: SlotId, voice: Voice) -> VoiceCommand {
+fn add(id: SlotId, voice: Voice<f32>) -> VoiceCommand<f32> {
     VoiceCommand::AddVoice {
         id,
         voice: Box::new(voice),
@@ -1875,7 +1875,7 @@ fn a_voice_out_of_its_window_adds_nothing_at_any_gain() {
     }
 }
 
-fn memory_voice() -> Voice {
+fn memory_voice() -> Voice<f32> {
     Voice {
         source: VoiceSource::Memory(
             MemorySource::new(Arc::new(Wave::zero(
@@ -1891,7 +1891,10 @@ fn memory_voice() -> Voice {
 
 /// The loop a streamer's commands leave `stream` on, the last one wins:
 /// `None` cleared, `Some(range)` looping.
-fn last_loop(sent: &[crate::streamer::StreamerCommand], stream: StreamId) -> Option<Option<Loop>> {
+fn last_loop(
+    sent: &[crate::streamer::StreamerCommand<f32>],
+    stream: StreamId,
+) -> Option<Option<Loop>> {
     use crate::streamer::StreamerCommand as B;
     sent.iter().rev().find_map(|c| match c {
         B::SetStreamLoop { stream: s, looped } if *s == stream => Some(Some(*looped)),
@@ -1902,7 +1905,7 @@ fn last_loop(sent: &[crate::streamer::StreamerCommand], stream: StreamId) -> Opt
 
 /// Fills `handle`'s command queue to `COMMAND_CAPACITY - room` with
 /// removes of ids nothing uses.
-fn fill_queue(handle: &VoicePoolHandle, queued: usize, room: usize) {
+fn fill_queue(handle: &VoicePoolHandle<f32>, queued: usize, room: usize) {
     for i in queued..COMMAND_CAPACITY - room {
         handle
             .send(VoiceCommand::Remove(SlotId(1000 + i as u128)))
@@ -1989,7 +1992,7 @@ fn a_full_queue_refuses_a_streaming_loop_or_add_before_the_streamer() {
 /// Waits until another thread holds the lock of the stream `handle` holds for
 /// `id`: its streaming loop is past its lookup and at (or about to reach) the
 /// streamer send.
-fn wait_for_forward(handle: &VoicePoolHandle, id: SlotId) {
+fn wait_for_forward(handle: &VoicePoolHandle<f32>, id: SlotId) {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
     // A table lock held by another thread is a send in progress too (it must
     // never be, but the wait must not itself block on it).
@@ -2143,7 +2146,7 @@ fn reader_and_voice_node_default_to_stereo() {
 /// outputs its read never writes.
 #[test]
 fn a_pool_wider_than_the_sampler_reads_is_refused() {
-    let ceiling = tutti_types::MAX_CHANNELS;
+    let ceiling = tutti_buffers::MAX_CHANNELS;
     assert!(
         VoicePool::<f32>::with_channels(
             ChannelLayout::try_from(ceiling).expect("a test width is small")
@@ -2169,7 +2172,7 @@ fn a_voice_node_wider_than_the_sampler_reads_leaves_no_stale_channels() {
     let transport = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
     let sampler = MemorySource::placed(make_wave(4096), VoiceWindow::from(Beat::new(0.0)))
         .expect("a placeable wave");
-    let wide = tutti_types::MAX_CHANNELS + 2;
+    let wide = tutti_buffers::MAX_CHANNELS + 2;
     let node = VoiceNode::with_channels(
         Voice {
             source: VoiceSource::Memory(sampler),
@@ -2183,7 +2186,7 @@ fn a_voice_node_wider_than_the_sampler_reads_leaves_no_stale_channels() {
         ch.fill(7.0);
     }
     direct.block_in(&transport.env(64, SampleRate::of(SR)));
-    for c in tutti_types::MAX_CHANNELS..wide {
+    for c in tutti_buffers::MAX_CHANNELS..wide {
         for i in 0..64 {
             assert_eq!(
                 direct.output().plane(c).samples()[i],

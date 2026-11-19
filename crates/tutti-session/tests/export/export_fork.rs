@@ -20,6 +20,7 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex};
 use std::thread::ThreadId;
 use std::time::Duration;
+use tutti_buffers::ChannelLayout;
 use tutti_export::Produced;
 use tutti_graph::NodeKey;
 use tutti_graph::{
@@ -29,14 +30,13 @@ use tutti_graph::{
 use tutti_nodes::testing::{Const, Osc, Sink};
 use tutti_nodes::{SvfFilterNode, SvfType};
 use tutti_rt::LockExt;
+use tutti_rt::Param;
 use tutti_session::BufferMaster;
 use tutti_session::SessionNode;
 use tutti_session::{
     Bounce, BounceConfigError, BounceError, BounceLatency, DetachedSession, ExportClock, InPort,
     OutPort, PreparedGraph, Range, Root, Session, Stem,
 };
-use tutti_types::ChannelLayout;
-use tutti_types::Param;
 use tutti_units::{Amplitude, Hz, Q, SampleRate, Samples, Seconds, Tail};
 
 const RATE: f64 = 48_000.0;

@@ -7,9 +7,11 @@
 //! `rt_no_alloc_modulation.rs`, beside the gated pool they share.
 
 use std::sync::Arc;
+use tutti_buffers::MaxBlock;
 use tutti_curve::Exponent;
-use tutti_types::MaxBlock;
 
+use atomic_float::AtomicF64;
+use tutti_buffers::ChannelLayout;
 use tutti_curve::{Breakpoint, Trajectory};
 use tutti_graph::NodeKey;
 use tutti_graph::{
@@ -24,7 +26,6 @@ use tutti_modulation::{
 };
 use tutti_music::FrameClock;
 use tutti_nodes::automation::{ControlLaneNode, LaneControls};
-use tutti_types::{AtomicF64, ChannelLayout};
 use tutti_units::{
     Beat, BeatsPerCycle, Bpm, Depth, Frame, Hz, Normalized, ParamId, ParamKey, Phase,
     PhaseIncrement, SampleRate, Samples, UnitParam,

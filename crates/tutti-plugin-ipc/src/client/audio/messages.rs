@@ -2,16 +2,17 @@
 //! Distinct from wire-format `HostMessage`/`BridgeMessage` in `protocol/`.
 
 use super::ask::Reply;
-use crate::protocol::{
-    ChordChanges, MidiEventVec, NoteExpressionChanges, NoteExpressionIntChanges,
-    NoteExpressionTextChanges, ParamEdit, ParamId, ParameterChanges, ParameterInfo, PluginTail,
-    Preset, PresetId, Samples, ScaleChanges, TransportChanges, TransportInfo,
-};
 use dpi::Size;
 use tutti_plugin_types::{
     BlockStatus, ContentScale, PluginFailure, ResyncKind, StateError, StateUse,
 };
+use tutti_plugin_types::{
+    ChordChanges, MidiEventVec, NoteExpressionChanges, NoteExpressionIntChanges,
+    NoteExpressionTextChanges, ParamEdit, ParameterChanges, ParameterInfo, PluginTail, Preset,
+    PresetId, Samples, ScaleChanges, TransportChanges, TransportInfo,
+};
 use tutti_units::Normalized;
+use tutti_units::ParamId;
 use tutti_units::SampleRate;
 
 /// Audio-thread bulk payload for one `Process` command. Heap-boxed and
@@ -68,8 +69,8 @@ pub(super) enum Command {
     SetAutomationState {
         /// Format-neutral automation mode; each format loader encodes it onto its
         /// own ABI at the FFI edge (VST3 `IAutomationState`, etc.). The wire does
-        /// NOT carry a format-specific bitmask — see [`AutomationMode`](crate::protocol::AutomationMode).
-        mode: crate::protocol::AutomationMode,
+        /// NOT carry a format-specific bitmask — see [`AutomationMode`](tutti_plugin_types::AutomationMode).
+        mode: tutti_plugin_types::AutomationMode,
     },
     /// What the host says of the plugin's track; boxed to keep the queue's
     /// slots small.
@@ -84,13 +85,12 @@ pub(super) enum Command {
     /// `kAudioUnitProperty_OfflineRender`, VST2
     /// `audioMasterGetCurrentProcessLevel`).
     SetRenderMode {
-        mode: crate::protocol::RenderMode,
+        mode: tutti_plugin_types::RenderMode,
     },
     Reset,
     /// Reads what the plugin said unprompted off the control connection, so
     /// it reaches the listener while no other command is waiting on a reply.
     Drain,
-    Shutdown,
     /// Chunked state read.
     ///
     /// `progress` is advanced per chunk so the waiting caller can tell a slow
@@ -127,7 +127,7 @@ pub(super) enum Command {
     /// it from its next block: answered `true` once it has.
     SetupSharedMemory {
         shm_name: String,
-        layout: crate::protocol::SlabLayout,
+        layout: crate::SlabLayout,
         reply: Reply<bool>,
     },
     GetCurrentPreset {
@@ -215,7 +215,7 @@ pub enum BridgeEvent {
         samples: Samples,
     },
     /// The plugin reported a new tail length at runtime (CLAP only — see
-    /// [`BridgeMessage::TailChanged`](crate::protocol::BridgeMessage)).
+    /// [`BridgeMessage::TailChanged`](crate::BridgeMessage)).
     TailChanged {
         /// The tail it reports now.
         tail: PluginTail,
@@ -544,7 +544,7 @@ mod tests {
     fn the_announced_layout_precedes_its_resync() {
         let layout = |channels| tutti_plugin_types::Layout {
             inputs: vec![tutti_plugin_types::PluginBus::main(
-                tutti_types::ChannelLayout::from_count(channels),
+                tutti_buffers::ChannelLayout::from_count(channels),
             )],
             outputs: Vec::new(),
         };
@@ -570,7 +570,7 @@ mod tests {
     #[test]
     fn an_implausible_layout_is_dropped_and_counted() {
         use tutti_plugin_types::{Layout, MAX_LAYOUT_BUSES, PluginBus};
-        let stereo = || PluginBus::main(tutti_types::ChannelLayout::STEREO);
+        let stereo = || PluginBus::main(tutti_buffers::ChannelLayout::STEREO);
         let good = Layout {
             inputs: vec![stereo()],
             outputs: vec![stereo()],
@@ -579,7 +579,7 @@ mod tests {
         inbox.io_layout(good.clone());
         inbox.io_layout(Layout {
             inputs: vec![
-                PluginBus::main(tutti_types::ChannelLayout::from_count(0));
+                PluginBus::main(tutti_buffers::ChannelLayout::from_count(0));
                 MAX_LAYOUT_BUSES + 1
             ],
             outputs: Vec::new(),

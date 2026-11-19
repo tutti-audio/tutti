@@ -3,7 +3,7 @@
 //!
 //! # Why a wrapper and not an extension of `crate`
 //!
-//! Giving `InPort`/`OutPort` a kind in `tutti-types` would break every place
+//! Giving `InPort`/`OutPort` a kind would break every place
 //! that builds them by literal (`InPort { node, port }`). Event edges also
 //! have a different *edge kind* from audio edges (an event edge carries an
 //! offset-merged stream, an audio edge a signal that will be summed), so the
@@ -22,7 +22,7 @@ use crate::{ChannelFeed, LatencyGraph, PortFeed};
 use crate::{Edge, EdgeId, InPort, Sink, Source};
 use crate::{Invalid, Valid};
 use crate::{NodeKey, Topology};
-use tutti_types::BusTopology;
+use tutti_buffers::BusTopology;
 use tutti_units::{Mix, Samples};
 
 use crate::node::Resolution;
@@ -181,7 +181,7 @@ pub struct GraphSpec {
     /// The declared topology of the root, the graph's outputs, as a bus (doc
     /// 013, "Buses", B4): what a bus edge into the root folds to. `None` is
     /// undeclared. Every root the engine renders is at most
-    /// [`MAX_CHANNELS`](tutti_types::MAX_CHANNELS) wide, which is a bus's
+    /// [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS) wide, which is a bus's
     /// width. The session keeps it in step with its root declaration.
     pub root: Option<BusTopology>,
     /// The root's generation: a commit that changes the root's declaration

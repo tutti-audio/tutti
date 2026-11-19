@@ -12,6 +12,7 @@ mod pooled;
 
 use crate::pooled::{LoadPlugin, Spec};
 use std::sync::Arc;
+use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_export::Produced;
 use tutti_plugin::catalog::{Hosting, PluginRef};
 use tutti_session::{
@@ -19,7 +20,6 @@ use tutti_session::{
 };
 use tutti_tempo::TempoMap;
 use tutti_transport::{OfflineTimeline, OfflineTimelineConfig};
-use tutti_types::{ChannelLayout, MaxBlock};
 use tutti_ump::{Message, MidiChannel, NoteNumber, NoteVelocity, Voice2};
 use tutti_units::{Beat, Bpm, SampleRate, Samples, Seconds};
 

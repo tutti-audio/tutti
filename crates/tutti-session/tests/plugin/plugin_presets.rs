@@ -7,17 +7,15 @@
 //! its saved state); VST2 over the reference plugin in process, whose program
 //! count the environment sets.
 
-use crate::pooled::{LandOn as _, LoadEntry as _, LoadPlugin, Spec};
-use tutti_plugin::catalog::{Hosting, PluginRef};
-use tutti_plugin_types::{PresetError, PresetSupport};
-use tutti_session::{Peer as _, PoolEvent, PresetJobError, PresetJobFailed, Session, SessionEvent};
-
 #[cfg(feature = "clap")]
 mod clap {
-    use super::*;
-    use crate::support::{clap_probe, plugin_server};
+    use crate::pooled::{LandOn as _, LoadPlugin, Spec};
+    use crate::support::clap_probe;
+    use tutti_buffers::MaxBlock;
     use tutti_graph::NodeKey;
-    use tutti_types::MaxBlock;
+    use tutti_plugin::catalog::PluginRef;
+    use tutti_plugin_types::{PresetError, PresetSupport};
+    use tutti_session::{Peer as _, PresetJobFailed, Session};
     use tutti_units::Samples;
 
     fn loaded() -> (Session, u64, NodeKey) {
@@ -26,7 +24,7 @@ mod clap {
         // SAFETY: nextest runs each test in its own process, and this is set
         // before the first server is spawned, from the test's own thread.
         unsafe {
-            std::env::set_var("TUTTI_PLUGIN_SERVER", plugin_server());
+            std::env::set_var("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server());
             // The reference plugin answers `clap.preset-load` only when asked.
             std::env::set_var("TUTTI_CLAP_PROBE_PRESET_LOAD", "1");
         }
@@ -150,11 +148,11 @@ mod clap {
 
 #[cfg(feature = "vst3")]
 mod vst3 {
-    use super::*;
-    use crate::support::plugin_server;
+    use tutti_buffers::ChannelLayout;
+    use tutti_plugin::catalog::PluginRef;
     use tutti_plugin_types::PresetId;
     use tutti_session::{PHASES, PhaseCx, PoolEvent, SessionEvent};
-    use tutti_types::ChannelLayout;
+    use tutti_session::{Peer as _, Session};
     use tutti_units::SampleRate;
 
     /// **A served plugin's list is read by the first update on the main
@@ -168,7 +166,7 @@ mod vst3 {
     fn a_served_list_is_read_by_the_first_main_thread_update() {
         // SAFETY: nextest runs each test in its own process, and this is set
         // from the test's own thread before the first server is spawned.
-        unsafe { std::env::set_var("TUTTI_PLUGIN_SERVER", plugin_server()) };
+        unsafe { std::env::set_var("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server()) };
         let module = tutti_fixtures::vst3_module();
         let bundle = tutti_plugin_types::bundle::bundle_dir_of(
             &module,
@@ -243,11 +241,16 @@ mod vst3 {
 
 #[cfg(feature = "vst2")]
 mod vst2 {
-    use super::*;
+    use crate::pooled::{LandOn as _, LoadEntry as _, LoadPlugin, Spec};
+    use tutti_buffers::ChannelLayout;
     use tutti_fixtures::ScopedEnv;
+    use tutti_plugin::catalog::{Hosting, PluginRef};
     use tutti_plugin_types::PresetId;
+    use tutti_plugin_types::{PresetError, PresetSupport};
     use tutti_session::DetachedSession;
-    use tutti_types::ChannelLayout;
+    use tutti_session::{
+        Peer as _, PoolEvent, PresetJobError, PresetJobFailed, Session, SessionEvent,
+    };
     use tutti_units::SampleRate;
 
     fn probe_with(programs: &str) -> (DetachedSession, u64, ScopedEnv) {

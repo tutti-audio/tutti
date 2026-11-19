@@ -3,11 +3,14 @@
 //! thread; all IPC calls are blocking.
 
 use super::ListenerSlot;
-use super::channels::Channels;
+#[cfg(test)]
+use super::channels::response_ring;
+use super::channels::{BridgeSide, Channels, ResponseWriter};
 use super::dispatch::{Lane, Lanes, Owed, handle};
 use super::lifecycle::Lifecycle;
 use super::messages::{AudioResponse, BridgeEvent, Command, Unsolicited};
 use super::payload_pool::PayloadPool;
+use crate::HostMessage;
 use crate::transport::control::{self as ipc, ControlStream};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -33,6 +36,7 @@ impl std::fmt::Debug for BridgeThread {
 impl BridgeThread {
     pub(super) fn spawn(
         channels: Channels,
+        responses: ResponseWriter,
         sleeper: Sleeper,
         payloads: PayloadPool,
         lifecycle: Lifecycle,
@@ -52,6 +56,7 @@ impl BridgeThread {
             move |_| {
                 run_thread(
                     thread_channels,
+                    responses,
                     sleeper,
                     thread_payloads,
                     thread_lifecycle,
@@ -69,23 +74,21 @@ impl BridgeThread {
     }
 
     /// Asks the thread to stop, without waiting for it: from here on a failure
-    /// it reads (the server's end, say) is not declared a death.
+    /// it reads (the server's end, say) is not declared a death. The thread
+    /// says `Shutdown` to the server on its way out.
     pub fn request_stop(&self) {
         self.lifecycle.request_shutdown();
-        self.channels.push_command(Command::Shutdown);
         self.channels.wake();
     }
 
     /// Asks the thread to stop and joins it. Idempotent.
     pub fn shutdown(&mut self) {
         self.lifecycle.request_shutdown();
-        self.channels.push_command(Command::Shutdown);
-        // The queue may have been full, so the push may have rung nothing.
         self.channels.wake();
         if let Some(handle) = self.handle.take() {
-            // The thread ends on the `Shutdown` it was sent, so this waits for
-            // that and asks for nothing more. A panic in it is not reported:
-            // the bridge is gone either way.
+            // The thread ends on the stop flag, so this waits for that and asks
+            // for nothing more. A panic in it is not reported: the bridge is
+            // gone either way.
             let _ = handle.join();
         }
     }
@@ -99,12 +102,15 @@ impl Drop for BridgeThread {
 
 fn run_thread(
     channels: Channels,
+    responses: ResponseWriter,
     mut sleeper: Sleeper,
     payloads: PayloadPool,
     lifecycle: Lifecycle,
     listener: ListenerSlot,
     socket_path: PathBuf,
 ) {
+    // The response ring's writer is this thread's alone.
+    let mut channels = BridgeSide::new(channels, responses);
     // A bridge that never connects is as dead as one whose socket drops later,
     // and the audio thread tells them apart only through `is_crashed`. Both
     // exits below must mark the crash: returning silently would leave the flag
@@ -123,7 +129,7 @@ fn run_thread(
                 },
             );
             // A block queued before the crash was marked is never sent.
-            drain_with_errors(&channels);
+            drain_with_errors(&mut channels);
             return;
         }
     };
@@ -135,7 +141,7 @@ fn run_thread(
     // instead of an error.
     if let Err(failure) = expect_ready(&mut stream) {
         crash(&lifecycle, &listener, failure);
-        drain_with_errors(&channels);
+        drain_with_errors(&mut channels);
         return;
     }
     // The control connection (3): the server accepts it after the audio one.
@@ -149,14 +155,14 @@ fn run_thread(
                     source: Arc::new(e),
                 },
             );
-            drain_with_errors(&channels);
+            drain_with_errors(&mut channels);
             return;
         }
     };
     let mut control = control;
     if let Err(failure) = expect_ready(&mut control) {
         crash(&lifecycle, &listener, failure);
-        drain_with_errors(&channels);
+        drain_with_errors(&mut channels);
         return;
     }
     let mut lanes = Lanes {
@@ -180,19 +186,31 @@ fn run_thread(
         }
     };
     pump(
-        &channels,
+        &mut channels,
         &mut sleeper,
         &payloads,
         &lifecycle,
         &listener,
         &mut lanes,
     );
+    say_shutdown(&lifecycle, &mut lanes);
     // The watcher ends with the pump, whether the bridge was shut down or the
     // connection failed: asked to stop, never waited for (it ends within one
     // slice, and drops its duplicate of the connection then).
     if let Some(news) = news {
         news.token().stop();
         news.detach();
+    }
+}
+
+/// Tells the server to shut down when the bridge was asked to stop and the
+/// server is still there to hear it: its plugin is then destroyed by the server
+/// itself, and the host's wait for the process's end (the guard's) is the
+/// grace. Best effort: a server that cannot be written to is gone or hung, and
+/// the guard kills it at the end of the grace.
+fn say_shutdown(lifecycle: &Lifecycle, lanes: &mut Lanes) {
+    if !lifecycle.is_running() && lifecycle.crash_cause().is_none() {
+        let _ = ipc::send(&mut lanes.control.stream, &HostMessage::Shutdown);
     }
 }
 
@@ -243,16 +261,16 @@ fn watch_control(
 /// the message, and the first is actionable.
 fn expect_ready(stream: &mut ControlStream) -> Result<(), PluginFailure> {
     match ipc::recv(stream) {
-        Ok(crate::protocol::BridgeMessage::Ready { protocol_version })
+        Ok(crate::BridgeMessage::Ready { protocol_version })
             if crate::protocol::check_protocol_version(protocol_version).is_ok() =>
         {
             Ok(())
         }
         other => {
             let source = match other {
-                Ok(crate::protocol::BridgeMessage::Ready { protocol_version }) => {
+                Ok(crate::BridgeMessage::Ready { protocol_version }) => {
                     BridgeError::ProtocolMismatch {
-                        expected: crate::protocol::PROTOCOL_VERSION,
+                        expected: crate::PROTOCOL_VERSION,
                         got: protocol_version,
                     }
                 }
@@ -277,7 +295,7 @@ fn expect_ready(stream: &mut ControlStream) -> Result<(), PluginFailure> {
 /// listener after the command. There is no timeout in the sleep: a command, the
 /// watcher and `shutdown` each ring the doorbell, and a spurious return loops.
 fn pump(
-    channels: &Channels,
+    channels: &mut BridgeSide,
     sleeper: &mut Sleeper,
     payloads: &PayloadPool,
     lifecycle: &Lifecycle,
@@ -374,7 +392,7 @@ fn drain_unsolicited(inbox: &mut Unsolicited, channels: &Channels, listener: &Li
 /// Answer every queued command with an error. A queued chunk is never sent,
 /// so its MIDI is counted dropped; nothing can splice past it, as the server
 /// is gone.
-fn drain_with_errors(channels: &Channels) {
+fn drain_with_errors(channels: &mut BridgeSide) {
     while let Some(cmd) = channels.pop_command() {
         if let Command::Process(payload) = &cmd {
             channels.note_dropped_midi(payload.midi_events.len() as u64);
@@ -387,12 +405,12 @@ fn drain_with_errors(channels: &Channels) {
 mod tests {
     use super::*;
     use crate::client::audio::messages::{ProcessPayload, UNSOLICITED_PARAMS};
-    use crate::protocol::ParamId;
     use std::sync::Arc;
     use tutti_fixtures::midi;
     use tutti_plugin_types::ResyncKind;
     use tutti_ump::MidiChannel;
     use tutti_units::Normalized;
+    use tutti_units::ParamId;
     use tutti_units::SampleRate;
 
     /// **A crash's drain counts the queued chunks' MIDI.**
@@ -401,6 +419,7 @@ mod tests {
         use tutti_plugin_types::WireMidi;
 
         let channels = Channels::new(SampleRate::SR_48K, Arc::default()).0;
+        let mut channels = BridgeSide::new(channels, response_ring().0);
         for n in [3, 0, 2] {
             let mut payload = Box::new(ProcessPayload::empty(SampleRate::SR_48K));
             for _ in 0..n {
@@ -411,7 +430,7 @@ mod tests {
             }
             assert!(channels.push_command(Command::Process(payload)));
         }
-        drain_with_errors(&channels);
+        drain_with_errors(&mut channels);
         assert!(channels.pop_command().is_none());
         assert_eq!(channels.dropped_midi_cell().get(), 5);
     }
@@ -440,6 +459,7 @@ mod tests {
             std::env::temp_dir().join(format!("tutti-no-such-bridge-{}.sock", std::process::id()));
         run_thread(
             channels.clone(),
+            response_ring().0,
             sleeper,
             PayloadPool::new(
                 SampleRate::SR_48K,

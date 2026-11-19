@@ -31,16 +31,16 @@
 //!    second; [`the_latest_placement_wins`] pins it.
 
 use std::sync::Arc;
+use tutti_buffers::MaxBlock;
 use tutti_buffers::Mono;
-use tutti_types::MaxBlock;
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::Wave;
 use tutti_graph::NodeKey;
 use tutti_graph::{Editor, Executor, ForkMode, ForkTarget, Prepare, TransportPosition, Unforkable};
 use tutti_graph::{OutPort, Source};
 use tutti_sampler::testing::{MockTransport, block};
 use tutti_sampler::{MemorySource, Playback, Voice, VoiceNode, VoiceSource, VoiceWindow};
-use tutti_types::ChannelLayout;
 use tutti_units::{Beat, BeatDuration, Bpm, SampleRate, Samples};
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -55,7 +55,7 @@ fn flat_wave(len: usize) -> Arc<Wave> {
 }
 
 /// A voice placed on the transport at `[start, start + 1)`.
-fn voice_at(start: f64) -> Voice {
+fn voice_at(start: f64) -> Voice<f32> {
     let source = MemorySource::new(flat_wave(48_000))
         .expect("a placeable wave")
         .placed_at(VoiceWindow::span(Beat(start), BeatDuration(1.0)));
@@ -65,7 +65,7 @@ fn voice_at(start: f64) -> Voice {
     }
 }
 
-fn node_at(start: f64) -> VoiceNode {
+fn node_at(start: f64) -> VoiceNode<f32> {
     VoiceNode::with_channels(voice_at(start), ChannelLayout::MONO)
 }
 
@@ -79,7 +79,7 @@ fn peak(node: &mut dyn tutti_graph::Node, beat: f64) -> f32 {
 }
 
 /// A graph holding `node` at key 1 on output 0, committed; its controls.
-fn graph_with(node: VoiceNode) -> (Editor, Executor, tutti_sampler::VoiceNodeHandle) {
+fn graph_with(node: VoiceNode<f32>) -> (Editor, Executor, tutti_sampler::VoiceNodeHandle<f32>) {
     let (mut ed, mut exec) = Editor::new(Prepare::new(RATE, MaxBlock::of(Samples(256))));
     let handle = ed.insert(NodeKey(1), "voice", node).controls;
     ed.spec_mut()

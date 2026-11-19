@@ -7,8 +7,8 @@ use super::super::tree::{PeJson, PeObject};
 use super::channels::{channel, list_type};
 use super::fields::{
     CtrlKind, CtrlValueKind, Fields, ParamPath, PeChannel, PeDataError, PeDataFault, PeExtensions,
-    PeText, Priority, SignificantBits, StepCount, TypeHint, boolean, integer, ints, required_text,
-    text, u32_json, unsigned32,
+    PeText, Place, Priority, SignificantBits, StepCount, TypeHint, boolean, integer, ints,
+    required_text, text, u32_json, unsigned32,
 };
 
 /// Which controller message an entry describes: the kind and the index it needs
@@ -439,8 +439,18 @@ impl PeChCtrlEntry {
 /// what the device sends where the first describes what it recognizes
 /// (M2-117 §2.1.3, §3.1.3).
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-#[error("{0} is listed twice, and not once for transmit and once for recognize")]
-pub struct ListedTwice(pub String);
+#[error("{controller:?}{} is listed twice, and not once for transmit and once for recognize", channel_text(.channel))]
+pub struct ListedTwice {
+    /// The controller listed twice.
+    pub controller: PeController,
+    /// The Channel of the entries in an AllCtrlList; `None` in a ChCtrlList,
+    /// which is of one Channel.
+    pub channel: Option<PeChannel>,
+}
+
+fn channel_text(channel: &Option<PeChannel>) -> String {
+    channel.map_or_else(String::new, |c| format!(" of Channel {}", c.get()))
+}
 
 /// Whether `a` and `b` are the one controller seen as sent and as recognized.
 fn complementary(a: &PeCtrl, b: &PeCtrl) -> bool {
@@ -448,14 +458,19 @@ fn complementary(a: &PeCtrl, b: &PeCtrl) -> bool {
         || (b.transmit == CtrlValueKind::None && a.recognize == CtrlValueKind::None)
 }
 
-fn check_unique<'a, K: PartialEq + std::fmt::Debug>(
-    items: impl Iterator<Item = (K, &'a PeCtrl)>,
+fn check_unique<'a>(
+    items: impl Iterator<Item = (PeController, Option<PeChannel>, &'a PeCtrl)>,
 ) -> Result<(), ListedTwice> {
-    let seen: Vec<(K, &PeCtrl)> = items.collect();
-    for (at, (key, ctrl)) in seen.iter().enumerate() {
-        for (other_key, other) in &seen[..at] {
-            if key == other_key && !complementary(ctrl, other) {
-                return Err(ListedTwice(format!("{key:?}")));
+    let seen: Vec<_> = items.collect();
+    for (at, &(controller, channel, ctrl)) in seen.iter().enumerate() {
+        for &(other_controller, other_channel, other) in &seen[..at] {
+            if (controller, channel) == (other_controller, other_channel)
+                && !complementary(ctrl, other)
+            {
+                return Err(ListedTwice {
+                    controller,
+                    channel,
+                });
             }
         }
     }
@@ -480,7 +495,7 @@ impl TryFrom<Vec<PeAllCtrlEntry>> for PeAllCtrlList {
         check_unique(
             entries
                 .iter()
-                .map(|e| ((e.ctrl.controller, e.channel), &e.ctrl)),
+                .map(|e| (e.ctrl.controller, Some(e.channel), &e.ctrl)),
         )?;
         Ok(Self(entries))
     }
@@ -536,7 +551,7 @@ impl TryFrom<Vec<PeChCtrlEntry>> for PeChCtrlList {
     ///
     /// [`ListedTwice`] as for [`PeAllCtrlList`]'s `TryFrom`.
     fn try_from(entries: Vec<PeChCtrlEntry>) -> Result<Self, ListedTwice> {
-        check_unique(entries.iter().map(|e| (e.ctrl.controller, &e.ctrl)))?;
+        check_unique(entries.iter().map(|e| (e.ctrl.controller, None, &e.ctrl)))?;
         Ok(Self(entries))
     }
 }
@@ -574,7 +589,7 @@ impl PeChCtrlList {
                             Ok(PeChCtrlEntry::with_default_cc_map(ctrl, index))
                         }
                         _ => Err(PeDataError::new(
-                            "ChCtrlList entry.defaultCCMap",
+                            Place::of("ChCtrlList entry").property("defaultCCMap"),
                             PeDataFault::NotValid("Control Change flag"),
                         )),
                     }

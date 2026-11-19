@@ -6,8 +6,8 @@
 
 use std::path::PathBuf;
 
+use tutti_buffers::{ChannelLayout, ChannelTopology, Speaker::*};
 use tutti_codec::{DecodeError, FileIn, read_wave, read_wave_bytes};
-use tutti_types::{ChannelLayout, ChannelTopology, Speaker::*};
 
 fn asset(name: &str) -> PathBuf {
     tutti_fixtures::asset(&format!("audio/{name}"))
@@ -170,7 +170,7 @@ fn a_vorbis_six_decodes_in_the_topologys_order() {
     // plane survives the codec's gain, which treats the LFE differently), the
     // LFE lowest since the encoder low-passes it.
     let hz =
-        |s: tutti_types::Speaker| 150 - 20 * vorbis_order.iter().position(|&x| x == s).unwrap();
+        |s: tutti_buffers::Speaker| 150 - 20 * vorbis_order.iter().position(|&x| x == s).unwrap();
     let rate = 44_100usize;
     let planes: Vec<Vec<f32>> = vorbis_order
         .iter()

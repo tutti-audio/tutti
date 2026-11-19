@@ -15,8 +15,8 @@
 
 #![cfg(feature = "clap")]
 
+use tutti_buffers::MaxBlock;
 use tutti_nodes::automation::Exponent;
-use tutti_types::MaxBlock;
 use tutti_units::Hz;
 
 use crate::clap_probe::{ProbeEnv, Rig, load_probe, render};

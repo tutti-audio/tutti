@@ -9,6 +9,7 @@ use tutti_graph::testing as common;
 use std::collections::BTreeMap;
 
 use common::{Kind, Pair, SpecBehaviour, bits, input_signal};
+use tutti_buffers::ChannelLayout;
 use tutti_graph::{
     CompileError, CycleEdge, DelayKey, EventEdge, EventIn, EventOut, GraphInvalid, GraphSpec, Op,
     PortKind, Shape, Shapes, Unforkable, compile,
@@ -17,7 +18,6 @@ use tutti_graph::{
     Edge, Feed, FeedbackFrom, InPort, InputDelay, Invalid, NodeSpec, OutPort, Source,
 };
 use tutti_graph::{NodeKey, Topology, delays, latency_plan};
-use tutti_types::ChannelLayout;
 use tutti_units::{Latency, SampleRate, Samples, Tail};
 
 /// The `MaxBlock` every plan in this file is compiled for.

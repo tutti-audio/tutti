@@ -7,7 +7,7 @@
 //! itself, on the render's thread (tutti-sampler's `offline_read`), never
 //! from the live ring.
 //!
-//! The streamer is hand-stepped (`DiskStreamer::manual`), so a refill is a
+//! The streamer is hand-stepped (`DiskStreamer::by_hand`), so a refill is a
 //! step, not a race with a render that runs faster than real time.
 
 use std::path::Path;
@@ -17,6 +17,7 @@ use tutti_buffers::Interleaved;
 use tutti_buffers::{InterleavedMut, PlanesMut};
 use tutti_session::Root;
 
+use tutti_buffers::ChannelLayout;
 use tutti_export::Produced;
 use tutti_graph::NodeKey;
 use tutti_sampler::testing::settle;
@@ -30,7 +31,6 @@ use tutti_session::{
     Stem,
 };
 use tutti_transport::{OfflineTimeline, OfflineTimelineConfig};
-use tutti_types::ChannelLayout;
 use tutti_units::{Beat, Bpm, SampleRate, Samples, Seconds};
 
 const RATE: f64 = 48_000.0;
@@ -209,9 +209,14 @@ fn write_ramp(path: &Path, rate: u32, frames: usize) {
 /// the stream's handle and reader. The streamer and the handle are held by the
 /// test: a fork reads the file through the streamer's cache while the stream
 /// lives, and dropping the handle ends it.
-fn streamer_on(path: &Path) -> ((DiskStreamer<ByHand>, Stream), StreamReader) {
+fn streamer_on(
+    path: &Path,
+) -> (
+    (DiskStreamer<ByHand<f32>, f32>, Stream<f32>),
+    StreamReader<f32>,
+) {
     let mut streamer =
-        DiskStreamer::manual(SampleRate::of(RATE), Default::default()).expect("builds");
+        DiskStreamer::by_hand(SampleRate::of(RATE), Default::default()).expect("builds");
     let opening = streamer.open(path, Placement::HEAD);
     let (stream, reader) = settle(&mut streamer, opening).expect("the file opens");
     assert!(
@@ -222,11 +227,11 @@ fn streamer_on(path: &Path) -> ((DiskStreamer<ByHand>, Stream), StreamReader) {
 }
 
 /// The live voice of the stream `reader` reads, placed at `beat`.
-fn disk_voice(reader: StreamReader, beat: f64) -> DiskVoice {
+fn disk_voice(reader: StreamReader<f32>, beat: f64) -> DiskVoice<f32> {
     DiskVoice::from_reader(reader, VoiceWindow::from(Beat(beat)))
 }
 
-fn node_of(source: VoiceSource) -> VoiceNode {
+fn node_of(source: VoiceSource<f32>) -> VoiceNode<f32> {
     VoiceNode::with_channels(
         Voice {
             source,

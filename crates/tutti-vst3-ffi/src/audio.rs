@@ -413,8 +413,8 @@ mod tests {
     use crate::bus_buffers::BusBuffers;
     use crate::types::SampleWidth;
     use std::sync::atomic::AtomicUsize;
+    use tutti_buffers::ChannelLayout;
     use tutti_plugin_types::PointPool;
-    use tutti_types::ChannelLayout;
     use vst3::Class;
     use vst3::Steinberg::Vst::{ProcessSetup, SpeakerArrangement};
     use vst3::Steinberg::{kResultOk, tresult};

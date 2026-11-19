@@ -13,15 +13,15 @@ use tutti_buffers::InterleavedMut;
 use tutti_graph::testing as common;
 
 use std::collections::{BTreeMap, BTreeSet};
-use tutti_types::MaxBlock;
+use tutti_buffers::MaxBlock;
 
 use common::{Kind, Pair, Word, bits, input_signal};
 use proptest::prelude::*;
+use tutti_buffers::{BusTopology, ChannelLayout, ChannelTopology};
 use tutti_graph::Topology;
 use tutti_graph::{Bus, BusRef, BusRole, BusSource, Buses, NodeKey, TapAlign, TapId, TapSpec};
 use tutti_graph::{Edge, EdgeGain, EdgeId, FeedbackFrom, InPort, NodeSpec, OutPort, Sink, Source};
 use tutti_graph::{EventEdge, EventIn, EventOut, GraphSpec, Unforkable};
-use tutti_types::{BusTopology, ChannelLayout, ChannelTopology};
 use tutti_units::{Amplitude, Samples};
 
 use tutti_graph::Node;

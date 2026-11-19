@@ -59,19 +59,19 @@ const WRAP_BEATS: f64 = 4.0;
 /// measure the early return for silence. The wind-back costs one seat (and,
 /// on the disk tier, one crossfade) per ~1 500 blocks.
 struct Rig {
-    direct: Direct<VoicePool>,
+    direct: Direct<VoicePool<f32>>,
     t: Arc<MockTransport>,
     /// Frames per block, and the pool's `max_block`.
     block: usize,
 }
 
 impl Rig {
-    fn new(pool: VoicePool) -> Self {
+    fn new(pool: VoicePool<f32>) -> Self {
         Self::with_block(pool, BLOCK)
     }
 
     /// A rig whose blocks (and `max_block`) are `block` frames.
-    fn with_block(pool: VoicePool, block: usize) -> Self {
+    fn with_block(pool: VoicePool<f32>, block: usize) -> Self {
         Self {
             direct: Direct::new(pool, SampleRate::of(SR), block),
             t: MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0)),
@@ -227,14 +227,14 @@ struct Pool64 {
     rig: Rig,
     /// Keeps the disk tier's streamer and the handle that owns its streams (and
     /// so their rings) alive.
-    _streamer: Option<(DiskStreamer<ByHand>, VoicePoolHandle)>,
+    _streamer: Option<(DiskStreamer<ByHand<f32>, f32>, VoicePoolHandle<f32>)>,
     _dir: tempfile::TempDir,
 }
 
 /// A voice the pool bench adds: a memory source, or a disk voice with its stream.
 enum Built {
-    Memory(MemorySource),
-    Disk(DiskVoice, Stream),
+    Memory(MemorySource<f32>),
+    Disk(DiskVoice<f32>, Stream<f32>),
 }
 
 /// The stereo tone every `pool64` voice reads, sample `i`.
@@ -326,7 +326,7 @@ fn pool_knobs(
                 }
             }
             w.finalize().expect("finalize wav");
-            let mut s = DiskStreamer::manual(SampleRate::of(SR), DiskStreamerConfig::default())
+            let mut s = DiskStreamer::by_hand(SampleRate::of(SR), DiskStreamerConfig::default())
                 .expect("streamer builds");
             let openings: Vec<_> = (0..n).map(|_| s.open(&path, Placement::HEAD)).collect();
             for _ in 0..4096 {
@@ -467,7 +467,7 @@ fn bench_pool512(c: &mut Criterion) {
 /// `n` clips, each its own `VoiceNode` (one node per clip, each with its own scratch), in `block`-frame blocks on
 /// the moving transport. One block of every node per iteration.
 struct Clips {
-    nodes: Vec<Direct<VoiceNode>>,
+    nodes: Vec<Direct<VoiceNode<f32>>>,
     t: Arc<MockTransport>,
     block: usize,
 }
@@ -544,7 +544,7 @@ fn bench_sources(c: &mut Criterion) {
             .unwrap();
     }
     let wave = Arc::new(wave);
-    let mut nodes: Vec<Direct<MemorySource>> = (0..64)
+    let mut nodes: Vec<Direct<MemorySource<f32>>> = (0..64)
         .map(|_| {
             let source = MemorySource::placed(Arc::clone(&wave), VoiceWindow::from(Beat::new(0.0)))
                 .expect("a placeable wave");

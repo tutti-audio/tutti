@@ -5,8 +5,8 @@
 //! widths must agree, then the frame counts. A source and a destination of
 //! different formats convert sample by sample by the rule in [`Sample`].
 
+use crate::ChannelLayout;
 use crate::{BufferError, Interleaved, InterleavedMut, Mono, MonoMut, Planes, PlanesMut, Sample};
-use tutti_types::ChannelLayout;
 use tutti_units::Samples;
 
 /// Converts every sample of `src` into `dst`'s format by the rule in
@@ -14,7 +14,7 @@ use tutti_units::Samples;
 ///
 /// ```
 /// use tutti_buffers::{convert, Interleaved, InterleavedMut};
-/// use tutti_types::ChannelLayout;
+/// use tutti_buffers::ChannelLayout;
 ///
 /// let src = [0.5f32, -1.0, 2.0, f32::NAN];
 /// let mut dst = [0i16; 4];
@@ -45,7 +45,7 @@ pub fn convert<A: Sample, B: Sample>(
 ///
 /// ```
 /// use tutti_buffers::{convert_counting_clips, Interleaved, InterleavedMut};
-/// use tutti_types::ChannelLayout;
+/// use tutti_buffers::ChannelLayout;
 ///
 /// let src = [1.0f32, 32767.0 / 32768.0, -1.0, f32::NAN];
 /// let mut dst = [0i16; 4];

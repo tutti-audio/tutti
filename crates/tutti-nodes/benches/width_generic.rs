@@ -19,13 +19,13 @@
 use std::hint::black_box;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
+use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_graph::Node;
 use tutti_graph::contract::Direct;
 use tutti_nodes::{
     DelayControls, DelayNode, InterpolationMode, LadderFilterNode, LadderType, MaxDelay,
     ModDelayNode, PhaserControls, PhaserNode, Stages, Stagger, SvfFilterNode, SvfType, SweepRange,
 };
-use tutti_types::{BusTopology, ChannelLayout};
 use tutti_units::{Feedback, Hz, Q, Resonance, SampleRate, Seconds};
 
 const BLOCK: usize = 64;

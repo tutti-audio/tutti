@@ -35,7 +35,7 @@
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-use tutti_types::ParamCell;
+use tutti_rt::ParamCell;
 use tutti_units::UnitAddr;
 #[cfg(test)]
 use tutti_units::UnitParam;
@@ -306,7 +306,7 @@ impl<F: Float, N: ParamNode<F> + Clone> IntoNode<F> for Params<N> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tutti_types::Param;
+    use tutti_rt::Param;
     use tutti_units::{Hz, Q};
 
     fn set() -> (Param<Hz>, Param<Q>, ParamSet) {

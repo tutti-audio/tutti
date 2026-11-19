@@ -1,8 +1,8 @@
 //! The root's declared topology: [`RootTopologyStatus`] says whether the root is as it was asked
 //! to be, and the `Session` calls declare it, read it back and place it on the output device.
 
+use tutti_buffers::ChannelTopology;
 use tutti_graph::RootError;
-use tutti_types::ChannelTopology;
 
 use crate::{AppKey, Clock, RootDeclaration, Session};
 
@@ -78,7 +78,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// # Errors
     ///
     /// [`Error::Output`](crate::Error::Output) when the declaration is empty, wider than the engine
-    /// renders ([`MAX_CHANNELS`](tutti_types::MAX_CHANNELS)), or the
+    /// renders ([`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS)), or the
     /// device cannot place it (an unassigned root wider than the device, a channel
     /// no speaker names). Nothing is changed.
     pub fn declare_root_topology(
@@ -152,10 +152,10 @@ impl<K: AppKey, C: Clock> Session<K, C> {
 
     /// What the output device's channels are as the session folds the root
     /// into them, and whether that was
-    /// [`Stated`](tutti_types::Placement::Stated)
+    /// [`Stated`](tutti_buffers::Placement::Stated)
     /// ([`SessionBuilder::device_topology`](crate::SessionBuilder::device_topology),
     /// `DeviceRestart::topology`) or
-    /// [`Assumed`](tutti_types::Placement::Assumed) from the device's width
+    /// [`Assumed`](tutti_buffers::Placement::Assumed) from the device's width
     /// alone ([`ChannelTopology::assumed`]). `None` for a session with no
     /// engine (a detached one).
     #[must_use]

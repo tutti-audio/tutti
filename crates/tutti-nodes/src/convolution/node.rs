@@ -14,15 +14,15 @@
 //! nothing writes them after they are built. Each channel and each fork keeps only its own
 //! running state.
 
+use tutti_buffers::{
+    AmbisonicFormat, AmbisonicOrder, BusTopology, ChannelLayout, ChannelTopology, MAX_CHANNELS,
+};
 use tutti_buffers::{Fold, FoldError, Mono, MonoMut, Planes, PlanesMut, Sample};
 use tutti_graph::{
     Buses, Cx, Inputs, IntoNode, Io, Node, NodeParts, Outputs, ParamNode, ParamSet, Prepare, Shape,
     Status,
 };
-use tutti_types::{
-    AmbisonicFormat, AmbisonicOrder, BusTopology, ChannelLayout, ChannelTopology, MAX_CHANNELS,
-    Param,
-};
+use tutti_rt::Param;
 use tutti_units::{Amplitude, Samples, UnitParam};
 use tutti_units::{Latency, Tail};
 
@@ -407,7 +407,7 @@ impl<F: FftFloat + Lerp> ConvolverNode<F> {
     pub fn new<S: Sample>(ir: Mono<'_, S>, block_size: Samples) -> Self {
         Self::assemble(
             Engine::PerChannel(vec![Convolver::new(ir, block_size)]),
-            IrLayout::PerChannel(ChannelTopology::from(tutti_types::Bed::Mono)),
+            IrLayout::PerChannel(ChannelTopology::from(tutti_buffers::Bed::Mono)),
             BusTopology::MONO,
             BusTopology::MONO,
             None,
@@ -421,7 +421,7 @@ impl<F: FftFloat + Lerp> ConvolverNode<F> {
     pub fn with_ir<S: Sample>(ir: Mono<'_, S>) -> Self {
         Self::assemble(
             Engine::PerChannel(vec![Convolver::with_ir(ir)]),
-            IrLayout::PerChannel(ChannelTopology::from(tutti_types::Bed::Mono)),
+            IrLayout::PerChannel(ChannelTopology::from(tutti_buffers::Bed::Mono)),
             BusTopology::MONO,
             BusTopology::MONO,
             None,
@@ -1512,8 +1512,8 @@ mod direct_sum {
 mod layouts {
     use super::*;
     use crate::test_support::{RATE, noise, prepared};
+    use tutti_buffers::{AmbisonicFormat, Bed};
     use tutti_graph::contract::drive;
-    use tutti_types::{AmbisonicFormat, Bed};
 
     const BLOCK: usize = 64;
 
@@ -1620,7 +1620,7 @@ mod layouts {
     /// is, on every output `i`, the response of path `(j, i)`, and only that.
     #[test]
     fn an_ambisonic_impulse_on_an_input_is_each_outputs_path_response() {
-        let format = AmbisonicFormat::ambix(tutti_types::AmbisonicOrder::of(1));
+        let format = AmbisonicFormat::ambix(tutti_buffers::AmbisonicOrder::of(1));
         let irs: Vec<Vec<f32>> = (0..16)
             .map(|p| tap(2 + 3 * p, 0.0625 * (p as f32 + 1.0)))
             .collect();
@@ -1727,7 +1727,7 @@ mod layouts {
         let one = [1.0f32];
         let irs = |n: usize| vec![Mono::new(&one[..]); n];
         let stereo = ChannelTopology::from(Bed::Stereo);
-        let foa = AmbisonicFormat::ambix(tutti_types::AmbisonicOrder::of(1));
+        let foa = AmbisonicFormat::ambix(tutti_buffers::AmbisonicOrder::of(1));
         let foa_bus = BusTopology::ambisonic(foa);
         let build = |layout, i, o, n| {
             ConvolverNode::<f32>::from_layout(layout, i, o, &irs(n), Samples(64)).err()
@@ -1815,7 +1815,7 @@ mod layouts {
     /// only that; the node's ports are four in and two out.
     #[test]
     fn first_order_ambisonic_to_stereo_routes_each_path_by_its_own_response() {
-        let foa = AmbisonicFormat::ambix(tutti_types::AmbisonicOrder::of(1));
+        let foa = AmbisonicFormat::ambix(tutti_buffers::AmbisonicOrder::of(1));
         let irs: Vec<Vec<f32>> = (0..8)
             .map(|p| tap(2 + 5 * p, 0.125 * (p as f32 + 1.0)))
             .collect();
@@ -1857,7 +1857,7 @@ mod layouts {
         let four: Vec<Vec<f32>> = (0..4)
             .map(|p| long(10 + p, 2500 + 90 * p as usize))
             .collect();
-        let foa = AmbisonicFormat::ambix(tutti_types::AmbisonicOrder::of(1));
+        let foa = AmbisonicFormat::ambix(tutti_buffers::AmbisonicOrder::of(1));
         let sixteen: Vec<Vec<f32>> = (0..16)
             .map(|p| long(50 + p, 600 + 40 * p as usize))
             .collect();

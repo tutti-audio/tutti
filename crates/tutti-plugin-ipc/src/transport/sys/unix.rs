@@ -5,7 +5,7 @@ use super::control::ControlStream;
 use interprocess::local_socket::traits::Stream as _;
 use interprocess::local_socket::{GenericFilePath, Name, Stream, ToFsName as _};
 use std::os::fd::{AsFd, OwnedFd};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 /// Converts a host-chosen socket path into the local-socket name for this
@@ -23,6 +23,30 @@ use std::time::Duration;
 // there.
 pub fn socket_name(socket: &Path) -> std::io::Result<Name<'static>> {
     socket.to_owned().to_fs_name::<GenericFilePath>()
+}
+
+/// The longest socket path every Unix takes: `sun_path` is 104 bytes on macOS
+/// and the BSDs and 108 on Linux, and the path needs a terminating NUL in it.
+/// One figure for all, so a path that fits on Linux fits on macOS too.
+const SOCKET_PATH_MAX: usize = 103;
+
+/// `name` in the first of `temp`, `$XDG_RUNTIME_DIR` and `/tmp` where the whole
+/// path fits [`SOCKET_PATH_MAX`]. `/tmp` always fits a name
+/// [`unique_socket_path`](crate::unique_socket_path) makes.
+///
+/// `$XDG_RUNTIME_DIR` comes before `/tmp` because it is the user's own (mode
+/// 0700); `temp` comes first because it is the one the user chose.
+pub fn socket_path_in(temp: &Path, name: &str) -> PathBuf {
+    let fits = |p: &PathBuf| p.as_os_str().len() <= SOCKET_PATH_MAX;
+    let runtime = std::env::var_os("XDG_RUNTIME_DIR")
+        .map(PathBuf::from)
+        .filter(|d| d.is_absolute());
+    std::iter::once(temp.to_path_buf())
+        .chain(runtime)
+        .chain(std::iter::once(PathBuf::from("/tmp")))
+        .map(|dir| dir.join(name))
+        .find(fits)
+        .unwrap_or_else(|| temp.join(name))
 }
 
 /// Whether `stream` has something to read now, asked without blocking or
@@ -105,5 +129,50 @@ impl Wakeup {
             }
             Self::None => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A temporary directory too deep for a socket address moves the socket
+    /// to a short one, which a listener binds and a client connects to; one
+    /// that fits keeps it. A deep `TMPDIR` (a worktree's scratch directory,
+    /// macOS's `/var/folders/…/T/`) failed the plugin server's launch with
+    /// "local socket name length exceeds capacity of sun_path".
+    #[test]
+    fn a_deep_temporary_directory_moves_the_socket() {
+        use interprocess::local_socket::ListenerOptions;
+        use interprocess::local_socket::traits::Listener as _;
+
+        let base = tempfile::tempdir().expect("a temporary directory");
+        let deep = base.path().join("d".repeat(SOCKET_PATH_MAX));
+        std::fs::create_dir_all(&deep).expect("the deep directory");
+        let name = format!(
+            "{}.sock",
+            crate::config::unique_name("tutti-bridge").expect("a random source")
+        );
+
+        let path = socket_path_in(&deep, &name);
+        assert!(!path.starts_with(&deep), "{path:?}");
+        assert!(path.as_os_str().len() <= SOCKET_PATH_MAX, "{path:?}");
+
+        let listener = ListenerOptions::new()
+            .name(crate::transport::control::socket_name(&path).expect("a name"))
+            .create_sync()
+            .expect("the moved path binds");
+        let connect = path.clone();
+        let client = std::thread::spawn(move || crate::transport::control::connect(&connect));
+        let _peer = listener.accept().expect("a peer");
+        client
+            .join()
+            .expect("no panic")
+            .expect("the client connects");
+        drop(listener);
+        let _ = std::fs::remove_file(&path);
+
+        let root = std::path::Path::new("/");
+        assert_eq!(socket_path_in(root, &name), root.join(&name));
     }
 }

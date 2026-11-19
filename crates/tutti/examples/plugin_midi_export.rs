@@ -60,13 +60,10 @@ fn load(
     plugin: &Path,
     state: Option<Vec<u8>>,
 ) -> Result<tutti::Key<tutti::AnyPlugin>, Box<dyn std::error::Error>> {
-    use tutti::plugin::catalog::{CatalogConfig, NO_SCAN_DIRS, PluginDb, PluginId, ScanPoll};
+    use tutti::plugin::catalog::{CatalogConfig, PluginDb, PluginId, ScanPoll};
     let dir = tempfile::TempDir::new()?;
-    let mut catalog = tutti::Catalog::new(
-        PluginDb::new(),
-        CatalogConfig::new(dir.path(), NO_SCAN_DIRS),
-        |_| Ok(()),
-    );
+    let mut catalog =
+        tutti::Catalog::new(PluginDb::new(), CatalogConfig::new(dir.path()), |_| Ok(()));
     let mut probe = catalog.register(plugin)?;
     let scanned = loop {
         match catalog.try_apply(&mut probe) {
@@ -125,19 +122,20 @@ fn play<M: Master>(
     let synth = load(&mut s, main, plugin, state)?;
     s.graph().connect(synth, Root).unwrap();
 
-    let file = MidiFile::read(midi)?; // an SMF or a Clip File
-    // A file timed in SMPTE frames has no beats, and a format 2 file no one
-    // tempo map to adopt: this example plays files of one metrical timeline only.
-    let Timebase::Metrical(metrical) = file.timebase() else {
-        return Err("a file with no one beat timeline (SMPTE frames, or format 2 sequences) has nothing to play on".into());
+    // The load is a job: the worker reads the file (an SMF or a Clip File) and
+    // converts its tracks to clips. A file in SMPTE time or of format 2 has no
+    // one beat timeline to adopt: this example plays one metrical timeline only.
+    let job = s.midi().load_midi(midi);
+    let loaded = job.wait(&mut s)?;
+    let tempo_map = loaded.tempo()?.clone();
+    let Timebase::Metrical(metrical) = loaded.file().timebase() else {
+        return Err("a file with no one beat timeline has nothing to play on".into());
     };
-    let (tempo_map, end) = (metrical.tempo_map(), metrical.beat_at(metrical.end()));
+    let end = metrical.beat_at(metrical.end());
     // A file's tempo track is the file's data, not the project's: the project
     // adopts it on import, here, by an explicit call (a shared map, no copy).
-    s.set(s.transport_handle().tempo().to(tempo_map.clone()))?;
-    // Its messages on the file's one timeline, as the
-    // packets they are: the clip translates them when it is loaded.
-    s.midi().play_file(synth, Beat(0.0), metrical)?;
+    s.set(s.transport_handle().tempo().to(tempo_map))?;
+    s.midi().play_track(synth, loaded.track(0)?)?;
     report(s.update());
 
     // Everything else is derived: the clock is the project's tempo map from
@@ -224,7 +222,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             // SAFETY: set before the first server or probe is spawned, while
             // `main` is the only thread.
             unsafe {
-                std::env::set_var("TUTTI_PLUGIN_SERVER", support::plugin_server());
+                std::env::set_var("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server());
                 std::env::set_var("TUTTI_PLUGIN_PROBE", tutti_fixtures::plugin_probe());
             }
             reference(main, &std::env::temp_dir())?
@@ -251,7 +249,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("tutti-5-2-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let mut env = tutti_fixtures::ScopedEnv::new();
-        env.set("TUTTI_PLUGIN_SERVER", super::support::plugin_server());
+        env.set("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server());
         env.set("TUTTI_PLUGIN_PROBE", tutti_fixtures::plugin_probe());
         let written =
             super::reference(tutti_fixtures::main_thread(), &dir).expect("the example runs");
@@ -282,7 +280,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("tutti-5-2-notes-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let mut env = tutti_fixtures::ScopedEnv::new();
-        env.set("TUTTI_PLUGIN_SERVER", super::support::plugin_server());
+        env.set("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server());
         env.set("TUTTI_PLUGIN_PROBE", tutti_fixtures::plugin_probe());
         let midi = dir.join("phrase.mid");
         super::phrase(&midi).unwrap();

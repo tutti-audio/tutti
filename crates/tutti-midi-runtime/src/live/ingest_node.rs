@@ -28,10 +28,10 @@
 //! assemblers, and skipping an event corrupts the ones after it.
 //!
 //! **A source that ends leaves nothing held downstream.** The node keeps what
-//! its device started and has not ended ([`HeldState`]: the keys down, the hold
+//! its device started and has not ended ([`Held`]: the keys down, the hold
 //! pedals down and the bends off centre, as the device sent them), and
 //! releases it as the messages that end it (Note Offs, then pedal-ups and
-//! centred bends; `HeldState`'s docs say why not All Notes Off) through the
+//! centred bends; `Held`'s docs say why not All Notes Off) through the
 //! same translation as any other message, in three cases:
 //!
 //! - *The device changed or went.* Built [`following`](MidiIngestNode::following)
@@ -42,9 +42,8 @@
 //!   empty, translator and MPE state, so one device's half-sent run is not
 //!   completed by the next; and an input whose device went hears nothing until
 //!   another takes it. (The executor's edge close, `tutti-graph`'s
-//!   `held.rs`, ends the same notes when the device's inlet is taken out of the
-//!   graph; this ends them as soon as the device lets go, and the pedals and
-//!   bends the edge does not track.)
+//!   `held.rs`, ends the same notes, pedals and bends when the device's inlet
+//!   is taken out of the graph; this ends them as soon as the device lets go.)
 //! - *Active Sensing lapsed* ([`ActiveSensing`], MIDI 1.0 Detailed
 //!   Specification p. 32). Once a Group has sent an Active Sensing (FE), a
 //!   message is expected from it at least every 330 ms; when none comes, the
@@ -83,13 +82,12 @@ use tutti_graph::{
 use tutti_midi_protocol::Translator;
 use tutti_midi_protocol::{MpeMode, MpeZones};
 use tutti_rt::{Counter, CounterWriter, LockExt, Publisher, Reader, counter};
-use tutti_ump::{Message, MidiChannel, MidiGroup, System, Ump};
+use tutti_ump::{Held, Message, MidiChannel, MidiGroup, System, Ump};
 use tutti_units::{Frame, SampleRate, Samples};
 
 use super::mpe_ingest::MpeIngest;
 use super::order::{BLANK, in_offset_order, offset_of};
 use super::sensing::ActiveSensing;
-use crate::held::HeldState;
 use crate::live::device_epochs::DeviceEpochs;
 
 /// The port that carries a Group's events with no channel: after its sixteen
@@ -242,16 +240,20 @@ const PORTS_PER_GROUP: usize = MIDI_INPUT_PORTS;
 /// Group alone). See the module docs.
 ///
 /// ```
-/// use tutti_types::MaxBlock;
+/// use tutti_buffers::MaxBlock;
 /// use tutti_units::{SampleRate, Samples};
 /// use tutti_graph::NodeKey;
 /// use tutti_graph::{Editor, Prepare};
+/// use tutti_midi_protocol::MpeMode;
 /// use tutti_midi_runtime::MidiIngestNode;
+/// use tutti_rt::Publisher;
 ///
 /// let (mut editor, _exec) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(512))));
 /// // The inlet is not wired yet.
-/// let controls = editor.insert(NodeKey(1), "midi in", MidiIngestNode::new()).controls;
-/// controls.set_mpe_mode(tutti_midi_protocol::MpeMode::Disabled);
+/// let mode = Publisher::new(MpeMode::Disabled);
+/// let node = MidiIngestNode::new().with_mpe(&mode);
+/// let controls = editor.insert(NodeKey(1), "midi in", node).controls;
+/// controls.clear_mpe_profiles();
 /// ```
 pub struct MidiIngestNode {
     /// The device's translation state.
@@ -264,6 +266,9 @@ pub struct MidiIngestNode {
     out: Box<[UmpAt]>,
     /// The Groups it hears, and so its ports.
     ports: MidiInputPorts,
+    /// The session's MPE mode, read once per block; `None` for a node built
+    /// over none, whose mode is [`MpeMode::Disabled`].
+    mpe_mode: Option<Reader<MpeMode>>,
     /// What a host asked for, read once per block.
     mpe_request: Reader<Requests>,
     /// The cell `mpe_request` reads, which the controls publish to; the node
@@ -293,8 +298,6 @@ type GroupProfiles = [Option<MpeZones>; MidiGroup::COUNT as usize];
 /// What the control side asks of the node, published whole.
 #[derive(Clone, Debug)]
 struct Requests {
-    /// The MPE 1.1 mode, if one was asked for.
-    mode: Option<MpeMode>,
     /// The MPE Profile zones the device enabled.
     profiles: GroupProfiles,
 }
@@ -302,7 +305,6 @@ struct Requests {
 impl Requests {
     fn new() -> Self {
         Self {
-            mode: None,
             profiles: NO_PROFILES,
         }
     }
@@ -323,7 +325,7 @@ struct Device {
     /// node that follows no epochs.
     present: bool,
     /// What the device started and has not ended, as it sent it.
-    held: HeldState,
+    held: Held,
     /// The device's Groups that have sent an Active Sensing.
     sensing: ActiveSensing,
     /// The Groups (bit `g` for Group `g`) whose release did not fit the
@@ -339,7 +341,7 @@ impl Device {
             mode,
             epoch: 0,
             present: true,
-            held: HeldState::new(),
+            held: Held::new(),
             // Built again for the real rate in `prepare`.
             sensing: ActiveSensing::at_rate(SampleRate::SR_48K),
             owing: 0,
@@ -351,10 +353,10 @@ impl Device {
     /// ranges first ([`MpeIngest::zone_defaults`]: what an MPE Configuration
     /// Message resets a receiver to, as this node sends an MCM's).
     ///
-    /// **The comparison is load-bearing**: the request latches (the audio
-    /// thread cannot clear it without publishing), and `set_mode` rebuilds
-    /// the ingest, so re-adopting it every block would drop every sounding
-    /// note's voice mapping, and re-send the ranges, every block.
+    /// **The comparison is load-bearing**: the session's cell keeps the mode
+    /// it was last given, so every block reads it, and `set_mode` rebuilds the
+    /// ingest: re-adopting it every block would drop every sounding note's
+    /// voice mapping, and re-send the ranges, every block.
     fn adopt(&mut self, requested: Option<MpeMode>) -> bool {
         let Some(mode) = requested else {
             return false;
@@ -457,6 +459,7 @@ impl MidiIngestNode {
         let cell = Publisher::new(Requests::new());
         let (dropped, dropped_reader) = counter();
         Self {
+            mpe_mode: None,
             mpe_request: cell.reader(),
             request_serial: Arc::default(),
             mpe_request_cell: cell,
@@ -499,17 +502,27 @@ impl MidiIngestNode {
         self
     }
 
-    /// Ingest classic MPE in `mode` from the first block, on every Group.
+    /// Ingest classic MPE in the mode `mode` holds from the first block, on
+    /// every Group, and follow it: a publish to `mode` is adopted at the next
+    /// block. The reader is registered here, so build the node on the control
+    /// side.
+    ///
+    /// A new mode stops and resets the channels that enter or leave MPE
+    /// control (M1-100 section 2.2.3: All Sound Off and Reset All Controllers,
+    /// sent ahead of the new zones' default bend ranges); the others keep
+    /// their notes. Publishing the mode in force changes nothing.
     #[must_use]
-    pub fn with_mpe(mut self, mode: MpeMode) -> Self {
-        self.device.mode = mode;
-        self.device.mpe = MpeIngest::new(mode);
+    pub fn with_mpe(mut self, mode: &Publisher<MpeMode>) -> Self {
+        let initial = *mode.current();
+        self.device.mode = initial;
+        self.device.mpe = MpeIngest::new(initial);
+        self.mpe_mode = Some(mode.reader());
         self
     }
 }
 
-/// The host's handle on a [`MidiIngestNode`]: its MPE mode and the MPE Profile
-/// zones of its device. Cheap to clone.
+/// The host's handle on a [`MidiIngestNode`]: the MPE Profile zones of its
+/// device. Cheap to clone.
 #[derive(Clone, Debug)]
 pub struct MidiIngestControls {
     /// What the node reads; the controls publish to it and read it back with
@@ -522,26 +535,12 @@ pub struct MidiIngestControls {
 }
 
 impl MidiIngestControls {
-    /// Ingest classic MPE in `mode` from the next block. Control thread.
-    ///
-    /// A new mode stops and resets the channels that enter or leave MPE
-    /// control (M1-100 §2.2.3: All Sound Off and Reset All Controllers, sent
-    /// ahead of the new zones' default bend ranges); the others keep their
-    /// notes. Setting the mode in force changes nothing.
-    pub fn set_mpe_mode(&self, mode: MpeMode) {
-        let _serial = self.serial.lock_recover();
-        let mut request = (*self.request.current()).clone();
-        request.mode = Some(mode);
-        self.request.publish(request);
-    }
-
     /// The MIDI-CI MPE Profile zones (M2-120) the device enabled on `group`: from the next block, what the device sends on
     /// that Group follows the zones' rules instead of the mode's, until `zones`
     /// is `None` ([`MpeIngest::set_profile`] says what the change stops and
     /// resets). Control thread. Setting what is set changes nothing.
     ///
-    /// The zones are the device's alone: the mode
-    /// [`set_mpe_mode`](Self::set_mpe_mode) sets is not changed. A device that
+    /// The zones are the device's alone: the session's mode is not changed. A device that
     /// takes the input starts with none, but the control side's record stays
     /// until it is set: clear it when the device goes
     /// ([`clear_mpe_profiles`](Self::clear_mpe_profiles)).
@@ -613,7 +612,8 @@ impl<F: Float> Node<F> for MidiIngestNode {
         // One lend, before any event is translated, stated or not: the mode
         // and the Profile zones are read from the same requests.
         let requests = self.mpe_request.lend();
-        let reset = self.device.adopt(requests.mode);
+        let mode = self.mpe_mode.as_mut().map(|reader| *reader.lend());
+        let reset = self.device.adopt(mode);
         let block_len = cx.env.block_len;
         let first = cx.env.frame;
         // An event's translation goes in whole or not at all: a fan-out cut
@@ -737,14 +737,12 @@ impl<F: Float> Node<F> for MidiIngestNode {
     /// owed, no Group has sent an Active Sensing, and the Profile zones in
     /// force are read again from the requests. What the node held is not
     /// released: `reset` has no output to release into. The executor, when it
-    /// parks a bypassed node, ends the keys and the sustain pedal the node held
-    /// on its event outputs (the graph's held set covers keys and sustain
-    /// only), so after a bypass the sostenuto, soft and hold-2 pedals and the
-    /// bend the device left are neither lifted nor remembered.
+    /// parks a bypassed node, ends the keys, hold pedals and bends the node held
+    /// on its event outputs.
     fn reset(&mut self) {
         self.device.translator.reset();
         self.device.mpe = MpeIngest::new(self.device.mode);
-        self.device.held.forget();
+        self.device.held.clear();
         self.device.sensing.forget_all();
         self.device.owing = 0;
         self.profiles = NO_PROFILES;

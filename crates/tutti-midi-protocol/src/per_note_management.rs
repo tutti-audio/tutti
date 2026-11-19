@@ -21,6 +21,7 @@ const SLOTS: usize = MidiGroup::COUNT as usize * MidiChannel::COUNT as usize;
 
 /// When a sender sends Per-Note Management, and which (M2-104 Appendix C).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum PerNotePolicy {
     /// Appendix C.2: only where a key's controllers are still attached. A key
     /// is attached once it is struck, and stays so until a management message

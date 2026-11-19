@@ -41,10 +41,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use super::fault::FirstError;
+use tutti_buffers::ChannelLayout;
 #[cfg(codec)]
 use tutti_buffers::Source;
 use tutti_buffers::{Float, Wave};
-use tutti_types::ChannelLayout;
 use tutti_units::{SamplePosition, Samples};
 
 use super::Loop;
@@ -107,7 +107,7 @@ pub(crate) enum ReadFault {
 
 /// The file a forked disk voice plays: the streamer's description of it, and
 /// the file itself, opened on the first read.
-pub(crate) struct OfflineRead<F: Float = f32> {
+pub(crate) struct OfflineRead<F: Float> {
     /// What to play. Shared by clones: it is a description, never written.
     file: Arc<StreamFile<F>>,
     /// The loop the stream ran when the fork was taken, as the streamer
@@ -295,7 +295,7 @@ impl<F: Float> OfflineRead<F> {
 
 /// An opened file: decoded whole already (the streamer's cached wave, or a
 /// file that cannot seek), or paged in through a decoder.
-enum Open<F: Float = f32> {
+enum Open<F: Float> {
     Resident(Arc<Wave<F>>),
     /// Boxed: a decoder and two pages' bookkeeping, against an `Arc`. With
     /// no codec compiled in nothing builds one (`open_path` fails first).
@@ -404,7 +404,7 @@ impl<F: Float> Open<F> {
 /// read decodes a page per page of frames, not one per few frames.
 // With no codec compiled in nothing builds one (`open_path` fails first).
 #[cfg_attr(not(codec), allow(dead_code))]
-struct Pages<F: Float = f32> {
+struct Pages<F: Float> {
     #[cfg(codec)]
     decoder: tutti_codec::FileIn<F>,
     path: PathBuf,
@@ -582,7 +582,7 @@ mod tests {
         path
     }
 
-    fn reader(path: std::path::PathBuf) -> OfflineRead {
+    fn reader(path: std::path::PathBuf) -> OfflineRead<f32> {
         OfflineRead::new(
             Arc::new(StreamFile::new(path, SampleRate::SR_48K, None)),
             None,

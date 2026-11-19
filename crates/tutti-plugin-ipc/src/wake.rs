@@ -14,7 +14,7 @@ use tutti_rt::LockExt;
 ///
 /// **The condition runs under the gate**, on the waiting thread, so it must not
 /// wait or notify; it may change state that only the waiter owns (a drain of a
-/// queue the waiter alone pops, as `take_replies` does).
+/// queue the waiter alone pops, as `Replies::take` does).
 ///
 /// Off the audio thread only: [`notify`](Self::notify) takes a lock.
 #[derive(Debug, Default)]

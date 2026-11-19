@@ -2,13 +2,14 @@
 //! [`CrossoverKernel`]. The algorithm is `tutti-dsp`'s ([`CrossoverBank`]); this file holds the
 //! kernel, the cells and how a block reads them.
 
+use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{
     CrossoverBank, CrossoverCoefficients, CrossoverControls, CrossoverError, CrossoverModel, Glide,
     Lanes, MAX_SPLITS, fit_to_rate,
 };
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
-use tutti_types::{BusTopology, ChannelLayout, MaxBlock, Param};
+use tutti_rt::Param;
 use tutti_units::{Hz, SampleRate, Tail};
 #[cfg(test)]
 use tutti_units::{UnitAddr, UnitParam};

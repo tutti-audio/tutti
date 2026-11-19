@@ -6,7 +6,7 @@ use std::borrow::Cow;
 use std::io;
 
 use thiserror::Error;
-use tutti_types::ChannelLayout;
+use tutti_buffers::ChannelLayout;
 
 /// Why a file could not be probed, decoded or sought.
 ///

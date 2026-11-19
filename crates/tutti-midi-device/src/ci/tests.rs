@@ -78,7 +78,7 @@ fn a_reply_keeps_the_device_it_goes_to() {
     let msg = CiMessage::Nak {
         header: header(),
         to: Muid::of(0x0042_4242),
-        nak: Nak::new(U7::of(0x20), Nak::STATUS_MESSAGE_NOT_SUPPORTED),
+        nak: Nak::new(U7::of(0x20), NakStatus::MessageNotSupported),
     };
     let bytes = msg.encode();
     assert_eq!(&bytes[9..13], Muid::of(0x0042_4242).to_bytes());
@@ -130,7 +130,7 @@ fn a_message_that_is_not_read_keeps_its_header() {
                 source: Muid::of(0x77),
             },
             to: Muid::of(SRC),
-            nak: Nak::new(U7::of(0x3E), U7::of(0x01)),
+            nak: Nak::new(U7::of(0x3E), NakStatus::MessageNotSupported),
         }
     );
     assert_eq!(decoded(&reply.encode()), reply);
@@ -155,7 +155,7 @@ fn reserved_version_bits_are_nakked_with_0x02_in_the_receivers_version() {
         let CiMessage::Nak { header, nak, .. } = got.nak(Muid::of(9)).unwrap() else {
             panic!("a NAK")
         };
-        assert_eq!(nak.status_code, U7::of(0x02));
+        assert_eq!(nak.status, NakStatus::VersionNotSupported);
         assert_eq!(header.ci_version, CI_VERSION);
     }
 }
@@ -198,7 +198,7 @@ fn a_reserved_device_id_is_refused() {
             panic!("a NAK")
         };
         assert_eq!(header.device_id, CiDeviceId::FunctionBlock);
-        assert_eq!(nak.status_code, Nak::STATUS_MALFORMED);
+        assert_eq!(nak.status, NakStatus::Malformed);
     }
     for id in (0x00..=0x0F).chain([0x7E, 0x7F]) {
         let mut bytes = invalidate();
@@ -267,12 +267,12 @@ fn the_broadcast_rule_is_held_in_both_directions() {
         CiMessage::Ack {
             header: header(),
             to: Muid::of(7),
-            ack: Ack::new(U7::of(0x34), Ack::STATUS_ACK),
+            ack: Ack::new(U7::of(0x34), AckStatus::Ack),
         },
         CiMessage::Nak {
             header: header(),
             to: Muid::of(7),
-            nak: Nak::new(U7::of(0x34), Nak::STATUS_NAK),
+            nak: Nak::new(U7::of(0x34), NakStatus::Nak),
         },
     ] {
         let mut bytes = msg.encode();
@@ -301,10 +301,24 @@ fn an_unreadable_ack_or_nak_is_not_nakked() {
     }
 }
 
-#[cfg(feature = "serde")]
+/// M2-101 Table 5: `7E` is the whole Group and `7F` the whole Function Block;
+/// each whole is the Device ID and the Profile target of its own byte.
+#[test]
+fn a_whole_is_the_device_id_and_profile_target_of_its_byte() {
+    for (whole, byte, target) in [
+        (Whole::Group, 0x7E, ProfileTarget::Group),
+        (Whole::FunctionBlock, 0x7F, ProfileTarget::FunctionBlock),
+    ] {
+        let id = CiDeviceId::from(whole);
+        assert_eq!(id.get(), byte);
+        assert_eq!(ProfileTarget::from(whole), target);
+        assert_eq!(target.address(), id);
+    }
+}
+
 #[test]
 fn the_device_id_and_version_are_range_checked_values() {
-    use tutti_fixtures::{RangeContract, check_range_contract, check_range_serde};
+    use tutti_fixtures::{RangeContract, check_range_contract};
     let c = RangeContract {
         new: CiDeviceId::new,
         get: CiDeviceId::get,
@@ -313,7 +327,6 @@ fn the_device_id_and_version_are_range_checked_values() {
         invalid: &[0x10, 0x7D, 0x80, 0xFF],
     };
     check_range_contract(&c);
-    check_range_serde(&c);
     let c = RangeContract {
         new: CiVersion::new,
         get: CiVersion::get,
@@ -322,12 +335,10 @@ fn the_device_id_and_version_are_range_checked_values() {
         invalid: &[0x00, 0x20, 0x80, 0xFF],
     };
     check_range_contract(&c);
-    check_range_serde(&c);
 }
 
 /// The ranged values of the CI messages keep the range-checked contract at
-/// each edge of their spec range, and the ones that are stored keep it through
-/// serde.
+/// each edge of their spec range.
 #[test]
 fn the_ci_ranged_values_keep_the_range_contract() {
     use tutti_fixtures::{RangeContract, check_range_contract};
@@ -341,8 +352,6 @@ fn the_ci_ranged_values_keep_the_range_contract() {
                 invalid: &$invalid,
             };
             check_range_contract(&c);
-            #[cfg(feature = "serde")]
-            tutti_fixtures::check_range_serde(&c);
         }};
     }
     contract!(
@@ -376,7 +385,6 @@ fn the_ci_ranged_values_keep_the_range_contract() {
         [0, 0x7FFF_FFFF_FFFF_FFFF],
         [0x8000_0000_0000_0000, u64::MAX]
     );
-    // `ProfileChannels` is not stored, so it has no serde form.
     check_range_contract(&RangeContract {
         new: ProfileChannels::new,
         get: ProfileChannels::get,
@@ -401,7 +409,7 @@ fn packets_carry_the_payload_in_sysex7_packets() {
     use tutti_ump::{Message, MidiGroup, SysexStatus};
     let message = long_message();
     let payload = message.encode();
-    let packets: Vec<_> = message.packets(MidiGroup::of(3)).collect();
+    let packets: Vec<_> = message.packets(MidiGroup::of(3)).unwrap().collect();
     assert_eq!(packets.len(), payload.len().div_ceil(6));
     let mut bytes = Vec::new();
     for (i, ump) in packets.iter().enumerate() {
@@ -421,7 +429,6 @@ fn packets_carry_the_payload_in_sysex7_packets() {
     assert_eq!(bytes, payload);
 }
 
-#[cfg(feature = "serde")]
 #[test]
 fn the_muid_is_a_range_checked_value() {
     use tutti_fixtures::{RangeContract, check_range_contract};
@@ -467,4 +474,16 @@ fn the_preamble_tells_property_exchange_and_set_profile_on() {
     // Only the preamble is read: a first packet's data can stop at it.
     assert!(is_property_exchange(&[0x7E, 0x7F, 0x0D, 0x34]));
     assert!(is_set_profile_on(&[0x7E, 0x7F, 0x0D, 0x22]));
+}
+
+/// A payload byte of 128 or more is refused with its index, never dropped from
+/// the packets: M2-104 §7.7 SysEx7 carries 7-bit bytes only.
+#[test]
+fn a_payload_that_is_not_seven_bit_is_refused_not_sent_short() {
+    let group = MidiGroup::of(3);
+    assert_eq!(
+        sysex7_packets(group, &[0x01, 0x80, 0x02]).err(),
+        Some(tutti_ump::SysexError::NotSevenBit { index: 1 })
+    );
+    assert_eq!(sysex7_packets(group, &[0x01, 0x7F]).unwrap().count(), 1);
 }

@@ -1,13 +1,14 @@
 //! The control surface of a VST2 plugin in the shared vocabulary, implemented by
 //! [`Vst2Loaded`] and, through it, by [`Vst2Controller`](crate::Vst2Controller).
 
+use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_plugin_types::MainThreadMarker;
 use tutti_plugin_types::features::probed;
 use tutti_plugin_types::{
     AutomationMode, ContentScale, Control, EditorPresence, EditorWindow, Features, KeyEvent,
     KeyUse, LoadedPlugin, ModifierConvention, ParamAccess, ParamEdit, ParamWriteError,
-    ParameterInfo, PluginBus, PluginClass, PluginDescriptor, PluginError, PluginResult, Preset,
-    PresetId, RenderMode, RenderModeSupport, Request, StateUse, WindowHandle,
+    ParameterInfo, PluginBus, PluginBuses, PluginClass, PluginDescriptor, PluginError,
+    PluginResult, Preset, PresetId, RenderMode, RenderModeSupport, Request, StateUse, WindowHandle,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -69,6 +70,14 @@ pub(crate) fn descriptor_of(info: &PluginInfo) -> PluginDescriptor {
     }
 }
 
+/// The main bus of `channels` placed at `kept`, or no bus for no channels.
+fn placed(channels: ChannelLayout, kept: Option<&ChannelTopology>) -> PluginBuses {
+    PluginBus::single(channels)
+        .into_iter()
+        .map(|bus| bus.placed(kept.cloned()))
+        .collect()
+}
+
 impl Vst2Loaded {
     /// The capabilities this plugin has, as the shared vocabulary names them.
     fn features(&self) -> Features {
@@ -102,14 +111,15 @@ impl Control for Vst2Loaded {
     /// asked of the `AEffect` and the dispatcher, not remembered from load.
     fn wiring(&self, main: MainThreadMarker) -> LoadedPlugin {
         let (inputs, outputs) = self.pins();
+        // The arrangements the plugin kept after `negotiate_arrangement`; a bus reads one
+        // through `placement`, which is `None` where its width is not the pin count.
+        let kept = self.kept.as_ref();
         LoadedPlugin {
-            // VST2 is single-bus: one main input bus, one main output bus.
-            // One bus a side, with no placement: `effSetSpeakerArrangement`
-            // (opcode 42) exists, but the `VstSpeakerArrangement` struct its
-            // ABI needs is not defined anywhere in the forked bindings and
-            // the host never sends it.
-            inputs: PluginBus::single(inputs),
-            outputs: PluginBus::single(outputs),
+            // VST2 is single-bus: one main input bus, one main output bus. Before a
+            // negotiation a bus has no placement: `effGetSpeakerArrangement` is asked only
+            // of a plugin the host has proposed an arrangement to.
+            inputs: placed(inputs, kept.and_then(|k| k.input.as_ref())),
+            outputs: placed(outputs, kept.and_then(|k| k.output.as_ref())),
             latency_samples: self.latency_samples(),
             // Asked and decoded: VST2 inverts the tail convention, so `0` is "no
             // information" where every other format means "no tail" (see

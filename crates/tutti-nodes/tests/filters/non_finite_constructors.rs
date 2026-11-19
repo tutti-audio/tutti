@@ -5,13 +5,13 @@
 // These tests pin the `f32` instantiation, the session's audio format, so their tolerances are `f32`'s.
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use tutti_buffers::MaxBlock;
 use tutti_buffers::Planes;
-use tutti_types::MaxBlock;
 
+use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_graph::contract::drive;
 use tutti_graph::{Node, Prepare};
 use tutti_nodes::*;
-use tutti_types::{BusTopology, ChannelLayout};
 use tutti_units::{Db, Feedback, Hz, Q, SampleRate, Samples, Seconds};
 
 const RATE: SampleRate = SampleRate::SR_48K;

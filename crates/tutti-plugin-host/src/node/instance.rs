@@ -862,7 +862,7 @@ mod tests {
         let wiring = loaded.wiring(main);
         let prepare = Prepare::new(
             SampleRate::SR_48K,
-            tutti_types::MaxBlock::new(Samples(64)).expect("a block"),
+            tutti_buffers::MaxBlock::new(Samples(64)).expect("a block"),
         );
         let Ok((processor, controller)) = loaded.activate(main, prepare) else {
             panic!("the fake activates");

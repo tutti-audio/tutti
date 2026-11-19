@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tutti_buffers::InterleavedMut;
 
+use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_cpal::{DeviceId, DeviceSelector, Direction, Snapshot, SnapshotSource};
 use tutti_engine::{BackendErrorKind, ManualStreamDriver, OutputSpec};
 use tutti_graph::{Cx, ForkByClone, Io, Node, Prepare, Shape, Status};
@@ -15,7 +16,6 @@ use tutti_session::{
     Backoff, DeviceEvent, DevicePolicy, DeviceRestart, DeviceWatch, InPort, LiveSession, OutPort,
     Phase, PhaseCx, RestartOutcome, Root, Session, SessionEvent, Workers,
 };
-use tutti_types::{ChannelLayout, MaxBlock};
 use tutti_units::{Db, Hz, SampleRate, Samples};
 
 fn spec_at(rate: f64) -> OutputSpec {
@@ -841,7 +841,7 @@ fn a_restart_onto_a_device_that_cannot_place_the_declared_root_is_refused() {
     };
     let (driver, _stream) = ManualStreamDriver::new();
     let mut session = Session::builder()
-        .root_topology(tutti_types::ChannelTopology::unassigned(
+        .root_topology(tutti_buffers::ChannelTopology::unassigned(
             ChannelLayout::QUAD,
         ))
         .device(Default::default())
@@ -880,7 +880,7 @@ fn a_restart_onto_a_device_that_cannot_place_the_declared_root_is_refused() {
 /// the graph moves.
 #[test]
 fn a_restart_states_or_assumes_the_new_devices_placement() {
-    use tutti_types::{Bed, Placement};
+    use tutti_buffers::{Bed, Placement};
     let six = OutputSpec::new(
         SampleRate::SR_48K,
         ChannelLayout::from(6u16),
@@ -941,7 +941,7 @@ fn a_restart_states_or_assumes_the_new_devices_placement() {
 #[test]
 fn a_refused_declaration_is_retried_on_a_restart() {
     use tutti_session::RootTopologyStatus;
-    let buses = tutti_types::ChannelTopology::unassigned(ChannelLayout::QUAD);
+    let buses = tutti_buffers::ChannelTopology::unassigned(ChannelLayout::QUAD);
     let (driver, _stream) = ManualStreamDriver::new();
     let mut session = Session::builder()
         .device(Default::default())
@@ -977,8 +977,8 @@ fn a_waiting_declaration_the_device_no_longer_places_is_refused_and_retried_on_a
         ChannelLayout::from(6u16),
         tutti_buffers::SampleFormat::F32,
     );
-    let buses = tutti_types::ChannelTopology::unassigned(ChannelLayout::QUAD);
-    let stereo = tutti_types::ChannelTopology::assumed(ChannelLayout::STEREO);
+    let buses = tutti_buffers::ChannelTopology::unassigned(ChannelLayout::QUAD);
+    let stereo = tutti_buffers::ChannelTopology::assumed(ChannelLayout::STEREO);
     let (driver, stream) = ManualStreamDriver::new();
     let mut session = Session::builder()
         .device(Default::default())
@@ -1178,9 +1178,9 @@ fn a_listed_device_starts_nothing_with_retry_startup_off() {
 /// device has places for, the same restart goes through.
 #[test]
 fn a_restart_onto_a_device_the_map_does_not_fit_is_refused_and_keeps_the_map() {
+    use tutti_buffers::Bed;
     use tutti_engine::OutputMap;
     use tutti_session::OutputPolicy;
-    use tutti_types::Bed;
     let spec = |channels: usize| {
         OutputSpec::new(
             SampleRate::SR_48K,

@@ -1,15 +1,15 @@
 //! A route's range is a range of the target's unit, and a backwards one is
 //! refused where it is declared (doc 030, T2).
 
+use tutti_buffers::MaxBlock;
 use tutti_graph::NodeKey;
 use tutti_nodes::{SvfFilterNode, SvfType};
 use tutti_session::{ParamRef, RangeError, RouteError, RouteSpec, Session};
-use tutti_types::MaxBlock;
 use tutti_units::{Depth, Hz, Mix, Q, Samples};
 
 fn session() -> Session {
     Session::builder()
-        .outputs(tutti_types::ChannelLayout::STEREO)
+        .outputs(tutti_buffers::ChannelLayout::STEREO)
         .max_block(MaxBlock::of(Samples(256)))
         .build()
         .expect("builds")

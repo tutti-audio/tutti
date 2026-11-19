@@ -180,40 +180,38 @@ fn stopping_a_clip_that_is_not_there_names_the_target() {
     ));
 }
 
-/// **A file plays as a clip at the beat it is given**: a note on its beat 1,
-/// in a file played from beat 1, sounds at beat 2 (frame 48 000); a file in
-/// SMPTE time has no metrical view to play.
+/// **A loaded track plays as a clip on the transport's timeline**: a note on
+/// the file's beat 2 sounds at 48 000 frames at 120 beats a minute.
 #[test]
-fn a_file_plays_at_the_beat_it_is_given_and_smpte_time_has_no_view_to_play() {
+fn a_loaded_track_plays_its_events_at_their_beats() {
     use tutti_midi_file::SmfDivision;
     use tutti_midi_file::{Layout, LeadTrack, MidiFile, Tick, Track};
     use tutti_ump::U7;
     let track = Track::new().note(
-        Tick(480),
-        Tick(720),
+        Tick(960),
+        Tick(1200),
         MidiChannel::FIRST,
         NoteNumber::of(62),
         U7::of(100),
     );
     let file = MidiFile::smf(
         SmfDivision::per_quarter(480),
-        Layout::Format0(LeadTrack::new(track.clone())),
+        Layout::Format0(LeadTrack::new(track)),
     )
     .unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("one.mid");
+    file.write(&path).unwrap();
     let mut s = offline();
     let (synth, seen) = tap(&mut s);
+    let job = s.midi().load_midi(path);
+    let loaded = job.wait(&mut s).unwrap();
     s.midi()
-        .play_file(synth, Beat(1.0), file.timebase().metrical().unwrap())
+        .play_track(synth, loaded.track(0).unwrap())
         .unwrap();
     let _ = s.update();
     roll(&s, 49_000);
     assert_eq!(note_ons(&seen), vec![(48_000, 62)]);
-
-    // SMPTE time (-25 frames a second, 40 ticks a frame: `E7 28`) has seconds
-    // and no beats to play on: it has no metrical view to pass.
-    let smpte = MidiFile::from_bytes(b"MThd\0\0\0\x06\0\0\0\x01\xE7\x28MTrk\0\0\0\x04\0\xFF\x2F\0")
-        .unwrap();
-    assert!(smpte.timebase().metrical().is_none());
 }
 
 /// **A target that takes no MIDI is refused**: a node with no event input,
@@ -1095,7 +1093,7 @@ fn a_midi_ci_peer_that_answers_discovery_is_in_the_ports_info() {
                     to: header.source,
                     data,
                 };
-                answers.extend(reply.packets(MidiGroup::FIRST));
+                answers.extend(reply.packets(MidiGroup::FIRST).unwrap());
             }
         }
         for ump in answers {
@@ -1229,7 +1227,8 @@ fn a_midi_ci_peers_profiles_are_listed_and_switched_through_the_session() {
                             to: header.source,
                             data,
                         }
-                        .packets(MidiGroup::FIRST),
+                        .packets(MidiGroup::FIRST)
+                        .unwrap(),
                     );
                 }
                 Decoded::Message(CiMessage::ProfileInquiry { header, .. }) => {
@@ -1249,7 +1248,8 @@ fn a_midi_ci_peers_profiles_are_listed_and_switched_through_the_session() {
                                 to: header.source,
                                 profiles: lists,
                             }
-                            .packets(MidiGroup::FIRST),
+                            .packets(MidiGroup::FIRST)
+                            .unwrap(),
                         );
                     }
                 }
@@ -1262,7 +1262,8 @@ fn a_midi_ci_peers_profiles_are_listed_and_switched_through_the_session() {
                             target,
                             profile,
                         }
-                        .packets(MidiGroup::FIRST),
+                        .packets(MidiGroup::FIRST)
+                        .unwrap(),
                     );
                 }
                 _ => {}
@@ -1303,7 +1304,7 @@ fn a_midi_ci_peers_profiles_are_listed_and_switched_through_the_session() {
     ));
     let say = |s: &mut Session, message: CiMessage| {
         let now = Instant::now();
-        for ump in message.packets(MidiGroup::FIRST) {
+        for ump in message.packets(MidiGroup::FIRST).unwrap() {
             assert!(fake.send_input(raw, ump, now));
         }
         for ms in 0..4 {
@@ -1454,8 +1455,9 @@ impl MpePeer {
     ) {
         use tutti_midi_device::{
             CI_VERSION, CiCategories, CiDeviceId, CiHeader, CiMessage, Decoded, DiscoveryData,
-            MaxSysexSize, Nak, ProfileId, ProfileList, ProfileLists, ProfileTarget,
-            SUB_ID2_MESSAGE_REPORT_INQUIRY, SUB_ID2_SET_PROFILE_OFF, SUB_ID2_SET_PROFILE_ON,
+            MaxSysexSize, Nak, NakStatus, PeTerminator, ProfileId, ProfileList, ProfileLists,
+            ProfileTarget, SUB_ID2_MESSAGE_REPORT_INQUIRY, SUB_ID2_SET_PROFILE_OFF,
+            SUB_ID2_SET_PROFILE_ON,
         };
         use tutti_ump::{DeviceIdentity, ManufacturerId, SysexStep, U7};
         let at = |device_id| CiHeader {
@@ -1502,7 +1504,8 @@ impl MpePeer {
                             to: header.source,
                             data,
                         }
-                        .packets(MidiGroup::FIRST),
+                        .packets(MidiGroup::FIRST)
+                        .unwrap(),
                     );
                 }
                 Decoded::Message(CiMessage::ProfileInquiry { header, .. }) => {
@@ -1522,7 +1525,8 @@ impl MpePeer {
                                 to: header.source,
                                 profiles: lists,
                             }
-                            .packets(MidiGroup::FIRST),
+                            .packets(MidiGroup::FIRST)
+                            .unwrap(),
                         );
                     }
                 }
@@ -1535,7 +1539,8 @@ impl MpePeer {
                                 target,
                                 profile: ProfileId::MPE,
                             }
-                            .packets(MidiGroup::FIRST),
+                            .packets(MidiGroup::FIRST)
+                            .unwrap(),
                         ),
                         Reply::Refuse => answers.extend(
                             CiMessage::Nak {
@@ -1543,10 +1548,11 @@ impl MpePeer {
                                 to: source,
                                 nak: Nak::new(
                                     U7::of(SUB_ID2_SET_PROFILE_ON),
-                                    Nak::STATUS_PROFILE_NOT_SUPPORTED,
+                                    NakStatus::ProfileNotSupported,
                                 ),
                             }
-                            .packets(MidiGroup::FIRST),
+                            .packets(MidiGroup::FIRST)
+                            .unwrap(),
                         ),
                         Reply::Silent => {}
                     }
@@ -1566,7 +1572,8 @@ impl MpePeer {
                             },
                             profile: ProfileId::MPE,
                         }
-                        .packets(MidiGroup::FIRST),
+                        .packets(MidiGroup::FIRST)
+                        .unwrap(),
                     ),
                     Reply::Refuse => answers.extend(
                         CiMessage::Nak {
@@ -1574,10 +1581,11 @@ impl MpePeer {
                             to: header.source,
                             nak: Nak::new(
                                 U7::of(SUB_ID2_SET_PROFILE_OFF),
-                                Nak::STATUS_PROFILE_NOT_SUPPORTED,
+                                NakStatus::ProfileNotSupported,
                             ),
                         }
-                        .packets(MidiGroup::FIRST),
+                        .packets(MidiGroup::FIRST)
+                        .unwrap(),
                     ),
                     Reply::Silent => {}
                 },
@@ -1588,7 +1596,8 @@ impl MpePeer {
                             to: header.source,
                             features: tutti_midi_device::ProcessFeatures::MIDI_MESSAGE_REPORT,
                         }
-                        .packets(MidiGroup::FIRST),
+                        .packets(MidiGroup::FIRST)
+                        .unwrap(),
                     ),
                 Decoded::Message(CiMessage::MessageReportInquiry { header, scope, .. }) => {
                     match self.report {
@@ -1599,7 +1608,8 @@ impl MpePeer {
                                     to: header.source,
                                     scope,
                                 }
-                                .packets(MidiGroup::FIRST),
+                                .packets(MidiGroup::FIRST)
+                                .unwrap(),
                             );
                             answers.push(midi::m1_note_on(
                                 MidiChannel::of(0),
@@ -1611,7 +1621,8 @@ impl MpePeer {
                                     header: at(header.device_id),
                                     to: header.source,
                                 }
-                                .packets(MidiGroup::FIRST),
+                                .packets(MidiGroup::FIRST)
+                                .unwrap(),
                             );
                         }
                         Reply::Refuse => answers.extend(
@@ -1620,10 +1631,11 @@ impl MpePeer {
                                 to: header.source,
                                 nak: Nak::new(
                                     U7::of(SUB_ID2_MESSAGE_REPORT_INQUIRY),
-                                    Nak::STATUS_TERMINATE,
+                                    NakStatus::Terminate(PeTerminator::Responder),
                                 ),
                             }
-                            .packets(MidiGroup::FIRST),
+                            .packets(MidiGroup::FIRST)
+                            .unwrap(),
                         ),
                         Reply::Silent => {}
                     }
@@ -1909,7 +1921,8 @@ fn a_midi_ci_peers_message_report_is_asked_for_through_the_session() {
                             to: header.source,
                             data,
                         }
-                        .packets(MidiGroup::FIRST),
+                        .packets(MidiGroup::FIRST)
+                        .unwrap(),
                     );
                 }
                 Decoded::Message(CiMessage::ProcessCapabilitiesInquiry { header, .. }) => {
@@ -1919,7 +1932,8 @@ fn a_midi_ci_peers_message_report_is_asked_for_through_the_session() {
                             to: header.source,
                             features: ProcessFeatures::MIDI_MESSAGE_REPORT,
                         }
-                        .packets(MidiGroup::FIRST),
+                        .packets(MidiGroup::FIRST)
+                        .unwrap(),
                     );
                 }
                 Decoded::Message(CiMessage::MessageReportInquiry {
@@ -1935,14 +1949,16 @@ fn a_midi_ci_peers_message_report_is_asked_for_through_the_session() {
                             to: header.source,
                             scope,
                         }
-                        .packets(MidiGroup::FIRST),
+                        .packets(MidiGroup::FIRST)
+                        .unwrap(),
                     );
                     answers.extend(
                         CiMessage::MessageReportEnd {
                             header: at(header.device_id),
                             to: header.source,
                         }
-                        .packets(MidiGroup::FIRST),
+                        .packets(MidiGroup::FIRST)
+                        .unwrap(),
                     );
                 }
                 _ => {}
@@ -2172,7 +2188,7 @@ fn the_output_latency_is_written_and_read_through_its_target() {
     let target = s.midi().output_latency();
     assert_eq!(s.get(target).unwrap(), OutputLatency::default());
     let latency = OutputLatency::new(
-        std::time::Duration::from_millis(7),
+        tutti_units::Seconds(0.007),
         OutputOffset::new(Seconds(-0.002)).unwrap(),
     )
     .unwrap();

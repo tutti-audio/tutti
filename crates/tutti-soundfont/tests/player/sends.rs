@@ -251,6 +251,6 @@ fn a_voice_in_its_delay_is_silent_but_the_unit_is_not_idle() {
 fn the_dry_pair_is_the_main_pair_of_five_outputs() {
     let rig = rig(vec![]);
     assert_eq!(rig.hand.shape().audio_out().count(), 5);
-    let unit: &SoundFontUnit = &rig.hand;
+    let unit: &SoundFontUnit<f32> = &rig.hand;
     assert_eq!(unit.main_outputs(), [0, 1]);
 }
