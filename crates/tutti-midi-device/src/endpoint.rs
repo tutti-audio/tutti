@@ -49,6 +49,21 @@ pub struct Capabilities {
     pub tx_jr: bool,
 }
 
+impl Capabilities {
+    /// Whether an Endpoint with these capabilities can have `config` in use:
+    /// its Protocol is one of the Protocols supported (M2-104 §7.1.2) and
+    /// each JR direction that is on is one supported (§7.1.6.2).
+    #[must_use]
+    pub const fn admits(self, config: StreamConfig) -> bool {
+        let protocol = match config.protocol {
+            Protocol::Midi1 => self.midi1,
+            Protocol::Midi2 => self.midi2,
+            _ => false,
+        };
+        protocol && (!config.rx_jr || self.rx_jr) && (!config.tx_jr || self.tx_jr)
+    }
+}
+
 /// What an Endpoint that answers supports: [`Capabilities`] with at least one
 /// Protocol (M2-104 §7.1.2: the Protocol it is in is one it supports, so an
 /// Endpoint with neither has none to be in). A peer's report is a
@@ -111,6 +126,15 @@ impl TryFrom<Capabilities> for Supports {
     fn try_from(capabilities: Capabilities) -> Result<Self, NoProtocol> {
         Self::new(capabilities).ok_or(NoProtocol)
     }
+}
+
+/// Why [`Endpoint::in_use`] refuses: the Endpoint does not support what is to
+/// be in use.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("an Endpoint cannot have {active:?} in use: it does not support it")]
+pub struct ConfigNotSupported {
+    /// The configuration that was to be in use.
+    pub active: StreamConfig,
 }
 
 /// One Function Block (M2-104 §7.1.8): a set of Groups that act as one
@@ -616,12 +640,20 @@ impl Endpoint {
     }
 
     /// The Endpoint with the Protocol and JR Timestamps in use now set, for an
-    /// Endpoint whose state an OS reports rather than one that was asked
-    /// (§7.1.6.3). Nothing is checked against its capabilities.
-    #[must_use]
-    pub const fn in_use(mut self, active: StreamConfig) -> Self {
+    /// Endpoint whose state is reported rather than one that was asked
+    /// (§7.1.6.3).
+    ///
+    /// # Errors
+    ///
+    /// [`ConfigNotSupported`] when the Endpoint does not support the Protocol or a
+    /// JR direction `active` has in use ([`Capabilities::admits`]): the
+    /// Protocol it is in is one it supports (§7.1.2).
+    pub const fn in_use(mut self, active: StreamConfig) -> Result<Self, ConfigNotSupported> {
+        if !self.capabilities.admits(active) {
+            return Err(ConfigNotSupported { active });
+        }
         self.active = active;
-        self
+        Ok(self)
     }
 
     /// The Endpoint with a Device Identity (§7.1.3).

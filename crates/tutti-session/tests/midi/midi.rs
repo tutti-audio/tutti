@@ -1454,8 +1454,9 @@ impl MpePeer {
     ) {
         use tutti_midi_device::{
             CI_VERSION, CiCategories, CiDeviceId, CiHeader, CiMessage, Decoded, DiscoveryData,
-            MaxSysexSize, Nak, ProfileId, ProfileList, ProfileLists, ProfileTarget,
-            SUB_ID2_MESSAGE_REPORT_INQUIRY, SUB_ID2_SET_PROFILE_OFF, SUB_ID2_SET_PROFILE_ON,
+            MaxSysexSize, Nak, NakStatus, PeTerminator, ProfileId, ProfileList, ProfileLists,
+            ProfileTarget, SUB_ID2_MESSAGE_REPORT_INQUIRY, SUB_ID2_SET_PROFILE_OFF,
+            SUB_ID2_SET_PROFILE_ON,
         };
         use tutti_ump::{DeviceIdentity, ManufacturerId, SysexStep, U7};
         let at = |device_id| CiHeader {
@@ -1543,7 +1544,7 @@ impl MpePeer {
                                 to: source,
                                 nak: Nak::new(
                                     U7::of(SUB_ID2_SET_PROFILE_ON),
-                                    Nak::STATUS_PROFILE_NOT_SUPPORTED,
+                                    NakStatus::ProfileNotSupported,
                                 ),
                             }
                             .packets(MidiGroup::FIRST),
@@ -1574,7 +1575,7 @@ impl MpePeer {
                             to: header.source,
                             nak: Nak::new(
                                 U7::of(SUB_ID2_SET_PROFILE_OFF),
-                                Nak::STATUS_PROFILE_NOT_SUPPORTED,
+                                NakStatus::ProfileNotSupported,
                             ),
                         }
                         .packets(MidiGroup::FIRST),
@@ -1620,7 +1621,7 @@ impl MpePeer {
                                 to: header.source,
                                 nak: Nak::new(
                                     U7::of(SUB_ID2_MESSAGE_REPORT_INQUIRY),
-                                    Nak::STATUS_TERMINATE,
+                                    NakStatus::Terminate(PeTerminator::Responder),
                                 ),
                             }
                             .packets(MidiGroup::FIRST),

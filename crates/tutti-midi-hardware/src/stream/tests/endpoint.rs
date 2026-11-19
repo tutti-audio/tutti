@@ -466,16 +466,10 @@ fn the_request_to_stop_jr_keeps_the_protocol_a_peers_request_chose() {
     let sent = stream_sent(&wire);
     assert_eq!(
         sent,
-        [
-            request(Protocol::Midi1, false, false),
-            // The Endpoint receives what the device sends, until it stops.
-            Stream::StreamConfigurationNotification(StreamConfig {
-                protocol: Protocol::Midi1,
-                rx_jr: true,
-                tx_jr: false,
-            }),
-        ],
-        "one request, to stop JR, in the Protocol in force, and the JR in force told"
+        [request(Protocol::Midi1, false, false)],
+        // The Endpoint supports no RXJR here, so it is never told to have it
+        // in use (M2-104 §7.1.2): only the request to stop goes out.
+        "one request, to stop JR, in the Protocol in force"
     );
 }
 

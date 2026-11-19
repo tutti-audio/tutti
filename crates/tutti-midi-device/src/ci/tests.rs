@@ -78,7 +78,7 @@ fn a_reply_keeps_the_device_it_goes_to() {
     let msg = CiMessage::Nak {
         header: header(),
         to: Muid::of(0x0042_4242),
-        nak: Nak::new(U7::of(0x20), Nak::STATUS_MESSAGE_NOT_SUPPORTED),
+        nak: Nak::new(U7::of(0x20), NakStatus::MessageNotSupported),
     };
     let bytes = msg.encode();
     assert_eq!(&bytes[9..13], Muid::of(0x0042_4242).to_bytes());
@@ -130,7 +130,7 @@ fn a_message_that_is_not_read_keeps_its_header() {
                 source: Muid::of(0x77),
             },
             to: Muid::of(SRC),
-            nak: Nak::new(U7::of(0x3E), U7::of(0x01)),
+            nak: Nak::new(U7::of(0x3E), NakStatus::MessageNotSupported),
         }
     );
     assert_eq!(decoded(&reply.encode()), reply);
@@ -155,7 +155,7 @@ fn reserved_version_bits_are_nakked_with_0x02_in_the_receivers_version() {
         let CiMessage::Nak { header, nak, .. } = got.nak(Muid::of(9)).unwrap() else {
             panic!("a NAK")
         };
-        assert_eq!(nak.status_code, U7::of(0x02));
+        assert_eq!(nak.status, NakStatus::VersionNotSupported);
         assert_eq!(header.ci_version, CI_VERSION);
     }
 }
@@ -198,7 +198,7 @@ fn a_reserved_device_id_is_refused() {
             panic!("a NAK")
         };
         assert_eq!(header.device_id, CiDeviceId::FunctionBlock);
-        assert_eq!(nak.status_code, Nak::STATUS_MALFORMED);
+        assert_eq!(nak.status, NakStatus::Malformed);
     }
     for id in (0x00..=0x0F).chain([0x7E, 0x7F]) {
         let mut bytes = invalidate();
@@ -267,12 +267,12 @@ fn the_broadcast_rule_is_held_in_both_directions() {
         CiMessage::Ack {
             header: header(),
             to: Muid::of(7),
-            ack: Ack::new(U7::of(0x34), Ack::STATUS_ACK),
+            ack: Ack::new(U7::of(0x34), AckStatus::Ack),
         },
         CiMessage::Nak {
             header: header(),
             to: Muid::of(7),
-            nak: Nak::new(U7::of(0x34), Nak::STATUS_NAK),
+            nak: Nak::new(U7::of(0x34), NakStatus::Nak),
         },
     ] {
         let mut bytes = msg.encode();

@@ -36,6 +36,7 @@ fn endpoint(protocol: Protocol, direction: BlockDirection, active: bool) -> Endp
         rx_jr: false,
         tx_jr: false,
     })
+    .unwrap()
     .block(
         FunctionBlock::builder(
             block_id(),
@@ -61,6 +62,7 @@ fn endpoint_with(protocol: Protocol, port: Midi1Port, rx_jr: bool) -> Endpoint {
         rx_jr,
         tx_jr: false,
     })
+    .unwrap()
     .block(
         FunctionBlock::builder(
             block_id(),
@@ -110,11 +112,13 @@ fn jr_timestamps_are_prepended_when_the_endpoint_receives_them() {
         );
     }
     let mut endpoint = endpoint_with(Protocol::Midi2, Midi1Port::No, false);
-    endpoint = endpoint.in_use(StreamConfig {
-        protocol: Protocol::Midi2,
-        rx_jr: false,
-        tx_jr: true,
-    });
+    endpoint = endpoint
+        .in_use(StreamConfig {
+            protocol: Protocol::Midi2,
+            rx_jr: false,
+            tx_jr: true,
+        })
+        .unwrap();
     assert_eq!(
         of(&endpoint, &table(&[])).unwrap().jr_timestamps(),
         JrTimestamps::Off,
@@ -179,8 +183,12 @@ fn the_active_protocol_is_the_channel_voice_to_send() {
 
 #[test]
 fn a_reserved_active_protocol_is_no_dialect() {
+    // A peer's Stream Configuration Notification can name one, which a
+    // discovered Endpoint keeps as it was read.
+    let mut peer = speaking(Protocol::Midi2);
+    peer.active.protocol = midi::reserved_protocol(0x03);
     assert_eq!(
-        of(&speaking(midi::reserved_protocol(0x03)), &table(&[])),
+        of(&peer, &table(&[])),
         Err(NoDialect::UnspokenProtocol(midi::reserved_protocol(0x03)))
     );
 }

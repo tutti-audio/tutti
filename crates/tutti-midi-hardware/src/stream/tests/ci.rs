@@ -1828,7 +1828,7 @@ fn a_nak_of_a_report_ends_it_and_is_reported() {
     let _ = polled(&mut wire, 110);
     let nak = Nak::new(
         U7::of(SUB_ID2_MESSAGE_REPORT_INQUIRY),
-        Nak::STATUS_TERMINATE,
+        tutti_midi_device::NakStatus::Terminate(tutti_midi_device::PeTerminator::Responder),
     );
     say(
         &wire,
@@ -2659,8 +2659,8 @@ fn an_inquiry_of_a_peer_that_declared_no_property_exchange_is_nakked() {
     assert_eq!(*to, peer());
     assert_eq!(nak.nak_sub_id2.get(), 0x30);
     assert_eq!(
-        nak.status_code,
-        tutti_midi_device::Nak::STATUS_MESSAGE_NOT_SUPPORTED
+        nak.status,
+        tutti_midi_device::NakStatus::MessageNotSupported
     );
 }
 

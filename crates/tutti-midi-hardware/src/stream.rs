@@ -637,8 +637,12 @@ impl Negotiation {
         let mut replies: Vec<Ump> = Vec::new();
         if let Run::Done { stream, .. } = &self.run {
             let in_force = mirrored(stream.endpoint.active());
-            if answering.endpoint.active() != in_force {
-                answering.endpoint = answering.endpoint.in_use(in_force);
+            // A configuration the presented Endpoint does not support is not
+            // taken: it stays in the one it is in.
+            if answering.endpoint.active() != in_force
+                && let Ok(endpoint) = answering.endpoint.in_use(in_force)
+            {
+                answering.endpoint = endpoint;
                 if answering.told {
                     ask(
                         &mut answering.endpoint,
@@ -705,7 +709,9 @@ impl Negotiation {
         if stream.endpoint.active() == config {
             return None;
         }
-        stream.endpoint = stream.endpoint.in_use(config);
+        // The device's Endpoint stays as it is when it does not support what
+        // was granted.
+        stream.endpoint = stream.endpoint.in_use(config).ok()?;
         if let Some(connection) = listening {
             connection.adopt(config);
         }
@@ -748,9 +754,11 @@ impl Negotiation {
             endpoint = endpoint.instanced(id);
         }
         if let Some(was) = &was {
-            endpoint = endpoint.in_use(was.endpoint.active());
+            endpoint = endpoint.in_use(was.endpoint.active()).unwrap_or(endpoint);
         } else if let Run::Done { stream, .. } = &self.run {
-            endpoint = endpoint.in_use(mirrored(stream.endpoint.active()));
+            endpoint = endpoint
+                .in_use(mirrored(stream.endpoint.active()))
+                .unwrap_or(endpoint);
         }
         let told = was.as_ref().is_some_and(|a| a.told);
         let announce = was.as_ref().map(|a| Announce {

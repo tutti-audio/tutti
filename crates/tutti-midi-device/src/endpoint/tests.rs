@@ -786,7 +786,7 @@ fn a_capability_change_drops_what_it_no_longer_supports_from_the_active_set() {
         rx_jr: true,
         tx_jr: true,
     };
-    let mut e = changeable().in_use(active);
+    let mut e = changeable().in_use(active).unwrap();
     let m1_only = Supports::of(Capabilities {
         midi1: true,
         ..Capabilities::default()
@@ -1050,4 +1050,46 @@ fn a_merger_after_discovery_uses_only_stream_ids_below_the_count() {
     let mut got = done;
     got.sort();
     assert_eq!(got, sources);
+}
+
+/// Spec: m2-104/7.1.2#2
+#[test]
+fn an_endpoint_is_not_in_a_protocol_or_jr_direction_it_does_not_support() {
+    let midi1_only = Endpoint::new(Supports::of(Capabilities {
+        midi1: true,
+        ..Capabilities::default()
+    }));
+    let midi2 = StreamConfig {
+        protocol: Protocol::Midi2,
+        rx_jr: false,
+        tx_jr: false,
+    };
+    assert_eq!(
+        midi1_only.in_use(midi2),
+        Err(ConfigNotSupported { active: midi2 })
+    );
+    // A Stream Configuration Notification of Protocol 0x03, which the decoder
+    // keeps as reserved: no Endpoint supports it.
+    let Message::Stream(Stream::StreamConfigurationNotification(reserved)) =
+        Ump([0xF006_0300, 0, 0, 0]).decode().unwrap()
+    else {
+        panic!("a Stream Configuration Notification")
+    };
+    assert!(matches!(reserved.protocol, Protocol::Reserved(_)));
+    assert!(Endpoint::new(Supports::of(FULL)).in_use(reserved).is_err());
+    let jr = StreamConfig {
+        protocol: Protocol::Midi1,
+        rx_jr: true,
+        tx_jr: false,
+    };
+    assert!(midi1_only.in_use(jr).is_err(), "JR it does not receive");
+    let supported = StreamConfig {
+        protocol: Protocol::Midi1,
+        ..midi2
+    };
+    assert_eq!(
+        midi1_only.in_use(supported).map(|e| e.active()),
+        Ok(supported)
+    );
+    assert!(Endpoint::new(Supports::of(FULL)).in_use(jr).is_ok());
 }

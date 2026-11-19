@@ -682,11 +682,11 @@ pub mod midi {
     pub use tutti_midi_device::{
         ChannelControllers, ChannelsDetail, CiCategories, CiDeviceId, CiPeer, DataControl,
         DetailsData, DiscoveryData, EnabledMpeZones, Identity, InquiryTarget, ManufacturerProfile,
-        MaxSysexSize, MessageText, Muid, Nak, NameError, NotADataControl, NotADeviceId, NotAMuid,
-        NotASysexSize, NotProfileChannels, NoteData, Outcome, PortDirection, ProcessError,
-        ProcessFeatures, ProductInstanceId, ProfileChange, ProfileDataError, ProfileEntry,
-        ProfileState, ProfileTable, ReportRequest, ReportScope, Request, RequestError,
-        SpecificData, StandardProfile, SystemMessages, WinMmDevice,
+        MaxSysexSize, MessageText, Muid, Nak, NakStatus, NameError, NotADataControl, NotADeviceId,
+        NotAMuid, NotASysexSize, NotProfileChannels, NoteData, Outcome, PortDirection,
+        ProcessError, ProcessFeatures, ProductInstanceId, ProfileChange, ProfileDataError,
+        ProfileEntry, ProfileState, ProfileTable, ReportRequest, ReportScope, Request,
+        RequestError, SpecificData, StandardProfile, SystemMessages, WinMmDevice,
     };
     pub use tutti_midi_device::{
         NotSetProfileOn, ProfileChannels, ProfileId, ProfileOnRequest, ProfileTarget,
@@ -805,10 +805,10 @@ pub mod midi {
         pub use tutti_midi_device::mcoded7::Mcoded7Error;
         #[cfg(feature = "midi-hardware")]
         pub use tutti_midi_device::{
-            Ack, ActionError, BodyLimit, BufferLimit, CallError, CallId, CanSet, CcIndex,
-            ChangeKind, ChunkNo, ClusterKind, ColumnSource, ConfirmIcon, ConfirmType, Confirmation,
-            CtrlControl, CtrlKind, CtrlRange, CtrlValueKind, CustomResource, EntryError,
-            JsonPointer, LinkRole, ListedTwice, ModeId, NotABodyLimit, NotABufferLimit,
+            Ack, AckStatus, ActionError, BodyLimit, BufferLimit, CallError, CallId, CanSet,
+            CcIndex, ChangeKind, ChunkNo, ClusterKind, ColumnSource, ConfirmIcon, ConfirmType,
+            Confirmation, CtrlControl, CtrlKind, CtrlRange, CtrlValueKind, CustomResource,
+            EntryError, JsonPointer, LinkRole, ListedTwice, ModeId, NotABodyLimit, NotABufferLimit,
             NotAChunkNo, NotAPeChannel, NotAPriority, NotARequestId, NotASimultaneousRequests,
             NotAStateSize, NotAStepCount, NotAStreamLimit, NotATimeoutWait, NotSignificantBits,
             NotUnixSeconds, NotValid, NotVendorName, OpaqueBody, PaginationFault, ParamPath,

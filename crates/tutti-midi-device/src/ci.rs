@@ -129,7 +129,7 @@ pub use profile::{
     SUB_ID2_SET_PROFILE_OFF, SUB_ID2_SET_PROFILE_ON, SpecificData, StandardProfile,
 };
 pub use rotary::{RotaryControl, RotarySpeaker, RotaryValue};
-pub use status::{Ack, Nak};
+pub use status::{Ack, AckStatus, Nak, NakStatus};
 pub use text::MessageText;
 pub use two_state::{SwitchMeaning, TwoState};
 pub use wait::{NotATimeoutWait, PEER_REPLY_TIMEOUT, TimeoutWait};
@@ -1210,19 +1210,19 @@ pub enum UnreadReason {
 }
 
 impl UnreadReason {
-    /// The NAK Status Code Table 16 gives this: `0x02` (version not
+    /// The NAK status Table 16 gives this: `0x02` (version not
     /// supported) for a version the Device cannot read (§5.3 names reserved
     /// bits; version 0 is tutti's reading), `0x01` (message not
     /// supported), else `0x41` (message malformed).
     #[must_use]
-    pub(crate) fn nak_status(self) -> U7 {
+    pub(crate) fn nak_status(self) -> NakStatus {
         match self {
-            Self::ReservedVersionBits | Self::VersionZero => Nak::STATUS_VERSION_NOT_SUPPORTED,
-            Self::UnsupportedMessage => Nak::STATUS_MESSAGE_NOT_SUPPORTED,
+            Self::ReservedVersionBits | Self::VersionZero => NakStatus::VersionNotSupported,
+            Self::UnsupportedMessage => NakStatus::MessageNotSupported,
             // §5.8: a device that cannot provide the information for the given
             // Status replies with a NAK: the generic one, which is not retried.
-            Self::ReservedStatus => Nak::STATUS_NAK,
-            _ => Nak::STATUS_MALFORMED,
+            Self::ReservedStatus => NakStatus::Nak,
+            _ => NakStatus::Malformed,
         }
     }
 }
