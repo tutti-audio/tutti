@@ -12,7 +12,9 @@
 //! a separate primitive whose `acquire`/`recycle` names document the RT
 //! contract.
 
-use super::messages::{AudioResponse, Command};
+use super::ask::ControlSlot;
+use super::messages::{AudioCommand, AudioResponse, ControlCommand};
+use crate::transport::control::{ControlBell, ControlWait, control_bell};
 use crossbeam::queue::ArrayQueue;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -20,12 +22,12 @@ use std::time::Duration;
 use tutti_plugin_types::BlockCounts;
 use tutti_rt::AtomicSampleRate;
 use tutti_rt::{
-    Counter, Doorbell, LockExt, Overflow, PackedAtomic, RingReader, RingWriter, Sleeper, Tally,
-    TallyWriter, doorbell, ring, tally,
+    Counter, LockExt, Overflow, PackedAtomic, RingReader, RingWriter, Tally, TallyWriter, ring,
+    tally,
 };
 use tutti_units::SampleRate;
 
-/// How many commands the audio thread can queue before `push_command` fails.
+/// How many commands each lane's queue holds before a push fails.
 /// This also bounds how many `Process` payloads can be outstanding at once,
 /// which is why [`super::payload_pool::PayloadPool`] sizes itself from it.
 pub(super) const COMMAND_QUEUE_SIZE: usize = 128;
@@ -33,16 +35,21 @@ const RESPONSE_QUEUE_SIZE: usize = 128;
 
 #[derive(Clone)]
 pub(super) struct Channels {
-    commands: Arc<ArrayQueue<Command>>,
+    /// What rides the audio lane: blocks and resets.
+    blocks: Arc<ArrayQueue<AudioCommand>>,
+    /// What rides the control lane: every other request.
+    controls: Arc<ArrayQueue<ControlCommand>>,
+    /// Whether a control request owes a reply: one at a time.
+    owing: ControlSlot,
     /// The newest block sequence the audio thread has submitted. Owned here
     /// rather than on the batcher because the *bridge* thread is what reads it,
     /// to decide whether a dequeued block is still worth sending.
     newest_seq: Arc<AtomicU64>,
-    /// The bridge thread's doorbell: the thread sleeps on it when the queue
-    /// is empty, and the audio thread rings it after a push. The ring is
-    /// wait-free (no lock, no allocation) and cannot be missed
-    /// ([`Doorbell`]'s protocol), so the bridge needs no polling timeout.
-    bell: Doorbell,
+    /// The bridge thread's bell: the thread waits on it and the control stream
+    /// together when its queue is empty, and a push rings it. The ring is one
+    /// non-blocking write (no lock, no allocation) and cannot be missed, so the
+    /// bridge needs no polling timeout.
+    bell: ControlBell,
     /// The negotiated sample rate, as `f64::to_bits`. Lives here rather than
     /// only on `AudioBridge` because *both* threads size a timeout from the
     /// block period — the bridge thread its reply timeout, and the staleness
@@ -109,15 +116,14 @@ pub(super) struct Channels {
     /// What became of each of the last [`FATES`] chunks the bridge thread
     /// dealt with, for the batcher to look up.
     fates: Arc<Fates>,
-    /// The control connection has something the bridge thread has not read:
-    /// set by the watcher thread, cleared by the bridge thread after it has
-    /// read the lane dry. The bridge's doorbell is rung with it, so a bridge
-    /// parked with no command queued reads the lane when news arrives.
+    /// The bridge thread is reading the control connection for news: set when
+    /// its wait ended on the stream, cleared after the lane is read dry and the
+    /// events are delivered.
     news: Arc<std::sync::atomic::AtomicBool>,
-    /// A watch on the control connection, kept while the watcher thread runs:
-    /// [`bytes_waiting`](Self::bytes_waiting) asks it whether bytes the bridge
-    /// has not read are there, which `news` alone misses between the bridge's
-    /// clearing it and the watcher's setting it again.
+    /// A watch on the control connection, kept while the bridge thread runs:
+    /// [`bytes_waiting`](Self::bytes_waiting) asks it whether bytes the thread
+    /// has not read are there, which `news` alone misses before the thread's
+    /// wait has returned.
     probe: Arc<std::sync::Mutex<Option<Arc<crate::transport::control::Watch>>>>,
     /// Notified on the bridge thread when a response is queued and when it has
     /// finished a turn (a lane read dry, a command answered): what a control or
@@ -213,15 +219,24 @@ impl Fate {
 }
 
 impl Channels {
-    /// The channels and the [`Sleeper`] of the bridge thread's doorbell,
-    /// which that thread alone waits on.
-    pub(super) fn new(sample_rate: SampleRate, progress: Arc<crate::Wake>) -> (Self, Sleeper) {
-        let (bell, sleeper) = doorbell();
+    /// The channels and the [`ControlWait`] of the bridge thread's bell, which
+    /// that thread alone waits on.
+    ///
+    /// # Errors
+    ///
+    /// The OS refused the bell.
+    pub(super) fn new(
+        sample_rate: SampleRate,
+        progress: Arc<crate::Wake>,
+    ) -> std::io::Result<(Self, ControlWait)> {
+        let (bell, wait) = control_bell()?;
         let (dropped_param_events, dropped_midi, skipped) = (tally(), tally(), tally());
         let (abandoned, late, commands_refused, leaked_buffers) =
             (tally(), tally(), tally(), tally());
         let channels = Self {
-            commands: Arc::new(ArrayQueue::new(COMMAND_QUEUE_SIZE)),
+            blocks: Arc::new(ArrayQueue::new(COMMAND_QUEUE_SIZE)),
+            controls: Arc::new(ArrayQueue::new(COMMAND_QUEUE_SIZE)),
+            owing: ControlSlot::default(),
             newest_seq: Arc::new(AtomicU64::new(0)),
             bell,
             sample_rate: Arc::new(AtomicSampleRate::new(sample_rate)),
@@ -246,7 +261,7 @@ impl Channels {
             probe: Arc::default(),
             progress,
         };
-        (channels, sleeper)
+        Ok((channels, wait))
     }
 
     /// The current sample rate. `Relaxed` suffices: it only sizes a timeout, so
@@ -278,20 +293,9 @@ impl Channels {
         self.reply_wait_ns.store(ns, Ordering::Relaxed);
     }
 
-    /// Park the bridge thread until a command is queued or `stop` says to
-    /// leave, whichever is already true or comes first. May return with
-    /// neither (a spurious wake-up): the caller rechecks. `stop` reads what
-    /// whoever ends the loop publishes before calling [`wake`](Self::wake).
-    /// `sleeper` is the one [`new`](Self::new) returned.
-    pub(super) fn wait_for_command(&self, sleeper: &mut Sleeper, stop: impl FnOnce() -> bool) {
-        sleeper.wait(|| !self.commands.is_empty() || stop());
-    }
-
-    /// The control connection has bytes to read: publishes it and rings the
-    /// bridge thread's doorbell. The watcher thread's call.
+    /// The bridge thread is reading the control connection for news.
     pub(super) fn set_news(&self) {
         self.news.store(true, Ordering::Release);
-        self.bell.ring();
     }
 
     /// Whether [`set_news`](Self::set_news) was called since the last
@@ -319,16 +323,22 @@ impl Channels {
             .is_some_and(|watch| watch.wait_readable(Duration::ZERO))
     }
 
-    /// The bridge thread has read the control connection dry. Cleared *after*
-    /// the read: a byte that arrives during it is still readable, so the
-    /// watcher sees it and sets the flag again.
+    /// The bridge thread has read the control connection dry and delivered what
+    /// it said.
     pub(super) fn clear_news(&self) {
         self.news.store(false, Ordering::Release);
     }
 
+    /// A call that wakes the bridge thread, for what has no `Channels` to hold:
+    /// it holds the bell and no queue.
+    pub(super) fn waker(&self) -> impl Fn() + Send + Sync + use<> {
+        let bell = self.bell.clone();
+        move || bell.ring()
+    }
+
     /// Wake the bridge thread to re-check its stop condition (shutdown).
     /// Publish the condition first. Real-time safe, like the ring in
-    /// [`push_command`](Self::push_command).
+    /// [`push_block`](Self::push_block).
     pub(super) fn wake(&self) {
         self.bell.ring();
     }
@@ -465,27 +475,26 @@ impl Channels {
         self.dropped_param_events.get()
     }
 
-    /// Pushes, then rings the bridge thread's doorbell, so the socket
+    /// Pushes, then rings the bridge thread's bell, so the socket
     /// round-trip starts immediately rather than after a poll interval. The
     /// audio thread never waits on the reply, but the ring still matters: it
     /// is what keeps a block's reply arriving in time to be collected on the
     /// *next* block rather than the one after.
     ///
-    /// The ring is wait-free and allocation-free (`Doorbell::ring`: a fence
-    /// and a load, plus a futex wake when the bridge is parked), and it
-    /// cannot be lost, so nothing backs it with a timeout. A push the queue
+    /// The ring is one non-blocking write, allocation-free, and it cannot be
+    /// lost, so nothing backs it with a timeout. A push the queue
     /// refuses rings nothing: the bridge is, or is about to be, draining.
     ///
     /// A refused command is counted ([`note_command_refused`](Self::note_command_refused)).
-    pub(super) fn push_command(&self, cmd: Command) -> bool {
-        self.try_push_command(cmd).is_ok()
+    pub(super) fn push_block(&self, cmd: AudioCommand) -> bool {
+        self.try_push_block(cmd).is_ok()
     }
 
-    /// [`push_command`](Self::push_command), handing a refused command back
+    /// [`push_block`](Self::push_block), handing a refused command back
     /// rather than dropping it, so the audio thread can return what it holds
     /// to its pools instead of freeing it.
-    pub(super) fn try_push_command(&self, cmd: Command) -> Result<(), Command> {
-        if let Err(cmd) = self.commands.push(cmd) {
+    pub(super) fn try_push_block(&self, cmd: AudioCommand) -> Result<(), AudioCommand> {
+        if let Err(cmd) = self.blocks.push(cmd) {
             self.note_command_refused();
             return Err(cmd);
         }
@@ -493,8 +502,28 @@ impl Channels {
         Ok(())
     }
 
-    pub(super) fn pop_command(&self) -> Option<Command> {
-        self.commands.pop()
+    pub(super) fn pop_block(&self) -> Option<AudioCommand> {
+        self.blocks.pop()
+    }
+
+    /// Pushes a control-lane command and rings the bell. A refused command is
+    /// counted.
+    pub(super) fn push_control(&self, cmd: ControlCommand) -> bool {
+        if self.controls.push(cmd).is_err() {
+            self.note_command_refused();
+            return false;
+        }
+        self.bell.ring();
+        true
+    }
+
+    pub(super) fn pop_control(&self) -> Option<ControlCommand> {
+        self.controls.pop()
+    }
+
+    /// The slot a request that owes a reply holds until it is answered.
+    pub(super) fn owing(&self) -> &ControlSlot {
+        &self.owing
     }
 
     /// The gate a waiter on the bridge's progress sleeps on.
@@ -601,8 +630,8 @@ mod tests {
         assert_eq!(unpack(0), (0, 0));
     }
 
-    fn channels() -> (Channels, Sleeper) {
-        Channels::new(SampleRate::SR_48K, Arc::default())
+    fn channels() -> (Channels, ControlWait) {
+        Channels::new(SampleRate::SR_48K, Arc::default()).expect("the channels")
     }
 
     /// A fate for a block never submitted is dropped, so a peer-supplied
@@ -643,87 +672,13 @@ mod tests {
         assert_eq!(c.block_counts(), counts(3, 2, 3), "owed replies collected");
     }
 
-    /// A bridge thread as `pump` runs one: sleep for a command, take it,
-    /// report it, until `stop`. Returns the handle once it is parked.
-    fn bridge(
-        c: &Channels,
-        mut sleeper: Sleeper,
-        stop: &Arc<std::sync::atomic::AtomicBool>,
-    ) -> (
-        std::thread::JoinHandle<()>,
-        std::sync::mpsc::Receiver<Command>,
-    ) {
-        let (tx, rx) = std::sync::mpsc::channel();
-        let (c, stop) = (c.clone(), Arc::clone(stop));
-        let t = std::thread::spawn(move || {
-            while !stop.load(Ordering::Acquire) {
-                match c.pop_command() {
-                    Some(cmd) => tx.send(cmd).unwrap(),
-                    None => c.wait_for_command(&mut sleeper, || stop.load(Ordering::Acquire)),
-                }
-            }
-        });
-        (t, rx)
-    }
-
-    const PATIENCE: Duration = Duration::from_secs(20);
-
-    /// **A push wakes a parked bridge, and the audio thread's half
-    /// allocates nothing.** The ring runs inside `assert_no_alloc` with the
-    /// bridge parked, so the futex-wake path is the one gated, not just the
-    /// fence and load.
+    /// **A push and its ring allocate nothing**: the audio thread's half of a
+    /// hand-off, the bell's write included.
     #[test]
-    fn a_push_wakes_a_parked_bridge_without_allocating() {
-        let (c, sleeper) = channels();
-        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let (t, rx) = bridge(&c, sleeper, &stop);
-        while !c.bell.is_asleep() {
-            std::thread::yield_now();
-        }
-        assert_no_alloc::assert_no_alloc(|| assert!(c.push_command(Command::Reset)));
-        let got = rx.recv_timeout(PATIENCE).expect("the push woke the bridge");
-        assert!(matches!(got, Command::Reset));
-        stop.store(true, Ordering::Release);
-        c.wake();
-        t.join().unwrap();
-    }
-
-    /// **No push is left sitting in the queue**: many hand-offs, each
-    /// answered before the next, race the bridge's park against the ring.
-    /// A lost wake-up leaves one unanswered and the receive times out (there
-    /// is no backstop timeout to hide it).
-    #[test]
-    fn no_pushed_command_waits_on_a_missed_wake_up() {
-        let (c, sleeper) = channels();
-        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let (t, rx) = bridge(&c, sleeper, &stop);
-        for i in 0..20_000u32 {
-            // Alternate a spin so the push lands both before and after the park.
-            for _ in 0..(i % 64) {
-                std::hint::spin_loop();
-            }
-            assert!(c.push_command(Command::Reset));
-            rx.recv_timeout(PATIENCE)
-                .unwrap_or_else(|_| panic!("hand-off {i} was never woken"));
-        }
-        stop.store(true, Ordering::Release);
-        c.wake();
-        t.join().unwrap();
-    }
-
-    /// **`wake` ends a wait on a stop flag with no command queued**, which
-    /// is how `shutdown` reaches a parked bridge when its queue was full.
-    #[test]
-    fn wake_ends_a_wait_with_nothing_queued() {
-        let (c, sleeper) = channels();
-        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let (t, _rx) = bridge(&c, sleeper, &stop);
-        while !c.bell.is_asleep() {
-            std::thread::yield_now();
-        }
-        stop.store(true, Ordering::Release);
-        c.wake();
-        t.join().unwrap();
+    fn a_push_and_its_ring_allocate_nothing() {
+        let (c, _wait) = channels();
+        assert_no_alloc::assert_no_alloc(|| assert!(c.push_block(AudioCommand::Reset)));
+        assert!(matches!(c.pop_block(), Some(AudioCommand::Reset)));
     }
 
     /// **Every command a full queue refuses is counted, and an accepted one is
@@ -731,9 +686,9 @@ mod tests {
     /// allocates nothing.
     #[test]
     fn a_full_command_queue_counts_each_refusal() {
-        let (c, _sleeper) = channels();
+        let (c, _wait) = channels();
         for _ in 0..COMMAND_QUEUE_SIZE {
-            assert!(c.push_command(Command::Reset));
+            assert!(c.push_block(AudioCommand::Reset));
         }
         assert_eq!(
             c.commands_refused_cell().get(),
@@ -742,7 +697,7 @@ mod tests {
         );
         assert_no_alloc::assert_no_alloc(|| {
             for _ in 0..3 {
-                assert!(!c.push_command(Command::Reset));
+                assert!(!c.push_block(AudioCommand::Reset));
             }
         });
         assert_eq!(c.commands_refused_cell().get(), 3);
@@ -751,7 +706,7 @@ mod tests {
     /// **A response the full response ring refuses is counted lost.**
     #[test]
     fn a_full_response_ring_counts_each_loss() {
-        let (c, _sleeper) = channels();
+        let (c, _wait) = channels();
         let (writer, _replies, lost) = response_ring();
         let mut side = BridgeSide::new(c, writer);
         let resp = || AudioResponse::Error { seq: None };

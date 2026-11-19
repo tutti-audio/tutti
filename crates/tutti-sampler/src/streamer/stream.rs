@@ -1,10 +1,11 @@
-//! [`Stream`], the control side of an open stream, and the port its commands
-//! travel by.
+//! [`Stream`], the control side of an open stream, and the port its close
+//! travels by.
 //!
 //! A stream is addressed by its [`StreamId`], which every command carries; the
 //! streamer ignores an id it no longer holds, so a command can never reach
-//! another stream. Nothing outside this crate names a command:
-//! the control side is the [`Stream`] methods.
+//! another stream. What a stream is asked to play (its loop and direction) is
+//! two [`SteerCell`]s the streamer reads; the only command a stream sends is
+//! the close its drop sends.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -12,17 +13,23 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use super::StreamerSender;
 use super::cells::Cells;
 use super::command::{StreamId, StreamerCommand};
-use super::control::{StreamFile, StreamerGone};
+use super::control::StreamFile;
 use super::loops::RingControl;
 use super::status::{StatusCell, StreamStatus};
+use super::steer::SteerCell;
 use crate::Loop;
 use crate::voice::Direction;
 use tutti_rt::Publisher;
 use tutti_rt::RingFloat;
 
+/// The streamer's queue is closed: its thread has exited (or its streamer was
+/// dropped), so a command was discarded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PortClosed;
+
 /// The way onto one streamer's command queue, cloned into every [`Stream`].
 ///
-/// Private to the crate: the public command surface is the `Stream` methods.
+/// Private to the crate: a stream's drop sends its close through it.
 /// Control threads only: a send waits while the bounded queue is full and
 /// fails once the streamer has gone (every receiver dropped: the thread's on
 /// its exit, a built streamer's on its drop).
@@ -39,16 +46,8 @@ impl<F: RingFloat> StreamerPort<F> {
     /// Queues `cmd` for the streamer. `Ok` means it was *queued*: the streamer
     /// applies it on its own thread, and that outcome is not available
     /// synchronously.
-    pub(crate) fn send(&self, cmd: StreamerCommand<F>) -> Result<(), StreamerGone> {
-        self.tx.send(cmd).map_err(|_| StreamerGone)
-    }
-}
-
-/// The streamer's command for a loop `setting` on `stream`.
-fn loop_command<F: RingFloat>(stream: StreamId, setting: Option<Loop>) -> StreamerCommand<F> {
-    match setting {
-        Some(looped) => StreamerCommand::SetStreamLoop { stream, looped },
-        None => StreamerCommand::ClearStreamLoop { stream },
+    pub(crate) fn send(&self, cmd: StreamerCommand<F>) -> Result<(), PortClosed> {
+        self.tx.send(cmd).map_err(|_| PortClosed)
     }
 }
 
@@ -97,12 +96,11 @@ pub struct Stream<F: RingFloat> {
     /// The ring's published control: the loop as applied is read from it
     /// ([`StreamStatus::loop_`]).
     control: Publisher<RingControl<F>>,
-    /// The loop as last set through this handle, whose send succeeded: the
-    /// loop a caller asked for, which a voice's own record of its loop is
-    /// kept equal to.
-    loop_: Option<Loop>,
-    /// The direction as last set through this handle, whose send succeeded.
-    direction: Direction,
+    /// The loop asked for, which the streamer reads and applies on its own
+    /// thread. The same cell the stream's node steers.
+    looping: SteerCell<Option<Loop>>,
+    /// The direction asked for, read and applied the same way.
+    direction: SteerCell<Direction>,
 }
 
 impl<F: RingFloat> std::fmt::Debug for Stream<F> {
@@ -119,6 +117,8 @@ impl<F: RingFloat> Stream<F> {
         cells: Arc<Cells>,
         file: Arc<StreamFile<F>>,
         control: Publisher<RingControl<F>>,
+        looping: SteerCell<Option<Loop>>,
+        direction: SteerCell<Direction>,
     ) -> Self {
         Self {
             id,
@@ -128,8 +128,8 @@ impl<F: RingFloat> Stream<F> {
             underruns: AtomicU64::new(0),
             file,
             control,
-            loop_: None,
-            direction: Direction::Forward,
+            looping,
+            direction,
         }
     }
 
@@ -169,19 +169,18 @@ impl<F: RingFloat> Stream<F> {
         &self.file
     }
 
-    /// The loop as last set through this handle: the request, which the
-    /// streamer applies on its own thread
-    /// ([`status`](Self::status)`.loop_` is what it applied).
-    /// `None` until one is set. A set whose send failed is not recorded here.
+    /// The loop asked for: the request, which the streamer applies on its own
+    /// thread ([`status`](Self::status)`.loop_` is what it applied). `None`
+    /// until one is published to [`looping_cell`](Self::looping_cell).
     #[must_use]
     pub fn loop_(&self) -> Option<Loop> {
-        self.loop_
+        *self.looping.current()
     }
 
-    /// The direction as last set through this handle.
+    /// The direction asked for.
     #[must_use]
     pub fn direction(&self) -> Direction {
-        self.direction
+        *self.direction.current()
     }
 
     /// The stream this handle steers: the identity every command it sends
@@ -191,60 +190,45 @@ impl<F: RingFloat> Stream<F> {
         self.id
     }
 
-    /// Sets, replaces or clears the loop the stream plays (its frames index
-    /// the file, not the engine's rate).
+    /// The cell holding the loop the stream plays (its frames index the file,
+    /// not the engine's rate): `None` plays once.
     ///
-    /// A change near the playhead is heard about 256 frames past the block
-    /// being played, crossfaded over the stream's seek crossfade
+    /// A publish rings the streamer's bell, and the streamer reads the cell
+    /// at the start of its next cycle and applies a change there, even when
+    /// it was parked with nothing else to do. A change near
+    /// the playhead is heard [`GUARD_FRAMES`](crate::GUARD_FRAMES) past the block being played,
+    /// crossfaded over the stream's seek crossfade
     /// (`DiskStreamerConfig::seek_crossfade_frames`) from what the old loop
     /// would have played; one further ahead, exactly where the memory tier
     /// hears it. From there on the stream plays the new loop exactly as the
     /// memory tier does ([`Loop`] has the rule). An export fork taken after
     /// the change reads the new loop from the start of its render.
     ///
-    /// `Ok` means the command was *queued*; the streamer applies it on its
-    /// own thread. Control thread: it waits while the streamer's bounded queue
-    /// is full, so nothing reachable from a graph node's `process` calls it.
-    ///
-    /// # Errors
-    ///
-    /// [`StreamerGone`] means the streamer thread has exited and the command
-    /// was discarded; the stream's loop is as it was. It is permanent: every
-    /// later command fails the same way, so a caller should stop rather than
-    /// retry.
-    #[must_use = "a discarded loop is a loop that never plays"]
-    pub fn set_loop(&mut self, setting: Option<Loop>) -> Result<(), StreamerGone> {
-        self.port.send(loop_command::<F>(self.id, setting))?;
-        // Recorded only once the streamer has the command: a failed send leaves
-        // the stream as it was.
-        self.loop_ = setting;
-        Ok(())
+    /// The session writes it (`sampler.looping()`); a host driving a stream by
+    /// hand publishes into it, from the control thread, and reclaims it
+    /// ([`reclaim`](Self::reclaim)).
+    #[must_use]
+    pub fn looping_cell(&self) -> &SteerCell<Option<Loop>> {
+        &self.looping
     }
 
-    /// Plays the stream forwards or backwards.
+    /// The cell holding the direction the stream plays.
     ///
     /// Reverse reads the file mirrored and ignores the loop, as the memory
     /// tier's reverse does. The streamer turns the ring's mapping on its own
-    /// thread, and the change is heard just past the block the voice is in,
-    /// crossfaded (a loop change's rule). The direction is published with the
-    /// ring's control: the voice and a fork read it from there, and nothing
-    /// polls a flag.
-    ///
-    /// `Ok` means the command was *queued*. Control thread: it waits while the
-    /// streamer's bounded queue is full.
-    ///
-    /// # Errors
-    ///
-    /// [`StreamerGone`] means the streamer thread has exited and the command
-    /// was discarded; the stream's direction is as it was. It is permanent.
-    #[must_use = "a discarded direction is a stream that never turns"]
-    pub fn set_direction(&mut self, direction: Direction) -> Result<(), StreamerGone> {
-        self.port.send(StreamerCommand::SetDirection {
-            stream: self.id,
-            direction,
-        })?;
-        self.direction = direction;
-        Ok(())
+    /// thread when it takes the change (a publish wakes it), and the change is heard just past the
+    /// block the voice is in, crossfaded (a loop change's rule). The
+    /// direction is published with the ring's control: the voice and a fork
+    /// read it from there, and nothing polls a flag.
+    #[must_use]
+    pub fn direction_cell(&self) -> &SteerCell<Direction> {
+        &self.direction
+    }
+
+    /// Frees the loops and directions the control side replaced and no
+    /// streamer cycle holds. Control thread, from the owner's tick.
+    pub fn reclaim(&self) -> usize {
+        self.looping.reclaim() + self.direction.reclaim()
     }
 }
 
@@ -277,6 +261,8 @@ impl<F: RingFloat> Stream<F> {
                 ),
                 None,
             )),
+            SteerCell::new(None),
+            SteerCell::new(Direction::Forward),
         )
     }
 }
@@ -284,44 +270,20 @@ impl<F: RingFloat> Stream<F> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::loop_frames;
 
     const STREAM_1: StreamId = StreamId::of(1);
     const STREAM_2: StreamId = StreamId::of(2);
 
-    fn on(start: usize, end: usize) -> Option<Loop> {
-        Some(loop_frames(start, end, 7))
-    }
-
-    /// Both loop variants report a dead streamer, and dropping a stream whose
-    /// streamer is gone has nothing to end and does not fail.
-    ///
-    /// Covering both variants, not one representative: they are separate
-    /// sends, so one whose `Result` went unpropagated would accept a loop
-    /// indefinitely and do nothing, indistinguishable from working playback.
-    #[test]
-    fn a_stream_on_a_gone_streamer_reports_it() {
-        let (tx, queue) = crossbeam_channel::bounded::<StreamerCommand<f32>>(8);
-        let mut stream = Stream::detached(StreamId::of(1), StreamerPort::new(tx));
-        drop(queue);
-        assert_eq!(stream.set_loop(None), Err(StreamerGone));
-        assert_eq!(stream.set_loop(on(0, 100)), Err(StreamerGone));
-        drop(stream);
-    }
-
     /// Every command a stream sends names that stream, and only it: two streams
-    /// on one queue each send their own id, for a loop, a clear and the close
-    /// their drop sends.
+    /// on one queue each send their own id in the close their drop sends.
     #[test]
-    fn a_stream_names_itself_in_every_command() {
+    fn a_stream_names_itself_in_the_close_it_sends() {
         let (tx, queue) = crossbeam_channel::bounded::<StreamerCommand<f32>>(16);
         let port = StreamerPort::new(tx);
-        let (mut a, mut b) = (
+        let (a, b) = (
             Stream::detached(StreamId::of(1), port.clone()),
             Stream::detached(StreamId::of(2), port),
         );
-        a.set_loop(on(5, 100)).unwrap();
-        b.set_loop(None).unwrap();
         drop(a);
         drop(b);
         let sent: Vec<_> = queue.try_iter().collect();
@@ -329,50 +291,11 @@ mod tests {
             matches!(
                 sent.as_slice(),
                 [
-                    StreamerCommand::SetStreamLoop {
-                        stream: STREAM_1,
-                        looped: first,
-                    },
-                    StreamerCommand::ClearStreamLoop {
-                        stream: STREAM_2
-                    },
-                    StreamerCommand::Close {
-                        stream: STREAM_1
-                    },
-                    StreamerCommand::Close {
-                        stream: STREAM_2
-                    },
-                ] if *first == on(5, 100).unwrap()
+                    StreamerCommand::Close { stream: STREAM_1 },
+                    StreamerCommand::Close { stream: STREAM_2 },
+                ]
             ),
             "{sent:?}"
         );
-    }
-
-    /// **`set_loop` and `set_direction` leave the stream unchanged when the
-    /// send fails**: a stream whose streamer is gone keeps the loop and the
-    /// direction it was last given, and says so, rather than claim a
-    /// setting nobody received.
-    #[test]
-    fn a_failed_send_leaves_the_stream_as_it_was() {
-        let (tx, queue) = crossbeam_channel::bounded::<StreamerCommand<f32>>(8);
-        let mut stream = Stream::detached(StreamId::of(3), StreamerPort::new(tx));
-        assert_eq!(stream.loop_(), None);
-        assert_eq!(stream.direction(), Direction::Forward);
-        stream.set_loop(on(0, 100)).expect("the streamer lives");
-        stream
-            .set_direction(Direction::Reverse)
-            .expect("the streamer lives");
-        assert_eq!(stream.loop_(), on(0, 100), "recorded once sent");
-        assert_eq!(stream.direction(), Direction::Reverse);
-
-        drop(queue);
-        assert_eq!(stream.set_loop(None), Err(StreamerGone));
-        assert_eq!(stream.set_direction(Direction::Forward), Err(StreamerGone));
-        assert_eq!(
-            stream.loop_(),
-            on(0, 100),
-            "the failed loop is not recorded"
-        );
-        assert_eq!(stream.direction(), Direction::Reverse);
     }
 }

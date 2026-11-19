@@ -405,16 +405,12 @@ tutti-sampler  setter  crates/tutti-sampler/src/streamer/cells.rs::Cells::set_sp
 tutti-sampler  setter  crates/tutti-sampler/src/streamer/cells.rs::Cells::set_src_ratio
 tutti-sampler  setter  crates/tutti-sampler/src/streamer/cells.rs::Cells::set_stretch_rate
 tutti-sampler  setter  crates/tutti-sampler/src/streamer/mod.rs::DiskStreamer::set_sample_rate
-tutti-sampler  setter  crates/tutti-sampler/src/streamer/stream.rs::Stream::set_direction
-tutti-sampler  setter  crates/tutti-sampler/src/streamer/stream.rs::Stream::set_loop
 tutti-sampler  setter  crates/tutti-sampler/src/stretch/unit.rs::Unit::set_enabled
 tutti-sampler  setter  crates/tutti-sampler/src/stretch/unit.rs::Unit::set_pitch_cents
 tutti-sampler  setter  crates/tutti-sampler/src/stretch/unit.rs::Unit::set_sample_rate
 tutti-sampler  setter  crates/tutti-sampler/src/stretch/unit.rs::Unit::set_stretch_factor
 tutti-sampler  setter  crates/tutti-sampler/src/voice/command.rs::VoiceNodeHandle::set_gain
-tutti-sampler  setter  crates/tutti-sampler/src/voice/command.rs::VoiceNodeHandle::set_loop
 tutti-sampler  setter  crates/tutti-sampler/src/voice/command.rs::VoiceNodeHandle::set_speed
-tutti-sampler  setter  crates/tutti-sampler/src/voice/command.rs::VoiceNodeHandle::set_window
 tutti-sampler  setter  crates/tutti-sampler/src/voice/command.rs::VoicePoolHandle::set_direction
 tutti-sampler  setter  crates/tutti-sampler/src/voice/command.rs::VoicePoolHandle::set_gain
 tutti-sampler  setter  crates/tutti-sampler/src/voice/command.rs::VoicePoolHandle::set_loop
@@ -458,8 +454,6 @@ tutti-session  chain-result  crates/tutti-session/src/take.rs::Punch::until
 tutti-session  chain-result  crates/tutti-session/src/take.rs::Take::rolling
 tutti-session  setter  crates/tutti-session/src/general_midi.rs::GeneralMidi::set_gain
 tutti-session  setter  crates/tutti-session/src/graph.rs::Graph::set_feed
-tutti-session  setter  crates/tutti-session/src/graph.rs::Graph::set_mix
-tutti-session  setter  crates/tutti-session/src/graph.rs::Graph::set_mode
 tutti-session  setter  crates/tutti-session/src/graph.rs::Graph::set_param_mod
 tutti-session  setter  crates/tutti-session/src/graph.rs::Graph::set_sample_rate
 tutti-session  setter  crates/tutti-session/src/graph.rs::Graph::set_sources
@@ -468,7 +462,6 @@ tutti-session  setter  crates/tutti-session/src/instrument.rs::InstrumentHandle:
 tutti-session  setter  crates/tutti-session/src/midi.rs::Midi::set_route_fallback
 tutti-session  setter  crates/tutti-session/src/midi.rs::Midi::set_routes
 tutti-session  setter  crates/tutti-session/src/modulation.rs::Mods::set_source
-tutti-session  setter  crates/tutti-session/src/modulation.rs::RouteMut::set_depth
 tutti-session  setter  crates/tutti-session/src/plugin_params.rs::Param::set_plain
 tutti-session  setter  crates/tutti-session/src/plugin_params.rs::Param::set_text
 tutti-session  setter  crates/tutti-session/src/plugin_params.rs::Params::set_automation_mode

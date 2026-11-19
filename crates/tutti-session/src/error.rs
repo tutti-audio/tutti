@@ -17,6 +17,27 @@ pub enum HeardTapError {
     Tap(#[from] tutti_engine::HeardTapError),
 }
 
+/// Why a declaration was refused: a value declared with a target
+/// ([`Mods::range`](crate::Mods::range)). Nothing is declared. The value
+/// declared is the declaration's initial one, and later changes to it are
+/// writes to its target.
+#[derive(Clone, Copy, Debug, PartialEq, Error)]
+#[non_exhaustive]
+pub enum DeclarationError {
+    /// A declared number is NaN or infinite: a weight or a bound must be a
+    /// number the lane can multiply by.
+    #[error("a declared value must be finite")]
+    NotFinite,
+    /// A range's start is above its end.
+    #[error("the range is backwards: min {min} is above max {max}")]
+    Backwards {
+        /// The lower bound given.
+        min: f64,
+        /// The upper bound given.
+        max: f64,
+    },
+}
+
 /// Why [`Graph::remove`](crate::Graph::remove) (or
 /// [`Session::remove`](crate::Session::remove)) refused: what was not there.
 /// Nothing is changed.
@@ -453,17 +474,13 @@ pub enum Error {
     #[error(transparent)]
     Connect(#[from] ConnectError),
 
-    /// A modulation range was refused (`Mods::range`).
+    /// A declaration was refused ([`Mods::range`](crate::Mods::range)).
     #[error(transparent)]
-    Range(#[from] crate::RangeError),
+    Declaration(#[from] DeclarationError),
 
     /// A bus edge was refused ([`Graph::connect`](crate::Graph::connect)).
     #[error(transparent)]
     Bus(#[from] tutti_graph::BusError),
-
-    /// A dry/wet mix was refused ([`Graph::set_mix`](crate::Graph::set_mix)).
-    #[error(transparent)]
-    Mix(#[from] tutti_graph::MixError),
 
     /// A transport command was refused ([`Session::play`](crate::Session::play),
     /// [`Session::schedule`](crate::Session::schedule) and the other verbs):

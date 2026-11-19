@@ -782,6 +782,51 @@ fn a_range_edit_rescales_on_the_next_block() {
     }
 }
 
+/// **A lane sees two depths stored between two blocks, however their bits
+/// combine.** Two constant layers on a span of 800 add `800 * (d1 + d2)` to the
+/// knob 500. The cells go from `0.125` and `0.125` to `0.125 + 2^-11` (one
+/// mantissa bit, 44) and `0.1875` (the top mantissa bit, 51): the second flip
+/// is the first rotated left by 7, so a fold of the cells' bits as
+/// `acc.rotl(7) ^ id ^ bits` is the same before and after and the lane would
+/// miss the move. It reads `700` before and `750.390625` after.
+#[test]
+fn a_lane_sees_two_depths_stored_in_one_block_whatever_their_bits() {
+    use tutti_rt::Param;
+    let (mut ed, mut exec) = probes(128, &[2], (100.0, 900.0));
+    let constant = |id| Layer {
+        id: LayerId(id),
+        clock: beats(4.0),
+        wave: Waveform::Const(1.0),
+        amount: amount(0.125),
+        depth_by: None,
+    };
+    let (d1, d2) = (Param::new(Depth::of(0.125)), Param::new(Depth::of(0.125)));
+    let mut program =
+        ControlProgram::new(None, vec![constant(1), constant(2)], vec![]).expect("a valid program");
+    program
+        .bind_depths([(LayerId(1), d1.handle()), (LayerId(2), d2.handle())])
+        .expect("two cells");
+    let lane = native(&ed, 2, program, Some(500.0));
+    wire(&mut ed, 1, lane, 2);
+    ed.commit().expect("commits");
+    let (mut host, mut all) = (Host::new(), Vec::new());
+    for _ in 0..10 {
+        host.roll(&mut ed, &mut exec, 100, &mut all);
+    }
+    assert!(all[0].iter().all(|&v| v == 700.0), "{:?}", all[0].last());
+
+    d1.store(Depth::of(0.125 + 2.0f64.powi(-11)));
+    d2.store(Depth::of(0.1875));
+    for _ in 0..10 {
+        host.roll(&mut ed, &mut exec, 100, &mut all);
+    }
+    let last = f64::from(*all[0].last().unwrap());
+    assert!(
+        (last - 750.390_625).abs() < 1e-3,
+        "the lane missed it: {last}"
+    );
+}
+
 /// A plugin lane under shaped automation sends linear grid pieces, never
 /// exact mode: every segment it sends is `Linear`, a point
 /// lands on every grid frame, and the value there is the curve's.

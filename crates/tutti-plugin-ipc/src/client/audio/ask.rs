@@ -8,16 +8,55 @@
 //! responses come back in the order requests went out.
 
 use crossbeam_channel::{Receiver, RecvTimeoutError, Sender, bounded};
+use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::time::Duration;
+use tutti_rt::LockExt;
+
+/// Whether a control request is owed a reply: at most one is, and a caller who
+/// finds it held waits for it, up to a bound of its own, instead of queueing a
+/// second request behind it on the lane.
+#[derive(Clone, Default)]
+pub(super) struct ControlSlot(Arc<SlotState>);
+
+#[derive(Default)]
+struct SlotState {
+    held: Mutex<Held>,
+    freed: Condvar,
+}
+
+#[derive(Default)]
+struct Held {
+    owed: bool,
+}
+
+/// The slot, held: released when it drops, which is when its request's
+/// [`Reply`] is answered or dropped unanswered.
+struct Owing(Arc<SlotState>);
+
+impl Drop for Owing {
+    fn drop(&mut self) {
+        self.0.held.lock_recover().owed = false;
+        self.0.freed.notify_one();
+    }
+}
 
 /// Sender half. Consumed on [`Self::send`] — exactly one message can be
 /// delivered, and forgetting to send is a compile error in any branch
 /// that should have consumed `self`.
-pub(super) struct Reply<T>(Sender<T>);
+pub(super) struct Reply<T> {
+    tx: Sender<T>,
+    /// The slot this reply holds, for a request that owes one.
+    owing: Option<Owing>,
+}
 
 impl<T> Reply<T> {
+    /// Answers the request. The slot is released **before** the value is
+    /// sent: the caller the value wakes may ask again at once, and must find
+    /// the slot free.
     pub(super) fn send(self, value: T) {
-        let _ = self.0.try_send(value);
+        let Self { tx, owing } = self;
+        drop(owing);
+        let _ = tx.try_send(value);
     }
 }
 
@@ -46,12 +85,75 @@ impl<T> Ask<T> {
 /// Make a paired one-shot channel.
 pub(super) fn ask<T>() -> (Ask<T>, Reply<T>) {
     let (tx, rx) = bounded(1);
-    (Ask(rx), Reply(tx))
+    (Ask(rx), Reply { tx, owing: None })
+}
+
+impl ControlSlot {
+    /// A paired one-shot channel that holds the slot until it is answered or
+    /// dropped. Waits up to `wait` for another request to release it (parked on
+    /// a condvar the release notifies, so no spinning); `None` when it is still
+    /// held then.
+    pub(super) fn ask<T>(&self, wait: Duration) -> Option<(Ask<T>, Reply<T>)> {
+        let state = &self.0;
+        let mut held = state.held.lock_recover();
+        if held.owed {
+            held = state
+                .freed
+                .wait_timeout_while(held, wait, |h| h.owed)
+                .unwrap_or_else(PoisonError::into_inner)
+                .0;
+            if held.owed {
+                return None;
+            }
+        }
+        held.owed = true;
+        drop(held);
+        let (waiting, mut reply) = ask();
+        reply.owing = Some(Owing(Arc::clone(&self.0)));
+        Some((waiting, reply))
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **One request owes a reply at a time**: a second `ask` is refused while
+    /// the first is unanswered, and the slot is free again at the answer (before
+    /// its value is readable) and when the reply drops unanswered.
+    #[test]
+    fn the_slot_is_held_until_the_reply_is_answered_or_dropped() {
+        let slot = ControlSlot::default();
+        let now = Duration::ZERO;
+        let (first, reply) = slot.ask::<u8>(now).expect("a free slot");
+        assert!(slot.ask::<u8>(now).is_none(), "the slot is held");
+        reply.send(1);
+        let free = slot.ask::<u8>(now);
+        assert!(
+            free.is_some(),
+            "answered: free by the time the value is sent"
+        );
+        assert_eq!(first.recv_timeout(Duration::from_secs(60)), Ok(1));
+        drop(free);
+        assert!(
+            slot.ask::<u8>(now).is_some(),
+            "dropped unanswered: free again"
+        );
+    }
+
+    /// **A caller that finds the slot held takes it at the release**, in place
+    /// of failing. Its budget is a hang guard only.
+    #[test]
+    fn a_caller_takes_the_slot_at_the_release() {
+        let slot = ControlSlot::default();
+        let (_first, reply) = slot.ask::<u8>(Duration::ZERO).expect("a free slot");
+        let waiter = {
+            let slot = slot.clone();
+            std::thread::spawn(move || slot.ask::<u8>(Duration::from_secs(60)).is_some())
+        };
+        drop(reply);
+        assert!(waiter.join().expect("the waiter"), "taken at the release");
+    }
 
     #[test]
     fn test_ask_reply_oneshot() {

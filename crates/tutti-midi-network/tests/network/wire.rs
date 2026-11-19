@@ -228,11 +228,11 @@ fn accepted_and_pending_carry_the_host_identity_like_an_invitation() {
 #[test]
 fn authentication_required_puts_the_state_in_data_two_and_the_nonce_before_the_name() {
     let nonce = Nonce::new(*b"nUWrn*@#$hjfwnkL").unwrap();
-    let c = Command::AuthRequired(AuthChallenge {
+    let c = Command::AuthRequired(Box::new(AuthChallenge {
         state: AuthState::DigestWrong,
         nonce,
         identity: identity("Studio", "HOST-1"),
-    });
+    }));
     let bytes = cmd_bytes(&c);
     // payload: 4 nonce + 2 name + 2 id words; csd1 is the name's 2 words.
     assert_eq!(&bytes[..4], [0x12, 0x08, 0x02, 0x01]);
@@ -248,11 +248,11 @@ fn user_authentication_required_has_three_states() {
         (UserAuthState::DigestWrong, 1),
         (UserAuthState::UserNotFound, 2),
     ] {
-        let c = Command::UserAuthRequired(UserAuthChallenge {
+        let c = Command::UserAuthRequired(Box::new(UserAuthChallenge {
             state,
             nonce: Nonce::new(*b"XI|~=NNRVaD;XCPL").unwrap(),
             identity: identity("A", "B"),
-        });
+        }));
         let bytes = cmd_bytes(&c);
         assert_eq!(bytes[0], 0x13);
         assert_eq!(bytes[3], byte);
@@ -328,16 +328,16 @@ fn every_command_round_trips() {
         })),
         Command::Accepted(id),
         Command::Pending(id),
-        Command::AuthRequired(AuthChallenge {
+        Command::AuthRequired(Box::new(AuthChallenge {
             state: AuthState::First,
             nonce,
             identity: id,
-        }),
-        Command::UserAuthRequired(UserAuthChallenge {
+        })),
+        Command::UserAuthRequired(Box::new(UserAuthChallenge {
             state: UserAuthState::UserNotFound,
             nonce,
             identity: id,
-        }),
+        })),
         Command::Ping(PingId::new(1)),
         Command::PingReply(PingId::new(u32::MAX)),
         Command::RetransmitRequest(RetransmitRequest {
@@ -517,11 +517,11 @@ fn an_invitation_name_over_twenty_five_words_is_refused() {
 
 #[test]
 fn a_reserved_authentication_state_is_refused() {
-    let c = Command::AuthRequired(AuthChallenge {
+    let c = Command::AuthRequired(Box::new(AuthChallenge {
         state: AuthState::First,
         nonce: Nonce::new(*b"0123456789abcdef").unwrap(),
         identity: identity("A", "B"),
-    });
+    }));
     let mut bytes = cmd_bytes(&c);
     bytes[3] = 2;
     assert_eq!(one(&bytes).unwrap_err().error, ParseError::Reserved);
@@ -531,11 +531,11 @@ fn a_reserved_authentication_state_is_refused() {
 /// Spec: m2-124/6.7#14
 #[test]
 fn a_non_ascii_nonce_is_refused() {
-    let c = Command::AuthRequired(AuthChallenge {
+    let c = Command::AuthRequired(Box::new(AuthChallenge {
         state: AuthState::First,
         nonce: Nonce::new(*b"0123456789abcdef").unwrap(),
         identity: identity("A", "B"),
-    });
+    }));
     let mut bytes = cmd_bytes(&c);
     bytes[4] = 0xC3;
     assert_eq!(one(&bytes).unwrap_err().error, ParseError::Nonce);
@@ -545,11 +545,11 @@ fn a_non_ascii_nonce_is_refused() {
 /// Spec: m2-124/6.7#14
 #[test]
 fn a_received_nonce_outside_the_senders_range_is_read_but_never_issued() {
-    let mut bytes = cmd_bytes(&Command::AuthRequired(AuthChallenge {
+    let mut bytes = cmd_bytes(&Command::AuthRequired(Box::new(AuthChallenge {
         state: AuthState::First,
         nonce: Nonce::new(*b"0123456789abcdef").unwrap(),
         identity: identity("A", "B"),
-    }));
+    })));
     bytes[4] = 0x01;
     let Ok(Command::AuthRequired(challenge)) = one(&bytes) else {
         panic!("a nonce holding 0x01 is read")
@@ -695,7 +695,7 @@ mod props {
 /// A `Command` is built, queued and copied per datagram on the UMP data path,
 /// so it stays at or below 160 bytes, its size before the texts were inline
 /// (the largest variant then was a User Authentication Required at 159 bytes
-/// plus the tag). A variant that holds a text or a user name is boxed to stay
+/// plus the tag). A variant that holds a text, a user name or a challenge is boxed to stay
 /// under it.
 #[test]
 fn a_command_stays_small() {
