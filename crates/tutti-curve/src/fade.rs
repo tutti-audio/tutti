@@ -14,7 +14,7 @@ pub const DECLICK: Seconds = Seconds::new(0.005);
 #[inline]
 #[must_use]
 pub fn declick_frames(rate: SampleRate) -> Samples {
-    Samples::new(DECLICK.to_samples(rate).get().max(1))
+    DECLICK.to_samples(rate).max(Samples::new(1))
 }
 
 /// The gain law of a fade between two signals.
