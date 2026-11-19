@@ -1262,7 +1262,7 @@ fn a_list_entry_fault_carries_the_error_of_the_entry_type() {
     ));
 }
 
-/// Spec: m2-105/4#3
+/// Spec: m2-105/4.3#2
 #[test]
 fn a_channel_fault_carries_the_function_block_channel_error() {
     let error = fails(PeResource::ChannelList, r#"[{"title":"A","channel":257}]"#);
