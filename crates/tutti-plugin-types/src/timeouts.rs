@@ -27,6 +27,13 @@ pub struct Timeouts {
     /// A reply during the launch handshake, and one chunk of an offline fork's
     /// render. The generic wait on the server: 5 s.
     pub call: Duration,
+    /// The server opening the plugin (its library, instance and initialisation)
+    /// after a `LoadPlugin`, which a sampler or a large synth spends seconds on:
+    /// 60 s.
+    pub load: Duration,
+    /// How long a server that was told to shut down is given to end by itself
+    /// (the plugin's own teardown runs in it) before it is killed: 2 s.
+    pub shutdown: Duration,
     /// The server's socket coming up after the process spawned. A slow machine
     /// under load is the failure this guards; a server that died is reported
     /// at once whatever this is: 5 s.
@@ -59,6 +66,8 @@ impl Default for Timeouts {
     fn default() -> Self {
         Self {
             call: Duration::from_secs(5),
+            load: Duration::from_secs(60),
+            shutdown: Duration::from_secs(2),
             connect: Duration::from_secs(5),
             state_restore: Duration::from_secs(60),
             state_progress: Duration::from_secs(10),
@@ -121,6 +130,8 @@ impl Timeouts {
     pub fn validate(&self) -> Result<(), ZeroTimeout> {
         let fields = [
             ("call", self.call),
+            ("load", self.load),
+            ("shutdown", self.shutdown),
             ("connect", self.connect),
             ("state_restore", self.state_restore),
             ("state_progress", self.state_progress),
@@ -148,6 +159,8 @@ mod tests {
     fn a_host_wait_always_outlasts_its_bridge_deadline() {
         let short = Timeouts {
             call: Duration::from_millis(1),
+            load: Duration::from_millis(1),
+            shutdown: Duration::from_millis(1),
             connect: Duration::from_millis(1),
             state_restore: Duration::from_millis(1),
             state_progress: Duration::from_millis(20),
@@ -190,6 +203,7 @@ mod tests {
     fn the_defaults_are_the_figures_the_bridge_shipped_with() {
         let t = Timeouts::default();
         assert_eq!(t.call, Duration::from_secs(5));
+        assert!(t.load > t.call, "an open outlasts a generic call");
         assert_eq!(t.state_restore, Duration::from_secs(60));
         assert_eq!(t.editor_wait(), Duration::from_secs(15));
         assert_eq!(t.settle_wait(), Duration::from_secs(16));

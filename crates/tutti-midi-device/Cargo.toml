@@ -15,7 +15,11 @@ workspace = true
 
 [features]
 default = []
-# `Serialize`/`Deserialize` on `DeviceId`, `Identity`, `SavedDevice`, `Learned` and `SavedState`.
+# `Serialize`/`Deserialize` on the values an app stores: `DeviceId`, `DeviceInfo`, `Identity`,
+# `SavedDevice`, `Learned`, `SavedState` (with `MediaType`), `Endpoint`, `FunctionBlock`,
+# `MidiIdentity`, `Capabilities`, `Supports` and `Name<N>`; a checked type reads back through
+# its check. The exceptions hold no stored value: the CI messages and their numbers (`Muid`,
+# `CiDeviceId`, the limits), the Property Exchange Resource values, and the wire packets.
 serde = ["dep:serde", "tutti-ump/serde"]
 
 [dependencies]

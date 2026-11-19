@@ -15,8 +15,6 @@ tutti_units::ranged! {
     /// together and a reply to its inquiry, and is unique among the
     /// transactions between one Initiator and one Responder.
     #[derive(Eq, Hash, PartialOrd, Ord)]
-    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-    #[cfg_attr(feature = "serde", serde(try_from = "u8", into = "u8"))]
     PeRequestId(u8), NotARequestId, "a request id (0 to 127)", |raw| raw <= 127
 }
 
@@ -24,8 +22,6 @@ tutti_units::ranged! {
     /// The number of a chunk, or a count of chunks: 1 to 16383, since the
     /// count starts from 1 and is a 14-bit value (M2-101 §8.3, Table 33).
     #[derive(Eq, Hash, PartialOrd, Ord)]
-    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-    #[cfg_attr(feature = "serde", serde(try_from = "u16", into = "u16"))]
     ChunkNo(u16), NotAChunkNo, "a chunk number (1 to 16383)", |raw| raw >= 1 && raw <= 0x3FFF
 }
 
