@@ -295,12 +295,14 @@ impl MidiEndpoints for CoreMidiEndpoints {
             "tutti-in",
             protocol,
             &endpoint,
-            move |time, event| {
-                // The packet's own host time, as an `Instant`: when the event reached
-                // CoreMIDI, not when this callback ran. A full inlet counts the drop
-                // itself; a log line would run on CoreMIDI's thread.
-                let arrived = host_time::Pairing::now().instant_of_stamp(time);
-                let _ = producer.push(event, arrived);
+            // The clocks are read once per delivered list, so messages with equal
+            // stamps get equal instants.
+            host_time::Pairing::now,
+            move |pairing, time, event| {
+                // The packet's own host time, as an `Instant`: when the event
+                // reached CoreMIDI, not when this callback ran. A full inlet counts
+                // the drop itself; a log line would run on CoreMIDI's thread.
+                let _ = producer.push(event, pairing.instant_of_stamp(time));
             },
         )?;
         Ok(Box::new(CoreMidiInput { port }))

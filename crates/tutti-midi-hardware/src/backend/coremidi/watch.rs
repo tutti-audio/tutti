@@ -18,16 +18,16 @@
 //! ran its own run loop. So the hub starts before any other client the backend
 //! creates (`hub_first` starts it, and every endpoint and port is created on it),
 //! and a host that creates a client of its own earlier still takes the
-//! notifications. The hub thread therefore also looks again once a second passes
-//! with no notification, on a timer of the loop it runs
-//! (`tutti_coremidi_ffi::run_notifications`), which finds a hot-plug in about a
-//! second in that case. Nothing here has been run on a Mac with a main run loop.
+//! notifications. The hub thread therefore runs its loop with
+//! `tutti_coremidi_ffi::run_notifications`, which, only where the loop has no
+//! notification source, looks again once a second on a timer; that finds a hot-plug
+//! in about a second in that case. Nothing here has been run on a Mac with a main
+//! run loop.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
-use tutti_platform::Instant;
 use tutti_rt::LockExt;
 
 use crate::devices::ChangeSink;
@@ -38,38 +38,10 @@ use tutti_coremidi_ffi::{SharedClient, run_notifications};
 use tutti_midi_device::OsDevice;
 use tutti_platform::spawn_named;
 
-/// How often the hub's timer asks whether a look is due.
-const IDLE_CHECK: Duration = Duration::from_millis(250);
-/// How long without a notification before a hub looks again by itself: the
-/// fallback for a process whose first CoreMIDI client was not the hub's.
+/// How often a hub whose run loop has no notification source looks again by
+/// itself: the fallback for a process whose first CoreMIDI client was not the hub's.
+/// A hub whose loop has the source (the usual case) never looks on a timer.
 const IDLE_LOOK: Duration = Duration::from_secs(1);
-
-/// When a hub looks by itself, as a function of the time it is given: a look is due
-/// once [`IDLE_LOOK`] has passed since the last look or notification.
-struct IdleLooks {
-    looked: Instant,
-}
-
-impl IdleLooks {
-    fn new(now: Instant) -> Self {
-        Self { looked: now }
-    }
-
-    /// Whether a look is due at `now`; when it is, it is taken.
-    fn look_due(&mut self, now: Instant) -> bool {
-        let due = now.saturating_duration_since(self.looked) >= IDLE_LOOK;
-        if due {
-            self.looked = now;
-        }
-        due
-    }
-
-    /// A notification arrived at `now`: they reach the loop, so the interval starts
-    /// over.
-    fn notified(&mut self, now: Instant) {
-        self.looked = now;
-    }
-}
 
 /// One registered watch: the reporting state of a `Devices`, and the sink to
 /// tell if it fails.
@@ -158,10 +130,7 @@ fn start_hub() -> Result<(&'static Hub, SharedClient)> {
         let (ready, started) = mpsc::channel();
         // The hub thread lives as long as the process: no owner stops it.
         spawn_named(MidiThread::DeviceWatch.name(), None, move |_| {
-            let looks = Arc::new(Mutex::new(IdleLooks::new(Instant::now())));
-            let heard = Arc::clone(&looks);
             let client = SharedClient::start("tutti-midi-watch", move |notification| {
-                heard.lock_recover().notified(Instant::now());
                 if notification.changes_devices() {
                     hub.notify();
                 }
@@ -171,14 +140,9 @@ fn start_hub() -> Result<(&'static Hub, SharedClient)> {
             let Ok(client) = client else {
                 return;
             };
-            // The loop runs for the thread's life: a timer on it looks when no
-            // notification has come.
-            run_notifications(client, IDLE_CHECK, move || {
-                let due = looks.lock_recover().look_due(Instant::now());
-                if due {
-                    hub.notify();
-                }
-            });
+            // The loop runs for the thread's life; where it has no notification
+            // source, its timer has the watches look.
+            run_notifications(client, IDLE_LOOK, move || hub.notify());
         })
         .map_err(|source| MidiHardwareError::Spawn {
             thread: MidiThread::DeviceWatch,

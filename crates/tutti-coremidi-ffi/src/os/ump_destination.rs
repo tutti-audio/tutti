@@ -86,7 +86,7 @@ impl UmpDestination {
     {
         let protocol = protocol_id(protocol)?;
         let client = client.get();
-        let receiver = Receiver::new(on_ump);
+        let receiver = Receiver::ump(on_ump);
         let name = CFString::new(name);
         let mut endpoint: MIDIEndpointRef = 0;
         // SAFETY: `client` is a live client, `name` outlives the call, `endpoint`

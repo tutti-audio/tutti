@@ -64,8 +64,8 @@ fn until(devices: &Watched, want: impl Fn(&DeviceEvent) -> bool) -> DeviceEvent 
 /// A virtual destination that appears is `Added` and, dropped, `Removed`; the
 /// watch's registration ends with `Devices`. On GitHub's macOS runner CoreMIDI
 /// sent the background client no notification, so this passes on the hub's own
-/// look (see `watch.rs`); without `hub.notify` in the timer (`IDLE_LOOK` never
-/// reached) the first wait times out there.
+/// look (see `watch.rs`); without `hub.notify` in the timer the first wait times out
+/// there.
 #[test]
 fn a_virtual_destination_comes_and_goes_and_the_watch_unregisters() {
     let name = format!("tutti-test-{}", std::process::id());
@@ -118,9 +118,8 @@ fn a_change_is_reported_when_an_output_port_comes_first() {
     drop((destination, out, first));
 }
 
-/// As above, with a virtual source created before the watch: its raw client is
-/// the other creation site, and a destination that appears after the watch
-/// opened is still reported.
+/// As above, with a virtual source created before the watch: a destination that
+/// appears after the watch opened is still reported.
 #[test]
 fn a_change_is_reported_when_a_virtual_source_comes_first() {
     use crate::backend::coremidi::UmpVirtualSource;
@@ -136,23 +135,4 @@ fn a_change_is_reported_when_a_virtual_source_comes_first() {
         |e| matches!(e, DeviceEvent::Added(i) if i.name.contains(&name)),
     );
     drop((destination, source));
-}
-
-/// **A hub looks once per `IDLE_LOOK` without a notification**: a look is due an
-/// interval after the last, is taken when it is due, and a notification starts the
-/// interval over.
-#[test]
-fn an_idle_hub_looks_once_per_interval_and_a_notification_restarts_it() {
-    let t0 = Instant::now();
-    let mut looks = IdleLooks::new(t0);
-    assert!(!looks.look_due(t0 + IDLE_LOOK - Duration::from_millis(1)));
-    assert!(looks.look_due(t0 + IDLE_LOOK));
-    assert!(
-        !looks.look_due(t0 + IDLE_LOOK + IDLE_CHECK),
-        "taken at the last look"
-    );
-    assert!(looks.look_due(t0 + IDLE_LOOK * 2));
-    looks.notified(t0 + IDLE_LOOK * 2 + Duration::from_millis(10));
-    assert!(!looks.look_due(t0 + IDLE_LOOK * 3));
-    assert!(looks.look_due(t0 + IDLE_LOOK * 3 + Duration::from_millis(10)));
 }

@@ -25,20 +25,32 @@ use tutti_ump::{Ump, split_stream};
 /// a pointer is a pointer at the ABI, and the block casts it back.
 type ReceiveBlock = RcBlock<dyn Fn(*const c_void, *mut c_void)>;
 
-pub(crate) type OnUmp = Box<dyn FnMut(Option<Duration>, Ump) + Send>;
+/// What a receiver's callback is told: a list has arrived, then each UMP message of
+/// it with its packet's time.
+pub(crate) enum Event {
+    /// A delivered event list starts, before any of its messages.
+    List,
+    /// One message of the current list.
+    Ump(Option<Duration>, Ump),
+}
+
+type OnEvent = Box<dyn FnMut(Event) + Send>;
+#[cfg(test)]
+type OnUmp = Box<dyn FnMut(Option<Duration>, Ump) + Send>;
 
 /// What the receive block and its [`Receiver`] share: the callback, which the
 /// receiver takes on drop or the block takes after a panic, and the count of
 /// panics caught and of packets that ended in a truncated message.
 struct Callback {
-    on_ump: Mutex<Option<OnUmp>>,
+    on_event: Mutex<Option<OnEvent>>,
     faults: AtomicU64,
     truncated: AtomicU64,
 }
 
 /// A receive block and the callback behind it: what an endpoint or port that
 /// receives UMP holds. CoreMIDI calls the block on its delivery thread with each
-/// event list; the callback gets one call per UMP message, in order, with its
+/// event list; the callback gets one `Event::List` per list, then one call per UMP
+/// message, in order, with its
 /// packet's time as the duration since the host clock's origin (the clock
 /// [`host_ticks`](crate::host_ticks) reads), or `None` when the sender gave no time
 /// (a host time of 0: delivery now). A packet that ends inside a message drops that
@@ -69,17 +81,29 @@ pub(crate) struct Receiver {
 // SAFETY: the block is never called from Rust: it is only retained by CoreMIDI and
 // released by the drop, both atomic on a block's reference count. `Callback` is
 // `Send + Sync`: its closure is `Send` (`new` requires it) and sits behind a mutex.
-// The one assumption beyond the header is that CoreMIDI retains the block for the
-// duration of a call; `MIDIServices.h` does not document it.
+// A reference to the block is also leaked (`new`), so the block outlives any call
+// CoreMIDI still has in flight.
 unsafe impl Send for Receiver {}
 
 impl Receiver {
-    pub(crate) fn new<F>(on_ump: F) -> Self
+    /// A receiver for callers that take only the messages.
+    pub(crate) fn ump<F>(mut on_ump: F) -> Self
     where
         F: FnMut(Option<Duration>, Ump) + Send + 'static,
     {
+        Self::new(move |event| {
+            if let Event::Ump(time, ump) = event {
+                on_ump(time, ump);
+            }
+        })
+    }
+
+    pub(crate) fn new<F>(on_event: F) -> Self
+    where
+        F: FnMut(Event) + Send + 'static,
+    {
         let callback = Arc::new(Callback {
-            on_ump: Mutex::new(Some(Box::new(on_ump))),
+            on_event: Mutex::new(Some(Box::new(on_event))),
             faults: AtomicU64::new(0),
             truncated: AtomicU64::new(0),
         });
@@ -90,6 +114,13 @@ impl Receiver {
             // `packets` reads as empty.
             unsafe { receive(&shared, list.cast::<MIDIEventList>()) };
         });
+        // One retained reference to the block is leaked, and with it the block's
+        // clone of the callback: `MIDIServices.h` does not say CoreMIDI holds the
+        // block through a call that is running when its endpoint or port is
+        // disposed, so nothing can free the block under an in-flight invoke. What
+        // stays is the callback's shell (a mutex and two counters), the closure
+        // having been taken out on drop.
+        std::mem::forget(block.clone());
         Self { callback, block }
     }
 
@@ -116,7 +147,7 @@ impl Drop for Receiver {
         // The lock is never poisoned: `receive` catches every panic under it.
         let taken = self
             .callback
-            .on_ump
+            .on_event
             .lock()
             .ok()
             .and_then(|mut slot| slot.take());
@@ -131,20 +162,24 @@ impl Drop for Receiver {
 ///
 /// `list` satisfies [`packets`]'s contract.
 unsafe fn receive(callback: &Callback, list: *const MIDIEventList) {
-    let Ok(mut slot) = callback.on_ump.lock() else {
+    let Ok(mut slot) = callback.on_event.lock() else {
         return;
     };
-    let Some(on_ump) = slot.as_mut() else {
+    let Some(on_event) = slot.as_mut() else {
         return;
     };
     let base = Timebase::get();
-    // SAFETY: the caller's contract.
-    let ran = catch_unwind(AssertUnwindSafe(|| unsafe {
-        packets(list, &mut |stamp, words| {
-            if !split_packet(base, stamp, words, on_ump) {
-                callback.truncated.fetch_add(1, Ordering::Relaxed);
-            }
-        })
+    let ran = catch_unwind(AssertUnwindSafe(|| {
+        on_event(Event::List);
+        let mut on_ump = |time, ump| on_event(Event::Ump(time, ump));
+        // SAFETY: the caller's contract.
+        unsafe {
+            packets(list, &mut |stamp, words| {
+                if !split_packet(base, stamp, words, &mut on_ump) {
+                    callback.truncated.fetch_add(1, Ordering::Relaxed);
+                }
+            })
+        }
     }));
     if let Err(payload) = ran {
         callback.faults.fetch_add(1, Ordering::Relaxed);
@@ -157,7 +192,7 @@ unsafe fn receive(callback: &Callback, list: *const MIDIEventList) {
 
 /// Drops `value`; a panic in its `Drop` is caught, and its payload is leaked
 /// rather than dropped, since that drop could panic again.
-fn drop_guarded<T>(value: T) {
+pub(super) fn drop_guarded<T>(value: T) {
     if let Err(payload) = catch_unwind(AssertUnwindSafe(|| drop(value))) {
         std::mem::forget(payload);
     }
@@ -200,6 +235,8 @@ unsafe fn packets(list: *const MIDIEventList, on_packet: &mut dyn FnMut(MIDITime
         // `MIDIEventPacketNext` of the one before); its fields are read unaligned
         // for the four-byte packing, and `wordCount` is clamped to the 64 words
         // of the packet's `words` array, so the slice stays inside it.
+        // `MIDIEventPacketNext` steps by the unclamped `wordCount`, so the walk
+        // trusts CoreMIDI for it, as it does for `numPackets`.
         let (stamp, words) = unsafe {
             let stamp = std::ptr::addr_of!((*packet).timeStamp).read_unaligned();
             let len = (std::ptr::addr_of!((*packet).wordCount).read_unaligned() as usize).min(64);
@@ -246,9 +283,13 @@ mod tests {
         f(list.as_ptr());
     }
 
-    fn callback_of(on_ump: OnUmp) -> Callback {
+    fn callback_of(mut on_ump: OnUmp) -> Callback {
         Callback {
-            on_ump: Mutex::new(Some(on_ump)),
+            on_event: Mutex::new(Some(Box::new(move |event| {
+                if let Event::Ump(time, ump) = event {
+                    on_ump(time, ump);
+                }
+            }))),
             faults: AtomicU64::new(0),
             truncated: AtomicU64::new(0),
         }
@@ -276,7 +317,7 @@ mod tests {
         deliver_thrice(&callback);
         assert_eq!(calls.load(Ordering::Relaxed), 1);
         assert_eq!(callback.faults.load(Ordering::Relaxed), 1);
-        assert!(callback.on_ump.lock().unwrap().is_none());
+        assert!(callback.on_event.lock().unwrap().is_none());
     }
 
     #[test]
@@ -357,5 +398,30 @@ mod tests {
         });
         assert_eq!(calls.load(Ordering::Relaxed), 1);
         assert_eq!(callback.truncated.load(Ordering::Relaxed), 1);
+    }
+
+    /// A list announces itself once, before all its messages, whatever the number
+    /// of packets in it: what a caller keeps per list (a clock reading) is made once.
+    #[test]
+    fn a_list_is_announced_once_before_its_messages() {
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let seen = Arc::clone(&log);
+        let callback = Callback {
+            on_event: Mutex::new(Some(Box::new(move |event| {
+                seen.lock().unwrap().push(matches!(event, Event::List));
+            }))),
+            faults: AtomicU64::new(0),
+            truncated: AtomicU64::new(0),
+        };
+        with_list(&[0x2090_3C64, 0x2080_3C00], |list| {
+            // SAFETY: `list` is a valid event list.
+            unsafe { receive(&callback, list) };
+            // SAFETY: as above.
+            unsafe { receive(&callback, list) };
+        });
+        assert_eq!(
+            *log.lock().unwrap(),
+            [true, false, false, true, false, false]
+        );
     }
 }

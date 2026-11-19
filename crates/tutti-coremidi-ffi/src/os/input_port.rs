@@ -18,7 +18,7 @@ use std::time::Duration;
 use super::client::SharedClient;
 use super::endpoint::Endpoint;
 use super::error::{Error, Operation, OsStatus};
-use super::receive::Receiver;
+use super::receive::{Event, Receiver};
 use super::source::protocol_id;
 use tutti_ump::{Protocol, Ump};
 
@@ -26,7 +26,9 @@ use tutti_ump::{Protocol, Ump};
 /// created with. Every UMP message the source sends is handed to the callback given
 /// at creation, on CoreMIDI's delivery thread, as an [`UmpDestination`](crate::UmpDestination)
 /// hands it: one call per message of each packet, in order, with its packet's time
-/// since the host clock's origin, or `None` for a packet sent with no time. A packet
+/// since the host clock's origin, or `None` for a packet sent with no time. Each
+/// delivered list first makes a state with `new_list`, which every message of the
+/// list is handed, so what a list shares (a reading of a clock) is made once for it. A packet
 /// that ends inside a message drops that tail and counts it
 /// ([`truncated`](Self::truncated)). Owns its port, which is disposed on drop, and
 /// that disconnects it.
@@ -51,24 +53,36 @@ impl fmt::Debug for InputPort {
 
 impl InputPort {
     /// Creates a port named `name` on `client` that receives UMP in `protocol` and
-    /// connects it to `source`; `on_ump` gets each message the source sends.
+    /// connects it to `source`; `new_list` makes the state of each delivered list
+    /// and `on_ump` gets it with each message of the list.
     ///
     /// # Errors
     ///
     /// [`Error::ReservedProtocol`] for a reserved `protocol`, and [`Error::Call`]
     /// when CoreMIDI refuses the port or the connection (the source went away).
-    pub fn connect<F>(
+    pub fn connect<S, N, F>(
         client: SharedClient,
         name: &str,
         protocol: Protocol,
         source: &Endpoint,
-        on_ump: F,
+        mut new_list: N,
+        mut on_ump: F,
     ) -> Result<Self, Error>
     where
-        F: FnMut(Option<Duration>, Ump) + Send + 'static,
+        S: Send + 'static,
+        N: FnMut() -> S + Send + 'static,
+        F: FnMut(&mut S, Option<Duration>, Ump) + Send + 'static,
     {
         let protocol = protocol_id(protocol)?;
-        let receiver = Receiver::new(on_ump);
+        let mut list: Option<S> = None;
+        let receiver = Receiver::new(move |event| match event {
+            Event::List => list = Some(new_list()),
+            Event::Ump(time, ump) => {
+                if let Some(list) = list.as_mut() {
+                    on_ump(list, time, ump);
+                }
+            }
+        });
         let name = CFString::new(name);
         let mut port: MIDIPortRef = 0;
         // SAFETY: `client` is a live client, `name` outlives the call, `port` is a

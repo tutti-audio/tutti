@@ -2,7 +2,7 @@
 //!
 //! `MIDIEventListInit` and `MIDIEventListAdd` initialise a list piece by piece, and
 //! the list is only ever read by CoreMIDI through a pointer: the buffer is zeroed
-//! first and no reference to a `MIDIEventList` is formed, so nothing reads
+//! first (by [`EventList::new`]) and no reference to a `MIDIEventList` is formed, so nothing reads
 //! uninitialised memory as a typed value. `MIDIEventListAdd` returns null when a
 //! packet does not fit the buffer; that is [`Error::EventListFull`], never ignored.
 
@@ -35,7 +35,7 @@ pub(crate) struct EventList<'a> {
 }
 
 impl<'a> EventList<'a> {
-    /// Fills `buffer` with a list in `protocol` holding each of `packets` (its time
+    /// Zeroes `buffer` and fills it with a list in `protocol` holding each of `packets` (its time
     /// stamp in host ticks, 0 for now, and its UMP words), in order.
     ///
     /// # Errors
@@ -50,6 +50,7 @@ impl<'a> EventList<'a> {
         if buffer.len() < INIT_WORDS {
             return Err(Error::EventListFull);
         }
+        buffer.fill(0);
         let list = buffer.as_mut_ptr().cast::<MIDIEventList>();
         let size = size_of_val(buffer) as ByteCount;
         // SAFETY: `list` addresses `buffer`, which is four-byte aligned (a `MIDIEventList`
