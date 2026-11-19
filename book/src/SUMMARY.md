@@ -2,7 +2,7 @@
 
 [Introduction](introduction.md)
 
-- [Getting started]()
+- [Getting started](getting-started.md)
 
 # Guide: a song from nothing
 

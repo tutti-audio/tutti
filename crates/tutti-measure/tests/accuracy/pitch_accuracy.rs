@@ -207,7 +207,7 @@ fn a_rising_sweep_reads_as_rising() {
         })
         .collect();
 
-    let tracked = yin_track(&cfg, &sweep, Samples(frame)).expect("track");
+    let tracked = yin_track(&cfg, &sweep, Samples::new(frame)).expect("track");
     let freqs: Vec<f64> = tracked
         .iter()
         .map(|e| e.pitch().map(|p| p.frequency.get()).unwrap_or(0.0))
@@ -281,7 +281,7 @@ fn a_tone_below_the_configured_range_is_not_reported_as_in_range() {
     // Search 400-2000 Hz, present a 100 Hz tone. The correct answers are
     // "unvoiced" or a harmonic inside the band — never 100 Hz, which the
     // configuration excludes.
-    let cfg = YinConfig::new().band(FrequencyBand::new(Hz(400.0), Hz(2000.0)).unwrap());
+    let cfg = YinConfig::new().band(FrequencyBand::new(Hz::new(400.0), Hz::new(2000.0)).unwrap());
     let est = yin(&cfg, &sine(100.0, 0.5, 0.5)).expect("long enough");
 
     if let Some(p) = est.pitch() {

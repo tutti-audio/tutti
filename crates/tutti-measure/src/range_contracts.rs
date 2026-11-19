@@ -61,19 +61,19 @@ const INF: f64 = f64::INFINITY;
 const NEG_INF: f64 = f64::NEG_INFINITY;
 
 fn db(raws: &[f64]) -> Vec<Db> {
-    raws.iter().map(|&r| Db(r)).collect()
+    raws.iter().map(|&r| Db::new(r)).collect()
 }
 
 fn cents(raws: &[f64]) -> Vec<Cents> {
-    raws.iter().map(|&r| Cents(r)).collect()
+    raws.iter().map(|&r| Cents::new(r)).collect()
 }
 
 fn amplitudes(raws: &[f64]) -> Vec<Amplitude> {
-    raws.iter().map(|&r| Amplitude(r)).collect()
+    raws.iter().map(|&r| Amplitude::new(r)).collect()
 }
 
 fn seconds(raws: &[f64]) -> Vec<Seconds> {
-    raws.iter().map(|&r| Seconds(r)).collect()
+    raws.iter().map(|&r| Seconds::new(r)).collect()
 }
 
 /// `1..=16` partials.
@@ -318,8 +318,8 @@ fn pitch_hop_keeps_the_range_checked_shape() {
         new: PitchHop::new,
         get: PitchHop::get,
         of: Some(PitchHop::of),
-        valid: &[Samples(1), Samples(512), Samples(usize::MAX)],
-        invalid: &[Samples(0)],
+        valid: &[Samples::new(1), Samples::new(512), Samples::new(usize::MAX)],
+        invalid: &[Samples::new(0)],
     });
 }
 
@@ -342,12 +342,16 @@ fn yin_threshold_keeps_the_range_checked_shape() {
         new: YinThreshold::new,
         get: YinThreshold::get,
         of: Some(YinThreshold::of),
-        valid: &[Confidence(0.01), Confidence(0.1), Confidence(0.5)],
+        valid: &[
+            Confidence::new(0.01),
+            Confidence::new(0.1),
+            Confidence::new(0.5),
+        ],
         invalid: &[
-            Confidence(0.0),
-            Confidence(0.009),
-            Confidence(0.51),
-            Confidence(f64::NAN),
+            Confidence::new(0.0),
+            Confidence::new(0.009),
+            Confidence::new(0.51),
+            Confidence::new(f64::NAN),
         ],
     });
 }

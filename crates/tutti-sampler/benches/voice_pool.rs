@@ -13,7 +13,7 @@
 //! matter).
 //!
 //! `voices/stretch` is the case to watch: the phase vocoder is by far the
-//! most expensive thing in this crate, and `StretchFactor(1.0)` is a bypass,
+//! most expensive thing in this crate, and `StretchFactor::new(1.0)` is a bypass,
 //! so the 1.0-vs-0.5 gap is the whole cost of engaging it.
 //!
 //! Driven through `tutti_graph::contract::Direct` (the pool called by hand,

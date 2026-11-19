@@ -5,10 +5,10 @@ const ONE: NonZeroUsize = NonZeroUsize::MIN;
 
 fn sine(len: usize) -> Vec<f64> {
     tutti_fixtures::signal::sine(
-        tutti_units::Hz(440.0),
-        tutti_units::Amplitude(1.0),
+        tutti_units::Hz::new(440.0),
+        tutti_units::Amplitude::new(1.0),
         tutti_units::SampleRate::SR_48K,
-        tutti_units::Samples(len),
+        tutti_units::Samples::new(len),
     )
     .into_iter()
     .map(f64::from)

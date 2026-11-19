@@ -296,11 +296,13 @@ fn profile_bench_keeps_its_defaults_and_its_glob() {
 }
 
 #[test]
-fn book_builds_into_its_own_dir_or_the_one_named() {
-    assert_eq!(dry("book", &[]), ["mdbook build book"]);
+fn book_renders_its_sounds_then_builds_into_its_own_dir_or_the_one_named() {
+    let sound =
+        "cargo run --locked --release -p tutti-book --example getting_started -- book/src/sounds";
+    assert_eq!(dry("book", &[]), [sound, "mdbook build book"]);
     assert_eq!(
         dry("book", &["/srv/site/book"]),
-        ["mdbook build book --dest-dir /srv/site/book"]
+        [sound, "mdbook build book --dest-dir /srv/site/book"]
     );
 }
 

@@ -186,7 +186,7 @@ impl<F: Float> Design<F> {
 }
 
 /// The frames of the key a period reads at a time: the bell's design period.
-const PERIOD: Samples = Samples(COEFF_INTERVAL);
+const PERIOD: Samples = Samples::new(COEFF_INTERVAL);
 
 /// One EQ band of any width whose bell gain follows the level of its key in the band.
 ///
@@ -366,13 +366,13 @@ impl<F: Float + Lanes + Lerp> DynamicEqBank<F> {
             for &level in levels.iter() {
                 self.frame(level);
             }
-            let span = Samples(start)..Samples(end);
+            let span = Samples::new(start)..Samples::new(end);
             self.bell.process(
                 &mut self.coefficients,
                 input.slice(span.clone()),
                 output.slice_mut(span),
             );
-            self.phase = (self.phase + Samples(n)) % PERIOD;
+            self.phase = (self.phase + Samples::new(n)) % PERIOD;
             start = end;
         }
     }

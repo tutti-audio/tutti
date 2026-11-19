@@ -325,3 +325,51 @@ fn the_latest_placement_wins() {
         "the second move is the window the node plays"
     );
 }
+
+/// **A fork taken after a speed publish reads at the new rate**, and one taken
+/// before it at the old: the fork source applies the speed the handle last
+/// published when the fork is taken. A ramp whose value is its frame index
+/// names the rate: output frame `n` is file frame `n` at unity and `2n` at 2.
+#[test]
+fn a_speed_published_after_the_insert_reaches_a_fork() {
+    const LEN: usize = 1_024;
+    let samples: Vec<f32> = (0..LEN).map(|i| i as f32 / LEN as f32).collect();
+    let wave = Arc::new(Wave::from_mono(SampleRate::SR_48K, Mono::new(&samples)));
+    let source = MemorySource::new(wave)
+        .expect("a placeable wave")
+        .placed_at(VoiceWindow::from(Beat::new(0.0)));
+    let node = VoiceNode::with_channels(
+        Voice {
+            source: VoiceSource::Memory(source),
+            play: Playback::default(),
+        },
+        ChannelLayout::MONO,
+    );
+    let (ed, _exec, handle) = graph_with(node);
+    let prepare = Prepare::new(RATE, MaxBlock::of(Samples::new(256)));
+    let (_before_ed, mut before) = ed
+        .fork(ForkTarget::Master, ForkMode::Live, prepare)
+        .expect("forks");
+    before.apply_pending();
+
+    handle
+        .speed_cell()
+        .publish(tutti_units::PlaybackRate::of(2.0));
+
+    let (_after_ed, mut after) = ed
+        .fork(ForkTarget::Master, ForkMode::Live, prepare)
+        .expect("forks");
+    after.apply_pending();
+    let render = |exec: &mut Executor| {
+        let mut out = vec![0.0f32; 256];
+        let t = TransportPosition::new(true, Bpm::of(120.0), Beat::new(0.0), None);
+        exec.process(256, &t, &[], &mut [&mut out[..]]);
+        out
+    };
+    for (n, &got) in render(&mut after).iter().enumerate() {
+        assert_eq!(got.to_bits(), samples[2 * n].to_bits(), "after: frame {n}");
+    }
+    for (n, &got) in render(&mut before).iter().enumerate() {
+        assert_eq!(got.to_bits(), samples[n].to_bits(), "before: frame {n}");
+    }
+}

@@ -4,8 +4,8 @@ use tutti_ump::{DeviceIdentity, ManufacturerId, SoftwareRevision, U7};
 
 use super::super::tree::{PeJson, PeObject};
 use super::fields::{
-    Fields, PeDataError, PeDataFault, PeExtensions, PeText, ints, list, required_text, text,
-    u7_array,
+    Fields, InvalidValue, PeDataError, PeDataFault, PeExtensions, PeText, ints, list,
+    required_text, text, u7_array,
 };
 use super::link::PeLink;
 
@@ -66,7 +66,7 @@ impl PeDeviceInfo {
         let manufacturer_id =
             f.required("manufacturerId", "an array of 3 data bytes", u7_array::<3>)?;
         let manufacturer = ManufacturerId::from_sysex_bytes(manufacturer_id)
-            .ok_or_else(|| f.fail("manufacturerId", PeDataFault::NotValid("manufacturer id")))?;
+            .ok_or_else(|| f.invalid("manufacturerId", InvalidValue::ManufacturerId))?;
         let family = f.required("familyId", "an array of 2 data bytes", u7_array::<2>)?;
         let model = f.required("modelId", "an array of 2 data bytes", u7_array::<2>)?;
         let revision = f.required("versionId", "an array of 4 data bytes", u7_array::<4>)?;

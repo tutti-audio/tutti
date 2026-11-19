@@ -56,7 +56,7 @@
 //! so every admitted render's work is ordered before what the caller does
 //! next). A render lasts at most one block, so it backs off:
 //! a spin, then yields, then sleeps of at most a millisecond. The render's
-//! drop stays one `fetch_sub`: waking a parked waiter would need a doorbell
+//! drop stays one `fetch_sub`: waking a parked waiter would need an unparker
 //! per gate, and a wait is rare and short, so polling costs the audio side
 //! nothing and the control side a bounded latency.
 //!

@@ -12,7 +12,7 @@ use super::super::super::flow::PeMessageKind;
 use super::super::super::flow::{PeSignal, PeTerminator};
 use super::super::super::header::{PeEncoding, PeHeader, PeStatus};
 use super::super::super::initiator::PeOutcome;
-use super::super::super::limits::{MediaType, PropertyName};
+use super::super::super::limits::{MediaType, PeTextError, PropertyName};
 use super::super::super::tree::PeJson;
 use super::super::super::value::PeExtra;
 use super::super::exchange::{Link, octets, target};
@@ -131,7 +131,10 @@ fn a_state_id_is_36_of_letters_digits_and_underscore() {
         &json(r#"[{"title":"A","stateId":"B-d"}]"#),
     )
     .unwrap_err();
-    assert_eq!(error.fault, PeDataFault::NotValid("state id"));
+    assert!(matches!(
+        error.fault,
+        PeDataFault::NotValid(InvalidValue::Text(PeTextError::Character { .. }))
+    ));
 }
 
 // M2-111 §2.3: `timestamp` and `size` are integers, never below zero.

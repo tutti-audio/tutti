@@ -312,7 +312,7 @@ fn the_tail_is_the_rt60_of_the_longest_comb_plus_the_chain() {
     assert_eq!(at(0.5, 0.0), at(0.5, 1.0));
     assert_eq!(
         bank.tail(),
-        Tail::Finite(Samples(at(1.0, 0.0))),
+        Tail::Finite(Samples::new(at(1.0, 0.0))),
         "the ceiling is the room at its largest"
     );
     assert_eq!(TAIL_FLOOR, Db::new(-60.0));

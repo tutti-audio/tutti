@@ -18,7 +18,8 @@ use super::client::{CallError, CallId, ResourceInitiator};
 use super::data::{OpaqueBody, PeData};
 use super::entry::{EntryError, ResourceEntry, ResourceEntryBuilder};
 use super::fields::{
-    Fields, PeDataError, PeDataFault, PeExtensions, PeText, Place, integer, required_text, text,
+    Fields, PeDataError, PeDataFault, PeExtensions, PeText, Place, integer, narrowed,
+    required_text, text,
 };
 use super::kind::PeResource;
 use super::request::{RequestRefused, ResourceGet, ResourceSet, ResourceTarget};
@@ -218,8 +219,7 @@ impl PeStateEntry {
         let mut f = Fields::new(json, "StateList entry")?;
         let title = required_text(&mut f, "title")?;
         let id = f.required("stateId", "a string", text)?.to_owned();
-        let state_id = StateId::new(&id)
-            .ok_or_else(|| f.fail("stateId", PeDataFault::NotValid("state id")))?;
+        let state_id = StateId::try_from(id).map_err(|e| f.invalid("stateId", e))?;
         let rev = f.optional("stateRev", "a string", |j| text(j).map(StateRev::new))?;
         let timestamp = f.optional("timestamp", "an integer", unix_seconds)?;
         let description = f.optional("description", "a string", |j| text(j).map(str::to_owned))?;
@@ -378,7 +378,7 @@ impl PeState {
     fn parse_json(bytes: &[u8]) -> Result<Self, PeDataError> {
         PeJson::try_from(bytes)
             .map(Self::json)
-            .map_err(|_| PeDataError::new("State", PeDataFault::NotValid("JSON text")))
+            .map_err(|e| PeDataError::new("State", PeDataFault::NotValid(e.into())))
     }
 
     /// Writes the revision and time into the header of a reply.
@@ -449,12 +449,19 @@ impl StateStamp {
             None => None,
         };
         let timestamp = match extra.get("timestamp") {
-            Some(json) => Some(unix_seconds(json).ok_or_else(|| {
-                PeDataError::new(
-                    Place::of("State").property("timestamp"),
-                    PeDataFault::NotValid("time in Unix seconds"),
+            Some(json) => {
+                let place = Place::of("State").property("timestamp");
+                let PeJson::Integer(n) = json else {
+                    return Err(PeDataError::new(
+                        place,
+                        PeDataFault::WrongType("an integer"),
+                    ));
+                };
+                Some(
+                    narrowed::<u64, UnixSeconds>(*n)
+                        .map_err(|e| PeDataError::new(place, PeDataFault::NotValid(e)))?,
                 )
-            })?),
+            }
             None => None,
         };
         Ok(Self { rev, timestamp })

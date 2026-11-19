@@ -58,7 +58,7 @@ impl DcBlockerControls {
     #[must_use]
     pub fn tail(&self, rate: SampleRate) -> Samples {
         let r = dc_pole(self.corner, rate);
-        Samples((ring_frames(r, crate::TAIL_FLOOR).ceil() as usize).saturating_add(1))
+        Samples::new((ring_frames(r, crate::TAIL_FLOOR).ceil() as usize).saturating_add(1))
     }
 }
 

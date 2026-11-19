@@ -28,7 +28,7 @@ impl MaxDelay {
     /// allocation that aborts.
     #[must_use]
     pub fn frames(self, rate: SampleRate) -> Samples {
-        Samples(self.0.to_samples_ceil(rate).get().min(MAX_FRAMES))
+        Samples::new(self.0.to_samples_ceil(rate).get().min(MAX_FRAMES))
     }
 }
 

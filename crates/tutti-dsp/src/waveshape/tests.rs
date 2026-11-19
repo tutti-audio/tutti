@@ -918,8 +918,8 @@ fn the_delay_is_the_centroid_of_the_impulse_response() {
             "{order:?}: rings on"
         );
         assert!(y[ring] != 0.0, "{order:?}: {ring} frames of ring-out");
-        assert_eq!(order.ring_out(None), Samples(ring), "{order:?}");
-        assert_eq!(order.delay(None), Samples(1), "{order:?}");
+        assert_eq!(order.ring_out(None), Samples::new(ring), "{order:?}");
+        assert_eq!(order.delay(None), Samples::new(1), "{order:?}");
     }
     assert_eq!(Antialiasing::Off.delay(None), Samples::ZERO);
     assert_eq!(Antialiasing::Off.ring_out(None), Samples::ZERO);
@@ -927,19 +927,19 @@ fn the_delay_is_the_centroid_of_the_impulse_response() {
     // frame half of one; at 4x, an eighth and a quarter.
     assert_eq!(
         Antialiasing::FirstOrder.delay(Some(OversamplingFactor::X2)),
-        Samples(0)
+        Samples::new(0)
     );
     assert_eq!(
         Antialiasing::SecondOrder.delay(Some(OversamplingFactor::X2)),
-        Samples(1)
+        Samples::new(1)
     );
     assert_eq!(
         Antialiasing::SecondOrder.delay(Some(OversamplingFactor::X4)),
-        Samples(0)
+        Samples::new(0)
     );
     assert_eq!(
         Antialiasing::SecondOrder.ring_out(Some(OversamplingFactor::X2)),
-        Samples(1)
+        Samples::new(1)
     );
 }
 

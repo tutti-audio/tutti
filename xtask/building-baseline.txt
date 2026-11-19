@@ -410,7 +410,6 @@ tutti-sampler  setter  crates/tutti-sampler/src/stretch/unit.rs::Unit::set_pitch
 tutti-sampler  setter  crates/tutti-sampler/src/stretch/unit.rs::Unit::set_sample_rate
 tutti-sampler  setter  crates/tutti-sampler/src/stretch/unit.rs::Unit::set_stretch_factor
 tutti-sampler  setter  crates/tutti-sampler/src/voice/command.rs::VoiceNodeHandle::set_gain
-tutti-sampler  setter  crates/tutti-sampler/src/voice/command.rs::VoiceNodeHandle::set_speed
 tutti-sampler  setter  crates/tutti-sampler/src/voice/command.rs::VoicePoolHandle::set_direction
 tutti-sampler  setter  crates/tutti-sampler/src/voice/command.rs::VoicePoolHandle::set_gain
 tutti-sampler  setter  crates/tutti-sampler/src/voice/command.rs::VoicePoolHandle::set_loop

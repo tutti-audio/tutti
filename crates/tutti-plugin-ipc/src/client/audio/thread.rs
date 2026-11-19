@@ -2,12 +2,12 @@
 //! starts the control lane's, and pumps [`AudioCommand`]s through
 //! [`handle_audio`]; the control lane's thread pumps `ControlCommand`s through
 //! [`handle_control`] and reads what the server says unprompted. Each owns its
-//! connection, its queue and its doorbell, so a block never waits behind a
+//! connection, its queue and its wake-up, so a block never waits behind a
 //! control request and all IPC calls on a lane are blocking.
 //!
 //! The audio-response ring has one producer, the audio lane's thread. The control
-//! lane's thread never pushes to it: a failure it sees is latched (which rings
-//! both threads' bells, [`Channels::waker`]) and the audio lane's thread, woken,
+//! lane's thread never pushes to it: a failure it sees is latched (which wakes
+//! both threads, [`Channels::waker`]) and the audio lane's thread, woken,
 //! answers the queued blocks.
 
 use super::ListenerSlot;
@@ -26,7 +26,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 use tutti_plugin_types::{BridgeError, PluginFailure};
-use tutti_rt::{Sleeper, ThreadHandle};
+use tutti_rt::{Parker, ThreadHandle};
 
 /// The bridge's audio lane thread of an `AudioBridge`, which owns the control
 /// lane's: it speaks to the server for the queues. Dropping it shuts both down
@@ -58,7 +58,7 @@ impl BridgeThread {
         let thread_channels = channels.clone();
         let thread_payloads = payloads.clone();
         let thread_lifecycle = lifecycle.clone();
-        // Every block passes through this thread (callback, doorbell, bridge,
+        // Every block passes through this thread (callback, unpark, bridge,
         // server, bridge, next callback), and the OS elevates only the audio
         // callback's own thread, so a default-priority bridge delays the
         // reply. A refusal is an outcome on the handle, not an error.
@@ -128,7 +128,7 @@ fn run_thread(
     socket_path: PathBuf,
 ) {
     let Waits {
-        audio: mut sleeper,
+        audio: mut parker,
         control: control_wait,
     } = waits;
     // The response ring's writer is this thread's alone: it lives in the audio
@@ -178,7 +178,7 @@ fn run_thread(
     };
     audio_loop(
         &channels,
-        &mut sleeper,
+        &mut parker,
         &payloads,
         &lifecycle,
         &listener,
@@ -213,15 +213,15 @@ fn connect_lanes(socket_path: &Path) -> Result<(ControlStream, ControlStream), P
     Ok((audio, connect()?))
 }
 
-/// The audio lane's loop: sleep on the doorbell until a block-lane command is
+/// The audio lane's loop: park until a block-lane command is
 /// queued, send it, and answer it into the response ring.
 ///
-/// **Idle, the thread sleeps on its doorbell**, rung by a push, by `shutdown`
-/// and by a crash anyone declares. It does not read the control connection.
-/// There is no timeout in the sleep: a spurious return loops.
+/// **Idle, the thread parks on its [`Parker`]**, unparked by a push, by
+/// `shutdown` and by a crash anyone declares. It does not read the control
+/// connection. There is no timeout in the park: a spurious return loops.
 fn audio_loop(
     channels: &Channels,
-    sleeper: &mut Sleeper,
+    parker: &mut Parker,
     payloads: &PayloadPool,
     lifecycle: &Lifecycle,
     listener: &ListenerSlot,
@@ -244,11 +244,11 @@ fn audio_loop(
             // it may rely on.
             channels.note_handled(pushed);
             channels.progress().notify();
-            // Sleep on the doorbell: `push_block` rings it the instant a block
-            // arrives, so the socket round-trip starts immediately. The ring
-            // cannot be lost and `shutdown` rings it too, so there is no
-            // timeout.
-            channels.wait_for_block(sleeper, || !live(lifecycle));
+            // Park: `push_block` unparks the thread the instant a block
+            // arrives, so the socket round-trip starts immediately. The
+            // unpark cannot be lost and `shutdown` unparks too, so there is
+            // no timeout.
+            channels.wait_for_block(parker, || !live(lifecycle));
             continue;
         };
         // The settings asked for before a block go before it. A `Reset` takes

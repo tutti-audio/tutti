@@ -14,7 +14,7 @@ use tutti_units::{SampleRate, Samples};
 /// included, and a `reset` allocate nothing.
 #[test]
 fn no_push_allocates() {
-    let cfg = ChromaConfig::new().framing(Framing::new(Samples(2048), Samples(512)));
+    let cfg = ChromaConfig::new().framing(Framing::new(Samples::new(2048), Samples::new(512)));
     let frame: Vec<f32> = (0..2048)
         .map(|i| (std::f32::consts::TAU * 440.0 * i as f32 / 22_050.0).sin() * 0.5)
         .collect();
@@ -47,7 +47,7 @@ fn no_push_allocates() {
 /// nothing either, for a chunk longer than the conversion block.
 #[test]
 fn an_integer_push_allocates_nothing() {
-    let cfg = ChromaConfig::new().framing(Framing::new(Samples(2048), Samples(512)));
+    let cfg = ChromaConfig::new().framing(Framing::new(Samples::new(2048), Samples::new(512)));
     let long: Vec<i16> = (0..20_000)
         .map(|i| ((std::f32::consts::TAU * 440.0 * i as f32 / 22_050.0).sin() * 8_000.0) as i16)
         .collect();

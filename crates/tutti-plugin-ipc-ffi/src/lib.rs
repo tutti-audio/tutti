@@ -24,7 +24,7 @@
 //!   [`protect_host_memory`], the host's dumpable flag cleared (Linux), so a
 //!   same-user plugin cannot `ptrace` the host or write its memory.
 //! - **The OS calls** (`wait_readable`, `wait_readable_either` and `poll_wait`
-//!   (the server's waits on its sockets, a doorbell's descriptor and the
+//!   (the server's waits on its sockets, a bell's descriptor and the
 //!   descriptors a plugin asked to have watched, and an in-process host's
 //!   zero-timeout look at the same) on unix, `process_exists`,
 //!   `parent_process_id`, `terminate_process` and, on Windows,

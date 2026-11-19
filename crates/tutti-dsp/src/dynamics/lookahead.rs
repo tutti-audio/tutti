@@ -34,7 +34,7 @@ impl<F: Float> LookaheadRing<F> {
         );
         Self {
             lines: (0..channels.max(1))
-                .map(|_| DelayLine::new(Samples(n)))
+                .map(|_| DelayLine::new(Samples::new(n)))
                 .collect(),
             lookahead: n,
             min_deque: MonotonicMinDeque::new(window),

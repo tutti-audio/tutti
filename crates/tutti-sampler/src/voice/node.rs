@@ -33,7 +33,7 @@ use tutti_graph::{
 };
 use tutti_rt::{Param, Publisher, Reader};
 use tutti_transport::TempoReader;
-use tutti_units::{Amplitude, SampleRate, Tail, UnitParam};
+use tutti_units::{Amplitude, PlaybackRate, SampleRate, Tail, UnitParam};
 
 /// One [`Voice`] as a graph node in its own right: zero inputs, `channels`
 /// outputs.
@@ -95,6 +95,10 @@ pub struct VoiceNode<F: SamplerFloat> {
     direction: Reader<Direction>,
     /// The direction last applied.
     applied_direction: Direction,
+    /// A reader of the speed the handle publishes, lent once per block.
+    speed: Reader<PlaybackRate>,
+    /// The speed last applied.
+    applied_speed: PlaybackRate,
     /// The disk stream of a streaming node, until [`with_handle`](Self::with_handle)
     /// hands it to the handle: a stream is control-thread only (its drop
     /// sends on a bounded queue), so the node never keeps one it plays with.
@@ -161,6 +165,8 @@ impl<F: SamplerFloat> VoiceNode<F> {
             applied_loop: play.loop_,
             direction: SteerCell::new(play.direction).reader(),
             applied_direction: play.direction,
+            speed: Publisher::new(play.speed).reader(),
+            applied_speed: play.speed,
             stream: None,
             gain,
             clock: Clock::new(),
@@ -237,12 +243,16 @@ impl<F: SamplerFloat> VoiceNode<F> {
         self.applied_loop = *looping.current();
         self.direction = direction.reader();
         self.applied_direction = *direction.current();
+        let speed = Publisher::new(play.speed);
+        self.speed = speed.reader();
+        self.applied_speed = play.speed;
         let params = self.param_set();
         let handle = VoiceNodeHandle::new(
             steering,
             window,
             looping,
             direction,
+            speed,
             self.gain.handle(),
             params,
             self.stream.take(),
@@ -290,6 +300,11 @@ impl<F: SamplerFloat> VoiceNode<F> {
         if direction != self.applied_direction {
             self.slot.voice.play.direction = direction;
             self.applied_direction = direction;
+        }
+        let speed = *self.speed.lend();
+        if speed != self.applied_speed {
+            apply_speed(&mut self.slot.voice, speed);
+            self.applied_speed = speed;
         }
         // Both halves of the gain: `Playback` is what the memory tier's read
         // scales by, the source's own cell what the disk tier's does.
@@ -505,12 +520,12 @@ fn apply_steering<F: SamplerFloat>(voice: &mut Voice<F>, was: &Steering, now: &S
     {
         source.play();
     }
-    if now.speed != was.speed
-        && let Some(speed) = now.speed
-    {
-        voice.source.apply_speed(speed);
-        voice.play.speed = speed;
-    }
+}
+
+/// Applies a speed: the source's, and the record the voice keeps of it.
+fn apply_speed<F: SamplerFloat>(voice: &mut Voice<F>, speed: PlaybackRate) {
+    voice.source.apply_speed(speed);
+    voice.play.speed = speed;
 }
 
 /// A voice node's fork source: see "Forks" on [`VoiceNode`].
@@ -524,10 +539,11 @@ struct VoiceNodeFork<F: SamplerFloat> {
     /// The live node's steering cell, read with `current` when a fork is
     /// taken (an owning read on the control side, never a lend).
     steering: SteeringCell,
-    /// The live node's window, loop and direction cells, read the same way.
+    /// The live node's window, loop, direction and speed cells, read the same way.
     window: Publisher<Option<VoiceWindow>>,
     looping: SteerCell<Option<Loop>>,
     direction: SteerCell<Direction>,
+    speed: Publisher<PlaybackRate>,
     /// The node's params: a fork starts from the gain cell, which holds the
     /// gain last set (a modulation lane sends its composite to the
     /// port and never writes the cell).
@@ -546,6 +562,7 @@ impl<F: SamplerFloat> ForkSource<F> for VoiceNodeFork<F> {
         voice.source.apply_window(*self.window.current());
         apply_loop(&mut voice, *self.looping.current());
         voice.play.direction = *self.direction.current();
+        apply_speed(&mut voice, *self.speed.current());
         let gain = self
             .params
             .get(UnitParam::Volume)
@@ -576,6 +593,7 @@ impl<F: SamplerFloat> IntoNode<F> for VoiceNode<F> {
             window: handle.window.clone(),
             looping: handle.looping.clone(),
             direction: handle.direction.clone(),
+            speed: handle.speed.clone(),
             params: handle.params.clone(),
             tempo: node.tempo.clone(),
         };
@@ -617,6 +635,29 @@ mod tests {
         assert_eq!(handle.window.retired_len(), 1, "pinned until a scan");
         assert_eq!(tutti_rt::Reclaim::reclaim(&handle), 0);
         assert_eq!(handle.window.retired_len(), 0, "freed by the reclaim");
+    }
+
+    /// A speed the node held across the next publish is freed by the next
+    /// `reclaim`, with no further publish.
+    #[test]
+    fn reclaim_frees_a_speed_a_block_held_across_the_next() {
+        let wave = Arc::new(tutti_buffers::Wave::from_mono(
+            SampleRate::SR_48K,
+            Mono::new(&[0.0; 64]),
+        ));
+        let voice = Voice {
+            source: VoiceSource::Memory(MemorySource::new(wave).expect("a placeable wave")),
+            play: Playback::default(),
+        };
+        let (mut node, handle) = VoiceNode::new(voice).with_handle();
+        {
+            // A block in progress across the move.
+            let _held = node.speed.lend();
+            handle.speed_cell().publish(PlaybackRate::of(2.0));
+        }
+        assert_eq!(handle.speed.retired_len(), 1, "pinned until a scan");
+        assert_eq!(tutti_rt::Reclaim::reclaim(&handle), 0);
+        assert_eq!(handle.speed.retired_len(), 0, "freed by the reclaim");
     }
 
     /// **A node's ring-out follows what can still steer it.** A placed voice

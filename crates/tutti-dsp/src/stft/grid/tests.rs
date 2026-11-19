@@ -123,19 +123,19 @@ fn shape_agreement_is_checkable_before_elementwise_work() {
 #[test]
 fn whole_frames_fit_by_the_closed_form_and_a_zero_window_or_hop_fits_none() {
     assert_eq!(
-        FrameCount::fitting(Samples(9), Samples(4), Samples(2)),
+        FrameCount::fitting(Samples::new(9), Samples::new(4), Samples::new(2)),
         FrameCount(3)
     );
     assert_eq!(
-        FrameCount::fitting(Samples(3), Samples(4), Samples(2)),
+        FrameCount::fitting(Samples::new(3), Samples::new(4), Samples::new(2)),
         FrameCount(0)
     );
     assert_eq!(
-        FrameCount::fitting(Samples(9), Samples(4), Samples(0)),
+        FrameCount::fitting(Samples::new(9), Samples::new(4), Samples::new(0)),
         FrameCount(0)
     );
     assert_eq!(
-        FrameCount::fitting(Samples(9), Samples(0), Samples(2)),
+        FrameCount::fitting(Samples::new(9), Samples::new(0), Samples::new(2)),
         FrameCount(0)
     );
 }

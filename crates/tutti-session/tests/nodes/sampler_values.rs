@@ -1,7 +1,7 @@
 //! A sampler voice's steering values written with the session's verbs: its
-//! window (`clip.window()`), loop (`clip.looping()`) and direction
-//! (`clip.direction()`) are staged at `set` and published by the next
-//! `update()`.
+//! window (`clip.window()`), loop (`clip.looping()`), direction
+//! (`clip.direction()`) and speed (`clip.speed()`) are staged at `set` and
+//! published by the next `update()`.
 
 use tutti_buffers::{ChannelLayout, Interleaved, InterleavedMut, Wave};
 use tutti_graph::NodeKey;
@@ -698,4 +698,170 @@ fn a_direction_turned_mid_play_on_a_free_running_voice_jumps_to_the_mirrored_fra
     let _ = rig.s.update();
     let reversed = rig.render(2_048);
     assert_source(&reversed, 1_024, 1_024, |f| LEN - 1 - f);
+}
+
+fn rate(x: f64) -> tutti_units::PlaybackRate {
+    tutti_units::PlaybackRate::of(x)
+}
+
+/// **A speed set is pending until the update, and then the voice reads every
+/// second source frame**, in either tier: speed 2 is written before any block.
+/// A read answers it while the node's cell holds unity; after the update the
+/// cell holds it, and output frame `f` is exactly source frame `2f`, from the
+/// first block on (the streamer's ring is read by position, so the streamed
+/// voice's node hands the rate on to the stream's playback cells and the
+/// streamer fetches ahead at it between blocks).
+fn a_speed_set_reads_every_second_frame(streamed: bool) {
+    let mut rig = Rig::new(streamed);
+    rig.s.set(rig.clip.speed().to(rate(2.0))).unwrap();
+    assert_eq!(rig.s.get(rig.clip.speed()).unwrap(), rate(2.0));
+    assert_eq!(
+        *rig.handle.speed_cell().current(),
+        tutti_units::PlaybackRate::UNITY,
+        "pending"
+    );
+    let _ = rig.s.update();
+    assert_eq!(*rig.handle.speed_cell().current(), rate(2.0));
+    rig.settle();
+    let out = rig.render(LEN / 2);
+    for (f, &got) in out.iter().enumerate() {
+        assert_eq!(got.to_bits(), ramp(2 * f).to_bits(), "frame {f}");
+    }
+}
+
+#[test]
+fn a_speed_set_lands_at_the_update_and_a_resident_voice_reads_every_second_frame() {
+    a_speed_set_reads_every_second_frame(false);
+}
+
+#[test]
+fn a_speed_set_lands_at_the_update_and_a_streamed_voice_reads_every_second_frame() {
+    a_speed_set_reads_every_second_frame(true);
+}
+
+/// **Two speeds written before an update publish once, and the second wins**:
+/// the cell's `seq` moves by one and holds the second; a speed written back to
+/// the one in force publishes nothing.
+#[test]
+fn two_speed_writes_before_an_update_publish_once_and_the_second_wins() {
+    let mut rig = Rig::new(false);
+    let cell = rig.handle.speed_cell().clone();
+    let before = cell.seq();
+    rig.s.set(rig.clip.speed().to(rate(2.0))).unwrap();
+    rig.s.set(rig.clip.speed().to(rate(0.5))).unwrap();
+    let _ = rig.s.update();
+    assert_eq!(*cell.current(), rate(0.5));
+    assert_eq!(cell.seq(), before + 1);
+    let _ = rig.s.update();
+    assert_eq!(cell.seq(), before + 1, "nothing pending");
+    rig.s.set(rig.clip.speed().to(rate(0.5))).unwrap();
+    let _ = rig.s.update();
+    assert_eq!(
+        cell.seq(),
+        before + 1,
+        "the rate in force publishes nothing"
+    );
+}
+
+/// **A speed written to a node removed before the update never publishes**:
+/// the node's cell keeps the speed it had through the updates after, and the
+/// target is gone.
+#[test]
+fn a_pending_speed_write_to_a_removed_node_never_publishes() {
+    let mut rig = Rig::new(false);
+    let cell = rig.handle.speed_cell().clone();
+    let seq = cell.seq();
+    rig.s.set(rig.clip.speed().to(rate(2.0))).unwrap();
+    let clip = rig.clip;
+    rig.s.remove(clip).unwrap();
+    let _ = rig.s.update();
+    let _ = rig.s.update();
+    assert_eq!(cell.seq(), seq);
+    assert_eq!(*cell.current(), tutti_units::PlaybackRate::UNITY);
+    let err = rig
+        .s
+        .set(clip.speed().to(rate(2.0)))
+        .expect_err("the node is gone");
+    assert_eq!(err.kind, ValueErrorKind::NoSuchTarget);
+    assert_eq!(
+        rig.s.get(clip.speed()).expect_err("gone").kind,
+        ValueErrorKind::NoSuchTarget
+    );
+}
+
+/// **A block that adopts a written speed allocates nothing.**
+#[test]
+fn a_block_adopting_a_written_speed_does_not_allocate() {
+    let mut rig = Rig::new(false);
+    let _ = rig.render(1_024);
+    rig.s.set(rig.clip.speed().to(rate(2.0))).unwrap();
+    let _ = rig.s.update();
+    let mut buf = vec![0.0f32; BLOCK * 2];
+    assert_no_alloc::assert_no_alloc(|| {
+        for _ in 0..4 {
+            rig.s
+                .render(&mut InterleavedMut::new(&mut buf, ChannelLayout::STEREO).unwrap());
+        }
+    });
+    // The speed was adopted (the voice is placed, so a frame is read at the
+    // transport's position times the speed): the last block's first frame is frame 2 560 of
+    // the voice, which reads source frame 5 120.
+    assert_eq!(buf[0].to_bits(), ramp(2 * 2_560).to_bits());
+}
+
+/// **A speed set mid-play on a placed voice reads every second frame from the
+/// update on**, in either tier: the voice plays at unity for two blocks (so
+/// output frame `f` is source frame `f`), then speed 2 is written and
+/// published, and a placed voice reads the source at the transport's position
+/// times the speed, so output frame `f` is source frame `2f`. A resident voice
+/// takes it from the next block; a streamed one from [`landing`] on.
+fn a_speed_set_mid_play_reads_every_second_frame(streamed: bool) {
+    const CHANGE: usize = 2 * BLOCK;
+    let mut rig = Rig::new(streamed);
+    let before = rig.render(CHANGE);
+    assert_source(&before, 0, 0, |f| f);
+    rig.s.set(rig.clip.speed().to(rate(2.0))).unwrap();
+    let _ = rig.s.update();
+    rig.settle();
+    let after = rig.render(LEN / 2 - CHANGE);
+    let from = CHANGE + landing(streamed);
+    assert_source(&after, CHANGE, from, |f| 2 * f);
+    assert!(
+        LEN / 2 - from > 1_000,
+        "the check hears {} frames",
+        LEN / 2 - from
+    );
+}
+
+#[test]
+fn a_speed_set_mid_play_reads_a_resident_placed_voice_at_twice_the_position() {
+    a_speed_set_mid_play_reads_every_second_frame(false);
+}
+
+#[test]
+fn a_speed_set_mid_play_reads_a_streamed_placed_voice_at_twice_the_position() {
+    a_speed_set_mid_play_reads_every_second_frame(true);
+}
+
+/// **A speed set mid-play on a free-running voice continues from its cursor**:
+/// the voice plays 512 frames at unity (output frame `k` is source frame `k`,
+/// the cursor ending at 512), then speed 2 is published, and output frame
+/// `512 + k` is source frame `512 + 2k`: two source frames per output frame
+/// from the cursor, never a restart and never a jump.
+#[test]
+fn a_speed_set_mid_play_continues_a_free_running_voice_from_its_cursor() {
+    let mut s = offline();
+    let (clip, handle) = placed_ramp(&mut s);
+    s.set(clip.window().to(None)).unwrap();
+    let _ = s.update();
+    s.play().expect("room");
+    assert_eq!(handle.play(), Ok(()));
+    let mut got = left(&s, 512);
+    s.set(clip.speed().to(rate(2.0))).unwrap();
+    let _ = s.update();
+    got.extend(left(&s, 1_024));
+    for (f, &x) in got.iter().enumerate() {
+        let source = if f < 512 { f } else { 512 + 2 * (f - 512) };
+        assert_eq!(x.to_bits(), ramp_value(source).to_bits(), "frame {f}");
+    }
 }
