@@ -4,7 +4,7 @@
 //! winmm lists ports by position, names them by a product string, and moves
 //! MIDI 1.0 bytes: no UMP, no Endpoint discovery, no virtual ports, and no
 //! notification when a device comes or goes. This file and its siblings are
-//! the calls into it; what the backend decides (identity, packing, timestamps)
+//! the calls into it; what the backend decides (identity, SysEx, timestamps)
 //! is [`legacy_port`](super::legacy_port), which runs on every platform.
 //!
 //! - **Enumeration** names each port by the device interface path the driver
@@ -26,8 +26,8 @@
 //! - **Input** is a winmm callback on the driver's thread. A short message is
 //!   one MIDI 1.0 UMP (type 2 or type 1) and System Exclusive arrives as
 //!   SysEx7 packets; the ingest node widens the first as it does for any
-//!   MIDI 1.0 port. Each carries winmm's millisecond stamp since the port
-//!   started, placed on the `Instant` clock.
+//!   MIDI 1.0 port. Each carries its time since the port started, placed on
+//!   the `Instant` clock.
 //! - **Output** is a thread of its own: it holds each event until its time
 //!   (a high-resolution waitable timer; one already due goes at once) and
 //!   sends them in order, a SysEx message whole, waiting for the driver to

@@ -270,29 +270,6 @@ fn a_byte_port_is_listed_as_midi1_with_no_blocks_in_list_order() {
 // ---- bytes in -------------------------------------------------------------
 
 #[test]
-fn a_packed_note_on_is_the_midi1_ump_of_its_bytes() {
-    // 0x90 0x3C 0x64, low byte first: MIDI 1.0 Channel Voice in type 2 (M2-104 7.3).
-    let ump = ByteIn::new().short(0x0064_3C90).unwrap();
-    assert_eq!(ump.0, [0x2090_3C64, 0, 0, 0]);
-}
-
-#[test]
-fn a_packed_program_change_has_one_data_byte_and_ignores_the_padding() {
-    let ump = ByteIn::new().short(0x7F00_0AC3).unwrap();
-    assert_eq!(ump.0[0], 0x20C3_0A00);
-}
-
-#[test]
-fn a_packed_real_time_status_is_a_system_message() {
-    assert_eq!(ByteIn::new().short(0xF8).unwrap().0[0], 0x10F8_0000);
-}
-
-#[test]
-fn a_packed_data_byte_with_no_status_is_nothing() {
-    assert_eq!(ByteIn::new().short(0x0000_0040), None);
-}
-
-#[test]
 fn a_sysex_split_across_two_buffers_is_one_sysex7_packet() {
     let mut input = ByteIn::new();
     assert_eq!(input.long(&[0xF0, 0x7E, 0x7F]).count(), 0, "not whole yet");
@@ -301,23 +278,14 @@ fn a_sysex_split_across_two_buffers_is_one_sysex7_packet() {
     assert_eq!(packets, [Ump([0x3004_7E7F, 0x0601_0000, 0, 0])]);
 }
 
-#[test]
-fn a_short_message_does_not_end_a_sysex_in_progress() {
-    let mut input = ByteIn::new();
-    assert_eq!(input.long(&[0xF0, 0x01]).count(), 0);
-    assert!(input.short(0xF8).is_some());
-    let packets: Vec<Ump> = input.long(&[0xF7]).collect();
-    assert_eq!(packets, [Ump([0x3001_0100, 0, 0, 0])]);
-}
-
 // ---- bytes out ------------------------------------------------------------
 
 fn sent(out: &mut ByteOut, ump: Ump) -> Vec<Vec<u8>> {
     let mut wire: Vec<Vec<u8>> = Vec::new();
     out.encode::<()>(ump, |w| {
         wire.push(match w {
-            Wire::Short(m) => m.to_le_bytes().to_vec(),
-            Wire::Long(b) => b.to_vec(),
+            Wire::Short(ump) => ump.words().iter().flat_map(|w| w.to_be_bytes()).collect(),
+            Wire::Long(message) => message.bytes().to_vec(),
         });
         Ok(())
     })
@@ -333,18 +301,21 @@ fn sysex(status: SysexStatus, data: &[u8]) -> Ump {
 }
 
 #[test]
-fn a_midi1_note_on_is_one_packed_short_message() {
+fn a_midi1_note_on_is_one_short_message() {
     let note_on = Ump([0x2090_3C64, 0, 0, 0]);
     assert_eq!(
         sent(&mut ByteOut::new(), note_on),
-        [vec![0x90, 0x3C, 0x64, 0]]
+        [vec![0x20, 0x90, 0x3C, 0x64]]
     );
 }
 
 #[test]
-fn a_midi1_program_change_packs_two_bytes() {
+fn a_midi1_program_change_is_one_short_message() {
     let program = Ump([0x20C3_0A00, 0, 0, 0]);
-    assert_eq!(sent(&mut ByteOut::new(), program), [vec![0xC3, 0x0A, 0, 0]]);
+    assert_eq!(
+        sent(&mut ByteOut::new(), program),
+        [vec![0x20, 0xC3, 0x0A, 0]]
+    );
 }
 
 #[test]
@@ -612,7 +583,10 @@ fn a_stopped_outbox_tells_the_sender_to_stop_before_anything_due() {
 fn a_stamp_is_that_long_after_the_start() {
     let start = Instant::now();
     let mut anchor = Anchor::new(start);
-    let at = anchor.arrival(250, start + Duration::from_millis(260));
+    let at = anchor.arrival(
+        Duration::from_millis(250),
+        start + Duration::from_millis(260),
+    );
     assert_eq!(at, start + Duration::from_millis(250));
 }
 
@@ -621,11 +595,11 @@ fn a_stamp_seen_before_it_is_due_arrives_when_it_was_seen_and_moves_the_start() 
     let start = Instant::now();
     let mut anchor = Anchor::new(start);
     let now = start + Duration::from_millis(100);
-    assert_eq!(anchor.arrival(500, now), now);
+    assert_eq!(anchor.arrival(Duration::from_millis(500), now), now);
     // The next event, 100 ms after that one by the stamps, is placed from the
     // moved start: seen 100 ms later, it arrived when it was seen.
     let later = now + Duration::from_millis(100);
-    assert_eq!(anchor.arrival(600, later), later);
+    assert_eq!(anchor.arrival(Duration::from_millis(600), later), later);
 }
 
 #[test]
@@ -633,9 +607,9 @@ fn a_stamp_more_than_a_second_old_re_anchors_to_now() {
     let start = Instant::now();
     let mut anchor = Anchor::new(start);
     let now = start + Duration::from_secs(5);
-    assert_eq!(anchor.arrival(100, now), now);
+    assert_eq!(anchor.arrival(Duration::from_millis(100), now), now);
     let next = now + Duration::from_millis(40);
-    assert_eq!(anchor.arrival(140, next), next);
+    assert_eq!(anchor.arrival(Duration::from_millis(140), next), next);
 }
 
 // ---- the poll watch -------------------------------------------------------

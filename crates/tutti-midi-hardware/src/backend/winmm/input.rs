@@ -56,13 +56,9 @@ pub(super) fn open(port: &InputPort, mut producer: InputProducerHandle) -> Resul
         guard.run(|| {
             let seen = Instant::now();
             match event {
-                Event::Short { message, millis } => {
-                    if let Some(ump) = bytes.short(message) {
-                        push(ump, anchor.arrival(millis, seen));
-                    }
-                }
-                Event::Long { data, millis } => {
-                    let at = anchor.arrival(millis, seen);
+                Event::Short { ump, at } => push(ump, anchor.arrival(at, seen)),
+                Event::Long { data, at } => {
+                    let at = anchor.arrival(at, seen);
                     for ump in bytes.long(data) {
                         push(ump, at);
                     }

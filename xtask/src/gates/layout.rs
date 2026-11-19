@@ -112,7 +112,7 @@ const ONLY: &[(&str, &[&str])] = &[
     // The OS edges: the UMP types for what the spec defines, nothing else.
     ("tutti-alsa-ffi", &["tutti-ump"]),
     ("tutti-coremidi-ffi", &["tutti-ump"]),
-    ("tutti-winmm-ffi", &[]),
+    ("tutti-winmm-ffi", &["tutti-ump"]),
     ("tutti-ump", &["tutti-units"]),
     // The unit vocabulary a `Gauge<U>` and a `Param<U>` hold (`Reading` for a `Unit`), the
     // channel layout a position ring is written in and the `Sample` formats the
