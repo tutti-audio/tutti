@@ -71,6 +71,9 @@
 //! - [`parker()`], [`Unparker`] and [`Parker`] — wake one parked thread from
 //!   the audio thread (a futex wake only if the parker is parked), with no
 //!   wake-up lost between the parker's check and its park.
+//! - [`Bells`], [`Bell`] and [`Listener`] — carry an audio-thread ring to a
+//!   future's `Waker` through one control-side tick (a thread where one can
+//!   start, `Bells::tick` where not), the audio thread never touching the waker.
 //! - [`RenderCount`] — the renders of one thing in flight, and a `quiescent`
 //!   check so a thread that cleared what they read frees only when none can
 //!   still read it.
@@ -167,6 +170,7 @@ mod parker;
 // `id!` is `#[macro_export]`ed: the one way any crate writes an id, used as
 // `tutti_rt::id!`.
 mod atomic_cell;
+mod bells;
 mod id;
 mod job_gate;
 mod last_out;
@@ -192,6 +196,9 @@ mod vec;
 
 pub use atomic_cell::{AtomicCell, AtomicWord};
 pub use atomic_rate::{AtomicSampleRate, PendingSampleRate};
+#[cfg(loom)]
+pub use bells::Ticker;
+pub use bells::{Bell, Bells, Listener};
 pub use capped_vec::CappedVec;
 pub use cell::{AudioThreadCell, BorrowGuard, BorrowRef};
 pub use claim_lock::{Claim, ClaimGuard};
