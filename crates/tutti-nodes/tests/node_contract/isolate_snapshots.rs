@@ -46,12 +46,12 @@ fn compressor() {
             BusTopology::STEREO,
             KeySource::Sidechain,
             CompressorControls {
-                threshold: Db(-20.0),
-                knee: Db(3.0),
+                threshold: Db::new(-20.0),
+                knee: Db::new(3.0),
                 ratio: CompressionRatio::new(4.0),
-                attack: Seconds(0.005),
-                release: Seconds(0.05),
-                makeup: Db(2.0),
+                attack: Seconds::new(0.005),
+                release: Seconds::new(0.05),
+                makeup: Db::new(2.0),
                 ..CompressorControls::DEFAULT
             },
         )
@@ -84,11 +84,11 @@ fn gate() {
             BusTopology::STEREO,
             KeySource::Sidechain,
             GateControls {
-                threshold: Db(-15.0),
-                attack: Seconds(0.001),
-                hold: Seconds(0.005),
-                release: Seconds(0.02),
-                range: Db(-40.0),
+                threshold: Db::new(-15.0),
+                attack: Seconds::new(0.001),
+                hold: Seconds::new(0.005),
+                release: Seconds::new(0.02),
+                range: Db::new(-40.0),
                 ..GateControls::DEFAULT
             },
         )
@@ -115,8 +115,8 @@ fn gate() {
 fn limiter() {
     IsolateRow::new("LimiterNode (stereo)", || {
         LimiterNode::<f32>::stereo(LimiterControls {
-            threshold: Db(-6.0),
-            ceiling: Db(-3.0),
+            threshold: Db::new(-6.0),
+            ceiling: Db::new(-3.0),
             ..LimiterControls::DEFAULT
         })
     })
@@ -135,7 +135,7 @@ fn limiter() {
 #[test]
 fn brickwall_limiter() {
     IsolateRow::new("BrickwallLimiterNode (stereo)", || {
-        BrickwallLimiterNode::<f32>::new(Db(-3.0))
+        BrickwallLimiterNode::<f32>::new(Db::new(-3.0))
     })
     .control("ceiling", |l| {
         assert!(l.param_set().set(UnitParam::Ceiling, -9.0));
@@ -148,15 +148,15 @@ fn delay_line() {
     IsolateRow::new("DelayNode (stereo, ping-pong)", || {
         let layout = DelayLayout::new(
             BusTopology::STEREO,
-            MaxDelay::of(Seconds(1.0)),
+            MaxDelay::of(Seconds::new(1.0)),
             InterpolationMode::Linear,
         )
-        .with_times(ChannelTimes::each(&[Seconds(0.07)]).unwrap())
+        .with_times(ChannelTimes::each(&[Seconds::new(0.07)]).unwrap())
         .unwrap();
         DelayNode::<f32>::from_layout(
             layout,
             DelayControls {
-                time: Seconds(0.05),
+                time: Seconds::new(0.05),
                 feedback: Feedback::new(0.5_f64),
                 cross_feedback: Feedback::new(0.3_f64),
             },
@@ -177,7 +177,7 @@ fn delay_line() {
 #[test]
 fn distortion() {
     IsolateRow::new("DistortionNode (stereo)", || {
-        DistortionNode::<f32>::new(ShapeKind::Tanh, Drive(2.0))
+        DistortionNode::<f32>::new(ShapeKind::Tanh, Drive::new(2.0))
     })
     .control("drive", |d| {
         assert!(d.param_set().set(UnitParam::Drive, 8.0))
@@ -202,7 +202,7 @@ fn bit_crusher() {
 #[test]
 fn stereo_width() {
     IsolateRow::new("StereoWidthNode", || {
-        StereoWidthNode::<f32>::from(StereoWidthConfig::new().width(StereoWidth(1.5)))
+        StereoWidthNode::<f32>::from(StereoWidthConfig::new().width(StereoWidth::new(1.5)))
     })
     .control("width", |w| {
         assert!(w.param_set().set(UnitParam::StereoWidth, 0.25))
@@ -240,9 +240,9 @@ fn bell_filter() {
     IsolateRow::new("BellFilterNode (stereo)", || {
         BellFilterNode::from(BellFilterConfig::new(
             ChannelLayout::STEREO,
-            Hz(2_000.0),
-            Q(2.0),
-            Db(6.0),
+            Hz::new(2_000.0),
+            Q::new(2.0),
+            Db::new(6.0),
         ))
     })
     .control("gain", |d| {
@@ -256,8 +256,8 @@ fn tilt_filter() {
     IsolateRow::new("TiltFilterNode (stereo)", || {
         TiltFilterNode::from(TiltFilterConfig::new(
             ChannelLayout::STEREO,
-            Hz(1_000.0),
-            Db(6.0),
+            Hz::new(1_000.0),
+            Db::new(6.0),
         ))
     })
     .control("gain", |d| {
@@ -270,7 +270,8 @@ fn tilt_filter() {
 fn dynamic_eq() {
     IsolateRow::new("DynamicEqNode<f32> (stereo, side-chain)", || {
         DynamicEqNode::<f32>::from(
-            DynamicEqConfig::de_esser(ChannelLayout::STEREO, Hz(6_000.0)).key(KeySource::Sidechain),
+            DynamicEqConfig::de_esser(ChannelLayout::STEREO, Hz::new(6_000.0))
+                .key(KeySource::Sidechain),
         )
     })
     .control("threshold", |d| {
@@ -301,8 +302,8 @@ fn cut_filter() {
 fn envelope_filter() {
     IsolateRow::new("EnvelopeFilterNode<f32> (stereo)", || {
         EnvelopeFilterNode::<f32>::from(
-            EnvelopeFilterConfig::new(ChannelLayout::STEREO, Hz(500.0), SvfType::LowPass)
-                .depth(Semitones(24.0)),
+            EnvelopeFilterConfig::new(ChannelLayout::STEREO, Hz::new(500.0), SvfType::LowPass)
+                .depth(Semitones::new(24.0)),
         )
     })
     .control("base", |d| {
@@ -320,8 +321,8 @@ fn transient_shaper() {
     IsolateRow::new("TransientShaperNode<f32> (stereo)", || {
         TransientShaperNode::<f32>::from(
             TransientShaperConfig::new(ChannelLayout::STEREO)
-                .attack(Db(6.0))
-                .sustain(Db(-3.0)),
+                .attack(Db::new(6.0))
+                .sustain(Db::new(-3.0)),
         )
     })
     .control("attack", |d| {
@@ -362,7 +363,7 @@ fn ring_mod() {
 fn lfo() {
     IsolateRow::new("LfoNode (sine, 3 Hz)", || {
         LfoNode::new(LfoShape::Sine)
-            .with_rate(Hz(3.0))
+            .with_rate(Hz::new(3.0))
             .with_depth(Depth::clamped(0.8))
     })
     .control("rate", |l| {
@@ -413,7 +414,7 @@ fn phaser() {
 #[test]
 fn plate_reverb() {
     IsolateRow::new("PlateReverbNode", || {
-        PlateReverbNode::<f32>::from(PlateReverbConfig::new().decay(Seconds(1.0)))
+        PlateReverbNode::<f32>::from(PlateReverbConfig::new().decay(Seconds::new(1.0)))
     })
     .control("decay", |p| {
         assert!(p.param_set().set(UnitParam::Decay, 6.0))
@@ -439,7 +440,11 @@ fn plate_reverb() {
 #[test]
 fn ladder() {
     IsolateRow::new("LadderFilterNode (LP12)", || {
-        LadderFilterNode::<f32>::new(LadderType::LP12, Hz(1_000.0), Resonance::new_clamped(0.3))
+        LadderFilterNode::<f32>::new(
+            LadderType::LP12,
+            Hz::new(1_000.0),
+            Resonance::new_clamped(0.3),
+        )
     })
     .control("cutoff", |l| {
         assert!(l.param_set().set(UnitParam::Cutoff, 3_000.0));
@@ -463,9 +468,9 @@ fn svf() {
         ChannelLayout::MONO,
         SvfControls {
             ty: SvfType::Bell,
-            freq: Hz(1_000.0),
-            q: Q(0.7),
-            gain: Db(6.0),
+            freq: Hz::new(1_000.0),
+            q: Q::new(0.7),
+            gain: Db::new(6.0),
         },
     ));
 }
@@ -474,16 +479,16 @@ fn svf() {
 fn eq_band() {
     tutti_graph::contract::assert_param_fork(EqBandNode::<f32>::new(
         SvfType::Bell,
-        Hz(1_000.0),
-        Q(0.7),
-        Db(6.0),
+        Hz::new(1_000.0),
+        Q::new(0.7),
+        Db::new(6.0),
     ));
 }
 
 #[test]
 fn bus_strip() {
     IsolateRow::new("BusStripNode (stereo)", BusStripNode::stereo)
-        .control("volume", |s| s.set_volume(Amplitude(0.5)))
+        .control("volume", |s| s.set_volume(Amplitude::new(0.5)))
         .control("balance", |s| {
             assert!(ParamNode::<f32>::param_set(s).set(UnitParam::Balance, -0.7))
         })
@@ -501,8 +506,8 @@ fn convolver() {
         })
         .collect();
     IsolateRow::new("ConvolverNode (mono)", move || {
-        ConvolverNode::new(Mono::new(&ir), Samples(64))
+        ConvolverNode::new(Mono::new(&ir), Samples::new(64))
     })
-    .control("gain", |c| c.set_gain(Amplitude(0.3)))
+    .control("gain", |c| c.set_gain(Amplitude::new(0.3)))
     .check();
 }

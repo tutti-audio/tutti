@@ -49,7 +49,7 @@ fn gate<N: IntoNode>(node: N, mut between: impl FnMut(&N::Controls, usize)) {
 fn crossover_node_process_is_allocation_free() {
     let node = CrossoverNode::<f32>::new(
         ChannelLayout::STEREO,
-        &[Hz(120.0), Hz(1_000.0), Hz(6_000.0)],
+        &[Hz::new(120.0), Hz::new(1_000.0), Hz::new(6_000.0)],
     )
     .unwrap();
     gate(node, |_, _| {});
@@ -57,7 +57,9 @@ fn crossover_node_process_is_allocation_free() {
 
 #[test]
 fn crossover_node_with_a_moving_frequency_is_allocation_free() {
-    let node = CrossoverNode::<f32>::new(ChannelLayout::STEREO, &[Hz(200.0), Hz(3_000.0)]).unwrap();
+    let node =
+        CrossoverNode::<f32>::new(ChannelLayout::STEREO, &[Hz::new(200.0), Hz::new(3_000.0)])
+            .unwrap();
     let mut hz = 200.0f32;
     gate(node, move |controls, _| {
         hz = if hz > 2_000.0 { 200.0 } else { hz + 3.0 };

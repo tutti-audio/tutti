@@ -251,7 +251,7 @@ fn vbap_every_bed_under_hostile_cells_and_lanes_is_allocation_free_finite_and_bo
                         [step / 131 % 3];
                     rig.node
                         .0
-                        .prepare(&Prepare::new(rate, MaxBlock::of(Samples(FRAMES))));
+                        .prepare(&Prepare::new(rate, MaxBlock::of(Samples::new(FRAMES))));
                 }
             });
             rig.block();
@@ -424,7 +424,7 @@ fn hrtf_binaural_same_rate_prepare_is_allocation_free() {
         HrtfBinauralNode::<f32>::new(&bytes, SampleRate::SR_48K).expect("synthetic sphere parses");
     let prepare = Prepare::new(
         SampleRate::SR_48K,
-        tutti_buffers::MaxBlock::of(tutti_units::Samples(256)),
+        tutti_buffers::MaxBlock::of(tutti_units::Samples::new(256)),
     );
     assert_no_alloc::assert_no_alloc(|| node.prepare(&prepare));
 }
@@ -445,11 +445,11 @@ fn hrtf_binaural_resampled_set_in_split_blocks_is_allocation_free() {
     aim(&node.param_set(), Azimuth::new(30.0), Elevation::new(0.0));
     node.prepare(&Prepare::new(
         SampleRate::SR_44K1,
-        MaxBlock::of(Samples(100)),
+        MaxBlock::of(Samples::new(100)),
     ));
     // 64 taps at 48 kHz are ceil(64 * 44 100 / 48 000) = 59 at 44.1 kHz:
     // the set was resampled, not reused.
-    assert_eq!(node.shape().tail, Tail::Finite(Samples(59 - 1)));
+    assert_eq!(node.shape().tail, Tail::Finite(Samples::new(59 - 1)));
 
     let (mut rig, _controls) = BlockRig::new(node, SampleRate::SR_44K1, 100);
     for c in rig.inputs_mut().iter_mut() {

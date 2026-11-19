@@ -262,7 +262,7 @@ impl BusStripNode {
     fn control_gains(&mut self, fed: (bool, bool)) -> StripGains {
         let volume = match fed.0 {
             true => Amplitude::UNITY,
-            false => Amplitude(self.good.read(self.volume.load().get())),
+            false => Amplitude::new(self.good.read(self.volume.load().get())),
         };
         let balance = match (fed.1, &self.balance) {
             (false, Some(cell)) => cell.load(),
@@ -575,7 +575,7 @@ mod tests {
     #[test]
     fn volume_scales_both_channels() {
         let mut s = BusStripNode::stereo();
-        s.set_volume(Amplitude(0.5));
+        s.set_volume(Amplitude::new(0.5));
         assert_eq!(tick2(&mut s, 1.0, 1.0), (0.5, 0.5));
     }
 
@@ -642,7 +642,7 @@ mod tests {
             ),
             (6, 6)
         );
-        s.set_volume(Amplitude(0.5));
+        s.set_volume(Amplitude::new(0.5));
         assert_eq!(
             Node::<f32>::param_base(&s, 0),
             Some(0.5),
@@ -680,7 +680,7 @@ mod tests {
     #[test]
     fn a_fed_volume_overrides_the_atomic() {
         let mut s = BusStripNode::stereo();
-        s.set_volume(Amplitude(1.0));
+        s.set_volume(Amplitude::new(1.0));
         let mut out = [0.0f32; 2];
         crate::test_support::tick_fed(&mut s, &[1.0, 1.0], &[Some(0.5)], &mut out);
         assert_eq!(out, [0.5, 0.5]);
@@ -692,7 +692,7 @@ mod tests {
     #[test]
     fn starting_a_feed_does_not_apply_the_gain_twice() {
         let mut s = BusStripNode::stereo();
-        s.set_volume(Amplitude(0.5));
+        s.set_volume(Amplitude::new(0.5));
         let x = [1.0f32; 16];
         let steady = drive(&mut s, RATE, Planes::new(&[&x, &x]).unwrap(), &[None, None]);
         assert!(steady[0].iter().all(|&y| y == 0.5));
@@ -718,7 +718,7 @@ mod tests {
     fn clone_shares_atomics() {
         let original = BusStripNode::stereo();
         let clone = original.clone();
-        clone.set_volume(Amplitude(0.1));
+        clone.set_volume(Amplitude::new(0.1));
         set_balance(&clone, 0.5);
         assert_eq!(original.volume().load().get(), 0.1);
         assert_eq!(original.balance().unwrap().load().get(), 0.5);
@@ -729,7 +729,7 @@ mod tests {
     #[test]
     fn extra_channels_are_faded_but_not_balanced() {
         let mut s = BusStripNode::new(lcr());
-        s.set_volume(Amplitude(0.5));
+        s.set_volume(Amplitude::new(0.5));
         set_balance(&s, -1.0);
         let mut out = [0.0f32; 3];
         tick(&mut s, &[1.0, 1.0, 1.0], &mut out);
@@ -743,7 +743,7 @@ mod tests {
     #[test]
     fn a_block_matches_its_frames() {
         let mut framed = BusStripNode::stereo();
-        framed.set_volume(Amplitude(0.6));
+        framed.set_volume(Amplitude::new(0.6));
         set_balance(&framed, 0.25);
         let mut block = ParamNode::<f32>::fork_fresh(&framed);
 
@@ -796,7 +796,7 @@ mod tests {
         let ones = vec![F::ONE; N];
         let steady: Vec<Vec<F>> = drive(&mut s, RATE, Planes::new(&[&ones]).unwrap(), &[]);
         assert!(steady[0].iter().all(|&v| v == F::ONE));
-        s.set_volume(Amplitude(0.25));
+        s.set_volume(Amplitude::new(0.25));
         let out = drive(&mut s, RATE, Planes::new(&[&ones]).unwrap(), &[]);
         let mut worst = 0.0f64;
         for (i, &y) in out[0].iter().enumerate() {
@@ -842,7 +842,7 @@ mod tests {
         let steady = process_dc(&mut s, BLOCK, 1.0, 1.0);
         assert!(steady.iter().all(|f| *f == [1.0, 1.0]));
 
-        s.set_volume(Amplitude(0.0));
+        s.set_volume(Amplitude::new(0.0));
         let fading = process_dc(&mut s, BLOCK, 1.0, 1.0);
         let mut seam = vec![*steady.last().unwrap()];
         seam.extend_from_slice(&fading);
@@ -862,7 +862,7 @@ mod tests {
             "silent from the next block on"
         );
 
-        s.set_volume(Amplitude(1.0));
+        s.set_volume(Amplitude::new(1.0));
         let rising = process_dc(&mut s, BLOCK, 1.0, 1.0);
         let mut seam = vec![*silent.last().unwrap()];
         seam.extend_from_slice(&rising);
@@ -883,7 +883,7 @@ mod tests {
         let mut s = BusStripNode::stereo();
         let _ = process_dc(&mut s, BLOCK, 1.0, 1.0);
 
-        s.set_volume(Amplitude(0.5));
+        s.set_volume(Amplitude::new(0.5));
         let ramp = process_dc(&mut s, BLOCK, 1.0, 1.0);
         let first = ramp[0][0];
         assert!(
@@ -906,7 +906,7 @@ mod tests {
     #[test]
     fn a_fresh_or_reset_strip_starts_at_its_target() {
         let mut s = BusStripNode::stereo();
-        s.set_volume(Amplitude(0.0));
+        s.set_volume(Amplitude::new(0.0));
         assert!(
             process_dc(&mut s, 16, 1.0, 1.0)
                 .iter()
@@ -914,7 +914,7 @@ mod tests {
         );
 
         Node::<f32>::reset(&mut s);
-        s.set_volume(Amplitude(0.25));
+        s.set_volume(Amplitude::new(0.25));
         assert!(
             process_dc(&mut s, 16, 1.0, 1.0)
                 .iter()
@@ -938,7 +938,7 @@ mod tests {
             Planes::new(&[&ones, &ones, &ones]).unwrap(),
             &[],
         );
-        s.set_volume(Amplitude(0.5));
+        s.set_volume(Amplitude::new(0.5));
         let out = drive(
             &mut s,
             RATE,
@@ -976,7 +976,7 @@ mod tests {
             Planes::new(&[&ones, &ones, &ones]).unwrap(),
             &fed,
         );
-        s.set_volume(Amplitude(0.5));
+        s.set_volume(Amplitude::new(0.5));
         let out = drive(
             &mut s,
             RATE,
@@ -1002,7 +1002,7 @@ mod tests {
     /// `volume`, read back by the speaker each channel feeds.
     fn gain_by_speaker(topology: BusTopology, balance: f64, volume: f64) -> Vec<(Speaker, f32)> {
         let mut s = BusStripNode::new(topology);
-        s.set_volume(Amplitude(volume));
+        s.set_volume(Amplitude::new(volume));
         set_balance(&s, balance);
         let n = topology.layout().count() as usize;
         let mut out = vec![0.0f32; n];
@@ -1029,10 +1029,10 @@ mod tests {
     #[test]
     fn a_stereo_strip_is_input_times_balance_law_times_volume() {
         for balance in [-1.0f64, -0.5, 0.0, 0.5, 1.0] {
-            let (gl, gr) = Balance(balance).gains();
+            let (gl, gr) = Balance::new(balance).gains();
             let volume = 0.5f64;
             let mut s = BusStripNode::stereo();
-            s.set_volume(Amplitude(volume));
+            s.set_volume(Amplitude::new(volume));
             set_balance(&s, balance);
             let (l, r) = tick2(&mut s, 0.75, -0.25);
             // The samples are `f32`: each gain narrows into the product.
@@ -1117,7 +1117,7 @@ mod tests {
         for bus in pairless_buses() {
             let n = bus.layout().count() as usize;
             let mut s = BusStripNode::new(bus);
-            s.set_volume(Amplitude(0.5));
+            s.set_volume(Amplitude::new(0.5));
             assert!(
                 !set_param(&s, UnitParam::Balance, -1.0),
                 "{bus:?} refuses the param"

@@ -50,8 +50,8 @@ fn panner(k: u64) -> VbapPannerNode<f32> {
     let node = VbapPannerNode::<f32>::stereo();
     aim(
         &node.param_set(),
-        Azimuth(-30.0 + 4.0 * k as f64),
-        Elevation(0.0),
+        Azimuth::new(-30.0 + 4.0 * k as f64),
+        Elevation::new(0.0),
     );
     node
 }
@@ -70,7 +70,7 @@ fn wire(ed: &mut Editor, to: NodeKey, port: u16, from: Source) {
 fn graph(workers: usize, declared: bool) -> Executor {
     let (mut ed, mut exec) = Editor::new(Prepare::new(
         SampleRate::of(SR),
-        MaxBlock::of(Samples(MAX_BLOCK)),
+        MaxBlock::of(Samples::new(MAX_BLOCK)),
     ));
     if workers > 1 {
         exec.set_pool(Some(Arc::new(
@@ -124,7 +124,7 @@ fn render(exec: &mut Executor) -> Vec<Vec<f32>> {
         let mut chunk = vec![vec![0.0f32; n]; 2];
         {
             let mut outs: Vec<&mut [f32]> = chunk.iter_mut().map(Vec::as_mut_slice).collect();
-            let t = TransportPosition::new(true, Bpm::of(120.0), Beat(0.0), None);
+            let t = TransportPosition::new(true, Bpm::of(120.0), Beat::new(0.0), None);
             exec.process(n, &t, &ins, &mut outs);
         }
         for (a, c) in all.iter_mut().zip(chunk) {
@@ -169,7 +169,7 @@ fn moderate_panners_pack_and_render_bit_identically() {
     // From a one-frame block: every ragged block below is spread, so the
     // comparison is never a serial walk against itself.
     assert!(
-        matches!(plan.schedule(4), Schedule::Parallel { from, .. } if from == Samples(1)),
+        matches!(plan.schedule(4), Schedule::Parallel { from, .. } if from == Samples::new(1)),
         "{:?}",
         plan.schedule(4)
     );

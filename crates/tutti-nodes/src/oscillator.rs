@@ -181,7 +181,7 @@ impl<F: Float> Node<F> for OscillatorNode {
         // A frequency and a level that hold are read, and cross into `F`, once per block; a
         // lane's value replaces them at each frame.
         let mut step = OscillatorStep::<F>::new(
-            Hz(if frequency.is_none() {
+            Hz::new(if frequency.is_none() {
                 self.good_frequency.read(frequency_cell)
             } else {
                 0.0
@@ -189,14 +189,14 @@ impl<F: Float> Node<F> for OscillatorNode {
             rate,
         );
         let mut gain = if level.is_none() {
-            F::from_unit(Amplitude(self.good_level.read(level_cell)))
+            F::from_unit(Amplitude::new(self.good_level.read(level_cell)))
         } else {
             F::ZERO
         };
         for (i, o) in out[..size].iter_mut().enumerate() {
             if let Some(lane) = frequency {
                 let f = self.good_frequency.read(lane[i].into());
-                step = OscillatorStep::new(Hz(f), rate);
+                step = OscillatorStep::new(Hz::new(f), rate);
             }
             if let Some(lane) = level {
                 // A finite lane value is the level in `F` as it is.
@@ -204,7 +204,7 @@ impl<F: Float> Node<F> for OscillatorNode {
                 gain = if lane[i].is_finite() {
                     lane[i]
                 } else {
-                    F::from_unit(Amplitude(good))
+                    F::from_unit(Amplitude::new(good))
                 };
             }
             *o = self.wave.step(step) * gain;
@@ -262,12 +262,12 @@ mod tests {
 
     #[test]
     fn a_fork_shares_no_cell() {
-        assert_param_fork(OscillatorNode::saw(Hz(220.0)));
+        assert_param_fork(OscillatorNode::saw(Hz::new(220.0)));
     }
 
     #[test]
     fn the_shape_is_a_mono_source_declaring_frequency_then_level() {
-        let node = OscillatorNode::sine(Hz(440.0)).with_level(Amplitude(0.25));
+        let node = OscillatorNode::sine(Hz::new(440.0)).with_level(Amplitude::new(0.25));
         let shape = Node::<f32>::shape(&node);
         assert_eq!(shape.audio_in().count(), 0);
         assert_eq!(shape.audio_out().count(), 1);
@@ -281,7 +281,7 @@ mod tests {
 
     #[test]
     fn the_sine_is_sin_two_pi_f_t_at_the_graph_rate() {
-        let out = render(OscillatorNode::sine(Hz(440.0)), 1_000);
+        let out = render(OscillatorNode::sine(Hz::new(440.0)), 1_000);
         for (n, &y) in out.iter().enumerate() {
             let exact = libm::sin(2.0 * core::f64::consts::PI * 440.0 * n as f64 / 48_000.0);
             assert!((f64::from(y) - exact).abs() < 1e-6, "sample {n}");
@@ -290,9 +290,9 @@ mod tests {
 
     #[test]
     fn level_scales_the_output_exactly() {
-        let full = render(OscillatorNode::saw(Hz(997.0)), 512);
+        let full = render(OscillatorNode::saw(Hz::new(997.0)), 512);
         let half = render(
-            OscillatorNode::saw(Hz(997.0)).with_level(Amplitude(0.5)),
+            OscillatorNode::saw(Hz::new(997.0)).with_level(Amplitude::new(0.5)),
             512,
         );
         for (a, b) in full.iter().zip(&half) {
@@ -303,8 +303,8 @@ mod tests {
     #[test]
     fn a_square_and_a_saw_have_no_dc_over_whole_periods() {
         for node in [
-            OscillatorNode::square(Hz(1_000.0)),
-            OscillatorNode::saw(Hz(1_000.0)),
+            OscillatorNode::square(Hz::new(1_000.0)),
+            OscillatorNode::saw(Hz::new(1_000.0)),
         ] {
             let out = render(node, 48 * 20);
             assert!(mean(&out).abs() < 1e-6);
@@ -313,7 +313,7 @@ mod tests {
 
     #[test]
     fn a_square_peaks_at_plus_and_minus_one() {
-        let out = render(OscillatorNode::square(Hz(1_000.0)), 48);
+        let out = render(OscillatorNode::square(Hz::new(1_000.0)), 48);
         let (hi, lo) = out
             .iter()
             .fold((f32::MIN, f32::MAX), |(h, l), &v| (h.max(v), l.min(v)));
@@ -327,13 +327,13 @@ mod tests {
     /// `2/(29 pi)`, each over 0.02; the band-limited one holds under 0.003.
     #[test]
     fn the_saw_does_not_alias_onto_a_non_harmonic_line() {
-        let out = render(OscillatorNode::saw(Hz(5_000.0)), 48 * 100);
+        let out = render(OscillatorNode::saw(Hz::new(5_000.0)), 48 * 100);
         assert!(amplitude_at(&out, 1_000.0, 48_000.0) < 0.003);
     }
 
     #[test]
     fn a_driven_frequency_changes_the_pitch_per_frame() {
-        let mut d = Direct::new(OscillatorNode::sine(Hz(1_000.0)), RATE, 96);
+        let mut d = Direct::new(OscillatorNode::sine(Hz::new(1_000.0)), RATE, 96);
         let lane: Vec<f32> = (0..96)
             .map(|i| if i < 48 { 1_000.0 } else { 2_000.0 })
             .collect();
@@ -354,14 +354,14 @@ mod tests {
         let mut lane = vec![1_000.0f32; 16];
         lane[8] = f32::NAN;
         lane[9] = f32::INFINITY;
-        let mut d = Direct::new(OscillatorNode::sine(Hz(500.0)), RATE, 16);
+        let mut d = Direct::new(OscillatorNode::sine(Hz::new(500.0)), RATE, 16);
         d.feed(0, Some(&lane));
         d.block();
         for (n, &y) in d.output().plane(0).iter().enumerate() {
             let exact = libm::sin(2.0 * core::f64::consts::PI * 1_000.0 * n as f64 / 48_000.0);
             assert!((f64::from(y) - exact).abs() < 1e-6, "sample {n}");
         }
-        let mut level = Direct::new(OscillatorNode::sine(Hz(1_000.0)), RATE, 4);
+        let mut level = Direct::new(OscillatorNode::sine(Hz::new(1_000.0)), RATE, 4);
         level.feed(1, Some(&[0.5, f32::NAN, f32::NEG_INFINITY, 0.5]));
         level.block();
         let held = level.output().plane(0).samples()[1];
@@ -378,7 +378,7 @@ mod tests {
 
     #[test]
     fn an_unprepared_node_renders_silence() {
-        let mut node = OscillatorNode::sine(Hz(440.0));
+        let mut node = OscillatorNode::sine(Hz::new(440.0));
         let ones = [1.0f32; 32];
         let out = drive::<f32>(&mut node, RATE, Planes::default(), &[None, Some(&ones)]);
         assert!(out[0].iter().all(|&v| v == 0.0));
@@ -386,7 +386,7 @@ mod tests {
 
     #[test]
     fn reset_restarts_the_cycle() {
-        let mut d = Direct::new(OscillatorNode::triangle(Hz(300.0)), RATE, 64);
+        let mut d = Direct::new(OscillatorNode::triangle(Hz::new(300.0)), RATE, 64);
         d.block();
         let first = d.output().plane(0).samples().to_vec();
         Node::<f32>::reset(&mut *d.node);
@@ -396,11 +396,11 @@ mod tests {
 
     #[test]
     fn a_set_frequency_is_heard_on_the_next_block() {
-        let node = OscillatorNode::sine(Hz(1_000.0));
+        let node = OscillatorNode::sine(Hz::new(1_000.0));
         let cell = node.frequency();
         let mut d = Direct::new(node, RATE, 48);
         d.block();
-        cell.store(Hz(2_000.0));
+        cell.store(Hz::new(2_000.0));
         d.block();
         let out = d.output().plane(0).samples();
         // 1 kHz filled one cycle, so the block starts at phase 0 and holds two
@@ -417,7 +417,8 @@ mod tests {
     fn in_an_f64_graph_the_saw_is_the_exact_ramp_of_its_cycle() {
         use crate::test_support::{F64_TOLERANCE, render_f64};
         let level = 1.0 / 3.0;
-        let node = OscillatorNode::saw(Hz(RATE.get() / 64.0)).with_level(Amplitude(level));
+        let node =
+            OscillatorNode::saw(Hz::new(RATE.get() / 64.0)).with_level(Amplitude::new(level));
         let out = render_f64(node, RATE, &[], 128);
         for k in 2..62 {
             let want = level * (k as f64 / 32.0 - 1.0);

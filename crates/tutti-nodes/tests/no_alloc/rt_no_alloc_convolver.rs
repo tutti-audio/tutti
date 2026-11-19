@@ -31,7 +31,7 @@ fn nodes(len: usize) -> Vec<(String, ConvolverNode<f32>)> {
         let refs: Vec<Mono<'_, f32>> = irs.iter().map(|ir| Mono::new(ir)).collect();
         all.push((
             format!("per channel x{width}"),
-            ConvolverNode::<f32>::per_channel(&refs, Samples(32)).unwrap(),
+            ConvolverNode::<f32>::per_channel(&refs, Samples::new(32)).unwrap(),
         ));
     }
     let four = irs(4);
@@ -42,7 +42,7 @@ fn nodes(len: usize) -> Vec<(String, ConvolverNode<f32>)> {
             Mono::new(&four[1]),
             Mono::new(&four[2]),
             Mono::new(&four[3]),
-            Samples(32),
+            Samples::new(32),
         ),
     ));
     // First order in, stereo out: the widths differ.
@@ -54,7 +54,7 @@ fn nodes(len: usize) -> Vec<(String, ConvolverNode<f32>)> {
             AmbisonicFormat::ambix(AmbisonicOrder::of(1)),
             ChannelTopology::from(Bed::Stereo),
             &views,
-            Samples(32),
+            Samples::new(32),
         )
         .unwrap(),
     ));
@@ -74,7 +74,7 @@ fn nodes(len: usize) -> Vec<(String, ConvolverNode<f32>)> {
                 format,
                 ChannelTopology::from(format),
                 &views,
-                Samples(32),
+                Samples::new(32),
             )
             .unwrap(),
         ));
@@ -125,7 +125,7 @@ fn sweep(name: &str, node: ConvolverNode<f32>, gains: &[Option<f32>], driven: bo
     }
     for &gain in gains {
         if let Some(g) = gain {
-            cell.store(Amplitude(f64::from(g)));
+            cell.store(Amplitude::new(f64::from(g)));
         }
         // Past the first partitions, so the blocks take the hot path.
         for _ in 0..12 {

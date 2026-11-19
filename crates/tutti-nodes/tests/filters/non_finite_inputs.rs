@@ -59,14 +59,17 @@ fn a_delay_with_an_unusable_maximum_is_refused_and_the_longest_builds() {
         1e30,
         10.000_001,
     ] {
-        assert_eq!(MaxDelay::new(Seconds(max)), None, "max {max}");
+        assert_eq!(MaxDelay::new(Seconds::new(max)), None, "max {max}");
     }
     let longest = MaxDelay::of(MaxDelay::CAP);
     for mut node in [
         DelayNode::<f32>::mono(longest, DelayControls::DEFAULT),
         DelayNode::<f32>::stereo(longest, DelayControls::DEFAULT),
     ] {
-        Node::<f32>::prepare(&mut node, &Prepare::new(RATE, MaxBlock::of(Samples(64))));
+        Node::<f32>::prepare(
+            &mut node,
+            &Prepare::new(RATE, MaxBlock::of(Samples::new(64))),
+        );
         assert!(renders_finite(&mut node, 4));
     }
 }
@@ -75,9 +78,9 @@ fn a_delay_with_an_unusable_maximum_is_refused_and_the_longest_builds() {
 #[test]
 fn a_delay_with_a_nan_initial_time_starts_at_zero() {
     let node = DelayNode::<f32>::mono(
-        MaxDelay::of(Seconds(0.1)),
+        MaxDelay::of(Seconds::new(0.1)),
         DelayControls {
-            time: Seconds(f64::NAN),
+            time: Seconds::new(f64::NAN),
             ..DelayControls::DEFAULT
         },
     );
@@ -92,17 +95,22 @@ fn a_delay_with_a_nan_initial_time_starts_at_zero() {
 fn the_strip_holds_off_non_finite_volume_and_balance() {
     type Write = fn(&BusStripNode, f32);
     let cells: [(&str, Write); 2] = [
-        ("volume", |n, v| n.volume().store(Amplitude(f64::from(v)))),
+        ("volume", |n, v| {
+            n.volume().store(Amplitude::new(f64::from(v)))
+        }),
         ("balance", |n, v| {
             n.balance()
                 .expect("a stereo strip balances")
-                .store(Balance(f64::from(v)));
+                .store(Balance::new(f64::from(v)));
         }),
     ];
     for (name, write) in cells {
         for bad in BAD {
             let mut node = BusStripNode::stereo();
-            Node::<f32>::prepare(&mut node, &Prepare::new(RATE, MaxBlock::of(Samples(64))));
+            Node::<f32>::prepare(
+                &mut node,
+                &Prepare::new(RATE, MaxBlock::of(Samples::new(64))),
+            );
             assert!(renders_finite(&mut node, 2));
             write(&node, bad);
             assert!(
@@ -134,7 +142,7 @@ fn the_limiters_and_the_eq_band_hold_off_non_finite_controls() {
         for bad in BAD {
             for k in 0..make().1.len() {
                 let (mut node, cells) = make();
-                node.prepare(&Prepare::new(RATE, MaxBlock::of(Samples(64))));
+                node.prepare(&Prepare::new(RATE, MaxBlock::of(Samples::new(64))));
                 assert!(renders_finite(&mut *node, 2), "{name}");
                 for (j, (_, cell, alt)) in cells.iter().enumerate() {
                     cell.store(
@@ -162,8 +170,8 @@ fn the_limiters_and_the_eq_band_hold_off_non_finite_controls() {
     }
     check("limiter", || {
         let n = LimiterNode::<f32>::stereo(LimiterControls {
-            threshold: Db(-6.0),
-            ceiling: Db(-1.0),
+            threshold: Db::new(-6.0),
+            ceiling: Db::new(-1.0),
             ..LimiterControls::DEFAULT
         });
         let cell = |kind| n.param_set().cell(kind).unwrap();
@@ -175,7 +183,7 @@ fn the_limiters_and_the_eq_band_hold_off_non_finite_controls() {
         (Box::new(n), cells)
     });
     check("brickwall", || {
-        let n = BrickwallLimiterNode::<f32>::new(Db(-1.0));
+        let n = BrickwallLimiterNode::<f32>::new(Db::new(-1.0));
         let cells = vec![(
             "ceiling",
             n.param_set().cell(UnitParam::Ceiling).unwrap(),
@@ -184,7 +192,7 @@ fn the_limiters_and_the_eq_band_hold_off_non_finite_controls() {
         (Box::new(n), cells)
     });
     check("eq band", || {
-        let n = EqBandNode::<f32>::new(SvfType::Bell, Hz(1000.0), Q(1.0), Db(3.0));
+        let n = EqBandNode::<f32>::new(SvfType::Bell, Hz::new(1000.0), Q::new(1.0), Db::new(3.0));
         let cells = vec![
             (
                 "frequency",

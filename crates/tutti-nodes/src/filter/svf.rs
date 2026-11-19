@@ -116,7 +116,7 @@ impl<F: Float + Lanes> SvfFilterNode<F> {
                 ty: filter_type,
                 freq: frequency.into(),
                 q: q.into(),
-                gain: Db(0.0),
+                gain: Db::new(0.0),
             },
         )
     }
@@ -760,7 +760,7 @@ mod tests {
         let mut f = prepared(SvfFilterNode::<f32>::new(
             SvfType::LowPass,
             Hz::new(800.0),
-            Q(f64::NAN),
+            Q::new(f64::NAN),
         ));
         let mut last = Vec::new();
         for block in x.chunks(1024) {

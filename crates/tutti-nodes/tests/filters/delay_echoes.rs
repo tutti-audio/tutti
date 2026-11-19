@@ -17,7 +17,7 @@ use tutti_units::{Amplitude, Feedback, Hz, SampleRate, Samples, Seconds};
 
 const SR: SampleRate = SampleRate::of(1_024.0);
 /// A second of line: every time here is a few frames of it.
-const MAX: MaxDelay = MaxDelay::of(Seconds(1.0));
+const MAX: MaxDelay = MaxDelay::of(Seconds::new(1.0));
 
 /// `frames` frames over `SR`, as a time.
 fn frames(frames: f64) -> Seconds {
@@ -61,7 +61,7 @@ fn render(node: DelayNode<f32>, inputs: &[Vec<f32>]) -> Vec<Vec<f32>> {
 fn an_impulse_echoes_at_the_delay_scaled_by_the_feedback_each_period() {
     let (d, g) = (16usize, 0.5f64);
     let node = DelayNode::<f32>::mono(MAX, controls(frames(d as f64), g, 0.0));
-    let out = render(node, &[impulse(Samples(d * 8 + 5))]);
+    let out = render(node, &[impulse(Samples::new(d * 8 + 5))]);
     for (i, &y) in out[0].iter().enumerate() {
         let want = if i >= d && i % d == 0 {
             g.powi((i / d - 1) as i32)
@@ -87,7 +87,7 @@ fn a_fractional_delay_is_a_sine_delayed_by_that_time_within_the_interpolators_er
     let delay = 16.5f64;
     let hz = SR.get() / 64.0;
     let w = std::f64::consts::TAU * hz / SR.get();
-    let x = sine(Hz::new(hz), Amplitude::new(1.0), SR, Samples(512));
+    let x = sine(Hz::new(hz), Amplitude::new(1.0), SR, Samples::new(512));
     let mut errors = Vec::new();
     for (mode, tolerance) in [
         (InterpolationMode::Linear, w * w / 8.0 * 1.05),

@@ -196,7 +196,9 @@ mod tests {
     /// frame 3 hard left under the RP-036 law.
     #[test]
     fn the_wave_places_the_pair_hard_right_at_its_peak_and_hard_left_at_its_trough() {
-        let mut n = prepared(AutoPanNode::from(AutoPanConfig::new().rate(Hz(12_000.0))));
+        let mut n = prepared(AutoPanNode::from(
+            AutoPanConfig::new().rate(Hz::new(12_000.0)),
+        ));
         let ones = [1.0f32; 4];
         let out = drive_block(&mut n, &[&ones, &ones]);
         assert!(out[0][1].abs() < 1e-6 && (out[1][1] - 1.0).abs() < 1e-6);

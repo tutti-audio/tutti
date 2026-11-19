@@ -99,7 +99,7 @@ fn strip(c: &mut Criterion) {
             BLOCK,
         );
         fill_noise(&mut d);
-        d.node.set_volume(Amplitude(0.5));
+        d.node.set_volume(Amplitude::new(0.5));
         assert!(ParamNode::<f32>::param_set(&*d.node).set(tutti_units::UnitParam::Balance, 0.25));
         d.block();
         g.bench_with_input(BenchmarkId::new("steady", width), &width, |b, _| {
@@ -113,7 +113,8 @@ fn strip(c: &mut Criterion) {
         g.bench_with_input(BenchmarkId::new("ramp", width), &width, |b, _| {
             b.iter(|| {
                 flip = !flip;
-                d.node.set_volume(Amplitude(if flip { 0.75 } else { 0.5 }));
+                d.node
+                    .set_volume(Amplitude::new(if flip { 0.75 } else { 0.5 }));
                 d.block();
                 black_box(d.output().plane(0).samples()[BLOCK - 1]);
             })
