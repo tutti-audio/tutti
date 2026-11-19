@@ -39,7 +39,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use tutti_rt::LockExt;
-use tutti_types::Mint;
+use tutti_rt::Mint;
 
 use crate::{Clock, Session, SessionEvent};
 

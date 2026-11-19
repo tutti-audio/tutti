@@ -8,6 +8,7 @@ use std::sync::Arc;
 use tutti_buffers::MaxBlock;
 use tutti_buffers::Planes;
 
+use atomic_float::AtomicF64;
 use tutti_buffers::ChannelLayout;
 use tutti_dsp::{FdnControls, FdnLayout, FreeverbControls, MaxDecay, Network, System};
 use tutti_graph::contract::{
@@ -20,7 +21,6 @@ use tutti_graph::{
 use tutti_modulation::ControlProgram;
 use tutti_nodes::automation::ControlLaneNode;
 use tutti_nodes::{FdnNode, FreeverbNode};
-use tutti_types::AtomicF64;
 use tutti_units::{
     Db, Depth, Frame, Latency, Mix, SampleRate, Samples, Seconds, Tail, UnitAddr, UnitParam,
 };

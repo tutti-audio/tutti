@@ -4,7 +4,7 @@
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::Float;
 use tutti_graph::{Cx, Io, Node, ParamNode, ParamSet, Prepare, Shape, Status};
-use tutti_types::Param;
+use tutti_rt::Param;
 use tutti_units::{Amplitude, UnitParam};
 
 /// One part in 2^40 above one: past `f32`'s 24-bit significand, inside `f64`'s 53.

@@ -14,7 +14,7 @@ use tutti_nodes::{
     BrickwallLimiterNode, BusStripNode, DelayControls, DelayNode, EqBandNode, LimiterControls,
     LimiterNode, MaxDelay, SvfType,
 };
-use tutti_types::ParamCell;
+use tutti_rt::ParamCell;
 use tutti_units::{Amplitude, Balance, Db, Hz, Q, SampleRate, Samples, Seconds, UnitParam};
 
 const RATE: SampleRate = SampleRate::SR_48K;

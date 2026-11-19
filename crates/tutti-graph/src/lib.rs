@@ -269,7 +269,7 @@
 //!     declare_params,
 //! };
 //! use tutti_units::{Amplitude, Real, SampleRate, Samples, UnitParam};
-//! use tutti_types::Param;
+//! use tutti_rt::Param;
 //! use tutti_buffers::{ChannelLayout, MaxBlock};
 //!
 //! #[derive(Clone)]

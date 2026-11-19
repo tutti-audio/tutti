@@ -25,7 +25,7 @@ use tutti_rt::LockExt;
 use crate::WorkerError;
 use crate::{Session, SessionEvent};
 
-tutti_types::id! {
+tutti_rt::id! {
     /// An open ([`Session::open_stream`]) the session started, named so the event that lands it can be matched to the call:
     /// [`SamplerEvent::Opened`] and [`SamplerEvent::OpenFailed`] carry it. The
     /// session mints it; it names nothing else.

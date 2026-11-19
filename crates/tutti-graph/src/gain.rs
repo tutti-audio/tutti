@@ -56,7 +56,9 @@ use std::sync::atomic::{AtomicU8, Ordering};
 use tutti_buffers::Float;
 use tutti_curve::FadeLaw;
 
-use tutti_types::{AtomicF64, ParamCell};
+use atomic_float::AtomicF64;
+
+use tutti_rt::ParamCell;
 use tutti_units::{Amplitude, Samples, UnitAddr, UnitParam};
 
 use crate::lane::{fade_in, ramp_in};

@@ -33,12 +33,12 @@ tutti-buffers = { version = "0.0.1", path = "../tutti-buffers" }
 # tail vocabulary.
 tutti-units = { version = "0.0.1", path = "../tutti-units" }
 tutti-music = { version = "0.0.1", path = "../tutti-music" }
-tutti-types = { version = "0.0.1", path = "../tutti-types" }
+atomic_float = "1.1"
 tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
 # `Law`, the closed set of easings a param segment and a ramp move along.
 tutti-curve = { version = "0.0.1", path = "../tutti-curve" }
 # `Ump`, the packet an event carries, and its note-off test. No other tutti
-# crate and no codec: this is why the packet is not in `tutti-types`.
+# crate and no codec: this is why the packet is not in `tutti-units`.
 tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false }
 # Safe casts between the 64-byte-aligned arena lines and the sample slices a
 # node is handed. This is what keeps the executor free of `unsafe`: alignment

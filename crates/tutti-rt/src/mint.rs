@@ -14,7 +14,7 @@ use core::sync::atomic::{AtomicU64, Ordering};
 /// is not a `Mint`: it reuses numbers on purpose.
 ///
 /// ```
-/// use tutti_types::Mint;
+/// use tutti_rt::Mint;
 ///
 /// static NEXT: Mint = Mint::new();
 ///

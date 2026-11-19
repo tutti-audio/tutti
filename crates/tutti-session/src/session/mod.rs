@@ -126,7 +126,7 @@ pub struct Session<K: AppKey = &'static str, C: Clock = Offline> {
     pub(crate) disk_streamer: Option<tutti_sampler::DiskStreamer<tutti_sampler::Running, C::Float>>,
     /// Names the [`SamplerLoad`](crate::SamplerLoad)s.
     #[cfg(feature = "sampler")]
-    pub(crate) sampler_opens: tutti_types::Mint,
+    pub(crate) sampler_opens: tutti_rt::Mint,
     /// What the opens landed, until the host takes it ([`Session::take_stream`]).
     #[cfg(feature = "sampler")]
     pub(crate) sampler_streams: crate::sampler::OpenedStreams<C::Float>,

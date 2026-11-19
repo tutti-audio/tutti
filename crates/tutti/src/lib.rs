@@ -286,7 +286,7 @@ pub mod nodes {
     };
 }
 
-/// The unit vocabulary (`tutti-units`, `tutti-music`, `tutti-types`, `tutti-buffers`) a program names less
+/// The unit vocabulary (`tutti-units`, `tutti-music`, `tutti-rt`, `tutti-buffers`) a program names less
 /// often than the root's units: moments and notes, the parameter cell and its
 /// addresses, shape terms (`Tail`, `Latency`), the edge traits (`Source`,
 /// `Sink`, `Pull`), channel folds and the range errors.
@@ -312,11 +312,11 @@ pub mod types {
         NoteNumberOutOfRange, NoteValue, Pass, PassEnd, PitchClass, SegmentOrigin, TimelineSegment,
         beats_per_sample, first_frame_at_or_after, frames_per_beat, snap_to_whole_frame,
     };
+    pub use tutti_rt::{AtomicSampleRate, Mint, Param, Param64, ParamCell};
     pub use tutti_rt::{
         Count, Counter, CounterWriter, Drained, Gauge, GaugeWriter, LevelSpan, Panicked, PosFrame,
         Reading, Reclaim, RingFloat, RingSample, Setting, SettingWord, Tally, TallyWriter, Words,
     };
-    pub use tutti_types::{AtomicSampleRate, Mint, Param, Param64, ParamCell};
     pub use tutti_units::{
         ArcDegrees, Azimuth, Balance, Ballistics, BarCount, BeatDuration, BeatsPerCycle,
         BeatsPerCycleOutOfRange, BipolarOutOfRange, BitDepth, BpmOutOfRange, CentsSpan,

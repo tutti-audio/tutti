@@ -19,8 +19,8 @@
 use core::marker::PhantomData;
 use core::sync::atomic::{AtomicU64, Ordering};
 
-use alloc::sync::Arc;
 use atomic_float::AtomicF64;
+use std::sync::Arc;
 use tutti_units::Unit;
 
 /// A [`Param`]'s cell without its unit, read and written as `f64`.
@@ -29,48 +29,43 @@ use tutti_units::Unit;
 /// modulation path (control lanes, `ParamSet`) works in `f64` values, the raw
 /// of every unit.
 #[derive(Clone, Debug)]
-pub enum ParamCell {
-    /// An `f64` cell.
-    F64(Arc<AtomicF64>),
-}
+pub struct ParamCell(Arc<AtomicF64>);
 
 impl ParamCell {
     /// Loads the value.
     #[inline]
     pub fn load(&self, order: Ordering) -> f64 {
-        match self {
-            Self::F64(c) => c.load(order),
-        }
+        self.0.load(order)
     }
 
     /// Stores a value.
     #[inline]
     pub fn store(&self, value: f64, order: Ordering) {
-        match self {
-            Self::F64(c) => c.store(value, order),
-        }
+        self.0.store(value, order);
     }
 
     /// A fresh cell holding the value now: control thread (allocates).
     #[must_use]
     pub fn detached(&self) -> Self {
-        match self {
-            Self::F64(c) => Self::F64(Arc::new(AtomicF64::new(c.load(Ordering::Acquire)))),
-        }
+        Self(Arc::new(AtomicF64::new(self.0.load(Ordering::Acquire))))
     }
 
     /// Whether both are the same cell.
     #[must_use]
     pub fn ptr_eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::F64(a), Self::F64(b)) => Arc::ptr_eq(a, b),
-        }
+        Arc::ptr_eq(&self.0, &other.0)
     }
 }
 
 impl From<Arc<AtomicF64>> for ParamCell {
     fn from(c: Arc<AtomicF64>) -> Self {
-        Self::F64(c)
+        Self(c)
+    }
+}
+
+impl From<ParamCell> for Arc<AtomicF64> {
+    fn from(c: ParamCell) -> Self {
+        c.0
     }
 }
 
@@ -90,7 +85,7 @@ impl From<Arc<AtomicF64>> for ParamCell {
 ///
 /// ```
 /// use tutti_units::Hz;
-/// use tutti_types::Param;
+/// use tutti_rt::Param;
 ///
 /// let cutoff = Param::new(Hz(1_000.0)); // control thread: allocates
 /// let on_audio_thread = cutoff.handle(); // shares the cell
@@ -232,7 +227,7 @@ impl<U: Unit<Raw = f64>> core::fmt::Debug for Param<U> {
 ///
 /// ```
 /// use tutti_units::ReadRate;
-/// use tutti_types::Param64;
+/// use tutti_rt::Param64;
 ///
 /// let stretch_rate = Param64::new(ReadRate::UNITY); // no allocation
 /// stretch_rate.store(ReadRate::new(0.75));
@@ -243,7 +238,7 @@ impl<U: Unit<Raw = f64>> core::fmt::Debug for Param<U> {
 ///
 /// ```compile_fail
 /// use tutti_units::Samples;
-/// use tutti_types::Param64;
+/// use tutti_rt::Param64;
 /// struct Delay {
 ///     length: Param64<Samples>, // a count is not a continuous quantity
 /// }

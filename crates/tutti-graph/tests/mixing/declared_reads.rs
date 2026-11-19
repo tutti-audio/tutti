@@ -17,7 +17,7 @@ use tutti_graph::{
     ParamEvent, ParamIn, ParamInput, ParamNode, ParamSegment, ParamSet, Prepare, Shape, Source,
     Status, TransportPosition, declare_params, param_parts,
 };
-use tutti_types::Param;
+use tutti_rt::Param;
 use tutti_units::{Amplitude, Db, Hz, Q, Samples, UnitAddr, UnitParam};
 
 #[derive(Clone)]
