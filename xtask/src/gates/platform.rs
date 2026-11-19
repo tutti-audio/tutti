@@ -13,8 +13,9 @@
 //! - `std::time::Instant`, named by a path, a `use`, a group (`use std::time::{Duration,
 //!   Instant}`), a glob (`use std::time::*`) or through the module (`use std::time;` then
 //!   `time::Instant`);
-//! - `std::time::SystemTime::now`, and `SystemTime::now` where the file imports
-//!   `SystemTime` from `std::time` (under its alias, when it has one).
+//! - `std::time::SystemTime::now`, by its path or through the module, and
+//!   `SystemTime::now` where the file imports `SystemTime` from `std::time` (under its
+//!   alias, when it has one).
 //!
 //! `SystemTime` as a type stays std's: `fs::Metadata::modified` returns it, so a file
 //! stamp keeps it. `Duration` is plain arithmetic and stays `std::time::Duration`. `xtask`
@@ -95,6 +96,11 @@ fn hits(text: &str) -> Vec<(usize, &'static str)> {
         named_by(&code, &format!("{name}::Instant"), |at| {
             if !code[..at].ends_with("::") {
                 found.insert((line_of(&code, at), "std::time::Instant"));
+            }
+        });
+        named_by(&code, &format!("{name}::SystemTime::now"), |at| {
+            if !code[..at].ends_with("::") {
+                found.insert((line_of(&code, at), "std::time::SystemTime::now"));
             }
         });
     }
@@ -183,6 +189,26 @@ mod tests {
         assert!(!fails(
             LIB,
             "use std::time;\nfn f() { time::Duration::ZERO; }\n"
+        ));
+    }
+
+    #[test]
+    fn system_time_now_through_the_std_time_module_fails() {
+        assert!(fails(
+            LIB,
+            "use std::time;\nfn f() { time::SystemTime::now(); }\n"
+        ));
+        assert!(fails(
+            LIB,
+            "use std::time as t;\nfn f() { t::SystemTime::now(); }\n"
+        ));
+    }
+
+    #[test]
+    fn a_use_inside_a_function_body_is_read() {
+        assert!(fails(
+            LIB,
+            "fn f() {\n    use std::time::Instant;\n    Instant::now();\n}\n"
         ));
     }
 
