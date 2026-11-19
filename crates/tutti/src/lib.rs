@@ -524,8 +524,8 @@ pub mod codec {
 pub mod sampler {
     pub use tutti_sampler::{
         Block, Direction as PlaybackDirection, Error, OpenError, Placement as ClipPlacement,
-        RefusedPlacement, Stream, StreamFault, StreamFile, StreamId, StreamPhase, StreamReader,
-        StreamStatus, VoiceNodeHandle,
+        RefusedPlacement, SamplerFloat, Stream, StreamFault, StreamFile, StreamId, StreamPhase,
+        StreamReader, StreamStatus, VoiceNodeHandle,
     };
     // A file's probe needs a decoder.
     pub use tutti_sampler::{

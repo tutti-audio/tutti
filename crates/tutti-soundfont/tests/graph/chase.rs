@@ -33,7 +33,7 @@ fn font() -> Arc<SoundFont> {
     Arc::new(SoundFont::from_reader(&mut file).expect("parses"))
 }
 
-fn unit() -> SoundFontUnit {
+fn unit() -> SoundFontUnit<f32> {
     SoundFontUnit::new(font(), Settings::new()).expect("builds")
 }
 

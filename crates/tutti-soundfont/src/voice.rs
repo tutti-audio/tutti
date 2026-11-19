@@ -2,8 +2,10 @@
 // MeltySynth (Copyright (C) 2021 Nobuaki Tanaka). The MIT notice is
 // LICENSE-RUSTYSYNTH.txt, at the root of this crate.
 
+use tutti_buffers::Float;
 use tutti_dsp::{
-    PanLaw, SOLVE_CEILING, SvfCoefficients, SvfControls, SvfModel, SvfType, pan_gains, svf_step,
+    Lanes, PanLaw, SOLVE_CEILING, SvfCoefficients, SvfControls, SvfModel, SvfType, pan_gains,
+    svf_step,
 };
 use tutti_sf2::{SamplePool, Side};
 use tutti_ump::ControlValue;
@@ -47,7 +49,11 @@ use crate::volume_envelope::VolumeEnvelope;
 /// up to [`SvfControls::MAX_Q`] (a resonance of about 60 dB; the model clamps
 /// `q` there and a larger resonance peaks at that cap), and a resonance of 1
 /// (0 dB) is `q = 1 / sqrt(2)`, Butterworth.
-fn low_pass(cutoff: Hz, resonance: Amplitude, rate: SampleRate) -> Option<SvfCoefficients<f32>> {
+fn low_pass<F: Float + Lanes>(
+    cutoff: Hz,
+    resonance: Amplitude,
+    rate: SampleRate,
+) -> Option<SvfCoefficients<F>> {
     low_pass_model(cutoff, resonance, rate).map(|model| SvfCoefficients::from(&model))
 }
 
@@ -105,13 +111,13 @@ struct GlideRun {
     done: Samples,
 }
 
-/// A voice: its envelopes, LFOs, oscillator and filter, rendering a chunk at a time in
-/// `f32`. Its controls are designed in `f64` quantities, at its start and, for the filter, per
-/// chunk while the cutoff moves; what reaches `f32` is the chunk of audio, the filter's
-/// coefficients and state, and the gains the mix ramps between.
+/// A voice: its envelopes, LFOs, oscillator and filter, rendering a chunk at a time in the
+/// graph's float `F`. Its controls are designed in `f64` quantities, at its start and, for the filter, per chunk
+/// while the cutoff moves; what reaches `F` is the chunk of audio, the filter's coefficients and state, and the gains
+/// the mix ramps between.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
-pub(crate) struct Voice {
+pub(crate) struct Voice<F: Float + Lanes> {
     vol_env: VolumeEnvelope,
     mod_env: ModulationEnvelope,
 
@@ -122,25 +128,25 @@ pub(crate) struct Voice {
     rate: SampleRate,
     /// The low-pass, designed at the start and per chunk while the cutoff moves, or `None`
     /// while the cutoff is too near Nyquist to filter.
-    low_pass: Option<SvfCoefficients<f32>>,
+    low_pass: Option<SvfCoefficients<F>>,
     /// The low-pass's integrator state `[ic1eq, ic2eq]`.
-    history: [f32; 2],
+    history: [F; 2],
 
-    block: Vec<f32>,
+    block: Vec<F>,
 
     // A sudden change in the mix gain will cause pop noise.
     // To avoid this, we save the mix gain of the previous block,
     // and smooth out the gain if the gap between the current and previous gain is too large.
     // The actual smoothing process is done in the WriteBlock method of the Synthesizer class.
-    pub(crate) previous_mix_gain_left: f32,
-    pub(crate) previous_mix_gain_right: f32,
-    pub(crate) current_mix_gain_left: f32,
-    pub(crate) current_mix_gain_right: f32,
+    pub(crate) previous_mix_gain_left: F,
+    pub(crate) previous_mix_gain_right: F,
+    pub(crate) current_mix_gain_left: F,
+    pub(crate) current_mix_gain_right: F,
 
-    pub(crate) previous_reverb_send: f32,
-    pub(crate) previous_chorus_send: f32,
-    pub(crate) current_reverb_send: f32,
-    pub(crate) current_chorus_send: f32,
+    pub(crate) previous_reverb_send: F,
+    pub(crate) previous_chorus_send: F,
+    pub(crate) current_reverb_send: F,
+    pub(crate) current_chorus_send: F,
 
     channel: i32,
     key: i32,
@@ -191,7 +197,7 @@ pub(crate) struct Voice {
     voice_length: usize,
 }
 
-impl Voice {
+impl<F: Float + Lanes> Voice<F> {
     pub(crate) fn new(settings: &Render) -> Self {
         Self {
             vol_env: VolumeEnvelope::new(settings),
@@ -201,16 +207,16 @@ impl Voice {
             oscillator: Oscillator::new(settings),
             rate: settings.rate(),
             low_pass: None,
-            history: [0_f32; 2],
-            block: vec![0_f32; settings.block_len()],
-            previous_mix_gain_left: 0_f32,
-            previous_mix_gain_right: 0_f32,
-            current_mix_gain_left: 0_f32,
-            current_mix_gain_right: 0_f32,
-            previous_reverb_send: 0_f32,
-            previous_chorus_send: 0_f32,
-            current_reverb_send: 0_f32,
-            current_chorus_send: 0_f32,
+            history: [F::ZERO; 2],
+            block: vec![F::ZERO; settings.block_len()],
+            previous_mix_gain_left: F::ZERO,
+            previous_mix_gain_right: F::ZERO,
+            current_mix_gain_left: F::ZERO,
+            current_mix_gain_right: F::ZERO,
+            previous_reverb_send: F::ZERO,
+            previous_chorus_send: F::ZERO,
+            current_reverb_send: F::ZERO,
+            current_chorus_send: F::ZERO,
             channel: 0,
             key: 0,
             velocity: 0,
@@ -304,7 +310,7 @@ impl Voice {
         RegionEx::start_vibrato(&mut self.vib_lfo, region, key, velocity);
         RegionEx::start_modulation(&mut self.mod_lfo, region, key, velocity);
         RegionEx::start_oscillator(&mut self.oscillator, region);
-        self.history = [0_f32; 2];
+        self.history = [F::ZERO; 2];
         self.low_pass = low_pass(self.cutoff, self.resonance, self.rate);
 
         self.smoothed_cutoff = self.cutoff;
@@ -463,10 +469,7 @@ impl Voice {
             + vib_pitch_change
             + mod_pitch_change
             + channel_pitch_change;
-        if !self
-            .oscillator
-            .process(data, &mut self.block[..], pitch.get() as f32)
-        {
+        if !self.oscillator.process(data, &mut self.block[..], pitch) {
             return false;
         }
 
@@ -492,7 +495,7 @@ impl Voice {
             // section takes over without a step.
             None => {
                 if let Some(&last) = self.block.last() {
-                    self.history = [0_f32, last];
+                    self.history = [F::ZERO, last];
                 }
             }
         }
@@ -519,13 +522,13 @@ impl Voice {
         // RP-036's pan: the channel's or the note's, plus the zone's.
         let pan = self.note.pan.unwrap_or_else(|| state.pan());
         let (left, right) = pan_gains(Pan(pan.get() + self.instrument_pan.get()), PanLaw::Rp036);
-        self.current_mix_gain_left = (mix_gain * left.get()).get() as f32;
-        self.current_mix_gain_right = (mix_gain * right.get()).get() as f32;
+        self.current_mix_gain_left = F::from_unit(mix_gain * left.get());
+        self.current_mix_gain_right = F::from_unit(mix_gain * right.get());
 
         self.current_reverb_send =
-            send(channel_info.reverb_send(), self.instrument_reverb).get() as f32;
+            F::from_unit(send(channel_info.reverb_send(), self.instrument_reverb));
         self.current_chorus_send =
-            send(channel_info.chorus_send(), self.instrument_chorus).get() as f32;
+            F::from_unit(send(channel_info.chorus_send(), self.instrument_chorus));
 
         if self.voice_length == 0 {
             self.previous_mix_gain_left = self.current_mix_gain_left;
@@ -539,7 +542,7 @@ impl Voice {
         true
     }
 
-    pub(crate) fn block(&self) -> &[f32] {
+    pub(crate) fn block(&self) -> &[F] {
         &self.block
     }
 }
@@ -562,7 +565,7 @@ mod tests {
     /// The steady-state gain of the voice's low-pass at `hz`, measured by
     /// running a sine through the section the voice runs.
     fn gain(resonance: Amplitude, hz: f64) -> f64 {
-        let section = low_pass(CUTOFF, resonance, RATE).expect("below Nyquist");
+        let section = low_pass::<f32>(CUTOFF, resonance, RATE).expect("below Nyquist");
         let mut state = [0_f32; 2];
         let w = core::f64::consts::TAU * hz / RATE.get();
         let mut peak = 0.0f64;
@@ -683,8 +686,8 @@ mod tests {
     #[test]
     fn a_cutoff_near_nyquist_is_no_filter() {
         let none = Amplitude::UNITY;
-        assert!(low_pass(Hz(0.4 * RATE.get()), none, RATE).is_some());
-        assert!(low_pass(Hz(0.5 * RATE.get()), none, RATE).is_none());
+        assert!(low_pass::<f32>(Hz(0.4 * RATE.get()), none, RATE).is_some());
+        assert!(low_pass::<f32>(Hz(0.5 * RATE.get()), none, RATE).is_none());
     }
 
     /// `H(e^jw)` of the trapezoidal section with coefficients `c`, from its state
@@ -765,7 +768,7 @@ mod tests {
         for rate in [SampleRate::SR_48K, SampleRate::SR_96K] {
             for db in [0.0, 12.0] {
                 let resonance = Db(db).to_amplitude();
-                let c32 = low_pass(FLOOR, resonance, rate).expect("below Nyquist");
+                let c32 = low_pass::<f32>(FLOOR, resonance, rate).expect("below Nyquist");
                 let q = q_of(resonance.get());
                 let frames = settle(q, FLOOR, rate, 1e-13);
                 let norm = error_norm(&widened(&c32), frames);
@@ -847,5 +850,98 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// A font whose one instrument zone has `release` timecents of volume-envelope release.
+    fn font_with_release(release: i16) -> tutti_sf2::SoundFont {
+        use tutti_fixtures::sf2::{Inst, Preset, bytes, generator};
+        let file = bytes(
+            &[Preset {
+                name: "p",
+                bank: 0,
+                program: 0,
+                zones: vec![(vec![], 0)],
+            }],
+            &[Inst {
+                name: "i",
+                zones: vec![vec![(generator::RELEASE_VOL_ENV, release)]],
+            }],
+        );
+        tutti_sf2::SoundFont::from_reader(&mut std::io::Cursor::new(file))
+            .expect("the built SoundFont parses")
+    }
+
+    /// The left mix gain of a voice at `rate` the `last`th chunk after its key-off over the
+    /// `first`th's, with the font's one zone struck at velocity 127 and run through its
+    /// attack to full level before the key-off.
+    fn gain_ratio_after_release<F: Float + Lanes>(
+        font: &tutti_sf2::SoundFont,
+        rate: SampleRate,
+        first: usize,
+        last: usize,
+    ) -> f64 {
+        let channels = vec![Channel::new(false); 16];
+        let states = [ChannelState::new(Semitones(2.0)); 16];
+        let bends = [Semitones(0.0); 16];
+        let preset = &font.presets()[0].regions()[0];
+        let instrument = &font.instruments()[preset.instrument_id()].regions()[0];
+        let mut voice = Voice::<F>::new(&Render::new(rate));
+        voice.start(&RegionPair::new(preset, instrument), 0, 60, 127);
+        let data = font.sample_pool();
+        let chunks = |voice: &mut Voice<F>, n: usize| {
+            for _ in 0..n {
+                assert!(voice.process(data, &channels, &states, &bends));
+            }
+        };
+        // The delay, attack, hold and decay at their default millisecond each are 96 chunks at
+        // 192 kHz.
+        chunks(&mut voice, 200);
+        voice.release();
+        chunks(&mut voice, first);
+        let g1: f64 = voice.current_mix_gain_left.into();
+        chunks(&mut voice, last - first);
+        let g2: f64 = voice.current_mix_gain_left.into();
+        g2 / g1
+    }
+
+    /// The longest volume-envelope release SF2 allows, 8000 timecents (`R = 2^(8000/1200)` s,
+    /// about 101.6 s), at the highest rate a voice runs at, 192 kHz: the mix gain 25 s into the
+    /// release over its first chunk's is `exp(-5 ln 10 dt / R)` (the release falls 100 dB, a
+    /// factor `10^-5` in amplitude, in `R`), whatever the float the voice mixes in. Returns the
+    /// relative deviation, asserted within `2 u + 1e-15`: each gain is an `f64` figure rounded
+    /// once to `F` (relative `u = eps / 2`), their quotient is taken in `f64`, and `1e-15`
+    /// covers the `f64` evaluation of the closed form (a time is a count over the rate, the
+    /// fall one `exp`).
+    ///
+    /// The envelope is a closed form of the time, so no float stalls it. A one-pole `e <- r e`
+    /// with `r = exp(-5 ln 10 / (R fs))` would: at `f32`, `1 - r = 5.9e-7` sits on a grid of
+    /// `2^-24 = 6e-8`, so the pole's exponent is wrong by up to 5%.
+    fn deviation_at_the_longest_release<F: Float + Lanes>() -> f64 {
+        let rate = SampleRate::SR_192K;
+        let release = 2f64.powf(8000.0 / 1200.0);
+        let (first, last) = (1, (25.0 * rate.get() / 8.0) as usize);
+        let seconds = (last - first) as f64 * 8.0 / rate.get();
+        let want = (-5.0 * 10f64.ln() * seconds / release).exp();
+        let got = gain_ratio_after_release::<F>(&font_with_release(8000), rate, first, last);
+        let deviation = (got / want - 1.0).abs();
+        let epsilon: f64 = F::EPSILON.into();
+        let bound = epsilon + 1e-15;
+        assert!(deviation <= bound, "deviation {deviation:e} over {bound:e}");
+        deviation
+    }
+
+    /// The `f32` voice at the longest release and the highest rate has its closed-form level
+    /// (see `deviation_at_the_longest_release`): the bound is `2 u + 1e-15 = 1.19e-7`.
+    /// Spec: sf2.synth.env.release-time, sf2.gen.releaseVolEnv
+    #[test]
+    fn an_f32_voice_has_the_closed_form_level_at_the_longest_release_and_highest_rate() {
+        deviation_at_the_longest_release::<f32>();
+    }
+
+    /// The `f64` voice at the same figure, within `2 u + 1e-15` for the `f64` `u`.
+    /// Spec: sf2.synth.env.release-time, sf2.gen.releaseVolEnv
+    #[test]
+    fn an_f64_voice_has_the_closed_form_level_at_the_longest_release_and_highest_rate() {
+        deviation_at_the_longest_release::<f64>();
     }
 }

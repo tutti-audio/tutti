@@ -16,10 +16,12 @@ use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 
+use tutti_buffers::Float;
+use tutti_dsp::Lanes;
 use tutti_midi_protocol::{Universal, UniversalReader, narrow_value};
 use tutti_sf2::SoundFont;
 use tutti_ump::{Address, CCNumber, Message, MidiChannel, MidiGroup, U7, Ump, Voice2};
-use tutti_units::{SampleRate, Seconds, Semitones};
+use tutti_units::{Amplitude, SampleRate, Seconds, Semitones};
 use tutti_voicing::{MasterGain, Rules, Voicing};
 
 use crate::array_math::ArrayMath;
@@ -41,7 +43,7 @@ const BANK_SELECT_LSB: CCNumber = CCNumber::BANK_SELECT.lsb().unwrap();
 
 /// The gain applied to the mix of every voice, on every plane: the sends carry
 /// it too, so an effect node after the unit is unity-gain.
-const MASTER_VOLUME: f32 = 0.5;
+const MASTER_VOLUME: Amplitude = Amplitude(0.5);
 
 /// One of the unit's five outputs, in port order.
 ///
@@ -108,7 +110,18 @@ impl Heard {
 }
 
 /// Five equal-length planes: the unit's outputs for one stretch of frames.
-pub(crate) struct Planes<'a>(pub(crate) [&'a mut [f32]; Plane::COUNT]);
+pub(crate) struct Planes<'a, F>(pub(crate) [&'a mut [F]; Plane::COUNT]);
+
+/// The channel General MIDI plays percussion on.
+const PERCUSSION_CHANNEL: MidiChannel = MidiChannel::of(9);
+
+/// The rate a player renders at until its graph prepares it: the voices
+/// are built against a rate, and the unit's `prepare` re-rates them.
+pub(crate) const INITIAL_RATE: SampleRate = SampleRate::SR_44K1;
+
+/// The most messages [`chase`](Player::chase) writes.
+pub(crate) const CHASE_MESSAGES: usize =
+    Voicing::CHASE_MESSAGES + MidiChannel::COUNT as usize * Channel::CHASE_MESSAGES;
 
 /// The rates a player renders at, in whole hertz.
 const RATES: std::ops::RangeInclusive<i32> = 16_000..=192_000;
@@ -139,13 +152,13 @@ fn rules(polyphony: NonZeroUsize) -> Rules {
     // master tuning leaves it (CA-025, GM2 section 4.2).
     Rules::poly(polyphony)
         .with_exclusive_groups(true)
-        .with_percussion(Player::PERCUSSION_CHANNEL)
+        .with_percussion(PERCUSSION_CHANNEL)
 }
 
 /// The player. Its voices are built against a rate and cannot be re-rated in
 /// place: [`rerated`](Self::rerated) builds another.
 #[derive(Debug, Clone)]
-pub(crate) struct Player {
+pub(crate) struct Player<F: Float + Lanes> {
     font: Arc<SoundFont>,
     render: Render,
     settings: Settings,
@@ -155,7 +168,7 @@ pub(crate) struct Player {
 
     channels: Vec<Channel>,
     voicing: Voicing,
-    voices: Voices,
+    voices: Voices<F>,
     /// The Group's Universal System Exclusive, reassembled and filtered by
     /// device id.
     universal: UniversalReader,
@@ -164,23 +177,20 @@ pub(crate) struct Player {
     master_applied: MasterGain,
 
     /// The chunk being read out, a plane each (see [`Plane`]).
-    block: [Vec<f32>; Plane::COUNT],
+    block: [Vec<F>; Plane::COUNT],
     /// What the chunk holds written, and what has been read out since
     /// [`take_heard`](Self::take_heard).
     block_heard: Heard,
     heard: Heard,
     block_read: usize,
+    /// One over the chunk's frames, as the mix's ramp step.
+    inverse_block_size: F,
+    /// The level under which a gain is not mixed, in the voices' float.
+    audible_floor: F,
 }
 
-impl Player {
-    /// The channel General MIDI plays percussion on.
-    pub(crate) const PERCUSSION_CHANNEL: MidiChannel = MidiChannel::of(9);
-
-    /// The rate a player renders at until its graph prepares it: the voices
-    /// are built against a rate, and the unit's `prepare` re-rates them.
-    pub(crate) const INITIAL_RATE: SampleRate = SampleRate::SR_44K1;
-
-    /// Builds a player over `font` at [`INITIAL_RATE`](Self::INITIAL_RATE).
+impl<F: Float + Lanes> Player<F> {
+    /// Builds a player over `font` at [`INITIAL_RATE`].
     /// Allocates the voices.
     ///
     /// # Errors
@@ -188,7 +198,7 @@ impl Player {
     /// [`Error::NoPlayablePreset`] when no preset of the font has a MIDI bank
     /// and program (SF2 2.04 section 7.2).
     pub(crate) fn new(font: &Arc<SoundFont>, settings: Settings) -> Result<Self> {
-        Self::at(font, settings, Render::new(Self::INITIAL_RATE))
+        Self::at(font, settings, Render::new(INITIAL_RATE))
     }
 
     /// Builds a player over `font` on the grid `render`.
@@ -228,7 +238,7 @@ impl Player {
         };
 
         let channels = (0..MidiChannel::COUNT)
-            .map(|i| Channel::new(i == Self::PERCUSSION_CHANNEL.get()))
+            .map(|i| Channel::new(i == PERCUSSION_CHANNEL.get()))
             .collect();
 
         Ok(Self {
@@ -242,10 +252,12 @@ impl Player {
             voices: Voices::new(&render, polyphony.get()),
             universal: UniversalReader::new(settings.group(), settings.device()),
             master_applied: MasterGain::UNITY,
-            block: std::array::from_fn(|_| vec![0_f32; render.block_len()]),
+            block: std::array::from_fn(|_| vec![F::ZERO; render.block_len()]),
             block_heard: Heard::default(),
             heard: Heard::default(),
             block_read: render.block_len(),
+            inverse_block_size: F::from_design(1.0 / render.block_len() as f64),
+            audible_floor: F::from_unit(SoundFontMath::NON_AUDIBLE),
         })
     }
 
@@ -342,7 +354,7 @@ impl Player {
         self.voices.execute(commands, &self.font);
         if matches!(heard.message, Universal::GeneralMidi(_)) {
             self.channels = (0..MidiChannel::COUNT)
-                .map(|i| Channel::new(i == Self::PERCUSSION_CHANNEL.get()))
+                .map(|i| Channel::new(i == PERCUSSION_CHANNEL.get()))
                 .collect();
         }
     }
@@ -429,7 +441,7 @@ impl Player {
 
     /// Renders the five planes, which are the same length, advancing the
     /// player by that many frames.
-    pub(crate) fn render(&mut self, planes: Planes<'_>) {
+    pub(crate) fn render(&mut self, planes: Planes<'_, F>) {
         let block = self.render.block_len();
         let mut planes = planes.0;
         let length = planes[0].len();
@@ -456,10 +468,6 @@ impl Player {
             wrote += rem;
         }
     }
-
-    /// The most messages [`chase`](Self::chase) writes.
-    pub(crate) const CHASE_MESSAGES: usize =
-        Voicing::CHASE_MESSAGES + MidiChannel::COUNT as usize * Channel::CHASE_MESSAGES;
 
     /// Writes the state a successor starts from, as messages in this
     /// player's Group: each channel's program, bank and sends, then the
@@ -490,7 +498,6 @@ impl Player {
     }
 
     fn render_block(&mut self) {
-        let inverse_block_size = 1_f32 / self.render.block_len() as f32;
         let bends = std::array::from_fn(|i| {
             MidiChannel::new(i as u8).map_or(Semitones(0.0), |c| self.voicing.channel_pitch(c))
         });
@@ -502,32 +509,34 @@ impl Player {
         );
 
         for plane in &mut self.block {
-            plane.fill(0_f32);
+            plane.fill(F::ZERO);
         }
         self.block_heard = Heard::default();
         // The Master Volume and Balance (M1 p.57) ramp across the chunk with
         // the voices' own gains, on every plane: the sends carry them too.
         let (from, to) = (self.master_applied, self.voicing.master_gain());
         self.master_applied = to;
-        // The chunk is `f32`: the master gains narrow once per chunk.
-        let (from_left, from_right) = (from.left.get() as f32, from.right.get() as f32);
-        let (to_left, to_right) = (to.left.get() as f32, to.right.get() as f32);
+        // The master gains cross to the chunk's float once per chunk.
+        let master = |gain: Amplitude| F::from_unit(MASTER_VOLUME * gain.get());
+        let (from_left, from_right) = (master(from.left), master(from.right));
+        let (to_left, to_right) = (master(to.left), master(to.right));
         for voice in self.voices.iter() {
             let (prev_l, cur_l) = (
-                MASTER_VOLUME * from_left * voice.previous_mix_gain_left,
-                MASTER_VOLUME * to_left * voice.current_mix_gain_left,
+                from_left * voice.previous_mix_gain_left,
+                to_left * voice.current_mix_gain_left,
             );
             let (prev_r, cur_r) = (
-                MASTER_VOLUME * from_right * voice.previous_mix_gain_right,
-                MASTER_VOLUME * to_right * voice.current_mix_gain_right,
+                from_right * voice.previous_mix_gain_right,
+                to_right * voice.current_mix_gain_right,
             );
-            let mut write = |plane: Plane, previous: f32, current: f32| {
+            let mut write = |plane: Plane, previous: F, current: F| {
                 if write_block(
                     previous,
                     current,
                     voice.block(),
                     &mut self.block[plane as usize],
-                    inverse_block_size,
+                    self.inverse_block_size,
+                    self.audible_floor,
                 ) {
                     self.block_heard.insert(plane);
                 }
@@ -588,35 +597,36 @@ impl Player {
     /// cannot be bounded (it is not finite). The effects after the unit are the
     /// graph's: each node declares its own tail.
     pub(crate) fn ring_out(&self) -> Option<Seconds> {
-        let mut longest = 0_f64;
+        let mut longest = Seconds(0.0);
         for preset in self.font.presets() {
             for preset_zone in preset.regions() {
                 let instrument = &self.font.instruments()[preset_zone.instrument_id()];
                 for instrument_zone in instrument.regions() {
                     let pair = crate::region_pair::RegionPair::new(preset_zone, instrument_zone);
-                    longest = longest.max(pair.release_time().get());
+                    longest = longest.max(pair.release_time());
                 }
             }
         }
-        longest.is_finite().then_some(Seconds(longest))
+        longest.get().is_finite().then_some(longest)
     }
 }
 
 /// Adds `source` into `destination` at a gain that ramps from `previous_gain`
 /// to `current_gain` across the chunk. Returns whether it wrote anything: not
 /// when the gain stays under the audible floor.
-fn write_block(
-    previous_gain: f32,
-    current_gain: f32,
-    source: &[f32],
-    destination: &mut [f32],
-    inverse_block_size: f32,
+fn write_block<F: Float>(
+    previous_gain: F,
+    current_gain: F,
+    source: &[F],
+    destination: &mut [F],
+    inverse_block_size: F,
+    audible_floor: F,
 ) -> bool {
-    if f64::from(previous_gain.max(current_gain)) < SoundFontMath::NON_AUDIBLE.get() {
+    if previous_gain.max(current_gain) < audible_floor {
         return false;
     }
 
-    if (current_gain - previous_gain).abs() < 1.0E-3_f32 {
+    if (current_gain - previous_gain).abs() < F::lit(1.0e-3) {
         ArrayMath::multiply_add(current_gain, source, destination);
     } else {
         let step = inverse_block_size * (current_gain - previous_gain);

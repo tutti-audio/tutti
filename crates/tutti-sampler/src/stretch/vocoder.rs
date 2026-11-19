@@ -7,19 +7,20 @@
 use std::sync::Arc;
 
 use super::buffers::{OverlapAdd, SampleFifo};
-use super::fft::{Complex32, Fft};
+use super::fft::Fft;
 #[allow(
     unused_imports,
     reason = "`Unit` is referenced only by the intra-doc link on `clone_fresh` below; rustdoc needs the name in scope to resolve it"
 )]
 use super::{FftSize, Unit};
-use tutti_dsp::StftGeometry;
+use tutti_buffers::Float;
+use tutti_dsp::{Complex, FftFloat, StftGeometry};
 use tutti_units::Radians;
 
 /// One channel of phase-vocoder state.
 ///
 /// Sized once, at construction; `process` allocates nothing.
-pub(super) struct Vocoder {
+pub(super) struct Vocoder<F: Float + FftFloat> {
     pub(super) geometry: StftGeometry,
     /// The analysis/synthesis window, taken from the grid.
     ///
@@ -30,16 +31,16 @@ pub(super) struct Vocoder {
     /// `Arc` because it is immutable for the vocoder's lifetime and identical for
     /// every channel and every clone, and building it costs `size` `cos()`
     /// calls. Sharing turns that into a refcount bump.
-    pub(super) window: Arc<Vec<f32>>,
+    pub(super) window: Arc<Vec<F>>,
 
     /// The real-input transform pair and its scratch.
-    pub(super) fft: Fft,
+    pub(super) fft: Fft<F>,
     /// The frame in, and the synthesized frame out (the forward transform
     /// clobbers it, the inverse fills it).
-    pub(super) fft_buffer: Vec<f32>,
+    pub(super) fft_buffer: Vec<F>,
     /// Half spectrum, `DC..=Nyquist` (`size / 2 + 1` bins): written by
     /// analysis, rewritten with the synthesis phases before the inverse.
-    pub(super) spectrum: Vec<Complex32>,
+    pub(super) spectrum: Vec<Complex<F>>,
     /// Per-bin synthesis phase, accumulated across frames.
     pub(super) phase_accumulator: Vec<Radians>,
     /// Per-bin analysis phase from the previous frame.
@@ -66,11 +67,14 @@ pub(super) struct Vocoder {
     /// must seed again.
     pub(super) primed: bool,
 
-    pub(super) input: SampleFifo,
-    pub(super) output: OverlapAdd,
+    /// The inverse transform's `1 / size`, crossed once at construction.
+    norm: F,
+
+    pub(super) input: SampleFifo<F>,
+    pub(super) output: OverlapAdd<F>,
 }
 
-impl Vocoder {
+impl<F: Float + FftFloat> Vocoder<F> {
     /// The window this vocoder was built on, which its buffers are sized
     /// to: what a rate change must rebuild the grid with.
     pub(super) fn fft_size(&self) -> FftSize {
@@ -100,16 +104,17 @@ impl Vocoder {
 
         Self {
             geometry,
-            window: Arc::new(geometry.window_coefficients()),
+            window: Arc::new(window(geometry)),
             fft: Fft::new(size),
-            fft_buffer: vec![0.0; size],
-            spectrum: vec![Complex32::new(0.0, 0.0); bins],
+            fft_buffer: vec![F::ZERO; size],
+            spectrum: vec![Complex::new(F::ZERO, F::ZERO); bins],
             phase_accumulator: vec![Radians(0.0); bins],
             last_phase: vec![Radians(0.0); bins],
             phase_per_sample: Arc::new(phase_per_sample),
             // 4x the window: three frames of overlap-add tail plus the frame
             // being written.
             primed: false,
+            norm: F::from_design(1.0 / size as f64),
             input: SampleFifo::new(size * 4),
             output: OverlapAdd::new(size * 4),
         }
@@ -138,12 +143,13 @@ impl Vocoder {
             geometry: self.geometry,
             window: Arc::clone(&self.window),
             fft: self.fft.clone_fresh(),
-            fft_buffer: vec![0.0; size],
-            spectrum: vec![Complex32::new(0.0, 0.0); bins],
+            fft_buffer: vec![F::ZERO; size],
+            spectrum: vec![Complex::new(F::ZERO, F::ZERO); bins],
             phase_accumulator: vec![Radians(0.0); bins],
             last_phase: vec![Radians(0.0); bins],
             phase_per_sample: Arc::clone(&self.phase_per_sample),
             primed: false,
+            norm: F::from_design(1.0 / size as f64),
             input: SampleFifo::new(size * 4),
             output: OverlapAdd::new(size * 4),
         }
@@ -152,8 +158,8 @@ impl Vocoder {
     /// Clear every buffer and the phase history, keeping the grid and the shared
     /// tables. Allocation-free, so it is safe from the audio thread.
     pub(super) fn reset(&mut self) {
-        self.fft_buffer.fill(0.0);
-        self.spectrum.fill(Complex32::new(0.0, 0.0));
+        self.fft_buffer.fill(F::ZERO);
+        self.spectrum.fill(Complex::new(F::ZERO, F::ZERO));
         self.phase_accumulator.fill(Radians(0.0));
         self.last_phase.fill(Radians(0.0));
         self.input.reset();
@@ -211,10 +217,11 @@ impl Vocoder {
         // 3. Per-bin phase advance, re-accumulated at the synthesis rate.
         let hop_ratio = synthesis_hop as f64 / analysis_hop as f64;
         for k in 0..bins {
-            let magnitude = self.spectrum[k].norm();
-            // The spectrum is `f32`: its phase widens into the unit, and the
-            // accumulated phase narrows once per bin on the way back.
-            let phase = Radians(f64::from(self.spectrum[k].arg()));
+            let Complex { re, im } = self.spectrum[k];
+            let magnitude = (re * re + im * im).sqrt();
+            // The phase widens into the unit, and the accumulated phase
+            // crosses back to the spectrum's width once per bin.
+            let phase = Radians(im.atan2(re).into());
 
             // Deviation of the observed advance from the expected one, wrapped
             // into [-π, π) — the unwrapping step that recovers the bin's true
@@ -235,8 +242,11 @@ impl Vocoder {
             }
             self.last_phase[k] = phase;
 
-            self.spectrum[k] =
-                Complex32::from_polar(magnitude, self.phase_accumulator[k].get() as f32);
+            let (sin, cos) = {
+                let angle = F::from_unit(self.phase_accumulator[k]);
+                (angle.sin(), angle.cos())
+            };
+            self.spectrum[k] = Complex::new(magnitude * cos, magnitude * sin);
         }
 
         self.primed = true;
@@ -247,14 +257,14 @@ impl Vocoder {
         //    Nyquist's imaginary parts (a polar bin at phase pi is not exactly
         //    real) are ignored.
         self.fft.inverse(&mut self.spectrum, &mut self.fft_buffer);
-        let norm = 1.0 / size as f32;
         for i in 0..size {
             let w = self.window[i];
             // The windowed sample and the window energy that carried it, summed
             // into the same slot. `drain` divides one by the other, as
             // `tutti_measure::istft_transform` does; a constant COLA gain would be right
             // for one window at one hop only.
-            self.output.add_at(i, self.fft_buffer[i] * norm * w, w * w);
+            self.output
+                .add_at(i, self.fft_buffer[i] * self.norm * w, w * w);
         }
 
         // Zero the span the next frame will accumulate into, which this one has
@@ -284,3 +294,9 @@ pub(super) fn wrap_phase(phase: Radians) -> Radians {
 // sum is accumulated per sample in `OverlapAdd` and divided out at the read,
 // as `tutti_measure::istft_transform` does. See that type's doc for why the two rings
 // are one struct.
+
+/// The analysis/synthesis window of `geometry` as data of the vocoder's width:
+/// designed in `f64` by `StftGeometry`, each coefficient crossing to `F` once.
+fn window<F: Float>(geometry: StftGeometry) -> Vec<F> {
+    geometry.window_coefficients::<F>()
+}
