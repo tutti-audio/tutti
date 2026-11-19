@@ -18,27 +18,20 @@ use tutti_coremidi_ffi::{Timebase, host_ticks};
 use tutti_midi_runtime::SendAt;
 
 /// The host clock and the OS's read together ([`Paired`]): to place a
-/// callback's packets, and to stamp a batch's.
+/// callback's packets, and to stamp a batch's. A stamp is a duration since the
+/// host clock's origin, `None` for "now".
 #[derive(Clone, Copy, Debug)]
 pub(super) struct Pairing {
-    base: Timebase,
     paired: Paired,
 }
 
 impl Pairing {
     /// Reads both clocks now. Allocation-free, so it runs in CoreMIDI's callback.
     pub(super) fn now() -> Self {
-        let base = Timebase::get();
         let before = Instant::now();
-        let reading = base.duration(host_ticks());
+        let reading = Timebase::get().duration(host_ticks());
         let paired = Paired::midpoint(before, Instant::now(), reading);
-        Self { base, paired }
-    }
-
-    /// The instant of a packet stamped `host_time` ticks; a 0 stamp ("now") is
-    /// the pairing's own.
-    pub(super) fn instant_of(&self, host_time: u64) -> Instant {
-        self.instant_of_stamp(self.base.stamp(host_time))
+        Self { paired }
     }
 
     /// The instant of a packet stamped `time` of host time; no stamp ("now") is
@@ -52,20 +45,18 @@ impl Pairing {
 
     /// The host time to stamp a packet that is to leave at `at`: the one place
     /// an `Instant` becomes CoreMIDI's clock, by this pairing's reading of both.
-    /// An instant the host clock cannot hold is 0, "now".
-    pub(super) fn host_time_of(&self, at: Instant) -> u64 {
-        self.paired
-            .departure(at)
-            .map_or(0, |host| self.base.ticks(host))
+    /// An instant the host clock cannot hold is `None`, "now".
+    pub(super) fn host_time_of(&self, at: Instant) -> Option<Duration> {
+        self.paired.departure(at)
     }
 }
 
-/// The host-time stamp of a packet sent `send`: 0 ("now") for [`SendAt::Now`],
-/// else the host time of its instant by `pairing`, which is read from the clocks
-/// the first time a scheduled packet needs it.
-pub(super) fn stamp_of(send: SendAt, pairing: &mut Option<Pairing>) -> u64 {
+/// The host-time stamp of a packet sent `send`: `None` ("now") for
+/// [`SendAt::Now`], else the host time of its instant by `pairing`, which is read
+/// from the clocks the first time a scheduled packet needs it.
+pub(super) fn stamp_of(send: SendAt, pairing: &mut Option<Pairing>) -> Option<Duration> {
     match send {
-        SendAt::Now => 0,
+        SendAt::Now => None,
         SendAt::At(instant) => pairing
             .get_or_insert_with(Pairing::now)
             .host_time_of(instant),
