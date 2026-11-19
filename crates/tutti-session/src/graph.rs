@@ -1326,6 +1326,7 @@ impl<F: Float> Graph<F> {
             entry.reclaimer = None;
         }
         self.note_pass(node);
+        self.sweep_gain_targets();
         self.edited = true;
         Ok(controls)
     }
@@ -1932,6 +1933,7 @@ impl<F: Float> Graph<F> {
         // The edges it feeds fade out first: the node stays in the editor,
         // rendering, until they have.
         self.editor.remove_declicked(node);
+        self.sweep_gain_targets();
         self.feeds.remove(&node);
         for feeds in self.feeds.values_mut() {
             for sources in feeds.values_mut() {
@@ -2202,6 +2204,7 @@ impl<F: Float> Graph<F> {
         });
         if plain {
             self.editor.spec_mut().clear_edge_gain(id);
+            self.sweep_gain_targets();
         }
         self.edited = true;
     }
@@ -2218,6 +2221,12 @@ impl<F: Float> Graph<F> {
     }
 
     fn drop_edge(&mut self, id: EdgeId, hard: bool) -> bool {
+        let dropped = self.drop_edge_now(id, hard);
+        self.sweep_gain_targets();
+        dropped
+    }
+
+    fn drop_edge_now(&mut self, id: EdgeId, hard: bool) -> bool {
         if !self.editor.spec().has_edge(id) {
             return false;
         }

@@ -401,3 +401,68 @@ fn moving_a_weight_marks_no_recompile() {
     ));
     assert_eq!(r.s.graph_ref().testing().commits_sent(), commits);
 }
+
+/// **A gain target whose lane is gone is refused at the call**, with no
+/// update in between, by every path that removes a lane: removing the node,
+/// disconnecting the edge, clearing the gain, replacing the sink with a node
+/// that has no such input, and rewriting the sink's sources.
+#[test]
+fn a_gain_target_of_a_removed_lane_is_refused_at_the_call() {
+    use tutti_graph::FadeLaw;
+    use tutti_units::Seconds;
+
+    let lane = |r: &mut Rig| {
+        r.s.graph()
+            .connect(node(r.a), InPort::new(r.sink, 0))
+            .unwrap()
+            .hard()
+            .gain(amp(0.5))
+            .unwrap();
+        let _ = r.s.update();
+        let edge = r.edge_from(r.a);
+        GainTarget::of(r.s.graph_ref(), edge.source(), edge.sink()).expect("a lane")
+    };
+    let refused = |r: &mut Rig, gain: GainTarget, path: &str| {
+        assert_eq!(
+            r.s.set(gain.to(amp(1.0))).unwrap_err().kind,
+            ValueErrorKind::NoSuchTarget,
+            "{path}"
+        );
+    };
+
+    let mut r = rig();
+    let gain = lane(&mut r);
+    r.s.graph().remove(r.a).unwrap();
+    refused(&mut r, gain, "node removal");
+
+    let mut r = rig();
+    let gain = lane(&mut r);
+    r.s.graph()
+        .disconnect(node(r.a), InPort::new(r.sink, 0))
+        .unwrap();
+    refused(&mut r, gain, "disconnect");
+
+    let mut r = rig();
+    let gain = lane(&mut r);
+    assert!(r.edge_from(r.a).clear_gain(r.s.graph()));
+    refused(&mut r, gain, "clear_gain");
+
+    let mut r = rig();
+    let gain = lane(&mut r);
+    r.s.graph()
+        .replace(
+            r.sink,
+            ForkByClone(Const::mono(A)),
+            Seconds(0.0),
+            FadeLaw::EqualAmplitude,
+        )
+        .unwrap();
+    refused(&mut r, gain, "replace at an existing key");
+
+    let mut r = rig();
+    let gain = lane(&mut r);
+    r.s.graph()
+        .set_sources(InPort::new(r.sink, 0), [node(r.b)])
+        .unwrap();
+    refused(&mut r, gain, "set_sources");
+}
