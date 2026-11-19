@@ -32,18 +32,13 @@ use std::ptr;
 use tutti_clap_ffi::{EventRef, EventSink, PluginEvent};
 use tutti_graph::UmpAt;
 use tutti_plugin_types::{
-    Edit, LinearRange, ParamEdit, ParamMapping, RtMidiEvents, StableOrder, WireMidi,
+    LinearRange, ParamEdit, ParamMapping, RtMidiEvents, StableOrder, WireMidi,
     expression_of_per_note_controller, group_of_port, note_id_to_channel_note, per_note_message,
     per_note_tuning, plugin_note_id, push_sysex, sysex_assembler,
 };
 use tutti_rt::{CappedVec, RtVec, Tally, TallyWriter, tally};
 use tutti_units::ParamId;
 use tutti_units::{Normalized, Semitones, Velocity};
-
-/// The parameter edits the Controller can have queued to the Processor before
-/// the ring refuses one: one block holds as many, and the Processor reserves
-/// event room for them.
-pub(crate) const EDIT_CAPACITY: usize = 256;
 
 use crate::types::RtNoteExpressions;
 use tutti_midi_protocol::{
@@ -1590,38 +1585,19 @@ impl InputEventList {
         self
     }
 
-    /// Adds the block's queued edits. `drain` hands each queued edit to the
-    /// callback it is given, oldest first. A [`Edit::Reset`] voids the edits
-    /// before it; the edits kept are added in order, and any past the room
-    /// [`InputRooms::sources`] gave them, or past the
-    /// [`EDIT_CAPACITY`] the block can hold, are refused and counted
+    /// Adds the block's edits. `drain` hands each parameter written since the
+    /// last block, with its latest value, to the callback it is given. Edits
+    /// past the room [`InputRooms::sources`] gave them are refused and counted
     /// ([`refused`](Self::refused)).
     pub(crate) fn add_param_edits(
         &mut self,
         ranges: &[ParamBounds],
         plugin_claims_params: bool,
-        drain: impl FnOnce(&mut dyn FnMut(Edit)),
+        drain: impl FnOnce(&mut dyn FnMut(ParamId, Normalized)),
     ) {
-        let mut edits: RtVec<(ParamId, f64), EDIT_CAPACITY> = RtVec::new();
-        let mut surplus = 0u64;
-        drain(&mut |edit| match edit {
-            Edit::Param { id, value } => {
-                if !edits.push((id, value.get())) {
-                    surplus += 1;
-                }
-            }
-            // The Controller reset the stream (a state or preset load): the
-            // edits queued before it are not to be sent.
-            Edit::Reset => {
-                edits.clear();
-                surplus = 0;
-            }
-            _ => {}
+        drain(&mut |id, value| {
+            self.add_param_edit(id, value.get(), ranges, plugin_claims_params);
         });
-        self.refused += surplus;
-        for &(id, value) in &edits {
-            self.add_param_edit(id, value, ranges, plugin_claims_params);
-        }
     }
 
     /// Appends one `PARAM_VALUE` event at the head of the block (time 0) for a
@@ -3301,46 +3277,19 @@ mod tests {
     /// counted.** One more than the room is queued; the room's worth is kept.
     #[test]
     fn an_edit_past_the_edit_room_is_refused_and_counted() {
-        let mut list = InputEventList::new(InputRooms::new(8).sources(EDIT_CAPACITY, 0, 0));
+        const ROOM: usize = 256;
+        let mut list = InputEventList::new(InputRooms::new(8).sources(ROOM, 0, 0));
         let capacity = list.events.capacity();
         assert_no_alloc::assert_no_alloc(|| {
             list.add_param_edits(&[], false, |each| {
-                for id in 0..=EDIT_CAPACITY as u32 {
-                    each(Edit::Param {
-                        id: ParamId::new(id),
-                        value: Normalized::clamped(0.5),
-                    });
+                for id in 0..=ROOM as u32 {
+                    each(ParamId::new(id), Normalized::clamped(0.5));
                 }
             });
         });
-        assert_eq!(list.events.len(), EDIT_CAPACITY);
+        assert_eq!(list.events.len(), ROOM);
         assert_eq!(list.events.capacity(), capacity);
         assert_eq!(list.refused(), 1);
-    }
-
-    /// A reset in the block's edits voids the ones before it.
-    #[test]
-    fn a_reset_voids_the_edits_before_it() {
-        let mut list = InputEventList::new(InputRooms::new(0).sources(8, 0, 0));
-        let param = |id| Edit::Param {
-            id: ParamId::new(id),
-            value: Normalized::clamped(0.5),
-        };
-        list.add_param_edits(&[], false, |each| {
-            each(param(1));
-            each(Edit::Reset);
-            each(param(2));
-        });
-        let ids: Vec<u32> = list
-            .events()
-            .iter()
-            .filter_map(|e| match e {
-                ClapEvent::ParamValue(v) => Some(v.param_id),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(ids, [2]);
-        assert_eq!(list.refused(), 0);
     }
 
     /// **SysEx takes only the MIDI room.** A list whose MIDI room holds three
@@ -3357,10 +3306,7 @@ mod tests {
         assert_eq!(list.midi_dropped(), 2);
         list.add_param_edits(&[], false, |each| {
             for id in 0..3 {
-                each(Edit::Param {
-                    id: ParamId::new(id),
-                    value: Normalized::clamped(0.5),
-                });
+                each(ParamId::new(id), Normalized::clamped(0.5));
             }
         });
         assert_eq!(list.events().len(), 6);
