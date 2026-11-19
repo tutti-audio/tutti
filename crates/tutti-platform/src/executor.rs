@@ -326,7 +326,12 @@ impl Task {
     /// Polls once. A woken task is queued again, a finished or panicked one drops its
     /// future.
     fn run(self: &Arc<Self>) {
-        self.queued.store(false, Ordering::Release);
+        // `queued` is only ever swapped, here and in `wake_by_ref`: two read-modify-writes
+        // on one atomic. Either the waker's swap is first, and this acquire sees what
+        // the waker published before it, or this swap is first, and the waker reads
+        // `false` and queues the task again. A store here would let the poll read stale
+        // state while the waker still saw `true`: a lost wake.
+        self.queued.swap(false, Ordering::AcqRel);
         let mut slot = lock(&self.future);
         let Some(future) = slot.as_mut() else {
             return;
