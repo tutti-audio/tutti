@@ -2341,3 +2341,100 @@ fn a_setting_the_control_lane_cannot_take_in_time_is_counted() {
         mock.bridge.audio().unapplied_settings() == 1
     });
 }
+
+/// A control script that holds a setting while a block may overtake it: the
+/// setting's request waits up to a window for the block to arrive at the audio
+/// lane's script (it ends at once if one does, and is only waited out by a host
+/// that holds the block back), then logs `name`.
+fn log_after_window(
+    log: &Arc<std::sync::Mutex<Vec<&'static str>>>,
+    block_rx: &crossbeam_channel::Receiver<()>,
+    name: &'static str,
+) {
+    let _ = block_rx.recv_timeout(Duration::from_millis(300));
+    log.lock().unwrap().push(name);
+}
+
+/// The audio lane's script for the ordering tests: logs the block, then answers.
+fn log_blocks(
+    log: Arc<std::sync::Mutex<Vec<&'static str>>>,
+    block_seen: crossbeam_channel::Sender<()>,
+) -> impl Fn(HostMessage) -> Action + Send + 'static {
+    move |msg| {
+        if matches!(msg, HostMessage::ProcessAudio(_)) {
+            log.lock().unwrap().push("block");
+            let _ = block_seen.try_send(());
+        }
+        answer_blocks(msg)
+    }
+}
+
+/// **A render mode is applied before the next block is sent.** The control lane
+/// gives the mode a window to be overtaken by a block; a block held for the
+/// mode's fence is not, and the server's two lanes see the mode, its fence and
+/// then the block. A bridge that stops holding the blocks logs the block first.
+#[test]
+fn a_render_mode_is_applied_before_the_next_block() {
+    let log = Arc::new(std::sync::Mutex::new(Vec::<&'static str>::new()));
+    let (block_seen, block_rx) = crossbeam_channel::bounded(1);
+    let control = {
+        let log = Arc::clone(&log);
+        move |msg: HostMessage| match msg {
+            HostMessage::SetRenderMode { .. } => {
+                log_after_window(&log, &block_rx, "mode");
+                Action::Silent
+            }
+            HostMessage::GetCurrentPreset => {
+                log.lock().unwrap().push("fence");
+                Action::Reply(Box::new(applied_fence()))
+            }
+            _ => Action::Silent,
+        }
+    };
+    let mut mock = MockServer::start_lanes(
+        "render-mode-order",
+        log_blocks(Arc::clone(&log), block_seen),
+        control,
+    );
+
+    assert!(
+        mock.bridge
+            .audio()
+            .set_render_mode_rt(tutti_plugin_types::RenderMode::Offline)
+    );
+    submit_block(&mock.bridge, 1);
+    tutti_fixtures::wait_until("the block to be answered", NOTICE_TIMEOUT, || {
+        answered(&mut mock, 1)
+    });
+    assert_eq!(*log.lock().unwrap(), ["mode", "fence", "block"]);
+}
+
+/// **A rate change is applied before the next block is sent**, as a render mode
+/// is: the server sees the rate change, and only then the block.
+#[test]
+fn a_rate_change_is_applied_before_the_next_block() {
+    let log = Arc::new(std::sync::Mutex::new(Vec::<&'static str>::new()));
+    let (block_seen, block_rx) = crossbeam_channel::bounded(1);
+    let control = {
+        let log = Arc::clone(&log);
+        move |msg: HostMessage| match msg {
+            HostMessage::SetSampleRate { rate } => {
+                log_after_window(&log, &block_rx, "rate");
+                Action::Reply(Box::new(BridgeMessage::SampleRateSet { rate, error: None }))
+            }
+            _ => Action::Silent,
+        }
+    };
+    let mut mock = MockServer::start_lanes(
+        "rate-order",
+        log_blocks(Arc::clone(&log), block_seen),
+        control,
+    );
+
+    assert!(mock.bridge.audio().set_sample_rate_rt(SampleRate::SR_96K));
+    submit_block(&mock.bridge, 1);
+    tutti_fixtures::wait_until("the block to be answered", NOTICE_TIMEOUT, || {
+        answered(&mut mock, 1)
+    });
+    assert_eq!(*log.lock().unwrap(), ["rate", "block"]);
+}

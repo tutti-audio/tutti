@@ -858,14 +858,17 @@ impl AudioBridge {
     }
 
     /// Wait until every setting queued before this call (a rate change, a render
-    /// mode) has been applied, every request before it handled, and every
-    /// event the server sent because of them (a `LatencyChanged` a render-mode
-    /// or rate change caused) has reached the listener. Control thread.
+    /// mode) has been applied, the control commands already in flight to the
+    /// server have been handled, and the events the server sent because of them
+    /// (a `LatencyChanged` a render-mode or rate change caused) have reached the
+    /// listener. Control thread.
     ///
-    /// The settle rides the audio lane's queue behind the settings, like them,
-    /// and holds the blocks after it for two round trips to the control lane (see
-    /// `AudioCommand::Settle` for why two). It takes no request slot. Blocks for
-    /// at most two settle waits and a query's.
+    /// **What the fence proves is that and no more**: a settle rides the audio
+    /// lane's queue behind the settings, but settings jump the control queue, so
+    /// a control command still queued (a `SetParameter`, say) is not waited for.
+    /// The settle holds the blocks after it for two round trips to the control
+    /// lane (see `AudioCommand::Settle` for why two) and takes no request slot.
+    /// Blocks for at most two settle waits and a query's.
     pub(crate) fn settle(&self) {
         if self.lifecycle.is_crashed() {
             return;
