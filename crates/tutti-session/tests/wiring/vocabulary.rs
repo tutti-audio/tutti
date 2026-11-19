@@ -9,7 +9,7 @@ use tutti_buffers::{FoldError, InterleavedMut};
 use tutti_graph::ForkByClone;
 use tutti_nodes::testing::{Const, Through};
 use tutti_session::{
-    ConnectError, DeclarationError, Edge, GainTarget, GainTargetError, OutPort, Root, Session,
+    ConnectError, DeclarationError, Edge, GainTargetError, OutPort, Root, Session,
 };
 use tutti_units::Amplitude;
 
@@ -134,11 +134,14 @@ fn a_connections_gain_weights_the_edge_it_added() {
         .unwrap();
     assert_eq!(first_frame(&mut s), [0.25, 0.0]);
     let edge = Edge::new(src.out(0), Root::output(0));
-    let gain = GainTarget::of(s.graph_ref(), edge.source(), edge.sink()).expect("a lane");
+    let gain = s
+        .graph_ref()
+        .gain_target(edge.source(), edge.sink())
+        .expect("a lane");
     assert_eq!(s.get(gain).unwrap(), Amplitude::new(0.5));
     assert!(edge.clear_gain(s.graph()));
     assert_eq!(
-        GainTarget::of(s.graph_ref(), edge.source(), edge.sink()),
+        s.graph_ref().gain_target(edge.source(), edge.sink()),
         Err(GainTargetError::NoLane(edge))
     );
     assert_eq!(first_frame(&mut s), [0.5, 0.0]);

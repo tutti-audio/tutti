@@ -18,8 +18,7 @@ use super::error::SetRefusal;
 use super::slot::{Slot, SlotCell, SlotId, keyed_slot_target};
 use super::state::Params;
 use super::target::{Effective, Moved, ScalarTarget, Target, TargetId, sealed, target_builders};
-use crate::{Edge, Graph, InPort, OutPort};
-use tutti_buffers::Float;
+use crate::Edge;
 
 /// A control written and not yet handed to the editor.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -293,7 +292,7 @@ impl MixTarget {
 
 keyed_slot_target!(
     /// The gain of one audio edge, a weight of the sum its sink holds, as
-    /// [`GainTarget::of`] names it: `1.0` is the plain sum, `0.0` mutes the
+    /// [`Graph::gain_target`](crate::Graph::gain_target) names it: `1.0` is the plain sum, `0.0` mutes the
     /// edge and a negative gain inverts it. A route onto the edge
     /// ([`Edge`]) moves the gain around this value.
     ///
@@ -319,23 +318,6 @@ impl GainTarget {
         Effective { target: self }
     }
 
-    /// The gain of the wire `from -> to` in `graph`: the edge has a target
-    /// once it has a gain lane, which only its declaration adds
-    /// ([`Connection::gain`](crate::Connection::gain)).
-    ///
-    /// # Errors
-    ///
-    /// [`GainTargetError::NoLane`] when the wire is not in the graph or has no
-    /// gain lane, and [`GainTargetError::BusLane`] for a lane a bus edge lowers
-    /// to.
-    pub fn of<F: Float>(
-        graph: &Graph<F>,
-        from: OutPort,
-        to: InPort,
-    ) -> Result<Self, GainTargetError> {
-        graph.gain_target(Edge::new(from, to))
-    }
-
     /// The edge the gain is of.
     #[must_use]
     pub const fn edge(self) -> Edge {
@@ -343,7 +325,7 @@ impl GainTarget {
     }
 }
 
-/// Why [`GainTarget::of`] named no gain.
+/// Why [`Graph::gain_target`](crate::Graph::gain_target) named no gain.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum GainTargetError {

@@ -47,7 +47,9 @@ fn settle(s: &mut Session) {
 
 /// The gain target of `edge`, which has a lane.
 fn gain(s: &Session, edge: Edge) -> GainTarget {
-    GainTarget::of(s.graph_ref(), edge.source(), edge.sink()).expect("a lane")
+    s.graph_ref()
+        .gain_target(edge.source(), edge.sink())
+        .expect("a lane")
 }
 
 /// Output channel 0 (the left of the stereo root) for `blocks` blocks.

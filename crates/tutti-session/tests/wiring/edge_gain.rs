@@ -84,15 +84,21 @@ impl Rig {
     /// The value of the gain lane of `from`'s edge into the sink.
     fn gain_of(&self, from: NodeKey) -> Amplitude {
         let edge = self.edge_from(from);
-        let target =
-            GainTarget::of(self.s.graph_ref(), edge.source(), edge.sink()).expect("a lane");
+        let target = self
+            .s
+            .graph_ref()
+            .gain_target(edge.source(), edge.sink())
+            .expect("a lane");
         self.s.get(target).unwrap()
     }
 
     /// Whether `from`'s edge into the sink has no gain lane.
     fn no_lane(&self, from: NodeKey) -> bool {
         let edge = self.edge_from(from);
-        GainTarget::of(self.s.graph_ref(), edge.source(), edge.sink()).is_err()
+        self.s
+            .graph_ref()
+            .gain_target(edge.source(), edge.sink())
+            .is_err()
     }
 }
 
@@ -115,7 +121,7 @@ fn an_edge_gain_is_declared_written_read_and_cleared() {
     assert!(all_are(&settled(&mut r.s, 0), A + B));
     let edge = r.edge_from(r.a);
     assert_eq!(
-        GainTarget::of(r.s.graph_ref(), edge.source(), edge.sink()),
+        r.s.graph_ref().gain_target(edge.source(), edge.sink()),
         Err(GainTargetError::NoLane(edge)),
         "plain: no lane"
     );
@@ -127,7 +133,10 @@ fn an_edge_gain_is_declared_written_read_and_cleared() {
         .gain(amp(0.5))
         .unwrap();
     assert!(r.s.graph_ref().is_edited(), "a declared lane is structural");
-    let gain = GainTarget::of(r.s.graph_ref(), edge.source(), edge.sink()).expect("a lane");
+    let gain =
+        r.s.graph_ref()
+            .gain_target(edge.source(), edge.sink())
+            .expect("a lane");
     assert_eq!(r.s.get(gain).unwrap(), amp(0.5));
     assert!(all_are(&settled(&mut r.s, 0), (0.0 + 0.5 * A) + B));
 
@@ -163,11 +172,15 @@ fn a_gain_target_needs_a_lane_and_a_number() {
     let _ = r.s.update();
     let missing = r.edge_from(r.b);
     assert_eq!(
-        GainTarget::of(r.s.graph_ref(), missing.source(), missing.sink()),
+        r.s.graph_ref()
+            .gain_target(missing.source(), missing.sink()),
         Err(GainTargetError::NoLane(missing))
     );
     let real = r.edge_from(r.a);
-    let gain = GainTarget::of(r.s.graph_ref(), real.source(), real.sink()).expect("a lane");
+    let gain =
+        r.s.graph_ref()
+            .gain_target(real.source(), real.sink())
+            .expect("a lane");
     for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
         let refused = r.s.set(gain.to(amp(bad))).unwrap_err();
         assert_eq!(
@@ -275,7 +288,9 @@ fn add_output_source_weighted_weights_the_channel() {
         [node(a), node(b)]
     );
     let weight = |r: &Rig, from| {
-        GainTarget::of(r.s.graph_ref(), node(from), Root::output(1)).expect("a lane")
+        r.s.graph_ref()
+            .gain_target(node(from), Root::output(1))
+            .expect("a lane")
     };
     assert_eq!(r.s.get(weight(&r, a)).unwrap(), amp(0.5));
     assert!(all_are(&settled(&mut r.s, 1), (0.0 + 0.5 * A) + 2.0 * B));
@@ -350,7 +365,7 @@ fn removing_a_source_drops_its_weight() {
         .disconnect_hard(node(a), Root::output(1))
         .unwrap();
     assert_eq!(
-        GainTarget::of(r.s.graph_ref(), node(a), Root::output(1)),
+        r.s.graph_ref().gain_target(node(a), Root::output(1)),
         Err(GainTargetError::NoLane(Edge::new(node(a), Root::output(1))))
     );
     assert!(all_are(&settled(&mut r.s, 1), B));
@@ -364,7 +379,7 @@ fn removing_a_source_drops_its_weight() {
         .set_sources_hard(Root::output(1), [node(b)])
         .unwrap();
     assert_eq!(
-        GainTarget::of(r.s.graph_ref(), node(a), Root::output(1)),
+        r.s.graph_ref().gain_target(node(a), Root::output(1)),
         Err(GainTargetError::NoLane(Edge::new(node(a), Root::output(1))))
     );
     assert!(all_are(&settled(&mut r.s, 1), B));
@@ -391,7 +406,10 @@ fn moving_a_weight_marks_no_recompile() {
     let plan = r.s.graph_ref().testing().sent_plan().expect("a plan");
     let commits = r.s.graph_ref().testing().commits_sent();
 
-    let gain = GainTarget::of(r.s.graph_ref(), node(a), InPort::new(sink, 0)).expect("a lane");
+    let gain =
+        r.s.graph_ref()
+            .gain_target(node(a), InPort::new(sink, 0))
+            .expect("a lane");
     r.s.set(gain.to(amp(1.5))).unwrap();
     assert!(!r.s.graph_ref().is_edited(), "a control, not a rewire");
     assert!(all_are(&settled(&mut r.s, 0), (0.0 + 1.5 * A) + B));
@@ -420,7 +438,9 @@ fn a_gain_target_of_a_removed_lane_is_refused_at_the_call() {
             .unwrap();
         let _ = r.s.update();
         let edge = r.edge_from(r.a);
-        GainTarget::of(r.s.graph_ref(), edge.source(), edge.sink()).expect("a lane")
+        r.s.graph_ref()
+            .gain_target(edge.source(), edge.sink())
+            .expect("a lane")
     };
     let refused = |r: &mut Rig, gain: GainTarget, path: &str| {
         assert_eq!(

@@ -15,7 +15,7 @@ use tutti_graph::{
 };
 use tutti_nodes::testing::Const;
 use tutti_session::{
-    BusSink, Edge, EventEdge, Feeder, GainTarget, InPort, OutPort, Root, Session, SessionEvent,
+    BusSink, Edge, EventEdge, Feeder, InPort, OutPort, Root, Session, SessionEvent,
 };
 use tutti_units::{Amplitude, Seconds};
 
@@ -175,7 +175,10 @@ fn a_narrower_reinsert_reports_what_it_dropped_and_keeps_the_rest() {
         channel(&mut s, 1).iter().all(|&v| v == 0.0),
         "output 1 lost its source"
     );
-    let gain = GainTarget::of(s.graph_ref(), kept.source(), kept.sink()).expect("a lane");
+    let gain = s
+        .graph_ref()
+        .gain_target(kept.source(), kept.sink())
+        .expect("a lane");
     assert_eq!(
         s.get(gain).unwrap(),
         Amplitude::new(f64::from(GAIN)),

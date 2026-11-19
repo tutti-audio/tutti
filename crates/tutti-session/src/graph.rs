@@ -2779,7 +2779,8 @@ impl<F: Float> Graph<F> {
     ///
     /// [`GainTargetError::NoLane`] when the edge is not in the graph or has
     /// no gain lane, [`GainTargetError::BusLane`] for a lane of a bus edge.
-    pub(crate) fn gain_target(&self, edge: Edge) -> Result<GainTarget, GainTargetError> {
+    pub fn gain_target(&self, from: OutPort, to: InPort) -> Result<GainTarget, GainTargetError> {
+        let edge = Edge::new(from, to);
         let id = Self::edge_id(edge).ok_or(GainTargetError::NoLane(edge))?;
         match self.editor.check_gain_edge(id) {
             Ok(()) => {}
