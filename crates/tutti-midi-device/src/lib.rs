@@ -53,7 +53,7 @@
 //! connection.on_timeout(start + 2 * STEP_TIMEOUT);
 //! assert_eq!(
 //!     connection.on_timeout(start + 3 * STEP_TIMEOUT + Duration::from_millis(1)),
-//!     DiscoveryAction::Settled(DiscoveryEnding::Midi1Fallback)
+//!     DiscoveryAction::Ended(DiscoveryEnding::Midi1Fallback)
 //! );
 //! ```
 //!

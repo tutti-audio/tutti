@@ -18,7 +18,7 @@
 //! A step that gets no answer within [`STEP_TIMEOUT`] is sent again, up to
 //! [`MAX_ATTEMPTS`] times in all. Then Discovery and Select Protocol give up
 //! and the peer is a MIDI 1.0 device ([`DiscoveryEnding::Midi1Fallback`]); Function
-//! Blocks settle with the blocks that arrived. Once every block's Info is in,
+//! Blocks are complete with the blocks that arrived. Once every block's Info is in,
 //! the Names have [`NAME_GRACE`] to follow, since a block with no name sends
 //! none.
 
@@ -49,11 +49,11 @@ pub const STEP_TIMEOUT: Duration = Duration::from_secs(1);
 /// How long Function Block discovery waits for Names once every Info is in. A
 /// block with no name never sends one (§7.1.9 makes the name optional), so a Name is not
 /// something to wait for without end; when every block's Info and Name are in
-/// it settles at once. 100 ms is ours.
+/// it ends at once. 100 ms is ours.
 pub const NAME_GRACE: Duration = Duration::from_millis(100);
 
 /// How many times a step is sent in all, the first included. Ours: three
-/// attempts, so a silent peer settles as MIDI 1.0 after
+/// attempts, so a silent peer ends as MIDI 1.0 after
 /// `3 x` [`STEP_TIMEOUT`].
 pub const MAX_ATTEMPTS: u8 = 3;
 
@@ -78,8 +78,8 @@ pub enum DiscoveryAction {
     /// Send this packet to the peer.
     Send(Ump),
     /// The discovery is over; read [`EndpointDiscovery::endpoint`].
-    Settled(DiscoveryEnding),
-    /// After a [`Negotiated`](DiscoveryEnding::Negotiated) settle, the peer told
+    Ended(DiscoveryEnding),
+    /// After a [`Negotiated`](DiscoveryEnding::Negotiated) ending, the peer told
     /// something that changes what [`EndpointDiscovery::endpoint`] holds: a Stream
     /// Configuration Notification that moves the Protocol or JR Timestamps in
     /// use, or (when the Endpoint did not declare its Function Blocks static)
@@ -162,7 +162,7 @@ impl EndpointDiscovery {
         (connection, first)
     }
 
-    /// What the connection learned so far. Final once [`settled`](Self::settled).
+    /// What the connection learned so far. Final once [`ending`](Self::ending).
     #[must_use]
     pub const fn endpoint(&self) -> &Endpoint {
         &self.endpoint
@@ -170,7 +170,7 @@ impl EndpointDiscovery {
 
     /// How it ended, or `None` while a step is waiting.
     #[must_use]
-    pub const fn settled(&self) -> Option<DiscoveryEnding> {
+    pub const fn ending(&self) -> Option<DiscoveryEnding> {
         match self.step {
             Step::Done(ending) => Some(ending),
             _ => None,
@@ -178,7 +178,7 @@ impl EndpointDiscovery {
     }
 
     /// When [`on_timeout`](Self::on_timeout) next has something to do, or
-    /// `None` once settled.
+    /// `None` once ended.
     #[must_use]
     pub fn deadline(&self) -> Option<Instant> {
         match self.step {
@@ -201,7 +201,7 @@ impl EndpointDiscovery {
     /// Folds one message from the peer. One that is not a UMP Stream message,
     /// and one the step does not wait for, are ignored.
     ///
-    /// After a [`Negotiated`](DiscoveryEnding::Negotiated) settle the peer may still
+    /// After a [`Negotiated`](DiscoveryEnding::Negotiated) ending the peer may still
     /// change what it said, and the connection follows it, answering
     /// [`DiscoveryAction::Changed`]: a Stream Configuration Notification is the
     /// Protocol and JR Timestamps in use whenever it comes (§7.1.6.1 step 3),
@@ -209,7 +209,7 @@ impl EndpointDiscovery {
     /// not declare its Function Blocks static (§6.1.1: a static Endpoint's
     /// blocks never change after discovery, and §7.1.8 and §7.1.9 send
     /// change Notifications only from an Endpoint that has not declared that). A Function Block outside the count Endpoint Info declared is
-    /// never read. After a [`Midi1Fallback`](DiscoveryEnding::Midi1Fallback) settle
+    /// never read. After a [`Midi1Fallback`](DiscoveryEnding::Midi1Fallback) ending
     /// everything is ignored: the peer is a MIDI 1.0 device.
     pub fn on_message(&mut self, message: Message, now: Instant) -> DiscoveryAction {
         let Message::Stream(stream) = message else {
@@ -238,7 +238,7 @@ impl EndpointDiscovery {
         } = self.step
         {
             return if now.saturating_duration_since(at) >= NAME_GRACE {
-                self.settle(DiscoveryEnding::Negotiated)
+                self.end(DiscoveryEnding::Negotiated)
             } else {
                 DiscoveryAction::Wait
             };
@@ -251,10 +251,10 @@ impl EndpointDiscovery {
             return DiscoveryAction::Send(self.packet_for_step());
         }
         match self.step {
-            Step::Blocks { .. } => self.settle(DiscoveryEnding::Negotiated),
+            Step::Blocks { .. } => self.end(DiscoveryEnding::Negotiated),
             _ => {
                 self.endpoint.fall_back_to_midi1();
-                self.settle(DiscoveryEnding::Midi1Fallback)
+                self.end(DiscoveryEnding::Midi1Fallback)
             }
         }
     }
@@ -300,7 +300,7 @@ impl EndpointDiscovery {
 
     fn start_blocks(&mut self, now: Instant) -> DiscoveryAction {
         if self.endpoint.declared_blocks.get() == 0 {
-            return self.settle(DiscoveryEnding::Negotiated);
+            return self.end(DiscoveryEnding::Negotiated);
         }
         self.step = Step::Blocks {
             info: 0,
@@ -356,13 +356,13 @@ impl EndpointDiscovery {
         }
         self.step = Step::Blocks { info, name, infos };
         if info & every == every && name & every == every {
-            self.settle(DiscoveryEnding::Negotiated)
+            self.end(DiscoveryEnding::Negotiated)
         } else {
             DiscoveryAction::Wait
         }
     }
 
-    /// A message after a negotiated settle (see [`on_message`](Self::on_message)).
+    /// A message after a negotiated ending (see [`on_message`](Self::on_message)).
     fn follow(&mut self, stream: Stream) -> DiscoveryAction {
         match stream {
             Stream::StreamConfigurationNotification(config) => {
@@ -413,14 +413,14 @@ impl EndpointDiscovery {
         }
     }
 
-    fn settle(&mut self, ending: DiscoveryEnding) -> DiscoveryAction {
+    fn end(&mut self, ending: DiscoveryEnding) -> DiscoveryAction {
         for (i, name) in self.block_names.iter().enumerate() {
             if let (Some(name), Some(Some(block))) = (name, self.endpoint.blocks.get_mut(i)) {
                 block.name = Some(*name);
             }
         }
         self.step = Step::Done(ending);
-        DiscoveryAction::Settled(ending)
+        DiscoveryAction::Ended(ending)
     }
 
     fn send_step(&mut self, now: Instant) -> DiscoveryAction {
