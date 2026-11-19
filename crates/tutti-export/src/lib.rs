@@ -26,7 +26,7 @@
 //!   end, after every output has been finalized and the fork and the event loss
 //!   have been checked. A render that fails or is cancelled leaves every path as it
 //!   was. The renames are the one step that is not undone: if one fails after others
-//!   landed the error is `Error::NotCommitted`, which names the files that did.
+//!   succeeded the error is `Error::NotCommitted`, which names the files in place.
 //! - `write_buffers` encodes planes a caller already holds into the `FileTarget`
 //!   that describes the file.
 //!
@@ -235,7 +235,7 @@ use tutti_units::{Db, Samples};
 /// ([`Produced::File`]) or [`write_buffers`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct Written {
-    /// Where it landed — the `path` the entry point was given.
+    /// Where it was written: the `path` the entry point was given.
     pub path: PathBuf,
     /// Size on disk after finalization, in bytes. `0` if the file could not
     /// be stat'd.
@@ -329,8 +329,8 @@ fn frame_width(layout: ChannelLayout) -> Result<usize> {
 /// at the end, after every output's encoder has been finalized and the fork
 /// and the event loss have been checked: a render that fails, or is
 /// cancelled, leaves every path as it was and no temporary. The renames are
-/// the one step that is not undone: if one fails after others landed the
-/// error is [`Error::NotCommitted`] and the files that landed are kept.
+/// the one step that is not undone: if one fails after others succeeded the
+/// error is [`Error::NotCommitted`] and the files already in place are kept.
 ///
 /// `control` is how a host watches and stops the render: it is told the
 /// [`Stage`] and fraction as the render goes (`Rendering`, then with a
