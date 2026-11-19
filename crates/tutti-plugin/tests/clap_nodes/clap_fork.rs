@@ -133,7 +133,15 @@ fn a_fork_renders_like_the_live_instance_from_its_state() {
             tutti_transport::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
         )
         .expect("the probe forks");
-    assert_eq!(fork.descriptor().name, probe.client.descriptor().name);
+    assert!(
+        probe.client.plugin().id().is_some(),
+        "the live plugin names itself"
+    );
+    assert_eq!(
+        fork.plugin().id(),
+        probe.client.plugin().id(),
+        "the fork is the live plugin"
+    );
 
     const BLOCKS: usize = 40;
     let mut fork = Rig::new(fork, SAMPLE_RATE, BLOCK);

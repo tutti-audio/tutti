@@ -138,12 +138,12 @@ pub(super) const EXCEPTIONS: &[(&str, &str, &str)] = &[
     (
         "crates/tutti-plugin-types/src/format.rs",
         "Uid",
-        "permanent: every sixteen bytes are a class id",
+        "permanent: a class id is any sixteen bytes; it has no range, the gate flags only the private field under the derive",
     ),
     (
         "crates/tutti-plugin-types/src/format.rs",
         "FourCc",
-        "permanent: every u32 is a four-character code",
+        "permanent: the registry accepts any u32 as a component code (`AuComponentType::Unknown` keeps one raw), so no value is invalid and a printable-ASCII check would refuse real components",
     ),
     (
         "crates/tutti-plugin-types/src/parameters.rs",
