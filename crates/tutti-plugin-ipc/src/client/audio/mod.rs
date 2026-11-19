@@ -309,7 +309,7 @@ impl AudioBridge {
 
     /// The count of audio responses the bridge thread could not queue for the
     /// audio thread, shared. See `commands_refused_cell`.
-    pub(crate) fn responses_lost_cell(&self) -> tutti_rt::Tally<u64> {
+    pub(crate) fn responses_lost_cell(&self) -> tutti_rt::Counter<u64> {
         self.channels.responses_lost_cell()
     }
 
