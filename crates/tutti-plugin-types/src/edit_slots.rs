@@ -77,14 +77,14 @@ impl EditWriter {
     }
 
     /// Makes every write made so far stale: a state or a preset load replaced
-    /// the values they were written against, and no block may put them back.
+    /// the values they were written against.
     ///
     /// A caller that follows it with a change a stale write must not overwrite
     /// (a plugin's `set_state`) calls it first: it is ordered before whatever
     /// follows the call (see [`tutti_rt::SeqSlotsWriter::new_epoch`]). A block
-    /// that began draining before the call may still apply what it had already
+    /// that began draining before the reset may still apply what it had
     /// collected, since it overlapped the change; every block that starts after
-    /// the call applies no write from before it.
+    /// the reset sees the new epoch and applies no write from before it.
     pub fn reset(&mut self) {
         self.slots.new_epoch();
     }

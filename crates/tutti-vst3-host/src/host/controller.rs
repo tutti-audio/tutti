@@ -256,13 +256,23 @@ impl Wraps for Vst3Controller {
         self.queue_edit(id, value);
     }
 
-    /// What `load_preset` refuses up front: an id that is no program, or a
-    /// program parameter the plugin does not let the host write.
-    fn preset_reaches_plugin(&self, main: MainThreadMarker, id: &PresetId) -> bool {
+    /// Looks the program up once and refuses, without touching the plugin, an
+    /// id that is no program or a program parameter the host may not write;
+    /// otherwise runs the restore hooks around the load itself.
+    fn load_preset_override(&mut self, main: MainThreadMarker, id: &PresetId) -> Option<bool> {
         let loaded = self.loaded();
-        loaded
-            .program_write(main, id)
-            .is_some_and(|(param, _)| loaded.parameter_writable(main, param).is_ok())
+        let Some((param, value)) = loaded.program_write(main, id) else {
+            return Some(false);
+        };
+        if loaded.parameter_writable(main, param).is_err() {
+            return Some(false);
+        }
+        self.before_restore(main);
+        let selected = self.loaded_mut().select_program(main, param, value);
+        if selected {
+            self.after_restore(main);
+        }
+        Some(selected)
     }
 
     /// The writes queued before the load are stale, voided before it runs.
@@ -272,7 +282,7 @@ impl Wraps for Vst3Controller {
 
     /// The writes the state or the program carried (the plugin keeps them in
     /// `carried`) are queued to the Processor, which the component's own stream
-    /// did not hold, under the stamp the reset made current.
+    /// did not hold, under the epoch the reset made current.
     fn after_restore(&mut self, _main: MainThreadMarker) {
         for (id, value) in std::mem::take(&mut self.loaded_mut().carried) {
             self.queue_edit(id, value);
