@@ -15,7 +15,7 @@ use crossbeam_channel::Receiver;
 
 use super::bell::Bell;
 use super::command::StreamerCommand;
-use tutti_rt::Sleeper;
+use tutti_rt::Parker;
 
 use super::handlers::Handles;
 use super::step::{StepOutcome, StreamerCycle};
@@ -37,13 +37,13 @@ pub(super) const BACKSTOP: Duration = Duration::from_millis(50);
 /// Each cycle clears the bell's refill flag, drains the queue and does one
 /// [`StreamerCycle::step`], then sleeps unless the step has more to do. No wake
 /// is lost: whatever rings after the cycle began (a command pushed, a flag set)
-/// is read by the sleep's own check after it arms the doorbell, so the sleep
+/// is read by the sleep's own check after it arms the parker, so the sleep
 /// returns at once.
 pub(super) fn streamer_loop<F: RingFloat>(
     queue: &Receiver<StreamerCommand<F>>,
     shared: Handles<F>,
     mut cycle: StreamerCycle<F>,
-    mut sleeper: Sleeper,
+    mut parker: Parker,
     backstop: Duration,
 ) {
     let bell = shared.bell.clone();
@@ -54,7 +54,7 @@ pub(super) fn streamer_loop<F: RingFloat>(
             // that holds all its mapping writes, the tail of every clip):
             // sleep until something rings.
             StepOutcome::Idle | StepOutcome::Healthy | StepOutcome::Stalled => {
-                sleep(&bell, &mut sleeper, queue, backstop);
+                sleep(&bell, &mut parker, queue, backstop);
             }
 
             // A ring is below threshold and the cycle moved frames into it:
@@ -66,9 +66,9 @@ pub(super) fn streamer_loop<F: RingFloat>(
 
 fn sleep<F: RingFloat>(
     bell: &Bell,
-    sleeper: &mut Sleeper,
+    parker: &mut Parker,
     queue: &Receiver<StreamerCommand<F>>,
     backstop: Duration,
 ) {
-    bell.sleep(sleeper, || !queue.is_empty(), backstop);
+    bell.sleep(parker, || !queue.is_empty(), backstop);
 }

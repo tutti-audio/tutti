@@ -925,7 +925,7 @@ const LOOM: &[&str] = &[
     r#"LOOM_MAX_PREEMPTIONS=3 RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test split_loom"#,
     r#"LOOM_MAX_PREEMPTIONS=3 RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test job_gate_loom"#,
     r#"LOOM_MAX_PREEMPTIONS=3 RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test task_graph_loom"#,
-    r#"RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test doorbell_loom"#,
+    r#"RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test parker_loom"#,
     r#"RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test level_cell_loom"#,
     r#"RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test request_word_loom"#,
     r#"RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test dirty_set_loom"#,

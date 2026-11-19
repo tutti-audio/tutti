@@ -14,7 +14,7 @@ use tutti_graph::{
     Cx, Editor, Executor, Io, Node, NodeKey, NodeMode, OutPort, Prepare, Shape, Source, Status,
     TransportPosition, Unforkable,
 };
-use tutti_rt::{Hand, Rt, handoff};
+use tutti_rt::{Handoff, Rt, handoff};
 
 const NODE: NodeKey = NodeKey(1);
 const BLOCK: usize = 32;
@@ -56,7 +56,7 @@ impl Node for Holder {
 struct Rig {
     ed: Editor,
     exec: Executor,
-    hand: Hand<u32>,
+    hand: Handoff<u32>,
     processed: Arc<AtomicUsize>,
     parked: Arc<AtomicUsize>,
     returned: Arc<AtomicUsize>,

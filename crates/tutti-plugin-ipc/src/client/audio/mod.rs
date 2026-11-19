@@ -16,7 +16,7 @@
 //!
 //! The bridge's threads live in [`BridgeThread`] (the audio lane's, which owns the
 //! control lane's); its `Drop` shuts them down. **A block never waits behind a
-//! control request**: each lane has its own thread, queue and doorbell.
+//! control request**: each lane has its own thread, queue and wake-up.
 
 mod ask;
 mod channels;
@@ -210,7 +210,7 @@ impl AudioBridge {
         // rate would let the two timeouts drift apart.
         let (channels, waits) = Channels::new(sample_rate, Arc::clone(watch.wake()))?;
         // An end of the server declared by anyone (the process guard, the host)
-        // rings both lanes' threads, which each wait on a bell and not on the
+        // wakes both lanes' threads, which each wait on their own wake-up and not on the
         // watch's gate.
         watch.on_declared(channels.waker());
         let payloads = PayloadPool::new(

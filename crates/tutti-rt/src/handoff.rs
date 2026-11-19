@@ -2,7 +2,7 @@
 //! thread, at a block boundary, without a lock: a plugin's Processor lent to
 //! the graph and recalled for a rate change.
 //!
-//! The control end, [`Hand`], **lends** a value, **recalls** it, and **takes**
+//! The control end, [`Handoff`], **lends** a value, **recalls** it, and **takes**
 //! it back once returned. The audio end, [`Rt`], holds the value it was lent
 //! and, between blocks, [`poll`](Rt::poll)s: it takes a value on offer and
 //! hands its own back when a recall is raised, after running the caller's
@@ -219,7 +219,7 @@ impl<T> Shared<T> {
 
 /// The control end of a [`handoff`]: lends the value, recalls it and takes it
 /// back.
-pub struct Hand<T> {
+pub struct Handoff<T> {
     shared: Arc<Shared<T>>,
 }
 
@@ -238,13 +238,13 @@ pub struct Rt<T> {
 /// A new handoff with nothing lent. The one allocation is here, on the control
 /// side; neither end allocates after it.
 #[must_use]
-pub fn handoff<T: Send>() -> (Hand<T>, Rt<T>) {
+pub fn handoff<T: Send>() -> (Handoff<T>, Rt<T>) {
     let shared = Arc::new(Shared {
         state: AtomicU32::new(EMPTY),
         slot: UnsafeCell::new(MaybeUninit::uninit()),
     });
     (
-        Hand {
+        Handoff {
             shared: Arc::clone(&shared),
         },
         Rt {
@@ -255,7 +255,7 @@ pub fn handoff<T: Send>() -> (Hand<T>, Rt<T>) {
     )
 }
 
-impl<T> Hand<T> {
+impl<T> Handoff<T> {
     /// Offers `value` to the audio end, which takes it at its next poll.
     ///
     /// # Errors
@@ -343,9 +343,9 @@ impl<T> Rt<T> {
     }
 }
 
-impl<T> std::fmt::Debug for Hand<T> {
+impl<T> std::fmt::Debug for Handoff<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Hand").finish_non_exhaustive()
+        f.debug_struct("Handoff").finish_non_exhaustive()
     }
 }
 
