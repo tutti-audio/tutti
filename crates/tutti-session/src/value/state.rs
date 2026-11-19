@@ -242,6 +242,28 @@ impl ValueTable {
         );
     }
 
+    /// Forgets the targets of what is declared on `node`'s params and mix and
+    /// on the edges that touch it (a range, a route's depth), the moment the
+    /// node leaves the graph: a call that names them fails at the call, not
+    /// at the next update. Control thread.
+    pub(crate) fn retire_declared_on(&self, node: NodeKey) {
+        let touches = |target: &crate::ModTarget| match target {
+            crate::ModTarget::Param(p) => p.node == node,
+            crate::ModTarget::Mix(m) => m.node == node,
+            crate::ModTarget::Edge(e) => e.touches(node),
+        };
+        let gone: Vec<_> = self
+            .params
+            .lock_recover()
+            .slots
+            .extract_if(.., |id, _| match id {
+                SlotId::Range(target) | SlotId::RouteDepth((_, target)) => touches(target),
+                _ => false,
+            })
+            .collect();
+        drop(gone);
+    }
+
     /// Forgets `node`'s mode and mix targets, and what was written to them
     /// and not yet handed to the editor. Control thread.
     pub(crate) fn retire_node_controls(&self, node: NodeKey) {

@@ -1917,6 +1917,7 @@ impl<F: Float> Graph<F> {
         let node = node.into();
         self.values.retire(node);
         self.values.retire_node_controls(node);
+        self.values.retire_declared_on(node);
         if self.nodes.remove(&node).is_none() {
             return Err(RemoveError::NoSuchNode(node));
         }

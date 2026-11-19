@@ -257,3 +257,28 @@ fn a_range_write_republishes_no_program() {
     );
     assert!(Arc::ptr_eq(&before, &lane(&s).program()));
 }
+
+/// **A removed node's range and route depth are refused at the call**, with no
+/// update in between: the targets go with the node, not at the next update.
+#[test]
+fn a_range_and_a_depth_of_a_removed_node_are_refused_at_the_call() {
+    let mut s = session();
+    let (lp, _) = s.graph().add(SvfFilterNode::<f32>::new(
+        SvfType::LowPass,
+        Hz(1_000.0),
+        Q(0.7),
+    ));
+    let mut m = s.mods_mut();
+    m.range(lp.cutoff(), Hz(100.0)..Hz(4_000.0)).unwrap();
+    let source = m.macro_(0.0);
+    m.route(RouteSpec::new(source, lp.cutoff(), Depth::of(0.5)))
+        .unwrap();
+    let depth = tutti_session::DepthTarget::of(source, lp.cutoff());
+    s.set(depth.to(Depth::of(0.25))).unwrap();
+
+    s.graph().remove(lp).unwrap();
+    let range = s.set(lp.cutoff().range().to(Hz(1.0)..Hz(2.0)));
+    assert_eq!(range.unwrap_err().kind, ValueErrorKind::NoSuchTarget);
+    let depth = s.set(depth.to(Depth::of(0.1)));
+    assert_eq!(depth.unwrap_err().kind, ValueErrorKind::NoSuchTarget);
+}
