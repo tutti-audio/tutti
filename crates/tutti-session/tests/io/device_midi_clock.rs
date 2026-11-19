@@ -83,7 +83,7 @@ fn a_restart_re_rates_the_midi_clock() {
         .expect("the engine's MIDI nodes")
         .sync_controls
         .messages()
-        .set(tutti_midi_runtime::SyncMessages {
+        .store(tutti_midi_runtime::SyncMessages {
             clock: true,
             ..tutti_midi_runtime::SyncMessages::OFF
         });

@@ -7,7 +7,7 @@
 //! control threads take. A rate change is a recall, a rejoin and an
 //! activation ([`HostOp::Reconfigure`]): the node's `prepare` runs it to the
 //! end with its own realtime end, which is not in an executor then; a rate
-//! parked for the main thread is run by the pump, and the Processor comes
+//! pending for the main thread is run by the pump, and the Processor comes
 //! back at the audio thread's next poll.
 
 use std::path::Path;
@@ -532,7 +532,7 @@ impl<L: Loaded> Instance<L> {
     /// it (`standing`: where the plugin stands). What went wrong is also kept
     /// for [`take_reports`](Self::take_reports), by its kind: a refusal of the
     /// rate, a restart that would not stop, or the plugin's death. That is how
-    /// the control side hears of one the audio thread's parked rate caused.
+    /// the control side hears of one the audio thread's pending rate caused.
     ///
     /// A rate that is taken after a refusal is reported taken
     /// (`PluginInvalidation::RateRestored`) when the plugin renders at it: at
@@ -640,7 +640,7 @@ impl<L: Loaded> Instance<L> {
     }
 
     /// The main thread's tick: delivers what the plugin asked for, collects a
-    /// Processor the audio thread returned (running a parked rate change), and
+    /// Processor the audio thread returned (running a pending rate change), and
     /// reports what the plugin changed about itself since the last call.
     ///
     /// Re-reads on `audioMasterIOChanged` (the plugin's own signal: its pin

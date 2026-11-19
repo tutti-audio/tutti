@@ -23,8 +23,8 @@
 //!   known only at run time.
 //! - [`PackedAtomic`] — a value of up to eight bytes in one atomic word, so a
 //!   reader never pairs one write's field with another's.
-//! - [`Setting`] / [`SettingWord`] — a mode or switch set (a fieldless enum,
-//!   [`setting_word!`]) in one atomic word, stored by its encoding.
+//! - [`AtomicCell`] / [`AtomicWord`] — a mode or switch set (a fieldless enum,
+//!   [`atomic_word!`]) in one atomic word, stored by its encoding.
 //! - [`SeqWriter`] / [`SeqReader`] — a sequence lock for a `Pod` value one
 //!   writer overwrites in place and any thread copies whole.
 //! - [`seq_slots()`] — an array of those, one slot per index, that one reader
@@ -41,7 +41,7 @@
 //! - [`Param`] / [`Param64`] / [`ParamCell`] — a unit held in an atomic cell:
 //!   shared and cloned by handle ([`Param`], addressed without its unit as a
 //!   [`ParamCell`]) or inline ([`Param64`]); [`AtomicSampleRate`] and
-//!   [`ParkedSampleRate`] carry a `SampleRate` the same way.
+//!   [`PendingSampleRate`] carry a `SampleRate` the same way.
 //! - [`Mint`] and [`id!`] — a lock-free counter of unique non-zero numbers from 1,
 //!   and the macro that writes an id type minted from one.
 //! - [`SplitMix64`] — the pseudo-random generator: a seeded stream of
@@ -188,6 +188,7 @@ mod handoff;
 mod parker;
 // `id!` is `#[macro_export]`ed: the one way any crate writes an id, used as
 // `tutti_rt::id!`.
+mod atomic_cell;
 mod id;
 mod job_gate;
 mod last_out;
@@ -207,7 +208,6 @@ mod ring;
 mod scope;
 mod seq_cell;
 mod seq_slots;
-mod setting;
 mod sleep;
 mod spin;
 mod split;
@@ -216,7 +216,8 @@ mod task_graph;
 mod thread;
 mod vec;
 
-pub use atomic_rate::{AtomicSampleRate, ParkedSampleRate};
+pub use atomic_cell::{AtomicCell, AtomicWord};
+pub use atomic_rate::{AtomicSampleRate, PendingSampleRate};
 pub use capped_vec::CappedVec;
 pub use cell::{AudioThreadCell, BorrowGuard, BorrowRef};
 pub use claim_lock::{Claim, ClaimGuard};
@@ -253,7 +254,6 @@ pub use ring::{Drain, Iter, Overflow, PushError, Returned, RingReader, RingWrite
 pub use scope::{ControlDrop, RtScope, RtScopeGuard};
 pub use seq_cell::{Contended, SeqReader, SeqWriter};
 pub use seq_slots::{SeqSlotsReader, SeqSlotsWriter, seq_slots};
-pub use setting::{Setting, SettingWord};
 pub use sleep::sleep_until_ns;
 pub use spin::BlockWaits;
 pub use split::{ClaimConflict, ClaimTable, Claimed, ClaimedRun, Held, RwView, SplitMut, SplitRw};

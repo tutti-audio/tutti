@@ -487,7 +487,7 @@ fn graph_engine_with_env_clock_and_metronome_is_allocation_free() {
     let sample_rate = 48_000.0;
     let transport = Transport::new(SampleRate::of(sample_rate));
     let settings = Arc::new(ClickSettings::new());
-    settings.mode().set(MetronomeMode::Always);
+    settings.mode().store(MetronomeMode::Always);
     settings.set_volume(tutti_nodes::ClickLevel::of(tutti_units::Amplitude::new(
         1.0,
     )));

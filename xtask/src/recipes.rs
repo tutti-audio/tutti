@@ -943,7 +943,7 @@ const MIRI: &[&str] = &[
 const LOOM: &[&str] = &[
     r#"LOOM_MAX_PREEMPTIONS=4 RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test pos_ring_loom"#,
     r#"RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test packed_atomic_loom"#,
-    r#"RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test setting_loom"#,
+    r#"RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test atomic_cell_loom"#,
     r#"RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test seq_cell_loom"#,
     r#"RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test cell_loom"#,
     r#"RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test handoff_loom -- --nocapture"#,
