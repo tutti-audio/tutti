@@ -25,6 +25,7 @@ windows-sys = { workspace = true, features = [
   "Win32_Media_Multimedia",
   "Win32_Security",
 ] }
+tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false }
 
 # The protocol's atomics and lock become loom's under the loom cfg flag, so the
 # `loom_model` unit module in `src/lifetime.rs` models the shipped code. Only
@@ -38,6 +39,10 @@ loom = "0.7"
 # The suites that open Windows' GS Wavetable Synth, which needs an audio
 # endpoint.
 synth-tests = []
+
+# The packing and stamp tests in `src/ump.rs` run on every target.
+[dev-dependencies]
+tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false }
 
 [target.'cfg(windows)'.dev-dependencies]
 tutti-fixtures = { path = "../../testing/tutti-fixtures" }
