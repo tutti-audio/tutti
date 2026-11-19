@@ -13,12 +13,12 @@
 
 use tutti_graph::{Due, Env, Offset};
 use tutti_music::{FRAME_TOLERANCE, first_frame_at_or_after, frames_per_beat};
-use tutti_units::{At, Samples};
+use tutti_units::{At, Beat, BeatDuration, Samples};
 
 /// An event scheduled at a beat.
 pub(crate) trait Beated {
     /// The beat it is scheduled at.
-    fn beat(&self) -> f64;
+    fn beat(&self) -> Beat;
 }
 
 /// What a source does as the walk goes: [`Walk::segment`] calls these in
@@ -30,12 +30,12 @@ pub(crate) trait Visit<T> {
     /// walk told to [`forget`](Walk::forget). `events` are the source's, and
     /// `frames_per_beat` the rate the walk places them at
     /// ([`lands_on_first_frame`]).
-    fn jump(&mut self, at: Option<Offset>, beat: f64, frames_per_beat: f64, events: &[T]);
+    fn jump(&mut self, at: Option<Offset>, beat: Beat, frames_per_beat: f64, events: &[T]);
     /// Playback wrapped its loop inside a segment: the pass starts at `at`,
     /// on `beat` (the loop's start, or a hair past it). A jump the source may
     /// treat as one ([`jump`](Self::jump), the default) or as the next pass
     /// of the same run.
-    fn wrap(&mut self, at: Option<Offset>, beat: f64, frames_per_beat: f64, events: &[T]) {
+    fn wrap(&mut self, at: Option<Offset>, beat: Beat, frames_per_beat: f64, events: &[T]) {
         self.jump(at, beat, frames_per_beat, events);
     }
     /// `event` is due at `at`.
@@ -48,7 +48,7 @@ pub(crate) trait Visit<T> {
 pub(crate) struct Walk {
     /// `None` when stopped, before the first block, and after
     /// [`forget`](Self::forget).
-    expected: Option<f64>,
+    expected: Option<Beat>,
 }
 
 impl Walk {
@@ -76,11 +76,13 @@ impl Walk {
             self.expected = None;
             return;
         };
-        let now = t.beat().get();
-        let frame = 1.0 / fpb;
+        let now = t.beat();
+        let frame = BeatDuration(1.0 / fpb);
         // A jump is a start more than half a frame away from where the last
         // segment left off (a seek, a wrap at a block edge, a restart).
-        let continuous = self.expected.is_some_and(|e| ((now - e) * fpb).abs() < 0.5);
+        let continuous = self
+            .expected
+            .is_some_and(|e| ((now - e).get() * fpb).abs() < 0.5);
         if !continuous {
             v.jump(at(0), now, fpb, events);
         }
@@ -91,14 +93,14 @@ impl Walk {
         // the segment ends is where the clock does. A wrap is at least a
         // frame after the last, so the walk is at most one pass a frame
         // however short the loop.
-        let looping = t.looping.filter(|l| now < l.end().get());
+        let looping = t.looping.filter(|l| now < l.end());
         let mut clock = t.clock(seg.sample_rate);
         let first = clock.advance_to_wrap(Samples(len), looping);
         let wrap = first.map_or(len, Samples::get);
 
         // Up to the wrap: a beat less than a frame behind the playhead falls
         // on the first frame (`Env::due`), so the range starts a frame back.
-        let hi = now + (wrap as f64 + 1.0) * frame;
+        let hi = now + frame * (wrap as f64 + 1.0);
         emit(events, now - frame, hi, seg, v, &at, |k| k < wrap);
 
         // Whether the loop wraps exactly at this segment's end: the next
@@ -108,15 +110,15 @@ impl Walk {
         let mut wraps_at_end = wrap == len && first.is_some();
         if let (Some(l), true) = (looping, wrap < len) {
             let in_loop = {
-                let lo = events.partition_point(|e| e.beat() < l.start().get());
-                let hi = events.partition_point(|e| e.beat() < l.end().get());
+                let lo = events.partition_point(|e| e.beat() < l.start());
+                let hi = events.partition_point(|e| e.beat() < l.end());
                 &events[lo..hi.max(lo)]
             };
             let mut k = wrap;
             while k < len {
                 // The clock is on pass `k`'s first frame, at the beat it
                 // wrapped to; the pass runs to the next wrap.
-                let from = clock.beat().get();
+                let from = clock.beat();
                 let wrapped = clock.advance_to_wrap(Samples(len - k), Some(l));
                 let next = wrapped.map_or(len, |r| k + r.get());
                 v.wrap(at(k), from, fpb, events);
@@ -127,7 +129,7 @@ impl Walk {
         }
 
         // Where the next segment starts if nothing jumps.
-        self.expected = (!wraps_at_end).then(|| clock.beat().get());
+        self.expected = (!wraps_at_end).then(|| clock.beat());
     }
 }
 
@@ -137,8 +139,8 @@ impl Walk {
 /// [`FRAME_TOLERANCE`] (`first_frame_at_or_after`). Of the events behind,
 /// the walk visits on that frame only those less than a frame behind; the
 /// rest were before playback got there.
-pub(crate) fn lands_on_first_frame(beat: f64, from: f64, frames_per_beat: f64) -> bool {
-    (beat - from) * frames_per_beat <= FRAME_TOLERANCE
+pub(crate) fn lands_on_first_frame(beat: Beat, from: Beat, frames_per_beat: f64) -> bool {
+    (beat - from).get() * frames_per_beat <= FRAME_TOLERANCE
 }
 
 /// Visit the events of one loop pass that playback reaches on its frames
@@ -148,22 +150,22 @@ pub(crate) fn lands_on_first_frame(beat: f64, from: f64, frames_per_beat: f64) -
 /// first frame at or after them (`first_frame_at_or_after`).
 fn pass<T: Beated>(
     in_loop: &[T],
-    from: f64,
+    from: Beat,
     k: usize,
     next: usize,
     fpb: f64,
     v: &mut impl Visit<T>,
     at: &impl Fn(usize) -> Option<Offset>,
 ) {
-    let frame = 1.0 / fpb;
+    let frame = BeatDuration(1.0 / fpb);
     let lo = from - frame;
-    let hi = from + ((next - k) as f64 + 1.0) * frame;
+    let hi = from + frame * ((next - k) as f64 + 1.0);
     let first = in_loop.partition_point(|e| e.beat() < lo);
     for e in &in_loop[first..] {
         if e.beat() >= hi {
             break;
         }
-        let ahead = (e.beat() - from) * fpb;
+        let ahead = (e.beat() - from).get() * fpb;
         let d = if ahead < 0.0 {
             if -ahead < 1.0 - FRAME_TOLERANCE {
                 0
@@ -185,8 +187,8 @@ fn pass<T: Beated>(
 /// at an offset `keep` accepts.
 fn emit<T: Beated>(
     events: &[T],
-    lo: f64,
-    hi: f64,
+    lo: Beat,
+    hi: Beat,
     seg: &Env,
     v: &mut impl Visit<T>,
     at: &impl Fn(usize) -> Option<Offset>,
@@ -194,10 +196,10 @@ fn emit<T: Beated>(
 ) {
     let first = events.partition_point(|e| e.beat() < lo);
     for e in &events[first..] {
-        if e.beat() >= hi || e.beat().is_nan() {
+        if e.beat() >= hi || e.beat().get().is_nan() {
             break;
         }
-        let Due::In(k) = seg.due(At::Beat(tutti_units::Beat(e.beat()))) else {
+        let Due::In(k) = seg.due(At::Beat(e.beat())) else {
             continue;
         };
         if !keep(k.index()) {

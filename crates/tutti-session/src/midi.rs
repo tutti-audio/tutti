@@ -15,7 +15,7 @@
 //! [`Phase::MidiOut`]: crate::Phase::MidiOut
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use tutti_buffers::Float;
 use tutti_graph::UmpAt;
 
@@ -75,8 +75,8 @@ pub(crate) const MIDI_INPUT_INLET_CAPACITY: tutti_graph::EventCapacity =
 /// not late. The spacing between events is kept; the
 /// whole is that much later than the OS delivered it.
 #[cfg(feature = "midi-hardware")]
-pub(crate) fn input_lead(block: Samples, rate: tutti_units::SampleRate) -> Duration {
-    Duration::from_secs_f64(block.to_seconds(rate).get())
+pub(crate) fn input_lead(block: Samples, rate: tutti_units::SampleRate) -> std::time::Duration {
+    std::time::Duration::from_secs_f64(block.to_seconds(rate).get())
 }
 
 /// The engine's block clock as the device threads read it
@@ -120,9 +120,12 @@ impl OutputClockSource {
     }
 
     /// The audio output's latency as the device reports it now: read on every
-    /// drain, for it can arrive or change after a restart.
-    fn audio_output(&self) -> Option<Duration> {
-        self.audio_latency.get()
+    /// drain, for it can arrive or change after a restart. The OS reports a
+    /// `Duration`; this is the one place it becomes `Seconds`.
+    fn audio_output(&self) -> Option<tutti_units::Seconds> {
+        self.audio_latency
+            .get()
+            .map(|latency| tutti_units::Seconds(latency.as_secs_f64()))
     }
 
     /// The timing of a drain at `now`: the latest block's map, `now` and the
@@ -2031,6 +2034,7 @@ mod tests {
     use super::*;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
     use tutti_fixtures::midi;
     use tutti_units::SampleRate;
 
@@ -2276,9 +2280,9 @@ mod tests {
         };
         let base = sent_with(OutputTerms::default());
         let terms = OutputTerms {
-            audio_output: Some(Duration::from_millis(30)),
+            audio_output: Some(tutti_units::Seconds(0.03)),
             latency: OutputLatency::new(
-                Duration::from_millis(5),
+                tutti_units::Seconds(0.005),
                 tutti_midi_runtime::OutputOffset::new(tutti_units::Seconds(0.25)).unwrap(),
             )
             .unwrap(),

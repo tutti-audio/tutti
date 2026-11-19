@@ -120,49 +120,24 @@ impl Outgoing {
     }
 }
 
-/// A user's trim of when an output sends, in seconds, signed and at most
-/// [`MAX_OUTPUT_LATENCY`] (1 s) either way: positive sends later.
-///
-/// `new` refuses what it cannot hold (NaN, infinity, beyond a second) and never
-/// clamps; `get` returns the seconds.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct OutputOffset(Seconds);
-
-/// The seconds [`OutputOffset::try_from`] refused.
-#[derive(Clone, Copy, Debug, PartialEq, thiserror::Error)]
-#[error("an output offset is finite and at most {} s either way, not {} s", MAX_OUTPUT_LATENCY.get(), .0.get())]
-pub struct OffsetOutOfRange(pub Seconds);
+tutti_units::ranged! {
+    /// A user's trim of when an output sends, in seconds, signed and at most
+    /// [`MAX_OUTPUT_LATENCY`] (1 s) either way: positive sends later.
+    ///
+    /// `new` refuses what it cannot hold (NaN, infinity, beyond a second) and
+    /// never clamps; `get` returns the seconds.
+    OutputOffset(Seconds), OffsetOutOfRange, "finite and at most one second either way",
+    |raw| raw.get().is_finite() && raw.get().abs() <= MAX_OUTPUT_LATENCY.get()
+}
 
 impl OutputOffset {
     /// No trim.
-    pub const ZERO: Self = Self(Seconds(0.0));
-
-    /// `seconds`, or `None` when it is not finite or its magnitude is over
-    /// [`MAX_OUTPUT_LATENCY`].
-    #[must_use]
-    pub fn new(seconds: Seconds) -> Option<Self> {
-        (seconds.get().is_finite() && seconds.get().abs() <= MAX_OUTPUT_LATENCY.get())
-            .then_some(Self(seconds))
-    }
-
-    /// The trim, in seconds.
-    #[must_use]
-    pub const fn get(self) -> Seconds {
-        self.0
-    }
+    pub const ZERO: Self = Self::of(Seconds(0.0));
 }
 
-impl TryFrom<Seconds> for OutputOffset {
-    type Error = OffsetOutOfRange;
-
-    fn try_from(seconds: Seconds) -> Result<Self, Self::Error> {
-        Self::new(seconds).ok_or(OffsetOutOfRange(seconds))
-    }
-}
-
-impl From<OutputOffset> for Seconds {
-    fn from(offset: OutputOffset) -> Self {
-        offset.0
+impl Default for OutputOffset {
+    fn default() -> Self {
+        Self::ZERO
     }
 }
 
@@ -170,21 +145,24 @@ impl From<OutputOffset> for Seconds {
 /// the user's trim on top. Both default to nothing.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct OutputLatency {
-    device: Duration,
+    device: Seconds,
     offset: OutputOffset,
 }
 
 impl OutputLatency {
     /// A device latency (measured, or what its maker declares) and a user
-    /// offset; `None` when the device latency is over [`MAX_OUTPUT_LATENCY`].
+    /// offset; `None` when the device latency is negative, not finite, or over
+    /// [`MAX_OUTPUT_LATENCY`].
     #[must_use]
-    pub fn new(device: Duration, offset: OutputOffset) -> Option<Self> {
-        (device.as_secs_f64() <= MAX_OUTPUT_LATENCY.get()).then_some(Self { device, offset })
+    pub fn new(device: Seconds, offset: OutputOffset) -> Option<Self> {
+        let d = device.get();
+        (d.is_finite() && (0.0..=MAX_OUTPUT_LATENCY.get()).contains(&d))
+            .then_some(Self { device, offset })
     }
 
     /// What the device takes to sound an event: it is sent that much earlier.
     #[must_use]
-    pub const fn device(self) -> Duration {
+    pub const fn device(self) -> Seconds {
         self.device
     }
 
@@ -202,7 +180,7 @@ pub struct OutputTerms {
     /// The audio output's latency, from the render callback to the sound
     /// leaving: `None` while nobody has reported it (before the stream's first
     /// callback, again after a restart), and when there is no audio output.
-    pub audio_output: Option<Duration>,
+    pub audio_output: Option<Seconds>,
     /// The output's own.
     pub latency: OutputLatency,
 }
@@ -254,14 +232,18 @@ impl OutputPlan {
         let Some(heard) = map.and_then(|map| map.os_at(frame)) else {
             return Placement::Send(SendAt::Now);
         };
-        let trim = self.terms.latency.offset.get().get();
-        let later =
-            self.terms.audio_output.unwrap_or_default() + Duration::from_secs_f64(trim.max(0.0));
-        let earlier = self.terms.latency.device + Duration::from_secs_f64((-trim).max(0.0));
-        let Some(at) = heard
-            .checked_add(later)
-            .and_then(|at| at.checked_sub(earlier))
-        else {
+        // One signed sum in seconds, then one step on the clock: later by the
+        // audio output and the trim, earlier by the device.
+        let net = self.terms.audio_output.unwrap_or(Seconds(0.0)) + self.terms.latency.offset.get()
+            - self.terms.latency.device;
+        let step = Duration::try_from_secs_f64(net.get().abs()).ok();
+        let Some(at) = step.and_then(|step| {
+            if net.get() >= 0.0 {
+                heard.checked_add(step)
+            } else {
+                heard.checked_sub(step)
+            }
+        }) else {
             return Placement::Send(SendAt::Now);
         };
         match at.checked_duration_since(now) {

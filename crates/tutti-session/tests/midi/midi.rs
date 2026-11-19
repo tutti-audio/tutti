@@ -2188,7 +2188,7 @@ fn the_output_latency_is_written_and_read_through_its_target() {
     let target = s.midi().output_latency();
     assert_eq!(s.get(target).unwrap(), OutputLatency::default());
     let latency = OutputLatency::new(
-        std::time::Duration::from_millis(7),
+        tutti_units::Seconds(0.007),
         OutputOffset::new(Seconds(-0.002)).unwrap(),
     )
     .unwrap();
