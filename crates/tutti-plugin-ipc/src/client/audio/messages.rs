@@ -55,14 +55,43 @@ impl ProcessPayload {
     }
 }
 
-/// Audio thread → bridge thread: what rides the audio lane (the block
-/// connection), in the order the audio thread queued it.
+/// Audio thread → the audio lane's thread: what rides the block connection, in
+/// the order the audio thread queued it.
 pub(super) enum AudioCommand {
     Process(Box<ProcessPayload>),
     Reset,
+    /// Format-neutral render mode. Ordered against the blocks by being queued
+    /// with them: the lane's thread has the control lane apply it and waits for
+    /// that before it sends the next block.
+    SetRenderMode {
+        mode: tutti_plugin_types::RenderMode,
+    },
+    /// The rate the plugin runs at: ordered against the blocks as
+    /// [`SetRenderMode`](Self::SetRenderMode) is, since a block rendered
+    /// before the plugin has taken the rate (or been refused it) is at the
+    /// wrong one.
+    SetSampleRate {
+        rate: SampleRate,
+    },
 }
 
-/// Callers and the audio thread → bridge thread: what rides the control lane.
+/// A setting the audio lane holds its blocks for. Written by the audio lane's
+/// thread into a latest-value slot per kind ([`Channels::put_setting`](super::channels::Channels::put_setting)), never
+/// queued, so a full control queue cannot lose one; taken first by the control
+/// lane's thread, which answers `applied` once the server has applied it.
+#[derive(Clone, Copy, Debug)]
+pub(super) enum Setting {
+    /// The rate the plugin runs at.
+    SampleRate(SampleRate),
+    /// Format-neutral render mode, encoded onto each format's own ABI at the
+    /// FFI edge (VST3 `ProcessSetup::processMode`, CLAP `clap.render`, AU
+    /// `kAudioUnitProperty_OfflineRender`, VST2
+    /// `audioMasterGetCurrentProcessLevel`). The server answers it with
+    /// nothing, so the lane's own fence after it is the answer.
+    RenderMode(tutti_plugin_types::RenderMode),
+}
+
+/// Callers and the audio thread → the control lane's thread.
 ///
 /// Variants that need a reply carry their own [`Reply<T>`]; the calling
 /// thread holds the paired `Ask<T>` and blocks on it. There is no shared
@@ -82,16 +111,6 @@ pub(super) enum ControlCommand {
     /// slots small.
     SetTrackInfo {
         info: Box<tutti_plugin_types::TrackInfo>,
-    },
-    SetSampleRate {
-        rate: SampleRate,
-    },
-    /// Format-neutral render mode, encoded onto each format's own ABI at the
-    /// FFI edge (VST3 `ProcessSetup::processMode`, CLAP `clap.render`, AU
-    /// `kAudioUnitProperty_OfflineRender`, VST2
-    /// `audioMasterGetCurrentProcessLevel`).
-    SetRenderMode {
-        mode: tutti_plugin_types::RenderMode,
     },
     /// Chunked state read.
     ///
@@ -280,11 +299,11 @@ pub(super) const UNSOLICITED_TRANSPORT: usize = 64;
 pub(super) const UNSOLICITED_PARAMS: usize = 128;
 
 /// The unsolicited events read off the control stream while a command waited
-/// for its reply, held until `pump` hands them to the listener.
+/// for its reply, held until its lane's loop hands them to the listener.
 ///
 /// A plain buffer, not a queue between threads: `recv_reply` fills it and
-/// `pump` drains it after each command, both on the bridge thread, so it is
-/// owned by `pump` and lent to `handle`. The listener runs after the drain
+/// the loop drains it after each command, both on the lane's thread, so it is
+/// owned by the loop and lent to the handler. The listener runs after the drain
 /// rather than from `recv_reply` itself so a slow listener never delays the
 /// reply a blocked caller is waiting on.
 ///

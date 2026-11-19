@@ -1,10 +1,12 @@
-//! Per-command IPC choreography for the bridge thread.
+//! Per-command IPC choreography for the bridge's two lane threads: the audio
+//! lane's ([`handle_audio`]) and the control lane's ([`handle_control`]).
 
-use super::channels::{BridgeSide, Fate};
+use super::ask::Reply;
 #[cfg(test)]
-use super::channels::{Channels, response_ring};
+use super::channels::response_ring;
+use super::channels::{Channels, Fate, ResponseWriter};
 use super::lifecycle::Lifecycle;
-use super::messages::{AudioCommand, AudioResponse, ControlCommand, Unsolicited};
+use super::messages::{AudioCommand, AudioResponse, ControlCommand, Setting, Unsolicited};
 use super::payload_pool::PayloadPool;
 use super::progress::StateProgress;
 use crate::error::unexpected_message;
@@ -12,10 +14,11 @@ use crate::transport::control::{self as ipc, ControlStream, PartialFrame};
 use crate::transport::shm::RING_SLOTS;
 use crate::transport::state_chunk::{self, ChunkError, Reassembler};
 use crate::{BridgeMessage, HostMessage, ProcessAudioData};
+use crossbeam_channel::RecvTimeoutError;
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
-use tutti_plugin_types::MidiIntake;
 use tutti_plugin_types::{BridgeError, BridgeResult, ResyncKind, StateError};
+use tutti_plugin_types::{Deadline, MidiIntake};
 use tutti_plugin_types::{ParameterChanges, ParameterPoint, ParameterQueue};
 use tutti_units::ParamId;
 use tutti_units::SampleRate;
@@ -24,7 +27,7 @@ use tutti_units::SampleRate;
 /// reply before abandoning the block.
 ///
 /// Bounded by the *block period*, not an absolute duration. A bridge thread
-/// blocked in `recv_reply` dequeues no further commands — `pump` is a single
+/// blocked in `recv_reply` dequeues no further commands — a lane's loop is a single
 /// loop — while the audio thread keeps pushing one command per block, so a single
 /// slow reply overflows the 128-slot queue and produces sustained silence long
 /// after the server recovers. A fixed 500 ms against a 667 µs block (64 frames
@@ -121,8 +124,8 @@ fn is_stale(seq: u64, newest: u64) -> bool {
 /// there is what paired a block with its predecessor's reply, and a query with
 /// a stale `AudioProcessed`.
 ///
-/// Owned by `pump` and passed in, rather than living in [`Channels`](super::channels::Channels): only the
-/// bridge thread ever reads or writes it, so an `Arc<AtomicU32>` would advertise
+/// Owned by its lane's thread and passed in, rather than living in [`Channels`]: only that
+/// thread ever reads or writes it, so an `Arc<AtomicU32>` would advertise
 /// a sharing that does not exist. The [`PartialFrame`] must have exactly this
 /// scope for a different reason — it describes a position in *this* connection's
 /// stream, so it lives and dies with the stream.
@@ -149,17 +152,41 @@ pub(super) struct Owed {
     /// skipped, the rest of every SysEx open in it is not sent, so the
     /// server's reassembler never completes one with a gap.
     intake: MidiIntake,
+    /// The audio-response ring's writer, on the audio lane and nowhere else:
+    /// the ring is single-producer by ownership, so the control lane holds none
+    /// and never owes a block.
+    responses: Option<ResponseWriter>,
 }
 
 impl Owed {
-    /// Nothing owed, on a connection whose begun replies get `finish` to end.
-    pub(super) fn finishing(finish: Duration) -> Self {
+    /// Nothing owed on the control connection, whose begun replies get `finish`
+    /// to end.
+    pub(super) fn control(finish: Duration) -> Self {
         Self {
             finish,
             late: VecDeque::new(),
             partial: PartialFrame::default(),
             carried: Vec::new(),
             intake: MidiIntake::default(),
+            responses: None,
+        }
+    }
+
+    /// Nothing owed on the audio connection, whose thread alone answers the
+    /// blocks into `responses`.
+    pub(super) fn audio(finish: Duration, responses: ResponseWriter) -> Self {
+        Self {
+            responses: Some(responses),
+            ..Self::control(finish)
+        }
+    }
+
+    /// Queues `resp` for the audio thread. Audio lane only: the control lane
+    /// has no writer, and what it learns reaches the audio lane's thread as a
+    /// wake-up.
+    pub(super) fn respond(&mut self, channels: &Channels, resp: AudioResponse) {
+        if let Some(responses) = self.responses.as_mut() {
+            responses.push(resp, channels);
         }
     }
 
@@ -258,7 +285,7 @@ impl Owed {
     ///
     /// A block's reply naming a block never sent is no owed reply: it is
     /// handed back as the answer, for the caller to refuse.
-    fn take(&mut self, msg: BridgeMessage, channels: &mut BridgeSide) -> Option<BridgeMessage> {
+    fn take(&mut self, msg: BridgeMessage, channels: &Channels) -> Option<BridgeMessage> {
         if matches!(msg, BridgeMessage::AudioProcessed { seq, .. } if !channels.sent(seq)) {
             return Some(msg);
         }
@@ -282,11 +309,14 @@ impl Owed {
                                 Fate::Published
                             },
                         );
-                        channels.push_audio_response(AudioResponse::AudioProcessed {
-                            seq,
-                            midi_out,
-                            status,
-                        });
+                        self.respond(
+                            channels,
+                            AudioResponse::AudioProcessed {
+                                seq,
+                                midi_out,
+                                status,
+                            },
+                        );
                         channels.note_late();
                         self.late.pop_front();
                         return None;
@@ -349,12 +379,12 @@ pub(super) enum Late {
 /// declared unable to frame. A frame still unfinished after `Timeouts::drain` is
 /// a peer that cannot frame (a few hundred bytes over a local socket do not
 /// take that long from a live one), and that timeout propagates with the
-/// transport's errors (EOF, a frame over the cap), which `pump` crashes on.
+/// transport's errors (EOF, a frame over the cap), which the lane's loop crashes on.
 fn next_reply(
     stream: &mut ControlStream,
     inbox: &mut Unsolicited,
     owed: &mut Owed,
-    channels: &mut BridgeSide,
+    channels: &Channels,
     budget: Duration,
 ) -> BridgeResult<Option<BridgeMessage>> {
     let deadline = Instant::now() + budget;
@@ -383,7 +413,7 @@ fn answer(
     stream: &mut ControlStream,
     inbox: &mut Unsolicited,
     owed: &mut Owed,
-    channels: &mut BridgeSide,
+    channels: &Channels,
     budget: Duration,
     late: Late,
 ) -> BridgeResult<Option<BridgeMessage>> {
@@ -400,24 +430,18 @@ pub(super) struct Lane {
     pub(super) owed: Owed,
 }
 
-/// The bridge's two connections to the server. **Each is
-/// in order, one request at a time, and independent of the other**: the audio
-/// lane carries `ProcessAudio` and `Reset` (the server's render thread answers
-/// them) and the control lane every other request and the plugin's unsolicited
-/// news (the server's main thread, which may be busy with an editor). A block
-/// is never queued behind the main thread, and what a block's reply owes
-/// ([`Owed`]) is paired on its own stream.
-pub(super) struct Lanes {
-    pub(super) audio: Lane,
-    pub(super) control: Lane,
-}
-
+/// The audio lane's command, run on its thread: **the lane carries `ProcessAudio`
+/// and `Reset`** (the server's render thread answers them), in order and one
+/// at a time. A block is never queued behind the control lane (the server's
+/// main thread, which may be busy with an editor), and what a block's reply
+/// owes ([`Owed`]) is paired on its own stream.
 pub(super) fn handle_audio(
     cmd: AudioCommand,
     lane: &mut Lane,
-    channels: &mut BridgeSide,
+    channels: &Channels,
     payloads: &PayloadPool,
     inbox: &mut Unsolicited,
+    lifecycle: &Lifecycle,
 ) -> BridgeResult<()> {
     let Lane { stream, owed } = lane;
     match cmd {
@@ -489,7 +513,7 @@ pub(super) fn handle_audio(
                 // [`process_timeout`] is a few block periods with a 2 ms floor,
                 // and it exists to stop the bridge thread blocking while the
                 // audio thread keeps queueing. When the timeout was an error
-                // out of `handle`, `pump` treated it as connection-level and
+                // out of the handler, the loop treated it as connection-level and
                 // `crash()`ed: one reply that lost a 2 ms race against the
                 // scheduler latched a permanent crash for a server still
                 // running and publishing correct audio. Whether a working
@@ -504,7 +528,7 @@ pub(super) fn handle_audio(
                 // behind.
                 None => {
                     channels.note_abandoned();
-                    channels.push_audio_response(AudioResponse::Error { seq: Some(seq) });
+                    owed.respond(channels, AudioResponse::Error { seq: Some(seq) });
                 }
                 Some(reply) => {
                     match reply {
@@ -538,17 +562,20 @@ pub(super) fn handle_audio(
                                     Fate::Published
                                 },
                             );
-                            channels.push_audio_response(AudioResponse::AudioProcessed {
-                                seq,
-                                midi_out,
-                                status,
-                            });
+                            owed.respond(
+                                channels,
+                                AudioResponse::AudioProcessed {
+                                    seq,
+                                    midi_out,
+                                    status,
+                                },
+                            );
                         }
                         // Attributable to this request: the server answered it
                         // and never published, so the block is silence; the
                         // variant keeps the failure visible.
                         BridgeMessage::Error { .. } => {
-                            channels.push_audio_response(AudioResponse::Error { seq: Some(seq) });
+                            owed.respond(channels, AudioResponse::Error { seq: Some(seq) });
                         }
                         // Any other kind is no answer to a block: counting it
                         // as one would keep a hung plugin looking alive.
@@ -563,14 +590,85 @@ pub(super) fn handle_audio(
         AudioCommand::Reset => {
             ipc::send(stream, &HostMessage::Reset)?;
         }
+        AudioCommand::SetRenderMode { mode } => {
+            hold_for(
+                channels,
+                lifecycle,
+                "a render mode",
+                Setting::RenderMode(mode),
+            );
+        }
+        AudioCommand::SetSampleRate { rate } => {
+            hold_for(
+                channels,
+                lifecycle,
+                "a rate change",
+                Setting::SampleRate(rate),
+            );
+        }
     }
     Ok(())
 }
 
+/// Ordered against the blocks by sitting between them in the audio lane's
+/// queue: the blocks before it are sent, and the ones after wait until the
+/// control lane has had the server apply it. The setting goes into the control
+/// lane's latest-value slot, not its queue, so a full queue cannot lose it; the
+/// control lane answers `applied` (the server answers that lane, not the audio
+/// one).
+///
+/// The wait ends after a rate change's deadline and a query's, or when the
+/// bridge stops or crashes. A change the lane gives up on at the deadline is
+/// counted ([`Channels::note_unapplied`]) and logged, and the blocks go on: a
+/// lane that cannot answer in that time is the control lane's to report.
+fn hold_for(channels: &Channels, lifecycle: &Lifecycle, what: &str, setting: Setting) {
+    let (applied, reply) = super::ask::ask::<()>();
+    let deadline = Deadline::after(Instant::now(), lifecycle.timeouts().settle_wait());
+    channels.put_setting(setting, reply);
+    loop {
+        match applied.recv_timeout_borrowed(RATE_SLICE) {
+            Err(RecvTimeoutError::Timeout) => {
+                if !lifecycle.is_running() || lifecycle.is_crashed() {
+                    return;
+                }
+                if deadline.passed(Instant::now()) {
+                    channels.note_unapplied();
+                    tracing::warn!(
+                        "the plugin bridge gave up holding blocks for {what}: \
+                         the plugin did not apply it in time"
+                    );
+                    return;
+                }
+            }
+            Ok(()) | Err(RecvTimeoutError::Disconnected) => return,
+        }
+    }
+}
+
+/// A round trip that proves the server has handled every request sent before
+/// it: it answers this lane in order, and `GetCurrentPreset` is a cheap
+/// request every server answers. A reply that does not come in time is owed
+/// and does not hold the caller longer.
+fn fence(
+    stream: &mut ControlStream,
+    inbox: &mut Unsolicited,
+    owed: &mut Owed,
+    channels: &Channels,
+    lifecycle: &Lifecycle,
+) -> BridgeResult<()> {
+    ipc::send(stream, &HostMessage::GetCurrentPreset)?;
+    ask(stream, inbox, owed, channels, lifecycle, |m| {
+        matches!(m, BridgeMessage::CurrentPreset { .. })
+    })?;
+    Ok(())
+}
+
+/// The control lane's command, run on its thread: **every request but the
+/// blocks'**, and the plugin's unsolicited news (the server's main thread).
 pub(super) fn handle_control(
     cmd: ControlCommand,
     lane: &mut Lane,
-    channels: &mut BridgeSide,
+    channels: &Channels,
     inbox: &mut Unsolicited,
     lifecycle: &Lifecycle,
 ) -> BridgeResult<()> {
@@ -584,67 +682,6 @@ pub(super) fn handle_control(
         }
         ControlCommand::SetTrackInfo { info } => {
             ipc::send(stream, &HostMessage::SetTrackInfo { info: *info })?;
-        }
-        ControlCommand::SetSampleRate { rate } => {
-            ipc::send(stream, &HostMessage::SetSampleRate { rate })?;
-            // Wait for the answer: the plugin's re-activation is the slowest
-            // thing the bridge asks of it, and what it says decides whether
-            // the next block may be sent.
-            //
-            // Replies owed from abandoned requests can still be ahead of the
-            // answer on the stream; `next_reply` takes them first.
-            //
-            // Waited in slices, so a shutdown (dropping the node joins this
-            // thread) ends the wait within one slice rather than after
-            // `Timeouts::rate`. A slice that expires part-way through a frame
-            // resumes it (`owed.partial`), so slicing never unframes the stream.
-            let budget = lifecycle.timeouts().rate;
-            let deadline = std::time::Instant::now() + budget;
-            loop {
-                let reply = match next_reply(stream, inbox, owed, channels, RATE_SLICE)? {
-                    None => {
-                        if !lifecycle.is_running() {
-                            return Ok(());
-                        }
-                        if std::time::Instant::now() >= deadline {
-                            // No answer is a refusal, not a dead connection: the
-                            // plugin may still be re-activating. Its late reply
-                            // is taken off the stream when it arrives
-                            // (`recv_reply`) and settles the state.
-                            inbox.expect_late_rate_reply();
-                            apply_rate_reply(
-                                lifecycle,
-                                inbox,
-                                rate,
-                                Some(format!(
-                                    "the plugin did not answer the rate change within {budget:?}"
-                                )),
-                            );
-                            break;
-                        }
-                        continue;
-                    }
-                    Some(reply) => reply,
-                };
-                match reply {
-                    // A refusal is not a failure of the connection: the plugin
-                    // stays loaded, the server renders silence for it, and the
-                    // next rate change retries it.
-                    BridgeMessage::SampleRateSet { rate, error } => {
-                        apply_rate_reply(lifecycle, inbox, rate, error);
-                        break;
-                    }
-                    other => {
-                        return Err(BridgeError::UnexpectedMessage {
-                            expected: "SampleRateSet",
-                            got: format!("{other:?}").into(),
-                        });
-                    }
-                }
-            }
-        }
-        ControlCommand::SetRenderMode { mode } => {
-            ipc::send(stream, &HostMessage::SetRenderMode { mode })?;
         }
         ControlCommand::SaveState {
             state_use,
@@ -666,7 +703,7 @@ pub(super) fn handle_control(
             // Propagating would be wrong twice over: `?` returns before
             // `reply.send`, so the `Reply` drops and the caller waits out
             // the progress deadline to learn a length comparison the host made
-            // instantly; and `pump` treats every `handle` error as
+            // instantly; and a lane's loop treats every handler error as
             // connection-level, so one oversized preset would `crash()` a
             // healthy session. Nothing was sent, so the stream is still
             // synchronised and there is nothing to crash about. Contrast
@@ -907,12 +944,93 @@ pub(super) fn handle_control(
     Ok(())
 }
 
+/// A setting the audio lane holds its blocks for, applied on the control
+/// lane's thread: sent, and answered `applied` once the server has taken it.
+pub(super) fn handle_setting(
+    setting: Setting,
+    applied: Reply<()>,
+    lane: &mut Lane,
+    channels: &Channels,
+    inbox: &mut Unsolicited,
+    lifecycle: &Lifecycle,
+) -> BridgeResult<()> {
+    let Lane { stream, owed } = lane;
+    match setting {
+        Setting::SampleRate(rate) => {
+            ipc::send(stream, &HostMessage::SetSampleRate { rate })?;
+            // Wait for the answer: the plugin's re-activation is the slowest
+            // thing the bridge asks of it, and the requests queued behind it
+            // on this lane wait for it. The audio lane does not: its blocks
+            // are the server's render thread's.
+            //
+            // Replies owed from abandoned requests can still be ahead of the
+            // answer on the stream; `next_reply` takes them first.
+            //
+            // Waited in slices, so a shutdown (dropping the node joins this
+            // thread) ends the wait within one slice rather than after
+            // `Timeouts::rate`. A slice that expires part-way through a frame
+            // resumes it (`owed.partial`), so slicing never unframes the stream.
+            let budget = lifecycle.timeouts().rate;
+            let deadline = std::time::Instant::now() + budget;
+            loop {
+                let reply = match next_reply(stream, inbox, owed, channels, RATE_SLICE)? {
+                    None => {
+                        if !lifecycle.is_running() {
+                            return Ok(());
+                        }
+                        if std::time::Instant::now() >= deadline {
+                            // No answer is a refusal, not a dead connection: the
+                            // plugin may still be re-activating. Its late reply
+                            // is taken off the stream when it arrives
+                            // (`recv_reply`) and settles the state.
+                            inbox.expect_late_rate_reply();
+                            apply_rate_reply(
+                                lifecycle,
+                                inbox,
+                                rate,
+                                Some(format!(
+                                    "the plugin did not answer the rate change within {budget:?}"
+                                )),
+                            );
+                            break;
+                        }
+                        continue;
+                    }
+                    Some(reply) => reply,
+                };
+                match reply {
+                    // A refusal is not a failure of the connection: the plugin
+                    // stays loaded, the server renders silence for it, and the
+                    // next rate change retries it.
+                    BridgeMessage::SampleRateSet { rate, error } => {
+                        apply_rate_reply(lifecycle, inbox, rate, error);
+                        break;
+                    }
+                    other => {
+                        return Err(BridgeError::UnexpectedMessage {
+                            expected: "SampleRateSet",
+                            got: format!("{other:?}").into(),
+                        });
+                    }
+                }
+            }
+            applied.send(());
+        }
+        Setting::RenderMode(mode) => {
+            ipc::send(stream, &HostMessage::SetRenderMode { mode })?;
+            fence(stream, inbox, owed, channels, lifecycle)?;
+            applied.send(());
+        }
+    }
+    Ok(())
+}
+
 /// Reads what the plugin said unprompted off the control connection: each
 /// frame is filed into `inbox` as `next_reply` reads it, and what is left over
 /// is an answer owed to nobody.
 pub(super) fn read_news(
     lane: &mut Lane,
-    channels: &mut BridgeSide,
+    channels: &Channels,
     inbox: &mut Unsolicited,
 ) -> BridgeResult<()> {
     let Lane { stream, owed } = lane;
@@ -927,7 +1045,7 @@ fn ask(
     stream: &mut ControlStream,
     inbox: &mut Unsolicited,
     owed: &mut Owed,
-    channels: &mut BridgeSide,
+    channels: &Channels,
     lifecycle: &Lifecycle,
     answers: fn(&BridgeMessage) -> bool,
 ) -> BridgeResult<Option<BridgeMessage>> {
@@ -967,7 +1085,7 @@ fn recv_state(
     stream: &mut ControlStream,
     inbox: &mut Unsolicited,
     owed: &mut Owed,
-    channels: &mut BridgeSide,
+    channels: &Channels,
     progress: &StateProgress,
 ) -> BridgeResult<std::result::Result<Vec<u8>, StateError>> {
     let mut acc = Reassembler::default();
@@ -1115,19 +1233,16 @@ mod tests {
     #[test]
     fn owed_frames_are_taken_in_order_before_the_answer() {
         let (writer, mut replies, _lost) = response_ring();
-        let mut channels = BridgeSide::new(
-            Channels::new(SampleRate::SR_48K, std::sync::Arc::default())
-                .expect("the channels")
-                .0,
-            writer,
-        );
-        let mut owed = Owed::finishing(Timeouts::default().drain);
+        let channels = Channels::new(SampleRate::SR_48K, std::sync::Arc::default())
+            .expect("the channels")
+            .0;
+        let mut owed = Owed::audio(Timeouts::default().drain, writer);
         channels.note_submitted(3);
         owed.owe(Late::Block);
         owed.owe(Late::Answer(is_value));
         owed.owe(Late::StateRest);
 
-        assert!(owed.take(processed(3), &mut channels).is_none());
+        assert!(owed.take(processed(3), &channels).is_none());
         assert!(matches!(
             replies.pop(),
             Some(AudioResponse::AudioProcessed { seq: 3, .. })
@@ -1136,16 +1251,16 @@ mod tests {
         let value = BridgeMessage::ParameterValue {
             value: Some(tutti_units::Normalized::of(0.25)),
         };
-        assert!(owed.take(value, &mut channels).is_none());
-        assert!(owed.take(chunk(0, false), &mut channels).is_none());
-        assert!(owed.take(chunk(1, true), &mut channels).is_none());
+        assert!(owed.take(value, &channels).is_none());
+        assert!(owed.take(chunk(0, false), &channels).is_none());
+        assert!(owed.take(chunk(1, true), &channels).is_none());
         assert!(owed.late.is_empty());
 
         let list = BridgeMessage::ParameterList {
             parameters: Vec::new(),
         };
         assert!(matches!(
-            owed.take(list, &mut channels),
+            owed.take(list, &channels),
             Some(BridgeMessage::ParameterList { .. })
         ));
         assert_eq!(
@@ -1160,21 +1275,18 @@ mod tests {
     /// against the next; the server's `Error` answers any request.
     #[test]
     fn a_frame_of_another_kind_lets_an_owed_answer_go() {
-        let mut channels = BridgeSide::new(
-            Channels::new(SampleRate::SR_48K, std::sync::Arc::default())
-                .expect("the channels")
-                .0,
-            response_ring().0,
-        );
+        let channels = Channels::new(SampleRate::SR_48K, std::sync::Arc::default())
+            .expect("the channels")
+            .0;
         let list = || BridgeMessage::ParameterList {
             parameters: Vec::new(),
         };
 
-        let mut owed = Owed::finishing(Timeouts::default().drain);
+        let mut owed = Owed::control(Timeouts::default().drain);
         owed.owe(Late::Answer(is_value));
         owed.owe(Late::StateRest);
         assert!(matches!(
-            owed.take(list(), &mut channels),
+            owed.take(list(), &channels),
             Some(BridgeMessage::ParameterList { .. })
         ));
         assert!(owed.late.is_empty());
@@ -1183,7 +1295,7 @@ mod tests {
         let error = BridgeMessage::Error {
             message: "refused".into(),
         };
-        assert!(owed.take(error, &mut channels).is_none());
+        assert!(owed.take(error, &channels).is_none());
         assert!(owed.late.is_empty());
     }
 
@@ -1194,7 +1306,7 @@ mod tests {
     /// with a 10-point queue among its reserved ones.
     #[test]
     fn a_carried_value_fills_a_reserved_queue() {
-        let mut owed = Owed::finishing(Timeouts::default().drain);
+        let mut owed = Owed::control(Timeouts::default().drain);
         let mut skipped = ParameterChanges::reserved(1, 1);
         skipped.add_change(ParamId::new(7), 3, 0.25);
         owed.carry(&skipped);
@@ -1232,7 +1344,7 @@ mod tests {
         skipped.add_change(ParamId::new(7), 3, 0.25);
         skipped.add_change(ParamId::new(8), 3, 0.5);
 
-        let mut owed = Owed::finishing(Timeouts::default().drain);
+        let mut owed = Owed::control(Timeouts::default().drain);
         owed.carry(&skipped);
         let mut block = ParameterChanges::reserved_bridged(1, 40);
         assert!(block.add_change(ParamId::new(1), 5, 0.5));
@@ -1240,7 +1352,7 @@ mod tests {
         assert_eq!(block.queues.len(), 1);
         assert_eq!(block.points_overflowed(), 2);
 
-        let mut owed = Owed::finishing(Timeouts::default().drain);
+        let mut owed = Owed::control(Timeouts::default().drain);
         owed.carry(&skipped);
         let mut placeholder = ParameterChanges::new();
         owed.merge_carried(&mut placeholder);
@@ -1279,7 +1391,7 @@ mod tests {
         for i in 0..PARAMS {
             assert!(skipped.add_change(addr(i), 7, 0.25));
         }
-        let mut owed = Owed::finishing(Timeouts::default().drain);
+        let mut owed = Owed::control(Timeouts::default().drain);
         owed.carry(&skipped);
 
         // Filled as the node's delivery fills it: a full queue takes points

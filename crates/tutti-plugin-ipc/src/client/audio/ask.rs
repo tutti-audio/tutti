@@ -1,6 +1,6 @@
 //! One-shot reply pair for command/response choreography.
 //!
-//! Each `Command` that expects a reply carries a [`Reply<T>`] of the right
+//! Each `ControlCommand` that expects a reply carries a [`Reply<T>`] of the right
 //! type. The dispatch handler sends *into the reply*, and the calling
 //! thread blocks on the paired [`Ask<T>`]. Per-request channels mean two
 //! in-flight `SaveState` calls can't accidentally swap their results — the

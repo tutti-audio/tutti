@@ -41,7 +41,7 @@
 //!
 //! # A stall is not a disconnection
 //!
-//! `pump` treats every error out of `dispatch::handle` as connection-level and
+//! a lane's loop treats every error out of its dispatch handler as connection-level and
 //! calls `crash()`. A state deadline expiring is not that: the socket is
 //! synchronised, nothing is malformed, and the peer has merely not spoken yet.
 //! So the bridge thread reports a stall *to the caller* and stays alive, the way
@@ -119,7 +119,7 @@ impl StallWatch {
 
 /// Shared byte counter for one in-flight state transfer.
 ///
-/// Cloned into the [`ControlCommand`](super::messages::ControlCommand) so the bridge thread
+/// Cloned into the [`ControlCommand`](super::messages::ControlCommand) so the control lane's thread
 /// can advance it while the caller watches. One counter per transfer, created at
 /// the call and dropped with it, so a previous transfer's progress can never be
 /// mistaken for this one's.

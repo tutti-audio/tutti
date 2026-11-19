@@ -52,15 +52,6 @@ pub fn socket_path_in(temp: &Path, name: &str) -> PathBuf {
         .unwrap_or_else(|| temp.join(name))
 }
 
-/// Whether `stream` has something to read now, asked without blocking or
-/// consuming. **A failed ask is "yes"**: the read is the authority on a closed
-/// or broken stream, and this must never be able to hide one.
-pub fn has_pending(stream: &ControlStream) -> bool {
-    // `local_socket::Stream` has exactly one variant on Unix.
-    let Stream::UdSocket(socket) = stream;
-    tutti_plugin_ipc_ffi::wait_readable(socket.as_fd(), Some(Duration::ZERO)).unwrap_or(true)
-}
-
 /// A second handle on a control stream that only *waits* for it to have
 /// something to read, from a thread of its own: it never reads, so the thread
 /// that does keeps every byte and its frame cursor.
