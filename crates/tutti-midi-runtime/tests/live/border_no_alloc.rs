@@ -269,7 +269,7 @@ fn the_mpe_bend_range_fan_out_processes_without_allocating() {
         MaxBlock::of(Samples::new(512)),
     ));
     let mode = Publisher::new(tutti_fixtures::midi::lower_zone(15));
-    ed.insert(NodeKey(1), "in", MidiInputNode::new().with_mpe(&mode));
+    ed.insert(NodeKey(1), "in", MidiInputNode::new().mpe(&mode));
     let mut dev = device(&mut ed, 4);
     let mut out = common::sink(&mut ed, 1, &[(1, 15)]);
     ed.commit().unwrap();
@@ -326,7 +326,7 @@ fn the_mpe_expression_paths_process_without_allocating() {
         MaxBlock::of(Samples::new(512)),
     ));
     let mode = Publisher::new(tutti_fixtures::midi::lower_zone(15));
-    ed.insert(NodeKey(1), "in", MidiInputNode::new().with_mpe(&mode));
+    ed.insert(NodeKey(1), "in", MidiInputNode::new().mpe(&mode));
     let mut dev = device(&mut ed, 4);
     let mut out = common::sink(&mut ed, 1, &[(1, 2)]);
     ed.commit().unwrap();
@@ -383,7 +383,7 @@ fn an_mpe_mode_change_and_an_mcm_process_without_allocating() {
         MaxBlock::of(Samples::new(512)),
     ));
     let cell = Publisher::new(MpeMode::Disabled);
-    ed.insert(NodeKey(1), "in", MidiInputNode::new().with_mpe(&cell));
+    ed.insert(NodeKey(1), "in", MidiInputNode::new().mpe(&cell));
     let mut dev = device(&mut ed, 4);
     let mut out = common::sink(&mut ed, 1, &[(1, 15)]);
     ed.commit().unwrap();

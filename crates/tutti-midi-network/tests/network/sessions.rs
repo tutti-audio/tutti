@@ -267,7 +267,7 @@ fn a_client_without_a_host_naks_an_invitation_as_not_expected() {
 fn secret_sim(client_secret: &str) -> Sim {
     Sim::new(
         host_with(Admission::SharedSecret("5483".into())),
-        Credentials::none().with_secret(client_secret),
+        Credentials::none().secret(client_secret),
         SessionConfig::default(),
     )
 }
@@ -373,7 +373,7 @@ fn the_delay_after_each_failed_digest_doubles() {
 fn five_failed_digests_end_the_invitation_with_authentication_failed() {
     let mut sim = Sim::new(
         host_with(Admission::SharedSecret("5483".into())),
-        Credentials::none().with_secret("5483"),
+        Credentials::none().secret("5483"),
         SessionConfig::default(),
     );
     // A guesser invites, and answers every challenge with a wrong digest.
@@ -433,7 +433,7 @@ fn no_nonce() -> Result<Nonce, getrandom::Error> {
 fn a_host_without_a_nonce_refuses_the_invitation_that_needs_one() {
     let mut sim = Sim::with_nonces(
         host_with(Admission::SharedSecret("5483".into())),
-        Credentials::none().with_secret("5483"),
+        Credentials::none().secret("5483"),
         SessionConfig::default(),
         no_nonce,
     );
@@ -451,7 +451,7 @@ fn a_repeated_invitation_gets_the_same_nonce_and_a_new_session_a_new_one() {
     NONCE_CALLS.store(0, Ordering::SeqCst);
     let mut sim = Sim::with_nonces(
         host_with(Admission::SharedSecret("5483".into())),
-        Credentials::none().with_secret("5483"),
+        Credentials::none().secret("5483"),
         SessionConfig::default(),
         counting_nonce,
     );
@@ -485,7 +485,7 @@ fn a_repeated_invitation_gets_the_same_nonce_and_a_new_session_a_new_one() {
     sim.log.clear();
     let mut again = tutti_midi_network::Client::new(
         identity("Laptop", "CLIENT-1"),
-        Credentials::none().with_secret("5483"),
+        Credentials::none().secret("5483"),
         SessionConfig::default(),
         host_addr(),
         sim.now,
@@ -522,7 +522,7 @@ fn users_sim(user: &str, password: &str) -> Sim {
             Username::new("Rosa").unwrap(),
             "RPBqBno".into(),
         )])),
-        Credentials::none().with_user(Username::new(user).unwrap(), password),
+        Credentials::none().user(Username::new(user).unwrap(), password),
         SessionConfig::default(),
     )
 }
@@ -604,7 +604,7 @@ fn a_client_that_sent_no_invitation_naks_a_challenge_as_not_expected() {
     for challenge in [auth_required(), user_auth_required()] {
         let mut sim = Sim::new(
             HostConfig::new(identity("Studio", "HOST-1")),
-            Credentials::none().with_secret("1234"),
+            Credentials::none().secret("1234"),
             SessionConfig::default(),
         );
         sim.client
@@ -626,14 +626,11 @@ fn a_client_naks_a_challenge_for_a_method_its_invitation_did_not_advertise() {
     let cases = [
         // Holds a user, advertised USER: a shared-secret challenge is unexpected.
         (
-            Credentials::none().with_user(Username::new("Rosa").unwrap(), "pw"),
+            Credentials::none().user(Username::new("Rosa").unwrap(), "pw"),
             auth_required(),
         ),
         // Holds a secret, advertised SHARED_SECRET: a user challenge is unexpected.
-        (
-            Credentials::none().with_secret("1234"),
-            user_auth_required(),
-        ),
+        (Credentials::none().secret("1234"), user_auth_required()),
         // Advertised nothing: neither is expected.
         (Credentials::none(), auth_required()),
         (Credentials::none(), user_auth_required()),
@@ -752,7 +749,7 @@ fn forward_error_correction_recovers_two_lost_datagrams_with_no_retransmit_reque
 }
 
 fn no_fec() -> SessionConfig {
-    SessionConfig::default().with_fec(Fec::Off)
+    SessionConfig::default().fec(Fec::Off)
 }
 
 fn lossy_sim(client: SessionConfig, lost: Vec<usize>) -> Sim {
@@ -814,8 +811,8 @@ fn a_retransmit_request_the_sender_cannot_serve_reports_the_data_lost() {
     // Only the last command is kept; commands 1 and 2 are gone.
     let mut sim = lossy_sim(
         no_fec()
-            .with_retransmit(Retransmit::Buffer(std::num::NonZeroUsize::MIN))
-            .with_idle_interval(IdleInterval::of(ms(300))),
+            .retransmit(Retransmit::Buffer(std::num::NonZeroUsize::MIN))
+            .idle_interval(IdleInterval::of(ms(300))),
         vec![2, 3],
     );
     let notes: Vec<_> = (60..64).map(note_on).collect();
@@ -861,7 +858,7 @@ fn a_retransmit_request_the_sender_cannot_serve_reports_the_data_lost() {
 /// Spec: m2-124/7.2.3#10, m2-124/7.2.3#11
 #[test]
 fn a_peer_without_retransmit_naks_the_request_and_the_gap_is_given_up() {
-    let mut sim = lossy_sim(no_fec().with_retransmit(Retransmit::Unsupported), vec![2]);
+    let mut sim = lossy_sim(no_fec().retransmit(Retransmit::Unsupported), vec![2]);
     let notes: Vec<_> = (60..63).map(note_on).collect();
     for n in &notes {
         sim.client.send(sim.now, &[*n]).unwrap();
@@ -898,10 +895,10 @@ fn the_wait_between_retransmit_requests_stops_doubling_at_the_timer_ceiling() {
     let hour = Duration::from_secs(60 * 60);
     let mut host = HostConfig::new(identity("Studio", "HOST-1"));
     host.session = no_fec()
-        .with_reorder_wait(Timer::of(hour))
-        .with_requests(Requests::UpTo(std::num::NonZeroU8::MAX))
-        .with_ping_interval(Timer::of(hour))
-        .with_liveness_timeout(Timer::of(hour));
+        .reorder_wait(Timer::of(hour))
+        .requests(Requests::UpTo(std::num::NonZeroU8::MAX))
+        .ping_interval(Timer::of(hour))
+        .liveness_timeout(Timer::of(hour));
     // Every retransmission is lost as well, so the gap stays open.
     let mut sim = lossy_sim_with(host, no_fec(), std::iter::once(2).chain(4..60).collect());
     for n in (60..63).map(note_on) {
@@ -1254,7 +1251,7 @@ fn the_first_zero_length_command_comes_within_300_ms_at_the_longest_idle_interva
     let mut sim = Sim::new(
         HostConfig::new(identity("Studio", "HOST-1")),
         Credentials::none(),
-        SessionConfig::default().with_idle_interval(IdleInterval::of(ms(300))),
+        SessionConfig::default().idle_interval(IdleInterval::of(ms(300))),
     );
     sim.connect();
     sim.log.clear();
@@ -1714,7 +1711,7 @@ fn only_an_invitation_below_capacity_creates_a_host_entry() {
 #[test]
 fn a_receiver_that_never_requests_gives_a_gap_up_without_asking() {
     let mut host = HostConfig::new(identity("Studio", "HOST-1"));
-    host.session = SessionConfig::default().with_requests(Requests::Never);
+    host.session = SessionConfig::default().requests(Requests::Never);
     let mut sim = Sim::new(host, Credentials::none(), no_fec());
     sim.connect();
     sim.host_events.clear();

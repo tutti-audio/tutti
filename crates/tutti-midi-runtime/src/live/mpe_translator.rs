@@ -500,12 +500,12 @@ fn view_of(config: &MpeZoneConfig, mono: &[bool; MidiChannel::COUNT as usize]) -
         member_count: config.member_count(),
         manager_range: config.pitch_bend_range_for(config.master_channel()),
         member_range: config.pitch_bend_range_for(first_member),
-        response: config.channel_response(),
+        response: config.response(),
         // The Profile's response is the zone's; MPE 1.1's mode is switched by
         // the wire, from the response the zone started in.
         monophonic: match config.spec() {
             MpeSpec::Mpe11 => mono[config.master_channel().index()],
-            MpeSpec::Profile => config.channel_response() == ChannelResponse::Monophonic,
+            MpeSpec::Profile => config.response() == ChannelResponse::Monophonic,
         },
     }
 }
@@ -604,7 +604,7 @@ impl MpeTranslator {
 
     /// Reconfigure every Group to a new zone layout. Allocates nothing, so the
     /// input node calls it on the audio thread when the cell it follows
-    /// ([`MidiInputNode::with_mpe`](crate::MidiInputNode::with_mpe))
+    /// ([`MidiInputNode::mpe`](crate::MidiInputNode::mpe))
     /// publishes a new mode.
     ///
     /// What a channel held or was told is kept where the channel is what it
