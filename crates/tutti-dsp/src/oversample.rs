@@ -67,7 +67,7 @@ use crate::{FirDesign, FirError, FirResponse};
 /// The attenuation of an [`Oversampling`] until [`attenuation`](Oversampling::attenuation) sets
 /// it: 100 dB puts the images of a tone 100 dB below it, past what a 16-bit signal resolves
 /// and a few dB under what `f32` does, for about 70 taps in the first stage.
-const DEFAULT_ATTENUATION: Db = Db(100.0);
+const DEFAULT_ATTENUATION: Db = Db::new(100.0);
 
 tutti_units::ranged! {
     /// The top of the band the oversampler keeps flat, as a fraction of the base rate's
@@ -176,7 +176,7 @@ impl Oversampling {
         let base = rate.get();
         let stages = self.factor.stages();
         // A rate that overflows when scaled is refused with this error.
-        let overflow = FirError::NonPositiveTransition(Hz(f64::INFINITY));
+        let overflow = FirError::NonPositiveTransition(Hz::new(f64::INFINITY));
         let high = SampleRate::new(base * self.factor.get() as f64).ok_or(overflow)?;
         let passband = f64::from(self.passband.get());
         let mut taps = Vec::with_capacity(stages);
@@ -184,7 +184,7 @@ impl Oversampling {
             let transition =
                 base * (f64::from(1u32 << j) - passband).min(f64::from(1u32 << j) / 2.0);
             let stage_rate = SampleRate::new(base * f64::from(2u32 << j)).ok_or(overflow)?;
-            let fir = FirDesign::new(FirResponse::HalfBand, Hz(transition))
+            let fir = FirDesign::new(FirResponse::HalfBand, Hz::new(transition))
                 .attenuation(self.attenuation)
                 .design(stage_rate)?;
             let delay = fir.delay().get();

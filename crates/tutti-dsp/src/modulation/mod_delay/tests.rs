@@ -23,9 +23,9 @@ fn bus(width: u16) -> BusTopology {
 
 fn controls(rate: f64, depth: f64, feedback: f64) -> ModDelayControls {
     ModDelayControls {
-        rate: Hz(rate),
-        depth: Seconds(depth),
-        feedback: Feedback(feedback),
+        rate: Hz::new(rate),
+        depth: Seconds::new(depth),
+        feedback: Feedback::new(feedback),
     }
 }
 
@@ -33,10 +33,10 @@ fn controls(rate: f64, depth: f64, feedback: f64) -> ModDelayControls {
 /// flanger's least depth is 0.1 ms, so it is never frozen.
 fn short_base() -> Sweep {
     Sweep::of(
-        Seconds(0.001),
-        MaxDelay::of(Seconds(0.02)),
+        Seconds::new(0.001),
+        MaxDelay::of(Seconds::new(0.02)),
         Seconds::ZERO,
-        Seconds(0.01),
+        Seconds::new(0.01),
         Feedback::MAX_STABLE,
     )
 }
@@ -44,10 +44,10 @@ fn short_base() -> Sweep {
 /// A mono swept delay of a base of `frames` at `rate`, in a 20 ms line.
 fn at_frames(frames: f64, rate: SampleRate) -> ModDelayBank<f32> {
     let sweep = Sweep::of(
-        Seconds(frames / rate.get()),
-        MaxDelay::of(Seconds(0.02)),
+        Seconds::new(frames / rate.get()),
+        MaxDelay::of(Seconds::new(0.02)),
         Seconds::ZERO,
-        Seconds(0.01),
+        Seconds::new(0.01),
         Feedback::MAX_STABLE,
     );
     let layout = ModDelayLayout::new(bus(1), sweep, Stagger::NONE).unwrap();
@@ -139,7 +139,7 @@ fn a_sweep_reaches_base_plus_and_minus_the_depth_floored_at_a_frame() {
 #[test]
 fn the_controls_are_made_safe() {
     let chorus = ModDelayBank::<f32>::new(&ModDelayLayout::chorus(bus(1)), RATE);
-    let step = |hz: f64| PhaseIncrement::per_sample(Hz(hz), RATE);
+    let step = |hz: f64| PhaseIncrement::per_sample(Hz::new(hz), RATE);
     for (hz, effective) in [
         (-3.0f64, 0.01),
         (0.0, 0.01),
@@ -165,7 +165,7 @@ fn the_controls_are_made_safe() {
     ] {
         assert_eq!(
             chorus.design(&controls(1.0, 0.005, fb)).feedback,
-            Feedback(want),
+            Feedback::new(want),
             "feedback {fb}"
         );
     }
@@ -416,10 +416,10 @@ fn an_f64_bank_with_no_depth_is_a_fixed_delay_in_f64() {
     let (d, len) = (16usize, 200usize);
     let rate = SampleRate::of(1_024.0);
     let sweep = Sweep::of(
-        Seconds(d as f64 / rate.get()),
-        MaxDelay::of(Seconds(1.0)),
+        Seconds::new(d as f64 / rate.get()),
+        MaxDelay::of(Seconds::new(1.0)),
         Seconds::ZERO,
-        Seconds(0.01),
+        Seconds::new(0.01),
         Feedback::MAX_STABLE,
     );
     let layout = ModDelayLayout::new(bus(1), sweep, Stagger::NONE).unwrap();

@@ -17,7 +17,7 @@ fn the_centroid_of_two_equal_bins_is_their_midpoint() {
     let mut row = vec![0.0f64; 65];
     row[10] = 2.0;
     row[30] = 2.0;
-    let c = spectral_centroid(&row, Hz(10.0));
+    let c = spectral_centroid(&row, Hz::new(10.0));
     assert!((c.get() - 200.0).abs() < 1e-3, "{c}");
 }
 
@@ -33,11 +33,11 @@ fn the_centroid_of_two_equal_bins_is_their_midpoint() {
 fn rolloff_sits_at_the_energy_share_and_the_band_edge() {
     let mut row = vec![0.0f64; 513];
     row[..100].fill(1.0);
-    let width = Hz(10.0);
-    assert_eq!(spectral_rolloff(&row, width, 0.5), Hz(490.0));
-    assert_eq!(spectral_rolloff(&row, width, 0.855), Hz(850.0));
-    assert_eq!(spectral_rolloff(&row, width, 1.0), Hz(990.0));
-    assert_eq!(spectral_rolloff(&row, width, 0.0), Hz(0.0));
+    let width = Hz::new(10.0);
+    assert_eq!(spectral_rolloff(&row, width, 0.5), Hz::new(490.0));
+    assert_eq!(spectral_rolloff(&row, width, 0.855), Hz::new(850.0));
+    assert_eq!(spectral_rolloff(&row, width, 1.0), Hz::new(990.0));
+    assert_eq!(spectral_rolloff(&row, width, 0.0), Hz::new(0.0));
 }
 
 /// Band-limited noise (unit magnitude below an edge, random phase) rolls
@@ -60,7 +60,7 @@ fn band_limited_noise_rolls_off_at_the_edge() {
         fft.forward_unwindowed(tutti_buffers::Mono::new(&x), &mut out);
         out.iter().map(|b| b.norm()).collect::<Vec<_>>()
     };
-    let r = spectral_rolloff(&row, Hz(width), 0.99);
+    let r = spectral_rolloff(&row, Hz::new(width), 0.99);
     let edge = edge_bin as f64 * width;
     assert!(r.get() <= edge && r.get() > 0.98 * edge, "{r} vs {edge}");
 }
@@ -90,15 +90,18 @@ fn non_finite_magnitudes_give_no_result_and_an_out_of_range_share_acts_as_its_ne
     for bad in [f64::NAN, f64::INFINITY] {
         let mut row = vec![1.0f64; 32];
         row[5] = bad;
-        assert_eq!(spectral_centroid(&row, Hz(10.0)), Hz(0.0));
+        assert_eq!(spectral_centroid(&row, Hz::new(10.0)), Hz::new(0.0));
         assert_eq!(spectral_flatness(&row), 0.0);
-        assert_eq!(spectral_rolloff(&row, Hz(10.0), 0.85), Hz(0.0));
+        assert_eq!(spectral_rolloff(&row, Hz::new(10.0), 0.85), Hz::new(0.0));
     }
     let mut row = vec![0.0f64; 40];
     row[..20].fill(1.0);
-    assert_eq!(spectral_rolloff(&row, Hz(10.0), 7.0), Hz(190.0));
-    assert_eq!(spectral_rolloff(&row, Hz(10.0), -3.0), Hz(0.0));
-    assert_eq!(spectral_rolloff(&row, Hz(10.0), f64::NAN), Hz(0.0));
+    assert_eq!(spectral_rolloff(&row, Hz::new(10.0), 7.0), Hz::new(190.0));
+    assert_eq!(spectral_rolloff(&row, Hz::new(10.0), -3.0), Hz::new(0.0));
+    assert_eq!(
+        spectral_rolloff(&row, Hz::new(10.0), f64::NAN),
+        Hz::new(0.0)
+    );
 }
 
 /// A silent spectrum reads zero on all three, and an empty one does not
@@ -106,11 +109,11 @@ fn non_finite_magnitudes_give_no_result_and_an_out_of_range_share_acts_as_its_ne
 #[test]
 fn silence_has_no_shape() {
     let zeros = [0.0f64; 33];
-    assert_eq!(spectral_centroid(&zeros, Hz(5.0)), Hz(0.0));
+    assert_eq!(spectral_centroid(&zeros, Hz::new(5.0)), Hz::new(0.0));
     assert_eq!(spectral_flatness(&zeros), 0.0);
-    assert_eq!(spectral_rolloff(&zeros, Hz(5.0), 0.85), Hz(0.0));
+    assert_eq!(spectral_rolloff(&zeros, Hz::new(5.0), 0.85), Hz::new(0.0));
     assert_eq!(spectral_flatness::<f64>(&[]), 0.0);
-    assert_eq!(spectral_centroid::<f64>(&[], Hz(5.0)), Hz(0.0));
+    assert_eq!(spectral_centroid::<f64>(&[], Hz::new(5.0)), Hz::new(0.0));
 }
 
 /// The kernels read a spectrum of either float width: a single bin `k` of a
@@ -120,8 +123,8 @@ fn silence_has_no_shape() {
 fn the_kernels_read_an_f32_spectrum_at_the_same_figures() {
     let mut row = vec![0.0f32; 64];
     row[10] = 2.0;
-    let width = Hz(100.0);
-    assert_eq!(spectral_centroid(&row, width), Hz(1000.0));
-    assert_eq!(spectral_rolloff(&row, width, 1.0), Hz(1000.0));
+    let width = Hz::new(100.0);
+    assert_eq!(spectral_centroid(&row, width), Hz::new(1000.0));
+    assert_eq!(spectral_rolloff(&row, width, 1.0), Hz::new(1000.0));
     assert!(spectral_flatness(&row) < 1e-9);
 }

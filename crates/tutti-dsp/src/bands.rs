@@ -23,7 +23,7 @@ pub fn log_band_edges(lo: Hz, hi: Hz, count: usize) -> Vec<Hz> {
     }
     let (lo, hi) = (lo.get(), hi.get());
     (0..=count)
-        .map(|j| Hz(lo * libm::pow(hi / lo, j as f64 / count as f64)))
+        .map(|j| Hz::new(lo * libm::pow(hi / lo, j as f64 / count as f64)))
         .collect()
 }
 
@@ -51,7 +51,7 @@ pub fn octave_band_edges(lo: Hz, hi: Hz, per_octave: usize) -> Vec<Hz> {
         return Vec::new();
     }
     (0..=bands)
-        .map(|j| Hz(lo * libm::exp2(j as f64 / n)))
+        .map(|j| Hz::new(lo * libm::exp2(j as f64 / n)))
         .collect()
 }
 

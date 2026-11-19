@@ -30,7 +30,7 @@ pub fn spectral_centroid<F: Float>(magnitudes: &[F], bin_width: Hz) -> Hz {
                 (w + k as f64 * m, t + m)
             });
     if total.is_finite() && total > 0.0 {
-        Hz(weighted / total * bin_width.get())
+        Hz::new(weighted / total * bin_width.get())
     } else {
         Hz::ZERO
     }
@@ -86,7 +86,7 @@ pub fn spectral_rolloff<F: Float>(magnitudes: &[F], bin_width: Hz, fraction: f64
     };
     let total: f64 = magnitudes.iter().map(|&m| energy(m)).sum();
     if !total.is_finite() || total <= 0.0 {
-        return Hz(0.0);
+        return Hz::new(0.0);
     }
     let fraction = if fraction.is_nan() { 0.0 } else { fraction };
     let target = total * fraction;
@@ -103,7 +103,7 @@ pub fn spectral_rolloff<F: Float>(magnitudes: &[F], bin_width: Hz, fraction: f64
     }
     // The bin that crossed the target, or, if the float sum fell a hair short
     // of the total at a full share, the last one that holds energy.
-    Hz(last_active as f64 * bin_width.get())
+    Hz::new(last_active as f64 * bin_width.get())
 }
 
 #[cfg(test)]

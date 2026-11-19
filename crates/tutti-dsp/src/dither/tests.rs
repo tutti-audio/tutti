@@ -10,7 +10,7 @@ fn apply<F: Float>(n: &mut DitherNoise, shape: DitherShape, lsb: Amplitude, s: &
     );
 }
 
-const LSB: Amplitude = Amplitude(1.0);
+const LSB: Amplitude = Amplitude::new(1.0);
 
 /// The first rectangular draw is the first xorshift32 word from the seed
 /// 0x12345678, 2_274_908_837, scaled to `[-0.5, 0.5]`: `2274908837 / 2^32 - 0.5` (to the `f32` grid of `2^-24`).
@@ -35,7 +35,7 @@ fn the_first_triangular_draw_is_the_difference_of_two_seeded_words() {
     apply(
         &mut DitherNoise::new(),
         DitherShape::Triangular,
-        Amplitude(0.25),
+        Amplitude::new(0.25),
         &mut s,
     );
     let want = (2_274_908_837.0_f64 - 358_294_691.0) / 4_294_967_296.0 * 0.25;
@@ -117,7 +117,7 @@ fn f32_triangular_noise_has_the_variance_of_a_triangle() {
         apply(
             &mut DitherNoise::new(),
             DitherShape::Triangular,
-            Amplitude(lsb),
+            Amplitude::new(lsb),
             &mut s,
         );
         let draws: Vec<f64> = s.iter().map(|&x| f64::from(x) / lsb).collect();

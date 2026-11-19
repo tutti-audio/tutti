@@ -13,5 +13,5 @@ pub(crate) fn trips(q: f64, floor: Db) -> f64 {
 /// delay and its interpolator's spread (the echo `k` is spread over `k + 1` frames at
 /// most; two per trip errs long), in seconds.
 pub(crate) fn ring_seconds(frames: usize, trips: f64, rate: SampleRate) -> Seconds {
-    Seconds((1.0 + trips) * (frames as f64 + 2.0) / rate.get())
+    Seconds::new((1.0 + trips) * (frames as f64 + 2.0) / rate.get())
 }

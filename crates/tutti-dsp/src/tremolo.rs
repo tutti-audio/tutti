@@ -32,7 +32,7 @@ pub struct TremoloControls {
 impl TremoloControls {
     /// 5 Hz at half depth.
     pub const DEFAULT: Self = Self {
-        rate: Hz(5.0),
+        rate: Hz::new(5.0),
         depth: Depth::of(0.5),
     };
 }
@@ -50,7 +50,7 @@ pub struct AutoPanControls {
 impl AutoPanControls {
     /// 1 Hz across the whole field.
     pub const DEFAULT: Self = Self {
-        rate: Hz(1.0),
+        rate: Hz::new(1.0),
         depth: Depth::FULL,
     };
 }

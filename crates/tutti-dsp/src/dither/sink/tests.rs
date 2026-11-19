@@ -44,8 +44,8 @@ fn tpdf_i16() -> DitherSink<Collect<i16>, f32> {
 /// is 2^-23, and a float format has none.
 #[test]
 fn the_lsb_is_the_step_of_the_integer_format() {
-    assert_eq!(lsb_of::<i16>().0, 1.0 / 32768.0);
-    assert_eq!(lsb_of::<I24>().0, 1.0 / 8_388_608.0);
+    assert_eq!(lsb_of::<i16>().get(), 1.0 / 32768.0);
+    assert_eq!(lsb_of::<I24>().get(), 1.0 / 8_388_608.0);
     assert_eq!(lsb_of::<f32>(), Amplitude::SILENT);
 }
 

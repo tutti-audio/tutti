@@ -141,11 +141,11 @@ pub(crate) const DECAY_DIFFUSION_1: Gain = Gain::new(-0.70);
 /// The deepest modulation excursion, in frames at 29761 Hz (the paper's EXCURSION).
 const EXCURSION: f64 = 16.0;
 /// The rate of the modulation (the paper: of the order of 1 Hz).
-const MODULATION_RATE: Hz = Hz(1.0);
+const MODULATION_RATE: Hz = Hz::new(1.0);
 /// The longest decay a control may ask for: 8 s.
-pub const MAX_PLATE_DECAY: Seconds = Seconds(8.0);
+pub const MAX_PLATE_DECAY: Seconds = Seconds::new(8.0);
 /// The lowest bandwidth a control reaches.
-pub(crate) const MIN_BANDWIDTH: Hz = Hz(10.0);
+pub(crate) const MIN_BANDWIDTH: Hz = Hz::new(10.0);
 /// The share of Nyquist the input bandwidth is held under.
 const BANDWIDTH_CEILING: f64 = 0.9;
 /// The largest damping pole: one short of a filter that never settles.
@@ -198,12 +198,12 @@ impl PlateControls {
     /// damping 0.0005, a bandwidth of 20 kHz (the paper's 0.9995 is nearly transparent), no
     /// pre-delay and half the modulation depth.
     pub const DEFAULT: PlateControls = PlateControls {
-        decay: Seconds(1.8),
-        damping: Mix(0.0005),
-        bandwidth: Hz(20_000.0),
+        decay: Seconds::new(1.8),
+        damping: Mix::new(0.0005),
+        bandwidth: Hz::new(20_000.0),
         pre_delay: Seconds::ZERO,
         modulation: Depth::of(0.5),
-        diffusion: Mix(1.0),
+        diffusion: Mix::new(1.0),
     };
 }
 
@@ -284,7 +284,7 @@ impl PlateControls {
                     length: span(h.delay1),
                     modulation: LineModulation::NONE,
                     absorption: Absorption::OnePole {
-                        gain: Amplitude(c),
+                        gain: Amplitude::new(c),
                         damp: damping,
                     },
                     diffuser: Some(lattice(
@@ -301,7 +301,7 @@ impl PlateControls {
                 .push(Line {
                     length: span(h.delay2),
                     modulation: LineModulation::NONE,
-                    absorption: Absorption::Gain(Amplitude(c)),
+                    absorption: Absorption::Gain(Amplitude::new(c)),
                     diffuser: Some(lattice(span(h.lattice2), lattice2, LineModulation::NONE)),
                 })
                 .expect("four lines fit MAX_LINES");
@@ -334,7 +334,7 @@ impl PlateControls {
             decay: MAX_PLATE_DECAY,
             pre_delay: MAX_PRE_DELAY,
             modulation: Depth::of(1.0),
-            damping: Mix(MAX_DAMPING),
+            damping: Mix::new(MAX_DAMPING),
             ..Self::DEFAULT
         };
         let mut network = Box::new(Network::new(rate));

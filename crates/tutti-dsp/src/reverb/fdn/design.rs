@@ -54,22 +54,22 @@ const LENGTHS: [SampleSpan; 16] = [
 ];
 
 /// The crossovers of the three bands.
-pub(crate) const CROSSOVER: [Hz; 2] = [Hz(300.0), Hz(4_000.0)];
+pub(crate) const CROSSOVER: [Hz; 2] = [Hz::new(300.0), Hz::new(4_000.0)];
 
 /// The longest pre-delay, in seconds.
-pub const MAX_PRE_DELAY: Seconds = Seconds(0.5);
+pub const MAX_PRE_DELAY: Seconds = Seconds::new(0.5);
 /// The deepest modulation, in frames at 44.1 kHz, at a depth of 1.
 const MAX_MODULATION: SampleSpan = SampleSpan::of(8.0);
 /// The modulation rates a control may ask for.
-const RATES: (Hz, Hz) = (Hz(0.05), Hz(5.0));
+const RATES: (Hz, Hz) = (Hz::new(0.05), Hz::new(5.0));
 /// The shortest RT60 a control may ask for, and the least a [`MaxDecay`] holds.
-pub const MIN_DECAY: Seconds = Seconds(0.05);
+pub const MIN_DECAY: Seconds = Seconds::new(0.05);
 /// The widest stereo image.
 const MAX_WIDTH: f64 = 2.0;
 /// The wet gain at or below which the network is silent.
-const SILENT_WET: Db = Db(-120.0);
+const SILENT_WET: Db = Db::new(-120.0);
 /// The loudest wet gain.
-const MAX_WET: Db = Db(24.0);
+const MAX_WET: Db = Db::new(24.0);
 
 /// The controls of a feedback delay network, in tutti units.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -104,12 +104,12 @@ impl FdnControls {
     /// A mid-sized room with a two second tail, darker above: the controls an
     /// FDN starts from.
     pub const DEFAULT: FdnControls = FdnControls {
-        decay: [Seconds(2.0), Seconds(2.4), Seconds(1.2)],
-        size: Mix(0.5),
-        diffusion: Mix(0.8),
+        decay: [Seconds::new(2.0), Seconds::new(2.4), Seconds::new(1.2)],
+        size: Mix::new(0.5),
+        diffusion: Mix::new(0.8),
         pre_delay: Seconds::ZERO,
         modulation: Depth::of(0.3),
-        rate: Hz(0.5),
+        rate: Hz::new(0.5),
         width: StereoWidth::NATURAL,
         wet: Db::UNITY,
         freeze: false,
@@ -235,7 +235,7 @@ impl FdnLayout {
             v.clamp(MIN_DECAY, self.max_decay)
         });
         let rt60 = if freeze {
-            [Seconds(f64::INFINITY); 3]
+            [Seconds::new(f64::INFINITY); 3]
         } else {
             rt60
         };
@@ -257,7 +257,7 @@ impl FdnLayout {
             if w.get().is_nan() {
                 Db::UNITY
             } else if w <= SILENT_WET {
-                Db(f64::NEG_INFINITY)
+                Db::new(f64::NEG_INFINITY)
             } else {
                 w.min(MAX_WET)
             }
@@ -343,7 +343,7 @@ impl FdnLayout {
             input,
             output: OutputMap { rows },
         }));
-        out.width = StereoWidth(width);
+        out.width = StereoWidth::new(width);
         out.wet = wet;
     }
 }
@@ -355,8 +355,8 @@ impl FdnLayout {
     pub(crate) fn capacity(&self, rate: SampleRate) -> NetworkCapacity {
         let worst = FdnControls {
             decay: [self.max_decay; 3],
-            size: Mix(1.0),
-            diffusion: Mix(1.0),
+            size: Mix::new(1.0),
+            diffusion: Mix::new(1.0),
             pre_delay: MAX_PRE_DELAY,
             modulation: Depth::of(1.0),
             freeze: false,
@@ -367,7 +367,7 @@ impl FdnLayout {
         let mut b = NetworkCapacity::need(&network, TAIL_FLOOR);
         b.tail = match b.tail {
             _ if self.freezable => Ring::Unbounded,
-            Ring::Finite(t) => Ring::Finite(Seconds(t.get() * self.rounding_margin(rate))),
+            Ring::Finite(t) => Ring::Finite(Seconds::new(t.get() * self.rounding_margin(rate))),
             other => other,
         };
         b

@@ -17,7 +17,8 @@ fn closed(tau: f64) -> f64 {
 }
 
 fn follower<F: tutti_buffers::Float>() -> Follower<F> {
-    let ballistics = Ballistics::new(Seconds(ATTACK), Seconds(RELEASE)).expect("a valid pair");
+    let ballistics =
+        Ballistics::new(Seconds::new(ATTACK), Seconds::new(RELEASE)).expect("a valid pair");
     Follower::of(ballistics, SampleRate::of(RATE))
 }
 
@@ -84,7 +85,7 @@ fn the_f32_follower_takes_the_same_one_step_values() {
 #[test]
 fn a_pole_leaves_its_exponential_to_one_half_and_closes_its_complement_beyond() {
     let rate = SampleRate::of(RATE);
-    let frames = |n: f64| Seconds(n / RATE);
+    let frames = |n: f64| Seconds::new(n / RATE);
     assert_eq!(
         Pole::<f64>::of(frames(1.0), rate),
         Pole::Leaves((-1.0f64).exp())
@@ -95,7 +96,7 @@ fn a_pole_leaves_its_exponential_to_one_half_and_closes_its_complement_beyond() 
     );
     assert_eq!(Pole::<f64>::of(Seconds::ZERO, rate), Pole::<f64>::INSTANT);
     assert_eq!(
-        Pole::<f64>::of(Seconds(f64::INFINITY), rate),
+        Pole::<f64>::of(Seconds::new(f64::INFINITY), rate),
         Pole::<f64>::HOLD
     );
     for n in [0.5, 1.0, 1.4, 1.5, 3.0, 100.0] {
@@ -122,7 +123,7 @@ fn an_f32_sub_frame_time_constant_keeps_its_retained_fraction_where_the_coeffici
     let (mut stored, mut coefficient) = (0.0f64, 0.0f64);
     for i in 0..200 {
         let frames = 0.05 + 0.65 * f64::from(i) / 199.0;
-        let tau = Seconds(frames / rate.get());
+        let tau = Seconds::new(frames / rate.get());
         let keep = (-1.0 / frames).exp();
         let pole = Pole::<f32>::of(tau, rate);
         let c = tau.one_pole_coeff(rate) as f32;
@@ -155,7 +156,7 @@ fn a_compensated_f32_follower_reaches_one_minus_one_over_e_in_tau_frames_where_t
     let want = 1.0 - (-1.0f64).exp();
     for tau in [100.0, 300.0] {
         let n = (tau * rate.get()) as u64;
-        let pole = Pole::<f32>::of(Seconds(tau), rate);
+        let pole = Pole::<f32>::of(Seconds::new(tau), rate);
         let Pole::Closes(c) = pole else {
             panic!("{pole:?}")
         };
