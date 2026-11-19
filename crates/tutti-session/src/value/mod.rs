@@ -50,6 +50,8 @@ pub(crate) use program::{
 pub use program::{AutomationTarget, CurveTarget, MacroTarget, PolarityTarget, RateTarget};
 #[cfg(feature = "midi-hardware")]
 pub use slot::MidiPolicyTarget;
+#[cfg(feature = "sampler")]
+pub use slot::WindowTarget;
 pub(crate) use slot::{
     Cell, ClickVolumeSlot, LoopCell, PublishedSlot, SettingSlot, SlotCell, SlotId, TempoCell,
 };
