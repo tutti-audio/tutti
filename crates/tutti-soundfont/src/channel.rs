@@ -193,7 +193,7 @@ mod tests {
     use super::*;
     use tutti_ump::ControlValue;
 
-    /// A chased effect send is the 7-bit value widened Min-Center-Max (M2-115 section 3):
+    /// A chased effect send is the 7-bit value upscaled Min-Center-Max (M2-115 section 3):
     /// the centre 64 is exactly `0x8000_0000`, 127 is full scale, `0xFFFF_FFFF`, and a value
     /// below the centre shifts (1 is `1 << 25`). A plain shift would put 127 at
     /// `0xFE00_0000`. (0 is the fresh channel's value and is not chased.)

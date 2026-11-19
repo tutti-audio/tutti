@@ -550,7 +550,7 @@ fn the_valid_bank_is_per_channel_and_group() {
 
 /// Spec: m2-104/d.3.1#1, m2-104/d.3.1#2, m2-115/3.1#1, m2-104/6.2#4
 #[test]
-fn stateless_messages_are_widened() {
+fn stateless_messages_are_translated() {
     let mut t = Midi2Translator::new();
     let note = NoteNumber::of(60);
     let on0: Ump = Message::Midi1(
@@ -573,7 +573,7 @@ fn stateless_messages_are_widened() {
             }
         )]]
     );
-    // Data Increment stays a Control Change, widened (M2-115: 127 to max).
+    // Data Increment stays a Control Change, upscaled (M2-115: 127 to max).
     assert_eq!(
         run(&mut t, &[cc(CCNumber::of(96), 127)]),
         vec![vec![Message::Midi2(
@@ -804,7 +804,7 @@ fn a_velocity_prefix_waits_across_other_messages_on_its_channel_only() {
 
 /// **CA-031: `9n kk 00` is still a valid Note Off, and a preceding `Bn 58 xx`
 /// has no effect.** The Note Off is the one
-/// `widen` makes (release velocity `0x8000`, M2-104 D.3.1), and the prefix does
+/// `Voice2::from` makes (release velocity `0x8000`, M2-104 D.3.1), and the prefix does
 /// not carry over to the Note On after it.
 /// Spec: m2-104/d.3.1#1
 #[test]
@@ -960,7 +960,7 @@ fn reset_group_forgets_that_groups_selection_alone() {
 }
 
 /// Appendix D.3.3: a 14-bit controller's MSB (1 to 31) and LSB (33 to 63) are
-/// not merged into one 32-bit value: each is its own Control Change, widened
+/// not merged into one 32-bit value: each is its own Control Change, upscaled
 /// on its own, and neither is a relative controller.
 /// Spec: m2-104/d.3.3#1, m2-104/d.3.3#2
 #[test]
@@ -1034,12 +1034,12 @@ fn translated_channel_voice_messages_are_all_midi_2() {
 }
 
 /// **D.1.5 up-scaling needs no special case**: the near-zero 7-bit value 1
-/// widens above 0 (to 0x0200 at 16 bits, D.1.3's `1 << 9`) and the near-maximum
+/// upscales above 0 (to 0x0200 at 16 bits, D.1.3's `1 << 9`) and the near-maximum
 /// 126 below 0xFFFF (to 0xFDF7, from the scaleUp7to16 code), so a value never
 /// lands on an extreme it was not.
 /// Spec: m2-104/d.1.5#1
 #[test]
-fn near_extreme_midi_1_values_widen_off_the_extremes() {
+fn near_extreme_midi_1_values_translate_off_the_extremes() {
     let mut t = Midi2Translator::new();
     for (velocity, wide) in [(1, 0x0200), (126, 0xFDF7), (127, 0xFFFF)] {
         let on = Message::midi1(A, Voice1::note_on(NoteNumber::of(60), U7::of(velocity)));

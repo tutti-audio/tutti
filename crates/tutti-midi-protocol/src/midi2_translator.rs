@@ -2,7 +2,6 @@
 //! [`Midi2Translator`] an input edge runs once.
 
 use crate::scale;
-use crate::voice::widen;
 use tutti_ump::{
     Address, Attribute, Bank, CCNumber, ControlValue, Message, MidiChannel, MidiGroup,
     NoteVelocity, U7, U14, Ump, Voice1, Voice2,
@@ -68,7 +67,7 @@ struct Channel {
 /// State is kept per group and channel, and the group is kept. What it does
 /// (M2-104 Appendix D.3):
 ///
-/// - **A stateless message** is [`widen`]ed: velocity, pressure, Control
+/// - **A stateless message** is converted by `Voice2::from`: velocity, pressure, Control
 ///   Change and Pitch Bend values scaled Min-Center-Max (M2-115 section 3),
 ///   and a Note On at velocity 0 is a Note Off at release velocity `0x8000`.
 /// - **An RPN or NRPN run** (CC 101 and 100, or 99 and 98, then Data Entry CC
@@ -278,7 +277,7 @@ impl Midi2Translator {
                 if matches!(other, Voice1::NoteOn { .. }) {
                     channel.velocity_low = None;
                 }
-                send(widen(other));
+                send(Voice2::from(other));
             }
         }
         sent
@@ -299,7 +298,7 @@ impl Channel {
     }
 }
 
-/// A Control Change on `channel`: absorbed into a run or a bank, or widened.
+/// A Control Change on `channel`: absorbed into a run or a bank, or translated.
 fn controller_change(
     channel: &mut Channel,
     controller: CCNumber,
@@ -363,7 +362,7 @@ fn controller_change(
             channel.msb = None;
             channel.pending = false;
             channel.early_lsb = None;
-            send(widen(Voice1::ControlChange { controller, value }));
+            send(Voice2::from(Voice1::ControlChange { controller, value }));
         }
         // CA-031: Bn 58 vv is the lower 7 bits of the next Note On or Note Off's
         // velocity on this channel. It is the MIDI 1.0 spelling of what the
@@ -378,7 +377,7 @@ fn controller_change(
             channel.bank_lsb = value;
             channel.bank_set = true;
         }
-        _ => send(widen(Voice1::ControlChange { controller, value })),
+        _ => send(Voice2::from(Voice1::ControlChange { controller, value })),
     }
 }
 

@@ -719,7 +719,7 @@ fn a_legacy_source_arrives_as_midi1_ump_not_converted_by_the_kernel() {
 }
 
 /// An Endpoint that offers the MIDI 2.0 Protocol is a MIDI 2.0 client: its own
-/// type 4 packet arrives as sent, not narrowed.
+/// type 4 packet arrives as sent, not translated.
 #[test]
 fn a_midi2_endpoint_arrives_as_midi2_ump() {
     let mut pumped = Pumped::over(plug_ump(&unique("two-in"), Protocol::Midi2), Duration::ZERO);

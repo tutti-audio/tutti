@@ -8,8 +8,8 @@
 //! `match` on the site.
 
 use super::audio::AudioBridge;
+use super::ipc_editor::IpcEditor;
 use super::plugin_bridge::EditorLoader;
-use super::remote_editor::RemoteEditor;
 use crossbeam::queue::ArrayQueue;
 use dpi::Size;
 use std::sync::Mutex;
@@ -64,7 +64,7 @@ pub(crate) struct InProcessEditor {
 /// The editor in the server: every window call is a message to it.
 pub(crate) struct ServedEditor {
     audio: AudioBridge,
-    remote: Mutex<RemoteEditor>,
+    remote: Mutex<IpcEditor>,
 }
 
 impl std::fmt::Debug for InProcessEditor {
@@ -102,7 +102,7 @@ impl EditorSite {
             })),
             None => Site::Served(Box::new(ServedEditor {
                 audio: audio.clone(),
-                remote: Mutex::new(RemoteEditor::new(audio.clone())),
+                remote: Mutex::new(IpcEditor::new(audio.clone())),
             })),
         };
         Self { site }
@@ -308,7 +308,7 @@ impl ServedEditor {
     /// [`EditorError`] the bridge's editor calls answer with.
     fn call<T>(
         &self,
-        call: impl FnOnce(&mut RemoteEditor) -> tutti_plugin_types::PluginResult<T>,
+        call: impl FnOnce(&mut IpcEditor) -> tutti_plugin_types::PluginResult<T>,
     ) -> std::result::Result<T, EditorError> {
         let mut remote = self.remote.lock().map_err(|_| EditorError::Busy)?;
         call(&mut remote).map_err(|e| match e {

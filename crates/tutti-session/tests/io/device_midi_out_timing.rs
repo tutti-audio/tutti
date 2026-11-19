@@ -75,7 +75,7 @@ fn rig(wire: &Wire) -> (LiveSession, ManualStream) {
         .unwrap()
         .sync_controls
         .messages()
-        .set(tutti_midi_runtime::SyncMessages {
+        .store(tutti_midi_runtime::SyncMessages {
             clock: true,
             ..tutti_midi_runtime::SyncMessages::OFF
         });
@@ -227,7 +227,7 @@ fn a_clips_notes_are_sent_when_their_frames_are_heard() {
         .unwrap()
         .sync_controls
         .messages()
-        .set(tutti_midi_runtime::SyncMessages::OFF);
+        .store(tutti_midi_runtime::SyncMessages::OFF);
     let target = s.midi().output_latency();
     s.set(
         target.to(OutputLatency::new(

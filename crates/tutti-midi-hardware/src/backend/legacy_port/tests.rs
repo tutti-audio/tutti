@@ -319,7 +319,7 @@ fn a_midi1_program_change_is_one_short_message() {
     );
 }
 
-/// M2-104 Appendix D.3: a MIDI 2.0 velocity narrows to its top 7 bits.
+/// M2-104 Appendix D.3: a MIDI 2.0 velocity downscales to its top 7 bits.
 #[test]
 fn a_midi2_note_on_is_one_midi1_note_on_with_the_top_seven_velocity_bits() {
     // Type 4, status 9 channel 0, note 0x3C; velocity 0xC000 (top 7 bits 0x60).

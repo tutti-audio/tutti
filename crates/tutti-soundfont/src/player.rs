@@ -298,7 +298,7 @@ impl<F: Float + SimdLanes> Player<F> {
         match message {
             // A Note On at velocity 0 is a Note On (M2-104 §7.4.2), struck at
             // the least MIDI 1.0 velocity (`Patch`'s `.max(1)`); a MIDI 1.0 one
-            // arrived as a Note Off (`channel_voice` widens it, App. D.3.1).
+            // arrived as a Note Off (`channel_voice` translates it, App. D.3.1).
             Voice2::NoteOn { .. } | Voice2::NoteOff { .. } => self.dispatch(channel, message),
             Voice2::ControlChange { controller, value } => {
                 self.control(channel, controller, value.to_u7());

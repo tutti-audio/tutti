@@ -119,7 +119,7 @@
 //! # `Phase::RenderMode` (with `export`)
 //!
 //! Offline while an export token lives (§4.3), Realtime otherwise; each
-//! plugin is told per `tutti_plugin_host::needs_announcement`: on a change of
+//! plugin is told per `tutti_plugin_host::needs_notify`: on a change of
 //! mode, or if it was never told.
 
 use std::sync::{Arc, Mutex};
@@ -2417,7 +2417,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
     }
 
     /// `Phase::RenderMode`: Offline while an export token lives, Realtime
-    /// otherwise, told per `needs_announcement`. Without `export` nothing
+    /// otherwise, told per `needs_notify`. Without `export` nothing
     /// is ever announced: there is no bounce to announce.
     pub(crate) fn render_mode_phase(&mut self) {
         #[cfg(feature = "export")]
@@ -2429,7 +2429,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
             };
             let changed = self.plugins.render_mode.announced != wanted;
             for hosted in self.graph.plugins.values_mut() {
-                if !tutti_plugin_host::needs_announcement(changed, hosted.told) {
+                if !tutti_plugin_host::needs_notify(changed, hosted.told) {
                     continue;
                 }
                 // `false` means the plugin declined (a CLAP plugin without

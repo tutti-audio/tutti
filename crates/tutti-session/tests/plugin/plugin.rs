@@ -244,7 +244,7 @@ fn a_dropped_export_job_restores_realtime_on_the_next_update() {
 }
 
 /// **A plugin added mid-export is told Offline** on its first update:
-/// `needs_announcement`'s `!told` half, end to end. The mode has not changed
+/// `needs_notify`'s `!told` half, end to end. The mode has not changed
 /// since the export announced it, so only "never told" reaches the new
 /// plugin.
 #[test]

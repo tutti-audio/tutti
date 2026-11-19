@@ -2,11 +2,11 @@
 //! reads back equal, and a document that names no value is refused with its text.
 
 use tutti_midi_protocol::{
-    ChannelMask, ExtremeValues, KeyChange, KeyChanges, KeyTable, MtcRate, MtcTimeCode,
-    OctaveOffsets, PerNotePolicy, PerNoteTranslation, SmpteFrameRate, SmpteTimecode, Timing,
-    TranslationMode, TuningFrequency, TuningName,
+    ChannelMask, KeyChange, KeyChanges, KeyTable, MtcRate, MtcTimeCode, OctaveOffsets,
+    PerNotePolicy, PerNoteTranslation, SmpteFrameRate, SmpteTimecode, Timing, TranslationMode,
+    TuningFrequency, TuningName,
 };
-use tutti_ump::{NoteNumber, PerNoteManagement, U7, U14};
+use tutti_ump::{ExtremeValues, NoteNumber, PerNoteManagement, U7, U14};
 
 fn round_trip<T>(value: &T) -> T
 where

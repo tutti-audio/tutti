@@ -1,7 +1,7 @@
 //! The MPE transform as a graph node.
 //!
 //! [`MpeTransformNode`] runs one [`MpeIngest`] over one event stream: MIDI 1.0
-//! in is widened by a [`Midi2Translator`], classic-MPE channel-spread comes out as
+//! in is translated by a [`Midi2Translator`], classic-MPE channel-spread comes out as
 //! native per-note messages, and a Manager Channel's zone-wide messages and bend
 //! come out on each member channel of its zone, as the ingest's docs say. It is
 //! the input edge's transform for a stream that does not come off a wire (a

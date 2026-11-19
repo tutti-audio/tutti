@@ -154,7 +154,7 @@ fn at(offset: usize, ump: Ump) -> UmpAt {
     (Offset::of(Samples::new(offset), Samples::new(1 << 20)), ump)
 }
 
-/// A note-on with 7-bit velocity 100, widened (M2-115), at `offset`.
+/// A note-on with 7-bit velocity 100, upscaled (M2-115), at `offset`.
 fn note(channel: u8, note: u8, offset: usize) -> UmpAt {
     at(
         offset,

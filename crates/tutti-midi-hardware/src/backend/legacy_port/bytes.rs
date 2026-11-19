@@ -42,7 +42,7 @@ pub(in crate::backend) enum Wire<'a> {
 
 /// UMP written as MIDI 1.0 bytes.
 ///
-/// A MIDI 2.0 channel voice message is narrowed to MIDI 1.0 ([`Midi1Translator`]'s
+/// A MIDI 2.0 channel voice message is translated to MIDI 1.0 ([`Midi1Translator`]'s
 /// Default Translation: a Registered or Assignable Controller is its four
 /// Control Changes, a Program Change with a bank three messages). A message with
 /// no MIDI 1.0 form (a Flex Data or a Utility message, a per-note message) is
@@ -71,7 +71,7 @@ impl ByteOut {
 
     /// Hands `send` what `ump` puts on the wire: nothing for the packet of a
     /// message not yet whole, one message for a MIDI 1.0 message or the packet
-    /// that completes a SysEx, up to four for a narrowed MIDI 2.0 message.
+    /// that completes a SysEx, up to four for a translated MIDI 2.0 message.
     ///
     /// Stops at the first `Err` `send` returns.
     pub(in crate::backend) fn encode<E>(
@@ -86,7 +86,7 @@ impl ByteOut {
             SysexStep::NotSysex => {
                 let mut sent = Ok(());
                 self.midi1_translator.feed(ump, |bytes| {
-                    // The narrowed bytes are one MIDI 1.0 message, which
+                    // The translated bytes are one MIDI 1.0 message, which
                     // `parse_exact` reads back as its type 2 or type 1 UMP.
                     if sent.is_ok()
                         && let Some(message) = parse_exact(MidiGroup::FIRST, bytes.as_slice())

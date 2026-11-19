@@ -7,7 +7,7 @@
 //! its block); the node has one event input, so what it reads is what the
 //! inlet emitted. Each block it translates the device's events,
 //! MIDI 1.0 to MIDI 2.0 ([`Midi2Translator`]: RPN and NRPN runs, Bank Select,
-//! widening), and rewrites classic MPE into native per-note messages
+//! translating), and rewrites classic MPE into native per-note messages
 //! ([`MpeIngest`]), then sends every event out of the port for its address
 //! ([`MidiInputPorts`]). **The translator and the MPE state are the
 //! device's own**: a device that replaces another starts from none of the
