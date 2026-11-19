@@ -158,7 +158,9 @@ mod tuning;
 mod universal;
 mod voice;
 
-pub use flex::{flex_tempo, flex_tempo_field, flex_time_signature, flex_time_signature_wire};
+pub use flex::{
+    flex_metronome, flex_tempo, flex_tempo_field, flex_time_signature, flex_time_signature_wire,
+};
 pub use midi1::midi1;
 pub use midi1_translator::Midi1Translator;
 pub use midi2_translator::Midi2Translator;

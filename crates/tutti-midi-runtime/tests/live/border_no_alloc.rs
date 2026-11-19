@@ -86,6 +86,7 @@ fn the_border_nodes_process_without_allocating() {
                 mtc: true,
                 mmc: Some(Recipient::AllCall),
                 flex: true,
+                metronome: true,
                 rate: MtcRate::Fps30,
             }),
     );
@@ -869,6 +870,7 @@ fn resetting_the_border_nodes_allocates_nothing() {
         mtc: true,
         mmc: Some(Recipient::AllCall),
         flex: true,
+        metronome: true,
         rate: MtcRate::Fps30,
     });
     let mut sync = Direct::new(sync, rate, 64);
