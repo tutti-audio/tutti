@@ -318,6 +318,17 @@ pub(crate) struct Queued<F: SamplerFloat> {
 // Handle — held by ECS systems, sends commands to the audio-thread unit.
 // ---------------------------------------------------------------------------
 
+/// A voice on the transport cannot be played or stopped by hand.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[non_exhaustive]
+pub enum PlayError {
+    /// The voice is placed: its window says when it sounds, and
+    /// [`play`](VoiceNodeHandle::play) and [`stop`](VoiceNodeHandle::stop)
+    /// drive a free-running voice.
+    #[error("the voice is placed on the transport; its window says when it sounds")]
+    Placed,
+}
+
 /// A command never reached the pool, and the work it carried is gone.
 ///
 /// Modelled on `tutti_transport::TimedError`: the two failures are told apart
@@ -340,6 +351,13 @@ pub enum SendError {
     /// dead pool distinguishable from a working one.
     #[error("voice pool is gone; the command was dropped")]
     Disconnected,
+    /// The voice is free-running (a memory voice with no window) and a
+    /// stretch or pitch shift was asked of it: a time-stretcher reads the
+    /// transport's clock, which a free-running voice does not have. Place the
+    /// voice ([`set_window`](VoicePoolHandle::set_window)) first. The
+    /// command was dropped.
+    #[error("the voice is free-running and cannot be stretched; the command was dropped")]
+    FreeRunning,
 }
 
 impl SendError {
@@ -412,7 +430,7 @@ impl SendError {
 /// #     play: Playback::default(),
 /// # };
 /// let (_node, handle) = VoiceNode::new(voice).with_handle();
-/// handle.set_window(VoiceWindow::from(tutti_units::Beat::new(1.0)));
+/// handle.window_cell().publish(Some(VoiceWindow::from(tutti_units::Beat::new(1.0))));
 /// ```
 #[derive(Clone, Debug)]
 pub struct VoiceNodeHandle<F: SamplerFloat> {
@@ -420,6 +438,9 @@ pub struct VoiceNodeHandle<F: SamplerFloat> {
     /// (which reads it once per block) and with its fork source (which reads
     /// it at fork time).
     pub(crate) steering: SteeringCell,
+    /// The voice's window: `Some` places it on the transport, `None` leaves it
+    /// free-running. The cell the node reads once per block.
+    pub(crate) window: Publisher<Option<VoiceWindow>>,
     /// The latest steering, which the setters edit under the lock and
     /// publish: two handles racing never lose each other's field.
     latest: Arc<Mutex<Steering>>,
@@ -447,12 +468,15 @@ pub struct VoiceNodeHandle<F: SamplerFloat> {
 /// last, and nothing else rides with it to be ordered against.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(crate) struct Steering {
-    pub(crate) window: Option<VoiceWindow>,
     /// The memory tier's loop; a disk voice's is its stream's.
     pub(crate) loop_: Option<Option<Loop>>,
     pub(crate) speed: Option<PlaybackRate>,
     /// Whether the handle has stopped the voice.
     pub(crate) stopped: bool,
+    /// How many times the handle has played the voice: each one starts a
+    /// free-running memory voice's cursor, which a reset leaves stopped. A
+    /// wrapping count, compared only for equality.
+    pub(crate) plays: u32,
 }
 
 pub(crate) type SteeringCell = Publisher<Steering>;
@@ -460,6 +484,7 @@ pub(crate) type SteeringCell = Publisher<Steering>;
 impl<F: SamplerFloat> VoiceNodeHandle<F> {
     pub(crate) fn new(
         steering: SteeringCell,
+        window: Publisher<Option<VoiceWindow>>,
         gain: Param<Amplitude>,
         params: ParamSet,
         stream: Option<Stream<F>>,
@@ -467,6 +492,7 @@ impl<F: SamplerFloat> VoiceNodeHandle<F> {
         Self {
             latest: Arc::new(Mutex::new(*steering.current())),
             steering,
+            window,
             gain,
             params,
             stream: stream.map(|s| Arc::new(Mutex::new(s))),
@@ -482,17 +508,26 @@ impl<F: SamplerFloat> VoiceNodeHandle<F> {
         self.steering.publish(*latest);
     }
 
-    /// Moves the voice's timeline window, from the node's next block on.
+    /// The cell holding the voice's window: `Some` places the voice on the
+    /// transport, `None` leaves it free-running.
     ///
     /// A window is a [`Beat`](tutti_units::Beat) (`f64`) plus an optional
     /// duration: two values, and a precision the transport cannot afford to
     /// lose, so it is no scalar param (an `f32` beat position loses whole
-    /// frames past ~2²⁴). It is published to a cell the node reads once per
-    /// block: never lost and never queued, and only the latest window is
-    /// heard (a window set twice between two blocks plays the second). A fork
-    /// of the node taken after this call starts from it.
-    pub fn set_window(&self, window: VoiceWindow) {
-        self.steer(|s| s.window = Some(window));
+    /// frames past ~2²⁴). The node lends the cell once per block, so a window
+    /// published twice between two blocks plays the second. A fork of the node
+    /// taken after a publish starts from it. A streamed voice is always
+    /// placed: `None` leaves it at the window it has.
+    ///
+    /// The session writes it (`sampler.window()`); a host driving a node by
+    /// hand publishes into it.
+    pub fn window_cell(&self) -> &Publisher<Option<VoiceWindow>> {
+        &self.window
+    }
+
+    /// Whether the voice plays its window of the transport, as published.
+    pub fn is_placed(&self) -> bool {
+        self.stream.is_some() || self.window.current().is_some()
     }
 
     /// Sets the voice's loop, or clears it with `None`, from the node's next
@@ -544,17 +579,48 @@ impl<F: SamplerFloat> VoiceNodeHandle<F> {
         self.steer(|s| s.speed = Some(speed));
     }
 
-    /// Resumes a voice [`stop`](Self::stop)ped: the voice reads and sounds
-    /// again from the node's next block. A voice is playing until stopped.
-    pub fn play(&self) {
-        self.steer(|s| s.stopped = false);
+    /// Starts a free-running voice, or resumes one [`stop`](Self::stop)ped:
+    /// the voice sounds from the node's next block, from where its cursor is
+    /// (a reset rewinds it).
+    ///
+    /// Placed means the published window ([`is_placed`](Self::is_placed)),
+    /// checked on the control thread before the steer: a window published
+    /// between the two is not seen by this call.
+    ///
+    /// A free-running voice has limits: it reads forwards, or backwards when
+    /// built reversed, on its own cursor, loops as built, and is never
+    /// stretched (the stretch setters refuse it,
+    /// [`SendError::FreeRunning`]).
+    ///
+    /// # Errors
+    ///
+    /// [`PlayError::Placed`] for a voice on the transport: its window says
+    /// when it sounds.
+    pub fn play(&self) -> Result<(), PlayError> {
+        self.drive(false)
     }
 
-    /// Stops the voice: it is silent from the node's next block and reads
-    /// nothing, until [`play`](Self::play). A voice on the transport resumes
-    /// where the transport is; a free-running one, where it stopped.
-    pub fn stop(&self) {
-        self.steer(|s| s.stopped = true);
+    /// Stops a free-running voice: it is silent from the node's next block and
+    /// reads nothing, until [`play`](Self::play).
+    ///
+    /// # Errors
+    ///
+    /// [`PlayError::Placed`] for a voice on the transport.
+    pub fn stop(&self) -> Result<(), PlayError> {
+        self.drive(true)
+    }
+
+    fn drive(&self, stopped: bool) -> Result<(), PlayError> {
+        if self.is_placed() {
+            return Err(PlayError::Placed);
+        }
+        self.steer(|s| {
+            s.stopped = stopped;
+            if !stopped {
+                s.plays = s.plays.wrapping_add(1);
+            }
+        });
+        Ok(())
     }
 
     /// Whether the voice is playing (not [`stop`](Self::stop)ped).
@@ -637,6 +703,9 @@ pub struct VoicePoolHandle<F: SamplerFloat> {
     /// was made is not in it, and the drain then refuses that slot's loops
     /// ([`PoolDrops::loops_not_forwarded`]).
     pub(crate) streams: SlotStreams<F>,
+    /// The slots the handle added as free-running memory voices and has not
+    /// placed since: a stretch is refused for them.
+    pub(crate) free: Arc<Mutex<std::collections::HashSet<SlotId>>>,
 }
 
 /// [`VoicePoolHandle::streams`]: the table is locked for a lookup or for
@@ -709,14 +778,22 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
         source: MemorySource<F>,
         play: Playback,
     ) -> Result<(), SendError> {
-        self.send(VoiceCommand::AddVoice {
+        let free = !source.is_placed();
+        if free && stretch_wanted(&play) {
+            return Err(SendError::FreeRunning);
+        }
+        self.send_noting_free(
             id,
-            voice: Box::new(Voice {
-                source: VoiceSource::Memory(source),
-                play,
-            }),
-            stretch: None,
-        })
+            free,
+            VoiceCommand::AddVoice {
+                id,
+                voice: Box::new(Voice {
+                    source: VoiceSource::Memory(source),
+                    play,
+                }),
+                stretch: None,
+            },
+        )
     }
 
     /// Removes the voice at `id` (and ends its stream, if it streams). The
@@ -729,7 +806,9 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
     /// [`SendError`]: a dropped remove is a voice that never stops.
     #[must_use = "a dropped remove is a voice that never stops"]
     pub fn remove(&self, id: SlotId) -> Result<(), SendError> {
-        self.send(VoiceCommand::Remove(id))
+        self.send(VoiceCommand::Remove(id))?;
+        self.free.lock_recover().remove(&id);
+        Ok(())
     }
 
     /// Points the in-memory voice at `id` at a different wave, keeping its
@@ -756,7 +835,9 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
     /// [`SendError`], as [`add`](Self::add).
     #[must_use = "a dropped command changes nothing"]
     pub fn set_window(&self, id: SlotId, window: VoiceWindow) -> Result<(), SendError> {
-        self.send(VoiceCommand::UpdatePlacement { id, window })
+        self.send(VoiceCommand::UpdatePlacement { id, window })?;
+        self.free.lock_recover().remove(&id);
+        Ok(())
     }
 
     /// Sets the voice's gain, linear; a NaN or infinite gain is silence.
@@ -834,6 +915,9 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
         factor: StretchFactor,
         pitch: Cents,
     ) -> Result<(), SendError> {
+        if stretch_values_want_filter(factor, pitch) && self.free.lock_recover().contains(&id) {
+            return Err(SendError::FreeRunning);
+        }
         self.send(VoiceCommand::UpdateStretch {
             id,
             stretch_factor: factor,
@@ -1038,6 +1122,24 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
         self.streams().get(&id).cloned()
     }
 
+    /// Queues `cmd`, an add at `id`, and notes whether the slot is
+    /// free-running.
+    fn send_noting_free(
+        &self,
+        id: SlotId,
+        free: bool,
+        cmd: VoiceCommand<F>,
+    ) -> Result<(), SendError> {
+        self.send(cmd)?;
+        let mut set = self.free.lock_recover();
+        if free {
+            set.insert(id);
+        } else {
+            set.remove(&id);
+        }
+        Ok(())
+    }
+
     /// The command ring's writer, locked.
     fn writer(&self) -> std::sync::MutexGuard<'_, RingWriter<Queued<F>>> {
         self.tx.lock_recover()
@@ -1109,7 +1211,7 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
 /// (the placement windows a replacement left behind); control thread, from the owner's tick.
 impl<F: SamplerFloat> tutti_rt::Reclaim for VoiceNodeHandle<F> {
     fn reclaim(&self) -> usize {
-        self.steering.reclaim()
+        self.steering.reclaim() + self.window.reclaim()
     }
 }
 

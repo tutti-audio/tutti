@@ -175,12 +175,25 @@ impl<F: SamplerFloat> VoiceSource<F> {
         }
     }
 
-    /// Update the timeline window.
-    #[inline]
-    pub(crate) fn apply_window(&mut self, window: VoiceWindow) {
+    /// The window the source plays on the transport: `None` for a
+    /// free-running memory voice. A streamed voice is always placed.
+    pub(crate) fn window(&self) -> Option<VoiceWindow> {
         match self {
-            Self::Memory(s) => s.set_window(window),
-            Self::Disk(s) => s.set_window(window),
+            Self::Memory(s) => s.window(),
+            Self::Disk(s) => Some(s.window()),
+        }
+    }
+
+    /// Update the timeline window: `None` frees a memory voice to run on its
+    /// own cursor, and leaves a streamed voice, which is always placed, where
+    /// it is.
+    #[inline]
+    pub(crate) fn apply_window(&mut self, window: Option<VoiceWindow>) {
+        match (self, window) {
+            (Self::Memory(s), Some(window)) => s.set_window(window),
+            (Self::Memory(s), None) => s.free_run(),
+            (Self::Disk(s), Some(window)) => s.set_window(window),
+            (Self::Disk(_), None) => {}
         }
     }
 }

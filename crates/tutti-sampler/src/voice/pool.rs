@@ -463,6 +463,7 @@ impl<F: SamplerFloat> VoicePool<F> {
             rate: self.rate.clone(),
             counters: Arc::clone(&self.counters),
             streams: Arc::default(),
+            free: Arc::default(),
         };
         (self, handle)
     }
@@ -779,7 +780,7 @@ impl<F: SamplerFloat> VoicePool<F> {
                         // The source owns the window: each backend's setter
                         // overwrites it, and the next block's read places the
                         // voice by it.
-                        slot.voice.source.apply_window(window);
+                        slot.voice.source.apply_window(Some(window));
                     }
                 }
                 VoiceCommand::UpdateGain { id, gain } => {

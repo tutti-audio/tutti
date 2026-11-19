@@ -53,6 +53,9 @@ pub enum SlotId {
     /// The chord and scale changes a harmony node sends.
     #[cfg(feature = "midi")]
     Harmony(NodeKey),
+    /// Where a sampler voice sits on the transport.
+    #[cfg(feature = "sampler")]
+    Window(NodeKey),
     /// How a modulation route maps its source's value onto its span.
     RoutePolarity(ModRouteId),
     /// The law that shapes a modulation route's value.
@@ -79,6 +82,8 @@ impl SlotId {
         match self {
             #[cfg(feature = "midi")]
             Self::ClipEvents(node) | Self::Harmony(node) => Some(node),
+            #[cfg(feature = "sampler")]
+            Self::Window(node) => Some(node),
             Self::Automation(TargetKey::Param { node, .. }) => Some(NodeKey(node)),
             _ => None,
         }
@@ -109,7 +114,7 @@ pub struct NodeSlots(pub(crate) Vec<(SlotId, Erased)>);
 
 impl NodeSlots {
     /// `slot` as the value `id` names.
-    #[cfg(feature = "midi")]
+    #[cfg(any(feature = "midi", feature = "sampler"))]
     pub(crate) fn of<C: Held>(id: SlotId, slot: Arc<PublishedSlot<C>>) -> Self {
         Self(vec![(id, erase_staged(slot))])
     }
@@ -372,7 +377,7 @@ pub(super) use keyed_slot_target;
 
 /// Writes the target, `Target`, `Land` and builders of a slot target on a node
 /// of the graph: its `SlotId` names the node, and the value type is fixed.
-#[cfg(feature = "midi")]
+#[cfg(any(feature = "midi", feature = "sampler"))]
 macro_rules! node_slot_target {
     ($(#[$meta:meta])* $name:ident, $value:ty, $id:ident) => {
         keyed_slot_target!($(#[$meta])* $name, $value, NodeKey, $id);
@@ -424,6 +429,44 @@ node_slot_target!(
     Arc<tutti_midi_runtime::HarmonyChanges>,
     Harmony
 );
+
+#[cfg(feature = "sampler")]
+node_slot_target!(
+    /// Where a sampler voice sits on the transport, as `sampler.window()`
+    /// names it: `Some` places it on the transport at a
+    /// [`VoiceWindow`](tutti_sampler::VoiceWindow), `None` leaves it
+    /// free-running ([`play`](tutti_sampler::VoiceNodeHandle::play) and
+    /// [`stop`](tutti_sampler::VoiceNodeHandle::stop) drive such a voice and
+    /// refuse a placed one with [`PlayError::Placed`](tutti_sampler::PlayError)).
+    /// A streamed voice is always placed: `None` leaves it at its window.
+    ///
+    /// A write is staged and published by the next
+    /// [`Session::update`](crate::Session::update); the voice reads the window
+    /// from its next block after that. A read answers the staged window, else
+    /// the one in force. A write to a node removed before the update is
+    /// dropped.
+    WindowTarget,
+    Option<tutti_sampler::VoiceWindow>,
+    Window
+);
+
+#[cfg(feature = "sampler")]
+impl<F: tutti_sampler::SamplerFloat> crate::Key<tutti_sampler::VoiceNode<F>> {
+    /// The window the voice plays on the transport.
+    #[must_use]
+    pub const fn window(self) -> WindowTarget {
+        WindowTarget::new(self.erase())
+    }
+}
+
+#[cfg(feature = "sampler")]
+impl<F: tutti_sampler::SamplerFloat> crate::Key<tutti_sampler::Clip<F>> {
+    /// The window the clip plays on the transport.
+    #[must_use]
+    pub const fn window(self) -> WindowTarget {
+        WindowTarget::new(self.erase())
+    }
+}
 
 #[cfg(feature = "midi")]
 impl crate::Key<tutti_midi_runtime::MidiClipNode> {
@@ -733,9 +776,9 @@ impl Held for tutti_midi_runtime::HarmonyControls {
     }
 }
 
-/// A published cell of a `Copy` value, which the session owns: written
-/// through the cell itself, which publishes when the value differs.
-#[cfg(feature = "midi")]
+/// A published cell of a `Copy` value: written through the cell itself, which
+/// publishes when the value differs.
+#[cfg(any(feature = "midi", feature = "sampler"))]
 impl<T: Copy + PartialEq + Send + Sync + 'static> Held for tutti_rt::Publisher<T> {
     type Value = T;
 
