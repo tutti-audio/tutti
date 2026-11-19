@@ -169,16 +169,12 @@ fn a_bend_precedes_its_note_on_at_the_same_beat_and_the_range_is_sent_once() {
             other => panic!("{other:?}"),
         })
         .collect();
-    // The two notes' own events, then the sensitivity at the first note's beat.
+    // The sensitivity leads, at the first note's beat, ahead of the bend it scales.
     assert_eq!(
         kinds,
-        ["bend", "on", "off", "bend", "on", "off", "rpn 0x1000000"] // 0.5 semitone, 2^24 in the Q7.25 word
+        ["rpn 0x1000000", "bend", "on", "off", "bend", "on", "off"]
     );
-    assert_eq!(
-        e[6].beat(),
-        e[0].beat(),
-        "the range is set at the first note"
-    );
+    assert_eq!(e[0].beat(), e[1].beat());
 }
 
 #[test]

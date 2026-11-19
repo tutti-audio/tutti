@@ -8,7 +8,7 @@
 //! neither of which depends on the other, so they live here.
 //!
 //! A [`NoteMapping`] states the two choices the MIDI spec does not make: what a
-//! note's `cents` become, and what its level becomes. It has no default.
+//! note's `cents` become, and what its level becomes. Neither choice has a default.
 
 use tutti_graph::Harmony;
 use tutti_measure::{ChordQuality, ChordSpan, NoteEvent, VelocityRange};
@@ -47,9 +47,8 @@ pub enum NoteCents {
 /// The choices [`clip_from_notes`] makes for the caller: a level's velocity, a
 /// note's cents, and where the notes are sent.
 ///
-/// There is no default: [`new`](Self::new) takes the two choices, and the
-/// address is the first Group's first Channel unless [`on`](Self::on) says
-/// otherwise.
+/// Neither choice has a default: [`new`](Self::new) takes both. The address is
+/// the first Group's first Channel unless [`on`](Self::on) names another.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct NoteMapping {
     velocity: LevelVelocity,
@@ -139,10 +138,11 @@ fn note_events(
             Rpn::PER_NOTE_PITCH_BEND_SENSITIVITY,
             ControlValue::new(range.to_rpn_bits()),
         );
-        events.extend(TimedMidiEvent::new(
-            at,
-            Message::Midi2(mapping.address, set),
-        ));
+        // First in the list, so at the first note's beat it sorts before the bend it scales.
+        events.splice(
+            0..0,
+            TimedMidiEvent::new(at, Message::Midi2(mapping.address, set)),
+        );
     }
     events
 }
@@ -158,7 +158,7 @@ fn bend(note: &NoteEvent, range: PitchBendSensitivity) -> BendValue {
 }
 
 fn beat_at(tempo: &mut TempoView<'_>, at: Samples) -> Beat {
-    tempo.beat_at_frame(Frame::new(at.get() as u64))
+    tempo.beat_at_frame(Frame::ZERO + at)
 }
 
 /// The harmony lane a chord transcription plays: one change per span, at the
