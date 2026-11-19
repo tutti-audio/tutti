@@ -4,7 +4,7 @@
 //! event on the frame the plugin gave it.
 //!
 //! **Parameters** arrive on the same event input: a ramp or a curve segment
-//! (a foreign control lane's, `ControlLaneNode::for_foreign`), addressed by
+//! (a control lane addressed by id, `ControlLaneNode::by_id`), addressed by
 //! the plugin's own parameter id.
 //! They go through the out-of-process node's delivery (`host::node`'s
 //! `param_delivery` and `param_input`): a slot per parameter declared at
@@ -568,7 +568,7 @@ where
     fn bind_wake(&mut self, wake: tutti_graph::Wake) {
         let mut instance = self.client.inner.lock();
         if let Some(control) = instance.control() {
-            control.bind_wake(tutti_plugin_types::ProcessWake::new(move || wake.raise()));
+            control.bind_wake(tutti_plugin_types::ProcessWake::new(move || wake.notify()));
         }
     }
 }
@@ -833,7 +833,7 @@ mod owed_tests {
                     tutti_units::Samples::new(0),
                     tutti_units::Samples::new(BLOCK),
                 ),
-                ParamRamp::foreign(ParamId::new(1), 0.75, tutti_units::Samples::new(0)),
+                ParamRamp::by_id(ParamId::new(1), 0.75, tutti_units::Samples::new(0)),
             )],
         );
         unit.block();

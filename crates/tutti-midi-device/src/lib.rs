@@ -62,7 +62,6 @@ mod deadline;
 mod dialect;
 mod endpoint;
 mod endpoint_discovery;
-mod entropy;
 mod id;
 mod inquiry;
 mod jr;
@@ -80,7 +79,6 @@ pub use endpoint::{
 pub use endpoint_discovery::{
     DiscoveryAction, DiscoveryEnding, EndpointDiscovery, MAX_ATTEMPTS, NAME_GRACE, STEP_TIMEOUT,
 };
-pub use entropy::{EntropyError, EntropyWords, random_bytes};
 pub use id::{DeviceId, DeviceInfo, EndpointId, Identity, PortDirection, WinMmDevice};
 pub use inquiry::{INQUIRY_ATTEMPTS, INQUIRY_TIMEOUT, IdentityInquiry, InquiryAction};
 pub use jr::{ClockHeard, JrLock, JrReceiver, JrTime, TICK_RATE, Unmapped, tick_time};

@@ -7,13 +7,13 @@
 //! belong to the packet's [`Address`](tutti_ump::Address), which the caller
 //! keeps unchanged.
 //!
-//! [`Translator`] is the stateful rest of the translation (M2-104 Appendix
+//! [`Midi2Translator`] is the stateful rest of the translation (M2-104 Appendix
 //! D.3): RPN and NRPN runs into Registered and Assignable Controllers, and
 //! Bank Select onto the next Program Change, per group and channel. An input
 //! edge runs it once, so what follows carries MIDI 2.0 channel voice messages.
 //! It calls `widen` for every message that needs no state.
 //!
-//! [`Narrower`] is its inverse (M2-104 Appendix D.2), per group and channel:
+//! [`Midi1Translator`] is its inverse (M2-104 Appendix D.2), per group and channel:
 //! a Registered or Assignable Controller as its four Control Changes, and a
 //! Program Change with a bank as Bank Select MSB and LSB then the Program
 //! Change, every time. An output edge that speaks MIDI 1.0 holds one.
@@ -61,7 +61,7 @@
 //!   the group and channel kept (the inverse of [`widen_message`]).
 //! - [`narrow()`](fn@narrow) for one [`Voice2`](tutti_ump::Voice2) to its
 //!   [`Voice1`](tutti_ump::Voice1), when you already hold the voice message.
-//! - [`Narrower`] for a stream of packets that must keep Registered and
+//! - [`Midi1Translator`] for a stream of packets that must keep Registered and
 //!   Assignable Controllers and Bank Select: it is the only one with state,
 //!   and the only one that does not refuse them.
 //! - [`midi1()`](fn@midi1) for the bytes of the wire, a Program Change with a
@@ -93,7 +93,7 @@
 //!   RPN or NRPN run (CC 101/100, 99/98, 6, 38) into one Registered or
 //!   Assignable Controller message, and Bank Select (CC 0 and 32) into a
 //!   Program Change bank. Both need per-group, per-channel assembly, which is
-//!   the [`Translator`]'s. Here those controllers widen by value like any
+//!   the [`Midi2Translator`]'s. Here those controllers widen by value like any
 //!   other, so a consumer that wants RPN or NRPN data must not rely on this
 //!   function for it. The 14-bit pairs (CC 1 to 31 with 33 to 63) stay two
 //!   independent messages, as D.3.3 says.
@@ -121,7 +121,7 @@
 //! section 7.4.7.1): it converts between the two.
 //!
 //! **One input type at the edge:** a packet is a [`Ump`](tutti_ump::Ump), and
-//! [`Translator::translate`], [`Narrower::feed`], [`midi1()`](fn@midi1) and
+//! [`Midi2Translator::translate`], [`Midi1Translator::feed`], [`midi1()`](fn@midi1) and
 //! [`channel_voice`] take `impl Into<Ump>`, so a decoded
 //! [`Message`](tutti_ump::Message) goes in as it is. The conversion between the
 //! two protocols is `widen`/`narrow` (and `widen_message`, `widen_bytes`) rather
@@ -142,22 +142,24 @@ extern crate alloc;
 
 mod flex;
 mod midi1;
+mod midi1_translator;
+mod midi2_translator;
 mod mode;
 mod mpe;
 mod narrow;
-mod narrower;
 mod per_note_management;
 mod scale;
 mod sensitivity;
 mod smpte;
 mod song_position;
-mod translator;
 mod tuning;
 mod universal;
 mod voice;
 
 pub use flex::{flex_tempo, flex_tempo_field, flex_time_signature, flex_time_signature_wire};
 pub use midi1::{NoMidi1Form, midi1, narrow, narrow_message, narrow_with};
+pub use midi1_translator::Midi1Translator;
+pub use midi2_translator::Midi2Translator;
 pub use mode::{ExtremeValues, PerNoteTranslation, TranslationMode};
 #[cfg(feature = "serde")]
 pub use mpe::InvalidMpeZoneConfig;
@@ -167,14 +169,12 @@ pub use mpe::{
     MpeZones, PitchBendSupport,
 };
 pub use narrow::{narrow_bend, narrow_note_on_velocity, narrow_value, narrow_velocity};
-pub use narrower::Narrower;
 pub use per_note_management::{PerNoteManager, PerNotePolicy};
 pub use sensitivity::PitchBendSensitivity;
 #[cfg(feature = "serde")]
 pub use smpte::InvalidSmpteTimecode;
 pub use smpte::{MtcRate, SmpteFrameRate, SmpteTimecode};
 pub use song_position::song_position;
-pub use translator::Translator;
 pub use tuning::{
     ChannelMask, InvalidKeyChanges, InvalidKeyTable, KeyChange, KeyChanges, KeyTable,
     MAX_KEY_CHANGES, NotFrequencyData, OctaveOffsets, Timing, TuningFrequency, TuningMessage,

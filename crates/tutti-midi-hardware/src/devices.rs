@@ -595,7 +595,7 @@ impl OpenInput {
 /// **What it queues is put in the device's wire form first** (M2-104 §3.2, §3.3.2
 /// and §7.1.6.2): a device in the MIDI 2.0 Protocol is sent the graph's MIDI 2.0
 /// Channel Voice as it is; one in the MIDI 1.0 Protocol (and a MIDI 1.0 port) is
-/// never sent type `0x4`, and its MIDI 2.0 messages go through one `Narrower`
+/// never sent type `0x4`, and its MIDI 2.0 messages go through one `Midi1Translator`
 /// for this output (a Registered Controller as Control Changes 101, 100, 6 and
 /// 38); and JR Timestamps go only to a device whose configuration receives them.
 /// The configuration is the OS's description of the device until

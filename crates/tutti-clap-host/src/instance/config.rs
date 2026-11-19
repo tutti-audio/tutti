@@ -10,7 +10,7 @@ use clap_sys::process::CLAP_PROCESS_CONTINUE;
 use std::sync::atomic::AtomicI32;
 use tutti_buffers::FloatWidth;
 use tutti_clap_ffi::PortScratch;
-use tutti_midi_protocol::Translator;
+use tutti_midi_protocol::Midi2Translator;
 use tutti_plugin_types::BusChannels;
 use tutti_plugin_types::RtMidiEvents;
 
@@ -51,7 +51,7 @@ pub(crate) struct AudioScratch {
     /// parameter-number and bank runs across blocks. One per activation, so a
     /// deactivation drops it; [`ClapProcessor::reset`](super::ClapProcessor::reset)
     /// forgets them without sending what was pending.
-    pub out_translator: Translator,
+    pub out_translator: Midi2Translator,
     /// MIDI the block's output lost (see `fill_midi_events`), for the block's
     /// `ProcessOutput` to count.
     pub out_midi_lost: usize,
@@ -92,7 +92,7 @@ impl AudioScratch {
             input_events: InputEventList::new(input_rooms),
             output_events: OutputEventList::new(output_rooms),
             out_midi: RtMidiEvents::new(),
-            out_translator: Translator::new(),
+            out_translator: Midi2Translator::new(),
             out_midi_lost: 0,
             out_param_changes: ParameterChanges::new(),
             out_param_points_dropped: 0,

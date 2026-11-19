@@ -18,7 +18,7 @@
 //! path, so each path is a separate case that fails on its own.
 //!
 //! ```
-//! use tutti_graph::contract::{Detect, Excite, Path, Pulse, Row};
+//! use tutti_graph::contract::{Detect, Excite, Path, ImpulseSource, Row};
 //! use tutti_graph::EventKind;
 //! use tutti_fixtures::midi;
 //! use tutti_ump::{MidiChannel, NoteVelocity};
@@ -26,7 +26,7 @@
 //!
 //! let row = Row::new(
 //!     "pulse, 37 frames late",
-//!     || Box::new(Pulse::new(Latency::new(Samples::new(37)))),
+//!     || Box::new(ImpulseSource::new(Latency::new(Samples::new(37)))),
 //!     Excite::Event {
 //!         port: 0,
 //!         kind: EventKind::Midi(midi::note_on(MidiChannel::FIRST, 60, 0xC800)),
@@ -227,7 +227,7 @@ pub enum Path {
     ///
     /// What this case does not catch: a merge that drops the **first**
     /// source's events, on an instrument row. An instrument's sustained first
-    /// response hides the second onset, so only the Pulse rows (and
+    /// response hides the second onset, so only the ImpulseSource rows (and
     /// `a_fan_in_tie_goes_by_source_order`) hold that property; the
     /// instrument rows did not hold it with the same key either.
     ///
@@ -1317,7 +1317,7 @@ impl Node for ParamEcho {
 ///   `n - 1` frames late;
 /// - `Block`: at its block's first frame.
 #[derive(Clone, Debug)]
-pub struct Pulse {
+pub struct ImpulseSource {
     latency: Latency,
     resolution: Resolution,
     /// Absolute frames of impulses still to come; a fixed array, so the
@@ -1326,14 +1326,14 @@ pub struct Pulse {
     len: usize,
 }
 
-/// How many impulses a [`Pulse`] holds in flight.
+/// How many impulses a [`ImpulseSource`] holds in flight.
 const PULSE_PENDING: usize = 16;
 
-/// Where a `Frames(n)` [`Pulse`]'s own chunk grid starts: frame 3, so it
+/// Where a `Frames(n)` [`ImpulseSource`]'s own chunk grid starts: frame 3, so it
 /// lines up with no block boundary a schedule of the usual sizes makes.
 const PULSE_GRID_PHASE: u64 = 3;
 
-impl Pulse {
+impl ImpulseSource {
     /// A pulse delayed by `latency`, declared as its [`Shape::latency`].
     #[must_use]
     pub fn new(latency: Latency) -> Self {
@@ -1354,7 +1354,7 @@ impl Pulse {
     }
 }
 
-impl Node for Pulse {
+impl Node for ImpulseSource {
     fn shape(&self) -> Shape {
         Shape::source_unassigned(ChannelLayout::MONO)
             .with_events(1, 0)
@@ -1669,7 +1669,7 @@ impl Node for Sum {
 /// in a child module of the caller (so it can name the caller's items).
 ///
 /// ```
-/// use tutti_graph::contract::{Detect, Excite, Lookahead, Pulse, Row};
+/// use tutti_graph::contract::{Detect, Excite, Lookahead, ImpulseSource, Row};
 /// use tutti_graph::EventKind;
 /// use tutti_fixtures::midi;
 /// use tutti_ump::{MidiChannel, NoteVelocity};
@@ -1677,8 +1677,8 @@ impl Node for Sum {
 ///
 /// fn pulse_row() -> Row {
 ///     Row::new(
-///         "Pulse",
-///         || Box::new(Pulse::new(Latency::ZERO)),
+///         "ImpulseSource",
+///         || Box::new(ImpulseSource::new(Latency::ZERO)),
 ///         Excite::Event {
 ///             port: 0,
 ///             kind: EventKind::Midi(midi::note_on(MidiChannel::FIRST, 60, 0xC800)),
@@ -1746,7 +1746,7 @@ macro_rules! contract_tests {
 /// then the block is as long as the first fed param.
 ///
 /// For a node's own unit tests, which inspect its state between blocks —
-/// what a [`Solo`](crate::Solo), whose node the executor owns, cannot show.
+/// what a [`Standalone`](crate::Standalone), whose node the executor owns, cannot show.
 /// `node` must already be [`prepare`](Node::prepare)d for a maximum block
 /// at least this long ([`prepared`]). [`drive_input`] is the same call under a
 /// transport, with events.
@@ -1945,7 +1945,7 @@ pub fn drive_input_params<F: Float>(
 ///
 /// On the first sound after the tail, naming the frame and channel, or when
 /// the figure to check is too long to render here.
-pub fn assert_honest_tail(node: &mut dyn Node, rate: SampleRate) {
+pub fn assert_declared_tail(node: &mut dyn Node, rate: SampleRate) {
     const BLOCK: usize = 64;
     let shape = node.shape();
     let width = usize::from(shape.audio_in().count());
@@ -2007,7 +2007,7 @@ pub fn assert_honest_tail(node: &mut dyn Node, rate: SampleRate) {
     }
 }
 
-/// The longest tail, with its latency, [`assert_honest_tail`] renders.
+/// The longest tail, with its latency, [`assert_declared_tail`] renders.
 pub const MAX_CHECKED_TAIL: usize = 1 << 20;
 
 /// `node`, prepared at `rate` for blocks of up to `max_block` frames: the

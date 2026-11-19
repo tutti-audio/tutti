@@ -94,7 +94,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     //    is the main thread: make the token once.
     let mut session = Session::builder()
         .sample_rate(RATE)
-        .max_block(MaxBlock::of(Samples(512)))
+        .max_block(MaxBlock::of(Samples::new(512)))
         .build()?;
     let main = tutti::plugin::MainThreadMarker::new().ok_or("run on the process's main thread")?;
     let id = entry
@@ -140,11 +140,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Voice1::NoteOff { note, velocity }
             };
             let message = Message::Midi1(Address::first(MidiChannel::FIRST), voice);
-            TimedMidiEvent::new(Beat(beat), Ump::from(message)).expect("a finite beat")
+            TimedMidiEvent::new(Beat::new(beat), Ump::from(message)).expect("a finite beat")
         };
         session
             .midi()
-            .play_clip(node, Beat(0.0), [note(0.0, true), note(2.0, false)])?;
+            .play_clip(node, Beat::new(0.0), [note(0.0, true), note(2.0, false)])?;
     }
 
     // 6. Set a parameter: the first one it lists, to the middle of its range.
@@ -233,7 +233,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     //    renders and Realtime after.
     let job = session.bounce_start(
         Bounce::project()
-            .range(Range::Beats(Beat(0.0), Beat(4.0)))
+            .range(Range::Beats(Beat::new(0.0), Beat::new(4.0)))
             .master(out.as_path(), Format::Wav(Pcm::Int24)),
     )?;
     let written = session.finish_bounce(job.run())?.into_master();

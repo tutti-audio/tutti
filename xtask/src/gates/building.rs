@@ -191,7 +191,7 @@ pub(super) const ALLOW: &[Allow] = &[
     },
     Allow {
         path: GRAPH,
-        owner: "Pulse",
+        owner: "ImpulseSource",
         rules: &[],
         reason: "the contract harness a node crate writes rows with: node-author test support",
     },
@@ -414,12 +414,6 @@ pub(super) const ALLOW: &[Allow] = &[
     ty(
         "crates/tutti-midi-network/",
         "Nonce::random",
-        CTOR,
-        "reading OS entropy: the failure is the OS's, not a value's",
-    ),
-    ty(
-        "crates/tutti-midi-device/",
-        "EntropyWords::from_os",
         CTOR,
         "reading OS entropy: the failure is the OS's, not a value's",
     ),

@@ -233,9 +233,9 @@ where
         self.host.restart_with(|| Ok((spec, driver)), rerate)
     }
 
-    /// [`StreamHost::settle`] on this driver's stream.
-    pub fn settle(&mut self, prepared: &tutti_graph::Prepare) {
-        self.host.settle(prepared);
+    /// [`StreamHost::sync_to_graph`] on this driver's stream.
+    pub fn sync_to_graph(&mut self, prepared: &tutti_graph::Prepare) {
+        self.host.sync_to_graph(prepared);
     }
 
     /// The stream host, taken out of the driver: the device is no longer this

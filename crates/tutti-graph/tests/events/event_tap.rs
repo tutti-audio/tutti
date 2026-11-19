@@ -561,9 +561,9 @@ fn aligned_against_raw_on_a_latent_path() {
 
 /// A closed tap leaves no op (and no delay), nothing is written for it, a fork
 /// carries none, opening an id again replaces the tap, and a reader dropped
-/// first is reaped on the control side.
+/// first is pruned on the control side.
 #[test]
-fn closed_fork_reopen_and_reap() {
+fn closed_fork_reopen_and_prune() {
     let mut r = rig(1, false, 0);
     script(&mut r, 1, Script::new(vec![(10, on(1)), (110, on(2))]));
     let open = |r: &mut Rig, id| {
@@ -618,20 +618,20 @@ fn closed_fork_reopen_and_reap() {
     r.ed.close_event_tap(EventTapId::of(5)).unwrap();
     drop((stale, fresh));
 
-    // A reader dropped first: the tap writes nothing until it is reaped.
+    // A reader dropped first: the tap writes nothing until it is pruned.
     let keep = open(&mut r, 3);
     let gone = open(&mut r, 4);
     commit(&mut r);
     drop(gone);
     drop(live);
     assert_eq!(
-        r.ed.reap_event_taps(),
+        r.ed.prune_event_taps(),
         1,
         "the dropped reader's tap; the replaced one's id is the new reader's"
     );
     commit(&mut r);
     assert_eq!(tap_ops(&r), 2, "the others stay");
-    assert_eq!(r.ed.reap_event_taps(), 0);
+    assert_eq!(r.ed.prune_event_taps(), 0);
     assert_eq!(keep.id(), EventTapId::of(3));
 }
 

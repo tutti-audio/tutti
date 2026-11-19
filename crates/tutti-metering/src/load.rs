@@ -42,7 +42,7 @@ pub struct LoadReading {
     /// output port past its capacity
     /// (`tutti_graph::DEFAULT_EVENT_CAPACITY` per
     /// block unless the node declares its own), or a full delay or feedback
-    /// FIFO, or an event a node withheld because the one it pairs with was
+    /// FIFO, or an event a node skipped because the one it pairs with was
     /// refused. Nonzero means events were lost: a port refuses the newest (a
     /// note-off last), a FIFO may evict the oldest non-note-off; the rest
     /// reached the graph. A note-off refused and sent again later counts as

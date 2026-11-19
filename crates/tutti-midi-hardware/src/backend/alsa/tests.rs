@@ -687,7 +687,7 @@ fn arrive(pumped: &mut Pumped, count: usize) -> Vec<tutti_ump::Ump> {
 }
 
 /// A MIDI 1.0 source reaches the graph as MIDI 1.0 UMP (type 2), not converted
-/// to MIDI 2.0 by the kernel: tutti's own `Translator` is the one conversion.
+/// to MIDI 2.0 by the kernel: tutti's own `Midi2Translator` is the one conversion.
 /// A legacy client's Note On and control change, both.
 #[test]
 fn a_legacy_source_arrives_as_midi1_ump_not_converted_by_the_kernel() {

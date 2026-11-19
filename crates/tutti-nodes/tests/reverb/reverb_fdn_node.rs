@@ -12,7 +12,7 @@ use atomic_float::AtomicF64;
 use tutti_buffers::ChannelLayout;
 use tutti_dsp::{FdnControls, FdnLayout, FreeverbControls, FreezeMode, MaxDecay, Network, System};
 use tutti_graph::contract::{
-    Driven, assert_honest_tail, assert_param_fork, drive, drive_input, prepared,
+    Driven, assert_declared_tail, assert_param_fork, drive, drive_input, prepared,
 };
 use tutti_graph::{
     Env, GraphBuilder, MAX_NODE_TAIL, Node, ParamIn, ParamNode, PlayClock, Prepare, Status,
@@ -168,7 +168,7 @@ fn the_reported_tail_is_the_networks_and_honest() {
         };
         let mut rig = Rig::new(node(plain(), c));
         assert_eq!(finite(&rig.block(&impulse(), &[])), tail_of(&plain(), &c));
-        assert_honest_tail(&mut node(plain(), c), SR);
+        assert_declared_tail(&mut node(plain(), c), SR);
     }
 }
 

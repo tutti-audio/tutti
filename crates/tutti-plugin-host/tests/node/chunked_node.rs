@@ -657,7 +657,7 @@ fn the_loss_a_chunked_processor_reports_is_counted() {
         0,
         &[ParamEvent::ramp(
             at(0, 100),
-            ParamRamp::foreign(PARAM, 0.5, Samples::new(0)),
+            ParamRamp::by_id(PARAM, 0.5, Samples::new(0)),
         )],
     );
     run_block(&mut unit, 0, 100);
@@ -1035,7 +1035,7 @@ fn the_chunked_audio_path_does_not_allocate() {
             0,
             &[ParamEvent::ramp(
                 at(50, 100),
-                ParamRamp::foreign(PARAM, 0.25, Samples::new(10)),
+                ParamRamp::by_id(PARAM, 0.25, Samples::new(10)),
             )],
         );
         run_block(unit, frame, 100);

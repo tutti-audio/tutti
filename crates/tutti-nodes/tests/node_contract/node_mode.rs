@@ -11,18 +11,18 @@
 use tutti_buffers::MaxBlock;
 use tutti_buffers::Planes;
 use tutti_fixtures::signal::bits;
-use tutti_graph::{IntoNode, NodeMode, Prepare, Solo, declick_frames};
+use tutti_graph::{IntoNode, NodeMode, Prepare, Standalone, declick_frames};
 use tutti_nodes::{BusStripNode, EqBandNode, SvfType};
 use tutti_units::{Amplitude, Db, Hz, Q, SampleRate, Samples, UnitParam};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 const FRAMES: usize = 1024;
 
-fn solo<N: IntoNode>(node: N) -> Solo<N::Controls> {
-    Solo::new(node, Prepare::new(RATE, MaxBlock::of(Samples::new(64))))
+fn solo<N: IntoNode>(node: N) -> Standalone<N::Controls> {
+    Standalone::new(node, Prepare::new(RATE, MaxBlock::of(Samples::new(64))))
 }
 
-fn set_mode<C>(solo: &mut Solo<C>, mode: NodeMode) {
+fn set_mode<C>(solo: &mut Standalone<C>, mode: NodeMode) {
     let key = solo.key();
     solo.renderer_mut()
         .editor_mut()

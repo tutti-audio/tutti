@@ -405,7 +405,7 @@ stopped: the usual retrigger on play.
 
 ### 4.4 Event-input layers
 
-A signal source's node sends `ParamSegment::foreign(source.0, …)` with its
+A signal source's node sends `ParamSegment::by_id(source.0, …)` with its
 **raw** value into the lane's one event input. Fan-in merges by offset, then
 source order (`crates/tutti-graph/src/compile/mod.rs:1388-1394`), and
 the address tells sources apart, so adding a source is an edge, never a new
@@ -438,7 +438,7 @@ the 32-byte event are unchanged.
 |---|---|
 | Audio | none |
 | Event inputs | 1: signal sources' raw values by `SourceId`; other events ignored |
-| Event outputs | 1: `ParamSegment`s to `ParamAddr::Unit(param)` or `ParamAddr::Indexed(param, index)` (`ControlLaneNode::for_param`, `for_unit`) or `ParamAddr::Id(id)` in normalised 0..1 (`for_foreign`) |
+| Event outputs | 1: `ParamSegment`s to `ParamAddr::Unit(param)` or `ParamAddr::Indexed(param, index)` (`ControlLaneNode::for_param`, `for_unit`) or `ParamAddr::Id(id)` in normalised 0..1 (`for_id`) |
 | Event capacity | `LANE_EVENT_CAPACITY` = **256** (today 128) |
 | Tail | `Tail::Unbounded` |
 | Latency | none; modulation lag is musical delay (§6) |
@@ -930,7 +930,7 @@ fn setup(mut mods: Mods, scene: Res<Scene>) {
     let gain = ParamRef::unit(scene.pad, UnitParam::Volume);
     mods.range(cutoff, 0.0, 1_000.0);
     mods.range(gain, 0.0, 1.0);
-    let wobble = mods.lfo(Lfo::sine().rate(BeatDuration(0.5)));
+    let wobble = mods.lfo(Lfo::sine().rate(BeatDuration::new(0.5)));
     mods.route(wobble, cutoff, Depth(0.3));
     let kick = mods.follower(scene.kick_bus);
     mods.route(kick, gain, Depth(-0.6)); // sidechain
@@ -1399,7 +1399,7 @@ from the parameter's current host value, along its shape, as points (doc
 |---|---|
 | `tutti-graph` | `ParamFrom::Audio`, so **`ParamFrom` collapses to `EventOut`** and `connect_param(at, from: EventOut)` loses its shaping; `ParamShaping`, `ShapeLut`, `SHAPE_LUT_LEN`; `ParamSource`; `MAX_PARAM_SOURCES` and the per-source arrays; `signature`'s source hashing; `GraphInvalid::TooManyParamSources`, `UnsortedParamSources`; `DelayKey::ParamAudio`; the `Σ` of the fused step (`param.rs:11`). **`ParamTap` and its seqlock** (`param.rs:930-1060`) and **the fork seeds** (`PendingFork::seeds`, `fork.rs:207`; `Editor::param_seeds`, `seed_params`, `editor.rs:1539-1633`): a fresh lane (a fork's) has nothing in flight and sends at its first frame (§5.6: a lane never re-sends at a block edge), so a fork's port needs no seed. The one user outside the lane path is a host's hand-wired event source. The requirement now: **a fresh (forked) instance sends its current value on its first block**; the lane meets it by sending whenever nothing is in flight. Two classes need more: (1) **ramp-based sources**: re-sending a `ParamRamp` restarts it, so re-send the in-flight move as `ParamSegment::resumed`, or the held value as a step; (2) **sources driven by live input that cannot be replayed** (MIDI CC or OSC bridges, UI-driven event nodes): a `ForkByClone` fork does not know the held value, so either write the target's `Param` cell (the knob, which a fork reads) instead of an event source, or capture the current value in the node's `ForkSource::gather`. `ParamSet::set_authored`, `authored`. |
 | `tutti-modulation` | The `routing` feature and its items: `AtomicTarget`, `LayeredCurve`, `ModBus`, `ModRouter`, `ModEdge`, `ModRoutingSnapshot`, `ModRoutingTable`, `ModPreFrame`, `ErasedModulator`, `Sourced`, `SourceRate`, `Rate`, `SourceClock`, `ModParams`, `ModMatrix`, `Route`, `RouteTo`, `TargetHandle`, `ShapedCurve`, `EdgeShape`, `CurveModulator`, `BeatLfo`. Also the ungated `ModTarget`, `LayerKey`, `ModTargetId` and `fold`; the `std` feature; the `bevy` feature's implied `routing`. The README and the lib doctest are rewritten for the compiler. |
-| `tutti-nodes` | `ParamModShaping`; the re-exports at `lib.rs:93-95`; `AutomationLaneNode::for_param`/`for_foreign` (now `ControlLaneNode`'s). `AutomationLaneNode::new` (the audio lane) stays. |
+| `tutti-nodes` | `ParamModShaping`; the re-exports at `lib.rs:93-95`; `AutomationLaneNode::for_param`/`for_id` (now `ControlLaneNode`'s). `AutomationLaneNode::new` (the audio lane) stays. |
 | `tutti-polysynth` | The `ModParams` impl's `AtomicTarget::with_mirror` (`polysynth.rs:1221`); its params are reached through `ParamSet` |
 | `tutti-plugin` | `PluginAutomation`, `AutomationControls`, `AUTOMATION_EVENT_CAPACITY`, `TimedParam`, `PluginParamTarget`, `LfoCurve`, `LfoOffset`, `OffsetCurve`, `stride_for`, `MAX_POINTS`; `PluginControls::automation`, `param_target`; `impl ModParams for PluginClient` (`host/node/mod.rs:650`) |
 | `bevy-tutti` | `modulation/driver.rs` (with its `ParamKey`), `target.rs` (with `ModTargetResolver`), `audio_rate.rs`, most of `source.rs`; `ModulationMatrix`, `ModTargetRegistry`, `ModBusRes`, `ModParamsHandle`, `ModRateCell`, `CollectedModSources`, `ModSourceSystems`, `AudioRateRoutes`, `ModDelivery`, `ModParamRange`; the modulation role of `CapturedControls::for_params` (`graph/capture.rs:109`, its row in the table at `:14`); `write_param`'s modulated branch, `set_param_snapshot`; `plugin_bind_params`, `PluginParamsBound`, `PluginAutomationNode`, `remove_plugin_automation`; `AudioGraphRes::set_param_mod`'s source list |
@@ -1608,8 +1608,8 @@ sources:
   (counted), steady holds, the glide, the fork. Constructors:
   `ControlLaneNode::for_param(key, program, knob, range)` (the knob a
   node's `Param` cell, the range `Editor::param_range_cell`) and
-  `for_foreign(id, program, knob, (min, max))`.
-  `AutomationLaneNode::for_param` and `for_foreign` return a
+  `for_id(id, program, knob, (min, max))`.
+  `AutomationLaneNode::for_param` and `for_id` return a
   `ControlLaneNode` of automation alone; `AutomationLaneNode` itself is
   the audio-output lane only.
 - The plugin side (§9 requirement 6): `ParameterQueue::chunk_room` is
@@ -1669,7 +1669,7 @@ and `LaneControls` (§5), exact mode on the grid, thinning, the fork;
 `EnvelopeFollowerNode`, `NoteEnvelopeNode` with play-start reset; the port
 rule (§5.6) with interpreter, verifier and proptest; `SegmentPoints` on
 piece endpoints and the point capacity (§9.6); `AutomationLaneNode::for_param`
-and `for_foreign` become thin `ControlLaneNode` constructors; doc 013's
+and `for_id` become thin `ControlLaneNode` constructors; doc 013's
 pointer names this design.
 
 **Properties tested.**
@@ -1977,7 +1977,7 @@ CLAUDE.md's modulation lines, the CHANGELOG's migrations (`ModMatrix` /
 `AtomicTarget` users declare routes or call `compile`;
 `connect_param(at, from, shaping)` → `connect_param(at, event_out)`;
 `set_authored` → `set`; `PluginControls::automation` → a
-`ControlLaneNode::for_foreign` per parameter; a hand-wired event source
+`ControlLaneNode::for_id` per parameter; a hand-wired event source
 sends its current value on a fork's first block, per §10's two classes).
 
 **Properties.** The workspace, doctests, `cargo xtask check-windows` and the
@@ -1995,7 +1995,7 @@ and the fork seeds gone; `ParamSet::authored` with them); tutti-modulation keeps
 only the compiler (§7) and its vocabulary, the runtime copies of `Lfo`,
 `Modulator`, `RandomState` and `SampleHold` being `tutti-nodes`'; tutti-nodes
 drops `ParamModShaping`; tutti-plugin drops `PluginAutomation` and its
-source, a plugin parameter being a `ControlLaneNode::for_foreign`;
+source, a plugin parameter being a `ControlLaneNode::for_id`;
 bevy-tutti drops `modulation::legacy`, `LegacyModulationPlugin`,
 `plugin_bind_params` and its kin, and `CapturedControls::for_params` (a
 node's params are addressed at insert by `GraphNode::params`).

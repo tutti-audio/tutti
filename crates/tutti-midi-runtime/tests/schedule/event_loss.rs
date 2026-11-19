@@ -152,7 +152,7 @@ fn a_chord_ends_in_a_long_block() {
 /// blocks, whose port holds 256, off on frame 500. The port refuses the last
 /// 44 note-ons; the clip never writes the note-offs of those notes. 256
 /// notes start and 256 end, and nothing is left sounding or ended unstarted.
-/// The loss is 44 note-ons refused and 44 note-offs withheld, each counted
+/// The loss is 44 note-ons refused and 44 note-offs skipped, each counted
 /// once: 88, charged to the clip's port 0 in the blocks they were lost in.
 #[test]
 fn a_loss_is_counted_exactly_and_leaves_no_orphan() {
@@ -305,7 +305,7 @@ fn the_harmony_port_follows_the_block() {
 /// Block 3: 256 note-ons land and 44 are refused; 40 note-offs land after
 /// them and 360 are refused. Block 4: the retry sends 296 (the port's room)
 /// and is refused on the 297th, so 64 are still owed. Block 5: they go.
-/// Refused or withheld: 44 + 360 + 1 repeat = 405 (the writer counts every
+/// Refused or skipped: 44 + 360 + 1 repeat = 405 (the writer counts every
 /// attempt); the repeat and the 360 sent are taken back, so 44 are lost, the
 /// note-ons. All 400 note-offs arrive.
 #[test]
@@ -328,7 +328,7 @@ fn a_note_off_refused_twice_and_sent_is_not_lost() {
 }
 
 /// Note A's note-on refused, note B taking the key and A's note-off
-/// swallowed: the withheld note-off is counted, because B starting does not
+/// swallowed: the skipped note-off is counted, because B starting does not
 /// clear A's mark. 256 other notes fill the port on frame 10 with A the
 /// 257th (refused); B starts the key on frame 70 (a later block) and A ends
 /// on frame 100, B on frame 200. Lost: A's note-on and A's note-off, 2.

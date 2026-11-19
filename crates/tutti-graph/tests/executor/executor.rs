@@ -1145,11 +1145,11 @@ fn too_few_input_slices_render_silence_in_release() {
     assert!(out[0].iter().all(|&x| x == 0.0));
 }
 
-/// A [`common::Ringer`] fed by a silent constant, in one-frame blocks' reach:
+/// A [`common::RingingNode`] fed by a silent constant, in one-frame blocks' reach:
 /// the calls it gets are the quiet frames the skip waited. Returns the
 /// report word the test can change between blocks.
 fn ringer_after_silence(
-    ringer: common::Ringer,
+    ringer: common::RingingNode,
 ) -> (
     Editor,
     Executor,
@@ -1180,8 +1180,8 @@ fn ringer_after_silence(
     (ed, exec, calls, report)
 }
 
-/// Calls a [`common::Ringer`] gets over `frames` quiet one-frame blocks.
-fn ringer_calls(ringer: common::Ringer, frames: usize) -> usize {
+/// Calls a [`common::RingingNode`] gets over `frames` quiet one-frame blocks.
+fn ringer_calls(ringer: common::RingingNode, frames: usize) -> usize {
     let (_ed, mut exec, calls, _report) = ringer_after_silence(ringer);
     for _ in 0..frames {
         render(&mut exec, 1, 1);
@@ -1195,29 +1195,29 @@ fn ringer_calls(ringer: common::Ringer, frames: usize) -> usize {
 /// an `Unbounded` ceiling narrows to a finite report.
 #[test]
 fn a_reported_tail_shorter_than_the_ceiling_is_what_the_skip_waits() {
-    use common::{REPORT_UNKNOWN, Ringer};
+    use common::{REPORT_UNKNOWN, RingingNode};
     let ceiling = Tail::Finite(Samples::new(100));
-    assert_eq!(ringer_calls(Ringer::new(ceiling, 5, 10), 300), 10);
+    assert_eq!(ringer_calls(RingingNode::new(ceiling, 5, 10), 300), 10);
     assert_eq!(
         ringer_calls(
-            Ringer::new(ceiling, 5, 10).with_latency(Samples::new(7)),
+            RingingNode::new(ceiling, 5, 10).with_latency(Samples::new(7)),
             300
         ),
         7 + 10,
         "latency, then the reported tail"
     );
     assert_eq!(
-        ringer_calls(Ringer::new(ceiling, 5, 0), 300),
+        ringer_calls(RingingNode::new(ceiling, 5, 0), 300),
         1,
         "a reported `None` is skipped after the first call"
     );
     assert_eq!(
-        ringer_calls(Ringer::new(ceiling, 5, REPORT_UNKNOWN), 300),
+        ringer_calls(RingingNode::new(ceiling, 5, REPORT_UNKNOWN), 300),
         100,
         "Unknown reported never narrows"
     );
     assert_eq!(
-        ringer_calls(Ringer::new(Tail::Unbounded, 5, 25), 300),
+        ringer_calls(RingingNode::new(Tail::Unbounded, 5, 25), 300),
         25,
         "an unbounded ceiling narrows to a finite report"
     );
@@ -1228,20 +1228,20 @@ fn a_reported_tail_shorter_than_the_ceiling_is_what_the_skip_waits() {
 /// `Unbounded` ceiling is never skipped.
 #[test]
 fn a_reported_tail_above_the_ceiling_is_clamped() {
-    use common::{REPORT_UNBOUNDED, Ringer};
+    use common::{REPORT_UNBOUNDED, RingingNode};
     let ceiling = Tail::Finite(Samples::new(20));
-    assert_eq!(ringer_calls(Ringer::new(ceiling, 5, 500), 300), 20);
+    assert_eq!(ringer_calls(RingingNode::new(ceiling, 5, 500), 300), 20);
     assert_eq!(
-        ringer_calls(Ringer::new(ceiling, 5, REPORT_UNBOUNDED), 300),
+        ringer_calls(RingingNode::new(ceiling, 5, REPORT_UNBOUNDED), 300),
         20
     );
     assert_eq!(
-        ringer_calls(Ringer::new(Tail::None, 5, 500), 300),
+        ringer_calls(RingingNode::new(Tail::None, 5, 500), 300),
         1,
         "no report outlasts a ceiling of none"
     );
     assert_eq!(
-        ringer_calls(Ringer::new(Tail::Unbounded, 5, REPORT_UNBOUNDED), 300),
+        ringer_calls(RingingNode::new(Tail::Unbounded, 5, REPORT_UNBOUNDED), 300),
         300,
         "an unbounded report is never skipped"
     );
@@ -1254,9 +1254,9 @@ fn a_reported_tail_above_the_ceiling_is_clamped() {
 /// quiet frames are then what the skip waits.
 #[test]
 fn a_call_that_reports_nothing_restores_the_ceiling() {
-    use common::{NO_REPORT, Ringer};
+    use common::{NO_REPORT, RingingNode};
     let (_ed, mut exec, calls, report) =
-        ringer_after_silence(Ringer::new(Tail::Finite(Samples::new(100)), 5, 10));
+        ringer_after_silence(RingingNode::new(Tail::Finite(Samples::new(100)), 5, 10));
     for _ in 0..5 {
         render(&mut exec, 1, 1);
     }
@@ -1275,13 +1275,13 @@ fn a_call_that_reports_nothing_restores_the_ceiling() {
 /// The test pins the observable rule, not the individual resets.
 #[test]
 fn a_new_unit_starts_at_its_ceiling() {
-    use common::{NO_REPORT, Ringer};
+    use common::{NO_REPORT, RingingNode};
     let (mut ed, mut exec, _calls, _report) =
-        ringer_after_silence(Ringer::new(Tail::Finite(Samples::new(100)), 5, 0));
+        ringer_after_silence(RingingNode::new(Tail::Finite(Samples::new(100)), 5, 0));
     for _ in 0..10 {
         render(&mut exec, 1, 1);
     }
-    let fresh = Ringer::new(Tail::Finite(Samples::new(100)), 5, NO_REPORT);
+    let fresh = RingingNode::new(Tail::Finite(Samples::new(100)), 5, NO_REPORT);
     let calls = Arc::clone(&fresh.calls);
     ed.insert(FX, "ringer", Unforkable(fresh));
     ed.commit().expect("commits");
@@ -1299,9 +1299,9 @@ fn a_new_unit_starts_at_its_ceiling() {
 /// form, `Call::run`).
 #[test]
 fn a_report_reaches_every_call_form() {
-    use common::Ringer;
+    use common::RingingNode;
     let ceiling = Tail::Finite(Samples::new(100));
-    let ringer = |width: usize| Ringer::new(ceiling, 5, 10).wide(width);
+    let ringer = |width: usize| RingingNode::new(ceiling, 5, 10).wide(width);
     for (what, node) in [
         ("mono", ringer(1)),
         ("stereo (Direct)", ringer(2)),
@@ -1317,6 +1317,9 @@ fn a_report_reaches_every_call_form() {
 /// declares no tail is never skipped.
 #[test]
 fn nothing_narrows_an_unknown_ceiling() {
-    use common::Ringer;
-    assert_eq!(ringer_calls(Ringer::new(Tail::Unknown, 5, 10), 300), 300);
+    use common::RingingNode;
+    assert_eq!(
+        ringer_calls(RingingNode::new(Tail::Unknown, 5, 10), 300),
+        300
+    );
 }

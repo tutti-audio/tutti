@@ -29,7 +29,7 @@
 //! // with its key; they set its parameters live.
 //! let (tone, _controls) = session
 //!     .graph()
-//!     .add(LfoNode::new(LfoShape::Sine).with_rate(Hz(440.0)));
+//!     .add(LfoNode::new(LfoShape::Sine).with_rate(Hz::new(440.0)));
 //! session.graph().connect(tone, Root).expect("both ends exist");
 //!
 //! // An update commits the edit; it lands at the start of the next block, and
@@ -402,8 +402,8 @@ pub mod session {
         Unmeasured,
     };
     pub use tutti_graph::{
-        BusError, BusRef, BusSource, CloseError, CommitError, MissingSource, MixError, ModeError,
-        PassError, Placed, Rewired, Unwired, Wired,
+        BusError, BusRef, BusSource, CloseError, CommitError, Inserted, MissingSource, MixError,
+        ModeError, PassError, Rewired, Unwired, Wired,
     };
     pub use tutti_graph::{
         BusFeed, BusFold, BusSide, EdgeFade, EdgeId, EventCapacityError, EventIn, EventOut,
@@ -418,9 +418,9 @@ pub mod session {
     pub use tutti_session::{
         BlockConfig, Bus as BusEdgeKind, BusSink, Channel as ChannelEdgeKind, Committed,
         Connection, Crossfade, CrossfadeId, CrossfadeRefused, DeclarationError,
-        Event as EventEdgeKind, EventEdge, EventTapPort, Fanin, Feeder, Graph, HeardOpen,
-        HeardTapError, Inlet, InletError, LIVE_MAX_BLOCK, MainBus, MainSink, Meters, NodeSlots,
-        NotReopened, Outlet, OutputPlacement, OutputPolicy, OutputPolicyError, PHASES, Peer,
+        Event as EventEdgeKind, EventEdge, EventTapPort, Fanin, Feeder, Graph, HeardTapError,
+        Inlet, InletError, LIVE_MAX_BLOCK, MainBus, MainSink, Meters, NodeSlots, NotReopened,
+        Outlet, OutputPlacement, OutputPolicy, OutputPolicyError, OutputTapOpen, PHASES, Peer,
         PeerError, Phase as UpdatePhase, PhaseCx, Policy, Presence, Reclaimer, Reclaims,
         RemoveError, Reopened, ReplaceRefused, Resource, ResourceFact, ResourceId, RootDeclaration,
         RootReader, RootTopologyStatus, SessionNode, Taps, TempoError, Weighted, Wire, root_width,
@@ -683,7 +683,7 @@ pub mod plugin {
 /// `MidiInput`, `MidiOutput`, their entries and loaded reports) and what an open one said of itself (`Learned`, `SavedDevice`, `Match`), and the Profiles
 /// its MIDI-CI peers support and how to switch one (`PeerProfiles`,
 /// `ListedProfile`, `SwitchProfile`, `ProfilesChange`). The translation layer
-/// (`Translator`, `Narrower`), the runtime's clock sync and the MIDI-CI codec
+/// (`Midi2Translator`, `Midi1Translator`), the runtime's clock sync and the MIDI-CI codec
 /// belong to `tutti-midi-protocol`, `tutti-midi-runtime` and `tutti-midi-device`.
 /// Feature `midi`.
 #[cfg(feature = "midi")]

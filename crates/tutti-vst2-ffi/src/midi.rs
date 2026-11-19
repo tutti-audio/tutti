@@ -19,7 +19,7 @@
 
 use tutti_graph::Offset;
 use tutti_graph::UmpAt;
-use tutti_midi_protocol::{Narrower, Translator};
+use tutti_midi_protocol::{Midi1Translator, Midi2Translator};
 use tutti_plugin_types::WireMidi;
 use tutti_ump::{Message, MidiGroup, Ump, parse_exact};
 
@@ -74,7 +74,7 @@ pub struct MidiIo {
     /// Translates the plugin's MIDI 1.0 output into UMP, keeping its
     /// parameter-number and bank runs across blocks: VST2 has one output
     /// stream, so one translator.
-    translator: Translator,
+    translator: Midi2Translator,
 }
 
 impl std::fmt::Debug for MidiIo {
@@ -103,7 +103,7 @@ impl MidiIo {
             out_rx,
             out,
             out_overflow: out_overflow.writer(),
-            translator: Translator::new(),
+            translator: Midi2Translator::new(),
         }
     }
 }
@@ -172,10 +172,10 @@ pub fn to_midi(event: &crate::api::MidiEvent) -> Option<WireMidi> {
 /// stream that has sent nothing before it: per-note pitch bend, per-note
 /// controllers and management (no MIDI-1 analogue), a Program Change with a
 /// bank (three messages) and an RPN or NRPN (four). [`MidiSendBuffer`] sends all
-/// of them, through a [`Narrower`] that keeps the stream's state.
+/// of them, through a [`Midi1Translator`] that keeps the stream's state.
 pub fn from_midi(event: &WireMidi) -> Option<crate::api::MidiEvent> {
     let mut messages = [[0u8; 3]; MAX_MESSAGES];
-    match narrowed(&mut Narrower::new(), event.ump, &mut messages) {
+    match narrowed(&mut Midi1Translator::new(), event.ump, &mut messages) {
         1 => Some(midi_event(event.offset, messages[0], true)),
         _ => None,
     }
@@ -185,13 +185,17 @@ pub fn from_midi(event: &WireMidi) -> Option<crate::api::MidiEvent> {
 /// data.
 const MAX_MESSAGES: usize = 4;
 
-/// The MIDI 1.0 messages `ump` stands for through `narrower`, in send order, into
+/// The MIDI 1.0 messages `ump` stands for through `midi1_translator`, in send order, into
 /// `out`; how many. None when it has no MIDI 1.0 form (a per-note controller, a
 /// relative controller) or does not decode.
-fn narrowed(narrower: &mut Narrower, ump: Ump, out: &mut [[u8; 3]; MAX_MESSAGES]) -> usize {
+fn narrowed(
+    midi1_translator: &mut Midi1Translator,
+    ump: Ump,
+    out: &mut [[u8; 3]; MAX_MESSAGES],
+) -> usize {
     let mut n = 0;
     if let Ok(message) = ump.decode() {
-        narrower.feed(message, |bytes| {
+        midi1_translator.feed(message, |bytes| {
             if n < MAX_MESSAGES {
                 // VST2's `midi_data` is a fixed `[u8; 3]`: a short message is zero-padded.
                 out[n] = bytes.padded();
@@ -207,7 +211,7 @@ fn midi_event(frame_offset: u32, midi_data: [u8; 3], live: bool) -> crate::api::
     use crate::api;
     use std::mem;
 
-    // A message with no 3-byte form (SysEx) never reaches here: the narrower has
+    // A message with no 3-byte form (SysEx) never reaches here: the MIDI 1.0 translator has
     // none for it, and `stage_piece` sends SysEx as a `SysExEvent`.
 
     // `frame_offset` is `u32`; VST2's `delta_frames` is `i32`. A value past
@@ -275,7 +279,7 @@ pub struct MidiSendBuffer {
     /// The MIDI 2.0 to MIDI 1.0 state of what the plugin has been sent: which RPN,
     /// NRPN and bank each channel has had selected. VST2 has one MIDI input, so
     /// only Group 0's channels are in it.
-    narrower: Narrower,
+    midi1_translator: Midi1Translator,
     /// Channel voice messages of a Group other than 0, which VST2's one MIDI
     /// input cannot tell from Group 0's.
     groups_dropped: Drops,
@@ -344,7 +348,7 @@ impl MidiSendBuffer {
             sysex_events: Vec::with_capacity(events),
             order: Vec::with_capacity(events),
             sysex: sysex_assembler(),
-            narrower: Narrower::new(),
+            midi1_translator: Midi1Translator::new(),
             groups_dropped: Drops::new(),
             sysex_dropped: Drops::new(),
             sysex_seen: 0,
@@ -483,7 +487,7 @@ impl MidiSendBuffer {
             // and all of them fit or none is staged (a bank is not sent
             // without its program).
             let mut messages = [[0u8; 3]; MAX_MESSAGES];
-            let n = narrowed(&mut self.narrower, *ev, &mut messages);
+            let n = narrowed(&mut self.midi1_translator, *ev, &mut messages);
             if self.order.len() + n > self.room {
                 self.events_dropped.add(n as u64);
                 continue;
@@ -606,12 +610,12 @@ impl MidiSendBuffer {
     }
 
     /// The plugin was reset: drops a SysEx message open across the reset
-    /// (counted in [`sysex_dropped`](Self::sysex_dropped)) and resets the narrower.
+    /// (counted in [`sysex_dropped`](Self::sysex_dropped)) and resets the MIDI 1.0 translator.
     /// Never allocates.
     pub fn reset_midi(&mut self) {
         self.sysex.reset();
         self.count_sysex_drops();
-        self.narrower.reset();
+        self.midi1_translator.reset();
     }
 
     /// Channel voice messages dropped since this buffer was made because they
@@ -958,7 +962,7 @@ mod tests {
 
         // 0xB1 = CC on channel 1, controller 74, value 100.
         let midi = to_midi(&api_from_bytes([0xB1, 74, 100])).expect("CC decodes");
-        let ump = Translator::new()
+        let ump = Midi2Translator::new()
             .translate(midi.ump)
             .expect("a CC outside a run is sent");
         match ump.decode().expect("valid UMP") {
@@ -1445,7 +1449,7 @@ mod tests {
     }
 
     /// **A refused message leaves an MPE note's member channel as it was**: the
-    /// narrower's note allocation survives a message past the room, so the
+    /// The MIDI 1.0 translator's note allocation survives a message past the room, so the
     /// note's per-note bend still goes to its channel (M2-104 D.2.8).
     #[test]
     fn a_refused_message_keeps_an_mpe_notes_channel() {
@@ -1462,7 +1466,7 @@ mod tests {
         .unwrap();
         // Room for the note, the bend and one more: the RPN's four do not fit.
         let mut buf = MidiSendBuffer::with_capacity(3);
-        buf.narrower = Narrower::with_mode(TranslationMode {
+        buf.midi1_translator = Midi1Translator::with_mode(TranslationMode {
             extremes: ExtremeValues::Scaled,
             per_note: PerNoteTranslation::Mpe(zone),
         });

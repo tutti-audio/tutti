@@ -28,8 +28,8 @@
 //!
 //! Dropping the [`TapReader`] first is safe. The tap then finds no reader and
 //! writes nothing, and the rings are freed with the writer when the tap is
-//! closed ([`Editor::close_tap`](crate::Editor::close_tap)) or reaped
-//! ([`Editor::reap_taps`](crate::Editor::reap_taps)), on the control side.
+//! closed ([`Editor::close_tap`](crate::Editor::close_tap)) or pruned
+//! ([`Editor::prune_taps`](crate::Editor::prune_taps)), on the control side.
 //! Dropping the reader last frees the ring on the reader's thread.
 
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -218,7 +218,7 @@ pub(crate) fn tap_op<F: Float, A: AudioSlots<F>>(
 /// The caller's end of a tap: every lane, read together.
 ///
 /// Drain it from a thread of your own. Dropping it leaves the tap open until
-/// the editor closes or reaps it; the audio thread then writes nothing for it.
+/// the editor closes or prunes it; the audio thread then writes nothing for it.
 /// It must not be dropped on the audio thread (debug builds panic there).
 pub struct TapReader<F: Float = f32> {
     _control: ControlDrop<Self>,

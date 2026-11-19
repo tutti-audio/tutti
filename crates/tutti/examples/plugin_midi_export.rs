@@ -119,7 +119,7 @@ fn play<M: Master>(
 ) -> Result<M::Result<f32>, Box<dyn std::error::Error>> {
     let mut s = Session::builder()
         .sample_rate(RATE)
-        .max_block(MaxBlock::of(Samples(512)))
+        .max_block(MaxBlock::of(Samples::new(512)))
         .build()?;
 
     let synth = load(&mut s, main, plugin, state)?;
@@ -145,7 +145,7 @@ fn play<M: Master>(
     // beat 0, the latency is the plan's, the tail is the plugin's declared
     // one, and the file is as wide as the root.
     let job = s.bounce_start(master(
-        Bounce::project().range(Range::Beats(Beat(0.0), end)),
+        Bounce::project().range(Range::Beats(Beat::new(0.0), end)),
     ))?; // the plugin hears Offline from here
     let bounced = s.finish_bounce(job.run())?; // and Realtime from here
     Ok(bounced.into_master())

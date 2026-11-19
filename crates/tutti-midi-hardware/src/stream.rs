@@ -79,7 +79,7 @@ use tutti_graph::{Losses, Offset};
 use tutti_midi_ci::ResourceStore;
 use tutti_midi_device::{
     Capabilities, DiscoveryAction, DiscoveryEnding, Endpoint, EndpointDiscovery, EndpointReply,
-    EntropyError, IdentityInquiry, InquiryAction, Learned, Supports,
+    IdentityInquiry, InquiryAction, Learned, Supports,
 };
 use tutti_midi_protocol::{Addressed, Universal, UniversalRead, read};
 use tutti_midi_runtime::Outgoing;
@@ -350,7 +350,7 @@ pub(crate) struct Stepped {
     /// How the requests asked of peers ended.
     pub(crate) answers: Vec<(PeerId, Answer)>,
     /// The Groups whose MIDI-CI device could not start, with why.
-    pub(crate) unstarted: Vec<(MidiGroup, EntropyError)>,
+    pub(crate) unstarted: Vec<(MidiGroup, getrandom::Error)>,
 }
 
 /// The Identity Request of a MIDI 1.0 port that has an output (the module's

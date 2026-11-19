@@ -307,7 +307,7 @@ fn a_typed_handle_of_the_wrong_unit_is_refused() {
 }
 
 /// **A typed parameter reads and writes in its unit through the plugin's own
-/// map**: the fake's linear map over `20..=20000` is the oracle (`Hz(10010)` is
+/// map**: the fake's linear map over `20..=20000` is the oracle (`Hz::new(10010)` is
 /// the middle, position `0.5`), a value outside the declared range is refused,
 /// and the position the plugin was given is the one its map names.
 #[test]

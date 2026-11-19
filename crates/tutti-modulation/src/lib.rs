@@ -18,7 +18,7 @@
 //!   where it has a value) plus time-function layers and event-input layers
 //!   (which add), summed in `LayerId` order. A description: equal programs
 //!   evaluate to equal bits.
-//! - **The source builders.** `Lfo` (`Lfo::sine().rate(BeatDuration(0.5))`),
+//! - **The source builders.** `Lfo` (`Lfo::sine().rate(BeatDuration::new(0.5))`),
 //!   `Macro`, and the source halves of a follower (`Follower`: attack and
 //!   release) and a note envelope (`NoteEnvelope`: the ADSR), each a
 //!   `Source` through `Source::from`. What feeds a follower or a note envelope

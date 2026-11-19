@@ -559,7 +559,7 @@ mod tests {
     fn param(offset: u32, target: f64) -> ParamEvent {
         ParamEvent::ramp(
             Offset::raw(offset),
-            ParamRamp::foreign(tutti_units::ParamId::new(1), target, Samples::new(0)),
+            ParamRamp::by_id(tutti_units::ParamId::new(1), target, Samples::new(0)),
         )
     }
 
