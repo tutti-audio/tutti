@@ -92,7 +92,7 @@ fn the_latency_is_the_padded_round_trip_of_the_stage_delays() {
         let padded = top.next_multiple_of(factor.get());
         assert_eq!(
             plan(factor).latency(),
-            Samples(padded / factor.get()),
+            Samples::new(padded / factor.get()),
             "{factor:?}: {delays:?}"
         );
     }
@@ -109,7 +109,7 @@ fn an_impulse_peaks_at_the_latency() {
         let plan = plan(factor);
         let latency = plan.latency().get();
         for block in [1, 7, 64, 700] {
-            let mut os = plan.state::<f32>(MaxBlock::of(Samples(block)));
+            let mut os = plan.state::<f32>(MaxBlock::of(Samples::new(block)));
             let mut x = vec![0.0; 1024];
             x[0] = 1.0;
             let y = pass_through(&mut os, &x, block);
@@ -142,7 +142,7 @@ fn a_passband_sine_round_trips_delayed_within_the_ripple() {
         let latency = plan.latency().get();
         for bin in [60, TONE_BIN, 1800] {
             let x = sine(bin, SETTLE + WINDOW);
-            let mut os = plan.state::<f32>(MaxBlock::of(Samples(128)));
+            let mut os = plan.state::<f32>(MaxBlock::of(Samples::new(128)));
             let y = pass_through(&mut os, &x, 100);
             let worst = (SETTLE..x.len())
                 .map(|n| (f64::from(y[n]) - f64::from(x[n - latency])).abs())
@@ -165,7 +165,7 @@ fn the_up_sampler_rejects_its_images() {
         let f = TONE_BIN as f64 / WINDOW as f64 * BASE;
         let f_hi = BASE * factor.get() as f64;
         let x = sine(TONE_BIN, SETTLE + WINDOW);
-        let mut os = plan(factor).state::<f32>(MaxBlock::of(Samples(256)));
+        let mut os = plan(factor).state::<f32>(MaxBlock::of(Samples::new(256)));
         let mut high = Vec::new();
         through(&mut os, &x, 256, |h, out| {
             high.extend_from_slice(h);
@@ -204,7 +204,7 @@ fn the_down_sampler_rejects_what_would_alias() {
         let f_hi = BASE * factor.get() as f64;
         for m in 1..=factor.get() / 2 {
             let g = m as f64 * BASE - f;
-            let mut os = plan(factor).state::<f32>(MaxBlock::of(Samples(256)));
+            let mut os = plan(factor).state::<f32>(MaxBlock::of(Samples::new(256)));
             let mut n_hi = 0usize;
             let y = through(&mut os, &vec![0.0; SETTLE + WINDOW], 256, |_, out| {
                 for o in out.iter_mut() {
@@ -226,13 +226,13 @@ fn the_down_sampler_rejects_what_would_alias() {
 #[test]
 fn a_block_has_factor_times_the_frames() {
     for factor in FACTORS {
-        let mut os = plan(factor).state::<f32>(MaxBlock::of(Samples(32)));
+        let mut os = plan(factor).state::<f32>(MaxBlock::of(Samples::new(32)));
         os.upsample(Mono::new(&[0.5f32; 20]));
         let (high, out) = os.high_rate();
-        assert_eq!(high.frames(), Samples(20 * factor.get()));
-        assert_eq!(out.frames(), Samples(20 * factor.get()));
+        assert_eq!(high.frames(), Samples::new(20 * factor.get()));
+        assert_eq!(out.frames(), Samples::new(20 * factor.get()));
         os.upsample(Mono::new(&[0.5f32; 100]));
-        assert_eq!(os.high_rate().0.frames(), Samples(32 * factor.get()));
+        assert_eq!(os.high_rate().0.frames(), Samples::new(32 * factor.get()));
     }
 }
 
@@ -240,7 +240,7 @@ fn a_block_has_factor_times_the_frames() {
 #[test]
 fn a_reset_leaves_silence_exact() {
     for factor in FACTORS {
-        let mut os = plan(factor).state::<f32>(MaxBlock::of(Samples(64)));
+        let mut os = plan(factor).state::<f32>(MaxBlock::of(Samples::new(64)));
         pass_through(&mut os, &crate::testing::noise(3, 500, 1.0), 64);
         os.reset();
         let y = pass_through(&mut os, &[0.0; 500], 64);
@@ -255,7 +255,7 @@ fn a_block_round_trips_in_either_format() {
     fn run<F: Float>() {
         let plan = plan(OversamplingFactor::X2);
         let latency = plan.latency().get();
-        let mut os = plan.state::<F>(MaxBlock::of(Samples(1024)));
+        let mut os = plan.state::<F>(MaxBlock::of(Samples::new(1024)));
         let x: Vec<f64> = (0..1024)
             .map(|n| libm::sin(TAU * 100.0 * n as f64 / WINDOW as f64))
             .collect();

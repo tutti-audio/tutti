@@ -132,7 +132,7 @@ impl<F: Float> OscillatorStep<F> {
 ///
 /// let mut osc = Oscillator::new(OscillatorWave::Sine);
 /// let rate = SampleRate::SR_48K;
-/// let step = OscillatorStep::<f32>::new(Hz(12_000.0), rate);
+/// let step = OscillatorStep::<f32>::new(Hz::new(12_000.0), rate);
 /// assert_eq!(osc.step(step), 0.0);
 /// // A quarter of a cycle later: the peak.
 /// assert!((osc.step(step) - 1.0).abs() < 1e-6);

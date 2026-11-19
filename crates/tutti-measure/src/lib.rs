@@ -133,7 +133,7 @@
 //!
 //! // Waveform blocks for display — one series per channel.
 //! let blocks = summarize(
-//!     &PeakConfig::new(Samples(512)),
+//!     &PeakConfig::new(Samples::new(512)),
 //!     Interleaved::new(&samples, ChannelLayout::STEREO).unwrap(),
 //! )?;
 //! let left = blocks.channel(0).expect("stereo has a channel 0");
@@ -193,24 +193,24 @@
 //! }
 //!
 //! // A tap on the graph's two outputs.
-//! let (mut editor, mut executor) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))));
+//! let (mut editor, mut executor) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64))));
 //! editor.insert(NodeKey(1), "tone", Unforkable(Tone));
 //! let out = |port| Source::Node(OutPort { node: NodeKey(1), port });
 //! editor.spec_mut().topology.set_outputs([out(0), out(1)]);
-//! let mut tap = editor.open_tap(TapId::of(1), vec![out(0), out(1)], TapAlign::ToOutput, Samples(256)).expect("the ports exist");
+//! let mut tap = editor.open_tap(TapId::of(1), vec![out(0), out(1)], TapAlign::ToOutput, Samples::new(256)).expect("the ports exist");
 //! editor.commit().expect("compiles");
 //! executor.apply_pending();
 //! editor.collect();
 //!
 //! // The audio-callback side: a block of 2 frames.
 //! let (mut l, mut r) = ([0.0f32; 2], [0.0f32; 2]);
-//! let transport = TransportPosition::new(true, Bpm::of(120.0), Beat(0.0), None);
+//! let transport = TransportPosition::new(true, Bpm::of(120.0), Beat::new(0.0), None);
 //! executor.process(2, &transport, &[], &mut [&mut l[..], &mut r[..]]);
 //!
 //! // The analysis side: two frames, popped a plane to a lane.
 //! let (mut left, mut right) = ([0.0f32; 2], [0.0f32; 2]);
 //! let mut lanes = [&mut left[..], &mut right[..]];
-//! assert_eq!(tap.pop_planes(PlanesMut::new(&mut lanes).expect("two planes")), Ok(Samples(2)));
+//! assert_eq!(tap.pop_planes(PlanesMut::new(&mut lanes).expect("two planes")), Ok(Samples::new(2)));
 //! let planes = StereoPlanes::new(&left, &right).expect("drained in lockstep");
 //!
 //! // `Correlation` is a MEASUREMENT type, deliberately distinct from the control
