@@ -8,8 +8,8 @@ use tutti_buffers::ChannelLayout;
 use tutti_platform::{PriorityRequest, StopToken, ThreadHandle};
 use tutti_sampler::{Clip, Placement, StreamPhase};
 use tutti_session::{
-    Bounce, BounceLatency, BounceTail, Fallback, Range, Root, SamplerEvent, SamplerLoad, Session,
-    SessionEvent,
+    AudioEntry, Bounce, BounceLatency, BounceTail, Fallback, PoolState, Range, Root, SamplerEvent,
+    SamplerLoad, Session, SessionEvent, audio_file,
 };
 use tutti_units::{Beat, SampleRate, Seconds};
 
@@ -103,8 +103,8 @@ fn a_refused_streamer_thread_is_reported_once_and_counted_once() {
 }
 
 /// **One `update` steps a stepped streamer until the stream is primed.** The
-/// open is a job on the inline spawner; the update that lands it has already
-/// refilled the new stream's ring, so the stream is no longer `Opening`.
+/// update that lands the open has already refilled the new stream's ring, so
+/// the stream is no longer `Opening`.
 #[test]
 fn update_primes_an_open_streams_ring_in_one_call() {
     let dir = tempfile::tempdir().expect("a temp dir");
@@ -119,10 +119,10 @@ fn update_primes_an_open_streams_ring_in_one_call() {
     );
     assert_eq!(
         fallbacks(&events, Fallback::Jobs),
-        1,
-        "the open's job ran inline"
+        0,
+        "a stepped open is polled, not a job"
     );
-    assert_eq!(s.fallbacks(Fallback::Jobs), 1);
+    assert_eq!(s.fallbacks(Fallback::Jobs), 0);
     let (stream, _reader) = s.take_stream(id).expect("the landed stream");
     assert_ne!(
         stream.status().phase,
@@ -173,4 +173,27 @@ fn a_bounce_of_a_streamed_sample_at_unity_reproduces_the_files_frames() {
         assert_eq!(rendered[0][k], value(k), "left, file frame {k}");
         assert_eq!(rendered[1][k], -value(k), "right, file frame {k}");
     }
+}
+
+/// **A pool load is a job on the inline spawner: one update runs it, and the
+/// jobs fallback is reported once and counted once.** A resident `audio_file`
+/// entry lands as `Loaded` within a few updates, and the count stays 1.
+#[test]
+fn a_pool_load_runs_inline_and_reports_the_jobs_fallback_once() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let path = dir.path().join("ramp.wav");
+    write_ramp(&path);
+    let mut s = session();
+    s.pool(audio_file("ramp", &path)).expect("a declaration");
+    assert_eq!(s.fallbacks(Fallback::Jobs), 1);
+    let mut reported = 0;
+    for _ in 0..UPDATES {
+        reported += fallbacks(&s.update(), Fallback::Jobs);
+        if matches!(s.pool_state(&"ramp"), Some(PoolState::Loaded)) {
+            break;
+        }
+    }
+    assert_eq!(reported, 1);
+    assert!(matches!(s.audio(&"ramp"), Ok(AudioEntry::Resident(_))));
+    assert_eq!(s.fallbacks(Fallback::Jobs), 1);
 }

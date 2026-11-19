@@ -108,6 +108,12 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
             .ok_or(SamplerError::NoStreamer)?;
         let opening = streamer.open(&path.into(), place);
         let id = SamplerLoad::mint(&self.sampler.opens);
+        // A stepped streamer answers from `update`'s own steps, so waiting for it
+        // on a job would block the thread that steps it.
+        if streamer.is_stepped() {
+            self.sampler.open_stepped(id, opening);
+            return Ok(id);
+        }
         let landed = Arc::clone(&self.sampler.streams);
         self.jobs.submit(
             move || opening.wait(),

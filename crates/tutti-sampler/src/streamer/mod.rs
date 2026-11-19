@@ -213,13 +213,13 @@ impl<F: RingFloat> DiskStreamer<Running, F> {
 /// its owner: what [`Started::new`] builds.
 ///
 /// The thread is the normal driver. The stepped one runs the same cycle on the
-/// caller's thread, one [`settle`](Self::settle) at a time, so a host with no
+/// caller's thread, one [`step_until_idle`](Self::step_until_idle) at a time, so a host with no
 /// thread to give (a browser's main thread, a sandbox) still streams.
 #[derive(Debug)]
 pub enum Started<F: RingFloat> {
     /// Driven by its own thread.
     Thread(DiskStreamer<Running, F>),
-    /// The thread was refused: the owner calls [`settle`](Self::settle).
+    /// The thread was refused: the owner calls [`step_until_idle`](Self::step_until_idle).
     Stepped(Box<DiskStreamer<Manual<F>, F>>),
 }
 
@@ -253,7 +253,7 @@ impl<F: RingFloat> Started<F> {
         }
     }
 
-    /// Whether the owner steps it ([`settle`](Self::settle)).
+    /// Whether the owner steps it ([`step_until_idle`](Self::step_until_idle)).
     #[must_use]
     pub fn is_stepped(&self) -> bool {
         matches!(self, Self::Stepped(_))
@@ -267,13 +267,23 @@ impl<F: RingFloat> Started<F> {
         }
     }
 
-    /// Steps a stepped streamer until it reports anything but
+    /// Steps a stepped streamer until a cycle reports anything but
     /// [`Busy`](StepOutcome::Busy), at most as many cycles as refill every open
-    /// ring once; returns the cycles run. A threaded streamer runs none.
-    pub fn settle(&mut self) -> usize {
+    /// ring once ([`DiskStreamer::step_until_idle`]'s budget); returns the cycles
+    /// run. A threaded streamer runs none.
+    ///
+    /// The first cycle runs alone: it applies the queued commands, so the budget
+    /// that follows counts the rings an open just made.
+    pub fn step_until_idle(&mut self) -> usize {
         match self {
             Self::Thread(_) => 0,
-            Self::Stepped(streamer) => streamer.settle(),
+            Self::Stepped(streamer) => {
+                if streamer.step() == StepOutcome::Busy {
+                    1 + streamer.step_until_idle(streamer.fill_steps())
+                } else {
+                    1
+                }
+            }
         }
     }
 }
@@ -327,25 +337,9 @@ impl<F: RingFloat> DiskStreamer<Manual<F>, F> {
         self.driver.step()
     }
 
-    /// Steps until the streamer reports anything but
-    /// [`Busy`](StepOutcome::Busy), at most [`fill_steps`](Self::fill_steps)
-    /// cycles: enough to refill every open ring once, whatever each cycle
-    /// reads. Returns the cycles run.
-    pub fn settle(&mut self) -> usize {
-        let mut taken = 0;
-        while taken < self.fill_steps() {
-            taken += 1;
-            if self.step() != StepOutcome::Busy {
-                break;
-            }
-        }
-        taken
-    }
-
     /// How many cycles refill every open ring once from empty, counting the
     /// whole-file decodes still waiting for a cycle.
-    #[must_use]
-    pub fn fill_steps(&self) -> usize {
+    pub(crate) fn fill_steps(&self) -> usize {
         self.driver.fill_steps()
     }
 

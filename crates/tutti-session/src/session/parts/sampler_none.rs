@@ -25,7 +25,10 @@ impl<F: SessionFloat> SamplerPart<F> {
     }
 
     /// No streamer to step.
-    pub(crate) fn settle(&mut self) {}
+    pub(crate) fn step_until_idle(&mut self) {}
+
+    /// No open is pending.
+    pub(crate) fn land_opens(&mut self, _: &mut Vec<crate::SessionEvent>) {}
 
     /// No stream has a ratio.
     pub(crate) fn set_sample_rate(&self, _: SampleRate) {}

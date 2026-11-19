@@ -755,13 +755,13 @@ fn a_fork_of_a_closed_stream_fails_even_after_a_decode_fault() {
 // The stepped driver.
 // ---------------------------------------------------------------------------
 
-/// **A refused streamer thread is a stepped streamer, and one `settle` primes
+/// **A refused streamer thread is a stepped streamer, and one `step_until_idle` primes
 /// an open stream's ring.** The streamer's own thread is refused through the
 /// seam: `Started::new` answers the stepped variant, and a stream opened on it
 /// leaves `Opening` (its ring filled to the refill threshold, or to the file's
-/// end) within one `settle` after the open is answered.
+/// end) within one `step_until_idle` after the open is answered.
 #[test]
-fn a_refused_streamer_thread_is_stepped_and_one_settle_primes_the_ring() {
+fn a_refused_streamer_thread_is_stepped_and_one_step_until_idle_primes_the_ring() {
     let dir = tempfile::tempdir().expect("a temp dir");
     let path = constant_file(dir.path(), "long.wav", 8_000, 30, 0.5);
     let mut started = crate::Started::<f32>::new(
@@ -771,9 +771,9 @@ fn a_refused_streamer_thread_is_stepped_and_one_settle_primes_the_ring() {
     );
     assert!(started.is_stepped());
     let opening = started.open(&path, Placement::HEAD);
-    assert!(started.settle() > 0, "the open's cycle ran");
+    assert!(started.step_until_idle() > 0, "the open's cycle ran");
     let Open::Ready(stream, _reader) = opening.poll() else {
-        panic!("one settle answers a seekable file's open");
+        panic!("one step_until_idle answers a seekable file's open");
     };
     assert_ne!(
         stream.status().phase,
@@ -782,7 +782,7 @@ fn a_refused_streamer_thread_is_stepped_and_one_settle_primes_the_ring() {
     );
 }
 
-/// **A streamer thread that starts is not stepped**, and `settle` runs no cycle.
+/// **A streamer thread that starts is not stepped**, and `step_until_idle` runs no cycle.
 #[test]
 fn a_streamer_whose_thread_starts_is_not_stepped() {
     let mut started = crate::Started::<f32>::new(
@@ -791,17 +791,17 @@ fn a_streamer_whose_thread_starts_is_not_stepped() {
         tutti_platform::start_thread,
     );
     assert!(!started.is_stepped());
-    assert_eq!(started.settle(), 0);
+    assert_eq!(started.step_until_idle(), 0);
 }
 
-/// **`settle` stops at the first cycle that is not `Busy`**: with nothing open
-/// the first cycle is `Idle` and it is the only one.
+/// **`step_until_idle` stops at the first cycle that is not `Busy`**: with
+/// nothing open the first cycle is `Idle` and it is the only one.
 #[test]
-fn settle_with_nothing_open_runs_one_cycle() {
-    let mut sampler = DiskStreamer::<Manual<f32>, f32>::manual(
+fn step_until_idle_with_nothing_open_runs_one_cycle() {
+    let mut started = crate::Started::<f32>::new(
         tutti_units::SampleRate::SR_48K,
         DiskStreamerConfig::default(),
-    )
-    .expect("builds");
-    assert_eq!(sampler.settle(), 1);
+        refuse,
+    );
+    assert_eq!(started.step_until_idle(), 1);
 }
