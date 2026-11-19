@@ -44,7 +44,7 @@ fn tone_at(i: usize) -> f32 {
 
 /// A pool with one voice placed at beat 0, pitched by `cents`, playing four
 /// seconds of the tone.
-fn pool(cents: f64) -> VoicePool {
+fn pool(cents: f64) -> VoicePool<f32> {
     let mut wave = Wave::new(1, SampleRate::of(SR));
     for i in 0..4 * SR as usize {
         wave.append(Interleaved::new(&[tone_at(i)], wave.layout()).unwrap())
@@ -77,7 +77,7 @@ fn routes(units: usize) -> Vec<(usize, usize)> {
 /// A graph engine over `transport`, prepared for blocks of up to 1024 frames
 /// (the export's `GRAPH_MAX_BLOCK`), with `units` at keys 1, 2, … routed by
 /// [`routes`].
-fn graph_engine(transport: &Transport, units: Vec<VoicePool>) -> (Engine, Editor) {
+fn graph_engine(transport: &Transport, units: Vec<VoicePool<f32>>) -> (Engine, Editor) {
     let (mut ed, exec) = Editor::new(Prepare::new(
         SampleRate::of(SR),
         MaxBlock::of(Samples(1024)),

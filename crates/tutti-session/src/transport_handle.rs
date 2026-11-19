@@ -62,6 +62,13 @@ impl TransportHandle {
         crate::MeterTarget::new()
     }
 
+    /// The loop region, a target of [`Session::set`](crate::Session::set)
+    /// and [`Session::get`](crate::Session::get).
+    #[must_use]
+    pub const fn looping(&self) -> crate::LoopTarget {
+        crate::LoopTarget::new()
+    }
+
     /// The playhead as the engine's last block wrote it; the default while no
     /// engine renders.
     pub(crate) fn playhead(&self) -> Playhead {

@@ -5,8 +5,8 @@ use tutti_buffers::InterleavedMut;
 use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_music::LoopRange;
 use tutti_session::Session;
-use tutti_transport::TimedError;
 use tutti_transport::{FadeOut, MotionEvent};
+use tutti_transport::{LoopRegion, TimedError};
 use tutti_units::{Beat, Bpm, Frame, SampleRate, Samples};
 
 fn offline() -> Session {
@@ -32,8 +32,8 @@ fn render(s: &Session, frames: usize) {
 /// the playhead at beat 3; a stop holds it there.
 #[test]
 fn locate_play_and_stop_move_the_playhead_on_the_set_tempo() {
-    let s = offline();
-    crate::tempo::set_tempo(&s, Bpm::of(60.0)).expect("not following");
+    let mut s = offline();
+    crate::tempo::set_tempo(&mut s, Bpm::of(60.0)).expect("not following");
     s.locate(Beat(2.0)).unwrap();
     s.play().unwrap();
     render(&s, 48_000);
@@ -52,8 +52,8 @@ fn locate_play_and_stop_move_the_playhead_on_the_set_tempo() {
 /// half a beat after one second.
 #[test]
 fn a_scheduled_play_starts_on_its_frame() {
-    let s = offline();
-    crate::tempo::set_tempo(&s, Bpm::of(60.0)).expect("not following");
+    let mut s = offline();
+    crate::tempo::set_tempo(&mut s, Bpm::of(60.0)).expect("not following");
     s.schedule(Frame::new(24_000), MotionEvent::Play).unwrap();
     render(&s, 48_000);
     let beat = s.playhead().beat().get();
@@ -64,8 +64,8 @@ fn a_scheduled_play_starts_on_its_frame() {
 /// 60 BPM transport halts the playhead there.
 #[test]
 fn a_stop_scheduled_at_a_beat_halts_there() {
-    let s = offline();
-    crate::tempo::set_tempo(&s, Bpm::of(60.0)).expect("not following");
+    let mut s = offline();
+    crate::tempo::set_tempo(&mut s, Bpm::of(60.0)).expect("not following");
     s.schedule(Beat(1.0), MotionEvent::stop_unfaded()).unwrap();
     s.play().unwrap();
     render(&s, 3_000);
@@ -83,8 +83,8 @@ fn a_stop_scheduled_at_a_beat_halts_there() {
 /// beat, frame and seconds from that same block.
 #[test]
 fn the_playhead_is_one_read_of_the_last_block() {
-    let s = offline();
-    crate::tempo::set_tempo(&s, Bpm::of(60.0)).expect("not following");
+    let mut s = offline();
+    crate::tempo::set_tempo(&mut s, Bpm::of(60.0)).expect("not following");
     s.locate(Beat(2.0)).unwrap();
     s.play().unwrap();
     render(&s, 2_000);
@@ -128,24 +128,31 @@ fn a_detached_session_reads_a_resting_playhead() {
     assert_eq!(s.beat_now(), Beat(0.0));
 }
 
-/// **`set_loop` wraps a rolling render at the loop's end.** At 60 BPM a beat is
+/// **Setting the loop target wraps a rolling render at the loop's end.** At 60 BPM a beat is
 /// one second (48 000 frames): looping beats 0 to 1 and rolling for 1.5 s ends
 /// at beat 0.5 (frame 72 000 is half a pass past the wrap at frame 48 000),
 /// where an unlooped transport would read beat 1.5.
 #[test]
-fn set_loop_wraps_a_rolling_render_at_the_loops_end() {
-    let looped = offline();
-    crate::tempo::set_tempo(&looped, Bpm::of(60.0)).expect("not following");
+fn a_set_loop_target_wraps_a_rolling_render_at_the_loops_end() {
+    let mut looped = offline();
+    crate::tempo::set_tempo(&mut looped, Bpm::of(60.0)).expect("not following");
+    let range = LoopRange::try_from(Beat(0.0)..Beat(1.0)).unwrap();
     looped
-        .set_loop(LoopRange::try_from(Beat(0.0)..Beat(1.0)).unwrap())
+        .set(
+            looped
+                .transport_handle()
+                .looping()
+                .to(LoopRegion::new(range, true)),
+        )
         .unwrap();
+    let _published = looped.update();
     looped.play().unwrap();
     render(&looped, 72_000);
     let beat = looped.playhead().beat().get();
     assert!((beat - (0.5 - BLOCK_BEATS)).abs() < 1e-3, "looped: {beat}");
 
-    let free = offline();
-    crate::tempo::set_tempo(&free, Bpm::of(60.0)).expect("not following");
+    let mut free = offline();
+    crate::tempo::set_tempo(&mut free, Bpm::of(60.0)).expect("not following");
     free.play().unwrap();
     render(&free, 72_000);
     let beat = free.playhead().beat().get();
@@ -155,18 +162,21 @@ fn set_loop_wraps_a_rolling_render_at_the_loops_end() {
     );
 }
 
-/// **`clear_loop` stops the wrapping and keeps the bounds.** Looped over beats
-/// 0 to 1, half a second in (beat 0.5), the loop is cleared: one more second
+/// **Disarming the loop target stops the wrapping and keeps the bounds.**
+/// Looped over beats 0 to 1, half a second in (beat 0.5), the loop is disarmed: one more second
 /// rolls on to beat 1.5 instead of wrapping to 0.5; the bounds stay as set.
 #[test]
-fn clear_loop_stops_wrapping_and_keeps_the_bounds() {
-    let s = offline();
-    crate::tempo::set_tempo(&s, Bpm::of(60.0)).expect("not following");
+fn disarming_the_loop_target_stops_wrapping_and_keeps_the_bounds() {
+    let mut s = offline();
+    crate::tempo::set_tempo(&mut s, Bpm::of(60.0)).expect("not following");
     let range = LoopRange::try_from(Beat(0.0)..Beat(1.0)).unwrap();
-    s.set_loop(range).unwrap();
+    let looping = s.transport_handle().looping();
+    s.set(looping.to(LoopRegion::new(range, true))).unwrap();
+    let _published = s.update();
     s.play().unwrap();
     render(&s, 24_000);
-    s.clear_loop().unwrap();
+    s.set(looping.to(LoopRegion::new(range, false))).unwrap();
+    let _published = s.update();
     render(&s, 48_000);
     let beat = s.playhead().beat().get();
     assert!((beat - (1.5 - BLOCK_BEATS)).abs() < 1e-3, "{beat}");
@@ -183,8 +193,8 @@ fn clear_loop_stops_wrapping_and_keeps_the_bounds() {
 /// stop) and a play timed at a frame.
 #[test]
 fn a_play_at_a_beat_on_a_stopped_transport_is_refused() {
-    let s = offline();
-    crate::tempo::set_tempo(&s, Bpm::of(60.0)).expect("not following");
+    let mut s = offline();
+    crate::tempo::set_tempo(&mut s, Bpm::of(60.0)).expect("not following");
 
     assert_eq!(
         s.schedule(Beat(1.0), MotionEvent::Play),
@@ -211,8 +221,8 @@ fn a_play_at_a_beat_on_a_stopped_transport_is_refused() {
 /// after 1.25 s. A `stop()` after it makes a later beat play refused again.
 #[test]
 fn a_play_at_a_beat_right_after_play_is_taken_and_fires() {
-    let s = offline();
-    crate::tempo::set_tempo(&s, Bpm::of(60.0)).expect("not following");
+    let mut s = offline();
+    crate::tempo::set_tempo(&mut s, Bpm::of(60.0)).expect("not following");
     s.play().unwrap();
     s.schedule(Beat(1.0), MotionEvent::Play).unwrap();
     // The play and the timed play, neither applied yet.

@@ -15,7 +15,7 @@ fn flux() -> OnsetConfig {
     OnsetConfig::new(DetectionFunction::SpectralFlux)
 }
 
-fn detect_at(cfg: &OnsetConfig, samples: &[f32], fft: &mut FftScratch) -> Vec<Onset> {
+fn detect_at(cfg: &OnsetConfig, samples: &[f64], fft: &mut FftScratch<f64>) -> Vec<Onset> {
     detect_onsets(cfg, Mono::new(samples), rate(), fft).unwrap()
 }
 
@@ -49,7 +49,7 @@ fn the_novelty_curve_is_readable_per_frame_and_scaled_by_sensitivity() {
         assert_eq!(n.frame, Samples(i * 512));
     }
     for (a, b) in one.novelty().iter().zip(three.novelty()) {
-        assert!((b.value - 3.0 * a.value).abs() <= 1e-4 * a.value.max(1.0));
+        assert!((b.value - 3.0 * a.value).abs() <= 1e-12 * a.value.max(1.0));
     }
     // Frames holding the click (samples 8820..8870) carry its energy; a
     // frame wholly before it carries none.
@@ -61,13 +61,13 @@ fn the_novelty_curve_is_readable_per_frame_and_scaled_by_sensitivity() {
     assert!(cleared.novelty().is_empty());
 }
 
-fn signal(seconds: f64, onsets: &[f64]) -> Vec<f32> {
+fn signal(seconds: f64, onsets: &[f64]) -> Vec<f64> {
     let n = (SAMPLE_RATE * seconds) as usize;
-    let mut samples = vec![0.0f32; n];
+    let mut samples = vec![0.0f64; n];
     for &t in onsets {
         let pos = (t * SAMPLE_RATE) as usize;
         for i in 0..50.min(n.saturating_sub(pos)) {
-            samples[pos + i] += (-0.1 * i as f32).exp() * 0.8;
+            samples[pos + i] += (-0.1 * i as f64).exp() * 0.8;
         }
     }
     samples
@@ -100,14 +100,14 @@ fn a_meter_fed_in_chunks_equals_the_one_shot() {
 }
 
 /// Every sample format reads at its nominal level: a 16-bit copy of the
-/// signal gives the novelty of the `f32` signal to within quantisation.
+/// signal gives the novelty of the `f64` signal to within quantisation.
 #[test]
 fn an_integer_buffer_is_read_at_its_nominal_level() {
     let cfg = flux();
     let samples = signal(0.5, &[0.1, 0.3]);
     let ints: Vec<i16> = samples
         .iter()
-        .map(|&s| (s * f32::from(i16::MAX)) as i16)
+        .map(|&s| (s * f64::from(i16::MAX)) as i16)
         .collect();
     let mut float = cfg.measure(rate()).unwrap();
     float.push(Mono::new(&samples), &mut Vec::new()).unwrap();
@@ -141,7 +141,7 @@ fn a_reset_meter_matches_a_fresh_one() {
 
 /// The per-frame spectrum buffer is allocated once, not per frame.
 ///
-/// A fresh `vec![Complex32; bins]` per frame cost one allocation per
+/// A fresh `vec![Complex64; bins]` per frame cost one allocation per
 /// frame, tens of thousands for a few minutes of audio.
 ///
 /// Asserted by **reserving past the buffer and seeing the reserve
@@ -313,25 +313,25 @@ fn suppression_handles_unsorted_input() {
 
 #[test]
 fn detection_functions_respond_to_what_they_are_for() {
-    let loud = vec![Complex32::new(1.0, 0.0); 16];
-    let previous = vec![0.1f32; 16];
+    let loud = vec![Complex64::new(1.0, 0.0); 16];
+    let previous = vec![0.1f64; 16];
 
     // Flux counts growth only.
     assert!(spectral_flux(&previous, &loud) > 0.0);
-    let falling = vec![Complex32::new(0.01, 0.0); 16];
+    let falling = vec![Complex64::new(0.01, 0.0); 16];
     assert_eq!(spectral_flux(&previous, &falling), 0.0);
 
     // Complex-domain counts change in either direction.
     assert!(complex_domain_deviation(&previous, &falling) > 0.0);
 
     // HFC weights high bins more than low ones.
-    let mut low = vec![Complex32::default(); 16];
-    low[1] = Complex32::new(1.0, 0.0);
-    let mut high = vec![Complex32::default(); 16];
-    high[15] = Complex32::new(1.0, 0.0);
+    let mut low = vec![Complex64::default(); 16];
+    low[1] = Complex64::new(1.0, 0.0);
+    let mut high = vec![Complex64::default(); 16];
+    high[15] = Complex64::new(1.0, 0.0);
     assert!(high_frequency_content(&high) > high_frequency_content(&low));
 
-    assert!(spectral_energy(Mono::new(&[1.0f32; 4])) > spectral_energy(Mono::new(&[0.1f32; 4])));
+    assert!(spectral_energy(Mono::new(&[1.0f64; 4])) > spectral_energy(Mono::new(&[0.1f64; 4])));
 }
 
 #[test]
@@ -340,7 +340,7 @@ fn input_shorter_than_a_window_yields_nothing() {
     assert!(detect_at(&flux(), &[0.0; 100], &mut fft).is_empty());
     let mut meter = flux().measure(rate()).unwrap();
     meter
-        .push(Mono::new(&[0.0f32; 100]), &mut Vec::new())
+        .push(Mono::new(&[0.0f64; 100]), &mut Vec::new())
         .unwrap();
     assert!(meter.novelty().is_empty());
     assert!(meter.finish().is_empty());
@@ -355,13 +355,13 @@ fn a_zero_framing_is_refused_where_the_rate_binds() {
     ] {
         let cfg = flux().framing(framing);
         assert!(matches!(
-            Measure::<f32>::measure(&cfg, rate()),
+            Measure::<f64>::measure(&cfg, rate()),
             Err(crate::Error::ZeroWindow | crate::Error::ZeroHop)
         ));
         assert!(matches!(
             detect_onsets(
                 &cfg,
-                Mono::new(&[0.0f32; 4096]),
+                Mono::new(&[0.0f64; 4096]),
                 rate(),
                 &mut FftScratch::new()
             ),
@@ -386,4 +386,32 @@ fn the_trait_fold_over_uneven_chunks_equals_detect_onsets_with_the_curve_as_item
     let mut whole = cfg.measure(rate()).unwrap();
     whole.push(Mono::new(&samples), &mut Vec::new()).unwrap();
     assert_eq!(items, whole.novelty());
+}
+
+/// A novelty curve of 10 minutes at 192 kHz (225 000 frames at a hop of 512)
+/// alternating `LEVEL ± 1` has mean `LEVEL` and standard deviation exactly 1,
+/// so its threshold is `LEVEL + 3 * k` for a multiplier `k`: the up-frames
+/// (value `LEVEL + 1`) are peaks for `k = 0.3` (threshold `LEVEL + 0.9`) and
+/// none is for `k = 0.4` (threshold `LEVEL + 1.2`). The one-pass form
+/// `sum_sq / n - mean^2` cannot resolve that spread at the larger levels: at
+/// 1e8 the squares near 1e16 sit 2 apart in `f64`, and in `f32` at 1e4 it read
+/// a variance of 264536 for the true 1.
+#[test]
+fn a_long_novelty_curve_keeps_its_spread_at_a_large_level() {
+    const FRAMES: usize = 225_000;
+    for level in [1.0e4, 1.0e8, 1.0e10] {
+        let novelty: Vec<Novelty> = (0..FRAMES)
+            .map(|i| Novelty {
+                frame: Samples(i * 512),
+                value: if i % 2 == 0 { level + 1.0 } else { level - 1.0 },
+            })
+            .collect();
+        let at = |k: f64| pick_peaks(&plan(flux().threshold(amplitude(k))), &novelty).len();
+        assert_eq!(
+            at(0.3),
+            FRAMES / 2 - 1,
+            "level {level}: every interior up-frame"
+        );
+        assert_eq!(at(0.4), 0, "level {level}");
+    }
 }

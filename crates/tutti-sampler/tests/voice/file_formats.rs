@@ -61,7 +61,7 @@ fn write_f32(path: &Path) {
 /// voice at beat 0, planar.
 fn streamed(path: &Path) -> Vec<Vec<f32>> {
     let rate = SampleRate::of(f64::from(SR));
-    let mut streamer = DiskStreamer::manual(rate, Default::default()).expect("builds");
+    let mut streamer = DiskStreamer::by_hand(rate, Default::default()).expect("builds");
     let opening = streamer.open(path, Placement::HEAD);
     let (_stream, reader) = settle(&mut streamer, opening).expect("the file opens");
     assert!(

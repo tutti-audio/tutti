@@ -415,7 +415,7 @@ fn set_on_resolves_on_the_enabled_report_of_that_profile_at_that_address() {
         channels: ProfileChannels::of(2),
     };
     i.set_on(target, profile(1), now).unwrap();
-    let request = Request::SetOn {
+    let request = ProfileRequest::SetOn {
         address: channel(0),
         profile: profile(1),
     };
@@ -436,7 +436,7 @@ fn set_on_resolves_on_the_enabled_report_of_that_profile_at_that_address() {
     let actions = i.on_message(&enabled(channel(0), profile(1), 2));
     assert!(actions.contains(&ProfileAction::Resolved {
         request,
-        outcome: Outcome::Reported {
+        outcome: ProfileOutcome::Reported {
             state: ProfileState::Enabled,
             channels: ProfileChannels::of(2)
         },
@@ -451,11 +451,11 @@ fn set_on_answered_by_a_disabled_report_is_the_peer_unable_to_comply() {
     i.set_on(ProfileTarget::Group, profile(1), now).unwrap();
     let actions = i.on_message(&disabled(CiDeviceId::Group, profile(1), 0));
     assert!(actions.contains(&ProfileAction::Resolved {
-        request: Request::SetOn {
+        request: ProfileRequest::SetOn {
             address: CiDeviceId::Group,
             profile: profile(1)
         },
-        outcome: Outcome::Reported {
+        outcome: ProfileOutcome::Reported {
             state: ProfileState::Disabled,
             channels: ProfileChannels::BY_ADDRESS
         },
@@ -481,11 +481,11 @@ fn set_off_resolves_on_the_disabled_report_or_the_enabled_one_if_the_peer_could_
         assert_eq!((header.device_id, *p), (channel(3), profile(1)));
         let actions = i.on_message(&report);
         assert!(actions.contains(&ProfileAction::Resolved {
-            request: Request::SetOff {
+            request: ProfileRequest::SetOff {
                 address: channel(3),
                 profile: profile(1)
             },
-            outcome: Outcome::Reported {
+            outcome: ProfileOutcome::Reported {
                 state,
                 channels: ProfileChannels::of(1)
             },
@@ -525,7 +525,7 @@ fn a_nak_of_a_set_resolves_it_as_refused_whatever_its_status() {
         let [
             ProfileAction::Resolved {
                 request,
-                outcome: Outcome::Refused(n),
+                outcome: ProfileOutcome::Refused(n),
             },
         ] = &actions[..]
         else {
@@ -533,7 +533,7 @@ fn a_nak_of_a_set_resolves_it_as_refused_whatever_its_status() {
         };
         assert_eq!(
             *request,
-            Request::SetOn {
+            ProfileRequest::SetOn {
                 address: CiDeviceId::FunctionBlock,
                 profile: profile(1)
             }
@@ -597,11 +597,11 @@ fn a_request_with_no_answer_times_out() {
     assert_eq!(
         i.on_timeout(later + PEER_REPLY_TIMEOUT),
         [ProfileAction::Resolved {
-            request: Request::SetOn {
+            request: ProfileRequest::SetOn {
                 address: CiDeviceId::Group,
                 profile: profile(1)
             },
-            outcome: Outcome::TimedOut,
+            outcome: ProfileOutcome::TimedOut,
         }]
     );
 }
@@ -612,11 +612,11 @@ fn the_same_set_cannot_be_asked_twice_at_once() {
     i.set_on(ProfileTarget::Group, profile(1), now).unwrap();
     assert_eq!(
         i.set_on(ProfileTarget::Group, profile(1), now),
-        Err(RequestError::AlreadyAsking)
+        Err(ProfileRequestError::AlreadyAsking)
     );
     assert_eq!(
         i.set_off(CiDeviceId::Group, profile(1), now),
-        Err(RequestError::AlreadyAsking)
+        Err(ProfileRequestError::AlreadyAsking)
     );
     // Another Profile or address is a request of its own.
     assert!(i.set_on(ProfileTarget::Group, profile(2), now).is_ok());
@@ -679,12 +679,12 @@ fn details_resolves_on_the_reply_that_echoes_the_profile_and_target() {
     assert_eq!(
         actions,
         [ProfileAction::Resolved {
-            request: Request::Details {
+            request: ProfileRequest::Details {
                 address: channel(2),
                 profile: profile(1),
                 target
             },
-            outcome: Outcome::Details(data),
+            outcome: ProfileOutcome::Details(data),
         }]
     );
     assert_eq!(i.deadline(), None);
@@ -703,14 +703,14 @@ fn details_is_refused_by_a_nak_0x04_and_times_out() {
     ));
     assert!(matches!(
         &actions[..],
-        [ProfileAction::Resolved { outcome: Outcome::Refused(n), .. }] if n.status == NakStatus::ProfileNotSupported
+        [ProfileAction::Resolved { outcome: ProfileOutcome::Refused(n), .. }] if n.status == NakStatus::ProfileNotSupported
     ));
     i.details(channel(2), profile(1), target, now).unwrap();
     assert!(matches!(
         &i.on_timeout(now + PEER_REPLY_TIMEOUT)[..],
         [ProfileAction::Resolved {
-            outcome: Outcome::TimedOut,
-            request: Request::Details { .. }
+            outcome: ProfileOutcome::TimedOut,
+            request: ProfileRequest::Details { .. }
         }]
     ));
 }
@@ -823,7 +823,7 @@ fn a_timeout_wait_adds_its_time_to_a_sets_deadline() {
     assert!(matches!(
         actions.last(),
         Some(ProfileAction::Resolved {
-            outcome: Outcome::Reported { .. },
+            outcome: ProfileOutcome::Reported { .. },
             ..
         })
     ));

@@ -45,7 +45,7 @@ fn tone(secs: f64) -> Arc<Wave> {
     Arc::new(w)
 }
 
-fn stretched(wave: &Arc<Wave>) -> VoiceNode {
+fn stretched(wave: &Arc<Wave>) -> VoiceNode<f32> {
     VoiceNode::new(Voice {
         source: VoiceSource::Memory(
             MemorySource::placed(Arc::clone(wave), VoiceWindow::from(Beat(0.0)))

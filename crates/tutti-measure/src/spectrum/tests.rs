@@ -8,7 +8,7 @@ use tutti_units::{Amplitude, SampleRate};
 
 const RATE: f64 = 48_000.0;
 
-/// f32 transform and window error budget, in dB: a relative amplitude
+/// The `f32` test signals' rounding error budget, in dB: a relative amplitude
 /// error of `1e-4` (about 100x `eps * log2(N)` for the sizes here) is
 /// `20 log10(1 + 1e-4)`.
 const FFT_TOL: f64 = 1e-3;
@@ -90,7 +90,7 @@ fn a_bin_centred_sine_reads_its_amplitude() {
             );
         }
         // Leakage of a periodic Hann at a bin centre is exactly zero; what
-        // is left is f32 rounding, far under -100 dB.
+        // is left is the `f32` input's rounding, far under -100 dB.
         assert!(levels[29].get() < -100.0 && levels[35].get() < -100.0);
     }
     assert_eq!(state.frequencies()[32], Hz(1000.0));
@@ -754,7 +754,7 @@ fn input_is_checked_and_state_stays_finite() {
             .all(|l| l.get().is_finite())
     );
     // The power is clamped to `MAX_POWER`, so no level passes its decibels.
-    let ceiling = Db::from_power(f64::from(MAX_POWER));
+    let ceiling = Db::from_power(MAX_POWER);
     assert!(state.levels().iter().all(|&l| l <= ceiling));
     push_frames(&mut state, &vec![0.0f32; 600]);
     assert!(state.levels().iter().all(|l| l.get().is_finite()));

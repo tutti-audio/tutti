@@ -44,7 +44,7 @@ const WAVE_START: SamplePosition = SamplePosition::new(0.0);
 /// about which slot is live is decided by the owner. Sharing the name across the
 /// two crates invited reading one crate's stealing rules into the other's, so
 /// the name says which job this is.
-pub(crate) struct PlaybackSlot<F: SamplerFloat = f32> {
+pub(crate) struct PlaybackSlot<F: SamplerFloat> {
     /// Addresses this slot for every command after the add. `SlotId(0)` on a
     /// `VoiceNode`, whose single voice has nothing to disambiguate.
     pub(crate) id: SlotId,

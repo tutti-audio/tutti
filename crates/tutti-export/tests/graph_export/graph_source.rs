@@ -689,7 +689,7 @@ fn timeline() -> Arc<OfflineTimeline> {
 /// A voice placed at beat 0, pitched by `cents`, in a `VoicePool` (the node a
 /// clip track renders). It reads whatever transport its blocks' `Env` carry:
 /// here, the render clock's.
-fn placed_pool(cents: f64) -> tutti_sampler::VoicePool {
+fn placed_pool(cents: f64) -> tutti_sampler::VoicePool<f32> {
     use tutti_sampler::{MemorySource, Playback, SlotId, VoicePool, VoiceWindow};
     let source =
         MemorySource::placed(tone(), VoiceWindow::from(Beat(0.0))).expect("a placeable wave");

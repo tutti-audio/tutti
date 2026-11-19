@@ -23,7 +23,7 @@ use tutti_rt::RingFloat;
 /// reader of its published control, registered together on the control side.
 /// A voice holds one, by value, and reads a block through it.
 #[derive(Debug)]
-pub(crate) struct RingReader<F: RingFloat = f32> {
+pub(crate) struct RingReader<F: RingFloat> {
     pos: PosReader<F>,
     /// Registered on the control side (registering allocates).
     control: Reader<RingControl<F>>,
@@ -113,7 +113,7 @@ impl<F: RingFloat> RingReader<F> {
 /// # use tutti_sampler::StreamReader;
 /// # use tutti_units::Samples;
 /// # fn none() -> std::ops::Range<Samples> { Samples::new(0)..Samples::new(0) }
-/// # fn two(reader: &mut StreamReader) {
+/// # fn two(reader: &mut StreamReader<f32>) {
 /// let first = reader.block(Samples::new(0), [none(), none()]);
 /// let second = reader.block(Samples::new(0), [none(), none()]); // the first is alive
 /// first.holds(0);
@@ -126,7 +126,7 @@ impl<F: RingFloat> RingReader<F> {
 /// # use tutti_sampler::StreamReader;
 /// # use tutti_units::Samples;
 /// # fn none() -> std::ops::Range<Samples> { Samples::new(0)..Samples::new(0) }
-/// # fn two(reader: &mut StreamReader) {
+/// # fn two(reader: &mut StreamReader<f32>) {
 /// {
 ///     let first = reader.block(Samples::new(0), [none(), none()]);
 ///     first.holds(0);
@@ -142,7 +142,7 @@ impl<F: RingFloat> RingReader<F> {
 /// # use tutti_sampler::StreamReader;
 /// # use tutti_units::Samples;
 /// # fn none() -> std::ops::Range<Samples> { Samples::new(0)..Samples::new(0) }
-/// # fn away(reader: &mut StreamReader) {
+/// # fn away(reader: &mut StreamReader<f32>) {
 /// let block = reader.block(Samples::new(0), [none(), none()]);
 /// std::thread::scope(|s| {
 ///     s.spawn(move || block.holds(0));
@@ -156,7 +156,7 @@ impl<F: RingFloat> RingReader<F> {
 /// # use tutti_sampler::StreamReader;
 /// # use tutti_units::Samples;
 /// # fn none() -> std::ops::Range<Samples> { Samples::new(0)..Samples::new(0) }
-/// # fn here(reader: &mut StreamReader) {
+/// # fn here(reader: &mut StreamReader<f32>) {
 /// let block = reader.block(Samples::new(0), [none(), none()]);
 /// std::thread::scope(|s| {
 ///     s.spawn(|| ());
@@ -171,7 +171,7 @@ impl<F: RingFloat> RingReader<F> {
 /// # use tutti_sampler::StreamReader;
 /// # use tutti_units::Samples;
 /// # fn none() -> std::ops::Range<Samples> { Samples::new(0)..Samples::new(0) }
-/// # fn dropped(reader: &mut StreamReader) {
+/// # fn dropped(reader: &mut StreamReader<f32>) {
 /// reader.block(Samples::new(0), [none(), none()]);
 /// # }
 /// ```
@@ -183,7 +183,7 @@ impl<F: RingFloat> RingReader<F> {
 /// # use tutti_sampler::StreamReader;
 /// # use tutti_units::Samples;
 /// # fn none() -> std::ops::Range<Samples> { Samples::new(0)..Samples::new(0) }
-/// # fn kept(reader: &mut StreamReader) {
+/// # fn kept(reader: &mut StreamReader<f32>) {
 /// let block = reader.block(Samples::new(0), [none(), none()]);
 /// block.holds(0);
 /// # }
@@ -195,7 +195,7 @@ impl<F: RingFloat> RingReader<F> {
 /// # use tutti_sampler::StreamReader;
 /// # use tutti_units::Samples;
 /// # fn none() -> std::ops::Range<Samples> { Samples::new(0)..Samples::new(0) }
-/// # fn parked(reader: &mut StreamReader) {
+/// # fn parked(reader: &mut StreamReader<f32>) {
 /// let loop_ = {
 ///     let block = reader.block(Samples::new(0), [none(), none()]);
 ///     block.applied_loop() // borrows the block's loan
@@ -210,7 +210,7 @@ impl<F: RingFloat> RingReader<F> {
 /// # use tutti_sampler::StreamReader;
 /// # use tutti_units::Samples;
 /// # fn none() -> std::ops::Range<Samples> { Samples::new(0)..Samples::new(0) }
-/// # fn copied(reader: &mut StreamReader) {
+/// # fn copied(reader: &mut StreamReader<f32>) {
 /// let loop_ = {
 ///     let block = reader.block(Samples::new(0), [none(), none()]);
 ///     *block.applied_loop()
@@ -220,7 +220,7 @@ impl<F: RingFloat> RingReader<F> {
 /// ```
 #[derive(Debug)]
 #[must_use = "a block that is dropped unread claimed and lent for nothing"]
-pub struct Block<'r, F: RingFloat = f32> {
+pub struct Block<'r, F: RingFloat> {
     claim: PosClaim<'r, F>,
     control: Loan<'r, RingControl<F>>,
     /// The claim and the loan stay on the audio thread (`Loan` is `!Send`

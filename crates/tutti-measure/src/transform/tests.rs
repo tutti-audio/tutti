@@ -2,33 +2,40 @@ use super::*;
 
 const RATE: SampleRate = SampleRate::SR_44K1;
 
-fn stft(samples: &[f32], request: StftRequest, fft: &mut FftScratch) -> Result<Stft> {
+fn stft(samples: &[f64], request: StftRequest, fft: &mut FftScratch<f64>) -> Result<Stft> {
     super::stft(request, Mono::new(samples), RATE, fft)
 }
 
 fn stft_magnitude(
-    samples: &[f32],
+    samples: &[f64],
     request: StftRequest,
-    fft: &mut FftScratch,
+    fft: &mut FftScratch<f64>,
 ) -> Result<StftMagnitude> {
     super::stft_magnitude(request, Mono::new(samples), RATE, fft)
 }
 
-fn stft_polar(samples: &[f32], request: StftRequest, fft: &mut FftScratch) -> Result<StftPolar> {
+fn stft_polar(
+    samples: &[f64],
+    request: StftRequest,
+    fft: &mut FftScratch<f64>,
+) -> Result<StftPolar> {
     super::stft_polar(request, Mono::new(samples), RATE, fft)
 }
 
-fn istft(transform: &Stft, fft: &mut FftScratch) -> Vec<f32> {
+fn istft(transform: &Stft, fft: &mut FftScratch<f64>) -> Vec<f64> {
     super::istft(transform, fft)
 }
 
-fn tone(len: usize, freq: f64, sample_rate: f32) -> Vec<f32> {
+fn tone(len: usize, freq: f64, sample_rate: f64) -> Vec<f64> {
     tutti_fixtures::signal::sine(
         tutti_units::Hz(freq),
         tutti_units::Amplitude(0.5),
-        tutti_units::SampleRate::of(f64::from(sample_rate)),
+        tutti_units::SampleRate::of(sample_rate),
         tutti_units::Samples(len),
     )
+    .into_iter()
+    .map(f64::from)
+    .collect()
 }
 
 #[test]
@@ -77,7 +84,7 @@ fn stft_round_trips_through_istft() {
     let window = transform.geometry().window().get();
     for i in window..resynth.len() - window {
         assert!(
-            (samples[i] - resynth[i]).abs() < 1e-3,
+            (samples[i] - resynth[i]).abs() < 1e-9,
             "sample {i}: {} != {}",
             samples[i],
             resynth[i]
@@ -185,8 +192,8 @@ fn normalized_magnitudes_carry_their_peak() {
         .as_slice()
         .iter()
         .copied()
-        .fold(0.0f32, f32::max);
-    assert!((max - 1.0).abs() < 1e-5, "normalized peak should be 1.0");
+        .fold(0.0f64, f64::max);
+    assert!((max - 1.0).abs() < 1e-12, "normalized peak should be 1.0");
 }
 
 #[test]
@@ -239,22 +246,22 @@ fn masking_requires_a_matching_shape() {
     )
     .unwrap();
 
-    let wrong = Grid::filled(Complex32::default(), FrameCount(2), tutti_dsp::BinCount(3));
+    let wrong = Grid::filled(Complex64::default(), FrameCount(2), tutti_dsp::BinCount(3));
     assert_eq!(
-        transform.resynthesize_masked::<f32>(&wrong, &mut fft),
+        transform.resynthesize_masked::<f64>(&wrong, &mut fft),
         Err(Error::GridShapeDisagreement)
     );
 
     // A neutral mask is the identity.
     let neutral = Grid::filled(
-        Complex32::new(1.0, 0.0),
+        Complex64::new(1.0, 0.0),
         transform.bins().frames(),
         transform.bins().bins(),
     );
-    let masked: Vec<f32> = transform.resynthesize_masked(&neutral, &mut fft).unwrap();
+    let masked: Vec<f64> = transform.resynthesize_masked(&neutral, &mut fft).unwrap();
     let plain = istft(&transform, &mut fft);
     for (a, b) in masked.iter().zip(&plain) {
-        assert!((a - b).abs() < 1e-6);
+        assert!((a - b).abs() < 1e-12);
     }
 }
 
@@ -270,13 +277,13 @@ fn an_empty_mask_erases_the_signal() {
     .unwrap();
 
     let silence = Grid::filled(
-        Complex32::default(),
+        Complex64::default(),
         transform.bins().frames(),
         transform.bins().bins(),
     );
-    let erased: Vec<f32> = transform.resynthesize_masked(&silence, &mut fft).unwrap();
+    let erased: Vec<f64> = transform.resynthesize_masked(&silence, &mut fft).unwrap();
     for s in erased {
-        assert!(s.abs() < 1e-6);
+        assert!(s.abs() < 1e-9);
     }
 }
 

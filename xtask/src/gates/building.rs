@@ -238,6 +238,12 @@ pub(super) const ALLOW: &[Allow] = &[
         "a table has a fixed number of slots: the width of a block is a runtime fact the slots must hold",
     ),
     Allow {
+        path: "crates/tutti-midi-device/src/endpoint.rs",
+        owner: "FunctionBlock::from_info",
+        rules: &[Rule::CtorResult],
+        reason: "a conversion from a Function Block Info Notification and a name, not a configuration: it refuses what no block can hold, with a named error",
+    },
+    Allow {
         path: "crates/tutti-midi-hardware/src/virtual_endpoint.rs",
         owner: "VirtualSource::open",
         rules: &[Rule::CtorResult],
@@ -473,27 +479,15 @@ pub(super) const ALLOW: &[Allow] = &[
     ),
     ty(
         "crates/tutti-sampler/",
-        "DiskStreamer::new",
-        CTOR,
-        "starting the streamer thread: the failure is the OS's, not a value's",
-    ),
-    ty(
-        "crates/tutti-sampler/",
-        "DiskStreamer::manual",
-        CTOR,
-        "starting the streamer thread: the failure is the OS's, not a value's",
-    ),
-    ty(
-        "crates/tutti-sampler/",
         "DiskStreamer::start",
         CTOR,
-        "the streamer generic over its float format beside the f32 `new` (std's `HashMap::new`/`with_hasher` split); it starts a thread, so the OS can refuse",
+        "starting the streamer thread: the failure is the OS's, not a value's",
     ),
     ty(
         "crates/tutti-sampler/",
         "DiskStreamer::by_hand",
         CTOR,
-        "the hand-stepped streamer generic over its float format beside the f32 `manual` (std's `HashMap::new`/`with_hasher` split); the OS can refuse its worker",
+        "the hand-stepped streamer: the OS can refuse its worker",
     ),
     ty(
         "crates/tutti-plugin-types/",

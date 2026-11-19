@@ -66,11 +66,11 @@ impl std::ops::Deref for Case {
 
 type NoteConfig = Case;
 
-fn transcribe(c: &Case, x: &[f32], fft: &mut FftScratch) -> Result<Vec<NoteEvent>> {
+fn transcribe(c: &Case, x: &[f64], fft: &mut FftScratch<f64>) -> Result<Vec<NoteEvent>> {
     super::transcribe(&c.cfg, Mono::new(x), c.rate, fft)
 }
 
-fn frame_levels(c: &Case, x: &[f32]) -> Result<Vec<Amplitude>> {
+fn frame_levels(c: &Case, x: &[f64]) -> Result<Vec<Amplitude>> {
     super::frame_levels(&c.cfg, Mono::new(x), c.rate)
 }
 
@@ -83,7 +83,7 @@ fn notes_from_track(
     super::notes_from_track(&c.cfg, c.rate, track, levels, onsets)
 }
 
-fn yin_track(yin: &YinPlan, x: &[f32], hop: Samples) -> Result<Vec<PitchEstimate>> {
+fn yin_track(yin: &YinPlan, x: &[f64], hop: Samples) -> Result<Vec<PitchEstimate>> {
     yin_track_at(yin, x, hop)
 }
 
@@ -151,14 +151,14 @@ fn tone(a: f64, b: f64, hz: f64, amp: f64) -> Tone {
     }
 }
 
-fn render(rate: f64, tones: &[Tone], secs: f64) -> Vec<f32> {
-    let mut out = vec![0.0f32; (secs * rate) as usize];
+fn render(rate: f64, tones: &[Tone], secs: f64) -> Vec<f64> {
+    let mut out = vec![0.0f64; (secs * rate) as usize];
     for t in tones {
         let (a, b) = ((t.a * rate) as usize, (t.b * rate) as usize);
         let mut phase = 0.0f64;
         for (i, s) in out[a..b].iter_mut().enumerate() {
             let at = i as f64 / rate;
-            *s = ((t.amp)(at) * phase.sin()) as f32;
+            *s = (t.amp)(at) * phase.sin();
             phase += TAU * (t.pitch)(at) / rate;
         }
     }
@@ -169,7 +169,7 @@ fn cents_up(hz: f64, cents: f64) -> f64 {
     hz * (cents / 1200.0).exp2()
 }
 
-fn run(cfg: &NoteConfig, x: &[f32]) -> Vec<NoteEvent> {
+fn run(cfg: &NoteConfig, x: &[f64]) -> Vec<NoteEvent> {
     transcribe(cfg, x, &mut FftScratch::new()).unwrap()
 }
 
@@ -466,18 +466,18 @@ fn silence_noise_and_bad_input_are_defined() {
         Err(Error::NoSignal)
     );
     let mut rng = StdRng::seed_from_u64(7);
-    let noise: Vec<f32> = (0..88200).map(|_| rng.random_range(-0.3..0.3)).collect();
+    let noise: Vec<f64> = (0..88200).map(|_| rng.random_range(-0.3..0.3)).collect();
     assert_eq!(transcribe(&c, &noise, &mut fft), Ok(Vec::new()));
-    for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+    for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
         let mut x = render(RATE, &[tone(0.1, 0.5, 440.0, 0.5)], 0.7);
         x[10_000] = bad;
         assert_eq!(transcribe(&c, &x, &mut fft), Err(Error::NonFiniteInput));
     }
     let n = c.frame().get() + 10 * c.hop.get() + c.hop.get() / 2;
-    let mut tail: Vec<f32> = (0..n)
-        .map(|i| (TAU * 440.0 * i as f64 / RATE).sin() as f32 * 0.5)
+    let mut tail: Vec<f64> = (0..n)
+        .map(|i| (TAU * 440.0 * i as f64 / RATE).sin() * 0.5)
         .collect();
-    *tail.last_mut().unwrap() = f32::NAN;
+    *tail.last_mut().unwrap() = f64::NAN;
     assert_eq!(transcribe(&c, &tail, &mut fft), Err(Error::NonFiniteInput));
     assert!(matches!(
         transcribe(&c, &[0.5; 100], &mut fft),
@@ -568,8 +568,8 @@ fn gain_changes_only_the_level() {
     );
     let want = run(&c, &base);
     assert_eq!(want.len(), 2);
-    for (gain, db) in [(2.0f32, 6.0206), (0.25, -12.0412), (0.125, -18.0618)] {
-        let scaled: Vec<f32> = base.iter().map(|s| s * gain).collect();
+    for (gain, db) in [(2.0f64, 6.0206), (0.25, -12.0412), (0.125, -18.0618)] {
+        let scaled: Vec<f64> = base.iter().map(|s| s * gain).collect();
         let got = run(&c, &scaled);
         assert_eq!(got.len(), 2, "{gain}");
         for (g, w) in got.iter().zip(&want) {
@@ -585,7 +585,7 @@ fn gain_changes_only_the_level() {
         }
     }
     // -60 dBFS RMS is an amplitude of 0.00141; this is under it.
-    let quiet: Vec<f32> = base.iter().map(|s| s * 0.001).collect();
+    let quiet: Vec<f64> = base.iter().map(|s| s * 0.001).collect();
     assert_eq!(run(&c, &quiet), Vec::new());
     let lowered = c.floor(FiniteLevel::of(Db(-80.0)));
     assert_eq!(run(&lowered, &quiet).len(), 2);
@@ -819,7 +819,7 @@ fn too_many_frames_are_refused() {
     );
     assert!(c.frame().get() < 64, "{:?}", c.frame());
     let c = c.hop(PitchHop::of(Samples(1)));
-    let x = vec![0.1f32; MAX_FRAMES.get() + c.frame().get() + 1];
+    let x = vec![0.1f64; MAX_FRAMES.get() + c.frame().get() + 1];
     assert_eq!(
         transcribe(&c, &x, &mut FftScratch::new()),
         Err(Error::TooManyFrames {

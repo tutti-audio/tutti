@@ -51,7 +51,7 @@ const DECLICK: usize = 240;
 
 /// A detached session of `outputs` channels at 48 kHz, its audio side taken:
 /// the executor on this side, played in device-sized blocks.
-fn rig(outputs: usize) -> (DetachedSession, AudioSide) {
+pub(crate) fn rig(outputs: usize) -> (DetachedSession, AudioSide) {
     let mut s = Session::builder()
         .outputs_floor(ChannelLayout::clamped(outputs))
         .build_detached(SampleRate::DEFAULT)
@@ -62,7 +62,7 @@ fn rig(outputs: usize) -> (DetachedSession, AudioSide) {
 }
 
 /// Output channel `c` from `nodes[c]`'s port 0.
-fn master(s: &mut DetachedSession, nodes: &[NodeKey]) {
+pub(crate) fn master(s: &mut DetachedSession, nodes: &[NodeKey]) {
     for (c, &n) in nodes.iter().enumerate() {
         s.graph()
             .set_sources(Root::output(c), [OutPort::new(n, 0)])
@@ -71,7 +71,7 @@ fn master(s: &mut DetachedSession, nodes: &[NodeKey]) {
 }
 
 /// Updates until nothing is left to resolve: nodes committed, then lanes.
-fn settle(s: &mut DetachedSession) {
+pub(crate) fn settle(s: &mut DetachedSession) {
     for _ in 0..4 {
         let _ = s.update();
     }
@@ -96,7 +96,7 @@ fn render_n(side: &mut AudioSide, channels: usize, frames: usize, block: usize) 
 }
 
 /// [`render_n`] of one output.
-fn render(side: &mut AudioSide, frames: usize, block: usize) -> Vec<Vec<f32>> {
+pub(crate) fn render(side: &mut AudioSide, frames: usize, block: usize) -> Vec<Vec<f32>> {
     render_n(side, 1, frames, block)
 }
 
@@ -454,7 +454,7 @@ fn a_take_suspends_the_automation_then_restores_it() {
     lane.add_breakpoint(Breakpoint::new(Beat(0.0), Hz(800.0)));
     let mut m = s.mods_mut();
     m.range_raw(cutoff, 0.0, 1_000.0).unwrap();
-    m.automate(cutoff, Arc::new(lane));
+    assert!(m.automate(cutoff, Arc::new(lane)));
     settle(&mut s);
     let last = |out: &[Vec<f32>]| *out[0].last().expect("rendered");
     assert_eq!(
@@ -867,18 +867,16 @@ fn a_routes_polarity_and_curve_reach_the_render() {
     settle(&mut s);
     assert_holds(&render(&mut side, 1_024, 128)[0], 700.0, "bipolar linear");
 
-    s.mods_mut()
-        .route_of(route)
-        .unwrap()
-        .set_polarity(tutti_modulation::Polarity::Unipolar);
+    s.set(route.polarity().to(tutti_modulation::Polarity::Unipolar))
+        .unwrap();
     settle(&mut s);
     assert_holds(&render(&mut side, 1_024, 128)[0], 800.0, "unipolar");
 
-    s.mods_mut()
-        .route_of(route)
-        .unwrap()
-        .set_polarity(tutti_modulation::Polarity::Bipolar)
-        .set_curve(tutti_modulation::Law::Hold);
+    s.set((
+        route.polarity().to(tutti_modulation::Polarity::Bipolar),
+        route.curve().to(tutti_modulation::Law::Hold),
+    ))
+    .unwrap();
     settle(&mut s);
     assert_holds(&render(&mut side, 1_024, 128)[0], 500.0, "bipolar hold");
 
@@ -1006,7 +1004,7 @@ fn idle(s: &DetachedSession) -> bool {
 }
 
 /// One update, then a block rendered, as a device would between updates.
-fn frame(s: &mut DetachedSession, side: &mut AudioSide) {
+pub(crate) fn frame(s: &mut DetachedSession, side: &mut AudioSide) {
     let _ = s.update();
     render(side, 128, 128);
 }

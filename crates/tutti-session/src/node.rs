@@ -4,9 +4,6 @@
 use tutti_buffers::Float;
 use tutti_graph::{ForkByClone, IntoNode, Node, NodeKey, ParamNode, ParamSet, Params, Unforkable};
 
-#[cfg(feature = "midi")]
-use std::sync::Arc;
-
 use crate::NodeSlots;
 
 /// A node that may enter a session's graph: it declares its own ports (event
@@ -172,10 +169,6 @@ macro_rules! param_session_node {
         param_session_node!(@impl f32, tutti_nodes::$ty<f32>);
         param_session_node!(@impl f64, tutti_nodes::$ty<f64>);
     )*};
-    // A node of the session's default float only.
-    (f32 => $($ty:ty),* $(,)?) => {$(
-        param_session_node!(@impl f32, $ty);
-    )*};
     // A node of no float of its own, in a graph of any.
     (any: $($ty:ty),* $(,)?) => {$(
         impl<F: Float> SessionNode<F> for $ty {
@@ -242,8 +235,8 @@ param_session_node!(
     CrossoverNode,
 );
 
-/// The bus strip: its params by address, in the session's default float.
-impl SessionNode for tutti_nodes::BusStripNode {
+/// The bus strip: its params by address, in a graph of any float.
+impl<F: Float> SessionNode<F> for tutti_nodes::BusStripNode {
     fn params(controls: &ParamSet) -> Option<ParamSet> {
         Some(controls.clone())
     }
@@ -334,8 +327,7 @@ impl<F: Float> SessionNode<F> for tutti_midi_runtime::MidiClipNode {
     fn slots(node: NodeKey, controls: &tutti_midi_runtime::MidiClipControls) -> NodeSlots {
         NodeSlots::of(
             crate::value::SlotId::ClipEvents(node),
-            Arc::new(crate::value::PublishedSlot(controls.clone()))
-                as crate::value::SlotCell<Arc<tutti_midi_runtime::ClipEvents>>,
+            crate::value::PublishedSlot::new(controls.clone()),
         )
     }
 
@@ -361,8 +353,7 @@ impl<F: Float> SessionNode<F> for tutti_midi_runtime::HarmonyNode {
     fn slots(node: NodeKey, controls: &tutti_midi_runtime::HarmonyControls) -> NodeSlots {
         NodeSlots::of(
             crate::value::SlotId::Harmony(node),
-            Arc::new(crate::value::PublishedSlot(controls.clone()))
-                as crate::value::SlotCell<Arc<tutti_midi_runtime::HarmonyChanges>>,
+            crate::value::PublishedSlot::new(controls.clone()),
         )
     }
 
@@ -382,7 +373,7 @@ impl<F: Float> SessionNode<F> for tutti_midi_runtime::MidiIngestNode {
 
 /// The SoundFont player as a graph node.
 #[cfg(feature = "soundfont")]
-impl SessionNode for tutti_soundfont::SoundFontUnit<f32> {
+impl<F: Float + tutti_dsp::Lanes> SessionNode<F> for tutti_soundfont::SoundFontUnit<F> {
     fn reclaimer(_: &()) -> Reclaims {
         Reclaims::Nothing
     }
@@ -396,7 +387,16 @@ param_session_node!(floats: VbapPannerNode, HrtfBinauralNode);
 // (master volume, unison detune and spread) as a `ParamSet`, so a param
 // write reaches it and a fork of it starts from what was set.
 #[cfg(feature = "synth")]
-param_session_node!(f32 => tutti_polysynth::PolySynth<f32>);
+impl<F: tutti_polysynth::SynthFloat> SessionNode<F> for tutti_polysynth::PolySynth<F> {
+    fn params(controls: &ParamSet) -> Option<ParamSet> {
+        Some(controls.clone())
+    }
+
+    // A `ParamSet` publishes through `Param` atomics, no cell.
+    fn reclaimer(_: &ParamSet) -> Reclaims {
+        Reclaims::Nothing
+    }
+}
 
 /// A voice as a graph node: its params (the gain) addressed by its set, so a
 /// param write reaches the cell the node reads and a fork starts from the

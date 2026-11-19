@@ -8,8 +8,8 @@
 use tutti_buffers::{Mono, MonoMut, Sample};
 use tutti_units::Samples;
 
-use crate::convert::to_f32;
-use tutti_dsp::Complex32;
+use crate::convert::widen;
+use tutti_dsp::Complex64;
 use tutti_dsp::Correlator;
 use tutti_dsp::FftScratch;
 
@@ -23,7 +23,7 @@ use tutti_dsp::FftScratch;
 /// either side of zero.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct CrossCorrelation {
-    values: Vec<f32>,
+    values: Vec<f64>,
     /// Index of lag zero in `values`: `b.len() - 1`.
     zero: usize,
 }
@@ -35,7 +35,7 @@ pub struct CorrelationPeak {
     /// the sign.
     pub lag: isize,
     /// The correlation there, in the units of the product of the two inputs.
-    pub value: f32,
+    pub value: f64,
 }
 
 impl CrossCorrelation {
@@ -43,7 +43,7 @@ impl CrossCorrelation {
     /// lag: `a.len() + b.len() - 1` of them, or none if either input was
     /// empty.
     #[inline]
-    pub fn values(&self) -> &[f32] {
+    pub fn values(&self) -> &[f64] {
         &self.values
     }
 
@@ -61,7 +61,7 @@ impl CrossCorrelation {
 
     /// The correlation at `lag`, or `None` outside the overlap.
     #[inline]
-    pub fn at(&self, lag: isize) -> Option<f32> {
+    pub fn at(&self, lag: isize) -> Option<f64> {
         let index = lag.checked_add(self.zero as isize)?;
         usize::try_from(index)
             .ok()
@@ -98,9 +98,9 @@ impl CrossCorrelation {
 pub fn cross_correlate<S: Sample>(
     a: Mono<'_, S>,
     b: Mono<'_, S>,
-    fft: &mut FftScratch,
+    fft: &mut FftScratch<f64>,
 ) -> CrossCorrelation {
-    cross_correlate_shaped(&to_f32(a.samples()), &to_f32(b.samples()), fft, |_| {})
+    cross_correlate_shaped(&widen(a.samples()), &widen(b.samples()), fft, |_| {})
 }
 
 /// [`cross_correlate`] with the cross-spectrum `A * conj(B)` handed to `shape`
@@ -111,10 +111,10 @@ pub fn cross_correlate<S: Sample>(
 /// add an epsilon relative to the spectrum's own level, not an absolute one,
 /// so quiet and loud inputs weight alike.
 pub(crate) fn cross_correlate_shaped(
-    a: &[f32],
-    b: &[f32],
-    fft: &mut FftScratch,
-    shape: impl FnOnce(&mut [Complex32]),
+    a: &[f64],
+    b: &[f64],
+    fft: &mut FftScratch<f64>,
+    shape: impl FnOnce(&mut [Complex64]),
 ) -> CrossCorrelation {
     if a.is_empty() || b.is_empty() {
         return CrossCorrelation::default();
@@ -122,7 +122,7 @@ pub(crate) fn cross_correlate_shaped(
     let len = a.len() + b.len() - 1;
     // At least 2: a one-point real transform has no distinct Nyquist bin.
     let size = len.next_power_of_two().max(2);
-    let mut circular = vec![0.0f32; size];
+    let mut circular = vec![0.0f64; size];
     Correlator::new().correlate(
         Mono::new(a),
         Mono::new(b),

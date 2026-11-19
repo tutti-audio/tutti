@@ -41,7 +41,7 @@ pub struct StreamerGone;
 /// frees units, never the audio thread; what it frees is a path and a wave the
 /// streamer's writer shares.
 #[derive(Clone)]
-pub struct StreamFile<F: Float = f32> {
+pub struct StreamFile<F: Float> {
     path: PathBuf,
     file_rate: SampleRate,
     resident: Option<Arc<Wave<F>>>,

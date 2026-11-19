@@ -5,7 +5,7 @@
 //! reports the rate refused ("did not answer"), but the plugin may still be
 //! re-activating, and an idle bridge reads nothing, so its answer would sit
 //! unread and `Batcher::await_output` would latch the stale refusal. A fork
-//! does not reach that state: its `prepare` calls `PluginBridge::settle`, a
+//! does not reach that state: its `prepare` calls `AudioBridge::settle`, a
 //! command behind the rate change, and the bridge reads the late answer ahead
 //! of that command's reply. This pins it.
 
@@ -96,7 +96,7 @@ fn a_late_rate_answer_does_not_silence_an_offline_fork() {
         .expect("a one-plugin graph compiles");
 
     assert_eq!(
-        bridge.rate_refusal(),
+        bridge.audio().rate_refusal(),
         None,
         "prepare settled the rate change, late answer included"
     );

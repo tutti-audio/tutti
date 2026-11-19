@@ -11,9 +11,8 @@ use tutti_graph::Offset;
 use tutti_graph::contract::Direct;
 use tutti_plugin_host::client_over;
 use tutti_plugin_ipc::{
-    AudioSlab, BridgeConfig, BridgeMessage, HostMessage, Ipc, IpcParts, PROTOCOL_VERSION,
-    PluginBridge, ProcessAudioData, ProcessGuard, RING_SLOTS, SlabLayout, SlabWriter,
-    unique_socket_path,
+    AudioSlab, BridgeMessage, HostMessage, Ipc, IpcParts, PROTOCOL_VERSION, PluginBridge,
+    ProcessAudioData, ProcessGuard, RING_SLOTS, SlabLayout, SlabWriter, unique_socket_path,
 };
 use tutti_plugin_types::{
     ChannelLayout, EditorPresence, Features, LoadedPlugin, MaxBlock, ParameterChanges,
@@ -58,6 +57,7 @@ pub(super) type Record = Arc<Mutex<Vec<Vec<u8>>>>;
 pub(super) struct Rig {
     pub(super) bridge: Arc<PluginBridge>,
     pub(super) slab: SlabWriter,
+    pub(super) replies: tutti_plugin_ipc::Replies,
     pub(super) record: Record,
     pub(super) descriptor: PluginDescriptor,
     pub(super) loaded: LoadedPlugin,
@@ -132,7 +132,7 @@ fn serve_lane(
             HostMessage::GetPresetList => Some(BridgeMessage::PresetList {
                 presets: Vec::new(),
             }),
-            // What `PluginBridge::settle` asks, which a watched
+            // What `AudioBridge::settle` asks, which a watched
             // plugin's retune waits on.
             HostMessage::GetCurrentPreset => Some(BridgeMessage::CurrentPreset {
                 id: Some(PresetId::Number(PRESET)),
@@ -200,7 +200,7 @@ pub(super) fn rig_gated(label: &str, gate: Option<ReplyGate>) -> Rig {
         .unwrap();
     let slab = AudioSlab::create(shm.clone(), layout()).unwrap();
     let server_slab = AudioSlab::open(shm, layout()).unwrap();
-    let (bridge, thread) = PluginBridge::new(
+    let (bridge, thread, replies) = PluginBridge::new(
         path.clone(),
         tutti_plugin_types::Origin::new("test.vst3", tutti_plugin_types::Load::new()),
         tutti_plugin_types::PluginFormat::Vst3,
@@ -241,6 +241,7 @@ pub(super) fn rig_gated(label: &str, gate: Option<ReplyGate>) -> Rig {
     Rig {
         bridge,
         slab,
+        replies,
         record,
         descriptor: PluginDescriptor {
             id: "test.plugin".into(),
@@ -310,9 +311,9 @@ pub(super) fn new_node(
     rig: Rig,
     tempo: TempoReader,
 ) -> (Direct<tutti_plugin_host::PluginNode<Ipc>>, Record, Threads) {
-    let guard = Arc::new(ProcessGuard::for_test(BridgeConfig::at(
+    let guard = Arc::new(ProcessGuard::for_test(
         tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source"),
-    )));
+    ));
     let record = Arc::clone(&rig.record);
     let threads = rig.threads;
     let mut ipc = Ipc::new(IpcParts {
@@ -323,6 +324,7 @@ pub(super) fn new_node(
         format: FloatWidth::F32,
         ceiling: CHUNK,
         slab: rig.slab,
+        replies: rig.replies,
         rate: SR,
         parameters: PARAMS.len(),
         timeout: Duration::from_secs(5),

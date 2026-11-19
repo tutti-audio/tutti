@@ -5,6 +5,7 @@
 //! magnitudes a caller already holds. A silent spectrum has no shape: every
 //! feature reads zero rather than a division by nothing.
 
+use tutti_buffers::Float;
 use tutti_units::Hz;
 
 use crate::transform::StftMagnitude;
@@ -22,13 +23,15 @@ const RELATIVE_POWER_FLOOR: f64 = 1e-12;
 /// `bin_width` is the spacing of the bins in [`Hz`]
 /// (`sample_rate / window`). `Hz(0.0)` for a silent spectrum, and for one with
 /// a NaN or infinite magnitude.
-pub fn spectral_centroid(magnitudes: &[f32], bin_width: Hz) -> Hz {
-    let (weighted, total) = magnitudes
-        .iter()
-        .enumerate()
-        .fold((0.0f64, 0.0f64), |(w, t), (k, &m)| {
-            (w + k as f64 * f64::from(m), t + f64::from(m))
-        });
+pub fn spectral_centroid<F: Float>(magnitudes: &[F], bin_width: Hz) -> Hz {
+    let (weighted, total) =
+        magnitudes
+            .iter()
+            .enumerate()
+            .fold((0.0f64, 0.0f64), |(w, t), (k, &m)| {
+                let m = m.convert_to::<f64>();
+                (w + k as f64 * m, t + m)
+            });
     if total.is_finite() && total > 0.0 {
         Hz(weighted / total * bin_width.get())
     } else {
@@ -41,16 +44,19 @@ pub fn spectral_centroid(magnitudes: &[f32], bin_width: Hz) -> Hz {
 /// tonal one. Bins under `1e-12` of the mean power count as that much, so the
 /// result depends on the spectrum's shape and not on its level.
 ///
-/// A plain `f32` in `0..=1`, not a unit type: no unit covers a 0..1 spectral
+/// A plain `f64` in `0..=1`, not a unit type: no unit covers a 0..1 spectral
 /// ratio. `Confidence` is an estimator's certainty and `Mix` is a blend
 /// control, and a new unit needs a distinct range or algebra.
 ///
 /// `0.0` for a silent spectrum, and for one with a NaN or infinite magnitude.
-pub fn spectral_flatness(magnitudes: &[f32]) -> f32 {
+pub fn spectral_flatness<F: Float>(magnitudes: &[F]) -> f64 {
     if magnitudes.is_empty() {
         return 0.0;
     }
-    let power = |m: f32| f64::from(m) * f64::from(m);
+    let power = |m: F| {
+        let m = m.convert_to::<f64>();
+        m * m
+    };
     let mean: f64 = magnitudes.iter().map(|&m| power(m)).sum::<f64>() / magnitudes.len() as f64;
     if !mean.is_finite() || mean <= 0.0 {
         return 0.0;
@@ -62,7 +68,7 @@ pub fn spectral_flatness(magnitudes: &[f32]) -> f32 {
         .sum::<f64>()
         / magnitudes.len() as f64;
     // Both means in the log domain: exp(mean_log) / mean.
-    (libm::exp(mean_log - libm::log(mean)) as f32).clamp(0.0, 1.0)
+    libm::exp(mean_log - libm::log(mean)).clamp(0.0, 1.0)
 }
 
 /// The frequency below which `fraction` of the spectrum's energy lies: the
@@ -71,23 +77,26 @@ pub fn spectral_flatness(magnitudes: &[f32]) -> f32 {
 ///
 /// `fraction` is a share of a whole in `0..=1` (85 % is the usual choice,
 /// `0.85`); a value outside it acts as the nearer end and a NaN as `0.0`. A plain
-/// `f32`, not a unit type, for the reason given at [`spectral_flatness`]: no
+/// `f64`, not a unit type, for the reason given at [`spectral_flatness`]: no
 /// unit covers a 0..1 spectral ratio, and `Mix` is a blend control.
 ///
 /// `Hz(0.0)` for a silent spectrum, and for one with a NaN or infinite
 /// magnitude. At `1.0` this is the highest bin that holds any energy.
-pub fn spectral_rolloff(magnitudes: &[f32], bin_width: Hz, fraction: f32) -> Hz {
-    let energy = |m: f32| f64::from(m) * f64::from(m);
+pub fn spectral_rolloff<F: Float>(magnitudes: &[F], bin_width: Hz, fraction: f64) -> Hz {
+    let energy = |m: F| {
+        let m = m.convert_to::<f64>();
+        m * m
+    };
     let total: f64 = magnitudes.iter().map(|&m| energy(m)).sum();
     if !total.is_finite() || total <= 0.0 {
         return Hz(0.0);
     }
     let fraction = if fraction.is_nan() { 0.0 } else { fraction };
-    let target = total * f64::from(fraction);
+    let target = total * fraction;
     let mut running = 0.0f64;
     let mut last_active = 0usize;
     for (k, &m) in magnitudes.iter().enumerate() {
-        if m > 0.0 {
+        if m > F::ZERO {
             last_active = k;
         }
         running += energy(m);
@@ -106,7 +115,7 @@ pub struct SpectralFeatures {
     /// See [`spectral_centroid`].
     pub centroid: Hz,
     /// See [`spectral_flatness`].
-    pub flatness: f32,
+    pub flatness: f64,
     /// See [`spectral_rolloff`].
     pub rolloff: Hz,
 }
@@ -115,7 +124,7 @@ pub struct SpectralFeatures {
 ///
 /// `rolloff` is the energy share passed to [`spectral_rolloff`], as described there. The bin width
 /// comes from the transform's own geometry, so it cannot disagree with the grid.
-pub fn spectral_features(transform: &StftMagnitude, rolloff: f32) -> Vec<SpectralFeatures> {
+pub fn spectral_features(transform: &StftMagnitude, rolloff: f64) -> Vec<SpectralFeatures> {
     let geometry = transform.geometry();
     let bin_width = geometry.bin_frequency(BinIndex(1));
     let grid = transform.magnitudes().grid();

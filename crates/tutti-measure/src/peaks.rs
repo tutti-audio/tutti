@@ -46,10 +46,10 @@ use tutti_dsp::rms;
 pub struct PeakBlock {
     /// Most negative sample in the block. A raw signal excursion, so it is
     /// signed and not an `Amplitude`.
-    pub min: f32,
+    pub min: f64,
     /// Most positive sample in the block. Signed, for the same reason as
     /// [`min`](Self::min).
-    pub max: f32,
+    pub max: f64,
     /// Root-mean-square level over the block, as an [`Amplitude`].
     pub rms: Amplitude,
 }
@@ -58,7 +58,7 @@ impl PeakBlock {
     /// The larger of the two excursions — what a peak meter shows.
     #[inline]
     pub fn peak(&self) -> Amplitude {
-        Amplitude(f64::from(self.min.abs().max(self.max.abs())))
+        Amplitude(self.min.abs().max(self.max.abs()))
     }
 
     /// The block covering both inputs' samples.
@@ -293,18 +293,18 @@ impl<S: Sample> Measure<S> for PeakConfig {
 
 /// Summarizes one block. Stateless.
 pub fn summarize_block<S: Sample>(samples: Mono<'_, S>) -> PeakBlock {
-    block_of(&crate::convert::to_f32(samples.samples()))
+    block_of(&crate::convert::widen(samples.samples()))
 }
 
-/// [`summarize_block`] over `f32` samples.
-fn block_of(samples: &[f32]) -> PeakBlock {
+/// [`summarize_block`] over `f64` samples.
+fn block_of(samples: &[f64]) -> PeakBlock {
     if samples.is_empty() {
         return PeakBlock::default();
     }
 
     let (min, max) = samples
         .iter()
-        .fold((f32::INFINITY, f32::NEG_INFINITY), |(min, max), &s| {
+        .fold((f64::INFINITY, f64::NEG_INFINITY), |(min, max), &s| {
             (min.min(s), max.max(s))
         });
 
@@ -330,9 +330,9 @@ pub struct PeakMeter<S: Sample = f32> {
     block: usize,
     layout: ChannelLayout,
     /// Per channel: samples of an incomplete block, all the same length.
-    pending: Vec<Vec<f32>>,
+    pending: Vec<Vec<f64>>,
     /// Per channel: scratch for one chunk's deinterleave, reused across pushes.
-    planes: Vec<Vec<f32>>,
+    planes: Vec<Vec<f64>>,
     /// Per channel: the blocks completed so far.
     runs: Vec<Vec<PeakBlock>>,
     sample: PhantomData<fn(S)>,
@@ -341,7 +341,7 @@ pub struct PeakMeter<S: Sample = f32> {
 impl<S: Sample> PeakMeter<S> {
     /// Splits one chunk of whole frames into planes and cuts each into blocks,
     /// calling `emit` with each whole block, channel by channel.
-    fn step(&mut self, chunk: Interleaved<'_>, emit: &mut impl FnMut(ChannelBlock)) {
+    fn step(&mut self, chunk: Interleaved<'_, f64>, emit: &mut impl FnMut(ChannelBlock)) {
         let frames = chunk.frames().get();
         for plane in &mut self.planes {
             plane.clear();
@@ -447,7 +447,7 @@ impl<S: Sample> Meter for PeakMeter<S> {
 
 /// Cuts one channel's samples into whole blocks, completing the pending one
 /// first and carrying the remainder.
-fn cut_blocks(pending: &mut Vec<f32>, block: usize, samples: &[f32], out: &mut Vec<PeakBlock>) {
+fn cut_blocks(pending: &mut Vec<f64>, block: usize, samples: &[f64], out: &mut Vec<PeakBlock>) {
     let mut rest = samples;
 
     // Finish the block the previous call left half-built before taking whole

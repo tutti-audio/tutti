@@ -21,6 +21,7 @@ use std::sync::Arc;
 
 use tutti_midi_device::ProfileOnRequest;
 use tutti_midi_protocol::{MtcRate, channel_voice, flex_tempo};
+use tutti_music::{MeterChange, MeterMap, TimeSignature};
 use tutti_tempo::{TempoMap, TempoPoint, Transition};
 use tutti_ump::{
     Address, Flex, FlexAddress, FlexTextKind, Form, ManufacturerId, Message, MidiChannel,
@@ -1943,6 +1944,23 @@ impl<'a> MetricalView<'a> {
         &self.file.tempo_maps[0]
     }
 
+    /// The meter of the file's timeline: a change at the beat each Time
+    /// Signature event lands on (a change that falls mid-bar makes the bar
+    /// before it short), 4/4 from beat 0 where the file declares none there.
+    /// A Time Signature no [`TimeSignature`] holds is not a change:
+    /// [`refused_time_signatures`](Self::refused_time_signatures) lists it.
+    #[must_use]
+    pub fn meter_map(self) -> MeterMap {
+        meter_of(self.events()).0
+    }
+
+    /// The Time Signature events of the timeline that
+    /// [`meter_map`](Self::meter_map) leaves out, in order.
+    #[must_use]
+    pub fn refused_time_signatures(self) -> Vec<RefusedTimeSignature> {
+        meter_of(self.events()).1
+    }
+
     /// Seconds from the start of the file to `tick`, over its
     /// [`tempo_map`](Self::tempo_map): each stretch between two changes at
     /// its own tempo (a file's changes are all steps).
@@ -2012,6 +2030,52 @@ impl<'a> MetricalView<'a> {
     pub fn timeline(self) -> Timeline {
         Timeline::of(self.events())
     }
+}
+
+/// A Time Signature event that no [`TimeSignature`] holds
+/// ([`MetricalView::refused_time_signatures`]): a numerator of 0, or a
+/// denominator power of two past 32 bits.
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
+pub struct RefusedTimeSignature {
+    /// Where the event lands.
+    pub beat: Beat,
+    /// The numerator, as the wire states it.
+    pub numerator: u8,
+    /// The denominator as a power of two, as the wire states it.
+    pub denominator_power: u8,
+}
+
+/// The meter the Time Signature events declare, and the events no
+/// [`TimeSignature`] holds.
+fn meter_of<'a>(
+    events: impl Iterator<Item = (Beat, &'a FileEvent)>,
+) -> (MeterMap, Vec<RefusedTimeSignature>) {
+    let (mut changes, mut refused) = (Vec::new(), Vec::new());
+    for (beat, event) in events {
+        let FileEvent::Meta(Meta::TimeSignature {
+            numerator,
+            denominator_power,
+            ..
+        }) = event
+        else {
+            continue;
+        };
+        let signature = 1u32
+            .checked_shl(u32::from(*denominator_power))
+            .and_then(|denominator| {
+                TimeSignature::from_numbers(u32::from(*numerator), denominator)
+            });
+        match signature {
+            Some(signature) => changes.push(MeterChange::new(beat, signature)),
+            None => refused.push(RefusedTimeSignature {
+                beat,
+                numerator: *numerator,
+                denominator_power: *denominator_power,
+            }),
+        }
+    }
+    (MeterMap::new(changes), refused)
 }
 
 /// A [`MidiFile`] of independent sequences whose ticks are quarter notes
@@ -2089,6 +2153,23 @@ impl<'a> MetricalSequence<'a> {
     #[must_use]
     pub fn tempo_map(self) -> &'a Arc<TempoMap> {
         self.tempo_map
+    }
+
+    /// The meter of the sequence's track: a change at the beat each Time
+    /// Signature event lands on (a change that falls mid-bar makes the bar
+    /// before it short), 4/4 from beat 0 where the file declares none there.
+    /// A Time Signature no [`TimeSignature`] holds is not a change:
+    /// [`refused_time_signatures`](Self::refused_time_signatures) lists it.
+    #[must_use]
+    pub fn meter_map(self) -> MeterMap {
+        meter_of(self.events()).0
+    }
+
+    /// The Time Signature events of the track that
+    /// [`meter_map`](Self::meter_map) leaves out, in order.
+    #[must_use]
+    pub fn refused_time_signatures(self) -> Vec<RefusedTimeSignature> {
+        meter_of(self.events()).1
     }
 
     /// `tick` in quarter notes: the tick over the division.

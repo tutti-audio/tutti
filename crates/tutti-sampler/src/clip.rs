@@ -54,7 +54,7 @@ use crate::{
 /// what a clip does not say (a pool of voices: [`VoicePool`](crate::VoicePool)).
 #[derive(Debug)]
 #[must_use = "a clip is a node: add it to a graph"]
-pub struct Clip<F: SamplerFloat = f32> {
+pub struct Clip<F: SamplerFloat> {
     tier: Tier<F>,
     window: VoiceWindow,
     gain: Amplitude,
