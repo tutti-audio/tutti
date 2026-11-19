@@ -77,10 +77,14 @@
 //! call [`Ump::is_note_off`].
 //!
 //! The crate names only `tutti-units`, which has no allocation either, so the
-//! audio graph can carry packets without linking a MIDI stack.
+//! audio graph can carry packets without linking a MIDI stack. Only [`Held`]
+//! allocates, once, in `new`: it boxes the tables it keeps of what a source has
+//! started.
 
 #![forbid(unsafe_code)]
 #![cfg_attr(not(test), no_std)]
+
+extern crate alloc;
 
 mod articulation;
 mod bend_value;
@@ -91,6 +95,7 @@ mod encode;
 mod field;
 mod flex_text;
 mod flex_write;
+mod held_controllers;
 mod held_keys;
 mod iso8601;
 mod manufacturer;
@@ -137,7 +142,8 @@ pub use flex_write::{
     flex_melisma_end_packets, flex_project_name_packets, flex_recording_date_packets,
     flex_text_packets,
 };
-pub use held_keys::{KeyBitset, Lane, LaneSet};
+pub use held_controllers::HeldControllers;
+pub use held_keys::{Held, KeyBitset, Lane};
 pub use manufacturer::{ManufacturerId, NotManufacturerId};
 pub use message::{
     Accidental, Address, Alteration, AlterationKind, Attribute, Bank, BarAccents, BlockDirection,
