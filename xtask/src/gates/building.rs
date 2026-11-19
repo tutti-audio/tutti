@@ -334,10 +334,10 @@ pub(super) const ALLOW: &[Allow] = &[
         "opening a file for decoding: the failure is the file's, not a value's",
     ),
     ty(
-        "crates/tutti-codec/",
-        "FileIn::from_reader",
+        "crates/tutti-platform/",
+        "Stamp::of",
         CTOR,
-        "probing a stream for decoding: the failure is the stream's bytes, not a value's",
+        "stamping a file: the failure is the file's metadata, not a value's",
     ),
     ty(
         "crates/tutti-dsp/",
