@@ -875,50 +875,44 @@ impl AudioBridge {
         await_reply(ask_resp, self.lifecycle.timeouts().param_wait()).unwrap_or(false)
     }
 
-    /// Wait until every command queued before this call has reached the
-    /// server, been handled, and every event the server sent because of it
-    /// (a `LatencyChanged` a render-mode or rate change caused) has reached
-    /// the listener. Control thread; blocks for two round trips, each bounded
-    /// by the parameter timeout.
+    /// Wait until every setting queued before this call (a rate change, a render
+    /// mode) has been applied, the control commands already in flight to the
+    /// server have been handled, and the events the server sent because of them
+    /// (a `LatencyChanged` a render-mode or rate change caused) have reached the
+    /// listener. Control thread.
     ///
-    /// Why two. The server handles commands in order and sends the events a
-    /// command caused before it reads the next one, so a request's reply
-    /// comes after them on the socket, and the bridge thread reads them off
-    /// first. But it hands them to the listener only once it has finished
-    /// the command it read them during — after that command's reply has
-    /// already woken its caller. The bridge thread takes the next command only
-    /// after that hand-off, so the second request's reply means the first's
-    /// events were delivered. A cheap request that every server answers
-    /// (`GetCurrentPreset`) does for both.
-    ///
-    /// The second trip closes a window of microseconds (the bridge thread's
-    /// hand-off after a reply), which no test here loses reliably: tutti-plugin's
-    /// `an_export_is_aligned_when_the_plugin_latency_moves_offline` pins the
-    /// settle, not the second trip. A fork that lost the race anyway reports
-    /// it through its health (`PluginRenderFault::LatencyChanged`).
+    /// **What the fence proves is that and no more**: a settle rides the audio
+    /// lane's queue behind the settings, but settings jump the control queue, so
+    /// a control command still queued (a `SetParameter`, say) is not waited for.
+    /// The settle holds the blocks after it for two round trips to the control
+    /// lane (see `AudioCommand::Settle` for why two) and takes no request slot.
+    /// Blocks for at most two settle waits and a query's.
     pub(crate) fn settle(&self) {
-        // The first query waits behind an outstanding rate change, so its
-        // budget is the rate change's plus its own.
+        if self.lifecycle.is_crashed() {
+            return;
+        }
         let timeouts = self.lifecycle.timeouts();
-        let _ = self.current_preset_within(timeouts.settle_wait());
-        let _ = self.current_preset_within(timeouts.param_wait());
+        let (done_ask, done) = ask::ask::<()>();
+        if !self.channels.push_block(AudioCommand::Settle { done }) {
+            return;
+        }
+        let wait = timeouts
+            .settle_wait()
+            .saturating_mul(2)
+            .saturating_add(timeouts.param_wait());
+        let _ = await_reply(done_ask, wait);
     }
 
-    /// Which preset the plugin considers current, if it will say. Waits up to a
-    /// query's wait for a request already owed, then up to it again for its own
+    /// Which preset the plugin considers current, if it will say. Waits up to
+    /// a query's wait for a request already owed, then up to it again for its own
     /// answer.
     pub fn current_preset(&self) -> Option<PresetId> {
-        self.current_preset_within(self.lifecycle.timeouts().param_wait())
-    }
-
-    fn current_preset_within(&self, timeout: Duration) -> Option<PresetId> {
         if self.lifecycle.is_crashed() {
             return None;
         }
-        let ask_resp = self.request(self.lifecycle.timeouts().param_wait(), |reply| {
-            ControlCommand::GetCurrentPreset { reply }
-        })?;
-        await_reply(ask_resp, timeout).ok().flatten()
+        let wait = self.lifecycle.timeouts().param_wait();
+        let ask_resp = self.request(wait, |reply| ControlCommand::GetCurrentPreset { reply })?;
+        await_reply(ask_resp, wait).ok().flatten()
     }
 
     /// A parameter's value, or `None` when it cannot be asked. Waits up to a

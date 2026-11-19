@@ -267,6 +267,7 @@ impl Fate {
 struct Settings {
     rate: Option<(tutti_units::SampleRate, Reply<()>)>,
     mode: Option<(tutti_plugin_types::RenderMode, Reply<()>)>,
+    fence: Option<Reply<()>>,
 }
 
 /// The settings a caller has requested and the audio lane has not taken, each
@@ -396,6 +397,9 @@ impl Channels {
             match setting {
                 Setting::SampleRate(rate) => slots.rate = Some((rate, after)),
                 Setting::RenderMode(mode) => slots.mode = Some((mode, after)),
+                // A fence rides the audio queue (`AudioCommand::Settle`), never
+                // a request.
+                Setting::Fence => {}
             }
         }
         self.bell.ring();
@@ -720,6 +724,7 @@ impl Channels {
             match setting {
                 Setting::SampleRate(rate) => slots.rate = Some((rate, applied)),
                 Setting::RenderMode(mode) => slots.mode = Some((mode, applied)),
+                Setting::Fence => slots.fence = Some(applied),
             }
         }
         self.control_bell.ring();
@@ -735,10 +740,10 @@ impl Channels {
         if let Some((rate, applied)) = slots.rate.take() {
             return Some((Setting::SampleRate(rate), applied));
         }
-        slots
-            .mode
-            .take()
-            .map(|(mode, applied)| (Setting::RenderMode(mode), applied))
+        if let Some((mode, applied)) = slots.mode.take() {
+            return Some((Setting::RenderMode(mode), applied));
+        }
+        slots.fence.take().map(|applied| (Setting::Fence, applied))
     }
 
     /// Record a render-mode or rate change the audio lane gave up on. Audio

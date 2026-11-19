@@ -441,6 +441,7 @@ pub(super) fn handle_audio(
     channels: &Channels,
     payloads: &PayloadPool,
     inbox: &mut Unsolicited,
+    lifecycle: &Lifecycle,
 ) -> BridgeResult<()> {
     let Lane { stream, owed } = lane;
     match cmd {
@@ -595,6 +596,20 @@ pub(super) fn handle_audio(
         AudioCommand::Reset => {
             ipc::send(stream, &HostMessage::Reset)?;
         }
+        AudioCommand::Settle { done } => {
+            // Two fences, not one. A fence's reply wakes its waiter before the
+            // control lane hands the events it read meanwhile to the listener
+            // (after the turn); the second fence's turn starts after that
+            // hand-off, so its reply means the first's events were delivered.
+            // The settings requested before it first.
+            while let Some(setting) = channels.take_request(None) {
+                apply_setting(channels, lifecycle, setting);
+            }
+            for _ in 0..2 {
+                apply_setting(channels, lifecycle, Setting::Fence);
+            }
+            done.send(());
+        }
     }
     Ok(())
 }
@@ -614,6 +629,7 @@ pub(super) fn apply_setting(channels: &Channels, lifecycle: &Lifecycle, setting:
     let what = match setting {
         Setting::SampleRate(_) => "a rate change",
         Setting::RenderMode(_) => "a render mode",
+        Setting::Fence => "a settle",
     };
     let (applied, reply) = super::ask::ask::<()>();
     let deadline = Deadline::after(Instant::now(), lifecycle.timeouts().settle_wait());
@@ -1014,6 +1030,10 @@ pub(super) fn handle_setting(
         }
         Setting::RenderMode(mode) => {
             ipc::send(stream, &HostMessage::SetRenderMode { mode })?;
+            fence(stream, inbox, owed, channels, lifecycle)?;
+            applied.send(());
+        }
+        Setting::Fence => {
             fence(stream, inbox, owed, channels, lifecycle)?;
             applied.send(());
         }
