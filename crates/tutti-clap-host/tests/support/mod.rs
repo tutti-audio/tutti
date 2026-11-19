@@ -18,7 +18,7 @@ pub fn midi_events(
     list: &mut tutti_clap_host::OutputEventList,
 ) -> Vec<tutti_plugin_types::WireMidi> {
     let mut out = tutti_plugin_types::RtMidiEvents::new();
-    list.fill_midi_events(&mut tutti_midi_protocol::Translator::new(), &mut out);
+    list.fill_midi_events(&mut tutti_midi_protocol::Midi2Translator::new(), &mut out);
     out.iter().copied().collect()
 }
 

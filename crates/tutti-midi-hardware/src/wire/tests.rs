@@ -1,6 +1,6 @@
 //! The wire form against M2-104: a MIDI 1.0 endpoint is never sent type `0x4`,
 //! a Registered Controller narrows to the four Control Changes of Appendix D.2.3
-//! through one narrower, and JR goes only where it is enabled.
+//! through one MIDI 1.0 translator, and JR goes only where it is enabled.
 
 use super::*;
 use tutti_fixtures::midi;
@@ -293,7 +293,7 @@ fn a_change_of_protocol_drops_an_mpe_notes_channel() {
             PitchBendSensitivity::MPE_MEMBER_DEFAULT,
         )
         .unwrap();
-        Narrower::with_mode(TranslationMode {
+        Midi1Translator::with_mode(TranslationMode {
             extremes: ExtremeValues::Scaled,
             per_note: PerNoteTranslation::Mpe(zone),
         })
@@ -316,7 +316,7 @@ fn a_change_of_protocol_drops_an_mpe_notes_channel() {
     ));
     // A change of JR alone keeps the note: its bend is the member channel's.
     let mut wire = Wire::new(MIDI1);
-    wire.narrower = mpe();
+    wire.midi1_translator = mpe();
     convert(&mut wire, &[note_on]);
     wire.set_config(StreamConfig {
         rx_jr: true,
@@ -325,7 +325,7 @@ fn a_change_of_protocol_drops_an_mpe_notes_channel() {
     assert_eq!(convert(&mut wire, &[bend]).len(), 1);
     // A change of Protocol forgets it.
     let mut wire = Wire::new(MIDI1);
-    wire.narrower = mpe();
+    wire.midi1_translator = mpe();
     convert(&mut wire, &[note_on]);
     wire.set_config(MIDI2);
     wire.set_config(MIDI1);

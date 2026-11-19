@@ -368,11 +368,11 @@ impl Drop for ClapLoaded {
 mod tests {
     use super::*;
     use crate::ParamBounds;
-    use tutti_midi_protocol::Narrower;
+    use tutti_midi_protocol::Midi1Translator;
 
     /// **The input list built for a declared bound reports that bound as what
     /// it holds**: the Processor's `event_input`, which the node declares, is
-    /// the list's MIDI room over `Narrower::MAX_MESSAGES`, at any block.
+    /// the list's MIDI room over `Midi1Translator::MAX_MESSAGES`, at any block.
     #[test]
     fn the_input_list_reports_the_bound_it_was_built_from() {
         let table = RangeTable {
@@ -429,7 +429,7 @@ mod tests {
                 );
                 assert!(
                     scratch.input_events.events.capacity()
-                        >= MIDI_STACK_BOUND.get() as usize * Narrower::MAX_MESSAGES
+                        >= MIDI_STACK_BOUND.get() as usize * Midi1Translator::MAX_MESSAGES
                             + input
                             + EDIT_CAPACITY
                 );

@@ -1,5 +1,5 @@
 //! The stateful MIDI 1.0 to MIDI 2.0 translation of M2-104 Appendix D.3: the
-//! [`Translator`] an input edge runs once.
+//! [`Midi2Translator`] an input edge runs once.
 
 use crate::scale;
 use crate::voice::{widen, widen_velocity};
@@ -54,7 +54,7 @@ struct Channel {
     /// The Bank Select halves as last sent.
     bank_msb: U7,
     bank_lsb: U7,
-    /// Whether a Bank Select has arrived since [`new`](Translator::new) or
+    /// Whether a Bank Select has arrived since [`new`](Midi2Translator::new) or
     /// the last reset: the bank is valid from then on (D.3.4).
     bank_set: bool,
     /// The low 7 bits a High Resolution Velocity Prefix (CC 88) gave the next
@@ -129,7 +129,7 @@ struct Channel {
 /// stream for its life: two streams through one would interleave their runs.
 ///
 /// ```
-/// use tutti_midi_protocol::Translator;
+/// use tutti_midi_protocol::Midi2Translator;
 /// use tutti_ump::{Address, CCNumber, Message, MidiChannel, MidiGroup, U7, Ump, Voice1, Voice2};
 ///
 /// let address = Address { group: MidiGroup::FIRST, channel: MidiChannel::FIRST };
@@ -139,7 +139,7 @@ struct Channel {
 ///         value: U7::of(value),
 ///     }))
 /// };
-/// let mut translator = Translator::new();
+/// let mut translator = Midi2Translator::new();
 /// let mut out = Vec::new();
 /// // Pitch bend sensitivity, 12 semitones: RPN 0/0, Data Entry 12 then 0.
 /// for ump in [cc(101, 0), cc(100, 0), cc(6, 12), cc(38, 0)] {
@@ -153,17 +153,17 @@ struct Channel {
 /// assert_eq!(value.get(), 12 << 25);
 /// ```
 #[derive(Clone, Debug)]
-pub struct Translator {
+pub struct Midi2Translator {
     channels: [Channel; SLOTS],
 }
 
-impl Default for Translator {
+impl Default for Midi2Translator {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl Translator {
+impl Midi2Translator {
     /// A translator with nothing selected on any channel.
     #[must_use]
     pub const fn new() -> Self {

@@ -126,7 +126,7 @@ pub fn widen(voice: Voice1) -> Voice2 {
 ///
 /// Stateless, like `widen`: a MIDI 1.0 RPN run widens as plain Control
 /// Changes. An edge that can see a whole stream runs a
-/// [`Translator`](crate::Translator) instead.
+/// [`Midi2Translator`](crate::Midi2Translator) instead.
 #[inline]
 #[must_use]
 pub fn widen_message(message: Message) -> Message {

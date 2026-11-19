@@ -1,6 +1,6 @@
 //! MIDI 1.0 bytes and the UMP that carries them.
 
-use tutti_midi_protocol::Narrower;
+use tutti_midi_protocol::Midi1Translator;
 use tutti_ump::{
     Midi1Parser, MidiGroup, SYSEX7_MAX_PAYLOAD, SysexAssembler, SysexMessage, SysexStep, Ump,
     parse_exact,
@@ -42,7 +42,7 @@ pub(in crate::backend) enum Wire<'a> {
 
 /// UMP written as MIDI 1.0 bytes.
 ///
-/// A MIDI 2.0 channel voice message is narrowed to MIDI 1.0 ([`Narrower`]'s
+/// A MIDI 2.0 channel voice message is narrowed to MIDI 1.0 ([`Midi1Translator`]'s
 /// Default Translation: a Registered or Assignable Controller is its four
 /// Control Changes, a Program Change with a bank three messages). A message with
 /// no MIDI 1.0 form (a Flex Data or a Utility message, a per-note message) is
@@ -50,7 +50,7 @@ pub(in crate::backend) enum Wire<'a> {
 /// message, which is sent when its last packet arrives.
 #[derive(Debug)]
 pub(in crate::backend) struct ByteOut {
-    narrower: Narrower,
+    midi1_translator: Midi1Translator,
     sysex: SysexAssembler<Box<[u8]>>,
 }
 
@@ -64,7 +64,7 @@ impl ByteOut {
         // packet is pushed.
         let room = SysexAssembler::<()>::room_for(MAX_MESSAGE, 1, 1);
         Self {
-            narrower: Narrower::new(),
+            midi1_translator: Midi1Translator::new(),
             sysex: SysexAssembler::new(vec![0; room].into_boxed_slice(), MAX_MESSAGE, 1),
         }
     }
@@ -85,7 +85,7 @@ impl ByteOut {
             SysexStep::Complete(done) => send(Wire::Long(self.sysex.message(done))),
             SysexStep::NotSysex => {
                 let mut sent = Ok(());
-                self.narrower.feed(ump, |bytes| {
+                self.midi1_translator.feed(ump, |bytes| {
                     // The narrowed bytes are one MIDI 1.0 message, which
                     // `parse_exact` reads back as its type 2 or type 1 UMP.
                     if sent.is_ok()

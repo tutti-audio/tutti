@@ -13,7 +13,7 @@ use crate::MpeZoneConfig;
 ///
 /// Up-scaling needs no such mode: a MIDI 1.0 value above 0 widens above 0 and
 /// one below the maximum widens below it (M2-115 section 3.1), so
-/// [`Translator`](crate::Translator) never lands a value on an extreme it was
+/// [`Midi2Translator`](crate::Midi2Translator) never lands a value on an extreme it was
 /// not.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -98,7 +98,7 @@ pub enum PerNoteTranslation {
 }
 
 /// The Default Translation, or the Alternate Translation Modes a
-/// [`Narrower`](crate::Narrower) runs (M2-104 D.1.5 and D.4). The default is the
+/// [`Midi1Translator`](crate::Midi1Translator) runs (M2-104 D.1.5 and D.4). The default is the
 /// Default Translation; a product with a non-default mode tells its user it is
 /// active ([`is_alternate`](Self::is_alternate) is the question to ask).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
