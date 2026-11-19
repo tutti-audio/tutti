@@ -453,18 +453,46 @@ impl Jobs {
                 match (self.thread_start)("tutti-job", None, Box::new(body)) {
                     Ok(thread) => self.threads.push(thread),
                     Err(error) => {
-                        tracing::warn!("session jobs: no thread ({error}); running them inline");
-                        self.spawn = Spawner::Inline;
-                        self.fallbacks += 1;
-                        self.held.push(SessionEvent::SteppedFallback {
-                            what: crate::Fallback::Jobs,
-                        });
+                        self.fall_back(&error);
                         let task = slot.lock_recover().take();
                         self.inline.extend(task);
                     }
                 }
             }
             Spawner::Inline => self.inline.push_back(task),
+        }
+    }
+
+    /// Switches to [`Spawner::Inline`] after a refused thread: counted, and
+    /// reported by the next update.
+    fn fall_back(&mut self, error: &std::io::Error) {
+        tracing::warn!("session jobs: no thread ({error}); running them inline");
+        self.spawn = Spawner::Inline;
+        self.fallbacks += 1;
+        self.held.push(SessionEvent::SteppedFallback {
+            what: crate::Fallback::Jobs,
+        });
+    }
+
+    /// Whether a job that must run beside the control thread, without ending
+    /// before the app does (a take's pump), has a thread to run on: a host's
+    /// spawner is its own; the default starts one, and a refusal switches the
+    /// session to inline jobs, which have none.
+    #[cfg(feature = "capture")]
+    pub(crate) fn has_threads(&mut self) -> bool {
+        match &self.spawn {
+            Spawner::Host(_) => true,
+            Spawner::Inline => false,
+            Spawner::Threads => match (self.thread_start)("tutti-probe", None, Box::new(|_| {})) {
+                Ok(thread) => {
+                    drop(thread);
+                    true
+                }
+                Err(error) => {
+                    self.fall_back(&error);
+                    false
+                }
+            },
         }
     }
 

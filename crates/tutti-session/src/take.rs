@@ -567,6 +567,10 @@ pub enum TakeError {
     /// The input is not one this session holds.
     #[error("{0:?} is not an input of this session")]
     NotAnInput(NodeKey),
+    /// The take's pump runs for the whole take and needs a thread of its own,
+    /// and the session runs its jobs inline (its thread start was refused).
+    #[error("a take needs a thread of its own, and the session has none to give it")]
+    NeedsThread,
     /// The input's inlet node, or a port of it, is not in the graph.
     #[error(transparent)]
     Tap(#[from] MissingSource),
@@ -771,7 +775,9 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     ///
     /// # Errors
     ///
-    /// [`TakeError::NotAnInput`] for a node that is not an input of this
+    /// [`TakeError::NeedsThread`] when the session runs its jobs inline (its
+    /// thread start was refused, [`SessionBuilder::thread_start`](crate::SessionBuilder::thread_start)):
+    /// the pump would block `update`. [`TakeError::NotAnInput`] for a node that is not an input of this
     /// session; [`TakeError::Tap`] when it has left the graph;
     /// [`TakeError::TransportStopped`], [`TakeError::Punch`] and
     /// [`TakeError::Past`] for a punch that cannot be resolved;
@@ -783,6 +789,9 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
         punch: Punch,
         target: TakeTarget<C::Float>,
     ) -> Result<Take<Armed>, TakeError> {
+        if !self.jobs.has_threads() {
+            return Err(TakeError::NeedsThread);
+        }
         let node = input.node();
         let held = self
             .inputs

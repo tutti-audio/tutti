@@ -80,6 +80,10 @@ struct Rig {
 }
 
 fn rig(config: InputConfig, lead: Samples) -> Rig {
+    rig_on(Session::builder(), config, lead)
+}
+
+fn rig_on(builder: tutti_session::SessionBuilder, config: InputConfig, lead: Samples) -> Rig {
     let capture = Arc::new(Mutex::new(Capture {
         writer: None,
         lead,
@@ -91,7 +95,7 @@ fn rig(config: InputConfig, lead: Samples) -> Rig {
         ChannelLayout::STEREO,
         tutti_buffers::SampleFormat::F32,
     );
-    let live = Session::builder()
+    let live = builder
         .input_opener(Opener(Arc::clone(&capture)))
         .device(Default::default())
         .build_device_on(spec, driver)
@@ -653,4 +657,41 @@ fn a_take_makes_a_clip_only_from_a_file() {
         from_sink.err()
     );
     drop((to_file, to_sink));
+}
+
+/// A thread start that always answers `Err`: the host's choice of refusing every thread.
+fn no_threads(
+    _: &str,
+    _: Option<tutti_platform::PriorityRequest>,
+    _: Box<dyn FnOnce(&tutti_platform::StopToken) + Send>,
+) -> std::io::Result<tutti_platform::ThreadHandle<()>> {
+    Err(std::io::Error::other("no threads here"))
+}
+
+/// **A take needs a thread of its own, so a session with none refuses it at the
+/// call.** The pump runs for the whole take: run inline it would block `update`.
+/// The refusal is `TakeError::NeedsThread`, nothing is created at the path, and
+/// the refused thread is the jobs fallback, counted once.
+#[test]
+fn a_take_on_a_session_with_no_threads_is_refused_at_the_call() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut rig = rig_on(
+        Session::builder().thread_start(no_threads),
+        InputConfig::default(),
+        Samples::new(0),
+    );
+    rig.step(1024);
+    let path = wav(&dir, "never.wav");
+    let refused = rig.session.record(
+        &rig.input,
+        Punch::at(Frame::new(10)).until(Frame::new(5_000)).unwrap(),
+        TakeTarget::wav(path.clone()),
+    );
+    assert!(
+        matches!(refused, Err(TakeError::NeedsThread)),
+        "{:?}",
+        refused.map(|_| ())
+    );
+    assert!(!path.exists(), "nothing was created");
+    assert_eq!(rig.session.fallbacks(tutti_session::Fallback::Jobs), 1);
 }
