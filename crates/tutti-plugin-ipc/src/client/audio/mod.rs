@@ -1202,17 +1202,15 @@ mod tests {
         let id = ParamId::new(1);
         bridge.declare_host_edits([id]);
         assert_eq!(bridge.write_parameter(id, Normalized::of(0.5)), Ok(()));
-        let mut held = Vec::new();
-        while let Some(answer) = {
+        loop {
             let (_ask, done) = ask::ask::<bool>();
-            bridge
+            if bridge
                 .channels
                 .try_push_block(AudioCommand::Params { done })
-                .err()
-                .map_or(Some(()), |_| None)
-        } {
-            let _ = answer;
-            held.push(());
+                .is_err()
+            {
+                break;
+            }
         }
         assert!(bridge.request_flush().is_none(), "the queue is full");
         while bridge.channels.pop_block().is_some() {}
