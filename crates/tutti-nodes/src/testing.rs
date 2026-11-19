@@ -11,7 +11,7 @@
 //!   from one input, and a sink with no outputs.
 //!
 //! Widths are runtime: every node takes a [`ChannelLayout`], so a stereo tone
-//! is one node, `Osc::sine(Hz(440.0)).with_layout(ChannelLayout::STEREO)`.
+//! is one node, `Osc::sine(Hz::new(440.0)).with_layout(ChannelLayout::STEREO)`.
 //! Each is a plain graph [`Node`] and its own [`IntoNode`], forkable by clone
 //! (none shares state with its clones), so a test graph is built the same way
 //! a production one is: `GraphBuilder::add(Osc::sine(..))`.
