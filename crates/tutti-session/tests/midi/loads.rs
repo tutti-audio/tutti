@@ -71,6 +71,26 @@ fn load(s: &mut DetachedSession, path: PathBuf) -> Result<LoadedMidi, LoadMidiEr
     job.wait(s)
 }
 
+/// A file held only as bytes loads as the file at its path does: the same
+/// tracks, over the same timeline. The `Vec<u8>` is the asset.
+#[test]
+fn a_midi_file_loads_from_bytes_as_its_tracks() {
+    let bytes = smf(
+        1,
+        &[
+            track(&[&TEMPO_120, &note(0, 60)]),
+            track(&[&note(0, 64), &note(0, 67)]),
+        ],
+    );
+    let mut s = session();
+    let job = s.midi().load_midi(bytes);
+    let loaded = job.wait(&mut s).expect("loads");
+    assert_eq!(loaded.file().tracks().len(), 2);
+    assert_eq!(loaded.track(1).unwrap().events.len(), 4);
+    let tempo = loaded.tempo().expect("one timeline");
+    assert_eq!(tempo.seconds_at(Beat::new(2.0)), Seconds::new(1.0));
+}
+
 /// A format 1 file lands each track as a clip over the file's one tempo map
 /// and meter, and a file that needed no repair reports clean.
 #[test]
@@ -329,6 +349,15 @@ mod soundfont {
         let font = s.soundfont(&"gm").unwrap();
         let unit = SoundFontUnit::<f32>::new(font, Settings::new());
         assert!(unit.is_ok(), "{:?}", unit.err());
+    }
+
+    #[test]
+    fn a_soundfont_entry_loads_from_bytes() {
+        let bytes = std::fs::read(tutti_fixtures::asset("soundfonts/TimGM6mb.sf2")).unwrap();
+        let mut s = session();
+        s.pool(soundfont("gm", bytes)).unwrap();
+        assert!(matches!(settled(&mut s, "gm"), PoolState::Loaded));
+        assert!(!s.soundfont(&"gm").unwrap().presets().is_empty());
     }
 
     #[test]

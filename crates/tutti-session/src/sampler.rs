@@ -15,9 +15,9 @@
 //! [`open_stream`](Session::open_stream) opens.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+use tutti_platform::Asset;
 use tutti_sampler::{OpenError, Placement, Stream, StreamReader};
 
 use tutti_rt::LockExt;
@@ -101,7 +101,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     #[must_use = "the id matches the event that lands the open"]
     pub fn open_stream(
         &mut self,
-        path: impl Into<PathBuf>,
+        asset: impl Into<Asset>,
         place: Placement,
     ) -> Result<SamplerLoad, SamplerError> {
         let streamer = self
@@ -109,7 +109,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
             .streamer
             .as_ref()
             .ok_or(SamplerError::NoStreamer)?;
-        let opening = streamer.open(&path.into(), place);
+        let opening = streamer.open(asset, place);
         let id = SamplerLoad::mint(&self.sampler.opens);
         let landed = Arc::clone(&self.sampler.streams);
         self.jobs.submit(

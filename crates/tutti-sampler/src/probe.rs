@@ -20,9 +20,8 @@
 //! stops. Deciding *how much* of a file to keep resident is the caller's policy;
 //! this only reports what the file allows.
 
-use std::path::{Path, PathBuf};
-
 use tutti_buffers::{ChannelLayout, ChannelTopology};
+use tutti_platform::Asset;
 use tutti_units::{SampleRate, Samples};
 
 /// What a header says about a file, and what this sampler can do with it.
@@ -78,17 +77,17 @@ pub struct SampleFacts {
 #[non_exhaustive]
 pub enum ProbeError {
     /// The file could not be opened, or has no track this build can decode.
-    #[error("could not read {}: {source}", path.display())]
+    #[error("could not read {name}: {source}")]
     Unreadable {
-        /// The path that was probed.
-        path: PathBuf,
+        /// The probed asset's [`name`](Asset::name).
+        name: String,
         /// The decoder's error.
         #[source]
         source: tutti_codec::DecodeError,
     },
 }
 
-/// Reads `path`'s header and reports what this sampler can do with it.
+/// Reads `asset`'s header and reports what this sampler can do with it.
 ///
 /// Blocking file I/O. A host on a frame budget runs this off the main thread;
 /// this crate deliberately does not choose a task system for it.
@@ -111,17 +110,19 @@ pub enum ProbeError {
 /// }
 /// # Ok::<(), tutti_sampler::ProbeError>(())
 /// ```
-pub fn probe(path: impl AsRef<Path>) -> Result<SampleFacts, ProbeError> {
-    let path = path.as_ref();
-    let meta = tutti_codec::read_wave_metadata(path).map_err(|source| ProbeError::Unreadable {
-        path: path.to_path_buf(),
-        source,
+pub fn probe(asset: impl Into<Asset>) -> Result<SampleFacts, ProbeError> {
+    let asset = asset.into();
+    let meta = tutti_codec::read_wave_metadata(asset.clone()).map_err(|source| {
+        ProbeError::Unreadable {
+            name: asset.name(),
+            source,
+        }
     })?;
     Ok(SampleFacts {
         frames: meta.total_frames.map(|f| Samples::new(f as usize)),
         sample_rate: meta.sample_rate,
         layout: meta.topology.width(),
-        streamable: streamable(path, &meta),
+        streamable: streamable(&asset, &meta),
         topology: meta.topology,
     })
 }
@@ -131,13 +132,13 @@ pub fn probe(path: impl AsRef<Path>) -> Result<SampleFacts, ProbeError> {
 /// The one place these conditions live: `streamer::handlers::open_stream` asks
 /// [`probe`] for its verdict instead of re-deriving it, so a host picking a
 /// playback tier and the streamer cannot disagree.
-fn streamable(path: &Path, meta: &tutti_codec::WaveMetadata) -> bool {
+fn streamable(asset: &Asset, meta: &tutti_codec::WaveMetadata) -> bool {
     // 1. No frame count means no seekable end — the streamer falls back whole-file.
     if meta.total_frames.is_none() {
         return false;
     }
     // 2. The incremental decoder must actually open.
-    let Ok(decoder) = tutti_codec::FileIn::<f32>::open(path) else {
+    let Ok(decoder) = tutti_codec::FileIn::<f32>::open(asset.clone()) else {
         return false;
     };
     // 3. Defensive, and inherited from `open_stream`: a decoder that reports
@@ -190,6 +191,17 @@ mod tests {
             facts.streamable,
             "a local PCM wav has a frame count and seeks"
         );
+    }
+
+    #[test]
+    fn a_bytes_asset_reports_the_header_its_bytes_hold() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let bytes = std::fs::read(write_wav(&dir, "probe_bytes.wav", 4800)).expect("read");
+        drop(dir);
+        let facts = probe(bytes).expect("readable");
+        assert_eq!(facts.frames, Some(Samples::new(4800)));
+        assert_eq!(facts.sample_rate, SampleRate::SR_48K);
+        assert!(facts.streamable, "the bytes have a frame count and seek");
     }
 
     #[test]

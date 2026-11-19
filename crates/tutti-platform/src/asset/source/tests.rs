@@ -59,3 +59,40 @@ fn a_missing_path_has_no_identity_and_fails_at_open() {
     assert!(asset.open().is_err());
     assert!(asset.name().ends_with("absent.wav"));
 }
+
+#[test]
+fn two_assets_of_one_path_are_equal_and_of_two_paths_are_not() {
+    assert_eq!(
+        Asset::from("a/kick.wav"),
+        Asset::from(PathBuf::from("a/kick.wav"))
+    );
+    assert_ne!(Asset::from("a/kick.wav"), Asset::from("a/snare.wav"));
+}
+
+#[test]
+fn equal_bytes_in_two_vecs_are_two_assets_and_a_clone_is_its_original() {
+    let a = Asset::from(vec![1u8, 2, 3]);
+    assert_ne!(a, Asset::from(vec![1u8, 2, 3]));
+    assert_eq!(a, a.clone());
+    assert_eq!(a, a.clone().hint("wav"), "the hint is not the source");
+}
+
+#[test]
+fn an_arc_of_an_open_is_equal_to_itself_and_not_to_another_arc() {
+    struct Silent;
+    impl Open for Silent {
+        fn open(&self) -> io::Result<Box<dyn ReadSeek>> {
+            Ok(Box::new(Cursor::new(Vec::new())))
+        }
+        fn name(&self) -> String {
+            "silent".into()
+        }
+    }
+    let first: Arc<dyn Open> = Arc::new(Silent);
+    let second: Arc<dyn Open> = Arc::new(Silent);
+    assert_eq!(Asset::from(Arc::clone(&first)), Asset::from(first));
+    assert_ne!(
+        Asset::from(Arc::clone(&second)),
+        Asset::from(Arc::new(Silent) as Arc<dyn Open>)
+    );
+}

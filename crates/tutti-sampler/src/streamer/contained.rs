@@ -499,7 +499,7 @@ fn a_decode_held_open_does_not_stop_another_stream() {
     let Driver::Threaded(streamer) = &driver else {
         unreachable!()
     };
-    let mut opening = streamer.open(&mp3(dir.path()), Placement::HEAD);
+    let mut opening = streamer.open(mp3(dir.path()), Placement::HEAD);
     // Let the streamer reach the decode, which holds at the gate.
     std::thread::sleep(Duration::from_millis(50));
     opening = match opening.poll() {
@@ -537,7 +537,7 @@ fn a_refused_decode_thread_fails_the_open() {
     )
     .expect("builds");
     let dir = tempfile::tempdir().expect("a temp dir");
-    let opening = sampler.open(&mp3(dir.path()), Placement::HEAD);
+    let opening = sampler.open(mp3(dir.path()), Placement::HEAD);
     let answer = wait_for_open(&mut sampler, opening);
     assert!(
         matches!(&answer, Err(OpenError::Io(std::io::ErrorKind::Other))),
@@ -634,7 +634,7 @@ fn a_fork_plays_the_loop_as_applied_not_as_asked() {
     assert_ne!(fork.forked_loop(), Some(asked));
 }
 
-/// A stream names its file: its path, its own rate, and the wave when the
+/// A stream names its file: its asset, its own rate, and the wave when the
 /// streamer holds the file whole. A seekable file is read a piece at a time and
 /// has none; a file that cannot seek is decoded whole to be streamed, and the
 /// stream's file is that wave itself (not a second decode), the one its writer
@@ -647,10 +647,10 @@ fn a_stream_names_its_file() {
         DiskStreamer::<_, f32>::manual(SampleRate::SR_8K, Default::default()).expect("builds");
     let opening = sampler.open(&wav, Placement::HEAD);
     let (stream, reader) = wait_for_open(&mut sampler, opening).expect("opens");
-    assert_eq!(stream.file().path(), wav);
+    assert_eq!(stream.file().asset().name(), wav.display().to_string());
     assert_eq!(stream.file().file_rate(), SampleRate::SR_8K);
     assert!(stream.file().resident().is_none(), "read a piece at a time");
-    assert_eq!(reader.file().path(), stream.file().path());
+    assert_eq!(reader.file().asset().name(), stream.file().asset().name());
     assert_eq!(reader.file_rate(), SampleRate::SR_8K);
 
     {
@@ -660,7 +660,7 @@ fn a_stream_names_its_file() {
             DiskStreamer::<_, f32>::manual(wave.sample_rate(), Default::default()).expect("builds");
         let opening = sampler.open(&mp3, Placement::HEAD);
         let (stream, _reader) = wait_for_open(&mut sampler, opening).expect("opens");
-        assert_eq!(stream.file().path(), mp3);
+        assert_eq!(stream.file().asset().name(), mp3.display().to_string());
         assert_eq!(stream.file().file_rate(), wave.sample_rate());
         let resident = stream
             .file()
@@ -708,4 +708,108 @@ fn a_fork_of_a_closed_stream_fails_even_after_a_decode_fault() {
         fault.is_some_and(|e| e.to_string().contains("ended")),
         "the closed stream's fork carries the failure"
     );
+}
+
+// ---------------------------------------------------------------------------
+// An asset of bytes.
+// ---------------------------------------------------------------------------
+
+/// **A stream of a `Vec<u8>` asset plays the file's frames**: the repo's FLAC
+/// fixture, read in by the test, streams a piece at a time through a decoder
+/// opened on the bytes, and its first frames are the file's own.
+#[test]
+fn a_stream_of_bytes_plays_the_files_frames() {
+    let path = tutti_fixtures::asset("audio/stereo.flac");
+    let wave = tutti_codec::read_wave::<f32>(&path).expect("the fixture decodes");
+    let bytes = std::fs::read(&path).expect("fixture");
+    let mut sampler =
+        DiskStreamer::<_, f32>::manual(wave.sample_rate(), Default::default()).expect("builds");
+    let opening = sampler.open(Asset::from(bytes).hint("flac"), Placement::HEAD);
+    let (stream, mut reader) = wait_for_open(&mut sampler, opening).expect("opens");
+    assert!(
+        stream.file().resident().is_none(),
+        "setup: a seekable file is read a piece at a time"
+    );
+    let claim = reader.block(Samples::new(0), [span(0, 4_000), span(0, 0)]);
+    let mut sounded = false;
+    for s in 0..4_000u64 {
+        assert!(claim.contains(s), "frame {s}");
+        for c in 0..2 {
+            let want = wave.at(c, s as usize);
+            assert_eq!(claim.frame(s).get(c), want, "frame {s} channel {c}");
+            sounded |= want != 0.0;
+        }
+    }
+    assert!(sounded, "setup: the fixture's first frames are not silence");
+}
+
+/// A source of the mp3 fixture's bytes that gives no identity: what an app's
+/// own [`Open`](tutti_platform::Open) is by default.
+struct Anonymous(Arc<[u8]>);
+
+impl tutti_platform::Open for Anonymous {
+    fn open(&self) -> std::io::Result<Box<dyn tutti_platform::ReadSeek>> {
+        Ok(Box::new(std::io::Cursor::new(Arc::clone(&self.0))))
+    }
+
+    fn name(&self) -> String {
+        "anonymous bytes".into()
+    }
+}
+
+/// A streamer whose decode thread counts the whole-file decodes it is asked
+/// for.
+fn counting_streamer() -> (
+    DiskStreamer<Manual<f32>, f32>,
+    Arc<std::sync::atomic::AtomicUsize>,
+) {
+    let decodes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counted = Arc::clone(&decodes);
+    let seams = Seams {
+        decode_hook: Some(Arc::new(move |_| {
+            counted.fetch_add(1, Ordering::SeqCst);
+        })),
+        ..Seams::default()
+    };
+    let streamer = DiskStreamer::<Manual<f32>, f32>::manual_with(
+        tutti_units::SampleRate::SR_44K1,
+        Default::default(),
+        seams,
+    )
+    .expect("builds");
+    (streamer, decodes)
+}
+
+/// **One `Arc<[u8]>` asset opened twice decodes once**: the second open is
+/// served from the cache, which the asset's minted identity keys.
+#[test]
+fn a_bytes_asset_opened_twice_decodes_once() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let bytes: Arc<[u8]> = std::fs::read(mp3(dir.path())).expect("read").into();
+    let asset = Asset::from(bytes).hint("mp3");
+    let (mut sampler, decodes) = counting_streamer();
+    for _ in 0..2 {
+        let opening = sampler.open(asset.clone(), Placement::HEAD);
+        wait_for_open(&mut sampler, opening).expect("opens");
+    }
+    assert_eq!(decodes.load(Ordering::SeqCst), 1, "decoded again");
+    assert_eq!(sampler.cache().len(), 1);
+}
+
+/// **An asset with no identity is never cached**: the same source opened twice
+/// is decoded twice and leaves the cache empty.
+#[test]
+fn an_asset_without_identity_is_never_cached() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let bytes: Arc<[u8]> = std::fs::read(mp3(dir.path())).expect("read").into();
+    let asset =
+        Asset::from(Arc::new(Anonymous(bytes)) as Arc<dyn tutti_platform::Open>).hint("mp3");
+    assert!(asset.identity().is_none(), "setup");
+    let (mut sampler, decodes) = counting_streamer();
+    for _ in 0..2 {
+        let opening = sampler.open(asset.clone(), Placement::HEAD);
+        wait_for_open(&mut sampler, opening).expect("opens");
+    }
+    assert_eq!(decodes.load(Ordering::SeqCst), 2, "cached");
+    assert_eq!(sampler.cache().len(), 0);
 }

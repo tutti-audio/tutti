@@ -300,11 +300,11 @@ impl fmt::Debug for PluginLanding<'_> {
 /// lander is typed to nothing of the clock, so the jobs in flight at a clock
 /// switch land on the converted session.
 pub(crate) trait JobSession {
-    /// A pool load's worker ended: its stamp and what it staged.
+    /// A pool load's worker ended: the identity it read under and what it staged.
     fn land_pool_load(
         &mut self,
         flight: u64,
-        stamp: Option<crate::pool::Stamp>,
+        loaded_from: Option<tutti_platform::Identity>,
         done: Result<crate::pool::Staged, crate::LoadError>,
     );
 
@@ -320,11 +320,11 @@ impl<K: crate::AppKey, C: Clock> JobSession for Session<K, C> {
     fn land_pool_load(
         &mut self,
         flight: u64,
-        stamp: Option<crate::pool::Stamp>,
+        loaded_from: Option<tutti_platform::Identity>,
         done: Result<crate::pool::Staged, crate::LoadError>,
     ) {
         self.pool.entries.worker_ended();
-        self.pool.entries.stamped(flight, stamp);
+        self.pool.entries.stamped(flight, loaded_from);
         match done {
             Ok(crate::pool::Staged::Done(value)) => self.pool.entries.land(flight, Ok(value)),
             Ok(crate::pool::Staged::Main(stage)) => self.pool.entries.stage_main(flight, stage),

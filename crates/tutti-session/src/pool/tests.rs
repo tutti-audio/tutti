@@ -794,6 +794,33 @@ mod audio {
         assert_eq!(loaded.len().get(), 100, "a reader of the old wave keeps it");
     }
 
+    /// An audio file held only as bytes (the `Vec<u8>` is the asset) loads the
+    /// file's own samples, resident and streamed, and the entry still names it.
+    #[test]
+    fn an_audio_file_declared_from_bytes_loads_the_files_samples() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.wav");
+        write_wav(&path, 100);
+        let bytes = std::fs::read(&path).unwrap();
+        drop(dir);
+        let (mut s, spawned) = session();
+        s.pool((
+            audio_file("whole", bytes.clone()),
+            audio_file("piece", bytes).streamed(),
+        ))
+        .unwrap();
+        spawned.run_all();
+        let _ = events(&mut s);
+        let loaded = wave(&s, "whole");
+        assert_eq!(loaded.len().get(), 100);
+        assert_eq!(loaded.at(1, 50), -0.5, "the file's own samples");
+        let AudioEntry::Streamed(info) = s.audio(&"piece").unwrap() else {
+            panic!("a streamed entry reads as its header");
+        };
+        assert_eq!(info.facts().frames.map(|frames| frames.get()), Some(100));
+        assert!(info.asset().open().is_ok(), "the entry keeps the bytes");
+    }
+
     #[test]
     fn dropping_an_audio_handle_leaves_the_entry_loaded_and_its_wave_shared() {
         let dir = tempfile::tempdir().unwrap();
@@ -825,7 +852,7 @@ mod audio {
         let AudioEntry::Streamed(info) = s.audio(&"long").unwrap() else {
             panic!("a streamed entry reads as its header");
         };
-        assert_eq!(info.path(), path);
+        assert_eq!(info.asset().name(), path.display().to_string());
         assert_eq!(info.facts().frames.map(|frames| frames.get()), Some(480));
         assert_eq!(info.facts().layout.count(), 2);
         assert_eq!(info.facts().sample_rate, tutti_units::SampleRate::SR_48K);

@@ -28,12 +28,11 @@
 use std::any::Any;
 use std::io;
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crossbeam_channel::Sender;
 use tutti_buffers::Wave;
-use tutti_platform::{PriorityRequest, StopToken, ThreadHandle, spawn_named};
+use tutti_platform::{Asset, PriorityRequest, StopToken, ThreadHandle, spawn_named};
 
 use super::StreamerSender;
 use super::cache::LruCache;
@@ -69,7 +68,7 @@ pub(super) type ReadHook = Arc<dyn Fn(StreamId, usize) + Send + Sync>;
 /// A hook a test runs on the decode thread, before a file is decoded. It may
 /// block, to hold a decode open.
 #[cfg(test)]
-pub(super) type DecodeHook = Arc<dyn Fn(&Path) + Send + Sync>;
+pub(super) type DecodeHook = Arc<dyn Fn(&Asset) + Send + Sync>;
 
 /// What a test can replace: how threads start, and what runs where the
 /// streamer reads a file. Production is [`Seams::default`].
@@ -94,10 +93,10 @@ impl Default for Seams {
     }
 }
 
-/// Why `file_path` could not be turned into audio: the file itself when it
+/// Why `asset` could not be turned into audio: the source itself when it
 /// cannot be opened, else a format this build cannot decode.
-pub(super) fn unreadable(file_path: &Path) -> OpenError {
-    match std::fs::File::open(file_path) {
+pub(super) fn unreadable(asset: &Asset) -> OpenError {
+    match asset.open() {
         Err(error) => OpenError::Io(error.kind()),
         Ok(_) => OpenError::Format,
     }
@@ -106,7 +105,7 @@ pub(super) fn unreadable(file_path: &Path) -> OpenError {
 /// A whole-file decode asked of the lane.
 struct Job {
     id: StreamId,
-    path: PathBuf,
+    asset: Asset,
 }
 
 /// The decode thread's queue, started on first use. Streamer-thread-local.
@@ -125,7 +124,7 @@ impl<F: RingFloat> DecodeLane<F> {
         }
     }
 
-    /// Asks for `path` to be decoded whole for stream `id`, starting the thread
+    /// Asks for `asset` to be decoded whole for stream `id`, starting the thread
     /// if this is the first job. The answer arrives as a `Decoded` command.
     ///
     /// # Errors
@@ -136,9 +135,9 @@ impl<F: RingFloat> DecodeLane<F> {
         &mut self,
         shared: &Handles<F>,
         id: StreamId,
-        path: PathBuf,
+        asset: Asset,
     ) -> Result<(), OpenError> {
-        let job = Job { id, path };
+        let job = Job { id, asset };
         let job = match &self.jobs {
             Some(jobs) => match jobs.send(job) {
                 Ok(()) => return Ok(()),
@@ -162,23 +161,23 @@ impl<F: RingFloat> DecodeLane<F> {
         let decode_hook = shared.seams.decode_hook.clone();
         let body = move |_: &StopToken| {
             let mut meter = ReadMeter::new();
-            for Job { id, path } in queue {
+            for Job { id, asset } in queue {
                 // A panic in the decoder is this file's failure, not the
                 // thread's: the next job runs.
                 let wave = catch_unwind(AssertUnwindSafe(|| {
                     #[cfg(test)]
                     if let Some(hook) = &decode_hook {
-                        hook(&path);
+                        hook(&asset);
                     }
-                    load_wave(&cache, &metrics, &mut meter, &path)
+                    load_wave(&cache, &metrics, &mut meter, &asset)
                 }));
                 let wave = match wave {
                     Ok(Some(wave)) => Ok(wave),
-                    Ok(None) => Err(unreadable(&path)),
+                    Ok(None) => Err(unreadable(&asset)),
                     Err(payload) => {
                         tracing::error!(
                             "decoding {} panicked: {}",
-                            path.display(),
+                            asset.name(),
                             panic_message(payload.as_ref())
                         );
                         Err(OpenError::Format)
@@ -210,9 +209,12 @@ fn load_wave<F: RingFloat>(
     cache: &LruCache<F>,
     metrics: &Metrics,
     meter: &mut ReadMeter,
-    file_path: &Path,
+    asset: &Asset,
 ) -> Option<Arc<Wave<F>>> {
-    if let Some(cached) = cache.get(file_path) {
+    // Taken once: a hit and the insert after a miss use the same key. An asset
+    // with no identity is decoded each time and never cached.
+    let key = asset.identity();
+    if let Some(cached) = key.as_ref().and_then(|key| cache.get(key)) {
         return Some(cached);
     }
 
@@ -221,10 +223,12 @@ fn load_wave<F: RingFloat>(
     // `--no-default-features` build.
     #[cfg(codec)]
     {
-        if let Ok(w) = tutti_codec::read_wave::<F>(file_path) {
+        if let Ok(w) = tutti_codec::read_wave::<F>(asset.clone()) {
             let arc_wave = Arc::new(w);
             meter.record_read(wave_bytes(&arc_wave), metrics);
-            cache.insert(file_path.to_path_buf(), arc_wave.clone());
+            if let Some(key) = key {
+                cache.insert(key, arc_wave.clone());
+            }
             return Some(arc_wave);
         }
     }
