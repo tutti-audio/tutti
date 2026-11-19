@@ -293,25 +293,36 @@ impl SrcRatio {
     }
 }
 
-unit! {
+// `PlaybackRate` is a `Unit` (below), which is already a `Quantity`, so it takes
+// the type and its error without the macro's own `Quantity` impl.
+crate::ranged! {
+    @items []
     /// Varispeed: how fast a clip plays relative to its recorded rate.
     ///
     /// **Couples pitch to speed**, exactly like changing a turntable's speed —
     /// 2.0 plays twice as fast an octave up. When pitch must stay put, that is
     /// [`StretchFactor`], a different operation with different DSP.
     ///
-    /// Bounded ONLY when built through [`new_clamped`](Self::new_clamped) —
-    /// the generated `new` is unchecked, so the type makes the range *visible*
-    /// and *shared*, it does not enforce it. Every path fed by user input or a
-    /// document field must use `new_clamped`; bare `new` is for reading back a
-    /// value that was already clamped on the way in (an atomic reload).
+    /// **Range-checked**: [`new`](Self::new) refuses NaN, the infinities and
+    /// anything outside [`MIN`](Self::MIN)..=[`MAX`](Self::MAX) (`0.25..=4.0`, a
+    /// resampler limit), and so do `TryFrom<f64>` and serde, so no backend setter
+    /// can accept a speed another rejects. [`of`](Self::of) is for a literal.
+    /// [`clamped`](Self::clamped) is the one saturating constructor, for a value
+    /// that arrives from a knob or a document; [`Unit::from_raw`] is it too, since
+    /// a parameter cell holds any float. A NaN rate cannot exist.
     ///
-    /// The range is a resampler limit, and it lives on the constructor rather
-    /// than in each backend's setter. Split across two setters, one tier
-    /// accepts an out-of-range speed the other rejects — same command,
-    /// different audio. A newtype alone does not close that; the shared
-    /// constructor does.
-    pub struct PlaybackRate(pub f64): Unit, Ordered, Bounded;
+    /// ```
+    /// use tutti_units::PlaybackRate;
+    ///
+    /// assert_eq!(PlaybackRate::new(0.5).map(PlaybackRate::get), Some(0.5));
+    /// assert_eq!(PlaybackRate::new(8.0), None);
+    /// assert_eq!(PlaybackRate::clamped(8.0), PlaybackRate::MAX);
+    /// ```
+    #[repr(transparent)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+    #[cfg_attr(feature = "serde", serde(try_from = "f64", into = "f64"))]
+    PlaybackRate(f64), PlaybackRateOutOfRange, "within 0.25..=4.0",
+    |raw| raw >= 0.25 && raw <= 4.0
 }
 // NOT `Additive`: 2× plus 2× is not 4× — rates compose by multiplication.
 // NOT `Scalable`: scaling by a bare `f64` is how the three rate kinds got
@@ -327,14 +338,45 @@ impl PlaybackRate {
     /// Fastest supported varispeed (4× speed).
     pub const MAX: Self = Self(4.0);
 
-    /// Creates a rate, clamping into [`MIN`](Self::MIN)..=[`MAX`](Self::MAX).
-    ///
-    /// NaN stays NaN, which makes a read position NaN: a caller that takes
-    /// user input guards it first.
+    /// `raw` constrained into [`MIN`](Self::MIN)..=[`MAX`](Self::MAX); NaN is
+    /// [`UNITY`](Self::UNITY).
     #[inline]
     #[must_use]
-    pub fn new_clamped(v: f64) -> Self {
-        Self(v.clamp(Self::MIN.0, Self::MAX.0))
+    pub const fn clamped(raw: f64) -> Self {
+        if raw.is_nan() {
+            Self::UNITY
+        } else if raw < Self::MIN.0 {
+            Self::MIN
+        } else if raw > Self::MAX.0 {
+            Self::MAX
+        } else {
+            Self(raw)
+        }
+    }
+
+    /// Returns the smaller of the two, in this unit.
+    #[inline]
+    #[must_use]
+    pub fn min(self, other: Self) -> Self {
+        Self(self.0.min(other.0))
+    }
+
+    /// Returns the larger of the two, in this unit.
+    #[inline]
+    #[must_use]
+    pub fn max(self, other: Self) -> Self {
+        Self(self.0.max(other.0))
+    }
+
+    /// Clamps into `lo..=hi`, in this unit.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `lo > hi`, matching `f64::clamp`.
+    #[inline]
+    #[must_use]
+    pub fn clamp(self, lo: Self, hi: Self) -> Self {
+        Self(self.0.clamp(lo.0, hi.0))
     }
 
     /// Source samples consumed per output sample: varispeed × conversion.
@@ -345,6 +387,42 @@ impl PlaybackRate {
     #[must_use]
     pub fn read_rate(self, src: SrcRatio) -> ReadRate {
         ReadRate(self.0 * src.0)
+    }
+}
+
+/// Normal speed.
+impl Default for PlaybackRate {
+    #[inline]
+    fn default() -> Self {
+        Self::UNITY
+    }
+}
+
+impl PartialOrd for PlaybackRate {
+    #[inline]
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+        self.0.partial_cmp(&other.0)
+    }
+}
+
+impl core::fmt::Display for PlaybackRate {
+    #[inline]
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        core::fmt::Display::fmt(&self.0, f)
+    }
+}
+
+/// `from_raw` saturates ([`PlaybackRate::clamped`]): a parameter cell holds any
+/// float, and a unit's `from_raw` cannot refuse.
+impl Unit for PlaybackRate {
+    type Raw = f64;
+    #[inline]
+    fn from_raw(v: f64) -> Self {
+        Self::clamped(v)
+    }
+    #[inline]
+    fn to_raw(self) -> f64 {
+        self.0
     }
 }
 
@@ -429,7 +507,7 @@ impl StretchFactor {
 
     /// Creates a factor, clamping into [`MIN`](Self::MIN)..=[`MAX`](Self::MAX).
     ///
-    /// NaN stays NaN, as in [`PlaybackRate::new_clamped`]; the raw `new` is
+    /// NaN stays NaN, unlike [`PlaybackRate::clamped`]; the raw `new` is
     /// unchecked. Use this on any path carrying user input, and guard a NaN
     /// first.
     #[inline]

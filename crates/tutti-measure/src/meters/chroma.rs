@@ -750,7 +750,6 @@ pub fn chroma<S: Sample>(
     cfg: &ChromaConfig,
     samples: Mono<'_, S>,
     rate: impl Into<SampleRate>,
-    fft: &mut FftScratch<f64>,
 ) -> Result<Chroma> {
     let plan = cfg.plan(rate.into())?;
     let samples = widen(samples.samples());
@@ -775,8 +774,10 @@ pub fn chroma<S: Sample>(
         Tuning::Fixed(offset) => offset,
         Tuning::Estimate => {
             let mut state = ChromaFold::new(plan);
+            // The meter built below owns a separate scratch.
+            let mut fft = FftScratch::new();
             for i in 0..frames.get() {
-                state.transform(frame_at(i), fft);
+                state.transform(frame_at(i), &mut fft);
                 let sums = &mut state.sums;
                 plan.peaks(&state.magnitudes, |f, e| ChromaPlan::tune(f, e, sums));
             }
@@ -789,10 +790,8 @@ pub fn chroma<S: Sample>(
         ..plan
     };
     let mut meter = ChromaMeter::<f64>::new(fixed);
-    core::mem::swap(&mut meter.fft, fft);
     let mut data = Vec::with_capacity(frames.get() * CLASSES);
     meter.feed(&samples, |frame| data.extend_from_slice(&frame.bins));
-    core::mem::swap(&mut meter.fft, fft);
     Ok(Chroma {
         grid: Grid::new(data, frames, BinCount(CLASSES))?,
         tuning: tuning.get(),

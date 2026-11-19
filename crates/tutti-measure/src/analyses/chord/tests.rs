@@ -250,13 +250,13 @@ fn spans_sit_between_frame_centres() {
         let centre = |i: usize| (i * hop + window / 2) as f64;
         let boundary = (centre(6) + centre(7)) / 2.0;
         assert_eq!(spans.len(), 2, "{window}/{hop}");
-        assert_eq!(spans[0].start, Samples::new(0));
+        assert_eq!(spans[0].span.start(), Samples::new(0));
         assert!(
-            (spans[0].end.get() as f64 - boundary).abs() <= 1.0,
+            (spans[0].span.end().get() as f64 - boundary).abs() <= 1.0,
             "{window}/{hop}"
         );
-        assert_eq!(spans[1].start, spans[0].end);
-        assert_eq!(spans[1].end, Samples::new(11 * hop + window));
+        assert_eq!(spans[1].span.start(), spans[0].span.end());
+        assert_eq!(spans[1].span.end(), Samples::new(11 * hop + window));
     }
 }
 
@@ -274,7 +274,7 @@ fn no_chord_leaves_a_gap() {
         .collect();
     let spans = run(&rows, &cfg());
     assert_eq!(spans.len(), 2);
-    assert!(spans[0].end < spans[1].start);
+    assert!(spans[0].span.end() < spans[1].span.start());
     assert_eq!(roots(&spans), [(PitchClass::G, ChordQuality::Minor); 2]);
 }
 
@@ -351,11 +351,11 @@ fn spans_follow_the_chromas_own_framing() {
     let rows: Vec<_> = (0..12).map(|i| if i < 7 { c } else { f }).collect();
     for (window, hop) in [(2048, 512), (4096, 1024)] {
         let chroma = Chroma::new(grid(&rows), Cents::new(0.0), framing(window, hop));
-        let spans = detect_chords(&chroma, &cfg()).unwrap();
+        let spans = detect_chords(&cfg(), &chroma).unwrap();
         let centre = |i: usize| (i * hop + window / 2) as f64;
         let boundary = (centre(6) + centre(7)) / 2.0;
         assert_eq!(spans.len(), 2, "{window}/{hop}");
-        assert!((spans[0].end.get() as f64 - boundary).abs() <= 1.0);
-        assert_eq!(spans[1].end, Samples::new(11 * hop + window));
+        assert!((spans[0].span.end().get() as f64 - boundary).abs() <= 1.0);
+        assert_eq!(spans[1].span.end(), Samples::new(11 * hop + window));
     }
 }

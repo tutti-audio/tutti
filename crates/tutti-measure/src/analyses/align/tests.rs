@@ -23,29 +23,20 @@ fn shifted(x: &[f64], delay: isize) -> Vec<f64> {
 
 fn find(reference: &[f64], take: &[f64], max_lag: usize) -> Alignment {
     let cfg = AlignConfig::new(Samples::new(max_lag));
-    align(reference, take, &cfg, &mut FftScratch::new()).unwrap()
+    align(reference, take, &cfg).unwrap()
 }
 
 /// The lag plain cross-correlation picks for the same pair.
 fn plain_lag(reference: &[f64], take: &[f64], max_lag: usize) -> isize {
-    cross_correlate(
-        Mono::new(take),
-        Mono::new(reference),
-        &mut FftScratch::new(),
-    )
-    .peak_within(Samples::new(max_lag))
-    .unwrap()
-    .lag
+    cross_correlate(Mono::new(take), Mono::new(reference))
+        .peak_within(Samples::new(max_lag))
+        .unwrap()
+        .lag
 }
 
 /// `align` at 48 kHz, the rate the tests that do not name one read at.
-fn align(
-    reference: &[f64],
-    take: &[f64],
-    config: &AlignConfig,
-    fft: &mut FftScratch<f64>,
-) -> Result<Alignment> {
-    align_at(SampleRate::SR_48K, reference, take, config, fft)
+fn align(reference: &[f64], take: &[f64], config: &AlignConfig) -> Result<Alignment> {
+    align_at(SampleRate::SR_48K, reference, take, config)
 }
 
 fn align_at(
@@ -53,9 +44,8 @@ fn align_at(
     reference: &[f64],
     take: &[f64],
     config: &AlignConfig,
-    fft: &mut FftScratch<f64>,
 ) -> Result<Alignment> {
-    super::align(Mono::new(reference), Mono::new(take), config, rate, fft)
+    super::align(config, Mono::new(reference), Mono::new(take), rate)
 }
 
 fn band(low: f64, high: f64) -> FrequencyBand {
@@ -240,7 +230,6 @@ fn a_band_limit_leaves_out_what_does_not_correlate() {
         .map(|i| 3.0 * b[i] + common(i as f64 - 77.0))
         .collect();
 
-    let mut fft = FftScratch::new();
     let open = AlignConfig::new(Samples::new(500));
     let banded = open.band(band(0.03, 0.09));
     assert_eq!(
@@ -249,8 +238,8 @@ fn a_band_limit_leaves_out_what_does_not_correlate() {
     );
     // A rate of one sample per second: the band is cycles per sample.
     let rate = SampleRate::of(1.0);
-    let open = align_at(rate, &reference, &take, &open, &mut fft).unwrap();
-    let banded = align_at(rate, &reference, &take, &banded, &mut fft).unwrap();
+    let open = align_at(rate, &reference, &take, &open).unwrap();
+    let banded = align_at(rate, &reference, &take, &banded).unwrap();
     assert_eq!(banded.lag, 77);
     assert!(
         banded.confidence.get() > 2.0 * open.confidence.get(),
@@ -323,8 +312,7 @@ fn the_max_lag_bound_is_respected() {
 fn a_wide_peak_is_not_its_own_runner_up() {
     let cfg = AlignConfig::new(Samples::new(300)).band(band(1000.0, 4000.0));
     let x = band_noise(4096, 5, 1000.0 / 48_000.0, 4000.0 / 48_000.0);
-    let mut fft = FftScratch::new();
-    let clean = align(&x, &shifted(&x, 40), &cfg, &mut fft).unwrap();
+    let clean = align(&x, &shifted(&x, 40), &cfg).unwrap();
     assert_eq!(clean.lag, 40);
     assert!(clean.confidence.get() > 0.7, "{:?}", clean.confidence);
 
@@ -335,7 +323,7 @@ fn a_wide_peak_is_not_its_own_runner_up() {
         .zip(&n2)
         .map(|(a, b)| a + 0.5 * b)
         .collect();
-    let noisy = align(&reference, &take, &cfg, &mut fft).unwrap();
+    let noisy = align(&reference, &take, &cfg).unwrap();
     assert_eq!(noisy.lag, 40);
     assert!(noisy.confidence.get() > 0.7, "{:?}", noisy.confidence);
 }
@@ -390,8 +378,8 @@ fn unrelated_noise_has_low_confidence() {
 /// and a lag at the edge of the overlap (a neighbour missing) all give zero.
 #[test]
 fn the_offset_is_zero_unless_three_points_bend_down_inside_the_overlap() {
-    let mut fft = FftScratch::new();
     let x = noise(8, 1);
+    let mut fft = FftScratch::new();
     let delta_at_one = cross_correlate_shaped(&x, &x, &mut fft, |bins| {
         let size = ((bins.len() - 1) * 2) as f64;
         for (k, bin) in bins.iter_mut().enumerate() {
@@ -421,35 +409,34 @@ fn delay_converts_and_bad_input_is_refused() {
     assert_eq!(a.delay_samples(), 48.25);
     assert!((a.delay(SampleRate::SR_48K).get() - 48.25 / 48_000.0).abs() < 1e-9);
 
-    let mut fft = FftScratch::new();
     let cfg = AlignConfig::new(Samples::new(10));
     assert_eq!(cfg.band, None);
     let one = [1.0f64];
     assert!(matches!(
-        align(&[], &one, &cfg, &mut fft),
+        align(&[], &one, &cfg),
         Err(Error::InsufficientInput { .. })
     ));
     assert!(matches!(
-        align(&one, &[], &cfg, &mut fft),
+        align(&one, &[], &cfg),
         Err(Error::InsufficientInput { .. })
     ));
     for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
         let x = [1.0, bad, 2.0];
-        assert_eq!(align(&x, &one, &cfg, &mut fft), Err(Error::NonFiniteInput));
-        assert_eq!(align(&one, &x, &cfg, &mut fft), Err(Error::NonFiniteInput));
+        assert_eq!(align(&x, &one, &cfg), Err(Error::NonFiniteInput));
+        assert_eq!(align(&one, &x, &cfg), Err(Error::NonFiniteInput));
     }
     // Silence, and a band between two bins: nothing to correlate.
     let quiet = [0.0f64; 64];
     let x = noise(64, 3);
-    assert_eq!(align(&x, &quiet, &cfg, &mut fft), Err(Error::NoSignal));
-    assert_eq!(align(&quiet, &x, &cfg, &mut fft), Err(Error::NoSignal));
+    assert_eq!(align(&x, &quiet, &cfg), Err(Error::NoSignal));
+    assert_eq!(align(&quiet, &x, &cfg), Err(Error::NoSignal));
     let gap = cfg.band(band(100.0, 200.0));
-    assert_eq!(align(&x, &x, &gap, &mut fft), Err(Error::NoSignal));
+    assert_eq!(align(&x, &x, &gap), Err(Error::NoSignal));
 
     // A band above Nyquist is refused where the rate binds.
     let high = cfg.band(band(100.0, 30_000.0));
     assert_eq!(
-        align(&x, &x, &high, &mut fft),
+        align(&x, &x, &high),
         Err(Error::AboveNyquist {
             freq: Hz::new(30_000.0),
             nyquist: Hz::new(24_000.0)

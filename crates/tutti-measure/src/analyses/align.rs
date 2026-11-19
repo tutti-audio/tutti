@@ -132,11 +132,10 @@ impl Alignment {
 /// [`Error::NoSignal`] when there is nothing to correlate: a silent input, or
 /// a band that holds no spectrum bin.
 pub fn align<S: Sample>(
+    config: &AlignConfig,
     reference: Mono<'_, S>,
     take: Mono<'_, S>,
-    config: &AlignConfig,
     rate: impl Into<SampleRate>,
-    fft: &mut FftScratch<f64>,
 ) -> Result<Alignment> {
     let rate = rate.into();
     if let Some(band) = config.band {
@@ -156,7 +155,8 @@ pub fn align<S: Sample>(
         }
     }
     let mut signal = false;
-    let correlation = cross_correlate_shaped(take, reference, fft, |bins| {
+    let mut fft = FftScratch::new();
+    let correlation = cross_correlate_shaped(take, reference, &mut fft, |bins| {
         signal = phase_transform(bins, config.band, rate);
     });
     if !signal {

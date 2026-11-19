@@ -95,12 +95,9 @@ impl CrossCorrelation {
 ///
 /// See [`CrossCorrelation`] for the lag convention. Allocates the padded
 /// buffers and the result; an offline call.
-pub fn cross_correlate<S: Sample>(
-    a: Mono<'_, S>,
-    b: Mono<'_, S>,
-    fft: &mut FftScratch<f64>,
-) -> CrossCorrelation {
-    cross_correlate_shaped(&widen(a.samples()), &widen(b.samples()), fft, |_| {})
+pub fn cross_correlate<S: Sample>(a: Mono<'_, S>, b: Mono<'_, S>) -> CrossCorrelation {
+    let mut fft = FftScratch::new();
+    cross_correlate_shaped(&widen(a.samples()), &widen(b.samples()), &mut fft, |_| {})
 }
 
 /// [`cross_correlate`] with the cross-spectrum `A * conj(B)` handed to `shape`

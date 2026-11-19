@@ -20,7 +20,7 @@ use tutti_units::{Amplitude, SampleRate, Samples};
 
 use crate::convert::widen;
 
-use crate::{Error, Result};
+use crate::{Error, Region, Result};
 use tutti_dsp::Complex64;
 use tutti_dsp::CosineWindow;
 use tutti_dsp::FftScratch;
@@ -212,11 +212,7 @@ impl Stft {
     /// # Errors
     /// Returns [`Error::GridShapeDisagreement`] if `mask` does not
     /// match this transform's `frames x bins` shape.
-    pub fn resynthesize_masked<S: Sample>(
-        &self,
-        mask: &Grid<Complex64>,
-        fft: &mut FftScratch<f64>,
-    ) -> Result<Vec<S>> {
+    pub fn resynthesize_masked<S: Sample>(&self, mask: &Grid<Complex64>) -> Result<Vec<S>> {
         if !self.bins.same_shape_as(mask) {
             return Err(Error::GridShapeDisagreement);
         }
@@ -231,7 +227,7 @@ impl Stft {
             bins: self.bins.same_shape(masked),
             geometry: self.geometry,
         };
-        Ok(istft(&masked, fft))
+        Ok(istft(&masked))
     }
 }
 
@@ -319,49 +315,42 @@ pub enum HopPolicy {
 pub enum SampleRange {
     /// The whole buffer.
     All,
-    /// Half-open `[start, end)`, clamped to the buffer.
-    Span {
-        /// First sample analyzed, clamped to the buffer length.
-        start: Samples,
-        /// One past the last sample analyzed, clamped to `start..=len`.
-        end: Samples,
-    },
+    /// The half-open [`Region`], clamped to the buffer.
+    Span(Region),
 }
 
 impl SampleRange {
     fn resolve(self, len: usize) -> (usize, usize) {
         match self {
             Self::All => (0, len),
-            Self::Span { start, end } => {
-                let start = start.get().min(len);
-                (start, end.get().clamp(start, len))
+            Self::Span(region) => {
+                let start = region.start().get().min(len);
+                (start, region.end().get().clamp(start, len))
             }
         }
     }
 }
 
-/// An analysis request: what to analyze, at what resolution.
+/// What a short-time transform computes: the window, the hop and the window
+/// shape. The part of the buffer and the sample rate belong to the call.
 #[derive(Debug, Clone, Copy)]
-pub struct StftRequest {
+pub struct StftConfig {
     /// Analysis window, in [`Samples`]. Also the FFT size.
     pub window: Samples,
     /// How far to advance between frames — fixed, or decimated to a frame count.
     pub hop: HopPolicy,
-    /// Which span of the buffer to transform.
-    pub range: SampleRange,
     /// The window *shape*. [`CosineWindow::HANN`] unless
     /// [`window_fn`](Self::window_fn) says otherwise.
     pub window_fn: CosineWindow,
 }
 
-impl StftRequest {
-    /// A request over the whole buffer at a fixed hop. The sample rate is the
-    /// transform call's, which resolves the bin frequencies.
+impl StftConfig {
+    /// A config at a fixed hop. The sample rate is the transform call's, which
+    /// resolves the bin frequencies.
     pub fn new(window: impl Into<Samples>, hop: impl Into<Samples>) -> Self {
         Self {
             window: window.into(),
             hop: HopPolicy::Fixed(hop.into()),
-            range: SampleRange::All,
             window_fn: CosineWindow::HANN,
         }
     }
@@ -372,7 +361,7 @@ impl StftRequest {
     /// [`StftGeometry::with_window_fn`] gives: three `Samples`-adjacent
     /// positional parameters are already the transposition limit.
     ///
-    /// Note this can make a request that [`resolve_cola`](Self::resolve_cola)
+    /// Note this can make a config that [`resolve_cola`](Self::resolve_cola)
     /// refuses but [`resolve`](Self::resolve) accepts — Blackman needs 8x
     /// overlap where Hann needs 4x, so a grid that inverted before may not
     /// after. That refusal is the point.
@@ -390,15 +379,7 @@ impl StftRequest {
         self
     }
 
-    /// Restricts the request to a span of the buffer; a [`SampleRange::Span`]
-    /// is clamped to the buffer at resolve time.
-    #[must_use]
-    pub fn range(mut self, range: SampleRange) -> Self {
-        self.range = range;
-        self
-    }
-
-    /// The geometry this request resolves to over `len` samples at `rate`.
+    /// The geometry this config resolves to over `len` samples at `rate`.
     ///
     /// Only ever an overlapping grid — use [`resolve_cola`](Self::resolve_cola)
     /// when the result must invert.
@@ -448,19 +429,19 @@ impl StftRequest {
 ///
 /// # Errors
 ///
-/// As [`StftRequest::resolve_cola`]: an invalid geometry, or one that is not
+/// As [`StftConfig::resolve_cola`]: an invalid geometry, or one that is not
 /// COLA-compliant.
 pub fn stft<S: Sample>(
-    request: StftRequest,
+    config: &StftConfig,
     samples: Mono<'_, S>,
+    range: SampleRange,
     rate: impl Into<SampleRate>,
-    fft: &mut FftScratch<f64>,
 ) -> Result<Stft> {
     let samples = widen(samples.samples());
-    let (start, end) = request.range.resolve(samples.len());
+    let (start, end) = range.resolve(samples.len());
     let slice = &samples[start..end];
-    let geometry = request.resolve_cola(rate, Samples::new(slice.len()))?;
-    Ok(compute(slice, geometry, fft))
+    let geometry = config.resolve_cola(rate, Samples::new(slice.len()))?;
+    Ok(compute(slice, geometry, &mut FftScratch::new()))
 }
 
 /// Computes the STFT in magnitude/phase form. Also invertible.
@@ -469,12 +450,12 @@ pub fn stft<S: Sample>(
 ///
 /// As [`stft`].
 pub fn stft_polar<S: Sample>(
-    request: StftRequest,
+    config: &StftConfig,
     samples: Mono<'_, S>,
+    range: SampleRange,
     rate: impl Into<SampleRate>,
-    fft: &mut FftScratch<f64>,
 ) -> Result<StftPolar> {
-    Ok(stft(request, samples, rate, fft)?.to_polar())
+    Ok(stft(config, samples, range, rate)?.to_polar())
 }
 
 /// Computes a magnitude-only STFT — the display path.
@@ -485,25 +466,26 @@ pub fn stft_polar<S: Sample>(
 ///
 /// # Errors
 ///
-/// As [`StftRequest::resolve`]: an invalid geometry.
+/// As [`StftConfig::resolve`]: an invalid geometry.
 pub fn stft_magnitude<S: Sample>(
-    request: StftRequest,
+    config: &StftConfig,
     samples: Mono<'_, S>,
+    range: SampleRange,
     rate: impl Into<SampleRate>,
-    fft: &mut FftScratch<f64>,
 ) -> Result<StftMagnitude> {
     let samples = widen(samples.samples());
-    let (start, end) = request.range.resolve(samples.len());
+    let (start, end) = range.resolve(samples.len());
     let slice = &samples[start..end];
-    let geometry = request.resolve(rate, Samples::new(slice.len()))?;
-    Ok(compute(slice, geometry, fft).to_magnitude())
+    let geometry = config.resolve(rate, Samples::new(slice.len()))?;
+    Ok(compute(slice, geometry, &mut FftScratch::new()).to_magnitude())
 }
 
 /// Inverts a complex STFT by overlap-add.
 ///
 /// Weighted overlap-add with per-sample window-sum normalization, which is
 /// exact when the geometry is COLA — and [`Stft`] can only be built on one.
-pub fn istft<S: Sample>(transform: &Stft, fft: &mut FftScratch<f64>) -> Vec<S> {
+pub fn istft<S: Sample>(transform: &Stft) -> Vec<S> {
+    let mut fft = FftScratch::new();
     let geometry = transform.geometry;
     let frames = transform.bins.frames();
     let window_len = geometry.window().get();

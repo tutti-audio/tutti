@@ -37,8 +37,8 @@ use crate::convert::widen;
 use crate::framing::Framing;
 use crate::meters::onset::{DetectionFunction, OnsetConfig, onset_lag, run};
 use crate::{Error, Result};
+use tutti_dsp::FrameCount;
 use tutti_dsp::StftGeometry;
-use tutti_dsp::{FftScratch, FrameCount};
 use tutti_dsp::{local_maxima, parabolic_peak, track_beat_frames};
 use tutti_units::ranged;
 
@@ -275,12 +275,11 @@ pub fn estimate_tempo<S: Sample>(
     cfg: &TempoConfig,
     samples: Mono<'_, S>,
     rate: impl Into<SampleRate>,
-    fft: &mut FftScratch<f64>,
 ) -> Result<Tempo> {
     let rate = rate.into();
     let hop = cfg.framing.hop();
-    let novelty = novelty(cfg, &widen(samples.samples()), rate, fft)?.0;
-    estimate_tempo_from_novelty(cfg, &novelty, rate, hop, fft)
+    let novelty = novelty(cfg, &widen(samples.samples()), rate)?.0;
+    estimate_tempo_from_novelty(cfg, &novelty, rate, hop)
 }
 
 /// Estimates the tempo from a novelty curve of one value per `hop` samples.
@@ -304,10 +303,9 @@ pub fn estimate_tempo_from_novelty<F: Float>(
     novelty: &[F],
     sample_rate: impl Into<SampleRate>,
     hop: Samples,
-    fft: &mut FftScratch<f64>,
 ) -> Result<Tempo> {
     let rate = frame_rate(sample_rate.into(), hop)?;
-    let curve = Periodicity::new(cfg, &widen(novelty), rate, hop, fft)?;
+    let curve = Periodicity::new(cfg, &widen(novelty), rate, hop)?;
     Ok(curve.tempo(cfg))
 }
 
@@ -324,11 +322,10 @@ pub fn track_beats<S: Sample>(
     cfg: &TempoConfig,
     samples: Mono<'_, S>,
     rate: impl Into<SampleRate>,
-    fft: &mut FftScratch<f64>,
 ) -> Result<BeatGrid> {
     let rate = rate.into();
-    let (novelty, geometry) = novelty(cfg, &widen(samples.samples()), rate, fft)?;
-    let mut grid = track_beats_from_novelty(cfg, &novelty, rate, geometry.hop(), None, fft)?;
+    let (novelty, geometry) = novelty(cfg, &widen(samples.samples()), rate)?;
+    let mut grid = track_beats_from_novelty(cfg, &novelty, rate, geometry.hop(), None)?;
     let shift = onset_lag(geometry);
     for beat in &mut grid.beats {
         *beat += shift;
@@ -355,7 +352,6 @@ pub fn track_beats_from_novelty<F: Float>(
     sample_rate: impl Into<SampleRate>,
     hop: Samples,
     tempo: Option<Bpm>,
-    fft: &mut FftScratch<f64>,
 ) -> Result<BeatGrid> {
     let sample_rate = sample_rate.into();
     let novelty = &widen(novelty);
@@ -373,7 +369,7 @@ pub fn track_beats_from_novelty<F: Float>(
             }
             bpm
         }
-        None => estimate_tempo_from_novelty(cfg, novelty, sample_rate, hop, fft)?.bpm,
+        None => estimate_tempo_from_novelty(cfg, novelty, sample_rate, hop)?.bpm,
     };
     let period = lag_of(bpm, rate);
     let beats = track_beat_frames(novelty, period, cfg.tightness.get())
@@ -411,7 +407,6 @@ fn novelty(
     cfg: &TempoConfig,
     samples: &[f64],
     rate: SampleRate,
-    fft: &mut FftScratch<f64>,
 ) -> Result<(Vec<f64>, StftGeometry)> {
     let onset = OnsetConfig::new(DetectionFunction::SpectralFlux)
         .framing(cfg.framing)
@@ -431,7 +426,7 @@ fn novelty(
     if peak < SILENCE_FLOOR.to_amplitude().get() {
         return Err(Error::NoSignal);
     }
-    let mut curve: Vec<f64> = run(onset, samples, fft)
+    let mut curve: Vec<f64> = run(onset, samples)
         .novelty()
         .iter()
         .map(|n| n.value)
@@ -460,7 +455,6 @@ impl Periodicity {
         novelty: &[f64],
         frame_rate: SampleRate,
         hop: Samples,
-        fft: &mut FftScratch<f64>,
     ) -> Result<Self> {
         if novelty.iter().any(|v| !v.is_finite()) {
             return Err(Error::NonFiniteInput);
@@ -497,7 +491,7 @@ impl Periodicity {
         }
         let mean = novelty.iter().copied().sum::<f64>() / n as f64;
         let centred: Vec<f64> = novelty.iter().map(|&v| v - mean).collect();
-        let correlation = cross_correlate(Mono::new(&centred), Mono::new(&centred), fft);
+        let correlation = cross_correlate(Mono::new(&centred), Mono::new(&centred));
         let power = correlation.at(0).unwrap_or(0.0) / n as f64;
         if power <= 0.0 {
             return Err(Error::NoSignal);
