@@ -11,7 +11,9 @@
 
 use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
 use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_dsp::{Glide, LadderBank, LadderControls, LadderDesign, LadderModel, LadderType, Lanes};
+use tutti_dsp::{
+    Glide, LadderBank, LadderBlend, LadderControls, LadderModel, LadderType, SimdLanes,
+};
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
 use tutti_units::{Drive, Hz, Resonance, SampleRate, Tail};
 
@@ -27,7 +29,7 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 /// Cutoff ([`Hz`]), [`Resonance`] and [`Drive`] are live [`Params`](crate::Params) shared
 /// across clones. A held value costs nothing: the model is designed again only
 /// when the cutoff or resonance moves past a small dead-band or the drive moves
-/// at all ([`LadderControls::moved_from`]). The filter is designed on a 16-frame
+/// at all ([`LadderControls::differs_from`]). The filter is designed on a 16-frame
 /// grid counted from the last reset, at each segment's first frame, and the
 /// coefficients **and the drive** ramp linearly to that solve over the segment, so
 /// an automated control glides rather than stepping (drive multiplies straight
@@ -71,7 +73,7 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 /// Rendering allocates nothing.
 pub type LadderFilterNode<F> = KernelNode<LadderKernel<F>>;
 
-impl<F: Float + Lanes> LadderFilterNode<F> {
+impl<F: Float + SimdLanes> LadderFilterNode<F> {
     /// A mono ladder filter (1 in, 1 out) of `ladder_type` at `frequency`
     /// cutoff and `resonance`, with unity [`Drive`].
     ///
@@ -119,16 +121,16 @@ const GLIDE_STEPS: u32 = 16;
 /// The ladder as a [`Kernel`]: a [`LadderBank`] in the float `F` and the glide of the
 /// design (coefficients and drive) every channel shares.
 #[derive(Clone, Debug)]
-pub struct LadderKernel<F: Float + Lanes> {
+pub struct LadderKernel<F: Float + SimdLanes> {
     input: BusTopology,
     bank: LadderBank<F>,
-    /// The design in flight; the first one after `prepare` lands at once.
-    design: Glide<LadderDesign<F>>,
+    /// The blend in flight; the first one after `prepare` lands at once.
+    blend: Glide<LadderBlend<F>>,
     rate: SampleRate,
     landed: bool,
 }
 
-impl<F: Float + Lanes> LadderKernel<F> {
+impl<F: Float + SimdLanes> LadderKernel<F> {
     /// A filter on the bus `input`, its output where it is. Allocates the state. Its design
     /// until `prepare` is a placeholder at 48 kHz: an unprepared node renders nothing, and
     /// `prepare` designs for the rate it is given.
@@ -137,18 +139,18 @@ impl<F: Float + Lanes> LadderKernel<F> {
         Self {
             input,
             bank: LadderBank::new(input.layout()),
-            design: Glide::landed(Self::design(&LadderControls::DEFAULT, rate)),
+            blend: Glide::landed(Self::design(&LadderControls::DEFAULT, rate)),
             rate,
             landed: false,
         }
     }
 
-    fn design(controls: &LadderControls, rate: SampleRate) -> LadderDesign<F> {
-        LadderDesign::from(&LadderModel::new(*controls, rate))
+    fn design(controls: &LadderControls, rate: SampleRate) -> LadderBlend<F> {
+        LadderBlend::from(&LadderModel::new(*controls, rate))
     }
 }
 
-impl<F: Float + Lanes> Kernel for LadderKernel<F> {
+impl<F: Float + SimdLanes> Kernel for LadderKernel<F> {
     type Float = F;
     type Set = LadderSet;
 
@@ -166,19 +168,19 @@ impl<F: Float + Lanes> Kernel for LadderKernel<F> {
 
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
         self.rate = rate;
-        self.design = Glide::landed(Self::design(&LadderControls::DEFAULT, rate)).by(GLIDE_STEPS);
+        self.blend = Glide::landed(Self::design(&LadderControls::DEFAULT, rate)).by(GLIDE_STEPS);
         self.landed = false;
     }
 
     fn reset(&mut self) {
-        self.design.settle();
+        self.blend.settle();
         self.bank.reset();
     }
 
     fn retarget(&mut self, controls: &LadderControls) {
-        self.design.aim(Self::design(controls, self.rate));
+        self.blend.aim(Self::design(controls, self.rate));
         if !self.landed {
-            self.design.settle();
+            self.blend.settle();
             self.landed = true;
         }
     }
@@ -189,7 +191,7 @@ impl<F: Float + Lanes> Kernel for LadderKernel<F> {
         _: ControlLanes<'_, F>,
         output: PlanesMut<'_, '_, F>,
     ) {
-        self.bank.process(&mut self.design, input, output);
+        self.bank.process(&mut self.blend, input, output);
     }
 
     /// A resonant ladder rings on after its input stops, and at a resonance of 1 it does not
@@ -213,7 +215,7 @@ control_set! {
     Drive => Drive = drive;
 
     fn moved(&self, applied: &LadderControls, target: &LadderControls) -> bool {
-        target.moved_from(applied)
+        target.differs_from(applied)
     }
 
     fn defaults(&self) -> LadderControls {

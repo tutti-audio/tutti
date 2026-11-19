@@ -21,7 +21,7 @@ unit! {
     /// `1.0` is no compression. Below 1.0 would be an *expander*, which this
     /// type deliberately does not represent — a compressor clamps
     /// up to 1.0 rather than silently inverting its own behaviour.
-    pub struct CompressionRatio(pub f64): Unit, Ordered, Bounded;
+    pub struct CompressionRatio(f64): Unit, Ordered, Bounded;
 }
 // NOT `Additive`: 4:1 plus 4:1 is not 8:1.
 // NOT `Scalable`: doubling a ratio is not doubling anything audible —
@@ -52,7 +52,7 @@ unit! {
     /// Not a [`CompressionRatio`] despite the matching range (a unitless
     /// input:output ratio of level changes), and not a `Samples` count: a count is whole and this
     /// moves continuously.
-    pub struct HoldFactor(pub f64): Unit, Ordered, Bounded;
+    pub struct HoldFactor(f64): Unit, Ordered, Bounded;
 }
 // NOT `Additive`: two holds do not sum into a third.
 // NOT `Scalable`: a scaled factor falls below 1 or between whole frames, and
@@ -76,7 +76,7 @@ unit! {
     /// `0.707` (1/sqrt2) is the maximally-flat Butterworth response; higher is
     /// a narrower, more peaked resonance. Must stay above zero: `Q` divides
     /// into the filter's damping term.
-    pub struct Q(pub f64): Unit, Ordered, Bounded, Scalable;
+    pub struct Q(f64): Unit, Ordered, Bounded, Scalable;
 }
 // NOT `Additive`: two Q values do not sum into a third.
 
@@ -105,7 +105,7 @@ unit! {
     /// ladder self-oscillates, whereas `Q::new(1.0)` is a mild bell. They are
     /// different parameterizations of different topologies, and swapping them
     /// is silent.
-    pub struct Resonance(pub f64): Unit, Ordered, Bounded;
+    pub struct Resonance(f64): Unit, Ordered, Bounded;
 }
 // NOT `Scalable` / `Additive`: as with `Feedback`, scaling walks
 // the value toward self-oscillation with no check.
@@ -126,12 +126,12 @@ impl Resonance {
 
 unit! {
     /// Pitch offset in semitones. 12 semitones = 1 octave.
-    pub struct Semitones(pub f64): Unit, Ordered, Bounded, Additive, Signed, Scalable;
+    pub struct Semitones(f64): Unit, Ordered, Bounded, Additive, Signed, Scalable;
 }
 
 unit! {
     /// Pitch offset in cents. 100 cents = 1 semitone.
-    pub struct Cents(pub f64): Unit, Ordered, Bounded, Additive, Signed, Scalable;
+    pub struct Cents(f64): Unit, Ordered, Bounded, Additive, Signed, Scalable;
 }
 
 impl Cents {

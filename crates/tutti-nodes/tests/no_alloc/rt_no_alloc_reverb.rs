@@ -13,7 +13,9 @@ use tutti_graph::IntoNode;
 use tutti_graph::ParamSet;
 use tutti_graph::Status;
 use tutti_graph::contract::{BlockRig, Direct};
-use tutti_nodes::{FdnControls, FdnLayout, FdnNode, MaxDecay, PlateReverbConfig, PlateReverbNode};
+use tutti_nodes::{
+    FdnControls, FdnLayout, FdnNode, FreezeMode, MaxDecay, PlateReverbConfig, PlateReverbNode,
+};
 use tutti_units::{SampleRate, Seconds, UnitAddr, UnitParam};
 
 /// A bound a stable loop stays far under, wet gain at +24 dB and the longest decay included:
@@ -127,12 +129,12 @@ fn the_fdn_node_process_is_allocation_free() {
 #[test]
 fn the_fdn_corners_are_allocation_free_with_every_control_moving() {
     let layouts = [
-        FdnLayout::new(2, MaxDecay::of(Seconds::new(0.05)), false).unwrap(),
-        FdnLayout::new(8, MaxDecay::DEFAULT, true).unwrap(),
-        FdnLayout::new(16, MaxDecay::of(Seconds::new(60.0)), true).unwrap(),
+        FdnLayout::new(2, MaxDecay::of(Seconds::new(0.05)), FreezeMode::Decaying).unwrap(),
+        FdnLayout::new(8, MaxDecay::DEFAULT, FreezeMode::Freezable).unwrap(),
+        FdnLayout::new(16, MaxDecay::of(Seconds::new(60.0)), FreezeMode::Freezable).unwrap(),
     ];
     for layout in layouts {
-        let all = controls(layout.freezable());
+        let all = controls(layout.freeze_mode() == FreezeMode::Freezable);
         // One control moving between its ends, the rest at the default.
         for c in &all {
             gate(layout, 200, |set, i| {
@@ -215,9 +217,9 @@ fn the_fdn_parks_and_wakes_without_allocating() {
         ..FdnControls::DEFAULT
     };
     for layout in [
-        FdnLayout::new(2, MaxDecay::of(Seconds::new(0.1)), false).unwrap(),
-        FdnLayout::new(8, MaxDecay::DEFAULT, true).unwrap(),
-        FdnLayout::new(16, MaxDecay::DEFAULT, false).unwrap(),
+        FdnLayout::new(2, MaxDecay::of(Seconds::new(0.1)), FreezeMode::Decaying).unwrap(),
+        FdnLayout::new(8, MaxDecay::DEFAULT, FreezeMode::Freezable).unwrap(),
+        FdnLayout::new(16, MaxDecay::DEFAULT, FreezeMode::Decaying).unwrap(),
     ] {
         let mut rig = direct(layout, short, 0.5);
         for _ in 0..32 {
@@ -267,8 +269,8 @@ fn the_fdn_with_its_lanes_fed_is_allocation_free() {
             .collect()
     };
     for layout in [
-        FdnLayout::new(2, MaxDecay::of(Seconds::new(0.05)), false).unwrap(),
-        FdnLayout::new(8, MaxDecay::DEFAULT, true).unwrap(),
+        FdnLayout::new(2, MaxDecay::of(Seconds::new(0.05)), FreezeMode::Decaying).unwrap(),
+        FdnLayout::new(8, MaxDecay::DEFAULT, FreezeMode::Freezable).unwrap(),
     ] {
         for up in [true, false] {
             let mut rig = direct(layout, FdnControls::DEFAULT, 0.5);
@@ -300,8 +302,8 @@ fn the_fdn_with_its_lanes_fed_is_allocation_free() {
 #[test]
 fn the_fdn_renders_non_finite_input_without_allocating() {
     for layout in [
-        FdnLayout::new(8, MaxDecay::DEFAULT, false).unwrap(),
-        FdnLayout::new(8, MaxDecay::DEFAULT, true).unwrap(),
+        FdnLayout::new(8, MaxDecay::DEFAULT, FreezeMode::Decaying).unwrap(),
+        FdnLayout::new(8, MaxDecay::DEFAULT, FreezeMode::Freezable).unwrap(),
     ] {
         let mut rig = direct(layout, FdnControls::DEFAULT, 0.5);
         for _ in 0..32 {

@@ -134,7 +134,7 @@ fn reported_latency_is_the_real_latency() {
 ///
 /// Ragged call lengths (1, 7, 64, 3, …) against a small partition are what
 /// put a run boundary mid-call, before the first drain, and exactly on the
-/// drain — the three places the lockstep argument in `process_block` could
+/// drain — the three places the lockstep argument in `process` could
 /// be wrong.
 #[test]
 fn block_path_is_bit_identical_to_the_per_sample_path() {
@@ -152,7 +152,7 @@ fn block_path_is_bit_identical_to_the_per_sample_path() {
         let (mut at, mut k) = (0, 0);
         while at < x.len() {
             let n = lens[k % lens.len()].min(x.len() - at);
-            blocked.process_block(
+            blocked.process(
                 Mono::new(&x[at..at + n]),
                 MonoMut::new(&mut got[at..at + n]),
             );
@@ -222,13 +222,13 @@ fn long_ir(len: usize) -> Vec<f32> {
         .collect()
 }
 
-/// Feed `x` through `process_block` in `lens`-cycled calls.
+/// Feed `x` through `process` in `lens`-cycled calls.
 fn run_blocks(c: &mut Convolver, x: &[f32], lens: &[usize]) -> Vec<f32> {
     let mut got = vec![0.0f32; x.len()];
     let (mut at, mut k) = (0, 0);
     while at < x.len() {
         let n = lens[k % lens.len()].min(x.len() - at);
-        c.process_block(
+        c.process(
             Mono::new(&x[at..at + n]),
             MonoMut::new(&mut got[at..at + n]),
         );
@@ -351,12 +351,12 @@ fn accumulation_is_spread_across_the_calls_of_a_partition() {
     // Nothing is summed before the first block's transform: the history
     // is zero, so the first cycle is not measured.
     for _ in 0..8 {
-        c.process_block(Mono::new(&x), MonoMut::new(&mut out));
+        c.process(Mono::new(&x), MonoMut::new(&mut out));
     }
     for cycle in 0..4 {
         let mut last = 0;
         for call in 0..8 {
-            c.process_block(Mono::new(&x), MonoMut::new(&mut out));
+            c.process(Mono::new(&x), MonoMut::new(&mut out));
             if call < 7 {
                 let now = c.levels[0].accumulated;
                 assert!(
@@ -392,7 +392,7 @@ fn the_spread_sum_is_the_ascending_sum() {
     let mut out = [0.0f32; 4];
     let mut checked = 0;
     for (n, call) in x.chunks(4).enumerate() {
-        c.process_block(Mono::new(call), MonoMut::new(&mut out));
+        c.process(Mono::new(call), MonoMut::new(&mut out));
         // Nothing is summed before the first block's transform.
         if n % 4 != 2 || n < 4 {
             continue;
@@ -433,7 +433,7 @@ fn a_call_that_crosses_a_boundary_leaves_the_next_cycle_unstarted() {
     for k in 0..40 {
         let n = lens[k % 4];
         let x = vec![0.25f32; n];
-        c.process_block(Mono::new(&x), MonoMut::new(&mut out[..n]));
+        c.process(Mono::new(&x), MonoMut::new(&mut out[..n]));
         if fill + n > part {
             crossings += 1;
             assert_eq!(c.levels[0].accumulated, 0, "call {k} crossed");
@@ -463,7 +463,7 @@ fn an_inverse_step_does_not_suppress_the_spread() {
     let mut advanced = 0;
     for _ in 0..40 * 256 {
         let (step, acc) = (c.levels[tail].step, c.levels[tail].accumulated);
-        c.process_block(Mono::new(&[0.25]), MonoMut::new(&mut out));
+        c.process(Mono::new(&[0.25]), MonoMut::new(&mut out));
         let st = &c.levels[tail];
         let inverse_only = step >= forward && st.step > step;
         if inverse_only && st.accumulated > acc {
@@ -891,7 +891,7 @@ fn transforms_land_in_different_host_blocks() {
                 .zip(&c.spectra.levels)
                 .map(|(st, lv)| steps_run(st, lv))
                 .collect();
-            c.process_block(Mono::new(&x), MonoMut::new(&mut out));
+            c.process(Mono::new(&x), MonoMut::new(&mut out));
             let events: Vec<usize> = c
                 .levels
                 .iter()
@@ -1107,7 +1107,7 @@ fn an_f64_convolver_sums_the_scaled_delayed_copies_of_the_ir() {
     let mut got = vec![0.0f64; frames + lat];
     let padded: Vec<f64> = x.iter().copied().chain(vec![0.0; lat]).collect();
     for (xs, ys) in padded.chunks(77).zip(got.chunks_mut(77)) {
-        c.process_block(Mono::new(xs), MonoMut::new(ys));
+        c.process(Mono::new(xs), MonoMut::new(ys));
     }
     let worst = want
         .iter()

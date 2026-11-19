@@ -91,18 +91,15 @@ mod real_stall_tests;
 // call (`tutti-plugin-ipc`'s mock server answers a few).
 #[cfg(all(test, feature = "clap"))]
 mod served_control_tests;
-#[cfg(test)]
-mod tests;
 
 pub use capability_view::TransportView;
 pub(crate) use capability_view::is_declined;
 
-use crate::host::loadable::Loadable;
-use crate::host::plugin_ref::PluginRef;
 use std::sync::Arc;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::FloatWidth;
 use tutti_graph::{IntoNode, Node, NodeParts, Shape};
+use tutti_plugin_db::{Loadable, PluginRef};
 use tutti_plugin_host::{
     InProcClient, InvalidateSink, ParameterChangeSink, PluginControls, PluginHandle, PluginNode,
     Rebinder, RefreshSink, TransportSink, client_over,

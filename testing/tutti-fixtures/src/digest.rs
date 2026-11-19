@@ -6,24 +6,20 @@
 //! type in a signature, so a crate at any layer can dev-depend on this one for
 //! them.
 
-/// Deterministic broadband noise: an endless stream of `f32` in `[-1, 1)` from
-/// a linear congruential generator (Numerical Recipes' constants, the top 24
-/// bits of the state).
+use tutti_rt::SplitMix64;
+
+/// Deterministic broadband noise: an endless stream of `f32` in `[-1, 1)` drawn
+/// from [`SplitMix64`], each draw the top 24 bits of its 32-bit output.
 ///
-/// [`Noise::seeded`] scrambles the seed first, so neighbouring seeds give
-/// unrelated streams; [`Noise::from_state`] starts from the raw state.
+/// [`Noise::seeded`] feeds the seed to the generator as it is; the generator
+/// already decorrelates neighbouring seeds.
 #[derive(Clone, Debug)]
-pub struct Noise(u32);
+pub struct Noise(SplitMix64);
 
 impl Noise {
     /// The stream of `seed`.
     pub fn seeded(seed: u32) -> Self {
-        Self(seed.wrapping_mul(747_796_405).wrapping_add(2_891_336_453))
-    }
-
-    /// The stream that starts from generator state `state` as it is.
-    pub fn from_state(state: u32) -> Self {
-        Self(state)
+        Self(SplitMix64::new(u64::from(seed)))
     }
 }
 
@@ -31,8 +27,7 @@ impl Iterator for Noise {
     type Item = f32;
 
     fn next(&mut self) -> Option<f32> {
-        self.0 = self.0.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
-        Some((self.0 >> 8) as f32 / (1u32 << 24) as f32 * 2.0 - 1.0)
+        Some((self.0.next_u32() >> 8) as f32 / (1u32 << 24) as f32 * 2.0 - 1.0)
     }
 }
 
@@ -146,18 +141,15 @@ mod tests {
         assert_eq!(h.finish(), g.finish());
     }
 
-    /// The stream is Numerical Recipes' LCG (`s' = 1664525 s + 1013904223` mod 2^32)
-    /// from the scrambled seed (`747796405 seed + 2891336453`), each draw the top 24
-    /// bits `k` as `k / 2^23 - 1`: seed 5's first three `k` under those constants
-    /// are 4275643, 7789527 and 15995530, exact in `f32`. Every draw stays in
-    /// `[-1, 1)`.
+    /// The stream is SplitMix64's high 32 bits, top 24 of them `k` as `k / 2^23 - 1`:
+    /// seed 0's first output is the published `0xE220A8397B1DCDAF`, so `k` is
+    /// `0xE220A8`, exact in `f32`. Every draw stays in `[-1, 1)`.
     #[test]
-    fn noise_is_the_numerical_recipes_lcg() {
-        let x = noise(5, 4096);
+    fn noise_is_splitmix64_top_24_bits() {
+        let x = noise(0, 4096);
         assert!(x.iter().all(|s| (-1.0..1.0).contains(s)));
-        let draw = |k: u32| k as f32 / 8_388_608.0 - 1.0;
-        assert_eq!(x[..3], [draw(4_275_643), draw(7_789_527), draw(15_995_530)]);
-        assert_eq!(noise(5, 8), x[..8], "a longer draw extends a shorter one");
-        assert_ne!(noise(6, 8), x[..8], "neighbouring seeds differ");
+        assert_eq!(x[0], 0xE2_20A8_u32 as f32 / 8_388_608.0 - 1.0);
+        assert_eq!(noise(0, 8), x[..8], "a longer draw extends a shorter one");
+        assert_ne!(noise(1, 8), x[..8], "neighbouring seeds differ");
     }
 }

@@ -14,10 +14,10 @@
 //!   `fetch_or`'d by the plugin and swapped to zero by
 //!   [`ComponentHandler::take_restart`], which returns them as
 //!   [`RestartFlags`]. No queue, no capacity, nothing to lose.
-//! - **The same flags are also raised as [`Request`]s** on a [`RequestWord`]
+//! - **The same flags are also raised as [`Request`]s** on an [`AtomicRequestFlags`]
 //!   ([`ComponentHandler::requests`]), the form the shared core takes:
 //!   [`RestartFlags::raise_into`] says which flag is which request. A host that
-//!   drives a [`Lifecycle`](tutti_plugin_types::Lifecycle) reads that word; the
+//!   drives a [`Lifecycle`](tutti_plugin_types::Lifecycle) reads those flags; the
 //!   coalesced flags stay for a plugin held without one.
 //! - **Everything else** (edits, progress, unit news) goes on one bounded
 //!   [`ArrayQueue`] of [`PluginNotification`], preallocated at construction.
@@ -39,7 +39,7 @@ use std::sync::atomic::{AtomicI32, AtomicU64, Ordering};
 use tutti_plugin_types::ffi_guard;
 
 use tutti_plugin_types::{Request, RescanScope};
-use tutti_rt::RequestWord;
+use tutti_rt::AtomicRequestFlags;
 use tutti_units::Normalized;
 
 use arrayvec::ArrayString;
@@ -257,7 +257,7 @@ impl RestartFlags {
     /// header names, which is a restart. The three that nothing acts on (bus
     /// titles, routing, keyswitches) raise nothing: they stay in the flags of
     /// [`ComponentHandler::take_restart`].
-    pub fn raise_into(self, word: &RequestWord) {
+    pub fn raise_into(self, flags: &AtomicRequestFlags) {
         let requests = [
             (self.contains(Self::RELOAD_COMPONENT), Request::Reload),
             (self.contains(Self::IO_CHANGED), Request::IoChanged),
@@ -288,7 +288,7 @@ impl RestartFlags {
         ];
         for (raised, request) in requests {
             if raised {
-                let _ = request.raise(word);
+                let _ = request.raise(flags);
             }
         }
     }
@@ -381,7 +381,7 @@ pub struct ComponentHandler {
     restart: AtomicI32,
     /// The same flags as the core's requests, for a host that drives a
     /// `Lifecycle`.
-    requests: RequestWord,
+    requests: AtomicRequestFlags,
     next_progress_id: AtomicU64,
 }
 
@@ -404,7 +404,7 @@ impl ComponentHandler {
             notifications: ArrayQueue::new(NOTIFICATION_CAPACITY),
             dropped: Lost::new(),
             restart: AtomicI32::new(0),
-            requests: RequestWord::new(),
+            requests: AtomicRequestFlags::new(),
             next_progress_id: AtomicU64::new(1),
         })
     }
@@ -412,7 +412,7 @@ impl ComponentHandler {
     /// What the plugin has asked of the host as the core's requests, raised by
     /// every `restartComponent`. Taken with
     /// [`taken`](tutti_plugin_types::taken): wait-free and allocation-free.
-    pub fn requests(&self) -> &RequestWord {
+    pub fn requests(&self) -> &AtomicRequestFlags {
         &self.requests
     }
 

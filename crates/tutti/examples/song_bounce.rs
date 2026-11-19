@@ -56,7 +56,7 @@ fn song(dir: &std::path::Path) -> Result<Written, Error> {
 
     let mut s = Session::builder()
         .sample_rate(RATE)
-        .max_block(MaxBlock::of(Samples(512)))
+        .max_block(MaxBlock::of(Samples::new(512)))
         .build()?;
     s.set(
         s.transport_handle()
@@ -71,12 +71,12 @@ fn song(dir: &std::path::Path) -> Result<Written, Error> {
     let (first, _) = s.graph().add(
         Clip::new(wave.clone())?
             .channels(ChannelLayout::STEREO)?
-            .at(Beat(0.0)),
+            .at(Beat::new(0.0)),
     );
     let (second, _) = s.graph().add(
         Clip::new(wave)?
             .channels(ChannelLayout::STEREO)?
-            .at(Beat(4.0))
+            .at(Beat::new(4.0))
             .gain(Amplitude::new(0.8)),
     );
 
@@ -85,8 +85,8 @@ fn song(dir: &std::path::Path) -> Result<Written, Error> {
     let (filter, _) = s.graph().add(SvfFilterNode::with_channels(
         ChannelLayout::STEREO,
         SvfType::LowPass,
-        Hz(1_000.0),
-        Q(0.7),
+        Hz::new(1_000.0),
+        Q::new(0.7),
     ));
     let (reverb, _) = s.graph().add(FreeverbNode::default());
     s.graph().connect(first, filter)?;
@@ -100,8 +100,8 @@ fn song(dir: &std::path::Path) -> Result<Written, Error> {
     // An LFO on the cutoff: 1 Hz across 200 Hz to 3 kHz.
     let cutoff = filter.cutoff();
     let mut m = s.mods_mut();
-    m.range(cutoff, Hz(200.0)..Hz(3_000.0))?;
-    let wobble = m.lfo(Lfo::sine().rate(Hz(1.0)));
+    m.range(cutoff, Hz::new(200.0)..Hz::new(3_000.0))?;
+    let wobble = m.lfo(Lfo::sine().rate(Hz::new(1.0)));
     m.route(RouteSpec::new(wobble, cutoff, Depth::of(0.5)))?;
 
     // Commit the graph and the lanes, then roll the transport.
@@ -114,7 +114,7 @@ fn song(dir: &std::path::Path) -> Result<Written, Error> {
     let written = s
         .bounce(
             Bounce::project()
-                .range(Beat(0.0)..Beat(8.0))
+                .range(Beat::new(0.0)..Beat::new(8.0))
                 .master(&path, Format::Wav(Pcm::Int24)),
         )?
         .into_master();

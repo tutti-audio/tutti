@@ -14,7 +14,7 @@
 
 use tutti_buffers::Float;
 
-use crate::Lanes;
+use crate::SimdLanes;
 use crate::design::prewarp;
 use tutti_units::{Hz, Resonance, SampleRate};
 
@@ -41,23 +41,24 @@ pub enum LadderType {
     HP24,
 }
 
-/// The ladder's two coefficients, computed from its parameters.
+/// The ladder design: its two coefficients solved in `f64` from its parameters, before they are
+/// narrowed to the [`LadderCoefficients`] a step runs.
 ///
-/// Public for the same reason as [`SvfCoeffs`](crate::SvfCoeffs): a voice
+/// Public for the same reason as [`SvfDesign`](crate::SvfDesign): a voice
 /// engine running this topology across SIMD lanes derives its coefficients
 /// from this function rather than a copy of it. The recurrence they feed is
 /// the ladder node's: four one-pole stages each `v = G*(in - s); lp = v + s;
 /// s = lp + v` with `G = g / (1 + g)`, whose input is `u = tanh(u_lin)` for the
 /// delay-free loop's solution `u_lin = (x - k*S) / (1 + k*G^4)` (the kernel's `ladder_step`).
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct LadderCoeffs {
+pub struct LadderDesign {
     /// Prewarped integrator gain, `tan(pi * fc / sr)`.
     pub g: f64,
     /// Feedback gain, `4 * resonance`. At `4` the ladder self-oscillates.
     pub k: f64,
 }
 
-impl LadderCoeffs {
+impl LadderDesign {
     /// Computes ladder coefficients (pure function, no state).
     ///
     /// The cutoff is clamped to `1.0..=0.998 * Nyquist`, since `tan` diverges at
@@ -66,13 +67,13 @@ impl LadderCoeffs {
         freq: impl Into<Hz>,
         resonance: impl Into<Resonance>,
         sample_rate: impl Into<SampleRate>,
-    ) -> LadderCoeffs {
+    ) -> LadderDesign {
         let (freq, resonance, sample_rate) = (freq.into(), resonance.into(), sample_rate.into());
         let fc = freq.clamp(
             Hz::new(1.0),
             sample_rate.nyquist_scaled(crate::filter::NYQUIST_MARGIN),
         );
-        LadderCoeffs {
+        LadderDesign {
             g: prewarp(fc, sample_rate),
             k: 4.0 * resonance.get().clamp(0.0, 1.0),
         }
@@ -88,17 +89,17 @@ impl LadderCoeffs {
 /// zero-delay loop needs are derived in the step from `g1` and `k`, so a glide
 /// interpolates these two and every blended set is a valid ladder.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct LadderCoefficients<L: Lanes> {
+pub struct LadderCoefficients<L: SimdLanes> {
     /// The one-pole stage gain `G = g / (1 + g)`.
     pub g1: L,
     /// The loop gain, `4 * resonance`: the ladder self-oscillates from `k = 4`.
     pub k: L,
 }
 
-impl<F: Float + Lanes> From<&LadderCoeffs> for LadderCoefficients<F> {
+impl<F: Float + SimdLanes> From<&LadderDesign> for LadderCoefficients<F> {
     /// The solve's `f64` set, the stage gain `g / (1 + g)` divided out in `f64`, narrowed once
     /// to `F`: the one crossing of a ladder design.
-    fn from(c: &LadderCoeffs) -> Self {
+    fn from(c: &LadderDesign) -> Self {
         Self {
             g1: F::from_design(c.g / (1.0 + c.g)),
             k: F::from_design(c.k),
@@ -106,7 +107,7 @@ impl<F: Float + Lanes> From<&LadderCoeffs> for LadderCoefficients<F> {
     }
 }
 
-impl<F: Float + Lanes> LadderCoefficients<F> {
+impl<F: Float + SimdLanes> LadderCoefficients<F> {
     /// Linear blend toward `to` by `t` in `0..=1`: an interpolated set is only
     /// ever used for one sample and never stored.
     #[inline]
@@ -133,12 +134,12 @@ impl<F: Float + Lanes> LadderCoefficients<F> {
 ///
 /// `x` is the driven input (`input * drive`); `saturate` is the nonlinearity on the
 /// solved loop input: `tanh` for a filter node, the lane bank's rational
-/// approximation of it for the polysynth. Written once over [`Lanes`].
+/// approximation of it for the polysynth. Written once over [`SimdLanes`].
 ///
 /// `ty` is matched every frame; a caller with a constant type (the lane bank's
 /// `LP24`) has the match folded away by the inlining, so it costs nothing there.
 #[inline(always)]
-pub fn ladder_step<L: Lanes>(
+pub fn ladder_step<L: SimdLanes>(
     c: &LadderCoefficients<L>,
     ty: LadderType,
     s: &mut [L; 4],

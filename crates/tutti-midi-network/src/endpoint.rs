@@ -7,7 +7,6 @@ use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::Instant;
 
-use tutti_midi_device::EntropyError;
 use tutti_ump::Ump;
 
 use crate::datagram::{self, pack};
@@ -263,7 +262,7 @@ pub struct Host {
     admission: Arc<Admission>,
     max_sessions: NonZeroUsize,
     session_config: SessionConfig,
-    nonce_source: fn() -> Result<Nonce, EntropyError>,
+    nonce_source: fn() -> Result<Nonce, getrandom::Error>,
     sessions: HashMap<SocketAddr, Session>,
     outbox: Outbox,
 }
@@ -280,7 +279,7 @@ impl Host {
     #[must_use]
     pub fn with_nonce_source(
         config: HostConfig,
-        nonce_source: fn() -> Result<Nonce, EntropyError>,
+        nonce_source: fn() -> Result<Nonce, getrandom::Error>,
     ) -> Self {
         let HostConfig {
             identity,

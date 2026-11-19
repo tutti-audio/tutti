@@ -8,7 +8,7 @@
 
 use super::loop_region::LoopRegion;
 use super::state::ClockLinks;
-use super::walk::{TempoAhead, TempoWalk};
+use super::walk::{TempoWalk, UpcomingTempo};
 use std::sync::atomic::Ordering;
 use tutti_music::FrameClock;
 use tutti_tempo::TempoMap;
@@ -153,7 +153,7 @@ impl TransportClock {
 
     /// Publish the tempo in force to the live transport.
     fn publish_tempo(&self) {
-        if let Some(ref out) = self.links.tempo_in_force {
+        if let Some(ref out) = self.links.current_tempo {
             out.store(self.clock.tempo(), Ordering::Release);
         }
     }
@@ -250,7 +250,7 @@ impl TransportClock {
                 // Seats at the exact beat; the map frame is its
                 // `frame_at_or_after`.
                 Some(map) => {
-                    self.walk.seat(map, &mut self.clock, target);
+                    self.walk.seek(map, &mut self.clock, target);
                     self.publish_tempo();
                 }
                 None => self.clock.seat(target),
@@ -264,7 +264,7 @@ impl TransportClock {
     /// there.
     pub fn follow(&mut self, map: &TempoMap) {
         self.clock.seat(self.clock.beat());
-        self.walk.place(map, &mut self.clock);
+        self.walk.sync_tempo(map, &mut self.clock);
         self.publish_tempo();
     }
 
@@ -340,7 +340,8 @@ impl TransportClock {
             let region = from.looping;
             match map {
                 Some(map) => {
-                    self.walk.roll(map, &mut self.clock, frames, region, false);
+                    self.walk
+                        .advance(map, &mut self.clock, frames, region, false);
                     self.publish_tempo();
                 }
                 None => self.clock.advance(Samples::new(frames), region),
@@ -359,9 +360,9 @@ impl TransportClock {
         from: &tutti_graph::TransportPosition,
         map: Option<&TempoMap>,
         cap: usize,
-    ) -> TempoAhead {
+    ) -> UpcomingTempo {
         let (Some(map), true) = (map, from.playing) else {
-            return TempoAhead::NONE;
+            return UpcomingTempo::NONE;
         };
         self.walk
             .ahead(map, &self.clock, frames, from.looping, cap, |clock| {
@@ -442,7 +443,7 @@ impl TransportClock {
     ) {
         self.clock.set_sample_rate(sample_rate);
         if let Some(map) = map {
-            self.walk.place(map, &mut self.clock);
+            self.walk.sync_tempo(map, &mut self.clock);
             self.publish_tempo();
         }
     }
@@ -476,7 +477,7 @@ impl TransportClock {
 
 #[cfg(test)]
 mod tests {
-    use super::super::state::{AtomicBpm, SeekSlot};
+    use super::super::state::{AtomicBpm, PendingSeek};
     use super::*;
     use atomic_float::AtomicF64;
     use std::sync::Arc;
@@ -492,8 +493,8 @@ mod tests {
     }
 
     /// A clock plus the seek slot that drives it.
-    fn clock_with_seek(tempo: Bpm, paused: Arc<AtomicBool>) -> (TransportClock, SeekSlot) {
-        let seek = SeekSlot::new();
+    fn clock_with_seek(tempo: Bpm, paused: Arc<AtomicBool>) -> (TransportClock, PendingSeek) {
+        let seek = PendingSeek::new();
         let clock = TransportClock::new(
             ClockLinks {
                 paused,
@@ -501,7 +502,7 @@ mod tests {
                 position_writeback: None,
                 segment_generation: None,
                 steady_time: None,
-                tempo_in_force: None,
+                current_tempo: None,
             },
             SampleRate::SR_44K1,
             tempo,
@@ -718,7 +719,7 @@ mod tests {
     #[test]
     fn test_transport_clock_loop_overshoot_precision() {
         let (tempo, paused) = create_test_atomics();
-        let seek = SeekSlot::new();
+        let seek = PendingSeek::new();
         let mut links = ClockLinks::bare(paused);
         links.seek = seek.clone();
         let mut clock = TransportClock::new(links, SampleRate::SR_44K1, tempo);
@@ -765,7 +766,7 @@ mod tests {
         let (tempo, paused) = create_test_atomics();
         let in_force = Arc::new(AtomicBpm::new(Bpm::of(1.0)));
         let mut links = ClockLinks::bare(paused);
-        links.tempo_in_force = Some(Arc::clone(&in_force));
+        links.current_tempo = Some(Arc::clone(&in_force));
         let mut clock = TransportClock::new(links, SampleRate::SR_44K1, tempo);
         // Inside the hysteresis: asked, but not taken.
         clock.asked = Bpm::of(120.0005);
@@ -818,7 +819,7 @@ mod tests {
     #[test]
     fn derived_stream_ignores_live_seek() {
         let (tempo, paused) = create_test_atomics();
-        let seek = SeekSlot::new();
+        let seek = PendingSeek::new();
         let mut links = ClockLinks::bare(paused);
         links.seek = seek.clone();
         let live = TransportClock::new(links, SampleRate::SR_44K1, tempo);

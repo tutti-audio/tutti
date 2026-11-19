@@ -5,7 +5,7 @@
 //! Every node here is a graph node (`tutti_graph::Node`), and a node file holds
 //! only the adapter: shape, prepare, process, params and fork. The algorithm each
 //! one runs is a pure function or struct over slices in `tutti-dsp`: the filter
-//! coefficients and steps (`SvfCoeffs`, `LadderCoeffs`, `CrossoverModel`), the dynamics
+//! coefficients and steps (`SvfDesign`, `LadderDesign`, `CrossoverModel`), the dynamics
 //! curves and recurrences, `Convolver`, `DelayLine` and the waveshaping curves. Build one, insert it
 //! into a graph (`tutti_graph::{GraphBuilder, Editor}`), wire it, and the graph
 //! prepares it at the device rate and renders it. Inserting a node hands back its
@@ -85,7 +85,7 @@
 //! `Waveform`, carries no suffix, because it is not a node and
 //! can be used on its own. The algorithms are `tutti-dsp`'s (`tutti_dsp::DelayLine`,
 //! `tutti_dsp::CrossoverBank`, …); this crate re-exports only the types in a node's
-//! signature: `SvfType`, `LadderType`, `Lanes`, `CrossoverError`,
+//! signature: `SvfType`, `LadderType`, `SimdLanes`, `CrossoverError`,
 //! `InterpolationMode`, `OversamplingFactor` and `ShapeKind`.
 //!
 //! Nothing in this crate can fail: there is no `Error` type, and a node is ready
@@ -104,7 +104,7 @@
 //! # use tutti_buffers::Planes;
 //! use tutti_buffers::MaxBlock;
 //! use tutti_units::{Hz, Q, UnitParam};
-//! use tutti_graph::{Prepare, Solo};
+//! use tutti_graph::{Prepare, Standalone};
 //! use tutti_nodes::{SvfFilterNode, SvfType};
 //! use tutti_units::{SampleRate, Samples};
 //!
@@ -112,13 +112,13 @@
 //! // graph node: inserted, it hands back its `ParamSet` — cutoff, Q and
 //! // gain by `UnitParam` — and the graph prepares it at the graph's rate.
 //! let filter = SvfFilterNode::new(SvfType::LowPass, Hz::new(800.0), Q::new(0.707));
-//! let mut solo = Solo::new(filter, Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64))));
-//! let out = solo.render_input(Planes::new(&[&[1.0; 64]]).unwrap());
+//! let mut standalone = Standalone::new(filter, Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64))));
+//! let out = standalone.render_input(Planes::new(&[&[1.0; 64]]).unwrap());
 //!
 //! // Sweeping the cutoff on the *running* node: the set writes the `Param`
 //! // cell the node reads, at the start of its next block.
-//! assert!(solo.controls().set(UnitParam::Cutoff, 2_000.0));
-//! let out = solo.render_input(Planes::new(&[&[1.0; 64]]).unwrap());
+//! assert!(standalone.controls().set(UnitParam::Cutoff, 2_000.0));
+//! let out = standalone.render_input(Planes::new(&[&[1.0; 64]]).unwrap());
 //! ```
 //!
 //! ## Changing a running node
@@ -194,7 +194,7 @@
 //! checked for what a rate does not change (finite, above 0, in order), and a frequency
 //! past the prepared rate's Nyquist is held under it, not refused. The nodes that are not
 //! kernels ([`LfoNode`], [`ConvolverNode`]) take their rate from `prepare` too. To drive a node
-//! outside a graph, prepare it first (`tutti_graph::Solo`, or
+//! outside a graph, prepare it first (`tutti_graph::Standalone`, or
 //! `tutti_graph::contract::prepared` in tests).
 //!
 //! ## Items
@@ -202,9 +202,9 @@
 //! - Filters: [`SvfFilterNode`] ([`SvfType`]), [`LadderFilterNode`]
 //!   ([`LadderType`]), [`EqBandNode`], [`CutFilterNode`] ([`CutResponse`]), [`BellFilterNode`],
 //!   [`TiltFilterNode`], [`EnvelopeFilterNode`]; the coefficient solvers
-//!   [`SvfCoeffs::new`](tutti_dsp::SvfCoeffs::new) and
-//!   [`LadderCoeffs::new`](tutti_dsp::LadderCoeffs::new); a node runs in the float of the
-//!   graph it is inserted in (`tutti_buffers::Float` with [`Lanes`]).
+//!   [`SvfDesign::new`](tutti_dsp::SvfDesign::new) and
+//!   [`LadderDesign::new`](tutti_dsp::LadderDesign::new); a node runs in the float of the
+//!   graph it is inserted in (`tutti_buffers::Float` with [`SimdLanes`]).
 //! - Crossover: [`CrossoverNode`], over `tutti_dsp::CrossoverBank`, a 2 to 6 band
 //!   Linkwitz-Riley 4th-order split (solved on the stream's 16-frame grid), each
 //!   crossover frequency an indexed [`Cutoff`](tutti_units::UnitParam::Cutoff) param, with
@@ -317,10 +317,10 @@ pub use filter::{
 pub use tutti_dsp::EnvelopeFilterControls;
 pub use tutti_dsp::{ButterworthOrder, CutResponse};
 // The types in the filter nodes' signatures stay reachable from here; the
-// algorithms behind them (`SvfCoeffs`, `LadderCoeffs`, `CrossoverModel`) are
+// algorithms behind them (`SvfDesign`, `LadderDesign`, `CrossoverModel`) are
 // `tutti-dsp`'s only.
 pub use tutti_dsp::{
-    CrossoverControls, CrossoverError, LadderControls, LadderType, Lanes, SvfControls, SvfType,
+    CrossoverControls, CrossoverError, LadderControls, LadderType, SimdLanes, SvfControls, SvfType,
 };
 
 mod dynamics;
@@ -384,7 +384,9 @@ mod reverb_plate;
 pub use reverb_plate::{PlateKernel, PlateReverbConfig, PlateReverbNode, PlateSet};
 
 // The banks' controls that sit in a node's signature.
-pub use tutti_dsp::{FdnControls, FdnLayout, FreeverbControls, MaxDecay, PlateControls};
+pub use tutti_dsp::{
+    FdnControls, FdnLayout, FreeverbControls, FreezeMode, MaxDecay, PlateControls,
+};
 
 // The spatial panners: VBAP speaker panning and binaural HRTF rendering.
 mod spatial;

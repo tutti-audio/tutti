@@ -37,10 +37,10 @@ const BLOCKS: usize = 400;
 /// would smear every harmonic measurement across the analysis window.
 fn flat_envelope() -> Adsr {
     Adsr {
-        attack: Seconds(0.001),
-        decay: Seconds(0.0),
-        sustain: Amplitude(1.0),
-        release: Seconds(0.3),
+        attack: Seconds::new(0.001),
+        decay: Seconds::new(0.0),
+        sustain: Amplitude::new(1.0),
+        release: Seconds::new(0.3),
     }
 }
 
@@ -49,7 +49,7 @@ fn render(cfg: SynthConfig, notes: &[u8]) -> (Vec<f32>, Vec<f32>) {
     // Driven as a graph drives it: `Node::process`, the notes on its event
     // input in the first block.
     let mut synth = Direct::new(PolySynth::<f32>::new(cfg), rate, BLOCK);
-    let at = Offset::of(Samples(0), Samples(BLOCK));
+    let at = Offset::of(Samples::new(0), Samples::new(BLOCK));
     let events: Vec<Event> = notes
         .iter()
         .map(|&n| midi::note_on(MidiChannel::FIRST, n, NoteVelocity::from(U7::of(100)).get()))
@@ -148,8 +148,8 @@ fn main() {
     for cutoff in [500.0f64, 1000.0, 2000.0, 4000.0] {
         let mut cfg = base(OscillatorType::Saw);
         cfg.filter = FilterType::Svf {
-            cutoff: Hz(cutoff),
-            q: Q(0.707),
+            cutoff: Hz::new(cutoff),
+            q: Q::new(0.707),
             mode: SvfMode::Lowpass,
         };
         let (l, r) = render(cfg, &[45]);
@@ -165,8 +165,8 @@ fn main() {
     for cutoff in [500.0f64, 2000.0] {
         let mut cfg = base(OscillatorType::Saw);
         cfg.filter = FilterType::Svf {
-            cutoff: Hz(cutoff),
-            q: Q(0.707),
+            cutoff: Hz::new(cutoff),
+            q: Q::new(0.707),
             mode: SvfMode::Highpass,
         };
         let (l, r) = render(cfg, &[45]);
@@ -189,7 +189,7 @@ fn main() {
         cfg.unison = Some(UnisonConfig {
             voice_count: UnisonVoices::new(voices).expect("a unison count"),
             detune_cents: CentsSpan::new(detune).expect("a non-negative detune"),
-            stereo_spread: Spread(0.8),
+            stereo_spread: Spread::new(0.8),
             ..Default::default()
         });
         let (l, r) = render(cfg, &[57]);

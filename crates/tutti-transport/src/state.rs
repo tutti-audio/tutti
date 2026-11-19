@@ -48,14 +48,14 @@ impl AtomicBpm {
 /// Seek is an *absolute* jump, not an offset — the clock overwrites its
 /// position with `target` and clears `pending`.
 #[derive(Clone, Debug)]
-pub struct SeekSlot {
+pub struct PendingSeek {
     /// The absolute beat to land on. Meaningless unless `pending` is set.
     pub target: Arc<AtomicF64>,
     /// Whether a jump is due. Cleared by the clock when it takes the target.
     pub pending: Arc<AtomicBool>,
 }
 
-impl SeekSlot {
+impl PendingSeek {
     /// An empty slot with no seek pending.
     #[must_use]
     pub fn new() -> Self {
@@ -86,7 +86,7 @@ impl SeekSlot {
     }
 }
 
-impl Default for SeekSlot {
+impl Default for PendingSeek {
     fn default() -> Self {
         Self::new()
     }
@@ -112,7 +112,7 @@ pub(crate) struct ClockLinks {
     pub(super) paused: Arc<AtomicBool>,
     /// Pending absolute jump, consumed once per buffer. Writer half: the
     /// clock that consumes the live seek is the one that moves the playhead.
-    pub(super) seek: SeekSlot,
+    pub(super) seek: PendingSeek,
     /// Where the clock publishes the playhead. `None` = writes nothing live.
     pub(super) position_writeback: Option<Arc<AtomicF64>>,
     /// Where the clock publishes its segment's generation
@@ -133,7 +133,7 @@ pub(crate) struct ClockLinks {
     /// Where the clock publishes the tempo it runs at (its hysteresis
     /// applied), so a beat resolved elsewhere uses the same one. `None` =
     /// writes nothing live.
-    pub(super) tempo_in_force: Option<Arc<AtomicBpm>>,
+    pub(super) current_tempo: Option<Arc<AtomicBpm>>,
 }
 
 impl ClockLinks {
@@ -143,11 +143,11 @@ impl ClockLinks {
     pub(crate) fn bare(paused: Arc<AtomicBool>) -> Self {
         Self {
             paused,
-            seek: SeekSlot::new(),
+            seek: PendingSeek::new(),
             position_writeback: None,
             segment_generation: None,
             steady_time: None,
-            tempo_in_force: None,
+            current_tempo: None,
         }
     }
 
@@ -180,16 +180,16 @@ impl ClockLinks {
             position_writeback: _,
             segment_generation: _,
             steady_time: _,
-            tempo_in_force: _,
+            current_tempo: _,
         } = self;
 
         Self {
             paused: Arc::new(AtomicBool::new(false)),
-            seek: SeekSlot::new(),
+            seek: PendingSeek::new(),
             position_writeback: None,
             segment_generation: None,
             steady_time: None,
-            tempo_in_force: None,
+            current_tempo: None,
         }
     }
 }
@@ -200,7 +200,7 @@ mod tests {
 
     #[test]
     fn seek_slot_take_is_one_shot() {
-        let seek = SeekSlot::new();
+        let seek = PendingSeek::new();
         assert_eq!(seek.take(), None);
 
         seek.request(Beat::new(8.0));

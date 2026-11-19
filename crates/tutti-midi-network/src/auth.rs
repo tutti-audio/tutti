@@ -2,7 +2,6 @@
 //! the [`Nonce`] a Host issues and the [`Digest`] a Client answers with.
 
 use sha2::{Digest as _, Sha256};
-use tutti_midi_device::{EntropyError, random_bytes};
 
 use crate::Username;
 
@@ -71,9 +70,13 @@ impl Nonce {
     ///
     /// # Errors
     ///
-    /// [`EntropyError`] when the operating system has no random bytes to give.
-    pub fn random() -> Result<Self, EntropyError> {
-        Self::draw(random_bytes::<16>)
+    /// [`getrandom::Error`] when the operating system has no random bytes to give.
+    pub fn random() -> Result<Self, getrandom::Error> {
+        Self::draw(|| {
+            let mut bytes = [0u8; 16];
+            getrandom::fill(&mut bytes)?;
+            Ok(bytes)
+        })
     }
 
     /// The 16 bytes.

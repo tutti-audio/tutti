@@ -152,7 +152,7 @@ fn tutti_yin_agrees_with_an_independent_yin() {
 /// returns *something* passes every frequency-accuracy test above.
 ///
 /// Two gates keep silence from being reported as a pitch: silence reaches `estimate` as
-/// `Hz(0.0)`, which `PitchResult::is_voiced` rejects (frequency and confidence both
+/// `Hz::new(0.0)`, which `PitchResult::is_voiced` rejects (frequency and confidence both
 /// zero) *and* `Note::nearest_to` independently rejects (`None` at 0 Hz).
 ///
 /// So this test does not pin any single line; it pins the *conjunction*, which

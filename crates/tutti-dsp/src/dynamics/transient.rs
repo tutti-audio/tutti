@@ -38,7 +38,7 @@ use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_units::{Db, SampleRate, Seconds};
 
 use super::curves::db_gain;
-use super::shared::{CHUNK, GAIN_GLIDE, floored, key_levels};
+use super::gain_pass::{CHUNK, GAIN_GLIDE, floored, key_levels};
 use crate::follower::{Follower, Smoothed};
 use crate::{Glide, Lerp};
 

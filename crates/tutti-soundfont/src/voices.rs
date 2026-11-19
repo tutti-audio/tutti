@@ -5,7 +5,7 @@
 //! The voices that sound, and the commands that start and end them.
 
 use tutti_buffers::Float;
-use tutti_dsp::Lanes;
+use tutti_dsp::SimdLanes;
 
 use tutti_sf2::{SamplePool, SoundFont};
 use tutti_ump::{MidiChannel, NoteVelocity};
@@ -20,7 +20,7 @@ use crate::voice::Voice;
 
 /// A sounding voice and the id the core knows it by.
 #[derive(Debug, Clone)]
-struct Slot<F: Float + Lanes> {
+struct Slot<F: Float + SimdLanes> {
     id: VoiceId,
     voice: Voice<F>,
 }
@@ -29,13 +29,13 @@ struct Slot<F: Float + Lanes> {
 /// the order the core wants them listed in), `free` the rest. Both are sized
 /// at construction to the polyphony, so nothing here allocates afterwards.
 #[derive(Debug)]
-pub(crate) struct Voices<F: Float + Lanes> {
+pub(crate) struct Voices<F: Float + SimdLanes> {
     polyphony: usize,
     active: Vec<Slot<F>>,
     free: Vec<Voice<F>>,
 }
 
-impl<F: Float + Lanes> Clone for Voices<F> {
+impl<F: Float + SimdLanes> Clone for Voices<F> {
     /// A copy with its lists as roomy as the original's: a derived clone would
     /// shrink them to their length, and a list that grows is an allocation on
     /// the audio thread.
@@ -51,7 +51,7 @@ impl<F: Float + Lanes> Clone for Voices<F> {
     }
 }
 
-impl<F: Float + Lanes> Voices<F> {
+impl<F: Float + SimdLanes> Voices<F> {
     pub(crate) fn new(render: &Render, polyphony: usize) -> Self {
         Self {
             polyphony,

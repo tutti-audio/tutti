@@ -47,6 +47,9 @@ pub(crate) enum Step {
     /// `umbrella-api`: `public-api` text of each crate the umbrella exports from,
     /// read for a signature type the umbrella does not name (`gates/umbrella_api.rs`).
     UmbrellaApi(Option<String>),
+    /// `affected <base>`: print the packages the diff from `<base>` can reach as
+    /// `-p` flags, or `all` (`gates/affected.rs`).
+    Affected(String),
     /// `cargo package --no-verify` over every crate under `crates/`, listed
     /// when the step runs.
     Package,
@@ -88,6 +91,9 @@ impl Step {
                 dir.as_ref().map_or(String::new(), |d| format!(
                     " (the texts of {d}/<package>.txt instead)"
                 ))
+            ),
+            Step::Affected(base) => format!(
+                "affected: git diff --name-only {base}...HEAD, then the packages it reaches as -p flags (or all)"
             ),
             Step::Package => {
                 "cargo package --locked --no-verify -p <each crate under crates/>".to_owned()
@@ -391,6 +397,11 @@ pub(crate) const RECIPES: &[(&str, &str, &str)] = &[
         "render the book's sounds into book/src/sounds, then build it with mdbook into book/build, or into OUT",
     ),
     (
+        "affected",
+        "<base>",
+        "the packages the diff <base>...HEAD can reach (changed crates and everything that depends on them, dev dependencies included) as `-p` flags, or `all`; CI's test selection",
+    ),
+    (
         "package",
         "",
         "package every crate under crates/ the way crates.io takes it, without building",
@@ -560,6 +571,7 @@ impl Planner<'_> {
                 | "coverage"
                 | "public-api"
                 | "umbrella-api"
+                | "affected"
                 | "fuzz"
         );
         if !takes_args && !args.is_empty() {
@@ -781,6 +793,13 @@ impl Planner<'_> {
                 self.out.push(Step::Release(v));
             }
             "package" => self.out.push(Step::Package),
+            "affected" => {
+                let [base] = Self::params(name, args, [""])?;
+                if base.is_empty() {
+                    return Err("`affected` takes a base: `cargo xtask affected <base>`".to_owned());
+                }
+                self.out.push(Step::Affected(base));
+            }
             "umbrella-api" => {
                 let [dir] = Self::params(name, args, [""])?;
                 self.out.push(Step::UmbrellaApi((!dir.is_empty()).then_some(dir)));
@@ -936,7 +955,7 @@ const LOOM: &[&str] = &[
     r#"LOOM_MAX_PREEMPTIONS=3 RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test task_graph_loom"#,
     r#"RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test parker_loom"#,
     r#"RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test level_cell_loom"#,
-    r#"RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test request_word_loom"#,
+    r#"RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test request_flags_loom"#,
     r#"RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test dirty_set_loom"#,
     r#"LOOM_MAX_PREEMPTIONS=3 RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test ring_loom"#,
     r#"RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test drain_clock_loom -- --nocapture"#,

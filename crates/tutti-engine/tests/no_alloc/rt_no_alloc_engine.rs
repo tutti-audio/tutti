@@ -200,7 +200,7 @@ fn a_published_tempo_map_is_taken_without_allocating() {
                     .process(&mut InterleavedMut::new(&mut output, ChannelLayout::STEREO).unwrap());
             }
         });
-        assert_eq!(transport.settings().tempo_in_force(), bpm, "round {round}");
+        assert_eq!(transport.settings().current_tempo(), bpm, "round {round}");
         transport.settings().reclaim_tempo();
     }
 }
@@ -210,7 +210,7 @@ fn a_published_tempo_map_is_taken_without_allocating() {
 /// (41 steps 24 frames apart, so a 512-frame graph block carries more than the
 /// 8 changes it holds), loop wraps that re-seat on a step, a seek back across
 /// the steps and a map swap all run inside the gate. The publishes run outside
-/// it; the clock really takes the steps (`tempo_in_force` reaches the last
+/// it; the clock really takes the steps (`current_tempo` reaches the last
 /// step's tempo), so a walk that never ran would not pass.
 ///
 /// The ramp case runs the same calls over a ramp, whose
@@ -218,7 +218,7 @@ fn a_published_tempo_map_is_taken_without_allocating() {
 /// crosses 32 cell edges and the engine cuts it at every 8th change; loop
 /// wraps inside the ramp re-seat on a cell, and a seek back and a map swap
 /// land in the middle of it. Its clock really takes the cells
-/// (`tempo_in_force` is the chord of a ramp cell, strictly between the ends).
+/// (`current_tempo` is the chord of a ramp cell, strictly between the ends).
 #[test]
 fn a_step_map_is_followed_without_allocating() {
     use tutti_graph::NodeKey;
@@ -266,7 +266,7 @@ fn a_step_map_is_followed_without_allocating() {
     let mut output = vec![0.0f32; 1024 * 2];
     engine.process(&mut InterleavedMut::new(&mut output, ChannelLayout::STEREO).unwrap());
     // 1 024 frames: past all 41 steps (the last at frame 960).
-    assert_eq!(transport.settings().tempo_in_force(), Bpm::of(160.0));
+    assert_eq!(transport.settings().current_tempo(), Bpm::of(160.0));
     for round in 0..10u32 {
         // Control side: a new map, a loop over the steps, a seek back.
         transport
@@ -287,7 +287,7 @@ fn a_step_map_is_followed_without_allocating() {
             }
         });
         // Looping over beats 0 to 0.02 keeps the tempo among the first 21.
-        let tempo = transport.settings().tempo_in_force().get();
+        let tempo = transport.settings().current_tempo().get();
         assert!((120.0..=140.0).contains(&tempo), "round {round}: {tempo}");
         transport.settings().reclaim_tempo();
     }
@@ -334,7 +334,7 @@ fn a_step_map_is_followed_without_allocating() {
         .expect("room");
     let mut output = vec![0.0f32; 4_096 * 2];
     engine.process(&mut InterleavedMut::new(&mut output, ChannelLayout::STEREO).unwrap());
-    let slowed = transport.settings().tempo_in_force().get();
+    let slowed = transport.settings().current_tempo().get();
     assert!(
         (60.0..119.0).contains(&slowed),
         "a ramp cell's chord: {slowed}"
@@ -364,7 +364,7 @@ fn a_step_map_is_followed_without_allocating() {
         });
         // Looping over beats 0.1 to 0.3 of a ramp that starts at 120 keeps the
         // chord between the ramp's tempo there and its start.
-        let tempo = transport.settings().tempo_in_force().get();
+        let tempo = transport.settings().current_tempo().get();
         assert!((90.0..120.0).contains(&tempo), "round {round}: {tempo}");
         transport.settings().reclaim_tempo();
     }
@@ -399,7 +399,7 @@ fn the_heard_tap_is_allocation_free() {
     let engine = Engine::new(&transport, &mut ed, exec, tutti_engine::BlockDates::Os)
         .expect("within the limits");
     let _ = transport.motion().try_send(MotionEvent::Play);
-    let taps = engine.heard_taps();
+    let taps = engine.output_taps();
     let mut output = vec![0.0f32; 1024 * 2];
     let layout = ChannelLayout::STEREO;
     engine.process(&mut InterleavedMut::new(&mut output, layout).unwrap());
@@ -488,7 +488,7 @@ fn graph_engine_with_env_clock_and_metronome_is_allocation_free() {
     let transport = Transport::new(SampleRate::of(sample_rate));
     let settings = Arc::new(ClickSettings::new());
     settings.mode().set(MetronomeMode::Always);
-    settings.store_volume(tutti_nodes::ClickLevel::of(tutti_units::Amplitude::new(
+    settings.set_volume(tutti_nodes::ClickLevel::of(tutti_units::Amplitude::new(
         1.0,
     )));
     let click = ClickNode::new(&transport, Arc::clone(&settings));

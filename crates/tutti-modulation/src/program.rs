@@ -20,7 +20,7 @@ use alloc::vec::Vec;
 use core::fmt;
 
 use tutti_curve::{Law, Piece};
-use tutti_rt::Param;
+use tutti_rt::{Param, SplitMix64};
 use tutti_units::{
     Azimuth, Beat, BeatsPerCycle, Depth, Frame, Hz, Normalized, Phase, PhaseIncrement, Real,
     SamplePosition, SampleRate, UnitParam,
@@ -160,7 +160,7 @@ pub enum Waveform {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PeriodPoint {
     /// Where in the period, in `[0, 1)` (a program with one outside is
-    /// refused: `Phase(x)` does not wrap, and a point past the period's end
+    /// refused: `Phase::new(x)` does not wrap, and a point past the period's end
     /// is a mistake, not the next period's start).
     pub at: Phase,
     /// The raw value there, in `[-1, 1]`.
@@ -952,7 +952,7 @@ fn hash_cycle(n: f64, seed: u64) -> f64 {
 }
 
 /// Map an integer index to a stable pseudo-random value in `[-1, 1)`
-/// ([`splitmix64`]).
+/// ([`SplitMix64::mix`]).
 ///
 /// Addressable rather than sequential: the value for index `n` is
 /// computable without having produced `n-1`, which is what lets a random
@@ -960,22 +960,9 @@ fn hash_cycle(n: f64, seed: u64) -> f64 {
 /// fork.
 #[inline]
 pub(crate) fn hash_bipolar(n: i64) -> f64 {
-    let z = splitmix64(n as u64);
+    let z = SplitMix64::mix(n as u64);
     // Top 53 bits → [0, 1) → [-1, 1).
     ((z >> 11) as f64 / (1u64 << 53) as f64) * 2.0 - 1.0
-}
-
-/// The splitmix64 output function (Steele, Lea and Flood 2014; Vigna's
-/// reference) applied to the state `z`: the state advanced by the golden-ratio
-/// increment, then the two multiply-xorshift rounds. A stable,
-/// platform-independent mix whose single step from state `s` is the generator's
-/// output for `s`.
-#[inline]
-pub(crate) fn splitmix64(mut z: u64) -> u64 {
-    z = z.wrapping_add(0x9E37_79B9_7F4A_7C15);
-    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-    z ^ (z >> 31)
 }
 
 impl Waveform {

@@ -4,7 +4,7 @@
 use tutti_buffers::{BusTopology, MaxBlock};
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{
-    COEFF_INTERVAL, GateBank, GateControls, GateLanes, KeyFilter, KeySource, Lanes, Lerp,
+    COEFF_INTERVAL, GateBank, GateControls, GateLanes, KeyFilter, KeySource, Lerp, SimdLanes,
 };
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
 use tutti_units::{Db, Hz, Q, SampleRate, Seconds, Tail};
@@ -70,7 +70,7 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 /// `F` is the float of the graph it runs in, and of the detector, the gain and the key filter.
 pub type GateNode<F> = KernelNode<GateKernel<F>>;
 
-impl<F: Float + Lanes + Lerp> GateNode<F> {
+impl<F: Float + SimdLanes + Lerp> GateNode<F> {
     /// A gate on the bus `input`, its detector on `key`, running at `controls`.
     ///
     /// The main bus keeps its speaker placement; a [`KeySource::Sidechain`] is a second bus
@@ -90,7 +90,7 @@ impl<F: Float + Lanes + Lerp> GateNode<F> {
     /// 0 dB, a gate that passes everything (what a non-finite control falls back to), where
     /// the gate this node has always been built as closes to **-80 dB**, effectively
     /// silent. A caller that wants a gate writes the range:
-    /// `GateControls { threshold, range: Db(-80.0), ..GateControls::DEFAULT }`. A gentler
+    /// `GateControls { threshold, range: Db::new(-80.0), ..GateControls::DEFAULT }`. A gentler
     /// `-12.0` ducks the signal without removing it, which sounds more natural on drums and
     /// room mics.
     ///
@@ -191,7 +191,7 @@ control_set! {
 /// parks: its follower must keep tracking the key, which the main input's silence says
 /// nothing of.
 #[derive(Clone, Debug)]
-pub struct GateKernel<F: Float + Lanes> {
+pub struct GateKernel<F: Float + SimdLanes> {
     input: BusTopology,
     key: KeySource,
     filter: KeyFilter,
@@ -201,7 +201,7 @@ pub struct GateKernel<F: Float + Lanes> {
     landed: bool,
 }
 
-impl<F: Float + Lanes + Lerp> GateKernel<F> {
+impl<F: Float + SimdLanes + Lerp> GateKernel<F> {
     /// A gate on `input` whose detector reads `key`.
     fn new(input: BusTopology, key: KeySource, filter: KeyFilter) -> Self {
         Self {
@@ -220,7 +220,7 @@ impl<F: Float + Lanes + Lerp> GateKernel<F> {
     }
 }
 
-impl<F: Float + Lanes + Lerp> Kernel for GateKernel<F> {
+impl<F: Float + SimdLanes + Lerp> Kernel for GateKernel<F> {
     type Float = F;
     type Set = GateSet;
 

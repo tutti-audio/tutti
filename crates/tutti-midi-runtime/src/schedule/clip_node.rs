@@ -79,7 +79,7 @@ use super::walk::{Beated, Visit, Walk};
 
 /// Keys a clip node tracks at once, held or refused. One group's 16 channels
 /// of 128 notes is 2,048, so a clip on one group never fills it; a note-on
-/// that finds it full is withheld and counted, never dropped silently. At 8
+/// that finds it full is skipped and counted, never dropped silently. At 8
 /// bytes a key the table is 16 KiB, allocated with the node.
 const LEDGER_CAPACITY: usize = 2048;
 

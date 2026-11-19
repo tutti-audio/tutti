@@ -29,6 +29,7 @@ workspace = true
 thiserror = { workspace = true, features = ["std"] }
 serde = { version = "1", optional = true, features = ["derive"] }
 tracing.workspace = true
+getrandom = { workspace = true }
 
 tutti-midi-device = { version = "0.0.1", path = "../tutti-midi-device" }
 tutti-midi-ci = { version = "0.0.1", path = "../tutti-midi-ci" }

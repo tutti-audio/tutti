@@ -119,9 +119,9 @@ impl ProcessGuard {
         }
     }
 
-    /// Test-only: create a guard without a real subprocess. Used by
-    /// `handle_over` in `tutti-plugin`'s mock-server tests, and by this
-    /// crate's own for `Ipc`.
+    /// Test-only: create a guard without a real subprocess. Used by the
+    /// served-node and fork tests of `tutti-plugin` over its mock `plugin-server`, and by
+    /// this crate's own for `Ipc`.
     #[cfg(any(test, feature = "testing"))]
     pub fn for_test(socket_path: PathBuf) -> Self {
         Self {

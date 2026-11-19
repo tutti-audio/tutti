@@ -76,19 +76,19 @@ fn audio_thread_cell_borrows_neither_allocate_nor_free() {
     assert_eq!(*cell.borrow(), (0..10_000u64).sum::<u64>());
 }
 
-/// `RequestWord::raise` and `take`, and a `ring` push and pop (full and
+/// `AtomicRequestFlags::raise` and `take`, and a `ring` push and pop (full and
 /// empty answers included), neither allocate nor free: the whole of what a
 /// host callback and the block-head drain do.
 #[test]
-fn request_word_and_ring_are_allocation_free() {
-    use tutti_rt::{Overflow, RequestBit, RequestWord, ring};
+fn request_flags_and_ring_are_allocation_free() {
+    use tutti_rt::{AtomicRequestFlags, Overflow, RequestFlag, ring};
 
-    let word = RequestWord::new();
+    let flags = AtomicRequestFlags::new();
     let (mut writer, mut reader) = ring::<[u32; 3]>(4, Overflow::DropNewest);
     assert_no_alloc::assert_no_alloc(|| {
         for round in 0..1_000u32 {
-            word.raise(RequestBit::of((round % 32) as u8));
-            let taken = word.take();
+            flags.raise(RequestFlag::of((round % 32) as u8));
+            let taken = flags.take();
             assert_eq!(taken.iter().count(), 1);
             for n in 0..6 {
                 let _ = writer.push([round, n, 0]);
@@ -149,6 +149,26 @@ fn seq_cell_write_and_read_are_allocation_free() {
             writer.write([round, round + 1, round + 2]);
             assert_eq!(writer.last(), Some([round, round + 1, round + 2]));
             assert_eq!(reader.read(4), Ok(Some([round, round + 1, round + 2])));
+        }
+    });
+}
+
+/// `SeqSlotsWriter::write` and `new_epoch`, and `SeqSlotsReader::drain`, neither
+/// allocate nor free.
+#[test]
+fn seq_slots_write_and_drain_are_allocation_free() {
+    let (mut writer, mut reader) = tutti_rt::seq_slots::<f64>(64);
+    assert_no_alloc::assert_no_alloc(|| {
+        for round in 0..100u32 {
+            for slot in 0..64 {
+                writer.write(slot, f64::from(round));
+            }
+            if round % 10 == 0 {
+                writer.new_epoch();
+            }
+            let mut yielded = 0;
+            reader.drain(|_, _| yielded += 1);
+            assert_eq!(yielded, if round % 10 == 0 { 0 } else { 64 });
         }
     });
 }

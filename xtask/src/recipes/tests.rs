@@ -25,6 +25,7 @@ fn least_args(name: &str) -> &'static [&'static str] {
         "release" => &["0.1.0"],
         "conformance" => &["--results", "r"],
         "public-api" => &["tutti-rt"],
+        "affected" => &["origin/main"],
         _ => &[],
     }
 }
@@ -540,4 +541,17 @@ fn fuzz_refuses_a_bad_target_or_duration() {
         let args: Vec<String> = bad.iter().map(|s| (*s).to_owned()).collect();
         assert!(plan("fuzz", &args, &ctx()).is_err(), "{bad:?}");
     }
+}
+
+#[test]
+fn affected_takes_exactly_one_base() {
+    let step = |args: &[&str]| {
+        let args: Vec<String> = args.iter().map(|s| (*s).to_owned()).collect();
+        plan("affected", &args, &ctx())
+    };
+    assert!(
+        matches!(&step(&["origin/main"]).unwrap()[..], [Step::Affected(b)] if b == "origin/main")
+    );
+    assert!(step(&[]).unwrap_err().contains("takes a base"));
+    assert!(step(&["a", "b"]).is_err());
 }

@@ -4,7 +4,7 @@
 use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{
-    COEFF_INTERVAL, DynamicEqBank, DynamicEqControls, DynamicMode, KeySource, Lanes, Lerp,
+    COEFF_INTERVAL, DynamicEqBank, DynamicEqControls, DynamicMode, KeySource, Lerp, SimdLanes,
 };
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
 use tutti_units::{CompressionRatio, Db, Hz, Q, SampleRate, Seconds, Tail};
@@ -152,7 +152,7 @@ impl DynamicEqConfig {
 /// `F` is the float of the graph it runs in, and of the detector and the bell.
 pub type DynamicEqNode<F> = KernelNode<DynamicEqKernel<F>>;
 
-impl<F: Float + Lanes + Lerp> From<DynamicEqConfig> for DynamicEqNode<F> {
+impl<F: Float + SimdLanes + Lerp> From<DynamicEqConfig> for DynamicEqNode<F> {
     /// # Panics
     ///
     /// Past 16 channels: a band is one bus.
@@ -191,7 +191,7 @@ control_set! {
 /// The band as a [`Kernel`]: a [`DynamicEqBank`] sized at the prepared rate, its detector on
 /// the [`KeySource`] it was built with.
 #[derive(Clone, Debug)]
-pub struct DynamicEqKernel<F: Float + Lanes> {
+pub struct DynamicEqKernel<F: Float + SimdLanes> {
     input: BusTopology,
     key: KeySource,
     mode: DynamicMode,
@@ -201,7 +201,7 @@ pub struct DynamicEqKernel<F: Float + Lanes> {
     landed: bool,
 }
 
-impl<F: Float + Lanes + Lerp> DynamicEqKernel<F> {
+impl<F: Float + SimdLanes + Lerp> DynamicEqKernel<F> {
     fn new(input: BusTopology, key: KeySource, mode: DynamicMode) -> Self {
         Self {
             input,
@@ -213,7 +213,7 @@ impl<F: Float + Lanes + Lerp> DynamicEqKernel<F> {
     }
 }
 
-impl<F: Float + Lanes + Lerp> Kernel for DynamicEqKernel<F> {
+impl<F: Float + SimdLanes + Lerp> Kernel for DynamicEqKernel<F> {
     type Float = F;
     type Set = DynamicEqSet;
 

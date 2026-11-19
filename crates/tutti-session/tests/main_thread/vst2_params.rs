@@ -1,7 +1,7 @@
 //! `Params::typed` over a real format's own value map: the
 //! reference VST2 plugin, in process. Its parameter 1 is labelled `Hz` and
 //! declares the integer range `0..=127`, which VST2 maps linearly
-//! (`tutti-vst2-host`'s `IntegerRange`), so `Hz(31.75)` is position `0.25`
+//! (`tutti-vst2-host`'s `IntegerRange`), so `Hz::new(31.75)` is position `0.25`
 //! (the figures are the range's, written here, not read from the host).
 
 use crate::pooled::{LoadPlugin, Spec};

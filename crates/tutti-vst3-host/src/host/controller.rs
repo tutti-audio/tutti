@@ -10,8 +10,8 @@ use tutti_rt::{DrainMark, DrainWatch};
 
 use tutti_buffers::FloatWidth;
 use tutti_plugin_types::{
-    Control, Controller, Edit, EditDrain, EditQueue, EditSink, Loaded, ParamAccess, ParamEdit,
-    PluginError, PluginResult, PluginTail, Prepare, Processor, Refused, Request, RestartRules,
+    Control, Controller, EditQueue, EditSink, Loaded, ParamAccess, ParamEdit, PluginError,
+    PluginResult, PluginTail, Prepare, Processor, Refused, ReportDrain, Request, RestartRules,
     Samples, Stuck, Widths, Wraps,
 };
 use tutti_units::Normalized;
@@ -22,6 +22,9 @@ use crate::types::{ProcessMode, Vst3Sample};
 /// Reports of the processor's `outputParameterChanges` held for
 /// `take_reported_edits` before the oldest go (a control tick drains them).
 const PROCESSOR_EDITS_ROOM: usize = 4096;
+
+/// The reports the Processor can have waiting for a tick.
+const REPORT_CAPACITY: usize = 256;
 
 use super::control::plugin_error;
 use super::instance::Staged;
@@ -66,7 +69,7 @@ pub struct Vst3Controller {
     /// The plugin's `outputParameterChanges`, the last value of each parameter
     /// per block, applied to the controller on a tick
     /// ([`flush_edits`](Control::flush_edits)).
-    reports: EditDrain,
+    reports: ReportDrain,
     /// What `apply_reports` applied, for `take_reported_edits`.
     processor_edits: Vec<ParamEdit>,
     /// The processor's reports that were dropped for want of room in
@@ -117,7 +120,7 @@ impl Vst3Controller {
         edits: EditSink,
         handed: Vec<Handed>,
         watch: DrainWatch,
-        reports: EditDrain,
+        reports: ReportDrain,
     ) -> Self {
         Self {
             loaded: Some(loaded),
@@ -184,7 +187,7 @@ impl Vst3Controller {
     fn apply_reports(&mut self, main: MainThreadMarker) {
         let mut reported = Vec::new();
         self.reports.drain(|edit| {
-            if let Edit::Param { id, value } = edit {
+            if let ParamEdit::Change { id, value, .. } = edit {
                 reported.push((id, value));
             }
         });
@@ -440,7 +443,7 @@ impl Vst3Loaded {
         loaded.declared = Some(Arc::clone(&declared));
         let shell = Arc::new(Shell::new());
         let (sink, drain) = tutti_plugin_types::edits(EDIT_CAPACITY);
-        let (reports_in, reports_out) = tutti_plugin_types::edits(EDIT_CAPACITY);
+        let (reports_in, reports_out) = tutti_plugin_types::reports(REPORT_CAPACITY);
         let (beat, watch) = tutti_rt::drain_clock();
         // The Processor holds the first `EDIT_CAPACITY` carried writes and refuses
         // the rest, counted; the Controller keeps a record of what it holds.

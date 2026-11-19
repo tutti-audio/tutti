@@ -6,7 +6,6 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use tutti_midi_device::EntropyError;
 use tutti_ump::Ump;
 
 use crate::command::code;
@@ -84,7 +83,7 @@ pub(crate) enum Role {
     Client(Box<Credentials>),
     Host {
         admission: Arc<Admission>,
-        nonce_source: fn() -> Result<Nonce, EntropyError>,
+        nonce_source: fn() -> Result<Nonce, getrandom::Error>,
     },
 }
 

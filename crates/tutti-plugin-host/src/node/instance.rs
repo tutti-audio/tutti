@@ -926,7 +926,7 @@ mod tests {
         let lost = instance.lost_latch();
         assert!(!lost.is_lost(), "a live plugin");
         fake.panic_in_latency(true);
-        assert!(Request::LatencyChanged.raise(fake.request_word()));
+        assert!(Request::LatencyChanged.raise(fake.request_flags()));
         let changes = instance.pump(main_thread());
         assert!(lost.is_lost());
         assert!(

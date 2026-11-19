@@ -22,7 +22,7 @@ use tutti_dsp::{FdnControls, FdnLayout, FreeverbControls};
 use tutti_fixtures::noise;
 use tutti_fixtures::signal::bits;
 use tutti_graph::contract::drive;
-use tutti_graph::{IntoNode, Prepare, Solo};
+use tutti_graph::{IntoNode, Prepare, Standalone};
 use tutti_nodes::{
     ChannelTimes, CompressorControls, CompressorNode, CrossoverNode, DelayControls, DelayLayout,
     DelayNode, FdnNode, FreeverbNode, GateControls, GateNode, InterpolationMode, KeySource,
@@ -34,11 +34,11 @@ const RATE: SampleRate = SampleRate::SR_48K;
 const BLOCK: usize = 64;
 const FRAMES: usize = 1_024;
 
-fn solo<N: IntoNode>(node: N) -> Solo<N::Controls> {
-    Solo::new(node, Prepare::new(RATE, MaxBlock::of(Samples::new(BLOCK))))
+fn solo<N: IntoNode>(node: N) -> Standalone<N::Controls> {
+    Standalone::new(node, Prepare::new(RATE, MaxBlock::of(Samples::new(BLOCK))))
 }
 
-fn set_mix<C>(solo: &mut Solo<C>, mix: Mix) {
+fn set_mix<C>(solo: &mut Standalone<C>, mix: Mix) {
     let key = solo.key();
     solo.renderer_mut()
         .editor_mut()

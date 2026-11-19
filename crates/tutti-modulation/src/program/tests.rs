@@ -5,7 +5,7 @@ use super::*;
 
 use tutti_curve::{Breakpoint, Trajectory};
 use tutti_curve::{Curvature, Exponent};
-use tutti_rt::Param;
+use tutti_rt::{Param, SplitMix64};
 use tutti_units::{Azimuth, Hz, UnitParam};
 
 // The 1e-12 bounds: each figure is at most 50 f64 operations on values of at most 10
@@ -947,30 +947,6 @@ fn a_negative_position_reads_the_end_of_the_cycle() {
     }
 }
 
-/// `splitmix64` is the published generator (Vigna's reference, seed 0): its n-th output is
-/// the mix of the state `n - 1` increments on, here the golden-ratio increment
-/// `0x9E3779B97F4A7C15` times `n - 1`. The first five outputs are 0xE220A8397B1DCDAF,
-/// 0x6E789E6AA1B965F4, 0x06C45D188009454F, 0xF88BB8A8724C81EC and 0x1B39896A51A8749B.
-#[test]
-fn splitmix64_reproduces_the_published_outputs() {
-    let gamma = 0x9E37_79B9_7F4A_7C15_u64;
-    let want = [
-        0xE220_A839_7B1D_CDAF_u64,
-        0x6E78_9E6A_A1B9_65F4,
-        0x06C4_5D18_8009_454F,
-        0xF88B_B8A8_724C_81EC,
-        0x1B39_896A_51A8_749B,
-    ];
-    for (n, want) in want.into_iter().enumerate() {
-        assert_eq!(
-            splitmix64((n as u64).wrapping_mul(gamma)),
-            want,
-            "output {}",
-            n + 1
-        );
-    }
-}
-
 /// The random LFO's value for cycle 0 is not a constant -1: the mix of index 0
 /// is not 0.
 #[test]
@@ -995,7 +971,7 @@ fn a_raw_value_keeps_f64_precision() {
         .expect("a value");
     assert!((got - third).abs() < 1e-15, "{got}");
     for n in [0i64, 1, 7, -3, 1_000_003] {
-        let want = ((splitmix64(n as u64) >> 11) as f64 / 9_007_199_254_740_992.0) * 2.0 - 1.0;
+        let want = ((SplitMix64::mix(n as u64) >> 11) as f64 / 9_007_199_254_740_992.0) * 2.0 - 1.0;
         assert_eq!(hash_bipolar(n), want, "index {n}");
     }
     assert!(

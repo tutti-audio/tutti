@@ -128,7 +128,7 @@ pub struct Scheduled {
     /// a cancel compares against.
     seq: u64,
     /// An `At::Frame`'s frame, unrounded: a rate change moves it by
-    /// `new / old` (`ScheduleAudio::rescale`), and `at` is this rounded to the
+    /// `new / old` (`CommandQueueAudio::rescale`), and `at` is this rounded to the
     /// nearest frame, so two changes in a row round once rather than twice
     /// (the graph executor's `CommandRx::rescale` keeps the same figure).
     pos: f64,
@@ -153,7 +153,7 @@ impl Scheduled {
 
 /// Both sides of the queue. Clone shares every field.
 #[derive(Clone)]
-pub struct Schedule {
+pub struct CommandQueue {
     queue: Arc<ArrayQueue<Scheduled>>,
     /// Commands in flight: sent, not yet applied or cancelled.
     credit: Arc<AtomicUsize>,
@@ -168,7 +168,7 @@ pub struct Schedule {
     /// flight is taken to be old (a graph re-rated without telling the
     /// transport).
     rescale_before: Arc<AtomicU64>,
-    /// The pending list while no [`ScheduleAudio`] holds it: a capacity-one
+    /// The pending list while no [`CommandQueueAudio`] holds it: a capacity-one
     /// queue, as the motion machine's home is. The audio side pops it at
     /// its build and pushes it back when it drops, so a command still
     /// waiting (a beat not yet reached) outlives the engine that gathered
@@ -176,13 +176,13 @@ pub struct Schedule {
     carry: Arc<ArrayQueue<Vec<Scheduled>>>,
 }
 
-impl std::fmt::Debug for Schedule {
+impl std::fmt::Debug for CommandQueue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Schedule").finish_non_exhaustive()
+        f.debug_struct("CommandQueue").finish_non_exhaustive()
     }
 }
 
-impl Schedule {
+impl CommandQueue {
     pub(crate) fn new() -> Self {
         let carry = Arc::new(ArrayQueue::new(1));
         // A fresh capacity-one queue has room.
@@ -256,7 +256,7 @@ impl Schedule {
 
     /// Control thread: the device rate is changing, and every command sent
     /// from here on is written in the new rate's frames. The boundary
-    /// `ScheduleAudio::rescale` keeps to — the same rule as the
+    /// `CommandQueueAudio::rescale` keeps to — the same rule as the
     /// executor's own schedule (`Editor::reprepare`), where a commit's
     /// sequence number is the boundary; here it is the send order.
     pub(crate) fn mark_rate_change(&self) {
@@ -265,28 +265,28 @@ impl Schedule {
     }
 }
 
-/// The audio thread's half of a [`Schedule`]: the commands pulled off the
+/// The audio thread's half of a [`CommandQueue`]: the commands pulled off the
 /// ring and not yet due, in a list reserved at its in-flight maximum and owned
 /// by the one value that walks them. Only a [`TransportAudio`](super::TransportAudio)
 /// holds one, so nothing else can reach the list, and a command leaves it
 /// only through [`take`](Self::take), which gives its credit back.
-pub(crate) struct ScheduleAudio {
-    shared: Schedule,
+pub(crate) struct CommandQueueAudio {
+    shared: CommandQueue,
     pending: Vec<Scheduled>,
 }
 
-impl Drop for ScheduleAudio {
+impl Drop for CommandQueueAudio {
     fn drop(&mut self) {
         self.hand_back();
     }
 }
 
-impl ScheduleAudio {
+impl CommandQueueAudio {
     /// Takes the pending list the last audio side handed back. Control
     /// thread: a second audio side over the same schedule (only a test
     /// builds one; the transport hands out one) starts with an empty list
     /// of its own, allocated here.
-    pub(crate) fn new(shared: Schedule) -> Self {
+    pub(crate) fn new(shared: CommandQueue) -> Self {
         let pending = shared
             .carry
             .pop()
@@ -307,7 +307,7 @@ impl ScheduleAudio {
     /// Move what was sent into the pending list and drop what was cancelled.
     /// Never allocates: the list was reserved at its in-flight maximum, and
     /// the credit keeps it under that.
-    pub(crate) fn gather(&mut self) {
+    pub(crate) fn drain_commands(&mut self) {
         while let Some(cmd) = self.shared.queue.pop() {
             debug_assert!(
                 self.pending.len() < self.pending.capacity(),
@@ -324,7 +324,7 @@ impl ScheduleAudio {
         self.shared.release(before - self.pending.len());
     }
 
-    /// The commands sent and not yet applied, as of the last [`gather`](Self::gather).
+    /// The commands sent and not yet applied, as of the last [`drain_commands`](Self::drain_commands).
     pub(crate) fn pending(&self) -> &[Scheduled] {
         &self.pending
     }
@@ -354,7 +354,7 @@ impl ScheduleAudio {
     /// here. Never allocates.
     pub(crate) fn rescale(&mut self, ratio: f64) {
         let before = self.shared.rescale_before.swap(u64::MAX, Ordering::AcqRel);
-        self.gather();
+        self.drain_commands();
         for cmd in self.pending.iter_mut() {
             if cmd.seq >= before {
                 continue;
@@ -367,7 +367,7 @@ impl ScheduleAudio {
     }
 }
 
-impl Schedule {
+impl CommandQueue {
     fn release(&self, n: usize) {
         if n > 0 {
             self.credit.fetch_sub(n, Ordering::AcqRel);
@@ -388,15 +388,15 @@ mod tests {
     /// handed back, and applying one frees one.
     #[test]
     fn a_full_schedule_refuses_and_hands_the_command_back() {
-        let s = Schedule::new();
+        let s = CommandQueue::new();
         let play = TransportCommand::Motion(MotionEvent::Play);
         for i in 0..SCHEDULE_CAPACITY {
             s.send(At::Frame(Frame::new(i as u64)), play).expect("room");
         }
         let at = At::Frame(Frame::new(99));
         assert_eq!(s.send(at, play), Err(NoCredit));
-        let mut audio = ScheduleAudio::new(s.clone());
-        audio.gather();
+        let mut audio = CommandQueueAudio::new(s.clone());
+        audio.drain_commands();
         assert_eq!(audio.pending().len(), SCHEDULE_CAPACITY);
         audio.take(0, false);
         s.send(at, play).expect("one credit back");
@@ -407,7 +407,7 @@ mod tests {
     /// is handed back.
     #[test]
     fn immediate_commands_have_a_reserve_timed_ones_cannot_use() {
-        let s = Schedule::new();
+        let s = CommandQueue::new();
         let play = TransportCommand::Motion(MotionEvent::Play);
         for i in 0..SCHEDULE_CAPACITY {
             s.send(At::Beat(tutti_units::Beat::new(1000.0 + i as f64)), play)
@@ -425,14 +425,14 @@ mod tests {
     /// leaves later commands alone.
     #[test]
     fn cancel_drops_what_was_sent_before_it() {
-        let s = Schedule::new();
+        let s = CommandQueue::new();
         let play = TransportCommand::Motion(MotionEvent::Play);
         s.send(At::Frame(Frame::new(10)), play).expect("room");
         s.send(At::Frame(Frame::new(20)), play).expect("room");
         s.cancel_all();
         s.send(At::Frame(Frame::new(30)), play).expect("room");
-        let mut audio = ScheduleAudio::new(s.clone());
-        audio.gather();
+        let mut audio = CommandQueueAudio::new(s.clone());
+        audio.drain_commands();
         assert_eq!(audio.pending().len(), 1);
         assert_eq!(audio.pending()[0].at(), At::Frame(Frame::new(30)));
         assert_eq!(s.outstanding(), 1);

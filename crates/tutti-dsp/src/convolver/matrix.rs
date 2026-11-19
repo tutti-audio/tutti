@@ -184,7 +184,7 @@ impl<F: FftFloat> MatrixConvolver<F> {
             for o in 0..cols {
                 self.sum[..n].fill(F::ZERO);
                 for i in 0..rows {
-                    self.paths[i * cols + o].process_block(
+                    self.paths[i * cols + o].process(
                         Mono::new(&self.heard[i][..n]),
                         MonoMut::new(&mut self.path[..n]),
                     );

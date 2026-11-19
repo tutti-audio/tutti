@@ -270,7 +270,7 @@ impl<T> Grid<T> {
     /// Whether another grid has the same shape — the precondition for any
     /// elementwise operation between the two.
     #[inline]
-    pub fn same_shape_as<U>(&self, other: &Grid<U>) -> bool {
+    pub fn has_same_shape<U>(&self, other: &Grid<U>) -> bool {
         self.frames == other.frames && self.bins == other.bins
     }
 

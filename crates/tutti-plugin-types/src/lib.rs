@@ -224,6 +224,7 @@ mod probe_wire;
 mod process;
 mod process_wake;
 mod render_mode;
+mod reports;
 mod requests;
 mod state_frame;
 mod state_use;
@@ -245,7 +246,7 @@ static RT_NO_ALLOC_HARNESS: assert_no_alloc::AllocDisabler = assert_no_alloc::Al
 
 pub use tutti_buffers::MaxBlock;
 pub use tutti_buffers::{ChannelLayout, ChannelTopology, Speaker};
-pub use tutti_rt::{RequestBit, RequestBits, RequestWord};
+pub use tutti_rt::{AtomicRequestFlags, RequestFlag, RequestFlags};
 /// Re-exported so every format crate spells a sample count the same way
 /// without each taking its own `tutti-units` dependency — `ChannelLayout`
 /// above is here for the same reason.
@@ -286,6 +287,7 @@ pub use invalidation::{PluginInvalidation, PluginRefresh, ResyncClass, ResyncKin
 pub use order::{StableOrder, insertion_sort_by_key};
 pub use points::{PointBuf, PointPool};
 pub use process_wake::ProcessWake;
+pub use reports::{ReportDrain, ReportSink, reports};
 pub use requests::{Edit, EditDrain, EditQueue, EditSink, edits, taken};
 pub use state_frame::{
     BareFrame, FrameReader, MAX_STATE_BYTES, Opened, StateFrame, StateFrameError,

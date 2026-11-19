@@ -40,12 +40,12 @@ use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_units::{Amplitude, CompressionRatio, Db, Hz, Q, SampleRate, Samples, Seconds};
 
 use super::curves::{gain_reduction, level_db, upward_gain_lift};
+use super::gain_pass::{MAX_KNEE, floored};
 use super::key_filter::KeyStage;
-use super::shared::{MAX_KNEE, floored};
 use crate::follower::{Follower, Pole, Smoothed};
 use crate::{
-    COEFF_INTERVAL, Glide, Lanes, Lerp, SvfBank, SvfCoefficients, SvfCoeffs, SvfControls, SvfModel,
-    SvfType,
+    COEFF_INTERVAL, Glide, Lerp, SimdLanes, SvfBank, SvfCoefficients, SvfControls, SvfDesign,
+    SvfModel, SvfType,
 };
 
 /// The periods of the band's centre the detector's mean-square level is taken over: 8.
@@ -97,7 +97,7 @@ pub struct DynamicEqControls {
     /// How fast the gain change falls back toward flat. Read as `attack` is.
     pub release: Seconds,
     /// The most the band's gain moves from flat, in dB and not below 0: the cut of a
-    /// downward band, the boost of an upward one. Held in `0..=SvfCoeffs::MAX_GAIN`.
+    /// downward band, the boost of an upward one. Held in `0..=SvfDesign::MAX_GAIN`.
     pub range: Db,
 }
 
@@ -175,7 +175,7 @@ impl<F: Float> Design<F> {
             range: F::from_unit(
                 c.range
                     .finite_or(d.range)
-                    .clamp(Db::UNITY, SvfCoeffs::MAX_GAIN),
+                    .clamp(Db::UNITY, SvfDesign::MAX_GAIN),
             ),
             max_key: F::from_unit(MAX_KEY),
             ballistics: Follower::of(floored(c.attack, c.release), rate),
@@ -193,7 +193,7 @@ const PERIOD: Samples = Samples::new(COEFF_INTERVAL);
 /// Built on the control side for one rate; the state, in the detector and the bell, and the
 /// views are `F`, the graph's float. Nothing it holds grows.
 #[derive(Clone, Debug)]
-pub struct DynamicEqBank<F: Float + Lanes> {
+pub struct DynamicEqBank<F: Float + SimdLanes> {
     mode: DynamicMode,
     design: Design<F>,
     /// The centre and Q the filters are at, held in the SVF's range.
@@ -216,7 +216,7 @@ pub struct DynamicEqBank<F: Float + Lanes> {
     phase: Samples,
 }
 
-impl<F: Float + Lanes + Lerp> DynamicEqBank<F> {
+impl<F: Float + SimdLanes + Lerp> DynamicEqBank<F> {
     /// A band of `mode` over `width` channels at `rate` that does nothing, to be aimed.
     /// Allocates: build it on the control side.
     #[must_use]
@@ -324,7 +324,7 @@ impl<F: Float + Lanes + Lerp> DynamicEqBank<F> {
         let d = &self.design;
         let x = (level * d.key_scale).min(d.max_key);
         let mean = d.mean.step(&mut self.mean_square, x * x);
-        let db = level_db((<F as Lanes>::lit(2.0) * mean).sqrt());
+        let db = level_db((<F as SimdLanes>::lit(2.0) * mean).sqrt());
         let curve = match self.mode {
             DynamicMode::Downward => gain_reduction(db, d.threshold, d.ratio, d.knee),
             DynamicMode::Upward => upward_gain_lift(db, d.threshold, d.ratio, d.knee),

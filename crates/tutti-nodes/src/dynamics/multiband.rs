@@ -17,7 +17,7 @@ use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_buffers::{Float, Mono, Planes, PlanesMut};
 use tutti_dsp::{
     BandSettings, BankShape, COEFF_INTERVAL, CompressorControls, CrossoverControls, CrossoverError,
-    Lanes, Lerp, MultibandBank, MultibandLanes, MultibandSettings,
+    Lerp, MultibandBank, MultibandLanes, MultibandSettings, SimdLanes,
 };
 use tutti_graph::{
     Cost, Cx, IntoNode, Io, MAX_PARAM_PORTS, Node, NodeParts, ParamNode, ParamSet, Prepare, Shape,
@@ -273,7 +273,7 @@ struct PortLanes<'a, F: Float> {
 ///
 /// `F` is the float of the graph it runs in, and of the crossover, the detectors and the
 /// gains.
-pub struct MultibandCompressorNode<F: Float + Lanes + Lerp> {
+pub struct MultibandCompressorNode<F: Float + SimdLanes + Lerp> {
     rig: Rig,
     /// What [`prepare`](Node::prepare) builds from the rate it is given: `None` until the
     /// node is prepared.
@@ -290,7 +290,7 @@ struct Rig {
 }
 
 /// The node prepared for one rate and block size.
-struct Tuned<F: Float + Lanes + Lerp> {
+struct Tuned<F: Float + SimdLanes + Lerp> {
     bank: MultibandBank<F>,
     /// The settings the bank was last aimed at.
     applied: Option<MultibandSettings>,
@@ -299,7 +299,7 @@ struct Tuned<F: Float + Lanes + Lerp> {
     position: u64,
 }
 
-impl<F: Float + Lanes + Lerp> fmt::Debug for MultibandCompressorNode<F> {
+impl<F: Float + SimdLanes + Lerp> fmt::Debug for MultibandCompressorNode<F> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("MultibandCompressorNode")
             .field("layout", &self.rig.shape.width())
@@ -308,7 +308,7 @@ impl<F: Float + Lanes + Lerp> fmt::Debug for MultibandCompressorNode<F> {
     }
 }
 
-impl<F: Float + Lanes + Lerp> MultibandCompressorNode<F> {
+impl<F: Float + SimdLanes + Lerp> MultibandCompressorNode<F> {
     /// A compressor of `bands` bands over `layout`.
     ///
     /// The crossovers start at 1 kHz (2 bands), 200 Hz and 3 kHz (3), or
@@ -400,7 +400,7 @@ impl Rig {
     }
 }
 
-impl<F: Float + Lanes + Lerp> Tuned<F> {
+impl<F: Float + SimdLanes + Lerp> Tuned<F> {
     /// Prepares a bank for `rate`.
     fn new(shape: BankShape, rate: SampleRate) -> Self {
         Self {
@@ -487,7 +487,7 @@ impl<F: Float + Lanes + Lerp> Tuned<F> {
 // per band that is no port, then one crossover per split. The render reads
 // them by kind and band (`declared_param_at`), not by port. A band's make-up gain is addressed as
 // `GainDb`.
-tutti_graph::declare_params!([F: Float + Lanes + Lerp] MultibandCompressorNode<F>, n {
+tutti_graph::declare_params!([F: Float + SimdLanes + Lerp] MultibandCompressorNode<F>, n {
     [b in 0..n.rig.bands.len()] {
         Threshold => Db = &n.rig.bands[b].threshold,
         Knee => Db = &n.rig.bands[b].knee,
@@ -503,7 +503,7 @@ tutti_graph::declare_params!([F: Float + Lanes + Lerp] MultibandCompressorNode<F
     },
 });
 
-impl<F: Float + Lanes + Lerp> Node<F> for MultibandCompressorNode<F> {
+impl<F: Float + SimdLanes + Lerp> Node<F> for MultibandCompressorNode<F> {
     /// `channels` in, `channels` out; zero latency; a param port for each
     /// band parameter and each crossover (see the type's docs).
     ///
@@ -603,7 +603,7 @@ impl<F: Float + Lanes + Lerp> Node<F> for MultibandCompressorNode<F> {
 
 /// Shares the control cells (the template a fork is taken from); the realization
 /// is a copy with its state empty.
-impl<F: Float + Lanes + Lerp> Clone for MultibandCompressorNode<F> {
+impl<F: Float + SimdLanes + Lerp> Clone for MultibandCompressorNode<F> {
     fn clone(&self) -> Self {
         Self {
             rig: Rig {
@@ -626,7 +626,7 @@ impl<F: Float + Lanes + Lerp> Clone for MultibandCompressorNode<F> {
     }
 }
 
-impl<F: Float + Lanes + Lerp> ParamNode<F> for MultibandCompressorNode<F> {
+impl<F: Float + SimdLanes + Lerp> ParamNode<F> for MultibandCompressorNode<F> {
     /// Every param declared, the bands' then the crossovers'.
     fn param_set(&self) -> ParamSet {
         self.declared_set()
@@ -647,7 +647,7 @@ impl<F: Float + Lanes + Lerp> ParamNode<F> for MultibandCompressorNode<F> {
 
 /// Inserted with its [`MultibandControls`] as its controls; a fork starts
 /// from the values last set through its params.
-impl<F: Float + Lanes + Lerp> IntoNode<F> for MultibandCompressorNode<F> {
+impl<F: Float + SimdLanes + Lerp> IntoNode<F> for MultibandCompressorNode<F> {
     type Controls = MultibandControls;
 
     fn into_parts(self) -> NodeParts<MultibandControls, F> {
@@ -706,7 +706,7 @@ mod tests {
     struct Bd<'a>(&'a Ctl, u8);
 
     impl Ctl {
-        fn new<F: Float + Lanes + Lerp>(n: &MultibandCompressorNode<F>) -> Self {
+        fn new<F: Float + SimdLanes + Lerp>(n: &MultibandCompressorNode<F>) -> Self {
             Self {
                 set: n.param_set(),
                 bands: n.bands(),
