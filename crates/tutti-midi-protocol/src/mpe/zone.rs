@@ -128,7 +128,7 @@ impl TryFrom<MpeZoneConfigRaw> for MpeZoneConfig {
 
     fn try_from(raw: MpeZoneConfigRaw) -> Result<Self, Self::Error> {
         Self::placed(raw.placement, raw.member_count)
-            .map(|c| c.with_channel_response(raw.response))
+            .map(|c| c.channel_response(raw.response))
             .ok_or(InvalidMpeZoneConfig)
     }
 }
@@ -280,7 +280,7 @@ impl MpeZoneConfig {
     /// starts in; a Mono Mode On or Poly Mode On from the wire changes it.
     #[inline]
     #[must_use]
-    pub const fn channel_response(&self) -> ChannelResponse {
+    pub const fn response(&self) -> ChannelResponse {
         self.response
     }
 
@@ -309,9 +309,9 @@ impl MpeZoneConfig {
     }
 
     /// The zone with `response` as how its member channels take notes
-    /// ([`channel_response`](Self::channel_response)).
+    /// ([`response`](Self::response)).
     #[must_use]
-    pub const fn with_channel_response(mut self, response: ChannelResponse) -> Self {
+    pub const fn channel_response(mut self, response: ChannelResponse) -> Self {
         self.response = response;
         self
     }

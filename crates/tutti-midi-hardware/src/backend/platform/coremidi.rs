@@ -15,7 +15,7 @@ pub(crate) fn open_virtual_source(
     spec: &VirtualSpec,
 ) -> Result<(Box<dyn SourceBackend>, VirtualProtocol)> {
     let source = super::coremidi::UmpVirtualSource::open(spec)?;
-    Ok((Box::new(source), spec.protocol()))
+    Ok((Box::new(source), spec.protocol))
 }
 
 /// Publishes the virtual destination `spec` describes, delivering into `producer`.
@@ -24,7 +24,7 @@ pub(crate) fn open_virtual_destination(
     producer: InputProducerHandle,
 ) -> Result<(Box<dyn InputConnection>, VirtualProtocol)> {
     let destination = super::coremidi::UmpVirtualDestination::open(spec, producer)?;
-    Ok((Box::new(destination), spec.protocol()))
+    Ok((Box::new(destination), spec.protocol))
 }
 
 /// The platform's own error, as [`MidiHardwareError::Os`] carries it.

@@ -251,7 +251,7 @@ const PORTS_PER_GROUP: usize = MIDI_INPUT_PORTS;
 /// let (mut editor, _exec) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(512))));
 /// // The inlet is not wired yet.
 /// let mode = Publisher::new(MpeMode::Disabled);
-/// let node = MidiInputNode::new().with_mpe(&mode);
+/// let node = MidiInputNode::new().mpe(&mode);
 /// let controls = editor.insert(NodeKey(1), "midi in", node).controls;
 /// controls.clear_mpe_profiles();
 /// ```
@@ -512,7 +512,7 @@ impl MidiInputNode {
     /// sent ahead of the new zones' default bend ranges); the others keep
     /// their notes. Publishing the mode in force changes nothing.
     #[must_use]
-    pub fn with_mpe(mut self, mode: &Publisher<MpeMode>) -> Self {
+    pub fn mpe(mut self, mode: &Publisher<MpeMode>) -> Self {
         let initial = *mode.current();
         self.device.mode = initial;
         self.device.mpe = MpeTranslator::new(initial);

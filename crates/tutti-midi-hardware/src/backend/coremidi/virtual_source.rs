@@ -55,7 +55,7 @@ impl UmpVirtualSource {
         if !spec.function_blocks().is_empty() {
             return Err(MidiHardwareError::VirtualBlocksUnsupported);
         }
-        Self::new(spec.name().as_str(), spec.protocol())
+        Self::new(spec.name().as_str(), spec.protocol)
     }
 
     /// Creates a virtual source named `name` carrying `protocol`.

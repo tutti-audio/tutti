@@ -124,8 +124,7 @@ fn the_cadence_keeps_running_through_silence() {
 #[test]
 fn a_stamped_block_carries_its_clock_before_the_stamps() {
     let sample_rate = 48_000.0;
-    let mut stream =
-        JrStream::new(SampleRate::of(sample_rate)).with_clock(SampleRate::of(sample_rate));
+    let mut stream = JrStream::new(SampleRate::of(sample_rate)).clock(SampleRate::of(sample_rate));
     let events = [at(0, midi::note_on(MidiChannel::FIRST, 60, 0x8000))];
     let mut out = Vec::new();
     stream.stamp_span(&events, Samples::new(512), &mut out);
@@ -273,7 +272,7 @@ fn stamp_block_prefixes_each_event() {
 /// is 15 625 ticks on, where the old rate would read 22 050 frames as 14 355.
 #[test]
 fn a_re_rated_stream_continues_its_jr_time_at_the_new_rate() {
-    let mut stream = JrStream::new(SampleRate::SR_48K).with_clock(SampleRate::SR_48K);
+    let mut stream = JrStream::new(SampleRate::SR_48K).clock(SampleRate::SR_48K);
     let mut out = Vec::new();
     stream.stamp_span(&[], Samples::new(48_000), &mut out);
     assert_eq!(stream.origin(), Frame::new(48_000));
@@ -297,7 +296,7 @@ fn a_re_rated_stream_continues_its_jr_time_at_the_new_rate() {
 // exactly, one interval on, and reads 0.2 s: 6 250 ticks.
 #[test]
 fn a_re_rated_clock_keeps_its_cadence_at_the_new_rate() {
-    let mut stream = JrStream::new(SampleRate::SR_48K).with_clock(SampleRate::SR_48K);
+    let mut stream = JrStream::new(SampleRate::SR_48K).clock(SampleRate::SR_48K);
     let mut out = Vec::new();
     stream.stamp_span(&[], Samples::new(4_800), &mut out);
     stream.stamp_span(&[], Samples::new(4_800), &mut out);

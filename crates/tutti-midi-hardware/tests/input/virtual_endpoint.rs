@@ -202,7 +202,7 @@ fn the_published_endpoint_record_carries_the_protocol_and_the_blocks() {
 /// Spec: m2-115/2.3#1
 #[test]
 fn a_midi1_destination_reports_midi1_and_its_messages_arrive_widened() {
-    let spec = spec("midi1").with_protocol(VirtualProtocol::Midi1);
+    let spec = spec("midi1").protocol(VirtualProtocol::Midi1);
     let inlets = InputInlets::new(EventCapacity::of(8), Duration::ZERO);
     let mut listener = Listener::over_input(&inlets);
     let ports = HardwareMidiInputs::new(std::sync::Arc::clone(&inlets));
@@ -230,7 +230,7 @@ fn a_midi1_destination_reports_midi1_and_its_messages_arrive_widened() {
 /// Spec: m2-115/2.3#1
 #[test]
 fn a_midi2_note_sent_into_a_midi1_source_arrives_as_a_midi1_note() {
-    let spec = spec("translate").with_protocol(VirtualProtocol::Midi1);
+    let spec = spec("translate").protocol(VirtualProtocol::Midi1);
     let source = VirtualSource::open(&spec).expect("a virtual source");
     assert_eq!(source.protocol(), VirtualProtocol::Midi1);
     let (peer, port) = peer_in(PortCaps::WRITE, UmpVersion::Midi1);
@@ -250,7 +250,7 @@ fn a_midi2_note_sent_into_a_midi1_source_arrives_as_a_midi1_note() {
 /// subscriber.
 #[test]
 fn a_message_with_no_midi1_form_is_refused_by_a_midi1_source() {
-    let spec = spec("noform").with_protocol(VirtualProtocol::Midi1);
+    let spec = spec("noform").protocol(VirtualProtocol::Midi1);
     let source = VirtualSource::open(&spec).expect("a virtual source");
     let (peer, port) = peer_in(PortCaps::WRITE, UmpVersion::Midi1);
     let found = find(&peer, &spec).expect("listed");
@@ -281,7 +281,7 @@ fn a_message_with_no_midi1_form_is_refused_by_a_midi1_source() {
 /// Change (M2-104 Appendix D.2.4): the bank is not lost.
 #[test]
 fn a_program_change_with_a_bank_reaches_a_midi1_subscriber_as_bank_select_and_program() {
-    let spec = spec("bank").with_protocol(VirtualProtocol::Midi1);
+    let spec = spec("bank").protocol(VirtualProtocol::Midi1);
     let source = VirtualSource::open(&spec).expect("a virtual source");
     let (peer, port) = peer_in(PortCaps::WRITE, UmpVersion::Midi1);
     let found = find(&peer, &spec).expect("listed");
@@ -311,7 +311,7 @@ fn a_program_change_with_a_bank_reaches_a_midi1_subscriber_as_bank_select_and_pr
 /// a second value for the same parameter is the four again.
 #[test]
 fn a_registered_controller_reaches_a_midi1_subscriber_as_the_rpn_sequence() {
-    let spec = spec("rpn").with_protocol(VirtualProtocol::Midi1);
+    let spec = spec("rpn").protocol(VirtualProtocol::Midi1);
     let source = VirtualSource::open(&spec).expect("a virtual source");
     let (peer, port) = peer_in(PortCaps::WRITE, UmpVersion::Midi1);
     let found = find(&peer, &spec).expect("listed");

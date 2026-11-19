@@ -31,12 +31,12 @@ fn version_of(protocol: VirtualProtocol) -> UmpVersion {
 /// when the kernel refuses a MIDI 2.0 client; the protocol it got goes with it.
 fn open_client(spec: &VirtualSpec, blocking: Blocking) -> Result<(Client, VirtualProtocol)> {
     let name = spec.name().as_str();
-    match super::client::open(name, blocking, version_of(spec.protocol())) {
-        Ok(client) => Ok((client, spec.protocol())),
+    match super::client::open(name, blocking, version_of(spec.protocol)) {
+        Ok(client) => Ok((client, spec.protocol)),
         Err(MidiHardwareError::Os(tutti_alsa_ffi::Error::Call {
             operation: Operation::SetClientMidiVersion,
             source,
-        })) if spec.protocol() == VirtualProtocol::Midi2 => {
+        })) if spec.protocol == VirtualProtocol::Midi2 => {
             // The call that fails when the kernel has no MIDI 2.0 client mode.
             tracing::debug!("virtual MIDI endpoint falls back to MIDI 1.0 ({source})");
             Ok((

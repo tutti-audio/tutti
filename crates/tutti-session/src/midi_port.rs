@@ -1500,7 +1500,7 @@ impl<F: tutti_buffers::Float> crate::Midi<'_, F> {
             .map_or(MidiInputPorts::FIRST_GROUP, |n| n.input_ports);
         let node = tutti_midi_runtime::MidiInputNode::new()
             .hearing(layout)
-            .with_mpe(self.state.mpe())
+            .mpe(self.state.mpe())
             .following(&generation);
         let (key, controls) = self.graph.add(node);
         let node = key.erase();

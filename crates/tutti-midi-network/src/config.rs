@@ -131,7 +131,7 @@ impl SessionConfig {
     /// again (forward error correction, M2-124 section 7.2.2). Two repeats
     /// is the recommended figure.
     #[must_use]
-    pub const fn with_fec(mut self, fec: Fec) -> Self {
+    pub const fn fec(mut self, fec: Fec) -> Self {
         self.fec = fec;
         self
     }
@@ -139,7 +139,7 @@ impl SessionConfig {
     /// Whether this end answers Retransmit Requests, and how many sent UMP
     /// Data Commands it keeps to do so.
     #[must_use]
-    pub const fn with_retransmit(mut self, retransmit: Retransmit) -> Self {
+    pub const fn retransmit(mut self, retransmit: Retransmit) -> Self {
         self.retransmit = retransmit;
         self
     }
@@ -147,7 +147,7 @@ impl SessionConfig {
     /// How long after sending data the first Zero Length UMP Data Command
     /// follows, and the interval of the next few.
     #[must_use]
-    pub const fn with_idle_interval(mut self, interval: IdleInterval) -> Self {
+    pub const fn idle_interval(mut self, interval: IdleInterval) -> Self {
         self.idle_interval = interval;
         self
     }
@@ -156,7 +156,7 @@ impl SessionConfig {
     /// Request asks for it (the specification suggests 10 ms), which lets
     /// an out-of-order command arrive first.
     #[must_use]
-    pub const fn with_reorder_wait(mut self, wait: Timer) -> Self {
+    pub const fn reorder_wait(mut self, wait: Timer) -> Self {
         self.reorder_wait = wait;
         self
     }
@@ -165,14 +165,14 @@ impl SessionConfig {
     /// Requests it sends for one gap before giving it up as lost. The wait
     /// between requests doubles.
     #[must_use]
-    pub const fn with_requests(mut self, requests: Requests) -> Self {
+    pub const fn requests(mut self, requests: Requests) -> Self {
         self.requests = requests;
         self
     }
 
     /// How long a peer is silent before a Ping is sent.
     #[must_use]
-    pub const fn with_ping_interval(mut self, interval: Timer) -> Self {
+    pub const fn ping_interval(mut self, interval: Timer) -> Self {
         self.ping_interval = interval;
         self
     }
@@ -180,7 +180,7 @@ impl SessionConfig {
     /// How long a peer is silent before the Session is ended with a Bye for
     /// timeout.
     #[must_use]
-    pub const fn with_liveness_timeout(mut self, timeout: Timer) -> Self {
+    pub const fn liveness_timeout(mut self, timeout: Timer) -> Self {
         self.liveness_timeout = timeout;
         self
     }
@@ -189,7 +189,7 @@ impl SessionConfig {
     /// M2-124 section 6.2 says "A delay between 300ms and 2 seconds is
     /// recommended"; the default is 500 ms.
     #[must_use]
-    pub const fn with_repeat_interval(mut self, interval: Timer) -> Self {
+    pub const fn repeat_interval(mut self, interval: Timer) -> Self {
         self.repeat_interval = interval;
         self
     }
@@ -197,7 +197,7 @@ impl SessionConfig {
     /// How long a repeated command is repeated before the endpoint gives up
     /// and ends the Session with a Bye.
     #[must_use]
-    pub const fn with_command_timeout(mut self, timeout: Timer) -> Self {
+    pub const fn command_timeout(mut self, timeout: Timer) -> Self {
         self.command_timeout = timeout;
         self
     }
@@ -206,7 +206,7 @@ impl SessionConfig {
     /// Host said it was Pending (a user may be deciding), and how long a Host
     /// holds a challenge or a confirmation open.
     #[must_use]
-    pub const fn with_pending_timeout(mut self, timeout: Timer) -> Self {
+    pub const fn pending_timeout(mut self, timeout: Timer) -> Self {
         self.pending_timeout = timeout;
         self
     }
@@ -250,7 +250,7 @@ mod tests {
     #[test]
     fn a_repeat_interval_outside_the_recommended_300_ms_to_2_s_is_accepted_and_kept() {
         for value in [MS(100), Duration::from_secs(5)] {
-            let config = SessionConfig::default().with_repeat_interval(Timer::of(value));
+            let config = SessionConfig::default().repeat_interval(Timer::of(value));
             assert_eq!(config.repeat_interval.get(), value);
         }
     }
@@ -258,13 +258,13 @@ mod tests {
     #[test]
     fn an_option_keeps_the_value_it_is_given() {
         let config = SessionConfig::default()
-            .with_idle_interval(IdleInterval::of(MS(300)))
-            .with_reorder_wait(Timer::of(MS(1)))
-            .with_ping_interval(Timer::of(MS(250)))
-            .with_liveness_timeout(Timer::of(TIMER_MAX))
-            .with_repeat_interval(Timer::of(MS(300)))
-            .with_command_timeout(Timer::of(MS(7)))
-            .with_pending_timeout(Timer::of(MS(9)));
+            .idle_interval(IdleInterval::of(MS(300)))
+            .reorder_wait(Timer::of(MS(1)))
+            .ping_interval(Timer::of(MS(250)))
+            .liveness_timeout(Timer::of(TIMER_MAX))
+            .repeat_interval(Timer::of(MS(300)))
+            .command_timeout(Timer::of(MS(7)))
+            .pending_timeout(Timer::of(MS(9)));
         assert_eq!(config.idle_interval.get(), MS(300));
         assert_eq!(config.reorder_wait.get(), MS(1));
         assert_eq!(config.ping_interval.get(), MS(250));

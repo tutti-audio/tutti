@@ -279,7 +279,7 @@ proptest! {
     ) {
         let identity = identity("Laptop", "CLIENT-1");
         let credentials = if secret {
-            Credentials::none().with_secret("1234")
+            Credentials::none().secret("1234")
         } else {
             Credentials::none()
         };

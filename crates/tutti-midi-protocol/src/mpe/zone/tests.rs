@@ -526,10 +526,9 @@ fn removing_the_last_zone_leaves_no_set() {
 #[test]
 fn a_zone_keeps_its_channel_response() {
     for z in [pzone(0, 4), zone(MpeZone::Lower, 3)] {
-        assert_eq!(z.channel_response(), ChannelResponse::Polyphonic);
+        assert_eq!(z.response(), ChannelResponse::Polyphonic);
         assert_eq!(
-            z.with_channel_response(ChannelResponse::Monophonic)
-                .channel_response(),
+            z.channel_response(ChannelResponse::Monophonic).response(),
             ChannelResponse::Monophonic
         );
     }
@@ -609,7 +608,7 @@ mod serde_tests {
     /// A persisted Profile zone and set are read back through the check too.
     #[test]
     fn a_persisted_profile_zone_is_read_back_through_its_check() {
-        let set = MpeZones::single(pzone(0, 4).with_channel_response(ChannelResponse::Monophonic))
+        let set = MpeZones::single(pzone(0, 4).channel_response(ChannelResponse::Monophonic))
             .with(MpeZoneConfig::profile(
                 MpeZoneSpan::new(ch(8), MpeChannels::of(8)).unwrap(),
                 PitchBendSensitivity::from_semitones(U7::of(24)),

@@ -293,7 +293,7 @@ impl UmpOut {
     }
 
     fn over(sink: Sink, sample_rate: tutti_units::SampleRate) -> Self {
-        let stream = tutti_midi_runtime::JrStream::new(sample_rate).with_clock(sample_rate);
+        let stream = tutti_midi_runtime::JrStream::new(sample_rate).clock(sample_rate);
         Self::with_stream(sink, stream)
     }
 
