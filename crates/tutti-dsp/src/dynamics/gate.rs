@@ -14,7 +14,7 @@
 //! key that hovers at the threshold.
 //!
 //! The threshold is the one control read **per frame** when the graph drives it
-//! ([`GateLanes`]): it is a level to compare against, not a coefficient. The range multiplies
+//! ([`GateSignals`]): it is a level to compare against, not a coefficient. The range multiplies
 //! the output directly, so a step in it is a click: it is a ramp, a control moving to a
 //! target, and ramps over [`GAIN_RAMP`] as a [`Ramp`]. The times only move what the
 //! follower is smoothing toward, and the follower is the smoother: they land whole.
@@ -125,11 +125,11 @@ fn opens<F: Float>(level: F, threshold: F, silence_opens: bool) -> bool {
     level >= threshold || (level <= F::ZERO && silence_opens)
 }
 
-/// The per-frame lane a gate reads beside its audio, in the bank's float, `None` where nothing
-/// drives it. A lane is at least as long as the frames a call renders; a frame past its end is
+/// The per-frame control signal a gate reads beside its audio, in the bank's float, `None` where nothing
+/// drives it. A control signal is at least as long as the frames a call renders; a frame past its end is
 /// not driven.
 #[derive(Clone, Copy, Debug, Default)]
-pub struct GateLanes<'a, F: Float> {
+pub struct GateSignals<'a, F: Float> {
     /// The threshold in dB. A frame that is not finite is the set threshold.
     pub threshold: Option<Mono<'a, F>>,
 }
@@ -138,7 +138,7 @@ pub struct GateLanes<'a, F: Float> {
 /// gain applied to every channel, with the follower and the hold that smooth it and the
 /// range that ramps.
 ///
-/// Built on the control side for one rate; the state, the views and the lane are `F`, the
+/// Built on the control side for one rate; the state, the views and the control signal are `F`, the
 /// graph's float. Nothing it holds grows.
 #[derive(Clone, Debug)]
 pub struct GateBank<F: Float + SimdLanes> {
@@ -235,7 +235,7 @@ impl<F: Float + SimdLanes + Lerp> GateBank<F> {
     /// `taken + 1 + i`, then the block's steps are taken. No allocation.
     pub fn process(
         &mut self,
-        lanes: GateLanes<'_, F>,
+        signals: GateSignals<'_, F>,
         key: Planes<'_, F>,
         input: Planes<'_, F>,
         mut output: PlanesMut<'_, '_, F>,
@@ -265,7 +265,7 @@ impl<F: Float + SimdLanes + Lerp> GateBank<F> {
             for (k, g) in gains.iter_mut().enumerate() {
                 let i = start + k;
                 let level = *g;
-                let open = match lanes
+                let open = match signals
                     .threshold
                     .and_then(|l| l.samples().get(i))
                     .copied()

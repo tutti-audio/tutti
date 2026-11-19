@@ -8,7 +8,7 @@ use tutti_graph::Shape;
 use tutti_units::{Db, SampleRate, Samples, Tail};
 
 use super::ramped::{RAMP_STEPS, RampedSos, filter_shape};
-use crate::kernel::{ControlLanes, Kernel};
+use crate::kernel::{ControlSignals, Kernel};
 use crate::params::ControlSet;
 
 /// What a controls type must give [`EqKernel`], kept out of reach of an implementation.
@@ -151,7 +151,7 @@ impl<C: EqControls, F: Float + SimdLanes> Kernel for EqKernel<C, F> {
     fn render(
         &mut self,
         input: Planes<'_, F>,
-        _: ControlLanes<'_, F>,
+        _: ControlSignals<'_, F>,
         output: PlanesMut<'_, '_, F>,
     ) {
         self.sos.render(input, output);

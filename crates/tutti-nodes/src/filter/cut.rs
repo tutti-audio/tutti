@@ -12,7 +12,7 @@ use tutti_units::{Hz, SampleRate, Samples, Tail};
 
 use super::filter_bus;
 use super::ramped::{RAMP_STEPS, RampedSos, filter_shape};
-use crate::kernel::{ControlLanes, Kernel, KernelNode};
+use crate::kernel::{ControlSignals, Kernel, KernelNode};
 
 /// The lowest cutoff a filter takes: 10 Hz.
 pub const MIN_CUT_CUTOFF: Hz = Hz::new(10.0);
@@ -215,7 +215,7 @@ impl<F: Float + SimdLanes> Kernel for CutFilterKernel<F> {
     fn render(
         &mut self,
         input: Planes<'_, F>,
-        _: ControlLanes<'_, F>,
+        _: ControlSignals<'_, F>,
         output: PlanesMut<'_, '_, F>,
     ) {
         self.sos.render(input, output);

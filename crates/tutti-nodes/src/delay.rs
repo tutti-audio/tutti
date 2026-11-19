@@ -9,13 +9,13 @@
 use tutti_buffers::{BusTopology, MaxBlock};
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{
-    COEFF_INTERVAL, DelayBank, DelayControls, DelayLanes, DelayLayout, DelayRamps, GAIN_RAMP,
+    COEFF_INTERVAL, DelayBank, DelayControls, DelayLayout, DelayRamps, DelaySignals, GAIN_RAMP,
     InterpolationMode, Lerp, MaxDelay,
 };
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
 use tutti_units::{Feedback, SampleRate, Seconds, Tail};
 
-use crate::kernel::{ControlLanes, Kernel, KernelNode};
+use crate::kernel::{ControlSignals, Kernel, KernelNode};
 
 /// A feedback delay of any width: `N` audio inputs, `N` outputs, one delay line per
 /// channel.
@@ -150,18 +150,18 @@ control_set! {
 }
 
 impl DelaySet {
-    /// The lane of the time, in seconds: the first [`fast`](crate::ControlRead::Fast) row.
-    const TIME_LANE: usize = 0;
-    /// The lane of the feedback: the second fast row. The cross-feedback is not a lane: it
+    /// The control signal of the time, in seconds: the first [`fast`](crate::ControlRead::Fast) row.
+    const TIME_SIGNAL: usize = 0;
+    /// The control signal of the feedback: the second fast row. The cross-feedback is not a control signal: it
     /// is read on the stream grid.
-    const FEEDBACK_LANE: usize = 1;
+    const FEEDBACK_SIGNAL: usize = 1;
 }
 
 /// The feedback delay as a [`Kernel`]: a [`DelayBank`] sized at the prepared rate and the
 /// ramps of the delay and the feedbacks it reads.
 ///
 /// The time and the feedback are read per frame when the graph drives them
-/// ([`ControlLanes`]); a cell that moves lands whole on the stream grid and ramps here.
+/// ([`ControlSignals`]); a cell that moves lands whole on the stream grid and ramps here.
 /// A recirculating line rings for as long as its feedback says, which is a ceiling the
 /// graph's bounce would have to render: the tail is [`Tail::Unknown`] and never narrowed, so
 /// the executor never skips it.
@@ -234,15 +234,15 @@ impl<F: Float + Lerp> Kernel for DelayKernel<F> {
     fn render(
         &mut self,
         input: Planes<'_, F>,
-        lanes: ControlLanes<'_, F>,
+        signals: ControlSignals<'_, F>,
         output: PlanesMut<'_, '_, F>,
     ) {
-        let lanes = DelayLanes {
-            time: lanes.get(DelaySet::TIME_LANE),
-            feedback: lanes.get(DelaySet::FEEDBACK_LANE),
+        let signals = DelaySignals {
+            time: signals.get(DelaySet::TIME_SIGNAL),
+            feedback: signals.get(DelaySet::FEEDBACK_SIGNAL),
         };
         if let Some(bank) = &mut self.bank {
-            bank.process(&mut self.ramps, lanes, input, output);
+            bank.process(&mut self.ramps, signals, input, output);
         }
         // A design after a render is a move, which ramps.
         self.applied = true;
@@ -446,11 +446,11 @@ mod tests {
         }
     }
 
-    /// The time and feedback lanes are the time and feedback of each frame, **over the
-    /// cells**: with the cells at zero, a lane held at `D` frames and `g` is the echo train
+    /// The time and feedback control signals are the time and feedback of each frame, **over the
+    /// cells**: with the cells at zero, a control signal held at `D` frames and `g` is the echo train
     /// of the definition, `g^k` at `(k + 1) D`, and nothing between.
     #[test]
-    fn fed_lanes_are_the_time_and_feedback_over_the_cells() {
+    fn fed_signals_are_the_time_and_feedback_over_the_cells() {
         let (d, g, len) = (16usize, 0.5f32, 16 * 8 + 3);
         let time = vec![frames(d as f64) as f32; len];
         let feedback = vec![g; len];
@@ -475,8 +475,8 @@ mod tests {
     fn a_fed_feedback_drives_the_tail() {
         let run = |fb: f32| -> f32 {
             let node = DelayNode::<f32>::stereo(MAX, controls(frames(10.0), 0.0, 0.0));
-            let lane = vec![fb; 200];
-            let out = frames_of(node, &impulses(2, 200, &[0, 1]), &[None, Some(&lane)]);
+            let signal = vec![fb; 200];
+            let out = frames_of(node, &impulses(2, 200, &[0, 1]), &[None, Some(&signal)]);
             out[0][50..].iter().map(|s| s * s).sum()
         };
         let (low, high) = (run(0.1), run(0.9));
@@ -557,11 +557,11 @@ mod tests {
     /// A control the graph drives and the kernel does not read per frame (the
     /// cross-feedback) is sampled on the stream's 16-frame grid, not at the block's last
     /// frame, so what is heard does not depend on how the stream is cut into blocks; and
-    /// the lane is heard, since the cell it overrides is zero.
+    /// the control signal is heard, since the cell it overrides is zero.
     #[test]
     fn a_driven_slow_control_is_sampled_on_the_grid_whatever_the_blocks() {
         let len = 4_096;
-        let lane: Vec<f32> = (0..len).map(|n| 0.5 * n as f32 / len as f32).collect();
+        let signal: Vec<f32> = (0..len).map(|n| 0.5 * n as f32 / len as f32).collect();
         let x: Vec<f32> = (0..len)
             .map(|n| ((n * 7 + 3) % 100) as f32 / 50.0 - 1.0)
             .collect();
@@ -574,7 +574,7 @@ mod tests {
             let mut out = Vec::new();
             for (n, chunk) in x.chunks(block).enumerate() {
                 let at = n * block;
-                let l = &lane[at..at + chunk.len()];
+                let l = &signal[at..at + chunk.len()];
                 let params = [None, None, driven.then_some(l)];
                 out.extend(
                     drive(
@@ -589,16 +589,16 @@ mod tests {
             out
         };
         let whole = render(1_024, true);
-        assert_ne!(whole, render(1_024, false), "the lane is heard");
+        assert_ne!(whole, render(1_024, false), "the signal is heard");
         for block in [1, 16, 64, 128] {
             assert_eq!(render(block, true), whole, "blocks of {block}");
         }
     }
 
-    /// The lane constants are the fast rows of the control set, in order: reordering its
-    /// rows moves a lane and fails here.
+    /// The control signal constants are the fast rows of the control set, in order: reordering its
+    /// rows moves a control signal and fails here.
     #[test]
-    fn the_lane_constants_are_the_fast_rows_of_the_control_set() {
+    fn the_signal_constants_are_the_fast_rows_of_the_control_set() {
         use crate::{ControlRead, ControlSet};
         use tutti_units::UnitAddr;
         let set = DelaySet;
@@ -608,11 +608,11 @@ mod tests {
             .collect();
         assert_eq!(fast.len(), 2);
         assert_eq!(
-            fast[DelaySet::TIME_LANE],
+            fast[DelaySet::TIME_SIGNAL],
             UnitAddr::first(UnitParam::DelayTime)
         );
         assert_eq!(
-            fast[DelaySet::FEEDBACK_LANE],
+            fast[DelaySet::FEEDBACK_SIGNAL],
             UnitAddr::first(UnitParam::Feedback)
         );
     }

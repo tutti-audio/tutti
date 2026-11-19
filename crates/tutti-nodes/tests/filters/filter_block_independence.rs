@@ -31,12 +31,12 @@ fn noise(seed: u32) -> Vec<f32> {
 }
 
 /// `node`, prepared for 512-frame blocks, fed `inputs` in blocks of `block` with
-/// `lanes` (each a function of the absolute frame, in port order) cut to match.
+/// `control signals` (each a function of the absolute frame, in port order) cut to match.
 fn render<N: Node + ParamNode + 'static>(
     node: N,
     block: usize,
     inputs: &[Vec<f32>],
-    lanes: &[Option<Vec<f32>>],
+    signals: &[Option<Vec<f32>>],
     act: impl Fn(&tutti_graph::ParamSet),
 ) -> Vec<Vec<f32>> {
     let mut node = prepared(node, RATE, 512);
@@ -46,7 +46,7 @@ fn render<N: Node + ParamNode + 'static>(
     for start in (0..len).step_by(block) {
         let end = (start + block).min(len);
         let ins: Vec<&[f32]> = inputs.iter().map(|c| &c[start..end]).collect();
-        let params: Vec<Option<&[f32]>> = lanes
+        let params: Vec<Option<&[f32]>> = signals
             .iter()
             .map(|l| l.as_ref().map(|l| &l[start..end]))
             .collect();
@@ -94,16 +94,16 @@ fn same_at_every_block(what: &str, make: impl Fn() -> Box<dyn Fn(usize) -> Vec<V
     }
 }
 
-/// An SVF bell and an EQ band with a lane on every control it has, and the
+/// An SVF bell and an EQ band with a control signal on every control it has, and the
 /// other cells moved before the first block, render the same bits whether the
 /// stream arrives in blocks of 1, 17, 64 or 512 frames.
 #[test]
 fn blocks_of_any_length_render_alike_with_lanes_and_moved_cells() {
     let inputs = [noise(1), noise(2)];
-    same_at_every_block("svf bell, three lanes", || {
+    same_at_every_block("svf bell, three signals", || {
         let inputs = inputs.clone();
         Box::new(move |block| {
-            let lanes = [
+            let signals = [
                 Some(sweep(300.0, 9_000.0)),
                 Some(sweep(0.6, 7.0)),
                 Some(
@@ -124,12 +124,12 @@ fn blocks_of_any_length_render_alike_with_lanes_and_moved_cells() {
                 ),
                 block,
                 &inputs,
-                &lanes,
+                &signals,
                 |_| {},
             )
         })
     });
-    same_at_every_block("eq band, a cutoff lane, gain and Q cells moved", || {
+    same_at_every_block("eq band, a cutoff signal, gain and Q cells moved", || {
         let inputs = inputs.clone();
         Box::new(move |block| {
             render(
@@ -153,17 +153,17 @@ fn blocks_of_any_length_render_alike_with_lanes_and_moved_cells() {
     });
 }
 
-/// A stereo ladder with a lane on its cutoff, its resonance and its drive, and one
-/// with the drive cell moved before the first block under a cutoff lane, render the
+/// A stereo ladder with a control signal on its cutoff, its resonance and its drive, and one
+/// with the drive cell moved before the first block under a cutoff control signal, render the
 /// same bits at blocks of 1, 17, 64 or 512 frames: the drive is on the grid like the
-/// coefficients (a lane sampled per segment, a cell held).
+/// coefficients (a control signal sampled per segment, a cell held).
 #[test]
-fn the_ladder_renders_alike_at_every_block_length_with_lanes() {
+fn the_ladder_renders_alike_at_every_block_length_with_signals() {
     let inputs = [noise(4), noise(5)];
-    same_at_every_block("ladder, cutoff, resonance and drive lanes", || {
+    same_at_every_block("ladder, cutoff, resonance and drive signals", || {
         let inputs = inputs.clone();
         Box::new(move |block| {
-            let lanes = [
+            let signals = [
                 Some(sweep(200.0, 8_000.0)),
                 Some(
                     (0..FRAMES)
@@ -185,12 +185,12 @@ fn the_ladder_renders_alike_at_every_block_length_with_lanes() {
                 ),
                 block,
                 &inputs,
-                &lanes,
+                &signals,
                 |_| {},
             )
         })
     });
-    same_at_every_block("ladder, a cutoff lane and the drive cell moved", || {
+    same_at_every_block("ladder, a cutoff signal and the drive cell moved", || {
         let inputs = inputs.clone();
         Box::new(move |block| {
             render(
@@ -210,7 +210,7 @@ fn the_ladder_renders_alike_at_every_block_length_with_lanes() {
     });
 }
 
-/// A step in a drive lane at frame 40 reaches the render within one segment of the
+/// A step in a drive control signal at frame 40 reaches the render within one segment of the
 /// grid point that samples it, as a cutoff's does: the drive is on the grid.
 ///
 /// The point at 32 reads the old drive and its segment ends on it at frame 47; the
@@ -226,10 +226,10 @@ fn a_drive_lane_step_is_in_the_render_within_one_segment() {
     let response = |drive: Option<f32>, at: usize| -> f64 {
         let mut x = vec![0.0f32; 64];
         x[at] = 0.5;
-        let lane = drive.map_or_else(|| step.clone(), |d| vec![d; 64]);
+        let signal = drive.map_or_else(|| step.clone(), |d| vec![d; 64]);
         let node =
             LadderFilterNode::<f32>::new(LadderType::HP24, Hz::new(1_500.0), Resonance::new(0.2));
-        let out = render(node, 64, &[x], &[None, None, Some(lane)], |_| {});
+        let out = render(node, 64, &[x], &[None, None, Some(signal)], |_| {});
         f64::from(out[0][at])
     };
     let at_old = response(Some(old), 47);
@@ -243,7 +243,7 @@ fn a_drive_lane_step_is_in_the_render_within_one_segment() {
     assert_eq!(response(None, 63), at_new, "frame 63 is on the new drive");
 }
 
-/// A step in a cutoff lane at frame 40 reaches the SVF on the stream grid: the point
+/// A step in a cutoff control signal at frame 40 reaches the SVF on the stream grid: the point
 /// at 32 reads the old cutoff, the point at 48 the new one, and the coefficients ramp
 /// from 48 to land at frame 63. With no state a low-pass answers an impulse with the
 /// `a3` of the set in force at that frame, so the output at frame 47 is the old set's
@@ -252,7 +252,7 @@ fn a_drive_lane_step_is_in_the_render_within_one_segment() {
 fn an_svf_cutoff_step_lands_on_the_grid_point_after_it() {
     const STEP: usize = 40;
     let (old, new) = (500.0f64, 5_000.0f64);
-    // The lane carries `f32` words.
+    // The control signal carries `f32` words.
     let step: Vec<f32> = (0..64)
         .map(|i| (if i < STEP { old } else { new }) as f32)
         .collect();
@@ -292,11 +292,11 @@ fn an_svf_cutoff_step_lands_on_the_grid_point_after_it() {
     );
 }
 
-/// A cell moved before the first block (no lane) is held: every block length
+/// A cell moved before the first block (no control signal) is held: every block length
 /// renders the same bits.
 ///
 /// Not sensitive to the grid (a held set has no ramp to cut);
-/// it pins the path the lanes' case does not take, one retarget at the first
+/// it pins the path the control signals' case does not take, one retarget at the first
 /// grid point and none after.
 #[test]
 fn held_cells_render_alike_at_every_block_length() {
@@ -317,7 +317,7 @@ fn held_cells_render_alike_at_every_block_length() {
     });
 }
 
-/// A step in a cutoff lane at frame 40 reaches the render within one segment of
+/// A step in a cutoff control signal at frame 40 reaches the render within one segment of
 /// the grid point that samples it.
 ///
 /// The grid points are 0, 16, 32, 48. The point at 32 reads the old cutoff and
@@ -330,17 +330,17 @@ fn held_cells_render_alike_at_every_block_length() {
 fn a_lane_step_is_in_the_render_within_one_segment() {
     const STEP: usize = 40;
     let (old, new) = (400.0f64, 4_000.0f64);
-    // The lane carries `f32` words.
-    let lane: Vec<f32> = (0..64)
+    // The control signal carries `f32` words.
+    let signal: Vec<f32> = (0..64)
         .map(|i| (if i < STEP { old } else { new }) as f32)
         .collect();
     let response = |cutoff: Option<f64>, at: usize| -> f64 {
         let mut x = vec![0.0f32; 64];
         x[at] = 1.0;
         let held = cutoff.map(|c| vec![c as f32; 64]);
-        let lanes = [Some(held.unwrap_or_else(|| lane.clone())), None, None];
+        let signals = [Some(held.unwrap_or_else(|| signal.clone())), None, None];
         let node = SvfFilterNode::<f32>::new(SvfType::LowPass, Hz::new(old), Q::new(0.707));
-        let out = render(node, 64, &[x], &lanes, |_| {});
+        let out = render(node, 64, &[x], &signals, |_| {});
         f64::from(out[0][at])
     };
     let at_old = response(Some(old), 47);
@@ -354,16 +354,16 @@ fn a_lane_step_is_in_the_render_within_one_segment() {
     assert_eq!(response(None, 63), at_new, "frame 63 is on the new set");
 }
 
-/// A stereo three-band crossover with a lane on each split, and one with a lane on
+/// A stereo three-band crossover with a control signal on each split, and one with a control signal on
 /// the upper split and the lower cell moved before the first block, render the same
 /// bits (all six outputs) at blocks of 1, 17, 64 or 512 frames.
 #[test]
-fn the_crossover_renders_alike_at_every_block_length_with_lanes() {
+fn the_crossover_renders_alike_at_every_block_length_with_signals() {
     let inputs = [noise(6), noise(7)];
-    same_at_every_block("crossover, a lane on each split", || {
+    same_at_every_block("crossover, a signal on each split", || {
         let inputs = inputs.clone();
         Box::new(move |block| {
-            let lanes = [Some(sweep(200.0, 1_500.0)), Some(sweep(2_500.0, 9_000.0))];
+            let signals = [Some(sweep(200.0, 1_500.0)), Some(sweep(2_500.0, 9_000.0))];
             render(
                 CrossoverNode::<f32>::new(
                     ChannelLayout::STEREO,
@@ -372,12 +372,12 @@ fn the_crossover_renders_alike_at_every_block_length_with_lanes() {
                 .unwrap(),
                 block,
                 &inputs,
-                &lanes,
+                &signals,
                 |_| {},
             )
         })
     });
-    same_at_every_block("crossover, a lane and a moved cell", || {
+    same_at_every_block("crossover, a signal and a moved cell", || {
         let inputs = inputs.clone();
         Box::new(move |block| {
             render(
@@ -398,7 +398,7 @@ fn the_crossover_renders_alike_at_every_block_length_with_lanes() {
     });
 }
 
-/// A step in a crossover's lane at frame 40 is held to the next grid point, then ramps: the
+/// A step in a crossover's control signal at frame 40 is held to the next grid point, then ramps: the
 /// point at 32 reads the old frequency and its segment runs on that set to frame 47; the
 /// point at 48 reads the new one and the integrator gain `g = tan(pi f / fs)` moves linearly
 /// to it over the 16 frames, frame 48 + m at step m + 1 of 16, reached exactly at frame 63. An
@@ -408,17 +408,17 @@ fn the_crossover_renders_alike_at_every_block_length_with_lanes() {
 fn a_crossover_lane_step_is_held_to_the_next_grid_point_then_ramps() {
     const STEP: usize = 40;
     let (old, new) = (400.0f64, 4_000.0f64);
-    // The lane carries `f32` words.
-    let lane: Vec<f32> = (0..64)
+    // The control signal carries `f32` words.
+    let signal: Vec<f32> = (0..64)
         .map(|i| (if i < STEP { old } else { new }) as f32)
         .collect();
     let response = |cutoff: Option<f64>, at: usize| -> f64 {
         let mut x = vec![0.0f32; 64];
         x[at] = 1.0;
         let held = cutoff.map(|c| vec![c as f32; 64]);
-        let lanes = [Some(held.unwrap_or_else(|| lane.clone()))];
+        let signals = [Some(held.unwrap_or_else(|| signal.clone()))];
         let node = CrossoverNode::<f32>::new(ChannelLayout::MONO, &[Hz::new(old)]).unwrap();
-        let out = render(node, 64, &[x], &lanes, |_| {});
+        let out = render(node, 64, &[x], &signals, |_| {});
         f64::from(out[0][at])
     };
     let at_old = response(Some(old), 47);

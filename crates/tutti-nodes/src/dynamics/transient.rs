@@ -6,7 +6,7 @@ use tutti_dsp::{COEFF_INTERVAL, Lerp, TransientBank, TransientControls};
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
 use tutti_units::{Db, SampleRate, Seconds, Tail};
 
-use crate::kernel::{ControlLanes, Kernel, KernelNode};
+use crate::kernel::{ControlSignals, Kernel, KernelNode};
 
 /// What a [`TransientShaperNode`] is made from: its width, the amounts it starts at and the
 /// time constants of its two envelopes.
@@ -172,7 +172,7 @@ impl<F: Float + Lerp> Kernel for TransientShaperKernel<F> {
     fn render(
         &mut self,
         input: Planes<'_, F>,
-        _: ControlLanes<'_, F>,
+        _: ControlSignals<'_, F>,
         output: PlanesMut<'_, '_, F>,
     ) {
         if let Some(bank) = &mut self.bank {
@@ -209,7 +209,7 @@ mod tests {
         let mut y = vec![0.0f64; x.len()];
         k.render(
             Planes::new(&[&x[..]]).unwrap(),
-            ControlLanes::NONE,
+            ControlSignals::NONE,
             PlanesMut::new(&mut [&mut y[..]]).unwrap(),
         );
         let pole = |tau: f64| (-1.0 / (tau * rate.get())).exp();

@@ -9,7 +9,7 @@ use tutti_dsp::{
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
 use tutti_units::{Drive, SampleRate, Samples, Tail};
 
-use crate::kernel::{ControlLanes, Kernel, KernelNode};
+use crate::kernel::{ControlSignals, Kernel, KernelNode};
 
 /// Waveshaping distortion of any width: `N` audio inputs and `N` outputs, every channel
 /// shaped alone by the same curve at the same drive.
@@ -26,7 +26,7 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 /// `set_param` (`UnitParam::Drive`); a value that is not finite reads as the last one that
 /// was.
 ///
-/// **It is read per frame** when the graph drives it: a lane on its port is the bank's own, and a
+/// **It is read per frame** when the graph drives it: a control signal on its port is the bank's own, and a
 /// frame of it that is not finite reads the drive in force: the cell's, ramping to its value. A
 /// cell that moves is sampled at the stream grid (16 frames from the last reset, [`Kernel::GRID`])
 /// and ramps over [`GAIN_RAMP`](tutti_dsp::GAIN_RAMP), 5 ms, so a write is no step at a block's
@@ -99,7 +99,7 @@ impl<F: Float + Lerp> DistortionNode<F> {
     /// Shapes at `factor` times the rate (see "Oversampling" above), up through the half-band
     /// cascade and back, instead of at the rate the node runs at.
     ///
-    /// Drive changes, from the cell or a lane, reach the shaper about half the latency ahead of
+    /// Drive changes, from the cell or a control signal, reach the shaper about half the latency ahead of
     /// the audio they were meant for: under 1 ms at 48 kHz for any factor.
     ///
     /// At a rate no half-band can be designed for (one where 0.1 times the rate overflows or
@@ -137,8 +137,8 @@ control_set! {
 }
 
 impl DistortionSet {
-    /// The lane of the drive: the one [`fast`](crate::ControlRead::Fast) row.
-    const DRIVE_LANE: usize = 0;
+    /// The control signal of the drive: the one [`fast`](crate::ControlRead::Fast) row.
+    const DRIVE_SIGNAL: usize = 0;
 }
 
 /// The waveshaper as a [`Kernel`]: a [`WaveshaperBank`] of one curve, at the prepared rate.
@@ -184,14 +184,14 @@ impl<F: Float + Lerp> DistortionKernel<F> {
     }
 }
 
-/// The oversampling of a prepared kernel: one [`Oversampler`] per channel and the drive lane
+/// The oversampling of a prepared kernel: one [`Oversampler`] per channel and the drive control signal
 /// held across the oversampled frames.
 #[derive(Clone, Debug)]
 struct Oversampled<F: Float> {
     plan: OversamplingPlan,
     channels: Vec<Oversampler<F>>,
-    /// A drive lane at the oversampled rate.
-    lane: Vec<F>,
+    /// A drive control signal at the oversampled rate.
+    signal: Vec<F>,
     max_block: usize,
 }
 
@@ -207,7 +207,7 @@ impl<F: Float + Lerp> Oversampled<F> {
         let plan = Oversampling::new(factor).plan(rate).ok()?;
         let state = plan.state::<F>(max_block);
         Some(Self {
-            lane: vec![F::ZERO; max_block.get() * factor.get()],
+            signal: vec![F::ZERO; max_block.get() * factor.get()],
             channels: vec![state; width],
             plan,
             max_block: max_block.get(),
@@ -219,7 +219,7 @@ impl<F: Float + Lerp> Oversampled<F> {
     fn render<S: Float>(
         &mut self,
         bank: &mut WaveshaperBank<F>,
-        lane: Option<Mono<'_, S>>,
+        signal: Option<Mono<'_, S>>,
         input: Planes<'_, S>,
         mut output: PlanesMut<'_, '_, S>,
     ) {
@@ -236,10 +236,10 @@ impl<F: Float + Lerp> Oversampled<F> {
             for (c, state) in self.channels.iter_mut().enumerate().take(width) {
                 state.upsample(input.plane(c).slice(span.clone()));
             }
-            let held = lane.map(|l| {
-                let high = &mut self.lane[..(end - start) * factor];
+            let held = signal.map(|l| {
+                let high = &mut self.signal[..(end - start) * factor];
                 for (k, h) in high.iter_mut().enumerate() {
-                    // A frame past the lane's end, like a non-finite one, reads the drive in force.
+                    // A frame past the control signal's end, like a non-finite one, reads the drive in force.
                     *h = l
                         .samples()
                         .get(start + k / factor)
@@ -331,13 +331,13 @@ impl<F: Float + Lerp> Kernel for DistortionKernel<F> {
     fn render(
         &mut self,
         input: Planes<'_, F>,
-        lanes: ControlLanes<'_, F>,
+        signals: ControlSignals<'_, F>,
         output: PlanesMut<'_, '_, F>,
     ) {
-        let lane = lanes.get(DistortionSet::DRIVE_LANE);
+        let signal = signals.get(DistortionSet::DRIVE_SIGNAL);
         match &mut self.oversampled {
-            Some(oversampled) => oversampled.render(&mut self.bank, lane, input, output),
-            None => self.bank.process(lane, input, output),
+            Some(oversampled) => oversampled.render(&mut self.bank, signal, input, output),
+            None => self.bank.process(signal, input, output),
         }
         // A design after a render is a move, which ramps.
         self.applied = true;

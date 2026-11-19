@@ -6,7 +6,7 @@ use tutti_dsp::{COEFF_INTERVAL, DcBlocker, DcBlockerControls, Lerp, MIN_DC_CORNE
 use tutti_graph::{Cost, Shape};
 use tutti_units::{Hz, SampleRate, Tail};
 
-use crate::kernel::{ControlLanes, Kernel, KernelNode};
+use crate::kernel::{ControlSignals, Kernel, KernelNode};
 
 /// What a [`DcBlockerNode`] is made from: its width and, optionally, its corner.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -142,7 +142,7 @@ impl<F: Float + Lerp> Kernel for DcBlockerKernel<F> {
     fn render(
         &mut self,
         input: Planes<'_, F>,
-        _: ControlLanes<'_, F>,
+        _: ControlSignals<'_, F>,
         output: PlanesMut<'_, '_, F>,
     ) {
         self.blocker.process(input, output);

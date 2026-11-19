@@ -100,13 +100,13 @@ fn runner(c: &GateControls) -> GateBank<f32> {
     runner_at(c, RATE)
 }
 
-/// `audio` (one slice per channel) through `bank`, keyed by `key`, with `lane` as the
-/// threshold lane when given, in calls of at most `block` frames.
+/// `audio` (one slice per channel) through `bank`, keyed by `key`, with `control signal` as the
+/// threshold control signal when given, in calls of at most `block` frames.
 fn run_in<F: Float + SimdLanes + Lerp>(
     bank: &mut GateBank<F>,
     audio: &[&[F]],
     key: &[&[F]],
-    lane: Option<&[F]>,
+    signal: Option<&[F]>,
     block: usize,
 ) -> Vec<Vec<F>> {
     let n = audio[0].len();
@@ -116,12 +116,12 @@ fn run_in<F: Float + SimdLanes + Lerp>(
         let end = (at + block).min(n);
         let a: Vec<&[F]> = audio.iter().map(|c| &c[at..end]).collect();
         let kk: Vec<&[F]> = key.iter().map(|c| &c[at..end]).collect();
-        let lanes = GateLanes {
-            threshold: lane.map(|l| Mono::new(&l[at..end])),
+        let signals = GateSignals {
+            threshold: signal.map(|l| Mono::new(&l[at..end])),
         };
         let mut outs: Vec<&mut [F]> = out.iter_mut().map(|c| &mut c[at..end]).collect();
         bank.process(
-            lanes,
+            signals,
             Planes::new(&kk).unwrap(),
             Planes::new(&a).unwrap(),
             PlanesMut::new(&mut outs).unwrap(),
@@ -136,9 +136,9 @@ fn run<F: Float + SimdLanes + Lerp>(
     bank: &mut GateBank<F>,
     audio: &[&[F]],
     key: &[&[F]],
-    lane: Option<&[F]>,
+    signal: Option<&[F]>,
 ) -> Vec<Vec<F>> {
-    run_in(bank, audio, key, lane, CHUNK)
+    run_in(bank, audio, key, signal, CHUNK)
 }
 
 /// One channel of `audio` and of the key, as the stereo pair the tests run.
@@ -146,9 +146,9 @@ fn run_mono<F: Float + SimdLanes + Lerp>(
     bank: &mut GateBank<F>,
     audio: &[F],
     key: &[F],
-    lane: Option<&[F]>,
+    signal: Option<&[F]>,
 ) -> Vec<F> {
-    run(bank, &[audio, audio], &[key, key], lane).remove(0)
+    run(bank, &[audio, audio], &[key, key], signal).remove(0)
 }
 
 /// A level of `db` as an amplitude, from the definition.
@@ -414,16 +414,16 @@ fn an_own_key_detects_the_signal_itself() {
     );
 }
 
-/// A threshold lane is read per frame: with the follower instant, each frame is open
+/// A threshold control signal is read per frame: with the follower instant, each frame is open
 /// when the key is at or over that frame's threshold, and a frame that is not finite takes
 /// the set one.
 #[test]
-fn a_threshold_lane_is_read_per_frame() {
+fn a_threshold_signal_is_read_per_frame() {
     let n = 600;
     let base = -30.0f64;
     let c = controls(base, 0.0, 0.0, 0.0, -40.0);
     let level = -20.0f32;
-    let lane: Vec<f32> = (0..n)
+    let signal: Vec<f32> = (0..n)
         .map(|i| match i {
             0..100 => 0.0,
             100..200 => -40.0,
@@ -439,9 +439,9 @@ fn a_threshold_lane_is_read_per_frame() {
         &mut k,
         &ones,
         &vec![amplitude(f64::from(level)); n],
-        Some(&lane),
+        Some(&signal),
     );
-    for (i, &t) in lane.iter().enumerate() {
+    for (i, &t) in signal.iter().enumerate() {
         let threshold = if t.is_finite() { f64::from(t) } else { base };
         let want = if f64::from(level) >= threshold {
             1.0
@@ -621,7 +621,7 @@ fn gain_at(range: f64, open: f64) -> f64 {
     r + open * (1.0 - r)
 }
 
-/// The render is the closed form whatever the calls cut the stream into: a key over a lane's
+/// The render is the closed form whatever the calls cut the stream into: a key over a control signal's
 /// threshold (and under the set one) opens the gate along the one-pole `1 - a^n`, then falls
 /// silent at frame 517 (inside a block of 7, 33, 64, 100 and 255 frames alike) with no hold, so
 /// the follower releases as `f b^m` from the `f` the step found, and the range ramps linearly in
@@ -642,15 +642,15 @@ fn a_cut_stream_follows_the_one_pole_and_ramp_closed_forms() {
         }
     };
     let ones = vec![1.0f64; n];
-    // -20 dB: over the lane's -30 dB threshold, under the set -10 dB one; then silence.
+    // -20 dB: over the control signal's -30 dB threshold, under the set -10 dB one; then silence.
     let key: Vec<f64> = (0..n)
         .map(|i| if i < step_at { 0.1 } else { 0.0 })
         .collect();
-    let lane = vec![-30.0f64; n];
+    let signal = vec![-30.0f64; n];
     for block in [1, 7, 33, 64, 100, 255, n] {
         let mut k = bank_at::<f64>(&c, RATE);
         k.retarget(&target);
-        let out = run_in(&mut k, &[&ones], &[&key], Some(&lane), block).remove(0);
+        let out = run_in(&mut k, &[&ones], &[&key], Some(&signal), block).remove(0);
         for (i, &y) in out.iter().enumerate() {
             let range = from + (to - from) * ((i + 1).min(steps) as f64 / steps as f64);
             let want = gain_at(range, open(i + 1));
@@ -782,7 +782,7 @@ fn run_f64(c: &GateControls, audio: &[f64], key: &[f64]) -> Vec<f64> {
     bank.jump_to_target();
     let mut out = vec![0.0f64; audio.len()];
     bank.process(
-        GateLanes::default(),
+        GateSignals::default(),
         Planes::new(&[key]).unwrap(),
         Planes::new(&[audio]).unwrap(),
         PlanesMut::new(&mut [&mut out[..]]).unwrap(),

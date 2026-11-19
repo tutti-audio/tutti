@@ -5,7 +5,7 @@
 //! coupling. So an N-channel node of one setting, fed N different inputs,
 //! renders on each channel exactly what a one-channel node of the same setting
 //! renders from that channel's input alone, whatever moves the controls: a
-//! held cell, a cell moved between blocks, or a lane on a param port, across a
+//! held cell, a cell moved between blocks, or a control signal on a param port, across a
 //! ragged block pattern. The check is bit for bit: the channels share a
 //! coefficient table and a block's ramps, and nothing may mix them.
 
@@ -28,28 +28,31 @@ const WIDTH: u16 = 6;
 /// Ragged on purpose: full blocks, odd sizes, and a block of one.
 const PATTERN: [usize; 6] = [64, 64, 17, 1, 64, 33];
 
-/// What moves a node's controls: lanes on its param ports (`None`: nothing fed
+/// What moves a node's controls: control signals on its param ports (`None`: nothing fed
 /// there) and a write to its cells before each block.
 struct Moves {
-    lanes: Vec<Option<Vec<f32>>>,
+    signals: Vec<Option<Vec<f32>>>,
     cells: Option<Box<dyn Fn(&ParamSet, usize)>>,
 }
 
 impl Moves {
     fn held() -> Self {
         Self {
-            lanes: Vec::new(),
+            signals: Vec::new(),
             cells: None,
         }
     }
 
-    fn lanes(lanes: Vec<Option<Vec<f32>>>) -> Self {
-        Self { lanes, cells: None }
+    fn signals(signals: Vec<Option<Vec<f32>>>) -> Self {
+        Self {
+            signals,
+            cells: None,
+        }
     }
 
     fn cells(f: impl Fn(&ParamSet, usize) + 'static) -> Self {
         Self {
-            lanes: Vec::new(),
+            signals: Vec::new(),
             cells: Some(Box::new(f)),
         }
     }
@@ -85,8 +88,8 @@ fn render<N: Node + ParamNode + 'static>(
         }
         k += 1;
         let ins: Vec<&[f32]> = inputs.iter().map(|c| &c[pos..pos + n]).collect();
-        let lanes: Vec<Option<&[f32]>> = moves
-            .lanes
+        let signals: Vec<Option<&[f32]>> = moves
+            .signals
             .iter()
             .map(|l| l.as_ref().map(|l| &l[pos..pos + n]))
             .collect();
@@ -94,7 +97,7 @@ fn render<N: Node + ParamNode + 'static>(
             &mut node as &mut dyn Node,
             SR,
             Planes::new(&ins).unwrap(),
-            &lanes,
+            &signals,
         );
         out.resize(block.len(), Vec::with_capacity(LEN));
         for (o, b) in out.iter_mut().zip(block) {
@@ -192,14 +195,14 @@ fn phaser(layout: ChannelLayout) -> PhaserNode<f32> {
 }
 
 /// The SVF's channels are independent whether its cutoff is held, swept by a
-/// lane or moved between blocks.
+/// control signal or moved between blocks.
 #[test]
 fn svf_channels_are_independent_mono_filters() {
     assert_width_generic("svf held", svf, Moves::held());
     assert_width_generic(
         "svf swept",
         svf,
-        Moves::lanes(vec![Some(sweep(200.0, 8_000.0)), None]),
+        Moves::signals(vec![Some(sweep(200.0, 8_000.0)), None]),
     );
     assert_width_generic(
         "svf automated",
@@ -211,14 +214,14 @@ fn svf_channels_are_independent_mono_filters() {
 }
 
 /// The ladder's channels are independent whether its cutoff is held, swept by a
-/// lane or its drive moved between blocks.
+/// control signal or its drive moved between blocks.
 #[test]
 fn ladder_channels_are_independent_mono_filters() {
     assert_width_generic("ladder held", ladder, Moves::held());
     assert_width_generic(
         "ladder swept",
         ladder,
-        Moves::lanes(vec![Some(sweep(200.0, 8_000.0)), None, None]),
+        Moves::signals(vec![Some(sweep(200.0, 8_000.0)), None, None]),
     );
     assert_width_generic(
         "ladder drive automated",
@@ -230,15 +233,15 @@ fn ladder_channels_are_independent_mono_filters() {
 }
 
 /// An uncoupled delay's channels are independent whether its feedback and time
-/// are held or on lanes, or its feedback is moved between blocks. (Its channels are
-/// linked in time, so the one time cell is every channel's, as a time lane is.)
+/// are held or on control signals, or its feedback is moved between blocks. (Its channels are
+/// linked in time, so the one time cell is every channel's, as a time control signal is.)
 #[test]
 fn delay_channels_are_independent_mono_delays() {
     assert_width_generic("delay held", delay, Moves::held());
     assert_width_generic(
-        "delay lanes",
+        "delay signals",
         delay,
-        Moves::lanes(vec![Some(ramp(0.002, 0.012)), Some(ramp(0.0, 0.9))]),
+        Moves::signals(vec![Some(ramp(0.002, 0.012)), Some(ramp(0.0, 0.9))]),
     );
     assert_width_generic(
         "delay automated",
@@ -250,14 +253,14 @@ fn delay_channels_are_independent_mono_delays() {
 }
 
 /// An unstaggered chorus's channels are independent whether its controls are
-/// held, on lanes, or moved between blocks.
+/// held, on control signals, or moved between blocks.
 #[test]
 fn chorus_channels_are_independent_mono_choruses() {
     assert_width_generic("chorus held", chorus, Moves::held());
     assert_width_generic(
-        "chorus lanes",
+        "chorus signals",
         chorus,
-        Moves::lanes(vec![
+        Moves::signals(vec![
             Some(sweep(0.5, 4.0)),
             Some(ramp(0.001, 0.006)),
             Some(ramp(0.0, 0.5)),
@@ -274,14 +277,14 @@ fn chorus_channels_are_independent_mono_choruses() {
 }
 
 /// The phaser's channels are independent whether its controls are held, on
-/// lanes, or moved between blocks.
+/// control signals, or moved between blocks.
 #[test]
 fn phaser_channels_are_independent_mono_phasers() {
     assert_width_generic("phaser held", phaser, Moves::held());
     assert_width_generic(
-        "phaser lanes",
+        "phaser signals",
         phaser,
-        Moves::lanes(vec![
+        Moves::signals(vec![
             Some(sweep(0.3, 5.0)),
             Some(ramp(0.2, 1.0)),
             Some(ramp(0.0, 0.7)),

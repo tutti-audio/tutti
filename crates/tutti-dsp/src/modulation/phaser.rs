@@ -148,7 +148,7 @@ impl Default for SweepRange {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PhaserControls {
     /// The LFO's rate: how fast the notches sweep. Phaser rates are slow, typically 0.1 to
-    /// 2 Hz. **Floored at 0.01 Hz**, a lane's value and a cell's alike ([`MIN_RATE`](crate::MIN_RATE)): a
+    /// 2 Hz. **Floored at 0.01 Hz**, a control signal's value and a cell's alike ([`MIN_RATE`](crate::MIN_RATE)): a
     /// negative rate does not run the sweep backwards. A rate that is not finite is not
     /// taken: the node holds the last finite one (the default's before any).
     pub rate: Hz,

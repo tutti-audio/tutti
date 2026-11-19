@@ -118,13 +118,13 @@ fn runner(c: &CompressorControls) -> CompressorBank<f32> {
     runner_at(c, RATE)
 }
 
-/// `audio` (one slice per channel) through `bank`, keyed by `key`, with `lane` as the
-/// threshold lane when given, in calls of at most `block` frames.
+/// `audio` (one slice per channel) through `bank`, keyed by `key`, with `control signal` as the
+/// threshold control signal when given, in calls of at most `block` frames.
 fn run_in<F: Float + SimdLanes + Lerp>(
     bank: &mut CompressorBank<F>,
     audio: &[&[F]],
     key: &[&[F]],
-    lane: Option<&[F]>,
+    signal: Option<&[F]>,
     block: usize,
 ) -> Vec<Vec<F>> {
     let n = audio[0].len();
@@ -134,12 +134,12 @@ fn run_in<F: Float + SimdLanes + Lerp>(
         let end = (at + block).min(n);
         let a: Vec<&[F]> = audio.iter().map(|c| &c[at..end]).collect();
         let kk: Vec<&[F]> = key.iter().map(|c| &c[at..end]).collect();
-        let lanes = CompressorLanes {
-            threshold: lane.map(|l| Mono::new(&l[at..end])),
+        let signals = CompressorSignals {
+            threshold: signal.map(|l| Mono::new(&l[at..end])),
         };
         let mut outs: Vec<&mut [F]> = out.iter_mut().map(|c| &mut c[at..end]).collect();
         bank.process(
-            lanes,
+            signals,
             Planes::new(&kk).unwrap(),
             Planes::new(&a).unwrap(),
             PlanesMut::new(&mut outs).unwrap(),
@@ -154,9 +154,9 @@ fn run<F: Float + SimdLanes + Lerp>(
     bank: &mut CompressorBank<F>,
     audio: &[&[F]],
     key: &[&[F]],
-    lane: Option<&[F]>,
+    signal: Option<&[F]>,
 ) -> Vec<Vec<F>> {
-    run_in(bank, audio, key, lane, CHUNK)
+    run_in(bank, audio, key, signal, CHUNK)
 }
 
 /// A level of `db` as an amplitude, from the definition.
@@ -411,15 +411,15 @@ fn an_own_key_detects_the_signal_itself() {
     }
 }
 
-/// A threshold lane is read per frame: with the follower instant, each frame's gain is the
+/// A threshold control signal is read per frame: with the follower instant, each frame's gain is the
 /// curve at that frame's threshold, and a frame that is not finite takes the set one.
 #[test]
-fn a_threshold_lane_is_read_per_frame() {
+fn a_threshold_signal_is_read_per_frame() {
     let n = 600;
     let base = -40.0f64;
     let c = controls(base, 0.0, 4.0, 0.0, 0.0, 0.0);
     let level = -6.0;
-    let lane: Vec<f32> = (0..n)
+    let signal: Vec<f32> = (0..n)
         .map(|i| match i {
             0..100 => 20.0,
             100..200 => -10.0,
@@ -431,8 +431,8 @@ fn a_threshold_lane_is_read_per_frame() {
     let mut k = runner(&c);
     let ones = vec![1.0f32; n];
     let key = vec![amplitude(level); n];
-    let out = run(&mut k, &[&ones, &ones], &[&key, &key], Some(&lane));
-    for (i, &t) in lane.iter().enumerate() {
+    let out = run(&mut k, &[&ones, &ones], &[&key, &key], Some(&signal));
+    for (i, &t) in signal.iter().enumerate() {
         let threshold = if t.is_finite() { f64::from(t) } else { base };
         let want = -curve(level, threshold, 0.0, 4.0);
         let got = 20.0 * f64::from(out[0][i]).log10();
@@ -532,19 +532,19 @@ fn gain_of(makeup: f64, reduction: f64) -> f64 {
 
 /// The render is the closed form whatever the calls cut the stream into: a key that steps from
 /// `L1` to a louder `L2` at frame 517 (inside a block of 7, 33, 64, 100 and 255 frames alike)
-/// attacks along the one-pole toward the static curve at the lane's threshold, `T1 (1 - a^n)`
+/// attacks along the one-pole toward the static curve at the control signal's threshold, `T1 (1 - a^n)`
 /// and then `T2 + (R - T2) a^m` from the reduction `R` the step found, and the makeup ramps
 /// linearly in dB over the 240 steps of 5 ms at 48 kHz, in calls of 1, 7, 33, 64, 100 and 255
 /// frames and in one call.
 #[test]
 fn a_cut_stream_follows_the_one_pole_and_ramp_closed_forms() {
-    let (lane_threshold, ratio, tau) = (-20.0, 4.0, 0.002);
+    let (signal_threshold, ratio, tau) = (-20.0, 4.0, 0.002);
     let (first, second) = (-14.0, -6.0);
     let (steps, makeup, step_at) = (240usize, 9.0, 517usize);
     let n = 1_200;
     let (t1, t2) = (
-        curve(first, lane_threshold, 0.0, ratio),
-        curve(second, lane_threshold, 0.0, ratio),
+        curve(first, signal_threshold, 0.0, ratio),
+        curve(second, signal_threshold, 0.0, ratio),
     );
     let a = (-1.0 / (tau * RATE.get())).exp();
     let reduction = |frames: usize| {
@@ -560,11 +560,11 @@ fn a_cut_stream_follows_the_one_pole_and_ramp_closed_forms() {
     let key: Vec<f64> = (0..n)
         .map(|i| 10f64.powf(if i < step_at { first } else { second } / 20.0))
         .collect();
-    let lane = vec![lane_threshold; n];
+    let signal = vec![signal_threshold; n];
     for block in [1, 7, 33, 64, 100, 255, n] {
         let mut k = bank_at::<f64>(&c, RATE);
         k.retarget(&to);
-        let out = run_in(&mut k, &[&ones], &[&key], Some(&lane), block).remove(0);
+        let out = run_in(&mut k, &[&ones], &[&key], Some(&signal), block).remove(0);
         for (i, &y) in out.iter().enumerate() {
             let ramp = makeup * ((i + 1).min(steps) as f64 / steps as f64);
             let want = gain_of(ramp, reduction(i + 1));
@@ -785,7 +785,7 @@ fn run_f64(c: &CompressorControls, audio: &[f64], key: &[f64]) -> Vec<f64> {
     bank.jump_to_target();
     let mut out = vec![0.0f64; audio.len()];
     bank.process(
-        CompressorLanes::default(),
+        CompressorSignals::default(),
         Planes::new(&[key]).unwrap(),
         Planes::new(&[audio]).unwrap(),
         PlanesMut::new(&mut [&mut out[..]]).unwrap(),
