@@ -417,13 +417,12 @@ fn a_direction_set_plays_the_voice_backwards(streamed: bool) {
         for (f, &got) in out.iter().enumerate().take(guard) {
             assert_eq!(got.to_bits(), ramp(f).to_bits(), "frame {f} plays forwards");
         }
-        for f in guard..guard + fade {
+        for (f, &got) in out.iter().enumerate().skip(guard).take(fade) {
             let (a, b) = (ramp(f), ramp(LEN - 1 - f));
             let (lo, hi) = (a.min(b), a.max(b));
             assert!(
-                (lo..=hi).contains(&out[f]),
-                "frame {f}: {} is not between {lo} and {hi}",
-                out[f]
+                (lo..=hi).contains(&got),
+                "frame {f}: {got} is not between {lo} and {hi}"
             );
         }
         let landed = out

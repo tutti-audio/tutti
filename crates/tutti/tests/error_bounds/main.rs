@@ -79,7 +79,6 @@ fn session_modulation_errors_are_boxable() {
 
 #[cfg(feature = "sampler")]
 fn sampler_errors_are_boxable() {
-    err::<tutti::sampler::StreamerGone>();
     err::<tutti::sampler::StreamingAddError<f32>>();
 }
 

@@ -6,7 +6,7 @@ use tutti_rt::{Publisher, Reader};
 
 use super::bell::Bell;
 
-/// A published value (`ArcLend`) that a voice and, for a streamed one, the
+/// A published value that a voice and, for a streamed one, the
 /// streamer read: the loop or direction a stream is asked for.
 ///
 /// A cell of a streamed voice rings the streamer's bell when it is published
