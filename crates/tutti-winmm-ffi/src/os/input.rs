@@ -280,6 +280,10 @@ impl MidiIn {
         };
         let worker = {
             let shared = Arc::clone(&shared);
+            // A raw thread: the worker stops by the input's own wake and closing
+            // flag and is joined (or forgotten when the wake fails) in a fixed
+            // order with the port's close, and `spawn_named`'s handle would own a
+            // second stop and join, and a priority request, beside them.
             std::thread::Builder::new()
                 .name("tutti-winmm-in".to_string())
                 .spawn(move || requeue(&shared, wait))

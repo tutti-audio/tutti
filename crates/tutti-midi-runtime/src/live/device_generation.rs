@@ -22,7 +22,7 @@
 //! ([`DeviceGeneration`], cheap to clone, which reads) with the one [`GenerationWriter`]
 //! (not `Clone`, `&mut self` to move the generation): `arrive` and `depart` read the
 //! generation and then store the next, so no two of them can overlap. The node only
-//! stores what it has settled.
+//! stores what it has handled.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -40,7 +40,7 @@ struct Cell {
     /// The control side's generation: odd while a device is there.
     generation: AtomicU64,
     /// The generation the node has handled and owes nothing for.
-    settled: AtomicU64,
+    handled: AtomicU64,
 }
 
 /// The one writer of an input's generation: the control side's half of
@@ -74,7 +74,7 @@ impl DeviceGeneration {
     /// After a [`depart`](GenerationWriter::depart) it is false until a block has run.
     #[must_use]
     pub fn is_idle(&self) -> bool {
-        self.cell.settled.load(Ordering::Acquire) == self.cell.generation.load(Ordering::Acquire)
+        self.cell.handled.load(Ordering::Acquire) == self.cell.generation.load(Ordering::Acquire)
     }
 
     /// The generation, for the node's block.
@@ -83,8 +83,8 @@ impl DeviceGeneration {
     }
 
     /// The node has handled `generation` and pushed what it owed for it.
-    pub(crate) fn settle(&self, generation: u64) {
-        self.cell.settled.store(generation, Ordering::Release);
+    pub(crate) fn mark_handled(&self, generation: u64) {
+        self.cell.handled.store(generation, Ordering::Release);
     }
 }
 

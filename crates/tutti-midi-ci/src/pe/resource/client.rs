@@ -16,6 +16,7 @@ use super::super::limits::{MediaType, SubscribeId};
 use super::super::partial::PartialUpdate;
 use super::super::reassemble::PeFlowControl;
 use super::super::tree::{PeJson, PeJsonError};
+use super::cache::GetCache;
 use super::data::PeData;
 use super::entry::{PeResourceList, ResourceEntry};
 use super::fields::PeDataError;
@@ -231,11 +232,14 @@ enum Op {
     Get {
         call: CallId,
         target: ResourceTarget,
+        page: Option<PePage>,
+        /// The cache's drop count when the Get started.
+        drops: u64,
     },
     Walk(Walk),
     Set {
         call: CallId,
-        resource: PeResource,
+        target: ResourceTarget,
     },
     Subscribe {
         call: CallId,
@@ -279,6 +283,7 @@ pub struct ResourceInitiator {
     list: Option<PeResourceList>,
     ops: Vec<(PeRequestId, Op)>,
     subs: Vec<Sub>,
+    cache: GetCache,
     next_call: u32,
 }
 
@@ -298,6 +303,7 @@ impl ResourceInitiator {
             list: None,
             ops: Vec::new(),
             subs: Vec::new(),
+            cache: GetCache::default(),
             next_call: 0,
         };
         let out = this.map(actions, now);
@@ -361,7 +367,12 @@ impl ResourceInitiator {
         Ok(self.map(actions, now))
     }
 
-    /// Get Property Data.
+    /// Get Property Data. While the `cacheTime` of an earlier reply to the same
+    /// request (Resource, entry and page) has not elapsed at `now`, the data is
+    /// that reply's: the returned actions hold its [`ResourceEvent::Got`] and
+    /// nothing is sent (M2-103 §7.4.3). A Subscription update of the Resource
+    /// drops what is held for it (§7.4.3). A successful Set of it does too, which
+    /// the spec does not ask for: the data held is the data the Set replaced.
     ///
     /// # Errors
     ///
@@ -379,9 +390,20 @@ impl ResourceInitiator {
             get.check_get(entry)?;
         }
         let call = self.call_id();
+        self.cache.prune(now);
+        if let Some(data) = self.cache.fresh(get.target(), get.page(), now) {
+            let got = event(ResourceEvent::Got {
+                call,
+                target: get.target().clone(),
+                result: Ok(data.clone()),
+            });
+            return Ok((call, vec![got]));
+        }
         let op = Op::Get {
             call,
             target: get.target().clone(),
+            page: get.page(),
+            drops: self.cache.drops(),
         };
         let actions = self.start(PeCall::Get(pe_get(get)), op, now)?;
         Ok((call, actions))
@@ -392,7 +414,8 @@ impl ResourceInitiator {
     ///
     /// The walk asks for offset 0, then for the offset after the entries it has,
     /// until it has `totalCount` of them. A reply with no `totalCount`, or an
-    /// empty page before the end, fails the call.
+    /// empty page before the end, fails the call. A walk that paginates always
+    /// asks: it neither uses nor holds the data of [`get`](Self::get)'s cache.
     ///
     /// # Errors
     ///
@@ -464,7 +487,7 @@ impl ResourceInitiator {
         let call = self.call_id();
         let op = Op::Set {
             call,
-            resource: set.target().resource().clone(),
+            target: set.target().clone(),
         };
         let pe_set = PeSet {
             resource: set.target().resource().name(),
@@ -584,13 +607,24 @@ impl ResourceInitiator {
             Op::List => match reply.and_then(|r| decode(&PeResource::ResourceList, &r)) {
                 Ok(PeData::ResourceList(list)) => {
                     self.list = Some(list.clone());
+                    self.cache.clear();
                     out.push(event(ResourceEvent::ResourceList(list)));
                 }
                 Ok(_) => {}
                 Err(failure) => out.push(event(ResourceEvent::ResourceListFailed(failure))),
             },
-            Op::Get { call, target } => {
+            Op::Get {
+                call,
+                target,
+                page,
+                drops,
+            } => {
+                let cache_time = reply.as_ref().ok().and_then(|r| r.header.cache_time);
                 let result = reply.and_then(|r| decode(target.resource(), &r));
+                if let (Ok(data), Some(time)) = (&result, cache_time) {
+                    self.cache
+                        .keep(&target, page, data.clone(), time, drops, now);
+                }
                 out.push(event(ResourceEvent::Got {
                     call,
                     target,
@@ -598,7 +632,8 @@ impl ResourceInitiator {
                 }));
             }
             Op::Walk(walk) => self.walked(walk, reply, now, out),
-            Op::Set { call, resource } => {
+            Op::Set { call, target } => {
+                let resource = target.resource().clone();
                 let (result, stamp) = match reply {
                     Ok(r) if resource == PeResource::State => {
                         match StateStamp::read(&r.header.extra) {
@@ -608,6 +643,9 @@ impl ResourceInitiator {
                     }
                     other => (other.map(|r| r.status()), None),
                 };
+                if result.is_ok() {
+                    self.cache.forget(&target);
+                }
                 out.push(event(ResourceEvent::Set {
                     call,
                     resource,
@@ -822,6 +860,7 @@ impl ResourceInitiator {
                 let Some(sub) = self.subs.iter_mut().find(|s| s.id == subscribe_id) else {
                     return;
                 };
+                self.cache.forget(&sub.target);
                 let applied = match &change {
                     PeChange::Full(bytes) => {
                         read_full(sub.target.resource(), media_type.as_ref(), bytes)
