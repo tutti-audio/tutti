@@ -27,6 +27,19 @@
 /// assert_eq!(Voices::try_from(9), Err(VoicesOutOfRange(9)));
 /// ```
 ///
+/// `$err: Eq` in place of `$err` derives `Eq` on the error, for a raw that is
+/// `Eq`; the default leaves a float raw free to use the macro.
+///
+/// ```
+/// tutti_units::ranged! {
+///     /// A small count.
+///     Small(u8), NotSmall: Eq, "a small count", |raw| raw < 4
+/// }
+///
+/// assert_eq!(Small::try_from(9), Err(NotSmall(9)));
+/// assert_eq!(NotSmall(9), NotSmall(9));
+/// ```
+///
 /// `bits $width` in place of the predicate is the range `0..=(1 << $width) - 1`
 /// of a bit-width field. It adds `pub const MAX` and `pub const fn masked(raw)`,
 /// which keeps the low `$width` bits of a raw the wire has just framed, and its
@@ -66,6 +79,12 @@ macro_rules! ranged {
                 self.0
             }
         }
+    };
+    (
+        $(#[$meta:meta])*
+        $name:ident($inner:ty), $err:ident: Eq, $what:literal, |$raw:ident| $valid:expr
+    ) => {
+        $crate::ranged!(@items [Eq] $(#[$meta])* $name($inner), $err, $what, |$raw| $valid);
     };
     (
         $(#[$meta:meta])*
