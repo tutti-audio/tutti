@@ -437,12 +437,13 @@ pub mod catalog {
     pub use tutti_plugin_types::{Helper, Locator};
     // Named in `Plugin::role` and `Catalog::iter`.
     pub use crate::host::placement::placement;
-    pub use crate::host::plugin::{BoundPlugin, Commit, Plugin, PluginRebinder, Rebuilt};
+    pub use crate::host::plugin::{BoundPlugin, Plugin, PluginRebinder, Rebuilt};
     pub use tutti_plugin_db::{
         BindError, BlacklistView, Catalog, CatalogConfig, DEFAULT_MEASURE_TIMEOUT,
         DEFAULT_PROBE_TIMEOUT, FileFailure, FilesError, Hosting, Loadable, PersistError, PluginDb,
         PluginRef, ProbeFailure, Resolved, Scan, ScanBusy, ScanError, ScanPoll, ScanResult,
     };
+    pub use tutti_plugin_host::Commit;
     pub use tutti_plugin_ipc::AudioConfig;
     pub use tutti_plugin_types::{PluginDescriptor, PluginId, PluginRole};
 }
