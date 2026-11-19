@@ -266,7 +266,7 @@ impl<F: SynthFloat> PolySynth<F> {
         match voice {
             // A MIDI 2.0 Note On at velocity 0 is a Note On (M2-104 §7.4.2),
             // sounding at velocity 0. A MIDI 1.0 one arrives as a `NoteOff`
-            // (`channel_voice` widens it, App. D.3.1).
+            // (`channel_voice` translates it, App. D.3.1).
             Voice2::NoteOn {
                 note,
                 velocity,

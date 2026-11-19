@@ -110,7 +110,7 @@ pub(crate) fn is_ump_endpoint(os: &Endpoint) -> bool {
 
 /// Whether the endpoint carries MIDI-2-only messages (per-note controllers,
 /// per-note pitch bend, JR Timestamps) intact. A MIDI 1.0 endpoint carries MIDI
-/// 1.0 messages, which have none of those: the output narrows the graph's MIDI
+/// 1.0 messages, which have none of those: the output translates the graph's MIDI
 /// 2.0 messages for it (`OpenOutput`).
 pub(crate) fn carries_midi2_only(os: &Endpoint) -> bool {
     os.active().protocol == Protocol::Midi2

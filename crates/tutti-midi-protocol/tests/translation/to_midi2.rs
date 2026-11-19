@@ -1,9 +1,8 @@
-//! `widen` against figures that do not come from its own code: the tables of
+//! `Voice2::from` against figures that do not come from its own code: the tables of
 //! M2-115 section 3.3.3, a bit-by-bit statement of the repeat rule, and the
 //! core rules of section 3.2, each over every value (128 seven-bit values and
 //! 16,384 fourteen-bit values).
 
-use tutti_midi_protocol::widen;
 use tutti_ump::{
     Address, Attribute, BendValue, CCNumber, ControlValue, Message, NoteNumber, NoteVelocity, U7,
     U14, Ump, Voice1, Voice2,
@@ -30,7 +29,7 @@ fn repeat_rule(v: u32, src: u32, dst: u32) -> u32 {
 }
 
 fn velocity(v: u8) -> u16 {
-    match widen(Voice1::NoteOff {
+    match Voice2::from(Voice1::NoteOff {
         note: NoteNumber::of(60),
         velocity: U7::of(v),
     }) {
@@ -39,7 +38,7 @@ fn velocity(v: u8) -> u16 {
     }
 }
 fn value(v: u8) -> u32 {
-    match widen(Voice1::ControlChange {
+    match Voice2::from(Voice1::ControlChange {
         controller: CCNumber::of(74),
         value: U7::of(v),
     }) {
@@ -48,7 +47,7 @@ fn value(v: u8) -> u32 {
     }
 }
 fn bend(v: u16) -> u32 {
-    match widen(Voice1::PitchBend(U14::of(v))) {
+    match Voice2::from(Voice1::PitchBend(U14::of(v))) {
         Voice2::PitchBend(b) => b.get(),
         other => panic!("{other:?}"),
     }
@@ -165,7 +164,7 @@ fn the_core_rules_hold() {
 #[test]
 fn a_note_on_at_velocity_0_is_a_note_off_at_the_centre() {
     assert_eq!(
-        widen(Voice1::NoteOn {
+        Voice2::from(Voice1::NoteOn {
             note: NoteNumber::of(60),
             velocity: U7::of(0)
         }),
@@ -176,7 +175,7 @@ fn a_note_on_at_velocity_0_is_a_note_off_at_the_centre() {
         }
     );
     assert_eq!(
-        widen(Voice1::NoteOn {
+        Voice2::from(Voice1::NoteOn {
             note: NoteNumber::of(60),
             velocity: U7::of(1)
         }),
@@ -188,7 +187,7 @@ fn a_note_on_at_velocity_0_is_a_note_off_at_the_centre() {
     );
     for v in 1..=127u8 {
         assert_eq!(
-            widen(Voice1::NoteOn {
+            Voice2::from(Voice1::NoteOn {
                 note: NoteNumber::of(61),
                 velocity: U7::of(v)
             }),
@@ -212,10 +211,10 @@ fn a_note_off_keeps_its_velocity() {
 }
 
 #[test]
-fn every_variant_widens_and_keeps_its_fields() {
+fn every_variant_translates_and_keeps_its_fields() {
     let n = NoteNumber::of(72);
     assert_eq!(
-        widen(Voice1::PolyPressure {
+        Voice2::from(Voice1::PolyPressure {
             note: n,
             pressure: U7::of(96)
         }),
@@ -225,23 +224,23 @@ fn every_variant_widens_and_keeps_its_fields() {
         }
     );
     assert_eq!(
-        widen(Voice1::ChannelPressure(U7::of(120))),
+        Voice2::from(Voice1::ChannelPressure(U7::of(120))),
         Voice2::ChannelPressure(ControlValue::new(0xF1C7_1C71))
     );
     // No bank: choosing one needs the latched Bank Select.
     assert_eq!(
-        widen(Voice1::ProgramChange(U7::of(33))),
+        Voice2::from(Voice1::ProgramChange(U7::of(33))),
         Voice2::ProgramChange {
             program: U7::of(33),
             bank: None
         }
     );
-    // Every controller, RPN/NRPN and Bank Select selectors included, widens by
+    // Every controller, RPN/NRPN and Bank Select selectors included, translates by
     // value and stays a Control Change on the same controller.
     for c in 0..=127u8 {
         for v in [0u8, 1, 63, 64, 65, 127] {
             assert_eq!(
-                widen(Voice1::ControlChange {
+                Voice2::from(Voice1::ControlChange {
                     controller: CCNumber::of(c),
                     value: U7::of(v)
                 }),
@@ -256,14 +255,14 @@ fn every_variant_widens_and_keeps_its_fields() {
 }
 
 /// The result is a message the codec writes and reads back, and the address is
-/// the caller's: widening never touches it.
+/// the caller's: translating never touches it.
 #[test]
-fn the_widened_message_is_a_message() {
+fn the_translated_message_is_a_message() {
     let address = Address {
         group: tutti_ump::MidiGroup::of(5),
         channel: tutti_ump::MidiChannel::of(9),
     };
-    let voice = widen(Voice1::NoteOn {
+    let voice = Voice2::from(Voice1::NoteOn {
         note: NoteNumber::of(60),
         velocity: U7::of(64),
     });

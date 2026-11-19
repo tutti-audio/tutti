@@ -2,11 +2,12 @@
 //! [`Midi1Translator`] an output edge runs.
 
 use crate::scale;
-use crate::{ExtremeValues, PerNoteTranslation, TranslationMode, midi1, narrow_with};
+use crate::{PerNoteTranslation, TranslationMode, midi1};
 use alloc::boxed::Box;
 use members::Members;
 use tutti_ump::{
-    Address, BendValue, CCNumber, ControlValue, Message, Midi1Bytes, U7, U14, Ump, Voice1, Voice2,
+    Address, BendValue, CCNumber, ControlValue, ExtremeValues, Message, Midi1Bytes, U7, U14, Ump,
+    Voice1, Voice2,
 };
 
 mod members;
@@ -20,21 +21,21 @@ mod members;
 ///   parameter, then CC 6 and CC 38, the top 14 bits of the 32-bit value. All
 ///   four are sent for every message, even for the parameter the previous one
 ///   selected.
-/// - **The data narrows** by the rule the [`Midi2Translator`](crate::Midi2Translator) widened with. A
+/// - **The data downscales** by the rule the [`Midi2Translator`](crate::Midi2Translator) upscaled with. A
 ///   Registered Controller of index 0 to 31 (any bank) is a fixed-point number
-///   or a pair of fields, widened by zero-extension (M2-115 section 4.1:
+///   or a pair of fields, upscaled by zero-extension (M2-115 section 4.1:
 ///   Zero-Extension Scaling for every Registered Controller whose index is
-///   0 to 31), and narrows **with rounding** (section 4.4, `narrow_rounded`).
+///   0 to 31), and downscales **with rounding** (section 4.4, `rounded_u14`).
 ///   Every other controller was scaled
-///   Min-Center-Max and narrows by the plain right shift of section 3.4
-///   (`ControlValue::to_u7`), which returns the value it was widened from.
+///   Min-Center-Max and downscales by the plain right shift of section 3.4
+///   (`ControlValue::to_u7`), which returns the value it was upscaled from.
 /// - **Null Function is not sent after a run.** D.2.3 gives four messages, not
 ///   five, and D.3.3 says the Null Function is not translated; the select
 ///   stays until the next message selects again.
 /// - **A Program Change with a bank** is CC 0, CC 32, then the Program Change
 ///   (D.2.4): three messages every time the Bank Valid bit is 1, and the
 ///   Program Change alone when it is 0.
-/// - **Every other message** is [`midi1()`](fn@midi1)'s: a Note On whose velocity narrows
+/// - **Every other message** is [`midi1()`](fn@midi1)'s: a Note On whose velocity translates
 ///   to 0 is 1 (D.2.1), pressure and Control Change shift, and the messages
 ///   with no MIDI 1.0 form (D.2.8: relative and per-note controllers) send
 ///   nothing.
@@ -171,7 +172,7 @@ impl Midi1Translator {
             PerNoteTranslation::Dropped => address,
         };
         let plain = |out: &mut dyn FnMut(Midi1Bytes)| {
-            if let Ok(voice) = narrow_with(extremes, voice) {
+            if let Ok(voice) = Voice1::try_from_with(extremes, voice) {
                 out(voice.bytes(address.channel));
             }
         };
@@ -181,9 +182,9 @@ impl Midi1Translator {
         match voice {
             Voice2::Registered { bank, index, value } => {
                 let data = if scale::zero_extended(index) {
-                    narrow_rounded(value)
+                    rounded_u14(value)
                 } else {
-                    narrow_data(extremes, value)
+                    data_u14(extremes, value)
                 };
                 run(
                     (CCNumber::RPN_MSB, bank),
@@ -196,7 +197,7 @@ impl Midi1Translator {
                 run(
                     (CCNumber::NRPN_MSB, bank),
                     (CCNumber::NRPN_LSB, index),
-                    narrow_data(extremes, value),
+                    data_u14(extremes, value),
                     &mut cc,
                 );
             }
@@ -228,9 +229,9 @@ fn run(
 }
 
 /// The top 14 bits of a 32-bit controller word: the data of a Registered or
-/// Assignable Controller that M2-115 scales Min-Center-Max, narrowed by a right
+/// Assignable Controller that M2-115 scales Min-Center-Max, downscaled by a right
 /// shift (as [`BendValue::to_u14`](tutti_ump::BendValue::to_u14) does a bend).
-fn narrow_data(extremes: ExtremeValues, value: ControlValue) -> U14 {
+fn data_u14(extremes: ExtremeValues, value: ControlValue) -> U14 {
     extremes.fourteen(BendValue::new(value.get()).to_u14(), value.get())
 }
 
@@ -238,7 +239,7 @@ fn narrow_data(extremes: ExtremeValues, value: ControlValue) -> U14 {
 /// `scaleDownRounding(value, 32, 14)`): fixed-point values are rounded when
 /// downscaled, by adding half the scaled range, shifting, and clamping to the
 /// 14-bit maximum.
-fn narrow_rounded(value: ControlValue) -> U14 {
+fn rounded_u14(value: ControlValue) -> U14 {
     const SCALE_BITS: u32 = 32 - 14;
     let shifted = (u64::from(value.get()) + (1 << (SCALE_BITS - 1))) >> SCALE_BITS;
     // `min` keeps 14 bits.

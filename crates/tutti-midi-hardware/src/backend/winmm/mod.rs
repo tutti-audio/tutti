@@ -25,7 +25,7 @@
 //!   port is open, failing when the device there is not the one listed.
 //! - **Input** is a winmm callback on the driver's thread. A short message is
 //!   one MIDI 1.0 UMP (type 2 or type 1) and System Exclusive arrives as
-//!   SysEx7 packets; the ingest node widens the first as it does for any
+//!   SysEx7 packets; the ingest node translates the first as it does for any
 //!   MIDI 1.0 port. Each carries its time since the port started, placed on
 //!   the `Instant` clock.
 //! - **Output** is a thread of its own: it holds each event until its time

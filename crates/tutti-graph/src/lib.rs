@@ -782,7 +782,7 @@ pub use wake::Wake;
 pub mod __private {
     pub use crate::declare::{Cells, Row, Visit, base, input, ports, row, set};
     pub use tutti_buffers::Float;
-    pub use tutti_rt::{Setting, SettingWord};
+    pub use tutti_rt::{AtomicCell, AtomicWord};
     pub use tutti_units::{UnitAddr, UnitParam};
 }
 

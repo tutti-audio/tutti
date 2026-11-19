@@ -102,7 +102,7 @@ fn process_honors_frame_offset_within_block() {
     const OFFSETS: [usize; 3] = [16, 32, 48];
 
     let note = |offset: usize| {
-        let velocity = NoteVelocity::from(U7::of(100)).get(); // 7-bit 100, widened (M2-115)
+        let velocity = NoteVelocity::from(U7::of(100)).get(); // 7-bit 100, upscaled (M2-115)
         (
             Offset::of(Samples::new(offset), Samples::new(BLOCK)),
             midi::note_on(MidiChannel::FIRST, 60, velocity),
@@ -189,7 +189,7 @@ fn two_events_in_one_block_apply_at_their_own_offsets() {
     const SECOND_OFFSET: usize = 32;
 
     let note = |key: u8, offset: usize| {
-        let velocity = NoteVelocity::from(U7::of(100)).get(); // 7-bit 100, widened (M2-115)
+        let velocity = NoteVelocity::from(U7::of(100)).get(); // 7-bit 100, upscaled (M2-115)
         (
             Offset::of(Samples::new(offset), Samples::new(BLOCK)),
             midi::note_on(MidiChannel::FIRST, key, velocity),
@@ -278,7 +278,7 @@ fn event_at_last_frame_of_block_still_applies() {
     const LAST: usize = BLOCK - 1;
 
     let note = |offset: usize| {
-        let velocity = NoteVelocity::from(U7::of(100)).get(); // 7-bit 100, widened (M2-115)
+        let velocity = NoteVelocity::from(U7::of(100)).get(); // 7-bit 100, upscaled (M2-115)
         (
             Offset::of(Samples::new(offset), Samples::new(BLOCK)),
             midi::note_on(MidiChannel::FIRST, 60, velocity),
@@ -339,7 +339,7 @@ fn a_same_rate_reprepare_mid_stream_does_not_disturb_rendering() {
     const BLOCKS: usize = 6;
 
     let note = || {
-        let velocity = NoteVelocity::from(U7::of(100)).get(); // 7-bit 100, widened (M2-115)
+        let velocity = NoteVelocity::from(U7::of(100)).get(); // 7-bit 100, upscaled (M2-115)
         (
             Offset::ZERO,
             midi::note_on(MidiChannel::FIRST, 60, velocity),

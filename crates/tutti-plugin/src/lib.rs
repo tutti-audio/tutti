@@ -127,7 +127,7 @@
 //!   [`ParamRead`](tutti_plugin_host::ParamRead) job,
 //!   [`Liveness`](tutti_plugin_host::Liveness), the death debounce: 3 unhealthy
 //!   observations spanning 50 ms, and
-//!   [`needs_announcement`](tutti_plugin_host::needs_announcement)) are
+//!   [`needs_notify`](tutti_plugin_host::needs_notify)) are
 //!   `tutti-plugin-host`'s.
 //! - [`BridgeConfig`] — low-level bridge tuning (buffer size, timeouts).
 //! - [`BridgeError`](tutti_plugin_types::BridgeError) — the error most calls return.

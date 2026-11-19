@@ -14,6 +14,7 @@ use tutti_ump::{
     Address, Attribute, BendValue, CCNumber, ControlValue, Message, MidiChannel, MidiGroup,
     NoteNumber, NoteVelocity, PerNoteManagement, U7, U14, Ump, Voice1, Voice2,
 };
+
 use tutti_units::{Amplitude, Hz, Normalized, Resonance, Seconds, Spread};
 
 /// The synth at `f32`, the width these tests run at unless they name another.
@@ -2360,7 +2361,7 @@ fn poly_synth() -> PolySynth {
     })
 }
 
-/// A MIDI 1.0 Note On and the MIDI 2.0 Note On that widens it claim the same
+/// A MIDI 1.0 Note On and the MIDI 2.0 Note On that translates it claim the same
 /// voice: same note, channel and velocity, which is the figure translation
 /// scales to.
 #[test]
@@ -2391,7 +2392,7 @@ fn a_midi1_and_a_midi2_note_on_claim_the_same_voice() {
         assert_eq!(
             slot.velocity(),
             NoteVelocity::new(wide).velocity(),
-            "{message:?} sounds at the widened velocity"
+            "{message:?} sounds at the translated velocity"
         );
     }
 }
@@ -2662,7 +2663,7 @@ fn an_assignable_per_note_index_is_a_whole_byte() {
     assert_eq!(before, after, "index 0xCA is not");
 }
 
-/// MIDI 1.0 controller and pressure values are widened by translation's
+/// MIDI 1.0 controller and pressure values are translated by translation's
 /// scaler, to exact figures: 64 is the centre, 127 is full. A Control Change 1
 /// is the MSB of a 14-bit controller (M1 p.12: its LSB is 0 until a CC 33
 /// says), so the wheel reads the MSB's 14-bit position: `value * 128 / 16383`.
@@ -2677,7 +2678,7 @@ fn midi1_values_scale_to_exact_figures() {
             velocity: U7::of(100),
         },
     )));
-    // M2-115 section 3 widens 0, 64 and 127 to the minimum, centre and maximum words.
+    // M2-115 section 3 upscales 0, 64 and 127 to the minimum, centre and maximum words.
     for (value, word) in [(0, 0), (64, 0x8000_0000_u32), (127, u32::MAX)] {
         synth.apply_midi(ump(Message::Midi1(
             address(1),

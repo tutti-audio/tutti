@@ -11,7 +11,7 @@ use tutti_ump::{MidiChannel, NoteKeyEvent, NoteVelocity, U7};
 fn note_at(note: u8, offset: usize) -> UmpAt {
     at(
         offset,
-        // 7-bit velocity 100, widened (M2-115).
+        // 7-bit velocity 100, upscaled (M2-115).
         midi::note_on(
             MidiChannel::FIRST,
             note,

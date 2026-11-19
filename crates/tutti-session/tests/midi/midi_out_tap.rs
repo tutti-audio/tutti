@@ -55,7 +55,7 @@ fn rig(wire: &Wire) -> Session {
         .unwrap()
         .sync_controls
         .messages()
-        .set(tutti_midi_runtime::SyncMessages {
+        .store(tutti_midi_runtime::SyncMessages {
             clock: true,
             ..tutti_midi_runtime::SyncMessages::OFF
         });
@@ -235,7 +235,7 @@ fn a_clip_fed_to_a_sinks_node_arrives_on_its_frames() {
         .unwrap()
         .sync_controls
         .messages()
-        .set(tutti_midi_runtime::SyncMessages::OFF);
+        .store(tutti_midi_runtime::SyncMessages::OFF);
     let out = s.midi_sink(&"out").expect("loaded");
     let (clip, _) = s.graph().add(MidiClipNode::new(note(
         60,
