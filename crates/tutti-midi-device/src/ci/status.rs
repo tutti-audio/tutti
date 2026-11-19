@@ -79,7 +79,7 @@ macro_rules! status_message {
                 self.message.encode(&mut text);
                 // The length is a 14-bit field; the text of a message we hold
                 // is at most 103 bytes, and one read from a peer fits it.
-                let len = U14::from_len(text.len()).unwrap_or(U14::MAX);
+                let len = U14::saturating_from_len(text.len());
                 out.extend(len.to_le7());
                 out.extend(text.into_iter().take(usize::from(len.get())));
             }

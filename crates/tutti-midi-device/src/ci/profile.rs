@@ -349,11 +349,7 @@ impl ProfileLists {
     pub(crate) fn encode_body(&self, out: &mut impl Extend<u8>) {
         for list in [&self.enabled, &self.disabled] {
             // A `ProfileList` holds its length to 14 bits.
-            out.extend(
-                U14::from_len(list.as_slice().len())
-                    .expect("a `ProfileList` holds its length to 14 bits")
-                    .to_le7(),
-            );
+            out.extend(U14::saturating_from_len(list.as_slice().len()).to_le7());
             for id in list.as_slice() {
                 out.extend(id.to_bytes());
             }

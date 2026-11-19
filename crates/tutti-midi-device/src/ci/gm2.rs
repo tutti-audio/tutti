@@ -16,7 +16,7 @@
 //! on or off by them reports the change with Profile Enabled or Disabled
 //! (M2-118 §3.2.1), which is the device's side.
 
-use tutti_ump::MidiChannel;
+use tutti_ump::{GroupSpan, MidiChannel};
 
 use super::{CiDeviceId, ProfileId, ProfileState, ProfileTable};
 
@@ -39,14 +39,11 @@ tutti_units::ranged! {
 }
 
 impl Gm2ChannelCount {
-    /// The number of Groups the Channels span.
+    /// The Groups the Channels span: one for each set of 16.
     #[must_use]
-    pub fn groups(self) -> u8 {
-        // The count is at most 256, so the Groups are at most 16.
-        match u8::try_from(self.get() / 16) {
-            Ok(groups) => groups,
-            Err(_) => unreachable!("a Channel count is at most 256"),
-        }
+    pub const fn groups(self) -> GroupSpan {
+        // The count is 16 to 256 in steps of 16, so the Groups are 1 to 16.
+        GroupSpan::of((self.get() / 16) as u8)
     }
 }
 
