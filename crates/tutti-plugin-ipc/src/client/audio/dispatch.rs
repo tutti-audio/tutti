@@ -1118,7 +1118,9 @@ mod tests {
     fn owed_frames_are_taken_in_order_before_the_answer() {
         let (writer, mut replies, _lost) = response_ring();
         let mut channels = BridgeSide::new(
-            Channels::new(SampleRate::SR_48K, std::sync::Arc::default()).0,
+            Channels::new(SampleRate::SR_48K, std::sync::Arc::default())
+                .expect("the channels")
+                .0,
             writer,
         );
         let mut owed = Owed::finishing(Timeouts::default().drain);
@@ -1161,7 +1163,9 @@ mod tests {
     #[test]
     fn a_frame_of_another_kind_lets_an_owed_answer_go() {
         let mut channels = BridgeSide::new(
-            Channels::new(SampleRate::SR_48K, std::sync::Arc::default()).0,
+            Channels::new(SampleRate::SR_48K, std::sync::Arc::default())
+                .expect("the channels")
+                .0,
             response_ring().0,
         );
         let list = || BridgeMessage::ParameterList {

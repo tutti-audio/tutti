@@ -648,8 +648,8 @@ fn a_listener_hears_the_crash_with_its_cause() {
 /// **What the server says while no command waits is heard when it arrives.**
 /// `SetRenderMode` is fire-and-forget: the bridge reads nothing after it. The
 /// mock answers it with a latency change the host never asked for, and the
-/// listener must hear it with no further command sent: the watcher thread tells
-/// the idle bridge, which reads the control connection.
+/// listener must hear it with no further command sent: the idle bridge waits on
+/// the control connection, so it reads it as it arrives.
 #[test]
 fn an_unprompted_event_reaches_the_listener_while_no_command_waits() {
     use parking_lot::Mutex as PlMutex;
@@ -2014,4 +2014,63 @@ fn the_rest_of_a_stalled_state_is_not_the_next_answer() {
         "a late state chunk was read as the parameter list's answer"
     );
     assert!(!mock.bridge.audio().is_crashed());
+}
+
+/// **A control call made while a control reply is owed waits for it** and is
+/// answered after it, in place of failing: a project save must not fail during
+/// an editor open. The server's log shows the second request only after the
+/// first was answered, and each caller gets its own answer.
+#[test]
+fn a_second_control_call_while_a_reply_is_owed_waits_for_it() {
+    let log = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let (seen, seen_rx) = crossbeam_channel::bounded(1);
+    let (release_tx, release) = crossbeam_channel::bounded::<()>(1);
+    let control = {
+        let log = Arc::clone(&log);
+        let first = std::sync::atomic::AtomicBool::new(true);
+        move |msg: HostMessage| match msg {
+            HostMessage::GetParameter { param_id } => {
+                let id = param_id.get();
+                log.lock().unwrap().push(format!("recv {id}"));
+                if first.swap(false, Ordering::SeqCst) {
+                    seen.send(()).expect("the test is listening");
+                    release.recv().expect("the test releases the request");
+                }
+                log.lock().unwrap().push(format!("answer {id}"));
+                Action::Reply(Box::new(BridgeMessage::ParameterValue {
+                    value: Some(Normalized::of(f64::from(id) / 10.0)),
+                }))
+            }
+            _ => Action::Silent,
+        }
+    };
+    let mock = MockServer::start("queued", control);
+    let bridge = Arc::clone(&mock.bridge);
+    let first = std::thread::spawn(move || bridge.audio().parameter(ParamId::new(1)));
+    seen_rx
+        .recv_timeout(NOTICE_TIMEOUT)
+        .expect("the first query reached the server");
+
+    let (about_to_ask, started) = crossbeam_channel::bounded(1);
+    let bridge = Arc::clone(&mock.bridge);
+    let second = std::thread::spawn(move || {
+        about_to_ask.send(()).expect("the test is listening");
+        bridge.audio().parameter(ParamId::new(2))
+    });
+    started.recv().expect("the second caller started");
+
+    release_tx.send(()).expect("the server is waiting");
+    assert_eq!(
+        first.join().expect("the first query's thread"),
+        Some(Normalized::of(0.1))
+    );
+    assert_eq!(
+        second.join().expect("the second query's thread"),
+        Some(Normalized::of(0.2)),
+        "the second call failed or was lost instead of waiting its turn"
+    );
+    assert_eq!(
+        *log.lock().unwrap(),
+        ["recv 1", "answer 1", "recv 2", "answer 2"]
+    );
 }
