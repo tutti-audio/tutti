@@ -18,7 +18,7 @@
 //! record of an open, capturing a loop) is the driver's, before and after.
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use super::cache::StreamPin;
 use super::cells::Cells;
@@ -29,7 +29,7 @@ use super::prefetch::RegionOut;
 use super::status::{Served, StatusCell, StreamFault};
 use crate::Loop;
 use crate::voice::Direction;
-use tutti_rt::{LockExt, Reader, RingFloat};
+use tutti_rt::{Reader, RingFloat};
 use tutti_units::{SampleRate, Samples, SrcRatio};
 
 /// Where a stream is in its life. A closed stream has no record, so there is
@@ -74,16 +74,19 @@ pub(super) struct Record<F: RingFloat> {
     /// Its work panicked: faulted, and removed at the end of the cycle
     /// ([`Streams::reap`]).
     dead: bool,
-    /// The loop the control side asks for, lent on each cycle. Behind a lock
+    /// The loop the control side asks for, lent on each cycle. In a `Mutex`
     /// only so the streamer stays `Sync` (a reader is `Send`, not `Sync`):
-    /// the streamer's thread is its one user, so it is never contended.
+    /// only the streamer's thread reaches it, through `get_mut`, which never
+    /// locks. `tutti_rt::Exclusive` replaces the `Mutex` when it lands.
     looping: Mutex<Reader<Option<Loop>>>,
     /// The loop the stream was last asked for, so a cycle applies a request
-    /// once, when it changes.
+    /// once, when it changes. A stream starts asked for no loop, the value its
+    /// cell opens holding.
     asked_loop: Option<Loop>,
     /// The direction the control side asks for, held as the loop is.
     direction: Mutex<Reader<Direction>>,
-    /// The direction the stream was last asked for.
+    /// The direction the stream was last asked for: forwards, the value its
+    /// cell opens holding.
     asked_direction: Direction,
 }
 
@@ -118,7 +121,11 @@ impl<F: RingFloat> Record<F> {
     /// The loop the control side now asks for, when it differs from the one
     /// last asked. A stream starts asked for no loop.
     pub(super) fn loop_asked(&mut self) -> Option<Option<Loop>> {
-        let ask = *self.looping.lock_recover().lend();
+        let ask = *self
+            .looping
+            .get_mut()
+            .unwrap_or_else(PoisonError::into_inner)
+            .lend();
         (ask != self.asked_loop).then(|| {
             self.asked_loop = ask;
             ask
@@ -128,7 +135,11 @@ impl<F: RingFloat> Record<F> {
     /// The direction the control side now asks for, when it differs from the
     /// one last asked. A stream starts asked for forwards.
     pub(super) fn direction_asked(&mut self) -> Option<Direction> {
-        let ask = *self.direction.lock_recover().lend();
+        let ask = *self
+            .direction
+            .get_mut()
+            .unwrap_or_else(PoisonError::into_inner)
+            .lend();
         (ask != self.asked_direction).then(|| {
             self.asked_direction = ask;
             ask

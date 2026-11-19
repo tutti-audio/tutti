@@ -28,6 +28,7 @@ mod open;
 mod prefetch;
 mod record;
 mod status;
+mod steer;
 mod step;
 mod stream;
 mod thread;
@@ -38,8 +39,8 @@ pub(crate) use cells::Cells;
 pub use command::StreamId;
 pub(crate) use command::StreamerCommand;
 pub(crate) use config::BufferConfig;
-#[cfg(test)]
-pub(crate) use loops::GUARD_FRAMES;
+#[cfg(any(test, feature = "testing"))]
+pub use loops::GUARD_FRAMES;
 #[cfg(test)]
 pub(crate) use loops::RingControl;
 pub(crate) use loops::{Arrangement, RingMap, straight};
@@ -54,10 +55,11 @@ pub(crate) use bell::StreamerSender;
 // and the one failure every stream-control command can report.
 pub use block::Block;
 pub(crate) use block::RingReader;
-pub use control::{StreamFile, StreamerGone};
+pub use control::StreamFile;
 pub use open::{Open, OpenError, Opening, Placement, RefusedPlacement, StreamReader};
 pub(crate) use status::StatusCell;
 pub use status::{StreamFault, StreamPhase, StreamStatus};
+pub use steer::SteerCell;
 pub use stream::Stream;
 pub(crate) use stream::StreamerPort;
 

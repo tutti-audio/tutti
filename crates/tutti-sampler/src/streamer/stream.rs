@@ -1,10 +1,11 @@
-//! [`Stream`], the control side of an open stream, and the port its commands
-//! travel by.
+//! [`Stream`], the control side of an open stream, and the port its close
+//! travels by.
 //!
 //! A stream is addressed by its [`StreamId`], which every command carries; the
 //! streamer ignores an id it no longer holds, so a command can never reach
-//! another stream. Nothing outside this crate names a command:
-//! the control side is the [`Stream`] methods.
+//! another stream. What a stream is asked to play (its loop and direction) is
+//! two [`SteerCell`]s the streamer reads; the only command a stream sends is
+//! the close its drop sends.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -12,17 +13,23 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use super::StreamerSender;
 use super::cells::Cells;
 use super::command::{StreamId, StreamerCommand};
-use super::control::{StreamFile, StreamerGone};
+use super::control::StreamFile;
 use super::loops::RingControl;
 use super::status::{StatusCell, StreamStatus};
+use super::steer::SteerCell;
 use crate::Loop;
 use crate::voice::Direction;
 use tutti_rt::Publisher;
 use tutti_rt::RingFloat;
 
+/// The streamer's queue is closed: its thread has exited (or its streamer was
+/// dropped), so a command was discarded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PortClosed;
+
 /// The way onto one streamer's command queue, cloned into every [`Stream`].
 ///
-/// Private to the crate: the public command surface is the `Stream` methods.
+/// Private to the crate: a stream's drop sends its close through it.
 /// Control threads only: a send waits while the bounded queue is full and
 /// fails once the streamer has gone (every receiver dropped: the thread's on
 /// its exit, a built streamer's on its drop).
@@ -39,8 +46,8 @@ impl<F: RingFloat> StreamerPort<F> {
     /// Queues `cmd` for the streamer. `Ok` means it was *queued*: the streamer
     /// applies it on its own thread, and that outcome is not available
     /// synchronously.
-    pub(crate) fn send(&self, cmd: StreamerCommand<F>) -> Result<(), StreamerGone> {
-        self.tx.send(cmd).map_err(|_| StreamerGone)
+    pub(crate) fn send(&self, cmd: StreamerCommand<F>) -> Result<(), PortClosed> {
+        self.tx.send(cmd).map_err(|_| PortClosed)
     }
 }
 
@@ -91,9 +98,9 @@ pub struct Stream<F: RingFloat> {
     control: Publisher<RingControl<F>>,
     /// The loop asked for, which the streamer reads and applies on its own
     /// thread. The same cell the stream's node steers.
-    looping: Publisher<Option<Loop>>,
+    looping: SteerCell<Option<Loop>>,
     /// The direction asked for, read and applied the same way.
-    direction: Publisher<Direction>,
+    direction: SteerCell<Direction>,
 }
 
 impl<F: RingFloat> std::fmt::Debug for Stream<F> {
@@ -110,8 +117,8 @@ impl<F: RingFloat> Stream<F> {
         cells: Arc<Cells>,
         file: Arc<StreamFile<F>>,
         control: Publisher<RingControl<F>>,
-        looping: Publisher<Option<Loop>>,
-        direction: Publisher<Direction>,
+        looping: SteerCell<Option<Loop>>,
+        direction: SteerCell<Direction>,
     ) -> Self {
         Self {
             id,
@@ -186,8 +193,9 @@ impl<F: RingFloat> Stream<F> {
     /// The cell holding the loop the stream plays (its frames index the file,
     /// not the engine's rate): `None` plays once.
     ///
-    /// The streamer lends the cell on each of its cycles and applies a change
-    /// there, within its backstop when nothing else rings it. A change near
+    /// A publish rings the streamer's bell, and the streamer reads the cell
+    /// at the start of its next cycle and applies a change there, even when
+    /// it was parked with nothing else to do. A change near
     /// the playhead is heard about 256 frames past the block being played,
     /// crossfaded over the stream's seek crossfade
     /// (`DiskStreamerConfig::seek_crossfade_frames`) from what the old loop
@@ -200,7 +208,7 @@ impl<F: RingFloat> Stream<F> {
     /// hand publishes into it, from the control thread, and reclaims it
     /// ([`reclaim`](Self::reclaim)).
     #[must_use]
-    pub fn looping_cell(&self) -> &Publisher<Option<Loop>> {
+    pub fn looping_cell(&self) -> &SteerCell<Option<Loop>> {
         &self.looping
     }
 
@@ -208,12 +216,12 @@ impl<F: RingFloat> Stream<F> {
     ///
     /// Reverse reads the file mirrored and ignores the loop, as the memory
     /// tier's reverse does. The streamer turns the ring's mapping on its own
-    /// thread when it takes the change, and the change is heard just past the
+    /// thread when it takes the change (a publish wakes it), and the change is heard just past the
     /// block the voice is in, crossfaded (a loop change's rule). The
     /// direction is published with the ring's control: the voice and a fork
     /// read it from there, and nothing polls a flag.
     #[must_use]
-    pub fn direction_cell(&self) -> &Publisher<Direction> {
+    pub fn direction_cell(&self) -> &SteerCell<Direction> {
         &self.direction
     }
 
@@ -253,8 +261,8 @@ impl<F: RingFloat> Stream<F> {
                 ),
                 None,
             )),
-            Publisher::new(None),
-            Publisher::new(Direction::Forward),
+            SteerCell::new(None),
+            SteerCell::new(Direction::Forward),
         )
     }
 }

@@ -217,6 +217,41 @@ fn a_published_request_is_taken_once_when_it_changes() {
     assert_eq!(rec.direction_asked(), Some(Direction::Forward));
 }
 
+/// **A request published before the stream is live is taken when it goes
+/// live**: a cycle leaves an `Opening` stream's loop and direction alone, and
+/// takes them, once, in the cycle after its reader is delivered.
+#[test]
+fn a_request_published_before_the_stream_is_live_is_taken_once_it_is() {
+    use crate::streamer::config::BufferConfig;
+    use crate::streamer::handlers::{Local, follow_steering};
+    let config = BufferConfig::default();
+    let (reports, _queue) = crossbeam_channel::bounded(8);
+    let mut local = Local::<f32>::new(config.chunk_size, reports.into());
+    let id = StreamId::of(1);
+    let (rec, _ring, _pos, _status, looping, direction) =
+        record_with_cells(id, PathBuf::from("t.wav"), 1024, 1u16);
+    let _ = step(&mut local.streams, Cmd::Open(Box::new(rec)));
+    looping.publish(ask(0, 10));
+    direction.publish(Direction::Reverse);
+
+    follow_steering(&config, &mut local);
+    let held = local.streams.get(id).unwrap();
+    assert_eq!(
+        (held.asked_loop, held.asked_direction),
+        (None, Direction::Forward),
+        "an opening stream takes nothing"
+    );
+
+    let _ = step(&mut local.streams, Cmd::Opened(id));
+    follow_steering(&config, &mut local);
+    let held = local.streams.get(id).unwrap();
+    assert_eq!(
+        (held.asked_loop, held.asked_direction),
+        (ask(0, 10), Direction::Reverse),
+        "taken once it is live"
+    );
+}
+
 /// A rate event re-derives each stream's own ratio from its own file's rate:
 /// two streams at different file rates, one session rate, two ratios; and the
 /// ratio is the cell the stream's voice reads.

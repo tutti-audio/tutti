@@ -221,14 +221,14 @@ pub(crate) mod streamer;
 
 pub use streamer::{
     Block, DiskStreamer, DiskStreamerConfig, Open, OpenError, Opening, Placement, RefusedPlacement,
-    Running, Stream, StreamFault, StreamFile, StreamId, StreamPhase, StreamReader, StreamStatus,
-    StreamerGone,
+    Running, SteerCell, Stream, StreamFault, StreamFile, StreamId, StreamPhase, StreamReader,
+    StreamStatus,
 };
 
 // The hand-driven streamer cycle, alongside `DiskStreamer::by_hand`: its driver
 // type and its verdict.
 #[cfg(any(test, feature = "testing"))]
-pub use streamer::{ByHand, StepOutcome};
+pub use streamer::{ByHand, GUARD_FRAMES, StepOutcome};
 
 // Header-only probe: what a file is, and whether *this build's* streamer can
 // stream it. Public because the tier decision is the caller's or the

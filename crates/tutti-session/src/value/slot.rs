@@ -844,6 +844,24 @@ impl<T: Copy + PartialEq + Send + Sync + 'static> Held for tutti_rt::Publisher<T
     }
 }
 
+/// A sampler voice's loop or direction cell: written through the cell, which
+/// publishes when the value differs and wakes the streamer of a streamed voice.
+#[cfg(feature = "sampler")]
+impl<T: Copy + PartialEq + Send + Sync + 'static> Held for tutti_sampler::SteerCell<T> {
+    type Value = T;
+
+    fn current(&self) -> T {
+        *tutti_sampler::SteerCell::current(self)
+    }
+
+    fn replace(&self, value: &T) -> bool {
+        if *tutti_sampler::SteerCell::current(self) != *value {
+            self.publish(*value);
+        }
+        true
+    }
+}
+
 /// The click's level.
 pub(crate) struct ClickVolumeSlot(pub Arc<ClickSettings>);
 

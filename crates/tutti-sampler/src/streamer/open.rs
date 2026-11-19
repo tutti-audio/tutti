@@ -27,6 +27,7 @@ use super::control::StreamFile;
 use super::loops::RingControl;
 use super::prefetch::SharedReader;
 use super::status::StatusCell;
+use super::steer::SteerCell;
 use super::stream::{Stream, StreamerPort};
 use crate::voice::Direction;
 use crate::voice::interp::Place;
@@ -131,8 +132,8 @@ pub(crate) struct Opened<F: RingFloat> {
     pub(crate) control: Publisher<RingControl<F>>,
     /// The loop and direction the control side asks for, which the streamer
     /// reads: the handle holds the publishing ends.
-    pub(crate) looping: Publisher<Option<Loop>>,
-    pub(crate) direction: Publisher<Direction>,
+    pub(crate) looping: SteerCell<Option<Loop>>,
+    pub(crate) direction: SteerCell<Direction>,
     pub(crate) place: Place<F>,
     pub(crate) width: ChannelLayout,
     /// What the reader rings when its ring wants the streamer.

@@ -27,13 +27,14 @@ use super::open::{OpenError, Opened};
 use super::prefetch::RegionBuffer;
 use super::record::{Cmd, Record, Streams, step};
 use super::status::StatusCell;
+use super::steer::SteerCell;
 use crate::Loop;
 use crate::nonempty;
 use crate::voice::Direction;
 use crate::voice::interp::Place;
 use crate::voice_width;
 use tutti_buffers::ChannelLayout;
-use tutti_rt::{Publisher, RingFloat};
+use tutti_rt::RingFloat;
 
 /// Arc'd handles shared between the control side and the streamer loop.
 /// `Clone` is cheap — every field is an `Arc`.
@@ -437,8 +438,8 @@ fn build_stream<F: RingFloat>(
     let control = ring.control_cell();
     // The loop and direction the control side asks for: the record reads
     // them, the stream's handle (and the voice node, for a node) publishes.
-    let looping = Publisher::new(None::<Loop>);
-    let direction = Publisher::new(Direction::Forward);
+    let looping = SteerCell::ringing(None::<Loop>, Arc::clone(&shared.bell));
+    let direction = SteerCell::ringing(Direction::Forward, Arc::clone(&shared.bell));
     let record = Record::new(
         producer,
         Arc::clone(&cells),

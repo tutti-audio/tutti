@@ -48,7 +48,7 @@ const BODY_MAX_FRAMES: usize = 1 << 16;
 
 /// How far past the in-flight block a rewrite may start, in frames: room for
 /// the streamer to rewrite before the reader gets there.
-pub(crate) const GUARD_FRAMES: u64 = 256;
+pub const GUARD_FRAMES: u64 = 256;
 
 /// Frames of old material a [`FadeRecord`] carries past the fade itself: what
 /// the reader plays if it reaches the switch before the rewrite has.

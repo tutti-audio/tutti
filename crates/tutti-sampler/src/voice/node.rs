@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use crate::lanes::{BlockScratch, UNPREPARED_FRAMES};
 use crate::nonempty;
-use crate::streamer::Stream;
+use crate::streamer::{SteerCell, Stream};
 use crate::stretch;
 use tutti_buffers::MAX_CHANNELS;
 
@@ -157,9 +157,9 @@ impl<F: SamplerFloat> VoiceNode<F> {
             applied: Steering::default(),
             window: Publisher::new(window).reader(),
             applied_window: window,
-            looping: Publisher::new(play.loop_).reader(),
+            looping: SteerCell::new(play.loop_).reader(),
             applied_loop: play.loop_,
-            direction: Publisher::new(play.direction).reader(),
+            direction: SteerCell::new(play.direction).reader(),
             applied_direction: play.direction,
             stream: None,
             gain,
@@ -231,7 +231,7 @@ impl<F: SamplerFloat> VoiceNode<F> {
                 stream.looping_cell().clone(),
                 stream.direction_cell().clone(),
             ),
-            None => (Publisher::new(play.loop_), Publisher::new(play.direction)),
+            None => (SteerCell::new(play.loop_), SteerCell::new(play.direction)),
         };
         self.looping = looping.reader();
         self.applied_loop = *looping.current();
@@ -526,8 +526,8 @@ struct VoiceNodeFork<F: SamplerFloat> {
     steering: SteeringCell,
     /// The live node's window, loop and direction cells, read the same way.
     window: Publisher<Option<VoiceWindow>>,
-    looping: Publisher<Option<Loop>>,
-    direction: Publisher<Direction>,
+    looping: SteerCell<Option<Loop>>,
+    direction: SteerCell<Direction>,
     /// The node's params: a fork starts from the gain cell, which holds the
     /// gain last set (a modulation lane sends its composite to the
     /// port and never writes the cell).
