@@ -9,7 +9,7 @@ use tutti_units::{At, Beat, Bpm, Frame, Samples};
 
 fn offline() -> Session {
     Session::builder()
-        .max_block(MaxBlock::of(Samples(1_000)))
+        .max_block(MaxBlock::of(Samples::new(1_000)))
         .build()
         .expect("builds")
 }
@@ -64,7 +64,7 @@ fn a_handle_stop_halts_a_session_play() {
 fn a_handle_refuses_a_beat_play_while_stopped() {
     let s = offline();
     let handle = s.transport_handle();
-    let refused = std::thread::spawn(move || handle.schedule(Beat(1.0), MotionEvent::Play))
+    let refused = std::thread::spawn(move || handle.schedule(Beat::new(1.0), MotionEvent::Play))
         .join()
         .unwrap();
     assert!(matches!(
@@ -72,7 +72,7 @@ fn a_handle_refuses_a_beat_play_while_stopped() {
         Err(TimedError::BeatWhileStopped(MotionEvent::Play))
     ));
     assert!(matches!(
-        s.schedule(Beat(1.0), MotionEvent::Play),
+        s.schedule(Beat::new(1.0), MotionEvent::Play),
         Err(TimedError::BeatWhileStopped(MotionEvent::Play))
     ));
 }
@@ -85,10 +85,10 @@ fn the_session_and_its_handles_share_the_rolling_record() {
     let s = offline();
     let handle = s.transport_handle();
     s.play().unwrap();
-    handle.schedule(Beat(4.0), MotionEvent::Play).unwrap();
+    handle.schedule(Beat::new(4.0), MotionEvent::Play).unwrap();
     handle.stop(FadeOut::Immediate).unwrap();
     assert!(matches!(
-        s.schedule(Beat(4.0), MotionEvent::Play),
+        s.schedule(Beat::new(4.0), MotionEvent::Play),
         Err(TimedError::BeatWhileStopped(_))
     ));
 }
@@ -101,12 +101,12 @@ fn a_next_block_schedule_updates_the_rolling_record() {
     let s = offline();
     let handle = s.transport_handle();
     handle.schedule(At::NextBlock, MotionEvent::Play).unwrap();
-    assert!(handle.schedule(Beat(4.0), MotionEvent::Play).is_ok());
+    assert!(handle.schedule(Beat::new(4.0), MotionEvent::Play).is_ok());
     handle
         .schedule(At::NextBlock, MotionEvent::stop_unfaded())
         .unwrap();
     assert!(matches!(
-        handle.schedule(Beat(5.0), MotionEvent::Play),
+        handle.schedule(Beat::new(5.0), MotionEvent::Play),
         Err(TimedError::BeatWhileStopped(MotionEvent::Play))
     ));
 }
@@ -124,7 +124,7 @@ fn a_stop_sent_after_a_rendered_play_refuses_a_beat_play() {
     let handle = s.transport_handle();
     handle.stop(FadeOut::Immediate).unwrap();
     assert!(matches!(
-        handle.schedule(Beat(8.0), MotionEvent::Play),
+        handle.schedule(Beat::new(8.0), MotionEvent::Play),
         Err(TimedError::BeatWhileStopped(MotionEvent::Play))
     ));
 }
@@ -139,12 +139,12 @@ fn a_play_timed_at_a_frame_counts_as_rolling_once_rendered() {
         .schedule(Frame::new(1_000), MotionEvent::Play)
         .unwrap();
     assert!(matches!(
-        handle.schedule(Beat(8.0), MotionEvent::Play),
+        handle.schedule(Beat::new(8.0), MotionEvent::Play),
         Err(TimedError::BeatWhileStopped(MotionEvent::Play))
     ));
     render(&s, 3);
     assert!(s.playhead().playing());
-    assert!(handle.schedule(Beat(8.0), MotionEvent::Play).is_ok());
+    assert!(handle.schedule(Beat::new(8.0), MotionEvent::Play).is_ok());
 }
 
 /// **A handle reads and cancels the timed commands in flight.**
@@ -167,7 +167,7 @@ fn a_handle_counts_and_cancels_scheduled_commands() {
 fn a_handle_reads_the_loop_region() {
     let mut s = offline();
     let handle = s.transport_handle();
-    let range = LoopRange::try_from(Beat(0.0)..Beat(1.0)).unwrap();
+    let range = LoopRange::try_from(Beat::new(0.0)..Beat::new(1.0)).unwrap();
     let looping = handle.looping();
     s.set(looping.to(LoopRegion::new(range, true))).unwrap();
     let _published = s.update();

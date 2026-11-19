@@ -19,7 +19,7 @@ use crate::mod_lanes::{master, render, rig, settle};
 fn session() -> Session {
     Session::builder()
         .outputs(tutti_buffers::ChannelLayout::STEREO)
-        .max_block(MaxBlock::of(Samples(256)))
+        .max_block(MaxBlock::of(Samples::new(256)))
         .build()
         .expect("builds")
 }
@@ -32,19 +32,19 @@ fn a_backwards_or_nan_range_is_refused_and_declares_nothing() {
     let mut s = session();
     let (lp, _) = s.graph().add(SvfFilterNode::<f32>::new(
         SvfType::LowPass,
-        Hz(1_000.0),
-        Q(0.7),
+        Hz::new(1_000.0),
+        Q::new(0.7),
     ));
     let mut m = s.mods_mut();
     assert_eq!(
-        m.range(lp.cutoff(), Hz(4_000.0)..Hz(100.0)),
+        m.range(lp.cutoff(), Hz::new(4_000.0)..Hz::new(100.0)),
         Err(DeclarationError::Backwards {
             min: 4_000.0,
             max: 100.0
         })
     );
     assert_eq!(
-        m.range(lp.cutoff(), Hz(f64::NAN)..Hz(100.0)),
+        m.range(lp.cutoff(), Hz::new(f64::NAN)..Hz::new(100.0)),
         Err(DeclarationError::NotFinite)
     );
     assert_eq!(
@@ -62,7 +62,10 @@ fn a_backwards_or_nan_range_is_refused_and_declares_nothing() {
     ));
 
     // A range of one point is a range.
-    assert_eq!(m.range(lp.cutoff(), Hz(500.0)..Hz(500.0)), Ok(true));
+    assert_eq!(
+        m.range(lp.cutoff(), Hz::new(500.0)..Hz::new(500.0)),
+        Ok(true)
+    );
     assert!(
         m.route(RouteSpec::new(src, lp.cutoff(), Depth::of(0.5)))
             .is_ok()
@@ -78,11 +81,12 @@ fn a_typed_range_declares_the_target_an_untyped_ref_names() {
     let mut s = session();
     let (lp, _) = s.graph().add(SvfFilterNode::<f32>::new(
         SvfType::LowPass,
-        Hz(1_000.0),
-        Q(0.7),
+        Hz::new(1_000.0),
+        Q::new(0.7),
     ));
     let mut m = s.mods_mut();
-    m.range(lp.cutoff(), Hz(100.0)..Hz(4_000.0)).unwrap();
+    m.range(lp.cutoff(), Hz::new(100.0)..Hz::new(4_000.0))
+        .unwrap();
     let src = m.macro_(0.0);
     let same = ParamRef::unit(lp.erase(), tutti_units::UnitParam::Cutoff);
     assert_eq!(ParamRef::from(lp.cutoff()), same);
@@ -93,9 +97,9 @@ fn a_typed_range_declares_the_target_an_untyped_ref_names() {
 
     // A mix's range is in `Mix`: backwards is refused there too.
     let mix = tutti_session::MixRef::of(NodeKey(1));
-    assert_eq!(m.range(mix, Mix(0.0)..Mix(1.0)), Ok(true));
+    assert_eq!(m.range(mix, Mix::new(0.0)..Mix::new(1.0)), Ok(true));
     assert!(matches!(
-        m.range(mix, Mix(1.0)..Mix(0.0)),
+        m.range(mix, Mix::new(1.0)..Mix::new(0.0)),
         Err(DeclarationError::Backwards { .. })
     ));
 }
@@ -110,10 +114,12 @@ fn a_typed_range_keeps_bounds_f32_cannot_hold() {
     let mut s = session();
     let (lp, _) = s.graph().add(SvfFilterNode::<f32>::new(
         SvfType::LowPass,
-        Hz(1_000.0),
-        Q(0.7),
+        Hz::new(1_000.0),
+        Q::new(0.7),
     ));
-    s.mods_mut().range(lp.cutoff(), Hz(lo)..Hz(hi)).unwrap();
+    s.mods_mut()
+        .range(lp.cutoff(), Hz::new(lo)..Hz::new(hi))
+        .unwrap();
     assert_eq!(s.mods().range_of(lp.cutoff()), Some(lo..=hi));
 }
 
@@ -125,21 +131,24 @@ fn a_second_declaration_keeps_the_range_the_target_holds() {
     let mut s = session();
     let (lp, _) = s.graph().add(SvfFilterNode::<f32>::new(
         SvfType::LowPass,
-        Hz(1_000.0),
-        Q(0.7),
+        Hz::new(1_000.0),
+        Q::new(0.7),
     ));
     assert_eq!(
-        s.mods_mut().range(lp.cutoff(), Hz(100.0)..Hz(4_000.0)),
+        s.mods_mut()
+            .range(lp.cutoff(), Hz::new(100.0)..Hz::new(4_000.0)),
         Ok(true)
     );
-    s.set(lp.cutoff().range().to(Hz(200.0)..Hz(300.0))).unwrap();
+    s.set(lp.cutoff().range().to(Hz::new(200.0)..Hz::new(300.0)))
+        .unwrap();
     assert_eq!(
-        s.mods_mut().range(lp.cutoff(), Hz(100.0)..Hz(4_000.0)),
+        s.mods_mut()
+            .range(lp.cutoff(), Hz::new(100.0)..Hz::new(4_000.0)),
         Ok(false)
     );
     assert_eq!(
         s.get(lp.cutoff().range()).unwrap(),
-        Hz(200.0)..Hz(300.0),
+        Hz::new(200.0)..Hz::new(300.0),
         "the target's value stands"
     );
     assert_eq!(s.mods().range_of(lp.cutoff()), Some(200.0..=300.0));
@@ -154,34 +163,41 @@ fn a_range_write_is_refused_at_the_call() {
     let mut s = session();
     let (lp, _) = s.graph().add(SvfFilterNode::<f32>::new(
         SvfType::LowPass,
-        Hz(1_000.0),
-        Q(0.7),
+        Hz::new(1_000.0),
+        Q::new(0.7),
     ));
-    let undeclared = s.set(lp.cutoff().range().to(Hz(1.0)..Hz(2.0))).unwrap_err();
+    let undeclared = s
+        .set(lp.cutoff().range().to(Hz::new(1.0)..Hz::new(2.0)))
+        .unwrap_err();
     assert_eq!(undeclared.kind, ValueErrorKind::NoSuchTarget);
 
     s.mods_mut()
-        .range(lp.cutoff(), Hz(100.0)..Hz(4_000.0))
+        .range(lp.cutoff(), Hz::new(100.0)..Hz::new(4_000.0))
         .unwrap();
     for (range, why) in [
-        (Hz(4_000.0)..Hz(100.0), SetRefusal::Backwards),
-        (Hz(f64::NAN)..Hz(100.0), SetRefusal::NotFinite),
-        (Hz(0.0)..Hz(f64::INFINITY), SetRefusal::NotFinite),
+        (Hz::new(4_000.0)..Hz::new(100.0), SetRefusal::Backwards),
+        (Hz::new(f64::NAN)..Hz::new(100.0), SetRefusal::NotFinite),
+        (Hz::new(0.0)..Hz::new(f64::INFINITY), SetRefusal::NotFinite),
     ] {
         let refused = s.set(lp.cutoff().range().to(range)).unwrap_err();
         assert_eq!(refused.kind, ValueErrorKind::Refused(why));
     }
     assert_eq!(
         s.get(lp.cutoff().range()).unwrap(),
-        Hz(100.0)..Hz(4_000.0),
+        Hz::new(100.0)..Hz::new(4_000.0),
         "nothing landed"
     );
 
     let mix = tutti_session::MixRef::of(NodeKey(1));
-    s.mods_mut().range(mix, Mix(0.0)..Mix(1.0)).unwrap();
-    s.set(RangeTarget::of(mix).to(Mix(0.25)..Mix(0.75)))
+    s.mods_mut()
+        .range(mix, Mix::new(0.0)..Mix::new(1.0))
         .unwrap();
-    assert_eq!(s.get(RangeTarget::of(mix)).unwrap(), Mix(0.25)..Mix(0.75));
+    s.set(RangeTarget::of(mix).to(Mix::new(0.25)..Mix::new(0.75)))
+        .unwrap();
+    assert_eq!(
+        s.get(RangeTarget::of(mix)).unwrap(),
+        Mix::new(0.25)..Mix::new(0.75)
+    );
 }
 
 /// **A narrowed range bounds the effective value and leaves the base alone.** A
@@ -195,7 +211,8 @@ fn a_narrowed_range_bounds_the_effective_value_and_not_the_base() {
     let (probe, _) = s.graph().add(ProbeUnit::new(500.0));
     master(&mut s, &[probe.erase()]);
     let mut m = s.mods_mut();
-    m.range(probe.cutoff(), Hz(0.0)..Hz(1_000.0)).unwrap();
+    m.range(probe.cutoff(), Hz::new(0.0)..Hz::new(1_000.0))
+        .unwrap();
     let source = m.macro_(0.5);
     m.route(RouteSpec::new(source, probe.cutoff(), Depth::of(0.4)))
         .unwrap();
@@ -206,22 +223,25 @@ fn a_narrowed_range_bounds_the_effective_value_and_not_the_base() {
     };
     near(tail(&mut side), 700.0);
 
-    s.set(probe.cutoff().range().to(Hz(0.0)..Hz(600.0)))
+    s.set(probe.cutoff().range().to(Hz::new(0.0)..Hz::new(600.0)))
         .unwrap();
-    assert_eq!(s.get(probe.cutoff().range()).unwrap(), Hz(0.0)..Hz(600.0));
+    assert_eq!(
+        s.get(probe.cutoff().range()).unwrap(),
+        Hz::new(0.0)..Hz::new(600.0)
+    );
     settle(&mut s);
     near(tail(&mut side), 600.0);
     assert_eq!(
         s.get(probe.cutoff()).unwrap(),
-        Hz(500.0),
+        Hz::new(500.0),
         "the base is not the range's"
     );
 
-    s.set(probe.cutoff().range().to(Hz(0.0)..Hz(1_000.0)))
+    s.set(probe.cutoff().range().to(Hz::new(0.0)..Hz::new(1_000.0)))
         .unwrap();
     settle(&mut s);
     near(tail(&mut side), 700.0);
-    assert_eq!(s.get(probe.cutoff()).unwrap(), Hz(500.0));
+    assert_eq!(s.get(probe.cutoff()).unwrap(), Hz::new(500.0));
 }
 
 /// **A range edit sends no plan and republishes no program**: it is a store
@@ -232,7 +252,8 @@ fn a_range_write_republishes_no_program() {
     let (probe, _) = s.graph().add(ProbeUnit::new(500.0));
     master(&mut s, &[probe.erase()]);
     let mut m = s.mods_mut();
-    m.range(probe.cutoff(), Hz(0.0)..Hz(1_000.0)).unwrap();
+    m.range(probe.cutoff(), Hz::new(0.0)..Hz::new(1_000.0))
+        .unwrap();
     let source = m.macro_(0.5);
     m.route(RouteSpec::new(source, probe.cutoff(), Depth::of(0.4)))
         .unwrap();
@@ -247,7 +268,7 @@ fn a_range_write_republishes_no_program() {
     };
     let before = lane(&s).program();
     assert_eq!(lane(&s).range(), (0.0, 1_000.0));
-    s.set(probe.cutoff().range().to(Hz(0.0)..Hz(600.0)))
+    s.set(probe.cutoff().range().to(Hz::new(0.0)..Hz::new(600.0)))
         .unwrap();
     settle(&mut s);
     assert_eq!(
@@ -265,11 +286,12 @@ fn a_range_and_a_depth_of_a_removed_node_are_refused_at_the_call() {
     let mut s = session();
     let (lp, _) = s.graph().add(SvfFilterNode::<f32>::new(
         SvfType::LowPass,
-        Hz(1_000.0),
-        Q(0.7),
+        Hz::new(1_000.0),
+        Q::new(0.7),
     ));
     let mut m = s.mods_mut();
-    m.range(lp.cutoff(), Hz(100.0)..Hz(4_000.0)).unwrap();
+    m.range(lp.cutoff(), Hz::new(100.0)..Hz::new(4_000.0))
+        .unwrap();
     let source = m.macro_(0.0);
     m.route(RouteSpec::new(source, lp.cutoff(), Depth::of(0.5)))
         .unwrap();
@@ -277,7 +299,7 @@ fn a_range_and_a_depth_of_a_removed_node_are_refused_at_the_call() {
     s.set(depth.to(Depth::of(0.25))).unwrap();
 
     s.graph().remove(lp).unwrap();
-    let range = s.set(lp.cutoff().range().to(Hz(1.0)..Hz(2.0)));
+    let range = s.set(lp.cutoff().range().to(Hz::new(1.0)..Hz::new(2.0)));
     assert_eq!(range.unwrap_err().kind, ValueErrorKind::NoSuchTarget);
     let depth = s.set(depth.to(Depth::of(0.1)));
     assert_eq!(depth.unwrap_err().kind, ValueErrorKind::NoSuchTarget);

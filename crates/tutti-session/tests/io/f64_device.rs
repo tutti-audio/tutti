@@ -40,7 +40,7 @@ fn an_f64_device_session_renders_a_figure_f32_rounds_away_to_its_stream() {
     s.set(gain.volume().to(Amplitude::new(0.75))).unwrap();
 
     let block = stream
-        .render_block(Samples(64))
+        .render_block(Samples::new(64))
         .expect("the stream is open");
     assert!(block.iter().all(|&x| x == 0.75 * FINE), "{:?}", &block[..3]);
 }
@@ -69,12 +69,12 @@ fn an_f64_device_session_switches_to_the_timer_and_keeps_rendering_fine() {
         .unwrap()
         .hard();
     let _ = live.update();
-    stream.render_block(Samples(64)).expect("open");
+    stream.render_block(Samples::new(64)).expect("open");
     let mut system = live
         .into_system_clock()
         .unwrap_or_else(|e| panic!("switches: {}", e.error()));
     assert!(
-        stream.render_block(Samples(64)).is_none(),
+        stream.render_block(Samples::new(64)).is_none(),
         "the card's stream stopped"
     );
     system.play().expect("queued");
@@ -82,7 +82,7 @@ fn an_f64_device_session_switches_to_the_timer_and_keeps_rendering_fine() {
     let mut tap = None;
     tutti_fixtures::wait_until("the audio side never took the graph", guard, || {
         let _ = system.update();
-        tap = system.open_heard_tap(Samples(2_048)).unwrap().reader();
+        tap = system.open_heard_tap(Samples::new(2_048)).unwrap().reader();
         tap.is_some()
     });
     let mut tap = tap.expect("opened");
@@ -92,7 +92,7 @@ fn an_f64_device_session_switches_to_the_timer_and_keeps_rendering_fine() {
         let frames = tap
             .pop_into(InterleavedMut::new(&mut heard, tap.layout()).unwrap())
             .unwrap()
-            .0;
+            .get();
         frames > 0 && heard[..frames].iter().all(|&x| x == FINE)
     });
     assert_eq!(system.faults().count(), 0);

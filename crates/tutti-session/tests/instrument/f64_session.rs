@@ -22,7 +22,7 @@ fn session() -> OfflineSession<&'static str, f64> {
     Session::builder()
         .float::<f64>()
         .sample_rate(RATE)
-        .max_block(MaxBlock::of(Samples(BLOCK)))
+        .max_block(MaxBlock::of(Samples::new(BLOCK)))
         .build()
         .expect("an f64 offline session builds")
 }
@@ -50,10 +50,10 @@ fn sine_synth() -> PolySynth<f64> {
         oscillator: OscillatorType::Sine,
         filter: FilterType::None,
         envelope: Adsr {
-            attack: Seconds(0.001),
-            decay: Seconds(0.0),
-            sustain: Amplitude(1.0),
-            release: Seconds(0.05),
+            attack: Seconds::new(0.001),
+            decay: Seconds::new(0.0),
+            sustain: Amplitude::new(1.0),
+            release: Seconds::new(0.05),
         },
         ..SynthConfig::default()
     })

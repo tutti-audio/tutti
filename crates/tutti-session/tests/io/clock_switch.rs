@@ -29,7 +29,7 @@ fn stereo(rate: SampleRate) -> OutputSpec {
 fn system_builder() -> tutti_session::SessionBuilder<tutti_session::SystemClock> {
     Session::builder()
         .sample_rate(SampleRate::SR_48K)
-        .max_block(MaxBlock::of(Samples(BLOCK)))
+        .max_block(MaxBlock::of(Samples::new(BLOCK)))
         .system_clock()
 }
 
@@ -90,8 +90,8 @@ fn a_system_session_switches_to_a_device_and_its_graph_plays_there() {
         .unwrap_or_else(|e| panic!("switches: {}", e.error()));
     assert!(live.device().is_running(), "the card's stream runs");
     let _ = live.update();
-    stream.render_block(Samples(64)).expect("open");
-    let block = stream.render_block(Samples(64)).expect("open");
+    stream.render_block(Samples::new(64)).expect("open");
+    let block = stream.render_block(Samples::new(64)).expect("open");
     assert!(
         block.iter().all(|&x| x == 0.25),
         "the wired constant plays on the card: {:?}",
@@ -110,19 +110,19 @@ fn a_device_session_switches_to_the_timer_and_its_graph_keeps_rendering() {
         .build_device_on(stereo(SampleRate::SR_48K), driver)
         .expect("builds with no device");
     wire_constant(&mut live, 0.25);
-    stream.render_block(Samples(64)).expect("open");
+    stream.render_block(Samples::new(64)).expect("open");
     let mut s = live
         .into_system_clock()
         .unwrap_or_else(|e| panic!("switches: {}", e.error()));
     assert!(
-        stream.render_block(Samples(64)).is_none(),
+        stream.render_block(Samples::new(64)).is_none(),
         "the card's stream stopped"
     );
     play(&s);
     let limit = Instant::now() + Duration::from_secs(10);
     let mut tap = loop {
         let _ = s.update();
-        if let Some(tap) = s.open_heard_tap(Samples(4 * BLOCK)).unwrap().reader() {
+        if let Some(tap) = s.open_heard_tap(Samples::new(4 * BLOCK)).unwrap().reader() {
             break tap;
         }
         assert!(
@@ -137,7 +137,7 @@ fn a_device_session_switches_to_the_timer_and_its_graph_keeps_rendering() {
         let frames = tap
             .pop_into(InterleavedMut::new(&mut heard, tap.layout()).unwrap())
             .unwrap()
-            .0;
+            .get();
         frames > 0 && heard[..2 * frames].iter().all(|&x| x == 0.25)
     });
     assert_eq!(s.faults().count(), 0);
@@ -227,7 +227,10 @@ fn a_graph_that_no_longer_compiles_fails_the_switch_and_the_timer_runs_again() {
     assert!(!stream.is_open(), "the card never started");
     let mut s = err.into_session();
     assert_eq!(s.stream_spec().sample_rate, SampleRate::SR_48K);
-    assert_eq!(s.stream_spec().quantum, Some(MaxBlock::of(Samples(BLOCK))));
+    assert_eq!(
+        s.stream_spec().quantum,
+        Some(MaxBlock::of(Samples::new(BLOCK)))
+    );
     wait_past(&mut s, before);
 }
 
@@ -302,9 +305,9 @@ fn the_transport_resumes_where_the_last_block_ended_going_to_the_timer() {
     let _ = live.update();
     play(&live);
     for _ in 0..5 {
-        stream.render_block(Samples(BLOCK)).expect("open");
+        stream.render_block(Samples::new(BLOCK)).expect("open");
     }
-    let timer_block = tutti_session::LIVE_MAX_BLOCK.samples().0 as u64;
+    let timer_block = tutti_session::LIVE_MAX_BLOCK.samples().get() as u64;
     // The playhead reads the frame the last block started at.
     let ended = frame(&live) + BLOCK as u64;
     assert_eq!(ended, 5 * BLOCK as u64, "five card blocks of play");
@@ -328,7 +331,7 @@ fn the_transport_resumes_where_the_last_block_ended_going_to_the_device() {
     let live = s
         .into_device_on(stereo(SampleRate::SR_48K), driver)
         .unwrap_or_else(|e| panic!("switches: {}", e.error()));
-    stream.render_block(Samples(64)).expect("open");
+    stream.render_block(Samples::new(64)).expect("open");
     let started = frame(&live);
     assert_eq!(
         started % BLOCK as u64,
@@ -496,7 +499,7 @@ fn a_card_that_fails_to_open_after_the_stop_returns_the_session_running_on_the_t
     assert_eq!(stream.channels, ChannelLayout::STEREO);
     assert_eq!(
         stream.quantum,
-        Some(MaxBlock::of(Samples(BLOCK))),
+        Some(MaxBlock::of(Samples::new(BLOCK))),
         "the old block"
     );
     wait_past(&mut s, before);
@@ -531,11 +534,11 @@ fn a_timer_that_fails_to_start_returns_the_session_running_on_the_card() {
         "the spec it had, block included"
     );
     assert!(
-        again.render_block(Samples(64)).is_some(),
+        again.render_block(Samples::new(64)).is_some(),
         "the card renders blocks again"
     );
     assert!(
-        stream.render_block(Samples(64)).is_none(),
+        stream.render_block(Samples::new(64)).is_none(),
         "the old stream is gone"
     );
     let _ = live.update();

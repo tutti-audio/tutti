@@ -265,7 +265,7 @@ impl<F: Float> AudioSide<F> {
                             F::ZERO
                         };
                         let (go, gn) = if f.done.get() + i < f.fade.duration.get() {
-                            fade_gains::<F>(f.fade.law, f.done + Samples(i), f.fade.duration)
+                            fade_gains::<F>(f.fade.law, f.done + Samples::new(i), f.fade.duration)
                         } else {
                             (F::ZERO, F::ONE)
                         };

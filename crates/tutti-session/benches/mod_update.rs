@@ -30,15 +30,15 @@ const UPDATES: usize = 2_000;
 
 fn scene(n: usize, modulated: bool) -> (Session, Vec<Key<SvfFilterNode<f32>>>) {
     let mut s = Session::builder()
-        .max_block(MaxBlock::of(Samples(512)))
+        .max_block(MaxBlock::of(Samples::new(512)))
         .build()
         .expect("builds");
     let mut filters = Vec::with_capacity(n);
     for _ in 0..n {
         let (f, _) = s.graph().add(SvfFilterNode::<f32>::new(
             SvfType::LowPass,
-            Hz(1_000.0),
-            Q(0.7),
+            Hz::new(1_000.0),
+            Q::new(0.7),
         ));
         if let Some(&prev) = filters.last() {
             s.graph()
@@ -55,7 +55,7 @@ fn scene(n: usize, modulated: bool) -> (Session, Vec<Key<SvfFilterNode<f32>>>) {
         let mut m = s.mods_mut();
         for (i, &f) in filters.iter().enumerate() {
             let cutoff = f.cutoff();
-            m.range(cutoff, Hz(20.0)..Hz(20_000.0)).unwrap();
+            m.range(cutoff, Hz::new(20.0)..Hz::new(20_000.0)).unwrap();
             let lfo = m.lfo(
                 Lfo::sine().rate(BeatsPerCycle::new(0.25 + i as f64 / 64.0).expect("above zero")),
             );
@@ -86,7 +86,10 @@ fn measure(label: &str, n: usize, modulated: bool, edit: bool) {
     for i in 0..UPDATES {
         if edit {
             s.mods_mut()
-                .range(filters[0].cutoff(), Hz(20.0)..Hz(20_000.0 + (i % 2) as f64))
+                .range(
+                    filters[0].cutoff(),
+                    Hz::new(20.0)..Hz::new(20_000.0 + (i % 2) as f64),
+                )
                 .unwrap();
         }
         let t = Instant::now();

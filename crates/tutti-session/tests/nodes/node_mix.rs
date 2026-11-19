@@ -240,7 +240,7 @@ fn a_refused_replace_keeps_the_last_plan_until_the_mix_or_mode_is_set_back() {
                 .replace(
                     r.halve,
                     ForkByClone(Quarter),
-                    Seconds(0.0),
+                    Seconds::new(0.0),
                     FadeLaw::EqualAmplitude
                 )
                 .is_ok()

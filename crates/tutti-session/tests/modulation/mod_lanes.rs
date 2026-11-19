@@ -89,7 +89,7 @@ fn render_n(side: &mut AudioSide, channels: usize, frames: usize, block: usize) 
     side.set_transport(tutti_graph::TransportPosition::new(
         false,
         TEMPO,
-        Beat(0.0),
+        Beat::new(0.0),
         None,
     ));
     side.render(block, PlanesMut::from_vecs(&mut out).unwrap());
@@ -157,7 +157,7 @@ const LATE: usize = 100;
 impl Node for Late {
     fn shape(&self) -> Shape {
         Shape::source_unassigned(ChannelLayout::MONO)
-            .with_latency(tutti_units::Latency::new(Samples(LATE)))
+            .with_latency(tutti_units::Latency::new(Samples::new(LATE)))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -190,8 +190,8 @@ fn an_export_is_the_live_render_on_a_native_param() {
     let mut m = s.mods_mut();
     m.range_raw(cutoff, 0.0, 1_000.0).unwrap();
     m.range_raw(volume, 0.0, 1.0).unwrap();
-    let sine = m.lfo(Lfo::sine().rate(Hz(3.0)));
-    let tri = m.lfo(Lfo::triangle().rate(Hz(5.0)));
+    let sine = m.lfo(Lfo::sine().rate(Hz::new(3.0)));
+    let tri = m.lfo(Lfo::triangle().rate(Hz::new(5.0)));
     m.route(RouteSpec::new(sine, cutoff, Depth::of(0.3)))
         .unwrap();
     m.route(RouteSpec::new(tri, volume, Depth::of(0.2)))
@@ -199,14 +199,14 @@ fn an_export_is_the_live_render_on_a_native_param() {
     settle(&mut s);
     // Past the connect's declick, stopped; then the knobs move.
     render_n(&mut side, 2, 1_024, 128);
-    s.set(a.cutoff().to(Hz(450.0))).unwrap();
+    s.set(a.cutoff().to(Hz::new(450.0))).unwrap();
     let _ = s.update();
     // The same write lands on the live side before it plays.
     render_n(&mut side, 2, 128, 128);
 
     let total = 24_000;
     let timeline = Arc::new(OfflineTimeline::new(&OfflineTimelineConfig {
-        start_beat: Beat(0.0),
+        start_beat: Beat::new(0.0),
         tempo_map: Arc::new(tutti_tempo::TempoMap::constant(TEMPO).expect("a tempo")),
         sample_rate: SampleRate::of(RATE),
         loop_range: None,
@@ -241,7 +241,7 @@ fn an_export_is_the_live_render_on_a_native_param() {
         side.set_transport(tutti_graph::TransportPosition::new(
             true,
             TEMPO,
-            Beat(beat),
+            Beat::new(beat),
             None,
         ));
         let mut out = vec![vec![0.0; n]; 2];
@@ -289,7 +289,7 @@ fn a_removed_source_leaves_no_node_and_no_layer() {
     let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);
     let mut m = s.mods_mut();
     m.range_raw(cutoff, 0.0, 1_000.0).unwrap();
-    let lfo = m.lfo(Lfo::sine().rate(Hz(2.0)));
+    let lfo = m.lfo(Lfo::sine().rate(Hz::new(2.0)));
     let follower = m.follower(Follower::default(), kick);
     m.route(RouteSpec::new(lfo, cutoff, Depth::of(0.1)))
         .unwrap();
@@ -345,19 +345,19 @@ fn a_knob_written_after_a_route_edit_is_the_knob() {
     let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);
     let mut m = s.mods_mut();
     m.range_raw(cutoff, 0.0, 1_000.0).unwrap();
-    let lfo = m.lfo(Lfo::sine().rate(Hz(2.0)));
+    let lfo = m.lfo(Lfo::sine().rate(Hz::new(2.0)));
     m.route(RouteSpec::new(lfo, cutoff, Depth::of(0.3)))
         .unwrap();
     settle(&mut s);
     render(&mut side, 1_024, 128);
 
-    s.set(probe.cutoff().to(Hz(300.0))).unwrap();
+    s.set(probe.cutoff().to(Hz::new(300.0))).unwrap();
     let _ = s.update();
     s.set(DepthTarget::of(lfo, cutoff).to(Depth::of(0.2)))
         .unwrap();
     let _ = s.update();
     let a = render(&mut side, 2_048, 128);
-    s.set(probe.cutoff().to(Hz(700.0))).unwrap();
+    s.set(probe.cutoff().to(Hz::new(700.0))).unwrap();
     let _ = s.update();
     let b = render(&mut side, 2_048, 128);
 
@@ -398,10 +398,10 @@ fn a_held_note_envelope_newly_routed_reads_its_level_at_once() {
         ParamRef::unit(two, UnitParam::Cutoff),
     );
     let adsr = Adsr {
-        attack: Seconds(0.002),
-        decay: Seconds(0.003),
-        sustain: Amplitude(0.4),
-        release: Seconds(0.2),
+        attack: Seconds::new(0.002),
+        decay: Seconds::new(0.003),
+        sustain: Amplitude::new(0.4),
+        release: Seconds::new(0.2),
     };
     let mut m = s.mods_mut();
     m.range_raw(c1, 0.0, 1.0).unwrap();
@@ -448,8 +448,8 @@ fn a_take_suspends_the_automation_then_restores_it() {
     master(&mut s, &[probe.erase()]);
     let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);
     let cutoff_key = probe.cutoff();
-    let mut lane = Trajectory::new().with_range(Hz(0.0), Hz(1_000.0));
-    lane.add_breakpoint(Breakpoint::new(Beat(0.0), Hz(800.0)));
+    let mut lane = Trajectory::new().with_range(Hz::new(0.0), Hz::new(1_000.0));
+    lane.add_breakpoint(Breakpoint::new(Beat::new(0.0), Hz::new(800.0)));
     let mut m = s.mods_mut();
     m.range_raw(cutoff, 0.0, 1_000.0).unwrap();
     assert!(m.automate(cutoff, Arc::new(lane)));
@@ -464,13 +464,13 @@ fn a_take_suspends_the_automation_then_restores_it() {
     let mut m = s.mods_mut();
     m.record(
         cutoff_key,
-        AutomationTake::record(RecordMode::Touch, Hz(0.0), Hz(1_000.0)),
+        AutomationTake::record(RecordMode::Touch, Hz::new(0.0), Hz::new(1_000.0)),
     )
     .unwrap();
     m.take_mut(cutoff_key)
         .expect("the take is open")
         .recorder_mut()
-        .touch(Beat(0.0), Hz(650.0));
+        .touch(Beat::new(0.0), Hz::new(650.0));
     let _ = s.update();
     assert_eq!(
         last(&render(&mut side, 512, 128)),
@@ -482,7 +482,7 @@ fn a_take_suspends_the_automation_then_restores_it() {
         .take_mut(cutoff_key)
         .expect("still open")
         .recorder_mut()
-        .release(Beat(1.0), Hz(650.0));
+        .release(Beat::new(1.0), Hz::new(650.0));
     let _ = s.update();
     assert!(
         s.mods_mut().take_mut(cutoff_key).is_none(),
@@ -690,7 +690,9 @@ fn two_ranges_or_automations_on_one_param_are_refused() {
     );
 
     let curve = || -> Option<Arc<dyn Curve>> {
-        Some(Arc::new(Trajectory::new().with_range(Hz(0.0), Hz(1_000.0))))
+        Some(Arc::new(
+            Trajectory::new().with_range(Hz::new(0.0), Hz::new(1_000.0)),
+        ))
     };
     let two_automations = declare_targets(
         [(cutoff, 0.0, 1_000.0)],
@@ -714,7 +716,8 @@ fn a_node_crossfaded_to_another_param_list_keeps_modulating() {
     master(&mut s, &[probe.erase()]);
     let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);
     let mut m = s.mods_mut();
-    m.range(probe.cutoff(), Hz(0.0)..Hz(1_000.0)).unwrap();
+    m.range(probe.cutoff(), Hz::new(0.0)..Hz::new(1_000.0))
+        .unwrap();
     let offset = m.macro_(1.0);
     m.route(RouteSpec::new(offset, cutoff, Depth::of(0.25)))
         .unwrap();
@@ -726,7 +729,7 @@ fn a_node_crossfaded_to_another_param_list_keeps_modulating() {
         .crossfade(
             probe,
             ProbeUnit::new(400.0).with_extra(UnitParam::Q),
-            Seconds(0.005),
+            Seconds::new(0.005),
             FadeLaw::EqualAmplitude,
         )
         .expect("the crossfade starts");
@@ -743,7 +746,7 @@ fn a_node_crossfaded_to_another_param_list_keeps_modulating() {
     let out = render(&mut side, 4_096, 128);
     assert_eq!(*out[0].last().unwrap(), 650.0, "the new node, modulated");
 
-    s.set(probe.cutoff().range().to(Hz(0.0)..Hz(2_000.0)))
+    s.set(probe.cutoff().range().to(Hz::new(0.0)..Hz::new(2_000.0)))
         .unwrap();
     let _ = s.update();
     let out = render(&mut side, 1_024, 128);
@@ -775,7 +778,7 @@ fn a_host_edit_committed_for_a_target_publishes_its_latency() {
     let _ = s.update();
     assert_eq!(
         s.latency(),
-        Samples(LATE),
+        Samples::new(LATE),
         "the plan the update sent, published"
     );
     render(&mut side, 128, 128);
@@ -1021,8 +1024,8 @@ fn lfo_scene(
     master(s, &[filter.erase()]);
     let cutoff = filter.cutoff();
     let mut m = s.mods_mut();
-    m.range(cutoff, Hz(0.0)..Hz(1_000.0)).unwrap();
-    let lfo = m.lfo(Lfo::sine().rate(Hz(rate)));
+    m.range(cutoff, Hz::new(0.0)..Hz::new(1_000.0)).unwrap();
+    let lfo = m.lfo(Lfo::sine().rate(Hz::new(rate)));
     let route = m
         .route(RouteSpec::new(lfo, cutoff, Depth::of(depth)))
         .unwrap();
@@ -1069,7 +1072,8 @@ fn range_and_depth_edits_send_no_plan_and_a_follower_route_one_commit() {
     );
 
     // The range: clamped to 600..=700, the knob (500) reads 600.
-    s.set(cutoff.range().to(Hz(600.0)..Hz(700.0))).unwrap();
+    s.set(cutoff.range().to(Hz::new(600.0)..Hz::new(700.0)))
+        .unwrap();
     for _ in 0..3 {
         frame(&mut s, &mut side);
         assert!(Arc::ptr_eq(&sent(&s), &settled), "a range edit sent a plan");
@@ -1078,7 +1082,8 @@ fn range_and_depth_edits_send_no_plan_and_a_follower_route_one_commit() {
     let v = render(&mut side, 128, 128);
     assert!(v[0].iter().all(|&x| x == 600.0), "the range clamps: {v:?}");
     // And back to 0..=1000 (a route's depth is a fraction of the span).
-    s.set(cutoff.range().to(Hz(0.0)..Hz(1_000.0))).unwrap();
+    s.set(cutoff.range().to(Hz::new(0.0)..Hz::new(1_000.0)))
+        .unwrap();
     frame(&mut s, &mut side);
     assert!(Arc::ptr_eq(&sent(&s), &settled), "a range edit sent a plan");
 
@@ -1187,7 +1192,7 @@ fn a_fork_renders_a_modulated_param_as_live_does() {
             .unwrap();
     }
     settle(&mut s);
-    s.set(written.drive().to(Drive(6.0))).unwrap();
+    s.set(written.drive().to(Drive::new(6.0))).unwrap();
     let _ = s.update();
 
     // Past the lanes' connect declick (256 frames).

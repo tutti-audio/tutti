@@ -86,7 +86,7 @@ fn rig(mode: NodeMode) -> Rig {
     set_server();
     let mut s = Session::builder()
         .sample_rate(RATE)
-        .max_block(MaxBlock::of(Samples(BLOCK)))
+        .max_block(MaxBlock::of(Samples::new(BLOCK)))
         .build()
         .expect("an offline session builds");
     let plugin = s
@@ -142,7 +142,7 @@ impl Rig {
 #[test]
 fn a_bypassed_plugin_passes_a_click_its_declared_latency_late() {
     let mut r = rig(NodeMode::Bypassed);
-    let latency = r.s.graph_ref().node_latency(r.plugin).unwrap().0;
+    let latency = r.s.graph_ref().node_latency(r.plugin).unwrap().get();
     assert!(
         latency >= BLOCK,
         "a served plugin's node declares at least its pipeline chunk, got {latency}"
@@ -168,7 +168,7 @@ fn a_bypassed_plugin_passes_a_click_its_declared_latency_late() {
 #[test]
 fn a_plugin_without_its_own_bypass_is_left_to_the_executor() {
     let mut r = rig(NodeMode::Bypassed);
-    let latency = r.s.graph_ref().node_latency(r.plugin).unwrap().0;
+    let latency = r.s.graph_ref().node_latency(r.plugin).unwrap().get();
     let mut out = Vec::new();
     for _ in 0..(FIRE + latency) / BLOCK + 2 {
         out.extend(r.render(1));

@@ -178,7 +178,7 @@ fn a_crossfade_of_a_missing_node_is_refused_during_a_re_prepare() {
         .crossfade(
             GHOST,
             ForkByClone(Const::frame(&[2.0])),
-            Seconds(0.005),
+            Seconds::new(0.005),
             FadeLaw::EqualAmplitude,
         )
         .expect_err("a node that is not there");
@@ -189,7 +189,7 @@ fn a_crossfade_of_a_missing_node_is_refused_during_a_re_prepare() {
     let waits = s.graph().crossfade(
         knob,
         ForkByClone(Const::frame(&[2.0])),
-        Seconds(0.005),
+        Seconds::new(0.005),
         FadeLaw::EqualAmplitude,
     );
     assert!(matches!(waits, Ok(Crossfade::Waiting(_))), "{waits:?}");
@@ -208,7 +208,7 @@ fn a_tap_source_past_what_a_port_index_holds_is_refused() {
     let refused = s
         .graph()
         .taps()
-        .open(&[a.out(0), far], TapAlign::Raw, Samples(64))
+        .open(&[a.out(0), far], TapAlign::Raw, Samples::new(64))
         .map(|_| ())
         .unwrap_err();
     assert!(matches!(refused, MissingSource::Port { node, .. } if node == a.erase()));
