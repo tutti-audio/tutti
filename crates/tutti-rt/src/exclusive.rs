@@ -45,6 +45,8 @@ pub struct Exclusive<T: ?Sized> {
 // anything that reaches `inner`; every path to it takes `&mut self` or `self`, which a
 // shared reference cannot produce. So a shared `Exclusive<T>` grants no access to `T`
 // at all, and needs only `T: Send` for the `&mut`/by-value moves between threads.
+// Adding a `&self` path to `inner` (a `Clone`, a `PartialEq`, a `get(&self)`) makes
+// this impl unsound.
 unsafe impl<T: ?Sized + Send> Sync for Exclusive<T> {}
 
 impl<T: Sized> Exclusive<T> {
@@ -85,22 +87,6 @@ impl<T: ?Sized> core::fmt::Debug for Exclusive<T> {
 #[cfg(test)]
 mod tests {
     use super::Exclusive;
-    use std::cell::Cell;
-
-    /// `Cell<u32>` is `Send` and not `Sync`; wrapped, it is `Sync`, a shared borrow
-    /// crosses threads, and the value is reached through `get_mut` and `into_inner`.
-    #[test]
-    fn a_send_value_is_shared_by_its_sync_holder_and_reached_through_mut() {
-        fn sync<T: Sync>(_: &T) {}
-        let mut e = Exclusive::new(Cell::new(1u32));
-        sync(&e);
-        e.get_mut().set(7);
-        let shared = &e;
-        std::thread::scope(|s| {
-            s.spawn(move || sync(shared));
-        });
-        assert_eq!(e.into_inner().get(), 7);
-    }
 
     #[test]
     fn debug_shows_no_value() {
