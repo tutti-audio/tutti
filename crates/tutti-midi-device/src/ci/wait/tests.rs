@@ -3,7 +3,6 @@ use std::time::Instant;
 use super::*;
 use tutti_ump::U7;
 
-#[cfg(feature = "serde")]
 #[test]
 fn the_wait_is_a_range_checked_value() {
     use tutti_fixtures::{RangeContract, check_range_contract};

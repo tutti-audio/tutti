@@ -290,7 +290,6 @@ fn a_body_with_a_top_bit_is_refused() {
     );
 }
 
-#[cfg(feature = "serde")]
 #[test]
 fn the_numbers_are_range_checked_values() {
     use tutti_fixtures::{RangeContract, check_range_contract};
