@@ -16,8 +16,8 @@
 //! MIDI server is reachable) comes back as [`UmpEndpointsError::Exception`]
 //! instead of unwinding into Rust, which aborts the process.
 
-use crate::objc_exception::{ObjcException, catch};
-use crate::unique_id::UniqueId;
+use super::objc_exception::{ObjcException, catch};
+use crate::UniqueId;
 use objc2::rc::autoreleasepool;
 use objc2::runtime::AnyClass;
 use objc2_core_midi::{

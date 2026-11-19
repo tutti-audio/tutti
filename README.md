@@ -1,4 +1,9 @@
-# tutti
+<h1>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/brand/tutti-banner-dark.svg">
+    <img alt="tutti" src="assets/brand/tutti-banner-light.svg" width="480">
+  </picture>
+</h1>
 
 A type-driven, real-time audio engine for building DAWs in Rust.
 

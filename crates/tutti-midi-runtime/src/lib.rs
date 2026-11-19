@@ -36,7 +36,7 @@
 //!   as a node of one event stream.
 //!
 //! The MPE zone types (`MpeMode`, `MpeZoneConfig`, ...) are
-//! `tutti-midi-protocol`'s; `MidiInputNode::with_mpe` takes a `MpeMode` from there.
+//! `tutti-midi-protocol`'s; `MidiInputNode::mpe` takes a `MpeMode` from there.
 //! So are the `SmpteFrameRate` and the `SmpteTimecode` the decoders assemble.
 //!
 //! ## What it does not own
