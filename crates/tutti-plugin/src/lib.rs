@@ -434,7 +434,6 @@ pub use tutti_units::ParamId;
 /// With the `serde` feature a `PluginDb` is `Serialize` and `Deserialize`, so
 /// the app picks the file format and where it lives.
 pub mod catalog {
-    pub use crate::host::db_probe::{DEFAULT_MEASURE_TIMEOUT, DEFAULT_PROBE_TIMEOUT};
     pub use tutti_plugin_types::{Helper, Locator};
     // Named in `Plugin::role` and `Catalog::iter`.
     pub use crate::host::catalog::{BlacklistView, Catalog, PersistError};
@@ -442,10 +441,10 @@ pub mod catalog {
     pub use crate::host::plugin::{BoundPlugin, Commit, Plugin, PluginRebinder, Rebuilt};
     pub use crate::host::plugin_ref::PluginRef;
     pub use tutti_plugin_db::{
-        FileFailure, FilesError, PluginDb, ProbeFailure, Scan, ScanBusy, ScanError, ScanPoll,
-        ScanResult,
+        CatalogConfig, DEFAULT_MEASURE_TIMEOUT, DEFAULT_PROBE_TIMEOUT, FileFailure, FilesError,
+        PluginDb, ProbeFailure, Scan, ScanBusy, ScanError, ScanPoll, ScanResult,
     };
-    pub use tutti_plugin_ipc::{AudioConfig, CatalogConfig};
+    pub use tutti_plugin_ipc::AudioConfig;
     pub use tutti_plugin_types::{PluginDescriptor, PluginId, PluginRole};
 }
 

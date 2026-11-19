@@ -1483,7 +1483,7 @@ mod shell_server {
             Action::Silent
         });
         let mut guard = crate::ProcessGuard::launched(
-            crate::Reaped::new(child),
+            tutti_plugin_ipc_ffi::Reaped::new(child),
             &crate::BridgeConfig::at(mock.socket.clone()),
         )
         .expect("the exit thread starts");

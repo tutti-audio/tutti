@@ -42,7 +42,7 @@ pub struct Panicked {
 #[derive(Debug, Default)]
 struct StopState {
     stopped: AtomicBool,
-    /// Held only to order a stop against a sleeper's check.
+    /// Held only to order a stop against a waiter's check.
     gate: Mutex<()>,
     wake: Condvar,
 }
@@ -123,9 +123,9 @@ impl StopToken {
         self.state.stopped.load(Ordering::Acquire)
     }
 
-    /// Requests the stop and wakes every sleeper. Idempotent.
+    /// Requests the stop and wakes every waiter. Idempotent.
     pub fn stop(&self) {
-        // The flag is set under the gate, so a sleeper that checked it before
+        // The flag is set under the gate, so a waiter that checked it before
         // the store is already parked on the condvar when the notify comes.
         let _gate = self.state.gate.lock_recover();
         self.state.stopped.store(true, Ordering::Release);

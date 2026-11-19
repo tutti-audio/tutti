@@ -69,7 +69,7 @@ pub(crate) use wake::Wake;
 // fills it the way the node does.
 #[doc(hidden)]
 pub use client::audio::{PARAM_BUFFERS, PayloadPool};
-pub use config::{AudioConfig, BridgeConfig, CatalogConfig, RandomSourceError, unique_socket_path};
+pub use config::{AudioConfig, BridgeConfig, RandomSourceError, unique_socket_path};
 pub use error::PluginRenderFault;
 pub use ipc::{Ipc, IpcController, IpcOrigin, IpcParts, IpcProcessor, Launched};
 pub use offline_wait::OfflineWait;
@@ -81,7 +81,7 @@ pub use protocol::{
 };
 pub use server_watch::ServerWatch;
 pub(crate) use subprocess::launch;
-pub use subprocess::{LoadRequest, Reaped, Restore};
+pub use subprocess::{LoadRequest, Restore};
 pub use transport::control::socket_name;
 pub use transport::shm::{AudioSlab, RING_SLOTS, SlabWriter};
 // Splitting and reassembling plugin state across frames: both ends must chunk

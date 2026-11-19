@@ -1,4 +1,5 @@
 use tutti_fixtures::midi::{GS_RESET, GS_WAVETABLE};
+use tutti_ump::{SysexMessage, Ump};
 use tutti_winmm_ffi::{MidiOut, Output, OutputPort, ports};
 
 /// The built-in synth, or a failure that lists what is there.
@@ -20,9 +21,10 @@ fn the_synth_takes_short_messages_and_a_sysex_and_opens_again_after_a_close() {
     for round in 0..2 {
         let mut out = MidiOut::open(&port)
             .unwrap_or_else(|e| panic!("the synth opens in round {round}: {e:?}"));
-        out.short(0x0064_3C90).expect("note on");
-        out.short(0x0000_3C80).expect("note off");
-        out.long(&GS_RESET).expect("the GS reset is sent whole");
+        out.send(&Ump([0x2090_3C64, 0, 0, 0])).expect("note on");
+        out.send(&Ump([0x2080_3C00, 0, 0, 0])).expect("note off");
+        out.long(SysexMessage::from_framed(&GS_RESET).expect("a framed message"))
+            .expect("the GS reset is sent whole");
         // Dropping resets and closes the port, so the next open is not refused
         // as allocated.
     }

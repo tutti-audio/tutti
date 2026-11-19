@@ -21,23 +21,34 @@
 //!   outlives a host that dies mid-probe and blacklists the culprit on the next
 //!   run.
 //!
+//! - [`probe_metadata_with`] and [`measure_metadata_with`] are the out-of-process
+//!   probe: they spawn `plugin-probe` on a file, wait under a deadline and read the
+//!   result file, killing the child at the deadline or a stop. [`probe_fn`] is the
+//!   probe a [`Scanner`] is given, as a [`CatalogConfig`] says.
+//!
 //! The crate never loads a plugin and never touches the audio thread.
 
 #![forbid(unsafe_code)]
 
+mod config;
 mod facts;
 mod fs;
 mod mtime;
 mod os_path;
 mod pedal;
+mod probe;
+mod probing;
 mod scanner;
 mod table;
 #[cfg(feature = "serde")]
 mod wire;
 
+pub use config::CatalogConfig;
 pub use facts::FileFacts;
 pub use fs::canonical_path;
 pub use mtime::{BeforeEpoch, Mtime};
+pub use probe::{DEFAULT_PROBE_TIMEOUT, ProbeState, measure_metadata_with, probe_metadata_with};
+pub use probing::{DEFAULT_MEASURE_TIMEOUT, Probing, probe_fn};
 pub use scanner::{
     FileFailure, FilesError, ProbeFailure, Scan, ScanBusy, ScanError, ScanPoll, ScanProgress,
     ScanResult, Scanner, probe_plugin_fallback,

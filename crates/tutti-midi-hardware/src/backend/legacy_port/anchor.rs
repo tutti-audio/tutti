@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 /// drifted from the OS's by that much.
 const MAX_LATENESS: Duration = Duration::from_secs(1);
 
-/// Places an OS stamp, milliseconds since the port started, on the `Instant`
+/// Places an OS stamp, the time since the port started, on the `Instant`
 /// clock: an event is as long after the start as its stamp says. The start is
 /// read just before the port starts, so no event is stamped before it.
 ///
@@ -26,12 +26,9 @@ impl Anchor {
         Self { start }
     }
 
-    /// The instant an event stamped `millis` arrived, seen at `now`.
-    ///
-    /// The stamp is a 32-bit millisecond count, which wraps after 49 days of
-    /// one port's life; the wrap is a stamp far in the past, which re-anchors.
-    pub(in crate::backend) fn arrival(&mut self, millis: u32, now: Instant) -> Instant {
-        let stamped = Duration::from_millis(u64::from(millis));
+    /// The instant an event stamped `stamped` after the start arrived, seen at
+    /// `now`.
+    pub(in crate::backend) fn arrival(&mut self, stamped: Duration, now: Instant) -> Instant {
         if let Some(at) = self.start.checked_add(stamped)
             && at <= now
             && now - at <= MAX_LATENESS

@@ -13,12 +13,12 @@
 //! | shutdown | [`Bell::shut`] |
 //! | the reclaim backstop | the wait's timeout, which stays |
 //!
-//! The wait is [`Sleeper::wait_timeout`] over what each source publishes: a
+//! The wait is [`Parker::park_timeout`] over what each source publishes: a
 //! command is in the queue, the refill or steer flag is set, or the shutdown
 //! flag is.
-//! The flag a voice sets and the doorbell's ring are in the order the
-//! doorbell's protocol asks (publish, then ring), so a ring that lands between
-//! the streamer's last look and its park is not lost. The backstop bounds how
+//! The flag a voice sets and the unpark are in the order the parker's
+//! protocol asks (publish, then unpark), so a ring that lands between the
+//! streamer's last look and its park is not lost. The backstop bounds how
 //! long a *missed* ring (a bug, not a design) can delay a refill, and is the
 //! control-side tick a cell that goes quiet still gets its `reclaim()` on.
 
@@ -29,7 +29,7 @@ use std::time::Duration;
 #[cfg(test)]
 use crossbeam_channel::TrySendError;
 use crossbeam_channel::{SendError, Sender};
-use tutti_rt::{Doorbell, Sleeper, doorbell};
+use tutti_rt::{Parker, Unparker, parker};
 
 use super::command::StreamerCommand;
 use tutti_rt::RingFloat;
@@ -37,7 +37,7 @@ use tutti_rt::RingFloat;
 /// The streamer thread's wake-up, shared by every sender, every voice's
 /// reader and the thread itself.
 pub(crate) struct Bell {
-    door: Doorbell,
+    unparker: Unparker,
     /// A voice found its ring wanting a refill since the streamer's last
     /// cycle began ([`begin_cycle`](Self::begin_cycle) clears it).
     refill: AtomicBool,
@@ -52,25 +52,25 @@ pub(crate) struct Bell {
 }
 
 impl Bell {
-    /// The bell and the [`Sleeper`] of its doorbell, which the streamer
+    /// The bell and the [`Parker`] of its unparker, which the streamer
     /// thread alone waits on.
-    pub(crate) fn new() -> (Arc<Self>, Sleeper) {
-        let (door, sleeper) = doorbell();
+    pub(crate) fn new() -> (Arc<Self>, Parker) {
+        let (unparker, parker) = parker();
         let bell = Arc::new(Self {
-            door,
+            unparker,
             refill: AtomicBool::new(false),
             steer: AtomicBool::new(false),
             shut: AtomicBool::new(false),
             #[cfg(test)]
             cycles: std::sync::atomic::AtomicU64::new(0),
         });
-        (bell, sleeper)
+        (bell, parker)
     }
 
     /// Wake the streamer after something was published for it to find (a
     /// command pushed to its queue). Wait-free: no lock, no allocation.
     pub(crate) fn ring(&self) {
-        self.door.ring();
+        self.unparker.unpark();
     }
 
     /// A voice's ring wants a refill: set the flag the streamer reads, then
@@ -79,20 +79,20 @@ impl Bell {
     #[inline]
     pub(crate) fn ring_refill(&self) {
         self.refill.store(true, Ordering::Release);
-        self.door.ring();
+        self.unparker.unpark();
     }
 
     /// A request was published for the streamer (a loop or direction): set
     /// the flag it reads, then ring. Control thread.
     pub(crate) fn ring_steer(&self) {
         self.steer.store(true, Ordering::Release);
-        self.door.ring();
+        self.unparker.unpark();
     }
 
     /// Ask the streamer to stop, and wake it to see it.
     pub(crate) fn shut(&self) {
         self.shut.store(true, Ordering::Release);
-        self.door.ring();
+        self.unparker.unpark();
     }
 
     /// Whether [`shut`](Self::shut) was called.
@@ -118,8 +118,8 @@ impl Bell {
 
     /// Whether the streamer is parked, or about to be (tests).
     #[cfg(test)]
-    pub(crate) fn is_asleep(&self) -> bool {
-        self.door.is_asleep()
+    pub(crate) fn is_parked(&self) -> bool {
+        self.unparker.is_parked()
     }
 
     /// Cycles begun so far (tests).
@@ -129,16 +129,16 @@ impl Bell {
     }
 
     /// Sleep until a source rings, or `backstop` passes. `queued` says whether
-    /// a command is waiting; it is read after the doorbell is armed, so a push
+    /// a command is waiting; it is read after the parker is armed, so a push
     /// that lands before the park is seen. May return with nothing to do (a
     /// spurious park return, a ring whose work the last cycle already did).
     pub(crate) fn sleep(
         &self,
-        sleeper: &mut Sleeper,
+        parker: &mut Parker,
         queued: impl FnOnce() -> bool,
         backstop: Duration,
     ) {
-        sleeper.wait_timeout(|| queued() || self.has_work(), backstop);
+        parker.park_timeout(|| queued() || self.has_work(), backstop);
     }
 }
 
