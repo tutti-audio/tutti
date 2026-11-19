@@ -146,7 +146,7 @@ pub(super) const EXCEPTIONS: &[(&str, &str, &str)] = &[
         "temporary: a document can set `flags` outside `known` and a `measures` its range does not fit; `serde(try_from)` removes it",
     ),
     (
-        "crates/tutti-plugin/src/host/plugin_ref.rs",
+        "crates/tutti-plugin-db/src/plugin_ref.rs",
         "PluginRef",
         "permanent: any path, format and id names a plugin; a missing one is the load's error",
     ),

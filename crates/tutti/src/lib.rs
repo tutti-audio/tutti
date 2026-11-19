@@ -171,7 +171,7 @@ pub use tutti_codec::{Format, Pcm};
 #[cfg(feature = "session")]
 pub use tutti_graph::NodeKey;
 #[cfg(feature = "plugin")]
-pub use tutti_plugin::catalog::{Catalog, Hosting, PluginRef};
+pub use tutti_plugin_db::{Catalog, Hosting, PluginRef};
 #[cfg(feature = "plugin")]
 pub use tutti_plugin_types::{PluginFailure, PresetError, PresetId, StateUse};
 #[cfg(all(feature = "session", feature = "midi-hardware"))]
@@ -624,7 +624,6 @@ pub mod soundfont {
 /// spawns; build it with `cargo build -p tutti-plugin-server`.
 #[cfg(feature = "plugin")]
 pub mod plugin {
-    pub use tutti_plugin::catalog::{BindError, BlacklistView, Loadable, PersistError, Resolved};
     pub use tutti_plugin::{
         AutomationMode, BridgeConfig, MainThreadMarker, MainWork, MainWorkHandle,
         PluginRenderFault, Preset,
@@ -634,6 +633,7 @@ pub mod plugin {
         BeforeEpoch, BlacklistedFile, FileFacts, FileFailure, FileRow, FileState, FilesError,
         Mtime, PluginEntry, ProbeFailure, RowChange, ScanError, ScanProgress,
     };
+    pub use tutti_plugin_db::{BindError, BlacklistView, Loadable, PersistError, Resolved};
     pub use tutti_plugin_host::{BlockLosses, RebindError};
     pub use tutti_plugin_ipc::RandomSourceError;
     pub use tutti_plugin_types::PresetSupport;
@@ -659,11 +659,9 @@ pub mod plugin {
     /// The plugin catalog: scanning, the database and the descriptors it
     /// holds.
     pub mod catalog {
-        pub use tutti_plugin::catalog::{
-            AudioConfig, CatalogConfig, PluginDb, PluginDescriptor, PluginId, Scan, ScanPoll,
-            ScanResult,
-        };
-        pub use tutti_plugin_types::PluginRole;
+        pub use tutti_plugin::catalog::AudioConfig;
+        pub use tutti_plugin_db::{CatalogConfig, PluginDb, Scan, ScanPoll, ScanResult};
+        pub use tutti_plugin_types::{PluginDescriptor, PluginId, PluginRole};
     }
 }
 

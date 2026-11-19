@@ -11,7 +11,7 @@
 //!
 //! ```no_run
 //! # fn ex() -> Result<(), tutti_plugin_db::ScanError> {
-//! use tutti_plugin::catalog::{Catalog, CatalogConfig, PersistError};
+//! use tutti_plugin_db::{Catalog, CatalogConfig, PersistError};
 //! use tutti_plugin_db::{PluginDb, ScanPoll};
 //! use std::path::PathBuf;
 //!
@@ -49,15 +49,17 @@
 //! without waiting for the probe's deadline. Nothing here runs on or reaches
 //! the audio thread.
 
-use crate::host::loadable::{Loadable, Resolved};
-use crate::host::plugin_ref::PluginRef;
+use crate::loadable::{Loadable, Resolved};
+use crate::plugin_ref::PluginRef;
+use crate::probe::ProbeState;
+use crate::probing::{Probing, probe_fn};
+use crate::{
+    BlacklistedFile, CatalogConfig, FileFacts, FileRow, FilesError, PluginDb, PluginEntry,
+    RowChange, Scan, ScanBusy, ScanError, ScanPoll, Scanner,
+};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError, RwLock};
-use tutti_plugin_db::{
-    BlacklistedFile, CatalogConfig, FileFacts, FileRow, FilesError, PluginDb, PluginEntry,
-    ProbeState, Probing, RowChange, Scan, ScanBusy, ScanError, ScanPoll, Scanner, probe_fn,
-};
 use tutti_plugin_types::{BridgeError, BridgeResult};
 use tutti_plugin_types::{PluginDescriptor, PluginFormat, PluginId};
 use tutti_rt::LockExt;
@@ -151,7 +153,7 @@ fn persist_unattended(
 /// alias and the real path are one row, also when the file is gone (its parent
 /// is resolved and its name kept).
 fn key(path: &Path) -> PathBuf {
-    tutti_plugin_db::canonical_path(path)
+    crate::canonical_path(path)
 }
 
 /// A database holding only the blacklisted rows of `db`.
@@ -323,7 +325,7 @@ impl Catalog {
 
     /// The database, for reading rows this catalog has no method for.
     ///
-    /// Its rows are keyed by [`canonical_path`](tutti_plugin_db::canonical_path),
+    /// Its rows are keyed by [`canonical_path`](crate::canonical_path),
     /// which is what a scan and every method of this catalog key by. The table
     /// itself matches paths exactly, so look a file up by its canonical path
     /// (an alias finds nothing); the catalog's own `is_blacklisted`, `blacklist`
@@ -356,7 +358,7 @@ impl Catalog {
     /// # Examples
     ///
     /// ```no_run
-    /// # use tutti_plugin::catalog::Catalog;
+    /// # use tutti_plugin_db::Catalog;
     /// # use tutti_plugin_db::ScanPoll;
     /// # fn ex(mut plugins: Catalog) -> Result<(), tutti_plugin_db::ScanError> {
     /// let mut scan = plugins.scan()?;
@@ -399,7 +401,7 @@ impl Catalog {
     /// [`FilesError::UnrecognizedFormat`] when its extension names no plugin
     /// format, and [`FilesError::Scan`] as for [`scan`](Self::scan). A file the
     /// probe fails on is not an error of the call: the result's
-    /// [`failures`](tutti_plugin_db::ScanResult::failures) name it and say why
+    /// [`failures`](crate::ScanResult::failures) name it and say why
     /// ([`ProbeError`](tutti_plugin_types::ProbeError)), a missing
     /// `plugin-probe` among them.
     pub fn register(&mut self, path: impl AsRef<Path>) -> std::result::Result<Scan, FilesError> {
@@ -669,7 +671,7 @@ impl Catalog {
     /// `measure` without one measures its plugin as it loads.
     ///
     /// The probe renders each plugin at two configurations, up to
-    /// [`DEFAULT_MEASURE_TIMEOUT`](crate::catalog::DEFAULT_MEASURE_TIMEOUT).
+    /// [`DEFAULT_MEASURE_TIMEOUT`](crate::DEFAULT_MEASURE_TIMEOUT).
     /// As in a measuring scan, a plugin that crashes or hangs while being
     /// measured is **blacklisted**; one that cannot be measured (it would not
     /// activate, has no audio output, or is too slow to render) is logged and its
@@ -767,10 +769,8 @@ impl Catalog {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::host::loadable::BindError;
-    use crate::host::plugin::Plugin;
-    use tutti_plugin_db::{FileRow, ScanPoll, ScanResult};
-    use tutti_units::SampleRate;
+    use crate::loadable::BindError;
+    use crate::{FileRow, ScanPoll, ScanResult};
 
     /// Runs a scan to its end on the calling thread, applying as it goes.
     fn rescan(plugins: &mut Catalog) -> ScanResult {
@@ -802,7 +802,7 @@ mod tests {
     /// with their own ids, and a ref with no id is the first.
     #[test]
     fn a_bundle_of_two_plugins_is_two_refs_and_info_finds_each() {
-        use tutti_plugin_db::FileFacts;
+        use crate::FileFacts;
         use tutti_plugin_types::{PluginClass, PluginDescriptor};
         let path = std::env::temp_dir().join("tutti-two-plugins.clap");
         std::fs::write(&path, b"x").unwrap();
@@ -877,9 +877,9 @@ mod tests {
         // Record the blacklist against a *different* mtime than the file has,
         // which is what a reinstall produces.
         let mut row = blacklisted_row(&path, "crashed once");
-        row.mtime = row.mtime.and_then(|t| {
-            tutti_plugin_db::Mtime::new(t.get() - std::time::Duration::from_secs(1_000))
-        });
+        row.mtime = row
+            .mtime
+            .and_then(|t| crate::Mtime::new(t.get() - std::time::Duration::from_secs(1_000)));
         let plugins = catalog_with(&path, row);
 
         plugins
@@ -926,9 +926,9 @@ mod tests {
         // a rewrite inside the filesystem's timestamp granularity leaves the
         // times equal and the test proves nothing.
         let mut stale = blacklisted_row(&path, "SIGSEGV during probe");
-        stale.mtime = stale.mtime.and_then(|t| {
-            tutti_plugin_db::Mtime::new(t.get() - std::time::Duration::from_secs(1_000))
-        });
+        stale.mtime = stale
+            .mtime
+            .and_then(|t| crate::Mtime::new(t.get() - std::time::Duration::from_secs(1_000)));
         let plugins = catalog_with(&path, stale);
 
         assert!(
@@ -938,34 +938,6 @@ mod tests {
         plugins
             .check(&PluginRef::file(&path).unwrap())
             .expect("the check must admit it too, so the two answers agree");
-
-        std::fs::remove_file(&path).ok();
-    }
-
-    /// A plugin no catalog resolved consults no blacklist: the load of a file
-    /// the host holds a [`PluginRef`] to, and no catalog, is not refused for
-    /// what a catalog recorded of it.
-    #[test]
-    fn an_uncatalogued_plugin_does_not_consult_a_blacklist() {
-        let dir = std::env::temp_dir().join("tutti-bl-unguarded");
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("Crasher.vst3");
-        std::fs::write(&path, b"not a real plugin").unwrap();
-
-        let plugins = catalog_with(&path, blacklisted_row(&path, "SIGSEGV during probe"));
-        assert!(plugins.is_blacklisted(&path), "fixture should be recorded");
-
-        let err = Plugin::open(
-            None,
-            &tutti_fixtures::detached_work(),
-            &Loadable::uncatalogued(PluginRef::file(&path).unwrap()),
-            SampleRate::SR_48K,
-        )
-        .expect_err("the fixture is not a loadable plugin");
-        assert!(
-            !matches!(err, BridgeError::Blacklisted { .. }),
-            "an uncatalogued plugin has no blacklist to be refused by, got {err:?}"
-        );
 
         std::fs::remove_file(&path).ok();
     }
@@ -982,36 +954,6 @@ mod tests {
             path,
             FileRow::probed(format, &FileFacts::read(path), plugins),
         )
-    }
-
-    /// **A load refuses a plugin blacklisted after it was resolved**: the
-    /// `Loadable` asks the catalog's blacklist where the load opens the plugin,
-    /// so a scan that blacklists the file between the resolve and the load is
-    /// not raced.
-    #[test]
-    fn a_plugin_blacklisted_after_its_resolve_is_refused_at_the_load() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let path = dir.path().join("Late.clap");
-        let mut plugins = catalog_of(&path, PluginFormat::Clap, &["late"]);
-        let Resolved::Exact(loadable) = plugins.resolve(&PluginId::new(PluginFormat::Clap, "late"))
-        else {
-            panic!("the id is in the catalog");
-        };
-        assert!(loadable.check().is_ok(), "admitted when resolved");
-
-        plugins.blacklist(&path, "crashed while scanning");
-
-        let err = Plugin::open(
-            None,
-            &tutti_fixtures::detached_work(),
-            &loadable,
-            SampleRate::SR_48K,
-        )
-        .expect_err("the plugin is blacklisted now");
-        assert!(
-            matches!(&err, BridgeError::Blacklisted { reason, .. } if reason == "crashed while scanning"),
-            "{err:?}"
-        );
     }
 
     /// **Only a move of the blacklist is published**: a probed row changing

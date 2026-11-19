@@ -218,10 +218,13 @@ impl PluginLoad {
             .loadable
             .check()
             .err()
-            .or_else(|| self.loadable.placement().err());
+            .or_else(|| tutti_plugin::catalog::placement(&self.loadable).err());
         let opened = if let Some(refusal) = refused {
             Opened::Done(Box::new(Open::refused(refusal)))
-        } else if matches!(self.loadable.placement(), Ok(Hosting::InProcess)) {
+        } else if matches!(
+            tutti_plugin::catalog::placement(&self.loadable),
+            Ok(Hosting::InProcess)
+        ) {
             Opened::OnMain(Box::new(self))
         } else {
             Opened::Done(Box::new(self.open(None)))

@@ -42,12 +42,12 @@ fn run_budget(timeout: Duration) -> Duration {
 
 /// The state a measuring probe puts one plugin in.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProbeState {
+pub(crate) struct ProbeState {
     /// A file of the bytes the plugin's own `save_state` wrote.
-    pub file: PathBuf,
+    pub(crate) file: PathBuf,
     /// The descriptor id of the plugin the state is for; `None` is the file's
     /// first plugin.
-    pub plugin: Option<String>,
+    pub(crate) plugin: Option<String>,
 }
 
 /// Reads the descriptor of every plugin a file holds in a `plugin-probe` subprocess, so a plugin that
@@ -63,7 +63,7 @@ pub struct ProbeState {
 /// [`ProbeError::TimedOut`] if it did not finish within `timeout` (it is killed);
 /// [`ProbeError::Cancelled`] if `stop` was requested (the child is killed and
 /// reaped before this returns).
-pub fn probe_metadata_with(
+pub(crate) fn probe_metadata_with(
     locator: &Locator,
     plugin_path: &Path,
     format: PluginFormat,
@@ -97,7 +97,7 @@ pub fn probe_metadata_with(
 ///
 /// As [`probe_metadata_with`]; a plugin that refuses `state` is
 /// [`ProbeRefusal::StateRefused`].
-pub fn measure_metadata_with(
+pub(crate) fn measure_metadata_with(
     locator: &Locator,
     plugin_path: &Path,
     format: PluginFormat,
