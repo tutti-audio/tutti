@@ -259,7 +259,7 @@ fn audio_loop(
                 apply_setting(channels, lifecycle, setting);
             }
         }
-        let result = handle_audio(cmd, &mut lane, channels, payloads, &mut inbox);
+        let result = handle_audio(cmd, &mut lane, channels, payloads, &mut inbox, lifecycle);
         drain_unsolicited(&mut inbox, channels, listener);
         channels.turn_done();
 
