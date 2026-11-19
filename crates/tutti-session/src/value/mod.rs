@@ -60,7 +60,7 @@ pub use error::PluginParamRefusal;
 pub use error::{SetRefusal, ValueError, ValueErrorKind};
 pub use param::{ParamTarget, TargetInfo};
 #[cfg(feature = "plugin")]
-pub(crate) use plugin::{AutomationModeSlot, PluginEntry};
+pub(crate) use plugin::{AutomationModeSlot, CarriedParam, PluginEntry};
 #[cfg(feature = "plugin")]
 pub use plugin::{PluginAutomationModeTarget, PluginParamTarget};
 pub(crate) use program::{

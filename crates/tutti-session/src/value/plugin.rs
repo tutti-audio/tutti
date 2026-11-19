@@ -108,7 +108,8 @@ impl sealed::Store for PluginParamTarget {
 target_builders!(moved [] PluginParamTarget);
 
 /// A hosted plugin as the value table holds it: what a write to one of its
-/// parameters needs, and the value the host mirror holds of each.
+/// parameters needs, and a lock-free copy of the value the plugin's mirror
+/// holds of each. The mirror is the source of every value.
 #[derive(Debug)]
 pub(crate) struct PluginEntry {
     handle: PluginHandle,
@@ -118,6 +119,8 @@ pub(crate) struct PluginEntry {
     declared: Option<BTreeMap<ParamId, Declared>>,
 }
 
+/// One declared parameter. The plugin's mirror is the source of its value;
+/// this is the value table's lock-free copy of it.
 #[derive(Debug)]
 struct Declared {
     access: ParamAccess,
@@ -125,23 +128,63 @@ struct Declared {
     value: AtomicU64,
 }
 
+impl Declared {
+    fn of(access: ParamAccess, value: Normalized) -> Self {
+        Self {
+            access,
+            value: AtomicU64::new(value.get().to_bits()),
+        }
+    }
+}
+
+/// What a plugin's mirror declared of one parameter, kept across a replace by
+/// the same plugin.
+#[derive(Debug, Clone)]
+pub(crate) struct CarriedParam {
+    id: ParamId,
+    access: ParamAccess,
+    value: Normalized,
+}
+
+impl CarriedParam {
+    pub(crate) fn new(info: &tutti_plugin_types::ParameterInfo, value: Normalized) -> Self {
+        Self {
+            id: info.id(),
+            access: ParamAccess::of(info),
+            value,
+        }
+    }
+}
+
 impl PluginEntry {
-    /// The entry for the plugin of `handle` whose values `mirror` holds.
-    pub(crate) fn new(handle: PluginHandle, driven: Driven, mirror: &PluginParamValues) -> Self {
-        let declared = mirror.is_ready().then(|| {
-            mirror
-                .descriptors()
-                .iter()
-                .enumerate()
-                .map(|(at, info)| {
-                    let declared = Declared {
-                        access: ParamAccess::of(info),
-                        value: AtomicU64::new(mirror.value_at(at).get().to_bits()),
-                    };
-                    (info.id(), declared)
-                })
-                .collect()
-        });
+    /// The entry for the plugin of `handle` whose values `mirror` holds. While
+    /// the mirror is not read, the entry declares `carried`, what the plugin
+    /// at the node declared before it was replaced by itself.
+    pub(crate) fn new(
+        handle: PluginHandle,
+        driven: Driven,
+        mirror: &PluginParamValues,
+        carried: Option<&[CarriedParam]>,
+    ) -> Self {
+        let declared = if mirror.is_ready() {
+            Some(
+                mirror
+                    .descriptors()
+                    .iter()
+                    .enumerate()
+                    .map(|(at, info)| {
+                        let access = ParamAccess::of(info);
+                        (info.id(), Declared::of(access, mirror.value_at(at)))
+                    })
+                    .collect(),
+            )
+        } else {
+            carried.map(|held| {
+                held.iter()
+                    .map(|p| (p.id, Declared::of(p.access, p.value)))
+                    .collect()
+            })
+        };
         Self {
             handle,
             driven,

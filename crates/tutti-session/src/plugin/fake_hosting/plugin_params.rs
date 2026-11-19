@@ -14,15 +14,15 @@ use crate::{
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{ForkByClone, NodeKey};
 use tutti_nodes::testing::Const;
-use tutti_plugin_host::{PluginHandle, RefreshSink};
+use tutti_plugin_host::{PluginControls, PluginHandle, RefreshSink};
 use tutti_plugin_types::{
     AnyThread, AutomationMode, AutomationModeError, Health, ParamFlags, ParamUnit, ParameterInfo,
-    PluginFailure, PluginRefresh, RenderMode,
+    PluginFailure, PluginRefresh, PluginTail, RenderMode,
 };
 use tutti_rt::LockExt;
 use tutti_units::Normalized;
 use tutti_units::ParamId;
-use tutti_units::{Db, Hz, SampleRate};
+use tutti_units::{Db, Hz, SampleRate, Samples};
 
 const CUTOFF: ParamId = ParamId::new(1);
 const LEVEL: ParamId = ParamId::new(2);
@@ -782,4 +782,69 @@ fn a_state_load_replaces_the_values_written_before_it() {
 fn a_plugin_without_automation_state_has_no_automation_mode_target() {
     let (s, node, _, _) = ready();
     assert_eq!(s.plugin_view(node).unwrap().automation_mode(), None);
+}
+
+/// Replaces the plugin at `node` with `fake` as the node's plugin `plugin`, as
+/// the graph's replace does: the record takes the new handle, the old one is
+/// retired and the value table is told.
+fn replace_with(s: &mut DetachedSession, node: NodeKey, fake: &Arc<Fake>, plugin: &str) {
+    let handle = PluginHandle::from_backend(
+        Arc::clone(fake),
+        None,
+        Default::default(),
+        Default::default(),
+        Default::default(),
+    );
+    let (controls, _) =
+        PluginControls::new(Samples::new(0), PluginTail::default(), SampleRate::SR_48K);
+    let plugin = tutti_plugin::catalog::PluginRef::file(plugin).expect("a plugin file");
+    let hosted = s.graph.plugins.get_mut(&node).expect("a hosted plugin");
+    let outgoing = hosted.replace_hosted(handle, (*controls).clone(), plugin);
+    outgoing.retire().settle(node, &mut s.graph.graveyard);
+    s.graph.provide_plugin(node);
+}
+
+/// **A replace by the same plugin keeps its parameters targets until the new
+/// read lands**: a set made in between is taken by the new handle and `get`
+/// reads it back, and the read that lands then replaces the carried values.
+#[test]
+fn a_replace_by_the_same_plugin_keeps_its_parameters_settable_until_the_read_lands() {
+    let (mut s, key, _, _) = session_keyed();
+    let _ = update(&mut s);
+    let again = Fake::new();
+    replace_with(&mut s, key.erase(), &again, "fake.clap");
+
+    assert_eq!(s.get(key.param(CUTOFF)).unwrap(), Normalized::of(0.5));
+    s.set(key.param(CUTOFF).to(Normalized::of(0.3))).unwrap();
+    assert_eq!(s.get(key.param(CUTOFF)).unwrap(), Normalized::of(0.3));
+    assert_eq!(again.sets(), [(CUTOFF, 0.3)], "the new handle took it");
+    assert_eq!(
+        refusal(s.set(key.param(LOCKED).to(Normalized::of(0.9)))),
+        PluginParamRefusal::ReadOnly(LOCKED),
+        "the carried declaration keeps its access"
+    );
+
+    again
+        .values
+        .lock_recover()
+        .insert(LEVEL, Normalized::of(0.75));
+    let _ = update(&mut s);
+    assert_eq!(s.get(key.param(LEVEL)).unwrap(), Normalized::of(0.75));
+    assert_eq!(s.get(key.param(CUTOFF)).unwrap(), Normalized::of(0.3));
+}
+
+/// **A replace by another plugin leaves no target until its read lands.**
+#[test]
+fn a_replace_by_another_plugin_has_no_target_until_its_read_lands() {
+    let (mut s, key, _, _) = session_keyed();
+    let _ = update(&mut s);
+    let other = Fake::new();
+    replace_with(&mut s, key.erase(), &other, "other.clap");
+
+    assert!(no_such_target(
+        s.set(key.param(CUTOFF).to(Normalized::of(0.3)))
+    ));
+    assert!(other.sets().is_empty());
+    let _ = update(&mut s);
+    s.set(key.param(CUTOFF).to(Normalized::of(0.3))).unwrap();
 }

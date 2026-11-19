@@ -817,6 +817,10 @@ pub(crate) struct HostedPlugin {
     /// was not answered, or the plugin announced a rescan), until
     /// `Phase::Plugins` hands it to the host as a job.
     param_read: Option<tutti_plugin_host::ParamRead>,
+    /// What the outgoing mirror declared, when a replace put the same plugin
+    /// ([`PluginRef::is_same_plugin`]) at the node: the value table keeps these
+    /// declarations and values until the new read lands, which replaces them.
+    carried: Option<Vec<crate::value::CarriedParam>>,
     /// Held by that job: a later read mints a new one, and the earlier read
     /// lands nowhere.
     mirror_token: Arc<()>,
@@ -1023,6 +1027,7 @@ impl HostedPlugin {
             gate: Gate::default(),
             driven: crate::plugin_params::Driven::default(),
             param_read: Some(read),
+            carried: None,
             mirror_token: Arc::new(()),
             silenced: false,
             pooled: None,
@@ -1062,6 +1067,7 @@ impl HostedPlugin {
         controls: PluginControls,
         plugin: PluginRef,
     ) -> Outgoing {
+        self.carry_declaration(&plugin);
         self.plugin = plugin;
         let outgoing = self.adopt(handle, Placement::Served);
         self.set_node((*controls).clone());
@@ -1078,6 +1084,7 @@ impl HostedPlugin {
         node: NodeControls,
         plugin: PluginRef,
     ) -> Outgoing {
+        self.carry_declaration(&plugin);
         self.plugin = plugin;
         let outgoing = self.adopt(handle, Placement::InProcess);
         self.set_node(node);
@@ -1138,6 +1145,25 @@ impl HostedPlugin {
         self.banked
             + self.node_losses()
             + tutti_graph::Losses::lost(self.handle.dropped_parameter_events())
+    }
+
+    /// Keeps the declarations and values the mirror holds when `incoming` is
+    /// the plugin at the node again (a recovery, a rebuild), so its parameters
+    /// stay targets until the new read lands. Another plugin keeps none.
+    fn carry_declaration(&mut self, incoming: &PluginRef) {
+        if !self.plugin.is_same_plugin(incoming) {
+            self.carried = None;
+            return;
+        }
+        let held = self.mirror.is_ready().then(|| {
+            self.mirror
+                .descriptors()
+                .iter()
+                .enumerate()
+                .map(|(at, info)| crate::value::CarriedParam::new(info, self.mirror.value_at(at)))
+                .collect()
+        });
+        self.carried = held.or_else(|| self.carried.take());
     }
 
     /// [`replace`](Self::replace)'s handle half: everything but the
@@ -1253,8 +1279,12 @@ impl HostedPlugin {
     /// Registers the plugin's parameters and automation mode with the value
     /// table at `node`, as the mirror and the handle hold them now.
     pub(crate) fn provide_values(&self, node: NodeKey, table: &crate::value::ValueTable) {
-        let entry =
-            crate::value::PluginEntry::new(self.handle.clone(), self.driven.clone(), &self.mirror);
+        let entry = crate::value::PluginEntry::new(
+            self.handle.clone(),
+            self.driven.clone(),
+            &self.mirror,
+            self.carried.as_deref(),
+        );
         let mode = self
             .takes_automation_mode()
             .then(|| crate::value::AutomationModeSlot::cell(self.handle.clone()));
@@ -1716,6 +1746,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
         match values {
             Ok(values) => {
                 hosted.mirror.land(values);
+                hosted.carried = None;
                 hosted.driven.report_knobs(&hosted.mirror);
                 hosted.gate.declare(&hosted.mirror);
                 self.graph.provide_plugin(node);
