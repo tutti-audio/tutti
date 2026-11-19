@@ -318,6 +318,33 @@ fn a_midi1_program_change_is_one_short_message() {
     );
 }
 
+/// M2-104 Appendix D.3: a MIDI 2.0 velocity narrows to its top 7 bits.
+#[test]
+fn a_midi2_note_on_is_one_midi1_note_on_with_the_top_seven_velocity_bits() {
+    // Type 4, status 9 channel 0, note 0x3C; velocity 0xC000 (top 7 bits 0x60).
+    let note_on = Ump([0x4090_3C00, 0xC000_0000, 0, 0]);
+    assert_eq!(
+        sent(&mut ByteOut::new(), note_on),
+        [vec![0x20, 0x90, 0x3C, 0x60]]
+    );
+}
+
+/// A Registered Controller is CC 101, 100, 6, 38 (M2-104 Appendix D).
+#[test]
+fn a_midi2_pitch_bend_range_is_four_control_changes() {
+    // Type 4, status 2 (Registered), RPN 0/0, value 12 << 25.
+    let rpn = Ump([0x4020_0000, 12 << 25, 0, 0]);
+    assert_eq!(
+        sent(&mut ByteOut::new(), rpn),
+        [
+            vec![0x20, 0xB0, 101, 0],
+            vec![0x20, 0xB0, 100, 0],
+            vec![0x20, 0xB0, 6, 12],
+            vec![0x20, 0xB0, 38, 0],
+        ]
+    );
+}
+
 #[test]
 fn sysex7_packets_are_sent_as_one_framed_message_at_the_end_packet() {
     let mut out = ByteOut::new();
