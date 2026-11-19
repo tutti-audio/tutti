@@ -131,8 +131,8 @@ impl ParamRef {
 
 /// The mix of a node in the session's graph (doc 013, "Bypass and mute are
 /// graph state"): the node's blend with its aligned input, which
-/// [`Graph::set_mix`] sets and a modulation route onto it ([`ModTarget`])
-/// drives. Its range is `0..=1`: a route's depth is a fraction of the range
+/// [`MixTarget`](crate::MixTarget) writes and a modulation route onto it
+/// ([`ModTarget`]) drives. Its range is `0..=1`: a route's depth is a fraction of the range
 /// declared for it (`Mods::range`), and the value is clamped to the blend.
 /// The mix is the lane's knob (one cell), so a route modulates around the mix
 /// the graph holds and removing it returns to that mix.

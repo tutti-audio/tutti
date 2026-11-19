@@ -19,7 +19,10 @@
 //!   staged by the write, a later write replacing it, and published with the
 //!   others staged by the next [`Session::update`] in one fixed order; a read
 //!   answers the staged value, else the one in force. A value in an atomic
-//!   cell (a param, the click) lands at once.
+//!   cell (a param, the click) lands at once. A control the
+//!   graph's editor holds (a node's mode and mix) is stored at once, a read
+//!   answering it, and handed to the editor by the next update, which the
+//!   node reads from its next block with no commit.
 //! - **Atomic.** Every item is checked and every `modify` has run before
 //!   anything lands, and the error's `at` is the first failing item. A batch is
 //!   never one cut for the audio thread: two stores can straddle a block.
@@ -33,6 +36,7 @@
 //! [`Session::update`]: crate::Session::update
 
 mod batch;
+mod controls;
 mod error;
 mod param;
 mod program;
@@ -42,6 +46,8 @@ mod target;
 mod verbs;
 
 pub use batch::{IntoAssign, IntoRead};
+pub(crate) use controls::Write;
+pub use controls::{MixTarget, ModeTarget};
 pub use error::{SetRefusal, ValueError, ValueErrorKind};
 pub use param::{ParamTarget, TargetInfo};
 pub(crate) use program::{

@@ -11,8 +11,6 @@
 setter  crates/tutti-session/src/general_midi.rs::GeneralMidi::set_gain  goes at the editor-table targets (7a S3): a target's `set`
 unit  crates/tutti-session/src/general_midi.rs::GeneralMidi::set_gain  goes at the editor-table targets (7a S3): a target's `set`
 setter  crates/tutti-session/src/graph.rs::Graph::set_feed  wiring of an event feed, a declaration: goes with the wiring declarations (11b)
-setter  crates/tutti-session/src/graph.rs::Graph::set_mix  goes at the editor-table targets (7a S3): a target's `set`
-setter  crates/tutti-session/src/graph.rs::Graph::set_mode  goes at the editor-table targets (7a S3): a target's `set`
 setter  crates/tutti-session/src/graph.rs::Graph::set_param_mod  a modulation declaration (range, source): goes with the declarations (11b)
 setter  crates/tutti-session/src/graph.rs::Graph::set_sample_rate  the graph's prepare rate, a configuration of the detached graph: goes with the builder's rate (11a)
 unit  crates/tutti-session/src/graph.rs::Graph::set_sample_rate  the graph's prepare rate, a configuration of the detached graph: goes with the builder's rate (11a)

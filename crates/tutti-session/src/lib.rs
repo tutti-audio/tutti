@@ -302,8 +302,7 @@ pub use tutti_graph::{
     BusError, BusRef, BusSource, Buses, HasParam, HasParams, MissingSource, ParamUnit, Scalar,
 };
 pub use tutti_graph::{
-    CloseError, CommitError, EventCapacity, Losses, MixError, ModeError, NodeMode, PassError,
-    Stamp, Wired, WiredMask,
+    CloseError, CommitError, EventCapacity, Losses, NodeMode, PassError, Stamp, Wired, WiredMask,
 };
 #[cfg(feature = "midi")]
 pub use tutti_ump::{MidiChannel, MidiGroup};
@@ -312,9 +311,9 @@ pub use value::MidiPolicyTarget;
 pub use value::OutputPolicyTarget;
 pub use value::{
     AnyAssign, AnyTarget, Assign, AutomationTarget, ClickTargets, ClickVolumeTarget, CurveTarget,
-    Effective, Info, IntoAssign, IntoRead, Knobs, LoopTarget, MacroTarget, MeterTarget, Modify,
-    Moved, NodeSlots, ParamTarget, PolarityTarget, RateTarget, ScalarTarget, SetRefusal,
-    SettingTarget, Target, TargetInfo, TempoTarget, ValueError, ValueErrorKind,
+    Effective, Info, IntoAssign, IntoRead, Knobs, LoopTarget, MacroTarget, MeterTarget, MixTarget,
+    ModeTarget, Modify, Moved, NodeSlots, ParamTarget, PolarityTarget, RateTarget, ScalarTarget,
+    SetRefusal, SettingTarget, Target, TargetInfo, TempoTarget, ValueError, ValueErrorKind,
 };
 #[cfg(feature = "midi")]
 pub use value::{ClipEventsTarget, HarmonyTarget, MpeModeTarget, OutputLatencyTarget};

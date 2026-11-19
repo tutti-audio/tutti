@@ -236,6 +236,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
                 // publishes, and the plan the commit sends and the blocks
                 // after it read the rest.
                 self.values.publish_pending();
+                self.graph.apply_controls();
                 self.mods
                     .modulation_phase(&mut self.graph, cx.mods, cx.now, out);
             }
@@ -301,6 +302,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// before the next update; [`update`](Self::update) commits iff the
     /// graph was edited.
     pub fn commit(&mut self) -> Committed {
+        self.graph.apply_controls();
         let committed = self.graph.commit();
         if committed == Committed::Sent {
             self.graph.publish_sent();

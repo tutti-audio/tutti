@@ -63,6 +63,10 @@ pub enum SlotId {
     SourceValue(ModSourceId),
     /// A param's automation curve, by the key the reconciler holds it under.
     Automation(TargetKey),
+    /// A node's mode.
+    Mode(NodeKey),
+    /// A node's mix.
+    Mix(NodeKey),
 }
 
 impl SlotId {

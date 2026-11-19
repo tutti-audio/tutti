@@ -461,10 +461,6 @@ pub enum Error {
     #[error(transparent)]
     Bus(#[from] tutti_graph::BusError),
 
-    /// A dry/wet mix was refused ([`Graph::set_mix`](crate::Graph::set_mix)).
-    #[error(transparent)]
-    Mix(#[from] tutti_graph::MixError),
-
     /// A transport command was refused ([`Session::play`](crate::Session::play),
     /// [`Session::schedule`](crate::Session::schedule) and the other verbs):
     /// the queue was full, or the command cannot fire. The command is handed

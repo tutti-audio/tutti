@@ -55,6 +55,11 @@ pub enum SetRefusal {
     /// A finite value outside the range the target takes.
     #[error("the value is outside the target's range")]
     OutOfRange,
+    /// A node's mode or mix needs a pass, and the node has none: its buses do
+    /// not say where its input goes when it does not run, so a bypass or a
+    /// blend would be a guess.
+    #[error(transparent)]
+    Unplaced(#[from] tutti_graph::PassError),
     /// The session follows a live tempo, which owns the tempo map: an app's
     /// write would be overwritten at the next message.
     #[error("a live tempo is followed")]

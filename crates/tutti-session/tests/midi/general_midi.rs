@@ -378,10 +378,11 @@ fn muting_the_setup_silences_the_wet_path_too() {
     );
 
     session
-        .graph()
-        .set_mode(gm.out(), NodeMode::Muted)
+        .set(gm.out().mode().to(NodeMode::Muted))
         .expect("the fader is in the graph");
-    for _ in 0..2 {
+    // The mode reaches the node with the update after the first block, and
+    // its fade is two blocks.
+    for _ in 0..3 {
         peak_of_block(&mut session);
     }
     for block in 0..8 {
