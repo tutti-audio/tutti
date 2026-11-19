@@ -21,12 +21,12 @@
 //! works once at each chunk's start: every [`Ramp`] takes a step and the chunk's constants are
 //! read from them, the modulation's offsets at the chunk's start and end among them. The chunks
 //! are counted from the first frame since the last reset, so the output does not depend on how
-//! the input is cut into calls. The caller [sets the targets of](PlateBank::retarget) the ramps when its controls
-//! move: each sounds through 20 ms of whole chunks, the pre-delay by two frames a chunk.
+//! the input is cut into calls. The caller [retargets](PlateBank::retarget) the ramps when its
+//! controls move: each sounds through 20 ms of whole chunks, the pre-delay by two frames a chunk.
 //!
 //! **Format.** The state and the views are the bank's float `F`. The coefficients are designed
-//! in `f64` and cross to `F` once per design (`target_of`, [`retarget`](PlateBank::retarget)). The decay
-//! gain is the loop gain's fourth root, `c = g^(1/4)`, applied four times a trip. The longest
+//! in `f64` and cross to `F` once per design (`target_of`, [`retarget`](PlateBank::retarget)). The
+//! decay gain is the loop gain's fourth root, `c = g^(1/4)`, applied four times a trip. The longest
 //! decay (8 s at 192 kHz, `T` of 1.39e5 frames) has `|ln g| = 0.63` and `1 - c = 0.145`, so `F`'s
 //! rounding of `c` (3e-8) moves the RT60 by about 2e-7 of itself in `f32`. A loop gain multiplies a
 //! delay line's sample, so the product rounds by about `u` a trip whatever the form: it is not
@@ -114,8 +114,8 @@ impl<F: Float> Default for Coefficients<F> {
 /// What a [`PlateBank`] approaches: every sounding control a [`Ramp`], the pre-delay by a
 /// distance a chunk and the rest in 20 ms.
 ///
-/// Aimed by [`PlateBank::retarget`], stepped once a chunk by [`PlateBank::process`]. A ramp steps
-/// before its chunk runs: the first chunk after a `retarget` reads step 1.
+/// Retargeted by [`PlateBank::retarget`], stepped once a chunk by [`PlateBank::process`]. A ramp
+/// steps before its chunk runs: the first chunk after a `retarget` reads step 1.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PlateRamps<F: Float> {
     ramp: Steps,
@@ -143,10 +143,10 @@ impl<F: Float + Lerp> PlateRamps<F> {
         .chain(&mut self.input)
     }
 
-    /// Lands on the targets now.
-    pub fn finish(&mut self) {
-        self.each().for_each(Ramp::finish);
-        self.pre.finish();
+    /// Jumps to the targets now.
+    pub fn jump_to_target(&mut self) {
+        self.each().for_each(Ramp::jump_to_target);
+        self.pre.jump_to_target();
     }
 
     fn step(&mut self) {
@@ -312,7 +312,7 @@ impl<F: Float + Lerp> PlateBank<F> {
         bank
     }
 
-    /// The ramps of this bank, at rest and aimed at nothing: its first [`retarget`](Self::retarget)
+    /// The ramps of this bank, at rest and set to nothing: its first [`retarget`](Self::retarget)
     /// is the caller's to land. Until then the bank is silent.
     #[must_use]
     pub fn ramps(&self) -> PlateRamps<F> {

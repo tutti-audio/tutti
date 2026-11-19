@@ -18,12 +18,12 @@ fn still(decay: f64) -> PlateControls {
     }
 }
 
-/// A bank at `rate`, landed on `c`.
-fn landed(rate: SampleRate, c: &PlateControls) -> (PlateBank<f32>, PlateRamps<f32>) {
+/// A bank at `rate`, at rest on `c`.
+fn at_rest(rate: SampleRate, c: &PlateControls) -> (PlateBank<f32>, PlateRamps<f32>) {
     let mut bank = PlateBank::<f32>::new(rate);
     let mut ramps = bank.ramps();
     bank.retarget(&mut ramps, c);
-    ramps.finish();
+    ramps.jump_to_target();
     (bank, ramps)
 }
 
@@ -57,7 +57,7 @@ fn run(
 
 /// The impulse response of `c` at `rate`, `frames` long.
 fn response(rate: SampleRate, c: &PlateControls, frames: usize) -> [Vec<f32>; 2] {
-    let (mut bank, mut ramps) = landed(rate, c);
+    let (mut bank, mut ramps) = at_rest(rate, c);
     run(&mut bank, &mut ramps, &impulse(frames), 480)
 }
 
@@ -203,7 +203,7 @@ fn the_tail_covers_the_response_falling_under_the_floor() {
                 pre_delay: Seconds::new(pre),
                 ..still(decay)
             };
-            let (mut bank, mut ramps) = landed(rate, &c);
+            let (mut bank, mut ramps) = at_rest(rate, &c);
             let (Tail::Finite(tail), Tail::Finite(ceiling)) =
                 (bank.tail_of(&ramps, &c), bank.tail())
             else {
@@ -291,7 +291,7 @@ fn the_modulated_delays_sweep_the_papers_excursion_in_quadrature() {
     ];
     for k in 0..8 {
         let start = k * 6_000;
-        let (mut bank, mut ramps) = landed(rate, &c);
+        let (mut bank, mut ramps) = at_rest(rate, &c);
         let mut x = vec![0.0f32; start + 4_000];
         x[start] = 1.0;
         let out = run(&mut bank, &mut ramps, &x, 480);
@@ -317,9 +317,9 @@ fn the_modulated_delays_sweep_the_papers_excursion_in_quadrature() {
     }
 }
 
-/// A bank that was never aimed renders silence.
+/// A bank that was never set renders silence.
 #[test]
-fn an_unaimed_bank_renders_silence() {
+fn a_bank_never_retargeted_renders_silence() {
     let mut bank = PlateBank::<f32>::new(SampleRate::SR_48K);
     let mut ramps = bank.ramps();
     let out = run(&mut bank, &mut ramps, &impulse(2_000), 256);
@@ -382,7 +382,7 @@ fn an_f64_plate_is_linear() {
         let mut bank = PlateBank::<f64>::new(SampleRate::SR_48K);
         let mut ramps = bank.ramps();
         bank.retarget(&mut ramps, &controls);
-        ramps.finish();
+        ramps.jump_to_target();
         run_wide(&mut bank, &mut ramps, input)
     };
     let (rx, ry, rm) = (render(&x), render(&y), render(&mix));
@@ -463,7 +463,7 @@ fn the_bandwidth_complement_keeps_its_relative_precision_where_one_minus_the_pol
             bandwidth: Hz::new(hz),
             ..PlateControls::DEFAULT
         };
-        let (_, ramps) = landed(rate, &controls);
+        let (_, ramps) = at_rest(rate, &controls);
         let exact = -libm::expm1(-std::f64::consts::TAU * hz / rate.get());
         let held = f64::from(ramps.bandwidth.now());
         stored = stored.max((held / exact - 1.0).abs());
@@ -494,7 +494,7 @@ fn the_damping_complement_keeps_its_relative_precision_near_the_largest_pole() {
             damping: Mix::new(damp),
             ..PlateControls::DEFAULT
         };
-        let (_, ramps) = landed(SampleRate::SR_48K, &controls);
+        let (_, ramps) = at_rest(SampleRate::SR_48K, &controls);
         let exact = 1.0 - damp;
         stored = stored.max((f64::from(ramps.damping.now()) / exact - 1.0).abs());
         formed = formed.max((f64::from(1.0f32 - damp as f32) / exact - 1.0).abs());

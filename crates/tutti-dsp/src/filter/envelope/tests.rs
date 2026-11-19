@@ -19,11 +19,11 @@ fn sine(hz: f64, amplitude: f64, frames: usize) -> Vec<f32> {
         .collect()
 }
 
-/// A bank of `ty` at `RATE` aimed at `controls`.
+/// A bank of `ty` at `RATE` set to `controls`.
 fn bank(ty: SvfType, controls: &EnvelopeFilterControls) -> EnvelopeFilterBank<f32> {
     let mut bank = EnvelopeFilterBank::<f32>::new(ChannelLayout::MONO, ty, RATE);
     bank.retarget(controls);
-    bank.finish();
+    bank.jump_to_target();
     bank
 }
 
@@ -292,7 +292,7 @@ fn an_f64_bank_at_depth_zero_is_the_cookbook_filter_at_its_base() {
     for ty in [SvfType::LowPass, SvfType::BandPass] {
         let mut b = EnvelopeFilterBank::<f64>::new(ChannelLayout::MONO, ty, RATE);
         b.retarget(&controls(1_000.0, 0.0, 0.707));
-        b.finish();
+        b.jump_to_target();
         let mut out = vec![0.0f64; x.len()];
         b.process(
             Planes::new(&[&x[..]]).unwrap(),

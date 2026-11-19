@@ -13,7 +13,7 @@
 //! read from them (the line lengths, the absorption gains, the reflection vector, the
 //! modulation's two ends the lengths are interpolated between). The chunks are counted from
 //! the first frame since the last reset, not from a call's edge, so the output does not
-//! depend on how the input is cut into calls. The *design* is not the bank's: the caller aims
+//! depend on how the input is cut into calls. The *design* is not the bank's: the caller retargets
 //! the ramps ([`retarget`](FdnBank::retarget)) when its controls move, on a grid of its own.
 //!
 //! **Retargeting ramps.** `retarget` only sets targets. Every parameter that sounds (the loop
@@ -26,7 +26,7 @@
 //! **Lines in flight.** A gain is designed for the length its line is moving to. While a line
 //! is still `L'` frames long and its design is for `L`, each band's gain is raised to `L' / L`
 //! at the chunk's start, so the decay stays the designed RT60 at whatever length the line has
-//! (`begin_chunk` derives it). A landed line runs the designed gains unchanged.
+//! (`begin_chunk` derives it). An at-rest line runs the designed gains unchanged.
 //!
 //! **The mix.** The identity of a diagonal network and the reflection of a
 //! mixing one have determinants +1 and -1, so no path of orthogonal matrices
@@ -36,7 +36,7 @@
 //! switches at the end of a ramp that leaves a mixing matrix (when `v` has
 //! reached line 0, where `I - 2 v v^T` flips one line's sign) and at the start
 //! of one that reaches it. Every step of a ramp is then orthogonal, `v` moves
-//! between unit vectors (a diagonal network aims it at line 0), and a mixing
+//! between unit vectors (a diagonal network points it at line 0), and a mixing
 //! network is bit-identical to a recurrence without `m`. The switch is a step in
 //! the sign of line 0's loop, as the model's own matrix steps between
 //! `Diagonal` and the first `Reflection` near line 0.
@@ -137,7 +137,7 @@ impl<F: Float> Target<F> {
 /// rate: a length and the pre-delay by a distance, the rest by 20 ms), and the few that jump
 /// (the line count, the modulation rate, the absorption's poles).
 ///
-/// Aimed by [`FdnBank::retarget`], stepped once a chunk by [`FdnBank::process`]. A ramp steps
+/// Retargeted by [`FdnBank::retarget`], stepped once a chunk by [`FdnBank::process`]. A ramp steps
 /// before its chunk runs: the first chunk after a `retarget` reads step 1.
 #[derive(Clone, Debug)]
 pub struct FdnRamps<F: Float> {
@@ -164,7 +164,7 @@ pub struct FdnRamps<F: Float> {
     v_len: Ramp<F>,
     /// `m` of `I - 2 m v v^T`: 0 for a diagonal network, 1 for a reflection. Only
     /// its target and whether it is moving are read (see the module docs): the
-    /// bank's `m` is 1 while it ramps or aims at 1, else 0.
+    /// bank's `m` is 1 while it ramps or targets 1, else 0.
     mix: Ramp<F>,
     input: Vec<Ramp<F>>,
     out: Vec<[Ramp<F>; 2]>,
@@ -212,10 +212,10 @@ impl<F: Float + Lerp> FdnRamps<F> {
             ])
     }
 
-    /// Lands on the targets now.
-    pub fn finish(&mut self) {
-        self.ramps().for_each(Ramp::finish);
-        self.lengths().for_each(Ramp::finish);
+    /// Jumps to the targets now.
+    pub fn jump_to_target(&mut self) {
+        self.ramps().for_each(Ramp::jump_to_target);
+        self.lengths().for_each(Ramp::jump_to_target);
     }
 
     /// Takes one step of every ramp.
@@ -324,7 +324,7 @@ pub struct FdnBank<F: Float> {
 
 impl<F: Float + Lerp> FdnBank<F> {
     /// The frames between a ramp's steps: the chunk. A caller that designs on a grid of
-    /// its own can align it here, so a retarget lands on a chunk's start.
+    /// its own can align it here, so a new target lands on a chunk's start.
     pub const CHUNK: usize = CHUNK;
 
     /// A silent bank of `layout` at `rate`. Allocates: build it on the control side.
@@ -370,7 +370,7 @@ impl<F: Float + Lerp> FdnBank<F> {
         bank
     }
 
-    /// The ramps of this bank, at rest and aimed at nothing: its first [`retarget`](Self::retarget)
+    /// The ramps of this bank, at rest and set to nothing: its first [`retarget`](Self::retarget)
     /// is the caller's to land.
     #[must_use]
     pub fn ramps(&self) -> FdnRamps<F> {
@@ -550,7 +550,7 @@ impl<F: Float + Lerp> FdnBank<F> {
             // The gains are designed for a length `L`: a loop of `L` frames loses 60 dB in `T`
             // seconds at `g = 10^(-3 L / (fs T))` a trip. The same `T` at the `L'` frames the
             // line is now takes `g^(L' / L)`, since `(g^(L'/L))^(fs T / L') = g^(fs T / L)`: each
-            // band's gain is raised to `L' / L` while the length is in flight, and a landed line
+            // band's gain is raised to `L' / L` while the length is in flight, and an at-rest line
             // runs the designed gains as they are. `L` is the design length the gains ramp
             // with (the gain in flight is a blend of two designs), so the ramp is continuous. The
             // power is taken in `f64` and each band crosses once.

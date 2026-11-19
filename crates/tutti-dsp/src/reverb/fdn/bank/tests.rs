@@ -29,12 +29,12 @@ fn layout(lines: usize, freeze: FreezeMode) -> FdnLayout {
     FdnLayout::new(lines, MaxDecay::DEFAULT, freeze).unwrap()
 }
 
-/// A bank of `layout` at `rate`, landed on `c`.
-fn landed(layout: &FdnLayout, rate: SampleRate, c: &FdnControls) -> (FdnBank<f32>, FdnRamps<f32>) {
+/// A bank of `layout` at `rate`, at rest on `c`.
+fn at_rest(layout: &FdnLayout, rate: SampleRate, c: &FdnControls) -> (FdnBank<f32>, FdnRamps<f32>) {
     let mut bank = FdnBank::<f32>::new(layout, rate);
     let mut ramps = bank.ramps();
     bank.retarget(&mut ramps, c);
-    ramps.finish();
+    ramps.jump_to_target();
     (bank, ramps)
 }
 
@@ -141,7 +141,7 @@ fn the_schroeder_integral_falls_60_db_in_the_designed_rt60() {
                 c.decay = [Seconds::new(rt60); 3];
                 c.diffusion = Mix::new(diffusion);
             });
-            let (mut bank, mut ramps) = landed(&l, RATE, &c);
+            let (mut bank, mut ramps) = at_rest(&l, RATE, &c);
             let frames = (2.0 * rt60 * RATE.get()) as usize;
             let [left, right] = run(&mut bank, &mut ramps, &impulse(frames), 64);
             // The two channels' energy, summed frame for frame.
@@ -209,7 +209,7 @@ fn each_band_decays_at_its_designed_rt60() {
     let length = fdn_of(&design(&l, RATE, &c)).lines[0].length.get();
     assert_eq!(length.fract(), 0.0, "a whole number of frames");
     let trip = length as usize;
-    let (mut bank, mut ramps) = landed(&l, RATE, &c);
+    let (mut bank, mut ramps) = at_rest(&l, RATE, &c);
     let [left, _] = run(&mut bank, &mut ramps, &impulse(8 * trip), 64);
 
     let g = [3.0, 1.5, 0.6].map(|t| trip_gain(length, t, RATE));
@@ -258,7 +258,7 @@ fn each_band_decays_at_its_designed_rt60() {
 fn a_frozen_network_keeps_its_energy() {
     let l = layout(8, FreezeMode::Freezable);
     let c = controls(|c| c.diffusion = Mix::new(1.0));
-    let (mut bank, mut ramps) = landed(&l, RATE, &c);
+    let (mut bank, mut ramps) = at_rest(&l, RATE, &c);
     run(&mut bank, &mut ramps, &noise(1, 24_000), 64);
     bank.retarget(
         &mut ramps,
@@ -290,7 +290,7 @@ fn a_diffusion_ramp_keeps_a_frozen_tails_energy() {
             c.freeze = freeze;
         })
     };
-    let (mut bank, mut ramps) = landed(&l, RATE, &at(0.0, false));
+    let (mut bank, mut ramps) = at_rest(&l, RATE, &at(0.0, false));
     run(&mut bank, &mut ramps, &noise(5, 48_000), 64);
     bank.retarget(&mut ramps, &at(0.0, true));
     run(&mut bank, &mut ramps, &vec![0.0; 24_000], 64);
@@ -328,7 +328,7 @@ fn a_diagonal_network_is_the_identity_a_comb_a_line_with_a_positive_sign() {
         })
         .sum::<f64>()
         * net.wet.to_amplitude().get();
-    let (mut bank, mut ramps) = landed(&l, RATE, &c);
+    let (mut bank, mut ramps) = at_rest(&l, RATE, &c);
     let [left, _] = run(&mut bank, &mut ramps, &impulse(10 * 48_000), 64);
     let sum: f64 = left.iter().map(|&v| f64::from(v)).sum();
     assert!(
@@ -359,7 +359,7 @@ fn the_first_echo_follows_the_pre_delay_the_wet_gain_and_the_width() {
             .min()
             .unwrap();
         let at = 4_800 + first;
-        let (mut bank, mut ramps) = landed(&l, RATE, &c);
+        let (mut bank, mut ramps) = at_rest(&l, RATE, &c);
         let [left, right] = run(&mut bank, &mut ramps, &impulse(at + 64), 64);
         assert!(
             left[..at].iter().chain(&right[..at]).all(|&x| x == 0.0),
@@ -384,7 +384,7 @@ fn the_first_echo_follows_the_pre_delay_the_wet_gain_and_the_width() {
     assert_eq!(silent, 0.0);
 }
 
-/// What is heard does not depend on how the stream is cut into calls: a retarget at a chunk's
+/// What is heard does not depend on how the stream is cut into calls: a new target at a chunk's
 /// start and one inside a chunk each give the same bits whether the input goes in whole, in
 /// calls of a frame, a chunk, a chunk and one, or a prime, because the chunks are counted
 /// from the last reset and not from a call's edge.
@@ -404,7 +404,7 @@ fn any_split_of_the_stream_gives_the_same_bits() {
     let x = noise(7, 6_000);
     for at in [1_024, 1_000] {
         let render = |block: usize| {
-            let (mut bank, mut ramps) = landed(&l, RATE, &a);
+            let (mut bank, mut ramps) = at_rest(&l, RATE, &a);
             let mut out = run(&mut bank, &mut ramps, &x[..at], block);
             bank.retarget(&mut ramps, &b);
             let tail = run(&mut bank, &mut ramps, &x[at..], block);
@@ -428,11 +428,11 @@ fn any_split_of_the_stream_gives_the_same_bits() {
 fn a_reset_bank_renders_as_a_fresh_one() {
     let l = layout(8, FreezeMode::Decaying);
     let c = controls(|c| c.modulation = Depth::of(0.8));
-    let (mut used, mut used_ramps) = landed(&l, RATE, &c);
+    let (mut used, mut used_ramps) = at_rest(&l, RATE, &c);
     run(&mut used, &mut used_ramps, &noise(3, 5_001), 64);
     used.reset();
-    used_ramps.finish();
-    let (mut fresh, mut fresh_ramps) = landed(&l, RATE, &c);
+    used_ramps.jump_to_target();
+    let (mut fresh, mut fresh_ramps) = at_rest(&l, RATE, &c);
     let x = impulse(12_000);
     let after = run(&mut used, &mut used_ramps, &x, 64);
     assert!(after[0].iter().any(|&s| s != 0.0));
@@ -445,7 +445,7 @@ fn a_reset_bank_renders_as_a_fresh_one() {
 fn a_clone_continues_where_the_original_was_and_shares_nothing() {
     let l = layout(8, FreezeMode::Decaying);
     let c = controls(|_| {});
-    let (mut bank, mut ramps) = landed(&l, RATE, &c);
+    let (mut bank, mut ramps) = at_rest(&l, RATE, &c);
     let x = noise(9, 4_000);
     run(&mut bank, &mut ramps, &x[..1_777], 64);
     bank.retarget(&mut ramps, &controls(|c| c.decay = [Seconds::new(0.7); 3]));
@@ -470,7 +470,7 @@ fn a_bank_is_silent_until_its_target_is_set_and_averages_its_input() {
     let y = noise(4, 4_096);
     let negated: Vec<f32> = y.iter().map(|s| -s).collect();
     let render = |channels: &[&[f32]]| {
-        let (mut bank, mut ramps) = landed(&l, RATE, &c);
+        let (mut bank, mut ramps) = at_rest(&l, RATE, &c);
         let (mut left, mut right) = (vec![0.0f32; y.len()], vec![0.0f32; y.len()]);
         bank.process(
             &mut ramps,
@@ -545,7 +545,7 @@ fn a_size_on_the_move_keeps_its_rt60_in_every_band() {
             c.size = Mix::new(size);
         })
     };
-    let (mut bank, mut ramps) = landed(&l, RATE, &bands(1.0));
+    let (mut bank, mut ramps) = at_rest(&l, RATE, &bands(1.0));
     bank.retarget(&mut ramps, &bands(0.0));
     let designed = [3.0, 1.5, 0.6];
     let Steps::Fixed(ramp_chunks) = ramp(RATE) else {
@@ -590,12 +590,12 @@ fn a_size_on_the_move_keeps_its_rt60_in_every_band() {
 #[test]
 fn the_tail_owes_the_pre_delay_still_to_fall() {
     let l = layout(8, FreezeMode::Decaying);
-    let (mut bank, mut ramps) = landed(&l, RATE, &still(|c| c.pre_delay = Seconds::new(0.4)));
+    let (mut bank, mut ramps) = at_rest(&l, RATE, &still(|c| c.pre_delay = Seconds::new(0.4)));
     bank.retarget(&mut ramps, &still(|_| {}));
     let Tail::Finite(owed) = bank.tail_of(&ramps, &still(|_| {})) else {
         panic!("finite")
     };
-    let (mut fresh, fresh_ramps) = landed(&l, RATE, &still(|_| {}));
+    let (mut fresh, fresh_ramps) = at_rest(&l, RATE, &still(|_| {}));
     let Tail::Finite(base) = fresh.tail_of(&fresh_ramps, &still(|_| {})) else {
         panic!("finite")
     };
@@ -604,7 +604,7 @@ fn the_tail_owes_the_pre_delay_still_to_fall() {
         "{owed:?} against {base:?}"
     );
     let longest = still(|c| c.decay = [Seconds::new(8.0); 3]);
-    let (mut worst, mut worst_ramps) = landed(
+    let (mut worst, mut worst_ramps) = at_rest(
         &l,
         RATE,
         &still(|c| {
@@ -631,7 +631,7 @@ fn a_length_moves_half_a_frame_a_chunk_and_lands_exactly() {
         still(|c| c.size = Mix::new(0.2)),
         still(|c| c.size = Mix::new(0.3)),
     );
-    let (mut bank, mut ramps) = landed(&l, RATE, &a);
+    let (mut bank, mut ramps) = at_rest(&l, RATE, &a);
     let (from, to) = (
         ReadPosition::from_span(fdn_of(&design(&l, RATE, &a)).lines[3].length),
         ReadPosition::from_span(fdn_of(&design(&l, RATE, &b)).lines[3].length),
@@ -665,7 +665,7 @@ fn a_length_moves_half_a_frame_a_chunk_and_lands_exactly() {
 #[test]
 fn the_pre_delay_moves_two_frames_a_chunk_and_lands_exactly() {
     let l = layout(8, FreezeMode::Decaying);
-    let (mut bank, mut ramps) = landed(&l, RATE, &still(|_| {}));
+    let (mut bank, mut ramps) = at_rest(&l, RATE, &still(|_| {}));
     bank.retarget(&mut ramps, &still(|c| c.pre_delay = Seconds::new(0.1)));
     let mut last = ReadPosition::START;
     for chunk in 1..=2_400 {
@@ -696,7 +696,7 @@ fn a_gain_ramps_over_twenty_milliseconds_of_chunks_and_lands_exactly() {
     assert_eq!(wanted, 30);
     assert_eq!(ramp(RATE), Steps::Fixed(wanted));
     let l = layout(8, FreezeMode::Decaying);
-    let (mut bank, mut ramps) = landed(&l, RATE, &still(|_| {}));
+    let (mut bank, mut ramps) = at_rest(&l, RATE, &still(|_| {}));
     bank.retarget(&mut ramps, &still(|c| c.wet = Db::new(-6.0206)));
     let target = ramps.wet.target();
     assert!((target - 0.5).abs() < 1e-4);
@@ -717,7 +717,7 @@ fn a_gain_ramps_over_twenty_milliseconds_of_chunks_and_lands_exactly() {
 #[test]
 fn a_line_idle_while_the_line_count_shrinks_ages_with_the_clock() {
     let c = still(|c| c.pre_delay = Seconds::new(0.0));
-    let (mut bank, mut ramps) = landed(&layout(8, FreezeMode::Decaying), RATE, &c);
+    let (mut bank, mut ramps) = at_rest(&layout(8, FreezeMode::Decaying), RATE, &c);
     run(&mut bank, &mut ramps, &impulse(1), 1);
     let held = bank.state.lines[7].back(1);
     assert_ne!(held, 0.0, "the impulse reached the last line");
@@ -753,7 +753,7 @@ fn an_f64_fdn_is_linear() {
         let mut bank = FdnBank::<f64>::new(&l, RATE);
         let mut ramps = bank.ramps();
         bank.retarget(&mut ramps, &c);
-        ramps.finish();
+        ramps.jump_to_target();
         let (mut l, mut r) = (vec![0.0f64; len], vec![0.0f64; len]);
         bank.process(
             &mut ramps,
@@ -828,7 +828,7 @@ fn the_longest_decay_at_192_khz_on_the_shortest_line_holds_its_closed_form_rt60_
     });
     let frames_per_line = fdn_of(&design(&l, rate, &c)).lines[0].length.get() as usize;
     let trips = (decay.get().get() * rate.get() / frames_per_line as f64) as usize - 2;
-    let (mut bank, mut ramps) = landed(&l, rate, &c);
+    let (mut bank, mut ramps) = at_rest(&l, rate, &c);
     let [left, _] = run(
         &mut bank,
         &mut ramps,

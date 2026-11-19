@@ -127,7 +127,7 @@ pub struct LadderKernel<F: Float + SimdLanes> {
     /// The blend in flight; the first one after `prepare` lands at once.
     blend: Ramp<LadderBlend<F>>,
     rate: SampleRate,
-    landed: bool,
+    applied: bool,
 }
 
 impl<F: Float + SimdLanes> LadderKernel<F> {
@@ -141,7 +141,7 @@ impl<F: Float + SimdLanes> LadderKernel<F> {
             bank: LadderBank::new(input.layout()),
             blend: Ramp::new(Self::design(&LadderControls::DEFAULT, rate)),
             rate,
-            landed: false,
+            applied: false,
         }
     }
 
@@ -169,19 +169,19 @@ impl<F: Float + SimdLanes> Kernel for LadderKernel<F> {
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
         self.rate = rate;
         self.blend = Ramp::new(Self::design(&LadderControls::DEFAULT, rate)).steps(RAMP_STEPS);
-        self.landed = false;
+        self.applied = false;
     }
 
     fn reset(&mut self) {
-        self.blend.finish();
+        self.blend.jump_to_target();
         self.bank.reset();
     }
 
     fn retarget(&mut self, controls: &LadderControls) {
         self.blend.retarget(Self::design(controls, self.rate));
-        if !self.landed {
-            self.blend.finish();
-            self.landed = true;
+        if !self.applied {
+            self.blend.jump_to_target();
+            self.applied = true;
         }
     }
 
@@ -676,19 +676,19 @@ mod tests {
         for (j, &level) in blocks.iter().enumerate() {
             near(level, expect(j), &format!("block {j} after the write"));
         }
-        // A cutoff that jumped would put block 0 at the landed gain, three times the
+        // A cutoff that jumped would put block 0 at the final gain, three times the
         // held one; the ramp's first block is well under it.
-        let landed = 1e-3 * core::f64::consts::FRAC_1_SQRT_2 * gain(g_of(1_400.0));
+        let arrived = 1e-3 * core::f64::consts::FRAC_1_SQRT_2 * gain(g_of(1_400.0));
         assert!(
-            f64::from(blocks[0]) < 0.8 * landed,
-            "block 0 is not yet landed"
+            f64::from(blocks[0]) < 0.8 * arrived,
+            "block 0 is not yet arrived"
         );
     }
 
     /// Drive multiplies straight into the saturator, so a step would click: a drive
     /// written between blocks ramps on the stream clock like a cutoff, and arrives. The
     /// level of a high-pass tone below the saturator's knee rises on every block of the ramp
-    /// (a drive that jumped would start at its landed level, and one that never moved would
+    /// (a drive that jumped would start at its final level, and one that never moved would
     /// not rise), starts well under it, and settles on it.
     #[test]
     fn a_drive_written_between_blocks_ramps_on_the_stream() {
@@ -705,20 +705,20 @@ mod tests {
             assert!(n.param_set().set(UnitParam::Drive, 9.0));
         };
         let (low, blocks) = block_levels(make, change, 6_000.0, 0.1);
-        let landed = blocks[7];
-        assert!(landed > 4.0 * low, "the drive arrived: {low} to {landed}");
+        let arrived = blocks[7];
+        assert!(arrived > 4.0 * low, "the drive arrived: {low} to {arrived}");
         assert!(
-            blocks[0] > low && blocks[0] < 0.5 * landed,
-            "block 0 is under way: {low} < {} < {landed}",
+            blocks[0] > low && blocks[0] < 0.5 * arrived,
+            "block 0 is under way: {low} < {} < {arrived}",
             blocks[0]
         );
         // Four 64-frame blocks of a 240-frame ramp: each one louder than the last, then
-        // landed (the ramp is done by block 4).
+        // at rest (the ramp is done by block 4).
         assert!(blocks[..5].windows(2).all(|w| w[1] > w[0]), "{blocks:?}");
         assert!(
             blocks[5..]
                 .iter()
-                .all(|&l| (l - landed).abs() < 0.01 * landed)
+                .all(|&l| (l - arrived).abs() < 0.01 * arrived)
         );
     }
 

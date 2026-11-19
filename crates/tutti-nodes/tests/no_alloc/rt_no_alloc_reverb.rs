@@ -4,7 +4,7 @@
 //! the two corners of all of them together. The node is driven alone in a graph by
 //! `tutti_graph::contract::BlockRig`: its `prepare` (which sizes the lines, the pre-delay and
 //! the scratch a design is made in) runs when the rig is built, outside the gate; the gate
-//! walks only `process`, which designs, aims the ramps, renders and tracks the tail. The
+//! walks only `process`, which designs, retargets the ramps, renders and tracks the tail. The
 //! output stays finite and bounded. The park (the clear, the zero fill of the cut block, the
 //! idle blocks and the wake), a lane driving the slow controls (the longest tail a block takes
 //! is designed from them) and a block of non-finite input run under it too.

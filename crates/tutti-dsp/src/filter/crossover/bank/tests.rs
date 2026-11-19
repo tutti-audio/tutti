@@ -18,7 +18,7 @@ fn model(freqs: &[f64]) -> CrossoverModel {
 const RAMP: u32 = 16;
 
 /// A ramp at rest on `model`.
-fn landed(model: &CrossoverModel) -> Ramp<CrossoverBlend> {
+fn at_rest(model: &CrossoverModel) -> Ramp<CrossoverBlend> {
     Ramp::new(model.blend()).steps(RAMP)
 }
 
@@ -57,7 +57,7 @@ fn run(
     input: &[Vec<f64>],
     blocks: &[usize],
 ) -> Vec<Vec<f64>> {
-    run_ramp(bank, &mut landed(model), input, blocks)
+    run_ramp(bank, &mut at_rest(model), input, blocks)
 }
 
 /// The unit impulse response of every band of a mono tree.
@@ -236,7 +236,7 @@ fn any_split_renders_the_frames_of_the_whole() {
         .collect();
     let render = |blocks: &[usize]| {
         let mut bank = CrossoverBank::<f64>::new(ChannelLayout::STEREO);
-        let mut ramp = landed(&models[0]);
+        let mut ramp = at_rest(&models[0]);
         let mut out = vec![vec![0.0f64; 1_501]; 6];
         for (w, m) in cuts.windows(2).zip(&models) {
             ramp.retarget(m.blend());
@@ -275,7 +275,7 @@ fn a_step_in_the_splits_ramps_linearly_in_the_gain_and_lands_exactly() {
     for m in [0usize, 1, 7, 14, 15, 16, 25] {
         let mut x = vec![0.0f64; m + 1];
         x[m] = 1.0;
-        let mut ramp = landed(&from);
+        let mut ramp = at_rest(&from);
         ramp.retarget(to.blend());
         let out = run_ramp(
             &mut CrossoverBank::<f64>::new(ChannelLayout::MONO),
@@ -294,7 +294,7 @@ fn a_step_in_the_splits_ramps_linearly_in_the_gain_and_lands_exactly() {
         );
     }
     let (low, all_pass) = (to.coeffs[0].low().b0, to.coeffs[1].all_pass().b0);
-    let mut ramp = landed(&from);
+    let mut ramp = at_rest(&from);
     ramp.retarget(to.blend());
     let mut x = vec![0.0f64; 40];
     x[39] = 1.0;
@@ -327,7 +327,7 @@ fn a_split_ramping_between_the_extremes_stays_within_the_derived_bound() {
             .map(|i| if alternate { [1.0, -1.0][i % 2] } else { 1.0 })
             .collect();
         let mut bank = CrossoverBank::<f64>::new(ChannelLayout::MONO);
-        let mut ramp = landed(&lo);
+        let mut ramp = at_rest(&lo);
         let mut peak = 0.0f64;
         for (period, chunk) in input.chunks(16).enumerate() {
             ramp.retarget(if period.is_multiple_of(2) { &hi } else { &lo }.blend());
@@ -379,7 +379,7 @@ fn a_narrow_view_is_filled_as_far_as_it_goes() {
     let ins: Vec<&[f64]> = input.iter().map(|c| &c[..]).collect();
     let mut outs: Vec<&mut [f64]> = out.iter_mut().map(|c| &mut c[..]).collect();
     CrossoverBank::<f64>::new(ChannelLayout::STEREO).process(
-        &mut landed(&m),
+        &mut at_rest(&m),
         Planes::new(&ins).unwrap(),
         PlanesMut::new(&mut outs).unwrap(),
     );
@@ -388,7 +388,7 @@ fn a_narrow_view_is_filled_as_far_as_it_goes() {
     let mut out = vec![vec![9.0f64; 300]; 6];
     let mut outs: Vec<&mut [f64]> = out.iter_mut().map(|c| &mut c[..]).collect();
     CrossoverBank::<f64>::new(ChannelLayout::STEREO).process(
-        &mut landed(&m),
+        &mut at_rest(&m),
         Planes::new(&ins[..1]).unwrap(),
         PlanesMut::new(&mut outs).unwrap(),
     );
@@ -480,7 +480,7 @@ fn a_five_hz_split_at_192_khz_holds_its_bands_and_noise_in_f32() {
     let mut out = vec![vec![0.0f32; 2 * whole]; 2];
     let mut outs: Vec<&mut [f32]> = out.iter_mut().map(|c| &mut c[..]).collect();
     CrossoverBank::<f32>::new(ChannelLayout::MONO).process(
-        &mut landed(&model),
+        &mut at_rest(&model),
         Planes::new(&[&input[..]]).unwrap(),
         PlanesMut::new(&mut outs).unwrap(),
     );

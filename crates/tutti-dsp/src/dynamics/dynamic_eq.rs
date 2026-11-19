@@ -217,7 +217,7 @@ pub struct DynamicEqBank<F: Float + SimdLanes> {
 }
 
 impl<F: Float + SimdLanes + Lerp> DynamicEqBank<F> {
-    /// A band of `mode` over `width` channels at `rate` that does nothing, to be aimed.
+    /// A band of `mode` over `width` channels at `rate` that does nothing, to be set.
     /// Allocates: build it on the control side.
     #[must_use]
     pub fn new(mode: DynamicMode, width: ChannelLayout, rate: SampleRate) -> Self {
@@ -273,14 +273,14 @@ impl<F: Float + SimdLanes + Lerp> DynamicEqBank<F> {
         self.phase = Samples::ZERO;
         self.bell.reset();
         self.key.reset();
-        self.finish();
+        self.jump_to_target();
     }
 
     /// Lands the filters on their design now.
-    pub fn finish(&mut self) {
+    pub fn jump_to_target(&mut self) {
         self.design_bell();
-        self.coefficients.finish();
-        self.key.finish();
+        self.coefficients.jump_to_target();
+        self.key.jump_to_target();
     }
 
     /// Aims at `controls`: the curve and the times land whole, and the bell and the detector's

@@ -103,7 +103,7 @@ impl Default for MultibandSettings {
 /// its end is not driven.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct MultibandLanes<'a, F: Float> {
-    /// Band `b`'s threshold in dB. A frame that is not finite is the aimed threshold.
+    /// Band `b`'s threshold in dB. A frame that is not finite is the set threshold.
     pub thresholds: [Option<Mono<'a, F>>; MAX_BANDS],
 }
 
@@ -233,8 +233,8 @@ pub struct MultibandBank<F: Float + SimdLanes + Lerp> {
     audible: [Ramp<F>; MAX_BANDS],
     /// The steps a weight ramp takes: [`GAIN_RAMP`] at the rate.
     steps: u32,
-    /// Whether the first `retarget` since the last reset has landed.
-    landed: bool,
+    /// Whether the first `retarget` since the last reset has been applied.
+    applied: bool,
     /// Each band's deepest reduction since the last reading, in dB.
     deepest: [Db; MAX_BANDS],
     scratch: Scratch<F>,
@@ -242,7 +242,7 @@ pub struct MultibandBank<F: Float + SimdLanes + Lerp> {
 
 impl<F: Float + SimdLanes + Lerp> MultibandBank<F> {
     /// A multiband of `bands` bands over `width` at `rate`, splitting and summing until it
-    /// is aimed. Allocates: build it on the control side.
+    /// is set. Allocates: build it on the control side.
     ///
     /// # Errors
     ///
@@ -282,7 +282,7 @@ impl<F: Float + SimdLanes + Lerp> MultibandBank<F> {
             bypass: [Ramp::new(F::ZERO); MAX_BANDS],
             audible: [Ramp::new(F::ONE); MAX_BANDS],
             steps,
-            landed: false,
+            applied: false,
             deepest: [Db::UNITY; MAX_BANDS],
             scratch: Scratch::new(channels, bands),
         }
@@ -306,12 +306,12 @@ impl<F: Float + SimdLanes + Lerp> MultibandBank<F> {
         self.bypass = [Ramp::new(F::ZERO); MAX_BANDS];
         self.audible = [Ramp::new(F::ONE); MAX_BANDS];
         self.deepest = [Db::UNITY; MAX_BANDS];
-        self.landed = false;
+        self.applied = false;
     }
 
     /// Aims at `controls`: the crossover is designed in place (total: a set out of order is
     /// solved with its splits no lower than the one before) and ramps to the design over a
-    /// grid period, each band's compressor is aimed as [`CompressorBank::retarget`] does, and the
+    /// grid period, each band's compressor is set as [`CompressorBank::retarget`] does, and the
     /// bypass and solo weights ramp over [`GAIN_RAMP`]. The first `retarget` after
     /// [`new`](Self::new) or [`reset`](Self::reset) lands whole. No allocation.
     pub fn retarget(&mut self, controls: &MultibandSettings) {
@@ -325,14 +325,14 @@ impl<F: Float + SimdLanes + Lerp> MultibandBank<F> {
             self.bypass[b].retarget_by(flag(band.bypass), steps);
             self.audible[b].retarget_by(flag(!any_solo || band.solo), steps);
         }
-        if !self.landed {
-            self.blend.finish();
+        if !self.applied {
+            self.blend.jump_to_target();
             for b in 0..self.bands {
-                self.compressors[b].finish();
-                self.bypass[b].finish();
-                self.audible[b].finish();
+                self.compressors[b].jump_to_target();
+                self.bypass[b].jump_to_target();
+                self.audible[b].jump_to_target();
             }
-            self.landed = true;
+            self.applied = true;
         }
     }
 
@@ -434,7 +434,7 @@ impl<F: Float + SimdLanes + Lerp> MultibandBank<F> {
             // The meter counts a band unless the whole chunk is bypassed.
             let deepest = self.compressors[b].take_deepest();
             let bypass = &self.bypass[b];
-            if bypass.blend_len(n) != 0 || bypass.target() < F::ONE {
+            if bypass.blended_frames(n) != 0 || bypass.target() < F::ONE {
                 self.deepest[b] = self.deepest[b].max(deepest);
             }
             weights(bypass, &mut by[..n]);
@@ -487,7 +487,7 @@ fn flag<F: Float>(on: bool) -> F {
 /// target.
 #[inline]
 fn weights<F: Float + Lerp>(ramp: &Ramp<F>, out: &mut [F]) {
-    let blended = ramp.blend_len(out.len());
+    let blended = ramp.blended_frames(out.len());
     let taken = ramp.steps_taken();
     for (i, w) in out.iter_mut().enumerate() {
         *w = if i < blended {

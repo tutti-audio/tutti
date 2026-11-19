@@ -79,7 +79,7 @@ pub trait Kernel: Clone + Send + 'static {
     /// Back to silence. Audio thread: no allocation.
     fn reset(&mut self);
 
-    /// Designs `controls` and aims the running coefficients at the design. Audio thread:
+    /// Designs `controls` and sets the running coefficients' target to the design. Audio thread:
     /// no allocation.
     fn retarget(&mut self, controls: &<Self::Set as ControlSet>::Controls);
 

@@ -130,7 +130,7 @@ fn opens<F: Float>(level: F, threshold: F, silence_opens: bool) -> bool {
 /// not driven.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct GateLanes<'a, F: Float> {
-    /// The threshold in dB. A frame that is not finite is the aimed threshold.
+    /// The threshold in dB. A frame that is not finite is the set threshold.
     pub threshold: Option<Mono<'a, F>>,
 }
 
@@ -157,7 +157,7 @@ pub struct GateBank<F: Float + SimdLanes> {
 }
 
 impl<F: Float + SimdLanes + Lerp> GateBank<F> {
-    /// A gate that passes everything at `rate`, to be aimed.
+    /// A gate that passes everything at `rate`, to be set.
     #[must_use]
     pub fn new(rate: SampleRate) -> Self {
         // 5 ms is a few hundred frames at any real rate; an absurd rate saturates rather
@@ -187,22 +187,22 @@ impl<F: Float + SimdLanes + Lerp> GateBank<F> {
         self
     }
 
-    /// Back to silence: the gate closed and no hold left, and the range landed on its
+    /// Back to silence: the gate closed and no hold left, and the range at rest on its
     /// target. No allocation.
     pub fn reset(&mut self) {
         self.follower = Smoothed::ZERO;
         self.hold_counter = 0;
-        self.range.finish();
+        self.range.jump_to_target();
         if let Some(key) = &mut self.key {
             key.reset();
         }
     }
 
     /// Lands the range on its target now.
-    pub fn finish(&mut self) {
-        self.range.finish();
+    pub fn jump_to_target(&mut self) {
+        self.range.jump_to_target();
         if let Some(key) = &mut self.key {
-            key.finish();
+            key.jump_to_target();
         }
     }
 
@@ -248,7 +248,7 @@ impl<F: Float + SimdLanes + Lerp> GateBank<F> {
         let width = input.channels().min(output.channels());
         let d = self.design;
         let threshold = F::from_unit(d.threshold);
-        let blended = self.range.blend_len(frames);
+        let blended = self.range.blended_frames(frames);
         let taken = self.range.steps_taken();
         let held = db_gain(self.range.target());
         let mut gains = [F::ZERO; CHUNK];

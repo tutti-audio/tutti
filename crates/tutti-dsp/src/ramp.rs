@@ -79,7 +79,8 @@ impl<T: Lerp> Ramp<T> {
         }
     }
 
-    /// The same ramp, taking `steps` steps to each target it is given by [`retarget`](Self::retarget).
+    /// The same ramp, taking `steps` steps to each target it is given by
+    /// [`retarget`](Self::retarget).
     #[must_use]
     pub fn steps(self, steps: u32) -> Self {
         Self { steps, ..self }
@@ -103,7 +104,7 @@ impl<T: Lerp> Ramp<T> {
     }
 
     /// Jumps to the target now.
-    pub fn finish(&mut self) {
+    pub fn jump_to_target(&mut self) {
         self.from = self.to;
         self.k = self.n;
     }
@@ -131,7 +132,7 @@ impl<T: Lerp> Ramp<T> {
     /// How many of the next `frames` frames read a blend, each short of the last step;
     /// the frames after them read the target. None when the ramp starts on its target.
     #[must_use]
-    pub fn blend_len(&self, frames: usize) -> usize {
+    pub fn blended_frames(&self, frames: usize) -> usize {
         if self.from == self.to {
             return 0;
         }
@@ -170,8 +171,8 @@ impl<T: Lerp> Ramp<T> {
 }
 
 impl<F: Float + Lerp> Ramp<F> {
-    /// Sets the target to `to`, reached in `steps`. A target already set leaves the ramp as it is (a
-    /// value sent again every block does not stretch it).
+    /// Sets the target to `to`, reached in `steps`. A target already set leaves the ramp as it is
+    /// (a value sent again every block does not stretch it).
     pub fn retarget_by(&mut self, to: F, steps: Steps) {
         if to == self.to {
             return;

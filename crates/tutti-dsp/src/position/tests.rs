@@ -17,7 +17,7 @@ fn a_position_ramp_lands_on_the_target_and_reads_the_closed_form_between() {
 }
 
 #[test]
-fn a_position_ramp_aimed_by_rate_takes_the_distance_over_the_rate_in_steps() {
+fn a_position_ramp_retargeted_by_rate_takes_the_distance_over_the_rate_in_steps() {
     let mut ramp = Ramp::new(at(100_u64 << 32));
     // 20 frames at no more than 0.5 a step: 40 steps.
     ramp.retarget_position(at(120_u64 << 32), Steps::Rate(0.5));

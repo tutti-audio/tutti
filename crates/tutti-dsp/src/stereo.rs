@@ -87,7 +87,7 @@ pub struct WidthBank<F: Float> {
 }
 
 impl<F: Float + Lerp> WidthBank<F> {
-    /// A pair at unity width at `rate`, to be aimed.
+    /// A pair at unity width at `rate`, to be set.
     #[must_use]
     pub fn new(rate: SampleRate) -> Self {
         let steps = u32::try_from(GAIN_RAMP.to_samples_ceil(rate).get()).unwrap_or(u32::MAX);
@@ -98,8 +98,8 @@ impl<F: Float + Lerp> WidthBank<F> {
     }
 
     /// Lands the width on its target now.
-    pub fn finish(&mut self) {
-        self.width.finish();
+    pub fn jump_to_target(&mut self) {
+        self.width.jump_to_target();
     }
 
     /// Aims at `controls`: the width ramps over [`GAIN_RAMP`]. A width that is not
@@ -131,7 +131,7 @@ impl<F: Float + Lerp> WidthBank<F> {
             &mut right.samples_mut()[..frames],
         );
         let half = F::lit(0.5);
-        let blended = self.width.blend_len(frames);
+        let blended = self.width.blended_frames(frames);
         let taken = self.width.steps_taken();
         let held = self.width.target();
         if blended == 0 && held == F::from_unit(StereoWidth::NATURAL) {

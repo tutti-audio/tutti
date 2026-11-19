@@ -55,7 +55,7 @@ fn a_step_reads_the_closed_form_and_lands_on_the_target() {
 
 /// A new target starts from the value in flight, not from the old start or target.
 #[test]
-fn an_aim_mid_flight_starts_from_the_value_in_flight() {
+fn a_retarget_mid_flight_starts_from_the_value_in_flight() {
     let mut g = Ramp::new(0.0f32).steps(4);
     g.retarget(4.0);
     g.advance(2);
@@ -70,13 +70,13 @@ fn an_aim_mid_flight_starts_from_the_value_in_flight() {
 fn the_blended_frames_stop_one_short_of_the_last_step() {
     let mut g = Ramp::new(0.0f32).steps(16);
     g.retarget(1.0);
-    assert_eq!(g.blend_len(64), 15);
-    assert_eq!(g.blend_len(4), 4);
+    assert_eq!(g.blended_frames(64), 15);
+    assert_eq!(g.blended_frames(4), 4);
     g.advance(10);
-    assert_eq!(g.blend_len(64), 5);
+    assert_eq!(g.blended_frames(64), 5);
     g.advance(5);
-    assert_eq!(g.blend_len(64), 0);
+    assert_eq!(g.blended_frames(64), 0);
     let mut same = Ramp::new(3.0f32).steps(16);
     same.retarget(3.0);
-    assert_eq!(same.blend_len(64), 0);
+    assert_eq!(same.blended_frames(64), 0);
 }

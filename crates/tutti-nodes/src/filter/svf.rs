@@ -150,7 +150,7 @@ pub struct SvfKernel<F: Float + SimdLanes> {
     /// The coefficients in flight; the first design after `prepare` lands at once.
     coefficients: Ramp<SvfCoefficients<F>>,
     rate: SampleRate,
-    landed: bool,
+    applied: bool,
 }
 
 impl<F: Float + SimdLanes> SvfKernel<F> {
@@ -164,7 +164,7 @@ impl<F: Float + SimdLanes> SvfKernel<F> {
             bank: SvfBank::new(input.layout()),
             coefficients: Ramp::new(Self::design(&SvfControls::DEFAULT, rate)),
             rate,
-            landed: false,
+            applied: false,
         }
     }
 
@@ -192,20 +192,20 @@ impl<F: Float + SimdLanes> Kernel for SvfKernel<F> {
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
         self.rate = rate;
         self.coefficients = Ramp::new(Self::design(&SvfControls::DEFAULT, rate)).steps(RAMP_STEPS);
-        self.landed = false;
+        self.applied = false;
     }
 
     fn reset(&mut self) {
-        self.coefficients.finish();
+        self.coefficients.jump_to_target();
         self.bank.reset();
     }
 
     fn retarget(&mut self, controls: &SvfControls) {
         self.coefficients
             .retarget(Self::design(controls, self.rate));
-        if !self.landed {
-            self.coefficients.finish();
-            self.landed = true;
+        if !self.applied {
+            self.coefficients.jump_to_target();
+            self.applied = true;
         }
     }
 
@@ -718,11 +718,11 @@ mod tests {
         (gain * core::f64::consts::FRAC_1_SQRT_2) as f32
     }
 
-    /// A clone starts with its cells landed: a clone of a node whose cutoff ramp is in
+    /// A clone starts with its cells at rest: a clone of a node whose cutoff ramp is in
     /// flight renders its first block at the cell's cutoff, not at where the source's ramp
     /// stands on the source's clock.
     #[test]
-    fn a_clone_of_a_node_mid_ramp_starts_landed() {
+    fn a_clone_of_a_node_mid_ramp_starts_at_rest() {
         use crate::test_support::sine;
         let rate = SampleRate::SR_48K;
         let mut node = tutti_graph::contract::prepared(
@@ -737,16 +737,16 @@ mod tests {
         block(&mut node);
         assert!(node.param_set().set(UnitParam::Cutoff, 6_000.0));
         let source = block(&mut node);
-        let landed = lp_rms(1_500.0, 6_000.0, 0.707);
+        let arrived = lp_rms(1_500.0, 6_000.0, 0.707);
         assert!(
-            source < 0.8 * landed,
-            "the source is under way: {source} vs {landed}"
+            source < 0.8 * arrived,
+            "the source is under way: {source} vs {arrived}"
         );
         let mut clone = node.clone();
         let first = block(&mut clone);
         assert!(
-            first > 0.85 * landed,
-            "the clone landed: {first} vs {landed}"
+            first > 0.85 * arrived,
+            "the clone arrived: {first} vs {arrived}"
         );
     }
 

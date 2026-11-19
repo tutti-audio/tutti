@@ -105,13 +105,13 @@ const RATE: SampleRate = SampleRate::SR_48K;
 // The block tests below run an `F = f32` bank on `f32` views, the session's audio format, so
 // their tolerances are `f32`'s; the `f64` tests at the end run the bank at `F = f64`.
 
-/// A bank of `kind` landed on `drive`.
-fn landed(kind: ShapeKind, drive: f64) -> WaveshaperBank<f32> {
+/// A bank of `kind` at rest on `drive`.
+fn at_rest(kind: ShapeKind, drive: f64) -> WaveshaperBank<f32> {
     let mut bank = WaveshaperBank::<f32>::new(kind, RATE);
     bank.retarget(&WaveshaperControls {
         drive: Drive::new(drive),
     });
-    bank.finish();
+    bank.jump_to_target();
     bank
 }
 
@@ -133,12 +133,12 @@ fn run(
     out
 }
 
-/// A block through a landed bank is the curve of each sample at the drive: the loop for
+/// A block through an at-rest bank is the curve of each sample at the drive: the loop for
 /// each kind picks the curve it names and reads its own channel at its own frame.
 #[test]
 fn a_held_block_is_the_curve_of_each_sample() {
     for kind in KINDS {
-        let mut bank = landed(kind, 2.5);
+        let mut bank = at_rest(kind, 2.5);
         let ins: Vec<Vec<f32>> = (0..3).map(|c| noise(c + 7, 64, 1.0)).collect();
         for (c, (y, x)) in run(&mut bank, None, &ins).iter().zip(&ins).enumerate() {
             for (i, (&y, &x)) in y.iter().zip(x).enumerate() {
@@ -158,7 +158,7 @@ fn a_held_block_is_the_curve_of_each_sample() {
 fn a_lane_is_read_per_frame_on_every_channel() {
     let lane: Vec<f32> = (0..150).map(|i| 1.0 + 0.125 * i as f32).collect();
     for kind in KINDS {
-        let mut bank = landed(kind, 1.0);
+        let mut bank = at_rest(kind, 1.0);
         let ins: Vec<Vec<f32>> = (0..3).map(|c| noise(c + 11, 150, 1.0)).collect();
         for (c, (y, x)) in run(&mut bank, Some(&lane), &ins)
             .iter()
@@ -179,13 +179,13 @@ fn a_lane_is_read_per_frame_on_every_channel() {
 /// A lane frame that is not finite reads the drive in force, a finite one its own.
 #[test]
 fn a_non_finite_lane_frame_reads_the_drive_in_force() {
-    let mut bank = landed(ShapeKind::HardClip, 2.0);
+    let mut bank = at_rest(ShapeKind::HardClip, 2.0);
     let lane = [f32::NAN, 4.0, f32::INFINITY, f32::NEG_INFINITY];
     let out = run(&mut bank, Some(&lane), &[vec![0.25; 4]]);
     assert_eq!(out[0], [0.5, 1.0, 0.5, 0.5]);
 }
 
-/// A drive aimed past the held one ramps over `GAIN_RAMP`: frame `i` of a hard clip of a
+/// A drive set past the held one ramps over `GAIN_RAMP`: frame `i` of a hard clip of a
 /// constant is the line `1 + (3 - 1) * (i + 1) / n`, in whole blocks or in pieces, and the
 /// block after it is on the target.
 #[test]
@@ -193,7 +193,7 @@ fn a_drive_step_ramps_linearly_over_the_ramp() {
     let n = GAIN_RAMP.to_samples_ceil(RATE).get();
     let x = 0.2f32;
     for block in [n + 40, 7] {
-        let mut bank = landed(ShapeKind::HardClip, 1.0);
+        let mut bank = at_rest(ShapeKind::HardClip, 1.0);
         bank.retarget(&WaveshaperControls {
             drive: Drive::new(3.0),
         });
@@ -218,19 +218,19 @@ fn a_drive_step_ramps_linearly_over_the_ramp() {
 /// Each channel is shaped by its own samples alone.
 #[test]
 fn channels_are_independent() {
-    let mut bank = landed(ShapeKind::HardClip, 1.0);
+    let mut bank = at_rest(ShapeKind::HardClip, 1.0);
     let out = run(&mut bank, None, &[vec![4.0], vec![0.5]]);
     assert_eq!((out[0][0], out[1][0]), (1.0, 0.5));
 }
 
-/// `finish` lands the drive on its target at once: the block after is the held curve.
+/// `jump_to_target` lands the drive on its target at once: the block after is the held curve.
 #[test]
 fn settle_lands_on_the_target() {
-    let mut bank = landed(ShapeKind::Softsign, 1.0);
+    let mut bank = at_rest(ShapeKind::Softsign, 1.0);
     bank.retarget(&WaveshaperControls {
         drive: Drive::new(3.0),
     });
-    bank.finish();
+    bank.jump_to_target();
     let out = run(&mut bank, None, &[vec![1.0]]);
     assert_eq!(out[0][0], 0.75);
 }
@@ -241,7 +241,7 @@ fn settle_lands_on_the_target() {
 #[test]
 fn a_non_finite_lane_frame_mid_ramp_reads_the_ramp() {
     let n = GAIN_RAMP.to_samples_ceil(RATE).get();
-    let mut bank = landed(ShapeKind::HardClip, 1.0);
+    let mut bank = at_rest(ShapeKind::HardClip, 1.0);
     bank.retarget(&WaveshaperControls {
         drive: Drive::new(3.0),
     });
@@ -262,21 +262,21 @@ fn a_non_finite_lane_frame_mid_ramp_reads_the_ramp() {
 #[test]
 fn the_drive_floors_hold_on_the_lane_and_the_ramp() {
     // Lane: a hard clip at -2 is drive 0 (silence); a crush at 0.5 is one level per unit.
-    let mut clip = landed(ShapeKind::HardClip, 1.0);
+    let mut clip = at_rest(ShapeKind::HardClip, 1.0);
     let out = run(&mut clip, Some(&[-2.0; 4]), &[vec![0.25; 4]]);
     assert_eq!(out[0], [0.0; 4]);
-    let mut crush = landed(ShapeKind::Crush, 4.0);
+    let mut crush = at_rest(ShapeKind::Crush, 4.0);
     let out = run(&mut crush, Some(&[0.5, 0.0, -1.0, 0.5]), &[vec![0.6; 4]]);
     assert_eq!(out[0], [1.0; 4]);
     // Hardness 1 puts a quarter on the soft step's rational 12826 / 262144; hardness 4 would
     // put it on 0.25.
-    let mut soft = landed(ShapeKind::SoftCrush, 4.0);
+    let mut soft = at_rest(ShapeKind::SoftCrush, 4.0);
     let out = run(&mut soft, Some(&[0.5, 0.0, -1.0, 0.5]), &[vec![0.25; 4]]);
     for y in &out[0] {
         assert!((f64::from(*y) - 12826.0 / 262144.0).abs() < 1e-6, "{y}");
     }
-    // Ramp: a drive aimed below the floor never reads below it, on the way or on arrival.
-    let mut clip = landed(ShapeKind::HardClip, 1.0);
+    // Ramp: a drive set below the floor never reads below it, on the way or on arrival.
+    let mut clip = at_rest(ShapeKind::HardClip, 1.0);
     clip.retarget(&WaveshaperControls {
         drive: Drive::new(-2.0),
     });
@@ -287,7 +287,7 @@ fn the_drive_floors_hold_on_the_lane_and_the_ramp() {
         let drive = (1.0 - 3.0 * (i + 1) as f64 / n as f64).max(0.0);
         assert!((f64::from(y) - 0.25 * drive).abs() < 1e-6, "frame {i}: {y}");
     }
-    let mut crush = landed(ShapeKind::Crush, 4.0);
+    let mut crush = at_rest(ShapeKind::Crush, 4.0);
     crush.retarget(&WaveshaperControls {
         drive: Drive::new(-3.0),
     });
@@ -307,13 +307,13 @@ fn the_drive_floors_hold_on_the_lane_and_the_ramp() {
 
 // Antiderivative antialiasing.
 
-/// A bank of `kind` landed on `drive`, antialiased to `order`.
+/// A bank of `kind` at rest on `drive`, antialiased to `order`.
 fn antialiased(kind: ShapeKind, drive: f64, order: Antialiasing) -> WaveshaperBank<f32> {
     let mut bank = WaveshaperBank::<f32>::new(kind, RATE).antialiasing(order);
     bank.retarget(&WaveshaperControls {
         drive: Drive::new(drive),
     });
-    bank.finish();
+    bank.jump_to_target();
     bank
 }
 
@@ -1004,13 +1004,13 @@ fn a_non_finite_input_is_heard_at_its_own_frame_only() {
     }
 }
 
-/// One block of `x` through an `f64` bank of `kind` landed on `drive`, at `order`.
+/// One block of `x` through an `f64` bank of `kind` at rest on `drive`, at `order`.
 fn through_f64(kind: ShapeKind, drive: f64, order: Antialiasing, x: &[f64]) -> Vec<f64> {
     let mut bank = WaveshaperBank::<f64>::new(kind, RATE).antialiasing(order);
     bank.retarget(&WaveshaperControls {
         drive: Drive::new(drive),
     });
-    bank.finish();
+    bank.jump_to_target();
     let mut out = vec![0.0f64; x.len()];
     bank.process(
         None,

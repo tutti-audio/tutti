@@ -235,7 +235,8 @@ fn just_below_k_four_the_oscillation_decays_at_the_poles_modulus() {
 }
 
 /// The resonance is held at 1: `LadderDesign` reads `k = 4 min(res, 1)`, `k = 4` being where
-/// the continuous poles reach the imaginary axis (`the_ladder_self_oscillates_at_the_cutoff_at_k_four`).
+/// the continuous poles reach the imaginary axis
+/// (`the_ladder_self_oscillates_at_the_cutoff_at_k_four`).
 #[test]
 fn the_resonance_ceiling_is_k_four() {
     for res in [1.0f64, 1.5, 2.0, 1e30, f64::INFINITY] {
@@ -381,10 +382,10 @@ fn a_ramp_is_linear_and_arrives_on_the_new_design() {
 
 /// A retarget in the middle of a ramp starts from the design in force there, not the one it
 /// was heading for: 8 frames into a ramp from 500 Hz to 5 kHz (the half-way `g1`, `k` being
-/// equal at both ends), a `retarget` back to 500 Hz makes the first frame after it step 1 of 16 from
-/// the half-way design to the old one, written out here.
+/// equal at both ends), a `retarget` back to 500 Hz makes the first frame after it step 1 of 16
+/// from the half-way design to the old one, written out here.
 #[test]
-fn an_aim_in_flight_goes_on_from_where_the_ramp_was() {
+fn a_retarget_in_flight_goes_on_from_where_the_ramp_was() {
     let (a, b) = (
         design::<f64>(LadderType::HP12, 500.0, 0.3, 1.0),
         design::<f64>(LadderType::HP12, 5_000.0, 0.3, 1.0),

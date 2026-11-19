@@ -13,7 +13,7 @@ static A: ThreadCounting = ThreadCounting;
 /// Freeverb's `retarget`, `process` and `tail_of` allocate nothing, with a different room every
 /// block (hostile controls among them), after the one `FreeverbBank::new` that sizes it.
 #[test]
-fn freeverb_aims_and_renders_without_allocating() {
+fn freeverb_retargets_and_renders_without_allocating() {
     use tutti_buffers::{Planes, PlanesMut};
     use tutti_dsp::{FreeverbBank, FreeverbControls};
 
@@ -50,7 +50,7 @@ fn freeverb_aims_and_renders_without_allocating() {
 /// after the one `FdnBank::new` that sizes it. The ramps the ramps start are the work of the
 /// following blocks, which allocate nothing either.
 #[test]
-fn the_fdn_aims_and_renders_without_allocating() {
+fn the_fdn_retargets_and_renders_without_allocating() {
     use tutti_buffers::{Planes, PlanesMut};
     use tutti_dsp::{FdnBank, FdnControls, FdnLayout, FreezeMode, MaxDecay};
     use tutti_units::{Db, Depth, Hz, StereoWidth};

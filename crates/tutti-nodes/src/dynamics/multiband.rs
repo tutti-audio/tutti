@@ -260,7 +260,7 @@ struct PortLanes<'a, F: Float> {
 /// they are a block-rate on/off a lane would only flap, and with them the ports would pass
 /// the graph's 32.
 ///
-/// A [`reset`](Node::reset) and a clone (a fork) start from silence, and the next aim lands
+/// A [`reset`](Node::reset) and a clone (a fork) start from silence, and the next retarget lands
 /// whole, as a fresh node's first does. A block whose output holds a NaN or an infinity is
 /// passed on as rendered and resets the node after it, its meters back at unity, so nothing
 /// non-finite is latched.
@@ -292,7 +292,7 @@ struct Rig {
 /// The node prepared for one rate and block size.
 struct Tuned<F: Float + SimdLanes + Lerp> {
     bank: MultibandBank<F>,
-    /// The settings the bank was last aimed at.
+    /// The settings the bank was last set to.
     applied: Option<MultibandSettings>,
     rate: SampleRate,
     /// Frames rendered since the last reset: where the stream grid's points fall.
@@ -454,7 +454,7 @@ impl<F: Float + SimdLanes + Lerp> Tuned<F> {
 
     /// Renders the block cut at the grid points of the stream, the block beginning at
     /// stream frame `position`: each grid point reads the controls at its frame, and one
-    /// that moved aims the bank before the frames after it render. The stretches that did
+    /// that moved retargets the bank before the frames after it render. The stretches that did
     /// not move render together, in one call.
     fn render_steps(
         &mut self,
@@ -1619,7 +1619,7 @@ mod tests {
         assert!((amp(&mut n) - 0.5).abs() < 2e-3);
         c.set_crossover(0, Hz::new(5_000.0));
         let a = amp(&mut n);
-        assert!(a > 0.99, "the consistent set landed: {a}");
+        assert!(a > 0.99, "the consistent set arrived: {a}");
     }
 
     /// A driven make-up port moves its own band: band 1 alone heard (band 0

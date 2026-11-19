@@ -148,8 +148,8 @@ pub struct DistortionKernel<F: Float> {
     input: BusTopology,
     /// The bank, at the rate it shapes at: the oversampled one when there is oversampling.
     bank: WaveshaperBank<F>,
-    /// Whether the first retarget after `prepare` has landed.
-    landed: bool,
+    /// Whether the first retarget after `prepare` has been applied.
+    applied: bool,
     /// What the node was asked to shape at.
     factor: Option<OversamplingFactor>,
     /// The oversampling, once prepared at a rate its filters can be designed for.
@@ -166,7 +166,7 @@ impl<F: Float + Lerp> DistortionKernel<F> {
             kind,
             input,
             bank: WaveshaperBank::<F>::new(kind, SampleRate::SR_48K),
-            landed: false,
+            applied: false,
             factor: None,
             oversampled: None,
             antialiasing: Antialiasing::Off,
@@ -308,13 +308,13 @@ impl<F: Float + Lerp> Kernel for DistortionKernel<F> {
             .as_ref()
             .map_or(rate, |o| o.plan.high_rate());
         self.bank = WaveshaperBank::<F>::new(self.kind, shaping).antialiasing(self.antialiasing);
-        self.landed = false;
+        self.applied = false;
     }
 
     /// Silence, and the next design lands at once, as a fresh node's first does.
     fn reset(&mut self) {
         self.bank.reset();
-        self.landed = false;
+        self.applied = false;
         for state in self.oversampled.iter_mut().flat_map(|o| &mut o.channels) {
             state.reset();
         }
@@ -322,9 +322,9 @@ impl<F: Float + Lerp> Kernel for DistortionKernel<F> {
 
     fn retarget(&mut self, controls: &WaveshaperControls) {
         self.bank.retarget(controls);
-        if !self.landed {
-            self.bank.finish();
-            self.landed = true;
+        if !self.applied {
+            self.bank.jump_to_target();
+            self.applied = true;
         }
     }
 
@@ -340,7 +340,7 @@ impl<F: Float + Lerp> Kernel for DistortionKernel<F> {
             None => self.bank.process(lane, input, output),
         }
         // A design after a render is a move, which ramps.
-        self.landed = true;
+        self.applied = true;
     }
 
     /// The cascade's round trip, in base frames, and the antialiasing's delay rounded to a

@@ -45,12 +45,12 @@ fn run(
     out
 }
 
-/// A bank at `rate` with `c` aimed and landed.
+/// A bank at `rate` with `c` set and at rest.
 fn settled(rate: SampleRate, c: &FreeverbControls) -> (FreeverbBank<f32>, FreeverbRamps<f32>) {
     let bank = FreeverbBank::<f32>::new(rate);
     let mut ramps = bank.ramps();
     bank.retarget(&mut ramps, c);
-    ramps.finish();
+    ramps.jump_to_target();
     (bank, ramps)
 }
 
@@ -353,7 +353,7 @@ fn a_moving_room_ramps_its_combs_a_chunk_at_a_time() {
             );
         }
         if k < steps {
-            assert!(f != to && dmp != to_damp, "landed early at {k}");
+            assert!(f != to && dmp != to_damp, "arrived early at {k}");
         }
         last = f;
     }
@@ -392,7 +392,7 @@ fn a_reset_bank_is_a_fresh_one_and_a_clone_shares_nothing() {
     let (mut fresh, mut fresh_ramps) = settled(RATE, &c);
     let mut ramps = used.ramps();
     used.retarget(&mut ramps, &c);
-    ramps.finish();
+    ramps.jump_to_target();
     assert_eq!(
         run(&mut used, &mut ramps, &impulse(4_000), 64),
         run(&mut fresh, &mut fresh_ramps, &impulse(4_000), 64)
@@ -615,7 +615,7 @@ fn an_f64_freeverb_returns_the_fixed_gain_times_the_input_at_each_comb_length() 
     let mut ramps = bank.ramps();
     let mut bank = bank;
     bank.retarget(&mut ramps, &controls(0.5, 0.5));
-    ramps.finish();
+    ramps.jump_to_target();
     let [left, _] = run_wide(&mut bank, &mut ramps, &x);
     let mut want = vec![0.0f64; 1_300];
     for at in [1_116, 1_188, 1_277] {
@@ -639,7 +639,7 @@ fn an_f64_freeverb_is_linear() {
         let mut ramps = bank.ramps();
         let mut bank = bank;
         bank.retarget(&mut ramps, &controls(0.7, 0.3));
-        ramps.finish();
+        ramps.jump_to_target();
         run_wide(&mut bank, &mut ramps, input)
     };
     let (rx, ry, rm) = (render(&x), render(&y), render(&mix));

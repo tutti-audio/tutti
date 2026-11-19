@@ -2,7 +2,7 @@
 //!
 //! A brickwall clamps every sample to `+-c` and has nothing else: no state, no
 //! envelope, no lookahead and so no latency and no tail. Its only control is the ceiling,
-//! which is read per frame when the graph drives it ([`BrickwallLanes`]); the aimed ceiling
+//! which is read per frame when the graph drives it ([`BrickwallLanes`]); the set ceiling
 //! is the one a frame nobody drives is clamped at. The clamp bounds the **sample** peak of
 //! the output for any finite or infinite input; a NaN input passes as NaN. It is not a
 //! true-peak limit.
@@ -10,7 +10,7 @@
 //! The ceiling is in dB and the clamp bound is its amplitude. `+inf` dB passes
 //! everything and `-inf` dB mutes (both are ceilings); only a NaN has no level, and it
 //! is ignored wherever it comes from (the node keeps the last ceiling for a NaN
-//! cell, and a NaN frame on the lane clamps at the aimed ceiling).
+//! cell, and a NaN frame on the lane clamps at the set ceiling).
 
 use tutti_buffers::{Float, Mono, Planes, PlanesMut};
 use tutti_units::Db;
@@ -55,7 +55,7 @@ fn clip<F: Float>(x: F, ceiling: F) -> F {
 /// its end is not driven.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct BrickwallLanes<'a, F: Float> {
-    /// The ceiling in dB. A frame that is NaN clamps at the aimed ceiling.
+    /// The ceiling in dB. A frame that is NaN clamps at the set ceiling.
     pub ceiling: Option<Mono<'a, F>>,
 }
 
@@ -65,7 +65,7 @@ pub struct BrickwallLanes<'a, F: Float> {
 /// how the input is cut into blocks.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BrickwallBank<F: Float> {
-    /// The aimed ceiling as an amplitude.
+    /// The set ceiling as an amplitude.
     ceiling: F,
 }
 
@@ -90,7 +90,7 @@ impl<F: Float> BrickwallBank<F> {
     }
 
     /// Runs `input` into `output`, every frame clamped at the ceiling: its own on a driven
-    /// frame, the aimed one on any other (a NaN is not a level).
+    /// frame, the set one on any other (a NaN is not a level).
     ///
     /// Channel `c` of `input` feeds channel `c` of `output`; a channel past the narrower of
     /// the two views is not touched. No allocation.

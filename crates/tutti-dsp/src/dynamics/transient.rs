@@ -148,15 +148,15 @@ impl<F: Float + Lerp> TransientBank<F> {
         }
     }
 
-    /// Back to silence: both envelopes at 0 and the amounts landed. No allocation.
+    /// Back to silence: both envelopes at 0 and the amounts at rest. No allocation.
     pub fn reset(&mut self) {
         self.envelopes = (Smoothed::ZERO, Smoothed::ZERO);
-        self.amounts.finish();
+        self.amounts.jump_to_target();
     }
 
     /// Lands the amounts on their target now.
-    pub fn finish(&mut self) {
-        self.amounts.finish();
+    pub fn jump_to_target(&mut self) {
+        self.amounts.jump_to_target();
     }
 
     /// Aims at `controls`: the amounts ramp over [`GAIN_RAMP`]. No allocation.
@@ -177,7 +177,7 @@ impl<F: Float + Lerp> TransientBank<F> {
     pub fn process(&mut self, input: Planes<'_, F>, mut output: PlanesMut<'_, '_, F>) {
         let frames = input.frames().get().min(output.frames().get());
         let width = input.channels().min(output.channels());
-        let blended = self.amounts.blend_len(frames);
+        let blended = self.amounts.blended_frames(frames);
         let taken = self.amounts.steps_taken();
         let mut gains = [F::ZERO; CHUNK];
         let mut start = 0;

@@ -97,14 +97,14 @@ fn hostile() -> Vec<CompressorControls> {
     all
 }
 
-/// A bank at `rate` at rest on `c`: aimed and landed, nothing ramping.
+/// A bank at `rate` at rest on `c`: set and at rest, nothing ramping.
 fn bank_at<F: Float + SimdLanes + Lerp>(
     c: &CompressorControls,
     rate: SampleRate,
 ) -> CompressorBank<F> {
     let mut bank = CompressorBank::new(rate);
     bank.retarget(c);
-    bank.finish();
+    bank.jump_to_target();
     bank
 }
 
@@ -412,7 +412,7 @@ fn an_own_key_detects_the_signal_itself() {
 }
 
 /// A threshold lane is read per frame: with the follower instant, each frame's gain is the
-/// curve at that frame's threshold, and a frame that is not finite takes the aimed one.
+/// curve at that frame's threshold, and a frame that is not finite takes the set one.
 #[test]
 fn a_threshold_lane_is_read_per_frame() {
     let n = 600;
@@ -444,7 +444,7 @@ fn a_threshold_lane_is_read_per_frame() {
 }
 
 /// The detector's controls land whole: a ratio that moves is in the next frame's gain,
-/// not ramped to (the follower is the smoother), and a retarget that moves the ratio only
+/// not ramped to (the follower is the smoother), and a new target that moves the ratio only
 /// takes no makeup step.
 #[test]
 fn a_moved_detector_control_lands_at_once() {
@@ -576,7 +576,7 @@ fn a_cut_stream_follows_the_one_pole_and_ramp_closed_forms() {
     }
 }
 
-/// A reset bank attacks from nothing along the one-pole closed form, with the makeup landed on
+/// A reset bank attacks from nothing along the one-pole closed form, with the makeup at rest on
 /// its target: after wear under other controls and a reset, a steady key over the threshold gives
 /// `10^((makeup - target (1 - a^n)) / 20)` from its first frame.
 #[test]
@@ -603,7 +603,7 @@ fn a_reset_bank_attacks_from_nothing_along_the_closed_form() {
 }
 
 /// A clone continues the one-pole where the original is and shares nothing with it: both follow
-/// the closed form on from the frame they were cloned at, and what the clone is aimed at and
+/// the closed form on from the frame they were cloned at, and what the clone is set to and
 /// rendered under leaves the original's closed form unmoved.
 #[test]
 fn a_clone_continues_along_the_closed_form_and_shares_nothing() {
@@ -777,12 +777,12 @@ fn a_huge_knee_is_held_and_the_gain_returns_to_the_static_curve() {
     }
 }
 
-/// `audio` through an `f64` bank at 48 kHz aimed at `c` and landed, in one block, keyed by
+/// `audio` through an `f64` bank at 48 kHz set to `c` and at rest, in one block, keyed by
 /// `key`.
 fn run_f64(c: &CompressorControls, audio: &[f64], key: &[f64]) -> Vec<f64> {
     let mut bank = CompressorBank::<f64>::new(RATE);
     bank.retarget(c);
-    bank.finish();
+    bank.jump_to_target();
     let mut out = vec![0.0f64; audio.len()];
     bank.process(
         CompressorLanes::default(),

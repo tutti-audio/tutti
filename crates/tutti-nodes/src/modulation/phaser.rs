@@ -271,13 +271,13 @@ impl<F: Float + Lerp> Kernel for PhaserKernel<F> {
         self.reset();
     }
 
-    /// Back to silence with the sweep at its start: the chain empty, the ramps landed on
+    /// Back to silence with the sweep at its start: the chain empty, the ramps at rest on
     /// their targets, the next segment solved from the LFO's first phase and the next design
     /// landing at once, as a fresh node's first does.
     fn reset(&mut self) {
         self.chain.reset();
-        self.depth.finish();
-        self.feedback.finish();
+        self.depth.jump_to_target();
+        self.feedback.jump_to_target();
         self.clock.reset();
         self.clock.unland();
     }
@@ -299,8 +299,8 @@ impl<F: Float + Lerp> Kernel for PhaserKernel<F> {
         self.depth.retarget_by(F::from_unit(controls.depth), steps);
         self.feedback.retarget_by(F::from_unit(feedback), steps);
         if self.clock.lands() {
-            self.depth.finish();
-            self.feedback.finish();
+            self.depth.jump_to_target();
+            self.feedback.jump_to_target();
         }
         if self.clock.at_corner() {
             self.solve();
@@ -741,7 +741,7 @@ mod tests {
     }
 
     /// A depth that ramps is solved into a segment's end corner with the depth the ramp
-    /// has **there**, sixteen steps on: a depth aimed from 0 to 1 over 240 steps at the
+    /// has **there**, sixteen steps on: a depth set from 0 to 1 over 240 steps at the
     /// grid point at frame 16 has its start corner at depth 0 (the last segment's end) and
     /// its end corner at `16 / 240`.
     #[test]
@@ -778,13 +778,13 @@ mod tests {
             drive_kernel(&mut k, &moves, &silence(1, frames));
             k
         };
-        // The ramp was aimed at frame 16: 120 frames on is half way.
+        // The ramp was set to frame 16: 120 frames on is half way.
         let half = after(16 + 120);
         assert!((half.depth.now() - 0.5).abs() < 1e-6, "depth halfway");
         assert!((half.feedback.now() - 0.5).abs() < 1e-6, "feedback halfway");
-        let landed = after(16 + 240);
-        assert_eq!((landed.depth.now(), landed.feedback.now()), (1.0, 0.8));
-        assert!(!landed.depth.moving() && !landed.feedback.moving());
+        let arrived = after(16 + 240);
+        assert_eq!((arrived.depth.now(), arrived.feedback.now()), (1.0, 0.8));
+        assert!(!arrived.depth.moving() && !arrived.feedback.moving());
     }
 
     /// The rate is floored at 0.01 Hz: a rate of -3 Hz, of zero and of 0.005 Hz is the

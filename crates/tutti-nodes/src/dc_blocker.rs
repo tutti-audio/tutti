@@ -89,8 +89,8 @@ pub struct DcBlockerKernel<F: Float> {
     width: ChannelLayout,
     rate: SampleRate,
     blocker: DcBlocker<F>,
-    /// Whether the first retarget after `prepare` has landed.
-    landed: bool,
+    /// Whether the first retarget after `prepare` has been applied.
+    applied: bool,
 }
 
 impl<F: Float + Lerp> DcBlockerKernel<F> {
@@ -101,7 +101,7 @@ impl<F: Float + Lerp> DcBlockerKernel<F> {
             width,
             rate,
             blocker: DcBlocker::<F>::new(width, rate),
-            landed: false,
+            applied: false,
         }
     }
 }
@@ -122,20 +122,20 @@ impl<F: Float + Lerp> Kernel for DcBlockerKernel<F> {
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
         self.rate = rate;
         self.blocker = DcBlocker::<F>::new(self.width, rate);
-        self.landed = false;
+        self.applied = false;
     }
 
     /// Silence, and the next design lands at once, as a fresh node's first does.
     fn reset(&mut self) {
         self.blocker.reset();
-        self.landed = false;
+        self.applied = false;
     }
 
     fn retarget(&mut self, controls: &DcBlockerControls) {
         self.blocker.retarget(controls);
-        if !self.landed {
-            self.blocker.finish();
-            self.landed = true;
+        if !self.applied {
+            self.blocker.jump_to_target();
+            self.applied = true;
         }
     }
 
@@ -147,7 +147,7 @@ impl<F: Float + Lerp> Kernel for DcBlockerKernel<F> {
     ) {
         self.blocker.process(input, output);
         // A design after a render is a move, which ramps.
-        self.landed = true;
+        self.applied = true;
     }
 
     /// The ring-out at the lowest corner: the longest over every control.

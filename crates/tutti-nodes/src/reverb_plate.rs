@@ -1,7 +1,7 @@
 //! The Dattorro plate, [`PlateReverbNode`].
 //!
 //! [`PlateBank`] is the plate over buffers views (the lattices, the delays, the output taps,
-//! the ramps); this file holds the kernel that aims it, the cells and how the graph reaches
+//! the ramps); this file holds the kernel that retargets it, the cells and how the graph reaches
 //! them.
 
 use tutti_buffers::{BusTopology, MaxBlock};
@@ -142,15 +142,15 @@ struct Running<F: Float> {
 }
 
 /// The plate as a [`Kernel`]: a [`PlateBank`] sized at the prepared rate and the ramps its
-/// design is aimed through.
+/// design is set through.
 ///
 /// The bank's state is `F`, the float of the graph.
 #[derive(Clone, Debug)]
 pub struct PlateKernel<F: Float> {
     /// `None` until [`prepare`](Kernel::prepare).
     running: Option<Running<F>>,
-    /// Whether the first retarget after `prepare` has landed.
-    landed: bool,
+    /// Whether the first retarget after `prepare` has been applied.
+    applied: bool,
 }
 
 impl<F: Float + Lerp> PlateKernel<F> {
@@ -158,7 +158,7 @@ impl<F: Float + Lerp> PlateKernel<F> {
     fn new() -> Self {
         Self {
             running: None,
-            landed: false,
+            applied: false,
         }
     }
 }
@@ -184,23 +184,23 @@ impl<F: Float + Lerp> Kernel for PlateKernel<F> {
         let bank = PlateBank::new(rate);
         let ramps = bank.ramps();
         self.running = Some(Running { rate, bank, ramps });
-        self.landed = false;
+        self.applied = false;
     }
 
     /// Silence, and the next design lands at once, as a fresh node's first does.
     fn reset(&mut self) {
         if let Some(r) = &mut self.running {
             r.bank.reset();
-            r.ramps.finish();
+            r.ramps.jump_to_target();
         }
     }
 
     fn retarget(&mut self, controls: &PlateControls) {
         let Some(r) = &mut self.running else { return };
         r.bank.retarget(&mut r.ramps, controls);
-        if !self.landed {
-            r.ramps.finish();
-            self.landed = true;
+        if !self.applied {
+            r.ramps.jump_to_target();
+            self.applied = true;
         }
     }
 

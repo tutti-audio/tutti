@@ -10,8 +10,8 @@
 //! Per channel eight parallel damped comb filters then four all-pass filters, fed by one mono
 //! input and giving a stereo wet signal. The right channel's lines are 23 frames longer than
 //! the left's at 44.1 kHz (the stereo spread), and the tunings are scaled to the rate. The
-//! input is scaled by a fixed gain ([`FIXED_GAIN`](FreeverbBank::FIXED_GAIN)), so a caller feeds it at the level it
-//! wants wet.
+//! input is scaled by a fixed gain ([`FIXED_GAIN`](FreeverbBank::FIXED_GAIN)), so a caller feeds
+//! it at the level it wants wet.
 //!
 //! A **comb** of `L` frames, feedback `g` and damping `d` is the loop `v[n] = x[n] + g s[n]`
 //! with `s` the one-pole `s[n] = (1 - d) y[n] + d s[n - 1]` of the comb's output
@@ -24,13 +24,13 @@
 //! and works once at each chunk's start: the two [`Ramp`]s take a step and the combs read
 //! their coefficients from them. The chunks are counted from the first frame since the last
 //! reset, not from a call's edge, so the output does not depend on how the input is cut into
-//! calls. The design is not the bank's: the caller [sets the targets of](FreeverbBank::retarget) the ramps when
-//! its controls move, on a grid of its own. They move in 20 ms of whole chunks, landing
+//! calls. The design is not the bank's: the caller [retargets](FreeverbBank::retarget) the ramps
+//! when its controls move, on a grid of its own. They move in 20 ms of whole chunks, landing
 //! exactly (a size or a damping that jumped would click).
 //!
 //! **Format.** The state and the views are the bank's float `F`. The feedback and the damping
-//! cross to `F` once per `retarget`, from the design in `f64`. Neither is stored as a complement: the
-//! damping pole is at most 0.4 (its complement is at least 0.6), and the comb loop gain is at
+//! cross to `F` once per `retarget`, from the design in `f64`. Neither is stored as a complement:
+//! the damping pole is at most 0.4 (its complement is at least 0.6), and the comb loop gain is at
 //! most 0.98, so `1 - g` is at least 0.02 and `F`'s rounding of `g` (3e-8 in `f32`) moves it, and
 //! the RT60 with it, by 1.5e-6 of itself; a loop gain multiplies a line's sample, which rounds by
 //! about `u` a trip whatever the form.
@@ -73,7 +73,7 @@ fn design<F: Float>(controls: &FreeverbControls) -> (F, F) {
     )
 }
 
-/// What a Freeverb reads while it runs: the comb feedback and the damping, each aimed by
+/// What a Freeverb reads while it runs: the comb feedback and the damping, each retargeted by
 /// [`FreeverbBank::retarget`] and stepped once a chunk by [`FreeverbBank::process`].
 ///
 /// A ramp steps before its chunk runs: the first chunk after a `retarget` reads step 1. Held in the
@@ -87,10 +87,10 @@ pub struct FreeverbRamps<F: Float> {
 }
 
 impl<F: Float + Lerp> FreeverbRamps<F> {
-    /// Lands on the targets now.
-    pub fn finish(&mut self) {
-        self.feedback.finish();
-        self.damp.finish();
+    /// Jumps to the targets now.
+    pub fn jump_to_target(&mut self) {
+        self.feedback.jump_to_target();
+        self.damp.jump_to_target();
     }
 
     /// Takes one step of each ramp.
@@ -122,7 +122,7 @@ impl<F: Float + Lerp> FreeverbBank<F> {
     pub const FIXED_GAIN: Gain = Gain::new(0.015);
 
     /// The frames between ramp steps: the chunk. A caller that designs on a grid of its own
-    /// can align it here, so a retarget lands on a chunk's start.
+    /// can align it here, so a new target lands on a chunk's start.
     pub const CHUNK: usize = CHUNK;
 
     /// A silent Freeverb at `rate`, rounded to whole hertz. Allocates the filter lines: each is
@@ -159,7 +159,7 @@ impl<F: Float + Lerp> FreeverbBank<F> {
         bank
     }
 
-    /// The ramps of this bank, landed on the General MIDI figures: its first
+    /// The ramps of this bank, at rest on the General MIDI figures: its first
     /// [`retarget`](Self::retarget) is the caller's to land.
     #[must_use]
     pub fn ramps(&self) -> FreeverbRamps<F> {
@@ -237,8 +237,8 @@ impl<F: Float + Lerp> FreeverbBank<F> {
     }
 
     /// Runs `input` into `output`, the same number of frames: the input's channels averaged
-    /// (a mono input is itself) and scaled by [`FIXED_GAIN`](Self::FIXED_GAIN), through the combs and the
-    /// all-passes of the left channel into plane 0 and of the right into plane 1. A plane
+    /// (a mono input is itself) and scaled by [`FIXED_GAIN`](Self::FIXED_GAIN), through the combs
+    /// and the all-passes of the left channel into plane 0 and of the right into plane 1. A plane
     /// past the second is not touched, and a view with one plane is its left alone. Each
     /// chunk's ramp step is taken at its first frame ([`CHUNK`](Self::CHUNK)). No
     /// allocation.
@@ -284,8 +284,8 @@ impl<F: Float + Lerp> FreeverbBank<F> {
         }
     }
 
-    /// One run of a chunk: `input` scaled by [`FIXED_GAIN`](Self::FIXED_GAIN) through each channel's combs and
-    /// all-passes into `left` and `right`, which are overwritten.
+    /// One run of a chunk: `input` scaled by [`FIXED_GAIN`](Self::FIXED_GAIN) through each
+    /// channel's combs and all-passes into `left` and `right`, which are overwritten.
     fn run(&mut self, input: &[F], left: &mut [F], right: &mut [F]) {
         for (out, (combs, all_passes)) in [left, right]
             .into_iter()

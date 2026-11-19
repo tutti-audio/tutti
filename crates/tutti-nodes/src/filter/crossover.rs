@@ -144,7 +144,7 @@ pub struct CrossoverKernel<F: Float + SimdLanes> {
     model: CrossoverModel,
     /// The blend in flight; the first design after `prepare` or `reset` lands at once.
     blend: Ramp<CrossoverBlend>,
-    landed: bool,
+    applied: bool,
     rate: SampleRate,
 }
 
@@ -172,7 +172,7 @@ impl<F: Float + SimdLanes> CrossoverKernel<F> {
             bank: CrossoverBank::new(input.layout()),
             blend: Ramp::new(model.blend()).steps(RAMP_STEPS),
             model,
-            landed: false,
+            applied: false,
             rate,
         })
     }
@@ -203,22 +203,22 @@ impl<F: Float + SimdLanes> Kernel for CrossoverKernel<F> {
 
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
         self.rate = rate;
-        self.landed = false;
+        self.applied = false;
     }
 
     /// Silence, and the next design lands at once, as a fresh node's first does.
     fn reset(&mut self) {
-        self.blend.finish();
-        self.landed = false;
+        self.blend.jump_to_target();
+        self.applied = false;
         self.bank.reset();
     }
 
     fn retarget(&mut self, controls: &CrossoverControls) {
         self.model.design_into(controls, self.rate);
         self.blend.retarget(self.model.blend());
-        if !self.landed {
-            self.blend.finish();
-            self.landed = true;
+        if !self.applied {
+            self.blend.jump_to_target();
+            self.applied = true;
         }
     }
 

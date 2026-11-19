@@ -18,7 +18,7 @@ fn at(corner: f64, rate: SampleRate) -> DcBlocker<f64> {
     b.retarget(&DcBlockerControls {
         corner: Hz::new(corner),
     });
-    b.finish();
+    b.jump_to_target();
     b
 }
 
@@ -57,7 +57,7 @@ fn a_constant_decays_as_the_pole_to_the_n() {
     b.retarget(&DcBlockerControls {
         corner: Hz::new(20.0),
     });
-    b.finish();
+    b.jump_to_target();
     let r = b.pole();
     let out = run(&mut b, &[vec![0.5; 2000], vec![-1.0; 2000]]);
     for n in [0usize, 1, 2, 10, 500, 1999] {
@@ -243,7 +243,7 @@ fn a_one_hz_corner_at_192_khz_holds_its_gain_and_noise_in_f32() {
     blocker.retarget(&DcBlockerControls {
         corner: MIN_DC_CORNER,
     });
-    blocker.finish();
+    blocker.jump_to_target();
     let mut out = vec![0.0f32; x.len()];
     blocker.process(
         Planes::new(&[&x[..]]).unwrap(),
@@ -291,7 +291,7 @@ fn a_one_hz_corner_at_192_khz_holds_its_gain_and_noise_in_f32() {
     blocker.retarget(&DcBlockerControls {
         corner: worst_corner,
     });
-    blocker.finish();
+    blocker.jump_to_target();
     blocker.process(
         Planes::new(&[&x[..]]).unwrap(),
         PlanesMut::new(&mut [&mut out[..]]).unwrap(),

@@ -84,8 +84,8 @@ control_set! {
 #[derive(Clone, Debug)]
 pub struct StereoWidthKernel<F: Float> {
     bank: WidthBank<F>,
-    /// Whether the first retarget after `prepare` has landed.
-    landed: bool,
+    /// Whether the first retarget after `prepare` has been applied.
+    applied: bool,
 }
 
 impl<F: Float + Lerp> StereoWidthKernel<F> {
@@ -93,7 +93,7 @@ impl<F: Float + Lerp> StereoWidthKernel<F> {
     fn new() -> Self {
         Self {
             bank: WidthBank::<F>::new(SampleRate::SR_48K),
-            landed: false,
+            applied: false,
         }
     }
 }
@@ -110,20 +110,20 @@ impl<F: Float + Lerp> Kernel for StereoWidthKernel<F> {
 
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
         self.bank = WidthBank::<F>::new(rate);
-        self.landed = false;
+        self.applied = false;
     }
 
     /// Silence, and the next design lands at once, as a fresh node's first does.
     fn reset(&mut self) {
-        self.bank.finish();
-        self.landed = false;
+        self.bank.jump_to_target();
+        self.applied = false;
     }
 
     fn retarget(&mut self, controls: &WidthControls) {
         self.bank.retarget(controls);
-        if !self.landed {
-            self.bank.finish();
-            self.landed = true;
+        if !self.applied {
+            self.bank.jump_to_target();
+            self.applied = true;
         }
     }
 
@@ -135,7 +135,7 @@ impl<F: Float + Lerp> Kernel for StereoWidthKernel<F> {
     ) {
         self.bank.process(input, output);
         // A design after a render is a move, which ramps.
-        self.landed = true;
+        self.applied = true;
     }
 
     fn tail(&self) -> Tail {

@@ -82,11 +82,11 @@ fn hostile() -> Vec<GateControls> {
     all
 }
 
-/// A bank at `rate` at rest on `c`: aimed and landed, nothing ramping.
+/// A bank at `rate` at rest on `c`: set and at rest, nothing ramping.
 fn bank_at<F: Float + SimdLanes + Lerp>(c: &GateControls, rate: SampleRate) -> GateBank<F> {
     let mut bank = GateBank::new(rate);
     bank.retarget(c);
-    bank.finish();
+    bank.jump_to_target();
     bank
 }
 
@@ -416,7 +416,7 @@ fn an_own_key_detects_the_signal_itself() {
 
 /// A threshold lane is read per frame: with the follower instant, each frame is open
 /// when the key is at or over that frame's threshold, and a frame that is not finite takes
-/// the aimed one.
+/// the set one.
 #[test]
 fn a_threshold_lane_is_read_per_frame() {
     let n = 600;
@@ -622,7 +622,7 @@ fn gain_at(range: f64, open: f64) -> f64 {
 }
 
 /// The render is the closed form whatever the calls cut the stream into: a key over a lane's
-/// threshold (and under the aimed one) opens the gate along the one-pole `1 - a^n`, then falls
+/// threshold (and under the set one) opens the gate along the one-pole `1 - a^n`, then falls
 /// silent at frame 517 (inside a block of 7, 33, 64, 100 and 255 frames alike) with no hold, so
 /// the follower releases as `f b^m` from the `f` the step found, and the range ramps linearly in
 /// dB over the 240 steps of 5 ms at 48 kHz, in calls of 1, 7, 33, 64, 100 and 255 frames and in
@@ -632,7 +632,7 @@ fn a_cut_stream_follows_the_one_pole_and_ramp_closed_forms() {
     let (tau, release, steps, n, step_at) = (0.002, 0.03, 240usize, 1_200usize, 517usize);
     let (from, to) = (-30.0, -6.0);
     let c = controls(-10.0, tau, 0.0, release, from);
-    let aimed = controls(-10.0, tau, 0.0, release, to);
+    let target = controls(-10.0, tau, 0.0, release, to);
     let b = (-1.0 / (release * RATE.get())).exp();
     let open = |frames: usize| {
         if frames <= step_at {
@@ -642,14 +642,14 @@ fn a_cut_stream_follows_the_one_pole_and_ramp_closed_forms() {
         }
     };
     let ones = vec![1.0f64; n];
-    // -20 dB: over the lane's -30 dB threshold, under the aimed -10 dB one; then silence.
+    // -20 dB: over the lane's -30 dB threshold, under the set -10 dB one; then silence.
     let key: Vec<f64> = (0..n)
         .map(|i| if i < step_at { 0.1 } else { 0.0 })
         .collect();
     let lane = vec![-30.0f64; n];
     for block in [1, 7, 33, 64, 100, 255, n] {
         let mut k = bank_at::<f64>(&c, RATE);
-        k.retarget(&aimed);
+        k.retarget(&target);
         let out = run_in(&mut k, &[&ones], &[&key], Some(&lane), block).remove(0);
         for (i, &y) in out.iter().enumerate() {
             let range = from + (to - from) * ((i + 1).min(steps) as f64 / steps as f64);
@@ -664,7 +664,7 @@ fn a_cut_stream_follows_the_one_pole_and_ramp_closed_forms() {
 
 /// A reset gate opens from closed along the one-pole closed form with no hold left: after wear
 /// under other controls and a reset, a key over the threshold gives `r + (1 - a^n)(1 - r)` from
-/// its first frame, the range landed on its target.
+/// its first frame, the range at rest on its target.
 #[test]
 fn a_reset_gate_opens_from_closed_along_the_closed_form() {
     let (tau, range) = (0.001, -50.0);
@@ -687,7 +687,7 @@ fn a_reset_gate_opens_from_closed_along_the_closed_form() {
 }
 
 /// A clone continues the one-pole where the original is and shares nothing with it: both open
-/// along the closed form on from the frame they were cloned at, and what the clone is aimed at
+/// along the closed form on from the frame they were cloned at, and what the clone is set to
 /// and rendered under leaves the original's closed form unmoved.
 #[test]
 fn a_clone_continues_along_the_closed_form_and_shares_nothing() {
@@ -774,12 +774,12 @@ fn an_infinite_key_opens_the_gate_and_does_not_latch_it() {
     );
 }
 
-/// `audio` through an `f64` bank at 48 kHz aimed at `c` and landed, in one block, keyed by
+/// `audio` through an `f64` bank at 48 kHz set to `c` and at rest, in one block, keyed by
 /// `key`.
 fn run_f64(c: &GateControls, audio: &[f64], key: &[f64]) -> Vec<f64> {
     let mut bank = GateBank::<f64>::new(RATE);
     bank.retarget(c);
-    bank.finish();
+    bank.jump_to_target();
     let mut out = vec![0.0f64; audio.len()];
     bank.process(
         GateLanes::default(),

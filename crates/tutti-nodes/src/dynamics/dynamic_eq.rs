@@ -197,8 +197,8 @@ pub struct DynamicEqKernel<F: Float + SimdLanes> {
     mode: DynamicMode,
     /// `None` until [`prepare`](Kernel::prepare).
     bank: Option<DynamicEqBank<F>>,
-    /// Whether the first retarget after `prepare` has landed.
-    landed: bool,
+    /// Whether the first retarget after `prepare` has been applied.
+    applied: bool,
 }
 
 impl<F: Float + SimdLanes + Lerp> DynamicEqKernel<F> {
@@ -208,7 +208,7 @@ impl<F: Float + SimdLanes + Lerp> DynamicEqKernel<F> {
             key,
             mode,
             bank: None,
-            landed: false,
+            applied: false,
         }
     }
 }
@@ -236,7 +236,7 @@ impl<F: Float + SimdLanes + Lerp> Kernel for DynamicEqKernel<F> {
 
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
         self.bank = Some(DynamicEqBank::new(self.mode, self.input.layout(), rate));
-        self.landed = false;
+        self.applied = false;
     }
 
     fn reset(&mut self) {
@@ -248,9 +248,9 @@ impl<F: Float + SimdLanes + Lerp> Kernel for DynamicEqKernel<F> {
     fn retarget(&mut self, controls: &DynamicEqControls) {
         let Some(bank) = &mut self.bank else { return };
         bank.retarget(controls);
-        if !self.landed {
-            bank.finish();
-            self.landed = true;
+        if !self.applied {
+            bank.jump_to_target();
+            self.applied = true;
         }
     }
 

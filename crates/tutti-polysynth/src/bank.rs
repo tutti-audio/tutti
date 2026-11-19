@@ -188,7 +188,7 @@ pub(crate) struct VoiceBank<F: SynthFloat> {
     filter: Filter<F>,
     env_config: Adsr,
     shape: EnvShape<F>,
-    /// Per-sample one-pole coefficient the output gains glide with: the
+    /// Per-sample one-pole coefficient the output gains smooth with: the
     /// fraction of the gap one sample closes, a small number designed in `f64`.
     gain_coeff: F,
     sample_rate: SampleRate,
@@ -230,7 +230,7 @@ pub(crate) struct VoiceBank<F: SynthFloat> {
     stage: Vec<EnvStage>,
 
     // Output gains (pan law × unison gain × voice gain), current and target.
-    // Unlike pitch and cutoff these glide by a one-pole at a fixed time
+    // Unlike pitch and cutoff these are smoothed by a one-pole at a fixed time
     // constant rather than ramping across the control step: `tick` takes a
     // control step every frame, so a step-long ramp there would be a one-sample
     // jump — a click on every velocity or pressure change.
@@ -706,7 +706,7 @@ impl<F: SynthFloat> VoiceBank<F> {
 
         let [mut gain_l, mut gain_r] = self.gain[g];
         let [gain_l_target, gain_r_target] = self.gain_target[g];
-        let glide = V::<F>::splat(self.gain_coeff);
+        let smoothing = V::<F>::splat(self.gain_coeff);
 
         for frame in acc.iter_mut().take(n) {
             inc += inc_step;
@@ -769,8 +769,8 @@ impl<F: SynthFloat> VoiceBank<F> {
                 (slope, target) = self.advance_envelopes(g, env, slope, target, reached);
             }
 
-            gain_l = (gain_l_target - gain_l).mul_add(glide, gain_l);
-            gain_r = (gain_r_target - gain_r).mul_add(glide, gain_r);
+            gain_l = (gain_l_target - gain_l).mul_add(smoothing, gain_l);
+            gain_r = (gain_r_target - gain_r).mul_add(smoothing, gain_r);
             let out = y * env;
             frame[0] += out * gain_l;
             frame[1] += out * gain_r;

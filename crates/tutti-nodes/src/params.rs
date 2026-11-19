@@ -421,10 +421,10 @@ impl<S: ControlSet> Params<S> {
             } else if to.to_bits() != ramp.ramp.target().to_bits() {
                 // Where it stood on the frame before this block, the last one rendered.
                 let from = ramp.at(position.saturating_sub(1));
-                let mut aimed = Ramp::new(from);
-                aimed.retarget_in(to, u32::try_from(self.ramp).unwrap_or(u32::MAX));
+                let mut arriving = Ramp::new(from);
+                arriving.retarget_in(to, u32::try_from(self.ramp).unwrap_or(u32::MAX));
                 *ramp = CellRamp {
-                    ramp: aimed,
+                    ramp: arriving,
                     start: position,
                 };
             }
@@ -584,7 +584,7 @@ mod tests {
 
     /// A ramp of `n` frames from `from` to `to` begun at stream frame `start`, as
     /// [`Params::begin`] builds it.
-    fn aimed(from: f64, to: f64, n: u32, start: u64) -> CellRamp {
+    fn retargeted(from: f64, to: f64, n: u32, start: u64) -> CellRamp {
         let mut ramp = Ramp::new(from);
         ramp.retarget_in(to, n);
         CellRamp { ramp, start }
@@ -595,7 +595,7 @@ mod tests {
     #[test]
     fn a_cell_ramp_is_linear_and_lands_on_its_target_bits() {
         for (from, to, n) in [(0.7f64, 0.2f64, 64u32), (3.3, 1.1, 17), (0.0, 1.0, 240)] {
-            let g = aimed(from, to, n, 1_000);
+            let g = retargeted(from, to, n, 1_000);
             for i in 0..n - 1 {
                 let want = from + (to - from) * f64::from(i + 1) / f64::from(n);
                 let got = g.at(1_000 + u64::from(i));
@@ -620,16 +620,16 @@ mod tests {
     /// A one-frame ramp is the new value on its first frame.
     #[test]
     fn a_one_frame_cell_ramp_is_the_new_value() {
-        assert_eq!(aimed(3.0, 9.0, 1, 5).at(5), 9.0);
+        assert_eq!(retargeted(3.0, 9.0, 1, 5).at(5), 9.0);
     }
 
     /// A retarget mid-ramp starts from the value of the frame before it: the first
     /// frame of the new ramp is one step on from there.
     #[test]
     fn a_cell_ramp_retargeted_mid_flight_continues_from_its_value() {
-        let first = aimed(0.0, 1.0, 100, 0);
+        let first = retargeted(0.0, 1.0, 100, 0);
         let before = first.at(39);
-        let second = aimed(before, 0.25, 50, 40);
+        let second = retargeted(before, 0.25, 50, 40);
         let step = (0.25 - before) / 50.0;
         let got = second.at(40);
         assert!((got - (before + step)).abs() < 1e-12, "{got}");

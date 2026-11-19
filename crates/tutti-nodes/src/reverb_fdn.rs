@@ -1,7 +1,7 @@
 //! The feedback delay network, [`FdnNode`].
 //!
 //! [`FdnBank`] is the network over buffers views (the lines, the absorption, the mix, the
-//! ramps); this file holds the kernel that aims it, the cells and how the graph reaches
+//! ramps); this file holds the kernel that retargets it, the cells and how the graph reaches
 //! them.
 
 use tutti_buffers::{BusTopology, MaxBlock};
@@ -92,7 +92,7 @@ struct Running<F: Float> {
 }
 
 /// The feedback delay network as a [`Kernel`]: a [`FdnBank`] sized at the prepared rate and
-/// the ramps its design is aimed through.
+/// the ramps its design is set through.
 ///
 /// The bank's state is `F`, the float of the graph.
 #[derive(Clone, Debug)]
@@ -100,8 +100,8 @@ pub struct FdnKernel<F: Float> {
     layout: FdnLayout,
     /// `None` until [`prepare`](Kernel::prepare).
     running: Option<Running<F>>,
-    /// Whether the first retarget after `prepare` has landed.
-    landed: bool,
+    /// Whether the first retarget after `prepare` has been applied.
+    applied: bool,
 }
 
 impl<F: Float + Lerp> FdnKernel<F> {
@@ -110,7 +110,7 @@ impl<F: Float + Lerp> FdnKernel<F> {
         Self {
             layout,
             running: None,
-            landed: false,
+            applied: false,
         }
     }
 }
@@ -137,22 +137,22 @@ impl<F: Float + Lerp> Kernel for FdnKernel<F> {
         let bank = FdnBank::new(&self.layout, rate);
         let ramps = bank.ramps();
         self.running = Some(Running { rate, bank, ramps });
-        self.landed = false;
+        self.applied = false;
     }
 
     fn reset(&mut self) {
         if let Some(r) = &mut self.running {
             r.bank.reset();
-            r.ramps.finish();
+            r.ramps.jump_to_target();
         }
     }
 
     fn retarget(&mut self, controls: &FdnControls) {
         let Some(r) = &mut self.running else { return };
         r.bank.retarget(&mut r.ramps, controls);
-        if !self.landed {
-            r.ramps.finish();
-            self.landed = true;
+        if !self.applied {
+            r.ramps.jump_to_target();
+            self.applied = true;
         }
     }
 

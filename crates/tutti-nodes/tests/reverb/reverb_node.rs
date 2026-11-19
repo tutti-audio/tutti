@@ -247,7 +247,7 @@ fn the_cut_discards_only_what_is_below_the_floor() {
         let mut bank = FreeverbBank::<f32>::new(SR);
         let mut ramps = bank.ramps();
         bank.retarget(&mut ramps, &c);
-        ramps.finish();
+        ramps.jump_to_target();
         let frames = tail + 20_000;
         let mut x = vec![0.0f32; frames];
         x[0] = 1.0;

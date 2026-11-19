@@ -20,7 +20,7 @@
 //!   ([`LadderBank`], [`LadderDesign`], [`LadderBlend`], [`LadderModel`], [`LadderType`]) and the
 //!   Linkwitz-Riley crossover ([`CrossoverBank`], [`CrossoverModel`]; a 2 to 6 band
 //!   4th-order split), each one filter per channel over buffers views with its
-//!   coefficients a [`Ramp`] the caller aims; the envelope filter ([`EnvelopeFilterBank`]:
+//!   coefficients a [`Ramp`] the caller retargets; the envelope filter ([`EnvelopeFilterBank`]:
 //!   an SVF whose cutoff follows the input's level); [`SimdLanes`], the arithmetic their steps
 //!   run in, and the [`Biquad`] section they share. The state runs in `f32` or `f64`, and
 //!   its transcendentals call `libm`, so results do not depend on the platform's C math

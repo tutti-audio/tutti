@@ -19,7 +19,7 @@ fn shaper(attack: f64, sustain: f64) -> TransientBank<f32> {
         attack: Db::new(attack),
         sustain: Db::new(sustain),
     });
-    bank.finish();
+    bank.jump_to_target();
     bank
 }
 
@@ -210,11 +210,12 @@ fn the_amounts_are_held_within_the_range_and_a_non_finite_one_is_zero() {
     }
 }
 
-/// A mid-stream `retarget` after `finish` ramps the amount along `lerp(a0, a1, k / steps)` over the
-/// `GAIN_RAMP` steps (`ceil(5 ms * rate)`), frame `j` after the `retarget` reading step `j + 1`, and
-/// the rendered gain is that amount in the onset's closed form. Tolerance as the onset test's.
+/// A mid-stream `retarget` after `jump_to_target` ramps the amount along
+/// `lerp(a0, a1, k / steps)` over the `GAIN_RAMP` steps (`ceil(5 ms * rate)`), frame `j` after
+/// the `retarget` reading step `j + 1`, and the rendered gain is that amount in the onset's
+/// closed form. Tolerance as the onset test's.
 #[test]
-fn an_aimed_amount_ramps_along_the_linear_ramp() {
+fn a_retargeted_amount_ramps_along_the_linear_ramp() {
     let (a0, a1): (f64, f64) = (6.0, 18.0);
     let steps = (GAIN_RAMP.get() * RATE.get()).ceil() as usize;
     let cut = 500;
@@ -280,7 +281,7 @@ fn an_f64_shaper_at_zero_amounts_is_the_identity() {
     let x: Vec<f64> = rising.iter().chain(rising.iter().rev()).copied().collect();
     let mut bank = TransientBank::<f64>::new(RATE, FAST, SLOW);
     bank.retarget(&TransientControls::DEFAULT);
-    bank.finish();
+    bank.jump_to_target();
     let mut out = vec![0.0f64; x.len()];
     bank.process(
         Planes::new(&[&x[..]]).unwrap(),

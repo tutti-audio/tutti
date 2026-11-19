@@ -34,7 +34,7 @@ fn ceilings() -> Vec<f64> {
     all
 }
 
-/// A bank aimed at `controls`, rendering `x` on both channels, held or with `lane`, in
+/// A bank set to `controls`, rendering `x` on both channels, held or with `lane`, in
 /// blocks of `block`.
 fn render_blocks(
     controls: BrickwallControls,
@@ -63,7 +63,7 @@ fn render_blocks(
     out
 }
 
-/// `xs` on one channel through a bank aimed at `db`.
+/// `xs` on one channel through a bank set to `db`.
 fn through(db: f64, xs: &[f32]) -> Vec<f32> {
     render_blocks(controls(db), xs, None, 64).remove(0)
 }
@@ -150,7 +150,7 @@ fn infinite_ceilings_pass_everything_and_mute() {
     );
 }
 
-/// The render is the clamp of the definition at the aimed ceiling, whatever the block cut
+/// The render is the clamp of the definition at the set ceiling, whatever the block cut
 /// (1, 17, 64, 512 frames) and on every channel.
 #[test]
 fn the_render_is_the_clamp_at_any_block() {
@@ -175,7 +175,7 @@ fn the_render_is_the_clamp_at_any_block() {
 }
 
 /// A fed ceiling is read **per frame**: frame `i` is clamped at the amplitude of
-/// `lane[i]` dB, a NaN frame at the aimed ceiling, and `+-inf` frames are
+/// `lane[i]` dB, a NaN frame at the set ceiling, and `+-inf` frames are
 /// ceilings. Whatever the block cut.
 #[test]
 fn a_fed_ceiling_is_read_per_frame() {

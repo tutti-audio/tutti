@@ -165,7 +165,7 @@ impl<F: Float> Detector<F> {
 /// its end is not driven.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct CompressorLanes<'a, F: Float> {
-    /// The threshold in dB. A frame that is not finite is the aimed threshold.
+    /// The threshold in dB. A frame that is not finite is the set threshold.
     pub threshold: Option<Mono<'a, F>>,
 }
 
@@ -192,7 +192,7 @@ pub struct CompressorBank<F: Float + SimdLanes> {
 }
 
 impl<F: Float + SimdLanes + Lerp> CompressorBank<F> {
-    /// A compressor that does nothing at `rate`, to be aimed.
+    /// A compressor that does nothing at `rate`, to be set.
     #[must_use]
     pub fn new(rate: SampleRate) -> Self {
         // 5 ms is a few hundred frames at any real rate; an absurd rate saturates rather
@@ -221,29 +221,29 @@ impl<F: Float + SimdLanes + Lerp> CompressorBank<F> {
         self
     }
 
-    /// Back to silence: no reduction, nothing metered, and the makeup landed on its target.
+    /// Back to silence: no reduction, nothing metered, and the makeup at rest on its target.
     /// No allocation.
     pub fn reset(&mut self) {
         self.reduction = Smoothed::ZERO;
         self.deepest = F::ZERO;
-        self.makeup.finish();
+        self.makeup.jump_to_target();
         if let Some(key) = &mut self.key {
             key.reset();
         }
     }
 
     /// Lands the makeup on its target now.
-    pub fn finish(&mut self) {
-        self.makeup.finish();
+    pub fn jump_to_target(&mut self) {
+        self.makeup.jump_to_target();
         if let Some(key) = &mut self.key {
-            key.finish();
+            key.jump_to_target();
         }
     }
 
     /// Aims at `controls`: the detector's figures land whole (the follower smooths them) and
     /// the makeup ramps over [`GAIN_RAMP`]. A non-finite control is the default's, a knee
-    /// and the times at 0 (through `floored`) and a ratio at 1. The key filter, if any, ramps to the
-    /// cutoff and Q over one grid period ([`COEFF_INTERVAL`](crate::COEFF_INTERVAL)). No
+    /// and the times at 0 (through `floored`) and a ratio at 1. The key filter, if any, ramps to
+    /// the cutoff and Q over one grid period ([`COEFF_INTERVAL`](crate::COEFF_INTERVAL)). No
     /// allocation.
     pub fn retarget(&mut self, controls: &CompressorControls) {
         let member = CompressorMember::designed(controls, self.rate);
@@ -285,8 +285,8 @@ impl<F: Float + SimdLanes + Lerp> CompressorBank<F> {
             .min(key.frames().get());
         let width = input.channels().min(output.channels());
         let d = self.detector;
-        let aimed = F::from_unit(d.threshold);
-        let blended = self.makeup.blend_len(frames);
+        let threshold_set = F::from_unit(d.threshold);
+        let blended = self.makeup.blended_frames(frames);
         let taken = self.makeup.steps_taken();
         let mut gains = [F::ZERO; CHUNK];
         let mut start = 0;
@@ -306,7 +306,7 @@ impl<F: Float + SimdLanes + Lerp> CompressorBank<F> {
                     .and_then(|l| l.samples().get(i))
                     .copied()
                     .filter(|t| t.is_finite())
-                    .unwrap_or(aimed);
+                    .unwrap_or(threshold_set);
                 let makeup = if i < blended {
                     self.makeup
                         .at(taken.saturating_add(1).saturating_add(i as u32))

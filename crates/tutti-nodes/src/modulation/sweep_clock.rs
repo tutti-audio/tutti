@@ -32,9 +32,9 @@ pub(crate) struct SweepClock {
     pos: usize,
     /// Whether a segment has been solved since the last reset.
     primed: bool,
-    /// Whether the first retarget since a prepare, or since a reset, has landed or a frame has
-    /// rendered: what separates a fresh effect's first design (it lands at once) from a move.
-    landed: bool,
+    /// Whether the first retarget since a prepare, or since a reset, has been applied or a frame
+    /// has rendered: what separates a fresh effect's first design (it lands at once) from a move.
+    applied: bool,
 }
 
 impl SweepClock {
@@ -45,7 +45,7 @@ impl SweepClock {
             phase: RunningPhase::START,
             pos: 0,
             primed: false,
-            landed: false,
+            applied: false,
         }
     }
 
@@ -58,7 +58,7 @@ impl SweepClock {
 
     /// The next design lands whole, as a fresh effect's first does.
     pub(crate) fn unland(&mut self) {
-        self.landed = false;
+        self.applied = false;
     }
 
     /// The LFO's step per frame, for the next segment.
@@ -68,7 +68,7 @@ impl SweepClock {
 
     /// Whether this is the first design since the clock was unlanded: it lands at once.
     pub(crate) fn lands(&mut self) -> bool {
-        !std::mem::replace(&mut self.landed, true)
+        !std::mem::replace(&mut self.applied, true)
     }
 
     /// Whether the next frame begins a segment.
@@ -78,7 +78,7 @@ impl SweepClock {
 
     /// `frames` rendered: the segment position moves on.
     pub(crate) fn advance(&mut self, frames: usize) {
-        self.landed = true;
+        self.applied = true;
         self.pos = (self.pos + frames) % COEFF_INTERVAL;
     }
 

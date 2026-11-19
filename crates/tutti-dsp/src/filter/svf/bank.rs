@@ -117,7 +117,7 @@ fn group<F: Float + SimdLanes, const N: usize>(
             }
         };
     }
-    let blended = ramp.blend_len(frames);
+    let blended = ramp.blended_frames(frames);
     for (i, step) in (0..blended).zip(ramp.steps_taken().saturating_add(1)..) {
         let c = ramp.at(step);
         frame!(i, &c);

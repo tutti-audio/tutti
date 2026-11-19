@@ -22,7 +22,7 @@ impl Lerp for ReadPosition {
 
 impl Ramp<ReadPosition> {
     /// Aims at `to` in `steps`: a count of steps, or no more than a rate in frames a step.
-    /// A target already aimed at leaves the ramp as it is.
+    /// A target already set to leaves the ramp as it is.
     pub fn retarget_position(&mut self, to: ReadPosition, steps: Steps) {
         if to == self.to {
             return;

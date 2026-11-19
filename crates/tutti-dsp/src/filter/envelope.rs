@@ -120,24 +120,24 @@ impl<F: Float + SimdLanes + Lerp> EnvelopeFilterBank<F> {
             phase: Samples::ZERO,
         };
         bank.retarget(&controls);
-        bank.finish();
+        bank.jump_to_target();
         bank
     }
 
-    /// Back to silence: the envelope at 0, the filter cleared, the cutoff landed at the
+    /// Back to silence: the envelope at 0, the filter cleared, the cutoff at rest at the
     /// design for an envelope of 0, and the grid counted from here. No allocation.
     pub fn reset(&mut self) {
         self.env = Smoothed::ZERO;
         self.bank.reset();
         self.phase = Samples::ZERO;
         self.coefficients.retarget(self.design(F::ZERO));
-        self.coefficients.finish();
+        self.coefficients.jump_to_target();
     }
 
     /// Lands the cutoff on its design for the current envelope now.
-    pub fn finish(&mut self) {
+    pub fn jump_to_target(&mut self) {
         self.coefficients.retarget(self.design(self.env.value()));
-        self.coefficients.finish();
+        self.coefficients.jump_to_target();
     }
 
     /// Aims at `controls`. The envelope's times land whole, and the base, depth and Q reach the

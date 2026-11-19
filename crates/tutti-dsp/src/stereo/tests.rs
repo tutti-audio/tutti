@@ -113,7 +113,7 @@ fn widen(width: f64, settle: bool, l: &[f64], r: &[f64]) -> (Vec<f64>, Vec<f64>)
         width: StereoWidth::new(width),
     });
     if settle {
-        bank.finish();
+        bank.jump_to_target();
     }
     let input = vec![l.to_vec(), r.to_vec()];
     let mut out = vec![vec![0.0f64; l.len()]; 2];

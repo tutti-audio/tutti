@@ -12,7 +12,7 @@
 //! [`Ramp`]s, one per channel, and a feedback ramp. The LFO and the solve of the
 //! complements are the caller's: it solves the corners of a segment (the coefficient at
 //! the segment's start and at its end, [`COEFF_INTERVAL`](crate::COEFF_INTERVAL) frames on)
-//! and aims each channel's ramp across it, so the cut of the blocks does not move the
+//! and retargets each channel's ramp across it, so the cut of the blocks does not move the
 //! render.
 
 use tutti_buffers::{ChannelLayout, MAX_CHANNELS};

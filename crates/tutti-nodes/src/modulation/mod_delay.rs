@@ -259,16 +259,16 @@ impl<F: Float + Lerp> Kernel for ModDelayKernel<F> {
         if let Some(bank) = &mut self.bank {
             bank.reset();
         }
-        self.depth.finish();
-        self.feedback.finish();
+        self.depth.jump_to_target();
+        self.feedback.jump_to_target();
         for delay in &mut self.delays {
-            delay.finish();
+            delay.jump_to_target();
         }
         self.clock.reset();
         self.clock.unland();
     }
 
-    /// At a grid point it aims the depth and the feedback at `controls`, takes the rate and
+    /// At a grid point it retargets the depth and the feedback to `controls`, takes the rate and
     /// solves the segment: a retarget inside a segment is a control that moved, and waits for
     /// the next grid point (which retargets with the controls in force there). The first
     /// retarget after a prepare or a reset lands the depth and the feedback at once.
@@ -285,8 +285,8 @@ impl<F: Float + Lerp> Kernel for ModDelayKernel<F> {
         self.feedback
             .retarget_by(F::from_unit(design.feedback), Steps::Fixed(self.steps));
         if first {
-            self.depth.finish();
-            self.feedback.finish();
+            self.depth.jump_to_target();
+            self.feedback.jump_to_target();
         }
         if self.clock.at_corner() {
             self.solve();
@@ -579,7 +579,7 @@ mod tests {
     /// the old rate and the next begins on the new, so the delay follows the exact sine of a
     /// phase that kept running, at the old rate to frame 2512 and at the new one after. Frame
     /// 2500 is near a zero crossing, where the delay moves fastest, so a phase that restarted,
-    /// or a rate that landed a segment early or late, is several frames off.
+    /// or a rate that arrives a segment early or late, is several frames off.
     #[test]
     fn a_rate_change_lands_at_its_grid_point_and_the_phase_stays_continuous() {
         let depth = 0.01f64;
@@ -678,10 +678,10 @@ mod tests {
             "the delay moved {worst} frames in one"
         );
         assert!(worst > slew * 0.9, "it ramps at the slew: {worst}");
-        let landed = moved + 13_440 + 64;
+        let arrived = moved + 13_440 + 64;
         let amp_at = |n: usize| (trace[n] - BASE) / (to * SR);
         let sine_at = |n: usize| (std::f64::consts::TAU * hz * n as f64 / SR).sin();
-        for n in [landed + 1_000, landed + 6_000, len - 100] {
+        for n in [arrived + 1_000, arrived + 6_000, len - 100] {
             let want = sine_at(n);
             assert!(
                 (amp_at(n) - want).abs() < 2e-3,

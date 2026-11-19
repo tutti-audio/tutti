@@ -316,7 +316,7 @@ impl<F: Float> VbapPannerNode<F> {
             self.gains = Ramp::new(gains).steps(GRID as u32);
             self.seated = true;
         }
-        self.gains.finish();
+        self.gains.jump_to_target();
         self.gains.retarget(gains);
     }
 }

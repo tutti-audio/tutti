@@ -566,7 +566,7 @@ fn the_meter_reports_the_deepest_reduction_since_the_last_read() {
 }
 
 /// Each band reads its own threshold lane per frame: driving band 0's lane low reduces band
-/// 0 and no other, a frame that is not finite falls back to the aimed threshold, and a lane
+/// 0 and no other, a frame that is not finite falls back to the set threshold, and a lane
 /// in `f64` reads as the same dB.
 #[test]
 fn a_band_reads_its_own_threshold_lane() {
@@ -585,7 +585,7 @@ fn a_band_reads_its_own_threshold_lane() {
     let d0 = reading.band(0).unwrap().get();
     assert!((d0 - want).abs() < 0.05, "{d0} vs {want}");
     assert!(reading.band(1).unwrap().get() < 1e-3 && reading.band(2).unwrap().get() < 1e-3);
-    // A lane that is NaN reads as the aimed threshold (0 dB): nothing to reduce.
+    // A lane that is NaN reads as the set threshold (0 dB): nothing to reduce.
     let nan = vec![f32::NAN; len];
     let mut k = bank(1, 3);
     k.retarget(&set);
@@ -668,7 +668,7 @@ fn any_call_length_gives_the_same_bits() {
 }
 
 /// A reset bank is a fresh one: after a loud, moved and bypassed run, `reset` and the same
-/// aim render the bits a fresh bank renders, and so does `process` straight after `reset`
+/// retarget render the bits a fresh bank renders, and so does `process` straight after `reset`
 /// with no `retarget`; the meters read nothing.
 #[test]
 fn a_reset_bank_renders_as_a_fresh_one() {
@@ -719,7 +719,7 @@ fn a_reset_bank_renders_as_a_fresh_one() {
 
 /// A threshold lane that ends inside a chunk drives the frames it has and no others: with
 /// instant followers, frames up to the lane's end are reduced by the curve at the lane's
-/// -30 dB and the frames after it are at the aimed 0 dB threshold, unreduced, chunk or not.
+/// -30 dB and the frames after it are at the set 0 dB threshold, unreduced, chunk or not.
 #[test]
 fn a_lane_that_ends_inside_a_chunk_drives_its_own_frames() {
     let mut set = unity(&[200.0, 3_000.0]);

@@ -28,7 +28,7 @@ use super::routing::Routing;
 use crate::{DelayLine, InterpolationMode, Lerp, Ramp, Steps, delay_step};
 
 /// What a delay reads while it runs: the delay as a [`ReadPosition`], and the two feedbacks
-/// in the bank's float `F`, each aimed by [`DelayBank::retarget`] and stepped by
+/// in the bank's float `F`, each retargeted by [`DelayBank::retarget`] and stepped by
 /// [`DelayBank::process`].
 ///
 /// The time ramps at [`DELAY_SLEW`] frames of delay per frame; the channels past the
@@ -57,11 +57,11 @@ impl<F: Float + Lerp> DelayRamps<F> {
         }
     }
 
-    /// Lands on the targets now.
-    pub fn finish(&mut self) {
-        self.time.finish();
-        self.feedback.finish();
-        self.cross.finish();
+    /// Jumps to the targets now.
+    pub fn jump_to_target(&mut self) {
+        self.time.jump_to_target();
+        self.feedback.jump_to_target();
+        self.cross.jump_to_target();
     }
 
     /// Takes `frames` steps of each ramp.
@@ -235,9 +235,9 @@ impl<F: Float + Lerp> DelayBank<F> {
         );
         let cf = g.cross.now();
         let coupled = !self.routing.is_none() && (cf != F::ZERO || g.cross.target() != F::ZERO);
-        let moving = g.time.blend_len(frames) > 0
-            || g.feedback.blend_len(frames) > 0
-            || g.cross.blend_len(frames) > 0;
+        let moving = g.time.blended_frames(frames) > 0
+            || g.feedback.blended_frames(frames) > 0
+            || g.cross.blended_frames(frames) > 0;
         // The step of frame `i` of the block: the one after the steps taken.
         let step = |taken: u32, i: usize| {
             taken

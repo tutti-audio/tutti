@@ -87,15 +87,15 @@ impl<F: Float + SimdLanes + Lerp> KeyStage<F> {
         SvfCoefficients::from(&SvfModel::new(controls, rate))
     }
 
-    /// Silence in the filter's state, and the coefficients landed.
+    /// Silence in the filter's state, and the coefficients at rest.
     pub(super) fn reset(&mut self) {
         self.bank.reset();
-        self.coefficients.finish();
+        self.coefficients.jump_to_target();
     }
 
     /// Lands the coefficients on their design now.
-    pub(super) fn finish(&mut self) {
-        self.coefficients.finish();
+    pub(super) fn jump_to_target(&mut self) {
+        self.coefficients.jump_to_target();
     }
 
     /// Aims at `cutoff` and `q`: the coefficients ramp there over one grid period.

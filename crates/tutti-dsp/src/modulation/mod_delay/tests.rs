@@ -279,7 +279,7 @@ fn a_frozen_flanger_has_notches_at_odd_multiples_of_half_over_the_delay() {
 }
 
 /// The delay ramps, and a frame reads it in closed form: with the ramp `x[n] = n` through
-/// the line a linear read is exact, so frame `i` of a ramp aimed from 100 to 200 frames over
+/// the line a linear read is exact, so frame `i` of a ramp set from 100 to 200 frames over
 /// 400 steps is `n - at(i + 1)` (the first frame after a `retarget` reads step 1), and it lands
 /// exactly.
 #[test]
@@ -298,7 +298,7 @@ fn a_delay_ramp_is_read_in_closed_form_at_the_step_after_those_taken() {
         let want = (300 + i) as f32 - (100.0 + ramp.at(i as u32 + 1));
         assert!((got - want).abs() < 2e-3, "frame {i}: {got} vs {want}");
     }
-    assert_eq!(delays[0].now(), 100.0, "landed exactly");
+    assert_eq!(delays[0].now(), 100.0, "arrived exactly");
 }
 
 /// Any split of the stream gives the bits of one call, with a delay ramp and a feedback
@@ -386,7 +386,7 @@ fn a_silent_channel_stays_silent() {
     assert!(y[0].iter().any(|&s| s != 0.0) && y[2].iter().any(|&s| s != 0.0));
 }
 
-/// The slew is a span of frames: a depth ramp aimed at `DELAY_SLEW` a frame takes
+/// The slew is a span of frames: a depth ramp set to `DELAY_SLEW` a frame takes
 /// `ceil(distance / slew)` steps, so a jump of 1,680 frames takes 13,440.
 #[test]
 fn the_slew_is_frames_of_delay_per_frame() {

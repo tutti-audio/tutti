@@ -66,7 +66,7 @@ impl<F: Float + SimdLanes> CrossoverBank<F> {
                 reached[channel] = band + 1;
             }
         }
-        let blended = blend.blend_len(frames);
+        let blended = blend.blended_frames(frames);
         // The frames the ramp blends read a set per frame: frame-outer, so it is solved once.
         for (i, step) in (0..blended).zip(blend.steps_taken().saturating_add(1)..) {
             let c = blend.at(step).narrowed::<F>();

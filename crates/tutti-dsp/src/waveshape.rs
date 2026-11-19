@@ -279,7 +279,7 @@ pub struct WaveshaperBank<F: Float> {
 }
 
 impl<F: Float + Lerp> WaveshaperBank<F> {
-    /// A waveshaper of `kind` at `rate`, at unity drive, to be aimed.
+    /// A waveshaper of `kind` at `rate`, at unity drive, to be set.
     #[must_use]
     pub fn new(kind: ShapeKind, rate: SampleRate) -> Self {
         // 5 ms is a few hundred frames at any real rate; an absurd rate saturates rather
@@ -309,16 +309,16 @@ impl<F: Float + Lerp> WaveshaperBank<F> {
         self.antialiasing
     }
 
-    /// Back to rest: [`finish`](Self::finish)s the drive on its target and clears every
-    /// channel's history.
+    /// Back to rest: the drive jumps to its target ([`jump_to_target`](Self::jump_to_target)) and
+    /// every channel's history clears.
     pub fn reset(&mut self) {
-        self.finish();
+        self.jump_to_target();
         self.history = [[F::ZERO; 2]; MAX_CHANNELS];
     }
 
     /// Lands the drive on its target now: back to rest.
-    pub fn finish(&mut self) {
-        self.drive.finish();
+    pub fn jump_to_target(&mut self) {
+        self.drive.jump_to_target();
     }
 
     /// Aims at `controls`: the drive ramps over [`GAIN_RAMP`]. No allocation.
@@ -344,7 +344,7 @@ impl<F: Float + Lerp> WaveshaperBank<F> {
         let width = input.channels().min(output.channels());
         debug_assert!(width <= MAX_CHANNELS, "a bank is at most MAX_CHANNELS wide");
         let kind = self.kind;
-        let blended = self.drive.blend_len(frames);
+        let blended = self.drive.blended_frames(frames);
         let taken = self.drive.steps_taken();
         let order = self.antialiasing;
         if order == Antialiasing::Off && lane.is_none() && blended == 0 {

@@ -102,7 +102,7 @@ impl<F: Float + SimdLanes> SosBank<F> {
             .len()
             .min(input.channels())
             .min(output.channels());
-        let blended = coefficients.blend_len(frames);
+        let blended = coefficients.blended_frames(frames);
         let first = coefficients.steps_taken().saturating_add(1);
         // The frames the ramp still blends read a set of their own, once for every channel.
         for i in 0..blended {

@@ -2,7 +2,7 @@
 //!
 //! [`DelayLine`](tutti_dsp::DelayLine) is the bare fractional-read ring;
 //! [`DelayBank`] is the delay over buffers views (the loop, the routing, the ramps), and
-//! this file holds the kernel that aims it, the cells and how the graph reaches them. The
+//! this file holds the kernel that retargets it, the cells and how the graph reaches them. The
 //! read is fractional: a delay whose time is modulated must interpolate between taps or it
 //! steps audibly.
 
@@ -171,8 +171,8 @@ pub struct DelayKernel<F: Float> {
     /// The lines, sized when the rate is known: `None` until [`prepare`](Kernel::prepare).
     bank: Option<DelayBank<F>>,
     ramps: DelayRamps<F>,
-    /// Whether the first retarget after `prepare` has landed.
-    landed: bool,
+    /// Whether the first retarget after `prepare` has been applied.
+    applied: bool,
 }
 
 impl<F: Float + Lerp> DelayKernel<F> {
@@ -182,7 +182,7 @@ impl<F: Float + Lerp> DelayKernel<F> {
             layout,
             bank: None,
             ramps: DelayRamps::new(0),
-            landed: false,
+            applied: false,
         }
     }
 }
@@ -211,23 +211,23 @@ impl<F: Float + Lerp> Kernel for DelayKernel<F> {
         let steps = u32::try_from(GAIN_RAMP.to_samples_ceil(rate).get()).unwrap_or(u32::MAX);
         self.bank = Some(DelayBank::new(&self.layout, rate));
         self.ramps = DelayRamps::new(steps);
-        self.landed = false;
+        self.applied = false;
     }
 
     fn reset(&mut self) {
         if let Some(bank) = &mut self.bank {
             bank.reset();
         }
-        self.ramps.finish();
-        self.landed = false;
+        self.ramps.jump_to_target();
+        self.applied = false;
     }
 
     fn retarget(&mut self, controls: &DelayControls) {
         let Some(bank) = &self.bank else { return };
         bank.retarget(&mut self.ramps, controls);
-        if !self.landed {
-            self.ramps.finish();
-            self.landed = true;
+        if !self.applied {
+            self.ramps.jump_to_target();
+            self.applied = true;
         }
     }
 
@@ -245,7 +245,7 @@ impl<F: Float + Lerp> Kernel for DelayKernel<F> {
             bank.process(&mut self.ramps, lanes, input, output);
         }
         // A design after a render is a move, which ramps.
-        self.landed = true;
+        self.applied = true;
     }
 
     /// A recirculating line rings for as long as its feedback says: unknown, so the graph

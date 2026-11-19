@@ -49,7 +49,7 @@ struct Rig {
 }
 
 impl Rig {
-    /// `layout` at `rate`, landed on `c`.
+    /// `layout` at `rate`, at rest on `c`.
     fn at(layout: &DelayLayout, c: &DelayControls, rate: SampleRate) -> Self {
         let steps = u32::try_from(GAIN_RAMP.to_samples_ceil(rate).get()).unwrap();
         let mut rig = Self {
@@ -57,7 +57,7 @@ impl Rig {
             ramps: DelayRamps::new(steps),
         };
         rig.retarget(c);
-        rig.ramps.finish();
+        rig.ramps.jump_to_target();
         rig
     }
 
@@ -380,7 +380,8 @@ fn a_feedback_lane_is_the_feedback_of_each_frame() {
 /// A feedback cell that moves ramps over [`GAIN_RAMP`](crate::GAIN_RAMP) (5 ms: 240
 /// frames at 48 kHz), counted on the stream. The first echo has the feedback of its own
 /// frame: an echo at `2 D` is the feedback `D + 1` steps into the ramp, so `D = 100` of
-/// the 240 steps from 0.2 to 0.8 is `0.2 + 0.6 * 101 / 240`, and one past the ramp, `D = 300`, is 0.8.
+/// the 240 steps from 0.2 to 0.8 is `0.2 + 0.6 * 101 / 240`, and one past the ramp, `D = 300`, is
+/// 0.8.
 #[test]
 fn a_feedback_ramps_over_five_milliseconds_counted_on_the_stream() {
     let rate = SampleRate::SR_48K;
@@ -520,7 +521,7 @@ fn an_f64_impulse_arrives_at_the_delay() {
     let mut bank = DelayBank::<f64>::new(&mono(InterpolationMode::Linear), BINARY);
     let mut ramps = DelayRamps::<f64>::new(1);
     bank.retarget(&mut ramps, &controls(20.0 / 1024.0, 0.0, 0.0));
-    ramps.finish();
+    ramps.jump_to_target();
     let mut x = vec![0.0f64; 64];
     x[0] = 1.0;
     let mut y = vec![0.0f64; 64];
@@ -540,7 +541,7 @@ fn run_wide(layout: &DelayLayout, c: &DelayControls, x: &[Vec<f64>]) -> Vec<Vec<
     let mut bank = DelayBank::<f64>::new(layout, BINARY);
     let mut ramps = DelayRamps::<f64>::new(1);
     bank.retarget(&mut ramps, c);
-    ramps.finish();
+    ramps.jump_to_target();
     let ins: Vec<&[f64]> = x.iter().map(Vec::as_slice).collect();
     let mut out = vec![vec![0.0f64; x[0].len()]; x.len()];
     let mut outs: Vec<&mut [f64]> = out.iter_mut().map(Vec::as_mut_slice).collect();
@@ -555,7 +556,8 @@ fn run_wide(layout: &DelayLayout, c: &DelayControls, x: &[Vec<f64>]) -> Vec<Vec<
 
 /// An `f64` bank keeps its state in `f64`: at a whole delay `d` with no feedback a signal
 /// of more than 24 significant bits returns `d` frames later exactly, and with feedback `g`
-/// it is the loop `v[n] = x[n] + g v[n - d]` heard at `y[n] = v[n - d]`, to 2^-45; an `f32` state is off by 1e-8.
+/// it is the loop `v[n] = x[n] + g v[n - d]` heard at `y[n] = v[n - d]`, to 2^-45; an `f32` state
+/// is off by 1e-8.
 #[test]
 fn an_f64_bank_returns_a_wide_signal_d_frames_later_and_runs_the_loop_in_f64() {
     use tutti_fixtures::signal::{assert_close_f64, wide_signal};

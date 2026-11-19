@@ -1,7 +1,7 @@
 //! Freeverb, [`FreeverbNode`].
 //!
 //! [`FreeverbBank`] is the combs and all-passes over buffers views (the lines, the ramps);
-//! this file holds the kernel that aims it, the cells and how the graph reaches them.
+//! this file holds the kernel that retargets it, the cells and how the graph reaches them.
 
 use tutti_buffers::{BusTopology, MaxBlock};
 use tutti_buffers::{Float, Planes, PlanesMut};
@@ -101,7 +101,7 @@ struct Running<F: Float> {
 }
 
 /// Freeverb as a [`Kernel`]: a [`FreeverbBank`] sized at the prepared rate and the ramps its
-/// controls are aimed through.
+/// controls are set through.
 ///
 /// The bank's state is `F`, the float of the graph.
 #[derive(Clone, Debug)]
@@ -110,8 +110,8 @@ pub struct FreeverbKernel<F: Float> {
     fixed: Option<FreeverbControls>,
     /// `None` until [`prepare`](Kernel::prepare).
     running: Option<Running<F>>,
-    /// Whether the first retarget after `prepare` has landed.
-    landed: bool,
+    /// Whether the first retarget after `prepare` has been applied.
+    applied: bool,
 }
 
 impl<F: Float + Lerp> FreeverbKernel<F> {
@@ -121,7 +121,7 @@ impl<F: Float + Lerp> FreeverbKernel<F> {
         Self {
             fixed,
             running: None,
-            landed: false,
+            applied: false,
         }
     }
 }
@@ -147,24 +147,24 @@ impl<F: Float + Lerp> Kernel for FreeverbKernel<F> {
         let bank = FreeverbBank::new(rate);
         let ramps = bank.ramps();
         self.running = Some(Running { rate, bank, ramps });
-        self.landed = false;
+        self.applied = false;
     }
 
     /// Silence, and the next design lands at once, as a fresh node's first does.
     fn reset(&mut self) {
         if let Some(r) = &mut self.running {
             r.bank.reset();
-            r.ramps.finish();
+            r.ramps.jump_to_target();
         }
-        self.landed = false;
+        self.applied = false;
     }
 
     fn retarget(&mut self, controls: &FreeverbControls) {
         let Some(r) = &mut self.running else { return };
         r.bank.retarget(&mut r.ramps, controls);
-        if !self.landed {
-            r.ramps.finish();
-            self.landed = true;
+        if !self.applied {
+            r.ramps.jump_to_target();
+            self.applied = true;
         }
     }
 
@@ -178,7 +178,7 @@ impl<F: Float + Lerp> Kernel for FreeverbKernel<F> {
             r.bank.process(&mut r.ramps, input, output);
         }
         // A design after a render is a move, which ramps.
-        self.landed = true;
+        self.applied = true;
     }
 
     /// The bank's ceiling (the room at its largest), or the room's own for a send, or

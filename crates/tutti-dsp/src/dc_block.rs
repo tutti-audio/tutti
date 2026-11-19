@@ -72,8 +72,8 @@ fn dc_complement(corner: Hz, rate: SampleRate) -> f64 {
 /// pole for all.
 ///
 /// The pole `R` is within `1 - R` of 1 at a low corner, so the blocker holds `c = 1 - R`, designed
-/// in `f64` and narrowed to `F` once per `retarget`, and runs `y = y1 + ((x - x1) - c y1)`. Built on
-/// the control side for one rate; nothing it holds grows.
+/// in `f64` and narrowed to `F` once per `retarget`, and runs `y = y1 + ((x - x1) - c y1)`. Built
+/// on the control side for one rate; nothing it holds grows.
 #[derive(Clone, Debug)]
 pub struct DcBlocker<F: Float> {
     rate: SampleRate,
@@ -102,22 +102,22 @@ impl<F: Float + Lerp> DcBlocker<F> {
             .retarget_by(to, Steps::Fixed(COEFF_INTERVAL as u32));
     }
 
-    /// Lands on the aimed pole now.
-    pub fn finish(&mut self) {
-        self.complement.finish();
+    /// Jumps to the target pole now.
+    pub fn jump_to_target(&mut self) {
+        self.complement.jump_to_target();
     }
 
-    /// The pole in force, `1 - c` formed in `f64`: the aimed one once the ramp has run.
+    /// The pole in force, `1 - c` formed in `f64`: the set one once the ramp has run.
     #[must_use]
     pub fn pole(&self) -> F {
         let c: f64 = self.complement.now().into();
         F::from_design(1.0 - c)
     }
 
-    /// Back to silence, the pole landed.
+    /// Back to silence, the pole at rest.
     pub fn reset(&mut self) {
         self.state.fill((F::ZERO, F::ZERO));
-        self.finish();
+        self.jump_to_target();
     }
 
     /// Runs `input` into `output`, channel `c` through its own recursion. The channels

@@ -11,7 +11,7 @@
 //! per channel, around its base delay (a [`ReadPosition`], so a long base keeps its fraction),
 //! and a feedback ramp. **The LFO is the caller's**, on the stream's clock: it solves the
 //! corners of a segment (each channel's excursion at the segment's start and at its end, [`COEFF_INTERVAL`](crate::COEFF_INTERVAL) frames on, [`swept`](ModDelayBank::swept))
-//! and aims each channel's ramp across it, so the cut of the blocks does not move the
+//! and retargets each channel's ramp across it, so the cut of the blocks does not move the
 //! render. The chord of a sine over a step of `h` radians misses it by at most `h^2 / 8`,
 //! which at 5 Hz and 48 kHz is 1.4e-5 of the depth (0.03 samples against the deepest chorus,
 //! 40 ms), and it kinks the delay's slope at each corner, a small ripple on the pitch
