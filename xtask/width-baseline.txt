@@ -14,7 +14,6 @@
 #       dsp S7/instruments  the instruments' f32 engines
 #       midi units  the MIDI crates' f32 units
 #       foundation  units, types, curve and plumbing: the last f32 unit families
-#       measure step 10  tutti-measure's F rows and readings
 crates/tutti-buffers/src/fold.rs  1  migrating: foundation
 crates/tutti-buffers/src/fold/ambisonic.rs  1  migrating: foundation
 crates/tutti-codec/src/format.rs  2  migrating: foundation
@@ -22,22 +21,6 @@ crates/tutti-export/src/control.rs  5  migrating: foundation
 crates/tutti-export/src/encode/mod.rs  2  migrating: foundation
 crates/tutti-export/src/render/outputs.rs  2  migrating: foundation
 crates/tutti-export/src/rendered.rs  1  migrating: foundation
-crates/tutti-measure/src/align.rs  1  migrating: measure step 10
-crates/tutti-measure/src/beat.rs  3  migrating: measure step 10
-crates/tutti-measure/src/chroma.rs  8  migrating: measure step 10
-crates/tutti-measure/src/convert.rs  1  migrating: measure step 10
-crates/tutti-measure/src/features.rs  6  migrating: measure step 10
-crates/tutti-measure/src/key.rs  2  migrating: measure step 10
-crates/tutti-measure/src/loudness.rs  1  migrating: measure step 10
-crates/tutti-measure/src/onset.rs  9  migrating: measure step 10
-crates/tutti-measure/src/peaks.rs  2  migrating: measure step 10
-crates/tutti-measure/src/pitch.rs  2  migrating: measure step 10
-crates/tutti-measure/src/spectrum.rs  3  migrating: measure step 10
-crates/tutti-measure/src/stereo.rs  2  migrating: measure step 10
-crates/tutti-measure/src/tempo.rs  6  migrating: measure step 10
-crates/tutti-measure/src/transform.rs  5  migrating: measure step 10
-crates/tutti-measure/src/vectorscope.rs  2  migrating: measure step 10
-crates/tutti-measure/src/xcorr.rs  3  migrating: measure step 10
 crates/tutti-metering/src/load.rs  8  migrating: foundation
 crates/tutti-modulation/src/compile.rs  1  migrating: B2/B3
 crates/tutti-modulation/src/program.rs  6  migrating: B2/B3

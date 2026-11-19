@@ -25,9 +25,7 @@
 //!
 //! `push` takes an [`Interleaved`] — the shape a render loop already
 //! has, carrying its own width. Results come back as [`Db`]: LUFS and dBTP
-//! are both decibel readings, and the f32 that `Db` carries is ~3× finer than a
-//! 24-bit LSB at any level these reach, so nothing measurable is lost by not
-//! keeping them `f64`.
+//! are both decibel readings.
 //!
 //! # Weighted by placement
 //!
@@ -253,7 +251,7 @@ impl<S: Sample> Meter for LoudnessMeter<S> {
         for_blocks(chunk.samples(), chunk.channels(), |block| {
             // The width was checked above, and the block is whole frames, so
             // the meter takes it; a metering miss must not fail a render.
-            let _ = meter.add_frames_f32(block);
+            let _ = meter.add_frames_f64(block);
         });
         Ok(())
     }
@@ -377,7 +375,7 @@ impl<S: Sample> Meter for TruePeakMeter<S> {
         for part in chunk.samples().chunks(run) {
             let widened = &mut self.scratch[..part.len()];
             for (slot, s) in widened.iter_mut().zip(part) {
-                *slot = s.to_f64();
+                *slot = s.convert_to::<f64>();
             }
             let _ = self.meter.add_frames_f64(widened);
         }
@@ -608,7 +606,7 @@ impl<S: Sample> Meter for WindowedMeter<S> {
     /// stream is cut. A chunk may be empty.
     ///
     /// A push allocates nothing once the meter is built (the meter's
-    /// `add_frames_f32` and its momentary, short-term and true-peak getters,
+    /// `add_frames_f64` and its momentary, short-term and true-peak getters,
     /// counted in `tests/alloc/windowed_loudness.rs` for the locked `ebur128`),
     /// but it is not a realtime-safe call: each reads both windows over their
     /// whole length, three seconds of every channel for the short-term one, so
@@ -639,7 +637,7 @@ impl<S: Sample> Meter for WindowedMeter<S> {
         let channels = chunk.channels();
         let mut rejected = false;
         for_blocks(chunk.samples(), channels, |block| {
-            if self.meter.add_frames_f32(block).is_err() {
+            if self.meter.add_frames_f64(block).is_err() {
                 rejected = true;
             } else {
                 self.frames += (block.len() / channels) as u64;

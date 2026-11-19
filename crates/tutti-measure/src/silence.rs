@@ -165,10 +165,10 @@ pub struct SilenceMeter<S: Sample = f32> {
 }
 
 impl<S: Sample> SilenceMeter<S> {
-    fn scan(&mut self, samples: &[f32]) {
+    fn scan(&mut self, samples: &[f64]) {
         for (offset, &sample) in samples.iter().enumerate() {
             // Below the floor, or NaN, is silence.
-            if f64::from(sample.abs()) < self.floor.get() || sample.is_nan() {
+            if sample.abs() < self.floor.get() || sample.is_nan() {
                 continue;
             }
             let at = self.seen.get() + offset;

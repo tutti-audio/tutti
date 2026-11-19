@@ -6,16 +6,16 @@ use crate::fold_uneven;
 #[test]
 fn a_layout_wider_than_a_bus_meters_every_channel() {
     let wide = ChannelLayout::from(24u16);
-    let samples: Vec<f32> = (0..4 * 24).map(|i| (i % 24) as f32 / 24.0).collect();
+    let samples: Vec<f64> = (0..4 * 24).map(|i| (i % 24) as f64 / 24.0).collect();
     let blocks = summarize(&mono(4), Interleaved::new(&samples, wide).unwrap());
     for c in 0..24 {
         assert_eq!(ch(&blocks, c).len(), 1, "channel {c}");
-        assert_eq!(ch(&blocks, c)[0].max, c as f32 / 24.0, "channel {c}");
+        assert_eq!(ch(&blocks, c)[0].max, c as f64 / 24.0, "channel {c}");
     }
 }
 
 /// `summarize` of a buffer that is valid for its config.
-fn summarize(cfg: &PeakConfig, buffer: Interleaved<'_>) -> PeakBlocks {
+fn summarize(cfg: &PeakConfig, buffer: Interleaved<'_, f64>) -> PeakBlocks {
     super::summarize(cfg, buffer).unwrap()
 }
 
@@ -30,7 +30,7 @@ fn ch(blocks: &PeakBlocks, ch: usize) -> &[PeakBlock] {
 
 /// Stream `samples` in `chunk`-frame pieces at `layout`. The streaming
 /// path, wrapped so a test states only what it varies.
-fn stream(cfg: &PeakConfig, layout: ChannelLayout, samples: &[f32], chunk: usize) -> PeakBlocks {
+fn stream(cfg: &PeakConfig, layout: ChannelLayout, samples: &[f64], chunk: usize) -> PeakBlocks {
     let mut meter = cfg.measure(layout).unwrap();
     for part in samples.chunks(chunk * usize::from(layout.count())) {
         meter
@@ -42,7 +42,7 @@ fn stream(cfg: &PeakConfig, layout: ChannelLayout, samples: &[f32], chunk: usize
 
 #[test]
 fn block_values_are_exact_for_a_ramp() {
-    let samples: Vec<f32> = (0..500).map(|i| i as f32).collect();
+    let samples: Vec<f64> = (0..500).map(|i| i as f64).collect();
     let blocks = summarize(
         &mono(100),
         Interleaved::new(&samples, ChannelLayout::MONO).unwrap(),
@@ -50,10 +50,10 @@ fn block_values_are_exact_for_a_ramp() {
 
     assert_eq!(blocks.blocks_per_channel(), 5);
     for (i, block) in ch(&blocks, 0).iter().enumerate() {
-        let lo = (i * 100) as f32;
+        let lo = (i * 100) as f64;
         assert_eq!(block.min, lo);
         assert_eq!(block.max, lo + 99.0);
-        assert_eq!(block.peak(), Amplitude(f64::from(lo + 99.0)));
+        assert_eq!(block.peak(), Amplitude(lo + 99.0));
     }
 }
 
@@ -75,7 +75,7 @@ fn streaming_matches_batch_at_every_chunk_size_and_layout() {
     ] {
         let channels = layout.count() as usize;
         // 500 whole frames, so batch and streaming see the same input.
-        let samples: Vec<f32> = (0..500 * channels).map(|i| i as f32).collect();
+        let samples: Vec<f64> = (0..500 * channels).map(|i| i as f64).collect();
 
         for block in [1usize, 3, 100] {
             let cfg = PeakConfig::new(Samples(block));
@@ -102,7 +102,7 @@ fn a_chunk_of_the_wrong_width_is_refused() {
 
     assert_eq!(
         meter.push(
-            Interleaved::new(&[1.0f32, 2.0, 3.0, 4.0], ChannelLayout::QUAD).unwrap(),
+            Interleaved::new(&[1.0f64, 2.0, 3.0, 4.0], ChannelLayout::QUAD).unwrap(),
             &mut Vec::new()
         ),
         Err(Error::ChunkLayoutMismatch {
@@ -118,7 +118,7 @@ fn a_chunk_of_the_wrong_width_is_refused() {
 
 #[test]
 fn a_trailing_partial_block_is_kept() {
-    let samples: Vec<f32> = (0..250).map(|i| i as f32).collect();
+    let samples: Vec<f64> = (0..250).map(|i| i as f64).collect();
     let blocks = summarize(
         &mono(100),
         Interleaved::new(&samples, ChannelLayout::MONO).unwrap(),
@@ -134,7 +134,7 @@ fn a_trailing_partial_block_is_kept() {
 #[test]
 fn a_trailing_partial_block_is_kept_on_every_channel() {
     // 250 stereo frames at block 100: two whole blocks and a 50-frame tail.
-    let samples: Vec<f32> = (0..250).flat_map(|i| [i as f32, -(i as f32)]).collect();
+    let samples: Vec<f64> = (0..250).flat_map(|i| [i as f64, -(i as f64)]).collect();
     let blocks = summarize(
         &PeakConfig::new(Samples(100)),
         Interleaved::new(&samples, ChannelLayout::STEREO).unwrap(),
@@ -153,7 +153,7 @@ fn a_trailing_partial_block_is_kept_on_every_channel() {
 #[test]
 fn a_phase_inverted_pair_does_not_cancel() {
     // L ramps up, R is its exact negation.
-    let samples: Vec<f32> = (0..200).flat_map(|i| [i as f32, -(i as f32)]).collect();
+    let samples: Vec<f64> = (0..200).flat_map(|i| [i as f64, -(i as f64)]).collect();
     let blocks = summarize(
         &PeakConfig::new(Samples(100)),
         Interleaved::new(&samples, ChannelLayout::STEREO).unwrap(),
@@ -183,7 +183,7 @@ fn a_phase_inverted_pair_does_not_cancel() {
 #[test]
 fn a_hard_panned_pair_keeps_the_loud_channel_at_full_scale() {
     // L silent, R full-scale square.
-    let samples: Vec<f32> = (0..200)
+    let samples: Vec<f64> = (0..200)
         .flat_map(|i| [0.0, if i % 2 == 0 { 1.0 } else { -1.0 }])
         .collect();
     let blocks = summarize(
@@ -203,7 +203,7 @@ fn a_hard_panned_pair_keeps_the_loud_channel_at_full_scale() {
 fn surround_keeps_every_channel_separately() {
     // 5.1 with only the centre non-zero.
     let layout = ChannelLayout::from(6u16);
-    let samples: Vec<f32> = (0..100)
+    let samples: Vec<f64> = (0..100)
         .flat_map(|_| [0.0, 0.0, 1.0, 0.0, 0.0, 0.0])
         .collect();
     let blocks = summarize(
@@ -228,7 +228,7 @@ fn surround_keeps_every_channel_separately() {
 /// `to_mono` reproduces the per-channel output exactly.
 #[test]
 fn to_mono_on_mono_input_is_the_channel_itself() {
-    let samples: Vec<f32> = (0..500).map(|i| i as f32).collect();
+    let samples: Vec<f64> = (0..500).map(|i| i as f64).collect();
     let blocks = summarize(
         &mono(100),
         Interleaved::new(&samples, ChannelLayout::MONO).unwrap(),
@@ -241,7 +241,7 @@ fn to_mono_on_mono_input_is_the_channel_itself() {
 /// path depends on, so it is asserted rather than assumed.
 #[test]
 fn as_flat_is_channel_major() {
-    let samples: Vec<f32> = (0..200).flat_map(|i| [i as f32, -(i as f32)]).collect();
+    let samples: Vec<f64> = (0..200).flat_map(|i| [i as f64, -(i as f64)]).collect();
     let blocks = summarize(
         &PeakConfig::new(Samples(100)),
         Interleaved::new(&samples, ChannelLayout::STEREO).unwrap(),
@@ -267,15 +267,15 @@ fn degenerate_inputs_are_safe() {
     assert_eq!(
         super::summarize(
             &mono(0),
-            Interleaved::new(&[1.0f32, 2.0], ChannelLayout::MONO).unwrap()
+            Interleaved::new(&[1.0f64, 2.0], ChannelLayout::MONO).unwrap()
         ),
         Err(Error::ZeroBlock)
     );
     assert_eq!(
-        summarize_block(Mono::new(&[] as &[f32])),
+        summarize_block(Mono::new(&[] as &[f64])),
         PeakBlock::default()
     );
-    let one = summarize_block(Mono::new(&[-0.5f32, 0.25]));
+    let one = summarize_block(Mono::new(&[-0.5f64, 0.25]));
     assert_eq!((one.min, one.max), (-0.5, 0.25));
 
     // `to_mono` and `channel` on an empty summary answer rather than panic.
@@ -286,7 +286,7 @@ fn degenerate_inputs_are_safe() {
     assert!(empty.to_mono().is_empty());
     assert!(empty.as_flat().is_empty());
 
-    let blocks = Measure::<f32>::measure(&mono(100), ChannelLayout::MONO)
+    let blocks = Measure::<f64>::measure(&mono(100), ChannelLayout::MONO)
         .unwrap()
         .finish();
     assert!(blocks.is_empty(), "finish on an empty meter emits nothing");
@@ -298,7 +298,7 @@ fn degenerate_inputs_are_safe() {
 fn an_empty_summary_has_no_channels_until_a_width_is_measured() {
     assert_eq!(PeakBlocks::default().layout(), ChannelLayout::EMPTY);
     assert_eq!(PeakBlocks::default().channel(0), None);
-    let blocks = Measure::<f32>::measure(&mono(64), ChannelLayout::STEREO)
+    let blocks = Measure::<f64>::measure(&mono(64), ChannelLayout::STEREO)
         .unwrap()
         .finish();
     assert_eq!(blocks.layout(), ChannelLayout::STEREO);
@@ -315,7 +315,7 @@ fn an_empty_summary_has_no_channels_until_a_width_is_measured() {
 #[test]
 fn summarize_is_exact_across_its_chunks() {
     let frames = 20_000;
-    let samples: Vec<f32> = (0..frames).flat_map(|i| [i as f32, -(i as f32)]).collect();
+    let samples: Vec<f64> = (0..frames).flat_map(|i| [i as f64, -(i as f64)]).collect();
     let cfg = PeakConfig::new(Samples(3_000));
     let blocks = summarize(
         &cfg,
@@ -323,8 +323,8 @@ fn summarize_is_exact_across_its_chunks() {
     );
     assert_eq!(blocks.blocks_per_channel(), 7);
     for (k, (l, r)) in ch(&blocks, 0).iter().zip(ch(&blocks, 1)).enumerate() {
-        let lo = (k * 3_000) as f32;
-        let hi = ((k * 3_000 + 2_999).min(frames - 1)) as f32;
+        let lo = (k * 3_000) as f64;
+        let hi = ((k * 3_000 + 2_999).min(frames - 1)) as f64;
         assert_eq!((l.min, l.max), (lo, hi), "left block {k}");
         assert_eq!((r.min, r.max), (-hi, -lo), "right block {k}");
     }
@@ -344,14 +344,14 @@ fn reset_returns_to_a_fresh_meter() {
     let mut meter = mono(100).measure(ChannelLayout::MONO).unwrap();
     meter
         .push(
-            Interleaved::new(&[1.0f32; 150], ChannelLayout::MONO).unwrap(),
+            Interleaved::new(&[1.0f64; 150], ChannelLayout::MONO).unwrap(),
             &mut Vec::new(),
         )
         .unwrap();
     meter.reset();
     meter
         .push(
-            Interleaved::new(&[2.0f32; 100], ChannelLayout::MONO).unwrap(),
+            Interleaved::new(&[2.0f64; 100], ChannelLayout::MONO).unwrap(),
             &mut Vec::new(),
         )
         .unwrap();
@@ -375,7 +375,7 @@ fn reset_clears_every_channel_carry() {
         .unwrap();
 
     // 50 frames: half a block on both channels, nothing emitted.
-    let partial: Vec<f32> = (0..50).flat_map(|_| [1.0f32, -1.0]).collect();
+    let partial: Vec<f64> = (0..50).flat_map(|_| [1.0f64, -1.0]).collect();
     meter
         .push(
             Interleaved::new(&partial, ChannelLayout::STEREO).unwrap(),
@@ -386,7 +386,7 @@ fn reset_clears_every_channel_carry() {
 
     // A full block of a different value. If either carry survived, its
     // channel would report the earlier value's excursion too.
-    let full: Vec<f32> = (0..100).flat_map(|_| [2.0f32, -2.0]).collect();
+    let full: Vec<f64> = (0..100).flat_map(|_| [2.0f64, -2.0]).collect();
     meter
         .push(
             Interleaved::new(&full, ChannelLayout::STEREO).unwrap(),
@@ -428,7 +428,7 @@ fn merge_unions_the_range_and_takes_the_quadratic_mean() {
 #[test]
 fn the_trait_fold_over_uneven_chunks_equals_summarize_with_whole_blocks_as_items() {
     let layout = ChannelLayout::STEREO;
-    let samples: Vec<f32> = (0..2 * 250).map(|i| ((i * 37) % 101) as f32).collect();
+    let samples: Vec<f64> = (0..2 * 250).map(|i| ((i * 37) % 101) as f64).collect();
     let cfg = mono(16);
     let batch = summarize(&cfg, Interleaved::new(&samples, layout).unwrap());
     let (items, blocks) = fold_uneven(&cfg, layout, 250, |meter, at, out| {
@@ -470,15 +470,15 @@ fn an_odd_and_a_wide_layout_keep_every_sample_on_its_channel() {
     for channels in [3u16, 6] {
         let layout = ChannelLayout::from(channels);
         let width = usize::from(channels);
-        let samples: Vec<f32> = (0..5000 * width).map(|i| (i % width + 1) as f32).collect();
+        let samples: Vec<f64> = (0..5000 * width).map(|i| (i % width + 1) as f64).collect();
         let blocks = summarize(&mono(100), Interleaved::new(&samples, layout).unwrap());
         assert_eq!(blocks.blocks_per_channel(), 50);
         for c in 0..width {
-            let want = (c + 1) as f32;
+            let want = (c + 1) as f64;
             assert!(
                 ch(&blocks, c)
                     .iter()
-                    .all(|b| b.min == want && b.max == want && b.rms.0 == f64::from(want)),
+                    .all(|b| b.min == want && b.max == want && b.rms.0 == want),
                 "channel {c} of {channels}"
             );
         }
