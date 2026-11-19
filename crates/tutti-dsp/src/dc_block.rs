@@ -14,7 +14,7 @@ use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_units::{Hz, SampleRate, Samples};
 
 use crate::onepole::{cutoff_pole, ring_frames};
-use crate::{COEFF_INTERVAL, Glide, Lerp, Steps};
+use crate::{COEFF_INTERVAL, Lerp, Ramp, Steps};
 
 /// The default corner: 10 Hz, well under the audible band's low end and a few time
 /// constants (`1 / 2 pi fc`, 16 ms) from settling a step.
@@ -72,13 +72,13 @@ fn dc_complement(corner: Hz, rate: SampleRate) -> f64 {
 /// pole for all.
 ///
 /// The pole `R` is within `1 - R` of 1 at a low corner, so the blocker holds `c = 1 - R`, designed
-/// in `f64` and narrowed to `F` once per aim, and runs `y = y1 + ((x - x1) - c y1)`. Built on
-/// the control side for one rate; nothing it holds grows.
+/// in `f64` and narrowed to `F` once per `retarget`, and runs `y = y1 + ((x - x1) - c y1)`. Built
+/// on the control side for one rate; nothing it holds grows.
 #[derive(Clone, Debug)]
 pub struct DcBlocker<F: Float> {
     rate: SampleRate,
-    /// The complement `1 - R` of the pole, gliding over [`COEFF_INTERVAL`] frames.
-    complement: Glide<F>,
+    /// The complement `1 - R` of the pole, ramping over [`COEFF_INTERVAL`] frames.
+    complement: Ramp<F>,
     /// `(x[n-1], y[n-1])` of each channel: per-sample values in `F`.
     state: Vec<(F, F)>,
 }
@@ -89,35 +89,35 @@ impl<F: Float + Lerp> DcBlocker<F> {
     pub fn new(width: ChannelLayout, rate: SampleRate) -> Self {
         Self {
             rate,
-            complement: Glide::landed(F::from_design(dc_complement(DC_CORNER, rate))),
+            complement: Ramp::new(F::from_design(dc_complement(DC_CORNER, rate))),
             state: vec![(F::ZERO, F::ZERO); usize::from(width.count())],
         }
     }
 
     /// Aims at the pole for `controls`: the pole moves in a line from the one in force over
     /// the next [`COEFF_INTERVAL`] frames. The state is kept. No allocation.
-    pub fn aim(&mut self, controls: &DcBlockerControls) {
+    pub fn retarget(&mut self, controls: &DcBlockerControls) {
         let to = F::from_design(dc_complement(controls.corner, self.rate));
         self.complement
-            .aim_by(to, Steps::Fixed(COEFF_INTERVAL as u32));
+            .retarget_by(to, Steps::Fixed(COEFF_INTERVAL as u32));
     }
 
-    /// Lands on the aimed pole now.
-    pub fn settle(&mut self) {
-        self.complement.settle();
+    /// Jumps to the target pole now.
+    pub fn jump_to_target(&mut self) {
+        self.complement.jump_to_target();
     }
 
-    /// The pole in force, `1 - c` formed in `f64`: the aimed one once the glide has run.
+    /// The pole in force, `1 - c` formed in `f64`: the set one once the ramp has run.
     #[must_use]
     pub fn pole(&self) -> F {
         let c: f64 = self.complement.now().into();
         F::from_design(1.0 - c)
     }
 
-    /// Back to silence, the pole landed.
+    /// Back to silence, the pole at rest.
     pub fn reset(&mut self) {
         self.state.fill((F::ZERO, F::ZERO));
-        self.settle();
+        self.jump_to_target();
     }
 
     /// Runs `input` into `output`, channel `c` through its own recursion. The channels
@@ -129,7 +129,7 @@ impl<F: Float + Lerp> DcBlocker<F> {
             .channels()
             .min(output.channels())
             .min(self.state.len());
-        let first = self.complement.taken().saturating_add(1);
+        let first = self.complement.steps_taken().saturating_add(1);
         for (ch, state) in self.state.iter_mut().enumerate().take(width) {
             let x = &input.plane(ch).samples()[..frames];
             let mut plane = output.plane_mut(ch);

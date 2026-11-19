@@ -102,7 +102,7 @@ impl Tremolo {
     }
 
     /// Takes `controls`; the phase is kept. No allocation.
-    pub fn aim(&mut self, controls: &TremoloControls) {
+    pub fn retarget(&mut self, controls: &TremoloControls) {
         self.controls = *controls;
     }
 
@@ -166,7 +166,7 @@ impl AutoPan {
     }
 
     /// Takes `controls`; the phase is kept. No allocation.
-    pub fn aim(&mut self, controls: &AutoPanControls) {
+    pub fn retarget(&mut self, controls: &AutoPanControls) {
         self.controls = *controls;
     }
 

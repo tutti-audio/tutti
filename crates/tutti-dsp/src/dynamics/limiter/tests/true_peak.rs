@@ -21,7 +21,7 @@ fn bank(detection: PeakDetection) -> LimiterBank<f32> {
 fn bank_at(detection: PeakDetection, lookahead: Lookahead, rate: SampleRate) -> LimiterBank<f32> {
     let mut bank = LimiterBank::<f32>::detecting(ChannelLayout::MONO, lookahead, rate, detection)
         .expect("the lookahead is long enough");
-    bank.aim(&controls(ceiling_db(), ceiling_db(), 0.1));
+    bank.retarget(&controls(ceiling_db(), ceiling_db(), 0.1));
     bank
 }
 

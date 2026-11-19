@@ -31,16 +31,16 @@
 //! with `a = exp(-1 / (tau * rate))`, so the gain at frame `n` is
 //! `attack * (1 - (1 - as^n) / (1 - af^n))`.
 //!
-//! The amounts glide over [`GAIN_GLIDE`], as a compressor's makeup does; the
+//! The amounts ramp over [`GAIN_RAMP`], as a compressor's makeup does; the
 //! times are the bank's build. The shaper has no latency and no tail: it only scales.
 
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_units::{Db, SampleRate, Seconds};
 
 use super::curves::db_gain;
-use super::gain_pass::{CHUNK, GAIN_GLIDE, floored, key_levels};
+use super::gain_pass::{CHUNK, GAIN_RAMP, floored, key_levels};
 use crate::follower::{Follower, Smoothed};
-use crate::{Glide, Lerp};
+use crate::{Lerp, Ramp};
 
 /// The controls of a [`TransientBank`]: the dB the two branches of the gain reach.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -84,7 +84,7 @@ impl Default for TransientControls {
     }
 }
 
-/// The two amounts in dB, as a pair a glide blends.
+/// The two amounts in dB, as a pair a ramp blends.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Amounts {
     attack: Db,
@@ -127,8 +127,8 @@ pub struct TransientBank<F: Float + Lerp> {
     /// The fast and the slow envelope, both at 0 until a level is heard: per-sample levels in
     /// `F`.
     envelopes: (Smoothed<F>, Smoothed<F>),
-    /// The amounts in dB, gliding over [`GAIN_GLIDE`].
-    amounts: Glide<Amounts>,
+    /// The amounts in dB, ramping over [`GAIN_RAMP`].
+    amounts: Ramp<Amounts>,
     steps: u32,
 }
 
@@ -138,32 +138,32 @@ impl<F: Float + Lerp> TransientBank<F> {
     #[must_use]
     pub fn new(rate: SampleRate, fast: Seconds, slow: Seconds) -> Self {
         let follower = |t: Seconds| Follower::of(floored(t, t), rate);
-        let steps = u32::try_from(GAIN_GLIDE.to_samples_ceil(rate).get()).unwrap_or(u32::MAX);
+        let steps = u32::try_from(GAIN_RAMP.to_samples_ceil(rate).get()).unwrap_or(u32::MAX);
         Self {
             fast: follower(fast),
             slow: follower(slow),
             envelopes: (Smoothed::ZERO, Smoothed::ZERO),
-            amounts: Glide::landed(TransientControls::DEFAULT.designed()),
+            amounts: Ramp::new(TransientControls::DEFAULT.designed()),
             steps,
         }
     }
 
-    /// Back to silence: both envelopes at 0 and the amounts landed. No allocation.
+    /// Back to silence: both envelopes at 0 and the amounts at rest. No allocation.
     pub fn reset(&mut self) {
         self.envelopes = (Smoothed::ZERO, Smoothed::ZERO);
-        self.amounts.settle();
+        self.amounts.jump_to_target();
     }
 
     /// Lands the amounts on their target now.
-    pub fn settle(&mut self) {
-        self.amounts.settle();
+    pub fn jump_to_target(&mut self) {
+        self.amounts.jump_to_target();
     }
 
-    /// Aims at `controls`: the amounts glide over [`GAIN_GLIDE`]. No allocation.
-    pub fn aim(&mut self, controls: &TransientControls) {
+    /// Aims at `controls`: the amounts ramp over [`GAIN_RAMP`]. No allocation.
+    pub fn retarget(&mut self, controls: &TransientControls) {
         let to = controls.designed();
         if to != self.amounts.target() {
-            self.amounts.aim_in(to, self.steps);
+            self.amounts.retarget_in(to, self.steps);
         }
     }
 
@@ -172,13 +172,13 @@ impl<F: Float + Lerp> TransientBank<F> {
     /// Channel `c` of `input` feeds channel `c` of `output`; a channel past the narrower of the
     /// two views is not touched, and the frames rendered are the fewer of the two views'. A NaN
     /// sample reads as quiet and an infinite one as the largest finite level. Frame `i` reads
-    /// the amounts at the glide's step `taken + 1 + i`, then the block's steps are taken. No
+    /// the amounts at the ramp's step `taken + 1 + i`, then the block's steps are taken. No
     /// allocation.
     pub fn process(&mut self, input: Planes<'_, F>, mut output: PlanesMut<'_, '_, F>) {
         let frames = input.frames().get().min(output.frames().get());
         let width = input.channels().min(output.channels());
-        let blended = self.amounts.blended(frames);
-        let taken = self.amounts.taken();
+        let blended = self.amounts.blended_frames(frames);
+        let taken = self.amounts.steps_taken();
         let mut gains = [F::ZERO; CHUNK];
         let mut start = 0;
         while start < frames {

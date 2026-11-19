@@ -97,14 +97,14 @@ fn hostile() -> Vec<CompressorControls> {
     all
 }
 
-/// A bank at `rate` at rest on `c`: aimed and landed, nothing gliding.
+/// A bank at `rate` at rest on `c`: set and at rest, nothing ramping.
 fn bank_at<F: Float + SimdLanes + Lerp>(
     c: &CompressorControls,
     rate: SampleRate,
 ) -> CompressorBank<F> {
     let mut bank = CompressorBank::new(rate);
-    bank.aim(c);
-    bank.settle();
+    bank.retarget(c);
+    bank.jump_to_target();
     bank
 }
 
@@ -412,7 +412,7 @@ fn an_own_key_detects_the_signal_itself() {
 }
 
 /// A threshold lane is read per frame: with the follower instant, each frame's gain is the
-/// curve at that frame's threshold, and a frame that is not finite takes the aimed one.
+/// curve at that frame's threshold, and a frame that is not finite takes the set one.
 #[test]
 fn a_threshold_lane_is_read_per_frame() {
     let n = 600;
@@ -444,7 +444,7 @@ fn a_threshold_lane_is_read_per_frame() {
 }
 
 /// The detector's controls land whole: a ratio that moves is in the next frame's gain,
-/// not glided to (the follower is the smoother), and a retarget that moves the ratio only
+/// not ramped to (the follower is the smoother), and a new target that moves the ratio only
 /// takes no makeup step.
 #[test]
 fn a_moved_detector_control_lands_at_once() {
@@ -457,7 +457,7 @@ fn a_moved_detector_control_lands_at_once() {
     let ones = vec![1.0f32; n];
     let key = vec![amplitude(-8.0); n];
     let _ = run(&mut k, &[&ones, &ones], &[&key, &key], None);
-    k.aim(&b);
+    k.retarget(&b);
     let out = run(&mut k, &[&ones, &ones], &[&key, &key], None);
     let want = -curve(-8.0, -20.0, 0.0, 8.0);
     let got = 20.0 * f64::from(out[0][0]).log10();
@@ -467,11 +467,11 @@ fn a_moved_detector_control_lands_at_once() {
     );
 }
 
-/// A makeup that moves glides over [`GAIN_GLIDE`] (5 ms: 221, 240 and 480 frames at 44.1, 48
+/// A makeup that moves ramps over [`GAIN_RAMP`] (5 ms: 221, 240 and 480 frames at 44.1, 48
 /// and 96 kHz) in a straight line in dB, frame `i` being `(i + 1) / n` of the way, and is
 /// exactly its value after; no frame steps.
 #[test]
-fn a_moved_makeup_glides_over_five_milliseconds() {
+fn a_moved_makeup_ramps_over_five_milliseconds() {
     for (rate, frames) in [(RATES[0], 221usize), (RATES[1], 240), (RATES[2], 480)] {
         assert_eq!((0.005 * rate.get()).ceil() as usize, frames);
         let (a, b) = (
@@ -479,7 +479,7 @@ fn a_moved_makeup_glides_over_five_milliseconds() {
             controls(0.0, 0.0, 1.0, 0.0, 0.0, 12.0),
         );
         let mut k = runner_at(&a, rate);
-        k.aim(&b);
+        k.retarget(&b);
         let n = 2 * frames;
         let ones = vec![1.0f32; n];
         let silent = vec![0.0f32; n];
@@ -492,7 +492,7 @@ fn a_moved_makeup_glides_over_five_milliseconds() {
                 (f64::from(x) / want - 1.0).abs() < 1e-5,
                 "{rate:?} frame {i}: {x} vs {want}"
             );
-            // No step: a frame is within a 12 dB glide's own increment of the last.
+            // No step: a frame is within a 12 dB ramp's own increment of the last.
             assert!(
                 f64::from(x) / previous < 1.0 + 0.0013 * 12.0,
                 "{rate:?}: a step at {i}"
@@ -503,7 +503,7 @@ fn a_moved_makeup_glides_over_five_milliseconds() {
 }
 
 /// A makeup that does not move is applied exactly from the first frame (a bank at rest on
-/// it has nothing gliding), and with nothing to reduce the gain is its amplitude.
+/// it has nothing ramping), and with nothing to reduce the gain is its amplitude.
 #[test]
 fn a_held_makeup_applies_exactly() {
     let c = controls(0.0, 0.0, 1.0, 0.0, 0.0, 6.0);
@@ -533,11 +533,11 @@ fn gain_of(makeup: f64, reduction: f64) -> f64 {
 /// The render is the closed form whatever the calls cut the stream into: a key that steps from
 /// `L1` to a louder `L2` at frame 517 (inside a block of 7, 33, 64, 100 and 255 frames alike)
 /// attacks along the one-pole toward the static curve at the lane's threshold, `T1 (1 - a^n)`
-/// and then `T2 + (R - T2) a^m` from the reduction `R` the step found, and the makeup glides
+/// and then `T2 + (R - T2) a^m` from the reduction `R` the step found, and the makeup ramps
 /// linearly in dB over the 240 steps of 5 ms at 48 kHz, in calls of 1, 7, 33, 64, 100 and 255
 /// frames and in one call.
 #[test]
-fn a_cut_stream_follows_the_one_pole_and_glide_closed_forms() {
+fn a_cut_stream_follows_the_one_pole_and_ramp_closed_forms() {
     let (lane_threshold, ratio, tau) = (-20.0, 4.0, 0.002);
     let (first, second) = (-14.0, -6.0);
     let (steps, makeup, step_at) = (240usize, 9.0, 517usize);
@@ -563,11 +563,11 @@ fn a_cut_stream_follows_the_one_pole_and_glide_closed_forms() {
     let lane = vec![lane_threshold; n];
     for block in [1, 7, 33, 64, 100, 255, n] {
         let mut k = bank_at::<f64>(&c, RATE);
-        k.aim(&to);
+        k.retarget(&to);
         let out = run_in(&mut k, &[&ones], &[&key], Some(&lane), block).remove(0);
         for (i, &y) in out.iter().enumerate() {
-            let glide = makeup * ((i + 1).min(steps) as f64 / steps as f64);
-            let want = gain_of(glide, reduction(i + 1));
+            let ramp = makeup * ((i + 1).min(steps) as f64 / steps as f64);
+            let want = gain_of(ramp, reduction(i + 1));
             assert!(
                 (y / want - 1.0).abs() < 1e-12,
                 "blocks of {block}, frame {i}: {y} vs {want}"
@@ -576,7 +576,7 @@ fn a_cut_stream_follows_the_one_pole_and_glide_closed_forms() {
     }
 }
 
-/// A reset bank attacks from nothing along the one-pole closed form, with the makeup landed on
+/// A reset bank attacks from nothing along the one-pole closed form, with the makeup at rest on
 /// its target: after wear under other controls and a reset, a steady key over the threshold gives
 /// `10^((makeup - target (1 - a^n)) / 20)` from its first frame.
 #[test]
@@ -588,9 +588,9 @@ fn a_reset_bank_attacks_from_nothing_along_the_closed_form() {
     let wear: Vec<f64> = worn_by.iter().map(|&x| f64::from(x)).collect();
     let mut worn = bank_at::<f64>(&c, RATE);
     let _ = run(&mut worn, &[&wear], &[&wear], None);
-    worn.aim(&controls(-10.0, 0.0, 2.0, 0.01, 0.1, -3.0));
+    worn.retarget(&controls(-10.0, 0.0, 2.0, 0.01, 0.1, -3.0));
     let _ = run(&mut worn, &[&wear], &[&wear], None);
-    worn.aim(&c);
+    worn.retarget(&c);
     worn.reset();
     let target = curve(level, threshold, knee, ratio);
     let ones = vec![1.0f64; n];
@@ -603,7 +603,7 @@ fn a_reset_bank_attacks_from_nothing_along_the_closed_form() {
 }
 
 /// A clone continues the one-pole where the original is and shares nothing with it: both follow
-/// the closed form on from the frame they were cloned at, and what the clone is aimed at and
+/// the closed form on from the frame they were cloned at, and what the clone is set to and
 /// rendered under leaves the original's closed form unmoved.
 #[test]
 fn a_clone_continues_along_the_closed_form_and_shares_nothing() {
@@ -631,7 +631,7 @@ fn a_clone_continues_along_the_closed_form_and_shares_nothing() {
         "the clone",
     );
     // The clone moves to other controls and runs on; the original has not heard of it.
-    b.aim(&controls(-40.0, 0.0, 20.0, 0.0, 0.0, 0.0));
+    b.retarget(&controls(-40.0, 0.0, 20.0, 0.0, 0.0, 0.0));
     let _ = run(&mut b, &[&ones], &[&key], None);
     on(
         &run(&mut a, &[&ones], &[&key], None)[0],
@@ -777,12 +777,12 @@ fn a_huge_knee_is_held_and_the_gain_returns_to_the_static_curve() {
     }
 }
 
-/// `audio` through an `f64` bank at 48 kHz aimed at `c` and landed, in one block, keyed by
+/// `audio` through an `f64` bank at 48 kHz set to `c` and at rest, in one block, keyed by
 /// `key`.
 fn run_f64(c: &CompressorControls, audio: &[f64], key: &[f64]) -> Vec<f64> {
     let mut bank = CompressorBank::<f64>::new(RATE);
-    bank.aim(c);
-    bank.settle();
+    bank.retarget(c);
+    bank.jump_to_target();
     let mut out = vec![0.0f64; audio.len()];
     bank.process(
         CompressorLanes::default(),

@@ -15,14 +15,14 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 /// width is a live [`StereoWidth`] cell, read from `0` up with no upper bound (the unit
 /// holds `0..`), set through the node's [`ParamSet`](tutti_graph::ParamSet)
 /// (`UnitParam::StereoWidth`) or the graph's `set_param`. A cell that moves is sampled at
-/// the stream grid (16 frames, [`Kernel::GRID`]) and glides over
-/// [`GAIN_GLIDE`](tutti_dsp::GAIN_GLIDE), 5 ms, so a write is no step and renders the same
+/// the stream grid (16 frames, [`Kernel::GRID`]) and ramps over
+/// [`GAIN_RAMP`](tutti_dsp::GAIN_RAMP), 5 ms, so a write is no step and renders the same
 /// whatever the blocks; a value that is not finite reads as the last one that was.
 ///
-/// Memoryless past the glide: no latency and no tail. Made from the width it starts at
+/// Memoryless past the ramp: no latency and no tail. Made from the width it starts at
 /// ([`StereoWidthConfig`], `StereoWidthNode::from`).
 ///
-/// `F` is the float of the graph it runs in, and of the width's glide and the mid/side
+/// `F` is the float of the graph it runs in, and of the width's ramp and the mid/side
 /// arithmetic.
 pub type StereoWidthNode<F> = KernelNode<StereoWidthKernel<F>>;
 
@@ -84,8 +84,8 @@ control_set! {
 #[derive(Clone, Debug)]
 pub struct StereoWidthKernel<F: Float> {
     bank: WidthBank<F>,
-    /// Whether the first retarget after `prepare` has landed.
-    landed: bool,
+    /// Whether the first retarget after `prepare` has been applied.
+    applied: bool,
 }
 
 impl<F: Float + Lerp> StereoWidthKernel<F> {
@@ -93,7 +93,7 @@ impl<F: Float + Lerp> StereoWidthKernel<F> {
     fn new() -> Self {
         Self {
             bank: WidthBank::<F>::new(SampleRate::SR_48K),
-            landed: false,
+            applied: false,
         }
     }
 }
@@ -110,20 +110,20 @@ impl<F: Float + Lerp> Kernel for StereoWidthKernel<F> {
 
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
         self.bank = WidthBank::<F>::new(rate);
-        self.landed = false;
+        self.applied = false;
     }
 
     /// Silence, and the next design lands at once, as a fresh node's first does.
     fn reset(&mut self) {
-        self.bank.settle();
-        self.landed = false;
+        self.bank.jump_to_target();
+        self.applied = false;
     }
 
     fn retarget(&mut self, controls: &WidthControls) {
-        self.bank.aim(controls);
-        if !self.landed {
-            self.bank.settle();
-            self.landed = true;
+        self.bank.retarget(controls);
+        if !self.applied {
+            self.bank.jump_to_target();
+            self.applied = true;
         }
     }
 
@@ -134,8 +134,8 @@ impl<F: Float + Lerp> Kernel for StereoWidthKernel<F> {
         output: PlanesMut<'_, '_, F>,
     ) {
         self.bank.process(input, output);
-        // A design after a render is a move, which glides.
-        self.landed = true;
+        // A design after a render is a move, which ramps.
+        self.applied = true;
     }
 
     fn tail(&self) -> Tail {
@@ -146,7 +146,7 @@ impl<F: Float + Lerp> Kernel for StereoWidthKernel<F> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{RATE, assert_cell_glides, drive_block, prepared};
+    use crate::test_support::{RATE, assert_cell_ramps, drive_block, prepared};
     use tutti_graph::contract::assert_param_fork;
     use tutti_graph::{Node, ParamNode};
     use tutti_units::UnitParam;
@@ -193,17 +193,17 @@ mod tests {
         }
     }
 
-    /// A cell written between blocks glides on the stream clock whatever the blocks, and
+    /// A cell written between blocks ramps on the stream clock whatever the blocks, and
     /// lands on the formula: a side-only pair `(1, -1)` reads `w` on the left, `-w` on the
-    /// right, and `0.25` after the glide.
+    /// right, and `0.25` after the ramp.
     #[test]
-    fn a_written_width_glides_and_lands_on_the_formula() {
+    fn a_written_width_ramps_and_lands_on_the_formula() {
         let make = || StereoWidthNode::<f32>::from(StereoWidthConfig::new());
         let change =
             |n: &StereoWidthNode<f32>| assert!(n.param_set().set(UnitParam::StereoWidth, 0.25));
         let (l, r) = (vec![1.0f32; 64], vec![-1.0f32; 64]);
         let (la, ra) = (vec![1.0f32; 600], vec![-1.0f32; 600]);
-        assert_cell_glides(make, change, &[&l, &r], &[&la, &ra], "width");
+        assert_cell_ramps(make, change, &[&l, &r], &[&la, &ra], "width");
         let (_, out) = crate::test_support::render_change(make, change, &[&l, &r], &[&la, &ra], 64);
         assert!(out[0][599] == 0.25 && out[1][599] == -0.25);
         assert!(out[0][0] < 1.0 && out[0][0] > 0.9, "starts down the line");

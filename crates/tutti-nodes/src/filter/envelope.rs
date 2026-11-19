@@ -71,7 +71,7 @@ impl EnvelopeFilterConfig {
 /// channel followed with an attack and a release, in `[0, 1]` (0 silent, 1 at full scale).
 ///
 /// The cutoff is designed once per 16 frames of the stream at the envelope then, and the
-/// coefficients glide to it as the SVF's do ([`EnvelopeFilterBank`]). At depth 0 it is a fixed
+/// coefficients ramp to it as the SVF's do ([`EnvelopeFilterBank`]). At depth 0 it is a fixed
 /// SVF at the base.
 ///
 /// The base (`UnitParam::Cutoff`), the resonance (`UnitParam::Q`), the envelope's attack and
@@ -123,8 +123,8 @@ pub struct EnvelopeFilterKernel<F: Float + SimdLanes> {
     ty: SvfType,
     /// `None` until [`prepare`](Kernel::prepare).
     bank: Option<EnvelopeFilterBank<F>>,
-    /// Whether the first retarget after `prepare` has landed.
-    landed: bool,
+    /// Whether the first retarget after `prepare` has been applied.
+    applied: bool,
 }
 
 impl<F: Float + SimdLanes + Lerp> EnvelopeFilterKernel<F> {
@@ -133,7 +133,7 @@ impl<F: Float + SimdLanes + Lerp> EnvelopeFilterKernel<F> {
             input,
             ty,
             bank: None,
-            landed: false,
+            applied: false,
         }
     }
 }
@@ -155,7 +155,7 @@ impl<F: Float + SimdLanes + Lerp> Kernel for EnvelopeFilterKernel<F> {
 
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
         self.bank = Some(EnvelopeFilterBank::new(self.input.layout(), self.ty, rate));
-        self.landed = false;
+        self.applied = false;
     }
 
     fn reset(&mut self) {
@@ -166,10 +166,10 @@ impl<F: Float + SimdLanes + Lerp> Kernel for EnvelopeFilterKernel<F> {
 
     fn retarget(&mut self, controls: &EnvelopeFilterControls) {
         let Some(bank) = &mut self.bank else { return };
-        bank.aim(controls);
-        if !self.landed {
-            bank.settle();
-            self.landed = true;
+        bank.retarget(controls);
+        if !self.applied {
+            bank.jump_to_target();
+            self.applied = true;
         }
     }
 

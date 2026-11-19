@@ -245,9 +245,9 @@ fn the_cut_discards_only_what_is_below_the_floor() {
     for c in [gm(), controls(0.9, 0.2), controls(0.1, 0.9)] {
         let tail = tail_of(c);
         let mut bank = FreeverbBank::<f32>::new(SR);
-        let mut glides = bank.glides();
-        bank.aim(&mut glides, &c);
-        glides.settle();
+        let mut ramps = bank.ramps();
+        bank.retarget(&mut ramps, &c);
+        ramps.jump_to_target();
         let frames = tail + 20_000;
         let mut x = vec![0.0f32; frames];
         x[0] = 1.0;
@@ -255,7 +255,7 @@ fn the_cut_discards_only_what_is_below_the_floor() {
         let ins = [x.as_slice()];
         let mut outs: [&mut [f32]; 2] = [&mut l, &mut r];
         bank.process(
-            &mut glides,
+            &mut ramps,
             tutti_buffers::Planes::new(&ins).unwrap(),
             tutti_buffers::PlanesMut::new(&mut outs).unwrap(),
         );
@@ -574,7 +574,7 @@ fn an_unprepared_node_declares_nothing_derived_from_a_rate() {
 /// A cell that moves lands on the stream's 32-frame grid, whatever the blocks: the room and
 /// the damping written between two blocks at frame 1024 (a multiple of every block below)
 /// give the same render in blocks of 1, 16, 64, 128 and 1024 (the node against itself under
-/// cuts), because the reader takes each whole at the grid and the bank's glides are on the
+/// cuts), because the reader takes each whole at the grid and the bank's ramps are on the
 /// stream's chunks, not a block's. And the move is heard.
 #[test]
 fn a_moved_cell_lands_on_the_grid_whatever_the_blocks() {
@@ -602,7 +602,7 @@ fn a_moved_cell_lands_on_the_grid_whatever_the_blocks() {
     }
 }
 
-/// A cell that moves **between** grid points starts its glide at the next one: a room and a
+/// A cell that moves **between** grid points starts its ramp at the next one: a room and a
 /// damping written 13 frames past frame 1024 and heard from the block that begins there
 /// render the same as the same write at frame 1056, the next grid point of 32, and
 /// differently from the write at 1088.
@@ -632,7 +632,7 @@ fn a_move_between_grid_points_starts_at_the_next_one() {
 
 /// A reset node equals a fresh one that has the cell: render, move the room and the damping,
 /// reset, and the render is the fresh node's with those cells (the move lands at once, it does
-/// not glide from the old room).
+/// not ramp from the old room).
 #[test]
 fn a_cell_moved_before_a_reset_lands_at_once_as_on_a_fresh_node() {
     let x = noise(21, 4_096);

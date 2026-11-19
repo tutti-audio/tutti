@@ -20,7 +20,7 @@ use tutti_units::{SampleRate, Seconds, Tail};
 
 use crate::{Ring, Steps};
 
-/// The frames between glide steps in the reverbs that run in chunks ([`FdnBank::CHUNK`](crate::FdnBank::CHUNK),
+/// The frames between ramp steps in the reverbs that run in chunks ([`FdnBank::CHUNK`](crate::FdnBank::CHUNK),
 /// [`FreeverbBank::CHUNK`](crate::FreeverbBank::CHUNK)).
 pub(crate) const CHUNK: usize = 32;
 

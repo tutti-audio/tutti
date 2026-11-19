@@ -218,7 +218,7 @@ fn the_cutoff_param_moves_the_key_filter() {
         );
         let got = deepest_reduction_db(&out);
         // A 1 kHz tone's sampled peak is within `sampled_peak_tolerance_db(1 kHz)`, 0.022 dB,
-        // of its crest; 0.05 dB holds that with room for the glide's last step.
+        // of its crest; 0.05 dB holds that with room for the ramp's last step.
         assert!(
             (got - want).abs() < 0.05,
             "cutoff {cutoff}: {got} dB, curve says {want} dB"
@@ -246,7 +246,7 @@ fn the_q_param_moves_the_key_filter() {
         );
         let got = deepest_reduction_db(&out);
         // A 1 kHz tone's sampled peak is within `sampled_peak_tolerance_db(1 kHz)`, 0.022 dB,
-        // of its crest; 0.05 dB holds that with room for the glide's last step.
+        // of its crest; 0.05 dB holds that with room for the ramp's last step.
         assert!(
             (got - want).abs() < 0.05,
             "q {q}: {got} dB, curve says {want} dB"

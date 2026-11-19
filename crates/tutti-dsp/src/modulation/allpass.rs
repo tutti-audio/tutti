@@ -33,7 +33,7 @@ const SWEEP_CEILING: f64 = 0.98;
 /// `c` to an absolute `2^-25`: a relative error of up to 4.6e-5 in the stage's pole offset. The
 /// complement keeps full relative precision, and the stage runs on it
 /// ([`PhaserChain`](crate::PhaserChain)). A phaser solves it only at the corners of a segment
-/// (every 16 frames of the stream) and glides between, rather than per sample and channel.
+/// (every 16 frames of the stream) and ramps between, rather than per sample and channel.
 ///
 /// The sweep is held inside `SWEEP_FLOOR..=0.98 ·` Nyquist first. Outside it
 /// `tan` of the normalised frequency is negative (a sweep below 0 Hz, which a

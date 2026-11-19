@@ -461,7 +461,7 @@ fn kinds() -> Vec<(&'static str, Make)> {
 /// - the second burst and its tail are a fresh node's at the new gain, bit for bit, and the
 ///   frames past the tail are exact zeros.
 ///
-/// A gain that glided over the first loud block (its ramp frozen while parked), or an engine
+/// A gain that ramped over the first loud block (its ramp frozen while parked), or an engine
 /// that carried its partition phase and round-off across the gap, would differ in the bits.
 #[test]
 fn a_burst_after_a_parked_gap_is_a_fresh_nodes_at_any_block_size() {

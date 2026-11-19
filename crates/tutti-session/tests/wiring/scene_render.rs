@@ -204,12 +204,12 @@ fn unaligned_blocks_render_per_sample_units_identically() {
     assert_eq!(first_difference(&a, &b), None, "64 vs 100-frame blocks");
 }
 
-/// **A param write glides in from the first frame of the next block**: written
+/// **A param write ramps in from the first frame of the next block**: written
 /// between two 256-frame blocks, the render before it is the scene with the old
 /// drive, the drive moves from the next block's first frame over the waveshaper's
-/// 5 ms glide (a grid point and 240 frames at most, inside 288), and from there on
+/// 5 ms ramp (a grid point and 240 frames at most, inside 288), and from there on
 /// the render is the scene built with the new drive (the waveshaper holds no state
-/// but the glide).
+/// but the ramp).
 #[test]
 fn a_param_write_lands_on_the_next_blocks_first_frame() {
     let mut s = scene(false);
@@ -232,7 +232,7 @@ fn a_param_write_lands_on_the_next_blocks_first_frame() {
     assert_eq!(
         first_difference(&settled(&after), &settled(&new_after)),
         None,
-        "after the glide: the scene at the new drive"
+        "after the ramp: the scene at the new drive"
     );
     // Not vacuous: the write moved the left channel from its first frame.
     assert!(
