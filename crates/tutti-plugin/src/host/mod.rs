@@ -5,7 +5,6 @@
 //! plugin are `tutti-plugin-ipc`'s). What's here is the actual plumbing of
 //! *being a plugin host*:
 //!
-//! - [`db_probe`] — the subprocess probe that `tutti-plugin-db` scans with.
 //! - [`node`] — the [`PluginClient`](node::PluginClient): the generic plugin
 //!   node over the served hosting, its typestates (born `Unbound`, bound into a
 //!   graph node) and what the host keeps beside it.
@@ -15,9 +14,7 @@
 //! over a handle live in `tutti-plugin-host`.
 
 pub mod catalog;
-pub mod db_probe;
 pub mod loadable;
 pub mod node;
 pub mod plugin;
 pub mod plugin_ref;
-pub(crate) mod probe;

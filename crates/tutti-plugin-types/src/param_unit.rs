@@ -197,7 +197,6 @@ macro_rules! one_to_one {
     };
 }
 
-one_to_one!(PlaybackRate, ParamUnit::PlaybackRate);
 one_to_one!(Db, ParamUnit::Decibels);
 one_to_one!(Amplitude, ParamUnit::LinearGain);
 one_to_one!(Hz, ParamUnit::Hertz);
@@ -244,6 +243,22 @@ impl PlainUnit for Pan {
     }
     fn from_plain(unit: ParamUnit, plain: f64) -> Option<Self> {
         (unit == ParamUnit::Pan && (-1.0..=1.0).contains(&plain)).then(|| Self::new(plain))
+    }
+    fn to_plain(self, _unit: ParamUnit) -> f64 {
+        self.get()
+    }
+}
+
+impl PlainUnit for PlaybackRate {
+    fn reads(unit: ParamUnit) -> bool {
+        unit == ParamUnit::PlaybackRate
+    }
+    fn from_plain(unit: ParamUnit, plain: f64) -> Option<Self> {
+        if unit == ParamUnit::PlaybackRate {
+            Self::new(plain)
+        } else {
+            None
+        }
     }
     fn to_plain(self, _unit: ParamUnit) -> f64 {
         self.get()
@@ -502,7 +517,7 @@ mod tests {
         );
         assert_eq!(
             PlaybackRate::from_plain(U::PlaybackRate, 2.0),
-            Some(PlaybackRate::new(2.0))
+            Some(PlaybackRate::of(2.0))
         );
         assert_eq!(Hz::from_plain(U::Cents, 1.0), None);
         assert_eq!(Cents::from_plain(U::Hertz, 1.0), None);

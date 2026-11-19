@@ -9,11 +9,11 @@
 //! drops (i.e., after both the graph has released the node *and* every
 //! user-held handle has dropped).
 
-use crate::{BridgeConfig, BridgeThread, Reaped, ServerWatch};
+use crate::{BridgeConfig, BridgeThread, ServerWatch};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tutti_plugin_ipc_ffi::ExitWait;
+use tutti_plugin_ipc_ffi::{ExitWait, Reaped};
 use tutti_plugin_types::{Deadline, PluginFailure};
 use tutti_rt::LockExt;
 use tutti_rt::{StopToken, ThreadHandle};

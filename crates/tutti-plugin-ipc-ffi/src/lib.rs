@@ -23,6 +23,9 @@
 //!   kernel ends a server with when the host dies (Windows). And
 //!   [`protect_host_memory`], the host's dumpable flag cleared (Linux), so a
 //!   same-user plugin cannot `ptrace` the host or write its memory.
+//! - **The guard on a child process** ([`Reaped`]): a spawned child, killed with its
+//!   process group and reaped when the guard drops, so no path out of the code that holds
+//!   it leaves a running process or a zombie. It holds no `unsafe` of its own.
 //! - **The OS calls** (`wait_readable`, `wait_readable_either` and `poll_wait`
 //!   (the server's waits on its sockets, a bell's descriptor and the
 //!   descriptors a plugin asked to have watched, and an in-process host's
@@ -48,6 +51,7 @@ mod os;
 #[cfg(windows)]
 #[path = "os/windows.rs"]
 mod os;
+mod reaped;
 mod wakeups;
 
 pub use exit::{ExitWait, HOST_PID_ENV, Host, host_pid, watch_host, watch_spawner};
@@ -56,6 +60,7 @@ pub use header::{Direction, RING_SLOTS, SLAB_HEADER_BYTES, SlabHeader, slot_for}
 pub use lifetime::{bind_to_host, has_ended, kill_group, own_group};
 pub use mapping::{MappingWriter, SharedMapping};
 pub use os::*;
+pub use reaped::Reaped;
 pub use wakeups::{FdId, Interest, Ready, Watch};
 
 /// Why a slab could not be made, opened or trusted.

@@ -110,7 +110,7 @@ fn thread(mut port: Port, mut wait: TimerWaiter, losses: CounterWriter<Losses>, 
         (
             move |ump| {
                 bytes.encode(ump, |wire| match wire {
-                    Wire::Short(message) => port.short(message),
+                    Wire::Short(ump) => port.send(&ump),
                     Wire::Long(message) => port.long(message),
                 })
             },

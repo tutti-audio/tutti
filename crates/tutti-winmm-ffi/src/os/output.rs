@@ -7,8 +7,11 @@ use windows_sys::Win32::Media::Audio::{
     midiOutOpen, midiOutPrepareHeader, midiOutReset, midiOutShortMsg, midiOutUnprepareHeader,
 };
 
+use tutti_ump::{SysexMessage, Ump};
+
 use super::OutputPort;
 use super::error::{Error, MmOperation, check};
+use crate::ump::pack;
 
 /// How long a SysEx send may take beyond what its bytes take on a MIDI 1.0
 /// wire (320 microseconds each, rounded up to a millisecond per three).
@@ -87,29 +90,38 @@ impl MidiOut {
         Ok(unconfirmed.confirm())
     }
 
-    /// Sends one short message: the status byte, then its data bytes, low
-    /// byte first.
+    /// Sends `ump` as one short message: a MIDI 1.0 channel voice (type 2) or
+    /// system common or real time (type 1) message, on any Group, which a byte
+    /// stream does not carry.
     ///
     /// # Errors
     ///
-    /// `midiOutShortMsg`'s.
-    pub fn short(&mut self, message: u32) -> Result<(), Error> {
+    /// [`Error::NoMidi1Form`] for any other message type (a MIDI 2.0 channel
+    /// voice message is one), with nothing sent; otherwise `midiOutShortMsg`'s.
+    pub fn send(&mut self, ump: &Ump) -> Result<(), Error> {
+        let message = pack(ump).ok_or(Error::NoMidi1Form {
+            message_type: ump.message_type(),
+        })?;
         // SAFETY: `handle` is the open output.
         let code = unsafe { midiOutShortMsg(self.handle, message) };
         check(MmOperation::MidiOutShortMsg, code)
     }
 
-    /// Sends `message`, a whole System Exclusive message from `0xF0` to
-    /// `0xF7`, and returns when the driver has taken all of it.
+    /// Sends `message`, a whole System Exclusive message, and returns when the
+    /// driver has taken all of it.
     ///
     /// # Errors
     ///
-    /// The failing call. Two failures leave the header and the bytes
+    /// [`Error::TooLong`] for a message past `u32::MAX` bytes, with nothing
+    /// sent; otherwise the failing call.
+    ///
+    /// Two failures leave the header and the bytes
     /// allocated for good, because the driver may still read them: the send
     /// outlasting its timeout ([`Error::NotReturned`]), and an unprepare
     /// that returns any code but `MIDIERR_STILLPLAYING` or success. The port
     /// is then never closed: dropping it only resets it.
-    pub fn long(&mut self, message: &[u8]) -> Result<(), Error> {
+    pub fn long(&mut self, message: SysexMessage<'_>) -> Result<(), Error> {
+        let message = message.bytes();
         let length = u32::try_from(message.len()).map_err(|source| Error::TooLong {
             len: message.len(),
             source,

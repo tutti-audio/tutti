@@ -2,7 +2,6 @@
 //! spawn → handshake → load plugin → setup shared memory → return
 //! a [`LaunchedServer`] ready for the RT bridge thread to connect.
 
-use super::Reaped;
 use crate::ProcessGuard;
 use crate::config::BridgeConfig;
 use crate::error::unexpected_message;
@@ -13,6 +12,7 @@ use std::path::Path;
 use std::process::Command;
 use std::time::{Duration, Instant};
 use tutti_buffers::FloatWidth;
+use tutti_plugin_ipc_ffi::Reaped;
 use tutti_plugin_types::MAX_CHUNK;
 use tutti_plugin_types::StateUse;
 use tutti_plugin_types::Timeouts;

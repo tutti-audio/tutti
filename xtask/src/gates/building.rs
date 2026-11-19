@@ -553,7 +553,7 @@ pub(super) const ALLOW: &[Allow] = &[
     ),
     ty("crates/tutti-plugin-ipc/", "AudioConfig", WIDTH, NOT_A_NODE),
     ty(
-        "crates/tutti-plugin-ipc/",
+        "crates/tutti-plugin-db/",
         "CatalogConfig",
         WIDTH,
         NOT_A_NODE,

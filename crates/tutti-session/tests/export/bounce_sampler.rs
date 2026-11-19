@@ -74,7 +74,7 @@ fn a_free_running_voice_rings_out_its_wave() {
     let at = |speed: f64, looped: Option<Loop>| {
         let mut session = session();
         let mut source = MemorySource::new(constant(frames, 0.25)).expect("a placeable wave");
-        source.set_speed(PlaybackRate::new_clamped(speed));
+        source.set_speed(PlaybackRate::clamped(speed));
         source.set_loop(looped);
         let (voice, _) = session.graph().add(source);
         session.graph().connect(voice, Root).unwrap().hard();

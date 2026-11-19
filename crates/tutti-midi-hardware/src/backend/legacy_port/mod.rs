@@ -7,9 +7,9 @@
 //! the calls into the OS:
 //!
 //! - [`ports`]: a port's identity and the id that names it, stale-proof.
-//! - [`bytes`]: bytes to MIDI 1.0 UMP (type 2, type 1, SysEx7) on the way in,
-//!   and UMP to bytes on the way out, SysEx reassembled whole.
-//! - [`anchor`]: an arrival stamp in milliseconds since the port started, as an
+//! - [`bytes`]: SysEx bytes to SysEx7 packets on the way in, and a UMP to a
+//!   short message or a whole SysEx message on the way out.
+//! - [`anchor`]: an arrival stamp, the time since the port started, as an
 //!   `Instant`.
 //! - [`schedule`]: items held until their time and released in order, for an
 //!   output that sends each event when it is due.

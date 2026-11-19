@@ -681,7 +681,7 @@ fn disk_varispeed_transposes_by_its_factor() {
 
     // The control, at unity. Everything below is measured against this, so a
     // constant offset in the harness cannot masquerade as a correct ratio.
-    voice.set_speed(PlaybackRate::new(1.0));
+    voice.set_speed(PlaybackRate::of(1.0));
     let base = render_streamed(&mut voice, &mut streamer, &clock, 128);
     let base_left: Vec<f32> = base.iter().map(|&(l, _)| l).collect();
     let base_hz = dominant_hz_in(&base_left, 200.0, 1000.0);
@@ -701,7 +701,7 @@ fn disk_varispeed_transposes_by_its_factor() {
         // how the 0.5x case came to report 8 kHz on a 440 Hz tone, a "failure"
         // that was entirely the harness running out of material.
         clock.seek_seconds(0.0);
-        voice.set_speed(PlaybackRate::new(factor));
+        voice.set_speed(PlaybackRate::of(factor));
 
         let want = base_hz * factor;
 
@@ -759,7 +759,7 @@ fn the_tiers_agree_under_varispeed() {
         // iteration, so the disk side must start from the same place or the two
         // are compared at different points in the file.
         disk_clock.seek_seconds(0.0);
-        disk.set_speed(PlaybackRate::new(factor));
+        disk.set_speed(PlaybackRate::of(factor));
         // The gate re-seeks on a varispeed change; the streamer applies it on the
         // next cycle, so step rather than sleep.
         prime(&mut streamer);
@@ -778,7 +778,7 @@ fn the_tiers_agree_under_varispeed() {
                     duration: None,
                 }),
                 channels: ChannelLayout::STEREO,
-                speed: PlaybackRate::new(factor),
+                speed: PlaybackRate::of(factor),
                 ..Default::default()
             },
         )

@@ -1,7 +1,7 @@
 //! A child process that cannot outlive its owner.
 
+use crate::{ExitWait, has_ended, kill_group};
 use std::process::{Child, ExitStatus};
-use tutti_plugin_ipc_ffi::ExitWait;
 
 /// A child process that is killed and reaped when it drops.
 ///
@@ -34,7 +34,7 @@ impl Reaped {
     }
 
     /// Own `child`, which leads a process group of its own
-    /// ([`own_group`](tutti_plugin_ipc_ffi::own_group)): its end, by the kill
+    /// ([`own_group`](crate::own_group)): its end, by the kill
     /// of a drop or by its reaping, ends the group's other processes too (the
     /// helpers a plugin spawned).
     #[must_use]
@@ -62,7 +62,7 @@ impl Reaped {
     ///
     /// The OS error of `try_wait`.
     pub fn try_reap(&mut self) -> std::io::Result<Option<ExitStatus>> {
-        if self.group && tutti_plugin_ipc_ffi::has_ended(self.child.id()) {
+        if self.group && has_ended(self.child.id()) {
             self.end_group();
         }
         let status = self.child.try_wait()?;
@@ -99,7 +99,7 @@ impl Reaped {
     /// reaping, or at it. A `false` `group` has nothing to end.
     fn end_group(&mut self) {
         if std::mem::take(&mut self.group) {
-            tutti_plugin_ipc_ffi::kill_group(self.child.id());
+            kill_group(self.child.id());
         }
     }
 }
@@ -130,8 +130,7 @@ mod tests {
 
     /// **A child is killed and reaped when its guard unwinds**: a panic
     /// between spawn and wait leaves no running process and no zombie (a
-    /// zombie still answers `kill -0`). Moved here with the guard from
-    /// `tutti-plugin`'s probe, which had its own copy.
+    /// zombie still answers `kill -0`).
     #[test]
     fn a_child_is_killed_and_reaped_when_its_guard_unwinds() {
         let child = Command::new("sleep").arg("30").spawn().unwrap();
