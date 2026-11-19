@@ -3,8 +3,8 @@
 //! The tempo is the strongest peak of the novelty curve's autocorrelation,
 //! weighted by a log-Gaussian prior over tempo (Ellis 2007; the same shape as
 //! librosa's `beat_track`), refined to a fraction of a frame by a parabola
-//! through the peak. The beats come from [`crate::beat`]'s dynamic program,
-//! run at that tempo.
+//! through the peak. The beats come from [`tutti_dsp::track_beat_frames`]'s
+//! dynamic program, run at that tempo.
 //!
 //! # Time resolution
 //!
@@ -32,16 +32,14 @@ use crate::level::SILENCE_FLOOR;
 use tutti_buffers::{Float, Mono, Sample};
 use tutti_units::{Bpm, Confidence, SampleRate, Samples, Seconds};
 
-use crate::beat;
 use crate::convert::widen;
 use crate::framing::Framing;
 use crate::onset::{DetectionFunction, OnsetConfig, onset_lag, run};
-use crate::sequence::local_maxima;
 use crate::xcorr::cross_correlate;
 use crate::{Error, Result};
 use tutti_dsp::StftGeometry;
-use tutti_dsp::parabolic_peak;
 use tutti_dsp::{FftScratch, FrameCount};
+use tutti_dsp::{local_maxima, parabolic_peak, track_beat_frames};
 use tutti_units::ranged;
 
 /// The default analysis window, in samples.
@@ -378,7 +376,7 @@ pub fn track_beats_from_novelty<F: Float>(
         None => estimate_tempo_from_novelty(cfg, novelty, sample_rate, hop, fft)?.bpm,
     };
     let period = lag_of(bpm, rate);
-    let beats = beat::track(novelty, period, cfg.tightness.get())
+    let beats = track_beat_frames(novelty, period, cfg.tightness.get())
         .into_iter()
         .map(|frame| Samples(frame * hop.get()))
         .collect();

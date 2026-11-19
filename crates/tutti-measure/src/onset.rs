@@ -2,9 +2,9 @@
 //!
 //! Unlike pitch, this genuinely is "pick a detection function, then threshold
 //! and peak-pick" — four published functions over one pipeline. So the entry
-//! point keeps a general name and the four functions are exported
-//! individually, named for themselves, because choosing between them is a real
-//! choice with real trade-offs.
+//! point keeps a general name and the four functions are
+//! [`tutti_dsp`]'s, named for themselves, because choosing between them is a
+//! real choice with real trade-offs.
 //!
 //! An [`OnsetConfig`] describes the detection: the function, the framing in
 //! samples, a threshold, a sensitivity and a minimum gap in seconds. The rate
@@ -16,15 +16,18 @@
 
 use core::marker::PhantomData;
 
-use tutti_buffers::{Float, Mono, Sample};
+use tutti_buffers::{Mono, Sample};
 use tutti_units::{Amplitude, SampleRate, Samples, Seconds};
 
 use crate::convert::{for_blocks, widen};
 use crate::framing::{FrameCutter, Framing};
 use crate::{Measure, Meter, Result};
+use tutti_dsp::Complex64;
 use tutti_dsp::FftScratch;
 use tutti_dsp::StftGeometry;
-use tutti_dsp::{Complex, Complex64};
+use tutti_dsp::{
+    bin_magnitude, complex_domain_deviation, high_frequency_content, spectral_energy, spectral_flux,
+};
 use tutti_units::ranged;
 
 ranged! {
@@ -66,74 +69,6 @@ pub enum DetectionFunction {
     /// magnitudes only; the phase prediction of the textbook complex-domain
     /// function is not computed.
     ComplexDomain,
-}
-
-/// Positive-rectified sum of magnitude increases.
-///
-/// Only *growth* counts: a bin that quietens contributes nothing, which is
-/// what makes this an onset detector rather than a change detector.
-pub fn spectral_flux<F: Float>(previous: &[F], current: &[Complex<F>]) -> f64 {
-    current
-        .iter()
-        .zip(previous)
-        .map(|(&bin, &prev)| (magnitude(bin) - prev.convert_to::<f64>()).max(0.0))
-        .sum()
-}
-
-/// A bin's magnitude, taken at `f64`.
-fn magnitude<F: Float>(bin: Complex<F>) -> f64 {
-    libm::hypot(bin.re.convert_to::<f64>(), bin.im.convert_to::<f64>())
-}
-
-/// A bin's squared magnitude, taken at `f64`.
-fn power<F: Float>(bin: Complex<F>) -> f64 {
-    let (re, im) = (bin.re.convert_to::<f64>(), bin.im.convert_to::<f64>());
-    re * re + im * im
-}
-
-/// Magnitude energy weighted by bin index.
-///
-/// Bright transients concentrate energy at high frequencies, so weighting by
-/// bin favours them over low-frequency rumble.
-pub fn high_frequency_content<F: Float>(current: &[Complex<F>]) -> f64 {
-    current
-        .iter()
-        .enumerate()
-        .map(|(i, &bin)| (i + 1) as f64 * power(bin))
-        .sum::<f64>()
-        .sqrt()
-}
-
-/// Broadband level of a time-domain frame: its L2 norm, the square root of
-/// the summed squares.
-///
-/// Not an RMS: the sum is not divided by the frame's length, so the value
-/// grows with the window (by `sqrt(len)` for a steady signal). Onset
-/// detection compares frames of one length, where the scale cancels.
-pub fn spectral_energy<S: Sample>(frame: Mono<'_, S>) -> f64 {
-    energy(&widen(frame.samples()))
-}
-
-fn energy(frame: &[f64]) -> f64 {
-    frame.iter().map(|s| s * s).sum::<f64>().sqrt()
-}
-
-/// Euclidean distance between successive magnitude spectra.
-///
-/// Unlike [`spectral_flux`] this counts decreases too, which is what makes it
-/// sensitive to tonal onsets where energy moves between bins rather than
-/// simply arriving. It compares magnitudes only (`previous` holds the last
-/// frame's magnitudes); no phase enters it.
-pub fn complex_domain_deviation<F: Float>(previous: &[F], current: &[Complex<F>]) -> f64 {
-    current
-        .iter()
-        .zip(previous)
-        .map(|(&bin, &prev)| {
-            let diff = magnitude(bin) - prev.convert_to::<f64>();
-            diff * diff
-        })
-        .sum::<f64>()
-        .sqrt()
 }
 
 /// Onset detection parameters. Immutable once built, and free of a sample
@@ -368,7 +303,7 @@ impl<S: Sample> OnsetMeter<S> {
             // novelty against the wrong reference, which then dominates the
             // adaptive threshold for the whole run.
             let value = match plan.function {
-                DetectionFunction::Energy => energy(samples),
+                DetectionFunction::Energy => spectral_energy(Mono::new(samples)),
                 DetectionFunction::SpectralFlux => {
                     fft.forward(Mono::new(samples), window, spectrum);
                     let v = spectral_flux(previous, spectrum);
@@ -543,7 +478,7 @@ fn pick_peaks(cfg: &OnsetPlan, novelty: &[Novelty]) -> Vec<Onset> {
 
 fn store_magnitudes(previous: &mut [f64], spectrum: &[Complex64]) {
     for (slot, bin) in previous.iter_mut().zip(spectrum) {
-        *slot = magnitude(*bin);
+        *slot = bin_magnitude(*bin);
     }
 }
 

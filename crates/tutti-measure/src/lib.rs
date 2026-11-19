@@ -284,9 +284,10 @@
 //!   spectrogram.
 //! - Stereo: [`correlate`] into a [`StereoReading`], smoothed for a meter by a
 //!   [`StereoSmoother`].
-//! - Spectral shape: [`spectral_centroid`], [`spectral_flatness`] and
-//!   [`spectral_rolloff`] over one magnitude spectrum, or [`spectral_features`]
-//!   over every frame of a [`StftMagnitude`], into [`SpectralFeatures`].
+//! - Spectral shape: [`spectral_features`] over every frame of a
+//!   [`StftMagnitude`], into [`SpectralFeatures`]; the per-spectrum kernels
+//!   are [`tutti_dsp`]'s (`spectral_centroid`, `spectral_flatness`,
+//!   `spectral_rolloff`).
 //! - Strip silence: [`strip_silence`] with a [`SilenceConfig`] into
 //!   [`Region`]s, or incrementally with a [`SilenceMeter`].
 //! - Vectorscope: [`vectorscope_points`] turns a stereo pair into
@@ -310,7 +311,6 @@
 #![forbid(unsafe_code)]
 
 mod align;
-mod beat;
 mod chord;
 mod chroma;
 mod convert;
@@ -329,7 +329,6 @@ mod peaks;
 mod pitch;
 #[cfg(test)]
 mod range_contracts;
-mod sequence;
 mod silence;
 mod spectrum;
 mod stereo;
@@ -350,9 +349,7 @@ pub use chroma::{
     TuningOffsetError, chroma,
 };
 pub use error::{Error, Result};
-pub use features::{
-    SpectralFeatures, spectral_centroid, spectral_features, spectral_flatness, spectral_rolloff,
-};
+pub use features::{SpectralFeatures, spectral_features};
 pub use framing::Framing;
 pub use key::{Key, KeyEstimate, KeyProfile, Mode, estimate_key, estimate_key_from_mean};
 pub use loudness::{
@@ -368,9 +365,8 @@ pub use notes::{
 };
 pub use onset::{
     DetectionFunction, Novelty, Onset, OnsetConfig, OnsetGap, OnsetGapError, OnsetMeter,
-    OnsetSensitivity, OnsetSensitivityError, OnsetThreshold, OnsetThresholdError,
-    complex_domain_deviation, detect_onsets, high_frequency_content, spectral_energy,
-    spectral_flux, suppress_close_onsets,
+    OnsetSensitivity, OnsetSensitivityError, OnsetThreshold, OnsetThresholdError, detect_onsets,
+    suppress_close_onsets,
 };
 pub use peaks::{
     ChannelBlock, PeakBlock, PeakBlocks, PeakConfig, PeakMeter, summarize, summarize_block,
