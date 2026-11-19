@@ -224,8 +224,8 @@ impl Default for SynthVoicesConfig {
 }
 
 impl SynthVoicesConfig {
-    /// This synth's rules: a value of the shared note logic.
-    fn rules(&self) -> VoiceConfig {
+    /// This synth's [`VoiceConfig`] for the shared note logic.
+    fn voice_config(&self) -> VoiceConfig {
         VoiceConfig::poly(self.max_voices)
             .with_mode(match self.mode {
                 VoiceMode::Poly => Mode::Poly,
@@ -336,12 +336,12 @@ impl SynthVoices {
     }
 
     pub fn new(config: SynthVoicesConfig) -> Self {
-        let rules = config.rules();
+        let voice_config = config.voice_config();
         let slots = (0..config.max_voices.get())
             .map(|_| VoiceSlot::default())
             .collect();
         Self {
-            core: VoiceAllocator::new(rules),
+            core: VoiceAllocator::new(voice_config),
             commands: Vec::with_capacity(2 * config.max_voices.get() + 64),
             gates: Vec::with_capacity(2 * config.max_voices.get() + 64),
             config,

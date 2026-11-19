@@ -126,7 +126,7 @@ pub(crate) const CHASE_MESSAGES: usize =
 /// The rates a player renders at, in whole hertz.
 const RATES: std::ops::RangeInclusive<i32> = 16_000..=192_000;
 
-/// The note rules of a SoundFont, as a value of [`VoiceConfig`]. Where the SoundFont
+/// A SoundFont's [`VoiceConfig`]. Where the SoundFont
 /// 2.04 specification says, the rule is the spec's; where it is silent, it is
 /// tutti's, and says so.
 ///
@@ -146,7 +146,7 @@ const RATES: std::ops::RangeInclusive<i32> = 16_000..=192_000;
 ///   numbers a keyboard sends. The owner decided on 2026-11-08 that tutti
 ///   follows MIDI 1.0: 66 is the sostenuto and 67 the soft pedal (which is not
 ///   followed).
-fn rules(polyphony: NonZeroUsize) -> VoiceConfig {
+fn voice_config(polyphony: NonZeroUsize) -> VoiceConfig {
     // The bend ranges are General MIDI's 2 semitones until RPN 0 says
     // otherwise (`VoiceConfig::poly`'s). The percussion channel is key-based, so the
     // master tuning leaves it (CA-025, GM2 section 4.2).
@@ -167,7 +167,7 @@ pub(crate) struct Player<F: Float + SimdLanes> {
     default_preset: usize,
 
     channels: Vec<Channel>,
-    voicing: VoiceAllocator,
+    allocator: VoiceAllocator,
     voices: Voices<F>,
     /// The Group's Universal System Exclusive, reassembled and filtered by
     /// device id.
@@ -248,7 +248,7 @@ impl<F: Float + SimdLanes> Player<F> {
             presets,
             default_preset,
             channels,
-            voicing: VoiceAllocator::new(rules(polyphony.voices())),
+            allocator: VoiceAllocator::new(voice_config(polyphony.voices())),
             voices: Voices::new(&render, polyphony.get()),
             universal: UniversalReader::new(settings.group(), settings.device()),
             master_applied: MasterGain::UNITY,
@@ -350,7 +350,7 @@ impl<F: Float + SimdLanes> Player<F> {
         let Some(heard) = self.universal.push(ump) else {
             return;
         };
-        let commands = self.voicing.universal(heard);
+        let commands = self.allocator.universal(heard);
         self.voices.execute(commands, &self.font);
         if matches!(heard.message, Universal::GeneralMidi(_)) {
             self.channels = (0..MidiChannel::COUNT)
@@ -386,7 +386,7 @@ impl<F: Float + SimdLanes> Player<F> {
         };
         let voices = &self.voices;
         let commands = self
-            .voicing
+            .allocator
             .step(channel, message, &patch, |id| voices.level(id));
         self.voices.execute(commands, &self.font);
     }
@@ -416,7 +416,7 @@ impl<F: Float + SimdLanes> Player<F> {
     /// the pedals and keys: a fork's start.
     pub(crate) fn release_all(&mut self) {
         self.voices.release_all();
-        self.voicing.forget_notes();
+        self.allocator.forget_notes();
     }
 
     /// Cuts every voice, forgets the pedals and keys, and returns every
@@ -426,7 +426,7 @@ impl<F: Float + SimdLanes> Player<F> {
     /// sends.
     pub(crate) fn reset(&mut self) {
         self.voices.clear();
-        self.voicing.forget_notes();
+        self.allocator.forget_notes();
         for channel in (0..MidiChannel::COUNT).filter_map(MidiChannel::new) {
             self.apply(
                 channel,
@@ -482,7 +482,7 @@ impl<F: Float + SimdLanes> Player<F> {
             let address = Address { group, channel };
             info.chase(&mut |v| emit(Message::Midi2(address, v).into()));
         }
-        self.voicing.chase(group, &mut emit);
+        self.allocator.chase(group, &mut emit);
     }
 
     /// The planes written into since the last call: the others were exact
@@ -499,12 +499,13 @@ impl<F: Float + SimdLanes> Player<F> {
 
     fn render_block(&mut self) {
         let bends = std::array::from_fn(|i| {
-            MidiChannel::new(i as u8).map_or(Semitones::new(0.0), |c| self.voicing.channel_pitch(c))
+            MidiChannel::new(i as u8)
+                .map_or(Semitones::new(0.0), |c| self.allocator.channel_pitch(c))
         });
         self.voices.process(
             self.font.sample_pool(),
             &self.channels,
-            self.voicing.channels(),
+            self.allocator.channels(),
             &bends,
         );
 
@@ -514,7 +515,7 @@ impl<F: Float + SimdLanes> Player<F> {
         self.block_heard = Heard::default();
         // The Master Volume and Balance (M1 p.57) ramp across the chunk with
         // the voices' own gains, on every plane: the sends carry them too.
-        let (from, to) = (self.master_applied, self.voicing.master_gain());
+        let (from, to) = (self.master_applied, self.allocator.master_gain());
         self.master_applied = to;
         // The master gains cross to the chunk's float once per chunk.
         let master = |gain: Amplitude| F::from_unit(MASTER_VOLUME * gain.get());
@@ -582,8 +583,8 @@ impl<F: Float + SimdLanes> Player<F> {
         player.channels = self.channels.clone();
         // The core's channel state (wheel, sensitivity); its notes are not
         // the new player's, which has no voice.
-        player.voicing = self.voicing.clone();
-        player.voicing.forget_notes();
+        player.allocator = self.allocator.clone();
+        player.allocator.forget_notes();
         player.master_applied = self.master_applied;
         Some(player)
     }
