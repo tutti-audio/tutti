@@ -26,10 +26,10 @@
 //! use tutti_nodes::testing::Osc;
 //!
 //! let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::STEREO);
-//! let tone = g.add(Osc::sine(Hz(440.0)).with_layout(ChannelLayout::STEREO));
+//! let tone = g.add(Osc::sine(Hz::new(440.0)).with_layout(ChannelLayout::STEREO));
 //! g.pipe_output(tone);
 //! let mut r = g
-//!     .renderer(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))))
+//!     .renderer(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64))))
 //!     .expect("builds");
 //! let out = r.render(64);
 //! assert_eq!(out.len(), 2);

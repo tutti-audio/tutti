@@ -65,14 +65,14 @@ use super::Curve;
 /// use tutti_nodes::automation::{Trajectory, AutomationLaneNode, Breakpoint};
 ///
 /// let mut trajectory: Trajectory<Amplitude> = Trajectory::new();
-/// trajectory.add_breakpoint(Breakpoint::new(Beat(0.0), Amplitude(0.0)));
-/// trajectory.add_breakpoint(Breakpoint::new(Beat(4.0), Amplitude(1.0)));
+/// trajectory.add_breakpoint(Breakpoint::new(Beat::new(0.0), Amplitude::new(0.0)));
+/// trajectory.add_breakpoint(Breakpoint::new(Beat::new(4.0), Amplitude::new(1.0)));
 ///
 /// // No inputs, one output (the curve's value).
 /// let lane = AutomationLaneNode::new(trajectory);
-/// let mut solo = Solo::<_, f32>::new(lane, Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))));
+/// let mut solo = Solo::<_, f32>::new(lane, Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64))));
 /// solo.renderer_mut()
-///     .set_transport(TransportPosition::new(false, Bpm::of(120.0), Beat(2.0), None));
+///     .set_transport(TransportPosition::new(false, Bpm::of(120.0), Beat::new(2.0), None));
 /// let out = solo.render(1);
 /// assert!((out[0][0] - 0.5).abs() < 1e-3, "midpoint of a 0..1 ramp, got {}", out[0][0]);
 /// ```

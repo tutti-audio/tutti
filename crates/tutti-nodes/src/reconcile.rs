@@ -426,12 +426,12 @@ struct SourcePlan {
 /// use tutti_units::{Depth, Hz, ParamAddr, PhaseIncrement, SampleRate, Samples, UnitParam, Q};
 /// use tutti_rt::{Param, ParamCell};
 ///
-/// let (mut editor, _exec) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(512))));
+/// let (mut editor, _exec) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(512))));
 /// let filter = NodeKey(1);
 /// let params = editor.insert(
 ///     filter,
 ///     "svf",
-///     SvfFilterNode::<f32>::new(SvfType::LowPass, Hz(1_000.0), Q(0.7)),
+///     SvfFilterNode::<f32>::new(SvfType::LowPass, Hz::new(1_000.0), Q::new(0.7)),
 /// )
 /// .controls;
 /// // A native target's range cell exists once its node is placed.
@@ -453,7 +453,7 @@ struct SourcePlan {
 ///     SourceKey(1),
 ///     Source::Lfo {
 ///         wave: Waveform::Shape { shape: LfoShape::Sine, seed: 0 },
-///         clock: Clock::Seconds { rate: Hz(2.0), phase: PhaseIncrement(0.0), anchor: None },
+///         clock: Clock::Seconds { rate: Hz::new(2.0), phase: PhaseIncrement::new(0.0), anchor: None },
 ///     },
 /// )];
 /// let mut routes = [(
