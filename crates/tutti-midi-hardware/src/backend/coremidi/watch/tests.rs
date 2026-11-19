@@ -8,6 +8,7 @@ use tutti_platform::Instant;
 use super::*;
 use crate::Devices;
 use crate::backend::coremidi::UmpVirtualDestination;
+use crate::endpoints::MidiEndpoints;
 use crate::virtual_endpoint::VirtualProtocol;
 use tutti_midi_device::DeviceEvent;
 
