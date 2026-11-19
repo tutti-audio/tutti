@@ -2,7 +2,7 @@
 //!
 //! Three queues live at this level, one per lane and the response ring. The
 //! block queue (the audio thread → the audio lane's thread) and the control
-//! queue (any caller → the control lane's thread) each have their own doorbell,
+//! queue (any caller → the control lane's thread) each have their own wake-up,
 //! so a block is never queued behind a control request. The audio-response ring
 //! (the audio lane's thread → the audio thread, RT) has owned ends:
 //! [`ResponseWriter`] belongs to the audio lane's thread alone, whatever the
@@ -26,8 +26,8 @@ use std::time::Duration;
 use tutti_plugin_types::BlockCounts;
 use tutti_rt::AtomicSampleRate;
 use tutti_rt::{
-    Counter, Doorbell, LockExt, Overflow, PackedAtomic, RingReader, RingWriter, Sleeper, Tally,
-    TallyWriter, doorbell, ring, tally,
+    Counter, LockExt, Overflow, PackedAtomic, Parker, RingReader, RingWriter, Tally, TallyWriter,
+    Unparker, parker, ring, tally,
 };
 use tutti_units::SampleRate;
 
@@ -78,11 +78,12 @@ pub(super) struct Channels {
     /// rather than on the batcher because the *bridge* thread is what reads it,
     /// to decide whether a dequeued block is still worth sending.
     newest_seq: Arc<AtomicU64>,
-    /// The audio lane's doorbell: its thread sleeps on it when the block queue
-    /// is empty, and the audio thread rings it after a push. The ring is
-    /// wait-free (no lock, no allocation) and cannot be missed
-    /// ([`Doorbell`]'s protocol), so the thread needs no polling timeout.
-    bell: Doorbell,
+    /// The audio lane's unparker: its thread parks on the matching [`Parker`]
+    /// when the block queue is empty, and the audio thread unparks it after a
+    /// push. The unpark is wait-free (no lock, no allocation) and cannot be
+    /// missed ([`Unparker`]'s protocol), so the thread needs no polling
+    /// timeout.
+    unparker: Unparker,
     /// The control lane's bell: its thread waits on the control stream and this
     /// together, so a request or the server's news ends the wait at once.
     control_bell: ControlBell,
@@ -283,8 +284,8 @@ struct Requests {
 
 /// The waits of the two lane threads, each moved to the thread that waits.
 pub(super) struct Waits {
-    /// The audio lane's doorbell.
-    pub(super) audio: Sleeper,
+    /// The audio lane's parker.
+    pub(super) audio: Parker,
     /// The control lane's wait on its stream and bell.
     pub(super) control: ControlWait,
 }
@@ -300,7 +301,7 @@ impl Channels {
         sample_rate: SampleRate,
         progress: Arc<crate::Wake>,
     ) -> std::io::Result<(Self, Waits)> {
-        let (bell, sleeper) = doorbell();
+        let (unparker, parker) = parker();
         let (control_bell, control_wait) = control_bell()?;
         let (dropped_param_events, dropped_midi, skipped) = (tally(), tally(), tally());
         let (abandoned, late, commands_refused, leaked_buffers, unapplied) =
@@ -314,7 +315,7 @@ impl Channels {
             settings: Arc::default(),
             requests: Arc::default(),
             newest_seq: Arc::new(AtomicU64::new(0)),
-            bell,
+            unparker,
             control_bell,
             sample_rate: Arc::new(AtomicSampleRate::new(sample_rate)),
             reply_wait_ns: Arc::new(AtomicU64::new(0)),
@@ -343,7 +344,7 @@ impl Channels {
         Ok((
             channels,
             Waits {
-                audio: sleeper,
+                audio: parker,
                 control: control_wait,
             },
         ))
@@ -382,9 +383,9 @@ impl Channels {
     /// `stop` says to leave, whichever is already true or comes first. May
     /// return with neither (a spurious wake-up): the caller rechecks. `stop`
     /// reads what whoever ends the loop publishes before calling
-    /// [`wake`](Self::wake). `sleeper` is the one [`new`](Self::new) made.
-    pub(super) fn wait_for_block(&self, sleeper: &mut Sleeper, stop: impl FnOnce() -> bool) {
-        sleeper.wait(|| !self.blocks.is_empty() || self.requested() || stop());
+    /// [`wake`](Self::wake). `parker` is the one [`new`](Self::new) made.
+    pub(super) fn wait_for_block(&self, parker: &mut Parker, stop: impl FnOnce() -> bool) {
+        parker.park(|| !self.blocks.is_empty() || self.requested() || stop());
     }
 
     /// Asks for `setting` to be applied, ordered against the blocks: the blocks
@@ -402,7 +403,7 @@ impl Channels {
                 Setting::Fence => {}
             }
         }
-        self.bell.ring();
+        self.unparker.unpark();
     }
 
     /// Whether a requested setting waits for the audio lane.
@@ -481,7 +482,7 @@ impl Channels {
     /// crash). Publish the condition first. Real-time safe, like the rings in
     /// the pushes.
     pub(super) fn wake(&self) {
-        self.bell.ring();
+        self.unparker.unpark();
         self.control_bell.ring();
         self.progress.notify();
     }
@@ -489,9 +490,9 @@ impl Channels {
     /// A call that wakes both lanes' threads, for what has no `Channels` to
     /// hold: it holds the two bells and no queue.
     pub(super) fn waker(&self) -> impl Fn() + Send + Sync + use<> {
-        let (bell, control_bell) = (self.bell.clone(), self.control_bell.clone());
+        let (unparker, control_bell) = (self.unparker.clone(), self.control_bell.clone());
         move || {
-            bell.ring();
+            unparker.unpark();
             control_bell.ring();
         }
     }
@@ -628,16 +629,16 @@ impl Channels {
         self.dropped_param_events.get()
     }
 
-    /// Pushes a block-lane command, then rings the audio lane's doorbell, so the
+    /// Pushes a block-lane command, then unparks the audio lane, so the
     /// socket round-trip starts immediately rather than after a poll interval.
-    /// The audio thread never waits on the reply, but the ring still matters: it
+    /// The audio thread never waits on the reply, but the unpark still matters: it
     /// is what keeps a block's reply arriving in time to be collected on the
     /// *next* block rather than the one after.
     ///
-    /// The ring is wait-free and allocation-free (`Doorbell::ring`: a fence
+    /// The unpark is wait-free and allocation-free (`Unparker::unpark`: a fence
     /// and a load, plus a futex wake when the lane is parked), and it
     /// cannot be lost, so nothing backs it with a timeout. A push the queue
-    /// refuses rings nothing: the lane is, or is about to be, draining.
+    /// refuses unparks nothing: the lane is, or is about to be, draining.
     ///
     /// A refused command is counted ([`note_command_refused`](Self::note_command_refused)).
     pub(super) fn push_block(&self, cmd: AudioCommand) -> bool {
@@ -652,7 +653,7 @@ impl Channels {
             self.note_command_refused();
             return Err(cmd);
         }
-        self.bell.ring();
+        self.unparker.unpark();
         Ok(())
     }
 
@@ -857,7 +858,7 @@ mod tests {
     /// wait on it as if it were, nor be let through ahead of it.
     #[test]
     fn a_control_command_is_stamped_with_the_newest_block_pushed() {
-        let (c, _sleeper) = channels();
+        let (c, _parker) = channels();
         c.note_submitted(5);
         assert!(c.push_control(ControlCommand::CloseEditor));
         assert_eq!(c.pop_control().map(|s| s.after), Some(0), "5 is not queued");
@@ -866,7 +867,7 @@ mod tests {
         assert_eq!(c.pop_control().map(|s| s.after), Some(5));
     }
 
-    fn channels() -> (Channels, Sleeper) {
+    fn channels() -> (Channels, Parker) {
         let (channels, waits) =
             Channels::new(SampleRate::SR_48K, Arc::default()).expect("the channels");
         (channels, waits.audio)
@@ -914,7 +915,7 @@ mod tests {
     /// report it, until `stop`. Returns the handle once it is parked.
     fn bridge(
         c: &Channels,
-        mut sleeper: Sleeper,
+        mut parker: Parker,
         stop: &Arc<std::sync::atomic::AtomicBool>,
     ) -> (
         std::thread::JoinHandle<()>,
@@ -926,7 +927,7 @@ mod tests {
             while !stop.load(Ordering::Acquire) {
                 match c.pop_block() {
                     Some(cmd) => tx.send(cmd).unwrap(),
-                    None => c.wait_for_block(&mut sleeper, || stop.load(Ordering::Acquire)),
+                    None => c.wait_for_block(&mut parker, || stop.load(Ordering::Acquire)),
                 }
             }
         });
@@ -941,10 +942,10 @@ mod tests {
     /// fence and load.
     #[test]
     fn a_push_wakes_a_parked_bridge_without_allocating() {
-        let (c, sleeper) = channels();
+        let (c, parker) = channels();
         let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let (t, rx) = bridge(&c, sleeper, &stop);
-        while !c.bell.is_asleep() {
+        let (t, rx) = bridge(&c, parker, &stop);
+        while !c.unparker.is_parked() {
             std::thread::yield_now();
         }
         assert_no_alloc::assert_no_alloc(|| assert!(c.push_block(AudioCommand::Reset)));
@@ -961,9 +962,9 @@ mod tests {
     /// is no backstop timeout to hide it).
     #[test]
     fn no_pushed_command_waits_on_a_missed_wake_up() {
-        let (c, sleeper) = channels();
+        let (c, parker) = channels();
         let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let (t, rx) = bridge(&c, sleeper, &stop);
+        let (t, rx) = bridge(&c, parker, &stop);
         for i in 0..20_000u32 {
             // Alternate a spin so the push lands both before and after the park.
             for _ in 0..(i % 64) {
@@ -982,10 +983,10 @@ mod tests {
     /// is how `shutdown` reaches a parked bridge when its queue was full.
     #[test]
     fn wake_ends_a_wait_with_nothing_queued() {
-        let (c, sleeper) = channels();
+        let (c, parker) = channels();
         let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let (t, _rx) = bridge(&c, sleeper, &stop);
-        while !c.bell.is_asleep() {
+        let (t, _rx) = bridge(&c, parker, &stop);
+        while !c.unparker.is_parked() {
             std::thread::yield_now();
         }
         stop.store(true, Ordering::Release);
@@ -998,7 +999,7 @@ mod tests {
     /// allocates nothing.
     #[test]
     fn a_full_command_queue_counts_each_refusal() {
-        let (c, _sleeper) = channels();
+        let (c, _parker) = channels();
         for _ in 0..COMMAND_QUEUE_SIZE {
             assert!(c.push_block(AudioCommand::Reset));
         }
@@ -1018,7 +1019,7 @@ mod tests {
     /// **A response the full response ring refuses is counted lost.**
     #[test]
     fn a_full_response_ring_counts_each_loss() {
-        let (c, _sleeper) = channels();
+        let (c, _parker) = channels();
         let (writer, _replies, lost) = response_ring();
         let mut writer = writer;
         let resp = || AudioResponse::Error { seq: None };

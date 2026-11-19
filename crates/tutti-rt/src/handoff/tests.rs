@@ -11,13 +11,13 @@ impl Drop for Counted {
 
 // `Counted` holds an `Rc`, which is not `Send`; these tests stay on one thread
 // and reach the ends' methods, which ask nothing of `T`.
-fn pair<T>() -> (Hand<T>, Rt<T>) {
+fn pair<T>() -> (Handoff<T>, Rt<T>) {
     let shared = Arc::new(Shared {
         state: AtomicU32::new(EMPTY),
         slot: UnsafeCell::new(MaybeUninit::uninit()),
     });
     (
-        Hand {
+        Handoff {
             shared: Arc::clone(&shared),
         },
         Rt {

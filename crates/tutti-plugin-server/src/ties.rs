@@ -9,7 +9,7 @@
 //!   connection.
 //! - **The main thread's settle** ([`Settle`]) is a count the render thread
 //!   raises ([`Notify::bump`]) after it takes a command, trades the Processor or
-//!   hands something back, with a `tutti_rt` doorbell. The main thread reads
+//!   hands something back, with a `tutti_rt` [`Unparker`]. The main thread reads
 //!   the count, looks at what it waits for, and waits for the count to move
 //!   ([`Settle::wait_past`]), so a change that lands between its look and its
 //!   wait is not missed.
@@ -23,7 +23,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use tutti_rt::{Doorbell, LockExt, Sleeper, StopToken, doorbell};
+use tutti_rt::{LockExt, Parker, StopToken, Unparker, parker};
 
 use crate::main_loop::Bell;
 
@@ -56,13 +56,13 @@ impl Patience {
 #[derive(Clone)]
 pub(crate) struct Settle {
     progress: Arc<AtomicU64>,
-    sleeper: Arc<Mutex<Sleeper>>,
+    parker: Arc<Mutex<Parker>>,
 }
 
 /// The render thread's end of its progress.
 pub(crate) struct Notify {
     progress: Arc<AtomicU64>,
-    bell: Doorbell,
+    unparker: Unparker,
 }
 
 impl Notify {
@@ -71,7 +71,7 @@ impl Notify {
     /// lock and never waits.
     pub(crate) fn bump(&self) {
         self.progress.fetch_add(1, Ordering::Release);
-        self.bell.ring();
+        self.unparker.unpark();
     }
 }
 
@@ -88,9 +88,9 @@ impl Settle {
         let Some(left) = patience.left(Instant::now()) else {
             return;
         };
-        self.sleeper
+        self.parker
             .lock_recover()
-            .wait_timeout(|| self.progress.load(Ordering::Acquire) != seen, left);
+            .park_timeout(|| self.progress.load(Ordering::Acquire) != seen, left);
     }
 }
 
@@ -126,23 +126,20 @@ pub(crate) struct RenderTies {
 pub(crate) fn ties() -> std::io::Result<(Ties, RenderTies)> {
     let (wake, bell) = (Bell::new()?, Bell::new()?);
     let progress = Arc::new(AtomicU64::new(0));
-    let (rung, sleeper) = doorbell();
+    let (unparker, parker) = parker();
     Ok((
         Ties {
             bell,
             wake: wake.clone(),
             settle: Settle {
                 progress: Arc::clone(&progress),
-                sleeper: Arc::new(Mutex::new(sleeper)),
+                parker: Arc::new(Mutex::new(parker)),
             },
             host_gone: StopToken::new(),
         },
         RenderTies {
             wake,
-            notify: Notify {
-                progress,
-                bell: rung,
-            },
+            notify: Notify { progress, unparker },
         },
     ))
 }
