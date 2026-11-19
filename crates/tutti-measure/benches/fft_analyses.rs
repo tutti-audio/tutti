@@ -45,7 +45,7 @@ fn benches(c: &mut Criterion) {
     g.sample_size(30);
 
     g.bench_function("stft_istft_2048_hop512", |b| {
-        let mut fft = FftScratch::new();
+        let mut fft = FftScratch::<f64>::new();
         let req = StftRequest::new(Samples(2048), Samples(512));
         b.iter(|| {
             let s = stft(req, Mono::new(black_box(&x)), SR, &mut fft).unwrap();
@@ -54,7 +54,7 @@ fn benches(c: &mut Criterion) {
     });
 
     g.bench_function("onsets_flux_2048_hop512", |b| {
-        let mut fft = FftScratch::new();
+        let mut fft = FftScratch::<f64>::new();
         let cfg = OnsetConfig::new(DetectionFunction::SpectralFlux);
         b.iter(|| black_box(detect_onsets(&cfg, Mono::new(black_box(&x)), SR, &mut fft).unwrap()));
     });

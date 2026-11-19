@@ -76,7 +76,7 @@ use tutti_units::{SampleRate, Tail};
     clippy::large_enum_variant,
     reason = "the payloads exist to be received and dropped on the control thread, never read; boxing the large variant would re-add the audio-thread free this type exists to avoid"
 )]
-pub(crate) enum Retired<F: SamplerFloat = f32> {
+pub(crate) enum Retired<F: SamplerFloat> {
     /// A slot removed by `VoiceCommand::Remove`, filter and all.
     Slot(PlaybackSlot<F>),
     /// A stretch filter the sender built for an `UpdateStretch` that turned out
@@ -263,7 +263,7 @@ pub struct PoolTooWide {
 /// Both source tiers live here side by side, as the `Memory` / `Disk` arms of
 /// [`VoiceSource`]; the slot's read forks on that enum rather than on a trait,
 /// which is what keeps a per-tier difference visible at the call site.
-pub struct VoicePool<F: SamplerFloat = f32> {
+pub struct VoicePool<F: SamplerFloat> {
     /// The resident slots, one per voice, summed in order. Reserved to
     /// `MAX_RESIDENT_VOICES` at construction, and the audio-thread
     /// `AddVoice` drain never grows it: an add for a new slot once it is full

@@ -131,7 +131,7 @@ fn tutti_yin_agrees_with_an_independent_yin() {
     // Measured, not guessed: the observed worst-case disagreement across these
     // four tones is **2.0 cents** (110 Hz; the other three are under 0.6). So
     // 10 cents is the measurement plus 5x headroom for a different machine's
-    // f32 accumulation — an order of magnitude tighter than the 35 cents the
+    // accumulation order — an order of magnitude tighter than the 35 cents the
     // literature's "two YIN variants" hedge would suggest, and it is honest
     // because the run prints the numbers it is based on.
     //

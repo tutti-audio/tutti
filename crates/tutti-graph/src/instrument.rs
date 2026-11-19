@@ -1,3 +1,5 @@
+use tutti_buffers::Float;
+
 use crate::IntoNode;
 
 /// An instrument names the pair of its outputs that carries the sound a host
@@ -12,7 +14,7 @@ use crate::IntoNode;
 /// A hosted plugin is an instrument only if its format says so, which is known
 /// when it is open, not when it is typed: `tutti-session` converts one fallibly
 /// (`Session::instrument`).
-pub trait Instrument: IntoNode {
+pub trait Instrument<F: Float>: IntoNode<F> {
     /// The left and right output ports of the sound a host plays. The first two
     /// by default.
     fn main_outputs(&self) -> [u16; 2] {

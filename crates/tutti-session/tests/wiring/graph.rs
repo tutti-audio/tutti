@@ -968,7 +968,7 @@ fn the_update_sweeps_each_nodes_reclaimer_while_it_is_in_the_graph() {
 /// A pool's voice added and then removed, rendered through, so the pool's
 /// audio side parks the removed slot in its retire ring.
 #[cfg(feature = "sampler")]
-fn park_a_retired_slot(s: &mut DetachedSession, handle: &tutti_sampler::VoicePoolHandle) {
+fn park_a_retired_slot(s: &mut DetachedSession, handle: &tutti_sampler::VoicePoolHandle<f32>) {
     use tutti_sampler::{MemorySource, Playback, SlotId, VoiceWindow};
     let source = MemorySource::placed(
         Arc::new(tutti_buffers::Wave::new(1, SampleRate::SR_48K)),

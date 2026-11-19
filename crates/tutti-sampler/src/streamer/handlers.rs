@@ -38,7 +38,7 @@ use tutti_rt::RingFloat;
 /// Arc'd handles shared between the control side and the streamer loop.
 /// `Clone` is cheap — every field is an `Arc`.
 #[derive(Clone)]
-pub(super) struct Handles<F: RingFloat = f32> {
+pub(super) struct Handles<F: RingFloat> {
     pub cache: Arc<LruCache<F>>,
     pub metrics: Arc<Metrics>,
     /// What wakes the streamer: every stream's reader rings it.
@@ -83,7 +83,7 @@ impl SessionRate {
 }
 
 /// Streamer-thread-local state. Never shared. Plain data.
-pub(super) struct Local<F: RingFloat = f32> {
+pub(super) struct Local<F: RingFloat> {
     /// Every open stream, one record each.
     pub streams: Streams<F>,
     /// Flat interleaved refill scratch. Streamer-thread-local, so it may grow.
@@ -95,7 +95,7 @@ pub(super) struct Local<F: RingFloat = f32> {
 }
 
 /// An open of a file that cannot seek, waiting for the decode lane.
-pub(super) struct Pending<F: RingFloat = f32> {
+pub(super) struct Pending<F: RingFloat> {
     id: StreamId,
     file_path: PathBuf,
     start: u64,

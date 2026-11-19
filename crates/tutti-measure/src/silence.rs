@@ -149,7 +149,7 @@ impl<S: Sample> Measure<S> for SilenceConfig {
 /// Not for the audio thread: it keeps one entry per region found, so it grows
 /// with the audio and allocates. Feed it from the offline or UI side.
 #[derive(Debug, Clone)]
-pub struct SilenceMeter<S: Sample = f32> {
+pub struct SilenceMeter<S: Sample> {
     /// The threshold as a linear magnitude.
     floor: Amplitude,
     min_silence: Samples,
@@ -165,10 +165,10 @@ pub struct SilenceMeter<S: Sample = f32> {
 }
 
 impl<S: Sample> SilenceMeter<S> {
-    fn scan(&mut self, samples: &[f32]) {
+    fn scan(&mut self, samples: &[f64]) {
         for (offset, &sample) in samples.iter().enumerate() {
             // Below the floor, or NaN, is silence.
-            if f64::from(sample.abs()) < self.floor.get() || sample.is_nan() {
+            if sample.abs() < self.floor.get() || sample.is_nan() {
                 continue;
             }
             let at = self.seen.get() + offset;

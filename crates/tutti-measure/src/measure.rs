@@ -13,11 +13,11 @@ use crate::Result;
 /// [`ChannelLayout`](tutti_buffers::ChannelLayout), a pair of them, or `()`), and
 /// the call checks what depends on the config and the context together.
 ///
-/// `S` is the sample type of the audio the meter reads (`f32` by default, so a
-/// consumer bound `A: Measure` takes `f32` views); a meter converts each chunk
-/// to `f32` block by block on a block scratch and never copies the whole chunk.
+/// `S` is the sample type of the audio the meter reads (a consumer bound
+/// `A: Measure<S>` takes views of `S`); a meter converts each chunk to `f64`
+/// block by block on a block scratch and never copies the whole chunk.
 /// What a push allocates is the meter's own doc.
-pub trait Measure<S: Sample = f32> {
+pub trait Measure<S: Sample> {
     /// What binding the config to a stream needs.
     type Context;
     /// The meter this config builds.
@@ -42,7 +42,7 @@ pub trait Measure<S: Sample = f32> {
 /// [`finish`](Self::finish).
 ///
 /// A meter is not object-safe (its input borrows per call and `push` is
-/// generic over `out`): a consumer is generic over `A: Measure`.
+/// generic over `out`): a consumer is generic over `A: Measure<S>`.
 pub trait Meter {
     /// One chunk of the stream, a view from `tutti-buffers`: `Mono`,
     /// `Interleaved` or `StereoPlanes`.

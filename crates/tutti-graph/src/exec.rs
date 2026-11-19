@@ -179,8 +179,8 @@
 //! A unit whose event outputs carry notes ([`Shape::note_events`](crate::Shape::note_events)) has the keys
 //! each port holds tracked after its op (`src/held.rs`). When a commit removes
 //! an event edge, or its source is replaced or removed, the sink that survives
-//! is sent the pedal-ups and note-offs of what the source held, after the
-//! events flushed to it. A new edge sends nothing: the off of a note its sink
+//! is sent the pedal-ups, centred bends and note-offs of what the source held,
+//! after the events flushed to it. A new edge sends nothing: the off of a note its sink
 //! never saw begin reaches it, which ends nothing. While a replace with a fade
 //! waits behind a running one, the running replacement keeps its table; when the
 //! waiting unit takes over, the keys of the one that stopped are written ahead

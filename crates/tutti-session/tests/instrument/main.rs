@@ -12,6 +12,7 @@ static ALLOC: AllocDisabler = AllocDisabler;
 #[macro_use]
 mod instrument_support;
 
+mod f64_session;
 mod main_pair;
 mod plugin;
 mod polysynth;

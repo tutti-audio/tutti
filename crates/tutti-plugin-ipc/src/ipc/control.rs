@@ -32,11 +32,11 @@ macro_rules! served_control {
     ($ty:ty) => {
         impl AnyThread for $ty {
             fn parameter_descriptors(&self) -> Option<Vec<ParameterInfo>> {
-                self.link.bridge.parameters()
+                self.link.bridge.audio().parameters()
             }
 
             fn parameter_value(&self, id: ParamId) -> Option<Normalized> {
-                self.link.bridge.parameter(id)
+                self.link.bridge.audio().parameter(id)
             }
 
             /// Fire-and-forget, and the realtime path: the write is sent as it is.
@@ -78,15 +78,15 @@ macro_rules! served_control {
             }
 
             fn parameter_plain(&self, id: ParamId, value: Normalized) -> Option<f64> {
-                self.link.bridge.parameter_plain(id, value)
+                self.link.bridge.audio().parameter_plain(id, value)
             }
 
             fn parameter_normalized(&self, id: ParamId, plain: f64) -> Option<Normalized> {
-                self.link.bridge.parameter_normalized(id, plain)
+                self.link.bridge.audio().parameter_normalized(id, plain)
             }
 
             fn parameter_text(&self, id: ParamId, value: Normalized) -> Option<String> {
-                self.link.bridge.parameter_text(id, value)
+                self.link.bridge.audio().parameter_text(id, value)
             }
 
             /// Asked of the audio instance, like every other parameter read.
@@ -95,11 +95,11 @@ macro_rules! served_control {
             /// targets; the editor's mirror follows through the existing
             /// `PluginParamValuesChanged` refresh.
             fn parameter_value_from_text(&self, id: ParamId, text: &str) -> Option<Normalized> {
-                self.link.bridge.parameter_value_from_text(id, text)
+                self.link.bridge.audio().parameter_value_from_text(id, text)
             }
 
             fn save_state(&self, state_use: StateUse) -> Result<Vec<u8>, StateError> {
-                self.link.bridge.save_state(state_use)
+                self.link.bridge.audio().save_state(state_use)
             }
 
             /// Queued on the command bus as the blocks around it are, so the
@@ -107,7 +107,8 @@ macro_rules! served_control {
             /// not whether the plugin acts on the mode (the load-time
             /// `Features::RENDER_MODE` says), and never needs a restart.
             fn set_render_mode(&self, mode: RenderMode) -> bool {
-                !self.link.bridge.is_crashed() && self.link.bridge.set_render_mode_rt(mode)
+                !self.link.bridge.audio().is_crashed()
+                    && self.link.bridge.audio().set_render_mode_rt(mode)
             }
 
             /// Delivered to both the audio subprocess and the in-process GUI
@@ -115,7 +116,7 @@ macro_rules! served_control {
             /// the command was *queued*; no format confirms the plugin
             /// visibly reacted.
             fn set_automation_mode(&self, mode: AutomationMode) -> Result<(), AutomationModeError> {
-                if self.link.bridge.is_crashed() {
+                if self.link.bridge.audio().is_crashed() {
                     return Err(AutomationModeError::PluginDead);
                 }
                 automation_push_outcome(self.link.bridge.set_automation_state_rt(mode))
@@ -133,11 +134,11 @@ macro_rules! served_control {
                 parent: WindowHandle,
                 scale: ContentScale,
             ) -> PluginResult<Size> {
-                Ok(self.link.bridge.open_editor(main, parent, scale)?)
+                Ok(self.link.bridge.editor().open_editor(main, parent, scale)?)
             }
 
             fn open_floating_editor(&mut self, main: MainThreadMarker) -> PluginResult<()> {
-                Ok(self.link.bridge.open_floating_editor(main)?)
+                Ok(self.link.bridge.editor().open_floating_editor(main)?)
             }
 
             fn set_editor_scale(
@@ -145,19 +146,19 @@ macro_rules! served_control {
                 main: MainThreadMarker,
                 scale: ContentScale,
             ) -> PluginResult<()> {
-                Ok(self.link.bridge.set_editor_scale(main, scale)?)
+                Ok(self.link.bridge.editor().set_editor_scale(main, scale)?)
             }
 
             fn close_editor(&mut self, main: MainThreadMarker) {
-                let _ = self.link.bridge.close_editor(main);
+                let _ = self.link.bridge.editor().close_editor(main);
             }
 
             fn editor_idle(&mut self, main: MainThreadMarker) {
-                self.link.bridge.editor_idle(main);
+                self.link.bridge.editor().editor_idle(main);
             }
 
             fn wakeups(&mut self, main: MainThreadMarker, out: &mut tutti_plugin_types::Wakeups) {
-                self.link.bridge.wakeups(main, out);
+                self.link.bridge.editor().wakeups(main, out);
             }
 
             fn wake(
@@ -166,11 +167,11 @@ macro_rules! served_control {
                 ready: &[tutti_plugin_ipc_ffi::Ready],
                 now: std::time::Instant,
             ) {
-                self.link.bridge.wake(main, ready, now);
+                self.link.bridge.editor().wake(main, ready, now);
             }
 
             fn editor_capabilities(&mut self, main: MainThreadMarker) -> EditorCapabilities {
-                self.link.bridge.editor_capabilities(main)
+                self.link.bridge.editor().editor_capabilities(main)
             }
 
             fn set_editor_size(
@@ -178,11 +179,11 @@ macro_rules! served_control {
                 main: MainThreadMarker,
                 requested: Size,
             ) -> PluginResult<Size> {
-                Ok(self.link.bridge.set_editor_size(main, requested)?)
+                Ok(self.link.bridge.editor().set_editor_size(main, requested)?)
             }
 
             fn poll_editor_resize_request(&mut self, main: MainThreadMarker) -> Option<Size> {
-                self.link.bridge.poll_editor_resize_request(main)
+                self.link.bridge.editor().poll_editor_resize_request(main)
             }
         }
 
@@ -273,6 +274,7 @@ macro_rules! served_control {
             ) -> PluginResult<Vec<u8>> {
                 self.link
                     .bridge
+                    .audio()
                     .save_state(state_use)
                     .map_err(PluginError::StateFailed)
             }
@@ -290,15 +292,15 @@ macro_rules! served_control {
             }
 
             fn presets(&mut self, _main: MainThreadMarker) -> Vec<Preset> {
-                self.link.bridge.presets().unwrap_or_default()
+                self.link.bridge.audio().presets().unwrap_or_default()
             }
 
             fn load_preset(&mut self, _main: MainThreadMarker, id: &PresetId) -> bool {
-                self.link.bridge.load_preset(id.clone())
+                self.link.bridge.audio().load_preset(id.clone())
             }
 
             fn current_preset(&mut self, _main: MainThreadMarker) -> Option<PresetId> {
-                self.link.bridge.current_preset()
+                self.link.bridge.audio().current_preset()
             }
 
             /// Advisory only: the outcome `AnyThread::set_automation_mode`
@@ -319,7 +321,7 @@ macro_rules! served_control {
             /// queue is full ([`Dropped`](Delivered::Dropped)) or because the
             /// plugin is gone ([`PluginDead`](Delivered::PluginDead)).
             fn set_track_info(&mut self, _main: MainThreadMarker, info: &TrackInfo) -> Delivered {
-                self.link.bridge.set_track_info(info)
+                self.link.bridge.audio().set_track_info(info)
             }
 
             /// What the server's `ProcessRequested` raises, from the bridge's
@@ -347,7 +349,7 @@ macro_rules! served_control {
             /// a served plugin's edits through its listener
             /// ([`Ipc::forward_events`]).
             fn dropped_reported_edits(&self) -> u64 {
-                self.link.bridge.dropped_parameter_events()
+                self.link.bridge.audio().dropped_parameter_events()
             }
         }
     };
@@ -359,19 +361,19 @@ served_control!(IpcController);
 /// A served plugin's liveness, from the bridge and the server's guard.
 impl Health for IpcController {
     fn is_crashed(&self) -> bool {
-        self.link.bridge.is_crashed()
+        self.link.bridge.audio().is_crashed()
     }
 
     fn crash_cause(&self) -> Option<PluginFailure> {
-        self.link.bridge.crash_cause()
+        self.link.bridge.audio().crash_cause()
     }
 
     fn rate_refusal(&self) -> Option<(SampleRate, String)> {
-        self.link.bridge.rate_refusal()
+        self.link.bridge.audio().rate_refusal()
     }
 
     fn block_counts(&self) -> BlockCounts {
-        self.link.bridge.block_counts()
+        self.link.bridge.audio().block_counts()
     }
 
     fn terminate(&self, reason: TerminationReason) {
@@ -379,6 +381,7 @@ impl Health for IpcController {
         // the first cause latched wins.
         self.link
             .bridge
+            .audio()
             .mark_crashed(PluginFailure::Terminated { reason });
         self.link.guard.terminate();
     }

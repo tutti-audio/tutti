@@ -177,10 +177,9 @@ impl<F: SynthFloat> IntoNode<F> for PolySynth<F> {
     }
 }
 
-/// The synth at `f32` is an instrument (`Instrument` is `f32`'s until the session offers
-/// more widths): MIDI on event input 0, its stereo pair on
-/// outputs 0 and 1.
-impl tutti_graph::Instrument for PolySynth<f32> {}
+/// The synth is an instrument in any width it renders in: MIDI on event input 0, its
+/// stereo pair on outputs 0 and 1.
+impl<F: SynthFloat> tutti_graph::Instrument<F> for PolySynth<F> {}
 
 #[cfg(test)]
 mod tests;

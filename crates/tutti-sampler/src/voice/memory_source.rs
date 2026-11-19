@@ -159,7 +159,7 @@ impl Default for MemorySourceConfig {
 /// change in [`set_loop`](Self::set_loop) — the audio thread drains
 /// the pool's loop command inline. The one exception is
 /// [`set_wave`](Self::set_wave), which is control-thread only.
-pub struct MemorySource<F: Float = f32> {
+pub struct MemorySource<F: Float> {
     wave: Arc<Wave<F>>,
     position: Param64<SamplePosition>,
 

@@ -71,7 +71,7 @@
 //!   the audio in chunks of any length and extends `out` with the items each
 //!   chunk completes, and `meter.finish()` reads the [`Output`](Meter::Output)
 //!   of the whole run. `meter.reset()` starts over. Import the two traits to
-//!   call them; a consumer that is generic over `A: Measure` takes any analysis
+//!   call them; a consumer that is generic over `A: Measure<S>` takes any analysis
 //!   (a [`Meter`] is not object-safe).
 //!
 //! The one-shot feeds a meter the whole buffer, so the two cannot drift, with
@@ -80,10 +80,14 @@
 //! changes only through `push` and `reset`, counts the frames pushed (a push
 //! takes no position) and owns its transform scratch. `push` returns a `Result`
 //! exactly where the chunk can be refused (a NaN, a width that is not the
-//! meter's). A config is a `Measure<S>` for every sample format `S` (`f32` by
-//! default, so `A: Measure` means `f32`), and its meter reads views of `S`,
-//! converting block by block on the stack; `Measure::<i16>::measure(&config,
-//! context)` names another format when a push does not fix it.
+//! meter's). A config is a `Measure<S>` for every sample format `S`, and its
+//! meter reads views of `S`, converting block by block on the stack;
+//! `Measure::<i16>::measure(&config, context)` names the format when a push
+//! does not fix it.
+//!
+//! Every analysis reads its input in whatever format the caller holds and runs
+//! at `f64`: spectra, statistics and readings are `f64`, and the transform
+//! scratch is a `FftScratch<f64>`. A reading is never narrowed on the way out.
 //!
 //! | Analysis | Config | One-shot | Meter | Context | Input | Item | Output | Audio thread |
 //! |---|---|---|---|---|---|---|---|---|

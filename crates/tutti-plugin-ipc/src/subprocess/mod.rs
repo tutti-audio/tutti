@@ -6,6 +6,7 @@ mod reaped;
 
 pub(crate) use launch::launch;
 pub(crate) use launch::swap_slab;
+pub use launch::{LoadRequest, Restore};
 pub use reaped::Reaped;
 
 // The `*_with` entry points are deliberately NOT re-exported. They exist so a
