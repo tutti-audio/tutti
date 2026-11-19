@@ -832,7 +832,65 @@ fn a_block_adopting_a_written_speed_does_not_allocate() {
                 .render(&mut InterleavedMut::new(&mut buf, ChannelLayout::STEREO).unwrap());
         }
     });
-    // The speed was adopted: the last block's first frame is frame 2 560 of
+    // The speed was adopted (the voice is placed, so a frame is read at the
+    // transport's position times the speed): the last block's first frame is frame 2 560 of
     // the voice, which reads source frame 5 120.
     assert_eq!(buf[0].to_bits(), ramp(2 * 2_560).to_bits());
+}
+
+/// **A speed set mid-play on a placed voice reads every second frame from the
+/// update on**, in either tier: the voice plays at unity for two blocks (so
+/// output frame `f` is source frame `f`), then speed 2 is written and
+/// published, and a placed voice reads the source at the transport's position
+/// times the speed, so output frame `f` is source frame `2f`. A resident voice
+/// takes it from the next block; a streamed one from [`landing`] on.
+fn a_speed_set_mid_play_reads_every_second_frame(streamed: bool) {
+    const CHANGE: usize = 2 * BLOCK;
+    let mut rig = Rig::new(streamed);
+    let before = rig.render(CHANGE);
+    assert_source(&before, 0, 0, |f| f);
+    rig.s.set(rig.clip.speed().to(rate(2.0))).unwrap();
+    let _ = rig.s.update();
+    rig.settle();
+    let after = rig.render(LEN / 2 - CHANGE);
+    let from = CHANGE + landing(streamed);
+    assert_source(&after, CHANGE, from, |f| 2 * f);
+    assert!(
+        LEN / 2 - from > 1_000,
+        "the check hears {} frames",
+        LEN / 2 - from
+    );
+}
+
+#[test]
+fn a_speed_set_mid_play_reads_a_resident_placed_voice_at_twice_the_position() {
+    a_speed_set_mid_play_reads_every_second_frame(false);
+}
+
+#[test]
+fn a_speed_set_mid_play_reads_a_streamed_placed_voice_at_twice_the_position() {
+    a_speed_set_mid_play_reads_every_second_frame(true);
+}
+
+/// **A speed set mid-play on a free-running voice continues from its cursor**:
+/// the voice plays 512 frames at unity (output frame `k` is source frame `k`,
+/// the cursor ending at 512), then speed 2 is published, and output frame
+/// `512 + k` is source frame `512 + 2k`: two source frames per output frame
+/// from the cursor, never a restart and never a jump.
+#[test]
+fn a_speed_set_mid_play_continues_a_free_running_voice_from_its_cursor() {
+    let mut s = offline();
+    let (clip, handle) = placed_ramp(&mut s);
+    s.set(clip.window().to(None)).unwrap();
+    let _ = s.update();
+    s.play().expect("room");
+    assert_eq!(handle.play(), Ok(()));
+    let mut got = left(&s, 512);
+    s.set(clip.speed().to(rate(2.0))).unwrap();
+    let _ = s.update();
+    got.extend(left(&s, 1_024));
+    for (f, &x) in got.iter().enumerate() {
+        let source = if f < 512 { f } else { 512 + 2 * (f - 512) };
+        assert_eq!(x.to_bits(), ramp_value(source).to_bits(), "frame {f}");
+    }
 }

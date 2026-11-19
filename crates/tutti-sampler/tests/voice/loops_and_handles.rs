@@ -398,3 +398,23 @@ fn a_free_running_voice_built_with_a_stretch_plays_the_ramp_dry() {
     let got = render_with(&mut node, 1_000);
     assert_frames("dry", &got, |n| n);
 }
+
+/// **A rate the voice cannot play, published into the handle's cell, leaves
+/// the speed in force**: at speed 2 a NaN, an infinity, zero and a rate past
+/// the fastest each leave the voice reading file frame `2n` on, never a NaN
+/// position, in every block after.
+#[test]
+fn a_speed_the_voice_cannot_play_leaves_the_speed_in_force() {
+    let (mut node, handle) = memory_node();
+    node = tutti_sampler::testing::prepared(node, RATE, BLOCK);
+    let t = rolling();
+    let mut heard = Vec::new();
+    let rates = [2.0, f64::NAN, 100.0, f64::INFINITY, 0.0, -2.0];
+    for rate in rates {
+        handle.speed_cell().publish(PlaybackRate::new(rate));
+        heard.extend(tutti_sampler::testing::block(&mut node, &t, RATE, BLOCK).swap_remove(0));
+        t.advance(BLOCK as i64, RATE);
+    }
+    assert_eq!(heard.len(), rates.len() * BLOCK);
+    assert_frames("speed in force", &heard, |n| 2 * n);
+}
