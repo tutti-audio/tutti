@@ -13,7 +13,7 @@ use tutti_alsa_ffi::{
 };
 use tutti_midi_device::{FunctionBlock, UMP_VERSION};
 use tutti_rt::LockExt;
-use tutti_ump::{EndpointInfoNotification, FunctionBlockCount, FunctionBlocks, Protocol};
+use tutti_ump::{EndpointInfoNotification, FunctionBlockCount, FunctionBlocks, Protocol, Ump};
 
 use super::input::{self, AlsaInput};
 use crate::InputProducerHandle;
@@ -92,11 +92,13 @@ pub(crate) struct AlsaVirtualSource {
 }
 
 impl SourceBackend for AlsaVirtualSource {
-    fn send(&self, words: &[u32]) -> Result<()> {
+    fn send(&self, ump: &Ump) -> Result<()> {
         // A poisoned lock guards a client handle and a port number, which a
         // panic cannot leave half-written.
         let inner = self.inner.lock_recover();
-        inner.0.send_to_subscribers(inner.1, Packet::new(words)?)?;
+        inner
+            .0
+            .send_to_subscribers(inner.1, Packet::new(ump.words())?)?;
         Ok(())
     }
 }

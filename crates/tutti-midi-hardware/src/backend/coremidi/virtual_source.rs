@@ -11,7 +11,7 @@
 
 use tracing::debug;
 use tutti_coremidi_ffi::UmpSource;
-use tutti_ump::Protocol;
+use tutti_ump::{Protocol, Ump};
 
 use crate::error::{MidiHardwareError, Result};
 use crate::virtual_endpoint::{SourceBackend, VirtualProtocol, VirtualSpec};
@@ -74,15 +74,14 @@ impl UmpVirtualSource {
 }
 
 impl SourceBackend for UmpVirtualSource {
-    /// Publishes one UMP message (1-4 words) to the endpoint's subscribers;
-    /// CoreMIDI copies the words, so no lifetime escapes the call.
+    /// Publishes one UMP message to the endpoint's subscribers.
     ///
     /// # Errors
     ///
     /// [`MidiHardwareError::Os`] when the message will not fit the event list, or when
     /// `MIDIReceivedEventList` returns a non-zero `OSStatus`.
-    fn send(&self, words: &[u32]) -> Result<()> {
-        Ok(self.source.send(words)?)
+    fn send(&self, ump: &Ump) -> Result<()> {
+        Ok(self.source.send(ump)?)
     }
 }
 
