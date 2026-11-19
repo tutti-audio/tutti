@@ -39,7 +39,7 @@ pub enum TextError {
 ///
 /// assert_eq!(Name::new("Rosa").unwrap().as_str(), "Rosa");
 /// assert_eq!(Name::new(""), Err(TextError::TooShort { min: 1 }));
-/// assert_eq!(Name::new("123456789"), Err(TextError::TooLong { max: 8 }));
+/// assert_eq!(Name::try_from("123456789"), Err(TextError::TooLong { max: 8 }));
 /// // "é" is two bytes, so four of them are eight and five are ten.
 /// assert!(Name::new("éééé").is_ok());
 /// assert!(Name::new("ééééé").is_err());
@@ -59,7 +59,7 @@ pub enum TextError {
 /// can fail) and no `Deref`: [`as_str`](Self::as_str) is the way out.
 ///
 /// With the `serde` feature it serialises as a string and deserialises through
-/// [`new`](Self::new), so a decoded string out of range is refused.
+/// [`TryFrom`], so a decoded string out of range is refused.
 #[derive(Clone)]
 pub struct Text<const MIN: usize, const MAX: usize> {
     bytes: [u8; MAX],
@@ -73,13 +73,20 @@ impl<const MIN: usize, const MAX: usize> Text<MIN, MAX> {
         assert!(MIN <= MAX, "Text: MIN must not exceed MAX");
     };
 
-    /// The text `text`, or why it is not one.
-    ///
-    /// # Errors
-    ///
-    /// [`TextError::Nul`] for a NUL, [`TextError::TooShort`] under `MIN`
-    /// bytes, [`TextError::TooLong`] over `MAX` bytes.
-    pub const fn new(text: &str) -> Result<Self, TextError> {
+    /// The text `text`, or `None` for a NUL or a length outside `MIN..=MAX`
+    /// bytes; never truncates. [`TryFrom`] says why.
+    #[must_use]
+    pub const fn new(text: &str) -> Option<Self> {
+        match Self::check(text) {
+            Ok(text) => Some(text),
+            Err(_) => None,
+        }
+    }
+
+    /// The text `text`, or why it is not one: [`TextError::Nul`] for a NUL,
+    /// [`TextError::TooShort`] under `MIN` bytes, [`TextError::TooLong`] over
+    /// `MAX` bytes.
+    const fn check(text: &str) -> Result<Self, TextError> {
         let () = Self::BOUNDS;
         let src = text.as_bytes();
         let len = src.len();
@@ -117,8 +124,8 @@ impl<const MIN: usize, const MAX: usize> Text<MIN, MAX> {
     #[must_use]
     pub const fn of(text: &'static str) -> Self {
         match Self::new(text) {
-            Ok(text) => text,
-            Err(_) => panic!("the literal is not a Text of this size"),
+            Some(text) => text,
+            None => panic!("the literal is not a Text of this size"),
         }
     }
 
@@ -145,8 +152,9 @@ impl<const MAX: usize> Default for Text<0, MAX> {
 impl<const MIN: usize, const MAX: usize> TryFrom<&str> for Text<MIN, MAX> {
     type Error = TextError;
 
+    /// Agrees with [`Text::new`], and says why a string is refused.
     fn try_from(text: &str) -> Result<Self, TextError> {
-        Self::new(text)
+        Self::check(text)
     }
 }
 
@@ -235,8 +243,27 @@ mod tests {
     type Name = Text<1, 8>;
 
     #[test]
+    fn new_and_try_from_agree_on_every_case() {
+        let cases = [
+            "",
+            "a",
+            "12345678",
+            "123456789",
+            "123456é",
+            "1234567é",
+            "a\0b",
+            "\0",
+        ];
+        for case in cases {
+            assert_eq!(Name::new(case), Name::try_from(case).ok(), "{case:?}");
+            assert_eq!(Name::new(case).is_none(), Name::try_from(case).is_err());
+        }
+        assert_eq!(Name::try_from("a\0b"), Err(TextError::Nul));
+    }
+
+    #[test]
     fn empty_is_refused_under_min_and_kept_at_zero_min() {
-        assert_eq!(Name::new(""), Err(TextError::TooShort { min: 1 }));
+        assert_eq!(Name::try_from(""), Err(TextError::TooShort { min: 1 }));
         assert_eq!(Text::<0, 8>::new("").unwrap().as_str(), "");
         assert_eq!(Text::<0, 8>::default().as_str(), "");
     }
@@ -244,7 +271,10 @@ mod tests {
     #[test]
     fn exactly_max_bytes_fits_and_one_more_is_too_long() {
         assert_eq!(Name::new("12345678").unwrap().as_str(), "12345678");
-        assert_eq!(Name::new("123456789"), Err(TextError::TooLong { max: 8 }));
+        assert_eq!(
+            Name::try_from("123456789"),
+            Err(TextError::TooLong { max: 8 })
+        );
     }
 
     /// Lengths are bytes: a character that would straddle `MAX` is refused
@@ -252,14 +282,17 @@ mod tests {
     #[test]
     fn a_multibyte_char_straddling_max_is_refused_not_split() {
         // Seven ASCII bytes plus "é" (two bytes) is nine: the "é" straddles 8.
-        assert_eq!(Name::new("1234567é"), Err(TextError::TooLong { max: 8 }));
+        assert_eq!(
+            Name::try_from("1234567é"),
+            Err(TextError::TooLong { max: 8 })
+        );
         assert_eq!(Name::new("123456é").unwrap().as_str(), "123456é");
     }
 
     #[test]
     fn an_interior_nul_is_refused() {
-        assert_eq!(Name::new("a\0b"), Err(TextError::Nul));
-        assert_eq!(Name::new("\0"), Err(TextError::Nul));
+        assert_eq!(Name::try_from("a\0b"), Err(TextError::Nul));
+        assert_eq!(Name::try_from("\0"), Err(TextError::Nul));
     }
 
     #[test]

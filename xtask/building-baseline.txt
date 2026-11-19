@@ -526,9 +526,6 @@ tutti-ump  ctor-result  crates/tutti-ump/src/orchestral.rs::MuteType::from_value
 tutti-ump  ctor-result  crates/tutti-ump/src/sysex.rs::Sysex7Packets::from_payload
 tutti-ump  ctor-result  crates/tutti-ump/src/sysex.rs::SysexMessage::from_framed
 
-# tutti-units
-tutti-units  ctor-result  crates/tutti-units/src/text.rs::Text::new
-
 # tutti-voicing
 tutti-voicing  with-prefix  crates/tutti-voicing/src/voicing.rs::Rules::with_bend_range
 tutti-voicing  with-prefix  crates/tutti-voicing/src/voicing.rs::Rules::with_exclusive_groups

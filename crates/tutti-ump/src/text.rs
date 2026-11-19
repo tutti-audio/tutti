@@ -165,9 +165,7 @@ impl<const N: usize> StreamTextAssembler<N> {
         self.open = None;
         let text = &self.buf[..self.len];
         let cut = text.iter().position(|&b| b == 0).unwrap_or(text.len());
-        let text = core::str::from_utf8(&text[..cut])
-            .ok()
-            .and_then(|text| Text::new(text).ok());
+        let text = core::str::from_utf8(&text[..cut]).ok().and_then(Text::new);
         if text.is_none() {
             self.dropped += 1;
         }

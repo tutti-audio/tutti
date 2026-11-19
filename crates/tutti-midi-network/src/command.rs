@@ -872,7 +872,7 @@ impl Command {
                 let digest = payload.get(..32).ok_or_else(bad_length)?;
                 let name =
                     std::str::from_utf8(trimmed(&payload[32..])).map_err(ParseError::Utf8)?;
-                let username = Username::new(name).map_err(ParseError::Text)?;
+                let username = Username::try_from(name).map_err(ParseError::Text)?;
                 Ok(Self::InvitationWithUserAuth(UserAuthentication {
                     digest: read_digest(digest),
                     username,

@@ -625,14 +625,14 @@ fn chunks_split_at_sixty_four_words_without_splitting_a_packet_and_number_on() {
 /// Spec: m2-124/6.10#11
 #[test]
 fn texts_refuse_a_nul_and_overlong_input() {
-    assert!(ByeText::new("a\0b").is_err());
-    assert!(ByeText::new(&"x".repeat(1021)).is_err());
-    assert!(ByeText::new(&"x".repeat(1020)).is_ok());
-    assert!(NakText::new(&"x".repeat(1017)).is_err());
-    assert!(NakText::new(&"x".repeat(1016)).is_ok());
-    assert!(Username::new("").is_err());
-    assert!(Username::new(&"u".repeat(989)).is_err());
-    assert!(Username::new(&"u".repeat(988)).is_ok());
+    assert!(ByeText::new("a\0b").is_none());
+    assert!(ByeText::new(&"x".repeat(1021)).is_none());
+    assert!(ByeText::new(&"x".repeat(1020)).is_some());
+    assert!(NakText::new(&"x".repeat(1017)).is_none());
+    assert!(NakText::new(&"x".repeat(1016)).is_some());
+    assert!(Username::new("").is_none());
+    assert!(Username::new(&"u".repeat(989)).is_none());
+    assert!(Username::new(&"u".repeat(988)).is_some());
 }
 
 /// The digest hashes the peer's bytes, so a username keeps the bytes it was
