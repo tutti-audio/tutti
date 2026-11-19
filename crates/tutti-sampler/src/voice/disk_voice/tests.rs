@@ -85,7 +85,7 @@ fn process_reads_one_file_frame_per_output_frame_at_unity_rate() {
     }
     assert_eq!(
         voice.inner.read.read_to(),
-        SamplePosition((BLOCK * BLOCKS - 1) as f64)
+        SamplePosition::new((BLOCK * BLOCKS - 1) as f64)
     );
 }
 
@@ -135,7 +135,7 @@ fn a_disk_voice_sizes_its_positions_from_max_block() {
     for max in [512usize, 1024, 64] {
         voice.prepare(&Prepare::new(
             SampleRate::of(SR),
-            MaxBlock::of(Samples(max)),
+            MaxBlock::of(Samples::new(max)),
         ));
         assert_eq!(voice.positions.len(), max, "at {max}");
     }
@@ -507,7 +507,7 @@ fn a_non_finite_gain_is_silence_on_a_disk_voice() {
             Beat::new(4.0),
             Some(BeatDuration::new(4.0)),
         );
-        reader.set_gain(Amplitude(gain));
+        reader.set_gain(Amplitude::new(gain));
         for beat in [0.0, 5.0, 9.0] {
             transport.set_beat(Beat::new(beat));
             let out = under(&mut reader, &transport, SR, 8);
@@ -1164,7 +1164,7 @@ fn outside_the_window_silences_every_channel() {
                 ch.fill(9.0);
             }
             let mut env = transport.env(8, SampleRate::of(SR));
-            env.block_len = Samples(frames);
+            env.block_len = Samples::new(frames);
             if frames == 8 {
                 direct.block_in(&env);
             } else {
@@ -1289,7 +1289,10 @@ fn cached_stride_reads_every_channel_at_width_six() {
 #[test]
 fn a_gain_change_reaches_a_cloned_voice() {
     let (mut unit, _) = rolling_voice(&[(1.0, 1.0); 256]);
-    unit.prepare(&Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))));
+    unit.prepare(&Prepare::new(
+        SampleRate::SR_48K,
+        MaxBlock::of(Samples::new(64)),
+    ));
     let (t_unit, t_copy) = (
         MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0)),
         MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0)),
@@ -1482,7 +1485,7 @@ fn a_block_with_no_position_leaves_the_lanes_alone() {
     t.set_rolling(true);
     assert!(run(&mut voice, &mut scratch), "a rolling transport sounds");
     assert!(scratch.out.lanes()[0][..BLOCK].iter().all(|&s| s != 7.0));
-    assert!(voice.inner.read.read_to() > SamplePosition(22_000.0));
+    assert!(voice.inner.read.read_to() > SamplePosition::new(22_000.0));
 }
 
 /// A skipped block forgets a crossfade in progress, as the rendered

@@ -284,7 +284,7 @@ impl<F: Float> Node<F> for SyncOut {
                     // The transport's time is its beat at its tempo from beat
                     // 0, the timeline the clock's MTC runs on.
                     let seconds =
-                        (seg.transport.beat() - Beat(0.0)).to_seconds(seg.transport.tempo);
+                        (seg.transport.beat() - Beat::new(0.0)).to_seconds(seg.transport.tempo);
                     match self.sender.observe(
                         seg.transport.playing,
                         seconds,

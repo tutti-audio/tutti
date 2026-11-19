@@ -18,7 +18,7 @@ const FRAMES_PER_BEAT: f64 = 24_000.0;
 
 /// The beat `frame` frames in.
 pub fn beat_of(frame: u64) -> Beat {
-    Beat(frame as f64 / FRAMES_PER_BEAT)
+    Beat::new(frame as f64 / FRAMES_PER_BEAT)
 }
 
 /// Rolling at 120 BPM from `frame`.

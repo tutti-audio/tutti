@@ -53,7 +53,7 @@ const SR: f64 = 48_000.0;
 const TEMPO: Bpm = Bpm::of(90.0);
 /// Where the clip starts, and the frame that is exactly that beat at 90 BPM:
 /// 3 × 60 × 48 000 / 90.
-const START: Beat = Beat(3.0);
+const START: Beat = Beat::new(3.0);
 const START_FRAME: usize = 96_000;
 /// Rendered: past the start by a few device blocks.
 const FRAMES: usize = 98_304;
@@ -129,7 +129,7 @@ fn graph_with(
 ) -> (Editor, tutti_graph::Executor) {
     let (mut ed, exec) = Editor::new(Prepare::new(
         SampleRate::of(SR),
-        MaxBlock::of(Samples(1024)),
+        MaxBlock::of(Samples::new(1024)),
     ));
     ed.insert(NodeKey(1), "voice", pool);
     ed.insert(NodeKey(2), "probe", tutti_graph::Unforkable(Probe(probe)));
@@ -156,7 +156,7 @@ fn live_graph(start: Beat) -> Run {
 
 fn offline_graph(start: Beat) -> Run {
     let timeline = OfflineTimeline::new(&OfflineTimelineConfig {
-        start_beat: Beat(0.0),
+        start_beat: Beat::new(0.0),
         tempo_map: Arc::new(TempoMap::constant(TEMPO).expect("a tempo")),
         sample_rate: SampleRate::of(SR),
         loop_range: None,
@@ -183,13 +183,13 @@ fn offline_graph(start: Beat) -> Run {
 fn by_hand(start: Beat) -> Run {
     let mut node = contract::prepared(pool(start), SampleRate::of(SR), HAND);
     let mut probe = Probe(Arc::default());
-    let mut host = FrameClock::new(Beat(0.0), TEMPO, SampleRate::of(SR));
+    let mut host = FrameClock::new(Beat::new(0.0), TEMPO, SampleRate::of(SR));
     let mut left = Vec::with_capacity(FRAMES);
     while left.len() < FRAMES {
         let env = Env {
             frame: Frame::new(left.len() as u64),
             sample_rate: SampleRate::of(SR),
-            block_len: Samples(HAND),
+            block_len: Samples::new(HAND),
             transport: tutti_graph::TransportPosition::counted(true, TEMPO, host.origin(), None),
             changes: TransportChanges::NONE,
             play: tutti_graph::PlayClock::ZERO,
@@ -198,7 +198,7 @@ fn by_hand(start: Beat) -> Run {
             &contract::drive_input(&mut node, &env, Planes::default(), &[], &[]).audio[0],
         );
         contract::drive_input(&mut probe, &env, Planes::default(), &[], &[]);
-        host.advance(Samples(HAND), None);
+        host.advance(Samples::new(HAND), None);
     }
     let read = *probe.0.lock().expect("probe");
     Run { left, read }
@@ -254,9 +254,9 @@ fn a_clip_enters_on_its_frame_driven_by_hand() {
 /// 96 064.
 #[test]
 fn a_start_an_ulp_after_the_frame_enters_on_it() {
-    let start = Beat(f64::from_bits(START.get().to_bits() + 1));
+    let start = Beat::new(f64::from_bits(START.get().to_bits() + 1));
     assert_enters_at("an ulp late", &offline_graph(start), START_FRAME);
-    let later = Beat(START.get() + 1.0 / 32_000.0);
+    let later = Beat::new(START.get() + 1.0 / 32_000.0);
     assert_enters_at("a frame late", &offline_graph(later), START_FRAME + 1);
     assert_enters_at("a frame late, by hand", &by_hand(later), START_FRAME + 1);
 }

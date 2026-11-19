@@ -44,7 +44,7 @@ fn start_tune(commands: &[Command]) -> f64 {
     commands
         .iter()
         .find_map(|c| match c {
-            Command::Start { tune, .. } => Some(tune.0),
+            Command::Start { tune, .. } => Some(tune.get()),
             _ => None,
         })
         .expect("a Start")
@@ -55,7 +55,7 @@ fn tunes(commands: &[Command]) -> Vec<(u64, f64)> {
     commands
         .iter()
         .filter_map(|c| match c {
-            Command::Tune { id, tune } => Some((id_of(*id), tune.0)),
+            Command::Tune { id, tune } => Some((id_of(*id), tune.get())),
             _ => None,
         })
         .collect()
@@ -508,7 +508,7 @@ fn a_keys_tuning_is_apart_from_the_channels_pitch() {
         .to_vec();
     assert!(
         out.iter()
-            .all(|c| matches!(c, Command::Retune { bend, .. } if bend.0 == 2.0))
+            .all(|c| matches!(c, Command::Retune { bend, .. } if bend.get() == 2.0))
     );
     assert_eq!(start_tune(&on(&mut core, 0, 60)), 1.0);
 }
@@ -543,11 +543,11 @@ fn a_retarget_and_a_glide_carry_the_tuning_of_their_keys() {
     else {
         panic!("{out:?}");
     };
-    assert_eq!(tune.0, -1.0, "key 64 sounds as 63");
+    assert_eq!(tune.get(), -1.0, "key 64 sounds as 63");
     let glide = glide.expect("portamento");
     assert_eq!(glide.from.get(), 60);
-    assert_eq!(glide.from_tune.0, 0.25);
-    assert!(glide.time > Seconds(0.0));
+    assert_eq!(glide.from_tune.get(), 0.25);
+    assert!(glide.time > Seconds::new(0.0));
 }
 
 /// MTS stores tuning programs, not channel controls: General MIDI On returns the

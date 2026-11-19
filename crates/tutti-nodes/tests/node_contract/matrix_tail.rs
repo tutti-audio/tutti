@@ -168,7 +168,7 @@ fn assert_parks_at_the_tail(node: ConvolverNode<f32>, latency: usize, tail: usiz
         g.connect_output(key, c, c);
     }
     let mut r = g
-        .renderer(Prepare::new(SR, MaxBlock::of(Samples(BLOCK))))
+        .renderer(Prepare::new(SR, MaxBlock::of(Samples::new(BLOCK))))
         .expect("a two-node graph builds");
     let got = r.render(FRAMES);
     for (c, (g, w)) in got.iter().zip(&want).enumerate() {
@@ -200,7 +200,7 @@ fn a_true_stereo_node_parks_after_its_longest_path() {
         Mono::new(&irs[1]),
         Mono::new(&irs[2]),
         Mono::new(&irs[3]),
-        Samples(64),
+        Samples::new(64),
     );
     assert_parks_at_the_tail(node, 64, 200);
 }
@@ -220,7 +220,7 @@ fn an_ambisonic_node_parks_after_its_longest_path() {
         .collect();
     let views: Vec<Mono<'_, f32>> = irs.iter().map(|ir| Mono::new(ir)).collect();
     let node =
-        ConvolverNode::<f32>::ambisonic(foa, ChannelTopology::from(foa), &views, Samples(64))
+        ConvolverNode::<f32>::ambisonic(foa, ChannelTopology::from(foa), &views, Samples::new(64))
             .unwrap();
     assert_parks_at_the_tail(node, 64, 300);
 }
@@ -242,7 +242,7 @@ fn an_ambisonic_to_stereo_node_parks_after_its_longest_path() {
         foa,
         ChannelTopology::from(Bed::Stereo),
         &views,
-        Samples(64),
+        Samples::new(64),
     )
     .unwrap();
     assert_parks_at_the_tail(node, 64, 250);
@@ -261,7 +261,7 @@ fn the_node_says_silent_from_the_first_block_past_its_tail() {
         Mono::new(&irs[1]),
         Mono::new(&irs[2]),
         Mono::new(&irs[3]),
-        Samples(64),
+        Samples::new(64),
     );
     let (recording, log) = Recording::new(node);
     let mut node = prepared(recording, SR, BLOCK);
@@ -294,7 +294,7 @@ fn a_node_that_never_says_silent_is_never_skipped() {
         Mono::new(&irs[1]),
         Mono::new(&irs[2]),
         Mono::new(&irs[3]),
-        Samples(64),
+        Samples::new(64),
     );
     let (recording, log) = Recording::new(node);
     recording.hide_silence.store(true, Ordering::Relaxed);
@@ -309,7 +309,7 @@ fn a_node_that_never_says_silent_is_never_skipped() {
         g.connect_output(key, c, c);
     }
     let mut r = g
-        .renderer(Prepare::new(SR, MaxBlock::of(Samples(BLOCK))))
+        .renderer(Prepare::new(SR, MaxBlock::of(Samples::new(BLOCK))))
         .expect("a two-node graph builds");
     r.render(FRAMES);
     assert_eq!(calls(&log), FRAMES / BLOCK);
@@ -394,7 +394,7 @@ fn direct(
     let mut out: Vec<Vec<f32>> = vec![Vec::new(); usize::from(node.outputs().count())];
     for (lo, hi) in [(0, 1500), (1500, input[0].len())] {
         if lo == 1500 {
-            gain.store(Amplitude(0.25));
+            gain.store(Amplitude::new(0.25));
         }
         let mut at = lo;
         while at < hi {
@@ -429,20 +429,20 @@ fn kinds() -> Vec<(&'static str, Make)> {
             Mono::new(&irs[1]),
             Mono::new(&irs[2]),
             Mono::new(&irs[3]),
-            Samples(64),
+            Samples::new(64),
         )
     }
     fn dual_mono() -> ConvolverNode<f32> {
         ConvolverNode::<f32>::per_channel(
             &[Mono::new(&tap(200, 0.5)), Mono::new(&tap(120, -0.75))],
-            Samples(64),
+            Samples::new(64),
         )
         .unwrap()
     }
     fn folded() -> ConvolverNode<f32> {
         ConvolverNode::<f32>::folded(
             &[Mono::new(&tap(200, 0.5)), Mono::new(&tap(120, -0.75))],
-            Samples(64),
+            Samples::new(64),
         )
         .unwrap()
     }
@@ -511,11 +511,11 @@ fn a_burst_after_a_parked_gap_is_a_fresh_nodes_at_any_block_size() {
                 g.connect_output(key, c, c);
             }
             let mut r = g
-                .renderer(Prepare::new(SR, MaxBlock::of(Samples(128))))
+                .renderer(Prepare::new(SR, MaxBlock::of(Samples::new(128))))
                 .expect("a two-node graph builds");
-            r.set_block(Samples(block));
+            r.set_block(Samples::new(block));
             let mut got = r.render(1500);
-            gain.store(Amplitude(0.25));
+            gain.store(Amplitude::new(0.25));
             for (a, b) in got.iter_mut().zip(r.render(STREAM - 1500)) {
                 a.extend(b);
             }
@@ -607,7 +607,7 @@ fn a_gap_of_exactly_the_tail_restarts_the_engine_and_one_less_does_not() {
                 Mono::new(&irs[2][..]),
                 Mono::new(&irs[3][..]),
             ],
-            Samples(64),
+            Samples::new(64),
         );
         let mut out = vec![vec![0.0f32; input[0].len()]; 2];
         m.process(
@@ -622,7 +622,7 @@ fn a_gap_of_exactly_the_tail_restarts_the_engine_and_one_less_does_not() {
             Mono::new(&irs[1]),
             Mono::new(&irs[2]),
             Mono::new(&irs[3]),
-            Samples(64),
+            Samples::new(64),
         )
     };
     for gap in [263usize, 264] {

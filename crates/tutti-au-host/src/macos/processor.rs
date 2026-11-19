@@ -848,7 +848,10 @@ mod tests {
             &tutti_fixtures::detached_work(),
         )
         .unwrap();
-        let prepare = Prepare::new(SampleRate::SR_48K, MaxBlock::of(tutti_units::Samples(512)));
+        let prepare = Prepare::new(
+            SampleRate::SR_48K,
+            MaxBlock::of(tutti_units::Samples::new(512)),
+        );
         au.activate(tutti_fixtures::main_thread(), prepare)
             .unwrap_or_else(|e| panic!("AUDelay activates: {}", e.reason))
     }
@@ -872,7 +875,7 @@ mod tests {
         let mut outputs: Vec<&mut [f32]> = output.iter_mut().map(|v| v.as_mut_slice()).collect();
         let mut out = ProcessOutput::default();
         let mut buffer = InputOutput::new(
-            tutti_plugin_types::Samples(inputs[0].len()),
+            tutti_plugin_types::Samples::new(inputs[0].len()),
             Planes::new(&inputs).expect("two planes"),
             PlanesMut::new(&mut outputs).expect("two planes"),
         )
@@ -907,7 +910,7 @@ mod tests {
         let mut outputs: Vec<&mut [f32]> = output.iter_mut().map(|v| v.as_mut_slice()).collect();
         let mut out = ProcessOutput::default();
         let mut buffer = InputOutput::new(
-            tutti_plugin_types::Samples(inputs[0].len()),
+            tutti_plugin_types::Samples::new(inputs[0].len()),
             Planes::new(&inputs).expect("two planes"),
             PlanesMut::new(&mut outputs).expect("two planes"),
         )
@@ -938,7 +941,7 @@ mod ump_staging {
     use tutti_ump::{Message, MidiChannel, MidiGroup, Ump};
 
     fn at(frame: usize, ump: Ump) -> UmpAt {
-        (Offset::of(Samples(frame), Samples(4096)), ump)
+        (Offset::of(Samples::new(frame), Samples::new(4096)), ump)
     }
 
     fn note_on(group: u8, key: u8) -> Ump {

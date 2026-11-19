@@ -278,7 +278,7 @@ mod tests {
         LimiterNode::<f32>::stereo(LimiterControls {
             threshold,
             ceiling,
-            release: Seconds(release),
+            release: Seconds::new(release),
         })
     }
 
@@ -310,7 +310,7 @@ mod tests {
         assert_eq!(
             ports(LimiterNode::<f32>::new(
                 wide,
-                Lookahead::of(Seconds(0.002)),
+                Lookahead::of(Seconds::new(0.002)),
                 c
             )),
             (6, 6)
@@ -323,12 +323,12 @@ mod tests {
     #[test]
     fn the_constructor_controls_are_the_cells_and_the_lookahead_is_the_latency() {
         let c = LimiterControls {
-            threshold: Db(-9.0),
-            ceiling: Db(-2.0),
-            release: Seconds(0.25),
+            threshold: Db::new(-9.0),
+            ceiling: Db::new(-2.0),
+            release: Seconds::new(0.25),
         };
         let lim = prepared_at(
-            LimiterNode::<f32>::new(BusTopology::STEREO, Lookahead::of(Seconds(0.002)), c),
+            LimiterNode::<f32>::new(BusTopology::STEREO, Lookahead::of(Seconds::new(0.002)), c),
             RATE_44K,
         );
         let shape = lim.shape();
@@ -338,13 +338,13 @@ mod tests {
         );
         assert_eq!(shape.tail, Tail::None, "a tail excludes latency");
         // 2 ms at 44.1 kHz is 88.2 frames, rounded up.
-        assert_eq!(shape.latency, Latency::new(Samples(89)));
+        assert_eq!(shape.latency, Latency::new(Samples::new(89)));
         assert_eq!(lim.param_base(0), Some(-9.0), "the threshold's base");
         assert_eq!(lim.param_base(1), Some(-2.0), "the ceiling's base");
         assert_eq!(lim.param_base(2), Some(0.25), "the release's base");
         // A shorthand's lookahead is the default's: 5 ms is 220.5 frames, rounded up.
         let mono = prepared_at(LimiterNode::<f32>::mono(c), RATE_44K);
-        assert_eq!(mono.shape().latency, Latency::new(Samples(221)));
+        assert_eq!(mono.shape().latency, Latency::new(Samples::new(221)));
     }
 
     /// The lookahead frames are the `ceil` of the *exact* product of the window and the
@@ -356,14 +356,14 @@ mod tests {
         let lim = prepared_at(
             LimiterNode::<f32>::new(
                 BusTopology::STEREO,
-                Lookahead::of(Seconds(0.1)),
+                Lookahead::of(Seconds::new(0.1)),
                 LimiterControls::DEFAULT,
             ),
             device,
         );
         assert_eq!(
             lim.shape().latency,
-            Latency::new(Samples((0.1_f64 * 48_000.0).ceil() as usize))
+            Latency::new(Samples::new((0.1_f64 * 48_000.0).ceil() as usize))
         );
         assert_eq!(lim.shape().latency.samples().get(), 4800);
     }
@@ -375,17 +375,17 @@ mod tests {
     /// count, so rounding does not ratchet).
     #[test]
     fn lookahead_is_a_duration_and_the_frames_follow_the_prepared_rate() {
-        const LOOKAHEAD: Seconds = Seconds(0.005);
+        const LOOKAHEAD: Seconds = Seconds::new(0.005);
         let (low, high) = (SampleRate::SR_44K1, SampleRate::SR_96K);
         let mut lim = limiter(Db::new(-6.0), Db::new(-0.3));
 
         let frames = |lim: &LimiterNode<f32>| lim.shape().latency.samples().get();
         assert_eq!(frames(&lim), 0, "no rate, no latency");
 
-        lim.prepare(&Prepare::new(low, MaxBlock::of(Samples(64))));
+        lim.prepare(&Prepare::new(low, MaxBlock::of(Samples::new(64))));
         let at_low = frames(&lim);
         assert_eq!(at_low, LOOKAHEAD.to_samples_ceil(low).get());
-        lim.prepare(&Prepare::new(high, MaxBlock::of(Samples(64))));
+        lim.prepare(&Prepare::new(high, MaxBlock::of(Samples::new(64))));
         let at_high = frames(&lim);
         assert_eq!(at_high, LOOKAHEAD.to_samples_ceil(high).get());
         assert!(
@@ -400,13 +400,13 @@ mod tests {
         }
 
         for _ in 0..4 {
-            lim.prepare(&Prepare::new(low, MaxBlock::of(Samples(64))));
+            lim.prepare(&Prepare::new(low, MaxBlock::of(Samples::new(64))));
             assert_eq!(
                 frames(&lim),
                 at_low,
                 "a rate change does not accumulate rounding"
             );
-            lim.prepare(&Prepare::new(high, MaxBlock::of(Samples(64))));
+            lim.prepare(&Prepare::new(high, MaxBlock::of(Samples::new(64))));
             assert_eq!(
                 frames(&lim),
                 at_high,
@@ -459,11 +459,11 @@ mod tests {
         for _ in 0..2_000 {
             tick(&mut lim, &[1.0, 1.0], &mut out);
         }
-        let old = sample_gain(Db(-0.3));
+        let old = sample_gain(Db::new(-0.3));
         assert!(out[0] > 0.9 * old, "limited at the old ceiling: {}", out[0]);
 
         assert!(lim.param_set().set(UnitParam::Ceiling, -20.0));
-        let new = sample_gain(Db(-20.0));
+        let new = sample_gain(Db::new(-20.0));
         // What is fed from now on, after the solve, leaves a lookahead later.
         for i in 0..16 + latency + 64 {
             tick(&mut lim, &[1.0, 1.0], &mut out);
@@ -487,7 +487,7 @@ mod tests {
         );
         let latency = lim.shape().latency.samples().get();
         let lane = |i: usize| if i.is_multiple_of(2) { 0.0f32 } else { -20.0 };
-        let low = sample_gain(Db(-20.0));
+        let low = sample_gain(Db::new(-20.0));
         let mut out = [0.0f32; 2];
         let mut outputs = Vec::new();
         for i in 0..4_000 {
@@ -496,7 +496,7 @@ mod tests {
         }
         let mut reached = false;
         for (i, &y) in outputs.iter().enumerate().skip(latency) {
-            let bound = sample_gain(Db(f64::from(lane(i - latency)))) * (1.0 + 1e-6);
+            let bound = sample_gain(Db::new(f64::from(lane(i - latency)))) * (1.0 + 1e-6);
             assert!(y.abs() <= bound, "frame {i}: {y} over {bound}");
             reached |= i > 2_000 && (i - latency) % 2 == 1 && y.abs() > 0.9 * low;
         }
@@ -586,7 +586,7 @@ mod tests {
     /// ceiling, so the quiet gain is unity.
     #[test]
     fn loud_noise_stays_at_the_ceiling() {
-        let ceiling = Db(-6.0);
+        let ceiling = Db::new(-6.0);
         let limit = sample_gain(ceiling);
         let mut lim = prepared_at(limiter(ceiling, ceiling), RATE_44K);
         let latency = lim.shape().latency.samples().get();
@@ -610,7 +610,7 @@ mod tests {
     /// has filled; one over it settles at `ceiling / peak`.
     #[test]
     fn a_steady_signal_passes_under_and_settles_at_ceiling_over_peak() {
-        let ceiling = Db(-6.0);
+        let ceiling = Db::new(-6.0);
         let limit = sample_gain(ceiling);
         for (level, want) in [(0.25f32, 1.0f32), (1.0, limit), (3.0, limit / 3.0)] {
             let mut lim = prepared_at(limiter_releasing(ceiling, ceiling, 0.001), RATE_44K);
@@ -634,7 +634,7 @@ mod tests {
     /// `ceiling / threshold` under it.
     #[test]
     fn a_ceiling_under_the_threshold_scales_by_the_gap_under_it() {
-        let (threshold, ceiling) = (Db(-3.0), Db(-9.0));
+        let (threshold, ceiling) = (Db::new(-3.0), Db::new(-9.0));
         let (t, c) = (sample_gain(threshold), sample_gain(ceiling));
         for (level, gain) in [(0.1f32, c / t), (2.0, c / 2.0)] {
             let mut lim = prepared_at(limiter_releasing(threshold, ceiling, 0.001), RATE_44K);
@@ -655,7 +655,7 @@ mod tests {
     /// The steady-state output level in dB of a constant input at `in_db`.
     fn steady_out_db(threshold: Db, ceiling: Db, in_db: f64) -> f64 {
         let mut lim = prepared_at(limiter_releasing(threshold, ceiling, 0.001), RATE_44K);
-        let level = sample_gain(Db(in_db));
+        let level = sample_gain(Db::new(in_db));
         let x = vec![level; 1024];
         let mut out = Vec::new();
         for _ in 0..16 {
@@ -687,7 +687,7 @@ mod tests {
     #[test]
     fn the_threshold_drives_the_input_and_loud_signals_settle_at_the_ceiling() {
         for (t, c) in CURVES {
-            let (threshold, ceiling) = (Db(t), Db(c));
+            let (threshold, ceiling) = (Db::new(t), Db::new(c));
             let mut in_db = -80.0f64;
             while in_db <= 12.0 {
                 let out_db = steady_out_db(threshold, ceiling, in_db);
@@ -710,7 +710,7 @@ mod tests {
             let mut prev: Option<f64> = None;
             let mut in_db = -80.0f64;
             while in_db <= 12.0 {
-                let out_db = steady_out_db(Db(t), Db(c), in_db);
+                let out_db = steady_out_db(Db::new(t), Db::new(c), in_db);
                 if let Some(prev) = prev {
                     let step = out_db - prev;
                     assert!(step >= -2e-3, "({t}, {c}) at {in_db}: fell by {}", -step);
@@ -732,7 +732,7 @@ mod tests {
     /// both.
     #[test]
     fn a_nan_input_does_not_poison_the_gain() {
-        let ceiling = Db(-6.0);
+        let ceiling = Db::new(-6.0);
         let limit = sample_gain(ceiling);
         let mut lim = prepared_at(limiter_releasing(ceiling, ceiling, 0.001), RATE_44K);
         let latency = lim.shape().latency.samples().get();
@@ -765,7 +765,7 @@ mod tests {
         let set = lim.param_set();
         assert!(set.set(UnitParam::Ceiling, f64::NAN));
         assert!(set.set(UnitParam::Threshold, f64::NAN));
-        let limit = sample_gain(Db(-6.0));
+        let limit = sample_gain(Db::new(-6.0));
         let mut out = [0.0f32; 2];
         // 5 ms is 220 frames: 6 000 is 27 time constants, the envelope has settled.
         for _ in 0..6_000 {
@@ -780,7 +780,10 @@ mod tests {
     #[test]
     fn a_very_low_threshold_never_produces_a_nan() {
         for threshold in [f64::NEG_INFINITY, -800.0, -150.0] {
-            let mut lim = prepared_at(limiter_releasing(Db(threshold), Db(-6.0), 0.001), RATE_44K);
+            let mut lim = prepared_at(
+                limiter_releasing(Db::new(threshold), Db::new(-6.0), 0.001),
+                RATE_44K,
+            );
             let mut x = vec![0.0f32; 1024];
             x[300..400].fill(2.0);
             x[400..500].fill(-0.001);
@@ -814,7 +817,7 @@ mod tests {
                 limiter_releasing(ceiling, ceiling, 0.1).detection(detection),
                 RATE_44K,
             );
-            assert_eq!(lim.shape().latency, Latency::new(Samples(221)));
+            assert_eq!(lim.shape().latency, Latency::new(Samples::new(221)));
             let out = drive(&mut lim, RATE_44K, Planes::new(&[&x, &x]).unwrap(), &[]).remove(0);
             // The tone is a quarter of the rate, so its crest is a sample or a half between
             // two: the largest of the samples and of the pairs' quadrature (a quarter-rate
@@ -838,12 +841,12 @@ mod tests {
     #[test]
     fn a_true_peak_node_lengthens_a_lookahead_too_short_to_line_up() {
         let c = LimiterControls::DEFAULT;
-        let short = Lookahead::of(Seconds(0.0002));
+        let short = Lookahead::of(Seconds::new(0.0002));
         let sample = prepared_at(
             LimiterNode::<f32>::new(BusTopology::MONO, short, c),
             SampleRate::SR_48K,
         );
-        assert_eq!(sample.shape().latency, Latency::new(Samples(10)));
+        assert_eq!(sample.shape().latency, Latency::new(Samples::new(10)));
         let tp = prepared_at(
             LimiterNode::<f32>::new(BusTopology::MONO, short, c).detection(PeakDetection::TruePeak),
             SampleRate::SR_48K,
@@ -869,9 +872,9 @@ mod tests {
     #[test]
     fn an_f64_kernel_delays_a_wide_signal_by_exactly_its_latency() {
         use tutti_fixtures::signal::{assert_close_f64, wide_signal};
-        let lookahead = Lookahead::of(Seconds(0.005));
+        let lookahead = Lookahead::of(Seconds::new(0.005));
         let mut k = LimiterKernel::<f64>::new(BusTopology::MONO, lookahead);
-        k.prepare(SampleRate::SR_48K, MaxBlock::of(Samples(1_024)));
+        k.prepare(SampleRate::SR_48K, MaxBlock::of(Samples::new(1_024)));
         let latency = k.latency().get();
         assert_eq!(latency, 240);
         let x = wide_signal(3 * latency);

@@ -181,8 +181,8 @@ impl<T: Width> Typed<T> {
         let wanted_out: usize = output_ports.iter().map(|&c| c as usize).sum();
         let used_in = inputs.channels().min(wanted_in);
         let used_out = outputs.channels().min(wanted_out);
-        if (used_in > 0 && inputs.frames().0 < frames)
-            || (used_out > 0 && outputs.frames().0 < frames)
+        if (used_in > 0 && inputs.frames().get() < frames)
+            || (used_out > 0 && outputs.frames().get() < frames)
         {
             return Err(ProcessError::BufferTooShort);
         }

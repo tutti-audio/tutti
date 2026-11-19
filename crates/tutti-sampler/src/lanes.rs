@@ -385,7 +385,7 @@ mod tests {
         assert_eq!(node.scratch_size(), (UNPREPARED_FRAMES, 2));
         assert_eq!(memory.scratch_frames(), 0);
         for max in [512usize, 1024, 64] {
-            let p = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(max)));
+            let p = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(max)));
             pool.prepare(&p);
             node.prepare(&p);
             memory.prepare(&p);

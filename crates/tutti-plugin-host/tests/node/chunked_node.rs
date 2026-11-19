@@ -312,7 +312,7 @@ impl Controller for RecController {
     type Loaded = Rec;
     type Processor = RecProcessor;
     fn latency(&self, _: MainThreadMarker) -> Samples {
-        Samples(0)
+        Samples::new(0)
     }
     fn tail(&self, _: MainThreadMarker) -> PluginTail {
         PluginTail::None
@@ -387,7 +387,7 @@ impl RecProcessor {
             offset: 0,
             ump: tutti_ump::Ump([0x2090_3C40, 0, 0, 0]),
         }));
-        let frames = buffer.frames().0;
+        let frames = buffer.frames().get();
         let (input, mut output) = buffer.split();
         let poison = self.rig.poison.load(Ordering::Relaxed);
         for (i, (mut out, input)) in output.iter_mut().zip(input.iter()).enumerate() {
@@ -444,13 +444,13 @@ impl RecProcessor {
 /// A map at 120 BPM, with a step to 90 at `to_90` beats when given.
 fn tempo(to_90: Option<f64>) -> TempoReader {
     let mut points = vec![TempoPoint {
-        beat: Beat(0.0),
+        beat: Beat::new(0.0),
         tempo: Bpm::of(120.0),
         transition: Transition::Step,
     }];
     if let Some(beat) = to_90 {
         points.push(TempoPoint {
-            beat: Beat(beat),
+            beat: Beat::new(beat),
             tempo: Bpm::of(90.0),
             transition: Transition::Step,
         });
@@ -481,7 +481,7 @@ fn run_block(unit: &mut Direct<PluginNode<Rec>>, frame: u64, len: usize) {
         frame,
         len,
         Bpm::of(120.0),
-        Beat(4.0 + frame as f64 * BEATS_PER_FRAME),
+        Beat::new(4.0 + frame as f64 * BEATS_PER_FRAME),
     );
 }
 
@@ -503,7 +503,7 @@ fn run_block_with(
     let env = Env {
         frame: Frame::new(frame),
         sample_rate: SR,
-        block_len: Samples(len),
+        block_len: Samples::new(len),
         transport: TransportPosition::new(playing, bpm, beat, None),
         changes: TransportChanges::NONE,
         play: PlayClock::ZERO,
@@ -522,7 +522,7 @@ fn run_block_with(
 }
 
 fn at(frame: usize, len: usize) -> Offset {
-    Offset::of(Samples(frame), Samples(len))
+    Offset::of(Samples::new(frame), Samples::new(len))
 }
 
 fn note_on(frame: usize, len: usize) -> Event {
@@ -591,7 +591,7 @@ fn a_transport_change_is_the_chunks_on_the_chunks_frame() {
     // continues the stretch (a playhead that did not is a seek, below).
     let step = 4.0 + 79.5 * BEATS_PER_FRAME;
     let beat = step + 20.5 * BEATS_PER_FRAME * 0.75;
-    run_block_at(&mut unit, 100, 100, Bpm::of(90.0), Beat(beat));
+    run_block_at(&mut unit, 100, 100, Bpm::of(90.0), Beat::new(beat));
     let seen = rig.seen.lock().unwrap();
     let pieces: Vec<_> = seen
         .iter()
@@ -660,7 +660,7 @@ fn the_loss_a_chunked_processor_reports_is_counted() {
         0,
         &[ParamEvent::ramp(
             at(0, 100),
-            ParamRamp::foreign(PARAM, 0.5, Samples(0)),
+            ParamRamp::foreign(PARAM, 0.5, Samples::new(0)),
         )],
     );
     run_block(&mut unit, 0, 100);
@@ -861,7 +861,7 @@ fn a_node_built_over_an_activated_plugin_has_no_origin_to_fork_from() {
     .expect("loads");
     let wiring = loaded.wiring(main);
     let descriptor = loaded.info().clone();
-    let prepare = Prepare::new(SR, MaxBlock::new(Samples(64)).expect("a block"));
+    let prepare = Prepare::new(SR, MaxBlock::new(Samples::new(64)).expect("a block"));
     let Ok((processor, controller)) = loaded.activate(main, prepare) else {
         panic!("the recording plugin activates");
     };
@@ -978,12 +978,12 @@ fn a_rebuilt_nodes_overflow_is_counted_once_in_the_shared_controls() {
     .expect("loads");
     let wiring = loaded.wiring(main);
     let descriptor = loaded.info().clone();
-    let prepare = Prepare::new(SR, MaxBlock::new(Samples(128)).expect("a block"));
+    let prepare = Prepare::new(SR, MaxBlock::new(Samples::new(128)).expect("a block"));
     let Ok((processor, controller)) = loaded.activate(main, prepare) else {
         panic!("the recording plugin activates");
     };
     let (controls, _reports) =
-        tutti_plugin_host::PluginControls::new(Samples(0), PluginTail::None, SR);
+        tutti_plugin_host::PluginControls::new(Samples::new(0), PluginTail::None, SR);
     let client = tutti_plugin_host::client_over::<Rec, f32>(
         processor,
         controller,
@@ -1041,7 +1041,7 @@ fn the_chunked_audio_path_does_not_allocate() {
             0,
             &[ParamEvent::ramp(
                 at(50, 100),
-                ParamRamp::foreign(PARAM, 0.25, Samples(10)),
+                ParamRamp::foreign(PARAM, 0.25, Samples::new(10)),
             )],
         );
         run_block(unit, frame, 100);
@@ -1077,7 +1077,7 @@ fn a_chunked_processors_lost_midi_reaches_the_graphs_event_losses() {
         SR,
     )
     .expect("the recording plugin loads");
-    let (mut editor, mut exec) = Editor::new(Prepare::new(SR, MaxBlock::of(Samples(100))));
+    let (mut editor, mut exec) = Editor::new(Prepare::new(SR, MaxBlock::of(Samples::new(100))));
     let key = NodeKey(1);
     editor.insert(key, "rec", client.bind(tempo(None)));
     editor.commit().expect("commits");
@@ -1111,7 +1111,14 @@ fn a_stop_and_a_seek_on_a_block_boundary_are_changes_at_their_chunk_frame() {
         let rig = Rig::new(Some(64), Features::TRANSPORT);
         let (mut unit, _) = node(&rig, 100, tempo(None));
         run_block(&mut unit, 0, 100);
-        run_block_with(&mut unit, 100, 100, playing, Bpm::of(120.0), Beat(beat));
+        run_block_with(
+            &mut unit,
+            100,
+            100,
+            playing,
+            Bpm::of(120.0),
+            Beat::new(beat),
+        );
         let seen = rig.seen.lock().unwrap();
         let moves: Vec<_> = seen.iter().map(|s| s.moves.clone()).collect();
         let held = (want.0, want.1, beat);
@@ -1139,12 +1146,12 @@ fn a_tempo_ramp_across_a_block_boundary_gives_the_chunks_slope() {
     let ramp = TempoReader::fixed(Arc::new(
         TempoMap::new(vec![
             TempoPoint {
-                beat: Beat(0.0),
+                beat: Beat::new(0.0),
                 tempo: Bpm::of(120.0),
                 transition: Transition::RampTime { end: None },
             },
             TempoPoint {
-                beat: Beat(100.0),
+                beat: Beat::new(100.0),
                 tempo: Bpm::of(90.0),
                 transition: Transition::Step,
             },
@@ -1158,7 +1165,7 @@ fn a_tempo_ramp_across_a_block_boundary_gives_the_chunks_slope() {
     let at = |frame: u64| {
         let t = frame as f64 / rate;
         (
-            Beat((120.0 * t + k * t * t / 2.0) / 60.0),
+            Beat::new((120.0 * t + k * t * t / 2.0) / 60.0),
             Bpm::of(120.0 + k * t),
         )
     };
@@ -1206,13 +1213,13 @@ fn the_midi_in_flight_at_a_reset_is_lost_and_counted() {
 fn transport_changes_past_the_bound_are_dropped_and_counted() {
     let rig = Rig::new(Some(64), Features::TRANSPORT);
     let mut points = vec![TempoPoint {
-        beat: Beat(0.0),
+        beat: Beat::new(0.0),
         tempo: Bpm::of(120.0),
         transition: Transition::Step,
     }];
     for i in 0..12u32 {
         points.push(TempoPoint {
-            beat: Beat(4.0 + (4.5 + 4.0 * f64::from(i)) * BEATS_PER_FRAME),
+            beat: Beat::new(4.0 + (4.5 + 4.0 * f64::from(i)) * BEATS_PER_FRAME),
             tempo: Bpm::of(100.0 - f64::from(i)),
             transition: Transition::Step,
         });

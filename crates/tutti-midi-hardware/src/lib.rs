@@ -145,7 +145,7 @@
 //!   whose `push` answers a `Result` of [`Delivered`].
 //! - [`DeviceInfo`](tutti_midi_device::DeviceInfo), [`DeviceId`](tutti_midi_device::DeviceId), [`DeviceEvent`](tutti_midi_device::DeviceEvent): what the list holds and reports;
 //!   they live in `tutti-midi-device`, with the pure `DeviceTable` behind them.
-//! - [`OsEndpoint`], [`EndpointId`](tutti_midi_device::EndpointId), [`UmpCapability`]: what a backend enumerates.
+//! - [`OsEndpoint`], [`EndpointId`](tutti_midi_device::EndpointId), what a backend enumerates.
 //! - [`DeviceStream`], [`Basis`]: what a device's UMP Stream conversation settled
 //!   (`MidiSession::poll` steps it, `MidiSession::stream` reads it).
 //! - [`MidiEndpoints`]: the backend trait; [`MidiSession::open`] picks this
@@ -239,6 +239,7 @@ mod fault;
     allow(dead_code, reason = "only a native backend has a driver callback")
 )]
 mod guard;
+mod peer;
 mod port;
 mod process;
 mod profiles;
@@ -266,7 +267,7 @@ mod wire;
 pub mod test_support;
 
 pub use answer::{Answer, ReportEnd};
-pub use capability::{OsEndpoint, UmpCapability};
+pub use capability::OsEndpoint;
 pub use ci::{CiChange, CiPeerInfo, PeerId};
 pub use devices::{
     ChangeSink, DeviceEvents, Devices, OpenInput, OpenOutput, Pending, RecvTimeoutError, SeedError,
@@ -275,13 +276,14 @@ pub use devices::{
 pub use endpoints::{DeviceOut, InputConnection, MidiEndpoints, Watch};
 pub use error::{MidiHardwareError, MidiThread, NotFound, Result};
 pub use fault::{Errno, ErrnoOutOfRange, InputFault};
+pub use peer::{PeerError, PeerRef};
 pub use port::{Delivered, HardwareMidiInputs, InputProducerHandle, PortInfo, StreamDrain};
-pub use process::{ProcessChange, ReportAsk, ReportError, Reporter};
+pub use process::{ProcessChange, ReportAsk, Reporter};
 pub use profiles::{
     ChannelCount, ChannelSwitcher, NotAChannelCount, PeerProfiles, ProfileError, ProfileSwitch,
     ProfilesChange, Switcher, WholeSwitcher,
 };
-pub use properties::{PropertyAsk, PropertyCall, PropertyChange, PropertyError, PropertyPeer};
+pub use properties::{PropertyAsk, PropertyCall, PropertyChange, PropertyPeer};
 pub use session::{Connected, DeviceQuery, MidiHardwareOptions, MidiSession, Polled, Presented};
 pub use stream::{Basis, DeviceStream, InputTiming};
 pub use virtual_endpoint::{VirtualDestination, VirtualProtocol, VirtualSource, VirtualSpec};

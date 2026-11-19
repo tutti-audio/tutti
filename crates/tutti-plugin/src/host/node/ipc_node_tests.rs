@@ -70,11 +70,11 @@ fn block_env(frame: u64, len: usize) -> Env {
     Env {
         frame: Frame::new(frame),
         sample_rate: SR,
-        block_len: Samples(len),
+        block_len: Samples::new(len),
         transport: TransportPosition::new(
             true,
             Bpm::of(if frame >= STEP_FRAME { 90.0 } else { 120.0 }),
-            Beat(beat_at(frame)),
+            Beat::new(beat_at(frame)),
             None,
         ),
         changes: TransportChanges::NONE,
@@ -95,7 +95,7 @@ fn a_click_comes_out_one_declared_latency_later() {
     let declared = unit.node.shape().latency.samples();
     assert_eq!(
         declared,
-        Samples(CHUNK),
+        Samples::new(CHUNK),
         "the plugin's own (none) and a chunk"
     );
 
@@ -195,14 +195,14 @@ fn note_on(o: Offset) -> Event {
 fn ramp_7(o: Offset) -> ParamEvent {
     ParamEvent::ramp(
         o,
-        ParamRamp::foreign(ParamId::new(PARAMS[0]), 0.5, Samples(0)),
+        ParamRamp::foreign(ParamId::new(PARAMS[0]), 0.5, Samples::new(0)),
     )
 }
 
 fn ramp_9(o: Offset) -> ParamEvent {
     ParamEvent::ramp(
         o,
-        ParamRamp::foreign(ParamId::new(PARAMS[1]), 0.25, Samples(0)),
+        ParamRamp::foreign(ParamId::new(PARAMS[1]), 0.25, Samples::new(0)),
     )
 }
 
@@ -559,7 +559,7 @@ fn a_stop_and_a_seek_inside_a_chunk_reach_the_server_on_the_chunk_frame() {
     let steady = |frame: u64| {
         (
             Bpm::of(120.0),
-            Beat(4.0 + frame as f64 * BEATS_PER_FRAME_120),
+            Beat::new(4.0 + frame as f64 * BEATS_PER_FRAME_120),
         )
     };
     for (label, third, playing, quarters) in [
@@ -568,12 +568,12 @@ fn a_stop_and_a_seek_inside_a_chunk_reach_the_server_on_the_chunk_frame() {
             (
                 false,
                 Bpm::of(120.0),
-                Beat(4.0 + 160.0 * BEATS_PER_FRAME_120),
+                Beat::new(4.0 + 160.0 * BEATS_PER_FRAME_120),
             ),
             false,
             4.0 + 160.0 * BEATS_PER_FRAME_120,
         ),
-        ("seek", (true, Bpm::of(120.0), Beat(10.0)), true, 10.0),
+        ("seek", (true, Bpm::of(120.0), Beat::new(10.0)), true, 10.0),
     ] {
         let chunk = chunk_across_the_third_block(label, tempo(1000.0), steady, third);
         let moves: Vec<(u32, bool, f64)> = chunk
@@ -609,7 +609,7 @@ fn a_tempo_ramp_across_a_block_boundary_reaches_the_server_as_its_slope() {
     use tutti_tempo::{TempoMap, TempoPoint, Transition};
     let _machine = machine_lock();
     let point = |beat: f64, bpm: f64, shape| TempoPoint {
-        beat: Beat(beat),
+        beat: Beat::new(beat),
         tempo: Bpm::of(bpm),
         transition: shape,
     };
@@ -626,7 +626,7 @@ fn a_tempo_ramp_across_a_block_boundary_reaches_the_server_as_its_slope() {
         let t = frame as f64 / rate;
         (
             Bpm::of(120.0 + k * t),
-            Beat((120.0 * t + k * t * t / 2.0) / 60.0),
+            Beat::new((120.0 * t + k * t * t / 2.0) / 60.0),
         )
     };
     let (bpm, beat) = at(160);

@@ -34,10 +34,10 @@ fn planar(u: &mut Unit, size: usize, input: &[Vec<f32>], output: &mut [Vec<f32>]
 
 fn sine(freq: f64, sample_rate: f32, len: usize) -> Vec<f32> {
     tutti_fixtures::signal::sine(
-        Hz(freq),
-        Amplitude(0.5),
+        Hz::new(freq),
+        Amplitude::new(0.5),
         SampleRate::of(f64::from(sample_rate)),
-        Samples(len),
+        Samples::new(len),
     )
 }
 
@@ -47,8 +47,8 @@ fn fft_sizes_are_powers_of_two_with_quarter_hops() {
         assert!(size.size().get().is_power_of_two());
         assert_eq!(size.hop().get(), size.size().get() / 4);
     }
-    assert_eq!(FftSize::N2048.size(), Samples(2048));
-    assert_eq!(FftSize::N2048.hop(), Samples(512));
+    assert_eq!(FftSize::N2048.size(), Samples::new(2048));
+    assert_eq!(FftSize::N2048.hop(), Samples::new(512));
 }
 
 /// Every `FftSize` must satisfy COLA, because `geometry` `expect`s it.
@@ -83,7 +83,7 @@ fn wrap_phase_maps_into_a_single_turn() {
         // return.
         (1.0e6, 1e-6),
     ] {
-        let w = wrap_phase(Radians(p)).get();
+        let w = wrap_phase(Radians::new(p)).get();
         assert!(w > -PI - eps && w <= PI + eps, "{p} wrapped to {w}");
         // Wrapping differs from the input by a whole number of turns.
         let turns = (p - w) / tau;
@@ -1059,7 +1059,7 @@ fn stretching_preserves_the_signals_level() {
         let mut input = vec![vec![0.0f32; size]];
         let mut out = vec![vec![0.0f32; size]];
         let mut phase = Phase::START;
-        let step = PhaseIncrement::per_sample(Hz(440.0), SampleRate::SR_44K1);
+        let step = PhaseIncrement::per_sample(Hz::new(440.0), SampleRate::SR_44K1);
         let (mut in_sq, mut in_n) = (0.0f64, 0usize);
         let (mut out_sq, mut out_n) = (0.0f64, 0usize);
 
@@ -1115,7 +1115,7 @@ fn slowing_down_loses_level_only_as_far_as_the_overlap_allows() {
         let mut input = vec![vec![0.0f32; size]];
         let mut out = vec![vec![0.0f32; size]];
         let mut phase = Phase::START;
-        let step = PhaseIncrement::per_sample(Hz(440.0), SampleRate::SR_44K1);
+        let step = PhaseIncrement::per_sample(Hz::new(440.0), SampleRate::SR_44K1);
         let (mut in_sq, mut in_n) = (0.0f64, 0usize);
         let (mut out_sq, mut out_n) = (0.0f64, 0usize);
 

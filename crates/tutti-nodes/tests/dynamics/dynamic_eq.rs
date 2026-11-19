@@ -74,7 +74,10 @@ fn bell_db(f: f64, f0: f64, q: f64, gain: f64) -> f64 {
 }
 
 fn de_esser() -> DynamicEqNode<f32> {
-    DynamicEqNode::<f32>::from(DynamicEqConfig::de_esser(ChannelLayout::MONO, Hz(6_000.0)))
+    DynamicEqNode::<f32>::from(DynamicEqConfig::de_esser(
+        ChannelLayout::MONO,
+        Hz::new(6_000.0),
+    ))
 }
 
 fn render(node: DynamicEqNode<f32>, inputs: &[&[f32]]) -> Vec<f32> {
@@ -136,13 +139,13 @@ fn the_de_esser_cuts_the_sibilance_and_leaves_the_voice() {
 /// range, 0.15 dB as the de-esser's.
 #[test]
 fn an_upward_band_boosts_a_quiet_band_by_the_mirrored_curve() {
-    let config = DynamicEqConfig::new(ChannelLayout::MONO, Hz(1_000.0), Q(1.5))
+    let config = DynamicEqConfig::new(ChannelLayout::MONO, Hz::new(1_000.0), Q::new(1.5))
         .mode(DynamicMode::Upward)
-        .threshold(Db(-20.0))
-        .ratio(CompressionRatio(3.0))
-        .range(Db(9.0))
-        .attack(Seconds(0.001))
-        .release(Seconds(0.02));
+        .threshold(Db::new(-20.0))
+        .ratio(CompressionRatio::new(3.0))
+        .range(Db::new(9.0))
+        .attack(Seconds::new(0.001))
+        .release(Seconds::new(0.02));
     for level in [-50.0, -36.0, -26.0, -20.0, -10.0] {
         let x = tone(1_000.0, amplitude(level), RUN);
         let y = render(DynamicEqNode::<f32>::from(config), &[&x]);
@@ -159,10 +162,10 @@ fn an_upward_band_boosts_a_quiet_band_by_the_mirrored_curve() {
 /// by the curve of the key's level, not its own, and the node has the key bus after its input.
 #[test]
 fn a_side_chain_key_sets_the_cut_of_the_signal() {
-    let config = DynamicEqConfig::new(ChannelLayout::MONO, Hz(1_000.0), Q(2.0))
-        .threshold(Db(-20.0))
-        .ratio(CompressionRatio(4.0))
-        .range(Db(20.0))
+    let config = DynamicEqConfig::new(ChannelLayout::MONO, Hz::new(1_000.0), Q::new(2.0))
+        .threshold(Db::new(-20.0))
+        .ratio(CompressionRatio::new(4.0))
+        .range(Db::new(20.0))
         .key(KeySource::Sidechain);
     let node = DynamicEqNode::<f32>::from(config);
     assert_eq!(node.shape().audio_in().count(), 2, "a signal and a key");
@@ -177,9 +180,9 @@ fn a_side_chain_key_sets_the_cut_of_the_signal() {
 /// A node whose key nobody wired is silence: a downward band stays flat.
 #[test]
 fn an_unwired_side_chain_leaves_a_downward_band_flat() {
-    let config = DynamicEqConfig::new(ChannelLayout::MONO, Hz(1_000.0), Q(2.0))
-        .threshold(Db(-20.0))
-        .ratio(CompressionRatio(4.0))
+    let config = DynamicEqConfig::new(ChannelLayout::MONO, Hz::new(1_000.0), Q::new(2.0))
+        .threshold(Db::new(-20.0))
+        .ratio(CompressionRatio::new(4.0))
         .key(KeySource::Sidechain);
     let x = tone(1_000.0, 0.5, RUN);
     let silence = vec![0.0f32; RUN];
@@ -190,11 +193,11 @@ fn an_unwired_side_chain_leaves_a_downward_band_flat() {
 /// With the key nobody wired, silence, an upward band sits at its full boost: the range.
 #[test]
 fn an_unwired_side_chain_gives_an_upward_band_its_full_range() {
-    let config = DynamicEqConfig::new(ChannelLayout::MONO, Hz(1_000.0), Q(2.0))
+    let config = DynamicEqConfig::new(ChannelLayout::MONO, Hz::new(1_000.0), Q::new(2.0))
         .mode(DynamicMode::Upward)
-        .threshold(Db(-40.0))
-        .ratio(CompressionRatio(4.0))
-        .range(Db(9.0))
+        .threshold(Db::new(-40.0))
+        .ratio(CompressionRatio::new(4.0))
+        .range(Db::new(9.0))
         .key(KeySource::Sidechain);
     let x = tone(1_000.0, 0.1, RUN);
     let silence = vec![0.0f32; RUN];

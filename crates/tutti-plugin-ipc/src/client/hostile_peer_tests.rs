@@ -247,7 +247,7 @@ fn serve_lane(
                 for n in 0..count {
                     std::thread::sleep(gap);
                     let event = BridgeMessage::LatencyChanged {
-                        samples: tutti_plugin_types::Samples(n),
+                        samples: tutti_plugin_types::Samples::new(n),
                     };
                     if send_bridge_msg(&stream, &event).is_err() {
                         return;
@@ -271,7 +271,7 @@ fn serve_lane(
                 let mut s = &stream;
                 for n in 0.. {
                     let body = postcard::to_allocvec(&BridgeMessage::LatencyChanged {
-                        samples: tutti_plugin_types::Samples(n),
+                        samples: tutti_plugin_types::Samples::new(n),
                     })
                     .unwrap();
                     let prefix = (body.len() as u32).to_be_bytes();
@@ -604,7 +604,7 @@ fn a_crash_latches_a_cause_that_outlives_the_call() {
 fn a_listener_hears_the_crash_with_its_cause() {
     use parking_lot::Mutex as PlMutex;
 
-    let mock = MockServer::start("crash-event", |_| Action::Die);
+    let mut mock = MockServer::start("crash-event", |_| Action::Die);
 
     let heard: Arc<PlMutex<Vec<PluginFailure>>> = Arc::new(PlMutex::new(Vec::new()));
     let sink = Arc::clone(&heard);
@@ -626,10 +626,9 @@ fn a_listener_hears_the_crash_with_its_cause() {
         || !heard.lock().is_empty(),
     );
 
-    // Read once, straight after the wait, rather than sleeping to see whether
-    // more arrive. A duplicate could only come from a second `crash` call, and
-    // `pump` returns immediately after the first, so there is no later event to
-    // wait for — a sleep here would be a deadline pretending to be a proof.
+    // Counted once the bridge thread has ended (the shutdown joins it): a second
+    // event would be in the sink by then, and no sleep is needed to wait for one.
+    mock.thread.as_mut().expect("the bridge thread").shutdown();
     let seen = heard.lock().clone();
     assert_eq!(
         seen.len(),
@@ -648,8 +647,8 @@ fn a_listener_hears_the_crash_with_its_cause() {
 /// **What the server says while no command waits is heard when it arrives.**
 /// `SetRenderMode` is fire-and-forget: the bridge reads nothing after it. The
 /// mock answers it with a latency change the host never asked for, and the
-/// listener must hear it with no further command sent: the watcher thread tells
-/// the idle bridge, which reads the control connection.
+/// listener must hear it with no further command sent: the idle bridge waits on
+/// the control connection, so it reads it as it arrives.
 #[test]
 fn an_unprompted_event_reaches_the_listener_while_no_command_waits() {
     use parking_lot::Mutex as PlMutex;
@@ -657,7 +656,7 @@ fn an_unprompted_event_reaches_the_listener_while_no_command_waits() {
     let mock = MockServer::start("unprompted", |msg| match msg {
         HostMessage::SetRenderMode { .. } => {
             Action::Reply(Box::new(BridgeMessage::LatencyChanged {
-                samples: tutti_plugin_types::Samples(77),
+                samples: tutti_plugin_types::Samples::new(77),
             }))
         }
         _ => Action::Silent,
@@ -2014,4 +2013,53 @@ fn the_rest_of_a_stalled_state_is_not_the_next_answer() {
         "a late state chunk was read as the parameter list's answer"
     );
     assert!(!mock.bridge.audio().is_crashed());
+}
+
+/// **A control call made while a control reply is owed waits for it** and is
+/// answered once the slot is free, in place of failing: a project save must not
+/// fail during an editor open. The first request (a parameter list) is never
+/// answered; the bridge gives up on it at its own constructed deadline (under
+/// one receive slice, so it is not rounded up), which frees the slot, and the second call (a parameter value, which has the slot
+/// only by waiting) is then sent and answered. A slot that refused the second
+/// call at once returns `None` for it, whatever the timing.
+#[test]
+fn a_second_control_call_while_a_reply_is_owed_waits_for_it() {
+    let log = Arc::new(std::sync::Mutex::new(Vec::<&'static str>::new()));
+    let (seen, seen_rx) = crossbeam_channel::bounded(1);
+    let timeouts = {
+        let mut t = Timeouts::default();
+        t.param = Duration::from_millis(200);
+        t
+    };
+    let mock = {
+        let log = Arc::clone(&log);
+        MockServer::start_with_timeouts("queued", timeouts, move |msg| match msg {
+            HostMessage::GetParameterList => {
+                log.lock().unwrap().push("list");
+                let _ = seen.try_send(());
+                Action::Silent
+            }
+            HostMessage::GetParameter { .. } => {
+                log.lock().unwrap().push("value");
+                Action::Reply(Box::new(BridgeMessage::ParameterValue {
+                    value: Some(Normalized::of(0.25)),
+                }))
+            }
+            _ => Action::Silent,
+        })
+    };
+    let bridge = Arc::clone(&mock.bridge);
+    let first = std::thread::spawn(move || bridge.audio().parameters());
+    seen_rx
+        .recv_timeout(NOTICE_TIMEOUT)
+        .expect("the first request reached the server");
+
+    // The first request owes its reply until the bridge's deadline passes.
+    assert_eq!(
+        mock.bridge.audio().parameter(ParamId::new(2)),
+        Some(Normalized::of(0.25)),
+        "the second call failed instead of waiting for the slot"
+    );
+    assert!(first.join().expect("the first caller").is_none());
+    assert_eq!(*log.lock().unwrap(), ["list", "value"]);
 }

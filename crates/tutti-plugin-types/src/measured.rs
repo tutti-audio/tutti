@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 /// silence, because a plugin's own dither or denoise noise is not a tail, and
 /// not a per-plugin knob, because a floor chosen per plugin hides a dishonest
 /// tail. Recorded in every [`ProbeConfig`].
-pub const PROBE_FLOOR: Db = Db(-100.0);
+pub const PROBE_FLOOR: Db = Db::new(-100.0);
 
 /// A hash of a plugin's state, as the FNV-1a of its bytes: which patch a
 /// measurement is of. Two equal hashes are two equal states for the purpose of
@@ -268,7 +268,7 @@ mod tests {
     fn config(rate: f64, block: usize) -> ProbeConfig {
         ProbeConfig {
             rate: SampleRate::of(rate),
-            block: MaxBlock::new(Samples(block)).unwrap(),
+            block: MaxBlock::new(Samples::new(block)).unwrap(),
             floor: PROBE_FLOOR,
             state: StateHash::of(b"state"),
         }
@@ -277,7 +277,7 @@ mod tests {
     fn honest(tail: Option<usize>, cfg: ProbeConfig) -> Measured {
         Measured {
             tail: tail.map(Samples),
-            latency: Some(Samples(0)),
+            latency: Some(Samples::new(0)),
             config: cfg,
             verdict: Verdict {
                 tail: TailVerdict::Honest,
@@ -302,12 +302,12 @@ mod tests {
         let (a, b) = (config(48_000.0, 512), config(44_100.0, 64));
         let first = honest(Some(100), a);
         let second = honest(Some(250), b);
-        assert_eq!(first.merge(second).tail, Some(Samples(250)));
+        assert_eq!(first.merge(second).tail, Some(Samples::new(250)));
         assert_eq!(first.merge(second).config, b);
         assert_eq!(second.merge(first).config, b);
         let tie = honest(Some(100), b);
         assert_eq!(first.merge(tie).config, a);
-        assert_eq!(honest(None, a).merge(second).tail, Some(Samples(250)));
+        assert_eq!(honest(None, a).merge(second).tail, Some(Samples::new(250)));
     }
 
     /// **A contradiction outranks a gap and a gap outranks a pass**, and of two
@@ -316,8 +316,8 @@ mod tests {
     #[test]
     fn a_merge_keeps_the_worse_verdict() {
         let longer = |m| TailVerdict::TailLonger {
-            reported: Samples(10),
-            measured: Samples(m),
+            reported: Samples::new(10),
+            measured: Samples::new(m),
         };
         assert_eq!(
             TailVerdict::Honest.worse(longer(20)),
@@ -330,11 +330,13 @@ mod tests {
         let gap = TailVerdict::NotChecked(NotChecked::NeverReachedFloor);
         assert_eq!(TailVerdict::Honest.worse(gap), gap, "a gap is not a pass");
         assert_eq!(gap.worse(longer(20)), longer(20));
-        let hiss = TailVerdict::NeverSettles { level: Db(-60.0) };
+        let hiss = TailVerdict::NeverSettles {
+            level: Db::new(-60.0),
+        };
         assert_eq!(longer(20).worse(hiss), hiss);
         let differs = LatencyVerdict::LatencyDiffers {
-            reported: Samples(0),
-            measured: Samples(64),
+            reported: Samples::new(0),
+            measured: Samples::new(64),
         };
         assert_eq!(LatencyVerdict::Honest.worse(differs), differs);
         assert_eq!(differs.worse(LatencyVerdict::Honest), differs);

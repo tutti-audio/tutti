@@ -53,7 +53,7 @@ use crate::schedule::CLIP_EVENT_DENSITY;
 /// use tutti_midi_runtime::MpeTransformNode;
 /// use tutti_rt::Publisher;
 ///
-/// let (mut editor, _exec) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(512))));
+/// let (mut editor, _exec) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(512))));
 /// let mode = Publisher::new(MpeMode::Disabled);
 /// let controls = editor.insert(NodeKey(1), "mpe", MpeTransformNode::new(&mode)).controls;
 /// assert_eq!(controls.losses().refused, 0);

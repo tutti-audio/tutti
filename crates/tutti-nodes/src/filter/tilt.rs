@@ -23,7 +23,7 @@ pub struct TiltFilterControls {
 impl TiltFilterControls {
     /// 1 kHz and 0 dB.
     pub const DEFAULT: Self = Self {
-        frequency: Hz(1_000.0),
+        frequency: Hz::new(1_000.0),
         gain: Db::UNITY,
     };
 }
@@ -160,8 +160,8 @@ mod tests {
     fn a_fork_shares_no_cell() {
         assert_param_fork(TiltFilterNode::from(TiltFilterConfig::new(
             2u16,
-            Hz(300.0),
-            Db(-6.0),
+            Hz::new(300.0),
+            Db::new(-6.0),
         )));
     }
 
@@ -169,7 +169,7 @@ mod tests {
     /// finite tail once prepared; the pivot starts at the configured one.
     #[test]
     fn the_shape_declares_its_controls_and_a_finite_tail() {
-        let n = node(TiltFilterConfig::new(3u16, Hz(120.0), Db(9.0)));
+        let n = node(TiltFilterConfig::new(3u16, Hz::new(120.0), Db::new(9.0)));
         let shape = n.shape();
         assert_eq!(
             (shape.audio_in().count(), shape.audio_out().count()),
@@ -189,17 +189,17 @@ mod tests {
     /// (to 1e-4), and 0 dB at the pivot.
     #[test]
     fn a_rendered_sine_has_the_analog_tilt_magnitude() {
-        let pivot = Hz(bin(171));
+        let pivot = Hz::new(bin(171));
         for db in [-18.0f64, -6.0, 6.0, 18.0] {
             for f in [10, 34, 120, 240, 683, 2_400, 3_900].map(bin) {
                 let want = analog(pivot.get(), db, f);
-                let got = gain_of(config(pivot, Db(db)), f);
+                let got = gain_of(config(pivot, Db::new(db)), f);
                 assert!(
                     (got - want).abs() < 1e-4 * want,
                     "gain {db} at {f}: {got} vs {want}"
                 );
             }
-            assert!((gain_of(config(pivot, Db(db)), pivot.get()) - 1.0).abs() < 1e-4);
+            assert!((gain_of(config(pivot, Db::new(db)), pivot.get()) - 1.0).abs() < 1e-4);
         }
     }
 
@@ -207,7 +207,7 @@ mod tests {
     /// however the host cuts its blocks, and settle on the design.
     #[test]
     fn a_glide_of_the_controls_stays_finite_and_settles_on_the_design() {
-        let make = || TiltFilterNode::from(config(Hz(200.0), Db::UNITY));
+        let make = || TiltFilterNode::from(config(Hz::new(200.0), Db::UNITY));
         let sine = generate_sine(bin(256), 48_000.0, 8_192);
         let mut node = assert_cell_glides(
             make,
@@ -241,7 +241,7 @@ mod tests {
     #[test]
     fn controls_out_of_range_are_read_as_the_end_of_it() {
         let input = generate_sine(500.0, 48_000.0, 4_096);
-        let at = |hz: f64, db: f64| render(&mut node(config(Hz(hz), Db(db))), &input);
+        let at = |hz: f64, db: f64| render(&mut node(config(Hz::new(hz), Db::new(db))), &input);
         assert_eq!(at(1.0, 6.0), at(20.0, 6.0));
         assert_eq!(at(90_000.0, 6.0), at(RATE.nyquist_scaled(0.99).get(), 6.0));
         assert_eq!(at(500.0, 90.0), at(500.0, 24.0));
@@ -254,7 +254,7 @@ mod tests {
     #[test]
     fn the_tail_covers_the_tail_sum_and_the_ceiling_covers_it_all() {
         let mut kernel = TiltFilterKernel::<f64>::new(filter_bus(1u16.into()));
-        kernel.prepare(RATE, MaxBlock::of(Samples(64)));
+        kernel.prepare(RATE, MaxBlock::of(Samples::new(64)));
         let frames = |t: Tail| match t {
             Tail::Finite(s) => s.get(),
             other => panic!("{other:?}"),
@@ -263,11 +263,11 @@ mod tests {
         for fc in [20.0f64, 90.0, 700.0, 4_000.0, 15_000.0, 23_000.0] {
             for db in [-24.0f64, -6.0, 6.0, 24.0] {
                 let controls = TiltFilterControls {
-                    frequency: Hz(fc),
-                    gain: Db(db),
+                    frequency: Hz::new(fc),
+                    gain: Db::new(db),
                 };
                 let reported = frames(kernel.tail_of(&controls));
-                let section = Tilt::new(Db(db)).design(Hz(fc), RATE).unwrap();
+                let section = Tilt::new(Db::new(db)).design(Hz::new(fc), RATE).unwrap();
                 let ring = ring_at(&section.sections()[0]);
                 let tag = format!("fc {fc} gain {db}: reported {reported}, ring {ring}");
                 assert!(ring <= reported, "{tag}");

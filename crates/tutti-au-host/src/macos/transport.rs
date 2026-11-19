@@ -33,7 +33,7 @@ use tutti_units::Seconds;
 /// 15.6, **every** Apple instrument, mixer and generator rejects it with
 /// `kAudioUnitErr_InvalidProperty` (-10879), while every Apple effect answers.
 ///
-/// The error is propagated rather than absorbed into `Seconds(0.0)` because the
+/// The error is propagated rather than absorbed into `Seconds::new(0.0)` because the
 /// two mean opposite things to a bounce. `AUSampleDelay` genuinely reports a
 /// 0.0-second tail; a mixer reports *nothing*. Flattening the second into the
 /// first would tell the caller a unit of unknown tail has none, and the bounce
@@ -41,7 +41,7 @@ use tutti_units::Seconds;
 pub(crate) fn tail_time(unit: &Unit) -> crate::error::Result<Seconds> {
     // Apple's width is `Float64`, as `Seconds` is.
     let seconds: f64 = unit.get::<TailTime>(Scope::GLOBAL, Element::ZERO)?;
-    Ok(Seconds(seconds))
+    Ok(Seconds::new(seconds))
 }
 
 /// Tells the AU how far *downstream* of it the listener is, on one bus.
@@ -108,6 +108,6 @@ pub(crate) fn set_presentation_latency(
     bus: u32,
     latency: Seconds,
 ) -> crate::error::Result<()> {
-    let seconds = latency.0;
+    let seconds = latency.get();
     Ok(unit.set::<PresentationLatency>(direction.scope(), Element(bus), &seconds)?)
 }

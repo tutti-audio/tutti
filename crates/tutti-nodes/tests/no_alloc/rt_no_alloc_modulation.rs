@@ -206,7 +206,7 @@ fn delay_and_modulation_with_moving_controls_are_allocation_free() {
         bus(6),
         Stages::of(8),
         SweepRange::DEFAULT,
-        Stagger::of_step(PhaseIncrement(0.2)),
+        Stagger::of_step(PhaseIncrement::new(0.2)),
         PhaserControls::DEFAULT,
     )
     .expect("a step fits any width");
@@ -318,7 +318,7 @@ fn a_phaser_with_its_lanes_fed_is_allocation_free() {
             bus(width),
             Stages::of(6),
             SweepRange::DEFAULT,
-            Stagger::of_step(PhaseIncrement(0.25)),
+            Stagger::of_step(PhaseIncrement::new(0.25)),
             PhaserControls::DEFAULT,
         )
         .expect("a step fits any width");
@@ -409,28 +409,28 @@ fn lane_graph(max: usize) -> (tutti_graph::Editor, tutti_graph::Executor) {
     use tutti_units::{Beat, Hz, ParamKey, Samples, UnitParam};
     let mut shaped = Trajectory::new();
     shaped.add_breakpoint(Breakpoint::with_law(
-        Beat(0.0),
-        Hz(0.0),
+        Beat::new(0.0),
+        Hz::new(0.0),
         Law::PowerIn(Exponent::of(2.0)),
     ));
     shaped.add_breakpoint(Breakpoint::with_law(
-        Beat(0.25),
-        Hz(1.0),
+        Beat::new(0.25),
+        Hz::new(1.0),
         Law::PowerOut(Exponent::of(3.0)),
     ));
     shaped.add_breakpoint(Breakpoint::with_law(
-        Beat(0.4),
-        Hz(0.2),
+        Beat::new(0.4),
+        Hz::new(0.2),
         Law::PowerInOut(Exponent::of(2.0)),
     ));
-    shaped.add_breakpoint(Breakpoint::new(Beat(0.55), Hz(0.9)));
-    let mut clamped = Trajectory::new().with_range(Hz(0.0), Hz(0.5));
+    shaped.add_breakpoint(Breakpoint::new(Beat::new(0.55), Hz::new(0.9)));
+    let mut clamped = Trajectory::new().with_range(Hz::new(0.0), Hz::new(0.5));
     clamped.add_breakpoint(Breakpoint::with_law(
-        Beat(0.1),
-        Hz(0.0),
+        Beat::new(0.1),
+        Hz::new(0.0),
         Law::PowerIn(Exponent::of(2.0)),
     ));
-    clamped.add_breakpoint(Breakpoint::new(Beat(0.45), Hz(1.0)));
+    clamped.add_breakpoint(Breakpoint::new(Beat::new(0.45), Hz::new(1.0)));
     let key = ParamKey::<Hz>::CUTOFF;
     let lane = |curve: Arc<dyn Curve>| {
         ControlLaneNode::for_unit(key.addr(), ControlProgram::from_curve(curve), None, None)
@@ -441,8 +441,10 @@ fn lane_graph(max: usize) -> (tutti_graph::Editor, tutti_graph::Executor) {
         lane(Arc::new(SineCurve)),
         lane(Arc::new(shaped)),
     ];
-    let (mut ed, exec) =
-        tutti_graph::Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(max))));
+    let (mut ed, exec) = tutti_graph::Editor::new(Prepare::new(
+        SampleRate::SR_48K,
+        MaxBlock::of(Samples::new(max)),
+    ));
     let mut outputs = Vec::new();
     for (k, lane) in lanes.into_iter().enumerate() {
         let (l, p) = (NodeKey(10 + k as u64), NodeKey(20 + k as u64));
@@ -484,7 +486,8 @@ fn lane_block(
     n: usize,
     bufs: &mut [Vec<f32>; 4],
 ) {
-    let looping = tutti_music::LoopRange::new(tutti_units::Beat(0.1), tutti_units::Beat(0.5));
+    let looping =
+        tutti_music::LoopRange::new(tutti_units::Beat::new(0.1), tutti_units::Beat::new(0.5));
     let t = tutti_graph::TransportPosition::counted(true, clock.tempo(), clock.origin(), looping);
     let [a, b, c, d] = bufs;
     exec.process(
@@ -493,7 +496,7 @@ fn lane_block(
         &[],
         &mut [&mut a[..n], &mut b[..n], &mut c[..n], &mut d[..n]],
     );
-    clock.advance(tutti_units::Samples(n), looping);
+    clock.advance(tutti_units::Samples::new(n), looping);
 }
 
 /// A [`WorkerPool`](tutti_graph::WorkerPool) whose every participant runs its
@@ -534,7 +537,7 @@ fn event_lanes_are_allocation_free_serial_and_on_a_pool() {
             exec.set_pool(Some(Arc::new(GatedPool(pool))));
         }
         let mut clock = tutti_music::FrameClock::new(
-            tutti_units::Beat(0.0),
+            tutti_units::Beat::new(0.0),
             tutti_units::Bpm::of(113.0),
             SampleRate::SR_48K,
         );
@@ -579,7 +582,7 @@ fn event_lanes_render_the_same_serial_and_parallel() {
             )));
         }
         let mut clock = tutti_music::FrameClock::new(
-            tutti_units::Beat(0.0),
+            tutti_units::Beat::new(0.0),
             tutti_units::Bpm::of(113.0),
             SampleRate::SR_48K,
         );
@@ -659,11 +662,11 @@ fn lane_program(k: usize, generation: u32) -> tutti_modulation::ControlProgram {
     };
     let beats = Clock::Beats {
         per_cycle: BeatsPerCycle::new(0.25 + 0.125 * (k % 5) as f64).expect("above zero"),
-        phase: PhaseIncrement(0.0),
+        phase: PhaseIncrement::new(0.0),
     };
     let seconds = Clock::Seconds {
-        rate: Hz(1.0 + (k % 11) as f64),
-        phase: PhaseIncrement(0.0),
+        rate: Hz::new(1.0 + (k % 11) as f64),
+        phase: PhaseIncrement::new(0.0),
         anchor: None,
     };
     let shape = |shape| Waveform::Shape {
@@ -686,12 +689,12 @@ fn lane_program(k: usize, generation: u32) -> tutti_modulation::ControlProgram {
                 beats,
                 Waveform::Drawn(Arc::from(vec![
                     PeriodPoint {
-                        at: Phase(0.0),
+                        at: Phase::new(0.0),
                         value: -0.5,
                         curve: Law::Linear,
                     },
                     PeriodPoint {
-                        at: Phase(0.4),
+                        at: Phase::new(0.4),
                         value: 1.0,
                         curve: Law::PowerInOut(Exponent::of(2.0)),
                     },
@@ -702,11 +705,11 @@ fn lane_program(k: usize, generation: u32) -> tutti_modulation::ControlProgram {
         _ => {
             let mut e = Trajectory::new();
             e.add_breakpoint(Breakpoint::with_law(
-                Beat(0.0),
-                Hz(200.0),
+                Beat::new(0.0),
+                Hz::new(200.0),
                 Law::PowerIn(Exponent::of(2.0)),
             ));
-            e.add_breakpoint(Breakpoint::new(Beat(1.3), Hz(800.0)));
+            e.add_breakpoint(Breakpoint::new(Beat::new(1.3), Hz::new(800.0)));
             let curve: Arc<dyn tutti_modulation::Curve> = Arc::new(e);
             (Some(curve), vec![layer(seconds, shape(LfoShape::Sawtooth))])
         }
@@ -752,8 +755,10 @@ fn lanes_200(
     use tutti_graph::{EventOut, ParamIn, ParamRange, Prepare, Unforkable};
     use tutti_graph::{OutPort, Source};
     use tutti_units::Samples;
-    let (mut ed, exec) =
-        tutti_graph::Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(max))));
+    let (mut ed, exec) = tutti_graph::Editor::new(Prepare::new(
+        SampleRate::SR_48K,
+        MaxBlock::of(Samples::new(max)),
+    ));
     let at = |k: usize| ParamIn {
         node: NodeKey(1000 + (k / 8) as u64),
         param: PROBE8[k % 8].into(),
@@ -827,14 +832,14 @@ fn lanes_transport(clock: &tutti_music::FrameClock) -> tutti_graph::TransportPos
         clock.tempo(),
         clock.origin(),
         Some(
-            tutti_music::LoopRange::new(tutti_units::Beat(0.5), tutti_units::Beat(1.7))
+            tutti_music::LoopRange::new(tutti_units::Beat::new(0.5), tutti_units::Beat::new(1.7))
                 .expect("a loop"),
         ),
     )
 }
 
 fn lanes_loop() -> Option<tutti_music::LoopRange> {
-    tutti_music::LoopRange::new(tutti_units::Beat(0.5), tutti_units::Beat(1.7))
+    tutti_music::LoopRange::new(tutti_units::Beat::new(0.5), tutti_units::Beat::new(1.7))
 }
 
 /// 200 control lanes render bit for bit the same serial and
@@ -861,7 +866,7 @@ fn two_hundred_lanes_render_the_same_serial_and_parallel() {
             )));
         }
         let mut clock = tutti_music::FrameClock::new(
-            tutti_units::Beat(0.0),
+            tutti_units::Beat::new(0.0),
             tutti_units::Bpm::of(120.0),
             SampleRate::SR_48K,
         );
@@ -874,7 +879,7 @@ fn two_hundred_lanes_render_the_same_serial_and_parallel() {
                 let mut refs: Vec<&mut [f32]> = bufs.iter_mut().map(|b| &mut b[..]).collect();
                 exec.process(n, &t, &[], &mut refs);
             }
-            clock.advance(tutti_units::Samples(n), lanes_loop());
+            clock.advance(tutti_units::Samples::new(n), lanes_loop());
             ed.collect();
             for (a, b) in all.iter_mut().zip(&bufs) {
                 a.extend(b[..n].iter().map(|v| v.to_bits()));
@@ -915,7 +920,7 @@ fn two_hundred_lanes_are_allocation_free_serial_and_on_a_pool() {
             exec.set_pool(Some(Arc::new(GatedPool(pool))));
         }
         let mut clock = tutti_music::FrameClock::new(
-            tutti_units::Beat(0.0),
+            tutti_units::Beat::new(0.0),
             tutti_units::Bpm::of(120.0),
             SampleRate::SR_48K,
         );
@@ -930,7 +935,7 @@ fn two_hundred_lanes_are_allocation_free_serial_and_on_a_pool() {
             } else {
                 assert_no_alloc::assert_no_alloc(|| exec.process(n, &t, &[], &mut refs));
             }
-            clock.advance(tutti_units::Samples(n), lanes_loop());
+            clock.advance(tutti_units::Samples::new(n), lanes_loop());
             ed.collect();
         }
         assert_eq!(exec.is_parallel(), workers.is_some(), "{workers:?}");
@@ -1006,7 +1011,7 @@ impl tutti_graph::Node for Notes {
                 x if x == 3 * q => midi::m1_note_off(c, 62, U7::of(0)),
                 _ => continue,
             };
-            let at = tutti_graph::Offset::of(tutti_units::Samples(i), n);
+            let at = tutti_graph::Offset::of(tutti_units::Samples::new(i), n);
             let _ = io.event_out(0).push(tutti_graph::Event::midi(at, ump));
         }
         tutti_graph::Status::Modified
@@ -1032,8 +1037,10 @@ fn signal_graph(max: usize) -> (tutti_graph::Editor, tutti_graph::Executor) {
     use tutti_nodes::automation::ControlLaneNode;
     use tutti_nodes::{EnvelopeFollowerNode, NoteEnvelopeNode};
     use tutti_units::{Amplitude, Depth, Hz, ParamKey, Samples, Seconds, UnitParam};
-    let (mut ed, exec) =
-        tutti_graph::Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(max))));
+    let (mut ed, exec) = tutti_graph::Editor::new(Prepare::new(
+        SampleRate::SR_48K,
+        MaxBlock::of(Samples::new(max)),
+    ));
     let probe = |k: usize| NodeKey(5000 + k as u64);
     let cutoff = |k: usize| ParamIn {
         node: probe(k),
@@ -1066,7 +1073,8 @@ fn signal_graph(max: usize) -> (tutti_graph::Editor, tutti_graph::Executor) {
             );
             let follower = EnvelopeFollowerNode::new(
                 id,
-                Ballistics::new(Seconds(0.001 + 0.0005 * k as f64), Seconds(0.03)).unwrap(),
+                Ballistics::new(Seconds::new(0.001 + 0.0005 * k as f64), Seconds::new(0.03))
+                    .unwrap(),
                 ChannelLayout::STEREO,
             );
             ed.insert(node, "follower", ForkByClone(follower));
@@ -1085,10 +1093,10 @@ fn signal_graph(max: usize) -> (tutti_graph::Editor, tutti_graph::Executor) {
                 }),
             );
             let adsr = Adsr {
-                attack: Seconds(0.002),
-                decay: Seconds(0.004),
-                sustain: Amplitude(0.6),
-                release: Seconds(0.005),
+                attack: Seconds::new(0.002),
+                decay: Seconds::new(0.004),
+                sustain: Amplitude::new(0.6),
+                release: Seconds::new(0.005),
             };
             ed.insert(
                 node,
@@ -1149,23 +1157,23 @@ fn signal_block(
     use tutti_graph::{Offset, TransportChanges, TransportPosition};
     let rolling =
         |c: &tutti_music::FrameClock| TransportPosition::counted(true, c.tempo(), c.origin(), None);
-    let stopped = TransportPosition::new(false, clock.tempo(), tutti_units::Beat(0.0), None);
+    let stopped = TransportPosition::new(false, clock.tempo(), tutti_units::Beat::new(0.0), None);
     let mut ch = TransportChanges::NONE;
     let t = match b {
         0..20 => stopped,
         20 => {
             let at = (n / 2).min(n - 1);
             ch.push(
-                Offset::of(tutti_units::Samples(at), tutti_units::Samples(n)),
+                Offset::of(tutti_units::Samples::new(at), tutti_units::Samples::new(n)),
                 rolling(clock),
             )
             .expect("room");
-            clock.advance(tutti_units::Samples(n - at), None);
+            clock.advance(tutti_units::Samples::new(n - at), None);
             stopped
         }
         _ => {
             let t = rolling(clock);
-            clock.advance(tutti_units::Samples(n), None);
+            clock.advance(tutti_units::Samples::new(n), None);
             t
         }
     };
@@ -1194,7 +1202,7 @@ fn signal_sources_render_the_same_serial_and_parallel() {
             )));
         }
         let mut clock = tutti_music::FrameClock::new(
-            tutti_units::Beat(0.0),
+            tutti_units::Beat::new(0.0),
             tutti_units::Bpm::of(120.0),
             SampleRate::SR_48K,
         );
@@ -1245,7 +1253,7 @@ fn signal_sources_are_allocation_free_serial_and_on_a_pool() {
             exec.set_pool(Some(Arc::new(GatedPool(pool))));
         }
         let mut clock = tutti_music::FrameClock::new(
-            tutti_units::Beat(0.0),
+            tutti_units::Beat::new(0.0),
             tutti_units::Bpm::of(120.0),
             SampleRate::SR_48K,
         );
@@ -1345,15 +1353,17 @@ fn an_apply_that_republishes_is_allocation_free_on_the_audio_thread() {
         curve: Law::Linear,
     };
 
-    let (mut ed, mut exec) =
-        Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(128))));
+    let (mut ed, mut exec) = Editor::new(Prepare::new(
+        SampleRate::SR_48K,
+        MaxBlock::of(Samples::new(128)),
+    ));
     let (saw, filter) = (NodeKey(1 << 48), NodeKey((1 << 48) + 1));
-    ed.insert(saw, "saw", ForkByClone(Osc::saw(Hz(110.0))));
+    ed.insert(saw, "saw", ForkByClone(Osc::saw(Hz::new(110.0))));
     let params = ed
         .insert(
             filter,
             "svf",
-            SvfFilterNode::<f32>::new(SvfType::LowPass, Hz(1_000.0), Q(0.7)),
+            SvfFilterNode::<f32>::new(SvfType::LowPass, Hz::new(1_000.0), Q::new(0.7)),
         )
         .controls;
     let topology = &mut ed.spec_mut().topology;
@@ -1369,7 +1379,7 @@ fn an_apply_that_republishes_is_allocation_free_on_the_audio_thread() {
         port: 0,
     })]);
     ed.commit().expect("commits");
-    let transport = TransportPosition::new(false, Bpm::of(120.0), Beat(0.0), None);
+    let transport = TransportPosition::new(false, Bpm::of(120.0), Beat::new(0.0), None);
     let mut out = vec![0.0f32; 128];
     exec.process(128, &transport, &[], &mut [&mut out[..]]);
     ed.collect();
@@ -1388,8 +1398,8 @@ fn an_apply_that_republishes_is_allocation_free_on_the_audio_thread() {
                     seed: 0,
                 },
                 clock: Clock::Seconds {
-                    rate: Hz(2.0),
-                    phase: PhaseIncrement(0.0),
+                    rate: Hz::new(2.0),
+                    phase: PhaseIncrement::new(0.0),
                     anchor: None,
                 },
             },
@@ -1397,8 +1407,8 @@ fn an_apply_that_republishes_is_allocation_free_on_the_audio_thread() {
         (
             SourceKey(2),
             ModSource::Follower {
-                attack: Seconds(0.001),
-                release: Seconds(0.05),
+                attack: Seconds::new(0.001),
+                release: Seconds::new(0.05),
             },
         ),
     ];
@@ -1633,7 +1643,7 @@ fn the_phaser_corners_are_allocation_free() {
             bus(width),
             Stages::of(stages),
             range,
-            Stagger::of_step(PhaseIncrement(step)),
+            Stagger::of_step(PhaseIncrement::new(step)),
             PhaserControls::DEFAULT,
         )
         .expect("a step fits any width");

@@ -24,7 +24,7 @@ fn main() -> MainThreadMarker {
 }
 
 fn prepare(rate: f64) -> Prepare {
-    Prepare::new(SampleRate::of(rate), MaxBlock::of(Samples(64)))
+    Prepare::new(SampleRate::of(rate), MaxBlock::of(Samples::new(64)))
         .with_format(FloatWidth::F32)
         .with_mode(RenderMode::Realtime)
 }
@@ -96,7 +96,7 @@ impl Rig {
         let ctx = ProcessContext::new();
         let mut out = ProcessOutput::default();
         let mut io = PluginIo {
-            buffer: InputOutput::from_slices(Samples(inputs[0].len()), &inputs, &mut outputs)
+            buffer: InputOutput::from_slices(Samples::new(inputs[0].len()), &inputs, &mut outputs)
                 .expect("equal lengths"),
             ctx: &ctx,
             out: &mut out,
@@ -121,7 +121,7 @@ fn activations(calls: &[Call]) -> usize {
 #[test]
 fn activation_splits_the_plugin_and_reads_its_figures() {
     let mut rig = Rig::new();
-    rig.plugin.set_latency(Samples(32));
+    rig.plugin.set_latency(Samples::new(32));
     rig.op(HostOp::Activate(prepare(48_000.0)));
 
     assert_eq!(rig.state.stage(), Stage::Active);
@@ -129,7 +129,7 @@ fn activation_splits_the_plugin_and_reads_its_figures() {
     assert_eq!(
         rig.plugin.calls(),
         [
-            Call::Activate(SampleRate::SR_48K, Samples(64)),
+            Call::Activate(SampleRate::SR_48K, Samples::new(64)),
             Call::Latency,
             Call::Tail,
             Call::Wiring,
@@ -149,7 +149,7 @@ fn a_block_with_no_output_channel_reaches_the_processor_with_its_frames() {
     let ctx = ProcessContext::new();
     let mut out = ProcessOutput::default();
     let processor = rig.lifecycle.processor().expect("held");
-    crate::process_block::<_, f32>(processor, &[], &mut [], Samples(96), &ctx, &mut out)
+    crate::process_block::<_, f32>(processor, &[], &mut [], Samples::new(96), &ctx, &mut out)
         .expect("a block with no channels renders");
     assert_eq!(rig.plugin.calls().last(), Some(&Call::Process(96)));
 }
@@ -165,8 +165,14 @@ fn process_block_refuses_ragged_channels_without_entering_the_processor() {
     let (mut left, mut right) = ([0.0f32; 64], [0.0f32; 32]);
     let mut outputs = [&mut left[..], &mut right[..]];
     let processor = rig.lifecycle.processor().expect("held");
-    let refused =
-        crate::process_block::<_, f32>(processor, &[], &mut outputs, Samples(64), &ctx, &mut out);
+    let refused = crate::process_block::<_, f32>(
+        processor,
+        &[],
+        &mut outputs,
+        Samples::new(64),
+        &ctx,
+        &mut out,
+    );
     assert!(matches!(refused, Err(PluginError::Block(_))), "{refused:?}");
     assert!(
         !rig.plugin
@@ -294,7 +300,7 @@ fn a_reconfigure_is_one_deactivate_and_one_activate() {
         calls,
         [
             Call::Deactivate,
-            Call::Activate(SampleRate::SR_96K, Samples(64)),
+            Call::Activate(SampleRate::SR_96K, Samples::new(64)),
             Call::Latency,
             Call::Tail,
             Call::Wiring,
@@ -311,14 +317,14 @@ fn a_latency_change_restarts_once_and_is_announced() {
     rig.op(HostOp::Activate(prepare(48_000.0)));
     rig.take_notices();
 
-    rig.plugin.set_latency(Samples(128));
+    rig.plugin.set_latency(Samples::new(128));
     Request::LatencyChanged.raise(rig.plugin.request_word());
     rig.tick();
 
     assert_eq!(activations(&rig.plugin.calls()), 2);
     let notices = rig.take_notices();
     assert!(
-        matches!(notices.as_slice(), [Notice::LatencyChanged(Samples(128))]),
+        matches!(notices.as_slice(), [Notice::LatencyChanged(s)] if s.get() == 128),
         "{notices:?}"
     );
     rig.tick();
@@ -332,14 +338,14 @@ fn a_tail_change_is_read_in_place() {
     rig.op(HostOp::Activate(prepare(48_000.0)));
     rig.take_notices();
 
-    rig.plugin.set_tail(Samples(500));
+    rig.plugin.set_tail(Samples::new(500));
     Request::TailChanged.raise(rig.plugin.request_word());
     rig.tick();
 
     assert_eq!(activations(&rig.plugin.calls()), 1);
     assert!(matches!(
         rig.take_notices().as_slice(),
-        [Notice::TailChanged(PluginTail::Finite(Samples(500)))]
+        [Notice::TailChanged(PluginTail::Finite(s))] if s.get() == 500
     ));
 }
 
@@ -497,7 +503,7 @@ fn the_processor_renders_without_allocating() {
     let processor = rig.lifecycle.processor().expect("held");
     let mut outputs = [left.as_mut_slice(), right.as_mut_slice()];
     let mut io = PluginIo {
-        buffer: InputOutput::from_slices(Samples(inputs[0].len()), &inputs, &mut outputs)
+        buffer: InputOutput::from_slices(Samples::new(inputs[0].len()), &inputs, &mut outputs)
             .expect("equal lengths"),
         ctx: &ctx,
         out: &mut out,
@@ -572,7 +578,7 @@ fn a_panic_in_a_read_poisons_without_losing_the_state() {
     let mut rig = Rig::new();
     rig.op(HostOp::Activate(prepare(48_000.0)));
     rig.plugin.panic_in_latency(true);
-    rig.plugin.set_latency(Samples(8));
+    rig.plugin.set_latency(Samples::new(8));
     Request::LatencyChanged.raise(rig.plugin.request_word());
     rig.tick();
     assert!(rig.lifecycle.is_poisoned());
@@ -759,7 +765,7 @@ fn a_rate_change_recalls_the_lent_processor_and_lends_the_new_one() {
     assert!(!rig.state.is_parked());
     let calls = rig.plugin.calls();
     assert!(calls.contains(&Call::Deactivate));
-    assert!(calls.contains(&Call::Activate(SampleRate::SR_44K1, Samples(64))));
+    assert!(calls.contains(&Call::Activate(SampleRate::SR_44K1, Samples::new(64))));
     assert_eq!(activations(&calls), 2);
     assert!(poll(&mut rt), "the new Processor reaches the realtime end");
 }
@@ -951,11 +957,11 @@ fn the_fake_control_answers_nothing_in_either_state() {
 #[test]
 fn an_adopted_plugin_is_in_the_state_a_driven_activation_leaves() {
     let mut driven = Rig::new();
-    driven.plugin.set_latency(Samples(32));
+    driven.plugin.set_latency(Samples::new(32));
     driven.op(HostOp::Activate(prepare(48_000.0)));
 
     let (plugin, loaded) = FakePlugin::new();
-    plugin.set_latency(Samples(32));
+    plugin.set_latency(Samples::new(32));
     let wiring = Control::wiring(&loaded, main());
     let (processor, controller) = match loaded.activate(main(), prepare(48_000.0)) {
         Ok(halves) => halves,
@@ -972,7 +978,7 @@ fn an_adopted_plugin_is_in_the_state_a_driven_activation_leaves() {
 
     assert_eq!(state.stage(), driven.state.stage());
     assert_eq!(state.prepare(), driven.state.prepare());
-    assert_eq!(state.latency(), Some(Samples(32)));
+    assert_eq!(state.latency(), Some(Samples::new(32)));
     assert_eq!(state.latency(), driven.state.latency());
     assert_eq!(state.tail(), driven.state.tail());
     assert!(state.tail().is_some());

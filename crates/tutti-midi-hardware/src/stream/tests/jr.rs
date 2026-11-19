@@ -22,12 +22,7 @@ fn jr(utility: Utility) -> Ump {
 
 /// A connected, settled wire and a graph reading its inlets.
 fn settled(timing: InputTiming, device: Endpoint) -> (Wire, Rig, DeviceStream) {
-    let mut wire = session_over_timing(
-        UmpCapability::midi2(),
-        PortDirection::Duplex,
-        device,
-        timing,
-    );
+    let mut wire = session_over_timing(midi2(), PortDirection::Duplex, device, timing);
     let crate::Connected::Opened(inlet) = wire.session.connect_input(&wire.id.clone()).unwrap()
     else {
         panic!("the wire's input was not open");
@@ -88,12 +83,7 @@ fn txjr_is_asked_for_only_by_an_input_opened_for_jr() {
         (InputTiming::JitterReduction, true),
         (InputTiming::Arrival, false),
     ] {
-        let mut wire = session_over_timing(
-            UmpCapability::midi2(),
-            PortDirection::Duplex,
-            offering_both(),
-            timing,
-        );
+        let mut wire = session_over_timing(midi2(), PortDirection::Duplex, offering_both(), timing);
         let _ = wire.session.connect_input(&wire.id.clone()).unwrap();
         let mut asked = Vec::new();
         let mut settled = None;
@@ -175,7 +165,7 @@ fn an_arrival_input_keeps_the_arrival_stamp_though_the_device_sends_jr() {
 #[test]
 fn no_jr_is_expected_before_the_notification() {
     let mut wire = session_over_timing(
-        UmpCapability::midi2(),
+        midi2(),
         PortDirection::Duplex,
         offering_both(),
         InputTiming::JitterReduction,

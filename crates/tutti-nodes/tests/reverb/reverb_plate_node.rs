@@ -20,7 +20,7 @@ fn node(c: PlateReverbConfig) -> PlateReverbNode<f32> {
 }
 
 fn impulse() -> Vec<f32> {
-    tutti_fixtures::signal::impulse(Samples(BLOCK))
+    tutti_fixtures::signal::impulse(Samples::new(BLOCK))
 }
 
 fn noise(seed: u32, frames: usize) -> Vec<f32> {
@@ -48,7 +48,7 @@ impl Rig {
         let env = Env {
             frame: Frame::new(self.frame),
             sample_rate: SR,
-            block_len: Samples(input.len()),
+            block_len: Samples::new(input.len()),
             transport: TransportPosition::default(),
             changes: TransportChanges::NONE,
             play: PlayClock::ZERO,
@@ -83,7 +83,7 @@ fn the_ports_the_latency_and_the_declared_ceiling() {
         None,
         "no mix port: the graph blends"
     );
-    assert_eq!(n.shape().latency, Latency::new(Samples(0)));
+    assert_eq!(n.shape().latency, Latency::new(Samples::new(0)));
     let Tail::Finite(ceiling) = n.shape().tail else {
         panic!("a finite ceiling")
     };
@@ -112,17 +112,17 @@ fn the_ports_the_latency_and_the_declared_ceiling() {
 fn the_reported_tail_is_the_networks_and_honest() {
     let mut last = 0;
     for decay in [0.3, 1.0, 2.5] {
-        let c = PlateReverbConfig::new().decay(Seconds(decay));
+        let c = PlateReverbConfig::new().decay(Seconds::new(decay));
         let Some(Tail::Finite(reported)) = Rig::new(c).block(&impulse()).reported_tail else {
             panic!("a finite reported tail")
         };
         let mut network = Box::new(Network::new(SR));
         PlateControls {
-            decay: Seconds(decay),
+            decay: Seconds::new(decay),
             ..PlateControls::DEFAULT
         }
         .design_into(SR, &mut network);
-        let Ring::Finite(t) = network.tail(Db(-60.0)) else {
+        let Ring::Finite(t) = network.tail(Db::new(-60.0)) else {
             panic!("finite")
         };
         let ring = f64::ln(1.0e-3) / (-std::f64::consts::TAU * 20_000.0 / SR.get());
@@ -141,7 +141,7 @@ fn the_reported_tail_is_the_networks_and_honest() {
 /// renders the same bits the second time as the first, whatever stream position it wakes at.
 #[test]
 fn a_parked_node_wakes_as_a_fresh_one() {
-    let mut rig = Rig::new(PlateReverbConfig::new().decay(Seconds(0.3)));
+    let mut rig = Rig::new(PlateReverbConfig::new().decay(Seconds::new(0.3)));
     let play = |rig: &mut Rig| {
         let mut out = vec![rig.block(&impulse()).audio];
         out.extend((0..59).map(|_| rig.silent().audio));
@@ -222,7 +222,7 @@ fn a_moved_cell_lands_on_the_grid_whatever_the_blocks() {
             if moved && i * block == 1_024 {
                 assert!(set.set(UnitParam::Decay, 5.0));
                 assert!(set.set(UnitParam::Damping, 0.6));
-                assert!(set.set(UnitParam::Diffusion, Mix(0.2).get()));
+                assert!(set.set(UnitParam::Diffusion, Mix::new(0.2).get()));
             }
             for (o, y) in out.iter_mut().zip(drive(
                 &mut n,

@@ -27,7 +27,7 @@ fn retunes(commands: &[Command]) -> Vec<(u8, f64)> {
     commands
         .iter()
         .filter_map(|c| match c {
-            Command::Retune { channel, bend } => Some((channel.get(), bend.0)),
+            Command::Retune { channel, bend } => Some((channel.get(), bend.get())),
             _ => None,
         })
         .collect()
@@ -102,7 +102,7 @@ fn the_percussion_channel_is_not_retuned() {
 
 fn gain(core: &Voicing) -> (f64, f64) {
     let g = core.master_gain();
-    (g.left.0, g.right.0)
+    (g.left.get(), g.right.get())
 }
 
 /// GM2 section 4.1: the volume is proportional to the square of the value,
@@ -180,8 +180,9 @@ fn dirty(core: &mut Voicing, bend_range: u32) {
 /// GM2 section 3.3: pan centre).
 #[test]
 fn general_midi_on_mutes_and_returns_every_channel_to_its_defaults() {
-    let mut core =
-        Voicing::new(Rules::poly(NonZeroUsize::new(4).unwrap()).with_bend_range(Semitones(12.0)));
+    let mut core = Voicing::new(
+        Rules::poly(NonZeroUsize::new(4).unwrap()).with_bend_range(Semitones::new(12.0)),
+    );
     dirty(&mut core, 24);
     let started = step(&mut core, 0, note_on(60));
     let Some(Command::Start { id, .. }) = started.first().copied() else {
@@ -230,8 +231,9 @@ fn general_midi_on_mutes_and_returns_every_channel_to_its_defaults() {
 /// mode: here the bend range the instrument's rules were built with.
 #[test]
 fn general_midi_off_returns_to_the_instruments_own_status() {
-    let mut core =
-        Voicing::new(Rules::poly(NonZeroUsize::new(4).unwrap()).with_bend_range(Semitones(12.0)));
+    let mut core = Voicing::new(
+        Rules::poly(NonZeroUsize::new(4).unwrap()).with_bend_range(Semitones::new(12.0)),
+    );
     dirty(&mut core, 24);
     say(
         &mut core,

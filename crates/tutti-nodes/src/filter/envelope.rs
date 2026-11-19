@@ -200,10 +200,10 @@ mod tests {
         let mut k = EnvelopeFilterKernel::<f64>::new(BusTopology::MONO, SvfType::LowPass);
         k.prepare(
             SampleRate::SR_48K,
-            MaxBlock::of(tutti_units::Samples(4_000)),
+            MaxBlock::of(tutti_units::Samples::new(4_000)),
         );
         k.retarget(&EnvelopeFilterControls {
-            base: Hz(1_000.0),
+            base: Hz::new(1_000.0),
             ..EnvelopeFilterControls::DEFAULT
         });
         let c = wide_signal(1)[0];

@@ -65,7 +65,7 @@ impl Oscillator {
             start_loop: 0,
             end_loop: 0,
             root_key: 0,
-            tune: Semitones(0.0),
+            tune: Semitones::new(0.0),
             pitch_change_scale: 0.0,
             sample_rate_ratio: 0.0,
             looping: false,
@@ -93,7 +93,7 @@ impl Oscillator {
         self.end_loop = end_loop;
         self.root_key = root_key;
 
-        self.tune = Semitones(f64::from(coarse_tune) + 0.01 * f64::from(fine_tune));
+        self.tune = Semitones::new(f64::from(coarse_tune) + 0.01 * f64::from(fine_tune));
         self.pitch_change_scale = 0.01 * f64::from(scale_tuning);
         // Both rates are whole hertz: a header states its rate as a `u32`.
         self.sample_rate_ratio = sample_rate.get() / f64::from(self.synthesizer_sample_rate);
@@ -116,8 +116,9 @@ impl Oscillator {
         block: &mut [F],
         pitch: Semitones,
     ) -> bool {
-        let pitch_change =
-            (pitch - Semitones(f64::from(self.root_key))) * self.pitch_change_scale + self.tune;
+        let pitch_change = (pitch - Semitones::new(f64::from(self.root_key)))
+            * self.pitch_change_scale
+            + self.tune;
         let pitch_ratio = self.sample_rate_ratio * pitch_change.to_pitch_ratio();
         // The pool's width is matched once per block, not per point.
         match data {
@@ -259,7 +260,7 @@ mod tests {
         let mut oscillator = Oscillator::new(&Render::new(rate));
         oscillator.start(LoopMode::NoLoop, rate, 0, 2000, 0, 0, 60, 0, 0, 100);
         let mut block = vec![F::ZERO; count];
-        assert!(oscillator.process(pool, &mut block, Semitones(60.0)));
+        assert!(oscillator.process(pool, &mut block, Semitones::new(60.0)));
         block
     }
 
@@ -329,8 +330,8 @@ mod tests {
             0,
             100,
         );
-        let pitch = Semitones(67.0);
-        let ratio = Semitones(7.0).to_pitch_ratio();
+        let pitch = Semitones::new(67.0);
+        let ratio = Semitones::new(7.0).to_pitch_ratio();
         let frames = 1_920_000_usize;
         let mut block = [0_f32; 8];
         for _ in 0..frames / block.len() {

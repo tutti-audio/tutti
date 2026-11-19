@@ -62,22 +62,22 @@ fn the_first_clock_is_due_immediately() {
 fn clocks_are_emitted_on_the_configured_cadence() {
     let mut e = JrClockEmitter::with_interval(SampleRate::SR_48K, Duration::from_millis(100));
     let interval = e.interval;
-    assert_eq!(interval, Samples(4_800));
+    assert_eq!(interval, Samples::new(4_800));
     let at = |frames: Samples| Frame::new(frames.get() as u64);
 
     assert!(e.due(Frame::new(0)).is_some(), "first");
     assert!(
-        e.due(at(Samples(interval.get() - 1))).is_none(),
+        e.due(at(Samples::new(interval.get() - 1))).is_none(),
         "one sample short"
     );
     let second = e.due(at(interval)).expect("exactly due");
     assert_eq!(jr_clock_value(&second), Some(3_125), "100 ms is 3125 ticks");
     assert!(
-        e.due(at(Samples(interval.get() + 1))).is_none(),
+        e.due(at(Samples::new(interval.get() + 1))).is_none(),
         "just emitted"
     );
     assert!(
-        e.due(at(Samples(interval.get() * 2))).is_some(),
+        e.due(at(Samples::new(interval.get() * 2))).is_some(),
         "next period"
     );
 }
@@ -91,7 +91,7 @@ fn the_cadence_keeps_running_through_silence() {
     // would satisfy a test that sends notes and still emit nothing on an
     // idle stream — which is exactly when a receiver most needs the clock.
     let sample_rate = 48_000.0;
-    let block = Samples(512);
+    let block = Samples::new(512);
     let mut stream = JrStream {
         emitter: Some(JrClockEmitter::with_interval(
             SampleRate::of(sample_rate),
@@ -128,7 +128,7 @@ fn a_stamped_block_carries_its_clock_before_the_stamps() {
         JrStream::new(SampleRate::of(sample_rate)).with_clock(SampleRate::of(sample_rate));
     let events = [at(0, midi::note_on(MidiChannel::FIRST, 60, 0x8000))];
     let mut out = Vec::new();
-    stream.stamp_span(&events, Samples(512), &mut out);
+    stream.stamp_span(&events, Samples::new(512), &mut out);
     // clock, then stamp, then the note.
     assert_eq!(out.len(), 3);
     assert!(jr_clock_value(&out[0].1).is_some(), "clock leads");
@@ -142,7 +142,7 @@ fn a_stream_without_a_clock_emits_none() {
     // stamp-only callers keep their exact output.
     let mut stream = JrStream::new(SampleRate::SR_48K);
     let mut out = Vec::new();
-    stream.stamp_span(&[], Samples(512), &mut out);
+    stream.stamp_span(&[], Samples::new(512), &mut out);
     assert!(out.is_empty(), "no clock, no events, no output");
 }
 
@@ -159,7 +159,7 @@ fn stamp_advances_by_events_and_stamp_span_by_the_block() {
     );
 
     let mut by_block = JrStream::new(SampleRate::SR_48K);
-    by_block.stamp_span(&[], Samples(512), &mut Vec::new());
+    by_block.stamp_span(&[], Samples::new(512), &mut Vec::new());
     assert_eq!(by_block.origin(), Frame::new(512), "the block advanced it");
 }
 
@@ -187,7 +187,7 @@ fn a_blocks_span_is_one_past_its_furthest_offset() {
         at(0, midi::note_on(MidiChannel::FIRST, 60, 0x8000)),
         at(511, midi::note_off(MidiChannel::FIRST, 60, 0)),
     ];
-    assert_eq!(JrStamper::block_span(&events), Samples(512));
+    assert_eq!(JrStamper::block_span(&events), Samples::new(512));
     assert_eq!(
         JrStamper::block_span(&[]),
         Samples::ZERO,
@@ -275,7 +275,7 @@ fn stamp_block_prefixes_each_event() {
 fn a_re_rated_stream_continues_its_jr_time_at_the_new_rate() {
     let mut stream = JrStream::new(SampleRate::SR_48K).with_clock(SampleRate::SR_48K);
     let mut out = Vec::new();
-    stream.stamp_span(&[], Samples(48_000), &mut out);
+    stream.stamp_span(&[], Samples::new(48_000), &mut out);
     assert_eq!(stream.origin(), Frame::new(48_000));
     let mut stream = stream.at_rate(SampleRate::SR_44K1);
     assert_eq!(stream.origin(), Frame::new(44_100), "the same second");
@@ -299,12 +299,12 @@ fn a_re_rated_stream_continues_its_jr_time_at_the_new_rate() {
 fn a_re_rated_clock_keeps_its_cadence_at_the_new_rate() {
     let mut stream = JrStream::new(SampleRate::SR_48K).with_clock(SampleRate::SR_48K);
     let mut out = Vec::new();
-    stream.stamp_span(&[], Samples(4_800), &mut out);
-    stream.stamp_span(&[], Samples(4_800), &mut out);
+    stream.stamp_span(&[], Samples::new(4_800), &mut out);
+    stream.stamp_span(&[], Samples::new(4_800), &mut out);
     let stream = stream.at_rate(SampleRate::SR_44K1);
     assert_eq!(stream.origin(), Frame::new(8_820));
     let mut clock = stream.emitter.expect("the stream clocks");
-    assert_eq!(clock.interval, Samples(4_410), "100 ms at 44.1 kHz");
+    assert_eq!(clock.interval, Samples::new(4_410), "100 ms at 44.1 kHz");
     assert!(clock.due(Frame::new(8_819)).is_none(), "one frame short");
     let due = clock.due(Frame::new(8_820)).expect("one interval on");
     assert_eq!(jr_clock_value(&due), Some(6_250));

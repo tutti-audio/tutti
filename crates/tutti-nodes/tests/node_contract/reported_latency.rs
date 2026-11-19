@@ -69,7 +69,7 @@ fn mixed_impulse_response<N: IntoNode>(node: N, frames: usize, mix: Mix) -> Vec<
     }
     g.spec_mut().set_mix(key, mix);
     let mut r = g
-        .renderer(Prepare::new(SR, MaxBlock::of(Samples(BLOCK))))
+        .renderer(Prepare::new(SR, MaxBlock::of(Samples::new(BLOCK))))
         .expect("a one-node graph builds");
     let mut chunk = vec![0.0f32; frames];
     chunk[0] = 1.0;
@@ -105,7 +105,8 @@ fn onsets(ch: &[f32]) -> Vec<usize> {
 /// the summed output answers well above zero.
 #[test]
 fn crossover_and_multiband_report_zero_latency_and_respond_at_frame_0() {
-    let xo = CrossoverNode::<f32>::new(ChannelLayout::MONO, &[Hz(300.0), Hz(3_000.0)]).unwrap();
+    let xo = CrossoverNode::<f32>::new(ChannelLayout::MONO, &[Hz::new(300.0), Hz::new(3_000.0)])
+        .unwrap();
     assert_eq!(declared(&xo), Latency::ZERO);
     for (b, band) in impulse_response(xo, 64).iter().enumerate() {
         assert!(band[0] > 0.0, "band {b} is silent at frame 0");
@@ -245,10 +246,14 @@ fn a_delay_insert_adds_no_compensation_to_the_other_paths() {
         .connect_output(chorus, 0, 1)
         .connect_output(dry, 0, 2);
     let (_editor, exec) = g
-        .build(Prepare::new(SR, MaxBlock::of(Samples(BLOCK))))
+        .build(Prepare::new(SR, MaxBlock::of(Samples::new(BLOCK))))
         .expect("the graph builds");
     let plan = exec.plan().expect("committed");
-    assert_eq!(plan.compensation(), &[Samples(0); 3], "no output pre-rolls");
+    assert_eq!(
+        plan.compensation(),
+        &[Samples::new(0); 3],
+        "no output pre-rolls"
+    );
     assert!(plan.delays().is_empty(), "the compiler spliced a delay");
 }
 
@@ -272,18 +277,18 @@ fn a_limiter_summed_with_a_dry_path_reports_the_limiter_latency() {
 
     let mut g = GraphBuilder::new(ChannelLayout::MONO, ChannelLayout::MONO);
     let (lim, _) = g.add_with_controls(LimiterNode::<f32>::mono(LimiterControls {
-        threshold: Db(-1.0),
-        ceiling: Db(-0.3),
+        threshold: Db::new(-1.0),
+        ceiling: Db::new(-0.3),
         ..LimiterControls::DEFAULT
     }));
     g.connect_input(0, lim, 0);
     g.connect_output(lim, 0, 0);
     g.add_output(0, Source::Global(0));
     let mut r = g
-        .renderer(Prepare::new(SR, MaxBlock::of(Samples(BLOCK))))
+        .renderer(Prepare::new(SR, MaxBlock::of(Samples::new(BLOCK))))
         .expect("builds");
 
-    let lookahead = Seconds(0.005).to_samples_ceil(SR);
+    let lookahead = Seconds::new(0.005).to_samples_ceil(SR);
     assert_eq!(
         r.executor().plan().expect("committed").total_latency(),
         Latency::new(lookahead),
@@ -313,11 +318,15 @@ mod convolver {
     #[test]
     fn convolver_dry_and_wet_leave_together_at_the_reported_latency() {
         for mix in [0.0_f64, 0.5, 1.0] {
-            let node = ConvolverNode::<f32>::new(Mono::new(&[1.0]), Samples(256));
+            let node = ConvolverNode::<f32>::new(Mono::new(&[1.0]), Samples::new(256));
 
-            let latency = node.latency_samples().0;
+            let latency = node.latency_samples().get();
             assert_eq!(latency, 256);
-            assert_eq!(declared(&node), Latency::new(Samples(latency)), "mix {mix}");
+            assert_eq!(
+                declared(&node),
+                Latency::new(Samples::new(latency)),
+                "mix {mix}"
+            );
 
             let out = mixed_impulse_response(node, latency * 3, Mix::new(mix));
             assert_eq!(
@@ -341,12 +350,12 @@ mod convolver {
         type Build = fn() -> ConvolverNode<f32>;
         let builds: [(&str, Build); 7] = [
             ("mono", || {
-                ConvolverNode::<f32>::shared_ir(2u16, Mono::new(&[1.0]), Samples(128)).unwrap()
+                ConvolverNode::<f32>::shared_ir(2u16, Mono::new(&[1.0]), Samples::new(128)).unwrap()
             }),
             ("dual mono", || {
                 ConvolverNode::<f32>::per_channel(
                     &[Mono::new(&[1.0]), Mono::new(&[1.0])],
-                    Samples(128),
+                    Samples::new(128),
                 )
                 .unwrap()
             }),
@@ -357,31 +366,35 @@ mod convolver {
                     Mono::new(&one[..]),
                     Mono::new(&one[..]),
                     Mono::new(&one[..]),
-                    Samples(128),
+                    Samples::new(128),
                 )
             }),
             ("folded", || {
-                ConvolverNode::<f32>::folded(&[Mono::new(&[1.0]), Mono::new(&[1.0])], Samples(128))
-                    .unwrap()
+                ConvolverNode::<f32>::folded(
+                    &[Mono::new(&[1.0]), Mono::new(&[1.0])],
+                    Samples::new(128),
+                )
+                .unwrap()
             }),
             ("shared x6", || {
-                ConvolverNode::<f32>::shared_ir(6u16, Mono::new(&[1.0]), Samples(128)).unwrap()
+                ConvolverNode::<f32>::shared_ir(6u16, Mono::new(&[1.0]), Samples::new(128)).unwrap()
             }),
             ("per_channel x6", || {
-                ConvolverNode::<f32>::per_channel(&[Mono::new(&[1.0_f32]); 6], Samples(128))
+                ConvolverNode::<f32>::per_channel(&[Mono::new(&[1.0_f32]); 6], Samples::new(128))
                     .unwrap()
             }),
             ("folded x6", || {
-                ConvolverNode::<f32>::folded(&[Mono::new(&[1.0_f32]); 6], Samples(128)).unwrap()
+                ConvolverNode::<f32>::folded(&[Mono::new(&[1.0_f32]); 6], Samples::new(128))
+                    .unwrap()
             }),
         ];
         for (name, build) in builds {
             for mix in [0.0_f64, 0.5, 1.0] {
                 let node = build();
-                let latency = node.latency_samples().0;
+                let latency = node.latency_samples().get();
                 assert_eq!(
                     declared(&node),
-                    Latency::new(Samples(latency)),
+                    Latency::new(Samples::new(latency)),
                     "{name} mix {mix}"
                 );
 
@@ -403,7 +416,7 @@ mod convolver {
     #[test]
     fn convolver_reset_clears_the_buffered_take() {
         let mut node = prepared(
-            ConvolverNode::<f32>::new(Mono::new(&[1.0]), Samples(64)),
+            ConvolverNode::<f32>::new(Mono::new(&[1.0]), Samples::new(64)),
             SR,
             256,
         );
@@ -426,7 +439,7 @@ mod convolver {
     /// latency, so channels 1 and 2 each pre-roll by exactly that block.
     #[test]
     fn a_delay_after_a_convolver_adds_nothing_to_its_compensation() {
-        let conv = ConvolverNode::<f32>::new(Mono::new(&[1.0]), Samples(256));
+        let conv = ConvolverNode::<f32>::new(Mono::new(&[1.0]), Samples::new(256));
         let latency = conv.latency_samples();
         let mut g = GraphBuilder::new(ChannelLayout::MONO, ChannelLayout::from_count(3));
         let (conv, _) = g.add_with_controls(conv);
@@ -455,10 +468,10 @@ mod convolver {
             .connect_output(echo_b, 0, 1)
             .connect_output(dry, 0, 2);
         let (_editor, exec) = g
-            .build(Prepare::new(SR, MaxBlock::of(Samples(BLOCK))))
+            .build(Prepare::new(SR, MaxBlock::of(Samples::new(BLOCK))))
             .expect("the graph builds");
         let plan = exec.plan().expect("committed");
         assert_eq!(plan.total_latency(), Latency::new(latency));
-        assert_eq!(plan.compensation(), &[Samples(0), latency, latency]);
+        assert_eq!(plan.compensation(), &[Samples::new(0), latency, latency]);
     }
 }

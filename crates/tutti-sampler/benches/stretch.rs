@@ -19,8 +19,8 @@ fn stretch(c: &mut Criterion) {
     group.throughput(Throughput::Elements(BLOCK as u64));
     for size in [FftSize::N1024, FftSize::N2048, FftSize::N4096] {
         let mut unit = Unit::with_fft_size(SampleRate::SR_48K, size);
-        unit.set_stretch_factor(StretchFactor(1.5));
-        unit.set_pitch_cents(Cents(200.0));
+        unit.set_stretch_factor(StretchFactor::new(1.5));
+        unit.set_pitch_cents(Cents::new(200.0));
         let sine: Vec<f32> = (0..BLOCK)
             .map(|i| ((TAU * 440.0 * i as f64 / 48_000.0).sin() * 0.5) as f32)
             .collect();

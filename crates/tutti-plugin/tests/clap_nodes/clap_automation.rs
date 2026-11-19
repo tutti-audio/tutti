@@ -71,7 +71,10 @@ fn automation_reaches_the_plugin_through_its_event_input() {
         None,
         (0.0, 1.0),
     );
-    let prepare = Prepare::new(SampleRate::of(SAMPLE_RATE), MaxBlock::of(Samples(BLOCK)));
+    let prepare = Prepare::new(
+        SampleRate::of(SAMPLE_RATE),
+        MaxBlock::of(Samples::new(BLOCK)),
+    );
     let (mut live, _exec) = Editor::new(prepare);
     let (auto_key, key) = (NodeKey(1), NodeKey(9));
     let _automation = live.insert(auto_key, "automation", automation);
@@ -138,7 +141,10 @@ fn render_gain(
         .render_mode(render::TAG_ONLY)
         .gain_enabled(true);
     let probe = load_probe(SAMPLE_RATE);
-    let prepare = Prepare::new(SampleRate::of(SAMPLE_RATE), MaxBlock::of(Samples(BLOCK)));
+    let prepare = Prepare::new(
+        SampleRate::of(SAMPLE_RATE),
+        MaxBlock::of(Samples::new(BLOCK)),
+    );
     let (mut live, _exec) = Editor::new(prepare);
     let _controls = live.insert(
         PLUGIN,
@@ -278,7 +284,7 @@ fn a_scheduled_segment_drives_a_plugin_parameter_to_its_end() {
         GAIN,
         0.5,
         0.75,
-        Samples(1000),
+        Samples::new(1000),
         Law::PowerIn(Exponent::of(2.0)),
     );
     let (out, latency) = render_gain(None, &[(AT, ParamKind::Segment(seg))], 10);
@@ -289,7 +295,7 @@ fn a_scheduled_segment_drives_a_plugin_parameter_to_its_end() {
         AT as usize,
         end,
         1,
-        |f| seg.raw_value_after(Samples(f - AT as usize)),
+        |f| seg.raw_value_after(Samples::new(f - AT as usize)),
         0.75,
     );
 }
@@ -302,9 +308,9 @@ fn a_scheduled_segment_drives_a_plugin_parameter_to_its_end() {
 #[test]
 fn a_shaped_ramp_drives_a_plugin_parameter_along_its_shape() {
     const AT: u64 = 300;
-    let step = ParamRamp::foreign(GAIN, 0.5, Samples(0));
-    let ramp =
-        ParamRamp::foreign(GAIN, 0.75, Samples(1000)).with_shape(Law::PowerIn(Exponent::of(2.0)));
+    let step = ParamRamp::foreign(GAIN, 0.5, Samples::new(0));
+    let ramp = ParamRamp::foreign(GAIN, 0.75, Samples::new(1000))
+        .with_shape(Law::PowerIn(Exponent::of(2.0)));
     let (out, latency) = render_gain(
         None,
         &[(100, ParamKind::Ramp(step)), (AT, ParamKind::Ramp(ramp))],
@@ -314,7 +320,7 @@ fn a_shaped_ramp_drives_a_plugin_parameter_along_its_shape() {
         GAIN,
         0.5,
         0.75,
-        Samples(1000),
+        Samples::new(1000),
         Law::PowerIn(Exponent::of(2.0)),
     );
     follows(
@@ -323,7 +329,7 @@ fn a_shaped_ramp_drives_a_plugin_parameter_along_its_shape() {
         AT as usize,
         AT as usize + 999,
         1,
-        |f| seg.raw_value_after(Samples(f - AT as usize)),
+        |f| seg.raw_value_after(Samples::new(f - AT as usize)),
         0.75,
     );
 }
@@ -338,10 +344,10 @@ fn an_interrupting_ramp_stops_a_segment_on_a_plugin() {
         GAIN,
         0.5,
         0.75,
-        Samples(1000),
+        Samples::new(1000),
         Law::PowerIn(Exponent::of(2.0)),
     );
-    let ramp = ParamRamp::foreign(GAIN, 0.25, Samples(0));
+    let ramp = ParamRamp::foreign(GAIN, 0.25, Samples::new(0));
     let (out, latency) = render_gain(
         None,
         &[(AT, ParamKind::Segment(seg)), (CUT, ParamKind::Ramp(ramp))],
@@ -365,12 +371,12 @@ fn an_interrupting_ramp_stops_a_segment_on_a_plugin() {
 fn a_lane_drives_a_plugin_parameter_along_its_curve() {
     let mut env = Trajectory::new();
     env.add_breakpoint(Breakpoint::with_law(
-        Beat(0.0),
-        Hz(0.5),
+        Beat::new(0.0),
+        Hz::new(0.5),
         Law::PowerIn(Exponent::of(2.0)),
     ));
     // 120 BPM at 48 kHz: 24 000 frames a beat, so frame 1500.
-    env.add_breakpoint(Breakpoint::new(Beat(0.0625), Hz(0.75)));
+    env.add_breakpoint(Breakpoint::new(Beat::new(0.0625), Hz::new(0.75)));
     let lane = ControlLaneNode::for_foreign(
         GAIN,
         ControlProgram::from_curve(Arc::new(env.clone())),
@@ -378,7 +384,7 @@ fn a_lane_drives_a_plugin_parameter_along_its_curve() {
         (0.0, 1.0),
     );
     let (out, latency) = render_gain(Some(lane), &[], 10);
-    let beat = |f: usize| Beat(f as f64 / 24_000.0);
+    let beat = |f: usize| Beat::new(f as f64 / 24_000.0);
     follows(
         &out,
         latency,

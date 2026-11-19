@@ -17,7 +17,7 @@ use tutti_units::{SampleRate, Samples};
 fn declared_at(node: &mut impl Node, frames: usize) -> Option<u32> {
     node.prepare(&Prepare::new(
         SampleRate::of(SAMPLE_RATE),
-        MaxBlock::of(Samples(frames)),
+        MaxBlock::of(Samples::new(frames)),
     ));
     node.shape().event_input_capacity.map(|n| n.get())
 }

@@ -342,7 +342,7 @@ enum Variant {
 fn graph(kind: Kind, variant: Variant, members: usize, frames: usize) -> Executor {
     let (mut ed, mut exec) = Editor::new(Prepare::new(
         SampleRate::of(SR),
-        MaxBlock::of(Samples(frames)),
+        MaxBlock::of(Samples::new(frames)),
     ));
     let w = kind.width();
     ed.spec_mut().topology.inputs = ChannelLayout::try_from(w).expect("a test width is small");

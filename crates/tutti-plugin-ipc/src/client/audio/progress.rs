@@ -119,7 +119,7 @@ impl StallWatch {
 
 /// Shared byte counter for one in-flight state transfer.
 ///
-/// Cloned into the [`Command`](super::messages::Command) so the bridge thread
+/// Cloned into the [`ControlCommand`](super::messages::ControlCommand) so the bridge thread
 /// can advance it while the caller watches. One counter per transfer, created at
 /// the call and dropped with it, so a previous transfer's progress can never be
 /// mistaken for this one's.

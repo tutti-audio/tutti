@@ -135,7 +135,7 @@ fn prepare_at(unit: &mut PluginNode<Vst2Loaded>, rate: SampleRate) {
         unit,
         &tutti_graph::Prepare::new(
             rate,
-            tutti_buffers::MaxBlock::of(tutti_units::Samples(BLOCK)),
+            tutti_buffers::MaxBlock::of(tutti_units::Samples::new(BLOCK)),
         ),
     );
 }
@@ -153,7 +153,10 @@ fn drive_blocks(unit: &mut PluginNode<Vst2Loaded>, max: usize, frames: usize) {
     let rate = SampleRate::of(SAMPLE_RATE);
     Node::prepare(
         unit,
-        &Prepare::new(rate, tutti_buffers::MaxBlock::of(tutti_units::Samples(max))),
+        &Prepare::new(
+            rate,
+            tutti_buffers::MaxBlock::of(tutti_units::Samples::new(max)),
+        ),
     );
     process_block(unit, frames);
 }
@@ -169,7 +172,7 @@ fn process_block(unit: &mut PluginNode<Vst2Loaded>, frames: usize) {
     let env = Env {
         frame: tutti_units::Frame::new(0),
         sample_rate: rate,
-        block_len: tutti_units::Samples(frames),
+        block_len: tutti_units::Samples::new(frames),
         transport: TransportPosition::default(),
         changes: TransportChanges::NONE,
         play: tutti_graph::PlayClock::ZERO,
@@ -429,7 +432,7 @@ fn the_output_is_what_the_plugin_wrote() {
         &mut loaded.unit,
         &Prepare::new(
             rate,
-            tutti_buffers::MaxBlock::of(tutti_units::Samples(BLOCK)),
+            tutti_buffers::MaxBlock::of(tutti_units::Samples::new(BLOCK)),
         ),
     );
     let channels = usize::from(Node::shape(&loaded.unit).audio_in().count());
@@ -449,7 +452,7 @@ fn the_output_is_what_the_plugin_wrote() {
         let env = Env {
             frame: tutti_units::Frame::new(0),
             sample_rate: rate,
-            block_len: tutti_units::Samples(frames),
+            block_len: tutti_units::Samples::new(frames),
             transport: TransportPosition::default(),
             changes: TransportChanges::NONE,
             play: tutti_graph::PlayClock::ZERO,
@@ -631,7 +634,7 @@ fn an_io_change_reaches_a_subscriber_and_the_shape() {
     assert!(
         seen.iter().any(|n| matches!(
             n,
-            PluginInvalidation::Latency { samples } if *samples == tutti_units::Samples(300)
+            PluginInvalidation::Latency { samples } if *samples == tutti_units::Samples::new(300)
         )),
         "{seen:?}"
     );

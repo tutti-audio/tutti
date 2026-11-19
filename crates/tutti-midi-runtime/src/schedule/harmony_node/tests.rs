@@ -7,7 +7,7 @@ use tutti_graph::Harmony;
 #[test]
 fn reclaim_frees_lanes_a_block_held_across_their_replacement() {
     let c_major = Harmony::chord(60, 60, 0b1001_0001);
-    let mut node = HarmonyNode::new([TimedHarmony::new(Beat(0.0), c_major)]);
+    let mut node = HarmonyNode::new([TimedHarmony::new(Beat::new(0.0), c_major)]);
     let controls = HarmonyControls {
         cell: node.cell.clone(),
         serial: Arc::default(),

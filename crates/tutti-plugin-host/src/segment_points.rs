@@ -115,7 +115,7 @@ impl SegmentPoints {
         let j = frame.checked_sub(t.start)?;
         Some(
             t.segment
-                .raw_value_after(Samples(usize::try_from(j).unwrap_or(usize::MAX))),
+                .raw_value_after(Samples::new(usize::try_from(j).unwrap_or(usize::MAX))),
         )
     }
 
@@ -140,18 +140,23 @@ impl SegmentPoints {
         }
         self.interrupt(address);
         let arrives = segment.arrives_after();
-        if arrives == Samples(0) {
-            point(changes, address, at, segment.raw_value_after(Samples(0)));
+        if arrives == Samples::new(0) {
+            point(
+                changes,
+                address,
+                at,
+                segment.raw_value_after(Samples::new(0)),
+            );
             return;
         }
         // `len < capacity`: a push that cannot allocate. Past it, the
         // fallback (module docs).
         if self.tracks.len() >= self.tracks.capacity() {
-            let end = segment.raw_value_after(Samples(u32::MAX as usize));
+            let end = segment.raw_value_after(Samples::new(u32::MAX as usize));
             point(changes, address, at, end);
             return;
         }
-        let first = segment.raw_value_after(Samples(0));
+        let first = segment.raw_value_after(Samples::new(0));
         // On the chunk's last frame it is a corner, grid frame or not, as
         // the chunk edge is in `points`: a parameter's last point in a
         // chunk is never the one dropped first, so a full queue still ends
@@ -197,7 +202,7 @@ impl SegmentPoints {
                     let j = f.saturating_sub(t.start);
                     let value = t
                         .segment
-                        .raw_value_after(Samples(usize::try_from(j).unwrap_or(usize::MAX)));
+                        .raw_value_after(Samples::new(usize::try_from(j).unwrap_or(usize::MAX)));
                     if on_grid {
                         let offset = i32::try_from(c).unwrap_or(i32::MAX);
                         changes.grid_point(t.address, offset, value);
@@ -280,7 +285,7 @@ mod tests {
     /// before it.
     #[test]
     fn a_start_on_the_chunk_s_last_frame_is_a_corner() {
-        let seg = ParamSegment::foreign(ParamId::new(7), 0.5, 1.0, Samples(100), Law::Linear);
+        let seg = ParamSegment::foreign(ParamId::new(7), 0.5, 1.0, Samples::new(100), Law::Linear);
         let mut sp = SegmentPoints::default();
         let mut d = delivery([7]);
         sp.prepare(MAX_SEGMENTS);
@@ -294,7 +299,7 @@ mod tests {
         }
         assert_eq!(queue(&mut d, A).len(), room);
         sp.start(&mut d, A, seg, 63, 63, true);
-        let first = seg.raw_value_after(Samples(0));
+        let first = seg.raw_value_after(Samples::new(0));
         assert_eq!(queue(&mut d, A).last(), Some(&(63, first)));
         assert_eq!(queue(&mut d, A).len(), room);
     }
@@ -312,7 +317,7 @@ mod tests {
             ParamId::new(7),
             0.0,
             1.0,
-            Samples(150),
+            Samples::new(150),
             Law::PowerIn(Exponent::of(2.0)),
         );
         let grid = |f: u64| f.is_multiple_of(32);
@@ -339,7 +344,7 @@ mod tests {
         let at = |k: u64, c: i32| k as u32 * 64 + c as u32 - 10;
         for (k, q) in chunks.iter().enumerate().take(3) {
             for &(c, v) in q {
-                let want = seg.raw_value_after(Samples(at(k as u64, c) as usize));
+                let want = seg.raw_value_after(Samples::new(at(k as u64, c) as usize));
                 assert_eq!(v, want, "chunk {k}, frame {c}");
             }
         }
@@ -361,7 +366,7 @@ mod tests {
     #[test]
     fn an_interrupting_event_stops_the_segment() {
         let b = ParamId::new(8);
-        let seg = ParamSegment::foreign(ParamId::new(7), 0.0, 1.0, Samples(500), Law::Linear);
+        let seg = ParamSegment::foreign(ParamId::new(7), 0.0, 1.0, Samples::new(500), Law::Linear);
         let mut sp = SegmentPoints::default();
         let mut d = delivery([7, 8]);
         sp.prepare(MAX_SEGMENTS);
@@ -391,7 +396,7 @@ mod tests {
                 addr(k),
                 0.0,
                 1.0,
-                Samples(401 - k as usize),
+                Samples::new(401 - k as usize),
                 Law::PowerIn(Exponent::of(2.0)),
             )
         };
@@ -425,7 +430,7 @@ mod tests {
                     let at = base + c as u64;
                     assert_eq!(
                         v,
-                        seg(k).raw_value_after(Samples(at as usize)),
+                        seg(k).raw_value_after(Samples::new(at as usize)),
                         "{k} at {at}"
                     );
                     latest[k as usize] = v;
@@ -454,8 +459,9 @@ mod tests {
         let mut sp = SegmentPoints::default();
         let mut d = delivery([1, 2, 3]);
         sp.prepare(2);
-        let seg =
-            |id: u32| ParamSegment::foreign(ParamId::new(id), 0.0, 1.0, Samples(500), Law::Linear);
+        let seg = |id: u32| {
+            ParamSegment::foreign(ParamId::new(id), 0.0, 1.0, Samples::new(500), Law::Linear)
+        };
         d.begin();
         sp.begin(64);
         for id in [1, 2, 3] {

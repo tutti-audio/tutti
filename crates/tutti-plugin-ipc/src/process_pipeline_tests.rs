@@ -138,7 +138,7 @@ fn drive(
     } else {
         PlanesMut::new(&mut outs).expect("equal channels")
     };
-    let mut io = InputOutput::new(Samples(frames), plane_in, plane_out).expect("equal frames");
+    let mut io = InputOutput::new(Samples::new(frames), plane_in, plane_out).expect("equal frames");
     batcher.process(bridge.audio(), &mut io, host);
 }
 

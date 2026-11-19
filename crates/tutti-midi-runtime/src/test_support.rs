@@ -7,5 +7,5 @@ use tutti_units::Samples;
 /// `ump` at frame `offset`, built against a block long enough to hold any offset a
 /// test names.
 pub(crate) fn at(offset: usize, ump: Ump) -> UmpAt {
-    (Offset::of(Samples(offset), Samples(1 << 20)), ump)
+    (Offset::of(Samples::new(offset), Samples::new(1 << 20)), ump)
 }

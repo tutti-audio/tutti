@@ -410,7 +410,7 @@ impl<T: Vst3Sample> Vst3Processor<T> {
     /// carries any MIDI / parameter-change events the plugin emitted
     /// (plugin-emitted legacy-MIDI-CC-out is decoded to MIDI).
     ///
-    /// An empty output if `buffer.frames() == Samples(0)`.
+    /// An empty output if `buffer.frames() == Samples::new(0)`.
     ///
     /// # Errors
     ///
@@ -431,7 +431,7 @@ impl<T: Vst3Sample> Vst3Processor<T> {
         // plugin's fresh events into them.
         self.audio.output.clear_emitted();
 
-        if buffer.frames() == Samples(0) {
+        if buffer.frames() == Samples::new(0) {
             return Ok(self.audio.output.emitted_ref());
         }
         // Processing resumes lazily after a `stop`. (Activation starts it.)
@@ -553,7 +553,7 @@ impl<T: Vst3Sample> Vst3Processor<T> {
         };
         let result = self.audio_side.process(ProcessIo {
             mode: self.audio.config.block_mode,
-            num_samples: frames.0,
+            num_samples: frames.get(),
             inputs,
             outputs,
             input_events: &self.audio.input.events,

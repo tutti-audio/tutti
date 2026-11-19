@@ -53,7 +53,7 @@ fn render<N: Node + ParamNode + 'static>(
         let env = Env {
             frame: Frame::new(start as u64),
             sample_rate: RATE,
-            block_len: Samples(end - start),
+            block_len: Samples::new(end - start),
             transport: TransportPosition::default(),
             changes: TransportChanges::NONE,
             play: PlayClock::ZERO,
@@ -117,9 +117,9 @@ fn blocks_of_any_length_render_alike_with_lanes_and_moved_cells() {
                     ChannelLayout::STEREO,
                     SvfControls {
                         ty: SvfType::Bell,
-                        freq: Hz(1_000.0),
-                        q: Q(1.0),
-                        gain: Db(3.0),
+                        freq: Hz::new(1_000.0),
+                        q: Q::new(1.0),
+                        gain: Db::new(3.0),
                     },
                 ),
                 block,
@@ -133,7 +133,12 @@ fn blocks_of_any_length_render_alike_with_lanes_and_moved_cells() {
         let inputs = inputs.clone();
         Box::new(move |block| {
             render(
-                EqBandNode::<f32>::new(SvfType::HighShelf, Hz(4_000.0), Q(0.8), Db(8.0)),
+                EqBandNode::<f32>::new(
+                    SvfType::HighShelf,
+                    Hz::new(4_000.0),
+                    Q::new(0.8),
+                    Db::new(8.0),
+                ),
                 block,
                 &inputs[..1],
                 &[Some(sweep(1_000.0, 8_000.0)), None, None],
@@ -175,7 +180,7 @@ fn the_ladder_renders_alike_at_every_block_length_with_lanes() {
                 LadderFilterNode::<f32>::with_channels(
                     ChannelLayout::STEREO,
                     LadderType::LP24,
-                    Hz(1_000.0),
+                    Hz::new(1_000.0),
                     Resonance::new(0.3),
                 ),
                 block,
@@ -189,7 +194,11 @@ fn the_ladder_renders_alike_at_every_block_length_with_lanes() {
         let inputs = inputs.clone();
         Box::new(move |block| {
             render(
-                LadderFilterNode::<f32>::new(LadderType::HP12, Hz(2_000.0), Resonance::new(0.4)),
+                LadderFilterNode::<f32>::new(
+                    LadderType::HP12,
+                    Hz::new(2_000.0),
+                    Resonance::new(0.4),
+                ),
                 block,
                 &inputs[..1],
                 &[Some(sweep(500.0, 6_000.0)), None, None],
@@ -218,7 +227,8 @@ fn a_drive_lane_step_is_in_the_render_within_one_segment() {
         let mut x = vec![0.0f32; 64];
         x[at] = 0.5;
         let lane = drive.map_or_else(|| step.clone(), |d| vec![d; 64]);
-        let node = LadderFilterNode::<f32>::new(LadderType::HP24, Hz(1_500.0), Resonance::new(0.2));
+        let node =
+            LadderFilterNode::<f32>::new(LadderType::HP24, Hz::new(1_500.0), Resonance::new(0.2));
         let out = render(node, 64, &[x], &[None, None, Some(lane)], |_| {});
         f64::from(out[0][at])
     };
@@ -249,14 +259,14 @@ fn an_svf_cutoff_step_lands_on_the_grid_point_after_it() {
     let response = |at: usize| -> f32 {
         let mut x = vec![0.0f32; 64];
         x[at] = 1.0;
-        let node = SvfFilterNode::<f32>::new(SvfType::LowPass, Hz(old), Q::new(0.707));
+        let node = SvfFilterNode::<f32>::new(SvfType::LowPass, Hz::new(old), Q::new(0.707));
         let out = render(node, 64, &[x], &[Some(step.clone()), None, None], |_| {});
         out[0][at]
     };
     let a3 = |freq: f64| {
         let controls = SvfControls {
             ty: SvfType::LowPass,
-            freq: Hz(freq),
+            freq: Hz::new(freq),
             q: Q::new(0.707),
             gain: Db::new(0.0),
         };
@@ -295,7 +305,7 @@ fn held_cells_render_alike_at_every_block_length() {
         let inputs = inputs.clone();
         Box::new(move |block| {
             render(
-                SvfFilterNode::<f32>::new(SvfType::LowPass, Hz(800.0), Q(1.2)),
+                SvfFilterNode::<f32>::new(SvfType::LowPass, Hz::new(800.0), Q::new(1.2)),
                 block,
                 &inputs,
                 &[None, None, None],
@@ -329,7 +339,7 @@ fn a_lane_step_is_in_the_render_within_one_segment() {
         x[at] = 1.0;
         let held = cutoff.map(|c| vec![c as f32; 64]);
         let lanes = [Some(held.unwrap_or_else(|| lane.clone())), None, None];
-        let node = SvfFilterNode::<f32>::new(SvfType::LowPass, Hz(old), Q(0.707));
+        let node = SvfFilterNode::<f32>::new(SvfType::LowPass, Hz::new(old), Q::new(0.707));
         let out = render(node, 64, &[x], &lanes, |_| {});
         f64::from(out[0][at])
     };
@@ -355,8 +365,11 @@ fn the_crossover_renders_alike_at_every_block_length_with_lanes() {
         Box::new(move |block| {
             let lanes = [Some(sweep(200.0, 1_500.0)), Some(sweep(2_500.0, 9_000.0))];
             render(
-                CrossoverNode::<f32>::new(ChannelLayout::STEREO, &[Hz(300.0), Hz(3_000.0)])
-                    .unwrap(),
+                CrossoverNode::<f32>::new(
+                    ChannelLayout::STEREO,
+                    &[Hz::new(300.0), Hz::new(3_000.0)],
+                )
+                .unwrap(),
                 block,
                 &inputs,
                 &lanes,
@@ -368,8 +381,11 @@ fn the_crossover_renders_alike_at_every_block_length_with_lanes() {
         let inputs = inputs.clone();
         Box::new(move |block| {
             render(
-                CrossoverNode::<f32>::new(ChannelLayout::STEREO, &[Hz(300.0), Hz(3_000.0)])
-                    .unwrap(),
+                CrossoverNode::<f32>::new(
+                    ChannelLayout::STEREO,
+                    &[Hz::new(300.0), Hz::new(3_000.0)],
+                )
+                .unwrap(),
                 block,
                 &inputs,
                 &[None, Some(sweep(2_500.0, 9_000.0))],
@@ -401,7 +417,7 @@ fn a_crossover_lane_step_is_held_to_the_next_grid_point_then_glides() {
         x[at] = 1.0;
         let held = cutoff.map(|c| vec![c as f32; 64]);
         let lanes = [Some(held.unwrap_or_else(|| lane.clone()))];
-        let node = CrossoverNode::<f32>::new(ChannelLayout::MONO, &[Hz(old)]).unwrap();
+        let node = CrossoverNode::<f32>::new(ChannelLayout::MONO, &[Hz::new(old)]).unwrap();
         let out = render(node, 64, &[x], &lanes, |_| {});
         f64::from(out[0][at])
     };

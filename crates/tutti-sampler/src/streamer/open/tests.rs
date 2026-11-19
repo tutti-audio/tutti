@@ -45,11 +45,11 @@ fn constant_file(value: f32) -> (tempfile::TempDir, PathBuf) {
 /// One block of the voice playing `reader` from beat 0, planar.
 fn first_block(reader: StreamReader<f32>) -> Vec<Vec<f32>> {
     let mut voice = prepared(
-        DiskVoice::from_reader(reader, VoiceWindow::from(Beat(0.0))),
+        DiskVoice::from_reader(reader, VoiceWindow::from(Beat::new(0.0))),
         SampleRate::of(RATE),
         64,
     );
-    let clock = MockTransport::rolling(Beat(0.0), Bpm::of(120.0));
+    let clock = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
     play(&mut voice, &clock, SampleRate::of(RATE), 64, 64)
 }
 
@@ -60,7 +60,7 @@ fn first_block(reader: StreamReader<f32>) -> Vec<Vec<f32>> {
 fn placement_keeps_the_range_contract() {
     use tutti_fixtures::{RangeContract, check_range_contract, check_range_serde};
     let c = RangeContract {
-        new: |raw| Placement::new(SamplePosition(raw)),
+        new: |raw| Placement::new(SamplePosition::new(raw)),
         get: |placement| placement.get().get(),
         of: None,
         valid: &[0.0, 0.5, 4_000.0, 1e12],
@@ -76,7 +76,7 @@ fn placement_keeps_the_range_contract() {
 fn a_fractional_start_opens_at_its_frame() {
     let (_dir, path) = constant_file(0.25);
     let mut streamer = manual();
-    let start = Placement::new(SamplePosition(4_000.7)).expect("a position");
+    let start = Placement::new(SamplePosition::new(4_000.7)).expect("a position");
     assert_eq!(start.frame(), 4_000);
     let opening = streamer.open(&path, start);
     let (_stream, reader) = settle(&mut streamer, opening).expect("the file opens");
@@ -124,11 +124,11 @@ fn a_ready_reader_has_registered_its_control_before_it_is_returned() {
     );
     let ring = Arc::clone(&reader.ring);
     let mut voice = prepared(
-        DiskVoice::from_reader(reader, VoiceWindow::from(Beat(0.0))),
+        DiskVoice::from_reader(reader, VoiceWindow::from(Beat::new(0.0))),
         SampleRate::of(RATE),
         64,
     );
-    let clock = MockTransport::rolling(Beat(0.0), Bpm::of(120.0));
+    let clock = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
     let _ = play(&mut voice, &clock, SampleRate::of(RATE), 64, 64);
     assert_eq!(ring.registered_readers(), 1, "the voice registers none");
 }

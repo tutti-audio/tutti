@@ -315,14 +315,14 @@ mod tests {
             attack: Seconds::new(attack),
             hold: Seconds::new(hold),
             release: Seconds::new(release),
-            range: Db(-80.0),
+            range: Db::new(-80.0),
             ..GateControls::DEFAULT
         }
     }
 
     fn with_range(c: GateControls, range: f64) -> GateControls {
         GateControls {
-            range: Db(range),
+            range: Db::new(range),
             ..c
         }
     }
@@ -530,11 +530,11 @@ mod tests {
     #[test]
     fn the_constructor_controls_reach_the_cells() {
         let c = GateControls {
-            threshold: Db(-35.0),
-            attack: Seconds(0.002),
-            hold: Seconds(0.03),
-            release: Seconds(0.25),
-            range: Db(-15.0),
+            threshold: Db::new(-35.0),
+            attack: Seconds::new(0.002),
+            hold: Seconds::new(0.03),
+            release: Seconds::new(0.25),
+            range: Db::new(-15.0),
             ..GateControls::DEFAULT
         };
         for node in [
@@ -690,7 +690,10 @@ mod tests {
         use tutti_fixtures::signal::{assert_close_f64, wide_signal};
         let x = wide_signal(128);
         let mut k = GateKernel::<f64>::new(BusTopology::MONO, KeySource::Own, KeyFilter::Off);
-        k.prepare(SampleRate::SR_48K, MaxBlock::of(tutti_units::Samples(128)));
+        k.prepare(
+            SampleRate::SR_48K,
+            MaxBlock::of(tutti_units::Samples::new(128)),
+        );
         let controls = GateControls {
             threshold: Db::new(-40.0),
             range: Db::new(-80.0),
