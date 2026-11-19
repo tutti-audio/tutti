@@ -11,7 +11,9 @@
 
 use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
 use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_dsp::{Glide, LadderBank, LadderControls, LadderDesign, LadderModel, LadderType, Lanes};
+use tutti_dsp::{
+    Glide, LadderBank, LadderBlend, LadderControls, LadderModel, LadderType, SimdLanes,
+};
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
 use tutti_units::{Drive, Hz, Resonance, SampleRate, Tail};
 
@@ -71,7 +73,7 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 /// Rendering allocates nothing.
 pub type LadderFilterNode<F> = KernelNode<LadderKernel<F>>;
 
-impl<F: Float + Lanes> LadderFilterNode<F> {
+impl<F: Float + SimdLanes> LadderFilterNode<F> {
     /// A mono ladder filter (1 in, 1 out) of `ladder_type` at `frequency`
     /// cutoff and `resonance`, with unity [`Drive`].
     ///
@@ -119,16 +121,16 @@ const GLIDE_STEPS: u32 = 16;
 /// The ladder as a [`Kernel`]: a [`LadderBank`] in the float `F` and the glide of the
 /// design (coefficients and drive) every channel shares.
 #[derive(Clone, Debug)]
-pub struct LadderKernel<F: Float + Lanes> {
+pub struct LadderKernel<F: Float + SimdLanes> {
     input: BusTopology,
     bank: LadderBank<F>,
     /// The design in flight; the first one after `prepare` lands at once.
-    design: Glide<LadderDesign<F>>,
+    design: Glide<LadderBlend<F>>,
     rate: SampleRate,
     landed: bool,
 }
 
-impl<F: Float + Lanes> LadderKernel<F> {
+impl<F: Float + SimdLanes> LadderKernel<F> {
     /// A filter on the bus `input`, its output where it is. Allocates the state. Its design
     /// until `prepare` is a placeholder at 48 kHz: an unprepared node renders nothing, and
     /// `prepare` designs for the rate it is given.
@@ -143,12 +145,12 @@ impl<F: Float + Lanes> LadderKernel<F> {
         }
     }
 
-    fn design(controls: &LadderControls, rate: SampleRate) -> LadderDesign<F> {
-        LadderDesign::from(&LadderModel::new(*controls, rate))
+    fn design(controls: &LadderControls, rate: SampleRate) -> LadderBlend<F> {
+        LadderBlend::from(&LadderModel::new(*controls, rate))
     }
 }
 
-impl<F: Float + Lanes> Kernel for LadderKernel<F> {
+impl<F: Float + SimdLanes> Kernel for LadderKernel<F> {
     type Float = F;
     type Set = LadderSet;
 

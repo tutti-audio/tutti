@@ -2,7 +2,7 @@ use super::*;
 use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_buffers::{Mono, MonoMut};
 
-/// `VbapGains::render_channel` over plain slices.
+/// `VbapGains::process_channel` over plain slices.
 fn render<F: Float>(
     glide: &Glide<VbapGains>,
     first: u32,
@@ -12,7 +12,7 @@ fn render<F: Float>(
     right: &[F],
     out: &mut [F],
 ) {
-    VbapGains::render_channel(
+    VbapGains::process_channel(
         glide,
         first,
         speaker,

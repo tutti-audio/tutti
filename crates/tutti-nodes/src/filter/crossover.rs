@@ -5,8 +5,8 @@
 use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{
-    CrossoverBank, CrossoverCoefficients, CrossoverControls, CrossoverError, CrossoverModel, Glide,
-    Lanes, MAX_SPLITS, fit_to_rate,
+    CrossoverBank, CrossoverControls, CrossoverDesign, CrossoverError, CrossoverModel, Glide,
+    MAX_SPLITS, SimdLanes, fit_to_rate,
 };
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
 use tutti_rt::Param;
@@ -104,7 +104,7 @@ impl Splits {
 /// `F` is the float of the graph it runs in, and of the sections.
 pub type CrossoverNode<F> = KernelNode<CrossoverKernel<F>>;
 
-impl<F: Float + Lanes> CrossoverNode<F> {
+impl<F: Float + SimdLanes> CrossoverNode<F> {
     /// A crossover over `layout` with one split at each of `frequencies`.
     ///
     /// # Errors
@@ -138,17 +138,17 @@ const GLIDE_STEPS: u32 = 16;
 /// the sections share their states and a blend of two splits' integrator gains is a split,
 /// so the bands stay a Butterworth set at every frame.
 #[derive(Clone, Debug)]
-pub struct CrossoverKernel<F: Float + Lanes> {
+pub struct CrossoverKernel<F: Float + SimdLanes> {
     input: BusTopology,
     bank: CrossoverBank<F>,
     model: CrossoverModel,
     /// The coefficients in flight; the first design after `prepare` or `reset` lands at once.
-    coefficients: Glide<CrossoverCoefficients>,
+    coefficients: Glide<CrossoverDesign>,
     landed: bool,
     rate: SampleRate,
 }
 
-impl<F: Float + Lanes> CrossoverKernel<F> {
+impl<F: Float + SimdLanes> CrossoverKernel<F> {
     /// A crossover of `bands` bands on the bus `input`, each band where it is. Allocates the
     /// state. Its model until the first retarget is `controls` at 48 kHz: an unprepared node
     /// renders nothing, and the first block designs for the rate `prepare` was given.
@@ -170,7 +170,7 @@ impl<F: Float + Lanes> CrossoverKernel<F> {
         Ok(Self {
             input,
             bank: CrossoverBank::new(input.layout()),
-            coefficients: Glide::landed(model.coefficients()).by(GLIDE_STEPS),
+            coefficients: Glide::landed(model.design()).by(GLIDE_STEPS),
             model,
             landed: false,
             rate,
@@ -183,7 +183,7 @@ impl<F: Float + Lanes> CrossoverKernel<F> {
     }
 }
 
-impl<F: Float + Lanes> Kernel for CrossoverKernel<F> {
+impl<F: Float + SimdLanes> Kernel for CrossoverKernel<F> {
     type Float = F;
     type Set = CrossoverSet;
 
@@ -215,7 +215,7 @@ impl<F: Float + Lanes> Kernel for CrossoverKernel<F> {
 
     fn retarget(&mut self, controls: &CrossoverControls) {
         self.model.design_into(controls, self.rate);
-        self.coefficients.aim(self.model.coefficients());
+        self.coefficients.aim(self.model.design());
         if !self.landed {
             self.coefficients.settle();
             self.landed = true;

@@ -373,7 +373,7 @@ impl<F: Float> SessionNode<F> for tutti_midi_runtime::MidiIngestNode {
 
 /// The SoundFont player as a graph node.
 #[cfg(feature = "soundfont")]
-impl<F: Float + tutti_dsp::Lanes> SessionNode<F> for tutti_soundfont::SoundFontUnit<F> {
+impl<F: Float + tutti_dsp::SimdLanes> SessionNode<F> for tutti_soundfont::SoundFontUnit<F> {
     fn reclaimer(_: &()) -> Reclaims {
         Reclaims::Nothing
     }

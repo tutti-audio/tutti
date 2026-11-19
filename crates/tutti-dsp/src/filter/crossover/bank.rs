@@ -1,17 +1,17 @@
 //! [`CrossoverBank`]: one Linkwitz-Riley band tree per channel, all channels at one glide of
-//! [`CrossoverCoefficients`], over buffers views.
+//! [`CrossoverDesign`], over buffers views.
 
 use tutti_buffers::{ChannelLayout, MAX_CHANNELS};
 use tutti_buffers::{Float, Planes, PlanesMut};
 
-use super::CrossoverCoefficients;
+use super::CrossoverDesign;
 use super::CrossoverState;
 use super::bands::MAX_BANDS;
-use super::coefficients::Narrowed;
-use crate::{Glide, Lanes};
+use super::design::Narrowed;
+use crate::{Glide, SimdLanes};
 
 /// The state of a crossover per channel, every channel read through one glide of
-/// [`CrossoverCoefficients`]. The width is fixed when it is built.
+/// [`CrossoverDesign`]. The width is fixed when it is built.
 ///
 /// A set of `bands` bands makes `bands * width` output planes, band-major: plane
 /// `band * width + channel` is the channel's band. A split that moves glides: each frame
@@ -19,11 +19,11 @@ use crate::{Glide, Lanes};
 /// moves linearly), so the bands are a Butterworth set at every frame, and the sections'
 /// words are bounded for any motion (see the state's docs).
 #[derive(Clone, Debug)]
-pub struct CrossoverBank<F: Float + Lanes> {
+pub struct CrossoverBank<F: Float + SimdLanes> {
     state: Box<[CrossoverState<F>]>,
 }
 
-impl<F: Float + Lanes> CrossoverBank<F> {
+impl<F: Float + SimdLanes> CrossoverBank<F> {
     /// A silent bank `width` channels wide. Allocates: build it on the control side.
     #[must_use]
     pub fn new(width: ChannelLayout) -> Self {
@@ -47,7 +47,7 @@ impl<F: Float + Lanes> CrossoverBank<F> {
     /// past the output's, is not touched. No allocation.
     pub fn process(
         &mut self,
-        coefficients: &mut Glide<CrossoverCoefficients>,
+        coefficients: &mut Glide<CrossoverDesign>,
         input: Planes<'_, F>,
         mut output: PlanesMut<'_, '_, F>,
     ) {
@@ -90,7 +90,7 @@ impl<F: Float + Lanes> CrossoverBank<F> {
 
 /// Frame `i` of a channel's bands: `x` through `state` at `c`, into the planes it reaches.
 #[inline]
-fn put<F: Float + Lanes>(
+fn put<F: Float + SimdLanes>(
     state: &mut CrossoverState<F>,
     c: &Narrowed<F>,
     x: F,

@@ -1,6 +1,6 @@
 //! The state of a Linkwitz-Riley crossover tree: [`CrossoverState`], the sections' words of one
 //! channel in the graph's float `F`, run with
-//! [`CrossoverCoefficients`](super::CrossoverCoefficients) narrowed to it (a
+//! [`CrossoverDesign`](super::CrossoverDesign) narrowed to it (a
 //! [`CrossoverBank`](super::CrossoverBank) holds one per channel).
 //!
 //! Each split is a low-pass and a high-pass of two cascaded 2nd-order Butterworth sections
@@ -77,8 +77,8 @@
 use tutti_buffers::Float;
 
 use super::bands::{MAX_BANDS, MAX_SPLITS};
-use super::coefficients::{Gains, Narrowed};
-use crate::Lanes;
+use super::design::{Gains, Narrowed};
+use crate::SimdLanes;
 use crate::filter::svf_taps;
 
 /// A section's two state words, `[s1, s2]`: the integrators' trapezoidal memories.
@@ -114,7 +114,7 @@ impl<F: Float> Taps<F> {
     }
 }
 
-impl<F: Float + Lanes> Section<F> {
+impl<F: Float + SimdLanes> Section<F> {
     /// One sample at the coefficients `c`: the integrator step of
     /// [`svf_step`](crate::svf_step), with the taps a split's low-pass, high-pass and all-pass
     /// are mixed from.
@@ -132,7 +132,7 @@ impl<F: Float + Lanes> Section<F> {
 }
 
 /// The state of one channel of a crossover tree: the sections' words, apart from the
-/// coefficients that run them ([`CrossoverCoefficients`](super::CrossoverCoefficients)).
+/// coefficients that run them ([`CrossoverDesign`](super::CrossoverDesign)).
 #[derive(Clone, Copy, Debug)]
 pub struct CrossoverState<F> {
     /// Per split, the first stage of its low-pass and high-pass, which share the state.
@@ -155,7 +155,7 @@ impl<F: Float> Default for CrossoverState<F> {
     }
 }
 
-impl<F: Float + Lanes> CrossoverState<F> {
+impl<F: Float + SimdLanes> CrossoverState<F> {
     /// One sample through the tree `c` describes: its bands, lowest first, in the first
     /// entries of the result (the rest are 0).
     #[inline]

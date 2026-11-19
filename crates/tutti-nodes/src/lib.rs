@@ -5,7 +5,7 @@
 //! Every node here is a graph node (`tutti_graph::Node`), and a node file holds
 //! only the adapter: shape, prepare, process, params and fork. The algorithm each
 //! one runs is a pure function or struct over slices in `tutti-dsp`: the filter
-//! coefficients and steps (`SvfCoeffs`, `LadderCoeffs`, `CrossoverModel`), the dynamics
+//! coefficients and steps (`SvfDesign`, `LadderDesign`, `CrossoverModel`), the dynamics
 //! curves and recurrences, `Convolver`, `DelayLine` and the waveshaping curves. Build one, insert it
 //! into a graph (`tutti_graph::{GraphBuilder, Editor}`), wire it, and the graph
 //! prepares it at the device rate and renders it. Inserting a node hands back its
@@ -85,7 +85,7 @@
 //! `Waveform`, carries no suffix, because it is not a node and
 //! can be used on its own. The algorithms are `tutti-dsp`'s (`tutti_dsp::DelayLine`,
 //! `tutti_dsp::CrossoverBank`, …); this crate re-exports only the types in a node's
-//! signature: `SvfType`, `LadderType`, `Lanes`, `CrossoverError`,
+//! signature: `SvfType`, `LadderType`, `SimdLanes`, `CrossoverError`,
 //! `InterpolationMode`, `OversamplingFactor` and `ShapeKind`.
 //!
 //! Nothing in this crate can fail: there is no `Error` type, and a node is ready
@@ -202,9 +202,9 @@
 //! - Filters: [`SvfFilterNode`] ([`SvfType`]), [`LadderFilterNode`]
 //!   ([`LadderType`]), [`EqBandNode`], [`CutFilterNode`] ([`CutResponse`]), [`BellFilterNode`],
 //!   [`TiltFilterNode`], [`EnvelopeFilterNode`]; the coefficient solvers
-//!   [`SvfCoeffs::new`](tutti_dsp::SvfCoeffs::new) and
-//!   [`LadderCoeffs::new`](tutti_dsp::LadderCoeffs::new); a node runs in the float of the
-//!   graph it is inserted in (`tutti_buffers::Float` with [`Lanes`]).
+//!   [`SvfDesign::new`](tutti_dsp::SvfDesign::new) and
+//!   [`LadderDesign::new`](tutti_dsp::LadderDesign::new); a node runs in the float of the
+//!   graph it is inserted in (`tutti_buffers::Float` with [`SimdLanes`]).
 //! - Crossover: [`CrossoverNode`], over `tutti_dsp::CrossoverBank`, a 2 to 6 band
 //!   Linkwitz-Riley 4th-order split (solved on the stream's 16-frame grid), each
 //!   crossover frequency an indexed [`Cutoff`](tutti_units::UnitParam::Cutoff) param, with
@@ -317,10 +317,10 @@ pub use filter::{
 pub use tutti_dsp::EnvelopeFilterControls;
 pub use tutti_dsp::{ButterworthOrder, CutResponse};
 // The types in the filter nodes' signatures stay reachable from here; the
-// algorithms behind them (`SvfCoeffs`, `LadderCoeffs`, `CrossoverModel`) are
+// algorithms behind them (`SvfDesign`, `LadderDesign`, `CrossoverModel`) are
 // `tutti-dsp`'s only.
 pub use tutti_dsp::{
-    CrossoverControls, CrossoverError, LadderControls, LadderType, Lanes, SvfControls, SvfType,
+    CrossoverControls, CrossoverError, LadderControls, LadderType, SimdLanes, SvfControls, SvfType,
 };
 
 mod dynamics;
@@ -384,7 +384,9 @@ mod reverb_plate;
 pub use reverb_plate::{PlateKernel, PlateReverbConfig, PlateReverbNode, PlateSet};
 
 // The banks' controls that sit in a node's signature.
-pub use tutti_dsp::{FdnControls, FdnLayout, FreeverbControls, MaxDecay, PlateControls};
+pub use tutti_dsp::{
+    FdnControls, FdnLayout, FreeverbControls, FreezeMode, MaxDecay, PlateControls,
+};
 
 // The spatial panners: VBAP speaker panning and binaural HRTF rendering.
 mod spatial;

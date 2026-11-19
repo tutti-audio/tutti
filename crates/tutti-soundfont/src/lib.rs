@@ -212,7 +212,7 @@ use tutti_ump::{Attribute, MidiChannel, NoteNumber, NoteVelocity, U7, Ump, Voice
 use tutti_units::{SampleRate, Seconds, Tail};
 
 use tutti_buffers::Float;
-use tutti_dsp::Lanes;
+use tutti_dsp::SimdLanes;
 
 use crate::player::{Heard, Plane, Planes, Player};
 use crate::render::Render;
@@ -312,7 +312,7 @@ pub const SYNTH_BLOCK_FRAMES: usize = Render::BLOCK;
 /// player at the graph's rate (control thread, keeping the presets and
 /// channel state), and a rate outside 16 to 192 kHz leaves it at its own. The
 /// rate is the graph's: nothing here names one.
-pub struct SoundFontUnit<F: Float + Lanes> {
+pub struct SoundFontUnit<F: Float + SimdLanes> {
     player: Player<F>,
     /// The longest the unit can keep sounding after its last key is up, in
     /// seconds, if that is bounded: see [`Self::shape_tail`].
@@ -325,7 +325,7 @@ pub struct SoundFontUnit<F: Float + Lanes> {
     planes: [Vec<F>; Plane::COUNT],
 }
 
-impl<F: Float + Lanes> std::fmt::Debug for SoundFontUnit<F> {
+impl<F: Float + SimdLanes> std::fmt::Debug for SoundFontUnit<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SoundFontUnit")
             .field("player", &self.player)
@@ -334,7 +334,7 @@ impl<F: Float + Lanes> std::fmt::Debug for SoundFontUnit<F> {
     }
 }
 
-impl<F: Float + Lanes> SoundFontUnit<F> {
+impl<F: Float + SimdLanes> SoundFontUnit<F> {
     fn from_player(player: Player<F>, buffers: usize) -> Self {
         Self {
             sample_rate: player.sample_rate(),
@@ -521,7 +521,7 @@ impl<F: Float + Lanes> SoundFontUnit<F> {
     }
 }
 
-impl<F: Float + Lanes> Clone for SoundFontUnit<F> {
+impl<F: Float + SimdLanes> Clone for SoundFontUnit<F> {
     fn clone(&self) -> Self {
         Self {
             player: self.player.clone(),

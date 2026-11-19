@@ -193,7 +193,7 @@ pub struct StreamingResampler<F: FftFloat = f32> {
     /// Reusable scratch so the per-block path does not allocate.
     in_scratch: Vec<Vec<F>>,
     /// The converter's output, `output_frames_max()` per channel, written
-    /// by `process_into_buffer`.
+    /// by `process`.
     out_scratch: Vec<Vec<F>>,
 }
 
@@ -374,7 +374,7 @@ impl<F: FftFloat> StreamingResampler<F> {
             }
             // Each scratch plane is `need` frames in and `output_frames_max()` out, and `new`
             // checked the width against `ChannelLayout`, so both views build.
-            let produced_len = self.inner.process_into_buffer(
+            let produced_len = self.inner.process(
                 Planes::from_vecs(&self.in_scratch).expect("BUG: equal planes of a checked width"),
                 PlanesMut::from_vecs(&mut self.out_scratch)
                     .expect("BUG: equal planes of a checked width"),

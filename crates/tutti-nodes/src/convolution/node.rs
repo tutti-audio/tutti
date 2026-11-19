@@ -680,7 +680,7 @@ impl<F: FftFloat + Lerp> ConvolverNode<F> {
             Engine::PerChannel(convolvers) => match &self.fold {
                 None => {
                     for (c, convolver) in convolvers.iter_mut().enumerate() {
-                        convolver.process_block(
+                        convolver.process(
                             Mono::new(input(c)),
                             MonoMut::new(&mut outputs.get(c)[at..at + size]),
                         );
@@ -707,7 +707,7 @@ impl<F: FftFloat + Lerp> ConvolverNode<F> {
                         self.mono[..size].fill(F::ZERO);
                     }
                     for (c, convolver) in convolvers.iter_mut().enumerate() {
-                        convolver.process_block(
+                        convolver.process(
                             Mono::new(&self.mono[..size]),
                             MonoMut::new(&mut outputs.get(c)[at..at + size]),
                         );

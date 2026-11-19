@@ -5,8 +5,8 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::{Float, Planes, PlanesMut};
 
 use super::kernel::{SvfCoefficients, svf_step};
-use crate::control::lane_group;
-use crate::{Glide, Lanes};
+use crate::control_rate::lane_group;
+use crate::{Glide, SimdLanes};
 
 /// The state of an SVF per channel: Simper's trapezoidal integrator pair
 /// `[ic1eq, ic2eq]` in the float `F`, every channel read through one shared
@@ -23,7 +23,7 @@ pub struct SvfBank<F> {
     state: Box<[[F; 2]]>,
 }
 
-impl<F: Float + Lanes> SvfBank<F> {
+impl<F: Float + SimdLanes> SvfBank<F> {
     /// A silent bank `width` channels wide. Allocates: build it on the control side.
     #[must_use]
     pub fn new(width: ChannelLayout) -> Self {
@@ -91,7 +91,7 @@ impl<F: Float + Lanes> SvfBank<F> {
 /// states in registers: the frames the glide blends at a coefficient set per frame, the
 /// rest at its target.
 #[inline]
-fn group<F: Float + Lanes, const N: usize>(
+fn group<F: Float + SimdLanes, const N: usize>(
     glide: &Glide<SvfCoefficients<F>>,
     state: &mut [[F; 2]],
     first: usize,

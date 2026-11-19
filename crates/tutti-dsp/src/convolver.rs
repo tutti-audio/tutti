@@ -58,7 +58,7 @@
 //! partition.** Only the newest partition's multiply, the inverse transform
 //! and the overlap-add need the input that completes a block; the products of
 //! the older partitions with the older history are fixed as soon as the
-//! previous block's transform is done. [`Convolver::process_block`] therefore
+//! previous block's transform is done. [`Convolver::process`] therefore
 //! sums them a few partitions per call, in proportion to the frames consumed,
 //! finishing a call's length before the next block's transform. Each bin adds
 //! its partitions in ascending order from zero, so any split of the work into
@@ -74,8 +74,8 @@ use tutti_buffers::{Float, Mono, MonoMut, Sample};
 use tutti_units::Samples;
 
 use crate::Complex;
-use crate::convert::convert_equal;
 use crate::fft::StagedRealFft;
+use crate::sample_convert::convert_equal;
 
 /// Default FFT block size when the caller doesn't pick one. A power of two,
 /// as every partition size here is.
@@ -601,7 +601,7 @@ impl<F: FftFloat> LevelState<F> {
 /// Composes the levels of the IR's [`IrSpectra`], which it shares (a `Clone`
 /// shares them, and so does [`fresh`](Self::fresh)), with its own running
 /// state, all sized at construction. The hot path (`process_sample`,
-/// `process_block`) never allocates.
+/// `process`) never allocates.
 #[derive(Clone)]
 pub struct Convolver<F: FftFloat = f32> {
     spectra: Arc<IrSpectra<F>>,
@@ -704,7 +704,7 @@ impl<F: FftFloat> Convolver<F> {
     #[inline]
     pub fn process_sample(&mut self, input: F) -> F {
         let mut out = [F::ZERO];
-        self.process_block(Mono::new(&[input]), MonoMut::new(&mut out));
+        self.process(Mono::new(&[input]), MonoMut::new(&mut out));
         out[0]
     }
 
@@ -718,7 +718,7 @@ impl<F: FftFloat> Convolver<F> {
     /// before the output frame that needs it. A call costs the transforms
     /// whose frames it contains, the share of every level's older partitions
     /// its length is due, and the copy.
-    pub fn process_block(&mut self, input: Mono<'_, F>, mut output: MonoMut<'_, F>) {
+    pub fn process(&mut self, input: Mono<'_, F>, mut output: MonoMut<'_, F>) {
         let (input, output) = (input.samples(), output.samples_mut());
         debug_assert_eq!(input.len(), output.len());
         let Self {

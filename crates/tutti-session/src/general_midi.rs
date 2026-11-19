@@ -16,7 +16,7 @@
 //! the unit's outputs itself, through [`Graph::connect`](crate::Graph::connect).
 
 use tutti_buffers::{BusTopology, Float};
-use tutti_dsp::{Lanes, Lerp};
+use tutti_dsp::{Lerp, SimdLanes};
 use tutti_nodes::{BusStripNode, FreeverbNode, ModDelayNode};
 use tutti_soundfont::SoundFontUnit;
 use tutti_units::Amplitude;
@@ -39,14 +39,14 @@ use crate::{InstrumentHandle, Key, OutPort, ParamTarget, RemoveError, Session, S
 /// here: `session.set(gm.out().mode().to(NodeMode::Muted))`. A send's level is the font's
 /// and the channel's (CC 91 and CC 93), not a gain's.
 #[derive(Debug)]
-pub struct GeneralMidi<F: Float + Lanes + Lerp> {
+pub struct GeneralMidi<F: Float + SimdLanes + Lerp> {
     instrument: InstrumentHandle<SoundFontUnit<F>>,
     chorus: Key<ModDelayNode<F>>,
     reverb: Key<FreeverbNode<F>>,
     strip: Key<BusStripNode>,
 }
 
-impl<F: Float + Lanes + Lerp> GeneralMidi<F> {
+impl<F: Float + SimdLanes + Lerp> GeneralMidi<F> {
     /// The unit, played through its handle.
     #[must_use]
     pub fn instrument(&self) -> &InstrumentHandle<SoundFontUnit<F>> {
@@ -114,7 +114,7 @@ impl<F: Float + Lanes + Lerp> GeneralMidi<F> {
 
 impl<K: crate::AppKey, C: crate::Clock> Session<K, C>
 where
-    C::Float: Lanes + Lerp,
+    C::Float: SimdLanes + Lerp,
     ModDelayNode<C::Float>: SessionNode<C::Float>,
     FreeverbNode<C::Float>: SessionNode<C::Float>,
 {

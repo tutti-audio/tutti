@@ -1,12 +1,12 @@
-use super::super::CrossoverCoefficients;
-use super::super::coefficients::Tpt;
+use super::super::CrossoverDesign;
+use super::super::design::Tpt;
 use super::*;
 use crate::CrossoverModel;
 use crate::testing::{amplitude_at, lock_in};
 use tutti_units::{Hz, SampleRate};
 
 /// One sample through `state` at `c`.
-fn tick(state: &mut CrossoverState<f64>, c: &CrossoverCoefficients, x: f64) -> [f64; MAX_BANDS] {
+fn tick(state: &mut CrossoverState<f64>, c: &CrossoverDesign, x: f64) -> [f64; MAX_BANDS] {
     state.tick(&c.narrowed(), x)
 }
 
@@ -42,7 +42,7 @@ fn bands_at(freqs: &[f64], hz: f64) -> (Vec<(f64, f64)>, f64) {
     let freqs: Vec<Hz> = freqs.iter().map(|&f| Hz::new(f)).collect();
     let model = CrossoverModel::new(&freqs, SampleRate::of(RATE)).unwrap();
     let mut state = CrossoverState::<f64>::default();
-    let c = model.coefficients();
+    let c = model.design();
     let x = unit_sine(hz, RATE, SETTLE + WINDOW);
     let nb = model.bands();
     let mut bands = vec![Vec::with_capacity(WINDOW); nb];
@@ -170,13 +170,13 @@ fn max_gain() -> f64 {
 
 /// The two ends of the range: a split at the floor (1 Hz, `g` of about 1e-4, a section
 /// that is nearly a Jordan block) and at the cap (`g` of about 318, a pole near -1).
-fn ends(splits: usize) -> [CrossoverCoefficients; 2] {
+fn ends(splits: usize) -> [CrossoverDesign; 2] {
     let at = |lo: f64, hi: f64| {
         let f: Vec<Hz> = [lo, hi][..splits].iter().map(|&f| Hz::new(f)).collect();
         // Strictly increasing and under Nyquist as `new` checks; `design_into` clamps to the cap.
         CrossoverModel::new(&f, SampleRate::of(RATE))
             .unwrap()
-            .coefficients()
+            .design()
     };
     [at(1.0, 2.0), at(23_951.0, 23_952.0)]
 }
@@ -259,7 +259,7 @@ fn a_section_at_zero_input_never_gains_energy_under_a_switching_split() {
     for i in 0..200_000usize {
         rng = rng.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
         let g = 10f64.powf(f64::from(rng >> 8) / f64::from(1u32 << 24) * 7.0 - 4.5);
-        let random = CrossoverCoefficients {
+        let random = CrossoverDesign {
             bands: 2,
             split: [Tpt::new(g); crate::MAX_SPLITS],
         };
@@ -340,7 +340,7 @@ fn a_held_split_rings_out_by_the_time_its_matrix_gives() {
     }
     let held = CrossoverModel::new(&[Hz::new(1_000.0)], SampleRate::of(RATE))
         .unwrap()
-        .coefficients();
+        .design();
     for _ in 0..n {
         state.tick(&held.narrowed(), 0.0);
     }

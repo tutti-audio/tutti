@@ -270,7 +270,7 @@ fn a_hostile_control_still_gives_a_stable_model() {
             },
             rate,
         );
-        let c = m.coeffs();
+        let c = m.design();
         assert!(
             [c.g, c.k, c.d, c.a2, c.a3, c.m0, c.m1, c.m2]
                 .iter()

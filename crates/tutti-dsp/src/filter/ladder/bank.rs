@@ -1,5 +1,5 @@
 //! [`LadderBank`]: one four-stage ladder per channel, all channels at one
-//! [`LadderDesign`], over buffers views.
+//! [`LadderBlend`], over buffers views.
 
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::{Float, Planes, PlanesMut};
@@ -7,33 +7,33 @@ use tutti_units::Real;
 
 use super::kernel::{LadderCoefficients, ladder_step};
 use super::{LadderModel, LadderType};
-use crate::control::lane_group;
+use crate::control_rate::lane_group;
 use crate::design::along;
-use crate::{Glide, Lanes, Lerp};
+use crate::{Glide, Lerp, SimdLanes};
 
 /// What a ladder's glide blends: the coefficients and the drive, with the tap taken as the
 /// output, in the arithmetic `F` the bank runs in. A blend keeps the target's tap, so a type
 /// changes at once.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct LadderDesign<F: Float + Lanes> {
+pub struct LadderBlend<F: Float + SimdLanes> {
     coefficients: LadderCoefficients<F>,
     drive: F,
     ty: LadderType,
 }
 
-impl<F: Float + Lanes> From<&LadderModel> for LadderDesign<F> {
+impl<F: Float + SimdLanes> From<&LadderModel> for LadderBlend<F> {
     /// The model's own coefficients and drive ([`LadderModel::new`] sanitises the controls
     /// first), narrowed once to `F`.
     fn from(model: &LadderModel) -> Self {
         Self {
-            coefficients: LadderCoefficients::from(model.coeffs()),
+            coefficients: LadderCoefficients::from(model.design()),
             drive: F::from_unit(model.drive()),
             ty: model.ladder_type(),
         }
     }
 }
 
-impl<F: Float + Lanes> Lerp for LadderDesign<F> {
+impl<F: Float + SimdLanes> Lerp for LadderBlend<F> {
     /// The coefficients and the drive blended linearly, `t = k / n` in `F`: an interpolated
     /// set is only ever used for one sample and never stored.
     #[inline]
@@ -48,7 +48,7 @@ impl<F: Float + Lanes> Lerp for LadderDesign<F> {
 }
 
 /// The state of a ladder per channel: its four stage words in the float `F`, every channel
-/// read through one shared [`LadderDesign`].
+/// read through one shared [`LadderBlend`].
 ///
 /// The width is fixed when it is built. [`process`](Self::process) runs a block of audio
 /// through it while the design glides toward its target and then holds. Channels run in groups
@@ -59,7 +59,7 @@ pub struct LadderBank<F> {
     state: Box<[[F; 4]]>,
 }
 
-impl<F: Float + Lanes> LadderBank<F> {
+impl<F: Float + SimdLanes> LadderBank<F> {
     /// A silent bank `width` channels wide. Allocates: build it on the control side.
     #[must_use]
     pub fn new(width: ChannelLayout) -> Self {
@@ -82,7 +82,7 @@ impl<F: Float + Lanes> LadderBank<F> {
     /// group reads the design once per frame. No allocation.
     pub fn process(
         &mut self,
-        design: &mut Glide<LadderDesign<F>>,
+        design: &mut Glide<LadderBlend<F>>,
         input: Planes<'_, F>,
         mut output: PlanesMut<'_, '_, F>,
     ) {
@@ -127,8 +127,8 @@ impl<F: Float + Lanes> LadderBank<F> {
 /// states in registers: the frames the glide blends at a design per frame, the rest at its
 /// target.
 #[inline]
-fn group<F: Float + Lanes, const N: usize>(
-    glide: &Glide<LadderDesign<F>>,
+fn group<F: Float + SimdLanes, const N: usize>(
+    glide: &Glide<LadderBlend<F>>,
     state: &mut [[F; 4]],
     first: usize,
     input: &Planes<'_, F>,

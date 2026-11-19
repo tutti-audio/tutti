@@ -5,6 +5,6 @@ mod bank;
 mod kernel;
 mod model;
 
-pub use bank::{LadderBank, LadderDesign};
-pub use kernel::{LadderCoefficients, LadderCoeffs, LadderType, ladder_step};
+pub use bank::{LadderBank, LadderBlend};
+pub use kernel::{LadderCoefficients, LadderDesign, LadderType, ladder_step};
 pub use model::{LadderControls, LadderModel};

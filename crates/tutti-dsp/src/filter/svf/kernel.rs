@@ -7,7 +7,7 @@
 use tutti_buffers::Float;
 
 use crate::design::{along, prewarp};
-use crate::{Complex64, Lanes, Lerp};
+use crate::{Complex64, Lerp, SimdLanes};
 use tutti_units::{Db, Hz, Q, SampleRate};
 
 /// Which response the state-variable filter presents.
@@ -48,14 +48,15 @@ pub enum SvfType {
     HighShelf,
 }
 
-/// Pure SVF coefficient set computed from filter parameters.
+/// The SVF design: the coefficient set solved in `f64` from filter parameters, before it is
+/// narrowed to the [`SvfCoefficients`] a step runs.
 ///
 /// The per-sample recurrence these coefficients feed is
 /// `v3 = v0 - ic2; v1 = ic1 + (a2*v3 - d*ic1); v2 = ic2 + (a2*ic1 + a3*v3);
 /// ic1 = 2*v1 - ic1; ic2 = 2*v2 - ic2; y = m0*v0 + m1*v1 + m2*v2`
 /// (Simper's trapezoidal SVF, with `a1 = 1 - d`).
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct SvfCoeffs {
+pub struct SvfDesign {
     /// The prewarped integrator gain, `tan(pi * fc / sr)` (a shelf's divided or
     /// multiplied by `sqrt(A)`): where the response's frequency axis sits.
     pub g: f64,
@@ -78,7 +79,7 @@ pub struct SvfCoeffs {
     pub m2: f64,
 }
 
-impl SvfCoeffs {
+impl SvfDesign {
     /// The largest gain, in dB either way, [`new`](Self::new) solves for. A
     /// gain further out is this one: 200 dB is a factor of 10^10 in
     /// amplitude, past anything audible, and keeps every coefficient finite.
@@ -97,7 +98,7 @@ impl SvfCoeffs {
         q: impl Into<Q>,
         gain_db: impl Into<Db>,
         sample_rate: impl Into<SampleRate>,
-    ) -> SvfCoeffs {
+    ) -> SvfDesign {
         let (freq, q, gain_db) = (freq.into(), q.into().get(), gain_db.into());
         let sample_rate = sample_rate.into();
         // `tan` diverges at Nyquist itself, so the cutoff stops just short of it.
@@ -146,7 +147,7 @@ impl SvfCoeffs {
             SvfType::HighShelf => (a * a, k * (1.0 - a) * a, 1.0 - a * a),
         };
 
-        SvfCoeffs {
+        SvfDesign {
             g,
             k,
             d,
@@ -175,9 +176,9 @@ impl SvfCoeffs {
 /// One set serves every channel of a node: the controls are one linked surface, so
 /// widening replicates only the integrator state. The fields are named, so a set
 /// built by hand (the lane bank's, one cutoff per lane) cannot swap two of them;
-/// [`SvfCoeffs`] solves them from the controls.
+/// [`SvfDesign`] solves them from the controls.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct SvfCoefficients<L: Lanes> {
+pub struct SvfCoefficients<L: SimdLanes> {
     /// `1 - a1` for `a1 = 1 / (1 + g (g + k))`: `g (g + k) / (1 + g (g + k))`, stored as the
     /// small term it is, so it keeps its relative precision at a low cutoff.
     pub d: L,
@@ -193,9 +194,9 @@ pub struct SvfCoefficients<L: Lanes> {
     pub m2: L,
 }
 
-impl<F: Float + Lanes> From<&SvfCoeffs> for SvfCoefficients<F> {
+impl<F: Float + SimdLanes> From<&SvfDesign> for SvfCoefficients<F> {
     /// The solve's `f64` set narrowed once to `F`: the one crossing of an SVF design.
-    fn from(c: &SvfCoeffs) -> Self {
+    fn from(c: &SvfDesign) -> Self {
         let [d, a2, a3, m0, m1, m2] = [c.d, c.a2, c.a3, c.m0, c.m1, c.m2].map(F::from_design);
         Self {
             d,
@@ -208,15 +209,15 @@ impl<F: Float + Lanes> From<&SvfCoeffs> for SvfCoefficients<F> {
     }
 }
 
-impl<F: Float + Lanes> From<&super::SvfModel> for SvfCoefficients<F> {
+impl<F: Float + SimdLanes> From<&super::SvfModel> for SvfCoefficients<F> {
     /// The model's own coefficients ([`SvfModel::new`](super::SvfModel::new) sanitises the
     /// controls first), narrowed once to `F`.
     fn from(model: &super::SvfModel) -> Self {
-        Self::from(model.coeffs())
+        Self::from(model.design())
     }
 }
 
-impl<F: Float + Lanes> Lerp for SvfCoefficients<F> {
+impl<F: Float + SimdLanes> Lerp for SvfCoefficients<F> {
     /// Each coefficient blended linearly, `t = k / n` in `F`: an interpolated set is only
     /// ever used for one sample and never stored.
     #[inline]
@@ -242,10 +243,10 @@ impl<F: Float + Lanes> Lerp for SvfCoefficients<F> {
 /// across-channel layout only pays once a channel-inner loop is explicitly
 /// vectorised, which this one is not.
 ///
-/// Written once over [`Lanes`], so the polysynth's lane bank runs this step on eight
+/// Written once over [`SimdLanes`], so the polysynth's lane bank runs this step on eight
 /// voices at a time.
 #[inline(always)]
-pub fn svf_step<L: Lanes>(c: &SvfCoefficients<L>, s: &mut [L; 2], v0: L) -> L {
+pub fn svf_step<L: SimdLanes>(c: &SvfCoefficients<L>, s: &mut [L; 2], v0: L) -> L {
     let [v1, v2] = svf_taps([c.d, c.a2, c.a3], s, v0);
     c.m0 * v0 + c.m1 * v1 + c.m2 * v2
 }
@@ -253,7 +254,7 @@ pub fn svf_step<L: Lanes>(c: &SvfCoefficients<L>, s: &mut [L; 2], v0: L) -> L {
 /// The integrator coefficients `[d, a2, a3]` of a trapezoidal state-variable filter at the
 /// prewarped gain `g = tan(pi fc / fs)` and the damping `k = 1 / Q`: with Simper's `a1 = 1 /
 /// (1 + g (g + k))`, `d = 1 - a1 = g (g + k) / (1 + g (g + k))`, `a2 = g a1` and `a3 = g a2`.
-/// The one solve of [`SvfCoeffs`] and the crossover's sections.
+/// The one solve of [`SvfDesign`] and the crossover's sections.
 pub(crate) fn integrator_gains(g: f64, k: f64) -> [f64; 3] {
     let h = g * (g + k);
     let a1 = 1.0 / (1.0 + h);
@@ -272,7 +273,7 @@ pub(crate) fn integrator_gains(g: f64, k: f64) -> [f64; 3] {
 /// ulp (`a3 v3` is `0.1` ulp at 5 Hz and 192 kHz in `f32`), while the sum of the terms keeps
 /// its relative precision and rounds into the state once.
 #[inline(always)]
-pub(crate) fn svf_taps<L: Lanes>([d, a2, a3]: [L; 3], s: &mut [L; 2], v0: L) -> [L; 2] {
+pub(crate) fn svf_taps<L: SimdLanes>([d, a2, a3]: [L; 3], s: &mut [L; 2], v0: L) -> [L; 2] {
     let [ic1eq, ic2eq] = *s;
     let v3 = v0 - ic2eq;
     let v1 = ic1eq + (a2 * v3 - d * ic1eq);

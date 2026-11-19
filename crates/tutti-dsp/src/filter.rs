@@ -1,6 +1,6 @@
 //! Filter algorithms: state-variable, Moog ladder and the Linkwitz-Riley crossover, each a
 //! bank of one filter per channel over buffers views ([`SvfBank`], [`LadderBank`],
-//! [`CrossoverBank`]), over the [`Lanes`] arithmetic their steps share.
+//! [`CrossoverBank`]), over the [`SimdLanes`] arithmetic their steps share.
 
 /// The share of Nyquist a cutoff is held under, where `tan` of its warp is finite and the
 /// bilinear map is well conditioned.
@@ -10,20 +10,20 @@ mod biquad;
 mod crossover;
 mod envelope;
 mod ladder;
-mod lanes;
+mod simd_lanes;
 mod svf;
 
 pub use biquad::Biquad;
 pub(crate) use biquad::section_l1;
 pub use crossover::{
-    CrossoverBank, CrossoverCoefficients, CrossoverControls, CrossoverError, CrossoverModel,
-    MAX_SPLITS, SOLVE_CEILING, fit_to_rate,
+    CrossoverBank, CrossoverControls, CrossoverDesign, CrossoverError, CrossoverModel, MAX_SPLITS,
+    SOLVE_CEILING, fit_to_rate,
 };
 pub use envelope::{EnvelopeFilterBank, EnvelopeFilterControls};
 pub use ladder::{
-    LadderBank, LadderCoefficients, LadderCoeffs, LadderControls, LadderDesign, LadderModel,
+    LadderBank, LadderBlend, LadderCoefficients, LadderControls, LadderDesign, LadderModel,
     LadderType, ladder_step,
 };
-pub use lanes::Lanes;
-pub use svf::{SvfBank, SvfCoefficients, SvfCoeffs, SvfControls, SvfModel, SvfType, svf_step};
+pub use simd_lanes::SimdLanes;
+pub use svf::{SvfBank, SvfCoefficients, SvfControls, SvfDesign, SvfModel, SvfType, svf_step};
 pub(crate) use svf::{integrator_gains, svf_taps};
