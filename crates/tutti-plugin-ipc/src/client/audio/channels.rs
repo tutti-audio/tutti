@@ -160,27 +160,53 @@ impl Fates {
     /// [`FATES`] chunks) must not erase the newer fate. A plain load decides:
     /// only the bridge thread writes.
     fn record(&self, seq: u64, fate: Fate) {
-        let code = match fate {
-            Fate::Published => 1,
-            Fate::Refused => 2,
-            Fate::Skipped => 3,
-        };
         let word = &self.0[(seq % FATES as u64) as usize];
-        if word.load() >> 2 > seq {
+        if unpack(word.load()).0 > seq {
             return;
         }
-        word.store(seq << 2 | code);
+        word.store(pack(seq, fate.code()));
     }
 
     fn get(&self, seq: u64) -> Option<Fate> {
-        let word = self.0[(seq % FATES as u64) as usize].load();
-        if word >> 2 != seq {
+        let (held, code) = unpack(self.0[(seq % FATES as u64) as usize].load());
+        if held != seq {
             return None;
         }
-        match word & 3 {
-            1 => Some(Fate::Published),
-            2 => Some(Fate::Refused),
-            3 => Some(Fate::Skipped),
+        Fate::from_code(code)
+    }
+}
+
+/// Bits of a [`Fates`] word that hold the fate's code; the sequence is above.
+const CODE_BITS: u32 = 2;
+
+/// The word for `seq` with fate `code`: the code in the low [`CODE_BITS`] bits,
+/// the sequence above them.
+fn pack(seq: u64, code: u64) -> u64 {
+    seq << CODE_BITS | code
+}
+
+/// The sequence and the fate code a [`pack`]ed word holds; code 0 is an empty
+/// word's.
+fn unpack(word: u64) -> (u64, u64) {
+    (word >> CODE_BITS, word & ((1 << CODE_BITS) - 1))
+}
+
+impl Fate {
+    /// The fate's code in a word: 1, 2 or 3, never 0 (an empty word's).
+    fn code(self) -> u64 {
+        match self {
+            Self::Published => 1,
+            Self::Refused => 2,
+            Self::Skipped => 3,
+        }
+    }
+
+    /// The fate a [`code`](Self::code) stands for; `None` for 0.
+    fn from_code(code: u64) -> Option<Self> {
+        match code {
+            1 => Some(Self::Published),
+            2 => Some(Self::Refused),
+            3 => Some(Self::Skipped),
             _ => None,
         }
     }
@@ -560,6 +586,24 @@ impl std::ops::Deref for BridgeSide {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **A fates word is the code in its low two bits and the sequence above
+    /// them**: a literal word, the round trip at the edges of the sequence, and
+    /// every code.
+    #[test]
+    fn a_fates_word_holds_the_code_low_and_the_sequence_above() {
+        assert_eq!(pack(5, 3), 0b10111);
+        assert_eq!(unpack(0b10111), (5, 3));
+        let max = u64::MAX >> CODE_BITS;
+        for seq in [0, 1, FATES as u64, max] {
+            for fate in [Fate::Published, Fate::Refused, Fate::Skipped] {
+                let (held, code) = unpack(pack(seq, fate.code()));
+                assert_eq!((held, Fate::from_code(code)), (seq, Some(fate)));
+            }
+        }
+        assert_eq!(Fate::from_code(0), None, "an empty word holds no fate");
+        assert_eq!(unpack(0), (0, 0));
+    }
 
     fn channels() -> (Channels, Sleeper) {
         Channels::new(SampleRate::SR_48K, Arc::default())
