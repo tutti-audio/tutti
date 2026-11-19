@@ -1,5 +1,5 @@
 use super::*;
-use crate::Ring;
+use crate::DecayTime;
 use crate::{Lti as _, System as _};
 
 /// The pre-delay is whole frames, rounded: 1 ms at 48 kHz is 48, more than half a
@@ -40,7 +40,7 @@ fn a_network_stays_under_109_kib() {
 fn an_empty_network_is_silent_and_stable() {
     let n = Network::new(SampleRate::SR_44K1);
     assert_eq!(n.rt60(Band::Mid), Seconds::ZERO);
-    assert_eq!(n.tail(Db::new(-60.0)), Ring::Finite(Seconds::ZERO));
+    assert_eq!(n.tail(Db::new(-60.0)), DecayTime::Finite(Seconds::ZERO));
     assert!(n.is_stable() && !n.is_lossless());
 }
 

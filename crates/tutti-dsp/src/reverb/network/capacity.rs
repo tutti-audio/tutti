@@ -4,7 +4,7 @@
 use tutti_units::{Db, SampleSpan, Samples};
 
 use super::{Network, Stage};
-use crate::{Ring, System};
+use crate::{DecayTime, System};
 
 /// The size of a [`Network`], or the worst case over a layout's controls: every
 /// figure a runner allocates from.
@@ -31,7 +31,7 @@ pub(crate) struct NetworkCapacity {
     /// The longest pre-delay.
     pub pre_delay: Samples,
     /// The longest [`tail`](System::tail) at the floor it was measured to.
-    pub tail: Ring,
+    pub tail: DecayTime,
 }
 
 impl NetworkCapacity {

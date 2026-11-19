@@ -100,7 +100,7 @@ fn finite(d: &Driven) -> usize {
 fn tail_of(layout: &FdnLayout, c: &FdnControls) -> usize {
     let mut network = Box::new(Network::new(SR));
     layout.design_into(c, SR, &mut network);
-    let tutti_dsp::Ring::Finite(s) = network.tail(Db::new(-60.0)) else {
+    let tutti_dsp::DecayTime::Finite(s) = network.tail(Db::new(-60.0)) else {
         panic!("finite")
     };
     (s.get() * SR.get()).ceil() as usize

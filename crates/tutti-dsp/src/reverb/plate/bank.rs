@@ -42,7 +42,7 @@ use crate::design::along;
 use crate::onepole::{cutoff_complement, cutoff_pole, ring_frames};
 use crate::reverb::network::{Absorption, Network, Stage};
 use crate::reverb::{CHUNK, ramp, tail_of};
-use crate::{Lerp, Ramp, Ring, Steps, System, TAIL_FLOOR};
+use crate::{DecayTime, Lerp, Ramp, Steps, System, TAIL_FLOOR};
 
 const PRE_STEP: f64 = 2.0; // frames a chunk the pre-delay moves
 const SLACK: usize = 4; // frames a line keeps beyond its length
@@ -282,7 +282,7 @@ impl<F: Float + Lerp> PlateBank<F> {
             }),
             ceiling: tail_of(
                 match PlateControls::capacity(rate).tail {
-                    Ring::Finite(t) => Ring::Finite(Seconds::new(
+                    DecayTime::Finite(t) => DecayTime::Finite(Seconds::new(
                         t.get() + bandwidth_ring(MIN_BANDWIDTH, rate).get(),
                     )),
                     other => other,
@@ -350,8 +350,8 @@ impl<F: Float + Lerp> PlateBank<F> {
     /// the pre-delay still to fall; at most the ceiling ([`tail`](Self::tail)). No allocation.
     pub fn tail_of(&mut self, ramps: &PlateRamps<F>, controls: &PlateControls) -> Tail {
         self.design(controls);
-        let Ring::Finite(t) = self.network.tail(TAIL_FLOOR) else {
-            return tail_of(Ring::Unbounded, self.rate);
+        let DecayTime::Finite(t) = self.network.tail(TAIL_FLOOR) else {
+            return tail_of(DecayTime::Unbounded, self.rate);
         };
         let pre = self.network.pre_delay.min(self.shape.pre);
         let behind = ramps
@@ -362,7 +362,7 @@ impl<F: Float + Lerp> PlateBank<F> {
             .to_seconds(self.rate);
         let input = bandwidth_ring(controls.bandwidth_at(self.rate), self.rate);
         tail_of(
-            Ring::Finite(Seconds::new(t.get() + input.get() + behind.get())),
+            DecayTime::Finite(Seconds::new(t.get() + input.get() + behind.get())),
             self.rate,
         )
     }

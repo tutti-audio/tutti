@@ -1,6 +1,6 @@
 use super::*;
 use crate::filter::ladder::kernel::{LadderCoefficients, ladder_step};
-use crate::{Complex32, RealFft, Ring};
+use crate::{Complex32, DecayTime, RealFft};
 use tutti_buffers::Mono;
 use tutti_units::Real;
 
@@ -128,7 +128,7 @@ fn the_model_is_the_small_signal_system_and_loud_signals_leave_it() {
     assert!((diff / norm).sqrt() > 0.1, "{}", (diff / norm).sqrt());
 }
 
-/// The ring: the slowest pole of the linearisation against the measured decay
+/// The decay time: the slowest pole of the linearisation against the measured decay
 /// of the small-signal impulse response, and the tail against the measured time
 /// to -60 dB (covers it, within 3 times).
 #[test]
@@ -184,7 +184,7 @@ fn the_radius_and_the_tail_are_what_the_linearised_filter_rings() {
     let peak = env.iter().copied().fold(0.0, f64::max);
     let last = env.iter().rposition(|&v| v >= peak * 1e-3).unwrap();
     let took = ((last + 1) * win) as f64 / RATE.get();
-    let Ring::Finite(tail) = m.tail(Db::new(-60.0)) else {
+    let DecayTime::Finite(tail) = m.tail(Db::new(-60.0)) else {
         panic!("finite")
     };
     assert!(
@@ -208,11 +208,11 @@ fn a_full_resonance_is_unstable_at_small_signal() {
     assert!(model(LadderType::LP24, 1_000.0, 0.5).is_stable());
     assert!(matches!(
         model(LadderType::LP24, 1_000.0, 0.5).tail(Db::new(-60.0)),
-        Ring::Finite(_)
+        DecayTime::Finite(_)
     ));
     assert_eq!(
         model(LadderType::LP24, 1_000.0, 1.0).tail(Db::new(-60.0)),
-        Ring::Unbounded
+        DecayTime::Unbounded
     );
 }
 
