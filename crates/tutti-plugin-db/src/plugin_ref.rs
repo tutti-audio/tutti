@@ -4,11 +4,11 @@
 //! so a path alone does not name one. A [`PluginRef`] is the path, the format
 //! and the plugin's own id inside it (its `PluginDescriptor::id`): what a
 //! scan reports for each plugin, and what a project file keeps to find the
-//! plugin again. A load takes a [`Loadable`](crate::host::loadable::Loadable).
+//! plugin again. A load takes a [`Loadable`](crate::Loadable).
 
+use crate::PluginEntry;
 use std::fmt;
 use std::path::{Path, PathBuf};
-use tutti_plugin_db::PluginEntry;
 use tutti_plugin_types::{Load, PluginFormat};
 
 /// One plugin: the file it is in, its format, and its id in that file.
@@ -85,16 +85,14 @@ impl PluginRef {
                 (Some(a), Some(b)) => a == b,
                 // Canonical, as a scan keys a file: a link and the file it
                 // names are one plugin.
-                _ => {
-                    tutti_plugin_db::canonical_path(&self.path)
-                        == tutti_plugin_db::canonical_path(&other.path)
-                }
+                _ => crate::canonical_path(&self.path) == crate::canonical_path(&other.path),
             }
     }
 
     /// The plugin a load of `path` as `format` produced, whose descriptor
     /// reports `descriptor_id`.
-    pub(crate) fn loaded(path: &Path, format: PluginFormat, descriptor_id: &str) -> Self {
+    #[must_use]
+    pub fn loaded(path: &Path, format: PluginFormat, descriptor_id: &str) -> Self {
         Self {
             path: path.to_path_buf(),
             format,
@@ -104,13 +102,8 @@ impl PluginRef {
 
     /// This ref with the id the loaded plugin reports, if it had none (an
     /// in-process load, which has no client to ask).
-    #[cfg(any(
-        feature = "vst2",
-        feature = "clap",
-        feature = "vst3",
-        all(feature = "au", target_os = "macos")
-    ))]
-    pub(crate) fn identified(&self, descriptor_id: &str) -> Self {
+    #[must_use]
+    pub fn identified(&self, descriptor_id: &str) -> Self {
         Self {
             id: self.id.clone().or_else(|| Some(descriptor_id.to_owned())),
             ..self.clone()

@@ -11,11 +11,9 @@
 //! server is started or a library is opened, and the `plugin-server` never sees
 //! the blacklist.
 
-use std::path::Path;
-use tutti_plugin_types::{BridgeError, BridgeResult, PluginFormat};
-
-use crate::host::catalog::{BlacklistView, Catalog};
-use crate::host::plugin_ref::PluginRef;
+use crate::catalog::{BlacklistView, Catalog};
+use crate::plugin_ref::PluginRef;
+use tutti_plugin_types::{BridgeResult, PluginFormat};
 
 /// Where a plugin runs: in the host's own process or in a `plugin-server`
 /// process. A choice made per load ([`Loadable::hosting`]); everything a
@@ -35,71 +33,14 @@ pub enum Hosting {
     /// In the host's process: no isolation, no IPC copy, and the editor is the
     /// audio instance. The load needs the main thread
     /// ([`MainThreadMarker`](tutti_plugin_types::MainThreadMarker)). Refused with
-    /// [`BridgeError::NotInProcess`]
+    /// [`BridgeError::NotInProcess`](tutti_plugin_types::BridgeError::NotInProcess)
     /// when this build has no host for the format (its `tutti-plugin` feature
     /// is off).
     InProcess,
     /// In a `plugin-server` process, with its editor here. Refused with
-    /// [`BridgeError::NotOutOfProcess`]
+    /// [`BridgeError::NotOutOfProcess`](tutti_plugin_types::BridgeError::NotOutOfProcess)
     /// for VST2, which cannot be served.
     OutOfProcess,
-}
-
-impl Hosting {
-    /// Where a load of the `format` plugin at `path` runs: `InProcess` or
-    /// `OutOfProcess`, never `Auto`.
-    ///
-    /// # Errors
-    ///
-    /// [`BridgeError::NotOutOfProcess`] for a VST2 plugin asked to be served;
-    /// [`BridgeError::NotInProcess`] for a format this build has no in-process
-    /// host for (VST2 included, with its `vst2` feature off).
-    pub(crate) fn resolve(self, path: &Path, format: PluginFormat) -> BridgeResult<Self> {
-        let name = format_name(format);
-        match (self, format) {
-            (Self::OutOfProcess, PluginFormat::Vst2) => Err(BridgeError::NotOutOfProcess {
-                path: path.to_path_buf(),
-                format: name,
-            }),
-            (Self::OutOfProcess, _) => Ok(Self::OutOfProcess),
-            (Self::InProcess, _) | (Self::Auto, PluginFormat::Vst2) => {
-                if in_process_built(format) {
-                    Ok(Self::InProcess)
-                } else {
-                    Err(BridgeError::NotInProcess {
-                        path: path.to_path_buf(),
-                        format: name,
-                    })
-                }
-            }
-            (Self::Auto, _) => Ok(Self::OutOfProcess),
-        }
-    }
-}
-
-/// The format as a user knows it.
-fn format_name(format: PluginFormat) -> &'static str {
-    match format {
-        PluginFormat::Vst3 => "VST3",
-        PluginFormat::Vst2 => "VST2",
-        PluginFormat::Clap => "CLAP",
-        PluginFormat::AudioUnit => "AU",
-        _ => "plugin",
-    }
-}
-
-/// Whether this build holds the format's host for loading in this process.
-fn in_process_built(format: PluginFormat) -> bool {
-    let built = [
-        (PluginFormat::Vst2, cfg!(feature = "vst2")),
-        (PluginFormat::Clap, cfg!(feature = "clap")),
-        (PluginFormat::Vst3, cfg!(feature = "vst3")),
-        (
-            PluginFormat::AudioUnit,
-            cfg!(all(feature = "au", target_os = "macos")),
-        ),
-    ];
-    built.iter().any(|&(has, on)| has == format && on)
 }
 
 /// A plugin the catalog holds, ready to load.
@@ -111,7 +52,7 @@ fn in_process_built(format: PluginFormat) -> bool {
 /// options chain by bare name: [`hosting`](Self::hosting).
 ///
 /// **The blacklist gates every load and reload that goes through a
-/// `Loadable`**: [`Plugin::open`](crate::catalog::Plugin::open), `PluginClient`'s
+/// `Loadable`**: `tutti_plugin`'s `Plugin::open`, `PluginClient`'s
 /// open and a session's crash reload ask it. Two reloads of a plugin that was
 /// already admitted do not: the relaunch of a served plugin for a fork
 /// (`IpcOrigin::reopen`) and the in-process editor instance of a served plugin
@@ -153,7 +94,7 @@ impl Loadable {
 
     /// This plugin, hosted as `hosting` ([`Hosting::Auto`] until this says
     /// otherwise). Whether the format can be hosted that way is decided at the
-    /// load ([`placement`](Self::placement)).
+    /// load.
     #[must_use]
     pub fn hosting(mut self, hosting: Hosting) -> Self {
         self.hosting = hosting;
@@ -182,20 +123,12 @@ impl Loadable {
         self.plugin.format()
     }
 
-    /// Where the load runs: [`Hosting::InProcess`] or
-    /// [`Hosting::OutOfProcess`], never `Auto`. An in-process load (and the
-    /// instance's drop) is confined to the main thread; an out-of-process one
-    /// loads from any thread.
-    ///
-    /// # Errors
-    ///
-    /// [`BridgeError::NotOutOfProcess`] for a VST2 plugin asked to be served,
-    /// [`BridgeError::NotInProcess`] for a format this build cannot host in
-    /// process: the answer is the format's and the build's, so it comes before
-    /// a server or a file is looked for.
-    pub fn placement(&self) -> BridgeResult<Hosting> {
+    /// The hosting this load asks for, which may be [`Hosting::Auto`]: the
+    /// format's own is decided where the load opens the plugin, which knows
+    /// what its build can host.
+    #[must_use]
+    pub fn requested_hosting(&self) -> Hosting {
         self.hosting
-            .resolve(self.plugin.path(), self.plugin.format())
     }
 
     /// Whether the catalog allows the load now: the check a load makes where it
@@ -203,7 +136,7 @@ impl Loadable {
     ///
     /// # Errors
     ///
-    /// [`BridgeError::Blacklisted`] with the recorded reason when the plugin's
+    /// [`BridgeError::Blacklisted`](tutti_plugin_types::BridgeError::Blacklisted) with the recorded reason when the plugin's
     /// file is blacklisted and unchanged.
     pub fn check(&self) -> BridgeResult<()> {
         self.blacklist.check(&self.plugin)
@@ -276,74 +209,5 @@ mod tests {
             Err(BindError::Ambiguous(c)) if c.len() == 2
         ));
         assert!(matches!(Resolved::Missing.bind(), Err(BindError::Missing)));
-    }
-
-    /// **`Auto` is the format's default**: CLAP, VST3 and AU
-    /// are served, whatever the build holds.
-    #[test]
-    fn auto_serves_every_format_but_vst2() {
-        for format in [
-            PluginFormat::Clap,
-            PluginFormat::Vst3,
-            PluginFormat::AudioUnit,
-        ] {
-            let path = Path::new("P");
-            assert_eq!(
-                Hosting::Auto.resolve(path, format).unwrap(),
-                Hosting::OutOfProcess,
-                "{format:?}"
-            );
-        }
-    }
-
-    /// **VST2 cannot be served, and is not quietly hosted here instead.**
-    #[test]
-    fn vst2_asked_for_out_of_process_is_refused() {
-        let err = Hosting::OutOfProcess
-            .resolve(Path::new("P.vst"), PluginFormat::Vst2)
-            .unwrap_err();
-        assert!(matches!(
-            err,
-            BridgeError::NotOutOfProcess { format: "VST2", .. }
-        ));
-    }
-
-    /// **A hosting the build has no host for is refused, typed**: the format's
-    /// feature decides, for `Auto` on VST2 as for an explicit `InProcess`.
-    #[cfg(not(feature = "vst2"))]
-    #[test]
-    fn vst2_in_process_needs_its_feature() {
-        for hosting in [Hosting::Auto, Hosting::InProcess] {
-            let err = hosting
-                .resolve(Path::new("P.vst"), PluginFormat::Vst2)
-                .unwrap_err();
-            assert!(matches!(
-                err,
-                BridgeError::NotInProcess { format: "VST2", .. }
-            ));
-        }
-    }
-
-    #[cfg(not(feature = "clap"))]
-    #[test]
-    fn clap_in_process_needs_its_feature() {
-        let err = Hosting::InProcess
-            .resolve(Path::new("P.clap"), PluginFormat::Clap)
-            .unwrap_err();
-        assert!(matches!(
-            err,
-            BridgeError::NotInProcess { format: "CLAP", .. }
-        ));
-    }
-
-    #[cfg(feature = "clap")]
-    #[test]
-    fn clap_in_process_is_admitted_with_its_feature() {
-        assert_eq!(
-            Hosting::InProcess
-                .resolve(Path::new("P.clap"), PluginFormat::Clap)
-                .unwrap(),
-            Hosting::InProcess
-        );
     }
 }
