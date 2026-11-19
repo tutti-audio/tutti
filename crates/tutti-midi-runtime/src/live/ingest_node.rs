@@ -42,9 +42,8 @@
 //!   empty, translator and MPE state, so one device's half-sent run is not
 //!   completed by the next; and an input whose device went hears nothing until
 //!   another takes it. (The executor's edge close, `tutti-graph`'s
-//!   `held.rs`, ends the same notes and the sustain pedal when the device's
-//!   inlet is taken out of the graph; this ends them as soon as the device
-//!   lets go, and the other pedals and the bends too.)
+//!   `held.rs`, ends the same notes, pedals and bends when the device's inlet
+//!   is taken out of the graph; this ends them as soon as the device lets go.)
 //! - *Active Sensing lapsed* ([`ActiveSensing`], MIDI 1.0 Detailed
 //!   Specification p. 32). Once a Group has sent an Active Sensing (FE), a
 //!   message is expected from it at least every 330 ms; when none comes, the
@@ -738,10 +737,8 @@ impl<F: Float> Node<F> for MidiIngestNode {
     /// owed, no Group has sent an Active Sensing, and the Profile zones in
     /// force are read again from the requests. What the node held is not
     /// released: `reset` has no output to release into. The executor, when it
-    /// parks a bypassed node, ends the keys and the sustain pedal the node held
-    /// on its event outputs (the graph's held set covers keys and sustain
-    /// only), so after a bypass the sostenuto, soft and hold-2 pedals and the
-    /// bend the device left are neither lifted nor remembered.
+    /// parks a bypassed node, ends the keys, hold pedals and bends the node held
+    /// on its event outputs.
     fn reset(&mut self) {
         self.device.translator.reset();
         self.device.mpe = MpeIngest::new(self.device.mode);

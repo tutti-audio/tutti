@@ -24,7 +24,7 @@ use tutti_plugin_types::{
 };
 
 use super::Link;
-use crate::{Batcher, BlockPayload, Chunks, SlabWriter};
+use crate::{Batcher, BlockPayload, Chunks, Replies, SlabWriter};
 
 /// The realtime half of an activated served plugin. See the module docs.
 pub struct IpcProcessor {
@@ -63,7 +63,7 @@ impl IpcProcessor {
 
     /// The slab's writer and the next chunk's sequence, back to the loaded
     /// plugin on deactivation.
-    pub(super) fn into_parts(self) -> (SlabWriter, u64) {
+    pub(super) fn into_parts(self) -> (SlabWriter, u64, Replies) {
         self.batcher.into_parts()
     }
 }
