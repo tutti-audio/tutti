@@ -774,6 +774,7 @@ pub fn chroma<S: Sample>(
         Tuning::Fixed(offset) => offset,
         Tuning::Estimate => {
             let mut state = ChromaFold::new(plan);
+            // The meter built below owns a separate scratch.
             let mut fft = FftScratch::new();
             for i in 0..frames.get() {
                 state.transform(frame_at(i), &mut fft);

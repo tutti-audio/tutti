@@ -328,28 +328,13 @@ pub struct NoteEvent {
     /// The median pitch's distance from `note`, `-50..=50` [`Cents`]: the
     /// pitch-bend amount.
     pub cents: Cents,
-    /// The samples the note spans; never empty.
+    /// The samples the note spans. Never empty: `build_note` yields no note
+    /// whose end is not past its start.
     pub span: Region,
     /// The loudest frame RMS wholly inside the note, in dBFS (the loudest frame
     /// it holds, for a note shorter than a YIN frame). See [`VelocityRange`]
     /// for a MIDI velocity.
     pub velocity: Db,
-}
-
-impl NoteEvent {
-    /// The note's length in [`Samples`].
-    #[inline]
-    #[must_use]
-    pub fn len(&self) -> Samples {
-        self.span.len()
-    }
-
-    /// Whether the note spans nothing; never true of a transcribed note.
-    #[inline]
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.span.is_empty()
-    }
 }
 
 /// A linear-in-dB map from a note's level to a MIDI velocity: `floor` and
@@ -549,8 +534,7 @@ fn segment(
         for (i, piece) in pieces.iter().enumerate() {
             let next_split = pieces.get(i + 1).and_then(|p| p.split);
             if let Some(note) = build_note(cfg, &frames, &run, piece, next_split)
-                && note.len() >= cfg.min_length
-                && !note.is_empty()
+                && note.span.len() >= cfg.min_length
             {
                 notes.push(note);
             }

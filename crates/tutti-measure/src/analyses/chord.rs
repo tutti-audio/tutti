@@ -297,7 +297,7 @@ fn spans(path: &[u16], framing: Framing) -> Result<Vec<ChordSpan>> {
                         sample(boundary(t))?
                     }),
                 )
-                .expect("boundaries ascend with the frame"),
+                .ok_or(Error::SpanBeyondSampleCount)?,
             });
         }
         start = t;
