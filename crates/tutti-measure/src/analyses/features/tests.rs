@@ -10,7 +10,7 @@ const RATE: f64 = 48_000.0;
 const WINDOW: usize = 2048;
 
 fn magnitudes_of(samples: &[f64]) -> StftMagnitude {
-    let request = StftRequest::new(Samples(WINDOW), Samples(WINDOW / 2));
+    let request = StftRequest::new(Samples::new(WINDOW), Samples::new(WINDOW / 2));
     stft_magnitude(
         request,
         Mono::new(samples),
@@ -21,15 +21,15 @@ fn magnitudes_of(samples: &[f64]) -> StftMagnitude {
 }
 
 fn bin_width() -> Hz {
-    Hz(RATE / WINDOW as f64)
+    Hz::new(RATE / WINDOW as f64)
 }
 
 fn sine(hz: f64, len: usize) -> Vec<f64> {
     tutti_fixtures::signal::sine(
-        tutti_units::Hz(hz),
-        tutti_units::Amplitude(1.0),
+        tutti_units::Hz::new(hz),
+        tutti_units::Amplitude::new(1.0),
         tutti_units::SampleRate::of(RATE),
-        tutti_units::Samples(len),
+        tutti_units::Samples::new(len),
     )
     .into_iter()
     .map(f64::from)

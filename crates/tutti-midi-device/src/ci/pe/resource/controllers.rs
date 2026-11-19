@@ -6,9 +6,9 @@ use super::super::limits::ResourceId;
 use super::super::tree::{PeJson, PeObject};
 use super::channels::{channel, list_type};
 use super::fields::{
-    CtrlKind, CtrlValueKind, Fields, ParamPath, PeChannel, PeDataError, PeDataFault, PeExtensions,
-    PeText, Place, Priority, SignificantBits, StepCount, TypeHint, boolean, integer, ints,
-    required_text, text, u32_json, unsigned32,
+    CtrlKind, CtrlValueKind, Fields, InvalidValue, ParamPath, PeChannel, PeDataError, PeDataFault,
+    PeExtensions, PeText, Place, Priority, SignificantBits, StepCount, TypeHint, boolean, integer,
+    ints, narrowed, required_text, text, u32_json, unsigned32,
 };
 
 /// Which controller message an entry describes: the kind and the index it needs
@@ -269,8 +269,7 @@ impl PeCtrl {
         let title = required_text(f, "title")?;
         let description = f.optional("description", "a string", |j| text(j).map(str::to_owned))?;
         let kind_text = f.required("ctrlType", "a string", text)?.to_owned();
-        let kind = CtrlKind::new(&kind_text)
-            .ok_or_else(|| f.fail("ctrlType", PeDataFault::NotValid("controller type")))?;
+        let kind = CtrlKind::try_from(kind_text.as_str()).map_err(|e| f.invalid("ctrlType", e))?;
         let index = f.optional("ctrlIndex", "an array of integers", |j| {
             j.as_array()?
                 .iter()
@@ -278,67 +277,42 @@ impl PeCtrl {
                 .collect::<Option<Vec<i64>>>()
         })?;
         let controller = PeController::from_parts(kind, index.as_deref())
-            .ok_or_else(|| f.fail("ctrlIndex", PeDataFault::NotValid("controller index")))?;
+            .ok_or_else(|| f.invalid("ctrlIndex", InvalidValue::ControllerIndex))?;
         let priority = f
             .optional("priority", "an integer", integer)?
-            .map(|n| {
-                u8::try_from(n)
-                    .ok()
-                    .and_then(Priority::new)
-                    .ok_or_else(|| f.fail("priority", PeDataFault::NotValid("priority")))
-            })
+            .map(|n| narrowed::<u8, Priority>(n).map_err(|e| f.invalid("priority", e)))
             .transpose()?;
         let default = f.optional("default", "an unsigned 32-bit integer", unsigned32)?;
         let transmit = value_kind(f, "transmit")?;
         let recognize = value_kind(f, "recognize")?;
         let significant_bits = f
             .optional("numSigBits", "an integer", integer)?
-            .map(|n| {
-                u8::try_from(n)
-                    .ok()
-                    .and_then(SignificantBits::new)
-                    .ok_or_else(|| {
-                        f.fail(
-                            "numSigBits",
-                            PeDataFault::NotValid("count of significant bits"),
-                        )
-                    })
-            })
+            .map(|n| narrowed::<u8, SignificantBits>(n).map_err(|e| f.invalid("numSigBits", e)))
             .transpose()?;
         let param_path = f
             .optional("paramPath", "a string", text)?
             .map(|t| {
-                ParamPath::new(t)
-                    .ok_or_else(|| f.fail("paramPath", PeDataFault::NotValid("parameter path")))
+                ParamPath::new(t).ok_or_else(|| f.invalid("paramPath", InvalidValue::ParamPath))
             })
             .transpose()?;
         let hint_text = f.optional("typeHint", "a string", |j| text(j).map(str::to_owned))?;
         let map = f
             .optional("ctrlMapId", "a string", text)?
-            .map(|t| {
-                ResourceId::new(t)
-                    .ok_or_else(|| f.fail("ctrlMapId", PeDataFault::NotValid("resource id")))
-            })
+            .map(|t| ResourceId::try_from(t).map_err(|e| f.invalid("ctrlMapId", e)))
             .transpose()?;
         let control = match hint_text.as_deref() {
             Some("valueSelect") => CtrlControl::ValueSelect {
                 map: map.ok_or_else(|| f.fail("ctrlMapId", PeDataFault::Missing))?,
             },
             Some(other) => CtrlControl::Free {
-                hint: Some(
-                    TypeHint::new(other)
-                        .ok_or_else(|| f.fail("typeHint", PeDataFault::NotValid("type hint")))?,
-                ),
+                hint: Some(TypeHint::try_from(other).map_err(|e| f.invalid("typeHint", e))?),
                 map,
             },
             None => CtrlControl::Free { hint: None, map },
         };
         let steps = f
             .optional("stepCount", "an integer", unsigned32)?
-            .map(|n| {
-                StepCount::new(n)
-                    .ok_or_else(|| f.fail("stepCount", PeDataFault::NotValid("step count")))
-            })
+            .map(|n| StepCount::try_from(n).map_err(|e| f.invalid("stepCount", e)))
             .transpose()?;
         let min_max = f.optional(
             "minMax",
@@ -352,7 +326,7 @@ impl PeCtrl {
             (None, None) => CtrlRange::Full,
             (Some(n), None) => CtrlRange::Steps(n),
             (None, Some((min, max))) if min <= max => CtrlRange::MinMax { min, max },
-            (None, Some(_)) => return Err(f.fail("minMax", PeDataFault::NotValid("range"))),
+            (None, Some(_)) => return Err(f.invalid("minMax", InvalidValue::MinAboveMax)),
             (Some(_), Some(_)) => return Err(f.fail("minMax", PeDataFault::Conflicts("stepCount"))),
         };
         Ok(Self {
@@ -374,9 +348,7 @@ impl PeCtrl {
 
 fn value_kind(f: &mut Fields<'_>, name: &'static str) -> Result<CtrlValueKind, PeDataError> {
     Ok(f.optional(name, "a string", text)?
-        .map(|t| {
-            CtrlValueKind::new(t).ok_or_else(|| f.fail(name, PeDataFault::NotValid("value kind")))
-        })
+        .map(|t| CtrlValueKind::try_from(t).map_err(|e| f.invalid(name, e)))
         .transpose()?
         .unwrap_or(CtrlValueKind::Absolute))
 }
@@ -529,12 +501,8 @@ impl PeAllCtrlList {
             })
             .collect::<Result<Vec<_>, PeDataError>>()?;
         Self::try_from(entries)
-            .map_err(|e| PeDataError::new("AllCtrlList", PeDataFault::NotValid(listed_twice(&e))))
+            .map_err(|e| PeDataError::new("AllCtrlList", PeDataFault::NotValid(e.into())))
     }
-}
-
-fn listed_twice(_: &ListedTwice) -> &'static str {
-    "list: a controller listed once, or once for transmit and once for recognize"
 }
 
 list_type! {
@@ -590,7 +558,7 @@ impl PeChCtrlList {
                         }
                         _ => Err(PeDataError::new(
                             Place::of("ChCtrlList entry").property("defaultCCMap"),
-                            PeDataFault::NotValid("Control Change flag"),
+                            PeDataFault::NotValid(InvalidValue::NotControlChange),
                         )),
                     }
                 } else {
@@ -599,7 +567,7 @@ impl PeChCtrlList {
             })
             .collect::<Result<Vec<_>, PeDataError>>()?;
         Self::try_from(entries)
-            .map_err(|e| PeDataError::new("ChCtrlList", PeDataFault::NotValid(listed_twice(&e))))
+            .map_err(|e| PeDataError::new("ChCtrlList", PeDataFault::NotValid(e.into())))
     }
 }
 

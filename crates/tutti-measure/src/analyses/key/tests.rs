@@ -96,7 +96,7 @@ fn a_blurred_chroma_is_less_certain() {
     };
     assert!(c(&blend) < c(&pure));
     let scale = [1.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0];
-    assert!(c(&scale) < Confidence(0.9));
+    assert!(c(&scale) < Confidence::new(0.9));
 }
 
 /// Silence, a flat chroma and no frames are `NoTonalContent`, never a key;

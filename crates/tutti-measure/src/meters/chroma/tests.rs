@@ -4,11 +4,11 @@ use crate::fold_uneven;
 const RATE: SampleRate = SampleRate::SR_22K05;
 
 fn geometry(window: usize, hop: usize) -> StftGeometry {
-    StftGeometry::new(RATE, Samples(window), Samples(hop)).unwrap()
+    StftGeometry::new(RATE, Samples::new(window), Samples::new(hop)).unwrap()
 }
 
 fn framing(window: usize, hop: usize) -> Framing {
-    Framing::new(Samples(window), Samples(hop))
+    Framing::new(Samples::new(window), Samples::new(hop))
 }
 
 fn sine(freq: f64, len: usize, amp: f64) -> Vec<f64> {
@@ -62,7 +62,7 @@ fn cfg() -> ChromaConfig {
 fn a_silent_frame_is_zero_not_nan() {
     let silent = run(&vec![0.0; 8192], &cfg());
     assert!(silent.grid().as_slice().iter().all(|&v| v == 0.0));
-    assert_eq!(silent.tuning(), Cents(0.0));
+    assert_eq!(silent.tuning(), Cents::new(0.0));
     let quiet = run(&sine(440.0, 8192, 1e-5), &cfg());
     assert!(quiet.grid().as_slice().iter().all(|&v| v == 0.0));
     let audible = run(&sine(440.0, 8192, 1e-3), &cfg());
@@ -127,9 +127,9 @@ fn peaks_under_the_floor_do_not_vote() {
         .map(|(a, b)| a + b)
         .collect();
     let only = cfg().harmonics(Harmonics::of(1));
-    let ignored = run(&x, &only.peak_floor(PeakFloor::of(Db(-40.0)))).mean();
+    let ignored = run(&x, &only.peak_floor(PeakFloor::of(Db::new(-40.0)))).mean();
     assert_eq!(ignored[4], 0.0);
-    let heard = run(&x, &only.peak_floor(PeakFloor::of(Db(-80.0)))).mean();
+    let heard = run(&x, &only.peak_floor(PeakFloor::of(Db::new(-80.0)))).mean();
     assert!(heard[4] > 0.0, "{heard:?}");
 }
 
@@ -138,9 +138,9 @@ fn peaks_under_the_floor_do_not_vote() {
 #[test]
 fn the_band_selects_the_peaks_that_fold() {
     let x = sine(440.0, 8192, 0.5);
-    let inside = cfg().band(FrequencyBand::new(Hz(300.0), Hz(600.0)).unwrap());
+    let inside = cfg().band(FrequencyBand::new(Hz::new(300.0), Hz::new(600.0)).unwrap());
     assert_eq!(run(&x, &inside).mean()[9], 1.0);
-    let above = cfg().band(FrequencyBand::new(Hz(600.0), Hz(2000.0)).unwrap());
+    let above = cfg().band(FrequencyBand::new(Hz::new(600.0), Hz::new(2000.0)).unwrap());
     assert!(run(&x, &above).grid().as_slice().iter().all(|&v| v == 0.0));
 }
 
@@ -165,9 +165,9 @@ fn the_tuning_of_a_sine_is_its_distance_from_the_grid() {
 fn a_fixed_tuning_moves_the_fold() {
     let x = sine(440.0 * (30.0f64 / 1200.0).exp2(), 8192, 0.5);
     let at = |cents: f64| {
-        let cfg = cfg().tuning(Tuning::Fixed(TuningOffset::new(Cents(cents)).unwrap()));
+        let cfg = cfg().tuning(Tuning::Fixed(TuningOffset::new(Cents::new(cents)).unwrap()));
         let c = run(&x, &cfg);
-        assert_eq!(c.tuning(), Cents(cents));
+        assert_eq!(c.tuning(), Cents::new(cents));
         c.mean()
     };
     assert_eq!(at(30.0)[9], 1.0);
@@ -240,7 +240,7 @@ fn an_estimating_meter_does_not_depend_on_the_chunking() {
 fn a_running_estimate_follows_the_peaks_seen() {
     let x = sine(440.0 * (25.0f64 / 1200.0).exp2(), 4096, 0.5);
     let mut meter = cfg().measure(RATE).unwrap();
-    assert_eq!(meter.tuning(), Cents(0.0));
+    assert_eq!(meter.tuning(), Cents::new(0.0));
     let mut frames = Vec::new();
     meter.push(Mono::new(&x), &mut frames).unwrap();
     assert_eq!(frames.len(), 1);
@@ -265,7 +265,7 @@ fn a_refused_chunk_keeps_the_carry_and_reset_reads_fresh() {
 
     meter.reset();
     assert_eq!(meter.mean(), [0.0; CLASSES]);
-    assert_eq!(meter.tuning(), Cents(0.0));
+    assert_eq!(meter.tuning(), Cents::new(0.0));
 }
 
 /// The framing is validated against what the fold can afford, and the band
@@ -294,7 +294,7 @@ fn the_framing_and_band_are_validated() {
     ] {
         assert!(
             matches!(
-                FrequencyBand::try_from(Hz(lo)..=Hz(hi)),
+                FrequencyBand::try_from(Hz::new(lo)..=Hz::new(hi)),
                 Err(Error::EmptyFrequencyRange { .. })
             ),
             "{lo} {hi}"
@@ -304,12 +304,12 @@ fn the_framing_and_band_are_validated() {
     // bins, or one above Nyquist.
     let x = sine(440.0, 8192, 0.5);
     let mut fft = FftScratch::new();
-    let narrow = cfg().band(FrequencyBand::new(Hz(100.0), Hz(110.0)).unwrap());
+    let narrow = cfg().band(FrequencyBand::new(Hz::new(100.0), Hz::new(110.0)).unwrap());
     assert!(matches!(
         chroma(&narrow, Mono::new(&x), RATE, &mut fft),
         Err(Error::EmptyFrequencyRange { .. })
     ));
-    let wide = cfg().band(FrequencyBand::new(Hz(100.0), Hz(12_000.0)).unwrap());
+    let wide = cfg().band(FrequencyBand::new(Hz::new(100.0), Hz::new(12_000.0)).unwrap());
     assert!(matches!(
         chroma(&wide, Mono::new(&x), RATE, &mut fft),
         Err(Error::AboveNyquist { .. })
@@ -323,7 +323,7 @@ fn the_framing_and_band_are_validated() {
         .framing(framing(1024, 256))
         .plan(SampleRate::SR_8K)
         .unwrap();
-    assert_eq!(low.max_freq, Hz(4000.0));
+    assert_eq!(low.max_freq, Hz::new(4000.0));
 }
 
 /// Bad input is an error, and a refused call computes nothing.
@@ -348,8 +348,8 @@ fn bad_input_is_refused() {
     assert_eq!(
         one_shot(&x[..4095], &cfg(), &mut fft).unwrap_err(),
         Error::InsufficientInput {
-            needed: Samples(4096),
-            got: Samples(4095)
+            needed: Samples::new(4096),
+            got: Samples::new(4095)
         }
     );
     let tiny = cfg().framing(framing(64, 1));
@@ -386,7 +386,7 @@ fn an_integer_buffer_folds_at_its_nominal_level() {
 #[test]
 fn the_trait_fold_over_uneven_chunks_equals_the_chroma_rows() {
     let x = sine(440.0, 30_000, 0.5);
-    let fixed = cfg().tuning(Tuning::Fixed(TuningOffset::new(Cents(0.0)).unwrap()));
+    let fixed = cfg().tuning(Tuning::Fixed(TuningOffset::new(Cents::new(0.0)).unwrap()));
     let batch = run(&x, &fixed);
     let (items, summary) = fold_uneven(&fixed, RATE, x.len(), |meter, at, out| {
         meter.push(Mono::new(&x[at]), out)
@@ -405,7 +405,7 @@ fn the_trait_fold_over_uneven_chunks_equals_the_chroma_rows() {
         items
             .iter()
             .enumerate()
-            .all(|(i, f)| f.frame == Samples(i * hop)),
+            .all(|(i, f)| f.frame == Samples::new(i * hop)),
         "each frame names the sample it starts at"
     );
     assert_eq!(summary.mean, batch.mean());

@@ -56,7 +56,7 @@ impl Region {
     /// How many samples the region spans.
     #[inline]
     pub fn len(&self) -> Samples {
-        Samples(self.end.get() - self.start.get())
+        Samples::new(self.end.get() - self.start.get())
     }
 
     /// Whether the region spans nothing.
@@ -95,8 +95,8 @@ impl SilenceConfig {
         Self {
             threshold: threshold.get(),
             min_silence,
-            pre_pad: Seconds(0.0),
-            post_pad: Seconds(0.0),
+            pre_pad: Seconds::new(0.0),
+            post_pad: Seconds::new(0.0),
         }
     }
 
@@ -121,7 +121,7 @@ impl SilenceConfig {
     fn bind<S: Sample>(&self, rate: SampleRate) -> SilenceMeter<S> {
         SilenceMeter {
             floor: self.threshold.to_amplitude(),
-            min_silence: self.min_silence.to_samples(rate).max(Samples(1)),
+            min_silence: self.min_silence.to_samples(rate).max(Samples::new(1)),
             pre_pad: self.pre_pad.to_samples(rate),
             post_pad: self.post_pad.to_samples(rate),
             seen: Samples::ZERO,
@@ -182,7 +182,7 @@ impl<S: Sample> SilenceMeter<S> {
                 Some((first, _)) => Some((first, at)),
             };
         }
-        self.seen += Samples(samples.len());
+        self.seen += Samples::new(samples.len());
     }
 
     /// Forgets everything fed. Equivalent to a fresh meter at the same rate.
@@ -209,8 +209,8 @@ impl<S: Sample> Meter for SilenceMeter<S> {
         let open = self.open.map(|(first, last)| (first, last + 1));
         let mut regions: Vec<Region> = Vec::new();
         for &(first, end) in self.closed.iter().chain(open.iter()) {
-            let start = Samples(first).remaining_after(self.pre_pad);
-            let end = (Samples(end) + self.post_pad).min(self.seen);
+            let start = Samples::new(first).remaining_after(self.pre_pad);
+            let end = (Samples::new(end) + self.post_pad).min(self.seen);
             match regions.last_mut() {
                 Some(prev) if start <= prev.end => prev.end = prev.end.max(end),
                 _ => regions.push(Region { start, end }),

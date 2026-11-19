@@ -18,15 +18,15 @@ use tutti_units::{Db, Hz, SampleRate, Samples, Seconds};
 /// for bins and for bands, with smoothing, peaks and a wrapping spectrogram.
 #[test]
 fn a_spectrum_step_does_not_allocate() {
-    let plain = SpectrumConfig::new().framing(Framing::new(Samples(1024), Samples(256)));
+    let plain = SpectrumConfig::new().framing(Framing::new(Samples::new(1024), Samples::new(256)));
     let banded = plain
         .banding(Banding::Octave {
             per_octave: BandsPerOctave::of(3),
-            band: FrequencyBand::new(Hz(400.0), Hz(20_000.0)).unwrap(),
+            band: FrequencyBand::new(Hz::new(400.0), Hz::new(20_000.0)).unwrap(),
         })
-        .smoothing(Smoothing::Average(SpectrumTime::of(Seconds(0.2))))
-        .peak_hold(SpectrumTime::of(Seconds(0.5)))
-        .peak_decay(PeakDecay::of(Db(20.0)))
+        .smoothing(Smoothing::Average(SpectrumTime::of(Seconds::new(0.2))))
+        .peak_hold(SpectrumTime::of(Seconds::new(0.5)))
+        .peak_decay(PeakDecay::of(Db::new(20.0)))
         .spectrogram(FrameCount(7));
     let signal: Vec<f32> = (0..48_000)
         .map(|i| 0.4 * (((std::f64::consts::TAU * 1234.5 * i as f64 / 48_000.0).sin()) as f32))
@@ -62,7 +62,7 @@ fn a_spectrum_step_does_not_allocate() {
 /// conversion block.
 #[test]
 fn an_integer_spectrum_step_does_not_allocate() {
-    let cfg = SpectrumConfig::new().framing(Framing::new(Samples(1024), Samples(256)));
+    let cfg = SpectrumConfig::new().framing(Framing::new(Samples::new(1024), Samples::new(256)));
     let signal: Vec<i16> = (0..48_000)
         .map(|i| {
             ((((std::f64::consts::TAU * 1234.5 * i as f64 / 48_000.0).sin()) as f32) * 8_000.0)

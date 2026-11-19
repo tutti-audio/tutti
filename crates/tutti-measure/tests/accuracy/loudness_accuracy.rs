@@ -199,7 +199,7 @@ fn silence_reads_the_gate_not_negative_infinity() {
 fn gain_to_honours_the_ceiling_without_pushing_up() {
     // Quiet signal, generous ceiling: the gain is purely loudness-driven.
     let quiet = measure(48_000.0, 0.01); // ~-40 LUFS, -40 dBTP
-    let g = quiet.gain_to(Db(-23.0), Db(-1.0));
+    let g = quiet.gain_to(Db::new(-23.0), Db::new(-1.0));
     let want = -23.0 - quiet.lufs.get();
     assert!(
         (g.get() - want).abs() < 0.01,
@@ -212,7 +212,7 @@ fn gain_to_honours_the_ceiling_without_pushing_up() {
 
     // Loud signal, tight ceiling: the gain must be limited by the peak.
     let loud = measure(48_000.0, 1.0); // ~0 LUFS, 0 dBTP
-    let g = loud.gain_to(Db(6.0), Db(-1.0));
+    let g = loud.gain_to(Db::new(6.0), Db::new(-1.0));
     let projected = loud.true_peak.get() + g.get();
     assert!(
         projected <= -1.0 + 0.01,

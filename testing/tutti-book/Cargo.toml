@@ -1,0 +1,21 @@
+[package]
+name = "tutti-book"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+description = "The tutti book's programs; each writes the sound its chapter plays"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/tutti-audio/tutti"
+publish = false
+
+[lints]
+workspace = true
+
+# The book's programs depend on the umbrella alone, as an application does.
+[dev-dependencies]
+tutti = { path = "../../crates/tutti", features = ["export", "encode-flac"] }
+tutti-fixtures = { path = "../tutti-fixtures" }
+
+[[example]]
+name = "getting_started"
+test = true

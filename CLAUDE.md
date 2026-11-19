@@ -318,7 +318,9 @@ adapter is [tutti-audio/bevy-tutti](https://github.com/tutti-audio/bevy-tutti).
 10. `tutti`
 
 - Nothing under `crates/` has a normal or build dependency on `testing/`.
-- Only `tutti` depends on `tutti-session`, and nothing depends on `tutti`.
+- Only `tutti` depends on `tutti-session`, and nothing depends on `tutti` but a
+  `testing/` crate that reads it as an app does, through a dev-dependency
+  (`tutti-book`, the book's programs).
 - A crate keeps its modules private and is named from its root; `check-paths` enforces it.
 - `check-layout` also holds each crate's limits on its own dependencies: which workspace
   crates it may name, and which modules alone may name a wrapped library (`symphonia` in

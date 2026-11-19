@@ -113,7 +113,7 @@ impl<F: Float + Lanes + Lerp> KeyStage<F> {
     pub(super) fn levels(&mut self, key: &Planes<'_, F>, frames: Range<usize>, out: &mut [F]) {
         out.fill(F::ZERO);
         let n = frames.len().min(CHUNK);
-        let heard = key.slice(Samples(frames.start)..Samples(frames.start + n));
+        let heard = key.slice(Samples::new(frames.start)..Samples::new(frames.start + n));
         let width = heard.channels().min(MAX_CHANNELS);
         let mut scratch = [[F::ZERO; CHUNK]; MAX_CHANNELS];
         let mut outs: [&mut [F]; MAX_CHANNELS] = scratch.each_mut().map(|p| &mut p[..n]);

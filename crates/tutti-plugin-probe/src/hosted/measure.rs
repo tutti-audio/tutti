@@ -332,7 +332,7 @@ fn judge(
     let latency_figure = if subject.instrument {
         None
     } else {
-        onset.map(Samples)
+        onset.map(Samples::new)
     };
     let latency = match (subject.instrument, latency_figure) {
         (true, _) => LatencyVerdict::NotChecked(NotChecked::Instrument),

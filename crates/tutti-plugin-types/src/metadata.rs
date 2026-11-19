@@ -585,7 +585,7 @@ mod tests {
 
     fn measured_with(tail: Option<usize>) -> Measured {
         Measured {
-            tail: tail.map(Samples),
+            tail: tail.map(Samples::new),
             latency: None,
             config: config(),
             verdict: Verdict {

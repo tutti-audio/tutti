@@ -206,7 +206,7 @@ fn a_refined_tempo_is_clamped_to_the_range() {
         &cfg,
         &curve,
         SampleRate::of(RATE),
-        Samples(441),
+        Samples::new(441),
         &mut FftScratch::new(),
     )
     .unwrap();
@@ -330,7 +330,13 @@ fn a_signal_without_change_has_no_tempo() {
     }
     for curve in [flat, ulp] {
         assert_eq!(
-            estimate_tempo_from_novelty(&cfg, &curve, SampleRate::of(RATE), Samples(512), &mut fft),
+            estimate_tempo_from_novelty(
+                &cfg,
+                &curve,
+                SampleRate::of(RATE),
+                Samples::new(512),
+                &mut fft
+            ),
             Err(Error::NoSignal)
         );
     }
@@ -356,7 +362,13 @@ fn non_finite_input_is_refused() {
         curve[10] = 1.0;
         curve[500] = bad;
         assert_eq!(
-            estimate_tempo_from_novelty(&cfg, &curve, SampleRate::of(RATE), Samples(512), &mut fft),
+            estimate_tempo_from_novelty(
+                &cfg,
+                &curve,
+                SampleRate::of(RATE),
+                Samples::new(512),
+                &mut fft
+            ),
             Err(Error::NonFiniteInput)
         );
         assert_eq!(
@@ -364,7 +376,7 @@ fn non_finite_input_is_refused() {
                 &cfg,
                 &curve,
                 SampleRate::of(RATE),
-                Samples(512),
+                Samples::new(512),
                 Some(Bpm::of(120.0)),
                 &mut fft
             ),
@@ -423,16 +435,21 @@ fn a_caller_curve_is_read_in_its_own_frames() {
     }
     let cfg = TempoConfig::new();
     let mut fft = FftScratch::new();
-    let tempo =
-        estimate_tempo_from_novelty(&cfg, &curve, SampleRate::of(RATE), Samples(441), &mut fft)
-            .unwrap();
+    let tempo = estimate_tempo_from_novelty(
+        &cfg,
+        &curve,
+        SampleRate::of(RATE),
+        Samples::new(441),
+        &mut fft,
+    )
+    .unwrap();
     assert!((tempo.bpm.get() - 150.0).abs() < 0.01, "{}", tempo.bpm);
 
     let grid = track_beats_from_novelty(
         &cfg,
         &curve,
         SampleRate::of(RATE),
-        Samples(441),
+        Samples::new(441),
         None,
         &mut fft,
     )
@@ -447,7 +464,9 @@ fn a_caller_curve_is_read_in_its_own_frames() {
     assert!((grid.bpm.get() - 150.0).abs() < 0.01);
     assert_eq!(
         grid.time(1, SampleRate::of(RATE)),
-        Some(Seconds(0.4 * (grid.beats[1].get() / (40 * 441)) as f64))
+        Some(Seconds::new(
+            0.4 * (grid.beats[1].get() / (40 * 441)) as f64
+        ))
     );
     assert_eq!(grid.time(grid.beats.len(), SampleRate::of(RATE)), None);
 
@@ -457,7 +476,7 @@ fn a_caller_curve_is_read_in_its_own_frames() {
         &cfg,
         &curve,
         SampleRate::of(RATE),
-        Samples(441),
+        Samples::new(441),
         Some(Bpm::of(100.0)),
         &mut fft,
     )
@@ -499,7 +518,13 @@ fn unusable_settings_are_refused() {
 
     let curve = vec![0.0f64; 1000];
     assert_eq!(
-        estimate_tempo_from_novelty(&cfg, &curve, SampleRate::of(RATE), Samples(0), &mut fft),
+        estimate_tempo_from_novelty(
+            &cfg,
+            &curve,
+            SampleRate::of(RATE),
+            Samples::new(0),
+            &mut fft
+        ),
         Err(Error::ZeroHop)
     );
     // Under one window, and under two periods of the slowest tempo.
@@ -515,7 +540,13 @@ fn unusable_settings_are_refused() {
     let mut short = vec![0.0f64; 100];
     short[3] = 1.0;
     assert!(matches!(
-        estimate_tempo_from_novelty(&cfg, &short, SampleRate::of(RATE), Samples(512), &mut fft),
+        estimate_tempo_from_novelty(
+            &cfg,
+            &short,
+            SampleRate::of(RATE),
+            Samples::new(512),
+            &mut fft
+        ),
         Err(Error::InsufficientInput { .. })
     ));
     // At a hop this wide no whole-frame lag falls in 100 to 101 BPM.
@@ -523,7 +554,13 @@ fn unusable_settings_are_refused() {
     let mut long = vec![0.0f64; 4000];
     long[3] = 1.0;
     assert!(matches!(
-        estimate_tempo_from_novelty(&narrow, &long, SampleRate::of(RATE), Samples(512), &mut fft),
+        estimate_tempo_from_novelty(
+            &narrow,
+            &long,
+            SampleRate::of(RATE),
+            Samples::new(512),
+            &mut fft
+        ),
         Err(Error::EmptyTempoRange { .. })
     ));
 }
@@ -537,7 +574,7 @@ fn unusable_settings_are_refused() {
 /// wide).
 #[test]
 fn a_wide_window_still_places_beats_within_a_hop() {
-    let wide = TempoConfig::new().framing(Framing::new(Samples(4096), Samples(512)));
+    let wide = TempoConfig::new().framing(Framing::new(Samples::new(4096), Samples::new(512)));
     let clicks_at = click_samples(120.0, 0.3, 20.0);
     let grid = track_beats(
         &wide,
@@ -557,7 +594,7 @@ fn a_wide_window_still_places_beats_within_a_hop() {
 fn near_silence_has_no_tempo() {
     let quiet = |db: f64| -> Vec<f64> {
         // The click train is `f64`: the gain narrows once.
-        let gain = Db(db).to_amplitude().get();
+        let gain = Db::new(db).to_amplitude().get();
         clicks(120.0, 0.3, 20.0).iter().map(|s| s * gain).collect()
     };
     let cfg = TempoConfig::new();
@@ -601,7 +638,7 @@ fn a_supplied_tempo_must_fit_the_curve() {
     }
     let cfg = TempoConfig::new();
     let mut fft = FftScratch::new();
-    let hop = Samples(441);
+    let hop = Samples::new(441);
     // 100 frames per second: a curve of 1000 frames spans 10 s, so the
     // slowest tempo is 6 BPM (a period of the whole curve) and the fastest
     // 3000 (a period of two frames).
@@ -658,7 +695,7 @@ fn an_absurd_range_is_refused() {
             &slow,
             &curve,
             SampleRate::of(RATE),
-            Samples(512),
+            Samples::new(512),
             &mut FftScratch::new()
         ),
         Err(Error::InsufficientInput { .. })

@@ -79,7 +79,7 @@ use crate::fft::StagedRealFft;
 
 /// Default FFT block size when the caller doesn't pick one. A power of two,
 /// as every partition size here is.
-pub(crate) const DEFAULT_BLOCK_SIZE: Samples = Samples(512);
+pub(crate) const DEFAULT_BLOCK_SIZE: Samples = Samples::new(512);
 
 /// A tail level's partition is at most this many times the head's, and at
 /// most [`MAX_PARTITION`] frames: the larger it is, the more steps its
@@ -362,7 +362,7 @@ impl<F: FftFloat> IrSpectra<F> {
             (levels.iter().map(|l| l.delay + l.part).max().unwrap_or(0) + 1).next_power_of_two();
         Self {
             block_size,
-            ir_len: Samples(ir.len()),
+            ir_len: Samples::new(ir.len()),
             levels,
             input_ring,
             output_ring,
@@ -633,7 +633,7 @@ impl<F: FftFloat> Convolver<F> {
     /// partition and the latency.
     #[must_use]
     pub fn new<S: Sample>(ir: Mono<'_, S>, block_size: Samples) -> Self {
-        let block_size = Samples(block_size.get().next_power_of_two().max(2));
+        let block_size = Samples::new(block_size.get().next_power_of_two().max(2));
         let mut converted = vec![F::ZERO; ir.samples().len()];
         convert_equal(ir.samples(), &mut converted);
         Self::over(Arc::new(IrSpectra::new(&converted, block_size)))
@@ -652,7 +652,7 @@ impl<F: FftFloat> Convolver<F> {
     #[cfg(test)]
     fn with_parts_split(ir: &[F], block_size: usize, parts: &[usize], max_sub: usize) -> Self {
         assert_eq!(parts[0], block_size);
-        let block_size = Samples(block_size);
+        let block_size = Samples::new(block_size);
         let plan = build_plan(ir.len(), parts);
         Self::over(Arc::new(IrSpectra::from_plan(
             ir, block_size, &plan, max_sub,

@@ -51,7 +51,7 @@ impl RawMagnitudes {
 
     /// The largest magnitude anywhere in the grid.
     pub fn peak(&self) -> Amplitude {
-        Amplitude(
+        Amplitude::new(
             self.0
                 .as_slice()
                 .iter()
@@ -175,7 +175,7 @@ impl Stft {
     /// discarded for this read only.
     #[inline]
     pub fn magnitude_at(&self, frame: FrameIndex, bin: BinIndex) -> Amplitude {
-        Amplitude(self.bins.at(frame, bin).norm())
+        Amplitude::new(self.bins.at(frame, bin).norm())
     }
 
     /// Converts to magnitude/phase. Lossless.
@@ -436,7 +436,7 @@ impl StftRequest {
                     return min_hop;
                 }
                 let span = len - self.window.get();
-                Samples((span / frames.get()).max(min_hop.get()).max(1))
+                Samples::new((span / frames.get()).max(min_hop.get()).max(1))
             }
         }
     }
@@ -459,7 +459,7 @@ pub fn stft<S: Sample>(
     let samples = widen(samples.samples());
     let (start, end) = request.range.resolve(samples.len());
     let slice = &samples[start..end];
-    let geometry = request.resolve_cola(rate, Samples(slice.len()))?;
+    let geometry = request.resolve_cola(rate, Samples::new(slice.len()))?;
     Ok(compute(slice, geometry, fft))
 }
 
@@ -495,7 +495,7 @@ pub fn stft_magnitude<S: Sample>(
     let samples = widen(samples.samples());
     let (start, end) = request.range.resolve(samples.len());
     let slice = &samples[start..end];
-    let geometry = request.resolve(rate, Samples(slice.len()))?;
+    let geometry = request.resolve(rate, Samples::new(slice.len()))?;
     Ok(compute(slice, geometry, fft).to_magnitude())
 }
 
@@ -538,7 +538,7 @@ pub fn istft<S: Sample>(transform: &Stft, fft: &mut FftScratch<f64>) -> Vec<S> {
 /// The shared forward pass. Both entry points differ only in what they accept
 /// and what they return.
 fn compute(samples: &[f64], geometry: StftGeometry, fft: &mut FftScratch<f64>) -> Stft {
-    let frames = geometry.frames_for(Samples(samples.len()));
+    let frames = geometry.frames_for(Samples::new(samples.len()));
     let bins_per_frame = geometry.bins_per_frame();
     let window = geometry.window_coefficients::<f64>();
     let window_len = geometry.window().get();

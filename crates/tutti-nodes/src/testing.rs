@@ -11,7 +11,7 @@
 //!   from one input, and a sink with no outputs.
 //!
 //! Widths are runtime: every node takes a [`ChannelLayout`], so a stereo tone
-//! is one node, `Osc::sine(Hz(440.0)).with_layout(ChannelLayout::STEREO)`.
+//! is one node, `Osc::sine(Hz::new(440.0)).with_layout(ChannelLayout::STEREO)`.
 //! Each is a plain graph [`Node`] and its own [`IntoNode`], forkable by clone
 //! (none shares state with its clones), so a test graph is built the same way
 //! a production one is: `GraphBuilder::add(Osc::sine(..))`.
@@ -26,10 +26,10 @@
 //! use tutti_nodes::testing::Osc;
 //!
 //! let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::STEREO);
-//! let tone = g.add(Osc::sine(Hz(440.0)).with_layout(ChannelLayout::STEREO));
+//! let tone = g.add(Osc::sine(Hz::new(440.0)).with_layout(ChannelLayout::STEREO));
 //! g.pipe_output(tone);
 //! let mut r = g
-//!     .renderer(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))))
+//!     .renderer(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64))))
 //!     .expect("builds");
 //! let out = r.render(64);
 //! assert_eq!(out.len(), 2);

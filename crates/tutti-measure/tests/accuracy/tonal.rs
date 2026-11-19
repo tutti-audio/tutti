@@ -54,7 +54,7 @@ fn chord_tones(out: &mut [f32], at: usize, secs: f64, root: i32, minor: bool, pa
 }
 
 fn geometry(window: usize, hop: usize) -> StftGeometry {
-    StftGeometry::new(SampleRate::of(SR), Samples(window), Samples(hop)).unwrap()
+    StftGeometry::new(SampleRate::of(SR), Samples::new(window), Samples::new(hop)).unwrap()
 }
 
 fn config() -> ChromaConfig {
@@ -137,10 +137,10 @@ fn a_triad_of_sines_is_the_chord_c_major() {
         (spans[0].root, spans[0].quality),
         (PitchClass::C, ChordQuality::Major)
     );
-    assert_eq!(spans[0].start, Samples(0));
+    assert_eq!(spans[0].start, Samples::new(0));
     assert_eq!(
         spans[0].end,
-        Samples(geometry(4096, 1024).output_len(c.grid().frames()).get())
+        Samples::new(geometry(4096, 1024).output_len(c.grid().frames()).get())
     );
 }
 
@@ -235,14 +235,14 @@ fn a_detuned_scale_resolves_and_its_tuning_is_read() {
         );
     }
     // Fixed tuning is reported as given.
-    let fixed = cfg.tuning(Tuning::Fixed(TuningOffset::of(Cents(12.0))));
+    let fixed = cfg.tuning(Tuning::Fixed(TuningOffset::of(Cents::new(12.0))));
     let c = chroma(
         &melody(&[0], 0.5, 1, 0.0),
         &fixed,
         &mut FftScratch::<f64>::new(),
     )
     .unwrap();
-    assert_eq!(c.tuning(), Cents(12.0));
+    assert_eq!(c.tuning(), Cents::new(12.0));
 }
 
 /// C-F-G-C, 1.5 s each, comes out as those four chords with each end and each
@@ -277,7 +277,7 @@ fn a_progression_has_its_boundaries_where_the_chords_change() {
         (4096, 4096),
     ] {
         let g = geometry(window, hop);
-        let chroma_cfg = config().framing(Framing::new(Samples(window), Samples(hop)));
+        let chroma_cfg = config().framing(Framing::new(Samples::new(window), Samples::new(hop)));
         let c = chroma(&x, &chroma_cfg, &mut fft).unwrap();
         let spans = detect_chords(&c, &ChordConfig::new()).unwrap();
         let got: Vec<_> = spans.iter().map(|s| (s.root, s.quality)).collect();
@@ -287,8 +287,11 @@ fn a_progression_has_its_boundaries_where_the_chords_change() {
             .collect();
         assert_eq!(got, want, "{window}/{hop}");
         let tolerance = (window + hop) / 2 + 1;
-        assert_eq!(spans[0].start, Samples(0));
-        assert_eq!(spans[3].end, Samples(g.output_len(c.grid().frames()).get()));
+        assert_eq!(spans[0].start, Samples::new(0));
+        assert_eq!(
+            spans[3].end,
+            Samples::new(g.output_len(c.grid().frames()).get())
+        );
         // Frames that hold both chords may read neither, so the old chord's
         // end and the new one's start are each placed, with a gap between.
         for i in 1..4 {

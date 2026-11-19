@@ -46,7 +46,7 @@ fn benches(c: &mut Criterion) {
 
     g.bench_function("stft_istft_2048_hop512", |b| {
         let mut fft = FftScratch::<f64>::new();
-        let req = StftRequest::new(Samples(2048), Samples(512));
+        let req = StftRequest::new(Samples::new(2048), Samples::new(512));
         b.iter(|| {
             let s = stft(req, Mono::new(black_box(&x)), SR, &mut fft).unwrap();
             black_box(istft_transform::<f32>(&s, &mut fft))
@@ -61,7 +61,7 @@ fn benches(c: &mut Criterion) {
 
     g.bench_function("yin_track_hop512", |b| {
         let cfg = YinConfig::new();
-        let hop = PitchHop::of(Samples(512));
+        let hop = PitchHop::of(Samples::new(512));
         b.iter(|| {
             black_box(tutti_measure::yin_track(&cfg, Mono::new(black_box(&x)), SR, hop).unwrap())
         });

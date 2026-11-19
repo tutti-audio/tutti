@@ -89,10 +89,10 @@ impl OnsetConfig {
     pub fn new(function: DetectionFunction) -> Self {
         Self {
             function,
-            framing: Framing::new(Samples(2048), Samples(512)),
-            threshold: OnsetThreshold::of(Amplitude(0.3)),
+            framing: Framing::new(Samples::new(2048), Samples::new(512)),
+            threshold: OnsetThreshold::of(Amplitude::new(0.3)),
             sensitivity: OnsetSensitivity::of(Amplitude::UNITY),
-            min_gap: OnsetGap::of(Seconds(0.05)),
+            min_gap: OnsetGap::of(Seconds::new(0.05)),
         }
     }
 
@@ -206,7 +206,7 @@ impl Onset {
     /// [`position`](Self::position).
     #[inline]
     pub fn time(&self, sample_rate: impl Into<SampleRate>) -> Seconds {
-        Seconds(self.position.get() as f64 / sample_rate.into().get())
+        Seconds::new(self.position.get() as f64 / sample_rate.into().get())
     }
 }
 
@@ -323,7 +323,7 @@ impl<S: Sample> OnsetMeter<S> {
                     v
                 }
             };
-            let position = Samples(index * plan.geometry.hop().get());
+            let position = Samples::new(index * plan.geometry.hop().get());
             let item = Novelty {
                 frame: position,
                 value: value * plan.sensitivity,
@@ -466,7 +466,7 @@ fn pick_peaks(cfg: &OnsetPlan, novelty: &[Novelty]) -> Vec<Onset> {
             let falling = value > novelty[i + 1].value;
             (rising && falling && value > threshold).then(|| Onset {
                 position,
-                strength: Amplitude(if max > 0.0 {
+                strength: Amplitude::new(if max > 0.0 {
                     (value / max).min(1.0)
                 } else {
                     0.0

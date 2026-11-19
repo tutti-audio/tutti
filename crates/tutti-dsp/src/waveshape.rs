@@ -231,7 +231,7 @@ impl Antialiasing {
     #[must_use]
     pub fn delay(self, factor: Option<OversamplingFactor>) -> Samples {
         let factor = factor.map_or(1, OversamplingFactor::get);
-        Samples((self.depth() + factor) / (2 * factor))
+        Samples::new((self.depth() + factor) / (2 * factor))
     }
 
     /// The frames the output rings after the input stops, at a rate `factor` times lower than
@@ -239,7 +239,7 @@ impl Antialiasing {
     #[must_use]
     pub fn ring_out(self, factor: Option<OversamplingFactor>) -> Samples {
         let factor = factor.map_or(1, OversamplingFactor::get);
-        Samples(self.depth().div_ceil(factor))
+        Samples::new(self.depth().div_ceil(factor))
     }
 }
 
