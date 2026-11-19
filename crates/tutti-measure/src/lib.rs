@@ -310,90 +310,74 @@
 //!   [`ChordConfig`] smooths triads into [`ChordSpan`]s by Viterbi.
 #![forbid(unsafe_code)]
 
-mod align;
-mod chord;
-mod chroma;
+mod analyses;
 mod convert;
 mod error;
-mod features;
 mod framing;
-mod key;
 mod level;
-mod loudness;
 mod measure;
-mod notes;
-mod onset;
-mod peaks;
-// No `///` here: a doc comment on a `mod` line shadows the module's own `//!`.
-// The module header carries the description.
-mod pitch;
+mod meters;
 #[cfg(test)]
 mod range_contracts;
-mod silence;
-mod spectrum;
-mod stereo;
-mod tempo;
-mod transform;
-mod vectorscope;
-mod xcorr;
-mod yin;
 
-pub use align::{AlignConfig, Alignment, align};
-pub use chord::{
+pub use analyses::align::{AlignConfig, Alignment, align};
+pub use analyses::chord::{
     ChordConfig, ChordQuality, ChordSpan, SelfTransition, SelfTransitionError, Sharpness,
     SharpnessError, detect_chords,
 };
-pub use chroma::{
-    Chroma, ChromaConfig, ChromaFrame, ChromaMeter, ChromaSummary, FrequencyBand, HarmonicDecay,
-    HarmonicDecayError, Harmonics, HarmonicsError, PeakFloor, PeakFloorError, Tuning, TuningOffset,
-    TuningOffsetError, chroma,
-};
-pub use error::{Error, Result};
-pub use features::{SpectralFeatures, spectral_features};
-pub use framing::Framing;
-pub use key::{Key, KeyEstimate, KeyProfile, Mode, estimate_key, estimate_key_from_mean};
-pub use loudness::{
-    Loudness, LoudnessConfig, LoudnessMeter, TruePeakConfig, TruePeakMeter, WindowedLoudnessConfig,
-    WindowedMeter, WindowedReading, measure_loudness, measure_true_peak,
-};
-#[cfg(test)]
-pub(crate) use measure::fold_uneven;
-pub use measure::{Measure, Meter};
-pub use notes::{
+pub use analyses::features::{SpectralFeatures, spectral_features};
+pub use analyses::key::{Key, KeyEstimate, KeyProfile, Mode, estimate_key, estimate_key_from_mean};
+pub use analyses::notes::{
     NoteConfig, NoteEvent, NoteSpan, NoteSpanError, PitchHop, PitchHopError, PitchSplit,
     PitchSplitError, VelocityRange, frame_levels, notes_from_track, transcribe,
 };
-pub use onset::{
-    DetectionFunction, Novelty, Onset, OnsetConfig, OnsetGap, OnsetGapError, OnsetMeter,
-    OnsetSensitivity, OnsetSensitivityError, OnsetThreshold, OnsetThresholdError, detect_onsets,
-    suppress_close_onsets,
-};
-pub use peaks::{
-    ChannelBlock, PeakBlock, PeakBlocks, PeakConfig, PeakMeter, summarize, summarize_block,
-};
-pub use silence::{
-    FiniteLevel, FiniteLevelError, Region, SilenceConfig, SilenceMeter, strip_silence,
-};
-pub use spectrum::{
-    BandCount, BandCountError, Banding, BandsPerOctave, BandsPerOctaveError, PeakDecay,
-    PeakDecayError, Smoothing, SpectrumConfig, SpectrumFloor, SpectrumFloorError, SpectrumMeter,
-    SpectrumTime, SpectrumTimeError,
-};
-pub use stereo::{StereoLevels, StereoReading, StereoSmoother, correlate};
-pub use tempo::{
+pub use analyses::tempo::{
     Alternatives, AlternativesError, BeatGrid, PriorSpread, PriorSpreadError, Tempo,
     TempoCandidate, TempoConfig, TempoRange, Tightness, TightnessError, estimate_tempo,
     estimate_tempo_from_novelty, track_beats, track_beats_from_novelty,
 };
-pub use transform::{
+pub use analyses::transform::{
     HopPolicy, NormalizedMagnitudes, RawMagnitudes, SampleRange, Stft, StftMagnitude, StftPolar,
     StftRequest, istft as istft_transform, stft, stft_magnitude, stft_polar,
 };
-pub use vectorscope::{ScopePoint, VectorscopeConfig, VectorscopeMeter, vectorscope_points};
-pub use xcorr::{CorrelationPeak, CrossCorrelation, cross_correlate};
-pub use yin::{
+pub use analyses::xcorr::{CorrelationPeak, CrossCorrelation, cross_correlate};
+pub use analyses::yin::{
     Pitch, PitchEstimate, YinConfig, YinThreshold, YinThresholdError, median_filter,
     penalize_jumps, yin, yin_track,
+};
+pub use error::{Error, Result};
+pub use framing::Framing;
+#[cfg(test)]
+pub(crate) use measure::fold_uneven;
+pub use measure::{Measure, Meter};
+pub use meters::chroma::{
+    Chroma, ChromaConfig, ChromaFrame, ChromaMeter, ChromaSummary, FrequencyBand, HarmonicDecay,
+    HarmonicDecayError, Harmonics, HarmonicsError, PeakFloor, PeakFloorError, Tuning, TuningOffset,
+    TuningOffsetError, chroma,
+};
+pub use meters::loudness::{
+    Loudness, LoudnessConfig, LoudnessMeter, TruePeakConfig, TruePeakMeter, WindowedLoudnessConfig,
+    WindowedMeter, WindowedReading, measure_loudness, measure_true_peak,
+};
+pub use meters::onset::{
+    DetectionFunction, Novelty, Onset, OnsetConfig, OnsetGap, OnsetGapError, OnsetMeter,
+    OnsetSensitivity, OnsetSensitivityError, OnsetThreshold, OnsetThresholdError, detect_onsets,
+    suppress_close_onsets,
+};
+pub use meters::peaks::{
+    ChannelBlock, PeakBlock, PeakBlocks, PeakConfig, PeakMeter, summarize, summarize_block,
+};
+pub use meters::silence::{
+    FiniteLevel, FiniteLevelError, Region, SilenceConfig, SilenceMeter, strip_silence,
+};
+pub use meters::spectrum::{
+    BandCount, BandCountError, Banding, BandsPerOctave, BandsPerOctaveError, PeakDecay,
+    PeakDecayError, Smoothing, SpectrumConfig, SpectrumFloor, SpectrumFloorError, SpectrumMeter,
+    SpectrumTime, SpectrumTimeError,
+};
+pub use meters::stereo::{StereoLevels, StereoReading, StereoSmoother, correlate};
+pub use meters::vectorscope::{
+    ScopePoint, VectorscopeConfig, VectorscopeMeter, vectorscope_points,
 };
 
 /// Notes and pitch classes, re-exported from the engine vocabulary: a

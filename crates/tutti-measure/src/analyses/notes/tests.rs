@@ -1,7 +1,7 @@
 use super::*;
-use crate::chroma::FrequencyBand;
+use crate::analyses::yin::Pitch;
 use crate::framing::Framing;
-use crate::yin::Pitch;
+use crate::meters::chroma::FrequencyBand;
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 use tutti_units::{Confidence, Hz};
 

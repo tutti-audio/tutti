@@ -60,8 +60,8 @@ use tutti_units::Samples;
 
 use tutti_units::ranged;
 
-use crate::chroma::{CLASSES, Chroma};
 use crate::framing::{Framing, check_frame_count};
+use crate::meters::chroma::{CLASSES, Chroma};
 use crate::{Error, Result};
 use tutti_dsp::{FrameCount, FrameIndex, Grid, median, sticky_viterbi};
 
