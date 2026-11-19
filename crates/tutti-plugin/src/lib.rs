@@ -60,7 +60,7 @@
 //! // A session hands every plugin it adds a reader of its own; with none, a fixed
 //! // map does.
 //! let tempo = TempoReader::constant(Bpm::of(120.0)).expect("a tempo");
-//! let (mut editor, _executor) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(512))));
+//! let (mut editor, _executor) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(512))));
 //! let _controls = editor.insert(NodeKey(1), "plugin", plugin.bind(tempo));
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```

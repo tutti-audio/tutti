@@ -33,21 +33,22 @@
 //! [`InputProducerHandle`]: crate::InputProducerHandle
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Instant;
-use tutti_rt::LockExt;
 
 use tutti_midi_device::ResourceStore;
 
 use crate::answer::Answer;
 use crate::backend;
+use crate::capability::legacy;
 use crate::ci::{CiChange, CiPeerInfo, Heard, PeerId};
 use crate::devices::{Devices, OpenInput, OpenOutput};
 use crate::endpoints::MidiEndpoints;
 use crate::error::{MidiHardwareError, Result};
-use crate::process::{ProcessChange, ReportAsk, ReportError, Reporter};
+use crate::peer::{PeerError, PeerRef};
+use crate::process::{ProcessChange, ReportAsk, Reporter};
 use crate::profiles::{PeerProfiles, ProfileError, ProfileSwitch, ProfilesChange};
-use crate::properties::{PropertyAsk, PropertyChange, PropertyError, PropertyPeer};
+use crate::properties::{PropertyAsk, PropertyChange, PropertyPeer};
 use crate::stream::{DeviceStream, InputTiming, Negotiation};
 use crate::{HardwareMidiInputs, InputFault};
 use tutti_graph::EventInletNode;
@@ -98,7 +99,7 @@ pub struct MidiSession {
     generated_instance: Option<ProductInstanceId>,
     /// What the MIDI-CI devices' Property Exchange Responders serve
     /// ([`MidiSession::serve_properties`]); empty by default.
-    properties: Arc<Mutex<ResourceStore>>,
+    properties: ResourceStore,
 }
 
 /// An identity and the Groups its one Function Block spans: what
@@ -317,7 +318,7 @@ impl MidiSession {
             options,
             presented: None,
             generated_instance: None,
-            properties: Arc::default(),
+            properties: ResourceStore::default(),
         })
     }
 
@@ -427,17 +428,10 @@ impl MidiSession {
         // A UMP Endpoint with an output is asked what it is by the next
         // `poll`. Its output is the negotiation's own, not the session's one
         // destination: asking must not wait for, or disturb, that choice.
-        let os = self.devices.capability(&id).unwrap_or_default();
+        let os = self.devices.capability(&id).unwrap_or_else(legacy);
         // A MIDI 1.0 port with an output is asked for its identity instead.
         let out = self.devices.open_output(&id).ok();
-        let stream = Negotiation::new(
-            id.clone(),
-            os,
-            out,
-            timing,
-            ci_refused,
-            Arc::clone(&self.properties),
-        );
+        let stream = Negotiation::new(id.clone(), os, out, timing, ci_refused);
         let held = Held {
             stream,
             timing,
@@ -604,7 +598,9 @@ impl MidiSession {
                 lost_during: after > before,
             };
             held.lost_seen = after;
-            let stepped = held.stream.poll(now, &heard, presented);
+            let stepped = held
+                .stream
+                .poll(now, &heard, presented, &mut self.properties);
             // Off the moment nothing listens, so no packet is kept for no one.
             sync_hearing(ports, held, ci);
             if let Some(stream) = stepped.stream {
@@ -739,16 +735,15 @@ impl MidiSession {
     /// cannot be subscribed to (M2-103 §11.1). Publishing to subscribers is not
     /// offered.
     pub fn serve_properties(&mut self, store: ResourceStore) {
-        *self.properties.lock_recover() = store.without_subscriptions();
+        self.properties = store.without_subscriptions();
     }
 
     /// The store the devices serve: what [`serve_properties`](Self::serve_properties)
-    /// gave, as peers' Sets have changed it. Lock it for as short a time as a
-    /// read takes: the devices lock it inside [`poll`](Self::poll), so a guard held on
-    /// the thread that calls `poll` deadlocks it.
+    /// gave, as peers' Sets have changed it. Only
+    /// [`poll`](Self::poll) changes it between calls.
     #[must_use]
-    pub fn served_properties(&self) -> Arc<Mutex<ResourceStore>> {
-        Arc::clone(&self.properties)
+    pub const fn served_properties(&self) -> &ResourceStore {
+        &self.properties
     }
 
     /// The MIDI-CI peers of the open input `id` that declared Property Exchange
@@ -770,14 +765,10 @@ impl MidiSession {
     ///
     /// # Errors
     ///
-    /// [`PropertyError::NotOpen`] when that input has since closed, and
-    /// [`PropertyError::NoSuchPeer`] when the peer is gone.
-    pub fn ask_property(&mut self, ask: PropertyAsk) -> std::result::Result<(), PropertyError> {
-        self.inputs
-            .get_mut(&ask.peer.device)
-            .ok_or(PropertyError::NotOpen)?
-            .stream
-            .ask_property(ask)
+    /// [`PeerError::NotOpen`] when that input has since closed, and
+    /// [`PeerError::NoSuchPeer`] when the peer is gone.
+    pub fn ask_property(&mut self, ask: PropertyAsk) -> std::result::Result<(), PeerError> {
+        self.input_of(ask.peer.at())?.stream.ask_property(ask)
     }
 
     /// The Profiles of the MIDI-CI peers found on the open input `id` that
@@ -802,17 +793,13 @@ impl MidiSession {
     ///
     /// # Errors
     ///
-    /// [`ProfileError::NotOpen`] when that input has since closed,
-    /// [`ProfileError::NoSuchPeer`] when the peer is gone, and
+    /// [`ProfileError::Peer`] with [`PeerError::NotOpen`] when that input has
+    /// since closed, with [`PeerError::NoSuchPeer`] when the peer is gone, and
     /// [`ProfileError::NotListed`] when it no longer lists the Profile there.
     ///
     /// [`PEER_REPLY_TIMEOUT`]: tutti_midi_device::PEER_REPLY_TIMEOUT
     pub fn set_profile(&mut self, switch: ProfileSwitch) -> std::result::Result<(), ProfileError> {
-        self.inputs
-            .get_mut(&switch.device)
-            .ok_or(ProfileError::NotOpen)?
-            .stream
-            .set_profile(switch)
+        self.input_of(switch.at())?.stream.set_profile(switch)
     }
 
     /// The MIDI-CI peers of the open input `id` that declared Process Inquiry and
@@ -836,14 +823,15 @@ impl MidiSession {
     ///
     /// # Errors
     ///
-    /// [`ReportError::NotOpen`] when that input has since closed, and
-    /// [`ReportError::NoSuchPeer`] when the peer is gone.
-    pub fn report(&mut self, ask: ReportAsk) -> std::result::Result<(), ReportError> {
-        self.inputs
-            .get_mut(&ask.peer.device)
-            .ok_or(ReportError::NotOpen)?
-            .stream
-            .report(ask)
+    /// [`PeerError::NotOpen`] when that input has since closed, and
+    /// [`PeerError::NoSuchPeer`] when the peer is gone.
+    pub fn report(&mut self, ask: ReportAsk) -> std::result::Result<(), PeerError> {
+        self.input_of(ask.peer.at())?.stream.report(ask)
+    }
+
+    /// The open input the peer `at` was found on.
+    fn input_of(&mut self, at: &PeerRef) -> std::result::Result<&mut Held, PeerError> {
+        self.inputs.get_mut(at.device()).ok_or(PeerError::NotOpen)
     }
 
     /// What is known of the UMP Stream state of the open input `id`: `None`
@@ -948,10 +936,7 @@ fn mpe_zone_refusals(
             } => Some(*manager),
             _ => continue,
         };
-        let Some(held) = peers
-            .iter()
-            .find(|p| p.group() == peer.group && p.muid() == peer.muid)
-        else {
+        let Some(held) = peers.iter().find(|p| p.at().peer() == *peer) else {
             continue;
         };
         for overlap in held.refused_mpe_zones() {

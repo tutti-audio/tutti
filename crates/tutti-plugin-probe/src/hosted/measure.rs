@@ -48,15 +48,15 @@ use tutti_units::{Amplitude, Db, SampleRate, Samples, Seconds};
 /// plugins). **The probe measures at this
 /// level**: a figure is of that stimulus, not a bound for a nonlinear plugin (a
 /// gate or an expander may never open at 0.1, which reads as `Silent`).
-const IMPULSE: Amplitude = Amplitude(0.1);
+const IMPULSE: Amplitude = Amplitude::new(0.1);
 
 /// How long silence is rendered before the stimulus: what decides
 /// `NeverSettles`.
-const SILENCE: Seconds = Seconds(1.0);
+const SILENCE: Seconds = Seconds::new(1.0);
 
 /// How long the output must stay below the floor, after its last frame above
 /// it, for the plugin to count as settled.
-const SETTLE: Seconds = Seconds(1.0);
+const SETTLE: Seconds = Seconds::new(1.0);
 
 /// What the stimulus render runs past [`tutti_graph::MAX_NODE_TAIL`]: **the render
 /// budget is `MAX_NODE_TAIL` plus this**, a time converted at the configuration's
@@ -68,7 +68,7 @@ const SETTLE: Seconds = Seconds(1.0);
 ///   claim) and `Processing::ceiling` declares it `Unbounded`;
 /// - an **instrument** is `NotChecked(NeverReachedFloor)`: a held note has no
 ///   lower bound worth reporting.
-const BUDGET_MARGIN: Seconds = Seconds(5.0);
+const BUDGET_MARGIN: Seconds = Seconds::new(5.0);
 
 /// How long one plugin may render at one configuration before it loses its row
 /// ([`MeasureFailure::TimedOut`]): a plugin slower than real time over the
@@ -79,7 +79,7 @@ const BUDGET_MARGIN: Seconds = Seconds(5.0);
 const RENDER_DEADLINE: Duration = Duration::from_secs(60);
 
 /// How long an instrument's note is held before its note-off.
-const NOTE_LENGTH: Seconds = Seconds(0.1);
+const NOTE_LENGTH: Seconds = Seconds::new(0.1);
 
 /// The key an instrument is played (middle C).
 const NOTE: NoteNumber = NoteNumber::of(60);
@@ -90,8 +90,8 @@ const VELOCITY: NoteVelocity = NoteVelocity::CENTER;
 /// The configurations the probe measures at, in order: a
 /// figure can depend on the rate and the block.
 const CONFIGS: [(SampleRate, MaxBlock); 2] = [
-    (SampleRate::SR_48K, MaxBlock::of(Samples(512))),
-    (SampleRate::SR_44K1, MaxBlock::of(Samples(64))),
+    (SampleRate::SR_48K, MaxBlock::of(Samples::new(512))),
+    (SampleRate::SR_44K1, MaxBlock::of(Samples::new(64))),
 ];
 
 /// What the experiment needs to know about the plugin it runs on.
@@ -141,7 +141,7 @@ impl<'p, P: Processor> Render<'p, P> {
         let mut outs: Vec<&mut [f32]> = self.outs.iter_mut().map(Vec::as_mut_slice).collect();
         let ctx = ProcessContext::new().midi(events);
         let mut io = PluginIo {
-            buffer: InputOutput::from_slices(Samples(self.block), &ins, &mut outs)
+            buffer: InputOutput::from_slices(Samples::new(self.block), &ins, &mut outs)
                 .expect("equal channels"),
             ctx: &ctx,
             out: &mut self.out,
@@ -200,7 +200,8 @@ fn note(on: bool, offset: usize, block: usize) -> UmpAt {
             attribute,
         }
     };
-    let offset = Offset::new(Samples(offset), Samples(block)).expect("an offset inside its block");
+    let offset =
+        Offset::new(Samples::new(offset), Samples::new(block)).expect("an offset inside its block");
     (offset, Ump::from(Message::Midi2(address, voice)))
 }
 
@@ -242,7 +243,7 @@ fn measure_within<P: Processor>(
         held = held.min(run.peak());
     }
     if held > floor {
-        let level = Amplitude(f64::from(held)).to_db();
+        let level = Amplitude::new(f64::from(held)).to_db();
         run.processor.stop();
         return Ok(unsettled(config, level));
     }
@@ -347,7 +348,7 @@ fn judge(
     // plugin reports: a tail excludes latency.
     let from = note_off.unwrap_or(0);
     let figure = last
-        .map(|l| Samples(l.saturating_sub(from)).remaining_after(subject.latency))
+        .map(|l| Samples::new(l.saturating_sub(from)).remaining_after(subject.latency))
         .unwrap_or(Samples::ZERO);
     let (tail, tail_verdict) = match subject.tail {
         PluginTail::Unbounded => (None, TailVerdict::NotChecked(NotChecked::UnboundedClaim)),

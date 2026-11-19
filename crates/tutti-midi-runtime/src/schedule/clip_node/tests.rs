@@ -11,7 +11,7 @@ use tutti_units::Beat;
 #[test]
 fn reclaim_frees_a_clip_a_block_held_across_its_replacement() {
     let on = midi::note_on(MidiChannel::FIRST, 60, 0xFFFF);
-    let mut node = MidiClipNode::new([TimedMidiEvent::new(Beat(1.0), on).unwrap()]);
+    let mut node = MidiClipNode::new([TimedMidiEvent::new(Beat::new(1.0), on).unwrap()]);
     let controls = MidiClipControls {
         cell: node.cell.clone(),
         serial: Arc::default(),
@@ -48,9 +48,9 @@ fn a_clip_is_translated_in_beat_order_and_keeps_its_list_order() {
         Voice1::note_on(note, U7::of(0)),
     ));
     let events = [
-        TimedMidiEvent::new(Beat(3.0), on0).unwrap(),
+        TimedMidiEvent::new(Beat::new(3.0), on0).unwrap(),
         TimedMidiEvent::new(
-            Beat(2.0),
+            Beat::new(2.0),
             Message::midi1(
                 MidiChannel::FIRST,
                 Voice1::control_change(CCNumber::DATA_ENTRY_LSB, U7::of(50)),
@@ -58,7 +58,7 @@ fn a_clip_is_translated_in_beat_order_and_keeps_its_list_order() {
         )
         .unwrap(),
         TimedMidiEvent::new(
-            Beat(1.0),
+            Beat::new(1.0),
             Message::midi1(
                 MidiChannel::FIRST,
                 Voice1::control_change(CCNumber::DATA_ENTRY, U7::of(12)),
@@ -66,7 +66,7 @@ fn a_clip_is_translated_in_beat_order_and_keeps_its_list_order() {
         )
         .unwrap(),
         TimedMidiEvent::new(
-            Beat(0.0),
+            Beat::new(0.0),
             Message::midi1(
                 MidiChannel::FIRST,
                 Voice1::control_change(CCNumber::RPN_MSB, U7::of(0)),
@@ -74,7 +74,7 @@ fn a_clip_is_translated_in_beat_order_and_keeps_its_list_order() {
         )
         .unwrap(),
         TimedMidiEvent::new(
-            Beat(0.0),
+            Beat::new(0.0),
             Message::midi1(
                 MidiChannel::FIRST,
                 Voice1::control_change(CCNumber::RPN_LSB, U7::of(0)),

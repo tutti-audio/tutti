@@ -83,7 +83,7 @@ fn the_swept_delay_corners_are_allocation_free_and_finite() {
                     ModDelayNode::<f32>::new(
                         bus(width),
                         Sweep::FLANGER,
-                        Stagger::of_step(PhaseIncrement(0.37)),
+                        Stagger::of_step(PhaseIncrement::new(0.37)),
                         ModDelayControls::FLANGER,
                     )
                     .expect("a step fits any width")

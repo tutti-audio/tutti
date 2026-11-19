@@ -734,14 +734,14 @@ impl RenderSide {
         let (room, matches) = self.slab.as_ref().map_or((Samples::ZERO, false), |slab| {
             let layout = slab.layout_ref();
             (
-                Samples(layout.samples_per_channel),
+                Samples::new(layout.samples_per_channel),
                 layout.input_channels() == self.config.inputs
                     && layout.output_channels() == self.config.outputs,
             )
         });
         let fits = matches
             && frames > Samples::ZERO
-            && frames <= Samples(self.config.max_block)
+            && frames <= Samples::new(self.config.max_block)
             && frames <= room
             && self
                 .pipeline
@@ -786,7 +786,7 @@ impl RenderSide {
             self.losses.refused_blocks.add(1);
             return Ok(silent());
         }
-        if !self.block_fits(Samples(block.num_samples)) {
+        if !self.block_fits(Samples::new(block.num_samples)) {
             return Ok(silent());
         }
         // Neither the no-slab return just below nor a block the plugin's host

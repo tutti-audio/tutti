@@ -23,7 +23,7 @@ const FRAMES_PER_BEAT: f64 = 24_000.0;
 const BLOCK: usize = 512;
 
 fn at(frame: u64, e: Ump) -> TimedMidiEvent {
-    TimedMidiEvent::new(Beat(frame as f64 / FRAMES_PER_BEAT), e).unwrap()
+    TimedMidiEvent::new(Beat::new(frame as f64 / FRAMES_PER_BEAT), e).unwrap()
 }
 
 fn key(i: u32) -> (MidiChannel, u8) {
@@ -75,7 +75,7 @@ fn pad() -> Vec<TimedMidiEvent> {
 fn rig(events: Vec<TimedMidiEvent>) -> Executor {
     let (mut editor, exec) = Editor::new(Prepare::new(
         SampleRate::SR_48K,
-        MaxBlock::of(Samples(BLOCK)),
+        MaxBlock::of(Samples::new(BLOCK)),
     ));
     editor.insert(NodeKey(1), "clip", MidiClipNode::new(events));
     editor.commit().expect("commits");
@@ -84,8 +84,12 @@ fn rig(events: Vec<TimedMidiEvent>) -> Executor {
 
 fn roll(mut exec: Executor, frames: u64) -> Executor {
     for f in (0..frames).step_by(BLOCK) {
-        let t =
-            TransportPosition::new(true, Bpm::of(120.0), Beat(f as f64 / FRAMES_PER_BEAT), None);
+        let t = TransportPosition::new(
+            true,
+            Bpm::of(120.0),
+            Beat::new(f as f64 / FRAMES_PER_BEAT),
+            None,
+        );
         exec.process(BLOCK, &t, &[], &mut []);
     }
     exec

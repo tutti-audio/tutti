@@ -93,7 +93,7 @@ fn konst(depth: f64) -> Layer {
         id: LayerId(1),
         clock: Clock::Beats {
             per_cycle: BeatsPerCycle::of(1.0),
-            phase: PhaseIncrement(0.0),
+            phase: PhaseIncrement::new(0.0),
         },
         wave: Waveform::Const(1.0),
         amount: Amount {
@@ -151,7 +151,10 @@ fn render(
         g.connect_output(n, c, c);
     }
     let mut r = g
-        .renderer(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(100))))
+        .renderer(Prepare::new(
+            SampleRate::SR_48K,
+            MaxBlock::of(Samples::new(100)),
+        ))
         .expect("builds");
     if let Some((param, v)) = fed {
         let at = ParamIn {
@@ -202,7 +205,10 @@ fn render_mix(node: NodeParts<()>, mix: MixIs) -> Vec<Vec<f32>> {
         g.spec_mut().set_mix(n, Mix::new(v));
     }
     let mut r = g
-        .renderer(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(100))))
+        .renderer(Prepare::new(
+            SampleRate::SR_48K,
+            MaxBlock::of(Samples::new(100)),
+        ))
         .expect("builds");
     if let MixIs::Fed(v) = mix {
         let at = ParamIn {
@@ -516,7 +522,7 @@ fn cases() -> Vec<Case> {
                         .expect("a test width fits a bus"),
                 );
                 if let Some(v) = v {
-                    n.set_volume(Amplitude(f64::from(v)));
+                    n.set_volume(Amplitude::new(f64::from(v)));
                 }
                 parts_of(n)
             },
@@ -948,7 +954,7 @@ fn mix_cases() -> Vec<MixCase> {
                     tutti_nodes::ConvolverNode::shared_ir(
                         ChannelLayout::try_from(w).expect("a test width is small"),
                         Mono::new(&[0.0, 0.0, 1.0, -0.5]),
-                        Samples(64),
+                        Samples::new(64),
                     )
                     .unwrap(),
                 )
@@ -1033,7 +1039,10 @@ fn an_authored_write_moves_the_base_under_modulation() {
     };
     g.spec_mut().set_param_range(at, ParamRange::new(0.0, 10.0));
     let mut r = g
-        .renderer(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(100))))
+        .renderer(Prepare::new(
+            SampleRate::SR_48K,
+            MaxBlock::of(Samples::new(100)),
+        ))
         .expect("builds");
     drive(r.editor_mut(), at, Arc::clone(&cell), vec![konst(0.05)]);
     let x = noise(7);
@@ -1077,7 +1086,10 @@ fn a_crossed_range_is_survivable() {
     };
     g.spec_mut().set_param_range(at, ParamRange::new(4.0, 2.0));
     let mut r = g
-        .renderer(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(100))))
+        .renderer(Prepare::new(
+            SampleRate::SR_48K,
+            MaxBlock::of(Samples::new(100)),
+        ))
         .expect("builds");
     drive(r.editor_mut(), at, Arc::new(AtomicF64::new(100.0)), vec![]);
     let out = r.render_input(Planes::new(&[&noise(7)]).unwrap()).remove(0);
@@ -1098,7 +1110,10 @@ fn an_unmodulated_param_adds_nothing_to_the_plan() {
     let (n, _) = g.add_with_controls(node);
     g.connect_input(0, n, 0).connect_output(n, 0, 0);
     let mut r: Renderer = g
-        .renderer(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(100))))
+        .renderer(Prepare::new(
+            SampleRate::SR_48K,
+            MaxBlock::of(Samples::new(100)),
+        ))
         .expect("builds");
     // The lane is in the graph, unconnected, from the start.
     let lane = ControlLaneNode::for_unit(
@@ -1170,7 +1185,7 @@ fn a_fork_modulates_as_the_live_graph_does() {
     let mut g = GraphBuilder::new(ChannelLayout::MONO, ChannelLayout::MONO);
     let (n, _) = g.add_with_controls(node);
     g.connect_input(0, n, 0).connect_output(n, 0, 0);
-    let prepare = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(100)));
+    let prepare = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(100)));
     let (mut editor, _exec) = g.build(prepare).expect("builds");
     let at = ParamIn {
         node: n,

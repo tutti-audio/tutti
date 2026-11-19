@@ -33,6 +33,19 @@ pub struct ServerWatch {
     /// Notified when [`declare`](Self::declare) sets the latch, and shared with
     /// whoever else waits on the server ([`wake`](Self::wake)).
     wake: Arc<Wake>,
+    /// What [`declare`](Self::declare) calls once it has set the latch: the
+    /// rings of the threads that wait on the server.
+    wakers: Mutex<Wakers>,
+}
+
+/// The calls a declaration makes ([`ServerWatch::on_declared`]).
+#[derive(Default)]
+struct Wakers(Vec<Box<dyn Fn() + Send + Sync>>);
+
+impl std::fmt::Debug for Wakers {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("Wakers").field(&self.0.len()).finish()
+    }
 }
 
 impl ServerWatch {
@@ -55,7 +68,25 @@ impl ServerWatch {
         self.dead.store(true, Ordering::Release);
         drop(slot);
         self.wake.notify();
+        for wake in &self.wakers.lock_recover().0 {
+            wake();
+        }
         true
+    }
+
+    /// Has `wake` called when the latch is set, or at once when it is set
+    /// already: how a thread that waits on a descriptor or a doorbell, which
+    /// [`wake`](Self::wake)'s gate does not reach, hears the server's end.
+    /// Called on whichever thread declares, so it takes no lock and does not wait.
+    pub(crate) fn on_declared(&self, wake: impl Fn() + Send + Sync + 'static) {
+        let mut wakers = self.wakers.lock_recover();
+        wakers.0.push(Box::new(wake));
+        // A declaration that landed before the registration called nothing.
+        if self.is_dead()
+            && let Some(wake) = wakers.0.last()
+        {
+            wake();
+        }
     }
 
     /// The gate that waits on this server notify: [`declare`](Self::declare)

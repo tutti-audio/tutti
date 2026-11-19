@@ -73,7 +73,7 @@ pub struct TimerId(pub u32);
 /// use tutti_plugin_types::{MaxBlock, Prepare, RenderMode};
 /// use tutti_units::{SampleRate, Samples};
 ///
-/// let block = MaxBlock::of(Samples(512));
+/// let block = MaxBlock::of(Samples::new(512));
 /// let prepare = Prepare::new(SampleRate::SR_48K, block);
 /// assert_eq!(prepare.mode(), RenderMode::Realtime);
 /// ```

@@ -600,12 +600,12 @@ mod tests {
     #[test]
     fn the_constructor_controls_reach_the_cells() {
         let c = CompressorControls {
-            threshold: Db(-18.0),
-            knee: Db(6.0),
-            ratio: CompressionRatio(3.0),
-            attack: Seconds(0.002),
-            release: Seconds(0.25),
-            makeup: Db(2.5),
+            threshold: Db::new(-18.0),
+            knee: Db::new(6.0),
+            ratio: CompressionRatio::new(3.0),
+            attack: Seconds::new(0.002),
+            release: Seconds::new(0.25),
+            makeup: Db::new(2.5),
             ..CompressorControls::DEFAULT
         };
         for node in [
@@ -767,7 +767,10 @@ mod tests {
         let (threshold, ratio) = (-30.0f64, 5.0f64);
         let key = vec![wide_signal(1)[0]; 128];
         let mut k = CompressorKernel::<f64>::new(BusTopology::MONO, KeySource::Own, KeyFilter::Off);
-        k.prepare(SampleRate::SR_48K, MaxBlock::of(tutti_units::Samples(128)));
+        k.prepare(
+            SampleRate::SR_48K,
+            MaxBlock::of(tutti_units::Samples::new(128)),
+        );
         let y = drive_kernel(
             &mut k,
             &[(0, four(threshold, ratio, 0.0, 0.0))],

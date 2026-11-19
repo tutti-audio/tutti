@@ -26,7 +26,7 @@ fn dry() -> Rig {
 /// A unit prepared by a graph at `rate`, the way `Node::prepare` re-rates it.
 fn prepared_at(rate: SampleRate) -> SoundFontUnit<f32> {
     let mut unit = SoundFontUnit::new(timgm6mb(), Settings::new()).unwrap();
-    unit.prepare(&Prepare::new(rate, MaxBlock::of(Samples(64))));
+    unit.prepare(&Prepare::new(rate, MaxBlock::of(Samples::new(64))));
     unit
 }
 

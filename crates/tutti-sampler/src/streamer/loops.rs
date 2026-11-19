@@ -373,7 +373,7 @@ impl<F: Float> RingLoop<F> {
             let Some((lead, weight)) = self.span.fade_at(from + k) else {
                 continue;
             };
-            let lead = lead_in.frame(Samples(lead + fade - self.span.resume()));
+            let lead = lead_in.frame(Samples::new(lead + fade - self.span.resume()));
             for (s, &l) in frame.iter_mut().zip(lead) {
                 *s = tutti_dsp::lerp(*s, l, weight);
             }
@@ -392,7 +392,7 @@ impl<F: Float> RingLoop<F> {
         let Ok(body) = Interleaved::new(body, run.layout()) else {
             return false;
         };
-        let from = Samples(at - self.span.resume());
+        let from = Samples::new(at - self.span.resume());
         let src = body.slice(from..from + run.frames());
         run.samples_mut().copy_from_slice(src.samples());
         true
@@ -532,7 +532,7 @@ impl<F: Float> Mapping<F> {
     ) {
         let frames = out.frames();
         let writable = self.end().map_or(frames, |end| {
-            Samples((end.saturating_sub(pos) as usize).min(frames.get()))
+            Samples::new((end.saturating_sub(pos) as usize).min(frames.get()))
         });
         out.slice_mut(writable..frames).samples_mut().fill(F::ZERO);
         let mut out = out.slice_mut(Samples::ZERO..writable);
@@ -558,7 +558,7 @@ impl<F: Float> Mapping<F> {
         while done < writable.get() {
             let at = span.place_frame(pos as usize + done);
             let run = (span.end() - at).min(writable.get() - done);
-            let mut slice = out.slice_mut(Samples(done)..Samples(done + run));
+            let mut slice = out.slice_mut(Samples::new(done)..Samples::new(done + run));
             if !ring_loop.body_run(at, &mut slice) {
                 read(at, slice.samples_mut());
             }
@@ -678,7 +678,7 @@ pub(crate) fn apply_mapping<F: RingFloat>(
             let start = at.saturating_sub(3);
             let covered = ReadRate::new(rate.get().max(1.0)).advance(fade_frames);
             let frames = covered.to_samples_ceil().get() + GAP_COVER_FRAMES + 8;
-            let mut data = vec![F::ZERO; layout.interleaved_len(Samples(frames))];
+            let mut data = vec![F::ZERO; layout.interleaved_len(Samples::new(frames))];
             // The old content piecewise, as the reader would have heard it.
             let split = (content
                 .switch_at
@@ -687,7 +687,7 @@ pub(crate) fn apply_mapping<F: RingFloat>(
                 - start) as usize;
             // `data` is whole frames of the ring's width, so the view is built.
             let mut view = InterleavedMut::new(&mut data, layout).ok()?;
-            let (a, b) = view.split_at_mut(Samples(split));
+            let (a, b) = view.split_at_mut(Samples::new(split));
             writer.fill_with(&content.before, start, a);
             writer.fill_with(&content.current, start + split as u64, b);
             Some(FadeRecord {
@@ -792,7 +792,7 @@ mod tests {
         };
         for pos in [f64::INFINITY, 1e30, 18_446_744_073_709_552_000.0] {
             let (taps, _) = arrangement
-                .taps::<f32>(SamplePosition(pos))
+                .taps::<f32>(SamplePosition::new(pos))
                 .expect("a looped position has taps");
             assert!(
                 taps.iter().all(|&t| t >= usize::MAX as u64 - 1),
@@ -849,7 +849,7 @@ mod tests {
 
     fn fill(mapping: &Mapping<f32>, wave: &Wave, pos: u64, frames: usize, ch: usize) -> Vec<f32> {
         let layout = ChannelLayout::try_from(ch).expect("a test width is small");
-        let mut out = vec![0.0f32; layout.interleaved_len(Samples(frames))];
+        let mut out = vec![0.0f32; layout.interleaved_len(Samples::new(frames))];
         let reads = std::cell::Cell::new(0);
         let mut read = reader(wave, ch, &reads);
         let view = InterleavedMut::new(&mut out, layout).expect("whole frames");
@@ -1072,14 +1072,14 @@ mod tests {
             let arrangement = mapping.arrangement();
             for k in 0..9_000u32 {
                 let pos = k as f64 * 1.318_359_375 * 0.91875;
-                let at = SamplePosition(pos);
+                let at = SamplePosition::new(pos);
                 let mut memory = [0.0f32];
                 if mapping.reverse {
                     if pos < len as f64 {
                         read_frame(
                             &wave,
                             &Place::FAN,
-                            mirrored(Samples::new(len), SamplePosition(pos)),
+                            mirrored(Samples::new(len), SamplePosition::new(pos)),
                             &mut memory,
                         );
                     }
@@ -1089,12 +1089,12 @@ mod tests {
                         &wave,
                         &Place::FAN,
                         &span,
-                        SamplePosition(p),
+                        SamplePosition::new(p),
                         looped,
                         &mut memory,
                     );
                 } else if pos < len as f64 {
-                    read_frame(&wave, &Place::FAN, SamplePosition(pos), &mut memory);
+                    read_frame(&wave, &Place::FAN, SamplePosition::new(pos), &mut memory);
                 }
                 let mut live = [0.0f32];
                 if let Some((taps, frac)) = arrangement.taps(at) {
@@ -1176,7 +1176,7 @@ mod tests {
         writer.fill_with(&Mapping::plain(Samples::new(LEN)), 0, view);
         assert_eq!(
             writer.push_interleaved(&held).expect("the ring's width"),
-            tutti_units::Samples(10_000)
+            tutti_units::Samples::new(10_000)
         );
         let _ = reader.claim(0, [(0, 64), (0, 0)]);
         assert_eq!(writer.in_flight_end(), 64);

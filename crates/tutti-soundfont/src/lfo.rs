@@ -30,19 +30,19 @@ impl Lfo {
             sample_rate: settings.hz(),
             block_size: settings.block_len(),
             active: false,
-            delay: Seconds(0.0),
-            period: Seconds(0.0),
+            delay: Seconds::new(0.0),
+            period: Seconds::new(0.0),
             processed_sample_count: 0,
             value: Bipolar::ZERO,
         }
     }
 
     pub(crate) fn start(&mut self, delay: Seconds, frequency: Hz) {
-        if frequency > Hz(1.0e-3) {
+        if frequency > Hz::new(1.0e-3) {
             self.active = true;
 
             self.delay = delay;
-            self.period = Seconds(1.0 / frequency.get());
+            self.period = Seconds::new(1.0 / frequency.get());
 
             self.processed_sample_count = 0;
             self.value = Bipolar::ZERO;
@@ -60,7 +60,7 @@ impl Lfo {
         self.processed_sample_count += self.block_size;
 
         let current_time =
-            Seconds(self.processed_sample_count as f64 / f64::from(self.sample_rate));
+            Seconds::new(self.processed_sample_count as f64 / f64::from(self.sample_rate));
 
         if current_time < self.delay {
             self.value = Bipolar::ZERO;

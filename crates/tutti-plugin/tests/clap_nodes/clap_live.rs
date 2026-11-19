@@ -172,8 +172,8 @@ fn settled(controls: &tutti_plugin_host::PluginControls, refused: u64, skipped: 
 fn run_live(rate: f64, quantum: usize, blocks: usize, burst_at: Option<usize>) -> Run {
     let probe = load_probe(rate);
     let inputs = probe.client.inputs();
-    let prepare = Prepare::new(SampleRate::of(rate), MaxBlock::of(Samples(quantum)))
-        .with_quantum(MaxBlock::of(Samples(quantum)));
+    let prepare = Prepare::new(SampleRate::of(rate), MaxBlock::of(Samples::new(quantum)))
+        .with_quantum(MaxBlock::of(Samples::new(quantum)));
     let (mut ed, exec) = Editor::new(prepare);
     let (src, key) = (NodeKey(1), NodeKey(2));
     ed.insert(src, "ramp", Unforkable(RampSource));
@@ -350,7 +350,7 @@ fn a_silent_block_is_judged_by_what_the_collect_and_the_server_did() {
                lates: &[usize],
                refuses: &[usize],
                skips: &[usize]| Run {
-        declared: Samples(0),
+        declared: Samples::new(0),
         silent: silent.to_vec(),
         wrong: Vec::new(),
         misses: misses.to_vec(),
@@ -417,7 +417,7 @@ fn assert_live(rate: f64, quantum: usize) {
     let run = judged_run(&what, || run_live(rate, quantum, 200, None), 0, 0..0);
     assert_eq!(
         run.declared,
-        Samples(PROBE_LATENCY + quantum),
+        Samples::new(PROBE_LATENCY + quantum),
         "a {quantum}-frame device: the plugin's latency plus one callback"
     );
 }

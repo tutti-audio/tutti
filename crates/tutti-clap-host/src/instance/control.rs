@@ -291,7 +291,7 @@ impl Control for ClapLoaded {
         let latency_samples = if self.flags.active {
             self.latency_samples(main)
         } else {
-            Samples(0)
+            Samples::new(0)
         };
         LoadedPlugin {
             inputs: layout.inputs,

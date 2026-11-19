@@ -211,7 +211,7 @@ fn a_lied_about_latency_does_not_destabilise_the_host() {
     let reported = au.get_latency().expect("latency read must not fail");
     assert_eq!(
         reported,
-        Samples(LIED_LATENCY_SAMPLES as usize),
+        Samples::new(LIED_LATENCY_SAMPLES as usize),
         "the host must report the AU's claim verbatim rather than inventing a \
          value; PDC correctness is the plugin's problem, but silently rewriting \
          the number would hide the lie from a user comparing against the plugin's UI"

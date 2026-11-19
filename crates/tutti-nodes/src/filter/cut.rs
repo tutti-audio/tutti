@@ -15,7 +15,7 @@ use super::glided::{GLIDE_STEPS, GlidedSos, filter_shape};
 use crate::kernel::{ControlLanes, Kernel, KernelNode};
 
 /// The lowest cutoff a filter takes: 10 Hz.
-pub const MIN_CUT_CUTOFF: Hz = Hz(10.0);
+pub const MIN_CUT_CUTOFF: Hz = Hz::new(10.0);
 
 /// The octaves from [`MIN_CUT_CUTOFF`] a cutoff below 192 kHz's Nyquist can sit in.
 const LADDER: usize = 14;
@@ -31,7 +31,7 @@ pub struct CutFilterControls {
 impl CutFilterControls {
     /// 1 kHz.
     pub const DEFAULT: Self = Self {
-        cutoff: Hz(1_000.0),
+        cutoff: Hz::new(1_000.0),
     };
 }
 
@@ -158,7 +158,7 @@ impl<F: Float + Lanes> CutFilterKernel<F> {
     /// Nyquist; the cascade as it is for a cutoff that is not a number. No allocation.
     fn design(&mut self, cutoff: Hz) -> SosCoefficients<F> {
         let top = self.rate.nyquist_scaled(0.99).get();
-        let cutoff = Hz(cutoff.get().clamp(MIN_CUT_CUTOFF.get(), top));
+        let cutoff = Hz::new(cutoff.get().clamp(MIN_CUT_CUTOFF.get(), top));
         let (response, alignment, rate) = (self.response, self.alignment, self.rate);
         self.sos.design(|into| match alignment {
             CutAlignment::Butterworth(order) => {
@@ -195,7 +195,9 @@ impl<F: Float + Lanes> Kernel for CutFilterKernel<F> {
         for rung in 0..LADDER {
             let _ = self.design(rung_cutoff(rung).min(top));
             self.ladder[rung] = match self.sos.scratch().tail(TAIL_FLOOR) {
-                Ring::Finite(s) => Tail::Finite(Samples((s.get() * rate.get()).ceil() as usize)),
+                Ring::Finite(s) => {
+                    Tail::Finite(Samples::new((s.get() * rate.get()).ceil() as usize))
+                }
                 Ring::Unbounded => Tail::Unbounded,
             };
         }
@@ -307,7 +309,7 @@ mod tests {
     /// tail once prepared; the cutoff starts at the configured one.
     #[test]
     fn the_shape_declares_the_cutoff_and_a_finite_tail() {
-        let n = node(CutFilterConfig::new(3u16, HP, bw(8)).cutoff(Hz(120.0)));
+        let n = node(CutFilterConfig::new(3u16, HP, bw(8)).cutoff(Hz::new(120.0)));
         let shape = n.shape();
         assert_eq!(
             (shape.audio_in().count(), shape.audio_out().count()),
@@ -342,8 +344,9 @@ mod tests {
     #[test]
     fn linkwitz_riley_is_6_db_down_and_the_pair_sums_to_an_allpass() {
         for order in [2u8, 4, 6, 8, 16] {
-            let lr =
-                |response| CutFilterConfig::new(1u16, response, lr(order / 2)).cutoff(Hz(bin(171)));
+            let lr = |response| {
+                CutFilterConfig::new(1u16, response, lr(order / 2)).cutoff(Hz::new(bin(171)))
+            };
             assert!((gain(lr(LP), bin(171)) - 0.5).abs() < 1e-4, "LR{order}");
             for f in [34, 120, 171, 512].map(bin) {
                 let want = analog(LP, order / 2, bin(171), f).powi(2);
@@ -402,7 +405,7 @@ mod tests {
     fn a_cutoff_out_of_range_is_read_as_the_end_of_it() {
         let input = generate_sine(500.0, 48_000.0, 4_096);
         let at = |hz: f64| {
-            let config = CutFilterConfig::new(1u16, HP, bw(4)).cutoff(Hz(hz));
+            let config = CutFilterConfig::new(1u16, HP, bw(4)).cutoff(Hz::new(hz));
             render(&mut node(config), &input)
         };
         assert_eq!(at(1.0), at(MIN_CUT_CUTOFF.get()));
@@ -439,7 +442,7 @@ mod tests {
     /// realization) of LR16 at `cutoff` last carries the tail floor of its peak.
     fn ring_at(response: CutResponse, cutoff: f64) -> usize {
         let sos = LinkwitzRiley::new(response, ButterworthOrder::of(8))
-            .design(Hz(cutoff), RATE)
+            .design(Hz::new(cutoff), RATE)
             .unwrap();
         let mut z = vec![[0.0f64; 2]; sos.sections().len()];
         let h: Vec<f64> = (0..1 << 20)
@@ -472,14 +475,18 @@ mod tests {
         for response in [LP, HP] {
             let mut kernel = CutFilterKernel::<f64>::new(filter_bus(1u16.into()), &config);
             kernel.response = response;
-            kernel.prepare(RATE, MaxBlock::of(Samples(64)));
+            kernel.prepare(RATE, MaxBlock::of(Samples::new(64)));
             assert_eq!(
                 kernel.tail(),
-                kernel.tail_of(&CutFilterControls { cutoff: Hz(10.0) })
+                kernel.tail_of(&CutFilterControls {
+                    cutoff: Hz::new(10.0)
+                })
             );
             let mut last = usize::MAX;
             for cutoff in [14.0f64, 27.0, 55.0, 110.0, 230.0, 470.0, 1500.0, 3000.0] {
-                let reported = frames(kernel.tail_of(&CutFilterControls { cutoff: Hz(cutoff) }));
+                let reported = frames(kernel.tail_of(&CutFilterControls {
+                    cutoff: Hz::new(cutoff),
+                }));
                 let ring = ring_at(response, cutoff);
                 assert!(
                     ring <= reported,

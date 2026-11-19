@@ -257,7 +257,7 @@ mod tests {
             0,
             PlateControls {
                 modulation: Depth::of(0.0),
-                damping: Mix(0.3),
+                damping: Mix::new(0.3),
                 ..PlateControls::DEFAULT
             },
         )];
@@ -265,7 +265,7 @@ mod tests {
         // width of the output the harness reads back.
         let render = |input: &[f64]| {
             let mut k = PlateKernel::<f64>::new();
-            k.prepare(SampleRate::SR_48K, MaxBlock::of(Samples(len)));
+            k.prepare(SampleRate::SR_48K, MaxBlock::of(Samples::new(len)));
             drive_kernel(&mut k, &moves, &[input.to_vec(), input.to_vec()])
         };
         let (rx, ry, rm) = (render(&x), render(&y), render(&mix));

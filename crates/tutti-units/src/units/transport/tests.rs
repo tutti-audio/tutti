@@ -375,6 +375,13 @@ fn a_beat_period_is_sixty_over_its_seconds() {
         // An infinite period is a tempo of zero, which is none either.
         assert_eq!(tempo, None, "{bad}");
     }
+    // 60 over a period below 60 / MAX overflows to infinity: outside `Bpm`'s range.
+    assert_eq!(Bpm::from_beat_period(Seconds::new(1e-308)), None);
+    // The largest finite period still has a finite, positive tempo.
+    assert_eq!(
+        Bpm::from_beat_period(Seconds::new(f64::MAX)),
+        Some(Bpm::of(60.0 / f64::MAX))
+    );
 }
 
 /// **At 120 bpm a beat lasts exactly half a second, and the period leads back

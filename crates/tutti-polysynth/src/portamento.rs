@@ -42,7 +42,7 @@ impl GlideTime {
     /// negative.
     #[must_use]
     pub const fn new(time: Seconds) -> Option<Self> {
-        if time.0 > 0.0 && time.0 <= f64::MAX {
+        if time.get() > 0.0 && time.get() <= f64::MAX {
             Some(Self(time))
         } else {
             None
@@ -124,7 +124,7 @@ impl Default for PortamentoConfig {
         Self {
             mode: PortamentoMode::Off,
             curve: Law::Linear,
-            time: GlideTime::of(Seconds(0.1)),
+            time: GlideTime::of(Seconds::new(0.1)),
             constant_time: true,
         }
     }

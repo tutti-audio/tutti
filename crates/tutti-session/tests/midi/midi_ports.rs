@@ -8,9 +8,9 @@ use std::time::Instant;
 use crate::common::{MF, Seen, blocks, note, play, tap};
 use tutti_fixtures::midi;
 use tutti_graph::NodeKey;
-use tutti_midi_device::{DeviceInfo, EndpointId, PortDirection};
+use tutti_midi_device::{Capabilities, DeviceInfo, Endpoint, EndpointId, PortDirection, Supports};
+use tutti_midi_hardware::InputFault;
 use tutti_midi_hardware::test_support::{FakeBackend, FakeCounters, endpoint, persistent_endpoint};
-use tutti_midi_hardware::{InputFault, UmpCapability};
 use tutti_midi_runtime::MidiClipNode;
 use tutti_session::{
     Declared, EventInPort, HandleError, LoadError, MidiInputEntry, MidiPortError, MidiRouteRule,
@@ -860,7 +860,12 @@ fn is_active_sensing(u: &tutti_ump::Ump) -> bool {
 fn sensing_session(options: OutputOptions) -> (Session, FakeCounters) {
     let (mut s, fake) = session();
     let mut synth = persistent_endpoint(SYNTH, "Synth");
-    synth.capability = UmpCapability::midi1();
+    // A MIDI 1.0 port that declares no block: the Protocol in use is MIDI 1.0 and
+    // there is no UMP Stream to ask.
+    synth.capability = Endpoint::new(Supports::of(Capabilities {
+        midi1: true,
+        ..Capabilities::default()
+    }));
     fake.plug(synth, PortDirection::Output);
     let _ = s.update();
     let device = device(&mut s, "Synth");

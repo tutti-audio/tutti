@@ -94,8 +94,8 @@ impl Fade {
         F::from_unit(FadeLaw::EqualAmplitude.between(
             Amplitude::SILENT,
             Amplitude::UNITY,
-            Samples(k),
-            Samples(frames),
+            Samples::new(k),
+            Samples::new(frames),
         ))
     }
 }
@@ -620,8 +620,8 @@ impl<F: Float> State<F> {
             F::from_unit(FadeLaw::EqualAmplitude.between(
                 Amplitude::UNITY,
                 Amplitude::SILENT,
-                Samples(declick - left),
-                Samples(declick),
+                Samples::new(declick - left),
+                Samples::new(declick),
             ))
         };
         fade.started |= new;

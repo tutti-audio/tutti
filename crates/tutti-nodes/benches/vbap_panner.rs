@@ -55,7 +55,7 @@ fn bench(c: &mut Criterion) {
             g.throughput(Throughput::Elements(block as u64));
             let node = VbapPannerNode::<f32>::new(bed).unwrap();
             let params = node.param_set();
-            aim(&params, Azimuth(20.0), Elevation::LEVEL);
+            aim(&params, Azimuth::new(20.0), Elevation::LEVEL);
             let mut d = Direct::new(node, SampleRate::SR_48K, block);
             fill_noise(d.inputs_mut());
             for _ in 0..WARMUP_FRAMES / block {
@@ -66,7 +66,7 @@ fn bench(c: &mut Criterion) {
             g.bench_with_input(id, &speakers, |b, _| {
                 b.iter(|| {
                     if moving {
-                        bearing = bearing.rotate_by(ArcDegrees(7.0));
+                        bearing = bearing.rotate_by(ArcDegrees::new(7.0));
                         aim(&params, bearing, Elevation::LEVEL);
                     }
                     d.block();

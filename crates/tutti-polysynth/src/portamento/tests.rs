@@ -18,7 +18,7 @@ fn test_no_glide() {
 fn test_always_glide() {
     let config = PortamentoConfig {
         mode: PortamentoMode::Always,
-        time: GlideTime::of(Seconds(0.01)), // 10ms
+        time: GlideTime::of(Seconds::new(0.01)), // 10ms
         ..Default::default()
     };
     let mut porta = Portamento::new(config, SampleRate::SR_44K1, Hz::new(440.0));
@@ -43,7 +43,7 @@ fn test_always_glide() {
 fn test_legato_only() {
     let config = PortamentoConfig {
         mode: PortamentoMode::LegatoOnly,
-        time: GlideTime::of(Seconds(0.01)),
+        time: GlideTime::of(Seconds::new(0.01)),
         ..Default::default()
     };
     let mut porta = Portamento::new(config, SampleRate::SR_44K1, Hz::new(440.0));
@@ -70,7 +70,7 @@ fn test_curve_shapes() {
         let config = PortamentoConfig {
             mode: PortamentoMode::Always,
             curve,
-            time: GlideTime::of(Seconds(0.01)),
+            time: GlideTime::of(Seconds::new(0.01)),
             ..Default::default()
         };
         let mut porta = Portamento::new(config, SampleRate::SR_44K1, Hz::new(440.0));
@@ -103,7 +103,7 @@ fn advance_is_that_many_ticks() {
             mode: PortamentoMode::Always,
             curve,
             // 44.1 frames: a glide that ends mid-step.
-            time: GlideTime::of(Seconds(0.001)),
+            time: GlideTime::of(Seconds::new(0.001)),
             ..Default::default()
         };
         let (mut by_tick, mut by_advance) = (
@@ -172,7 +172,7 @@ fn a_glide_follows_its_law_in_cents() {
                 rate,
                 Hz::new(440.0),
             );
-            porta.begin(Hz(from), Hz(to), Seconds(time));
+            porta.begin(Hz::new(from), Hz::new(to), Seconds::new(time));
             let frames = time * rate.get();
             let interval = 1200.0 * (to / from).log2();
             let mut k = 0usize;
@@ -234,13 +234,17 @@ fn glide_time_keeps_the_range_checked_shape() {
         new: |raw| GlideTime::new(raw).map(Checked),
         get: |c| c.0.get(),
         of: Some(|raw| Checked(GlideTime::of(raw))),
-        valid: &[Seconds(0.001), Seconds(0.1), Seconds(10_000.0)],
+        valid: &[
+            Seconds::new(0.001),
+            Seconds::new(0.1),
+            Seconds::new(10_000.0),
+        ],
         invalid: &[
-            Seconds(0.0),
-            Seconds(-0.1),
-            Seconds(f64::NAN),
-            Seconds(f64::INFINITY),
-            Seconds(f64::NEG_INFINITY),
+            Seconds::new(0.0),
+            Seconds::new(-0.1),
+            Seconds::new(f64::NAN),
+            Seconds::new(f64::INFINITY),
+            Seconds::new(f64::NEG_INFINITY),
         ],
     });
 }
@@ -256,7 +260,7 @@ fn a_constant_rate_glide_scales_with_the_interval_and_floors_at_a_tenth() {
         let mut porta = Portamento::new(
             PortamentoConfig {
                 mode: PortamentoMode::Always,
-                time: GlideTime::of(Seconds(1.0)),
+                time: GlideTime::of(Seconds::new(1.0)),
                 constant_time: false,
                 ..Default::default()
             },

@@ -60,7 +60,7 @@ fn an_f64_unit_sounds_a_note_and_idles_within_its_declared_tail() {
         0,
         &[Event::midi(at, midi::note_off(MidiChannel::FIRST, 60, 0))],
     );
-    let blocks = (tail + Samples(BLOCK)).get() / BLOCK + 1;
+    let blocks = (tail + Samples::new(BLOCK)).get() / BLOCK + 1;
     let mut status = Status::Modified;
     for _ in 0..blocks {
         status = direct.block();

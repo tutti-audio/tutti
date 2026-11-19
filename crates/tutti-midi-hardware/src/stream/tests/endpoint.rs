@@ -21,12 +21,7 @@ fn presenting(who: Option<crate::Presented>) -> Wire {
 /// [`InputTiming::JitterReduction`] the device (which offers JR both ways) is
 /// asked to send JR Timestamps and settles with them on.
 fn presenting_timed(who: Option<crate::Presented>, timing: InputTiming) -> Wire {
-    let mut wire = session_over_timing(
-        UmpCapability::midi2(),
-        PortDirection::Duplex,
-        offering_both(),
-        timing,
-    );
+    let mut wire = session_over_timing(midi2(), PortDirection::Duplex, offering_both(), timing);
     wire.session.present(who);
     wire.open();
     settle(&mut wire);
@@ -622,7 +617,7 @@ fn a_granted_jr_request_is_recorded_for_an_os_described_device_and_settles() {
         midi1: true,
         ..Capabilities::default()
     }));
-    let mut wire = session_over(UmpCapability::midi2(), PortDirection::Duplex, silent);
+    let mut wire = session_over(midi2(), PortDirection::Duplex, silent);
     wire.session.present(Some(presented(identity())));
     wire.open();
     let step = STEP_TIMEOUT.as_millis() as u64;

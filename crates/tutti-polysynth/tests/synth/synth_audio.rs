@@ -45,10 +45,10 @@ fn note_off(note: u8) -> Ump {
 /// summing rather than an envelope's position on its curve.
 fn flat_envelope() -> Adsr {
     Adsr {
-        attack: Seconds(0.001),
-        decay: Seconds(0.0),
-        sustain: Amplitude(1.0),
-        release: Seconds(0.5),
+        attack: Seconds::new(0.001),
+        decay: Seconds::new(0.0),
+        sustain: Amplitude::new(1.0),
+        release: Seconds::new(0.5),
     }
 }
 
@@ -230,10 +230,10 @@ fn velocity_scales_the_output_level() {
 fn a_note_off_silences_the_voice_after_release() {
     let mut cfg = config(OscillatorType::Sine);
     cfg.envelope = Adsr {
-        attack: Seconds(0.001),
-        decay: Seconds(0.0),
-        sustain: Amplitude(1.0),
-        release: Seconds(0.05),
+        attack: Seconds::new(0.001),
+        decay: Seconds::new(0.0),
+        sustain: Amplitude::new(1.0),
+        release: Seconds::new(0.05),
     };
     let mut synth = Hand::new(PolySynth::<f32>::new(cfg));
 
@@ -404,7 +404,7 @@ fn master_volume_scales_the_output() {
     let loud = render(&mut full, 100);
 
     let mut half = Hand::new(PolySynth::<f32>::new(config(OscillatorType::Sine)));
-    half.set_volume(tutti_units::Amplitude(0.5));
+    half.set_volume(tutti_units::Amplitude::new(0.5));
     half.queue_midi(&[note_on(69, 100)]);
     let quiet = render(&mut half, 100);
 
@@ -417,7 +417,7 @@ fn master_volume_scales_the_output() {
 
     // Zero must be silence, not merely quiet.
     let mut muted = Hand::new(PolySynth::<f32>::new(config(OscillatorType::Sine)));
-    muted.set_volume(tutti_units::Amplitude(0.0));
+    muted.set_volume(tutti_units::Amplitude::new(0.0));
     muted.queue_midi(&[note_on(69, 100)]);
     let silent = render(&mut muted, 100);
     assert!(
@@ -434,7 +434,7 @@ fn master_volume_scales_the_output() {
 fn a_non_finite_master_volume_write_leaves_the_synth_at_its_volume() {
     for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
         let mut synth = Hand::new(PolySynth::<f32>::new(config(OscillatorType::Sine)));
-        synth.set_volume(tutti_units::Amplitude(0.5));
+        synth.set_volume(tutti_units::Amplitude::new(0.5));
         synth.queue_midi(&[note_on(69, 100)]);
         let before = render(&mut synth, 40);
         // A host writes the cell through the synth's `ParamSet`, which stores
@@ -452,7 +452,7 @@ fn a_non_finite_master_volume_write_leaves_the_synth_at_its_volume() {
             (ratio - 1.0).abs() < 0.05,
             "volume = {bad} moved the level by {ratio}"
         );
-        synth.set_volume(tutti_units::Amplitude(0.25));
+        synth.set_volume(tutti_units::Amplitude::new(0.25));
         let after = render(&mut synth, 40);
         assert!(
             rms(&after[2048..]) < 0.7 * rms(&held[2048..]),

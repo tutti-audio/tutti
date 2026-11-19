@@ -381,7 +381,10 @@ fn a_prepare_with_no_block_cannot_be_built() {
     let loaded = Vst2Loaded::load(main_thread(), &tutti_fixtures::detached_work(), &path)
         .expect("the probe loads");
 
-    assert!(MaxBlock::new(Samples(0)).is_none(), "no frames is no block");
+    assert!(
+        MaxBlock::new(Samples::new(0)).is_none(),
+        "no frames is no block"
+    );
 
     let inst = Active::activate(
         loaded,

@@ -122,7 +122,7 @@ impl Stretch {
             playing: s.playing,
             recording: s.recording,
             looping: s.looping,
-            told: Beat(f64::NEG_INFINITY),
+            told: Beat::new(f64::NEG_INFINITY),
         }
     }
 
@@ -180,7 +180,7 @@ impl Stretch {
         }
         let (predicted, slack) = if self.playing {
             let t0 = view.seconds_at(self.beat).get();
-            let at = Seconds(t0 + (frame - self.frame) as f64 / rate);
+            let at = Seconds::new(t0 + (frame - self.frame) as f64 / rate);
             let beat = view.beat_at_seconds(at);
             let per_frame = view.tempo_at(beat).get().max(t.tempo.get()) / 60.0 / rate;
             (beat.get(), 2.0 * per_frame)
@@ -284,7 +284,7 @@ impl TransportWalk {
                 Source::Predicted(_) => {}
             }
             let frame = at + (p - from);
-            let Some(offset) = Offset::new(Samples(p), Samples(call.frames)) else {
+            let Some(offset) = Offset::new(Samples::new(p), Samples::new(call.frames)) else {
                 continue;
             };
             let t = call.cx.transport_at(offset);

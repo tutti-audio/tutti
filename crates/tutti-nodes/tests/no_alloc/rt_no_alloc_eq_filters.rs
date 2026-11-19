@@ -39,7 +39,12 @@ fn run<N: IntoNode>(node: N, moves: impl Fn(&N::Controls, usize)) {
 
 #[test]
 fn bell_filter_process_is_allocation_free_with_every_control_moving() {
-    let config = BellFilterConfig::new(ChannelLayout::STEREO, Hz(1_000.0), Q(1.0), Db(0.0));
+    let config = BellFilterConfig::new(
+        ChannelLayout::STEREO,
+        Hz::new(1_000.0),
+        Q::new(1.0),
+        Db::new(0.0),
+    );
     run(BellFilterNode::from(config), |c, i| {
         let even = i.is_multiple_of(2);
         c.set(UnitParam::Cutoff, if even { 80.0 } else { 15_000.0 });
@@ -50,7 +55,7 @@ fn bell_filter_process_is_allocation_free_with_every_control_moving() {
 
 #[test]
 fn tilt_filter_process_is_allocation_free_with_every_control_moving() {
-    let config = TiltFilterConfig::new(ChannelLayout::STEREO, Hz(1_000.0), Db(0.0));
+    let config = TiltFilterConfig::new(ChannelLayout::STEREO, Hz::new(1_000.0), Db::new(0.0));
     run(TiltFilterNode::from(config), |c, i| {
         let even = i.is_multiple_of(2);
         c.set(UnitParam::Cutoff, if even { 80.0 } else { 15_000.0 });

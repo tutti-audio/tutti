@@ -120,7 +120,7 @@ fn load() -> (PluginNode<Vst2Loaded>, PluginHandle) {
 fn scene_map(blocks: usize) -> tutti_tempo::TempoMap {
     use tutti_tempo::{TempoMap, TempoPoint, Transition};
     let point = |beat: f64, bpm: f64| TempoPoint {
-        beat: Beat(beat),
+        beat: Beat::new(beat),
         tempo: Bpm::of(bpm),
         transition: Transition::Step,
     };
@@ -146,7 +146,7 @@ fn scene_tempo() -> tutti_transport::TempoReader {
 fn rig<N: IntoNode>(node: N, arrival: usize) -> (Renderer, N::Controls) {
     let stereo = ChannelLayout::from_count(2);
     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, stereo);
-    let latent = g.add(Unforkable(Latent::new(Latency::new(Samples(arrival)))));
+    let latent = g.add(Unforkable(Latent::new(Latency::new(Samples::new(arrival)))));
     let (key, controls) = g.add_with_controls(node);
     for port in 0..2 {
         g.connect(latent, 0, key, port);
@@ -155,7 +155,7 @@ fn rig<N: IntoNode>(node: N, arrival: usize) -> (Renderer, N::Controls) {
     let r = g
         .renderer(Prepare::new(
             SampleRate::of(SAMPLE_RATE),
-            MaxBlock::of(Samples(BLOCK)),
+            MaxBlock::of(Samples::new(BLOCK)),
         ))
         .expect("the graph compiles");
     (r, controls)
@@ -166,20 +166,20 @@ fn rig<N: IntoNode>(node: N, arrival: usize) -> (Renderer, N::Controls) {
 fn scene(b: usize) -> (TransportPosition, TransportChanges) {
     let base = 4.0 + b as f64;
     let mut changes = TransportChanges::NONE;
-    let rolling = TransportPosition::new(true, Bpm::of(120.0), Beat(base), None);
+    let rolling = TransportPosition::new(true, Bpm::of(120.0), Beat::new(base), None);
     let t = match b % 6 {
         0 => rolling,
         // A seek at the block boundary, far from where the last block left
         // off.
-        1 => TransportPosition::new(true, Bpm::of(120.0), Beat(64.0 + base), None),
+        1 => TransportPosition::new(true, Bpm::of(120.0), Beat::new(64.0 + base), None),
         // A tempo change inside the block, after the frame the next block
         // hears (frame 24 of this one) and before it.
         2 => {
-            let at = Offset::of(Samples(10), Samples(BLOCK));
+            let at = Offset::of(Samples::new(10), Samples::new(BLOCK));
             changes
                 .push(
                     at,
-                    TransportPosition::new(true, Bpm::of(90.0), Beat(base + 0.5), None),
+                    TransportPosition::new(true, Bpm::of(90.0), Beat::new(base + 0.5), None),
                 )
                 .expect("a change inside the block");
             rolling
@@ -189,11 +189,13 @@ fn scene(b: usize) -> (TransportPosition, TransportChanges) {
         3 => TransportPosition::new(
             true,
             Bpm::of(120.0),
-            Beat(base),
-            Some(LoopRange::new(Beat(base), Beat(base + 16.0 / 24_000.0)).expect("a loop")),
+            Beat::new(base),
+            Some(
+                LoopRange::new(Beat::new(base), Beat::new(base + 16.0 / 24_000.0)).expect("a loop"),
+            ),
         ),
         4 => rolling.with_recording(true),
-        _ => TransportPosition::new(false, Bpm::of(100.0), Beat(base), None),
+        _ => TransportPosition::new(false, Bpm::of(100.0), Beat::new(base), None),
     };
     (t, changes)
 }
@@ -242,7 +244,7 @@ fn render_scenes(r: &mut Renderer, blocks: usize) -> Vec<(Env, Told)> {
         let env = Env {
             frame: r.executor().frame(),
             sample_rate: SampleRate::of(SAMPLE_RATE),
-            block_len: Samples(BLOCK),
+            block_len: Samples::new(BLOCK),
             transport,
             changes,
             play: tutti_graph::PlayClock::ZERO,
@@ -326,7 +328,7 @@ fn a_live_node_with_no_latency_is_told_the_blocks_own_time() {
 
 fn seven_eight() -> ProjectMeter {
     ProjectMeter::new(MeterMap::new([MeterChange::new(
-        Beat(0.0),
+        Beat::new(0.0),
         TimeSignature::new(BeatsPerBar::of(7), NoteValue::EIGHTH),
     )]))
 }

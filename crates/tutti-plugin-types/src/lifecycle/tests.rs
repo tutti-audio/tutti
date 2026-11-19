@@ -59,7 +59,7 @@ fn tag(effect: &Effect) -> Fx {
         Effect::RunMainThread => Fx::Main,
         Effect::RunTimer(id) => Fx::Timer(id.0),
         Effect::ServiceFd(id) => Fx::Fd(id.get()),
-        Effect::Notify(Notice::LatencyChanged(s)) => Fx::LatencyNotice(s.0),
+        Effect::Notify(Notice::LatencyChanged(s)) => Fx::LatencyNotice(s.get()),
         Effect::Notify(Notice::TailChanged(_)) => Fx::TailNotice,
         Effect::Notify(Notice::IoChanged) => Fx::IoNotice,
         Effect::Notify(Notice::ParamValuesChanged) => Fx::ParamValues,
@@ -79,7 +79,7 @@ fn prep(n: u8) -> Prepare {
     } else {
         44_100.0
     });
-    Prepare::new(rate, MaxBlock::of(Samples(64 << (n % 3))))
+    Prepare::new(rate, MaxBlock::of(Samples::new(64 << (n % 3))))
         .with_format(if n.is_multiple_of(5) {
             FloatWidth::F64
         } else {
@@ -119,7 +119,7 @@ fn active(rules: RestartRules, p: Prepare) -> State {
     let s = State::new(rules);
     let (s, _) = go(s, Event::Op(HostOp::Activate(p)));
     let (s, _) = reply(s, Reply::Activated);
-    let (s, _) = reply(s, Reply::Latency(Samples(0)));
+    let (s, _) = reply(s, Reply::Latency(Samples::new(0)));
     let (s, _) = reply(s, Reply::Tail(PluginTail::Unknown));
     let (s, _) = reply(s, Reply::Layout(stereo()));
     let (s, _) = reply(s, Reply::Done);
@@ -357,7 +357,9 @@ impl Shell {
                 self.hand = false;
                 Reply::Done
             }
-            Effect::ReadLatency if self.real_active => Reply::Latency(Samples(self.real_latency)),
+            Effect::ReadLatency if self.real_active => {
+                Reply::Latency(Samples::new(self.real_latency))
+            }
             Effect::ReadTail if self.real_active => Reply::Tail(PluginTail::Unknown),
             Effect::ReadLayout if self.real_active => Reply::Layout(stereo()),
             Effect::ReadLatency | Effect::ReadTail | Effect::ReadLayout => Reply::NotActive,
@@ -459,7 +461,7 @@ fn any_reply() -> impl Strategy<Value = Reply> {
         lazy(|| Reply::Refused(err())),
         lazy(|| Reply::Deactivated),
         lazy(|| Reply::Rebuilt),
-        (0usize..3).prop_map(|n| Reply::Latency(Samples(n))),
+        (0usize..3).prop_map(|n| Reply::Latency(Samples::new(n))),
         lazy(|| Reply::Tail(PluginTail::Unknown)),
         lazy(|| Reply::Tail(PluginTail::None)),
         lazy(|| Reply::Layout(stereo())),
@@ -855,25 +857,25 @@ fn rule_4_a_figure_is_notified_when_it_moved_or_was_announced() {
     // The first read after load only records the figure.
     let (s, _) = go(State::new(RESTARTS), Event::Op(HostOp::Activate(prep(1))));
     let (s, _) = reply(s, Reply::Activated);
-    let (s, fx) = reply(s, Reply::Latency(Samples(7)));
+    let (s, fx) = reply(s, Reply::Latency(Samples::new(7)));
     assert!(fx.is_empty());
-    assert_eq!(s.latency(), Some(Samples(7)));
+    assert_eq!(s.latency(), Some(Samples::new(7)));
     let (s, fx) = reply(s, Reply::Tail(PluginTail::Unbounded));
     assert!(fx.is_empty());
     assert_eq!(s.tail(), Some(PluginTail::Unbounded));
     let s = active(RESTARTS, prep(1));
     // Same figure, not announced: silent.
-    let (s, fx) = reply(s, Reply::Latency(Samples(0)));
+    let (s, fx) = reply(s, Reply::Latency(Samples::new(0)));
     assert!(fx.is_empty());
     // Moved: notified.
-    let (_, fx) = reply(s, Reply::Latency(Samples(32)));
+    let (_, fx) = reply(s, Reply::Latency(Samples::new(32)));
     assert_eq!(fx, [Fx::LatencyNotice(32)]);
     // Announced by a re-read format, same figure: notified.
     let s = active(REST, prep(1));
     let s = req(s, Request::LatencyChanged);
     let (s, fx) = go(s, Event::Tick);
     assert_eq!(fx, [Fx::Latency]);
-    let (_, fx) = reply(s, Reply::Latency(Samples(0)));
+    let (_, fx) = reply(s, Reply::Latency(Samples::new(0)));
     assert_eq!(fx, [Fx::LatencyNotice(0)]);
     // Tail likewise.
     let s = active(REST, prep(1));
@@ -1618,7 +1620,7 @@ fn set_mode_changes_the_next_activation_and_restarts_nothing() {
 /// types refuse the rest, so a host is never asked to activate at one.
 #[test]
 fn a_prepare_carries_a_rate_and_a_block() {
-    let block = MaxBlock::of(Samples(64));
+    let block = MaxBlock::of(Samples::new(64));
     for rate in [48_000.0, 44_100.0, f64::MIN_POSITIVE, f64::MAX] {
         let prepare = Prepare::new(SampleRate::of(rate), block);
         assert_eq!(prepare.rate(), SampleRate::of(rate));
@@ -1630,7 +1632,7 @@ fn a_prepare_carries_a_rate_and_a_block() {
         prep(0).with_rate(SampleRate::SR_96K).rate(),
         SampleRate::SR_96K
     );
-    assert!(MaxBlock::new(Samples(0)).is_none());
+    assert!(MaxBlock::new(Samples::new(0)).is_none());
 }
 
 /// `MaxBlock` keeps the range contract, serde included.
@@ -1642,20 +1644,20 @@ fn a_max_block_keeps_the_range_contract() {
         get: MaxBlock::samples,
         of: Some(MaxBlock::of),
         valid: &[
-            Samples(1),
-            Samples(64),
-            Samples(4096),
-            Samples(u32::MAX as usize),
+            Samples::new(1),
+            Samples::new(64),
+            Samples::new(4096),
+            Samples::new(u32::MAX as usize),
         ],
         // The bound is `u32::MAX` frames; a `usize` wider than that is refused.
         #[cfg(target_pointer_width = "64")]
         invalid: &[
-            Samples(0),
-            Samples(u32::MAX as usize + 1),
-            Samples(usize::MAX),
+            Samples::new(0),
+            Samples::new(u32::MAX as usize + 1),
+            Samples::new(usize::MAX),
         ],
         #[cfg(not(target_pointer_width = "64"))]
-        invalid: &[Samples(0)],
+        invalid: &[Samples::new(0)],
     };
     tutti_fixtures::check_range_contract(&c);
     tutti_fixtures::check_range_serde(&c);

@@ -91,7 +91,7 @@ fn a_late_rate_answer_does_not_silence_an_offline_fork() {
     let mut renderer: Renderer = g
         .renderer(Prepare::new(
             SampleRate::of(SLOW_RATE),
-            MaxBlock::of(Samples(BLOCK)),
+            MaxBlock::of(Samples::new(BLOCK)),
         ))
         .expect("a one-plugin graph compiles");
 

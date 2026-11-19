@@ -250,7 +250,8 @@ impl Osc {
     /// The next sample, advancing the phase.
     #[inline]
     fn next(&mut self) -> f32 {
-        let y = naive(self.waveform, Phase(f64::from_phase(self.phase))) * self.amplitude.get();
+        let y =
+            naive(self.waveform, Phase::new(f64::from_phase(self.phase))) * self.amplitude.get();
         self.phase = self
             .phase
             .advance(PhaseStep::from(PhaseIncrement::per_sample(
@@ -412,8 +413,8 @@ mod tests {
 
     /// `node` alone in a graph at `rate`, in blocks of `block` frames.
     fn solo<N: IntoNode<Controls = ()>>(node: N, rate: SampleRate, block: usize) -> Solo<()> {
-        let mut solo = Solo::new(node, Prepare::new(rate, MaxBlock::of(Samples(64))));
-        solo.renderer_mut().set_block(Samples(block));
+        let mut solo = Solo::new(node, Prepare::new(rate, MaxBlock::of(Samples::new(64))));
+        solo.renderer_mut().set_block(Samples::new(block));
         solo
     }
 
@@ -427,23 +428,23 @@ mod tests {
         // k/8 and every expected value is exact.
         for (osc, expect) in [
             (
-                Osc::sine(Hz(1_000.0)),
+                Osc::sine(Hz::new(1_000.0)),
                 (0..16)
                     .map(|k| ((k % 8) as f64 / 8.0 * TAU).sin() as f32)
                     .collect::<Vec<_>>(),
             ),
             (
-                Osc::saw(Hz(1_000.0)),
+                Osc::saw(Hz::new(1_000.0)),
                 (0..16).map(|k| 2.0 * (k % 8) as f32 / 8.0 - 1.0).collect(),
             ),
             (
-                Osc::square(Hz(1_000.0)),
+                Osc::square(Hz::new(1_000.0)),
                 (0..16)
                     .map(|k| if k % 8 < 4 { 1.0 } else { -1.0 })
                     .collect(),
             ),
             (
-                Osc::triangle(Hz(1_000.0)),
+                Osc::triangle(Hz::new(1_000.0)),
                 [-1.0, -0.5, 0.0, 0.5, 1.0, 0.5, 0.0, -0.5].repeat(2),
             ),
         ] {
@@ -473,10 +474,10 @@ mod tests {
     /// the phase to its start.
     #[test]
     fn amplitude_rate_and_reset_are_honoured() {
-        let mut osc = Osc::sine(Hz(1_000.0)).with_amplitude(Amplitude(0.25));
+        let mut osc = Osc::sine(Hz::new(1_000.0)).with_amplitude(Amplitude::new(0.25));
         osc.prepare(&Prepare::new(
             SampleRate::of(4_000.0),
-            MaxBlock::of(Samples(64)),
+            MaxBlock::of(Samples::new(64)),
         ));
         let first: Vec<f32> = (0..4).map(|_| osc.next()).collect();
         // Quarter-cycle steps: 0, +peak, 0, −peak.
@@ -534,8 +535,11 @@ mod tests {
     fn with_phase_wraps_into_one_cycle_and_reset_restores_it() {
         let quarter = 2.0 * 0.25 - 1.0; // the saw's value at 0.25 turns
         for start in [0.25f64, 1.25, -0.75, 3.25] {
-            let mut osc = Osc::saw(Hz(1_000.0)).with_phase(Phase(start));
-            osc.prepare(&Prepare::new(SampleRate::SR_8K, MaxBlock::of(Samples(64))));
+            let mut osc = Osc::saw(Hz::new(1_000.0)).with_phase(Phase::new(start));
+            osc.prepare(&Prepare::new(
+                SampleRate::SR_8K,
+                MaxBlock::of(Samples::new(64)),
+            ));
             let first = osc.next();
             assert!((first - quarter).abs() < 1e-6, "start {start}: {first}");
             let _ = osc.next();
@@ -544,7 +548,7 @@ mod tests {
             assert!((again - quarter).abs() < 1e-6, "reset {start}: {again}");
         }
         // A tiny negative is just under a whole cycle, not at 1.0.
-        let mut edge = Osc::saw(Hz(1_000.0)).with_phase(Phase(-1e-9));
+        let mut edge = Osc::saw(Hz::new(1_000.0)).with_phase(Phase::new(-1e-9));
         assert!((edge.next() - 1.0).abs() < 1e-6);
     }
 }

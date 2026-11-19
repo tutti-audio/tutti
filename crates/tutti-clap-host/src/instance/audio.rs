@@ -173,7 +173,7 @@ impl ClapProcessor {
                 let (inputs, outputs) = io.split();
                 self.process_impl(
                     Planar::F32 { inputs, outputs },
-                    frames.0,
+                    frames.get(),
                     ctx.midi,
                     params,
                     ctx.expressions,
@@ -186,7 +186,7 @@ impl ClapProcessor {
                 let (inputs, outputs) = io.split();
                 self.process_impl(
                     Planar::F64 { inputs, outputs },
-                    frames.0,
+                    frames.get(),
                     ctx.midi,
                     params,
                     ctx.expressions,
@@ -577,7 +577,7 @@ mod tests {
     }
 
     fn cycle(start: f64, end: f64) -> LoopRegion {
-        LoopRegion::new(LoopRange::new(Beat(start), Beat(end)).expect("a loop"))
+        LoopRegion::new(LoopRange::new(Beat::new(start), Beat::new(end)).expect("a loop"))
     }
 
     /// A timeline flag is a claim that the matching position is finite, so it
@@ -592,17 +592,17 @@ mod tests {
             "a tempo is valid by its type and always advertised"
         );
 
-        t.position.beat = Beat(f64::NAN);
+        t.position.beat = Beat::new(f64::NAN);
         assert_eq!(
             build_clap_transport(&t).flags & CLAP_TRANSPORT_HAS_BEATS_TIMELINE,
             0
         );
-        t.position.beat = Beat(0.0);
+        t.position.beat = Beat::new(0.0);
         assert_ne!(
             build_clap_transport(&t).flags & CLAP_TRANSPORT_HAS_BEATS_TIMELINE,
             0
         );
-        t.position.seconds = tutti_units::Seconds(f64::NAN);
+        t.position.seconds = tutti_units::Seconds::new(f64::NAN);
         assert_eq!(
             build_clap_transport(&t).flags & CLAP_TRANSPORT_HAS_SECONDS_TIMELINE,
             0
@@ -625,10 +625,10 @@ mod tests {
     fn the_bar_at_song_position_zero_is_number_zero() {
         use tutti_units::BarNumber;
         assert_eq!(build_clap_transport(&base()).bar_number, 0);
-        let third = base().with_bar(Beat(8.0), BarNumber::new(3));
+        let third = base().with_bar(Beat::new(8.0), BarNumber::new(3));
         assert_eq!(build_clap_transport(&third).bar_number, 2);
         // Pre-roll: the bar before the first is -1.
-        let pickup = base().with_bar(Beat(-4.0), BarNumber::new(0));
+        let pickup = base().with_bar(Beat::new(-4.0), BarNumber::new(0));
         assert_eq!(build_clap_transport(&pickup).bar_number, -1);
     }
 
@@ -640,10 +640,10 @@ mod tests {
     fn an_active_loop_carries_its_seconds() {
         use tutti_units::Seconds;
         let looped = base()
-            .with_beat(Beat(1.0))
-            .with_seconds(Seconds(0.5))
+            .with_beat(Beat::new(1.0))
+            .with_seconds(Seconds::new(0.5))
             .with_loop(LoopRegion {
-                seconds: Some((Seconds(1.0), Seconds(4.5))),
+                seconds: Some((Seconds::new(1.0), Seconds::new(4.5))),
                 ..cycle(2.0, 8.0)
             });
         let ev = build_clap_transport(&looped);
@@ -652,8 +652,8 @@ mod tests {
         assert_eq!(ev.loop_end_seconds, CLAP_SECTIME_FACTOR * 9 / 2);
 
         let unknown = base()
-            .with_beat(Beat(1.0))
-            .with_seconds(Seconds(0.5))
+            .with_beat(Beat::new(1.0))
+            .with_seconds(Seconds::new(0.5))
             .with_loop(cycle(2.0, 8.0));
         assert_eq!(
             build_clap_transport(&unknown).flags & CLAP_TRANSPORT_HAS_SECONDS_TIMELINE,
@@ -668,8 +668,8 @@ mod tests {
     #[test]
     fn the_time_signature_flag_is_always_honest() {
         let mut t = base();
-        t.position.beat = Beat(f64::NAN);
-        t.position.seconds = tutti_units::Seconds(f64::NAN);
+        t.position.beat = Beat::new(f64::NAN);
+        t.position.seconds = tutti_units::Seconds::new(f64::NAN);
         assert_ne!(
             build_clap_transport(&t).flags & CLAP_TRANSPORT_HAS_TIME_SIGNATURE,
             0

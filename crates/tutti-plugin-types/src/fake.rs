@@ -93,7 +93,7 @@ impl Call {
     /// The slot's three words: a kind (never zero) and two arguments.
     fn encode(self) -> [u64; 3] {
         match self {
-            Self::Activate(rate, block) => [1, rate.get().to_bits(), block.0 as u64],
+            Self::Activate(rate, block) => [1, rate.get().to_bits(), block.get() as u64],
             Self::Deactivate => [2, 0, 0],
             Self::Rebuild => [3, 0, 0],
             Self::Process(frames) => [4, frames as u64, 0],
@@ -123,7 +123,10 @@ impl Call {
 
     fn decode([kind, a, b]: [u64; 3]) -> Option<Self> {
         Some(match kind {
-            1 => Self::Activate(SampleRate::new(f64::from_bits(a))?, Samples(b as usize)),
+            1 => Self::Activate(
+                SampleRate::new(f64::from_bits(a))?,
+                Samples::new(b as usize),
+            ),
             2 => Self::Deactivate,
             3 => Self::Rebuild,
             4 => Self::Process(a as usize),
@@ -278,7 +281,7 @@ impl Shared {
         LoadedPlugin {
             inputs: vec![PluginBus::main(ChannelLayout::STEREO)],
             outputs: vec![PluginBus::main(outputs)],
-            latency_samples: Samples(self.latency.load(Ordering::Relaxed)),
+            latency_samples: Samples::new(self.latency.load(Ordering::Relaxed)),
             tail: self.tail(),
             ..LoadedPlugin::default()
         }
@@ -287,7 +290,7 @@ impl Shared {
     fn tail(&self) -> PluginTail {
         match self.tail.load(Ordering::Relaxed) {
             0 => PluginTail::None,
-            n => PluginTail::Finite(Samples(n)),
+            n => PluginTail::Finite(Samples::new(n)),
         }
     }
 
@@ -415,12 +418,12 @@ impl FakePlugin {
 
     /// The latency the plugin reports from now on.
     pub fn set_latency(&self, latency: Samples) {
-        self.0.latency.store(latency.0, Ordering::Relaxed);
+        self.0.latency.store(latency.get(), Ordering::Relaxed);
     }
 
     /// The tail the plugin reports from now on: none for zero.
     pub fn set_tail(&self, tail: Samples) {
-        self.0.tail.store(tail.0, Ordering::Relaxed);
+        self.0.tail.store(tail.get(), Ordering::Relaxed);
     }
 
     /// Makes the fake sound for `frames` after each trigger (a non-silent input
@@ -953,7 +956,7 @@ impl Controller for FakeController {
             !self.shared.panic_in_latency.load(Ordering::Relaxed),
             "the fake was told to panic in latency"
         );
-        Samples(self.shared.latency.load(Ordering::Relaxed))
+        Samples::new(self.shared.latency.load(Ordering::Relaxed))
     }
 
     fn tail(&self, _main: MainThreadMarker) -> PluginTail {
@@ -981,7 +984,7 @@ impl Processor for FakeProcessor {
             }
         });
         let ring = self.shared.ring.load(Ordering::Relaxed);
-        let frames = io.buffer.frames().0;
+        let frames = io.buffer.frames().get();
         io.buffer.output().silence();
         if ring > 0 {
             // A voice: every trigger (a non-silent input frame, a MIDI

@@ -389,7 +389,10 @@ mod tests {
         use tutti_fixtures::signal::{assert_close_f64, wide_signal};
         let x = wide_signal(128);
         let mut k = BrickwallKernel::<f64>::new(BusTopology::MONO);
-        k.prepare(SampleRate::SR_48K, MaxBlock::of(tutti_units::Samples(128)));
+        k.prepare(
+            SampleRate::SR_48K,
+            MaxBlock::of(tutti_units::Samples::new(128)),
+        );
         let controls = BrickwallControls {
             ceiling: Db::new(-20.0),
         };

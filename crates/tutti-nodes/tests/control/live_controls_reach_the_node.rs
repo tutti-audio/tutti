@@ -34,7 +34,7 @@ use tutti_units::{Db, Hz, Q, SampleRate, Samples};
 const RATE: SampleRate = SampleRate::SR_48K;
 
 fn band(gain: f64) -> EqBandNode<f32> {
-    EqBandNode::<f32>::new(SvfType::Bell, Hz(1_000.0), Q(1.0), Db(gain))
+    EqBandNode::<f32>::new(SvfType::Bell, Hz::new(1_000.0), Q::new(1.0), Db::new(gain))
 }
 
 /// Energy of the band's response to a 1 kHz tone at its centre — the
@@ -51,7 +51,7 @@ fn energy<C>(solo: &mut Solo<C>) -> f32 {
 }
 
 fn solo<N: IntoNode>(node: N) -> Solo<N::Controls> {
-    Solo::new(node, Prepare::new(RATE, MaxBlock::of(Samples(64))))
+    Solo::new(node, Prepare::new(RATE, MaxBlock::of(Samples::new(64))))
 }
 
 /// **The instrument works**: an active +24 dB bell and a bypassed one render
@@ -106,11 +106,20 @@ fn a_by_value_change_reaches_the_audio_by_replacing_the_node() {
     let mut s = solo(band(24.0));
     let active = energy(&mut s);
     // A high-pass far above the 1 kHz tone: all but nothing of it passes.
-    let high_pass = EqBandNode::<f32>::new(SvfType::HighPass, Hz(20_000.0), Q(0.7), Db(0.0));
+    let high_pass = EqBandNode::<f32>::new(
+        SvfType::HighPass,
+        Hz::new(20_000.0),
+        Q::new(0.7),
+        Db::new(0.0),
+    );
     let key = s.key();
     let editor = s.renderer_mut().editor_mut();
     editor
-        .replace(key, high_pass, Fade::new(Samples(1), FadeLaw::default()))
+        .replace(
+            key,
+            high_pass,
+            Fade::new(Samples::new(1), FadeLaw::default()),
+        )
         .expect("same shape");
     editor.commit().expect("commits");
     let replaced = energy(&mut s);

@@ -125,7 +125,7 @@ fn ragged_blocks_are_delayed_by_exactly_the_declared_latency() {
     ];
     for (what, blocks) in cuts {
         let (mut rig, _probe) = fork_rig(512);
-        assert_eq!(rig.latency(), Samples(DECLARED), "{what}: declared");
+        assert_eq!(rig.latency(), Samples::new(DECLARED), "{what}: declared");
         let out = render_blocks(&mut rig, &blocks);
         assert_delayed(&out, DECLARED, what);
     }
@@ -143,8 +143,11 @@ fn a_max_block_below_the_chunk_is_the_pipeline() {
     const DECLARED: usize = PROBE_LATENCY + 32;
 
     let (mut rig, _probe) = fork_rig(32);
-    assert_eq!(rig.latency(), Samples(DECLARED), "declared");
-    assert_eq!(rig.controls.declared_latency().samples(), Samples(DECLARED));
+    assert_eq!(rig.latency(), Samples::new(DECLARED), "declared");
+    assert_eq!(
+        rig.controls.declared_latency().samples(),
+        Samples::new(DECLARED)
+    );
     let out = render_blocks(&mut rig, &[32; 40]);
     assert_delayed(&out, DECLARED, "32-frame blocks");
 

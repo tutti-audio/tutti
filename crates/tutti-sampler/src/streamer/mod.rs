@@ -508,7 +508,7 @@ mod tests {
             "the open stream is re-rated"
         );
 
-        let voice = crate::DiskVoice::from_reader(first, VoiceWindow::from(Beat(0.0)));
+        let voice = crate::DiskVoice::from_reader(first, VoiceWindow::from(Beat::new(0.0)));
         assert_eq!(voice.file_sample_rate(), SampleRate::SR_48K);
 
         let (_second_stream, second) = stream(&mut sampler, &at_44);

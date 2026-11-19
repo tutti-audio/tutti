@@ -64,11 +64,11 @@ use super::sync_messages::SyncMessages;
 
 /// Below this beat, a play edge is treated as "from the top" → Start (0xFA)
 /// rather than Continue (0xFB). Wide enough to absorb float jitter at beat 0.
-const START_EPSILON: BeatDuration = BeatDuration(1e-6);
+const START_EPSILON: BeatDuration = BeatDuration::new(1e-6);
 /// A start beat further than this from where the previous block ended (while
 /// playing) is a seek, not the normal run-on of the next block: it triggers a
 /// fresh Song Position.
-const SEEK_EPSILON: BeatDuration = BeatDuration(1e-3);
+const SEEK_EPSILON: BeatDuration = BeatDuration::new(1e-3);
 
 /// Generates outbound MIDI clock / timecode from the transport: the Beat
 /// Clock and MTC half of a [`SyncOut`](crate::SyncOut), which owns it.
@@ -143,7 +143,7 @@ struct PrevTick {
 impl PrevTick {
     const FRESH: Self = Self {
         playing: false,
-        end: Beat(0.0),
+        end: Beat::new(0.0),
         wrapped: false,
         cued: None,
     };
@@ -308,7 +308,7 @@ impl ClockMaster {
                 let beats_per_sample = tutti_music::beats_per_sample(transport.tempo, sample_rate);
                 let region = transport.looping;
                 let mut clock = transport.clock(sample_rate);
-                for pass in clock.passes(Samples(block_size), region) {
+                for pass in clock.passes(Samples::new(block_size), region) {
                     let Some(meter) = meter else { break };
                     self.send_flex(
                         meter,
@@ -340,7 +340,7 @@ impl ClockMaster {
         // --- transport edges -------------------------------------------------
         if playing && !was_playing {
             if messages.clock {
-                if (beat - Beat(0.0)).abs() <= START_EPSILON {
+                if (beat - Beat::new(0.0)).abs() <= START_EPSILON {
                     emit((Offset::ZERO, self.system(System::Start)));
                 } else {
                     emit((
@@ -416,7 +416,7 @@ impl ClockMaster {
         let region = transport.looping;
         let mut clock = transport.clock(sample_rate);
         let mut ends_on_wrap = false;
-        for pass in clock.passes(Samples(block_size), region) {
+        for pass in clock.passes(Samples::new(block_size), region) {
             ends_on_wrap = pass.end == PassEnd::Wrap;
             if !pass.start.is_zero() {
                 if messages.clock {
@@ -546,7 +546,7 @@ impl ClockMaster {
         let mut bar = if frame_of(meter.bar_start(first)) >= 0 {
             first
         } else {
-            first + BarCount(1)
+            first + BarCount::new(1)
         };
         let mut boundary = meter.bar_start(bar);
         while let Some(k) = usize::try_from(frame_of(boundary))
@@ -564,7 +564,7 @@ impl ClockMaster {
                 }
                 self.flex.meter = Some(signature);
             }
-            bar += BarCount(1);
+            bar += BarCount::new(1);
             let next = meter.bar_start(bar);
             // A line that does not advance would stand here for ever.
             if next <= boundary {
@@ -658,7 +658,7 @@ impl ClockMaster {
 /// `k` the pass reaches, compared as integer frames so a tick on a block
 /// boundary is reached on the next block's first frame, not both.
 fn tick_frames(pass: &Pass, beats_per_sample: BeatDuration) -> impl Iterator<Item = usize> {
-    let tick_beats = BeatDuration(1.0 / f64::from(System::TIMING_CLOCKS_PER_QUARTER));
+    let tick_beats = BeatDuration::new(1.0 / f64::from(System::TIMING_CLOCKS_PER_QUARTER));
     let (beat, len) = (pass.beat, pass.len.get());
     // The tick at or before the pass's first beat: its frame is 0 (on the
     // beat, within the rule's tolerance) or before the pass (already sent, or
@@ -666,7 +666,7 @@ fn tick_frames(pass: &Pass, beats_per_sample: BeatDuration) -> impl Iterator<Ite
     let mut tick_idx = (beat.get() / tick_beats.get()).floor() as i64;
     std::iter::from_fn(move || {
         loop {
-            let tick_beat = Beat(tick_idx as f64 * tick_beats.get());
+            let tick_beat = Beat::new(tick_idx as f64 * tick_beats.get());
             let k = first_frame_at_or_after((tick_beat - beat) / beats_per_sample);
             tick_idx += 1;
             if k >= 0 {
@@ -681,8 +681,8 @@ fn tick_frames(pass: &Pass, beats_per_sample: BeatDuration) -> impl Iterator<Ite
 /// runs.
 fn frame_offset(frames: usize, block_size: usize) -> Offset {
     Offset::new(
-        Samples(frames.min(block_size.saturating_sub(1))),
-        Samples(block_size),
+        Samples::new(frames.min(block_size.saturating_sub(1))),
+        Samples::new(block_size),
     )
     .unwrap_or(Offset::ZERO)
 }
@@ -691,7 +691,7 @@ fn frame_offset(frames: usize, block_size: usize) -> Offset {
 /// the timeline the MTC grid and the Full Message share. Before zero, or at a
 /// tempo that does not advance, it is 0.
 fn samples_at(beat: Beat, beats_per_sample: BeatDuration) -> f64 {
-    if beats_per_sample > BeatDuration(0.0) {
+    if beats_per_sample > BeatDuration::new(0.0) {
         (beat.get() / beats_per_sample.get()).max(0.0)
     } else {
         0.0

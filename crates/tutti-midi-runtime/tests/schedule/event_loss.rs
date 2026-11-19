@@ -77,7 +77,10 @@ struct Rig {
 
 /// A clip at key 1 into the sink at key 2, blocks of at most `max`.
 fn rig(events: impl IntoIterator<Item = TimedMidiEvent>, max: usize) -> Rig {
-    let (mut ed, exec) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(max))));
+    let (mut ed, exec) = Editor::new(Prepare::new(
+        SampleRate::SR_48K,
+        MaxBlock::of(Samples::new(max)),
+    ));
     ed.insert(NodeKey(1), "clip", MidiClipNode::new(events));
     let tally = Arc::new(Mutex::new(Tally::default()));
     ed.insert(NodeKey(2), "sink", Unforkable(Sink(Arc::clone(&tally))));
@@ -239,7 +242,7 @@ fn the_port_follows_the_block() {
         let mut node = MidiClipNode::new([]);
         tutti_graph::Node::<f32>::prepare(
             &mut node,
-            &Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(block))),
+            &Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(block))),
         );
         assert_eq!(
             tutti_graph::Node::<f32>::shape(&node)
@@ -262,7 +265,7 @@ fn the_ingest_node_follows_the_block() {
         let mut node = MidiIngestNode::new();
         tutti_graph::Node::<f32>::prepare(
             &mut node,
-            &Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(block))),
+            &Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(block))),
         );
         assert_eq!(
             tutti_graph::Node::<f32>::shape(&node)
@@ -284,7 +287,7 @@ fn the_harmony_port_follows_the_block() {
         let mut node = HarmonyNode::new([]);
         tutti_graph::Node::<f32>::prepare(
             &mut node,
-            &Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(block))),
+            &Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(block))),
         );
         assert_eq!(
             tutti_graph::Node::<f32>::shape(&node)

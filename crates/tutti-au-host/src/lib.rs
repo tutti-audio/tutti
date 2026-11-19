@@ -83,7 +83,7 @@
 //!     let main = MainThreadMarker::new().unwrap();
 //!     let (_collector, work) = MainWork::new();
 //!     let au = AuLoaded::new(info.component, SampleRate::SR_44K1, 512, &work).unwrap();
-//!     let prepare = Prepare::new(SampleRate::SR_44K1, MaxBlock::of(Samples(512)));
+//!     let prepare = Prepare::new(SampleRate::SR_44K1, MaxBlock::of(Samples::new(512)));
 //!     let Ok((mut processor, _controller)) = au.activate(main, prepare) else {
 //!         return;
 //!     };
@@ -93,7 +93,7 @@
 //!     let in_refs: Vec<&[f32]> = input.iter().map(|v| v.as_slice()).collect();
 //!     let mut out_refs: Vec<&mut [f32]> = output.iter_mut().map(|v| v.as_mut_slice()).collect();
 //!     let mut block = InputOutput::new(
-//!         Samples(512),
+//!         Samples::new(512),
 //!         Planes::new(&in_refs).unwrap(),
 //!         PlanesMut::new(&mut out_refs).unwrap(),
 //!     )

@@ -60,7 +60,7 @@ impl Rig {
     pub fn new(client: PluginClient<Bound>, rate: f64, block: usize) -> Self {
         Self::prepared(
             client,
-            Prepare::new(SampleRate::of(rate), MaxBlock::of(Samples(block))),
+            Prepare::new(SampleRate::of(rate), MaxBlock::of(Samples::new(block))),
         )
     }
 
