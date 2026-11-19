@@ -97,7 +97,7 @@ tutti_units::ranged! {
 
 impl ClickLevel {
     /// Half level, a click's default.
-    pub const HALF: ClickLevel = ClickLevel(Amplitude(0.5));
+    pub const HALF: ClickLevel = ClickLevel(Amplitude::new(0.5));
 }
 
 /// Click-specific settings (volume, mode).
@@ -147,7 +147,7 @@ impl ClickSettings {
     /// The click level.
     pub fn volume(&self) -> ClickLevel {
         // Only `store_volume` and `new` write the cell, with a `ClickLevel`.
-        ClickLevel(Amplitude(self.volume.load(Ordering::Acquire)))
+        ClickLevel(Amplitude::new(self.volume.load(Ordering::Acquire)))
     }
 
     /// A fresh cell holding this one's volume and mode now, sharing no cell
@@ -308,7 +308,7 @@ impl<F: Float> ClickNode<F> {
             click_pos: 0,
             is_accent: false,
             last_click_onset: None,
-            latched_until: Beat(f64::NEG_INFINITY),
+            latched_until: Beat::new(f64::NEG_INFINITY),
         }
     }
 
@@ -320,21 +320,25 @@ impl<F: Float> ClickNode<F> {
     /// floats that happen to line up.
     fn generate_click(sample_rate: tutti_units::SampleRate, is_accent: bool) -> Vec<F> {
         /// Total click length.
-        const CLICK_LEN: Seconds = Seconds(0.03);
+        const CLICK_LEN: Seconds = Seconds::new(0.03);
         /// Fade-in, then full level until `HOLD_END`, then fade to zero.
-        const ATTACK: Seconds = Seconds(0.001);
-        const HOLD_END: Seconds = Seconds(0.02);
+        const ATTACK: Seconds = Seconds::new(0.001);
+        const HOLD_END: Seconds = Seconds::new(0.02);
 
         // `to_samples_ceil`, not a truncating cast: this sizes a buffer, which
         // is the allocating case the three named roundings exist to
         // distinguish.
         let num_samples = CLICK_LEN.to_samples_ceil(sample_rate).get();
 
-        let freq = if is_accent { Hz(1200.0) } else { Hz(1000.0) };
-        let accent_volume = if is_accent {
-            Amplitude(1.0)
+        let freq = if is_accent {
+            Hz::new(1200.0)
         } else {
-            Amplitude(0.7)
+            Hz::new(1000.0)
+        };
+        let accent_volume = if is_accent {
+            Amplitude::new(1.0)
+        } else {
+            Amplitude::new(0.7)
         };
         let (attack, hold_end) = (ATTACK.get(), HOLD_END.get());
         let release_len = CLICK_LEN.get() - hold_end;
@@ -343,7 +347,7 @@ impl<F: Float> ClickNode<F> {
         let mut phase = RunningPhase::START;
         (0..num_samples)
             .map(|i| {
-                let t = Samples(i).to_seconds(sample_rate).get();
+                let t = Samples::new(i).to_seconds(sample_rate).get();
                 let env = if t < attack {
                     t / attack
                 } else if t < hold_end {
@@ -351,7 +355,7 @@ impl<F: Float> ClickNode<F> {
                 } else {
                     1.0 - (t - hold_end) / release_len
                 };
-                let sample = Phase(f64::from_phase(phase)).sin() * env * accent_volume.get();
+                let sample = Phase::new(f64::from_phase(phase)).sin() * env * accent_volume.get();
                 phase = phase.advance(phase_step);
                 F::from_design(sample)
             })
@@ -464,7 +468,7 @@ impl<F: Float> ClickNode<F> {
     /// one.
     #[inline]
     fn forget_latch(&mut self) {
-        self.latched_until = Beat(f64::NEG_INFINITY);
+        self.latched_until = Beat::new(f64::NEG_INFINITY);
     }
 
     /// One sample of the click envelope, or silence once it has run out.
@@ -738,7 +742,7 @@ mod tests {
         tutti_graph::TransportPosition::new(
             deck.playing,
             Bpm::of(f64::from_bits(1)),
-            Beat(beat),
+            Beat::new(beat),
             None,
         )
         .with_recording(deck.recording)
@@ -749,7 +753,7 @@ mod tests {
         Env {
             frame: Frame::new(0),
             sample_rate: tutti_units::SampleRate::of(rate),
-            block_len: Samples(len),
+            block_len: Samples::new(len),
             transport,
             changes: TransportChanges::NONE,
             play: tutti_graph::PlayClock::ZERO,
@@ -808,7 +812,7 @@ mod tests {
     fn test_click_node_plays_on_beat() {
         let (_, settings, mut node) = make_click();
         settings.mode().set(MetronomeMode::Always);
-        set_volume(&settings, Amplitude(1.0));
+        set_volume(&settings, Amplitude::new(1.0));
 
         assert!(
             sounds_within(&mut node, ROLLING, 0.0, 100),
@@ -824,16 +828,16 @@ mod tests {
     fn test_click_plays_after_loop_wrap() {
         let (_, settings, mut node) = make_click();
         settings.mode().set(MetronomeMode::Always);
-        set_volume(&settings, Amplitude(1.0));
+        set_volume(&settings, Amplitude::new(1.0));
 
         let _ = frame(&mut node, ROLLING, 7.0);
-        assert_eq!(node.last_click_onset, Some(Beat(7.0)));
+        assert_eq!(node.last_click_onset, Some(Beat::new(7.0)));
 
         // Simulate loop wrap: beat jumps backward from 7 to 4
         let found_nonzero = (0..100).any(|_| frame(&mut node, ROLLING, 4.0)[0] != 0.0);
         assert_eq!(
             node.last_click_onset,
-            Some(Beat(4.0)),
+            Some(Beat::new(4.0)),
             "Should reset to beat 4 after loop wrap"
         );
         assert!(found_nonzero, "Click should play after loop wrap");
@@ -863,7 +867,7 @@ mod tests {
             .settings()
             .project_meter()
             .set_meter(Arc::new(MeterMap::new([MeterChange::new(
-                Beat(0.0),
+                Beat::new(0.0),
                 TimeSignature::new(BeatsPerBar::of(3), NoteValue::QUARTER),
             )])));
         assert!(accents_at(&mut node, 3.0));
@@ -881,20 +885,20 @@ mod tests {
             .settings()
             .project_meter()
             .set_meter(Arc::new(MeterMap::new([MeterChange::new(
-                Beat(0.0),
+                Beat::new(0.0),
                 TimeSignature::new(BeatsPerBar::of(7), NoteValue::EIGHTH),
             )])));
 
         // Half a quarter note apart is a full notated beat in 7/8, so these are
         // distinct clicks.
         let _ = frame(&mut node, ROLLING, 0.0);
-        assert_eq!(node.last_click_onset, Some(Beat(0.0)));
+        assert_eq!(node.last_click_onset, Some(Beat::new(0.0)));
         assert!(node.is_accent, "beat 0 is the downbeat of bar 1");
 
         let _ = frame(&mut node, ROLLING, 0.5);
         assert_eq!(
             node.last_click_onset,
-            Some(Beat(0.5)),
+            Some(Beat::new(0.5)),
             "an eighth is one notated beat"
         );
         assert!(!node.is_accent, "beat 2 of the bar is not accented");
@@ -921,10 +925,10 @@ mod tests {
             .project_meter()
             .set_meter(Arc::new(MeterMap::new([
                 MeterChange::new(
-                    Beat(0.0),
+                    Beat::new(0.0),
                     TimeSignature::new(BeatsPerBar::of(7), NoteValue::EIGHTH),
                 ),
-                MeterChange::new(Beat(10.5), TimeSignature::default()),
+                MeterChange::new(Beat::new(10.5), TimeSignature::default()),
             ])));
 
         // Walk every notated beat across the change and collect the onsets the
@@ -958,13 +962,13 @@ mod tests {
             25,
             "every notated beat must click exactly once"
         );
-        assert!(onsets.contains(&Beat(10.5)), "the change begins a bar");
+        assert!(onsets.contains(&Beat::new(10.5)), "the change begins a bar");
     }
 
     /// A transport rolling from `start` so that frame `i` of the block is at
     /// beat `start + i/100` (at 44.1 kHz): 26 460 BPM.
     fn hundredths_from(start: f64) -> tutti_graph::TransportPosition {
-        tutti_graph::TransportPosition::new(true, Bpm::of(26_460.0), Beat(start), None)
+        tutti_graph::TransportPosition::new(true, Bpm::of(26_460.0), Beat::new(start), None)
     }
 
     /// A meter change that lands *inside* a notated beat still clicks its
@@ -981,20 +985,20 @@ mod tests {
     fn a_mid_beat_meter_change_clicks_its_downbeat() {
         let (transport, settings, mut node) = make_click();
         settings.mode().set(MetronomeMode::Always);
-        set_volume(&settings, Amplitude(1.0));
+        set_volume(&settings, Amplitude::new(1.0));
         transport
             .settings()
             .project_meter()
             .set_meter(Arc::new(MeterMap::new([
-                MeterChange::new(Beat(0.0), TimeSignature::default()),
+                MeterChange::new(Beat::new(0.0), TimeSignature::default()),
                 MeterChange::new(
-                    Beat(2.5),
+                    Beat::new(2.5),
                     TimeSignature::new(BeatsPerBar::of(7), NoteValue::EIGHTH),
                 ),
             ])));
 
         // Beat 2's click has already played out, so only the change can sound.
-        node.last_click_onset = Some(Beat(2.0));
+        node.last_click_onset = Some(Beat::new(2.0));
         node.click_pos = node.click_normal.len();
 
         // Frame `i` carries beat `2 + i/100`, so the change at 2.5 is frame 50.
@@ -1002,7 +1006,7 @@ mod tests {
 
         assert_eq!(
             node.last_click_onset,
-            Some(Beat(2.5)),
+            Some(Beat::new(2.5)),
             "the change's downbeat is a new onset"
         );
         assert!(node.is_accent, "and it is a downbeat");
@@ -1021,7 +1025,7 @@ mod tests {
 
         // 4/4 (the default): 2.00..2.10 all belong to the quarter at 2.0.
         let _ = block(&mut node, &env(SR, 10, hundredths_from(2.0)));
-        assert_eq!(node.last_click_onset, Some(Beat(2.0)));
+        assert_eq!(node.last_click_onset, Some(Beat::new(2.0)));
 
         // 3/16: sixteenth-note beats, three to a 0.75-quarter bar. Beat 2.64
         // falls in the sixteenth starting at 2.5 — inside the old span.
@@ -1029,13 +1033,13 @@ mod tests {
             .settings()
             .project_meter()
             .set_meter(Arc::new(MeterMap::new([MeterChange::new(
-                Beat(0.0),
+                Beat::new(0.0),
                 TimeSignature::new(BeatsPerBar::of(3), NoteValue::SIXTEENTH),
             )])));
         let _ = block(&mut node, &env(SR, 10, hundredths_from(2.64)));
         assert_eq!(
             node.last_click_onset,
-            Some(Beat(2.5)),
+            Some(Beat::new(2.5)),
             "the new meter's beat must be the one latched"
         );
     }
@@ -1068,13 +1072,13 @@ mod tests {
     fn a_block_matches_its_frames_one_by_one() {
         let (_, settings, mut block_node) = make_click();
         settings.mode().set(MetronomeMode::Always);
-        set_volume(&settings, Amplitude(1.0));
+        set_volume(&settings, Amplitude::new(1.0));
 
         // 44.1 kHz at 120 BPM is 1/22050 beat per frame, so starting 20 frames
         // before beat 2 puts that onset at frame 20 of the block.
         const N: usize = 64;
         let mut host = FrameClock::new(
-            Beat(2.0 - 20.0 / 22_050.0),
+            Beat::new(2.0 - 20.0 / 22_050.0),
             Bpm::of(120.0),
             tutti_units::SampleRate::of(SR),
         );
@@ -1085,7 +1089,7 @@ mod tests {
         // Latch the beat before it, as a transport rolling into this block
         // would have, with its click already played out, so the onset at beat 2
         // is the only sound in the block.
-        block_node.last_click_onset = Some(Beat(1.0));
+        block_node.last_click_onset = Some(Beat::new(1.0));
         block_node.click_pos = block_node.click_normal.len();
         let mut frame_node = block_node.clone();
 
@@ -1097,7 +1101,7 @@ mod tests {
 
         for i in 0..N {
             let [l, r] = block(&mut frame_node, &env(SR, 1, counted(&host)));
-            host.advance(Samples(1), None);
+            host.advance(Samples::new(1), None);
             assert_eq!(left[i], l[0], "left channel diverged at frame {i}");
             assert_eq!(right[i], r[0], "right channel diverged at frame {i}");
         }
@@ -1126,7 +1130,7 @@ mod tests {
             let transport = Transport::new(SampleRate::of(RATE));
             let settings = Arc::new(ClickSettings::new());
             settings.mode().set(MetronomeMode::Always);
-            set_volume(&settings, Amplitude(1.0));
+            set_volume(&settings, Amplitude::new(1.0));
             let mut node = prepared(
                 ClickNode::new(&transport, settings),
                 tutti_units::SampleRate::of(RATE),
@@ -1139,7 +1143,7 @@ mod tests {
             assert_ne!(node.click_normal[1], 0.0);
             // As if the transport had rolled through beat 0 already: the click
             // under test is the one at beat 1, and beat 0's has played out.
-            node.last_click_onset = Some(Beat(0.0));
+            node.last_click_onset = Some(Beat::new(0.0));
             node.click_pos = node.click_normal.len();
 
             let bps = tutti_music::beats_per_sample(Bpm::of(BPM), SampleRate::of(RATE)).get();
@@ -1150,8 +1154,11 @@ mod tests {
                 "the onset must land mid-block, or a block-quantised click passes"
             );
 
-            let mut host =
-                FrameClock::new(Beat(START), Bpm::of(BPM), tutti_units::SampleRate::of(RATE));
+            let mut host = FrameClock::new(
+                Beat::new(START),
+                Bpm::of(BPM),
+                tutti_units::SampleRate::of(RATE),
+            );
             let mut left = Vec::new();
             while left.len() < expected + 2 * len {
                 let t = tutti_graph::TransportPosition::counted(
@@ -1161,7 +1168,7 @@ mod tests {
                     None,
                 );
                 let [l, _] = block(&mut node, &env(RATE, len, t));
-                host.advance(Samples(len), None);
+                host.advance(Samples::new(len), None);
                 left.extend(l);
             }
 
@@ -1189,12 +1196,15 @@ mod tests {
     fn a_start_or_stop_inside_a_block_gates_on_its_frame() {
         let (_, settings, mut node) = make_click();
         settings.mode().set(MetronomeMode::Always);
-        set_volume(&settings, Amplitude(1.0));
+        set_volume(&settings, Amplitude::new(1.0));
 
         // Rolling on beat 3 (its click sounding), stopped at frame 30.
         let mut changes = TransportChanges::NONE;
         changes
-            .push(Offset::of(Samples(30), Samples(64)), held(STOPPED, 3.0))
+            .push(
+                Offset::of(Samples::new(30), Samples::new(64)),
+                held(STOPPED, 3.0),
+            )
             .expect("fits");
         let mut rolling = env(SR, 64, held(ROLLING, 3.0));
         rolling.changes = changes;
@@ -1205,7 +1215,10 @@ mod tests {
         // Stopped, then started at frame 10 on beat 5.
         let mut changes = TransportChanges::NONE;
         changes
-            .push(Offset::of(Samples(10), Samples(64)), held(ROLLING, 5.0))
+            .push(
+                Offset::of(Samples::new(10), Samples::new(64)),
+                held(ROLLING, 5.0),
+            )
             .expect("fits");
         let mut starting = env(SR, 64, held(STOPPED, 4.0));
         starting.changes = changes;
@@ -1218,7 +1231,7 @@ mod tests {
     fn test_preroll_only_mode() {
         let (transport, settings, mut node) = make_click();
         settings.mode().set(MetronomeMode::PrerollOnly);
-        set_volume(&settings, Amplitude(1.0));
+        set_volume(&settings, Amplitude::new(1.0));
 
         // Should be silent when not in preroll
         let output = frame(&mut node, ROLLING, 0.0);
@@ -1237,7 +1250,7 @@ mod tests {
     fn test_recording_only_mode() {
         let (transport, settings, mut node) = make_click();
         settings.mode().set(MetronomeMode::RecordingOnly);
-        set_volume(&settings, Amplitude(1.0));
+        set_volume(&settings, Amplitude::new(1.0));
         let recording = Deck {
             playing: true,
             recording: true,
@@ -1273,13 +1286,13 @@ mod tests {
     fn a_fork_snapshots_settings_and_the_count_in() {
         type Move = fn(&Transport, &ClickSettings);
         let moves: [(&str, Move); 4] = [
-            ("volume", |_, s| set_volume(s, Amplitude(1.0))),
+            ("volume", |_, s| set_volume(s, Amplitude::new(1.0))),
             ("mode", |_, s| s.mode().set(MetronomeMode::Off)),
             ("meter", |t, _| {
                 t.settings()
                     .project_meter()
                     .set_meter(Arc::new(MeterMap::new([MeterChange::new(
-                        Beat(0.0),
+                        Beat::new(0.0),
                         TimeSignature::new(BeatsPerBar::of(3), NoteValue::QUARTER),
                     )])))
             }),
@@ -1288,7 +1301,7 @@ mod tests {
         let fresh = || {
             let transport = Transport::new(SampleRate::SR_48K);
             let settings = Arc::new(ClickSettings::new());
-            set_volume(&settings, Amplitude(0.5));
+            set_volume(&settings, Amplitude::new(0.5));
             // Recording-only, so the count-in gates it (the render records).
             settings.mode().set(MetronomeMode::RecordingOnly);
             let node = ClickNode::<f32>::new(&transport, Arc::clone(&settings));
@@ -1298,8 +1311,11 @@ mod tests {
         // second: four clicks, past beat 3 (a downbeat in 3/4, not in 4/4).
         let render = |node: ClickNode<f32>| {
             let mut node = prepared(node, tutti_units::SampleRate::SR_48K, 64);
-            let mut host =
-                FrameClock::new(Beat(0.0), Bpm::of(1_200.0), tutti_units::SampleRate::SR_48K);
+            let mut host = FrameClock::new(
+                Beat::new(0.0),
+                Bpm::of(1_200.0),
+                tutti_units::SampleRate::SR_48K,
+            );
             let mut left = Vec::new();
             for _ in 0..160 {
                 let t = tutti_graph::TransportPosition::counted(
@@ -1310,7 +1326,7 @@ mod tests {
                 )
                 .with_recording(true);
                 left.extend(block(&mut node, &env(48_000.0, 64, t))[0].clone());
-                host.advance(Samples(64), None);
+                host.advance(Samples::new(64), None);
             }
             left
         };

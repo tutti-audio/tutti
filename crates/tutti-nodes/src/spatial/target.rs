@@ -4,7 +4,7 @@
 use tutti_units::{Azimuth, Direction, Elevation, SampleRate, Samples, Seconds};
 
 /// The time constant of the position de-zipper, in audio time.
-const SMOOTH_TIME: Seconds = Seconds(0.05);
+const SMOOTH_TIME: Seconds = Seconds::new(0.05);
 
 /// One smoother per coordinate, each with its own arithmetic: the bearing takes
 /// the short arc, the height is a plain ramp.

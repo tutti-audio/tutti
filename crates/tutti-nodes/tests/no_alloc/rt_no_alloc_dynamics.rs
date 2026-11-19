@@ -381,7 +381,7 @@ fn brickwall_limiter_fed_ceiling_process_is_allocation_free() {
     let ceiling: Vec<f32> = (0..64).map(|i| -12.0 + 0.1875 * i as f32).collect();
     node.feed(0, Some(&ceiling));
     node.block();
-    let first = tutti_units::Db(-12.0).to_amplitude().get() as f32;
+    let first = tutti_units::Db::new(-12.0).to_amplitude().get() as f32;
     assert!(
         (node.output().plane(5).samples()[0] - first).abs() < 1e-5,
         "the fed ceiling did not reach the clip: {}",
@@ -651,12 +651,16 @@ pub(crate) fn sweep<N: tutti_graph::Node + tutti_graph::ParamNode>(
                 );
             }
             // Between windows: prepared again, and forked, the control side's own work.
-            d.node
-                .prepare(&Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))));
+            d.node.prepare(&Prepare::new(
+                SampleRate::SR_48K,
+                MaxBlock::of(Samples::new(64)),
+            ));
             let fork = d.node.fork_fresh();
             *d.node = fork;
-            d.node
-                .prepare(&Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))));
+            d.node.prepare(&Prepare::new(
+                SampleRate::SR_48K,
+                MaxBlock::of(Samples::new(64)),
+            ));
             set = d.node.param_set();
         }
     }

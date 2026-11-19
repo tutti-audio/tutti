@@ -113,7 +113,7 @@ impl<F: FftFloat> HrtfBinauralNode<F> {
         sample_rate: impl Into<SampleRate>,
     ) -> Result<Self, HrtfBinauralError> {
         let sample_rate = sample_rate.into();
-        let aim = AngleSmoother::new(sample_rate, Samples(HRTF_STEP));
+        let aim = AngleSmoother::new(sample_rate, Samples::new(HRTF_STEP));
         Ok(Self {
             panner: HrtfBinaural::new(hrir_bytes, sample_rate, aim.current())?,
             aim,
@@ -144,7 +144,10 @@ impl<F: FftFloat> HrtfBinauralNode<F> {
             .good
             .elevation
             .read(elevation.map_or_else(|| self.elevation.load().get(), Into::into));
-        Direction::new(Azimuth(azimuth).wrap(), Elevation::new_clamped(elevation))
+        Direction::new(
+            Azimuth::new(azimuth).wrap(),
+            Elevation::new_clamped(elevation),
+        )
     }
 }
 
@@ -168,10 +171,10 @@ impl<F: FftFloat> Node<F> for HrtfBinauralNode<F> {
     fn shape(&self) -> Shape {
         Shape::through(BusTopology::STEREO)
             .with_param_addrs(self.declared_ports().as_slice())
-            .with_latency(Latency::new(Samples(HRTF_LATENCY)))
+            .with_latency(Latency::new(Samples::new(HRTF_LATENCY)))
             .with_tail(match self.panner.ring_out() {
                 0 => Tail::None,
-                n => Tail::Finite(Samples(n)),
+                n => Tail::Finite(Samples::new(n)),
             })
             // An exception to the nearest-class rule. The FFT work lands all at once in the
             // block that completes a 128-frame step: at 64-frame blocks that
@@ -204,11 +207,13 @@ impl<F: FftFloat> Node<F> for HrtfBinauralNode<F> {
                 .last_frame(),
         ]);
         // `Mix::new_clamped` passes a NaN through, so the blend is held too.
-        let blend = Mix(self.good.blend.read(
-            self.declared_param::<{ UnitParam::Wet as u16 }, _>(&io)
-                .last_frame()
-                .map_or_else(|| self.blend.load().get(), Into::into),
-        ));
+        let blend = Mix::new(
+            self.good.blend.read(
+                self.declared_param::<{ UnitParam::Wet as u16 }, _>(&io)
+                    .last_frame()
+                    .map_or_else(|| self.blend.load().get(), Into::into),
+            ),
+        );
         let size = io.frames();
         let (inputs, mut outputs) = io.split();
         let (left, right) = (&inputs.get(0)[..size], &inputs.get(1)[..size]);

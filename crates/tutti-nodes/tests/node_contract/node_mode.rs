@@ -19,7 +19,7 @@ const RATE: SampleRate = SampleRate::SR_48K;
 const FRAMES: usize = 1024;
 
 fn solo<N: IntoNode>(node: N) -> Solo<N::Controls> {
-    Solo::new(node, Prepare::new(RATE, MaxBlock::of(Samples(64))))
+    Solo::new(node, Prepare::new(RATE, MaxBlock::of(Samples::new(64))))
 }
 
 fn set_mode<C>(solo: &mut Solo<C>, mode: NodeMode) {
@@ -48,9 +48,9 @@ fn input() -> Vec<f32> {
 fn a_bypassed_band_is_its_input_bit_for_bit() {
     let mut s = solo(EqBandNode::<f32>::new(
         SvfType::Bell,
-        Hz(1_000.0),
-        Q(1.0),
-        Db(24.0),
+        Hz::new(1_000.0),
+        Q::new(1.0),
+        Db::new(24.0),
     ));
     set_mode(&mut s, NodeMode::Bypassed);
     let x = input();
@@ -81,7 +81,7 @@ fn a_muted_strip_is_silence_and_un_muted_is_its_fader() {
 
     set_mode(&mut s, NodeMode::Active);
     let back = s.render_input(Planes::new(&[&x, &x]).unwrap());
-    let fader = Amplitude(0.75).get() as f32;
+    let fader = Amplitude::new(0.75).get() as f32;
     for (c, y) in back.iter().enumerate() {
         let want: Vec<u32> = x[from..].iter().map(|v| (v * fader).to_bits()).collect();
         assert_eq!(bits(&y[from..]), want, "channel {c} is the fader again");

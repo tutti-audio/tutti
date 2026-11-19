@@ -144,7 +144,7 @@ fn bench(c: &mut Criterion) {
             let node = HrtfBinauralNode::<f32>::new(&bytes, SampleRate::of(f64::from(RATE)))
                 .expect("the sphere parses");
             let params = node.param_set();
-            aim(&params, Azimuth(20.0), Elevation(10.0));
+            aim(&params, Azimuth::new(20.0), Elevation::new(10.0));
             let mut d = Direct::new(node, SampleRate::of(f64::from(RATE)), BLOCK);
             // Seat the de-zipper on the position, so the static case renders
             // one filter from its first block.
@@ -163,8 +163,8 @@ fn bench(c: &mut Criterion) {
             g.bench_with_input(BenchmarkId::from_parameter(ir_len), &ir_len, |b, _| {
                 b.iter(|| {
                     if moving {
-                        bearing = bearing.rotate_by(ArcDegrees(7.0));
-                        aim(&params, bearing, Elevation(10.0));
+                        bearing = bearing.rotate_by(ArcDegrees::new(7.0));
+                        aim(&params, bearing, Elevation::new(10.0));
                     }
                     d.block();
                     black_box(d.output().plane(0).samples()[BLOCK - 1]);

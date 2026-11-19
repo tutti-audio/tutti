@@ -68,7 +68,7 @@ fn survives_node<N: Node>(name: &str, make: impl Fn() -> N, cells: impl Fn(&N) -
         let count = cells(&make()).len();
         for k in 0..count {
             let mut node = make();
-            node.prepare(&Prepare::new(a, MaxBlock::of(Samples(64))));
+            node.prepare(&Prepare::new(a, MaxBlock::of(Samples::new(64))));
             assert!(
                 render_node_finite(&mut node, a, 4, 1),
                 "{name}: finite before"
@@ -86,7 +86,7 @@ fn survives_node<N: Node>(name: &str, make: impl Fn() -> N, cells: impl Fn(&N) -
                 render_node_finite(&mut node, a, 8, 10),
                 "{name}: {cell} = {bad} (with every other control moving) reached the output"
             );
-            node.prepare(&Prepare::new(b, MaxBlock::of(Samples(64))));
+            node.prepare(&Prepare::new(b, MaxBlock::of(Samples::new(64))));
             assert!(
                 render_node_finite(&mut node, b, 8, 30),
                 "{name}: {cell} = {bad} reached the output through a rate change"
@@ -329,7 +329,10 @@ fn the_convolver_holds_off_non_finite_controls() {
     let ir = decay_ir(128, Seconds::new(0.1), SampleRate::SR_48K);
     survives_node(
         "convolver",
-        || ConvolverNode::shared_ir(ChannelLayout::STEREO, Mono::new(&ir), Samples(64)).unwrap(),
+        || {
+            ConvolverNode::shared_ir(ChannelLayout::STEREO, Mono::new(&ir), Samples::new(64))
+                .unwrap()
+        },
         |n| vec![("gain", n.gain().cell(), 2.0)],
     );
 }
@@ -364,7 +367,10 @@ fn a_distortion_built_with_a_non_finite_drive_renders_finite() {
     use tutti_nodes::{DistortionNode, ShapeKind};
     for bad in BAD {
         let mut node = DistortionNode::<f32>::new(ShapeKind::Tanh, Drive::new(f64::from(bad)));
-        node.prepare(&Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))));
+        node.prepare(&Prepare::new(
+            SampleRate::SR_48K,
+            MaxBlock::of(Samples::new(64)),
+        ));
         assert!(
             render_node_finite(&mut node, SampleRate::SR_48K, 4, 1),
             "drive {bad}"

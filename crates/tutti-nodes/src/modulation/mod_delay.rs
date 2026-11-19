@@ -340,9 +340,9 @@ mod tests {
 
     fn controls(rate: f64, depth: f64, feedback: f64) -> ModDelayControls {
         ModDelayControls {
-            rate: Hz(rate),
-            depth: Seconds(depth),
-            feedback: Feedback(feedback),
+            rate: Hz::new(rate),
+            depth: Seconds::new(depth),
+            feedback: Feedback::new(feedback),
         }
     }
 
@@ -377,7 +377,7 @@ mod tests {
             (shape.audio_in().count(), shape.audio_out().count()),
             (3, 3)
         );
-        assert_eq!(shape.latency, Latency::new(Samples(0)));
+        assert_eq!(shape.latency, Latency::new(Samples::new(0)));
         assert_eq!(shape.tail, Tail::Unknown);
         assert_eq!(
             chorus.param_base(0),
@@ -394,15 +394,15 @@ mod tests {
             RATE,
             64,
         );
-        assert_eq!(gm.shape().tail, Tail::Finite(Samples(240)));
-        assert_eq!(gm.shape().latency, Latency::new(Samples(0)));
+        assert_eq!(gm.shape().tail, Tail::Finite(Samples::new(240)));
+        assert_eq!(gm.shape().latency, Latency::new(Samples::new(0)));
         assert_honest_tail(&mut gm, RATE);
     }
 
     /// A stagger that names an offset per channel must name the bus's.
     #[test]
     fn a_stagger_of_the_wrong_length_is_refused_at_construction() {
-        let two = Stagger::each(&[PhaseIncrement(0.0), PhaseIncrement(0.5)]).unwrap();
+        let two = Stagger::each(&[PhaseIncrement::new(0.0), PhaseIncrement::new(0.5)]).unwrap();
         assert!(
             ModDelayNode::<f32>::new(
                 BusTopology::STEREO,
@@ -425,10 +425,10 @@ mod tests {
     /// At 20 Hz and 10 ms it is the worst case for the chord between corners.
     fn trajectory_layout(width: u16, stagger: Stagger) -> ModDelayLayout {
         let sweep = Sweep::of(
-            Seconds(0.02),
-            MaxDelay::of(Seconds(0.08)),
-            Seconds(0.0),
-            Seconds(0.04),
+            Seconds::new(0.02),
+            MaxDelay::of(Seconds::new(0.08)),
+            Seconds::new(0.0),
+            Seconds::new(0.04),
             Feedback::MAX_STABLE,
         );
         ModDelayLayout::new(bus(width), sweep, stagger).expect("a stagger that fits")
@@ -436,7 +436,7 @@ mod tests {
 
     fn prepared_kernel(layout: ModDelayLayout, rate: SampleRate) -> ModDelayKernel<f32> {
         let mut k = ModDelayKernel::<f32>::new(layout);
-        k.prepare(rate, MaxBlock::of(Samples(64)));
+        k.prepare(rate, MaxBlock::of(Samples::new(64)));
         k
     }
 
@@ -469,12 +469,12 @@ mod tests {
     /// steps on, so the corners (frame `16 k + 15`) are the sine itself. `rates` are `(frame,
     /// hz)`: the rate in force from that frame on.
     fn exact_delays(len: usize, depth: f64, rate: f64, rates: &[(usize, f64)]) -> Vec<f64> {
-        let mut inc = PhaseIncrement::per_sample(Hz(rate), RATE);
+        let mut inc = PhaseIncrement::per_sample(Hz::new(rate), RATE);
         let mut phase = Phase::START;
         (0..len)
             .map(|n| {
                 if let Some(&(_, hz)) = rates.iter().find(|r| r.0 == n) {
-                    inc = PhaseIncrement::per_sample(Hz(hz), RATE);
+                    inc = PhaseIncrement::per_sample(Hz::new(hz), RATE);
                 }
                 phase = phase.advance(inc);
                 let turns = phase.get();
@@ -707,7 +707,7 @@ mod tests {
             ModDelayLayout::new(
                 bus(3),
                 Sweep::CHORUS,
-                Stagger::of_step(PhaseIncrement(0.25)),
+                Stagger::of_step(PhaseIncrement::new(0.25)),
             )
             .unwrap(),
             RATE,
@@ -721,7 +721,7 @@ mod tests {
             y[1].iter().all(|&s| s == 0.0),
             "no bleed into a silent channel"
         );
-        let inc = PhaseIncrement::per_sample(Hz(3.0), RATE);
+        let inc = PhaseIncrement::per_sample(Hz::new(3.0), RATE);
         let mut phase = Phase::START;
         let (base, amp) = (0.01 * SR, 0.005 * SR);
         for (n, _) in ramp.iter().enumerate() {
@@ -741,15 +741,19 @@ mod tests {
         }
         // A whole cycle of stagger is none.
         let mut k = prepared_kernel(
-            ModDelayLayout::new(bus(2), Sweep::CHORUS, Stagger::of_step(PhaseIncrement(1.0)))
-                .unwrap(),
+            ModDelayLayout::new(
+                bus(2),
+                Sweep::CHORUS,
+                Stagger::of_step(PhaseIncrement::new(1.0)),
+            )
+            .unwrap(),
             RATE,
         );
         let both = drive_kernel(&mut k, &[(0, c)], &[ramp.clone(), ramp.clone()]);
         assert_eq!(both[0], both[1], "a full-cycle stagger is no stagger");
         // The offsets can be named: channel 1 half a cycle ahead, the two delays mirrored
         // about the base.
-        let named = Stagger::each(&[PhaseIncrement(0.0), PhaseIncrement(0.5)]).unwrap();
+        let named = Stagger::each(&[PhaseIncrement::new(0.0), PhaseIncrement::new(0.5)]).unwrap();
         let mut k = prepared_kernel(
             ModDelayLayout::new(bus(2), Sweep::CHORUS, named).unwrap(),
             RATE,
@@ -810,7 +814,7 @@ mod tests {
             RunningPhase::START,
             "the sweep was running"
         );
-        k.prepare(RATE, MaxBlock::of(Samples(64)));
+        k.prepare(RATE, MaxBlock::of(Samples::new(64)));
         assert_eq!(k.clock.state(), (RunningPhase::START, 0, false));
         let len = 6_000;
         let trace = trace(&mut k, &[(0, c)], len);
@@ -834,9 +838,9 @@ mod tests {
             .map(|n| ((n * 13 + 5) % 100) as f32 / 50.0 - 1.0)
             .collect();
         let c = ModDelayControls {
-            rate: Hz(7.0),
-            depth: Seconds(0.004),
-            feedback: Feedback(0.6),
+            rate: Hz::new(7.0),
+            depth: Seconds::new(0.004),
+            feedback: Feedback::new(0.6),
         };
         let blocks = |node: &mut ModDelayNode<f32>, from: usize| -> Vec<f32> {
             let mut out = Vec::new();
@@ -1047,16 +1051,16 @@ mod tests {
         let (d, len) = (16usize, 200usize);
         let rate = SampleRate::of(1_024.0);
         let sweep = Sweep::of(
-            Seconds(d as f64 / rate.get()),
-            MaxDelay::of(Seconds(1.0)),
+            Seconds::new(d as f64 / rate.get()),
+            MaxDelay::of(Seconds::new(1.0)),
             Seconds::ZERO,
-            Seconds(0.01),
+            Seconds::new(0.01),
             Feedback::MAX_STABLE,
         );
         let controls = ModDelayControls {
-            rate: Hz(1.0),
+            rate: Hz::new(1.0),
             depth: Seconds::ZERO,
-            feedback: Feedback(0.6),
+            feedback: Feedback::new(0.6),
         };
         let x = wide_signal(len);
         let g = 0.6;
@@ -1069,7 +1073,7 @@ mod tests {
             .collect();
         let layout = ModDelayLayout::new(BusTopology::MONO, sweep, Stagger::NONE).unwrap();
         let mut k = ModDelayKernel::<f64>::new(layout);
-        k.prepare(rate, MaxBlock::of(Samples(len)));
+        k.prepare(rate, MaxBlock::of(Samples::new(len)));
         let y = drive_kernel(&mut k, &[(0, controls)], &[x]).remove(0);
         assert_close_f64(&y, &want, 2.0f64.powi(-45));
     }

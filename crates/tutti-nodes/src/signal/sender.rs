@@ -41,7 +41,7 @@ struct Flight {
 
 impl Flight {
     fn since(&self, now: u64) -> Samples {
-        Samples(usize::try_from(now.saturating_sub(self.at)).unwrap_or(usize::MAX))
+        Samples::new(usize::try_from(now.saturating_sub(self.at)).unwrap_or(usize::MAX))
     }
 
     /// Its value at stream frame `now`.
@@ -127,10 +127,10 @@ impl<S: ControlSource> SourceNode<S> {
             ParamId::new(self.id),
             leg.piece.from,
             leg.piece.to,
-            Samples(0),
+            Samples::new(0),
             leg.piece.law,
         )
-        .resumed(Samples(0), leg.frames)
+        .resumed(Samples::new(0), leg.frames)
     }
 
     /// The value it has sent, at stream frame `now` (0 before any).
@@ -181,7 +181,7 @@ impl Out {
 
     fn flush<F: Float>(&mut self, io: &mut Io<'_, F>) {
         if let Some((i, seg)) = self.pending.take() {
-            let pushed = Offset::new(Samples(i), self.len).is_some_and(|at| {
+            let pushed = Offset::new(Samples::new(i), self.len).is_some_and(|at| {
                 io.event_out(0)
                     .push_param(ParamEvent::segment(at, seg))
                     .is_ok()
@@ -336,7 +336,7 @@ impl<F: Float, S: SourcePorts> Node<F> for SourceNode<S> {
                     self.send_leg(&mut out, &mut io, p, leg);
                 }
                 if let (true, Some(st)) = (grid == Some(p), stride) {
-                    let leg = self.source.grid(play(p), Samples(st as usize));
+                    let leg = self.source.grid(play(p), Samples::new(st as usize));
                     self.send_leg(&mut out, &mut io, p, leg);
                 }
                 while let Some(x) = events.get(ev).filter(|x| x.offset.index() == p) {

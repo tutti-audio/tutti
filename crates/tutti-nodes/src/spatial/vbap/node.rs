@@ -22,7 +22,7 @@ const GRID: usize = COEFF_INTERVAL;
 
 /// The time a bearing or height written to a cell takes to glide to its new
 /// value.
-const GLIDE: Seconds = Seconds(0.05);
+const GLIDE: Seconds = Seconds::new(0.05);
 
 // The params a [`VbapPannerNode`] lets the graph modulate, in port order.
 tutti_graph::declare_params!([F: Float] VbapPannerNode<F>, n {
@@ -292,7 +292,7 @@ impl<F: Float> VbapPannerNode<F> {
                 .spread
                 .read(lane(2).map_or(cells.2.get(), Into::into)),
         );
-        let width = StereoWidth(
+        let width = StereoWidth::new(
             self.good
                 .width
                 .read(lane(3).map_or(cells.3.get(), Into::into)),
@@ -300,7 +300,7 @@ impl<F: Float> VbapPannerNode<F> {
         let whole = !self.seated;
         steer(
             &mut self.aim_azimuth,
-            Azimuth(azimuth).wrap(),
+            Azimuth::new(azimuth).wrap(),
             whole || lane(0).is_some(),
             self.steps,
         );

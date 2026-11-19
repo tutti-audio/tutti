@@ -38,21 +38,23 @@ use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_units::{Db, Hz, SampleRate};
 
 /// The lowest center a bell or tilt takes: 20 Hz.
-const MIN_EQ_CENTER: Hz = Hz(20.0);
+const MIN_EQ_CENTER: Hz = Hz::new(20.0);
 
 /// The largest gain magnitude a bell or tilt takes: 24 dB.
-const MAX_EQ_GAIN: Db = Db(24.0);
+const MAX_EQ_GAIN: Db = Db::new(24.0);
 
 /// `center` held within [`MIN_EQ_CENTER`] and 0.99 of the Nyquist of `rate`.
 fn eq_center(center: Hz, rate: SampleRate) -> Hz {
-    Hz(center
-        .get()
-        .clamp(MIN_EQ_CENTER.get(), rate.nyquist_scaled(0.99).get()))
+    Hz::new(
+        center
+            .get()
+            .clamp(MIN_EQ_CENTER.get(), rate.nyquist_scaled(0.99).get()),
+    )
 }
 
 /// `gain` held within [`MAX_EQ_GAIN`].
 fn eq_gain(gain: Db) -> Db {
-    Db(gain.get().clamp(-MAX_EQ_GAIN.get(), MAX_EQ_GAIN.get()))
+    Db::new(gain.get().clamp(-MAX_EQ_GAIN.get(), MAX_EQ_GAIN.get()))
 }
 
 /// The bus a filter built for a width runs on: the engine's order for it
@@ -126,7 +128,7 @@ pub(super) mod test_utils {
 
     /// `signal::impulse` of `len` frames.
     pub fn impulse(len: usize) -> Vec<f32> {
-        signal::impulse(Samples(len))
+        signal::impulse(Samples::new(len))
     }
 
     /// A mono node over `input`, one frame per call (a block of one). The
@@ -142,10 +144,10 @@ pub(super) mod test_utils {
     /// `signal::sine` at unit amplitude, for a test that holds bare numbers.
     pub fn generate_sine(freq: f64, sample_rate: f32, num_samples: usize) -> Vec<f32> {
         signal::sine(
-            Hz(freq),
-            Amplitude(1.0),
+            Hz::new(freq),
+            Amplitude::new(1.0),
             SampleRate::of(f64::from(sample_rate)),
-            Samples(num_samples),
+            Samples::new(num_samples),
         )
     }
 }
