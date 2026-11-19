@@ -1,6 +1,6 @@
-use rand::rngs::StdRng;
-use rand::{RngExt, SeedableRng};
+use crate::testing::uniform;
 use tutti_buffers::{Mono, Planes, PlanesMut};
+use tutti_rt::SplitMix64;
 use tutti_units::Db;
 
 use super::*;
@@ -29,8 +29,8 @@ fn controls(db: f64) -> BrickwallControls {
 /// The ceilings the tests run at: a grid across the range and seeded draws.
 fn ceilings() -> Vec<f64> {
     let mut all = vec![-96.0, -60.0, -24.0, -6.0, -0.3, 0.0, 3.0, 12.0];
-    let mut rng = StdRng::seed_from_u64(24);
-    all.extend((0..64).map(|_| rng.random_range(-80.0..20.0)));
+    let mut rng = SplitMix64::new(24);
+    all.extend((0..64).map(|_| uniform(&mut rng, -80.0, 20.0)));
     all
 }
 
@@ -112,9 +112,9 @@ fn the_ceiling_is_the_amplitude_of_the_decibels() {
 /// identity inside the ceiling.
 #[test]
 fn the_bank_is_the_clamp_and_its_four_consequences() {
-    let mut rng = StdRng::seed_from_u64(8);
+    let mut rng = SplitMix64::new(8);
     let mut xs: Vec<f32> = vec![0.0, -0.0, 1.0, -1.0, 0.5, 1e-30, 1e30, f32::MAX, f32::MIN];
-    xs.extend((0..200).map(|_| rng.random_range(-4.0..4.0)));
+    xs.extend((0..200).map(|_| uniform(&mut rng, -4.0, 4.0)));
     xs.extend((-400..=400).map(|i| i as f32 * 0.01));
     let negated: Vec<f32> = xs.iter().map(|x| -x).collect();
     for db in ceilings() {

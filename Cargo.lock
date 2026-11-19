@@ -2698,7 +2698,6 @@ name = "tutti-dsp"
 version = "0.0.1"
 dependencies = [
  "libm",
- "rand",
  "rustfft",
  "thiserror 2.0.21",
  "tutti-buffers",
@@ -2831,7 +2830,6 @@ dependencies = [
  "criterion",
  "ebur128",
  "libm",
- "rand",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
@@ -2840,6 +2838,7 @@ dependencies = [
  "tutti-fixtures",
  "tutti-graph",
  "tutti-music",
+ "tutti-rt",
  "tutti-units",
 ]
 

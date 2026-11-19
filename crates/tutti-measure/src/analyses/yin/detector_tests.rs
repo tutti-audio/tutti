@@ -1,4 +1,6 @@
 use super::*;
+use tutti_buffers::Float;
+use tutti_rt::SplitMix64;
 use tutti_units::SampleRate;
 
 const SR: SampleRate = SampleRate::SR_48K;
@@ -27,14 +29,9 @@ fn saw(freq: Hz, amp: f64) -> Vec<f64> {
 }
 
 fn white_noise() -> Vec<f64> {
-    let mut state = 0x2545_F491_4F6C_DD1Du64;
+    let mut rng = SplitMix64::new(1);
     (0..N)
-        .map(|_| {
-            state = state
-                .wrapping_mul(6364136223846793005)
-                .wrapping_add(1442695040888963407);
-            (((state >> 33) as f64 / (1u64 << 31) as f64) - 1.0) * 0.5
-        })
+        .map(|_| (f64::from_fraction_bits(rng.next_u64()) * 2.0 - 1.0) * 0.5)
         .collect()
 }
 

@@ -10,24 +10,22 @@
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use std::hint::black_box;
-use tutti_buffers::Mono;
+use tutti_buffers::{Float, Mono};
 use tutti_measure::PitchHop;
 use tutti_measure::{
     DetectionFunction, OnsetConfig, SampleRange, StftConfig, YinConfig, detect_onsets,
     istft_transform, stft,
 };
+use tutti_rt::SplitMix64;
 use tutti_units::{SampleRate, Samples};
 
 const SR: SampleRate = SampleRate::SR_48K;
 
 fn signal() -> Vec<f32> {
-    let mut state = 0x2545_f491_4f6c_dd1du64;
+    let mut rng = SplitMix64::new(1);
     (0..4 * 48_000)
         .map(|i| {
-            state = state
-                .wrapping_mul(6364136223846793005)
-                .wrapping_add(1442695040888963407);
-            let noise = ((state >> 33) as f32 / (1u64 << 31) as f32 - 1.0) * 0.02;
+            let noise = (f32::from_fraction_bits(rng.next_u64()) * 2.0 - 1.0) * 0.02;
             let t = i as f32 / 48_000.0;
             let burst = if (i / 12_000) % 2 == 0 { 1.0 } else { 0.4 };
             burst

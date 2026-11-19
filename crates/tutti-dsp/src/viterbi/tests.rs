@@ -1,5 +1,6 @@
 use super::*;
-use rand::{RngExt, SeedableRng, rngs::StdRng};
+use crate::testing::uniform;
+use tutti_rt::SplitMix64;
 
 const STATES: usize = 25;
 
@@ -8,11 +9,11 @@ const STATES: usize = 25;
 /// the even share, where a state must not "switch" into itself).
 #[test]
 fn viterbi_is_the_best_path() {
-    let mut rng = StdRng::seed_from_u64(11);
+    let mut rng = SplitMix64::new(11);
     for p in [0.9f64, 0.5, 0.02] {
         for _ in 0..3 {
             let emit: Vec<[f64; STATES]> = (0..4)
-                .map(|_| core::array::from_fn(|_| rng.random_range(0.0..1.0) * 6.0))
+                .map(|_| core::array::from_fn(|_| uniform(&mut rng, 0.0, 1.0) * 6.0))
                 .collect();
             let (stay, switch) = (p.ln(), ((1.0 - p) / 24.0).ln());
             let mut best = (f64::MIN, [0usize; 4]);

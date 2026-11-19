@@ -3,14 +3,14 @@
 //! Every tone is a few harmonics at amplitudes `1/h`, written straight from
 //! `sin` in f64.
 
-use rand::{RngExt, SeedableRng, rngs::StdRng};
-use tutti_buffers::Mono;
+use tutti_buffers::{Float, Mono};
 use tutti_dsp::StftGeometry;
 use tutti_measure::{
     ChordConfig, ChordQuality, ChromaConfig, Harmonics, Key, KeyProfile, Mode, PitchClass, Tuning,
     TuningOffset, detect_chords, estimate_key,
 };
 use tutti_measure::{Chroma, Error, Framing, Result};
+use tutti_rt::SplitMix64;
 use tutti_units::{Cents, SampleRate, Samples};
 
 const SR: f64 = 22_050.0;
@@ -314,9 +314,9 @@ fn silence_noise_and_bad_input() {
     let chords = ChordConfig::new();
     assert!(detect_chords(&chords, &silent).unwrap().is_empty());
 
-    let mut rng = StdRng::seed_from_u64(3);
+    let mut rng = SplitMix64::new(3);
     let noise: Vec<f32> = (0..SR as usize * 4)
-        .map(|_| rng.random_range(-0.3..0.3))
+        .map(|_| (f32::from_fraction_bits(rng.next_u64()) * 2.0 - 1.0) * 0.3)
         .collect();
     let noisy = chroma(&noise, &cfg).unwrap();
     assert!(noisy.grid().as_slice().iter().all(|v| v.is_finite()));

@@ -1,6 +1,6 @@
-use rand::rngs::StdRng;
-use rand::{RngExt, SeedableRng};
+use crate::testing::uniform;
 use tutti_buffers::{Float, Mono, Planes, PlanesMut};
+use tutti_rt::SplitMix64;
 use tutti_units::{CompressionRatio, Db, SampleRate, Seconds};
 
 use super::*;
@@ -47,15 +47,15 @@ fn reachable() -> Vec<CompressorControls> {
             }
         }
     }
-    let mut rng = StdRng::seed_from_u64(24);
+    let mut rng = SplitMix64::new(24);
     all.extend((0..64).map(|_| {
         controls(
-            rng.random_range(-60.0..6.0),
-            rng.random_range(0.0..24.0),
-            rng.random_range(1.0..30.0),
-            rng.random_range(0.0..0.05),
-            rng.random_range(0.0..0.5),
-            rng.random_range(-12.0..12.0),
+            uniform(&mut rng, -60.0, 6.0),
+            uniform(&mut rng, 0.0, 24.0),
+            uniform(&mut rng, 1.0, 30.0),
+            uniform(&mut rng, 0.0, 0.05),
+            uniform(&mut rng, 0.0, 0.5),
+            uniform(&mut rng, -12.0, 12.0),
         )
     }));
     all
