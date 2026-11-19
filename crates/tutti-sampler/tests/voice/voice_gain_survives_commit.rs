@@ -79,7 +79,7 @@ fn rolling(frame: Frame) -> TransportPosition {
 /// transport renders silence, and every gain comparison in this file would
 /// compare 0.0 against 0.0. A setup without a rolling clock fails on the
 /// guard below, which is what it is for.
-fn solo_voice() -> Solo<VoiceNodeHandle> {
+fn solo_voice() -> Solo<VoiceNodeHandle<f32>> {
     let voice = Voice {
         source: VoiceSource::Memory(
             MemorySource::placed(flat_wave(48_000), VoiceWindow::from(Beat(0.0)))
@@ -96,7 +96,7 @@ fn solo_voice() -> Solo<VoiceNodeHandle> {
 }
 
 /// Every sample of the next block.
-fn block(solo: &mut Solo<VoiceNodeHandle>) -> Vec<f32> {
+fn block(solo: &mut Solo<VoiceNodeHandle<f32>>) -> Vec<f32> {
     solo.render(BLOCK).swap_remove(0)
 }
 

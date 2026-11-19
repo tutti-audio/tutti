@@ -131,7 +131,7 @@ impl Bell {
 /// fails once the streamer has gone (every receiver dropped: the thread's on
 /// its exit, a built streamer's on its drop).
 #[derive(Clone)]
-pub(crate) struct StreamerSender<F: RingFloat = f32> {
+pub(crate) struct StreamerSender<F: RingFloat> {
     tx: Sender<StreamerCommand<F>>,
     bell: Arc<Bell>,
 }

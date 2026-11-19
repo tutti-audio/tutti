@@ -110,7 +110,7 @@ struct Job {
 }
 
 /// The decode thread's queue, started on first use. Streamer-thread-local.
-pub(super) struct DecodeLane<F: RingFloat = f32> {
+pub(super) struct DecodeLane<F: RingFloat> {
     /// The streamer's own queue, where a result is sent.
     reports: StreamerSender<F>,
     /// The job queue, once the thread has started.

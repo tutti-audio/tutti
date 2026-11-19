@@ -101,7 +101,7 @@ impl From<bool> for Direction {
     clippy::large_enum_variant,
     reason = "the voice is built once on the control thread and read in place; boxing the memory tier would put a pointer chase in front of every per-sample read, the cost the enum exists to avoid"
 )]
-pub enum VoiceSource<F: SamplerFloat = f32> {
+pub enum VoiceSource<F: SamplerFloat> {
     /// The whole source is resident in memory.
     Memory(MemorySource<F>),
     /// The source streams incrementally from the streamer's ring.
@@ -234,7 +234,7 @@ impl Default for Playback {
 /// One voice's playback state — what a [`VoicePool`](super::VoicePool) stores
 /// per slot.
 #[derive(Debug)]
-pub struct Voice<F: SamplerFloat = f32> {
+pub struct Voice<F: SamplerFloat> {
     /// The audio itself, resident or streaming.
     pub source: VoiceSource<F>,
     /// The control intent applied to [`source`](Self::source).
