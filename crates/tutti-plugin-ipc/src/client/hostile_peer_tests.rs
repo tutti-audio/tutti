@@ -353,7 +353,7 @@ impl MockServer {
             .create_sync()
             .expect("listen");
 
-        let (bridge, thread) = PluginBridge::new(
+        let (bridge, thread, _replies) = PluginBridge::new(
             path.clone(),
             tutti_plugin_types::Origin::new("test.vst3", tutti_plugin_types::Load::new()),
             tutti_plugin_types::PluginFormat::Vst3,

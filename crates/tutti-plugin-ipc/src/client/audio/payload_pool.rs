@@ -11,9 +11,8 @@
 use super::messages::ProcessPayload;
 use crossbeam::queue::ArrayQueue;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
 use tutti_plugin_types::ParameterChanges;
-use tutti_rt::TallyWriter;
+use tutti_rt::{PackedAtomic, TallyWriter};
 use tutti_units::SampleRate;
 
 /// One payload per command the audio thread can have queued.
@@ -103,11 +102,11 @@ pub const PARAM_BUFFERS: usize = 8;
 /// [`PARAM_BUFFERS`] are free.
 const PARAM_SLOTS: usize = 2 * PARAM_BUFFERS;
 
-/// A reservation's queues and point room as one word, each saturated at
-/// `u32::MAX` (past any plugin's parameter count or a chunk's room).
-fn shape(queues: usize, points: usize) -> u64 {
-    let half = |n: usize| u64::from(u32::try_from(n).unwrap_or(u32::MAX));
-    half(queues) << 32 | half(points)
+/// A reservation's queues and point room, each saturated at `u32::MAX` (past
+/// any plugin's parameter count or a chunk's room).
+fn shape(queues: usize, points: usize) -> [u32; 2] {
+    let half = |n: usize| u32::try_from(n).unwrap_or(u32::MAX);
+    [half(queues), half(points)]
 }
 
 /// Bounded pool of recycled `ProcessPayload` boxes, and the parameter-change
@@ -119,11 +118,11 @@ pub struct PayloadPool {
     /// `params_shape`. Empty until [`reserve_params`](Self::reserve_params).
     params: Arc<ArrayQueue<ParameterChanges>>,
     /// The queues and the point room the buffers were reserved with, one
-    /// word ([`shape`]) so the bridge thread never reads one reservation's
-    /// queues with another's room: a buffer coming back of any other shape
-    /// (one reserved before a re-reserve) is dropped rather than recycled,
-    /// on the bridge thread. 0 before a reservation.
-    params_shape: Arc<AtomicU64>,
+    /// packed cell ([`shape`]) so the bridge thread never reads one
+    /// reservation's queues with another's room: a buffer coming back of any
+    /// other shape (one reserved before a re-reserve) is dropped rather than
+    /// recycled, on the bridge thread. Zeroes before a reservation.
+    params_shape: Arc<PackedAtomic<[u32; 2]>>,
     /// Counts an empty pool at `acquire`.
     refused: TallyWriter<u64>,
     /// Counts a full list at `return_params_rt`: a buffer leaked.
@@ -160,7 +159,7 @@ impl PayloadPool {
         Self {
             recycle: Arc::new(recycle),
             params: Arc::new(ArrayQueue::new(PARAM_SLOTS)),
-            params_shape: Arc::new(AtomicU64::new(0)),
+            params_shape: Arc::new(PackedAtomic::new([0; 2])),
             refused,
             leaked,
         }
@@ -177,8 +176,7 @@ impl PayloadPool {
     /// room, so a buffer of another room in its hands would misread them,
     /// and could hold more points than the server's lists reserve.
     pub fn reserve_params(&self, queues: usize, points: usize) {
-        self.params_shape
-            .store(shape(queues, points), Ordering::Release);
+        self.params_shape.store(shape(queues, points));
         while self.params.pop().is_some() {}
         for _ in 0..PARAM_BUFFERS {
             // Cannot fail: drained above, and the list holds twice this many
@@ -206,8 +204,8 @@ impl PayloadPool {
     /// are dropped here.
     #[inline]
     pub fn return_params(&self, mut changes: ParameterChanges) {
-        let reserved = self.params_shape.load(Ordering::Acquire);
-        if reserved == 0
+        let reserved = self.params_shape.load();
+        if reserved == [0; 2]
             || shape(changes.capacity(), changes.point_room()) != reserved
             || self.params.len() >= PARAM_BUFFERS
         {
