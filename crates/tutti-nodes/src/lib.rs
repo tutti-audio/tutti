@@ -112,13 +112,13 @@
 //! // graph node: inserted, it hands back its `ParamSet` — cutoff, Q and
 //! // gain by `UnitParam` — and the graph prepares it at the graph's rate.
 //! let filter = SvfFilterNode::new(SvfType::LowPass, Hz::new(800.0), Q::new(0.707));
-//! let mut solo = Standalone::new(filter, Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64))));
-//! let out = solo.render_input(Planes::new(&[&[1.0; 64]]).unwrap());
+//! let mut standalone = Standalone::new(filter, Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64))));
+//! let out = standalone.render_input(Planes::new(&[&[1.0; 64]]).unwrap());
 //!
 //! // Sweeping the cutoff on the *running* node: the set writes the `Param`
 //! // cell the node reads, at the start of its next block.
-//! assert!(solo.controls().set(UnitParam::Cutoff, 2_000.0));
-//! let out = solo.render_input(Planes::new(&[&[1.0; 64]]).unwrap());
+//! assert!(standalone.controls().set(UnitParam::Cutoff, 2_000.0));
+//! let out = standalone.render_input(Planes::new(&[&[1.0; 64]]).unwrap());
 //! ```
 //!
 //! ## Changing a running node

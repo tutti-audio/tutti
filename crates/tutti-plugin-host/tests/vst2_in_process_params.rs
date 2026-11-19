@@ -223,7 +223,7 @@ fn an_export_renders_an_edit_made_in_the_plugin_as_live_does() {
     let _env = ProbeEnv::new().params(4).state_dc();
     let (client, handle) = load();
     // A host's knob for VST2 parameter 0, held still.
-    let held = ControlLaneNode::for_id(
+    let held = ControlLaneNode::by_id(
         ParamId::new(0),
         ControlProgram::default(),
         Some(0.25),

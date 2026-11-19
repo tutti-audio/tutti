@@ -36,12 +36,12 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 /// use tutti_units::{SampleRate, Samples};
 ///
 /// let filter = SvfFilterNode::<f32>::new(SvfType::LowPass, Hz::new(800.0), Q::new(0.707));
-/// let mut solo = Standalone::new(filter, Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64))));
-/// let out = solo.render_input(Planes::new(&[&[1.0; 64]]).unwrap());
+/// let mut standalone = Standalone::new(filter, Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64))));
+/// let out = standalone.render_input(Planes::new(&[&[1.0; 64]]).unwrap());
 /// assert_eq!(out.len(), 1);
 ///
 /// // Move the cutoff on the running node; it glides over the next block.
-/// assert!(solo.controls().set(UnitParam::Cutoff, 2_000.0));
+/// assert!(standalone.controls().set(UnitParam::Cutoff, 2_000.0));
 /// ```
 ///
 /// Cutoff ([`Hz`]), [`Q`] and gain ([`Db`]) are live [`Params`](crate::Params) shared across

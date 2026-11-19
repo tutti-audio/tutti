@@ -375,7 +375,7 @@ fn automation_replaces_the_knob_and_the_clamp_is_per_frame() {
         Some(1000.0),
     );
     wire(&mut ed, 1, lane, 2);
-    let plugin = ControlLaneNode::for_id(
+    let plugin = ControlLaneNode::by_id(
         ParamId::new(9),
         program(Some(flat), vec![]),
         Some(1000.0),
@@ -415,7 +415,7 @@ fn automation_replaces_the_knob_and_the_clamp_is_per_frame() {
     let (mut ed, mut exec) = probes(128, &[2], (0.0, f64::from(BOUND)));
     let lane = native(&ed, 2, program(Some(ramp()), vec![]), Some(0.0));
     wire(&mut ed, 1, lane, 2);
-    let plugin = ControlLaneNode::for_id(
+    let plugin = ControlLaneNode::by_id(
         ParamId::new(9),
         program(Some(ramp()), vec![]),
         None,
@@ -564,7 +564,7 @@ fn an_export_is_the_live_render_bit_for_bit() {
     wire_sink(
         &mut ed,
         300,
-        ControlLaneNode::for_id(ParamId::new(5), foreign, Some(0.5), (0.0, 1.0)),
+        ControlLaneNode::by_id(ParamId::new(5), foreign, Some(0.5), (0.0, 1.0)),
         301,
     );
     ed.commit().expect("commits");
@@ -856,7 +856,7 @@ fn a_plugin_lane_sends_linear_grid_pieces() {
         SampleRate::of(RATE),
         MaxBlock::of(Samples::new(128)),
     ));
-    let lane = ControlLaneNode::for_id(
+    let lane = ControlLaneNode::by_id(
         ParamId::new(3),
         ControlProgram::from_curve(Arc::clone(&curve)),
         None,
@@ -1253,7 +1253,7 @@ fn an_unread_source_is_no_point() {
         amount: amount(0.5),
     };
     let p = ControlProgram::new(None, vec![], vec![input]).expect("valid");
-    let lane = ControlLaneNode::for_id(ParamId::new(3), p, Some(0.25), (0.0, 1.0));
+    let lane = ControlLaneNode::by_id(ParamId::new(3), p, Some(0.25), (0.0, 1.0));
     wire_sink(&mut ed, 1, lane, 2);
     let step = |v| ParamSegment::by_id(ParamId::new(99), v, v, Samples::new(0), Law::Linear);
     let plan = (1..60).map(|k| (k * 10, step(k as f64 / 100.0))).collect();
@@ -1375,7 +1375,7 @@ fn a_lane_fed_fork_reads_its_value_at_frame_0() {
 /// built without a knob refuses one.
 #[test]
 fn lane_controls_reach_their_own_cells() {
-    let plugin = ControlLaneNode::for_id(
+    let plugin = ControlLaneNode::by_id(
         ParamId::new(1),
         ControlProgram::default(),
         Some(0.25),
@@ -1426,7 +1426,7 @@ fn a_constant_layer_is_one_held_value() {
     for (layers, rolling) in cases {
         let (mut ed, mut exec) = probes(128, &[], (0.0, 1.0));
         let p = program(None, layers);
-        let lane = ControlLaneNode::for_id(ParamId::new(3), p, Some(0.25), (0.0, 1.0));
+        let lane = ControlLaneNode::by_id(ParamId::new(3), p, Some(0.25), (0.0, 1.0));
         wire_sink(&mut ed, 1, lane, 2);
         ed.commit().expect("commits");
         let mut host = Host::new();

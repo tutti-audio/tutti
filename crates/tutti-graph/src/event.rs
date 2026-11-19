@@ -573,7 +573,7 @@ pub(crate) struct PortCount {
 /// The writer does not pair: a note-on it refused leaves its note-off to
 /// whoever wrote it. A node that tracks the notes it starts (the clip node)
 /// keeps the pairing itself and reports the note-off it then skips with
-/// [`skip`](Self::skip); a relay that does not track (hardware input,
+/// [`count_skipped`](Self::count_skipped); a relay that does not track (hardware input,
 /// the queue) passes the note-off on, which a receiver treats as a no-op for
 /// a key that is not sounding.
 pub struct EventWriter<'a> {
@@ -714,7 +714,7 @@ impl<'a> EventWriter<'a> {
     /// refused by the port, but the node left it out because the event it
     /// belongs to was (a note-off whose note-on the port refused). Without
     /// it the port's count is short by the notes a refusal then unpaired.
-    pub fn skip(&self) {
+    pub fn count_skipped(&self) {
         self.count_lost();
     }
 
@@ -1095,7 +1095,7 @@ mod tests {
             assert_eq!(w.push(off(3 + k)), Ok(()), "note-off {k}");
         }
         assert_eq!(w.push(off(12)), Err(EventRejected::Full));
-        w.skip();
+        w.count_skipped();
         w.recovered();
         assert_eq!((dropped.refused.get(), dropped.recovered.get()), (3, 1));
         assert_eq!(w.len(), 10);

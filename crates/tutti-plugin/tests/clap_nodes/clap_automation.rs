@@ -65,7 +65,7 @@ fn automation_reaches_the_plugin_through_its_event_input() {
         .render_mode(render::TAG_ONLY)
         .gain_enabled(true);
     let probe = load_probe(SAMPLE_RATE);
-    let automation = ControlLaneNode::for_id(
+    let automation = ControlLaneNode::by_id(
         GAIN,
         ControlProgram::from_curve(Arc::new(Constant(0.75))),
         None,
@@ -364,7 +364,7 @@ fn an_interrupting_ramp_stops_a_segment_on_a_plugin() {
 }
 
 /// **An automation lane drives a plugin parameter along its curve.** A lane
-/// sending an exponential trajectory as segments (`for_id`) gives what a
+/// sending an exponential trajectory as segments (`by_id`) gives what a
 /// scheduled segment gives: the gain follows the curve within one point
 /// spacing and lands exactly on the end gain on the trajectory's last frame.
 #[test]
@@ -377,7 +377,7 @@ fn a_lane_drives_a_plugin_parameter_along_its_curve() {
     ));
     // 120 BPM at 48 kHz: 24 000 frames a beat, so frame 1500.
     env.add_breakpoint(Breakpoint::new(Beat::new(0.0625), Hz::new(0.75)));
-    let lane = ControlLaneNode::for_id(
+    let lane = ControlLaneNode::by_id(
         GAIN,
         ControlProgram::from_curve(Arc::new(env.clone())),
         None,

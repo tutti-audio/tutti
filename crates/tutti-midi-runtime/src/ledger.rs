@@ -32,7 +32,7 @@
 //! port, and what the port owes.
 //!
 //! The table holds at most its capacity in keys, held or refused. A note-on
-//! that finds it full is skipped and counted ([`EventWriter::skip`])
+//! that finds it full is skipped and counted ([`EventWriter::count_skipped`])
 //! like one the port refused: the note does not start, so no off is owed. A
 //! note already started always has its row, so a full table never strands one.
 
@@ -280,7 +280,7 @@ impl<T: Copy + PartialEq> Sending<'_, '_, T> {
 
     fn on(&mut self, at: Offset, ump: Ump, key: NoteKey, owner: Option<T>) {
         let Some(i) = self.ledger.entry(key) else {
-            self.out.skip();
+            self.out.count_skipped();
             return;
         };
         if let Some(held) = self.ledger.entries[i].held {
@@ -289,7 +289,7 @@ impl<T: Copy + PartialEq> Sending<'_, '_, T> {
                 // start.
                 self.owe(i);
                 self.ledger.refuse(i);
-                self.out.skip();
+                self.out.count_skipped();
                 return;
             }
             if held == Held::Owing {
@@ -354,7 +354,7 @@ impl<T: Copy + PartialEq> Sending<'_, '_, T> {
     fn settle(&mut self, i: usize) {
         self.ledger.entries[i].refused -= 1;
         self.forget_if_idle(i);
-        self.out.skip();
+        self.out.count_skipped();
     }
 
     /// The off of held entry `i` was written (`taken`) or refused.
@@ -414,7 +414,7 @@ impl<T: Copy + PartialEq> Sending<'_, '_, T> {
             match (full, held) {
                 // The refused push counted itself.
                 (false, Held::Owing) => self.out.recovered(),
-                (true, Held::Sounding) => self.out.skip(),
+                (true, Held::Sounding) => self.out.count_skipped(),
                 _ => {}
             }
             full = true;
@@ -437,7 +437,7 @@ impl<T: Copy + PartialEq> Sending<'_, '_, T> {
             match (attempted, owed) {
                 // The refused push counted itself.
                 (true, true) => out.recovered(),
-                (false, false) => out.skip(),
+                (false, false) => out.count_skipped(),
                 _ => {}
             }
             full = true;

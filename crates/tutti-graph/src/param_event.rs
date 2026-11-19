@@ -32,7 +32,7 @@ use crate::time::Offset;
 /// start value: a shape is a function of progress alone.
 ///
 /// Addressed by [`ParamAddr`], so it reaches both tutti's own parameters and a
-/// foreign unit's (a hosted plugin's numeric id) without a later breaking
+/// id-addressed target's (a hosted plugin's numeric id) without a later breaking
 /// change:
 ///
 /// - **Built-in params** are built from a typed [`ParamKey<U>`] and a `U`,
@@ -41,8 +41,8 @@ use crate::time::Offset;
 ///   the unit's `f64`), because one event port carries ramps for parameters of
 ///   different units and a [`ParamEvent`] has to be one `Copy` type. The raw
 ///   value is private: nothing reads a built-in ramp without naming its key.
-/// - **Foreign params** ([`ParamRamp::by_id`]) carry a [`ParamId`] and
-///   a raw value in the foreign unit's own normalisation. That is the C ABI
+/// - **Id-addressed params** ([`ParamRamp::by_id`]) carry a [`ParamId`] and
+///   a raw value in the id-addressed target's own normalisation. That is the C ABI
 ///   boundary the units rule stops at: tutti does not know the unit.
 ///
 /// ```
@@ -51,7 +51,7 @@ use crate::time::Offset;
 /// let r = ParamRamp::new(ParamKey::<Hz>::CUTOFF, Hz::new(800.0), Samples::new(64));
 /// assert_eq!(r.target(ParamKey::<Hz>::CUTOFF), Some(Hz::new(800.0)));
 /// assert_eq!(r.target(ParamKey::<Db>::THRESHOLD), None); // another param
-/// assert_eq!(r.target_by_id(ParamId::new(7)), None); // not a foreign param at all
+/// assert_eq!(r.target_by_id(ParamId::new(7)), None); // no id-addressed value
 /// assert_eq!(r.shape(), Law::Linear);
 /// let eased = r.with_shape(Law::PowerIn(Exponent::of(2.0)));
 /// assert_eq!(eased.shape(), Law::PowerIn(Exponent::of(2.0)));
@@ -77,8 +77,8 @@ impl ParamRamp {
         Self::packed(ParamAddr::unit(key.addr()), target.to_cell(), duration)
     }
 
-    /// Ramp a foreign unit's parameter `id` linearly to the raw `target`
-    /// over `duration`. The value is in the foreign unit's own terms (see the
+    /// Ramp a id-addressed target's parameter `id` linearly to the raw `target`
+    /// over `duration`. The value is in the id-addressed target's own terms (see the
     /// type docs).
     ///
     /// A hosted plugin's node starts the ramp from where the parameter
@@ -124,7 +124,7 @@ impl ParamRamp {
         (self.addr == ParamAddr::unit(key.addr())).then(|| U::from_cell(self.target))
     }
 
-    /// The raw target, if this ramp is for foreign parameter `id`.
+    /// The raw target, if this ramp is for parameter `id`.
     pub fn target_by_id(&self, id: ParamId) -> Option<f64> {
         (self.addr == ParamAddr::Id(id)).then_some(self.target)
     }
@@ -188,7 +188,7 @@ impl ParamRamp {
 /// interrupted segment had reached.
 ///
 /// Addressed and typed as [`ParamRamp`] is (built-in params by
-/// [`ParamKey<U>`], foreign ones by a `ParamId`). A param port's range
+/// [`ParamKey<U>`], id-addressed ones by a `ParamId`). A param port's range
 /// is applied when the port reads the value, never to the endpoints.
 ///
 /// ```
@@ -247,7 +247,7 @@ impl ParamSegment {
         Self::packed(ParamAddr::unit(param.into()), from, to, duration, shape)
     }
 
-    /// A segment of a foreign unit's parameter `id`, in its own
+    /// A segment of a id-addressed target's parameter `id`, in its own
     /// normalisation, as [`new`](Self::new) otherwise.
     pub fn by_id(id: ParamId, from: f64, to: f64, duration: Samples, shape: Law) -> Self {
         Self::packed(ParamAddr::Id(id), from, to, duration, shape)
@@ -317,12 +317,12 @@ impl ParamSegment {
             .then(|| U::from_cell(self.from))
     }
 
-    /// The raw end value, if this segment is for foreign parameter `id`.
+    /// The raw end value, if this segment is for parameter `id`.
     pub fn target_by_id(&self, id: ParamId) -> Option<f64> {
         self.is_for(ParamAddr::Id(id)).then_some(self.to)
     }
 
-    /// The raw start value, if this segment is for foreign parameter `id`.
+    /// The raw start value, if this segment is for parameter `id`.
     pub fn start_by_id(&self, id: ParamId) -> Option<f64> {
         self.is_for(ParamAddr::Id(id)).then_some(self.from)
     }
@@ -366,7 +366,7 @@ impl ParamSegment {
         Piece::new(self.from, self.to, self.shape)
     }
 
-    /// The built-in param this moves, `None` for a foreign one: what decides
+    /// The built-in param this moves, `None` for an id-addressed one: what decides
     /// whether it turns the short arc ([`UnitParam::is_circular`]). The
     /// reading of a segment between frames (`Piece::value(param, t)` at its
     /// progress) takes it; a reader of many frames takes it once.
@@ -482,38 +482,38 @@ mod tests {
     use tutti_curve::{Curvature, Exponent};
     use tutti_units::{Hz, ParamKey};
 
-    /// A foreign ramp and a built-in ramp never answer for each other, even
-    /// when the foreign id equals the built-in's discriminant.
+    /// An id-addressed ramp and a built-in ramp never answer for each other, even
+    /// when the id equals the built-in's discriminant.
     #[test]
-    fn foreign_and_builtin_ramps_are_distinct_addresses() {
-        let foreign = ParamRamp::by_id(
+    fn id_addressed_and_builtin_ramps_are_distinct_addresses() {
+        let by_id = ParamRamp::by_id(
             ParamId::new(ParamKey::<Hz>::CUTOFF.addr().to_u16() as u32),
             0.5,
             Samples::new(0),
         );
-        assert_eq!(foreign.target(ParamKey::<Hz>::CUTOFF), None);
-        assert_eq!(foreign.target_by_id(ParamId::new(0)), Some(0.5));
+        assert_eq!(by_id.target(ParamKey::<Hz>::CUTOFF), None);
+        assert_eq!(by_id.target_by_id(ParamId::new(0)), Some(0.5));
         let builtin = ParamRamp::new(ParamKey::<Hz>::CUTOFF, Hz::new(100.0), Samples::new(0));
         assert_eq!(builtin.target_by_id(ParamId::new(0)), None);
     }
 
-    /// A segment's address round-trips, built-in and foreign never answer
+    /// A segment's address round-trips, built-in and id-addressed never answer
     /// for each other, and its shape and timing read back as built.
     #[test]
     fn a_segment_reads_back_as_built() {
         let key = ParamKey::<Hz>::CUTOFF;
         let id = ParamId::new(u32::from(key.addr().to_u16()));
-        let foreign = ParamSegment::by_id(
+        let by_id = ParamSegment::by_id(
             id,
             0.25,
             0.75,
             Samples::new(8),
             Law::Exp(Curvature::of(2.0)),
         );
-        assert_eq!(foreign.target(key), None);
-        assert_eq!(foreign.target_by_id(id), Some(0.75));
-        assert_eq!(foreign.start_by_id(id), Some(0.25));
-        assert_eq!(foreign.addr(), ParamAddr::Id(id));
+        assert_eq!(by_id.target(key), None);
+        assert_eq!(by_id.target_by_id(id), Some(0.75));
+        assert_eq!(by_id.start_by_id(id), Some(0.25));
+        assert_eq!(by_id.addr(), ParamAddr::Id(id));
         let s = ParamSegment::new(
             key,
             Hz::new(1.0),

@@ -33,7 +33,7 @@ pub fn extra(i: usize) -> ParamId {
 /// its knob on its first block and whenever the knob moves
 /// (`LaneControls::set_knob`), and again on `LaneControls::resync`.
 pub fn knob(id: ParamId, value: f32) -> ControlLaneNode {
-    ControlLaneNode::for_id(
+    ControlLaneNode::by_id(
         id,
         ControlProgram::default(),
         Some(f64::from(value)),

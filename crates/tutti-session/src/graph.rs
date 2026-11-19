@@ -3119,8 +3119,8 @@ impl<F: Float> Graph<F> {
     /// Closes the taps whose readers were dropped, and returns how many.
     /// The session's [`Reclaim`](crate::Phase::Reclaim) phase runs it.
     pub(crate) fn reap_taps(&mut self) -> usize {
-        let reaped = self.editor.prune_taps();
-        if reaped > 0 {
+        let pruned = self.editor.prune_taps();
+        if pruned > 0 {
             let open = &self.editor.spec().topology.taps;
             self.output_taps.retain(|id, _| open.contains_key(id));
             // A held reader keeps its tap alive, and a claimed one has left the map.
@@ -3129,23 +3129,23 @@ impl<F: Float> Graph<F> {
                     RootReader::Tap(tap) => open.contains_key(tap),
                     RootReader::Meter(_) => true,
                 }),
-                "no held reader names a reaped tap"
+                "no held reader names a pruned tap"
             );
             self.edited = true;
         }
-        reaped
+        pruned
     }
 
     /// Closes the event taps whose readers were dropped, and returns how many.
     /// The session's [`Reclaim`](crate::Phase::Reclaim) phase runs it.
     pub(crate) fn reap_event_taps(&mut self) -> usize {
-        let reaped = self.editor.prune_event_taps();
-        if reaped > 0 {
+        let pruned = self.editor.prune_event_taps();
+        if pruned > 0 {
             let open = &self.editor.spec().topology.event_taps;
             self.event_taps.retain(|id, _| open.contains_key(id));
             self.edited = true;
         }
-        reaped
+        pruned
     }
 
     /// Closes the meters whose readers were dropped, and returns how many.

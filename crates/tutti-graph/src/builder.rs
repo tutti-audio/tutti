@@ -990,8 +990,8 @@ impl<F: Float> Renderer<F> {
 /// #     }
 /// #     fn reset(&mut self) {}
 /// # }
-/// let mut solo = Standalone::new(ForkByClone(Half), Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64))));
-/// assert_eq!(solo.render_input(Planes::new(&[&[1.0; 3]]).unwrap()), vec![vec![0.5; 3]]);
+/// let mut standalone = Standalone::new(ForkByClone(Half), Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64))));
+/// assert_eq!(standalone.render_input(Planes::new(&[&[1.0; 3]]).unwrap()), vec![vec![0.5; 3]]);
 /// ```
 #[derive(Debug)]
 pub struct Standalone<C, F: Float = f32> {

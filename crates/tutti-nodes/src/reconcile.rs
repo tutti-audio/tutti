@@ -1082,7 +1082,7 @@ impl Modulation {
                     controls
                 }
                 Bind::Foreign { to, id, knob, .. } => {
-                    let node = ControlLaneNode::for_id(*id, program.clone(), *knob, (min, max));
+                    let node = ControlLaneNode::by_id(*id, program.clone(), *knob, (min, max));
                     let controls = editor.insert(key, "control-lane", node).controls;
                     editor
                         .spec_mut()

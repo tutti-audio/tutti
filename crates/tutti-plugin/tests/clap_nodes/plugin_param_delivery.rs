@@ -1,5 +1,5 @@
 //! Parameter delivery to a hosted plugin, end to end: foreign control lanes
-//! (`ControlLaneNode::for_id`, one per parameter) on the plugin node's
+//! (`ControlLaneNode::by_id`, one per parameter) on the plugin node's
 //! event input, the node's per-parameter queues,
 //! the bridge, a real `plugin-server` and a real format host (the reference
 //! CLAP plugin, which takes an extra parameter count from the environment),
