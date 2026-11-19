@@ -158,56 +158,7 @@ tutti-graph  ctor-result  crates/tutti-graph/src/event.rs::SortedEvents::sort
 tutti-graph  ctor-result  crates/tutti-graph/src/param.rs::ParamPorts::try_new
 tutti-graph  ctor-result  crates/tutti-graph/src/param.rs::ParamPorts::try_of
 
-# tutti-midi-ci
-tutti-midi-ci  range-macro  crates/tutti-midi-ci/src/pe/limits.rs::text_type
-
-# tutti-midi-file
-tutti-midi-file  chain-result  crates/tutti-midi-file/src/file.rs::Track::push
-tutti-midi-file  ctor-result  crates/tutti-midi-file/src/file.rs::MidiFile::clip
-tutti-midi-file  ctor-result  crates/tutti-midi-file/src/file.rs::MidiFile::from_bytes
-tutti-midi-file  ctor-result  crates/tutti-midi-file/src/file.rs::MidiFile::read
-tutti-midi-file  ctor-result  crates/tutti-midi-file/src/file.rs::MidiFile::smf
-
-# tutti-midi-hardware
-tutti-midi-hardware  with-prefix  crates/tutti-midi-hardware/src/virtual_endpoint.rs::VirtualSpec::with_protocol
-tutti-midi-hardware  setter  crates/tutti-midi-hardware/src/devices.rs::OpenOutput::set_config
-tutti-midi-hardware  setter  crates/tutti-midi-hardware/src/port/manager.rs::HardwareMidiInputs::set_input_timing
-tutti-midi-hardware  setter  crates/tutti-midi-hardware/src/port/manager.rs::HardwareMidiInputs::set_port_active
-tutti-midi-hardware  setter  crates/tutti-midi-hardware/src/session.rs::MidiSession::set_profile
-
-# tutti-midi-network
-tutti-midi-network  with-prefix  crates/tutti-midi-network/src/config.rs::SessionConfig::with_command_timeout
-tutti-midi-network  with-prefix  crates/tutti-midi-network/src/config.rs::SessionConfig::with_fec
-tutti-midi-network  with-prefix  crates/tutti-midi-network/src/config.rs::SessionConfig::with_idle_interval
-tutti-midi-network  with-prefix  crates/tutti-midi-network/src/config.rs::SessionConfig::with_liveness_timeout
-tutti-midi-network  with-prefix  crates/tutti-midi-network/src/config.rs::SessionConfig::with_pending_timeout
-tutti-midi-network  with-prefix  crates/tutti-midi-network/src/config.rs::SessionConfig::with_ping_interval
-tutti-midi-network  with-prefix  crates/tutti-midi-network/src/config.rs::SessionConfig::with_reorder_wait
-tutti-midi-network  with-prefix  crates/tutti-midi-network/src/config.rs::SessionConfig::with_repeat_interval
-tutti-midi-network  with-prefix  crates/tutti-midi-network/src/config.rs::SessionConfig::with_requests
-tutti-midi-network  with-prefix  crates/tutti-midi-network/src/config.rs::SessionConfig::with_retransmit
-tutti-midi-network  with-prefix  crates/tutti-midi-network/src/policy.rs::Credentials::with_secret
-tutti-midi-network  with-prefix  crates/tutti-midi-network/src/policy.rs::Credentials::with_user
-tutti-midi-network  ctor-result  crates/tutti-midi-network/src/command.rs::Command::parse
-tutti-midi-network  ctor-result  crates/tutti-midi-network/src/command.rs::UmpData::new
-tutti-midi-network  ctor-result  crates/tutti-midi-network/src/discovery.rs::Advertisement::start
-tutti-midi-network  ctor-result  crates/tutti-midi-network/src/discovery.rs::FoundHost::from_service
-
-# tutti-midi-protocol
-tutti-midi-protocol  with-prefix  crates/tutti-midi-protocol/src/mpe/zone.rs::MpeZoneConfig::with_channel_response
-tutti-midi-protocol  with-prefix  crates/tutti-midi-protocol/src/universal/machine_control/values.rs::MmcTimeLabel::with_color_frame
-tutti-midi-protocol  with-prefix  crates/tutti-midi-protocol/src/universal/machine_control/values.rs::MmcTimeLabel::with_sign
-tutti-midi-protocol  ctor-result  crates/tutti-midi-protocol/src/universal/machine_control/segmentation.rs::MmcSegments::new
-
 # tutti-midi-runtime
-tutti-midi-runtime  with-prefix  crates/tutti-midi-runtime/src/live/input_node.rs::MidiInputNode::with_mpe
-tutti-midi-runtime  with-prefix  crates/tutti-midi-runtime/src/outbound/jr_timestamp.rs::JrStream::with_clock
-tutti-midi-runtime  setter  crates/tutti-midi-runtime/src/clock_map.rs::ClockMap::set_rate
-tutti-midi-runtime  setter  crates/tutti-midi-runtime/src/live/input_node.rs::MidiInputControls::set_mpe_profile
-tutti-midi-runtime  setter  crates/tutti-midi-runtime/src/live/input_inlets.rs::InputInlets::set_clock
-tutti-midi-runtime  setter  crates/tutti-midi-runtime/src/live/input_inlets.rs::InputInlets::set_lead
-tutti-midi-runtime  setter  crates/tutti-midi-runtime/src/live/mpe_translator.rs::MpeTranslator::set_mode
-tutti-midi-runtime  setter  crates/tutti-midi-runtime/src/live/mpe_translator.rs::MpeTranslator::set_profile
 tutti-midi-runtime  node-ctor  crates/tutti-midi-runtime/src/live/input_node.rs::MidiInputNode::new
 tutti-midi-runtime  node-ctor  crates/tutti-midi-runtime/src/live/transform_node.rs::MpeTransformNode::new
 tutti-midi-runtime  node-ctor  crates/tutti-midi-runtime/src/outbound/out_node.rs::MidiOutNode::new

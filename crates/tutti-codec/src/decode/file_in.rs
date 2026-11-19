@@ -28,9 +28,6 @@
 //! helper. All decode/seek/file I/O runs on the streamer thread; the audio
 //! thread never touches this type.
 
-use std::io::{Read, Seek};
-use std::path::Path;
-
 use symphonia::core::codecs::audio::well_known::CODEC_ID_FLAC;
 use symphonia::core::errors::{Error, SeekErrorKind};
 use symphonia::core::formats::{FormatReader, SeekMode, SeekTo};
@@ -43,10 +40,9 @@ use tutti_units::{SampleRate, Samples};
 
 use super::error::convert;
 use super::placement::topology_of;
-use super::read::{
-    PacketDecoder, first_audio_track, probe_path, probe_reader, sample_rate_of, total_frames_of,
-};
+use super::read::{PacketDecoder, first_audio_track, probe_asset, sample_rate_of, total_frames_of};
 use crate::DecodeError;
+use tutti_platform::Asset;
 
 /// A frame count from the file's `u64`, saturating where `usize` is narrower.
 fn frames(n: u64) -> Samples {
@@ -192,34 +188,21 @@ impl<S: Sample> FileIn<S> {
         self.seekable
     }
 
-    /// Opens `path` at its first audio track, positioned at frame 0.
+    /// Opens `src` (a path, or bytes in memory) at its first audio track,
+    /// positioned at frame 0.
     ///
     /// Probes the container and creates a decoder; no audio is decoded yet.
-    /// It reads the same track [`read_wave`](crate::read_wave) decodes.
+    /// It reads the same track [`read_wave`](crate::read_wave) decodes. The
+    /// reader the asset opens is owned for the life of the `FileIn`, and must
+    /// seek (a seek is how the file's frames are found).
     ///
     /// # Errors
     ///
-    /// A [`DecodeError`] if the file cannot be opened, its container is not one
+    /// A [`DecodeError`] if the source cannot be opened, its container is not one
     /// this build reads, it has no audio track this build can decode, or the
     /// track states no sample rate ([`DecodeError::NoSampleRate`]).
-    ///
-    /// [`from_reader`](Self::from_reader) opens a source that is not a file.
-    pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, DecodeError> {
-        Self::start(probe_path(path.as_ref()).map_err(convert)?)
-    }
-
-    /// Opens a complete file read from `reader` (a `Cursor` over its bytes,
-    /// say) at its first audio track, positioned at frame 0, as
-    /// [`open`](Self::open) opens a path. There is no extension hint, so the
-    /// container is identified from the bytes alone. The reader is owned for
-    /// the life of the `FileIn`, and must seek (a seek is how the file's
-    /// frames are found).
-    ///
-    /// # Errors
-    ///
-    /// As [`open`](Self::open), less the open of a file.
-    pub fn from_reader<R: Read + Seek + Send + 'static>(reader: R) -> Result<Self, DecodeError> {
-        Self::start(probe_reader(reader).map_err(convert)?)
+    pub fn open(src: impl Into<Asset>) -> Result<Self, DecodeError> {
+        Self::start(probe_asset(&src.into()).map_err(convert)?)
     }
 
     /// The decoder over a probed container's first audio track.
