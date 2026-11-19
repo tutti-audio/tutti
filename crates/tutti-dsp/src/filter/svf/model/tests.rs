@@ -291,11 +291,11 @@ fn a_control_moves_the_design_only_past_its_dead_band() {
         gain: Db::new(gain),
     };
     let base = controls(SvfType::Bell, 1_000.0, 1.0, 3.0);
-    assert!(!controls(SvfType::Bell, 1_000.005, 1.0, 3.0).moved_from(&base));
-    assert!(!controls(SvfType::Bell, 1_000.0, 1.00005, 3.0).moved_from(&base));
-    assert!(!controls(SvfType::Bell, 1_000.0, 1.0, 3.005).moved_from(&base));
-    assert!(controls(SvfType::Bell, 1_000.02, 1.0, 3.0).moved_from(&base));
-    assert!(controls(SvfType::Bell, 1_000.0, 1.0002, 3.0).moved_from(&base));
-    assert!(controls(SvfType::Bell, 1_000.0, 1.0, 3.02).moved_from(&base));
-    assert!(controls(SvfType::Notch, 1_000.0, 1.0, 3.0).moved_from(&base));
+    assert!(!controls(SvfType::Bell, 1_000.005, 1.0, 3.0).differs_from(&base));
+    assert!(!controls(SvfType::Bell, 1_000.0, 1.00005, 3.0).differs_from(&base));
+    assert!(!controls(SvfType::Bell, 1_000.0, 1.0, 3.005).differs_from(&base));
+    assert!(controls(SvfType::Bell, 1_000.02, 1.0, 3.0).differs_from(&base));
+    assert!(controls(SvfType::Bell, 1_000.0, 1.0002, 3.0).differs_from(&base));
+    assert!(controls(SvfType::Bell, 1_000.0, 1.0, 3.02).differs_from(&base));
+    assert!(controls(SvfType::Notch, 1_000.0, 1.0, 3.0).differs_from(&base));
 }

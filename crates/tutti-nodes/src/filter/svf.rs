@@ -46,7 +46,7 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 ///
 /// Cutoff ([`Hz`]), [`Q`] and gain ([`Db`]) are live [`Params`](crate::Params) shared across
 /// clones. A held value costs nothing: the model is designed again only when one
-/// moves past a small dead-band ([`SvfControls::moved_from`]). The filter is
+/// moves past a small dead-band ([`SvfControls::differs_from`]). The filter is
 /// designed on a 16-frame grid counted from the last reset, at each segment's
 /// first frame, and the coefficients ramp linearly to that solve over the segment,
 /// so an automated cutoff glides rather than stepping, arrives within 16 frames
@@ -238,7 +238,7 @@ control_set! {
     GainDb => Db = gain;
 
     fn moved(&self, applied: &SvfControls, target: &SvfControls) -> bool {
-        target.moved_from(applied)
+        target.differs_from(applied)
     }
 
     fn defaults(&self) -> SvfControls {
