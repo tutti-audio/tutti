@@ -1,4 +1,10 @@
-//! Nodes through the session: mix, mode, multiband params, reverbs and the sampler.
+//! Nodes through the session: mix, mode, multiband params, reverbs and the sampler. The binary installs
+//! `AllocDisabler`, so an allocation inside an `assert_no_alloc` closure aborts.
+
+use assert_no_alloc::AllocDisabler;
+
+#[global_allocator]
+static ALLOC: AllocDisabler = AllocDisabler;
 
 mod bus_strip;
 mod multiband_params;
@@ -22,3 +28,6 @@ mod f64_loads;
 // A voice of either tier arrives where the compiler puts it (doc 025 stage 5).
 #[cfg(feature = "sampler")]
 mod tier_alignment;
+// A sampler voice's window written through the session's verbs.
+#[cfg(feature = "sampler")]
+mod sampler_values;

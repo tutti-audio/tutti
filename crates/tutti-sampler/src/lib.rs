@@ -212,8 +212,8 @@ impl<F: tutti_rt::RingFloat + tutti_dsp::FftFloat> SamplerFloat for F {}
 //
 pub use voice::{
     Direction, DiskVoice, DiskVoiceControls, Loop, LoopError, MemorySource, MemorySourceConfig,
-    Playback, PoolDrops, PoolTooWide, SendError, SlotId, StreamingAddError, Voice, VoiceNode,
-    VoiceNodeHandle, VoicePool, VoicePoolHandle, VoiceSource, VoiceWindow, memory_voice,
+    PlayError, Playback, PoolDrops, PoolTooWide, SendError, SlotId, StreamingAddError, Voice,
+    VoiceNode, VoiceNodeHandle, VoicePool, VoicePoolHandle, VoiceSource, VoiceWindow, memory_voice,
     voice_width,
 };
 // The async disk-streaming engine (streamer thread + the `DiskStreamer` handle).
