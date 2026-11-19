@@ -27,11 +27,11 @@ fn reclaim_frees_a_clip_a_block_held_across_its_replacement() {
     assert!(gone.upgrade().is_none(), "freed by the reclaim");
 }
 
-/// **A clip node's held-note table is 24 KiB**, allocated with the node.
+/// **A clip node's held-note table is 16 KiB**, allocated with the node.
 #[test]
-fn a_clip_nodes_table_is_24_kib() {
+fn a_clip_nodes_table_is_16_kib() {
     let node = MidiClipNode::new([]);
-    assert_eq!(node.play.held.heap_bytes(), 2_048 * 12);
+    assert_eq!(node.play.held.heap_bytes(), 2_048 * 8);
 }
 
 /// **A clip is translated as it is loaded, in beat order, and keeps its list

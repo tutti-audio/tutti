@@ -79,7 +79,7 @@ fn the_border_nodes_process_without_allocating() {
         "sync",
         SyncOut::new(MidiGroup::FIRST)
             .meter(move || sync_meter.reader())
-            .messages(SyncMessages {
+            .sending(SyncMessages {
                 clock: true,
                 mtc: true,
                 mmc: Some(Recipient::AllCall),
@@ -764,7 +764,7 @@ fn machine_control_out_of_a_sync_node_processes_without_allocating() {
         .insert(
             NodeKey(1),
             "mmc",
-            SyncOut::new(MidiGroup::FIRST).messages(SyncMessages {
+            SyncOut::new(MidiGroup::FIRST).sending(SyncMessages {
                 mmc: Some(Recipient::AllCall),
                 rate: MtcRate::Fps30,
                 ..SyncMessages::OFF
@@ -834,7 +834,7 @@ fn resetting_the_border_nodes_allocates_nothing() {
 
     let rate = SampleRate::SR_48K;
     let mut ingest = Direct::new(MidiIngestNode::new(), rate, 64);
-    let sync = SyncOut::new(MidiGroup::FIRST).messages(SyncMessages {
+    let sync = SyncOut::new(MidiGroup::FIRST).sending(SyncMessages {
         clock: true,
         mtc: true,
         mmc: Some(Recipient::AllCall),
