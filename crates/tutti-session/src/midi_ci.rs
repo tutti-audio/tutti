@@ -189,6 +189,7 @@ impl std::fmt::Debug for PortLink {
 /// [`PeerId`]; its requests go through the port's queue.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ListedPeer {
+    id: ResourceId,
     port: ResourceId,
     info: CiPeerInfo,
     profiles: Option<ProfilePeer>,
@@ -197,7 +198,8 @@ pub struct ListedPeer {
 }
 
 impl ListedPeer {
-    pub(crate) const fn new(
+    const fn new(
+        id: ResourceId,
         port: ResourceId,
         info: CiPeerInfo,
         profiles: Option<ProfilePeer>,
@@ -205,12 +207,21 @@ impl ListedPeer {
         resources: Option<ResourcePeer>,
     ) -> Self {
         Self {
+            id,
             port,
             info,
             profiles,
             report,
             resources,
         }
+    }
+
+    /// The peer's id in the session: minted when its input first lists it and
+    /// the same while the input lists it, and again if it leaves and returns
+    /// with the same Group and MUID.
+    #[must_use]
+    pub const fn id(&self) -> ResourceId {
+        self.id
     }
 
     /// The input the peer was found on, by its [`ResourceId`].
@@ -632,6 +643,9 @@ pub(crate) struct Pending {
     /// What the live Subscriptions hold.
     subs: Subscriptions,
     ids: ResourceIds,
+    /// The id of each peer the port has listed: kept when the peer leaves, so
+    /// one that returns with the same Group and MUID has its id again.
+    peer_ids: std::sync::Mutex<std::collections::BTreeMap<PeerId, ResourceId>>,
 }
 
 /// A Property Exchange call sent to a peer, or waiting to be, in the order the
@@ -718,7 +732,14 @@ impl Pending {
             full: Vec::new(),
             subs: Subscriptions::default(),
             ids,
+            peer_ids: std::sync::Mutex::default(),
         }
+    }
+
+    /// The id of `peer`: minted when the port first lists it.
+    fn peer_id(&self, peer: PeerId) -> ResourceId {
+        let mut ids = tutti_rt::LockExt::lock_recover(&self.peer_ids);
+        *ids.entry(peer).or_insert_with(|| self.ids.mint())
     }
 
     /// Takes in a switch the app asked for: sent now when nothing else is out
@@ -1122,6 +1143,24 @@ impl Pending {
     }
 
     /// What `peer`'s Subscriptions hold of its Resources.
+    pub(crate) fn listed(
+        &self,
+        port: ResourceId,
+        info: CiPeerInfo,
+        profiles: Option<ProfilePeer>,
+        report: Option<ReportPeer>,
+        resources: Option<ResourcePeer>,
+    ) -> ListedPeer {
+        ListedPeer::new(
+            self.peer_id(info.id()),
+            port,
+            info,
+            profiles,
+            report,
+            resources,
+        )
+    }
+
     pub(crate) fn bodies(&self, peer: PeerId) -> subscription::Bodies {
         self.subs.bodies(peer)
     }

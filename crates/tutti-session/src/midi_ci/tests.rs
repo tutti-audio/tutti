@@ -214,3 +214,19 @@ fn dropping_a_job_whose_landed_lease_is_live_does_not_deadlock() {
     drop(job);
     assert!(queue.lock().unwrap().is_empty());
 }
+
+/// A peer's id is minted once per Group and MUID: asking again, also after the
+/// peer left and came back, gives the same id, and another MUID has its own.
+#[test]
+fn a_peer_keeps_its_id_and_another_muid_has_its_own() {
+    let pending = Pending::new(ResourceIds::new());
+    let at = |muid: u32| PeerId {
+        group: MidiGroup::FIRST,
+        muid: Muid::of(muid),
+    };
+    let first = pending.peer_id(at(0x0012_3456));
+    assert_eq!(pending.peer_id(at(0x0012_3456)), first);
+    let other = pending.peer_id(at(0x0045_6789));
+    assert_ne!(other, first);
+    assert_eq!(pending.peer_id(at(0x0012_3456)), first);
+}

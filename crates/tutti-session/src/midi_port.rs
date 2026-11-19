@@ -880,7 +880,7 @@ fn input_info(
         .iter()
         .map(|info| {
             let id = info.id();
-            ListedPeer::new(
+            pending.listed(
                 port,
                 info.clone(),
                 profiles
