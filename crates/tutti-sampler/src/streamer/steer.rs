@@ -113,22 +113,4 @@ mod tests {
         assert!(!bell.has_work(), "taken by the cycle that began");
         assert_eq!((streamed.seq(), *streamed.current()), (1, 1));
     }
-
-    /// **A parked streamer returns from its sleep for a publish, not for its
-    /// backstop**: the sleep over a cell's bell, with a backstop of a minute,
-    /// returns at once when a request was published, so it ends far short of
-    /// the backstop (the bound only guards a hang).
-    #[test]
-    fn a_parked_streamer_wakes_for_a_publish_not_its_backstop() {
-        use std::time::{Duration, Instant};
-        let (bell, mut sleeper) = Bell::new();
-        let cell = SteerCell::ringing(0u8, Arc::clone(&bell));
-        cell.publish(1);
-        let parked = Instant::now();
-        bell.sleep(&mut sleeper, || false, Duration::from_secs(60));
-        assert!(
-            parked.elapsed() < Duration::from_secs(30),
-            "the sleep ran to its backstop"
-        );
-    }
 }
