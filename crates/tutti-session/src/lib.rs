@@ -204,7 +204,7 @@ pub use midi_follow::{FollowClock, FollowMachineControl, FollowTempo};
 #[cfg(feature = "midi")]
 pub use midi_load::{
     DroppedEvent, LoadMidi, LoadMidiError, LoadReport, LoadedMidi, LoadedTrack,
-    NoCommonTimelineError, NoSuchTrackError,
+    NoCommonTimelineError, TrackError,
 };
 #[cfg(feature = "midi-hardware")]
 pub use midi_port::{

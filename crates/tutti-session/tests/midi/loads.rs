@@ -13,8 +13,8 @@ use std::time::{Duration, Instant};
 use tutti_midi_file::{Normalized, TimelineDrop};
 use tutti_music::TimeSignature;
 use tutti_session::{
-    DetachedSession, LoadMidiError, LoadedMidi, NoCommonTimelineError, NoSuchTrackError, Session,
-    SessionEvent, WorkerError,
+    DetachedSession, LoadMidiError, LoadedMidi, NoCommonTimelineError, Session, SessionEvent,
+    TrackError, WorkerError,
 };
 use tutti_units::{Beat, SampleRate, Seconds};
 
@@ -118,8 +118,8 @@ fn a_format_2_file_has_no_common_timeline_and_each_track_its_own_tempo() {
     );
     let loaded = load(&mut session(), write(dir.path(), "f2.mid", &bytes)).expect("loads");
 
-    assert_eq!(loaded.tempo().unwrap_err(), NoCommonTimelineError);
-    assert_eq!(loaded.meter().unwrap_err(), NoCommonTimelineError);
+    assert_eq!(loaded.tempo().unwrap_err(), NoCommonTimelineError::PerTrack);
+    assert_eq!(loaded.meter().unwrap_err(), NoCommonTimelineError::PerTrack);
     let (first, second) = (loaded.track(0).unwrap(), loaded.track(1).unwrap());
     assert_eq!(first.tempo.seconds_at(Beat(1.0)), Seconds(0.5));
     assert_eq!(second.tempo.seconds_at(Beat(1.0)), Seconds(1.0));
@@ -136,7 +136,7 @@ fn a_track_past_the_end_is_no_such_track() {
     let loaded = load(&mut session(), write(dir.path(), "two.mid", &bytes)).expect("loads");
     assert_eq!(
         loaded.track(2).unwrap_err(),
-        NoSuchTrackError {
+        TrackError::NoSuch {
             index: 2,
             tracks: 2
         }
@@ -186,16 +186,42 @@ fn an_event_with_no_packet_is_reported_at_its_beat() {
     assert_eq!(loaded.track(0).unwrap().events.len(), 2);
 }
 
-/// A file in SMPTE time has seconds and no beats: it lands, with no clip and
-/// no common timeline.
+/// A Time Signature of numerator 0 is no meter: the load reports it at its
+/// beat (tick 960 of 480 a quarter is beat 2) and the meter stays 4/4.
 #[test]
-fn a_file_in_smpte_time_lands_with_no_clip_and_no_timeline() {
+fn a_time_signature_no_meter_holds_is_reported_at_its_beat() {
+    let dir = tempfile::tempdir().unwrap();
+    // Delta 960 (`87 40`), Time Signature 0/4.
+    let zero: [u8; 8] = [0x87, 0x40, 0xFF, 0x58, 4, 0, 2, 24];
+    let mut zero = zero.to_vec();
+    zero.push(8);
+    let bytes = smf(0, &[track(&[&TEMPO_120, &zero])]);
+    let loaded = load(&mut session(), write(dir.path(), "zero.mid", &bytes)).expect("loads");
+    let refused = &loaded.report().refused_time_signatures;
+    assert_eq!(refused.len(), 1);
+    assert_eq!((refused[0].0, refused[0].1.beat), (None, Beat(2.0)));
+    assert_eq!(refused[0].1.numerator, 0);
+    assert!(!loaded.report().is_clean());
+    assert_eq!(loaded.meter().unwrap().current().changes().len(), 1);
+}
+
+/// A file in SMPTE time has seconds and no beats: it lands, and each
+/// of its tracks and timeline answers `SmpteTiming`.
+#[test]
+fn a_file_in_smpte_time_lands_and_says_why_it_has_no_clip_or_timeline() {
     let dir = tempfile::tempdir().unwrap();
     // -25 frames a second, 40 ticks a frame (`E7 28`).
     let bytes = b"MThd\0\0\0\x06\0\0\0\x01\xE7\x28MTrk\0\0\0\x04\0\xFF\x2F\0";
     let loaded = load(&mut session(), write(dir.path(), "smpte.mid", bytes)).expect("loads");
-    assert!(loaded.track(0).is_err());
-    assert_eq!(loaded.tempo().unwrap_err(), NoCommonTimelineError);
+    assert_eq!(loaded.track(0).unwrap_err(), TrackError::SmpteTiming);
+    assert_eq!(
+        loaded.tempo().unwrap_err(),
+        NoCommonTimelineError::SmpteTiming
+    );
+    assert_eq!(
+        loaded.meter().unwrap_err(),
+        NoCommonTimelineError::SmpteTiming
+    );
 }
 
 #[test]

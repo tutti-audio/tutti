@@ -1288,7 +1288,11 @@ impl<F: Float> Midi<'_, F> {
             }
             None => {
                 let (clip, _) = self.graph.add(MidiClipNode::new([]));
-                self.publish_clip(clip, events)?;
+                // A clip that cannot take its events is not left in the graph.
+                if let Err(refused) = self.publish_clip(clip, events) {
+                    let _ = self.graph.remove(clip);
+                    return Err(refused);
+                }
                 let clip = clip.erase();
                 // The clip's MIDI is classic MPE until the transform says
                 // otherwise: it is the one holder of the zones.

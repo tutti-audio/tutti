@@ -118,10 +118,12 @@ fn run() -> Result<Outcome, Box<dyn std::error::Error>> {
     // A clip from a file's timeline: the packets it holds at their beats.
     // The load is a job on the session's worker, which converts each track to
     // a clip value; `wait` runs updates until it lands.
-    let path = std::env::temp_dir().join("tutti-midi-all.mid");
+    let path = std::env::temp_dir().join(format!("tutti-midi-all-{}.mid", std::process::id()));
     file()?.write(&path)?;
     let job = s.midi().load_midi(&path);
-    let loaded = job.wait(&mut s)?;
+    let loaded = job.wait(&mut s);
+    std::fs::remove_file(&path)?;
+    let loaded = loaded?;
     s.midi().play_track(synth.node(), loaded.track(0)?)?;
 
     // Live notes, through the handle's keys: a MIDI 2.0 note with its

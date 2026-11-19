@@ -16,10 +16,9 @@ use std::sync::Arc;
 
 use tutti_buffers::Float;
 use tutti_midi_file::{
-    FileEvent, Meta, MidiFile, Normalized, ReadError, Timebase, TimelineDrop, Track,
+    FileEvent, MidiFile, Normalized, ReadError, RefusedTimeSignature, Timebase, TimelineDrop, Track,
 };
 use tutti_midi_runtime::{ClipEvents, TimedMidiEvent};
-use tutti_music::{MeterChange, MeterMap, TimeSignature};
 use tutti_tempo::TempoMap;
 use tutti_transport::ProjectMeter;
 use tutti_ump::TicksPerQuarterNote;
@@ -49,23 +48,37 @@ pub enum LoadMidiError {
     Wait(#[from] WaitError),
 }
 
-/// A [`LoadedMidi`] has no track `index`.
+/// Why a [`LoadedMidi`] has no [`LoadedTrack`] `i`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
-#[error("the file has no track {index}: {tracks} tracks are loaded")]
-pub struct NoSuchTrackError {
-    /// The index asked for.
-    pub index: usize,
-    /// How many tracks were loaded: none for a file in SMPTE time, which has
-    /// no beats to place a clip on.
-    pub tracks: usize,
+#[non_exhaustive]
+pub enum TrackError {
+    /// The file has no such track.
+    #[error("the file has no track {index}: it has {tracks}")]
+    NoSuch {
+        /// The index asked for.
+        index: usize,
+        /// How many tracks the file has.
+        tracks: usize,
+    },
+    /// The file's ticks are fractions of a second: it has no beats to place a
+    /// clip on, and a file in SMPTE time is not converted to clips.
+    #[error("the file is in SMPTE time: it has no beats, and is not converted to clips")]
+    SmpteTiming,
 }
 
-/// A [`LoadedMidi`] has no one tempo map and meter: its tracks are independent
-/// sequences (format 2), each with its own ([`LoadedTrack`]), or it is in SMPTE
-/// time and has none.
+/// Why a [`LoadedMidi`] has no one tempo map and meter.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
-#[error("the file has no one timeline: its tracks are independent sequences, or it has no beats")]
-pub struct NoCommonTimelineError;
+#[non_exhaustive]
+pub enum NoCommonTimelineError {
+    /// The tracks are independent sequences (format 2): each keeps its own
+    /// ([`LoadedTrack::tempo`], [`LoadedTrack::meter`]).
+    #[error("the file's tracks are independent sequences, each with its own timeline")]
+    PerTrack,
+    /// The file's ticks are fractions of a second: it has no tempo map or
+    /// meter.
+    #[error("the file is in SMPTE time: it has no tempo map or meter")]
+    SmpteTiming,
+}
 
 /// One track of a [`LoadedMidi`] as the values a session plays and follows.
 #[derive(Clone, Debug)]
@@ -104,14 +117,29 @@ pub struct LoadReport {
     pub normalized: Vec<Normalized>,
     /// The events the conversion to clips left out, in track order.
     pub dropped: Vec<DroppedEvent>,
+    /// The Time Signature events no meter holds, so no change of meter was
+    /// made for them, each with its sequence's track (format 2), or `None`
+    /// for the file's one timeline.
+    pub refused_time_signatures: Vec<(Option<usize>, RefusedTimeSignature)>,
 }
 
 impl LoadReport {
     /// Whether the file was read as it is and every event is in a clip.
     #[must_use]
     pub fn is_clean(&self) -> bool {
-        self.normalized.is_empty() && self.dropped.is_empty()
+        self.normalized.is_empty()
+            && self.dropped.is_empty()
+            && self.refused_time_signatures.is_empty()
     }
+}
+
+/// What a loaded file's tracks share.
+#[derive(Debug)]
+enum Timeline {
+    /// One tempo map and meter: a format 0 or 1 file's.
+    Common(Arc<TempoMap>, Arc<ProjectMeter>),
+    PerTrack,
+    Smpte,
 }
 
 /// The landing of a [`LoadMidi`] job: the file as read, and each track as a
@@ -120,8 +148,7 @@ impl LoadReport {
 pub struct LoadedMidi {
     file: MidiFile,
     tracks: Vec<LoadedTrack>,
-    /// The timeline every track shares: a format 0 or 1 file's.
-    common: Option<(Arc<TempoMap>, Arc<ProjectMeter>)>,
+    timeline: Timeline,
     report: LoadReport,
 }
 
@@ -136,10 +163,14 @@ impl LoadedMidi {
     ///
     /// # Errors
     ///
-    /// [`NoSuchTrackError`] when the file has no track `i`, or is in SMPTE
-    /// time and so has no clip.
-    pub fn track(&self, i: usize) -> Result<&LoadedTrack, NoSuchTrackError> {
-        self.tracks.get(i).ok_or(NoSuchTrackError {
+    /// [`TrackError::NoSuch`] when the file has no track `i`;
+    /// [`TrackError::SmpteTiming`] when it is in SMPTE time, which is not
+    /// converted to clips.
+    pub fn track(&self, i: usize) -> Result<&LoadedTrack, TrackError> {
+        if matches!(self.timeline, Timeline::Smpte) {
+            return Err(TrackError::SmpteTiming);
+        }
+        self.tracks.get(i).ok_or(TrackError::NoSuch {
             index: i,
             tracks: self.tracks.len(),
         })
@@ -149,13 +180,11 @@ impl LoadedMidi {
     ///
     /// # Errors
     ///
-    /// [`NoCommonTimelineError`] for a format 2 file, whose tracks each keep
-    /// their own ([`LoadedTrack::tempo`]), and for a file in SMPTE time.
+    /// [`NoCommonTimelineError::PerTrack`] for a format 2 file, whose tracks
+    /// each keep their own ([`LoadedTrack::tempo`]);
+    /// [`NoCommonTimelineError::SmpteTiming`] for a file in SMPTE time.
     pub fn tempo(&self) -> Result<&Arc<TempoMap>, NoCommonTimelineError> {
-        self.common
-            .as_ref()
-            .map(|(tempo, _)| tempo)
-            .ok_or(NoCommonTimelineError)
+        self.common().map(|(tempo, _)| tempo)
     }
 
     /// The meter every track shares: a format 0 or 1 file's.
@@ -164,10 +193,15 @@ impl LoadedMidi {
     ///
     /// As [`tempo`](Self::tempo).
     pub fn meter(&self) -> Result<&Arc<ProjectMeter>, NoCommonTimelineError> {
-        self.common
-            .as_ref()
-            .map(|(_, meter)| meter)
-            .ok_or(NoCommonTimelineError)
+        self.common().map(|(_, meter)| meter)
+    }
+
+    fn common(&self) -> Result<(&Arc<TempoMap>, &Arc<ProjectMeter>), NoCommonTimelineError> {
+        match &self.timeline {
+            Timeline::Common(tempo, meter) => Ok((tempo, meter)),
+            Timeline::PerTrack => Err(NoCommonTimelineError::PerTrack),
+            Timeline::Smpte => Err(NoCommonTimelineError::SmpteTiming),
+        }
     }
 
     /// What the read repaired and the conversion left out.
@@ -186,8 +220,9 @@ impl<F: Float> Midi<'_, F> {
     /// lands [`LoadMidiError::Read`]. **Dropping the [`Job`](crate::Job)
     /// discards the result.**
     ///
-    /// A file in SMPTE time has seconds and no beats: it lands with no track
-    /// and no common timeline.
+    /// A file in SMPTE time has seconds and no beats: it lands with its
+    /// [`file`](LoadedMidi::file) and report, and [`TrackError::SmpteTiming`]
+    /// for every track.
     pub fn load_midi(&mut self, path: impl Into<PathBuf>) -> crate::Job<LoadMidi> {
         let path = path.into();
         self.jobs.submit_job(
@@ -211,14 +246,18 @@ fn load(path: &PathBuf) -> Result<LoadedMidi, LoadMidiError> {
 fn convert(file: MidiFile) -> LoadedMidi {
     let mut report = LoadReport {
         normalized: file.normalized().to_vec(),
-        dropped: Vec::new(),
+        ..LoadReport::default()
     };
     let mut tracks = Vec::new();
-    let mut common = None;
-    match file.timebase() {
+    let timeline = match file.timebase() {
         Timebase::Metrical(view) => {
             let tempo = Arc::clone(view.tempo_map());
-            let meter = Arc::new(meter_of(view.events()));
+            let meter = Arc::new(ProjectMeter::new(view.meter_map()));
+            report.refused_time_signatures.extend(
+                view.refused_time_signatures()
+                    .into_iter()
+                    .map(|refused| (None, refused)),
+            );
             for (index, track) in file.tracks().iter().enumerate() {
                 tracks.push(LoadedTrack {
                     events: clip_of(&mut report, index, track, view.ticks_per_quarter()),
@@ -226,10 +265,16 @@ fn convert(file: MidiFile) -> LoadedMidi {
                     meter: Arc::clone(&meter),
                 });
             }
-            common = Some((tempo, meter));
+            Timeline::Common(tempo, meter)
         }
         Timebase::MetricalSequences(sequences) => {
             for (index, sequence) in sequences.sequences().enumerate() {
+                report.refused_time_signatures.extend(
+                    sequence
+                        .refused_time_signatures()
+                        .into_iter()
+                        .map(|refused| (Some(index), refused)),
+                );
                 tracks.push(LoadedTrack {
                     events: clip_of(
                         &mut report,
@@ -238,16 +283,17 @@ fn convert(file: MidiFile) -> LoadedMidi {
                         sequences.ticks_per_quarter(),
                     ),
                     tempo: Arc::clone(sequence.tempo_map()),
-                    meter: Arc::new(meter_of(sequence.events())),
+                    meter: Arc::new(ProjectMeter::new(sequence.meter_map())),
                 });
             }
+            Timeline::PerTrack
         }
-        Timebase::Smpte(_) | Timebase::SmpteSequences(_) => {}
-    }
+        Timebase::Smpte(_) | Timebase::SmpteSequences(_) => Timeline::Smpte,
+    };
     LoadedMidi {
         file,
         tracks,
-        common,
+        timeline,
         report,
     }
 }
@@ -279,23 +325,4 @@ fn clip_of(
             .filter_map(|(beat, packet)| TimedMidiEvent::new(beat, packet))
             .collect(),
     )
-}
-
-/// The meter the Time Signature events declare, a change at the beat each
-/// lands on. A signature no [`TimeSignature`] holds (a zero numerator, a
-/// denominator past a 32-bit power of two) is not a change.
-fn meter_of<'a>(events: impl Iterator<Item = (Beat, &'a FileEvent)>) -> ProjectMeter {
-    ProjectMeter::new(MeterMap::new(events.filter_map(|(beat, event)| {
-        let FileEvent::Meta(Meta::TimeSignature {
-            numerator,
-            denominator_power,
-            ..
-        }) = event
-        else {
-            return None;
-        };
-        let denominator = 1u32.checked_shl(u32::from(*denominator_power))?;
-        let signature = TimeSignature::from_numbers(u32::from(*numerator), denominator)?;
-        Some(MeterChange::new(beat, signature))
-    })))
 }
