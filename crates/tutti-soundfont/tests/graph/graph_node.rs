@@ -6,7 +6,7 @@
 //! other suites here. 120 BPM: a beat is half a second.
 
 use std::sync::Arc;
-use tutti_types::MaxBlock;
+use tutti_buffers::MaxBlock;
 
 use tutti_fixtures::midi;
 use tutti_graph::NodeKey;

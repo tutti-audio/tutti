@@ -1,10 +1,10 @@
 //! [`EnvelopeFollowerNode`]: an audio input's level, sent to control lanes
 //! on the play-clock grid.
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::Float;
 use tutti_graph::{Cost, Io};
 use tutti_modulation::{LevelFollower, SignalKind, SignalSource, SourceId};
-use tutti_types::ChannelLayout;
 use tutti_units::Ballistics;
 
 use super::{SourceNode, SourcePorts};

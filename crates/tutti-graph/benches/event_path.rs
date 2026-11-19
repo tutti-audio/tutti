@@ -12,7 +12,7 @@
 //! ```
 
 use std::hint::black_box;
-use tutti_types::MaxBlock;
+use tutti_buffers::MaxBlock;
 use tutti_ump::Ump;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};

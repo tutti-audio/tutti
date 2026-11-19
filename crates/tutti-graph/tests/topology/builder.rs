@@ -10,13 +10,13 @@ use tutti_graph::testing as common;
 use std::sync::{Arc, Mutex};
 
 use common::{Kind, TestNode, prepare};
+use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_graph::{
     Cx, Editor, EventEdge, EventIn, EventOut, ForkByClone, GraphBuilder, Io, Node, Prepare,
     Renderer, Shape, Status, TransportPosition, Unforkable,
 };
 use tutti_graph::{Edge, FeedbackFrom, InPort, OutPort, Source};
-use tutti_types::ChannelLayout;
 use tutti_units::{Beat, Frame, Samples};
 
 fn signal(n: usize) -> Vec<f32> {

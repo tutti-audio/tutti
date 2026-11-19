@@ -4,8 +4,8 @@
 //! setting deserves to know which invariant broke, and a caller feeding a
 //! short buffer deserves better than a panic on the audio path.
 
+use tutti_buffers::ChannelLayout;
 use tutti_dsp::FrameCount;
-use tutti_types::ChannelLayout;
 use tutti_units::{Bpm, Db, Hz, SampleRate, Samples};
 
 /// Everything that can go wrong constructing or feeding an analysis.

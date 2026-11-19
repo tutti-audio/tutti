@@ -16,6 +16,7 @@
 
 // These tests pin the `f32` instantiation, the session's audio format, so their tolerances are `f32`'s.
 
+use tutti_buffers::MaxBlock;
 use tutti_buffers::Planes;
 use tutti_dsp::{HrtfBinauralError, MAX_PREPARED_RATE, MAX_SPHERE_RATE, MIN_SPHERE_RATE};
 use tutti_fixtures::Noise;
@@ -24,7 +25,6 @@ use tutti_graph::contract::{drive, prepared};
 use tutti_graph::{Node, Prepare};
 use tutti_nodes::HrtfBinauralNode;
 use tutti_nodes::testing::aim;
-use tutti_types::MaxBlock;
 use tutti_units::{Azimuth, Direction, Elevation, SampleRate, Samples, Tail};
 
 const RATE: u32 = 48_000;

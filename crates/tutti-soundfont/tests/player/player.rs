@@ -10,11 +10,11 @@ use support::rig::{Rig, timgm6mb};
 use tutti_fixtures::sf2::generator;
 use tutti_ump::{Bank, CCNumber, MidiChannel, U7, Voice2};
 
+use tutti_buffers::MaxBlock;
 use tutti_fixtures::{RangeContract, check_range_contract, check_range_serde};
 use tutti_graph::{Node, Prepare};
 use tutti_sf2::SoundFont;
 use tutti_soundfont::{Error, Polyphony, Settings, SoundFontUnit};
-use tutti_types::MaxBlock;
 use tutti_units::{SampleRate, Samples};
 
 /// A unit at the default settings, whose dry pair is true silence once a voice

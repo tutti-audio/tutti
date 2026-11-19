@@ -104,7 +104,7 @@ pub enum ClapError {
         index: u32,
         /// Why no layout holds the reported count; carries the count.
         #[source]
-        source: tutti_types::LayoutError,
+        source: tutti_buffers::LayoutError,
     },
 
     /// Saving or loading plugin state failed.

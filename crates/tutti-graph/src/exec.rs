@@ -691,7 +691,7 @@ impl<F: Float> Executor<F> {
 mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use tutti_types::{ChannelLayout, MaxBlock};
+    use tutti_buffers::{ChannelLayout, MaxBlock};
     use tutti_units::{At, SampleRate, Samples};
 
     use super::*;

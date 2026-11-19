@@ -915,7 +915,8 @@ fn a_ci_peers_product_instance_id_fills_what_the_device_left() {
 
 // --- Profile Configuration (M2-101 section 7, M2-102 section 2) -----------
 
-use crate::{ChannelCount, ProfileError, ProfilesChange, Switcher, Whole};
+use crate::{ChannelCount, ProfileError, ProfilesChange, Switcher};
+use tutti_midi_device::Whole;
 use tutti_midi_device::{
     Outcome, PEER_REPLY_TIMEOUT, ProfileChange, ProfileChannels, ProfileId, ProfileList,
     ProfileLists, ProfileState, ProfileTarget, Request, StandardProfile,

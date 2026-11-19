@@ -9,11 +9,11 @@
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
+use tutti_buffers::ChannelLayout;
 use tutti_graph::{
     Edge, Feed, FeedbackFrom, InPort, Invalid, LatencyGraph, NodeKey, NodeSpec, OutPort, PortFeed,
     Sink, Source, TapAlign, TapId, TapSpec, Topology, graph_tail, latency_plan,
 };
-use tutti_types::ChannelLayout;
 use tutti_units::{SampleRate, Samples, Tail};
 
 const A: NodeKey = NodeKey(1);

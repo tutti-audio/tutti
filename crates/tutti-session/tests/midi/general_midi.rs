@@ -2,14 +2,14 @@
 //! own topology (which port feeds which), not from a render.
 
 use std::sync::Arc;
+use tutti_buffers::MaxBlock;
 use tutti_session::InPort;
-use tutti_types::MaxBlock;
 
+use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_session::{GeneralMidi, NodeMode, OutPort, Root, Session};
 use tutti_sf2::SoundFont;
 use tutti_soundfont::{Settings, SoundFontUnit};
-use tutti_types::ChannelLayout;
 use tutti_units::{SampleRate, Samples, Tail};
 
 const RATE: SampleRate = SampleRate::SR_48K;

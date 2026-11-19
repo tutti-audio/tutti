@@ -2,7 +2,7 @@
 //! `k` note events a block into a sink, `k = 0` being the no-notes block.
 
 use std::hint::black_box;
-use tutti_types::MaxBlock;
+use tutti_buffers::MaxBlock;
 use tutti_ump::Ump;
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};

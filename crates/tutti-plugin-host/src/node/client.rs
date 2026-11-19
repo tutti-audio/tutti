@@ -33,11 +33,12 @@ use tutti_rt::Rt;
 
 use arrayvec::ArrayVec;
 use parking_lot::Mutex;
+use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_graph::{Bus, Buses, Cx, Offset, Shape};
 use tutti_plugin_types::{Layout, LoadedPlugin, PluginBus};
 use tutti_tempo::TempoView;
 use tutti_transport::TempoReader;
-use tutti_types::{BusTopology, ChannelLayout, ParkedSampleRate};
+use tutti_types::ParkedSampleRate;
 use tutti_units::{SampleRate, Samples};
 
 use super::control_backend::Reporting;
@@ -689,7 +690,7 @@ impl<L: Loaded, F: Float> InProcClient<L, F> {
         if !processor.retune(
             rate,
             max_block,
-            p.quantum().map(tutti_types::MaxBlock::samples),
+            p.quantum().map(tutti_buffers::MaxBlock::samples),
         ) {
             return false;
         }

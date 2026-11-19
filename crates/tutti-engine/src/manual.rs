@@ -37,7 +37,7 @@ use crate::stream::{OutputSpec, RunningStream, StreamDriver};
 /// use tutti_graph::{Editor, Prepare};
 /// use tutti_transport::Transport;
 /// use tutti_units::{SampleRate, Samples};
-/// use tutti_types::{ChannelLayout, MaxBlock};
+/// use tutti_buffers::{ChannelLayout, MaxBlock};
 ///
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// let rate = SampleRate::SR_48K;

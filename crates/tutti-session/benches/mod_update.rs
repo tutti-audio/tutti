@@ -18,7 +18,7 @@
 //! `cargo bench -p tutti-session --bench mod_update`.
 
 use std::time::{Duration, Instant};
-use tutti_types::MaxBlock;
+use tutti_buffers::MaxBlock;
 
 use tutti_modulation::{Follower, Lfo};
 use tutti_nodes::{SvfFilterNode, SvfType};

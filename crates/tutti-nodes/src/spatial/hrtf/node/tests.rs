@@ -1,10 +1,10 @@
 use super::*;
 use crate::testing::aim;
+use tutti_buffers::ChannelLayout;
+use tutti_buffers::MaxBlock;
 use tutti_buffers::Planes;
 use tutti_dsp::HRTF_STEP;
 use tutti_graph::contract::{drive, prepared};
-use tutti_types::ChannelLayout;
-use tutti_types::MaxBlock;
 use tutti_units::UnitParam;
 
 const RATE: SampleRate = SampleRate::SR_44K1;

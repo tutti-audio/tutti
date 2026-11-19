@@ -5,12 +5,12 @@
 //! panner is the gain vector itself, so each case reads the gains off one
 //! rendered block.
 
+use tutti_buffers::Bed;
 use tutti_buffers::Planes;
 use tutti_graph::ParamNode;
 use tutti_graph::contract::{drive, prepared};
 use tutti_nodes::VbapPannerNode;
 use tutti_nodes::testing::aim;
-use tutti_types::Bed;
 use tutti_units::{Azimuth, Elevation, SampleRate, UnitParam};
 
 const RATE: SampleRate = SampleRate::SR_48K;

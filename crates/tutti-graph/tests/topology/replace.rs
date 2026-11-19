@@ -9,6 +9,7 @@ use std::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
 
 use common::{Kind, TestNode, prepare};
 
+use tutti_buffers::ChannelLayout;
 use tutti_fixtures::midi;
 use tutti_graph::NodeKey;
 use tutti_graph::{
@@ -17,7 +18,6 @@ use tutti_graph::{
 };
 use tutti_graph::{Edge, InPort, OutPort, Source};
 use tutti_rt::RtScope;
-use tutti_types::ChannelLayout;
 use tutti_ump::{MidiChannel, U7};
 use tutti_units::{At, Samples};
 

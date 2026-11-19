@@ -7,7 +7,7 @@
 //! is entry `n` of the topology.
 
 use symphonia::core::audio::{Channels, Position};
-use tutti_types::{
+use tutti_buffers::{
     AmbisonicFormat, AmbisonicOrder, Bed, ChannelLayout, ChannelTopology, Placement, Speaker,
     Speakers,
 };

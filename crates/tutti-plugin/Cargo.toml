@@ -47,7 +47,6 @@ tutti-tempo = { version = "0.0.1", path = "../tutti-tempo" }
 # The engine's value vocabulary (`Samples`, `SampleRate`).
 tutti-units = { version = "0.0.1", path = "../tutti-units" }
 tutti-music = { version = "0.0.1", path = "../tutti-music" }
-tutti-types = { version = "0.0.1", path = "../tutti-types" }
 
 # The graph, for a plugin node's own `ForkSource` (fork by state
 # transfer). No cycle: `tutti-graph` names only `tutti-types`, `tutti-rt` and `tutti-ump`.

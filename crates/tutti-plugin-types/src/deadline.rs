@@ -21,6 +21,13 @@ impl Deadline {
         Self(None)
     }
 
+    /// The time left at `now`: zero once the deadline has passed, `None` for one
+    /// that never does.
+    #[must_use]
+    pub fn left(self, now: Instant) -> Option<Duration> {
+        self.0.map(|at| at.saturating_duration_since(now))
+    }
+
     /// The earlier of this deadline and `other`: a wait bounded by both.
     #[must_use]
     pub fn sooner(self, other: Self) -> Self {
@@ -55,6 +62,28 @@ mod tests {
         let far = start + Duration::from_secs(1 << 30);
         assert!(!Deadline::after(start, Duration::MAX).passed(far));
         assert!(!Deadline::never().passed(far));
+    }
+
+    /// The time left runs down to zero at the deadline, and a deadline that
+    /// never passes has none to count.
+    #[test]
+    fn the_time_left_runs_down_to_zero_at_the_deadline() {
+        let start = Instant::now();
+        let deadline = Deadline::after(start, Duration::from_secs(15));
+        assert_eq!(deadline.left(start), Some(Duration::from_secs(15)));
+        assert_eq!(
+            deadline.left(start + Duration::from_secs(14)),
+            Some(Duration::from_secs(1))
+        );
+        assert_eq!(
+            deadline.left(start + Duration::from_secs(15)),
+            Some(Duration::ZERO)
+        );
+        assert_eq!(
+            deadline.left(start + Duration::from_secs(99)),
+            Some(Duration::ZERO)
+        );
+        assert_eq!(Deadline::never().left(start), None);
     }
 
     /// `sooner` is the earlier deadline, and `never` is the later of any.

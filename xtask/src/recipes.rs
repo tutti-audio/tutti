@@ -889,8 +889,14 @@ const NO_STD_CRATES: &[(&str, &[&str])] = &[
     ("tutti-voicing", &[]),
 ];
 
-const CHECK_FEATURES: &[&str] =
-    &[r#"cargo clippy --locked --workspace --all-features --all-targets -- -D warnings"#];
+const CHECK_FEATURES: &[&str] = &[
+    r#"cargo clippy --locked --workspace --all-features --all-targets -- -D warnings"#,
+    // The session's lib alone, where no dev-dependency unifies a codec feature in.
+    r#"cargo clippy --locked -p tutti-session --all-features --lib -- -D warnings"#,
+    // A subsystem feature alone: its test binaries compile only what it enables.
+    r#"cargo clippy --locked -p tutti-session --no-default-features --features plugin --all-targets -- -D warnings"#,
+    r#"cargo clippy --locked -p tutti-session --no-default-features --features midi --all-targets -- -D warnings"#,
+];
 
 const TEST_FEATURES: &[&str] = &[
     r#"cargo build --locked -p tutti-plugin-server --no-default-features --features clap,vst3"#,

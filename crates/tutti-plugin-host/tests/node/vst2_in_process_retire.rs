@@ -14,8 +14,8 @@
 //! (1).
 
 use std::path::PathBuf;
+use tutti_buffers::MaxBlock;
 use tutti_plugin_types::Load;
-use tutti_types::MaxBlock;
 use tutti_vst2_host::Vst2Loaded;
 
 use tutti_graph::NodeKey;

@@ -7,13 +7,13 @@ use tutti_graph::UmpAt;
 
 use vst3::Steinberg::Vst::ProcessSetup;
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::{ByWidth, Float, InputOutput};
 use tutti_plugin_types::{
     ChannelTable, Edit, EditDrain, EditSink, ParamAccess, ParamWriteError, PluginError, PluginIo,
     PluginResult, Processor, RtMidiEvents,
 };
 use tutti_rt::{DrainBeat, RtVec, TallyWriter, tally};
-use tutti_types::ChannelLayout;
 use tutti_units::Normalized;
 use tutti_units::ParamId;
 use tutti_units::{SampleRate, Samples};

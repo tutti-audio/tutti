@@ -2,11 +2,11 @@ use super::*;
 use crate::control::{CancelToken, Progress, Stage};
 use crate::{GRAPH_MAX_BLOCK, Setup};
 use std::sync::Arc;
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::{Interleaved, Planes};
 use tutti_graph::GraphBuilder;
 use tutti_tempo::TempoMap;
 use tutti_transport::{FrozenClock, OfflineTimeline, OfflineTimelineConfig};
-use tutti_types::ChannelLayout;
 use tutti_ump::Ump;
 use tutti_units::{Beat, Bpm, SampleRate};
 

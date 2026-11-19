@@ -1,9 +1,9 @@
 //! [`StereoWidthNode`]: the side of a stereo pair scaled by a width.
 
+use tutti_buffers::{BusTopology, MaxBlock};
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{COEFF_INTERVAL, Lerp, WidthBank, WidthControls};
 use tutti_graph::{Cost, Shape};
-use tutti_types::{BusTopology, MaxBlock};
 use tutti_units::{SampleRate, StereoWidth, Tail};
 
 use crate::kernel::{ControlLanes, Kernel, KernelNode};

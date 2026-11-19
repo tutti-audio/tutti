@@ -1,8 +1,8 @@
 use std::f64::consts::PI;
 
 use crate::Complex64;
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::{Planes, PlanesMut};
-use tutti_types::ChannelLayout;
 use tutti_units::{Db, Hz, Q, SampleRate};
 
 use super::*;

@@ -14,13 +14,13 @@
 //! first block, which is where the deque fills to its whole window.
 //! Lookahead changes are off-RT (`prepare`).
 
+use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_graph::IntoNode;
 use tutti_graph::contract::BlockRig;
 use tutti_nodes::{
     BrickwallLimiterNode, CompressorControls, CompressorNode, GateControls, GateNode, KeyFilter,
     KeySource, LimiterControls, LimiterNode, Lookahead, MultibandCompressorNode, PeakDetection,
 };
-use tutti_types::{BusTopology, ChannelLayout};
 use tutti_units::{CompressionRatio, Db, SampleRate, Seconds};
 
 /// `node` alone in a graph through `BlockRig`: every input an alternating
@@ -107,7 +107,7 @@ fn compressor_fed_threshold_and_moving_cells_are_allocation_free() {
 
     let mut node = Direct::new(
         CompressorNode::<f32>::new(
-            tutti_types::BusTopology::assumed(tutti_types::ChannelLayout::from(6u16))
+            tutti_buffers::BusTopology::assumed(tutti_buffers::ChannelLayout::from(6u16))
                 .expect("at most one bus wide"),
             KeySource::Sidechain,
             CompressorControls {
@@ -559,9 +559,9 @@ pub(crate) fn sweep<N: tutti_graph::Node + tutti_graph::ParamNode>(
     amplitude: f32,
     key_from: Option<usize>,
 ) {
+    use tutti_buffers::MaxBlock;
     use tutti_graph::Prepare;
     use tutti_graph::contract::Direct;
-    use tutti_types::MaxBlock;
     use tutti_units::Samples;
 
     let fill = |d: &mut Direct<N>, amplitude: f32| {

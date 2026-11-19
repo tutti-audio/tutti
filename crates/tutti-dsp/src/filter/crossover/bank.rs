@@ -1,8 +1,8 @@
 //! [`CrossoverBank`]: one Linkwitz-Riley band tree per channel, all channels at one glide of
 //! [`CrossoverCoefficients`], over buffers views.
 
+use tutti_buffers::{ChannelLayout, MAX_CHANNELS};
 use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_types::{ChannelLayout, MAX_CHANNELS};
 
 use super::CrossoverCoefficients;
 use super::CrossoverState;

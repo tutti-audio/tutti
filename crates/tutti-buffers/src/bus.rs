@@ -32,7 +32,7 @@ enum Repr {
 /// equality compares the bus and nothing else.
 ///
 /// ```
-/// use tutti_types::{Bed, BusTopology, ChannelLayout, ChannelTopology, Speaker};
+/// use tutti_buffers::{Bed, BusTopology, ChannelLayout, ChannelTopology, Speaker};
 ///
 /// let stereo = BusTopology::new([Speaker::FrontLeft, Speaker::FrontRight]).unwrap();
 /// assert_eq!(stereo.layout(), ChannelLayout::STEREO);

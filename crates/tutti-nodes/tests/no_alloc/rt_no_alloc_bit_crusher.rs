@@ -1,9 +1,9 @@
 //! Regression gate: the bit crusher must not allocate per block, held and with its depth
 //! and hold moved between blocks.
 
+use tutti_buffers::ChannelLayout;
 use tutti_graph::contract::BlockRig;
 use tutti_nodes::{BitCrusherConfig, BitCrusherNode};
-use tutti_types::ChannelLayout;
 use tutti_units::{SampleRate, UnitParam};
 
 /// 16 warm-up blocks, then 2 000 blocks under `assert_no_alloc`, both controls moved before

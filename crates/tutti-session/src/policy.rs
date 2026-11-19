@@ -9,9 +9,9 @@
 use std::sync::{Arc, Mutex};
 
 use tutti_buffers::FoldLevels;
+use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_engine::{OutputLevels, OutputMap, Routing, RoutingError};
 use tutti_rt::LockExt;
-use tutti_types::{ChannelLayout, ChannelTopology};
 
 use crate::value::{Cell, SetRefusal, Target};
 use crate::{Clock, Session};
@@ -38,7 +38,7 @@ pub trait Policy: Clone + PartialEq + Send + Sync + 'static {
 /// ```
 /// use tutti_engine::{OutputMap, OutputStrip};
 /// use tutti_session::OutputPolicy;
-/// use tutti_types::{Bed, ChannelLayout};
+/// use tutti_buffers::{Bed, ChannelLayout};
 ///
 /// // Hear a 5.1 mix as stereo, on outputs 3 and 4 of the interface.
 /// let mut policy = OutputPolicy {

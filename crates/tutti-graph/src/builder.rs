@@ -47,7 +47,7 @@
 
 use crate::NodeKey;
 use crate::{Edge, FeedbackFrom, InPort, NodeSpec, OutPort, Source};
-use tutti_types::ChannelLayout;
+use tutti_buffers::ChannelLayout;
 use tutti_units::{Frame, Samples};
 
 use crate::editor::{CommitError, Editor};
@@ -95,10 +95,10 @@ struct Pending<F: Float> {
 /// A source feeding both channels of a stereo output:
 ///
 /// ```
-/// use tutti_types::MaxBlock;
+/// use tutti_buffers::MaxBlock;
 /// use tutti_graph::{ForkByClone, GraphBuilder, Prepare};
 /// use tutti_units::{SampleRate, Samples};
-/// use tutti_types::ChannelLayout;
+/// use tutti_buffers::ChannelLayout;
 /// # use tutti_graph::{Cx, Io, Node, Shape, Status};
 /// # #[derive(Clone)]
 /// # struct Dc(f32);
@@ -131,10 +131,10 @@ struct Pending<F: Float> {
 ///
 /// ```
 /// # use tutti_buffers::Planes;
-/// use tutti_types::MaxBlock;
+/// use tutti_buffers::MaxBlock;
 /// use tutti_graph::{ForkByClone, GraphBuilder, Prepare};
 /// use tutti_units::{SampleRate, Samples};
-/// use tutti_types::ChannelLayout;
+/// use tutti_buffers::ChannelLayout;
 /// # use tutti_graph::{Cx, Io, Node, Shape, Status};
 /// # #[derive(Clone)]
 /// # struct Gain(f32);
@@ -727,10 +727,10 @@ type TransportFn = Box<dyn FnMut(Frame) -> TransportPosition + Send>;
 ///
 /// ```
 /// # use tutti_buffers::Planes;
-/// use tutti_types::MaxBlock;
+/// use tutti_buffers::MaxBlock;
 /// use tutti_graph::{ForkByClone, GraphBuilder, Prepare, TransportPosition};
 /// use tutti_units::{Beat, Bpm, SampleRate, Samples};
-/// use tutti_types::ChannelLayout;
+/// use tutti_buffers::ChannelLayout;
 /// # use tutti_graph::{Cx, Io, Node, Shape, Status};
 /// # #[derive(Clone)]
 /// # struct Gain(f32);
@@ -973,11 +973,11 @@ impl<F: Float> Renderer<F> {
 ///
 /// ```
 /// # use tutti_buffers::Planes;
-/// use tutti_types::MaxBlock;
+/// use tutti_buffers::MaxBlock;
 /// use tutti_graph::{ForkByClone, Prepare, Solo};
 /// # use tutti_graph::{Cx, Io, Node, Shape, Status};
 /// # use tutti_units::{SampleRate, Samples};
-/// # use tutti_types::ChannelLayout;
+/// # use tutti_buffers::ChannelLayout;
 /// # #[derive(Clone)]
 /// # struct Half;
 /// # impl Node for Half {

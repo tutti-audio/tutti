@@ -30,11 +30,11 @@ use vst3::Steinberg::{
 };
 use vst3::{ComPtr, ComWrapper};
 
+use tutti_buffers::ChannelLayout;
 use tutti_plugin_types::{
     ContentScale, EditorCapabilities, MainThreadMarker, MainWorkHandle, WindowHandle,
     read_utf16_str, write_c_chars, write_utf16_str,
 };
-use tutti_types::ChannelLayout;
 use tutti_units::ParamId;
 
 use crate::audio::{Arrangement, AudioSide, Setup, Shared};

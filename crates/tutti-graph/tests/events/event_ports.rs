@@ -23,7 +23,7 @@
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use tutti_types::MaxBlock;
+use tutti_buffers::MaxBlock;
 
 use tutti_graph::NodeSpec;
 use tutti_graph::{

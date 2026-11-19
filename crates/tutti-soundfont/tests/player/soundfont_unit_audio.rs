@@ -357,7 +357,7 @@ fn a_same_rate_reprepare_mid_stream_does_not_disturb_rendering() {
         &mut *interrupted,
         &tutti_graph::Prepare::new(
             tutti_units::SampleRate::SR_44K1,
-            tutti_types::MaxBlock::of(tutti_units::Samples(128)),
+            tutti_buffers::MaxBlock::of(tutti_units::Samples(128)),
         ),
     );
     got.extend(render_process_blocks(

@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tutti_buffers::Interleaved;
 
+use tutti_buffers::ChannelLayout;
 use tutti_cpal::MicConfig;
 use tutti_engine::{ManualStream, ManualStreamDriver, OutputSpec, StreamLatency};
 use tutti_graph::{InletRing, TapWriter};
@@ -15,7 +16,6 @@ use tutti_session::{
     DeviceEvent, Error, InputConfig, InputOpener, LiveSession, OpenedInput, Phase, PhaseCx, Root,
     Session, SessionEvent,
 };
-use tutti_types::ChannelLayout;
 use tutti_units::{SampleRate, Samples};
 
 fn spec_at(rate: f64) -> OutputSpec {
@@ -234,7 +234,7 @@ fn a_failed_restart_is_a_device_event_with_the_typed_error_as_its_source() {
     let refused = session.restart_on(
         spec_at(96_000.0),
         driver,
-        Some(tutti_types::MaxBlock::of(Samples(16_384))),
+        Some(tutti_buffers::MaxBlock::of(Samples(16_384))),
         None,
     );
     assert!(refused.is_err());

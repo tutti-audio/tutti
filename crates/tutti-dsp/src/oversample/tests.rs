@@ -1,7 +1,7 @@
 use core::f64::consts::TAU;
 
+use tutti_buffers::MaxBlock;
 use tutti_buffers::{Float, Mono, MonoMut};
-use tutti_types::MaxBlock;
 use tutti_units::{Db, SampleRate, Samples};
 
 use super::*;

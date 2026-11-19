@@ -1,10 +1,10 @@
 //! [`EqKernel`]: the kernel of the bell and the tilt, a one-section closed-form design run
 //! as a state-variable section.
 
+use tutti_buffers::{BusTopology, MaxBlock};
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{Lanes, Ring, Sos, SosError, TAIL_FLOOR};
 use tutti_graph::Shape;
-use tutti_types::{BusTopology, MaxBlock};
 use tutti_units::{Db, SampleRate, Samples, Tail};
 
 use super::glided::{GLIDE_STEPS, GlidedSos, filter_shape};

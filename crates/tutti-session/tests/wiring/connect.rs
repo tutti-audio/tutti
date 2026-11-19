@@ -3,12 +3,12 @@
 //!
 //! Every figure is analytic: constants of exactly representable values.
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::ForkByClone;
 use tutti_graph::NodeKey;
 use tutti_nodes::testing::{Const, Through};
 use tutti_session::{ConnectError, OutPort, Root, Session};
-use tutti_types::ChannelLayout;
 
 fn offline() -> Session {
     Session::builder().build().expect("builds")

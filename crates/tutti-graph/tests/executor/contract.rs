@@ -19,8 +19,9 @@ use tutti_graph::testing as common;
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Arc, Mutex};
-use tutti_types::MaxBlock;
+use tutti_buffers::MaxBlock;
 
+use tutti_buffers::ChannelLayout;
 use tutti_fixtures::midi;
 use tutti_graph::contract::{
     Detect, Emitter, Excite, Lookahead, MAX_BLOCK, OFFSETS, ParamEcho, Path, Pulse, Row,
@@ -30,7 +31,6 @@ use tutti_graph::{
     Cx, EventKind, GraphBuilder, Io, Node, Prepare, Resolution, Shape, Status, Unforkable,
     contract_tests,
 };
-use tutti_types::ChannelLayout;
 use tutti_ump::{CCNumber, MidiChannel, Ump};
 use tutti_units::{Frame, Latency, Samples, Tail, UnitParam};
 

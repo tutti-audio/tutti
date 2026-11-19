@@ -1,9 +1,9 @@
 //! The dynamic EQ band does not allocate per block, held and with its centre and threshold
 //! moved between blocks (a bell design every grid period and the glide of both filters).
 
+use tutti_buffers::ChannelLayout;
 use tutti_graph::contract::BlockRig;
 use tutti_nodes::{DynamicEqConfig, DynamicEqNode, DynamicMode, KeySource};
-use tutti_types::ChannelLayout;
 use tutti_units::{CompressionRatio, Db, Hz, Q, SampleRate, UnitParam};
 
 /// 16 warm-up blocks, then 2 000 blocks under `assert_no_alloc`, the centre and the threshold

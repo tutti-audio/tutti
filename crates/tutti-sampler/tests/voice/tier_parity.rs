@@ -51,12 +51,12 @@ use tutti_buffers::Interleaved;
 use tutti_buffers::Planes;
 use tutti_fixtures::signal::rms_f64;
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::Wave;
 use tutti_graph::{Node, contract};
 use tutti_sampler::testing::{MockTransport, settle};
 use tutti_sampler::{ByHand, DiskStreamer, DiskStreamerConfig, Placement, StepOutcome, Stream};
 use tutti_sampler::{DiskVoice, MemorySource, VoiceWindow};
-use tutti_types::ChannelLayout;
 use tutti_units::{Beat, Bpm, PlaybackRate, SamplePosition, SampleRate};
 
 const SR: f64 = 48_000.0;

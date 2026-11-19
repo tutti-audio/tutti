@@ -4,7 +4,7 @@
 use std::cell::Cell;
 use tutti_buffers::Float;
 
-use tutti_types::MaxBlock;
+use tutti_buffers::MaxBlock;
 use tutti_units::{Samples, Tail};
 
 use super::state::{Inject, Unit};

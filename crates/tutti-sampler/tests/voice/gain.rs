@@ -33,10 +33,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use tutti_buffers::Interleaved;
 use tutti_buffers::Planes;
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::Wave;
 use tutti_graph::{Env, Node, TransportChanges, contract};
 use tutti_sampler::{MemorySource, MemorySourceConfig, Playback, SlotId, VoicePool};
-use tutti_types::ChannelLayout;
 use tutti_units::{Amplitude, Beat, Bpm, Frame, SamplePosition, SampleRate, Samples};
 
 const SR: f64 = 48_000.0;

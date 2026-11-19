@@ -2,7 +2,7 @@
 
 use std::io;
 use thiserror::Error;
-use tutti_types::{ChannelLayout, ChannelTopology};
+use tutti_buffers::{ChannelLayout, ChannelTopology};
 
 /// Anything that can go wrong creating, writing or finishing an encode.
 ///

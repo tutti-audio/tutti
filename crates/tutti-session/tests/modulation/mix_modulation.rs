@@ -10,6 +10,7 @@
 //! `depth * macro * span`, clamped to the range; every figure is exact in
 //! `f32`).
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::{Cx, ForkByClone, Io, Node, NodeKey, Prepare, Shape, Status};
 use tutti_modulation::Macro;
@@ -19,7 +20,6 @@ use tutti_session::{
     InPort, MixRef, ModRefusal, ModTarget, OutPort, ParamRef, PassError, Problem, Root, RouteSpec,
     Session, TargetName,
 };
-use tutti_types::ChannelLayout;
 use tutti_units::{Depth, Mix, UnitParam};
 
 const BLOCK: usize = 128;
