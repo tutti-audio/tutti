@@ -9,7 +9,7 @@ const FREQS: [f64; 8] = [30.0, 120.0, 400.0, 1000.0, 2500.0, 6000.0, 12000.0, 20
 
 fn gain_at(sos: &Sos, f: f64) -> Complex64 {
     let mut h = [Complex64::new(0.0, 0.0)];
-    sos.frequency_response(0, &[Hz(f)], &mut h);
+    sos.frequency_response(0, &[Hz::new(f)], &mut h);
     h[0]
 }
 
@@ -32,7 +32,7 @@ fn the_butterworth_magnitude_is_the_analog_one_at_the_prewarped_frequency() {
         for order in ORDERS {
             for fc in [100.0f64, 1000.0, 8000.0] {
                 let sos = Butterworth::new(response, ButterworthOrder::of(order))
-                    .design(Hz(fc), RATE)
+                    .design(Hz::new(fc), RATE)
                     .unwrap();
                 assert_eq!(sos.sections().len(), usize::from(order).div_ceil(2));
                 for f in FREQS {
@@ -68,7 +68,7 @@ fn the_section_poles_are_the_bilinear_image_of_the_prototype_poles() {
                 })
                 .collect();
             let sos = Butterworth::new(response, ButterworthOrder::of(order))
-                .design(Hz(700.0), RATE)
+                .design(Hz::new(700.0), RATE)
                 .unwrap();
             let mut got: Vec<Complex64> = sos.sections().iter().flat_map(Biquad::poles).collect();
             if order % 2 == 1 {
@@ -94,10 +94,10 @@ fn the_section_poles_are_the_bilinear_image_of_the_prototype_poles() {
 fn linkwitz_riley_is_butterworth_squared() {
     for order in [2u8, 4, 6, 8, 12, 16] {
         let lr = LinkwitzRiley::new(CutResponse::LowPass, ButterworthOrder::of(order / 2))
-            .design(Hz(1000.0), RATE)
+            .design(Hz::new(1000.0), RATE)
             .unwrap();
         let bw = Butterworth::new(CutResponse::LowPass, ButterworthOrder::of(order / 2))
-            .design(Hz(1000.0), RATE)
+            .design(Hz::new(1000.0), RATE)
             .unwrap();
         assert_eq!(lr.sections().len(), 2 * bw.sections().len());
         for f in FREQS {
@@ -118,7 +118,7 @@ fn the_linkwitz_riley_pair_sums_to_an_allpass() {
     for order in [2u8, 4, 6, 8, 10, 12, 16] {
         let at = |response| {
             LinkwitzRiley::new(response, ButterworthOrder::of(order / 2))
-                .design(Hz(300.0), RATE)
+                .design(Hz::new(300.0), RATE)
                 .unwrap()
         };
         let (lp, hp) = (at(CutResponse::LowPass), at(CutResponse::HighPass));
@@ -139,12 +139,12 @@ fn the_linkwitz_riley_pair_sums_to_an_allpass() {
 fn a_design_refuses_a_cutoff_the_rate_cannot_take() {
     for cutoff in [0.0, -5.0, 24000.0, 30000.0, f64::NAN] {
         let order = ButterworthOrder::of(4);
-        let b = Butterworth::new(CutResponse::LowPass, order).design(Hz(cutoff), RATE);
+        let b = Butterworth::new(CutResponse::LowPass, order).design(Hz::new(cutoff), RATE);
         assert!(
             matches!(b, Err(SosError::CutoffOutOfRange { .. })),
             "{cutoff}"
         );
-        let l = LinkwitzRiley::new(CutResponse::HighPass, order).design(Hz(cutoff), RATE);
+        let l = LinkwitzRiley::new(CutResponse::HighPass, order).design(Hz::new(cutoff), RATE);
         assert!(
             matches!(l, Err(SosError::CutoffOutOfRange { .. })),
             "{cutoff}"
@@ -154,7 +154,7 @@ fn a_design_refuses_a_cutoff_the_rate_cannot_take() {
     let fast = SampleRate::SR_96K;
     assert!(
         Butterworth::new(CutResponse::LowPass, ButterworthOrder::of(4))
-            .design(Hz(30000.0), fast)
+            .design(Hz::new(30000.0), fast)
             .is_ok()
     );
 }
@@ -178,7 +178,7 @@ fn the_slowest_design_has_a_finite_tail_at_the_fastest_rate() {
     for rate in [RATE, SampleRate::SR_192K] {
         for response in [CutResponse::LowPass, CutResponse::HighPass] {
             let sos = LinkwitzRiley::new(response, ButterworthOrder::of(8))
-                .design(Hz(10.0), rate)
+                .design(Hz::new(10.0), rate)
                 .unwrap();
             assert!(
                 matches!(sos.tail(TAIL_FLOOR), Ring::Finite(_)),
@@ -283,7 +283,7 @@ fn a_repeated_pole_rings_as_n_times_r_to_the_n() {
 fn the_tail_of_a_long_cascade_is_that_of_all_its_poles_together() {
     for response in [CutResponse::LowPass, CutResponse::HighPass] {
         let sos = LinkwitzRiley::new(response, ButterworthOrder::of(8))
-            .design(Hz(40.0), RATE)
+            .design(Hz::new(40.0), RATE)
             .unwrap();
         let ring = ring_of(&impulse(&sos, 1 << 21));
         let declared = frames_of(&sos);
@@ -314,7 +314,7 @@ fn the_tail_of_a_long_cascade_is_that_of_all_its_poles_together() {
 #[test]
 fn the_norms_bound_the_response_and_an_unstable_cascade_is_unbounded() {
     let sos = Butterworth::new(CutResponse::LowPass, ButterworthOrder::of(6))
-        .design(Hz(500.0), RATE)
+        .design(Hz::new(500.0), RATE)
         .unwrap();
     assert!(sos.is_stable() && sos.spectral_radius() < 1.0);
     let l1: f64 = impulse(&sos, 1 << 16).iter().map(|v| v.abs()).sum();
@@ -351,7 +351,7 @@ fn a_five_hz_high_pass_at_192_khz_holds_its_gain_and_noise_in_f32() {
     let whole = FS as usize;
     let w = 2.0 * PI * FC / FS;
     let sos = Butterworth::new(CutResponse::HighPass, ButterworthOrder::of(2))
-        .design(Hz(FC), SampleRate::of(FS))
+        .design(Hz::new(FC), SampleRate::of(FS))
         .unwrap();
     let mut glide = crate::Glide::landed(SosCoefficients::<f32>::new(&sos).unwrap());
     let input: Vec<f32> = (0..2 * whole)

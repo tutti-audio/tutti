@@ -131,7 +131,7 @@ impl Work {
     #[must_use]
     pub const fn at(self, frames: Samples) -> u64 {
         self.fixed
-            .saturating_add(self.per_frame.saturating_mul(frames.0 as u64))
+            .saturating_add(self.per_frame.saturating_mul(frames.get() as u64))
     }
 
     /// The sum of two estimates.
@@ -282,7 +282,7 @@ pub(crate) fn schedule(
     max_block: Samples,
     participants: usize,
 ) -> Schedule {
-    if participants < 2 || tasks < 2 || max_block.0 == 0 {
+    if participants < 2 || tasks < 2 || max_block.get() == 0 {
         return Schedule::Serial;
     }
     let w_max = work.at(max_block);
@@ -298,17 +298,17 @@ pub(crate) fn schedule(
     let dispatch = TASK_DISPATCH.saturating_mul(tasks as u64);
     // `p × (parallel estimate) < p × serial`, without a division.
     let pays = |frames: usize| {
-        let f = Samples(frames);
+        let f = Samples::new(frames);
         let (w, c) = (work.at(f), critical.at(f));
         let par = p
             .saturating_mul(BLOCK_DISPATCH)
             .saturating_add(p.saturating_mul(c).max(w.saturating_add(dispatch)));
         par < p.saturating_mul(w)
     };
-    if !pays(max_block.0) {
+    if !pays(max_block.get()) {
         return Schedule::Serial;
     }
-    let (mut lo, mut hi) = (1usize, max_block.0);
+    let (mut lo, mut hi) = (1usize, max_block.get());
     while lo < hi {
         let mid = lo + (hi - lo) / 2;
         if pays(mid) {
@@ -319,7 +319,7 @@ pub(crate) fn schedule(
     }
     Schedule::Parallel {
         wake,
-        from: Samples(lo),
+        from: Samples::new(lo),
     }
 }
 
@@ -335,11 +335,11 @@ mod tests {
     fn one_task_or_one_participant_is_serial() {
         let big = w(1_000_000, 1_000);
         assert_eq!(
-            schedule(big, w(1, 0), 1, 1, Samples(256), 8),
+            schedule(big, w(1, 0), 1, 1, Samples::new(256), 8),
             Schedule::Serial
         );
         assert_eq!(
-            schedule(big, w(1, 0), 64, 64, Samples(256), 1),
+            schedule(big, w(1, 0), 64, 64, Samples::new(256), 1),
             Schedule::Serial
         );
     }
@@ -351,20 +351,20 @@ mod tests {
         let lane = w(200, 79);
         let work = w(8 * lane.fixed, 8 * lane.per_frame);
         let critical = lane.plus(w(TASK_DISPATCH, 0));
-        match schedule(work, critical, 9, 8, Samples(256), 4) {
+        match schedule(work, critical, 9, 8, Samples::new(256), 4) {
             Schedule::Parallel { wake, from } => {
                 assert_eq!(wake, 4);
-                assert_eq!(from, Samples(13));
+                assert_eq!(from, Samples::new(13));
                 // `from` is the threshold: it pays there and not one below.
-                let at = |f| schedule(work, critical, 9, 8, Samples(f), 4);
-                assert!(matches!(at(from.0), Schedule::Parallel { .. }));
-                assert_eq!(at(from.0 - 1), Schedule::Serial);
+                let at = |f| schedule(work, critical, 9, 8, Samples::new(f), 4);
+                assert!(matches!(at(from.get()), Schedule::Parallel { .. }));
+                assert_eq!(at(from.get() - 1), Schedule::Serial);
             }
             s => panic!("{s:?}"),
         }
         // Sixteen gains' worth: about 10 µs of work in all.
         assert_eq!(
-            schedule(w(2_000, 32), w(1_000, 20), 4, 2, Samples(256), 4),
+            schedule(w(2_000, 32), w(1_000, 20), 4, 2, Samples::new(256), 4),
             Schedule::Serial
         );
     }
@@ -376,18 +376,18 @@ mod tests {
         let work = w(200_000, 0);
         let critical = w(100_000, 0);
         assert_eq!(
-            schedule(work, critical, 4, 2, Samples(64), 8),
+            schedule(work, critical, 4, 2, Samples::new(64), 8),
             Schedule::Parallel {
                 wake: 2,
-                from: Samples(1)
+                from: Samples::new(1)
             }
         );
         // Three tasks on one level: three.
         assert_eq!(
-            schedule(work, critical, 4, 3, Samples(64), 8),
+            schedule(work, critical, 4, 3, Samples::new(64), 8),
             Schedule::Parallel {
                 wake: 3,
-                from: Samples(1)
+                from: Samples::new(1)
             }
         );
     }
@@ -399,10 +399,10 @@ mod tests {
         ));
         let task = heavy.plus(w(TASK_DISPATCH, 0));
         assert_eq!(
-            schedule(heavy.plus(heavy), task, 2, 2, Samples(1), 2),
+            schedule(heavy.plus(heavy), task, 2, 2, Samples::new(1), 2),
             Schedule::Parallel {
                 wake: 2,
-                from: Samples(1)
+                from: Samples::new(1)
             }
         );
     }

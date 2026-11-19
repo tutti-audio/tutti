@@ -14,7 +14,7 @@
 use tutti_music::PitchClass;
 use tutti_units::Confidence;
 
-use crate::chroma::{CLASSES, mean_of_rows};
+use crate::meters::chroma::{CLASSES, mean_of_rows};
 use crate::{Error, Result};
 use tutti_dsp::Grid;
 

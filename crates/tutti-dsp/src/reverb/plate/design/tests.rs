@@ -57,7 +57,7 @@ fn the_decay_coefficient_gives_the_designed_rt60_by_the_closed_form() {
     for rate in [SampleRate::SR_44K1, SampleRate::SR_48K, SampleRate::SR_96K] {
         for secs in [0.5, 2.0, 6.0] {
             let c = PlateControls {
-                decay: Seconds(secs),
+                decay: Seconds::new(secs),
                 ..PlateControls::DEFAULT
             };
             let n = design(&c, rate);
@@ -139,7 +139,7 @@ fn decay_diffusion_follows_the_papers_rule() {
         let rt60 = 0.75 * t / -f64::log10(c);
         let n = design(
             &PlateControls {
-                decay: Seconds(rt60),
+                decay: Seconds::new(rt60),
                 ..PlateControls::DEFAULT
             },
             rate,
@@ -161,7 +161,7 @@ fn diffusion_scales_every_lattice_coefficient_and_zero_makes_them_delays() {
     let gains = |k: f64| {
         let mut n = Box::new(Network::new(SampleRate::SR_48K));
         let c = PlateControls {
-            diffusion: Mix(k),
+            diffusion: Mix::new(k),
             ..PlateControls::DEFAULT
         };
         c.design_into(SampleRate::SR_48K, &mut n);
@@ -199,18 +199,18 @@ fn non_finite_controls_are_the_default_and_wild_ones_are_clamped() {
     let with_default_damping = |c: PlateControls| {
         design(
             &PlateControls {
-                damping: Mix(0.0005),
+                damping: Mix::new(0.0005),
                 ..c
             },
             rate,
         )
     };
     let wild = PlateControls {
-        decay: Seconds(f64::NAN),
-        damping: Mix(f64::INFINITY),
-        bandwidth: Hz(f64::NAN),
-        pre_delay: Seconds(f64::NAN),
-        diffusion: Mix(f64::NAN),
+        decay: Seconds::new(f64::NAN),
+        damping: Mix::new(f64::INFINITY),
+        bandwidth: Hz::new(f64::NAN),
+        pre_delay: Seconds::new(f64::NAN),
+        diffusion: Mix::new(f64::NAN),
         ..PlateControls::DEFAULT
     };
     assert_eq!(
@@ -219,8 +219,8 @@ fn non_finite_controls_are_the_default_and_wild_ones_are_clamped() {
     );
     assert_eq!(wild.bandwidth_at(rate), PlateControls::DEFAULT.bandwidth);
     let huge = PlateControls {
-        decay: Seconds(1.0e9),
-        damping: Mix(5.0),
+        decay: Seconds::new(1.0e9),
+        damping: Mix::new(5.0),
         ..PlateControls::DEFAULT
     };
     let n = design(&huge, rate);

@@ -80,8 +80,9 @@ impl std::fmt::Debug for EditorLoader {
 
 impl PluginBridge {
     /// Build the full bridge — spawns the audio bridge thread that connects
-    /// to the plugin-server at `socket_path` and leaves the GUI instance to be
-    /// lazily loaded on first `open_editor`.
+    /// to the plugin-server at `socket_path` (and starts the control lane's
+    /// thread, so a block never waits behind a control request) and leaves the
+    /// GUI instance to be lazily loaded on first `open_editor`.
     ///
     /// Returns an `Arc<Self>` (for cheap cloning into the audio graph), a
     /// `BridgeThread` (whose `Drop` shuts down the bridge thread) and the
@@ -89,7 +90,7 @@ impl PluginBridge {
     /// one consumer.
     ///
     /// `sample_rate` seeds the bridge thread's per-block reply timeout (see
-    /// `dispatch::process_timeout`); `set_sample_rate_rt` keeps it current after
+    /// `dispatch::process_timeout`); `set_sample_rate` keeps it current after
     /// device rate changes. The audio thread itself sizes nothing from the rate
     /// any more — it does not wait.
     ///

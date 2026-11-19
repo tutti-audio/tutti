@@ -20,7 +20,7 @@ use crate::stft::window::KaiserWindow;
 const MAX_LEN: usize = 1 << 20;
 
 /// The attenuation a design has until [`FirDesign::attenuation`] sets it.
-const DEFAULT_ATTENUATION: Db = Db(60.0);
+const DEFAULT_ATTENUATION: Db = Db::new(60.0);
 
 /// What a [`FirDesign`] passes. Cutoffs are the midpoints of their transition
 /// bands, in [`Hz`].
@@ -59,7 +59,7 @@ pub enum FirResponse {
 /// The most stopband attenuation a design takes: `f64` taps resolve about
 /// 313 dB below the passband (their epsilon), so a deeper stopband is not
 /// representable.
-pub const MAX_ATTENUATION: Db = Db(300.0);
+pub const MAX_ATTENUATION: Db = Db::new(300.0);
 
 /// A windowed-sinc FIR filter, described without a sample rate.
 ///
@@ -176,7 +176,7 @@ impl FirDesign {
         if transition > widest {
             return Err(FirError::TransitionTooWide {
                 transition: self.transition,
-                widest: Hz(widest),
+                widest: Hz::new(widest),
             });
         }
 

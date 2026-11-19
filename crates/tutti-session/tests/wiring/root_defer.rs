@@ -23,7 +23,7 @@ const FADE: usize = 240;
 fn session() -> Session {
     let mut s = Session::builder()
         .sample_rate(SampleRate::SR_48K)
-        .max_block(MaxBlock::of(Samples(BLOCK)))
+        .max_block(MaxBlock::of(Samples::new(BLOCK)))
         .build()
         .expect("builds");
     let (node, _) = s.graph().add(ForkByClone(Const::frame(&[0.25, 0.75])));
@@ -106,7 +106,11 @@ fn mono_fade_right(k: usize) -> f32 {
 /// Declares mono, takes the reopened tap, and renders one block: the fade is
 /// running, 64 frames of it done.
 fn start_fade(s: &mut Session) -> tutti_graph::TapReader {
-    let mut tap = s.graph().taps().open_output(Samples(8192)).expect("opens");
+    let mut tap = s
+        .graph()
+        .taps()
+        .open_output(Samples::new(8192))
+        .expect("opens");
     assert_eq!(tap.width(), 2);
     s.declare_root_topology(Some(mono())).expect("mono");
     let (events, frames) = block(s);
@@ -349,7 +353,7 @@ fn swapped() -> ChannelTopology {
 fn a_bus_fed_root_redeclared_mid_fade_keeps_its_fold_until_the_fade_ends() {
     let mut s = Session::builder()
         .sample_rate(SampleRate::SR_48K)
-        .max_block(MaxBlock::of(Samples(BLOCK)))
+        .max_block(MaxBlock::of(Samples::new(BLOCK)))
         .root_topology(root(2))
         .build()
         .expect("builds");

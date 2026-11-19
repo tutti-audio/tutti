@@ -15,7 +15,7 @@ use coremidi_sys::{
 };
 use std::mem::MaybeUninit;
 use std::sync::Mutex;
-use tutti_ump::Protocol;
+use tutti_ump::{Protocol, Ump};
 
 /// CoreMIDI's id (`MIDIProtocolID`) for the protocol a virtual endpoint
 /// carries: `kMIDIProtocol_1_0` for MIDI 1.0 channel voice messages in UMP
@@ -111,23 +111,20 @@ impl UmpSource {
         Ok(Self { source, protocol })
     }
 
-    /// Publishes one UMP message to the endpoint's subscribers.
+    /// Publishes one UMP message to the endpoint's subscribers, delivered now.
     ///
-    /// `words` is a complete UMP message; its length must match the message type
-    /// (a JR Timestamp is 1 word, a note is 1 to 2, SysEx8 is 4). Empty input is
-    /// a no-op. CoreMIDI copies the words, so no lifetime escapes this call.
+    /// The message's words are its type's length (`Ump::words`: a JR Timestamp
+    /// is 1 word, a note 1 to 2, SysEx8 4). CoreMIDI copies them, so no lifetime
+    /// escapes this call.
     ///
     /// # Errors
     ///
-    /// [`Error::TooLong`] when the message will not fit the event list, and
     /// [`Error::Call`] when `MIDIReceivedEventList` returns a non-zero status.
-    pub fn send(&self, words: &[u32]) -> Result<(), Error> {
-        if words.is_empty() {
-            return Ok(());
-        }
+    pub fn send(&self, ump: &Ump) -> Result<(), Error> {
+        let words = ump.words();
 
         // A `MIDIEventList` holds one packet of up to 64 words inline, so a single
-        // message of up to 4 words always fits.
+        // message of up to 4 words always fits and `Add` cannot return NULL.
         let mut list = MaybeUninit::<MIDIEventList>::uninit();
         let list_ptr = list.as_mut_ptr();
         let list_size = std::mem::size_of::<MIDIEventList>();
@@ -137,8 +134,8 @@ impl UmpSource {
         // after both calls have run. `list_size` is that allocation's real size,
         // so `Add` cannot write past it, and `words` outlives the call.
         let status = unsafe {
-            let mut packet = MIDIEventListInit(list_ptr, self.protocol);
-            packet = MIDIEventListAdd(
+            let packet = MIDIEventListInit(list_ptr, self.protocol);
+            MIDIEventListAdd(
                 list_ptr,
                 list_size as ByteCount,
                 packet,
@@ -146,10 +143,6 @@ impl UmpSource {
                 words.len() as ByteCount,
                 words.as_ptr(),
             );
-            if packet.is_null() {
-                // The message didn't fit: nothing was queued.
-                return Err(Error::TooLong);
-            }
             MIDIReceivedEventList(self.source, list.assume_init_ref() as *const MIDIEventList)
         };
 
@@ -198,13 +191,13 @@ mod tests {
         ));
     }
 
-    /// A message longer than the event list holds is refused with the packet
-    /// error, not written past it; an empty one is a no-op.
+    /// A message of every length reaches the endpoint: a 1-word JR Timestamp, a
+    /// 2-word MIDI 2.0 note and a 4-word SysEx8 each fit the event list.
     #[test]
-    fn a_message_that_does_not_fit_is_refused() {
+    fn a_message_of_each_length_is_sent() {
         let source = UmpSource::new("tutti-ffi-test", Protocol::Midi2).expect("CoreMIDI");
-        assert_eq!(source.send(&[]), Ok(()));
-        assert_eq!(source.send(&[0; 100_000]), Err(Error::TooLong));
-        assert_eq!(source.send(&[0x2090_3C64]), Ok(()));
+        assert_eq!(source.send(&Ump([0x0020_1234, 0, 0, 0])), Ok(()));
+        assert_eq!(source.send(&Ump([0x4090_3C00, 0x8000_0000, 0, 0])), Ok(()));
+        assert_eq!(source.send(&Ump([0x5001_0000, 1, 2, 3])), Ok(()));
     }
 }

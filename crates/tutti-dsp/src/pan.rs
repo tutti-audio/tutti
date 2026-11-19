@@ -40,7 +40,7 @@ pub enum PanLaw {
 #[must_use]
 pub fn pan_gains(pan: Pan, law: PanLaw) -> (Amplitude, Amplitude) {
     let (left, right) = pan_gains_in::<f64>(pan.get(), law);
-    (Amplitude(left), Amplitude(right))
+    (Amplitude::new(left), Amplitude::new(right))
 }
 
 /// The `(left, right)` gains of the position `p` under `law`, as data of the float `F`: the

@@ -20,7 +20,7 @@ pub fn sweep_hz(min: Hz, max: Hz, lfo: Bipolar, depth: Depth) -> Hz {
 }
 
 /// The lowest frequency an all-pass stage is tuned to (see [`allpass_complement`]).
-const SWEEP_FLOOR: Hz = Hz(1.0);
+const SWEEP_FLOOR: Hz = Hz::new(1.0);
 
 /// The share of Nyquist an all-pass stage is tuned up to (see [`allpass_complement`]).
 const SWEEP_CEILING: f64 = 0.98;

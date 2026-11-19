@@ -85,13 +85,13 @@ mod tests {
 
     #[test]
     fn seconds_round_to_the_nearest_frame() {
-        let f = Fade::seconds(Seconds(0.005), SampleRate::SR_48K, FadeLaw::EqualPower);
-        assert_eq!(f.duration, Samples(240));
+        let f = Fade::seconds(Seconds::new(0.005), SampleRate::SR_48K, FadeLaw::EqualPower);
+        assert_eq!(f.duration, Samples::new(240));
         let f = Fade::seconds(
-            Seconds(1.5 / 1000.0),
+            Seconds::new(1.5 / 1000.0),
             SampleRate::of(1000.0),
             FadeLaw::EqualPower,
         );
-        assert_eq!(f.duration, Samples(2));
+        assert_eq!(f.duration, Samples::new(2));
     }
 }

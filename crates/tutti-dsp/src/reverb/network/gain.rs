@@ -28,7 +28,7 @@ pub(crate) fn loop_gain(delay: SampleSpan, rt60: Seconds, rate: SampleRate) -> A
     if trips == SampleSpan::ZERO {
         return Amplitude::SILENT;
     }
-    Db(-60.0 * delay.get() / trips.get()).to_amplitude()
+    Db::new(-60.0 * delay.get() / trips.get()).to_amplitude()
 }
 
 /// The RT60 of a loop of `delay` frames at gain `gain`, `-60 d / (fs · 20 log10 g)`: the
@@ -46,7 +46,7 @@ pub fn rt60_from_gain(gain: Amplitude, delay: SampleSpan, rate: SampleRate) -> S
 /// infinite, which a [`SampleSpan`] cannot hold.
 pub(crate) fn decay_seconds(delay_sum: f64, db_sum: Db, rate: SampleRate) -> Seconds {
     let db_sum = db_sum.get();
-    Seconds(if db_sum.is_nan() || db_sum >= 0.0 {
+    Seconds::new(if db_sum.is_nan() || db_sum >= 0.0 {
         f64::INFINITY
     } else if db_sum == f64::NEG_INFINITY {
         0.0

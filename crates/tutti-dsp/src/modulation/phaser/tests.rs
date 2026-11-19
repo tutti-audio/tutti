@@ -118,7 +118,7 @@ fn a_held_chain_is_flat_with_the_nth_power_of_a_stage_at_no_feedback() {
         let c = textbook_c(1_000.0, sr);
         let h = held_response(
             stages,
-            allpass_complement(Hz(1_000.0), RATE),
+            allpass_complement(Hz::new(1_000.0), RATE),
             Feedback::NONE,
             8_192,
         );
@@ -144,7 +144,7 @@ fn a_held_chain_is_flat_with_the_nth_power_of_a_stage_at_no_feedback() {
 #[test]
 fn two_stages_invert_at_their_centre() {
     let sr = RATE.get();
-    let c = allpass_complement(Hz(1_000.0), RATE);
+    let c = allpass_complement(Hz::new(1_000.0), RATE);
     let h = held_response(2, c, Feedback::NONE, 8_192);
     let g = dft(&h, 1_000.0, sr);
     assert!((g + 1.0).norm() < 1e-3, "H(f0) = {g}");
@@ -206,7 +206,7 @@ fn a_half_mix_of_the_chain_has_ceil_n_over_two_notches_where_the_phase_is_odd_pi
         }
         let h = held_response(
             stages,
-            allpass_complement(Hz(700.0), RATE),
+            allpass_complement(Hz::new(700.0), RATE),
             Feedback::NONE,
             8_192,
         );
@@ -232,9 +232,9 @@ fn the_feedback_closes_the_loop_at_dc_and_nyquist_and_peaks_at_dc() {
     let sr = RATE.get();
     for stages in [2usize, 3, 6, 7] {
         for q in [0.0, 0.5, 0.9, Feedback::MAX_STABLE.get()] {
-            let g = Feedback(q);
+            let g = Feedback::new(q);
             let len = if q > 0.95 { 262_144 } else { 16_384 };
-            let h = held_response(stages, allpass_complement(Hz(900.0), RATE), g, len);
+            let h = held_response(stages, allpass_complement(Hz::new(900.0), RATE), g, len);
             let nyquist = if stages % 2 == 0 {
                 1.0 / (1.0 + q)
             } else {
@@ -298,9 +298,14 @@ fn the_loop_decays_at_the_greatest_stable_feedback_with_the_time_constant_its_de
 #[test]
 fn the_feedback_response_is_the_closed_loop_of_the_stages() {
     let sr = RATE.get();
-    let (stages, g) = (4usize, Feedback(0.8));
+    let (stages, g) = (4usize, Feedback::new(0.8));
     let c = textbook_c(2_000.0, sr);
-    let h = held_response(stages, allpass_complement(Hz(2_000.0), RATE), g, 16_384);
+    let h = held_response(
+        stages,
+        allpass_complement(Hz::new(2_000.0), RATE),
+        g,
+        16_384,
+    );
     for hz in [0.0f64, 100.0, 1_500.0, 2_000.0, 5_000.0, 17_000.0, 24_000.0] {
         let got = dft(&h, hz, sr);
         let want = textbook(stages, c, g.get(), hz, sr);
@@ -315,8 +320,8 @@ fn the_feedback_response_is_the_closed_loop_of_the_stages() {
 #[test]
 fn feedback_rings_as_a_train_of_the_loop_length() {
     for (stages, g) in [
-        (2usize, Feedback(0.6)),
-        (5, Feedback(0.9)),
+        (2usize, Feedback::new(0.6)),
+        (5, Feedback::new(0.9)),
         (12, Feedback::MAX_STABLE),
     ] {
         let y = held_response(stages, complement(0.0), g, 80);
@@ -416,8 +421,8 @@ fn a_silent_channel_stays_silent_and_each_channel_keeps_its_own_state() {
         x.clone(),
         noise(6),
     ];
-    let a = allpass_complement(Hz(1_000.0), RATE);
-    let b = allpass_complement(Hz(2_500.0), RATE);
+    let a = allpass_complement(Hz::new(1_000.0), RATE);
+    let b = allpass_complement(Hz::new(2_500.0), RATE);
     let mut coefficients = [a, b, a, a, a, a].map(Glide::landed);
     let out = run(6, &mut coefficients, &mut Glide::landed(0.99), &audio, 64);
     assert!(out[3].iter().all(|&s| s == 0.0), "no bleed into a silence");
@@ -430,7 +435,7 @@ fn a_silent_channel_stays_silent_and_each_channel_keeps_its_own_state() {
 /// Reset is silence: after a loud stretch and a reset, silence in is exactly silence out.
 #[test]
 fn reset_empties_the_chain() {
-    let c = allpass_complement(Hz(1_000.0), RATE);
+    let c = allpass_complement(Hz::new(1_000.0), RATE);
     let mut chain = PhaserChain::new(Stages::of(6), ChannelLayout::clamped(2));
     let mut coefficients = [Glide::landed(c); 2];
     let mut fb = Glide::landed(0.9);
@@ -451,7 +456,7 @@ fn reset_empties_the_chain() {
 /// A clone is the chain with its history: it carries on where the original is.
 #[test]
 fn a_clone_continues_where_the_original_is() {
-    let c = allpass_complement(Hz(1_000.0), RATE);
+    let c = allpass_complement(Hz::new(1_000.0), RATE);
     let mut chain = PhaserChain::new(Stages::of(4), ChannelLayout::clamped(1));
     let mut coefficients = [Glide::landed(c)];
     let mut fb = Glide::landed(0.5);
@@ -493,20 +498,23 @@ fn stages_keep_the_range_checked_shape() {
 /// 0.90-of-Nyquist cap is not here: it depends on the rate, and is the member's.
 #[test]
 fn a_sweep_range_refuses_what_a_sweep_cannot_hold() {
-    let ok = |lo: f64, hi: f64| SweepRange::new(Hz(lo), Hz(hi));
+    let ok = |lo: f64, hi: f64| SweepRange::new(Hz::new(lo), Hz::new(hi));
     assert!(ok(20.0, 20.0).is_ok(), "the floor, a range of one value");
     assert!(ok(200.0, 4_000.0).is_ok());
     assert!(ok(20.0, 1e9).is_ok(), "the top is the rate's to cap");
     assert_eq!(
         ok(19.999, 4_000.0),
-        Err(SweepRangeError::BelowFloor(Hz(19.999)))
+        Err(SweepRangeError::BelowFloor(Hz::new(19.999)))
     );
-    assert_eq!(ok(-5.0, 100.0), Err(SweepRangeError::BelowFloor(Hz(-5.0))));
+    assert_eq!(
+        ok(-5.0, 100.0),
+        Err(SweepRangeError::BelowFloor(Hz::new(-5.0)))
+    );
     assert_eq!(
         ok(300.0, 299.0),
         Err(SweepRangeError::Order {
-            min: Hz(300.0),
-            max: Hz(299.0)
+            min: Hz::new(300.0),
+            max: Hz::new(299.0)
         })
     );
     for (lo, hi) in [
@@ -522,7 +530,7 @@ fn a_sweep_range_refuses_what_a_sweep_cannot_hold() {
         );
     }
     let r = SweepRange::DEFAULT;
-    assert_eq!((r.min(), r.max()), (Hz(200.0), Hz(4_000.0)));
+    assert_eq!((r.min(), r.max()), (Hz::new(200.0), Hz::new(4_000.0)));
     assert_eq!(SweepRange::default(), SweepRange::DEFAULT);
 }
 
@@ -530,7 +538,7 @@ fn a_sweep_range_refuses_what_a_sweep_cannot_hold() {
 #[test]
 #[should_panic(expected = "a sweep range is finite")]
 fn a_sweep_range_of_a_transposed_pair_panics_where_it_is_a_constant() {
-    let _ = SweepRange::of(Hz(4_000.0), Hz(200.0));
+    let _ = SweepRange::of(Hz::new(4_000.0), Hz::new(200.0));
 }
 
 /// An `f64` chain keeps its state and its coefficient in `f64`: with the complement `a` held
@@ -541,7 +549,7 @@ fn a_sweep_range_of_a_transposed_pair_panics_where_it_is_a_constant() {
 fn an_f64_chain_is_the_all_pass_difference_equation_in_f64() {
     use tutti_fixtures::signal::{assert_close_f64, wide_signal};
     let (stages, len, g) = (3usize, 300usize, 0.5f64);
-    let a: f64 = allpass_complement(Hz(1_000.0), RATE);
+    let a: f64 = allpass_complement(Hz::new(1_000.0), RATE);
     let c = a - 1.0;
     assert_ne!(
         a,
@@ -600,7 +608,7 @@ fn an_f32_chain_at_its_lowest_sweeps_at_192_khz_inverts_a_sine_at_the_centre() {
     let (settle, n) = (32_000, 19_200);
     let (mut worst_new, mut worst_old, mut worst_bound) = (0.0f64, 0.0f64, 0.0f64);
     for k in 0..12 {
-        let f0 = Hz(SweepRange::FLOOR.get() * (1.0 + f64::from(k) / 11.0));
+        let f0 = Hz::new(SweepRange::FLOOR.get() * (1.0 + f64::from(k) / 11.0));
         let x: Vec<f32> = (0..settle + n)
             .map(|i| {
                 f32::from_design(libm::sin(

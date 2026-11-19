@@ -88,7 +88,7 @@ impl Default for InputConfig {
 /// use tutti_units::Samples;
 ///
 /// assert_eq!(Trim::default(), Trim::NONE);
-/// assert_eq!(Trim::Earlier(Samples(64)).frames(), -64);
+/// assert_eq!(Trim::Earlier(Samples::new(64)).frames(), -64);
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Trim {

@@ -31,8 +31,8 @@ fn each_lfo_constructor_is_its_shape_at_one_hertz() {
         assert_eq!(
             clock,
             Clock::Seconds {
-                rate: Hz(1.0),
-                phase: PhaseIncrement(0.0),
+                rate: Hz::new(1.0),
+                phase: PhaseIncrement::new(0.0),
                 anchor: None,
             },
             "{want:?}"
@@ -46,9 +46,9 @@ fn each_lfo_constructor_is_its_shape_at_one_hertz() {
 #[test]
 fn an_lfos_clock_and_seed_are_pinned_field_by_field() {
     let beats = Lfo::saw()
-        .rate(Hz(4.0))
+        .rate(Hz::new(4.0))
         .rate(BeatsPerCycle::of(0.5))
-        .phase(PhaseIncrement(0.25))
+        .phase(PhaseIncrement::new(0.25))
         .seed(7);
     let (shape, seed, clock) = lfo_parts(beats.into());
     assert_eq!(shape, LfoShape::Sawtooth);
@@ -57,20 +57,20 @@ fn an_lfos_clock_and_seed_are_pinned_field_by_field() {
         clock,
         Clock::Beats {
             per_cycle: BeatsPerCycle::of(0.5),
-            phase: PhaseIncrement(0.25),
+            phase: PhaseIncrement::new(0.25),
         }
     );
 
     let seconds = Lfo::sine()
         .rate(BeatsPerCycle::of(2.0))
-        .rate(Hz(3.0))
-        .phase(PhaseIncrement(0.5));
+        .rate(Hz::new(3.0))
+        .phase(PhaseIncrement::new(0.5));
     let (_, _, clock) = lfo_parts(seconds.into());
     assert_eq!(
         clock,
         Clock::Seconds {
-            rate: Hz(3.0),
-            phase: PhaseIncrement(0.5),
+            rate: Hz::new(3.0),
+            phase: PhaseIncrement::new(0.5),
             anchor: None::<RateAnchor>,
         }
     );
@@ -89,16 +89,20 @@ fn a_followers_times_are_pinned_field_by_field() {
     assert_eq!(
         Source::from(Follower::default()),
         Source::Follower {
-            attack: Seconds(0.005),
-            release: Seconds(0.1),
+            attack: Seconds::new(0.005),
+            release: Seconds::new(0.1),
         }
     );
     assert_eq!(Follower::default(), Follower::new());
     assert_eq!(
-        Source::from(Follower::new().attack(Seconds(0.02)).release(Seconds(0.3))),
+        Source::from(
+            Follower::new()
+                .attack(Seconds::new(0.02))
+                .release(Seconds::new(0.3))
+        ),
         Source::Follower {
-            attack: Seconds(0.02),
-            release: Seconds(0.3),
+            attack: Seconds::new(0.02),
+            release: Seconds::new(0.3),
         }
     );
 }
@@ -107,10 +111,10 @@ fn a_followers_times_are_pinned_field_by_field() {
 #[test]
 fn a_note_envelope_carries_its_stages() {
     let adsr = Adsr {
-        attack: Seconds(0.01),
-        decay: Seconds(0.2),
-        sustain: Amplitude(0.6),
-        release: Seconds(0.5),
+        attack: Seconds::new(0.01),
+        decay: Seconds::new(0.2),
+        sustain: Amplitude::new(0.6),
+        release: Seconds::new(0.5),
     };
     assert_eq!(
         Source::from(NoteEnvelope::new(adsr)),

@@ -199,7 +199,7 @@ impl TransportSettings {
     /// (its [`Timeline`](super::Timeline)). An app reads the session's
     /// playhead, which carries the beat with the play state and the frame.
     pub(crate) fn beat(&self) -> Beat {
-        Beat(self.beat.load(Ordering::Acquire))
+        Beat::new(self.beat.load(Ordering::Acquire))
     }
 
     /// The playhead's segment generation as last published by the clock.
@@ -291,7 +291,7 @@ mod tests {
             assert_eq!(map.constant_tempo(), Some(Bpm::of(bpm)), "{bpm} to the bit");
             let frames = 4.0 * 60.0 * 48_000.0 / bpm;
             assert_eq!(
-                map.view(rate).frame_at_or_after(Beat(4.0)).get(),
+                map.view(rate).frame_at_or_after(Beat::new(4.0)).get(),
                 tutti_music::first_frame_at_or_after(frames) as u64,
                 "beat 4 at {bpm}"
             );
@@ -311,12 +311,12 @@ mod tests {
         let two = |shape| {
             TempoMap::new([
                 TempoPoint {
-                    beat: Beat(0.0),
+                    beat: Beat::new(0.0),
                     tempo: Bpm::of(100.0),
                     transition: shape,
                 },
                 TempoPoint {
-                    beat: Beat(4.0),
+                    beat: Beat::new(4.0),
                     tempo: Bpm::of(200.0),
                     transition: Transition::Step,
                 },

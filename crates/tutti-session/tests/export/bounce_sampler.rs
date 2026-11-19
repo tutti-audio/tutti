@@ -40,7 +40,7 @@ fn constant(frames: usize, level: f32) -> Arc<Wave> {
 fn length_of(session: &mut DetachedSession, seconds: f64) -> usize {
     let bounce = Bounce::project()
         .master_buffers()
-        .range(Range::Seconds(Seconds(0.0), Seconds(seconds)))
+        .range(Range::Seconds(Seconds::new(0.0), Seconds::new(seconds)))
         .sample_rate(SampleRate::of(RATE));
     session
         .bounce(bounce)
@@ -84,16 +84,16 @@ fn a_free_running_voice_rings_out_its_wave() {
     assert_eq!(at(1.0, None), second + frames);
     assert_eq!(at(2.0, None), second + frames / 2);
 
-    let looped = Loop::new(Samples(0)..Samples(frames)).expect("a loop");
+    let looped = Loop::new(Samples::new(0)..Samples::new(frames)).expect("a loop");
     let mut session = session();
     let mut source = MemorySource::new(constant(frames, 0.25)).expect("a placeable wave");
     source.set_loop(Some(looped));
     let (voice, _) = session.graph().add(source);
     session.graph().connect(voice, Root).unwrap().hard();
-    let cap = Seconds(0.5);
+    let cap = Seconds::new(0.5);
     let bounce = Bounce::project()
         .master_buffers()
-        .range(Range::Seconds(Seconds(0.0), Seconds(1.0)))
+        .range(Range::Seconds(Seconds::new(0.0), Seconds::new(1.0)))
         .sample_rate(SampleRate::of(RATE))
         .tail(BounceTail::Graph { cap });
     let len = session
@@ -113,7 +113,7 @@ fn a_pool_built_with_its_voices_bounces_them() {
     let mut pool = VoicePool::new();
     let source = MemorySource::placed(
         constant(RATE as usize, 0.25),
-        tutti_sampler::VoiceWindow::from(Beat(0.0)),
+        tutti_sampler::VoiceWindow::from(Beat::new(0.0)),
     )
     .expect("a placeable wave");
     pool.insert(SlotId(1), source, Playback::default());
@@ -122,7 +122,7 @@ fn a_pool_built_with_its_voices_bounces_them() {
 
     let bounce = Bounce::project()
         .master_buffers()
-        .range(Range::Seconds(Seconds(0.0), Seconds(0.5)))
+        .range(Range::Seconds(Seconds::new(0.0), Seconds::new(0.5)))
         .sample_rate(SampleRate::of(RATE))
         .tail(BounceTail::None);
     let planes = session
@@ -147,7 +147,7 @@ fn a_pool_driven_through_its_handle_refuses_the_bounce_by_key() {
     session.graph().connect(pool, Root).unwrap().hard();
     let source = MemorySource::placed(
         constant(RATE as usize, 0.25),
-        tutti_sampler::VoiceWindow::from(Beat(0.0)),
+        tutti_sampler::VoiceWindow::from(Beat::new(0.0)),
     )
     .expect("a placeable wave");
     handle
@@ -156,7 +156,7 @@ fn a_pool_driven_through_its_handle_refuses_the_bounce_by_key() {
 
     let bounce = Bounce::project()
         .master_buffers()
-        .range(Range::Seconds(Seconds(0.0), Seconds(0.5)))
+        .range(Range::Seconds(Seconds::new(0.0), Seconds::new(0.5)))
         .sample_rate(SampleRate::of(RATE))
         .tail(BounceTail::None);
     match session.bounce(bounce) {

@@ -204,8 +204,8 @@ impl<F: Float + Lerp> FreeverbBank<F> {
     #[must_use]
     pub fn tail(&self) -> Tail {
         let room_one = FreeverbControls {
-            room: Mix(1.0),
-            damp: Mix(0.0),
+            room: Mix::new(1.0),
+            damp: Mix::new(0.0),
         };
         self.tail_of(&room_one)
     }
@@ -232,7 +232,7 @@ impl<F: Float + Lerp> FreeverbBank<F> {
             .iter()
             .map(|a| a.buffer.len())
             .map(|d| ring_seconds(d, trips(ALLPASS_FEEDBACK.get(), TAIL_FLOOR), self.rate));
-        let total = chain.fold(comb, |sum, s| Seconds(sum.get() + s.get()));
+        let total = chain.fold(comb, |sum, s| Seconds::new(sum.get() + s.get()));
         Tail::Finite(total.to_samples_ceil(self.rate))
     }
 

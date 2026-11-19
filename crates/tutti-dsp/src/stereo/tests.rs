@@ -110,7 +110,7 @@ fn a_mono_view_is_left_alone() {
 fn widen(width: f64, settle: bool, l: &[f64], r: &[f64]) -> (Vec<f64>, Vec<f64>) {
     let mut bank = WidthBank::<f64>::new(SampleRate::SR_48K);
     bank.aim(&WidthControls {
-        width: StereoWidth(width),
+        width: StereoWidth::new(width),
     });
     if settle {
         bank.settle();

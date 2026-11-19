@@ -51,8 +51,8 @@ mod tests {
     #[test]
     fn the_stand_in_keeps_ports_and_latency_drops_the_tail_and_renders_silence() {
         let shape = Shape::through_unassigned(ChannelLayout::MONO)
-            .with_latency(Latency::new(Samples(64)))
-            .with_tail(Tail::Finite(Samples(100)));
+            .with_latency(Latency::new(Samples::new(64)))
+            .with_tail(Tail::Finite(Samples::new(100)));
         let stand_in = Lost::of(shape).shape();
         assert_eq!(stand_in.latency, shape.latency, "the last latency");
         assert_eq!(stand_in.tail, Tail::None, "no tail");
@@ -63,7 +63,10 @@ mod tests {
         let lost = g.add(ForkByClone(Lost::of(shape)));
         g.pipe_input(lost).pipe_output(lost);
         let mut r = g
-            .renderer(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))))
+            .renderer(Prepare::new(
+                SampleRate::SR_48K,
+                MaxBlock::of(Samples::new(64)),
+            ))
             .expect("builds");
         assert_eq!(
             r.render_input(Planes::new(&[&[1.0; 8]]).unwrap())[0],

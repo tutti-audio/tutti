@@ -84,7 +84,13 @@ impl OutputStage {
             let (from, to) = (F::from_unit(ramp.from), F::from_unit(ramp.to));
             let mut last = None;
             for s in block.iter_mut().skip(c).step_by(out_ch) {
-                let gain = ramp_in(None, from, to, Samples(ramp.done), Samples(ramp.frames));
+                let gain = ramp_in(
+                    None,
+                    from,
+                    to,
+                    Samples::new(ramp.done),
+                    Samples::new(ramp.frames),
+                );
                 if ramp.done < ramp.frames {
                     ramp.done += 1;
                 }
@@ -105,7 +111,7 @@ mod tests {
 
     fn targets(first: f64) -> StageTargets {
         let mut t = StageTargets::UNITY;
-        t.0[0] = Amplitude(first);
+        t.0[0] = Amplitude::new(first);
         t
     }
 

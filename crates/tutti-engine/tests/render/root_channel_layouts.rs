@@ -24,8 +24,11 @@ use tutti_units::{Hz, SampleRate, Samples};
 /// A graph whose root has `outputs` channels, with a sine at key 1 feeding
 /// the channels `wire` picks (the rest explicitly silent).
 fn root(outputs: usize, wire: &[usize]) -> (Editor, tutti_graph::Executor) {
-    let (mut ed, exec) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(256))));
-    ed.insert(NodeKey(1), "sine", ForkByClone(Sine::new(Hz(440.0))));
+    let (mut ed, exec) = Editor::new(Prepare::new(
+        SampleRate::SR_48K,
+        MaxBlock::of(Samples::new(256)),
+    ));
+    ed.insert(NodeKey(1), "sine", ForkByClone(Sine::new(Hz::new(440.0))));
     ed.spec_mut().topology.set_outputs((0..outputs).map(|ch| {
         if wire.contains(&ch) {
             Source::Node(OutPort {

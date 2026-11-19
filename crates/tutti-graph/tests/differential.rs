@@ -185,7 +185,7 @@ fn wire_node(desc: &mut Desc, j: usize, rng: &mut Rng) {
             None
         } else if roll < 90 {
             // Feedback delays of at least a block, sometimes longer.
-            let delay = Samples(MAX_BLOCK + 17 * rng.below(3) as usize);
+            let delay = Samples::new(MAX_BLOCK + 17 * rng.below(3) as usize);
             rng.pick(&any)
                 .map(|from| Edge::Feedback(FeedbackFrom::new(from, delay)))
         } else {
@@ -212,7 +212,7 @@ fn wire_node(desc: &mut Desc, j: usize, rng: &mut Rng) {
                         Some(Edge::Direct(Source::Global(fan.below(width) as u16)))
                     }
                     2 => {
-                        let delay = Samples(MAX_BLOCK + 17 * fan.below(3) as usize);
+                        let delay = Samples::new(MAX_BLOCK + 17 * fan.below(3) as usize);
                         fan.pick(&any)
                             .map(|from| Edge::Feedback(FeedbackFrom::new(from, delay)))
                     }
@@ -252,7 +252,7 @@ fn wire_node(desc: &mut Desc, j: usize, rng: &mut Rng) {
             let e = if hub || rng.chance(85) {
                 rng.pick(&direct_ev).map(EventEdge::Direct)
             } else {
-                let delay = Samples(MAX_BLOCK + 17 * rng.below(3) as usize);
+                let delay = Samples::new(MAX_BLOCK + 17 * rng.below(3) as usize);
                 rng.pick(&any_ev).map(|f| EventEdge::feedback(f, delay))
             };
             if let Some(e) = e
@@ -465,10 +465,13 @@ impl Script {
         let t = tutti_graph::TransportPosition::new(
             self.playing,
             tutti_units::Bpm::of(self.tempo),
-            tutti_units::Beat(self.beat),
+            tutti_units::Beat::new(self.beat),
             self.looping.map(|(start, end)| {
-                tutti_music::LoopRange::new(tutti_units::Beat(start), tutti_units::Beat(end))
-                    .expect("a loop")
+                tutti_music::LoopRange::new(
+                    tutti_units::Beat::new(start),
+                    tutti_units::Beat::new(end),
+                )
+                .expect("a loop")
             }),
         );
         // Half the changes ramp linearly across the block; half step at a
@@ -610,8 +613,8 @@ proptest! {
             // harness compiles `spec` itself: give the editor the same nodes.
             pair.editor.spec_mut().topology.nodes = spec.topology.nodes.clone();
             pair.editor.spec_mut().topology.inputs = spec.topology.inputs;
-            let mut tap = pair.editor.open_tap(TapId::of(1), outputs, TapAlign::ToOutput, Samples(1 << 16)).expect("the sources exist");
-            let mut heard = pair.editor.open_output_tap(TapId::of(2), channels, Samples(1 << 16)).expect("the sources exist");
+            let mut tap = pair.editor.open_tap(TapId::of(1), outputs, TapAlign::ToOutput, Samples::new(1 << 16)).expect("the sources exist");
+            let mut heard = pair.editor.open_output_tap(TapId::of(2), channels, Samples::new(1 << 16)).expect("the sources exist");
             pair.switch(&valid, &desc.kinds);
             let width = tap.width();
             prop_assert_eq!(heard.width(), channels);
@@ -689,11 +692,11 @@ proptest! {
                             2 => tutti_units::At::Frame(tutti_units::Frame::new(frame + 3 * rng.below(100))),
                             3 if script.looping.is_some() => {
                                 let (a, b) = script.looping.expect("looping");
-                                tutti_units::At::Beat(tutti_units::Beat(a + (b - a) * rng.below(1000) as f64 / 1000.0))
+                                tutti_units::At::Beat(tutti_units::Beat::new(a + (b - a) * rng.below(1000) as f64 / 1000.0))
                             }
                             // Around the playhead: behind it by up to 0.05
                             // beat, ahead by up to 0.25.
-                            _ => tutti_units::At::Beat(tutti_units::Beat(
+                            _ => tutti_units::At::Beat(tutti_units::Beat::new(
                                 (t.beat().get() + (rng.below(3000) as f64 - 500.0) / 10_000.0).max(0.0),
                             )),
                         };
@@ -780,7 +783,7 @@ fn transport_case(seed: u64, which: usize) -> Result<(), TestCaseError> {
             let mut changes = tutti_graph::TransportChanges::NONE;
             for w in bounds[1..].windows(2) {
                 let to = script.block(w[1] - w[0], &mut rng);
-                let at = tutti_graph::Offset::of(Samples(w[0]), tutti_units::Samples(n));
+                let at = tutti_graph::Offset::of(Samples::new(w[0]), tutti_units::Samples::new(n));
                 changes.push(at, to).expect("ordered, distinct, few");
             }
             if rng.chance(30) {
@@ -797,7 +800,7 @@ fn transport_case(seed: u64, which: usize) -> Result<(), TestCaseError> {
                                 .chain(changes.as_slice().iter().map(|c| c.to.beat().get()))
                                 .collect();
                             let b = pieces[rng.below(pieces.len() as u64) as usize];
-                            tutti_units::At::Beat(tutti_units::Beat(
+                            tutti_units::At::Beat(tutti_units::Beat::new(
                                 (b + (rng.below(600) as f64 - 100.0) / 10_000.0).max(0.0),
                             ))
                         }
@@ -1332,7 +1335,7 @@ fn an_unrelated_edit_does_not_disturb_the_running_graph() {
         InPort { node: mix, port: 2 },
         vec![Edge::Feedback(FeedbackFrom::one_block(
             OutPort { node: c, port: 0 },
-            Samples(MAX_BLOCK),
+            Samples::new(MAX_BLOCK),
         ))],
     );
     t.set_outputs(vec![Source::Node(OutPort { node: mix, port: 0 })]);
@@ -1364,7 +1367,7 @@ fn an_unrelated_edit_does_not_disturb_the_running_graph() {
                 at: InPort { node: mix, port: 1 },
                 from: Source::Node(OutPort { node: c, port: 0 })
             }),
-        tutti_units::Samples(37),
+        tutti_units::Samples::new(37),
         "the edit must land while a PDC ring is full of signal"
     );
     for block in 0..20u64 {
@@ -1840,7 +1843,7 @@ impl EditorPair {
         let transport = tutti_graph::TransportPosition::new(
             true,
             tutti_units::Bpm::of(120.0),
-            tutti_units::Beat(0.0),
+            tutti_units::Beat::new(0.0),
             None,
         );
         for &n in blocks {
@@ -1905,7 +1908,7 @@ proptest! {
                 (96_000.0, 64),
                 (48_000.0, MAX_BLOCK),
             ][to];
-            let p = tutti_graph::Prepare::new(tutti_units::SampleRate::of(rate), MaxBlock::of(Samples(max)));
+            let p = tutti_graph::Prepare::new(tutti_units::SampleRate::of(rate), MaxBlock::of(Samples::new(max)));
             let ports: Vec<EventIn> = desc
                 .kinds
                 .keys()
@@ -1966,7 +1969,7 @@ fn random_fade(rng: &mut Rng) -> tutti_graph::Fade {
     };
     // Mostly shorter than the rounds between edits, often longer, so fades
     // end mid-block, run across edits, and queue behind each other.
-    tutti_graph::Fade::new(Samples(1 + rng.below(250) as usize), curve)
+    tutti_graph::Fade::new(Samples::new(1 + rng.below(250) as usize), curve)
 }
 
 /// An edit that replaces one to three running nodes with a crossfade — the
@@ -2050,7 +2053,7 @@ fn mutate_with_fades(desc: &Desc, rng: &mut Rng) -> (Desc, BTreeMap<NodeKey, tut
             };
             let Some(key) = rng.pick(among) else { break };
             let node = d.spec.topology.nodes.get_mut(&key).expect("kept");
-            node.latency = Samples(rng.below(41) as usize);
+            node.latency = Samples::new(rng.below(41) as usize);
         }
     }
     d.recent = fades.keys().copied().collect();

@@ -64,11 +64,11 @@ pub fn driver_value(f: u64, period: u64) -> f64 {
 }
 
 pub fn prepare(max_block: usize) -> Prepare {
-    Prepare::new(RATE, MaxBlock::of(Samples(max_block)))
+    Prepare::new(RATE, MaxBlock::of(Samples::new(max_block)))
 }
 
 fn lat(frames: usize) -> Latency {
-    Latency::new(Samples(frames))
+    Latency::new(Samples::new(frames))
 }
 
 fn ch(n: usize) -> ChannelLayout {
@@ -261,7 +261,7 @@ impl<F: Float> TestNode<F> {
             // Any number of inputs, which are not a bus: ports.
             Kind::Sum { inputs } => Shape::EMPTY.with_ports(ch(inputs), ch(1)),
             Kind::Smooth => Shape::through_unassigned(ch(1))
-                .with_tail(Tail::Finite(Samples(1)))
+                .with_tail(Tail::Finite(Samples::new(1)))
                 .with_in_place(),
             // A pure delay declared as latency: its tail, which excludes
             // latency, is none.
@@ -447,7 +447,7 @@ impl<F: Float> Node<F> for TestNode<F> {
                         let ramp = crate::ParamRamp::new(
                             tutti_units::ParamKey::<tutti_units::Amplitude>::VOLUME,
                             tutti_units::Amplitude::new(driver_value(f, period)),
-                            Samples(0),
+                            Samples::new(0),
                         );
                         let _ = io
                             .event_out(0)
@@ -463,7 +463,7 @@ impl<F: Float> Node<F> for TestNode<F> {
                         let ramp = crate::ParamRamp::new(
                             tutti_units::ParamKey::<tutti_units::Mix>::WET.at(u8::MAX),
                             tutti_units::Mix::new(driver_value(f, period) * 2.0),
-                            Samples(0),
+                            Samples::new(0),
                         );
                         let _ = io
                             .event_out(0)
@@ -531,7 +531,7 @@ impl<F: Float> Node<F> for TestNode<F> {
                     // rescaled the older entries, new ones can fall due
                     // before them. `insert` stays within the reserved
                     // capacity, so it does not allocate.
-                    let due = cx.env.frame_at(e.offset) + Samples(latency);
+                    let due = cx.env.frame_at(e.offset) + Samples::new(latency);
                     let at = self.pending.partition_point(|&(d, _)| d <= due);
                     self.pending.insert(at, (due, fwd));
                 }
@@ -928,7 +928,7 @@ impl<F: Float> Pair<F> {
         let transport = TransportPosition::new(
             true,
             tutti_units::Bpm::of(120.0),
-            tutti_units::Beat(0.0),
+            tutti_units::Beat::new(0.0),
             None,
         );
         self.block_at(frames, input, &transport)
@@ -1286,7 +1286,7 @@ impl Node for Ringer {
             REPORT_UNBOUNDED => io.report_tail(Tail::Unbounded),
             REPORT_UNKNOWN => io.report_tail(Tail::Unknown),
             0 => io.report_tail(Tail::None),
-            n => io.report_tail(Tail::Finite(Samples(n as usize))),
+            n => io.report_tail(Tail::Finite(Samples::new(n as usize))),
         }
         if loud {
             Status::Modified

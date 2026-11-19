@@ -18,7 +18,7 @@
 
 use bytemuck::{Pod, Zeroable};
 use tutti_rt::{SeqReader, SeqWriter};
-use tutti_units::{Beat, BeatDuration, Bpm, Frame, SampleRate, Samples, Seconds};
+use tutti_units::{Beat, Bpm, Frame, SampleRate, Samples, Seconds};
 
 /// How many times a read retries a copy a write overlapped before it answers
 /// "nothing": a write is a few stores, so a reader that loses this many was
@@ -199,7 +199,7 @@ pub(crate) struct Pose {
 /// let resting = Playhead::default();
 /// assert!(!resting.playing());
 /// assert_eq!(resting.at(), None, "no call has rendered");
-/// assert_eq!(resting.beat_now(123), Beat(0.0));
+/// assert_eq!(resting.beat_now(123), Beat::new(0.0));
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Playhead {
@@ -219,13 +219,13 @@ impl Default for Playhead {
     /// `None`).
     fn default() -> Self {
         Self {
-            beat: Beat(0.0),
+            beat: Beat::new(0.0),
             frame: Frame::ZERO,
-            seconds: Seconds(0.0),
+            seconds: Seconds::new(0.0),
             playing: false,
             tempo: Bpm::default(),
             rate: SampleRate::SR_48K,
-            span: Samples(0),
+            span: Samples::new(0),
             at: None,
         }
     }
@@ -316,10 +316,10 @@ impl Playhead {
         }
         let bound_ns = self.span.to_seconds(self.rate).get() * 1e9;
         let elapsed_ns = now.saturating_sub(at).max(0) as f64;
-        let elapsed = Seconds(elapsed_ns.min(bound_ns) * 1e-9);
+        let elapsed = Seconds::new(elapsed_ns.min(bound_ns) * 1e-9);
         // Beats per second is the tempo over sixty: the one place a time
         // becomes a beat span here, in `f64` as the beat is.
-        self.beat + BeatDuration(elapsed.get() * self.tempo.get() / 60.0)
+        self.beat + self.tempo.beats_in(elapsed)
     }
 }
 
@@ -390,13 +390,13 @@ impl BlockClockReader {
             return Playhead::default();
         };
         Playhead {
-            beat: Beat(wire.beat),
+            beat: Beat::new(wire.beat),
             frame: Frame::new(wire.frame),
-            seconds: Seconds(wire.seconds),
+            seconds: Seconds::new(wire.seconds),
             playing: wire.playing != 0,
             tempo: Bpm::new(wire.tempo).unwrap_or_default(),
             rate,
-            span: Samples(wire.span as usize),
+            span: Samples::new(wire.span as usize),
             at: Some(wire.nanos),
         }
     }

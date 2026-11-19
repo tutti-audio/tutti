@@ -39,7 +39,7 @@ fn sweep() -> Vec<f64> {
 /// Band `b`'s phasor and the bands' summed amplitude for a unit tone at
 /// `hz`, in steady state: the tree of `freqs` at 48 kHz run as the crossover runs it.
 fn bands_at(freqs: &[f64], hz: f64) -> (Vec<(f64, f64)>, f64) {
-    let freqs: Vec<Hz> = freqs.iter().map(|&f| Hz(f)).collect();
+    let freqs: Vec<Hz> = freqs.iter().map(|&f| Hz::new(f)).collect();
     let model = CrossoverModel::new(&freqs, SampleRate::of(RATE)).unwrap();
     let mut state = CrossoverState::<f64>::default();
     let c = model.coefficients();
@@ -172,7 +172,7 @@ fn max_gain() -> f64 {
 /// that is nearly a Jordan block) and at the cap (`g` of about 318, a pole near -1).
 fn ends(splits: usize) -> [CrossoverCoefficients; 2] {
     let at = |lo: f64, hi: f64| {
-        let f: Vec<Hz> = [lo, hi][..splits].iter().map(|&f| Hz(f)).collect();
+        let f: Vec<Hz> = [lo, hi][..splits].iter().map(|&f| Hz::new(f)).collect();
         // Strictly increasing and under Nyquist as `new` checks; `design_into` clamps to the cap.
         CrossoverModel::new(&f, SampleRate::of(RATE))
             .unwrap()
@@ -338,7 +338,7 @@ fn a_held_split_rings_out_by_the_time_its_matrix_gives() {
         n += 1;
         assert!(n < 100_000, "never decays");
     }
-    let held = CrossoverModel::new(&[Hz(1_000.0)], SampleRate::of(RATE))
+    let held = CrossoverModel::new(&[Hz::new(1_000.0)], SampleRate::of(RATE))
         .unwrap()
         .coefficients();
     for _ in 0..n {

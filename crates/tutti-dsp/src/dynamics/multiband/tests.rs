@@ -24,7 +24,7 @@ fn bank(width: u16, bands: usize) -> MultibandBank<f32> {
 fn hz(freqs: &[f64]) -> CrossoverControls {
     let mut frequencies = [Hz::ZERO; 5];
     for (f, &x) in frequencies.iter_mut().zip(freqs) {
-        *f = Hz(x);
+        *f = Hz::new(x);
     }
     CrossoverControls { frequencies }
 }
@@ -39,12 +39,12 @@ fn band(
 ) -> BandSettings {
     BandSettings {
         compressor: CompressorControls {
-            threshold: Db(threshold),
-            knee: Db(knee),
-            ratio: CompressionRatio(ratio),
-            attack: Seconds(attack),
-            release: Seconds(release),
-            makeup: Db(makeup),
+            threshold: Db::new(threshold),
+            knee: Db::new(knee),
+            ratio: CompressionRatio::new(ratio),
+            attack: Seconds::new(attack),
+            release: Seconds::new(release),
+            makeup: Db::new(makeup),
             ..CompressorControls::DEFAULT
         },
         bypass: false,
@@ -168,9 +168,9 @@ fn the_analytic_band_magnitudes_sum_to_one() {
         assert!((sum - 1.0).abs() < 1e-12, "{f} Hz: {sum}");
         assert!((all_pass(f, 1_000.0).norm() - 1.0).abs() < 1e-12);
     }
-    let m = CrossoverModel::new(&[Hz(1_000.0)], RATE).unwrap();
+    let m = CrossoverModel::new(&[Hz::new(1_000.0)], RATE).unwrap();
     let mut g = [Complex64::new(0.0, 0.0)];
-    m.frequency_response(0, &[Hz(1_000.0)], &mut g);
+    m.frequency_response(0, &[Hz::new(1_000.0)], &mut g);
     assert!((g[0].norm() - band_magnitude(0, &[1_000.0], 1_000.0)).abs() < 1e-6);
 }
 
@@ -631,8 +631,8 @@ fn any_call_length_gives_the_same_bits() {
     first.bands[2] = band(-25.0, 0.0, 2.0, 0.001, 0.05, -2.0);
     let mut second = first;
     second.crossover = hz(&[150.0, 3_000.0, 9_000.0]);
-    second.bands[0].compressor.ratio = CompressionRatio(8.0);
-    second.bands[2].compressor.makeup = Db(4.0);
+    second.bands[0].compressor.ratio = CompressionRatio::new(8.0);
+    second.bands[2].compressor.makeup = Db::new(4.0);
     second.bands[1].bypass = true;
     second.bands[3].solo = true;
     // Aims at frames 333 and 1_001, whichever the calls are.

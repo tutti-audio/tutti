@@ -28,7 +28,7 @@ fn line(length: f64, absorption: Absorption) -> Line {
 }
 
 fn gain(g: f64) -> Absorption {
-    Absorption::Gain(Amplitude(g))
+    Absorption::Gain(Amplitude::new(g))
 }
 
 /// An FDN over `lines`, fed `input` and read through one row `output`.
@@ -55,7 +55,7 @@ fn network(stages: Vec<Stage>) -> Network {
 fn at(n: &Network, w: f64) -> Complex64 {
     let hz = w / std::f64::consts::TAU * RATE.get();
     let mut g = [ZERO];
-    n.frequency_response(0, &[Hz(hz)], &mut g);
+    n.frequency_response(0, &[Hz::new(hz)], &mut g);
     g[0]
 }
 
@@ -199,7 +199,7 @@ fn the_rank_one_solve_equals_elimination() {
         line(
             m,
             Absorption::OnePole {
-                gain: Amplitude(0.8),
+                gain: Amplitude::new(0.8),
                 damp: 0.3,
             },
         )
@@ -410,7 +410,7 @@ fn a_fir_has_no_response_and_no_l1_bound() {
         length: tutti_units::Samples(100),
         onset: tutti_units::Samples(0),
         latency: tutti_units::Samples(0),
-        rt60: [Seconds(1.0); 3],
+        rt60: [Seconds::new(1.0); 3],
         energy: 1.0,
     })]);
     assert!(n.l1_norm().is_infinite() && n.hinf_norm().is_infinite());
@@ -444,7 +444,7 @@ fn taps_width_and_wet_follow_the_kernels_fold() {
     let w = 0.7;
     let (l, r) = (delay(w, 3.0) * 0.5, delay(w, 5.0) * -0.25);
     let both = |n: &Network| {
-        let hz = [Hz(w / std::f64::consts::TAU * RATE.get())];
+        let hz = [Hz::new(w / std::f64::consts::TAU * RATE.get())];
         let (mut a, mut b) = ([ZERO], [ZERO]);
         n.frequency_response(0, &hz, &mut a);
         n.frequency_response(1, &hz, &mut b);
@@ -452,13 +452,13 @@ fn taps_width_and_wet_follow_the_kernels_fold() {
     };
     let (a, b) = both(&n);
     assert!(close(a, l) && close(b, r));
-    n.width = StereoWidth(0.0);
-    n.wet = Db(-6.0);
+    n.width = StereoWidth::new(0.0);
+    n.wet = Db::new(-6.0);
     let (a, b) = both(&n);
-    let (mid, wet) = ((l + r) * 0.5, Db(-6.0).to_amplitude().get());
+    let (mid, wet) = ((l + r) * 0.5, Db::new(-6.0).to_amplitude().get());
     assert!(close(a, mid * wet) && close(b, mid * wet));
     // A width above 1 raises the l1 gain by the width.
-    n.width = StereoWidth(2.0);
+    n.width = StereoWidth::new(2.0);
     n.wet = Db::UNITY;
     assert!((n.l1_norm() - 1.0).abs() < 1e-12);
 }
@@ -484,6 +484,6 @@ fn an_output_the_network_lacks_has_no_response() {
     let n = network(vec![]);
     assert_eq!((n.inputs(), n.outputs()), (1, 1));
     let mut g = [ZERO];
-    n.frequency_response(1, &[Hz(100.0)], &mut g);
+    n.frequency_response(1, &[Hz::new(100.0)], &mut g);
     assert!(g[0].re.is_nan());
 }

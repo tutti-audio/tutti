@@ -67,14 +67,14 @@ impl InputOpener for Capture {
         if rec.fail_from.is_some_and(|from| n >= from) {
             return Err(tutti_cpal::Error::InvalidDevice("unplugged".into()));
         }
-        let (ring, writer) = InletRing::pair(ChannelLayout::STEREO, Samples(256), rate);
+        let (ring, writer) = InletRing::pair(ChannelLayout::STEREO, Samples::new(256), rate);
         rec.writers.push(writer);
         rec.configs.push(config.clone());
         rec.latency = config.latency.clone();
         Ok(OpenedInput {
             ring,
             keep: Box::new(Stream(Arc::clone(&self.0))) as Box<dyn Any + Send>,
-            lead: Samples(0),
+            lead: Samples::new(0),
         })
     }
 }
@@ -114,7 +114,7 @@ fn poll(session: &mut LiveSession) -> Vec<SessionEvent> {
 fn first_frame(session: &mut LiveSession, stream: &ManualStream) -> [f32; 2] {
     let _ = session.update();
     let block = stream
-        .render_block(Samples(16))
+        .render_block(Samples::new(16))
         .expect("the stream is open");
     [block[0], block[1]]
 }
@@ -234,7 +234,7 @@ fn a_failed_restart_is_a_device_event_with_the_typed_error_as_its_source() {
     let refused = session.restart_on(
         spec_at(96_000.0),
         driver,
-        Some(tutti_buffers::MaxBlock::of(Samples(16_384))),
+        Some(tutti_buffers::MaxBlock::of(Samples::new(16_384))),
         None,
     );
     assert!(refused.is_err());
@@ -275,7 +275,7 @@ fn device_latency_is_the_reported_delay_in_frames_and_none_before_a_report() {
     assert_eq!((none.input, none.output), (None, None), "nothing reported");
 
     stream
-        .render_block_delayed(Samples(64), Duration::from_millis(10))
+        .render_block_delayed(Samples::new(64), Duration::from_millis(10))
         .expect("open");
     let cell = record
         .lock()
@@ -285,8 +285,8 @@ fn device_latency_is_the_reported_delay_in_frames_and_none_before_a_report() {
         .expect("handed a cell");
     cell.record(Some(Duration::from_millis(5)));
     let l = session.device().latency();
-    assert_eq!(l.output, Some(Samples(480)));
-    assert_eq!(l.input, Some(Samples(240)));
+    assert_eq!(l.output, Some(Samples::new(480)));
+    assert_eq!(l.input, Some(Samples::new(240)));
 
     let (driver, new) = ManualStreamDriver::new();
     session
@@ -298,9 +298,9 @@ fn device_latency_is_the_reported_delay_in_frames_and_none_before_a_report() {
         (None, None),
         "the new streams have reported nothing"
     );
-    new.render_block_delayed(Samples(64), Duration::from_millis(10))
+    new.render_block_delayed(Samples::new(64), Duration::from_millis(10))
         .expect("open");
-    assert_eq!(session.device().latency().output, Some(Samples(441)));
+    assert_eq!(session.device().latency().output, Some(Samples::new(441)));
 }
 
 /// **Removing an input's node closes its capture and forgets it**, whether

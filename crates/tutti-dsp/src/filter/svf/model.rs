@@ -40,7 +40,7 @@ impl SvfControls {
     /// low-pass at 0 dB.
     pub const DEFAULT: SvfControls = SvfControls {
         ty: SvfType::LowPass,
-        freq: Hz(1_000.0),
+        freq: Hz::new(1_000.0),
         q: Q::BUTTERWORTH,
         gain: Db::UNITY,
     };
@@ -71,8 +71,8 @@ impl SvfControls {
         let finite = |v: f64, d: f64| if v.is_finite() { v } else { d };
         Self {
             ty: self.ty,
-            freq: Hz(finite(self.freq.get(), Self::DEFAULT.freq.get())),
-            q: Q(finite(self.q.get(), Self::DEFAULT.q.get()).clamp(0.01, Self::MAX_Q)),
+            freq: Hz::new(finite(self.freq.get(), Self::DEFAULT.freq.get())),
+            q: Q::new(finite(self.q.get(), Self::DEFAULT.q.get()).clamp(0.01, Self::MAX_Q)),
             gain: if self.gain.get().is_nan() {
                 Db::UNITY
             } else {

@@ -18,7 +18,7 @@ const CHUNK: Samples = Samples(1024);
 /// One least significant bit of the sample format `I` in the `[-1, 1]` float
 /// domain, or silence for a float format, which has none.
 fn lsb_of<I: Sample>() -> Amplitude {
-    I::STEP.map_or(Amplitude::SILENT, Amplitude)
+    I::STEP.map_or(Amplitude::SILENT, Amplitude::new)
 }
 
 /// A [`Sink`] of floats `F` in front of a sink of integers `K`: each block is

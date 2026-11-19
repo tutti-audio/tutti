@@ -222,9 +222,8 @@ impl LfoNode {
     /// The wave at `cycles` plus the phase offset, with the depth applied.
     #[inline]
     fn evaluate<F: Float>(&self, cycles: f64, offset: PhaseIncrement, depth: F) -> F {
-        // `Waveform::raw_at` reads `f32`: the wave widens exactly and crosses into the lane's
-        // format once per frame, until the waveform is `f64`.
-        F::from_design(f64::from(self.wave.raw_at(cycles + offset.get(), false))) * depth
+        // The wave is `f64`; it crosses into the lane's format once per frame.
+        F::from_design(self.wave.raw_at(cycles + offset.get(), false)) * depth
     }
 }
 
@@ -591,6 +590,10 @@ mod tests {
         );
     }
 
+    /// The unit roundoff of `f32`, `2^-24`: the bound on the relative error of one rounding,
+    /// so on the absolute error of a value in `[-1, 1]`.
+    const F32_ROUNDOFF: f64 = 5.960_464_477_539_063e-8;
+
     fn random(seed: u64) -> Waveform {
         Waveform::Shape {
             shape: LfoShape::Random,
@@ -614,12 +617,16 @@ mod tests {
         // 7.5 beats at 120 BPM and 48 kHz.
         let rolled = render_at(lfo(), rolling, 180_001);
         let want = random(seed).raw_at(7.5, false);
-        assert_eq!(rolled[180_000], want);
+        assert_eq!(rolled[180_000], want as f32);
         for beat in [7.5, 7.25, 3.5, 1_000.5] {
             let sought = render_at(lfo(), stopped_at(beat), 1)[0];
-            assert_eq!(sought, random(seed).raw_at(beat, false), "beat {beat}");
+            assert_eq!(
+                sought,
+                random(seed).raw_at(beat, false) as f32,
+                "beat {beat}"
+            );
         }
-        assert_eq!(render_at(lfo(), stopped_at(7.25), 1)[0], want);
+        assert_eq!(render_at(lfo(), stopped_at(7.25), 1)[0], want as f32);
     }
 
     /// **Fork.** A free-running fork starts at cycle zero and replays the
@@ -640,7 +647,7 @@ mod tests {
             for (i, &v) in out.iter().enumerate() {
                 assert_eq!(
                     v,
-                    random(5).raw_at(i as f64 / 256.0, false),
+                    random(5).raw_at(i as f64 / 256.0, false) as f32,
                     "{who} frame {i}"
                 );
             }
@@ -666,7 +673,11 @@ mod tests {
             2048,
         );
         for (i, &v) in free.iter().enumerate() {
-            assert_eq!(v, w.raw_at((i / 256) as f64, false), "free frame {i}");
+            assert_eq!(
+                v,
+                w.raw_at((i / 256) as f64, false) as f32,
+                "free frame {i}"
+            );
         }
         let rolling = TransportPosition::new(true, Bpm::of(120.0), Beat::new(0.0), None);
         let synced = render_at(
@@ -675,7 +686,11 @@ mod tests {
             60_000,
         );
         for (i, &v) in synced.iter().enumerate() {
-            assert_eq!(v, w.raw_at((i / 12_000) as f64, false), "synced frame {i}");
+            assert_eq!(
+                v,
+                w.raw_at((i / 12_000) as f64, false) as f32,
+                "synced frame {i}"
+            );
         }
         // Consecutive steps differ here, so each boundary is visible.
         for k in 1..5 {
@@ -687,7 +702,9 @@ mod tests {
             2048,
         );
         for k in 1..8 {
-            assert!((smooth[k * 256] - w.raw_at(k as f64 - 1.0, false)).abs() < 1e-6);
+            assert!(
+                (f64::from(smooth[k * 256]) - w.raw_at(k as f64 - 1.0, false)).abs() < F32_ROUNDOFF
+            );
         }
     }
 
@@ -708,14 +725,20 @@ mod tests {
         for beat in [0.0, 1.5, 9.0, 33.75] {
             let got = render_at(LfoNode::from(lfo), stopped_at(beat), 1)[0];
             let want = wave.raw_at(beat / 2.0 + 0.25, false);
-            assert!((got - want).abs() < 1e-6, "beat {beat}: {got} vs {want}");
+            assert!(
+                (f64::from(got) - want).abs() < F32_ROUNDOFF,
+                "beat {beat}: {got} vs {want}"
+            );
         }
         // 187.5 Hz at 48 kHz: 256 frames a cycle.
         let free = render(LfoNode::from(lfo.rate(Hz::new(187.5))), 48_000.0, 2048);
         for i in [0, 100, 256, 777, 2047] {
             let want = wave.raw_at(i as f64 / 256.0 + 0.25, false);
-            let got = free[i];
-            assert!((got - want).abs() < 1e-6, "frame {i}: {got} vs {want}");
+            let got = f64::from(free[i]);
+            assert!(
+                (got - want).abs() < F32_ROUNDOFF,
+                "frame {i}: {got} vs {want}"
+            );
         }
     }
 
@@ -755,7 +778,7 @@ mod tests {
             shape: LfoShape::Random,
             seed: 0,
         }
-        .raw_at(cycles, false)
+        .raw_at(cycles, false) as f32
     }
 
     /// At 100 Hz the clock's step is `rate / 100` cycles; frames whose position is not
@@ -804,17 +827,24 @@ mod tests {
         assert!(out[10] != out[110] && out[110] != out[210]);
     }
 
-    /// In an `f64` graph a free-running sawtooth at `1/64` of the rate is the ramp `k / 32 - 1`
-    /// of its first cycle. The wave and the depth are `f32` (`Waveform::raw_at`, `Depth`), whose
-    /// values here are exact in `f32`, so this pins the node's plumbing in an `f64` graph.
+    /// In an `f64` graph a free-running sine at a third of the rate is `sin(2 pi k / 3)`. The
+    /// wave and the depth are `f64` (`Waveform::raw_at`, `Depth`), so every frame holds the
+    /// closed form to `F64_TOLERANCE`, and a frame is not what an `f32` narrowing leaves (a
+    /// non-dyadic value, which `f32` cannot hold to 1e-9).
     #[test]
-    fn in_an_f64_graph_the_lfo_writes_its_wave_widened_exactly() {
+    fn in_an_f64_graph_the_lfo_writes_its_wave_unnarrowed() {
         use crate::test_support::{F64_TOLERANCE, RATE, render_f64};
-        let node = LfoNode::new(LfoShape::Sawtooth).with_rate(Hz::new(RATE.get() / 64.0));
+        let node = LfoNode::new(LfoShape::Sine).with_rate(Hz::new(RATE.get() / 3.0));
         let out = render_f64(node, RATE, &[], 64);
-        for (k, &got) in out[0].iter().enumerate().skip(1) {
-            let want = k as f64 / 32.0 - 1.0;
-            assert!((got - want).abs() <= F64_TOLERANCE, "frame {k}");
+        let mut beyond_f32 = false;
+        for (k, &got) in out[0].iter().enumerate() {
+            let want = (core::f64::consts::TAU * k as f64 / 3.0).sin();
+            assert!(
+                (got - want).abs() <= F64_TOLERANCE,
+                "frame {k}: {got} vs {want}"
+            );
+            beyond_f32 |= (got - f64::from(got as f32)).abs() > 1e-9;
         }
+        assert!(beyond_f32, "no frame is finer than an f32");
     }
 }

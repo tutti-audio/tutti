@@ -18,11 +18,11 @@ use crate::{COEFF_INTERVAL, Glide, Lerp, Steps};
 
 /// The default corner: 10 Hz, well under the audible band's low end and a few time
 /// constants (`1 / 2 pi fc`, 16 ms) from settling a step.
-pub const DC_CORNER: Hz = Hz(10.0);
+pub const DC_CORNER: Hz = Hz::new(10.0);
 
 /// The lowest corner a blocker takes: 1 Hz. A lower one reads as this, which bounds the
 /// ring-out ([`DcBlockerControls::tail`]) at about a second.
-pub const MIN_DC_CORNER: Hz = Hz(1.0);
+pub const MIN_DC_CORNER: Hz = Hz::new(1.0);
 
 /// The pole `R = exp(-2 pi fc / fs)` of a blocker with `corner` at `rate`: the corner read
 /// as at least [`MIN_DC_CORNER`] and at most the rate's Nyquist, and a corner that is not

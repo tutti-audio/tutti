@@ -50,7 +50,7 @@ fn wire(ed: &mut Editor, pair: [u64; 2]) {
 /// many jobs the pool ran.
 fn render(pooled: bool) -> (Vec<f32>, usize) {
     let rate = SampleRate::SR_48K;
-    let (mut ed, mut exec) = Editor::new(Prepare::new(rate, MaxBlock::of(Samples(64))));
+    let (mut ed, mut exec) = Editor::new(Prepare::new(rate, MaxBlock::of(Samples::new(64))));
     let jobs = Arc::new(AtomicUsize::new(0));
     if pooled {
         let pool = WorkerPool::builder()
@@ -63,7 +63,7 @@ fn render(pooled: bool) -> (Vec<f32>, usize) {
         ed.insert(
             NodeKey(k + 1),
             "sine",
-            ForkByClone(support::Sine::new(Hz(220.0 * (k + 1) as f64))),
+            ForkByClone(support::Sine::new(Hz::new(220.0 * (k + 1) as f64))),
         );
         ed.insert(
             NodeKey(k + 11),
@@ -91,7 +91,7 @@ fn render(pooled: bool) -> (Vec<f32>, usize) {
     )
     .expect("within limits");
     ed.set_root_fade(Some(Fade::seconds(
-        Seconds(0.005),
+        Seconds::new(0.005),
         rate,
         FadeLaw::EqualAmplitude,
     )));

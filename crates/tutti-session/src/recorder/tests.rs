@@ -48,7 +48,7 @@ impl Source for SliceSource {
         }
         out[..n * ch].copy_from_slice(&self.samples[self.pos * ch..(self.pos + n) * ch]);
         self.pos += n;
-        Pull::Frames(Samples(n))
+        Pull::Frames(Samples::new(n))
     }
 }
 
@@ -88,7 +88,7 @@ fn pump_into_wav_sink_round_trips_frame_count() {
         layout: ChannelLayout::STEREO,
     };
     let mut pump_loop = PumpLoop::new(src, sink(&path, 2, Pcm::Float32), SCRATCH_FRAMES).unwrap();
-    assert_eq!(pump_until_dry(&mut pump_loop, 16), Samples(FRAMES));
+    assert_eq!(pump_until_dry(&mut pump_loop, 16), Samples::new(FRAMES));
     pump_loop
         .finalize()
         .expect("finalize should back-patch the header");
@@ -174,7 +174,7 @@ fn a_six_channel_source_records_at_its_own_width() {
     let written = pump_until_dry(&mut pump_loop, 16);
     assert_eq!(
         written,
-        Samples(FRAMES),
+        Samples::new(FRAMES),
         "the pump moved {written} frames of {FRAMES}: a short drain here would \
          make the header assertion below measure the harness"
     );
@@ -217,7 +217,7 @@ fn a_non_mic_live_source_records_until_stopped() {
             }
             out[0] = 0.25;
             out[1] = -0.25;
-            Pull::Frames(Samples(1))
+            Pull::Frames(Samples::new(1))
         }
     }
 
@@ -245,7 +245,11 @@ fn a_non_mic_live_source_records_until_stopped() {
             ),
         }
     }
-    assert_eq!(wrote, Samples(3), "three yielding passes, one frame each");
+    assert_eq!(
+        wrote,
+        Samples::new(3),
+        "three yielding passes, one frame each"
+    );
 
     pump_loop.finalize().expect("finalize should succeed");
 
@@ -304,7 +308,7 @@ impl Source for Ramp {
             out[i * 2 + 1] = -k;
         }
         self.pos += n;
-        Pull::Frames(Samples(n))
+        Pull::Frames(Samples::new(n))
     }
 }
 
@@ -323,18 +327,18 @@ fn a_named_capacity_bounds_each_pass_over_any_sink() {
             pos: 0,
         },
         seen.clone(),
-        Samples(64),
+        Samples::new(64),
     )
     .expect("stereo into stereo");
 
     for pass in 0..15 {
         assert_eq!(
             pump_loop.pump_once(),
-            PumpPass::Wrote(Samples(64)),
+            PumpPass::Wrote(Samples::new(64)),
             "pass {pass} must move exactly the named capacity"
         );
     }
-    assert_eq!(pump_loop.pump_once(), PumpPass::Wrote(Samples(40)));
+    assert_eq!(pump_loop.pump_once(), PumpPass::Wrote(Samples::new(40)));
     assert_eq!(pump_loop.pump_once(), PumpPass::Ended);
     pump_loop
         .finalize()
@@ -358,7 +362,7 @@ fn a_zero_capacity_moves_one_frame_per_pass() {
     let mut pump_loop = PumpLoop::new(Ramp { frames: 3, pos: 0 }, seen.clone(), Samples::ZERO)
         .expect("stereo into stereo");
 
-    assert_eq!(pump_until_dry(&mut pump_loop, 16), Samples(3));
+    assert_eq!(pump_until_dry(&mut pump_loop, 16), Samples::new(3));
     assert_eq!(pump_loop.pump_once(), PumpPass::Ended);
     pump_loop.finalize().expect("finalize");
     assert_eq!(*seen.0.lock().unwrap(), [0.0, 0.0, 1.0, -1.0, 2.0, -2.0]);
@@ -394,7 +398,7 @@ impl Source for DyingMic {
         match (n, dead) {
             (0, true) => Pull::Failed,
             (0, false) => Pull::Starved,
-            (n, _) => Pull::Frames(Samples(n)),
+            (n, _) => Pull::Frames(Samples::new(n)),
         }
     }
 }
@@ -422,7 +426,7 @@ fn a_dead_mic_fails_the_take_and_keeps_its_frames() {
     )
     .unwrap();
 
-    assert_eq!(pump_loop.pump_once(), PumpPass::Wrote(Samples(10)));
+    assert_eq!(pump_loop.pump_once(), PumpPass::Wrote(Samples::new(10)));
     assert_eq!(
         pump_loop.pump_once(),
         PumpPass::Starved,
@@ -460,7 +464,7 @@ fn frames_buffered_at_the_fault_are_written_first() {
         SCRATCH_FRAMES,
     )
     .unwrap();
-    assert_eq!(pump_loop.pump_once(), PumpPass::Wrote(Samples(5)));
+    assert_eq!(pump_loop.pump_once(), PumpPass::Wrote(Samples::new(5)));
     assert_eq!(pump_loop.pump_once(), PumpPass::Failed);
     assert!(pump_loop.finalize().is_err());
     assert_eq!(hound::WavReader::open(&path).unwrap().len(), 10);
@@ -536,14 +540,14 @@ fn a_frame_delivered_before_the_failure_is_recorded() {
     let path = dir.path().join("script.wav");
     let mut pump_loop = PumpLoop::new(
         Scripted {
-            answers: vec![Pull::Starved, Pull::Frames(Samples(1)), Pull::Failed].into_iter(),
+            answers: vec![Pull::Starved, Pull::Frames(Samples::new(1)), Pull::Failed].into_iter(),
         },
         sink(&path, 2, Pcm::Float32),
         SCRATCH_FRAMES,
     )
     .unwrap();
     assert_eq!(pump_loop.pump_once(), PumpPass::Starved);
-    assert_eq!(pump_loop.pump_once(), PumpPass::Wrote(Samples(1)));
+    assert_eq!(pump_loop.pump_once(), PumpPass::Wrote(Samples::new(1)));
     assert_eq!(pump_loop.pump_once(), PumpPass::Failed);
     let _ = pump_loop.finalize();
     assert_eq!(hound::WavReader::open(&path).unwrap().len(), 2);
@@ -583,7 +587,7 @@ fn the_loop_sums_what_the_source_lost() {
             Pull::Starved
         }
         fn take_lost(&mut self) -> Samples {
-            Samples(7)
+            Samples::new(7)
         }
     }
     struct F32Collect;
@@ -604,7 +608,7 @@ fn the_loop_sums_what_the_source_lost() {
     let mut pump_loop = PumpLoop::new(Dropping, F32Collect, SCRATCH_FRAMES).unwrap();
     assert_eq!(pump_loop.pump_once(), PumpPass::Starved);
     assert_eq!(pump_loop.pump_once(), PumpPass::Starved);
-    assert_eq!(pump_loop.lost(), Samples(14));
+    assert_eq!(pump_loop.lost(), Samples::new(14));
 }
 
 /// A finite source with a per-pull cap, so chunks straddle the buffer.
@@ -632,7 +636,7 @@ impl Source for Chunked {
         }
         out[..n * ch].copy_from_slice(&self.samples[self.pos * ch..(self.pos + n) * ch]);
         self.pos += n;
-        Pull::Frames(Samples(n))
+        Pull::Frames(Samples::new(n))
     }
 }
 
@@ -685,7 +689,7 @@ fn pump_drains_a_finite_source_exactly() {
         );
         total += n;
     }
-    assert_eq!(total, Samples(1000));
+    assert_eq!(total, Samples::new(1000));
     assert_eq!(dst.written, samples, "frames arrive intact and in order");
 }
 
@@ -709,7 +713,7 @@ fn every_count_on_this_boundary_is_denominated_in_frames() {
     let mut buf = vec![0.0f32; 10 * CH];
     assert_eq!(
         pump(&mut src, &mut dst, &mut buf),
-        Ok(Pull::Frames(Samples(10))),
+        Ok(Pull::Frames(Samples::new(10))),
         "pump returns FRAMES (10), not samples (60)"
     );
     assert_eq!(src.pos, 10, "the source advanced by 10 FRAMES");

@@ -4,8 +4,8 @@ use super::*;
 
 fn controls(room: f64, damp: f64) -> FreeverbControls {
     FreeverbControls {
-        room: Mix(room),
-        damp: Mix(damp),
+        room: Mix::new(room),
+        damp: Mix::new(damp),
     }
 }
 
@@ -54,7 +54,7 @@ fn a_hostile_control_is_made_safe() {
     ] {
         let g = controls(room, 0.5).feedback();
         assert!(
-            g >= Feedback(0.7) && g <= Feedback(0.98),
+            g >= Feedback::new(0.7) && g <= Feedback::new(0.98),
             "room {room}: {g:?}"
         );
     }

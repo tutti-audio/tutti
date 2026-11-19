@@ -40,7 +40,7 @@ impl Node for Probe {
         let events = io.events(0);
         for i in 0..io.frames() {
             io.output(0)[i] = 0.0;
-            let at = Offset::of(Samples(i), cx.env.block_len);
+            let at = Offset::of(Samples::new(i), cx.env.block_len);
             io.output(1)[i] = cx.env.transport_at(at).beat().get() as f32;
         }
         for e in events {
@@ -53,7 +53,7 @@ impl Node for Probe {
 }
 
 fn at(k: usize, block: usize) -> Offset {
-    Offset::of(Samples(k), Samples(block))
+    Offset::of(Samples::new(k), Samples::new(block))
 }
 
 /// `drive_input` plays each event on its frame, hands the node the `Env`'s
@@ -64,8 +64,8 @@ fn drive_in_plays_events_under_the_env() {
     let env = Env {
         frame: Frame::new(1_000),
         sample_rate: RATE,
-        block_len: Samples(64),
-        transport: TransportPosition::new(true, Bpm::of(120.0), Beat(4.0), None),
+        block_len: Samples::new(64),
+        transport: TransportPosition::new(true, Bpm::of(120.0), Beat::new(4.0), None),
         changes: TransportChanges::NONE,
         play: tutti_graph::PlayClock::ZERO,
     };
@@ -98,7 +98,7 @@ fn direct_plays_events_once_advances_and_rolls() {
     probe.set_transport(TransportPosition::new(
         true,
         Bpm::of(120.0),
-        Beat(2.0),
+        Beat::new(2.0),
         None,
     ));
     probe.events(0, &[Event::midi(at(5, 64), m1_note())]);

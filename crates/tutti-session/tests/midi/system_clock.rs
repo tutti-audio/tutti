@@ -35,7 +35,7 @@ fn the_midi_clock_reaches_the_output_on_the_timers_blocks() {
     let wire = Wire::default();
     let mut system = Session::builder()
         .sample_rate(SampleRate::SR_48K)
-        .max_block(MaxBlock::of(Samples(480)))
+        .max_block(MaxBlock::of(Samples::new(480)))
         .system_clock()
         .build()
         .expect("builds");
@@ -75,6 +75,6 @@ fn the_midi_clock_reaches_the_output_on_the_timers_blocks() {
         .midi()
         .output_terms()
         .expect("the system clock times the out");
-    assert_eq!(terms.audio_output, Some(tutti_units::Seconds(0.0)));
+    assert_eq!(terms.audio_output, Some(tutti_units::Seconds::new(0.0)));
     assert!(terms.is_complete());
 }

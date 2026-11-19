@@ -75,7 +75,7 @@ impl SeekSlot {
     pub fn take(&self) -> Option<Beat> {
         self.pending
             .swap(false, Ordering::AcqRel)
-            .then(|| Beat(self.target.load(Ordering::Acquire)))
+            .then(|| Beat::new(self.target.load(Ordering::Acquire)))
     }
 
     /// Whether a jump is waiting for the clock. Advisory — the clock may
@@ -205,7 +205,7 @@ mod tests {
 
         seek.request(Beat::new(8.0));
         assert!(seek.is_pending());
-        assert_eq!(seek.take(), Some(Beat(8.0)));
+        assert_eq!(seek.take(), Some(Beat::new(8.0)));
         // Consumed — a second take sees nothing.
         assert_eq!(seek.take(), None);
         assert!(!seek.is_pending());

@@ -16,7 +16,7 @@ use std::sync::{Arc, Mutex};
 use tutti_modulation::{Clock, Curve, Law, LfoRate, Polarity, Source, TargetKey};
 use tutti_nodes::automation::Trajectory;
 use tutti_rt::LockExt;
-use tutti_units::{Bipolar, Real};
+use tutti_units::Bipolar;
 
 use super::error::SetRefusal;
 use super::param::ParamTarget;
@@ -138,15 +138,14 @@ impl Held for MacroField {
 
     fn current(&self) -> Bipolar {
         match self.0.get() {
-            Source::Macro { value } => Bipolar::clamped(f64::from(value)),
+            Source::Macro { value } => Bipolar::clamped(value),
             _ => unreachable!("the slot is unregistered before the source stops being a macro"),
         }
     }
 
     fn replace(&self, value: &Bipolar) -> bool {
         self.0.edit(|source| {
-            // The compile's raw value is an `f32`: the one narrowing.
-            let next = f32::from_unit(*value);
+            let next = value.get();
             match source {
                 Source::Macro { value } if *value != next => {
                     *value = next;

@@ -9,7 +9,7 @@ use tutti_units::{SampleRate, Samples};
 fn session(dates: BlockDates, rate: f64) -> Session {
     Session::builder()
         .sample_rate(SampleRate::of(rate))
-        .max_block(MaxBlock::of(Samples(512)))
+        .max_block(MaxBlock::of(Samples::new(512)))
         .block_dates(dates)
         .build()
         .expect("builds")

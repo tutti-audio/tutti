@@ -86,10 +86,10 @@ pub enum SweepRangeError {
 
 impl SweepRange {
     /// The lowest bottom a sweep has: 20 Hz.
-    pub const FLOOR: Hz = Hz(20.0);
+    pub const FLOOR: Hz = Hz::new(20.0);
 
     /// The default sweep: 200 to 4000 Hz.
-    pub const DEFAULT: Self = Self::of(Hz(200.0), Hz(4_000.0));
+    pub const DEFAULT: Self = Self::of(Hz::new(200.0), Hz::new(4_000.0));
 
     /// A sweep from `min` to `max`.
     ///
@@ -167,9 +167,9 @@ impl PhaserControls {
     /// 0.3 Hz, half depth, half feedback: where a phaser starts, and what a control holds
     /// until it has been given a finite value.
     pub const DEFAULT: Self = Self {
-        rate: Hz(0.3),
+        rate: Hz::new(0.3),
         depth: Depth::of(0.5),
-        feedback: Feedback(0.5),
+        feedback: Feedback::new(0.5),
     };
 }
 

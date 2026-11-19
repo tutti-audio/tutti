@@ -83,7 +83,7 @@ impl Leg {
     /// A step to `value`, held.
     #[must_use]
     pub const fn hold(value: f64) -> Self {
-        Self::linear(value, value, Samples(0))
+        Self::linear(value, value, Samples::new(0))
     }
 }
 

@@ -55,7 +55,7 @@ pub struct TransientControls {
 
 impl TransientControls {
     /// The most either amount reaches, either way: 24 dB.
-    pub const MAX_AMOUNT: Db = Db(24.0);
+    pub const MAX_AMOUNT: Db = Db::new(24.0);
 
     /// No change: both amounts 0 dB.
     pub const DEFAULT: Self = Self {
@@ -95,8 +95,8 @@ impl Lerp for Amounts {
     #[inline]
     fn lerp(&self, to: &Self, k: u32, n: u32) -> Self {
         Self {
-            attack: Db(self.attack.get().lerp(&to.attack.get(), k, n)),
-            sustain: Db(self.sustain.get().lerp(&to.sustain.get(), k, n)),
+            attack: Db::new(self.attack.get().lerp(&to.attack.get(), k, n)),
+            sustain: Db::new(self.sustain.get().lerp(&to.sustain.get(), k, n)),
         }
     }
 }

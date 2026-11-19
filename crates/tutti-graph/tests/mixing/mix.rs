@@ -452,7 +452,7 @@ fn a_fade_runs_against_the_weights_of_the_mix() {
             let n = start + i as u64;
             let want = if i < FADE {
                 let g = FadeLaw::EqualAmplitude
-                    .gains(Samples(i), Samples(FADE))
+                    .gains(Samples::new(i), Samples::new(FADE))
                     .1
                     .get() as f32;
                 let (wy, wx) = (0.0 + (m - 0.0) * g, 0.0 + ((1.0 - m) - 0.0) * g);
@@ -471,7 +471,7 @@ fn a_fade_runs_against_the_weights_of_the_mix() {
             let n = start + i as u64;
             let want = if i < FADE {
                 let g = FadeLaw::EqualAmplitude
-                    .gains(Samples(i), Samples(FADE))
+                    .gains(Samples::new(i), Samples::new(FADE))
                     .1
                     .get() as f32;
                 let (wy, wx) = (m + (0.0 - m) * g, (1.0 - m) + (1.0 - (1.0 - m)) * g);
@@ -508,7 +508,7 @@ fn a_mix_moving_during_a_fade_follows_frame_by_frame() {
             let n = start + i as u64;
             let k = (n - fade_start) as usize;
             let g = FadeLaw::EqualAmplitude
-                .gains(Samples(k), Samples(FADE))
+                .gains(Samples::new(k), Samples::new(FADE))
                 .1
                 .get() as f32;
             let m = ramp(0.5, 1.0, i, BLOCK);

@@ -30,8 +30,8 @@ use tutti_units::Samples;
 ///
 /// let table = PrerollTable::default();
 /// assert_eq!(table.preroll(0), None, "empty until the first plan");
-/// table.set(&[Samples(128), Samples(0)]);
-/// assert_eq!(table.preroll(0), Some(Samples(128)));
+/// table.set(&[Samples::new(128), Samples::new(0)]);
+/// assert_eq!(table.preroll(0), Some(Samples::new(128)));
 /// assert_eq!(table.preroll(2), None, "past the end of the table");
 /// ```
 #[derive(Debug, Default)]
@@ -78,12 +78,12 @@ mod tests {
     /// entry of the longer one behind, and every reader sees the last `set`.
     #[test]
     fn a_set_replaces_the_whole_table() {
-        let table = PrerollTable::new(vec![Samples(200), Samples(0), Samples(100)]);
-        assert_eq!(table.preroll(2), Some(Samples(100)));
-        table.set(&[Samples(7)]);
-        assert_eq!(table.preroll(0), Some(Samples(7)));
+        let table = PrerollTable::new(vec![Samples::new(200), Samples::new(0), Samples::new(100)]);
+        assert_eq!(table.preroll(2), Some(Samples::new(100)));
+        table.set(&[Samples::new(7)]);
+        assert_eq!(table.preroll(0), Some(Samples::new(7)));
         assert_eq!(table.preroll(1), None, "the old entry is gone");
-        assert_eq!(table.to_vec(), [Samples(7)]);
+        assert_eq!(table.to_vec(), [Samples::new(7)]);
         assert_eq!(table.with(<[Samples]>::len), 1);
     }
 }

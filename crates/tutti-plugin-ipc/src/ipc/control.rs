@@ -108,7 +108,7 @@ macro_rules! served_control {
             /// `Features::RENDER_MODE` says), and never needs a restart.
             fn set_render_mode(&self, mode: RenderMode) -> bool {
                 !self.link.bridge.audio().is_crashed()
-                    && self.link.bridge.audio().set_render_mode_rt(mode)
+                    && self.link.bridge.audio().set_render_mode(mode)
             }
 
             /// Delivered to both the audio subprocess and the in-process GUI

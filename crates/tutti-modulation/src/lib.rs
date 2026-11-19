@@ -56,7 +56,7 @@
 //!     SourceKey(1),
 //!     Source::Lfo {
 //!         wave: Waveform::Shape { shape: LfoShape::Square, seed: 0 },
-//!         clock: Clock::Beats { per_cycle: BeatsPerCycle::of(4.0), phase: PhaseIncrement(0.0) },
+//!         clock: Clock::Beats { per_cycle: BeatsPerCycle::of(4.0), phase: PhaseIncrement::new(0.0) },
 //!     },
 //! )];
 //! let routes = [(
@@ -78,8 +78,8 @@
 //! // node's own cell) and the range's span (800): a square, ±200.
 //! let program = &compiled.programs[&cutoff];
 //! let at = |beat| ProgramTime {
-//!     beat: Beat(beat),
-//!     play: SamplePosition(0.0),
+//!     beat: Beat::new(beat),
+//!     play: SamplePosition::new(0.0),
 //!     play_epoch: 1,
 //!     rate,
 //! };
@@ -103,8 +103,9 @@ mod source;
 mod sources;
 
 pub use compile::{
-    CompileError, Compiled, Declarations, RATE_ANCHOR_MARGIN, RouteDecl, RouteKey, RouteTarget,
-    SignalKind, SignalSource, Source, SourceKey, TargetDecl, TargetKey, compile, layer_id,
+    CompileError, Compiled, Declarations, MAX_CLOCK_PHASE, RATE_ANCHOR_MARGIN, RouteDecl, RouteKey,
+    RouteTarget, SignalKind, SignalSource, Source, SourceKey, TargetDecl, TargetKey, compile,
+    layer_id,
 };
 pub use curve::{Curve, CurveSegment};
 pub use program::{

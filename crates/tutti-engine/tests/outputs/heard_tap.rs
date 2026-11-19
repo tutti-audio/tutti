@@ -44,7 +44,7 @@ fn engine(width: u16) -> Engine {
     let transport = Transport::new(SampleRate::of(RATE));
     let (mut ed, exec) = Editor::new(Prepare::new(
         SampleRate::of(RATE),
-        MaxBlock::of(Samples(512)),
+        MaxBlock::of(Samples::new(512)),
     ));
     ed.insert(NodeKey(1), "ramp", Unforkable(Ramp { width, at: 0 }));
     ed.spec_mut().topology.set_outputs((0..width).map(|port| {
@@ -106,7 +106,7 @@ fn the_tap_is_the_device_output_on_every_channel() {
         let engine = engine(6);
         let mut tap = engine
             .heard_taps()
-            .open(ChannelLayout::from_count(6), Samples(8192))
+            .open(ChannelLayout::from_count(6), Samples::new(8192))
             .expect("opens")
             .reader()
             .expect("the audio thread is not behind");
@@ -116,7 +116,7 @@ fn the_tap_is_the_device_output_on_every_channel() {
             heard.extend(render(&engine, frames, 6, segment));
             drain(&mut tap, &mut tapped);
         }
-        assert_eq!(tap.take_lost(), Samples(0));
+        assert_eq!(tap.take_lost(), Samples::new(0));
         assert_eq!(heard.len(), 2265 * 6);
         let bits = |x: &[f32]| x.iter().map(|s| s.to_bits()).collect::<Vec<_>>();
         assert_eq!(bits(&tapped), bits(&heard), "segment: {segment}");
@@ -134,19 +134,23 @@ fn a_tap_flows_from_the_next_call_and_stops_at_a_close() {
     let taps = engine.heard_taps();
     render(&engine, 64, 2, false);
     let mut tap = taps
-        .open(ChannelLayout::STEREO, Samples(1024))
+        .open(ChannelLayout::STEREO, Samples::new(1024))
         .expect("opens")
         .reader()
         .expect("the audio thread is not behind");
-    assert_eq!(tap.available(), Samples(0), "nothing before a call renders");
     assert_eq!(
-        taps.open(ChannelLayout::STEREO, Samples(1024)).err(),
+        tap.available(),
+        Samples::new(0),
+        "nothing before a call renders"
+    );
+    assert_eq!(
+        taps.open(ChannelLayout::STEREO, Samples::new(1024)).err(),
         Some(HeardTapError::Busy)
     );
     let second = render(&engine, 64, 2, false);
     assert_eq!(
         tap.available(),
-        Samples(64),
+        Samples::new(64),
         "exactly the next call's block"
     );
     let mut got = vec![0.0f32; 128];
@@ -157,11 +161,11 @@ fn a_tap_flows_from_the_next_call_and_stops_at_a_close() {
     render(&engine, 64, 2, false);
     assert_eq!(
         tap.available(),
-        Samples(0),
+        Samples::new(0),
         "a closed tap gets nothing more"
     );
     drop(tap);
-    let again = taps.open(ChannelLayout::STEREO, Samples(8));
+    let again = taps.open(ChannelLayout::STEREO, Samples::new(8));
     assert!(
         matches!(again, Ok(HeardOpen::Opened(_))),
         "a dropped reader frees the tap"
@@ -175,14 +179,14 @@ fn drops_are_counted_and_a_wrong_width_is_lost_whole() {
     let engine = engine(2);
     let mut tap = engine
         .heard_taps()
-        .open(ChannelLayout::STEREO, Samples(100))
+        .open(ChannelLayout::STEREO, Samples::new(100))
         .expect("opens")
         .reader()
         .expect("the audio thread is not behind");
     render(&engine, 300, 2, false);
-    assert_eq!(tap.available(), Samples(100));
-    assert_eq!(tap.take_lost(), Samples(200));
-    assert_eq!(tap.take_lost(), Samples(0), "reading clears");
+    assert_eq!(tap.available(), Samples::new(100));
+    assert_eq!(tap.take_lost(), Samples::new(200));
+    assert_eq!(tap.take_lost(), Samples::new(0), "reading clears");
     let mut got = vec![0.0f32; 200];
     tap.pop_into(InterleavedMut::new(&mut got, tap.layout()).unwrap())
         .unwrap();
@@ -192,13 +196,13 @@ fn drops_are_counted_and_a_wrong_width_is_lost_whole() {
     let wide = engine_wide();
     let narrow = wide
         .heard_taps()
-        .open(ChannelLayout::STEREO, Samples(1024))
+        .open(ChannelLayout::STEREO, Samples::new(1024))
         .expect("opens")
         .reader()
         .expect("the audio thread is not behind");
     render(&wide, 50, 6, false);
-    assert_eq!(narrow.available(), Samples(0));
-    assert_eq!(narrow.take_lost(), Samples(50));
+    assert_eq!(narrow.available(), Samples::new(0));
+    assert_eq!(narrow.take_lost(), Samples::new(50));
 }
 
 fn engine_wide() -> Engine {
@@ -216,7 +220,7 @@ fn channels_do_not_tear_under_a_concurrent_drain() {
     let engine = engine(6);
     let mut tap = engine
         .heard_taps()
-        .open(ChannelLayout::from_count(6), Samples(256))
+        .open(ChannelLayout::from_count(6), Samples::new(256))
         .expect("opens")
         .reader()
         .expect("the audio thread is not behind");
@@ -271,7 +275,9 @@ fn opening_and_closing_while_rendering_never_frees_on_the_audio_thread() {
         let control = scope.spawn(|| {
             let mut opened = 0;
             while !stop.load(std::sync::atomic::Ordering::Acquire) {
-                if let Ok(HeardOpen::Opened(tap)) = taps.open(ChannelLayout::STEREO, Samples(64)) {
+                if let Ok(HeardOpen::Opened(tap)) =
+                    taps.open(ChannelLayout::STEREO, Samples::new(64))
+                {
                     opened += 1;
                     std::thread::yield_now();
                     drop(tap);
@@ -304,7 +310,7 @@ fn a_close_is_not_lost_to_a_full_install_queue() {
     for _ in 0..4 {
         drop(last.take());
         last = taps
-            .open(layout, Samples(256))
+            .open(layout, Samples::new(256))
             .expect("room for four")
             .reader();
         assert!(last.is_some(), "room for four");
@@ -314,12 +320,12 @@ fn a_close_is_not_lost_to_a_full_install_queue() {
     render(&engine, 64, 2, false);
     assert_eq!(
         last.available(),
-        Samples(0),
+        Samples::new(0),
         "the close came after its open"
     );
     // The queue drained; a new open works again.
     assert!(matches!(
-        taps.open(layout, Samples(8)),
+        taps.open(layout, Samples::new(8)),
         Ok(HeardOpen::Opened(_))
     ));
 }
@@ -335,16 +341,16 @@ fn a_full_install_queue_asks_for_a_retry_and_is_not_an_error() {
     let taps = engine.heard_taps();
     let layout = ChannelLayout::STEREO;
     for _ in 0..4 {
-        let opened = taps.open(layout, Samples(256)).expect("room for four");
+        let opened = taps.open(layout, Samples::new(256)).expect("room for four");
         assert!(matches!(opened, HeardOpen::Opened(_)), "room for four");
     }
     assert!(
-        matches!(taps.open(layout, Samples(256)), Ok(HeardOpen::Retry)),
+        matches!(taps.open(layout, Samples::new(256)), Ok(HeardOpen::Retry)),
         "the audio thread is behind: retry, not an error"
     );
     render(&engine, 64, 2, false);
     assert!(matches!(
-        taps.open(layout, Samples(256)),
+        taps.open(layout, Samples::new(256)),
         Ok(HeardOpen::Opened(_))
     ));
 }

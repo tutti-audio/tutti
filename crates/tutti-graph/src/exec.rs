@@ -435,7 +435,7 @@ fn par_for(
         Schedule::Parallel { wake, from } => Some(Par::new(
             plan,
             participants,
-            (wake, from.0),
+            (wake, from.get()),
             store_len,
             inject_units,
             overlay,
@@ -618,7 +618,7 @@ impl<F: Float> Executor<F> {
         (run.done < bank.fade.duration.get()).then(|| RootFade {
             old: bank.old,
             width: plan.rendered_outputs() - bank.base,
-            done: Samples(run.done),
+            done: Samples::new(run.done),
             fade: bank.fade,
         })
     }
@@ -724,7 +724,7 @@ mod tests {
     /// land once the commit does.
     #[test]
     fn a_command_seen_before_its_commit_waits_for_it() {
-        let prepare = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64)));
+        let prepare = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64)));
         let (mut ed, mut exec) = crate::Editor::new(prepare);
         let seen = Arc::new(AtomicUsize::new(0));
         ed.insert(NodeKey(1), "a", crate::Unforkable(Count(Arc::clone(&seen))));
@@ -746,7 +746,7 @@ mod tests {
         let env = Env {
             frame: exec.clock.frame,
             sample_rate: prepare.sample_rate(),
-            block_len: Samples(64),
+            block_len: Samples::new(64),
             transport: TransportPosition::default(),
             changes: TransportChanges::NONE,
             play: crate::PlayClock::ZERO,
@@ -774,7 +774,7 @@ mod tests {
     /// that has room is not built again.
     #[test]
     fn a_commit_past_the_stores_room_carries_a_store_built_for_it() {
-        let prepare = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64)));
+        let prepare = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64)));
         let (mut ed, mut exec) = crate::Editor::new(prepare);
         let seen = Arc::new(AtomicUsize::new(0));
         let staged_store = |ed: &mut crate::Editor, exec: &mut Executor| {
@@ -846,7 +846,7 @@ mod tests {
         use std::collections::BTreeMap;
         use tutti_units::Mix;
 
-        let prepare = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64)));
+        let prepare = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64)));
         let (a, b, g) = (NodeKey(1), NodeKey(2), NodeKey(3));
         let (big, small) = (1.0 + 2f64.powi(-40), 2f64.powi(-41));
         let gain = 3.0;

@@ -124,7 +124,7 @@ fn a_plugin_gui_edit_becomes_the_knob() {
         &tutti_graph::TransportPosition::new(
             false,
             tutti_units::Bpm::of(120.0),
-            tutti_units::Beat(0.0),
+            tutti_units::Beat::new(0.0),
             None,
         ),
         tutti_buffers::InterleavedMut::one_frame(&mut out).unwrap(),

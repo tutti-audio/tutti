@@ -61,7 +61,10 @@ fn engine(transport: &Transport) -> (Engine, Editor, Arc<Mutex<Vec<Seen>>>) {
 }
 
 fn engine_logging(transport: &Transport, log: Option<Arc<Mutex<Vec<Seen>>>>) -> (Engine, Editor) {
-    let (mut ed, exec) = Editor::new(Prepare::new(SampleRate::of(SR), MaxBlock::of(Samples(512))));
+    let (mut ed, exec) = Editor::new(Prepare::new(
+        SampleRate::of(SR),
+        MaxBlock::of(Samples::new(512)),
+    ));
     ed.insert(NodeKey(1), "probe", Unforkable(LoopProbe(log)));
     ed.spec_mut()
         .topology

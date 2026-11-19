@@ -50,7 +50,7 @@ struct Counters {
 impl Counters {
     fn new() -> Self {
         let (controls, _) =
-            PluginControls::new(Samples(0), PluginTail::default(), SampleRate::SR_48K);
+            PluginControls::new(Samples::new(0), PluginTail::default(), SampleRate::SR_48K);
         let delivery_counters = controls.delivery_counters();
         let bridge_midi = tutti_rt::tally();
         delivery_counters.attach_bridge_midi(bridge_midi.clone());
@@ -163,7 +163,7 @@ fn chords_the_node_had_no_room_for_land_in_the_plugins_losses() {
     let descriptor = loaded.info().clone();
     let prepare = Prepare::new(
         SampleRate::SR_48K,
-        MaxBlock::new(Samples(64)).expect("a block"),
+        MaxBlock::new(Samples::new(64)).expect("a block"),
     );
     let Ok((processor, controller)) = loaded.activate(main, prepare) else {
         panic!("the fake activates");
@@ -184,7 +184,7 @@ fn chords_the_node_had_no_room_for_land_in_the_plugins_losses() {
     let chords: Vec<Event> = (0..HARMONY_CAPACITY + over)
         .map(|i| {
             Event::harmony(
-                Offset::of(Samples(i), Samples(64)),
+                Offset::of(Samples::new(i), Samples::new(64)),
                 Harmony::chord(0, 0, 0b1001),
             )
         })
@@ -208,7 +208,7 @@ fn leave_unlent(controls: &PluginControls, blocks: usize) {
     let descriptor = loaded.info().clone();
     let prepare = Prepare::new(
         SampleRate::SR_48K,
-        MaxBlock::new(Samples(64)).expect("a block"),
+        MaxBlock::new(Samples::new(64)).expect("a block"),
     );
     let Ok((processor, controller)) = loaded.activate(main, prepare) else {
         panic!("the fake activates");

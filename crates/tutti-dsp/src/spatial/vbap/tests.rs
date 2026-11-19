@@ -31,8 +31,8 @@ fn gains(mono: bool, a0: f64, b0: f64) -> VbapGains {
         a: [Gain::SILENT; MAX_CHANNELS],
         b: [Gain::SILENT; MAX_CHANNELS],
     };
-    g.a[0] = Gain(a0);
-    g.b[0] = Gain(b0);
+    g.a[0] = Gain::new(a0);
+    g.b[0] = Gain::new(b0);
     g
 }
 
@@ -141,19 +141,19 @@ fn the_stereo_spread_wraps_instead_of_leaving_the_canonical_range() {
     // Near the rear seam at full width, one source crosses 180 and wraps to
     // the other side: vbap never sees 185 degrees, outside the -180..180
     // range every other path maintains.
-    let (a, b) = virtual_sources(Azimuth(170.0), StereoWidth(1.0));
-    assert_eq!(a, Azimuth(-175.0));
-    assert_eq!(b, Azimuth(155.0));
+    let (a, b) = virtual_sources(Azimuth::new(170.0), StereoWidth::new(1.0));
+    assert_eq!(a, Azimuth::new(-175.0));
+    assert_eq!(b, Azimuth::new(155.0));
 
     // The mirrored case, crossing the other way.
-    let (a, b) = virtual_sources(Azimuth(-170.0), StereoWidth(1.0));
-    assert_eq!(a, Azimuth(-155.0));
-    assert_eq!(b, Azimuth(175.0));
+    let (a, b) = virtual_sources(Azimuth::new(-170.0), StereoWidth::new(1.0));
+    assert_eq!(a, Azimuth::new(-155.0));
+    assert_eq!(b, Azimuth::new(175.0));
 
     // Both stay in range for every bearing and width.
     for deg in -180..=180 {
         for w in [0.0, 0.25, 0.5, 1.0] {
-            let (a, b) = virtual_sources(Azimuth(f64::from(deg)), StereoWidth(w));
+            let (a, b) = virtual_sources(Azimuth::new(f64::from(deg)), StereoWidth::new(w));
             assert!(a.get() >= -180.0 && a.get() <= 180.0, "a={a:?}");
             assert!(b.get() >= -180.0 && b.get() <= 180.0, "b={b:?}");
         }
@@ -164,14 +164,14 @@ fn the_stereo_spread_wraps_instead_of_leaving_the_canonical_range() {
 fn the_spread_is_symmetric_about_the_bearing_away_from_the_seam() {
     // Front and centre: no wrapping involved, so the two sources should
     // straddle the bearing by exactly the offset.
-    let (a, b) = virtual_sources(Azimuth::FRONT, StereoWidth(1.0));
-    assert_eq!(a, Azimuth(15.0));
-    assert_eq!(b, Azimuth(-15.0));
+    let (a, b) = virtual_sources(Azimuth::FRONT, StereoWidth::new(1.0));
+    assert_eq!(a, Azimuth::new(15.0));
+    assert_eq!(b, Azimuth::new(-15.0));
 
     // Width scales the offset; zero width collapses both onto the bearing.
-    let (a, b) = virtual_sources(Azimuth(30.0), StereoWidth(0.0));
-    assert_eq!(a, Azimuth(30.0));
-    assert_eq!(b, Azimuth(30.0));
+    let (a, b) = virtual_sources(Azimuth::new(30.0), StereoWidth::new(0.0));
+    assert_eq!(a, Azimuth::new(30.0));
+    assert_eq!(b, Azimuth::new(30.0));
 }
 
 /// A bearing glide from 170 to -170 degrees passes through 180, never through
@@ -179,11 +179,11 @@ fn the_spread_is_symmetric_about_the_bearing_away_from_the_seam() {
 /// line.
 #[test]
 fn a_bearing_glide_takes_the_short_arc_and_a_height_glide_a_line() {
-    let (from, to) = (Azimuth(170.0), Azimuth(-170.0));
+    let (from, to) = (Azimuth::new(170.0), Azimuth::new(-170.0));
     for k in 0..=10 {
         let at = from.lerp(&to, k, 10);
         assert!(at.get().abs() >= 170.0, "step {k}: {at:?}");
-        let height = Lerp::lerp(&Elevation(0.0), &Elevation(20.0), k, 10);
+        let height = Lerp::lerp(&Elevation::new(0.0), &Elevation::new(20.0), k, 10);
         assert_eq!(height.get(), 2.0 * f64::from(k), "step {k}");
     }
     assert_eq!(from.lerp(&to, 5, 10).get().abs(), 180.0);
@@ -198,9 +198,9 @@ fn a_huge_width_saturates_instead_of_overflowing() {
     let layout = SpeakerLayout::from_bed(tutti_buffers::Bed::Surround714).unwrap();
     let solve = |width: f64| {
         VbapKernel::new(layout.clone()).gains(
-            Azimuth(30.0),
-            Elevation(10.0),
-            StereoWidth(width),
+            Azimuth::new(30.0),
+            Elevation::new(10.0),
+            StereoWidth::new(width),
             Spread::POINT,
         )
     };

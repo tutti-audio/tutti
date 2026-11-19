@@ -51,7 +51,7 @@ const SR: f64 = 48_000.0;
 const FPB: u64 = 24_000;
 
 fn prepare(max_block: usize) -> Prepare {
-    Prepare::new(SampleRate::of(SR), MaxBlock::of(Samples(max_block)))
+    Prepare::new(SampleRate::of(SR), MaxBlock::of(Samples::new(max_block)))
 }
 
 /// Wire global outputs `0..width` to `node`'s outputs.
@@ -363,15 +363,15 @@ fn beat_timed_seek_and_stop_land_on_their_frames() {
     let m = &transport.motion();
     m.try_send(MotionEvent::Play).expect("room");
     m.schedule(
-        At::Beat(Beat(1.0)),
+        At::Beat(Beat::new(1.0)),
         MotionEvent::Locate {
-            beat: Beat(10.0),
+            beat: Beat::new(10.0),
             fade: FadeOut::Immediate,
             then: Then::Keep,
         },
     )
     .expect("room");
-    m.schedule(At::Beat(Beat(10.5)), MotionEvent::stop_unfaded())
+    m.schedule(At::Beat(Beat::new(10.5)), MotionEvent::stop_unfaded())
         .expect("room");
     // 500-frame blocks put the seek on a block's first frame; 700-frame ones
     // put the stop inside a block.
@@ -545,7 +545,7 @@ fn a_timed_declicked_seek_fades_out_before_and_in_after_its_frame() {
             m.schedule(
                 At::Frame(Frame::new(1_000)),
                 MotionEvent::Locate {
-                    beat: Beat(10.0),
+                    beat: Beat::new(10.0),
                     fade: FadeOut::Declick,
                     then: Then::Keep,
                 },
@@ -589,7 +589,7 @@ fn a_declicked_seek_with_short_notice_fades_over_what_is_left() {
             m.schedule(
                 At::Frame(Frame::new(1_224)),
                 MotionEvent::Locate {
-                    beat: Beat(10.0),
+                    beat: Beat::new(10.0),
                     fade: FadeOut::Declick,
                     then: Then::Keep,
                 },
@@ -634,7 +634,7 @@ fn a_declick_lasts_five_milliseconds_at_any_rate() {
         let transport = Transport::new(SampleRate::of(rate));
         let (mut ed, exec) = Editor::new(Prepare::new(
             SampleRate::of(rate),
-            MaxBlock::of(Samples(256)),
+            MaxBlock::of(Samples::new(256)),
         ));
         let log = Arc::new(Mutex::new(Vec::new()));
         ed.insert(NodeKey(1), "node", Unforkable(DcLog(log)));
@@ -681,7 +681,7 @@ fn a_next_block_declicked_seek_fades_in_after_the_jump() {
     let (out, t) = dc_run(8, |m, i| {
         if i == 3 {
             m.try_send(MotionEvent::Locate {
-                beat: Beat(10.0),
+                beat: Beat::new(10.0),
                 fade: FadeOut::Declick,
                 then: Then::Keep,
             })
@@ -771,8 +771,10 @@ fn a_graph_beat_note_after_a_timed_start_lands_on_its_frame() {
         port: 0,
     };
     let note = EventKind::Midi(midi::m1_note_on(MidiChannel::FIRST, 60, U7::of(100)));
-    ed.schedule(At::Beat(Beat(0.0)), to, note).expect("room");
-    ed.schedule(At::Beat(Beat(0.5)), to, note).expect("room");
+    ed.schedule(At::Beat(Beat::new(0.0)), to, note)
+        .expect("room");
+    ed.schedule(At::Beat(Beat::new(0.5)), to, note)
+        .expect("room");
     transport
         .motion()
         .schedule(At::Frame(Frame::new(1_000)), MotionEvent::Play)
@@ -821,7 +823,7 @@ fn env_beats_are_the_closed_form_of_each_segment() {
     m.schedule(
         At::Frame(Frame::new(3_100)),
         MotionEvent::Locate {
-            beat: Beat(3.25),
+            beat: Beat::new(3.25),
             fade: FadeOut::Immediate,
             then: Then::Keep,
         },
@@ -908,7 +910,8 @@ fn a_loop_armed_behind_the_playhead_does_not_jump() {
         1,
     );
     let m = &transport.motion();
-    m.try_send(MotionEvent::play_from(Beat(3.0))).expect("room");
+    m.try_send(MotionEvent::play_from(Beat::new(3.0)))
+        .expect("room");
     // Armed at beat ~3.04, behind the playhead.
     m.schedule(
         At::Frame(Frame::new(1_000)),
@@ -921,7 +924,7 @@ fn a_loop_armed_behind_the_playhead_does_not_jump() {
     m.schedule(
         At::Frame(Frame::new(20_000)),
         MotionEvent::Locate {
-            beat: Beat(1.9),
+            beat: Beat::new(1.9),
             fade: FadeOut::Immediate,
             then: Then::Keep,
         },
@@ -988,7 +991,7 @@ fn a_declick_stop_stops_the_transport_on_its_frame() {
     render(&e, ChannelLayout::MONO, &[256]);
     ed2.collect();
     ed2.schedule(
-        At::Beat(Beat(400.0 / FPB as f64)),
+        At::Beat(Beat::new(400.0 / FPB as f64)),
         EventIn {
             node: NodeKey(1),
             port: 0,
@@ -1082,11 +1085,11 @@ fn re_preparing_under_the_engine_adopts_the_new_block_at_once() {
             &transport,
             &mut ed,
             exec,
-            Samples(2048),
+            Samples::new(2048),
             tutti_engine::BlockDates::Os,
         )
         .expect("fits");
-        assert_eq!(engine.block_capacity(), Samples(2048));
+        assert_eq!(engine.block_capacity(), Samples::new(2048));
         let layout = ChannelLayout::from_count(3);
         let go = |n: usize| {
             let mut buf = vec![0.0f32; n * 3];
@@ -1150,7 +1153,7 @@ fn a_tempo_wiggle_under_the_clock_hysteresis_does_not_move_the_beat() {
         .expect("room");
     transport
         .motion()
-        .schedule(At::Beat(Beat(10.0)), MotionEvent::stop_unfaded())
+        .schedule(At::Beat(Beat::new(10.0)), MotionEvent::stop_unfaded())
         .expect("room");
     for _ in 0..480 {
         render(&engine, ChannelLayout::MONO, &[512]);
@@ -1284,7 +1287,7 @@ fn the_published_playhead_is_the_closed_form_over_ten_minutes() {
 #[test]
 fn two_declicked_commands_close_together_stay_continuous() {
     let seek = |beat: f64| MotionEvent::Locate {
-        beat: Beat(beat),
+        beat: Beat::new(beat),
         fade: FadeOut::Declick,
         then: Then::Keep,
     };
@@ -1356,7 +1359,7 @@ fn a_re_prepare_keeps_the_beat_and_a_frame_command_on_wall_clock_time() {
     let log = Arc::new(Mutex::new(Vec::new()));
     let (mut ed, exec) = Editor::new(Prepare::new(
         SampleRate::of(OLD_SR),
-        MaxBlock::of(Samples(512)),
+        MaxBlock::of(Samples::new(512)),
     ));
     ed.insert(
         NodeKey(1),
@@ -1381,7 +1384,7 @@ fn a_re_prepare_keeps_the_beat_and_a_frame_command_on_wall_clock_time() {
     render(&engine, ChannelLayout::MONO, &[441; 50]);
     ed.reprepare(Prepare::new(
         SampleRate::of(NEW_SR),
-        MaxBlock::of(Samples(512)),
+        MaxBlock::of(Samples::new(512)),
     ))
     .expect("re-prepares");
     // The suspended block: silence, and the rate moves here.

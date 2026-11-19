@@ -3,7 +3,7 @@ use super::*;
 const RATE: f64 = 48_000.0;
 
 fn check(freqs: &[f64]) -> Result<(), CrossoverError> {
-    let f: Vec<Hz> = freqs.iter().map(|&f| Hz(f)).collect();
+    let f: Vec<Hz> = freqs.iter().map(|&f| Hz::new(f)).collect();
     validate(&f, SampleRate::of(RATE))
 }
 
@@ -76,11 +76,11 @@ fn errors_name_what_is_wrong() {
 #[test]
 fn a_set_is_fitted_under_the_rate_and_stays_increasing() {
     let rate = SampleRate::of(RATE);
-    let mut set = [Hz(30_000.0), Hz(25_000.0)];
+    let mut set = [Hz::new(30_000.0), Hz::new(25_000.0)];
     fit_to_rate(&mut set, rate);
     assert!(set[0] < set[1], "{set:?}");
     assert!(set[1].get() <= SOLVE_CEILING * RATE);
-    let mut ok = [Hz(100.0), Hz(1_000.0)];
+    let mut ok = [Hz::new(100.0), Hz::new(1_000.0)];
     fit_to_rate(&mut ok, rate);
-    assert_eq!(ok, [Hz(100.0), Hz(1_000.0)]);
+    assert_eq!(ok, [Hz::new(100.0), Hz::new(1_000.0)]);
 }

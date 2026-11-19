@@ -50,7 +50,7 @@ fn tap_with(frames: &[(f32, f32)]) -> TapReader {
 fn tap_with_ring(frames: &[(f32, f32)], ring: usize) -> TapReader {
     let (mut ed, mut exec): (Editor, Executor) = Editor::new(Prepare::new(
         SampleRate::SR_48K,
-        MaxBlock::of(Samples(BLOCK)),
+        MaxBlock::of(Samples::new(BLOCK)),
     ));
     ed.insert(
         NodeKey(1),
@@ -72,13 +72,13 @@ fn tap_with_ring(frames: &[(f32, f32)], ring: usize) -> TapReader {
             TapId::of(1),
             vec![port(0), port(1)],
             TapAlign::ToOutput,
-            Samples(ring),
+            Samples::new(ring),
         )
         .expect("the sources exist");
     ed.commit().expect("compiles");
     exec.apply_pending();
     ed.collect();
-    let t = TransportPosition::new(true, Bpm::of(120.0), Beat(0.0), None);
+    let t = TransportPosition::new(true, Bpm::of(120.0), Beat::new(0.0), None);
     let mut left = [0.0f32; BLOCK];
     let mut right = [0.0f32; BLOCK];
     for block in frames.chunks(BLOCK) {
@@ -105,7 +105,7 @@ fn rendered_frames_come_back_in_order_and_channel_side() {
     let mut out = [0.0f32; 8 * 2];
     assert_eq!(
         Source::pull(&mut tap, stereo(&mut out)),
-        Pull::Frames(Samples(4)),
+        Pull::Frames(Samples::new(4)),
         "the count is FRAMES, not samples"
     );
 
@@ -125,7 +125,7 @@ fn a_poll_never_writes_past_the_output_slice() {
     let mut out = [0.0f32; 4 * 2];
     assert_eq!(
         Source::pull(&mut tap, stereo(&mut out)),
-        Pull::Frames(Samples(4)),
+        Pull::Frames(Samples::new(4)),
         "must fill exactly the slice"
     );
 
@@ -133,7 +133,7 @@ fn a_poll_never_writes_past_the_output_slice() {
     let mut rest = [0.0f32; 32 * 2];
     assert_eq!(
         Source::pull(&mut tap, stereo(&mut rest)),
-        Pull::Frames(Samples(28))
+        Pull::Frames(Samples::new(28))
     );
 }
 
@@ -173,7 +173,7 @@ fn a_tap_is_accepted_where_a_live_source_is_required() {
 fn the_layout_follows_the_taps_width() {
     let (mut ed, _exec): (Editor, Executor) = Editor::new(Prepare::new(
         SampleRate::SR_48K,
-        MaxBlock::of(Samples(BLOCK)),
+        MaxBlock::of(Samples::new(BLOCK)),
     ));
     for width in [1usize, 2, 6] {
         let reader = ed
@@ -181,7 +181,7 @@ fn the_layout_follows_the_taps_width() {
                 TapId::of(width as u64),
                 vec![Origin::Zero; width],
                 TapAlign::Raw,
-                Samples(8),
+                Samples::new(8),
             )
             .expect("the sources exist");
         assert_eq!(
@@ -195,6 +195,6 @@ fn the_layout_follows_the_taps_width() {
 #[test]
 fn a_tap_reports_the_frames_it_lost() {
     let mut tap = tap_with_ring(&[(1.0, 1.0); 8], 5);
-    assert_eq!(Source::take_lost(&mut tap), Samples(3));
+    assert_eq!(Source::take_lost(&mut tap), Samples::new(3));
     assert_eq!(Source::take_lost(&mut tap), Samples::ZERO, "reading clears");
 }

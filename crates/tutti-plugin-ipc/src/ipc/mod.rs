@@ -875,7 +875,7 @@ impl Ipc {
         };
         let rate = prepare.rate();
         if rate != link.rate() {
-            let _ = link.bridge.audio().set_sample_rate_rt(rate);
+            let _ = link.bridge.audio().set_sample_rate(rate);
             link.set_rate(rate);
         }
         // The widths are the slab's own, which is the snapshot's: one source.

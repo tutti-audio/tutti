@@ -73,11 +73,11 @@ fn bell_db(f: f64, f0: f64, q: f64, gain: f64) -> f64 {
 
 fn controls(threshold: f64, knee: f64, ratio: f64, range: f64, q: f64) -> DynamicEqControls {
     DynamicEqControls {
-        threshold: Db(threshold),
-        knee: Db(knee),
-        ratio: CompressionRatio(ratio),
-        range: Db(range),
-        q: Q(q),
+        threshold: Db::new(threshold),
+        knee: Db::new(knee),
+        ratio: CompressionRatio::new(ratio),
+        range: Db::new(range),
+        q: Q::new(q),
         ..DynamicEqControls::DEFAULT
     }
 }
@@ -262,7 +262,7 @@ fn a_loud_tone_far_from_the_band_does_not_move_it() {
 fn the_attack_reaches_one_minus_inverse_e_in_its_time_constant() {
     let tau = 24_000usize;
     let c = DynamicEqControls {
-        attack: Seconds(tau as f64 / FS),
+        attack: Seconds::new(tau as f64 / FS),
         ..controls(-20.0, 0.0, 4.0, 12.0, 1.0)
     };
     let full = band_gain(DynamicMode::Downward, -6.0, &c);
@@ -283,7 +283,7 @@ fn the_attack_reaches_one_minus_inverse_e_in_its_time_constant() {
 fn the_release_falls_to_inverse_e_in_its_time_constant() {
     let tau = 24_000usize;
     let c = DynamicEqControls {
-        release: Seconds(tau as f64 / FS),
+        release: Seconds::new(tau as f64 / FS),
         ..controls(-20.0, 0.0, 4.0, 12.0, 1.0)
     };
     let full = band_gain(DynamicMode::Downward, -6.0, &c);
@@ -323,8 +323,8 @@ fn the_gain_is_linked_from_the_loudest_key_channel() {
 #[test]
 fn an_upward_band_at_ratio_one_and_a_huge_threshold_lifts_nothing() {
     let c = DynamicEqControls {
-        threshold: Db(3.0e38),
-        ratio: CompressionRatio(1.0),
+        threshold: Db::new(3.0e38),
+        ratio: CompressionRatio::new(1.0),
         ..controls(-20.0, 6.0, 4.0, 12.0, 2.0)
     };
     let x = sine(1000.0, 0.5, 4096);
@@ -341,41 +341,41 @@ fn hostile_controls_and_keys_leave_the_output_finite() {
     let base = controls(-20.0, 6.0, 4.0, 12.0, 2.0);
     let mut all = vec![
         DynamicEqControls {
-            knee: Db(-6.0),
-            ratio: CompressionRatio(0.25),
-            range: Db(-3.0),
-            attack: Seconds(-1.0),
-            release: Seconds(-1.0),
+            knee: Db::new(-6.0),
+            ratio: CompressionRatio::new(0.25),
+            range: Db::new(-3.0),
+            attack: Seconds::new(-1.0),
+            release: Seconds::new(-1.0),
             ..base
         },
         DynamicEqControls {
-            threshold: Db(3.0e38),
-            ratio: CompressionRatio(1.0),
+            threshold: Db::new(3.0e38),
+            ratio: CompressionRatio::new(1.0),
             ..base
         },
         DynamicEqControls {
-            threshold: Db(-3.0e38),
+            threshold: Db::new(-3.0e38),
             ..base
         },
         DynamicEqControls {
-            range: Db(1.0e30),
-            knee: Db(1.0e30),
+            range: Db::new(1.0e30),
+            knee: Db::new(1.0e30),
             ..base
         },
     ];
     for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
         all.push(DynamicEqControls {
-            center: Hz(bad),
-            q: Q(bad),
-            threshold: Db(bad),
-            knee: Db(bad),
-            ratio: CompressionRatio(bad),
-            range: Db(bad),
+            center: Hz::new(bad),
+            q: Q::new(bad),
+            threshold: Db::new(bad),
+            knee: Db::new(bad),
+            ratio: CompressionRatio::new(bad),
+            range: Db::new(bad),
             ..base
         });
         all.push(DynamicEqControls {
-            attack: Seconds(bad),
-            release: Seconds(bad),
+            attack: Seconds::new(bad),
+            release: Seconds::new(bad),
             ..base
         });
     }
@@ -444,8 +444,8 @@ fn the_render_is_the_same_bits_in_any_blocks() {
     let mut key = sine(1_000.0, 0.5, n);
     key[n / 2..].iter_mut().for_each(|x| *x *= 0.05);
     let c = DynamicEqControls {
-        attack: Seconds(0.002),
-        release: Seconds(0.03),
+        attack: Seconds::new(0.002),
+        release: Seconds::new(0.03),
         ..controls(-24.0, 6.0, 4.0, 12.0, 2.0)
     };
     for mode in [DynamicMode::Downward, DynamicMode::Upward] {

@@ -59,7 +59,7 @@ pub struct EnvelopeFilterControls {
 
 impl EnvelopeFilterControls {
     /// The widest depth: 120 semitones, ten octaves either way.
-    pub const MAX_DEPTH: Semitones = Semitones(120.0);
+    pub const MAX_DEPTH: Semitones = Semitones::new(120.0);
 
     /// A filter at the SVF's defaults (1 kHz, Butterworth) whose cutoff does not move, with a
     /// 10 ms attack and a 100 ms release.
@@ -67,8 +67,8 @@ impl EnvelopeFilterControls {
         base: SvfControls::DEFAULT.freq,
         depth: Semitones::UNISON,
         q: SvfControls::DEFAULT.q,
-        attack: Seconds(0.01),
-        release: Seconds(0.1),
+        attack: Seconds::new(0.01),
+        release: Seconds::new(0.1),
     };
 }
 
@@ -163,7 +163,7 @@ impl<F: Float + Lanes + Lerp> EnvelopeFilterBank<F> {
     pub(crate) fn cutoff_at(&self, env: F) -> Hz {
         let ratio = (self.controls.depth * env.into()).to_pitch_ratio();
         (self.controls.base * ratio).clamp(
-            Hz(1.0),
+            Hz::new(1.0),
             self.rate.nyquist_scaled(crate::filter::NYQUIST_MARGIN),
         )
     }

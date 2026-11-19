@@ -66,9 +66,9 @@ use core::ops::RangeInclusive;
 use tutti_buffers::{Mono, Sample};
 use tutti_units::{Ballistics, Db, Hz, SampleRate, Samples, Seconds};
 
-use crate::chroma::FrequencyBand;
 use crate::convert::{all_finite, for_blocks};
 use crate::framing::{Framing, check_hop_within, check_nyquist, check_overlap, check_window};
+use crate::meters::chroma::FrequencyBand;
 use crate::{Error, Measure, Meter, Result};
 use tutti_dsp::BinIndex;
 use tutti_dsp::Complex64;

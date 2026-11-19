@@ -1,5 +1,4 @@
 use super::*;
-use crate::yin::YinConfig;
 use tutti_units::SampleRate;
 
 const SR: SampleRate = SampleRate::SR_48K;

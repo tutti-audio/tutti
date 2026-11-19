@@ -42,10 +42,10 @@ fn engine() -> (LiveSession, ManualStream, NodeKey, NodeKey) {
         .device(Default::default())
         .build_device_on(spec_at(OLD), driver)
         .expect("builds with no device");
-    let (osc, _) = s.graph().add(ForkByClone(Osc::sine(Hz(1_000.0))));
+    let (osc, _) = s.graph().add(ForkByClone(Osc::sine(Hz::new(1_000.0))));
     let (lim, _) = s.graph().add(LimiterNode::<f32>::mono(LimiterControls {
-        threshold: Db(0.0),
-        ceiling: Db(0.0),
+        threshold: Db::new(0.0),
+        ceiling: Db::new(0.0),
         ..LimiterControls::DEFAULT
     }));
     s.graph()
@@ -68,7 +68,7 @@ fn play(s: &mut LiveSession, stream: &ManualStream, frames: usize, blocks: usize
     let mut left = Vec::new();
     for _ in 0..blocks {
         let block = stream
-            .render_block(Samples(frames))
+            .render_block(Samples::new(frames))
             .expect("the stream is open");
         left.extend(block.iter().step_by(2));
         let _ = s.update();
@@ -217,7 +217,7 @@ fn a_restart_past_the_block_capacity_is_refused_and_keeps_playing() {
         .restart_on(
             spec_at(NEW),
             driver,
-            Some(MaxBlock::of(Samples(16_384))),
+            Some(MaxBlock::of(Samples::new(16_384))),
             None,
         )
         .expect_err("past the capacity");
@@ -242,7 +242,7 @@ fn a_restart_past_the_block_capacity_is_refused_and_keeps_playing() {
     s.restart_on(
         spec_with(NEW, 6),
         driver,
-        Some(MaxBlock::of(Samples(2_048))),
+        Some(MaxBlock::of(Samples::new(2_048))),
         None,
     )
     .expect("at a block the engine holds");
@@ -273,7 +273,7 @@ fn a_restart_onto_a_wider_device_widens_the_root() {
     assert_eq!(s.device().spec().channels, ChannelLayout::from(6u16));
     for _ in 0..4 {
         let block = surround
-            .render_block(Samples(480))
+            .render_block(Samples::new(480))
             .expect("the stream is open");
         assert_eq!(block.len(), 480 * 6);
         let _ = s.update();
@@ -386,8 +386,8 @@ fn a_crossfade_after_the_restart_lands_at_once() {
         .graph()
         .crossfade(
             osc,
-            ForkByClone(Osc::sine(Hz(2_000.0))),
-            Seconds(0.005),
+            ForkByClone(Osc::sine(Hz::new(2_000.0))),
+            Seconds::new(0.005),
             FadeLaw::EqualAmplitude,
         )
         .expect("the crossfade is accepted");

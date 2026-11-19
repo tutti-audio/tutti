@@ -5,10 +5,10 @@ use super::*;
 #[test]
 fn controls_refuse_what_a_crossover_cannot_run() {
     let rate = SampleRate::SR_48K;
-    assert!(CrossoverControls::new(&[Hz(100.0), Hz(1_000.0)], rate).is_ok());
-    assert!(CrossoverControls::new(&[Hz(1_000.0), Hz(100.0)], rate).is_err());
-    assert!(CrossoverControls::new(&[Hz(f64::NAN)], rate).is_err());
-    assert!(CrossoverControls::new(&[Hz(30_000.0)], rate).is_err());
+    assert!(CrossoverControls::new(&[Hz::new(100.0), Hz::new(1_000.0)], rate).is_ok());
+    assert!(CrossoverControls::new(&[Hz::new(1_000.0), Hz::new(100.0)], rate).is_err());
+    assert!(CrossoverControls::new(&[Hz::new(f64::NAN)], rate).is_err());
+    assert!(CrossoverControls::new(&[Hz::new(30_000.0)], rate).is_err());
     assert!(CrossoverControls::new(&[], rate).is_err());
 }
 
@@ -17,12 +17,12 @@ fn controls_refuse_what_a_crossover_cannot_run() {
 /// design clamps at the rate it runs at.
 #[test]
 fn ordered_controls_refuse_structure_and_leave_nyquist_to_the_rate() {
-    assert!(CrossoverControls::ordered(&[Hz(100.0), Hz(1_000.0)]).is_ok());
-    assert!(CrossoverControls::ordered(&[Hz(1_000.0), Hz(100.0)]).is_err());
-    assert!(CrossoverControls::ordered(&[Hz(f64::NAN)]).is_err());
+    assert!(CrossoverControls::ordered(&[Hz::new(100.0), Hz::new(1_000.0)]).is_ok());
+    assert!(CrossoverControls::ordered(&[Hz::new(1_000.0), Hz::new(100.0)]).is_err());
+    assert!(CrossoverControls::ordered(&[Hz::new(f64::NAN)]).is_err());
     assert!(CrossoverControls::ordered(&[Hz::ZERO]).is_err());
     assert!(CrossoverControls::ordered(&[]).is_err());
-    let high = [Hz(30_000.0)];
+    let high = [Hz::new(30_000.0)];
     assert!(CrossoverControls::new(&high, SampleRate::SR_48K).is_err());
     assert!(CrossoverControls::new(&high, SampleRate::SR_96K).is_ok());
     assert_eq!(

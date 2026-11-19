@@ -22,9 +22,9 @@
 //!
 //! let mut s = Session::builder()
 //!     .outputs_floor(ChannelLayout::MONO)
-//!     .outputs(ChannelLayout::MONO).max_block(MaxBlock::of(Samples(512))).build()
+//!     .outputs(ChannelLayout::MONO).max_block(MaxBlock::of(Samples::new(512))).build()
 //!     .unwrap();
-//! let (osc, _) = s.graph().add(ForkByClone(Osc::sine(Hz(1_000.0))));
+//! let (osc, _) = s.graph().add(ForkByClone(Osc::sine(Hz::new(1_000.0))));
 //! s.graph().connect(osc, Root).unwrap();
 //! s.update(); // commits: the graph was edited
 //!

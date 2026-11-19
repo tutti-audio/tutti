@@ -28,10 +28,10 @@ impl Subject for Poly {
             oscillator: OscillatorType::Saw,
             filter: FilterType::None,
             envelope: Adsr {
-                attack: Seconds(0.001),
-                decay: Seconds(0.0),
-                sustain: Amplitude(1.0),
-                release: Seconds(0.05),
+                attack: Seconds::new(0.001),
+                decay: Seconds::new(0.0),
+                sustain: Amplitude::new(1.0),
+                release: Seconds::new(0.05),
             },
             ..SynthConfig::default()
         });

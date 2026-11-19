@@ -3,7 +3,7 @@
 
 use tutti_units::Hz;
 
-use crate::transform::StftMagnitude;
+use crate::analyses::transform::StftMagnitude;
 use tutti_dsp::{BinIndex, FrameIndex, spectral_centroid, spectral_flatness, spectral_rolloff};
 
 /// The three features of one frame.

@@ -36,7 +36,7 @@ fn session() -> Session {
     // the first server is spawned, from the test's own thread.
     unsafe { std::env::set_var("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server()) };
     Session::builder()
-        .max_block(MaxBlock::of(Samples(512)))
+        .max_block(MaxBlock::of(Samples::new(512)))
         .build()
         .expect("an offline session builds")
 }

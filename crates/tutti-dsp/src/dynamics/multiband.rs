@@ -80,7 +80,13 @@ impl MultibandSettings {
     /// [`BandSettings::DEFAULT`], the splits at 200 Hz, 1 kHz and 5 kHz.
     pub const DEFAULT: Self = Self {
         crossover: CrossoverControls {
-            frequencies: [Hz(200.0), Hz(1_000.0), Hz(5_000.0), Hz::ZERO, Hz::ZERO],
+            frequencies: [
+                Hz::new(200.0),
+                Hz::new(1_000.0),
+                Hz::new(5_000.0),
+                Hz::ZERO,
+                Hz::ZERO,
+            ],
         },
         bands: [BandSettings::DEFAULT; MAX_BANDS],
     };

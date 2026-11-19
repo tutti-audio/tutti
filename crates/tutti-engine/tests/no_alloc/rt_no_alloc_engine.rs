@@ -86,7 +86,7 @@ fn graph_engine_with_timed_transport_is_allocation_free() {
     let transport = Transport::new(SampleRate::of(sample_rate));
     let (mut ed, exec) = Editor::new(Prepare::new(
         SampleRate::of(sample_rate),
-        tutti_buffers::MaxBlock::of(tutti_units::Samples(512)),
+        tutti_buffers::MaxBlock::of(tutti_units::Samples::new(512)),
     ));
     ed.insert(NodeKey(1), "tone", Unforkable(TransportTone));
     ed.spec_mut().topology.set_outputs((0..2).map(|port| {
@@ -110,7 +110,7 @@ fn graph_engine_with_timed_transport_is_allocation_free() {
     };
     for b in 0..8 {
         ed.schedule(
-            At::Beat(Beat(0.25 * b as f64)),
+            At::Beat(Beat::new(0.25 * b as f64)),
             to,
             EventKind::Midi(midi::m1_note_on(MidiChannel::FIRST, 60, U7::of(100))),
         )
@@ -130,8 +130,11 @@ fn graph_engine_with_timed_transport_is_allocation_free() {
                 )),
             )
             .expect("room");
-            m.schedule(At::Beat(Beat(0.5)), MotionEvent::locate(Beat(0.0)))
-                .expect("room");
+            m.schedule(
+                At::Beat(Beat::new(0.5)),
+                MotionEvent::locate(Beat::new(0.0)),
+            )
+            .expect("room");
             m.schedule(At::Frame(Frame::new(base + 6000)), MotionEvent::stop())
                 .expect("room");
             m.schedule(
@@ -174,7 +177,7 @@ fn a_published_tempo_map_is_taken_without_allocating() {
     let transport = Transport::new(SampleRate::SR_48K);
     let (mut ed, exec) = Editor::new(Prepare::new(
         SampleRate::SR_48K,
-        tutti_buffers::MaxBlock::of(tutti_units::Samples(512)),
+        tutti_buffers::MaxBlock::of(tutti_units::Samples::new(512)),
     ));
     ed.insert(NodeKey(1), "tone", Unforkable(TransportTone));
     ed.spec_mut().topology.set_outputs((0..2).map(|port| {
@@ -228,13 +231,13 @@ fn a_step_map_is_followed_without_allocating() {
     let dense = |last: f64| {
         let mut points: Vec<TempoPoint> = (0..41)
             .map(|i| TempoPoint {
-                beat: Beat(f64::from(i) * 0.001),
+                beat: Beat::new(f64::from(i) * 0.001),
                 tempo: Bpm::of(120.0 + f64::from(i)),
                 transition: Transition::Step,
             })
             .collect();
         points.push(TempoPoint {
-            beat: Beat(1.0),
+            beat: Beat::new(1.0),
             tempo: Bpm::of(last),
             transition: Transition::Step,
         });
@@ -243,7 +246,7 @@ fn a_step_map_is_followed_without_allocating() {
     let transport = Transport::new(SampleRate::SR_48K);
     let (mut ed, exec) = Editor::new(Prepare::new(
         SampleRate::SR_48K,
-        tutti_buffers::MaxBlock::of(tutti_units::Samples(512)),
+        tutti_buffers::MaxBlock::of(tutti_units::Samples::new(512)),
     ));
     ed.insert(NodeKey(1), "tone", Unforkable(TransportTone));
     ed.spec_mut().topology.set_outputs((0..2).map(|port| {
@@ -258,7 +261,7 @@ fn a_step_map_is_followed_without_allocating() {
     transport.settings().set_tempo_map(dense(90.0));
     transport
         .motion()
-        .try_send(MotionEvent::play_from(Beat(0.0)))
+        .try_send(MotionEvent::play_from(Beat::new(0.0)))
         .expect("room");
     let mut output = vec![0.0f32; 1024 * 2];
     engine.process(&mut InterleavedMut::new(&mut output, ChannelLayout::STEREO).unwrap());
@@ -275,7 +278,8 @@ fn a_step_map_is_followed_without_allocating() {
             LoopEdit::over(LoopRange::new(Beat::new(0.0), Beat::new(0.02)).expect("ordered")),
         )
         .expect("room");
-        m.try_send(MotionEvent::play_from(Beat(0.0))).expect("room");
+        m.try_send(MotionEvent::play_from(Beat::new(0.0)))
+            .expect("room");
         assert_no_alloc::assert_no_alloc(|| {
             for _ in 0..4 {
                 engine
@@ -293,12 +297,12 @@ fn a_step_map_is_followed_without_allocating() {
         Arc::new(
             TempoMap::new([
                 TempoPoint {
-                    beat: Beat(0.0),
+                    beat: Beat::new(0.0),
                     tempo: Bpm::of(120.0),
                     transition,
                 },
                 TempoPoint {
-                    beat: Beat(2.0),
+                    beat: Beat::new(2.0),
                     tempo: Bpm::of(end),
                     transition: Transition::Step,
                 },
@@ -309,7 +313,7 @@ fn a_step_map_is_followed_without_allocating() {
     let transport = Transport::new(SampleRate::SR_48K);
     let (mut ed, exec) = Editor::new(Prepare::new(
         SampleRate::SR_48K,
-        tutti_buffers::MaxBlock::of(tutti_units::Samples(4_096)),
+        tutti_buffers::MaxBlock::of(tutti_units::Samples::new(4_096)),
     ));
     ed.insert(NodeKey(1), "tone", Unforkable(TransportTone));
     ed.spec_mut().topology.set_outputs((0..2).map(|port| {
@@ -326,7 +330,7 @@ fn a_step_map_is_followed_without_allocating() {
         .set_tempo_map(ramp(60.0, Transition::RampTime { end: None }));
     transport
         .motion()
-        .try_send(MotionEvent::play_from(Beat(0.0)))
+        .try_send(MotionEvent::play_from(Beat::new(0.0)))
         .expect("room");
     let mut output = vec![0.0f32; 4_096 * 2];
     engine.process(&mut InterleavedMut::new(&mut output, ChannelLayout::STEREO).unwrap());
@@ -350,7 +354,8 @@ fn a_step_map_is_followed_without_allocating() {
             LoopEdit::over(LoopRange::new(Beat::new(0.1), Beat::new(0.3)).expect("ordered")),
         )
         .expect("room");
-        m.try_send(MotionEvent::play_from(Beat(0.2))).expect("room");
+        m.try_send(MotionEvent::play_from(Beat::new(0.2)))
+            .expect("room");
         assert_no_alloc::assert_no_alloc(|| {
             for _ in 0..4 {
                 engine
@@ -381,7 +386,7 @@ fn the_heard_tap_is_allocation_free() {
     let transport = Transport::new(SampleRate::SR_48K);
     let (mut ed, exec) = Editor::new(Prepare::new(
         SampleRate::SR_48K,
-        tutti_buffers::MaxBlock::of(tutti_units::Samples(512)),
+        tutti_buffers::MaxBlock::of(tutti_units::Samples::new(512)),
     ));
     ed.insert(NodeKey(1), "tone", Unforkable(TransportTone));
     ed.spec_mut().topology.set_outputs((0..2).map(|port| {
@@ -402,7 +407,7 @@ fn the_heard_tap_is_allocation_free() {
 
     // 16 frames of ring against 1024-frame blocks: every block overflows.
     let first = taps
-        .open(layout, tutti_units::Samples(16))
+        .open(layout, tutti_units::Samples::new(16))
         .expect("opens")
         .reader()
         .expect("the audio thread is not behind");
@@ -415,7 +420,7 @@ fn the_heard_tap_is_allocation_free() {
     taps.reclaim();
     // The reclaim queued a close; a new open queues a replacement behind it.
     let second = taps
-        .open(layout, tutti_units::Samples(4096))
+        .open(layout, tutti_units::Samples::new(4096))
         .expect("reopens")
         .reader()
         .expect("the audio thread is not behind");
@@ -483,12 +488,14 @@ fn graph_engine_with_env_clock_and_metronome_is_allocation_free() {
     let transport = Transport::new(SampleRate::of(sample_rate));
     let settings = Arc::new(ClickSettings::new());
     settings.mode().set(MetronomeMode::Always);
-    settings.store_volume(tutti_nodes::ClickLevel::of(tutti_units::Amplitude(1.0)));
+    settings.store_volume(tutti_nodes::ClickLevel::of(tutti_units::Amplitude::new(
+        1.0,
+    )));
     let click = ClickNode::new(&transport, Arc::clone(&settings));
 
     let (mut ed, exec) = Editor::new(Prepare::new(
         SampleRate::of(sample_rate),
-        tutti_buffers::MaxBlock::of(tutti_units::Samples(512)),
+        tutti_buffers::MaxBlock::of(tutti_units::Samples::new(512)),
     ));
     let (clock, sink) = (NodeKey(1), NodeKey(2));
     ed.insert(clock, "clock", Unforkable(BeatWalk));
@@ -522,8 +529,11 @@ fn graph_engine_with_env_clock_and_metronome_is_allocation_free() {
                 )),
             )
             .expect("room");
-            m.schedule(At::Beat(Beat(1.75)), MotionEvent::locate(Beat(0.9)))
-                .expect("room");
+            m.schedule(
+                At::Beat(Beat::new(1.75)),
+                MotionEvent::locate(Beat::new(0.9)),
+            )
+            .expect("room");
             m.schedule(
                 At::Frame(Frame::new(base + 7000)),
                 TransportCommand::Loop(LoopEdit::armed(false)),
@@ -576,7 +586,7 @@ fn graph_engine_on_a_worker_pool_is_allocation_free() {
     let transport = Transport::new(SampleRate::of(sample_rate));
     let (mut ed, mut exec) = Editor::new(Prepare::new(
         SampleRate::of(sample_rate),
-        tutti_buffers::MaxBlock::of(tutti_units::Samples(512)),
+        tutti_buffers::MaxBlock::of(tutti_units::Samples::new(512)),
     ));
     // Parks quickly, so the gated blocks below wake parked helpers.
     let pool = tutti_graph::WorkerPool::builder()
@@ -590,7 +600,7 @@ fn graph_engine_on_a_worker_pool_is_allocation_free() {
         ed.insert(
             NodeKey(k + 1),
             "sine",
-            ForkByClone(crate::support::Sine::new(tutti_units::Hz(
+            ForkByClone(crate::support::Sine::new(tutti_units::Hz::new(
                 220.0 * (k + 1) as f64,
             ))),
         );
@@ -677,7 +687,7 @@ fn a_714_root_block_is_allocation_free() {
     let transport = Transport::new(SampleRate::of(48_000.0));
     let (mut ed, exec) = Editor::new(Prepare::new(
         SampleRate::of(48_000.0),
-        tutti_buffers::MaxBlock::of(tutti_units::Samples(512)),
+        tutti_buffers::MaxBlock::of(tutti_units::Samples::new(512)),
     ));
     ed.insert(NodeKey(1), "wide", Unforkable(TwelveWide));
     ed.spec_mut().topology.set_outputs((0..12).map(|port| {
@@ -745,7 +755,7 @@ fn a_declared_root_into_a_stated_device_is_allocation_free() {
     let transport = Transport::new(SampleRate::of(48_000.0));
     let (mut ed, exec) = Editor::new(Prepare::new(
         SampleRate::of(48_000.0),
-        tutti_buffers::MaxBlock::of(tutti_units::Samples(512)),
+        tutti_buffers::MaxBlock::of(tutti_units::Samples::new(512)),
     ));
     ed.insert(NodeKey(1), "wide", Unforkable(TwelveWide));
     ed.spec_mut().topology.set_outputs((0..12).map(|port| {
@@ -805,7 +815,7 @@ fn a_live_routing_and_ramping_output_gains_are_allocation_free() {
     let transport = Transport::new(SampleRate::of(48_000.0));
     let (mut ed, exec) = Editor::new(Prepare::new(
         SampleRate::of(48_000.0),
-        tutti_buffers::MaxBlock::of(tutti_units::Samples(512)),
+        tutti_buffers::MaxBlock::of(tutti_units::Samples::new(512)),
     ));
     ed.insert(NodeKey(1), "wide", Unforkable(TwelveWide));
     ed.spec_mut().topology.set_outputs((0..12).map(|port| {
@@ -841,7 +851,7 @@ fn a_live_routing_and_ramping_output_gains_are_allocation_free() {
     };
     let mut levels = OutputLevels::new();
     levels.set_strip(2, strip(true)).unwrap();
-    control.set_levels(&levels.clone().with_dim(Some(Amplitude(0.5))).unwrap());
+    control.set_levels(&levels.clone().with_dim(Some(Amplitude::new(0.5))).unwrap());
     // Two blocks into the first ramp...
     block(&engine);
     block(&engine);
@@ -849,7 +859,7 @@ fn a_live_routing_and_ramping_output_gains_are_allocation_free() {
     // another dim.
     levels.set_strip(2, strip(false)).unwrap();
     levels.set_strip(3, strip(true)).unwrap();
-    control.set_levels(&levels.with_dim(Some(Amplitude(0.25))).unwrap());
+    control.set_levels(&levels.with_dim(Some(Amplitude::new(0.25))).unwrap());
     for _ in 0..8 {
         block(&engine);
     }
@@ -886,7 +896,7 @@ fn a_routing_crossfade_is_allocation_free() {
     let transport = Transport::new(SampleRate::of(48_000.0));
     let (mut ed, exec) = Editor::new(Prepare::new(
         SampleRate::of(48_000.0),
-        tutti_buffers::MaxBlock::of(tutti_units::Samples(512)),
+        tutti_buffers::MaxBlock::of(tutti_units::Samples::new(512)),
     ));
     ed.insert(NodeKey(1), "wide", Unforkable(TwelveWide));
     ed.spec_mut().topology.set_outputs((0..12).map(|port| {
@@ -946,7 +956,7 @@ struct Latent;
 impl tutti_graph::Node for Latent {
     fn shape(&self) -> tutti_graph::Shape {
         tutti_graph::Shape::source_unassigned(ChannelLayout::MONO)
-            .with_latency(tutti_units::Latency::new(tutti_units::Samples(16)))
+            .with_latency(tutti_units::Latency::new(tutti_units::Samples::new(16)))
             .with_tail(tutti_units::Tail::Unbounded)
     }
     fn prepare(&mut self, _: &tutti_graph::Prepare) {}
@@ -978,7 +988,7 @@ fn a_root_change_crossfaded_across_several_blocks_is_allocation_free() {
     let transport = Transport::new(SampleRate::of(48_000.0));
     let (mut ed, exec) = Editor::new(Prepare::new(
         SampleRate::of(48_000.0),
-        MaxBlock::of(Samples(64)),
+        MaxBlock::of(Samples::new(64)),
     ));
     ed.insert(NodeKey(1), "wide", Unforkable(TwelveWide));
     ed.insert(NodeKey(2), "latent", Unforkable(Latent));
@@ -998,7 +1008,7 @@ fn a_root_change_crossfaded_across_several_blocks_is_allocation_free() {
     let engine = Engine::new(&transport, &mut ed, exec, tutti_engine::BlockDates::Os)
         .expect("twelve is within the cap");
     ed.set_root_fade(Some(Fade::seconds(
-        Seconds(0.005),
+        Seconds::new(0.005),
         SampleRate::of(48_000.0),
         FadeLaw::EqualAmplitude,
     )));

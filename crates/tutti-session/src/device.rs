@@ -528,7 +528,7 @@ impl<F: SessionFloat> Device<F> {
     #[must_use]
     pub fn latency(&self) -> DeviceLatency {
         let rate = self.graph_rate();
-        let frames = |delay: Duration| Seconds(delay.as_secs_f64()).to_samples(rate);
+        let frames = |delay: Duration| Seconds::new(delay.as_secs_f64()).to_samples(rate);
         DeviceLatency {
             input: self.input_latency.get().map(frames),
             output: self.driver.stream().latency().get().map(frames),

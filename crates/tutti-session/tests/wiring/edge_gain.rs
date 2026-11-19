@@ -473,7 +473,7 @@ fn a_gain_target_of_a_removed_lane_is_refused_at_the_call() {
         .replace(
             r.sink,
             ForkByClone(Const::mono(A)),
-            Seconds(0.0),
+            Seconds::new(0.0),
             FadeLaw::EqualAmplitude,
         )
         .unwrap();

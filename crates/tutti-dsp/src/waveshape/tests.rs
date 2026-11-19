@@ -29,7 +29,7 @@ fn curves_are_pinned() {
         (ShapeKind::SoftCrush, 0.25, 2.0, 0.25),
     ];
     for (kind, x, drive, want) in exact {
-        let got = kind.apply::<f32>(x, Drive(drive));
+        let got = kind.apply::<f32>(x, Drive::new(drive));
         assert_eq!(
             got.to_bits(),
             f32::to_bits(want),
@@ -39,7 +39,7 @@ fn curves_are_pinned() {
 
     // Off the midpoint the S-curve is a rational: smooth9(1/4) is
     // 12826 / 262144 exactly, so at hardness 1 a quarter step lands there.
-    let quarter = ShapeKind::SoftCrush.apply::<f32>(0.25, Drive(1.0));
+    let quarter = ShapeKind::SoftCrush.apply::<f32>(0.25, Drive::new(1.0));
     assert!((f64::from(quarter) - 12826.0 / 262144.0).abs() < 1e-7);
 
     let half_pi = std::f64::consts::FRAC_PI_2;
@@ -55,7 +55,7 @@ fn curves_are_pinned() {
         ),
     ];
     for (kind, x, drive, want) in closed {
-        let got = f64::from(kind.apply(x, Drive(drive)));
+        let got = f64::from(kind.apply(x, Drive::new(drive)));
         assert!(
             (got - want).abs() < 1e-6,
             "{kind:?}({x}, drive {drive}) = {got}, want {want}"
@@ -109,7 +109,7 @@ const RATE: SampleRate = SampleRate::SR_48K;
 fn landed(kind: ShapeKind, drive: f64) -> WaveshaperBank<f32> {
     let mut bank = WaveshaperBank::<f32>::new(kind, RATE);
     bank.aim(&WaveshaperControls {
-        drive: Drive(drive),
+        drive: Drive::new(drive),
     });
     bank.settle();
     bank
@@ -194,7 +194,9 @@ fn a_drive_step_glides_linearly_over_the_glide() {
     let x = 0.2f32;
     for block in [n + 40, 7] {
         let mut bank = landed(ShapeKind::HardClip, 1.0);
-        bank.aim(&WaveshaperControls { drive: Drive(3.0) });
+        bank.aim(&WaveshaperControls {
+            drive: Drive::new(3.0),
+        });
         let mut out = Vec::new();
         while out.len() < n + 40 {
             out.extend(run(&mut bank, None, &[vec![x; block]]).remove(0));
@@ -225,7 +227,9 @@ fn channels_are_independent() {
 #[test]
 fn settle_lands_on_the_target() {
     let mut bank = landed(ShapeKind::Softsign, 1.0);
-    bank.aim(&WaveshaperControls { drive: Drive(3.0) });
+    bank.aim(&WaveshaperControls {
+        drive: Drive::new(3.0),
+    });
     bank.settle();
     let out = run(&mut bank, None, &[vec![1.0]]);
     assert_eq!(out[0][0], 0.75);
@@ -238,7 +242,9 @@ fn settle_lands_on_the_target() {
 fn a_non_finite_lane_frame_mid_glide_reads_the_glide() {
     let n = GAIN_GLIDE.to_samples_ceil(RATE).get();
     let mut bank = landed(ShapeKind::HardClip, 1.0);
-    bank.aim(&WaveshaperControls { drive: Drive(3.0) });
+    bank.aim(&WaveshaperControls {
+        drive: Drive::new(3.0),
+    });
     let mut lane = vec![f32::NAN; 20];
     lane[5] = 2.0;
     let out = run(&mut bank, Some(&lane), &[vec![0.2; 20]]).remove(0);
@@ -271,7 +277,9 @@ fn the_drive_floors_hold_on_the_lane_and_the_glide() {
     }
     // Glide: a drive aimed below the floor never reads below it, on the way or on arrival.
     let mut clip = landed(ShapeKind::HardClip, 1.0);
-    clip.aim(&WaveshaperControls { drive: Drive(-2.0) });
+    clip.aim(&WaveshaperControls {
+        drive: Drive::new(-2.0),
+    });
     let n = GAIN_GLIDE.to_samples_ceil(RATE).get();
     let out = run(&mut clip, None, &[vec![0.25; n + 10]]).remove(0);
     for (i, &y) in out.iter().enumerate() {
@@ -280,7 +288,9 @@ fn the_drive_floors_hold_on_the_lane_and_the_glide() {
         assert!((f64::from(y) - 0.25 * drive).abs() < 1e-6, "frame {i}: {y}");
     }
     let mut crush = landed(ShapeKind::Crush, 4.0);
-    crush.aim(&WaveshaperControls { drive: Drive(-3.0) });
+    crush.aim(&WaveshaperControls {
+        drive: Drive::new(-3.0),
+    });
     let out = run(&mut crush, None, &[vec![0.6; n + 10]]).remove(0);
     // One level per unit once the line is under 1: round(0.6) = 1; above it the line is at
     // hardness h and the output is round(0.6 h) / h.
@@ -301,7 +311,7 @@ fn the_drive_floors_hold_on_the_lane_and_the_glide() {
 fn antialiased(kind: ShapeKind, drive: f64, order: Antialiasing) -> WaveshaperBank<f32> {
     let mut bank = WaveshaperBank::<f32>::new(kind, RATE).antialiasing(order);
     bank.aim(&WaveshaperControls {
-        drive: Drive(drive),
+        drive: Drive::new(drive),
     });
     bank.settle();
     bank
@@ -998,7 +1008,7 @@ fn a_non_finite_input_is_heard_at_its_own_frame_only() {
 fn through_f64(kind: ShapeKind, drive: f64, order: Antialiasing, x: &[f64]) -> Vec<f64> {
     let mut bank = WaveshaperBank::<f64>::new(kind, RATE).antialiasing(order);
     bank.aim(&WaveshaperControls {
-        drive: Drive(drive),
+        drive: Drive::new(drive),
     });
     bank.settle();
     let mut out = vec![0.0f64; x.len()];

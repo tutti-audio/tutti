@@ -93,8 +93,8 @@ impl Sweep {
                 max_delay: max_delay.get(),
             });
         }
-        let f = feedback_max.0;
-        if !(f.is_finite() && f >= 0.0 && f <= Feedback::MAX_STABLE.0) {
+        let f = feedback_max.get();
+        if !(f.is_finite() && f >= 0.0 && f <= Feedback::MAX_STABLE.get()) {
             return Err(SweepError::FeedbackMax(feedback_max));
         }
         Ok(Self {
@@ -129,10 +129,10 @@ impl Sweep {
     /// The long base delay is what separates chorus from flanger: the copy sits far
     /// enough behind to read as a second voice.
     pub const CHORUS: Self = Self::of(
-        Seconds(0.01),
-        MaxDelay::of(Seconds(0.05)),
+        Seconds::new(0.01),
+        MaxDelay::of(Seconds::new(0.05)),
         Seconds::ZERO,
-        Seconds(0.04),
+        Seconds::new(0.04),
         Feedback::MAX_STABLE,
     );
 
@@ -140,10 +140,10 @@ impl Sweep {
     /// The short base delay lands the copy close enough to interfere with the original,
     /// producing the comb notches whose sweep is the flanger's signature.
     pub const FLANGER: Self = Self::of(
-        Seconds(0.001),
-        MaxDelay::of(Seconds(0.02)),
-        Seconds(0.0001),
-        Seconds(0.01),
+        Seconds::new(0.001),
+        MaxDelay::of(Seconds::new(0.02)),
+        Seconds::new(0.0001),
+        Seconds::new(0.01),
         Feedback::MAX_STABLE,
     );
 
@@ -153,10 +153,10 @@ impl Sweep {
     /// its node declare a finite ceiling: what it outputs was in its input at most
     /// `max_delay` ago.
     pub const GENERAL_MIDI_CHORUS: Self = Self::of(
-        Seconds(0.002),
-        MaxDelay::of(Seconds(0.005)),
+        Seconds::new(0.002),
+        MaxDelay::of(Seconds::new(0.005)),
         Seconds::ZERO,
-        Seconds(0.0019),
+        Seconds::new(0.0019),
         Feedback::NONE,
     );
 
@@ -251,7 +251,7 @@ pub enum StaggerError {
 impl Stagger {
     /// No stagger: every channel sweeps in step with channel 0.
     pub const NONE: Self = Self {
-        kind: Kind::Step(PhaseIncrement(0.0)),
+        kind: Kind::Step(PhaseIncrement::new(0.0)),
     };
 
     /// Channel `c` runs `c` times `step` ahead of channel 0, wrapped into one cycle: at
@@ -291,9 +291,9 @@ impl Stagger {
                 max: MAX_CHANNELS,
             });
         }
-        let mut all = [PhaseIncrement(0.0); MAX_CHANNELS];
+        let mut all = [PhaseIncrement::new(0.0); MAX_CHANNELS];
         for (channel, &offset) in offsets.iter().enumerate() {
-            if !offset.0.is_finite() {
+            if !offset.get().is_finite() {
                 return Err(StaggerError::NotFinite { channel, offset });
             }
             all[channel] = wrap(offset);
@@ -325,14 +325,14 @@ impl Stagger {
             Kind::Each { offsets, .. } => offsets
                 .get(channel.get())
                 .copied()
-                .unwrap_or(PhaseIncrement(0.0)),
+                .unwrap_or(PhaseIncrement::new(0.0)),
         }
     }
 }
 
 /// `x` wrapped into one cycle by [`Phase`]'s own wrap.
 fn wrap(x: PhaseIncrement) -> PhaseIncrement {
-    PhaseIncrement(Phase::START.advance(x).get())
+    PhaseIncrement::new(Phase::START.advance(x).get())
 }
 
 #[cfg(test)]

@@ -32,10 +32,10 @@ use crate::level::SILENCE_FLOOR;
 use tutti_buffers::{Float, Mono, Sample};
 use tutti_units::{Bpm, Confidence, SampleRate, Samples, Seconds};
 
+use crate::analyses::xcorr::cross_correlate;
 use crate::convert::widen;
 use crate::framing::Framing;
-use crate::onset::{DetectionFunction, OnsetConfig, onset_lag, run};
-use crate::xcorr::cross_correlate;
+use crate::meters::onset::{DetectionFunction, OnsetConfig, onset_lag, run};
 use crate::{Error, Result};
 use tutti_dsp::StftGeometry;
 use tutti_dsp::{FftScratch, FrameCount};

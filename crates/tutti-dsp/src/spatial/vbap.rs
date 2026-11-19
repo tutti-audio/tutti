@@ -23,15 +23,15 @@ pub use error::SpeakerGeometryError;
 pub use layout::SpeakerLayout;
 
 /// A width below this folds the stereo pair to mono and pans one source.
-const MONO_WIDTH: StereoWidth = StereoWidth(0.001);
+const MONO_WIDTH: StereoWidth = StereoWidth::new(0.001);
 
 /// How far each virtual source sits from the bearing at width 1.
-const WIDTH_HALF_ANGLE: ArcDegrees = ArcDegrees(15.0);
+const WIDTH_HALF_ANGLE: ArcDegrees = ArcDegrees::new(15.0);
 
 /// The width that puts the two virtual sources at the antipode of the bearing
 /// (an offset of half a turn). The solve saturates the width here by convention,
 /// so a huge one cannot overflow the offset.
-const MAX_WIDTH: StereoWidth = StereoWidth(180.0 / WIDTH_HALF_ANGLE.get());
+const MAX_WIDTH: StereoWidth = StereoWidth::new(180.0 / WIDTH_HALF_ANGLE.get());
 
 /// One direction's speaker gains, as an end of a glide between two grid points.
 ///
@@ -54,7 +54,7 @@ impl VbapGains {
     #[inline]
     pub fn pair(&self, s: usize) -> (Gain, Gain) {
         if self.mono {
-            let half = Gain(self.a[s].get() * 0.5);
+            let half = Gain::new(self.a[s].get() * 0.5);
             (half, half)
         } else {
             (self.a[s], self.b[s])
@@ -154,7 +154,7 @@ impl Lerp for VbapGains {
         if self.mono && to.mono {
             let mut a = [Gain::SILENT; MAX_CHANNELS];
             for (g, (from, to)) in a.iter_mut().zip(self.a.iter().zip(&to.a)) {
-                *g = Gain(from.get().lerp(&to.get(), k, n));
+                *g = Gain::new(from.get().lerp(&to.get(), k, n));
             }
             return Self {
                 mono: true,
@@ -165,8 +165,8 @@ impl Lerp for VbapGains {
         let (mut a, mut b) = ([Gain::SILENT; MAX_CHANNELS], [Gain::SILENT; MAX_CHANNELS]);
         for s in 0..MAX_CHANNELS {
             let (from, to) = (self.pair(s), to.pair(s));
-            a[s] = Gain(from.0.get().lerp(&to.0.get(), k, n));
-            b[s] = Gain(from.1.get().lerp(&to.1.get(), k, n));
+            a[s] = Gain::new(from.0.get().lerp(&to.0.get(), k, n));
+            b[s] = Gain::new(from.1.get().lerp(&to.1.get(), k, n));
         }
         Self { mono: false, a, b }
     }
@@ -261,9 +261,9 @@ impl VbapKernel {
     ) -> VbapGains {
         // A NaN reads as no width.
         let width = if width.get().is_nan() {
-            StereoWidth(0.0)
+            StereoWidth::new(0.0)
         } else {
-            width.clamp(StereoWidth(0.0), MAX_WIDTH)
+            width.clamp(StereoWidth::new(0.0), MAX_WIDTH)
         };
         let count = self.layout.speaker_count();
         if width < MONO_WIDTH {

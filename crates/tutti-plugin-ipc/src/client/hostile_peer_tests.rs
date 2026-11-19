@@ -92,6 +92,12 @@ fn no_editor(
     })
 }
 
+/// The answer to the request the bridge sends after a render mode: the server
+/// answers its control lane in order, so this says the mode is applied.
+fn applied_fence() -> BridgeMessage {
+    BridgeMessage::CurrentPreset { id: None }
+}
+
 fn stereo_layout() -> SlabLayout {
     SlabLayout {
         slots: RING_SLOTS as u32,
@@ -292,8 +298,13 @@ fn serve_lane(
     }
 }
 
+/// How a mock lane answers: a script over the messages of its connection.
+type Responder = Arc<std::sync::Mutex<Box<dyn Fn(HostMessage) -> Action + Send>>>;
+
 struct MockServer {
     bridge: Arc<PluginBridge>,
+    /// The ring the bridge's audio lane answers blocks into.
+    replies: crate::client::audio::Replies,
     /// `Option` only so `Drop` can take it out and `mem::forget` it; see there.
     thread: Option<BridgeThread>,
     server: Option<std::thread::JoinHandle<()>>,
@@ -340,6 +351,37 @@ impl MockServer {
         timeouts: Timeouts,
         respond: impl Fn(HostMessage) -> Action + Send + 'static,
     ) -> Self {
+        // One script for both lanes: a test's script sees the requests of both
+        // as it saw the one's.
+        let respond: Responder = Arc::new(std::sync::Mutex::new(Box::new(respond)));
+        Self::start_on(label, timeouts, [Arc::clone(&respond), respond])
+    }
+
+    /// As [`start_with_timeouts`](Self::start_with_timeouts), each lane with a
+    /// script of its own: a lane held in one answer does not hold the other.
+    fn start_lanes(
+        label: &str,
+        audio: impl Fn(HostMessage) -> Action + Send + 'static,
+        control: impl Fn(HostMessage) -> Action + Send + 'static,
+    ) -> Self {
+        // A request that is not answered stays outstanding past any test.
+        Self::start_lanes_under(label, unreachable_deadline(), audio, control)
+    }
+
+    /// As [`start_lanes`](Self::start_lanes), under `timeouts`.
+    fn start_lanes_under(
+        label: &str,
+        timeouts: Timeouts,
+        audio: impl Fn(HostMessage) -> Action + Send + 'static,
+        control: impl Fn(HostMessage) -> Action + Send + 'static,
+    ) -> Self {
+        fn lane(respond: impl Fn(HostMessage) -> Action + Send + 'static) -> Responder {
+            Arc::new(std::sync::Mutex::new(Box::new(respond)))
+        }
+        Self::start_on(label, timeouts, [lane(audio), lane(control)])
+    }
+
+    fn start_on(label: &str, timeouts: Timeouts, lanes: [Responder; 2]) -> Self {
         let timeouts = {
             let mut t = timeouts;
             t.reply_margin = REPLY_MARGIN;
@@ -353,7 +395,7 @@ impl MockServer {
             .create_sync()
             .expect("listen");
 
-        let (bridge, thread, _replies) = PluginBridge::new(
+        let (bridge, thread, replies) = PluginBridge::new(
             path.clone(),
             tutti_plugin_types::Origin::new("test.vst3", tutti_plugin_types::Load::new()),
             tutti_plugin_types::PluginFormat::Vst3,
@@ -368,12 +410,9 @@ impl MockServer {
         .expect("bridge");
 
         // Two connections, as the server accepts them: audio, then control.
-        // Each is served on its own thread by the same responder, so a test's
-        // script sees the requests of both as it saw the one's.
-        let respond: Arc<std::sync::Mutex<Box<dyn Fn(HostMessage) -> Action + Send>>> =
-            Arc::new(std::sync::Mutex::new(Box::new(respond)));
+        // Each is served on its own thread by its lane's responder.
         let mut servers = Vec::new();
-        for lane in ["audio", "control"] {
+        for (lane, respond) in ["audio", "control"].into_iter().zip(lanes) {
             let stream = listener.accept().expect("accept");
             send_bridge_msg(
                 &stream,
@@ -382,7 +421,6 @@ impl MockServer {
                 },
             )
             .expect("handshake");
-            let respond = Arc::clone(&respond);
             servers.push(
                 std::thread::Builder::new()
                     .name(format!("mock-hostile-{label}-{lane}"))
@@ -397,6 +435,7 @@ impl MockServer {
 
         Self {
             bridge,
+            replies,
             thread: Some(thread),
             server: Some(server),
             socket: path,
@@ -489,8 +528,8 @@ fn call_within<T: Send + 'static>(
 /// crashed.
 ///
 /// Distinct from `bridge_with_no_server()`, which never connects: there the
-/// failure happens in `run_thread` before `pump` is ever entered. Here the
-/// bridge is inside `pump`, mid-conversation, with the connection already
+/// failure happens in `run_thread` before a lane's loop is ever entered. Here the
+/// bridge is inside its loop, mid-conversation, with the connection already
 /// proven good — the path where a real plugin segfault lands, and the one no
 /// existing test covers.
 #[test]
@@ -626,8 +665,9 @@ fn a_listener_hears_the_crash_with_its_cause() {
         || !heard.lock().is_empty(),
     );
 
-    // Counted once the bridge thread has ended (the shutdown joins it): a second
-    // event would be in the sink by then, and no sleep is needed to wait for one.
+    // Counted once both lane threads have ended (the shutdown joins them): a
+    // second event, from the lane that saw the end after the first, would be in
+    // the sink by then, and no sleep is needed to wait for one.
     mock.thread.as_mut().expect("the bridge thread").shutdown();
     let seen = heard.lock().clone();
     assert_eq!(
@@ -645,10 +685,10 @@ fn a_listener_hears_the_crash_with_its_cause() {
 }
 
 /// **What the server says while no command waits is heard when it arrives.**
-/// `SetRenderMode` is fire-and-forget: the bridge reads nothing after it. The
-/// mock answers it with a latency change the host never asked for, and the
-/// listener must hear it with no further command sent: the idle bridge waits on
-/// the control connection, so it reads it as it arrives.
+/// The mock answers a render mode with a latency change the host never asked
+/// for, and the listener must hear it with no further command sent: the control
+/// lane's thread waits on the control connection, so it reads the news when it
+/// arrives.
 #[test]
 fn an_unprompted_event_reaches_the_listener_while_no_command_waits() {
     use parking_lot::Mutex as PlMutex;
@@ -659,6 +699,7 @@ fn an_unprompted_event_reaches_the_listener_while_no_command_waits() {
                 samples: tutti_plugin_types::Samples::new(77),
             }))
         }
+        HostMessage::GetCurrentPreset => Action::Reply(Box::new(applied_fence())),
         _ => Action::Silent,
     });
     let heard: Arc<PlMutex<Vec<usize>>> = Arc::new(PlMutex::new(Vec::new()));
@@ -672,7 +713,7 @@ fn an_unprompted_event_reaches_the_listener_while_no_command_waits() {
     assert!(
         mock.bridge
             .audio()
-            .set_render_mode_rt(tutti_plugin_types::RenderMode::Realtime)
+            .set_render_mode(tutti_plugin_types::RenderMode::Realtime)
     );
     tutti_fixtures::wait_until(
         "the server's unprompted latency change to be heard",
@@ -712,6 +753,7 @@ fn a_layout_with_absurdly_many_buses_is_dropped_on_receipt() {
                 layout: Some(sent.clone()),
             },
         ]),
+        HostMessage::GetCurrentPreset => Action::Reply(Box::new(applied_fence())),
         _ => Action::Silent,
     });
     let layouts: Arc<PlMutex<Vec<Layout>>> = Arc::new(PlMutex::new(Vec::new()));
@@ -729,7 +771,7 @@ fn a_layout_with_absurdly_many_buses_is_dropped_on_receipt() {
     assert!(
         mock.bridge
             .audio()
-            .set_render_mode_rt(tutti_plugin_types::RenderMode::Realtime)
+            .set_render_mode(tutti_plugin_types::RenderMode::Realtime)
     );
     tutti_fixtures::wait_until("the real layout", NOTICE_TIMEOUT, || {
         !layouts.lock().is_empty()
@@ -1000,7 +1042,7 @@ fn the_frame_cap_is_the_boundary_it_claims_to_be() {
 /// What makes it worse than a slow request is *who* is stuck. The caller has
 /// its own `Timeouts::param` and returns `None` on schedule, so the symptom is
 /// invisible from the audio thread — but the bridge thread never returns from
-/// `handle`, so `pump` never runs `crash()`, `is_crashed()` stays false, and
+/// the handler, so the loop never runs `crash()`, `is_crashed()` stays false, and
 /// every later request is queued behind a thread that is never coming back.
 /// The bridge looks healthy and answers nothing, forever.
 ///
@@ -1217,7 +1259,7 @@ fn a_refused_rate_is_reported_without_crashing_the_bridge() {
         }
         _ => Action::Silent,
     });
-    assert!(mock.bridge.audio().set_sample_rate_rt(SampleRate::SR_96K));
+    assert!(mock.bridge.audio().set_sample_rate(SampleRate::SR_96K));
     tutti_fixtures::wait_until("a rate refusal to be recorded", NOTICE_TIMEOUT, || {
         mock.bridge.audio().rate_refusal().is_some()
     });
@@ -1230,7 +1272,7 @@ fn a_refused_rate_is_reported_without_crashing_the_bridge() {
         "a refusal is not a crash"
     );
 
-    assert!(mock.bridge.audio().set_sample_rate_rt(SampleRate::SR_48K));
+    assert!(mock.bridge.audio().set_sample_rate(SampleRate::SR_48K));
     tutti_fixtures::wait_until("a rate refusal to be cleared", NOTICE_TIMEOUT, || {
         mock.bridge.audio().rate_refusal().is_none()
     });
@@ -1256,7 +1298,7 @@ fn an_unanswered_rate_change_is_a_refusal_and_its_late_answer_clears_it() {
         }
         _ => Action::Silent,
     });
-    assert!(mock.bridge.audio().set_sample_rate_rt(SampleRate::SR_96K));
+    assert!(mock.bridge.audio().set_sample_rate(SampleRate::SR_96K));
     tutti_fixtures::wait_until("a rate refusal to be recorded", NOTICE_TIMEOUT, || {
         mock.bridge.audio().rate_refusal().is_some()
     });
@@ -1325,12 +1367,12 @@ fn a_late_rate_answer_does_not_override_a_later_one() {
                 _ => Action::Silent,
             }
         });
-    assert!(mock.bridge.audio().set_sample_rate_rt(SampleRate::SR_96K));
+    assert!(mock.bridge.audio().set_sample_rate(SampleRate::SR_96K));
     tutti_fixtures::wait_until("a rate refusal to be recorded", NOTICE_TIMEOUT, || {
         mock.bridge.audio().rate_refusal().is_some()
     });
     // B, queued behind A's wait; its answer follows A's on the stream.
-    assert!(mock.bridge.audio().set_sample_rate_rt(SampleRate::SR_88K2));
+    assert!(mock.bridge.audio().set_sample_rate(SampleRate::SR_88K2));
     release.send(()).expect("the mock is listening");
     tutti_fixtures::wait_until("B's refusal to be recorded", NOTICE_TIMEOUT, || {
         mock.bridge
@@ -1363,7 +1405,7 @@ fn dropping_the_bridge_ends_a_hung_rate_change() {
         }
         Action::Silent
     });
-    assert!(mock.bridge.audio().set_sample_rate_rt(SampleRate::SR_96K));
+    assert!(mock.bridge.audio().set_sample_rate(SampleRate::SR_96K));
     // The request is on the wire, so the bridge thread is in the wait.
     request_seen
         .recv_timeout(NOTICE_TIMEOUT)
@@ -1578,7 +1620,7 @@ fn a_state_larger_than_one_frame_round_trips() {
 /// - **Answered.** The refusal is a length comparison and the reply is sent
 ///   with it; the peer here never answers anything, so a refusal that waited
 ///   on the peer would surface as `Stalled`, not `TooLarge`.
-/// - **Non-fatal.** `pump` treats any `handle` error as connection-level, so
+/// - **Non-fatal.** a lane's loop treats any handler error as connection-level, so
 ///   one oversized preset must not call `crash()` on a healthy session. Nothing
 ///   was written, so the socket is still synchronised and there is nothing to
 ///   crash about — which is what separates this from an over-cap *receive*.
@@ -2062,4 +2104,146 @@ fn a_second_control_call_while_a_reply_is_owed_waits_for_it() {
     );
     assert!(first.join().expect("the first caller").is_none());
     assert_eq!(*log.lock().unwrap(), ["list", "value"]);
+}
+
+// ── The two lanes ────────────────────────────────────────────────────────────
+
+/// The audio lane's script for these tests: every block is answered.
+fn answer_blocks(msg: HostMessage) -> Action {
+    match msg {
+        HostMessage::ProcessAudio(data) => Action::Reply(Box::new(BridgeMessage::AudioProcessed {
+            latency_us: 0,
+            seq: data.seq,
+            midi_out: Default::default(),
+            status: Default::default(),
+            refused: false,
+        })),
+        _ => Action::Silent,
+    }
+}
+
+/// Whether block `seq` has been answered on the ring.
+fn answered(mock: &mut MockServer, seq: u64) -> bool {
+    let (mut midi, mut status) = (Default::default(), Default::default());
+    mock.replies.take(seq, &mut midi, &mut status)
+}
+
+/// A control lane that holds the first `GetParameter` until `release` says go,
+/// telling `seen` it arrived, and answers every later one at once.
+fn hold_first_query(
+    seen: crossbeam_channel::Sender<()>,
+    release: crossbeam_channel::Receiver<()>,
+) -> impl Fn(HostMessage) -> Action + Send + 'static {
+    let first = std::sync::atomic::AtomicBool::new(true);
+    move |msg| match msg {
+        HostMessage::GetParameter { .. } => {
+            if first.swap(false, Ordering::SeqCst) {
+                seen.send(()).expect("the test is listening");
+                release.recv().expect("the test releases the request");
+            }
+            Action::Reply(Box::new(BridgeMessage::ParameterValue {
+                value: Some(Normalized::of(0.5)),
+            }))
+        }
+        _ => Action::Silent,
+    }
+}
+
+/// **A block is answered while a control request is still outstanding.** The
+/// control lane holds a query unanswered; a block sent meanwhile completes on
+/// the audio lane. One thread serving both lanes parks in the query and never
+/// sends the block.
+#[test]
+fn a_block_completes_while_a_control_request_is_outstanding() {
+    let (seen, seen_rx) = crossbeam_channel::bounded(1);
+    let (release_tx, release) = crossbeam_channel::bounded(1);
+    let mut mock = MockServer::start_lanes("block-beside-control", answer_blocks, {
+        hold_first_query(seen, release)
+    });
+    let bridge = Arc::clone(&mock.bridge);
+    let query = std::thread::spawn(move || bridge.audio().parameter(ParamId::new(1)));
+    seen_rx
+        .recv_timeout(NOTICE_TIMEOUT)
+        .expect("the query reached the control lane");
+
+    submit_block(&mock.bridge, 1);
+    tutti_fixtures::wait_until(
+        "the block to be answered while the query is outstanding",
+        NOTICE_TIMEOUT,
+        || answered(&mut mock, 1),
+    );
+
+    release_tx.send(()).expect("the control lane is waiting");
+    assert_eq!(
+        query.join().expect("the query's thread"),
+        Some(Normalized::of(0.5))
+    );
+}
+
+/// **A control command pushed after a block reaches the server after it.** With
+/// a thread per lane nothing else orders them: the audio lane is held for a
+/// render mode's fence (the control mock holds it), a block and then an
+/// automation mode are pushed, and once the fence is answered the control lane
+/// has the command to send while the audio lane is still waking to send the
+/// block. The server's log must read mode, fence, block, command; a bridge
+/// that does not make the command wait for the block logs it before the block.
+#[test]
+fn a_control_command_pushed_after_a_block_reaches_the_server_after_it() {
+    let log = Arc::new(std::sync::Mutex::new(Vec::<&'static str>::new()));
+    let (fence_seen, fence_rx) = crossbeam_channel::bounded(1);
+    let (release_tx, release) = crossbeam_channel::bounded::<()>(1);
+    let audio = {
+        let log = Arc::clone(&log);
+        move |msg: HostMessage| {
+            if matches!(msg, HostMessage::ProcessAudio(_)) {
+                log.lock().unwrap().push("block");
+            }
+            answer_blocks(msg)
+        }
+    };
+    let control = {
+        let log = Arc::clone(&log);
+        move |msg: HostMessage| match msg {
+            HostMessage::SetRenderMode { .. } => {
+                log.lock().unwrap().push("mode");
+                Action::Silent
+            }
+            HostMessage::GetCurrentPreset => {
+                log.lock().unwrap().push("fence");
+                fence_seen.send(()).expect("the test listens");
+                release.recv().expect("the test releases the fence");
+                Action::Reply(Box::new(applied_fence()))
+            }
+            HostMessage::SetAutomationState { .. } => {
+                log.lock().unwrap().push("command");
+                Action::Silent
+            }
+            _ => Action::Silent,
+        }
+    };
+    let mut mock = MockServer::start_lanes("control-after-block", audio, control);
+
+    assert!(
+        mock.bridge
+            .audio()
+            .set_render_mode(tutti_plugin_types::RenderMode::Offline)
+    );
+    submit_block(&mock.bridge, 1);
+    fence_rx
+        .recv_timeout(NOTICE_TIMEOUT)
+        .expect("the control lane is held in the fence");
+    assert_eq!(
+        mock.bridge
+            .audio()
+            .set_automation_state_rt(tutti_plugin_types::AutomationMode::Reading),
+        tutti_plugin_types::Delivered::Yes
+    );
+    release_tx.send(()).expect("the control lane is waiting");
+    tutti_fixtures::wait_until("the block to be answered", NOTICE_TIMEOUT, || {
+        answered(&mut mock, 1)
+    });
+    tutti_fixtures::wait_until("the command to reach the server", NOTICE_TIMEOUT, || {
+        log.lock().unwrap().contains(&"command")
+    });
+    assert_eq!(*log.lock().unwrap(), ["mode", "fence", "block", "command"]);
 }

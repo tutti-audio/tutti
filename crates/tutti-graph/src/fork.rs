@@ -626,7 +626,7 @@ impl Error for ForkError {
 /// #     fn process(&mut self, _: &Cx<'_>, _: Io<'_>) -> Status { Status::Modified }
 /// #     fn reset(&mut self) {}
 /// # }
-/// let prepare = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(256)));
+/// let prepare = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(256)));
 /// let (mut editor, _exec) = Editor::new(prepare);
 /// editor.insert(NodeKey(1), "silence", ForkByClone(Silence));
 /// editor.spec_mut().topology.set_outputs([tutti_graph::Source::Node(
@@ -706,7 +706,7 @@ impl<F: Float, N: Node<F> + Clone + Send + 'static> IntoNode<F> for ForkByClone<
 /// #     fn process(&mut self, _: &Cx<'_>, _: Io<'_>) -> Status { Status::Modified }
 /// #     fn reset(&mut self) {}
 /// # }
-/// let prepare = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(256)));
+/// let prepare = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(256)));
 /// let (mut editor, _exec) = Editor::new(prepare);
 /// editor.insert(NodeKey(1), "silence", Unforkable(Silence));
 /// editor.spec_mut().topology.set_outputs([tutti_graph::Source::Node(

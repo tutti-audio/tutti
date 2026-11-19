@@ -11,8 +11,8 @@ use crate::reverb::network::Stage;
 /// all-passes and delays.
 fn still(decay: f64) -> PlateControls {
     PlateControls {
-        decay: Seconds(decay),
-        damping: Mix(0.0),
+        decay: Seconds::new(decay),
+        damping: Mix::new(0.0),
         modulation: Depth::of(0.0),
         ..PlateControls::DEFAULT
     }
@@ -94,7 +94,7 @@ fn rt60_t30(curve: &[f64], rate: SampleRate) -> f64 {
 /// Every lattice a plain delay, no modulation, no damping.
 fn pure(decay: f64) -> PlateControls {
     PlateControls {
-        diffusion: Mix(0.0),
+        diffusion: Mix::new(0.0),
         ..still(decay)
     }
 }
@@ -167,7 +167,7 @@ fn the_two_outputs_cross_correlation_peak_is_under_0_3() {
 fn the_first_sound_is_the_pre_delay_plus_the_earliest_tap() {
     let rate = SampleRate::SR_48K;
     let c = PlateControls {
-        pre_delay: Seconds(0.01),
+        pre_delay: Seconds::new(0.01),
         ..still(2.0)
     };
     let [l, r] = response(rate, &c, 4_000);
@@ -197,10 +197,10 @@ fn the_tail_covers_the_response_falling_under_the_floor() {
             (8.0, 0.5, 20_000.0, 0.0, 0.0),
         ] {
             let c = PlateControls {
-                damping: Mix(damping),
-                bandwidth: Hz(bandwidth),
-                diffusion: Mix(diffusion),
-                pre_delay: Seconds(pre),
+                damping: Mix::new(damping),
+                bandwidth: Hz::new(bandwidth),
+                diffusion: Mix::new(diffusion),
+                pre_delay: Seconds::new(pre),
                 ..still(decay)
             };
             let (mut bank, mut glides) = landed(rate, &c);
@@ -275,9 +275,9 @@ fn the_modulated_delays_sweep_the_papers_excursion_in_quadrature() {
     let a = 16.0 * fs / 29_761.0;
     let scaled = |n: u32| (f64::from(n) * fs / 29_761.0).round();
     let c = PlateControls {
-        diffusion: Mix(0.0),
+        diffusion: Mix::new(0.0),
         modulation: Depth::of(1.0),
-        bandwidth: Hz(1.0e9),
+        bandwidth: Hz::new(1.0e9),
         ..still(2.0)
     };
     // The bandwidth one-pole spreads an impulse: its mean delay is `p / (1 - p)`.
@@ -375,7 +375,7 @@ fn an_f64_plate_is_linear() {
     let (a, b) = (1.0 / 3.0, -std::f64::consts::PI / 7.0);
     let mix: Vec<f64> = x.iter().zip(&y).map(|(x, y)| a * x + b * y).collect();
     let controls = PlateControls {
-        damping: Mix(0.3),
+        damping: Mix::new(0.3),
         ..still(1.5)
     };
     let render = |input: &[f64]| {
@@ -460,7 +460,7 @@ fn the_bandwidth_complement_keeps_its_relative_precision_where_one_minus_the_pol
     let (mut stored, mut formed) = (0.0f64, 0.0f64);
     for hz in (10..=100).map(f64::from) {
         let controls = PlateControls {
-            bandwidth: Hz(hz),
+            bandwidth: Hz::new(hz),
             ..PlateControls::DEFAULT
         };
         let (_, glides) = landed(rate, &controls);
@@ -491,7 +491,7 @@ fn the_damping_complement_keeps_its_relative_precision_near_the_largest_pole() {
     for step in 0..=90 {
         let damp = 0.99 + 0.0001 * f64::from(step);
         let controls = PlateControls {
-            damping: Mix(damp),
+            damping: Mix::new(damp),
             ..PlateControls::DEFAULT
         };
         let (_, glides) = landed(SampleRate::SR_48K, &controls);

@@ -282,9 +282,9 @@ impl<F: Float + Lerp> PlateBank<F> {
             }),
             ceiling: tail_of(
                 match PlateControls::capacity(rate).tail {
-                    Ring::Finite(t) => {
-                        Ring::Finite(Seconds(t.get() + bandwidth_ring(MIN_BANDWIDTH, rate).get()))
-                    }
+                    Ring::Finite(t) => Ring::Finite(Seconds::new(
+                        t.get() + bandwidth_ring(MIN_BANDWIDTH, rate).get(),
+                    )),
                     other => other,
                 },
                 rate,
@@ -362,7 +362,7 @@ impl<F: Float + Lerp> PlateBank<F> {
             .to_seconds(self.rate);
         let input = bandwidth_ring(controls.bandwidth_at(self.rate), self.rate);
         tail_of(
-            Ring::Finite(Seconds(t.get() + input.get() + behind.get())),
+            Ring::Finite(Seconds::new(t.get() + input.get() + behind.get())),
             self.rate,
         )
     }
@@ -536,7 +536,7 @@ impl<F: Float + Lerp> PlateBank<F> {
 /// long after it stops.
 fn bandwidth_ring(cutoff: Hz, rate: SampleRate) -> Seconds {
     let pole = cutoff_pole(cutoff, rate);
-    Seconds(ring_frames(pole, TAIL_FLOOR) / rate.get())
+    Seconds::new(ring_frames(pole, TAIL_FLOOR) / rate.get())
 }
 
 /// The lengths and fixed coefficients of the design in `network`.

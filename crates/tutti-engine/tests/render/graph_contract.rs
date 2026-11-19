@@ -43,17 +43,20 @@ fn engine(
     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::STEREO);
     let direct = g.add(Unforkable(Pulse::new(Latency::ZERO)));
     let pdc = g.add(Unforkable(Pulse::new(Latency::ZERO)));
-    let sibling = g.add(Unforkable(Latent::new(Latency::new(Samples(D)))));
+    let sibling = g.add(Unforkable(Latent::new(Latency::new(Samples::new(D)))));
     g.connect_events(sibling, 0, pdc, 0);
     g.connect_output(pdc, 0, 0).connect_output(direct, 0, 1);
     let (mut ed, exec) = g
         .build(Prepare::new(
             SampleRate::of(SR),
-            MaxBlock::of(Samples(max_block)),
+            MaxBlock::of(Samples::new(max_block)),
         ))
         .expect("builds");
     let plan = exec.plan().expect("installed");
-    assert_eq!(plan.unit(pdc).unwrap().arrival, Latency::new(Samples(D)));
+    assert_eq!(
+        plan.unit(pdc).unwrap().arrival,
+        Latency::new(Samples::new(D))
+    );
     assert_eq!(plan.unit(direct).unwrap().arrival, Latency::ZERO);
     let engine = Engine::new(transport, &mut ed, exec, tutti_engine::BlockDates::Os)
         .expect("within the limits");
@@ -95,7 +98,7 @@ fn beat_notes_after_a_timed_start_leave_both_paths_on_one_frame() {
         let beats = [0.0, 0.001, 0.5];
         for node in [direct, pdc] {
             for b in beats {
-                ed.schedule(At::Beat(Beat(b)), EventIn { node, port: 0 }, note_on())
+                ed.schedule(At::Beat(Beat::new(b)), EventIn { node, port: 0 }, note_on())
                     .expect("room");
             }
         }

@@ -676,7 +676,7 @@ impl Fdn {
             let Some((db_rho, db_sigma, _)) = self.slowest(band) else {
                 return f64::INFINITY;
             };
-            worst = worst.max(Db(db_rho + db_sigma).to_amplitude().get());
+            worst = worst.max(Db::new(db_rho + db_sigma).to_amplitude().get());
         }
         worst
     }

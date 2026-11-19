@@ -26,9 +26,9 @@
 //! assert_eq!(Piece::new(0.0, 8.0, Law::PowerIn(Exponent::of(2.0))).value(None, Normalized::of(0.5)), 2.0);
 //!
 //! let mut lane = Trajectory::new();
-//! lane.add_breakpoint(Breakpoint::with_law(Beat(0.0), Hz(0.0), Law::PowerIn(Exponent::of(2.0))));
-//! lane.add_breakpoint(Breakpoint::new(Beat(4.0), Hz(1.0)));
-//! assert_eq!(lane.value_at(Beat(2.0)), Some(Hz(0.25)));
+//! lane.add_breakpoint(Breakpoint::with_law(Beat::new(0.0), Hz::new(0.0), Law::PowerIn(Exponent::of(2.0))));
+//! lane.add_breakpoint(Breakpoint::new(Beat::new(4.0), Hz::new(1.0)));
+//! assert_eq!(lane.value_at(Beat::new(2.0)), Some(Hz::new(0.25)));
 //! ```
 #![forbid(unsafe_code)]
 #![cfg_attr(not(test), no_std)]

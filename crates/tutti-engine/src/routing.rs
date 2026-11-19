@@ -320,7 +320,7 @@ impl OutputLevels {
             } else {
                 // Two finite gains, so the product is finite unless it
                 // overflows: kept at the largest finite gain.
-                (strip.gain * dim.get()).min(Amplitude(f64::MAX))
+                (strip.gain * dim.get()).min(Amplitude::new(f64::MAX))
             };
         }
         StageTargets(gains)
@@ -359,7 +359,7 @@ mod tests {
             .set_strip(
                 1,
                 OutputStrip {
-                    gain: Amplitude(0.25),
+                    gain: Amplitude::new(0.25),
                     ..OutputStrip::default()
                 },
             )
@@ -383,7 +383,9 @@ mod tests {
             .set_strip(2, OutputStrip { mute: true, ..solo })
             .unwrap();
         assert_eq!(gains(&levels), [0.0, 0.0, 0.0, 0.0], "mute wins over solo");
-        let levels = OutputLevels::new().with_dim(Some(Amplitude(0.1))).unwrap();
+        let levels = OutputLevels::new()
+            .with_dim(Some(Amplitude::new(0.1)))
+            .unwrap();
         assert_eq!(gains(&levels), [0.1, 0.1, 0.1, 0.1]);
     }
 
@@ -404,7 +406,7 @@ mod tests {
     fn a_gain_that_is_not_a_gain_is_refused() {
         for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -1.0] {
             let strip = OutputStrip {
-                gain: Amplitude(bad),
+                gain: Amplitude::new(bad),
                 ..OutputStrip::default()
             };
             assert_eq!(
@@ -412,19 +414,26 @@ mod tests {
                 Err(OutputLevelError::OutputGain { output: 3 })
             );
             assert_eq!(
-                OutputLevels::new().with_dim(Some(Amplitude(bad))),
+                OutputLevels::new().with_dim(Some(Amplitude::new(bad))),
                 Err(OutputLevelError::DimGain)
             );
         }
-        assert!(OutputLevels::new().with_dim(Some(Amplitude(0.0))).is_ok());
+        assert!(
+            OutputLevels::new()
+                .with_dim(Some(Amplitude::new(0.0)))
+                .is_ok()
+        );
         // Two finite gains never make a non-finite target.
         let mut huge = OutputLevels::new();
         let big = OutputStrip {
-            gain: Amplitude(f64::MAX),
+            gain: Amplitude::new(f64::MAX),
             ..OutputStrip::default()
         };
         huge.set_strip(0, big).unwrap();
-        let t = huge.with_dim(Some(Amplitude(f64::MAX))).unwrap().targets();
+        let t = huge
+            .with_dim(Some(Amplitude::new(f64::MAX)))
+            .unwrap()
+            .targets();
         assert!(t.gain(0).get().is_finite());
     }
 

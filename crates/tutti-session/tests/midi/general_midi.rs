@@ -17,7 +17,7 @@ const RATE: SampleRate = SampleRate::SR_48K;
 fn offline_session() -> Session {
     Session::builder()
         .sample_rate(RATE)
-        .max_block(MaxBlock::of(Samples(128)))
+        .max_block(MaxBlock::of(Samples::new(128)))
         .build()
         .expect("an offline session builds")
 }
@@ -369,7 +369,7 @@ fn muting_the_setup_silences_the_wet_path_too() {
 
     // The instrument's gain is the dry level: zero leaves the reverb heard.
     session
-        .set(gm.instrument().gain().to(tutti_units::Amplitude(0.0)))
+        .set(gm.instrument().gain().to(tutti_units::Amplitude::new(0.0)))
         .unwrap();
     for _ in 0..2 {
         peak_of_block(&mut session);

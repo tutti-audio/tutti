@@ -44,7 +44,8 @@ struct Latent(usize);
 
 impl Node for Latent {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO).with_latency(Latency::new(Samples(self.0)))
+        Shape::source_unassigned(ChannelLayout::MONO)
+            .with_latency(Latency::new(Samples::new(self.0)))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -149,7 +150,7 @@ impl Rig {
     /// The latent node's latency moves (a plugin's pipeline changing).
     fn set_latency(&mut self, lat: usize) {
         self.ed
-            .set_latency(LATENT, Latency::new(Samples(lat)))
+            .set_latency(LATENT, Latency::new(Samples::new(lat)))
             .expect("the node exists");
         self.ed.commit().expect("recompiles");
         self.reference
@@ -159,7 +160,7 @@ impl Rig {
     /// Re-prepares both at `rate`, with no block between the two commits.
     /// The ring is cleared: frames at the old rate name nothing at the new.
     fn reprepare(&mut self, rate: SampleRate) {
-        let p = Prepare::new(rate, MaxBlock::of(Samples(MAX)));
+        let p = Prepare::new(rate, MaxBlock::of(Samples::new(MAX)));
         self.ed.reprepare(p).expect("reprepares");
         self.exec.apply_pending(); // checks the units out
         self.ed.collect(); // re-prepares them, sends them back
@@ -181,7 +182,7 @@ impl Rig {
         let env = Env {
             frame: self.exec.frame(),
             sample_rate: self.rate,
-            block_len: Samples(n),
+            block_len: Samples::new(n),
             transport: t,
             changes,
             play: tutti_graph::PlayClock::ZERO,
@@ -209,18 +210,18 @@ impl Rig {
                 None => true,
                 Some(&(f, t, rate)) => {
                     let gap = piece.frame.get() - f;
-                    let span = Samples(usize::try_from(gap).unwrap());
+                    let span = Samples::new(usize::try_from(gap).unwrap());
                     // The newest piece rolled forward `gap` frames, through
                     // the public walk.
                     let rolled = Env {
                         frame: Frame::new(f),
                         sample_rate: rate,
-                        block_len: Samples(span.0 + 1),
+                        block_len: span + Samples::new(1),
                         transport: t,
                         changes: TransportChanges::NONE,
                         play: tutti_graph::PlayClock::ZERO,
                     }
-                    .transport_at(Offset::of(span, Samples(span.0 + 1)));
+                    .transport_at(Offset::of(span, span + Samples::new(1)));
                     rate != env.sample_rate
                         || rolled != piece.transport
                         || (start == Offset::ZERO
@@ -278,7 +279,7 @@ impl Rig {
 /// the next block there, and the history keeps no piece for it.
 fn end_of(e: &Env) -> TransportPosition {
     let longer = Env {
-        block_len: Samples(e.block_len.get() + 1),
+        block_len: e.block_len + Samples::new(1),
         ..*e
     };
     longer.transport_at(Offset::of(e.block_len, longer.block_len))
@@ -298,7 +299,7 @@ fn mostly_rolling(
 }
 
 fn rolling(beat: f64) -> TransportPosition {
-    TransportPosition::new(true, Bpm::of(120.0), Beat(beat), None)
+    TransportPosition::new(true, Bpm::of(120.0), Beat::new(beat), None)
 }
 
 /// The block-`b` scene for a block of `n` frames after `prev` (the block
@@ -306,7 +307,7 @@ fn rolling(beat: f64) -> TransportPosition {
 /// change inside the block, a 40-frame loop starting at the block, the loop
 /// continued from where it stood, a stop, and recording.
 fn scene(b: usize, n: usize, prev: Option<&Env>) -> (TransportPosition, TransportChanges) {
-    let at = |i: usize| Offset::of(Samples(i), Samples(n));
+    let at = |i: usize| Offset::of(Samples::new(i), Samples::new(n));
     let mut changes = TransportChanges::NONE;
     let t = match b % 7 {
         0 => prev.map_or(rolling(1.0), end_of),
@@ -316,7 +317,12 @@ fn scene(b: usize, n: usize, prev: Option<&Env>) -> (TransportPosition, Transpor
                 changes
                     .push(
                         at(n / 2),
-                        TransportPosition::new(true, Bpm::of(90.0), Beat(64.0 + b as f64), None),
+                        TransportPosition::new(
+                            true,
+                            Bpm::of(90.0),
+                            Beat::new(64.0 + b as f64),
+                            None,
+                        ),
                     )
                     .expect("inside");
             }
@@ -325,14 +331,19 @@ fn scene(b: usize, n: usize, prev: Option<&Env>) -> (TransportPosition, Transpor
         3 => TransportPosition::new(
             true,
             Bpm::of(120.0),
-            Beat(4.0),
-            Some(LoopRange::new(Beat(4.0), Beat(4.0 + 40.0 / FPB)).expect("a loop")),
+            Beat::new(4.0),
+            Some(LoopRange::new(Beat::new(4.0), Beat::new(4.0 + 40.0 / FPB)).expect("a loop")),
         ),
         // The loop, picked up at the previous block's last frame.
         4 => prev.map_or(rolling(2.0), |p| {
-            p.transport_at(Offset::of(Samples(p.block_len.get() - 1), p.block_len))
+            p.transport_at(Offset::of(
+                p.block_len
+                    .checked_sub(Samples::new(1))
+                    .expect("a block has at least one frame"),
+                p.block_len,
+            ))
         }),
-        5 => TransportPosition::new(false, Bpm::of(100.0), Beat(3.0), None),
+        5 => TransportPosition::new(false, Bpm::of(100.0), Beat::new(3.0), None),
         _ => rolling(32.0 + b as f64).with_recording(true),
     };
     (t, changes)
@@ -496,7 +507,7 @@ fn the_parallel_render_reads_the_same_history_as_the_serial_one() {
                 prev = Some(Env {
                     frame: exec.frame(),
                     sample_rate: prepare(MAX).sample_rate(),
-                    block_len: Samples(n),
+                    block_len: Samples::new(n),
                     transport: t,
                     changes: c,
                     play: tutti_graph::PlayClock::ZERO,

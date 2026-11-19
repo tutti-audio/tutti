@@ -55,7 +55,8 @@ fn a_route_onto_a_dropped_edge_reads_unresolved() {
     g.connect(x.out(1), Root::output(1)).unwrap().hard();
     let lost = Edge::new(OutPort::new(p, 0), x.input(1));
     let mut m = s.mods_mut();
-    m.range(lost, Amplitude(-2.0)..Amplitude(2.0)).unwrap();
+    m.range(lost, Amplitude::new(-2.0)..Amplitude::new(2.0))
+        .unwrap();
     let source = m.macro_(0.5);
     m.route(RouteSpec::new(source, lost, Depth::of(0.25)))
         .unwrap();
@@ -70,7 +71,7 @@ fn a_route_onto_a_dropped_edge_reads_unresolved() {
         .replace(
             x,
             ForkByClone(Through::mono()),
-            Seconds(0.0),
+            Seconds::new(0.0),
             FadeLaw::EqualAmplitude,
         )
         .expect("the node is there");

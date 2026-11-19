@@ -70,7 +70,7 @@ impl TempoWalk {
         let beat = clock.beat();
         let mut view = map.view(rate);
         self.frame = if beat.get() < 0.0 {
-            view.frames_between(Beat(0.0), beat)
+            view.frames_between(Beat::new(0.0), beat)
         } else {
             view.frame_at_or_after(beat).get() as i64
         };
@@ -126,7 +126,7 @@ impl TempoWalk {
         while rolled < frames {
             let edge = self.frames_to_edge(&mut view);
             let chunk = (frames - rolled).min(edge);
-            match clock.advance_to_wrap(Samples(chunk), looping) {
+            match clock.advance_to_wrap(Samples::new(chunk), looping) {
                 Some(wrapped) => {
                     let w = wrapped.get();
                     rolled += w;
@@ -175,7 +175,8 @@ impl TempoWalk {
                 out.limit = Some(at);
                 break;
             }
-            let offset = Offset::new(Samples(at), Samples(frames)).expect("inside the block");
+            let offset =
+                Offset::new(Samples::new(at), Samples::new(frames)).expect("inside the block");
             let _ = out.changes.push(offset, transport(&clock));
         }
         out

@@ -15,7 +15,9 @@ fn run(blocker: &mut DcBlocker<f64>, input: &[Vec<f64>]) -> Vec<Vec<f64>> {
 
 fn at(corner: f64, rate: SampleRate) -> DcBlocker<f64> {
     let mut b = DcBlocker::<f64>::new(ChannelLayout::MONO, rate);
-    b.aim(&DcBlockerControls { corner: Hz(corner) });
+    b.aim(&DcBlockerControls {
+        corner: Hz::new(corner),
+    });
     b.settle();
     b
 }
@@ -27,7 +29,7 @@ fn the_pole_is_the_exponential_of_the_corner_over_the_rate() {
     for rate in [SampleRate::SR_44K1, SampleRate::SR_48K, SampleRate::SR_96K] {
         for fc in [1.0f64, 10.0, 20.0, 100.0] {
             let want = (-2.0 * std::f64::consts::PI * fc / rate.get()).exp();
-            assert_eq!(dc_pole(Hz(fc), rate), want, "{fc} Hz at {rate:?}");
+            assert_eq!(dc_pole(Hz::new(fc), rate), want, "{fc} Hz at {rate:?}");
         }
     }
     assert!((dc_pole(DC_CORNER, RATE) - 0.998_691_8).abs() < 1e-7);
@@ -39,9 +41,12 @@ fn the_pole_is_the_exponential_of_the_corner_over_the_rate() {
 #[test]
 fn the_corner_is_held_within_its_bounds() {
     assert_eq!(dc_pole(Hz::ZERO, RATE), dc_pole(MIN_DC_CORNER, RATE));
-    assert_eq!(dc_pole(Hz(-5.0), RATE), dc_pole(MIN_DC_CORNER, RATE));
-    assert_eq!(dc_pole(Hz(1e9), RATE), dc_pole(Hz(24_000.0), RATE));
-    assert_eq!(dc_pole(Hz(f64::NAN), RATE), dc_pole(DC_CORNER, RATE));
+    assert_eq!(dc_pole(Hz::new(-5.0), RATE), dc_pole(MIN_DC_CORNER, RATE));
+    assert_eq!(
+        dc_pole(Hz::new(1e9), RATE),
+        dc_pole(Hz::new(24_000.0), RATE)
+    );
+    assert_eq!(dc_pole(Hz::new(f64::NAN), RATE), dc_pole(DC_CORNER, RATE));
 }
 
 /// A constant input `c` decays as `y[n] = c R^n` (the step response of the difference
@@ -49,7 +54,9 @@ fn the_corner_is_held_within_its_bounds() {
 #[test]
 fn a_constant_decays_as_the_pole_to_the_n() {
     let mut b = DcBlocker::<f64>::new(ChannelLayout::STEREO, RATE);
-    b.aim(&DcBlockerControls { corner: Hz(20.0) });
+    b.aim(&DcBlockerControls {
+        corner: Hz::new(20.0),
+    });
     b.settle();
     let r = b.pole();
     let out = run(&mut b, &[vec![0.5; 2000], vec![-1.0; 2000]]);
@@ -104,7 +111,9 @@ fn the_gain_is_the_closed_form_of_the_difference_equation() {
 fn the_tail_covers_the_worst_stopped_input_to_the_floor() {
     let floor = 10f64.powf(-3.0);
     for corner in [1.0f64, 10.0, 100.0] {
-        let controls = DcBlockerControls { corner: Hz(corner) };
+        let controls = DcBlockerControls {
+            corner: Hz::new(corner),
+        };
         let n = controls.tail(RATE).get();
         let settle = 20 * n;
         for hold in [1usize, 1000] {
@@ -142,9 +151,11 @@ fn a_corner_jump_steps_the_output_by_the_glide_share() {
     let x: Vec<f64> = (0..jump + 64).map(|i| (w * i as f64).sin()).collect();
     let mut b = at(10.0, RATE);
     let first = run(&mut b, &[x[..jump].to_vec()]);
-    b.aim(&DcBlockerControls { corner: Hz(1000.0) });
+    b.aim(&DcBlockerControls {
+        corner: Hz::new(1000.0),
+    });
     let second = run(&mut b, &[x[jump..].to_vec()]);
-    let (r0, r1) = (dc_pole(Hz(10.0), RATE), dc_pole(Hz(1000.0), RATE));
+    let (r0, r1) = (dc_pole(Hz::new(10.0), RATE), dc_pole(Hz::new(1000.0), RATE));
     let r1_step = r0 + (r1 - r0) / COEFF_INTERVAL as f64;
     let bound = w + (1.0 - r1_step);
     let y_before = *first[0].last().unwrap();
@@ -254,7 +265,7 @@ fn a_one_hz_corner_at_192_khz_holds_its_gain_and_noise_in_f32() {
     // three times the bound while the complement's is inside it.
     let old = 0.5 * 2f64.powi(-25) / (1.0 - dc_pole(MIN_DC_CORNER, rate));
     let worst_corner = (0..=100)
-        .map(|i| Hz(1.0 + f64::from(i) * 0.01))
+        .map(|i| Hz::new(1.0 + f64::from(i) * 0.01))
         .max_by(|&a, &b| {
             let off = |c: Hz| {
                 let r = dc_pole(c, rate);

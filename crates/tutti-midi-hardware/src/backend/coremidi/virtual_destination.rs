@@ -16,12 +16,12 @@
 //! crate's.
 //!
 //! CoreMIDI delivers a packet as a *packed word stream*: several concatenated
-//! UMP messages with no separators, each one's length implied by its type
-//! nibble. [`split_stream`] walks that.
+//! UMP messages with no separators. The endpoint splits it, so the callback
+//! gets one message at a time with the packet's time.
 
 use tracing::debug;
 use tutti_coremidi_ffi::UmpDestination;
-use tutti_ump::{Ump, split_stream};
+use tutti_ump::Ump;
 
 use super::virtual_source::protocol_of;
 use crate::InputFault;
@@ -116,14 +116,12 @@ impl UmpVirtualDestination {
     {
         // The device watch's client starts before this endpoint's (`hub_first`).
         super::hub_first();
-        let destination =
-            UmpDestination::new(name, protocol_of(protocol), move |timestamp, words| {
-                let arrived = super::host_time::Pairing::now().instant_of(timestamp);
-                // One packet carries several concatenated UMP messages.
-                for event in split_stream(words) {
-                    on_event(event, arrived);
-                }
-            })?;
+        let destination = UmpDestination::new(name, protocol_of(protocol), move |time, event| {
+            on_event(
+                event,
+                super::host_time::Pairing::now().instant_of_stamp(time),
+            );
+        })?;
 
         debug!(name, ?protocol, "Created virtual MIDI destination");
         Ok(Self {

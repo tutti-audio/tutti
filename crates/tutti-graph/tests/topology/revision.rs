@@ -29,7 +29,7 @@ impl Node for Out {
 }
 
 fn prep(max: usize) -> Prepare {
-    Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(max)))
+    Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(max)))
 }
 
 /// Runs `f` and asserts it moved the revision.
@@ -85,14 +85,14 @@ fn every_edit_moves_the_revision_and_nothing_else_does() {
         .expect("a node");
     });
     moves(&mut ed, "set_latency", |ed| {
-        ed.set_latency(one, Latency::new(Samples(4)))
+        ed.set_latency(one, Latency::new(Samples::new(4)))
             .expect("a node");
     });
     moves(&mut ed, "replace", |ed| {
         ed.replace(
             one,
             Unforkable(Out),
-            Fade::new(Samples(64), FadeLaw::EqualPower),
+            Fade::new(Samples::new(64), FadeLaw::EqualPower),
         )
         .expect("replaces");
     });
