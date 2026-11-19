@@ -160,6 +160,19 @@ pub trait Control: EditorWindow {
         value: Normalized,
     ) -> Result<(), ParamWriteError>;
 
+    /// Tells the plugin's edit controller of a value the host wrote and the
+    /// Processor was handed another way (in the block's parameter changes), so
+    /// the controller's own value and the plugin's editor follow it. VST3 hosts
+    /// inform both halves of a plugin on a host-side change: the component
+    /// through the block, the controller with `setParamNormalized` on the main
+    /// thread, and that is the only format that has a controller of its own to
+    /// tell (CLAP, VST2 and AU answer a read from the plugin the Processor
+    /// drives). The default does nothing, so a format with one controller
+    /// leaves it so.
+    fn inform_controller(&mut self, main: MainThreadMarker, id: ParamId, value: Normalized) {
+        let _ = (main, id, value);
+    }
+
     /// The plain value `value` stands for, in the unit
     /// [`ParameterInfo::unit`](crate::ParameterInfo::unit) names: the
     /// **format's** conversion, never a formula over the declared range (VST3
@@ -567,6 +580,13 @@ pub trait Wraps {
     /// The plugin, mutably.
     fn plugin_mut(&mut self) -> &mut Self::Plugin;
 
+    /// A host write the Processor was handed through a block: tells the
+    /// plugin's edit controller where the format has one of its own
+    /// ([`Control::inform_controller`]).
+    fn inform_controller(&mut self, main: MainThreadMarker, id: ParamId, value: Normalized) {
+        let _ = (main, id, value);
+    }
+
     /// A host write, after the plugin took it (or instead of it): hands it to
     /// the Processor.
     fn queue_write(&mut self, main: MainThreadMarker, id: ParamId, value: Normalized) {
@@ -695,6 +715,10 @@ impl<W: Wraps> Control for W {
         id: ParamId,
     ) -> Result<(), ParamWriteError> {
         self.plugin().parameter_writable(main, id)
+    }
+
+    fn inform_controller(&mut self, main: MainThreadMarker, id: ParamId, value: Normalized) {
+        Wraps::inform_controller(self, main, id, value);
     }
 
     fn set_parameter(

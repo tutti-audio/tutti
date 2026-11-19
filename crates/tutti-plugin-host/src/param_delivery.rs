@@ -118,7 +118,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 
 use crate::node_losses::{Count, LossCounts};
-use tutti_plugin_types::{ParameterChanges, ParameterQueue};
+use tutti_plugin_types::{ParameterChanges, ParameterQueue, epoch_before};
 use tutti_rt::Tally;
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -289,6 +289,18 @@ struct Slot {
     queue: u32,
     /// A value whose chunk did not go: placed on the next chunk's first frame.
     owed: bool,
+    /// The staged (or owed) value is a host write ([`ParamDelivery::write`]),
+    /// not a value the node's own sources moved: it is sent, but is not the
+    /// record of what this node delivered.
+    host_write: bool,
+    /// The latest value this node's own sources placed in the chunk being
+    /// filled, beneath a host write that came after it: what the node's record
+    /// of delivery becomes when the chunk goes, so a source holding that value
+    /// still does not undo the write at the next chunk.
+    node_value: Option<f64>,
+    /// The epoch the host write on this slot was drained in
+    /// ([`ParamDelivery::write`]).
+    host_epoch: u32,
     /// Its index in the [`DeliveredRecord`], or [`NO_MIRROR`].
     mirror: u32,
     /// The walk and frame [`start`](Self::start) is for
@@ -306,6 +318,9 @@ impl Slot {
             staged: 0.0,
             queue: NO_QUEUE,
             owed: false,
+            host_write: false,
+            node_value: None,
+            host_epoch: 0,
             mirror: NO_MIRROR,
             start_key: None,
             start: None,
@@ -742,17 +757,108 @@ impl ParamDelivery {
             self.counters.dropped.add(1);
             return false;
         };
-        self.place(i, offset, Normalized::clamped(value).get(), grid);
+        self.place(i, offset, Normalized::clamped(value).get(), grid, None);
         true
     }
 
+    /// A host write to `address` at chunk frame `offset`: a corner that is
+    /// sent even when it equals what this node last delivered, because the
+    /// plugin may have moved since (an edit in its editor, a preset), and the
+    /// write says where it is to stand. It is not the node's record of what it
+    /// delivered: a value the node's sources hold still stays unsent after it,
+    /// so it cannot overwrite the write. `false` when `address` has no slot
+    /// (counted). Allocation-free.
+    pub(crate) fn write(&mut self, address: ParamId, offset: i32, value: f64, epoch: u32) -> bool {
+        let Some(i) = self.slot(address) else {
+            self.counters.dropped.add(1);
+            return false;
+        };
+        self.place(
+            i,
+            offset,
+            Normalized::clamped(value).get(),
+            false,
+            Some(epoch),
+        );
+        true
+    }
+
+    /// Drops the host writes drained in an epoch before `current`: a state or a
+    /// preset load made them stale after they were drained, and the chunk that
+    /// holds them (or the one that owes them) has not gone. The write's point
+    /// leaves its queue, and the parameter stands where this node's own
+    /// sources, or the last delivery, left it. Allocation-free.
+    pub(crate) fn void_writes_before(&mut self, current: u32) {
+        for i in 0..self.slots.len() {
+            let slot = &self.slots[i];
+            if !slot.host_write || !epoch_before(slot.host_epoch, current) {
+                continue;
+            }
+            if slot.queue == NO_QUEUE {
+                // Owed to the next chunk, not placed yet.
+                let slot = &mut self.slots[i];
+                if let Some(under) = slot.node_value.take() {
+                    slot.staged = under;
+                    slot.host_write = false;
+                } else {
+                    slot.host_write = false;
+                    if slot.owed {
+                        slot.owed = false;
+                        self.owed -= 1;
+                    }
+                }
+                continue;
+            }
+            let q = slot.queue as usize;
+            let len = self.changes.queues[q].points.len();
+            if len > 0 {
+                self.changes.queues[q].points.remove(len - 1);
+                self.grid.remove(q, len - 1, len);
+            }
+            let slot = &mut self.slots[i];
+            match slot.node_value.take() {
+                Some(under) => {
+                    slot.staged = under;
+                    slot.host_write = false;
+                }
+                None => {
+                    // No point of this node's beneath it: the slot ends the
+                    // chunk on what it delivered before, and is not a
+                    // delivery of its own (a marker, current for this epoch).
+                    slot.staged = slot.sent.unwrap_or(slot.staged);
+                    slot.host_epoch = current;
+                }
+            }
+        }
+    }
+
     /// `value` (already normalized) for slot `i` at chunk frame `offset`,
-    /// a grid point or not.
-    fn place(&mut self, i: usize, offset: i32, value: f64, grid: bool) {
+    /// a grid point or not; `forced` sends it though the plugin has it from
+    /// this node already.
+    fn place(&mut self, i: usize, offset: i32, value: f64, grid: bool, host: Option<u32>) {
+        let forced = host.is_some();
+        if let Some(epoch) = host
+            && self.slots[i].host_write
+            && self.slots[i].queue != NO_QUEUE
+            && let Some(point) = self.changes.queues[self.slots[i].queue as usize]
+                .points
+                .last_mut()
+        {
+            // A host write stands on the host write before it: one point.
+            point.value = Normalized::clamped(value);
+            point.sample_offset = point.sample_offset.max(offset);
+            self.slots[i].staged = value;
+            self.slots[i].host_epoch = epoch;
+            return;
+        }
+        // What this node's own sources have put in the chunk so far, if a host
+        // write is about to stand on it.
+        let prior_node = (self.slots[i].queue != NO_QUEUE && !self.slots[i].host_write)
+            .then_some(self.slots[i].staged);
         let q = match self.slots[i].queue {
             NO_QUEUE => {
                 let slot = &self.slots[i];
-                if slot.sent == Some(value) {
+                if !forced && slot.sent == Some(value) {
                     // Unchanged: the plugin has it from this node already.
                     return;
                 }
@@ -771,6 +877,12 @@ impl ParamDelivery {
             }
             q => {
                 let q = q as usize;
+                let slot = &self.slots[i];
+                if !forced && slot.host_write && slot.sent == Some(value) {
+                    // A value the node's sources hold still, after a host
+                    // write in this chunk: unchanged, so it does not undo it.
+                    return;
+                }
                 if self.changes.queues[q]
                     .points
                     .last()
@@ -806,7 +918,8 @@ impl ParamDelivery {
                     merged = true;
                 }
             }
-        } else {
+        } else if !forced {
+            // A host write is not a point this node's sources moved.
             self.chunk_points += 1;
         }
         self.grid.fits(q, self.changes.queues[q].points.capacity());
@@ -822,7 +935,23 @@ impl ParamDelivery {
         // stores; were it not to, the chunk would not carry the value, and
         // it is not staged. Unreachable, so no test can pin it.)
         if stored || merged {
+            if forced {
+                // The node's own latest value in the chunk, beneath the write:
+                // when the write took the place of the latest point (`merged`:
+                // a queue of corners that is full) that value is not in the
+                // chunk, the plugin never gets it, and it is not what the node
+                // delivered.
+                if prior_node.is_some() && !merged {
+                    self.slots[i].node_value = prior_node;
+                }
+            } else {
+                self.slots[i].node_value = None;
+            }
             self.slots[i].staged = value;
+            self.slots[i].host_write = forced;
+            if let Some(epoch) = host {
+                self.slots[i].host_epoch = epoch;
+            }
         }
     }
 
@@ -834,8 +963,9 @@ impl ParamDelivery {
         for i in 0..self.slots.len() {
             if self.slots[i].owed {
                 self.slots[i].owed = false;
-                let value = self.slots[i].staged;
-                self.place(i, 0, value, false);
+                let (value, host) = (self.slots[i].staged, self.slots[i].host_write);
+                let epoch = self.slots[i].host_epoch;
+                self.place(i, 0, value, false, host.then_some(epoch));
             }
         }
         self.owed = 0;
@@ -873,10 +1003,19 @@ impl ParamDelivery {
             let slot = &mut self.slots[i as usize];
             slot.queue = NO_QUEUE;
             if delivered {
-                slot.sent = Some(slot.staged);
-                if let Some(m) = self.record.values.get(slot.mirror as usize) {
-                    m.store(slot.staged.to_bits(), Ordering::Release);
+                // What the node delivered: the value its own sources ended the
+                // chunk on, which a host write after it does not replace.
+                let delivered_value = slot
+                    .node_value
+                    .take()
+                    .or_else(|| (!slot.host_write).then_some(slot.staged));
+                if let Some(value) = delivered_value {
+                    slot.sent = Some(value);
+                    if let Some(m) = self.record.values.get(slot.mirror as usize) {
+                        m.store(value.to_bits(), Ordering::Release);
+                    }
                 }
+                slot.host_write = false;
             } else if !slot.owed {
                 slot.owed = true;
                 self.owed += 1;
@@ -1077,6 +1216,115 @@ mod tests {
         d.begin();
         d.point(op(2), 0, 0.375);
         assert!(chunk(&d).is_empty(), "delivered once, not again");
+    }
+
+    /// **A host write after a source's point in a chunk does not undo the
+    /// record of that point**: the source's value is what the node delivered, so
+    /// the source holding it still at the next chunk sends nothing and the
+    /// write stands. A record left at the value before the chunk would see the
+    /// held value as a change and send it over the write.
+    #[test]
+    fn a_write_mid_chunk_is_not_undone_by_a_held_source_at_the_next_chunk() {
+        let (mut d, _) = delivery(4);
+        d.begin();
+        d.point(op(2), 0, 0.25);
+        assert!(d.write(op(2), 10, 0.75, 0));
+        assert_eq!(chunk(&d), vec![(op(2), vec![(0, 0.25), (10, 0.75)])]);
+        hand_off(&mut d, true);
+
+        d.begin();
+        d.point(op(2), 0, 0.25);
+        assert!(
+            chunk(&d).is_empty(),
+            "the held source value was sent again over the write"
+        );
+    }
+
+    /// **A write drained in an epoch a load has since ended is not sent**: it
+    /// sits in a chunk that has not gone, a state load makes the epoch current
+    /// move on, and the chunk goes without it. A write drained after the load
+    /// is sent.
+    #[test]
+    fn a_write_drained_before_a_load_is_not_sent_after_it() {
+        let (mut d, _) = delivery(4);
+        d.begin();
+        assert!(d.write(op(2), 0, 0.75, 0));
+        d.void_writes_before(1);
+        assert!(
+            chunk(&d).iter().all(|(_, points)| points.is_empty()),
+            "the stale write was sent: {:?}",
+            chunk(&d)
+        );
+        assert!(d.write(op(2), 5, 0.5, 1));
+        d.void_writes_before(1);
+        assert_eq!(
+            chunk(&d),
+            vec![(op(2), vec![(5, 0.5)])],
+            "a write after the load goes"
+        );
+    }
+
+    /// **A source's value under a voided write stays**: the chunk still carries
+    /// the point the node's own source put there.
+    #[test]
+    fn a_voided_write_leaves_the_sources_point_beneath_it() {
+        let (mut d, _) = delivery(4);
+        d.begin();
+        d.point(op(2), 0, 0.25);
+        assert!(d.write(op(2), 10, 0.75, 0));
+        d.void_writes_before(1);
+        assert_eq!(chunk(&d), vec![(op(2), vec![(0, 0.25)])]);
+        hand_off(&mut d, true);
+        d.begin();
+        d.point(op(2), 0, 0.25);
+        assert!(
+            chunk(&d).is_empty(),
+            "the source's value is what was delivered"
+        );
+    }
+
+    /// **A write that took the place of the node's latest point in a full queue
+    /// does not make that point the node's delivery**: voiding the write removes
+    /// it, the plugin never got the point it replaced, so the source holding that
+    /// value at the next chunk still sends it.
+    #[test]
+    fn a_voided_write_that_replaced_a_point_in_a_full_queue_leaves_it_undelivered() {
+        let (mut d, counters) = delivery(1);
+        d.begin();
+        let mut at = 0;
+        let mut under = 0.0;
+        while counters.snapshot().points_merged == 0 {
+            under = 0.01 + f64::from(at) / 4096.0;
+            d.point(op(2), at, under);
+            at += 1;
+            assert!(at < 4096, "the queue never filled");
+        }
+        assert!(d.write(op(2), at, 0.9, 0));
+        d.void_writes_before(1);
+        hand_off(&mut d, true);
+        d.begin();
+        d.point(op(2), 0, under);
+        assert!(
+            !chunk(&d).is_empty(),
+            "the point the write replaced was recorded as delivered"
+        );
+    }
+
+    /// **A write owed to the next chunk is voided too**: the chunk that held
+    /// it did not go, a load came, and the next chunk does not take it up.
+    #[test]
+    fn an_owed_write_is_voided_by_a_load() {
+        let (mut d, _) = delivery(4);
+        d.begin();
+        assert!(d.write(op(2), 0, 0.75, 0));
+        hand_off(&mut d, false);
+        d.void_writes_before(1);
+        d.begin();
+        assert!(
+            chunk(&d).iter().all(|(_, points)| points.is_empty()),
+            "{:?}",
+            chunk(&d)
+        );
     }
 
     /// **`current` is the host's latest value in every state**: none before

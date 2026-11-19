@@ -194,6 +194,7 @@ where
         mut client,
         inner,
         pending_sample_rate,
+        post,
         descriptor,
         loaded,
     } = wire(main, inner, rt, origin, sample_rate, 0).map_err(failed)?;
@@ -212,6 +213,7 @@ where
         inner: Arc::clone(&inner),
         param_sink: param_sink.clone(),
         pending_sample_rate: Arc::clone(&pending_sample_rate),
+        edits: post,
         reporting,
         lost,
         format: descriptor.class.format_name(),
@@ -236,6 +238,8 @@ struct Wired<L: Loaded, F: Float> {
     /// Where the audio side parks a rate for the main thread's pump; drained
     /// by the handle's backend.
     pending_sample_rate: Arc<PendingSampleRate>,
+    /// Where the backend posts the host's parameter writes the client drains.
+    post: super::host_edits::EditPost,
     descriptor: PluginDescriptor,
     /// The wiring as the plugin reports it, with the presets it can list.
     loaded: LoadedPlugin,
@@ -296,7 +300,8 @@ where
     // transport send on the exact value the handle reports. One value, read
     // twice, cannot drift into a declared-but-undelivered capability.
     let ids: Vec<ParamId> = parameters.iter().map(|p| p.id()).collect();
-    let client = InProcessClient::new(
+    let (post, port) = super::host_edits::host_edits(ids.iter().copied());
+    let mut client = InProcessClient::new(
         Arc::clone(&inner),
         rt,
         descriptor.clone(),
@@ -312,9 +317,11 @@ where
         None,
         None,
     );
+    client.edits = Some(port);
     Ok(Wired {
         client,
         inner,
+        post,
         pending_sample_rate,
         descriptor,
         loaded,
