@@ -635,7 +635,7 @@ pub struct ChromaSummary {
 /// there), and its cost is a transform per frame: fit for a consumer thread
 /// that drains a tap, not for an audio callback.
 #[derive(Debug)]
-pub struct ChromaMeter<S: Sample = f32> {
+pub struct ChromaMeter<S: Sample> {
     fold: ChromaFold,
     cutter: FrameCutter,
     fft: FftScratch<f64>,
@@ -788,7 +788,7 @@ pub fn chroma<S: Sample>(
         tuning: Tuning::Fixed(tuning),
         ..plan
     };
-    let mut meter: ChromaMeter = ChromaMeter::new(fixed);
+    let mut meter = ChromaMeter::<f64>::new(fixed);
     core::mem::swap(&mut meter.fft, fft);
     let mut data = Vec::with_capacity(frames.get() * CLASSES);
     meter.feed(&samples, |frame| data.extend_from_slice(&frame.bins));

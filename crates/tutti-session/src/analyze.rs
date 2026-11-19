@@ -120,7 +120,7 @@ pub enum AnalyzeError {
 /// The kind of [`Session::analyze`]: the job lands the meter's
 /// [`Output`](Meter::Output) over the whole audio.
 #[derive(Debug)]
-pub struct Analyze<A, S: Float = f32>(PhantomData<fn() -> (A, S)>);
+pub struct Analyze<A, S: Float>(PhantomData<fn() -> (A, S)>);
 
 impl<S: Float, A: Measure<S> + 'static> sealed::Sealed for Analyze<A, S> where
     <A::Meter as Meter>::Output: Send + 'static
