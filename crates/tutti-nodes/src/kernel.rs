@@ -79,7 +79,7 @@ pub trait Kernel: Clone + Send + 'static {
     /// Back to silence. Audio thread: no allocation.
     fn reset(&mut self);
 
-    /// Designs `controls` and aims the running coefficients at the design. Audio thread:
+    /// Designs `controls` and sets the running coefficients' target to the design. Audio thread:
     /// no allocation.
     fn retarget(&mut self, controls: &<Self::Set as ControlSet>::Controls);
 
@@ -122,7 +122,7 @@ pub trait Kernel: Clone + Send + 'static {
     /// How long it rings at `controls`, at most [`tail`](Self::tail), erring long: what the
     /// node narrows its tail to. A kernel whose ring-out does not follow its controls leaves
     /// the ceiling. It may design into the kernel's own scratch, and must not change the
-    /// audio state: lines, glides and phase are as they were. Audio thread: no allocation.
+    /// audio state: lines, ramps and phase are as they were. Audio thread: no allocation.
     fn tail_of(&mut self, _controls: &<Self::Set as ControlSet>::Controls) -> Tail {
         self.tail()
     }

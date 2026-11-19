@@ -8,7 +8,7 @@
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_units::{SampleRate, StereoWidth};
 
-use crate::{GAIN_GLIDE, Glide, Lerp, Steps};
+use crate::{GAIN_RAMP, Lerp, Ramp, Steps};
 
 /// The direction of a mid/side conversion of a stereo pair.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -73,41 +73,41 @@ impl WidthControls {
     };
 }
 
-/// Stereo width of a left/right pair in the float `F`: the side scaled by a width that glides
-/// over [`GAIN_GLIDE`].
+/// Stereo width of a left/right pair in the float `F`: the side scaled by a width that ramps
+/// over [`GAIN_RAMP`].
 ///
-/// Frame `i` of a block reads the glide at step `taken + 1 + i`, then the block's steps
+/// Frame `i` of a block reads the ramp at step `taken + 1 + i`, then the block's steps
 /// are taken, so a write renders the same whatever the blocks. The pair is two channels:
 /// a view with fewer renders nothing.
 #[derive(Clone, Copy, Debug)]
 pub struct WidthBank<F: Float> {
-    /// The width in force, narrowed to `F` once per aim.
-    width: Glide<F>,
+    /// The width in force, narrowed to `F` once per `retarget`.
+    width: Ramp<F>,
     steps: u32,
 }
 
 impl<F: Float + Lerp> WidthBank<F> {
-    /// A pair at unity width at `rate`, to be aimed.
+    /// A pair at unity width at `rate`, to be set.
     #[must_use]
     pub fn new(rate: SampleRate) -> Self {
-        let steps = u32::try_from(GAIN_GLIDE.to_samples_ceil(rate).get()).unwrap_or(u32::MAX);
+        let steps = u32::try_from(GAIN_RAMP.to_samples_ceil(rate).get()).unwrap_or(u32::MAX);
         Self {
-            width: Glide::landed(F::from_unit(StereoWidth::NATURAL)),
+            width: Ramp::new(F::from_unit(StereoWidth::NATURAL)),
             steps,
         }
     }
 
     /// Lands the width on its target now.
-    pub fn settle(&mut self) {
-        self.width.settle();
+    pub fn jump_to_target(&mut self) {
+        self.width.jump_to_target();
     }
 
-    /// Aims at `controls`: the width glides over [`GAIN_GLIDE`]. A width that is not
-    /// finite leaves the aim as it is. No allocation.
-    pub fn aim(&mut self, controls: &WidthControls) {
+    /// Aims at `controls`: the width ramps over [`GAIN_RAMP`]. A width that is not
+    /// finite leaves the `retarget` as it is. No allocation.
+    pub fn retarget(&mut self, controls: &WidthControls) {
         let w = controls.width;
         if w.get().is_finite() {
-            self.width.aim_by(
+            self.width.retarget_by(
                 F::from_unit(StereoWidth::new_clamped(w.get())),
                 Steps::Fixed(self.steps),
             );
@@ -131,8 +131,8 @@ impl<F: Float + Lerp> WidthBank<F> {
             &mut right.samples_mut()[..frames],
         );
         let half = F::lit(0.5);
-        let blended = self.width.blended(frames);
-        let taken = self.width.taken();
+        let blended = self.width.blended_frames(frames);
+        let taken = self.width.steps_taken();
         let held = self.width.target();
         if blended == 0 && held == F::from_unit(StereoWidth::NATURAL) {
             out_l.copy_from_slice(l);

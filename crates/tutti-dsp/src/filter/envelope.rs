@@ -18,8 +18,8 @@
 //!
 //! The coefficients are designed once per grid period of [`COEFF_INTERVAL`] frames, counted on
 //! the stream from the last [`reset`](EnvelopeFilterBank::reset) and not from a block, at the
-//! envelope as it stands there, and the filter glides to the design over the period as a
-//! [`SvfBank`] does ([`Glide`]). So the cutoff in force at frame `i` follows the envelope up
+//! envelope as it stands there, and the filter ramps to the design over the period as a
+//! [`SvfBank`] does ([`Ramp`]). So the cutoff in force at frame `i` follows the envelope up
 //! to the period's first frame, and the render does not depend on how the stream is cut into
 //! blocks. Depth 0 never moves the cutoff: the bank is a fixed SVF at `base`.
 //!
@@ -35,7 +35,7 @@ use super::SvfBank;
 use super::svf::{SvfCoefficients, SvfControls, SvfModel, SvfType};
 use crate::dynamics::{floored, key_levels};
 use crate::follower::{Follower, Smoothed};
-use crate::{COEFF_INTERVAL, Glide, Lerp, SimdLanes};
+use crate::{COEFF_INTERVAL, Lerp, Ramp, SimdLanes};
 
 /// The frames between designs: the grid period.
 const GRID: Samples = Samples::new(COEFF_INTERVAL);
@@ -93,7 +93,7 @@ pub struct EnvelopeFilterBank<F: Float + SimdLanes> {
     /// The envelope, in `[0, 1]`: 0 until a level is heard. A per-sample level in `F`.
     env: Smoothed<F>,
     bank: SvfBank<F>,
-    coefficients: Glide<SvfCoefficients<F>>,
+    coefficients: Ramp<SvfCoefficients<F>>,
     controls: EnvelopeFilterControls,
     /// The frames of the current grid period already run.
     phase: Samples,
@@ -111,39 +111,39 @@ impl<F: Float + SimdLanes + Lerp> EnvelopeFilterBank<F> {
             follower: Follower::of(floored(controls.attack, controls.release), rate),
             env: Smoothed::ZERO,
             bank: SvfBank::new(width),
-            coefficients: Glide::landed(SvfCoefficients::from(&SvfModel::new(
+            coefficients: Ramp::new(SvfCoefficients::from(&SvfModel::new(
                 SvfControls::DEFAULT,
                 rate,
             )))
-            .by(COEFF_INTERVAL as u32),
+            .steps(COEFF_INTERVAL as u32),
             controls,
             phase: Samples::ZERO,
         };
-        bank.aim(&controls);
-        bank.settle();
+        bank.retarget(&controls);
+        bank.jump_to_target();
         bank
     }
 
-    /// Back to silence: the envelope at 0, the filter cleared, the cutoff landed at the
+    /// Back to silence: the envelope at 0, the filter cleared, the cutoff at rest at the
     /// design for an envelope of 0, and the grid counted from here. No allocation.
     pub fn reset(&mut self) {
         self.env = Smoothed::ZERO;
         self.bank.reset();
         self.phase = Samples::ZERO;
-        self.coefficients.aim(self.design(F::ZERO));
-        self.coefficients.settle();
+        self.coefficients.retarget(self.design(F::ZERO));
+        self.coefficients.jump_to_target();
     }
 
     /// Lands the cutoff on its design for the current envelope now.
-    pub fn settle(&mut self) {
-        self.coefficients.aim(self.design(self.env.value()));
-        self.coefficients.settle();
+    pub fn jump_to_target(&mut self) {
+        self.coefficients.retarget(self.design(self.env.value()));
+        self.coefficients.jump_to_target();
     }
 
     /// Aims at `controls`. The envelope's times land whole, and the base, depth and Q reach the
     /// filter at the next grid period. A non-finite control is the default's, a time is floored
     /// at 0. No allocation.
-    pub fn aim(&mut self, controls: &EnvelopeFilterControls) {
+    pub fn retarget(&mut self, controls: &EnvelopeFilterControls) {
         let d = EnvelopeFilterControls::DEFAULT;
         let max = EnvelopeFilterControls::MAX_DEPTH;
         let times = floored(controls.attack, controls.release);
@@ -181,7 +181,7 @@ impl<F: Float + SimdLanes + Lerp> EnvelopeFilterBank<F> {
         ))
     }
 
-    /// Runs `input` into `output`, designing at each grid period's first frame and gliding to
+    /// Runs `input` into `output`, designing at each grid period's first frame and ramping to
     /// the design.
     ///
     /// Channel `c` of `input` feeds channel `c` of `output`; a channel past the bank's width or
@@ -195,7 +195,7 @@ impl<F: Float + SimdLanes + Lerp> EnvelopeFilterBank<F> {
         while start < frames {
             if self.phase == Samples::ZERO {
                 let design = self.design(self.env.value());
-                self.coefficients.aim(design);
+                self.coefficients.retarget(design);
             }
             let n = (frames - start).min(GRID.get() - self.phase.get());
             let end = start + n;

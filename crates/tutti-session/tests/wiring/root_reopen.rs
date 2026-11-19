@@ -26,7 +26,7 @@ fn session() -> Session {
     let (node, _) = s.graph().add(ForkByClone(Const::frame(&[0.25, 0.75])));
     for c in 0..2 {
         s.graph()
-            .set_sources_hard(Root::output(c), [OutPort::new(node, c)])
+            .set_sources_unfaded(Root::output(c), [OutPort::new(node, c)])
             .unwrap();
     }
     let _ = s.update();
@@ -100,7 +100,7 @@ fn a_root_width_change_reopens_the_root_tap_and_closes_the_old_reader() {
 
     s.declare_root_topology(Some(mono()))
         .expect("a mono root")
-        .hard();
+        .unfaded();
     let mut events = reopened(s.update());
     assert_eq!(events.len(), 1, "one reopen for the one tap");
     let (id, topology) = events.remove(0);
@@ -165,7 +165,7 @@ fn a_declaration_that_keeps_the_width_leaves_the_tap_alone() {
     let _ = block(&mut s);
     s.declare_root_topology(Some(ChannelTopology::assumed(ChannelLayout::STEREO)))
         .expect("a stereo root")
-        .hard();
+        .unfaded();
     for _ in 0..3 {
         assert!(reopened(block(&mut s)).is_empty());
     }
@@ -187,7 +187,7 @@ fn the_taken_master_meter_reopens_with_the_new_width() {
 
     s.declare_root_topology(Some(mono()))
         .expect("a mono root")
-        .hard();
+        .unfaded();
     let mut events = reopened(block(&mut s));
     assert_eq!(events.len(), 1, "the meter, and no tap, was opened");
     let (id, topology) = events.remove(0);
@@ -214,7 +214,7 @@ fn a_meter_nobody_took_is_replaced_without_an_event() {
     let mut s = session();
     s.declare_root_topology(Some(mono()))
         .expect("a mono root")
-        .hard();
+        .unfaded();
     assert!(reopened(block(&mut s)).is_empty());
     let _ = block(&mut s);
     let meter = s.master_meter().expect("held");
@@ -233,10 +233,12 @@ fn only_the_last_of_two_changes_before_an_update_is_reported() {
         .open_output(Samples::new(4096))
         .expect("opens");
     let _ = block(&mut s);
-    s.declare_root_topology(Some(mono())).expect("mono").hard();
+    s.declare_root_topology(Some(mono()))
+        .expect("mono")
+        .unfaded();
     s.declare_root_topology(Some(ChannelTopology::assumed(ChannelLayout::from_count(4))))
         .expect("quad")
-        .hard();
+        .unfaded();
     let mut events = reopened(s.update());
     assert_eq!(events.len(), 1);
     let new = claim_tap(&mut s, events.remove(0).0);
@@ -257,12 +259,14 @@ fn a_second_reopen_before_the_claim_replaces_the_held_reader() {
         .taps()
         .open_output(Samples::new(4096))
         .expect("opens");
-    s.declare_root_topology(Some(mono())).expect("mono").hard();
+    s.declare_root_topology(Some(mono()))
+        .expect("mono")
+        .unfaded();
     let first = reopened(block(&mut s));
     assert_eq!(first.len(), 1);
     s.declare_root_topology(Some(ChannelTopology::assumed(ChannelLayout::from_count(4))))
         .expect("quad")
-        .hard();
+        .unfaded();
     let second = reopened(block(&mut s));
     assert_eq!(second.len(), 1, "announced again");
     assert_eq!(first[0].0, second[0].0, "under the one id");
@@ -284,7 +288,9 @@ fn an_unclaimed_reader_survives_ignored_updates_and_is_claimed_later() {
         .taps()
         .open_output(Samples::new(4096))
         .expect("opens");
-    s.declare_root_topology(Some(mono())).expect("mono").hard();
+    s.declare_root_topology(Some(mono()))
+        .expect("mono")
+        .unfaded();
     let events = reopened(block(&mut s));
     assert_eq!(events.len(), 1);
     for _ in 0..3 {
@@ -320,7 +326,7 @@ fn a_tap_that_has_the_roots_width_after_a_widen_and_a_declaration_is_not_reopene
     let _ = block(&mut s);
     s.declare_root_topology(Some(ChannelTopology::assumed(ChannelLayout::STEREO)))
         .expect("stereo")
-        .hard();
+        .unfaded();
     let events = reopened(block(&mut s));
     assert!(
         events
@@ -349,7 +355,7 @@ fn a_tap_narrower_than_the_declared_root_is_reopened_at_its_width() {
     let four = ChannelTopology::assumed(ChannelLayout::from_count(4));
     s.declare_root_topology(Some(four.clone()))
         .expect("quad")
-        .hard();
+        .unfaded();
     let mut events = reopened(block(&mut s));
     events.retain(|(id, _)| matches!(id, RootReader::Tap(_)));
     assert_eq!(events.len(), 1);
@@ -370,7 +376,9 @@ fn closing_a_tap_drops_the_reader_held_for_it() {
         .expect("opens");
     let id = old.id().expect("named");
     let _ = block(&mut s);
-    s.declare_root_topology(Some(mono())).expect("mono").hard();
+    s.declare_root_topology(Some(mono()))
+        .expect("mono")
+        .unfaded();
     assert_eq!(reopened(block(&mut s)).len(), 1);
     s.graph().taps().close(id).expect("open");
     let _ = block(&mut s);
@@ -390,7 +398,9 @@ fn closing_the_master_meter_drops_the_reader_held_for_it() {
     let old = s.take_master_meter().expect("held");
     let id = old.id();
     let _ = block(&mut s);
-    s.declare_root_topology(Some(mono())).expect("mono").hard();
+    s.declare_root_topology(Some(mono()))
+        .expect("mono")
+        .unfaded();
     assert_eq!(reopened(block(&mut s)).len(), 1);
     s.graph().meters().close(id).expect("open");
     for _ in 0..2 {

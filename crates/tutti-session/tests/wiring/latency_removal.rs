@@ -30,13 +30,13 @@ fn the_published_latency_shrinks_when_the_latency_bearing_node_leaves() {
         ..LimiterControls::DEFAULT
     }));
     s.graph()
-        .set_sources_hard(InPort::new(lim, 0), [OutPort::new(src, 0)])
+        .set_sources_unfaded(InPort::new(lim, 0), [OutPort::new(src, 0)])
         .unwrap();
     s.graph()
-        .set_sources_hard(Root::output(0), [OutPort::new(lim, 0)])
+        .set_sources_unfaded(Root::output(0), [OutPort::new(lim, 0)])
         .unwrap();
     s.graph()
-        .set_sources_hard(Root::output(1), [OutPort::new(dry, 0)])
+        .set_sources_unfaded(Root::output(1), [OutPort::new(dry, 0)])
         .unwrap();
     let _ = s.update();
 

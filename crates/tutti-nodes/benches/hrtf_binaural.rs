@@ -18,24 +18,21 @@
 use std::hint::black_box;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
+use tutti_buffers::Float;
 use tutti_graph::Node;
 use tutti_graph::ParamNode;
 use tutti_graph::contract::Direct;
 use tutti_nodes::HrtfBinauralNode;
 use tutti_nodes::testing::aim;
+use tutti_rt::SplitMix64;
 use tutti_units::{ArcDegrees, Azimuth, Elevation, SampleRate};
 
 const BLOCK: usize = 64;
 const RATE: u32 = 48_000;
 
-/// A cheap LCG, so the bench needs no `rand`.
-struct Lcg(u32);
-
-impl Lcg {
-    fn next(&mut self) -> f32 {
-        self.0 = self.0.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
-        (self.0 >> 8) as f32 / (1u32 << 24) as f32 * 2.0 - 1.0
-    }
+/// The next value of `rng` on `[-1, 1)`.
+fn noise(rng: &mut SplitMix64) -> f32 {
+    f32::from_fraction_bits(rng.next_u64()) * 2.0 - 1.0
 }
 
 /// An icosahedron subdivided `levels` times, projected onto the unit sphere.
@@ -108,7 +105,7 @@ fn icosphere(levels: usize) -> (Vec<[f32; 3]>, Vec<[u32; 3]>) {
 /// The sphere's bytes in the HRIR format: decaying noise per vertex and ear.
 fn sphere_bytes(ir_len: usize) -> Vec<u8> {
     let (verts, faces) = icosphere(2);
-    let mut rng = Lcg(0x1234_5678);
+    let mut rng = SplitMix64::new(2);
     let mut b = Vec::new();
     b.extend_from_slice(b"HRIR");
     b.extend_from_slice(&RATE.to_le_bytes());
@@ -127,7 +124,7 @@ fn sphere_bytes(ir_len: usize) -> Vec<u8> {
         for _ear in 0..2 {
             for i in 0..ir_len {
                 let decay = (-(i as f32) / (ir_len as f32 / 6.0)).exp();
-                b.extend_from_slice(&(rng.next() * decay).to_le_bytes());
+                b.extend_from_slice(&(noise(&mut rng) * decay).to_le_bytes());
             }
         }
     }
@@ -149,11 +146,11 @@ fn bench(c: &mut Criterion) {
             // Seat the de-zipper on the position, so the static case renders
             // one filter from its first block.
             Node::reset(&mut *d.node);
-            let mut rng = Lcg(0x2545_f491);
+            let mut rng = SplitMix64::new(1);
             for ch in d.inputs_mut().iter_mut() {
                 let ch = ch.into_samples_mut();
                 for x in ch.iter_mut() {
-                    *x = rng.next();
+                    *x = noise(&mut rng);
                 }
             }
             for _ in 0..64 {

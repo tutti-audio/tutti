@@ -173,7 +173,7 @@ fn phaser_node_process_is_allocation_free() {
     );
 }
 
-/// Every control moved each block: the delay time glides at its slew, the chorus depth
+/// Every control moved each block: the delay time ramps at its slew, the chorus depth
 /// sweeps, the phaser's control points are re-solved, the cross-fed delay reads
 /// every tap before writing any line. All of it on preallocated scratch.
 /// The delay's moves go through its `ParamSet`; the others through clones, which share
@@ -181,7 +181,7 @@ fn phaser_node_process_is_allocation_free() {
 #[test]
 fn delay_and_modulation_with_moving_controls_are_allocation_free() {
     // A cross-fed stereo delay whose time and both feedbacks move every block, the
-    // glides in flight on every one.
+    // ramps in flight on every one.
     let node = delay(2, 0.01, 0.4, 0.3);
     let set = node.param_set();
     gate(node, 0.5, 2_000, |i| {
@@ -191,7 +191,7 @@ fn delay_and_modulation_with_moving_controls_are_allocation_free() {
         assert!(set.set(UnitParam::CrossFeedback, f64::from(0.4 * (1.0 - t))));
     });
     // A 6-wide chorus whose rate, depth and feedback all move every block: the depth and
-    // feedback glides are in flight on every one, the rate lands whole at the grid.
+    // feedback ramps are in flight on every one, the rate lands whole at the grid.
     let chorus = ModDelayNode::<f32>::chorus(bus(6));
     let c = chorus.param_set();
     gate(chorus, 0.5, 2_000, |i| {
@@ -201,7 +201,7 @@ fn delay_and_modulation_with_moving_controls_are_allocation_free() {
         assert!(c.set(UnitParam::Feedback, f64::from(0.6 * t)));
     });
     // A 6-wide, 8-stage, staggered phaser whose rate, depth and feedback all move every
-    // block, the glides in flight on every one.
+    // block, the ramps in flight on every one.
     let phaser = PhaserNode::<f32>::new(
         bus(6),
         Stages::of(8),
@@ -262,7 +262,7 @@ fn a_delay_with_its_lanes_fed_is_allocation_free() {
 }
 
 /// A chorus with its three slow controls driven (rate, depth and feedback lanes fed): each
-/// is read at the grid's solve frame, the depth and feedback glides move on every solve,
+/// is read at the grid's solve frame, the depth and feedback ramps move on every solve,
 /// and the 6-wide stagger renders every channel's sweep. Through `Direct`, which feeds a
 /// node's param ports.
 #[test]
@@ -308,7 +308,7 @@ fn a_chorus_with_its_lanes_fed_is_allocation_free() {
 }
 
 /// A phaser with its three slow controls driven (rate, depth and feedback lanes fed): each
-/// is read at the grid's solve frame, the depth and feedback glides move on every solve, and
+/// is read at the grid's solve frame, the depth and feedback ramps move on every solve, and
 /// the staggered 6-wide chain renders every channel's sweep. Through `Direct`, which feeds a
 /// node's param ports.
 #[test]

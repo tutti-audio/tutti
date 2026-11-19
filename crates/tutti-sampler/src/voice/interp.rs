@@ -688,7 +688,7 @@ impl<F: Float> Place<F> {
     /// A wave read as it stands, a mono one placed by the lone-centre rule for
     /// a frame of `width` ([`MonoSpread::to`]). Control side: it allocates.
     #[must_use]
-    pub fn native(width: ChannelLayout) -> Self {
+    pub fn new(width: ChannelLayout) -> Self {
         Self::Native(MonoSpread::to(width))
     }
 
@@ -734,7 +734,7 @@ impl<F: Float> Place<F> {
             .into());
         }
         if topology.width() == ChannelLayout::MONO {
-            return Ok(Self::native(frame));
+            return Ok(Self::new(frame));
         }
         // A file that names no speakers is read in the engine's order for its
         // width.
@@ -745,7 +745,7 @@ impl<F: Float> Place<F> {
         };
         let fold = fold_to_width(&named, frame)?;
         if fold.is_identity() {
-            return Ok(Self::native(frame));
+            return Ok(Self::new(frame));
         }
         // A fold that is not the identity reads at most the widest named
         // source: a wider source than `MAX_WAVE_CHANNELS` would need more

@@ -21,7 +21,7 @@ fn bank(detection: PeakDetection) -> LimiterBank<f32> {
 fn bank_at(detection: PeakDetection, lookahead: Lookahead, rate: SampleRate) -> LimiterBank<f32> {
     let mut bank = LimiterBank::<f32>::detecting(ChannelLayout::MONO, lookahead, rate, detection)
         .expect("the lookahead is long enough");
-    bank.aim(&controls(ceiling_db(), ceiling_db(), 0.1));
+    bank.retarget(&controls(ceiling_db(), ceiling_db(), 0.1));
     bank
 }
 
@@ -143,10 +143,10 @@ fn signals() -> Vec<(&'static str, Vec<f32>)> {
     all.push(("0.42 fs bursts", bursts));
     // Band-limited noise: 300 tones of random phase to 0.44 of the rate, at an amplitude
     // whose peak is well over the ceiling.
-    let mut rng = StdRng::seed_from_u64(77);
+    let mut rng = SplitMix64::new(77);
     let mut noise = vec![0.0f64; frames];
     for k in 1..=300 {
-        let phase = rng.random_range(0.0..std::f64::consts::TAU);
+        let phase = uniform(&mut rng, 0.0, std::f64::consts::TAU);
         let cycles = 0.44 * f64::from(k) / 300.0;
         for (n, x) in noise.iter_mut().enumerate() {
             *x += (std::f64::consts::TAU * cycles * n as f64 + phase).sin();

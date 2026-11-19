@@ -2,7 +2,8 @@ use super::*;
 use crate::analyses::yin::Pitch;
 use crate::framing::Framing;
 use crate::meters::chroma::FrequencyBand;
-use rand::{RngExt, SeedableRng, rngs::StdRng};
+use crate::test_rng::uniform;
+use tutti_rt::SplitMix64;
 use tutti_units::{Confidence, Hz};
 
 const RATE: f64 = 44100.0;
@@ -409,14 +410,14 @@ fn a_fast_slide_splits_and_a_slow_one_does_not() {
 /// repeats, negative zero and extremes.
 #[test]
 fn the_sliding_median_matches_sorting_each_window() {
-    let mut rng = StdRng::seed_from_u64(11);
+    let mut rng = SplitMix64::new(11);
     for span in [1, 2, 3, 7, 10] {
         let cents: Vec<f64> = (0..200)
-            .map(|_| match rng.random_range(0..6) {
+            .map(|_| match rng.next_u64() % 6 {
                 0 => 0.0,
                 1 => -0.0,
                 2 => 100.0,
-                _ => rng.random_range(-80.0..80.0),
+                _ => uniform(&mut rng, -80.0, 80.0),
             })
             .collect();
         let mut want = Vec::new();
@@ -463,8 +464,8 @@ fn silence_noise_and_bad_input_are_defined() {
     let c = cfg();
     assert_eq!(transcribe(&c, &vec![0.0; 44100]), Err(Error::NoSignal));
     assert_eq!(transcribe(&c, &vec![1e-6; 44100]), Err(Error::NoSignal));
-    let mut rng = StdRng::seed_from_u64(7);
-    let noise: Vec<f64> = (0..88200).map(|_| rng.random_range(-0.3..0.3)).collect();
+    let mut rng = SplitMix64::new(7);
+    let noise: Vec<f64> = (0..88200).map(|_| uniform(&mut rng, -0.3, 0.3)).collect();
     assert_eq!(transcribe(&c, &noise), Ok(Vec::new()));
     for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
         let mut x = render(RATE, &[tone(0.1, 0.5, 440.0, 0.5)], 0.7);

@@ -60,7 +60,7 @@ fn a_placed_clip_adds_no_tail_to_the_range() {
     let (clip, _) = session
         .graph()
         .add(Clip::new(constant(2 * RATE as usize, 0.25)).expect("a placeable wave"));
-    session.graph().connect(clip, Root).unwrap().hard();
+    session.graph().connect(clip, Root).unwrap().unfaded();
     assert_eq!(length_of(&mut session, 1.0), RATE as usize);
 }
 
@@ -77,7 +77,7 @@ fn a_free_running_voice_rings_out_its_wave() {
         source.set_speed(PlaybackRate::clamped(speed));
         source.set_loop(looped);
         let (voice, _) = session.graph().add(source);
-        session.graph().connect(voice, Root).unwrap().hard();
+        session.graph().connect(voice, Root).unwrap().unfaded();
         length_of(&mut session, 1.0)
     };
     let second = RATE as usize;
@@ -89,7 +89,7 @@ fn a_free_running_voice_rings_out_its_wave() {
     let mut source = MemorySource::new(constant(frames, 0.25)).expect("a placeable wave");
     source.set_loop(Some(looped));
     let (voice, _) = session.graph().add(source);
-    session.graph().connect(voice, Root).unwrap().hard();
+    session.graph().connect(voice, Root).unwrap().unfaded();
     let cap = Seconds::new(0.5);
     let bounce = Bounce::project()
         .master_buffers()
@@ -118,7 +118,7 @@ fn a_pool_built_with_its_voices_bounces_them() {
     .expect("a placeable wave");
     pool.insert(SlotId(1), source, Playback::default());
     let (pool, _handle) = session.graph().add(pool);
-    session.graph().connect(pool, Root).unwrap().hard();
+    session.graph().connect(pool, Root).unwrap().unfaded();
 
     let bounce = Bounce::project()
         .master_buffers()
@@ -144,7 +144,7 @@ fn a_pool_built_with_its_voices_bounces_them() {
 fn a_pool_driven_through_its_handle_refuses_the_bounce_by_key() {
     let mut session = session();
     let (pool, handle) = session.graph().add(VoicePool::new());
-    session.graph().connect(pool, Root).unwrap().hard();
+    session.graph().connect(pool, Root).unwrap().unfaded();
     let source = MemorySource::placed(
         constant(RATE as usize, 0.25),
         tutti_sampler::VoiceWindow::from(Beat::new(0.0)),

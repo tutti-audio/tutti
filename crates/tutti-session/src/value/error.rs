@@ -12,7 +12,7 @@ use super::AnyTarget;
 /// [`ValueErrorKind::Reentrant`], which are the whole call's. `target` names
 /// the item's key and kind when the call had one to name.
 ///
-/// `K` is the session's key type: [`Knobs<K>`](crate::Knobs) and
+/// `K` is the session's key type: [`Values<K>`](crate::Values) and
 /// [`Session<K>`](crate::Session) answer a `ValueError<K>`.
 #[derive(Clone, Debug, PartialEq, Eq, Error)]
 #[error("value {at}: {kind}")]

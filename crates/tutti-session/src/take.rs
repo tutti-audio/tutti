@@ -11,9 +11,9 @@
 //! # Where the take is placed
 //!
 //! A sample the inlet emits at graph frame `F` was played by the performer in
-//! answer to what the device played [`out_latency`](Terms::out_latency) after it
-//! was rendered, and reached the graph [`in_latency`](Terms::in_latency) plus the
-//! inlet's [`lead`](Terms::inlet_lead) after it was sung, so the take's first
+//! answer to what the device played [`out_latency`](TakeLatency::out_latency) after it
+//! was rendered, and reached the graph [`in_latency`](TakeLatency::in_latency) plus the
+//! inlet's [`lead`](TakeLatency::inlet_lead) after it was sung, so the take's first
 //! frame belongs at
 //!
 //! ```text
@@ -21,7 +21,7 @@
 //! ```
 //!
 //! A latency the device has not reported is not a zero: the term is `None` in
-//! [`Terms`], left out of the sum, and [`Terms::is_complete`] says so.
+//! [`TakeLatency`], left out of the sum, and [`TakeLatency::is_complete`] says so.
 //!
 //! # Punch
 //!
@@ -285,11 +285,11 @@ impl LatencyProbe {
     }
 }
 
-/// The terms of a take's placement, each as the take found it: a reading, read
-/// from [`Placement::terms`] or [`Recorded::terms`].
+/// The latency of a take's placement, each as the take found it: a reading, read
+/// from [`Placement::latency`] or [`Recorded::latency`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
-pub struct Terms {
+pub struct TakeLatency {
     /// The capture's delay: how long before a graph block a frame was sung.
     /// `None`: the input has not reported one.
     pub in_latency: Option<Samples>,
@@ -302,8 +302,8 @@ pub struct Terms {
     pub offset: Trim,
 }
 
-impl Terms {
-    /// The terms of a placement.
+impl TakeLatency {
+    /// The latency of a placement.
     #[must_use]
     pub(crate) fn new(
         in_latency: Option<Samples>,
@@ -320,13 +320,13 @@ impl Terms {
     }
 
     /// Whether both latencies were reported. When they were not, the start is
-    /// placed by the terms that were, and is that much later than it belongs.
+    /// placed by the figures that were reported, and is that much later than it belongs.
     #[must_use]
     pub fn is_complete(&self) -> bool {
         self.in_latency.is_some() && self.out_latency.is_some()
     }
 
-    /// The start these terms put a take whose first frame is graph frame
+    /// The start this latency puts a take whose first frame is graph frame
     /// `first` at: `first - (in + out + lead) + offset`, with an unreported
     /// latency left out.
     #[must_use]
@@ -352,12 +352,12 @@ pub enum Start {
     BeforeOrigin(Samples),
 }
 
-/// Where a take that has started belongs: the first frame it holds, the terms
+/// Where a take that has started belongs: the first frame it holds, the latency
 /// and the start they give. Metadata: nothing is shifted in the file.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Placement {
     first: Frame,
-    terms: Terms,
+    latency: TakeLatency,
     start: Start,
     start_beat: Beat,
 }
@@ -369,10 +369,10 @@ impl Placement {
         self.first
     }
 
-    /// The terms.
+    /// The latency.
     #[must_use]
-    pub fn terms(&self) -> &Terms {
-        &self.terms
+    pub fn latency(&self) -> &TakeLatency {
+        &self.latency
     }
 
     /// Where the take belongs on the graph's clock.
@@ -483,10 +483,10 @@ impl Recorded {
         &self.placement
     }
 
-    /// The terms of the placement.
+    /// The latency of the placement.
     #[must_use]
-    pub fn terms(&self) -> &Terms {
-        &self.placement.terms
+    pub fn latency(&self) -> &TakeLatency {
+        &self.placement.latency
     }
 
     /// Where it belongs on the graph's clock ([`Placement::start`]).
@@ -1067,11 +1067,11 @@ impl<F: Float> Pump<F> {
     fn place(&self, first: Frame) -> Placement {
         let (in_latency, out_latency) = self.probe.read(self.anchor.rate);
         let (lead, offset) = self.terms;
-        let terms = Terms::new(in_latency, out_latency, lead, offset);
-        let start = terms.start(first);
+        let latency = TakeLatency::new(in_latency, out_latency, lead, offset);
+        let start = latency.start(first);
         Placement {
             first,
-            terms,
+            latency,
             start,
             start_beat: self.anchor.beat_at(start),
         }
@@ -1133,19 +1133,19 @@ mod tests {
     /// false.
     #[test]
     fn a_start_before_the_origin_is_stated_not_clamped() {
-        let terms = Terms::new(
+        let latency = TakeLatency::new(
             Some(Samples::new(240)),
             Some(Samples::new(480)),
             Samples::new(7),
             Trim::NONE,
         );
-        assert_eq!(terms.start(Frame::new(1_000)), Start::At(Frame::new(273)));
+        assert_eq!(latency.start(Frame::new(1_000)), Start::At(Frame::new(273)));
         assert_eq!(
-            terms.start(Frame::new(100)),
+            latency.start(Frame::new(100)),
             Start::BeforeOrigin(Samples::new(627))
         );
-        assert!(terms.is_complete());
-        let partial = Terms::new(Some(Samples::new(240)), None, Samples::new(0), Trim::NONE);
+        assert!(latency.is_complete());
+        let partial = TakeLatency::new(Some(Samples::new(240)), None, Samples::new(0), Trim::NONE);
         assert!(!partial.is_complete());
     }
 

@@ -22,7 +22,7 @@ fn session() -> DetachedSession {
         .expect("builds");
     let (dc, _) = s.graph().add(ForkByClone(Const::mono(0.25)));
     s.graph()
-        .set_sources_hard(Root::output(0), [OutPort::new(dc, 0)])
+        .set_sources_unfaded(Root::output(0), [OutPort::new(dc, 0)])
         .unwrap();
     s
 }

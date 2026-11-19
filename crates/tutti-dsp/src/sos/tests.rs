@@ -353,13 +353,13 @@ fn a_five_hz_high_pass_at_192_khz_holds_its_gain_and_noise_in_f32() {
     let sos = Butterworth::new(CutResponse::HighPass, ButterworthOrder::of(2))
         .design(Hz::new(FC), SampleRate::of(FS))
         .unwrap();
-    let mut glide = crate::Glide::landed(SosCoefficients::<f32>::new(&sos).unwrap());
+    let mut ramp = crate::Ramp::new(SosCoefficients::<f32>::new(&sos).unwrap());
     let input: Vec<f32> = (0..2 * whole)
         .map(|n| libm::sin(w * n as f64) as f32)
         .collect();
     let mut out = vec![0.0f32; input.len()];
     SosBank::<f32>::new(ChannelLayout::MONO).process(
-        &mut glide,
+        &mut ramp,
         Planes::new(&[&input[..]]).unwrap(),
         PlanesMut::new(&mut [&mut out[..]]).unwrap(),
     );

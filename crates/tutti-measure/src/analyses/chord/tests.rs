@@ -1,6 +1,7 @@
 use super::*;
-use rand::{RngExt, SeedableRng, rngs::StdRng};
+use crate::test_rng::uniform;
 use tutti_dsp::{BinCount, FrameCount};
+use tutti_rt::SplitMix64;
 use tutti_units::Cents;
 
 fn framing(window: usize, hop: usize) -> Framing {
@@ -65,10 +66,10 @@ fn silence_and_noise_are_no_chord() {
     assert!(sims[..NO_CHORD].iter().all(|&s| s == 0.0));
     assert!(run(&[[0.0; CLASSES]; 8], &cfg()).is_empty());
     assert!(run(&[[1.0; CLASSES]; 8], &cfg()).is_empty());
-    let mut rng = StdRng::seed_from_u64(7);
+    let mut rng = SplitMix64::new(7);
     let noise: Vec<[f64; CLASSES]> = (0..200)
         .map(|_| {
-            let mut x: [f64; CLASSES] = core::array::from_fn(|_| rng.random_range(0.3..1.0));
+            let mut x: [f64; CLASSES] = core::array::from_fn(|_| uniform(&mut rng, 0.3, 1.0));
             let max = x.iter().copied().fold(0.0, f64::max);
             x.iter_mut().for_each(|v| *v /= max);
             x
@@ -118,13 +119,13 @@ fn a_lone_note_a_bass_line_and_a_fifth_are_no_chord() {
 /// still pass, so the constant 0.4 case is the one that pins it).
 #[test]
 fn a_triad_over_a_realistic_floor_is_still_the_triad() {
-    let mut rng = StdRng::seed_from_u64(5);
+    let mut rng = SplitMix64::new(5);
     for (root, minor, constant) in [(0, false, None), (9, true, None), (7, false, Some(0.4))] {
         let rows: Vec<[f64; CLASSES]> = (0..30)
             .map(|_| {
                 let mut x = triad(root, minor);
                 for v in x.iter_mut().filter(|v| **v == 0.0) {
-                    *v = constant.unwrap_or_else(|| rng.random_range(0.2..0.4));
+                    *v = constant.unwrap_or_else(|| uniform(&mut rng, 0.2, 0.4));
                 }
                 x
             })
@@ -146,9 +147,9 @@ fn a_triad_over_a_realistic_floor_is_still_the_triad() {
 /// where an unscaled score would turn it into chords or a triad into none.
 #[test]
 fn the_chords_do_not_depend_on_the_scale() {
-    let mut rng = StdRng::seed_from_u64(9);
+    let mut rng = SplitMix64::new(9);
     let mut rows: Vec<[f64; CLASSES]> = (0..40)
-        .map(|_| core::array::from_fn(|_| rng.random_range(0.3..1.0)))
+        .map(|_| core::array::from_fn(|_| uniform(&mut rng, 0.3, 1.0)))
         .collect();
     rows.extend([triad(0, false); 10]);
     rows.extend([triad(9, true); 10]);

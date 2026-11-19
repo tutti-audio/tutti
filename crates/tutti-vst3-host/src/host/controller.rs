@@ -10,9 +10,9 @@ use tutti_rt::{DrainMark, DrainWatch};
 
 use tutti_buffers::FloatWidth;
 use tutti_plugin_types::{
-    Control, Controller, EditQueue, EditSink, Loaded, ParamAccess, ParamEdit, PluginError,
-    PluginResult, PluginTail, Prepare, Processor, Refused, ReportDrain, Request, RestartRules,
-    Samples, Stuck, Widths, Wraps,
+    Control, Controller, EditWriter, Loaded, ParamAccess, ParamEdit, ParamWriteError, PluginError,
+    PluginResult, PluginTail, Prepare, PresetId, Processor, Refused, ReportDrain, Request,
+    RestartRules, Samples, Stuck, Widths, Wraps,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -29,7 +29,7 @@ const REPORT_CAPACITY: usize = 256;
 use super::control::plugin_error;
 use super::instance::Staged;
 use super::loaded::{Activation, Vst3Loaded};
-use super::processor::{EDIT_CAPACITY, ProcessorAny, ProcessorParts, Vst3Processor};
+use super::processor::{ProcessorAny, ProcessorParts, Vst3Processor};
 use super::shell::Shell;
 
 /// The main-thread half of an activation: the whole control surface of a
@@ -57,9 +57,8 @@ pub struct Vst3Controller {
     loaded: Option<Vst3Loaded>,
     /// The identity of the pair, and the hand-off to the Processor.
     shell: Arc<Shell>,
-    /// The writes to the Processor, and those a full ring refused, retried on
-    /// the next tick ([`flush_edits`](Control::flush_edits)).
-    queue: EditQueue,
+    /// The writes to the Processor: one slot per declared parameter.
+    edits: EditWriter,
     /// What the Controller handed the Processor, latest per parameter, until a
     /// block has surely taken it: what a save must add, because the
     /// component's stream does not hold it yet.
@@ -83,9 +82,8 @@ pub struct Vst3Controller {
 struct Handed {
     id: ParamId,
     value: Normalized,
-    /// The drain count read after the write entered the ring; `None` while the
-    /// ring has refused it.
-    sent_at: Option<DrainMark>,
+    /// The drain count read after the write entered its slot.
+    sent_at: DrainMark,
 }
 
 impl Handed {
@@ -101,14 +99,14 @@ impl Handed {
     /// Processor cannot have; a `process` that fails was handed the points
     /// first.
     fn is_drained(&self, watch: &DrainWatch) -> bool {
-        self.sent_at.is_some_and(|mark| watch.two_since(mark))
+        watch.two_since(self.sent_at)
     }
 }
 
 impl std::fmt::Debug for Vst3Controller {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Vst3Controller")
-            .field("queue", &self.queue)
+            .field("edits", &self.edits)
             .finish_non_exhaustive()
     }
 }
@@ -117,7 +115,7 @@ impl Vst3Controller {
     fn new(
         loaded: Vst3Loaded,
         shell: Arc<Shell>,
-        edits: EditSink,
+        edits: EditWriter,
         handed: Vec<Handed>,
         watch: DrainWatch,
         reports: ReportDrain,
@@ -125,7 +123,7 @@ impl Vst3Controller {
         Self {
             loaded: Some(loaded),
             shell,
-            queue: EditQueue::new(edits),
+            edits,
             handed,
             watch,
             reports,
@@ -163,21 +161,14 @@ impl Vst3Controller {
             .expect("a live Controller holds its plugin")
     }
 
-    /// Edits the ring refused for want of room, cumulatively. Each was kept and
-    /// retried; the count says the Processor was not draining as fast as the
-    /// Controller wrote.
-    #[must_use]
-    pub fn refused_edits(&self) -> u32 {
-        self.queue.refused()
-    }
-
-    /// Queues a parameter write to the Processor.
-    ///
-    /// A value already waiting to be retried is replaced by the newer one; a
-    /// full ring keeps the value for the next tick.
+    /// Writes a parameter to the Processor's slot, which puts it in the next
+    /// block's `inputParameterChanges`.
     fn queue_edit(&mut self, id: ParamId, value: Normalized) {
-        let sent = self.queue.queue(id, value);
-        let sent_at = sent.then(|| self.watch.mark());
+        // The write policy refused an id the plugin does not declare before
+        // this call, so the slot exists.
+        let written = self.edits.write(id, value);
+        debug_assert!(written.is_ok(), "{written:?}");
+        let sent_at = self.watch.mark();
         self.hand(id, value, sent_at);
     }
 
@@ -210,7 +201,7 @@ impl Vst3Controller {
 
     /// Records the write as handed to the Processor, replacing an earlier one
     /// to the same parameter.
-    fn hand(&mut self, id: ParamId, value: Normalized, sent_at: Option<DrainMark>) {
+    fn hand(&mut self, id: ParamId, value: Normalized, sent_at: DrainMark) {
         let handed = Handed { id, value, sent_at };
         match self.handed.iter_mut().find(|h| h.id == id) {
             Some(slot) => *slot = handed,
@@ -226,10 +217,10 @@ impl Vst3Controller {
         self.handed.iter().map(|h| (h.id, h.value)).collect()
     }
 
-    /// Makes every write made so far stale (see [`EditQueue::reset`]).
+    /// Makes every write made so far stale (see [`EditWriter::reset`]).
     fn reset_edits(&mut self) {
         self.handed.clear();
-        self.queue.reset();
+        self.edits.reset();
     }
 }
 
@@ -265,11 +256,34 @@ impl Wraps for Vst3Controller {
         self.queue_edit(id, value);
     }
 
-    /// The writes queued before are stale. The writes the state or the program
-    /// carried (the plugin keeps them in `carried`) are queued to the Processor,
-    /// which the component's own stream did not hold.
-    fn after_restore(&mut self, _main: MainThreadMarker) {
+    /// Looks the program up once and refuses, without touching the plugin, an
+    /// id that is no program or a program parameter the host may not write;
+    /// otherwise runs the restore hooks around the load itself.
+    fn load_preset(&mut self, main: MainThreadMarker, id: &PresetId) -> bool {
+        let loaded = self.loaded();
+        let Some((param, value)) = loaded.program_write(main, id) else {
+            return false;
+        };
+        if loaded.parameter_writable(main, param).is_err() {
+            return false;
+        }
+        self.before_restore(main);
+        let selected = self.loaded_mut().select_program(main, param, value);
+        if selected {
+            self.after_restore(main);
+        }
+        selected
+    }
+
+    /// The writes queued before the load are stale, voided before it runs.
+    fn before_restore(&mut self, _main: MainThreadMarker) {
         self.reset_edits();
+    }
+
+    /// The writes the state or the program carried (the plugin keeps them in
+    /// `carried`) are queued to the Processor, which the component's own stream
+    /// did not hold, under the epoch the reset made current.
+    fn after_restore(&mut self, _main: MainThreadMarker) {
         for (id, value) in std::mem::take(&mut self.loaded_mut().carried) {
             self.queue_edit(id, value);
         }
@@ -313,26 +327,14 @@ impl Wraps for Vst3Controller {
 
     /// Applies what the plugin's `outputParameterChanges` reported to the edit
     /// controller (`setParamNormalized`, on this thread, as the portal's
-    /// "Processor and Controller" section has it), retries what the ring
-    /// refused, oldest first, and lets the retired midi-mapping tables go.
+    /// "Processor and Controller" section has it), and lets the retired
+    /// midi-mapping tables go.
     fn tick(&mut self, main: MainThreadMarker) {
         self.apply_reports(main);
         self.loaded_mut().midi_cc.reclaim();
         // A tick is a control-side moment: plugins whose last holder was a
         // Processor are destroyed here, not on its thread.
         super::shell::reap();
-        let (queue, watch, handed) = (&mut self.queue, &self.watch, &mut self.handed);
-        queue.retry(|id, value| {
-            let slot = Handed {
-                id,
-                value,
-                sent_at: Some(watch.mark()),
-            };
-            match handed.iter_mut().find(|h| h.id == id) {
-                Some(held) => *held = slot,
-                None => handed.push(slot),
-            }
-        });
     }
 }
 
@@ -442,18 +444,20 @@ impl Vst3Loaded {
         let declared: Arc<[(ParamId, ParamAccess)]> = declared.into();
         loaded.declared = Some(Arc::clone(&declared));
         let shell = Arc::new(Shell::new());
-        let (sink, drain) = tutti_plugin_types::edits(EDIT_CAPACITY);
+        // One slot per declared parameter: the list changes only across a
+        // reactivation, so the table cannot go stale while this activation lasts.
+        let (sink, drain) = tutti_plugin_types::edit_slots(declared.iter().map(|&(id, _)| id));
         let (reports_in, reports_out) = tutti_plugin_types::reports(REPORT_CAPACITY);
         let (beat, watch) = tutti_rt::drain_clock();
-        // The Processor holds the first `EDIT_CAPACITY` carried writes and refuses
-        // the rest, counted; the Controller keeps a record of what it holds.
+        // The Processor takes the carried writes the plugin declares; the
+        // Controller keeps a record of what it holds.
         let handed = carried
             .iter()
-            .take(EDIT_CAPACITY)
+            .filter(|&&(id, _)| ParamWriteError::check_sorted(id, &declared).is_ok())
             .map(|&(id, value)| Handed {
                 id,
                 value,
-                sent_at: Some(watch.mark()),
+                sent_at: watch.mark(),
             })
             .collect();
         let processor = Vst3Processor::new(ProcessorParts {
@@ -502,11 +506,10 @@ impl Vst3Loaded {
             ));
         }
         stop(&mut processor);
-        // Writes no block has drained would die with the ring. Older first: what
-        // the ring held, then what a full ring had refused.
+        // Writes no block has taken would die with the slots: read each slot
+        // once, nothing is rendering, so none is contended.
         let mut pending = Vec::new();
         take_edits(&mut processor, &mut pending);
-        pending.append(&mut controller.queue.take_unsent());
         drop(processor);
         let mut loaded = controller
             .loaded

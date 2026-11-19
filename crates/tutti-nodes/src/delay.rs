@@ -1,15 +1,15 @@
 //! The feedback delay, [`DelayNode`].
 //!
 //! [`DelayLine`](tutti_dsp::DelayLine) is the bare fractional-read ring;
-//! [`DelayBank`] is the delay over buffers views (the loop, the routing, the glides), and
-//! this file holds the kernel that aims it, the cells and how the graph reaches them. The
+//! [`DelayBank`] is the delay over buffers views (the loop, the routing, the ramps), and
+//! this file holds the kernel that retargets it, the cells and how the graph reaches them. The
 //! read is fractional: a delay whose time is modulated must interpolate between taps or it
 //! steps audibly.
 
 use tutti_buffers::{BusTopology, MaxBlock};
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{
-    COEFF_INTERVAL, DelayBank, DelayControls, DelayGlides, DelayLanes, DelayLayout, GAIN_GLIDE,
+    COEFF_INTERVAL, DelayBank, DelayControls, DelayLanes, DelayLayout, DelayRamps, GAIN_RAMP,
     InterpolationMode, Lerp, MaxDelay,
 };
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
@@ -56,12 +56,12 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 ///   their own that is a construction constant ([`ChannelTimes`](tutti_dsp::ChannelTimes)).
 ///   A time the graph feeds drives **every** channel through one shared value, per frame
 ///   (the natural flanger control: the lines interpolate); a frame that is not finite falls
-///   back to the time of the cell. A cell that moves glides, at no more than
+///   back to the time of the cell. A cell that moves ramps, at no more than
 ///   [`DELAY_SLEW`](tutti_dsp::DELAY_SLEW) frames of delay per frame: a moving delay is a
 ///   pitch bend, so it is its speed that is bounded, whatever the distance.
 /// - The **feedback** is per frame too when driven, clamped into the stable range; a cell
-///   that moves glides over [`GAIN_GLIDE`].
-/// - The **cross-feedback** is a cell the stream's 16-frame grid reads, and glides like the
+///   that moves ramps over [`GAIN_RAMP`].
+/// - The **cross-feedback** is a cell the stream's 16-frame grid reads, and ramps like the
 ///   feedback.
 ///
 /// # In a graph
@@ -73,7 +73,7 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 /// empties them. Its tail is [`Tail::Unknown`]: a recirculating
 /// line rings for as long as its feedback says, so the executor never skips it.
 ///
-/// `F` is the float of the graph it runs in, and of the lines and the glides; a line holds
+/// `F` is the float of the graph it runs in, and of the lines and the ramps; a line holds
 /// `ceil(max_delay * rate)` frames of it, so an `f32` graph halves the memory of an `f64` one.
 pub type DelayNode<F> = KernelNode<DelayKernel<F>>;
 
@@ -158,10 +158,10 @@ impl DelaySet {
 }
 
 /// The feedback delay as a [`Kernel`]: a [`DelayBank`] sized at the prepared rate and the
-/// glides of the delay and the feedbacks it reads.
+/// ramps of the delay and the feedbacks it reads.
 ///
 /// The time and the feedback are read per frame when the graph drives them
-/// ([`ControlLanes`]); a cell that moves lands whole on the stream grid and glides here.
+/// ([`ControlLanes`]); a cell that moves lands whole on the stream grid and ramps here.
 /// A recirculating line rings for as long as its feedback says, which is a ceiling the
 /// graph's bounce would have to render: the tail is [`Tail::Unknown`] and never narrowed, so
 /// the executor never skips it.
@@ -170,9 +170,9 @@ pub struct DelayKernel<F: Float> {
     layout: DelayLayout,
     /// The lines, sized when the rate is known: `None` until [`prepare`](Kernel::prepare).
     bank: Option<DelayBank<F>>,
-    glides: DelayGlides<F>,
-    /// Whether the first retarget after `prepare` has landed.
-    landed: bool,
+    ramps: DelayRamps<F>,
+    /// Whether the first retarget after `prepare` has been applied.
+    applied: bool,
 }
 
 impl<F: Float + Lerp> DelayKernel<F> {
@@ -181,8 +181,8 @@ impl<F: Float + Lerp> DelayKernel<F> {
         Self {
             layout,
             bank: None,
-            glides: DelayGlides::landed(0),
-            landed: false,
+            ramps: DelayRamps::new(0),
+            applied: false,
         }
     }
 }
@@ -206,28 +206,28 @@ impl<F: Float + Lerp> Kernel for DelayKernel<F> {
 
     /// Sizes a line per channel at `rate` (`ceil(max_delay * rate)` frames: a re-prepare
     /// empties them, the delays in frames having been the old rate's) and the feedback
-    /// glides from [`GAIN_GLIDE`] at it, the conversion saturating: a prepare must not panic.
+    /// ramps from [`GAIN_RAMP`] at it, the conversion saturating: a prepare must not panic.
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
-        let steps = u32::try_from(GAIN_GLIDE.to_samples_ceil(rate).get()).unwrap_or(u32::MAX);
+        let steps = u32::try_from(GAIN_RAMP.to_samples_ceil(rate).get()).unwrap_or(u32::MAX);
         self.bank = Some(DelayBank::new(&self.layout, rate));
-        self.glides = DelayGlides::landed(steps);
-        self.landed = false;
+        self.ramps = DelayRamps::new(steps);
+        self.applied = false;
     }
 
     fn reset(&mut self) {
         if let Some(bank) = &mut self.bank {
             bank.reset();
         }
-        self.glides.settle();
-        self.landed = false;
+        self.ramps.jump_to_target();
+        self.applied = false;
     }
 
     fn retarget(&mut self, controls: &DelayControls) {
         let Some(bank) = &self.bank else { return };
-        bank.aim(&mut self.glides, controls);
-        if !self.landed {
-            self.glides.settle();
-            self.landed = true;
+        bank.retarget(&mut self.ramps, controls);
+        if !self.applied {
+            self.ramps.jump_to_target();
+            self.applied = true;
         }
     }
 
@@ -242,10 +242,10 @@ impl<F: Float + Lerp> Kernel for DelayKernel<F> {
             feedback: lanes.get(DelaySet::FEEDBACK_LANE),
         };
         if let Some(bank) = &mut self.bank {
-            bank.process(&mut self.glides, lanes, input, output);
+            bank.process(&mut self.ramps, lanes, input, output);
         }
-        // A design after a render is a move, which glides.
-        self.landed = true;
+        // A design after a render is a move, which ramps.
+        self.applied = true;
     }
 
     /// A recirculating line rings for as long as its feedback says: unknown, so the graph
@@ -619,7 +619,7 @@ mod tests {
 
     /// A reset empties the lines and restarts the grid: the same stream rendered after a
     /// reset, at a frame that is not a grid point, is the fresh node's bit for bit, with the
-    /// feedback ringing and the cross-feedback glide in flight.
+    /// feedback ringing and the cross-feedback ramp in flight.
     #[test]
     fn a_reset_node_renders_what_a_fresh_one_does() {
         let x: Vec<f32> = (0..400)
@@ -655,7 +655,7 @@ mod tests {
     /// A feedback written after a reset lands whole, as a fresh node's first design does: a
     /// one-frame delay of a constant `1` is `y[n] = x[n - 1] + f y[n - 1]`, so at feedback
     /// `0.5` from frame 0 it reads `0, 1, 1.5, 1.75, ...` (`2 - 2^(1 - n)` for `n >= 1`),
-    /// where a glide from 0 would not.
+    /// where a ramp from 0 would not.
     #[test]
     fn a_feedback_written_after_a_reset_lands_whole() {
         let mut node = prepared(

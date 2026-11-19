@@ -7,7 +7,7 @@
 //! itself, on the render's thread (tutti-sampler's `offline_read`), never
 //! from the live ring.
 //!
-//! The streamer is hand-stepped (`DiskStreamer::by_hand`), so a refill is a
+//! The streamer is hand-stepped (`DiskStreamer::manual`), so a refill is a
 //! step, not a race with a render that runs faster than real time.
 
 use std::path::Path;
@@ -20,9 +20,9 @@ use tutti_session::Root;
 use tutti_buffers::ChannelLayout;
 use tutti_export::Produced;
 use tutti_graph::NodeKey;
-use tutti_sampler::testing::settle;
+use tutti_sampler::testing::wait_for_open;
 use tutti_sampler::{
-    ByHand, DiskStreamer, DiskVoice, MemorySource, Placement, Playback, Stream, StreamReader,
+    DiskStreamer, DiskVoice, Manual, MemorySource, Placement, Playback, Stream, StreamReader,
     Voice, VoiceNode, VoiceSource, VoiceWindow,
 };
 use tutti_session::BufferMaster;
@@ -212,17 +212,14 @@ fn write_ramp(path: &Path, rate: u32, frames: usize) {
 fn streamer_on(
     path: &Path,
 ) -> (
-    (DiskStreamer<ByHand<f32>, f32>, Stream<f32>),
+    (DiskStreamer<Manual<f32>, f32>, Stream<f32>),
     StreamReader<f32>,
 ) {
     let mut streamer =
-        DiskStreamer::by_hand(SampleRate::of(RATE), Default::default()).expect("builds");
+        DiskStreamer::manual(SampleRate::of(RATE), Default::default()).expect("builds");
     let opening = streamer.open(path, Placement::HEAD);
-    let (stream, reader) = settle(&mut streamer, opening).expect("the file opens");
-    assert!(
-        streamer.step_until_settled(1_000) < 1_000,
-        "the ring primes"
-    );
+    let (stream, reader) = wait_for_open(&mut streamer, opening).expect("the file opens");
+    assert!(streamer.step_until_idle(1_000) < 1_000, "the ring primes");
     ((streamer, stream), reader)
 }
 
@@ -412,7 +409,7 @@ fn live_disk_playback_is_untouched_while_its_voice_exports() {
             let mut block = vec![vec![0.0; BLOCK]; 2];
             let mut after = 0;
             while after < 8 {
-                let _ = streamer.step_until_settled(64);
+                let _ = streamer.step_until_idle(64);
                 live.set_transport(tutti_graph::TransportPosition::new(
                     true,
                     Bpm::of(120.0),

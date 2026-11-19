@@ -176,7 +176,7 @@ pub fn play<F: Float>(
 // ---------------------------------------------------------------------------
 
 /// The answer to `opening` from a hand-stepped streamer: steps it until the
-/// streamer has answered, then until it has primed (`step_until_settled`), so
+/// streamer has answered, then until it has primed (`step_until_idle`), so
 /// the reader's ring holds what the threaded streamer would have read by the
 /// time a voice plays. The [`Stream`](crate::Stream) is the caller's to keep
 /// while the voice plays: dropping it ends the stream.
@@ -194,17 +194,17 @@ pub fn play<F: Float>(
 /// If the streamer has not answered within ten seconds: a hand-stepped
 /// streamer answers a seekable file on the first step, so that is a hang, not
 /// a slow machine.
-pub fn settle<F: tutti_rt::RingFloat>(
-    streamer: &mut crate::DiskStreamer<crate::ByHand<F>, F>,
-    mut opening: crate::Opening<F>,
+pub fn wait_for_open<F: tutti_rt::RingFloat>(
+    streamer: &mut crate::DiskStreamer<crate::Manual<F>, F>,
+    mut opening: crate::PendingOpen<F>,
 ) -> Result<(crate::Stream<F>, crate::StreamReader<F>), crate::OpenError> {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     while std::time::Instant::now() < deadline {
-        let _ = streamer.step_once();
+        let _ = streamer.step();
         match opening.poll() {
             crate::Open::Pending(again) => opening = again,
             crate::Open::Ready(stream, reader) => {
-                let _ = streamer.step_until_settled(1_000);
+                let _ = streamer.step_until_idle(1_000);
                 return Ok((stream, reader));
             }
             crate::Open::Failed(error) => return Err(error),
@@ -224,8 +224,8 @@ pub fn settle<F: tutti_rt::RingFloat>(
 /// # Panics
 ///
 /// If the streamer has not answered by then.
-pub fn settle_threaded<F: tutti_rt::RingFloat>(
-    mut opening: crate::Opening<F>,
+pub fn wait_for_open_threaded<F: tutti_rt::RingFloat>(
+    mut opening: crate::PendingOpen<F>,
 ) -> Result<(crate::Stream<F>, crate::StreamReader<F>), crate::OpenError> {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     loop {

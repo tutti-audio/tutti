@@ -87,22 +87,22 @@ fn scene_driven(with_limiter: bool, drive: f64) -> Scene {
     let g = session.graph();
     let (osc, _) = g.add(saw());
     let (filter, _) = g.add(low_pass(1_200.0));
-    g.set_sources_hard(InPort::new(filter, 0), [OutPort::new(osc, 0)])
+    g.set_sources_unfaded(InPort::new(filter, 0), [OutPort::new(osc, 0)])
         .unwrap();
     let (drive, _) = g.add(shaper(drive));
-    g.set_sources_hard(InPort::new(drive, 0), [OutPort::new(filter, 0)])
+    g.set_sources_unfaded(InPort::new(drive, 0), [OutPort::new(filter, 0)])
         .unwrap();
     let right = if with_limiter {
         let (lim, _) = g.add(limiter());
-        g.set_sources_hard(InPort::new(lim, 0), [OutPort::new(osc, 0)])
+        g.set_sources_unfaded(InPort::new(lim, 0), [OutPort::new(osc, 0)])
             .unwrap();
         lim.erase()
     } else {
         osc.erase()
     };
-    g.set_sources_hard(Root::output(0), [OutPort::new(drive, 0)])
+    g.set_sources_unfaded(Root::output(0), [OutPort::new(drive, 0)])
         .unwrap();
-    g.set_sources_hard(Root::output(1), [OutPort::new(right, 0)])
+    g.set_sources_unfaded(Root::output(1), [OutPort::new(right, 0)])
         .unwrap();
     let _ = session.update();
     Scene {
@@ -204,12 +204,12 @@ fn unaligned_blocks_render_per_sample_units_identically() {
     assert_eq!(first_difference(&a, &b), None, "64 vs 100-frame blocks");
 }
 
-/// **A param write glides in from the first frame of the next block**: written
+/// **A param write ramps in from the first frame of the next block**: written
 /// between two 256-frame blocks, the render before it is the scene with the old
 /// drive, the drive moves from the next block's first frame over the waveshaper's
-/// 5 ms glide (a grid point and 240 frames at most, inside 288), and from there on
+/// 5 ms ramp (a grid point and 240 frames at most, inside 288), and from there on
 /// the render is the scene built with the new drive (the waveshaper holds no state
-/// but the glide).
+/// but the ramp).
 #[test]
 fn a_param_write_lands_on_the_next_blocks_first_frame() {
     let mut s = scene(false);
@@ -232,7 +232,7 @@ fn a_param_write_lands_on_the_next_blocks_first_frame() {
     assert_eq!(
         first_difference(&settled(&after), &settled(&new_after)),
         None,
-        "after the glide: the scene at the new drive"
+        "after the ramp: the scene at the new drive"
     );
     // Not vacuous: the write moved the left channel from its first frame.
     assert!(

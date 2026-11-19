@@ -9,8 +9,8 @@ mod cut;
 mod envelope;
 mod eq;
 pub mod eq_band;
-mod glided;
 pub mod ladder;
+mod ramped;
 pub mod svf;
 mod tilt;
 

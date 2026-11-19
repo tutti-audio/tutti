@@ -116,7 +116,7 @@ impl<F: RingFloat> RingReader<F> {
 /// # fn two(reader: &mut StreamReader<f32>) {
 /// let first = reader.block(Samples::new(0), [none(), none()]);
 /// let second = reader.block(Samples::new(0), [none(), none()]); // the first is alive
-/// first.holds(0);
+/// first.contains(0);
 /// # }
 /// ```
 ///
@@ -129,10 +129,10 @@ impl<F: RingFloat> RingReader<F> {
 /// # fn two(reader: &mut StreamReader<f32>) {
 /// {
 ///     let first = reader.block(Samples::new(0), [none(), none()]);
-///     first.holds(0);
+///     first.contains(0);
 /// } // the first block ends (its loan is a destructor)
 /// let second = reader.block(Samples::new(0), [none(), none()]);
-/// second.holds(0);
+/// second.contains(0);
 /// # }
 /// ```
 ///
@@ -145,7 +145,7 @@ impl<F: RingFloat> RingReader<F> {
 /// # fn away(reader: &mut StreamReader<f32>) {
 /// let block = reader.block(Samples::new(0), [none(), none()]);
 /// std::thread::scope(|s| {
-///     s.spawn(move || block.holds(0));
+///     s.spawn(move || block.contains(0));
 /// });
 /// # }
 /// ```
@@ -161,7 +161,7 @@ impl<F: RingFloat> RingReader<F> {
 /// std::thread::scope(|s| {
 ///     s.spawn(|| ());
 /// });
-/// block.holds(0);
+/// block.contains(0);
 /// # }
 /// ```
 /// A block that is dropped unread is a mistake, and the compiler says so:
@@ -185,7 +185,7 @@ impl<F: RingFloat> RingReader<F> {
 /// # fn none() -> std::ops::Range<Samples> { Samples::new(0)..Samples::new(0) }
 /// # fn kept(reader: &mut StreamReader<f32>) {
 /// let block = reader.block(Samples::new(0), [none(), none()]);
-/// block.holds(0);
+/// block.contains(0);
 /// # }
 /// ```
 ///
@@ -229,10 +229,10 @@ pub struct Block<'r, F: RingFloat> {
 }
 
 impl<F: RingFloat> Block<'_, F> {
-    /// Whether position `pos` may be read this block: the ring's window holds
+    /// Whether position `pos` may be read this block: the ring's window contains
     /// it.
     #[inline]
-    pub fn holds(&self, pos: u64) -> bool {
+    pub fn contains(&self, pos: u64) -> bool {
         self.claim.holds(pos)
     }
 

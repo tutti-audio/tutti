@@ -141,7 +141,7 @@ impl<F: Float> Kernel for BitCrusherKernel<F> {
     }
 
     fn retarget(&mut self, controls: &BitCrusherControls) {
-        self.crusher.aim(controls);
+        self.crusher.retarget(controls);
     }
 
     fn render(

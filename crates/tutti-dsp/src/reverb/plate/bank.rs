@@ -1,5 +1,5 @@
 //! [`PlateBank`]: the Dattorro plate over buffers views, with the controls that sound as
-//! [`Glide`]s ([`PlateGlides`]).
+//! [`Ramp`]s ([`PlateRamps`]).
 //!
 //! The design is [`PlateControls::design_into`]: the bank reads the lengths and coefficients
 //! the [`Network`] holds and runs the topology of [`design`](super::design) over them. Mono in
@@ -18,15 +18,15 @@
 //! precision where `1 - p` formed in `F` would lose `u / c` of it (9e-5 at 192 kHz in `f32`).
 //!
 //! **Chunks.** The render counts [`CHUNK`](PlateBank::CHUNK) frames from the last reset and
-//! works once at each chunk's start: every [`Glide`] takes a step and the chunk's constants are
+//! works once at each chunk's start: every [`Ramp`] takes a step and the chunk's constants are
 //! read from them, the modulation's offsets at the chunk's start and end among them. The chunks
 //! are counted from the first frame since the last reset, so the output does not depend on how
-//! the input is cut into calls. The caller [aims](PlateBank::aim) the glides when its controls
-//! move: each sounds through 20 ms of whole chunks, the pre-delay by two frames a chunk.
+//! the input is cut into calls. The caller [retargets](PlateBank::retarget) the ramps when its
+//! controls move: each sounds through 20 ms of whole chunks, the pre-delay by two frames a chunk.
 //!
 //! **Format.** The state and the views are the bank's float `F`. The coefficients are designed
-//! in `f64` and cross to `F` once per design (`target_of`, [`aim`](PlateBank::aim)). The decay
-//! gain is the loop gain's fourth root, `c = g^(1/4)`, applied four times a trip. The longest
+//! in `f64` and cross to `F` once per design (`target_of`, [`retarget`](PlateBank::retarget)). The
+//! decay gain is the loop gain's fourth root, `c = g^(1/4)`, applied four times a trip. The longest
 //! decay (8 s at 192 kHz, `T` of 1.39e5 frames) has `|ln g| = 0.63` and `1 - c = 0.145`, so `F`'s
 //! rounding of `c` (3e-8) moves the RT60 by about 2e-7 of itself in `f32`. A loop gain multiplies a
 //! delay line's sample, so the product rounds by about `u` a trip whatever the form: it is not
@@ -42,7 +42,7 @@ use crate::design::along;
 use crate::onepole::{cutoff_complement, cutoff_pole, ring_frames};
 use crate::reverb::network::{Absorption, Network, Stage};
 use crate::reverb::{CHUNK, ramp, tail_of};
-use crate::{Glide, Lerp, Ring, Steps, System, TAIL_FLOOR};
+use crate::{Lerp, Ramp, Ring, Steps, System, TAIL_FLOOR};
 
 const PRE_STEP: f64 = 2.0; // frames a chunk the pre-delay moves
 const SLACK: usize = 4; // frames a line keeps beyond its length
@@ -74,7 +74,7 @@ struct Shape {
     pre: Samples,
 }
 
-/// A coefficient point: what a design asks for (the values [`PlateGlides`] glide to) and
+/// A coefficient point: what a design asks for (the values [`PlateRamps`] ramp to) and
 /// what a chunk runs.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Coefficients<F> {
@@ -111,26 +111,26 @@ impl<F: Float> Default for Coefficients<F> {
     }
 }
 
-/// What a [`PlateBank`] approaches: every sounding control a [`Glide`], the pre-delay by a
+/// What a [`PlateBank`] approaches: every sounding control a [`Ramp`], the pre-delay by a
 /// distance a chunk and the rest in 20 ms.
 ///
-/// Aimed by [`PlateBank::aim`], stepped once a chunk by [`PlateBank::process`]. A glide steps
-/// before its chunk runs: the first chunk after an aim reads step 1.
+/// Retargeted by [`PlateBank::retarget`], stepped once a chunk by [`PlateBank::process`]. A ramp
+/// steps before its chunk runs: the first chunk after a `retarget` reads step 1.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct PlateGlides<F: Float> {
+pub struct PlateRamps<F: Float> {
     ramp: Steps,
-    decay: Glide<F>,
-    damping: Glide<F>,
-    lattice2: Glide<F>,
-    lattice1: Glide<F>,
-    input: [Glide<F>; 4],
-    depth: Glide<F>,
-    pre: Glide<ReadPosition>,
-    bandwidth: Glide<F>,
+    decay: Ramp<F>,
+    damping: Ramp<F>,
+    lattice2: Ramp<F>,
+    lattice1: Ramp<F>,
+    input: [Ramp<F>; 4],
+    depth: Ramp<F>,
+    pre: Ramp<ReadPosition>,
+    bandwidth: Ramp<F>,
 }
 
-impl<F: Float + Lerp> PlateGlides<F> {
-    fn each(&mut self) -> impl Iterator<Item = &mut Glide<F>> {
+impl<F: Float + Lerp> PlateRamps<F> {
+    fn each(&mut self) -> impl Iterator<Item = &mut Ramp<F>> {
         [
             &mut self.decay,
             &mut self.damping,
@@ -143,10 +143,10 @@ impl<F: Float + Lerp> PlateGlides<F> {
         .chain(&mut self.input)
     }
 
-    /// Lands on the targets now.
-    pub fn settle(&mut self) {
-        self.each().for_each(Glide::settle);
-        self.pre.settle();
+    /// Jumps to the targets now.
+    pub fn jump_to_target(&mut self) {
+        self.each().for_each(Ramp::jump_to_target);
+        self.pre.jump_to_target();
     }
 
     fn step(&mut self) {
@@ -168,18 +168,18 @@ impl<F: Float + Lerp> PlateGlides<F> {
         }
     }
 
-    fn aim(&mut self, t: &Coefficients<F>) {
+    fn retarget(&mut self, t: &Coefficients<F>) {
         let ramp = self.ramp;
-        self.decay.aim_by(t.decay, ramp);
-        self.damping.aim_by(t.damping, ramp);
-        self.lattice2.aim_by(t.lattice2, ramp);
-        self.lattice1.aim_by(t.lattice1, ramp);
+        self.decay.retarget_by(t.decay, ramp);
+        self.damping.retarget_by(t.damping, ramp);
+        self.lattice2.retarget_by(t.lattice2, ramp);
+        self.lattice1.retarget_by(t.lattice1, ramp);
         for (g, &v) in self.input.iter_mut().zip(&t.input) {
-            g.aim_by(v, ramp);
+            g.retarget_by(v, ramp);
         }
-        self.depth.aim_by(t.depth, ramp);
-        self.pre.aim_position(t.pre, Steps::Rate(PRE_STEP));
-        self.bandwidth.aim_by(t.bandwidth, ramp);
+        self.depth.retarget_by(t.depth, ramp);
+        self.pre.retarget_position(t.pre, Steps::Rate(PRE_STEP));
+        self.bandwidth.retarget_by(t.bandwidth, ramp);
     }
 }
 
@@ -249,7 +249,7 @@ pub struct PlateBank<F: Float> {
 }
 
 impl<F: Float + Lerp> PlateBank<F> {
-    /// The frames between a glide's steps: the chunk.
+    /// The frames between a ramp's steps: the chunk.
     pub const CHUNK: usize = CHUNK;
 
     /// A silent plate at `rate`. Allocates: build it on the control side.
@@ -312,21 +312,21 @@ impl<F: Float + Lerp> PlateBank<F> {
         bank
     }
 
-    /// The glides of this bank, at rest and aimed at nothing: its first [`aim`](Self::aim)
+    /// The ramps of this bank, at rest and set to nothing: its first [`retarget`](Self::retarget)
     /// is the caller's to land. Until then the bank is silent.
     #[must_use]
-    pub fn glides(&self) -> PlateGlides<F> {
-        let rest = Glide::landed(F::ZERO);
-        PlateGlides {
+    pub fn ramps(&self) -> PlateRamps<F> {
+        let rest = Ramp::new(F::ZERO);
+        PlateRamps {
             ramp: ramp(self.rate),
             decay: rest,
-            damping: Glide::landed(F::ONE),
+            damping: Ramp::new(F::ONE),
             lattice2: rest,
             lattice1: rest,
             input: [rest; 4],
             depth: rest,
-            pre: Glide::landed(ReadPosition::START),
-            bandwidth: Glide::landed(F::ONE),
+            pre: Ramp::new(ReadPosition::START),
+            bandwidth: Ramp::new(F::ONE),
         }
     }
 
@@ -344,17 +344,17 @@ impl<F: Float + Lerp> PlateBank<F> {
         }
     }
 
-    /// How long `controls` ring from now, with `glides` as they are: the network's own tail at
+    /// How long `controls` ring from now, with `ramps` as they are: the network's own tail at
     /// the floor (it counts each damping one-pole's peak delay, so the loop it bounds is the
     /// real one), plus the ring of the bandwidth one-pole (`ln(floor) / ln(pole)` frames), plus
     /// the pre-delay still to fall; at most the ceiling ([`tail`](Self::tail)). No allocation.
-    pub fn tail_of(&mut self, glides: &PlateGlides<F>, controls: &PlateControls) -> Tail {
+    pub fn tail_of(&mut self, ramps: &PlateRamps<F>, controls: &PlateControls) -> Tail {
         self.design(controls);
         let Ring::Finite(t) = self.network.tail(TAIL_FLOOR) else {
             return tail_of(Ring::Unbounded, self.rate);
         };
         let pre = self.network.pre_delay.min(self.shape.pre);
-        let behind = glides
+        let behind = ramps
             .pre
             .now()
             .saturating_sub(pre)
@@ -384,8 +384,8 @@ impl<F: Float + Lerp> PlateBank<F> {
         self.into = Samples::ZERO;
     }
 
-    /// Aims `glides` at the design of `controls`. No allocation.
-    pub fn aim(&mut self, glides: &mut PlateGlides<F>, controls: &PlateControls) {
+    /// Aims `ramps` at the design of `controls`. No allocation.
+    pub fn retarget(&mut self, ramps: &mut PlateRamps<F>, controls: &PlateControls) {
         self.design(controls);
         if let Some(mut t) = target_of::<F>(&self.network) {
             t.bandwidth = F::from_design(cutoff_complement(
@@ -393,12 +393,12 @@ impl<F: Float + Lerp> PlateBank<F> {
                 self.rate,
             ));
             t.pre = t.pre.min(ReadPosition::from_frames(self.shape.pre));
-            glides.aim(&t);
+            ramps.retarget(&t);
         }
     }
 
-    /// The constants of the chunk that starts now, from the glides' step.
-    fn begin_chunk(&mut self, g: &PlateGlides<F>) {
+    /// The constants of the chunk that starts now, from the ramps' step.
+    fn begin_chunk(&mut self, g: &PlateRamps<F>) {
         let k = g.now();
         let depth: f64 = k.depth.into();
         let at = |phase: f64| {
@@ -421,13 +421,13 @@ impl<F: Float + Lerp> PlateBank<F> {
     }
 
     /// Runs `input` into `output`, the same number of frames: the input channels averaged to
-    /// one, the wet signal on the first two output channels. `glides` steps at each chunk's
+    /// one, the wet signal on the first two output channels. `ramps` steps at each chunk's
     /// start, so a call that ends inside a chunk goes on in the next. A channel of `output`
-    /// past the second is not touched; before the first [`aim`](Self::aim) the output is
+    /// past the second is not touched; before the first [`retarget`](Self::retarget) the output is
     /// silent. No allocation.
     pub fn process(
         &mut self,
-        glides: &mut PlateGlides<F>,
+        ramps: &mut PlateRamps<F>,
         input: Planes<'_, F>,
         mut output: PlanesMut<'_, '_, F>,
     ) {
@@ -444,7 +444,7 @@ impl<F: Float + Lerp> PlateBank<F> {
         let mut left = planes.next().map(|p| &mut p.into_samples_mut()[..frames]);
         let mut right = planes.next().map(|p| &mut p.into_samples_mut()[..frames]);
 
-        if glides.decay.target() == F::ZERO {
+        if ramps.decay.target() == F::ZERO {
             for y in left.iter_mut().chain(right.iter_mut()) {
                 y.fill(F::ZERO);
             }
@@ -453,8 +453,8 @@ impl<F: Float + Lerp> PlateBank<F> {
         let scale = F::from_design(1.0 / width.max(1) as f64);
         for i in 0..frames {
             if self.into == Samples::ZERO {
-                glides.step();
-                self.begin_chunk(glides);
+                ramps.step();
+                self.begin_chunk(ramps);
             }
             let t = along::<F>(self.into.get() as u32, Self::CHUNK as u32);
             let x: F = xs[..width].iter().map(|ch| ch[i]).sum::<F>() * scale;

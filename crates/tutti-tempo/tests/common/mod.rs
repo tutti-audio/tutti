@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+use tutti_rt::SplitMix64;
 use tutti_tempo::{TempoPoint, Transition};
 use tutti_units::{Beat, Bpm, SampleRate};
 
@@ -13,15 +14,15 @@ pub fn pt(beat: f64, tempo: f64, shape: Transition) -> TempoPoint {
 }
 
 /// A fixed-seed generator: the same sequence on every platform.
-pub struct Lcg(pub u64);
+pub struct Rng(SplitMix64);
 
-impl Lcg {
+impl Rng {
+    pub fn new(seed: u64) -> Self {
+        Self(SplitMix64::new(seed))
+    }
+
     /// Uniform in `[0, 1)`.
     pub fn next(&mut self) -> f64 {
-        self.0 = self
-            .0
-            .wrapping_mul(6364136223846793005)
-            .wrapping_add(1442695040888963407);
-        (self.0 >> 11) as f64 / (1u64 << 53) as f64
+        (self.0.next_u64() >> 11) as f64 * (1.0 / (1u64 << 53) as f64)
     }
 }

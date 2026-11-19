@@ -59,7 +59,7 @@ pub(crate) enum Pole<F> {
 
 impl<F: Float> Pole<F> {
     /// Holds: a step closes none of the gap, so a state stays where it is. What a bank that is
-    /// not yet aimed starts with.
+    /// not yet set starts with.
     pub(crate) const HOLD: Self = Self::Closes(F::ZERO);
 
     /// Instant: a step lands on the target.
@@ -104,7 +104,7 @@ pub(crate) struct Follower<F> {
 
 impl<F: Float> Follower<F> {
     /// Holds: a pole that closes none of the gap, so a state stays where it is. What a bank
-    /// that is not yet aimed starts with; [`of`](Self::of) replaces it before any frame runs.
+    /// that is not yet set starts with; [`of`](Self::of) replaces it before any frame runs.
     pub(crate) const NEUTRAL: Self = Self {
         attack: Pole::HOLD,
         release: Pole::HOLD,

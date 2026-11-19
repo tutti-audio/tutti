@@ -3,7 +3,7 @@ use tutti_buffers::{Mono, Planes, PlanesMut};
 use tutti_units::{Feedback, SampleRate, Seconds};
 
 use super::*;
-use crate::{ChannelTimes, GAIN_GLIDE, MaxDelay, Routing};
+use crate::{ChannelTimes, GAIN_RAMP, MaxDelay, Routing};
 
 // The tests other than the `f64` ones pin the `f32` instantiation, the session's audio
 // format, so their tolerances are `f32`'s.
@@ -42,27 +42,27 @@ fn stereo_apart(right: f64) -> DelayLayout {
         .unwrap()
 }
 
-/// A bank and its glides, as a kernel holds them.
+/// A bank and its ramps, as a kernel holds them.
 struct Rig {
     bank: DelayBank<f32>,
-    glides: DelayGlides<f32>,
+    ramps: DelayRamps<f32>,
 }
 
 impl Rig {
-    /// `layout` at `rate`, landed on `c`.
+    /// `layout` at `rate`, at rest on `c`.
     fn at(layout: &DelayLayout, c: &DelayControls, rate: SampleRate) -> Self {
-        let steps = u32::try_from(GAIN_GLIDE.to_samples_ceil(rate).get()).unwrap();
+        let steps = u32::try_from(GAIN_RAMP.to_samples_ceil(rate).get()).unwrap();
         let mut rig = Self {
             bank: DelayBank::new(layout, rate),
-            glides: DelayGlides::landed(steps),
+            ramps: DelayRamps::new(steps),
         };
-        rig.aim(c);
-        rig.glides.settle();
+        rig.retarget(c);
+        rig.ramps.jump_to_target();
         rig
     }
 
-    fn aim(&mut self, c: &DelayControls) {
-        self.bank.aim(&mut self.glides, c);
+    fn retarget(&mut self, c: &DelayControls) {
+        self.bank.retarget(&mut self.ramps, c);
     }
 
     /// `audio` (one slice per channel) through the bank in blocks of `block`, with the
@@ -85,7 +85,7 @@ impl Rig {
                 feedback: lanes[1].map(|l| Mono::new(&l[at..end])),
             };
             self.bank.process(
-                &mut self.glides,
+                &mut self.ramps,
                 lanes,
                 Planes::new(&ins).unwrap(),
                 PlanesMut::new(&mut outs).unwrap(),
@@ -256,16 +256,16 @@ fn channel_times_are_linked_or_each_their_own() {
 /// A delay moves no faster than [`DELAY_SLEW`] frames of delay per frame, however far its
 /// time is moved, and arrives exactly on the time. A linear read of a ramp is exact, so
 /// the delay in use at frame `n` is `n - y[n]`, read off the output: a time moved from 100
-/// to 400 frames glides for `300 / 0.125 = 2400` frames, never faster, and holds there.
+/// to 400 frames ramps for `300 / 0.125 = 2400` frames, never faster, and holds there.
 #[test]
-fn a_time_glide_is_bounded_by_the_slew_and_lands_exactly() {
+fn a_time_ramp_is_bounded_by_the_slew_and_lands_exactly() {
     let family = mono(InterpolationMode::Linear);
     let mut k = Rig::at(
         &family,
         &controls(100.0 / 1000.0, 0.0, 0.0),
         SampleRate::of(1000.0),
     );
-    k.aim(&controls(400.0 / 1000.0, 0.0, 0.0));
+    k.retarget(&controls(400.0 / 1000.0, 0.0, 0.0));
     let len = 4_000;
     let ramp: Vec<f32> = (0..len).map(|n| n as f32).collect();
     let y = k.run(&[ramp]).remove(0);
@@ -280,9 +280,9 @@ fn a_time_glide_is_bounded_by_the_slew_and_lands_exactly() {
     );
     assert!(
         delay.windows(2).all(|w| w[1] >= w[0] - 2e-3),
-        "the glide is monotone"
+        "the ramp is monotone"
     );
-    // At frame `n` the glide has taken `n + 1` steps of the 2400: still short of 400 until
+    // At frame `n` the ramp has taken `n + 1` steps of the 2400: still short of 400 until
     // the last, and on it from then on.
     let at = |n: usize| delay[n - 500];
     assert!(
@@ -301,7 +301,7 @@ fn a_time_glide_is_bounded_by_the_slew_and_lands_exactly() {
 /// A time lane, in seconds, is the delay of **every frame**: a ramp through a delay swept
 /// by a sine (a flanger's) is the ramp at the lane's time, `y[n] = n - tau[n]`, read off
 /// the output frame by frame; and a frame that is not finite, or not a time, is the
-/// glided delay (here 20 frames), and one past the longest delay is the longest.
+/// ramped delay (here 20 frames), and one past the longest delay is the longest.
 #[test]
 fn a_time_lane_is_the_delay_of_each_frame() {
     let family = mono(InterpolationMode::Linear);
@@ -346,7 +346,7 @@ fn a_time_lane_is_the_delay_of_each_frame() {
 }
 
 /// A feedback lane is the feedback of every frame: held at `g` it is the echo train of a
-/// cell at `g`; a frame that is not finite is the glided cell's (here 0.5); and a value
+/// cell at `g`; a frame that is not finite is the ramped cell's (here 0.5); and a value
 /// past the stable range is the range's last (0.99).
 #[test]
 fn a_feedback_lane_is_the_feedback_of_each_frame() {
@@ -377,18 +377,19 @@ fn a_feedback_lane_is_the_feedback_of_each_frame() {
     }
 }
 
-/// A feedback cell that moves glides over [`GAIN_GLIDE`](crate::GAIN_GLIDE) (5 ms: 240
+/// A feedback cell that moves ramps over [`GAIN_RAMP`](crate::GAIN_RAMP) (5 ms: 240
 /// frames at 48 kHz), counted on the stream. The first echo has the feedback of its own
-/// frame: an echo at `2 D` is the feedback `D + 1` steps into the glide, so `D = 100` of
-/// the 240 steps from 0.2 to 0.8 is `0.2 + 0.6 * 101 / 240`, and one past the glide, `D = 300`, is 0.8.
+/// frame: an echo at `2 D` is the feedback `D + 1` steps into the ramp, so `D = 100` of
+/// the 240 steps from 0.2 to 0.8 is `0.2 + 0.6 * 101 / 240`, and one past the ramp, `D = 300`, is
+/// 0.8.
 #[test]
-fn a_feedback_glides_over_five_milliseconds_counted_on_the_stream() {
+fn a_feedback_ramps_over_five_milliseconds_counted_on_the_stream() {
     let rate = SampleRate::SR_48K;
     let family = mono(InterpolationMode::Linear);
     for (d, want) in [(100usize, 0.2 + 0.6 * 101.0 / 240.0), (300, 0.8)] {
         let c = |fb| controls(d as f64 / rate.get(), fb, 0.0);
         let mut k = Rig::at(&family, &c(0.2), rate);
-        k.aim(&c(0.8));
+        k.retarget(&c(0.8));
         let y = k.run(&[impulse(2 * d + 8)]).remove(0);
         let got = f64::from(y[2 * d]);
         assert!((got - want).abs() < 1e-5, "D {d}: {got}, want {want}");
@@ -438,7 +439,7 @@ fn a_feedback_past_the_stable_range_is_the_greatest_stable_one() {
 }
 
 /// The render is a function of the stream, not of where its blocks fall: a moving delay,
-/// both feedbacks gliding and both lanes driving give the same bits in any split of the
+/// both feedbacks ramping and both lanes driving give the same bits in any split of the
 /// stream, on the coupled loop and the uncoupled one.
 #[test]
 fn any_split_of_the_stream_renders_the_same_bits() {
@@ -463,7 +464,7 @@ fn any_split_of_the_stream_renders_the_same_bits() {
         for lanes in [[None, None], [Some(&time[..]), Some(&feedback[..])]] {
             let render = |block: usize| {
                 let mut k = Rig::at(&layout, &controls(10.0 / 1024.0, 0.2, 0.1), BINARY);
-                k.aim(&controls(300.0 / 1024.0, 0.7, 0.5));
+                k.retarget(&controls(300.0 / 1024.0, 0.7, 0.5));
                 k.run_in(&x, lanes, block)
             };
             let whole = render(len);
@@ -506,7 +507,7 @@ fn a_clone_keeps_the_capacity_and_the_echoes_in_flight() {
     let silence = vec![0.0f32; 1_100];
     let mut out = vec![0.0f32; 1_100];
     copy.process(
-        &mut k.glides,
+        &mut k.ramps,
         DelayLanes::default(),
         Planes::new(&[&silence[..]]).unwrap(),
         PlanesMut::new(&mut [&mut out[..]]).unwrap(),
@@ -518,16 +519,16 @@ fn a_clone_keeps_the_capacity_and_the_echoes_in_flight() {
 #[test]
 fn an_f64_impulse_arrives_at_the_delay() {
     let mut bank = DelayBank::<f64>::new(&mono(InterpolationMode::Linear), BINARY);
-    let mut glides = DelayGlides::<f64>::landed(1);
-    bank.aim(&mut glides, &controls(20.0 / 1024.0, 0.0, 0.0));
-    glides.settle();
+    let mut ramps = DelayRamps::<f64>::new(1);
+    bank.retarget(&mut ramps, &controls(20.0 / 1024.0, 0.0, 0.0));
+    ramps.jump_to_target();
     let mut x = vec![0.0f64; 64];
     x[0] = 1.0;
     let mut y = vec![0.0f64; 64];
     let ins = [&x[..]];
     let mut outs = [&mut y[..]];
     bank.process(
-        &mut glides,
+        &mut ramps,
         DelayLanes::default(),
         Planes::new(&ins).unwrap(),
         PlanesMut::new(&mut outs).unwrap(),
@@ -538,14 +539,14 @@ fn an_f64_impulse_arrives_at_the_delay() {
 /// `x` (one slice per channel) through an `f64` bank of `layout` at `c`, in one block.
 fn run_wide(layout: &DelayLayout, c: &DelayControls, x: &[Vec<f64>]) -> Vec<Vec<f64>> {
     let mut bank = DelayBank::<f64>::new(layout, BINARY);
-    let mut glides = DelayGlides::<f64>::landed(1);
-    bank.aim(&mut glides, c);
-    glides.settle();
+    let mut ramps = DelayRamps::<f64>::new(1);
+    bank.retarget(&mut ramps, c);
+    ramps.jump_to_target();
     let ins: Vec<&[f64]> = x.iter().map(Vec::as_slice).collect();
     let mut out = vec![vec![0.0f64; x[0].len()]; x.len()];
     let mut outs: Vec<&mut [f64]> = out.iter_mut().map(Vec::as_mut_slice).collect();
     bank.process(
-        &mut glides,
+        &mut ramps,
         DelayLanes::default(),
         Planes::new(&ins).unwrap(),
         PlanesMut::new(&mut outs).unwrap(),
@@ -555,7 +556,8 @@ fn run_wide(layout: &DelayLayout, c: &DelayControls, x: &[Vec<f64>]) -> Vec<Vec<
 
 /// An `f64` bank keeps its state in `f64`: at a whole delay `d` with no feedback a signal
 /// of more than 24 significant bits returns `d` frames later exactly, and with feedback `g`
-/// it is the loop `v[n] = x[n] + g v[n - d]` heard at `y[n] = v[n - d]`, to 2^-45; an `f32` state is off by 1e-8.
+/// it is the loop `v[n] = x[n] + g v[n - d]` heard at `y[n] = v[n - d]`, to 2^-45; an `f32` state
+/// is off by 1e-8.
 #[test]
 fn an_f64_bank_returns_a_wide_signal_d_frames_later_and_runs_the_loop_in_f64() {
     use tutti_fixtures::signal::{assert_close_f64, wide_signal};
