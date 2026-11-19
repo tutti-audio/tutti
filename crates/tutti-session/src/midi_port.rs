@@ -187,7 +187,7 @@ impl MidiInputInfo {
         &self.learned
     }
 
-    /// The MIDI-CI peers found on the input, by [`PeerId`] (Group then MUID):
+    /// The MIDI-CI peers found on the input, by [`PeerId`](tutti_midi_hardware::PeerId) (Group then MUID):
     /// what a device that answered the session's Discovery declared, each with
     /// the handles of what it offers ([`ListedPeer`]).
     #[must_use]
@@ -636,7 +636,7 @@ impl MidiInput {
     /// device's output refused (a refused message is
     /// not sent again, so the count is how many a peer may never have heard).
     /// The CI count is the input's because the input owns the conversation, its
-    /// peers and Profiles ([`MidiInputInfo::profiles`]); the session's MIDI
+    /// peers and Profiles ([`MidiInputInfo::peers`]); the session's MIDI
     /// output never carries it.
     #[must_use]
     pub fn losses(&self) -> Losses {
