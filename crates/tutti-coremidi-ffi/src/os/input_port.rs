@@ -35,7 +35,10 @@ use tutti_ump::{Protocol, Ump};
 ///
 /// A panic in the callback is caught as in [`UmpDestination`](crate::UmpDestination):
 /// the callback is dropped and [`faults`](Self::faults) counts it. Dropping the port
-/// waits for a call in progress, so it must not run inside the callback.
+/// waits for a call in progress, so it must not run inside the callback. The
+/// port's block is never freed, so a call CoreMIDI still has in flight after the
+/// drop finds no callback: each port keeps a few dozen bytes for the life of the
+/// process.
 pub struct InputPort {
     port: MIDIPortRef,
     // Dropped after `port` is disposed (see `Drop`).

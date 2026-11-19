@@ -48,10 +48,12 @@ use tutti_ump::{Protocol, Ump};
 /// start after it. The drop therefore disposes the endpoint, then takes the
 /// callback out of the state it shares with the block under the callback's lock:
 /// it waits for a call in progress, and afterwards the callback is neither
-/// running nor callable, and is dropped on the dropping thread. CoreMIDI's own
-/// copy of the block may outlive the drop and only finds the state empty.
+/// running nor callable, and is dropped on the dropping thread. The block itself
+/// is never freed, so a call CoreMIDI still has in flight finds the state empty:
+/// each destination keeps a few dozen bytes for the life of the process.
 ///
 /// Dropping a destination from inside its own callback deadlocks, since the
+/// callback holds that lock.
 pub struct UmpDestination {
     endpoint: MIDIEndpointRef,
     // Dropped after `endpoint` is disposed (see `Drop`).
