@@ -786,7 +786,7 @@ fn a_capability_change_drops_what_it_no_longer_supports_from_the_active_set() {
         rx_jr: true,
         tx_jr: true,
     };
-    let mut e = changeable().in_use(active).unwrap();
+    let mut e = changeable().in_use(active);
     let m1_only = Supports::of(Capabilities {
         midi1: true,
         ..Capabilities::default()
@@ -1059,14 +1059,16 @@ fn an_endpoint_is_not_in_a_protocol_or_jr_direction_it_does_not_support() {
         midi1: true,
         ..Capabilities::default()
     }));
-    let midi2 = StreamConfig {
+    let midi2_with_jr = StreamConfig {
         protocol: Protocol::Midi2,
-        rx_jr: false,
-        tx_jr: false,
+        rx_jr: true,
+        tx_jr: true,
     };
+    // Neither the Protocol nor either JR direction is supported: all three
+    // keep their values.
     assert_eq!(
-        midi1_only.in_use(midi2),
-        Err(ConfigNotSupported { active: midi2 })
+        midi1_only.in_use(midi2_with_jr).active(),
+        midi1_only.active()
     );
     // A Stream Configuration Notification of Protocol 0x03, which the decoder
     // keeps as reserved: no Endpoint supports it.
@@ -1076,20 +1078,14 @@ fn an_endpoint_is_not_in_a_protocol_or_jr_direction_it_does_not_support() {
         panic!("a Stream Configuration Notification")
     };
     assert!(matches!(reserved.protocol, Protocol::Reserved(_)));
-    assert!(Endpoint::new(Supports::of(FULL)).in_use(reserved).is_err());
-    let jr = StreamConfig {
+    let full = Endpoint::new(Supports::of(FULL));
+    assert_eq!(full.in_use(reserved).active(), full.active());
+    // What it supports is taken.
+    assert_eq!(full.in_use(midi2_with_jr).active(), midi2_with_jr);
+    let jr_only = StreamConfig {
         protocol: Protocol::Midi1,
         rx_jr: true,
         tx_jr: false,
     };
-    assert!(midi1_only.in_use(jr).is_err(), "JR it does not receive");
-    let supported = StreamConfig {
-        protocol: Protocol::Midi1,
-        ..midi2
-    };
-    assert_eq!(
-        midi1_only.in_use(supported).map(|e| e.active()),
-        Ok(supported)
-    );
-    assert!(Endpoint::new(Supports::of(FULL)).in_use(jr).is_ok());
+    assert_eq!(midi1_only.in_use(jr_only).active().rx_jr, false);
 }

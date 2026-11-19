@@ -36,7 +36,6 @@ fn endpoint(protocol: Protocol, direction: BlockDirection, active: bool) -> Endp
         rx_jr: false,
         tx_jr: false,
     })
-    .unwrap()
     .block(
         FunctionBlock::builder(
             block_id(),
@@ -62,7 +61,6 @@ fn endpoint_with(protocol: Protocol, port: Midi1Port, rx_jr: bool) -> Endpoint {
         rx_jr,
         tx_jr: false,
     })
-    .unwrap()
     .block(
         FunctionBlock::builder(
             block_id(),
@@ -112,13 +110,11 @@ fn jr_timestamps_are_prepended_when_the_endpoint_receives_them() {
         );
     }
     let mut endpoint = endpoint_with(Protocol::Midi2, Midi1Port::No, false);
-    endpoint = endpoint
-        .in_use(StreamConfig {
-            protocol: Protocol::Midi2,
-            rx_jr: false,
-            tx_jr: true,
-        })
-        .unwrap();
+    endpoint = endpoint.in_use(StreamConfig {
+        protocol: Protocol::Midi2,
+        rx_jr: false,
+        tx_jr: true,
+    });
     assert_eq!(
         of(&endpoint, &table(&[])).unwrap().jr_timestamps(),
         JrTimestamps::Off,
