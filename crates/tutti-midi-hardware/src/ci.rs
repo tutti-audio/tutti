@@ -115,7 +115,7 @@
 //! until then) to the peers that declared the category: the member routes it every
 //! message, runs its deadline on the same step as the device's, and sends its replies
 //! in the same batch. When the device's MUID changes the Responder is made again for
-//! the new one, over the store as the peers left it, and holds no Subscription. A lost
+//! the new one, serves the session's store, handed to it on each call, and holds no Subscription. A lost
 //! peer's Initiator and Subscriptions go with it ([`PropertyChange::Dropped`]); a repeated
 //! Discovery of a peer keeps its Subscriptions. An update of a Subscription the
 //! session holds, and the end of one, go to its Initiator and not to the Responder. The store is served as not subscribable

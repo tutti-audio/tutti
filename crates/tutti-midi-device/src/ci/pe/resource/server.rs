@@ -1116,7 +1116,7 @@ impl ResourceResponder {
     /// The data of `target` with `update` made.
     fn changed(
         &self,
-        store: &mut ResourceStore,
+        store: &ResourceStore,
         target: &ResourceTarget,
         update: &PartialUpdate,
     ) -> Result<PeData, PublishError> {
