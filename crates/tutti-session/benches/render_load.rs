@@ -181,7 +181,7 @@ impl Node for Hold {
 /// Deterministic white noise in `-1..1` from a seeded stream, so every run
 /// renders the same scene.
 fn noise(rng: &mut SplitMix64) -> f32 {
-    (rng.next_u32() as f32 / u32::MAX as f32) * 2.0 - 1.0
+    ((rng.next_u32() >> 8) as f32 / (1u32 << 24) as f32) * 2.0 - 1.0
 }
 
 /// A 2 s exponentially decaying noise tail: a plain reverb IR.
