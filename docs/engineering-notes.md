@@ -115,7 +115,7 @@ crates/             everything shipped, directory name = package name
   tutti-codec       # File codecs: the encoders and FileOut, the decoder (Wave, FileIn).
   tutti-modulation         # Pure modulation: the route compiler, curves. Audio-free.
   tutti-export      # Offline rendering and export
-  tutti-dsp         # Pure algorithms over slices. Names only tutti-units and tutti-buffers.
+  tutti-dsp         # Pure algorithms over slices. Names only tutti-units, tutti-buffers and tutti-rt.
   tutti-nodes       # DSP nodes (LFO, dynamics, convolution, automation, VBAP and HRTF panners).
   tutti-sampler     # Sample playback (streaming, audition)
   tutti-polysynth   # Polyphonic subtractive/wavetable synth

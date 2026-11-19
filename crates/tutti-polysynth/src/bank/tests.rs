@@ -525,9 +525,6 @@ fn a_zero_pulse_width_still_oscillates() {
     assert!(ac > 0.05, "a zero-width pulse rendered DC (AC rms {ac})");
 }
 
-/// Every lane of a built bank, across voices and across one voice's unison
-/// stack, starts its noise generator on its own nonzero seed: two lanes on
-/// one seed would play the same noise, in both ears of a stereo stack.
 /// The first word of every lane's stream. The output is a bijection of the state, so two
 /// lanes agree on it only if they share a seed.
 fn first_words<const N: usize>(rng: &[[SplitMix64; N]]) -> Vec<u64> {
@@ -536,6 +533,9 @@ fn first_words<const N: usize>(rng: &[[SplitMix64; N]]) -> Vec<u64> {
         .collect()
 }
 
+/// Every lane of a built bank, across voices and across one voice's unison
+/// stack, starts its noise generator on its own seed: two lanes on one seed
+/// would play the same noise, in both ears of a stereo stack.
 #[test]
 fn every_lane_starts_on_its_own_noise_seed() {
     let bank = VoiceBank::<f32>::new(
