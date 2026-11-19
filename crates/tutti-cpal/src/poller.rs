@@ -7,8 +7,9 @@
 //! `Session::update`, which only takes the newest result
 //! ([`SnapshotSource::poll`]).
 
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+use std::sync::mpsc::{self, Receiver};
 use std::time::Duration;
+use tutti_platform::StopToken;
 
 use crate::error::{Error, Result};
 use crate::host::{AudioHost, DeviceHost};
@@ -26,8 +27,14 @@ pub const MIN_POLL_INTERVAL: Duration = Duration::from_millis(250);
 #[derive(Debug)]
 pub struct DevicePoller {
     snapshots: Receiver<Snapshot>,
-    // Dropped with the poller: the thread's wait ends, and so does it.
-    _stop: Sender<()>,
+    /// Stopped when the poller drops: the thread's wait ends, and so does it.
+    stop: StopToken,
+}
+
+impl Drop for DevicePoller {
+    fn drop(&mut self) {
+        self.stop.stop();
+    }
 }
 
 impl DevicePoller {
@@ -42,34 +49,31 @@ impl DevicePoller {
         // opens its own, so no host crosses a thread.
         DeviceHost::open(host)?;
         let (tx, snapshots) = mpsc::channel();
-        let (stop, stop_rx) = mpsc::channel::<()>();
-        std::thread::Builder::new()
-            .name("tutti-device-poll".into())
-            .spawn(move || {
-                let Ok(host) = DeviceHost::open(host) else {
-                    return;
-                };
-                let mut last: Option<Snapshot> = None;
-                loop {
-                    if let Ok(snap) = host.snapshot()
-                        && last.as_ref() != Some(&snap)
-                    {
-                        last = Some(snap.clone());
-                        if tx.send(snap).is_err() {
-                            return;
-                        }
-                    }
-                    match stop_rx.recv_timeout(interval) {
-                        Err(RecvTimeoutError::Timeout) => {}
-                        Ok(()) | Err(RecvTimeoutError::Disconnected) => return,
+        // Detached: dropping the poller stops it without waiting on an
+        // enumeration in progress.
+        let thread = tutti_platform::spawn_named("tutti-device-poll", None, move |stop| {
+            let Ok(host) = DeviceHost::open(host) else {
+                return;
+            };
+            let mut last: Option<Snapshot> = None;
+            loop {
+                if let Ok(snap) = host.snapshot()
+                    && last.as_ref() != Some(&snap)
+                {
+                    last = Some(snap.clone());
+                    if tx.send(snap).is_err() {
+                        return;
                     }
                 }
-            })
-            .map_err(|e| Error::InvalidConfig(format!("cannot start the device poller: {e}")))?;
-        Ok(Self {
-            snapshots,
-            _stop: stop,
+                if stop.wait(interval) {
+                    return;
+                }
+            }
         })
+        .map_err(|e| Error::InvalidConfig(format!("cannot start the device poller: {e}")))?;
+        let stop = thread.token();
+        thread.detach();
+        Ok(Self { snapshots, stop })
     }
 }
 

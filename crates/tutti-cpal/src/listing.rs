@@ -57,13 +57,13 @@ impl DeviceListing {
         list: impl FnOnce() -> Result<Vec<DeviceId>> + Send + 'static,
     ) -> Result<Self> {
         let (tx, result) = mpsc::channel();
-        std::thread::Builder::new()
-            .name("tutti-device-list".into())
-            .spawn(move || {
-                // The receiver may be gone by now; nobody wants the answer.
-                let _ = tx.send(list());
-            })
-            .map_err(|e| Error::InvalidConfig(format!("cannot start the device listing: {e}")))?;
+        // Detached: dropping the listing never waits on a host that may never answer.
+        tutti_platform::spawn_named("tutti-device-list", None, move |_| {
+            // The receiver may be gone by now; nobody wants the answer.
+            let _ = tx.send(list());
+        })
+        .map_err(|e| Error::InvalidConfig(format!("cannot start the device listing: {e}")))?
+        .detach();
         Ok(Self {
             result,
             done: false,
