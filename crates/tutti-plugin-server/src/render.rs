@@ -39,7 +39,8 @@
 //! every block the host sends after that answer.
 
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tutti_platform::Instant;
 use tutti_platform::{StopToken, ThreadHandle};
 use tutti_rt::LockExt;
 

@@ -11,7 +11,9 @@
 //! the figures for a late reading and a re-anchor, and the count carried across a
 //! reconnect, are the runtime tests' (`input_inlets`) and the clock map's.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use tutti_platform::Instant;
 
 use crate::common::blocks;
 use tutti_midi_device::{DeviceInfo, EndpointId, PortDirection};

@@ -5,7 +5,7 @@
 //! describing what the transport loop should do next. Because it has no `async` and no `Transport`
 //! dependency, it's unit-testable without tokio or sockets.
 
-use std::time::Instant;
+use tutti_platform::Instant;
 
 use crate::audio_pipeline::Clock;
 use crate::render::{RenderConfig, RenderLink, RenderSide, ToRender, link};
@@ -1162,7 +1162,7 @@ mod tests {
                 let mut blocks = Vec::new();
                 let mut seq = 0u64;
                 while !stop.load(Ordering::Acquire) {
-                    let started = std::time::Instant::now();
+                    let started = tutti_platform::Instant::now();
                     seq += 1;
                     for ch in 0..2 {
                         shm.write::<f32>(seq, ch, &[1.0; FRAMES]).unwrap();
@@ -1233,7 +1233,7 @@ mod tests {
             assert_none(r);
         }
         let after = save_state_bytes(&mut s);
-        let saved_at = std::time::Instant::now();
+        let saved_at = tutti_platform::Instant::now();
         // Snapshots come round after round in a session, with blocks between
         // them; each one must leave the blocks alone.
         for _ in 0..10 {

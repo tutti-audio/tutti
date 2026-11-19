@@ -12,7 +12,8 @@
 use crate::{BridgeConfig, BridgeThread, ServerWatch};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tutti_platform::Instant;
 use tutti_platform::{StopToken, ThreadHandle};
 use tutti_plugin_ipc_ffi::{ExitWait, Reaped};
 use tutti_plugin_types::{Deadline, PluginFailure};

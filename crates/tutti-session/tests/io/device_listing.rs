@@ -2,7 +2,9 @@
 //! holds nothing, and its answer reaches the host as an event in a later
 //! update.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use tutti_platform::Instant;
 
 use tutti_buffers::ChannelLayout;
 use tutti_cpal::{DeviceId, DeviceListing};

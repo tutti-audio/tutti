@@ -23,7 +23,7 @@
 //! one plugin instance at once.
 
 use std::num::{NonZeroU32, NonZeroUsize};
-use std::time::Instant;
+use tutti_platform::Instant;
 
 use dpi::Size;
 use tutti_buffers::{Float, InputOutput};

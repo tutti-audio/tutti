@@ -117,7 +117,7 @@ impl<F: SessionFloat> DeviceHandle<F> {
     /// then the watch, told first if the stream was lost.
     pub(crate) fn poll_device(
         &mut self,
-        now: std::time::Instant,
+        now: tutti_platform::Instant,
         lost: bool,
         out: &mut Vec<SessionEvent>,
     ) {
@@ -320,7 +320,7 @@ impl<K: crate::AppKey, F: SessionFloat> Session<K, DeviceClock<F>> {
         selector: Option<&DeviceSelector>,
         outcome: Result<SampleRate>,
     ) -> std::result::Result<DeviceRestarted, RestartError> {
-        let now = std::time::Instant::now();
+        let now = tutti_platform::Instant::now();
         match outcome {
             Ok(previous_rate) => {
                 // A custom driver (`restart_on`) names no device: unknown.
@@ -377,11 +377,11 @@ impl<K: crate::AppKey, F: SessionFloat> Session<K, DeviceClock<F>> {
     }
 
     pub(crate) fn note_chosen(&mut self, selector: DeviceSelector) {
-        self.note_device(FollowEvent::Chose(selector), std::time::Instant::now());
+        self.note_device(FollowEvent::Chose(selector), tutti_platform::Instant::now());
     }
 
     /// Feeds the policy and queues a restart it asks for.
-    fn note_device(&mut self, event: FollowEvent, now: std::time::Instant) {
+    fn note_device(&mut self, event: FollowEvent, now: tutti_platform::Instant) {
         if let Some(watch) = &mut self.running.watch
             && let Some(request) = watch.note(event, now)
         {
@@ -950,7 +950,7 @@ impl<K: crate::AppKey, C: Clock> Session<K, C> {
         // new one, committed with the rest below.
         if self
             .midi
-            .follow_rate(&mut self.graph, std::time::Instant::now())
+            .follow_rate(&mut self.graph, tutti_platform::Instant::now())
         {
             self.commit();
         }

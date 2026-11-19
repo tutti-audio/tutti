@@ -4,7 +4,8 @@
 //! not unknown).
 
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tutti_platform::Instant;
 
 use tutti_buffers::MaxBlock;
 use tutti_graph::UmpAt;

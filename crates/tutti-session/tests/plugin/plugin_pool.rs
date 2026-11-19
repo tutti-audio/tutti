@@ -5,8 +5,10 @@
 //! Build the server and the probe first: `cargo build -p tutti-plugin-server
 //! -p tutti-plugin-probe`.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
 use tutti_buffers::PlanesMut;
+use tutti_platform::Instant;
 
 use tutti_buffers::InterleavedMut;
 use tutti_buffers::{ChannelLayout, MaxBlock};

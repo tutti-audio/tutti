@@ -219,7 +219,7 @@ fn a_send_time_reaches_the_sink_with_its_packet() {
     let s = MidiSession::open_over(backend, inlets(), crate::MidiHardwareOptions::new()).unwrap();
     let mut output = s.connect_output("synth a").unwrap();
     let raw = EndpointId::from_raw(10);
-    let t = std::time::Instant::now() + std::time::Duration::from_secs(1);
+    let t = tutti_platform::Instant::now() + std::time::Duration::from_secs(1);
     let (at, ump) = note();
     let events = [
         Outgoing::new(at, SendAt::Now, ump),

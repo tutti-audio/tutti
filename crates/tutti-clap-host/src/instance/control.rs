@@ -3,7 +3,7 @@
 //! activation redirects, by [`ClapController`].
 
 use std::path::Path;
-use std::time::Instant;
+use tutti_platform::Instant;
 use tutti_plugin_types::MainThreadMarker;
 
 use tutti_plugin_ipc_ffi::FdId;

@@ -2,8 +2,10 @@
 //! (the card is a `ManualStreamDriver`, the timer is real). What a switch
 //! keeps, what it refuses before anything stops, and what it hands back.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
 use tutti_buffers::InterleavedMut;
+use tutti_platform::Instant;
 
 use tutti_buffers::{ChannelLayout, ChannelTopology, MaxBlock};
 use tutti_cpal::{DeviceId, DeviceSelector};

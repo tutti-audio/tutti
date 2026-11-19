@@ -1,4 +1,4 @@
-use std::time::Instant;
+use tutti_platform::Instant;
 
 use tutti_midi_ci::Muid;
 use tutti_midi_ci::{

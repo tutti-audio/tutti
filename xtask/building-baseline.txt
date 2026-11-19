@@ -509,16 +509,16 @@ tutti-ump  ctor-result  crates/tutti-ump/src/sysex.rs::Sysex7Packets::from_paylo
 tutti-ump  ctor-result  crates/tutti-ump/src/sysex.rs::SysexMessage::from_framed
 
 # tutti-voicing
-tutti-voicing  with-prefix  crates/tutti-voicing/src/voicing.rs::Rules::with_bend_range
-tutti-voicing  with-prefix  crates/tutti-voicing/src/voicing.rs::Rules::with_exclusive_groups
-tutti-voicing  with-prefix  crates/tutti-voicing/src/voicing.rs::Rules::with_mode
-tutti-voicing  with-prefix  crates/tutti-voicing/src/voicing.rs::Rules::with_per_note_bend_range
-tutti-voicing  with-prefix  crates/tutti-voicing/src/voicing.rs::Rules::with_percussion
-tutti-voicing  with-prefix  crates/tutti-voicing/src/voicing.rs::Rules::with_polyphony
-tutti-voicing  with-prefix  crates/tutti-voicing/src/voicing.rs::Rules::with_retrigger
-tutti-voicing  with-prefix  crates/tutti-voicing/src/voicing.rs::Rules::with_sostenuto
-tutti-voicing  with-prefix  crates/tutti-voicing/src/voicing.rs::Rules::with_steal
-tutti-voicing  with-prefix  crates/tutti-voicing/src/voicing.rs::Rules::with_tuning_capacity
+tutti-voicing  with-prefix  crates/tutti-voicing/src/voicing.rs::VoiceConfig::with_bend_range
+tutti-voicing  with-prefix  crates/tutti-voicing/src/voicing.rs::VoiceConfig::with_exclusive_groups
+tutti-voicing  with-prefix  crates/tutti-voicing/src/voicing.rs::VoiceConfig::with_mode
+tutti-voicing  with-prefix  crates/tutti-voicing/src/voicing.rs::VoiceConfig::with_per_note_bend_range
+tutti-voicing  with-prefix  crates/tutti-voicing/src/voicing.rs::VoiceConfig::with_percussion
+tutti-voicing  with-prefix  crates/tutti-voicing/src/voicing.rs::VoiceConfig::with_polyphony
+tutti-voicing  with-prefix  crates/tutti-voicing/src/voicing.rs::VoiceConfig::with_retrigger
+tutti-voicing  with-prefix  crates/tutti-voicing/src/voicing.rs::VoiceConfig::with_sostenuto
+tutti-voicing  with-prefix  crates/tutti-voicing/src/voicing.rs::VoiceConfig::with_steal
+tutti-voicing  with-prefix  crates/tutti-voicing/src/voicing.rs::VoiceConfig::with_tuning_capacity
 
 # tutti-vst2-host
 tutti-vst2-host  setter  crates/tutti-vst2-host/src/loaded.rs::Vst2Loaded::set_bypass

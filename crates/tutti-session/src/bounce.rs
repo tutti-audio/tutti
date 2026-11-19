@@ -61,7 +61,8 @@ use std::marker::PhantomData;
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tutti_platform::Instant;
 
 use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_codec::Format;

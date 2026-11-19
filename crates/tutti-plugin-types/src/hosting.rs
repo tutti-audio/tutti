@@ -12,7 +12,7 @@
 //! is listed in the plugin contract's `hostings` (`cargo xtask check-hosting`).
 
 use std::path::Path;
-use std::time::Instant;
+use tutti_platform::Instant;
 
 use dpi::Size;
 use tutti_plugin_ipc_ffi::Ready;

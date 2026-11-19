@@ -7,7 +7,8 @@
 //! reads around its own calls.
 
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tutti_platform::Instant;
 
 use tutti_buffers::ChannelLayout;
 use tutti_engine::{ManualStream, ManualStreamDriver, OutputSpec};

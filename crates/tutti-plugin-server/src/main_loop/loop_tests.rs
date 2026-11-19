@@ -11,7 +11,8 @@
 use std::collections::VecDeque;
 use std::os::fd::OwnedFd;
 use std::os::unix::net::UnixStream;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tutti_platform::Instant;
 
 use tutti_buffers::FloatWidth;
 use tutti_clap_test_plugin::{ClapSwitch, Site};

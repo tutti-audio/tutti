@@ -14,7 +14,8 @@
 //! Needs `cargo build -p tutti-plugin-probe` first.
 
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tutti_platform::Instant;
 
 use tutti_plugin::catalog::{
     Catalog, CatalogConfig, DEFAULT_MEASURE_TIMEOUT, DEFAULT_PROBE_TIMEOUT, Locator,

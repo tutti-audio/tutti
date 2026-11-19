@@ -1,7 +1,7 @@
 //! [`ResourceResponder`]: the Responder of Property Exchange, serving the
 //! Resources of a [`ResourceStore`] (M2-103 §5 to §12, §14, §15).
 
-use std::time::Instant;
+use tutti_platform::Instant;
 
 use super::super::body::{BodyLimit, decode_body, encode_body};
 use super::super::capabilities::{PeCapabilities, PeCiMessage, SimultaneousRequests};

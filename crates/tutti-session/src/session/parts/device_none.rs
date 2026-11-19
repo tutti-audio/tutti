@@ -1,7 +1,7 @@
 //! [`DevicePart`] without the `device` feature: no device is listed. `device` is this module's
 //! twin when devices are built.
 
-use std::time::Instant;
+use tutti_platform::Instant;
 
 use crate::SessionEvent;
 

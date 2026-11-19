@@ -32,7 +32,8 @@
 
 use std::ffi::{CStr, c_void};
 use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, AtomicUsize, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tutti_platform::Instant;
 
 use clap_sys::ext::log::{CLAP_EXT_LOG, CLAP_LOG_INFO, clap_host_log};
 use clap_sys::ext::thread_pool::{

@@ -1,6 +1,8 @@
 //! A Client and a Host over real UDP sockets on the loopback interface.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use tutti_platform::Instant;
 
 use tutti_midi_network::{
     ByeReason, Client, Credentials, EndedBy, EndpointIdentity, Event, Host, HostConfig,

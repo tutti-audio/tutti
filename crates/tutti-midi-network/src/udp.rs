@@ -2,7 +2,8 @@
 
 use std::io;
 use std::net::{SocketAddr, ToSocketAddrs, UdpSocket};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tutti_platform::Instant;
 
 use crate::{Event, MAX_DATAGRAM_BYTES, NetworkEndpoint};
 

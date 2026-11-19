@@ -44,7 +44,7 @@ mod args;
 use args::{Args, Measure, USAGE, Usage};
 use std::path::Path;
 use std::process::ExitCode;
-use std::time::Instant;
+use tutti_platform::Instant;
 use tutti_plugin_probe::{StateFor, describe, describe_measured};
 use tutti_plugin_types::{
     Deadline, MainThreadMarker, ProbeExit, ProbeOutcome, ProbeRefusal, write_result,

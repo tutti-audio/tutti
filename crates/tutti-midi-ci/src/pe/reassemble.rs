@@ -6,7 +6,7 @@
 //! a chunk arrived, [`PeReassembler::expire`] the time now, and what the spec
 //! says to send comes back as a [`PeSignal`].
 
-use std::time::Instant;
+use tutti_platform::Instant;
 
 use super::chunk::{ChunkNo, ChunkPosition, ChunkTotal, PeChunk, PeRequestId};
 use super::flow::{PE_TIMEOUT, PeMessageKind, PeSignal, PeTerminator};

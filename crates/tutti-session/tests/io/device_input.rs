@@ -104,7 +104,7 @@ fn poll(session: &mut LiveSession) -> Vec<SessionEvent> {
     let mut out = Vec::new();
     session.run_phase(
         Phase::Poll,
-        PhaseCx::at(std::time::Instant::now()),
+        PhaseCx::at(tutti_platform::Instant::now()),
         &mut out,
     );
     out

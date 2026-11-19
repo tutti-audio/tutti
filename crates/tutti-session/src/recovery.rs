@@ -21,7 +21,8 @@
 
 use std::collections::VecDeque;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tutti_platform::Instant;
 
 use tutti_plugin_types::{BridgeError, PluginFailure};
 

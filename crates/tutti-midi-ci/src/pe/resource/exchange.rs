@@ -4,7 +4,7 @@
 
 use std::collections::VecDeque;
 use std::num::NonZeroU32;
-use std::time::Instant;
+use tutti_platform::Instant;
 
 use tutti_ump::{Bank, U7};
 

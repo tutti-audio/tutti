@@ -1,8 +1,10 @@
 //! A session on the system clock: an OS timer thread renders the graph, with
 //! no device and no host pulling blocks.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
 use tutti_buffers::InterleavedMut;
+use tutti_platform::Instant;
 
 use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_engine::StreamFaultKind;

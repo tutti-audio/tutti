@@ -22,10 +22,10 @@
 use tutti_units::{Samples, Seconds};
 fn main() {
     use std::hint::black_box;
-    use std::time::Instant;
     use tutti_buffers::{Mono, MonoMut};
     use tutti_dsp::Convolver;
     use tutti_fixtures::signal::decay_ir;
+    use tutti_platform::Instant;
     use tutti_units::SampleRate;
 
     println!(

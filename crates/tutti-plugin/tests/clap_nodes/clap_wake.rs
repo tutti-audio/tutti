@@ -19,7 +19,9 @@ use crate::clap_probe;
 use clap_probe::{BLOCK, ProbeEnv, SAMPLE_RATE, load_probe, render};
 use tutti_fixtures::{machine_lock, main_thread};
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use tutti_platform::Instant;
 
 use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_clap_host::ClapLoaded;

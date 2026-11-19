@@ -9,8 +9,8 @@
 
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::Instant;
 use tutti_clap_ffi::ThreadRoles;
+use tutti_platform::Instant;
 use tutti_plugin_types::{
     AtomicRequestFlags, MainThreadMarker, ProcessWake, TrackInfo, TransportRequest,
 };

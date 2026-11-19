@@ -52,7 +52,7 @@ impl Polyphony {
     }
 
     /// The number of voices, as the count the note logic
-    /// ([`tutti_voicing::Rules::poly`]) takes.
+    /// ([`tutti_voicing::VoiceConfig::poly`]) takes.
     #[must_use]
     pub const fn voices(self) -> NonZeroUsize {
         self.0

@@ -19,8 +19,10 @@
 use crate::pooled::{LoadPlugin, Spec};
 use crate::support;
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
 use tutti_buffers::MaxBlock;
+use tutti_platform::Instant;
 
 use support::clap_probe;
 use tutti_buffers::ChannelLayout;

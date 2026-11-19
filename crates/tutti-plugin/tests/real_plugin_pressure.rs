@@ -74,8 +74,9 @@ use pressure_rig::{
     BLOCK, GraphUnit, Planes, SAMPLE_RATE, STALL, fill_sine, load_half_stalled, load_n,
     load_stalled, peak,
 };
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tutti_fixtures::machine_lock;
+use tutti_platform::Instant;
 
 /// One block's worth of wall time — the audio callback's deadline.
 const PERIOD: Duration = Duration::from_nanos((BLOCK as f64 / SAMPLE_RATE * 1e9) as u64);

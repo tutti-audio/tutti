@@ -2,7 +2,9 @@
 //! readable and writable port is a device to every other client, so creating
 //! and dropping one is a hot-plug the kernel announces: nothing here is faked.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use tutti_platform::Instant;
 
 use crate::DeviceOut;
 use crate::{Devices, HardwareMidiInputs};

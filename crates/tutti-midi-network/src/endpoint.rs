@@ -5,7 +5,7 @@ use std::collections::{HashMap, VecDeque};
 use std::net::SocketAddr;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
-use std::time::Instant;
+use tutti_platform::Instant;
 
 use tutti_ump::Ump;
 

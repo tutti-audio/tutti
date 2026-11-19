@@ -54,7 +54,7 @@ impl SessionFloat for f32 {}
 impl SessionFloat for f64 {}
 
 pub(crate) mod sealed {
-    use std::time::Instant;
+    use tutti_platform::Instant;
 
     use tutti_engine::OutputStream;
 
@@ -315,7 +315,12 @@ impl<F: SessionFloat> sealed::Running for crate::device::DeviceHandle<F> {
         Some(self.device().output_stream())
     }
 
-    fn poll(&mut self, now: std::time::Instant, lost: bool, out: &mut Vec<crate::SessionEvent>) {
+    fn poll(
+        &mut self,
+        now: tutti_platform::Instant,
+        lost: bool,
+        out: &mut Vec<crate::SessionEvent>,
+    ) {
         self.poll_device(now, lost, out);
     }
 }

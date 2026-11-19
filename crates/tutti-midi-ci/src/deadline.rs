@@ -1,7 +1,9 @@
 //! The sans-IO timing vocabulary of the initiators: a wait that ends at an
 //! instant. Every method takes the `now` it is asked at.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use tutti_platform::Instant;
 
 /// A wait that ends at an instant: reached when `now` is at or past it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

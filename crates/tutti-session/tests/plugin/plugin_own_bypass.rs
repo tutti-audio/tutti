@@ -9,7 +9,9 @@
 
 use crate::param_reads::ParamReads as _;
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use tutti_platform::Instant;
 
 use crate::pooled::{LoadPlugin, Spec};
 use tutti_buffers::InterleavedMut;

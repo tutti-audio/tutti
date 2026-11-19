@@ -35,7 +35,8 @@
 //! The loop owns no state: what a message or a tick does is [`Session`]'s.
 
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tutti_platform::Instant;
 
 use tutti_plugin_ipc_ffi::Ready;
 use tutti_plugin_types::{BridgeError, BridgeResult, MainThreadMarker, StateError, Wakeups};

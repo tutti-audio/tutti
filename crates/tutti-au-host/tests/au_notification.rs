@@ -59,8 +59,9 @@
 #![cfg(target_os = "macos")]
 
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tutti_fixtures::main_thread;
+use tutti_platform::Instant;
 use tutti_rt::LockExt;
 
 mod support;

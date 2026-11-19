@@ -271,6 +271,11 @@ pub(crate) const RECIPES: &[(&str, &str, &str)] = &[
         "a platform cfg stands only on a mod declaration, bar the temporary rows",
     ),
     (
+        "check-platform",
+        "",
+        "`Instant` and `SystemTime::now` come from `tutti_platform`: std's panic on wasm",
+    ),
+    (
         "check-buffers",
         "",
         "a public item names audio with a fixed sample format only as a row of xtask/buffers-fixed.txt, and a hand interleave loop or frame-times-width length in src only as a row of xtask/buffers-loops.txt",
@@ -702,6 +707,7 @@ impl Planner<'_> {
             "check-building" => self.out.push(Step::Gate(Gate::Building)),
             "check-values" => self.out.push(Step::Gate(Gate::Values)),
             "check-logging" => self.out.push(Step::Gate(Gate::Logging)),
+            "check-platform" => self.out.push(Step::Gate(Gate::Platform)),
             "check-test-time" => self.out.push(Step::Gate(Gate::TestTime)),
             "check-units-bare" => self.out.push(Step::Gate(Gate::UnitsBare)),
             "check-width" => self.out.push(Step::Gate(Gate::Width)),
@@ -838,7 +844,7 @@ impl Planner<'_> {
                     "check-paths", "check-session", "check-guards", "check-ffi", "check-errors",
                     "check-layout", "check-range-types", "check-hosting", "check-lints",
                     "check-value-traits", "check-submodule-pins", "check-doc-refs",
-                    "check-pointers", "check-comments", "check-platform-seam", "check-doc-idents",
+                    "check-pointers", "check-comments", "check-platform-seam", "check-platform", "check-doc-idents",
                     "check-passive-tests", "check-alloc-binaries", "check-buffers",
                     "check-building", "check-umbrella", "check-logging", "check-test-time",
                     "check-session-api", "check-values", "check-units-bare", "check-width",

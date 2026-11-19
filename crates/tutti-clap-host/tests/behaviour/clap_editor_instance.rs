@@ -45,7 +45,7 @@ fn a_timer_the_editor_registers_ticks_on_idle() {
 
     // `on_main_thread` is where the plugin registers it, so every deadline is
     // after this instant.
-    let before_registering = std::time::Instant::now();
+    let before_registering = tutti_platform::Instant::now();
     // SAFETY: a plain integer command latched by the plugin.
     unsafe { command(CMD_REGISTER_TIMER) };
     editor.loaded_mut().on_main_thread(main);

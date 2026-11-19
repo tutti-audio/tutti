@@ -1,6 +1,6 @@
 //! [`Initiator`]: what the Initiators of MIDI-CI categories have in common.
 
-use std::time::Instant;
+use tutti_platform::Instant;
 
 use super::Decoded;
 

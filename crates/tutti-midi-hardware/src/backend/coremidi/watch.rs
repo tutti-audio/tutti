@@ -26,7 +26,8 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tutti_platform::Instant;
 use tutti_rt::LockExt;
 
 use core_foundation::runloop::CFRunLoop;

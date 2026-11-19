@@ -10,7 +10,8 @@ use super::*;
 /// only, as the yield is.
 #[test]
 fn the_close_yields_while_a_helper_is_inside() {
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
+    use tutti_platform::Instant;
     static YIELDED: AtomicU32 = AtomicU32::new(0);
     let gate = JobGate::new(2);
     let inside = AtomicBool::new(false);
@@ -90,15 +91,17 @@ fn the_close_yields_after_the_gates_budget() {
                 if i == 0 {
                     // Hold participant 0 until the helper is inside, so
                     // the close has a helper to wait for.
-                    let deadline = std::time::Instant::now() + Duration::from_secs(10);
-                    while !inside.load(Ordering::Acquire) && std::time::Instant::now() < deadline {
+                    let deadline = tutti_platform::Instant::now() + Duration::from_secs(10);
+                    while !inside.load(Ordering::Acquire)
+                        && tutti_platform::Instant::now() < deadline
+                    {
                         std::thread::yield_now();
                     }
                 } else {
                     inside.store(true, Ordering::Release);
-                    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+                    let deadline = tutti_platform::Instant::now() + Duration::from_secs(10);
                     while READ.load(Ordering::Acquire) < READS
-                        && std::time::Instant::now() < deadline
+                        && tutti_platform::Instant::now() < deadline
                     {
                         std::thread::yield_now();
                     }

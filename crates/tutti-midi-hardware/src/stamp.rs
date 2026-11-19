@@ -6,7 +6,9 @@
 //! before that reading as its stamp is before the clock's. Nothing here reads a
 //! clock.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use tutti_platform::Instant;
 
 /// The instant of an event stamped `stamped` on a clock that read `clock` when
 /// the OS's read `os`: as long before `os` as `stamped` is before `clock`. An

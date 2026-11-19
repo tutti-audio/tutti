@@ -1,6 +1,8 @@
 //! An open winmm output.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use tutti_platform::Instant;
 
 use windows_sys::Win32::Media::Audio::{
     CALLBACK_NULL, HMIDIOUT, MIDIERR_STILLPLAYING, MIDIHDR, midiOutClose, midiOutLongMsg,

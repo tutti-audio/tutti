@@ -2,7 +2,8 @@
 //! change and not by a poll.
 
 use std::sync::{Condvar, Mutex, PoisonError};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tutti_platform::Instant;
 use tutti_rt::LockExt;
 
 /// A gate a thread waits on until a condition holds, and that the threads which

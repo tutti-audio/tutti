@@ -21,7 +21,8 @@
 //! `flock`.
 
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tutti_platform::Instant;
 
 /// The path every test process agrees on.
 fn path() -> PathBuf {

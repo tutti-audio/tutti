@@ -10,14 +10,14 @@
 //! - The session machines: [`Client`] and [`Host`] hold the session states of
 //!   section 6, authentication, keep-alive Pings, Session Reset, forward error
 //!   correction, retransmit and the idle declaration. They take datagrams and
-//!   an [`Instant`](std::time::Instant), and hand back [`Transmit`]s and
+//!   an [`Instant`](tutti_platform::Instant), and hand back [`Transmit`]s and
 //!   [`Event`]s ([`NetworkEndpoint`]); they own no socket and read no clock.
 //! - [`UdpDriver`] runs a [`NetworkEndpoint`] over a `std::net::UdpSocket`.
 //! - [`Advertisement`] and [`Browser`] publish and find Hosts by mDNS.
 //!
 //! ```
 //! use std::net::SocketAddr;
-//! use std::time::Instant;
+//! use tutti_platform::Instant;
 //! use tutti_midi_ci::{EndpointName, ProductInstanceId};
 //! use tutti_midi_network::{
 //!     Client, Credentials, EndpointIdentity, Event, Host, HostConfig, NetworkEndpoint,

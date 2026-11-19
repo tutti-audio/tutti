@@ -4,7 +4,8 @@
 
 use std::any::Any;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tutti_platform::Instant;
 
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::{Interleaved, SampleFormat};

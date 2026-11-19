@@ -29,8 +29,9 @@
 //! program material, so a figure is a lower bound.
 
 use std::path::Path;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tutti_buffers::InputOutput;
+use tutti_platform::Instant;
 
 use tutti_graph::{MAX_NODE_TAIL, Offset, UmpAt};
 use tutti_plugin_types::{

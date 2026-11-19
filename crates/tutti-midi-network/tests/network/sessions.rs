@@ -2,7 +2,8 @@
 //! authentication, data transfer with loss, keep-alive, reset and Bye.
 
 use std::sync::atomic::{AtomicU8, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tutti_platform::Instant;
 
 use tutti_midi_network::{
     Admission, AuthChallenge, AuthFailure, AuthMethods, AuthState, Bye, ByeReason, Client, Command,

@@ -2,7 +2,8 @@
 //! the test lets them, and the test owns the clock.
 
 use std::net::SocketAddr;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tutti_platform::Instant;
 
 use tutti_midi_ci::{EndpointName, ProductInstanceId};
 use tutti_midi_network::{

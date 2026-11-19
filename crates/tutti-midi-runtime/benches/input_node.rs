@@ -16,7 +16,8 @@
 //! region.
 
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tutti_platform::Instant;
 
 use tutti_buffers::MaxBlock;
 use tutti_fixtures::midi;

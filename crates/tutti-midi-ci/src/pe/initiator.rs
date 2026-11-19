@@ -64,7 +64,7 @@
 //! A chunk that could not be read never reaches the machine, and its request times
 //! out.
 
-use std::time::Instant;
+use tutti_platform::Instant;
 
 use super::body::{BodyLimit, PeBodyError, decode_body, encode_body};
 use super::capabilities::SimultaneousRequests;

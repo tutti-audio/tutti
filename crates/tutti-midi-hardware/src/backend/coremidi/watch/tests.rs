@@ -1,7 +1,9 @@
 //! `Devices` against CoreMIDI: a virtual destination is a device to every
 //! client, so creating and dropping one is a hot-plug.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use tutti_platform::Instant;
 
 use super::*;
 use crate::Devices;

@@ -2,7 +2,7 @@
 
 use super::{MainThreadMarker, Measuring, Read, StateFor, routing};
 use std::path::Path;
-use std::time::Instant;
+use tutti_platform::Instant;
 use tutti_plugin_types::{
     Describe, Described, InProcess, MeasureFailure, PluginError, PluginFormat, PluginId,
     ProbeRefusal, Unmeasured,

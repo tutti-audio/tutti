@@ -19,7 +19,7 @@ use crate::mpe::MpeControl;
 use crate::synth_voice::SynthVoice;
 use crate::tuning::{A4_FREQ, key_freq};
 use crate::voice::Gate;
-use crate::{UnisonEngine, VoiceAllocator, VoiceAllocatorConfig};
+use crate::{SynthVoices, SynthVoicesConfig, UnisonEngine};
 use tutti_graph::{EventKind, SubBlocks};
 use tutti_midi_protocol::channel_voice;
 use tutti_midi_protocol::{PitchBendSensitivity, UniversalReader};
@@ -82,7 +82,7 @@ pub struct PolySynth<F: SynthFloat> {
     /// The rate the voices are built for: [`PolySynth::INITIAL_RATE`] until the
     /// graph prepares the synth (`Node::prepare`).
     sample_rate: SampleRate,
-    allocator: VoiceAllocator,
+    allocator: SynthVoices,
     voices: Vec<SynthVoice>,
     /// Every sub-voice's oscillator, filter and envelope state, in SIMD lanes.
     bank: VoiceBank<F>,
@@ -101,7 +101,7 @@ pub struct PolySynth<F: SynthFloat> {
     /// The Universal System Exclusive the synth's Group carries to it: the
     /// edge that reassembles it and keeps what is addressed to this synth.
     universal: UniversalReader,
-    /// The master gain (`Voicing::master_gain`) the last control step ended
+    /// The master gain (`VoiceAllocator::master_gain`) the last control step ended
     /// at: each step ramps from it to the gain now, so a Master Volume or
     /// Balance never steps the output.
     master_applied: MasterGain,
@@ -127,14 +127,14 @@ impl<F: SynthFloat> PolySynth<F> {
     #[must_use]
     pub fn new(config: SynthConfig) -> Self {
         let polyphony = config.polyphony.get();
-        let allocator_config = VoiceAllocatorConfig {
+        let allocator_config = SynthVoicesConfig {
             max_voices: config.polyphony,
             mode: config.voice_mode,
             strategy: config.allocation_strategy,
             bend_range: config.pitch_bend_range,
             per_note_bend_range: PitchBendSensitivity::MPE_MEMBER_DEFAULT.semitones(),
         };
-        let mut allocator = VoiceAllocator::new(allocator_config);
+        let mut allocator = SynthVoices::new(allocator_config);
         allocator.store_initial_tuning(config.tuning.table());
 
         let unison = config.unison.as_ref().map(|u| UnisonEngine::new(u.clone()));
@@ -246,7 +246,7 @@ impl<F: SynthFloat> PolySynth<F> {
     ///
     /// The Group's System Exclusive is read here too ([`UniversalReader`]): a
     /// Universal message addressed to this synth or to all of them is the note
-    /// logic's (`Voicing::universal`). This is a sink, so a message that is
+    /// logic's (`VoiceAllocator::universal`). This is a sink, so a message that is
     /// neither (a clock, a manufacturer's sysex, one `decode` cannot frame) is
     /// unused, not an error.
     fn process_midi_event(&mut self, ump: Ump) {

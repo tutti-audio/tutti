@@ -308,7 +308,8 @@ fn first_alias_is_the_first_slot_another_position_of_the_range_holds() {
 )]
 fn a_writer_and_a_reader_thread_never_tear() {
     use std::sync::atomic::{AtomicBool, AtomicU64, Ordering as O};
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
+    use tutti_platform::Instant;
     const N: usize = 64;
     /// Frames the reader checks before the writer stops, and steps the
     /// writer takes at least.

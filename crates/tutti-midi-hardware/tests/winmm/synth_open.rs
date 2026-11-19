@@ -1,4 +1,5 @@
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tutti_platform::Instant;
 
 use tutti_fixtures::midi::GS_RESET;
 use tutti_graph::{Losses, Offset};

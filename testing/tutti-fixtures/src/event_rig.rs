@@ -2,7 +2,7 @@
 //! inputs receive, for the tests of what feeds a graph's event inputs.
 
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use tutti_platform::Instant;
 
 use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_graph::{

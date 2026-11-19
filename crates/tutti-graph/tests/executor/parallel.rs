@@ -652,8 +652,9 @@ fn a_panic_on_a_worker_reaches_the_caller() {
 fn the_executor_waits_by_its_pools_budget() {
     use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
     use std::sync::{Arc, Mutex};
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
     use tutti_graph::{BlockWaits, Pool};
+    use tutti_platform::Instant;
 
     /// The order the events happened in: each event takes the next number.
     #[derive(Default)]

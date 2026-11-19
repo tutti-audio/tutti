@@ -409,7 +409,7 @@ impl AudioPipeline {
         // whose tail decays toward silence can otherwise emit denormalized
         // floats and spike CPU. The mode is restored when the closure ends.
         tutti_platform::with_no_denormals(move || {
-            let start = std::time::Instant::now();
+            let start = tutti_platform::Instant::now();
 
             // Gate each best-effort input on the plugin's advertised features — the
             // engine only hands a plugin what it asked to consume, keyed on the

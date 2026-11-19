@@ -5,7 +5,7 @@
 
 use crate::common::{blocks, play, tap};
 use std::sync::Arc;
-use std::time::Instant;
+use tutti_platform::Instant;
 
 use tutti_midi_device::EndpointId;
 use tutti_midi_hardware::test_support::{FakeBackend, FakeCounters, endpoint};

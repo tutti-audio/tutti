@@ -219,7 +219,7 @@ impl Parts {
         &self,
         main: MainThreadMarker,
         ready: &[tutti_plugin_ipc_ffi::Ready],
-        now: std::time::Instant,
+        now: tutti_platform::Instant,
     ) {
         self.module.run_loop().dispatch(main, ready, now);
     }

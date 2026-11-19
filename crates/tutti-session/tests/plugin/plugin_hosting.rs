@@ -4,8 +4,9 @@
 use crate::pooled::{LoadEntry, LoadPlugin, Spec, catalog_of, probe};
 use crate::support::clap_probe;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tutti_buffers::MaxBlock;
+use tutti_platform::Instant;
 use tutti_plugin::catalog::{Hosting, PluginRef};
 use tutti_plugin_types::BridgeError;
 use tutti_session::{LoadError, PoolEvent, Session, SessionEvent, Task};

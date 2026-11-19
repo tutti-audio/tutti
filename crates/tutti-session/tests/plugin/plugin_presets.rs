@@ -117,10 +117,10 @@ mod clap {
     #[test]
     fn a_loaded_preset_file_moves_the_mirror() {
         let (mut s, entry, node) = loaded();
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let deadline = tutti_platform::Instant::now() + std::time::Duration::from_secs(10);
         while !s.plugin_view(node).is_ok_and(|p| p.params().is_ready()) {
             assert!(
-                std::time::Instant::now() < deadline,
+                tutti_platform::Instant::now() < deadline,
                 "the read never landed"
             );
             let _ = s.update();
@@ -134,10 +134,10 @@ mod clap {
             .land_on(&mut s)
             .expect("the plugin takes the preset");
 
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let deadline = tutti_platform::Instant::now() + std::time::Duration::from_secs(5);
         while cutoff(&s, node) == Some(before) {
             assert!(
-                std::time::Instant::now() < deadline,
+                tutti_platform::Instant::now() < deadline,
                 "the mirror still reads {before} after the preset moved Cutoff"
             );
             let _ = s.update_on(main);
@@ -183,7 +183,7 @@ mod vst3 {
         s.pool(s.plugin_entry(0u64, &id, &catalog)).unwrap();
 
         // Phases with no proof of the main thread: nothing runs main work.
-        let mut now = std::time::Instant::now();
+        let mut now = tutti_platform::Instant::now();
         let deadline = now + std::time::Duration::from_secs(60);
         let kept = 'landed: loop {
             now += std::time::Duration::from_millis(20);
@@ -199,7 +199,7 @@ mod vst3 {
                 }
             }
             assert!(
-                std::time::Instant::now() < deadline,
+                tutti_platform::Instant::now() < deadline,
                 "the load never landed"
             );
             std::thread::yield_now();
@@ -404,7 +404,7 @@ mod vst2 {
                 .hosting(Hosting::InProcess),
         )
         .unwrap();
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        let deadline = tutti_platform::Instant::now() + std::time::Duration::from_secs(60);
         'reloaded: loop {
             for event in s.update_on(main) {
                 if let SessionEvent::Pool { key: k, event } = event
@@ -415,7 +415,7 @@ mod vst2 {
                 }
             }
             assert!(
-                std::time::Instant::now() < deadline,
+                tutti_platform::Instant::now() < deadline,
                 "the reload never landed"
             );
             std::thread::yield_now();

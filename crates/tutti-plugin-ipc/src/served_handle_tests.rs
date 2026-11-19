@@ -81,9 +81,12 @@ fn handle_over(
 
 /// Waits until `seen` holds, polling: a hang guard of a minute, not a speed claim.
 fn eventually(what: &str, mut seen: impl FnMut() -> bool) {
-    let guard = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    let guard = tutti_platform::Instant::now() + std::time::Duration::from_secs(60);
     while !seen() {
-        assert!(std::time::Instant::now() < guard, "never happened: {what}");
+        assert!(
+            tutti_platform::Instant::now() < guard,
+            "never happened: {what}"
+        );
         std::thread::yield_now();
     }
 }

@@ -163,7 +163,7 @@ pub(crate) struct Voice<F: Float + SimdLanes> {
     // `NoteControls::DEFAULT` until a message sets one.
     note: NoteControls,
     /// How far the key sounds from equal temperament: the note logic's tuning
-    /// of it (`Command::Start`'s `tune`).
+    /// of it (`VoiceCommand::Start`'s `tune`).
     tune: Semitones,
 
     note_gain: Amplitude,

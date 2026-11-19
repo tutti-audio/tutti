@@ -612,10 +612,10 @@ fn a_command_waits_for_the_commit_it_was_checked_against() {
         ed.schedule(At::NextBlock, EventIn { node: key, port: 0 }, tag(round))
             .expect("one outstanding at a time");
         // Wait for it to land before the next round removes its node.
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let deadline = tutti_platform::Instant::now() + std::time::Duration::from_secs(10);
         while ed.commands_outstanding() > 0 {
             assert!(
-                std::time::Instant::now() < deadline,
+                tutti_platform::Instant::now() < deadline,
                 "round {round}: the command never landed"
             );
             std::thread::yield_now();
@@ -1130,10 +1130,10 @@ fn cancels_are_never_lost_across_threads() {
             std::thread::yield_now();
         }
     }
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let deadline = tutti_platform::Instant::now() + std::time::Duration::from_secs(10);
     while ed.commands_outstanding() > 0 {
         assert!(
-            std::time::Instant::now() < deadline,
+            tutti_platform::Instant::now() < deadline,
             "{} commands outlived their cancels",
             ed.commands_outstanding()
         );
