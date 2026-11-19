@@ -4,14 +4,18 @@
 //! safe handles; the backend above it is `#![forbid(unsafe_code)]` and holds the
 //! logic (enumeration, the device watch, the packet to `Instant` placement).
 //!
+//! The crate sits one layer above `tutti-ump` and takes and returns its types for what
+//! the UMP spec defines (protocol, Function Block fields); a value CoreMIDI holds
+//! that the spec does not define is that field's `Reserved`.
+//!
 //! The crate is empty off macOS.
 //!
 //! ## What is here
 //!
 //! | | |
 //! |---|---|
-//! | `UmpSource`, `Protocol` | a native-UMP virtual source in the MIDI 1.0 or MIDI 2.0 protocol: it disposes its endpoint on drop, and sends a UMP message as an event list. The safe `coremidi` wrapper has the destination side and no source |
-//! | `ump_endpoints` | the UMP Endpoints and Function Blocks CoreMIDI reports (macOS 15's `MIDIUMPEndpoint`, Objective-C classes bound through `objc2-core-midi`), as plain values; `UmpEndpointsError::Unsupported` before macOS 15, where the classes do not exist, and `Exception` for an Objective-C exception CoreMIDI raises (as seen when no MIDI server is reachable) |
+//! | `UmpSource` | a native-UMP virtual source in the MIDI 1.0 or MIDI 2.0 protocol (a `tutti_ump::Protocol`; a reserved one is refused): it disposes its endpoint on drop, and sends a UMP message as an event list. The safe `coremidi` wrapper has the destination side and no source |
+//! | `ump_endpoints` | the UMP Endpoints and Function Blocks CoreMIDI reports (macOS 15's `MIDIUMPEndpoint`, Objective-C classes bound through `objc2-core-midi`), as `tutti-ump` values; `UmpEndpointsError::Unsupported` before macOS 15, where the classes do not exist, and `Exception` for an Objective-C exception CoreMIDI raises (as seen when no MIDI server is reachable) |
 //! | `UniqueId`, `OsStatus` | CoreMIDI's `kMIDIPropertyUniqueID` and the `OSStatus` of a failed call |
 //! | `create_client` | client creation that retries the status CoreMIDI returns while its server exits, for a bounded time; every client the process makes goes through it |
 //! | `Timebase`, `host_ticks` | the Mach host clock CoreMIDI timestamps its packets with, and the ratio from its ticks to nanoseconds |
@@ -40,6 +44,6 @@ pub use destination::UmpDestination;
 pub use error::{Error, Operation, OsStatus};
 pub use host_clock::{Timebase, host_ticks};
 pub use objc_exception::ObjcException;
-pub use source::{Protocol, UmpSource};
+pub use source::UmpSource;
 pub use ump_endpoints::{UmpBlockInfo, UmpEndpointInfo, UmpEndpointsError, ump_endpoints};
 pub use unique_id::UniqueId;

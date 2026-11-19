@@ -738,7 +738,7 @@ impl Modulation {
             now,
             editor.prepare().sample_rate(),
         )?;
-        attach_depths(&mut compiled, decl, host);
+        attach_depths(&mut compiled, decl, host)?;
         let mut applied = Applied::default();
         let mut resolved = Vec::with_capacity(compiled.programs.len());
         let mut feeds = Vec::with_capacity(compiled.nodes.len());
@@ -1616,7 +1616,11 @@ fn unused_key<F: Float>(editor: &Editor<F>) -> NodeKey {
 
 /// Gives each compiled program the depth cells the host holds for its routes
 /// ([`ModHost::depth`]).
-fn attach_depths(compiled: &mut Compiled, decl: &Declarations<'_>, host: &dyn ModHost) {
+fn attach_depths(
+    compiled: &mut Compiled,
+    decl: &Declarations<'_>,
+    host: &dyn ModHost,
+) -> Result<(), CompileError> {
     let mut cells: BTreeMap<TargetKey, Vec<(LayerId, Param<Depth>)>> = BTreeMap::new();
     for (key, route) in decl.routes {
         if let RouteTarget::Param(target) = route.to
@@ -1630,9 +1634,13 @@ fn attach_depths(compiled: &mut Compiled, decl: &Declarations<'_>, host: &dyn Mo
     }
     for (target, cells) in cells {
         if let Some(program) = compiled.programs.get_mut(&target) {
-            *program = std::mem::take(program).depths(cells);
+            let count = cells.len();
+            program
+                .bind_depths(cells)
+                .map_err(|_| CompileError::TooManyLayers { target, count })?;
         }
     }
+    Ok(())
 }
 
 /// Whether the node the reconciler built at `key` (generation `generation` at its

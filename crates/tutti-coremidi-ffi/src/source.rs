@@ -15,25 +15,22 @@ use coremidi_sys::{
 };
 use std::mem::MaybeUninit;
 use std::sync::Mutex;
+use tutti_ump::Protocol;
 
-/// The UMP protocol a virtual endpoint carries (`MIDIProtocolID`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum Protocol {
-    /// MIDI 1.0 channel voice messages in UMP packets (`kMIDIProtocol_1_0`).
-    Midi1,
-    /// MIDI 2.0 Protocol messages (`kMIDIProtocol_2_0`).
-    Midi2,
-}
-
-impl Protocol {
-    /// CoreMIDI's id for the protocol.
-    pub(crate) fn id(self) -> MIDIProtocolID {
-        let id = match self {
-            Self::Midi1 => kMIDIProtocol_1_0,
-            Self::Midi2 => kMIDIProtocol_2_0,
-        };
-        id as MIDIProtocolID
-    }
+/// CoreMIDI's id (`MIDIProtocolID`) for the protocol a virtual endpoint
+/// carries: `kMIDIProtocol_1_0` for MIDI 1.0 channel voice messages in UMP
+/// packets, `kMIDIProtocol_2_0` for MIDI 2.0 Protocol messages.
+///
+/// # Errors
+///
+/// [`Error::ReservedProtocol`] for a reserved protocol, which has no id.
+pub(crate) fn protocol_id(protocol: Protocol) -> Result<MIDIProtocolID, Error> {
+    let id = match protocol {
+        Protocol::Midi1 => kMIDIProtocol_1_0,
+        Protocol::Midi2 => kMIDIProtocol_2_0,
+        _ => return Err(Error::ReservedProtocol),
+    };
+    Ok(id as MIDIProtocolID)
 }
 
 /// The process-wide raw client every endpoint here belongs to.
@@ -82,7 +79,7 @@ const MIDI_TIMESTAMP_NOW: MIDITimeStamp = 0;
 #[must_use = "dropping it removes the virtual source"]
 pub struct UmpSource {
     source: MIDIEndpointRef,
-    protocol: Protocol,
+    protocol: MIDIProtocolID,
 }
 
 impl UmpSource {
@@ -91,8 +88,10 @@ impl UmpSource {
     ///
     /// # Errors
     ///
+    /// [`Error::ReservedProtocol`] for a reserved `protocol`, and
     /// [`Error::Call`] when CoreMIDI refuses the client or the endpoint.
     pub fn new(name: &str, protocol: Protocol) -> Result<Self, Error> {
+        let protocol = protocol_id(protocol)?;
         let source_name = CFString::new(name);
         let client =
             shared_raw_client().map_err(|status| Error::call(Operation::CreateClient, status))?;
@@ -104,7 +103,7 @@ impl UmpSource {
             MIDISourceCreateWithProtocol(
                 client,
                 source_name.as_concrete_TypeRef(),
-                protocol.id(),
+                protocol,
                 &mut source,
             )
         };
@@ -138,7 +137,7 @@ impl UmpSource {
         // after both calls have run. `list_size` is that allocation's real size,
         // so `Add` cannot write past it, and `words` outlives the call.
         let status = unsafe {
-            let mut packet = MIDIEventListInit(list_ptr, self.protocol.id());
+            let mut packet = MIDIEventListInit(list_ptr, self.protocol);
             packet = MIDIEventListAdd(
                 list_ptr,
                 list_size as ByteCount,
@@ -169,6 +168,7 @@ impl Drop for UmpSource {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tutti_ump::read_protocol;
 
     fn assert_send_sync<T: Send + Sync>() {}
 
@@ -177,6 +177,25 @@ mod tests {
     #[test]
     fn a_source_is_send_and_sync() {
         assert_send_sync::<UmpSource>();
+    }
+
+    /// A reserved protocol has no CoreMIDI id: no endpoint is created in it, and
+    /// the two defined ones map to the two ids.
+    #[test]
+    fn a_reserved_protocol_is_refused() {
+        assert_eq!(protocol_id(read_protocol(0)), Err(Error::ReservedProtocol));
+        assert_eq!(
+            protocol_id(Protocol::Midi1),
+            Ok(kMIDIProtocol_1_0 as MIDIProtocolID)
+        );
+        assert_eq!(
+            protocol_id(Protocol::Midi2),
+            Ok(kMIDIProtocol_2_0 as MIDIProtocolID)
+        );
+        assert!(matches!(
+            UmpSource::new("tutti-ffi-test", read_protocol(3)),
+            Err(Error::ReservedProtocol)
+        ));
     }
 
     /// A message longer than the event list holds is refused with the packet

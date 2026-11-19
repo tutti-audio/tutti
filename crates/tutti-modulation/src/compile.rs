@@ -643,7 +643,9 @@ pub fn compile(
             continue;
         }
         let program = ControlProgram::new(decl.automation.clone(), l, i).map_err(|e| match e {
-            ProgramError::TooManyLayers { count } => CompileError::TooManyLayers { target, count },
+            ProgramError::TooManyLayers { count } | ProgramError::TooManyDepths { count } => {
+                CompileError::TooManyLayers { target, count }
+            }
             ProgramError::TooManyInputs { count } => CompileError::TooManyInputs { target, count },
             ProgramError::DuplicateLayer(_) => CompileError::LayerIdCollision(target),
             // Sources and routes are checked above, so these do not reach

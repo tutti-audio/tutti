@@ -38,6 +38,43 @@ pub const MAX_LANE_LAYERS: usize = 16;
 /// [`ControlProgram::new`] refuses past it ([`ProgramError::TooManyInputs`]).
 pub const MAX_LANE_INPUTS: usize = 8;
 
+/// Depth cells one program holds, at most: one per layer and per input.
+/// [`ControlProgram::bind_depths`] refuses past it ([`ProgramError::TooManyDepths`]).
+pub const MAX_LANE_DEPTHS: usize = MAX_LANE_LAYERS + MAX_LANE_INPUTS;
+
+/// The depths a program's cells held at one moment: what a lane loads once per
+/// block ([`ControlProgram::depth_snapshot`]), compares with the last block's,
+/// and evaluates from ([`ControlProgram::value_at_in`]), so one block never
+/// evaluates at two depths. Fixed size: nothing allocates.
+#[derive(Clone, Copy, Debug)]
+pub struct DepthSnapshot {
+    len: usize,
+    bits: [u64; MAX_LANE_DEPTHS],
+}
+
+impl DepthSnapshot {
+    /// The snapshot of a program with no depth cells.
+    pub const EMPTY: Self = Self {
+        len: 0,
+        bits: [0; MAX_LANE_DEPTHS],
+    };
+}
+
+impl Default for DepthSnapshot {
+    fn default() -> Self {
+        Self::EMPTY
+    }
+}
+
+/// Equal when every depth is the same bit for bit.
+impl PartialEq for DepthSnapshot {
+    fn eq(&self, other: &Self) -> bool {
+        self.len == other.len && self.bits[..self.len] == other.bits[..other.len]
+    }
+}
+
+impl Eq for DepthSnapshot {}
+
 /// A layer's identity: what its sum order and its identity across a
 /// republish are keyed by. A compiler derives it stably from what the layer
 /// comes from (a route), so a republish keeps it.
@@ -283,6 +320,12 @@ pub enum ProgramError {
         /// How many there were.
         count: usize,
     },
+    /// More than [`MAX_LANE_DEPTHS`] depth cells.
+    #[error("{count} depth cells, past MAX_LANE_DEPTHS ({})", MAX_LANE_DEPTHS)]
+    TooManyDepths {
+        /// How many there were.
+        count: usize,
+    },
     /// Two layers (or two input layers) with one id.
     #[error("two layers share id {}", .0.0)]
     DuplicateLayer(LayerId),
@@ -449,20 +492,35 @@ impl ControlProgram {
         })
     }
 
-    /// The program with `depths` as the depth of the layers and inputs they
-    /// name, each read from its cell at every evaluation; an id no layer or
-    /// input has is ignored.
-    #[must_use]
-    pub fn depths(mut self, depths: impl IntoIterator<Item = (LayerId, Param<Depth>)>) -> Self {
+    /// Makes `depths` the depth of the layers and inputs they
+    /// name, each read from its cell when a lane takes a
+    /// [snapshot](Self::depth_snapshot); an id no layer or input has is
+    /// ignored.
+    ///
+    /// # Errors
+    ///
+    /// More than [`MAX_LANE_DEPTHS`] cells, or two cells for one id.
+    pub fn bind_depths(
+        &mut self,
+        depths: impl IntoIterator<Item = (LayerId, Param<Depth>)>,
+    ) -> Result<(), ProgramError> {
         let mut depths: Vec<_> = depths
             .into_iter()
             .filter(|(id, _)| {
                 self.layers.iter().any(|l| l.id == *id) || self.inputs.iter().any(|i| i.id == *id)
             })
             .collect();
+        if depths.len() > MAX_LANE_DEPTHS {
+            return Err(ProgramError::TooManyDepths {
+                count: depths.len(),
+            });
+        }
         depths.sort_by_key(|(id, _)| *id);
+        if let Some(w) = depths.windows(2).find(|w| w[0].0 == w[1].0) {
+            return Err(ProgramError::DuplicateLayer(w[0].0));
+        }
         self.depths = depths.into_boxed_slice();
-        self
+        Ok(())
     }
 
     /// The program with a cell of its own for every depth cell it holds, at
@@ -482,24 +540,27 @@ impl ControlProgram {
         program
     }
 
-    /// The depths the program's layers and inputs hold in cells, bit for
-    /// bit: what a lane compares to see a depth move.
+    /// Each depth cell loaded once, in id order: a lane takes one per block,
+    /// compares it with the last block's, and evaluates from it.
     #[must_use]
-    pub fn depth_bits(&self) -> u64 {
-        self.depths.iter().fold(0u64, |acc, (id, cell)| {
-            acc.rotate_left(7) ^ id.0 ^ cell.load().get().to_bits()
-        })
+    pub fn depth_snapshot(&self) -> DepthSnapshot {
+        let mut snapshot = DepthSnapshot::EMPTY;
+        for (at, (_, cell)) in self.depths.iter().enumerate() {
+            snapshot.bits[at] = cell.load().get().to_bits();
+        }
+        snapshot.len = self.depths.len();
+        snapshot
     }
 
-    /// `id`'s amount with the depth its cell holds, if it has one.
+    /// `id`'s amount with the depth `depths` holds for it, if it has a cell.
     #[inline]
-    fn amount_of(&self, id: LayerId, amount: Amount) -> Amount {
+    fn amount_of(&self, id: LayerId, amount: Amount, depths: &DepthSnapshot) -> Amount {
         match self.depths.binary_search_by_key(&id, |(id, _)| *id) {
-            Ok(at) => Amount {
-                depth: self.depths[at].1.load(),
+            Ok(at) if at < depths.len => Amount {
+                depth: Depth::clamped(f64::from_bits(depths.bits[at])),
                 ..amount
             },
-            Err(_) => amount,
+            _ => amount,
         }
     }
 
@@ -566,7 +627,21 @@ impl ControlProgram {
         span: f64,
         inputs: &[Option<f64>],
     ) -> Option<f64> {
-        self.evaluate(param, knob, at, span, inputs, Limit::At)
+        self.value_at_in(param, knob, at, span, inputs, &self.depth_snapshot())
+    }
+
+    /// [`value_at`](Self::value_at) at the depths of `depths`, which a lane
+    /// took once for its block.
+    pub fn value_at_in(
+        &self,
+        param: Option<UnitParam>,
+        knob: Option<f64>,
+        at: &ProgramTime,
+        span: f64,
+        inputs: &[Option<f64>],
+        depths: &DepthSnapshot,
+    ) -> Option<f64> {
+        self.evaluate(param, knob, at, span, inputs, depths, Limit::At)
     }
 
     /// The left limit at `at`: [`value_at`](Self::value_at) just before it,
@@ -581,7 +656,20 @@ impl ControlProgram {
         span: f64,
         inputs: &[Option<f64>],
     ) -> Option<f64> {
-        self.evaluate(param, knob, at, span, inputs, Limit::Before)
+        self.value_before_in(param, knob, at, span, inputs, &self.depth_snapshot())
+    }
+
+    /// [`value_before`](Self::value_before) at the depths of `depths`.
+    pub fn value_before_in(
+        &self,
+        param: Option<UnitParam>,
+        knob: Option<f64>,
+        at: &ProgramTime,
+        span: f64,
+        inputs: &[Option<f64>],
+        depths: &DepthSnapshot,
+    ) -> Option<f64> {
+        self.evaluate(param, knob, at, span, inputs, depths, Limit::Before)
     }
 
     fn evaluate(
@@ -591,6 +679,7 @@ impl ControlProgram {
         at: &ProgramTime,
         span: f64,
         inputs: &[Option<f64>],
+        depths: &DepthSnapshot,
         limit: Limit,
     ) -> Option<f64> {
         let circular = param.filter(|p| p.is_circular());
@@ -605,13 +694,13 @@ impl ControlProgram {
         }
         let mut acc = -0.0f64;
         for l in self.layers.iter() {
-            if let Some(o) = l.offset(at, span, limit, self.amount_of(l.id, l.amount)) {
+            if let Some(o) = l.offset(at, span, limit, self.amount_of(l.id, l.amount, depths)) {
                 acc += o;
             }
         }
         for (k, l) in self.inputs.iter().enumerate() {
             if let Some(x) = inputs.get(k).copied().flatten() {
-                acc += self.amount_of(l.id, l.amount).offset(x, span);
+                acc += self.amount_of(l.id, l.amount, depths).offset(x, span);
             }
         }
         let sum = base + acc;
