@@ -2246,3 +2246,165 @@ fn a_block_completes_while_a_control_request_is_outstanding() {
         Some(Normalized::of(0.5))
     );
 }
+
+/// **A settle is ordered behind the settings queued before it.** The rate
+/// change goes through the audio lane's queue; the settle's fence must reach the
+/// server after it, whatever the two threads' timing.
+#[test]
+fn a_settle_reaches_the_server_after_the_rate_change_queued_before_it() {
+    let log = Arc::new(std::sync::Mutex::new(Vec::<&'static str>::new()));
+    let control = {
+        let log = Arc::clone(&log);
+        move |msg: HostMessage| match msg {
+            HostMessage::SetSampleRate { rate } => {
+                log.lock().unwrap().push("rate");
+                Action::Reply(Box::new(BridgeMessage::SampleRateSet { rate, error: None }))
+            }
+            HostMessage::GetCurrentPreset => {
+                log.lock().unwrap().push("fence");
+                Action::Reply(Box::new(applied_fence()))
+            }
+            _ => Action::Silent,
+        }
+    };
+    let mock = MockServer::start_lanes("settle-order", answer_blocks, control);
+    assert!(mock.bridge.audio().set_sample_rate_rt(SampleRate::SR_96K));
+    let bridge = Arc::clone(&mock.bridge);
+    call_within(move || bridge.audio().settle()).expect("the settle returns");
+    assert_eq!(*log.lock().unwrap(), ["rate", "fence", "fence"]);
+}
+
+/// **A crash the control lane sees is answered on the reply ring by the audio
+/// lane's thread**, the ring's one producer: the control lane only wakes it.
+/// Nothing is in flight on the audio lane, so the `Error` for every block
+/// (`seq: None`) can only be the woken thread's.
+#[test]
+fn a_crash_the_control_lane_sees_is_answered_by_the_audio_lane() {
+    let mut mock = MockServer::start_lanes(
+        "control-death",
+        |_| Action::Silent,
+        |msg| match msg {
+            HostMessage::GetParameter { .. } => Action::Die,
+            _ => Action::Silent,
+        },
+    );
+    assert_eq!(mock.bridge.audio().parameter(ParamId::new(1)), None);
+    mock.wait_for_crash("the control lane's end to be seen");
+    tutti_fixtures::wait_until(
+        "the audio lane's thread to answer the crash",
+        NOTICE_TIMEOUT,
+        || answered(&mut mock, 99),
+    );
+}
+
+/// **A request that finds the control queue full is `Busy`, and counted.** The
+/// control lane is held in a render mode's fence, which owes no request slot, and
+/// its queue is filled behind it.
+#[test]
+fn a_control_call_on_a_full_queue_is_busy() {
+    let (seen, seen_rx) = crossbeam_channel::bounded(1);
+    let (release_tx, release) = crossbeam_channel::bounded::<()>(1);
+    let mock = MockServer::start_lanes("full", answer_blocks, move |msg| match msg {
+        HostMessage::GetCurrentPreset => {
+            let _ = seen.try_send(());
+            let _ = release.recv();
+            Action::Reply(Box::new(applied_fence()))
+        }
+        _ => Action::Silent,
+    });
+    assert!(
+        mock.bridge
+            .audio()
+            .set_render_mode_rt(tutti_plugin_types::RenderMode::Offline)
+    );
+    seen_rx
+        .recv_timeout(NOTICE_TIMEOUT)
+        .expect("the control lane is held in the fence");
+    while mock
+        .bridge
+        .audio()
+        .set_parameter_rt(ParamId::new(1), Normalized::of(0.5))
+    {}
+
+    let refused = mock.bridge.audio().commands_refused_cell();
+    let before = refused.get();
+    assert_eq!(
+        mock.bridge
+            .audio()
+            .save_state(tutti_plugin_types::StateUse::Project),
+        Err(StateError::Busy)
+    );
+    assert!(refused.get() > before, "the refusal is counted");
+    release_tx.send(()).expect("the control lane is waiting");
+}
+
+/// **A shutdown ends while a control request is stuck in the server.** The
+/// audio lane's thread joins the control lane's, which is in a query nobody
+/// answers; it leaves when that query's own deadline (constructed here, short)
+/// passes. What is asserted is that the shutdown completes, not how fast.
+#[test]
+fn a_shutdown_ends_when_a_control_request_is_stuck_in_the_server() {
+    let (seen, seen_rx) = crossbeam_channel::bounded(1);
+    let timeouts = {
+        let mut t = Timeouts::default();
+        t.param = Duration::from_millis(200);
+        t
+    };
+    let mut mock =
+        MockServer::start_lanes_under("stuck-shutdown", timeouts, answer_blocks, move |msg| {
+            if matches!(msg, HostMessage::GetParameter { .. }) {
+                let _ = seen.try_send(());
+            }
+            Action::Silent
+        });
+    let bridge = Arc::clone(&mock.bridge);
+    let query = std::thread::spawn(move || bridge.audio().parameter(ParamId::new(1)));
+    seen_rx
+        .recv_timeout(NOTICE_TIMEOUT)
+        .expect("the query is stuck in the server");
+
+    let mut thread = mock.thread.take().expect("the bridge thread");
+    call_within(move || thread.shutdown()).expect("the shutdown completes");
+    assert_eq!(query.join().expect("the query's thread"), None);
+}
+
+/// **A setting the control lane cannot take in time is counted, not lost
+/// silently.** The control lane is held in an editor open the server never
+/// answers; a render mode queued meanwhile is held for by the audio lane until
+/// its constructed deadline passes, then counted unapplied.
+#[test]
+fn a_setting_the_control_lane_cannot_take_in_time_is_counted() {
+    let (seen, seen_rx) = crossbeam_channel::bounded(1);
+    let timeouts = {
+        let mut t = Timeouts::default();
+        t.param = Duration::from_millis(100);
+        t.rate = Duration::from_millis(10);
+        t.editor = Duration::from_secs(3_600);
+        t
+    };
+    let mock = MockServer::start_lanes_under("unapplied", timeouts, answer_blocks, move |msg| {
+        if matches!(msg, HostMessage::OpenEditor { .. }) {
+            let _ = seen.try_send(());
+        }
+        Action::Silent
+    });
+    let bridge = Arc::clone(&mock.bridge);
+    std::thread::spawn(move || {
+        let _ = bridge
+            .audio()
+            .open_editor_in_server(None, tutti_plugin_types::ContentScale::IDENTITY);
+    });
+    seen_rx
+        .recv_timeout(NOTICE_TIMEOUT)
+        .expect("the control lane is held in the editor open");
+
+    assert_eq!(mock.bridge.audio().unapplied_settings(), 0);
+    assert!(
+        mock.bridge
+            .audio()
+            .set_render_mode_rt(tutti_plugin_types::RenderMode::Offline)
+    );
+    tutti_fixtures::wait_until("the render mode to be given up on", NOTICE_TIMEOUT, || {
+        mock.bridge.audio().unapplied_settings() == 1
+    });
+}

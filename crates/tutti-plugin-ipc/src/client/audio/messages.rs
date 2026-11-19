@@ -73,6 +73,12 @@ pub(super) enum AudioCommand {
     SetSampleRate {
         rate: SampleRate,
     },
+    /// A caller's wait for everything queued before it to have been applied and
+    /// heard: held behind the settings in this queue like them, answered into
+    /// `done` once the control lane has been through two fences.
+    Settle {
+        done: Reply<()>,
+    },
 }
 
 /// A setting the audio lane holds its blocks for. Written by the audio lane's
@@ -89,6 +95,9 @@ pub(super) enum Setting {
     /// `audioMasterGetCurrentProcessLevel`). The server answers it with
     /// nothing, so the lane's own fence after it is the answer.
     RenderMode(tutti_plugin_types::RenderMode),
+    /// A round trip that proves the server has handled every request sent
+    /// before it on this lane.
+    Fence,
 }
 
 /// Callers and the audio thread → the control lane's thread.

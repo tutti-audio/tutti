@@ -606,6 +606,16 @@ pub(super) fn handle_audio(
                 Setting::SampleRate(rate),
             );
         }
+        AudioCommand::Settle { done } => {
+            // Two fences, not one. A fence's reply wakes its waiter before the
+            // control lane hands the events it read meanwhile to the listener
+            // (after the turn); the second fence's turn starts after that
+            // hand-off, so its reply means the first's events were delivered.
+            for _ in 0..2 {
+                hold_for(channels, lifecycle, "a settle", Setting::Fence);
+            }
+            done.send(());
+        }
     }
     Ok(())
 }
@@ -1018,6 +1028,10 @@ pub(super) fn handle_setting(
         }
         Setting::RenderMode(mode) => {
             ipc::send(stream, &HostMessage::SetRenderMode { mode })?;
+            fence(stream, inbox, owed, channels, lifecycle)?;
+            applied.send(());
+        }
+        Setting::Fence => {
             fence(stream, inbox, owed, channels, lifecycle)?;
             applied.send(());
         }
