@@ -20,7 +20,7 @@ use tutti_units::{BitDepth, HoldFactor};
 
 /// The word length a quantizer keeps by default, and the one a depth that is not finite
 /// reads as: 8 bits.
-pub const DEFAULT_BIT_DEPTH: BitDepth = BitDepth::new(8.0);
+pub(crate) const DEFAULT_BIT_DEPTH: BitDepth = BitDepth::new(8.0);
 
 /// The frames one held sample lasts at `hold`: the factor rounded to the nearest whole
 /// number, ties to even (`2.4` is 2, `2.6` is 3, `2.5` is 2 and `3.5` is 4), and at least 1.
@@ -84,7 +84,7 @@ pub struct BitCrusherControls {
 }
 
 impl BitCrusherControls {
-    /// [`DEFAULT_BIT_DEPTH`] (8 bits) and no hold.
+    /// 8 bits and no hold.
     pub const DEFAULT: Self = Self {
         bits: DEFAULT_BIT_DEPTH,
         hold: HoldFactor::NONE,

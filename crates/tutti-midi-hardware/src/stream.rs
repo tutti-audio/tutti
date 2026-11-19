@@ -72,7 +72,7 @@
 //! is, and what the output sends in follows it, and where the input's event
 //! times come from follows its TXJR.
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Instant;
 
 use tutti_graph::{Losses, Offset};
@@ -90,14 +90,15 @@ use tutti_ump::{
 };
 
 use crate::answer::Answer;
-use crate::capability::UmpCapability;
+use crate::capability::{described, is_ump_endpoint};
 use crate::ci::{
     Ci, CiChange, CiChanges, CiPeerInfo, Heard, PeerId, groups_after_settle, groups_of_a_midi1_port,
 };
 use crate::devices::OpenOutput;
-use crate::process::{self, ProcessChange, ReportAsk, ReportError};
+use crate::peer::PeerError;
+use crate::process::{self, ProcessChange, ReportAsk};
 use crate::profiles::{ProfileError, ProfileSwitch, ProfilesChange, Snapshot};
-use crate::properties::{self, PropertyAsk, PropertyChange, PropertyError};
+use crate::properties::{self, PropertyAsk, PropertyChange};
 use crate::session::Presented;
 use tutti_midi_device::DeviceId;
 
@@ -230,19 +231,12 @@ impl DeviceStream {
     pub const fn config(&self) -> StreamConfig {
         self.endpoint.active()
     }
-
-    /// The Endpoint as a [`UmpCapability`]: the protocol in use and the blocks
-    /// it declares.
-    #[must_use]
-    pub fn capability(&self) -> UmpCapability {
-        UmpCapability::of(&self.endpoint)
-    }
 }
 
 /// One device's negotiation: its [`EndpointDiscovery`], while one runs, and the output
 /// it sends on. Control side.
 pub(crate) struct Negotiation {
-    os: UmpCapability,
+    os: Endpoint,
     out: Option<OpenOutput>,
     run: Run,
     inquire: Inquire,
@@ -429,14 +423,13 @@ impl Negotiation {
     /// other is [`Basis::Described`] at once.
     pub(crate) fn new(
         device: DeviceId,
-        os: UmpCapability,
+        os: Endpoint,
         out: Option<OpenOutput>,
         timing: InputTiming,
         ci_refused: CounterWriter<Losses>,
-        store: Arc<Mutex<ResourceStore>>,
     ) -> Self {
-        let asks = os.is_ump_endpoint() && out.is_some();
-        let inquire = if !os.is_ump_endpoint() && out.is_some() {
+        let asks = is_ump_endpoint(&os) && out.is_some();
+        let inquire = if !is_ump_endpoint(&os) && out.is_some() {
             Inquire::Idle
         } else {
             Inquire::No
@@ -446,7 +439,7 @@ impl Negotiation {
         } else {
             Run::Done {
                 stream: Box::new(DeviceStream {
-                    endpoint: os.endpoint(),
+                    endpoint: described(&os),
                     basis: Basis::Described,
                 }),
                 listening: None,
@@ -457,7 +450,7 @@ impl Negotiation {
             out,
             run,
             inquire,
-            ci: Ci::new(device, ci_refused, store),
+            ci: Ci::new(device, ci_refused),
             answering: None,
             timing,
             stop: StopJr::Settled,
@@ -511,12 +504,12 @@ impl Negotiation {
     }
 
     /// Asks that a peer be made a Property Exchange call at the next poll.
-    pub(crate) fn ask_property(&mut self, ask: PropertyAsk) -> Result<(), PropertyError> {
+    pub(crate) fn ask_property(&mut self, ask: PropertyAsk) -> Result<(), PeerError> {
         self.ci.ask_property(ask)
     }
 
     /// Asks that a peer be sent a MIDI Message Report request at the next poll.
-    pub(crate) fn report(&mut self, ask: ReportAsk) -> Result<(), ReportError> {
+    pub(crate) fn report(&mut self, ask: ReportAsk) -> Result<(), PeerError> {
         self.ci.report(ask)
     }
 
@@ -592,10 +585,11 @@ impl Negotiation {
         now: Instant,
         heard: &Heard<'_>,
         presented: Option<Presented>,
+        store: &mut ResourceStore,
     ) -> Stepped {
         let ci = presented.map(|p| p.identity.device);
         let changes = match &mut self.out {
-            Some(out) => self.ci.poll(now, heard, ci, out),
+            Some(out) => self.ci.poll(now, heard, ci, store, out),
             None => CiChanges::default(),
         };
         let stream = self.poll_stream(now, heard);
@@ -631,7 +625,7 @@ impl Negotiation {
     /// later request of the session's cannot undo a grant.
     fn answer(&mut self, heard: &Heard<'_>, presented: Option<Presented>) -> Option<DeviceStream> {
         let announce = self.rebuild(presented);
-        let (Some(answering), true) = (&mut self.answering, self.os.is_ump_endpoint()) else {
+        let (Some(answering), true) = (&mut self.answering, is_ump_endpoint(&self.os)) else {
             return None;
         };
         let mut replies: Vec<Ump> = Vec::new();
@@ -851,7 +845,7 @@ impl Negotiation {
             ),
             DiscoveryEnding::Midi1Fallback => (
                 DeviceStream {
-                    endpoint: self.os.endpoint(),
+                    endpoint: described(&self.os),
                     basis: Basis::Unanswered,
                 },
                 None,

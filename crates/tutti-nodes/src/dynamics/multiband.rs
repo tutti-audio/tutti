@@ -34,20 +34,20 @@ use crate::ramp::LastGood;
 /// The crossover frequencies a band count starts with.
 fn default_crossovers(bands: usize) -> &'static [Hz] {
     match bands {
-        2 => &[Hz(1_000.0)],
-        3 => &[Hz(200.0), Hz(3_000.0)],
-        _ => &[Hz(120.0), Hz(1_000.0), Hz(6_000.0)],
+        2 => &const { [Hz::new(1_000.0)] },
+        3 => &const { [Hz::new(200.0), Hz::new(3_000.0)] },
+        _ => &const { [Hz::new(120.0), Hz::new(1_000.0), Hz::new(6_000.0)] },
     }
 }
 
 /// The threshold a band starts at.
-const DEFAULT_THRESHOLD: Db = Db(-18.0);
+const DEFAULT_THRESHOLD: Db = Db::new(-18.0);
 /// The ratio a band starts at.
-const DEFAULT_RATIO: CompressionRatio = CompressionRatio(2.0);
+const DEFAULT_RATIO: CompressionRatio = CompressionRatio::new(2.0);
 /// The attack a band starts at.
-const DEFAULT_ATTACK: Seconds = Seconds(0.010);
+const DEFAULT_ATTACK: Seconds = Seconds::new(0.010);
 /// The release a band starts at.
-const DEFAULT_RELEASE: Seconds = Seconds(0.100);
+const DEFAULT_RELEASE: Seconds = Seconds::new(0.100);
 
 /// The most crossovers: one fewer than the bands.
 const MAX_CROSSOVERS: usize = BankShape::MAX_BANDS - 1;
@@ -148,11 +148,11 @@ impl Band {
     fn new() -> Self {
         Self {
             threshold: Param::new(DEFAULT_THRESHOLD),
-            knee: Param::new(Db(0.0)),
+            knee: Param::new(Db::new(0.0)),
             ratio: Param::new(DEFAULT_RATIO),
             attack: Param::new(DEFAULT_ATTACK),
             release: Param::new(DEFAULT_RELEASE),
-            makeup: Param::new(Db(0.0)),
+            makeup: Param::new(Db::new(0.0)),
             bypass: Arc::new(AtomicF64::new(0.0)),
             solo: Arc::new(AtomicF64::new(0.0)),
             reduction: Param::new(Db::UNITY),
@@ -200,12 +200,12 @@ impl Band {
         let threshold = self.good[THRESHOLD].read(self.threshold.load().get());
         BandSettings {
             compressor: CompressorControls {
-                threshold: Db(threshold),
-                knee: Db(knee),
-                ratio: CompressionRatio(ratio),
-                attack: Seconds(attack),
-                release: Seconds(release),
-                makeup: Db(makeup),
+                threshold: Db::new(threshold),
+                knee: Db::new(knee),
+                ratio: CompressionRatio::new(ratio),
+                attack: Seconds::new(attack),
+                release: Seconds::new(release),
+                makeup: Db::new(makeup),
                 // The multiband compressor has no key filter: its bands read the split signal.
                 ..CompressorControls::DEFAULT
             },
@@ -907,7 +907,7 @@ mod tests {
         // has taken all but a hair of it off by the end.
         for b in 1..4 {
             let held = n.gain_reduction_db(b);
-            assert!(held < Db(1e-3), "band {b} still reduces {held:?}");
+            assert!(held < Db::new(1e-3), "band {b} still reduces {held:?}");
         }
         assert_eq!(n.gain_reduction_db(9), Db::UNITY);
     }
@@ -1044,10 +1044,10 @@ mod tests {
         render_chunked(&mut n, &[vec![0.5f32; SETTLE]], 512);
         render_chunked(&mut n, &[vec![0.0f32; 64]], 64);
         let first = n.gain_reduction_db(0);
-        assert!(first > Db(10.0), "{first:?}");
+        assert!(first > Db::new(10.0), "{first:?}");
         render_chunked(&mut n, &[vec![0.0f32; 4_096]], 64);
         let later = n.gain_reduction_db(0);
-        assert!(later < Db(1.0), "the meter still holds {later:?}");
+        assert!(later < Db::new(1.0), "the meter still holds {later:?}");
     }
 
     /// Two soloed bands are both heard, and the bands being phase-aligned, their
@@ -1130,9 +1130,9 @@ mod tests {
         let (n, c) = node(4);
         unity(&c);
         c.band(0).set_solo(true);
-        c.set_crossover(2, Hz(15_000.0));
+        c.set_crossover(2, Hz::new(15_000.0));
         let mut n = tutti_graph::contract::prepared(n, SampleRate::SR_22K05, 1024);
-        c.set_crossover(0, Hz(150.0));
+        c.set_crossover(0, Hz::new(150.0));
         // 150 Hz at 22.05 kHz is 147 samples a period.
         let x = sine(150.0, 22_050.0, 12_000 + 5_880);
         let out = render_chunked(&mut n, &[x], 512);
@@ -1306,8 +1306,8 @@ mod tests {
             c.band(2).set_ratio(bad);
             c.band(0).set_attack(bad);
             c.band(0).set_release(bad);
-            c.set_crossover(0, Hz(bad_hz));
-            c.set_crossover(1, Hz(bad_hz));
+            c.set_crossover(0, Hz::new(bad_hz));
+            c.set_crossover(1, Hz::new(bad_hz));
             assert!(finite(&mut n), "{bad}");
             c.band(1).set_threshold(-30.0);
             c.band(1).set_makeup(0.0);
@@ -1335,7 +1335,7 @@ mod tests {
         let live = n.clone();
         let mut fork = prepared(n.fork_fresh());
         render_chunked(&mut fork, &[vec![0.5f32; 4_096]], 512);
-        assert!(fork.gain_reduction_db(0) > Db(5.0));
+        assert!(fork.gain_reduction_db(0) > Db::new(5.0));
         assert_eq!(live.gain_reduction_db(0), Db::UNITY);
     }
 
@@ -1367,7 +1367,7 @@ mod tests {
         let mut fork = forked.node;
         fork.prepare(&Prepare::new(
             RATE,
-            tutti_buffers::MaxBlock::of(tutti_units::Samples(1024)),
+            tutti_buffers::MaxBlock::of(tutti_units::Samples::new(1024)),
         ));
         let out = render_chunked(fork.as_mut(), &[vec![0.5f32; SETTLE]], 512);
         let reduction = (20.0 * libm::log10(0.5) + 20.0) * 0.75;
@@ -1394,13 +1394,13 @@ mod tests {
         let mut parts = n.into_parts();
         parts.node.prepare(&Prepare::new(
             RATE,
-            tutti_buffers::MaxBlock::of(tutti_units::Samples(1024)),
+            tutti_buffers::MaxBlock::of(tutti_units::Samples::new(1024)),
         ));
         render_chunked(parts.node.as_mut(), &[vec![0.5f32; SETTLE]], 512);
         let reduction = (20.0 * libm::log10(0.5) + 20.0) * 0.75;
         let m = parts.controls.gain_reduction_db(0).get();
         assert!((m - reduction).abs() < 1e-3, "{m} vs {reduction}");
-        assert!(parts.controls.gain_reduction_db(1) < Db(1e-3));
+        assert!(parts.controls.gain_reduction_db(1) < Db::new(1e-3));
         assert_eq!(parts.controls.gain_reduction_db(2), Db::UNITY);
     }
 
@@ -1482,21 +1482,21 @@ mod tests {
             .collect();
         render_chunked(&mut n, std::slice::from_ref(&tone), 512);
         assert!(
-            n.gain_reduction_db(1) > Db(3.0),
+            n.gain_reduction_db(1) > Db::new(3.0),
             "{:?}",
             n.gain_reduction_db(1)
         );
         c.band(0).set_ratio(1.0);
         render_chunked(&mut n, std::slice::from_ref(&tone), 512);
         assert!(
-            n.gain_reduction_db(1) > Db(3.0),
+            n.gain_reduction_db(1) > Db::new(3.0),
             "band 0's write moved band 1"
         );
         c.band(1).set_ratio(1.0);
         render_chunked(&mut n, std::slice::from_ref(&tone), 512);
         render_chunked(&mut n, std::slice::from_ref(&tone), 512);
         assert!(
-            n.gain_reduction_db(1) < Db(1e-4),
+            n.gain_reduction_db(1) < Db::new(1e-4),
             "{:?}",
             n.gain_reduction_db(1)
         );
@@ -1539,7 +1539,7 @@ mod tests {
             for _ in 0..4 {
                 render_chunked(&mut n, std::slice::from_ref(&x), 512);
             }
-            let reduced = n.gain_reduction_db(0) > Db(1.0);
+            let reduced = n.gain_reduction_db(0) > Db::new(1.0);
             assert_eq!(!reduced, bypassed, "bypass at {v}");
         }
     }
@@ -1579,7 +1579,7 @@ mod tests {
         let mut n = prepared(n);
         let before = gain_at(&mut n, 2_000.0);
         assert!((before - 1.0 / (1.0 + warp(2_000.0, 1_000.0).powi(4))).abs() < TOL);
-        c.set_crossover(0, Hz(2_000.0));
+        c.set_crossover(0, Hz::new(2_000.0));
         let after = gain_at(&mut n, 2_000.0);
         assert!((after - 0.5).abs() < TOL, "{after}");
     }
@@ -1607,17 +1607,17 @@ mod tests {
             )
         };
         for bad in [5_000.0, -1.0, 0.0, f64::NAN] {
-            c.set_crossover(0, Hz(bad));
+            c.set_crossover(0, Hz::new(bad));
             let a = amp(&mut n);
             assert!((a - 0.5).abs() < 2e-3, "{bad}: {a}");
         }
         // Written top-down with a block between: the set stays out of order
         // (the lowest cell still reads 0) until the last write.
-        c.set_crossover(2, Hz(9_000.0));
+        c.set_crossover(2, Hz::new(9_000.0));
         assert!((amp(&mut n) - 0.5).abs() < 2e-3);
-        c.set_crossover(1, Hz(8_000.0));
+        c.set_crossover(1, Hz::new(8_000.0));
         assert!((amp(&mut n) - 0.5).abs() < 2e-3);
-        c.set_crossover(0, Hz(5_000.0));
+        c.set_crossover(0, Hz::new(5_000.0));
         let a = amp(&mut n);
         assert!(a > 0.99, "the consistent set landed: {a}");
     }
@@ -1680,7 +1680,10 @@ mod tests {
         let driven = meter_driving(0).get();
         assert!((driven - reduction).abs() < 0.01, "{driven} vs {reduction}");
         let other = meter_driving(PER_BAND);
-        assert!(other < Db(1e-3), "band 1's port reduced band 0: {other:?}");
+        assert!(
+            other < Db::new(1e-3),
+            "band 1's port reduced band 0: {other:?}"
+        );
     }
 
     /// A driven control is sampled at the stream grid's solve frame, not at the block's last
@@ -1746,7 +1749,7 @@ mod tests {
     #[test]
     fn any_block_up_to_the_prepared_maximum_renders() {
         let (n, c) = node(4);
-        c.set_crossover(0, Hz(200.0));
+        c.set_crossover(0, Hz::new(200.0));
         let mut n = prepared(n);
         let x = sine(1_000.0, FS, 1_024);
         let big = drive(&mut n, RATE, Planes::new(&[&x]).unwrap(), &[]).remove(0);
@@ -1880,7 +1883,10 @@ mod tests {
         c.band(1).set_bypass(true);
         let mut n = prepared(n);
         render_chunked(&mut n, &[vec![0.9f32; 5_000]], 512);
-        assert!(n.gain_reduction_db(0) > Db(10.0), "the node was reducing");
+        assert!(
+            n.gain_reduction_db(0) > Db::new(10.0),
+            "the node was reducing"
+        );
         c.band(0).set_threshold(-18.0);
         c.band(0).set_ratio(3.0);
         c.band(1).set_bypass(false);

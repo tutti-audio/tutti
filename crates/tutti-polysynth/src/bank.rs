@@ -298,7 +298,7 @@ impl<F: SynthFloat> VoiceBank<F> {
                 };
                 // The output mix depends on the tap and `Q` alone, so any
                 // cutoff gives the same `m`.
-                let c = SvfCoeffs::new(ty, Hz(1000.0), q, Db(0.0), sample_rate);
+                let c = SvfCoeffs::new(ty, Hz::new(1000.0), q, Db::new(0.0), sample_rate);
                 Filter::Svf {
                     ty,
                     q,
@@ -380,8 +380,8 @@ impl<F: SynthFloat> VoiceBank<F> {
         self.coef_target = vec![[zero; 3]; groups];
         // NaN never compares within epsilon, so the first `set_filter` always
         // computes coefficients.
-        self.cutoff_seen = vec![Hz(f64::NAN); lanes];
-        self.res_seen = vec![Resonance(f64::NAN); lanes];
+        self.cutoff_seen = vec![Hz::new(f64::NAN); lanes];
+        self.res_seen = vec![Resonance::new(f64::NAN); lanes];
         self.env = vec![zero; groups];
         self.env_err = vec![zero; groups];
         self.env_slope = vec![zero; groups];
@@ -411,8 +411,8 @@ impl<F: SynthFloat> VoiceBank<F> {
         self.gain_coeff = F::from_design(GAIN_TIME_CONSTANT.one_pole_coeff(sample_rate));
         // The SVF's output mix depends on the tap and `Q`, not the rate, so
         // only the per-lane coefficients need recomputing.
-        self.cutoff_seen.fill(Hz(f64::NAN));
-        self.res_seen.fill(Resonance(f64::NAN));
+        self.cutoff_seen.fill(Hz::new(f64::NAN));
+        self.res_seen.fill(Resonance::new(f64::NAN));
     }
 
     /// Zero every lane's state: silence, idle envelopes, cleared filters.
@@ -440,8 +440,8 @@ impl<F: SynthFloat> VoiceBank<F> {
         self.coef_target.fill([zero; 3]);
         self.gain.fill([zero; 2]);
         self.gain_target.fill([zero; 2]);
-        self.cutoff_seen.fill(Hz(f64::NAN));
-        self.res_seen.fill(Resonance(f64::NAN));
+        self.cutoff_seen.fill(Hz::new(f64::NAN));
+        self.res_seen.fill(Resonance::new(f64::NAN));
         self.stage.fill(EnvStage::Idle);
         self.live.fill(false);
     }
@@ -451,7 +451,7 @@ impl<F: SynthFloat> VoiceBank<F> {
     /// Aim the lane's oscillator at `freq`.
     pub(crate) fn set_pitch(&mut self, lane: usize, freq: Hz) {
         let inc = PhaseIncrement::per_sample(freq, self.sample_rate)
-            .clamp(PhaseIncrement(0.0), MAX_INCREMENT);
+            .clamp(PhaseIncrement::new(0.0), MAX_INCREMENT);
         set(&mut self.inc_target, lane, F::from_unit(inc));
     }
 
@@ -474,7 +474,7 @@ impl<F: SynthFloat> VoiceBank<F> {
         let coef = match self.filter {
             Filter::None => return,
             Filter::Svf { ty, q, .. } => {
-                let s = SvfCoeffs::new(ty, cutoff, q, Db(0.0), self.sample_rate);
+                let s = SvfCoeffs::new(ty, cutoff, q, Db::new(0.0), self.sample_rate);
                 [s.d, s.a2, s.a3].map(F::from_design)
             }
             Filter::Ladder => {
@@ -599,7 +599,7 @@ impl<F: SynthFloat> VoiceBank<F> {
     /// The lane's envelope level, `0.0..=1.0`.
     pub(crate) fn envelope(&self, lane: usize) -> Amplitude {
         let (g, k) = Self::split(lane);
-        Amplitude(self.env[g].as_slice()[k].into())
+        Amplitude::new(self.env[g].as_slice()[k].into())
     }
 
     /// The lane's oscillator phase. Observability for tests.
@@ -830,7 +830,7 @@ impl<F: SynthFloat> VoiceBank<F> {
 /// linear `GAIN_GLIDE`): half a millisecond settles a
 /// velocity change to 1% in about 2.3 ms — inaudible as a fade, long enough
 /// that no single sample steps by more than 4% of the change at 48 kHz.
-const GAIN_TIME_CONSTANT: Seconds = Seconds(0.0005);
+const GAIN_TIME_CONSTANT: Seconds = Seconds::new(0.0005);
 
 /// The seed the one counter that mixes to zero gets instead.
 const ZERO_SEED: NonZeroU32 = match NonZeroU32::new(0x6D2B_79F5) {

@@ -19,7 +19,7 @@ use crate::{BridgeMessage, HostMessage};
 use tutti_plugin_types::{BridgeError, BridgeResult};
 
 use super::sys::Wakeup;
-pub use super::sys::{Watch, has_pending, socket_name};
+pub use super::sys::{ControlBell, ControlWait, Watch, control_bell, has_pending, socket_name};
 use interprocess::local_socket::Stream;
 use interprocess::local_socket::traits::Stream as _;
 use std::io::Read;
@@ -619,7 +619,7 @@ mod tests {
 
     fn latency_msg(samples: i64) -> BridgeMessage {
         BridgeMessage::LatencyChanged {
-            samples: tutti_plugin_types::Samples(samples as usize),
+            samples: tutti_plugin_types::Samples::new(samples as usize),
         }
     }
 

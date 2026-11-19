@@ -121,7 +121,10 @@ impl Node for Probe {
 fn an_lfo_lane_sweeps_around_a_real_filters_cutoff_cell() {
     let filter = svf();
     let (lo, hi) = (500.0, 1500.0);
-    let (mut ed, exec) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))));
+    let (mut ed, exec) = Editor::new(Prepare::new(
+        SampleRate::SR_48K,
+        MaxBlock::of(Samples::new(64)),
+    ));
     let probe = NodeKey(1);
     ed.insert(probe, "probe", Unforkable(Probe));
     ed.spec_mut()
@@ -141,8 +144,8 @@ fn an_lfo_lane_sweeps_around_a_real_filters_cutoff_cell() {
         id: LayerId(1),
         // 10 cycles a second: a cycle every 4800 frames.
         clock: Clock::Seconds {
-            rate: Hz(10.0),
-            phase: PhaseIncrement(0.0),
+            rate: Hz::new(10.0),
+            phase: PhaseIncrement::new(0.0),
             anchor: None,
         },
         wave: Waveform::Shape {
@@ -174,7 +177,7 @@ fn an_lfo_lane_sweeps_around_a_real_filters_cutoff_cell() {
     ed.commit().expect("the lane commits");
 
     let mut r = Renderer::new(ed, exec);
-    r.set_block(Samples(64));
+    r.set_block(Samples::new(64));
     // One cycle and a block.
     let mut sweep = || r.render(4800 + 64).swap_remove(0);
     let first = sweep();
@@ -220,7 +223,10 @@ fn render_chorus(
     };
     g.spec_mut().set_param_range(at, ParamRange::new(0.0, 10.0));
     let mut r = g
-        .renderer(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(128))))
+        .renderer(Prepare::new(
+            SampleRate::SR_48K,
+            MaxBlock::of(Samples::new(128)),
+        ))
         .expect("builds");
     if let Some(depth) = lane {
         let ed = r.editor_mut();
@@ -228,7 +234,7 @@ fn render_chorus(
             id: LayerId(1),
             clock: Clock::Beats {
                 per_cycle: BeatsPerCycle::of(1.0),
-                phase: PhaseIncrement(0.0),
+                phase: PhaseIncrement::new(0.0),
             },
             wave: Waveform::Const(1.0),
             amount: Amount {
@@ -338,10 +344,10 @@ fn compressor_makeup_is_addressed_as_gain_db() {
         BusTopology::STEREO,
         KeySource::Sidechain,
         CompressorControls {
-            threshold: tutti_units::Db(-12.0),
-            ratio: tutti_units::CompressionRatio(4.0),
-            attack: tutti_units::Seconds(0.01),
-            release: tutti_units::Seconds(0.1),
+            threshold: tutti_units::Db::new(-12.0),
+            ratio: tutti_units::CompressionRatio::new(4.0),
+            attack: tutti_units::Seconds::new(0.01),
+            release: tutti_units::Seconds::new(0.1),
             ..CompressorControls::DEFAULT
         },
     );
@@ -358,7 +364,8 @@ fn convolver_addresses_nothing() {
     // Room size is baked into the IR, the gain has no address and the mix is
     // the graph's (`NodeMix::ADDR`, not a node's param).
     // A minimal unit IR is fine — only the param surface is probed.
-    let node = tutti_nodes::ConvolverNode::shared_ir(2u16, Mono::new(&[1.0]), Samples(64)).unwrap();
+    let node =
+        tutti_nodes::ConvolverNode::shared_ir(2u16, Mono::new(&[1.0]), Samples::new(64)).unwrap();
     assert!(!addresses(&node, UnitParam::Wet));
     assert!(!addresses(&node, UnitParam::RoomSize));
     assert!(!addresses(&node, UnitParam::Cutoff));
@@ -371,7 +378,7 @@ fn convolver_addresses_nothing() {
 fn render_lfo(param: UnitParam, range: ParamRange, depth: f64) -> (Vec<f32>, f64) {
     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::MONO);
     let lfo = LfoNode::new(LfoShape::Sine)
-        .with_rate(Hz(1.0))
+        .with_rate(Hz::new(1.0))
         .with_depth(Depth::of(0.25));
     let (n, params) = g.add_with_controls(lfo);
     g.connect_output(n, 0, 0);
@@ -381,7 +388,10 @@ fn render_lfo(param: UnitParam, range: ParamRange, depth: f64) -> (Vec<f32>, f64
     };
     g.spec_mut().set_param_range(at, range);
     let mut r = g
-        .renderer(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(128))))
+        .renderer(Prepare::new(
+            SampleRate::SR_48K,
+            MaxBlock::of(Samples::new(128)),
+        ))
         .expect("builds");
     let knob = params.cell(param).expect("the LFO addresses it");
     let ed = r.editor_mut();
@@ -389,7 +399,7 @@ fn render_lfo(param: UnitParam, range: ParamRange, depth: f64) -> (Vec<f32>, f64
         id: LayerId(1),
         clock: Clock::Beats {
             per_cycle: BeatsPerCycle::of(1.0),
-            phase: PhaseIncrement(0.0),
+            phase: PhaseIncrement::new(0.0),
         },
         wave: Waveform::Const(1.0),
         amount: Amount {
@@ -482,14 +492,17 @@ where
     };
     g.spec_mut().set_param_range(at, range);
     let mut r = g
-        .renderer(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(128))))
+        .renderer(Prepare::new(
+            SampleRate::SR_48K,
+            MaxBlock::of(Samples::new(128)),
+        ))
         .expect("builds");
     let ed = r.editor_mut();
     let layer = Layer {
         id: LayerId(1),
         clock: Clock::Beats {
             per_cycle: BeatsPerCycle::of(1.0),
-            phase: PhaseIncrement(0.0),
+            phase: PhaseIncrement::new(0.0),
         },
         wave: Waveform::Const(1.0),
         amount: Amount {
@@ -691,7 +704,7 @@ fn an_lfo_reads_a_driven_depth_per_frame() {
     use tutti_units::{Frame, UnitAddr};
     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::MONO);
     let lfo = LfoNode::new(LfoShape::Square)
-        .with_rate(Hz(1.0))
+        .with_rate(Hz::new(1.0))
         .with_depth(Depth::of(0.25));
     let (n, _) = g.add_with_controls(lfo);
     g.connect_output(n, 0, 0);
@@ -711,7 +724,10 @@ fn an_lfo_reads_a_driven_depth_per_frame() {
         },
     );
     let mut r = g
-        .renderer(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(128))))
+        .renderer(Prepare::new(
+            SampleRate::SR_48K,
+            MaxBlock::of(Samples::new(128)),
+        ))
         .expect("builds");
     let out = r.render(128).swap_remove(0);
     assert_eq!(out[37], 1.0, "the pulse's frame");
@@ -728,7 +744,7 @@ fn shelf_handed_back(block: usize) -> Vec<f32> {
             ty: SvfType::LowShelf,
             freq: Hz::new(1000.0),
             q: Q::new(0.7),
-            gain: Db(0.0),
+            gain: Db::new(0.0),
         },
     );
     let mut g = GraphBuilder::new(ChannelLayout::MONO, ChannelLayout::MONO);
@@ -741,15 +757,18 @@ fn shelf_handed_back(block: usize) -> Vec<f32> {
     g.spec_mut()
         .set_param_range(at, ParamRange::new(-24.0, 24.0));
     let mut r = g
-        .renderer(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(256))))
+        .renderer(Prepare::new(
+            SampleRate::SR_48K,
+            MaxBlock::of(Samples::new(256)),
+        ))
         .expect("builds");
-    r.set_block(Samples(block));
+    r.set_block(Samples::new(block));
     let ed = r.editor_mut();
     let layer = Layer {
         id: LayerId(1),
         clock: Clock::Beats {
             per_cycle: BeatsPerCycle::of(1.0),
-            phase: PhaseIncrement(0.0),
+            phase: PhaseIncrement::new(0.0),
         },
         wave: Waveform::Const(1.0),
         // A quarter of the 48 dB range above the 0 dB knob: +12 dB.

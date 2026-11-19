@@ -229,6 +229,8 @@ pub(super) fn responder_settings() -> ResponderSettings {
 pub(super) struct Link {
     pub(super) init: ResourceInitiator,
     pub(super) resp: ResourceResponder,
+    /// What the Responder serves, handed to each of its calls.
+    pub(super) store: ResourceStore,
     pub(super) now: Instant,
     pub(super) events: Vec<ResourceEvent>,
     pub(super) served: Vec<ResponderEvent>,
@@ -268,7 +270,7 @@ impl Link {
             initiator_settings_taking(max, requests),
             now,
         );
-        let mut resp = ResourceResponder::new(Muid::of(PEER), responder_settings(), store);
+        let mut resp = ResourceResponder::new(Muid::of(PEER), responder_settings());
         if let Some(device) = device {
             resp = resp.state_device(device);
         }
@@ -276,6 +278,7 @@ impl Link {
         let mut link = Self {
             init,
             resp,
+            store,
             now,
             events: Vec::new(),
             served: Vec::new(),
@@ -294,7 +297,9 @@ impl Link {
         loop {
             if let Some(message) = to_resp.pop_front() {
                 self.wire.push((true, message.clone()));
-                let actions = self.resp.on_message(&Decoded::Message(message), self.now);
+                let actions =
+                    self.resp
+                        .on_message(&mut self.store, &Decoded::Message(message), self.now);
                 self.absorb_resp(actions, &mut to_init);
             } else if let Some(message) = to_init.pop_front() {
                 self.wire.push((false, message.clone()));
@@ -418,7 +423,7 @@ fn the_resource_list_is_got_after_the_capabilities() {
     let ResourceEvent::ResourceList(list) = &link.events[1] else {
         panic!("{:?}", link.events);
     };
-    assert_eq!(*list, link.resp.store().resource_list());
+    assert_eq!(*list, link.store.resource_list());
     assert_eq!(link.init.resource_list(), Some(list));
     assert!(list.entry(&PeResource::ResourceList).is_none());
     assert!(list.entry(&PeResource::DeviceInfo).is_some());
@@ -496,6 +501,7 @@ fn a_resource_not_in_the_list_is_refused_by_the_initiator() {
 pub(super) struct Raw {
     pub(super) init: PeInitiator,
     pub(super) resp: ResourceResponder,
+    pub(super) store: ResourceStore,
     pub(super) now: Instant,
 }
 
@@ -504,9 +510,14 @@ impl Raw {
         let now = Instant::now();
         let (init, actions) =
             PeInitiator::new(Muid::of(OURS), Muid::of(PEER), initiator_settings(256), now);
-        let mut resp = ResourceResponder::new(Muid::of(PEER), responder_settings(), store());
+        let mut resp = ResourceResponder::new(Muid::of(PEER), responder_settings());
         resp.accept(Muid::of(OURS), MaxSysexSize::of(256));
-        let mut raw = Self { init, resp, now };
+        let mut raw = Self {
+            init,
+            resp,
+            store: store(),
+            now,
+        };
         raw.pump(actions);
         raw
     }
@@ -517,7 +528,10 @@ impl Raw {
         while let Some(action) = queue.pop_front() {
             match action {
                 PeAction::Send(message) => {
-                    for reply in self.resp.on_message(&Decoded::Message(message), self.now) {
+                    for reply in
+                        self.resp
+                            .on_message(&mut self.store, &Decoded::Message(message), self.now)
+                    {
                         if let ResponderAction::Send(m) = reply {
                             queue.extend(self.init.on_message(&Decoded::Message(m), self.now));
                         }
@@ -1004,6 +1018,25 @@ fn set_replaces_the_data_and_get_reads_it_back() {
     assert_eq!(link.got(call), Ok(PeData::LocalOn(PeLocalOn(true))));
 }
 
+// The Responder holds no store: each call is handed the one it answers from, so a
+// Get answers from the store of that call.
+#[test]
+fn a_get_is_answered_from_the_store_the_responder_is_handed() {
+    let mut link = Link::new(store(), 256);
+    let made = link.init.get(&get(PeResource::LocalOn), link.now);
+    let call = link.call(made);
+    assert_eq!(link.got(call), Ok(PeData::LocalOn(PeLocalOn(false))));
+
+    let mut other = store();
+    other
+        .put(None, PeData::LocalOn(PeLocalOn(true)))
+        .expect("declared");
+    link.store = other;
+    let made = link.init.get(&get(PeResource::LocalOn), link.now);
+    let call = link.call(made);
+    assert_eq!(link.got(call), Ok(PeData::LocalOn(PeLocalOn(true))));
+}
+
 // M2-103 §10.2 Tables 31 to 38: a Partial Set changes the two elements and the
 // Get after it has them.
 /// Spec: m2-103/10#4, m2-103/10#6
@@ -1103,7 +1136,12 @@ fn a_full_update_replaces_the_data_of_a_subscription() {
     let channels = PeData::ChannelList(PeChannelList::new(vec![channel(3, "Strings")]));
     let actions = link
         .resp
-        .publish(&target(PeResource::ChannelList), channels.clone(), link.now)
+        .publish(
+            &mut link.store,
+            &target(PeResource::ChannelList),
+            channels.clone(),
+            link.now,
+        )
         .unwrap();
     link.publish(actions);
     let updates = link.updates();
@@ -1133,7 +1171,10 @@ fn a_partial_update_changes_the_data_the_initiator_holds() {
         .subscribe(&ResourceGet::new(program.clone()), link.now);
     link.call(made);
     let update = PartialUpdate::new().with(pointer("/lfoSpeed"), PartialValue::Integer(10));
-    let actions = link.resp.change(&program, update, link.now).unwrap();
+    let actions = link
+        .resp
+        .change(&mut link.store, &program, update, link.now)
+        .unwrap();
     link.publish(actions);
     let updates = link.updates();
     let (_, data, how) = updates.last().unwrap();
@@ -1148,7 +1189,7 @@ fn a_partial_update_changes_the_data_the_initiator_holds() {
     .unwrap();
     assert_eq!(*data, expected);
     // The Responder's data is the changed data too.
-    assert_eq!(link.resp.store().get(&program), Some(&expected));
+    assert_eq!(link.store.get(&program), Some(&expected));
 }
 
 // M2-103 §11, §11.1.1: when an Initiator's Set changes the data of a Resource it
@@ -1201,7 +1242,12 @@ fn an_update_too_big_for_a_chunk_is_a_notify_and_a_get() {
     let data = PeData::ChannelList(PeChannelList::new(big));
     let actions = link
         .resp
-        .publish(&target(PeResource::ChannelList), data.clone(), link.now)
+        .publish(
+            &mut link.store,
+            &target(PeResource::ChannelList),
+            data.clone(),
+            link.now,
+        )
         .unwrap();
     // The Subscription message the Responder sent is a `notify`, with no data.
     let notify = actions.iter().find_map(|a| match a {
@@ -1258,6 +1304,7 @@ fn the_initiator_ends_a_subscription() {
     let actions = link
         .resp
         .publish(
+            &mut link.store,
             &target(PeResource::ChannelList),
             PeData::ChannelList(PeChannelList::default()),
             link.now,
@@ -1279,7 +1326,9 @@ fn the_responder_ends_a_subscription() {
     let made = link.init.subscribe(&get(PeResource::ChannelList), link.now);
     link.call(made);
     let subscribe_id = link.init.subscriptions().next().unwrap().0.clone();
-    let actions = link.resp.end_subscription(&subscribe_id, link.now);
+    let actions = link
+        .resp
+        .end_subscription(&mut link.store, &subscribe_id, link.now);
     link.publish(actions);
     assert!(link.events.iter().any(|e| matches!(
         e,
@@ -1457,7 +1506,12 @@ fn a_failed_reply_to_an_update_ends_the_subscription() {
     let data = PeData::ChannelList(PeChannelList::new(vec![channel(2, "Next")]));
     let actions = link
         .resp
-        .publish(&target(PeResource::ChannelList), data, link.now)
+        .publish(
+            &mut link.store,
+            &target(PeResource::ChannelList),
+            data,
+            link.now,
+        )
         .unwrap();
     let request_id = actions
         .iter()
@@ -1488,7 +1542,10 @@ fn a_failed_reply_to_an_update_ends_the_subscription() {
                 chunk,
             },
         };
-        out.extend(link.resp.on_message(&Decoded::Message(message), link.now));
+        out.extend(
+            link.resp
+                .on_message(&mut link.store, &Decoded::Message(message), link.now),
+        );
     }
     assert_eq!(link.resp.subscriptions().count(), 0);
     assert!(out.iter().any(|a| matches!(
@@ -1512,7 +1569,7 @@ fn a_responder_serves_only_the_peers_it_accepted() {
     };
     assert!(
         link.resp
-            .on_message(&Decoded::Message(stranger), link.now)
+            .on_message(&mut link.store, &Decoded::Message(stranger), link.now)
             .is_empty()
     );
     let made = link.init.subscribe(&get(PeResource::ChannelList), link.now);

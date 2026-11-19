@@ -270,11 +270,11 @@ mod tests {
 
     fn measurement(tail: TailVerdict, latency: LatencyVerdict) -> Measured {
         Measured {
-            tail: Some(Samples(8191)),
-            latency: Some(Samples(64)),
+            tail: Some(Samples::new(8191)),
+            latency: Some(Samples::new(64)),
             config: ProbeConfig {
                 rate: SampleRate::SR_44K1,
-                block: MaxBlock::new(Samples(64)).unwrap(),
+                block: MaxBlock::new(Samples::new(64)).unwrap(),
                 floor: PROBE_FLOOR,
                 state: StateHash::of(b"patch"),
             },
@@ -293,17 +293,17 @@ mod tests {
             "segfault".into(),
             &no_file(),
         );
-        let held = Db(-60.0);
+        let held = Db::new(-60.0);
         let verdicts = [
             (TailVerdict::Honest, LatencyVerdict::Honest),
             (
                 TailVerdict::TailLonger {
-                    reported: Samples(8191),
-                    measured: Samples(12_287),
+                    reported: Samples::new(8191),
+                    measured: Samples::new(12_287),
                 },
                 LatencyVerdict::LatencyDiffers {
-                    reported: Samples(0),
-                    measured: Samples(64),
+                    reported: Samples::new(0),
+                    measured: Samples::new(64),
                 },
             ),
             (

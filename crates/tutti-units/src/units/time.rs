@@ -36,6 +36,15 @@ impl Hz {
             None
         }
     }
+
+    /// The angle a phasor at this frequency turns in one frame at `rate`: `TAU * f / fs`,
+    /// the digital angular frequency ω. The cycles per frame, `f / fs`, is formed first, so a
+    /// whole fraction of the rate (a quarter, an eighth) turns an exact fraction of `TAU`.
+    #[inline]
+    #[must_use]
+    pub fn angle_per_frame(self, rate: SampleRate) -> Radians {
+        Radians::new(core::f64::consts::TAU * (self.get() / rate.get()))
+    }
 }
 
 impl Seconds {

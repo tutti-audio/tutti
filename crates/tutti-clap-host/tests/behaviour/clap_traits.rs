@@ -31,7 +31,7 @@ static PROBE_LOCK: Mutex<()> = Mutex::new(());
 const PARAM_VALUE: u16 = 5;
 
 fn prepare() -> Prepare {
-    Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(256)))
+    Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(256)))
 }
 
 struct Probe {
@@ -140,7 +140,7 @@ fn render(processor: &mut ClapProcessor, format: FloatWidth) -> Result<(), Plugi
             let mut outputs = [left.as_mut_slice(), right.as_mut_slice()];
             let mut io = PluginIo {
                 buffer: InputOutput::from_slices(
-                    tutti_plugin_types::Samples(inputs[0].len()),
+                    tutti_plugin_types::Samples::new(inputs[0].len()),
                     &inputs,
                     &mut outputs,
                 )
@@ -158,7 +158,7 @@ fn render(processor: &mut ClapProcessor, format: FloatWidth) -> Result<(), Plugi
             let mut outputs = [left.as_mut_slice(), right.as_mut_slice()];
             let mut io = PluginIo {
                 buffer: InputOutput::from_slices(
-                    tutti_plugin_types::Samples(inputs[0].len()),
+                    tutti_plugin_types::Samples::new(inputs[0].len()),
                     &inputs,
                     &mut outputs,
                 )
@@ -659,7 +659,7 @@ fn an_errored_block_does_not_allocate() {
     let mut outputs = [left.as_mut_slice(), right.as_mut_slice()];
     let mut io = PluginIo {
         buffer: InputOutput::from_slices(
-            tutti_plugin_types::Samples(inputs[0].len()),
+            tutti_plugin_types::Samples::new(inputs[0].len()),
             &inputs,
             &mut outputs,
         )

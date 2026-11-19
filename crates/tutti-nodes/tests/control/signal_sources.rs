@@ -92,7 +92,7 @@ impl Node for Kick {
         for i in 0..n {
             let t = cx
                 .env
-                .transport_at(Offset::of(Samples(i), cx.env.block_len));
+                .transport_at(Offset::of(Samples::new(i), cx.env.block_len));
             let v = if t.playing {
                 let frac = t.beat().get().rem_euclid(1.0);
                 if frac < 0.1 {
@@ -146,7 +146,7 @@ impl Node for Seq {
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
         let n = cx.env.block_len;
         for i in 0..n.get() {
-            let at = Offset::of(Samples(i), n);
+            let at = Offset::of(Samples::new(i), n);
             let t = cx.env.transport_at(at);
             let words = if t.playing {
                 let f = t.beat().get().rem_euclid(1.0) * FPB;
@@ -235,7 +235,7 @@ impl Node for Tap {
                 k += 1;
             }
             out[0][i] = control_in(self.last.map_or(0.0, |(s, at)| {
-                s.raw_value_after(Samples((base + i as u64 - at) as usize))
+                s.raw_value_after(Samples::new((base + i as u64 - at) as usize))
             }));
         }
         for (c, v) in out.iter().enumerate() {
@@ -285,7 +285,7 @@ fn out(node: u64, port: u16) -> Source {
 fn editor(max: usize) -> (Editor, Executor) {
     Editor::new(Prepare::new(
         SampleRate::of(RATE),
-        MaxBlock::of(Samples(max)),
+        MaxBlock::of(Samples::new(max)),
     ))
 }
 
@@ -409,7 +409,7 @@ fn render_stopped(
     sizes: &[usize],
     total: usize,
 ) -> Vec<Vec<f32>> {
-    let stopped = TransportPosition::new(false, TEMPO, Beat(0.0), None);
+    let stopped = TransportPosition::new(false, TEMPO, Beat::new(0.0), None);
     let (mut all, mut done, mut k) = (Vec::new(), 0, 0);
     while done < total {
         let n = sizes[k % sizes.len()].min(total - done);
@@ -446,7 +446,7 @@ struct Host {
 impl Host {
     fn new() -> Self {
         Self {
-            clock: FrameClock::new(Beat(0.0), TEMPO, SampleRate::of(RATE)),
+            clock: FrameClock::new(Beat::new(0.0), TEMPO, SampleRate::of(RATE)),
         }
     }
 
@@ -457,7 +457,7 @@ impl Host {
     fn roll(&mut self, ed: &mut Editor, exec: &mut Executor, n: usize, all: &mut Vec<Vec<f32>>) {
         let t = self.rolling();
         append(all, block(ed, exec, &t, &TransportChanges::NONE, n));
-        self.clock.advance(Samples(n), None);
+        self.clock.advance(Samples::new(n), None);
     }
 }
 
@@ -470,17 +470,17 @@ fn pole(tau: f32) -> f64 {
 fn follower(source: u32, attack: f64, release: f64, width: ChannelLayout) -> EnvelopeFollowerNode {
     EnvelopeFollowerNode::new(
         SourceId(source),
-        Ballistics::new(Seconds(attack), Seconds(release)).unwrap(),
+        Ballistics::new(Seconds::new(attack), Seconds::new(release)).unwrap(),
         width,
     )
 }
 
 fn adsr(a: f64, d: f64, s: f64, r: f64) -> Adsr {
     Adsr {
-        attack: Seconds(a),
-        decay: Seconds(d),
-        sustain: Amplitude(s),
-        release: Seconds(r),
+        attack: Seconds::new(a),
+        decay: Seconds::new(d),
+        sustain: Amplitude::new(s),
+        release: Seconds::new(r),
     }
 }
 
@@ -633,7 +633,7 @@ fn a_follower_and_a_note_envelope_reset_at_play_start() {
     tap(&mut ed, 5, 6);
     ed.commit().expect("commits");
 
-    let stopped = TransportPosition::new(false, TEMPO, Beat(0.0), None);
+    let stopped = TransportPosition::new(false, TEMPO, Beat::new(0.0), None);
     let mut all = Vec::new();
     for _ in 0..3 {
         append(
@@ -643,8 +643,11 @@ fn a_follower_and_a_note_envelope_reset_at_play_start() {
     }
     let host = Host::new();
     let mut ch = TransportChanges::NONE;
-    ch.push(Offset::of(Samples(37), Samples(128)), host.rolling())
-        .expect("room");
+    ch.push(
+        Offset::of(Samples::new(37), Samples::new(128)),
+        host.rolling(),
+    )
+    .expect("room");
     append(&mut all, block(&mut ed, &mut exec, &stopped, &ch, 128));
     for _ in 0..4 {
         let t = host.rolling();
@@ -788,8 +791,8 @@ fn from_decl_builds_its_own_kind() {
     let f = SignalSource {
         id: SourceId(9),
         kind: SignalKind::Follower {
-            attack: Seconds(0.01),
-            release: Seconds(0.1),
+            attack: Seconds::new(0.01),
+            release: Seconds::new(0.1),
         },
     };
     let n = SignalSource {
@@ -921,7 +924,7 @@ fn an_export_is_the_live_render_for_signal_sources() {
     lane_to_probe(&mut ed, 6, 4, 0.5, 0.2, 7, 8);
     ed.commit().expect("commits");
 
-    let stopped = TransportPosition::new(false, TEMPO, Beat(0.0), None);
+    let stopped = TransportPosition::new(false, TEMPO, Beat::new(0.0), None);
     let mut before = Vec::new();
     for _ in 0..3 {
         append(
@@ -941,20 +944,23 @@ fn an_export_is_the_live_render_for_signal_sources() {
         .fork(
             ForkTarget::Master,
             ForkMode::Offline,
-            Prepare::new(SampleRate::of(RATE), MaxBlock::of(Samples(1024))),
+            Prepare::new(SampleRate::of(RATE), MaxBlock::of(Samples::new(1024))),
         )
         .expect("forks");
     let total = 60_000;
 
     let mut host = Host::new();
     let mut ch = TransportChanges::NONE;
-    ch.push(Offset::of(Samples(37), Samples(128)), host.rolling())
-        .expect("room");
+    ch.push(
+        Offset::of(Samples::new(37), Samples::new(128)),
+        host.rolling(),
+    )
+    .expect("room");
     let mut live = block(&mut ed, &mut exec, &stopped, &ch, 128);
     for c in &mut live {
         c.drain(..37);
     }
-    host.clock.advance(Samples(128 - 37), None);
+    host.clock.advance(Samples::new(128 - 37), None);
     for n in ragged(total - (128 - 37), 128) {
         host.roll(&mut ed, &mut exec, n, &mut live);
     }
@@ -990,11 +996,14 @@ fn an_export_is_the_live_render_for_signal_sources() {
 fn a_fresh_note_envelope_resets_at_a_start_in_its_first_block() {
     let (mut ed, mut exec) =
         envelope_rig(128, vec![(10, note_on(60))], adsr(0.01, 0.01, 0.5, 0.01));
-    let stopped = TransportPosition::new(false, TEMPO, Beat(0.0), None);
+    let stopped = TransportPosition::new(false, TEMPO, Beat::new(0.0), None);
     let host = Host::new();
     let mut ch = TransportChanges::NONE;
-    ch.push(Offset::of(Samples(50), Samples(128)), host.rolling())
-        .expect("room");
+    ch.push(
+        Offset::of(Samples::new(50), Samples::new(128)),
+        host.rolling(),
+    )
+    .expect("room");
     let mut all = Vec::new();
     append(&mut all, block(&mut ed, &mut exec, &stopped, &ch, 128));
     for _ in 0..4 {

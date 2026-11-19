@@ -55,13 +55,19 @@ impl ProcessPayload {
     }
 }
 
-/// Audio-thread → bridge-thread.
+/// Audio thread → bridge thread: what rides the audio lane (the block
+/// connection), in the order the audio thread queued it.
+pub(super) enum AudioCommand {
+    Process(Box<ProcessPayload>),
+    Reset,
+}
+
+/// Callers and the audio thread → bridge thread: what rides the control lane.
 ///
 /// Variants that need a reply carry their own [`Reply<T>`]; the calling
 /// thread holds the paired `Ask<T>` and blocks on it. There is no shared
 /// response queue — responses cannot be misrouted between requests.
-pub(super) enum Command {
-    Process(Box<ProcessPayload>),
+pub(super) enum ControlCommand {
     SetParameter {
         param_id: ParamId,
         value: Normalized,
@@ -87,10 +93,6 @@ pub(super) enum Command {
     SetRenderMode {
         mode: tutti_plugin_types::RenderMode,
     },
-    Reset,
-    /// Reads what the plugin said unprompted off the control connection, so
-    /// it reaches the listener while no other command is waiting on a reply.
-    Drain,
     /// Chunked state read.
     ///
     /// `progress` is advanced per chunk so the waiting caller can tell a slow

@@ -63,7 +63,7 @@ impl GraphUnit {
         let renderer = g
             .renderer(tutti_graph::Prepare::new(
                 tutti_units::SampleRate::of(SAMPLE_RATE),
-                tutti_buffers::MaxBlock::of(tutti_units::Samples(BLOCK)),
+                tutti_buffers::MaxBlock::of(tutti_units::Samples::new(BLOCK)),
             ))
             .expect("a one-plugin graph compiles");
         Self {

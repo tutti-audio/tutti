@@ -53,7 +53,7 @@ enum Seen {
 }
 
 fn at(k: usize) -> Offset {
-    Offset::of(Samples(k), Samples(1 << 16))
+    Offset::of(Samples::new(k), Samples::new(1 << 16))
 }
 
 fn group(n: u8) -> MidiGroup {

@@ -13,7 +13,7 @@ fn the_shape_declares_volume_and_the_unison_params() {
     use tutti_units::UnitParam;
 
     let mut plain = PolySynth::new(SynthConfig::default());
-    plain.set_volume(tutti_units::Amplitude(0.5));
+    plain.set_volume(tutti_units::Amplitude::new(0.5));
     assert_eq!(plain.shape().params.as_slice(), &[UnitParam::Volume][..]);
     assert_eq!(plain.param_base(0), Some(0.5));
     assert_eq!(plain.param_base(1), None);
@@ -50,7 +50,7 @@ fn the_release_tail_is_in_frames_at_the_prepared_rate() {
 
     let mut synth = PolySynth::new(SynthConfig {
         envelope: tutti_music::Adsr {
-            release: tutti_units::Seconds(0.5),
+            release: tutti_units::Seconds::new(0.5),
             ..Default::default()
         },
         ..Default::default()
@@ -58,11 +58,11 @@ fn the_release_tail_is_in_frames_at_the_prepared_rate() {
     for (rate, frames) in [(48_000.0, 24_000), (96_000.0, 48_000)] {
         synth.prepare(&Prepare::new(
             SampleRate::of(rate),
-            MaxBlock::of(Samples(64)),
+            MaxBlock::of(Samples::new(64)),
         ));
         assert_eq!(
             synth.shape().tail,
-            Tail::Finite(Samples(frames)),
+            Tail::Finite(Samples::new(frames)),
             "at {rate} Hz"
         );
     }

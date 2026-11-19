@@ -139,8 +139,8 @@ fn a_non_finite_position_is_ignored_and_does_not_stick() {
         (-45.0, f64::INFINITY),
         (-45.0, f64::NEG_INFINITY),
     ] {
-        node.azimuth.store(Azimuth(az));
-        node.elevation.store(Elevation(el));
+        node.azimuth.store(Azimuth::new(az));
+        node.elevation.store(Elevation::new(el));
         settle(&mut node);
         assert!(
             near(node.aim.current(), (-45.0, 30.0)),
@@ -241,11 +241,11 @@ fn onsets(ch: &[f32]) -> Vec<usize> {
 fn reported_latency_is_the_measured_impulse_delay() {
     use tutti_dsp::{HRTF_LATENCY as LATENCY, HRTF_STEP as STEP};
     let node = make_node();
-    assert_eq!(node.shape().latency, Latency::new(Samples(STEP)));
+    assert_eq!(node.shape().latency, Latency::new(Samples::new(STEP)));
 
     for at in [0, 1, STEP - 1, STEP, 2 * STEP + 37] {
         let mut node = make_node();
-        aim(&node.param_set(), Azimuth(90.0), Elevation::LEVEL);
+        aim(&node.param_set(), Azimuth::new(90.0), Elevation::LEVEL);
         Node::reset(&mut node);
         let (l, r) = impulse_response(&mut node, at, at + 3 * STEP);
         assert_eq!(onsets(&l), vec![at + LATENCY], "left, impulse at {at}");
@@ -263,7 +263,7 @@ fn pdc_compensates_the_other_path_by_the_binaural_latency() {
     use tutti_nodes::testing::Through;
 
     let mut node = make_node();
-    aim(&node.param_set(), Azimuth(90.0), Elevation::LEVEL);
+    aim(&node.param_set(), Azimuth::new(90.0), Elevation::LEVEL);
     Node::reset(&mut node);
     let mut g = GraphBuilder::new(ChannelLayout::MONO, ChannelLayout::from_count(3));
     let (hrtf, _) = g.add_with_controls(node);
@@ -275,7 +275,7 @@ fn pdc_compensates_the_other_path_by_the_binaural_latency() {
     g.connect_output(hrtf, 1, 1);
     g.connect_output(dry, 0, 2);
     let mut r = g
-        .renderer(Prepare::new(RATE, MaxBlock::of(Samples(BLOCK))))
+        .renderer(Prepare::new(RATE, MaxBlock::of(Samples::new(BLOCK))))
         .expect("builds");
     let mut impulse = vec![0.0f32; 2 * LATENCY];
     impulse[0] = 1.0;
@@ -293,8 +293,8 @@ fn dry_and_wet_leave_together_at_every_blend() {
     use tutti_dsp::{HRTF_LATENCY as LATENCY, HRTF_STEP as STEP};
     for blend in [0.0_f64, 0.5, 1.0] {
         let mut node = make_node();
-        aim(&node.param_set(), Azimuth(90.0), Elevation::LEVEL);
-        node.blend.store(Mix(blend));
+        aim(&node.param_set(), Azimuth::new(90.0), Elevation::LEVEL);
+        node.blend.store(Mix::new(blend));
         Node::reset(&mut node);
         let at = 100;
         let (l, r) = impulse_response(&mut node, at, at + 2 * STEP);
@@ -313,10 +313,10 @@ fn dry_and_wet_leave_together_at_every_blend() {
 #[test]
 fn a_nan_blend_holds_the_last_one() {
     let mut node = make_node();
-    aim(&node.param_set(), Azimuth(90.0), Elevation::LEVEL);
-    node.blend.store(Mix(0.5));
+    aim(&node.param_set(), Azimuth::new(90.0), Elevation::LEVEL);
+    node.blend.store(Mix::new(0.5));
     let (l0, _) = impulse_response(&mut node, 0, 4 * tutti_dsp::HRTF_STEP);
-    node.blend.store(Mix(f64::NAN));
+    node.blend.store(Mix::new(f64::NAN));
     let (l, r) = impulse_response(&mut node, 0, 4 * tutti_dsp::HRTF_STEP);
     assert!(
         l.iter().chain(&r).all(|s| s.is_finite()),
@@ -332,13 +332,13 @@ fn a_nan_blend_holds_the_last_one() {
 #[test]
 fn reset_keeps_the_authored_placement() {
     let mut node = make_node();
-    aim(&node.param_set(), Azimuth(45.0), Elevation(10.0));
-    node.blend.store(Mix(0.4));
+    aim(&node.param_set(), Azimuth::new(45.0), Elevation::new(10.0));
+    node.blend.store(Mix::new(0.4));
 
     Node::reset(&mut node);
 
-    assert_eq!(node.azimuth.load(), Azimuth(45.0));
-    assert_eq!(node.elevation.load(), Elevation(10.0));
+    assert_eq!(node.azimuth.load(), Azimuth::new(45.0));
+    assert_eq!(node.elevation.load(), Elevation::new(10.0));
     assert!(
         (node.blend.load().get() - 0.4).abs() < 0.001,
         "reset changed the blend to {}",
@@ -352,7 +352,7 @@ fn reset_keeps_the_authored_placement() {
 #[test]
 fn reset_drops_the_convolution_tail() {
     let mut node = make_node();
-    aim(&node.param_set(), Azimuth(90.0), Elevation::LEVEL);
+    aim(&node.param_set(), Azimuth::new(90.0), Elevation::LEVEL);
 
     // Fill the step and the input history with a loud take.
     for n in 0..(tutti_dsp::HRTF_STEP * 3) {
@@ -389,13 +389,13 @@ fn clone_shares_the_position_atomics() {
 
     // Set through the original, observe through the clone.
     aim(&node.param_set(), Azimuth::new(45.0), Elevation::new(10.0));
-    assert_eq!(c.azimuth.load(), Azimuth(45.0));
-    assert_eq!(c.elevation.load(), Elevation(10.0));
+    assert_eq!(c.azimuth.load(), Azimuth::new(45.0));
+    assert_eq!(c.elevation.load(), Elevation::new(10.0));
 
     // And back the other way.
     aim(&c.param_set(), Azimuth::new(-60.0), Elevation::new(-20.0));
-    assert_eq!(node.azimuth.load(), Azimuth(-60.0));
-    assert_eq!(node.elevation.load(), Elevation(-20.0));
+    assert_eq!(node.azimuth.load(), Azimuth::new(-60.0));
+    assert_eq!(node.elevation.load(), Elevation::new(-20.0));
 }
 
 /// Two graph rates above [`MAX_PREPARED_RATE`] share one prepared set, but
@@ -413,7 +413,7 @@ fn a_prepare_above_the_ceiling_retunes_the_glide() {
     .expect("parses");
     node.prepare(&Prepare::new(
         SampleRate::of(1_024_000.0),
-        MaxBlock::of(Samples(64)),
+        MaxBlock::of(Samples::new(64)),
     ));
 
     let e_inv = (-1.0f64).exp();
@@ -427,9 +427,9 @@ fn a_prepare_above_the_ceiling_retunes_the_glide() {
 /// Remaining fraction of a step from 0 to 90 degrees of height after
 /// `steps` rendered steps.
 fn remaining_after(aim: &mut AngleSmoother, steps: usize) -> f64 {
-    aim.reset_to_target(Direction::new(Azimuth::FRONT, Elevation(0.0)));
+    aim.reset_to_target(Direction::new(Azimuth::FRONT, Elevation::new(0.0)));
     for _ in 0..steps {
-        aim.step(Direction::new(Azimuth::FRONT, Elevation(90.0)));
+        aim.step(Direction::new(Azimuth::FRONT, Elevation::new(90.0)));
     }
     (90.0 - aim.current().elevation.get()) / 90.0
 }
@@ -443,7 +443,7 @@ fn the_glide_has_a_50_ms_time_constant_in_audio_time() {
     assert_eq!(HRTF_STEP, 128, "the rates below assume 128-sample steps");
     let e_inv = (-1.0f64).exp();
 
-    let mut aim = AngleSmoother::new(SampleRate::of(51_200.0), Samples(HRTF_STEP));
+    let mut aim = AngleSmoother::new(SampleRate::of(51_200.0), Samples::new(HRTF_STEP));
     let left = remaining_after(&mut aim, 20);
     assert!(
         (left - e_inv).abs() < 1e-4,
@@ -463,9 +463,9 @@ fn the_glide_has_a_50_ms_time_constant_in_audio_time() {
 #[test]
 fn the_renderer_declares_its_params() {
     let node = make_node();
-    node.azimuth.store(Azimuth(10.0));
-    node.elevation.store(Elevation(20.0));
-    node.blend.store(Mix(0.3));
+    node.azimuth.store(Azimuth::new(10.0));
+    node.elevation.store(Elevation::new(20.0));
+    node.blend.store(Mix::new(0.3));
     assert_eq!(
         node.shape().params.as_slice(),
         &[UnitParam::Azimuth, UnitParam::Elevation, UnitParam::Wet,][..]

@@ -11,8 +11,8 @@ use tutti_nodes::{TransientShaperConfig, TransientShaperNode};
 use tutti_units::{Db, SampleRate, Seconds, UnitAddr, UnitParam};
 
 const SR: SampleRate = SampleRate::SR_48K;
-const FAST: Seconds = Seconds(0.001);
-const SLOW: Seconds = Seconds(0.02);
+const FAST: Seconds = Seconds::new(0.001);
+const SLOW: Seconds = Seconds::new(0.02);
 const LEVEL: f64 = 0.5;
 
 fn node(width: ChannelLayout) -> TransientShaperNode<f32> {
@@ -78,7 +78,7 @@ fn a_step_onset_follows_the_attack_branch() {
     let mut n = prepared(
         TransientShaperNode::<f32>::from(
             TransientShaperConfig::new(ChannelLayout::MONO)
-                .attack(Db(attack))
+                .attack(Db::new(attack))
                 .fast(FAST)
                 .slow(SLOW),
         ),

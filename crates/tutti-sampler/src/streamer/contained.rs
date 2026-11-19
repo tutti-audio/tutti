@@ -175,11 +175,11 @@ fn a_decode_fault_is_faulted_and_the_voice_reads_silence() {
     );
 
     let mut voice = prepared(
-        DiskVoice::from_reader(reader, VoiceWindow::from(Beat(0.0))),
+        DiskVoice::from_reader(reader, VoiceWindow::from(Beat::new(0.0))),
         SampleRate::of(rate),
         512,
     );
-    let clock = MockTransport::rolling(Beat(0.0), Bpm::of(120.0));
+    let clock = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
     let out = play(&mut voice, &clock, SampleRate::of(rate), total, 512);
     let kept = out[0].iter().rposition(|&s| s != 0.0).map_or(0, |i| i + 1);
     assert!(
@@ -601,7 +601,7 @@ fn a_fork_plays_the_loop_as_applied_not_as_asked() {
     .expect("builds");
     let opening = sampler.open(&path, Placement::HEAD);
     let (stream, reader) = settle(&mut sampler, opening).expect("a cut file opens");
-    let voice = DiskVoice::from_reader(reader, VoiceWindow::from(Beat(0.0)));
+    let voice = DiskVoice::from_reader(reader, VoiceWindow::from(Beat::new(0.0)));
 
     // The loop's fade leads in from just before its start, which is past the
     // cut: unreadable.
@@ -690,7 +690,7 @@ fn a_fork_of_a_closed_stream_fails_even_after_a_decode_fault() {
         StreamPhase::Faulted(StreamFault::Decode),
         "setup: the stream met its fault first"
     );
-    let voice = DiskVoice::from_reader(reader, VoiceWindow::from(Beat(0.0)));
+    let voice = DiskVoice::from_reader(reader, VoiceWindow::from(Beat::new(0.0)));
     assert!(
         voice
             .fork_copy()

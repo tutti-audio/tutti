@@ -33,7 +33,7 @@ fn main() {
         "partition", "ir (s)", "host", "mean (us)", "p99 (us)", "p99.9", "max (us)", "max/mean"
     );
     let run = |ir: &[f32], partition: usize, lens: &[usize]| {
-        let mut c = Convolver::new(Mono::new(ir), Samples(partition));
+        let mut c = Convolver::new(Mono::new(ir), Samples::new(partition));
         let longest = *lens.iter().max().unwrap_or(&1);
         let input: Vec<f32> = (0..longest)
             .map(|i| ((i * 7919) % 1000) as f32 * 2e-3 - 1.0)
@@ -72,7 +72,11 @@ fn main() {
     };
     for secs in [0.5f64, 2.0, 5.0] {
         let len = (secs * 48_000.0) as usize;
-        let ir = decay_ir(len, tutti_units::Seconds(secs.min(1.0)), SampleRate::SR_48K);
+        let ir = decay_ir(
+            len,
+            tutti_units::Seconds::new(secs.min(1.0)),
+            SampleRate::SR_48K,
+        );
         for partition in [512usize] {
             for host in [64usize, 128, 512] {
                 let (mean, p99, p999, max) = run(&ir, partition, &[host]);
@@ -94,7 +98,7 @@ fn main() {
     ] {
         let ir = decay_ir(
             (secs * 48_000.0) as usize,
-            tutti_units::Seconds(secs.min(1.0)),
+            tutti_units::Seconds::new(secs.min(1.0)),
             SampleRate::SR_48K,
         );
         let (mean, p99, p999, max) = run(&ir, partition, &[64]);

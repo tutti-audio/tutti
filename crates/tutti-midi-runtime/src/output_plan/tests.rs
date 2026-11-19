@@ -24,14 +24,17 @@ fn map_at(t0: Instant) -> ClockMap {
 }
 
 fn secs(d: Duration) -> Seconds {
-    Seconds(d.as_secs_f64())
+    Seconds::new(d.as_secs_f64())
 }
 
 fn terms(audio: Option<Duration>, device: Duration, offset: f64) -> OutputTerms {
     OutputTerms {
         audio_output: audio.map(secs),
-        latency: OutputLatency::new(secs(device), OutputOffset::new(Seconds(offset)).unwrap())
-            .unwrap(),
+        latency: OutputLatency::new(
+            secs(device),
+            OutputOffset::new(Seconds::new(offset)).unwrap(),
+        )
+        .unwrap(),
     }
 }
 
@@ -130,7 +133,7 @@ fn an_audio_latency_that_is_no_time_is_sent_now() {
     let t0 = base();
     for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, 1e30, -1e30] {
         let plan = OutputPlan::new(OutputTerms {
-            audio_output: Some(Seconds(bad)),
+            audio_output: Some(Seconds::new(bad)),
             latency: OutputLatency::default(),
         });
         assert_eq!(
@@ -176,7 +179,7 @@ impl Serialize for OutputOffset {
 
 impl<'de> Deserialize<'de> for OutputOffset {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        Self::try_from(Seconds(f64::deserialize(d)?)).map_err(serde::de::Error::custom)
+        Self::try_from(Seconds::new(f64::deserialize(d)?)).map_err(serde::de::Error::custom)
     }
 }
 
@@ -188,12 +191,17 @@ fn an_output_offset_keeps_the_range_checked_shape() {
         new: OutputOffset::new,
         get: OutputOffset::get,
         of: None,
-        valid: &[Seconds(0.0), Seconds(-1.0), Seconds(1.0), Seconds(0.0125)],
+        valid: &[
+            Seconds::new(0.0),
+            Seconds::new(-1.0),
+            Seconds::new(1.0),
+            Seconds::new(0.0125),
+        ],
         invalid: &[
-            Seconds(1.000_001),
-            Seconds(-1.5),
-            Seconds(f64::NAN),
-            Seconds(f64::INFINITY),
+            Seconds::new(1.000_001),
+            Seconds::new(-1.5),
+            Seconds::new(f64::NAN),
+            Seconds::new(f64::INFINITY),
         ],
     };
     check_range_contract(&c);
@@ -203,10 +211,10 @@ fn an_output_offset_keeps_the_range_checked_shape() {
 /// A device latency over the same bound is refused.
 #[test]
 fn a_device_latency_beyond_a_second_is_refused() {
-    assert!(OutputLatency::new(Seconds(1.0), OutputOffset::ZERO).is_some());
-    assert!(OutputLatency::new(Seconds(1.001), OutputOffset::ZERO).is_none());
+    assert!(OutputLatency::new(Seconds::new(1.0), OutputOffset::ZERO).is_some());
+    assert!(OutputLatency::new(Seconds::new(1.001), OutputOffset::ZERO).is_none());
     // Seconds holds what a Duration cannot: none of these is a latency.
     for bad in [-0.001, f64::NAN, f64::INFINITY] {
-        assert!(OutputLatency::new(Seconds(bad), OutputOffset::ZERO).is_none());
+        assert!(OutputLatency::new(Seconds::new(bad), OutputOffset::ZERO).is_none());
     }
 }

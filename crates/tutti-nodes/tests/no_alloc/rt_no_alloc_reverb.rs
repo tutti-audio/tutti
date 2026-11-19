@@ -127,9 +127,9 @@ fn the_fdn_node_process_is_allocation_free() {
 #[test]
 fn the_fdn_corners_are_allocation_free_with_every_control_moving() {
     let layouts = [
-        FdnLayout::new(2, MaxDecay::of(Seconds(0.05)), false).unwrap(),
+        FdnLayout::new(2, MaxDecay::of(Seconds::new(0.05)), false).unwrap(),
         FdnLayout::new(8, MaxDecay::DEFAULT, true).unwrap(),
-        FdnLayout::new(16, MaxDecay::of(Seconds(60.0)), true).unwrap(),
+        FdnLayout::new(16, MaxDecay::of(Seconds::new(60.0)), true).unwrap(),
     ];
     for layout in layouts {
         let all = controls(layout.freezable());
@@ -211,11 +211,11 @@ fn level(rig: &Direct<FdnNode<f32>>) -> (f32, bool) {
 #[test]
 fn the_fdn_parks_and_wakes_without_allocating() {
     let short = FdnControls {
-        decay: [Seconds(0.1); 3],
+        decay: [Seconds::new(0.1); 3],
         ..FdnControls::DEFAULT
     };
     for layout in [
-        FdnLayout::new(2, MaxDecay::of(Seconds(0.1)), false).unwrap(),
+        FdnLayout::new(2, MaxDecay::of(Seconds::new(0.1)), false).unwrap(),
         FdnLayout::new(8, MaxDecay::DEFAULT, true).unwrap(),
         FdnLayout::new(16, MaxDecay::DEFAULT, false).unwrap(),
     ] {
@@ -267,7 +267,7 @@ fn the_fdn_with_its_lanes_fed_is_allocation_free() {
             .collect()
     };
     for layout in [
-        FdnLayout::new(2, MaxDecay::of(Seconds(0.05)), false).unwrap(),
+        FdnLayout::new(2, MaxDecay::of(Seconds::new(0.05)), false).unwrap(),
         FdnLayout::new(8, MaxDecay::DEFAULT, true).unwrap(),
     ] {
         for up in [true, false] {
@@ -351,7 +351,7 @@ fn the_plate_node_process_is_allocation_free_with_every_control_moving() {
 #[test]
 fn the_plate_parks_wakes_and_renders_non_finite_input_without_allocating() {
     let mut rig = Direct::new(
-        PlateReverbNode::<f32>::from(PlateReverbConfig::new().decay(Seconds(0.1))),
+        PlateReverbNode::<f32>::from(PlateReverbConfig::new().decay(Seconds::new(0.1))),
         SampleRate::SR_48K,
         64,
     );

@@ -467,7 +467,7 @@ fn a_file_with_no_tempo_or_signature_gets_the_smf_defaults() {
     // Two beats at the default 120 bpm (1 s), then two at 240 bpm (0.5 s).
     assert_eq!(
         metrical(&clip).seconds_at(Tick(4 * u64::from(TPQ))),
-        Seconds(1.5)
+        Seconds::new(1.5)
     );
 }
 
@@ -1359,7 +1359,7 @@ fn a_pickup_bar_has_its_own_signature_and_the_next_bar_a_new_one() {
         .collect();
     assert_eq!(signatures, [pickup, bar]);
     // The pickup is one beat: the second bar begins a quarter note in.
-    assert_eq!(metrical(&done.clip).beat_at(Tick(480)), Beat(1.0));
+    assert_eq!(metrical(&done.clip).beat_at(Tick(480)), Beat::new(1.0));
 }
 
 /// Without a signature for the pickup, a 4/4 bar is counted from the start of

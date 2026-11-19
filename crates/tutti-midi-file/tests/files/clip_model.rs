@@ -122,9 +122,12 @@ fn a_clip_reads_at_absolute_ticks() {
         events[0].1,
         FileEvent::Message(on(60, 0xABCD).decode().unwrap())
     );
-    assert_eq!(metrical(&file).beat_at(events[1].0), Beat(1.0));
+    assert_eq!(metrical(&file).beat_at(events[1].0), Beat::new(1.0));
     // The clip's length is the delta before End of Clip.
-    assert_eq!(metrical(&file).beat_at(metrical(&file).end()), Beat(2.0));
+    assert_eq!(
+        metrical(&file).beat_at(metrical(&file).end()),
+        Beat::new(2.0)
+    );
     // And a clip's notes keep all 16 bits.
     let notes: Vec<_> = file.tracks()[0].notes();
     assert_eq!(notes.len(), 1);
@@ -216,11 +219,11 @@ fn the_tempo_map_is_the_set_tempo_messages() {
         end(),
     ]))
     .unwrap();
-    let close = |a: Seconds, b: f64| assert!((a.0 - b).abs() < 1e-9, "{a:?} vs {b}");
+    let close = |a: Seconds, b: f64| assert!((a.get() - b).abs() < 1e-9, "{a:?} vs {b}");
     close(metrical(&file).seconds_at(Tick(4 * u64::from(q))), 2.0);
     close(metrical(&file).seconds_at(Tick(8 * u64::from(q))), 6.0);
     assert_eq!(
-        metrical(&file).tempo_map().tempo_at(Beat(5.0)),
+        metrical(&file).tempo_map().tempo_at(Beat::new(5.0)),
         Bpm::of(60.0)
     );
     // The messages are events, kept.
@@ -750,10 +753,10 @@ fn the_header_set_tempo_is_the_tempo_from_the_start_of_the_sequence() {
     parts.extend([dcs(q), set_tempo(50.0), dcs(q), on(60, 1), dcs(0), end()]);
     let file = MidiFile::from_bytes(&clip(&parts)).unwrap();
     let map = metrical(&file).tempo_map();
-    assert_eq!(map.tempo_at(Beat(0.5)), Bpm::of(100.0));
-    assert_eq!(map.tempo_at(Beat(1.5)), Bpm::of(50.0));
+    assert_eq!(map.tempo_at(Beat::new(0.5)), Bpm::of(100.0));
+    assert_eq!(map.tempo_at(Beat::new(1.5)), Bpm::of(50.0));
     // One beat at 100 BPM (0.6 s) and one at 50 (1.2 s).
-    let close = |a: Seconds, b: f64| assert!((a.0 - b).abs() < 1e-9, "{a:?} vs {b}");
+    let close = |a: Seconds, b: f64| assert!((a.get() - b).abs() < 1e-9, "{a:?} vs {b}");
     close(metrical(&file).seconds_at(Tick(2 * u64::from(q))), 1.8);
     assert_eq!(file.tracks()[0].header().len(), 1);
 }

@@ -18,7 +18,7 @@ impl Patch for One {
 /// `message` on `channel`, every voice sounding at unit level.
 pub fn step(core: &mut Voicing, channel: u8, message: Voice2) -> Vec<Command> {
     core.step(MidiChannel::of(channel), message, &One, |_| {
-        Some(Amplitude(1.0))
+        Some(Amplitude::new(1.0))
     })
     .to_vec()
 }

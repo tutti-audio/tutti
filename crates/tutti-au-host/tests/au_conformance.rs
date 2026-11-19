@@ -562,7 +562,7 @@ fn reported_latency_is_the_plugins_own_in_samples() {
         let latency = au.get_latency().expect("latency");
         assert_eq!(
             latency,
-            Samples(256),
+            Samples::new(256),
             "AUDynamicsProcessor advertises a 256-sample lookahead; at {rate} \
              Hz the host reported {latency:?}"
         );

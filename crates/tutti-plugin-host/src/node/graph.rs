@@ -79,7 +79,7 @@ where
         };
         // The plugin's own latency, and what the Processor adds to it (the
         // served pipeline's chunk).
-        let latency = Latency::new(Samples(latency.get() + this.pipeline.get()));
+        let latency = Latency::new(Samples::new(latency.get() + this.pipeline.get()));
         this.declared
             .ports
             .with_events(1, midi_out)
@@ -122,7 +122,7 @@ where
         this.set_render_mode_from(p);
         // A chunked Processor's delivery chunk is its own (`Processor::chunk`),
         // and it starts counting from here.
-        this.phase = Samples(0);
+        this.phase = Samples::new(0);
         this.drop_chunk();
         let chunk = this
             .rt
@@ -195,7 +195,7 @@ where
             // delivery's chunk at the chunk's first frame and ends it at its
             // last: the parameter changes in the context are the chunk's so
             // far, on chunk frames.
-            let mut phase = this.phase.0;
+            let mut phase = this.phase.get();
             if phase >= chunk {
                 // A Processor with another chunk took over.
                 phase = 0;
@@ -266,8 +266,8 @@ where
                     let (meter, steady, project, block_ns) = block.parts();
                     if phase == 0 {
                         // `at < size` here: the piece has frames.
-                        let offset =
-                            Offset::new(Samples(at), Samples(size)).expect("inside the block");
+                        let offset = Offset::new(Samples::new(at), Samples::new(size))
+                            .expect("inside the block");
                         let mut s = Snapshot::at(cx, offset, steady.at(at), project, block_ns);
                         let settled = s.settle(&mut view);
                         this.walk.begin(&s, settled);
@@ -382,7 +382,7 @@ where
                 phase = if completes { 0 } else { phase + n };
                 at += n;
             }
-            this.phase = Samples(phase);
+            this.phase = Samples::new(phase);
             drop(block);
             this.transport.advance(size);
             io.count_lost(lost);
@@ -394,7 +394,7 @@ where
             }
             if sends {
                 let writer = io.event_out(0);
-                let block = Samples(size);
+                let block = Samples::new(size);
                 for e in this.out_events.iter() {
                     let _ = writer.push(Event::midi(Offset::clamped(e.offset, block), e.ump));
                 }
@@ -527,10 +527,10 @@ where
             let out_events = &mut this.out.midi_events;
             tutti_plugin_types::insertion_sort_by_key(out_events, |e| e.offset);
             let writer = io.event_out(0);
-            let block = Samples(size);
+            let block = Samples::new(size);
             for e in out_events.iter() {
                 let at = (e.offset as usize).min(size - 1);
-                if let Some(at) = Offset::new(Samples(at), block) {
+                if let Some(at) = Offset::new(Samples::new(at), block) {
                     let _ = writer.push(Event::midi(at, e.ump));
                 }
             }
@@ -546,7 +546,7 @@ where
         this.segments.clear();
         this.params.abandon();
         // The Processor's chunk starts over, so a block is cut from here.
-        this.phase = Samples(0);
+        this.phase = Samples::new(0);
         this.drop_chunk();
         // A SysEx open across the reset is not completed past it: its rest
         // is skipped (the Processor drops its own open message, counted).
@@ -823,8 +823,11 @@ mod owed_tests {
         unit.param_events(
             0,
             &[ParamEvent::ramp(
-                Offset::of(tutti_units::Samples(0), tutti_units::Samples(BLOCK)),
-                ParamRamp::foreign(ParamId::new(1), 0.75, tutti_units::Samples(0)),
+                Offset::of(
+                    tutti_units::Samples::new(0),
+                    tutti_units::Samples::new(BLOCK),
+                ),
+                ParamRamp::foreign(ParamId::new(1), 0.75, tutti_units::Samples::new(0)),
             )],
         );
         unit.block();
@@ -858,7 +861,10 @@ mod owed_tests {
                 tutti_ump::Sysex7Packets::from_payload(MidiGroup::FIRST, &payload)
                     .expect("a 7-bit payload"),
             );
-            let at = Offset::of(tutti_units::Samples(0), tutti_units::Samples(BLOCK));
+            let at = Offset::of(
+                tutti_units::Samples::new(0),
+                tutti_units::Samples::new(BLOCK),
+            );
             out.iter().map(|e| Event::midi(at, *e)).collect::<Vec<_>>()
         };
         (packets(60), packets(12))

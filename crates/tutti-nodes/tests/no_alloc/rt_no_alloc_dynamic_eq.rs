@@ -52,17 +52,17 @@ fn walk(node: DynamicEqNode<f32>) {
 fn dynamic_eq_stereo_process_is_allocation_free_with_the_band_moving() {
     walk(DynamicEqNode::<f32>::from(DynamicEqConfig::de_esser(
         ChannelLayout::STEREO,
-        Hz(6_000.0),
+        Hz::new(6_000.0),
     )));
 }
 
 #[test]
 fn dynamic_eq_upward_side_chain_process_is_allocation_free() {
     walk(DynamicEqNode::<f32>::from(
-        DynamicEqConfig::new(ChannelLayout::MONO, Hz(6_000.0), Q(1.5))
+        DynamicEqConfig::new(ChannelLayout::MONO, Hz::new(6_000.0), Q::new(1.5))
             .mode(DynamicMode::Upward)
-            .ratio(CompressionRatio(3.0))
-            .range(Db(9.0))
+            .ratio(CompressionRatio::new(3.0))
+            .range(Db::new(9.0))
             .key(KeySource::Sidechain),
     ));
 }

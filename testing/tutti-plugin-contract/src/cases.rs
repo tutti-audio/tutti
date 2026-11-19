@@ -70,7 +70,7 @@ fn note(offset: usize, on: bool) -> UmpAt {
     } else {
         midi::note_off(tutti_ump::Address::new(group, channel), 60, 0)
     };
-    let offset = Offset::of(Samples(offset), Samples(BLOCK));
+    let offset = Offset::of(Samples::new(offset), Samples::new(BLOCK));
     (offset, ump)
 }
 
@@ -159,7 +159,7 @@ pub fn latency_reported<F: Format>() {
         active_in::<F>(Mode::Tag)
             .controller()
             .latency(main_thread()),
-        Samples(0)
+        Samples::new(0)
     );
 }
 
@@ -183,7 +183,7 @@ pub fn latency_applied<F: Format>() {
         heard.extend_from_slice(&a.render(&ins, frames, &ProcessContext::new())[0]);
     }
     for (i, &v) in heard.iter().enumerate() {
-        let want = spec::tag(0) + if i == spec::LATENCY.0 { 1.0 } else { 0.0 };
+        let want = spec::tag(0) + if i == spec::LATENCY.get() { 1.0 } else { 0.0 };
         assert_eq!(v, want, "frame {i}");
     }
 }
@@ -210,7 +210,7 @@ pub fn reset_clears_the_delay_line<F: Format>() {
     for _ in 0..4 {
         heard.extend_from_slice(&a.render(&silence(frames), frames, &ProcessContext::new())[0]);
     }
-    assert!(heard.len() > spec::LATENCY.0, "longer than the delay");
+    assert!(heard.len() > spec::LATENCY.get(), "longer than the delay");
     for (i, &v) in heard.iter().enumerate() {
         assert_eq!(
             v,
@@ -1026,7 +1026,7 @@ fn transport(playing: bool, tempo: f64, beat: f64) -> TransportInfo {
     TransportInfo::new(tutti_plugin_types::SampleRate::of(RATE))
         .with_playing(playing)
         .with_tempo(tutti_units::Bpm::of(tempo))
-        .with_beat(tutti_units::Beat(beat))
+        .with_beat(tutti_units::Beat::new(beat))
 }
 
 /// Each block's transport reaches the plugin at its first frame, as the host
@@ -1454,7 +1454,8 @@ pub fn process_does_not_allocate<F: Format>() {
     let mut outs = [left.as_mut_slice(), right.as_mut_slice()];
     let mut out = ProcessOutput::default();
     let mut io = PluginIo {
-        buffer: InputOutput::from_slices(Samples(BLOCK), &refs, &mut outs).expect("equal channels"),
+        buffer: InputOutput::from_slices(Samples::new(BLOCK), &refs, &mut outs)
+            .expect("equal channels"),
         ctx: &ctx,
         out: &mut out,
     };

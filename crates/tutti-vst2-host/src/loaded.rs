@@ -53,7 +53,7 @@ pub(crate) fn decode_tail(raw: isize) -> PluginTail {
     match raw {
         0 => PluginTail::Unknown,
         1 => PluginTail::None,
-        n if n > 1 => PluginTail::Finite(Samples(n as usize)),
+        n if n > 1 => PluginTail::Finite(Samples::new(n as usize)),
         _ => PluginTail::Unknown,
     }
 }
@@ -576,7 +576,7 @@ impl Vst2Loaded {
     /// read it makes.
     #[must_use]
     pub fn latency_samples(&self) -> Samples {
-        Samples(self.instance.read_initial_delay().max(0) as usize)
+        Samples::new(self.instance.read_initial_delay().max(0) as usize)
     }
 
     /// Returns the plugin's tail, read from the plugin now and decoded from

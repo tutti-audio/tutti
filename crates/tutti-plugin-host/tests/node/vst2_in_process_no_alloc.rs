@@ -29,7 +29,7 @@ static PLUGIN_LOAD_LOCK: Mutex<()> = Mutex::new(());
 
 /// `event` on frame 0 of a 64-frame block.
 fn at_start(event: Ump) -> Event {
-    Event::midi(Offset::of(Samples(0), Samples(64)), event)
+    Event::midi(Offset::of(Samples::new(0), Samples::new(64)), event)
 }
 
 #[test]
@@ -85,7 +85,7 @@ fn process_with_a_meter_does_not_allocate() {
     .expect("load failed");
     unit.controls()
         .set_meter(ProjectMeter::new(MeterMap::new([MeterChange::new(
-            Beat(0.0),
+            Beat::new(0.0),
             TimeSignature::new(BeatsPerBar::of(7), NoteValue::EIGHTH),
         )])));
     let mut unit = Direct::new(unit.bind(tutti_fixtures::tempo()), SampleRate::SR_48K, 64);
@@ -185,9 +185,9 @@ fn two_hundred_moving_parameters_do_not_allocate() {
     let mut block = |unit: &mut Direct<tutti_plugin_host::PluginNode<Vst2Loaded>>, b: u32| {
         events.clear();
         for (k, frame) in [(0u32, 0usize), (1, 32)] {
-            let at = Offset::of(Samples(frame), Samples(64));
+            let at = Offset::of(Samples::new(frame), Samples::new(64));
             for id in 0..PARAMS {
-                let ramp = ParamRamp::foreign(ParamId::new(id), value(b, k, id), Samples(0));
+                let ramp = ParamRamp::foreign(ParamId::new(id), value(b, k, id), Samples::new(0));
                 events.push(ParamEvent::ramp(at, ramp));
             }
         }

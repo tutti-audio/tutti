@@ -30,7 +30,7 @@ const MIDI_OUT_PORT_CAPACITY: std::num::NonZeroU32 =
 /// use tutti_buffers::MaxBlock;
 ///
 /// let (mut editor, _exec) =
-///     Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(512))));
+///     Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(512))));
 /// editor.insert(NodeKey(1), "midi out", tutti_graph::ForkByClone(MidiOutNode::new()));
 /// ```
 #[derive(Clone, Debug)]

@@ -64,7 +64,7 @@ fn notes(k: u64) -> Vec<TimedMidiEvent> {
     (0..2)
         .map(|i| {
             TimedMidiEvent::new(
-                Beat(0.001 * (k + 3 * i) as f64),
+                Beat::new(0.001 * (k + 3 * i) as f64),
                 Message::midi2(
                     MidiChannel::FIRST,
                     Voice2::note_on(
@@ -85,7 +85,7 @@ fn notes(k: u64) -> Vec<TimedMidiEvent> {
 fn graph(workers: usize, declared: bool) -> Executor {
     let (mut ed, mut exec) = Editor::new(Prepare::new(
         SampleRate::of(SR),
-        MaxBlock::of(Samples(MAX_BLOCK)),
+        MaxBlock::of(Samples::new(MAX_BLOCK)),
     ));
     if workers > 1 {
         exec.set_pool(Some(Arc::new(
@@ -142,7 +142,7 @@ fn render(exec: &mut Executor) -> Vec<Vec<f32>> {
         {
             let mut outs: Vec<&mut [f32]> = chunk.iter_mut().map(Vec::as_mut_slice).collect();
             let beat = frame as f64 * BPM / 60.0 / SR;
-            let t = TransportPosition::new(true, Bpm::of(BPM), Beat(beat), None);
+            let t = TransportPosition::new(true, Bpm::of(BPM), Beat::new(beat), None);
             exec.process(n, &t, &[], &mut outs);
         }
         for (a, c) in all.iter_mut().zip(chunk) {
@@ -187,7 +187,7 @@ fn moderate_synths_pack_and_render_bit_identically() {
     // From a one-frame block: every ragged block below is spread, so the
     // comparison is never a serial walk against itself.
     assert!(
-        matches!(plan.schedule(4), Schedule::Parallel { from, .. } if from == Samples(1)),
+        matches!(plan.schedule(4), Schedule::Parallel { from, .. } if from == Samples::new(1)),
         "{:?}",
         plan.schedule(4)
     );

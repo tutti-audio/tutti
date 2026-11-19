@@ -81,7 +81,10 @@ fn a_seek_inside_a_block_plays_from_the_seek() {
     let (_ed, mut exec, _c, seen) = rig(clip, 512);
     let mut changes = TransportChanges::NONE;
     changes
-        .push(Offset::of(Samples(200), Samples(512)), rolling(48_000))
+        .push(
+            Offset::of(Samples::new(200), Samples::new(512)),
+            rolling(48_000),
+        )
         .unwrap();
     exec.process_with_changes(512, &rolling(0), &changes, &[], &mut []);
     assert_eq!(
@@ -101,7 +104,7 @@ fn a_seek_inside_a_block_plays_from_the_seek() {
 fn a_loop_that_wraps_inside_a_block_plays_its_start() {
     let clip = MidiClipNode::new([at(48, on(62)), at(23_850, on(60)), at(23_950, on(64))]);
     let (_ed, mut exec, _c, seen) = rig(clip, 512);
-    let lp = Some(LoopRange::new(Beat(0.0), Beat(1.0)).expect("a loop"));
+    let lp = Some(LoopRange::new(Beat::new(0.0), Beat::new(1.0)).expect("a loop"));
     let looping = |f: u64| TransportPosition::new(true, Bpm::of(120.0), beat_of(f), lp);
     exec.process(100, &looping(23_800), &[], &mut []);
     exec.process(512, &looping(23_900), &[], &mut []);
@@ -212,7 +215,7 @@ fn a_fork_plays_the_clip_as_it_was_at_the_fork() {
 fn a_loop_that_wraps_at_a_block_edge_ends_its_held_notes() {
     let clip = MidiClipNode::new([at(23_850, on(60))]);
     let (_ed, mut exec, _c, seen) = rig(clip, 512);
-    let lp = Some(LoopRange::new(Beat(0.0), Beat(1.0)).expect("a loop"));
+    let lp = Some(LoopRange::new(Beat::new(0.0), Beat::new(1.0)).expect("a loop"));
     let looping = |f: u64| TransportPosition::new(true, Bpm::of(120.0), beat_of(f), lp);
     exec.process(100, &looping(23_800), &[], &mut []);
     exec.process(100, &looping(23_900), &[], &mut []);
@@ -225,24 +228,27 @@ fn a_loop_that_wraps_at_a_block_edge_ends_its_held_notes() {
 /// build no event, and a finite beat does.
 #[test]
 fn a_beat_that_is_not_finite_builds_no_event() {
-    let nan = Beat(0.0 / std::hint::black_box(0.0));
-    for bad in [nan, Beat(f64::INFINITY), Beat(f64::NEG_INFINITY)] {
+    let nan = Beat::new(0.0 / std::hint::black_box(0.0));
+    for bad in [nan, Beat::new(f64::INFINITY), Beat::new(f64::NEG_INFINITY)] {
         assert_eq!(TimedMidiEvent::new(bad, on(61)), None, "{bad:?}");
     }
-    let good = TimedMidiEvent::new(Beat(1.5), on(61)).expect("a finite beat");
-    assert_eq!((good.beat(), good.event()), (Beat(1.5), on(61)));
+    let good = TimedMidiEvent::new(Beat::new(1.5), on(61)).expect("a finite beat");
+    assert_eq!((good.beat(), good.event()), (Beat::new(1.5), on(61)));
 }
 
 /// **A shifted event is the same packet at the moved beat**, and a shift that
 /// leaves the finite beats (an overflow) builds no event.
 #[test]
 fn a_shifted_event_moves_its_beat_and_refuses_a_beat_that_is_not_finite() {
-    let e = TimedMidiEvent::new(Beat(1.5), on(61)).unwrap();
-    let moved = e.shifted(BeatDuration(2.0)).expect("finite");
-    assert_eq!((moved.beat(), moved.event()), (Beat(3.5), on(61)));
-    assert_eq!(e.shifted(BeatDuration(-1.5)).unwrap().beat(), Beat(0.0));
-    let huge = TimedMidiEvent::new(Beat(f64::MAX), on(61)).unwrap();
-    assert_eq!(huge.shifted(BeatDuration(f64::MAX)), None);
+    let e = TimedMidiEvent::new(Beat::new(1.5), on(61)).unwrap();
+    let moved = e.shifted(BeatDuration::new(2.0)).expect("finite");
+    assert_eq!((moved.beat(), moved.event()), (Beat::new(3.5), on(61)));
+    assert_eq!(
+        e.shifted(BeatDuration::new(-1.5)).unwrap().beat(),
+        Beat::new(0.0)
+    );
+    let huge = TimedMidiEvent::new(Beat::new(f64::MAX), on(61)).unwrap();
+    assert_eq!(huge.shifted(BeatDuration::new(f64::MAX)), None);
 }
 
 /// **Note-offs the port refuses go out in the blocks after, until none is
@@ -282,13 +288,13 @@ fn refused_note_offs_are_retried_until_none_is_held() {
 #[test]
 fn a_note_lands_on_its_frame_at_ninety_bpm() {
     let clip = MidiClipNode::new([
-        TimedMidiEvent::new(Beat(1.0), on(60)).unwrap(),
-        TimedMidiEvent::new(Beat(3.0), on(62)).unwrap(),
+        TimedMidiEvent::new(Beat::new(1.0), on(60)).unwrap(),
+        TimedMidiEvent::new(Beat::new(3.0), on(62)).unwrap(),
     ]);
     let (_ed, mut exec, _c, seen) = rig(clip, 64);
     let mut f = 0u64;
     while f < 100_000 {
-        let t = TransportPosition::new(true, Bpm::of(90.0), Beat(f as f64 / 32_000.0), None);
+        let t = TransportPosition::new(true, Bpm::of(90.0), Beat::new(f as f64 / 32_000.0), None);
         exec.process(64, &t, &[], &mut []);
         f += 64;
     }
@@ -304,7 +310,7 @@ fn a_note_lands_on_its_frame_at_ninety_bpm() {
 fn a_loop_shorter_than_a_block_plays_every_pass() {
     let clip = MidiClipNode::new([at(10, on(60)), at(60, off(60))]);
     let (_ed, mut exec, _c, seen) = rig(clip, 512);
-    let lp = Some(LoopRange::new(Beat(0.0), beat_of(100)).expect("a loop"));
+    let lp = Some(LoopRange::new(Beat::new(0.0), beat_of(100)).expect("a loop"));
     let looping = |f: u64| TransportPosition::new(true, Bpm::of(120.0), beat_of(f), lp);
     exec.process(512, &looping(0), &[], &mut []);
     exec.process(512, &looping(12), &[], &mut []);
@@ -431,7 +437,7 @@ fn a_keys_owner_starts_over_at_a_loop_wrap() {
     for _ in 0..2 {
         exec.process(
             300,
-            &looping_at(120.0, Beat(0.0), Beat(0.0), beat_of(100)),
+            &looping_at(120.0, Beat::new(0.0), Beat::new(0.0), beat_of(100)),
             &[],
             &mut [],
         );
@@ -473,13 +479,13 @@ fn a_pass_ending_on_a_block_edge_ends_what_it_held() {
     let (_ed, mut exec, _c, seen) = rig(clip, 512);
     exec.process(
         500,
-        &looping_at(120.0, Beat(0.0), Beat(0.0), beat_of(100)),
+        &looping_at(120.0, Beat::new(0.0), Beat::new(0.0), beat_of(100)),
         &[],
         &mut [],
     );
     exec.process(
         500,
-        &looping_at(120.0, Beat(0.0), Beat(0.0), beat_of(100)),
+        &looping_at(120.0, Beat::new(0.0), Beat::new(0.0), beat_of(100)),
         &[],
         &mut [],
     );
@@ -504,13 +510,13 @@ fn a_tempo_change_inside_a_block_re_times_the_passes() {
     let mut changes = TransportChanges::NONE;
     changes
         .push(
-            Offset::of(Samples(250), Samples(512)),
-            looping_at(240.0, beat_of(50), Beat(0.0), beat_of(100)),
+            Offset::of(Samples::new(250), Samples::new(512)),
+            looping_at(240.0, beat_of(50), Beat::new(0.0), beat_of(100)),
         )
         .unwrap();
     exec.process_with_changes(
         512,
-        &looping_at(120.0, Beat(0.0), Beat(0.0), beat_of(100)),
+        &looping_at(120.0, Beat::new(0.0), Beat::new(0.0), beat_of(100)),
         &changes,
         &[],
         &mut [],
@@ -537,19 +543,19 @@ fn a_tempo_change_inside_a_block_re_times_the_passes() {
 fn every_pass_lands_where_the_hosts_clock_reaches_it() {
     use tutti_music::{FRAME_TOLERANCE, FrameClock, LoopRange as Region};
     const TEMPO: f64 = 97.0;
-    let (start, end) = (Beat(3.0), Beat(3.00126));
+    let (start, end) = (Beat::new(3.0), Beat::new(3.00126));
     let fpb = RATE * 60.0 / TEMPO;
     let notes = [3.000_1, 3.000_5, 3.001_1];
     let clip = MidiClipNode::new(
         notes
             .iter()
             .enumerate()
-            .map(|(i, &b)| TimedMidiEvent::new(Beat(b), on(60 + i as u8)).unwrap()),
+            .map(|(i, &b)| TimedMidiEvent::new(Beat::new(b), on(60 + i as u8)).unwrap()),
     );
     let (_ed, mut exec, _c, seen) = rig(clip, 512);
     let region = Region::new(start, end).unwrap();
     let mut clock = FrameClock::new(
-        Beat(2.999),
+        Beat::new(2.999),
         tutti_units::Bpm::of(TEMPO),
         SampleRate::of(RATE),
     );
@@ -560,14 +566,14 @@ fn every_pass_lands_where_the_hosts_clock_reaches_it() {
             &[],
             &mut [],
         );
-        clock.advance(Samples(512), Some(region));
+        clock.advance(Samples::new(512), Some(region));
     }
 
     // The reference walk.
     let tol = FRAME_TOLERANCE / fpb;
     let mut want = Vec::new();
     let mut walk = FrameClock::new(
-        Beat(2.999),
+        Beat::new(2.999),
         tutti_units::Bpm::of(TEMPO),
         SampleRate::of(RATE),
     );
@@ -587,7 +593,7 @@ fn every_pass_lands_where_the_hosts_clock_reaches_it() {
             }
         }
         prev = Some(b);
-        walk.advance(Samples(1), Some(region));
+        walk.advance(Samples::new(1), Some(region));
     }
     assert!(
         want.len() > 100,
@@ -625,7 +631,7 @@ fn sub_frame_loop(start: Beat, end: Beat) -> Option<Vec<(u64, Ump)>> {
                 &[],
                 &mut [],
             );
-            clock.advance(Samples(64), Some(region));
+            clock.advance(Samples::new(64), Some(region));
         }
         let _ = tx.send(heard(&seen));
     });
@@ -641,8 +647,8 @@ fn sub_frame_loop(start: Beat, end: Beat) -> Option<Vec<(u64, Ump)>> {
 #[test]
 fn a_loop_shorter_than_a_frame_costs_one_pass_a_frame() {
     for (start, end) in [
-        (Beat(4.0), Beat(4.0f64.next_up())),
-        (Beat(0.0), Beat(1e-300)),
+        (Beat::new(4.0), Beat::new(4.0f64.next_up())),
+        (Beat::new(0.0), Beat::new(1e-300)),
     ] {
         let seen = sub_frame_loop(start, end)
             .unwrap_or_else(|| panic!("[{start:?}, {end:?}) did not finish"));
@@ -781,7 +787,7 @@ fn a_loop_wrap_lifts_the_pedal_after_the_note_off() {
         at(23_851, pedal(0, CCNumber::SUSTAIN, DOWN)),
     ]);
     let (_ed, mut exec, _c, seen) = rig(clip, 512);
-    let lp = Some(LoopRange::new(Beat(0.0), Beat(1.0)).expect("a loop"));
+    let lp = Some(LoopRange::new(Beat::new(0.0), Beat::new(1.0)).expect("a loop"));
     let looping = |f: u64| TransportPosition::new(true, Bpm::of(120.0), beat_of(f), lp);
     exec.process(100, &looping(23_800), &[], &mut []);
     exec.process(512, &looping(23_900), &[], &mut []);
@@ -809,7 +815,10 @@ fn a_seek_returns_the_controllers_where_the_jump_happens() {
     let (_ed, mut exec, _c, seen) = rig(clip, 512);
     let mut changes = TransportChanges::NONE;
     changes
-        .push(Offset::of(Samples(200), Samples(512)), rolling(96_000))
+        .push(
+            Offset::of(Samples::new(200), Samples::new(512)),
+            rolling(96_000),
+        )
         .unwrap();
     exec.process_with_changes(512, &rolling(0), &changes, &[], &mut []);
     exec.process(512, &rolling(96_312), &[], &mut []);

@@ -231,10 +231,10 @@ mod tests {
     fn populated_transport() -> TransportInfo {
         TransportInfo::new(SampleRate::of(48_000.0))
             .with_position_samples(1_234)
-            .with_beat(Beat(4.0))
-            .with_bar(Beat(8.0), Default::default())
+            .with_beat(Beat::new(4.0))
+            .with_bar(Beat::new(8.0), Default::default())
             .with_loop(LoopRegion::new(
-                LoopRange::new(Beat(2.0), Beat(6.0)).expect("a loop"),
+                LoopRange::new(Beat::new(2.0), Beat::new(6.0)).expect("a loop"),
             ))
             .with_tempo(Bpm::of(128.0))
             .with_time_signature(TimeSignature::new(BeatsPerBar::of(7), NoteValue::EIGHTH))
@@ -256,7 +256,7 @@ mod tests {
         let all = need::all();
 
         let mut t = populated_transport();
-        t.position.beat = Beat(f64::INFINITY);
+        t.position.beat = Beat::new(f64::INFINITY);
         let ctx = to_process_context(&t, all);
         assert_eq!(
             ctx.state & crate::sdk_enum_u32(StatesAndFlags_::kProjectTimeMusicValid),
@@ -559,7 +559,7 @@ mod tests {
     #[test]
     fn the_midi_clock_and_host_time_are_flagged_only_when_known() {
         let wants = need::NEED_SAMPLES_TO_NEXT_CLOCK | need::NEED_SYSTEM_TIME;
-        let t = populated_transport().with_beat(Beat(4.0 + 0.2 / 24.0));
+        let t = populated_transport().with_beat(Beat::new(4.0 + 0.2 / 24.0));
         let ctx = to_process_context(&t, wants);
         assert_eq!(ctx.samplesToNextClock, -188);
         assert_ne!(
@@ -572,7 +572,7 @@ mod tests {
             0
         );
 
-        let mut bare = populated_transport().with_beat(Beat(f64::NAN));
+        let mut bare = populated_transport().with_beat(Beat::new(f64::NAN));
         bare.system_time_ns = None;
         let ctx = to_process_context(&bare, wants);
         assert_eq!(

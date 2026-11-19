@@ -58,7 +58,7 @@ fn reprepare(unit: &mut Rig, rate: f64) {
         .editor_mut()
         .reprepare(Prepare::new(
             SampleRate::of(rate),
-            MaxBlock::of(Samples(BLOCK)),
+            MaxBlock::of(Samples::new(BLOCK)),
         ))
         .expect("the graph re-prepares");
 }

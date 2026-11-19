@@ -252,7 +252,7 @@ pub const NO_TAIL_EFFECTS: &[AuRef] = &[NO_VIEW_SAMPLE_DELAY];
 /// `kAudioUnitErr_InvalidProperty` (-10879).
 ///
 /// Every Apple instrument, mixer and generator does. Named here so the host's
-/// decision to propagate that as an error rather than flatten it to `Seconds(0)`
+/// decision to propagate that as an error rather than flatten it to `Seconds::new(0)`
 /// is pinned by a test — see `au_transport.rs`.
 pub const TAILLESS_UNITS: &[AuRef] = &[SAMPLER, DLS_SYNTH, MULTI_CHANNEL_MIXER];
 

@@ -335,7 +335,7 @@ fn a_stretched_placed_read_steps_by_the_conversion_and_the_stretch() {
         let env = transport.env(64, SampleRate::SR_48K);
         let bc = clock.observe(&env);
         let mut out = [None; 64];
-        u.placed_positions(&bc, 0..64, ReadRate(0.5), &mut out);
+        u.placed_positions(&bc, 0..64, ReadRate::new(0.5), &mut out);
         for (i, pos) in out.iter().enumerate() {
             let pos = pos.expect("inside the window");
             let want = (block * 64 + i) as f64 * 0.25;
@@ -488,7 +488,7 @@ fn a_stop_inside_a_block_silences_the_read_on_its_frame() {
     let stop_beat = Beat::new(0.25 + 40.0 * 2.0 / SR);
     changes
         .push(
-            Offset::of(Samples(40), Samples(64)),
+            Offset::of(Samples::new(40), Samples::new(64)),
             tutti_graph::TransportPosition::new(false, Bpm::of(120.0), stop_beat, None),
         )
         .unwrap();
@@ -560,7 +560,7 @@ fn loop_wrap_survives_a_degenerate_region() {
 
 #[test]
 fn test_sampler_outputs_silence_when_stopped() {
-    let wave = Wave::with_capacity(1, SampleRate::SR_44K1, Samples(100));
+    let wave = Wave::with_capacity(1, SampleRate::SR_44K1, Samples::new(100));
     let mut sampler = MemorySource::new(Arc::new(wave)).expect("a placeable wave");
 
     sampler.stop();
@@ -1054,7 +1054,7 @@ fn prepare_updates_src_ratio() {
 
     sampler.prepare(&Prepare::new(
         SampleRate::of(24000.0),
-        MaxBlock::of(Samples(64)),
+        MaxBlock::of(Samples::new(64)),
     ));
 
     let mut out = [0.0f32; 2];
@@ -1156,8 +1156,8 @@ fn the_shape_is_the_declared_width() {
         let shape = u.shape();
         assert_eq!(shape.audio_out().count() as usize, w, "width {w}");
         assert_eq!(shape.audio_in().count(), 0);
-        assert_eq!(shape.latency.samples(), Samples(0));
-        assert_eq!(shape.tail, Tail::Finite(Samples(32)));
+        assert_eq!(shape.latency.samples(), Samples::new(0));
+        assert_eq!(shape.tail, Tail::Finite(Samples::new(32)));
     }
 }
 
@@ -1235,7 +1235,7 @@ fn a_gain_change_reaches_the_rendering_node() {
     let wave = ramp_wave(64, 44_100.0);
     let mut solo = Solo::new(
         MemorySource::with_channels(wave, 1u16).expect("a placeable wave"),
-        Prepare::new(SampleRate::of(SR), MaxBlock::of(Samples(64))),
+        Prepare::new(SampleRate::of(SR), MaxBlock::of(Samples::new(64))),
     );
     assert!(solo.controls().set(UnitParam::Volume, 0.25));
     let out = solo.render(1);
@@ -1336,7 +1336,10 @@ fn a_mono_wave_goes_to_the_centre_of_a_node_that_has_one() {
         )
         .expect("a placeable wave")
         .placed_at(VoiceWindow::default());
-        lanes.prepare(&Prepare::new(SampleRate::of(SR), MaxBlock::of(Samples(64))));
+        lanes.prepare(&Prepare::new(
+            SampleRate::of(SR),
+            MaxBlock::of(Samples::new(64)),
+        ));
         assert!(lanes.gather.frames() >= 8, "the lane path is reachable");
         let free = planes(&mut free, None, 8);
         let placed = planes(&mut placed, Some(&transport), 8);
@@ -1375,11 +1378,11 @@ fn an_f64_source_reads_each_channel_in_f64() {
     }
     let source = MemorySource::<f64>::new(Arc::new(wave)).expect("a stereo wave places");
     let mut out = [0.0f64; 2];
-    source.sample_raw_into(SamplePosition(3.0), &mut out);
+    source.sample_raw_into(SamplePosition::new(3.0), &mut out);
     assert_eq!(out, [3.0, -6.0]);
-    source.sample_raw_into(SamplePosition(3.5), &mut out);
+    source.sample_raw_into(SamplePosition::new(3.5), &mut out);
     assert_eq!(out, [3.5, -7.0]);
-    source.set_gain(Amplitude(0.5));
-    source.sample_into(SamplePosition(3.0), &mut out);
+    source.set_gain(Amplitude::new(0.5));
+    source.sample_into(SamplePosition::new(3.0), &mut out);
     assert_eq!(out, [1.5, -3.0]);
 }

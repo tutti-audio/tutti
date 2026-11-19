@@ -29,7 +29,7 @@ pub const MIN_DC_CORNER: Hz = Hz(1.0);
 /// as at least [`MIN_DC_CORNER`] and at most the rate's Nyquist, and a corner that is not
 /// finite as [`DC_CORNER`].
 #[must_use]
-pub fn dc_pole(corner: Hz, rate: SampleRate) -> f64 {
+pub(crate) fn dc_pole(corner: Hz, rate: SampleRate) -> f64 {
     cutoff_pole(held_corner(corner, rate), rate)
 }
 

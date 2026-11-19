@@ -55,11 +55,11 @@ fn soundfont_row() -> Row {
         },
         Detect::Threshold(0.0),
     )
-    .with_lead(Samples(LEAD))
+    .with_lead(Samples::new(LEAD))
     // A note ended on the frame it starts is silent (SF2 2.04 section 9.1.7: a
     // release starts from the envelope's value, 0 at the onset), and a
     // regenerated source's held note is closed on that frame.
-    .onset_release_is_silent(Samples(DELAY_STAGE))
+    .onset_release_is_silent(Samples::new(DELAY_STAGE))
 }
 
 tutti_graph::contract_tests!(event soundfont => soundfont_row());

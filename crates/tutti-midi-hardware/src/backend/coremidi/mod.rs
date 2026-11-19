@@ -17,12 +17,12 @@
 //! # Protocol is asked, not assumed
 //!
 //! An input port opens in the protocol of its source (one port per opened
-//! input): `Protocol::Midi10` for a source whose [`UmpCapability`] is MIDI 1.0,
+//! input): `Protocol::Midi10` for a source whose capability is MIDI 1.0,
 //! so CoreMIDI hands it MIDI 1.0 UMP (type 2) and the ingest node's `Translator`
 //! widens it, never the OS; `Protocol::Midi20` otherwise.
-//! A MIDI 1.0 source is not a device speaking MIDI 2.0, so [`UmpCapability`] records `kMIDIPropertyProtocolID` as
+//! A MIDI 1.0 source is not a device speaking MIDI 2.0, so the capability records `kMIDIPropertyProtocolID` as
 //! the OS reports it — and falls back to `Midi1` when the property is absent,
-//! which is the conservative direction (see `UmpCapability::default`).
+//! which is the conservative direction (see `OsEndpoint::capability`).
 //!
 //! # Function Blocks (macOS 15)
 //!
@@ -44,7 +44,7 @@ use tutti_rt::{FaultLatch, LockExt};
 
 use crate::InputProducerHandle;
 use crate::backend::by_message::{Refused, by_message};
-use crate::capability::{OsEndpoint, UmpCapability, blocks_of};
+use crate::capability::{OsEndpoint, carries_midi2_only, from_os, legacy};
 use crate::devices::ChangeSink;
 use crate::devices::reporter::os_devices;
 use crate::endpoints::{DeviceOut, InputConnection, MidiEndpoints, Watch};
@@ -53,9 +53,9 @@ use crate::guard::Guard;
 use tutti_coremidi_ffi::{
     Operation, OsStatus, UmpEndpointInfo, UmpEndpointsError, UniqueId, ump_endpoints,
 };
-use tutti_midi_device::{EndpointId, Identity, OsDevice};
+use tutti_midi_device::{Endpoint, EndpointId, Identity, OsDevice};
 use tutti_midi_runtime::{MidiOut, Outgoing, Taken};
-use tutti_ump::{Protocol, split_stream};
+use tutti_ump::{Protocol, read_protocol, split_stream};
 
 mod host_time;
 mod virtual_destination;
@@ -99,9 +99,6 @@ pub(crate) fn hub_first() {
     let _ = watch::hub();
 }
 
-/// CoreMIDI's `kMIDIProtocol_2_0`, as `kMIDIPropertyProtocolID` reports it.
-const PROTOCOL_ID_MIDI_2_0: i32 = 2;
-
 /// Read an endpoint's name, falling back to a positional label.
 ///
 /// `display_name` is what the user sees in Audio MIDI Setup — preferred over
@@ -120,14 +117,16 @@ fn endpoint_name(object: &coremidi::Object, index: usize) -> String {
 /// use and its blocks. Otherwise the endpoint's property. An absent or unreadable `kMIDIPropertyProtocolID` means "the OS did not say",
 /// which resolves to MIDI 1.0 — claiming MIDI 2.0 on no evidence would feed
 /// per-note messages to an endpoint that cannot carry them.
-fn endpoint_capability(object: &coremidi::Object, ump: Option<&UmpEndpointInfo>) -> UmpCapability {
+fn endpoint_capability(object: &coremidi::Object, ump: Option<&UmpEndpointInfo>) -> Endpoint {
     if let Some(ump) = ump {
         return ump_capability(ump);
     }
     let protocol_id: std::result::Result<i32, _> = Properties::protocol_id().value_from(object);
     match protocol_id {
-        Ok(id) if id == PROTOCOL_ID_MIDI_2_0 => UmpCapability::midi2(),
-        _ => UmpCapability::midi1(),
+        // `kMIDIProtocol_1_0` is 1 and `kMIDIProtocol_2_0` is 2; any other value
+        // is reserved, which reads as MIDI 1.0.
+        Ok(id) => from_os(read_protocol(u8::try_from(id).unwrap_or(u8::MAX)), None, []),
+        Err(_) => legacy(),
     }
 }
 
@@ -143,7 +142,7 @@ fn endpoint_capability(object: &coremidi::Object, ump: Option<&UmpEndpointInfo>)
 fn input_protocol(source: &coremidi::Object, ump: Option<&UmpEndpointInfo>) -> CmProtocol {
     let midi2 = match ump {
         Some(ump) => ump.offered.midi2,
-        None => endpoint_capability(source, None).protocol == Protocol::Midi2,
+        None => carries_midi2_only(&endpoint_capability(source, None)),
     };
     if midi2 {
         CmProtocol::Midi20
@@ -152,17 +151,17 @@ fn input_protocol(source: &coremidi::Object, ump: Option<&UmpEndpointInfo>) -> C
     }
 }
 
-/// A UMP Endpoint as a capability: the Protocol it has in use (having blocks is
-/// not having the MIDI 2.0 Protocol) and the blocks the spec can hold.
-fn ump_capability(ump: &UmpEndpointInfo) -> UmpCapability {
-    UmpCapability {
-        protocol: ump.protocol,
-        blocks: blocks_of(
-            ump.blocks
-                .iter()
-                .map(|block| (block.info, block.name.as_deref())),
-        ),
-    }
+/// A UMP Endpoint as the Endpoint it describes: the Protocol it has in use
+/// (having blocks is not having the MIDI 2.0 Protocol), the protocols it offers
+/// and the blocks the spec can hold.
+fn ump_capability(ump: &UmpEndpointInfo) -> Endpoint {
+    from_os(
+        ump.protocol,
+        Some(&ump.offered),
+        ump.blocks
+            .iter()
+            .map(|block| (block.info, block.name.as_deref())),
+    )
 }
 
 /// The UMP Endpoint whose source (`input`) or destination has unique id `id`.
@@ -455,7 +454,7 @@ impl CoreMidiOutput {
 impl DeviceOut for CoreMidiOutput {
     fn follow(&self, protocol: Protocol) {
         // A reserved protocol value is one nobody can speak: unknown means
-        // MIDI 1.0, the conservative direction (see `UmpCapability::default`).
+        // MIDI 1.0, the conservative direction (see `OsEndpoint::capability`).
         self.midi2
             .store(protocol == Protocol::Midi2, Ordering::Relaxed);
     }

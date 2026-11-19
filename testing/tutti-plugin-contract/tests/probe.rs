@@ -417,9 +417,9 @@ macro_rules! measured_cases {
                 assert_eq!(m.verdict.tail, TailVerdict::Honest, "{m:?}");
                 assert_eq!(m.verdict.latency, LatencyVerdict::Honest, "{m:?}");
                 assert_eq!(m.tail, Some(spec::RING));
-                assert_eq!(m.latency, Some(Samples(0)));
+                assert_eq!(m.latency, Some(Samples::new(0)));
                 assert_eq!(m.config.rate, SampleRate::SR_48K);
-                assert_eq!(m.config.block, MaxBlock::new(Samples(512)).unwrap());
+                assert_eq!(m.config.block, MaxBlock::new(Samples::new(512)).unwrap());
                 assert_eq!(m.config.floor, PROBE_FLOOR);
                 assert_eq!(m.config.state, StateHash::of(&state));
             }
@@ -429,7 +429,7 @@ macro_rules! measured_cases {
             #[test]
             fn a_plugin_that_rings_longer_than_it_reports_is_tail_longer() {
                 let (m, _) = run(spec::RINGS_LONGER, 0);
-                let longer = Samples(spec::RING.get() + spec::RING_EXTRA.get());
+                let longer = Samples::new(spec::RING.get() + spec::RING_EXTRA.get());
                 assert_eq!(
                     m.verdict.tail,
                     TailVerdict::TailLonger {
@@ -488,12 +488,12 @@ macro_rules! measured_cases {
                 assert_eq!(
                     m.verdict.latency,
                     LatencyVerdict::LatencyDiffers {
-                        reported: Samples(0),
+                        reported: Samples::new(0),
                         measured: spec::LATE
                     }
                 );
                 assert_eq!(m.latency, Some(spec::LATE));
-                let late_tail = Samples(spec::RING.get() + spec::LATE.get());
+                let late_tail = Samples::new(spec::RING.get() + spec::LATE.get());
                 assert_eq!(
                     m.verdict.tail,
                     TailVerdict::TailLonger {

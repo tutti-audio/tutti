@@ -46,12 +46,12 @@ const FRAMES: usize = 200;
 /// `sends`, rendered in blocks of `block`.
 fn render(sends: Vec<(u64, ParamSegment)>, block: usize) -> Vec<f32> {
     let controls = CompressorControls {
-        threshold: Db(-20.0),
-        knee: Db(0.0),
-        ratio: CompressionRatio(1.0),
-        attack: Seconds(0.0),
-        release: Seconds(0.0),
-        makeup: Db(0.0),
+        threshold: Db::new(-20.0),
+        knee: Db::new(0.0),
+        ratio: CompressionRatio::new(1.0),
+        attack: Seconds::new(0.0),
+        release: Seconds::new(0.0),
+        makeup: Db::new(0.0),
         ..CompressorControls::DEFAULT
     };
     let mut g = GraphBuilder::new(
@@ -71,7 +71,7 @@ fn render(sends: Vec<(u64, ParamSegment)>, block: usize) -> Vec<f32> {
     let mut r = g
         .renderer(Prepare::new(
             SampleRate::SR_48K,
-            MaxBlock::of(Samples(block)),
+            MaxBlock::of(Samples::new(block)),
         ))
         .expect("builds");
     let at = ParamIn {
@@ -87,7 +87,7 @@ fn render(sends: Vec<(u64, ParamSegment)>, block: usize) -> Vec<f32> {
 }
 
 fn step(to: f64) -> ParamSegment {
-    ParamSegment::unit(UnitParam::Ratio, to, to, Samples(0), Law::Linear)
+    ParamSegment::unit(UnitParam::Ratio, to, to, Samples::new(0), Law::Linear)
 }
 
 /// **A ratio stepped between grid points lands on its own frame, at any
@@ -123,7 +123,7 @@ fn a_step_on_a_slow_control_lands_on_its_frame() {
         );
     }
     let mut resent = sends;
-    resent.push((70, step(4.0).resumed(Samples(0), Samples(0))));
+    resent.push((70, step(4.0).resumed(Samples::new(0), Samples::new(0))));
     let again = render(resent, 64);
     assert!(
         one.iter()

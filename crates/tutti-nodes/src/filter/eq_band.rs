@@ -207,7 +207,12 @@ mod tests {
         use crate::test_support::{F64_TOLERANCE, RATE, render_f64};
         const DC: f64 = 0x2000_0001 as f64 / 2_147_483_648.0;
         let x = vec![DC; 4_096];
-        let node = EqBandNode::<f64>::new(SvfType::LowPass, Hz(1_000.0), Q(0.707), Db(0.0));
+        let node = EqBandNode::<f64>::new(
+            SvfType::LowPass,
+            Hz::new(1_000.0),
+            Q::new(0.707),
+            Db::new(0.0),
+        );
         let settled = render_f64(node, RATE, &[&x], 4_096)[0][4_095];
         assert!(
             (settled - DC).abs() <= F64_TOLERANCE,

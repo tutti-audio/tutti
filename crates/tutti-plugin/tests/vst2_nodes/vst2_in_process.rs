@@ -385,7 +385,7 @@ fn the_node_reports_the_decoded_tail_rather_than_unknown() {
     for (raw, want) in [
         ("0", PluginTail::Unknown),
         ("1", PluginTail::None),
-        ("48000", PluginTail::Finite(Samples(48_000))),
+        ("48000", PluginTail::Finite(Samples::new(48_000))),
     ] {
         let _lock = lock_probe();
         let path: PathBuf = tutti_fixtures::vst2_probe().to_path_buf();
@@ -452,7 +452,7 @@ fn midi_past_the_blocks_capacity_is_counted() {
         (0..n)
             .map(|i| {
                 let on = midi::note_on(MidiChannel::FIRST, (i % 128) as u8, 0xFFFF);
-                Event::midi(Offset::of(Samples(i), Samples(512)), on)
+                Event::midi(Offset::of(Samples::new(i), Samples::new(512)), on)
             })
             .collect()
     };

@@ -63,7 +63,7 @@ struct Rig {
 
 impl Rig {
     fn new(instrument: impl tutti_graph::IntoNode) -> Self {
-        let (mut ed, exec) = Editor::new(Prepare::new(RATE, MaxBlock::of(Samples(BLOCK))));
+        let (mut ed, exec) = Editor::new(Prepare::new(RATE, MaxBlock::of(Samples::new(BLOCK))));
         let (inlet, tx) = EventInletNode::pair(EventCapacity::of(256));
         ed.insert(NodeKey(1), "inlet", Unforkable(inlet));
         ed.insert(NodeKey(2), "instrument", instrument);
@@ -236,7 +236,7 @@ fn a_crossfade_between_fonts_chases_the_incoming_unit() {
         .replace(
             NodeKey(2),
             Unforkable(unit()),
-            Fade::new(Samples(2 * BLOCK), FadeLaw::EqualPower),
+            Fade::new(Samples::new(2 * BLOCK), FadeLaw::EqualPower),
         )
         .expect("fits");
     rig.ed.commit().expect("commits");

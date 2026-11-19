@@ -635,7 +635,8 @@ impl<F: SynthFloat> PolySynth<F> {
             let (from_left, to_left) = (F::from_unit(from.left), F::from_unit(to.left));
             let (from_right, to_right) = (F::from_unit(from.right), F::from_unit(to.right));
             let ramp = |from: F, to: F, i: usize| {
-                let along = F::from_unit(Normalized::progress(Samples(i + 1), Samples(n)));
+                let along =
+                    F::from_unit(Normalized::progress(Samples::new(i + 1), Samples::new(n)));
                 tutti_dsp::lerp(from, to, along)
             };
             for (i, (&l, &r)) in left.iter().zip(right).enumerate() {

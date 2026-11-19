@@ -234,9 +234,9 @@ impl Control for Vst3Loaded {
     /// `setActive(1)`); a loaded plugin reports none.
     fn wiring(&self, main: MainThreadMarker) -> LoadedPlugin {
         let latency_samples = if self.active.is_active() {
-            Samples(self.latency_samples(main) as usize)
+            Samples::new(self.latency_samples(main) as usize)
         } else {
-            Samples(0)
+            Samples::new(0)
         };
         LoadedPlugin {
             inputs: self.buses(main, BusDirection::Input),

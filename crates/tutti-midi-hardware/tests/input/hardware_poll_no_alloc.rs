@@ -58,7 +58,7 @@ impl Rig {
         let inlets = inputs.inlets();
         let (mut editor, exec) = Editor::new(Prepare::new(
             SampleRate::of(RATE),
-            MaxBlock::of(Samples(1024)),
+            MaxBlock::of(Samples::new(1024)),
         ));
         // An ingest node for each port, the first one's channel 0 under the tap.
         for (input, node) in ports.into_iter().enumerate() {

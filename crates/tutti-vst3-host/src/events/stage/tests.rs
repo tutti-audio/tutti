@@ -19,7 +19,7 @@ const TEST_BLOCK: usize = 1 << 16;
 
 /// The offset `k` frames into a test block.
 fn at(k: usize) -> Offset {
-    Offset::of(Samples(k), Samples(TEST_BLOCK))
+    Offset::of(Samples::new(k), Samples::new(TEST_BLOCK))
 }
 
 fn midi_only(midi: &[UmpAt]) -> InputEvents<'_> {

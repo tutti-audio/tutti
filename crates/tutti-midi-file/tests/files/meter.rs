@@ -33,10 +33,10 @@ const TWO_METERS: &[u8] = &[
 fn a_time_signature_at_tick_zero_is_the_meter_from_beat_zero() {
     let file = smf(0, &[&[0, 0xFF, 0x58, 4, 3, 2, 24, 8]]);
     let map = metrical(&file).meter_map();
-    let at = map.bar_at(Beat(4.0));
-    assert_eq!(map.at(Beat(0.0)), TimeSignature::of(3, 4));
+    let at = map.bar_at(Beat::new(4.0));
+    assert_eq!(map.at(Beat::new(0.0)), TimeSignature::of(3, 4));
     // Bars of 3 quarters: beat 4 is the second beat of bar 2.
-    assert_eq!((at.bar, at.beat), (BarNumber(2), BeatsPerBar::of(2)));
+    assert_eq!((at.bar, at.beat), (BarNumber::new(2), BeatsPerBar::of(2)));
     assert!(metrical(&file).refused_time_signatures().is_empty());
 }
 
@@ -44,12 +44,12 @@ fn a_time_signature_at_tick_zero_is_the_meter_from_beat_zero() {
 fn a_later_time_signature_changes_the_meter_at_its_beat() {
     let file = smf(0, &[TWO_METERS]);
     let map = metrical(&file).meter_map();
-    assert_eq!(map.at(Beat(2.9)), TimeSignature::of(3, 4));
-    assert_eq!(map.at(Beat(3.0)), TimeSignature::of(6, 8));
-    assert_eq!(map.bar_start(BarNumber(2)), Beat(3.0));
+    assert_eq!(map.at(Beat::new(2.9)), TimeSignature::of(3, 4));
+    assert_eq!(map.at(Beat::new(3.0)), TimeSignature::of(6, 8));
+    assert_eq!(map.bar_start(BarNumber::new(2)), Beat::new(3.0));
     // Bars of 6 eighths are 3 quarters: beat 4.5 is the fourth eighth of bar 3.
-    let at = map.bar_at(Beat(4.5));
-    assert_eq!((at.bar, at.beat), (BarNumber(2), BeatsPerBar::of(4)));
+    let at = map.bar_at(Beat::new(4.5));
+    assert_eq!((at.bar, at.beat), (BarNumber::new(2), BeatsPerBar::of(4)));
 }
 
 #[test]
@@ -57,8 +57,8 @@ fn a_sequences_meter_is_its_own_tracks() {
     let file = smf(2, &[TWO_METERS, &[0, 0xFF, 0x58, 4, 5, 2, 24, 8]]);
     let view = sequences(&file);
     let meters: Vec<_> = view.sequences().map(|s| s.meter_map()).collect();
-    assert_eq!(meters[0].at(Beat(3.0)), TimeSignature::of(6, 8));
-    assert_eq!(meters[1].at(Beat(3.0)), TimeSignature::of(5, 4));
+    assert_eq!(meters[0].at(Beat::new(3.0)), TimeSignature::of(6, 8));
+    assert_eq!(meters[1].at(Beat::new(3.0)), TimeSignature::of(5, 4));
 }
 
 /// A numerator of 0 is no time signature: it is no change, and it is listed.
@@ -66,10 +66,10 @@ fn a_sequences_meter_is_its_own_tracks() {
 fn a_time_signature_no_meter_holds_is_listed_and_makes_no_change() {
     let file = smf(0, &[&[0x87, 0x40, 0xFF, 0x58, 4, 0, 2, 24, 8]]);
     let view = metrical(&file);
-    assert_eq!(view.meter_map().at(Beat(9.0)), TimeSignature::of(4, 4));
+    assert_eq!(view.meter_map().at(Beat::new(9.0)), TimeSignature::of(4, 4));
     let refused = view.refused_time_signatures();
     assert_eq!(refused.len(), 1);
-    assert_eq!((refused[0].beat, refused[0].numerator), (Beat(2.0), 0));
+    assert_eq!((refused[0].beat, refused[0].numerator), (Beat::new(2.0), 0));
 }
 
 /// A change that is not on a bar line starts a bar there: the bar before it is
@@ -85,8 +85,8 @@ fn a_change_off_a_bar_line_leaves_the_bar_before_it_short() {
         ]],
     );
     let map = metrical(&file).meter_map();
-    assert_eq!(map.bar_start(BarNumber(2)), Beat(4.0));
-    assert_eq!(map.bar_start(BarNumber(3)), Beat(5.0));
-    assert_eq!(map.bar_start(BarNumber(4)), Beat(8.0));
-    assert_eq!(map.bar_at(Beat(5.0)).bar, BarNumber(3));
+    assert_eq!(map.bar_start(BarNumber::new(2)), Beat::new(4.0));
+    assert_eq!(map.bar_start(BarNumber::new(3)), Beat::new(5.0));
+    assert_eq!(map.bar_start(BarNumber::new(4)), Beat::new(8.0));
+    assert_eq!(map.bar_at(Beat::new(5.0)).bar, BarNumber::new(3));
 }

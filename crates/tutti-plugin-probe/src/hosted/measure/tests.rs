@@ -93,7 +93,7 @@ impl Fake {
         buf: &mut InputOutput<'_, f32>,
         ctx: &ProcessContext<'_>,
     ) -> PluginResult<()> {
-        let frames = buf.frames().0;
+        let frames = buf.frames().get();
         let (input, mut output) = buf.split();
         let mut events = ctx.midi_events.iter().peekable();
         for i in 0..frames {
@@ -138,7 +138,7 @@ fn effect(tail: PluginTail, latency: usize) -> Subject {
         outputs: 2,
         instrument: false,
         tail,
-        latency: Samples(latency),
+        latency: Samples::new(latency),
     }
 }
 
@@ -148,12 +148,12 @@ fn instrument(tail: PluginTail) -> Subject {
         outputs: 2,
         instrument: true,
         tail,
-        latency: Samples(0),
+        latency: Samples::new(0),
     }
 }
 
 fn finite(n: usize) -> PluginTail {
-    PluginTail::Finite(Samples(n))
+    PluginTail::Finite(Samples::new(n))
 }
 
 /// **A plugin that rings exactly as long as it says is `Honest`**, and the
@@ -161,9 +161,9 @@ fn finite(n: usize) -> PluginTail {
 #[test]
 fn a_tail_that_equals_the_claim_is_honest() {
     let m = measure_at(&mut Fake::new(0, 8191), effect(finite(8191), 0), primary()).unwrap();
-    assert_eq!(m.tail, Some(Samples(8191)));
+    assert_eq!(m.tail, Some(Samples::new(8191)));
     assert_eq!(m.verdict.tail, TailVerdict::Honest);
-    assert_eq!(m.latency, Some(Samples(0)));
+    assert_eq!(m.latency, Some(Samples::new(0)));
     assert_eq!(m.verdict.latency, LatencyVerdict::Honest);
     assert!(m.verdict.is_honest());
 }
@@ -177,8 +177,8 @@ fn a_tail_longer_than_the_claim_is_tail_longer() {
         assert_eq!(
             m.verdict.tail,
             TailVerdict::TailLonger {
-                reported: Samples(claim),
-                measured: Samples(ring)
+                reported: Samples::new(claim),
+                measured: Samples::new(ring)
             },
             "claim {claim}, ring {ring}"
         );
@@ -190,7 +190,7 @@ fn a_tail_longer_than_the_claim_is_tail_longer() {
 fn a_claim_longer_than_the_ring_is_honest() {
     let m = measure_at(&mut Fake::new(0, 100), effect(finite(8191), 0), primary()).unwrap();
     assert_eq!(m.verdict.tail, TailVerdict::Honest);
-    assert_eq!(m.tail, Some(Samples(100)));
+    assert_eq!(m.tail, Some(Samples::new(100)));
 }
 
 /// **The figure does not depend on where the block edges fall**: the same ring
@@ -204,7 +204,7 @@ fn the_figure_is_the_same_at_every_configuration() {
             config(rate, block),
         )
         .unwrap();
-        assert_eq!(m.tail, Some(Samples(8191)), "{rate:?} {block:?}");
+        assert_eq!(m.tail, Some(Samples::new(8191)), "{rate:?} {block:?}");
         assert_eq!(m.config.block, block);
     }
 }
@@ -213,7 +213,7 @@ fn the_figure_is_the_same_at_every_configuration() {
 /// `NeverSettles`, not `TailLonger`**, and nothing else is judged.
 #[test]
 fn a_plugin_that_makes_its_own_sound_never_settles() {
-    let bias = Db(-60.0).to_amplitude().get() as f32;
+    let bias = Db::new(-60.0).to_amplitude().get() as f32;
     let m = measure_at(
         &mut Fake::new(0, 8191).with_bias(bias),
         effect(finite(8191), 0),
@@ -238,8 +238,8 @@ fn a_plugin_that_makes_its_own_sound_never_settles() {
 /// over it is sound.
 #[test]
 fn the_floor_is_the_boundary_of_sound() {
-    let under = Db(-101.0).to_amplitude().get() as f32;
-    let over = Db(-99.0).to_amplitude().get() as f32;
+    let under = Db::new(-101.0).to_amplitude().get() as f32;
+    let over = Db::new(-99.0).to_amplitude().get() as f32;
     let quiet = measure_at(
         &mut Fake::new(0, 100).with_bias(under),
         effect(finite(100), 0),
@@ -283,11 +283,11 @@ fn an_unbounded_claim_is_not_checked_but_its_latency_is() {
         assert_eq!(
             m.verdict.latency,
             LatencyVerdict::LatencyDiffers {
-                reported: Samples(0),
-                measured: Samples(64)
+                reported: Samples::new(0),
+                measured: Samples::new(64)
             }
         );
-        assert_eq!(m.latency, Some(Samples(64)));
+        assert_eq!(m.latency, Some(Samples::new(64)));
     }
 }
 
@@ -303,8 +303,8 @@ fn the_tail_excludes_the_reported_latency() {
     )
     .unwrap();
     assert_eq!(m.verdict.latency, LatencyVerdict::Honest);
-    assert_eq!(m.latency, Some(Samples(137)));
-    assert_eq!(m.tail, Some(Samples(5000)));
+    assert_eq!(m.latency, Some(Samples::new(137)));
+    assert_eq!(m.tail, Some(Samples::new(5000)));
     assert_eq!(m.verdict.tail, TailVerdict::Honest);
 }
 
@@ -321,8 +321,8 @@ fn a_latency_that_differs_is_recorded_beside_a_longer_tail() {
     assert_eq!(
         m.verdict.latency,
         LatencyVerdict::LatencyDiffers {
-            reported: Samples(137),
-            measured: Samples(200)
+            reported: Samples::new(137),
+            measured: Samples::new(200)
         }
     );
     assert!(matches!(m.verdict.tail, TailVerdict::TailLonger { .. }));
@@ -355,7 +355,7 @@ fn a_silent_plugin_has_no_onset() {
 #[test]
 fn an_instruments_tail_is_measured_from_its_note_off() {
     let honest = measure_at(&mut Fake::new(0, 3000), instrument(finite(3000)), primary()).unwrap();
-    assert_eq!(honest.tail, Some(Samples(3000)));
+    assert_eq!(honest.tail, Some(Samples::new(3000)));
     assert_eq!(honest.verdict.tail, TailVerdict::Honest);
     assert_eq!(
         honest.verdict.latency,
@@ -365,18 +365,18 @@ fn an_instruments_tail_is_measured_from_its_note_off() {
     // frames late (reported) and rings 3000 more after the note-off reads 3000,
     // not 3137 and not the 100 ms the note was held.
     let late = Subject {
-        latency: Samples(137),
+        latency: Samples::new(137),
         ..instrument(finite(3000))
     };
     let m = measure_at(&mut Fake::new(137, 3000), late, primary()).unwrap();
-    assert_eq!(m.tail, Some(Samples(3000)));
+    assert_eq!(m.tail, Some(Samples::new(3000)));
     assert_eq!(m.verdict.tail, TailVerdict::Honest);
     let longer = measure_at(&mut Fake::new(0, 3000), instrument(finite(2999)), primary()).unwrap();
     assert_eq!(
         longer.verdict.tail,
         TailVerdict::TailLonger {
-            reported: Samples(2999),
-            measured: Samples(3000)
+            reported: Samples::new(2999),
+            measured: Samples::new(3000)
         }
     );
 }
@@ -385,7 +385,7 @@ fn an_instruments_tail_is_measured_from_its_note_off() {
 /// `NotChecked`**: a held note has no lower bound to report.
 #[test]
 fn an_instrument_that_does_not_settle_in_the_budget_is_not_checked() {
-    let forever = Seconds(70.0).to_samples_ceil(primary().rate).get();
+    let forever = Seconds::new(70.0).to_samples_ceil(primary().rate).get();
     let m = measure_at(
         &mut Fake::new(0, forever),
         instrument(finite(1000)),
@@ -404,7 +404,7 @@ fn an_instrument_that_does_not_settle_in_the_budget_is_not_checked() {
 /// figure the plugin outlives.
 #[test]
 fn an_effect_that_outlasts_the_budget_raises_the_ceiling_to_unbounded() {
-    let forever = Seconds(70.0).to_samples_ceil(primary().rate).get();
+    let forever = Seconds::new(70.0).to_samples_ceil(primary().rate).get();
     let m = measure_at(
         &mut Fake::new(0, forever),
         effect(finite(1000), 0),
@@ -431,7 +431,9 @@ fn an_effect_that_outlasts_the_budget_raises_the_ceiling_to_unbounded() {
 #[test]
 fn the_budget_exceeds_the_graphs_bound_at_every_rate() {
     for (rate, block) in CONFIGS {
-        let forever = (MAX_NODE_TAIL + Seconds(10.0)).to_samples_ceil(rate).get();
+        let forever = (MAX_NODE_TAIL + Seconds::new(10.0))
+            .to_samples_ceil(rate)
+            .get();
         let m = measure_at(
             &mut Fake::new(0, forever),
             effect(finite(1000), 0),
@@ -461,7 +463,7 @@ fn the_bound_follows_the_measured_rate() {
     let rate = SampleRate::SR_96K;
     let block = CONFIGS[0].1;
     let run = |seconds: f64| {
-        let ring = Seconds(seconds).to_samples_ceil(rate).get();
+        let ring = Seconds::new(seconds).to_samples_ceil(rate).get();
         let m = measure_at(
             &mut Fake::new(0, ring),
             effect(finite(1000), 0),
@@ -507,9 +509,9 @@ fn the_settle_window_starts_after_the_reported_latency() {
         primary(),
     )
     .unwrap();
-    assert_eq!(m.latency, Some(Samples(latency)));
+    assert_eq!(m.latency, Some(Samples::new(latency)));
     assert_eq!(m.verdict.latency, LatencyVerdict::Honest);
-    assert_eq!(m.tail, Some(Samples(1000)));
+    assert_eq!(m.tail, Some(Samples::new(1000)));
     assert_eq!(m.verdict.tail, TailVerdict::Honest);
 }
 

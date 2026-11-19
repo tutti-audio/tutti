@@ -39,9 +39,9 @@ fn unit() -> SoundFontUnit<f32> {
 fn graph(unit: SoundFontUnit<f32>, rate: f64, frame: u64) -> (Editor, Executor) {
     let (mut ed, exec) = Editor::new(Prepare::new(
         SampleRate::of(rate),
-        MaxBlock::of(Samples(BLOCK)),
+        MaxBlock::of(Samples::new(BLOCK)),
     ));
-    let beat = Beat(frame as f64 / (rate / 2.0));
+    let beat = Beat::new(frame as f64 / (rate / 2.0));
     let velocity = widen_velocity(U7::of(100)).get(); // 7-bit 100, widened (M2-115)
     let on = midi::note_on(MidiChannel::FIRST, 60, velocity);
     ed.insert(
@@ -76,7 +76,7 @@ fn render(ed: Editor, exec: Executor, rate: f64, frames: usize) -> Vec<f32> {
         TransportPosition::new(
             true,
             Bpm::of(120.0),
-            Beat(f.get() as f64 / (rate / 2.0)),
+            Beat::new(f.get() as f64 / (rate / 2.0)),
             None,
         )
     });

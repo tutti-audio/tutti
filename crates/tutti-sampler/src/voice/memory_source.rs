@@ -649,7 +649,7 @@ impl<F: Float> MemorySource<F> {
     /// `read_frame` owns that policy.
     #[inline]
     pub fn sample_raw_into(&self, position: SamplePosition, out: &mut [F]) {
-        if position >= SamplePosition(0.0).advanced_by(self.wave.len()) {
+        if position >= SamplePosition::new(0.0).advanced_by(self.wave.len()) {
             out.fill(F::ZERO);
             return;
         }
@@ -693,7 +693,7 @@ impl<F: Float> MemorySource<F> {
             Direction::Forward => match LoopSpan::from_setting(self.loop_, self.wave.len().get()) {
                 Some(span) => {
                     let (p, looped) = span.place(pos.get());
-                    self.read_looped_raw_into(&span, SamplePosition(p), looped, out);
+                    self.read_looped_raw_into(&span, SamplePosition::new(p), looped, out);
                 }
                 None => self.sample_raw_into(pos, out),
             },
@@ -710,7 +710,7 @@ impl<F: Float> MemorySource<F> {
         looped: bool,
         out: &mut [F],
     ) {
-        if p >= SamplePosition(0.0).advanced_by(self.wave.len()) {
+        if p >= SamplePosition::new(0.0).advanced_by(self.wave.len()) {
             out.fill(F::ZERO);
             return;
         }
@@ -871,7 +871,9 @@ impl<F: Float> MemorySource<F> {
                 // `read_placed_into`.
                 let p = match (direction, &span) {
                     (Direction::Reverse, _) if p >= flen => return None,
-                    (Direction::Reverse, _) => mirrored(Samples::new(len), SamplePosition(p)).get(),
+                    (Direction::Reverse, _) => {
+                        mirrored(Samples::new(len), SamplePosition::new(p)).get()
+                    }
                     (Direction::Forward, Some(span)) => span.place(p).0,
                     (Direction::Forward, None) => p,
                 };
@@ -879,7 +881,7 @@ impl<F: Float> MemorySource<F> {
             });
             (index[i], frac[i], live[i]) = match at {
                 Some(at) => {
-                    let (idx, f) = split_position(SamplePosition(at));
+                    let (idx, f) = split_position(SamplePosition::new(at));
                     // `idx` ≤ `len` (a fraction rounding up to the next
                     // frame), and `len` fits a `u32` (above).
                     (idx as u32, f, true)
@@ -1050,14 +1052,14 @@ impl<F: Float> MemorySource<F> {
         match &span {
             Some(span) => {
                 let looped = self.looped.load(Ordering::Relaxed);
-                self.read_looped_raw_into(span, SamplePosition(pos), looped, out);
+                self.read_looped_raw_into(span, SamplePosition::new(pos), looped, out);
                 self.apply_gain(out);
             }
-            None => self.sample_into(SamplePosition(pos), out),
+            None => self.sample_into(SamplePosition::new(pos), out),
         }
 
         // One output sample's worth of source material.
-        let new_pos = pos + self.read_rate().advance(Samples(1)).get();
+        let new_pos = pos + self.read_rate().advance(Samples::new(1)).get();
 
         // A range with nothing in it keeps its old meaning: the cursor pins to
         // its start (`wrap_into_loop`), rather than play on as one-shot.
@@ -1167,9 +1169,9 @@ impl<F: Float> MemorySource<F> {
             out.fill(F::ZERO);
             return;
         }
-        self.read_placed_into(SamplePosition(pos), Direction::Reverse, out);
+        self.read_placed_into(SamplePosition::new(pos), Direction::Reverse, out);
         self.apply_gain(out);
-        let next = pos + self.read_rate().advance(Samples(1)).get();
+        let next = pos + self.read_rate().advance(Samples::new(1)).get();
         self.position.store(SamplePosition::new(next));
     }
 
@@ -1339,8 +1341,10 @@ fn crossfade_wraps<F: Float, H: AsMut<[F]>>(
         let end = run.end.min(run.start + wrap.left());
         for at in run.start..end {
             let i = at - base;
-            let (g_out, g_in) =
-                FadeLaw::EqualPower.gains(Samples(wrap.ago + at - run.start), Samples(wrap.len));
+            let (g_out, g_in) = FadeLaw::EqualPower.gains(
+                Samples::new(wrap.ago + at - run.start),
+                Samples::new(wrap.len),
+            );
             let (g_out, g_in) = (F::from_unit(g_out), F::from_unit(g_in));
             let g_in = if own_start { F::ONE } else { g_in };
             // A tail that has ended leaves the head to finish its ramp.
@@ -1477,7 +1481,7 @@ impl<F: Float> Node<F> for MemorySource<F> {
         self.driven_gain = self
             .declared_param::<{ UnitParam::Volume as u16 }, _>(&io)
             .last_frame()
-            .map(|v| Amplitude(Into::<f64>::into(v).max(0.0)));
+            .map(|v| Amplitude::new(Into::<f64>::into(v).max(0.0)));
         // Lent for the block and given back after it: the render borrows the
         // whole source.
         let mut reader = self.tempo.take();
