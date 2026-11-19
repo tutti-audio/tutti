@@ -7,7 +7,7 @@ use super::MAX_TAIL_FRAMES;
 use super::butterworth::{check_cutoff, check_gain, gain_root};
 use super::{Sos, SosError};
 use crate::design::prewarp;
-use crate::{Biquad, Ring};
+use crate::{Biquad, DecayTime};
 
 /// A tilt equalizer, described without a sample rate: the analog first-order shelf
 /// `H(s) = (A s + 1) / (s + A)` in `s / wc`, for the center `wc` and `A = 10^(gain / 40)`.
@@ -84,13 +84,18 @@ impl Tilt {
     /// `m >= 1` with `c = b1 - b0 a1 = 2 g (1 - A^2) / (1 + A g)^2`, so the tail sum is
     /// `c r^(n-1) / (1 - r)` and `n` is the first frame that brings it to `floor`.
     ///
-    /// [`Ring::Unbounded`] for a ring-out past `2^24` frames or a floor that is not a number or
+    /// [`DecayTime::Unbounded`] for a ring-out past `2^24` frames or a floor that is not a number or
     /// is infinite.
     ///
     /// # Errors
     ///
     /// As [`design`](Self::design).
-    pub fn ring_out(&self, center: Hz, rate: SampleRate, floor: Db) -> Result<Ring, SosError> {
+    pub fn decay_time(
+        &self,
+        center: Hz,
+        rate: SampleRate,
+        floor: Db,
+    ) -> Result<DecayTime, SosError> {
         let fc = check_cutoff(center, rate)?;
         let a = gain_root(check_gain(self.gain)?);
         let g = prewarp(fc, rate);
@@ -100,28 +105,28 @@ impl Tilt {
 
     /// The time after which the output of every tilt with a center in `[lowest, highest]`
     /// and a gain of magnitude at most `largest`, to any input in `[-1, 1]` that stops,
-    /// stays under `floor`: a bound on [`ring_out`](Self::ring_out) over those controls.
+    /// stays under `floor`: a bound on [`decay_time`](Self::decay_time) over those controls.
     ///
     /// With `x = A g` (`A` the root of the amplitude gain, `g = tan(pi fc / fs)`) the tail
-    /// sum of `ring_out` is `S r^(n-1)` for `S = c / (1 - r)` and `r = |x - 1| / (x + 1)`.
+    /// sum of `decay_time` is `S r^(n-1)` for `S = c / (1 - r)` and `r = |x - 1| / (x + 1)`.
     /// Then `S = g |1 - A^2| / ((1 + x) min(x, 1))` is at most `|1 / A - A|`, which is
     /// under `A_max = 10^(largest / 40)`, so `n <= 1 + ln(A_max / floor) / L` for `L = -ln r
     /// = ln((x + 1) / |x - 1|)`. `L` rises on `(0, 1)` and falls on `(1, inf)`, so over
     /// `x` in `[g_lowest / A_max, A_max g_highest]` it is least at an end of that range, and
     /// the bound is taken there. The ends of the centers may be given in either order.
-    /// [`Ring::Unbounded`] as for [`ring_out`](Self::ring_out).
+    /// [`DecayTime::Unbounded`] as for [`decay_time`](Self::decay_time).
     ///
     /// # Errors
     ///
     /// [`SosError::CutoffOutOfRange`] for either end of the centers, and
     /// [`SosError::GainOutOfRange`] for `largest` beyond [`MAX_GAIN_MAGNITUDE`](super::MAX_GAIN_MAGNITUDE).
-    pub fn ring_out_over(
+    pub fn decay_time_over(
         lowest: Hz,
         highest: Hz,
         largest: Db,
         rate: SampleRate,
         floor: Db,
-    ) -> Result<Ring, SosError> {
+    ) -> Result<DecayTime, SosError> {
         let (lo, hi) = (check_cutoff(lowest, rate)?, check_cutoff(highest, rate)?);
         let (lo, hi) = (lo.min(hi), lo.max(hi));
         let a_max = gain_root(check_gain(Db::new(largest.get().abs()))?);
@@ -152,12 +157,12 @@ fn tail_frames(a: f64, g: f64, eps: Amplitude) -> f64 {
     }
 }
 
-/// `frames` as a ring-out, [`Ring::Unbounded`] past `2^24` frames or for a floor `eps` that is
+/// `frames` as a ring-out, [`DecayTime::Unbounded`] past `2^24` frames or for a floor `eps` that is
 /// not a positive finite amplitude.
-fn finite(frames: f64, eps: Amplitude, rate: SampleRate) -> Ring {
+fn finite(frames: f64, eps: Amplitude, rate: SampleRate) -> DecayTime {
     if eps.get().is_finite() && eps.get() > 0.0 && frames <= MAX_TAIL_FRAMES as f64 {
-        Ring::Finite(Seconds::new(frames / rate.get()))
+        DecayTime::Finite(Seconds::new(frames / rate.get()))
     } else {
-        Ring::Unbounded
+        DecayTime::Unbounded
     }
 }

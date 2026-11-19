@@ -3,7 +3,7 @@
 
 use tutti_units::{Db, SampleRate, Seconds};
 
-use crate::{Complex64, Ring};
+use crate::{Complex64, DecayTime};
 
 /// A second-order section with `a0 = 1`:
 /// `H(z) = (b0 + b1 z^-1 + b2 z^-2) / (1 + a1 z^-1 + a2 z^-2)`.
@@ -52,18 +52,18 @@ impl Biquad {
     }
 }
 
-/// `Ring` of a system whose slowest pole has modulus `radius` and whose response
+/// `DecayTime` of a system whose slowest pole has modulus `radius` and whose response
 /// is `n^(m - 1) radius^n` at its slowest (a pole of multiplicity `m`): the
 /// frames until that falls to `floor`, which is the figure of a model that knows
 /// only its spectral radius, plus one time constant (`1 / -ln r`): the response
 /// peaks some frames in and not at `n = 0`, so a tail measured from the peak must
-/// not be reported short. [`Ring::Unbounded`] for a radius that is not below 1.
-pub(super) fn decay_ring(radius: f64, multiplicity: u32, floor: Db, rate: SampleRate) -> Ring {
+/// not be reported short. [`DecayTime::Unbounded`] for a radius that is not below 1.
+pub(super) fn decay_time(radius: f64, multiplicity: u32, floor: Db, rate: SampleRate) -> DecayTime {
     if radius.is_nan() || radius >= 1.0 {
-        return Ring::Unbounded;
+        return DecayTime::Unbounded;
     }
     if radius <= 0.0 {
-        return Ring::Finite(Seconds::new(0.0));
+        return DecayTime::Finite(Seconds::new(0.0));
     }
     let eps = libm::log(floor.to_amplitude().get());
     let per_frame = -libm::log(radius);
@@ -72,7 +72,7 @@ pub(super) fn decay_ring(radius: f64, multiplicity: u32, floor: Db, rate: Sample
         let poly = f64::from(multiplicity - 1) * libm::log(frames.max(2.0));
         frames = (eps.abs() + poly) / per_frame;
     }
-    Ring::Finite(Seconds::new(
+    DecayTime::Finite(Seconds::new(
         (frames.max(0.0) + 1.0 / per_frame) / rate.get(),
     ))
 }

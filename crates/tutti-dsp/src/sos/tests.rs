@@ -181,7 +181,7 @@ fn the_slowest_design_has_a_finite_tail_at_the_fastest_rate() {
                 .design(Hz::new(10.0), rate)
                 .unwrap();
             assert!(
-                matches!(sos.tail(TAIL_FLOOR), Ring::Finite(_)),
+                matches!(sos.tail(TAIL_FLOOR), DecayTime::Finite(_)),
                 "{response:?} {rate:?}"
             );
         }
@@ -244,8 +244,8 @@ fn ring_of(h: &[f64]) -> usize {
 
 fn frames_of(sos: &Sos) -> usize {
     match sos.tail(TAIL_FLOOR) {
-        Ring::Finite(s) => (s.get() * RATE.get()).round() as usize,
-        Ring::Unbounded => panic!("unbounded"),
+        DecayTime::Finite(s) => (s.get() * RATE.get()).round() as usize,
+        DecayTime::Unbounded => panic!("unbounded"),
     }
 }
 
@@ -329,7 +329,7 @@ fn the_norms_bound_the_response_and_an_unstable_cascade_is_unbounded() {
         }],
         RATE,
     );
-    assert_eq!(hot.tail(TAIL_FLOOR), Ring::Unbounded);
+    assert_eq!(hot.tail(TAIL_FLOOR), DecayTime::Unbounded);
 }
 
 /// A 5 Hz Butterworth high-pass at 192 kHz, the cascade's range extreme (an `SvfCoefficients`

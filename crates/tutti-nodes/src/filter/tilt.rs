@@ -2,7 +2,7 @@
 
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::Float;
-use tutti_dsp::{Ring, SimdLanes, Sos, SosError, Tilt};
+use tutti_dsp::{DecayTime, SimdLanes, Sos, SosError, Tilt};
 use tutti_units::{Db, Hz, SampleRate};
 
 use super::eq::sealed::Sealed;
@@ -54,8 +54,8 @@ impl TiltFilterConfig {
 /// closed form on a 16-frame grid and reached along a line in the section's coefficients
 /// over the next 16 frames with the state kept, so an automated control ramps.
 ///
-/// The tail is the tail-sum bound over every pivot and gain ([`Tilt::ring_out_over`]), the
-/// ceiling; each block narrows it to the bound of the controls in force ([`Tilt::ring_out`]). No latency. A [`KernelNode`]. Made from a
+/// The tail is the tail-sum bound over every pivot and gain ([`Tilt::decay_time_over`]), the
+/// ceiling; each block narrows it to the bound of the controls in force ([`Tilt::decay_time`]). No latency. A [`KernelNode`]. Made from a
 /// [`TiltFilterConfig`] (`TiltFilterNode::from`).
 ///
 /// # Panics
@@ -108,14 +108,14 @@ impl Sealed for TiltFilterControls {
         Tilt::new(self.gain).design_into(self.frequency, rate, into)
     }
 
-    fn ring_out(&self, rate: SampleRate, floor: Db) -> Result<Ring, SosError> {
-        Tilt::new(self.gain).ring_out(self.frequency, rate, floor)
+    fn decay_time(&self, rate: SampleRate, floor: Db) -> Result<DecayTime, SosError> {
+        Tilt::new(self.gain).decay_time(self.frequency, rate, floor)
     }
 
-    /// [`Tilt::ring_out_over`] the pivots and gains the controls are read within.
-    fn ring_ceiling(rate: SampleRate, floor: Db) -> Result<Ring, SosError> {
+    /// [`Tilt::decay_time_over`] the pivots and gains the controls are read within.
+    fn decay_ceiling(rate: SampleRate, floor: Db) -> Result<DecayTime, SosError> {
         let top = eq_center(rate.nyquist_scaled(0.99), rate);
-        Tilt::ring_out_over(MIN_EQ_CENTER, top, MAX_EQ_GAIN, rate, floor)
+        Tilt::decay_time_over(MIN_EQ_CENTER, top, MAX_EQ_GAIN, rate, floor)
     }
 }
 

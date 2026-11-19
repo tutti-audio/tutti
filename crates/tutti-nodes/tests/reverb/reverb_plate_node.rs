@@ -4,7 +4,7 @@
 //! queries and the one-pole's closed form, not another reverb's render.
 
 use tutti_buffers::Planes;
-use tutti_dsp::{Network, PlateControls, Ring, System};
+use tutti_dsp::{DecayTime, Network, PlateControls, System};
 use tutti_graph::contract::{Driven, assert_declared_tail, drive, drive_input, prepared};
 use tutti_graph::{
     Env, MAX_NODE_TAIL, Node, ParamNode, PlayClock, Status, TransportChanges, TransportPosition,
@@ -122,7 +122,7 @@ fn the_reported_tail_is_the_networks_and_honest() {
             ..PlateControls::DEFAULT
         }
         .design_into(SR, &mut network);
-        let Ring::Finite(t) = network.tail(Db::new(-60.0)) else {
+        let DecayTime::Finite(t) = network.tail(Db::new(-60.0)) else {
             panic!("finite")
         };
         let ring = f64::ln(1.0e-3) / (-std::f64::consts::TAU * 20_000.0 / SR.get());

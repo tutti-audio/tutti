@@ -30,7 +30,7 @@ use crate::reverb::network::{
     Absorption, Fdn, Gains, Inline, Line, LineModulation, MAX_LINES, Matrix, Network,
     NetworkCapacity, OutputMap, Stage, pre_delay_frames,
 };
-use crate::{MaxDecay, Ring, TAIL_FLOOR};
+use crate::{DecayTime, MaxDecay, TAIL_FLOOR};
 
 /// The line lengths at 44.1 kHz for a room size of 0.5 (the scale is
 /// `0.5 + size`), values near primes, so the delays share few factors.
@@ -380,8 +380,10 @@ impl FdnLayout {
         self.design_into(&worst, rate, &mut network);
         let mut b = NetworkCapacity::need(&network, TAIL_FLOOR);
         b.tail = match b.tail {
-            _ if self.freeze_mode == FreezeMode::Freezable => Ring::Unbounded,
-            Ring::Finite(t) => Ring::Finite(Seconds::new(t.get() * self.rounding_margin(rate))),
+            _ if self.freeze_mode == FreezeMode::Freezable => DecayTime::Unbounded,
+            DecayTime::Finite(t) => {
+                DecayTime::Finite(Seconds::new(t.get() * self.rounding_margin(rate)))
+            }
             other => other,
         };
         b

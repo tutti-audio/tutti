@@ -40,6 +40,8 @@ tutti-buffers = { version = "0.0.1", path = "../tutti-buffers" }
 tutti-platform = { version = "0.0.1", path = "../tutti-platform" }
 
 [dev-dependencies]
+# `MainThreadMarker`: the token the threading conformance suite makes.
+tutti-platform = { version = "0.0.1", path = "../tutti-platform" }
 # The README's editor example takes any `raw-window-handle` window.
 raw-window-handle = "0.6"
 tutti-clap-ffi = { path = "../tutti-clap-ffi", features = ["testing"] }

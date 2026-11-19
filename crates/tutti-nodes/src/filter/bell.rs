@@ -2,7 +2,7 @@
 
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::Float;
-use tutti_dsp::{MatchedBell, Ring, SimdLanes, Sos, SosError};
+use tutti_dsp::{DecayTime, MatchedBell, SimdLanes, Sos, SosError};
 use tutti_units::{Db, Hz, Q, SampleRate};
 
 use super::eq::sealed::Sealed;
@@ -61,7 +61,7 @@ impl BellFilterConfig {
 /// frames with the state kept, so an automated control ramps and the section stays stable.
 ///
 /// The declared tail is unbounded: the matched cut's poles have no closed-form bound over the
-/// ranges. Each block narrows it to [`MatchedBell::ring_out`] at the controls in force, the
+/// ranges. Each block narrows it to [`MatchedBell::decay_time`] at the controls in force, the
 /// first frame from which the tail sum of the impulse response is under the floor, so any
 /// input in `[-1, 1]` that stops is under the floor by then at the controls in force. No latency. A [`KernelNode`]. Made from a
 /// [`BellFilterConfig`] (`BellFilterNode::from`).
@@ -118,8 +118,8 @@ impl Sealed for BellFilterControls {
         MatchedBell::new(self.q, self.gain).design_into(self.frequency, rate, into)
     }
 
-    fn ring_out(&self, rate: SampleRate, floor: Db) -> Result<Ring, SosError> {
-        MatchedBell::new(self.q, self.gain).ring_out(self.frequency, rate, floor)
+    fn decay_time(&self, rate: SampleRate, floor: Db) -> Result<DecayTime, SosError> {
+        MatchedBell::new(self.q, self.gain).decay_time(self.frequency, rate, floor)
     }
 
     /// Unbounded. The boost's poles are `exp(-zeta w0)` with `zeta = 1 / (2 A Q)`, slowest
@@ -127,10 +127,10 @@ impl Sealed for BellFilterControls {
     /// inverse, whose poles are the boost's zeros, and the matched zeros have no
     /// closed-form bound on their radius (the numerator is fixed by three magnitudes, not
     /// by its zeros). A ceiling is a bound over every control, so the shape declares none;
-    /// each block's [`MatchedBell::ring_out`] is a bound at its controls and is what the
+    /// each block's [`MatchedBell::decay_time`] is a bound at its controls and is what the
     /// node reports.
-    fn ring_ceiling(_: SampleRate, _: Db) -> Result<Ring, SosError> {
-        Ok(Ring::Unbounded)
+    fn decay_ceiling(_: SampleRate, _: Db) -> Result<DecayTime, SosError> {
+        Ok(DecayTime::Unbounded)
     }
 }
 
