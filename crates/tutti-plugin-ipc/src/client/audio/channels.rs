@@ -1,8 +1,9 @@
 //! Lock-free message bus between audio thread and bridge thread.
 //!
 //! Two queues survive at this level: the command queue (audio thread → bridge
-//! thread) and the audio-response ring (bridge thread → audio thread, RT, one
-//! producer and one consumer).
+//! thread) and the audio-response ring (bridge thread → audio thread, RT). The
+//! ring's ends are owned, not shared: [`ResponseWriter`] by the bridge thread
+//! and [`Replies`] by the pipeline that collects chunks.
 //! Reply-bearing commands carry their own per-request `Reply<T>` so each
 //! response is routed back to its specific caller — no shared
 //! control-response queue, no risk of mismatched responses.
@@ -19,8 +20,8 @@ use std::time::Duration;
 use tutti_plugin_types::BlockCounts;
 use tutti_rt::AtomicSampleRate;
 use tutti_rt::{
-    AudioThreadCell, Counter, Doorbell, LockExt, Overflow, PackedAtomic, RingReader, RingWriter,
-    Sleeper, Tally, TallyWriter, doorbell, ring, tally,
+    Counter, Doorbell, LockExt, Overflow, PackedAtomic, RingReader, RingWriter, Sleeper, Tally,
+    TallyWriter, doorbell, ring, tally,
 };
 use tutti_units::SampleRate;
 
@@ -33,13 +34,6 @@ const RESPONSE_QUEUE_SIZE: usize = 128;
 #[derive(Clone)]
 pub(super) struct Channels {
     commands: Arc<ArrayQueue<Command>>,
-    /// The audio-response ring's producing end: the bridge thread's alone
-    /// (every `push_audio_response` runs there), so one writer.
-    responses_in: Arc<AudioThreadCell<RingWriter<AudioResponse>>>,
-    /// The consuming end: the audio side's alone (`take_replies`, called by the
-    /// pipeline that collects a chunk), so one reader. A full ring drops the
-    /// newest response and counts it in `responses_lost`.
-    responses_out: Arc<AudioThreadCell<RingReader<AudioResponse>>>,
     /// The newest block sequence the audio thread has submitted. Owned here
     /// rather than on the batcher because the *bridge* thread is what reads it,
     /// to decide whether a dequeued block is still worth sending.
@@ -85,9 +79,6 @@ pub(super) struct Channels {
     leaked_buffers: Tally<u64>,
     /// The writer of `leaked_buffers`, minted in `new`.
     leaked_writer: TallyWriter<u64>,
-    /// Audio responses the bridge thread could not queue for the audio
-    /// thread (the response ring was full), ever: the ring's own count.
-    responses_lost: Counter<u64>,
     /// How many replies the bridge thread has taken from the plugin, ever,
     /// on time or owed. With [`abandoned`](Self::abandoned) the hang
     /// verdict's input (`PluginHandle::block_counts`): a hang is abandoned
@@ -155,7 +146,8 @@ pub(crate) enum Fate {
 ///
 /// Each word stands alone and nothing is published through it (the audio is
 /// gated by the slab's sequence words), so a reader sees a fate or not yet,
-/// and tries again at its next look.
+/// and tries again at its next look. The cell's `Acquire`/`Release` is its
+/// own contract and nothing here relies on it.
 struct Fates([PackedAtomic<u64>; FATES]);
 
 impl Fates {
@@ -202,12 +194,8 @@ impl Channels {
         let (dropped_param_events, dropped_midi, skipped) = (tally(), tally(), tally());
         let (abandoned, late, commands_refused, leaked_buffers) =
             (tally(), tally(), tally(), tally());
-        let (responses_in, responses_out) = ring(RESPONSE_QUEUE_SIZE, Overflow::DropNewest);
         let channels = Self {
             commands: Arc::new(ArrayQueue::new(COMMAND_QUEUE_SIZE)),
-            responses_lost: responses_in.losses(),
-            responses_in: Arc::new(AudioThreadCell::new(responses_in)),
-            responses_out: Arc::new(AudioThreadCell::new(responses_out)),
             newest_seq: Arc::new(AtomicU64::new(0)),
             bell,
             sample_rate: Arc::new(AtomicSampleRate::new(sample_rate)),
@@ -399,11 +387,6 @@ impl Channels {
         self.leaked_buffers.clone()
     }
 
-    /// The count of audio responses lost to a full response ring.
-    pub(super) fn responses_lost_cell(&self) -> Counter<u64> {
-        self.responses_lost.clone()
-    }
-
     /// Record `n` dropped unsolicited parameter events. Bridge thread only; a
     /// count nothing branches on.
     pub(super) fn note_dropped_param_events(&self, n: u64) {
@@ -488,14 +471,6 @@ impl Channels {
         self.commands.pop()
     }
 
-    /// Queues a response for the audio thread; a full ring drops it and
-    /// counts it lost. Bridge thread only.
-    pub(super) fn push_audio_response(&self, resp: AudioResponse) {
-        // The ring counts the response it refuses (`Overflow::DropNewest`).
-        let _ = self.responses_in.borrow_mut().push(resp);
-        self.progress.notify();
-    }
-
     /// The gate a waiter on the bridge's progress sleeps on.
     pub(super) fn progress(&self) -> &Arc<crate::Wake> {
         &self.progress
@@ -506,10 +481,84 @@ impl Channels {
     pub(super) fn turn_done(&self) {
         self.progress.notify();
     }
+}
 
-    /// The oldest queued response. The audio side only.
-    pub(super) fn pop_audio_response(&self) -> Option<AudioResponse> {
-        self.responses_out.borrow_mut().pop()
+/// The producing end of the audio-response ring, owned by the bridge thread:
+/// a push can come from nowhere else, which makes the ring single-producer.
+/// A full ring drops the newest response and the ring counts it.
+pub(super) struct ResponseWriter {
+    ring: RingWriter<AudioResponse>,
+}
+
+/// The consuming end of the audio-response ring, owned by whatever collects
+/// chunks (the pipeline's batcher): a pop can come from nowhere else, which
+/// makes the ring single-consumer.
+pub struct Replies {
+    /// Boxed: the reader's cached indices are large, and `Ipc` moves by value.
+    ring: Box<RingReader<AudioResponse>>,
+}
+
+impl std::fmt::Debug for Replies {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Replies").finish_non_exhaustive()
+    }
+}
+
+/// Replies no bridge thread feeds, for a pipeline test that needs a
+/// consumer end and nothing behind it.
+#[cfg(test)]
+pub(crate) fn idle_replies() -> Replies {
+    response_ring().1
+}
+
+/// A new response ring, its two ends and the count of responses it lost.
+pub(super) fn response_ring() -> (ResponseWriter, Replies, Counter<u64>) {
+    let (writer, reader) = ring(RESPONSE_QUEUE_SIZE, Overflow::DropNewest);
+    let lost = writer.losses();
+    (
+        ResponseWriter { ring: writer },
+        Replies {
+            ring: Box::new(reader),
+        },
+        lost,
+    )
+}
+
+impl Replies {
+    /// The oldest queued response.
+    pub(super) fn pop(&mut self) -> Option<AudioResponse> {
+        self.ring.pop()
+    }
+}
+
+/// What the bridge thread holds: the shared channels and the producing end of
+/// the response ring, which is the thread's alone.
+pub(super) struct BridgeSide {
+    channels: Channels,
+    responses: ResponseWriter,
+}
+
+impl BridgeSide {
+    pub(super) fn new(channels: Channels, responses: ResponseWriter) -> Self {
+        Self {
+            channels,
+            responses,
+        }
+    }
+
+    /// Queues a response for the audio thread; a full ring drops it and
+    /// counts it lost.
+    pub(super) fn push_audio_response(&mut self, resp: AudioResponse) {
+        // The ring counts the response it refuses (`Overflow::DropNewest`).
+        let _ = self.responses.ring.push(resp);
+        self.channels.progress().notify();
+    }
+}
+
+impl std::ops::Deref for BridgeSide {
+    type Target = Channels;
+    fn deref(&self) -> &Channels {
+        &self.channels
     }
 }
 
@@ -664,17 +713,19 @@ mod tests {
         assert_eq!(c.commands_refused_cell().get(), 3);
     }
 
-    /// **A response the full response queue refuses is counted lost.**
+    /// **A response the full response ring refuses is counted lost.**
     #[test]
-    fn a_full_response_queue_counts_each_loss() {
+    fn a_full_response_ring_counts_each_loss() {
         let (c, _sleeper) = channels();
+        let (writer, _replies, lost) = response_ring();
+        let mut side = BridgeSide::new(c, writer);
         let resp = || AudioResponse::Error { seq: None };
         for _ in 0..RESPONSE_QUEUE_SIZE {
-            c.push_audio_response(resp());
+            side.push_audio_response(resp());
         }
-        assert_eq!(c.responses_lost_cell().get(), 0);
-        c.push_audio_response(resp());
-        c.push_audio_response(resp());
-        assert_eq!(c.responses_lost_cell().get(), 2);
+        assert_eq!(lost.get(), 0);
+        side.push_audio_response(resp());
+        side.push_audio_response(resp());
+        assert_eq!(lost.get(), 2);
     }
 }

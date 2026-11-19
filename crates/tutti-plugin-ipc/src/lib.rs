@@ -61,7 +61,7 @@ pub(crate) use batcher::Batcher;
 pub(crate) use batcher::{BlockPayload, Chunks};
 pub(crate) use client::audio::BridgeListener;
 pub(crate) use client::audio::HarmonyInputs;
-pub use client::audio::{AudioBridge, BridgeEvent, BridgeThread};
+pub use client::audio::{AudioBridge, BridgeEvent, BridgeThread, Replies};
 pub(crate) use client::audio::{FATES, Fate};
 pub use client::{EditorLoader, EditorSite, PluginBridge};
 pub(crate) use wake::Wake;

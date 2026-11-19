@@ -69,7 +69,7 @@
 //! never narrowed, and a 64-bit block through a 32-bit wire is narrowed once.
 
 use crate::OfflineWait;
-use crate::{AudioBridge, AudioSlab, FATES, Fate, HarmonyInputs, SlabWriter};
+use crate::{AudioBridge, AudioSlab, FATES, Fate, HarmonyInputs, Replies, SlabWriter};
 use std::ops::Range;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
@@ -348,6 +348,9 @@ pub(crate) struct Batcher {
     /// only thing that writes a chunk (`SlabWriter`). Reads go through the
     /// bridge's shared slab, which cannot write.
     slab: SlabWriter,
+    /// The consuming end of the bridge's response ring: the pipeline is the
+    /// only reader of the plugin's replies.
+    replies: Replies,
 
     /// The slab's per-chunk size: the most [`chunk`](Self::chunk) can be.
     ceiling: usize,
@@ -406,10 +409,12 @@ impl Batcher {
         format: FloatWidth,
         ceiling: usize,
         slab: SlabWriter,
+        replies: Replies,
     ) -> Self {
         Self {
             wire: Wire::new(format, inputs, outputs, ceiling),
             slab,
+            replies,
             ceiling,
             chunk: ceiling,
             pos: 0,
@@ -445,8 +450,8 @@ impl Batcher {
     /// given back: a served plugin's deactivation rejoins them with the rest
     /// of the plugin (`Ipc::deactivate`), and the next activation resumes at
     /// [`starting_at`](Self::starting_at) so no sequence of this one is reused.
-    pub(crate) fn into_parts(self) -> (SlabWriter, u64) {
-        (self.slab, self.next_seq)
+    pub(crate) fn into_parts(self) -> (SlabWriter, u64, Replies) {
+        (self.slab, self.next_seq, self.replies)
     }
 
     /// Issues sequences from `next_seq` on. A slab outlives a batcher, and a
@@ -558,7 +563,7 @@ impl Batcher {
         // two raced. Within the same budget; a reply that never comes costs
         // its MIDI, never the audio (no `give_up`).
         progress.wait_until(deadline, || {
-            bridge.is_crashed() || bridge.take_replies(seq, &mut self.reply, &mut self.said)
+            bridge.is_crashed() || self.replies.take(seq, &mut self.reply, &mut self.said)
         });
     }
 
@@ -633,7 +638,7 @@ impl Batcher {
                 self.wire.silence_ring(chunk);
             }
         }
-        bridge.take_replies(
+        self.replies.take(
             self.expect_seq.unwrap_or(0),
             &mut self.reply,
             &mut self.said,
@@ -810,6 +815,7 @@ impl Batcher {
 mod tests {
     use super::*;
     use crate::AudioSlab;
+    use crate::client::audio::idle_replies;
     use tutti_plugin_types::MAX_CHUNK;
 
     /// A real slab's input writer, `samples` frames per channel, stereo both
@@ -876,7 +882,7 @@ mod tests {
         }
         server.publish(1);
         // Three output rows over a two-channel slab.
-        let mut b = Batcher::new(2, 3, FloatWidth::F32, MAX_CHUNK, writer);
+        let mut b = Batcher::new(2, 3, FloatWidth::F32, MAX_CHUNK, writer, idle_replies());
         b.chunk = 8;
         // The refusal is a `Copy` error: nothing is allocated on the audio
         // thread to report it.
@@ -971,7 +977,14 @@ mod tests {
     /// rather than whatever the output slot happens to contain.
     #[test]
     fn a_fresh_batcher_expects_nothing() {
-        let b = Batcher::new(2, 2, FloatWidth::F32, MAX_CHUNK, slab(MAX_CHUNK));
+        let b = Batcher::new(
+            2,
+            2,
+            FloatWidth::F32,
+            MAX_CHUNK,
+            slab(MAX_CHUNK),
+            idle_replies(),
+        );
         assert_eq!(b.expect_seq, None);
         assert_eq!(b.next_seq, 1, "0 means 'never published' in the slab");
     }
@@ -983,8 +996,15 @@ mod tests {
     #[test]
     fn a_full_unanswered_list_counts_the_oldest() {
         let counters = Arc::new(ChunkCounters::default());
-        let mut b = Batcher::new(2, 2, FloatWidth::F32, MAX_CHUNK, slab(MAX_CHUNK))
-            .with_counters(Arc::clone(&counters));
+        let mut b = Batcher::new(
+            2,
+            2,
+            FloatWidth::F32,
+            MAX_CHUNK,
+            slab(MAX_CHUNK),
+            idle_replies(),
+        )
+        .with_counters(Arc::clone(&counters));
         for seq in 1..=FATES as u64 {
             b.remember_unanswered(seq);
         }
@@ -1002,7 +1022,14 @@ mod tests {
     /// fragment of pre-seek audio.
     #[test]
     fn reset_drops_the_in_flight_block_without_rewinding() {
-        let mut b = Batcher::new(2, 2, FloatWidth::F32, MAX_CHUNK, slab(MAX_CHUNK));
+        let mut b = Batcher::new(
+            2,
+            2,
+            FloatWidth::F32,
+            MAX_CHUNK,
+            slab(MAX_CHUNK),
+            idle_replies(),
+        );
         b.next_seq = 100;
         b.expect_seq = Some(99);
 
@@ -1034,7 +1061,14 @@ mod tests {
     /// would have been pinning the artifact.
     #[test]
     fn no_post_seek_sequence_can_collide_with_a_pre_seek_one() {
-        let mut b = Batcher::new(2, 2, FloatWidth::F32, MAX_CHUNK, slab(MAX_CHUNK));
+        let mut b = Batcher::new(
+            2,
+            2,
+            FloatWidth::F32,
+            MAX_CHUNK,
+            slab(MAX_CHUNK),
+            idle_replies(),
+        );
 
         let mut pre_seek = Vec::new();
         for _ in 0..5 {
@@ -1074,7 +1108,14 @@ mod tests {
     /// `MaxBlock`, capped by the slab's ceiling either way.
     #[test]
     fn the_pipeline_chunk_is_the_device_quantum_else_the_max_block() {
-        let mut b = Batcher::new(2, 2, FloatWidth::F32, MAX_CHUNK, slab(MAX_CHUNK));
+        let mut b = Batcher::new(
+            2,
+            2,
+            FloatWidth::F32,
+            MAX_CHUNK,
+            slab(MAX_CHUNK),
+            idle_replies(),
+        );
         b.prepare(Samples(1024), Some(Samples(480)));
         assert_eq!(Samples(b.chunk()), Samples(480));
         b.prepare(Samples(64), Some(Samples(2048)));
@@ -1088,7 +1129,7 @@ mod tests {
         b.prepare(Samples(32), None);
         assert_eq!(Samples(b.chunk()), Samples(32));
 
-        let mut small_slab = Batcher::new(2, 2, FloatWidth::F32, 16, slab(16));
+        let mut small_slab = Batcher::new(2, 2, FloatWidth::F32, 16, slab(16), idle_replies());
         small_slab.prepare(Samples(1024), None);
         assert_eq!(Samples(small_slab.chunk()), Samples(16));
     }
@@ -1098,7 +1139,14 @@ mod tests {
     /// new one — without advancing the sequence, as for a seek.
     #[test]
     fn prepare_drops_the_chunk_in_flight() {
-        let mut b = Batcher::new(2, 2, FloatWidth::F32, MAX_CHUNK, slab(MAX_CHUNK));
+        let mut b = Batcher::new(
+            2,
+            2,
+            FloatWidth::F32,
+            MAX_CHUNK,
+            slab(MAX_CHUNK),
+            idle_replies(),
+        );
         b.next_seq = 7;
         b.expect_seq = Some(6);
         b.prepare(Samples(128), None);

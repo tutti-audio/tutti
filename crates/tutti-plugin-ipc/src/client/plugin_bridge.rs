@@ -1,6 +1,6 @@
 //! Plugin bridge — a served plugin's audio and its editor.
 
-use super::audio::{AudioBridge, BridgeThread};
+use super::audio::{AudioBridge, BridgeThread, Replies};
 use super::editor_site::EditorSite;
 use crate::ServerWatch;
 use std::path::{Path, PathBuf};
@@ -83,8 +83,10 @@ impl PluginBridge {
     /// to the plugin-server at `socket_path` and leaves the GUI instance to be
     /// lazily loaded on first `open_editor`.
     ///
-    /// Returns an `Arc<Self>` (for cheap cloning into the audio graph) and
-    /// a `BridgeThread` (whose `Drop` shuts down the bridge thread).
+    /// Returns an `Arc<Self>` (for cheap cloning into the audio graph), a
+    /// `BridgeThread` (whose `Drop` shuts down the bridge thread) and the
+    /// [`Replies`] the pipeline reads the plugin's replies from, the ring's
+    /// one consumer.
     ///
     /// `sample_rate` seeds the bridge thread's per-block reply timeout (see
     /// `dispatch::process_timeout`); `set_sample_rate_rt` keeps it current after
@@ -102,11 +104,12 @@ impl PluginBridge {
         sample_rate: SampleRate,
         watch: Arc<ServerWatch>,
         timeouts: Timeouts,
-    ) -> BridgeResult<(Arc<Self>, BridgeThread)> {
+    ) -> BridgeResult<(Arc<Self>, BridgeThread, Replies)> {
         timeouts.validate()?;
-        let (audio, bridge_thread) = AudioBridge::new(socket_path, sample_rate, watch, timeouts)?;
+        let (audio, bridge_thread, replies) =
+            AudioBridge::new(socket_path, sample_rate, watch, timeouts)?;
         let editor = EditorSite::new(&audio, origin, format, load_editor);
-        Ok((Arc::new(Self { audio, editor }), bridge_thread))
+        Ok((Arc::new(Self { audio, editor }), bridge_thread, replies))
     }
 
     /// The audio instance's bridge.
