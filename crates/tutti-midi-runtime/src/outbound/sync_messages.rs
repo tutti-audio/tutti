@@ -40,11 +40,14 @@ pub struct SyncMessages {
     /// ([`SyncOut::meter`](crate::SyncOut::meter)).
     pub flex: bool,
     /// The Flex Data metronome: a Set Metronome (§7.5.5) on every bar boundary
-    /// where the meter in force differs from the one last stated, stating a
-    /// click on each beat of the meter with the bar's first beat accented, as the
-    /// metronome node sounds it. Sent with or without [`flex`](Self::flex), on
-    /// the same Group, under the same start and locate rules as the Set Time
-    /// Signature. The meter is the node's
+    /// where the meter in force differs from the one last stated. It states the
+    /// meter's click, one on each beat with the bar's first beat accented, and
+    /// is sent whatever the click node's state: on, off or in another mode.
+    /// It is stated again on a start, and after a locate at the next bar
+    /// boundary where the meter differs from the last one stated. A meter with
+    /// no Set Metronome form (a 64th-note beat) sends none, and the receiver
+    /// keeps the click it was last told. Sent with or without
+    /// [`flex`](Self::flex), on the same Group. The meter is the node's
     /// ([`SyncOut::meter`](crate::SyncOut::meter)).
     pub metronome: bool,
     /// The SMPTE frame rate every time code is stated at: the quarter-frames,
@@ -83,9 +86,9 @@ impl Default for SyncMessages {
     }
 }
 
-/// The word: bit 0 the Beat Clock, bit 1 MTC, bit 2 MMC present, bit 3 Flex Data, bit 4 the Flex metronome, bits 8 to 15
-/// the rate's two-bit code ([`MtcRate::code`]), bits 16 to 22 the MMC
-/// recipient's device byte (`0x7F` the all-call; zero while MMC is absent).
+/// The word: bit 0 the Beat Clock, bit 1 MTC, bit 2 MMC present, bit 3 Flex
+/// Data, bit 4 the Flex metronome, bits 8 to 15 the rate's
+/// two-bit code ([`MtcRate::code`]), bits 16 to 22 the MMC recipient's device byte (`0x7F` the all-call; zero while MMC is absent).
 ///
 /// Decoding is total: every word reads as some value, the rate from the low
 /// two bits of its byte ([`MtcRate::masked`]) and the device from the low seven

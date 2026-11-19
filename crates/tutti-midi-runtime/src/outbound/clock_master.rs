@@ -35,9 +35,10 @@
 //! even frame of the timeline from the wrapped beat, so a loop start that is
 //! not on an even frame leaves up to two frames with no quarter-frames.
 //! - **Set Tempo** and **Set Time Signature** (Flex Data, M2-104 §7.5.3 and
-//!   §7.5.4; when [`SyncMessages::flex`] is set; **Set Metronome**, §7.5.5, on
-//!   the Set Time Signature's frames when [`SyncMessages::metronome`] is set), on the clock's Group, with or
-//!   without the clock bytes enabled. Set Tempo goes out on the first 24-PPQN
+//!   §7.5.4, when [`SyncMessages::flex`] is set) and **Set Metronome** (§7.5.5,
+//!   when [`SyncMessages::metronome`] is set), on the clock's Group, with or
+//!   without the clock bytes enabled; a Set Metronome goes on the frames a Set
+//!   Time Signature would. Set Tempo goes out on the first 24-PPQN
 //!   tick position at or after the tempo in force changes, Set Time Signature on
 //!   the first bar boundary at or after the meter in force changes. Where
 //!   playback starts the tempo goes out on the first tick position (the start
@@ -575,7 +576,8 @@ impl ClockMaster {
         {
             let signature = meter.at(boundary);
             if messages.flex && self.flex.meter != Some(signature) {
-                // A whole-note meter has no standard message: it is stated by none.
+                // A whole-note meter has no standard Set Time Signature: it is stated
+                // by none (its Set Metronome, 96 clocks, is still sent below).
                 if let Some(wire) = flex_time_signature_wire(signature) {
                     emit((
                         frame_offset(pass.start.get() + k, block_size),
@@ -585,7 +587,8 @@ impl ClockMaster {
                 self.flex.meter = Some(signature);
             }
             if messages.metronome && self.flex.metronome != Some(signature) {
-                // A note value whose beat is not whole clocks is stated by none.
+                // A meter with no Set Metronome form (a 64th-note beat) sends none, and
+                // the receiver keeps the click it was last told.
                 if let Some(metronome) = flex_metronome(signature) {
                     emit((
                         frame_offset(pass.start.get() + k, block_size),

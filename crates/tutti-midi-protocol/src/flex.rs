@@ -6,7 +6,7 @@
 
 use core::num::NonZeroU8;
 use tutti_music::{BeatsPerBar, NoteValue};
-use tutti_ump::{BarAccents, FlexTimeSignature, Metronome};
+use tutti_ump::{BarAccents, FlexTimeSignature, Metronome, System};
 use tutti_units::{Bpm, Seconds};
 
 /// 10-nanosecond units in one second: the Set Tempo field counts them per
@@ -115,16 +115,15 @@ pub fn flex_time_signature_wire(
     })
 }
 
-/// MIDI clocks in a quarter note, the clock Set Metronome counts in (section
-/// 7.5.5).
-const CLOCKS_PER_QUARTER: u32 = 24;
-
 /// The Set Metronome fields of a metronome that clicks once on each beat of
 /// `signature` and accents the bar's first beat: the primary click is a beat,
 /// which is `4 * 24 / note value` MIDI clocks, the bar is undivided (Part 1 the
 /// beats per bar, Parts 2 and 3 zero) and no subdivision clicks sound
 /// (section 7.5.5). `None` for a note value whose beat is not a whole number of
-/// clocks (a 64th note is a clock and a half).
+/// clocks (a 64th note is a clock and a half): no Set Metronome has that form,
+/// so none is sent and a receiver keeps the click it was last told. A whole
+/// note has one (96 clocks), though its Set Time Signature does not
+/// ([`flex_time_signature_wire`]).
 ///
 /// ```
 /// use tutti_midi_protocol::flex_metronome;
@@ -137,7 +136,7 @@ const CLOCKS_PER_QUARTER: u32 = 24;
 /// ```
 #[must_use]
 pub fn flex_metronome(signature: tutti_music::TimeSignature) -> Option<Metronome> {
-    let clocks = 4 * CLOCKS_PER_QUARTER;
+    let clocks = 4 * System::TIMING_CLOCKS_PER_QUARTER;
     let value = signature.note_value().get();
     if !clocks.is_multiple_of(value) {
         return None;

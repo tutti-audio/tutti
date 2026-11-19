@@ -18,8 +18,9 @@
 //!   block late, unlike the clock's and MTC's, which are on the wrap's own
 //!   frame. A look sees only a position, so several wraps in one block can
 //!   leave it where rolling would have, and then no Locate goes at all.
-//! - Flex Data tempo, meter and metronome are the clock's too ([`SyncMessages::flex`], [`SyncMessages::metronome`]): the
-//!   meter is read from the cell [`meter`](SyncOut::meter) names (4/4 until one is).
+//! - Flex Data tempo, meter and metronome are the clock's too
+//!   ([`SyncMessages::flex`], [`SyncMessages::metronome`]): the meter is read
+//!   from the cell [`meter`](SyncOut::meter) names (4/4 until one is).
 //! - **One rate**: MTC and an MMC LOCATE state time codes at
 //!   [`SyncMessages::rate`], so the two cannot disagree.
 //!
