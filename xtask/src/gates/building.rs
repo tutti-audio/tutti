@@ -286,6 +286,12 @@ pub(super) const ALLOW: &[Allow] = &[
         "opening a SoundFont file: the failure is the file's, not a value's",
     ),
     ty(
+        "crates/tutti-rt/src/bells.rs",
+        "Bells::new",
+        CTOR,
+        "starting the tick thread: the failure is the OS's, not a value's",
+    ),
+    ty(
         "crates/tutti-midi-network/src/udp.rs",
         "UdpDriver::bind",
         CTOR,
