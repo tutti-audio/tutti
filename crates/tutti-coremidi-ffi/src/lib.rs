@@ -34,16 +34,17 @@
 // asks of its caller.
 #![deny(clippy::undocumented_unsafe_blocks, clippy::missing_safety_doc)]
 #![warn(unsafe_op_in_unsafe_fn)]
-// Off macOS the OS-free modules build for their tests only, so what `os` uses
-// of them is unused there.
-#![cfg_attr(not(target_os = "macos"), allow(dead_code))]
 
-// The OS-free checks and decisions: tested everywhere, and used by `os`.
+// The OS-free checks and decisions: tested everywhere, and used by `os`. Off
+// macOS they build for their tests only, so what only `os` uses is unused there.
 #[cfg(any(target_os = "macos", test))]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 mod find;
 #[cfg(any(target_os = "macos", test))]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 mod notification;
 #[cfg(any(target_os = "macos", test))]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 mod unique_id;
 
 // The one platform seam: the macOS half, or nothing.
