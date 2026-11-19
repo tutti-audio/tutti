@@ -62,7 +62,7 @@ impl YinConfig {
     pub fn new() -> Self {
         Self {
             band: FrequencyBand::VOICE,
-            threshold: Confidence(0.1),
+            threshold: Confidence::new(0.1),
         }
     }
 
@@ -137,19 +137,19 @@ impl YinPlan {
     /// Shortest period the range can express: set by the *highest* frequency.
     #[inline]
     pub(crate) fn min_period(&self) -> Samples {
-        Samples((self.sample_rate.get() / self.max_freq.get()) as usize)
+        Samples::new((self.sample_rate.get() / self.max_freq.get()) as usize)
     }
 
     /// Longest period: set by the *lowest* frequency.
     #[inline]
     pub(crate) fn max_period(&self) -> Samples {
-        Samples((self.sample_rate.get() / self.min_freq.get()) as usize)
+        Samples::new((self.sample_rate.get() / self.min_freq.get()) as usize)
     }
 
     /// Minimum input length.
     #[inline]
     pub(crate) fn buffer_size(&self) -> Samples {
-        Samples(self.max_period().get() * 2)
+        Samples::new(self.max_period().get() * 2)
     }
 
     fn detector(&self) -> PitchDetector {
@@ -170,7 +170,7 @@ impl PitchResult {
     /// Whether this reading is a real pitch: both a positive frequency and a
     /// non-zero [`Confidence`]. A default (unvoiced) result is neither.
     pub fn is_voiced(&self) -> bool {
-        self.frequency > Hz(0.0) && self.confidence > Confidence(0.0)
+        self.frequency > Hz::new(0.0) && self.confidence > Confidence::new(0.0)
     }
 }
 
@@ -235,7 +235,7 @@ impl PitchDetector {
         }
 
         let refined_period = self.parabolic_interpolation(period, max_period);
-        let frequency = Hz(self.cfg.sample_rate().get() / refined_period);
+        let frequency = Hz::new(self.cfg.sample_rate().get() / refined_period);
         // Clamped rather than wrapped raw: `Confidence` is a 0..=1 reading, and
         // this is the one place the aperiodicity inversion could leave the range.
         let confidence = Confidence::new_clamped(1.0 - aperiodicity);
@@ -434,7 +434,7 @@ impl PitchEstimate {
     /// ergonomics for callers that treat silence as zero.
     #[inline]
     pub fn frequency(&self) -> Hz {
-        self.pitch().map_or(Hz(0.0), |p| p.frequency)
+        self.pitch().map_or(Hz::new(0.0), |p| p.frequency)
     }
 
     /// The [`Confidence`], or [`Confidence::NONE`] when unvoiced.
@@ -513,14 +513,14 @@ pub(crate) fn yin_track_at(
     if samples.len() < frame.get() {
         return Err(Error::InsufficientInput {
             needed: frame,
-            got: Samples(samples.len()),
+            got: Samples::new(samples.len()),
         });
     }
 
     // One detector for the whole track: `detect` carries nothing between
     // calls, so reusing it is both sound and cheaper than replanning per frame.
     let mut detector = plan.detector();
-    let frames = Framing::new(frame, hop).frames_for(Samples(samples.len()));
+    let frames = Framing::new(frame, hop).frames_for(Samples::new(samples.len()));
     Ok((0..frames.get())
         .map(|i| {
             let start = i * hop.get();

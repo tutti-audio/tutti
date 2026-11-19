@@ -80,7 +80,7 @@ use tutti_dsp::{log_band_edges, octave_band_edges};
 use tutti_units::ranged;
 
 /// The smallest and largest window accepted.
-const WINDOWS: RangeInclusive<Samples> = Samples(64)..=Samples(1 << 16);
+const WINDOWS: RangeInclusive<Samples> = Samples::new(64)..=Samples::new(1 << 16);
 
 /// The most outputs a banding may have.
 const MAX_BANDS: usize = 4096;
@@ -149,8 +149,8 @@ pub enum Smoothing {
 impl Smoothing {
     fn ballistics(self) -> Ballistics {
         let (attack, release) = match self {
-            Self::None => (Seconds(0.0), Seconds(0.0)),
-            Self::Release(tau) => (Seconds(0.0), tau.get()),
+            Self::None => (Seconds::new(0.0), Seconds::new(0.0)),
+            Self::Release(tau) => (Seconds::new(0.0), tau.get()),
             Self::Average(tau) => (tau.get(), tau.get()),
         };
         Ballistics::new(attack, release).expect("a `SpectrumTime` is within 0..=3600 s")
@@ -213,12 +213,12 @@ impl SpectrumConfig {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            framing: Framing::new(Samples(2048), Samples(512)),
+            framing: Framing::new(Samples::new(2048), Samples::new(512)),
             banding: Banding::Bins,
             smoothing: Smoothing::None,
             floor: SpectrumFloor::of(Db::FLOOR),
-            peak_hold: SpectrumTime::of(Seconds(1.0)),
-            peak_decay: PeakDecay::of(Db(20.0)),
+            peak_hold: SpectrumTime::of(Seconds::new(1.0)),
+            peak_decay: PeakDecay::of(Db::new(20.0)),
             columns: 0,
         }
     }
@@ -449,7 +449,9 @@ impl SpectrumPlan {
                 band,
                 lower: edges[band],
                 upper: edges[band + 1],
-                window: Samples((needed.min((1u64 << 40) as f64) as usize).next_power_of_two()),
+                window: Samples::new(
+                    (needed.min((1u64 << 40) as f64) as usize).next_power_of_two(),
+                ),
             });
         }
         Ok(Some(first))
@@ -519,7 +521,7 @@ impl<S: Sample> SpectrumMeter<S> {
         let frequencies: Vec<Hz> = match cfg.edge_frequencies()? {
             Some(edges) => edges
                 .windows(2)
-                .map(|e| Hz((e[0].get() * e[1].get()).sqrt()))
+                .map(|e| Hz::new((e[0].get() * e[1].get()).sqrt()))
                 .collect(),
             None => (0..cfg.bins())
                 .map(|k| cfg.geometry.bin_frequency(BinIndex(k)))
@@ -669,7 +671,8 @@ impl<S: Sample> SpectrumMeter<S> {
             self.levels[i] = level;
 
             self.age[i] = self.age[i].saturating_add(1);
-            let held = self.anchor[i] - Db(decay * f64::from(self.age[i].saturating_sub(hold)));
+            let held =
+                self.anchor[i] - Db::new(decay * f64::from(self.age[i].saturating_sub(hold)));
             if level >= held {
                 self.anchor[i] = level;
                 self.age[i] = 0;

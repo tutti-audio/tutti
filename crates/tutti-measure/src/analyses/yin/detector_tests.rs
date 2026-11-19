@@ -7,9 +7,9 @@ const N: usize = 4096;
 fn sine(freq: Hz, amp: f64) -> Vec<f64> {
     tutti_fixtures::signal::sine(
         freq,
-        tutti_units::Amplitude(amp),
+        tutti_units::Amplitude::new(amp),
         SR,
-        tutti_units::Samples(N),
+        tutti_units::Samples::new(N),
     )
     .into_iter()
     .map(f64::from)
@@ -57,7 +57,7 @@ fn fill_cmndf(det: &mut PitchDetector, samples: &[f64]) -> (usize, usize) {
 #[test]
 fn cmndf_equals_one_at_lag_zero() {
     let mut det = detector();
-    fill_cmndf(&mut det, &sine(Hz(440.0), 1.0));
+    fill_cmndf(&mut det, &sine(Hz::new(440.0), 1.0));
     assert!(
         (det.cumulative_mean[0] - 1.0).abs() < f64::EPSILON,
         "d'(0) must be 1 by definition, got {}",
@@ -68,7 +68,7 @@ fn cmndf_equals_one_at_lag_zero() {
 /// A pure sine's CMNDF dips below the YIN threshold at the true period.
 #[test]
 fn cmndf_dips_below_threshold_at_the_true_period() {
-    let freq = Hz(440.0);
+    let freq = Hz::new(440.0);
     let tau = period_samples(freq).round() as usize;
     let mut det = detector();
     fill_cmndf(&mut det, &sine(freq, 1.0));
@@ -86,7 +86,7 @@ fn cmndf_dips_below_threshold_at_the_true_period() {
 /// below-threshold dip is the fundamental.
 #[test]
 fn first_local_minimum_beats_a_deeper_later_dip() {
-    let freq = Hz(110.0);
+    let freq = Hz::new(110.0);
     let true_period = period_samples(freq);
     let tau = true_period.round() as usize;
     let tau_2t = (true_period * 2.0).round() as usize;
@@ -121,7 +121,7 @@ fn first_local_minimum_beats_a_deeper_later_dip() {
 #[test]
 fn parabolic_interpolation_recovers_a_half_sample_period() {
     let true_period = 100.5;
-    let freq = Hz(SR.get() / true_period);
+    let freq = Hz::new(SR.get() / true_period);
     let mut det = detector();
     let (min_period, max_period) = fill_cmndf(&mut det, &sine(freq, 1.0));
     let (tau, _) = det.find_best_period_full(min_period, max_period);
@@ -162,7 +162,11 @@ fn aperiodic_buffers_are_unvoiced() {
             result.frequency.get(),
             result.confidence.get()
         );
-        assert_eq!(result.frequency, Hz(0.0), "{label} invented a frequency");
+        assert_eq!(
+            result.frequency,
+            Hz::new(0.0),
+            "{label} invented a frequency"
+        );
     }
 }
 
@@ -170,7 +174,7 @@ fn aperiodic_buffers_are_unvoiced() {
 /// frequency.
 #[test]
 fn the_estimate_is_invariant_to_amplitude_scaling() {
-    let freq = Hz(440.0);
+    let freq = Hz::new(440.0);
     let quiet = {
         let mut det = detector();
         det.detect(&sine(freq, 0.01))
@@ -202,7 +206,7 @@ fn the_estimate_is_invariant_to_amplitude_scaling() {
 #[test]
 fn the_difference_function_matches_its_definition() {
     // 480 Hz at 48 kHz: exactly 100 samples per period.
-    let x = sine(Hz(480.0), 0.8);
+    let x = sine(Hz::new(480.0), 0.8);
     let mut det = detector();
     let (_, max_period) = det.periods(x.len());
     det.compute_difference(&x, max_period);

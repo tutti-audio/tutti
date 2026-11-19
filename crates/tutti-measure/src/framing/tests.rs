@@ -1,7 +1,7 @@
 use super::*;
 
-const WINDOW: Samples = Samples(1024);
-const HOP: Samples = Samples(256);
+const WINDOW: Samples = Samples::new(1024);
+const HOP: Samples = Samples::new(256);
 
 /// `(len - window) / hop + 1` whole frames fit: none below one window, one
 /// at exactly a window, the next at a window plus a hop.
@@ -16,7 +16,7 @@ fn whole_frames_fit_at_window_plus_a_hop_each() {
         (1280, 2),
         (4096, 13),
     ] {
-        assert_eq!(f.frames_for(Samples(len)), FrameCount(frames), "{len}");
+        assert_eq!(f.frames_for(Samples::new(len)), FrameCount(frames), "{len}");
     }
 }
 
@@ -24,11 +24,11 @@ fn whole_frames_fit_at_window_plus_a_hop_each() {
 #[test]
 fn a_zero_hop_or_window_fits_no_frame() {
     assert_eq!(
-        Framing::new(WINDOW, Samples(0)).frames_for(Samples(9999)),
+        Framing::new(WINDOW, Samples::new(0)).frames_for(Samples::new(9999)),
         FrameCount(0)
     );
     assert_eq!(
-        Framing::new(Samples(0), HOP).frames_for(Samples(9999)),
+        Framing::new(Samples::new(0), HOP).frames_for(Samples::new(9999)),
         FrameCount(0)
     );
 }
@@ -37,26 +37,26 @@ fn a_zero_hop_or_window_fits_no_frame() {
 /// frames start at `0, hop, 2 hop ..` and the last must end inside `len`.
 #[test]
 fn a_hop_wider_than_the_window_counts_the_frames_that_fit() {
-    let f = Framing::new(Samples(100), Samples(300));
-    assert_eq!(f.frames_for(Samples(99)), FrameCount(0));
-    assert_eq!(f.frames_for(Samples(100)), FrameCount(1));
-    assert_eq!(f.frames_for(Samples(399)), FrameCount(1));
-    assert_eq!(f.frames_for(Samples(400)), FrameCount(2));
+    let f = Framing::new(Samples::new(100), Samples::new(300));
+    assert_eq!(f.frames_for(Samples::new(99)), FrameCount(0));
+    assert_eq!(f.frames_for(Samples::new(100)), FrameCount(1));
+    assert_eq!(f.frames_for(Samples::new(399)), FrameCount(1));
+    assert_eq!(f.frames_for(Samples::new(400)), FrameCount(2));
 }
 
 /// The window range includes both ends.
 #[test]
 fn the_window_range_includes_both_ends() {
-    let accepted = Samples(64)..=Samples(256);
-    assert!(check_window(Samples(64), &accepted).is_ok());
-    assert!(check_window(Samples(256), &accepted).is_ok());
+    let accepted = Samples::new(64)..=Samples::new(256);
+    assert!(check_window(Samples::new(64), &accepted).is_ok());
+    assert!(check_window(Samples::new(256), &accepted).is_ok());
     for window in [63, 257] {
         assert_eq!(
-            check_window(Samples(window), &accepted),
+            check_window(Samples::new(window), &accepted),
             Err(Error::WindowOutOfRange {
-                window: Samples(window),
-                min: Samples(64),
-                max: Samples(256)
+                window: Samples::new(window),
+                min: Samples::new(64),
+                max: Samples::new(256)
             })
         );
     }
@@ -67,9 +67,9 @@ fn the_window_range_includes_both_ends() {
 fn a_hop_is_within_a_window_up_to_its_length() {
     assert!(check_hop_within(WINDOW, WINDOW).is_ok());
     assert_eq!(
-        check_hop_within(WINDOW, Samples(1025)),
+        check_hop_within(WINDOW, Samples::new(1025)),
         Err(Error::HopWiderThanWindow {
-            hop: Samples(1025),
+            hop: Samples::new(1025),
             window: WINDOW
         })
     );
@@ -79,12 +79,12 @@ fn a_hop_is_within_a_window_up_to_its_length() {
 /// hops is, a window of 64 hops and one sample is not.
 #[test]
 fn the_overlap_limit_is_exact() {
-    assert!(check_overlap(Samples(4096), Samples(64)).is_ok());
+    assert!(check_overlap(Samples::new(4096), Samples::new(64)).is_ok());
     assert_eq!(
-        check_overlap(Samples(4097), Samples(64)),
+        check_overlap(Samples::new(4097), Samples::new(64)),
         Err(Error::TooManyOverlaps {
-            window: Samples(4097),
-            hop: Samples(64),
+            window: Samples::new(4097),
+            hop: Samples::new(64),
             max: MAX_OVERLAP
         })
     );

@@ -142,7 +142,7 @@ impl Default for TempoConfig {
             spread: PriorSpread::of(1.0),
             tightness: Tightness::of(100.0),
             alternatives: 2,
-            framing: Framing::new(Samples(WINDOW), Samples(HOP)),
+            framing: Framing::new(Samples::new(WINDOW), Samples::new(HOP)),
         }
     }
 }
@@ -254,7 +254,7 @@ impl BeatGrid {
     pub fn time(&self, index: usize, sample_rate: impl Into<SampleRate>) -> Option<Seconds> {
         self.beats
             .get(index)
-            .map(|b| Seconds(b.get() as f64 / sample_rate.into().get()))
+            .map(|b| Seconds::new(b.get() as f64 / sample_rate.into().get()))
     }
 }
 
@@ -378,7 +378,7 @@ pub fn track_beats_from_novelty<F: Float>(
     let period = lag_of(bpm, rate);
     let beats = track_beat_frames(novelty, period, cfg.tightness.get())
         .into_iter()
-        .map(|frame| Samples(frame * hop.get()))
+        .map(|frame| Samples::new(frame * hop.get()))
         .collect();
     Ok(BeatGrid { beats, bpm })
 }
@@ -423,8 +423,8 @@ fn novelty(
     let window = geometry.window().get();
     if samples.len() < window {
         return Err(Error::InsufficientInput {
-            needed: Samples(window),
-            got: Samples(samples.len()),
+            needed: Samples::new(window),
+            got: Samples::new(samples.len()),
         });
     }
     let peak = samples.iter().fold(0.0f64, |m, s| m.max(s.abs()));
@@ -482,8 +482,8 @@ impl Periodicity {
         let needed = 2.0 * (longest + 2.0);
         if (n as f64) < needed {
             return Err(Error::InsufficientInput {
-                needed: Samples((needed * hop.get() as f64).min(usize::MAX as f64) as usize),
-                got: Samples(n * hop.get()),
+                needed: Samples::new((needed * hop.get() as f64).min(usize::MAX as f64) as usize),
+                got: Samples::new(n * hop.get()),
             });
         }
         let last_lag = FrameCount(longest as usize);

@@ -89,17 +89,18 @@ fn yin_track(yin: &YinPlan, x: &[f64], hop: Samples) -> Result<Vec<PitchEstimate
 
 fn config(rate: f64, min_freq: f64, hop_div: usize, onset_window: usize) -> NoteConfig {
     let rate = SampleRate::of(rate);
-    let yin = YinConfig::new().band(FrequencyBand::new(Hz(min_freq), Hz(1000.0)).unwrap());
+    let yin =
+        YinConfig::new().band(FrequencyBand::new(Hz::new(min_freq), Hz::new(1000.0)).unwrap());
     let onset = OnsetConfig::new(DetectionFunction::SpectralFlux).framing(Framing::new(
-        Samples(onset_window),
-        Samples(onset_window / 4),
+        Samples::new(onset_window),
+        Samples::new(onset_window / 4),
     ));
     let frame = yin.buffer_size(rate).unwrap().get();
     Case::new(
         super::NoteConfig::new()
             .pitch(yin)
             .onsets(onset)
-            .hop(PitchHop::of(Samples(frame / hop_div))),
+            .hop(PitchHop::of(Samples::new(frame / hop_div))),
         rate,
     )
 }
@@ -122,11 +123,11 @@ fn config(rate: f64, min_freq: f64, hop_div: usize, onset_window: usize) -> Note
 /// the window short of the end, and one starting in the final window is
 /// lost.
 fn timing_tolerance(c: &NoteConfig) -> Samples {
-    Samples(c.hop.get() + c.frame().get() / 2)
+    Samples::new(c.hop.get() + c.frame().get() / 2)
 }
 
 fn band(min: f64, max: f64) -> FrequencyBand {
-    FrequencyBand::new(Hz(min), Hz(max)).unwrap()
+    FrequencyBand::new(Hz::new(min), Hz::new(max)).unwrap()
 }
 
 fn cfg() -> NoteConfig {
@@ -189,9 +190,9 @@ fn track(freqs: &[Option<f64>]) -> Vec<PitchEstimate> {
             None => PitchEstimate::Unvoiced,
             Some(hz) => {
                 let (note, cents_offset) =
-                    Note::nearest_to(Hz(*hz)).unwrap_or((Note::A4, Cents(0.0)));
+                    Note::nearest_to(Hz::new(*hz)).unwrap_or((Note::A4, Cents::new(0.0)));
                 PitchEstimate::Voiced(Pitch {
-                    frequency: Hz(*hz),
+                    frequency: Hz::new(*hz),
                     confidence: Confidence::CERTAIN,
                     note,
                     cents_offset,
@@ -202,7 +203,7 @@ fn track(freqs: &[Option<f64>]) -> Vec<PitchEstimate> {
 }
 
 fn loud(n: usize) -> Vec<Amplitude> {
-    vec![Amplitude(0.3); n]
+    vec![Amplitude::new(0.3); n]
 }
 
 /// A4, C5 and E5, each 250 ms, with gaps, come out as exactly those notes
@@ -241,7 +242,7 @@ fn a_melody_gives_its_notes_at_every_geometry() {
             assert_eq!(u8::try_from(n.note), Ok(midi));
             assert!(n.cents.get().abs() < 1.0, "{}", n.cents);
             let tol = timing_tolerance(&c);
-            let period = Samples((rate / hz) as usize);
+            let period = Samples::new((rate / hz) as usize);
             // Never later than a hop and a period after the attack.
             let late = (a * rate) as usize + c.hop.get() + period.get();
             assert!(n.start.get() <= late, "start {:?} vs {a}", n.start);
@@ -369,7 +370,7 @@ fn pitch_changes_split_only_beyond_the_threshold() {
 /// a frame (80 over a span) splits once, in the middle of the slide.
 #[test]
 fn a_fast_slide_splits_and_a_slow_one_does_not() {
-    let c = cfg().min_length(NoteSpan::of(Seconds(0.0)));
+    let c = cfg().min_length(NoteSpan::of(Seconds::new(0.0)));
     assert_eq!(c.smoothing_frames(), FrameCount(10));
     let slide = |per_frame: Cents| {
         let t: Vec<Option<f64>> = (0..60)
@@ -377,8 +378,8 @@ fn a_fast_slide_splits_and_a_slow_one_does_not() {
             .collect();
         notes_from_track(&c, &track(&t), &loud(60), &[]).unwrap()
     };
-    assert_eq!(slide(Cents(3.0)).len(), 1);
-    let fast = slide(Cents(8.0));
+    assert_eq!(slide(Cents::new(3.0)).len(), 1);
+    let fast = slide(Cents::new(8.0));
     assert_eq!(fast.len(), 2, "{fast:?}");
     // Every position with the medians 10 frames apart more than 50 apart:
     // 8 c/frame * 10 = 80, so the stretch is the whole run of positions
@@ -388,9 +389,9 @@ fn a_fast_slide_splits_and_a_slow_one_does_not() {
     assert_eq!(fast[0].end.get(), (centre(29) + centre(30)) / 2);
 
     // The split is the threshold: 80 cents over a span is under 200.
-    let loose = c.pitch_split(PitchSplit::of(Cents(200.0)));
+    let loose = c.pitch_split(PitchSplit::of(Cents::new(200.0)));
     let t: Vec<Option<f64>> = (0..60)
-        .map(|i| Some(440.0 * (Cents(8.0) * f64::from(i)).to_pitch_ratio()))
+        .map(|i| Some(440.0 * (Cents::new(8.0) * f64::from(i)).to_pitch_ratio()))
         .collect();
     assert_eq!(
         notes_from_track(&loose, &track(&t), &loud(60), &[])
@@ -442,11 +443,11 @@ fn a_note_shorter_than_the_minimum_is_dropped() {
         &[tone(0.1, 0.16, 440.0, 0.5), tone(0.4, 0.7, 523.2511, 0.5)],
         0.9,
     );
-    let c = cfg().min_length(NoteSpan::of(Seconds(0.1)));
+    let c = cfg().min_length(NoteSpan::of(Seconds::new(0.1)));
     let notes = run(&c, &x);
     assert_eq!(notes.len(), 1, "{notes:?}");
     assert_eq!(u8::try_from(notes[0].note), Ok(72));
-    let kept = run(&cfg().min_length(NoteSpan::of(Seconds(0.02))), &x);
+    let kept = run(&cfg().min_length(NoteSpan::of(Seconds::new(0.02))), &x);
     assert_eq!(kept.len(), 2, "{kept:?}");
     assert_eq!(u8::try_from(kept[0].note), Ok(69));
 }
@@ -533,26 +534,30 @@ fn velocity_follows_amplitude() {
 /// reads NaN as the quietest.
 #[test]
 fn the_velocity_map_is_linear_and_clamped() {
-    let r = VelocityRange::new(FiniteLevel::of(Db(-60.0)), FiniteLevel::of(Db(-20.0))).unwrap();
-    assert_eq!(r.midi(Db(-60.0)), 1);
-    assert_eq!(r.midi(Db(-20.0)), 127);
-    assert_eq!(r.midi(Db(-40.0)), 64);
-    assert_eq!(r.midi(Db(-100.0)), 1);
-    assert_eq!(r.midi(Db(0.0)), 127);
-    assert_eq!(r.midi(Db(f64::NEG_INFINITY)), 1);
-    assert_eq!(r.midi(Db(f64::NAN)), 1);
-    let level = |v: f64| FiniteLevel::of(Db(v));
+    let r = VelocityRange::new(
+        FiniteLevel::of(Db::new(-60.0)),
+        FiniteLevel::of(Db::new(-20.0)),
+    )
+    .unwrap();
+    assert_eq!(r.midi(Db::new(-60.0)), 1);
+    assert_eq!(r.midi(Db::new(-20.0)), 127);
+    assert_eq!(r.midi(Db::new(-40.0)), 64);
+    assert_eq!(r.midi(Db::new(-100.0)), 1);
+    assert_eq!(r.midi(Db::new(0.0)), 127);
+    assert_eq!(r.midi(Db::new(f64::NEG_INFINITY)), 1);
+    assert_eq!(r.midi(Db::new(f64::NAN)), 1);
+    let level = |v: f64| FiniteLevel::of(Db::new(v));
     assert!(VelocityRange::new(level(-20.0), level(-20.0)).is_none());
     assert_eq!(
         VelocityRange::try_from(level(-20.0)..=level(-30.0)),
         Err(Error::EmptyVelocityRange {
-            floor: Db(-20.0),
-            ceiling: Db(-30.0)
+            floor: Db::new(-20.0),
+            ceiling: Db::new(-30.0)
         })
     );
     // A NaN or infinite bound is not a `FiniteLevel`.
-    assert!(FiniteLevel::new(Db(f64::NAN)).is_none());
-    assert!(FiniteLevel::new(Db(f64::INFINITY)).is_none());
+    assert!(FiniteLevel::new(Db::new(f64::NAN)).is_none());
+    assert!(FiniteLevel::new(Db::new(f64::INFINITY)).is_none());
 }
 
 /// Scaling the input by a power of two (exact in floating point) changes
@@ -587,7 +592,7 @@ fn gain_changes_only_the_level() {
     // -60 dBFS RMS is an amplitude of 0.00141; this is under it.
     let quiet: Vec<f64> = base.iter().map(|s| s * 0.001).collect();
     assert_eq!(run(&c, &quiet), Vec::new());
-    let lowered = c.floor(FiniteLevel::of(Db(-80.0)));
+    let lowered = c.floor(FiniteLevel::of(Db::new(-80.0)));
     assert_eq!(run(&lowered, &quiet).len(), 2);
 }
 
@@ -613,7 +618,7 @@ fn dropouts_are_bridged_and_rests_are_not() {
         &[tone(0.1, 0.4, 440.0, 0.5), tone(0.42, 0.7, 440.0, 0.5)],
         0.9,
     );
-    let long = c.hold(NoteSpan::of(Seconds(60.0)));
+    let long = c.hold(NoteSpan::of(Seconds::new(60.0)));
     let t = yin_track(&long.yin, &x, long.hop).unwrap();
     let notes = notes_from_track(&long, &t, &frame_levels(&long, &x).unwrap(), &[]).unwrap();
     assert_eq!(notes.len(), 2, "{notes:?}");
@@ -624,18 +629,23 @@ fn dropouts_are_bridged_and_rests_are_not() {
 /// any order, repeated, or at the run's own start give the same cut.
 #[test]
 fn an_onset_splits_at_its_first_whole_frame() {
-    let c = cfg().min_length(NoteSpan::of(Seconds(0.0)));
+    let c = cfg().min_length(NoteSpan::of(Seconds::new(0.0)));
     let hop = c.hop.get();
     let t = track(&vec![Some(440.0); 40]);
     let at = 17 * hop + 50;
-    let notes = notes_from_track(&c, &t, &loud(40), &[Samples(at)]).unwrap();
+    let notes = notes_from_track(&c, &t, &loud(40), &[Samples::new(at)]).unwrap();
     assert_eq!(notes.len(), 2);
-    assert_eq!(notes[0].start, Samples(0));
-    assert_eq!(notes[0].end, Samples(at));
-    assert_eq!(notes[1].start, Samples(18 * hop));
-    assert_eq!(notes[1].end, Samples(39 * hop + c.frame().get() / 2));
+    assert_eq!(notes[0].start, Samples::new(0));
+    assert_eq!(notes[0].end, Samples::new(at));
+    assert_eq!(notes[1].start, Samples::new(18 * hop));
+    assert_eq!(notes[1].end, Samples::new(39 * hop + c.frame().get() / 2));
 
-    let extra = [Samples(30 * hop - 3), Samples(0), Samples(at), Samples(at)];
+    let extra = [
+        Samples::new(30 * hop - 3),
+        Samples::new(0),
+        Samples::new(at),
+        Samples::new(at),
+    ];
     let mut reversed = extra;
     reversed.reverse();
     let a = notes_from_track(&c, &t, &loud(40), &extra).unwrap();
@@ -645,21 +655,21 @@ fn an_onset_splits_at_its_first_whole_frame() {
     // An onset within one onset window (1024) of the piece's start is its own
     // attack: one sample inside cuts nothing, at the window it cuts.
     let guard = c.onset.geometry().window().get();
-    let inside = notes_from_track(&c, &t, &loud(40), &[Samples(guard - 1)]).unwrap();
+    let inside = notes_from_track(&c, &t, &loud(40), &[Samples::new(guard - 1)]).unwrap();
     assert_eq!(inside.len(), 1);
-    let outside = notes_from_track(&c, &t, &loud(40), &[Samples(guard)]).unwrap();
+    let outside = notes_from_track(&c, &t, &loud(40), &[Samples::new(guard)]).unwrap();
     assert_eq!(outside.len(), 2);
     // Nor does one within a window of the run's end (`39 * hop + frame / 2`).
     let end = 39 * hop + c.frame().get() / 2;
-    let late = [Samples(end - guard + 1)];
+    let late = [Samples::new(end - guard + 1)];
     assert_eq!(notes_from_track(&c, &t, &loud(40), &late).unwrap().len(), 1);
-    let early = [Samples(end - guard)];
+    let early = [Samples::new(end - guard)];
     assert_eq!(
         notes_from_track(&c, &t, &loud(40), &early).unwrap().len(),
         2
     );
     // An onset at the very start, or past the last frame, cuts nothing.
-    let none = [Samples(0), Samples(1000 * hop)];
+    let none = [Samples::new(0), Samples::new(1000 * hop)];
     assert_eq!(notes_from_track(&c, &t, &loud(40), &none).unwrap().len(), 1);
 }
 
@@ -697,15 +707,15 @@ fn a_note_does_not_read_its_neighbours_level() {
     let c = cfg();
     let (hop, frame) = (c.hop.get(), c.frame().get());
     let k = 20;
-    let mut levels = vec![Amplitude(0.1); 40];
+    let mut levels = vec![Amplitude::new(0.1); 40];
     for l in &mut levels[k - frame / hop + 1..] {
-        *l = Amplitude(0.8);
+        *l = Amplitude::new(0.8);
     }
     let t = track(&vec![Some(440.0); 40]);
-    let notes = notes_from_track(&c, &t, &levels, &[Samples(k * hop)]).unwrap();
+    let notes = notes_from_track(&c, &t, &levels, &[Samples::new(k * hop)]).unwrap();
     assert_eq!(notes.len(), 2);
-    assert!((notes[0].velocity.get() - Amplitude(0.1).to_db().get()).abs() < 1e-3);
-    assert!((notes[1].velocity.get() - Amplitude(0.8).to_db().get()).abs() < 1e-3);
+    assert!((notes[0].velocity.get() - Amplitude::new(0.1).to_db().get()).abs() < 1e-3);
+    assert!((notes[1].velocity.get() - Amplitude::new(0.8).to_db().get()).abs() < 1e-3);
 }
 
 /// The rules across settings and the shape of the inputs are validated, so
@@ -714,7 +724,7 @@ fn a_note_does_not_read_its_neighbours_level() {
 fn settings_and_inputs_are_validated() {
     let rate = SampleRate::of(RATE);
     let flux = OnsetConfig::new(DetectionFunction::SpectralFlux)
-        .framing(Framing::new(Samples(1024), Samples(256)));
+        .framing(Framing::new(Samples::new(1024), Samples::new(256)));
     let notes = |yin: YinConfig, onset: OnsetConfig| {
         super::NoteConfig::new().pitch(yin).onsets(onset).plan(rate)
     };
@@ -733,15 +743,15 @@ fn settings_and_inputs_are_validated() {
         Error::AboveNyquist { .. }
     ));
     // A zero onset window is refused too.
-    let zero = flux.framing(Framing::new(Samples(0), Samples(256)));
+    let zero = flux.framing(Framing::new(Samples::new(0), Samples::new(256)));
     assert!(matches!(notes(yin, zero).unwrap_err(), Error::ZeroWindow));
 
     let c = cfg();
     let frame = c.frame().get();
     // No hop writes zero; one wider than the frame, or under a sixty-fourth
     // of it, is refused by the calls that take the config.
-    assert!(PitchHop::new(Samples(0)).is_none());
-    let hop = |h: usize| c.hop(PitchHop::of(Samples(h)));
+    assert!(PitchHop::new(Samples::new(0)).is_none());
+    let hop = |h: usize| c.hop(PitchHop::of(Samples::new(h)));
     let levels = |c: &NoteConfig| frame_levels(c, &vec![0.0; frame]).map(|_| ());
     assert!(matches!(
         levels(&hop(frame + 1)),
@@ -772,12 +782,12 @@ fn settings_and_inputs_are_validated() {
         })
     );
     let mut neg = loud(10);
-    neg[3] = Amplitude(-0.1);
+    neg[3] = Amplitude::new(-0.1);
     assert_eq!(
         notes_from_track(&c, &t, &neg, &[]),
         Err(Error::NegativeInput)
     );
-    neg[3] = Amplitude(f64::NAN);
+    neg[3] = Amplitude::new(f64::NAN);
     assert_eq!(
         notes_from_track(&c, &t, &neg, &[]),
         Err(Error::NonFiniteInput)
@@ -792,7 +802,7 @@ fn settings_and_inputs_are_validated() {
         notes_from_track(&c, &nan, &loud(10), &[]),
         Err(Error::NonFiniteInput)
     );
-    let wide = c.smoothing(NoteSpan::of(Seconds(60.0)));
+    let wide = c.smoothing(NoteSpan::of(Seconds::new(60.0)));
     assert!(matches!(
         notes_from_track(&wide, &t, &loud(10), &[]),
         Err(Error::SmoothingTooLong { .. })
@@ -813,12 +823,12 @@ fn too_many_frames_are_refused() {
     let c = Case::new(
         super::NoteConfig::new().pitch(yin).onsets(
             OnsetConfig::new(DetectionFunction::SpectralFlux)
-                .framing(Framing::new(Samples(1024), Samples(256))),
+                .framing(Framing::new(Samples::new(1024), Samples::new(256))),
         ),
         SampleRate::of(RATE),
     );
     assert!(c.frame().get() < 64, "{:?}", c.frame());
-    let c = c.hop(PitchHop::of(Samples(1)));
+    let c = c.hop(PitchHop::of(Samples::new(1)));
     let x = vec![0.1f64; MAX_FRAMES.get() + c.frame().get() + 1];
     assert_eq!(
         transcribe(&c, &x, &mut FftScratch::new()),
@@ -839,10 +849,11 @@ fn the_frame_limit_is_exact_with_a_partial_hop() {
         SampleRate::of(RATE),
     );
     let hop = 2;
-    let c = c.hop(PitchHop::of(Samples(hop)));
+    let c = c.hop(PitchHop::of(Samples::new(hop)));
     let frame = c.frame().get();
     let last_ok = frame + (MAX_FRAMES.get() - 1) * hop;
-    let check = |len: usize| check_frame_count(c.framing().frames_for(Samples(len)), MAX_FRAMES);
+    let check =
+        |len: usize| check_frame_count(c.framing().frames_for(Samples::new(len)), MAX_FRAMES);
     assert!(check(last_ok).is_ok());
     assert!(check(last_ok + hop - 1).is_ok());
     assert!(check(last_ok + hop).is_err());
@@ -883,12 +894,12 @@ fn a_note_at_the_end_of_the_buffer_stops_short_of_it() {
 fn a_reversed_note_has_no_length() {
     let n = NoteEvent {
         note: Note::A4,
-        cents: Cents(0.0),
-        start: Samples(10),
-        end: Samples(4),
-        velocity: Db(-20.0),
+        cents: Cents::new(0.0),
+        start: Samples::new(10),
+        end: Samples::new(4),
+        velocity: Db::new(-20.0),
     };
-    assert_eq!(n.len(), Samples(0));
+    assert_eq!(n.len(), Samples::new(0));
     assert!(n.is_empty());
 }
 
@@ -896,11 +907,11 @@ fn a_reversed_note_has_no_length() {
 #[test]
 fn the_defaults_are_the_documented_ones() {
     let c = cfg();
-    assert_eq!(c.min_length, Samples(2646));
-    assert_eq!(c.smoothing, Samples(1323));
-    assert_eq!(c.hold, Samples(441));
-    assert_eq!(c.pitch_split, PitchSplit::of(Cents(50.0)));
-    assert_eq!(c.floor, Db(-60.0));
+    assert_eq!(c.min_length, Samples::new(2646));
+    assert_eq!(c.smoothing, Samples::new(1323));
+    assert_eq!(c.hold, Samples::new(441));
+    assert_eq!(c.pitch_split, PitchSplit::of(Cents::new(50.0)));
+    assert_eq!(c.floor, Db::new(-60.0));
     assert!((secs(c.min_length) - 0.06).abs() < 1e-6);
     let d = Case::new(
         super::NoteConfig::new().pitch(YinConfig::new().band(band(80.0, 1000.0))),

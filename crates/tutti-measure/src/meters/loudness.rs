@@ -192,7 +192,7 @@ impl Loudness {
         let projected = self.true_peak.get() + gain;
         // Pull back by exactly the overshoot, never push up: a signal already
         // under the ceiling keeps the loudness-derived gain.
-        Db(gain - (projected - ceiling.get()).max(0.0))
+        Db::new(gain - (projected - ceiling.get()).max(0.0))
     }
 }
 
@@ -280,9 +280,9 @@ impl<S: Sample> Meter for LoudnessMeter<S> {
             .fold(0.0f64, f64::max);
 
         Loudness {
-            lufs: Db(lufs),
+            lufs: Db::new(lufs),
             true_peak: true_peak_db(peak_linear),
-            range: Db(range),
+            range: Db::new(range),
         }
     }
 }
@@ -419,7 +419,7 @@ fn true_peak_db(peak_linear: f64) -> Db {
     if peak_linear <= 0.0 {
         Db::FLOOR
     } else {
-        Db::from_amplitude(Amplitude(peak_linear))
+        Db::from_amplitude(Amplitude::new(peak_linear))
     }
 }
 
@@ -524,7 +524,7 @@ impl WindowedReading {
     /// all read it, and only
     /// [`frames_seen`](WindowedMeter::frames_seen) tells them apart.
     /// A finite floor keeps every gain derived from a reading finite.
-    pub const LOUDNESS_FLOOR: Db = Db(-70.0);
+    pub const LOUDNESS_FLOOR: Db = Db::new(-70.0);
 }
 
 /// A running windowed meter at one rate and topology.
@@ -589,7 +589,7 @@ impl<S: Sample> WindowedMeter<S> {
                 self.meter.loudness_shortterm().ok(),
             ),
             true_peak: true_peak_db(peak),
-            frame: Samples(self.frames as usize),
+            frame: Samples::new(self.frames as usize),
         }
     }
 }
@@ -662,7 +662,7 @@ impl<S: Sample> Meter for WindowedMeter<S> {
 fn windowed_db(frames: u64, needed: u64, lufs: Option<f64>) -> Db {
     match lufs {
         Some(lufs) if frames >= needed && lufs.is_finite() => {
-            Db(lufs.max(WindowedReading::LOUDNESS_FLOOR.get()))
+            Db::new(lufs.max(WindowedReading::LOUDNESS_FLOOR.get()))
         }
         _ => WindowedReading::LOUDNESS_FLOOR,
     }

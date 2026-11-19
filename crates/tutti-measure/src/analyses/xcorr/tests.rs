@@ -99,9 +99,9 @@ fn peak_within_respects_the_bound() {
     let mut late = vec![0.0f64; 100];
     late.extend_from_slice(&base);
     let r = cross_correlate(&late, &base, &mut fft);
-    assert_eq!(r.peak_within(Samples(100)).unwrap().lag, 100);
-    assert_ne!(r.peak_within(Samples(99)).unwrap().lag, 100);
-    assert_eq!(r.peak_within(Samples(usize::MAX)), r.peak());
+    assert_eq!(r.peak_within(Samples::new(100)).unwrap().lag, 100);
+    assert_ne!(r.peak_within(Samples::new(99)).unwrap().lag, 100);
+    assert_eq!(r.peak_within(Samples::new(usize::MAX)), r.peak());
     assert_eq!(cross_correlate(&[], &base, &mut fft).peak(), None);
     assert_eq!(cross_correlate(&base, &[], &mut fft).values().len(), 0);
 }

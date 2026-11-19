@@ -72,7 +72,7 @@ impl CrossCorrelation {
     /// The largest value over every lag.
     #[inline]
     pub fn peak(&self) -> Option<CorrelationPeak> {
-        self.peak_within(Samples(usize::MAX))
+        self.peak_within(Samples::new(usize::MAX))
     }
 
     /// The largest value over lags `-max_lag..=max_lag`, the first on a tie.

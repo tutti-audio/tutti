@@ -58,7 +58,7 @@ impl PeakBlock {
     /// The larger of the two excursions — what a peak meter shows.
     #[inline]
     pub fn peak(&self) -> Amplitude {
-        Amplitude(self.min.abs().max(self.max.abs()))
+        Amplitude::new(self.min.abs().max(self.max.abs()))
     }
 
     /// The block covering both inputs' samples.
@@ -82,7 +82,10 @@ impl PeakBlock {
         Self {
             min: self.min.min(other.min),
             max: self.max.max(other.max),
-            rms: Amplitude(((self.rms.0 * self.rms.0 + other.rms.0 * other.rms.0) * 0.5).sqrt()),
+            rms: Amplitude::new(
+                ((self.rms.get() * self.rms.get() + other.rms.get() * other.rms.get()) * 0.5)
+                    .sqrt(),
+            ),
         }
     }
 }
@@ -364,7 +367,7 @@ impl<S: Sample> PeakMeter<S> {
                     channel: layout
                         .index(channel)
                         .expect("a meter has a plane per channel of its layout"),
-                    frame: Samples((done + i) * self.block),
+                    frame: Samples::new((done + i) * self.block),
                     block,
                 });
             }

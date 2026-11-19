@@ -179,8 +179,8 @@ impl FrameCutter {
         Self {
             framing,
             buffer: Vec::with_capacity(framing.window.get() + BLOCK + framing.hop.get()),
-            base: Samples(0),
-            next_start: Samples(0),
+            base: Samples::new(0),
+            next_start: Samples::new(0),
             frames: FrameCount(0),
         }
     }
@@ -190,7 +190,7 @@ impl FrameCutter {
     pub(crate) fn feed(&mut self, block: &[f64], mut each: impl FnMut(usize, &[f64])) {
         let (window, hop) = (self.framing.window, self.framing.hop);
         self.buffer.extend_from_slice(block);
-        let held = Samples(self.buffer.len());
+        let held = Samples::new(self.buffer.len());
         while self.next_start + window <= self.base + held {
             let at = self.next_start.remaining_after(self.base).get();
             each(self.frames.get(), &self.buffer[at..at + window.get()]);
@@ -203,14 +203,14 @@ impl FrameCutter {
             .get()
             .min(held.get());
         self.buffer.drain(..done);
-        self.base += Samples(done);
+        self.base += Samples::new(done);
     }
 
     /// Forgets everything fed, keeping the buffer.
     pub(crate) fn reset(&mut self) {
         self.buffer.clear();
-        self.base = Samples(0);
-        self.next_start = Samples(0);
+        self.base = Samples::new(0);
+        self.next_start = Samples::new(0);
         self.frames = FrameCount(0);
     }
 }

@@ -4,7 +4,7 @@ use tutti_dsp::{BinCount, FrameCount};
 use tutti_units::Cents;
 
 fn framing(window: usize, hop: usize) -> Framing {
-    Framing::new(Samples(window), Samples(hop))
+    Framing::new(Samples::new(window), Samples::new(hop))
 }
 
 fn cfg() -> ChordConfig {
@@ -250,13 +250,13 @@ fn spans_sit_between_frame_centres() {
         let centre = |i: usize| (i * hop + window / 2) as f64;
         let boundary = (centre(6) + centre(7)) / 2.0;
         assert_eq!(spans.len(), 2, "{window}/{hop}");
-        assert_eq!(spans[0].start, Samples(0));
+        assert_eq!(spans[0].start, Samples::new(0));
         assert!(
             (spans[0].end.get() as f64 - boundary).abs() <= 1.0,
             "{window}/{hop}"
         );
         assert_eq!(spans[1].start, spans[0].end);
-        assert_eq!(spans[1].end, Samples(11 * hop + window));
+        assert_eq!(spans[1].end, Samples::new(11 * hop + window));
     }
 }
 
@@ -350,12 +350,12 @@ fn spans_follow_the_chromas_own_framing() {
     let (c, f) = (triad(0, false), triad(5, false));
     let rows: Vec<_> = (0..12).map(|i| if i < 7 { c } else { f }).collect();
     for (window, hop) in [(2048, 512), (4096, 1024)] {
-        let chroma = Chroma::new(grid(&rows), Cents(0.0), framing(window, hop));
+        let chroma = Chroma::new(grid(&rows), Cents::new(0.0), framing(window, hop));
         let spans = detect_chords(&chroma, &cfg()).unwrap();
         let centre = |i: usize| (i * hop + window / 2) as f64;
         let boundary = (centre(6) + centre(7)) / 2.0;
         assert_eq!(spans.len(), 2, "{window}/{hop}");
         assert!((spans[0].end.get() as f64 - boundary).abs() <= 1.0);
-        assert_eq!(spans[1].end, Samples(11 * hop + window));
+        assert_eq!(spans[1].end, Samples::new(11 * hop + window));
     }
 }
