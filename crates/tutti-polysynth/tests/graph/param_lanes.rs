@@ -33,7 +33,7 @@ fn synth(unison: bool, detune: f64) -> PolySynth<f32> {
     PolySynth::<f32>::new(SynthConfig {
         oscillator: OscillatorType::Saw,
         envelope: Adsr {
-            attack: Seconds(0.0),
+            attack: Seconds::new(0.0),
             ..Default::default()
         },
         unison: unison.then_some(UnisonConfig {
@@ -52,7 +52,7 @@ fn constant(depth: f64) -> ControlProgram {
         id: LayerId(1),
         clock: Clock::Beats {
             per_cycle: BeatsPerCycle::of(1.0),
-            phase: PhaseIncrement(0.0),
+            phase: PhaseIncrement::new(0.0),
         },
         wave: Waveform::Const(1.0),
         amount: Amount {
@@ -86,10 +86,10 @@ fn render(synth: PolySynth<f32>, drive: Option<Drive>) -> [Vec<f32>; 2] {
 fn render_with_knob(synth: PolySynth<f32>, drive: Option<Drive>) -> ([Vec<f32>; 2], Option<f64>) {
     let (mut ed, exec) = Editor::new(Prepare::new(
         SampleRate::of(RATE),
-        MaxBlock::of(Samples(BLOCK)),
+        MaxBlock::of(Samples::new(BLOCK)),
     ));
     let note = TimedMidiEvent::new(
-        Beat(0.0),
+        Beat::new(0.0),
         Message::midi2(
             MidiChannel::FIRST,
             Voice2::note_on(NoteNumber::of(60), NoteVelocity::MAX),
@@ -141,7 +141,12 @@ fn render_with_knob(synth: PolySynth<f32>, drive: Option<Drive>) -> ([Vec<f32>; 
     }
     let mut r = Renderer::new(ed, exec);
     r.set_transport_fn(|f| {
-        TransportPosition::new(true, Bpm::of(120.0), Beat(f.get() as f64 / 24_000.0), None)
+        TransportPosition::new(
+            true,
+            Bpm::of(120.0),
+            Beat::new(f.get() as f64 / 24_000.0),
+            None,
+        )
     });
     let mut out = r.render(FRAMES);
     let right = out.swap_remove(1);
@@ -157,11 +162,11 @@ fn render_with_knob(synth: PolySynth<f32>, drive: Option<Drive>) -> ([Vec<f32>; 
 #[test]
 fn a_lane_drives_the_master_volume_around_its_cell() {
     let mut plain = synth(false, 0.0);
-    plain.set_volume(tutti_units::Amplitude(0.5));
+    plain.set_volume(tutti_units::Amplitude::new(0.5));
     let [undriven, _] = render(plain, None);
 
     let mut driven_synth = synth(false, 0.0);
-    driven_synth.set_volume(tutti_units::Amplitude(0.5));
+    driven_synth.set_volume(tutti_units::Amplitude::new(0.5));
     let ([driven, _], knob) = render_with_knob(
         driven_synth,
         Some(Drive {

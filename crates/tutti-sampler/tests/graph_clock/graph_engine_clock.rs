@@ -50,7 +50,7 @@ fn pool(cents: f64) -> VoicePool<f32> {
         wave.append(Interleaved::new(&[tone_at(i)], wave.layout()).unwrap())
             .unwrap();
     }
-    let source = MemorySource::placed(Arc::new(wave), VoiceWindow::from(Beat(0.0)))
+    let source = MemorySource::placed(Arc::new(wave), VoiceWindow::from(Beat::new(0.0)))
         .expect("a placeable wave");
     let mut pool = VoicePool::new();
     pool.insert(
@@ -80,7 +80,7 @@ fn routes(units: usize) -> Vec<(usize, usize)> {
 fn graph_engine(transport: &Transport, units: Vec<VoicePool<f32>>) -> (Engine, Editor) {
     let (mut ed, exec) = Editor::new(Prepare::new(
         SampleRate::of(SR),
-        MaxBlock::of(Samples(1024)),
+        MaxBlock::of(Samples::new(1024)),
     ));
     let n = units.len();
     for (i, u) in units.into_iter().enumerate() {
@@ -252,7 +252,7 @@ fn a_crossfaded_voice_plays_on_through_the_fade() {
                 ed.replace(
                     NodeKey(1),
                     spare.take().expect("once"),
-                    Fade::new(Samples(4096), FadeLaw::EqualAmplitude),
+                    Fade::new(Samples::new(4096), FadeLaw::EqualAmplitude),
                 )
                 .expect("same shape");
                 ed.commit().expect("commits");
@@ -311,7 +311,7 @@ fn a_loop_wrap_plays_the_tone_a_loop_back_from_its_frame() {
         let k = (f - end) % len;
         let head = tone_at(FPB + k);
         if k < fade {
-            let (g_out, g_in) = FadeLaw::EqualPower.gains(Samples(k), Samples(fade));
+            let (g_out, g_in) = FadeLaw::EqualPower.gains(Samples::new(k), Samples::new(fade));
             let (g_out, g_in) = (g_out.get() as f32, g_in.get() as f32);
             let want = g_in * head + g_out * tone_at(end + k);
             let got = b[2 * f];
@@ -339,7 +339,7 @@ fn a_scheduled_locate_lands_on_its_frame() {
             .schedule(
                 At::Frame(Frame::new(at as u64)),
                 MotionEvent::Locate {
-                    beat: Beat(0.25),
+                    beat: Beat::new(0.25),
                     fade: FadeOut::Immediate,
                     then: Then::Keep,
                 },

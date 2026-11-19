@@ -61,7 +61,7 @@ const BLOCK: usize = 64;
 
 /// The offset `k` frames into the block.
 fn at(k: usize) -> Offset {
-    Offset::of(Samples(k), Samples(BLOCK))
+    Offset::of(Samples::new(k), Samples::new(BLOCK))
 }
 
 /// The packet of `words`, zero-padded to four, `k` frames into the block.
@@ -204,7 +204,7 @@ fn drive(
         let outs: &mut [&mut [f32]] = &mut [&mut bufs.out_l[..], &mut bufs.out_r[..]];
         let ins: &[&[f32]] = &[&bufs.in_l[..], &bufs.in_r[..]];
         let mut buffer =
-            InputOutput::from_slices(tutti_plugin_types::Samples(ins[0].len()), ins, outs)
+            InputOutput::from_slices(tutti_plugin_types::Samples::new(ins[0].len()), ins, outs)
                 .expect("equal channels");
         last = inst.process(&mut buffer, ctx).map(|_| ());
     }
@@ -289,7 +289,7 @@ fn process_with_midi_does_not_allocate() {
             let outs: &mut [&mut [f32]] = &mut [&mut bufs.out_l[..], &mut bufs.out_r[..]];
             let ins: &[&[f32]] = &[&bufs.in_l[..], &bufs.in_r[..]];
             let mut buffer =
-                InputOutput::from_slices(tutti_plugin_types::Samples(ins[0].len()), ins, outs)
+                InputOutput::from_slices(tutti_plugin_types::Samples::new(ins[0].len()), ins, outs)
                     .expect("equal channels");
             inst.process(&mut buffer, &ctx).expect("process");
         }
@@ -509,7 +509,7 @@ fn the_plugins_status_becomes_the_blocks_status() {
         let ins: &[&[f32]] = &[&in_l[..], &in_r[..]];
         let mut out = ProcessOutput::default();
         let mut buffer =
-            InputOutput::from_slices(tutti_plugin_types::Samples(ins[0].len()), ins, outs)
+            InputOutput::from_slices(tutti_plugin_types::Samples::new(ins[0].len()), ins, outs)
                 .expect("equal channels");
         inst.processor()
             .render(&mut buffer, &ctx, &mut out)
@@ -614,7 +614,7 @@ fn plugin_error_status_does_not_allocate() {
             let outs: &mut [&mut [f32]] = &mut [&mut bufs.out_l[..], &mut bufs.out_r[..]];
             let ins: &[&[f32]] = &[&bufs.in_l[..], &bufs.in_r[..]];
             let mut buffer =
-                InputOutput::from_slices(tutti_plugin_types::Samples(ins[0].len()), ins, outs)
+                InputOutput::from_slices(tutti_plugin_types::Samples::new(ins[0].len()), ins, outs)
                     .expect("equal channels");
             // The error is expected; what must not happen is an allocation
             // while producing it.
@@ -660,8 +660,9 @@ fn oversized_block_rejection_does_not_allocate() {
     {
         let outs: &mut [&mut [f32]] = &mut [&mut out_l[..], &mut out_r[..]];
         let ins: &[&[f32]] = &[&in_l[..], &in_r[..]];
-        let mut buffer = InputOutput::from_slices(tutti_plugin_types::Samples(OVERSIZE), ins, outs)
-            .expect("equal channels");
+        let mut buffer =
+            InputOutput::from_slices(tutti_plugin_types::Samples::new(OVERSIZE), ins, outs)
+                .expect("equal channels");
         let err = inst
             .process(&mut buffer, &ctx)
             .expect_err("a block past max_frames must be rejected, not truncated");
@@ -682,7 +683,7 @@ fn oversized_block_rejection_does_not_allocate() {
             let outs: &mut [&mut [f32]] = &mut [&mut out_l[..], &mut out_r[..]];
             let ins: &[&[f32]] = &[&in_l[..], &in_r[..]];
             let mut buffer =
-                InputOutput::from_slices(tutti_plugin_types::Samples(ins[0].len()), ins, outs)
+                InputOutput::from_slices(tutti_plugin_types::Samples::new(ins[0].len()), ins, outs)
                     .expect("equal channels");
             let _ = inst.process(&mut buffer, &ctx);
         }
@@ -754,8 +755,9 @@ fn drive_and_read_output(
     };
     let outs: &mut [&mut [f32]] = &mut [&mut bufs.out_l[..], &mut bufs.out_r[..]];
     let ins: &[&[f32]] = &[&bufs.in_l[..], &bufs.in_r[..]];
-    let mut buffer = InputOutput::from_slices(tutti_plugin_types::Samples(ins[0].len()), ins, outs)
-        .expect("equal channels");
+    let mut buffer =
+        InputOutput::from_slices(tutti_plugin_types::Samples::new(ins[0].len()), ins, outs)
+            .expect("equal channels");
     let out = inst.process(&mut buffer, &ctx).expect("process");
     let queues = out
         .param_changes
@@ -1205,9 +1207,12 @@ fn drive_wide(inst: &mut Active<f32>, channels: usize, iters: usize) {
     for _ in 0..8 {
         let ins: Vec<&[f32]> = ins_storage.iter().map(|v| v.as_slice()).collect();
         let mut outs: Vec<&mut [f32]> = outs_storage.iter_mut().map(|v| v.as_mut_slice()).collect();
-        let mut buffer =
-            InputOutput::from_slices(tutti_plugin_types::Samples(ins[0].len()), &ins, &mut outs)
-                .expect("equal channels");
+        let mut buffer = InputOutput::from_slices(
+            tutti_plugin_types::Samples::new(ins[0].len()),
+            &ins,
+            &mut outs,
+        )
+        .expect("equal channels");
         inst.process(&mut buffer, &ctx).expect("warm-up process");
     }
 
@@ -1216,9 +1221,12 @@ fn drive_wide(inst: &mut Active<f32>, channels: usize, iters: usize) {
     let ins: Vec<&[f32]> = ins_storage.iter().map(|v| v.as_slice()).collect();
     let mut outs: Vec<&mut [f32]> = outs_storage.iter_mut().map(|v| v.as_mut_slice()).collect();
 
-    let mut buffer =
-        InputOutput::from_slices(tutti_plugin_types::Samples(ins[0].len()), &ins, &mut outs)
-            .expect("equal channels");
+    let mut buffer = InputOutput::from_slices(
+        tutti_plugin_types::Samples::new(ins[0].len()),
+        &ins,
+        &mut outs,
+    )
+    .expect("equal channels");
 
     assert_no_alloc::assert_no_alloc(|| {
         for _ in 0..iters {

@@ -40,9 +40,9 @@ pub(crate) fn read_wave<F: Float>(
         return false;
     }
     let have = wave.len().get().saturating_sub(at).min(frames.get());
-    let from = Samples(at.min(wave.len().get()));
-    let planes = wave.planes().slice(from..Samples(from.get() + have));
-    let head = &mut out[..channels.interleaved_len(Samples(have)).min(whole)];
+    let from = Samples::new(at.min(wave.len().get()));
+    let planes = wave.planes().slice(from..Samples::new(from.get() + have));
+    let head = &mut out[..channels.interleaved_len(Samples::new(have)).min(whole)];
     InterleavedMut::new(head, channels)
         .and_then(|dst| interleave(planes, dst))
         .is_ok()

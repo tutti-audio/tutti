@@ -72,7 +72,7 @@ fn render_mode(mode: ProcessMode) -> RenderMode {
 }
 
 fn prepare_for<T: Vst3Sample>(rate: f64, frames: usize, mode: ProcessMode) -> Prepare {
-    let block = MaxBlock::new(Samples(frames)).expect("a block of at least one frame");
+    let block = MaxBlock::new(Samples::new(frames)).expect("a block of at least one frame");
     Prepare::new(SampleRate::of(rate), block)
         .with_format(format_of::<T>())
         .with_mode(render_mode(mode))

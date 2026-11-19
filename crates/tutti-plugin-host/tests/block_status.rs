@@ -45,13 +45,13 @@ fn node_at<F: Float>(
     width: FloatWidth,
 ) -> (PluginNode<FakeLoaded, F>, FakePlugin) {
     let (fake, loaded) = FakePlugin::new();
-    fake.ring_out(ring.0);
+    fake.ring_out(ring.get());
     fake.set_tail(tail);
     let main = main_thread();
     let wiring = loaded.wiring(main);
     let descriptor = loaded.info().clone();
     let prepare =
-        Prepare::new(SR, MaxBlock::new(Samples(BLOCK)).expect("a block")).with_format(width);
+        Prepare::new(SR, MaxBlock::new(Samples::new(BLOCK)).expect("a block")).with_format(width);
     let Ok((processor, controller)) = loaded.activate(main, prepare) else {
         panic!("the fake activates");
     };
@@ -74,7 +74,7 @@ fn env(frame: u64) -> Env {
     Env {
         frame: Frame::new(frame),
         sample_rate: SR,
-        block_len: Samples(BLOCK),
+        block_len: Samples::new(BLOCK),
         transport: TransportPosition::default(),
         changes: TransportChanges::NONE,
         play: PlayClock::ZERO,
@@ -106,7 +106,7 @@ fn processed(fake: &FakePlugin) -> usize {
 /// plugin's *sleep* (`Idle`, `Tail::None`).
 #[test]
 fn a_sleeping_plugin_reports_no_tail_and_idles() {
-    let (node, _fake) = node(Samples(100), Samples(128));
+    let (node, _fake) = node(Samples::new(100), Samples::new(128));
     let mut node = contract::prepared(node, SR, BLOCK);
     for (block, impulse) in [(0u64, true), (1, false)] {
         let d = drive(&mut node, block * BLOCK as u64, impulse);
@@ -125,7 +125,7 @@ fn a_sleeping_plugin_reports_no_tail_and_idles() {
 /// what it reports (its ceiling, since the sounding blocks say nothing).
 #[test]
 fn the_plugin_node_passes_the_honest_tail_contract() {
-    let (node, _fake) = node(Samples(100), Samples(128));
+    let (node, _fake) = node(Samples::new(100), Samples::new(128));
     let mut node = contract::prepared(node, SR, BLOCK);
     assert_honest_tail(&mut node, SR);
 }
@@ -134,7 +134,7 @@ fn the_plugin_node_passes_the_honest_tail_contract() {
 /// heard, the node reports nothing and is not idle.
 #[test]
 fn a_plugin_that_sleeps_over_sound_is_not_idled() {
-    let (node, fake) = node(Samples(100), Samples(128));
+    let (node, fake) = node(Samples::new(100), Samples::new(128));
     fake.sleep_over_sound(true);
     let mut node = contract::prepared(node, SR, BLOCK);
     let d = drive(&mut node, 0, true);
@@ -146,8 +146,8 @@ fn a_plugin_that_sleeps_over_sound_is_not_idled() {
 /// A voice of 100 frames behind the executor: an event inlet into the node's
 /// event input, the node's two channels to the outputs.
 fn graph(fake_ring: Samples) -> (Editor, Executor, tutti_graph::EventInletWriter, FakePlugin) {
-    let (node, fake) = node(fake_ring, Samples(128));
-    let (mut ed, mut exec) = Editor::new(GraphPrepare::new(SR, MaxBlock::of(Samples(BLOCK))));
+    let (node, fake) = node(fake_ring, Samples::new(128));
+    let (mut ed, mut exec) = Editor::new(GraphPrepare::new(SR, MaxBlock::of(Samples::new(BLOCK))));
     let (inlet, writer) = EventInletNode::pair(EventCapacity::of(64));
     let (inlet_key, plugin) = (NodeKey(1), NodeKey(2));
     ed.insert(inlet_key, "inlet", inlet);
@@ -194,7 +194,7 @@ fn note() -> tutti_ump::Ump {
 /// 0.5, and silent before.
 #[test]
 fn a_parked_plugin_is_woken_by_a_note_on_its_frame() {
-    let (_ed, mut exec, mut tx, fake) = graph(Samples(100));
+    let (_ed, mut exec, mut tx, fake) = graph(Samples::new(100));
     let mut heard = Vec::new();
     let mut calls = Vec::new();
     let (first, second) = (8 * BLOCK as u64, 20 * BLOCK as u64 + 17);
@@ -229,7 +229,7 @@ fn a_parked_plugin_is_woken_by_a_note_on_its_frame() {
 /// once even though the ceiling is 128 frames.
 #[test]
 fn a_sleep_parks_before_the_ceiling_has_elapsed() {
-    let (_ed, mut exec, _tx, fake) = graph(Samples(100));
+    let (_ed, mut exec, _tx, fake) = graph(Samples::new(100));
     for _ in 0..10 {
         render(&mut exec);
     }
@@ -248,7 +248,7 @@ fn a_plugin_wider_than_a_block_is_refused_by_name() {
     let main = main_thread();
     let mut wiring = loaded.wiring(main);
     let descriptor = loaded.info().clone();
-    let prepare = Prepare::new(SR, MaxBlock::new(Samples(BLOCK)).expect("a block"));
+    let prepare = Prepare::new(SR, MaxBlock::new(Samples::new(BLOCK)).expect("a block"));
     let Ok((processor, controller)) = loaded.activate(main, prepare) else {
         panic!("the fake activates");
     };
@@ -280,7 +280,7 @@ fn a_plugin_wider_than_a_block_is_refused_by_name() {
 /// the next one 0.5 for 36 frames and silence after.
 #[test]
 fn a_64_bit_graph_renders_a_64_bit_plugin_natively() {
-    let (node, fake) = node_at::<f64>(Samples(100), Samples(128), FloatWidth::F64);
+    let (node, fake) = node_at::<f64>(Samples::new(100), Samples::new(128), FloatWidth::F64);
     let mut unit = Direct::with_format(node, SR, BLOCK);
     for channel in 0..2 {
         let mut input = unit.inputs_mut();
@@ -314,7 +314,7 @@ fn a_client_over_a_plugin_of_another_width_is_refused_by_name() {
     let main = main_thread();
     let wiring = loaded.wiring(main);
     let descriptor = loaded.info().clone();
-    let prepare = Prepare::new(SR, MaxBlock::new(Samples(BLOCK)).expect("a block"));
+    let prepare = Prepare::new(SR, MaxBlock::new(Samples::new(BLOCK)).expect("a block"));
     let Ok((processor, controller)) = loaded.activate(main, prepare) else {
         panic!("the fake activates");
     };

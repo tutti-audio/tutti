@@ -93,7 +93,8 @@ fn channel_sum(c: &mut Criterion) {
     let mut g = c.benchmark_group("channel_sum");
     for (case, sources, width) in [("8x2", 8u16, 2u16), ("16x1", 16, 1), ("2x6", 2, 6)] {
         for block in BLOCKS {
-            let (mut ed, mut exec) = Editor::new(Prepare::new(SR, MaxBlock::of(Samples(block))));
+            let (mut ed, mut exec) =
+                Editor::new(Prepare::new(SR, MaxBlock::of(Samples::new(block))));
             ed.spec_mut().topology.inputs = ChannelLayout::from(sources * width);
             ed.spec_mut()
                 .topology
@@ -447,7 +448,7 @@ fn convolver(c: &mut Criterion) {
         c,
         "convolver",
         "1",
-        || ConvolverNode::new(Mono::new(&ir), Samples(64)),
+        || ConvolverNode::new(Mono::new(&ir), Samples::new(64)),
         None,
     );
 }

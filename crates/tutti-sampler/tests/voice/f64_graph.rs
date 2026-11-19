@@ -68,7 +68,7 @@ fn write_file(dir: &Path) -> PathBuf {
 }
 
 fn prepare() -> Prepare {
-    Prepare::new(SampleRate::of(RATE), MaxBlock::of(Samples(BLOCK)))
+    Prepare::new(SampleRate::of(RATE), MaxBlock::of(Samples::new(BLOCK)))
 }
 
 /// The graph's transport: rolling from beat 0 at `TEMPO`, the beat following
@@ -76,7 +76,7 @@ fn prepare() -> Prepare {
 fn roll<C>(solo: &mut Solo<C, f64>) {
     let beats_per_frame = TEMPO / 60.0 / RATE;
     let solo = solo.renderer_mut();
-    solo.set_block(Samples(BLOCK));
+    solo.set_block(Samples::new(BLOCK));
     solo.set_transport_fn(move |frame| {
         TransportPosition::new(
             true,

@@ -88,7 +88,7 @@ pub struct RecordingConfig {
 impl Default for RecordingConfig {
     fn default() -> Self {
         Self {
-            min_point_interval: BeatDuration(0.01),
+            min_point_interval: BeatDuration::new(0.01),
             simplify_tolerance: 0.01,
             auto_simplify: true,
             default_curve: Law::Linear,
@@ -224,7 +224,7 @@ impl<U: Unit<Raw = f64>> Recorder<U> {
                 // a backwards jump is a seek, which should write immediately
                 // rather than be swallowed as "too soon".
                 let gap = beat - last_beat;
-                if gap > BeatDuration(0.0) && gap < self.config.min_point_interval {
+                if gap > BeatDuration::new(0.0) && gap < self.config.min_point_interval {
                     return;
                 }
             }
@@ -305,7 +305,7 @@ mod tests {
     use tutti_units::Db;
 
     fn recorder(mode: RecordMode) -> Recorder<Db> {
-        let mut r = Recorder::new(mode, Db(0.0), Db(1.0));
+        let mut r = Recorder::new(mode, Db::new(0.0), Db::new(1.0));
         // Point-count assertions below are about capture, not thinning.
         r.config.auto_simplify = false;
         r
@@ -316,9 +316,9 @@ mod tests {
     #[test]
     fn write_captures_without_touch() {
         let mut r = recorder(RecordMode::Write);
-        r.record(Beat(0.0), Db(0.1));
-        r.record(Beat(1.0), Db(0.2));
-        r.record(Beat(2.0), Db(0.3));
+        r.record(Beat::new(0.0), Db::new(0.1));
+        r.record(Beat::new(1.0), Db::new(0.2));
+        r.record(Beat::new(2.0), Db::new(0.3));
         assert_eq!(r.trajectory.len(), 3);
     }
 
@@ -326,8 +326,8 @@ mod tests {
     fn touch_and_latch_ignore_record_until_touched() {
         for mode in [RecordMode::Touch, RecordMode::Latch] {
             let mut r = recorder(mode);
-            r.record(Beat(0.0), Db(0.5));
-            r.record(Beat(1.0), Db(0.6));
+            r.record(Beat::new(0.0), Db::new(0.5));
+            r.record(Beat::new(1.0), Db::new(0.6));
             assert!(
                 r.trajectory.is_empty(),
                 "{mode:?} must not capture before touch"
@@ -339,7 +339,7 @@ mod tests {
     #[test]
     fn touch_on_write_is_a_noop() {
         let mut r = recorder(RecordMode::Write);
-        r.touch(Beat(0.0), Db(0.5));
+        r.touch(Beat::new(0.0), Db::new(0.5));
         assert!(r.trajectory.is_empty());
         assert!(!r.is_taking());
     }
@@ -349,14 +349,14 @@ mod tests {
     #[test]
     fn touch_records_then_release_ends_the_take() {
         let mut r = recorder(RecordMode::Touch);
-        r.touch(Beat(0.0), Db(0.5));
+        r.touch(Beat::new(0.0), Db::new(0.5));
         assert_eq!(r.trajectory.len(), 1);
 
-        r.record(Beat(1.0), Db(0.6));
-        r.record(Beat(2.0), Db(0.7));
+        r.record(Beat::new(1.0), Db::new(0.6));
+        r.record(Beat::new(2.0), Db::new(0.7));
         assert_eq!(r.trajectory.len(), 3);
 
-        r.release(Beat(3.0), Db(0.8));
+        r.release(Beat::new(3.0), Db::new(0.8));
         assert_eq!(r.trajectory.len(), 4, "release writes a final point");
         assert!(!r.is_taking(), "Touch ends the take on release");
     }
@@ -364,11 +364,11 @@ mod tests {
     #[test]
     fn touch_stops_capturing_after_release() {
         let mut r = recorder(RecordMode::Touch);
-        r.touch(Beat(0.0), Db(0.5));
-        r.release(Beat(1.0), Db(0.6));
+        r.touch(Beat::new(0.0), Db::new(0.5));
+        r.release(Beat::new(1.0), Db::new(0.6));
         let after_release = r.trajectory.len();
 
-        r.record(Beat(2.0), Db(0.9));
+        r.record(Beat::new(2.0), Db::new(0.9));
         assert_eq!(
             r.trajectory.len(),
             after_release,
@@ -379,18 +379,18 @@ mod tests {
     #[test]
     fn latch_holds_after_release() {
         let mut r = recorder(RecordMode::Latch);
-        r.touch(Beat(2.0), Db(0.5));
-        r.record(Beat(3.0), Db(0.6));
-        r.release(Beat(4.0), Db(0.7));
+        r.touch(Beat::new(2.0), Db::new(0.5));
+        r.record(Beat::new(3.0), Db::new(0.6));
+        r.release(Beat::new(4.0), Db::new(0.7));
 
         assert!(r.is_taking(), "Latch keeps the take open");
         assert_eq!(
-            r.value_at(Beat(5.0)),
+            r.value_at(Beat::new(5.0)),
             Some(0.7),
             "held value reads at any later beat"
         );
         assert_eq!(
-            r.value_at(Beat(100.0)),
+            r.value_at(Beat::new(100.0)),
             Some(0.7),
             "the hold is beat-independent"
         );
@@ -399,23 +399,27 @@ mod tests {
     #[test]
     fn latch_does_not_capture_while_held() {
         let mut r = recorder(RecordMode::Latch);
-        r.touch(Beat(0.0), Db(0.5));
-        r.release(Beat(1.0), Db(0.7));
+        r.touch(Beat::new(0.0), Db::new(0.5));
+        r.release(Beat::new(1.0), Db::new(0.7));
         let held = r.trajectory.len();
 
-        r.record(Beat(2.0), Db(0.9));
+        r.record(Beat::new(2.0), Db::new(0.9));
         assert_eq!(
             r.trajectory.len(),
             held,
             "a held latch take freezes; samples do not land"
         );
-        assert_eq!(r.value_at(Beat(2.0)), Some(0.7), "still reading the hold");
+        assert_eq!(
+            r.value_at(Beat::new(2.0)),
+            Some(0.7),
+            "still reading the hold"
+        );
     }
 
     #[test]
     fn release_without_a_take_is_a_noop() {
         let mut r = recorder(RecordMode::Touch);
-        r.release(Beat(1.0), Db(0.5));
+        r.release(Beat::new(1.0), Db::new(0.5));
         assert!(r.trajectory.is_empty());
         assert!(!r.is_taking());
     }
@@ -427,20 +431,26 @@ mod tests {
         // The empty-vs-zero distinction: between takes the saved trajectory must
         // show through, so the recorder reads None rather than 0.0.
         let mut r = recorder(RecordMode::Touch);
-        assert_eq!(r.value_at(Beat(0.0)), None);
+        assert_eq!(r.value_at(Beat::new(0.0)), None);
 
-        r.touch(Beat(0.0), Db(0.5));
-        r.release(Beat(1.0), Db(0.6));
-        assert_eq!(r.value_at(Beat(2.0)), None, "Touch releases to nothing");
+        r.touch(Beat::new(0.0), Db::new(0.5));
+        r.release(Beat::new(1.0), Db::new(0.6));
+        assert_eq!(
+            r.value_at(Beat::new(2.0)),
+            None,
+            "Touch releases to nothing"
+        );
     }
 
     #[test]
     fn capturing_reads_the_trajectory_being_written() {
         let mut r = recorder(RecordMode::Touch);
-        r.touch(Beat(0.0), Db(0.0));
-        r.record(Beat(4.0), Db(1.0));
+        r.touch(Beat::new(0.0), Db::new(0.0));
+        r.record(Beat::new(4.0), Db::new(1.0));
         // Mid-take the recorder reads its own in-progress curve, interpolated.
-        let mid = r.value_at(Beat(2.0)).expect("capturing take has a value");
+        let mid = r
+            .value_at(Beat::new(2.0))
+            .expect("capturing take has a value");
         assert!((mid - 0.5).abs() < 0.01, "expected ~0.5, got {mid}");
     }
 
@@ -450,19 +460,19 @@ mod tests {
     fn min_interval_drops_dense_samples() {
         let mut r = Recorder::with_config(
             RecordMode::Write,
-            Db(0.0),
-            Db(1.0),
+            Db::new(0.0),
+            Db::new(1.0),
             RecordingConfig {
-                min_point_interval: BeatDuration(0.5),
+                min_point_interval: BeatDuration::new(0.5),
                 auto_simplify: false,
                 ..Default::default()
             },
         );
 
-        r.record(Beat(0.0), Db(0.5)); // opens the take, writes
-        r.record(Beat(0.1), Db(0.6)); // +0.1 — too soon
-        r.record(Beat(0.4), Db(0.7)); // +0.4 from 0.0 — still too soon
-        r.record(Beat(0.5), Db(0.8)); // +0.5 — writes
+        r.record(Beat::new(0.0), Db::new(0.5)); // opens the take, writes
+        r.record(Beat::new(0.1), Db::new(0.6)); // +0.1 — too soon
+        r.record(Beat::new(0.4), Db::new(0.7)); // +0.4 from 0.0 — still too soon
+        r.record(Beat::new(0.5), Db::new(0.8)); // +0.5 — writes
         assert_eq!(r.trajectory.len(), 2);
     }
 
@@ -472,27 +482,27 @@ mod tests {
         // density check must not swallow it.
         let mut r = Recorder::with_config(
             RecordMode::Write,
-            Db(0.0),
-            Db(1.0),
+            Db::new(0.0),
+            Db::new(1.0),
             RecordingConfig {
-                min_point_interval: BeatDuration(0.5),
+                min_point_interval: BeatDuration::new(0.5),
                 auto_simplify: false,
                 ..Default::default()
             },
         );
-        r.record(Beat(4.0), Db(0.5));
-        r.record(Beat(0.0), Db(0.9));
+        r.record(Beat::new(4.0), Db::new(0.5));
+        r.record(Beat::new(0.0), Db::new(0.9));
         assert_eq!(r.trajectory.len(), 2, "the seek-back point must land");
     }
 
     #[test]
     fn finish_simplifies_when_configured() {
-        let mut r = Recorder::new(RecordMode::Write, Db(0.0), Db(1.0));
+        let mut r = Recorder::new(RecordMode::Write, Db::new(0.0), Db::new(1.0));
         r.config.auto_simplify = true;
         // A dead-straight ramp: every interior point is redundant.
-        r.config.min_point_interval = BeatDuration(0.0);
+        r.config.min_point_interval = BeatDuration::new(0.0);
         for i in 0..=10 {
-            r.record(Beat(i as f64), Db(f64::from(i) / 10.0));
+            r.record(Beat::new(i as f64), Db::new(f64::from(i) / 10.0));
         }
         let dense = r.trajectory.len();
         let env = r.finish();
@@ -506,9 +516,9 @@ mod tests {
     #[test]
     fn finish_preserves_points_when_not_simplifying() {
         let mut r = recorder(RecordMode::Write);
-        r.record(Beat(0.0), Db(0.1));
-        r.record(Beat(1.0), Db(0.9));
-        r.record(Beat(2.0), Db(0.2));
+        r.record(Beat::new(0.0), Db::new(0.1));
+        r.record(Beat::new(1.0), Db::new(0.9));
+        r.record(Beat::new(2.0), Db::new(0.2));
         let env = r.finish();
         assert_eq!(env.len(), 3);
     }
@@ -518,8 +528,8 @@ mod tests {
     #[test]
     fn changing_mode_ends_the_take_but_keeps_points() {
         let mut r = recorder(RecordMode::Latch);
-        r.touch(Beat(0.0), Db(0.5));
-        r.record(Beat(1.0), Db(0.6));
+        r.touch(Beat::new(0.0), Db::new(0.5));
+        r.record(Beat::new(1.0), Db::new(0.6));
         let captured = r.trajectory.len();
 
         r.set_mode(RecordMode::Write);
@@ -533,7 +543,7 @@ mod tests {
     #[test]
     fn setting_the_same_mode_leaves_the_take_alone() {
         let mut r = recorder(RecordMode::Latch);
-        r.touch(Beat(0.0), Db(0.5));
+        r.touch(Beat::new(0.0), Db::new(0.5));
         r.set_mode(RecordMode::Latch);
         assert!(r.is_taking());
     }
@@ -542,15 +552,15 @@ mod tests {
 
     #[test]
     fn overdub_starts_from_an_existing_trajectory() {
-        let mut env = Trajectory::new().with_range(Db(0.0), Db(1.0));
-        env.add_breakpoint(Breakpoint::new(Beat(0.0), Db(0.2)));
-        env.add_breakpoint(Breakpoint::new(Beat(8.0), Db(0.4)));
+        let mut env = Trajectory::new().with_range(Db::new(0.0), Db::new(1.0));
+        env.add_breakpoint(Breakpoint::new(Beat::new(0.0), Db::new(0.2)));
+        env.add_breakpoint(Breakpoint::new(Beat::new(8.0), Db::new(0.4)));
 
         let mut r = Recorder::overdub(RecordMode::Touch, env);
         assert_eq!(r.trajectory.len(), 2);
         assert!(!r.is_taking());
 
-        r.touch(Beat(4.0), Db(0.9));
+        r.touch(Beat::new(4.0), Db::new(0.9));
         assert_eq!(
             r.trajectory.len(),
             3,

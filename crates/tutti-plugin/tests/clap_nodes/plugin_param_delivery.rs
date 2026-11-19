@@ -54,7 +54,10 @@ fn read(handle: &PluginHandle, i: usize) -> Option<f32> {
 
 /// A rolling graph with the plugin fed by `lanes`.
 fn rig(client: tutti_plugin::PluginClient, lanes: Vec<ControlLaneNode>) -> Rig {
-    let prepare = Prepare::new(SampleRate::of(SAMPLE_RATE), MaxBlock::of(Samples(BLOCK)));
+    let prepare = Prepare::new(
+        SampleRate::of(SAMPLE_RATE),
+        MaxBlock::of(Samples::new(BLOCK)),
+    );
     let mut rig = Rig::prepared_with(
         client.bind(
             tutti_transport::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
@@ -65,7 +68,7 @@ fn rig(client: tutti_plugin::PluginClient, lanes: Vec<ControlLaneNode>) -> Rig {
     rig.renderer().set_transport(TransportPosition::new(
         true,
         Bpm::of(120.0),
-        Beat(0.0),
+        Beat::new(0.0),
         None,
     ));
     rig
@@ -239,7 +242,7 @@ fn an_export_renders_an_edit_made_in_the_plugin_as_live_does() {
     let held = knob(GAIN, gain_at(-6.0));
     let prepare = Prepare::new(
         SampleRate::of(SAMPLE_RATE),
-        MaxBlock::of(Samples(FORK_BLOCK)),
+        MaxBlock::of(Samples::new(FORK_BLOCK)),
     );
     let mut live = Rig::prepared_with(
         probe.client.bind(
@@ -251,7 +254,7 @@ fn an_export_renders_an_edit_made_in_the_plugin_as_live_does() {
     live.renderer().set_transport(TransportPosition::new(
         true,
         Bpm::of(120.0),
-        Beat(0.0),
+        Beat::new(0.0),
         None,
     ));
     let near = |out: &[Vec<f32>], db: f64| {

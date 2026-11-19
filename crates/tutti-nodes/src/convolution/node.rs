@@ -50,7 +50,7 @@ pub(super) fn ring_out(ir_length: Samples) -> Tail {
     match ir_length.get() {
         // An empty or single-sample IR produces nothing after its input stops.
         0 | 1 => Tail::None,
-        n => Tail::Finite(Samples(n - 1)),
+        n => Tail::Finite(Samples::new(n - 1)),
     }
 }
 
@@ -577,7 +577,7 @@ impl<F: FftFloat + Lerp> ConvolverNode<F> {
     ///
     /// `1.0` is unity. The floor keeps the wet path from inverting.
     pub fn set_gain(&self, gain: impl Into<Amplitude>) {
-        self.gain.store(Amplitude(gain.into().get().max(0.0)));
+        self.gain.store(Amplitude::new(gain.into().get().max(0.0)));
     }
 
     /// The node's latency in [`Samples`] — one FFT block, the same on every
@@ -625,7 +625,7 @@ impl<F: FftFloat + Lerp> ConvolverNode<F> {
         // The cell's gain narrows once, and a gain that is not finite reads as the last finite
         // one (`from_unit` would saturate an infinity to a finite value).
         let cell = self.gain.load();
-        let gain = Amplitude(
+        let gain = Amplitude::new(
             self.good
                 .read_if(F::from_unit(cell), cell.get().is_finite())
                 .into(),
@@ -931,16 +931,20 @@ mod tests {
     #[test]
     fn a_node_of_no_channels_is_refused() {
         assert_eq!(
-            ConvolverNode::<f32>::per_channel::<f32>(&[], Samples(64)).err(),
+            ConvolverNode::<f32>::per_channel::<f32>(&[], Samples::new(64)).err(),
             Some(ConvolverError::NoChannels)
         );
         assert_eq!(
-            ConvolverNode::<f32>::folded::<f32>(&[], Samples(64)).err(),
+            ConvolverNode::<f32>::folded::<f32>(&[], Samples::new(64)).err(),
             Some(ConvolverError::NoChannels)
         );
         assert_eq!(
-            ConvolverNode::<f32>::shared_ir(ChannelLayout::EMPTY, Mono::new(&[1.0]), Samples(64))
-                .err(),
+            ConvolverNode::<f32>::shared_ir(
+                ChannelLayout::EMPTY,
+                Mono::new(&[1.0]),
+                Samples::new(64)
+            )
+            .err(),
             Some(ConvolverError::NoChannels)
         );
     }
@@ -950,14 +954,14 @@ mod tests {
     fn more_channels_than_a_layout_counts_is_refused() {
         let irs = vec![Mono::new(&[1.0_f32]); usize::from(u16::MAX) + 1];
         assert_eq!(
-            ConvolverNode::<f32>::per_channel(&irs, Samples(64)).err(),
+            ConvolverNode::<f32>::per_channel(&irs, Samples::new(64)).err(),
             Some(ConvolverError::TooWide {
                 channels: irs.len()
             })
         );
         let past_a_bus = vec![Mono::new(&[1.0_f32]); MAX_CHANNELS + 1];
         assert_eq!(
-            ConvolverNode::<f32>::per_channel(&past_a_bus, Samples(64)).err(),
+            ConvolverNode::<f32>::per_channel(&past_a_bus, Samples::new(64)).err(),
             Some(ConvolverError::TooWide {
                 channels: MAX_CHANNELS + 1
             })
@@ -971,12 +975,13 @@ mod tests {
         assert!(matches!(
             ConvolverNode::<f32>::folded(
                 &[Mono::new(&ir), Mono::new(&ir), Mono::new(&ir)],
-                Samples(64)
+                Samples::new(64)
             ),
             Err(ConvolverError::NoFold { width: 3, .. })
         ));
         assert!(
-            ConvolverNode::<f32>::folded(&[Mono::new(&ir), Mono::new(&ir)], Samples(64)).is_ok()
+            ConvolverNode::<f32>::folded(&[Mono::new(&ir), Mono::new(&ir)], Samples::new(64))
+                .is_ok()
         );
     }
 
@@ -1061,16 +1066,16 @@ mod tests {
     fn a_fork_keeps_the_gain_and_shares_no_cell() {
         let node = ConvolverNode::<f32>::per_channel(
             &[Mono::new(&[1.0, 0.5]), Mono::new(&[0.25])],
-            Samples(64),
+            Samples::new(64),
         )
         .unwrap();
         assert_eq!(node.param_set().params().count(), 1);
         assert!(node.param_set().set(UnitParam::Volume, 0.7));
-        assert_eq!(node.gain().load(), Amplitude(0.7));
+        assert_eq!(node.gain().load(), Amplitude::new(0.7));
         node.set_gain(Amplitude::new(0.3));
         let fork = node.fork_fresh();
         node.set_gain(Amplitude::new(2.0));
-        assert_eq!(fork.gain.load(), Amplitude(0.3));
+        assert_eq!(fork.gain.load(), Amplitude::new(0.3));
     }
 
     /// A gain driven on the `Volume` port replaces the cell, frame by frame: a
@@ -1078,7 +1083,10 @@ mod tests {
     /// each frame's driven value, and a negative frame is floored at 0.
     #[test]
     fn a_driven_gain_scales_each_frame_and_floors_at_zero() {
-        let mut node = prepared(ConvolverNode::<f32>::new(Mono::new(&[1.0]), Samples(64)));
+        let mut node = prepared(ConvolverNode::<f32>::new(
+            Mono::new(&[1.0]),
+            Samples::new(64),
+        ));
         node.set_gain(Amplitude::new(5.0));
         let latency = node.latency_samples().get();
         let lane: Vec<f32> = (0..256).map(|i| [0.5, 1.0, -2.0, 0.25][i % 4]).collect();
@@ -1104,8 +1112,11 @@ mod tests {
     #[test]
     fn a_non_finite_driven_frame_holds_the_same_value_on_every_channel() {
         let mut node = prepared(
-            ConvolverNode::<f32>::per_channel(&[Mono::new(&[1.0]), Mono::new(&[1.0])], Samples(64))
-                .unwrap(),
+            ConvolverNode::<f32>::per_channel(
+                &[Mono::new(&[1.0]), Mono::new(&[1.0])],
+                Samples::new(64),
+            )
+            .unwrap(),
         );
         let ones = [1.0; 256];
         drive(
@@ -1131,7 +1142,8 @@ mod tests {
     #[test]
     fn the_spectra_are_stored_once_and_a_fork_shares_them() {
         let ir = decay_ir(4_096, Seconds::new(0.3), SampleRate::SR_48K);
-        let node = ConvolverNode::<f32>::shared_ir(6u16, Mono::new(&ir), Samples(256)).unwrap();
+        let node =
+            ConvolverNode::<f32>::shared_ir(6u16, Mono::new(&ir), Samples::new(256)).unwrap();
         let spectra = |n: &ConvolverNode<f32>| match &n.engine {
             Engine::PerChannel(cs) => cs
                 .iter()
@@ -1163,7 +1175,7 @@ mod tests {
             Mono::new(&ir),
             Mono::new(&ir),
             Mono::new(&ir),
-            Samples(64),
+            Samples::new(64),
         ));
         drive_block(&mut live, &[&x, &x]);
         let mut fork = prepared(live.fork_fresh());
@@ -1172,7 +1184,7 @@ mod tests {
             Mono::new(&ir),
             Mono::new(&ir),
             Mono::new(&ir),
-            Samples(64),
+            Samples::new(64),
         ));
         let silent = [0.0f32; 512];
         assert_eq!(
@@ -1195,8 +1207,8 @@ mod tests {
             .map(|v| v * 0.1)
             .collect();
         let x = crate::test_support::noise(2, 2500);
-        let node = ConvolverNode::<f32>::new(Mono::new(&ir), Samples(32));
-        let lat = node.latency_samples().0;
+        let node = ConvolverNode::<f32>::new(Mono::new(&ir), Samples::new(32));
+        let lat = node.latency_samples().get();
         assert_eq!(lat, 32);
         let mut want = vec![0.0f64; x.len() + lat];
         for (n, &xn) in x.iter().enumerate() {
@@ -1208,7 +1220,7 @@ mod tests {
         }
         let mut renders = Vec::new();
         for lens in [&[1usize][..], &[7, 61, 64, 127], &[1000, 3]] {
-            let mut node = prepared(ConvolverNode::<f32>::new(Mono::new(&ir), Samples(32)));
+            let mut node = prepared(ConvolverNode::<f32>::new(Mono::new(&ir), Samples::new(32)));
             let (mut at, mut k) = (0, 0);
             let mut out = Vec::new();
             while at < x.len() {
@@ -1239,7 +1251,7 @@ mod tests {
     /// invert the wet path's polarity.
     #[test]
     fn the_gain_is_floored_at_zero() {
-        let node = ConvolverNode::<f32>::new(Mono::new(&[1.0; 64]), Samples(64));
+        let node = ConvolverNode::<f32>::new(Mono::new(&[1.0; 64]), Samples::new(64));
         node.set_gain(Amplitude::new(1.5));
         assert_eq!(node.gain().load(), Amplitude::new(1.5));
         node.set_gain(Amplitude::new(-0.5));
@@ -1323,33 +1335,36 @@ mod direct_sum {
         let cases: Vec<(&str, ConvolverNode<f32>, Vec<(&[f32], usize)>)> = vec![
             (
                 "width1",
-                ConvolverNode::<f32>::new(Mono::new(&ir_a), Samples(64)),
+                ConvolverNode::<f32>::new(Mono::new(&ir_a), Samples::new(64)),
                 vec![(&ir_a[..], 0)],
             ),
             (
                 "shared_ir",
-                ConvolverNode::<f32>::shared_ir(2u16, Mono::new(&ir_a), Samples(32)).unwrap(),
+                ConvolverNode::<f32>::shared_ir(2u16, Mono::new(&ir_a), Samples::new(32)).unwrap(),
                 vec![(&ir_a[..], 0), (&ir_a[..], 1)],
             ),
             (
                 "per_channel",
                 ConvolverNode::<f32>::per_channel(
                     &[Mono::new(&ir_a), Mono::new(&ir_b)],
-                    Samples(128),
+                    Samples::new(128),
                 )
                 .unwrap(),
                 vec![(&ir_a[..], 0), (&ir_b[..], 1)],
             ),
             (
                 "folded",
-                ConvolverNode::<f32>::folded(&[Mono::new(&ir_a), Mono::new(&ir_b)], Samples(16))
-                    .unwrap(),
+                ConvolverNode::<f32>::folded(
+                    &[Mono::new(&ir_a), Mono::new(&ir_b)],
+                    Samples::new(16),
+                )
+                .unwrap(),
                 vec![(&ir_a[..], FOLDED), (&ir_b[..], FOLDED)],
             ),
         ];
         for (name, node, outputs) in cases {
             node.set_gain(Amplitude::new(gain));
-            let lat = node.latency_samples().0;
+            let lat = node.latency_samples().get();
             let x = signal(usize::from(node.inputs().count()), FRAMES);
             let mut mono = vec![0.0f32; FRAMES];
             if x.len() == 2 {
@@ -1396,13 +1411,13 @@ mod direct_sum {
             .map(|c| {
                 decay_ir(
                     200 + 90 * c,
-                    tutti_units::Seconds(0.2 + 0.05 * c as f64),
+                    tutti_units::Seconds::new(0.2 + 0.05 * c as f64),
                     SampleRate::SR_48K,
                 )
             })
             .collect();
         let refs: Vec<Mono<'_, f32>> = irs.iter().map(|ir| Mono::new(ir)).collect();
-        let wide = ConvolverNode::<f32>::per_channel(&refs, Samples(64)).unwrap();
+        let wide = ConvolverNode::<f32>::per_channel(&refs, Samples::new(64)).unwrap();
         let shape = wide.shape();
         assert_eq!(
             (shape.audio_in().count(), shape.audio_out().count()),
@@ -1412,7 +1427,7 @@ mod direct_sum {
         let x = signal(6, 900);
         let got = render(wide, &x);
         for c in 0..6 {
-            let solo = ConvolverNode::<f32>::new(Mono::new(&irs[c]), Samples(64));
+            let solo = ConvolverNode::<f32>::new(Mono::new(&irs[c]), Samples::new(64));
             let want = render(solo, &x[c..=c]);
             for (i, (g, w)) in got[c].iter().zip(&want[0]).enumerate() {
                 assert_eq!(g.to_bits(), w.to_bits(), "ch{c} frame {i}: {g} vs {w}");
@@ -1425,9 +1440,10 @@ mod direct_sum {
     /// `node_mix.rs`'s).
     #[test]
     fn a_six_channel_shared_ir_keeps_each_channel_to_itself_and_aligned() {
-        let node = ConvolverNode::<f32>::shared_ir(6u16, Mono::new(&[1.0]), Samples(64)).unwrap();
-        let latency = node.latency_samples().0;
-        assert_eq!(node.shape().latency, Latency::new(Samples(latency)));
+        let node =
+            ConvolverNode::<f32>::shared_ir(6u16, Mono::new(&[1.0]), Samples::new(64)).unwrap();
+        let latency = node.latency_samples().get();
+        assert_eq!(node.shape().latency, Latency::new(Samples::new(latency)));
         let mut x = vec![vec![0.0f32; 4 * latency]; 6];
         x[3][0] = 1.0;
         let out = render(node, &x);
@@ -1450,7 +1466,7 @@ mod direct_sum {
             .map(|c| decay_ir(150 + 40 * c, Seconds::new(0.3), SampleRate::SR_48K))
             .collect();
         let refs: Vec<Mono<'_, f32>> = irs.iter().map(|ir| Mono::new(ir)).collect();
-        let node = ConvolverNode::<f32>::folded(&refs, Samples(32)).unwrap();
+        let node = ConvolverNode::<f32>::folded(&refs, Samples::new(32)).unwrap();
         let x = signal(6, 700);
         let got = render(node, &x);
         let to_mono = Fold::between(
@@ -1467,7 +1483,7 @@ mod direct_sum {
             })
             .collect();
         for c in 0..6 {
-            let solo = ConvolverNode::<f32>::new(Mono::new(&irs[c]), Samples(32));
+            let solo = ConvolverNode::<f32>::new(Mono::new(&irs[c]), Samples::new(32));
             let want = render(solo, std::slice::from_ref(&mono));
             for (i, (g, w)) in got[c].iter().zip(&want[0]).enumerate() {
                 assert_eq!(g.to_bits(), w.to_bits(), "ch{c} frame {i}: {g} vs {w}");
@@ -1487,7 +1503,7 @@ mod direct_sum {
         let x = noise(21, 64 * 8);
         let (hist, block) = (&x[..64 * 7], &x[64 * 7..]);
         let make = || {
-            ConvolverNode::<f32>::shared_ir(ChannelLayout::STEREO, Mono::new(&ir), Samples(64))
+            ConvolverNode::<f32>::shared_ir(ChannelLayout::STEREO, Mono::new(&ir), Samples::new(64))
                 .unwrap()
         };
         let run = change_between_node_blocks(
@@ -1588,7 +1604,7 @@ mod layouts {
                 Mono::new(&irs[1]),
                 Mono::new(&irs[2]),
                 Mono::new(&irs[3]),
-                Samples(BLOCK),
+                Samples::new(BLOCK),
             ))
         };
         let lat = make().latency_samples().get();
@@ -1630,7 +1646,7 @@ mod layouts {
                     format,
                     ChannelTopology::from(format),
                     &views(&irs),
-                    Samples(BLOCK),
+                    Samples::new(BLOCK),
                 )
                 .unwrap(),
             )
@@ -1663,7 +1679,7 @@ mod layouts {
                     ports,
                     ports,
                     &views(&[l.clone(), r.clone()]),
-                    Samples(BLOCK),
+                    Samples::new(BLOCK),
                 )
                 .unwrap(),
             )
@@ -1696,7 +1712,7 @@ mod layouts {
             Mono::new(&irs[1]),
             Mono::new(&irs[2]),
             Mono::new(&irs[3]),
-            Samples(32),
+            Samples::new(32),
         ));
         let lat = node.latency_samples().get();
         let got = render(&mut node, &x, &[100]);
@@ -1730,7 +1746,7 @@ mod layouts {
         let foa = AmbisonicFormat::ambix(tutti_buffers::AmbisonicOrder::of(1));
         let foa_bus = BusTopology::ambisonic(foa);
         let build = |layout, i, o, n| {
-            ConvolverNode::<f32>::from_layout(layout, i, o, &irs(n), Samples(64)).err()
+            ConvolverNode::<f32>::from_layout(layout, i, o, &irs(n), Samples::new(64)).err()
         };
         let ambisonic = IrLayout::Ambisonic {
             input: foa,
@@ -1825,7 +1841,7 @@ mod layouts {
                     foa,
                     ChannelTopology::from(Bed::Stereo),
                     &views(&irs),
-                    Samples(BLOCK),
+                    Samples::new(BLOCK),
                 )
                 .unwrap(),
             )
@@ -1870,7 +1886,7 @@ mod layouts {
                     Mono::new(&four[1]),
                     Mono::new(&four[2]),
                     Mono::new(&four[3]),
-                    Samples(32),
+                    Samples::new(32),
                 ),
             ),
             (
@@ -1879,7 +1895,7 @@ mod layouts {
                     foa,
                     ChannelTopology::from(foa),
                     &views(&sixteen),
-                    Samples(32),
+                    Samples::new(32),
                 )
                 .unwrap(),
             ),
@@ -1887,7 +1903,7 @@ mod layouts {
                 "per channel",
                 ConvolverNode::<f32>::per_channel(
                     &[Mono::new(&two[0]), Mono::new(&two[1])],
-                    Samples(32),
+                    Samples::new(32),
                 )
                 .unwrap(),
             ),
@@ -1955,15 +1971,15 @@ mod layouts {
             Mono::new(&irs[1]),
             Mono::new(&irs[2]),
             Mono::new(&irs[3]),
-            Samples(64),
+            Samples::new(64),
         );
         let shape = node.shape();
-        assert_eq!(shape.latency, Latency::new(Samples(64)));
-        assert_eq!(shape.tail, Tail::Finite(Samples(200)));
+        assert_eq!(shape.latency, Latency::new(Samples::new(64)));
+        assert_eq!(shape.tail, Tail::Finite(Samples::new(200)));
         for ((name, node), tail) in long_layouts().into_iter().zip([2769, 1199, 2999]) {
             let shape = node.shape();
-            assert_eq!(shape.latency, Latency::new(Samples(32)), "{name}");
-            assert_eq!(shape.tail, Tail::Finite(Samples(tail)), "{name}");
+            assert_eq!(shape.latency, Latency::new(Samples::new(32)), "{name}");
+            assert_eq!(shape.tail, Tail::Finite(Samples::new(tail)), "{name}");
         }
     }
 
@@ -1973,7 +1989,7 @@ mod layouts {
     #[test]
     fn an_unprepared_folded_node_does_not_panic() {
         let mut node =
-            ConvolverNode::<f32>::folded(&[Mono::new(&[1.0]), Mono::new(&[1.0])], Samples(32))
+            ConvolverNode::<f32>::folded(&[Mono::new(&[1.0]), Mono::new(&[1.0])], Samples::new(32))
                 .unwrap();
         let lat = node.latency_samples().get();
         let out = drive(
@@ -2008,7 +2024,7 @@ mod in_an_f64_graph {
         const BLOCK: usize = 64;
         let h = [1.0 / 3.0, -1.0 / 7.0];
         let x = wide_signal(512);
-        let node = ConvolverNode::<f64>::new(Mono::new(&h), Samples(BLOCK));
+        let node = ConvolverNode::<f64>::new(Mono::new(&h), Samples::new(BLOCK));
         let latency = node.latency_samples().get();
         assert_eq!(latency, BLOCK);
         let out = render_f64(node, SampleRate::SR_48K, &[&x], x.len()).remove(0);
@@ -2026,8 +2042,8 @@ mod in_an_f64_graph {
         const BLOCK: usize = 64;
         let h = [1.0 / 7.0];
         let x = wide_signal(4 * BLOCK);
-        let node = ConvolverNode::<f64>::new(Mono::new(&h), Samples(BLOCK));
-        node.set_gain(Amplitude(1.0 / 3.0));
+        let node = ConvolverNode::<f64>::new(Mono::new(&h), Samples::new(BLOCK));
+        node.set_gain(Amplitude::new(1.0 / 3.0));
         let out = render_f64(node, SampleRate::SR_48K, &[&x], x.len()).remove(0);
         let want: Vec<f64> = (0..x.len())
             .map(|n| n.checked_sub(BLOCK).map_or(0.0, |m| h[0] * x[m] / 3.0))
@@ -2043,16 +2059,16 @@ mod in_an_f64_graph {
         const BLOCK: usize = 64;
         let h = [1.0 / 7.0];
         let x = wide_signal(BLOCK);
-        let node = ConvolverNode::<f64>::new(Mono::new(&h), Samples(BLOCK));
+        let node = ConvolverNode::<f64>::new(Mono::new(&h), Samples::new(BLOCK));
         let cell = node.gain();
-        cell.store(Amplitude(1.0 / 3.0));
+        cell.store(Amplitude::new(1.0 / 3.0));
         let mut d = Direct::<_, f64>::with_format(node, SampleRate::SR_48K, BLOCK);
         d.inputs_mut()
             .plane_mut(0)
             .samples_mut()
             .copy_from_slice(&x);
         d.block();
-        cell.store(Amplitude(f64::INFINITY));
+        cell.store(Amplitude::new(f64::INFINITY));
         d.block();
         // The latency is one block, so the second block holds the first block's input.
         let want: Vec<f64> = x.iter().map(|v| h[0] * v / 3.0).collect();

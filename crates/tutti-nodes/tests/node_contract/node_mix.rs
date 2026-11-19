@@ -35,7 +35,7 @@ const BLOCK: usize = 64;
 const FRAMES: usize = 1_024;
 
 fn solo<N: IntoNode>(node: N) -> Solo<N::Controls> {
-    Solo::new(node, Prepare::new(RATE, MaxBlock::of(Samples(BLOCK))))
+    Solo::new(node, Prepare::new(RATE, MaxBlock::of(Samples::new(BLOCK))))
 }
 
 fn set_mix<C>(solo: &mut Solo<C>, mix: Mix) {
@@ -114,7 +114,7 @@ fn check_io<N: IntoNode>(
     let wet = rendered(make, &x, Mix::WET);
     let (mut alone, _) = make().into_node();
     alone = {
-        alone.prepare(&Prepare::new(RATE, MaxBlock::of(Samples(BLOCK))));
+        alone.prepare(&Prepare::new(RATE, MaxBlock::of(Samples::new(BLOCK))));
         alone
     };
     let input = after_silence(&x);
@@ -165,11 +165,14 @@ fn the_convolver_is_blended_by_the_graph() {
     use tutti_buffers::Mono;
     use tutti_fixtures::signal::room_ir;
     use tutti_nodes::ConvolverNode;
-    let ir = room_ir(0.5, Seconds(0.05), RATE);
-    let ir2 = room_ir(0.8, Seconds(0.08), RATE);
+    let ir = room_ir(0.5, Seconds::new(0.05), RATE);
+    let ir2 = room_ir(0.8, Seconds::new(0.08), RATE);
     check(
         "convolver (dual mono, 64-frame block)",
-        &|| ConvolverNode::per_channel(&[Mono::new(&ir), Mono::new(&ir2)], Samples(64)).unwrap(),
+        &|| {
+            ConvolverNode::per_channel(&[Mono::new(&ir), Mono::new(&ir2)], Samples::new(64))
+                .unwrap()
+        },
         2,
         64,
     );
@@ -181,7 +184,7 @@ fn the_convolver_is_blended_by_the_graph() {
                 Mono::new(&ir2),
                 Mono::new(&ir2),
                 Mono::new(&ir),
-                Samples(64),
+                Samples::new(64),
             )
         },
         2,
@@ -189,13 +192,13 @@ fn the_convolver_is_blended_by_the_graph() {
     );
     check(
         "convolver (shared IR, six channels)",
-        &|| ConvolverNode::shared_ir(6u16, Mono::new(&[1.0, 0.5]), Samples(128)).unwrap(),
+        &|| ConvolverNode::shared_ir(6u16, Mono::new(&[1.0, 0.5]), Samples::new(128)).unwrap(),
         6,
         128,
     );
     check(
         "convolver (folded, stereo)",
-        &|| ConvolverNode::folded(&[Mono::new(&ir), Mono::new(&ir2)], Samples(32)).unwrap(),
+        &|| ConvolverNode::folded(&[Mono::new(&ir), Mono::new(&ir2)], Samples::new(32)).unwrap(),
         2,
         32,
     );
@@ -208,15 +211,15 @@ fn the_delay_is_blended_by_the_graph() {
         &|| {
             let layout = DelayLayout::new(
                 BusTopology::STEREO,
-                MaxDelay::of(Seconds(0.1)),
+                MaxDelay::of(Seconds::new(0.1)),
                 InterpolationMode::Linear,
             )
-            .with_times(ChannelTimes::each(&[Seconds(0.021)]).unwrap())
+            .with_times(ChannelTimes::each(&[Seconds::new(0.021)]).unwrap())
             .unwrap();
             DelayNode::<f32>::from_layout(
                 layout,
                 DelayControls {
-                    time: Seconds(0.013),
+                    time: Seconds::new(0.013),
                     feedback: Feedback::new(0.5),
                     cross_feedback: Feedback::new(0.3),
                 },
@@ -229,9 +232,9 @@ fn the_delay_is_blended_by_the_graph() {
         "delay (mono)",
         &|| {
             DelayNode::<f32>::mono(
-                MaxDelay::of(Seconds(0.1)),
+                MaxDelay::of(Seconds::new(0.1)),
                 DelayControls {
-                    time: Seconds(0.01),
+                    time: Seconds::new(0.01),
                     feedback: Feedback::new(0.4),
                     ..DelayControls::DEFAULT
                 },
@@ -310,10 +313,10 @@ fn a_mix_move_on_a_delay_ramps_across_the_block() {
     let make = || {
         DelayNode::<f32>::new(
             BusTopology::assumed(ChannelLayout::from(6u16)).expect("six channels are one bus"),
-            MaxDelay::of(Seconds(0.1)),
+            MaxDelay::of(Seconds::new(0.1)),
             InterpolationMode::Linear,
             DelayControls {
-                time: Seconds(0.0005),
+                time: Seconds::new(0.0005),
                 feedback: Feedback::new(0.3),
                 ..DelayControls::DEFAULT
             },
@@ -365,11 +368,11 @@ fn a_keyed_node_and_a_split_are_blended_on_their_main_bus() {
                 BusTopology::STEREO,
                 KeySource::Sidechain,
                 GateControls {
-                    threshold: Db(-20.0),
+                    threshold: Db::new(-20.0),
                     attack: s(0.001),
                     hold: s(0.01),
                     release: s(0.05),
-                    range: Db(-80.0),
+                    range: Db::new(-80.0),
                     ..GateControls::DEFAULT
                 },
             )
@@ -385,7 +388,7 @@ fn a_keyed_node_and_a_split_are_blended_on_their_main_bus() {
                 BusTopology::STEREO,
                 KeySource::Sidechain,
                 CompressorControls {
-                    threshold: Db(-20.0),
+                    threshold: Db::new(-20.0),
                     ratio: CompressionRatio::new(4.0),
                     attack: s(0.005),
                     release: s(0.05),
@@ -399,7 +402,10 @@ fn a_keyed_node_and_a_split_are_blended_on_their_main_bus() {
     );
     check_io(
         "crossover (stereo, two bands)",
-        &|| CrossoverNode::<f32>::new(ChannelLayout::STEREO, &[Hz(1_000.0)]).expect("one split"),
+        &|| {
+            CrossoverNode::<f32>::new(ChannelLayout::STEREO, &[Hz::new(1_000.0)])
+                .expect("one split")
+        },
         2,
         4,
         0,
@@ -407,7 +413,7 @@ fn a_keyed_node_and_a_split_are_blended_on_their_main_bus() {
     // Mono: band 0 is the input at DRY, band 1 silent (not a centre on both).
     let x = vec![noise(90, FRAMES)];
     let dry = rendered(
-        &|| CrossoverNode::<f32>::new(ChannelLayout::MONO, &[Hz(1_000.0)]).expect("one split"),
+        &|| CrossoverNode::<f32>::new(ChannelLayout::MONO, &[Hz::new(1_000.0)]).expect("one split"),
         &x,
         Mix::DRY,
     );

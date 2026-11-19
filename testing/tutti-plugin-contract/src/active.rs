@@ -24,7 +24,7 @@ const UNWRITTEN: f64 = 9.0;
 /// Panics when `block` is zero.
 #[must_use]
 pub fn prepare(rate: f64, block: usize, format: FloatWidth) -> Prepare {
-    let block = MaxBlock::new(Samples(block)).expect("a case renders at least one frame");
+    let block = MaxBlock::new(Samples::new(block)).expect("a case renders at least one frame");
     Prepare::new(SampleRate::of(rate), block).with_format(format)
 }
 
@@ -74,7 +74,7 @@ impl<L: Loaded> Render for Active<L> {
         let mut refs: Vec<&mut [S]> = outs.iter_mut().map(Vec::as_mut_slice).collect();
         let mut out = ProcessOutput::default();
         let mut io = PluginIo {
-            buffer: InputOutput::from_slices(Samples(frames), &ins, &mut refs)
+            buffer: InputOutput::from_slices(Samples::new(frames), &ins, &mut refs)
                 .expect("equal channels"),
             ctx,
             out: &mut out,

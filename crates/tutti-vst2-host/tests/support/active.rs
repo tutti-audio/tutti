@@ -19,7 +19,7 @@ pub type Active = tutti_fixtures::Active<Whole<Vst2Loaded>>;
 
 /// The `Prepare` a rate, block size and width stand for, in realtime mode.
 pub fn prepare_for(rate: f64, frames: usize, width: FloatWidth) -> Prepare {
-    let block = MaxBlock::new(Samples(frames)).expect("a block of at least one frame");
+    let block = MaxBlock::new(Samples::new(frames)).expect("a block of at least one frame");
     Prepare::new(SampleRate::of(rate), block).with_format(width)
 }
 
@@ -108,8 +108,8 @@ fn run<'p, S: Float>(
     } else {
         PlanesMut::new(&mut outs).expect("equal channels")
     };
-    let mut io =
-        InputOutput::new(Samples(num_samples), input, output).expect("the channels hold the block");
+    let mut io = InputOutput::new(Samples::new(num_samples), input, output)
+        .expect("the channels hold the block");
     processor.process_planes(&mut io, ctx)
 }
 
@@ -129,7 +129,7 @@ impl ActiveExt for Active {
         let prepare = self.prepare();
         let wanted = Prepare::new(
             prepare.rate(),
-            MaxBlock::new(Samples(frames)).expect("a block of at least one frame"),
+            MaxBlock::new(Samples::new(frames)).expect("a block of at least one frame"),
         )
         .with_format(prepare.format())
         .with_mode(prepare.mode());

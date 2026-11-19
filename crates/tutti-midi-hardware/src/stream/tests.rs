@@ -5,6 +5,7 @@
 
 use super::*;
 use crate::MidiSession;
+use crate::capability::{from_os, legacy};
 use crate::session::Polled;
 use crate::test_support::{FakeBackend, FakeCounters, endpoint};
 use crate::{Delivered, HardwareMidiInputs};
@@ -49,13 +50,18 @@ fn streams(polled: impl IntoIterator<Item = Polled>) -> Vec<(DeviceId, DeviceStr
         .collect()
 }
 
-fn session_over(os: UmpCapability, direction: PortDirection, device: Endpoint) -> Wire {
+/// A MIDI 2.0 endpoint the OS describes, with no blocks.
+fn midi2() -> Endpoint {
+    from_os(Protocol::Midi2, None, [])
+}
+
+fn session_over(os: Endpoint, direction: PortDirection, device: Endpoint) -> Wire {
     session_over_with(os, direction, device, crate::MidiHardwareOptions::new())
 }
 
 /// As [`session_over`], with inputs timed by `timing`.
 fn session_over_timing(
-    os: UmpCapability,
+    os: Endpoint,
     direction: PortDirection,
     device: Endpoint,
     timing: InputTiming,
@@ -70,7 +76,7 @@ fn session_over_timing(
 
 /// As [`session_over`], with MIDI-CI under `ci` from the start.
 fn session_over_ci(
-    os: UmpCapability,
+    os: Endpoint,
     direction: PortDirection,
     device: Endpoint,
     ci: Option<tutti_ump::DeviceIdentity>,
@@ -94,7 +100,7 @@ fn presented(device: tutti_ump::DeviceIdentity) -> crate::Presented {
 
 /// A wire over a session opened with `options`.
 fn session_over_with(
-    os: UmpCapability,
+    os: Endpoint,
     direction: PortDirection,
     device: Endpoint,
     options: crate::MidiHardwareOptions,
@@ -221,11 +227,7 @@ fn offering_both() -> Endpoint {
 /// off though the device offers them** (the module's reasoning).
 #[test]
 fn a_device_that_answers_is_negotiated_onto_midi2_with_jr_off() {
-    let mut wire = session_over(
-        UmpCapability::midi1(),
-        PortDirection::Duplex,
-        offering_both(),
-    );
+    let mut wire = session_over(legacy(), PortDirection::Duplex, offering_both());
     // The OS says MIDI 1.0 with no blocks: not a UMP Endpoint, nothing asked.
     wire.open();
     assert_eq!(
@@ -233,11 +235,7 @@ fn a_device_that_answers_is_negotiated_onto_midi2_with_jr_off() {
         Basis::Described
     );
 
-    let mut wire = session_over(
-        UmpCapability::midi2(),
-        PortDirection::Duplex,
-        offering_both(),
-    );
+    let mut wire = session_over(midi2(), PortDirection::Duplex, offering_both());
     wire.open();
     assert_eq!(
         wire.session.stream(&wire.id),
@@ -283,7 +281,7 @@ fn a_device_that_answers_is_negotiated_onto_midi2_with_jr_off() {
         }
     );
     assert_eq!(wire.session.stream(&wire.id), Some(*stream));
-    let blocks = stream.capability().blocks;
+    let blocks: Vec<_> = stream.endpoint().function_blocks().collect();
     assert_eq!(blocks.len(), 1);
     assert_eq!(blocks[0].name().map(BlockName::as_str), Some("Main"));
     assert_eq!(blocks[0].groups().get(), 2);
@@ -302,7 +300,7 @@ fn a_device_that_offers_only_midi1_stays_in_midi1() {
         ..Capabilities::default()
     }))
     .block(block());
-    let mut wire = session_over(UmpCapability::midi2(), PortDirection::Duplex, device);
+    let mut wire = session_over(midi2(), PortDirection::Duplex, device);
     wire.open();
     let mut all = Vec::new();
     let mut settled = Vec::new();
@@ -333,7 +331,7 @@ fn a_silent_device_settles_as_the_os_describes_it() {
         midi1: true,
         ..Capabilities::default()
     }));
-    let mut wire = session_over(UmpCapability::midi2(), PortDirection::Duplex, silent);
+    let mut wire = session_over(midi2(), PortDirection::Duplex, silent);
     wire.open();
 
     let step = STEP_TIMEOUT.as_millis() as u64;
@@ -369,7 +367,7 @@ fn a_silent_device_settles_as_the_os_describes_it() {
 #[test]
 fn a_midi1_port_is_not_sent_stream_messages_and_is_described_at_once() {
     let mut wire = session_over(
-        UmpCapability::midi1(),
+        legacy(),
         PortDirection::Duplex,
         Endpoint::new(Supports::of(Capabilities {
             midi1: true,
@@ -399,7 +397,7 @@ fn midi1_wire() -> Wire {
 /// As [`midi1_wire`], with MIDI-CI under `ci` from the start.
 fn midi1_wire_ci(ci: Option<tutti_ump::DeviceIdentity>) -> Wire {
     let mut wire = session_over_ci(
-        UmpCapability::midi1(),
+        legacy(),
         PortDirection::Duplex,
         Endpoint::new(Supports::of(Capabilities {
             midi1: true,
@@ -537,7 +535,7 @@ fn after_giving_up_the_sysex_copy_is_off_and_nothing_is_sent() {
 fn a_refused_output_does_not_fail_the_input_and_nothing_is_asked() {
     use tutti_midi_device::INQUIRY_TIMEOUT;
     let mut wire = session_over(
-        UmpCapability::midi1(),
+        legacy(),
         PortDirection::Duplex,
         Endpoint::new(Supports::of(Capabilities {
             midi1: true,
@@ -692,7 +690,7 @@ fn sysex_is_copied_to_the_stream_ring_while_asked_and_always_reaches_the_graph()
 #[test]
 fn an_endpoint_with_no_output_is_described_not_waited_for() {
     let mut wire = session_over(
-        UmpCapability::midi2(),
+        midi2(),
         PortDirection::Input,
         Endpoint::new(Supports::of(Capabilities {
             midi1: true,
@@ -815,11 +813,7 @@ fn rpn_ump(value: u32) -> Ump {
 /// Spec: m2-104/3.2#3
 #[test]
 fn a_midi1_port_is_never_sent_type_4() {
-    let mut wire = session_over(
-        UmpCapability::midi1(),
-        PortDirection::Output,
-        offering_both(),
-    );
+    let mut wire = session_over(legacy(), PortDirection::Output, offering_both());
     wire.connect_output();
     let note = midi::note_on(MidiChannel::FIRST, 60, 0xFFFF);
     assert_eq!(
@@ -854,7 +848,7 @@ fn the_output_follows_the_negotiated_protocol() {
     .block(block());
     // A device that has MIDI 2.0 on offer but is in MIDI 1.0; the session asks
     // for MIDI 2.0, so it ends in MIDI 2.0 ...
-    let mut wire = session_over(UmpCapability::midi2(), PortDirection::Duplex, device);
+    let mut wire = session_over(midi2(), PortDirection::Duplex, device);
     wire.open();
     wire.connect_output();
     let note = [(Offset::ZERO, midi::note_on(MidiChannel::FIRST, 60, 0xFFFF))];
@@ -891,11 +885,7 @@ fn the_output_follows_the_negotiated_protocol() {
 /// Spec: m2-104/7.1.6.2#3
 #[test]
 fn jr_reaches_a_device_only_after_its_notification_enables_it() {
-    let mut wire = session_over(
-        UmpCapability::midi2(),
-        PortDirection::Duplex,
-        offering_both(),
-    );
+    let mut wire = session_over(midi2(), PortDirection::Duplex, offering_both());
     wire.open();
     let stream = settle(&mut wire);
     assert!(!stream.config().rx_jr);
@@ -934,13 +924,19 @@ fn moved_block(first_group: u8) -> Stream {
 fn static_blocks_are_not_re_read_and_others_are() {
     for is_static in [true, false] {
         let device = offering_both().static_blocks(is_static);
-        let mut wire = session_over(UmpCapability::midi2(), PortDirection::Duplex, device);
+        let mut wire = session_over(midi2(), PortDirection::Duplex, device);
         wire.open();
         settle(&mut wire);
         send_ump(&wire, moved_block(6), 40);
         let changed = streams(wire.session.poll(wire.at(40)));
         let first_group = || {
-            wire.session.stream(&wire.id).unwrap().capability().blocks[0]
+            wire.session
+                .stream(&wire.id)
+                .unwrap()
+                .endpoint()
+                .function_blocks()
+                .next()
+                .unwrap()
                 .first_group()
                 .get()
         };
@@ -993,7 +989,7 @@ fn an_output_connected_after_the_settle_starts_in_the_settled_protocol() {
         ..Capabilities::default()
     }))
     .block(block());
-    let mut wire = session_over(UmpCapability::midi2(), PortDirection::Duplex, device);
+    let mut wire = session_over(midi2(), PortDirection::Duplex, device);
     wire.open();
     assert_eq!(settle(&mut wire).config().protocol, Protocol::Midi1);
     wire.connect_output();
@@ -1061,7 +1057,7 @@ fn an_endpoint_that_answers_declares_its_identity_and_product_instance_id() {
     let device = offering_both()
         .identified(identity())
         .instanced(ProductInstanceId::new("SN-0042").unwrap());
-    let mut wire = session_over(UmpCapability::midi2(), PortDirection::Duplex, device);
+    let mut wire = session_over(midi2(), PortDirection::Duplex, device);
     wire.open();
     assert!(wire.session.learned(&wire.id).is_empty(), "not settled yet");
     let stream = settle(&mut wire);

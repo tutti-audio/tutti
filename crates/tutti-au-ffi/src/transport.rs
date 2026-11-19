@@ -285,7 +285,7 @@ impl TransportState {
 
     /// Current beat position.
     pub fn beat(&self) -> Beat {
-        Beat(f64::from_bits(self.beat_bits.load(Ordering::Relaxed)))
+        Beat::new(f64::from_bits(self.beat_bits.load(Ordering::Relaxed)))
     }
 
     /// Whether the host transport is rolling.
@@ -465,7 +465,7 @@ unsafe extern "C" fn beat_and_tempo_proc(
         // SAFETY: the out-params are null or valid writable pointers, by this fn's `# Safety`.
         unsafe {
             // Unit newtypes stop here: Apple declares both out-params `Float64`.
-            write_opt(out_beat, state.beat().0);
+            write_opt(out_beat, state.beat().get());
             write_opt(out_tempo, state.tempo_raw());
         }
         NO_ERR

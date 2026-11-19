@@ -209,7 +209,7 @@ impl<L: Loaded> Instance<L> {
         width: FloatWidth,
     ) -> Result<(Self, Rt<L::Processor>), (LoadStage, String)> {
         let widths = loaded.widths();
-        let prepare = MaxBlock::new(Samples(block_size))
+        let prepare = MaxBlock::new(Samples::new(block_size))
             .map(|block| Prepare::new(sample_rate, block).with_format(widths.negotiate(width)))
             .ok_or_else(|| {
                 (
@@ -862,7 +862,7 @@ mod tests {
         let wiring = loaded.wiring(main);
         let prepare = Prepare::new(
             SampleRate::SR_48K,
-            tutti_buffers::MaxBlock::new(Samples(64)).expect("a block"),
+            tutti_buffers::MaxBlock::new(Samples::new(64)).expect("a block"),
         );
         let Ok((processor, controller)) = loaded.activate(main, prepare) else {
             panic!("the fake activates");

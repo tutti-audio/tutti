@@ -220,9 +220,9 @@ impl Mode {
 pub const MAIN_BUS: ChannelLayout = ChannelLayout::STEREO;
 
 /// The Delay mode's latency.
-pub const LATENCY: Samples = Samples(137);
+pub const LATENCY: Samples = Samples::new(137);
 /// The tail, in every mode.
-pub const TAIL: Samples = Samples(8191);
+pub const TAIL: Samples = Samples::new(8191);
 
 /// The tag on channel `channel` of the main bus.
 #[must_use]
@@ -246,7 +246,7 @@ pub const TAIL_INFINITE: u32 = 1;
 /// (`TAIL_PAST_CAP`, fourth byte).
 pub const TAIL_PAST_CAP: u32 = 2;
 /// What `TAIL_PAST_CAP` reports: 61 s at 48 kHz.
-pub const TAIL_PAST_CAP_FRAMES: Samples = Samples(48_000 * 61);
+pub const TAIL_PAST_CAP_FRAMES: Samples = Samples::new(48_000 * 61);
 
 /// The ring behaviour that rings [`RING`] after an impulse (`RINGS_EXACT`, the
 /// high nibble of the fourth byte of the mode word).
@@ -265,12 +265,12 @@ pub const FAULT_CRASH: u32 = 1;
 pub const FAULT_HANG: u32 = 2;
 /// How long a ring lasts after an impulse at frame 0: its last frame is this one.
 /// It equals [`TAIL`] on purpose, so the plugin is honest unless a case says not.
-pub const RING: Samples = Samples(8191);
+pub const RING: Samples = Samples::new(8191);
 /// How much longer than [`RING`] `RINGS_LONGER` rings.
-pub const RING_EXTRA: Samples = Samples(4096);
+pub const RING_EXTRA: Samples = Samples::new(4096);
 /// Frames `RINGS_LATE` waits before it sounds; the plugin reports no latency
 /// in its default mode.
-pub const LATE: Samples = Samples(64);
+pub const LATE: Samples = Samples::new(64);
 /// The peak of `RINGS_HISS`'s noise: 0.001, which is -60 dB.
 pub const HISS_DB: f64 = -60.0;
 

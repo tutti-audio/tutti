@@ -42,7 +42,7 @@ pub fn tick_time(ticks: u16) -> Seconds {
 }
 
 fn ticks_to_seconds(ticks: f64) -> Seconds {
-    Seconds(ticks / TICK_RATE.get())
+    Seconds::new(ticks / TICK_RATE.get())
 }
 
 fn seconds_to_ticks(seconds: Seconds) -> f64 {
@@ -82,7 +82,7 @@ const STALE_AFTER: Duration = LOST_AFTER;
 /// readings has seen almost no jitter, so without it the ordinary shrinking of
 /// a connection's delay reads as a clock that jumped, and restarts keep the
 /// window too short to fit a drift.
-const MIN_JITTER_TOLERANCE: Seconds = Seconds(0.001);
+const MIN_JITTER_TOLERANCE: Seconds = Seconds::new(0.001);
 
 /// A sender clock's wrap, in ticks.
 const WRAP: f64 = 65_536.0;
@@ -317,7 +317,7 @@ impl JrReceiver {
         let sent = ticks_to_seconds((ticks - line.ticks0) as f64) * line.slope + line.offset;
         let age = seconds_from(origin, arrival) - sent;
         age + line.jitter.max(MIN_JITTER_TOLERANCE) + ticks_to_seconds(1.0) < Seconds::ZERO
-            || age > Seconds(STALE_AFTER.as_secs_f64())
+            || age > Seconds::new(STALE_AFTER.as_secs_f64())
     }
 
     /// Takes a JR Timestamp of sender time `ticks` that arrived at `arrival`: it
@@ -401,8 +401,8 @@ impl JrReceiver {
         } else {
             1.0
         };
-        let mut low = Seconds(f64::INFINITY);
-        let mut high = Seconds(f64::NEG_INFINITY);
+        let mut low = Seconds::new(f64::INFINITY);
+        let mut high = Seconds::new(f64::NEG_INFINITY);
         for r in self.readings() {
             let offset = r.at - x(r) * slope;
             low = low.min(offset);
@@ -420,8 +420,8 @@ impl JrReceiver {
 /// Seconds from `origin` to `at`, negative before it.
 fn seconds_from(origin: Instant, at: Instant) -> Seconds {
     match at.checked_duration_since(origin) {
-        Some(after) => Seconds(after.as_secs_f64()),
-        None => Seconds(-origin.duration_since(at).as_secs_f64()),
+        Some(after) => Seconds::new(after.as_secs_f64()),
+        None => Seconds::new(-origin.duration_since(at).as_secs_f64()),
     }
 }
 

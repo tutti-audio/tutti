@@ -445,8 +445,8 @@ mod tests {
         let loaded = LoadedPlugin {
             inputs: main_and_aux(),
             outputs: vec![PluginBus::new(ChannelLayout::STEREO, BusRole::Main)],
-            latency_samples: Samples(128),
-            tail: PluginTail::Finite(Samples(48_000)),
+            latency_samples: Samples::new(128),
+            tail: PluginTail::Finite(Samples::new(48_000)),
             features: Features::F64_AUDIO | Features::MIDI_IN,
             probed: Features::F64_AUDIO | Features::MIDI_IN | Features::EDITOR,
             own_bypass: Some(OwnBypass::Parameter(tutti_units::ParamId::new(4))),
@@ -566,7 +566,7 @@ mod tests {
         for tail in [
             PluginTail::Unknown,
             PluginTail::None,
-            PluginTail::Finite(Samples(48_000)),
+            PluginTail::Finite(Samples::new(48_000)),
             PluginTail::Unbounded,
         ] {
             let bytes = postcard::to_allocvec(&tail).unwrap();
@@ -577,7 +577,7 @@ mod tests {
     fn config() -> ProbeConfig {
         ProbeConfig {
             rate: SampleRate::SR_48K,
-            block: MaxBlock::new(Samples(512)).unwrap(),
+            block: MaxBlock::new(Samples::new(512)).unwrap(),
             floor: PROBE_FLOOR,
             state: StateHash::of(&[]),
         }
@@ -603,10 +603,10 @@ mod tests {
     /// plugin that under-reports is not parked before it stops ringing.
     #[test]
     fn a_longer_measurement_raises_a_finite_claim() {
-        let p = Processing::new(PluginTail::Finite(Samples(100))).with_measured(measured(250));
+        let p = Processing::new(PluginTail::Finite(Samples::new(100))).with_measured(measured(250));
         assert_eq!(
             p.ceiling(SampleRate::SR_48K),
-            PluginTail::Finite(Samples(250))
+            PluginTail::Finite(Samples::new(250))
         );
     }
 
@@ -615,10 +615,11 @@ mod tests {
     #[test]
     fn a_shorter_measurement_does_not_lower_the_claim() {
         for m in [40, 100] {
-            let p = Processing::new(PluginTail::Finite(Samples(100))).with_measured(measured(m));
+            let p =
+                Processing::new(PluginTail::Finite(Samples::new(100))).with_measured(measured(m));
             assert_eq!(
                 p.ceiling(SampleRate::SR_48K),
-                PluginTail::Finite(Samples(100)),
+                PluginTail::Finite(Samples::new(100)),
                 "measured {m}"
             );
         }
@@ -643,7 +644,7 @@ mod tests {
             PluginTail::None,
             PluginTail::Unknown,
             PluginTail::Unbounded,
-            PluginTail::Finite(Samples(7)),
+            PluginTail::Finite(Samples::new(7)),
         ] {
             assert_eq!(Processing::new(claim).ceiling(SampleRate::SR_48K), claim);
             let empty = Processing::new(claim).with_measured(measured_with(None));
@@ -661,18 +662,18 @@ mod tests {
             (SampleRate::SR_48K, 2_880_000),
             (SampleRate::SR_96K, 5_760_000),
         ] {
-            assert_eq!(MAX_NODE_TAIL.to_samples_ceil(rate), Samples(bound));
-            let at = PluginTail::Finite(Samples(bound));
+            assert_eq!(MAX_NODE_TAIL.to_samples_ceil(rate), Samples::new(bound));
+            let at = PluginTail::Finite(Samples::new(bound));
             assert_eq!(Processing::new(at).ceiling(rate), at, "{rate:?}");
-            let past = PluginTail::Finite(Samples(bound + 1));
+            let past = PluginTail::Finite(Samples::new(bound + 1));
             assert_eq!(
                 Processing::new(past).ceiling(rate),
                 PluginTail::Unbounded,
                 "{rate:?}"
             );
             // A measurement that raises a claim past the bound goes the same way.
-            let raised =
-                Processing::new(PluginTail::Finite(Samples(10))).with_measured(measured(bound + 1));
+            let raised = Processing::new(PluginTail::Finite(Samples::new(10)))
+                .with_measured(measured(bound + 1));
             assert_eq!(raised.ceiling(rate), PluginTail::Unbounded, "{rate:?}");
         }
     }
@@ -682,7 +683,7 @@ mod tests {
     /// figure.
     #[test]
     fn a_finite_tail_is_judged_in_seconds_at_the_nodes_rate() {
-        let tail = PluginTail::Finite(Samples(4_000_000));
+        let tail = PluginTail::Finite(Samples::new(4_000_000));
         assert_eq!(
             Processing::new(tail).ceiling(SampleRate::SR_48K),
             PluginTail::Unbounded

@@ -119,15 +119,15 @@ fn an_smpte_tick_is_a_fixed_fraction_of_a_second() {
         assert_eq!(smpte(&file).seconds_at(Tick(0)), Seconds::ZERO);
         assert_eq!(
             smpte(&file).seconds_at(Tick(ticks_per_second)),
-            Seconds(1.0)
+            Seconds::new(1.0)
         );
         assert_eq!(
             smpte(&file).seconds_at(Tick(3 * ticks_per_second)),
-            Seconds(3.0)
+            Seconds::new(3.0)
         );
         assert_eq!(
             smpte(&file).seconds_at(Tick(ticks_per_second / 2)),
-            Seconds(0.5),
+            Seconds::new(0.5),
             "{fps} x {ticks_per_frame}"
         );
     }
@@ -135,7 +135,7 @@ fn an_smpte_tick_is_a_fixed_fraction_of_a_second() {
         fps: -25,
         ticks_per_frame: 40,
     }));
-    assert_eq!(smpte(&ms).seconds_at(Tick(2_500)), Seconds(2.5));
+    assert_eq!(smpte(&ms).seconds_at(Tick(2_500)), Seconds::new(2.5));
 }
 
 /// -29 is 29.97 frames a second, exactly 30000/1001: 30000 frames last 1001
@@ -148,8 +148,14 @@ fn the_drop_frame_rate_is_30000_over_1001() {
         fps: -29,
         ticks_per_frame: 4,
     }));
-    assert_eq!(smpte(&file).seconds_at(Tick(120_000)), Seconds(1_001.0));
-    assert_eq!(smpte(&file).seconds_at(Tick(240_000)), Seconds(2_002.0));
+    assert_eq!(
+        smpte(&file).seconds_at(Tick(120_000)),
+        Seconds::new(1_001.0)
+    );
+    assert_eq!(
+        smpte(&file).seconds_at(Tick(240_000)),
+        Seconds::new(2_002.0)
+    );
 }
 
 /// The events of an SMPTE file are at seconds, and a Set Tempo moves none of
@@ -178,11 +184,16 @@ fn an_smpte_files_events_are_at_seconds_and_no_tempo_applies() {
     // The tempo, the Time Signature and the two notes.
     assert_eq!(
         at,
-        [Seconds::ZERO, Seconds::ZERO, Seconds(1.0), Seconds(2.5)]
+        [
+            Seconds::ZERO,
+            Seconds::ZERO,
+            Seconds::new(1.0),
+            Seconds::new(2.5)
+        ]
     );
     assert_eq!(smpte.fps(), MtcRate::Fps25);
     assert_eq!(smpte.ticks_per_frame(), SmfTicksPerFrame::of(40));
-    assert_eq!(smpte.seconds_at(smpte.end()), Seconds(2.5));
+    assert_eq!(smpte.seconds_at(smpte.end()), Seconds::new(2.5));
     // A quarter-note grid does not exist: no view of it, so no beat, tempo map or timeline.
     assert!(file.timebase().metrical().is_none());
     // The Set Tempo is still an event and is written back.
@@ -227,8 +238,8 @@ fn a_format_2_file_in_smpte_time_has_sequences() {
     assert_eq!(
         at,
         [
-            [Seconds::ZERO, Seconds::ZERO, Seconds(1.0)],
-            [Seconds::ZERO, Seconds::ZERO, Seconds(0.5)]
+            [Seconds::ZERO, Seconds::ZERO, Seconds::new(1.0)],
+            [Seconds::ZERO, Seconds::ZERO, Seconds::new(0.5)]
         ]
     );
 }

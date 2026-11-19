@@ -39,7 +39,7 @@ fn wet(stages: usize, hz: f64) -> Vec<f32> {
     )
     .expect("a step fits any width");
     let mut node = prepared(node, SR, 64);
-    let x = sine(Hz::new(hz), Amplitude::new(1.0), SR, Samples(LEN));
+    let x = sine(Hz::new(hz), Amplitude::new(1.0), SR, Samples::new(LEN));
     let mut out = Vec::new();
     let (mut pos, mut k) = (0, 0);
     while pos < LEN {
@@ -92,7 +92,7 @@ fn a_parked_phaser_is_unit_gain_with_the_textbook_all_pass_phase() {
 #[test]
 fn two_stages_invert_a_sine_at_their_centre() {
     let out = wet(2, F0);
-    let x = sine(Hz::new(F0), Amplitude::new(1.0), SR, Samples(LEN));
+    let x = sine(Hz::new(F0), Amplitude::new(1.0), SR, Samples::new(LEN));
     let worst = (LEN - 1_000..LEN)
         .map(|n| (out[n] + x[n]).abs())
         .fold(0.0, f32::max);

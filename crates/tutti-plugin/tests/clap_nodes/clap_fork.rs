@@ -287,7 +287,10 @@ fn a_state_the_fresh_instance_refuses_is_a_named_fork_error() {
         "expected LoadState, got {err:?}"
     );
 
-    let prepare = Prepare::new(SampleRate::of(SAMPLE_RATE), MaxBlock::of(Samples(BLOCK)));
+    let prepare = Prepare::new(
+        SampleRate::of(SAMPLE_RATE),
+        MaxBlock::of(Samples::new(BLOCK)),
+    );
     let (mut editor, _exec) = Editor::new(prepare);
     let key = NodeKey(7);
     let _controls = editor.insert(
@@ -375,7 +378,10 @@ fn a_graph_holding_a_plugin_forks_and_renders_offline() {
     let probe = load_probe(SAMPLE_RATE);
     probe.client.set_parameter(GAIN, gain_at(-6.0));
 
-    let prepare = Prepare::new(SampleRate::of(SAMPLE_RATE), MaxBlock::of(Samples(BLOCK)));
+    let prepare = Prepare::new(
+        SampleRate::of(SAMPLE_RATE),
+        MaxBlock::of(Samples::new(BLOCK)),
+    );
     let (mut editor, _exec) = Editor::new(prepare);
     let key = NodeKey(1);
     let _controls = editor.insert(
@@ -410,7 +416,10 @@ fn a_graph_holding_a_plugin_forks_and_renders_offline() {
 /// Render `blocks` blocks of the offline fork of the plugin through the
 /// graph; return the forked editor, to ask its health.
 fn render_fork_of(client: PluginClient, blocks: usize) -> Editor {
-    let prepare = Prepare::new(SampleRate::of(SAMPLE_RATE), MaxBlock::of(Samples(BLOCK)));
+    let prepare = Prepare::new(
+        SampleRate::of(SAMPLE_RATE),
+        MaxBlock::of(Samples::new(BLOCK)),
+    );
     let (mut editor, _exec) = Editor::new(prepare);
     let key = NodeKey(3);
     let _controls = editor.insert(
@@ -606,7 +615,7 @@ fn a_failed_forks_server_is_reaped() {
 fn live_graph(client: PluginClient) -> (Editor, tutti_graph::Executor) {
     let (mut live, exec) = Editor::new(Prepare::new(
         SampleRate::of(SAMPLE_RATE),
-        MaxBlock::of(Samples(BLOCK)),
+        MaxBlock::of(Samples::new(BLOCK)),
     ));
     let key = NodeKey(9);
     let _controls = live.insert(
@@ -666,9 +675,9 @@ fn export_through_a_fork(live: &Editor) -> tutti_export::Result<tutti_export::Re
     let config = (
         tutti_export::Job::new(
             rate,
-            tutti_units::Seconds(0.5).to_samples(rate),
-            Samples(0),
-            Samples(0),
+            tutti_units::Seconds::new(0.5).to_samples(rate),
+            Samples::new(0),
+            Samples::new(0),
         )
         .expect("a render"),
         tutti_buffers::ChannelLayout::MONO,
@@ -752,9 +761,9 @@ fn a_clip_note_reaches_an_exported_plugin_on_its_frame() {
     let config = (
         tutti_export::Job::new(
             SampleRate::of(SAMPLE_RATE),
-            tutti_units::Seconds(0.25).to_samples(SampleRate::of(SAMPLE_RATE)),
-            Samples(0),
-            Samples(0),
+            tutti_units::Seconds::new(0.25).to_samples(SampleRate::of(SAMPLE_RATE)),
+            Samples::new(0),
+            Samples::new(0),
         )
         .expect("a render"),
         tutti_buffers::ChannelLayout::MONO,
@@ -784,7 +793,7 @@ fn feed_chord(live: &mut Editor, plugin: NodeKey, n: u8, on: usize, off: usize) 
         let (g, c, key) = (MidiGroup::FIRST, MidiChannel::of(k / 100), k % 100);
         [
             TimedMidiEvent::new(
-                Beat(on as f64 / 24_000.0),
+                Beat::new(on as f64 / 24_000.0),
                 Message::midi2(
                     Address::new(g, c),
                     Voice2::note_on(NoteNumber::of(key), NoteVelocity::MAX),
@@ -792,7 +801,7 @@ fn feed_chord(live: &mut Editor, plugin: NodeKey, n: u8, on: usize, off: usize) 
             )
             .unwrap(),
             TimedMidiEvent::new(
-                Beat(off as f64 / 24_000.0),
+                Beat::new(off as f64 / 24_000.0),
                 Message::midi2(
                     Address::new(g, c),
                     Voice2::note_off(NoteNumber::of(key), NoteVelocity::MIN),
@@ -846,9 +855,9 @@ fn a_chord_larger_than_a_chunk_ends_and_the_export_counts_the_loss() {
         let config = (
             tutti_export::Job::new(
                 SampleRate::of(SAMPLE_RATE),
-                tutti_units::Seconds(0.25).to_samples(SampleRate::of(SAMPLE_RATE)),
-                Samples(0),
-                Samples(0),
+                tutti_units::Seconds::new(0.25).to_samples(SampleRate::of(SAMPLE_RATE)),
+                Samples::new(0),
+                Samples::new(0),
             )
             .expect("a render")
             .event_loss(policy),
@@ -891,7 +900,7 @@ fn feed_note(live: &mut Editor, plugin: NodeKey, frame: usize) {
         clip,
         "clip",
         MidiClipNode::new([TimedMidiEvent::new(
-            Beat(frame as f64 / 24_000.0),
+            Beat::new(frame as f64 / 24_000.0),
             Message::midi2(
                 MidiChannel::FIRST,
                 Voice2::note_on(NoteNumber::of(60), NoteVelocity::MAX),
@@ -932,7 +941,10 @@ fn a_clip_note_in_a_chunk_that_begins_mid_block_lands_on_its_frame() {
         const BLOCK: usize = 400;
         const NOTE_FRAME: usize = 6_300;
 
-        let prepare = Prepare::new(SampleRate::of(SAMPLE_RATE), MaxBlock::of(Samples(CHUNK)));
+        let prepare = Prepare::new(
+            SampleRate::of(SAMPLE_RATE),
+            MaxBlock::of(Samples::new(CHUNK)),
+        );
         let (mut live, _exec) = Editor::new(prepare);
         let key = NodeKey(9);
         let _controls = live.insert(
@@ -1001,14 +1013,17 @@ fn a_clip_nodes_note_reaches_the_plugins_event_input_on_its_frame() {
     const BLOCK: usize = 400;
     const NOTE_FRAME: usize = 6_300;
 
-    let prepare = Prepare::new(SampleRate::of(SAMPLE_RATE), MaxBlock::of(Samples(CHUNK)));
+    let prepare = Prepare::new(
+        SampleRate::of(SAMPLE_RATE),
+        MaxBlock::of(Samples::new(CHUNK)),
+    );
     let (mut live, _exec) = Editor::new(prepare);
     let (clip, key) = (NodeKey(1), NodeKey(9));
     live.insert(
         clip,
         "clip",
         MidiClipNode::new([TimedMidiEvent::new(
-            Beat(NOTE_FRAME as f64 / 24_000.0),
+            Beat::new(NOTE_FRAME as f64 / 24_000.0),
             Message::midi2(
                 MidiChannel::FIRST,
                 Voice2::note_on(NoteNumber::of(60), NoteVelocity::MAX),
@@ -1109,7 +1124,10 @@ fn a_plugins_midi_out_keeps_its_place_against_its_audio() {
     const NOTE_FRAME: usize = 6_300;
     for _ in 0..3 {
         let probe = load_probe(SAMPLE_RATE);
-        let prepare = Prepare::new(SampleRate::of(SAMPLE_RATE), MaxBlock::of(Samples(CHUNK)));
+        let prepare = Prepare::new(
+            SampleRate::of(SAMPLE_RATE),
+            MaxBlock::of(Samples::new(CHUNK)),
+        );
         let (mut live, _exec) = Editor::new(prepare);
         let (clip, key, sink) = (NodeKey(1), NodeKey(9), NodeKey(3));
         let on = midi::note_on(MidiChannel::FIRST, 60, 0xFFFF);
@@ -1117,7 +1135,7 @@ fn a_plugins_midi_out_keeps_its_place_against_its_audio() {
             clip,
             "clip",
             MidiClipNode::new([
-                TimedMidiEvent::new(Beat(NOTE_FRAME as f64 / 24_000.0), on).unwrap()
+                TimedMidiEvent::new(Beat::new(NOTE_FRAME as f64 / 24_000.0), on).unwrap(),
             ]),
         );
         let _controls = live.insert(
@@ -1238,7 +1256,7 @@ fn an_export_is_aligned_when_the_plugin_latency_moves_offline() {
     let inputs = probe.client.inputs();
 
     let rate = SampleRate::of(SAMPLE_RATE);
-    let (mut live, _exec) = Editor::new(Prepare::new(rate, MaxBlock::of(Samples(BLOCK))));
+    let (mut live, _exec) = Editor::new(Prepare::new(rate, MaxBlock::of(Samples::new(BLOCK))));
     let (src, key) = (NodeKey(1), NodeKey(2));
     live.insert(src, "ramp", tutti_graph::ForkByClone(RampSource));
     let _controls = live.insert(
@@ -1268,15 +1286,15 @@ fn an_export_is_aligned_when_the_plugin_latency_moves_offline() {
     let latency = graph.reported_latency();
     assert_eq!(
         latency,
-        Samples(137 + 24 + tutti_export::GRAPH_MAX_BLOCK.get()),
+        Samples::new(137 + 24 + tutti_export::GRAPH_MAX_BLOCK.get()),
         "the plan carries the offline latency"
     );
     let config = (
         tutti_export::Job::new(
             rate,
-            tutti_units::Seconds(0.1).to_samples(rate),
+            tutti_units::Seconds::new(0.1).to_samples(rate),
             latency,
-            Samples(0),
+            Samples::new(0),
         )
         .expect("a render"),
         tutti_buffers::ChannelLayout::MONO,
@@ -1307,12 +1325,12 @@ fn an_export_is_aligned_when_the_plugin_latency_moves_offline() {
 /// fork is the live plugin's mode, not the graph's.
 #[test]
 fn a_live_fork_of_a_served_plugin_told_offline_is_offline() {
-    const BASE: Samples = Samples(137);
-    const OFFLINE_EXTRA: Samples = Samples(24);
+    const BASE: Samples = Samples::new(137);
+    const OFFLINE_EXTRA: Samples = Samples::new(24);
     let _lock = machine_lock();
     let _env = ProbeEnv::new()
         .render_mode(render::LATENCY)
-        .offline_extra_latency(OFFLINE_EXTRA.0 as u32);
+        .offline_extra_latency(OFFLINE_EXTRA.get() as u32);
     let probe = load_probe(SAMPLE_RATE);
     assert!(
         probe
@@ -1328,14 +1346,14 @@ fn a_live_fork_of_a_served_plugin_told_offline_is_offline() {
         .fork(
             ForkTarget::Master,
             ForkMode::Live,
-            Prepare::new(rate, MaxBlock::of(Samples(BLOCK))),
+            Prepare::new(rate, MaxBlock::of(Samples::new(BLOCK))),
         )
         .expect("a graph holding a plugin forks");
     let graph = tutti_export::RenderGraph::assemble(editor, executor, tutti_export::Setup::new())
         .expect("forked together");
     assert_eq!(
         graph.reported_latency(),
-        BASE + OFFLINE_EXTRA + Samples(BLOCK),
+        BASE + OFFLINE_EXTRA + Samples::new(BLOCK),
         "the fork carries the plugin's offline latency"
     );
 }
@@ -1405,7 +1423,7 @@ fn an_export_of_plugins_is_bit_identical_on_a_pool() {
     b.client.set_parameter(GAIN, gain_at(-12.0));
     let (mut live, _exec) = Editor::new(Prepare::new(
         SampleRate::of(SAMPLE_RATE),
-        MaxBlock::of(Samples(BLOCK)),
+        MaxBlock::of(Samples::new(BLOCK)),
     ));
     let _ = live.insert(
         NodeKey(9),
@@ -1449,9 +1467,9 @@ fn an_export_of_plugins_is_bit_identical_on_a_pool() {
         let config = (
             tutti_export::Job::new(
                 rate,
-                tutti_units::Seconds(0.5).to_samples(rate),
-                Samples(0),
-                Samples(0),
+                tutti_units::Seconds::new(0.5).to_samples(rate),
+                Samples::new(0),
+                Samples::new(0),
             )
             .expect("a render"),
             tutti_buffers::ChannelLayout::STEREO,
@@ -1506,7 +1524,7 @@ fn midi_past_the_chunks_capacity_is_counted() {
         (0..n)
             .map(|i| {
                 let on = midi::note_on(MidiChannel::FIRST, (i % 128) as u8, 0xFFFF);
-                Event::midi(Offset::of(Samples(i), Samples(512)), on)
+                Event::midi(Offset::of(Samples::new(i), Samples::new(512)), on)
             })
             .collect()
     };
@@ -1536,10 +1554,10 @@ fn a_fork_of_a_refused_rate_is_silent_and_a_failed_fault() {
     let probe = load_probe(SAMPLE_RATE);
     let _refuse = ProbeEnv::new().refuse_rate(96_000.0);
 
-    let prepare = Prepare::new(SampleRate::SR_96K, MaxBlock::of(Samples(BLOCK)));
+    let prepare = Prepare::new(SampleRate::SR_96K, MaxBlock::of(Samples::new(BLOCK)));
     let (mut editor, _exec) = Editor::new(Prepare::new(
         SampleRate::of(SAMPLE_RATE),
-        MaxBlock::of(Samples(BLOCK)),
+        MaxBlock::of(Samples::new(BLOCK)),
     ));
     let key = NodeKey(3);
     let _controls = editor.insert(

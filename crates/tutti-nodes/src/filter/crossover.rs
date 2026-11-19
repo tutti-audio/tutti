@@ -65,7 +65,7 @@ impl Splits {
         let mut targets = [Hz::ZERO; MAX_SPLITS];
         let n = self.cells.len();
         for (i, (t, good)) in targets.iter_mut().zip(&mut self.good).enumerate() {
-            *t = Hz(good.read(driven(i).unwrap_or_else(|| self.cells[i].load().get())));
+            *t = Hz::new(good.read(driven(i).unwrap_or_else(|| self.cells[i].load().get())));
         }
         fit_to_rate(&mut targets[..n], rate);
         targets
@@ -248,7 +248,7 @@ pub struct CrossoverSet {
 // One cutoff per split, up to `MAX_SPLITS`.
 control_set! {
     CrossoverSet(s): CrossoverControls = CrossoverControls {
-        frequencies: [Hz(0.0); MAX_SPLITS],
+        frequencies: [Hz::new(0.0); MAX_SPLITS],
     };
     live: (s.splits);
     Cutoff[0] => Hz = frequencies[0],
@@ -259,7 +259,7 @@ control_set! {
 
     fn defaults(&self) -> CrossoverControls {
         CrossoverControls {
-            frequencies: [Hz(0.0); MAX_SPLITS],
+            frequencies: [Hz::new(0.0); MAX_SPLITS],
         }
     }
 }
@@ -295,8 +295,9 @@ mod tests {
     /// and a moderate cost.
     #[test]
     fn the_node_writes_bands_band_major_per_channel() {
-        let mut node =
-            prepared(CrossoverNode::<f32>::new(ChannelLayout::STEREO, &[Hz(1_000.0)]).unwrap());
+        let mut node = prepared(
+            CrossoverNode::<f32>::new(ChannelLayout::STEREO, &[Hz::new(1_000.0)]).unwrap(),
+        );
         let shape = node.shape();
         assert_eq!(
             (shape.audio_in().count(), shape.audio_out().count()),
@@ -322,7 +323,8 @@ mod tests {
     #[test]
     fn a_param_write_moves_the_split() {
         let node =
-            CrossoverNode::<f32>::new(ChannelLayout::MONO, &[Hz(500.0), Hz(4_000.0)]).unwrap();
+            CrossoverNode::<f32>::new(ChannelLayout::MONO, &[Hz::new(500.0), Hz::new(4_000.0)])
+                .unwrap();
         let set = node.param_set();
         let mut node = prepared(node);
         assert!(set.set(Splits::addr(0), 2_000.0));
@@ -337,8 +339,11 @@ mod tests {
     #[test]
     fn a_fork_shares_no_cell() {
         tutti_graph::contract::assert_param_fork(
-            CrossoverNode::<f32>::new(ChannelLayout::MONO, &[Hz(500.0), Hz(900.0), Hz(3_000.0)])
-                .unwrap(),
+            CrossoverNode::<f32>::new(
+                ChannelLayout::MONO,
+                &[Hz::new(500.0), Hz::new(900.0), Hz::new(3_000.0)],
+            )
+            .unwrap(),
         );
     }
 
@@ -348,7 +353,7 @@ mod tests {
     fn the_ports_are_the_indexed_cutoffs() {
         let node = CrossoverNode::<f32>::new(
             ChannelLayout::STEREO,
-            &[Hz(200.0), Hz(2_000.0), Hz(9_000.0)],
+            &[Hz::new(200.0), Hz::new(2_000.0), Hz::new(9_000.0)],
         )
         .unwrap();
         let want: Vec<UnitAddr> = (0..3)
@@ -371,7 +376,8 @@ mod tests {
     fn a_driven_port_moves_its_crossover() {
         use tutti_graph::contract::drive;
         let mut node = prepared(
-            CrossoverNode::<f32>::new(ChannelLayout::MONO, &[Hz(500.0), Hz(4_000.0)]).unwrap(),
+            CrossoverNode::<f32>::new(ChannelLayout::MONO, &[Hz::new(500.0), Hz::new(4_000.0)])
+                .unwrap(),
         );
         let x = sine(2_000.0, RATE, SETTLE + WINDOW);
         let lane = [2_000.0f32; 512];
@@ -393,26 +399,40 @@ mod tests {
     #[test]
     fn the_node_validates_its_layout_and_frequencies() {
         assert!(matches!(
-            CrossoverNode::<f32>::new(ChannelLayout::from_count(0), &[Hz(100.0)]),
+            CrossoverNode::<f32>::new(ChannelLayout::from_count(0), &[Hz::new(100.0)]),
             Err(CrossoverError::Channels { channels: 0 })
         ));
         // 11 channels x 6 bands = 66 ports.
         assert!(matches!(
             CrossoverNode::<f32>::new(
                 ChannelLayout::from_count(11),
-                &[Hz(1.0), Hz(2.0), Hz(3.0), Hz(4.0), Hz(5.0)]
+                &[
+                    Hz::new(1.0),
+                    Hz::new(2.0),
+                    Hz::new(3.0),
+                    Hz::new(4.0),
+                    Hz::new(5.0)
+                ]
             ),
             Err(CrossoverError::Channels { channels: 11 })
         ));
         assert!(
             CrossoverNode::<f32>::new(
                 ChannelLayout::from_count(10),
-                &[Hz(1.0), Hz(2.0), Hz(3.0), Hz(4.0), Hz(5.0)]
+                &[
+                    Hz::new(1.0),
+                    Hz::new(2.0),
+                    Hz::new(3.0),
+                    Hz::new(4.0),
+                    Hz::new(5.0)
+                ]
             )
             .is_ok()
         );
-        assert!(CrossoverNode::<f32>::new(ChannelLayout::MONO, &[Hz(f64::NAN)]).is_err());
-        assert!(CrossoverNode::<f32>::new(ChannelLayout::MONO, &[Hz(9.0), Hz(3.0)]).is_err());
+        assert!(CrossoverNode::<f32>::new(ChannelLayout::MONO, &[Hz::new(f64::NAN)]).is_err());
+        assert!(
+            CrossoverNode::<f32>::new(ChannelLayout::MONO, &[Hz::new(9.0), Hz::new(3.0)]).is_err()
+        );
     }
 
     /// A node at 22.05 kHz with one frequency above its Nyquist still moves the
@@ -421,7 +441,8 @@ mod tests {
     #[test]
     fn a_frequency_above_the_rate_does_not_freeze_the_others() {
         let node =
-            CrossoverNode::<f32>::new(ChannelLayout::MONO, &[Hz(200.0), Hz(15_000.0)]).unwrap();
+            CrossoverNode::<f32>::new(ChannelLayout::MONO, &[Hz::new(200.0), Hz::new(15_000.0)])
+                .unwrap();
         let set = node.param_set();
         let rate = 22_050.0;
         let mut node = tutti_graph::contract::prepared(node, SampleRate::of(rate), 1024);
@@ -452,7 +473,7 @@ mod tests {
     /// effect on a render.
     #[test]
     fn prepare_reads_the_cells() {
-        let node = CrossoverNode::<f32>::new(ChannelLayout::MONO, &[Hz(500.0)]).unwrap();
+        let node = CrossoverNode::<f32>::new(ChannelLayout::MONO, &[Hz::new(500.0)]).unwrap();
         node.param_set().set(Splits::addr(0), 2_000.0);
         let mut node = prepared(node);
         let out = render(&mut node, &[sine(200.0, RATE, 480)]);
@@ -468,11 +489,11 @@ mod tests {
     #[test]
     fn an_f64_kernel_sums_a_wide_constant_to_itself_in_f64() {
         use tutti_fixtures::signal::wide_signal;
-        let controls = CrossoverControls::ordered(&[Hz(200.0), Hz(3_000.0)]).unwrap();
+        let controls = CrossoverControls::ordered(&[Hz::new(200.0), Hz::new(3_000.0)]).unwrap();
         let mut k = CrossoverKernel::<f64>::new(BusTopology::MONO, 3, &controls).unwrap();
         k.prepare(
             SampleRate::SR_48K,
-            MaxBlock::of(tutti_units::Samples(4_000)),
+            MaxBlock::of(tutti_units::Samples::new(4_000)),
         );
         k.retarget(&controls);
         let c = wide_signal(1)[0];

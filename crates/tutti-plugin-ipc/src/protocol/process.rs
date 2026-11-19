@@ -228,12 +228,15 @@ mod tests {
     fn a_cycle_with_its_seconds_crosses_the_wire() {
         let region = tutti_plugin_types::LoopRegion {
             seconds: Some((
-                tutti_plugin_types::Seconds(1.0),
-                tutti_plugin_types::Seconds(4.5),
+                tutti_plugin_types::Seconds::new(1.0),
+                tutti_plugin_types::Seconds::new(4.5),
             )),
             ..tutti_plugin_types::LoopRegion::new(
-                tutti_music::LoopRange::new(tutti_units::Beat(2.0), tutti_units::Beat(8.0))
-                    .expect("a loop"),
+                tutti_music::LoopRange::new(
+                    tutti_units::Beat::new(2.0),
+                    tutti_units::Beat::new(8.0),
+                )
+                .expect("a loop"),
             )
         };
         let block = ProcessAudioData {

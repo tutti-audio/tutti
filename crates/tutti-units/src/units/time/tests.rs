@@ -400,3 +400,32 @@ fn one_pole_leave_is_the_exponential_and_is_not_cancelled() {
         assert!((c + r - 1.0).abs() < 1e-15, "τ {t}: {c} + {r}");
     }
 }
+
+/// **A frequency of a quarter of the rate turns a quarter of `TAU` per frame, exactly.**
+///
+/// 12 kHz at 48 kHz is `f / fs = 0.25`, exact in binary; `TAU * 0.25` only moves the exponent,
+/// so the result is `TAU / 4`, which is `FRAC_PI_2` bit for bit (`TAU` is `2 * PI`).
+#[test]
+fn a_quarter_rate_frequency_turns_a_quarter_turn_per_frame() {
+    let w = Hz(12_000.0).angle_per_frame(SampleRate::of(48_000.0));
+    assert_eq!(w.get().to_bits(), core::f64::consts::FRAC_PI_2.to_bits());
+    let w = Hz(24_000.0).angle_per_frame(SampleRate::of(48_000.0));
+    assert_eq!(w.get().to_bits(), core::f64::consts::PI.to_bits());
+}
+
+/// **`finite_or` returns the value itself when finite, `-0.0` included, else the fallback.**
+#[test]
+fn finite_or_keeps_a_finite_value_and_replaces_a_non_finite_one() {
+    let fallback = Hz(440.0);
+    assert_eq!(
+        Hz(-0.0).finite_or(fallback).get().to_bits(),
+        (-0.0_f64).to_bits()
+    );
+    assert_eq!(Hz(1e300).finite_or(fallback), Hz(1e300));
+    assert_eq!(Hz(-3.5).finite_or(fallback), Hz(-3.5));
+    for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        assert_eq!(Hz(bad).finite_or(fallback), fallback, "{bad}");
+    }
+    // A NaN fallback is returned as given, not repaired.
+    assert!(Hz(f64::NAN).finite_or(Hz(f64::NAN)).get().is_nan());
+}

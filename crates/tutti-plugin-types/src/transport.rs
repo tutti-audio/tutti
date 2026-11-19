@@ -60,8 +60,8 @@ pub type TransportChanges = ArrayVec<TransportChange, MAX_TRANSPORT_CHANGES>;
 /// let info = TransportInfo::new(SampleRate::of(48_000.0))
 ///     .with_tempo(Bpm::of(128.0))
 ///     .with_playing(true)
-///     .with_beat(Beat(16.0))
-///     .with_bar(Beat(16.0), BarNumber::default());
+///     .with_beat(Beat::new(16.0))
+///     .with_bar(Beat::new(16.0), BarNumber::default());
 /// assert!(info.state.playing);
 /// assert_eq!(info.position.samples, None); // the producer reports it separately
 /// ```
@@ -239,7 +239,7 @@ impl Default for BarInfo {
     /// The first bar, which starts at position 0.
     fn default() -> Self {
         Self {
-            start: Beat(0.0),
+            start: Beat::new(0.0),
             number: BarNumber::FIRST,
         }
     }
@@ -361,7 +361,7 @@ impl TransportInfo {
     /// // 120 BPM at 48 kHz: a quarter note is 24 000 frames, a clock 1 000.
     /// let t = TransportInfo::new(SampleRate::of(48_000.0))
     ///     .with_tempo(Bpm::of(120.0))
-    ///     .with_beat(Beat(2.0 + 0.25 / 24.0));
+    ///     .with_beat(Beat::new(2.0 + 0.25 / 24.0));
     /// assert_eq!(t.samples_to_nearest_clock(), Some(-250));
     /// ```
     pub fn samples_to_nearest_clock(&self) -> Option<i32> {
@@ -397,7 +397,7 @@ impl TransportInfo {
     /// let t = TransportInfo::new(SampleRate::of(48_000.0))
     ///     .with_tempo(Bpm::of(120.0))
     ///     .with_playing(true)
-    ///     .with_beat(Beat(2.75));
+    ///     .with_beat(Beat::new(2.75));
     /// assert_eq!(t.samples_to_next_beat(), Some(6_000));
     /// ```
     // A bare `u32`, not `Samples`: it is AU's `UInt32` ABI value, as
@@ -525,7 +525,7 @@ mod tests {
     #[test]
     fn position_samples_is_absent_until_a_host_reports_one() {
         assert_eq!(at_48k().position.samples, None);
-        assert_eq!(at_48k().with_beat(Beat(4.0)).position.samples, None);
+        assert_eq!(at_48k().with_beat(Beat::new(4.0)).position.samples, None);
         assert_eq!(
             at_48k().with_position_samples(1_234).position.samples,
             Some(1_234)
@@ -541,7 +541,7 @@ mod tests {
         let at = |tempo: f64, rate: f64, quarters: f64| {
             TransportInfo::new(SampleRate::of(rate))
                 .with_tempo(Bpm::of(tempo))
-                .with_beat(Beat(quarters))
+                .with_beat(Beat::new(quarters))
                 .samples_to_nearest_clock()
         };
         assert_eq!(at(120.0, 48_000.0, 2.0), Some(0));
@@ -564,7 +564,7 @@ mod tests {
             TransportInfo::new(SampleRate::of(rate))
                 .with_tempo(Bpm::of(tempo))
                 .with_playing(playing)
-                .with_beat(Beat(beats))
+                .with_beat(Beat::new(beats))
                 .samples_to_next_beat()
         };
         assert_eq!(at(120.0, 48_000.0, 2.25, true), Some(18_000));
@@ -580,7 +580,7 @@ mod tests {
     }
 
     fn block(playing: bool, beats: f64) -> TransportInfo {
-        at_48k().with_playing(playing).with_beat(Beat(beats))
+        at_48k().with_playing(playing).with_beat(Beat::new(beats))
     }
 
     /// **A playhead that advances as playing predicts is not a change; the

@@ -56,7 +56,7 @@ fn publish(controls: &HarmonyControls, changes: impl IntoIterator<Item = TimedHa
 fn rig(node: HarmonyNode, max: usize) -> (Editor, Executor, HarmonyControls, Seen) {
     let (mut ed, exec) = Editor::new(Prepare::new(
         SampleRate::of(RATE),
-        MaxBlock::of(Samples(max)),
+        MaxBlock::of(Samples::new(max)),
     ));
     let controls = ed.insert(NodeKey(1), "harmony", node).controls;
     let seen = Seen::default();
@@ -162,7 +162,7 @@ fn a_seek_restates_the_context_and_a_stop_sends_nothing() {
 #[test]
 fn a_loop_wrap_restates_the_context_at_the_wrap() {
     let (_ed, mut exec, _c, seen) = rig(HarmonyNode::new(lanes()), 512);
-    let lp = Some(LoopRange::new(Beat(0.5), Beat(1.5)).expect("a loop"));
+    let lp = Some(LoopRange::new(Beat::new(0.5), Beat::new(1.5)).expect("a loop"));
     block(
         &mut exec,
         512,

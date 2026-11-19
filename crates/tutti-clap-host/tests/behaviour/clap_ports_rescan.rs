@@ -255,7 +255,7 @@ fn a_rate_change_rereads_the_port_layout() {
     let mut outs = vec![vec![0.0f32; FRAMES]; 3];
     let mut out_refs: Vec<&mut [f32]> = outs.iter_mut().map(Vec::as_mut_slice).collect();
     let mut buffer = InputOutput::from_slices(
-        tutti_plugin_types::Samples(in_refs[0].len()),
+        tutti_plugin_types::Samples::new(in_refs[0].len()),
         &in_refs,
         &mut out_refs,
     )
@@ -274,7 +274,7 @@ fn process_f32_block(active: &mut Active<f32>, channels: usize) -> Result<(), Cl
     let mut outs = vec![vec![0.0f32; FRAMES]; channels];
     let mut out_refs: Vec<&mut [f32]> = outs.iter_mut().map(Vec::as_mut_slice).collect();
     let mut buffer = InputOutput::from_slices(
-        tutti_plugin_types::Samples(in_refs[0].len()),
+        tutti_plugin_types::Samples::new(in_refs[0].len()),
         &in_refs,
         &mut out_refs,
     )

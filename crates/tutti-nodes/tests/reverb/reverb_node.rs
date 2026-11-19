@@ -34,8 +34,8 @@ fn gm() -> FreeverbControls {
 
 fn controls(room: f64, damp: f64) -> FreeverbControls {
     FreeverbControls {
-        room: Mix(room),
-        damp: Mix(damp),
+        room: Mix::new(room),
+        damp: Mix::new(damp),
     }
 }
 
@@ -59,7 +59,7 @@ impl<N: Node> Rig<N> {
         let env = Env {
             frame: Frame::new(self.frame),
             sample_rate: SR,
-            block_len: Samples(input.len()),
+            block_len: Samples::new(input.len()),
             transport: TransportPosition::default(),
             changes: TransportChanges::NONE,
             play: tutti_graph::PlayClock::ZERO,
@@ -84,7 +84,7 @@ fn noise(seed: u32, frames: usize) -> Vec<f32> {
 }
 
 fn impulse() -> Vec<f32> {
-    tutti_fixtures::signal::impulse(tutti_units::Samples(BLOCK))
+    tutti_fixtures::signal::impulse(tutti_units::Samples::new(BLOCK))
 }
 
 fn reported(d: &tutti_graph::contract::Driven) -> usize {
@@ -141,7 +141,7 @@ fn the_ports_and_the_ceiling() {
     assert_eq!(shape.audio_out(), ChannelLayout::STEREO);
     assert_eq!(shape.latency.samples(), Samples::ZERO);
     assert_eq!(shape.params.len(), 0, "no cells");
-    assert_eq!(shape.tail, Tail::Finite(Samples(tail_of(gm()))));
+    assert_eq!(shape.tail, Tail::Finite(Samples::new(tail_of(gm()))));
     assert_eq!(fixed.param_set().params().count(), 0);
 
     let live = live(gm());
@@ -498,7 +498,7 @@ fn a_lane_driving_the_room_changes_how_long_it_rings() {
         g.connect_input(0, n, 0).connect_output(n, 0, 0);
         g.connect_output(n, 1, 1);
         let mut r = g
-            .renderer(Prepare::new(SR, MaxBlock::of(Samples(100))))
+            .renderer(Prepare::new(SR, MaxBlock::of(Samples::new(100))))
             .expect("the graph builds");
         let at = ParamIn {
             node: n,

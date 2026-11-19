@@ -101,7 +101,7 @@ impl Node for SegSink {
                 k += 1;
             }
             vals[i] = control_in(self.last.map_or(0.0, |(s, at)| {
-                s.raw_value_after(Samples((base + i as u64 - at) as usize))
+                s.raw_value_after(Samples::new((base + i as u64 - at) as usize))
             }));
         }
         io.output(0).copy_from_slice(&vals);
@@ -159,7 +159,7 @@ fn out(node: u64, port: u16) -> Source {
 fn probes(max: usize, probes: &[u64], range: (f64, f64)) -> (Editor, Executor) {
     let (mut ed, exec) = Editor::new(Prepare::new(
         SampleRate::of(RATE),
-        MaxBlock::of(Samples(max)),
+        MaxBlock::of(Samples::new(max)),
     ));
     for &p in probes {
         ed.insert(NodeKey(p), "probe", ForkByClone(Probe));
@@ -245,7 +245,7 @@ struct Host {
 impl Host {
     fn new() -> Self {
         Self {
-            clock: FrameClock::new(Beat(0.0), TEMPO, SampleRate::of(RATE)),
+            clock: FrameClock::new(Beat::new(0.0), TEMPO, SampleRate::of(RATE)),
         }
     }
 
@@ -258,7 +258,7 @@ impl Host {
         let t = self.rolling();
         let got = block(ed, exec, &t, &TransportChanges::NONE, n);
         append(all, got);
-        self.clock.advance(Samples(n), None);
+        self.clock.advance(Samples::new(n), None);
     }
 }
 
@@ -297,14 +297,14 @@ fn amount(depth: f64) -> Amount {
 fn beats(per_cycle: f64) -> Clock {
     Clock::Beats {
         per_cycle: BeatsPerCycle::of(per_cycle),
-        phase: PhaseIncrement(0.0),
+        phase: PhaseIncrement::new(0.0),
     }
 }
 
 fn seconds(rate: f64) -> Clock {
     Clock::Seconds {
-        rate: Hz(rate),
-        phase: PhaseIncrement(0.0),
+        rate: Hz::new(rate),
+        phase: PhaseIncrement::new(0.0),
         anchor: None,
     }
 }
@@ -331,7 +331,7 @@ fn program(automation: Option<Arc<dyn Curve>>, layers: Vec<Layer>) -> ControlPro
 fn trajectory(points: &[(f64, f64)]) -> Trajectory<Hz> {
     let mut e = Trajectory::new();
     for &(b, v) in points {
-        e.add_breakpoint(Breakpoint::new(Beat(b), Hz(v)));
+        e.add_breakpoint(Breakpoint::new(Beat::new(b), Hz::new(v)));
     }
     e
 }
@@ -455,34 +455,38 @@ fn an_export_is_the_live_render_bit_for_bit() {
         let shaped: Arc<dyn Curve> = {
             // A range cutting into the 1500 breakpoint bends its two pieces, which
             // go as grid pieces beside the exact ones.
-            let mut e = Trajectory::new().with_range(Hz(0.0), Hz(1200.0));
+            let mut e = Trajectory::new().with_range(Hz::new(0.0), Hz::new(1200.0));
             e.add_breakpoint(Breakpoint::with_law(
-                Beat(0.0),
-                Hz(300.0),
+                Beat::new(0.0),
+                Hz::new(300.0),
                 Law::PowerIn(Exponent::of(2.0)),
             ));
             e.add_breakpoint(Breakpoint::with_law(
-                Beat(0.37),
-                Hz(1500.0),
+                Beat::new(0.37),
+                Hz::new(1500.0),
                 Law::PowerInOut(Exponent::of(2.0)),
             ));
-            e.add_breakpoint(Breakpoint::with_law(Beat(1.1), Hz(900.0), Law::Hold));
-            e.add_breakpoint(Breakpoint::new(Beat(1.9), Hz(600.0)));
+            e.add_breakpoint(Breakpoint::with_law(
+                Beat::new(1.1),
+                Hz::new(900.0),
+                Law::Hold,
+            ));
+            e.add_breakpoint(Breakpoint::new(Beat::new(1.9), Hz::new(600.0)));
             Arc::new(e)
         };
         let drawn = Waveform::Drawn(Arc::from(vec![
             PeriodPoint {
-                at: Phase(0.0),
+                at: Phase::new(0.0),
                 value: -1.0,
                 curve: Law::Linear,
             },
             PeriodPoint {
-                at: Phase(0.3),
+                at: Phase::new(0.3),
                 value: 0.8,
                 curve: Law::PowerIn(Exponent::of(2.0)),
             },
             PeriodPoint {
-                at: Phase(0.7),
+                at: Phase::new(0.7),
                 value: 0.2,
                 curve: Law::PowerInOut(Exponent::of(2.0)),
             },
@@ -566,7 +570,7 @@ fn an_export_is_the_live_render_bit_for_bit() {
     ed.commit().expect("commits");
 
     // Three stopped blocks, then the fork, then live starts at offset 37.
-    let stopped = TransportPosition::new(false, TEMPO, Beat(0.0), None);
+    let stopped = TransportPosition::new(false, TEMPO, Beat::new(0.0), None);
     for _ in 0..3 {
         block(&mut ed, &mut exec, &stopped, &TransportChanges::NONE, 128);
     }
@@ -574,20 +578,23 @@ fn an_export_is_the_live_render_bit_for_bit() {
         .fork(
             ForkTarget::Master,
             ForkMode::Offline,
-            Prepare::new(SampleRate::of(RATE), MaxBlock::of(Samples(1024))),
+            Prepare::new(SampleRate::of(RATE), MaxBlock::of(Samples::new(1024))),
         )
         .expect("forks");
     let total = 60_000;
 
     let mut host = Host::new();
     let mut ch = TransportChanges::NONE;
-    ch.push(Offset::of(Samples(37), Samples(128)), host.rolling())
-        .expect("room");
+    ch.push(
+        Offset::of(Samples::new(37), Samples::new(128)),
+        host.rolling(),
+    )
+    .expect("room");
     let mut live = block(&mut ed, &mut exec, &stopped, &ch, 128);
     for c in &mut live {
         c.drain(..37);
     }
-    host.clock.advance(Samples(128 - 37), None);
+    host.clock.advance(Samples::new(128 - 37), None);
     for n in ragged(total - (128 - 37), 128) {
         host.roll(&mut ed, &mut exec, n, &mut live);
     }
@@ -681,13 +688,13 @@ fn a_rate_anchor_holds_two_lanes_in_phase() {
     const AT: u64 = 4_010;
     let anchored = |epoch: u32| {
         tri(Clock::Seconds {
-            rate: Hz(5.0),
-            phase: PhaseIncrement(0.0),
+            rate: Hz::new(5.0),
+            phase: PhaseIncrement::new(0.0),
             anchor: Some(RateAnchor {
                 epoch,
                 at: Frame::new(AT),
                 phase: 3.0 * AT as f64 / RATE,
-                prev_rate: Hz(3.0),
+                prev_rate: Hz::new(3.0),
             }),
         })
     };
@@ -729,7 +736,7 @@ fn a_rate_anchor_holds_two_lanes_in_phase() {
     }
 
     // Stop, then start again: a new epoch, the anchor stale.
-    let stopped = TransportPosition::new(false, TEMPO, Beat(0.0), None);
+    let stopped = TransportPosition::new(false, TEMPO, Beat::new(0.0), None);
     block(&mut ed, &mut exec, &stopped, &TransportChanges::NONE, 128);
     let mut host = Host::new();
     let mut again = Vec::new();
@@ -834,20 +841,20 @@ fn a_lane_sees_two_depths_stored_in_one_block_whatever_their_bits() {
 fn a_plugin_lane_sends_linear_grid_pieces() {
     let mut e = Trajectory::new();
     e.add_breakpoint(Breakpoint::with_law(
-        Beat(0.0),
-        Hz(0.1),
+        Beat::new(0.0),
+        Hz::new(0.1),
         Law::PowerIn(Exponent::of(2.0)),
     ));
     e.add_breakpoint(Breakpoint::with_law(
-        Beat(0.3),
-        Hz(0.9),
+        Beat::new(0.3),
+        Hz::new(0.9),
         Law::PowerInOut(Exponent::of(2.0)),
     ));
-    e.add_breakpoint(Breakpoint::new(Beat(0.6), Hz(0.4)));
+    e.add_breakpoint(Breakpoint::new(Beat::new(0.6), Hz::new(0.4)));
     let curve: Arc<dyn Curve> = Arc::new(e);
     let (mut ed, mut exec) = Editor::new(Prepare::new(
         SampleRate::of(RATE),
-        MaxBlock::of(Samples(128)),
+        MaxBlock::of(Samples::new(128)),
     ));
     let lane = ControlLaneNode::for_foreign(
         ParamId::new(3),
@@ -865,7 +872,7 @@ fn a_plugin_lane_sends_linear_grid_pieces() {
     assert!(marks.iter().all(|&m| m != 2.0), "a shaped segment was sent");
     for f in (0..values.len()).step_by(STEP) {
         assert_eq!(marks[f], 1.0, "frame {f}: a grid point");
-        let want = curve.value_at(Beat(f as f64 / FPB)).expect("a value");
+        let want = curve.value_at(Beat::new(f as f64 / FPB)).expect("a value");
         assert!(
             (f64::from(values[f]) - want).abs() <= 1e-6,
             "frame {f}: {} vs {want}",
@@ -1095,8 +1102,8 @@ fn an_input_offset_is_exact_from_its_frame() {
     let p = ControlProgram::new(None, vec![], vec![input]).expect("valid");
     let lane = native(&ed, 2, p, Some(10.0));
     wire(&mut ed, 1, lane, 2);
-    let step = |v| ParamSegment::foreign(ParamId::new(7), v, v, Samples(0), Law::Linear);
-    let ramp = ParamSegment::foreign(ParamId::new(7), 0.25, 1.0, Samples(200), Law::Linear);
+    let step = |v| ParamSegment::foreign(ParamId::new(7), v, v, Samples::new(0), Law::Linear);
+    let ramp = ParamSegment::foreign(ParamId::new(7), 0.25, 1.0, Samples::new(200), Law::Linear);
     let arrive = 600 + ramp.arrives_after().get();
     ed.insert(
         NodeKey(5),
@@ -1107,7 +1114,7 @@ fn an_input_offset_is_exact_from_its_frame() {
     );
     feed_into(&mut ed, 5, 1);
     ed.commit().expect("commits");
-    let stopped = TransportPosition::new(false, TEMPO, Beat(0.0), None);
+    let stopped = TransportPosition::new(false, TEMPO, Beat::new(0.0), None);
     let mut all = Vec::new();
     for _ in 0..10 {
         let got = block(&mut ed, &mut exec, &stopped, &TransportChanges::NONE, 128);
@@ -1157,14 +1164,15 @@ fn a_republished_program_reads_a_new_source() {
     let p = ControlProgram::new(None, vec![], eight).expect("valid");
     let lane = native(&ed, 2, p, Some(10.0));
     let controls = wire(&mut ed, 1, lane, 2);
-    let step =
-        |src: u32, v: f64| ParamSegment::foreign(ParamId::new(src), v, v, Samples(0), Law::Linear);
+    let step = |src: u32, v: f64| {
+        ParamSegment::foreign(ParamId::new(src), v, v, Samples::new(0), Law::Linear)
+    };
     let mut plan: Vec<(u64, ParamSegment)> = (1..=8).map(|k| (0, step(k, 0.0))).collect();
     plan.push((640, step(9, 0.5)));
     ed.insert(NodeKey(5), "feed", ForkByClone(Feed { plan }));
     feed_into(&mut ed, 5, 1);
     ed.commit().expect("commits");
-    let stopped = TransportPosition::new(false, TEMPO, Beat(0.0), None);
+    let stopped = TransportPosition::new(false, TEMPO, Beat::new(0.0), None);
     let mut all = Vec::new();
     for k in 0..10 {
         if k == 4 {
@@ -1199,12 +1207,12 @@ fn a_reused_source_id_starts_from_nothing() {
     };
     let lane = native(&ed, 2, reads3(), Some(10.0));
     let controls = wire(&mut ed, 1, lane, 2);
-    let step = |v| ParamSegment::foreign(ParamId::new(3), v, v, Samples(0), Law::Linear);
+    let step = |v| ParamSegment::foreign(ParamId::new(3), v, v, Samples::new(0), Law::Linear);
     let plan = vec![(0, step(0.5)), (1_000, step(0.25))];
     ed.insert(NodeKey(5), "feed", ForkByClone(Feed { plan }));
     feed_into(&mut ed, 5, 1);
     ed.commit().expect("commits");
-    let stopped = TransportPosition::new(false, TEMPO, Beat(0.0), None);
+    let stopped = TransportPosition::new(false, TEMPO, Beat::new(0.0), None);
     let mut all = Vec::new();
     for k in 0..10 {
         if k == 2 {
@@ -1247,12 +1255,12 @@ fn an_unread_source_is_no_point() {
     let p = ControlProgram::new(None, vec![], vec![input]).expect("valid");
     let lane = ControlLaneNode::for_foreign(ParamId::new(3), p, Some(0.25), (0.0, 1.0));
     wire_sink(&mut ed, 1, lane, 2);
-    let step = |v| ParamSegment::foreign(ParamId::new(99), v, v, Samples(0), Law::Linear);
+    let step = |v| ParamSegment::foreign(ParamId::new(99), v, v, Samples::new(0), Law::Linear);
     let plan = (1..60).map(|k| (k * 10, step(k as f64 / 100.0))).collect();
     ed.insert(NodeKey(5), "feed", ForkByClone(Feed { plan }));
     feed_into(&mut ed, 5, 1);
     ed.commit().expect("commits");
-    let stopped = TransportPosition::new(false, TEMPO, Beat(0.0), None);
+    let stopped = TransportPosition::new(false, TEMPO, Beat::new(0.0), None);
     let mut all = Vec::new();
     for _ in 0..5 {
         let got = block(&mut ed, &mut exec, &stopped, &TransportChanges::NONE, 128);
@@ -1276,7 +1284,7 @@ fn a_resync_sends_a_steady_lane_to_its_new_target() {
     let lane = native(&ed, 2, program(None, vec![]), Some(250.0));
     let controls = wire(&mut ed, 1, lane, 2);
     ed.commit().expect("commits");
-    let stopped = TransportPosition::new(false, TEMPO, Beat(0.0), None);
+    let stopped = TransportPosition::new(false, TEMPO, Beat::new(0.0), None);
     let run = |ed: &mut Editor, exec: &mut Executor| {
         block(ed, exec, &stopped, &TransportChanges::NONE, 64)
     };
@@ -1338,7 +1346,7 @@ fn a_lane_fed_fork_reads_its_value_at_frame_0() {
         .fork(
             ForkTarget::Master,
             ForkMode::Offline,
-            Prepare::new(SampleRate::of(RATE), MaxBlock::of(Samples(64))),
+            Prepare::new(SampleRate::of(RATE), MaxBlock::of(Samples::new(64))),
         )
         .expect("forks");
     assert!(controls.set_knob(700.0));
@@ -1422,7 +1430,7 @@ fn a_constant_layer_is_one_held_value() {
         wire_sink(&mut ed, 1, lane, 2);
         ed.commit().expect("commits");
         let mut host = Host::new();
-        let stopped = TransportPosition::new(false, TEMPO, Beat(0.0), None);
+        let stopped = TransportPosition::new(false, TEMPO, Beat::new(0.0), None);
         let mut all = Vec::new();
         for _ in 0..8 {
             if rolling {

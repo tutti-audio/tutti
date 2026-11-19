@@ -33,12 +33,22 @@ use tutti_units::SampleRate;
 pub(super) const COMMAND_QUEUE_SIZE: usize = 128;
 const RESPONSE_QUEUE_SIZE: usize = 128;
 
+/// A queued command and its place in the order commands were pushed in, across
+/// both lanes' queues.
+pub(super) struct Stamped<T> {
+    pub(super) at: u64,
+    pub(super) cmd: T,
+}
+
 #[derive(Clone)]
 pub(super) struct Channels {
     /// What rides the audio lane: blocks and resets.
-    blocks: Arc<ArrayQueue<AudioCommand>>,
+    blocks: Arc<ArrayQueue<Stamped<AudioCommand>>>,
     /// What rides the control lane: every other request.
-    controls: Arc<ArrayQueue<ControlCommand>>,
+    controls: Arc<ArrayQueue<Stamped<ControlCommand>>>,
+    /// The next stamp: every command takes one as it is pushed, so the one
+    /// thread that serves both queues takes them in the order they were pushed.
+    order: Arc<AtomicU64>,
     /// Whether a control request owes a reply: one at a time.
     owing: ControlSlot,
     /// The newest block sequence the audio thread has submitted. Owned here
@@ -234,6 +244,7 @@ impl Channels {
         let (abandoned, late, commands_refused, leaked_buffers) =
             (tally(), tally(), tally(), tally());
         let channels = Self {
+            order: Arc::new(AtomicU64::new(0)),
             blocks: Arc::new(ArrayQueue::new(COMMAND_QUEUE_SIZE)),
             controls: Arc::new(ArrayQueue::new(COMMAND_QUEUE_SIZE)),
             owing: ControlSlot::default(),
@@ -296,6 +307,10 @@ impl Channels {
     /// The bridge thread is reading the control connection for news.
     pub(super) fn set_news(&self) {
         self.news.store(true, Ordering::Release);
+        // Pairs with the fence after `bytes_waiting`'s poll: this flag is
+        // visible before the bytes it covers are taken off the connection, so
+        // a checker that saw the bytes gone and then fenced reads it set.
+        std::sync::atomic::fence(Ordering::SeqCst);
     }
 
     /// Whether [`set_news`](Self::set_news) was called since the last
@@ -315,12 +330,17 @@ impl Channels {
     }
 
     /// Whether the control connection has bytes the bridge thread has not read
-    /// (one `poll`, no wait). `false` with no probe.
+    /// (one `poll`, no wait). `false` with no probe. A fence follows the poll,
+    /// so a [`news_pending`](Self::news_pending) read after this sees a flag
+    /// the bridge set before it took the bytes.
     pub(super) fn bytes_waiting(&self) -> bool {
-        self.probe
+        let waiting = self
+            .probe
             .lock_recover()
             .as_ref()
-            .is_some_and(|watch| watch.wait_readable(Duration::ZERO))
+            .is_some_and(|watch| watch.wait_readable(Duration::ZERO));
+        std::sync::atomic::fence(Ordering::SeqCst);
+        waiting
     }
 
     /// The bridge thread has read the control connection dry and delivered what
@@ -494,22 +514,24 @@ impl Channels {
     /// rather than dropping it, so the audio thread can return what it holds
     /// to its pools instead of freeing it.
     pub(super) fn try_push_block(&self, cmd: AudioCommand) -> Result<(), AudioCommand> {
-        if let Err(cmd) = self.blocks.push(cmd) {
+        let at = self.order.fetch_add(1, Ordering::Relaxed);
+        if let Err(back) = self.blocks.push(Stamped { at, cmd }) {
             self.note_command_refused();
-            return Err(cmd);
+            return Err(back.cmd);
         }
         self.bell.ring();
         Ok(())
     }
 
-    pub(super) fn pop_block(&self) -> Option<AudioCommand> {
+    pub(super) fn pop_block(&self) -> Option<Stamped<AudioCommand>> {
         self.blocks.pop()
     }
 
     /// Pushes a control-lane command and rings the bell. A refused command is
     /// counted.
     pub(super) fn push_control(&self, cmd: ControlCommand) -> bool {
-        if self.controls.push(cmd).is_err() {
+        let at = self.order.fetch_add(1, Ordering::Relaxed);
+        if self.controls.push(Stamped { at, cmd }).is_err() {
             self.note_command_refused();
             return false;
         }
@@ -517,7 +539,7 @@ impl Channels {
         true
     }
 
-    pub(super) fn pop_control(&self) -> Option<ControlCommand> {
+    pub(super) fn pop_control(&self) -> Option<Stamped<ControlCommand>> {
         self.controls.pop()
     }
 
@@ -678,7 +700,10 @@ mod tests {
     fn a_push_and_its_ring_allocate_nothing() {
         let (c, _wait) = channels();
         assert_no_alloc::assert_no_alloc(|| assert!(c.push_block(AudioCommand::Reset)));
-        assert!(matches!(c.pop_block(), Some(AudioCommand::Reset)));
+        assert!(matches!(
+            c.pop_block().map(|s| s.cmd),
+            Some(AudioCommand::Reset)
+        ));
     }
 
     /// **Every command a full queue refuses is counted, and an accepted one is

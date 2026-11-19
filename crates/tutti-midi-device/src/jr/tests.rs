@@ -429,7 +429,7 @@ fn the_interval_between_clocks_says_nothing_of_the_link() {
 #[test]
 fn a_tick_at_the_spec_rate_is_its_time_in_seconds() {
     assert_eq!(TICK_RATE.get(), 31_250.0);
-    assert_eq!(tick_time(31_250), tutti_units::Seconds(1.0));
+    assert_eq!(tick_time(31_250), tutti_units::Seconds::new(1.0));
     let near = |a: f64, b: f64| (a - b).abs() < 1e-12;
     assert!(near(tick_time(1).get(), 32e-6));
     assert!(near(
