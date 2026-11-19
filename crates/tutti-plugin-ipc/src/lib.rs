@@ -63,7 +63,7 @@ pub(crate) use client::audio::BridgeListener;
 pub(crate) use client::audio::HarmonyInputs;
 pub use client::audio::{AudioBridge, BridgeEvent, BridgeThread};
 pub(crate) use client::audio::{FATES, Fate};
-pub use client::{EditorLoader, EditorSite, InProcessEditor, PluginBridge, ServedEditor};
+pub use client::{EditorLoader, EditorSite, PluginBridge};
 pub(crate) use wake::Wake;
 // The bridge's free-buffer pool, for the delivery test in `tutti-plugin` that
 // fills it the way the node does.
