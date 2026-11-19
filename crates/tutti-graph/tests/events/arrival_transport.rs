@@ -216,12 +216,12 @@ impl Rig {
                     let rolled = Env {
                         frame: Frame::new(f),
                         sample_rate: rate,
-                        block_len: Samples::new(span.get() + 1),
+                        block_len: span + Samples::new(1),
                         transport: t,
                         changes: TransportChanges::NONE,
                         play: tutti_graph::PlayClock::ZERO,
                     }
-                    .transport_at(Offset::of(span, Samples::new(span.get() + 1)));
+                    .transport_at(Offset::of(span, span + Samples::new(1)));
                     rate != env.sample_rate
                         || rolled != piece.transport
                         || (start == Offset::ZERO
@@ -279,7 +279,7 @@ impl Rig {
 /// the next block there, and the history keeps no piece for it.
 fn end_of(e: &Env) -> TransportPosition {
     let longer = Env {
-        block_len: Samples::new(e.block_len.get() + 1),
+        block_len: e.block_len + Samples::new(1),
         ..*e
     };
     longer.transport_at(Offset::of(e.block_len, longer.block_len))
@@ -336,7 +336,12 @@ fn scene(b: usize, n: usize, prev: Option<&Env>) -> (TransportPosition, Transpor
         ),
         // The loop, picked up at the previous block's last frame.
         4 => prev.map_or(rolling(2.0), |p| {
-            p.transport_at(Offset::of(Samples::new(p.block_len.get() - 1), p.block_len))
+            p.transport_at(Offset::of(
+                p.block_len
+                    .checked_sub(Samples::new(1))
+                    .expect("a block has at least one frame"),
+                p.block_len,
+            ))
         }),
         5 => TransportPosition::new(false, Bpm::of(100.0), Beat::new(3.0), None),
         _ => rolling(32.0 + b as f64).with_recording(true),

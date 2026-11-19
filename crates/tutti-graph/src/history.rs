@@ -416,7 +416,7 @@ mod tests {
     /// the next block.
     fn end_of(e: &Env) -> TransportPosition {
         let longer = Env {
-            block_len: Samples::new(e.block_len.get() + 1),
+            block_len: e.block_len + Samples::new(1),
             ..*e
         };
         longer.transport_at(off(e.block_len.get()))

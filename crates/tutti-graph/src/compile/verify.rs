@@ -1394,7 +1394,7 @@ mod tests {
         verify(&good).expect("sound");
 
         let mut bad = good.clone();
-        bad.nodes.recs[0].latency = tutti_units::Samples::new(bad.nodes.recs[0].latency.get() + 1);
+        bad.nodes.recs[0].latency += tutti_units::Samples::new(1);
         assert!(verify(&bad).unwrap_err().0.contains("disagrees"));
 
         let mut bad = good.clone();
