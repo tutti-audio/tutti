@@ -9768,7 +9768,7 @@ over the ±48 default, since the host sends no sensitivity with it.
 
 A classic MPE controller sets the bend range with RPN #00/00 on a member
 channel, which in MPE (RP-053) sets every member channel's range. The
-input node's `MpeIngest`, which has already made those channels' bends
+input node's `MpeTranslator`, which has already made those channels' bends
 per-note bends, turns it into RPN #00/07 on each of the zone's member
 channels (its `translate` yields an allocation-free iterator, since one
 event can become up to fifteen); RPN #00/00 on the master channel sets the
@@ -9776,13 +9776,13 @@ master's own channel bend range and passes through.
 
 An MPE Configuration Message resets the zone it configures (MPE, RP-053 /
 M1-100-UM, "Pitch Bend Sensitivity": a receiver of an MCM sets the master
-channel to ±2 semitones and every member to ±48). `MpeIngest` absorbs the
+channel to ±2 semitones and every member to ±48). `MpeTranslator` absorbs the
 MCM, so it sends the reset in its place: RPN #00/00 = 2 on the master and
 RPN #00/07 = 48 on each member, at the MCM's offset, for the configured
 zone only (the other zone of a dual setup keeps its ranges; a disabling
 MCM sends nothing). A mode the host sets (`MidiInputControls::set_mpe_mode`)
 sends the same for every zone of the new mode, at frame 0 of the block that
-adopts it (`MpeIngest::zone_defaults`), so a receiver that followed the old
+adopts it (`MpeTranslator::zone_defaults`), so a receiver that followed the old
 ranges starts the new zones at MPE's defaults either way.
 
 The input node stages each event's translation whole: one that does not fit

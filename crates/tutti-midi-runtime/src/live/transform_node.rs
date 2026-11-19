@@ -1,9 +1,9 @@
 //! The MPE transform as a graph node.
 //!
-//! [`MpeTransformNode`] runs one [`MpeIngest`] over one event stream: MIDI 1.0
+//! [`MpeTransformNode`] runs one [`MpeTranslator`] over one event stream: MIDI 1.0
 //! in is translated by a [`Midi2Translator`], classic-MPE channel-spread comes out as
 //! native per-note messages, and a Manager Channel's zone-wide messages and bend
-//! come out on each member channel of its zone, as the ingest's docs say. It is
+//! come out on each member channel of its zone, as the MPE translator's docs say. It is
 //! the input edge's transform for a stream that does not come off a wire (a
 //! clip's), so a graph holds the MPE zones in two kinds of place alone, this
 //! node and [`MidiInputNode`](crate::MidiInputNode), and no instrument holds
@@ -15,7 +15,7 @@
 //! reader of it shares; the node adopts a new one at the next block. A mode
 //! starts each Group at its zones' default bend ranges and a change of it stops
 //! and resets the channels that enter or leave MPE control, which is what a
-//! receiver's zone change sends ([`MpeIngest::zone_defaults`]); the transform
+//! receiver's zone change sends ([`MpeTranslator::zone_defaults`]); the transform
 //! sends it for a Group the moment the mode changes when the Group has carried
 //! events, and ahead of the Group's first event when it has not, so a stream
 //! uses one Group and the other fifteen cost nothing. The output can hold more events than the input
@@ -39,7 +39,7 @@ use tutti_rt::{Counter, CounterWriter, Publisher, Reader, counter};
 use tutti_ump::MidiGroup;
 
 use super::input_node::{MIDI_INPUT_EVENT_CAPACITY, MIDI_INPUT_PORT_CAPACITY, Staging};
-use super::mpe_ingest::MpeIngest;
+use super::mpe_translator::MpeTranslator;
 use super::order::BLANK;
 use crate::schedule::CLIP_EVENT_DENSITY;
 
@@ -60,7 +60,7 @@ use crate::schedule::CLIP_EVENT_DENSITY;
 /// ```
 pub struct MpeTransformNode {
     translator: Midi2Translator,
-    mpe: MpeIngest,
+    mpe: MpeTranslator,
     /// The mode in force.
     mode: MpeMode,
     /// The session's mode, read once per block.
@@ -99,7 +99,13 @@ const fn bit(group: MidiGroup) -> u16 {
 /// Sends `group` the mode's stops and default ranges at `at`; the Group is
 /// `told` if they all fit, and is otherwise sent them again ahead of its next
 /// event.
-fn tell(mpe: &MpeIngest, told: &mut u16, group: MidiGroup, at: Offset, staging: &mut Staging<'_>) {
+fn tell(
+    mpe: &MpeTranslator,
+    told: &mut u16,
+    group: MidiGroup,
+    at: Offset,
+    staging: &mut Staging<'_>,
+) {
     if staging.whole(false, |send| mpe.zone_defaults(group, at, send)) {
         *told |= bit(group);
     }
@@ -120,7 +126,7 @@ impl MpeTransformNode {
         let (dropped, dropped_reader) = counter();
         Self {
             translator: Midi2Translator::default(),
-            mpe: MpeIngest::new(initial),
+            mpe: MpeTranslator::new(initial),
             mode: initial,
             request: mode.reader(),
             request_cell: mode.clone(),

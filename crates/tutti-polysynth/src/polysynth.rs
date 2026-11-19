@@ -46,7 +46,7 @@ use tutti_voicing::{Controller, Effect, Glide, MasterGain, NoteControl, Stop};
 /// The event input accepts MIDI 1.0 and MIDI 2.0 (UMP) channel-voice
 /// messages, including MIDI 2.0 per-note controllers. MPE zones are not its
 /// business: classic MPE arrives already rewritten as per-note messages
-/// (`tutti-midi-runtime`'s `MpeIngest`). Up to 512 events per block are
+/// (`tutti-midi-runtime`'s `MpeTranslator`). Up to 512 events per block are
 /// applied; any beyond that are dropped.
 ///
 /// Rendering allocates nothing and takes no lock. Construction, forking and
