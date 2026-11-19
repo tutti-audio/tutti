@@ -261,7 +261,7 @@ the interpreter.
   drain) is built; a fork's node registers on its own new cell,
   and a control-side `&self` method keeps a mirror instead of reading a
   cell the audio thread reads. The plugin meter is one cell per node
-  (`MeterSlot`), which `ProjectMeter::set_meter` publishes into before it
+  (`TimeSignatureSlot`), which `ProjectMeter::set_meter` publishes into before it
   returns. `MidiIn::poll_block` takes `&mut self`. `debug_check_reclaiming`
   and `PARKED_LOAN_LIMIT` are gone: a node cannot park a `Loan` across
   blocks, and a `mem::forget` pins one value per reader. The per-channel
@@ -805,7 +805,7 @@ place that loses precision to be written out explicitly:
    The `Net` path (deleted with fundsp) rendered the pieces one after
    another instead, applying the commands between them. Beats resolved by
    the graph's rule on both paths (the Net path with the tempo its clock
-   actually ran at, `tempo_in_force`, after the clock's hysteresis). A command past the 8-cut bound, or already past
+   actually ran at, `current_tempo`, after the clock's hysteresis). A command past the 8-cut bound, or already past
    due, lands at the next block's first frame and is counted
    (`late_command_count`); an `At::NextBlock` needs no cut and is never late.
    Commands due on one frame apply in send order. On the Graph path the

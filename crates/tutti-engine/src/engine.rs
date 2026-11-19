@@ -924,7 +924,7 @@ impl<F: Float> Engine<F> {
         // observed with its real length once it is cut; before that, a copy
         // observes it with the rest of the block, to answer `crossed`.
         let mut base = *playhead;
-        transport.gather();
+        transport.drain_commands();
         loop {
             // The map's tempo steps from the cursor on, assuming no command
             // moves the transport first (one that does is followed by a new
@@ -985,7 +985,7 @@ impl<F: Float> Engine<F> {
                     transport.advance(s, &t);
                     pieces.ran();
                     cursor += s;
-                    t = transport.restate();
+                    t = transport.current();
                     if let Some(o) = Offset::new(Samples::new(cursor), Samples::new(frames)) {
                         pieces.change(o, t);
                     }
@@ -1007,7 +1007,7 @@ impl<F: Float> Engine<F> {
                 pieces.ran();
                 cursor = at;
             }
-            let (applied, now) = transport.fire(i, late);
+            let (applied, now) = transport.apply_command(i, late);
             if applied.declicked() {
                 // A jump clears the fader's aim.
                 walk.gain.push(cursor, Gain::Jump);

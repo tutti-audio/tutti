@@ -271,7 +271,7 @@ Rules:
   installed meter cell's `Arc`; it was `ArcSwapOption` until a host that
   installed a meter it did not keep, then replaced it mid-block, was shown to
   free the whole cell on the audio thread (the guard-debt hazard below).
-  Each plugin node now reads a `MeterSlot` cell of its own, holding the
+  Each plugin node now reads a `TimeSignatureSlot` cell of its own, holding the
   project's `MeterMap` or nothing, and `ProjectMeter::set_meter` publishes
   into every follower. Cells no audio thread reads stay plain: device
   enumeration in `tutti-midi-hardware`, and the per-channel compensation

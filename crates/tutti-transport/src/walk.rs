@@ -9,7 +9,7 @@
 //! constant-tempo render is what it always was, bit for bit.
 //!
 //! The walk keeps one number, `frame`: the map frame the playhead is on. It is
-//! set at a seat (`frame_at_or_after` of the exact seat beat) and moves with
+//! set at a seek (`frame_at_or_after` of the exact target beat) and moves with
 //! the clock, and it never feeds the beat; the beat is the clock's, derived in
 //! closed form from the segment the walk starts. At each cell boundary
 //! ([`CELL_GRID`] frames, and where a point of the map starts) it asks
@@ -31,7 +31,7 @@ pub(crate) const CELL_GRID: CellGrid = CellGrid::of(128);
 /// The tempo changes inside a block, found ahead of the render
 /// ([`TransportAudio::tempo_ahead`](super::TransportAudio::tempo_ahead)).
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct TempoAhead {
+pub struct UpcomingTempo {
     /// The changes that fit, in time order (none at offset 0).
     pub changes: TransportChanges,
     /// Where the block must end because the next change does not fit: the
@@ -39,7 +39,7 @@ pub struct TempoAhead {
     pub limit: Option<usize>,
 }
 
-impl TempoAhead {
+impl UpcomingTempo {
     /// No change, and the block runs whole.
     pub const NONE: Self = Self {
         changes: TransportChanges::NONE,
@@ -56,16 +56,16 @@ pub(crate) struct TempoWalk {
 }
 
 impl TempoWalk {
-    /// Seat `clock` at the exact `beat` and take the map's tempo there.
-    pub fn seat(&mut self, map: &TempoMap, clock: &mut FrameClock, beat: Beat) {
+    /// Seek `clock` to the exact `beat` and take the map's tempo there.
+    pub fn seek(&mut self, map: &TempoMap, clock: &mut FrameClock, beat: Beat) {
         clock.seat(beat);
-        self.place(map, clock);
+        self.sync_tempo(map, clock);
     }
 
     /// Find `clock`'s current beat on `map`'s timeline and take the tempo in
-    /// force there, leaving the clock's beat as it is: after a seat, a loop
+    /// force there, leaving the clock's beat as it is: after a seek, a loop
     /// wrap, a rate change or a map swap. `true` when the tempo moved.
-    pub fn place(&mut self, map: &TempoMap, clock: &mut FrameClock) -> bool {
+    pub fn sync_tempo(&mut self, map: &TempoMap, clock: &mut FrameClock) -> bool {
         let rate = clock.sample_rate();
         let beat = clock.beat();
         let mut view = map.view(rate);
@@ -109,11 +109,11 @@ impl TempoWalk {
         }
     }
 
-    /// Roll `clock` `frames` forward, wrapping at `looping`, and following the
+    /// Advance `clock` `frames` forward, wrapping at `looping`, and following the
     /// map's tempo cell by cell. With `stop`, return right after the first
-    /// frame the tempo changed on (the clock standing on it); otherwise roll
+    /// frame the tempo changed on (the clock standing on it); otherwise advance
     /// all `frames`. Returns the frames rolled and whether the tempo changed.
-    pub fn roll(
+    pub fn advance(
         &mut self,
         map: &TempoMap,
         clock: &mut FrameClock,
@@ -131,8 +131,8 @@ impl TempoWalk {
                     let w = wrapped.get();
                     rolled += w;
                     self.frame += w as i64;
-                    // A wrap is a seek to the loop start: place it exactly.
-                    changed |= self.place(map, clock);
+                    // A wrap is a seek to the loop start: sync the tempo exactly.
+                    changed |= self.sync_tempo(map, clock);
                 }
                 None => {
                     rolled += chunk;
@@ -151,7 +151,7 @@ impl TempoWalk {
 
     /// The tempo changes inside the next `frames` of a rolling `clock`, at most
     /// `cap` of them. `transport` builds the transport from the clock after a
-    /// change. Walks a copy, with the code [`roll`](Self::roll) runs for real, so
+    /// change. Walks a copy, with the code [`advance`](Self::advance) runs for real, so
     /// a render that rolls to a change's offset finds the same change there.
     pub fn ahead(
         &self,
@@ -161,12 +161,12 @@ impl TempoWalk {
         looping: Option<LoopRange>,
         cap: usize,
         transport: impl Fn(&FrameClock) -> TransportPosition,
-    ) -> TempoAhead {
+    ) -> UpcomingTempo {
         let (mut walk, mut clock) = (*self, *clock);
-        let mut out = TempoAhead::NONE;
+        let mut out = UpcomingTempo::NONE;
         let mut at = 0;
         while at < frames {
-            let (rolled, changed) = walk.roll(map, &mut clock, frames - at, looping, true);
+            let (rolled, changed) = walk.advance(map, &mut clock, frames - at, looping, true);
             at += rolled;
             if !changed || at >= frames {
                 break;
