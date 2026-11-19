@@ -412,14 +412,18 @@ pub(super) struct Lanes {
     pub(super) control: Lane,
 }
 
+/// Sends a block or a reset; `true` when a block was sent (a stale one is
+/// skipped, and the control lane's news is looked at only after a sent block:
+/// skipping a backlog must stay cheap).
 pub(super) fn handle_audio(
     cmd: AudioCommand,
     lane: &mut Lane,
     channels: &mut BridgeSide,
     payloads: &PayloadPool,
     inbox: &mut Unsolicited,
-) -> BridgeResult<()> {
+) -> BridgeResult<bool> {
     let Lane { stream, owed } = lane;
+    let mut went = false;
     match cmd {
         AudioCommand::Process(mut payload) => {
             let seq = payload.seq;
@@ -444,7 +448,7 @@ pub(super) fn handle_audio(
                 owed.carry(&payload.param_changes);
                 payloads.return_params(core::mem::take(&mut payload.param_changes));
                 payloads.recycle(payload);
-                return Ok(());
+                return Ok(false);
             }
 
             if !owed.carried.is_empty() {
@@ -480,6 +484,7 @@ pub(super) fn handle_audio(
                 payloads.return_params(data.param_changes);
             }
             sent?;
+            went = true;
 
             // Replies owed from earlier blocks come first and are forwarded
             // (`Owed::take`); then this block's own, within its budget.
@@ -564,7 +569,7 @@ pub(super) fn handle_audio(
             ipc::send(stream, &HostMessage::Reset)?;
         }
     }
-    Ok(())
+    Ok(went)
 }
 
 pub(super) fn handle_control(

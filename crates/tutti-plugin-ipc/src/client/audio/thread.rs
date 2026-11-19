@@ -273,10 +273,10 @@ fn pump(
         let result = if let Some(cmd) = channels.pop_control() {
             handle_control(cmd, &mut lanes.control, channels, &mut inbox, lifecycle)
         } else if let Some(cmd) = held.take() {
-            handle_audio(cmd, &mut lanes.audio, channels, payloads, &mut inbox).and_then(|()| {
+            handle_audio(cmd, &mut lanes.audio, channels, payloads, &mut inbox).and_then(|went| {
                 // The plugin's news arrives on the control lane, which a block
-                // does not read: take what is there between blocks.
-                if ipc::has_pending(&lanes.control.stream) {
+                // does not read: take what is there after each block sent.
+                if went && ipc::has_pending(&lanes.control.stream) {
                     read_news(&mut lanes.control, channels, &mut inbox)
                 } else {
                     Ok(())
