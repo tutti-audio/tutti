@@ -383,3 +383,18 @@ fn play_restarts_a_free_running_voice_after_a_reset() {
     handle.play().expect("a free-running voice");
     assert_frames("after play", &block(&mut node), |n| n);
 }
+
+/// **A free-running voice built with a stretch plays dry, not silent**: a
+/// node built directly with a stretch in its `Playback` has no way to refuse
+/// it, and the stretch path reads the transport's clock, which the voice does
+/// not have. It reads its own cursor, unstretched: output frame `n` is file
+/// frame `n`, bit for bit.
+#[test]
+fn a_free_running_voice_built_with_a_stretch_plays_the_ramp_dry() {
+    let mut node = free_node(Playback {
+        stretch: tutti_units::StretchFactor::new(2.0),
+        ..Playback::default()
+    });
+    let got = render_with(&mut node, 1_000);
+    assert_frames("dry", &got, |n| n);
+}
