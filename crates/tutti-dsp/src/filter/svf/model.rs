@@ -14,7 +14,7 @@ use tutti_units::{Db, Hz, Q, SampleRate, Samples, Seconds};
 use super::{SvfDesign, SvfType};
 use crate::Biquad;
 use crate::filter::biquad::section_l1;
-use crate::{Complex64, Lti, Ring, System};
+use crate::{Complex64, DecayTime, Lti, System};
 
 /// What an SVF's controls are: its response, cutoff, resonance and the gain of a
 /// bell or shelf (read only by those three).
@@ -243,10 +243,10 @@ impl System for SvfModel {
     /// all-pole part (`r` the slowest pole, `K = 2r / |p1 - p2|`) against the
     /// largest `|h|` found on a geometric grid and refined at its peak, so it covers
     /// the true ring and sits within a small factor of it.
-    fn tail(&self, floor: Db) -> Ring {
+    fn tail(&self, floor: Db) -> DecayTime {
         let nln = self.decay_rate();
         if nln.is_nan() || nln <= 0.0 {
-            return Ring::Unbounded;
+            return DecayTime::Unbounded;
         }
         let b = self.biquad();
         let h = |n: i64| {
@@ -273,7 +273,7 @@ impl System for SvfModel {
         let eps = floor.to_amplitude().get();
         let target = eps * best.1;
         if target.is_nan() || target <= 0.0 {
-            return Ring::Finite(Seconds::new(0.0));
+            return DecayTime::Finite(Seconds::new(0.0));
         }
         let sum_b = b.b0.abs() + b.b1.abs() + b.b2.abs();
         let (r, k) = (libm::exp(-nln), self.envelope_k());
@@ -281,14 +281,14 @@ impl System for SvfModel {
         // The envelope falls from its peak, at about one time constant on.
         let mut lo = ((1.0 / nln) as i64 + 3).max(3);
         if bound(lo) <= target {
-            return Ring::Finite(Seconds::new(lo as f64 / self.rate.get()));
+            return DecayTime::Finite(Seconds::new(lo as f64 / self.rate.get()));
         }
         let mut hi = lo;
         while bound(hi) > target {
             lo = hi;
             hi = hi.saturating_mul(2);
             if hi > (1 << 52) {
-                return Ring::Unbounded;
+                return DecayTime::Unbounded;
             }
         }
         while hi - lo > 1 {
@@ -299,7 +299,7 @@ impl System for SvfModel {
                 hi = mid;
             }
         }
-        Ring::Finite(Seconds::new(hi as f64 / self.rate.get()))
+        DecayTime::Finite(Seconds::new(hi as f64 / self.rate.get()))
     }
 }
 

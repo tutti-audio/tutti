@@ -9,7 +9,7 @@
 //! ## Catalogue
 //!
 //! - **Model** (`model/`): a [`System`] is what every processor answers (its
-//!   [`latency`](System::latency) and [`tail`](System::tail), a [`Ring`]: how long the response
+//!   [`latency`](System::latency) and [`tail`](System::tail), a [`DecayTime`]: how long the response
 //!   rings until it is a floor below what it carried ([`TAIL_FLOOR`] by default)), and [`Lti`]
 //!   the class of a linear time-invariant one
 //!   ([`frequency_response`](Lti::frequency_response),
@@ -211,7 +211,7 @@ pub use filter::{
 pub use fir::{Fir, FirDesign, FirError, FirResponse, MAX_ATTENUATION, kaiser_beta};
 pub use interp::{ParabolicPeak, cubic_hermite, lerp, parabolic_peak};
 pub use level::rms;
-pub use model::{Lti, MaxDecay, MaxDecayError, Ring, System, TAIL_FLOOR};
+pub use model::{DecayTime, Lti, MaxDecay, MaxDecayError, System, TAIL_FLOOR};
 pub use modulation::allpass::{allpass_complement, sweep_hz};
 pub use modulation::mod_delay::{
     MAX_MOD_DELAY_CHANNELS, MIN_RATE, ModDelayBank, ModDelayControls, ModDelayLayout, SweepDesign,

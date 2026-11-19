@@ -27,8 +27,8 @@ use core::f64::consts::PI;
 use tutti_units::{Db, Drive, Hz, Resonance, SampleRate, Samples};
 
 use super::{LadderDesign, LadderType};
-use crate::filter::biquad::decay_ring;
-use crate::{Complex64, Lti, Ring, System};
+use crate::filter::biquad::decay_time;
+use crate::{Complex64, DecayTime, Lti, System};
 
 /// What a ladder's controls are: its type, cutoff, resonance and the drive into
 /// the saturator.
@@ -212,11 +212,11 @@ impl System for LadderModel {
 
     /// The linearised loop's ring: unbounded from `k = 4` (the closed form of
     /// `is_stable`), else its slowest pole, `ln(eps) / ln r` frames.
-    fn tail(&self, floor: Db) -> Ring {
+    fn tail(&self, floor: Db) -> DecayTime {
         if !self.is_stable() {
-            return Ring::Unbounded;
+            return DecayTime::Unbounded;
         }
-        decay_ring(self.spectral_radius(), 1, floor, self.rate)
+        decay_time(self.spectral_radius(), 1, floor, self.rate)
     }
 }
 

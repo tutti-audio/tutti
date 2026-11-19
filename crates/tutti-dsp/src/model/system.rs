@@ -1,4 +1,4 @@
-//! [`System`]: what every processor answers, [`Ring`], how long it rings, and the
+//! [`System`]: what every processor answers, [`DecayTime`], how long its response rings, and the
 //! [`TAIL_FLOOR`] it is measured to.
 
 use tutti_units::{Db, Samples, Seconds};
@@ -7,9 +7,9 @@ use tutti_units::{Db, Samples, Seconds};
 /// -60 dB, the reverberation time's definition.
 pub const TAIL_FLOOR: Db = Db::new(-60.0);
 
-/// How long a system rings: [`System::tail`].
+/// How long a system's response rings: [`System::tail`].
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Ring {
+pub enum DecayTime {
     /// It falls to the floor in this long.
     Finite(Seconds),
     /// It never does: a lossless loop, or one that grows.
@@ -27,6 +27,6 @@ pub trait System {
 
     /// How long the response rings past its onset, until it is `floor` below
     /// what it carried. Musical delay counts toward it, as a reverb's pre-delay
-    /// does. [`Ring::Unbounded`] when it never gets there.
-    fn tail(&self, floor: Db) -> Ring;
+    /// does. [`DecayTime::Unbounded`] when it never gets there.
+    fn tail(&self, floor: Db) -> DecayTime;
 }

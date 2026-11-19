@@ -73,7 +73,7 @@ use crate::design::along;
 use crate::onepole::{cutoff_complement, cutoff_pole};
 use crate::reverb::network::{Absorption, Band, Matrix, Network, Stage};
 use crate::reverb::{CHUNK, ramp, tail_of};
-use crate::{Lerp, Ramp, Ring, Steps, System, TAIL_FLOOR};
+use crate::{DecayTime, Lerp, Ramp, Steps, System, TAIL_FLOOR};
 
 /// The shortest a line reads at: one frame.
 const ONE_FRAME: ReadPosition = ReadPosition::from_frames(Samples::new(1));
@@ -405,13 +405,13 @@ impl<F: Float + Lerp> FdnBank<F> {
     /// the ceiling's worst design already has.
     pub fn tail_of(&mut self, ramps: &FdnRamps<F>, controls: &FdnControls) -> Tail {
         self.design(controls);
-        let Ring::Finite(t) = self.network.tail(TAIL_FLOOR) else {
-            return tail_of(Ring::Unbounded, self.rate);
+        let DecayTime::Finite(t) = self.network.tail(TAIL_FLOOR) else {
+            return tail_of(DecayTime::Unbounded, self.rate);
         };
         let pre = self.network.pre_delay.min(Samples::new(self.pre_cap - 4));
         let behind = ramps.pre_len.now().saturating_sub(pre);
         let seconds = t.get() + behind.span().to_seconds(self.rate).get();
-        tail_of(Ring::Finite(Seconds::new(seconds)), self.rate)
+        tail_of(DecayTime::Finite(Seconds::new(seconds)), self.rate)
     }
 
     /// Back to silence, the chunks counted from here. No allocation.

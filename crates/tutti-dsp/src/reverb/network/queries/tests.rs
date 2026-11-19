@@ -53,8 +53,8 @@ fn the_tail_is_pre_delay_transit_and_the_decay_to_the_floor() {
     ))]);
     n.pre_delay = Samples::new(4_800);
     let seconds = |floor| match n.tail(Db::new(floor)) {
-        Ring::Finite(s) => s.get(),
-        Ring::Unbounded => panic!("a damped line rings out"),
+        DecayTime::Finite(s) => s.get(),
+        DecayTime::Unbounded => panic!("a damped line rings out"),
     };
     assert!((seconds(-60.0) - 3.1).abs() < 1e-5, "{}", seconds(-60.0));
     assert!((seconds(-30.0) - 2.1).abs() < 1e-5);
@@ -74,7 +74,7 @@ fn a_series_all_pass_rings_for_its_geometric_train() {
         form: AllPassForm::Lattice,
     };
     let n = network(&[Stage::AllPass(Inline::from_slice(&[ap, ap]).unwrap())]);
-    let Ring::Finite(t) = n.tail(Db::new(-60.0)) else {
+    let DecayTime::Finite(t) = n.tail(Db::new(-60.0)) else {
         panic!("an all-pass chain rings out")
     };
     let t = t.get();
@@ -207,8 +207,8 @@ fn a_one_pole_adds_its_group_delay_at_dc_to_the_loop() {
     // The same DC gain: the RT60 is that of a loop 1000 + 9 frames long.
     assert!((rt(pole(0.9)) / rt(Absorption::Gain(g)) - 1.009).abs() < 1e-5);
     let tail = |a| match net(a).tail(Db::new(-60.0)) {
-        Ring::Finite(t) => t.get(),
-        Ring::Unbounded => panic!("a finite tail"),
+        DecayTime::Finite(t) => t.get(),
+        DecayTime::Unbounded => panic!("a finite tail"),
     };
     assert!(tail(pole(0.9)) > tail(Absorption::Gain(g)));
 }
@@ -242,7 +242,7 @@ fn stability_follows_the_gains_and_the_matrix() {
         Matrix::Hadamard,
     ))]);
     assert!(!n.is_stable() && !n.is_lossless());
-    assert_eq!(n.tail(Db::new(-60.0)), Ring::Unbounded);
+    assert_eq!(n.tail(Db::new(-60.0)), DecayTime::Unbounded);
     let three = [100.0, 130.0, 170.0].map(|m| line(m, Absorption::Gain(Amplitude::new(0.5))));
     assert!(!stable(&three, Matrix::Hadamard));
     assert!(stable(&three, Matrix::Householder));
@@ -294,7 +294,7 @@ fn a_lossless_loop_is_marginally_stable_with_an_unbounded_tail() {
         Matrix::Hadamard,
     ))]);
     assert!(frozen.is_lossless() && frozen.is_stable());
-    assert_eq!(frozen.tail(Db::new(-60.0)), Ring::Unbounded);
+    assert_eq!(frozen.tail(Db::new(-60.0)), DecayTime::Unbounded);
     assert_eq!(frozen.rt60(Band::Mid).get(), f64::INFINITY);
     let almost = Absorption::Bands {
         low: Amplitude::new(1.0),
@@ -307,7 +307,7 @@ fn a_lossless_loop_is_marginally_stable_with_an_unbounded_tail() {
         Matrix::Hadamard,
     ))]);
     assert!(!n.is_lossless());
-    assert_eq!(n.tail(Db::new(f64::NAN)), Ring::Unbounded);
+    assert_eq!(n.tail(Db::new(f64::NAN)), DecayTime::Unbounded);
     assert!(!network(&[]).is_lossless());
 }
 
@@ -382,7 +382,7 @@ fn a_fir_reports_its_summary() {
     let n = network(&[Stage::Fir(fir)]);
     assert_eq!(Band::ALL.map(|b| n.rt60(b).get()), [2.0, 1.5, 1.0]);
     assert_eq!(n.latency(), Samples::new(256));
-    assert_eq!(n.tail(Db::new(-60.0)), Ring::Finite(Seconds::new(0.5)));
+    assert_eq!(n.tail(Db::new(-60.0)), DecayTime::Finite(Seconds::new(0.5)));
     assert_eq!(n.min_delay(), Some(SampleSpan::of(100.0)));
     assert_eq!(network(&[]).latency(), Samples::ZERO);
 }
@@ -524,7 +524,7 @@ fn a_one_pole_outside_the_unit_circle_is_not_stable() {
         let f = fdn(&[line(100.0, a)], Matrix::Diagonal);
         assert_eq!(f.rt60_bound(Band::Mid, RATE).get(), f64::INFINITY);
         let n = network(&[Stage::Fdn(f)]);
-        assert_eq!(n.tail(Db::new(-60.0)), Ring::Unbounded);
+        assert_eq!(n.tail(Db::new(-60.0)), DecayTime::Unbounded);
     }
     // A valid low-pass pole is stable; a valid negative pole at gain 0.9
     // reads 0.9 * 1.5 / 0.5 = 2.7 at Nyquist and is not.
@@ -638,7 +638,7 @@ fn the_tail_covers_a_mixing_network_whose_lines_decay_differently() {
     assert!((estimate - 1.32).abs() < 1e-3, "{estimate}");
     let bound = fdn(&lines, Matrix::Hadamard).rt60_bound(Band::Mid, rate);
     assert!((bound.get() - 3.0).abs() < 1e-3);
-    let Ring::Finite(tail) = mixed.tail(Db::new(-60.0)) else {
+    let DecayTime::Finite(tail) = mixed.tail(Db::new(-60.0)) else {
         panic!("finite")
     };
     assert!((tail.get() - (0.07 + 3.0)).abs() < 1e-3, "{tail:?}");
