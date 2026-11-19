@@ -6,8 +6,8 @@
 
 use std::time::Instant;
 
-use tutti_midi_device::Muid;
-use tutti_midi_device::{
+use tutti_midi_ci::Muid;
+use tutti_midi_ci::{
     BodyLimit, BufferLimit, ChunkPosition, ChunkTotal, CiCategories, CiMessage, Decoded,
     PeCapabilities, PeCiMessage, PeHeader, PeMessageKind, PeReassemblyLimits, PeSettings,
     PeSubscription, ResourceAction, ResourceEvent, ResourceInitiator, ResourceResponder,

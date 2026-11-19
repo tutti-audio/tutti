@@ -23,10 +23,12 @@
 
 use std::sync::Arc;
 
-use tutti_midi_device::{
-    CiDeviceId, DeviceId, Muid, ProfileChange, ProfileChannels, ProfileEntry, ProfileId,
-    ProfileRequest, ProfileState, ProfileTable, ProfileTarget, SpecificData, Whole,
+use tutti_midi_ci::Muid;
+use tutti_midi_ci::{
+    CiDeviceId, ProfileChange, ProfileChannels, ProfileEntry, ProfileId, ProfileRequest,
+    ProfileState, ProfileTable, ProfileTarget, SpecificData, Whole,
 };
+use tutti_midi_device::DeviceId;
 use tutti_midi_protocol::{ChannelResponse, MpeZones, PitchBendSensitivity};
 use tutti_ump::{MidiChannel, MidiGroup, MpeOverlap};
 

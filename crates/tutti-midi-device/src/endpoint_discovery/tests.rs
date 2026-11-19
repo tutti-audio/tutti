@@ -9,8 +9,8 @@ use tutti_ump::{
 
 use super::*;
 use crate::endpoint::{Capabilities, Endpoint, FunctionBlock, FunctionBlockBuilder, Supports};
-use crate::name::{BlockName, EndpointName, ProductInstanceId};
 use tutti_fixtures::midi;
+use tutti_midi_ci::{BlockName, EndpointName, ProductInstanceId};
 
 fn at(base: Instant, ms: u64) -> Instant {
     base + Duration::from_millis(ms)

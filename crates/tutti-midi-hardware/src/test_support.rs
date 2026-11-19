@@ -566,8 +566,8 @@ impl MidiEndpoints for FakeBackend {
 pub fn property_peer(
     device: tutti_midi_device::DeviceId,
     group: tutti_ump::MidiGroup,
-    muid: tutti_midi_device::Muid,
-    resources: tutti_midi_device::PeResourceList,
+    muid: tutti_midi_ci::Muid,
+    resources: tutti_midi_ci::PeResourceList,
 ) -> crate::PropertyPeer {
     crate::PropertyPeer {
         at: crate::PeerRef::new(device, crate::PeerId { group, muid }),

@@ -8,7 +8,7 @@
 
 use core::num::NonZeroU8;
 
-use tutti_midi_device::is_property_exchange;
+use tutti_midi_ci::is_property_exchange;
 use tutti_ump::{
     BarAccents, Flex, FlexAddress, FlexTimeSignature, KeySignature, Letter, Message, Metronome,
     MidiGroup, PlainTextKind, SharpsFlats, SyllableError, SysexMessage, Text, TicksPerQuarterNote,

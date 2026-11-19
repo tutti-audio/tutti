@@ -8,7 +8,7 @@
 
 use std::fmt;
 
-use tutti_midi_device::MediaType;
+use tutti_midi_ci::MediaType;
 #[cfg(feature = "midi-hardware")]
 use tutti_midi_device::{Match, SavedDevice};
 #[cfg(feature = "plugin")]
