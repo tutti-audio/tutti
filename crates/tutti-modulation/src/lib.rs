@@ -1,6 +1,5 @@
 #![doc = include_str!("../README.md")]
 #![forbid(unsafe_code)]
-#![cfg_attr(not(test), no_std)]
 //! Modulation for the tutti engine, as a **pure compiler**.
 //! A host declares sources, routes and targets; [`compile()`] turns them into one
 //! [`ControlProgram`] per modulated target, a description of each
@@ -109,9 +108,8 @@ pub use compile::{
 };
 pub use curve::{Curve, CurveSegment};
 pub use program::{
-    Amount, Clock, ControlProgram, Corners, DepthBy, InputLayer, Layer, LayerId, LiveDepth,
-    MAX_LANE_INPUTS, MAX_LANE_LAYERS, PeriodPoint, ProgramError, ProgramTime, RateAnchor, SourceId,
-    Waveform,
+    Amount, Clock, ControlProgram, Corners, DepthBy, InputLayer, Layer, LayerId, MAX_LANE_INPUTS,
+    MAX_LANE_LAYERS, PeriodPoint, ProgramError, ProgramTime, RateAnchor, SourceId, Waveform,
 };
 pub use shape::{LfoShape, Polarity, shape};
 pub use source::{CONTROL_GRID, ControlSource, Leg, LevelFollower, NoteAdsr, PlayGrid};

@@ -22,12 +22,12 @@ use tutti_graph::{
 };
 use tutti_graph::{Edge, InPort, OutPort, Source};
 use tutti_modulation::{
-    CompileError, Compiled, ControlProgram, Declarations, LayerId, LiveDepth, RouteDecl, RouteKey,
+    CompileError, Compiled, ControlProgram, Declarations, LayerId, RouteDecl, RouteKey,
     RouteTarget, SignalKind, SignalSource, Source as ModSource, SourceId, SourceKey, TargetDecl,
     TargetKey, compile, layer_id,
 };
-use tutti_rt::ParamCell;
-use tutti_units::{At, ParamAddr, ParamId};
+use tutti_rt::{Param, ParamCell};
+use tutti_units::{At, Depth, ParamAddr, ParamId};
 
 use crate::automation::{ControlLaneNode, LaneControls};
 use crate::signal::{EnvelopeFollowerNode, NoteEnvelopeNode};
@@ -56,7 +56,7 @@ pub trait ModHost {
     /// evaluation, so a depth edit republishes no program. `None`, the
     /// default: the depth the route was declared with is the compiled one.
     /// Only a route into a target (not a depth route) takes a cell.
-    fn depth(&self, route: RouteKey) -> Option<LiveDepth> {
+    fn depth(&self, route: RouteKey) -> Option<Param<Depth>> {
         let _ = route;
         None
     }
@@ -424,7 +424,7 @@ struct SourcePlan {
 /// use tutti_nodes::{Feed, ModHost, Modulation, SvfFilterNode, SvfType, Target};
 /// use tutti_graph::NodeKey;
 /// use tutti_units::{Depth, Hz, ParamAddr, PhaseIncrement, SampleRate, Samples, UnitParam, Q};
-/// use tutti_rt::ParamCell;
+/// use tutti_rt::{Param, ParamCell};
 ///
 /// let (mut editor, _exec) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(512))));
 /// let filter = NodeKey(1);
@@ -1617,7 +1617,7 @@ fn unused_key<F: Float>(editor: &Editor<F>) -> NodeKey {
 /// Gives each compiled program the depth cells the host holds for its routes
 /// ([`ModHost::depth`]).
 fn attach_depths(compiled: &mut Compiled, decl: &Declarations<'_>, host: &dyn ModHost) {
-    let mut cells: BTreeMap<TargetKey, Vec<(LayerId, LiveDepth)>> = BTreeMap::new();
+    let mut cells: BTreeMap<TargetKey, Vec<(LayerId, Param<Depth>)>> = BTreeMap::new();
     for (key, route) in decl.routes {
         if let RouteTarget::Param(target) = route.to
             && let Some(cell) = host.depth(*key)

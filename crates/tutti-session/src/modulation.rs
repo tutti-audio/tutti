@@ -37,11 +37,12 @@ use std::time::{Duration, Instant};
 
 use tutti_graph::{EventOut, NodeKey};
 use tutti_modulation::{
-    Curve, Declarations, Follower, Law, Lfo, LiveDepth, Macro, NoteEnvelope, Polarity, RouteDecl,
-    RouteKey, RouteTarget, Source, SourceKey, TargetDecl, TargetKey,
+    Curve, Declarations, Follower, Law, Lfo, Macro, NoteEnvelope, Polarity, RouteDecl, RouteKey,
+    RouteTarget, Source, SourceKey, TargetDecl, TargetKey,
 };
 use tutti_nodes::automation::{LaneControls, RecordMode, Recorder, Trajectory};
 use tutti_nodes::{Feed, ReconcileError};
+use tutti_rt::Param;
 use tutti_units::{Depth, ParamAddr, ParamId, UnitAddr, UnitParam};
 
 use crate::DeclarationError;
@@ -882,7 +883,7 @@ struct OwnRoute {
     /// The depth in force, in the cell the route's lane reads
     /// ([`DepthTarget`](crate::DepthTarget)): `decl.depth` is the one the
     /// route was declared with.
-    depth: LiveDepth,
+    depth: Param<Depth>,
 }
 
 impl OwnRoute {
@@ -984,7 +985,7 @@ impl OwnMods {
         );
         self.table.provide(
             Self::depth_slot(route),
-            Arc::new(DepthSlot(route.depth.clone())) as crate::value::SlotCell<Depth>,
+            Arc::new(DepthSlot(route.depth.handle())) as crate::value::SlotCell<Depth>,
         );
     }
 
@@ -1213,8 +1214,8 @@ impl ModKeys for OwnKeys<'_> {
         })
     }
 
-    fn depth(&self, route: RouteKey) -> Option<LiveDepth> {
-        Some(self.0.routes.get(&route)?.depth.clone())
+    fn depth(&self, route: RouteKey) -> Option<Param<Depth>> {
+        Some(self.0.routes.get(&route)?.depth.handle())
     }
 }
 
@@ -1479,7 +1480,7 @@ impl OwnRoute {
             id: route_id(key),
             source: source_id(self.decl.source),
             target: self.target,
-            depth: self.depth.get(),
+            depth: self.depth.load(),
             polarity: self.polarity.get(),
             curve: self.curve.get(),
         }
@@ -1664,7 +1665,7 @@ impl Mods<'_> {
             target: spec.target,
             polarity: Declared::new(spec.polarity, &self.own.edited),
             curve: Declared::new(spec.curve, &self.own.edited),
-            depth: LiveDepth::new(spec.depth),
+            depth: Param::new(spec.depth),
         };
         self.own.provide_route(route_id(key), &route);
         self.own.routes.insert(key, route);

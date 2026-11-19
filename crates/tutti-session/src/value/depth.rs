@@ -1,6 +1,6 @@
 //! [`DepthTarget`]: how deep a modulation route moves its target.
 
-use tutti_modulation::LiveDepth;
+use tutti_rt::Param;
 use tutti_units::Depth;
 
 use super::error::SetRefusal;
@@ -11,11 +11,11 @@ use crate::{ModSourceId, ModTarget};
 
 /// A route's depth: the [`Slot`] of its [`DepthTarget`], over the cell the
 /// route's lane reads.
-pub(crate) struct DepthSlot(pub(crate) LiveDepth);
+pub(crate) struct DepthSlot(pub(crate) Param<Depth>);
 
 impl Slot<Depth> for DepthSlot {
     fn load(&self) -> Depth {
-        self.0.get()
+        self.0.load()
     }
 
     fn check(&self, _: &Depth) -> Result<(), SetRefusal> {
@@ -23,7 +23,7 @@ impl Slot<Depth> for DepthSlot {
     }
 
     fn store(&self, value: &Depth) {
-        self.0.set(*value);
+        self.0.store(*value);
     }
 }
 

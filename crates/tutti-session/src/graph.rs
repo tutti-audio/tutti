@@ -3818,7 +3818,10 @@ pub trait ModKeys {
     /// evaluation, so a depth edit republishes no program. A host that
     /// declares its depths with its routes leaves the default, which names
     /// none.
-    fn depth(&self, route: tutti_modulation::RouteKey) -> Option<tutti_modulation::LiveDepth> {
+    fn depth(
+        &self,
+        route: tutti_modulation::RouteKey,
+    ) -> Option<tutti_rt::Param<tutti_units::Depth>> {
         let _ = route;
         None
     }
@@ -3906,7 +3909,10 @@ impl tutti_nodes::ModHost for ModHostOver<'_> {
         self.keys.feed(source)
     }
 
-    fn depth(&self, route: tutti_modulation::RouteKey) -> Option<tutti_modulation::LiveDepth> {
+    fn depth(
+        &self,
+        route: tutti_modulation::RouteKey,
+    ) -> Option<tutti_rt::Param<tutti_units::Depth>> {
         self.keys.depth(route)
     }
 }

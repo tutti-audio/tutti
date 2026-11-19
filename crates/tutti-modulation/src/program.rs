@@ -7,7 +7,7 @@
 //! bits at equal times, which is what lets a live lane and an export's fork of
 //! it agree. Phase is a function of the time a lane hands in
 //! ([`ProgramTime`]), never of the program's age, so no edit is a phase
-//! reset. A route's depth may live in a cell ([`LiveDepth`]) the program
+//! reset. A route's depth may live in a cell ([`Param<Depth>`](tutti_rt::Param)) the program
 //! reads at every evaluation, so moving it republishes nothing.
 //!
 //! Ungated: the floor, with [`Curve`]. The lane that evaluates it is
@@ -18,9 +18,9 @@ use alloc::boxed::Box;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::fmt;
-use core::sync::atomic::{AtomicU64, Ordering};
 
 use tutti_curve::{Law, Piece};
+use tutti_rt::Param;
 use tutti_units::{
     Azimuth, Beat, BeatsPerCycle, Depth, Frame, Hz, Normalized, Phase, PhaseIncrement, Real,
     SamplePosition, SampleRate, UnitParam,
@@ -43,52 +43,6 @@ pub const MAX_LANE_INPUTS: usize = 8;
 /// comes from (a route), so a republish keeps it.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct LayerId(pub u64);
-
-/// A route's depth in a cell the control side moves between blocks: a program
-/// that holds one reads the depth from it at every evaluation, so a depth
-/// edit is a store and the program is not republished.
-///
-/// A program's [`Amount`] holds the depth the route was declared with; a
-/// [`LiveDepth`] attached to the layer ([`ControlProgram::depths`])
-/// replaces it. Clones share the cell; two are equal when they are the same
-/// cell.
-#[derive(Clone, Debug)]
-pub struct LiveDepth(Arc<AtomicU64>);
-
-impl LiveDepth {
-    /// A cell holding `depth`.
-    #[must_use]
-    pub fn new(depth: Depth) -> Self {
-        Self(Arc::new(AtomicU64::new(depth.get().to_bits())))
-    }
-
-    /// The depth now.
-    #[inline]
-    #[must_use]
-    pub fn get(&self) -> Depth {
-        Depth::clamped(f64::from_bits(self.0.load(Ordering::Acquire)))
-    }
-
-    /// Stores `depth`: the next evaluation reads it.
-    pub fn set(&self, depth: Depth) {
-        self.0.store(depth.get().to_bits(), Ordering::Release);
-    }
-
-    /// A cell of its own holding the depth now: what a fork reads, so a
-    /// depth moved after the fork does not reach it.
-    #[must_use]
-    pub fn detached(&self) -> Self {
-        Self::new(self.get())
-    }
-}
-
-impl PartialEq for LiveDepth {
-    fn eq(&self, other: &Self) -> bool {
-        Arc::ptr_eq(&self.0, &other.0)
-    }
-}
-
-impl Eq for LiveDepth {}
 
 /// A signal source's identity on a lane's event input: its events are
 /// addressed `ParamAddr::Id(source.0)` and carry its raw value.
@@ -389,7 +343,7 @@ pub struct ControlProgram {
     layers: Box<[Layer]>,
     inputs: Box<[InputLayer]>,
     /// The depth cells of the layers and inputs that have one, by id.
-    depths: Box<[(LayerId, LiveDepth)]>,
+    depths: Box<[(LayerId, Param<Depth>)]>,
 }
 
 impl fmt::Debug for ControlProgram {
@@ -417,7 +371,12 @@ impl PartialEq for ControlProgram {
         same_curve
             && self.layers == other.layers
             && self.inputs == other.inputs
-            && self.depths == other.depths
+            && self.depths.len() == other.depths.len()
+            && self
+                .depths
+                .iter()
+                .zip(other.depths.iter())
+                .all(|(a, b)| a.0 == b.0 && a.1.cell().ptr_eq(&b.1.cell()))
     }
 }
 
@@ -494,7 +453,7 @@ impl ControlProgram {
     /// name, each read from its cell at every evaluation; an id no layer or
     /// input has is ignored.
     #[must_use]
-    pub fn depths(mut self, depths: impl IntoIterator<Item = (LayerId, LiveDepth)>) -> Self {
+    pub fn depths(mut self, depths: impl IntoIterator<Item = (LayerId, Param<Depth>)>) -> Self {
         let mut depths: Vec<_> = depths
             .into_iter()
             .filter(|(id, _)| {
@@ -514,7 +473,11 @@ impl ControlProgram {
         program.depths = self
             .depths
             .iter()
-            .map(|(id, cell)| (*id, cell.detached()))
+            .map(|(id, cell)| {
+                let mut cell = cell.handle();
+                cell.detach();
+                (*id, cell)
+            })
             .collect();
         program
     }
@@ -524,7 +487,7 @@ impl ControlProgram {
     #[must_use]
     pub fn depth_bits(&self) -> u64 {
         self.depths.iter().fold(0u64, |acc, (id, cell)| {
-            acc.rotate_left(7) ^ id.0 ^ cell.get().get().to_bits()
+            acc.rotate_left(7) ^ id.0 ^ cell.load().get().to_bits()
         })
     }
 
@@ -533,7 +496,7 @@ impl ControlProgram {
     fn amount_of(&self, id: LayerId, amount: Amount) -> Amount {
         match self.depths.binary_search_by_key(&id, |(id, _)| *id) {
             Ok(at) => Amount {
-                depth: self.depths[at].1.get(),
+                depth: self.depths[at].1.load(),
                 ..amount
             },
             Err(_) => amount,

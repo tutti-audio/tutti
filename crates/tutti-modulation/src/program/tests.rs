@@ -4,6 +4,7 @@
 use super::*;
 use tutti_curve::{Breakpoint, Trajectory};
 use tutti_curve::{Curvature, Exponent};
+use tutti_rt::Param;
 use tutti_units::{Azimuth, Hz, UnitParam};
 
 const SR: f64 = 48_000.0;
@@ -128,9 +129,9 @@ fn a_layer_offsets_by_depth_times_span() {
 /// id no layer has is ignored.
 #[test]
 fn a_layer_reads_its_depth_from_a_cell() {
-    let cell = LiveDepth::new(Depth::of(0.25));
+    let cell = Param::new(Depth::of(0.25));
     let p = program(vec![layer(1, beats(4.0), LfoShape::Square, amount(0.5))])
-        .depths([(LayerId(1), cell.clone()), (LayerId(9), cell.clone())]);
+        .depths([(LayerId(1), cell.handle()), (LayerId(9), cell.handle())]);
     let value = |p: &ControlProgram, beat: f64| {
         p.value_at(None, Some(1000.0), &at_beat(beat), 800.0, &[])
             .unwrap()
@@ -139,7 +140,7 @@ fn a_layer_reads_its_depth_from_a_cell() {
     assert_eq!(value(&p, 3.0), 800.0);
 
     let fork = p.detached();
-    cell.set(Depth::of(-0.5));
+    cell.store(Depth::of(-0.5));
     assert_eq!(value(&p, 1.0), 600.0, "the next evaluation reads it");
     assert_eq!(value(&p, 3.0), 1400.0);
     assert_eq!(value(&fork, 1.0), 1200.0, "the fork's cell is its own");
