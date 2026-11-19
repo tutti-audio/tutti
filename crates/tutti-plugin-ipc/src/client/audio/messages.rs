@@ -90,7 +90,6 @@ pub(super) enum Command {
     /// Reads what the plugin said unprompted off the control connection, so
     /// it reaches the listener while no other command is waiting on a reply.
     Drain,
-    Shutdown,
     /// Chunked state read.
     ///
     /// `progress` is advanced per chunk so the waiting caller can tell a slow

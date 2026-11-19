@@ -1,17 +1,19 @@
 //! Subprocess lifetime guard.
 //!
 //! [`ProcessGuard`] owns the `plugin-server` child process and its
-//! bridge thread. `Drop` kills the subprocess and removes the socket
-//! file. `tutti-plugin` holds it behind an `Arc` in the node of a served
+//! bridge thread. `Drop` asks the server to shut down, gives it
+//! [`Timeouts::shutdown`](tutti_plugin_types::Timeouts::shutdown) to end by
+//! itself (its plugin is destroyed in that), then kills it and removes the
+//! socket file. `tutti-plugin` holds it behind an `Arc` in the node of a served
 //! plugin and in the plugin's handle — the subprocess dies when the LAST Arc
 //! drops (i.e., after both the graph has released the node *and* every
 //! user-held handle has dropped).
 
 use crate::{BridgeConfig, BridgeThread, Reaped, ServerWatch};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tutti_plugin_ipc_ffi::ExitWait;
-use tutti_plugin_types::PluginFailure;
+use tutti_plugin_types::{Deadline, PluginFailure};
 use tutti_rt::LockExt;
 use tutti_rt::{StopToken, ThreadHandle};
 
@@ -20,11 +22,23 @@ use tutti_rt::{StopToken, ThreadHandle};
 /// not the one ending: the end of the process wakes the wait at once.
 const EXIT_SLICE: Duration = Duration::from_millis(100);
 
+/// How long a wait for the server's end sleeps between looks at its deadline:
+/// only the most a wait overshoots it, as the end of the process wakes the wait
+/// at once.
+const END_SLICE: Duration = Duration::from_millis(20);
+
+/// How long a killed server is waited for before its reaping is handed to
+/// another thread: a process in uninterruptible sleep outlasts its kill, and
+/// the thread that dropped the guard does not wait on it.
+const REAP_PATIENCE: Duration = Duration::from_millis(250);
+
 /// The `plugin-server` child process and its bridge thread, owned as one.
 pub struct ProcessGuard {
     /// Shared with the exit thread, which asks it for the exit status. Never
     /// locked on the audio thread.
     process: Arc<Mutex<Option<Reaped>>>,
+    /// The OS's wake for the process's end; `None` for a test guard.
+    wait: Option<Arc<ExitWait>>,
     watch: Arc<ServerWatch>,
     exit_thread: Option<ThreadHandle<()>>,
     _bridge_thread: Option<BridgeThread>,
@@ -50,15 +64,17 @@ impl ProcessGuard {
     /// run, and `process` is killed and reaped as it drops.
     pub fn launched(process: Reaped, config: BridgeConfig) -> std::io::Result<Self> {
         let watch = Arc::new(ServerWatch::new());
-        let wait = ExitWait::of(&process);
+        let wait = Arc::new(process.exit_wait());
         let process = Arc::new(Mutex::new(Some(process)));
         let spawned = tutti_rt::spawn_named("plugin-exit", None, {
             let process = Arc::clone(&process);
+            let wait = Arc::clone(&wait);
             let watch = Arc::clone(&watch);
             move |stop: &StopToken| declare_exit(&process, &wait, &watch, stop)
         });
         Ok(Self {
             process,
+            wait: Some(wait),
             watch,
             exit_thread: Some(spawned?),
             _bridge_thread: None,
@@ -94,7 +110,7 @@ impl ProcessGuard {
     pub fn terminate(&self) {
         let mut process = self.process.lock_recover();
         if let Some(process) = process.as_mut() {
-            let _ = process.kill();
+            let _ = process.kill_all();
         }
     }
 
@@ -105,6 +121,7 @@ impl ProcessGuard {
     pub fn for_test(config: BridgeConfig) -> Self {
         Self {
             process: Arc::new(Mutex::new(None)),
+            wait: None,
             watch: Arc::new(ServerWatch::new()),
             exit_thread: None,
             _bridge_thread: None,
@@ -115,23 +132,88 @@ impl ProcessGuard {
 
 impl Drop for ProcessGuard {
     fn drop(&mut self) {
-        // The bridge is asked to stop before the kill, so the EOF the kill
+        // The bridge is asked to stop before the end, so the EOF the end
         // causes is read after the request and declares nothing; the exit
         // thread is stopped for the same reason. (The request ends in a SeqCst
         // fence and `crash` loads the flag after another, so a failure read
-        // after the kill cannot miss the stop: a store-load pair, fenced.)
+        // after the end cannot miss the stop: a store-load pair, fenced.) The
+        // bridge says `Shutdown` to the server as it ends, and the server
+        // destroys its plugin before it exits.
+        let shutting_down = self._bridge_thread.is_some();
         if let Some(bridge) = &self._bridge_thread {
             bridge.request_stop();
         }
         if let Some(exit) = &self.exit_thread {
             exit.token().stop();
         }
-        // Killed and reaped as it drops ([`Reaped`]), before the socket goes.
         let process = self.process.lock_recover().take();
-        drop(process);
+        if let (Some(mut process), Some(wait)) = (process, &self.wait) {
+            // A server nobody told to shut down (a failed launch) has no
+            // plugin to wait for.
+            let grace = if shutting_down {
+                self.config.timeouts.shutdown
+            } else {
+                Duration::ZERO
+            };
+            if !await_end(
+                &mut process,
+                wait,
+                Deadline::after(Instant::now(), grace),
+                Instant::now,
+            ) {
+                let _ = process.kill_all();
+                let reaped = await_end(
+                    &mut process,
+                    wait,
+                    Deadline::after(Instant::now(), REAP_PATIENCE),
+                    Instant::now,
+                );
+                if !reaped {
+                    reap_elsewhere(process);
+                }
+            }
+        }
         // Stops (again) and joins.
         drop(self.exit_thread.take());
         let _ = std::fs::remove_file(&self.config.socket_path);
+    }
+}
+
+/// Waits on the OS for `process` to end, until `deadline` as `now` reads it,
+/// and reaps it: whether it ended. The deadline is checked after each look, so
+/// a wait that has run out still looks once.
+fn await_end(
+    process: &mut Reaped,
+    wait: &ExitWait,
+    deadline: Deadline,
+    mut now: impl FnMut() -> Instant,
+) -> bool {
+    loop {
+        match process.try_reap() {
+            Ok(Some(_)) => return true,
+            Ok(None) => {}
+            // A status that cannot be read is an end that cannot be awaited.
+            Err(_) => return false,
+        }
+        if deadline.passed(now()) {
+            return false;
+        }
+        let _ = wait.wait(END_SLICE);
+    }
+}
+
+/// Reaps a killed `process` on a thread of its own, which ends with it. A
+/// thread that cannot start leaves the zombie to this process's end: the reap
+/// is a `wait`, which a process in uninterruptible sleep never returns from.
+fn reap_elsewhere(process: Reaped) {
+    let slot = Arc::new(Mutex::new(Some(process)));
+    let spawned = tutti_rt::spawn_named("plugin-reap", None, {
+        let slot = Arc::clone(&slot);
+        move |_: &StopToken| drop(slot.lock_recover().take())
+    });
+    match spawned {
+        Ok(handle) => handle.detach(),
+        Err(_) => std::mem::forget(slot.lock_recover().take()),
     }
 }
 
@@ -151,7 +233,7 @@ fn declare_exit(
         let Some(process) = process.as_mut() else {
             return;
         };
-        match process.try_wait() {
+        match process.try_reap() {
             Ok(Some(status)) => {
                 // Not a death the guard caused: its drop sets `stop` first.
                 if !stop.is_stopped() {
@@ -259,5 +341,38 @@ mod tests {
         // settled when it returns.
         drop(guard);
         assert!(!watch.is_dead(), "{:?}", watch.cause());
+    }
+
+    /// **A server that does not end is waited on until the deadline and no
+    /// longer**, and one that ends is seen at once: the deadline is a rule over
+    /// the `now` it is asked, here a clock that jumps a second per look, so the
+    /// wait ends by the rule and not by a real second passing.
+    #[test]
+    fn a_wait_for_the_end_gives_up_at_its_deadline_and_not_before() {
+        let mut command = Command::new("sleep");
+        command.arg("60");
+        let mut process = Reaped::new(command.spawn().expect("sleep spawns"));
+        let wait = process.exit_wait();
+        let start = Instant::now();
+        let looks = std::cell::Cell::new(0_u32);
+        let now = || {
+            looks.set(looks.get() + 1);
+            start + Duration::from_secs(u64::from(looks.get()))
+        };
+
+        let ended = await_end(
+            &mut process,
+            &wait,
+            Deadline::after(start, Duration::from_secs(3)),
+            now,
+        );
+
+        assert!(!ended, "a sleeping process did not end");
+        assert_eq!(looks.get(), 3, "the wait looked until the third second");
+        assert!(process.try_reap().expect("status").is_none());
+
+        process.kill_all().expect("the sleeper is killed");
+        let wait_for_kill = Deadline::never();
+        assert!(await_end(&mut process, &wait, wait_for_kill, Instant::now));
     }
 }

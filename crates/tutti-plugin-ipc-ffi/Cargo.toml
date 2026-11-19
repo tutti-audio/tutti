@@ -29,7 +29,9 @@ rustix = { version = "1", default-features = false, features = ["std", "event", 
 # slab file's delete-on-close open.
 windows-sys = { workspace = true, features = [
   "Win32_Storage_FileSystem",
+  "Win32_Security",
   "Win32_System_Diagnostics_ToolHelp",
+  "Win32_System_JobObjects",
   "Win32_System_Pipes",
 ] }
 

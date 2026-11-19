@@ -660,9 +660,6 @@ pub(super) fn handle(
             // answer owed to nobody.
             while next_reply(stream, inbox, owed, channels, DRAIN_UNSOLICITED)?.is_some() {}
         }
-        Command::Shutdown => {
-            ipc::send(stream, &HostMessage::Shutdown)?;
-        }
         Command::SaveState {
             state_use,
             progress,

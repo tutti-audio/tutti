@@ -9,6 +9,26 @@
 //! editor-only instance a client opens in this process is loaded by a
 //! function the host passes ([`EditorLoader`]).
 //!
+//! ## What the process boundary is
+//!
+//! Out-of-process hosting gives **crash and hang isolation**: a plugin that
+//! crashes or hangs takes down its server, which the host sees as one plugin
+//! failing. It is **not a security boundary**: the server runs as the host's
+//! user, and a plugin there can do what that user can do, `ptrace` or write the
+//! host's memory included. [`BridgeConfig::protect_host_memory`] clears the
+//! host's dumpable flag on Linux for the plugins it spawns afterwards (it also
+//! stops core dumps and a same-user debugger or crash handler attaching, so it
+//! is the app's choice and off by default). On macOS the equivalent is the app's
+//! hardened-runtime signing, which is the app's to do.
+//!
+//! ## How a server ends
+//!
+//! Dropping the [`ProcessGuard`] asks the server to shut down (`Shutdown`), so
+//! its plugin is destroyed, and gives it
+//! [`Timeouts::shutdown`](tutti_plugin_types::Timeouts::shutdown) to end; then
+//! it kills the server's process group (unix) and reaps it. On Windows the server
+//! is in a Job Object that ends it when the host does, by any means.
+//!
 //! It has no `unsafe`: the slab's shared mapping and header, and the Windows
 //! pipe peek behind the control socket's deadline, are `tutti-plugin-ipc-ffi`'s
 //! safe calls.

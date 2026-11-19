@@ -67,7 +67,7 @@ fn a_registered_descriptor_that_becomes_readable_is_served_once_each_time() {
         SLOW_TICK,
     );
     fixture.session.drop_plugin(main);
-    drop(render.stop());
+    drop(render);
     assert!(result.is_ok(), "{result:?}");
 
     driver.join().expect("the driver ran");
