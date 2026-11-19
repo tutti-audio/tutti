@@ -32,7 +32,7 @@ tutti_units::ranged! {
     #[derive(Eq, Hash, PartialOrd, Ord)]
     #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     #[cfg_attr(feature = "serde", serde(try_from = "u64", into = "u64"))]
-    UnixSeconds(u64), NotUnixSeconds: Eq, "a time in Unix seconds (below 2^63)",
+    UnixSeconds(u64), NotUnixSeconds, "a time in Unix seconds (below 2^63)",
     |raw| raw <= 0x7FFF_FFFF_FFFF_FFFF
 }
 
