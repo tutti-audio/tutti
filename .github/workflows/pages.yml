@@ -1,5 +1,6 @@
-# The conformance dashboard, its badges and the coverage report, published to
-# GitHub Pages from main, nightly. Each OS runs the spec-tagged test tiers with nextest's
+# The conformance dashboard, its badges, the coverage report, the book and the
+# API reference it links, published to GitHub Pages from main, nightly. Each OS
+# runs the spec-tagged test tiers with nextest's
 # `conformance` profile (JUnit), `cargo xtask conformance` joins the three
 # files to the spec inventories, and `cargo xtask coverage` adds the line
 # coverage. The tiers run here, not downloaded from CI: a CI run is per pull
@@ -120,10 +121,15 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@v7
+      - name: Install Linux audio deps
+        uses: ./.github/actions/linux-audio-deps
       - run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
         with:
           save-if: false
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: mdbook@0.5.3
       - uses: actions/download-artifact@v4
         with:
           pattern: junit-*
@@ -133,6 +139,13 @@ jobs:
         with:
           name: site-coverage
           path: site/coverage
+      # The book renders its programs' sounds, then builds into site/book.
+      - run: cargo xtask book site/book
+      # The book's links into the reference are relative: `../api/tutti/...`.
+      # It covers what the chapters use: export, FLAC and the sound card (`device`).
+      # `--no-deps`: the facade inlines what it re-exports; their own pages are left out.
+      - run: cargo doc --locked --no-deps -p tutti --features export,encode-flac,device
+      - run: cp -r target/doc site/api
       - run: cargo xtask conformance --results junit --out site/conformance
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3

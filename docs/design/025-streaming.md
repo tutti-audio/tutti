@@ -42,8 +42,8 @@ their grounds in §9.
 - **Adapters (`Resample`, `Dither`) wait** for a second pipeline. `Cue` waits
   for a measured gap.
 - **The streamer is named for what it is** (the `butler` rename, §6), the
-  priority it asks for is honest and already landed, and it sleeps on a
-  doorbell instead of polling (§7).
+  priority it asks for is honest and already landed, and it parks on a
+  `Parker` instead of polling (§7).
 
 ## 1. The problem
 
@@ -748,10 +748,10 @@ still needs:
 
 **Landed.**
 
-- `tutti_rt::Doorbell` (`crates/tutti-rt/src/doorbell.rs`), a wake-up for one
-  parked thread with a loom model (`tests/doorbell_loom.rs`), from the worker
-  pool's sleeper (#338). The `WorkerPool` sleeps on it; the plugin bridge's
-  channels sleep on it too (#341), which removed the bridge's `try_lock` and its
+- `tutti_rt::Unparker` (`crates/tutti-rt/src/parker.rs`), a wake-up for one
+  parked thread with a loom model (`tests/parker_loom.rs`), from the worker
+  pool's parker (#338). The `WorkerPool` parks on it; the plugin bridge's
+  channels park on it too (#341), which removed the bridge's `try_lock` and its
   1 ms backstop.
 - `tutti_rt::request_priority(PriorityRequest) -> PriorityOutcome`
   (`priority.rs`, #341): `Highest` (nice -20, `HIGHEST`) and `Raised` (about
@@ -770,11 +770,11 @@ set out to do.**
 
 - The streamer loop still waits on its command queue with `recv_timeout`, 1 ms
   idle and 3 ms healthy, and yields while a ring is below threshold
-  (`streamer/loop_body.rs`, `step.rs`). It should sleep on a `Doorbell`, with the
+  (`streamer/loop_body.rs`, `step.rs`). It should park on a `Parker`, with the
   wait timed to the earliest ring deadline instead of a fixed tick.
 - A **slow backstop tick** stays, because `Phase::Reclaim`-style `reclaim()` of
   the ring's `ArcLend` cells must still run on a cell that goes quiet
-  (CLAUDE.md, "Publishing to the audio thread"). The doorbell must not mean a
+  (CLAUDE.md, "Publishing to the audio thread"). The unparker must not mean a
   quiet streamer never scans.
 - `step(now) -> Wake` becomes testable with no thread and no manual mode: the
   step has no opinion on how long to sleep, only the wake it returns. (Stage 5
@@ -793,13 +793,13 @@ The review of the streamer widens that list. Stage 6 also does:
    | Source | Rung by | After |
    |---|---|---|
    | a command (open, close, loop, direction) | `Commands::send`, after the push | must ring; see 2 |
-   | a voice's ring below threshold, or a jump outside the window | the voice, on the audio thread, through `Doorbell` | one predicate, see 3 |
+   | a voice's ring below threshold, or a jump outside the window | the voice, on the audio thread, through `Unparker` | one predicate, see 3 |
    | session-rate change | `SessionRate::set` | rings |
    | shutdown | the one flag | rings, see 5 |
    | the reclaim backstop | the timeout | stays |
 
 2. **`Commands::send` rings, and `pending` reads `!queue.is_empty() ||
-   shutdown`.** Replacing `recv_timeout` with `Doorbell::wait_timeout` loses
+   shutdown`.** Replacing `recv_timeout` with `Parker::park_timeout` loses
    the property `a_send_wakes_a_waiting_streamer` pins; it is kept as a test.
 3. **One shared pure predicate for "needs a refill".** The voice's ring decision
    and `refill_one` share `needs_refill(play, window, frames, end) -> Refill`,
@@ -817,7 +817,7 @@ The review of the streamer widens that list. Stage 6 also does:
    the `rx` drop are three, and `Shutdown` is handled twice (`step.rs` and the
    empty arm in `handlers.rs`). One flag and a ring.
 6. **A test that a ring from a jump wakes a streamer parked on the backstop.**
-   `Doorbell` has its loom model; the ring condition does not need one, but the
+   `Unparker` has its loom model; the ring condition does not need one, but the
    wiring needs this test.
 7. **A send that cannot block the control thread.** `Commands::send` blocks the
    caller when the 256-slot queue is full, and the streamer can stall far longer
@@ -1470,7 +1470,7 @@ Each stage is one PR that stays green. Line figures are estimates.
    needs 6 (the `Block` lends `RingControl`). The free-detecting test of §10 Q4
    lands with cut 4 for `Stream` and with cut 7 for `StreamReader`.
 
-6. **Doorbell wake and backstop tick** (§7), including the review's items:
+6. **Parker wake and backstop tick** (§7), including the review's items:
    every wake source named and rung, `Commands::send` rings, one shared
    `needs_refill`, `Idle` redefined, one shutdown mechanism, a non-blocking
    send, the wake test, and the stale comments. After stage 5, because the
@@ -1478,13 +1478,13 @@ Each stage is one PR that stays green. Line figures are estimates.
    except the non-blocking send, which is deferred with its reason (below).
 
    *As built, stage 6.* The streamer thread sleeps on a `Bell`
-   (`streamer/bell.rs`): a `tutti_rt::Doorbell` with the two flags its
-   sleeper reads (a voice asked for a refill, shutdown), shared by every
-   sender, every voice's reader and the thread. `Doorbell::ring` is wait-free
-   and allocation-free (a fence and a load; with a sleeper parked, a swap and
+   (`streamer/bell.rs`): a `tutti_rt::Unparker` with the two flags its
+   `Parker` reads (a voice asked for a refill, shutdown), shared by every
+   sender, every voice's reader and the thread. `Unparker::unpark` is wait-free
+   and allocation-free (a fence and a load; with a parker parked, a swap and
    `Thread::unpark`, a futex wake), so the audio thread rings it, and `tutti-rt`
    needed no change and no new loom model. The wait is
-   `Doorbell::wait_timeout` over `!queue.is_empty() || shutdown || refill`,
+   `Parker::park_timeout` over `!queue.is_empty() || shutdown || refill`,
    timed to a **50 ms backstop** (`loop_body::BACKSTOP`).
 
    The wake sources, each rung:
@@ -1619,7 +1619,7 @@ Taken by the owner on 2026-11-07, all as recommended.
    files. Done (§8).
 10. **`DiskStreamer` lives in `streamer/mod.rs`** after the rename.
 11. **Rename `butler` to "disk streamer"**, matching the public `DiskStreamer`.
-12. **Waiting and priority**: a `Doorbell` for the wake, one priority call that
+12. **Waiting and priority**: a `Parker` for the wake, one priority call that
     reports what it got, disk streaming never real time at about nice -10.
     Landed (§7; the streamer's own part at stage 6).
 

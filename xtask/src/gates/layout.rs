@@ -112,7 +112,7 @@ const ONLY: &[(&str, &[&str])] = &[
     // The OS edges: the UMP types for what the spec defines, nothing else.
     ("tutti-alsa-ffi", &["tutti-ump"]),
     ("tutti-coremidi-ffi", &["tutti-ump"]),
-    ("tutti-winmm-ffi", &[]),
+    ("tutti-winmm-ffi", &["tutti-ump"]),
     ("tutti-ump", &["tutti-units"]),
     // The unit vocabulary a `Gauge<U>` and a `Param<U>` hold (`Reading` for a `Unit`), the
     // channel layout a position ring is written in and the `Sample` formats the
@@ -612,7 +612,12 @@ pub(super) fn check(tree: &dyn Tree, cargo: &dyn Cargo) -> Report {
                 p.name
             ));
         }
-        if users.contains("tutti") {
+        // A testing crate may read the facade the way an app does (the book's
+        // programs), through a dev-dependency; nothing shipped builds on it.
+        let reads_facade = internal(p)
+            .iter()
+            .any(|(d, k)| d == "tutti" && !(*k == Kind::Dev && p.dir.starts_with("testing/")));
+        if reads_facade {
             bad.push(format!("{} depends on tutti, the top of the tree", p.name));
         }
         for (d, _) in &p.deps {
@@ -1059,6 +1064,24 @@ mod tests {
             },
         );
         assert!(r.findings[1].contains("no longer reaches ogg_next_sys"));
+    }
+
+    #[test]
+    fn only_a_testing_crate_may_read_the_facade_and_only_as_a_dev_dependency() {
+        let top = |dir: &'static str, name: &'static str, body: &'static str| {
+            let mut v = base();
+            v.push(("crates/tutti", "tutti", ""));
+            v.push((dir, name, body));
+            run(&v)
+                .findings
+                .iter()
+                .any(|l| l.contains(&format!("{name} depends on tutti, the top of the tree")))
+        };
+        let dev = "[dev-dependencies]\ntutti = { path = \"x\" }\n";
+        let normal = "[dependencies]\ntutti = { path = \"x\" }\n";
+        assert!(!top("testing/tutti-book", "tutti-book", dev));
+        assert!(top("testing/tutti-book", "tutti-book", normal));
+        assert!(top("crates/tutti-graph", "tutti-graph", dev));
     }
 
     #[test]

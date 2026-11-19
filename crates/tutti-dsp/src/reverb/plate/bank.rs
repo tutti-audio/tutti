@@ -264,7 +264,7 @@ impl<F: Float + Lerp> PlateBank<F> {
         worst.design_into(rate, &mut network);
         let shape = shape_of(&network);
         let half = |h: &[Samples; 4]| Half::<F> {
-            modulated: line(h[0] + shape.excursion + Samples(1)),
+            modulated: line(h[0] + shape.excursion + Samples::new(1)),
             delay1: line(h[1]),
             lattice2: line(h[2]),
             delay2: line(h[3]),
@@ -465,7 +465,7 @@ impl<F: Float + Lerp> PlateBank<F> {
             if let Some(y) = right.as_deref_mut() {
                 y[i] = r;
             }
-            self.into = (self.into + Samples(1)) % Samples(Self::CHUNK);
+            self.into = (self.into + Samples::new(1)) % Samples::new(Self::CHUNK);
         }
     }
 
@@ -542,7 +542,7 @@ fn bandwidth_ring(cutoff: Hz, rate: SampleRate) -> Seconds {
 /// The lengths and fixed coefficients of the design in `network`.
 fn shape_of(network: &Network) -> Shape {
     let frames = SampleSpan::to_samples_floor;
-    let mut input = [Samples(1); 4];
+    let mut input = [Samples::new(1); 4];
     for (slot, stage) in input.iter_mut().zip(network.stages.iter()) {
         if let Stage::AllPass(a) = stage {
             *slot = frames(a[0].delay);
@@ -550,7 +550,7 @@ fn shape_of(network: &Network) -> Shape {
     }
     let mut shape = Shape {
         input,
-        halves: [[Samples(1); 4]; 2],
+        halves: [[Samples::new(1); 4]; 2],
         mod_rate: Hz::ZERO,
         excursion: Samples::ZERO,
         pre: network.pre_delay,

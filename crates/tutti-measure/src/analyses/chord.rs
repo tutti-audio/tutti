@@ -287,12 +287,12 @@ fn spans(path: &[u16], framing: Framing) -> Result<Vec<ChordSpan>> {
             out.push(ChordSpan {
                 root: PitchClass::from_semitones_above_c(root as u8),
                 quality,
-                start: Samples(if start == 0 {
+                start: Samples::new(if start == 0 {
                     0
                 } else {
                     sample(boundary(start))?
                 }),
-                end: Samples(if t == path.len() {
+                end: Samples::new(if t == path.len() {
                     sample(end)?
                 } else {
                     sample(boundary(t))?

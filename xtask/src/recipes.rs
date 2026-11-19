@@ -388,7 +388,7 @@ pub(crate) const RECIPES: &[(&str, &str, &str)] = &[
     (
         "book",
         "[OUT]",
-        "build the book with mdbook into book/build, or into OUT (relative to book/)",
+        "render the book's sounds into book/src/sounds, then build it with mdbook into book/build, or into OUT",
     ),
     (
         "package",
@@ -479,6 +479,10 @@ pub(crate) fn public_api_cmd(package: &str) -> String {
     // `-s` omits blanket impls only: a lost auto-trait impl is a break.
     format!("cargo +{DOCS_NIGHTLY} public-api --package {package} --all-features -s")
 }
+
+/// The `tutti-book` examples that write a sound the book plays, each run with
+/// `book/src/sounds` as its one argument.
+const BOOK_SOUNDS: &[&str] = &["getting_started"];
 
 impl Planner<'_> {
     fn run(&mut self, c: Cmd) {
@@ -742,6 +746,11 @@ impl Planner<'_> {
             ]),
             "book" => {
                 let [out] = Self::params(name, args, [""])?;
+                for example in BOOK_SOUNDS {
+                    self.lines(&[format!(
+                        "cargo run --locked --release -p tutti-book --example {example} -- book/src/sounds"
+                    )]);
+                }
                 if out.is_empty() {
                     self.lines(&["mdbook build book"]);
                 } else {
@@ -925,7 +934,7 @@ const LOOM: &[&str] = &[
     r#"LOOM_MAX_PREEMPTIONS=3 RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test split_loom"#,
     r#"LOOM_MAX_PREEMPTIONS=3 RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test job_gate_loom"#,
     r#"LOOM_MAX_PREEMPTIONS=3 RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test task_graph_loom"#,
-    r#"RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test doorbell_loom"#,
+    r#"RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test parker_loom"#,
     r#"RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test level_cell_loom"#,
     r#"RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test request_word_loom"#,
     r#"RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test dirty_set_loom"#,

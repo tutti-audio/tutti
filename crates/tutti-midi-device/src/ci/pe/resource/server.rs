@@ -1127,7 +1127,7 @@ impl ResourceResponder {
         let json = held.to_json().ok_or_else(|| {
             PeDataError::new(
                 target.resource().as_str(),
-                super::fields::PeDataFault::NotValid("JSON data to change"),
+                super::fields::PeDataFault::NotValid(super::fields::InvalidValue::NoJsonForm),
             )
         })?;
         let json = update.apply(&json)?;

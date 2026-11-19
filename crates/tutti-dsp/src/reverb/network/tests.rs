@@ -7,10 +7,13 @@ use crate::{Lti as _, System as _};
 #[test]
 fn the_pre_delay_is_rounded_to_whole_frames() {
     let rate = SampleRate::SR_48K;
-    assert_eq!(pre_delay_frames(Seconds::new(0.001), rate), Samples(48));
+    assert_eq!(
+        pre_delay_frames(Seconds::new(0.001), rate),
+        Samples::new(48)
+    );
     assert_eq!(
         pre_delay_frames(Seconds::new(0.6 / 48_000.0), rate),
-        Samples(1)
+        Samples::new(1)
     );
     assert_eq!(
         pre_delay_frames(Seconds::new(0.4 / 48_000.0), rate),

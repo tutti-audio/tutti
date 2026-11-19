@@ -66,13 +66,13 @@ use tutti_voicing::{Controller, Effect, Glide, MasterGain, NoteControl, Stop};
 /// let synth = PolySynth::<f32>::new(SynthConfig {
 ///     oscillator: OscillatorType::Saw,
 ///     polyphony: NonZeroUsize::new(8).unwrap(),
-///     filter: FilterType::Moog { cutoff: Hz(2_000.0), resonance: Resonance(0.5) },
+///     filter: FilterType::Moog { cutoff: Hz::new(2_000.0), resonance: Resonance::new(0.5) },
 ///     ..Default::default()
 /// });
 /// assert_eq!(synth.active_voice_count(), 0);
 ///
 /// // Alone in a graph; a host wires a clip or keyboard to its event input.
-/// let mut solo = Solo::new(synth, Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))));
+/// let mut solo = Solo::new(synth, Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64))));
 /// let out = solo.render(64);
 /// assert_eq!(out.len(), 2); // stereo
 /// ```

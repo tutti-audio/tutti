@@ -4,7 +4,7 @@
 use super::super::tree::{PeJson, PeObject};
 use super::fields::{
     ClusterKind, Fields, PeBankProgram, PeChannel, PeDataError, PeDataFault, PeExtensions,
-    PeMidiMode, PeText, integer, list, required_text, text,
+    PeMidiMode, PeText, integer, list, narrowed, required_text, text,
 };
 use super::link::PeLink;
 
@@ -115,19 +115,11 @@ impl PeChannelEntry {
         let length = channel_prop(&mut f, "clusterLength")?;
         let mode = f
             .optional("clusterMidiMode", "an integer", integer)?
-            .map(|n| {
-                u8::try_from(n)
-                    .ok()
-                    .and_then(PeMidiMode::new)
-                    .ok_or_else(|| f.fail("clusterMidiMode", PeDataFault::NotValid("MIDI mode")))
-            })
+            .map(|n| PeMidiMode::try_from(n).map_err(|e| f.invalid("clusterMidiMode", e)))
             .transpose()?;
         let kind = f
             .optional("clusterType", "a string", text)?
-            .map(|t| {
-                ClusterKind::new(t)
-                    .ok_or_else(|| f.fail("clusterType", PeDataFault::NotValid("cluster type")))
-            })
+            .map(|t| ClusterKind::try_from(t).map_err(|e| f.invalid("clusterType", e)))
             .transpose()?;
         let cluster = match (start, length) {
             (Some(start), Some(length)) => Some(PeCluster {
@@ -165,12 +157,7 @@ pub(super) fn channel(
     name: &'static str,
 ) -> Result<Option<PeChannel>, PeDataError> {
     f.optional(name, "an integer", integer)?
-        .map(|n| {
-            u16::try_from(n)
-                .ok()
-                .and_then(PeChannel::new)
-                .ok_or_else(|| f.fail(name, PeDataFault::NotValid("channel of a function block")))
-        })
+        .map(|n| narrowed::<u16, PeChannel>(n).map_err(|e| f.invalid(name, e)))
         .transpose()
 }
 

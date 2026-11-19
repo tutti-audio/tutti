@@ -18,20 +18,20 @@ pub const DEFAULT_MEASURE_TIMEOUT: Duration = Duration::from_secs(180);
 
 /// What a probe the catalog hands its scanner does.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct Probing {
+pub struct Probing {
     /// Also render each plugin ([`DEFAULT_MEASURE_TIMEOUT`]).
-    pub(crate) measure: bool,
+    pub measure: bool,
     /// The state a measurement puts one plugin in first.
-    pub(crate) state: Option<ProbeState>,
+    pub state: Option<ProbeState>,
     /// Answer with filename metadata when `plugin-probe` cannot be found. A scan
     /// lists what it found by file name then; a task that was asked about one
     /// file reports the probe's absence instead.
-    pub(crate) fallback: bool,
+    pub fallback: bool,
 }
 
 /// The probe a scanner calls, as `config` and `how` say: the binary
 /// `config.probe_locator` names, the deadlines `config` gives or the defaults.
-pub(crate) fn probe_fn(
+pub fn probe_fn(
     config: &CatalogConfig,
     how: Probing,
 ) -> impl Fn(&Path, PluginFormat, &StopToken) -> Result<Vec<PluginDescriptor>, ProbeFailure>

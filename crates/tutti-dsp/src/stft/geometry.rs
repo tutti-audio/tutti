@@ -255,9 +255,9 @@ impl StftGeometry {
     #[must_use]
     pub fn output_len(self, frames: FrameCount) -> Samples {
         if frames.get() == 0 {
-            return Samples(0);
+            return Samples::new(0);
         }
-        Samples((frames.get() - 1) * self.hop.get() + self.window.get())
+        Samples::new((frames.get() - 1) * self.hop.get() + self.window.get())
     }
 
     /// The delay this grid imposes: one whole window must arrive before the

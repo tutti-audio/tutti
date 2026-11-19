@@ -4,7 +4,7 @@
 //! Every case starts the streamer with a **60 s backstop** and allows 10 s: a
 //! streamer that does what the test waits for inside the bound was rung, since
 //! nothing else would have woken it for a minute. Each case first waits until
-//! the thread is parked, so the doorbell, and not a cycle that happened to be
+//! the thread is parked, so the unpark, and not a cycle that happened to be
 //! running, is what wakes it. The command source and shutdown are
 //! `thread.rs`'s tests.
 
@@ -31,7 +31,7 @@ const RATE: u32 = 4_000;
 const BOUND: Duration = Duration::from_secs(10);
 
 /// A threaded streamer whose backstop is 60 s, and its bell.
-fn sleeper(seams: Seams) -> (DiskStreamer<Running, f32>, Arc<Bell>) {
+fn parked_streamer(seams: Seams) -> (DiskStreamer<Running, f32>, Arc<Bell>) {
     let built = Built::new(
         256,
         SampleRate::of(f64::from(RATE)),
@@ -56,7 +56,7 @@ fn until(bound: Duration, mut done: impl FnMut() -> bool) -> bool {
 
 fn until_asleep(bell: &Bell) {
     assert!(
-        until(BOUND, || bell.is_asleep()),
+        until(BOUND, || bell.is_parked()),
         "the streamer never went to sleep"
     );
 }
@@ -72,7 +72,7 @@ fn primed(
     StreamReader<f32>,
     u64,
 ) {
-    let (streamer, bell) = sleeper(Seams::default());
+    let (streamer, bell) = parked_streamer(Seams::default());
     let (stream, reader) = settle_threaded(streamer.open(path, Placement::HEAD)).expect("opens");
     assert!(
         until(BOUND, || stream.status().phase != StreamPhase::Opening),
@@ -103,7 +103,7 @@ fn claim(reader: &mut StreamReader<f32>, play: u64) {
 fn an_open_wakes_a_sleeping_streamer() {
     let dir = tempfile::tempdir().expect("a temp dir");
     let path = long_file(dir.path());
-    let (streamer, bell) = sleeper(Seams::default());
+    let (streamer, bell) = parked_streamer(Seams::default());
     until_asleep(&bell);
     let _ = settle_threaded(streamer.open(&path, Placement::HEAD)).expect("opens");
 }
@@ -184,7 +184,7 @@ fn a_decode_reply_wakes_a_sleeping_streamer() {
     let dir = tempfile::tempdir().expect("a temp dir");
     let path = super::contained::mp3(dir.path());
     let gate = Gate::new();
-    let (streamer, bell) = sleeper(Seams {
+    let (streamer, bell) = parked_streamer(Seams {
         decode_hook: Some(gate.hook()),
         ..Seams::default()
     });

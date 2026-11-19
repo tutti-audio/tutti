@@ -8,7 +8,7 @@ use std::time::Instant;
 use tutti_ump::{ManufacturerId, MidiChannel, U7};
 
 use super::super::header::{PeEncoding, PePage};
-use super::super::limits::{MediaType, ResourceId};
+use super::super::limits::{MediaType, PeTextError, PropertyNameError, ResourceId};
 use super::super::partial::PartialUpdate;
 use super::super::tree::PeJson;
 use super::exchange::initiator_settings;
@@ -154,10 +154,12 @@ fn a_manufacturer_property_is_kept_and_written_back() {
     assert!(decode(&PeResource::DeviceInfo, &later).is_ok());
     // M2-103 §6.1: a name is alphanumeric and not only digits.
     let bad = text.replace(r#""x-uniqueKey""#, r#""not_a_name""#);
-    assert_eq!(
+    assert!(matches!(
         fails(PeResource::DeviceInfo, &bad).fault,
-        PeDataFault::BadName
-    );
+        PeDataFault::NotValid(InvalidValue::PropertyName(PropertyNameError::Text(
+            PeTextError::Character { .. }
+        )))
+    ));
 }
 
 // An extension is the manufacturer's when its name starts `x-` (M2-103 §6.1.4).
@@ -1196,5 +1198,76 @@ fn a_received_entry_is_taken_where_a_built_one_is_refused() {
             r#"[{"resource":"ResourceList"}]"#
         )
         .is_err()
+    );
+}
+
+// A fault of a value names the type's own error, not only that the value failed.
+/// Spec: m2-103/8.4#1
+#[test]
+fn a_resource_name_fault_carries_the_text_error() {
+    let error = fails(
+        PeResource::ResourceList,
+        r#"[{"resource":"has space","canGet":true}]"#,
+    );
+    assert_eq!(error.place.to_string(), "resource entry.resource");
+    assert!(matches!(
+        error.fault,
+        PeDataFault::NotValid(InvalidValue::Text(PeTextError::Character { .. }))
+    ));
+}
+
+/// Spec: m2-117/2.1.1#5
+#[test]
+fn a_priority_fault_carries_the_range_error() {
+    let entry = |extra: &str| {
+        format!(r#"[{{"title":"T","ctrlType":"cc","channel":1,"ctrlIndex":[1],{extra}}}]"#)
+    };
+    let error = fails(PeResource::AllCtrlList, &entry(r#""priority":9"#));
+    assert_eq!(
+        error.fault,
+        PeDataFault::NotValid(InvalidValue::Priority(NotAPriority(9)))
+    );
+    let error = fails(PeResource::AllCtrlList, &entry(r#""priority":300"#));
+    assert!(matches!(
+        error.fault,
+        PeDataFault::NotValid(InvalidValue::Width(_))
+    ));
+    assert_eq!(
+        fails(PeResource::AllCtrlList, &entry(r#""minMax":[200,10]"#)).fault,
+        PeDataFault::NotValid(InvalidValue::MinAboveMax)
+    );
+}
+
+/// Spec: m2-103/14.2#1
+#[test]
+fn a_list_entry_fault_carries_the_error_of_the_entry_type() {
+    let entry = |extra: &str| format!(r#"[{{"resource":"X-Buffer",{extra}}}]"#);
+    let error = fails(
+        PeResource::ResourceList,
+        &entry(r#""mediaTypes":["text/plain","bell\u0007"]"#),
+    );
+    assert_eq!(error.place.to_string(), "resource entry.mediaTypes");
+    assert!(matches!(
+        error.fault,
+        PeDataFault::NotValid(InvalidValue::Text(PeTextError::Character { .. }))
+    ));
+    let error = fails(
+        PeResource::ResourceList,
+        &entry(r#""encodings":["ASCII","gzip"]"#),
+    );
+    assert!(matches!(
+        error.fault,
+        PeDataFault::NotValid(InvalidValue::Unlisted(UnlistedText { allowed }))
+            if allowed.contains(&"Mcoded7")
+    ));
+}
+
+/// Spec: m2-105/4.3#2
+#[test]
+fn a_channel_fault_carries_the_function_block_channel_error() {
+    let error = fails(PeResource::ChannelList, r#"[{"title":"A","channel":257}]"#);
+    assert_eq!(
+        error.fault,
+        PeDataFault::NotValid(InvalidValue::FunctionBlockChannel(NotAPeChannel(257)))
     );
 }

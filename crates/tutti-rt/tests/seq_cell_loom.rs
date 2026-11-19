@@ -15,7 +15,9 @@
 //!   value of one write, never bytes of two;
 //! - **no going back**: two reads in program order never return an older
 //!   write after a newer one, nor "never written" after a write;
-//! - **the last write is read**, on the first copy, once the writer is done.
+//! - **the last write is read**, on the first copy, once the writer is done;
+//! - **a `try_read` is one whole write or `None`**, and its sequence is the
+//!   write's own: write `i` is sequence `2 * i`.
 
 #![cfg(loom)]
 
@@ -113,5 +115,35 @@ fn a_reader_beside_a_spawned_writer_never_sees_a_mixed_or_older_copy() {
         two_reads(&reader);
         handle.join().unwrap();
         assert_eq!(reader.read(0), Ok(Some([2; 3])), "the last write is read");
+    });
+}
+
+/// One `try_read` against two writes: `None` or exactly one whole write
+/// whose sequence is its own.
+#[test]
+fn a_try_read_is_none_or_one_whole_write_with_its_own_sequence() {
+    loom::model(|| {
+        let mut writer = SeqWriter::<Value>::new();
+        let reader = writer.reader();
+        let handle = {
+            let reader = reader.clone();
+            thread::spawn(move || match reader.try_read() {
+                None => {}
+                Some((seq, [a, b, c])) => {
+                    assert!(a == b && b == c, "a mixed copy: {:?}", [a, b, c]);
+                    assert!(WRITES.contains(&a), "a value no write stored: {a}");
+                    assert_eq!(seq, 2 * u64::from(a), "the sequence is the write's own");
+                }
+            })
+        };
+        for w in WRITES {
+            writer.write([w, w, w]);
+        }
+        handle.join().unwrap();
+        assert_eq!(
+            reader.try_read(),
+            Some((4, [2; 3])),
+            "the last write is read"
+        );
     });
 }

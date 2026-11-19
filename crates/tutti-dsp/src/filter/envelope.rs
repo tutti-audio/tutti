@@ -38,7 +38,7 @@ use crate::follower::{Follower, Smoothed};
 use crate::{COEFF_INTERVAL, Glide, Lanes, Lerp};
 
 /// The frames between designs: the grid period.
-const GRID: Samples = Samples(COEFF_INTERVAL);
+const GRID: Samples = Samples::new(COEFF_INTERVAL);
 
 /// The controls of an [`EnvelopeFilterBank`].
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -204,13 +204,13 @@ impl<F: Float + Lanes + Lerp> EnvelopeFilterBank<F> {
             for l in levels.iter() {
                 self.follower.follow_raw(&mut self.env, l.min(F::ONE));
             }
-            let range = Samples(start)..Samples(end);
+            let range = Samples::new(start)..Samples::new(end);
             self.bank.process(
                 &mut self.coefficients,
                 input.slice(range.clone()),
                 output.slice_mut(range),
             );
-            self.phase = (self.phase + Samples(n)) % GRID;
+            self.phase = (self.phase + Samples::new(n)) % GRID;
             start = end;
         }
     }

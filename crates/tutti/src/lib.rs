@@ -211,7 +211,7 @@ pub use tutti_session::{ClipEventsTarget, HarmonyTarget, MpeModeTarget, OutputLa
 #[cfg(all(feature = "session", feature = "device"))]
 pub use tutti_session::{Device, DeviceClock, DeviceEvent, LiveSession};
 #[cfg(all(feature = "session", feature = "sampler"))]
-pub use tutti_session::{DirectionTarget, LoopingTarget, WindowTarget};
+pub use tutti_session::{DirectionTarget, LoopingTarget, SpeedTarget, WindowTarget};
 #[cfg(all(feature = "session", feature = "capture"))]
 pub use tutti_session::{
     Input, InputConfig, Punch, Recorded, Take, TakeError, TakeEvent, TakeTarget, Trim,
@@ -817,18 +817,19 @@ pub mod midi {
             Ack, AckStatus, ActionError, BodyLimit, BufferLimit, CallError, CallId, CanSet,
             CcIndex, ChangeKind, ChunkNo, ClusterKind, ColumnSource, ConfirmIcon, ConfirmType,
             Confirmation, CtrlControl, CtrlKind, CtrlRange, CtrlValueKind, CustomResource,
-            EntryError, JsonPointer, LinkRole, ListedTwice, ModeId, NotABodyLimit, NotABufferLimit,
-            NotAChunkNo, NotAPeChannel, NotAPriority, NotARequestId, NotASimultaneousRequests,
-            NotAStateSize, NotAStepCount, NotAStreamLimit, NotATimeoutWait, NotSignificantBits,
-            NotUnixSeconds, NotVendorName, OpaqueBody, PaginationFault, ParamPath, PartialError,
-            PartialUpdate, PartialValue, PeAllCtrlEntry, PeAllCtrlList, PeAnswer, PeBankProgram,
-            PeBasicChannelRx, PeBasicChannelTx, PeBodyError, PeCapabilities, PeCapabilitiesFailure,
-            PeChCtrlEntry, PeChCtrlList, PeChannel, PeChannelEntry, PeChannelList, PeChannelMode,
-            PeChunkError, PeCluster, PeColumn, PeController, PeCtrl, PeCtrlMapEntry, PeCtrlMapList,
-            PeCurrentMode, PeData, PeDataError, PeDataFault, PeDecimal, PeDeviceInfo, PeEncoding,
-            PeEndedBy, PeError, PeExtensions, PeExternalSync, PeExtra, PeExtraError, PeFlowControl,
-            PeHeaderError, PeHeaderTooLong, PeJson, PeJsonError, PeJsonSchema, PeLink, PeLocalOn,
-            PeMessage, PeMidiMode, PeModeEntry, PeModeList, PeObject, PeOpaque, PeOutcome, PePage,
+            EntryError, InvalidValue, JsonPointer, LinkRole, ListedTwice, ModeId, NotABodyLimit,
+            NotABufferLimit, NotAChunkNo, NotAPeChannel, NotAPeMidiMode, NotAPriority,
+            NotARequestId, NotASimultaneousRequests, NotAStateSize, NotAStepCount, NotAStreamLimit,
+            NotATimeoutWait, NotSignificantBits, NotUnixSeconds, NotVendorName, OpaqueBody,
+            PaginationFault, ParamPath, PartialError, PartialUpdate, PartialValue, PeAllCtrlEntry,
+            PeAllCtrlList, PeAnswer, PeBankProgram, PeBasicChannelRx, PeBasicChannelTx,
+            PeBodyError, PeCapabilities, PeCapabilitiesFailure, PeChCtrlEntry, PeChCtrlList,
+            PeChannel, PeChannelEntry, PeChannelList, PeChannelMode, PeChunkError, PeCluster,
+            PeColumn, PeController, PeCtrl, PeCtrlMapEntry, PeCtrlMapList, PeCurrentMode, PeData,
+            PeDataError, PeDataFault, PeDecimal, PeDeviceInfo, PeEncoding, PeEndedBy, PeError,
+            PeExtensions, PeExternalSync, PeExtra, PeExtraError, PeFlowControl, PeHeaderError,
+            PeHeaderTooLong, PeJson, PeJsonError, PeJsonSchema, PeLink, PeLocalOn, PeMessage,
+            PeMidiMode, PeModeEntry, PeModeList, PeObject, PeOpaque, PeOutcome, PePage,
             PeProgramEntry, PeProgramList, PeReassemblyError, PeReply, PeRequestId, PeResource,
             PeResourceList, PeResponse, PeSignal, PeState, PeStateEntry, PeStateList, PeStatus,
             PeStatusClass, PeTerminator, PeText, PeTextError, PeTransaction, PeUnreadable,
@@ -837,7 +838,7 @@ pub mod midi {
             ResourceFailure, ResourceGet, ResourceId, ResourceName, ResourceSet, ResourceTarget,
             ResponderEvent, RoleName, SelectorAction, SetBody, SignificantBits, SimpleAction,
             SimultaneousRequests, StateId, StateRev, StateSize, StateStamp, StepCount, StreamLimit,
-            SubscribeId, TimeoutWait, TypeHint, UnixSeconds, UpdateKind,
+            SubscribeId, TimeoutWait, TypeHint, UnixSeconds, UnlistedText, UpdateKind,
         };
         #[cfg(feature = "midi-hardware")]
         pub use tutti_midi_hardware::{PropertyAsk, PropertyCall, PropertyChange, PropertyPeer};

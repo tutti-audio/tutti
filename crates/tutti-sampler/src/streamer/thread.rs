@@ -13,7 +13,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use tutti_rt::{PriorityRequest, Sleeper, StopToken, ThreadHandle};
+use tutti_rt::{Parker, PriorityRequest, StopToken, ThreadHandle};
 use tutti_units::SampleRate;
 
 use super::bell::{Bell, StreamerSender};
@@ -43,8 +43,8 @@ pub(super) struct Built<F: RingFloat> {
     /// Its receiving end, until a driver takes it.
     rx: Receiver<StreamerCommand<F>>,
     shared: Handles<F>,
-    /// The wait end of the bell's doorbell, for the thread that runs the loop.
-    sleeper: Sleeper,
+    /// The waiting end of the bell's parker pair, for the thread that runs the loop.
+    parker: Parker,
     config: BufferConfig,
     /// How long the thread sleeps at most when nothing rings it.
     backstop: Duration,
@@ -64,7 +64,7 @@ impl<F: RingFloat> Built<F> {
         seams: Seams,
     ) -> Self {
         let (tx, rx) = crossbeam_channel::bounded(channel_capacity.max(1));
-        let (bell, sleeper) = Bell::new();
+        let (bell, parker) = Bell::new();
         let tx = StreamerSender::new(tx, Arc::clone(&bell));
 
         let shared = Handles {
@@ -82,7 +82,7 @@ impl<F: RingFloat> Built<F> {
             tx,
             rx,
             shared,
-            sleeper,
+            parker,
             config,
             backstop: BACKSTOP,
         }
@@ -124,7 +124,7 @@ impl<F: RingFloat> Built<F> {
         let bell = Arc::clone(&self.shared.bell);
         let shared = self.shared;
         let cycle = StreamerCycle::new(self.config, self.tx.clone());
-        let (queue, backstop, sleeper) = (self.rx, self.backstop, self.sleeper);
+        let (queue, backstop, parker) = (self.rx, self.backstop, self.parker);
 
         let body = move |_: &StopToken| {
             // The thread owns the queue's one receiver, so however the
@@ -132,7 +132,7 @@ impl<F: RingFloat> Built<F> {
             // the streamer is gone instead of letting them queue into
             // nothing; and its table's drop tells every live stream
             // (`Faulted(StreamerGone)`).
-            streamer_loop(&queue, shared, cycle, sleeper, backstop);
+            streamer_loop(&queue, shared, cycle, parker, backstop);
         };
         // Disk streaming should stay ahead of background work, not compete
         // with the audio threads (Ardour's streamer sets no CPU priority,
@@ -298,7 +298,7 @@ mod tests {
     /// Waits until the streamer's thread is parked on its bell.
     fn until_asleep(bell: &Bell) {
         assert!(
-            within(Duration::from_secs(10), || bell.is_asleep()),
+            within(Duration::from_secs(10), || bell.is_parked()),
             "the streamer never went to sleep"
         );
     }
@@ -309,7 +309,7 @@ mod tests {
     /// The backstop is 60 s and the test allows 10 s: the bound is generous for
     /// a loaded machine, and still six times shorter than a streamer that only
     /// ever wakes on its own. Each send is made once the thread is parked, so
-    /// the doorbell, not a cycle already running, is what wakes it.
+    /// the unpark, not a cycle already running, is what wakes it.
     #[test]
     fn a_send_wakes_a_sleeping_streamer() {
         let built = built(8).with_backstop(LONG_WAIT);

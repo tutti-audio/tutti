@@ -62,6 +62,9 @@ pub enum SlotId {
     /// Which way a sampler voice plays.
     #[cfg(feature = "sampler")]
     Direction(NodeKey),
+    /// A sampler voice's varispeed.
+    #[cfg(feature = "sampler")]
+    Speed(NodeKey),
     /// How a modulation route maps its source's value onto its span.
     RoutePolarity(ModRouteId),
     /// The law that shapes a modulation route's value.
@@ -91,7 +94,10 @@ impl SlotId {
             #[cfg(feature = "midi")]
             Self::ClipEvents(node) | Self::Harmony(node) => Some(node),
             #[cfg(feature = "sampler")]
-            Self::Window(node) | Self::Looping(node) | Self::Direction(node) => Some(node),
+            Self::Window(node)
+            | Self::Looping(node)
+            | Self::Direction(node)
+            | Self::Speed(node) => Some(node),
             Self::Automation(TargetKey::Param { node, .. }) => Some(NodeKey(node)),
             _ => None,
         }
@@ -502,6 +508,26 @@ node_slot_target!(
     Direction
 );
 
+#[cfg(feature = "sampler")]
+node_slot_target!(
+    /// A sampler voice's varispeed, as `sampler.speed()` names it: the rate
+    /// the voice reads its source at, pitch following it
+    /// ([`PlaybackRate::UNITY`](tutti_units::PlaybackRate) is normal speed).
+    /// A rate that is not finite is refused with [`SetRefusal::NotFinite`],
+    /// and one outside [`MIN`](tutti_units::PlaybackRate::MIN)..=
+    /// [`MAX`](tutti_units::PlaybackRate::MAX) with [`SetRefusal::OutOfRange`].
+    ///
+    /// A write is staged and published by the next
+    /// [`Session::update`](crate::Session::update); the voice's node reads it
+    /// at its next block after that, on either tier (a streamed voice's node
+    /// hands it on to the stream's playback cells). A read answers the staged
+    /// rate, else the one in force. A write to a node removed before the
+    /// update is dropped.
+    SpeedTarget,
+    tutti_units::PlaybackRate,
+    Speed
+);
+
 /// Where a sampler node's value targets are reached from its key: a voice node
 /// and a clip are the same node underneath.
 #[cfg(feature = "sampler")]
@@ -524,6 +550,12 @@ macro_rules! sampler_keys {
             #[must_use]
             pub const fn direction(self) -> DirectionTarget {
                 DirectionTarget::new(self.erase())
+            }
+
+            /// The voice's varispeed.
+            #[must_use]
+            pub const fn speed(self) -> SpeedTarget {
+                SpeedTarget::new(self.erase())
             }
         }
     )*};
@@ -871,6 +903,38 @@ impl<T: Copy + PartialEq + Send + Sync + 'static> Held for tutti_sampler::SteerC
     fn replace(&self, value: &T) -> bool {
         if *tutti_sampler::SteerCell::current(self) != *value {
             self.publish(*value);
+        }
+        true
+    }
+}
+
+/// A sampler voice's speed cell: a published rate, which `check` bounds to the
+/// range both tiers play.
+#[cfg(feature = "sampler")]
+pub(crate) struct SpeedCell(pub tutti_rt::Publisher<tutti_units::PlaybackRate>);
+
+#[cfg(feature = "sampler")]
+impl Held for SpeedCell {
+    type Value = tutti_units::PlaybackRate;
+
+    fn current(&self) -> Self::Value {
+        *self.0.current()
+    }
+
+    fn check(&self, value: &Self::Value) -> Result<(), SetRefusal> {
+        use tutti_units::PlaybackRate;
+        if !value.get().is_finite() {
+            return Err(SetRefusal::NotFinite);
+        }
+        if *value < PlaybackRate::MIN || *value > PlaybackRate::MAX {
+            return Err(SetRefusal::OutOfRange);
+        }
+        Ok(())
+    }
+
+    fn replace(&self, value: &Self::Value) -> bool {
+        if *self.0.current() != *value {
+            self.0.publish(*value);
         }
         true
     }

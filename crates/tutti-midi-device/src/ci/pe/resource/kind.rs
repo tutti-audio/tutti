@@ -4,6 +4,7 @@
 use std::fmt;
 
 use super::super::limits::ResourceName;
+use super::fields::UnlistedText;
 
 /// What a ResourceList entry declares for a Resource when it names nothing
 /// (M2-103 §14.3).
@@ -46,9 +47,20 @@ impl CanSet {
     /// The setting a property value names, or `None` for other text.
     #[must_use]
     pub fn new(text: &str) -> Option<Self> {
+        Self::try_from(text).ok()
+    }
+}
+
+impl TryFrom<&str> for CanSet {
+    type Error = UnlistedText;
+
+    fn try_from(text: &str) -> Result<Self, UnlistedText> {
         [Self::None, Self::Full, Self::Partial]
             .into_iter()
             .find(|c| c.as_str() == text)
+            .ok_or(UnlistedText {
+                allowed: &["none", "full", "partial"],
+            })
     }
 }
 

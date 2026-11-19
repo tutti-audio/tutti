@@ -1,15 +1,13 @@
 //! MIDI 1.0 bytes and the UMP that carries them.
 
-use tutti_midi_protocol::midi1;
+use tutti_midi_protocol::Narrower;
 use tutti_ump::{
-    Midi1Parser, MidiGroup, SYSEX7_MAX_PAYLOAD, SysexAssembler, SysexStep, Ump, parse_exact,
+    Midi1Parser, MidiGroup, SYSEX7_MAX_PAYLOAD, SysexAssembler, SysexMessage, SysexStep, Ump,
+    parse_exact,
 };
 
-/// MIDI 1.0 bytes read as UMP on the first Group: a port is one cable.
-///
-/// Voice and system messages come out as MIDI 1.0 UMP (type 2 and type 1) and
-/// System Exclusive as SysEx7 packets (type 3), which the ingest node widens
-/// and reassembles.
+/// MIDI 1.0 System Exclusive bytes read as SysEx7 packets (type 3) on the first
+/// Group: a port is one cable. The ingest node reassembles the packets.
 #[derive(Clone, Debug)]
 pub(in crate::backend) struct ByteIn {
     parser: Midi1Parser,
@@ -21,15 +19,6 @@ impl ByteIn {
         Self {
             parser: Midi1Parser::new(MidiGroup::FIRST),
         }
-    }
-
-    /// The message in a packed short message: the status byte, then its data
-    /// bytes, low byte first, as the OS gives them with running status already
-    /// expanded. `None` for a status that is not a message (a stray data byte).
-    /// Does not touch a System Exclusive message in progress.
-    pub(in crate::backend) fn short(&self, packed: u32) -> Option<Ump> {
-        let [status, d1, d2, _] = packed.to_le_bytes();
-        parse_exact(MidiGroup::FIRST, &[status, d1, d2]).map(Ump::from)
     }
 
     /// The packets of the next bytes of a stream that carries System
@@ -45,21 +34,23 @@ impl ByteIn {
 /// What to put on the wire for a UMP.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::backend) enum Wire<'a> {
-    /// A short message, packed as the OS wants it: the status byte, then its
-    /// data bytes, low byte first.
-    Short(u32),
-    /// A whole System Exclusive message, `0xF0` to `0xF7`.
-    Long(&'a [u8]),
+    /// A MIDI 1.0 channel voice or system message (type 2 or type 1).
+    Short(Ump),
+    /// A whole System Exclusive message.
+    Long(SysexMessage<'a>),
 }
 
 /// UMP written as MIDI 1.0 bytes.
 ///
-/// The UMP are already MIDI 1.0 (the output narrowed them for a MIDI 1.0
-/// endpoint). A message with no MIDI 1.0 form (a Flex Data or a Utility
-/// message) is consumed and sends nothing. SysEx7 packets are joined into one
+/// A MIDI 2.0 channel voice message is narrowed to MIDI 1.0 ([`Narrower`]'s
+/// Default Translation: a Registered or Assignable Controller is its four
+/// Control Changes, a Program Change with a bank three messages). A message with
+/// no MIDI 1.0 form (a Flex Data or a Utility message, a per-note message) is
+/// consumed and sends nothing. SysEx7 packets are joined into one
 /// message, which is sent when its last packet arrives.
 #[derive(Debug)]
 pub(in crate::backend) struct ByteOut {
+    narrower: Narrower,
     sysex: SysexAssembler<Box<[u8]>>,
 }
 
@@ -73,13 +64,15 @@ impl ByteOut {
         // packet is pushed.
         let room = SysexAssembler::<()>::room_for(MAX_MESSAGE, 1, 1);
         Self {
+            narrower: Narrower::new(),
             sysex: SysexAssembler::new(vec![0; room].into_boxed_slice(), MAX_MESSAGE, 1),
         }
     }
 
     /// Hands `send` what `ump` puts on the wire: nothing for the packet of a
-    /// message not yet whole, one message for a short message or the packet
-    /// that completes a SysEx, up to three for a Program Change with a bank.
+    /// message not yet whole, one message for a MIDI 1.0 message or the packet
+    /// that completes a SysEx, up to four for a narrowed MIDI 2.0 message.
+    ///
     /// Stops at the first `Err` `send` returns.
     pub(in crate::backend) fn encode<E>(
         &mut self,
@@ -89,11 +82,20 @@ impl ByteOut {
         self.sysex.begin_block();
         match self.sysex.push(ump) {
             SysexStep::Held => Ok(()),
-            SysexStep::Complete(done) => send(Wire::Long(self.sysex.message(done).bytes())),
-            SysexStep::NotSysex => midi1(ump).try_for_each(|m| {
-                let [status, d1, d2] = m.padded();
-                send(Wire::Short(u32::from_le_bytes([status, d1, d2, 0])))
-            }),
+            SysexStep::Complete(done) => send(Wire::Long(self.sysex.message(done))),
+            SysexStep::NotSysex => {
+                let mut sent = Ok(());
+                self.narrower.feed(ump, |bytes| {
+                    // The narrowed bytes are one MIDI 1.0 message, which
+                    // `parse_exact` reads back as its type 2 or type 1 UMP.
+                    if sent.is_ok()
+                        && let Some(message) = parse_exact(MidiGroup::FIRST, bytes.as_slice())
+                    {
+                        sent = send(Wire::Short(Ump::from(message)));
+                    }
+                });
+                sent
+            }
         }
     }
 }

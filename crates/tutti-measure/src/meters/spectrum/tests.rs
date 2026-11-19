@@ -14,15 +14,15 @@ const RATE: f64 = 48_000.0;
 const FFT_TOL: f64 = 1e-3;
 
 fn band(min: f64, max: f64) -> FrequencyBand {
-    FrequencyBand::new(Hz(min), Hz(max)).unwrap()
+    FrequencyBand::new(Hz::new(min), Hz::new(max)).unwrap()
 }
 
 fn geometry(size: usize, hop: usize) -> StftGeometry {
-    StftGeometry::new(SampleRate::of(RATE), Samples(size), Samples(hop)).unwrap()
+    StftGeometry::new(SampleRate::of(RATE), Samples::new(size), Samples::new(hop)).unwrap()
 }
 
 fn config(size: usize, hop: usize) -> SpectrumConfig {
-    SpectrumConfig::new().framing(Framing::new(Samples(size), Samples(hop)))
+    SpectrumConfig::new().framing(Framing::new(Samples::new(size), Samples::new(hop)))
 }
 
 fn plan(cfg: &SpectrumConfig) -> SpectrumPlan {
@@ -74,7 +74,7 @@ fn a_bin_centred_sine_reads_its_amplitude() {
     let size = 1536; // 1 kHz is bin 32 at 48 kHz
     let cfg = config(size, size / 4);
     let (state, frames) = run(&cfg, &tone(size * 3, 1000.0, 0.5));
-    let want = Db::from_amplitude(Amplitude(0.5)).get();
+    let want = Db::from_amplitude(Amplitude::new(0.5)).get();
     for levels in &frames {
         assert_eq!(argmax(levels), 32);
         assert!(
@@ -93,7 +93,7 @@ fn a_bin_centred_sine_reads_its_amplitude() {
         // is left is the `f32` input's rounding, far under -100 dB.
         assert!(levels[29].get() < -100.0 && levels[35].get() < -100.0);
     }
-    assert_eq!(state.frequencies()[32], Hz(1000.0));
+    assert_eq!(state.frequencies()[32], Hz::new(1000.0));
 }
 
 /// Off the centre the peak loses `|sinc(d) / (1 - d^2)|`, the Hann
@@ -106,7 +106,7 @@ fn an_off_centre_sine_loses_the_scalloping_figure() {
     let cfg = config(size, size);
     let loss = |d: f64| {
         let sinc = (std::f64::consts::PI * d).sin() / (std::f64::consts::PI * d);
-        Db::from_amplitude(Amplitude((sinc / (1.0 - d * d)).abs())).get()
+        Db::from_amplitude(Amplitude::new((sinc / (1.0 - d * d)).abs())).get()
     };
     assert!((loss(0.5) - -1.4236).abs() < 1e-3);
     for d in [0.1, 0.25, 0.4, 0.5] {
@@ -114,9 +114,9 @@ fn an_off_centre_sine_loses_the_scalloping_figure() {
         let (_, frames) = run(&cfg, &tone(size, freq, 0.5));
         let levels = &frames[0];
         let peak = levels[argmax(levels)].get();
-        let want = Db::from_amplitude(Amplitude(0.5)).get() + loss(d);
+        let want = Db::from_amplitude(Amplitude::new(0.5)).get() + loss(d);
         assert!((peak - want).abs() < FFT_TOL, "d {d}: {peak} vs {want}");
-        assert!(peak >= Db::from_amplitude(Amplitude(0.5)).get() - 1.4237 - FFT_TOL);
+        assert!(peak >= Db::from_amplitude(Amplitude::new(0.5)).get() - 1.4237 - FFT_TOL);
     }
 }
 
@@ -139,8 +139,10 @@ fn two_tones_resolve_to_two_peaks() {
             })
             .collect();
         assert_eq!(peaks, [32, 160]);
-        assert!((levels[32].get() - Db::from_amplitude(Amplitude(0.5)).get()).abs() < FFT_TOL);
-        assert!((levels[160].get() - Db::from_amplitude(Amplitude(0.1)).get()).abs() < FFT_TOL);
+        assert!((levels[32].get() - Db::from_amplitude(Amplitude::new(0.5)).get()).abs() < FFT_TOL);
+        assert!(
+            (levels[160].get() - Db::from_amplitude(Amplitude::new(0.1)).get()).abs() < FFT_TOL
+        );
     }
 }
 
@@ -205,7 +207,7 @@ fn frames_land_on_the_hop_grid_for_every_size_and_hop() {
 #[test]
 fn blocks_of_any_size_give_identical_frames() {
     let cfg = config(256, 100)
-        .smoothing(Smoothing::Release(SpectrumTime::of(Seconds(0.05))))
+        .smoothing(Smoothing::Release(SpectrumTime::of(Seconds::new(0.05))))
         .banding(Banding::Octave {
             per_octave: BandsPerOctave::of(1),
             band: band(375.0, 12_000.0),
@@ -245,7 +247,7 @@ fn blocks_of_any_size_give_identical_frames() {
 #[test]
 fn averaging_converges_to_the_mean_noise_power() {
     let size = 1024;
-    let tau = Seconds(1.0);
+    let tau = Seconds::new(1.0);
     let cfg = config(size, size).smoothing(Smoothing::Average(SpectrumTime::of(tau)));
     let sigma = 0.1f64;
     let mut rng = StdRng::seed_from_u64(0x5eed);
@@ -294,7 +296,7 @@ fn averaging_converges_to_the_mean_noise_power() {
 #[test]
 fn release_follows_the_analytic_exponential_and_attack_is_instant() {
     let (size, hop) = (1536, 512);
-    let tau = Seconds(0.1);
+    let tau = Seconds::new(0.1);
     let cfg = config(size, hop).smoothing(Smoothing::Release(SpectrumTime::of(tau)));
     let (quiet, loud_end) = (size * 2, size * 6);
     let mut signal = tone(loud_end, 1000.0, 0.5);
@@ -303,7 +305,7 @@ fn release_follows_the_analytic_exponential_and_attack_is_instant() {
     let (_, frames) = run(&cfg, &signal);
     let at = |k: usize| frames[k][32].get();
 
-    let want = Db::from_amplitude(Amplitude(0.5)).get();
+    let want = Db::from_amplitude(Amplitude::new(0.5)).get();
     let first_loud = quiet.div_ceil(hop);
     for k in first_loud..=(loud_end - size) / hop {
         assert!((at(k) - want).abs() < FFT_TOL, "frame {k}: {}", at(k));
@@ -328,7 +330,7 @@ fn release_follows_the_analytic_exponential_and_attack_is_instant() {
 #[test]
 fn peaks_hold_then_decay_at_the_configured_rate() {
     let (size, hop) = (1536, 512);
-    let (hold, decay) = (Seconds(0.25), Db(30.0));
+    let (hold, decay) = (Seconds::new(0.25), Db::new(30.0));
     let cfg = config(size, hop)
         .peak_hold(SpectrumTime::of(hold))
         .peak_decay(PeakDecay::of(decay));
@@ -500,7 +502,7 @@ fn an_empty_band_names_itself_and_the_window_that_holds_it() {
     assert_eq!(band, 1);
     assert!((lower.get() - 20.0 * 2f64.powf(1.0 / 3.0)).abs() <= 20.0 * f64::EPSILON * 4.0);
     assert!((upper.get() - 20.0 * 2f64.powf(2.0 / 3.0)).abs() <= 40.0 * f64::EPSILON * 4.0);
-    assert_eq!(window, Samples(16_384));
+    assert_eq!(window, Samples::new(16_384));
     assert!(
         Measure::<f32>::measure(&config(16_384, 4096).banding(banding), SampleRate::of(RATE))
             .is_ok()
@@ -514,7 +516,7 @@ fn an_empty_band_names_itself_and_the_window_that_holds_it() {
 fn dc_and_nyquist_read_their_amplitude() {
     let size = 1024;
     let cfg = config(size, size);
-    let want = Db::from_amplitude(Amplitude(0.25)).get();
+    let want = Db::from_amplitude(Amplitude::new(0.25)).get();
     let (_, dc) = run(&cfg, &vec![0.25f32; size]);
     assert!((dc[0][0].get() - want).abs() < FFT_TOL, "{:?}", dc[0][0]);
     let nyquist: Vec<f32> = (0..size)
@@ -539,7 +541,7 @@ fn a_sine_inside_a_band_reads_the_noise_bandwidth_excess() {
         band: band(700.0, 2800.0),
     });
     let (state, frames) = run(&cfg, &tone(size, 1000.0, 0.5));
-    let want = Db::from_amplitude(Amplitude(0.5)).get() + Db::from_power(1.5).get();
+    let want = Db::from_amplitude(Amplitude::new(0.5)).get() + Db::from_power(1.5).get();
     let band = state
         .frequencies()
         .iter()
@@ -556,7 +558,7 @@ fn a_sine_inside_a_band_reads_the_noise_bandwidth_excess() {
 fn the_hold_is_a_whole_number_of_frames_without_over_holding() {
     let cfg = config(1920, 480);
     let frames = |hold: f64| {
-        plan(&cfg.peak_hold(SpectrumTime::new(Seconds(hold)).unwrap()))
+        plan(&cfg.peak_hold(SpectrumTime::new(Seconds::new(hold)).unwrap()))
             .peak_hold_frames()
             .get()
     };
@@ -569,8 +571,8 @@ fn the_hold_is_a_whole_number_of_frames_without_over_holding() {
     assert!(matches!(
         Measure::<f32>::measure(
             &config(64, 1)
-                .peak_hold(SpectrumTime::of(Seconds(3600.0)))
-                .peak_decay(PeakDecay::of(Db(1.0))),
+                .peak_hold(SpectrumTime::of(Seconds::new(3600.0)))
+                .peak_decay(PeakDecay::of(Db::new(1.0))),
             SampleRate::of(10_000_000.0)
         )
         .map(|_: SpectrumMeter<f32>| ()),
@@ -671,7 +673,7 @@ fn bad_settings_are_errors() {
     ] {
         assert!(
             matches!(
-                FrequencyBand::try_from(Hz(min)..=Hz(max)),
+                FrequencyBand::try_from(Hz::new(min)..=Hz::new(max)),
                 Err(Error::EmptyFrequencyRange { .. })
             ),
             "{min} {max}"
@@ -711,12 +713,12 @@ fn bad_settings_are_errors() {
 /// far below a -60 dB floor reads the floor in every bin.
 #[test]
 fn no_level_reads_under_the_configured_floor() {
-    let cfg = config(256, 64).floor(SpectrumFloor::of(Db(-60.0)));
+    let cfg = config(256, 64).floor(SpectrumFloor::of(Db::new(-60.0)));
     let mut state = meter(&cfg);
     push_frames(&mut state, &vec![0.0f32; 1000]);
-    assert!(state.levels().iter().all(|&l| l == Db(-60.0)));
+    assert!(state.levels().iter().all(|&l| l == Db::new(-60.0)));
     push_frames(&mut state, &tone(1000, 1000.0, 1e-6));
-    assert!(state.levels().iter().all(|&l| l == Db(-60.0)));
+    assert!(state.levels().iter().all(|&l| l == Db::new(-60.0)));
 }
 
 /// A refused block leaves the state as it was; silence reads the floor;

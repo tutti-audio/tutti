@@ -10,7 +10,7 @@ fn pos(frames: f64) -> ReadPosition {
 
 #[test]
 fn test_delay_line_basic() {
-    let mut dl = DelayLine::new(Samples(10));
+    let mut dl = DelayLine::new(Samples::new(10));
     dl.push_sample(1.0);
     dl.push_sample(0.0);
     dl.push_sample(0.0);
@@ -26,7 +26,7 @@ fn test_delay_line_basic() {
 fn an_integer_read_delays_by_exactly_that_many_frames() {
     const MAX: usize = 6;
     for at in 0..3 * (MAX + 1) {
-        let mut dl = DelayLine::new(Samples(MAX));
+        let mut dl = DelayLine::new(Samples::new(MAX));
         for frame in 0..at + MAX + 2 {
             dl.push_sample(if frame == at { 1.0 } else { 0.0 });
             for d in 0..=MAX {
@@ -40,7 +40,7 @@ fn an_integer_read_delays_by_exactly_that_many_frames() {
 
 #[test]
 fn test_delay_line_linear_interpolation() {
-    let mut dl = DelayLine::new(Samples(10));
+    let mut dl = DelayLine::new(Samples::new(10));
     dl.push_sample(0.0);
     dl.push_sample(1.0);
     dl.push_sample(0.0);
@@ -51,7 +51,7 @@ fn test_delay_line_linear_interpolation() {
 
 #[test]
 fn test_delay_line_cubic_interpolation() {
-    let mut dl = DelayLine::new(Samples(10));
+    let mut dl = DelayLine::new(Samples::new(10));
     for i in 0..5 {
         dl.push_sample(i as f32);
     }
@@ -65,7 +65,7 @@ fn test_delay_line_cubic_interpolation() {
 
 #[test]
 fn test_delay_line_reset() {
-    let mut dl = DelayLine::new(Samples(10));
+    let mut dl = DelayLine::new(Samples::new(10));
     dl.push_sample(1.0);
     dl.push_sample(1.0);
     dl.reset();
@@ -79,7 +79,7 @@ fn test_delay_line_reset() {
 #[test]
 fn a_whole_read_returns_each_sample_len_pushes_later() {
     const LEN: usize = 4;
-    let mut line = DelayLine::new(Samples(LEN));
+    let mut line = DelayLine::new(Samples::new(LEN));
     for round in 0..2 {
         for k in 0..5 * LEN {
             line.push_sample((k + 1) as f32);
@@ -95,7 +95,7 @@ fn a_whole_read_returns_each_sample_len_pushes_later() {
 #[test]
 fn the_two_readers_agree_on_a_whole_delay() {
     const MAX: usize = 7;
-    let mut line = DelayLine::new(Samples(MAX));
+    let mut line = DelayLine::new(Samples::new(MAX));
     for k in 0..3 * MAX {
         line.push_sample(((k * 37) % 11) as f32 - 5.0);
         for d in 0..=MAX {
@@ -141,7 +141,7 @@ fn an_f64_line_returns_a_wide_signal_d_frames_later_exactly() {
         InterpolationMode::CubicHermite,
     ] {
         for d in 0..=MAX {
-            let mut line = DelayLine::<f64>::new(Samples(MAX));
+            let mut line = DelayLine::<f64>::new(Samples::new(MAX));
             let got: Vec<f64> = signal
                 .iter()
                 .map(|&x| {
@@ -164,7 +164,7 @@ fn an_f64_delay_step_without_feedback_returns_the_input_d_frames_later() {
     use tutti_fixtures::signal::{assert_close_f64, wide_signal};
     const D: usize = 4;
     let signal = wide_signal(20);
-    let mut line = DelayLine::<f64>::new(Samples(8));
+    let mut line = DelayLine::<f64>::new(Samples::new(8));
     let got: Vec<f64> = signal
         .iter()
         .map(|&x| delay_step(&mut line, x, pos(D as f64), 0.0, InterpolationMode::Linear))
@@ -184,7 +184,7 @@ fn an_f64_delay_step_with_feedback_follows_the_closed_form_recursion() {
     const D: usize = 4;
     const FB: f64 = 0.3;
     let signal = wide_signal(40);
-    let mut line = DelayLine::<f64>::new(Samples(8));
+    let mut line = DelayLine::<f64>::new(Samples::new(8));
     let got: Vec<f64> = signal
         .iter()
         .map(|&x| delay_step(&mut line, x, pos(D as f64), FB, InterpolationMode::Linear))
@@ -206,7 +206,7 @@ fn an_f64_line_read_at_a_wide_position_is_the_lerp_of_the_wide_slots() {
     use tutti_fixtures::signal::wide_signal;
     const N: usize = 200_000;
     let signal = wide_signal(N);
-    let mut line = DelayLine::<f64>::new(Samples(N));
+    let mut line = DelayLine::<f64>::new(Samples::new(N));
     signal.iter().for_each(|&x| line.push_sample(x));
     let at = pos(100_000.3);
     let frac = (at.get() & 0xffff_ffff) as f64 / ReadPosition::COUNTS_PER_FRAME;

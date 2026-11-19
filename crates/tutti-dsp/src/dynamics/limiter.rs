@@ -376,14 +376,14 @@ impl<F: Float> LimiterBank<F> {
             let shortest = Lookahead::new(Seconds::new(needed as f64 / rate.get()))
                 .unwrap_or(Lookahead(Lookahead::CAP));
             return Err(TruePeakError::Lookahead {
-                lookahead: Samples(frames),
-                needed: Samples(needed),
+                lookahead: Samples::new(frames),
+                needed: Samples::new(needed),
                 shortest,
             });
         }
         let first = delay.saturating_sub(7).div_ceil(4);
         let channels = usize::from(width.count());
-        let block = MaxBlock::of(Samples(CHUNK));
+        let block = MaxBlock::of(Samples::new(CHUNK));
         let detector = Detector {
             states: (0..channels.max(1)).map(|_| plan.state(block)).collect(),
             lag: vec![F::ZERO; first],
@@ -401,7 +401,7 @@ impl<F: Float> LimiterBank<F> {
     /// The processing latency: the lookahead in frames, at least one.
     #[must_use]
     pub fn latency(&self) -> Samples {
-        Samples(self.lookahead)
+        Samples::new(self.lookahead)
     }
 
     /// Back to silence: the rings empty and the envelope without history. No allocation.

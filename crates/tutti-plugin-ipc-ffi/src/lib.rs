@@ -27,7 +27,7 @@
 //!   process group and reaped when the guard drops, so no path out of the code that holds
 //!   it leaves a running process or a zombie. It holds no `unsafe` of its own.
 //! - **The OS calls** (`wait_readable`, `wait_readable_either` and `poll_wait`
-//!   (the server's waits on its sockets, a doorbell's descriptor and the
+//!   (the server's waits on its sockets, a bell's descriptor and the
 //!   descriptors a plugin asked to have watched, and an in-process host's
 //!   zero-timeout look at the same) on unix, `process_exists`,
 //!   `parent_process_id`, `terminate_process` and, on Windows,

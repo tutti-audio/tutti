@@ -153,8 +153,7 @@ impl PeModeEntry {
     fn from_json(json: &PeJson) -> Result<Self, PeDataError> {
         let mut f = Fields::new(json, "ModeList entry")?;
         let id = f.required("modeId", "a string", text)?.to_owned();
-        let mode_id =
-            ModeId::new(&id).ok_or_else(|| f.fail("modeId", PeDataFault::NotValid("mode id")))?;
+        let mode_id = ModeId::try_from(id).map_err(|e| f.invalid("modeId", e))?;
         let title = required_text(&mut f, "title")?;
         let description = f.optional("description", "a string", |j| text(j).map(str::to_owned))?;
         Ok(Self {

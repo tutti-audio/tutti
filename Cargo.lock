@@ -2546,6 +2546,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "tutti-book"
+version = "0.0.0"
+dependencies = [
+ "tutti",
+ "tutti-fixtures",
+]
+
+[[package]]
 name = "tutti-buffers"
 version = "0.0.1"
 dependencies = [
@@ -3648,6 +3656,7 @@ dependencies = [
  "thiserror 2.0.21",
  "tracing",
  "tutti-fixtures",
+ "tutti-ump",
  "windows-sys",
 ]
 

@@ -211,7 +211,7 @@ impl Oversampling {
                 high,
                 taps,
                 lead: pad / 2,
-                latency: Samples((round_trip + pad) / factor),
+                latency: Samples::new((round_trip + pad) / factor),
             }),
         })
     }

@@ -140,11 +140,11 @@ impl NoteConfig {
             yin: YinConfig::new(),
             onset: OnsetConfig::new(DetectionFunction::SpectralFlux),
             hop: None,
-            min_length: NoteSpan::of(Seconds(0.06)),
-            pitch_split: PitchSplit::of(Cents(50.0)),
-            smoothing: NoteSpan::of(Seconds(0.03)),
-            hold: NoteSpan::of(Seconds(0.01)),
-            floor: Db(-60.0),
+            min_length: NoteSpan::of(Seconds::new(0.06)),
+            pitch_split: PitchSplit::of(Cents::new(50.0)),
+            smoothing: NoteSpan::of(Seconds::new(0.03)),
+            hold: NoteSpan::of(Seconds::new(0.01)),
+            floor: Db::new(-60.0),
         }
     }
 
@@ -234,8 +234,8 @@ impl NoteConfig {
         let frame = yin.buffer_size().get();
         if frame > MAX_FRAME {
             return Err(Error::YinFrameTooLong {
-                frame: Samples(frame),
-                max: Samples(MAX_FRAME),
+                frame: Samples::new(frame),
+                max: Samples::new(MAX_FRAME),
             });
         }
         if self.onset.function() != DetectionFunction::SpectralFlux {
@@ -248,7 +248,7 @@ impl NoteConfig {
             onset,
             hop: self
                 .hop
-                .map_or(Samples((frame / 8).max(1)), |hop| hop.get()),
+                .map_or(Samples::new((frame / 8).max(1)), |hop| hop.get()),
             min_length: samples(self.min_length),
             pitch_split: self.pitch_split,
             smoothing: samples(self.smoothing),
@@ -344,7 +344,7 @@ impl NoteEvent {
     #[inline]
     #[must_use]
     pub fn len(&self) -> Samples {
-        Samples(self.end.get().saturating_sub(self.start.get()))
+        Samples::new(self.end.get().saturating_sub(self.start.get()))
     }
 
     /// Whether the note spans nothing; never true of a transcribed note.
@@ -367,8 +367,8 @@ impl Default for VelocityRange {
     /// -60 dBFS to -3 dBFS, the RMS of a full-scale sine.
     fn default() -> Self {
         Self {
-            floor: Db(-60.0),
-            ceiling: Db(-3.0),
+            floor: Db::new(-60.0),
+            ceiling: Db::new(-3.0),
         }
     }
 }
@@ -440,14 +440,17 @@ pub fn transcribe<S: Sample>(
     if samples.len() < frame.get() {
         return Err(Error::InsufficientInput {
             needed: frame,
-            got: Samples(samples.len()),
+            got: Samples::new(samples.len()),
         });
     }
     let peak = samples.iter().fold(0.0f64, |m, s| m.max(s.abs()));
     if peak < SILENCE_FLOOR.to_amplitude().get() {
         return Err(Error::NoSignal);
     }
-    check_frame_count(cfg.framing().frames_for(Samples(samples.len())), MAX_FRAMES)?;
+    check_frame_count(
+        cfg.framing().frames_for(Samples::new(samples.len())),
+        MAX_FRAMES,
+    )?;
 
     let track = yin_track_at(&cfg.yin, samples, cfg.hop)?;
     let levels = levels_at(cfg, samples)?;
@@ -480,7 +483,7 @@ pub fn frame_levels<S: Sample>(
 fn levels_at(cfg: &NotePlan, samples: &[f64]) -> Result<Vec<Amplitude>> {
     cfg.check_hop()?;
     let frame = cfg.frame().get();
-    let frames = cfg.framing().frames_for(Samples(samples.len()));
+    let frames = cfg.framing().frames_for(Samples::new(samples.len()));
     Ok((0..frames.get())
         .map(|i| {
             let start = i * cfg.hop.get();
@@ -770,7 +773,7 @@ fn build_note(
 
     let voiced = |f: usize| frames[f].expect("a run holds voiced frames");
     let cents: Vec<f64> = mine.iter().map(|&f| voiced(f).cents.get()).collect();
-    let pitch = Cents(median(&cents)?);
+    let pitch = Cents::new(median(&cents)?);
     let (note, bend) = Note::nearest_to(Note::A4.frequency() * pitch.to_pitch_ratio())?;
 
     // The loudest frame wholly inside the note; one that straddles a neighbour
@@ -785,8 +788,8 @@ fn build_note(
     Some(NoteEvent {
         note,
         cents: bend,
-        start: Samples(start),
-        end: Samples(end),
+        start: Samples::new(start),
+        end: Samples::new(end),
         velocity: level.to_db(),
     })
 }

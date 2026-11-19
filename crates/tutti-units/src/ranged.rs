@@ -27,6 +27,34 @@
 /// assert_eq!(Voices::try_from(9), Err(VoicesOutOfRange(9)));
 /// ```
 ///
+/// The error derives `Eq` exactly when the raw is a primitive integer, so a
+/// float raw, or a unit raw such as `Db`, can use the macro. The raw is one
+/// name: import a type before naming it here.
+///
+/// ```
+/// tutti_units::ranged! {
+///     /// A small count.
+///     Small(u8), NotSmall, "a small count", |raw| raw < 4
+/// }
+///
+/// fn eq<T: Eq>() {}
+/// eq::<NotSmall>();
+/// assert_eq!(Small::try_from(9), Err(NotSmall(9)));
+/// ```
+///
+/// ```compile_fail
+/// use tutti_units::Db;
+///
+/// tutti_units::ranged! {
+///     /// A floor of at least -60 dB.
+///     Floor(Db), NotAFloor, "a floor of at least -60 dB",
+///     |raw| raw.get() >= -60.0
+/// }
+///
+/// fn eq<T: Eq>() {}
+/// eq::<NotAFloor>();
+/// ```
+///
 /// `bits $width` in place of the predicate is the range `0..=(1 << $width) - 1`
 /// of a bit-width field. It adds `pub const MAX` and `pub const fn masked(raw)`,
 /// which keeps the low `$width` bits of a raw the wire has just framed, and its
@@ -69,10 +97,23 @@ macro_rules! ranged {
     };
     (
         $(#[$meta:meta])*
-        $name:ident($inner:ty), $err:ident, $what:literal, |$raw:ident| $valid:expr
+        $name:ident($inner:tt), $err:ident, $what:literal, |$raw:ident| $valid:expr
     ) => {
-        $crate::ranged!(@items [] $(#[$meta])* $name($inner), $err, $what, |$raw| $valid);
+        $crate::ranged!(@eq $inner; $(#[$meta])* $name($inner), $err, $what, |$raw| $valid);
     };
+    (@eq u8; $($rest:tt)*) => { $crate::ranged!(@items [Eq] $($rest)*); };
+    (@eq u16; $($rest:tt)*) => { $crate::ranged!(@items [Eq] $($rest)*); };
+    (@eq u32; $($rest:tt)*) => { $crate::ranged!(@items [Eq] $($rest)*); };
+    (@eq u64; $($rest:tt)*) => { $crate::ranged!(@items [Eq] $($rest)*); };
+    (@eq u128; $($rest:tt)*) => { $crate::ranged!(@items [Eq] $($rest)*); };
+    (@eq usize; $($rest:tt)*) => { $crate::ranged!(@items [Eq] $($rest)*); };
+    (@eq i8; $($rest:tt)*) => { $crate::ranged!(@items [Eq] $($rest)*); };
+    (@eq i16; $($rest:tt)*) => { $crate::ranged!(@items [Eq] $($rest)*); };
+    (@eq i32; $($rest:tt)*) => { $crate::ranged!(@items [Eq] $($rest)*); };
+    (@eq i64; $($rest:tt)*) => { $crate::ranged!(@items [Eq] $($rest)*); };
+    (@eq i128; $($rest:tt)*) => { $crate::ranged!(@items [Eq] $($rest)*); };
+    (@eq isize; $($rest:tt)*) => { $crate::ranged!(@items [Eq] $($rest)*); };
+    (@eq $other:tt; $($rest:tt)*) => { $crate::ranged!(@items [] $($rest)*); };
     (
         $(#[$meta:meta])*
         $name:ident($inner:ty), $err:ident, bits $width:literal

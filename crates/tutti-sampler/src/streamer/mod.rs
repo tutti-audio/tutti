@@ -127,7 +127,7 @@ use tutti_units::SampleRate;
 /// // full length. `voice` is a graph node: insert it into the graph that
 /// // renders the track. The `stream` is the control thread's: keep it while
 /// // the voice plays, drop it to end the stream.
-/// let voice = DiskVoice::from_reader(reader, VoiceWindow::from(Beat(0.0)));
+/// let voice = DiskVoice::from_reader(reader, VoiceWindow::from(Beat::new(0.0)));
 /// # drop((voice, stream));
 /// # Ok(())
 /// # }

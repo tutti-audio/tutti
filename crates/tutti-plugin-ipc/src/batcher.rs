@@ -799,7 +799,7 @@ impl Batcher {
             }
             let n = (chunk - self.pos).min(frames - i);
             let (at, to) = (self.pos, self.pos + n);
-            let call = Samples::new(i)..Samples(i + n);
+            let call = Samples::new(i)..Samples::new(i + n);
             host.take(i, n, at);
             self.wire.play(&mut output, at, to, &call);
             let first = self.reply.partition_point(|e| (e.offset as usize) < at);
@@ -931,7 +931,7 @@ mod tests {
 
         let src = [FINE; 8];
         let chans = [&src[..], &src[..]];
-        let call = Samples::new(0)..Samples(8);
+        let call = Samples::new(0)..Samples::new(8);
         rows.take(&Planes::new(&chans).unwrap(), 0, 8, &call);
         assert!(rows.stage(&mut writer, 1, 8));
         writer.publish(1);
@@ -965,7 +965,7 @@ mod tests {
 
         let src = [FINE, -FINE, 0.1, 0.3];
         let chans = [&src[..]];
-        let call = Samples::new(0)..Samples(4);
+        let call = Samples::new(0)..Samples::new(4);
         rows.take(&Planes::new(&chans).unwrap(), 0, 4, &call);
         assert!(rows.stage(&mut writer, 1, 4));
         writer.publish(1);
