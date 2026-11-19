@@ -27,6 +27,8 @@
 //!   [`setting_word!`]) in one atomic word, stored by its encoding.
 //! - [`SeqWriter`] / [`SeqReader`] — a sequence lock for a `Pod` value one
 //!   writer overwrites in place and any thread copies whole.
+//! - [`seq_slots()`] — an array of those, one slot per index, that one reader
+//!   drains by changed slot, with an epoch that makes earlier writes stale.
 //! - [`level_cell()`] — a peak and an energy the audio thread folds each block
 //!   into and one reader takes whole since its last take (a level meter's lane).
 //! - [`gauge()`] / [`counter()`] — a reading a node writes and any thread reads:
@@ -204,6 +206,7 @@ mod request_word;
 mod ring;
 mod scope;
 mod seq_cell;
+mod seq_slots;
 mod setting;
 mod sleep;
 mod spin;
@@ -249,6 +252,7 @@ pub use request_word::{RequestBit, RequestBitOutOfRange, RequestBits, RequestWor
 pub use ring::{Drain, Iter, Overflow, PushError, Returned, RingReader, RingWriter, ring};
 pub use scope::{ControlDrop, RtScope, RtScopeGuard};
 pub use seq_cell::{Contended, SeqReader, SeqWriter};
+pub use seq_slots::{SeqSlotsReader, SeqSlotsWriter, seq_slots};
 pub use setting::{Setting, SettingWord};
 pub use sleep::sleep_until_ns;
 pub use spin::BlockWaits;
