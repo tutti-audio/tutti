@@ -2,9 +2,10 @@
 //! 7.5.3 and 7.5.4).
 
 use tutti_midi_protocol::{
-    flex_tempo, flex_tempo_field, flex_time_signature, flex_time_signature_wire,
+    flex_metronome, flex_tempo, flex_tempo_field, flex_time_signature, flex_time_signature_wire,
 };
 use tutti_music::TimeSignature;
+use tutti_ump::BarAccents;
 use tutti_ump::FlexTimeSignature as Wire;
 use tutti_units::Bpm;
 
@@ -135,4 +136,22 @@ fn a_time_signature_writes_its_numerator_and_exponent() {
     }
     // A whole-note denominator would be exponent 0, non-standard: no message.
     assert_eq!(flex_time_signature_wire(TimeSignature::of(4, 1)), None);
+}
+
+/// Section 7.5.5: a click on every beat is `4 * 24 / note value` clocks (a
+/// quarter 24, an eighth 12, a half 48, a whole 96); the bar is undivided, its
+/// beat count in Part 1 and Parts 2 and 3 zero, so the parts add up to the
+/// bar's beats; a 64th note's beat (1.5 clocks) has no integer field.
+/// Spec: m2-104/7.5.5#5, m2-104/7.5.5#9
+#[test]
+fn a_metronome_clicks_each_beat_with_an_undivided_bar() {
+    for (beats, value, clocks) in [(4, 4, 24), (6, 8, 12), (3, 2, 48), (1, 1, 96), (5, 16, 6)] {
+        let m = flex_metronome(TimeSignature::of(beats, value)).unwrap();
+        assert_eq!(u32::from(m.clocks_per_click), clocks, "{beats}/{value}");
+        assert_eq!(m.accents.parts(), [beats as u8, 0, 0]);
+        assert!(matches!(m.accents, BarAccents::Undivided(_)));
+        assert_eq!(u32::from(m.accents.beats()), beats);
+        assert_eq!((m.subdivision_1, m.subdivision_2), (0, 0));
+    }
+    assert_eq!(flex_metronome(TimeSignature::of(4, 64)), None);
 }

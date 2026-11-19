@@ -7,10 +7,11 @@ fn every_value() -> impl Iterator<Item = SyncMessages> {
         .chain((0..0x7F).map(|id| Some(Recipient::Device(SysexDeviceId::of(id)))));
     recipients.flat_map(|mmc| {
         MtcRate::ALL.into_iter().flat_map(move |rate| {
-            (0..8).map(move |bits| SyncMessages {
+            (0..16).map(move |bits| SyncMessages {
                 clock: bits & 1 != 0,
                 mtc: bits & 2 != 0,
                 flex: bits & 4 != 0,
+                metronome: bits & 8 != 0,
                 mmc,
                 rate,
             })
@@ -32,12 +33,12 @@ fn every_value_round_trips_through_its_word() {
         );
         n += 1;
     }
-    assert_eq!(n, 8 * 4 * 129);
+    assert_eq!(n, 16 * 4 * 129);
 }
 
 /// The word keeps the layout of the clock's old settings word (bit 0 clock,
 /// bit 1 MTC, bits 8 to 15 the rate's code) and adds bit 2 for MMC, bit 3 for
-/// Flex Data, with the device byte in bits 16 to 22.
+/// Flex Data, bit 4 for the Flex metronome, with the device byte in bits 16 to 22.
 #[test]
 fn the_word_is_the_documented_layout() {
     let messages = SyncMessages {
@@ -45,11 +46,12 @@ fn the_word_is_the_documented_layout() {
         mtc: true,
         mmc: Some(Recipient::Device(SysexDeviceId::of(5))),
         flex: true,
+        metronome: true,
         rate: MtcRate::Fps2997Df,
     };
     assert_eq!(
         messages.to_word(),
-        0b11 | 1 << 2 | 1 << 3 | 2 << 8 | 5 << 16
+        0b11 | 1 << 2 | 1 << 3 | 1 << 4 | 2 << 8 | 5 << 16
     );
     let all_call = SyncMessages {
         mmc: Some(Recipient::AllCall),

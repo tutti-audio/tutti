@@ -1,6 +1,7 @@
 use super::*;
 use crate::{ClockTransportState, MidiClockDecoder, MtcDecoder};
 use atomic_float::AtomicF64;
+use core::num::NonZeroU8;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool as StdAtomicBool, Ordering};
 use tutti_graph::UmpAt;
@@ -8,7 +9,7 @@ use tutti_midi_protocol::{QuarterFramePiece, SmpteFrameRate};
 use tutti_music::LoopRange;
 use tutti_music::MeterChange;
 use tutti_transport::ProjectMeter;
-use tutti_ump::{Flex, Message, MidiGroup, System};
+use tutti_ump::{BarAccents, Flex, Message, Metronome, MidiGroup, System};
 use tutti_units::{Bpm, Seconds};
 
 /// The System message a packet carries.
@@ -1376,6 +1377,108 @@ fn no_flex_is_sent_unless_enabled() {
     let events = drain_all(&out);
     assert!(flexes(&events).is_empty());
     assert!(events.iter().any(|e| is_status(e, 0xF8)), "the clock ran");
+}
+
+fn metronomes(events: &[UmpAt]) -> Vec<(u32, Flex)> {
+    flexes(events)
+        .into_iter()
+        .filter(|(_, f)| matches!(f, Flex::SetMetronome(_)))
+        .collect()
+}
+
+/// The Set Metronome of a bar of `beats` beats, undivided, clicking every
+/// `clocks` MIDI clocks with no subdivision clicks.
+fn metronome(clocks: u8, beats: u8) -> Flex {
+    Flex::SetMetronome(Metronome {
+        clocks_per_click: clocks,
+        accents: BarAccents::Undivided(NonZeroU8::new(beats).unwrap()),
+        subdivision_1: 0,
+        subdivision_2: 0,
+    })
+}
+
+/// A master sending the Set Metronome alone: Flex tempo and meter off.
+fn metronome_master() -> (FlexMaster, ProjectMeter, Collected) {
+    let (mut cm, meter, out) = flex_master(false);
+    cm.messages.flex = false;
+    cm.messages.metronome = true;
+    (cm, meter, out)
+}
+
+/// A start from the top states a click on every quarter-note beat of 4/4 (24
+/// clocks), the bar undivided (Part 1 the 4 beats, Parts 2 and 3 zero) with no
+/// subdivision clicks, on the bar line's frame and with no Set Tempo or Set
+/// Time Signature; a 3/4 meter published at beat 1.5 is stated on its first bar
+/// boundary, beat 3, frame (3 - 1.5) x 24 000 = 36 000; a 6/8 meter has an eighth
+/// note for a beat, 12 clocks, and 6 beats in the bar.
+/// Spec: m2-104/7.5.5#2, m2-104/7.5.5#5, m2-104/7.5.5#9
+#[test]
+fn set_metronome_states_the_click_of_each_bar_boundary_meter() {
+    let (mut cm, meter, out) = metronome_master();
+    play(&mut cm, &out, 120.0, 0.0, 36_000);
+    let first = drain_all(&out);
+    assert_eq!(flexes(&first), [(0, metronome(24, 4))]);
+    meter.set_meter(map(&[(0.0, 3, 4)]));
+    play(&mut cm, &out, 120.0, 1.5, 48_000);
+    assert_eq!(metronomes(&drain_all(&out)), [(36_000, metronome(24, 3))]);
+    meter.set_meter(map(&[(0.0, 6, 8)]));
+    // The boundary after beat 3.0 + 1.5 = 4.5 of 6/8 (3 beats a bar) is beat 6.
+    play(&mut cm, &out, 120.0, 4.5, 48_000);
+    assert_eq!(metronomes(&drain_all(&out)), [(36_000, metronome(12, 6))]);
+}
+
+/// The Set Metronome follows the meter on the Set Time Signature's frame, after
+/// it, when both are on.
+/// Spec: m2-104/7.5.5#2
+#[test]
+fn set_metronome_follows_the_set_time_signature_on_its_frame() {
+    let (mut cm, _meter, out) = flex_master(false);
+    cm.messages.metronome = true;
+    play(&mut cm, &out, 120.0, 0.0, 1_000);
+    assert_eq!(
+        flexes(&drain_all(&out)),
+        [
+            (0, Flex::SetTempo(50_000_000)),
+            (0, time_signature(4, 2)),
+            (0, metronome(24, 4)),
+        ]
+    );
+}
+
+/// An unchanged meter is stated once; a stop and a start state it again.
+/// Spec: m2-104/7.5.5#2
+#[test]
+fn set_metronome_is_stated_once_and_again_on_a_start() {
+    let (mut cm, _meter, out) = metronome_master();
+    play(&mut cm, &out, 120.0, 0.0, 30_000);
+    // Crosses the bar line at beat 4: the same meter is not restated.
+    play(&mut cm, &out, 120.0, 1.25, 90_000);
+    assert_eq!(metronomes(&drain_all(&out)), [(0, metronome(24, 4))]);
+    let stopped = TransportPosition::new(false, Bpm::of(120.0), Beat::new(2.5), None);
+    cm.tick(&stopped, Samples::new(1_000), &mut |_| {});
+    play(&mut cm, &out, 120.0, 4.0, 1_000);
+    assert_eq!(metronomes(&drain_all(&out)), [(0, metronome(24, 4))]);
+}
+
+/// A note value whose beat is not whole clocks (a 64th, a clock and a half) has
+/// no Set Metronome.
+#[test]
+fn a_meter_with_a_fractional_clock_beat_states_no_metronome() {
+    let (mut cm, meter, out) = metronome_master();
+    meter.set_meter(map(&[(0.0, 4, 64)]));
+    play(&mut cm, &out, 120.0, 0.0, 1_000);
+    assert!(drain_all(&out).is_empty());
+}
+
+/// The metronome is off until set: tempo and meter alone send no Set Metronome.
+#[test]
+fn no_metronome_is_sent_unless_enabled() {
+    let (mut cm, _meter, out) = flex_master(true);
+    assert!(!cm.messages.metronome);
+    play(&mut cm, &out, 120.0, 0.0, 48_000);
+    let events = drain_all(&out);
+    assert!(metronomes(&events).is_empty());
+    assert!(!meters(&events).is_empty(), "the meter was sent");
 }
 
 fn meters(events: &[UmpAt]) -> Vec<(u32, Flex)> {
