@@ -334,6 +334,7 @@ impl Session {
                     .plugin
                     .as_mut()
                     .is_some_and(|p| p.plugin_mut().load_preset(main, &id));
+                self.forget_informs();
                 Ok(BridgeMessage::PresetLoaded { ok }.into())
             }
             M::GetCurrentPreset => {
@@ -438,10 +439,15 @@ impl Session {
 
             M::SaveState { state_use } => Ok(self.handle_save_state(main, state_use)),
             M::LoadStateChunk { seq, last, bytes } => {
-                if last.is_some() {
+                let ends = last.is_some();
+                if ends {
                     self.forget_informs();
                 }
-                Ok(self.handle_load_state_chunk(main, seq, last, &bytes))
+                let reply = self.handle_load_state_chunk(main, seq, last, &bytes);
+                if ends {
+                    self.forget_informs();
+                }
+                Ok(reply)
             }
             M::StageStateChunk { seq, last, bytes } => {
                 Ok(self.handle_stage_state_chunk(seq, last, &bytes))
@@ -617,7 +623,8 @@ impl Session {
     /// preset load is about to replace them, and a stale one told after it
     /// would put the controller back where it was. What the render thread has
     /// not yet written for a block that began before the load is voided too
-    /// ([`Informs`](crate::render::Informs)).
+    /// ([`Informs`](crate::render::Informs)). Called before the load and again
+    /// after it, so a block that began while the load was applied is voided as well.
     fn forget_informs(&mut self) {
         self.render.void_informs();
         if let Some(reader) = self.informs.as_mut() {
