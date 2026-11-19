@@ -42,6 +42,8 @@
 //!   [`ParkedSampleRate`] carry a `SampleRate` the same way.
 //! - [`Mint`] and [`id!`] — a lock-free counter of unique non-zero numbers from 1,
 //!   and the macro that writes an id type minted from one.
+//! - [`SplitMix64`] — the pseudo-random generator: a seeded stream of
+//!   words, and the stateless mix of a counter.
 //!
 //! **Queues and signals**
 //!
@@ -206,6 +208,7 @@ mod setting;
 mod sleep;
 mod spin;
 mod split;
+mod splitmix;
 mod task_graph;
 mod thread;
 mod vec;
@@ -250,6 +253,7 @@ pub use setting::{Setting, SettingWord};
 pub use sleep::sleep_until_ns;
 pub use spin::BlockWaits;
 pub use split::{ClaimConflict, ClaimTable, Claimed, ClaimedRun, Held, RwView, SplitMut, SplitRw};
+pub use splitmix::SplitMix64;
 pub use task_graph::{Participant, TaskGraph};
 pub use thread::{Panicked, StopToken, ThreadHandle, spawn_named};
 pub use vec::RtVec;
