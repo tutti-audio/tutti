@@ -20,8 +20,8 @@ use tutti::graph::{Cx, ForkByClone, Io, Node, Prepare, Shape, Status};
 use tutti::modulation::{Follower, Lfo};
 use tutti::nodes::{SvfFilterNode, SvfType};
 use tutti::{
-    ChannelLayout, Depth, Error, Hz, InPort, InterleavedMut, MaxBlock, OutPort, Q, Root, RouteSpec,
-    SampleRate, Samples, Session, SessionEvent,
+    ChannelLayout, Depth, DepthTarget, Error, Hz, InPort, InterleavedMut, MaxBlock, OutPort, Q,
+    Root, RouteSpec, SampleRate, Samples, Session, SessionEvent,
 };
 use tutti_nodes::testing::Osc;
 
@@ -104,7 +104,7 @@ fn main() -> Result<(), Error> {
     m.range(cutoff, Hz(100.0)..Hz(4_000.0))?;
     m.range(resonance, Q(0.5)..Q(8.0))?;
     let wobble = m.lfo(Lfo::sine().rate(Hz(2.0)));
-    let sweep = m.route(RouteSpec::new(wobble, cutoff, Depth::of(0.2)))?;
+    m.route(RouteSpec::new(wobble, cutoff, Depth::of(0.2)))?;
     let hits = m.follower(Follower::default(), kick);
     m.route(RouteSpec::new(hits, resonance, Depth::of(0.5)))?;
 
@@ -119,13 +119,11 @@ fn main() -> Result<(), Error> {
     println!("LFO depth 0.2, kick on the resonance:");
     play(&mut s, 20);
 
-    // A depth edit: the LFO's lane republishes its program, keeping phase.
-    // It edits no wiring, so the graph holds nothing for a commit and no
-    // plan is sent.
-    s.mods_mut()
-        .route_of(sweep)
-        .expect("the route")
-        .set_depth(Depth::of(0.45));
+    // A depth edit: the LFO's lane reads its depth from a cell, so the wave
+    // goes on in phase. It edits no wiring, so the graph holds nothing for a
+    // commit and no plan is sent.
+    s.set(DepthTarget::of(wobble, cutoff).to(Depth::of(0.45)))
+        .expect("the route is declared");
     assert!(!s.graph_ref().is_edited(), "a depth edit sends no plan");
     report(s.update());
     println!("LFO depth 0.45:");

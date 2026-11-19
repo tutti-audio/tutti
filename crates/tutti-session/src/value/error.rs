@@ -55,6 +55,9 @@ pub enum SetRefusal {
     /// A finite value outside the range the target takes.
     #[error("the value is outside the target's range")]
     OutOfRange,
+    /// A range with its start above its end.
+    #[error("the range is backwards: its start is above its end")]
+    Backwards,
     /// A node's mode or mix needs a pass, and the node has none: its buses do
     /// not say where its input goes when it does not run, so a bypass or a
     /// blend would be a guess.

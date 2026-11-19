@@ -23,7 +23,6 @@ setter  crates/tutti-session/src/key.rs::Edge::set_gain  goes at the editor-tabl
 setter  crates/tutti-session/src/midi.rs::Midi::set_route_fallback  goes with the MIDI routing declarations (11b)
 setter  crates/tutti-session/src/midi.rs::Midi::set_routes  goes with the MIDI routing declarations (11b)
 setter  crates/tutti-session/src/modulation.rs::Mods::set_source  which source a route reads, a declaration: goes at 11e
-setter  crates/tutti-session/src/modulation.rs::RouteMut::set_depth  a route target (7a S4)
 setter  crates/tutti-session/src/plugin_params.rs::Param::set_plain  a plugin param's peer path (7a S6)
 setter  crates/tutti-session/src/plugin_params.rs::Param::set_text  a plugin param's peer path (7a S6)
 setter  crates/tutti-session/src/plugin_params.rs::Params::set_automation_mode  a plugin's automation mode (7a S6)

@@ -21,7 +21,7 @@ use super::state::Params;
 use super::target::{Target, TargetId, sealed, target_builders};
 use tutti_modulation::TargetKey;
 
-use crate::{ModRouteId, ModSourceId};
+use crate::{ModRouteId, ModSourceId, ModTarget};
 
 /// Which of the session's own values a slot target names.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -76,6 +76,10 @@ pub enum SlotId {
     Mode(NodeKey),
     /// A node's mix.
     Mix(NodeKey),
+    /// The range declared on a modulation target.
+    Range(ModTarget),
+    /// The depth of the route from a source into a target.
+    RouteDepth((ModSourceId, ModTarget)),
 }
 
 impl SlotId {

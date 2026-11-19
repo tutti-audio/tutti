@@ -19,10 +19,11 @@
 //!   staged by the write, a later write replacing it, and published with the
 //!   others staged by the next [`Session::update`] in one fixed order; a read
 //!   answers the staged value, else the one in force. A value in an atomic
-//!   cell (a param, the click) lands at once. A control the
+//!   cell (a param, the click, a route's depth) lands at once. A control the
 //!   graph's editor holds (a node's mode and mix) is stored at once, a read
 //!   answering it, and handed to the editor by the next update, which the
-//!   node reads from its next block with no commit.
+//!   node reads from its next block with no commit; a range is stored at
+//!   once and reaches the lane, as a store into its range, with the update.
 //! - **Atomic.** Every item is checked and every `modify` has run before
 //!   anything lands, and the error's `at` is the first failing item. A batch is
 //!   never one cut for the audio thread: two stores can straddle a block.
@@ -37,9 +38,11 @@
 
 mod batch;
 mod controls;
+mod depth;
 mod error;
 mod param;
 mod program;
+mod range;
 mod slot;
 mod state;
 mod target;
@@ -48,12 +51,16 @@ mod verbs;
 pub use batch::{IntoAssign, IntoRead};
 pub(crate) use controls::Write;
 pub use controls::{MixTarget, ModeTarget};
+pub(crate) use depth::DepthSlot;
+pub use depth::DepthTarget;
 pub use error::{SetRefusal, ValueError, ValueErrorKind};
 pub use param::{ParamTarget, TargetInfo};
 pub(crate) use program::{
     Automation, AutomationCell, AutomationField, Declared, Edited, Field, MacroField, RateField,
 };
 pub use program::{AutomationTarget, CurveTarget, MacroTarget, PolarityTarget, RateTarget};
+pub use range::RangeTarget;
+pub(crate) use range::{Bounds, RangeSlot};
 #[cfg(feature = "midi-hardware")]
 pub use slot::MidiPolicyTarget;
 pub(crate) use slot::{

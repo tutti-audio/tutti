@@ -1917,6 +1917,7 @@ impl<F: Float> Graph<F> {
         let node = node.into();
         self.values.retire(node);
         self.values.retire_node_controls(node);
+        self.values.retire_declared_on(node);
         if self.nodes.remove(&node).is_none() {
             return Err(RemoveError::NoSuchNode(node));
         }
@@ -3813,6 +3814,18 @@ pub trait ModKeys {
     }
     /// What feeds source `source`'s node.
     fn feed(&self, source: tutti_modulation::SourceKey) -> Option<tutti_nodes::Feed>;
+    /// The cell holding route `route`'s depth, when the host moves it between
+    /// applies: the route's lane reads the depth from it at every
+    /// evaluation, so a depth edit republishes no program. A host that
+    /// declares its depths with its routes leaves the default, which names
+    /// none.
+    fn depth(
+        &self,
+        route: tutti_modulation::RouteKey,
+    ) -> Option<tutti_rt::Param<tutti_units::Depth>> {
+        let _ = route;
+        None
+    }
 }
 
 /// `tutti_nodes::ModHost` over the graph's nodes and the host's keys: a
@@ -3895,6 +3908,13 @@ impl tutti_nodes::ModHost for ModHostOver<'_> {
 
     fn feed(&self, source: tutti_modulation::SourceKey) -> Option<tutti_nodes::Feed> {
         self.keys.feed(source)
+    }
+
+    fn depth(
+        &self,
+        route: tutti_modulation::RouteKey,
+    ) -> Option<tutti_rt::Param<tutti_units::Depth>> {
+        self.keys.depth(route)
     }
 }
 

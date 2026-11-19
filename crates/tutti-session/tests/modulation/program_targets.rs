@@ -9,7 +9,7 @@ use tutti_modulation::{
     Clock, Law, Lfo, LfoRate, Polarity, ProgramTime, RATE_ANCHOR_MARGIN, Waveform, shape,
 };
 use tutti_nodes::automation::{Breakpoint, Trajectory};
-use tutti_session::{ModRouteId, ModSourceId, ParamRef, RouteSpec, ValueErrorKind};
+use tutti_session::{DepthTarget, ModRouteId, ModSourceId, ParamRef, RouteSpec, ValueErrorKind};
 use tutti_units::{Beat, BeatsPerCycle, Bipolar, Depth, Hz, SamplePosition, SampleRate, UnitParam};
 
 use crate::common::probe::ProbeUnit;
@@ -466,5 +466,76 @@ fn an_automation_curve_set_lands_at_the_update_and_the_param_follows_it() {
         s.set(target.to(first)).unwrap_err().kind,
         ValueErrorKind::NoSuchTarget,
         "a cleared lane has no target"
+    );
+}
+
+/// **A depth set lands at once, with no republish**: the lane reads the depth
+/// from a cell, so the lane's program is the same `Arc` and no update has run
+/// when the next block carries the new offset. A macro at 0.5 on a route of
+/// depth 0.4 over a span of 1000 offsets the knob (500) by
+/// `0.4 * 0.5 * 1000 = 200`; set to -0.2 the offset is `-100`.
+#[test]
+fn a_depth_set_lands_at_once_with_no_republish() {
+    let (mut s, mut side) = rig(1);
+    let (cutoff, source, route) = scene(&mut s, &mut side, |m| m.macro_(0.5), 0.4);
+    let before = program(&s, cutoff);
+    let tail = |side: &mut tutti_session::AudioSide| *render(side, 1_024, 128)[0].last().unwrap();
+    let near = |got: f32, want: f32| {
+        assert!((got - want).abs() < 1e-3, "{got} is not {want}");
+    };
+    near(tail(&mut side), 700.0);
+
+    let depth = DepthTarget::of(source, cutoff);
+    assert_eq!(s.get(depth).unwrap(), Depth::of(0.4));
+    s.set(depth.to(Depth::of(-0.2))).unwrap();
+    assert_eq!(s.get(depth).unwrap(), Depth::of(-0.2));
+    assert_eq!(s.mods().route(route).unwrap().depth, Depth::of(-0.2));
+    // No update ran: the next block is the new figure.
+    near(tail(&mut side), 400.0);
+    assert!(
+        Arc::ptr_eq(&program(&s, cutoff), &before),
+        "the program was not republished"
+    );
+    let _ = s.update();
+    assert!(
+        Arc::ptr_eq(&program(&s, cutoff), &before),
+        "nor by the update"
+    );
+    near(tail(&mut side), 400.0);
+
+    // Inverted and zero: the offset follows the depth.
+    s.set(depth.to(Depth::of(-0.4))).unwrap();
+    near(tail(&mut side), 300.0);
+    s.set(depth.to(Depth::NONE)).unwrap();
+    near(tail(&mut side), 500.0);
+}
+
+/// **A depth target names its route by source and target**, so a pair with no
+/// route (never declared, or removed) is `NoSuchTarget`, and a second route
+/// between the pair is refused where it is declared.
+#[test]
+fn a_depth_target_is_named_by_its_source_and_target() {
+    let (mut s, mut side) = rig(1);
+    let (cutoff, source, route) = scene(&mut s, &mut side, |m| m.macro_(0.5), 0.4);
+    let other = s.mods_mut().macro_(0.0);
+    assert_eq!(
+        s.set(DepthTarget::of(other, cutoff).to(Depth::of(0.1)))
+            .unwrap_err()
+            .kind,
+        ValueErrorKind::NoSuchTarget,
+        "no route from this source"
+    );
+    assert!(matches!(
+        s.mods_mut()
+            .route(RouteSpec::new(source, cutoff, Depth::of(0.1))),
+        Err(tutti_session::RouteError::Duplicate { .. })
+    ));
+    s.mods_mut().remove_route(route).unwrap();
+    assert_eq!(
+        s.set(DepthTarget::of(source, cutoff).to(Depth::of(0.1)))
+            .unwrap_err()
+            .kind,
+        ValueErrorKind::NoSuchTarget,
+        "the route is gone"
     );
 }
