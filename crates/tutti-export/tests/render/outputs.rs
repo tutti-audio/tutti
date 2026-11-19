@@ -76,7 +76,12 @@ impl Rig {
             .collect();
         let reader = self
             .editor
-            .open_tap(TapId::of(id), sources, TapAlign::ToOutput, Samples(2048))
+            .open_tap(
+                TapId::of(id),
+                sources,
+                TapAlign::ToOutput,
+                Samples::new(2048),
+            )
             .expect("the node exists");
         self.editor.commit().expect("commits");
         self.executor.apply_pending();
@@ -98,7 +103,7 @@ fn stereo_placement() -> Placement {
 }
 
 fn job(frames: usize) -> Job {
-    Job::new(RATE, Samples(frames), Samples(0), Samples(0)).expect("a render")
+    Job::new(RATE, Samples::new(frames), Samples::new(0), Samples::new(0)).expect("a render")
 }
 
 fn wav(path: &std::path::Path, pcm: Pcm) -> FileTarget {
@@ -198,8 +203,8 @@ fn names(dir: &std::path::Path) -> Vec<String> {
 /// channel or a misplaced frame reads as a different number.
 fn two_tones() -> RenderGraph {
     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::STEREO);
-    let left = g.add(Osc::sine(Hz(440.0)).with_amplitude(Amplitude(0.5)));
-    let right = g.add(Osc::sine(Hz(660.0)).with_amplitude(Amplitude(0.4)));
+    let left = g.add(Osc::sine(Hz::new(440.0)).with_amplitude(Amplitude::new(0.5)));
+    let right = g.add(Osc::sine(Hz::new(660.0)).with_amplitude(Amplitude::new(0.4)));
     g.connect_output(left, 0, 0).connect_output(right, 0, 1);
     finish(g)
 }
@@ -223,7 +228,7 @@ fn two_outputs_of_different_formats_are_each_their_own_quantization_of_one_pass(
     let (a, b) = (dir.path().join("a.wav"), dir.path().join("b.flac"));
     let frames = 9_600;
     let timeline = OfflineTimeline::new(&OfflineTimelineConfig {
-        start_beat: Beat(0.0),
+        start_beat: Beat::new(0.0),
         tempo_map: Arc::new(TempoMap::constant(Bpm::of(120.0)).expect("a tempo")),
         sample_rate: RATE,
         loop_range: None,
@@ -348,8 +353,8 @@ fn a_tap_renders_the_signal_of_the_node_it_is_on() {
 fn a_tap_is_drained_and_gated_like_the_master() {
     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::STEREO);
     let osc = g.add(
-        Osc::sine(Hz(440.0))
-            .with_amplitude(Amplitude(0.4))
+        Osc::sine(Hz::new(440.0))
+            .with_amplitude(Amplitude::new(0.4))
             .with_layout(ChannelLayout::STEREO),
     );
     let gain = g.add(ForkByClone(Scale(0.5)));
@@ -358,7 +363,13 @@ fn a_tap_is_drained_and_gated_like_the_master() {
     let mut rig = rig(g);
     let reader = rig.tap(1, gain);
     let mut graph = rig.assemble();
-    let job = Job::new(RATE, Samples(2_000), Samples(1_500), Samples(0)).expect("a render");
+    let job = Job::new(
+        RATE,
+        Samples::new(2_000),
+        Samples::new(1_500),
+        Samples::new(0),
+    )
+    .expect("a render");
     let produced = render(
         &mut graph,
         &job,
@@ -509,7 +520,7 @@ fn stems_that_take_the_masters_gain_still_sum_to_it() {
     let (ta, tb) = (rig.tap(1, a), rig.tap(2, b));
     let mut graph = rig.assemble();
 
-    let mode = Normalize::peak(Db(-6.0));
+    let mode = Normalize::peak(Db::new(-6.0));
     let files: Vec<std::path::PathBuf> = ["master.wav", "a.wav", "b.wav"]
         .iter()
         .map(|n| dir.path().join(n))
@@ -656,7 +667,7 @@ fn a_rename_that_fails_after_another_landed_is_not_committed() {
 #[test]
 fn outputs_that_contradict_each_other_are_named_errors() {
     let dir = tempfile::tempdir().unwrap();
-    let mode = Normalize::peak(Db(-6.0));
+    let mode = Normalize::peak(Db::new(-6.0));
     let file = |n: &str, spec: Option<NormalizeSpec>| {
         Output::master(wav(&dir.path().join(n), Pcm::Int16).normalize(spec))
     };
@@ -739,7 +750,7 @@ fn an_unmeasurable_output_names_its_index() {
                     Format::Wav(Pcm::Float32),
                     ChannelLayout::STEREO,
                 )
-                .normalize(Some(NormalizeSpec::own(Normalize::peak(Db(-6.0))))),
+                .normalize(Some(NormalizeSpec::own(Normalize::peak(Db::new(-6.0))))),
             ),
             Output::tap(
                 reader,
@@ -749,7 +760,7 @@ fn an_unmeasurable_output_names_its_index() {
                     Format::Wav(Pcm::Float32),
                     ChannelLayout::STEREO,
                 )
-                .normalize(Some(NormalizeSpec::own(Normalize::peak(Db(-6.0))))),
+                .normalize(Some(NormalizeSpec::own(Normalize::peak(Db::new(-6.0))))),
             ),
         ],
         &mut Control::none(),
@@ -825,7 +836,7 @@ fn a_lufs_output_with_no_placement_is_refused_before_the_render() {
     let dir = tempfile::tempdir().unwrap();
     let mut graph = wide(3);
     let lufs = file_of(&dir.path().join("l.wav"), 3)
-        .normalize(Some(NormalizeSpec::own(Normalize::lufs(Db(-23.0)))));
+        .normalize(Some(NormalizeSpec::own(Normalize::lufs(Db::new(-23.0)))));
     let err = render(
         &mut graph,
         &job(2_000),
@@ -852,8 +863,8 @@ fn tone(width: u16) -> RenderGraph {
     let layout = ChannelLayout::from(width);
     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, layout);
     let node = g.add(
-        Osc::sine(Hz(1_000.0))
-            .with_amplitude(Amplitude(0.5))
+        Osc::sine(Hz::new(1_000.0))
+            .with_amplitude(Amplitude::new(0.5))
             .with_layout(layout),
     );
     for c in 0..usize::from(width) {
@@ -870,7 +881,8 @@ fn tone(width: u16) -> RenderGraph {
 fn a_peak_output_with_no_placement_reaches_its_target_and_reports_no_loudness() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("p.wav");
-    let target = file_of(&path, 3).normalize(Some(NormalizeSpec::own(Normalize::peak(Db(-12.0)))));
+    let target =
+        file_of(&path, 3).normalize(Some(NormalizeSpec::own(Normalize::peak(Db::new(-12.0)))));
     let written = render(
         &mut tone(3),
         &job(48_000),
@@ -888,7 +900,7 @@ fn a_peak_output_with_no_placement_reaches_its_target_and_reports_no_loudness() 
     assert_eq!(written.measured, None);
     let gain = written.gain.expect("normalized").get();
     assert!(
-        (gain - (-12.0 - Db::from_amplitude(Amplitude(0.5)).get())).abs() < 0.1,
+        (gain - (-12.0 - Db::from_amplitude(Amplitude::new(0.5)).get())).abs() < 0.1,
         "{gain}"
     );
     let peak = decode(&path)
@@ -907,7 +919,7 @@ fn a_peak_output_with_no_placement_reaches_its_target_and_reports_no_loudness() 
 fn a_peak_output_with_an_assumed_placement_reports_its_weighted_loudness() {
     let dir = tempfile::tempdir().unwrap();
     let target = file_of(&dir.path().join("p.wav"), 6)
-        .normalize(Some(NormalizeSpec::own(Normalize::peak(Db(-12.0)))));
+        .normalize(Some(NormalizeSpec::own(Normalize::peak(Db::new(-12.0)))));
     let written = render(
         &mut tone(6),
         &job(48_000),
