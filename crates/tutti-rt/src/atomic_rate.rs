@@ -1,4 +1,4 @@
-//! [`AtomicSampleRate`] and [`ParkedSampleRate`]: a [`SampleRate`] shared with
+//! [`AtomicSampleRate`] and [`PendingSampleRate`]: a [`SampleRate`] shared with
 //! another thread as one atomic word.
 
 use core::sync::atomic::{AtomicU64, Ordering};
@@ -50,22 +50,22 @@ fn rate_of(bits: u64) -> SampleRate {
 /// A [`SampleRate`] one thread leaves for another to take: an
 /// [`AtomicSampleRate`] that can also be empty.
 ///
-/// Empty is the bit pattern of `0.0`, which no `SampleRate` has, so a parked
+/// Empty is the bit pattern of `0.0`, which no `SampleRate` has, so a pending
 /// rate is never read as empty and the cell is one lock-free word. Parking over
 /// a rate nobody took replaces it: the taker only needs the latest.
 #[derive(Default)]
-pub struct ParkedSampleRate(AtomicU64);
+pub struct PendingSampleRate(AtomicU64);
 
-impl core::fmt::Debug for ParkedSampleRate {
+impl core::fmt::Debug for PendingSampleRate {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let bits = self.0.load(Ordering::Relaxed);
-        let parked = (bits != 0).then(|| rate_of(bits));
-        f.debug_tuple("ParkedSampleRate").field(&parked).finish()
+        let pending = (bits != 0).then(|| rate_of(bits));
+        f.debug_tuple("PendingSampleRate").field(&pending).finish()
     }
 }
 
-impl ParkedSampleRate {
-    /// A cell with nothing parked.
+impl PendingSampleRate {
+    /// A cell with nothing pending.
     #[must_use]
     pub const fn new() -> Self {
         Self(AtomicU64::new(0))
@@ -73,12 +73,12 @@ impl ParkedSampleRate {
 
     /// Parks `rate`, replacing one that was not taken.
     #[inline]
-    pub fn park(&self, rate: SampleRate, order: Ordering) {
+    pub fn set(&self, rate: SampleRate, order: Ordering) {
         self.0.store(rate.get().to_bits(), order);
     }
 
-    /// Takes the parked rate, leaving the cell empty; `None` when nothing is
-    /// parked.
+    /// Takes the pending rate, leaving the cell empty; `None` when nothing is
+    /// pending.
     #[inline]
     pub fn take(&self, order: Ordering) -> Option<SampleRate> {
         match self.0.swap(0, order) {
@@ -94,11 +94,11 @@ mod tests {
     use core::sync::atomic::Ordering::Relaxed;
 
     #[test]
-    fn a_parked_rate_is_taken_once_and_the_latest_wins() {
-        let cell = ParkedSampleRate::new();
+    fn a_pending_rate_is_taken_once_and_the_latest_wins() {
+        let cell = PendingSampleRate::new();
         assert_eq!(cell.take(Relaxed), None, "a new cell is empty");
-        cell.park(SampleRate::SR_44K1, Relaxed);
-        cell.park(SampleRate::SR_48K, Relaxed);
+        cell.set(SampleRate::SR_44K1, Relaxed);
+        cell.set(SampleRate::SR_48K, Relaxed);
         assert_eq!(cell.take(Relaxed), Some(SampleRate::SR_48K));
         assert_eq!(cell.take(Relaxed), None, "a take empties the cell");
     }

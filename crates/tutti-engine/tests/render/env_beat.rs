@@ -331,7 +331,7 @@ fn onsets(stereo: &[f32]) -> Vec<usize> {
 fn click_clicks_on_the_model_beats() {
     let transport = Transport::new(SampleRate::of(SR));
     let settings = Arc::new(ClickSettings::new());
-    settings.mode().set(MetronomeMode::Always);
+    settings.mode().store(MetronomeMode::Always);
     settings.set_volume(tutti_nodes::ClickLevel::of(tutti_units::Amplitude::new(
         1.0,
     )));

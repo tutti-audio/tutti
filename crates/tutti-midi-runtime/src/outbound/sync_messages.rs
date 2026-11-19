@@ -1,7 +1,7 @@
 //! [`SyncMessages`]: what a [`SyncOut`](crate::SyncOut) sends, as one word.
 
 use tutti_midi_protocol::{MtcRate, Recipient};
-use tutti_rt::SettingWord;
+use tutti_rt::AtomicWord;
 use tutti_ump::U7;
 
 /// What a [`SyncOut`](crate::SyncOut) sends of the transport. One value in
@@ -73,9 +73,9 @@ impl Default for SyncMessages {
 ///
 /// Decoding is total: every word reads as some value, the rate from the low
 /// two bits of its byte ([`MtcRate::masked`]) and the device from the low seven
-/// of its field, so a word no [`to_word`](SettingWord::to_word) wrote still
+/// of its field, so a word no [`to_word`](AtomicWord::to_word) wrote still
 /// reads, and no arm exists for a word that cannot happen.
-impl SettingWord for SyncMessages {
+impl AtomicWord for SyncMessages {
     fn to_word(self) -> u64 {
         let mut word = u64::from(self.rate.code()) << Self::RATE_SHIFT;
         if self.clock {
