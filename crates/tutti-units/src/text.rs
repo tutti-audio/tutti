@@ -240,9 +240,8 @@ mod tests {
     use super::*;
 
     // `tutti_fixtures::check_range_contract` does not fit a string type: it
-    // takes a value built by an `Option`-returning `new` and read back by
-    // `Into<raw>`, while a `Text` is built by a `Result` that says why and
-    // leaves as `as_str`. The cases are pinned in the tests below.
+    // reads a value back through `Into<raw>`, and a `Text` leaves as
+    // `as_str`. The cases are pinned in the tests below.
     type Name = Text<1, 8>;
 
     #[test]
