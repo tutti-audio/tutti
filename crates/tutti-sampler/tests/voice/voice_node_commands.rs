@@ -354,7 +354,7 @@ fn a_speed_published_after_the_insert_reaches_a_fork() {
 
     handle
         .speed_cell()
-        .publish(tutti_units::PlaybackRate::new(2.0));
+        .publish(tutti_units::PlaybackRate::of(2.0));
 
     let (_after_ed, mut after) = ed
         .fork(ForkTarget::Master, ForkMode::Live, prepare)

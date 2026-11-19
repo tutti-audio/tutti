@@ -212,7 +212,7 @@ fn a_varispeed_change_moves_the_read_without_any_beat_discontinuity() {
     assert_eq!(before, 441_000, "10 s of a 44.1 kHz file");
 
     let beat_before = transport.beat();
-    reader.set_speed(PlaybackRate::new(2.0));
+    reader.set_speed(PlaybackRate::of(2.0));
     under(&mut reader, &transport, SR, 1);
     assert_eq!(
         transport.beat(),

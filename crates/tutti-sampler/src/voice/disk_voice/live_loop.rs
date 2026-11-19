@@ -178,7 +178,7 @@ impl Live {
             SampleRate::of(SR),
             MaxBlock::of(Samples::new(BLOCK)),
         ));
-        voice.set_speed(PlaybackRate::new(setup.speed));
+        voice.set_speed(PlaybackRate::of(setup.speed));
         Self {
             streamer,
             voice,
@@ -258,7 +258,7 @@ impl Memory {
         let clock = MockTransport::rolling(Beat::new(from), Bpm::of(120.0));
         let mut source = MemorySource::placed(wave, VoiceWindow::from(Beat::new(0.0)))
             .expect("a placeable wave");
-        source.set_speed(PlaybackRate::new(speed));
+        source.set_speed(PlaybackRate::of(speed));
         source.set_loop(loop_);
         source.prepare(&Prepare::new(
             SampleRate::of(SR),
@@ -588,8 +588,8 @@ fn edits_and_jumps_leave_the_live_voice_on_the_clock() {
                 memory.clock.set_beat(Beat::new(*beat));
             }
             Event::Speed(speed) => {
-                live.voice.set_speed(PlaybackRate::new(*speed));
-                memory.source.set_speed(PlaybackRate::new(*speed));
+                live.voice.set_speed(PlaybackRate::of(*speed));
+                memory.source.set_speed(PlaybackRate::of(*speed));
             }
         }
     }
@@ -1094,14 +1094,14 @@ fn two_voices_opened_in_sequence_on_one_file_share_no_cell() {
     let (_stream_b, mut b) = open(&mut streamer);
 
     a.set_gain(tutti_units::Amplitude::new(0.5));
-    a.set_speed(PlaybackRate::new(2.0));
+    a.set_speed(PlaybackRate::of(2.0));
     a.set_stretch_rate(tutti_units::ReadRate::new(0.5));
     stream_a.direction_cell().publish(crate::Direction::Reverse);
     assert!(streamer.step_until_settled(1_000) < 1_000);
 
     // What was written, on the voice it was written to.
     assert_eq!(a.gain(), tutti_units::Amplitude::new(0.5));
-    assert_eq!(a.shared_state.speed(), PlaybackRate::new(2.0));
+    assert_eq!(a.shared_state.speed(), PlaybackRate::of(2.0));
     assert_eq!(
         a.shared_state.stretch_rate(),
         tutti_units::ReadRate::new(0.5)

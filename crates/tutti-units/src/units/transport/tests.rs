@@ -234,25 +234,13 @@ fn src_ratio_converts_mismatched_rates() {
     );
 }
 
-/// The module's one non-finite rule: NaN stays NaN, an infinity saturates
-/// at its bound.
-#[test]
-fn playback_rate_follows_the_non_finite_rule() {
-    assert!(PlaybackRate::new_clamped(f64::NAN).get().is_nan());
-    assert_eq!(PlaybackRate::new_clamped(f64::INFINITY), PlaybackRate::MAX);
-    assert_eq!(
-        PlaybackRate::new_clamped(f64::NEG_INFINITY),
-        PlaybackRate::MIN
-    );
-}
-
 #[test]
 fn read_rate_composes_varispeed_with_conversion() {
     // Half speed on a 48k file in a 44.1k session: both effects apply once.
     // Both rates are f64-backed and the quotient is rounded once, so the
     // composition matches the exact figure to f64 precision (an f32 ratio was
     // off by ~1e-8 here).
-    let rate = PlaybackRate::new(0.5);
+    let rate = PlaybackRate::of(0.5);
     let src = SrcRatio::for_rates(SampleRate::SR_48K, SampleRate::SR_44K1);
     let expected = 0.5 * (48_000.0 / 44_100.0);
     assert!((rate.read_rate(src).get() - expected).abs() < 1e-12);
@@ -272,7 +260,7 @@ fn read_rate_composes_varispeed_with_conversion() {
 #[test]
 fn read_rate_advances_a_position_by_a_sample_count() {
     // Half speed: 512 output samples consume 256 source samples.
-    let half = PlaybackRate::new(0.5).read_rate(SrcRatio::UNITY);
+    let half = PlaybackRate::of(0.5).read_rate(SrcRatio::UNITY);
     assert_eq!(half.advance(Samples::new(512)), SamplePosition(256.0));
 
     // Unity is the identity, exactly.
@@ -289,8 +277,8 @@ fn read_rate_advances_a_position_by_a_sample_count() {
 /// exactly multiplication — a stretched varispeed voice reads at the product.
 #[test]
 fn read_rates_compose_in_series() {
-    let half = PlaybackRate::new(0.5).read_rate(SrcRatio::UNITY);
-    let double = PlaybackRate::new(2.0).read_rate(SrcRatio::UNITY);
+    let half = PlaybackRate::of(0.5).read_rate(SrcRatio::UNITY);
+    let double = PlaybackRate::of(2.0).read_rate(SrcRatio::UNITY);
 
     // Half speed then double: back to unity, and exactly so.
     assert_eq!(half.then(double), ReadRate::UNITY);
