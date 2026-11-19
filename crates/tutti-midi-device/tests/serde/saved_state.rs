@@ -87,7 +87,7 @@ fn bytes_that_are_not_the_state_name_their_cause() {
     let error = serde_json::from_str::<SavedState>(&bad).unwrap_err();
     assert!(error.to_string().contains("do not read back"), "{error}");
     assert!(
-        error.to_string().contains("not a valid JSON text"),
+        error.to_string().contains("not JSON of the Property Exchange form"),
         "{error}"
     );
 }
