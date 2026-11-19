@@ -150,7 +150,7 @@ pub use tutti_buffers::{ChannelLayout, ChannelTopology, Interleaved, Interleaved
 pub use tutti_music::{Meter, MeterMap, TimeSignature};
 pub use tutti_units::{
     Amplitude, At, BarNumber, Beat, Bipolar, Bpm, Cents, Db, Depth, Frame, Hz, Normalized, ParamId,
-    Q, SampleRate, Samples, Seconds, Semitones,
+    Q, SampleRate, Samples, Seconds, Semitones, TextError,
 };
 
 // The device handle and a device's identity.
@@ -832,12 +832,12 @@ pub mod midi {
             PeProgramEntry, PeProgramList, PeReassemblyError, PeReply, PeRequestId, PeResource,
             PeResourceList, PeResponse, PeSignal, PeState, PeStateEntry, PeStateList, PeStatus,
             PeStatusClass, PeTerminator, PeText, PeTextError, PeTransaction, PeUnreadable,
-            PeVersion, Place, Priority, PropertyName, RefusedAt, RequestRefused, ResIdUse,
-            ResourceDefaults, ResourceEntry, ResourceEntryBuilder, ResourceEvent, ResourceFailure,
-            ResourceGet, ResourceId, ResourceName, ResourceSet, ResourceTarget, ResponderEvent,
-            RoleName, SelectorAction, SetBody, SignificantBits, SimpleAction, SimultaneousRequests,
-            StateId, StateRev, StateSize, StateStamp, StepCount, StreamLimit, SubscribeId,
-            TimeoutWait, TypeHint, UnixSeconds, UpdateKind,
+            PeVersion, Place, Priority, PropertyName, PropertyNameError, RefusedAt, RequestRefused,
+            ResIdUse, ResourceDefaults, ResourceEntry, ResourceEntryBuilder, ResourceEvent,
+            ResourceFailure, ResourceGet, ResourceId, ResourceName, ResourceSet, ResourceTarget,
+            ResponderEvent, RoleName, SelectorAction, SetBody, SignificantBits, SimpleAction,
+            SimultaneousRequests, StateId, StateRev, StateSize, StateStamp, StepCount, StreamLimit,
+            SubscribeId, TimeoutWait, TypeHint, UnixSeconds, UpdateKind,
         };
         #[cfg(feature = "midi-hardware")]
         pub use tutti_midi_hardware::{
