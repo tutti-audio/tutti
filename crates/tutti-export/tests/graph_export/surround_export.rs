@@ -34,7 +34,7 @@ fn export(g: GraphBuilder, layout: ChannelLayout, secs: f64, path: &std::path::P
         &ExportConfig {
             render: RenderConfig {
                 sample_rate: RATE,
-                duration_seconds: Seconds(secs),
+                duration_seconds: Seconds::new(secs),
                 ..Default::default()
             },
             encode: EncodeConfig {

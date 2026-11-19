@@ -74,10 +74,9 @@ impl LfoShape {
     /// [`RandomSmooth`](Self::RandomSmooth); random shapes need the
     /// cycle index and are not handled here (they debug-assert).
     #[inline]
-    pub fn evaluate_periodic(&self, phase_t: Phase) -> f32 {
+    pub fn evaluate_periodic(&self, phase_t: Phase) -> f64 {
         let phase = phase_t.get();
-        // The shape is evaluated in `f64`; the signal value narrows once.
-        let value = match self {
+        match self {
             // The arms below stay on the raw cycle position: quarters and
             // halves of a cycle are not angles, so unwrapping once at the top
             // is right for them.
@@ -105,8 +104,7 @@ impl LfoShape {
                 debug_assert!(false, "evaluate_periodic called on random shape");
                 0.0
             }
-        };
-        value as f32
+        }
     }
 
     /// Every shape, in declaration order — for populating a picker or

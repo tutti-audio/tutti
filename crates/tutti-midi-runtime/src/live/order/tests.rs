@@ -41,5 +41,5 @@ fn sorts_stably_and_places_late_offsets_last() {
         })
         .collect();
     assert_eq!(got, vec![(3, 0), (0, 5), (1, 10), (2, 10), (4, 900)]);
-    assert_eq!(offset_of(&v[4], Samples(64)).get(), 63);
+    assert_eq!(offset_of(&v[4], Samples::new(64)).get(), 63);
 }

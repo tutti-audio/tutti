@@ -22,7 +22,7 @@ fn session() -> OfflineSession<&'static str, f64> {
     Session::builder()
         .float::<f64>()
         .sample_rate(RATE)
-        .max_block(MaxBlock::of(Samples(BLOCK)))
+        .max_block(MaxBlock::of(Samples::new(BLOCK)))
         .build()
         .expect("an f64 offline session builds")
 }
@@ -50,10 +50,10 @@ fn sine_synth() -> PolySynth<f64> {
         oscillator: OscillatorType::Sine,
         filter: FilterType::None,
         envelope: Adsr {
-            attack: Seconds(0.001),
-            decay: Seconds(0.0),
-            sustain: Amplitude(1.0),
-            release: Seconds(0.05),
+            attack: Seconds::new(0.001),
+            decay: Seconds::new(0.0),
+            sustain: Amplitude::new(1.0),
+            release: Seconds::new(0.05),
         },
         ..SynthConfig::default()
     })
@@ -122,7 +122,7 @@ fn an_f64_instrument_gain_scales_a_held_sine_linearly() {
     let _settle = render(&mut session, 64);
     let full = peak(&render(&mut session, 16));
     assert!(full > 0.0, "the note sounds");
-    handle.set_gain(Amplitude::new(0.5));
+    session.set(handle.gain().to(Amplitude::new(0.5))).unwrap();
     let _settle = render(&mut session, 64);
     let half = peak(&render(&mut session, 16));
     // A sampled peak of 440 Hz at 48 kHz is low by at most
@@ -161,7 +161,7 @@ fn an_f64_general_midi_rig_is_silent_then_renders_a_finite_note() {
     assert!(heard.iter().all(|s| s.is_finite()), "finite output");
     assert!(peak(&heard) > 0.0, "the note sounds");
 
-    gm.set_gain(Amplitude::SILENT);
+    session.set(gm.gain().to(Amplitude::SILENT)).unwrap();
     let _settle = render(&mut session, 4);
     assert_eq!(
         peak(&render(&mut session, 4)),

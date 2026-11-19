@@ -157,7 +157,7 @@ impl Fdn {
             lines
                 .map(|(m, l)| decay_seconds(m, l, rate))
                 .fold(Seconds::ZERO, |slowest, s| {
-                    Seconds(slowest.get().max(s.get()))
+                    Seconds::new(slowest.get().max(s.get()))
                 })
         }
     }
@@ -188,7 +188,7 @@ impl Fdn {
         }
         Some((
             db_rho,
-            Db::from_amplitude(Amplitude(self.norm_bound().max(1.0))).get(),
+            Db::from_amplitude(Amplitude::new(self.norm_bound().max(1.0))).get(),
             longest,
         ))
     }
@@ -227,10 +227,10 @@ impl Fdn {
             return Seconds::ZERO;
         }
         let Some((db_rho, db_sigma, _)) = self.slowest(band) else {
-            return Seconds(f64::INFINITY);
+            return Seconds::new(f64::INFINITY);
         };
         let per_frame = db_rho + db_sigma;
-        Seconds(if per_frame >= 0.0 {
+        Seconds::new(if per_frame >= 0.0 {
             f64::INFINITY
         } else if per_frame == f64::NEG_INFINITY {
             0.0
@@ -368,7 +368,7 @@ impl Network {
                 Stage::Taps(_) => 0.0,
             })
             .sum();
-        Seconds(frames / self.rate.get())
+        Seconds::new(frames / self.rate.get())
     }
 
     /// Echoes per second `at` this long after an impulse, from the loops alone.
@@ -382,7 +382,7 @@ impl Network {
     #[must_use]
     pub fn echo_density(&self, at: Seconds) -> Hz {
         let rate = self.rate.get();
-        let t = Seconds(at.get().max(0.0));
+        let t = Seconds::new(at.get().max(0.0));
         let mut total = 0.0f64;
         for stage in self.stages.iter() {
             match stage {
@@ -393,7 +393,7 @@ impl Network {
                 _ => {}
             }
         }
-        Hz(total)
+        Hz::new(total)
     }
 
     /// The shortest path from the input to the output, in frames: the
@@ -495,7 +495,7 @@ impl System for Network {
         if !frames.is_finite() || !decay.is_finite() {
             return Ring::Unbounded;
         }
-        Ring::Finite(Seconds(frames / self.rate.get() + decay))
+        Ring::Finite(Seconds::new(frames / self.rate.get() + decay))
     }
 }
 

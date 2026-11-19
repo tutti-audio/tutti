@@ -27,7 +27,7 @@ use tutti_units::{Beat, Bpm, Hz, SampleRate, Tail};
 pub fn step_map(points: &[(f64, f64)]) -> Arc<TempoMap> {
     Arc::new(
         TempoMap::new(points.iter().map(|&(beat, bpm)| TempoPoint {
-            beat: Beat(beat),
+            beat: Beat::new(beat),
             tempo: Bpm::of(bpm),
             transition: Transition::Step,
         }))

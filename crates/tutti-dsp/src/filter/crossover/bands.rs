@@ -113,7 +113,7 @@ pub fn fit_to_rate(frequencies: &mut [Hz], rate: SampleRate) {
     let n = frequencies.len();
     for (i, f) in frequencies.iter_mut().enumerate() {
         let cap = SOLVE_CEILING * rate.get() * (1.0 - 0.01 * (n - 1 - i) as f64);
-        *f = Hz(f.get().min(cap));
+        *f = Hz::new(f.get().min(cap));
     }
 }
 

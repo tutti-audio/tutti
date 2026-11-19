@@ -22,8 +22,8 @@ fn planes_refuse_a_ragged_plane_and_name_it() {
         Planes::new(&[&a, &b, &c]).unwrap_err(),
         BufferError::RaggedPlane {
             plane: 2,
-            expected: Samples(4),
-            found: Samples(3)
+            expected: Samples::new(4),
+            found: Samples::new(3)
         }
     );
     let (mut a, mut b) = ([0i16; 2], [0i16; 5]);
@@ -32,8 +32,8 @@ fn planes_refuse_a_ragged_plane_and_name_it() {
         PlanesMut::new(&mut planes).unwrap_err(),
         BufferError::RaggedPlane {
             plane: 1,
-            expected: Samples(2),
-            found: Samples(5)
+            expected: Samples::new(2),
+            found: Samples::new(5)
         }
     );
 }
@@ -44,7 +44,7 @@ fn planes_report_width_as_the_plane_count_and_length_in_frames() {
     let slices = [&data[0][..], &data[1][..], &data[2][..]];
     let p = Planes::new(&slices).unwrap();
     assert_eq!(p.layout(), ChannelLayout::from(3u16));
-    assert_eq!(p.frames(), Samples(6));
+    assert_eq!(p.frames(), Samples::new(6));
     assert!(!p.is_empty());
     assert_eq!(p.iter().count(), 3);
 }
@@ -63,11 +63,11 @@ fn planes_slice_applies_one_frame_range_to_every_plane() {
     let (l, r) = ([0i32, 1, 2, 3, 4], [10, 11, 12, 13, 14]);
     let slices = [&l[..], &r[..]];
     let p = Planes::new(&slices).unwrap();
-    let w = p.slice(Samples(1)..Samples(4));
-    assert_eq!(w.frames(), Samples(3));
+    let w = p.slice(Samples::new(1)..Samples::new(4));
+    assert_eq!(w.frames(), Samples::new(3));
     assert_eq!(w.plane(0).samples(), &[1, 2, 3]);
     assert_eq!(w.plane(1).samples(), &[11, 12, 13]);
-    let ww = w.slice(Samples(1)..Samples(2));
+    let ww = w.slice(Samples::new(1)..Samples::new(2));
     assert_eq!(
         ww.plane(1).samples(),
         &[12],
@@ -79,7 +79,9 @@ fn planes_slice_applies_one_frame_range_to_every_plane() {
 #[should_panic]
 fn planes_slice_past_the_end_panics() {
     let l = [0.0f32; 3];
-    let _ = Planes::new(&[&l]).unwrap().slice(Samples(0)..Samples(4));
+    let _ = Planes::new(&[&l])
+        .unwrap()
+        .slice(Samples::new(0)..Samples::new(4));
 }
 
 #[test]
@@ -89,7 +91,7 @@ fn planes_mut_yields_disjoint_writable_planes_that_land_in_their_own_slices() {
         let mut slices = [&mut l[..], &mut r[..], &mut c[..]];
         let mut p = PlanesMut::new(&mut slices).unwrap();
         assert_eq!(p.layout(), ChannelLayout::from(3u16));
-        assert_eq!(p.frames(), Samples(3));
+        assert_eq!(p.frames(), Samples::new(3));
         // All three are live at once, which only holds if they are disjoint.
         let mut all: Vec<_> = p.iter_mut().collect();
         for (i, plane) in all.iter_mut().enumerate() {
@@ -112,10 +114,10 @@ fn planes_mut_slice_writes_only_its_frames_on_every_plane() {
     let mut slices = [&mut l[..], &mut r[..]];
     let mut out = PlanesMut::new(&mut slices).unwrap();
     {
-        let mut w = out.slice_mut(Samples(2)..Samples(5));
-        assert_eq!(w.frames(), Samples(3));
+        let mut w = out.slice_mut(Samples::new(2)..Samples::new(5));
+        assert_eq!(w.frames(), Samples::new(3));
         w.plane_mut(0).samples_mut().fill(1.0);
-        let mut inner = w.slice_mut(Samples(1)..Samples(2));
+        let mut inner = w.slice_mut(Samples::new(1)..Samples::new(2));
         inner.plane_mut(1).samples_mut().fill(2.0);
         assert_eq!(w.plane(1).samples(), &[0.0, 2.0, 0.0]);
     }
@@ -135,7 +137,9 @@ fn planes_mut_reads_as_planes_of_its_current_contents() {
     assert_eq!(read.layout(), out.layout());
     assert_eq!(read.plane(0).samples(), &[1.0, 9.0]);
     assert_eq!(
-        read.slice(Samples(1)..Samples(2)).plane(1).samples(),
+        read.slice(Samples::new(1)..Samples::new(2))
+            .plane(1)
+            .samples(),
         &[4.0]
     );
 }
@@ -146,7 +150,7 @@ fn planes_mut_slice_past_the_end_panics() {
     let mut l = [0.0f32; 2];
     let mut slices = [&mut l[..]];
     let mut out = PlanesMut::new(&mut slices).unwrap();
-    let _ = out.slice_mut(Samples(1)..Samples(3));
+    let _ = out.slice_mut(Samples::new(1)..Samples::new(3));
 }
 
 #[test]
@@ -154,7 +158,7 @@ fn the_default_planes_is_the_empty_view_with_no_channel() {
     let empty = Planes::<f32>::default();
     assert_eq!(empty.channels(), 0);
     assert_eq!(empty.layout(), ChannelLayout::EMPTY);
-    assert_eq!(empty.frames(), Samples(0));
+    assert_eq!(empty.frames(), Samples::new(0));
     assert!(empty.get_plane(0).is_none());
 }
 
@@ -163,7 +167,7 @@ fn the_default_planes_mut_is_the_empty_view_with_no_channel() {
     let mut empty = PlanesMut::<f32>::default();
     assert_eq!(empty.channels(), 0);
     assert_eq!(empty.layout(), ChannelLayout::EMPTY);
-    assert_eq!(empty.frames(), Samples(0));
+    assert_eq!(empty.frames(), Samples::new(0));
     assert!(empty.get_plane(0).is_none());
     assert!(empty.get_plane_mut(0).is_none());
     assert!(empty.iter_mut().next().is_none());

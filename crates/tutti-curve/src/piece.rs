@@ -52,8 +52,10 @@ impl Piece {
         if k + 1 >= n {
             to
         } else {
-            Self::new(from, to, Law::Linear)
-                .value(param, Normalized::progress(Samples(k + 1), Samples(n)))
+            Self::new(from, to, Law::Linear).value(
+                param,
+                Normalized::progress(Samples::new(k + 1), Samples::new(n)),
+            )
         }
     }
 }

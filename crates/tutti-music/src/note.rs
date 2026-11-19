@@ -148,9 +148,9 @@ impl PitchClass {
 ///
 /// let a4 = Note::try_from(69u8).unwrap();
 /// assert_eq!(a4, Note::A4);
-/// assert_eq!(a4.frequency(), Hz(440.0));
+/// assert_eq!(a4.frequency(), Hz::new(440.0));
 ///
-/// let c_sharp_5 = a4.transpose(Semitones(4.0));
+/// let c_sharp_5 = a4.transpose(Semitones::new(4.0));
 /// assert_eq!(c_sharp_5.class(), PitchClass::CSharp);
 /// assert_eq!(c_sharp_5.flat_label(), "Db5");
 ///
@@ -237,7 +237,7 @@ impl Note {
     #[inline]
     #[must_use]
     pub fn interval_to(self, other: Note) -> Semitones {
-        Semitones(f64::from(
+        Semitones::new(f64::from(
             other.semitones_from_c0() - self.semitones_from_c0(),
         ))
     }
@@ -260,7 +260,7 @@ impl Note {
     #[must_use]
     pub fn frequency(self) -> Hz {
         let steps = f64::from(self.semitones_from_c0() - Self::A4.semitones_from_c0());
-        Self::A4_HZ * Semitones(steps).to_pitch_ratio()
+        Self::A4_HZ * Semitones::new(steps).to_pitch_ratio()
     }
 
     /// Returns the nearest note to `freq`, and how far off it is.
@@ -278,7 +278,7 @@ impl Note {
         let steps = Semitones::from_pitch_ratio(freq.get() / Self::A4_HZ.get());
         let nearest = libm::round(steps.get());
         let note = Self::from_semitones_from_c0(Self::A4.semitones_from_c0() + nearest as i32);
-        Some((note, Semitones(steps.get() - nearest).to_cents()))
+        Some((note, Semitones::new(steps.get() - nearest).to_cents()))
     }
 
     /// Returns the sharp spelling with octave: `A4`, `C#5`. Same as `Display`.
@@ -294,7 +294,7 @@ impl Note {
     }
 
     /// Concert A's frequency. The one tuning constant this module carries.
-    const A4_HZ: Hz = Hz(440.0);
+    const A4_HZ: Hz = Hz::new(440.0);
 
     /// MIDI note 0 is C-1 in scientific pitch notation. This offset is a MIDI
     /// convention, so it lives with the conversion rather than on the note.
@@ -356,7 +356,7 @@ mod tests {
         assert_eq!(a5, Note::new(PitchClass::A, 5));
         assert!((a5.frequency().get() - 880.0).abs() < 1e-2);
 
-        let a3 = Note::A4.transpose(Semitones(-12.0));
+        let a3 = Note::A4.transpose(Semitones::new(-12.0));
         assert!((a3.frequency().get() - 220.0).abs() < 1e-2);
     }
 
@@ -371,22 +371,22 @@ mod tests {
 
     #[test]
     fn nearest_note_reports_a_signed_offset() {
-        let (note, cents) = Note::nearest_to(Hz(440.0)).unwrap();
+        let (note, cents) = Note::nearest_to(Hz::new(440.0)).unwrap();
         assert_eq!(note, Note::A4);
         assert!(cents.get().abs() < 1e-3);
 
         // Slightly sharp of A4.
-        let (note, cents) = Note::nearest_to(Hz(445.0)).unwrap();
+        let (note, cents) = Note::nearest_to(Hz::new(445.0)).unwrap();
         assert_eq!(note, Note::A4);
         assert!(cents.get() > 0.0 && cents.get() < 50.0);
 
         // Slightly flat.
-        let (note, cents) = Note::nearest_to(Hz(435.0)).unwrap();
+        let (note, cents) = Note::nearest_to(Hz::new(435.0)).unwrap();
         assert_eq!(note, Note::A4);
         assert!(cents.get() < 0.0 && cents.get() > -50.0);
 
-        assert!(Note::nearest_to(Hz(0.0)).is_none());
-        assert!(Note::nearest_to(Hz(-1.0)).is_none());
+        assert!(Note::nearest_to(Hz::new(0.0)).is_none());
+        assert!(Note::nearest_to(Hz::new(-1.0)).is_none());
     }
 
     #[test]
@@ -417,8 +417,8 @@ mod tests {
         let c4 = Note::C4;
         let g4 = Note::new(PitchClass::G, 4);
 
-        assert_eq!(c4.interval_to(g4), Semitones(7.0));
-        assert_eq!(g4.interval_to(c4), Semitones(-7.0));
+        assert_eq!(c4.interval_to(g4), Semitones::new(7.0));
+        assert_eq!(g4.interval_to(c4), Semitones::new(-7.0));
         assert_eq!(c4.interval_to(c4), Semitones::UNISON);
     }
 

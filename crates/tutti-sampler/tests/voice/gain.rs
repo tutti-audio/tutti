@@ -80,7 +80,7 @@ impl Clock {
         let env = Env {
             frame: Frame::new(0),
             sample_rate: SampleRate::of(SR),
-            block_len: Samples(BLOCK),
+            block_len: Samples::new(BLOCK),
             transport: tutti_graph::TransportPosition::new(
                 true,
                 Bpm::of(self.tempo),
@@ -331,7 +331,7 @@ fn a_bare_memory_source_applies_its_own_gain() {
             },
         )
         .expect("a placeable wave");
-        source.trigger_at(SamplePosition(0.0));
+        source.trigger_at(SamplePosition::new(0.0));
         source.play();
 
         let b = Clock::new().block(&mut source);

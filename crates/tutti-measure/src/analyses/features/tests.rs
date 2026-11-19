@@ -1,0 +1,87 @@
+use super::*;
+use crate::{StftRequest, stft_magnitude};
+use rand::{RngExt, SeedableRng, rngs::StdRng};
+use tutti_buffers::Mono;
+use tutti_dsp::FftScratch;
+use tutti_units::SampleRate;
+use tutti_units::Samples;
+
+const RATE: f64 = 48_000.0;
+const WINDOW: usize = 2048;
+
+fn magnitudes_of(samples: &[f64]) -> StftMagnitude {
+    let request = StftRequest::new(Samples(WINDOW), Samples(WINDOW / 2));
+    stft_magnitude(
+        request,
+        Mono::new(samples),
+        SampleRate::of(RATE),
+        &mut FftScratch::new(),
+    )
+    .unwrap()
+}
+
+fn bin_width() -> Hz {
+    Hz(RATE / WINDOW as f64)
+}
+
+fn sine(hz: f64, len: usize) -> Vec<f64> {
+    tutti_fixtures::signal::sine(
+        tutti_units::Hz(hz),
+        tutti_units::Amplitude(1.0),
+        tutti_units::SampleRate::of(RATE),
+        tutti_units::Samples(len),
+    )
+    .into_iter()
+    .map(f64::from)
+    .collect()
+}
+
+/// A pure sine's centroid is its frequency, to within a bin.
+#[test]
+fn a_sine_centroid_is_its_frequency_within_a_bin() {
+    for hz in [1000.0f64, 3517.0, 9000.0] {
+        let stft = magnitudes_of(&sine(hz, 16_384));
+        let features = spectral_features(&stft, 0.85);
+        assert!(!features.is_empty());
+        for f in &features {
+            assert!(
+                (f.centroid.get() - hz).abs() < bin_width().get(),
+                "{hz}: {}",
+                f.centroid
+            );
+        }
+    }
+}
+
+/// White noise is flat and a sine is not.
+#[test]
+fn noise_is_flat_a_sine_is_not() {
+    let mut rng = StdRng::seed_from_u64(42);
+    let noise: Vec<f64> = (0..65_536).map(|_| rng.random_range(-1.0..1.0)).collect();
+    let flat = spectral_features(&magnitudes_of(&noise), 0.85);
+    let mean: f64 = flat.iter().map(|f| f.flatness).sum::<f64>() / flat.len() as f64;
+    // The geometric mean of an exponential power distribution sits at
+    // exp(-gamma) = 0.56 of its mean.
+    assert!((0.5..0.62).contains(&mean), "noise flatness {mean}");
+
+    let tone = spectral_features(&magnitudes_of(&sine(1000.0, 16_384)), 0.85);
+    assert!(tone.iter().all(|f| f.flatness < 1e-3), "{tone:?}");
+}
+
+/// The grid helper takes its bin width from the transform: its output is
+/// the per-row kernels' on the transform's own rows.
+#[test]
+fn the_grid_helper_applies_the_kernels_row_by_row() {
+    let stft = magnitudes_of(&sine(2000.0, 8192));
+    let width = stft.geometry().bin_frequency(BinIndex(1));
+    let grid = stft.magnitudes().grid();
+    let features = spectral_features(&stft, 0.5);
+    assert_eq!(features.len(), grid.frames().get());
+    for (frame, f) in grid.frames().indices().zip(&features) {
+        let row = grid.row(frame);
+        assert_eq!(f.centroid, spectral_centroid(row, width));
+        assert_eq!(f.flatness, spectral_flatness(row));
+        assert_eq!(f.rolloff, spectral_rolloff(row, width, 0.5));
+    }
+    assert_eq!(width.get(), 23.4375);
+}

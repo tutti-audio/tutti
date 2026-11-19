@@ -338,7 +338,7 @@ impl Controller for Vst3Controller {
     type Processor = ProcessorAny;
 
     fn latency(&self, main: MainThreadMarker) -> Samples {
-        Samples(self.loaded().latency_samples(main) as usize)
+        Samples::new(self.loaded().latency_samples(main) as usize)
     }
 
     fn tail(&self, main: MainThreadMarker) -> PluginTail {

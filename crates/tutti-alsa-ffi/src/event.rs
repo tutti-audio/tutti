@@ -3,8 +3,8 @@
 use std::time::Duration;
 
 use crate::address::{Address, ClientId, PortId};
-use crate::client::Packet;
 use crate::sys;
+use tutti_ump::Ump;
 
 /// One event read from a port, owned: alsa-lib's buffer is valid only until
 /// the next read, so nothing here borrows it.
@@ -12,8 +12,8 @@ use crate::sys;
 pub enum Event {
     /// A UMP message.
     Ump {
-        /// The message, its words padded with zeros to the event's fixed field.
-        packet: Packet,
+        /// The message: the words its type takes from the event's fixed field.
+        ump: Ump,
         /// When the port stamped the event, as the time since its queue
         /// started; `None` when the port is not stamping.
         stamp: Option<Duration>,
@@ -29,12 +29,16 @@ impl Event {
     /// Copies what the backend needs out of `ev`.
     pub(crate) fn from_event(ev: &sys::snd_seq_ump_event_t) -> Self {
         if ev.type_ == sys::SND_SEQ_EVENT_UMP_PACKET {
-            return Self::Ump {
-                packet: Packet::from_field(ev.ump),
-                stamp: ev
-                    .real_time()
-                    .map(|t| Duration::new(u64::from(t.tv_sec), t.tv_nsec)),
-            };
+            // The fixed field holds four words, which every message fits, so
+            // the read always finds one.
+            if let Some(ump) = Ump::from_words(&ev.ump) {
+                return Self::Ump {
+                    ump,
+                    stamp: ev
+                        .real_time()
+                        .map(|t| Duration::new(u64::from(t.tv_sec), t.tv_nsec)),
+                };
+            }
         }
         Announced::of(ev).map_or(Self::Notice, Self::Announce)
     }
@@ -140,7 +144,7 @@ mod tests {
         }
     }
 
-    /// A UMP packet event carries its words, and the stamp is its real time as
+    /// A UMP packet event carries its message, and the stamp is its real time as
     /// a duration, none when the flags say the stamp is a tick.
     #[test]
     fn a_ump_event_carries_its_words_and_real_time_stamp() {
@@ -152,15 +156,30 @@ mod tests {
         ev.time[..4].copy_from_slice(&3u32.to_ne_bytes());
         ev.time[4..].copy_from_slice(&500u32.to_ne_bytes());
         ev.flags = sys::SND_SEQ_TIME_STAMP_REAL;
-        let Event::Ump { packet, stamp } = Event::from_event(&ev) else {
+        let Event::Ump { ump, stamp } = Event::from_event(&ev) else {
             panic!("a UMP packet event is a message");
         };
-        assert_eq!(packet.words(), [0x2090_4040, 0, 0, 0]);
+        assert_eq!(ump, Ump([0x2090_4040, 0, 0, 0]));
         assert_eq!(stamp, Some(Duration::new(3, 500)));
         ev.flags = 0;
         assert!(matches!(
             Event::from_event(&ev),
             Event::Ump { stamp: None, .. }
         ));
+    }
+
+    /// A message takes only the words its type has (M2-104 Table 4: type 0x4 is
+    /// two words): what follows in the fixed field is not part of it.
+    #[test]
+    fn a_ump_event_reads_the_words_of_its_message_type_only() {
+        let ev = sys::snd_seq_ump_event_t {
+            type_: sys::SND_SEQ_EVENT_UMP_PACKET,
+            ump: [0x4090_3C00, 0x8000_0000, 0xDEAD_BEEF, 0xFFFF_FFFF],
+            ..Default::default()
+        };
+        let Event::Ump { ump, .. } = Event::from_event(&ev) else {
+            panic!("a UMP packet event is a message");
+        };
+        assert_eq!(ump, Ump([0x4090_3C00, 0x8000_0000, 0, 0]));
     }
 }

@@ -143,7 +143,10 @@ fn graph_engine(
     sink: impl IntoNode<Controls = ()>,
     width: u16,
 ) -> (Engine, Editor) {
-    let (mut ed, exec) = Editor::new(Prepare::new(SampleRate::of(SR), MaxBlock::of(Samples(512))));
+    let (mut ed, exec) = Editor::new(Prepare::new(
+        SampleRate::of(SR),
+        MaxBlock::of(Samples::new(512)),
+    ));
     wire_clock(&mut ed, sink, width);
     let engine = Engine::new(transport, &mut ed, exec, tutti_engine::BlockDates::Os)
         .expect("within the limits");
@@ -186,7 +189,7 @@ fn the_env_walk_is_the_env_beat() {
     let (graph, _ed) = graph_engine(&transport, Unforkable(sink), 1);
 
     let locate = |beat: f64| MotionEvent::Locate {
-        beat: Beat(beat),
+        beat: Beat::new(beat),
         fade: FadeOut::Immediate,
         then: Then::Keep,
     };
@@ -329,9 +332,14 @@ fn click_clicks_on_the_model_beats() {
     let transport = Transport::new(SampleRate::of(SR));
     let settings = Arc::new(ClickSettings::new());
     settings.mode().set(MetronomeMode::Always);
-    settings.store_volume(tutti_nodes::ClickLevel::of(tutti_units::Amplitude(1.0)));
+    settings.store_volume(tutti_nodes::ClickLevel::of(tutti_units::Amplitude::new(
+        1.0,
+    )));
     let click = ClickNode::new(&transport, settings);
-    let (mut ed, exec) = Editor::new(Prepare::new(SampleRate::of(SR), MaxBlock::of(Samples(512))));
+    let (mut ed, exec) = Editor::new(Prepare::new(
+        SampleRate::of(SR),
+        MaxBlock::of(Samples::new(512)),
+    ));
     const CLICK: NodeKey = NodeKey(1);
     ed.insert(CLICK, "click", click);
     ed.spec_mut()
@@ -350,7 +358,7 @@ fn click_clicks_on_the_model_beats() {
     m.schedule(
         At::Frame(Frame::new(30_000)),
         MotionEvent::Locate {
-            beat: Beat(6.9),
+            beat: Beat::new(6.9),
             fade: FadeOut::Immediate,
             then: Then::Keep,
         },
@@ -412,7 +420,7 @@ impl Node for EnvLog {
 fn env_graph(max_block: usize, log: &Arc<Mutex<Vec<Env>>>) -> (Editor, Executor) {
     let (mut ed, exec) = Editor::new(Prepare::new(
         SampleRate::of(SR),
-        MaxBlock::of(Samples(max_block)),
+        MaxBlock::of(Samples::new(max_block)),
     ));
     ed.insert(NodeKey(1), "env", Unforkable(EnvLog(Arc::clone(log))));
     ed.spec_mut()
@@ -460,7 +468,7 @@ fn an_offline_render_sees_the_live_engine_transport() {
         .expect("room");
     live_t
         .motion()
-        .try_send(MotionEvent::play_from(Beat(BAR_2)))
+        .try_send(MotionEvent::play_from(Beat::new(BAR_2)))
         .expect("room");
     for &n in &blocks {
         render(&live, ChannelLayout::MONO, n);
@@ -469,7 +477,7 @@ fn an_offline_render_sees_the_live_engine_transport() {
     // Offline, in the graph blocks the live engine rendered (a device block
     // past its maximum is two).
     let timeline = Arc::new(OfflineTimeline::new(&OfflineTimelineConfig {
-        start_beat: Beat(BAR_2),
+        start_beat: Beat::new(BAR_2),
         tempo_map: step_map(&[(0.0, 100.0)]),
         sample_rate: SampleRate::of(SR),
         loop_range: LoopRange::new(Beat::new(6.0), Beat::new(7.0)),
@@ -511,7 +519,7 @@ fn an_offline_render_sees_the_live_engine_transport() {
     }
 
     // Not vacuous: it started on bar 2, it rolled, and it wrapped.
-    assert_eq!(off_log[0].transport.beat(), Beat(BAR_2));
+    assert_eq!(off_log[0].transport.beat(), Beat::new(BAR_2));
     assert!(off_log[0].transport.playing);
     assert!(wrapped, "the loop wrapped");
     // The timeline stands after the last block, where the live clock does.
@@ -525,14 +533,16 @@ fn an_offline_render_sees_the_live_engine_transport() {
 #[test]
 fn the_offline_env_walk_starts_each_block_on_the_timeline() {
     let timeline = OfflineTimeline::new(&OfflineTimelineConfig {
-        start_beat: Beat(4.0),
+        start_beat: Beat::new(4.0),
         tempo_map: step_map(&[(0.0, 128.0)]),
         sample_rate: SampleRate::of(SR),
         loop_range: None,
     });
     let log = Log::default();
-    let (mut ed, mut exec) =
-        Editor::new(Prepare::new(SampleRate::of(SR), MaxBlock::of(Samples(512))));
+    let (mut ed, mut exec) = Editor::new(Prepare::new(
+        SampleRate::of(SR),
+        MaxBlock::of(Samples::new(512)),
+    ));
     wire_clock(&mut ed, Unforkable(GraphBeats::new(&log)), 1);
     let mut out = vec![0.0f32; 512];
     let mut at = 0;

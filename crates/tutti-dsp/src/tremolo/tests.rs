@@ -48,7 +48,7 @@ fn tremolo(wave: OscillatorWave, rate: Hz, depth: f64) -> Tremolo {
 }
 
 fn gains(depth: f64, frames: usize, blocks: &[usize]) -> Vec<f32> {
-    let mut t = tremolo(OscillatorWave::Sine, Hz(HZ), depth);
+    let mut t = tremolo(OscillatorWave::Sine, Hz::new(HZ), depth);
     let ones = vec![vec![1.0f32; frames]];
     run(frames, blocks, &ones, |i, o| t.process(i, o)).remove(0)
 }
@@ -57,7 +57,7 @@ fn gains(depth: f64, frames: usize, blocks: &[usize]) -> Vec<f32> {
 #[test]
 fn depth_zero_is_unity() {
     let x = noise(1, 2_000, 1.0);
-    let mut t = tremolo(OscillatorWave::Sine, Hz(HZ), 0.0);
+    let mut t = tremolo(OscillatorWave::Sine, Hz::new(HZ), 0.0);
     let out = run(2_000, &[2_000], std::slice::from_ref(&x), |i, o| {
         t.process(i, o)
     });
@@ -70,7 +70,7 @@ fn depth_zero_is_unity() {
 fn the_output_is_the_input_times_the_closed_form_gain() {
     let x = noise(2, 1_920, 1.0);
     for d in [1.0f64, 0.5, -0.75] {
-        let mut t = tremolo(OscillatorWave::Sine, Hz(HZ), d);
+        let mut t = tremolo(OscillatorWave::Sine, Hz::new(HZ), d);
         let out = run(1_920, &[1_920], std::slice::from_ref(&x), |i, o| {
             t.process(i, o)
         });
@@ -127,7 +127,7 @@ fn the_phase_continues_across_blocks() {
 /// wave 0: gain `1 - |d| / 2`).
 #[test]
 fn every_channel_takes_one_gain_and_rate_zero_holds() {
-    let mut t = tremolo(OscillatorWave::Sine, Hz(HZ), 0.6);
+    let mut t = tremolo(OscillatorWave::Sine, Hz::new(HZ), 0.6);
     let ones = vec![vec![1.0f32; 100]; 3];
     let out = run(100, &[100], &ones, |i, o| t.process(i, o));
     for (c, channel) in out.iter().enumerate() {
@@ -144,7 +144,7 @@ fn every_channel_takes_one_gain_and_rate_zero_holds() {
 /// `1 - d` over its low one (the frames clear of the edges).
 #[test]
 fn a_square_wave_switches_between_unity_and_one_minus_depth() {
-    let mut t = tremolo(OscillatorWave::Square, Hz(HZ), 0.75);
+    let mut t = tremolo(OscillatorWave::Square, Hz::new(HZ), 0.75);
     let ones = vec![vec![1.0f32; PERIOD]];
     let g = run(PERIOD, &[PERIOD], &ones, |i, o| t.process(i, o)).remove(0);
     assert!(g[10..230].iter().all(|&g| (g - 1.0).abs() < 1e-6));
@@ -154,7 +154,7 @@ fn a_square_wave_switches_between_unity_and_one_minus_depth() {
 fn auto_pan(law: PanLaw, depth: f64) -> AutoPan {
     let mut p = AutoPan::new(OscillatorWave::Sine, law, RATE);
     p.aim(&AutoPanControls {
-        rate: Hz(HZ),
+        rate: Hz::new(HZ),
         depth: Depth::of(depth),
     });
     p
@@ -171,7 +171,7 @@ fn auto_pan_places_by_pan_gains_at_the_lfo_position() {
             let out = run(960, &[37, 200], &ones, |i, o| p.process(i, o));
             for (n, (&out_l, &out_r)) in out[0].iter().zip(&out[1]).enumerate() {
                 let u = (TAU * HZ * n as f64 / RATE.get()).sin();
-                let (l, r) = pan_gains(Pan(d * u), law);
+                let (l, r) = pan_gains(Pan::new(d * u), law);
                 assert!(
                     (f64::from(out_l) - l.get()).abs() < 1e-5,
                     "{law:?} {d} L {n}"
@@ -225,7 +225,7 @@ fn auto_pan_leaves_a_mono_view_untouched() {
 fn an_f64_tremolo_and_auto_pan_are_their_closed_forms_in_f64() {
     let (frames, d) = (960usize, 0.7f64);
     let ones = vec![1.0f64; frames];
-    let mut t = tremolo(OscillatorWave::Sine, Hz(HZ), d);
+    let mut t = tremolo(OscillatorWave::Sine, Hz::new(HZ), d);
     let mut y = vec![0.0f64; frames];
     t.process(
         Planes::new(&[&ones[..]]).unwrap(),
@@ -243,7 +243,7 @@ fn an_f64_tremolo_and_auto_pan_are_their_closed_forms_in_f64() {
         );
         for n in 0..frames {
             let u = (TAU * HZ * n as f64 / RATE.get()).sin();
-            let (gl, gr) = pan_gains(Pan(d * u), law);
+            let (gl, gr) = pan_gains(Pan::new(d * u), law);
             assert!((l[n] - gl.get()).abs() < 1e-12, "{law:?} left {n}");
             assert!((r[n] - gr.get()).abs() < 1e-12, "{law:?} right {n}");
         }

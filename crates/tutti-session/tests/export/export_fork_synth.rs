@@ -44,7 +44,7 @@ fn bounce_of(seconds: f64, rate: f64, clock: ExportClock) -> Bounce<NodeKey, Buf
     Bounce::project()
         .master_buffers()
         .channels(ChannelLayout::STEREO)
-        .range(Range::Seconds(Seconds(0.0), Seconds(seconds)))
+        .range(Range::Seconds(Seconds::new(0.0), Seconds::new(seconds)))
         .sample_rate(SampleRate::of(rate))
         .clock(clock)
         .latency(BounceLatency::Keep)
@@ -80,7 +80,7 @@ fn poly() -> PolySynth<f32> {
     PolySynth::<f32>::new(SynthConfig {
         oscillator: OscillatorType::Saw,
         envelope: Adsr {
-            attack: Seconds(0.0),
+            attack: Seconds::new(0.0),
             ..Default::default()
         },
         ..Default::default()
@@ -133,9 +133,9 @@ fn session_with<N: tutti_session::SessionNode>(unit: N) -> (DetachedSession, Nod
 /// Middle C from beat 1 to beat 2.
 fn clip() -> Vec<TimedMidiEvent> {
     vec![
-        TimedMidiEvent::new(Beat(1.0), clip_note_on()).unwrap(),
+        TimedMidiEvent::new(Beat::new(1.0), clip_note_on()).unwrap(),
         TimedMidiEvent::new(
-            Beat(2.0),
+            Beat::new(2.0),
             Message::midi2(
                 MidiChannel::FIRST,
                 Voice2::note_off(NoteNumber::of(60), NoteVelocity::MIN),
@@ -152,7 +152,7 @@ fn clip_note_on() -> Ump {
 fn install_clip(session: &mut DetachedSession, synth: NodeKey) {
     session
         .midi()
-        .play_clip(synth, Beat(0.0), clip())
+        .play_clip(synth, Beat::new(0.0), clip())
         .expect("the synth takes a clip");
     let _ = session.update();
 }
@@ -160,7 +160,7 @@ fn install_clip(session: &mut DetachedSession, synth: NodeKey) {
 /// A 90 BPM timeline from beat 0 at `rate`.
 fn timeline(rate: f64) -> Arc<OfflineTimeline> {
     Arc::new(OfflineTimeline::new(&OfflineTimelineConfig {
-        start_beat: Beat(0.0),
+        start_beat: Beat::new(0.0),
         tempo_map: Arc::new(tutti_tempo::TempoMap::constant(Bpm::of(90.0)).expect("a tempo")),
         sample_rate: SampleRate::of(rate),
         loop_range: None,
@@ -177,7 +177,7 @@ fn request(rate: f64) -> Bounce<NodeKey, BufferMaster> {
 /// the note sounds like from its first frame, at `rate`.
 fn reference<N: Node>(unit: N, rate: f64) -> Vec<f32> {
     let mut unit = Direct::new(unit, SampleRate::of(rate), 64);
-    let at = Offset::of(Samples(0), Samples(64));
+    let at = Offset::of(Samples::new(0), Samples::new(64));
     unit.events(0, &[Event::midi(at, clip_note_on())]);
     let mut out = Vec::with_capacity(NOTE);
     while out.len() < NOTE {
@@ -219,7 +219,7 @@ fn assert_live_untouched(session: &mut DetachedSession) {
         let t = tutti_graph::TransportPosition::new(
             true,
             Bpm::of(120.0),
-            Beat(1.0 + f64::from(i) / (RATE / 2.0)),
+            Beat::new(1.0 + f64::from(i) / (RATE / 2.0)),
             None,
         );
         let mut frame = [0.0f32; 2];

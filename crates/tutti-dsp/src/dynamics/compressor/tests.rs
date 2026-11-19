@@ -25,12 +25,12 @@ fn controls(
     makeup: f64,
 ) -> CompressorControls {
     CompressorControls {
-        threshold: Db(threshold),
-        knee: Db(knee),
-        ratio: CompressionRatio(ratio),
-        attack: Seconds(attack),
-        release: Seconds(release),
-        makeup: Db(makeup),
+        threshold: Db::new(threshold),
+        knee: Db::new(knee),
+        ratio: CompressionRatio::new(ratio),
+        attack: Seconds::new(attack),
+        release: Seconds::new(release),
+        makeup: Db::new(makeup),
         ..CompressorControls::DEFAULT
     }
 }
@@ -67,30 +67,30 @@ fn hostile() -> Vec<CompressorControls> {
     let base = controls(-18.0, 6.0, 4.0, 0.003, 0.08, 3.0);
     let mut all = vec![
         CompressorControls {
-            knee: Db(-6.0),
+            knee: Db::new(-6.0),
             ..base
         },
         CompressorControls {
-            ratio: CompressionRatio(0.25),
+            ratio: CompressionRatio::new(0.25),
             ..base
         },
         CompressorControls {
-            attack: Seconds(-1.0),
-            release: Seconds(-1.0),
+            attack: Seconds::new(-1.0),
+            release: Seconds::new(-1.0),
             ..base
         },
     ];
     for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
         all.push(CompressorControls {
-            threshold: Db(bad),
-            knee: Db(bad),
-            ratio: CompressionRatio(bad),
-            makeup: Db(bad),
+            threshold: Db::new(bad),
+            knee: Db::new(bad),
+            ratio: CompressionRatio::new(bad),
+            makeup: Db::new(bad),
             ..base
         });
         all.push(CompressorControls {
-            attack: Seconds(bad),
-            release: Seconds(bad),
+            attack: Seconds::new(bad),
+            release: Seconds::new(bad),
             ..base
         });
     }
@@ -192,7 +192,7 @@ fn the_member_reduction_is_the_static_curve() {
         for step in -80..=40 {
             let level = f64::from(step) * 1.5 - 20.0;
             let want = curve(level, t, w, r);
-            let got = reduction_db(&m, Db(level)).get();
+            let got = reduction_db(&m, Db::new(level)).get();
             // `Db` is `f64` and the member and the oracle are one formula, so the gap is rounding.
             assert!(
                 (got - want).abs() < 1e-12,
@@ -202,8 +202,8 @@ fn the_member_reduction_is_the_static_curve() {
         // Continuity at both edges: the two pieces meeting there give the same value.
         for edge in [t - w / 2.0, t + w / 2.0] {
             let (below, above) = (
-                reduction_db(&m, Db(edge - 1e-3)).get(),
-                reduction_db(&m, Db(edge + 1e-3)).get(),
+                reduction_db(&m, Db::new(edge - 1e-3)).get(),
+                reduction_db(&m, Db::new(edge + 1e-3)).get(),
             );
             assert!(
                 (above - below).abs() < 1e-2,
@@ -218,13 +218,13 @@ fn the_member_reduction_is_the_static_curve() {
 fn the_curve_has_its_three_regions() {
     let m = CompressorMember::designed(&controls(-20.0, 10.0, 4.0, 0.0, 0.0, 0.0), RATE);
     // Under -25 dB: nothing. Over -15 dB: three quarters of the excess.
-    assert_eq!(reduction_db(&m, Db(-40.0)), Db::UNITY);
-    assert_eq!(reduction_db(&m, Db(-25.0)), Db::UNITY);
+    assert_eq!(reduction_db(&m, Db::new(-40.0)), Db::UNITY);
+    assert_eq!(reduction_db(&m, Db::new(-25.0)), Db::UNITY);
     // `7.5` and `15` are exact in `f64`, which the `Db` stores; the quadratic is to rounding.
-    assert_eq!(reduction_db(&m, Db(-10.0)), Db(7.5));
-    assert_eq!(reduction_db(&m, Db::UNITY), Db(15.0));
+    assert_eq!(reduction_db(&m, Db::new(-10.0)), Db::new(7.5));
+    assert_eq!(reduction_db(&m, Db::UNITY), Db::new(15.0));
     // At the threshold the quadratic has run a half of the knee: (3/4)(5)^2/(2*10).
-    assert!((reduction_db(&m, Db(-20.0)).get() - 0.75 * 25.0 / 20.0).abs() < 1e-14);
+    assert!((reduction_db(&m, Db::new(-20.0)).get() - 0.75 * 25.0 / 20.0).abs() < 1e-14);
 }
 
 /// The member holds the controls made runnable: a knee under 0 reads as 0, a ratio under
@@ -235,15 +235,15 @@ fn the_member_floors_what_cannot_be_run() {
     let base = controls(-18.0, 6.0, 4.0, 0.003, 0.08, 3.0);
     let m = CompressorMember::designed(
         &CompressorControls {
-            knee: Db(-6.0),
-            ratio: CompressionRatio(0.25),
-            attack: Seconds(-1.0),
-            release: Seconds(-0.5),
+            knee: Db::new(-6.0),
+            ratio: CompressionRatio::new(0.25),
+            attack: Seconds::new(-1.0),
+            release: Seconds::new(-0.5),
             ..base
         },
         RATE,
     );
-    assert_eq!((m.knee, m.ratio), (Db::UNITY, CompressionRatio(1.0)));
+    assert_eq!((m.knee, m.ratio), (Db::UNITY, CompressionRatio::new(1.0)));
     // A time under 0 is the follower of time 0: instant.
     assert_eq!(
         Detector::<f32>::of(&m).ballistics,
@@ -252,10 +252,10 @@ fn the_member_floors_what_cannot_be_run() {
     let d = CompressorControls::DEFAULT;
     let bad = CompressorMember::designed(
         &CompressorControls {
-            threshold: Db(f64::NAN),
-            knee: Db(f64::INFINITY),
-            ratio: CompressionRatio(f64::NAN),
-            makeup: Db(f64::NEG_INFINITY),
+            threshold: Db::new(f64::NAN),
+            knee: Db::new(f64::INFINITY),
+            ratio: CompressionRatio::new(f64::NAN),
+            makeup: Db::new(f64::NEG_INFINITY),
             ..base
         },
         RATE,
@@ -880,7 +880,7 @@ const RELEASE_LEVEL: f64 = -8.0;
 
 /// The f32 coefficient of a release of `tau` seconds at 192 kHz, as `f64`.
 fn release_coeff(tau: f64) -> f64 {
-    f64::from(Seconds(tau).one_pole_coeff(SampleRate::SR_192K) as f32)
+    f64::from(Seconds::new(tau).one_pole_coeff(SampleRate::SR_192K) as f32)
 }
 
 /// The deviation from the closed form an f32 compensated one-pole of coefficient `c` shows in a

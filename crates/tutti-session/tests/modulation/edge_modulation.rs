@@ -14,7 +14,9 @@ use crate::common;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::ForkByClone;
-use tutti_session::{Edge, ModTarget, OutPort, ParamRef, RangeTarget, Root, RouteSpec, Session};
+use tutti_session::{
+    Edge, GainTarget, ModTarget, OutPort, ParamRef, RangeTarget, Root, RouteSpec, Session,
+};
 use tutti_units::{Amplitude, Depth, SampleRate, UnitParam};
 
 use common::probe::Pulse;
@@ -43,6 +45,13 @@ fn settle(s: &mut Session) {
     );
 }
 
+/// The gain target of `edge`, which has a lane.
+fn gain(s: &Session, edge: Edge) -> GainTarget {
+    s.graph_ref()
+        .gain_target(edge.source(), edge.sink())
+        .expect("a lane")
+}
+
 /// Output channel 0 (the left of the stereo root) for `blocks` blocks.
 fn render(s: &mut Session, blocks: usize) -> Vec<f32> {
     let mut all = Vec::new();
@@ -54,7 +63,8 @@ fn render(s: &mut Session, blocks: usize) -> Vec<f32> {
     all
 }
 
-/// Two always-on sources summed at output 0; the edge of the first.
+/// Two always-on sources summed at output 0; the edge of the first, which has
+/// a gain lane at unity (declared with the wire).
 fn mixer(s: &mut Session) -> Edge {
     let level = |level| {
         ForkByClone(Pulse {
@@ -68,7 +78,9 @@ fn mixer(s: &mut Session) -> Edge {
     s.graph()
         .connect(OutPort::new(a, 0), Root::output(0))
         .unwrap()
-        .hard();
+        .hard()
+        .gain(Amplitude::UNITY)
+        .unwrap();
     s.graph()
         .connect(OutPort::new(b, 0), Root::output(0))
         .unwrap()
@@ -81,7 +93,7 @@ fn mixer(s: &mut Session) -> Edge {
 /// `depth * macro * span`, clamped to the range: with a range of `-2..=2`
 /// (span 4), macro 0.5 at depth 0.25 gives `w = 1.0 + 0.5 = 1.5`, so the sum
 /// is `(0.0 + 1.5 * A) + B`. Then the macro moves (`w = 1.0 - 0.5 = 0.5`),
-/// the knob moves (`Edge::set_gain`: `w = -0.25 - 0.5`, polarity), a
+/// the knob moves (the gain target: `w = -0.25 - 0.5`, polarity), a
 /// narrower range changes the span, and one whose floor the value is below
 /// clamps it; and removing the route returns the edge to its base, which
 /// the knob left at `-0.25` (the knob is the edge's gain: one cell), once the
@@ -95,7 +107,8 @@ fn a_route_onto_an_edge_modulates_the_sum_by_the_analytic_amount() {
     assert!(plain.iter().all(|&x| x == A + B), "unity before any route");
 
     let mut m = s.mods_mut();
-    m.range(edge, Amplitude(-2.0)..Amplitude(2.0)).unwrap();
+    m.range(edge, Amplitude::new(-2.0)..Amplitude::new(2.0))
+        .unwrap();
     let source = m.macro_(0.5);
     let route = m
         .route(RouteSpec::new(source, edge, Depth::of(0.25)))
@@ -117,17 +130,17 @@ fn a_route_onto_an_edge_modulates_the_sum_by_the_analytic_amount() {
     settle(&mut s);
     figure(&mut s, 0.5, "the macro moved");
 
-    edge.set_gain(s.graph(), Amplitude(-0.25)).expect("an edge");
+    s.set(gain(&s, edge).to(Amplitude::new(-0.25))).unwrap();
     settle(&mut s);
     figure(&mut s, -0.75, "the knob moved");
 
     // The range is the route's span too: `-0.25 + 0.25 * -0.5 * 2`.
-    s.set(RangeTarget::of(edge).to(Amplitude(-2.0)..Amplitude(0.0)))
+    s.set(RangeTarget::of(edge).to(Amplitude::new(-2.0)..Amplitude::new(0.0)))
         .unwrap();
     settle(&mut s);
     figure(&mut s, -0.5, "within the range");
     // Span 2.25: `-0.25 - 0.28125` is below the range's floor.
-    s.set(RangeTarget::of(edge).to(Amplitude(-0.25)..Amplitude(2.0)))
+    s.set(RangeTarget::of(edge).to(Amplitude::new(-0.25)..Amplitude::new(2.0)))
         .unwrap();
     settle(&mut s);
     figure(&mut s, -0.25, "clamped to the range");
@@ -137,7 +150,7 @@ fn a_route_onto_an_edge_modulates_the_sum_by_the_analytic_amount() {
     figure(&mut s, -0.25, "the route gone: the base the knob left");
 }
 
-/// The gain has one writer. `Graph::set_edge_gain` is the knob whether or not
+/// The gain has one writer. `GainTarget` is the knob whether or not
 /// the edge is routed: a base of 0.5 stays the base when a route arrives (the
 /// lane modulates around it, it does not snap to unity), a base moved while
 /// routed moves the modulated figure, and removing the route returns to the
@@ -151,8 +164,7 @@ fn the_base_is_the_lanes_knob_and_a_route_returns_to_it() {
     let mut s = offline();
     let edge = mixer(&mut s);
     settle(&mut s);
-    edge.set_gain(s.graph(), Amplitude::new(0.5))
-        .expect("an edge");
+    s.set(gain(&s, edge).to(Amplitude::new(0.5))).unwrap();
     settle(&mut s);
 
     let figure = |s: &mut Session, w: f32, what: &str| {
@@ -165,7 +177,8 @@ fn the_base_is_the_lanes_knob_and_a_route_returns_to_it() {
     figure(&mut s, 0.5, "the base, before any route");
 
     let mut m = s.mods_mut();
-    m.range(edge, Amplitude(-2.0)..Amplitude(2.0)).unwrap();
+    m.range(edge, Amplitude::new(-2.0)..Amplitude::new(2.0))
+        .unwrap();
     let source = m.macro_(0.5);
     let route = m
         .route(RouteSpec::new(source, edge, Depth::of(0.5)))
@@ -173,11 +186,10 @@ fn the_base_is_the_lanes_knob_and_a_route_returns_to_it() {
     settle(&mut s);
     figure(&mut s, 1.5, "the base plus the route's offset");
 
-    edge.set_gain(s.graph(), Amplitude::new(0.25))
-        .expect("an edge");
+    s.set(gain(&s, edge).to(Amplitude::new(0.25))).unwrap();
     settle(&mut s);
     figure(&mut s, 1.25, "the base moved while routed");
-    assert_eq!(edge.gain(s.graph_ref()), Some(Amplitude::new(0.25)));
+    assert_eq!(s.get(gain(&s, edge)).unwrap(), Amplitude::new(0.25));
 
     s.mods_mut().remove_route(route).unwrap();
     settle(&mut s);

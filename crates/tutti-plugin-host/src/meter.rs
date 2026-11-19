@@ -120,7 +120,7 @@ mod tests {
     /// A project meter of `n`/4 from beat 0, for a block to recognise.
     fn meter_of(n: u32) -> ProjectMeter {
         ProjectMeter::new(MeterMap::new([MeterChange::new(
-            Beat(0.0),
+            Beat::new(0.0),
             TimeSignature::from_numbers(n, 4).unwrap(),
         )]))
     }
@@ -205,7 +205,7 @@ mod tests {
         assert!(slot.installed().unwrap().ptr_eq(&project));
         let seven_eight = TimeSignature::from_numbers(7, 8).unwrap();
         project.set_meter(Arc::new(MeterMap::new([MeterChange::new(
-            Beat(0.0),
+            Beat::new(0.0),
             seven_eight,
         )])));
         assert_eq!(

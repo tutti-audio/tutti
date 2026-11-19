@@ -10,28 +10,28 @@ fn a_device_range_gives_a_fixed_quantum() {
     use cpal::SupportedBufferSize::{Range, Unknown};
     assert_eq!(
         quantum_for(&Range { min: 64, max: 4096 }),
-        Some(MaxBlock::of(Samples(512)))
+        Some(MaxBlock::of(Samples::new(512)))
     );
     assert_eq!(
         quantum_for(&Range {
             min: 1024,
             max: 4096
         }),
-        Some(MaxBlock::of(Samples(1024)))
+        Some(MaxBlock::of(Samples::new(1024)))
     );
     assert_eq!(
         quantum_for(&Range { min: 16, max: 256 }),
-        Some(MaxBlock::of(Samples(256)))
+        Some(MaxBlock::of(Samples::new(256)))
     );
     assert_eq!(quantum_for(&Unknown), None);
     // A range with no usable size has no quantum, and does not panic.
     assert_eq!(quantum_for(&Range { min: 0, max: 0 }), None);
     assert_eq!(
         quantum_for(&Range { min: 0, max: 4096 }),
-        Some(MaxBlock::of(Samples(512)))
+        Some(MaxBlock::of(Samples::new(512)))
     );
     let spec = OutputSpec::new(SampleRate::SR_48K, ChannelLayout::STEREO, SampleFormat::F32)
-        .with_quantum(MaxBlock::of(Samples(480)));
+        .with_quantum(MaxBlock::of(Samples::new(480)));
     assert!(matches!(
         stream_config(&spec).buffer_size,
         cpal::BufferSize::Fixed(480)

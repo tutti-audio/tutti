@@ -47,7 +47,7 @@ const LARGEST_BLOCK_FRAMES: usize = 4096;
 /// of slack for the publish to land, so every lane reads the new program
 /// before its anchor and switches on the same frame. A frame count, so its
 /// length in time follows the rate.
-pub const RATE_ANCHOR_MARGIN: Samples = Samples(3 * LARGEST_BLOCK_FRAMES);
+pub const RATE_ANCHOR_MARGIN: Samples = Samples::new(3 * LARGEST_BLOCK_FRAMES);
 
 /// How far ahead of the play reading a pending anchor must still be for a
 /// second rate edit to reuse its frame: two of the largest block, the margin
@@ -55,7 +55,7 @@ pub const RATE_ANCHOR_MARGIN: Samples = Samples(3 * LARGEST_BLOCK_FRAMES);
 /// that lands late would reach the lanes after the anchor, and they would
 /// jump by the difference of the two new rates times the lag; the edit
 /// re-anchors at [`RATE_ANCHOR_MARGIN`] instead (see `anchored`).
-const ANCHOR_REUSE_MIN: Samples = Samples(2 * LARGEST_BLOCK_FRAMES);
+const ANCHOR_REUSE_MIN: Samples = Samples::new(2 * LARGEST_BLOCK_FRAMES);
 
 /// A source's key: the host's identity for it. Only compared. The session's own
 /// declarations name a source with a
@@ -149,7 +149,7 @@ pub enum Source {
     /// Moving it recompiles what it reaches: a layer of [`Waveform::Const`].
     Macro {
         /// The raw value.
-        value: f32,
+        value: f64,
     },
     /// An envelope follower: a node whose audio input the host wires, its
     /// level sent into each lane it reaches.
@@ -336,11 +336,16 @@ pub struct Compiled {
 }
 
 /// A clock holds no NaN: `compile` refuses a rate, period or phase that is
-/// not finite (an infinite phase would make a carried anchor's jump
-/// `inf − inf`), and an anchor's phase is a finite `Clock::cycles` plus
-/// phase jumps that are each a difference of two finite `f32`s, so their
-/// `f64` sum stays finite.
+/// not finite, and a phase whose magnitude exceeds [`MAX_CLOCK_PHASE`]. An
+/// anchor's phase is a finite `Clock::cycles` plus phase jumps, each a
+/// difference of two phases within that bound, so at most `2 * MAX_CLOCK_PHASE`
+/// (2^41): the sum stays finite for fewer than 2^900 edits, never `inf − inf`.
 impl Eq for Compiled {}
+
+/// The largest magnitude of a declared clock phase, in cycles (2^40): far past
+/// any musical offset, and small enough that a carried anchor's phase jumps
+/// (differences of two phases) stay finite.
+pub const MAX_CLOCK_PHASE: f64 = 1_099_511_627_776.0;
 
 /// Why [`compile`] refused, by name.
 ///
@@ -382,6 +387,11 @@ pub enum CompileError {
     /// whose points do not ascend in `[0, 1)` with finite values.
     #[error("source {}: a param out of its domain", .0.0)]
     BadSource(SourceKey),
+    /// A source whose clock phase is finite but past
+    /// [`MAX_CLOCK_PHASE`] cycles in magnitude: a phase jump between two such
+    /// edits could overflow.
+    #[error("source {}: a clock phase past MAX_CLOCK_PHASE cycles", .0.0)]
+    PhaseOutOfRange(SourceKey),
     /// An LFO declared with a rate anchor: anchors are the compiler's.
     #[error("source {}: a rate anchor is the compiler's to set", .0.0)]
     AnchorDeclared(SourceKey),
@@ -453,7 +463,7 @@ pub enum CompileError {
 /// clock has no corners for a constant.
 const MACRO_CLOCK: Clock = Clock::Beats {
     per_cycle: BeatsPerCycle::of(1.0),
-    phase: PhaseIncrement(0.0),
+    phase: PhaseIncrement::new(0.0),
 };
 
 /// The [`LayerId`] of `route`'s layer, scaled by `depth_by` (if any).
@@ -700,6 +710,12 @@ fn check_source(key: SourceKey, source: &Source) -> Result<(), CompileError> {
                     rate.get().is_finite() && phase.get().is_finite()
                 }
             };
+            let phase = match *clock {
+                Clock::Beats { phase, .. } | Clock::Seconds { phase, .. } => phase.get(),
+            };
+            if ok_clock && phase.abs() > MAX_CLOCK_PHASE {
+                return Err(CompileError::PhaseOutOfRange(key));
+            }
             let ok_wave = match wave {
                 Waveform::Shape { .. } => true,
                 Waveform::Const(v) => v.is_finite(),
@@ -825,8 +841,8 @@ fn anchored(clock: Clock, old: Option<&Clock>, now: PlayReading, rate: SampleRat
             _ => {
                 let at = now.after(RATE_ANCHOR_MARGIN).play;
                 let t = ProgramTime {
-                    beat: Beat(0.0),
-                    play: SamplePosition(at.get() as f64),
+                    beat: Beat::new(0.0),
+                    play: SamplePosition::new(at.get() as f64),
                     play_epoch: now.epoch,
                     rate,
                 };

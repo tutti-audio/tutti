@@ -148,7 +148,7 @@ pub fn render_graph<F: Float>(
     let mut done = 0;
     while done < frames {
         let (transport, changes, n) = clock.graph_piece(frames - done);
-        let piece = tutti_units::Samples(done)..tutti_units::Samples(done + n);
+        let piece = tutti_units::Samples::new(done)..tutti_units::Samples::new(done + n);
         // A graph with no inputs hands none.
         let ins = if inputs.channels() == 0 {
             Planes::default()
@@ -176,7 +176,7 @@ pub fn render_graph<F: Float>(
             &table_in[..ni],
             &mut table_out[..no],
         );
-        clock.advance(tutti_units::Samples(n));
+        clock.advance(tutti_units::Samples::new(n));
         done += n;
     }
 }

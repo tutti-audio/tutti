@@ -41,9 +41,9 @@ impl Default for RenderConfig {
     fn default() -> Self {
         Self {
             sample_rate: SampleRate::SR_44K1,
-            duration_seconds: Seconds(0.0),
-            latency: Samples(0),
-            tail: Samples(0),
+            duration_seconds: Seconds::new(0.0),
+            latency: Samples::new(0),
+            tail: Samples::new(0),
             on_event_loss: EventLossPolicy::default(),
         }
     }
@@ -94,9 +94,9 @@ impl ExportConfig {
         let r = &self.render;
         let secs = r.duration_seconds.get();
         assert!(secs.is_finite() && secs >= 0.0, "a test names a length");
-        let duration = Samples((secs * r.sample_rate.get()).round() as usize);
-        let (length, tail) = if duration == Samples(0) {
-            (r.tail, Samples(0))
+        let duration = Samples::new((secs * r.sample_rate.get()).round() as usize);
+        let (length, tail) = if duration == Samples::new(0) {
+            (r.tail, Samples::new(0))
         } else {
             (duration, r.tail)
         };

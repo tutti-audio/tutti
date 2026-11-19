@@ -20,7 +20,7 @@ const BLOCK: usize = 64;
 fn session() -> Session {
     let mut s = Session::builder()
         .sample_rate(SampleRate::SR_48K)
-        .max_block(MaxBlock::of(Samples(BLOCK)))
+        .max_block(MaxBlock::of(Samples::new(BLOCK)))
         .build()
         .expect("builds");
     let (node, _) = s.graph().add(ForkByClone(Const::frame(&[0.25, 0.75])));
@@ -91,7 +91,7 @@ fn a_root_width_change_reopens_the_root_tap_and_closes_the_old_reader() {
     let mut old = s
         .graph()
         .taps()
-        .open_output(Samples(4096))
+        .open_output(Samples::new(4096))
         .expect("the outputs exist");
     assert_eq!(old.width(), 2);
     for _ in 0..3 {
@@ -133,7 +133,7 @@ fn a_root_width_change_reopens_the_root_tap_and_closes_the_old_reader() {
     );
     assert_eq!(
         old.take_lost(),
-        Samples(0),
+        Samples::new(0),
         "nothing at the handoff is lost"
     );
 
@@ -148,7 +148,7 @@ fn a_root_width_change_reopens_the_root_tap_and_closes_the_old_reader() {
         new_frames.iter().all(|&x| x == 0.25),
         "the mono root keeps channel 0"
     );
-    assert_eq!(new.take_lost(), Samples(0));
+    assert_eq!(new.take_lost(), Samples::new(0));
 }
 
 /// **A tap on a port whose width did not change is not reopened**: a
@@ -160,7 +160,7 @@ fn a_declaration_that_keeps_the_width_leaves_the_tap_alone() {
     let mut tap = s
         .graph()
         .taps()
-        .open_output(Samples(4096))
+        .open_output(Samples::new(4096))
         .expect("the outputs exist");
     let _ = block(&mut s);
     s.declare_root_topology(Some(ChannelTopology::assumed(ChannelLayout::STEREO)))
@@ -227,7 +227,11 @@ fn a_meter_nobody_took_is_replaced_without_an_event() {
 #[test]
 fn only_the_last_of_two_changes_before_an_update_is_reported() {
     let mut s = session();
-    let mut old = s.graph().taps().open_output(Samples(4096)).expect("opens");
+    let mut old = s
+        .graph()
+        .taps()
+        .open_output(Samples::new(4096))
+        .expect("opens");
     let _ = block(&mut s);
     s.declare_root_topology(Some(mono())).expect("mono").hard();
     s.declare_root_topology(Some(ChannelTopology::assumed(ChannelLayout::from_count(4))))
@@ -248,7 +252,11 @@ fn only_the_last_of_two_changes_before_an_update_is_reported() {
 #[test]
 fn a_second_reopen_before_the_claim_replaces_the_held_reader() {
     let mut s = session();
-    let _old = s.graph().taps().open_output(Samples(4096)).expect("opens");
+    let _old = s
+        .graph()
+        .taps()
+        .open_output(Samples::new(4096))
+        .expect("opens");
     s.declare_root_topology(Some(mono())).expect("mono").hard();
     let first = reopened(block(&mut s));
     assert_eq!(first.len(), 1);
@@ -271,7 +279,11 @@ fn a_second_reopen_before_the_claim_replaces_the_held_reader() {
 #[test]
 fn an_unclaimed_reader_survives_ignored_updates_and_is_claimed_later() {
     let mut s = session();
-    let _old = s.graph().taps().open_output(Samples(4096)).expect("opens");
+    let _old = s
+        .graph()
+        .taps()
+        .open_output(Samples::new(4096))
+        .expect("opens");
     s.declare_root_topology(Some(mono())).expect("mono").hard();
     let events = reopened(block(&mut s));
     assert_eq!(events.len(), 1);
@@ -299,7 +311,11 @@ fn a_claim_of_an_unknown_id_is_refused() {
 #[test]
 fn a_tap_that_has_the_roots_width_after_a_widen_and_a_declaration_is_not_reopened() {
     let mut s = session();
-    let mut tap = s.graph().taps().open_output(Samples(4096)).expect("opens");
+    let mut tap = s
+        .graph()
+        .taps()
+        .open_output(Samples::new(4096))
+        .expect("opens");
     s.graph().widen_outputs(4).expect("widens");
     let _ = block(&mut s);
     s.declare_root_topology(Some(ChannelTopology::assumed(ChannelLayout::STEREO)))
@@ -323,7 +339,11 @@ fn a_tap_that_has_the_roots_width_after_a_widen_and_a_declaration_is_not_reopene
 #[test]
 fn a_tap_narrower_than_the_declared_root_is_reopened_at_its_width() {
     let mut s = session();
-    let old = s.graph().taps().open_output(Samples(4096)).expect("opens");
+    let old = s
+        .graph()
+        .taps()
+        .open_output(Samples::new(4096))
+        .expect("opens");
     s.graph().widen_outputs(4).expect("widens");
     let _ = block(&mut s);
     let four = ChannelTopology::assumed(ChannelLayout::from_count(4));
@@ -343,7 +363,11 @@ fn a_tap_narrower_than_the_declared_root_is_reopened_at_its_width() {
 #[test]
 fn closing_a_tap_drops_the_reader_held_for_it() {
     let mut s = session();
-    let mut old = s.graph().taps().open_output(Samples(4096)).expect("opens");
+    let mut old = s
+        .graph()
+        .taps()
+        .open_output(Samples::new(4096))
+        .expect("opens");
     let id = old.id().expect("named");
     let _ = block(&mut s);
     s.declare_root_topology(Some(mono())).expect("mono").hard();

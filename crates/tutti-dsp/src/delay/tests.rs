@@ -122,10 +122,10 @@ fn the_two_readers_agree_on_a_whole_delay() {
 #[test]
 fn trips_count_the_echoes_to_the_floor_in_decibels() {
     use tutti_units::Db;
-    assert_eq!(taps::trips(0.5, Db(-60.0)), 10.0);
-    assert_eq!(taps::trips(0.5, Db(-90.0)), 15.0);
-    assert_eq!(taps::trips(0.5, Db(-120.0)), 20.0);
-    assert_eq!(taps::trips(0.0, Db(-60.0)), 0.0);
+    assert_eq!(taps::trips(0.5, Db::new(-60.0)), 10.0);
+    assert_eq!(taps::trips(0.5, Db::new(-90.0)), 15.0);
+    assert_eq!(taps::trips(0.5, Db::new(-120.0)), 20.0);
+    assert_eq!(taps::trips(0.0, Db::new(-60.0)), 0.0);
 }
 
 /// A line in `f64` returns the 29-bit signal `d` frames later exactly at every mode and

@@ -49,8 +49,8 @@ impl LadderControls {
     /// no resonance and unity drive.
     pub const DEFAULT: LadderControls = LadderControls {
         ty: LadderType::LP12,
-        freq: Hz(1_000.0),
-        res: Resonance(0.0),
+        freq: Hz::new(1_000.0),
+        res: Resonance::new(0.0),
         drive: Drive::UNITY,
     };
 
@@ -79,9 +79,9 @@ impl LadderControls {
         let finite = |v: f64, d: f64| if v.is_finite() { v } else { d };
         Self {
             ty: self.ty,
-            freq: Hz(finite(self.freq.get(), Self::DEFAULT.freq.get())),
-            res: Resonance(finite(self.res.get(), Self::DEFAULT.res.get())),
-            drive: Drive(finite(self.drive.get(), Self::DEFAULT.drive.get()).max(0.0)),
+            freq: Hz::new(finite(self.freq.get(), Self::DEFAULT.freq.get())),
+            res: Resonance::new(finite(self.res.get(), Self::DEFAULT.res.get())),
+            drive: Drive::new(finite(self.drive.get(), Self::DEFAULT.drive.get()).max(0.0)),
         }
     }
 }
@@ -223,7 +223,7 @@ impl System for LadderModel {
 impl Lti for LadderModel {
     fn frequency_response(&self, output: usize, freqs: &[Hz], gain: &mut [Complex64]) {
         for (g, f) in gain.iter_mut().zip(freqs) {
-            let w = 2.0 * PI * f.get() / self.rate.get();
+            let w = f.angle_per_frame(self.rate).get();
             *g = if output == 0 {
                 self.at(Complex64::from_polar(1.0, -w))
             } else {

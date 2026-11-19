@@ -40,7 +40,7 @@ fn offline(builder: SessionBuilder, device: u16) -> Session {
     builder
         .sample_rate(RATE)
         .outputs(ChannelLayout::from(device))
-        .max_block(MaxBlock::of(Samples(64)))
+        .max_block(MaxBlock::of(Samples::new(64)))
         .build()
         .unwrap()
 }
@@ -63,7 +63,7 @@ fn monitoring_changes_what_is_heard_and_never_the_root() {
     let mut tap = s
         .graph()
         .taps()
-        .open_output(Samples(4_096))
+        .open_output(Samples::new(4_096))
         .expect("the sources exist");
     assert_eq!(last_frame(&mut s, 6, 128), [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
 
@@ -168,7 +168,7 @@ fn a_mute_and_a_dim_ramp_and_settle() {
         )
         .unwrap();
     policy.outputs = std::mem::take(&mut policy.outputs)
-        .with_dim(Some(Amplitude(0.5)))
+        .with_dim(Some(Amplitude::new(0.5)))
         .unwrap();
     s.set(s.policy::<OutputPolicy>().to(policy)).unwrap();
     let _ = s.update();
@@ -210,7 +210,7 @@ fn a_level_that_is_not_a_gain_is_refused_when_set() {
     let s = offline(Session::builder(), 2);
     let policy = OutputPolicy {
         levels: FoldLevels {
-            surround: Amplitude(f64::NAN),
+            surround: Amplitude::new(f64::NAN),
             ..FoldLevels::default()
         },
         ..OutputPolicy::default()

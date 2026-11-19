@@ -15,9 +15,9 @@ fn check<S: Sample, P: AsRef<[S]>>(planes: &[P]) -> Result<(ChannelLayout, Sampl
         return Err(BufferError::ZeroWidth);
     };
     let layout = ChannelLayout::try_from(planes.len())?;
-    let expected = Samples(first.as_ref().len());
+    let expected = Samples::new(first.as_ref().len());
     for (plane, p) in planes.iter().enumerate() {
-        let found = Samples(p.as_ref().len());
+        let found = Samples::new(p.as_ref().len());
         if found != expected {
             return Err(BufferError::RaggedPlane {
                 plane,
@@ -51,7 +51,7 @@ fn check<S: Sample, P: AsRef<[S]>>(planes: &[P]) -> Result<(ChannelLayout, Sampl
 /// let (l, r) = ([1.0f32, 2.0, 3.0], [4.0, 5.0, 6.0]);
 /// let slices = [&l[..], &r[..]];
 /// let planes = Planes::new(&slices)?;
-/// assert_eq!(planes.frames(), Samples(3));
+/// assert_eq!(planes.frames(), Samples::new(3));
 /// assert_eq!(planes.plane(1).samples(), &[4.0, 5.0, 6.0]);
 /// assert_eq!(planes.iter().len(), 2);
 /// assert!(Planes::new(&[&l[..], &r[..2]]).is_err());
@@ -155,7 +155,7 @@ impl<'data, S: Sample> Planes<'data, S> {
     #[inline]
     #[must_use]
     pub const fn frames(&self) -> Samples {
-        Samples(self.frames)
+        Samples::new(self.frames)
     }
 
     /// Returns whether there are no frames.
@@ -422,7 +422,7 @@ impl<'data, S> MutTable<'_, 'data, S> {
 /// let (mut l, mut r) = ([0.0f32; 4], [0.0f32; 4]);
 /// let mut planes = [&mut l[..], &mut r[..]];
 /// let mut out = PlanesMut::new(&mut planes)?;
-/// for (c, mut plane) in out.slice_mut(Samples(2)..Samples(4)).iter_mut().enumerate() {
+/// for (c, mut plane) in out.slice_mut(Samples::new(2)..Samples::new(4)).iter_mut().enumerate() {
 ///     plane.samples_mut().fill(c as f32 + 1.0);
 /// }
 /// assert_eq!(out.as_planes().plane(1).samples(), &[0.0, 0.0, 2.0, 2.0]);
@@ -486,7 +486,7 @@ impl<'list, 'data, S: Sample> PlanesMut<'list, 'data, S> {
     #[inline]
     #[must_use]
     pub const fn frames(&self) -> Samples {
-        Samples(self.frames)
+        Samples::new(self.frames)
     }
 
     /// Returns whether there are no frames.

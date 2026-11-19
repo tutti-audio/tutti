@@ -17,7 +17,6 @@ use tutti_alsa_ffi::{
 };
 use tutti_midi_device::EndpointId;
 use tutti_rt::{FaultLatch, ThreadHandle, spawn_named};
-use tutti_ump::split_stream;
 
 /// How long dropping an input waits for its pump to end before it lets the
 /// thread go. A pump ends within a poll wake of the stop; only a read that never
@@ -226,10 +225,9 @@ pub(super) fn pump(
         errors.read();
         // A subscription to the port, or a change of its Endpoint, is the
         // sequencer's notice and not music.
-        let Event::Ump { packet, stamp } = received else {
+        let Event::Ump { ump, stamp } = received else {
             continue;
         };
-        let words = packet.words();
         let now = Instant::now();
         let now = match stamp {
             Some(t) => arrivals.at(t, now, || {
@@ -239,16 +237,8 @@ pub(super) fn pump(
             None => now,
         };
 
-        // A `snd_seq_ump_event_t` carries one UMP message in a fixed 4-word
-        // field, so the trailing words are padding whenever the message is
-        // shorter. `split_stream` reads the length from the type nibble and
-        // yields exactly that one message — using it rather than passing all
-        // four words into one packet is what keeps a 1-word message from
-        // swallowing three words of zeros.
         // A full inlet counts the drop itself.
-        if let Some(event) = split_stream(&words).next() {
-            let _ = producer.push(event, now);
-        }
+        let _ = producer.push(ump, now);
     }
 }
 

@@ -34,7 +34,7 @@ fn session_with_plugin() -> (Session, tutti_graph::NodeKey) {
     unsafe { std::env::set_var("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server()) };
     let mut s = Session::builder()
         .sample_rate(SampleRate::SR_48K)
-        .max_block(MaxBlock::of(Samples(BLOCK)))
+        .max_block(MaxBlock::of(Samples::new(BLOCK)))
         .build()
         .expect("an offline session builds");
     let file = plugin_file();
@@ -117,7 +117,7 @@ fn a_plugin_replacing_another_under_a_bypassed_node_is_bypassed_as_it_enters() {
         .crossfade_plugin(
             node,
             Box::new(incoming),
-            Seconds(0.005),
+            Seconds::new(0.005),
             tutti_graph::FadeLaw::EqualAmplitude,
         )
         .expect("the crossfade is accepted");

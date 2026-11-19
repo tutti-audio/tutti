@@ -26,9 +26,9 @@ crate::ranged! {
     /// use tutti_units::{SamplePosition, SampleRate, SampleSpan, Seconds};
     ///
     /// let rate = SampleRate::of(48_000.0);
-    /// let delay = SampleSpan::from_seconds(Seconds(0.25), rate).unwrap();
+    /// let delay = SampleSpan::from_seconds(Seconds::new(0.25), rate).unwrap();
     /// assert_eq!(delay.get(), 12_000.0);
-    /// assert_eq!(SamplePosition(20_000.0) - delay, SamplePosition(8_000.0));
+    /// assert_eq!(SamplePosition::new(20_000.0) - delay, SamplePosition::new(8_000.0));
     /// assert_eq!(SampleSpan::new(-1.0), None);
     /// ```
     #[repr(transparent)]
@@ -80,7 +80,7 @@ impl SampleSpan {
     #[inline]
     #[must_use]
     pub fn to_seconds(self, rate: impl Into<SampleRate>) -> Seconds {
-        Seconds(self.0 / rate.into().get())
+        Seconds::new(self.get() / rate.into().get())
     }
 
     /// Whole frames within the span, rounded **down**: the integer index an
@@ -212,7 +212,7 @@ impl core::ops::Add<SampleSpan> for SamplePosition {
     type Output = SamplePosition;
     #[inline]
     fn add(self, rhs: SampleSpan) -> SamplePosition {
-        SamplePosition(self.0 + rhs.0)
+        SamplePosition::new(self.get() + rhs.get())
     }
 }
 
@@ -220,21 +220,21 @@ impl core::ops::Sub<SampleSpan> for SamplePosition {
     type Output = SamplePosition;
     #[inline]
     fn sub(self, rhs: SampleSpan) -> SamplePosition {
-        SamplePosition(self.0 - rhs.0)
+        SamplePosition::new(self.get() - rhs.get())
     }
 }
 
 impl core::ops::AddAssign<SampleSpan> for SamplePosition {
     #[inline]
     fn add_assign(&mut self, rhs: SampleSpan) {
-        self.0 += rhs.0;
+        *self = SamplePosition::new(self.get() + rhs.get());
     }
 }
 
 impl core::ops::SubAssign<SampleSpan> for SamplePosition {
     #[inline]
     fn sub_assign(&mut self, rhs: SampleSpan) {
-        self.0 -= rhs.0;
+        *self = SamplePosition::new(self.get() - rhs.get());
     }
 }
 
@@ -245,7 +245,7 @@ impl SamplePosition {
     #[inline]
     #[must_use]
     pub fn span_since(self, earlier: SamplePosition) -> Option<SampleSpan> {
-        SampleSpan::new(self.0 - earlier.0)
+        SampleSpan::new(self.get() - earlier.get())
     }
 }
 

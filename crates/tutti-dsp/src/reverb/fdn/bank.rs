@@ -114,7 +114,7 @@ impl<F: Float> Target<F> {
     fn new(lines: usize) -> Self {
         Self {
             n: 0,
-            rate: Hz(0.5),
+            rate: Hz::new(0.5),
             crossover: [Hz::ZERO; 2],
             pole: [0.0; 2],
             complement: [F::ONE; 2],
@@ -178,7 +178,7 @@ impl<F: Float + Lerp> FdnGlides<F> {
         Self {
             ramp,
             n: 0,
-            rate: Hz(0.5),
+            rate: Hz::new(0.5),
             complement: t.complement,
             crossover: t.crossover,
             len: vec![Glide::landed(ONE_FRAME); lines],
@@ -410,7 +410,7 @@ impl<F: Float + Lerp> FdnBank<F> {
         let pre = self.network.pre_delay.min(Samples::new(self.pre_cap - 4));
         let behind = glides.pre_len.now().saturating_sub(pre);
         let seconds = t.get() + behind.span().to_seconds(self.rate).get();
-        tail_of(Ring::Finite(Seconds(seconds)), self.rate)
+        tail_of(Ring::Finite(Seconds::new(seconds)), self.rate)
     }
 
     /// Back to silence, the chunks counted from here. No allocation.
@@ -512,7 +512,7 @@ impl<F: Float + Lerp> FdnBank<F> {
         let m = f.lines[0].modulation;
         t.depth = F::from_design(m.depth.get().min((self.cap as f64) * 0.25));
         let hz = m.rate.get();
-        t.rate = Hz(if hz.is_finite() {
+        t.rate = Hz::new(if hz.is_finite() {
             hz.clamp(0.0, 20.0)
         } else {
             0.5
@@ -540,7 +540,7 @@ impl<F: Float + Lerp> FdnBank<F> {
                 s.c_mod_next[j] = F::from_design(depth * libm::sin(s.phase[j]));
             }
         }
-        let dphi = std::f64::consts::TAU * c.rate.get() * Self::CHUNK as f64 / self.rate.get();
+        let dphi = c.rate.angle_per_frame(self.rate).get() * Self::CHUNK as f64;
         for j in 0..n {
             s.phase[j] = (s.phase[j] + dphi) % std::f64::consts::TAU;
             s.c_len[j] = c.len[j].now();

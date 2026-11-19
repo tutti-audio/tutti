@@ -105,7 +105,7 @@ fn rig(
     cap: u32,
     writers: &[Vec<Script>],
 ) -> (Editor, Executor, Arc<Mutex<Vec<(u32, u32)>>>) {
-    let prep = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(BLOCK)));
+    let prep = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(BLOCK)));
     let (mut ed, mut exec) = Editor::new(prep);
     if workers > 1 {
         exec.set_pool(Some(test_pool(workers)));
@@ -287,7 +287,7 @@ struct Bounded {
 
 impl Bounded {
     fn new(workers: usize, bound: Option<u32>, ons: &[u32]) -> Self {
-        let prep = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(BLOCK)));
+        let prep = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(BLOCK)));
         let (mut ed, mut exec) = Editor::new(prep);
         if workers > 1 {
             exec.set_pool(Some(test_pool(workers)));
@@ -476,7 +476,7 @@ impl Node for Latent {
     fn shape(&self) -> Shape {
         self.inner
             .shape()
-            .with_latency(tutti_units::Latency::new(Samples(self.latency)))
+            .with_latency(tutti_units::Latency::new(Samples::new(self.latency)))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, io: Io<'_>) -> Status {
@@ -515,7 +515,7 @@ impl Node for Once {
 fn a_declared_input_bound_covers_flushed_events_and_scheduled_commands() {
     use tutti_units::{At, Frame};
     for workers in std::iter::once(1).chain(common::WORKERS) {
-        let prep = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(BLOCK)));
+        let prep = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(BLOCK)));
         let (mut ed, mut exec) = Editor::new(prep);
         if workers > 1 {
             exec.set_pool(Some(test_pool(workers)));
@@ -599,7 +599,7 @@ fn a_declared_input_bound_covers_flushed_events_and_scheduled_commands() {
 #[test]
 fn a_lone_writer_within_the_bound_gets_no_merge() {
     let merges = |bound: u32, cap: u32| {
-        let prep = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(BLOCK)));
+        let prep = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(BLOCK)));
         let (mut ed, mut exec) = Editor::new(prep);
         ed.insert(
             NodeKey(100),
@@ -649,7 +649,7 @@ fn replace_or_swap_to_a_node_with_another_bound_commits_and_holds_it() {
     for workers in std::iter::once(1).chain(common::WORKERS) {
         let mut rig = Bounded::new(workers, Some(8), &[6, 5]);
         assert_eq!(rig.run(1)[0].len(), 8);
-        let fade = tutti_graph::Fade::new(Samples(100), tutti_graph::FadeLaw::EqualAmplitude);
+        let fade = tutti_graph::Fade::new(Samples::new(100), tutti_graph::FadeLaw::EqualAmplitude);
         rig.ed
             .replace_or_swap(
                 NodeKey(100),
@@ -724,7 +724,7 @@ impl Node for Keys {
 #[test]
 fn a_bypassed_node_is_sent_at_most_its_bound_of_closes_a_block() {
     for workers in std::iter::once(1).chain(common::WORKERS) {
-        let prep = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(BLOCK)));
+        let prep = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(BLOCK)));
         let (mut ed, mut exec) = Editor::new(prep);
         if workers > 1 {
             exec.set_pool(Some(test_pool(workers)));
@@ -854,7 +854,7 @@ impl Node for Trace {
 fn a_cut_keeps_late_note_offs_and_delivers_in_frame_order() {
     use tutti_units::{At, Frame};
     for workers in std::iter::once(1).chain(common::WORKERS) {
-        let prep = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(BLOCK)));
+        let prep = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(BLOCK)));
         let (mut ed, mut exec) = Editor::new(prep);
         if workers > 1 {
             exec.set_pool(Some(test_pool(workers)));

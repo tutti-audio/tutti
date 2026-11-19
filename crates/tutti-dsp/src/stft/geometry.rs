@@ -218,7 +218,7 @@ impl StftGeometry {
     #[inline]
     #[must_use]
     pub fn bin_frequency(self, bin: BinIndex) -> Hz {
-        Hz(bin.get() as f64 * self.sample_rate.get() / self.window.get() as f64)
+        Hz::new(bin.get() as f64 * self.sample_rate.get() / self.window.get() as f64)
     }
 
     /// The fractional bin `frequency` falls on, `frequency * window / sample_rate`:
@@ -234,14 +234,14 @@ impl StftGeometry {
     #[inline]
     #[must_use]
     pub fn frequency_of(self, bin: f64) -> Hz {
-        Hz(bin * self.sample_rate.get() / self.window.get() as f64)
+        Hz::new(bin * self.sample_rate.get() / self.window.get() as f64)
     }
 
     /// The time between frames, `hop / sample_rate`.
     #[inline]
     #[must_use]
     pub fn frame_interval(self) -> Seconds {
-        Seconds(self.hop.get() as f64 / self.sample_rate.get())
+        Seconds::new(self.hop.get() as f64 / self.sample_rate.get())
     }
 
     /// How many whole frames fit over `len` samples.
@@ -265,7 +265,7 @@ impl StftGeometry {
     #[inline]
     #[must_use]
     pub fn latency(self) -> Seconds {
-        Seconds(self.window.get() as f64 / self.sample_rate.get())
+        Seconds::new(self.window.get() as f64 / self.sample_rate.get())
     }
 
     /// The analysis window's coefficients, `window` points of `window_fn`.

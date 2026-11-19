@@ -319,7 +319,7 @@ impl Link {
 
     /// The latency the plugin reports now.
     pub(crate) fn latency(&self) -> Samples {
-        Samples(self.events.latency.load(Ordering::Acquire))
+        Samples::new(self.events.latency.load(Ordering::Acquire))
     }
 
     /// The plugin's declared parameters, sorted by id, from the cache the server's
@@ -889,7 +889,7 @@ impl Ipc {
         )
         .starting_at(next_seq)
         .with_counters(Arc::clone(&link.counters));
-        batcher.prepare(Samples(prepare.max_block().get()), None);
+        batcher.prepare(Samples::new(prepare.max_block().get()), None);
         if let Some(Watch {
             wait,
             offline: true,

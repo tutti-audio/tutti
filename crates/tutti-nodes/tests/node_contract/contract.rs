@@ -46,15 +46,15 @@ fn limiter_row() -> Row {
         "LimiterNode (mono, 5 ms lookahead)",
         || {
             Box::new(LimiterNode::<f32>::mono(LimiterControls {
-                threshold: Db(-3.0),
-                ceiling: Db(-0.3),
+                threshold: Db::new(-3.0),
+                ceiling: Db::new(-0.3),
                 ..LimiterControls::DEFAULT
             }))
         },
         impulse(0),
         Detect::Threshold(0.0),
     )
-    .with_expected_latency(Samples(240))
+    .with_expected_latency(Samples::new(240))
 }
 
 /// Linked gain across a stereo pair: the impulse on the right channel must
@@ -64,8 +64,8 @@ fn stereo_limiter_row() -> Row {
         "LimiterNode (stereo, right channel)",
         || {
             Box::new(LimiterNode::<f32>::stereo(LimiterControls {
-                threshold: Db(-3.0),
-                ceiling: Db(-0.3),
+                threshold: Db::new(-3.0),
+                ceiling: Db::new(-0.3),
                 ..LimiterControls::DEFAULT
             }))
         },
@@ -73,7 +73,7 @@ fn stereo_limiter_row() -> Row {
         Detect::Threshold(0.0),
     )
     .output(1)
-    .with_expected_latency(Samples(240))
+    .with_expected_latency(Samples::new(240))
 }
 
 /// A delay of zero seconds: the wet path is the response, on the excitation's
@@ -96,7 +96,7 @@ fn delay_line_row() -> Row {
         impulse(0),
         Detect::Threshold(0.0),
     )
-    .with_expected_latency(Samples(0))
+    .with_expected_latency(Samples::new(0))
 }
 
 /// The low band of a stereo crossover: an impulse on the right channel leaves
@@ -105,12 +105,12 @@ fn delay_line_row() -> Row {
 fn crossover_row() -> Row {
     Row::new(
         "CrossoverNode<f32> (stereo, 2 bands, right low band)",
-        || Box::new(CrossoverNode::<f32>::new(ChannelLayout::STEREO, &[Hz(1_000.0)]).unwrap()),
+        || Box::new(CrossoverNode::<f32>::new(ChannelLayout::STEREO, &[Hz::new(1_000.0)]).unwrap()),
         impulse(1),
         Detect::Threshold(0.0),
     )
     .output(1)
-    .with_expected_latency(Samples(0))
+    .with_expected_latency(Samples::new(0))
 }
 
 /// The summed output of a stereo multiband compressor, impulse on the right.
@@ -122,7 +122,7 @@ fn multiband_row() -> Row {
         Detect::Threshold(0.0),
     )
     .output(1)
-    .with_expected_latency(Samples(0))
+    .with_expected_latency(Samples::new(0))
 }
 
 contract_tests!(audio limiter => limiter_row());
@@ -142,11 +142,11 @@ mod convolution {
     fn convolver_row() -> Row {
         Row::new(
             "ConvolverNode (256-frame block)",
-            move || Box::new(ConvolverNode::new(Mono::new(&[1.0]), Samples(256))),
+            move || Box::new(ConvolverNode::new(Mono::new(&[1.0]), Samples::new(256))),
             impulse(0),
             Detect::Threshold(1e-3),
         )
-        .with_expected_latency(Samples(256))
+        .with_expected_latency(Samples::new(256))
     }
 
     contract_tests!(audio convolver => convolver_row());

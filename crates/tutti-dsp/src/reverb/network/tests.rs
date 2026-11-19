@@ -7,14 +7,20 @@ use crate::{Lti as _, System as _};
 #[test]
 fn the_pre_delay_is_rounded_to_whole_frames() {
     let rate = SampleRate::SR_48K;
-    assert_eq!(pre_delay_frames(Seconds(0.001), rate), Samples(48));
-    assert_eq!(pre_delay_frames(Seconds(0.6 / 48_000.0), rate), Samples(1));
+    assert_eq!(pre_delay_frames(Seconds::new(0.001), rate), Samples(48));
     assert_eq!(
-        pre_delay_frames(Seconds(0.4 / 48_000.0), rate),
+        pre_delay_frames(Seconds::new(0.6 / 48_000.0), rate),
+        Samples(1)
+    );
+    assert_eq!(
+        pre_delay_frames(Seconds::new(0.4 / 48_000.0), rate),
         Samples::ZERO
     );
-    assert_eq!(pre_delay_frames(Seconds(-1.0), rate), Samples::ZERO);
-    assert_eq!(pre_delay_frames(Seconds(f64::NAN), rate), Samples::ZERO);
+    assert_eq!(pre_delay_frames(Seconds::new(-1.0), rate), Samples::ZERO);
+    assert_eq!(
+        pre_delay_frames(Seconds::new(f64::NAN), rate),
+        Samples::ZERO
+    );
 }
 
 /// A `Network` is a plain value built on the control side: the whole value
@@ -31,7 +37,7 @@ fn a_network_stays_under_109_kib() {
 fn an_empty_network_is_silent_and_stable() {
     let n = Network::new(SampleRate::SR_44K1);
     assert_eq!(n.rt60(Band::Mid), Seconds::ZERO);
-    assert_eq!(n.tail(Db(-60.0)), Ring::Finite(Seconds::ZERO));
+    assert_eq!(n.tail(Db::new(-60.0)), Ring::Finite(Seconds::ZERO));
     assert!(n.is_stable() && !n.is_lossless());
 }
 

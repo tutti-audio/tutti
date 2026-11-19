@@ -39,7 +39,6 @@ use tutti_units::{Db, SampleRate, Seconds};
 
 use super::curves::db_gain;
 use super::shared::{CHUNK, GAIN_GLIDE, floored, key_levels};
-use crate::finite::finite_or;
 use crate::follower::{Follower, Smoothed};
 use crate::{Glide, Lerp};
 
@@ -56,7 +55,7 @@ pub struct TransientControls {
 
 impl TransientControls {
     /// The most either amount reaches, either way: 24 dB.
-    pub const MAX_AMOUNT: Db = Db(24.0);
+    pub const MAX_AMOUNT: Db = Db::new(24.0);
 
     /// No change: both amounts 0 dB.
     pub const DEFAULT: Self = Self {
@@ -67,10 +66,10 @@ impl TransientControls {
     /// These controls within range, a non-finite amount as the default's.
     fn designed(self) -> Amounts {
         let amount = |db: Db| {
-            Db(finite_or(db.get(), Db::UNITY.get()).clamp(
-                -TransientControls::MAX_AMOUNT.get(),
-                TransientControls::MAX_AMOUNT.get(),
-            ))
+            db.finite_or(Db::UNITY).clamp(
+                -TransientControls::MAX_AMOUNT,
+                TransientControls::MAX_AMOUNT,
+            )
         };
         Amounts {
             attack: amount(self.attack),
@@ -96,8 +95,8 @@ impl Lerp for Amounts {
     #[inline]
     fn lerp(&self, to: &Self, k: u32, n: u32) -> Self {
         Self {
-            attack: Db(self.attack.get().lerp(&to.attack.get(), k, n)),
-            sustain: Db(self.sustain.get().lerp(&to.sustain.get(), k, n)),
+            attack: Db::new(self.attack.get().lerp(&to.attack.get(), k, n)),
+            sustain: Db::new(self.sustain.get().lerp(&to.sustain.get(), k, n)),
         }
     }
 }

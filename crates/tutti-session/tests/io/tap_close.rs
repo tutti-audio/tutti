@@ -37,7 +37,7 @@ fn opening_a_tap_yields_a_reader_that_sees_the_rendered_frames() {
     let mut reader = s
         .graph()
         .taps()
-        .open_output(Samples(64))
+        .open_output(Samples::new(64))
         .expect("the sources exist");
     for _ in 0..3 {
         s.render_frame(InterleavedMut::one_frame(&mut out).unwrap());
@@ -48,7 +48,7 @@ fn opening_a_tap_yields_a_reader_that_sees_the_rendered_frames() {
         reader
             .pop_into(InterleavedMut::new(&mut got, reader.layout()).unwrap())
             .unwrap(),
-        Samples(3),
+        Samples::new(3),
         "three frames rendered since the open"
     );
     assert_eq!(got[..3], [0.25; 3]);
@@ -62,7 +62,7 @@ fn closing_the_tap_stops_the_copy() {
     let mut reader = s
         .graph()
         .taps()
-        .open_output(Samples(64))
+        .open_output(Samples::new(64))
         .expect("the sources exist");
     let mut out = [0.0f32];
     s.render_frame(InterleavedMut::one_frame(&mut out).unwrap());
@@ -81,7 +81,7 @@ fn closing_the_tap_stops_the_copy() {
         reader
             .pop_into(InterleavedMut::new(&mut got, reader.layout()).unwrap())
             .unwrap(),
-        Samples(1),
+        Samples::new(1),
         "only the frame rendered while open"
     );
 }
@@ -97,11 +97,11 @@ fn a_session_without_a_tap_renders_untouched() {
     let reader = s
         .graph()
         .taps()
-        .open_output(Samples(64))
+        .open_output(Samples::new(64))
         .expect("the sources exist");
     assert_eq!(
         reader.available(),
-        Samples(0),
+        Samples::new(0),
         "a tap flows from its commit"
     );
 }

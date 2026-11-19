@@ -26,7 +26,6 @@ use tutti_units::{CompressionRatio, Db, Hz, Q, SampleRate, Seconds};
 use super::curves::{db_gain, gain_reduction, level_db};
 use super::key_filter::{KeyFilter, KeyStage};
 use super::shared::{CHUNK, GAIN_GLIDE, MAX_KNEE, floored, key_levels};
-use crate::finite::finite_or;
 use crate::follower::{Follower, Smoothed};
 use crate::{Glide, Lanes, Lerp, Steps};
 
@@ -82,7 +81,7 @@ impl Default for CompressorControls {
 
 /// The most makeup, in dB, a compressor applies: 10^(400/20) is 1e20, so the gain of a
 /// makeup and a reduction stays finite whatever either is.
-const MAX_MAKEUP: Db = Db(400.0);
+const MAX_MAKEUP: Db = Db::new(400.0);
 
 /// A compressor at one set of controls and one rate: the controls made runnable.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -104,15 +103,14 @@ impl CompressorMember {
     fn designed(c: &CompressorControls, rate: SampleRate) -> Self {
         let d = CompressorControls::DEFAULT;
         Self {
-            threshold: Db(finite_or(c.threshold.get(), d.threshold.get())),
-            knee: Db(finite_or(c.knee.get(), d.knee.get()).clamp(0.0, MAX_KNEE.get())),
-            ratio: CompressionRatio::new_clamped(finite_or(c.ratio.get(), d.ratio.get())),
+            threshold: c.threshold.finite_or(d.threshold),
+            knee: c.knee.finite_or(d.knee).clamp(Db::UNITY, MAX_KNEE),
+            ratio: CompressionRatio::new_clamped(c.ratio.finite_or(d.ratio).get()),
             attack: c.attack,
             release: c.release,
-            makeup: Db(finite_or(c.makeup.get(), d.makeup.get())
-                .clamp(-MAX_MAKEUP.get(), MAX_MAKEUP.get())),
-            key_cutoff: Hz(finite_or(c.key_cutoff.get(), d.key_cutoff.get())),
-            key_q: Q(finite_or(c.key_q.get(), d.key_q.get())),
+            makeup: c.makeup.finite_or(d.makeup).clamp(-MAX_MAKEUP, MAX_MAKEUP),
+            key_cutoff: c.key_cutoff.finite_or(d.key_cutoff),
+            key_q: c.key_q.finite_or(d.key_q),
             rate,
         }
     }
@@ -261,7 +259,7 @@ impl<F: Float + Lanes + Lerp> CompressorBank<F> {
     /// [`reset`](Self::reset)), in dB and positive; [`Db::UNITY`] is none. A **measurement**,
     /// for a reduction meter. No allocation.
     pub fn take_deepest(&mut self) -> Db {
-        Db(core::mem::replace(&mut self.deepest, F::ZERO).into())
+        Db::new(core::mem::replace(&mut self.deepest, F::ZERO).into())
     }
 
     /// Runs `input` into `output`, scaled by one gain from the loudest channel of `key`.

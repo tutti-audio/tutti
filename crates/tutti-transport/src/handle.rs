@@ -21,7 +21,7 @@ use tutti_units::{Beat, SampleRate};
 /// transport.motion().try_send(MotionEvent::Play)?; // a request; may be refused
 /// transport.settings().set_tempo(Bpm::of(140.0));      // a value; cannot fail
 /// // Loop beats 0 to 4 from the next block; the engine owns the region.
-/// let range = tutti_music::LoopRange::new(tutti_units::Beat(0.0), tutti_units::Beat(4.0)).expect("ordered");
+/// let range = tutti_music::LoopRange::new(tutti_units::Beat::new(0.0), tutti_units::Beat::new(4.0)).expect("ordered");
 /// transport.motion().schedule(At::NextBlock, LoopEdit::over(range))?;
 /// # Ok::<_, Box<dyn std::error::Error>>(())
 /// ```
@@ -184,7 +184,7 @@ mod tests {
             .settings
             .tempo_map()
             .view(b.sample_rate())
-            .frame_at_or_after(Beat(1.0));
+            .frame_at_or_after(Beat::new(1.0));
         assert_eq!(beat.get(), 24_000, "one beat at 120 BPM and 48 kHz");
     }
 
@@ -198,7 +198,7 @@ mod tests {
 
         // beat/tempo come from settings, is_playing from the FSM — the reason
         // this type exists.
-        assert_eq!(t.beat(), Beat(8.0));
+        assert_eq!(t.beat(), Beat::new(8.0));
         assert_eq!(t.tempo_map().constant_tempo(), Some(Bpm::of(90.0)));
         assert!(t.is_rolling());
     }
@@ -208,9 +208,9 @@ mod tests {
         let t = Transport::new(SampleRate::SR_48K);
         let inputs = t.links();
 
-        let _ = t.motion.try_send(MotionEvent::locate(Beat(4.0)));
+        let _ = t.motion.try_send(MotionEvent::locate(Beat::new(4.0)));
         Audio::of(&t.motion).drain();
-        assert_eq!(inputs.seek.take(), Some(Beat(4.0)));
+        assert_eq!(inputs.seek.take(), Some(Beat::new(4.0)));
     }
 
     /// **A tempo a caller got wrong stops at the type**: a zero, negative or

@@ -107,7 +107,7 @@ impl Correlation {
     #[inline]
     #[must_use]
     pub fn to_stereo_width(self) -> StereoWidth {
-        StereoWidth(1.0 - self.0)
+        StereoWidth::new(1.0 - self.get())
     }
 }
 
@@ -118,7 +118,7 @@ unit! {
     ///
     /// A reading, not a [`Pan`]: it is measured from a signal, not set on a
     /// processor. Feeding a meter's balance back as a pan position is a
-    /// crossing a caller spells out, `Pan(balance.get())`.
+    /// crossing a caller spells out, `Pan::new(balance.get())`.
     pub struct StereoBalance(pub f64): Unit, Ordered, Bounded, Signed;
 }
 // NOT `Scalable`: a ratio of measured energy rescaled is no longer that ratio.

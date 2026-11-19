@@ -10,13 +10,13 @@ use crate::{ChannelTimes, GAIN_GLIDE, MaxDelay, Routing};
 
 /// A rate at which a time of `n / 1024` seconds is exactly `n` frames, in `f32` and in `f64`.
 const BINARY: SampleRate = SampleRate::of(1024.0);
-const MAX: MaxDelay = MaxDelay::of(Seconds(1.0));
+const MAX: MaxDelay = MaxDelay::of(Seconds::new(1.0));
 
 fn controls(time: f64, feedback: f64, cross: f64) -> DelayControls {
     DelayControls {
-        time: Seconds(time),
-        feedback: Feedback(feedback),
-        cross_feedback: Feedback(cross),
+        time: Seconds::new(time),
+        feedback: Feedback::new(feedback),
+        cross_feedback: Feedback::new(cross),
     }
 }
 
@@ -38,7 +38,7 @@ fn stereo_apart(right: f64) -> DelayLayout {
     stereo()
         .with_routing(Routing::none(BusTopology::STEREO))
         .unwrap()
-        .with_times(ChannelTimes::each(&[Seconds(right)]).unwrap())
+        .with_times(ChannelTimes::each(&[Seconds::new(right)]).unwrap())
         .unwrap()
 }
 

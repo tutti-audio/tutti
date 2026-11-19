@@ -81,9 +81,9 @@ use serde::{Deserialize, Serialize};
 /// ```
 /// use tutti_units::{Samples, Tail};
 ///
-/// let delay = Tail::Finite(Samples(24_000));
-/// let reverb = Tail::Finite(Samples(96_000));
-/// assert_eq!(delay.then(reverb), Tail::Finite(Samples(120_000))); // cascade
+/// let delay = Tail::Finite(Samples::new(24_000));
+/// let reverb = Tail::Finite(Samples::new(96_000));
+/// assert_eq!(delay.then(reverb), Tail::Finite(Samples::new(120_000))); // cascade
 /// assert_eq!(delay.beside(reverb), reverb); // parallel
 /// assert_eq!(Tail::from_vst3_samples(u32::MAX), Tail::Unbounded);
 /// assert_eq!(Tail::from_clap_samples(i32::MAX as u32), Tail::Unbounded);
@@ -135,7 +135,7 @@ impl Tail {
         match raw {
             0 => Self::None,
             u32::MAX => Self::Unbounded,
-            n => Self::Finite(Samples(n as usize)),
+            n => Self::Finite(Samples::new(n as usize)),
         }
     }
 
@@ -148,7 +148,7 @@ impl Tail {
         match raw {
             0 => Self::None,
             n if n >= i32::MAX as u32 => Self::Unbounded,
-            n => Self::Finite(Samples(n as usize)),
+            n => Self::Finite(Samples::new(n as usize)),
         }
     }
 
@@ -250,7 +250,10 @@ mod tests {
         assert_eq!(Tail::None.samples(), Some(Samples::ZERO));
         assert_eq!(Tail::Unbounded.samples(), None);
         assert_eq!(Tail::Unknown.samples(), None);
-        assert_eq!(Tail::Finite(Samples(512)).samples(), Some(Samples(512)));
+        assert_eq!(
+            Tail::Finite(Samples::new(512)).samples(),
+            Some(Samples::new(512))
+        );
     }
 
     /// VST3's `kInfiniteTail` (`u32::MAX`) decodes to `Unbounded` and zero to
@@ -261,12 +264,12 @@ mod tests {
         assert_eq!(Tail::from_vst3_samples(u32::MAX), Tail::Unbounded);
         assert_eq!(
             Tail::from_vst3_samples(44_100),
-            Tail::Finite(Samples(44_100))
+            Tail::Finite(Samples::new(44_100))
         );
         let int32_max = i32::MAX as u32;
         assert_eq!(
             Tail::from_vst3_samples(int32_max),
-            Tail::Finite(Samples(int32_max as usize))
+            Tail::Finite(Samples::new(int32_max as usize))
         );
     }
 
@@ -282,11 +285,11 @@ mod tests {
         assert_eq!(Tail::from_clap_samples(u32::MAX), Tail::Unbounded);
         assert_eq!(
             Tail::from_clap_samples(int32_max - 1),
-            Tail::Finite(Samples(int32_max as usize - 1))
+            Tail::Finite(Samples::new(int32_max as usize - 1))
         );
         assert_eq!(
             Tail::from_clap_samples(44_100),
-            Tail::Finite(Samples(44_100))
+            Tail::Finite(Samples::new(44_100))
         );
     }
 
@@ -296,22 +299,22 @@ mod tests {
     fn from_seconds_reads_only_plus_infinity_as_unbounded() {
         let rate = SampleRate::of(48_000.0);
         assert_eq!(
-            Tail::from_seconds(Seconds(f64::INFINITY), rate),
+            Tail::from_seconds(Seconds::new(f64::INFINITY), rate),
             Tail::Unbounded
         );
-        assert_eq!(Tail::from_seconds(Seconds(0.0), rate), Tail::None);
+        assert_eq!(Tail::from_seconds(Seconds::new(0.0), rate), Tail::None);
         assert_eq!(
-            Tail::from_seconds(Seconds(0.5), rate),
-            Tail::Finite(Samples(24_000))
+            Tail::from_seconds(Seconds::new(0.5), rate),
+            Tail::Finite(Samples::new(24_000))
         );
         // A part of a frame still needs that frame.
         assert_eq!(
-            Tail::from_seconds(Seconds(1.0 / 96_000.0), rate),
-            Tail::Finite(Samples(1))
+            Tail::from_seconds(Seconds::new(1.0 / 96_000.0), rate),
+            Tail::Finite(Samples::new(1))
         );
         for junk in [f64::NAN, f64::NEG_INFINITY, -1.0] {
             assert_eq!(
-                Tail::from_seconds(Seconds(junk), rate),
+                Tail::from_seconds(Seconds::new(junk), rate),
                 Tail::Unknown,
                 "{junk}"
             );
@@ -329,26 +332,26 @@ mod tests {
     /// statically-composed graph report without anyone walking it.
     #[test]
     fn cascade_adds_and_merge_takes_the_longer() {
-        let a = Tail::Finite(Samples(2000));
-        let b = Tail::Finite(Samples(3000));
-        assert_eq!(a.then(b), Tail::Finite(Samples(5000)));
-        assert_eq!(a.beside(b), Tail::Finite(Samples(3000)));
+        let a = Tail::Finite(Samples::new(2000));
+        let b = Tail::Finite(Samples::new(3000));
+        assert_eq!(a.then(b), Tail::Finite(Samples::new(5000)));
+        assert_eq!(a.beside(b), Tail::Finite(Samples::new(3000)));
     }
 
     /// A merge keeps the longer leg, not the shorter: tail asks when a signal
     /// last leaves, not when it first arrives.
     #[test]
     fn a_merge_is_not_the_shorter_leg() {
-        let slow = Tail::Finite(Samples(3000));
-        let fast = Tail::Finite(Samples(100));
-        assert_eq!(slow.beside(fast), Tail::Finite(Samples(3000)));
+        let slow = Tail::Finite(Samples::new(3000));
+        let fast = Tail::Finite(Samples::new(100));
+        assert_eq!(slow.beside(fast), Tail::Finite(Samples::new(3000)));
         assert_ne!(slow.beside(fast), fast);
     }
 
     /// Nothing that never decays can be composed away.
     #[test]
     fn unbounded_survives_composition() {
-        let n = Tail::Finite(Samples(100));
+        let n = Tail::Finite(Samples::new(100));
         assert_eq!(Tail::Unbounded.then(n), Tail::Unbounded);
         assert_eq!(n.then(Tail::Unbounded), Tail::Unbounded);
         assert_eq!(Tail::Unbounded.beside(n), Tail::Unbounded);
@@ -359,7 +362,7 @@ mod tests {
     /// it is not evidence of a short tail.
     #[test]
     fn unknown_survives_composition() {
-        let n = Tail::Finite(Samples(100));
+        let n = Tail::Finite(Samples::new(100));
         assert_eq!(Tail::Unknown.then(n), Tail::Unknown);
         assert_eq!(n.beside(Tail::Unknown), Tail::Unknown);
         // But `Unbounded` still outranks it — that much IS known.

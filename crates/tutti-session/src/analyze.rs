@@ -27,7 +27,7 @@ use crate::job::{Cancel, sealed};
 use crate::{AppKey, Clock, Job, JobKind, Session, WaitError, WorkerError};
 
 /// Frames decoded, and pushed to the meter, at a time.
-const CHUNK_FRAMES: Samples = Samples(16_384);
+const CHUNK_FRAMES: Samples = Samples::new(16_384);
 
 /// The audio an analysis reads, in the sample format `S` the measure asks for:
 /// a wave in memory or a file on disk.
@@ -227,12 +227,12 @@ impl<'w, S: Float> Reader<'w, S> {
         match self {
             Self::Wave { wave, at } => {
                 let wave: &'w Wave<S> = wave;
-                let frames = CHUNK_FRAMES.min(Samples(wave.len().get() - at.get()));
+                let frames = CHUNK_FRAMES.min(wave.len().remaining_after(*at));
                 let span = at.get()..at.get() + frames.get();
                 chunk.hold_planes(
                     (0..wave.channels()).map(|c| &wave.channel(c).samples()[span.clone()]),
                 );
-                *at = Samples(span.end);
+                *at = Samples::new(span.end);
             }
             #[cfg(codec)]
             Self::File(file) => {

@@ -65,7 +65,7 @@ impl OfflineWait {
     pub fn planned(&self) -> Option<Samples> {
         match self.planned.load(Ordering::Acquire) {
             usize::MAX => None,
-            planned => Some(Samples(planned)),
+            planned => Some(Samples::new(planned)),
         }
     }
 

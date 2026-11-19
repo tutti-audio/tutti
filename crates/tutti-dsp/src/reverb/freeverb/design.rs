@@ -19,14 +19,14 @@ pub struct FreeverbControls {
 impl FreeverbControls {
     /// The General MIDI reverb: room 0.5, damping 0.5.
     pub const GENERAL_MIDI: FreeverbControls = FreeverbControls {
-        room: Mix(0.5),
-        damp: Mix(0.5),
+        room: Mix::new(0.5),
+        damp: Mix::new(0.5),
     };
 
     /// The comb loop gain these controls make, `room * 0.28 + 0.7`: in `0.7..=0.98`.
     #[must_use]
     pub fn feedback(&self) -> Feedback {
-        Feedback(position(self.room, Self::GENERAL_MIDI.room) * 0.28 + 0.7)
+        Feedback::new(position(self.room, Self::GENERAL_MIDI.room) * 0.28 + 0.7)
     }
 
     /// The comb's damping, `damp * 0.4`: the one-pole's own pole, in `0..=0.4`, designed in

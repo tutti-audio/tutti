@@ -97,7 +97,7 @@ fn env_at(frame: usize, len: usize) -> Env {
     Env {
         frame: Frame::new(frame as u64),
         sample_rate: SampleRate::of(SR),
-        block_len: Samples(len),
+        block_len: Samples::new(len),
         transport: TransportPosition::new(true, Bpm::of(BPM), Beat::new(beat), None),
         changes: TransportChanges::NONE,
         play: tutti_graph::PlayClock::ZERO,

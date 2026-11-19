@@ -7,7 +7,12 @@ use tutti_units::{SampleRate, Samples};
 const RATE: SampleRate = SampleRate::SR_48K;
 
 fn job(length: usize, latency: usize, tail: usize) -> Result<Job, JobError> {
-    Job::new(RATE, Samples(length), Samples(latency), Samples(tail))
+    Job::new(
+        RATE,
+        Samples::new(length),
+        Samples::new(latency),
+        Samples::new(tail),
+    )
 }
 
 /// A job with no audible frame is refused, whatever it trims or keeps.
@@ -41,7 +46,7 @@ fn a_total_past_the_most_frames_is_refused() {
     assert_eq!(
         job(MAX_FRAMES.get(), 0, 1),
         Err(JobError::TooLong {
-            total: Some(Samples(MAX_FRAMES.get() + 1))
+            total: Some(MAX_FRAMES + Samples::new(1))
         })
     );
     assert!(matches!(
@@ -60,11 +65,11 @@ fn a_total_past_the_most_frames_is_refused() {
 fn a_job_reads_back_what_it_was_given() {
     let job = job(1_000, 64, 200).unwrap();
     assert_eq!(job.rate(), RATE);
-    assert_eq!(job.length(), Samples(1_000));
-    assert_eq!(job.latency(), Samples(64));
-    assert_eq!(job.tail(), Samples(200));
-    assert_eq!(job.output_length(), Samples(1_200));
-    assert_eq!(job.total(), Samples(1_264));
+    assert_eq!(job.length(), Samples::new(1_000));
+    assert_eq!(job.latency(), Samples::new(64));
+    assert_eq!(job.tail(), Samples::new(200));
+    assert_eq!(job.output_length(), Samples::new(1_200));
+    assert_eq!(job.total(), Samples::new(1_264));
     assert_eq!(job.on_event_loss(), EventLossPolicy::Fail);
     let allowed = job.event_loss(EventLossPolicy::Allow);
     assert_eq!(allowed.on_event_loss(), EventLossPolicy::Allow);

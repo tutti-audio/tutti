@@ -98,7 +98,7 @@ impl SweepClock {
         }
         // The LFO's sine is solved in `f64`; each effect crosses its corner value once.
         let sine = |offset: PhaseStep, p: RunningPhase| {
-            Bipolar::clamped(Phase(f64::from_phase(p.advance(offset))).sin())
+            Bipolar::clamped(Phase::new(f64::from_phase(p.advance(offset))).sin())
         };
         for c in 0..glides.len() {
             if c > 0 && self.offsets[c] == self.offsets[c - 1] {

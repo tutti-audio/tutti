@@ -52,6 +52,7 @@ struct PePeer {
     assembler: tutti_ump::SysexAssembler<Box<[u8]>>,
     muid: tutti_midi_device::Muid,
     responder: ResourceResponder,
+    store: ResourceStore,
     reply: Reply,
     asked: Vec<Asked>,
 }
@@ -91,8 +92,8 @@ impl PePeer {
                     },
                     body_limit: BodyLimit::of(1 << 16),
                 },
-                store,
             ),
+            store,
             reply: Reply::Serve,
             asked: Vec::new(),
         }
@@ -183,7 +184,7 @@ impl PePeer {
                     }
                 }
             }
-            for action in self.responder.on_message(&decoded, now) {
+            for action in self.responder.on_message(&mut self.store, &decoded, now) {
                 if let ResponderAction::Send(message) = action {
                     answers.extend(message.packets(MidiGroup::FIRST).unwrap());
                 }
@@ -333,7 +334,7 @@ fn a_write_lands_status_200_and_the_peer_holds_the_data() {
     assert_eq!(status.code(), 200);
     assert_eq!(wire.peer.asked, [Asked::Set("LocalOn".to_owned())]);
     let target = ResourceTarget::try_from(PeResource::LocalOn).unwrap();
-    assert_eq!(wire.peer.responder.store().get(&target), Some(&on(true)));
+    assert_eq!(wire.peer.store.get(&target), Some(&on(true)));
 }
 
 /// M2-103 section 7.4.1: a Resource the peer lists with no data replies 404, which
@@ -754,7 +755,12 @@ fn a_full_update_replaces_the_data_the_record_holds() {
     let actions = wire
         .peer
         .responder
-        .publish(&Wire::target(PeResource::LocalOn), on(false), now)
+        .publish(
+            &mut wire.peer.store,
+            &Wire::target(PeResource::LocalOn),
+            on(false),
+            now,
+        )
         .expect("publishes");
     wire.peer.send(&wire.fake, actions, now);
     wire.run(40);
@@ -776,7 +782,12 @@ fn a_partial_update_is_merged_into_the_data_the_record_holds() {
     let actions = wire
         .peer
         .responder
-        .change(&Wire::target(PeResource::DeviceInfo), update, now)
+        .change(
+            &mut wire.peer.store,
+            &Wire::target(PeResource::DeviceInfo),
+            update,
+            now,
+        )
         .expect("changes");
     wire.peer.send(&wire.fake, actions, now);
     wire.run(40);
@@ -799,6 +810,7 @@ fn a_notify_makes_the_session_get_the_resource_and_the_record_holds_the_result()
         .peer
         .responder
         .publish(
+            &mut wire.peer.store,
             &Wire::target(PeResource::DeviceInfo),
             device_info(&long),
             now,
@@ -865,7 +877,10 @@ fn the_peer_ending_the_subscription_is_the_leases_presence() {
         .0
         .clone();
     let now = wire.now();
-    let actions = wire.peer.responder.end_subscription(&id, now);
+    let actions = wire
+        .peer
+        .responder
+        .end_subscription(&mut wire.peer.store, &id, now);
     wire.peer.send(&wire.fake, actions, now);
     wire.run(40);
     assert_eq!(
@@ -1007,6 +1022,7 @@ fn a_sync_that_fails_clears_the_data_the_record_holds() {
         .peer
         .responder
         .publish(
+            &mut wire.peer.store,
             &Wire::target(PeResource::DeviceInfo),
             device_info(&long),
             now,

@@ -115,7 +115,7 @@
 //! until then) to the peers that declared the category: the member routes it every
 //! message, runs its deadline on the same step as the device's, and sends its replies
 //! in the same batch. When the device's MUID changes the Responder is made again for
-//! the new one, over the store as the peers left it, and holds no Subscription. A lost
+//! the new one, serves the session's store, handed to it on each call, and holds no Subscription. A lost
 //! peer's Initiator and Subscriptions go with it ([`PropertyChange::Dropped`]); a repeated
 //! Discovery of a peer keeps its Subscriptions. An update of a Subscription the
 //! session holds, and the end of one, go to its Initiator and not to the Responder. The store is served as not subscribable
@@ -159,13 +159,13 @@
 //! Time is an argument: nothing here reads a clock.
 
 use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Instant;
 
 use tutti_graph::{Losses, Offset};
 use tutti_midi_device::{
     CiAction, CiCategories, CiDevice, CiHeader, CiMessage, CiPeer, Decoded, DeviceId, EntropyError,
-    EntropyWords, MaxSysexSize, Muid, ProcessAction, ProcessError, ProcessFeatures,
+    EntropyWords, Initiator, MaxSysexSize, Muid, ProcessAction, ProcessError, ProcessFeatures,
     ProcessInitiator, ProfileAction, ProfileInitiator, ProfileRequestError, ResourceInitiator,
     ResourceResponder, ResourceStore,
 };
@@ -174,11 +174,12 @@ use tutti_ump::{DeviceIdentity, MidiGroup, SysexAssembler, SysexStep, Ump};
 
 use crate::answer::{Answer, ReportEnd};
 use crate::devices::OpenOutput;
-use crate::process::{self, ProcessChange, ReportAsk, ReportError, Reporter};
+use crate::peer::{PeerError, PeerRef};
+use crate::process::{self, ProcessChange, ReportAsk, Reporter};
 use crate::profiles::{
     PeerProfiles, ProfileError, ProfileSwitch, ProfilesChange, Snapshot, Switch,
 };
-use crate::properties::{self, PropertyAsk, PropertyChange, PropertyError, PropertyPeer};
+use crate::properties::{self, PropertyAsk, PropertyChange, PropertyPeer};
 use crate::stream::DeviceStream;
 
 mod property;
@@ -352,8 +353,8 @@ struct Member {
 }
 
 impl Member {
-    fn new(group: MidiGroup, device: CiDevice<Entropy>, store: Arc<Mutex<ResourceStore>>) -> Self {
-        let server = property::responder(device.muid(), store);
+    fn new(group: MidiGroup, device: CiDevice<Entropy>) -> Self {
+        let server = property::responder(device.muid());
         Self {
             group,
             device,
@@ -366,14 +367,37 @@ impl Member {
     }
 }
 
+/// What each Initiator of `initiators` does with the message `decoded`, by peer.
+fn hear_all<I: Initiator>(
+    initiators: &mut BTreeMap<Muid, I>,
+    decoded: &Decoded,
+    now: Instant,
+) -> Vec<(Muid, Vec<I::Action>)> {
+    initiators
+        .iter_mut()
+        .map(|(&muid, initiator)| (muid, initiator.on_message(decoded, now)))
+        .collect()
+}
+
+/// What each Initiator of `initiators` whose wait has run out does about it, by
+/// peer.
+fn expire_all<I: Initiator>(
+    initiators: &mut BTreeMap<Muid, I>,
+    now: Instant,
+) -> Vec<(Muid, Vec<I::Action>)> {
+    initiators
+        .iter_mut()
+        .filter(|(_, initiator)| initiator.deadline().is_some_and(|at| now >= at))
+        .map(|(&muid, initiator)| (muid, initiator.on_timeout(now)))
+        .collect()
+}
+
 /// The devices running on one input, and what hears their SysEx.
 struct Running {
     /// The identity they declare.
     identity: DeviceIdentity,
     members: Vec<Member>,
     assembler: SysexAssembler<Box<[u8]>>,
-    /// What the devices' Responders serve: the session's, given at start.
-    store: Arc<Mutex<ResourceStore>>,
     /// The Groups whose device could not start and was reported: reported once
     /// until it starts, tried again at every poll. A Group that leaves the
     /// Groups and returns is reported again.
@@ -403,8 +427,6 @@ pub(crate) struct Ci {
     property_peers: properties::Snapshot,
     /// Property Exchange calls asked for, started by the next poll.
     calls: Vec<PropertyAsk>,
-    /// What the devices' Responders serve: the session's, given at construction.
-    store: Arc<Mutex<ResourceStore>>,
     /// Counts the CI messages the output has refused: a cell of the port that
     /// owns the conversation, which outlives the connection.
     refused: CounterWriter<Losses>,
@@ -438,11 +460,7 @@ pub(crate) fn groups_of_a_midi1_port() -> Vec<MidiGroup> {
 
 impl Ci {
     /// MIDI-CI for the input `device`, with nothing decided.
-    pub(crate) fn new(
-        device: DeviceId,
-        refused: CounterWriter<Losses>,
-        store: Arc<Mutex<ResourceStore>>,
-    ) -> Self {
+    pub(crate) fn new(device: DeviceId, refused: CounterWriter<Losses>) -> Self {
         Self {
             device,
             groups: Vec::new(),
@@ -454,7 +472,6 @@ impl Ci {
             reports: Vec::new(),
             property_peers: Arc::default(),
             calls: Vec::new(),
-            store,
             refused,
         }
     }
@@ -480,6 +497,7 @@ impl Ci {
         now: Instant,
         heard: &Heard<'_>,
         identity: Option<DeviceIdentity>,
+        store: &mut ResourceStore,
         out: &mut OpenOutput,
     ) -> CiChanges {
         let mut changes = CiChanges::default();
@@ -497,14 +515,14 @@ impl Ci {
         match (&mut self.running, identity) {
             (Some(running), _) => {
                 running.reconcile(&self.groups, &mut entropy, now, out, &mut changes);
-                running.step(now, heard, out, &mut changes);
+                running.step(store, now, heard, out, &mut changes);
                 running.start_switches(&mut self.queue, now, out, &mut changes);
                 running.start_reports(&mut self.reports, now, out, &mut changes);
                 running.start_properties(&mut self.calls, now, out, &mut changes);
             }
             (None, Some(identity)) if !self.groups.is_empty() => {
                 let (running, started) =
-                    Running::start(&self.groups, &self.store, identity, &mut entropy, now, out);
+                    Running::start(&self.groups, identity, &mut entropy, now, out);
                 self.running = Some(Box::new(running));
                 changes.peers.extend(started.peers);
                 changes.profiles.extend(started.profiles);
@@ -562,7 +580,7 @@ impl Ci {
 
     /// Asks that the peer of `ask` be sent its request at the next poll, after
     /// checking it is still one that supports MIDI Message Report.
-    pub(crate) fn report(&mut self, ask: ReportAsk) -> Result<(), ReportError> {
+    pub(crate) fn report(&mut self, ask: ReportAsk) -> Result<(), PeerError> {
         ask.check(self.reporters.iter())?;
         self.reports.push(ask);
         Ok(())
@@ -575,7 +593,7 @@ impl Ci {
 
     /// Asks that the call of `ask` be made of its peer at the next poll, after
     /// checking it is still one that answered its Capabilities.
-    pub(crate) fn ask_property(&mut self, ask: PropertyAsk) -> Result<(), PropertyError> {
+    pub(crate) fn ask_property(&mut self, ask: PropertyAsk) -> Result<(), PeerError> {
         ask.check(self.property_peers.iter())?;
         self.calls.push(ask);
         Ok(())
@@ -598,9 +616,7 @@ impl Ci {
                     .initiators
                     .iter()
                     .map(|(&muid, initiator)| PeerProfiles {
-                        device: self.device.clone(),
-                        group: member.group,
-                        muid,
+                        at: member.peer_ref(&self.device, muid),
                         known: initiator.is_known(),
                         table: initiator.table().clone(),
                     })
@@ -625,9 +641,7 @@ impl Ci {
                             .is_some_and(|f| f.contains(ProcessFeatures::MIDI_MESSAGE_REPORT))
                     })
                     .map(|(&muid, _)| Reporter {
-                        device: self.device.clone(),
-                        group: member.group,
-                        muid,
+                        at: member.peer_ref(&self.device, muid),
                     })
             })
             .collect()
@@ -646,9 +660,7 @@ impl Ci {
                     .iter()
                     .filter(|(_, initiator)| initiator.transactions().capabilities().is_some())
                     .map(|(&muid, initiator)| PropertyPeer {
-                        device: self.device.clone(),
-                        group: member.group,
-                        muid,
+                        at: member.peer_ref(&self.device, muid),
                         resources: Arc::new(initiator.resource_list().cloned().unwrap_or_default()),
                     })
             })
@@ -686,7 +698,6 @@ impl Running {
     /// [`unstarted`](Self::unstarted).
     fn start(
         groups: &[MidiGroup],
-        store: &Arc<Mutex<ResourceStore>>,
         identity: DeviceIdentity,
         entropy: &mut impl FnMut() -> Result<Entropy, EntropyError>,
         now: Instant,
@@ -701,7 +712,7 @@ impl Running {
             .filter_map(|&group| match start_device(identity, entropy, now) {
                 Ok((device, first)) => {
                     firsts.push(first);
-                    Some(Member::new(group, device, Arc::clone(store)))
+                    Some(Member::new(group, device))
                 }
                 Err(error) => {
                     unstarted.push(group);
@@ -718,7 +729,6 @@ impl Running {
             identity,
             members,
             assembler,
-            store: Arc::clone(store),
             unstarted,
         };
         let mut changes = CiChanges {
@@ -771,8 +781,7 @@ impl Running {
                 Ok((device, first)) => {
                     started.push((group, first));
                     self.unstarted.retain(|g| *g != group);
-                    self.members
-                        .push(Member::new(group, device, Arc::clone(&self.store)));
+                    self.members.push(Member::new(group, device));
                     changed = true;
                 }
                 Err(error) => {
@@ -871,6 +880,7 @@ impl Running {
     /// Hands the devices what the port heard and the time (see [`Ci::poll`]).
     fn step(
         &mut self,
+        store: &mut ResourceStore,
         now: Instant,
         heard: &Heard<'_>,
         out: &mut OpenOutput,
@@ -894,9 +904,8 @@ impl Running {
             for member in self.members.iter_mut().filter(|m| m.group == group) {
                 let actions = member.device.on_message(&decoded, now);
                 member.apply(actions, now, &mut sends, changes);
-                member.route(&decoded, &mut sends, changes);
-                member.route_process(&decoded, now, &mut sends, changes);
-                member.route_property(&decoded, now, &mut sends, changes);
+                member.hear(&decoded, now, &mut sends, changes);
+                member.route_property(store, &decoded, now, &mut sends, changes);
             }
         }
         if heard.gap() {
@@ -909,8 +918,7 @@ impl Running {
                 member.apply(actions, now, &mut sends, changes);
             }
             member.expire(now, &mut sends, changes);
-            member.expire_process(now, &mut sends, changes);
-            member.expire_property(now, &mut sends, changes);
+            member.expire_property(store, now, &mut sends, changes);
         }
         changes.refused += send(out, &sends);
     }
@@ -926,12 +934,13 @@ impl Running {
     ) {
         let mut sends = Vec::new();
         for switch in queue.drain(..) {
-            let Some(member) = self.members.iter_mut().find(|m| m.group == switch.group) else {
+            let Some(member) = self
+                .members
+                .iter_mut()
+                .find(|m| m.group == switch.at.peer().group)
+            else {
                 changes.answers.push((
-                    PeerId {
-                        group: switch.group,
-                        muid: switch.muid,
-                    },
+                    switch.at.peer(),
                     Answer::SwitchLost {
                         request: switch.request(),
                     },
@@ -956,14 +965,14 @@ impl Running {
     ) {
         let mut sends = Vec::new();
         for ask in asks.drain(..) {
-            let Some(member) = self.members.iter_mut().find(|m| m.group == ask.peer.group) else {
-                changes.answers.push((
-                    PeerId {
-                        group: ask.peer.group,
-                        muid: ask.peer.muid,
-                    },
-                    Answer::ReportLost,
-                ));
+            let Some(member) = self
+                .members
+                .iter_mut()
+                .find(|m| m.group == ask.peer.at.peer().group)
+            else {
+                changes
+                    .answers
+                    .push((ask.peer.at.peer(), Answer::ReportLost));
                 continue;
             };
             member.start_report(&ask, now, &mut sends, changes);
@@ -1020,6 +1029,10 @@ impl Member {
                 _ => {}
             }
         }
+    }
+
+    fn peer_ref(&self, device: &DeviceId, muid: Muid) -> PeerRef {
+        PeerRef::new(device.clone(), self.peer_id(muid))
     }
 
     const fn peer_id(&self, muid: Muid) -> PeerId {
@@ -1094,39 +1107,35 @@ impl Member {
         self.carry_out_process(muid, actions, sends, changes);
     }
 
-    /// Hands every Process Inquiry Initiator the message, which is theirs to keep
-    /// or ignore.
-    fn route_process(
+    /// Hands every Profile Configuration and Process Inquiry Initiator the
+    /// message, which is theirs to keep or ignore.
+    fn hear(
         &mut self,
         decoded: &Decoded,
         now: Instant,
         sends: &mut Vec<(MidiGroup, CiMessage)>,
         changes: &mut CiChanges,
     ) {
-        let heard: Vec<_> = self
-            .process
-            .iter_mut()
-            .map(|(&muid, initiator)| (muid, initiator.on_message(decoded, now)))
-            .collect();
-        for (muid, actions) in heard {
+        for (muid, actions) in hear_all(&mut self.initiators, decoded, now) {
+            self.carry_out(muid, actions, sends, changes);
+        }
+        for (muid, actions) in hear_all(&mut self.process, decoded, now) {
             self.carry_out_process(muid, actions, sends, changes);
         }
     }
 
-    /// Ends every wait of the Process Inquiry Initiators that has run out.
-    fn expire_process(
+    /// Ends every wait of the Profile Configuration and Process Inquiry
+    /// Initiators that has run out.
+    fn expire(
         &mut self,
         now: Instant,
         sends: &mut Vec<(MidiGroup, CiMessage)>,
         changes: &mut CiChanges,
     ) {
-        let ended: Vec<_> = self
-            .process
-            .iter_mut()
-            .filter(|(_, initiator)| initiator.deadline().is_some_and(|at| now >= at))
-            .map(|(&muid, initiator)| (muid, initiator.on_timeout(now)))
-            .collect();
-        for (muid, actions) in ended {
+        for (muid, actions) in expire_all(&mut self.initiators, now) {
+            self.carry_out(muid, actions, sends, changes);
+        }
+        for (muid, actions) in expire_all(&mut self.process, now) {
             self.carry_out_process(muid, actions, sends, changes);
         }
     }
@@ -1138,20 +1147,20 @@ impl Member {
         sends: &mut Vec<(MidiGroup, CiMessage)>,
         changes: &mut CiChanges,
     ) {
-        let Some(initiator) = self.process.get_mut(&ask.peer.muid) else {
+        let Some(initiator) = self.process.get_mut(&ask.peer.muid()) else {
             changes
                 .answers
-                .push((self.peer_id(ask.peer.muid), Answer::ReportLost));
+                .push((self.peer_id(ask.peer.muid()), Answer::ReportLost));
             return;
         };
         match initiator.report(ask.request, now) {
-            Ok(actions) => self.carry_out_process(ask.peer.muid, actions, sends, changes),
+            Ok(actions) => self.carry_out_process(ask.peer.muid(), actions, sends, changes),
             // The session sends a report only once the one in flight has
             // ended; a second here has no answer of its own.
             Err(ProcessError::AlreadyAsking) => {}
             Err(ProcessError::NotSupported) => changes
                 .answers
-                .push((self.peer_id(ask.peer.muid), Answer::ReportUnsupported)),
+                .push((self.peer_id(ask.peer.muid()), Answer::ReportUnsupported)),
             Err(_) => {}
         }
     }
@@ -1196,41 +1205,6 @@ impl Member {
         }
     }
 
-    /// Hands every Initiator the message, which is theirs to keep or ignore.
-    fn route(
-        &mut self,
-        decoded: &Decoded,
-        sends: &mut Vec<(MidiGroup, CiMessage)>,
-        changes: &mut CiChanges,
-    ) {
-        let heard: Vec<_> = self
-            .initiators
-            .iter_mut()
-            .map(|(&muid, initiator)| (muid, initiator.on_message(decoded)))
-            .collect();
-        for (muid, actions) in heard {
-            self.carry_out(muid, actions, sends, changes);
-        }
-    }
-
-    /// Ends every wait of the Initiators that has run out.
-    fn expire(
-        &mut self,
-        now: Instant,
-        sends: &mut Vec<(MidiGroup, CiMessage)>,
-        changes: &mut CiChanges,
-    ) {
-        let ended: Vec<_> = self
-            .initiators
-            .iter_mut()
-            .filter(|(_, initiator)| initiator.deadline().is_some_and(|at| now >= at))
-            .map(|(&muid, initiator)| (muid, initiator.on_timeout(now)))
-            .collect();
-        for (muid, actions) in ended {
-            self.carry_out(muid, actions, sends, changes);
-        }
-    }
-
     fn start_switch(
         &mut self,
         switch: &ProfileSwitch,
@@ -1238,9 +1212,9 @@ impl Member {
         sends: &mut Vec<(MidiGroup, CiMessage)>,
         changes: &mut CiChanges,
     ) {
-        let Some(initiator) = self.initiators.get_mut(&switch.muid) else {
+        let Some(initiator) = self.initiators.get_mut(&switch.at.peer().muid) else {
             changes.answers.push((
-                self.peer_id(switch.muid),
+                self.peer_id(switch.at.peer().muid),
                 Answer::SwitchLost {
                     request: switch.request(),
                 },
@@ -1252,7 +1226,7 @@ impl Member {
             Switch::Off(address) => initiator.set_off(address, switch.profile, now),
         };
         match started {
-            Ok(actions) => self.carry_out(switch.muid, actions, sends, changes),
+            Ok(actions) => self.carry_out(switch.at.peer().muid, actions, sends, changes),
             // The session sends a switch of a Profile at an address only once
             // the one in flight has ended; a second here has no answer of its
             // own.
@@ -1333,7 +1307,6 @@ fn send(out: &mut OpenOutput, sends: &[(MidiGroup, CiMessage)]) -> Losses {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
     use tutti_midi_device::{CiCategories, DiscoveryData, EndpointId, PortDirection};
@@ -1431,14 +1404,8 @@ mod tests {
         let t0 = Instant::now();
         let at = |ms| t0 + Duration::from_millis(ms);
 
-        let (mut running, first) = Running::start(
-            &[G0, G1],
-            &Arc::default(),
-            identity(),
-            &mut source,
-            at(0),
-            &mut out,
-        );
+        let (mut running, first) =
+            Running::start(&[G0, G1], identity(), &mut source, at(0), &mut out);
         assert_eq!(first.unstarted, [(G1, EntropyError::unavailable())]);
         let _ = counters.take_sent(raw);
 
@@ -1454,7 +1421,13 @@ mod tests {
         for (ms, part) in [(1, head), (2, tail)] {
             let mut changes = CiChanges::default();
             running.reconcile(&[G0, G1], &mut source, at(ms), &mut out, &mut changes);
-            running.step(at(ms), &heard(part), &mut out, &mut changes);
+            running.step(
+                &mut ResourceStore::new(),
+                at(ms),
+                &heard(part),
+                &mut out,
+                &mut changes,
+            );
             assert!(changes.unstarted.is_empty(), "reported once");
             if ms == 1 {
                 assert!(
@@ -1486,14 +1459,8 @@ mod tests {
         // Two draws at the start and two on each of three polls are refused.
         let mut source = refusing(1, 9);
         let now = Instant::now();
-        let (mut running, first) = Running::start(
-            &[G0, G1],
-            &Arc::default(),
-            identity(),
-            &mut source,
-            now,
-            &mut out,
-        );
+        let (mut running, first) =
+            Running::start(&[G0, G1], identity(), &mut source, now, &mut out);
         assert_eq!(
             first.unstarted,
             [
@@ -1527,14 +1494,7 @@ mod tests {
         let (mut out, _counters) = output();
         let mut source = refusing(1, 100);
         let now = Instant::now();
-        let (mut running, first) = Running::start(
-            &[G0],
-            &Arc::default(),
-            identity(),
-            &mut source,
-            now,
-            &mut out,
-        );
+        let (mut running, first) = Running::start(&[G0], identity(), &mut source, now, &mut out);
         assert_eq!(first.unstarted.len(), 1);
         let mut changes = CiChanges::default();
         running.reconcile(&[G1], &mut source, now, &mut out, &mut changes);
@@ -1552,25 +1512,11 @@ mod tests {
     fn a_ci_message_the_output_refuses_is_counted_and_one_it_takes_is_not() {
         let now = Instant::now();
         let (mut full, _counters) = output_taking(0);
-        let (_, changes) = Running::start(
-            &[G0, G1],
-            &Arc::default(),
-            identity(),
-            &mut entropy,
-            now,
-            &mut full,
-        );
+        let (_, changes) = Running::start(&[G0, G1], identity(), &mut entropy, now, &mut full);
         assert_eq!(changes.refused, Losses::refused(2));
 
         let (mut roomy, counters) = output();
-        let (_, changes) = Running::start(
-            &[G0, G1],
-            &Arc::default(),
-            identity(),
-            &mut entropy,
-            now,
-            &mut roomy,
-        );
+        let (_, changes) = Running::start(&[G0, G1], identity(), &mut entropy, now, &mut roomy);
         assert_eq!(changes.refused, Losses::NONE);
         assert!(counters.sent() > 0, "the messages were sent");
     }
@@ -1581,44 +1527,8 @@ mod tests {
     fn a_ci_message_the_output_has_room_for_only_in_part_is_counted() {
         let now = Instant::now();
         let (mut short, _counters) = output_taking(1);
-        let (_, changes) = Running::start(
-            &[G0],
-            &Arc::default(),
-            identity(),
-            &mut entropy,
-            now,
-            &mut short,
-        );
+        let (_, changes) = Running::start(&[G0], identity(), &mut entropy, now, &mut short);
         assert_eq!(changes.refused, Losses::refused(1));
-    }
-
-    // A Group that starts later serves the store the first one does: one store
-    // is held for every device of the input, not one per start.
-    #[test]
-    fn a_group_reconciled_later_serves_the_store_the_first_does() {
-        let (mut out, _counters) = output();
-        let now = Instant::now();
-        let mut store = ResourceStore::new();
-        store.declare(
-            tutti_midi_device::ResourceEntry::builder(tutti_midi_device::PeResource::LocalOn)
-                .build()
-                .unwrap(),
-        );
-        let shared = Arc::new(Mutex::new(store));
-        let (mut running, _) =
-            Running::start(&[G0], &shared, identity(), &mut entropy, now, &mut out);
-        let mut changes = CiChanges::default();
-        running.reconcile(&[G0, G1], &mut entropy, now, &mut out, &mut changes);
-        assert_eq!(running.members.len(), 2);
-        let given = shared.lock().unwrap().resource_list();
-        for member in &running.members {
-            assert_eq!(
-                member.server.store().resource_list(),
-                given,
-                "{:?}",
-                member.group
-            );
-        }
     }
 
     /// The initiator `init` and the Responder `server` trade messages until
@@ -1626,6 +1536,7 @@ mod tests {
     fn trade(
         init: &mut tutti_midi_device::ResourceInitiator,
         server: &mut ResourceResponder,
+        store: &mut ResourceStore,
         first: Vec<tutti_midi_device::ResourceAction>,
         now: Instant,
     ) -> Vec<tutti_midi_device::ResourceEvent> {
@@ -1645,7 +1556,7 @@ mod tests {
                 break;
             }
             for message in to_server {
-                let replies = server.on_message(&Decoded::Message(message), now);
+                let replies = server.on_message(store, &Decoded::Message(message), now);
                 for reply in replies {
                     if let ResponderAction::Send(message) = reply {
                         actions.extend(init.on_message(&Decoded::Message(message), now));
@@ -1677,9 +1588,7 @@ mod tests {
         store
             .put(None, PeData::LocalOn(PeLocalOn(true)))
             .expect("declared");
-        let shared = Arc::new(Mutex::new(store));
-        let (mut running, _) =
-            Running::start(&[G0, G1], &shared, identity(), &mut entropy, now, &mut out);
+        let (mut running, _) = Running::start(&[G0, G1], identity(), &mut entropy, now, &mut out);
 
         let peer = Muid::of(0x0012_3456);
         let settings = |max| PeSettings {
@@ -1705,24 +1614,24 @@ mod tests {
         let [ma, mb] = &mut running.members[..] else {
             panic!("two Groups");
         };
-        let _ = trade(a, &mut ma.server, std::mem::take(first_a), now);
-        let _ = trade(b, &mut mb.server, std::mem::take(first_b), now);
+        let _ = trade(a, &mut ma.server, &mut store, std::mem::take(first_a), now);
+        let _ = trade(b, &mut mb.server, &mut store, std::mem::take(first_b), now);
 
         let set = ResourceSet::full(target.clone(), PeData::LocalOn(PeLocalOn(false))).unwrap();
         let (_, actions) = a.set(&set, now).unwrap();
-        let _ = trade(a, &mut ma.server, actions, now);
+        let _ = trade(a, &mut ma.server, &mut store, actions, now);
 
         let (_, actions) = b.get(&ResourceGet::new(target.clone()), now).unwrap();
-        let events = trade(b, &mut mb.server, actions, now);
+        let events = trade(b, &mut mb.server, &mut store, actions, now);
         let got = events.iter().find_map(|e| match e {
             ResourceEvent::Got { result, .. } => Some(result.clone()),
             _ => None,
         });
         assert_eq!(got, Some(Ok(PeData::LocalOn(PeLocalOn(false)))));
         assert_eq!(
-            shared.lock().unwrap().get(&target),
+            store.get(&target),
             Some(&PeData::LocalOn(PeLocalOn(false))),
-            "the app's handle sees it"
+            "the app's store sees it"
         );
     }
 
@@ -1752,14 +1661,7 @@ mod tests {
         let device = device_id();
         let (mut out, _counters) = output();
         let now = Instant::now();
-        let (mut running, _) = Running::start(
-            &[G0],
-            &Arc::default(),
-            identity(),
-            &mut entropy,
-            now,
-            &mut out,
-        );
+        let (mut running, _) = Running::start(&[G0], identity(), &mut entropy, now, &mut out);
         let muid = Muid::of(0x0012_3456);
         let profile = ProfileId::from_bytes([0x7E, 1, 0, 1, 1]).unwrap();
         for group in [G1, G0] {
@@ -1767,9 +1669,7 @@ mod tests {
             let mut changes = CiChanges::default();
             running.start_switches(
                 &mut vec![ProfileSwitch {
-                    device: device.clone(),
-                    group,
-                    muid,
+                    at: PeerRef::new(device.clone(), id),
                     profile,
                     switch: Switch::Off(CiDeviceId::Group),
                 }],
@@ -1791,9 +1691,7 @@ mod tests {
                 "{group:?}"
             );
             let peer = Reporter {
-                device: device.clone(),
-                group,
-                muid,
+                at: PeerRef::new(device.clone(), id),
             };
             let request = ReportRequest::new(
                 DataControl::Full,
@@ -1819,9 +1717,7 @@ mod tests {
             running.start_properties(
                 &mut vec![PropertyAsk {
                     peer: PropertyPeer {
-                        device: device.clone(),
-                        group,
-                        muid,
+                        at: PeerRef::new(device.clone(), id),
                         resources: Arc::default(),
                     },
                     call: call.clone(),

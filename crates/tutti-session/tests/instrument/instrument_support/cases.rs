@@ -395,12 +395,16 @@ pub fn gain_reaches_the_output<S: Subject>() {
     rig.at(rig.t(STAMP), note_on(0, 60, 100));
     rig.render_to(rig.t(STAMP) + 4_000);
     assert!(rig.peak(rig.t(STAMP) + 3_000..rig.t(STAMP) + 4_000) > 1e-4);
-    rig.handle.set_gain(Amplitude(0.0));
+    rig.session
+        .set(rig.handle.gain().to(Amplitude::new(0.0)))
+        .unwrap();
     let at = rig.frame();
     rig.render_to(at + 3 * BLOCK);
     let p = rig.peak(at + 2 * BLOCK..at + 3 * BLOCK);
     assert_eq!(p, 0.0, "gain 0 still sounds {p}");
-    rig.handle.set_gain(Amplitude(1.0));
+    rig.session
+        .set(rig.handle.gain().to(Amplitude::new(1.0)))
+        .unwrap();
     let at = rig.frame();
     rig.render_to(at + 4 * BLOCK);
     assert!(
@@ -478,7 +482,10 @@ fn rate_change_instant_once<S: Subject>(send_after_the_change: bool) -> Judged {
     let send = |rig: &mut Rig| {
         rig.handle
             .keys_mut()
-            .push(read.after(tutti_units::Samples(AHEAD)), note_on(0, 60, 100))
+            .push(
+                read.after(tutti_units::Samples::new(AHEAD)),
+                note_on(0, 60, 100),
+            )
             .expect("the queue has room");
     };
     if !send_after_the_change {
@@ -581,9 +588,9 @@ pub fn a_fork_starts_silent_and_plays<S: Subject>() {
         .midi()
         .play_clip(
             rig.node,
-            tutti_units::Beat(0.0),
+            tutti_units::Beat::new(0.0),
             [TimedMidiEvent::new(
-                tutti_units::Beat(0.01),
+                tutti_units::Beat::new(0.01),
                 Message::midi2(
                     MidiChannel::FIRST,
                     Voice2::note_on(NoteNumber::of(64), NoteVelocity::CENTER),
@@ -612,7 +619,7 @@ pub fn a_fork_starts_silent_and_plays<S: Subject>() {
         fork.set_transport(tutti_graph::TransportPosition::new(
             true,
             tutti_units::Bpm::of(120.0),
-            tutti_units::Beat(beat),
+            tutti_units::Beat::new(beat),
             None,
         ));
         fork.render(BLOCK, PlanesMut::from_vecs(&mut out).unwrap());

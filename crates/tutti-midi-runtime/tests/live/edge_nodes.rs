@@ -152,7 +152,7 @@ impl Ingest {
 /// `ump` at frame `offset`, which may lie past the 512-frame blocks these
 /// tests run: it is built against a block long enough to hold it.
 fn at(offset: usize, ump: Ump) -> UmpAt {
-    (Offset::of(Samples(offset), Samples(1 << 20)), ump)
+    (Offset::of(Samples::new(offset), Samples::new(1 << 20)), ump)
 }
 
 /// A note-on with 7-bit velocity 100, widened (M2-115), at `offset`.
@@ -919,7 +919,7 @@ fn a_host_set_modes_reset_goes_ahead_of_the_blocks_events() {
     for channel in 1..=6 {
         assert_eq!(
             ranges.semitones(tutti_ump::MidiChannel::of(channel)),
-            tutti_units::Semitones(12.0),
+            tutti_units::Semitones::new(12.0),
             "channel {channel}"
         );
     }
@@ -956,7 +956,7 @@ fn a_member_bend_range_fans_out_over_the_zones_ports() {
     for channel in 1..=7 {
         assert_eq!(
             ranges.semitones(tutti_ump::MidiChannel::of(channel)),
-            tutti_units::Semitones(12.0),
+            tutti_units::Semitones::new(12.0),
             "channel {channel}"
         );
     }
@@ -1051,7 +1051,7 @@ fn an_input_nodes_fork_is_silent() {
 fn an_event_tap_hands_midi_back_and_counts_drops() {
     let (mut ed, mut exec) = Editor::new(Prepare::new(
         SampleRate::of(RATE),
-        MaxBlock::of(Samples(512)),
+        MaxBlock::of(Samples::new(512)),
     ));
     let (inlet, mut keys) = EventInletNode::pair(EventCapacity::of(256));
     ed.insert(NodeKey(1), "keys", inlet);
@@ -1088,11 +1088,11 @@ fn a_start_inside_a_block_clocks_from_its_frame() {
         1,
         2048,
     );
-    let stopped = TransportPosition::new(false, Bpm::of(120.0), Beat(0.0), None);
-    let rolling = TransportPosition::new(true, Bpm::of(120.0), Beat(0.0), None);
+    let stopped = TransportPosition::new(false, Bpm::of(120.0), Beat::new(0.0), None);
+    let rolling = TransportPosition::new(true, Bpm::of(120.0), Beat::new(0.0), None);
     let mut changes = TransportChanges::NONE;
     changes
-        .push(Offset::of(Samples(100), Samples(2048)), rolling)
+        .push(Offset::of(Samples::new(100), Samples::new(2048)), rolling)
         .unwrap();
     let mut out = vec![0.0f32; 2048];
     exec.process_with_changes(2048, &stopped, &changes, &[], &mut [&mut out[..]]);
@@ -1133,7 +1133,7 @@ fn a_machine_control_message_is_on_the_frame_of_its_transport_change() {
         1,
         2048,
     );
-    let at_beat = |frames: f64| Beat(frames / 24_000.0);
+    let at_beat = |frames: f64| Beat::new(frames / 24_000.0);
     let stopped = |beat: Beat| TransportPosition::new(false, Bpm::of(120.0), beat, None);
     let rolling = |beat: Beat| TransportPosition::new(true, Bpm::of(120.0), beat, None);
     let mut out = vec![0.0f32; 2048];
@@ -1143,20 +1143,20 @@ fn a_machine_control_message_is_on_the_frame_of_its_transport_change() {
         let mut changes = TransportChanges::NONE;
         if let Some((frame, to)) = change {
             changes
-                .push(Offset::of(Samples(frame), Samples(2048)), to)
+                .push(Offset::of(Samples::new(frame), Samples::new(2048)), to)
                 .unwrap();
         }
         seen.lock().unwrap().clear();
         exec.process_with_changes(2048, start, &changes, &[], &mut [&mut out[..]]);
     };
     // The first block only looks.
-    run(&mut exec, &stopped(Beat(0.0)), None);
+    run(&mut exec, &stopped(Beat::new(0.0)), None);
     assert!(followed(&seen).is_empty());
     // Start on frame 100 (at beat 0); the rest of the block rolls 1 948 frames.
     run(
         &mut exec,
-        &stopped(Beat(0.0)),
-        Some((100, rolling(Beat(0.0)))),
+        &stopped(Beat::new(0.0)),
+        Some((100, rolling(Beat::new(0.0)))),
     );
     let block_start = |n: u64| n * 2048;
     assert_eq!(
@@ -1178,7 +1178,7 @@ fn a_machine_control_message_is_on_the_frame_of_its_transport_change() {
     run(
         &mut exec,
         &stopped(at_beat(1948.0 + 300.0)),
-        Some((700, rolling(Beat(2.0)))),
+        Some((700, rolling(Beat::new(2.0)))),
     );
     let got = followed(&seen);
     assert_eq!(got.len(), 2, "a locate and a deferred play: {got:?}");
@@ -1208,7 +1208,7 @@ fn a_machine_control_locate_to_no_time_code_is_counted() {
     for beat in [0.0, -4.0] {
         exec.process(
             512,
-            &TransportPosition::new(false, Bpm::of(120.0), Beat(beat), None),
+            &TransportPosition::new(false, Bpm::of(120.0), Beat::new(beat), None),
             &[],
             &mut [&mut out[..]],
         );
@@ -1241,7 +1241,7 @@ fn a_sync_nodes_fork_runs() {
     for playing in [false, true] {
         fork_exec.process(
             512,
-            &TransportPosition::new(playing, Bpm::of(120.0), Beat(0.0), None),
+            &TransportPosition::new(playing, Bpm::of(120.0), Beat::new(0.0), None),
             &[],
             &mut [&mut out[..]],
         );
@@ -1283,7 +1283,7 @@ fn a_clock_flood_past_the_port_capacity_is_counted() {
         let mut frame = 0usize;
         for &len in blocks {
             let beat = frame as f64 / RATE * BPM / 60.0;
-            let rolling = TransportPosition::new(true, Bpm::of(BPM), Beat(beat), None);
+            let rolling = TransportPosition::new(true, Bpm::of(BPM), Beat::new(beat), None);
             let mut out = vec![0.0f32; len];
             exec.process(len, &rolling, &[], &mut [&mut out[..]]);
             frame += len;
@@ -1333,11 +1333,14 @@ fn a_segment_boundary_on_a_wrap_sends_the_song_position_once() {
         1,
         4096,
     );
-    let looping = Some(LoopRange::new(Beat(1.0), Beat(1.1)).expect("a loop"));
-    let rolling = TransportPosition::new(true, Bpm::of(120.0), Beat(1.0), looping);
+    let looping = Some(LoopRange::new(Beat::new(1.0), Beat::new(1.1)).expect("a loop"));
+    let rolling = TransportPosition::new(true, Bpm::of(120.0), Beat::new(1.0), looping);
     let mut changes = TransportChanges::NONE;
     changes
-        .push(Offset::of(Samples(2_400), Samples(4_000)), rolling)
+        .push(
+            Offset::of(Samples::new(2_400), Samples::new(4_000)),
+            rolling,
+        )
         .unwrap();
     let mut out = vec![0.0f32; 4_000];
     exec.process_with_changes(4_000, &rolling, &changes, &[], &mut [&mut out[..]]);
@@ -1395,14 +1398,14 @@ fn a_short_loop_in_a_long_block_is_counted_past_the_cap() {
             1,
             TOTAL,
         );
-        let looping = Some(LoopRange::new(Beat(0.0), Beat(end)).expect("a loop"));
+        let looping = Some(LoopRange::new(Beat::new(0.0), Beat::new(end)).expect("a loop"));
         let region = tutti_music::LoopRange::new(Beat::new(0.0), Beat::new(end));
-        let mut host = FrameClock::new(Beat(0.0), Bpm::of(120.0), SampleRate::of(RATE));
+        let mut host = FrameClock::new(Beat::new(0.0), Bpm::of(120.0), SampleRate::of(RATE));
         for _ in 0..TOTAL / len {
             let rolling = TransportPosition::new(true, Bpm::of(120.0), host.beat(), looping);
             let mut out = vec![0.0f32; len];
             exec.process(len, &rolling, &[], &mut [&mut out[..]]);
-            host.advance(Samples(len), region);
+            host.advance(Samples::new(len), region);
         }
         let sent = seen.lock().unwrap().len();
         (sent, clock.losses().refused)

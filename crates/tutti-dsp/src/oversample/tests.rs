@@ -74,9 +74,9 @@ fn the_latency_is_the_padded_round_trip_of_the_stage_delays() {
         let delays: Vec<usize> = (0..stages)
             .map(|j| {
                 let wide = f64::from(1u32 << j);
-                let transition = Hz(BASE * (wide - 0.9).min(wide / 2.0));
+                let transition = Hz::new(BASE * (wide - 0.9).min(wide / 2.0));
                 FirDesign::new(FirResponse::HalfBand, transition)
-                    .attenuation(Db(100.0))
+                    .attenuation(Db::new(100.0))
                     .design(SampleRate::new(BASE * f64::from(2u32 << j)).unwrap())
                     .unwrap()
                     .delay()

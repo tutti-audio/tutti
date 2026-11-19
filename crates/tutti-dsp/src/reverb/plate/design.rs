@@ -30,7 +30,6 @@
 
 use tutti_units::{Amplitude, Depth, Gain, Hz, Mix, SampleRate, SampleSpan, Seconds};
 
-use crate::finite::finite_or;
 use crate::reverb::fdn::design::MAX_PRE_DELAY;
 use crate::reverb::network::{
     Absorption, AllPass, AllPassForm, Fdn, Gains, Inline, Line, LineModulation, MAX_DENSE,
@@ -142,11 +141,11 @@ pub(crate) const DECAY_DIFFUSION_1: Gain = Gain::new(-0.70);
 /// The deepest modulation excursion, in frames at 29761 Hz (the paper's EXCURSION).
 const EXCURSION: f64 = 16.0;
 /// The rate of the modulation (the paper: of the order of 1 Hz).
-const MODULATION_RATE: Hz = Hz(1.0);
+const MODULATION_RATE: Hz = Hz::new(1.0);
 /// The longest decay a control may ask for: 8 s.
-pub const MAX_PLATE_DECAY: Seconds = Seconds(8.0);
+pub const MAX_PLATE_DECAY: Seconds = Seconds::new(8.0);
 /// The lowest bandwidth a control reaches.
-pub(crate) const MIN_BANDWIDTH: Hz = Hz(10.0);
+pub(crate) const MIN_BANDWIDTH: Hz = Hz::new(10.0);
 /// The share of Nyquist the input bandwidth is held under.
 const BANDWIDTH_CEILING: f64 = 0.9;
 /// The largest damping pole: one short of a filter that never settles.
@@ -199,12 +198,12 @@ impl PlateControls {
     /// damping 0.0005, a bandwidth of 20 kHz (the paper's 0.9995 is nearly transparent), no
     /// pre-delay and half the modulation depth.
     pub const DEFAULT: PlateControls = PlateControls {
-        decay: Seconds(1.8),
-        damping: Mix(0.0005),
-        bandwidth: Hz(20_000.0),
+        decay: Seconds::new(1.8),
+        damping: Mix::new(0.0005),
+        bandwidth: Hz::new(20_000.0),
         pre_delay: Seconds::ZERO,
         modulation: Depth::of(0.5),
-        diffusion: Mix(1.0),
+        diffusion: Mix::new(1.0),
     };
 }
 
@@ -217,8 +216,9 @@ impl Default for PlateControls {
 impl PlateControls {
     /// The bandwidth in force at `rate`: finite, within 10 Hz and 0.9 of Nyquist.
     pub(crate) fn bandwidth_at(&self, rate: SampleRate) -> Hz {
-        let hz = finite_or(self.bandwidth.get(), Self::DEFAULT.bandwidth.get());
-        Hz(hz).clamp(MIN_BANDWIDTH, rate.nyquist_scaled(BANDWIDTH_CEILING))
+        self.bandwidth
+            .finite_or(Self::DEFAULT.bandwidth)
+            .clamp(MIN_BANDWIDTH, rate.nyquist_scaled(BANDWIDTH_CEILING))
     }
 
     /// Designs the controls into `out` in place, at `rate`: the network the bank runs (the
@@ -237,7 +237,11 @@ impl PlateControls {
             d.decay
         }
         .clamp(MIN_DECAY, MAX_PLATE_DECAY);
-        let damping = finite_or(self.damping.get(), d.damping.get()).clamp(0.0, MAX_DAMPING);
+        let damping = self
+            .damping
+            .finite_or(d.damping)
+            .get()
+            .clamp(0.0, MAX_DAMPING);
         let pre = if self.pre_delay.get().is_finite() {
             self.pre_delay
         } else {
@@ -246,7 +250,7 @@ impl PlateControls {
         .clamp(Seconds::ZERO, MAX_PRE_DELAY);
         let depth = self.modulation.get().abs().min(1.0);
         // `diffusion` is an `f32` unit: it widens once into the `f64` design.
-        let diffusion = finite_or(self.diffusion.get(), d.diffusion.get()).clamp(0.0, 1.0);
+        let diffusion = self.diffusion.finite_or(d.diffusion).get().clamp(0.0, 1.0);
 
         let total = SampleSpan::clamped(loop_frames(rate));
         let loop_gain = loop_gain(total, rt60, rate).get();
@@ -280,7 +284,7 @@ impl PlateControls {
                     length: span(h.delay1),
                     modulation: LineModulation::NONE,
                     absorption: Absorption::OnePole {
-                        gain: Amplitude(c),
+                        gain: Amplitude::new(c),
                         damp: damping,
                     },
                     diffuser: Some(lattice(
@@ -297,7 +301,7 @@ impl PlateControls {
                 .push(Line {
                     length: span(h.delay2),
                     modulation: LineModulation::NONE,
-                    absorption: Absorption::Gain(Amplitude(c)),
+                    absorption: Absorption::Gain(Amplitude::new(c)),
                     diffuser: Some(lattice(span(h.lattice2), lattice2, LineModulation::NONE)),
                 })
                 .expect("four lines fit MAX_LINES");
@@ -330,7 +334,7 @@ impl PlateControls {
             decay: MAX_PLATE_DECAY,
             pre_delay: MAX_PRE_DELAY,
             modulation: Depth::of(1.0),
-            damping: Mix(MAX_DAMPING),
+            damping: Mix::new(MAX_DAMPING),
             ..Self::DEFAULT
         };
         let mut network = Box::new(Network::new(rate));

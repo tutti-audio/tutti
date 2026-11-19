@@ -182,7 +182,7 @@ pub(crate) fn advance_time_info(
             let clock = Bpm::new(t.tempo).and_then(|tempo| {
                 TransportInfo::new(sample_rate)
                     .with_tempo(tempo)
-                    .with_beat(Beat(t.ppq_pos))
+                    .with_beat(Beat::new(t.ppq_pos))
                     .samples_to_nearest_clock()
             });
             match clock {
@@ -217,7 +217,7 @@ mod tests {
     }
 
     fn cycle(start: f64, end: f64) -> LoopRegion {
-        LoopRegion::new(LoopRange::new(Beat(start), Beat(end)).expect("a loop"))
+        LoopRegion::new(LoopRange::new(Beat::new(start), Beat::new(end)).expect("a loop"))
     }
 
     fn playing_transport() -> TransportInfo {
@@ -234,8 +234,8 @@ mod tests {
         // so every VALID bit is genuinely earned.
         let transport = playing_transport()
             .with_tempo(Bpm::of(120.0))
-            .with_beat(Beat(4.0))
-            .with_bar(Beat(4.0), Default::default());
+            .with_beat(Beat::new(4.0))
+            .with_bar(Beat::new(4.0), Default::default());
 
         // First block: no previous snapshot, so no transition to report.
         let info = build_vst2_time_info(&transport, SampleRate::SR_48K, None, AutomationMode::Off);
@@ -298,8 +298,8 @@ mod tests {
     fn smpte_is_never_claimed() {
         let transport = playing_transport()
             .with_tempo(Bpm::of(120.0))
-            .with_beat(Beat(4.0))
-            .with_bar(Beat(4.0), Default::default());
+            .with_beat(Beat::new(4.0))
+            .with_bar(Beat::new(4.0), Default::default());
         for transport in [&transport, &base()] {
             let info = build_vst2_time_info(
                 transport,
@@ -420,8 +420,8 @@ mod tests {
     /// A pure position advance is not a transport state change.
     #[test]
     fn moving_the_playhead_is_not_a_transport_change() {
-        let a = base().with_playing(true).with_beat(Beat(1.0));
-        let b = base().with_playing(true).with_beat(Beat(2.0));
+        let a = base().with_playing(true).with_beat(Beat::new(1.0));
+        let b = base().with_playing(true).with_beat(Beat::new(2.0));
 
         let first = build_vst2_time_info(&a, SampleRate::SR_48K, None, AutomationMode::Off);
         let second =
@@ -443,8 +443,8 @@ mod tests {
     #[test]
     fn non_finite_fields_are_withheld() {
         let transport = base()
-            .with_beat(Beat(f64::INFINITY))
-            .with_bar(Beat(f64::NAN), Default::default());
+            .with_beat(Beat::new(f64::INFINITY))
+            .with_bar(Beat::new(f64::NAN), Default::default());
         let info = build_vst2_time_info(&transport, SampleRate::SR_48K, None, AutomationMode::Off);
 
         assert_eq!(info.flags & F::PPQ_POS_VALID.bits(), 0);
@@ -486,7 +486,7 @@ mod tests {
     fn host_time_and_midi_clock_are_filled_and_flagged_when_known() {
         let transport = base()
             .with_tempo(Bpm::of(120.0))
-            .with_beat(Beat(2.0 + 0.25 / 24.0))
+            .with_beat(Beat::new(2.0 + 0.25 / 24.0))
             .with_position_samples(48_250)
             .with_system_time_ns(5_000_000_000);
         let info = build_vst2_time_info(&transport, SampleRate::SR_48K, None, AutomationMode::Off);
@@ -500,7 +500,7 @@ mod tests {
         assert_eq!(other_rate.samples_to_next_clock, -250);
 
         // No host clock and no finite position: neither field is claimed.
-        let bare = base().with_beat(Beat(f64::NAN));
+        let bare = base().with_beat(Beat::new(f64::NAN));
         let info = build_vst2_time_info(&bare, SampleRate::SR_48K, None, AutomationMode::Off);
         assert_eq!(info.flags & F::NANOSECONDS_VALID.bits(), 0);
         assert_eq!(info.flags & F::VST_CLOCK_VALID.bits(), 0);

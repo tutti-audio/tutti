@@ -539,7 +539,7 @@ mod tests {
             ChannelLayout::STEREO,
             tutti_buffers::SampleFormat::F32,
         )
-        .with_quantum(MaxBlock::of(Samples(quantum)))
+        .with_quantum(MaxBlock::of(Samples::new(quantum)))
     }
 
     /// **A card that cannot be started again after a timer that would not
@@ -575,7 +575,7 @@ mod tests {
     fn a_poisoned_graph_on_the_timer_leaves_it_stopped_agreeing_with_the_graph() {
         let mut s = Session::builder()
             .sample_rate(SampleRate::SR_48K)
-            .max_block(MaxBlock::of(Samples(480)))
+            .max_block(MaxBlock::of(Samples::new(480)))
             .system_clock()
             .build()
             .expect("builds");

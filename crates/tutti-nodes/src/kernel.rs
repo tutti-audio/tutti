@@ -752,9 +752,9 @@ mod tests {
         let rate = SampleRate::SR_48K;
         let mut node = prepared(
             DelayNode::<f32>::mono(
-                MaxDelay::of(Seconds(0.01)),
+                MaxDelay::of(Seconds::new(0.01)),
                 DelayControls {
-                    feedback: tutti_units::Feedback(0.5),
+                    feedback: tutti_units::Feedback::new(0.5),
                     ..DelayControls::DEFAULT
                 },
             ),
@@ -767,7 +767,7 @@ mod tests {
             let env = Env {
                 frame: Frame::new(block * 64),
                 sample_rate: rate,
-                block_len: Samples(64),
+                block_len: Samples::new(64),
                 transport: TransportPosition::default(),
                 changes: TransportChanges::NONE,
                 play: PlayClock::ZERO,
@@ -798,11 +798,11 @@ mod tests {
         #[derive(Clone, Copy, Debug)]
         struct GainSet;
         control_set! {
-            GainSet(_s): Gain = Gain { gain: Db(0.0) };
+            GainSet(_s): Gain = Gain { gain: Db::new(0.0) };
             live: (all);
             GainDb => Db = gain { whole };
             fn defaults(&self) -> Gain {
-                Gain { gain: Db(0.0) }
+                Gain { gain: Db::new(0.0) }
             }
         }
         /// Never asked to render: the node refuses each block it is declared empty for.
@@ -846,7 +846,7 @@ mod tests {
             (BusTopology::EMPTY, Some(BusTopology::MONO)),
         ] {
             let node =
-                KernelNode::with_kernel(Keyed { main, key }, GainSet, Gain { gain: Db(0.0) });
+                KernelNode::with_kernel(Keyed { main, key }, GainSet, Gain { gain: Db::new(0.0) });
             let mut d = Direct::new(node, SampleRate::SR_48K, 64);
             for c in d.inputs_mut().iter_mut() {
                 let c = c.into_samples_mut();

@@ -21,7 +21,7 @@ use tutti_units::Amplitude;
 /// use tutti_buffers::Bed;
 ///
 /// let levels = FoldLevels {
-///     centre: Amplitude(0.5),
+///     centre: Amplitude::new(0.5),
 ///     ..FoldLevels::default()
 /// };
 /// let fold: Fold = Fold::spec(&Bed::Surround51.topology(), &Bed::Stereo.topology())
@@ -51,7 +51,7 @@ impl Default for FoldLevels {
     /// ITU-R BS.775: -3 dB for the centre, the surrounds and the heights, and
     /// no LFE.
     fn default() -> Self {
-        let minus_3_db = Amplitude(f64::MINUS_3_DB);
+        let minus_3_db = Amplitude::new(f64::MINUS_3_DB);
         Self {
             centre: minus_3_db,
             surround: minus_3_db,

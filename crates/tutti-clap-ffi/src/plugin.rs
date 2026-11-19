@@ -787,7 +787,7 @@ impl Plugin {
     /// `latency.get`, 0 without the extension.
     #[must_use]
     pub fn latency(&self, _main: MainThreadMarker) -> Samples {
-        Samples(call!(self.latency.get() else 0) as usize)
+        Samples::new(call!(self.latency.get() else 0) as usize)
     }
 
     /// `tail.get`, `None` without the extension.

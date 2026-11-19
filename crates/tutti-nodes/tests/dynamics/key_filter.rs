@@ -101,8 +101,8 @@ fn compressor_controls(cutoff: f64, q: f64) -> CompressorControls {
     CompressorControls {
         threshold: Db::new(THRESHOLD),
         ratio: CompressionRatio::new(RATIO),
-        key_cutoff: Hz(cutoff),
-        key_q: Q(q),
+        key_cutoff: Hz::new(cutoff),
+        key_q: Q::new(q),
         ..CompressorControls::DEFAULT
     }
 }
@@ -293,9 +293,9 @@ fn the_audio_is_gained_by_the_curve_and_never_filtered() {
 fn gate_controls(threshold: f64, cutoff: f64, q: f64) -> GateControls {
     GateControls {
         threshold: Db::new(threshold),
-        range: Db(-80.0),
-        key_cutoff: Hz(cutoff),
-        key_q: Q(q),
+        range: Db::new(-80.0),
+        key_cutoff: Hz::new(cutoff),
+        key_q: Q::new(q),
         ..GateControls::DEFAULT
     }
 }
@@ -403,7 +403,7 @@ fn the_gate_applies_its_gain_to_the_unfiltered_audio() {
 #[test]
 fn off_declares_no_controls_and_a_filter_declares_two_more() {
     let controls = CompressorControls {
-        makeup: Db(3.0),
+        makeup: Db::new(3.0),
         ..compressor_controls(2_000.0, 1.5)
     };
     let off = CompressorNode::<f32>::new(BusTopology::MONO, KeySource::Sidechain, controls);

@@ -5,7 +5,7 @@ use tutti_units::{Db, Samples, Seconds};
 
 /// The level a tail is measured to when nothing says otherwise:
 /// -60 dB, the reverberation time's definition.
-pub const TAIL_FLOOR: Db = Db(-60.0);
+pub const TAIL_FLOOR: Db = Db::new(-60.0);
 
 /// How long a system rings: [`System::tail`].
 #[derive(Clone, Copy, Debug, PartialEq)]

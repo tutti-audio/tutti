@@ -85,9 +85,6 @@ pub enum Error {
         /// What it returned.
         status: OsStatus,
     },
-    /// The message is longer than one event list holds; nothing was sent.
-    #[error("the message does not fit one CoreMIDI event list")]
-    TooLong,
     /// The protocol is a reserved value (only a reader of the wire builds
     /// one), and no endpoint is created in it.
     #[error("no endpoint is created in a reserved protocol")]

@@ -21,7 +21,7 @@ use tutti_units::Samples;
 ///
 /// let (l, r) = ([1.0f32, 2.0], [3.0, 4.0]);
 /// let pair = StereoPlanes::new(&l, &r)?;
-/// assert_eq!(pair.frames(), Samples(2));
+/// assert_eq!(pair.frames(), Samples::new(2));
 /// assert!(StereoPlanes::new(&l, &r[..1]).is_err());
 /// # Ok::<(), tutti_buffers::BufferError>(())
 /// ```
@@ -45,8 +45,8 @@ impl<'a, S: Sample> StereoPlanes<'a, S> {
         } else {
             Err(BufferError::RaggedPlane {
                 plane: 1,
-                expected: Samples(left.len()),
-                found: Samples(right.len()),
+                expected: Samples::new(left.len()),
+                found: Samples::new(right.len()),
             })
         }
     }
@@ -55,7 +55,7 @@ impl<'a, S: Sample> StereoPlanes<'a, S> {
     #[inline]
     #[must_use]
     pub const fn frames(&self) -> Samples {
-        Samples(self.left.len())
+        Samples::new(self.left.len())
     }
 
     /// Returns the width, always [`ChannelLayout::STEREO`].

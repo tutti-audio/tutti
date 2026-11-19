@@ -42,7 +42,6 @@ use tutti_units::{Amplitude, CompressionRatio, Db, Hz, Q, SampleRate, Samples, S
 use super::curves::{gain_reduction, level_db, upward_gain_lift};
 use super::key_filter::KeyStage;
 use super::shared::{MAX_KNEE, floored};
-use crate::finite::finite_or;
 use crate::follower::{Follower, Pole, Smoothed};
 use crate::{
     COEFF_INTERVAL, Glide, Lanes, Lerp, SvfBank, SvfCoefficients, SvfCoeffs, SvfControls, SvfModel,
@@ -53,14 +52,14 @@ use crate::{
 const DETECTOR_PERIODS: f64 = 8.0;
 
 /// The longest time constant of the detector's mean, 25 ms: a low band does not wait longer.
-const DETECTOR_MAX: Seconds = Seconds(0.025);
+const DETECTOR_MAX: Seconds = Seconds::new(0.025);
 
 /// The largest threshold, in dB either way, a band runs: the upward curve mirrors a level about
 /// it (`2 t - x`), which stays finite for `|t|` this size and a level at or over -144 dB.
-const MAX_THRESHOLD: Db = Db(1.0e30);
+const MAX_THRESHOLD: Db = Db::new(1.0e30);
 
 /// The loudest key sample the detector squares: 1e15 (300 dB), whose square is finite.
-const MAX_KEY: Amplitude = Amplitude(1.0e15);
+const MAX_KEY: Amplitude = Amplitude::new(1.0e15);
 
 /// Which way a dynamic band moves from flat.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -107,14 +106,14 @@ impl DynamicEqControls {
     /// no times and a range of 12 dB. What a non-finite control other than a time falls back to
     /// (a NaN time is 0 and an infinite one holds).
     pub const DEFAULT: Self = Self {
-        center: Hz(1_000.0),
+        center: Hz::new(1_000.0),
         q: Q::BUTTERWORTH,
         threshold: Db::UNITY,
         knee: Db::UNITY,
         ratio: CompressionRatio::UNITY,
         attack: Seconds::ZERO,
         release: Seconds::ZERO,
-        range: Db(12.0),
+        range: Db::new(12.0),
     };
 }
 
@@ -165,19 +164,19 @@ impl<F: Float> Design<F> {
         });
         Self {
             threshold: F::from_unit(
-                Db(finite_or(c.threshold.get(), d.threshold.get()))
+                c.threshold
+                    .finite_or(d.threshold)
                     .clamp(-MAX_THRESHOLD, MAX_THRESHOLD),
             ),
-            knee: F::from_unit(Db(
-                finite_or(c.knee.get(), d.knee.get()).clamp(0.0, MAX_KNEE.get())
+            knee: F::from_unit(c.knee.finite_or(d.knee).clamp(Db::UNITY, MAX_KNEE)),
+            ratio: F::from_unit(CompressionRatio::new_clamped(
+                c.ratio.finite_or(d.ratio).get(),
             )),
-            ratio: F::from_unit(CompressionRatio::new_clamped(finite_or(
-                c.ratio.get(),
-                d.ratio.get(),
-            ))),
-            range: F::from_unit(Db(
-                finite_or(c.range.get(), d.range.get()).clamp(0.0, SvfCoeffs::MAX_GAIN.get())
-            )),
+            range: F::from_unit(
+                c.range
+                    .finite_or(d.range)
+                    .clamp(Db::UNITY, SvfCoeffs::MAX_GAIN),
+            ),
             max_key: F::from_unit(MAX_KEY),
             ballistics: Follower::of(floored(c.attack, c.release), rate),
             key_scale: F::ONE / F::from_unit(q),
@@ -260,7 +259,7 @@ impl<F: Float + Lanes + Lerp> DynamicEqBank<F> {
 
     /// The gain change as a `Db`.
     fn signed(&self) -> Db {
-        let moved = Db(self.moved.value().into());
+        let moved = Db::new(self.moved.value().into());
         match self.mode {
             DynamicMode::Downward => -moved,
             DynamicMode::Upward => moved,
@@ -294,8 +293,8 @@ impl<F: Float + Lanes + Lerp> DynamicEqBank<F> {
         let model = SvfModel::new(
             SvfControls {
                 ty: SvfType::Bell,
-                freq: Hz(finite_or(controls.center.get(), d.center.get())),
-                q: Q(finite_or(controls.q.get(), d.q.get())),
+                freq: controls.center.finite_or(d.center),
+                q: controls.q.finite_or(d.q),
                 gain: Db::UNITY,
             },
             self.rate,

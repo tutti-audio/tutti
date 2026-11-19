@@ -9,7 +9,7 @@ fn bus(width: u16) -> BusTopology {
 }
 
 fn step(x: f64) -> Stagger {
-    Stagger::of_step(PhaseIncrement(x))
+    Stagger::of_step(PhaseIncrement::new(x))
 }
 
 // ---- the checked constants --------------------------------------------------
@@ -23,9 +23,15 @@ fn step(x: f64) -> Stagger {
 /// past the line (`base + depth_max > max_delay`), and feedback outside `0..=MAX_STABLE`.
 #[test]
 fn a_sweep_refuses_what_its_line_cannot_hold() {
-    let line = MaxDelay::of(Seconds(0.05));
+    let line = MaxDelay::of(Seconds::new(0.05));
     let ok = |base: f64, lo: f64, hi: f64, fb: f64| {
-        Sweep::new(Seconds(base), line, Seconds(lo), Seconds(hi), Feedback(fb))
+        Sweep::new(
+            Seconds::new(base),
+            line,
+            Seconds::new(lo),
+            Seconds::new(hi),
+            Feedback::new(fb),
+        )
     };
     // The edge of each rule is in; the next value out is refused.
     assert!(
@@ -43,9 +49,9 @@ fn a_sweep_refuses_what_its_line_cannot_hold() {
     assert_eq!(
         ok(0.011, 0.0, 0.04, 0.5),
         Err(SweepError::Reach {
-            base: Seconds(0.011),
-            depth_max: Seconds(0.04),
-            max_delay: Seconds(0.05)
+            base: Seconds::new(0.011),
+            depth_max: Seconds::new(0.04),
+            max_delay: Seconds::new(0.05)
         }),
         "past the line"
     );
@@ -79,7 +85,7 @@ fn a_sweep_refuses_what_its_line_cannot_hold() {
         assert!(s.base().get() + s.depth_max().get() <= s.max_delay().get().get());
     }
     assert_eq!(Sweep::GENERAL_MIDI_CHORUS.feedback_max(), Feedback::NONE);
-    assert_eq!(Sweep::CHORUS.depth_max(), Seconds(0.04));
+    assert_eq!(Sweep::CHORUS.depth_max(), Seconds::new(0.04));
 }
 
 /// `of` panics where `new` refuses, the constant's spelling.
@@ -87,10 +93,10 @@ fn a_sweep_refuses_what_its_line_cannot_hold() {
 #[should_panic(expected = "a sweep stays inside its line")]
 fn a_sweep_of_a_transposed_base_panics_where_it_is_a_constant() {
     let _ = Sweep::of(
-        Seconds(0.05),
-        MaxDelay::of(Seconds(0.01)),
+        Seconds::new(0.05),
+        MaxDelay::of(Seconds::new(0.01)),
         Seconds::ZERO,
-        Seconds(0.001),
+        Seconds::new(0.001),
         Feedback::NONE,
     );
 }
@@ -101,38 +107,38 @@ fn a_sweep_of_a_transposed_base_panics_where_it_is_a_constant() {
 /// layout that takes it.
 #[test]
 fn a_stagger_is_finite_and_wrapped_into_one_cycle() {
-    assert!(Stagger::step(PhaseIncrement(0.25)).is_some());
+    assert!(Stagger::step(PhaseIncrement::new(0.25)).is_some());
     for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
-        assert_eq!(Stagger::step(PhaseIncrement(bad)), None, "{bad}");
+        assert_eq!(Stagger::step(PhaseIncrement::new(bad)), None, "{bad}");
         assert!(matches!(
-            Stagger::each(&[PhaseIncrement(0.0), PhaseIncrement(bad)]),
+            Stagger::each(&[PhaseIncrement::new(0.0), PhaseIncrement::new(bad)]),
             Err(StaggerError::NotFinite { channel: 1, .. })
         ));
     }
-    let s = Stagger::step(PhaseIncrement(1.25)).unwrap();
-    assert_eq!(s.offset(ChannelIndex::of(0)), PhaseIncrement(0.0));
-    assert_eq!(s.offset(ChannelIndex::of(1)), PhaseIncrement(0.25));
-    assert_eq!(s.offset(ChannelIndex::of(2)), PhaseIncrement(0.5));
+    let s = Stagger::step(PhaseIncrement::new(1.25)).unwrap();
+    assert_eq!(s.offset(ChannelIndex::of(0)), PhaseIncrement::new(0.0));
+    assert_eq!(s.offset(ChannelIndex::of(1)), PhaseIncrement::new(0.25));
+    assert_eq!(s.offset(ChannelIndex::of(2)), PhaseIncrement::new(0.5));
     assert_eq!(
         s.offset(ChannelIndex::of(4)),
-        PhaseIncrement(0.0),
+        PhaseIncrement::new(0.0),
         "a full cycle is none"
     );
-    let back = Stagger::step(PhaseIncrement(-0.25)).unwrap();
+    let back = Stagger::step(PhaseIncrement::new(-0.25)).unwrap();
     assert_eq!(
         back.offset(ChannelIndex::of(1)),
-        PhaseIncrement(0.75),
+        PhaseIncrement::new(0.75),
         "behind is wrapped ahead"
     );
-    let each = Stagger::each(&[PhaseIncrement(0.0), PhaseIncrement(-0.25)]).unwrap();
-    assert_eq!(each.offset(ChannelIndex::of(1)), PhaseIncrement(0.75));
+    let each = Stagger::each(&[PhaseIncrement::new(0.0), PhaseIncrement::new(-0.25)]).unwrap();
+    assert_eq!(each.offset(ChannelIndex::of(1)), PhaseIncrement::new(0.75));
     assert_eq!(
         each.offset(ChannelIndex::of(7)),
-        PhaseIncrement(0.0),
+        PhaseIncrement::new(0.0),
         "past the named: none"
     );
     assert_eq!((each.channels(), s.channels()), (Some(2), None));
-    let too_many = [PhaseIncrement(0.0); MAX_CHANNELS + 1];
+    let too_many = [PhaseIncrement::new(0.0); MAX_CHANNELS + 1];
     assert_eq!(
         Stagger::each(&too_many),
         Err(StaggerError::TooMany {
@@ -147,7 +153,7 @@ fn a_stagger_is_finite_and_wrapped_into_one_cycle() {
 /// at any width.
 #[test]
 fn a_layout_refuses_offsets_that_do_not_fit_its_bus() {
-    let two = Stagger::each(&[PhaseIncrement(0.0), PhaseIncrement(0.5)]).unwrap();
+    let two = Stagger::each(&[PhaseIncrement::new(0.0), PhaseIncrement::new(0.5)]).unwrap();
     assert!(ModDelayLayout::new(BusTopology::STEREO, Sweep::CHORUS, two).is_ok());
     assert_eq!(
         ModDelayLayout::new(bus(3), Sweep::CHORUS, two).unwrap_err(),

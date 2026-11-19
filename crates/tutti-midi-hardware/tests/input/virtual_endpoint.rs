@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use super::listener::Listener;
 
 use tutti_alsa_ffi::{
-    Blocking, Client, Event, Packet, PortCaps, PortEntry, PortId, PortKind, Read, UmpVersion,
+    Blocking, Client, Event, PortCaps, PortEntry, PortId, PortKind, Read, UmpVersion,
 };
 use tutti_fixtures::midi::{
     m1_cc, m1_note_on, note_on, per_note_pitch_bend, program_change, registered,
@@ -61,13 +61,13 @@ fn notes(count: u8) -> Vec<Ump> {
 }
 
 /// Reads `count` UMP messages the peer receives, in arrival order.
-fn read(peer: &Client, count: usize) -> Vec<[u32; 4]> {
+fn read(peer: &Client, count: usize) -> Vec<Ump> {
     let deadline = Instant::now() + PATIENCE;
     let mut got = Vec::new();
     while got.len() < count {
         assert!(Instant::now() < deadline, "only {got:?} arrived");
         match peer.read_event().expect("a read") {
-            Read::Event(Event::Ump { packet, .. }) => got.push(packet.words()),
+            Read::Event(Event::Ump { ump, .. }) => got.push(ump),
             Read::Event(_) => {}
             Read::Empty => std::thread::sleep(Duration::from_millis(1)),
         }
@@ -91,7 +91,7 @@ fn a_subscriber_receives_what_a_virtual_source_sends_in_order() {
     }
     let got = read(&peer, sent.len());
     for (ump, got) in sent.iter().zip(&got) {
-        assert_eq!(&got[..ump.words().len()], ump.words());
+        assert_eq!(*got, *ump);
     }
 }
 
@@ -112,8 +112,7 @@ fn a_virtual_destination_delivers_what_a_client_sends_to_the_graph_in_order() {
 
     let sent = notes(5);
     for ump in &sent {
-        peer.send_to_subscribers(port, Packet::new(ump.words()).unwrap())
-            .expect("sends");
+        peer.send_to_subscribers(port, ump).expect("sends");
     }
     let heard = listener.hear(sent.len(), PATIENCE);
     assert_eq!(heard, sent);
@@ -140,8 +139,7 @@ fn jr_messages_a_client_sends_are_not_heard_by_an_arrival_port() {
     let stamp = Ump::from(Message::Utility(Utility::JrTimestamp(0x1300)));
     let note = note_on(MidiChannel::of(2), 60, 0x8000);
     for ump in [clock, stamp, note] {
-        peer.send_to_subscribers(port, Packet::new(ump.words()).unwrap())
-            .expect("sends");
+        peer.send_to_subscribers(port, &ump).expect("sends");
     }
     assert_eq!(listener.hear(1, PATIENCE), [note]);
 }
@@ -218,8 +216,7 @@ fn a_midi1_destination_reports_midi1_and_its_messages_arrive_widened() {
     );
     peer.connect_to(port, found.address).expect("subscribes");
     let note = m1_note_on(MidiChannel::of(2), 60, U7::of(0x40));
-    peer.send_to_subscribers(port, Packet::new(note.words()).unwrap())
-        .expect("sends");
+    peer.send_to_subscribers(port, &note).expect("sends");
     let heard = listener.hear(1, PATIENCE);
     assert_eq!(heard, [note_on(MidiChannel::of(2), 60, 0x8000)]);
 }
@@ -242,7 +239,7 @@ fn a_midi2_note_sent_into_a_midi1_source_arrives_as_a_midi1_note() {
         .expect("sends");
     let got = read(&peer, 1);
     let want = m1_note_on(MidiChannel::of(2), 60, U7::of(0x40));
-    assert_eq!(&got[0][..want.words().len()], want.words());
+    assert_eq!(got[0], want);
 }
 
 /// A MIDI 2.0 message with no MIDI 1.0 form (M2-104 Appendix D.2: a per-note
@@ -269,7 +266,7 @@ fn a_message_with_no_midi1_form_is_refused_by_a_midi1_source() {
     source.send(after).expect("sends");
     let got = read(&peer, 1);
     // The note reaches a MIDI 1.0 subscriber as a type 2 Note On of key 60.
-    let word = got[0][0];
+    let word = got[0].0[0];
     assert_eq!(
         (word >> 28, (word >> 20) & 0xF, (word >> 8) & 0x7F),
         (2, 9, 60)
@@ -302,7 +299,7 @@ fn a_program_change_with_a_bank_reaches_a_midi1_subscriber_as_bank_select_and_pr
         Message::midi1(channel, Voice1::ProgramChange(U7::of(17))).into(),
     ];
     for (got, want) in got.iter().zip(&want) {
-        assert_eq!(&got[..want.words().len()], want.words());
+        assert_eq!(got, want);
     }
 }
 
@@ -337,7 +334,7 @@ fn a_registered_controller_reaches_a_midi1_subscriber_as_the_rpn_sequence() {
         cc(38, 0),
     ];
     for (got, want) in got.iter().zip(&want) {
-        assert_eq!(&got[..want.words().len()], want.words());
+        assert_eq!(got, want);
     }
 }
 
@@ -357,5 +354,5 @@ fn a_midi1_note_sent_into_a_midi2_source_arrives_widened() {
         .expect("sends");
     let got = read(&peer, 1);
     let want = note_on(MidiChannel::of(2), 60, 0x8000);
-    assert_eq!(&got[0][..want.words().len()], want.words());
+    assert_eq!(got[0], want);
 }

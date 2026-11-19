@@ -25,7 +25,6 @@ use tutti_units::{Feedback, ReadPosition, SampleRate, Samples, Seconds};
 
 use super::layout::{DELAY_SLEW, DelayControls, DelayLayout, MAX_DELAY_CHANNELS};
 use super::routing::Routing;
-use crate::finite::finite_or;
 use crate::{DelayLine, Glide, InterpolationMode, Lerp, Steps, delay_step};
 
 /// What a delay reads while it runs: the delay as a [`ReadPosition`], and the two feedbacks
@@ -77,7 +76,7 @@ impl<F: Float + Lerp> DelayGlides<F> {
 /// NaN time is no delay.
 #[inline(always)]
 fn position_of(secs: Seconds, max: Seconds, rate: SampleRate, cap: usize) -> ReadPosition {
-    let secs = Seconds(secs.get().clamp(0.0, max.get()));
+    let secs = Seconds::new(secs.get().clamp(0.0, max.get()));
     ReadPosition::of(secs, rate).min(ReadPosition::from_frames(Samples::new(cap)))
 }
 
@@ -168,12 +167,7 @@ impl<F: Float + Lerp> DelayBank<F> {
     /// `secs` as a delay position: clamped into `0..=max_delay` and into the line. A time
     /// that is not finite is no delay.
     fn position(&self, secs: Seconds) -> ReadPosition {
-        position_of(
-            Seconds(finite_or(secs.get(), 0.0)),
-            self.max,
-            self.rate,
-            self.cap,
-        )
+        position_of(secs.finite_or(Seconds::ZERO), self.max, self.rate, self.cap)
     }
 
     /// Aims `glides` at `controls`: a time past the longest reads as the longest and one that
@@ -190,11 +184,11 @@ impl<F: Float + Lerp> DelayBank<F> {
             };
         }
         let steps = Steps::Fixed(glides.steps);
-        let fb = F::from_unit(Feedback(finite_or(controls.feedback.get(), 0.0)));
+        let fb = F::from_unit(controls.feedback.finite_or(Feedback::NONE));
         let cross = if self.routing.is_none() {
             F::ZERO
         } else {
-            F::from_unit(Feedback(finite_or(controls.cross_feedback.get(), 0.0)))
+            F::from_unit(controls.cross_feedback.finite_or(Feedback::NONE))
         };
         glides.feedback.aim_by(fb, steps);
         glides.cross.aim_by(cross, steps);

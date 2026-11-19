@@ -47,7 +47,7 @@ fn engine(
     let transport = Transport::new(SampleRate::of(RATE));
     let (mut ed, exec) = Editor::new(Prepare::new(
         SampleRate::of(RATE),
-        MaxBlock::of(Samples(512)),
+        MaxBlock::of(Samples::new(512)),
     ));
     ed.insert(NodeKey(1), "dc", tutti_graph::Unforkable(Dc(level)));
     ed.spec_mut().topology.set_outputs((0..outputs).map(|c| {
@@ -109,7 +109,7 @@ fn render(engine: &Engine, frames: usize, width: usize) -> Vec<f32> {
 #[test]
 fn a_wide_device_meters_each_channel_not_the_first_two() {
     // 5.1 order: L, R, C, LFE, Ls, Rs. Channel 2 is the centre.
-    let (engine, mut meter) = engine(1.0, Some(2), 6, Samples(512));
+    let (engine, mut meter) = engine(1.0, Some(2), 6, Samples::new(512));
     meter.enable();
     let out = render(&engine, 64, 6);
 
@@ -138,7 +138,7 @@ fn a_wide_device_meters_each_channel_not_the_first_two() {
 #[test]
 fn an_enabled_meter_reads_the_block() {
     for width in [2usize, 6] {
-        let (engine, mut meter) = engine(0.5, None, width, Samples(512));
+        let (engine, mut meter) = engine(0.5, None, width, Samples::new(512));
         render(&engine, 64, width);
         assert_eq!(
             meter.read()[0].peak.get(),
@@ -159,14 +159,14 @@ fn an_enabled_meter_reads_the_block() {
 /// them as one.
 #[test]
 fn a_full_block_reads_its_analytic_level() {
-    let (engine, mut meter) = engine(0.5, None, 2, Samples(8192));
+    let (engine, mut meter) = engine(0.5, None, 2, Samples::new(8192));
     meter.enable();
     render(&engine, 8192, 2);
     let r = meter.read();
     for (what, channel) in [("left", 0), ("right", 1)] {
         assert_eq!(r[channel].peak.get(), 0.5, "peak {what}");
         assert_eq!(r[channel].rms.get(), 0.5, "rms {what}");
-        assert_eq!(r[channel].frames, Samples(8192), "frames {what}");
+        assert_eq!(r[channel].frames, Samples::new(8192), "frames {what}");
     }
 }
 
@@ -175,7 +175,7 @@ fn a_full_block_reads_its_analytic_level() {
 /// read silence for it.
 #[test]
 fn the_pure_render_feeds_the_meter() {
-    let (engine, mut meter) = engine(0.25, None, 2, Samples(512));
+    let (engine, mut meter) = engine(0.25, None, 2, Samples::new(512));
     meter.enable();
     let mut out = vec![0.0f32; 64 * 2];
     engine.process_segment(&mut InterleavedMut::new(&mut out, ChannelLayout::STEREO).unwrap());
@@ -195,7 +195,7 @@ fn the_master_reads_before_the_declick() {
     let transport = Transport::new(SampleRate::of(RATE));
     let (mut ed, exec) = Editor::new(Prepare::new(
         SampleRate::of(RATE),
-        MaxBlock::of(Samples(512)),
+        MaxBlock::of(Samples::new(512)),
     ));
     ed.insert(NodeKey(1), "dc", tutti_graph::Unforkable(Dc(0.5)));
     ed.spec_mut()
@@ -213,7 +213,7 @@ fn the_master_reads_before_the_declick() {
         &transport,
         &mut ed,
         exec,
-        Samples(512),
+        Samples::new(512),
         tutti_engine::BlockDates::Os,
     )
     .expect("limits");
@@ -274,7 +274,7 @@ fn a_block_longer_than_the_capacity_is_measured_whole() {
     let transport = Transport::new(SampleRate::of(RATE));
     let (mut ed, exec) = Editor::new(Prepare::new(
         SampleRate::of(RATE),
-        MaxBlock::of(Samples(512)),
+        MaxBlock::of(Samples::new(512)),
     ));
     ed.insert(
         NodeKey(1),
@@ -300,7 +300,7 @@ fn a_block_longer_than_the_capacity_is_measured_whole() {
         &transport,
         &mut ed,
         exec,
-        Samples(64),
+        Samples::new(64),
         tutti_engine::BlockDates::Os,
     )
     .expect("within limits");
@@ -309,7 +309,7 @@ fn a_block_longer_than_the_capacity_is_measured_whole() {
     let rms = ((100.0 + 1400.0 * 0.01) / 1500.0f64).sqrt();
     assert!((r[2].peak.get() - 1.0).abs() < 1e-5, "{r:?}");
     assert!((r[2].rms.get() - rms).abs() < 1e-4, "{r:?} want rms {rms}");
-    assert_eq!(r[2].frames, Samples(1500));
+    assert_eq!(r[2].frames, Samples::new(1500));
     for c in [0, 1, 3, 4, 5] {
         assert_eq!((r[c].peak.get(), r[c].rms.get()), (0.0, 0.0), "channel {c}");
     }

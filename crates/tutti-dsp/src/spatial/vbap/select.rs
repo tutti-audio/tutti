@@ -37,11 +37,11 @@ use tutti_units::{ArcDegrees, Azimuth, Direction};
 use super::math::{Vec3, cross, direction, dot, sub};
 
 /// A pair closer than this (degrees of bearing) is one point to the ear.
-const MIN_PAIR_GAP: ArcDegrees = ArcDegrees(5.0);
+const MIN_PAIR_GAP: ArcDegrees = ArcDegrees::new(5.0);
 
 /// A pair this far apart (degrees of bearing) or more leaves the listener on
 /// or beside its chord.
-const MAX_PAIR_GAP: ArcDegrees = ArcDegrees(175.0);
+const MAX_PAIR_GAP: ArcDegrees = ArcDegrees::new(175.0);
 
 /// A triple whose direction matrix has a determinant below this spans no
 /// volume.
@@ -60,7 +60,7 @@ const COINCIDENT: f64 = 1e-12;
 const SHORTNESS_QUANTUM: f64 = 1e9;
 
 /// A whole turn, the gap of a pair that closes the circle.
-const FULL_TURN: ArcDegrees = ArcDegrees(360.0);
+const FULL_TURN: ArcDegrees = ArcDegrees::new(360.0);
 
 /// The pairs of a horizontal layout, as indices into `azimuths`, ordered from
 /// the lowest bearing.
@@ -74,7 +74,7 @@ pub(super) fn pairs(azimuths: &[Azimuth]) -> Vec<[u16; 2]> {
         let (a, b) = (order[at], order[(at + 1) % n]);
         // The counter-clockwise gap from `a` to `b`: not the short arc, which
         // is the other way round for a gap past half a turn.
-        let mut gap = ArcDegrees(bearing(b).get() - bearing(a).get());
+        let mut gap = ArcDegrees::new(bearing(b).get() - bearing(a).get());
         if at + 1 == n {
             gap += FULL_TURN;
         }

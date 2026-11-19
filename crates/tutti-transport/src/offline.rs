@@ -37,7 +37,7 @@ pub struct OfflineTimelineConfig {
 impl Default for OfflineTimelineConfig {
     fn default() -> Self {
         Self {
-            start_beat: Beat(0.0),
+            start_beat: Beat::new(0.0),
             tempo_map: Arc::new(TempoMap::constant(Bpm::default()).expect("120 BPM is a map")),
             sample_rate: SampleRate::SR_44K1,
             loop_range: None,
@@ -59,7 +59,7 @@ impl Default for OfflineTimelineConfig {
 /// # use tutti_transport::Timeline;
 /// # use tutti_transport::{OfflineTimeline, OfflineTimelineConfig};
 /// let timeline = OfflineTimeline::new(&OfflineTimelineConfig {
-///     start_beat: Beat(0.0),
+///     start_beat: Beat::new(0.0),
 ///     tempo_map: Arc::new(TempoMap::constant(Bpm::of(120.0))?),
 ///     sample_rate: SampleRate::SR_44K1,
 ///     loop_range: None,
@@ -67,7 +67,7 @@ impl Default for OfflineTimelineConfig {
 ///
 /// // Advance by 44100 samples (1 second at 44.1kHz)
 /// // At 120 BPM, that's 2 beats
-/// timeline.advance(Samples(44100));
+/// timeline.advance(Samples::new(44100));
 /// assert!((timeline.beat().get() - 2.0).abs() < 0.001);
 /// # Ok::<_, tutti_tempo::TempoError>(())
 /// ```
@@ -207,7 +207,7 @@ impl OfflineTimeline {
     /// The current playhead.
     #[inline]
     pub fn beat(&self) -> Beat {
-        Beat(self.current_beat.load(Ordering::Acquire))
+        Beat::new(self.current_beat.load(Ordering::Acquire))
     }
 
     /// The render sample rate. Fixed at construction.
@@ -389,7 +389,7 @@ mod tests {
     #[test]
     fn an_inverted_loop_region_is_rejected_not_silently_ignored() {
         let timeline = OfflineTimeline::new(&OfflineTimelineConfig {
-            start_beat: Beat(0.0),
+            start_beat: Beat::new(0.0),
             tempo_map: constant(120.0),
             sample_rate: SampleRate::SR_44K1,
             loop_range: LoopRange::new(Beat::new(8.0), Beat::new(4.0)),
@@ -403,7 +403,7 @@ mod tests {
 
         // ...and the timeline runs free rather than pretending to loop.
         let samples_per_beat = 44100.0 / 2.0;
-        timeline.advance(Samples((10.0 * samples_per_beat) as usize));
+        timeline.advance(Samples::new((10.0 * samples_per_beat) as usize));
         assert!(
             (timeline.beat().get() - 10.0).abs() < 0.01,
             "expected free-running beat 10.0, got {}",
@@ -416,7 +416,7 @@ mod tests {
     #[test]
     fn an_empty_loop_region_is_rejected() {
         let timeline = OfflineTimeline::new(&OfflineTimelineConfig {
-            start_beat: Beat(0.0),
+            start_beat: Beat::new(0.0),
             tempo_map: constant(120.0),
             sample_rate: SampleRate::SR_44K1,
             loop_range: LoopRange::new(Beat::new(4.0), Beat::new(4.0)),
@@ -434,7 +434,7 @@ mod tests {
     #[test]
     fn a_block_longer_than_the_loop_lands_where_its_frames_do() {
         let timeline = OfflineTimeline::new(&OfflineTimelineConfig {
-            start_beat: Beat(0.0),
+            start_beat: Beat::new(0.0),
             tempo_map: constant(120.0),
             sample_rate: SampleRate::SR_44K1,
             loop_range: LoopRange::new(Beat::new(0.0), Beat::new(1.0)),
@@ -443,25 +443,25 @@ mod tests {
         // Five beats over a one-beat loop: a crossing every 22 050 frames, each
         // on a frame (one beat is exactly 22 050), so each wraps to 0.0.
         let samples_per_beat = 22050usize;
-        timeline.advance(Samples(5 * samples_per_beat));
+        timeline.advance(Samples::new(5 * samples_per_beat));
         assert_eq!(
             timeline.beat(),
-            Beat(0.0),
+            Beat::new(0.0),
             "5 beats over a 1-beat loop land exactly on the start"
         );
 
         // Crossings between frames, at a tempo whose frame step is not
         // representable: a block at once and its frames one by one agree.
         let config = OfflineTimelineConfig {
-            start_beat: Beat(0.1),
+            start_beat: Beat::new(0.1),
             tempo_map: constant(97.0),
             sample_rate: SampleRate::SR_44K1,
             loop_range: LoopRange::new(Beat::new(0.1), Beat::new(0.43)),
         };
         let (block, frames) = (OfflineTimeline::new(&config), OfflineTimeline::new(&config));
-        block.advance(Samples(50_000));
+        block.advance(Samples::new(50_000));
         for _ in 0..50_000 {
-            frames.advance(Samples(1));
+            frames.advance(Samples::new(1));
         }
         assert!(config.loop_range.expect("a loop").contains(block.beat()));
         assert_eq!(block.beat().get().to_bits(), frames.beat().get().to_bits());
@@ -484,7 +484,7 @@ mod tests {
 
         let sample_rate = 44100.0;
         let tempo = 120.0;
-        let start_beat = Beat(4.0);
+        let start_beat = Beat::new(4.0);
 
         let mut clock = TransportClock::new(
             crate::state::ClockLinks::bare(Arc::new(AtomicBool::new(false))),
@@ -516,7 +516,7 @@ mod tests {
         for _ in 1..block {
             clock_beat = clock.step(1).get();
         }
-        timeline.advance(Samples(block));
+        timeline.advance(Samples::new(block));
 
         let expected_lag =
             tutti_music::beats_per_sample(Bpm::of(tempo), SampleRate::of(sample_rate));
@@ -538,19 +538,19 @@ mod tests {
     #[test]
     fn a_block_on_a_beat_is_that_beat_exactly() {
         let timeline = OfflineTimeline::new(&OfflineTimelineConfig {
-            start_beat: Beat(0.0),
+            start_beat: Beat::new(0.0),
             tempo_map: constant(90.0),
             sample_rate: SampleRate::SR_48K,
             loop_range: None,
         });
         for _ in 0..500 {
-            timeline.advance(Samples(64));
+            timeline.advance(Samples::new(64));
         }
-        assert_eq!(timeline.beat(), Beat(1.0));
+        assert_eq!(timeline.beat(), Beat::new(1.0));
         for _ in 500..1_500 {
-            timeline.advance(Samples(64));
+            timeline.advance(Samples::new(64));
         }
-        assert_eq!(timeline.beat(), Beat(3.0));
+        assert_eq!(timeline.beat(), Beat::new(3.0));
     }
 
     /// After N blocks of arbitrary lengths, at arbitrary tempos and rates,
@@ -575,7 +575,7 @@ mod tests {
             let rate = [44_100.0, 48_000.0, 96_000.0][(next() % 3) as usize];
             let start = (next() % 64) as f64 / 3.0;
             let timeline = OfflineTimeline::new(&OfflineTimelineConfig {
-                start_beat: Beat(start),
+                start_beat: Beat::new(start),
                 tempo_map: constant(tempo),
                 sample_rate: SampleRate::of(rate),
                 loop_range: None,
@@ -589,7 +589,7 @@ mod tests {
             let mut frames = 0u64;
             for _ in 0..1_000 {
                 let n = 1 + (next() % 2_048) as usize;
-                timeline.advance(Samples(n));
+                timeline.advance(Samples::new(n));
                 frames += n as u64;
             }
             for _ in 0..frames / 64 {
@@ -613,14 +613,14 @@ mod tests {
     #[test]
     fn test_timeline_seek_to() {
         let timeline = OfflineTimeline::new(&OfflineTimelineConfig {
-            start_beat: Beat(0.0),
+            start_beat: Beat::new(0.0),
             tempo_map: constant(120.0),
             sample_rate: SampleRate::SR_44K1,
             loop_range: None,
         });
 
         let samples_per_beat = 44100.0 / 2.0;
-        timeline.advance(Samples((5.0 * samples_per_beat) as usize));
+        timeline.advance(Samples::new((5.0 * samples_per_beat) as usize));
         assert!((timeline.beat().get() - 5.0).abs() < 0.01);
 
         // Seek back to beat 2
@@ -631,7 +631,7 @@ mod tests {
     #[test]
     fn timeline_impl_reports_the_loop_region() {
         let timeline = OfflineTimeline::new(&OfflineTimelineConfig {
-            start_beat: Beat(0.0),
+            start_beat: Beat::new(0.0),
             tempo_map: constant(120.0),
             sample_rate: SampleRate::SR_44K1,
             loop_range: LoopRange::new(Beat::new(0.0), Beat::new(8.0)),
@@ -651,7 +651,7 @@ mod tests {
     #[test]
     fn timeline_impl_reports_no_loop_when_unset() {
         let timeline = OfflineTimeline::new(&OfflineTimelineConfig {
-            start_beat: Beat(0.0),
+            start_beat: Beat::new(0.0),
             tempo_map: constant(120.0),
             sample_rate: SampleRate::SR_44K1,
             loop_range: None,
@@ -669,7 +669,7 @@ mod tests {
                     .iter()
                     .enumerate()
                     .map(|(i, &(beat, bpm))| TempoPoint {
-                        beat: Beat(beat),
+                        beat: Beat::new(beat),
                         tempo: Bpm::of(bpm),
                         transition: if i == last { Transition::Step } else { shape },
                     }),
@@ -680,7 +680,7 @@ mod tests {
 
     fn config(start: f64) -> OfflineTimelineConfig {
         OfflineTimelineConfig {
-            start_beat: Beat(start),
+            start_beat: Beat::new(start),
             tempo_map: constant(120.0),
             sample_rate: SampleRate::SR_48K,
             loop_range: None,
@@ -716,7 +716,10 @@ mod tests {
         let dc = g.add(ForkByClone(Dc));
         g.connect_output(dc, 0, 0);
         let (mut editor, mut exec) = g
-            .build(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(128))))
+            .build(Prepare::new(
+                SampleRate::SR_48K,
+                MaxBlock::of(Samples::new(128)),
+            ))
             .expect("builds at f64");
         let timeline = OfflineTimeline::new(&config(0.0));
         let mut out = vec![0.0f64; 100];
@@ -728,7 +731,7 @@ mod tests {
         );
         editor.collect();
         assert!(out.iter().all(|&x| x == FINE));
-        assert_eq!(timeline.beat(), Beat(100.0 / 24_000.0));
+        assert_eq!(timeline.beat(), Beat::new(100.0 / 24_000.0));
     }
 
     /// A block of zero frames renders nothing and leaves the clock where it
@@ -742,7 +745,10 @@ mod tests {
         let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::MONO);
         g.set_output(0, tutti_graph::Source::Zero);
         let (_editor, mut exec) = g
-            .build(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(128))))
+            .build(Prepare::new(
+                SampleRate::SR_48K,
+                MaxBlock::of(Samples::new(128)),
+            ))
             .expect("builds");
         let timeline = OfflineTimeline::new(&config(0.0));
         let mut none: [f32; 0] = [];
@@ -752,7 +758,7 @@ mod tests {
             Planes::default(),
             PlanesMut::new(&mut [&mut none[..]]).expect("one empty plane"),
         );
-        assert_eq!(timeline.beat(), Beat(0.0));
+        assert_eq!(timeline.beat(), Beat::new(0.0));
         assert_eq!(exec.frame().get(), 0);
     }
 
@@ -778,7 +784,7 @@ mod tests {
         assert!((first - chord).abs() < 1e-9, "{first} vs {chord}");
         assert!(first > 97.0);
         // 128 frames on, the next cell's chord is higher.
-        ramp.advance(Samples(128));
+        ramp.advance(Samples::new(128));
         assert!(ramp.graph_block().0.tempo.get() > first);
     }
 
@@ -835,16 +841,16 @@ mod tests {
         });
         t.seek_to(Beat::new(4.5));
         assert_eq!(t.graph_block().0.tempo, Bpm::of(60.0));
-        t.advance(Samples(48_000));
-        assert_eq!(t.beat(), Beat(5.5));
+        t.advance(Samples::new(48_000));
+        assert_eq!(t.beat(), Beat::new(5.5));
         t.seek_to(Beat::new(3.5));
         assert_eq!(t.graph_block().0.tempo, Bpm::of(120.0));
-        t.advance(Samples(11_999));
+        t.advance(Samples::new(11_999));
         assert_eq!(t.graph_block().0.tempo, Bpm::of(120.0));
-        t.advance(Samples(1));
+        t.advance(Samples::new(1));
         assert_eq!(
             (t.beat(), t.graph_block().0.tempo),
-            (Beat(4.0), Bpm::of(60.0))
+            (Beat::new(4.0), Bpm::of(60.0))
         );
     }
 }

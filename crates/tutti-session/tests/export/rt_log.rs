@@ -30,7 +30,7 @@ fn a_node_that_logs_in_a_bounce_emits_a_tracing_event_through_the_export_path() 
     let events = rt_events(|| {
         let bounce = Bounce::project()
             .master_buffers()
-            .range(Range::Seconds(Seconds(0.0), Seconds(0.05)))
+            .range(Range::Seconds(Seconds::new(0.0), Seconds::new(0.05)))
             .sample_rate(SampleRate::of(48_000.0))
             .channels(ChannelLayout::STEREO)
             .clock(ExportClock::frozen())

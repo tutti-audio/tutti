@@ -13,17 +13,16 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_units::{Hz, SampleRate, Samples};
 
-use crate::finite::finite_or;
 use crate::onepole::{cutoff_pole, ring_frames};
 use crate::{COEFF_INTERVAL, Glide, Lerp, Steps};
 
 /// The default corner: 10 Hz, well under the audible band's low end and a few time
 /// constants (`1 / 2 pi fc`, 16 ms) from settling a step.
-pub const DC_CORNER: Hz = Hz(10.0);
+pub const DC_CORNER: Hz = Hz::new(10.0);
 
 /// The lowest corner a blocker takes: 1 Hz. A lower one reads as this, which bounds the
 /// ring-out ([`DcBlockerControls::tail`]) at about a second.
-pub const MIN_DC_CORNER: Hz = Hz(1.0);
+pub const MIN_DC_CORNER: Hz = Hz::new(1.0);
 
 /// The pole `R = exp(-2 pi fc / fs)` of a blocker with `corner` at `rate`: the corner read
 /// as at least [`MIN_DC_CORNER`] and at most the rate's Nyquist, and a corner that is not
@@ -35,8 +34,9 @@ pub(crate) fn dc_pole(corner: Hz, rate: SampleRate) -> f64 {
 
 /// The corner as a blocker reads it: finite, within [`MIN_DC_CORNER`] and the Nyquist.
 fn held_corner(corner: Hz, rate: SampleRate) -> Hz {
-    let corner = finite_or(corner.get(), DC_CORNER.get());
-    Hz(corner.clamp(MIN_DC_CORNER.get(), rate.nyquist().get()))
+    corner
+        .finite_or(DC_CORNER)
+        .clamp(MIN_DC_CORNER, rate.nyquist())
 }
 
 /// The control of a [`DcBlocker`].
@@ -65,7 +65,7 @@ impl DcBlockerControls {
 /// The complement `1 - R` of the pole of a blocker with `corner` at `rate`: the small term the
 /// recursion runs on, solved in `f64`.
 fn dc_complement(corner: Hz, rate: SampleRate) -> f64 {
-    -libm::expm1(-std::f64::consts::TAU * held_corner(corner, rate).get() / rate.get())
+    -libm::expm1(-held_corner(corner, rate).angle_per_frame(rate).get())
 }
 
 /// A DC blocker of any width in the float `F`: one `(x[n-1], y[n-1])` pair per channel, one

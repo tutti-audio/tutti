@@ -1,8 +1,8 @@
 use std::time::Instant;
 
 use tutti_midi_device::{
-    CiDeviceId, CiHeader, CiMessage, Decoded, DetailsData, Muid, Nak, NakStatus, ProfileAction,
-    ProfileId,
+    CiDeviceId, CiHeader, CiMessage, Decoded, DetailsData, Initiator, Muid, Nak, NakStatus,
+    ProfileAction, ProfileId,
 };
 use tutti_midi_protocol::{ControllerSupport, PitchBendSupport};
 
@@ -15,14 +15,17 @@ fn initiator() -> (ProfileInitiator, Instant) {
     let now = Instant::now();
     let (mut initiator, _) = ProfileInitiator::new(Muid::of(OURS), Muid::of(PEER), now);
     // The final Reply on the Function Block ends the Profile inquiry.
-    initiator.on_message(&Decoded::Message(CiMessage::ProfileReply {
-        header: CiHeader::new(Muid::of(PEER)),
-        to: Muid::of(OURS),
-        profiles: tutti_midi_device::ProfileLists::new(
-            tutti_midi_device::ProfileList::try_from(vec![ProfileId::MPE]).unwrap(),
-            tutti_midi_device::ProfileList::default(),
-        ),
-    }));
+    initiator.on_message(
+        &Decoded::Message(CiMessage::ProfileReply {
+            header: CiHeader::new(Muid::of(PEER)),
+            to: Muid::of(OURS),
+            profiles: tutti_midi_device::ProfileLists::new(
+                tutti_midi_device::ProfileList::try_from(vec![ProfileId::MPE]).unwrap(),
+                tutti_midi_device::ProfileList::default(),
+            ),
+        }),
+        now,
+    );
     (initiator, now)
 }
 
@@ -73,7 +76,7 @@ fn the_reply_reads_as_the_four_declared_features() {
     if let Decoded::Message(CiMessage::ProfileDetailsReply { header, .. }) = &mut answer {
         header.device_id = address;
     }
-    let features = mpe_features(&outcome(i.on_message(&answer))).unwrap();
+    let features = mpe_features(&outcome(i.on_message(&answer, now))).unwrap();
     assert!(features.channel_response_notification);
     assert_eq!(features.pitch_bend, PitchBendSupport::Supported);
     assert_eq!(features.channel_pressure, ControllerSupport::ControlChange);

@@ -404,7 +404,7 @@ impl PluginControls {
     ///
     /// RT-safe: one atomic load, no allocation.
     pub fn latency(&self) -> Samples {
-        Samples(self.latency.load(Ordering::Acquire))
+        Samples::new(self.latency.load(Ordering::Acquire))
     }
 
     /// The node's whole processing latency, as its `Shape` declares it to
@@ -421,7 +421,7 @@ impl PluginControls {
 
     /// The chunk the node's pipeline holds.
     pub(super) fn pipeline(&self) -> Samples {
-        Samples(self.pipeline.load(Ordering::Acquire))
+        Samples::new(self.pipeline.load(Ordering::Acquire))
     }
 
     /// Record the chunk the node's `prepare` settled on.
@@ -504,7 +504,7 @@ mod tests {
     use tutti_music::MeterMap;
 
     fn controls() -> PluginControls {
-        PluginControls::new(Samples(0), PluginTail::default(), SampleRate::SR_44K1).0
+        PluginControls::new(Samples::new(0), PluginTail::default(), SampleRate::SR_44K1).0
     }
 
     /// A handle taken *before* a rate change reads the new rate — the
@@ -529,7 +529,8 @@ mod tests {
         let live = controls();
         let meter = ProjectMeter::new(MeterMap::default());
         live.set_meter(meter.clone());
-        let (fork, _) = PluginControls::new(Samples(0), PluginTail::default(), SampleRate::SR_96K);
+        let (fork, _) =
+            PluginControls::new(Samples::new(0), PluginTail::default(), SampleRate::SR_96K);
         let gathered = live.sources_now();
         live.set_meter(ProjectMeter::new(MeterMap::default()));
         gathered.install(&fork);
@@ -548,7 +549,7 @@ mod tests {
         let held = node.clone();
         node.latency.store(512, Ordering::Release);
         *lock_tail(&node.tail) = PluginTail::Unbounded;
-        assert_eq!(held.latency(), Samples(512));
+        assert_eq!(held.latency(), Samples::new(512));
         assert_eq!(held.tail(), PluginTail::Unbounded);
     }
 
@@ -560,11 +561,14 @@ mod tests {
     fn the_declared_latency_is_the_plugins_plus_the_pipelines() {
         let node = controls();
         let held = node.clone();
-        assert_eq!(held.declared_latency(), Latency::new(Samples(MAX_CHUNK)));
-        node.set_pipeline(Samples(64));
+        assert_eq!(
+            held.declared_latency(),
+            Latency::new(Samples::new(MAX_CHUNK))
+        );
+        node.set_pipeline(Samples::new(64));
         node.latency.store(512, Ordering::Release);
-        assert_eq!(held.declared_latency(), Latency::new(Samples(576)));
-        node.set_pipeline(Samples(32));
-        assert_eq!(held.declared_latency(), Latency::new(Samples(544)));
+        assert_eq!(held.declared_latency(), Latency::new(Samples::new(576)));
+        node.set_pipeline(Samples::new(32));
+        assert_eq!(held.declared_latency(), Latency::new(Samples::new(544)));
     }
 }

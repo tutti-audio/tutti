@@ -31,9 +31,9 @@ fn render(
     frames: usize,
 ) -> Vec<Vec<f32>> {
     let plan = crate::render::RenderPlan {
-        total: Samples(frames),
-        output_length: Samples(frames),
-        latency: Samples(0),
+        total: Samples::new(frames),
+        output_length: Samples::new(frames),
+        latency: Samples::new(0),
     };
     let layout = ChannelLayout::try_from(ch).expect("a test width is small");
     let mut out = Vec::new();
@@ -56,7 +56,7 @@ fn render(
                 fold.fold_planar_to_interleaved(
                     Planes::from_vecs(planes)
                         .unwrap()
-                        .slice(Samples(window.start)..Samples(window.end)),
+                        .slice(Samples::new(window.start)..Samples::new(window.end)),
                     InterleavedMut::new(block, layout).unwrap(),
                 )
                 .unwrap();
@@ -85,9 +85,9 @@ fn drive_reported(
     report: &mut dyn FnMut(&Progress),
 ) -> (Outcome<()>, usize) {
     let plan = crate::render::RenderPlan {
-        total: Samples(frames),
-        output_length: Samples(frames),
-        latency: Samples(0),
+        total: Samples::new(frames),
+        output_length: Samples::new(frames),
+        latency: Samples::new(0),
     };
     let mut consumed = 0;
     let outcome = with_source(&mut mono_dc(0.5), RATE, &FrozenClock, |src| {
@@ -148,9 +148,9 @@ fn progress_rises_and_reaches_the_total() {
     assert!(done.windows(2).all(|w| w[0] < w[1]), "{done:?}");
     assert!(
         seen.iter()
-            .all(|p| p.frames().unwrap().1 == Samples(total) && p.stage() == Stage::Rendering)
+            .all(|p| p.frames().unwrap().1 == Samples::new(total) && p.stage() == Stage::Rendering)
     );
-    assert_eq!(done.last(), Some(&Samples(total)));
+    assert_eq!(done.last(), Some(&Samples::new(total)));
 }
 
 /// A mono graph rendered to a wider file must NOT be copied into every
@@ -244,7 +244,7 @@ fn the_clock_advances_exactly_once_per_frame_and_never_ahead() {
     let mut graph = RenderGraph::assemble(editor, executor, Setup::new()).expect("built together");
 
     let timeline = OfflineTimeline::new(&OfflineTimelineConfig {
-        start_beat: Beat(start_beat),
+        start_beat: Beat::new(start_beat),
         tempo_map: Arc::new(TempoMap::constant(Bpm::of(120.0)).expect("a tempo")),
         sample_rate: RATE,
         loop_range: None,
@@ -385,9 +385,9 @@ mod loss {
 
     fn lost_in_one_block(graph: &mut RenderGraph) -> u64 {
         let plan = crate::render::RenderPlan {
-            total: Samples(GRAPH_MAX_BLOCK.get()),
-            output_length: Samples(GRAPH_MAX_BLOCK.get()),
-            latency: Samples(0),
+            total: Samples::new(GRAPH_MAX_BLOCK.get()),
+            output_length: Samples::new(GRAPH_MAX_BLOCK.get()),
+            latency: Samples::new(0),
         };
         with_source(graph, RATE, &FrozenClock, |src| {
             drive(

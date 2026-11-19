@@ -54,7 +54,7 @@ pub struct Placement(SamplePosition);
 
 impl Placement {
     /// The head of the file.
-    pub const HEAD: Self = Self(SamplePosition(0.0));
+    pub const HEAD: Self = Self(SamplePosition::new(0.0));
 
     /// A start at `start` frames into the file; `None` when `start` is
     /// negative or not finite.
@@ -86,7 +86,7 @@ impl TryFrom<f64> for Placement {
     type Error = RefusedPlacement;
 
     fn try_from(raw: f64) -> Result<Self, RefusedPlacement> {
-        Self::new(SamplePosition(raw)).ok_or(RefusedPlacement(raw))
+        Self::new(SamplePosition::new(raw)).ok_or(RefusedPlacement(raw))
     }
 }
 

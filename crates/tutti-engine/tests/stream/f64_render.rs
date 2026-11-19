@@ -36,7 +36,7 @@ fn dc_state(level: f64, outputs: usize) -> Arc<AudioCallbackState<f64>> {
     let transport = Transport::new(SampleRate::of(SAMPLE_RATE));
     let (mut ed, exec) = Editor::<f64>::with_format(Prepare::new(
         SampleRate::of(SAMPLE_RATE),
-        MaxBlock::of(Samples(512)),
+        MaxBlock::of(Samples::new(512)),
     ));
     ed.insert(NodeKey(1), "dc", ForkByClone(Dc(level)));
     ed.spec_mut().topology.set_outputs(vec![
@@ -69,7 +69,7 @@ fn an_f64_stream_renders_a_dc_figure_f32_cannot_hold() {
         .expect("the manual driver opens");
 
     let block: Vec<f64> = stream
-        .render_block(Samples(64))
+        .render_block(Samples::new(64))
         .expect("the stream is open");
     assert_eq!(block.len(), 64 * 2);
     assert!(

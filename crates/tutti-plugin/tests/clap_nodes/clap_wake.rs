@@ -41,7 +41,7 @@ fn one_plugin_graph<N: tutti_graph::IntoNode>(node: N, outputs: usize) -> (Rende
     let renderer = g
         .renderer(Prepare::new(
             SampleRate::of(SAMPLE_RATE),
-            MaxBlock::of(Samples(BLOCK)),
+            MaxBlock::of(Samples::new(BLOCK)),
         ))
         .expect("a one-plugin graph compiles");
     (renderer, controls)

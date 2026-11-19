@@ -54,8 +54,8 @@ impl Lfo {
         Self {
             shape,
             seed: 0,
-            rate: LfoRate::Hz(Hz(1.0)),
-            phase: PhaseIncrement(0.0),
+            rate: LfoRate::Hz(Hz::new(1.0)),
+            phase: PhaseIncrement::new(0.0),
         }
     }
 
@@ -130,7 +130,7 @@ impl From<Lfo> for Source {
 
 /// A constant the user moves: a raw value, saturating past ±1.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Macro(pub f32);
+pub struct Macro(pub f64);
 
 impl From<Macro> for Source {
     /// A [`Source::Macro`] at the value.
@@ -154,8 +154,8 @@ impl Follower {
     #[must_use]
     pub const fn new() -> Self {
         Self {
-            attack: Seconds(0.005),
-            release: Seconds(0.1),
+            attack: Seconds::new(0.005),
+            release: Seconds::new(0.1),
         }
     }
 

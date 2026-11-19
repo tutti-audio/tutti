@@ -42,7 +42,7 @@ use crate::stream::{OutputSpec, RunningStream, StreamDriver};
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// let rate = SampleRate::SR_48K;
 /// let transport = Transport::new(rate);
-/// let (mut editor, executor) = Editor::new(Prepare::new(rate, MaxBlock::of(Samples(512))));
+/// let (mut editor, executor) = Editor::new(Prepare::new(rate, MaxBlock::of(Samples::new(512))));
 /// let engine = Engine::new(&transport, &mut editor, executor, tutti_engine::BlockDates::Os)?;
 /// let state = Arc::new(AudioCallbackState::new(engine));
 ///
@@ -51,7 +51,7 @@ use crate::stream::{OutputSpec, RunningStream, StreamDriver};
 /// let (driver, stream) = ManualStreamDriver::new();
 /// output.start_with(state, driver)?;
 ///
-/// let block = stream.render_block(Samples(256)).expect("the stream is open");
+/// let block = stream.render_block(Samples::new(256)).expect("the stream is open");
 /// assert_eq!(block.len(), 256 * 2);
 ///
 /// output.stop();

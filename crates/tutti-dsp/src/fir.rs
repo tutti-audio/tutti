@@ -20,7 +20,7 @@ use crate::stft::window::KaiserWindow;
 const MAX_LEN: usize = 1 << 20;
 
 /// The attenuation a design has until [`FirDesign::attenuation`] sets it.
-const DEFAULT_ATTENUATION: Db = Db(60.0);
+const DEFAULT_ATTENUATION: Db = Db::new(60.0);
 
 /// What a [`FirDesign`] passes. Cutoffs are the midpoints of their transition
 /// bands, in [`Hz`].
@@ -59,7 +59,7 @@ pub enum FirResponse {
 /// The most stopband attenuation a design takes: `f64` taps resolve about
 /// 313 dB below the passband (their epsilon), so a deeper stopband is not
 /// representable.
-pub const MAX_ATTENUATION: Db = Db(300.0);
+pub const MAX_ATTENUATION: Db = Db::new(300.0);
 
 /// A windowed-sinc FIR filter, described without a sample rate.
 ///
@@ -176,11 +176,11 @@ impl FirDesign {
         if transition > widest {
             return Err(FirError::TransitionTooWide {
                 transition: self.transition,
-                widest: Hz(widest),
+                widest: Hz::new(widest),
             });
         }
 
-        let delta_omega = std::f64::consts::TAU * transition / rate.get();
+        let delta_omega = self.transition.angle_per_frame(rate).get();
         let mut len = odd_up(kaiser_order(attenuation, delta_omega));
         if matches!(self.response, FirResponse::HalfBand) {
             // The centre's offset (len - 1) / 2 is odd, so the outermost taps
@@ -195,7 +195,7 @@ impl FirDesign {
 
         let omega: Vec<f64> = edges
             .iter()
-            .map(|f| std::f64::consts::TAU * f / rate.get())
+            .map(|f| Hz::new(*f).angle_per_frame(rate).get())
             .collect();
         Ok(Fir {
             taps: self.taps(len, &omega, kaiser_beta(self.attenuation)),

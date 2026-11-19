@@ -78,7 +78,7 @@ use crate::tap::{TapReader, TapWriter};
 /// use tutti_buffers::ChannelLayout;
 ///
 /// let (ring, mut producer) =
-///     InletRing::pair(ChannelLayout::STEREO, Samples(64), SampleRate::SR_48K);
+///     InletRing::pair(ChannelLayout::STEREO, Samples::new(64), SampleRate::SR_48K);
 /// producer.push_interleaved(Interleaved::new(&[0.5, -0.5], ChannelLayout::STEREO)?);
 /// assert_eq!(ring.rate(), SampleRate::SR_48K);
 /// assert_eq!(ring.layout(), ChannelLayout::STEREO);
@@ -146,7 +146,7 @@ impl<F: Float> InletRing<F> {
 /// use tutti_units::Samples;
 /// use tutti_buffers::ChannelLayout;
 ///
-/// let (node, mut producer) = InletNode::pair(ChannelLayout::STEREO, Samples(64));
+/// let (node, mut producer) = InletNode::pair(ChannelLayout::STEREO, Samples::new(64));
 /// let frame = Interleaved::new(&[0.5, -0.5], ChannelLayout::STEREO)?;
 /// producer.push_interleaved(frame); // one stereo frame, from any thread
 /// assert_eq!(node.layout(), ChannelLayout::STEREO);

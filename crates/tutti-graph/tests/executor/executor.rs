@@ -130,7 +130,7 @@ fn silent_inputs_skip_nodes_whose_tail_has_elapsed() {
         "Tail::None: called once, then skipped"
     );
 
-    let (_ed, mut exec, calls) = counted_after_silence(Tail::Finite(Samples(130)));
+    let (_ed, mut exec, calls) = counted_after_silence(Tail::Finite(Samples::new(130)));
     for _ in 0..10 {
         render(&mut exec, 64, 1);
     }
@@ -164,8 +164,8 @@ fn silent_inputs_skip_nodes_whose_tail_has_elapsed() {
 fn the_skip_waits_for_latency_plus_tail() {
     const D: usize = 37;
     const T: usize = 23;
-    for (tail, want) in [(Tail::Finite(Samples(T)), D + T), (Tail::None, D)] {
-        let (_ed, mut exec, calls) = counted_after_silence_with(Samples(D), tail);
+    for (tail, want) in [(Tail::Finite(Samples::new(T)), D + T), (Tail::None, D)] {
+        let (_ed, mut exec, calls) = counted_after_silence_with(Samples::new(D), tail);
         for _ in 0..(D + T) * 3 {
             let out = render(&mut exec, 1, 1);
             assert_eq!(out[0][0], 0.0);
@@ -399,7 +399,7 @@ struct GainNode(Param<Amplitude>);
 impl IntoNode for GainBuilder {
     type Controls = Param<Amplitude>;
     fn into_parts(self) -> NodeParts<Self::Controls> {
-        let p = Param::new(Amplitude(1.0));
+        let p = Param::new(Amplitude::new(1.0));
         NodeParts {
             node: Box::new(GainNode(p.handle())),
             fork: None,
@@ -416,7 +416,7 @@ impl Node for GainNode {
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
         // Read once per block, as the RT rules ask.
         // The block is `f32`: the gain narrows once.
-        let g = self.0.load().0 as f32;
+        let g = self.0.load().get() as f32;
         io.channel(0).map(|x| x * g);
         Status::Modified
     }
@@ -445,7 +445,7 @@ fn insert_returns_typed_controls() {
     exec.apply_pending();
     ed.collect();
     assert_eq!(render(&mut exec, 8, 1)[0][0], 2.0);
-    gain.store(Amplitude(0.25));
+    gain.store(Amplitude::new(0.25));
     assert_eq!(render(&mut exec, 8, 1)[0][0], 0.5);
 }
 
@@ -685,7 +685,7 @@ impl Node for Synth {
     fn shape(&self) -> Shape {
         Shape::source_unassigned(ChannelLayout::MONO)
             .with_events(1, 0)
-            .with_tail(Tail::Finite(Samples(self.release)))
+            .with_tail(Tail::Finite(Samples::new(self.release)))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -1111,7 +1111,7 @@ fn an_unchanged_commit_sends_nothing_and_a_change_still_sends() {
     assert_eq!(ed.in_flight(), 2, "a pending unit sends");
 
     // A latency set by hand sends.
-    ed.set_latency(SRC, tutti_units::Latency::new(Samples(3)))
+    ed.set_latency(SRC, tutti_units::Latency::new(Samples::new(3)))
         .expect("a node");
     ed.commit().expect("commits");
     assert_eq!(ed.in_flight(), 3, "a latency change sends");
@@ -1196,10 +1196,13 @@ fn ringer_calls(ringer: common::Ringer, frames: usize) -> usize {
 #[test]
 fn a_reported_tail_shorter_than_the_ceiling_is_what_the_skip_waits() {
     use common::{REPORT_UNKNOWN, Ringer};
-    let ceiling = Tail::Finite(Samples(100));
+    let ceiling = Tail::Finite(Samples::new(100));
     assert_eq!(ringer_calls(Ringer::new(ceiling, 5, 10), 300), 10);
     assert_eq!(
-        ringer_calls(Ringer::new(ceiling, 5, 10).with_latency(Samples(7)), 300),
+        ringer_calls(
+            Ringer::new(ceiling, 5, 10).with_latency(Samples::new(7)),
+            300
+        ),
         7 + 10,
         "latency, then the reported tail"
     );
@@ -1226,7 +1229,7 @@ fn a_reported_tail_shorter_than_the_ceiling_is_what_the_skip_waits() {
 #[test]
 fn a_reported_tail_above_the_ceiling_is_clamped() {
     use common::{REPORT_UNBOUNDED, Ringer};
-    let ceiling = Tail::Finite(Samples(20));
+    let ceiling = Tail::Finite(Samples::new(20));
     assert_eq!(ringer_calls(Ringer::new(ceiling, 5, 500), 300), 20);
     assert_eq!(
         ringer_calls(Ringer::new(ceiling, 5, REPORT_UNBOUNDED), 300),
@@ -1253,7 +1256,7 @@ fn a_reported_tail_above_the_ceiling_is_clamped() {
 fn a_call_that_reports_nothing_restores_the_ceiling() {
     use common::{NO_REPORT, Ringer};
     let (_ed, mut exec, calls, report) =
-        ringer_after_silence(Ringer::new(Tail::Finite(Samples(100)), 5, 10));
+        ringer_after_silence(Ringer::new(Tail::Finite(Samples::new(100)), 5, 10));
     for _ in 0..5 {
         render(&mut exec, 1, 1);
     }
@@ -1274,11 +1277,11 @@ fn a_call_that_reports_nothing_restores_the_ceiling() {
 fn a_new_unit_starts_at_its_ceiling() {
     use common::{NO_REPORT, Ringer};
     let (mut ed, mut exec, _calls, _report) =
-        ringer_after_silence(Ringer::new(Tail::Finite(Samples(100)), 5, 0));
+        ringer_after_silence(Ringer::new(Tail::Finite(Samples::new(100)), 5, 0));
     for _ in 0..10 {
         render(&mut exec, 1, 1);
     }
-    let fresh = Ringer::new(Tail::Finite(Samples(100)), 5, NO_REPORT);
+    let fresh = Ringer::new(Tail::Finite(Samples::new(100)), 5, NO_REPORT);
     let calls = Arc::clone(&fresh.calls);
     ed.insert(FX, "ringer", Unforkable(fresh));
     ed.commit().expect("commits");
@@ -1297,7 +1300,7 @@ fn a_new_unit_starts_at_its_ceiling() {
 #[test]
 fn a_report_reaches_every_call_form() {
     use common::Ringer;
-    let ceiling = Tail::Finite(Samples(100));
+    let ceiling = Tail::Finite(Samples::new(100));
     let ringer = |width: usize| Ringer::new(ceiling, 5, 10).wide(width);
     for (what, node) in [
         ("mono", ringer(1)),

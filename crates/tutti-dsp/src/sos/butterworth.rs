@@ -56,7 +56,7 @@ pub enum SosError {
 
 /// The largest gain magnitude a bell or tilt design takes: 120 dB, past which a linear
 /// amplitude is no longer a usable figure.
-pub const MAX_GAIN_MAGNITUDE: Db = Db(120.0);
+pub const MAX_GAIN_MAGNITUDE: Db = Db::new(120.0);
 
 /// `cutoff` when it is inside `(0, Nyquist)` of `rate`.
 pub(super) fn check_cutoff(cutoff: Hz, rate: SampleRate) -> Result<Hz, SosError> {
@@ -79,7 +79,7 @@ pub(super) fn check_gain(gain: Db) -> Result<Db, SosError> {
 
 /// The root of the amplitude gain of `db` decibels, `10^(db / 40)`: the `A` of a bell and a tilt.
 pub(super) fn gain_root(db: Db) -> f64 {
-    Db(db.get() / 2.0).to_amplitude().get()
+    Db::new(db.get() / 2.0).to_amplitude().get()
 }
 
 /// A Butterworth filter, described without a sample rate: maximally flat in the passband,

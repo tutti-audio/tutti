@@ -57,10 +57,10 @@ impl Node for Declared {
         let q = self.declared_param::<{ UnitParam::Q as u16 }, _>(&io);
         let band0 = self.declared_param_at::<{ UnitParam::Threshold as u16 }, _>(&io, 0);
         let band1 = self.declared_param_at::<{ UnitParam::Threshold as u16 }, _>(&io, 1);
-        show(io.output(0), cutoff, self.cutoff.load().0 as f32);
-        show(io.output(1), q, self.q.load().0 as f32);
-        show(io.output(2), band1, self.bands[1].load().0 as f32);
-        show(io.output(3), band0, self.bands[0].load().0 as f32);
+        show(io.output(0), cutoff, self.cutoff.load().get() as f32);
+        show(io.output(1), q, self.q.load().get() as f32);
+        show(io.output(2), band1, self.bands[1].load().get() as f32);
+        show(io.output(3), band0, self.bands[0].load().get() as f32);
         Status::Modified
     }
     fn reset(&mut self) {}
@@ -108,7 +108,7 @@ impl Node for Steps {
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
         let at = io.offset(0).expect("a block has a frame");
         for &(addr, v) in &self.to {
-            let seg = ParamSegment::unit(addr, v, v, Samples(0), Law::Linear);
+            let seg = ParamSegment::unit(addr, v, v, Samples::new(0), Law::Linear);
             let _ = io.event_out(0).push_param(ParamEvent::segment(at, seg));
         }
         Status::Silent
@@ -123,9 +123,9 @@ fn render(to: &[(UnitAddr, f64)]) -> [Vec<f32>; 4] {
     let (mut ed, mut exec): (Editor, Executor) = Editor::new(prepare(64));
     let node = Declared {
         gone: None,
-        q: Param::new(Q(0.5)),
-        cutoff: Param::new(Hz(1_000.0)),
-        bands: [Param::new(Db(-10.0)), Param::new(Db(-20.0))],
+        q: Param::new(Q::new(0.5)),
+        cutoff: Param::new(Hz::new(1_000.0)),
+        bands: [Param::new(Db::new(-10.0)), Param::new(Db::new(-20.0))],
     };
     ed.insert(NODE, "declared", node);
     ed.insert(

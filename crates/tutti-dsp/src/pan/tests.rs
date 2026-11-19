@@ -1,7 +1,7 @@
 use super::*;
 
 fn gains(pan: f64, law: PanLaw) -> (f64, f64) {
-    let (l, r) = pan_gains(Pan(pan), law);
+    let (l, r) = pan_gains(Pan::new(pan), law);
     (l.get(), r.get())
 }
 

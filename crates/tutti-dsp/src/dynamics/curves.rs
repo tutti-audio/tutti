@@ -52,7 +52,7 @@ pub fn compute_compressor_gain_reduction(
     ratio: impl Into<CompressionRatio>,
     knee: impl Into<Db>,
 ) -> Db {
-    Db(gain_reduction(
+    Db::new(gain_reduction(
         input_db.into().get(),
         threshold.into().get(),
         ratio.into().get(),
@@ -117,7 +117,7 @@ pub fn compute_limiter_gain(
     threshold: impl Into<Db>,
     ceiling: impl Into<Db>,
 ) -> Amplitude {
-    Amplitude(limiter_gain(
+    Amplitude::new(limiter_gain(
         peak_db.into().get(),
         threshold.into().get(),
         ceiling.into().get(),
@@ -184,11 +184,11 @@ impl LimiterCurve {
     /// (the limit is about 770 dB). The limits are `f32`-sized because the curve is narrowed
     /// into a bank of `F`, and `f32` is the narrowest `F`: at that instantiation a larger gap
     /// is an infinite gain (`a_threshold_past_the_clamp_never_overshoots_the_ceiling`).
-    const MAX_GAP: Db = Db(760.0);
+    const MAX_GAP: Db = Db::new(760.0);
 
     /// The largest ceiling amplitude used: a boost's output stays far from `f32::MAX`, the
     /// same `f32` boundary as [`MAX_GAP`](Self::MAX_GAP).
-    const MAX_OVER: Amplitude = Amplitude(1.0e37);
+    const MAX_OVER: Amplitude = Amplitude::new(1.0e37);
 
     /// The curve for `threshold` and `ceiling`, held across a block.
     #[must_use]
@@ -196,7 +196,7 @@ impl LimiterCurve {
         let gap = (ceiling - threshold).min(Self::MAX_GAP);
         let threshold_lin = threshold
             .to_amplitude()
-            .max(Amplitude(f64::from(f32::MIN_POSITIVE)));
+            .max(Amplitude::new(f64::from(f32::MIN_POSITIVE)));
         // `over / peak` for a peak over the threshold is at most `over / threshold`: held
         // to `f32::MAX`, so the gain is finite whatever the peak.
         let over = ceiling
@@ -208,7 +208,7 @@ impl LimiterCurve {
             over,
             below: gap
                 .to_amplitude()
-                .min(Amplitude(over.get() / threshold_lin.get())),
+                .min(Amplitude::new(over.get() / threshold_lin.get())),
         }
     }
 
@@ -218,7 +218,7 @@ impl LimiterCurve {
     /// divisor is never zero.
     #[inline]
     pub fn gain(&self, peak: Amplitude) -> Amplitude {
-        Amplitude(self.in_float::<f64>().gain(peak.get()))
+        Amplitude::new(self.in_float::<f64>().gain(peak.get()))
     }
 
     /// This curve's figures in `F`, crossed once, for a per-sample [`FloatCurve::gain`].

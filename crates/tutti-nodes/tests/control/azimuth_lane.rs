@@ -65,7 +65,7 @@ fn at(p: UnitParam) -> ParamIn {
 fn rig(azimuth: ParamRange, elevation: ParamRange) -> (Editor, Executor) {
     let (mut ed, exec) = Editor::new(Prepare::new(
         SampleRate::of(RATE),
-        MaxBlock::of(Samples(2048)),
+        MaxBlock::of(Samples::new(2048)),
     ));
     ed.insert(NodeKey(PROBE), "probe", ForkByClone(Probe));
     for c in 0..2 {
@@ -112,7 +112,7 @@ fn roll(
     n: usize,
     blocks: usize,
 ) -> [Vec<f32>; 2] {
-    let mut clock = FrameClock::new(Beat(start), TEMPO, SampleRate::of(RATE));
+    let mut clock = FrameClock::new(Beat::new(start), TEMPO, SampleRate::of(RATE));
     let mut all = [Vec::new(), Vec::new()];
     for _ in 0..blocks {
         let t = TransportPosition::counted(true, TEMPO, clock.origin(), None);
@@ -128,7 +128,7 @@ fn roll(
             );
         }
         ed.collect();
-        clock.advance(Samples(n), None);
+        clock.advance(Samples::new(n), None);
         for (o, b) in all.iter_mut().zip(bufs) {
             o.extend(b);
         }
@@ -141,8 +141,8 @@ fn constant(depth: f64) -> Layer {
     Layer {
         id: LayerId(1),
         clock: Clock::Seconds {
-            rate: tutti_units::Hz(1.0),
-            phase: tutti_units::PhaseIncrement(0.0),
+            rate: tutti_units::Hz::new(1.0),
+            phase: tutti_units::PhaseIncrement::new(0.0),
             anchor: None,
         },
         wave: Waveform::Const(1.0),
@@ -175,7 +175,7 @@ fn a_modulated_bearing_across_180_wraps_not_clamps() {
 /// The depth scales by the arc's length: 0.1 of a 40-degree arc is 4 degrees.
 #[test]
 fn a_bearings_modulation_depth_scales_by_the_arcs_length() {
-    let arc = ParamRange::arc(Azimuth(180.0), ArcDegrees(20.0));
+    let arc = ParamRange::arc(Azimuth::new(180.0), ArcDegrees::new(20.0));
     let (mut ed, mut exec) = rig(arc, ParamRange::UNBOUNDED);
     let program = ControlProgram::new(None, vec![constant(0.1)], vec![]).expect("valid");
     lane(&mut ed, 1, UnitParam::Azimuth, &program, 178.0);
@@ -212,8 +212,8 @@ fn a_modulated_height_is_clamped_as_ever() {
 /// no depth (so the lane samples the curve rather than sending its pieces).
 fn seam_program() -> ControlProgram {
     let mut curve = Trajectory::new();
-    curve.add_breakpoint(Breakpoint::new(Beat(0.0), Azimuth(170.0)));
-    curve.add_breakpoint(Breakpoint::new(Beat(4.0), Azimuth(-170.0)));
+    curve.add_breakpoint(Breakpoint::new(Beat::new(0.0), Azimuth::new(170.0)));
+    curve.add_breakpoint(Breakpoint::new(Beat::new(4.0), Azimuth::new(-170.0)));
     ControlProgram::new(Some(Arc::new(curve)), vec![constant(0.0)], vec![]).expect("valid")
 }
 
@@ -232,7 +232,7 @@ fn an_automation_curve_across_180_turns_through_it_and_a_height_does_not() {
     let mut crossed = false;
     for (i, (&a, &e)) in az.iter().zip(&el).enumerate().skip(8) {
         let b = 1.99 + i as f64 / FPB;
-        let want_az = Azimuth(170.0 + 5.0 * b).wrap().get();
+        let want_az = Azimuth::new(170.0 + 5.0 * b).wrap().get();
         assert!(
             (f64::from(a) - want_az).abs() < 0.05,
             "frame {i}: {a} against {want_az}"

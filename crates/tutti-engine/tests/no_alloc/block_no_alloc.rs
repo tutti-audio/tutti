@@ -60,14 +60,14 @@ fn rolling_state_with(
 
     let (mut ed, exec) = Editor::new(Prepare::new(
         SampleRate::of(SAMPLE_RATE),
-        MaxBlock::of(Samples(512)),
+        MaxBlock::of(Samples::new(512)),
     ));
     let (source, filter) = (NodeKey(1), NodeKey(2));
-    ed.insert(source, "sine", Osc::sine(Hz(220.0)));
+    ed.insert(source, "sine", Osc::sine(Hz::new(220.0)));
     ed.insert(
         filter,
         "filter",
-        SvfFilterNode::<f32>::new(SvfType::LowPass, Hz(2_000.0), Q(0.7)),
+        SvfFilterNode::<f32>::new(SvfType::LowPass, Hz::new(2_000.0), Q::new(0.7)),
     );
     ed.spec_mut().topology.edges.insert(
         InPort {
@@ -99,7 +99,7 @@ fn rolling_state_with(
             TapId::of(1),
             sources,
             TapAlign::ToOutput,
-            Samples(MAX_FRAMES),
+            Samples::new(MAX_FRAMES),
         )
         .expect("the sources exist")
     });

@@ -22,7 +22,7 @@ const TEST_BLOCK: usize = 1 << 16;
 
 /// The offset `k` frames into a test block.
 fn at(k: usize) -> Offset {
-    Offset::of(Samples(k), Samples(TEST_BLOCK))
+    Offset::of(Samples::new(k), Samples::new(TEST_BLOCK))
 }
 
 fn midi_only(midi: &[UmpAt]) -> InputEvents<'_> {
@@ -467,7 +467,7 @@ fn a_stop_drops_an_open_sysex_once() {
     let outs: &mut [&mut [f32]] = &mut [&mut l[..], &mut r[..]];
     let ins: &[&[f32]] = &[&input[0][..], &input[1][..]];
     let mut buffer = InputOutput::new(
-        tutti_plugin_types::Samples(ins[0].len()),
+        tutti_plugin_types::Samples::new(ins[0].len()),
         Planes::new(ins).expect("equal channels"),
         PlanesMut::new(outs).expect("equal channels"),
     )

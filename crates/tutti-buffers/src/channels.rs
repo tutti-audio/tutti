@@ -146,7 +146,7 @@ impl ChannelLayout {
     #[inline]
     #[must_use]
     pub const fn interleaved_len(self, frames: Samples) -> usize {
-        frames.0.saturating_mul(self.0 as usize)
+        frames.get().saturating_mul(self.0 as usize)
     }
 
     /// Returns how many **whole frames** a flat interleaved buffer of `len`
@@ -165,7 +165,7 @@ impl ChannelLayout {
     pub const fn from_interleaved_len(self, len: usize) -> Samples {
         match self.0 {
             0 => Samples::ZERO,
-            ch => Samples(len / ch as usize),
+            ch => Samples::new(len / ch as usize),
         }
     }
 
@@ -272,16 +272,19 @@ mod tests {
     #[test]
     fn interleaved_len_is_frames_times_width() {
         let six = ChannelLayout::from(6u16);
-        assert_eq!(six.interleaved_len(Samples(10)), 60);
-        assert_eq!(six.from_interleaved_len(60), Samples(10));
-        assert_eq!(ChannelLayout::STEREO.interleaved_len(Samples(3)), 6);
+        assert_eq!(six.interleaved_len(Samples::new(10)), 60);
+        assert_eq!(six.from_interleaved_len(60), Samples::new(10));
+        assert_eq!(ChannelLayout::STEREO.interleaved_len(Samples::new(3)), 6);
 
         // A trailing partial frame is not a frame.
-        assert_eq!(six.from_interleaved_len(65), Samples(10));
-        assert_eq!(ChannelLayout::STEREO.from_interleaved_len(7), Samples(3));
+        assert_eq!(six.from_interleaved_len(65), Samples::new(10));
+        assert_eq!(
+            ChannelLayout::STEREO.from_interleaved_len(7),
+            Samples::new(3)
+        );
         // Round trip from the frame side is exact.
         for n in [0usize, 1, 7, 512] {
-            let f = Samples(n);
+            let f = Samples::new(n);
             assert_eq!(six.from_interleaved_len(six.interleaved_len(f)), f);
         }
     }
@@ -291,7 +294,7 @@ mod tests {
     #[test]
     fn an_empty_layout_holds_no_frames() {
         assert_eq!(ChannelLayout::EMPTY.from_interleaved_len(64), Samples::ZERO);
-        assert_eq!(ChannelLayout::EMPTY.interleaved_len(Samples(64)), 0);
+        assert_eq!(ChannelLayout::EMPTY.interleaved_len(Samples::new(64)), 0);
     }
 
     /// Every count has exactly one representation, so equal counts are always

@@ -25,8 +25,8 @@ fn the_published_latency_shrinks_when_the_latency_bearing_node_leaves() {
     let (dry, _) = s.graph().add(ForkByClone(Const::mono(1.0)));
     let (src, _) = s.graph().add(ForkByClone(Const::mono(1.0)));
     let (lim, _) = s.graph().add(LimiterNode::<f32>::mono(LimiterControls {
-        threshold: Db(-1.0),
-        ceiling: Db(-0.3),
+        threshold: Db::new(-1.0),
+        ceiling: Db::new(-0.3),
         ..LimiterControls::DEFAULT
     }));
     s.graph()
@@ -42,12 +42,12 @@ fn the_published_latency_shrinks_when_the_latency_bearing_node_leaves() {
 
     let before = s.latency();
     assert!(
-        before > Samples(0),
+        before > Samples::new(0),
         "the limiter reports latency, so the graph has a figure to display"
     );
     assert_eq!(
         s.compensation().to_vec().as_slice(),
-        [Samples(0), before],
+        [Samples::new(0), before],
         "the dry channel pre-rolls by the limiter's lookahead"
     );
 
@@ -64,11 +64,11 @@ fn the_published_latency_shrinks_when_the_latency_bearing_node_leaves() {
     assert!(s.latency() < before, "the figure shrank");
     assert_eq!(
         s.latency(),
-        Samples(0),
+        Samples::new(0),
         "and with nothing latency-bearing left, to nothing at all"
     );
     assert_eq!(
         s.compensation().to_vec().as_slice(),
-        [Samples(0), Samples(0)]
+        [Samples::new(0), Samples::new(0)]
     );
 }

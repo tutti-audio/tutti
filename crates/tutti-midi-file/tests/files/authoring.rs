@@ -54,9 +54,12 @@ fn a_tick_moves_by_counts_and_a_quarter_is_the_division() {
         Tick::quarters(3, TicksPerQuarterNote::of(96)),
         Some(Tick(288))
     );
-    assert_eq!(Tick(720).beats(TicksPerQuarterNote::of(480)), Beat(1.5));
+    assert_eq!(
+        Tick(720).beats(TicksPerQuarterNote::of(480)),
+        Beat::new(1.5)
+    );
     let seven = Tick::quarters(7, DIVISION).unwrap();
-    assert_eq!(seven.beats(DIVISION), Beat(7.0));
+    assert_eq!(seven.beats(DIVISION), Beat::new(7.0));
 }
 
 /// The ends of `u64` are not wrapped: an add past the last tick, a distance
@@ -259,12 +262,12 @@ fn a_sysex_event_is_its_sysex7_packets_at_its_beat() {
     .unwrap();
     let timeline = metrical(&f).timeline();
     assert_eq!(timeline.packets.len(), 2);
-    assert!(timeline.packets.iter().all(|(b, _)| *b == Beat(2.0)));
+    assert!(timeline.packets.iter().all(|(b, _)| *b == Beat::new(2.0)));
     assert_eq!(
         sysex7(&timeline.packets),
         [
-            (Beat(2.0), SysexStatus::Start, vec![1, 2, 3, 4, 5, 6]),
-            (Beat(2.0), SysexStatus::End, vec![7, 8, 9, 10]),
+            (Beat::new(2.0), SysexStatus::Start, vec![1, 2, 3, 4, 5, 6]),
+            (Beat::new(2.0), SysexStatus::End, vec![7, 8, 9, 10]),
         ]
     );
     // An `F0` event with an 8-bit byte is read as the escape of the bytes it
@@ -272,7 +275,7 @@ fn a_sysex_event_is_its_sysex7_packets_at_its_beat() {
     assert_eq!(
         timeline.dropped,
         [(
-            Beat(2.0),
+            Beat::new(2.0),
             FileEvent::Escape(vec![0xF0, 0x90, 0xF7].into()),
             TimelineDrop::BareEscape
         ),]
@@ -320,7 +323,7 @@ fn a_divided_sysex_is_a_start_continues_and_an_end_each_at_its_events_beat() {
     let f = file(vec![track]);
     let timeline = metrical(&f).timeline();
     assert!(timeline.dropped.is_empty());
-    let beat = |ticks: f64| Beat(ticks / f64::from(TPQ));
+    let beat = |ticks: f64| Beat::new(ticks / f64::from(TPQ));
     assert_eq!(
         sysex7(&timeline.packets),
         [
@@ -348,7 +351,7 @@ fn a_divided_sysex_part_over_six_bytes_is_several_packets_and_a_meta_event_may_i
         .push(Tick(20), FileEvent::Escape(vec![9, 0xF7].into()))
         .unwrap();
     let timeline = metrical(&file(vec![track])).timeline();
-    let beat = |ticks: f64| Beat(ticks / f64::from(TPQ));
+    let beat = |ticks: f64| Beat::new(ticks / f64::from(TPQ));
     assert_eq!(
         sysex7(&timeline.packets),
         [
@@ -385,7 +388,7 @@ fn a_bare_escape_and_an_unfinished_divided_message_are_dropped_and_listed() {
     let timeline = metrical(&f).timeline();
     // The note is the only packet; the `F7` after it has no `F0` open.
     assert_eq!(timeline.packets.len(), 1);
-    let beat = |ticks: f64| Beat(ticks / f64::from(TPQ));
+    let beat = |ticks: f64| Beat::new(ticks / f64::from(TPQ));
     assert_eq!(
         timeline.dropped,
         [
@@ -415,7 +418,7 @@ fn a_format_2_file_has_no_metrical_view_but_each_track_has_a_timeline() {
         .into_iter()
         .map(|(b, _)| b)
         .collect();
-    assert_eq!(beats, [Beat(1.0), Beat(2.0)]);
+    assert_eq!(beats, [Beat::new(1.0), Beat::new(2.0)]);
 }
 
 /// A divided message with a byte of 128 or more is dropped whole, each part
@@ -432,7 +435,7 @@ fn an_eight_bit_divided_message_and_an_unknown_packet_are_listed() {
         .unwrap();
     let timeline = metrical(&file(vec![track])).timeline();
     assert!(timeline.packets.is_empty());
-    let beat = |ticks: f64| Beat(ticks / f64::from(TPQ));
+    let beat = |ticks: f64| Beat::new(ticks / f64::from(TPQ));
     assert_eq!(
         timeline.dropped,
         [
@@ -483,7 +486,7 @@ fn a_clip_files_timeline_is_its_packets_as_stored_without_the_header() {
     assert!(!track.header().is_empty());
     let f = MidiFile::clip(DIVISION, track).unwrap();
     let line: Vec<(Beat, Ump)> = metrical(&f).timeline().packets;
-    assert_eq!(line, [(Beat(0.5), Ump::from(note))]);
+    assert_eq!(line, [(Beat::new(0.5), Ump::from(note))]);
 }
 
 // ---- the tempo map ---------------------------------------------------------
@@ -498,7 +501,10 @@ fn the_tempo_map_is_one_shared_value() {
         metrical(&f).tempo_map(),
         metrical(&again).tempo_map()
     ));
-    assert_eq!(metrical(&f).tempo_map().tempo_at(Beat(0.0)), Bpm::of(75.0));
+    assert_eq!(
+        metrical(&f).tempo_map().tempo_at(Beat::new(0.0)),
+        Bpm::of(75.0)
+    );
 }
 
 // ---- typed refusals --------------------------------------------------------
@@ -570,7 +576,7 @@ fn two_tempos_on_one_tick_are_kept_and_the_later_governs() {
     );
     let file = crate::common::format0(SmfDivision::per_quarter(480), track).unwrap();
     assert_eq!(
-        metrical(&file).tempo_map().tempo_at(Beat(0.0)),
+        metrical(&file).tempo_map().tempo_at(Beat::new(0.0)),
         Bpm::of(60.0)
     );
 }

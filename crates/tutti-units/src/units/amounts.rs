@@ -135,7 +135,10 @@ impl Balance {
     #[must_use]
     pub fn gains(self) -> (Amplitude, Amplitude) {
         let b = self.0.clamp(-1.0, 1.0);
-        (Amplitude((1.0 - b).min(1.0)), Amplitude((1.0 + b).min(1.0)))
+        (
+            Amplitude::new((1.0 - b).min(1.0)),
+            Amplitude::new((1.0 + b).min(1.0)),
+        )
     }
 }
 

@@ -69,7 +69,7 @@ impl LadderCoeffs {
     ) -> LadderCoeffs {
         let (freq, resonance, sample_rate) = (freq.into(), resonance.into(), sample_rate.into());
         let fc = freq.clamp(
-            Hz(1.0),
+            Hz::new(1.0),
             sample_rate.nyquist_scaled(crate::filter::NYQUIST_MARGIN),
         );
         LadderCoeffs {

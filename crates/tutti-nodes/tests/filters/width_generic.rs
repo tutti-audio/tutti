@@ -162,7 +162,7 @@ fn delay(layout: ChannelLayout) -> DelayNode<f32> {
 
 fn chorus(layout: ChannelLayout) -> ModDelayNode<f32> {
     // No stagger: one phase for every channel, as the mono node has.
-    let zeros = vec![PhaseIncrement(0.0); usize::from(layout.count())];
+    let zeros = vec![PhaseIncrement::new(0.0); usize::from(layout.count())];
     let controls = ModDelayControls {
         rate: Hz::new(1.7),
         depth: Seconds::new(0.004),

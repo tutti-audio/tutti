@@ -9,7 +9,7 @@ use tutti_units::Amplitude;
 const CEILING: f64 = 0.5;
 
 fn ceiling_db() -> f64 {
-    Db::from_amplitude(Amplitude(CEILING)).get()
+    Db::from_amplitude(Amplitude::new(CEILING)).get()
 }
 
 /// A bank limiting to `CEILING` with no drive (threshold at the ceiling: the gain is
@@ -31,7 +31,7 @@ fn render(bank: &mut LimiterBank<f32>, x: &[f32]) -> Vec<f32> {
 
 /// The shortest lookahead a true-peak bank takes at the test rate, as the refusal names it.
 fn shortest() -> Lookahead {
-    let short = Lookahead::of(Seconds(0.0002));
+    let short = Lookahead::of(Seconds::new(0.0002));
     match LimiterBank::<f32>::detecting(ChannelLayout::MONO, short, RATE, PeakDetection::TruePeak) {
         Err(TruePeakError::Lookahead { shortest, .. }) => shortest,
         other => panic!("{other:?}"),
@@ -222,10 +222,10 @@ fn the_true_peak_of_the_output_is_within_the_ceiling_and_its_margin() {
 #[test]
 fn the_declared_latency_is_the_impulse_peak_delay_of_the_audio_path() {
     for (rate, lookahead) in [
-        (SampleRate::SR_48K, Seconds(0.005)),
-        (SampleRate::SR_44K1, Seconds(0.005)),
-        (SampleRate::SR_48K, Seconds(0.02)),
-        (SampleRate::SR_48K, Seconds(0.0009)),
+        (SampleRate::SR_48K, Seconds::new(0.005)),
+        (SampleRate::SR_44K1, Seconds::new(0.005)),
+        (SampleRate::SR_48K, Seconds::new(0.02)),
+        (SampleRate::SR_48K, Seconds::new(0.0009)),
     ] {
         let lookahead = Lookahead::of(lookahead);
         let mut bank = bank_at(PeakDetection::TruePeak, lookahead, rate);
@@ -266,7 +266,7 @@ fn the_upsample_delay_is_the_impulse_peak_of_the_4x_signal() {
 /// error names is accepted, and the sample-peak bank takes any.
 #[test]
 fn a_lookahead_shorter_than_the_upsampler_delay_is_refused() {
-    let short = Lookahead::of(Seconds(0.0002));
+    let short = Lookahead::of(Seconds::new(0.0002));
     let refused =
         LimiterBank::<f32>::detecting(ChannelLayout::MONO, short, RATE, PeakDetection::TruePeak)
             .expect_err("ten frames");
@@ -287,7 +287,7 @@ fn a_lookahead_shorter_than_the_upsampler_delay_is_refused() {
         LimiterBank::<f32>::detecting(ChannelLayout::MONO, shortest, RATE, PeakDetection::TruePeak)
             .expect("the shortest lines up");
     assert!(ok.latency() >= needed);
-    let one_under = Lookahead::of(Seconds((needed.get() - 1) as f64 / 48_000.0));
+    let one_under = Lookahead::of(Seconds::new((needed.get() - 1) as f64 / 48_000.0));
     assert!(
         LimiterBank::<f32>::detecting(
             ChannelLayout::MONO,

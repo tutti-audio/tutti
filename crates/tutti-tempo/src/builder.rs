@@ -17,8 +17,8 @@ use tutti_units::{Beat, Bpm};
 /// use tutti_units::{Beat, Bpm};
 ///
 /// let map = TempoMap::builder(Bpm::of(120.0))
-///     .ramp_time_to(Beat(4.0), Bpm::of(180.0))
-///     .step_to(Beat(8.0), Bpm::of(90.0))
+///     .ramp_time_to(Beat::new(4.0), Bpm::of(180.0))
+///     .step_to(Beat::new(8.0), Bpm::of(90.0))
 ///     .build()?;
 /// assert_eq!(map.points()[0].transition, Transition::RampTime { end: None });
 /// assert_eq!(map.points().last().unwrap().transition, Transition::Step);
@@ -31,7 +31,7 @@ use tutti_units::{Beat, Bpm};
 /// use tutti_tempo::TempoMap;
 /// use tutti_units::{Beat, Bpm};
 ///
-/// let _ = TempoMap::builder(Bpm::of(120.0)).ramp_time(Beat(4.0));
+/// let _ = TempoMap::builder(Bpm::of(120.0)).ramp_time(Beat::new(4.0));
 /// ```
 #[derive(Clone, Debug)]
 #[must_use]
@@ -42,7 +42,7 @@ pub struct TempoMapBuilder {
 impl TempoMapBuilder {
     pub(crate) fn new(first: Bpm) -> Self {
         Self {
-            points: vec![TempoPoint::step(Beat(0.0), first)],
+            points: vec![TempoPoint::step(Beat::new(0.0), first)],
         }
     }
 
@@ -88,11 +88,11 @@ impl TempoMapBuilder {
     ///
     /// // 120 to 180 BPM over four beats lasts 1.6 s; the tempo is 90 from there.
     /// let map = TempoMap::builder(Bpm::of(120.0))
-    ///     .ramp_time_to(Beat(4.0), Bpm::of(180.0))
+    ///     .ramp_time_to(Beat::new(4.0), Bpm::of(180.0))
     ///     .then_step(Bpm::of(90.0))
     ///     .build()?;
-    /// assert_eq!(map.tempo_at(Beat(4.0)), Bpm::of(90.0));
-    /// assert!((map.seconds_at(Beat(4.0)) - Seconds(1.6)).get().abs() < 1e-12);
+    /// assert_eq!(map.tempo_at(Beat::new(4.0)), Bpm::of(90.0));
+    /// assert!((map.seconds_at(Beat::new(4.0)) - Seconds::new(1.6)).get().abs() < 1e-12);
     /// # Ok::<(), tutti_tempo::TempoError>(())
     /// ```
     pub fn then_step(mut self, tempo: Bpm) -> Self {

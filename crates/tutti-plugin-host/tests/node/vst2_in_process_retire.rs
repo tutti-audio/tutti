@@ -67,7 +67,7 @@ fn a_removed_vst2_node_is_dropped_on_the_control_side() {
     let key = NodeKey(1);
     let (mut editor, mut exec) = Editor::new(Prepare::new(
         SampleRate::of(RATE),
-        MaxBlock::of(Samples(BLOCK)),
+        MaxBlock::of(Samples::new(BLOCK)),
     ));
     editor.insert(key, "vst2", Unforkable(unit.bind(tutti_fixtures::tempo())));
     editor

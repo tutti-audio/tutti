@@ -17,11 +17,11 @@ tutti_units::ranged! {
 
 impl MaxDelay {
     /// The longest delay of a node built without one: 2 s.
-    pub const DEFAULT: Self = Self(Seconds(2.0));
+    pub const DEFAULT: Self = Self(Seconds::new(2.0));
     /// The most [`new`](Self::new) accepts: 10 s. A line of that length at 192 kHz is
     /// 1.92 million frames of `f32`, so 16 channels hold 123 MB: the cap is what a
     /// capacity the node allocates at the device's rate can be.
-    pub const CAP: Seconds = Seconds(10.0);
+    pub const CAP: Seconds = Seconds::new(10.0);
 
     /// The frames a line holds for it at `rate`: `ceil(max * rate)`, from the exact
     /// product. Saturated at 16.7 million frames: a rate no device has must not make an

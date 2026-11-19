@@ -62,20 +62,22 @@ fn a_write_reaches_the_index_it_names() {
     let [a, b] = render(&mut s, 256);
     assert!(a.iter().all(|&x| x == 100.0) && b.iter().all(|&x| x == 500.0));
 
-    s.set(node.threshold_at(1).to(Db(-6.0))).unwrap();
+    s.set(node.threshold_at(1).to(Db::new(-6.0))).unwrap();
     let [a, b] = render(&mut s, 256);
     assert!(a.iter().all(|&x| x == 100.0), "band 0 did not move");
     assert!(b.iter().all(|&x| x == -6.0), "band 1 took the write");
 
     // A bare `UnitParam` is index 0.
-    s.set(node.threshold().to(Db(-12.0))).unwrap();
+    s.set(node.threshold().to(Db::new(-12.0))).unwrap();
     let [a, b] = render(&mut s, 256);
     assert!(a.iter().all(|&x| x == -12.0));
     assert!(b.iter().all(|&x| x == -6.0));
 
     // An index the node lacks takes nothing.
     assert_eq!(
-        s.set(node.threshold_at(2).to(Db(99.0))).unwrap_err().kind,
+        s.set(node.threshold_at(2).to(Db::new(99.0)))
+            .unwrap_err()
+            .kind,
         ValueErrorKind::NoSuchTarget
     );
     let [a, b] = render(&mut s, 256);

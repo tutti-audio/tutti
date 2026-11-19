@@ -1043,7 +1043,7 @@ mod tests {
             &shapes,
             &crate::node::Prepare::new(
                 tutti_units::SampleRate::SR_48K,
-                tutti_buffers::MaxBlock::of(tutti_units::Samples(64)),
+                tutti_buffers::MaxBlock::of(tutti_units::Samples::new(64)),
             ),
             None,
         )
@@ -1109,7 +1109,7 @@ mod tests {
             &shapes,
             &crate::node::Prepare::new(
                 tutti_units::SampleRate::SR_48K,
-                tutti_buffers::MaxBlock::of(tutti_units::Samples(64)),
+                tutti_buffers::MaxBlock::of(tutti_units::Samples::new(64)),
             ),
             None,
         )
@@ -1253,7 +1253,7 @@ mod tests {
             &shapes,
             &crate::node::Prepare::new(
                 tutti_units::SampleRate::SR_48K,
-                tutti_buffers::MaxBlock::of(tutti_units::Samples(64)),
+                tutti_buffers::MaxBlock::of(tutti_units::Samples::new(64)),
             ),
             None,
         )
@@ -1321,7 +1321,7 @@ mod tests {
             &shapes,
             &crate::node::Prepare::new(
                 tutti_units::SampleRate::SR_48K,
-                tutti_buffers::MaxBlock::of(tutti_units::Samples(64)),
+                tutti_buffers::MaxBlock::of(tutti_units::Samples::new(64)),
             ),
             None,
         )
@@ -1394,7 +1394,7 @@ mod tests {
         verify(&good).expect("sound");
 
         let mut bad = good.clone();
-        bad.nodes.recs[0].latency = tutti_units::Samples(bad.nodes.recs[0].latency.get() + 1);
+        bad.nodes.recs[0].latency += tutti_units::Samples::new(1);
         assert!(verify(&bad).unwrap_err().0.contains("disagrees"));
 
         let mut bad = good.clone();
@@ -1498,7 +1498,7 @@ mod tests {
                 channel: 0,
                 from: Source::Zero,
             },
-            len: tutti_units::Samples(1),
+            len: tutti_units::Samples::new(1),
         });
         assert!(verify(&bad).unwrap_err().0.contains("delay 0 is used by 0"));
 
@@ -1596,7 +1596,7 @@ mod tests {
         let valid = GraphSpec::new(t).validate().expect("valid");
         let prep = crate::node::Prepare::new(
             tutti_units::SampleRate::SR_48K,
-            tutti_buffers::MaxBlock::of(tutti_units::Samples(64)),
+            tutti_buffers::MaxBlock::of(tutti_units::Samples::new(64)),
         );
         let split = compile(&valid, &shapes, &prep, None).expect("compiles").0;
         let u = split.units.iter().position(|p| p.key == thru).unwrap();
@@ -1656,7 +1656,7 @@ mod tests {
         let valid = GraphSpec::new(t).validate().expect("valid");
         let prep = crate::node::Prepare::new(
             tutti_units::SampleRate::SR_48K,
-            tutti_buffers::MaxBlock::of(tutti_units::Samples(64)),
+            tutti_buffers::MaxBlock::of(tutti_units::Samples::new(64)),
         );
         let plan = compile(&valid, &shapes, &prep, None).expect("compiles").0;
         let u = plan.units.iter().position(|p| p.key == thru).unwrap();
@@ -1744,7 +1744,7 @@ mod tests {
         }
         let prep = crate::node::Prepare::new(
             tutti_units::SampleRate::SR_48K,
-            tutti_buffers::MaxBlock::of(tutti_units::Samples(64)),
+            tutti_buffers::MaxBlock::of(tutti_units::Samples::new(64)),
         );
         let good = compile(&g.validate().unwrap(), &shapes, &prep, None)
             .unwrap()
@@ -1811,12 +1811,12 @@ mod tests {
             spec.generations.insert(a, gen_a);
             let prepare = crate::node::Prepare::new(
                 tutti_units::SampleRate::SR_48K,
-                tutti_buffers::MaxBlock::of(tutti_units::Samples(64)),
+                tutti_buffers::MaxBlock::of(tutti_units::Samples::new(64)),
             );
             compile(&spec.validate().expect("valid"), &shapes, &prepare, prev).expect("compiles")
         };
         let (base, _) = build(generator(), 0, None);
-        let fade = Fade::new(tutti_units::Samples(32), FadeLaw::EqualPower);
+        let fade = Fade::new(tutti_units::Samples::new(32), FadeLaw::EqualPower);
         let check = |shape_a: Shape, fades: Vec<(NodeKey, Fade)>| {
             let (plan, mut delta) = build(shape_a, 1, Some(&base));
             delta.fades = fades;
@@ -1824,7 +1824,7 @@ mod tests {
         };
 
         assert_eq!(check(generator(), vec![(a, fade)]), Ok(()));
-        let tail = generator().with_tail(tutti_units::Tail::Finite(tutti_units::Samples(9)));
+        let tail = generator().with_tail(tutti_units::Tail::Finite(tutti_units::Samples::new(9)));
         assert_eq!(
             check(tail, vec![(a, fade)]),
             Ok(()),

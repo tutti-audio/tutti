@@ -40,7 +40,7 @@ fn an_f64_bounce_into_planes_keeps_the_figure_f32_rounds_away() {
     let planes = session()
         .bounce(
             Bounce::project()
-                .range(Range::Seconds(Seconds(0.0), Seconds(0.01)))
+                .range(Range::Seconds(Seconds::new(0.0), Seconds::new(0.01)))
                 .master_buffers()
                 .channels(ChannelLayout::MONO)
                 .tail(BounceTail::None),
@@ -65,7 +65,7 @@ fn an_f64_bounce_to_a_float64_file_reads_back_exactly() {
     session()
         .bounce(
             Bounce::project()
-                .range(Range::Seconds(Seconds(0.0), Seconds(0.01)))
+                .range(Range::Seconds(Seconds::new(0.0), Seconds::new(0.01)))
                 .master(&path, Format::Wav(Pcm::Float64))
                 .tail(BounceTail::None),
         )

@@ -10,8 +10,8 @@ fn model(ty: LadderType, fc: f64, res: f64) -> LadderModel {
     LadderModel::new(
         LadderControls {
             ty,
-            freq: Hz(fc),
-            res: Resonance(res),
+            freq: Hz::new(fc),
+            res: Resonance::new(res),
             drive: Drive::UNITY,
         },
         RATE,
@@ -24,7 +24,7 @@ fn coefficients(freq: Hz, res: Resonance) -> LadderCoefficients<f64> {
 
 fn at(m: &LadderModel, f: f64) -> Complex64 {
     let mut g = [Complex64::new(0.0, 0.0)];
-    m.frequency_response(0, &[Hz(f)], &mut g);
+    m.frequency_response(0, &[Hz::new(f)], &mut g);
     g[0]
 }
 
@@ -73,7 +73,7 @@ fn the_small_signal_response_is_the_models() {
     ] {
         for res in [0.0f64, 0.4, 0.8] {
             let m = model(ty, 1_200.0, res);
-            let c = coefficients(Hz(1_200.0), Resonance(res));
+            let c = coefficients(Hz::new(1_200.0), Resonance::new(res));
             let mut s = [0.0f64; 4];
             let ir: Vec<f32> = (0..N)
                 .map(|n| {
@@ -107,7 +107,7 @@ fn the_small_signal_response_is_the_models() {
 #[test]
 fn the_model_is_the_small_signal_system_and_loud_signals_leave_it() {
     const N: usize = 1 << 14;
-    let c = coefficients(Hz(1_200.0), Resonance(0.9));
+    let c = coefficients(Hz::new(1_200.0), Resonance::new(0.9));
     let run = |amp: f64| {
         let mut s = [0.0f64; 4];
         (0..N)
@@ -136,7 +136,7 @@ fn the_radius_and_the_tail_are_what_the_linearised_filter_rings() {
     const N: usize = 1 << 17;
     let amp = 1e-7f64;
     let m = model(LadderType::LP24, 300.0, 0.8);
-    let c = coefficients(Hz(300.0), Resonance(0.8));
+    let c = coefficients(Hz::new(300.0), Resonance::new(0.8));
     let mut s = [0.0f64; 4];
     let ir: Vec<f64> = (0..N)
         .map(|n| {
@@ -184,7 +184,7 @@ fn the_radius_and_the_tail_are_what_the_linearised_filter_rings() {
     let peak = env.iter().copied().fold(0.0, f64::max);
     let last = env.iter().rposition(|&v| v >= peak * 1e-3).unwrap();
     let took = ((last + 1) * win) as f64 / RATE.get();
-    let Ring::Finite(tail) = m.tail(Db(-60.0)) else {
+    let Ring::Finite(tail) = m.tail(Db::new(-60.0)) else {
         panic!("finite")
     };
     assert!(
@@ -207,11 +207,11 @@ fn a_full_resonance_is_unstable_at_small_signal() {
     assert!(!model(LadderType::LP24, 1_000.0, 1.0).is_stable());
     assert!(model(LadderType::LP24, 1_000.0, 0.5).is_stable());
     assert!(matches!(
-        model(LadderType::LP24, 1_000.0, 0.5).tail(Db(-60.0)),
+        model(LadderType::LP24, 1_000.0, 0.5).tail(Db::new(-60.0)),
         Ring::Finite(_)
     ));
     assert_eq!(
-        model(LadderType::LP24, 1_000.0, 1.0).tail(Db(-60.0)),
+        model(LadderType::LP24, 1_000.0, 1.0).tail(Db::new(-60.0)),
         Ring::Unbounded
     );
 }

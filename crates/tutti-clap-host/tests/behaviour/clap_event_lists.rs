@@ -37,7 +37,7 @@ use tutti_units::Samples;
 fn packet(k: usize, words: &[u32]) -> UmpAt {
     let mut w = [0u32; 4];
     w[..words.len()].copy_from_slice(words);
-    (Offset::of(Samples(k), Samples(100)), Ump(w))
+    (Offset::of(Samples::new(k), Samples::new(100)), Ump(w))
 }
 
 /// The raw output list of `output`, valid while `output` is alive and unmoved.

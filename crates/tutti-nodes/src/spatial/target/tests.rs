@@ -1,13 +1,13 @@
 use super::*;
 
 fn aim(azimuth: f64, elevation: f64) -> Direction {
-    Direction::new(Azimuth(azimuth), Elevation(elevation))
+    Direction::new(Azimuth::new(azimuth), Elevation::new(elevation))
 }
 
 /// A smoother that moves the whole way in one step, so the *path* is
 /// visible without waiting out an exponential ramp.
 fn with_coeff(coeff: f64) -> AngleSmoother {
-    let mut s = AngleSmoother::new(SampleRate::SR_48K, Samples(1));
+    let mut s = AngleSmoother::new(SampleRate::SR_48K, Samples::new(1));
     s.coeff = coeff;
     s
 }
@@ -22,7 +22,7 @@ fn seeded(azimuth: f64, coeff: f64) -> AngleSmoother {
 /// direction of travel — the exact per-step position is the smoother's.
 #[test]
 fn bearing_crosses_the_seam_the_short_way() {
-    let mut s = AngleSmoother::new(SampleRate::SR_48K, Samples(1));
+    let mut s = AngleSmoother::new(SampleRate::SR_48K, Samples::new(1));
     // Settle at 170 degrees.
     for _ in 0..48_000 {
         s.step(aim(170.0, 0.0));
@@ -49,7 +49,7 @@ fn bearing_crosses_the_seam_the_short_way() {
 /// The counterpart: elevation saturates rather than wrapping.
 #[test]
 fn height_saturates_and_does_not_wrap() {
-    let mut s = AngleSmoother::new(SampleRate::SR_48K, Samples(1));
+    let mut s = AngleSmoother::new(SampleRate::SR_48K, Samples::new(1));
     for _ in 0..48_000 {
         s.step(aim(0.0, 90.0));
     }
@@ -64,7 +64,7 @@ fn height_saturates_and_does_not_wrap() {
 /// Otherwise every static source sits slightly off-axis forever.
 #[test]
 fn settles_on_a_stationary_target() {
-    let mut s = AngleSmoother::new(SampleRate::SR_48K, Samples(1));
+    let mut s = AngleSmoother::new(SampleRate::SR_48K, Samples::new(1));
     for _ in 0..48_000 {
         s.step(aim(45.0, 30.0));
     }
@@ -85,14 +85,14 @@ fn settles_on_a_stationary_target() {
 fn angular_smoothing_crosses_the_seam_instead_of_going_around() {
     let mut s = seeded(170.0, 1.0);
     // 170 -> -170 is +20 degrees. The linear form would travel -340.
-    assert_eq!(s.step(aim(-170.0, 0.0)).azimuth, Azimuth(-170.0));
+    assert_eq!(s.step(aim(-170.0, 0.0)).azimuth, Azimuth::new(-170.0));
 }
 
 #[test]
 fn angular_smoothing_takes_the_short_arc_at_partial_coefficient() {
     let mut s = seeded(170.0, 0.5);
     // Half of the +20 degree arc lands at 180, not back down near 0.
-    assert_eq!(s.step(aim(-170.0, 0.0)).azimuth, Azimuth(-180.0));
+    assert_eq!(s.step(aim(-170.0, 0.0)).azimuth, Azimuth::new(-180.0));
 }
 
 #[test]

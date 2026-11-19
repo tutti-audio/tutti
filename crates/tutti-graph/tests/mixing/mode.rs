@@ -66,7 +66,7 @@ fn direct(node: u64) -> Edge {
 fn gains(k: usize) -> (f32, f32) {
     // The law's two gains sum to one: the mode's pair is the incoming `f32` weight and its complement.
     let inn = FadeLaw::EqualAmplitude
-        .gains(Samples(k), Samples(FADE))
+        .gains(Samples::new(k), Samples::new(FADE))
         .1
         .get() as f32;
     (inn, 1.0 - inn)
@@ -861,7 +861,7 @@ impl Node for Probe {
             tutti_graph::Buses::unassigned(ch(self.ins)),
             tutti_graph::Buses::unassigned(ch(self.outs)),
         )
-        .with_latency(Latency::new(Samples(self.latency)))
+        .with_latency(Latency::new(Samples::new(self.latency)))
         .with_events(self.events_in, 0)
         .with_tail(Tail::Unbounded);
         if self.own_bypass {
@@ -1054,7 +1054,7 @@ fn a_bypassed_node_is_not_called_after_the_fade() {
     ] {
         let mut p = Probe::new(3.0);
         p.latency = latency;
-        let ringer = Ringer::honest(Tail::Finite(Samples(1)), 1);
+        let ringer = Ringer::honest(Tail::Finite(Samples::new(1)), 1);
         let ring_calls = Arc::clone(&ringer.calls);
         let mut s = Solo::new(0);
         // A source that is loud for 5 blocks and then says it is silent.

@@ -138,8 +138,8 @@ fn the_schroeder_integral_falls_60_db_in_the_designed_rt60() {
     for rt60 in [0.5, 1.0, 2.0] {
         for diffusion in [0.0, 1.0] {
             let c = still(|c| {
-                c.decay = [Seconds(rt60); 3];
-                c.diffusion = Mix(diffusion);
+                c.decay = [Seconds::new(rt60); 3];
+                c.diffusion = Mix::new(diffusion);
             });
             let (mut bank, mut glides) = landed(&l, RATE, &c);
             let frames = (2.0 * rt60 * RATE.get()) as usize;
@@ -200,10 +200,10 @@ fn dtft(block: &[f32], w: f64) -> f64 {
 fn each_band_decays_at_its_designed_rt60() {
     let l = layout(2, false);
     let c = still(|c| {
-        c.decay = [Seconds(1.5), Seconds(3.0), Seconds(0.6)];
-        c.diffusion = Mix(0.0);
+        c.decay = [Seconds::new(1.5), Seconds::new(3.0), Seconds::new(0.6)];
+        c.diffusion = Mix::new(0.0);
         c.pre_delay = Seconds::ZERO;
-        c.width = StereoWidth(1.0);
+        c.width = StereoWidth::new(1.0);
         c.wet = Db::UNITY;
     });
     let length = fdn_of(&design(&l, RATE, &c)).lines[0].length.get();
@@ -257,13 +257,13 @@ fn each_band_decays_at_its_designed_rt60() {
 #[test]
 fn a_frozen_network_keeps_its_energy() {
     let l = layout(8, true);
-    let c = controls(|c| c.diffusion = Mix(1.0));
+    let c = controls(|c| c.diffusion = Mix::new(1.0));
     let (mut bank, mut glides) = landed(&l, RATE, &c);
     run(&mut bank, &mut glides, &noise(1, 24_000), 64);
     bank.aim(
         &mut glides,
         &controls(|c| {
-            c.diffusion = Mix(1.0);
+            c.diffusion = Mix::new(1.0);
             c.freeze = true;
         }),
     );
@@ -286,7 +286,7 @@ fn a_diffusion_ramp_keeps_a_frozen_tails_energy() {
     let l = layout(8, true);
     let at = |diffusion: f64, freeze: bool| {
         still(|c| {
-            c.diffusion = Mix(diffusion);
+            c.diffusion = Mix::new(diffusion);
             c.freeze = freeze;
         })
     };
@@ -312,10 +312,10 @@ fn a_diffusion_ramp_keeps_a_frozen_tails_energy() {
 fn a_diagonal_network_is_the_identity_a_comb_a_line_with_a_positive_sign() {
     let l = layout(8, true);
     let c = still(|c| {
-        c.decay = [Seconds(2.0); 3];
-        c.diffusion = Mix(0.0);
+        c.decay = [Seconds::new(2.0); 3];
+        c.diffusion = Mix::new(0.0);
         c.pre_delay = Seconds::ZERO;
-        c.width = StereoWidth(1.0);
+        c.width = StereoWidth::new(1.0);
     });
     let net = design(&l, RATE, &c);
     let f = fdn_of(&net);
@@ -347,9 +347,9 @@ fn the_first_echo_follows_the_pre_delay_the_wet_gain_and_the_width() {
     let l = layout(n, false);
     let echo = |wet: Db, width: f64| {
         let c = still(|c| {
-            c.pre_delay = Seconds(0.1);
+            c.pre_delay = Seconds::new(0.1);
             c.wet = wet;
-            c.width = StereoWidth(width);
+            c.width = StereoWidth::new(width);
         });
         let net = design(&l, RATE, &c);
         let first = fdn_of(&net)
@@ -373,14 +373,14 @@ fn the_first_echo_follows_the_pre_delay_the_wet_gain_and_the_width() {
         (l0 - unit).abs() < 1e-6 && r0 == 0.0,
         "{l0} {r0} against {unit}"
     );
-    let (l6, _) = echo(Db(-6.0206), 1.0);
+    let (l6, _) = echo(Db::new(-6.0206), 1.0);
     assert!((l6 - 0.5 * unit).abs() < 1e-6, "-6 dB halves it: {l6}");
     let (lw, rw) = echo(Db::UNITY, 0.0);
     assert!(
         lw == rw && (lw - 0.5 * unit).abs() < 1e-6,
         "mono: {lw} {rw}"
     );
-    let (silent, _) = echo(Db(f64::NEG_INFINITY), 1.0);
+    let (silent, _) = echo(Db::new(f64::NEG_INFINITY), 1.0);
     assert_eq!(silent, 0.0);
 }
 
@@ -393,13 +393,13 @@ fn any_split_of_the_stream_gives_the_same_bits() {
     let l = layout(8, true);
     let a = controls(|_| {});
     let b = controls(|c| {
-        c.decay = [Seconds(4.0), Seconds(5.0), Seconds(2.0)];
-        c.size = Mix(0.8);
-        c.diffusion = Mix(0.3);
-        c.pre_delay = Seconds(0.01);
-        c.rate = Hz(3.0);
-        c.width = StereoWidth(0.5);
-        c.wet = Db(-6.0);
+        c.decay = [Seconds::new(4.0), Seconds::new(5.0), Seconds::new(2.0)];
+        c.size = Mix::new(0.8);
+        c.diffusion = Mix::new(0.3);
+        c.pre_delay = Seconds::new(0.01);
+        c.rate = Hz::new(3.0);
+        c.width = StereoWidth::new(0.5);
+        c.wet = Db::new(-6.0);
     });
     let x = noise(7, 6_000);
     for at in [1_024, 1_000] {
@@ -448,7 +448,7 @@ fn a_clone_continues_where_the_original_was_and_shares_nothing() {
     let (mut bank, mut glides) = landed(&l, RATE, &c);
     let x = noise(9, 4_000);
     run(&mut bank, &mut glides, &x[..1_777], 64);
-    bank.aim(&mut glides, &controls(|c| c.decay = [Seconds(0.7); 3]));
+    bank.aim(&mut glides, &controls(|c| c.decay = [Seconds::new(0.7); 3]));
     run(&mut bank, &mut glides, &x[1_777..2_000], 64);
     let (mut twin, mut twin_glides) = (bank.clone(), glides.clone());
     let rest = run(&mut bank, &mut glides, &x[2_000..], 64);
@@ -502,7 +502,7 @@ fn the_tail_is_the_networks_under_the_ceiling() {
     let (mut plain, mut freezable) = (plain, freezable);
     let (glides_p, glides_f) = (plain.glides(), freezable.glides());
     for rt60 in [0.3, 1.0, 2.5] {
-        let c = still(|c| c.decay = [Seconds(rt60); 3]);
+        let c = still(|c| c.decay = [Seconds::new(rt60); 3]);
         let Tail::Finite(t) = plain.tail_of(&glides_p, &c) else {
             panic!("finite")
         };
@@ -544,8 +544,8 @@ fn a_size_on_the_move_keeps_its_rt60_in_every_band() {
     let l = layout(8, false);
     let bands = |size: f64| {
         still(|c| {
-            c.decay = [Seconds(1.5), Seconds(3.0), Seconds(0.6)];
-            c.size = Mix(size);
+            c.decay = [Seconds::new(1.5), Seconds::new(3.0), Seconds::new(0.6)];
+            c.size = Mix::new(size);
         })
     };
     let (mut bank, mut glides) = landed(&l, RATE, &bands(1.0));
@@ -593,7 +593,7 @@ fn a_size_on_the_move_keeps_its_rt60_in_every_band() {
 #[test]
 fn the_tail_owes_the_pre_delay_still_to_fall() {
     let l = layout(8, false);
-    let (mut bank, mut glides) = landed(&l, RATE, &still(|c| c.pre_delay = Seconds(0.4)));
+    let (mut bank, mut glides) = landed(&l, RATE, &still(|c| c.pre_delay = Seconds::new(0.4)));
     bank.aim(&mut glides, &still(|_| {}));
     let Tail::Finite(owed) = bank.tail_of(&glides, &still(|_| {})) else {
         panic!("finite")
@@ -606,12 +606,12 @@ fn the_tail_owes_the_pre_delay_still_to_fall() {
         owed.get().abs_diff(base.get() + 19_200) <= 1,
         "{owed:?} against {base:?}"
     );
-    let longest = still(|c| c.decay = [Seconds(8.0); 3]);
+    let longest = still(|c| c.decay = [Seconds::new(8.0); 3]);
     let (mut worst, mut worst_glides) = landed(
         &l,
         RATE,
         &still(|c| {
-            c.decay = [Seconds(8.0); 3];
+            c.decay = [Seconds::new(8.0); 3];
             c.pre_delay = crate::MAX_PRE_DELAY;
         }),
     );
@@ -630,7 +630,10 @@ fn the_tail_owes_the_pre_delay_still_to_fall() {
 #[test]
 fn a_length_moves_half_a_frame_a_chunk_and_lands_exactly() {
     let l = layout(8, false);
-    let (a, b) = (still(|c| c.size = Mix(0.2)), still(|c| c.size = Mix(0.3)));
+    let (a, b) = (
+        still(|c| c.size = Mix::new(0.2)),
+        still(|c| c.size = Mix::new(0.3)),
+    );
     let (mut bank, mut glides) = landed(&l, RATE, &a);
     let (from, to) = (
         ReadPosition::from_span(fdn_of(&design(&l, RATE, &a)).lines[3].length),
@@ -666,7 +669,7 @@ fn a_length_moves_half_a_frame_a_chunk_and_lands_exactly() {
 fn the_pre_delay_moves_two_frames_a_chunk_and_lands_exactly() {
     let l = layout(8, false);
     let (mut bank, mut glides) = landed(&l, RATE, &still(|_| {}));
-    bank.aim(&mut glides, &still(|c| c.pre_delay = Seconds(0.1)));
+    bank.aim(&mut glides, &still(|c| c.pre_delay = Seconds::new(0.1)));
     let mut last = ReadPosition::START;
     for chunk in 1..=2_400 {
         run(
@@ -697,7 +700,7 @@ fn a_gain_ramps_over_twenty_milliseconds_of_chunks_and_lands_exactly() {
     assert_eq!(ramp(RATE), Steps::Fixed(wanted));
     let l = layout(8, false);
     let (mut bank, mut glides) = landed(&l, RATE, &still(|_| {}));
-    bank.aim(&mut glides, &still(|c| c.wet = Db(-6.0206)));
+    bank.aim(&mut glides, &still(|c| c.wet = Db::new(-6.0206)));
     let target = glides.wet.target();
     assert!((target - 0.5).abs() < 1e-4);
     for chunk in 1..=wanted {
@@ -716,7 +719,7 @@ fn a_gain_ramps_over_twenty_milliseconds_of_chunks_and_lands_exactly() {
 /// and the same after it is regrown. A cursor that stood still while idle reads another slot.
 #[test]
 fn a_line_idle_while_the_line_count_shrinks_ages_with_the_clock() {
-    let c = still(|c| c.pre_delay = Seconds(0.0));
+    let c = still(|c| c.pre_delay = Seconds::new(0.0));
     let (mut bank, mut glides) = landed(&layout(8, false), RATE, &c);
     run(&mut bank, &mut glides, &impulse(1), 1);
     let held = bank.state.lines[7].back(1);
@@ -747,7 +750,7 @@ fn an_f64_fdn_is_linear() {
     let y: Vec<f64> = x.iter().rev().map(|v| v - 0.3).collect();
     let (a, b) = (1.0 / 3.0, -std::f64::consts::PI / 7.0);
     let mix: Vec<f64> = x.iter().zip(&y).map(|(x, y)| a * x + b * y).collect();
-    let c = still(|c| c.diffusion = Mix(0.6));
+    let c = still(|c| c.diffusion = Mix::new(0.6));
     let l = layout(8, false);
     let render = |input: &[f64]| {
         let mut bank = FdnBank::<f64>::new(&l, RATE);
@@ -788,7 +791,7 @@ fn the_absorption_complements_keep_their_relative_precision_where_one_minus_the_
     let (mut stored, mut formed) = (0.0f64, 0.0f64);
     for hz in (100..=400).map(f64::from) {
         let mut target = Target::<f32>::new(2);
-        set_poles(&mut target, [Hz(hz), Hz(4_000.0)], rate);
+        set_poles(&mut target, [Hz::new(hz), Hz::new(4_000.0)], rate);
         let exact = -libm::expm1(-std::f64::consts::TAU * hz / rate.get());
         stored = stored.max((f64::from(target.complement[0]) / exact - 1.0).abs());
         let pole = target.pole[0] as f32;
@@ -823,8 +826,8 @@ fn the_longest_decay_at_192_khz_on_the_shortest_line_holds_its_closed_form_rt60_
     let l = FdnLayout::new(2, decay, false).unwrap();
     let c = still(|c| {
         c.decay = [decay.get(); 3];
-        c.size = Mix(0.0);
-        c.diffusion = Mix(0.0);
+        c.size = Mix::new(0.0);
+        c.diffusion = Mix::new(0.0);
     });
     let frames_per_line = fdn_of(&design(&l, rate, &c)).lines[0].length.get() as usize;
     let trips = (decay.get().get() * rate.get() / frames_per_line as f64) as usize - 2;

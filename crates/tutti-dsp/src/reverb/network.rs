@@ -414,7 +414,7 @@ impl Absorption {
             Absorption::Gain(g) => g,
             Absorption::OnePole { gain, damp } => {
                 if !(damp.is_finite() && damp.abs() < 1.0) {
-                    return Amplitude(f64::INFINITY);
+                    return Amplitude::new(f64::INFINITY);
                 }
                 let d = damp;
                 let response = match band {
@@ -422,7 +422,7 @@ impl Absorption {
                     Band::Mid => (1.0 - d).abs() / libm::sqrt(1.0 + d * d),
                     Band::High => (1.0 - d).abs() / (1.0 + d).abs(),
                 };
-                Amplitude(gain.get() * response)
+                Amplitude::new(gain.get() * response)
             }
             Absorption::Bands { low, mid, high, .. } => match band {
                 Band::Low => low,

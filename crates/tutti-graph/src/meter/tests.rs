@@ -25,7 +25,12 @@ fn read(samples: &[f32]) -> Level {
 fn sine(a: f64, frames: usize) -> Vec<f32> {
     use tutti_units::{Amplitude, Hz, SampleRate, Samples};
     // One cycle per 64 frames: 1 Hz at a 64 Hz rate.
-    tutti_fixtures::signal::sine(Hz(1.0), Amplitude(a), SampleRate::of(64.0), Samples(frames))
+    tutti_fixtures::signal::sine(
+        Hz::new(1.0),
+        Amplitude::new(a),
+        SampleRate::of(64.0),
+        Samples::new(frames),
+    )
 }
 
 /// A constant block reads its analytic peak and RMS, exactly.
@@ -36,7 +41,7 @@ fn a_constant_reads_exactly() {
     let l = take(&mut r);
     assert_eq!(l.peak.get(), 0.5);
     assert_eq!(l.rms.get(), 0.5);
-    assert_eq!(l.frames, Samples(100));
+    assert_eq!(l.frames, Samples::new(100));
 }
 
 /// The statistics of a block of any length agree with a plain loop: the
@@ -74,7 +79,7 @@ fn blocks_between_reads_fold() {
     feed(&mut w, 0.5, 192);
     let l = take(&mut r);
     assert_eq!(l.peak.get(), 1.0);
-    assert_eq!(l.frames, Samples(256));
+    assert_eq!(l.frames, Samples::new(256));
     // sqrt((64 * 1 + 192 * 0.25) / 256)
     assert_eq!(l.rms.get(), (112.0f64 / 256.0).sqrt());
 }
@@ -87,7 +92,7 @@ fn an_empty_read_is_silence() {
     let l = take(&mut r);
     assert_eq!(
         (l.peak.get(), l.rms.get(), l.frames),
-        (0.0, 0.0, Samples(0))
+        (0.0, 0.0, Samples::new(0))
     );
 }
 
@@ -154,7 +159,7 @@ fn a_block_past_8192_frames_is_metered_whole() {
 fn silence_reads_zero() {
     let l = read(&[0.0; 512]);
     assert_eq!((l.peak.get(), l.rms.get()), (0.0, 0.0));
-    assert_eq!(l.frames, Samples(512));
+    assert_eq!(l.frames, Samples::new(512));
 }
 
 /// Lanes are channels: a signal on one reads on its own lane and nothing
@@ -194,7 +199,7 @@ fn an_hour_unread_reads_the_analytic_rms() {
     let l = take(&mut r);
     let want = (stats.sum_sq / 512.0).sqrt();
     assert_eq!(l.rms.get(), want);
-    assert_eq!(l.frames, Samples(337_500 * 512));
+    assert_eq!(l.frames, Samples::new(337_500 * 512));
 }
 
 /// The switch starts off and both ends see it.
@@ -228,9 +233,9 @@ fn an_f64_block_is_metered_across_chunks_at_its_analytic_peak_and_rms() {
     meter_op::<f64, _, _>(&mut writer, &arena, &[0u8][..], &[0], FRAMES);
     let level = reader.read()[0];
     let sum_sq = 85.0 * 28.0 / 16.0 + 15.0 / 16.0;
-    assert_eq!(level.frames, Samples(FRAMES));
-    assert_eq!(level.peak, Amplitude(0.75));
-    assert_eq!(level.rms, Amplitude((sum_sq / FRAMES as f64).sqrt()));
+    assert_eq!(level.frames, Samples::new(FRAMES));
+    assert_eq!(level.peak, Amplitude::new(0.75));
+    assert_eq!(level.rms, Amplitude::new((sum_sq / FRAMES as f64).sqrt()));
 }
 
 /// An `f64` block's peak is read at `f64`: a sample of `1 + 2^-40` is not

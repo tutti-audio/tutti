@@ -65,7 +65,7 @@ fn test_stereo_spread() {
     let config = UnisonConfig {
         voice_count: UnisonVoices::of(3),
         detune_cents: CentsSpan::ZERO,
-        stereo_spread: Spread(1.0),
+        stereo_spread: Spread::new(1.0),
         phase_randomize: false,
     };
     let unison = UnisonEngine::new(config);

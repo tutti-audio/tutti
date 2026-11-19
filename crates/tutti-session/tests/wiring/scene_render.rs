@@ -40,18 +40,18 @@ const RATE: f64 = 48_000.0;
 
 /// The scene's units, built once for every side.
 fn saw() -> ForkByClone<Osc> {
-    ForkByClone(Osc::saw(Hz(110.0)))
+    ForkByClone(Osc::saw(Hz::new(110.0)))
 }
 fn low_pass(cutoff: f64) -> SvfFilterNode<f32> {
-    SvfFilterNode::new(SvfType::LowPass, Hz(cutoff), Q(0.9))
+    SvfFilterNode::new(SvfType::LowPass, Hz::new(cutoff), Q::new(0.9))
 }
 fn shaper(drive: f64) -> DistortionNode<f32> {
     DistortionNode::new(ShapeKind::Tanh, Drive::new(drive))
 }
 fn limiter() -> LimiterNode<f32> {
     LimiterNode::mono(LimiterControls {
-        threshold: Db(-12.0),
-        ceiling: Db(-1.0),
+        threshold: Db::new(-12.0),
+        ceiling: Db::new(-1.0),
         ..LimiterControls::DEFAULT
     })
 }
@@ -125,7 +125,7 @@ fn render_builder(g: GraphBuilder, frames: usize) -> Vec<Vec<f32>> {
     let mut r = g
         .renderer(Prepare::new(
             SampleRate::of(RATE),
-            MaxBlock::of(Samples(256)),
+            MaxBlock::of(Samples::new(256)),
         ))
         .expect("builds");
     r.render(frames)
@@ -214,7 +214,7 @@ fn unaligned_blocks_render_per_sample_units_identically() {
 fn a_param_write_lands_on_the_next_blocks_first_frame() {
     let mut s = scene(false);
     let before = render(&mut s.side, 2_048, 256);
-    s.session.set(s.drive.drive().to(Drive(6.0))).unwrap();
+    s.session.set(s.drive.drive().to(Drive::new(6.0))).unwrap();
     let _ = s.session.update();
     let after = render(&mut s.side, 2_048, 256);
 
@@ -295,7 +295,7 @@ fn a_crossfade_follows_its_law_to_the_new_filter() {
         .crossfade(
             s.filter,
             low_pass(300.0),
-            Seconds(0.005),
+            Seconds::new(0.005),
             FadeLaw::EqualAmplitude,
         )
         .expect("the crossfade starts");

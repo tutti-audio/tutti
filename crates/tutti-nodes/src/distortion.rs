@@ -232,7 +232,7 @@ impl<F: Float + Lerp> Oversampled<F> {
         let mut start = 0;
         while width > 0 && start < frames {
             let end = (start + self.max_block).min(frames);
-            let span = Samples(start)..Samples(end);
+            let span = Samples::new(start)..Samples::new(end);
             for (c, state) in self.channels.iter_mut().enumerate().take(width) {
                 state.upsample(input.plane(c).slice(span.clone()));
             }
@@ -360,7 +360,7 @@ impl<F: Float + Lerp> Kernel for DistortionKernel<F> {
         let cascade = self
             .oversampled
             .as_ref()
-            .map_or(Samples::ZERO, |o| Samples(o.plan.latency().get() + 1));
+            .map_or(Samples::ZERO, |o| Samples::new(o.plan.latency().get() + 1));
         match cascade + self.order().ring_out(self.factor()) {
             Samples::ZERO => Tail::None,
             frames => Tail::Finite(frames),
@@ -677,19 +677,19 @@ mod tests {
                 ShapeKind::HardClip,
                 Antialiasing::FirstOrder,
                 1,
-                Tail::Finite(Samples(1)),
+                Tail::Finite(Samples::new(1)),
             ),
             (
                 ShapeKind::HardClip,
                 Antialiasing::SecondOrder,
                 1,
-                Tail::Finite(Samples(2)),
+                Tail::Finite(Samples::new(2)),
             ),
             (
                 ShapeKind::Tanh,
                 Antialiasing::SecondOrder,
                 1,
-                Tail::Finite(Samples(1)),
+                Tail::Finite(Samples::new(1)),
             ),
         ] {
             let shape = node(kind, order).shape();
@@ -711,7 +711,7 @@ mod tests {
         );
         assert_eq!(
             both.shape().tail,
-            Tail::Finite(Samples(
+            Tail::Finite(Samples::new(
                 match plain.shape().tail {
                     Tail::Finite(t) => t.get(),
                     other => panic!("{other:?}"),
@@ -812,7 +812,7 @@ mod tests {
         let render = |order: Antialiasing| {
             let mut k = DistortionKernel::<f64>::new(ShapeKind::Softsign, BusTopology::MONO);
             k.antialiasing = order;
-            k.prepare(RATE, MaxBlock::of(Samples(len)));
+            k.prepare(RATE, MaxBlock::of(Samples::new(len)));
             drive_kernel(&mut k, &[(0, controls)], std::slice::from_ref(&x)).remove(0)
         };
         let want: Vec<f64> = x.iter().map(|x| h * x / (1.0 + (h * x).abs())).collect();

@@ -98,7 +98,7 @@ impl VirtualSpec {
 /// The platform's side of a [`VirtualSource`].
 pub(crate) trait SourceBackend: Send + Sync {
     /// Publishes one UMP message to the endpoint's subscribers.
-    fn send(&self, words: &[u32]) -> Result<()>;
+    fn send(&self, ump: &Ump) -> Result<()>;
 }
 
 /// How a source brings a message to its protocol.
@@ -184,7 +184,7 @@ impl VirtualSource {
                 // A packet no message is defined for, and any that is not MIDI 2.0
                 // voice, is forwarded as it is.
                 let Ok(message @ Message::Midi2(..)) = ump.decode() else {
-                    return self.backend.send(ump.words());
+                    return self.backend.send(&ump);
                 };
                 // The packets go in order under the lock: the narrower assumes
                 // that what it emitted was sent before the next message.
@@ -192,7 +192,7 @@ impl VirtualSource {
                 let mut sent = Ok(());
                 let count = narrow_voice(&mut narrower, message, |packet| {
                     if sent.is_ok() {
-                        sent = self.backend.send(packet.words());
+                        sent = self.backend.send(&packet);
                     }
                 });
                 if count == 0 {
@@ -212,7 +212,7 @@ impl VirtualSource {
                 }
             }
         };
-        self.backend.send(ump.words())
+        self.backend.send(&ump)
     }
 
     /// The endpoint's name.
@@ -299,13 +299,11 @@ mod tests {
     }
 
     impl SourceBackend for Recorder {
-        fn send(&self, words: &[u32]) -> Result<()> {
+        fn send(&self, ump: &Ump) -> Result<()> {
             if self.calls.fetch_add(1, Ordering::SeqCst) == self.fail_at {
                 return Err(MidiHardwareError::Unsupported("recorder"));
             }
-            let mut ump = [0u32; 4];
-            ump[..words.len()].copy_from_slice(words);
-            self.sent.lock().unwrap().push(Ump(ump));
+            self.sent.lock().unwrap().push(*ump);
             Ok(())
         }
     }

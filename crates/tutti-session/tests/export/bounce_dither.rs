@@ -34,7 +34,7 @@ fn bounced(
     let dir = tempfile::tempdir().expect("dir");
     let path = dir.path().join("out.wav");
     let bounce = Bounce::project()
-        .range(Range::Seconds(Seconds(0.0), Seconds(0.1)))
+        .range(Range::Seconds(Seconds::new(0.0), Seconds::new(0.1)))
         .master(&path, Format::Wav(Pcm::Int16))
         .tail(tutti_session::BounceTail::None);
     session.bounce(configure(bounce)).expect("renders");

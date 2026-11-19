@@ -1,8 +1,6 @@
 //! The matched bell: a peaking equalizer whose digital magnitude is the analog one at DC,
 //! at the center and at Nyquist.
 
-use core::f64::consts::TAU;
-
 use tutti_units::{Amplitude, Db, Hz, Q, SampleRate, Seconds};
 
 use super::MAX_TAIL_FRAMES;
@@ -107,7 +105,7 @@ impl MatchedBell {
         let fc = check_cutoff(center, rate)?;
         let q = self.checked_q()?;
         let db = check_gain(self.gain)?;
-        let boost = matched(fc, q, Db(db.get().abs()), rate);
+        let boost = matched(fc, q, Db::new(db.get().abs()), rate);
         Ok(if db.get() < 0.0 {
             inverse(boost)
         } else {
@@ -204,9 +202,9 @@ fn inverse(b: Biquad) -> Biquad {
 /// difference and `c0 c2 = -C2 / 4`; `c0` is the larger root, which puts the zeros inside
 /// the circle.
 fn matched(fc: Hz, q: Q, db: Db, rate: SampleRate) -> Biquad {
+    let w0 = fc.angle_per_frame(rate).get();
     let (fc, q, fs) = (fc.get(), q.get(), rate.get());
     let a = gain_root(db);
-    let w0 = TAU * fc / fs;
     let zeta = 1.0 / (2.0 * a * q);
     let decay = libm::exp(-zeta * w0);
     let shape = if zeta < 1.0 {

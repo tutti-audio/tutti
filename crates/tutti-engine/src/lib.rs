@@ -85,7 +85,7 @@
 //!
 //! // The editor is the control thread's half of the graph; the executor goes to
 //! // the engine. Every edit reaches it through a `commit`.
-//! let (mut editor, executor) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(256))));
+//! let (mut editor, executor) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(256))));
 //!
 //! // Every insert says whether the node forks (for an export): `Beats` reads
 //! // only its block's `Env`, so a clone of it is a fork.
@@ -104,7 +104,7 @@
 //! transport.settings().set_tempo(Bpm::of(90.0));
 //! transport
 //!     .motion()
-//!     .try_send(MotionEvent::play_from(Beat(8.0)))
+//!     .try_send(MotionEvent::play_from(Beat::new(8.0)))
 //!     .expect("the motion queue has room at startup");
 //!
 //! let mut block = vec![0.0f32; 256 * 2];
@@ -114,7 +114,7 @@
 //! // playhead on by 256 frames at 90 BPM.
 //! assert_eq!((block[0], block[1]), (8.0, 0.0));
 //! assert!(transport.is_rolling());
-//! assert!(transport.beat() > Beat(8.0));
+//! assert!(transport.beat() > Beat::new(8.0));
 //! ```
 #![forbid(unsafe_code)]
 #![cfg_attr(docsrs, feature(doc_cfg))]

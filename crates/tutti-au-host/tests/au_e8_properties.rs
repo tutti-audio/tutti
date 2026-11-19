@@ -82,16 +82,17 @@ fn a_presentation_latency_write_arrives_with_its_seconds_intact() {
     // Not a round number, and not representable exactly in binary — so a value
     // that survived a detour through samples-and-back, or through an f32, lands
     // somewhere else.
-    let written = Seconds(0.031_25 + 1.0 / 3.0);
+    let written = Seconds::new(0.031_25 + 1.0 / 3.0);
     au.set_presentation_latency(BusDirection::Output, 0, written)
         .expect("the probe implements PresentationLatency");
 
     let seen = last_presentation_latency(&au, Scope::OUTPUT.raw(), 0)
         .expect("the probe recorded a write at output/0");
     assert_eq!(
-        seen, written.0,
+        seen,
+        written.get(),
         "the AU received {seen} s, host wrote {} s",
-        written.0
+        written.get()
     );
 }
 
@@ -107,9 +108,9 @@ fn a_presentation_latency_write_arrives_with_its_seconds_intact() {
 fn presentation_latency_is_recorded_per_bus_not_per_unit() {
     let au = Misbehaviour::None.open_initialized(RATE, BLOCK);
 
-    let out0 = Seconds(0.010);
-    let out1 = Seconds(0.020);
-    let in0 = Seconds(0.005);
+    let out0 = Seconds::new(0.010);
+    let out1 = Seconds::new(0.020);
+    let in0 = Seconds::new(0.005);
     au.set_presentation_latency(BusDirection::Output, 0, out0)
         .expect("probe accepts output/0");
     au.set_presentation_latency(BusDirection::Output, 1, out1)
@@ -150,9 +151,9 @@ fn presentation_latency_is_recorded_per_bus_not_per_unit() {
 fn a_zero_presentation_latency_is_still_written() {
     let au = Misbehaviour::None.open_initialized(RATE, BLOCK);
 
-    au.set_presentation_latency(BusDirection::Output, 0, Seconds(0.5))
+    au.set_presentation_latency(BusDirection::Output, 0, Seconds::new(0.5))
         .expect("probe accepts the first write");
-    au.set_presentation_latency(BusDirection::Output, 0, Seconds(0.0))
+    au.set_presentation_latency(BusDirection::Output, 0, Seconds::new(0.0))
         .expect("probe accepts the zero write");
 
     assert_eq!(
@@ -175,7 +176,7 @@ fn every_corpus_unit_refuses_presentation_latency_and_the_refusal_is_reported() 
     for unit in corpus::EFFECTS.iter().chain(corpus::INSTRUMENTS) {
         let au = unit.open(RATE, BLOCK);
         let err = au
-            .set_presentation_latency(BusDirection::Output, 0, Seconds(0.01))
+            .set_presentation_latency(BusDirection::Output, 0, Seconds::new(0.01))
             .expect_err(&format!(
                 "{} accepted PresentationLatency — the corpus measurement in this \
                  module's docs (0 of 39) no longer holds and must be re-taken",

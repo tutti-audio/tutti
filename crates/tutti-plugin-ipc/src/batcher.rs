@@ -787,7 +787,7 @@ impl Batcher {
         io: &mut InputOutput<'_, S>,
         host: &mut impl Chunks,
     ) {
-        let frames = io.frames().0;
+        let frames = io.frames().get();
         let (input, mut output) = io.split();
         let chunk = self.chunk;
         let mut i = 0;
@@ -799,7 +799,7 @@ impl Batcher {
             }
             let n = (chunk - self.pos).min(frames - i);
             let (at, to) = (self.pos, self.pos + n);
-            let call = Samples(i)..Samples(i + n);
+            let call = Samples::new(i)..Samples(i + n);
             host.take(i, n, at);
             self.wire.play(&mut output, at, to, &call);
             let first = self.reply.partition_point(|e| (e.offset as usize) < at);
@@ -931,7 +931,7 @@ mod tests {
 
         let src = [FINE; 8];
         let chans = [&src[..], &src[..]];
-        let call = Samples(0)..Samples(8);
+        let call = Samples::new(0)..Samples(8);
         rows.take(&Planes::new(&chans).unwrap(), 0, 8, &call);
         assert!(rows.stage(&mut writer, 1, 8));
         writer.publish(1);
@@ -965,7 +965,7 @@ mod tests {
 
         let src = [FINE, -FINE, 0.1, 0.3];
         let chans = [&src[..]];
-        let call = Samples(0)..Samples(4);
+        let call = Samples::new(0)..Samples(4);
         rows.take(&Planes::new(&chans).unwrap(), 0, 4, &call);
         assert!(rows.stage(&mut writer, 1, 4));
         writer.publish(1);
@@ -1126,22 +1126,26 @@ mod tests {
             slab(MAX_CHUNK),
             response_ring().1,
         );
-        b.prepare(Samples(1024), Some(Samples(480)));
-        assert_eq!(Samples(b.chunk()), Samples(480));
-        b.prepare(Samples(64), Some(Samples(2048)));
+        b.prepare(Samples::new(1024), Some(Samples::new(480)));
+        assert_eq!(Samples::new(b.chunk()), Samples::new(480));
+        b.prepare(Samples::new(64), Some(Samples::new(2048)));
         assert_eq!(
-            Samples(b.chunk()),
-            Samples(2048),
+            Samples::new(b.chunk()),
+            Samples::new(2048),
             "the quantum, not MaxBlock"
         );
-        b.prepare(Samples(1024), None);
-        assert_eq!(Samples(b.chunk()), Samples(1024), "no quantum: MaxBlock");
-        b.prepare(Samples(32), None);
-        assert_eq!(Samples(b.chunk()), Samples(32));
+        b.prepare(Samples::new(1024), None);
+        assert_eq!(
+            Samples::new(b.chunk()),
+            Samples::new(1024),
+            "no quantum: MaxBlock"
+        );
+        b.prepare(Samples::new(32), None);
+        assert_eq!(Samples::new(b.chunk()), Samples::new(32));
 
         let mut small_slab = Batcher::new(2, 2, FloatWidth::F32, 16, slab(16), response_ring().1);
-        small_slab.prepare(Samples(1024), None);
-        assert_eq!(Samples(small_slab.chunk()), Samples(16));
+        small_slab.prepare(Samples::new(1024), None);
+        assert_eq!(Samples::new(small_slab.chunk()), Samples::new(16));
     }
 
     /// A re-prepare starts the pipeline over: the chunk in flight was
@@ -1159,7 +1163,7 @@ mod tests {
         );
         b.next_seq = 7;
         b.expect_seq = Some(6);
-        b.prepare(Samples(128), None);
+        b.prepare(Samples::new(128), None);
         assert_eq!(b.expect_seq, None);
         assert_eq!(b.next_seq, 7);
     }

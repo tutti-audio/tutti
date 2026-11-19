@@ -58,8 +58,11 @@ fn sample_position_advances_by_a_frame_count_without_losing_the_fraction() {
     // Exactness is the whole point: an interpolating reader sits between two
     // integer indices, and advancing must not quietly seat it on one.
     let entry = SamplePosition(1000.5);
-    assert_eq!(entry.advanced_by(Samples(8192)), SamplePosition(9192.5));
-    assert_eq!(entry.advanced_by(Samples(0)), entry);
+    assert_eq!(
+        entry.advanced_by(Samples::new(8192)),
+        SamplePosition(9192.5)
+    );
+    assert_eq!(entry.advanced_by(Samples::new(0)), entry);
 }
 
 #[test]
@@ -69,8 +72,8 @@ fn sample_position_to_samples_names_its_rounding() {
     // sized by `floor` under-loads and the reader interpolates against data
     // it does not have.
     let mid_frame = SamplePosition(9192.5);
-    assert_eq!(mid_frame.to_samples_floor(), Samples(9192));
-    assert_eq!(mid_frame.to_samples_ceil(), Samples(9193));
+    assert_eq!(mid_frame.to_samples_floor(), Samples::new(9192));
+    assert_eq!(mid_frame.to_samples_ceil(), Samples::new(9193));
 
     // Exact positions agree — the rounding only bites on the fraction.
     let exact = SamplePosition(9192.0);
@@ -101,22 +104,31 @@ fn sample_position_survives_a_long_file() {
     // snap, and neither must a preload window computed against one.
     let hour_in = SamplePosition(48_000.0 * 3600.0);
     assert_eq!(
-        hour_in.advanced_by(Samples(8192)).to_samples_floor(),
-        Samples(172_800_000 + 8192)
+        hour_in.advanced_by(Samples::new(8192)).to_samples_floor(),
+        Samples::new(172_800_000 + 8192)
     );
 }
 
 #[test]
 fn beat_duration_to_seconds_is_the_readout_conversion() {
     // At 120 BPM a beat is half a second.
-    assert_eq!(BeatDuration(1.0).to_seconds(Bpm::of(120.0)), Seconds(0.5));
-    assert_eq!(BeatDuration(4.0).to_seconds(Bpm::of(120.0)), Seconds(2.0));
-    assert_eq!(BeatDuration(1.0).to_seconds(Bpm::of(60.0)), Seconds(1.0));
+    assert_eq!(
+        BeatDuration(1.0).to_seconds(Bpm::of(120.0)),
+        Seconds::new(0.5)
+    );
+    assert_eq!(
+        BeatDuration(4.0).to_seconds(Bpm::of(120.0)),
+        Seconds::new(2.0)
+    );
+    assert_eq!(
+        BeatDuration(1.0).to_seconds(Bpm::of(60.0)),
+        Seconds::new(1.0)
+    );
     // The slowest tempo a `Bpm` holds (zero is not one) yields zero rather
     // than inf.
     assert_eq!(
         BeatDuration(1.0).to_seconds(Bpm::of(f64::from_bits(1))),
-        Seconds(0.0)
+        Seconds::new(0.0)
     );
 }
 
@@ -261,16 +273,16 @@ fn read_rate_composes_varispeed_with_conversion() {
 fn read_rate_advances_a_position_by_a_sample_count() {
     // Half speed: 512 output samples consume 256 source samples.
     let half = PlaybackRate::new(0.5).read_rate(SrcRatio::UNITY);
-    assert_eq!(half.advance(Samples(512)), SamplePosition(256.0));
+    assert_eq!(half.advance(Samples::new(512)), SamplePosition(256.0));
 
     // Unity is the identity, exactly.
     assert_eq!(
-        ReadRate::UNITY.advance(Samples(1024)),
+        ReadRate::UNITY.advance(Samples::new(1024)),
         SamplePosition(1024.0)
     );
 
     // Zero output samples advance nowhere, whatever the rate.
-    assert_eq!(half.advance(Samples(0)), SamplePosition(0.0));
+    assert_eq!(half.advance(Samples::new(0)), SamplePosition(0.0));
 }
 
 /// `then` composes two read rates applied in series, and composition must be
@@ -296,7 +308,7 @@ fn read_rates_compose_in_series() {
     let stretch_half = ReadRate(0.5);
     assert_eq!(half.then(stretch_half), ReadRate(0.25));
     assert_eq!(
-        half.then(stretch_half).advance(Samples(1024)),
+        half.then(stretch_half).advance(Samples::new(1024)),
         SamplePosition(256.0)
     );
 }
@@ -339,12 +351,12 @@ fn a_converted_read_position_does_not_drift_over_an_hour() {
         let mut left = n;
         while left > 0 {
             let k = left.min(block);
-            pos = SamplePosition(pos.get() + rate.advance(Samples(k as _)).get());
+            pos = SamplePosition(pos.get() + rate.advance(Samples::new(k as _)).get());
             left -= k;
         }
         let exact = n as f64 * file / session;
         // The ratio alone: one multiply, so only the ratio's own error shows.
-        let once = rate.advance(Samples(n as _)).get();
+        let once = rate.advance(Samples::new(n as _)).get();
         assert!(
             (once - exact).abs() < 1e-6,
             "{file} -> {session}: {once} vs {exact}"
@@ -397,5 +409,29 @@ fn a_tempos_beat_period_is_sixty_over_its_bpm() {
             Some(tempo),
             "{bpm}"
         );
+    }
+}
+
+/// **The beats over a span are the tempo times the span over 60.**
+///
+/// 2 s at 90 bpm is 180 / 60 = 3 beats, and one beat period at any tempo is
+/// one beat; each product here is exact in binary.
+#[test]
+fn the_beats_in_a_span_are_bpm_times_seconds_over_sixty() {
+    assert_eq!(
+        Bpm::of(90.0).beats_in(Seconds::new(2.0)),
+        BeatDuration::new(3.0)
+    );
+    assert_eq!(
+        Bpm::of(120.0).beats_in(Seconds::new(0.25)),
+        BeatDuration::new(0.5)
+    );
+    assert_eq!(
+        Bpm::of(120.0).beats_in(Seconds::new(-1.0)),
+        BeatDuration::new(-2.0)
+    );
+    for tempo in [30.0, 60.0, 120.0, 240.0] {
+        let tempo = Bpm::of(tempo);
+        assert_eq!(tempo.beats_in(tempo.beat_period()), BeatDuration::new(1.0));
     }
 }

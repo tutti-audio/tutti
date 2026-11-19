@@ -145,7 +145,7 @@ fn graph_of(client: PluginClient) -> (Renderer, tutti_plugin_host::PluginControl
     let renderer = g
         .renderer(Prepare::new(
             SampleRate::of(SAMPLE_RATE),
-            MaxBlock::of(Samples(BLOCK)),
+            MaxBlock::of(Samples::new(BLOCK)),
         ))
         .expect("a one-plugin graph compiles");
     (renderer, controls)
@@ -501,7 +501,7 @@ fn feed(
     unit: &mut tutti_graph::contract::Direct<dyn tutti_graph::Node>,
     kinds: &[tutti_graph::EventKind],
 ) {
-    let at = tutti_graph::Offset::of(Samples(0), Samples(BLOCK / 2));
+    let at = tutti_graph::Offset::of(Samples::new(0), Samples::new(BLOCK / 2));
     let events: Vec<tutti_graph::Event> = kinds
         .iter()
         .map(|kind| match kind {
@@ -560,7 +560,7 @@ fn a_reprepare_drops_the_pending_midi_and_keeps_its_sysex_cut() {
     // The same rate, another callback size.
     unit.node.prepare(&Prepare::new(
         SampleRate::of(SAMPLE_RATE),
-        MaxBlock::of(Samples(BLOCK * 2)),
+        MaxBlock::of(Samples::new(BLOCK * 2)),
     ));
 
     assert_eq!(controls.dropped_midi_in(), 4);

@@ -170,7 +170,7 @@ fn phase_advances_backwards_without_escaping_the_cycle() {
 fn phase_increment_derives_from_frequency_and_rate() {
     // One cycle per second at 100 Hz sampling = 1/100 turn per sample.
     assert_eq!(
-        PhaseIncrement::per_sample(Hz(1.0), SampleRate::of(100.0)),
+        PhaseIncrement::per_sample(Hz::new(1.0), SampleRate::of(100.0)),
         PhaseIncrement(0.01)
     );
 }
@@ -384,7 +384,7 @@ fn the_wraps_and_the_phase_step_narrow_to_the_f32_figures() {
         0.716_814_7,
         1
     ));
-    let step = PhaseIncrement::per_sample(Hz(1000.0), SampleRate::SR_48K);
+    let step = PhaseIncrement::per_sample(Hz::new(1000.0), SampleRate::SR_48K);
     assert!(narrows_to(step.get(), 1.0 / 48.0, 1));
 }
 
@@ -452,7 +452,7 @@ fn a_non_finite_increment_is_a_held_phase() {
 #[test]
 fn a_slow_lfo_step_is_exact_to_one_count_and_a_period_returns_to_the_start() {
     // 0.01 Hz at 192 kHz: a period is 19.2e6 samples.
-    let inc = PhaseIncrement::per_sample(Hz(0.01), SampleRate::new(192_000.0).unwrap());
+    let inc = PhaseIncrement::per_sample(Hz::new(0.01), SampleRate::new(192_000.0).unwrap());
     let step = PhaseStep::from(inc);
     // Within one count (2^-64 cycles, truncation) of the exact rational 1 / 19.2e6 of a cycle.
     let exact = CYCLE / 19_200_000.0;

@@ -15,50 +15,61 @@ const THREE: ChannelLayout = ChannelLayout::from_count(3);
 fn a_get_out_of_bounds_is_none_and_one_in_bounds_is_the_element() {
     let data = [1i16, 2, 3, 4, 5, 6];
     let mono = Mono::new(&data);
-    assert_eq!(mono.get_frame(Samples(5)), Some(&6));
-    assert_eq!(mono.get_frame(Samples(6)), None);
-    assert!(mono.get_slice(Samples(2)..Samples(6)).is_some());
-    assert!(mono.get_slice(Samples(2)..Samples(7)).is_none());
-    assert!(mono.get_slice(Samples(3)..Samples(2)).is_none(), "inverted");
+    assert_eq!(mono.get_frame(Samples::new(5)), Some(&6));
+    assert_eq!(mono.get_frame(Samples::new(6)), None);
+    assert!(mono.get_slice(Samples::new(2)..Samples::new(6)).is_some());
+    assert!(mono.get_slice(Samples::new(2)..Samples::new(7)).is_none());
+    assert!(
+        mono.get_slice(Samples::new(3)..Samples::new(2)).is_none(),
+        "inverted"
+    );
 
     let buf = Interleaved::new(&data, THREE).unwrap();
-    assert_eq!(buf.get_frame(Samples(1)), Some(&[4, 5, 6][..]));
-    assert_eq!(buf.get_frame(Samples(2)), None);
-    assert_eq!(buf.get_frame(Samples(usize::MAX)), None, "no overflow");
+    assert_eq!(buf.get_frame(Samples::new(1)), Some(&[4, 5, 6][..]));
+    assert_eq!(buf.get_frame(Samples::new(2)), None);
+    assert_eq!(buf.get_frame(Samples::new(usize::MAX)), None, "no overflow");
     assert_eq!(
-        buf.get_slice(Samples(1)..Samples(2)).unwrap().samples(),
+        buf.get_slice(Samples::new(1)..Samples::new(2))
+            .unwrap()
+            .samples(),
         &[4, 5, 6]
     );
-    assert!(buf.get_slice(Samples(0)..Samples(3)).is_none());
+    assert!(buf.get_slice(Samples::new(0)..Samples::new(3)).is_none());
 
     let (l, r) = ([1i16, 2], [3i16, 4]);
     let slices = [&l[..], &r[..]];
     let planes = Planes::new(&slices).unwrap();
     assert_eq!(planes.get_plane(1).unwrap().samples(), &[3, 4]);
     assert!(planes.get_plane(2).is_none());
-    assert!(planes.get_slice(Samples(0)..Samples(3)).is_none());
+    assert!(planes.get_slice(Samples::new(0)..Samples::new(3)).is_none());
     let pair = StereoPlanes::new(&l, &r).unwrap();
     assert_eq!(pair.get_plane(1).unwrap().samples(), &[3, 4]);
     assert!(pair.get_plane(2).is_none());
-    assert!(pair.get_slice(Samples(1)..Samples(3)).is_none());
+    assert!(pair.get_slice(Samples::new(1)..Samples::new(3)).is_none());
 }
 
 #[test]
 fn a_get_out_of_bounds_on_a_write_view_is_none() {
     let mut data = [0i16; 6];
     let mut mono = MonoMut::new(&mut data);
-    assert!(mono.get_frame_mut(Samples(5)).is_some());
-    assert!(mono.get_frame_mut(Samples(6)).is_none());
-    assert_eq!(mono.get_frame(Samples(6)), None);
-    assert!(mono.get_slice_mut(Samples(0)..Samples(7)).is_none());
-    assert!(mono.get_slice(Samples(0)..Samples(7)).is_none());
+    assert!(mono.get_frame_mut(Samples::new(5)).is_some());
+    assert!(mono.get_frame_mut(Samples::new(6)).is_none());
+    assert_eq!(mono.get_frame(Samples::new(6)), None);
+    assert!(
+        mono.get_slice_mut(Samples::new(0)..Samples::new(7))
+            .is_none()
+    );
+    assert!(mono.get_slice(Samples::new(0)..Samples::new(7)).is_none());
 
     let mut buf = InterleavedMut::new(&mut data, THREE).unwrap();
-    assert!(buf.get_frame_mut(Samples(1)).is_some());
-    assert!(buf.get_frame_mut(Samples(2)).is_none());
-    assert!(buf.get_frame(Samples(2)).is_none());
-    assert!(buf.get_slice_mut(Samples(1)..Samples(3)).is_none());
-    assert!(buf.get_slice(Samples(1)..Samples(3)).is_none());
+    assert!(buf.get_frame_mut(Samples::new(1)).is_some());
+    assert!(buf.get_frame_mut(Samples::new(2)).is_none());
+    assert!(buf.get_frame(Samples::new(2)).is_none());
+    assert!(
+        buf.get_slice_mut(Samples::new(1)..Samples::new(3))
+            .is_none()
+    );
+    assert!(buf.get_slice(Samples::new(1)..Samples::new(3)).is_none());
 
     let (mut l, mut r) = ([0i16; 2], [0i16; 2]);
     let mut slices = [&mut l[..], &mut r[..]];
@@ -67,14 +78,18 @@ fn a_get_out_of_bounds_on_a_write_view_is_none() {
     assert!(planes.get_plane(2).is_none());
     assert!(planes.get_plane_mut(1).is_some());
     assert!(planes.get_plane_mut(2).is_none());
-    assert!(planes.get_slice(Samples(0)..Samples(3)).is_none());
-    assert!(planes.get_slice_mut(Samples(0)..Samples(3)).is_none());
+    assert!(planes.get_slice(Samples::new(0)..Samples::new(3)).is_none());
+    assert!(
+        planes
+            .get_slice_mut(Samples::new(0)..Samples::new(3))
+            .is_none()
+    );
     assert_eq!(
         planes
-            .get_slice_mut(Samples(1)..Samples(2))
+            .get_slice_mut(Samples::new(1)..Samples::new(2))
             .unwrap()
             .frames(),
-        Samples(1)
+        Samples::new(1)
     );
 }
 
@@ -82,7 +97,7 @@ fn a_get_out_of_bounds_on_a_write_view_is_none() {
 #[should_panic(expected = "slice 2..9 is out of bounds for 4 frames")]
 fn a_mono_slice_panic_names_the_range_in_frames() {
     let data = [0.0f32; 4];
-    let _ = Mono::new(&data).slice(Samples(2)..Samples(9));
+    let _ = Mono::new(&data).slice(Samples::new(2)..Samples::new(9));
 }
 
 #[test]
@@ -91,7 +106,7 @@ fn an_interleaved_slice_panic_names_the_range_in_frames_not_samples() {
     let data = [0.0f32; 8];
     let _ = Interleaved::new(&data, ChannelLayout::STEREO)
         .unwrap()
-        .slice(Samples(2)..Samples(9));
+        .slice(Samples::new(2)..Samples::new(9));
 }
 
 #[test]
@@ -100,7 +115,7 @@ fn a_planes_slice_panic_names_the_range_in_frames() {
     let (l, r) = ([0.0f32; 4], [0.0f32; 4]);
     let _ = Planes::new(&[&l, &r])
         .unwrap()
-        .slice(Samples(2)..Samples(9));
+        .slice(Samples::new(2)..Samples::new(9));
 }
 
 #[test]
@@ -109,7 +124,7 @@ fn a_split_past_the_end_panics_in_frames() {
     let data = [0.0f32; 8];
     let _ = Interleaved::new(&data, ChannelLayout::STEREO)
         .unwrap()
-        .split_at(Samples(5));
+        .split_at(Samples::new(5));
 }
 
 #[test]
@@ -118,7 +133,7 @@ fn an_interleaved_frame_past_the_end_panics() {
     let data = [0.0f32; 4];
     let _ = Interleaved::new(&data, ChannelLayout::STEREO)
         .unwrap()
-        .frame(Samples(2));
+        .frame(Samples::new(2));
 }
 
 #[test]
@@ -132,44 +147,44 @@ fn a_plane_past_the_last_panics() {
 fn every_view_splits_at_a_frame_into_two_that_cover_it() {
     let data = [1i16, 2, 3, 4, 5, 6];
 
-    let (a, b) = Mono::new(&data).split_at(Samples(2));
+    let (a, b) = Mono::new(&data).split_at(Samples::new(2));
     assert_eq!((a.samples(), b.samples()), (&data[..2], &data[2..]));
 
     let mut owned = data;
     let mut mono = MonoMut::new(&mut owned);
-    let (mut a, mut b) = mono.split_at_mut(Samples(4));
+    let (mut a, mut b) = mono.split_at_mut(Samples::new(4));
     a.samples_mut().fill(0);
     b.samples_mut().fill(9);
     assert_eq!(owned, [0, 0, 0, 0, 9, 9]);
 
     let buf = Interleaved::new(&data, THREE).unwrap();
-    let (a, b) = buf.split_at(Samples(1));
+    let (a, b) = buf.split_at(Samples::new(1));
     assert_eq!((a.samples(), b.samples()), (&data[..3], &data[3..]));
-    assert_eq!((a.layout(), b.frames()), (THREE, Samples(1)));
-    let (all, none) = buf.split_at(Samples(2));
-    assert_eq!((all.frames(), none.is_empty()), (Samples(2), true));
+    assert_eq!((a.layout(), b.frames()), (THREE, Samples::new(1)));
+    let (all, none) = buf.split_at(Samples::new(2));
+    assert_eq!((all.frames(), none.is_empty()), (Samples::new(2), true));
 
     let mut owned = data;
     let mut buf = InterleavedMut::new(&mut owned, THREE).unwrap();
-    let (mut a, mut b) = buf.split_at_mut(Samples(1));
+    let (mut a, mut b) = buf.split_at_mut(Samples::new(1));
     a.samples_mut().fill(0);
-    b.frame_mut(Samples(0)).fill(7);
+    b.frame_mut(Samples::new(0)).fill(7);
     assert_eq!(owned, [0, 0, 0, 7, 7, 7]);
 
     let (l, r) = ([1i16, 2, 3], [4i16, 5, 6]);
     let slices = [&l[..], &r[..]];
     let planes = Planes::new(&slices).unwrap();
-    let (a, b) = planes.split_at(Samples(1));
+    let (a, b) = planes.split_at(Samples::new(1));
     assert_eq!(
         (a.plane(1).samples(), b.plane(1).samples()),
         (&[4][..], &[5, 6][..])
     );
     assert_eq!(
         (a.layout(), b.frames()),
-        (ChannelLayout::STEREO, Samples(2))
+        (ChannelLayout::STEREO, Samples::new(2))
     );
 
-    let (a, b) = StereoPlanes::new(&l, &r).unwrap().split_at(Samples(2));
+    let (a, b) = StereoPlanes::new(&l, &r).unwrap().split_at(Samples::new(2));
     assert_eq!((a.left(), a.right()), (&[1, 2][..], &[4, 5][..]));
     assert_eq!((b.left(), b.right()), (&[3][..], &[6][..]));
 }
@@ -178,7 +193,7 @@ fn every_view_splits_at_a_frame_into_two_that_cover_it() {
 fn a_stereo_pair_slices_both_planes() {
     let (l, r) = ([1i16, 2, 3, 4], [5i16, 6, 7, 8]);
     let pair = StereoPlanes::new(&l, &r).unwrap();
-    let mid = pair.slice(Samples(1)..Samples(3));
+    let mid = pair.slice(Samples::new(1)..Samples::new(3));
     assert_eq!((mid.left(), mid.right()), (&[2, 3][..], &[6, 7][..]));
     assert_eq!(pair.channels(), 2);
     assert_eq!(pair.plane(0).samples(), &l);
@@ -219,7 +234,7 @@ fn the_named_iterators_know_their_length_and_run_from_either_end() {
     assert_eq!(planes.iter().nth(1).unwrap().samples(), &[3, 4]);
     assert_eq!(
         planes
-            .slice(Samples(1)..Samples(2))
+            .slice(Samples::new(1)..Samples::new(2))
             .iter()
             .next_back()
             .unwrap()
@@ -291,7 +306,7 @@ fn views_compare_the_frames_they_cover() {
     let long = [0.0f32, 1.0, 2.0, 3.0, 4.0];
     let short = [1.0f32, 2.0];
     assert_eq!(
-        Mono::new(&long).slice(Samples(1)..Samples(3)),
+        Mono::new(&long).slice(Samples::new(1)..Samples::new(3)),
         Mono::new(&short)
     );
     assert_ne!(Mono::new(&long), Mono::new(&short));
@@ -301,9 +316,13 @@ fn views_compare_the_frames_they_cover() {
     let a = [&la[..], &ra[..]];
     let b = [&lb[..], &rb[..]];
     let (a, b) = (Planes::new(&a).unwrap(), Planes::new(&b).unwrap());
-    assert_eq!(a.slice(Samples(1)..Samples(3)), b);
+    assert_eq!(a.slice(Samples::new(1)..Samples::new(3)), b);
     assert_ne!(a, b, "the whole of `a` is not `b`");
-    assert_ne!(a.slice(Samples(0)..Samples(2)), b, "another window of `a`");
+    assert_ne!(
+        a.slice(Samples::new(0)..Samples::new(2)),
+        b,
+        "another window of `a`"
+    );
 
     let vecs = vec![lb.to_vec(), rb.to_vec()];
     assert_eq!(
@@ -321,7 +340,7 @@ fn views_compare_the_frames_they_cover() {
     assert_eq!(
         Interleaved::new(&ia, st)
             .unwrap()
-            .slice(Samples(1)..Samples(2)),
+            .slice(Samples::new(1)..Samples::new(2)),
         Interleaved::new(&ib, st).unwrap()
     );
     assert_ne!(
@@ -332,7 +351,7 @@ fn views_compare_the_frames_they_cover() {
     assert_eq!(
         StereoPlanes::new(&la, &ra)
             .unwrap()
-            .slice(Samples(1)..Samples(3)),
+            .slice(Samples::new(1)..Samples::new(3)),
         StereoPlanes::new(&la[1..3], &ra[1..3]).unwrap()
     );
 }
@@ -342,10 +361,12 @@ fn planes_from_vecs_reads_the_tables_a_caller_holds() {
     let planes = vec![vec![1i16, 2, 3], vec![4, 5, 6]];
     let view = Planes::from_vecs(&planes).unwrap();
     assert_eq!(view.layout(), ChannelLayout::STEREO);
-    assert_eq!(view.frames(), Samples(3));
+    assert_eq!(view.frames(), Samples::new(3));
     assert_eq!(view.plane(1).samples(), &[4, 5, 6]);
     assert_eq!(
-        view.slice(Samples(1)..Samples(3)).plane(0).samples(),
+        view.slice(Samples::new(1)..Samples::new(3))
+            .plane(0)
+            .samples(),
         &[2, 3]
     );
 
@@ -359,8 +380,8 @@ fn planes_from_vecs_reads_the_tables_a_caller_holds() {
         Planes::from_vecs(&ragged).unwrap_err(),
         tutti_buffers::BufferError::RaggedPlane {
             plane: 1,
-            expected: Samples(3),
-            found: Samples(2)
+            expected: Samples::new(3),
+            found: Samples::new(2)
         }
     );
 }
@@ -371,8 +392,12 @@ fn planes_mut_from_vecs_writes_the_vecs_in_place_without_growing_them() {
     let capacity = planes[0].capacity();
     {
         let mut out = PlanesMut::from_vecs(&mut planes).unwrap();
-        assert_eq!(out.frames(), Samples(4));
-        for (c, mut plane) in out.slice_mut(Samples(1)..Samples(3)).iter_mut().enumerate() {
+        assert_eq!(out.frames(), Samples::new(4));
+        for (c, mut plane) in out
+            .slice_mut(Samples::new(1)..Samples::new(3))
+            .iter_mut()
+            .enumerate()
+        {
             plane.samples_mut().fill(c as i16 + 1);
         }
         out.plane_mut(1).samples_mut()[3] = 9;
@@ -436,9 +461,9 @@ fn a_write_view_converts_into_its_read_view_and_lends_its_samples() {
     let buf: Interleaved<'_, i16> = InterleavedMut::new(&mut data, ChannelLayout::STEREO)
         .unwrap()
         .into();
-    assert_eq!(buf.frames(), Samples(2));
-    assert_eq!(Mono::from(&data[..2]).frames(), Samples(2));
-    assert_eq!(MonoMut::from(&mut data[..3]).frames(), Samples(3));
+    assert_eq!(buf.frames(), Samples::new(2));
+    assert_eq!(Mono::from(&data[..2]).frames(), Samples::new(2));
+    assert_eq!(MonoMut::from(&mut data[..3]).frames(), Samples::new(3));
 
     let (mut l, mut r) = ([1i16, 2], [3i16, 4]);
     let mut slices = [&mut l[..], &mut r[..]];
@@ -473,11 +498,14 @@ fn a_read_view_is_copy_and_a_write_view_reborrows() {
     let data = [1.0f32, 2.0];
     let mono = Mono::new(&data);
     let again = mono;
-    assert_eq!((mono.frames(), again.frames()), (Samples(2), Samples(2)));
+    assert_eq!(
+        (mono.frames(), again.frames()),
+        (Samples::new(2), Samples::new(2))
+    );
     let mut owned = [0.0f32; 4];
     let mut buf = InterleavedMut::new(&mut owned, ChannelLayout::STEREO).unwrap();
-    buf.reborrow().frame_mut(Samples(0)).fill(1.0);
-    buf.reborrow().frame_mut(Samples(1)).fill(2.0);
+    buf.reborrow().frame_mut(Samples::new(0)).fill(1.0);
+    buf.reborrow().frame_mut(Samples::new(1)).fill(2.0);
     assert_eq!(buf.as_interleaved().samples(), &[1.0, 1.0, 2.0, 2.0]);
 }
 
@@ -492,9 +520,9 @@ fn the_accessors_are_const() {
         Ok(pair) => Some(pair),
         Err(_) => None,
     };
-    assert_eq!(MONO, Samples(6));
+    assert_eq!(MONO, Samples::new(6));
     assert_eq!(LAYOUT, ChannelLayout::MONO);
-    assert_eq!(PAIR.map(|p| p.frames()), Some(Samples(6)));
+    assert_eq!(PAIR.map(|p| p.frames()), Some(Samples::new(6)));
 }
 
 fn assert_send_sync<T: Send + Sync>() {}
@@ -524,7 +552,7 @@ fn silence_leaves_every_sample_of_every_plane_zero_and_the_frame_count_unchanged
     let mut planes = [&mut l[..], &mut r[..]];
     let mut out = PlanesMut::new(&mut planes).expect("two planes");
     out.silence();
-    assert_eq!(out.frames(), Samples(4));
+    assert_eq!(out.frames(), Samples::new(4));
     assert_eq!(out.channels(), 2);
     assert_eq!((l, r), ([0.0; 4], [0.0; 4]));
 }
@@ -535,7 +563,7 @@ fn silence_of_a_narrowed_view_spares_the_frames_outside_it() {
     let (mut l, mut r) = ([1.0f32; 4], [2.0f32; 4]);
     let mut planes = [&mut l[..], &mut r[..]];
     let mut out = PlanesMut::new(&mut planes).expect("two planes");
-    out.slice_mut(Samples(1)..Samples(3)).silence();
+    out.slice_mut(Samples::new(1)..Samples::new(3)).silence();
     assert_eq!((l, r), ([1.0, 0.0, 0.0, 1.0], [2.0, 0.0, 0.0, 2.0]));
 }
 
@@ -548,7 +576,7 @@ fn a_block_by_width_is_its_own_width_and_writes_through() {
     let mut wide = [0.0f64; 4];
     let mut planes = [&mut wide[..]];
     let mut block = InputOutput::new(
-        Samples(4),
+        Samples::new(4),
         Planes::default(),
         PlanesMut::new(&mut planes).expect("one plane"),
     )
@@ -562,7 +590,7 @@ fn a_block_by_width_is_its_own_width_and_writes_through() {
     let mut narrow = [0.0f32; 4];
     let mut planes = [&mut narrow[..]];
     let mut block = InputOutput::new(
-        Samples(4),
+        Samples::new(4),
         Planes::default(),
         PlanesMut::new(&mut planes).expect("one plane"),
     )

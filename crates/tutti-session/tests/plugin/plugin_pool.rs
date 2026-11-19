@@ -98,7 +98,7 @@ fn layout(mode: &str) {
 fn session_with(recovery: Option<RecoveryPolicy>) -> Session {
     servers();
     Session::builder()
-        .max_block(MaxBlock::of(Samples(BLOCK)))
+        .max_block(MaxBlock::of(Samples::new(BLOCK)))
         .plugin_recovery(recovery)
         .build()
         .expect("an offline session builds")
@@ -744,7 +744,7 @@ fn detached() -> DetachedSession {
 fn detached_with(recovery: Option<RecoveryPolicy>) -> DetachedSession {
     servers();
     Session::builder()
-        .max_block(MaxBlock::of(Samples(BLOCK)))
+        .max_block(MaxBlock::of(Samples::new(BLOCK)))
         .plugin_recovery(recovery)
         .build_detached(SampleRate::SR_48K)
         .expect("a detached session builds")

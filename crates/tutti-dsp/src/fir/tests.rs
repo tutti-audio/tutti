@@ -9,7 +9,7 @@ fn rate() -> SampleRate {
 }
 
 fn hz(v: f64) -> Hz {
-    Hz(v)
+    Hz::new(v)
 }
 
 fn taps(fir: &Fir) -> Vec<f64> {
@@ -85,11 +85,11 @@ fn beta_formula(a: f64) -> f64 {
 #[test]
 fn kaiser_beta_matches_the_published_formula() {
     for a in [20.0f64, 21.0, 40.0, 50.0, 60.0, 80.0] {
-        let got = kaiser_beta(Db(a));
+        let got = kaiser_beta(Db::new(a));
         let want = beta_formula(a);
         assert!((got - want).abs() < 1e-12, "A = {a}: {got} vs {want}");
     }
-    assert_eq!(kaiser_beta(Db(20.0)), 0.0);
+    assert_eq!(kaiser_beta(Db::new(20.0)), 0.0);
 }
 
 #[test]
@@ -108,7 +108,7 @@ fn kaiser_order_matches_the_published_formula_at_a_transition_of_005_pi() {
 #[test]
 fn kaiser_order_and_beta_reproduce_the_scipy_example() {
     assert_eq!(kaiser_order(65.0, 0.048 * PI), 167);
-    assert!((kaiser_beta(Db(65.0)) - 6.20426).abs() < 1e-5);
+    assert!((kaiser_beta(Db::new(65.0)) - 6.20426).abs() < 1e-5);
 }
 
 #[test]
@@ -119,7 +119,7 @@ fn the_length_is_odd_and_follows_the_estimate() {
         },
         hz(1_000.0),
     )
-    .attenuation(Db(65.0))
+    .attenuation(Db::new(65.0))
     .design(rate())
     .unwrap();
     let estimate = ((65.0 - 7.95) / (2.285 * 2.0 * PI * 1_000.0 / RATE) + 1.0).ceil() as usize;
@@ -136,11 +136,11 @@ fn the_length_is_odd_and_follows_the_estimate() {
 #[test]
 fn every_response_meets_its_ripple_and_attenuation() {
     for a in [40.0f64, 60.0, 80.0] {
-        let delta = Db(-a).to_amplitude().get();
+        let delta = Db::new(-a).to_amplitude().get();
         for response in responses() {
             let transition = 1_000.0f64;
             let fir = FirDesign::new(response, hz(transition))
-                .attenuation(Db(a))
+                .attenuation(Db::new(a))
                 .design(rate())
                 .unwrap();
             let h = taps(&fir);
@@ -185,7 +185,7 @@ fn the_taps_are_symmetric_bit_for_bit() {
 fn the_half_band_has_exact_zeros_and_a_centre_of_one_half() {
     for transition in [500.0f64, 2_000.0, 6_000.0] {
         let fir = FirDesign::new(FirResponse::HalfBand, hz(transition))
-            .attenuation(Db(70.0))
+            .attenuation(Db::new(70.0))
             .design(rate())
             .unwrap();
         let h = taps(&fir);
@@ -335,7 +335,7 @@ fn a_non_positive_transition_or_attenuation_is_refused() {
     }
     for a in [0.0, -60.0, f64::NAN] {
         let err = FirDesign::new(low, hz(500.0))
-            .attenuation(Db(a))
+            .attenuation(Db::new(a))
             .design(rate())
             .unwrap_err();
         assert!(
@@ -353,7 +353,7 @@ fn a_filter_beyond_the_maximum_length_is_refused() {
         },
         hz(0.001),
     )
-    .attenuation(Db(100.0))
+    .attenuation(Db::new(100.0))
     .design(rate())
     .unwrap_err();
     assert!(
@@ -369,11 +369,11 @@ fn an_attenuation_past_the_maximum_is_refused() {
     let lp = |a| {
         FirDesign::new(
             FirResponse::LowPass {
-                cutoff: Hz(4_000.0),
+                cutoff: Hz::new(4_000.0),
             },
-            Hz(8_000.0),
+            Hz::new(8_000.0),
         )
-        .attenuation(Db(a))
+        .attenuation(Db::new(a))
         .design(SampleRate::SR_48K)
     };
     assert!(matches!(

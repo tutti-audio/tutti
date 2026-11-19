@@ -10,7 +10,7 @@ fn a_nan_or_negative_time_is_instant_and_an_infinite_one_holds() {
         let rate = SampleRate::of(rate);
         for instant in [f64::NAN, -1.0, f64::NEG_INFINITY, -0.0, 0.0] {
             for hold in [f64::INFINITY, f64::MAX] {
-                let b = floored(Seconds(instant), Seconds(hold));
+                let b = floored(Seconds::new(instant), Seconds::new(hold));
                 assert_eq!(b.coeffs(rate), (1.0, 0.0), "{instant} {hold} at {rate:?}");
             }
         }

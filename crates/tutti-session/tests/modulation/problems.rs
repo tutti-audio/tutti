@@ -16,7 +16,7 @@ use tutti_units::{Depth, Hz, Samples, UnitParam};
 fn session() -> Session {
     Session::builder()
         .outputs(tutti_buffers::ChannelLayout::STEREO)
-        .max_block(MaxBlock::of(Samples(256)))
+        .max_block(MaxBlock::of(Samples::new(256)))
         .build()
         .expect("builds")
 }
@@ -40,7 +40,7 @@ fn an_unresolved_target_and_an_unfed_follower_are_named() {
     let ghost = ParamRef::unit(NodeKey(999), UnitParam::Cutoff);
     let mut m = s.mods_mut();
     m.range_raw(ghost, 0.0, 1_000.0).unwrap();
-    let lfo = m.lfo(Lfo::sine().rate(Hz(2.0)));
+    let lfo = m.lfo(Lfo::sine().rate(Hz::new(2.0)));
     m.route(RouteSpec::new(lfo, ghost, Depth::of(0.5))).unwrap();
     let follower = m.follower(Follower::default(), NodeKey(404));
     m.route(RouteSpec::new(follower, ghost, Depth::of(0.5)))
@@ -103,12 +103,13 @@ fn no_problems_while_the_declarations_apply() {
     assert_eq!(s.mod_state().problems().count(), 0);
     let (lp, _) = s.graph().add(tutti_nodes::SvfFilterNode::<f32>::new(
         tutti_nodes::SvfType::LowPass,
-        Hz(1_000.0),
-        tutti_units::Q(0.7),
+        Hz::new(1_000.0),
+        tutti_units::Q::new(0.7),
     ));
     let mut m = s.mods_mut();
-    m.range(lp.cutoff(), Hz(100.0)..Hz(4_000.0)).unwrap();
-    let lfo = m.lfo(Lfo::sine().rate(Hz(2.0)));
+    m.range(lp.cutoff(), Hz::new(100.0)..Hz::new(4_000.0))
+        .unwrap();
+    let lfo = m.lfo(Lfo::sine().rate(Hz::new(2.0)));
     m.route(RouteSpec::new(lfo, lp.cutoff(), Depth::of(0.5)))
         .unwrap();
     for _ in 0..4 {

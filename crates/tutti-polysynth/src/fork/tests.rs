@@ -16,7 +16,7 @@ fn saw() -> PolySynth {
     PolySynth::new(SynthConfig {
         oscillator: OscillatorType::Saw,
         envelope: Adsr {
-            attack: Seconds(0.0),
+            attack: Seconds::new(0.0),
             ..Default::default()
         },
         unison: Some(UnisonConfig::default()),
@@ -32,7 +32,7 @@ fn note_on() -> Ump {
 /// frame 0, in 64-frame blocks.
 fn peak(synth: PolySynth, frames: usize) -> f32 {
     let mut hand = Direct::new(synth, RATE, 64);
-    let on = Offset::of(tutti_units::Samples(0), tutti_units::Samples(64));
+    let on = Offset::of(tutti_units::Samples::new(0), tutti_units::Samples::new(64));
     hand.events(0, &[Event::midi(on, note_on())]);
     let mut peak = 0.0f32;
     for _ in 0..frames / 64 {
@@ -76,7 +76,7 @@ fn a_fork_takes_the_authored_volume_at_the_fork() {
         let set = source.params().clone();
         set.set(UnitParam::Volume, f64::from(before));
         // A modulation driver's composite in the live cell: not authored.
-        live.set_volume(tutti_units::Amplitude(f64::from(before) * 3.0));
+        live.set_volume(tutti_units::Amplitude::new(f64::from(before) * 3.0));
         let fork = source.fork_node();
         set.set(UnitParam::Volume, f64::from(after));
         peak(fork, 4_096)

@@ -209,7 +209,7 @@ impl Seconds {
         if !raw.is_finite() || raw <= 0.0 {
             return Samples::ZERO;
         }
-        Samples(round(raw) as usize)
+        Samples::new(round(raw) as usize)
     }
 }
 

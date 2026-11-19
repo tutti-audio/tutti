@@ -26,7 +26,7 @@
 //!
 //! let row = Row::new(
 //!     "pulse, 37 frames late",
-//!     || Box::new(Pulse::new(Latency::new(Samples(37)))),
+//!     || Box::new(Pulse::new(Latency::new(Samples::new(37)))),
 //!     Excite::Event {
 //!         port: 0,
 //!         kind: EventKind::Midi(midi::note_on(MidiChannel::FIRST, 60, 0xC800)),
@@ -601,7 +601,7 @@ impl Row {
             Feed::AtBeat => {
                 rig.ed
                     .schedule(
-                        At::Beat(Beat(lead as f64 / FRAMES_PER_BEAT as f64)),
+                        At::Beat(Beat::new(lead as f64 / FRAMES_PER_BEAT as f64)),
                         to,
                         self.event_kind(),
                     )
@@ -970,7 +970,7 @@ impl Row {
                     g.connect_input(0, n, p);
                 }
                 Topo::Pdc => {
-                    let lat = g.add(Unforkable(Latent::new(Latency::new(Samples(
+                    let lat = g.add(Unforkable(Latent::new(Latency::new(Samples::new(
                         SIBLING_LATENCY,
                     )))));
                     let sum = g.add(Unforkable(Sum));
@@ -982,7 +982,7 @@ impl Row {
         } else {
             let kind = self.event_kind();
             if topo == Topo::Pdc {
-                let lat = g.add(Unforkable(Latent::new(Latency::new(Samples(
+                let lat = g.add(Unforkable(Latent::new(Latency::new(Samples::new(
                     SIBLING_LATENCY,
                 )))));
                 g.connect_events(lat, 0, n, p);
@@ -1006,7 +1006,10 @@ impl Row {
         }
         g.connect_output(n, self.output as usize, 0);
         let (ed, exec) = g
-            .build(Prepare::new(SAMPLE_RATE, MaxBlock::of(Samples(MAX_BLOCK))))
+            .build(Prepare::new(
+                SAMPLE_RATE,
+                MaxBlock::of(Samples::new(MAX_BLOCK)),
+            ))
             .unwrap_or_else(|e| panic!("{}: the contract graph does not build: {e}", self.name));
         let unit = exec
             .plan()
@@ -1049,7 +1052,7 @@ impl Row {
                 "{}: behind PDC the latent sibling feeds audio input 0",
                 self.name
             );
-            let lat = g.add(Unforkable(Latent::new(Latency::new(Samples(
+            let lat = g.add(Unforkable(Latent::new(Latency::new(Samples::new(
                 SIBLING_LATENCY,
             )))));
             g.connect(lat, 0, n, 0);
@@ -1059,7 +1062,10 @@ impl Row {
             .connect_param(ParamIn { node: n, param }, EventOut { node: src, port: 0 });
         g.connect_output(n, self.output as usize, 0);
         let (ed, exec) = g
-            .build(Prepare::new(SAMPLE_RATE, MaxBlock::of(Samples(MAX_BLOCK))))
+            .build(Prepare::new(
+                SAMPLE_RATE,
+                MaxBlock::of(Samples::new(MAX_BLOCK)),
+            ))
             .unwrap_or_else(|e| panic!("{}: the contract graph does not build: {e}", self.name));
         let unit = exec
             .plan()
@@ -1121,7 +1127,7 @@ impl Rig {
                 self.ed.insert(
                     UNRELATED,
                     "unrelated",
-                    Unforkable(Latent::new(Latency::new(Samples(7)))),
+                    Unforkable(Latent::new(Latency::new(Samples::new(7)))),
                 );
             }
             Edit::Regenerate => {
@@ -1230,7 +1236,7 @@ fn transport_for(start: Option<u64>, bs: u64, n: usize) -> (TransportPosition, T
         TransportPosition::new(
             true,
             Bpm::of(120.0),
-            Beat((at - start.unwrap_or(0)) as f64 / FRAMES_PER_BEAT as f64),
+            Beat::new((at - start.unwrap_or(0)) as f64 / FRAMES_PER_BEAT as f64),
             None,
         )
     };
@@ -1242,7 +1248,10 @@ fn transport_for(start: Option<u64>, bs: u64, n: usize) -> (TransportPosition, T
         return (rolling(bs), changes);
     }
     if s < bs + n as u64 {
-        let at = crate::time::Offset::of(Samples(usize::try_from(s - bs).unwrap()), Samples(n));
+        let at = crate::time::Offset::of(
+            Samples::new(usize::try_from(s - bs).unwrap()),
+            Samples::new(n),
+        );
         changes.push(at, rolling(s)).expect("one change");
     }
     (stopped, changes)
@@ -1611,9 +1620,10 @@ impl Node for ParamPulse {
     fn prepare(&mut self, _: &Prepare) {}
 
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
-        for (frame, value) in [(self.at, self.amplitude), (self.at + Samples(1), 0.0)] {
+        for (frame, value) in [(self.at, self.amplitude), (self.at + Samples::new(1), 0.0)] {
             if let Some(offset) = cx.env.offset_of(frame) {
-                let step = ParamSegment::unit(self.param, value, value, Samples(0), Law::Linear);
+                let step =
+                    ParamSegment::unit(self.param, value, value, Samples::new(0), Law::Linear);
                 io.event_out(0)
                     .push_param(ParamEvent::segment(offset, step))
                     .expect("two events fit");
@@ -1680,7 +1690,7 @@ impl Node for Sum {
 /// fn lookahead_row() -> Row {
 ///     Row::new(
 ///         "Lookahead",
-///         || Box::new(Lookahead::new(Latency::new(Samples(45)))),
+///         || Box::new(Lookahead::new(Latency::new(Samples::new(45)))),
 ///         Excite::Impulse { port: 0, amplitude: 1.0 },
 ///         Detect::Exact(vec![1.0]),
 ///     )
@@ -1758,7 +1768,7 @@ pub fn drive<F: Float>(
     let env = Env {
         frame: Frame::new(0),
         sample_rate: rate,
-        block_len: Samples(frames),
+        block_len: Samples::new(frames),
         transport: TransportPosition::default(),
         changes: TransportChanges::NONE,
         play: crate::PlayClock::ZERO,
@@ -1887,7 +1897,7 @@ pub fn drive_input_params<F: Float>(
         arrival: Latency::ZERO,
         history: TransportHistory::none(),
     };
-    let max = Prepare::new(env.sample_rate, MaxBlock::of(Samples(frames))).max_block();
+    let max = Prepare::new(env.sample_rate, MaxBlock::of(Samples::new(frames))).max_block();
     let reported = std::cell::Cell::new(None);
     let main = shape.main_ports();
     let io = Io::new(
@@ -1943,7 +1953,7 @@ pub fn assert_honest_tail(node: &mut dyn Node, rate: SampleRate) {
     let env = |frame: u64| Env {
         frame: Frame::new(frame),
         sample_rate: rate,
-        block_len: Samples(BLOCK),
+        block_len: Samples::new(BLOCK),
         transport: TransportPosition::default(),
         changes: TransportChanges::NONE,
         play: crate::PlayClock::ZERO,
@@ -2003,7 +2013,7 @@ pub const MAX_CHECKED_TAIL: usize = 1 << 20;
 /// `node`, prepared at `rate` for blocks of up to `max_block` frames: the
 /// state a graph hands [`drive`] a node in.
 pub fn prepared<N: Node>(mut node: N, rate: SampleRate, max_block: usize) -> N {
-    node.prepare(&Prepare::new(rate, MaxBlock::of(Samples(max_block))));
+    node.prepare(&Prepare::new(rate, MaxBlock::of(Samples::new(max_block))));
     node
 }
 
@@ -2129,7 +2139,7 @@ impl<F: Float> BlockRig<F> {
         frames: usize,
     ) -> (Self, N::Controls) {
         let (mut editor, mut exec) =
-            Editor::<F>::with_format(Prepare::new(rate, MaxBlock::of(Samples(frames))));
+            Editor::<F>::with_format(Prepare::new(rate, MaxBlock::of(Samples::new(frames))));
         let key = NodeKey(1);
         let controls = editor.insert(key, N::kind(), node).controls;
         let shape = editor
@@ -2300,7 +2310,7 @@ impl<N: Node<F> + ?Sized, F: Float> Direct<N, F> {
     ///
     /// As [`new`](Direct::new).
     pub fn boxed_with_format(mut node: Box<N>, rate: SampleRate, frames: usize) -> Self {
-        node.prepare(&Prepare::new(rate, MaxBlock::of(Samples(frames))));
+        node.prepare(&Prepare::new(rate, MaxBlock::of(Samples::new(frames))));
         let shape = node.shape();
         let (ins, outs) = (
             usize::from(shape.audio_in().count()),
@@ -2460,7 +2470,7 @@ impl<N: Node<F> + ?Sized, F: Float> Direct<N, F> {
         if self.outputs.is_empty() {
             return Planes::default();
         }
-        or_empty(Planes::from_vecs(&self.outputs)).slice(Samples(0)..Samples(self.len))
+        or_empty(Planes::from_vecs(&self.outputs)).slice(Samples::new(0)..Samples::new(self.len))
     }
 
     /// The output channels, to fill before a block: a node must write every
@@ -2477,7 +2487,7 @@ impl<N: Node<F> + ?Sized, F: Float> Direct<N, F> {
         let env = Env {
             frame: self.frame,
             sample_rate: self.rate,
-            block_len: Samples(self.len),
+            block_len: Samples::new(self.len),
             transport: self.transport,
             changes: TransportChanges::NONE,
             // The driver's frame, as an executor's play clock would read
@@ -2547,7 +2557,7 @@ impl<N: Node<F> + ?Sized, F: Float> Direct<N, F> {
             arrival: Latency::ZERO,
             history: TransportHistory::none(),
         };
-        let max = Prepare::new(self.rate, MaxBlock::of(Samples(self.frames))).max_block();
+        let max = Prepare::new(self.rate, MaxBlock::of(Samples::new(self.frames))).max_block();
         let io = Io::new(
             max,
             len,

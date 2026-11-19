@@ -29,7 +29,6 @@ use tutti_units::{Amplitude, Db, Hz, Q, SampleRate, Seconds};
 use super::curves::{db_gain, gate_gain_at, level_db};
 use super::key_filter::{KeyFilter, KeyStage};
 use super::shared::{CHUNK, GAIN_GLIDE, floored, key_levels};
-use crate::finite::finite_or;
 use crate::follower::{Follower, Smoothed};
 use crate::{Glide, Lanes, Lerp, Steps};
 
@@ -63,7 +62,7 @@ impl GateControls {
     /// A gate that passes everything: threshold at -40 dB, no times and a range of 0 dB.
     /// What a non-finite control falls back to.
     pub const DEFAULT: Self = Self {
-        threshold: Db(-40.0),
+        threshold: Db::new(-40.0),
         attack: Seconds::ZERO,
         hold: Seconds::ZERO,
         release: Seconds::ZERO,
@@ -102,17 +101,17 @@ impl<F: Float> Design<F> {
     /// floored at 0 and the range is capped at 0 dB.
     fn of(c: &GateControls, rate: SampleRate) -> Self {
         let d = GateControls::DEFAULT;
-        let threshold = Db(finite_or(c.threshold.get(), d.threshold.get()));
+        let threshold = c.threshold.finite_or(d.threshold);
         // A NaN hold reads as 0 (`max` ignores it); an infinite one saturates to the
         // longest count. `floored` floors the attack and release.
-        let hold = Seconds(c.hold.get().max(0.0));
+        let hold = Seconds::new(c.hold.get().max(0.0));
         let ballistics = Follower::of(floored(c.attack, c.release), rate);
         Self {
             threshold: threshold.to_amplitude(),
             silence_opens: Db::FLOOR >= threshold,
             ballistics,
             hold_samples: hold.to_samples_floor(rate).get(),
-            range: Db(finite_or(c.range.get(), d.range.get()).min(0.0)),
+            range: c.range.finite_or(d.range).min(Db::UNITY),
         }
     }
 }
@@ -216,8 +215,8 @@ impl<F: Float + Lanes + Lerp> GateBank<F> {
         if let Some(key) = &mut self.key {
             let d = GateControls::DEFAULT;
             key.aim(
-                Hz(finite_or(controls.key_cutoff.get(), d.key_cutoff.get())),
-                Q(finite_or(controls.key_q.get(), d.key_q.get())),
+                controls.key_cutoff.finite_or(d.key_cutoff),
+                controls.key_q.finite_or(d.key_q),
             );
         }
         self.range

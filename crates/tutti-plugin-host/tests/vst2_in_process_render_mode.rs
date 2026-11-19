@@ -163,8 +163,11 @@ fn drive_blocks_in(
     let rate = SampleRate::of(hz);
     Node::prepare(
         unit,
-        &Prepare::new(rate, tutti_buffers::MaxBlock::of(tutti_units::Samples(max)))
-            .with_render_mode(mode),
+        &Prepare::new(
+            rate,
+            tutti_buffers::MaxBlock::of(tutti_units::Samples::new(max)),
+        )
+        .with_render_mode(mode),
     );
     let silence = vec![0.0f32; frames];
     let inputs: Vec<&[f32]> = (0..Node::shape(unit).audio_in().count())
@@ -173,7 +176,7 @@ fn drive_blocks_in(
     let env = Env {
         frame: tutti_units::Frame::new(0),
         sample_rate: rate,
-        block_len: tutti_units::Samples(frames),
+        block_len: tutti_units::Samples::new(frames),
         transport: TransportPosition::default(),
         changes: TransportChanges::NONE,
         play: tutti_graph::PlayClock::ZERO,

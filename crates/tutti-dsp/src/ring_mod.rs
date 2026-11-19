@@ -21,7 +21,7 @@ pub struct RingModControls {
 impl RingModControls {
     /// A 440 Hz carrier.
     pub const DEFAULT: Self = Self {
-        frequency: Hz(440.0),
+        frequency: Hz::new(440.0),
     };
 }
 

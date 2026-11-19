@@ -2456,7 +2456,7 @@ mod tests {
 
     /// The controls of a plugin's node, counting nothing yet.
     fn node_controls() -> NodeControls {
-        (*PluginControls::new(Samples(0), PluginTail::default(), SampleRate::SR_48K).0).clone()
+        (*PluginControls::new(Samples::new(0), PluginTail::default(), SampleRate::SR_48K).0).clone()
     }
 
     /// A backend that answers `state` (or declines), counts its saves, and
@@ -2767,7 +2767,7 @@ mod tests {
     fn an_update_frees_a_plugin_meter_cleared_while_a_block_held_it() {
         let mut rig = rig(None);
         let (controls, _) =
-            PluginControls::new(Samples(0), PluginTail::default(), SampleRate::SR_48K);
+            PluginControls::new(Samples::new(0), PluginTail::default(), SampleRate::SR_48K);
         let project = rig.session.transport.settings().project_meter().clone();
         controls.set_meter(project);
         let meter = controls.meter();
@@ -2804,7 +2804,7 @@ mod tests {
             .expect("hosted")
             .controls = Some(
             PluginControls::new(
-                Samples(10_000_000),
+                Samples::new(10_000_000),
                 PluginTail::default(),
                 SampleRate::SR_48K,
             )
@@ -2841,7 +2841,7 @@ mod tests {
         for crossfade in [false, true] {
             let mut rig = rig(None);
             let replacement = tutti_graph::ForkByClone(tutti_nodes::testing::Const::mono(1.0));
-            let fade = tutti_units::Seconds(0.0);
+            let fade = tutti_units::Seconds::new(0.0);
             let law = tutti_graph::FadeLaw::EqualAmplitude;
             if crossfade {
                 assert!(matches!(

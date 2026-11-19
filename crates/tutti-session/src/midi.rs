@@ -125,7 +125,7 @@ impl OutputClockSource {
     fn audio_output(&self) -> Option<tutti_units::Seconds> {
         self.audio_latency
             .get()
-            .map(|latency| tutti_units::Seconds(latency.as_secs_f64()))
+            .map(|latency| tutti_units::Seconds::new(latency.as_secs_f64()))
     }
 
     /// The timing of a drain at `now`: the latest block's map, `now` and the
@@ -405,7 +405,7 @@ impl UmpOut {
             return 0;
         };
         // `None` only for a span no block on this target can hold.
-        let Some(span) = last.since(first).map(|d| d + Samples(1)) else {
+        let Some(span) = last.since(first).map(|d| d + Samples::new(1)) else {
             return events.len();
         };
         let plan = timing.map(|t| OutputPlan::new(t.terms));
@@ -581,9 +581,9 @@ impl TakePlacement {
     pub fn place(self, frame: Frame) -> Frame {
         let back = self
             .input
-            .0
-            .saturating_add(self.output.0)
-            .saturating_add(self.lead.0);
+            .get()
+            .saturating_add(self.output.get())
+            .saturating_add(self.lead.get());
         let back = u64::try_from(back).unwrap_or(u64::MAX);
         Frame::new(frame.get().saturating_sub(back)) + self.trim
     }
@@ -1252,7 +1252,7 @@ impl<F: Float> Midi<'_, F> {
     ///
     /// ```ignore
     /// // The melody's beats 0..4, played from bar 3 of 4/4.
-    /// session.midi().play_clip(synth.node(), Beat(8.0), melody)?;
+    /// session.midi().play_clip(synth.node(), Beat::new(8.0), melody)?;
     /// ```
     ///
     /// # Errors
@@ -1272,7 +1272,7 @@ impl<F: Float> Midi<'_, F> {
         if !at.get().is_finite() {
             return Err(MidiError::BeatNotFinite(at));
         }
-        let by = BeatDuration(at.get());
+        let by = BeatDuration::new(at.get());
         let events = events
             .into_iter()
             .map(|e| e.shifted(by).ok_or(MidiError::BeatNotFinite(at)))
@@ -2103,7 +2103,7 @@ mod tests {
 
     fn note(offset: usize) -> UmpAt {
         (
-            Offset::of(Samples(offset), Samples(512)),
+            Offset::of(Samples::new(offset), Samples::new(512)),
             midi::note_on(MidiChannel::FIRST, 60, 0x8000),
         )
     }
@@ -2192,17 +2192,21 @@ mod tests {
         let mut out = UmpOut::new(Arc::new(Recording(log.clone())), SampleRate::SR_48K);
         out.send_frames(&[at(1_250), at(1_000), at(1_999)], None);
         let sent = log.lock().unwrap().remove(0);
-        let span = Samples(1_000);
+        let span = Samples::new(1_000);
         let offsets: Vec<_> = sent.iter().map(|e| e.0).collect();
         assert_eq!(
             offsets,
-            [250, 0, 999].map(|o| Offset::of(Samples(o), span)),
+            [250, 0, 999].map(|o| Offset::of(Samples::new(o), span)),
             "each event's spacing from the earliest"
         );
         out.set_stamping(Stamping::Jr);
         let before = out.origin();
         out.send_frames(&[at(1_250), at(1_000), at(1_999)], None);
-        assert_eq!(out.origin().since(before), Some(Samples(1_000)), "the span");
+        assert_eq!(
+            out.origin().since(before),
+            Some(Samples::new(1_000)),
+            "the span"
+        );
     }
 
     /// **Events sharing a frame are sent at that frame's time, whichever
@@ -2298,10 +2302,10 @@ mod tests {
         };
         let base = sent_with(OutputTerms::default());
         let terms = OutputTerms {
-            audio_output: Some(tutti_units::Seconds(0.03)),
+            audio_output: Some(tutti_units::Seconds::new(0.03)),
             latency: OutputLatency::new(
-                tutti_units::Seconds(0.005),
-                tutti_midi_runtime::OutputOffset::new(tutti_units::Seconds(0.25)).unwrap(),
+                tutti_units::Seconds::new(0.005),
+                tutti_midi_runtime::OutputOffset::new(tutti_units::Seconds::new(0.25)).unwrap(),
             )
             .unwrap(),
         };

@@ -55,7 +55,7 @@ struct Latent;
 impl Node for Latent {
     fn shape(&self) -> Shape {
         Shape::source_unassigned(ChannelLayout::STEREO)
-            .with_latency(tutti_units::Latency::new(Samples(256)))
+            .with_latency(tutti_units::Latency::new(Samples::new(256)))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, _: Io<'_>) -> Status {
@@ -224,10 +224,10 @@ fn recording_a_target_with_no_event_input_is_refused() {
 #[test]
 fn a_take_is_placed_by_the_documented_figures() {
     let p = TakePlacement {
-        input: Samples(100),
-        output: Samples(200),
-        lead: Samples(50),
-        trim: Samples(10),
+        input: Samples::new(100),
+        output: Samples::new(200),
+        lead: Samples::new(50),
+        trim: Samples::new(10),
     };
     assert_eq!(p.place(Frame::new(1_000)), Frame::new(660));
     assert_eq!(
@@ -248,7 +248,7 @@ fn a_take_is_placed_by_the_documented_figures() {
 fn clip(events: impl IntoIterator<Item = (f64, tutti_ump::Ump)>) -> Vec<TimedMidiEvent> {
     events
         .into_iter()
-        .map(|(beat, ump)| TimedMidiEvent::new(Beat(beat), ump).unwrap())
+        .map(|(beat, ump)| TimedMidiEvent::new(Beat::new(beat), ump).unwrap())
         .collect()
 }
 
@@ -298,7 +298,9 @@ fn a_clip_plays_through_the_sessions_mpe_mode() {
         .expect("builds");
     assert_eq!(s.get(s.mpe()).unwrap(), midi::lower_zone(3));
     let (target, seen) = crate::common::tap(&mut s);
-    s.midi().play_clip(target, Beat(0.0), mpe_clip()).unwrap();
+    s.midi()
+        .play_clip(target, Beat::new(0.0), mpe_clip())
+        .unwrap();
     play_for(&mut s, 40);
     let got = voices(&seen);
     assert!(
@@ -326,7 +328,9 @@ fn a_clip_plays_through_the_sessions_mpe_mode() {
 fn the_mpe_mode_reaches_a_clip_already_in_the_graph() {
     let mut s = crate::common::offline();
     let (target, seen) = crate::common::tap(&mut s);
-    s.midi().play_clip(target, Beat(0.0), mpe_clip()).unwrap();
+    s.midi()
+        .play_clip(target, Beat::new(0.0), mpe_clip())
+        .unwrap();
     let _ = s.update();
     s.set(s.mpe().to(midi::lower_zone(3))).unwrap();
     assert_eq!(s.get(s.mpe()).unwrap(), midi::lower_zone(3));
@@ -356,7 +360,9 @@ fn a_clips_transform_goes_with_the_clip_and_follows_a_retarget() {
     let (first, _) = crate::common::tap(&mut s);
     let (second, seen) = crate::common::tap(&mut s);
     let before = s.graph().node_count();
-    s.midi().play_clip(first, Beat(0.0), mpe_clip()).unwrap();
+    s.midi()
+        .play_clip(first, Beat::new(0.0), mpe_clip())
+        .unwrap();
     assert_eq!(
         s.graph().node_count(),
         before + 2,

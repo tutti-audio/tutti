@@ -31,7 +31,7 @@ pub(crate) fn frames_tail(frames: u64, rate: SampleRate) -> Tail {
     if frames == UNBOUNDED || frames > MAX_NODE_TAIL.to_samples_ceil(rate).get() as u64 {
         Tail::Unbounded
     } else {
-        Tail::Finite(Samples(usize::try_from(frames).unwrap_or(usize::MAX)))
+        Tail::Finite(Samples::new(usize::try_from(frames).unwrap_or(usize::MAX)))
     }
 }
 
@@ -179,7 +179,7 @@ mod tests {
         assert_eq!(TailClock::of(Tail::Unknown, 0), None);
         assert_eq!(TailClock::of(Tail::None, 0), None);
         assert_eq!(
-            TailClock::of(Tail::Finite(Samples(5)), 2),
+            TailClock::of(Tail::Finite(Samples::new(5)), 2),
             Some(TailClock::new(5, 2))
         );
         assert_eq!(
@@ -194,7 +194,7 @@ mod tests {
         let mut c = TailClock::new(1_000, 0);
         let owed = c.advance(0, silent(64));
         assert_eq!(owed.live, 0);
-        assert_eq!(owed.tail(R), Tail::Finite(Samples(0)));
+        assert_eq!(owed.tail(R), Tail::Finite(Samples::new(0)));
     }
 
     /// An impulse on a block's frame 0 with a tail of 100 and a latency of 10 sounds for the
@@ -210,7 +210,7 @@ mod tests {
                 last_input: Some(0),
             },
         );
-        assert_eq!(first.tail(R), Tail::Finite(Samples(100)));
+        assert_eq!(first.tail(R), Tail::Finite(Samples::new(100)));
         assert_eq!(first.live, 64);
         let second = c.advance(100, silent(64));
         assert_eq!(second.live, 111 - 64);
@@ -249,9 +249,13 @@ mod tests {
                 last_input: Some(63),
             },
         );
-        assert_eq!(first.tail(R), Tail::Finite(Samples(150)), "the ceiling");
+        assert_eq!(
+            first.tail(R),
+            Tail::Finite(Samples::new(150)),
+            "the ceiling"
+        );
         let second = c.advance(20, silent(64));
-        assert_eq!(second.tail(R), Tail::Finite(Samples(150)), "held");
+        assert_eq!(second.tail(R), Tail::Finite(Samples::new(150)), "held");
         assert_eq!(second.live, 64);
         assert_eq!(c.advance(20, silent(64)).live, 64);
         assert_eq!(c.advance(20, silent(64)).live, 150 - 128);
@@ -266,7 +270,7 @@ mod tests {
         assert_eq!(held.tail(R), Tail::Unbounded);
         assert_eq!(held.live, 64);
         let thaw = c.advance(100, silent(64));
-        assert_eq!(thaw.tail(R), Tail::Finite(Samples(100)));
+        assert_eq!(thaw.tail(R), Tail::Finite(Samples::new(100)));
         assert_eq!(thaw.live, 64);
         assert_eq!(c.advance(100, silent(64)).live, 100 - 64);
         assert_eq!(c.advance(100, silent(64)).live, 0);
@@ -292,7 +296,7 @@ mod tests {
             );
             assert_eq!(
                 at.tail(rate),
-                Tail::Finite(Samples(bound as usize)),
+                Tail::Finite(Samples::new(bound as usize)),
                 "{rate:?}"
             );
             let past = c.advance(bound + 1, silent(64));
@@ -301,7 +305,7 @@ mod tests {
             assert_eq!(frames_tail(bound + 1, rate), Tail::Unbounded);
             assert_eq!(
                 frames_tail(bound, rate),
-                Tail::Finite(Samples(bound as usize))
+                Tail::Finite(Samples::new(bound as usize))
             );
         }
         // The same count is a figure at the rate that holds it.
@@ -313,7 +317,7 @@ mod tests {
         );
         assert_eq!(
             frames_tail(frames, SampleRate::SR_96K),
-            Tail::Finite(Samples(frames as usize)),
+            Tail::Finite(Samples::new(frames as usize)),
             "41.7 s"
         );
     }

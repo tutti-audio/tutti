@@ -329,7 +329,7 @@ impl PluginClient<Unbound> {
         // The pipeline's chunk ceiling, matching the slab (`Ipc` clamps it to
         // `MAX_CHUNK` for the same reason): the raw `max_buffer_size` would
         // stage 8192 samples per channel to ship 64.
-        let prepare = MaxBlock::new(Samples(ipc.ceiling()))
+        let prepare = MaxBlock::new(Samples::new(ipc.ceiling()))
             .map(|block| Prepare::new(rate, block))
             .ok_or_else(|| {
                 failed(format!(

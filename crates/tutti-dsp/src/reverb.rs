@@ -25,7 +25,7 @@ use crate::{Ring, Steps};
 pub(crate) const CHUNK: usize = 32;
 
 /// The longest ramp of a reverb's gain, in seconds.
-const RAMP: Seconds = Seconds(0.020);
+const RAMP: Seconds = Seconds::new(0.020);
 
 /// A 20 ms ramp at `rate`, in whole chunks (at least one).
 pub(crate) fn ramp(rate: SampleRate) -> Steps {

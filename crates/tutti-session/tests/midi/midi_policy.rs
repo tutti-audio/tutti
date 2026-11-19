@@ -451,8 +451,8 @@ fn a_granted_request_moves_the_sessions_output_to_the_protocol_asked() {
     let (clip, _) = s.graph().add(MidiClipNode::new(note(
         60,
         MF,
-        Beat(0.0),
-        BeatDuration(1.0),
+        Beat::new(0.0),
+        BeatDuration::new(1.0),
     )));
     s.graph()
         .set_sources(EventInPort::new(out.node(), 0), [clip.events_out()])

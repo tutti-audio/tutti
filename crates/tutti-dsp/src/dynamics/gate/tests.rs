@@ -17,11 +17,11 @@ const CHUNK: usize = 256;
 
 fn controls(threshold: f64, attack: f64, hold: f64, release: f64, range: f64) -> GateControls {
     GateControls {
-        threshold: Db(threshold),
-        attack: Seconds(attack),
-        hold: Seconds(hold),
-        release: Seconds(release),
-        range: Db(range),
+        threshold: Db::new(threshold),
+        attack: Seconds::new(attack),
+        hold: Seconds::new(hold),
+        release: Seconds::new(release),
+        range: Db::new(range),
         ..GateControls::DEFAULT
     }
 }
@@ -56,26 +56,26 @@ fn hostile() -> Vec<GateControls> {
     let base = controls(-30.0, 0.003, 0.05, 0.08, -40.0);
     let mut all = vec![
         GateControls {
-            attack: Seconds(-1.0),
-            hold: Seconds(-1.0),
-            release: Seconds(-1.0),
+            attack: Seconds::new(-1.0),
+            hold: Seconds::new(-1.0),
+            release: Seconds::new(-1.0),
             ..base
         },
         GateControls {
-            range: Db(12.0),
+            range: Db::new(12.0),
             ..base
         },
     ];
     for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
         all.push(GateControls {
-            threshold: Db(bad),
-            range: Db(bad),
+            threshold: Db::new(bad),
+            range: Db::new(bad),
             ..base
         });
         all.push(GateControls {
-            attack: Seconds(bad),
-            hold: Seconds(bad),
-            release: Seconds(bad),
+            attack: Seconds::new(bad),
+            hold: Seconds::new(bad),
+            release: Seconds::new(bad),
             ..base
         });
     }
@@ -164,26 +164,26 @@ fn the_design_holds_the_figures_of_its_definition() {
     let m = Design::<f32>::of(&controls(-20.0, 0.001, 0.0102, 0.1, -12.0), RATE);
     // 0.0102 s at 48 kHz is 489.6 frames, floored.
     assert_eq!(m.hold_samples, 489);
-    assert_eq!(m.threshold, Db(-20.0).to_amplitude());
+    assert_eq!(m.threshold, Db::new(-20.0).to_amplitude());
     // One step from 0 toward 1 lands on the attack coefficient, and one from 1 toward 0 on
     // 1 less the release coefficient.
     let (attack, release) = (
-        Seconds(0.001).one_pole_coeff(RATE) as f32,
-        Seconds(0.1).one_pole_coeff(RATE) as f32,
+        Seconds::new(0.001).one_pole_coeff(RATE) as f32,
+        Seconds::new(0.1).one_pole_coeff(RATE) as f32,
     );
     assert_eq!(m.ballistics.follow_raw(&mut Smoothed::at(0.0), 1.0), attack);
     assert_eq!(
         m.ballistics.follow_raw(&mut Smoothed::at(1.0), 0.0),
         1.0 - release
     );
-    assert_eq!(m.range, Db(-12.0));
+    assert_eq!(m.range, Db::new(-12.0));
 
     let m = Design::<f32>::of(
         &GateControls {
-            attack: Seconds(-1.0),
-            hold: Seconds(-1.0),
-            release: Seconds(-1.0),
-            range: Db(6.0),
+            attack: Seconds::new(-1.0),
+            hold: Seconds::new(-1.0),
+            release: Seconds::new(-1.0),
+            range: Db::new(6.0),
             ..GateControls::DEFAULT
         },
         RATE,
@@ -203,8 +203,8 @@ fn the_design_holds_the_figures_of_its_definition() {
 
     let m = Design::<f32>::of(
         &GateControls {
-            threshold: Db(f64::NAN),
-            range: Db(f64::INFINITY),
+            threshold: Db::new(f64::NAN),
+            range: Db::new(f64::INFINITY),
             ..GateControls::DEFAULT
         },
         RATE,
@@ -743,7 +743,7 @@ fn every_reachable_gate_scales_between_its_floor_and_unity() {
     let audio = noise(21, n, 1.0);
     let key = noise(22, n, 0.3);
     for c in reachable() {
-        let floor = (Db(c.range.get().min(0.0)).to_amplitude().get() * (1.0 - 1e-5)) as f32;
+        let floor = (Db::new(c.range.get().min(0.0)).to_amplitude().get() * (1.0 - 1e-5)) as f32;
         let mut k = runner(&c);
         let out = run(&mut k, &[&audio], &[&key], None).remove(0);
         for (i, (&y, &x)) in out.iter().zip(&audio).enumerate() {
@@ -834,7 +834,7 @@ fn an_f64_gate_opens_along_the_one_pole_closed_form_in_f64() {
 fn an_f32_three_hundred_second_release_at_192_khz_still_closes_along_the_closed_form() {
     const CHUNK_FRAMES: usize = 1 << 16;
     let (rate, tau, range) = (SampleRate::SR_192K, 300.0, -60.0);
-    let c = f64::from(Seconds(tau).one_pole_coeff(rate) as f32);
+    let c = f64::from(Seconds::new(tau).one_pole_coeff(rate) as f32);
     let mut plain = 1.0f32;
     for _ in 0..1_000 {
         plain += -(c as f32) * plain;

@@ -6,8 +6,6 @@
 //! own and the all-pass of every later one (see `state.rs`), so each band's
 //! response is the product of those, in closed form.
 
-use core::f64::consts::PI;
-
 use tutti_units::{Db, Hz, SampleRate, Samples};
 
 use super::bands::{CrossoverError, MAX_BANDS, MAX_SPLITS, SOLVE_CEILING, check_bands, validate};
@@ -20,7 +18,7 @@ use crate::{Complex64, Lti, Ring, System};
 /// The sections' coefficients of the split at `hz` against `rate`, the frequency held under
 /// [`SOLVE_CEILING`] of the rate.
 fn solve_split(hz: Hz, rate: SampleRate) -> Tpt {
-    let hz = Hz(hz.get().min(SOLVE_CEILING * rate.get()));
+    let hz = Hz::new(hz.get().min(SOLVE_CEILING * rate.get()));
     Tpt::new(prewarp(hz, rate))
 }
 
@@ -88,7 +86,7 @@ impl CrossoverModel {
         let mut floor = 1.0f64;
         for (f, hz) in self.freqs.iter_mut().zip(&controls.frequencies) {
             floor = hz.get().max(floor).min(cap);
-            *f = Hz(floor);
+            *f = Hz::new(floor);
         }
         self.solve();
     }
@@ -96,11 +94,11 @@ impl CrossoverModel {
     /// A model of `bands` bands at `rate` before any design: every split at 1 kHz, with
     /// the coefficients of 1 kHz at 48 kHz. [`design_into`](Self::design_into) is what sets them.
     fn empty(bands: usize, rate: SampleRate) -> Self {
-        let split = solve_split(Hz(1_000.0), SampleRate::SR_48K);
+        let split = solve_split(Hz::new(1_000.0), SampleRate::SR_48K);
         Self {
             rate,
             bands,
-            freqs: [Hz(1_000.0); MAX_SPLITS],
+            freqs: [Hz::new(1_000.0); MAX_SPLITS],
             coeffs: [split; MAX_SPLITS],
         }
     }
@@ -167,7 +165,7 @@ impl Lti for CrossoverModel {
     fn frequency_response(&self, output: usize, freqs: &[Hz], gain: &mut [Complex64]) {
         for (g, f) in gain.iter_mut().zip(freqs) {
             *g = if output < self.bands {
-                let w = 2.0 * PI * f.get() / self.rate.get();
+                let w = f.angle_per_frame(self.rate).get();
                 let mut h = Complex64::new(1.0, 0.0);
                 for (j, c) in self.coeffs[..self.splits()].iter().enumerate() {
                     if j < output {

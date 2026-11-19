@@ -14,7 +14,7 @@ use tutti_transport::Transport;
 fn block(level: f32) -> OutputBlock<f32> {
     let rate = SampleRate::SR_48K;
     let transport = Transport::new(rate);
-    let (mut ed, exec) = Editor::new(Prepare::new(rate, MaxBlock::of(Samples(512))));
+    let (mut ed, exec) = Editor::new(Prepare::new(rate, MaxBlock::of(Samples::new(512))));
     ed.insert(NodeKey(1), "dc", Const::mono(level));
     ed.spec_mut().topology.set_outputs(vec![
         Source::Node(OutPort {

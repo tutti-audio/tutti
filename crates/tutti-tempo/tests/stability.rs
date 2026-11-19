@@ -52,13 +52,13 @@ fn ramps_match_decimal_figures() {
         ])
         .unwrap();
         for &(beat_in, sec_out, sec_in, beat_out) in case.rows {
-            let got = map.seconds_at(Beat(beat_in)).get();
+            let got = map.seconds_at(Beat::new(beat_in)).get();
             assert!(
                 close(got, sec_out),
                 "{} {shape:?} seconds_at({beat_in}) = {got:e}, want {sec_out:e}",
                 case.name
             );
-            let got = map.beat_at_seconds(Seconds(sec_in)).get();
+            let got = map.beat_at_seconds(Seconds::new(sec_in)).get();
             assert!(
                 close(got, beat_out),
                 "{} {shape:?} beat_at_seconds({sec_in}) = {got:e}, want {beat_out:e}",

@@ -57,13 +57,13 @@ impl DynamicEqConfig {
     /// between 4 and 9 kHz.
     #[must_use]
     pub fn de_esser(width: impl Into<ChannelLayout>, center: Hz) -> Self {
-        Self::new(width, center, Q(2.0))
-            .threshold(Db(-24.0))
-            .ratio(CompressionRatio(4.0))
-            .knee(Db(6.0))
-            .attack(Seconds(0.0005))
-            .release(Seconds(0.04))
-            .range(Db(10.0))
+        Self::new(width, center, Q::new(2.0))
+            .threshold(Db::new(-24.0))
+            .ratio(CompressionRatio::new(4.0))
+            .knee(Db::new(6.0))
+            .attack(Seconds::new(0.0005))
+            .release(Seconds::new(0.04))
+            .range(Db::new(10.0))
     }
 
     /// The level, in dB, at which the band starts to move.
@@ -293,16 +293,16 @@ mod tests {
     #[test]
     fn an_f64_kernel_with_zero_range_returns_a_wide_signal_unchanged() {
         let controls = DynamicEqControls {
-            threshold: Db(-60.0),
-            ratio: CompressionRatio(4.0),
-            range: Db(0.0),
+            threshold: Db::new(-60.0),
+            ratio: CompressionRatio::new(4.0),
+            range: Db::new(0.0),
             ..DynamicEqControls::DEFAULT
         };
         let mut k =
             DynamicEqKernel::<f64>::new(BusTopology::MONO, KeySource::Own, DynamicMode::Downward);
         k.prepare(
             SampleRate::SR_48K,
-            MaxBlock::of(tutti_units::Samples(2_000)),
+            MaxBlock::of(tutti_units::Samples::new(2_000)),
         );
         k.retarget(&controls);
         let x = wide_signal(2_000);

@@ -19,8 +19,9 @@ fn feed(rig: &mut BlockRig) {
 
 #[test]
 fn envelope_filter_process_is_allocation_free_with_the_base_moving() {
-    let config = EnvelopeFilterConfig::new(ChannelLayout::STEREO, Hz(400.0), SvfType::BandPass)
-        .depth(Semitones(36.0));
+    let config =
+        EnvelopeFilterConfig::new(ChannelLayout::STEREO, Hz::new(400.0), SvfType::BandPass)
+            .depth(Semitones::new(36.0));
     let (mut rig, controls) = BlockRig::new(
         EnvelopeFilterNode::<f32>::from(config),
         SampleRate::SR_48K,

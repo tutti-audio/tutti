@@ -1,18 +1,19 @@
 use super::*;
 use crate::RealFft;
 use crate::filter::crossover::CrossoverState;
+use core::f64::consts::PI;
 use tutti_buffers::Mono;
 
 const RATE: SampleRate = SampleRate::SR_48K;
 
 fn model(freqs: &[f64]) -> CrossoverModel {
-    let f: Vec<Hz> = freqs.iter().map(|&f| Hz(f)).collect();
+    let f: Vec<Hz> = freqs.iter().map(|&f| Hz::new(f)).collect();
     CrossoverModel::new(&f, RATE).unwrap()
 }
 
 fn at(m: &CrossoverModel, band: usize, f: f64) -> Complex64 {
     let mut g = [Complex64::new(0.0, 0.0)];
-    m.frequency_response(band, &[Hz(f)], &mut g);
+    m.frequency_response(band, &[Hz::new(f)], &mut g);
     g[0]
 }
 
@@ -106,7 +107,7 @@ fn the_two_bands_are_the_prewarped_bilinear_image_of_the_lr4_prototypes() {
 #[test]
 fn the_response_is_what_the_crossover_runs() {
     const N: usize = 1 << 15;
-    let freqs = [Hz(300.0), Hz(3_000.0)];
+    let freqs = [Hz::new(300.0), Hz::new(3_000.0)];
     let m = CrossoverModel::new(&freqs, RATE).unwrap();
     let mut xo = CrossoverState::<f64>::default();
     let c = m.coefficients();
@@ -154,7 +155,7 @@ fn the_radius_is_the_lowest_splits_butterworth_pole() {
 #[test]
 fn the_tail_covers_the_measured_ring_and_the_norms_bound_the_output() {
     const N: usize = 1 << 17;
-    let freqs = [Hz(80.0), Hz(2_000.0)];
+    let freqs = [Hz::new(80.0), Hz::new(2_000.0)];
     let m = CrossoverModel::new(&freqs, RATE).unwrap();
     let mut xo = CrossoverState::<f64>::default();
     let c = m.coefficients();
@@ -169,7 +170,7 @@ fn the_tail_covers_the_measured_ring_and_the_norms_bound_the_output() {
     let peak = env.iter().copied().fold(0.0, f64::max);
     let last = env.iter().rposition(|&v| v >= peak * 1e-3).unwrap();
     let took = ((last + 1) * win) as f64 / RATE.get();
-    let Ring::Finite(tail) = m.tail(Db(-60.0)) else {
+    let Ring::Finite(tail) = m.tail(Db::new(-60.0)) else {
         panic!("finite")
     };
     assert!(
@@ -198,7 +199,7 @@ fn the_tail_covers_the_measured_ring_and_the_norms_bound_the_output() {
 
 fn controls(low: f64, high: f64) -> CrossoverControls {
     CrossoverControls {
-        frequencies: [Hz(low), Hz(high), Hz::ZERO, Hz::ZERO, Hz::ZERO],
+        frequencies: [Hz::new(low), Hz::new(high), Hz::ZERO, Hz::ZERO, Hz::ZERO],
     }
 }
 

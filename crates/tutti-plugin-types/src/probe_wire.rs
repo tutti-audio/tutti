@@ -303,11 +303,11 @@ mod tests {
             Samples, StateHash, TailVerdict, Verdict,
         };
         let measured = |tail, latency| Measured {
-            tail: Some(Samples(8191)),
+            tail: Some(Samples::new(8191)),
             latency: None,
             config: ProbeConfig {
                 rate: SampleRate::SR_44K1,
-                block: MaxBlock::new(Samples(64)).unwrap(),
+                block: MaxBlock::new(Samples::new(64)).unwrap(),
                 floor: PROBE_FLOOR,
                 state: StateHash::of(b"state"),
             },
@@ -317,17 +317,17 @@ mod tests {
             (TailVerdict::Honest, LatencyVerdict::Honest),
             (
                 TailVerdict::TailLonger {
-                    reported: Samples(1),
-                    measured: Samples(2),
+                    reported: Samples::new(1),
+                    measured: Samples::new(2),
                 },
                 LatencyVerdict::LatencyDiffers {
-                    reported: Samples(0),
-                    measured: Samples(64),
+                    reported: Samples::new(0),
+                    measured: Samples::new(64),
                 },
             ),
             (
                 TailVerdict::NeverSettles {
-                    level: tutti_units::Db(-60.0),
+                    level: tutti_units::Db::new(-60.0),
                 },
                 LatencyVerdict::NotChecked(NotChecked::Silent),
             ),
@@ -355,7 +355,10 @@ mod tests {
     #[test]
     fn every_refusal_and_failure_survives_the_result_file() {
         use crate::{LoadStage, MaxBlock, PluginFormat, SampleRate, Samples};
-        let (rate, block) = (SampleRate::SR_48K, MaxBlock::new(Samples(512)).unwrap());
+        let (rate, block) = (
+            SampleRate::SR_48K,
+            MaxBlock::new(Samples::new(512)).unwrap(),
+        );
         let reason = || "the plugin's words".to_string();
         let refusals = [
             ProbeRefusal::Missing,

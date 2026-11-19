@@ -81,7 +81,7 @@ impl AudioScratch {
     /// No channels: what a pipeline holds until a slab is attached.
     /// Allocates nothing.
     pub(crate) fn empty(format: FloatWidth) -> Self {
-        Self::new(format, 0, Samples(0))
+        Self::new(format, 0, Samples::new(0))
     }
 
     /// Scratch in `format` for `channels` channels of `frames` frames each, in
@@ -89,7 +89,7 @@ impl AudioScratch {
     pub(crate) fn new(format: FloatWidth, channels: usize, frames: Samples) -> Self {
         fn shaped<T: Default + Clone>(channels: usize, frames: Samples) -> Channels<T> {
             (0..channels)
-                .map(|_| vec![T::default(); frames.0].into_boxed_slice())
+                .map(|_| vec![T::default(); frames.get()].into_boxed_slice())
                 .collect()
         }
         match format {
@@ -110,14 +110,14 @@ impl AudioScratch {
         Self::new(
             format,
             layout.input_channels().max(layout.output_channels()),
-            Samples(layout.samples_per_channel),
+            Samples::new(layout.samples_per_channel),
         )
     }
 
     /// Whether a block of `frames` over `channels` channels fits.
     pub(crate) fn fits(&self, channels: usize, frames: Samples) -> bool {
         fn holds<T>(bufs: &[Channel<T>], channels: usize, frames: Samples) -> bool {
-            bufs.len() >= channels && bufs.iter().all(|chan| chan.len() >= frames.0)
+            bufs.len() >= channels && bufs.iter().all(|chan| chan.len() >= frames.get())
         }
         match self {
             Self::F32 { input, output } => {
@@ -394,7 +394,7 @@ impl AudioPipeline {
         // flat, bus-ordered input view handed to the plugin's `process` (the
         // host crate splits it back into per-bus `AudioBusBuffers`).
         let num_channels = total_in.max(total_out);
-        if !self.scratch.fits(num_channels, Samples(num_samples)) {
+        if !self.scratch.fits(num_channels, Samples::new(num_samples)) {
             // A block the scratch cannot hold reads silence; the render side
             // checks this before it gets here (`RenderSide::block_fits`).
             self.plugin_output.clear();
@@ -632,7 +632,7 @@ fn block_midi(midi: &[WireMidi], frames: usize, out: &mut [UmpAt; MIDI_STACK_CAP
     if frames == 0 {
         return 0;
     }
-    let block = Samples(frames);
+    let block = Samples::new(frames);
     let mut n = 0;
     for e in midi.iter().take(MIDI_STACK_CAPACITY) {
         out[n] = (Offset::clamped(e.offset, block), e.ump);
@@ -657,7 +657,7 @@ fn render_block<S: Float>(
     let in_refs: ChannelTable<&[S]> = inputs.iter().map(|chan| &chan[..size]).collect();
     let mut out_refs: ChannelTable<&mut [S]> =
         outputs.iter_mut().map(|chan| &mut chan[..size]).collect();
-    let buffer = InputOutput::from_slices(Samples(size), &in_refs, &mut out_refs)
+    let buffer = InputOutput::from_slices(Samples::new(size), &in_refs, &mut out_refs)
         .map_err(|_| BlockFault("the block's channels differ in length"))?;
     render(plugin, &mut PluginIo { buffer, ctx, out }).map_err(BlockFault::of)
 }
@@ -694,9 +694,9 @@ mod tests {
         };
         assert_eq!((input.len(), output.len()), (3, 3));
         assert!(input.iter().chain(output.iter()).all(|c| c.len() == 512));
-        assert!(scratch.fits(3, Samples(512)));
-        assert!(!scratch.fits(4, Samples(512)), "one channel too wide");
-        assert!(!scratch.fits(3, Samples(513)), "one frame too long");
+        assert!(scratch.fits(3, Samples::new(512)));
+        assert!(!scratch.fits(4, Samples::new(512)), "one channel too wide");
+        assert!(!scratch.fits(3, Samples::new(513)), "one frame too long");
         assert!(AudioScratch::empty(FloatWidth::F32).fits(0, Samples::ZERO));
     }
 
@@ -728,7 +728,7 @@ mod tests {
         };
         let out = pipeline.process(&mut plugin, &mut shm, block);
         assert!(out.refused, "an empty scratch holds no block");
-        assert!(!pipeline.fits(2, Samples(N)));
+        assert!(!pipeline.fits(2, Samples::new(N)));
     }
 
     use tutti_plugin_ipc::SlabLayout;

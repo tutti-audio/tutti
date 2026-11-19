@@ -22,9 +22,9 @@
 //!
 //! let mut s = Session::builder()
 //!     .outputs_floor(ChannelLayout::MONO)
-//!     .outputs(ChannelLayout::MONO).max_block(MaxBlock::of(Samples(512))).build()
+//!     .outputs(ChannelLayout::MONO).max_block(MaxBlock::of(Samples::new(512))).build()
 //!     .unwrap();
-//! let (osc, _) = s.graph().add(ForkByClone(Osc::sine(Hz(1_000.0))));
+//! let (osc, _) = s.graph().add(ForkByClone(Osc::sine(Hz::new(1_000.0))));
 //! s.graph().connect(osc, Root).unwrap();
 //! s.update(); // commits: the graph was edited
 //!
@@ -69,7 +69,6 @@ mod bypass;
 mod clock;
 #[cfg(feature = "device")]
 mod device;
-mod edge;
 #[cfg(feature = "plugin")]
 mod editor;
 mod error;
@@ -165,7 +164,6 @@ pub use device::{
     Device, DeviceEvent, DeviceLatency, DeviceRestart, DeviceRestarted, LiveSession, RestartError,
     RestartOutcome,
 };
-pub use edge::EdgeGainError;
 #[cfg(feature = "plugin")]
 pub use editor::{Editor, EditorCallError, Opened};
 pub use error::{
@@ -311,10 +309,10 @@ pub use value::MidiPolicyTarget;
 pub use value::OutputPolicyTarget;
 pub use value::{
     AnyAssign, AnyTarget, Assign, AutomationTarget, ClickTargets, ClickVolumeTarget, CurveTarget,
-    DepthTarget, Effective, Info, IntoAssign, IntoRead, Knobs, LoopTarget, MacroTarget,
-    MeterTarget, MixTarget, ModeTarget, Modify, Moved, NodeSlots, ParamTarget, PolarityTarget,
-    RangeTarget, RateTarget, ScalarTarget, SetRefusal, SettingTarget, Target, TargetInfo,
-    TempoTarget, ValueError, ValueErrorKind,
+    DepthTarget, Effective, GainTarget, GainTargetError, Info, IntoAssign, IntoRead, Knobs,
+    LoopTarget, MacroTarget, MeterTarget, MixTarget, ModeTarget, Modify, Moved, NodeSlots,
+    ParamTarget, PolarityTarget, RangeTarget, RateTarget, ScalarTarget, SetRefusal, SettingTarget,
+    Target, TargetInfo, TempoTarget, ValueError, ValueErrorKind,
 };
 #[cfg(feature = "midi")]
 pub use value::{ClipEventsTarget, HarmonyTarget, MpeModeTarget, OutputLatencyTarget};

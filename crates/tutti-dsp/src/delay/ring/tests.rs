@@ -151,7 +151,7 @@ fn an_f32_read_at_9_9_seconds_and_a_third_of_a_frame_interpolates_at_that_fracti
         ring.push(n as f32);
     }
     let at = ReadPosition::of(
-        Seconds((WHOLE as f64 + 0.3) / 192_000.0),
+        Seconds::new((WHOLE as f64 + 0.3) / 192_000.0),
         SampleRate::SR_192K,
     );
     assert_eq!(at.frames().get(), WHOLE);

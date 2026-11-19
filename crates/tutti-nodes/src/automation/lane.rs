@@ -209,9 +209,9 @@ mod tests {
 
     fn ramp_trajectory() -> Trajectory<Hz> {
         let mut env: Trajectory<Hz> = Trajectory::new();
-        env.add_breakpoint(Breakpoint::new(Beat(0.0), Hz(0.0)));
-        env.add_breakpoint(Breakpoint::new(Beat(4.0), Hz(1.0)));
-        env.add_breakpoint(Breakpoint::new(Beat(8.0), Hz(0.5)));
+        env.add_breakpoint(Breakpoint::new(Beat::new(0.0), Hz::new(0.0)));
+        env.add_breakpoint(Breakpoint::new(Beat::new(4.0), Hz::new(1.0)));
+        env.add_breakpoint(Breakpoint::new(Beat::new(8.0), Hz::new(0.5)));
         env
     }
 
@@ -220,14 +220,14 @@ mod tests {
     fn render(lane: AutomationLaneNode, transport: TransportPosition, frames: usize) -> Vec<f32> {
         let mut solo = Solo::new(
             lane,
-            Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(frames))),
+            Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(frames))),
         );
         solo.renderer_mut().set_transport(transport);
         solo.render(frames).remove(0)
     }
 
     fn stopped_at(beat: f64) -> TransportPosition {
-        TransportPosition::new(false, Bpm::of(120.0), Beat(beat), None)
+        TransportPosition::new(false, Bpm::of(120.0), Beat::new(beat), None)
     }
 
     #[test]
@@ -246,10 +246,10 @@ mod tests {
     fn test_update_tracks_beat_position() {
         let lane = AutomationLaneNode::new(ramp_trajectory());
 
-        assert!((lane.value_at(Beat(0.0)) - 0.0).abs() < 0.01);
-        assert!((lane.value_at(Beat(2.0)) - 0.5).abs() < 0.01);
-        assert!((lane.value_at(Beat(4.0)) - 1.0).abs() < 0.01);
-        assert!((lane.value_at(Beat(6.0)) - 0.75).abs() < 0.01);
+        assert!((lane.value_at(Beat::new(0.0)) - 0.0).abs() < 0.01);
+        assert!((lane.value_at(Beat::new(2.0)) - 0.5).abs() < 0.01);
+        assert!((lane.value_at(Beat::new(4.0)) - 1.0).abs() < 0.01);
+        assert!((lane.value_at(Beat::new(6.0)) - 0.75).abs() < 0.01);
     }
 
     /// The transport hands an already-wrapped beat, so a lane at beat 6
@@ -258,7 +258,7 @@ mod tests {
     fn wrapped_beat_needs_no_loop_handling_in_the_lane() {
         let lane = AutomationLaneNode::new(ramp_trajectory());
         // A 4..8 loop wraps beat 10 to beat 6 in the transport.
-        let wrapped = lane.value_at(Beat(6.0));
+        let wrapped = lane.value_at(Beat::new(6.0));
         assert!(
             (wrapped - 0.75).abs() < 0.01,
             "expected ~0.75, got {wrapped}"
@@ -283,8 +283,8 @@ mod tests {
     #[test]
     fn test_reset_clears_last_value() {
         let mut flat: Trajectory<Hz> = Trajectory::new();
-        flat.add_breakpoint(Breakpoint::new(Beat(0.0), Hz(0.5)));
-        flat.add_breakpoint(Breakpoint::new(Beat(8.0), Hz(0.5)));
+        flat.add_breakpoint(Breakpoint::new(Beat::new(0.0), Hz::new(0.5)));
+        flat.add_breakpoint(Breakpoint::new(Beat::new(8.0), Hz::new(0.5)));
         let mut d = tutti_graph::contract::Direct::new(
             AutomationLaneNode::new(flat),
             SampleRate::SR_48K,
@@ -301,7 +301,7 @@ mod tests {
     fn test_empty_trajectory_returns_zero() {
         let empty: Trajectory<Hz> = Trajectory::new();
         let lane = AutomationLaneNode::new(empty);
-        assert_eq!(lane.value_at(Beat(5.0)), 0.0);
+        assert_eq!(lane.value_at(Beat::new(5.0)), 0.0);
         let empty: Trajectory<Hz> = Trajectory::new();
         let out = render(AutomationLaneNode::new(empty), stopped_at(5.0), 1);
         assert_eq!(out[0], 0.0);
@@ -327,8 +327,8 @@ mod tests {
     #[test]
     fn test_process_updates_last_value() {
         let mut flat: Trajectory<Hz> = Trajectory::new();
-        flat.add_breakpoint(Breakpoint::new(Beat(0.0), Hz(0.5)));
-        flat.add_breakpoint(Breakpoint::new(Beat(8.0), Hz(0.5)));
+        flat.add_breakpoint(Breakpoint::new(Beat::new(0.0), Hz::new(0.5)));
+        flat.add_breakpoint(Breakpoint::new(Beat::new(8.0), Hz::new(0.5)));
         let mut d = tutti_graph::contract::Direct::new(
             AutomationLaneNode::new(flat),
             SampleRate::SR_48K,
@@ -349,7 +349,7 @@ mod tests {
     #[test]
     fn test_process_per_sample_varies() {
         // 120 BPM at 48 kHz, rolling from beat 0.
-        let rolling = TransportPosition::new(true, Bpm::of(120.0), Beat(0.0), None);
+        let rolling = TransportPosition::new(true, Bpm::of(120.0), Beat::new(0.0), None);
         let out = render(AutomationLaneNode::new(ramp_trajectory()), rolling, 32);
 
         assert!((out[0] - 0.0).abs() < 0.001);
