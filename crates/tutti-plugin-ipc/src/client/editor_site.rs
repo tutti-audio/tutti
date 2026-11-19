@@ -26,9 +26,9 @@ use tutti_units::{Normalized, ParamId};
 #[derive(Debug)]
 pub enum EditorSite {
     /// An editor-only second instance of the plugin in this process.
-    InProcess(InProcessEditor),
+    InProcess(Box<InProcessEditor>),
     /// The served instance's own editor, in the server.
-    Served(ServedEditor),
+    Served(Box<ServedEditor>),
 }
 
 /// The editor-only instance in this process: loaded with the [`EditorLoader`]
@@ -84,7 +84,7 @@ impl EditorSite {
         loader: Option<EditorLoader>,
     ) -> Self {
         match loader {
-            Some(loader) => Self::InProcess(InProcessEditor {
+            Some(loader) => Self::InProcess(Box::new(InProcessEditor {
                 audio: audio.clone(),
                 origin,
                 format,
@@ -92,11 +92,11 @@ impl EditorSite {
                 gui: Mutex::new(None),
                 baseline: Mutex::new(None),
                 mirror: GuiMirror::new(),
-            }),
-            None => Self::Served(ServedEditor {
+            })),
+            None => Self::Served(Box::new(ServedEditor {
                 audio: audio.clone(),
                 remote: Mutex::new(RemoteEditor::new(audio.clone())),
-            }),
+            })),
         }
     }
 
