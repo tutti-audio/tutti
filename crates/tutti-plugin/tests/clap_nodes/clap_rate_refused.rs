@@ -84,10 +84,14 @@ fn refused_at(status: &PluginStatus, rate: f64) -> bool {
     matches!(status, PluginStatus::RateRefused { rate: r, reason } if r.get() == rate && !reason.is_empty())
 }
 
-/// Drive until `blocks` consecutive blocks are live, within a bounded budget.
+/// Drive until two consecutive blocks are live. Blocks are submitted faster
+/// than the server answers them and the bridge skips the ones it is behind on,
+/// so how many blocks that takes is the machine's; the wait is for the event,
+/// and only a hang ends it early.
 fn renders_live(unit: &mut Rig, handle: &PluginHandle) -> bool {
+    let deadline = Instant::now() + NOTICE_TIMEOUT;
     let mut live = 0;
-    for _ in 0..60 {
+    while Instant::now() < deadline {
         if drive_block(unit, handle).iter().all(|&s| s == LIVE) {
             live += 1;
             if live >= 2 {
