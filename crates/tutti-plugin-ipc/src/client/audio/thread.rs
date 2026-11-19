@@ -312,7 +312,7 @@ fn control_loop(
     }
     // The control command taken off its queue and not yet sent, with the end of
     // its wait for the blocks before it.
-    let mut held: Option<(Stamped<ControlCommand>, std::time::Instant)> = None;
+    let mut held: Option<(Stamped<ControlCommand>, tutti_platform::Instant)> = None;
     while live(lifecycle) {
         if held.is_none() {
             held = channels.pop_control().map(|cmd| {

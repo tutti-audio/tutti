@@ -27,6 +27,8 @@ tutti-units = { version = "0.0.1", path = "../tutti-units", default-features = f
 tutti-midi-ci = { version = "0.0.1", path = "../tutti-midi-ci", default-features = false }
 tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false }
 serde = { version = "1", optional = true, features = ["derive"] }
+# `Instant`, the one clock type.
+tutti-platform = { version = "0.0.1", path = "../tutti-platform" }
 
 [dev-dependencies]
 proptest = "1.9.0"

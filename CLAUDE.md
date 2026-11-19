@@ -24,6 +24,7 @@ cargo xtask test-all                       # every test tier CI runs
 cargo xtask doc                            # rustdoc as CI runs it
 cargo xtask check-loom                     # clippy under --cfg loom
 cargo xtask check-windows                  # Windows lints from Linux
+cargo xtask check-wasm                     # clippy for wasm32-unknown-unknown
 cargo xtask deny                           # needs cargo-deny 0.20.2 (`cargo install --locked`)
 ```
 
@@ -169,6 +170,8 @@ std only. A rule the compiler already enforces is not a gate.
   them forbids `unsafe`. Test-only `unsafe` is `tutti-fixtures`'.
 - Time, threads, thread priority, the main thread and denormal control come from
   `tutti-platform`; it names no tutti crate and holds only what needs a platform `cfg`.
+- Name `Instant` and `SystemTime::now` through `tutti_platform`; std's panic on wasm
+  (`cargo xtask check-platform`).
 - New lock-free or `unsafe` runtime structure goes in `tutti-rt`, with a loom model that
   runs the shipped code. The publish cell is the `arc-lend` crate from its own repository
   (github.com/tutti-audio/arc-lend); a change to it is made there.

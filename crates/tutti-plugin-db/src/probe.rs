@@ -12,8 +12,9 @@
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tracing::warn;
+use tutti_platform::Instant;
 use tutti_platform::StopToken;
 use tutti_plugin_ipc_ffi::{HOST_PID_ENV, Reaped};
 use tutti_plugin_types::{

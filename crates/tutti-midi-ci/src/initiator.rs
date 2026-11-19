@@ -65,8 +65,8 @@
 //! An inquiry waits [`PEER_REPLY_TIMEOUT`] for its reply.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::time::Instant;
 use std::vec::Vec;
+use tutti_platform::Instant;
 
 use super::Initiator;
 use super::TimeoutWait;

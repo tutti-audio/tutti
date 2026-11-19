@@ -1,8 +1,9 @@
 use super::*;
 use crate::Delivered;
 use crate::testing::{RATE, Rig, ports};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tutti_graph::Losses;
+use tutti_platform::Instant;
 
 use tutti_fixtures::midi;
 use tutti_midi_runtime::{InputInlets, InputWriters};

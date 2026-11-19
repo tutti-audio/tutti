@@ -2,7 +2,8 @@
 //! correction, the retransmit buffer, reordering and the idle declaration.
 
 use std::collections::VecDeque;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tutti_platform::Instant;
 
 use tutti_ump::Ump;
 

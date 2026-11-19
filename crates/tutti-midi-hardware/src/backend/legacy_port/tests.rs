@@ -1,6 +1,7 @@
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tutti_platform::Instant;
 
 use super::anchor::Anchor;
 use super::bytes::{ByteIn, ByteOut, Wire};

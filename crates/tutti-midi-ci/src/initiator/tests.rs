@@ -1,4 +1,5 @@
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tutti_platform::Instant;
 use tutti_ump::DeviceIdentity;
 use tutti_ump::{MidiChannel, MpeChannels, MpeOverlap, MpeZoneSpan, SoftwareRevision, U7};
 

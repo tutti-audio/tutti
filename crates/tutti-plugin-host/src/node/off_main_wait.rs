@@ -1,7 +1,8 @@
 //! The off-main deadline as a pure rule.
 
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tutti_platform::Instant;
 
 /// What an off-main call makes of its wait at an instant.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

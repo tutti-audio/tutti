@@ -7,7 +7,8 @@
 
 use crate::error::OsStatus;
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tutti_platform::Instant;
 
 /// How long a client creation keeps retrying, measured from the first attempt.
 /// It covers the server's restart of about five seconds with room to spare.

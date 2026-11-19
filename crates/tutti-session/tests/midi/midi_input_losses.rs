@@ -2,7 +2,9 @@
 //! had no room for, cumulative for the entry and carried across an unplug and a
 //! replug on the same cells.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use tutti_platform::Instant;
 
 use crate::common::blocks;
 use tutti_graph::Losses;

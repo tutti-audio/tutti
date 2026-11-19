@@ -15,9 +15,9 @@
 //! [`Phase::MidiOut`]: crate::Phase::MidiOut
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::time::Instant;
 use tutti_buffers::Float;
 use tutti_graph::UmpAt;
+use tutti_platform::Instant;
 
 use std::sync::Arc;
 use tutti_graph::{EventTapReader, NodeKey, Offset, TapEvent};

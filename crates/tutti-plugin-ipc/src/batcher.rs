@@ -73,9 +73,9 @@ use crate::{AudioBridge, AudioSlab, FATES, Fate, HarmonyInputs, Replies, SlabWri
 use std::ops::Range;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
-use std::time::Instant;
 use tutti_buffers::FloatWidth;
 use tutti_buffers::{Float, InputOutput, Planes, PlanesMut};
+use tutti_platform::Instant;
 use tutti_plugin_types::{
     BlockStatus, ChunkCounters, MidiEventVec, NoteExpressionChanges, ParameterChanges,
     TransportChanges, TransportInfo, WireMidi,

@@ -7,7 +7,8 @@
 //! what the inlets emit.
 
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tutti_platform::Instant;
 
 use tutti_fixtures::{BlockClock, EventRig};
 use tutti_graph::{EventEdge, EventIn, EventInletNode, EventOut, NodeKey};

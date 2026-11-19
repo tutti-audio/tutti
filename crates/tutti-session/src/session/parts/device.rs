@@ -1,6 +1,6 @@
 //! [`DevicePart`] with the `device` feature: the one-shot listing of the host's output devices.
 
-use std::time::Instant;
+use tutti_platform::Instant;
 
 use crate::SessionEvent;
 use crate::watch::OutputListing;

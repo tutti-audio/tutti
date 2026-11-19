@@ -54,6 +54,8 @@ tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false
 tutti-voicing = { version = "0.0.1", path = "../tutti-voicing" }
 vst3 = "0.3"
 tutti-vst3-ffi = { version = "0.0.1", path = "../tutti-vst3-ffi" }
+# `Instant`, the one clock type.
+tutti-platform = { version = "0.0.1", path = "../tutti-platform" }
 
 [build-dependencies]
 cc = "1"

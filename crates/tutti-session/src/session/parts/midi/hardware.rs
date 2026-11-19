@@ -7,7 +7,7 @@
 )]
 
 use std::sync::Arc;
-use std::time::Instant;
+use tutti_platform::Instant;
 
 use tutti_buffers::Float;
 use tutti_midi_device::MidiIdentity;

@@ -28,7 +28,9 @@
 //! timestamps are not mapped, and the next clock message starts the window
 //! over.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use tutti_platform::Instant;
 
 use tutti_units::{SampleRate, Seconds};
 

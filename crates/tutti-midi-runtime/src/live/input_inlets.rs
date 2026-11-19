@@ -52,7 +52,8 @@
 use std::num::NonZeroU64;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tutti_platform::Instant;
 
 use tutti_graph::{EventCapacity, EventInletNode, EventInletWriter, InletCounts, Losses, Stamp};
 use tutti_rt::Param64;

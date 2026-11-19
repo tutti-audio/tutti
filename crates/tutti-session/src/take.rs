@@ -1103,7 +1103,7 @@ fn write_silence<F: Float>(
 mod tests {
     use super::*;
     use std::sync::Mutex;
-    use std::time::Instant;
+    use tutti_platform::Instant;
     use tutti_units::Bpm;
 
     /// A sink that keeps what it is written.

@@ -3,7 +3,8 @@
 use std::os::fd::OwnedFd;
 use std::os::unix::net::UnixStream;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tutti_platform::Instant;
 
 use super::poll::{ErrorRun, read_fault, wait_fault};
 use crate::InputFault;

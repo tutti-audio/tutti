@@ -16,7 +16,8 @@ use crate::transport::state_chunk::{self, ChunkError, Reassembler};
 use crate::{BridgeMessage, HostMessage, ProcessAudioData};
 use crossbeam_channel::RecvTimeoutError;
 use std::collections::VecDeque;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tutti_platform::Instant;
 use tutti_plugin_types::{BridgeError, BridgeResult, ResyncKind, StateError};
 use tutti_plugin_types::{Deadline, MidiIntake};
 use tutti_plugin_types::{ParameterChanges, ParameterPoint, ParameterQueue};
@@ -980,14 +981,14 @@ pub(super) fn handle_setting(
             // `Timeouts::rate`. A slice that expires part-way through a frame
             // resumes it (`owed.partial`), so slicing never unframes the stream.
             let budget = lifecycle.timeouts().rate;
-            let deadline = std::time::Instant::now() + budget;
+            let deadline = tutti_platform::Instant::now() + budget;
             loop {
                 let reply = match next_reply(stream, inbox, owed, channels, RATE_SLICE)? {
                     None => {
                         if !lifecycle.is_running() {
                             return Ok(());
                         }
-                        if std::time::Instant::now() >= deadline {
+                        if tutti_platform::Instant::now() >= deadline {
                             // No answer is a refusal, not a dead connection: the
                             // plugin may still be re-activating. Its late reply
                             // is taken off the stream when it arrives

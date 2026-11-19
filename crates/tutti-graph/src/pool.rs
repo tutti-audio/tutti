@@ -73,7 +73,8 @@ use std::io;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::JoinHandle;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tutti_platform::Instant;
 
 use crate::{BlockWaits, Pool};
 use tutti_rt::{JobGate, Parker, Unparker, parker};

@@ -11,7 +11,8 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tutti_platform::Instant;
 use tutti_rt::LockExt;
 
 use tutti_graph::Offset;

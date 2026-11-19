@@ -9,7 +9,9 @@
 //!
 //! The Mach clock itself is `tutti-coremidi-ffi`'s (`host_ticks`, `Timebase`).
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use tutti_platform::Instant;
 
 use crate::stamp::Paired;
 use tutti_coremidi_ffi::{Timebase, host_ticks};

@@ -160,7 +160,7 @@
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use std::time::Instant;
+use tutti_platform::Instant;
 
 use tutti_graph::{Losses, Offset};
 use tutti_midi_ci::Muid;

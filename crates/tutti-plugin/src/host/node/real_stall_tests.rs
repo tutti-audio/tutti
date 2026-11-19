@@ -31,9 +31,11 @@
 //! release says *the budget elapsed, the block was abandoned, and the reply was
 //! later taken back off the socket*.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
 use tutti_buffers::MaxBlock;
 use tutti_buffers::Planes;
+use tutti_platform::Instant;
 
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{GraphBuilder, Prepare, Renderer};

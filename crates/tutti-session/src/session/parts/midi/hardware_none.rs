@@ -6,7 +6,7 @@
     expect(dead_code, reason = "a device restart (feature `device`) is the user")
 )]
 
-use std::time::Instant;
+use tutti_platform::Instant;
 
 use tutti_buffers::Float;
 use tutti_units::{SampleRate, Samples};

@@ -1,6 +1,8 @@
 //! [`Handshake`]: where an Initiator's opening inquiry stands.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use tutti_platform::Instant;
 
 use crate::deadline::Pending;
 

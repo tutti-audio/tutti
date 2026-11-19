@@ -2498,6 +2498,7 @@ version = "0.0.1"
 dependencies = [
  "libc",
  "thiserror 2.0.21",
+ "tutti-platform",
  "tutti-ump",
 ]
 
@@ -2540,6 +2541,7 @@ dependencies = [
  "tutti-graph",
  "tutti-midi-protocol",
  "tutti-music",
+ "tutti-platform",
  "tutti-plugin-types",
  "tutti-rt",
  "tutti-shared-plugin",
@@ -2627,6 +2629,7 @@ dependencies = [
  "clap-sys",
  "libc",
  "libloading 0.9.1",
+ "tutti-platform",
  "tutti-rt",
 ]
 
@@ -2664,6 +2667,7 @@ dependencies = [
  "objc2-core-midi",
  "objc2-foundation",
  "thiserror 2.0.21",
+ "tutti-platform",
  "tutti-ump",
 ]
 
@@ -2793,6 +2797,7 @@ dependencies = [
  "tutti-midi-ci",
  "tutti-midi-file",
  "tutti-midi-protocol",
+ "tutti-platform",
  "tutti-ump",
 ]
 
@@ -2869,6 +2874,7 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.21",
  "tutti-fixtures",
+ "tutti-platform",
  "tutti-ump",
  "tutti-units",
  "unicode-normalization",
@@ -2886,6 +2892,7 @@ dependencies = [
  "thiserror 2.0.21",
  "tutti-fixtures",
  "tutti-midi-ci",
+ "tutti-platform",
  "tutti-ump",
  "tutti-units",
 ]
@@ -2947,6 +2954,7 @@ dependencies = [
  "thiserror 2.0.21",
  "tutti-fixtures",
  "tutti-midi-ci",
+ "tutti-platform",
  "tutti-ump",
  "tutti-units",
 ]
@@ -2984,6 +2992,7 @@ dependencies = [
  "tutti-midi-device",
  "tutti-midi-protocol",
  "tutti-music",
+ "tutti-platform",
  "tutti-rt",
  "tutti-tempo",
  "tutti-transport",
@@ -3037,6 +3046,7 @@ dependencies = [
  "tutti-modulation",
  "tutti-music",
  "tutti-nodes",
+ "tutti-platform",
  "tutti-rt",
  "tutti-transport",
  "tutti-ump",
@@ -3114,6 +3124,7 @@ dependencies = [
  "tutti-fixtures",
  "tutti-graph",
  "tutti-midi-protocol",
+ "tutti-platform",
  "tutti-plugin",
  "tutti-plugin-db",
  "tutti-plugin-host",
@@ -3221,6 +3232,7 @@ dependencies = [
  "memmap2",
  "rustix",
  "thiserror 2.0.21",
+ "tutti-platform",
  "windows-sys",
 ]
 
@@ -3234,6 +3246,7 @@ dependencies = [
  "tutti-buffers",
  "tutti-clap-host",
  "tutti-graph",
+ "tutti-platform",
  "tutti-plugin-ipc-ffi",
  "tutti-plugin-types",
  "tutti-ump",
@@ -3661,6 +3674,7 @@ dependencies = [
  "tutti-buffers",
  "tutti-fixtures",
  "tutti-music",
+ "tutti-platform",
  "tutti-plugin-ipc-ffi",
  "tutti-plugin-types",
  "tutti-rt",
@@ -3687,6 +3701,7 @@ dependencies = [
  "tutti-fixtures",
  "tutti-graph",
  "tutti-midi-protocol",
+ "tutti-platform",
  "tutti-plugin-ipc-ffi",
  "tutti-plugin-types",
  "tutti-rt",
@@ -3707,6 +3722,7 @@ dependencies = [
  "thiserror 2.0.21",
  "tracing",
  "tutti-fixtures",
+ "tutti-platform",
  "tutti-ump",
  "windows-sys",
 ]

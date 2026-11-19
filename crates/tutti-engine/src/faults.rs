@@ -19,7 +19,8 @@
 use std::fmt::{self, Display, Write as _};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tutti_platform::Instant;
 
 use bytemuck::{Pod, Zeroable};
 use tutti_rt::{AudioThreadCell, Contended, Drained, FaultLatch, LockExt, SeqReader, SeqWriter};

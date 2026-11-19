@@ -18,7 +18,8 @@ use tutti_buffers::MaxBlock;
 use tutti_fixtures::machine_lock;
 
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tutti_platform::Instant;
 
 use tutti_graph::Prepare;
 use tutti_plugin_host::{PluginHandle, PluginStatus};

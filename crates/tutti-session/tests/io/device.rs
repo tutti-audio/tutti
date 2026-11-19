@@ -3,8 +3,9 @@
 
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tutti_buffers::InterleavedMut;
+use tutti_platform::Instant;
 
 use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_cpal::{DeviceId, DeviceSelector, Direction, Snapshot, SnapshotSource};

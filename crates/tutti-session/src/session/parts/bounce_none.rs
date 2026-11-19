@@ -1,7 +1,7 @@
 //! [`BouncePart`] without the `export` feature: no bounce runs, so the collect has nothing to
 //! drop or watch. `bounce::BounceState` is this module's twin when export is built.
 
-use std::time::Instant;
+use tutti_platform::Instant;
 
 /// No bounce is in flight.
 #[derive(Debug, Default)]

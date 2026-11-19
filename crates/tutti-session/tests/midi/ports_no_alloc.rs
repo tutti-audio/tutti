@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::Instant;
+use tutti_platform::Instant;
 
 use crate::common::{MF, play};
 use tutti_buffers::ChannelLayout;

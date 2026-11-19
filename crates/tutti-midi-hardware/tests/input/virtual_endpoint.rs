@@ -4,7 +4,9 @@
 //! Each test names its endpoints with its own process id, so tests (each its
 //! own process under nextest) and other clients on the machine do not meet.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use tutti_platform::Instant;
 
 use super::listener::Listener;
 

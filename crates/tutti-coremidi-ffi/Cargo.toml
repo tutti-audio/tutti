@@ -23,6 +23,8 @@ mach2 = { workspace = true }
 objc2 = { workspace = true }
 objc2-foundation = { workspace = true }
 objc2-core-midi = { workspace = true }
+# `Instant`, the one clock type.
+tutti-platform = { version = "0.0.1", path = "../tutti-platform" }
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]
 objc2-foundation = { workspace = true, features = ["NSDictionary"] }

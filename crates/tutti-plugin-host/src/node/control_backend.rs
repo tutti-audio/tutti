@@ -30,7 +30,8 @@
 
 use std::sync::Arc;
 use std::sync::mpsc::sync_channel;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tutti_platform::Instant;
 use tutti_plugin_types::{MainThreadMarker, MainWorkHandle, StateUse};
 use tutti_rt::ParkedSampleRate;
 

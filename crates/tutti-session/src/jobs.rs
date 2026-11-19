@@ -33,7 +33,8 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tutti_platform::Instant;
 
 use tutti_platform::ThreadHandle;
 use tutti_rt::LockExt;
@@ -574,7 +575,8 @@ mod tests {
     use super::*;
     use std::sync::Mutex;
     use std::sync::mpsc::sync_channel;
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
+    use tutti_platform::Instant;
     use tutti_units::SampleRate;
 
     fn session(builder: crate::SessionBuilder) -> crate::DetachedSession {

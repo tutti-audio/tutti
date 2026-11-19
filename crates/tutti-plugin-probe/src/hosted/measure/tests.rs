@@ -4,9 +4,9 @@
 //! with, never another render.
 
 use super::*;
-use std::time::Instant;
 use tutti_buffers::{ByWidth, Float};
 use tutti_graph::MAX_NODE_TAIL;
+use tutti_platform::Instant;
 use tutti_plugin_types::{PluginResult, Processing};
 
 /// A processor that answers a trigger with `delay` frames of nothing, then a

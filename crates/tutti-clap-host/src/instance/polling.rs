@@ -249,7 +249,7 @@ impl ClapLoaded {
     /// `on_timer` is `[main-thread]` (`ext/timer-support.h`), and a UI
     /// framework's tick need not run on the thread that loaded the plugin.
     pub fn poll_timers(&mut self, main: MainThreadMarker) -> usize {
-        self.poll_timers_at(main, std::time::Instant::now())
+        self.poll_timers_at(main, tutti_platform::Instant::now())
     }
 
     /// Like [`poll_timers`](Self::poll_timers), with the current time supplied
@@ -262,7 +262,7 @@ impl ClapLoaded {
     pub(crate) fn poll_timers_at(
         &mut self,
         main: MainThreadMarker,
-        now: std::time::Instant,
+        now: tutti_platform::Instant,
     ) -> usize {
         if !self.plugin.has_on_timer() {
             // Nothing can fire, so nothing is due: the per-block pass need not
@@ -358,7 +358,7 @@ impl ClapLoaded {
     /// (each restarting its period). Nothing is called: the plugin hears of
     /// them when [`take_requests_now`](Self::take_requests_now) hands them to
     /// the lifecycle, which serves them within its budget.
-    pub(crate) fn latch_wakeups(&mut self, ready: &[Ready], now: std::time::Instant) {
+    pub(crate) fn latch_wakeups(&mut self, ready: &[Ready], now: tutti_platform::Instant) {
         if let Ok(registered) = self.host_state.posix_fds.entries.lock() {
             for r in ready {
                 let Some(entry) = registered.iter().find(|e| e.fd == r.fd.get()) else {
@@ -429,7 +429,10 @@ fn flags_of(interest: Interest) -> u32 {
 
 /// Takes the timers due at `now`, each restarting its period, and caches the
 /// next deadline. They are fired one at a time by `fire_timer`.
-fn collect_due_timers(state: &crate::host::state::TimerState, now: std::time::Instant) -> Vec<u32> {
+fn collect_due_timers(
+    state: &crate::host::state::TimerState,
+    now: tutti_platform::Instant,
+) -> Vec<u32> {
     let due = match state.timers.lock() {
         Ok(mut timers) => take_due_timers(&mut timers, now),
         Err(_) => Vec::new(),
@@ -452,7 +455,7 @@ fn cache_next_deadline(state: &crate::host::state::TimerState) {
 /// fired.
 fn fire_due_timers(
     state: &crate::host::state::TimerState,
-    now: std::time::Instant,
+    now: tutti_platform::Instant,
     mut fire: impl FnMut(u32),
 ) -> usize {
     let due = match state.timers.lock() {
@@ -495,7 +498,7 @@ fn fire_due_timers(
 /// due again and fire it repeatedly to "catch up", which for a UI heartbeat
 /// means a burst of redraws after every stall. CLAP's timers are a periodic
 /// wake-up, not a budget to be reconciled.
-fn take_due_timers(timers: &mut [TimerEntry], now: std::time::Instant) -> Vec<u32> {
+fn take_due_timers(timers: &mut [TimerEntry], now: tutti_platform::Instant) -> Vec<u32> {
     let mut due = Vec::new();
     for timer in timers.iter_mut() {
         // `checked_duration_since` rather than `duration_since`: the latter
@@ -514,7 +517,8 @@ fn take_due_timers(timers: &mut [TimerEntry], now: std::time::Instant) -> Vec<u3
 #[cfg(test)]
 mod timer_due_tests {
     use super::*;
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
+    use tutti_platform::Instant;
 
     fn timer(id: u32, period_ms: u32, last_fire: Instant) -> TimerEntry {
         TimerEntry {
@@ -672,7 +676,8 @@ mod timer_due_tests {
 mod main_thread_work_tests {
     use super::*;
     use crate::host::state::TimerState;
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
+    use tutti_platform::Instant;
 
     /// **A timer's wake-up is its period after its last fire, and never less
     /// than the floor**: a timer that asks for a period of zero does not have

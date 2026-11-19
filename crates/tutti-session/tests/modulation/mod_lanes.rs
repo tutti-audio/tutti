@@ -17,7 +17,7 @@ use tutti_buffers::{InterleavedMut, PlanesMut};
 
 use std::cell::Cell;
 use std::sync::Arc;
-use std::time::Instant;
+use tutti_platform::Instant;
 
 use tutti_ump::{MidiChannel, NoteNumber, U7};
 

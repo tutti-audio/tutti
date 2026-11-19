@@ -23,7 +23,9 @@
 //! ordinary MIDI 1.0 device and not an error (a device that does not implement
 //! Device Inquiry simply never replies).
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use tutti_platform::Instant;
 
 use tutti_ump::{DeviceIdentity, IDENTITY_REQUEST, MidiGroup, Sysex7Packets, Ump};
 

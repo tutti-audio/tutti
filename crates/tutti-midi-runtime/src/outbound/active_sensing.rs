@@ -16,7 +16,9 @@
 //! sending for as long as it is polled: a transmitter that starts must go on
 //! (p. 32), so there is no stopping it but dropping it.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use tutti_platform::Instant;
 
 use tutti_ump::{Message, MidiGroup, System, Ump};
 
@@ -28,7 +30,8 @@ pub const ACTIVE_SENSING_INTERVAL: Duration = Duration::from_millis(270);
 /// The Active Sensing schedule of one output on one Group.
 ///
 /// ```
-/// use std::time::{Duration, Instant};
+/// use std::time::Duration;
+/// use tutti_platform::Instant;
 /// use tutti_midi_runtime::{ACTIVE_SENSING_INTERVAL, ActiveSensingSender};
 /// use tutti_ump::{Message, MidiGroup, System};
 ///

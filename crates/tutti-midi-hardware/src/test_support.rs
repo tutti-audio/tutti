@@ -199,7 +199,7 @@ impl FakeCounters {
         &self,
         id: EndpointId,
         ump: tutti_ump::Ump,
-        arrival: std::time::Instant,
+        arrival: tutti_platform::Instant,
     ) -> bool {
         let mut producers = self.producers.lock_recover();
         producers

@@ -113,10 +113,11 @@
 #![cfg(target_os = "macos")]
 
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tutti_au_ffi::Property;
 use tutti_au_ffi::property::{BypassEffect, Latency, PresentPreset};
 use tutti_au_host::types::{self, AudioComponentDescription, K_AUDIO_UNIT_TYPE_EFFECT};
+use tutti_platform::Instant;
 use tutti_rt::LockExt;
 
 mod support;

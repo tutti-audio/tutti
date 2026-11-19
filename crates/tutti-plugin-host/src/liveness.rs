@@ -20,7 +20,9 @@
 //! observes back to back, which would shrink a count alone to microseconds.
 //! A healthy observation resets both.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use tutti_platform::Instant;
 
 /// What a host believes about a plugin after an observation
 /// ([`Liveness::observe`]).

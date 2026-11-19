@@ -24,8 +24,9 @@ use tutti_session::{PluginChange, PluginEvent};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tutti_buffers::MaxBlock;
+use tutti_platform::Instant;
 
 use support::clap_probe;
 use tutti_buffers::ChannelLayout;

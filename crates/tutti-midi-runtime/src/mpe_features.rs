@@ -9,7 +9,7 @@
 //! settles with. The two live here because `MpeFeatures` is the protocol
 //! crate's and the Initiator the device crate's, and neither names the other.
 
-use std::time::Instant;
+use tutti_platform::Instant;
 
 use tutti_midi_ci::{
     CiDeviceId, DetailsData, InquiryTarget, Nak, ProfileAction, ProfileId, ProfileInitiator,

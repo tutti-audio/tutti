@@ -58,6 +58,8 @@ tutti-plugin-types = { path = "../tutti-plugin-types", features = ["contract"] }
 tutti-graph = { path = "../tutti-graph" }
 tutti-fixtures = { path = "../../testing/tutti-fixtures", features = ["plugin", "au"] }
 assert_no_alloc = { version = "1", default-features = false }
+# `Instant`, the one clock type.
+tutti-platform = { path = "../tutti-platform" }
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]
 # The raw calls the tests build beside the safe API.

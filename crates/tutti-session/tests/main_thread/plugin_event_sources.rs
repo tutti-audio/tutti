@@ -110,10 +110,10 @@ fn an_in_process_editors_timer_is_served_by_the_views_update() {
 
     let main = tutti_fixtures::main_thread();
     // Updates until the timer is served: a hang guard, not a speed claim.
-    let guard = std::time::Instant::now() + Duration::from_secs(60);
+    let guard = tutti_platform::Instant::now() + Duration::from_secs(60);
     while ticks() == 0 {
         assert!(
-            std::time::Instant::now() < guard,
+            tutti_platform::Instant::now() < guard,
             "the view's update never served the timer"
         );
         let _ = s.update_on(main);

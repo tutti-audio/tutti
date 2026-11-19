@@ -30,6 +30,8 @@ tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false
 winnow = { workspace = true }
 miniz_oxide = { version = "0.9.1", default-features = false, features = ["with-alloc"] }
 serde = { version = "1", optional = true, features = ["derive"] }
+# `Instant`, the one clock type.
+tutti-platform = { version = "0.0.1", path = "../tutti-platform" }
 
 [dev-dependencies]
 proptest = "1.9.0"

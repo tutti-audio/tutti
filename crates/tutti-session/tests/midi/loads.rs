@@ -8,7 +8,8 @@
 //! microseconds is a quarter note in half a second.
 
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tutti_platform::Instant;
 
 use tutti_midi_file::{Normalized, TimelineDrop};
 use tutti_music::TimeSignature;
@@ -300,7 +301,7 @@ mod soundfont {
 
     /// Updates until the entry under `key` is no longer pending.
     fn settled(s: &mut DetachedSession, key: &'static str) -> PoolState {
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        let deadline = tutti_platform::Instant::now() + std::time::Duration::from_secs(20);
         loop {
             let _ = s.update();
             match s.pool_state(&key) {
@@ -309,7 +310,7 @@ mod soundfont {
                 None => panic!("the entry is not declared"),
             }
             assert!(
-                std::time::Instant::now() < deadline,
+                tutti_platform::Instant::now() < deadline,
                 "the font never landed"
             );
             std::thread::sleep(std::time::Duration::from_millis(1));

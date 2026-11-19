@@ -7,8 +7,9 @@
 
 use std::sync::OnceLock;
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tutti_buffers::PlanesMut;
+use tutti_platform::Instant;
 
 use tutti_clap_test_plugin::{ClapProbe, ClapSwitch, Site, ThreadAnswer};
 

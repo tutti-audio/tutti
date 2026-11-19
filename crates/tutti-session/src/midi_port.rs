@@ -1064,7 +1064,7 @@ impl Ports {
         graph: &mut crate::graph::Graph<F>,
         rate: tutti_units::SampleRate,
         events: Vec<tutti_midi_device::DeviceEvent>,
-        now: std::time::Instant,
+        now: tutti_platform::Instant,
         out: &mut Vec<SessionEvent>,
     ) -> Edits {
         let mut edits = Edits::default();
@@ -1289,7 +1289,7 @@ impl Ports {
         &mut self,
         io: &mut MidiSession,
         graph: &mut crate::graph::Graph<F>,
-        now: std::time::Instant,
+        now: tutti_platform::Instant,
         out: &mut Vec<SessionEvent>,
     ) -> Edits {
         let mut edits = Edits::default();

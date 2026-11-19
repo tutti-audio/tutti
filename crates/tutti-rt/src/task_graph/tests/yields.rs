@@ -12,7 +12,8 @@ use super::*;
 fn the_caller_yields_while_a_helper_holds_a_task() {
     use std::sync::atomic::AtomicU32;
     use std::sync::mpsc;
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
+    use tutti_platform::Instant;
     static YIELDED: AtomicU32 = AtomicU32::new(0);
     // 0 → 1: while the helper holds 0, the caller has nothing to take.
     let mut g = TaskGraph::new(&[0, 1], &[0, 1, 1], &[1]);
@@ -63,7 +64,8 @@ fn the_caller_yields_while_a_helper_holds_a_task() {
 fn the_caller_yields_after_the_pools_budget() {
     use std::sync::atomic::AtomicU32;
     use std::sync::mpsc;
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
+    use tutti_platform::Instant;
     static YIELDED: AtomicU32 = AtomicU32::new(0);
     static READ: AtomicU32 = AtomicU32::new(0);
     const READS: u32 = 8;

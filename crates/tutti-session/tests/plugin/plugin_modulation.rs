@@ -16,7 +16,9 @@ use tutti_buffers::{InterleavedMut, PlanesMut};
 use tutti_session::Root;
 use tutti_session::{PluginChange, PluginEvent};
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use tutti_platform::Instant;
 
 use support::clap_probe;
 use tutti_buffers::ChannelLayout;

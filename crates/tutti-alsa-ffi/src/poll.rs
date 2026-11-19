@@ -7,7 +7,8 @@
 use std::io;
 use std::os::fd::{AsRawFd, OwnedFd, RawFd};
 use std::os::raw::{c_short, c_uint};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tutti_platform::Instant;
 
 use crate::client::Client;
 use crate::error::{Operation, Result, check};

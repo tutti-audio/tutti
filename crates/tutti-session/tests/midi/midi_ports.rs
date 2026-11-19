@@ -3,7 +3,7 @@
 //! fake OS plugs and unplugs the devices.
 
 use std::collections::BTreeSet;
-use std::time::Instant;
+use tutti_platform::Instant;
 
 use crate::common::{MF, Seen, blocks, note, play, tap};
 use tutti_fixtures::midi;
@@ -886,10 +886,13 @@ fn sent_until(
     what: &str,
     done: impl Fn(&[tutti_ump::Ump]) -> bool,
 ) -> Vec<tutti_ump::Ump> {
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    let deadline = tutti_platform::Instant::now() + std::time::Duration::from_secs(30);
     let mut sent = Vec::new();
     while !done(&sent) {
-        assert!(std::time::Instant::now() < deadline, "{what}: {sent:?}");
+        assert!(
+            tutti_platform::Instant::now() < deadline,
+            "{what}: {sent:?}"
+        );
         std::thread::sleep(std::time::Duration::from_millis(5));
         sent.extend(sent_by_the_port(fake));
     }

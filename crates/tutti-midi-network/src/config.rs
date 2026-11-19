@@ -276,7 +276,7 @@ mod tests {
 
     #[test]
     fn no_timer_is_past_an_hour_so_no_instant_overflows() {
-        let now = std::time::Instant::now();
+        let now = tutti_platform::Instant::now();
         assert!(now.checked_add(TIMER_MAX).is_some());
         assert!(Timer::new(TIMER_MAX + Duration::from_nanos(1)).is_none());
     }

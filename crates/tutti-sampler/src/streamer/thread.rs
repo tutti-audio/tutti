@@ -257,7 +257,8 @@ impl<F: RingFloat> Manual<F> {
 #[cfg(test)]
 mod tests {
     use std::thread;
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
+    use tutti_platform::Instant;
 
     use super::*;
     use crate::streamer::command::StreamId;

@@ -1,6 +1,6 @@
 //! The render-thread fault records under `AllocDisabler`.
 
-use std::time::Instant;
+use tutti_platform::Instant;
 
 use tutti_engine::{BackendErrorKind, StreamFaultKind, StreamFaults};
 

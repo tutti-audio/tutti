@@ -7,7 +7,8 @@
 //! beat through the tempo map (2 s at 120 bpm is beat 4).
 
 use crate::common::blocks;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tutti_platform::Instant;
 
 use tutti_midi_device::EndpointId;
 use tutti_midi_hardware::test_support::{FakeBackend, FakeCounters, endpoint};

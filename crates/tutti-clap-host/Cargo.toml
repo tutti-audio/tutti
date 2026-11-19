@@ -36,10 +36,10 @@ tutti-voicing = { version = "0.0.1", path = "../tutti-voicing" }
 tutti-graph = { version = "0.0.1", path = "../tutti-graph" }
 # The sample width `Float` and the block view `InputOutput` a block is processed in.
 tutti-buffers = { version = "0.0.1", path = "../tutti-buffers" }
+# `Instant`, the one clock type; `MainThreadMarker`, the token the threading conformance suite makes.
+tutti-platform = { version = "0.0.1", path = "../tutti-platform" }
 
 [dev-dependencies]
-# `MainThreadMarker`: the token the threading conformance suite makes.
-tutti-platform = { version = "0.0.1", path = "../tutti-platform" }
 # The README's editor example takes any `raw-window-handle` window.
 raw-window-handle = "0.6"
 tutti-clap-ffi = { path = "../tutti-clap-ffi", features = ["testing"] }

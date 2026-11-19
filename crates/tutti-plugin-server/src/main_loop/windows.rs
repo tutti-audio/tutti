@@ -63,7 +63,8 @@ pub(crate) fn wait_readable(
     wake: &Bell,
 ) -> BridgeResult<bool> {
     use std::os::windows::io::AsHandle;
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
+    use tutti_platform::Instant;
 
     /// Polls served by `yield_now` before any sleeping starts.
     const SPIN_POLLS: u32 = 64;

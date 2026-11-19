@@ -12,7 +12,9 @@
 
 #![allow(dead_code)]
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use tutti_platform::Instant;
 
 use tutti_clap_test_plugin::EXTRA_PARAM_BASE;
 use tutti_modulation::ControlProgram;

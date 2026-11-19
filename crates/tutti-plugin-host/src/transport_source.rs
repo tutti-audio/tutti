@@ -648,10 +648,10 @@ impl BlockTransport<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Instant;
     use tutti_graph::{Env, TransportChanges, TransportHistory, TransportPosition};
     use tutti_music::FrameClock;
     use tutti_music::{BeatsPerBar, MeterChange, NoteValue, TimeSignature};
+    use tutti_platform::Instant;
     use tutti_tempo::TempoMap;
     use tutti_units::BarNumber;
     use tutti_units::Latency;
