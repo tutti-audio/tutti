@@ -38,7 +38,7 @@ use crate::capability::{OsEndpoint, carries_midi2_only, from_os, legacy};
 use crate::devices::ChangeSink;
 use crate::devices::reporter::os_devices;
 use crate::endpoints::{DeviceOut, InputConnection, MidiEndpoints, Watch};
-use crate::error::{MidiHardwareError, NotFound, Result};
+use crate::error::{NotFound, Result};
 use tutti_coremidi_ffi::{
     Endpoint as OsObject, InputPort, OutputPort, SharedClient, UmpEndpointInfo, UmpEndpointsError,
     UniqueId, ump_endpoints,
