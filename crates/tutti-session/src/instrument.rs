@@ -35,13 +35,13 @@
 //! volume cell. Neither takes `&mut` of anything in the graph.
 
 use tutti_graph::NodeKey;
-use tutti_graph::{EventInletNode, Instrument, ParamSet};
+use tutti_graph::{EventInletNode, Instrument};
 use tutti_midi_runtime::{LIVE_INLET_CAPACITY, MidiKeys};
 use tutti_nodes::BusStripNode;
 use tutti_ump::MidiGroup;
-use tutti_units::{Amplitude, UnitParam};
+use tutti_units::Amplitude;
 
-use crate::{Feeder, Graph, Key, OutPort, RemoveError, Root, Session, SessionNode};
+use crate::{Feeder, Graph, Key, OutPort, ParamTarget, RemoveError, Root, Session, SessionNode};
 
 /// The type of an instrument's key when the session was given a node by its
 /// [`NodeKey`] ([`Session::instrument`]), so its type is not known. A [`Key`]
@@ -103,7 +103,6 @@ pub struct InstrumentHandle<N: ?Sized = AnyNode> {
     strip: Key<BusStripNode>,
     queue: Key<EventInletNode>,
     keys: MidiKeys,
-    strip_params: ParamSet,
 }
 
 impl<N: ?Sized> std::fmt::Debug for InstrumentHandle<N> {
@@ -136,7 +135,6 @@ impl<N: ?Sized> InstrumentHandle<N> {
             strip: self.strip,
             queue: self.queue,
             keys: self.keys,
-            strip_params: self.strip_params,
         }
     }
 
@@ -182,11 +180,12 @@ impl<N: ?Sized> InstrumentHandle<N> {
         &mut self.keys
     }
 
-    /// Sets the gain after the instrument's main pair, a linear amplitude.
-    /// A store into the strip's cell, read once per block.
-    pub fn set_gain(&self, gain: Amplitude) {
-        // The param cell is an `f32` word: the gain narrows once.
-        self.strip_params.set(UnitParam::Volume, gain.get());
+    /// The gain after the instrument's main pair, a linear amplitude: the
+    /// strip's volume, read by the strip once per block.
+    /// `session.set(handle.gain().to(Amplitude::new(0.5)))` writes it.
+    #[must_use]
+    pub fn gain(&self) -> ParamTarget<Amplitude> {
+        self.strip.volume()
     }
 }
 
@@ -350,7 +349,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
         let graph = self.graph();
         let (queue, keys) = open_keys(graph);
         graph.set_feed(node, Feeder::Instrument, vec![queue.events_out()]);
-        let (strip, strip_params) = graph.add(BusStripNode::stereo());
+        let (strip, _) = graph.add(BusStripNode::stereo());
         graph.connect(OutPort::new(node, usize::from(main[0])), strip.input(0))?;
         graph.connect(OutPort::new(node, usize::from(main[1])), strip.input(1))?;
         Ok(InstrumentHandle {
@@ -359,7 +358,6 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
             strip,
             queue,
             keys,
-            strip_params,
         })
     }
 }

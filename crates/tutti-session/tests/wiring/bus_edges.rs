@@ -11,9 +11,9 @@ use tutti_buffers::{FoldError, InterleavedMut};
 use tutti_graph::{BusError, BusRef, BusSource, Buses, NodeKey, Unforkable};
 use tutti_graph::{Cx, Io, Node, Prepare, Shape, Status};
 use tutti_session::{
-    Committed, ConnectError, Edge, EdgeGainError, InPort, OutPort, Root, Session, SessionEvent,
+    Committed, ConnectError, Edge, GainTarget, GainTargetError, InPort, OutPort, Root, Session,
+    SessionEvent,
 };
-use tutti_units::Amplitude;
 
 const BLOCK: usize = 64;
 
@@ -262,11 +262,11 @@ fn a_refused_bus_edge_changes_nothing() {
     assert!(g.bus_sources(BusRef::new(r.sink, 0)).unwrap().is_empty());
 }
 
-/// The weights of a bus edge's lanes are the fold's: the session refuses an
-/// edge gain on a lane by name, and removing a node takes its bus edges with
-/// it so the next commit stands.
+/// The weights of a bus edge's lanes are the fold's: a gain target of a lane is
+/// refused by name, and removing a node takes its bus edges with it so the
+/// next commit stands.
 #[test]
-fn a_lane_takes_no_session_gain_and_a_removed_node_takes_its_bus_edges() {
+fn a_lane_has_no_gain_target_and_a_removed_node_takes_its_bus_edges() {
     let mut r = rig();
     let g = r.s.graph();
     g.connect(BusSource::Node(bus(r.stereo)), bus(r.sink))
@@ -274,8 +274,8 @@ fn a_lane_takes_no_session_gain_and_a_removed_node_takes_its_bus_edges() {
         .hard();
     let lane = Edge::new(OutPort::new(r.stereo, 0), InPort::new(r.sink, 0));
     assert_eq!(
-        lane.set_gain(g, Amplitude::new(0.5)),
-        Err(EdgeGainError::BusLane(lane))
+        GainTarget::of(g, lane.source(), lane.sink()),
+        Err(GainTargetError::BusLane(lane))
     );
     assert!(all_are(&out0(&mut r.s), 0.5));
 
