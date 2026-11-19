@@ -1095,7 +1095,7 @@ fn a_midi_ci_peer_that_answers_discovery_is_in_the_ports_info() {
                     to: header.source,
                     data,
                 };
-                answers.extend(reply.packets(MidiGroup::FIRST));
+                answers.extend(reply.packets(MidiGroup::FIRST).unwrap());
             }
         }
         for ump in answers {
@@ -1229,7 +1229,8 @@ fn a_midi_ci_peers_profiles_are_listed_and_switched_through_the_session() {
                             to: header.source,
                             data,
                         }
-                        .packets(MidiGroup::FIRST),
+                        .packets(MidiGroup::FIRST)
+                        .unwrap(),
                     );
                 }
                 Decoded::Message(CiMessage::ProfileInquiry { header, .. }) => {
@@ -1249,7 +1250,8 @@ fn a_midi_ci_peers_profiles_are_listed_and_switched_through_the_session() {
                                 to: header.source,
                                 profiles: lists,
                             }
-                            .packets(MidiGroup::FIRST),
+                            .packets(MidiGroup::FIRST)
+                            .unwrap(),
                         );
                     }
                 }
@@ -1262,7 +1264,8 @@ fn a_midi_ci_peers_profiles_are_listed_and_switched_through_the_session() {
                             target,
                             profile,
                         }
-                        .packets(MidiGroup::FIRST),
+                        .packets(MidiGroup::FIRST)
+                        .unwrap(),
                     );
                 }
                 _ => {}
@@ -1303,7 +1306,7 @@ fn a_midi_ci_peers_profiles_are_listed_and_switched_through_the_session() {
     ));
     let say = |s: &mut Session, message: CiMessage| {
         let now = Instant::now();
-        for ump in message.packets(MidiGroup::FIRST) {
+        for ump in message.packets(MidiGroup::FIRST).unwrap() {
             assert!(fake.send_input(raw, ump, now));
         }
         for ms in 0..4 {
@@ -1503,7 +1506,8 @@ impl MpePeer {
                             to: header.source,
                             data,
                         }
-                        .packets(MidiGroup::FIRST),
+                        .packets(MidiGroup::FIRST)
+                        .unwrap(),
                     );
                 }
                 Decoded::Message(CiMessage::ProfileInquiry { header, .. }) => {
@@ -1523,7 +1527,8 @@ impl MpePeer {
                                 to: header.source,
                                 profiles: lists,
                             }
-                            .packets(MidiGroup::FIRST),
+                            .packets(MidiGroup::FIRST)
+                            .unwrap(),
                         );
                     }
                 }
@@ -1536,7 +1541,8 @@ impl MpePeer {
                                 target,
                                 profile: ProfileId::MPE,
                             }
-                            .packets(MidiGroup::FIRST),
+                            .packets(MidiGroup::FIRST)
+                            .unwrap(),
                         ),
                         Reply::Refuse => answers.extend(
                             CiMessage::Nak {
@@ -1547,7 +1553,8 @@ impl MpePeer {
                                     NakStatus::ProfileNotSupported,
                                 ),
                             }
-                            .packets(MidiGroup::FIRST),
+                            .packets(MidiGroup::FIRST)
+                            .unwrap(),
                         ),
                         Reply::Silent => {}
                     }
@@ -1567,7 +1574,8 @@ impl MpePeer {
                             },
                             profile: ProfileId::MPE,
                         }
-                        .packets(MidiGroup::FIRST),
+                        .packets(MidiGroup::FIRST)
+                        .unwrap(),
                     ),
                     Reply::Refuse => answers.extend(
                         CiMessage::Nak {
@@ -1578,7 +1586,8 @@ impl MpePeer {
                                 NakStatus::ProfileNotSupported,
                             ),
                         }
-                        .packets(MidiGroup::FIRST),
+                        .packets(MidiGroup::FIRST)
+                        .unwrap(),
                     ),
                     Reply::Silent => {}
                 },
@@ -1589,7 +1598,8 @@ impl MpePeer {
                             to: header.source,
                             features: tutti_midi_device::ProcessFeatures::MIDI_MESSAGE_REPORT,
                         }
-                        .packets(MidiGroup::FIRST),
+                        .packets(MidiGroup::FIRST)
+                        .unwrap(),
                     ),
                 Decoded::Message(CiMessage::MessageReportInquiry { header, scope, .. }) => {
                     match self.report {
@@ -1600,7 +1610,8 @@ impl MpePeer {
                                     to: header.source,
                                     scope,
                                 }
-                                .packets(MidiGroup::FIRST),
+                                .packets(MidiGroup::FIRST)
+                                .unwrap(),
                             );
                             answers.push(midi::m1_note_on(
                                 MidiChannel::of(0),
@@ -1612,7 +1623,8 @@ impl MpePeer {
                                     header: at(header.device_id),
                                     to: header.source,
                                 }
-                                .packets(MidiGroup::FIRST),
+                                .packets(MidiGroup::FIRST)
+                                .unwrap(),
                             );
                         }
                         Reply::Refuse => answers.extend(
@@ -1624,7 +1636,8 @@ impl MpePeer {
                                     NakStatus::Terminate(PeTerminator::Responder),
                                 ),
                             }
-                            .packets(MidiGroup::FIRST),
+                            .packets(MidiGroup::FIRST)
+                            .unwrap(),
                         ),
                         Reply::Silent => {}
                     }
@@ -1910,7 +1923,8 @@ fn a_midi_ci_peers_message_report_is_asked_for_through_the_session() {
                             to: header.source,
                             data,
                         }
-                        .packets(MidiGroup::FIRST),
+                        .packets(MidiGroup::FIRST)
+                        .unwrap(),
                     );
                 }
                 Decoded::Message(CiMessage::ProcessCapabilitiesInquiry { header, .. }) => {
@@ -1920,7 +1934,8 @@ fn a_midi_ci_peers_message_report_is_asked_for_through_the_session() {
                             to: header.source,
                             features: ProcessFeatures::MIDI_MESSAGE_REPORT,
                         }
-                        .packets(MidiGroup::FIRST),
+                        .packets(MidiGroup::FIRST)
+                        .unwrap(),
                     );
                 }
                 Decoded::Message(CiMessage::MessageReportInquiry {
@@ -1936,14 +1951,16 @@ fn a_midi_ci_peers_message_report_is_asked_for_through_the_session() {
                             to: header.source,
                             scope,
                         }
-                        .packets(MidiGroup::FIRST),
+                        .packets(MidiGroup::FIRST)
+                        .unwrap(),
                     );
                     answers.extend(
                         CiMessage::MessageReportEnd {
                             header: at(header.device_id),
                             to: header.source,
                         }
-                        .packets(MidiGroup::FIRST),
+                        .packets(MidiGroup::FIRST)
+                        .unwrap(),
                     );
                 }
                 _ => {}

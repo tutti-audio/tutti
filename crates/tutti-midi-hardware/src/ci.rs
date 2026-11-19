@@ -1317,10 +1317,12 @@ impl Member {
 fn send(out: &mut OpenOutput, sends: &[(MidiGroup, CiMessage)]) -> Losses {
     let mut refused = 0;
     for (group, message) in sends {
-        let packets: Vec<_> = message
-            .packets(*group)
-            .map(|ump| (Offset::ZERO, ump))
-            .collect();
+        let Ok(unsent) = message.packets(*group) else {
+            refused += 1;
+            tracing::debug!("a MIDI-CI message encoded a byte that is not 7-bit");
+            continue;
+        };
+        let packets: Vec<_> = unsent.map(|ump| (Offset::ZERO, ump)).collect();
         if !out.queue(&packets).is_all(&packets) {
             refused += 1;
             tracing::debug!("a MIDI-CI message was refused by {}", out.name());
@@ -1377,7 +1379,7 @@ mod tests {
             header: CiHeader::new(Muid::of(0x0012_3456)),
             data: DiscoveryData::new(identity(), CiCategories::empty(), MaxSysexSize::of(256)),
         };
-        let packets = message.packets(G0).count();
+        let packets = message.packets(G0).unwrap().count();
         assert!(packets >= 2, "a message of several packets");
         let (mut out, counters) = output_taking(packets - 1);
         assert_eq!(send(&mut out, &[(G0, message.clone())]), Losses::refused(1));
@@ -1446,7 +1448,7 @@ mod tests {
             header: CiHeader::new(Muid::of(0x0012_3456)),
             data: DiscoveryData::new(identity(), CiCategories::empty(), MaxSysexSize::of(256)),
         };
-        let packets: Vec<Ump> = message.packets(G0).collect();
+        let packets: Vec<Ump> = message.packets(G0).unwrap().collect();
         assert!(packets.len() >= 2);
         let (head, tail) = packets.split_at(packets.len() / 2);
         for (ms, part) in [(1, head), (2, tail)] {

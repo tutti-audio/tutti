@@ -764,7 +764,10 @@ impl ProfileOnRequest {
 
     /// The message as SysEx7 packets on `group` (M2-104 section 7.7).
     pub fn packets(self, group: MidiGroup) -> std::vec::IntoIter<Ump> {
+        // Every field is a 7-bit value: the Profile Id and the count are
+        // range-checked and the MUIDs are Broadcast.
         sysex7_packets(group, &self.encode())
+            .unwrap_or_else(|_| unreachable!("a Set Profile On has only 7-bit fields"))
     }
 }
 

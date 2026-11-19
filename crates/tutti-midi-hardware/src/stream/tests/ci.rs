@@ -25,7 +25,7 @@ pub(super) fn ci_sent(wire: &Wire) -> Vec<(MidiGroup, CiMessage)> {
 
 /// The device says `message` on `group` at `ms`.
 fn say(wire: &Wire, group: MidiGroup, message: &CiMessage, ms: u64) {
-    reply_at(wire, message.packets(group).collect(), ms);
+    reply_at(wire, message.packets(group).unwrap().collect(), ms);
 }
 
 /// A peer of ours on the wire, and what it declares.
@@ -419,7 +419,7 @@ fn nothing_midi_ci_reaches_the_sessions_output_and_the_graph_still_hears_sysex()
 
     rig.run(40);
     let heard: Vec<_> = rig.take().into_iter().map(|(_, _, ump)| ump).collect();
-    let said: Vec<_> = [identity_reply(0), reply.packets(GROUP_0).collect()].concat();
+    let said: Vec<_> = [identity_reply(0), reply.packets(GROUP_0).unwrap().collect()].concat();
     assert_eq!(heard, said, "the graph hears every packet MIDI-CI heard");
 }
 

@@ -409,7 +409,7 @@ fn packets_carry_the_payload_in_sysex7_packets() {
     use tutti_ump::{Message, MidiGroup, SysexStatus};
     let message = long_message();
     let payload = message.encode();
-    let packets: Vec<_> = message.packets(MidiGroup::of(3)).collect();
+    let packets: Vec<_> = message.packets(MidiGroup::of(3)).unwrap().collect();
     assert_eq!(packets.len(), payload.len().div_ceil(6));
     let mut bytes = Vec::new();
     for (i, ump) in packets.iter().enumerate() {
@@ -474,4 +474,16 @@ fn the_preamble_tells_property_exchange_and_set_profile_on() {
     // Only the preamble is read: a first packet's data can stop at it.
     assert!(is_property_exchange(&[0x7E, 0x7F, 0x0D, 0x34]));
     assert!(is_set_profile_on(&[0x7E, 0x7F, 0x0D, 0x22]));
+}
+
+/// A payload byte of 128 or more is refused with its index, never dropped from
+/// the packets: M2-104 §7.7 SysEx7 carries 7-bit bytes only.
+#[test]
+fn a_payload_that_is_not_seven_bit_is_refused_not_sent_short() {
+    let group = MidiGroup::of(3);
+    assert_eq!(
+        sysex7_packets(group, &[0x01, 0x80, 0x02]).err(),
+        Some(tutti_ump::SysexError::NotSevenBit { index: 1 })
+    );
+    assert_eq!(sysex7_packets(group, &[0x01, 0x7F]).unwrap().count(), 1);
 }

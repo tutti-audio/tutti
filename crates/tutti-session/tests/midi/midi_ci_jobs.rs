@@ -201,6 +201,7 @@ fn a_switch_whose_peer_leaves_before_it_answers_is_disconnected() {
         target: muid,
     })
     .packets(MidiGroup::FIRST)
+    .unwrap()
     {
         let now = wire.start + Duration::from_millis(wire.ms);
         assert!(
@@ -300,6 +301,7 @@ fn a_report_whose_peer_leaves_before_its_end_is_disconnected() {
         target: muid,
     })
     .packets(MidiGroup::FIRST)
+    .unwrap()
     {
         let now = wire.start + Duration::from_millis(wire.ms);
         assert!(
