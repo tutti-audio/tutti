@@ -43,16 +43,16 @@
 //! assert_eq!(velocity.get(), 0x8000);
 //! ```
 //!
-//! [`narrow_velocity`], [`narrow_value`] and [`narrow_bend`] go the other way
-//! for a consumer that has MIDI 1.0 resolution only (M2-115 section 3.4): the
-//! top bits, as a right shift. `widen` then narrow returns every 7-bit and
-//! 14-bit value it started with. A consumer such as a SoundFont synth works
-//! at MIDI 1.0 resolution and narrows what reaches it.
-//! The widening of one value is [`widen_velocity`], [`widen_value`] and
-//! [`widen_bend`]: they build a [`NoteVelocity`](tutti_ump::NoteVelocity), a
-//! [`ControlValue`](tutti_ump::ControlValue) or a
-//! [`BendValue`](tutti_ump::BendValue) from a 7-bit or 14-bit one, which a
-//! MIDI 2.0 constructor such as `Voice2::note_on` wants.
+//! [`NoteVelocity::to_u7`](tutti_ump::NoteVelocity::to_u7),
+//! [`ControlValue::to_u7`](tutti_ump::ControlValue::to_u7) and
+//! [`BendValue::to_u14`](tutti_ump::BendValue::to_u14) go the other way for a
+//! consumer that has MIDI 1.0 resolution only (M2-115 section 3.4): the top
+//! bits, as a right shift. `widen` then narrow returns every 7-bit and 14-bit
+//! value it started with. A consumer such as a SoundFont synth works at MIDI
+//! 1.0 resolution and narrows what reaches it.
+//! One value goes up with `NoteVelocity::from`, `ControlValue::from` and
+//! `BendValue::from` of a 7-bit or 14-bit one, which a MIDI 2.0 constructor such
+//! as `Voice2::note_on` wants.
 //!
 //! Going down has four entry points; pick by what you hold and what you need.
 //!
@@ -146,7 +146,6 @@ mod midi1_translator;
 mod midi2_translator;
 mod mode;
 mod mpe;
-mod narrow;
 mod per_note_management;
 mod scale;
 mod sensitivity;
@@ -168,7 +167,6 @@ pub use mpe::{
     ChannelResponse, ControllerSupport, MpeFeatures, MpeMode, MpeSpec, MpeZone, MpeZoneConfig,
     MpeZones, PitchBendSupport,
 };
-pub use narrow::{narrow_bend, narrow_note_on_velocity, narrow_value, narrow_velocity};
 pub use per_note_management::{PerNoteManager, PerNotePolicy};
 pub use sensitivity::PitchBendSensitivity;
 #[cfg(feature = "serde")]
@@ -205,6 +203,4 @@ pub use universal::{
     QuarterFramePiece, Recipient, RunReference, SysexDeviceId, Universal, UniversalRead,
     UniversalReader, VitcInsert, read,
 };
-pub use voice::{
-    channel_voice, widen, widen_bend, widen_bytes, widen_message, widen_value, widen_velocity,
-};
+pub use voice::{channel_voice, widen, widen_bytes, widen_message};

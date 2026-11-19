@@ -36,8 +36,8 @@ impl Served<Vst3Loaded> {
 use std::path::Path;
 use tutti_buffers::InputOutput;
 use tutti_fixtures::midi;
-use tutti_midi_protocol::widen_velocity;
-use tutti_ump::{MidiChannel, U7};
+
+use tutti_ump::{MidiChannel, NoteVelocity, U7};
 
 /// Sets `TUTTI_PROBE_MISBEHAVIOUR` until the guard drops (a panic
 /// included). Take it while holding `plugin_load_lock()`, which every test
@@ -712,7 +712,11 @@ fn test_vst3_process_f32_with_note() {
     let num_samples = 512;
     let note_on = [(
         tutti_graph::Offset::ZERO,
-        midi::note_on(MidiChannel::of(1), 60, widen_velocity(U7::of(100)).get()),
+        midi::note_on(
+            MidiChannel::of(1),
+            60,
+            NoteVelocity::from(U7::of(100)).get(),
+        ),
     )];
 
     let mut has_nonzero = false;

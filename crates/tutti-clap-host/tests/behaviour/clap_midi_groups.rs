@@ -10,7 +10,7 @@ use clap_sys::events::{
 use tutti_clap_host::{ClapEvent, EventList, InputEventList, InputRooms};
 use tutti_fixtures::midi;
 use tutti_graph::Offset;
-use tutti_midi_protocol::{PitchBendSensitivity, widen_value};
+use tutti_midi_protocol::PitchBendSensitivity;
 use tutti_ump::{
     Address, Attribute, MidiChannel, MidiGroup, NoteId, NoteNumber, NoteVelocity,
     PerNoteManagement, Rpn, Ump, Voice2,
@@ -123,7 +123,7 @@ fn two_groups_land_on_note_ports_zero_and_one() {
         midi::cc(
             Address::new(group(1), ch(0)),
             tutti_ump::CCNumber::BRIGHTNESS,
-            widen_value(U7::of(100)).get(),
+            ControlValue::from(U7::of(100)).get(),
         ),
     );
     let events = drain(&mut list);
@@ -158,7 +158,7 @@ fn a_group_without_a_note_port_is_dropped_and_counted() {
         midi::cc(
             Address::new(group(2), ch(0)),
             tutti_ump::CCNumber::BRIGHTNESS,
-            widen_value(U7::of(1)).get(),
+            ControlValue::from(U7::of(1)).get(),
         ),
     );
     add(

@@ -54,9 +54,7 @@
 use alloc::vec::Vec;
 use core::num::{NonZeroU16, NonZeroUsize};
 
-use tutti_midi_protocol::{
-    GeneralMidiMode, Heard, KeyTable, Timing, TuningMessage, Universal, narrow_value,
-};
+use tutti_midi_protocol::{GeneralMidiMode, Heard, KeyTable, Timing, TuningMessage, Universal};
 use tutti_ump::{
     Address, Attribute, CCNumber, Message, MidiChannel, MidiGroup, NoteId, NoteNumber,
     RegisteredData, Rpn, U7, Ump, Voice2,
@@ -788,7 +786,7 @@ impl Voicing {
                 self.note_off(channel, note, velocity.get(), patch, levels);
             }
             Voice2::ControlChange { controller, value } => {
-                let value = narrow_value(value);
+                let value = value.to_u7();
                 match Controller::effect(controller, value) {
                     Some(effect) => self.effect(channel, effect),
                     None => self.controller(channel, controller, value),

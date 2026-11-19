@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use tutti_buffers::Float;
 use tutti_dsp::SimdLanes;
-use tutti_midi_protocol::{Universal, UniversalReader, narrow_value};
+use tutti_midi_protocol::{Universal, UniversalReader};
 use tutti_sf2::SoundFont;
 use tutti_ump::{Address, CCNumber, Message, MidiChannel, MidiGroup, U7, Ump, Voice2};
 use tutti_units::{Amplitude, SampleRate, Seconds, Semitones};
@@ -301,7 +301,7 @@ impl<F: Float + SimdLanes> Player<F> {
             // arrived as a Note Off (`channel_voice` widens it, App. D.3.1).
             Voice2::NoteOn { .. } | Voice2::NoteOff { .. } => self.dispatch(channel, message),
             Voice2::ControlChange { controller, value } => {
-                self.control(channel, controller, narrow_value(value));
+                self.control(channel, controller, value.to_u7());
                 self.dispatch(channel, message);
             }
             // The wheel is the core's (it retunes the channel's voices), and so

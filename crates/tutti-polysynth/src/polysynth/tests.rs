@@ -9,12 +9,11 @@ use std::num::NonZeroUsize;
 use tutti_buffers::Planes;
 use tutti_curve::Law;
 use tutti_fixtures::midi;
-use tutti_midi_protocol::{widen_bend, widen_value, widen_velocity};
+
 use tutti_ump::{
-    Address, Attribute, CCNumber, Message, MidiChannel, MidiGroup, NoteNumber, NoteVelocity,
-    PerNoteManagement, U7, U14, Ump, Voice1, Voice2,
+    Address, Attribute, BendValue, CCNumber, ControlValue, Message, MidiChannel, MidiGroup,
+    NoteNumber, NoteVelocity, PerNoteManagement, U7, U14, Ump, Voice1, Voice2,
 };
-use tutti_ump::{BendValue, ControlValue};
 use tutti_units::{Amplitude, Hz, Normalized, Resonance, Seconds, Spread};
 
 /// The synth at `f32`, the width these tests run at unless they name another.
@@ -181,7 +180,7 @@ fn ev_note_on(channel: u8, note: u8, vel: u8) -> Ump {
     midi::note_on(
         MidiChannel::of(channel),
         note,
-        widen_velocity(U7::of(vel)).get(),
+        NoteVelocity::from(U7::of(vel)).get(),
     )
 }
 
@@ -193,12 +192,15 @@ fn ev_cc(channel: u8, cc_num: CCNumber, value: u8) -> Ump {
     midi::cc(
         MidiChannel::of(channel),
         cc_num,
-        widen_value(U7::of(value)).get(),
+        ControlValue::from(U7::of(value)).get(),
     )
 }
 
 fn ev_bend(channel: u8, bend14: u16) -> Ump {
-    midi::pitch_bend(MidiChannel::of(channel), widen_bend(U14::of(bend14)).get())
+    midi::pitch_bend(
+        MidiChannel::of(channel),
+        BendValue::from(U14::of(bend14)).get(),
+    )
 }
 
 fn ev_per_note_management(channel: u8, note: u8, management: PerNoteManagement) -> Ump {
@@ -214,7 +216,7 @@ fn ev_per_note_management(channel: u8, note: u8, management: PerNoteManagement) 
 fn ev_aftertouch(channel: u8, pressure: u8) -> Ump {
     midi::channel_pressure(
         MidiChannel::of(channel),
-        widen_value(U7::of(pressure)).get(),
+        ControlValue::from(U7::of(pressure)).get(),
     )
 }
 
@@ -2363,7 +2365,7 @@ fn poly_synth() -> PolySynth {
 /// scales to.
 #[test]
 fn a_midi1_and_a_midi2_note_on_claim_the_same_voice() {
-    let wide = widen_velocity(U7::of(100)).get();
+    let wide = NoteVelocity::from(U7::of(100)).get();
     let m1 = Message::Midi1(
         address(3),
         Voice1::NoteOn {
@@ -2469,7 +2471,7 @@ fn a_midi_2_note_on_at_velocity_0_holds_its_key() {
 #[test]
 fn midi1_and_midi2_controllers_reach_the_same_state() {
     let bend14 = 12_288u16;
-    let wide_bend = widen_bend(U14::of(bend14)).get();
+    let wide_bend = BendValue::from(U14::of(bend14)).get();
     let expected = BendValue::new(wide_bend).bipolar();
     for message in [
         Message::Midi1(address(0), Voice1::PitchBend(U14::of(bend14))),
@@ -2517,7 +2519,7 @@ fn midi1_and_midi2_controllers_reach_the_same_state() {
         address(0),
         Voice2::ControlChange {
             controller: pedal,
-            value: widen_value(U7::of(127))
+            value: ControlValue::from(U7::of(127))
         }
     )));
     assert!(!sustain(Message::Midi1(
@@ -2813,7 +2815,7 @@ fn a_synth_plays_its_own_groups_channels_only() {
         midi::note_on(
             Address::new(group, MidiChannel::FIRST),
             60,
-            widen_velocity(U7::of(100)).get(),
+            NoteVelocity::from(U7::of(100)).get(),
         )
     };
     let mut first = synth(SynthConfig::default());

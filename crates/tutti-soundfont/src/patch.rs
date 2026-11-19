@@ -2,7 +2,6 @@
 
 use std::num::NonZeroU16;
 
-use tutti_midi_protocol::narrow_note_on_velocity;
 use tutti_sf2::SoundFont;
 use tutti_ump::{MidiChannel, NoteNumber, NoteVelocity};
 use tutti_voicing::{Patch, VoiceSpec};
@@ -41,7 +40,7 @@ impl Patch for PresetPatch<'_> {
     ) {
         // A region's range is 7 bits: the 16-bit velocity is narrowed as the
         // voice's will be, and never to a Note Off's 0.
-        let velocity = narrow_note_on_velocity(NoteVelocity::new(velocity));
+        let velocity = NoteVelocity::new(velocity).to_note_on_u7();
         let preset = &self.font.presets()[self.preset];
         for (p, preset_zone) in preset.regions().iter().enumerate() {
             if !preset_zone.contains(key, velocity) {

@@ -14,12 +14,13 @@ use tutti_graph::{
     Status, TransportPosition, Unforkable,
 };
 use tutti_graph::{NodeKey, Stamp};
-use tutti_midi_protocol::widen_velocity;
+
 use tutti_polysynth::{PolySynth, SynthConfig};
 use tutti_sf2::SoundFont;
 use tutti_soundfont::{Settings, SoundFontUnit};
 use tutti_ump::{
-    Address, Bank, BendValue, CCNumber, Message, MidiChannel, MidiGroup, U7, Ump, Voice2,
+    Address, Bank, BendValue, CCNumber, Message, MidiChannel, MidiGroup, NoteVelocity, U7, Ump,
+    Voice2,
 };
 use tutti_units::{SampleRate, Samples};
 
@@ -49,7 +50,7 @@ fn note_on() -> Ump {
     midi::note_on(
         Address::new(G, MidiChannel::of(0)),
         60,
-        widen_velocity(U7::of(100)).get(),
+        NoteVelocity::from(U7::of(100)).get(),
     )
 }
 

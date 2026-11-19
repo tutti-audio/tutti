@@ -6,7 +6,7 @@ use crate::{ExtremeValues, PerNoteTranslation, TranslationMode, midi1, narrow_wi
 use alloc::boxed::Box;
 use members::Members;
 use tutti_ump::{
-    Address, CCNumber, ControlValue, Message, Midi1Bytes, U7, U14, Ump, Voice1, Voice2,
+    Address, BendValue, CCNumber, ControlValue, Message, Midi1Bytes, U7, U14, Ump, Voice1, Voice2,
 };
 
 mod members;
@@ -27,7 +27,7 @@ mod members;
 ///   0 to 31), and narrows **with rounding** (section 4.4, `narrow_rounded`).
 ///   Every other controller was scaled
 ///   Min-Center-Max and narrows by the plain right shift of section 3.4
-///   (`narrow_value`), which returns the value it was widened from.
+///   (`ControlValue::to_u7`), which returns the value it was widened from.
 /// - **Null Function is not sent after a run.** D.2.3 gives four messages, not
 ///   five, and D.3.3 says the Null Function is not translated; the select
 ///   stays until the next message selects again.
@@ -229,9 +229,9 @@ fn run(
 
 /// The top 14 bits of a 32-bit controller word: the data of a Registered or
 /// Assignable Controller that M2-115 scales Min-Center-Max, narrowed by a right
-/// shift (as [`narrow_bend`](crate::narrow_bend) does a bend).
+/// shift (as [`BendValue::to_u14`](tutti_ump::BendValue::to_u14) does a bend).
 fn narrow_data(extremes: ExtremeValues, value: ControlValue) -> U14 {
-    extremes.fourteen(U14::masked((value.get() >> 18) as u16), value.get())
+    extremes.fourteen(BendValue::new(value.get()).to_u14(), value.get())
 }
 
 /// A 32-bit value as 14 bits, rounded (M2-115 section 4.4.1,

@@ -112,6 +112,7 @@ mod orchestral;
 mod os;
 mod reserved;
 mod rpn;
+mod scale;
 mod sysex;
 mod sysex8;
 mod text;
