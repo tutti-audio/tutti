@@ -93,7 +93,7 @@ fn is_for(state: &StateFor<'_>, id: &PluginId) -> bool {
 }
 
 /// The audio widths of the plugin `id` of the file at `path`, read from a load of
-/// it as `L` (no activation): `L`'s own [`tutti_plugin_types::Loaded::widths`], the answer an
+/// it as `L` (no activation): `L`'s own [`Loaded::widths`](tutti_plugin_types::Loaded::widths), the answer an
 /// activation negotiates against. `None` when the plugin does not load, so the
 /// listing keeps it with its widths unread.
 fn widths_of<L: InProcess>(main: MainThreadMarker, path: &Path, id: &PluginId) -> Option<Widths> {

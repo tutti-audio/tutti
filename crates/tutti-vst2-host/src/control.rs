@@ -3,13 +3,13 @@
 
 use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_plugin_types::MainThreadMarker;
-use tutti_plugin_types::Widths;
 use tutti_plugin_types::features::probed;
 use tutti_plugin_types::{
     AutomationMode, ContentScale, Control, EditorPresence, EditorWindow, Features, KeyEvent,
     KeyUse, LoadedPlugin, ModifierConvention, ParamAccess, ParamEdit, ParamWriteError,
     ParameterInfo, PluginBus, PluginBuses, PluginClass, PluginDescriptor, PluginError,
-    PluginResult, Preset, PresetId, RenderMode, RenderModeSupport, Request, StateUse, WindowHandle,
+    PluginResult, Preset, PresetId, RenderMode, RenderModeSupport, Request, StateUse, Widths,
+    WindowHandle,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;

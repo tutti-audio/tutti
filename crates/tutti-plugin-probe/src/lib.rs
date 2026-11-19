@@ -51,6 +51,10 @@ pub fn describe(
 /// listing out before it calls this. A plugin that crashes or hangs while it
 /// loads takes this process with it, and the host that spawned it then reads
 /// the listing without widths, never a probe that failed for the whole file.
+/// A plugin that refuses to load is pinned by the shared VST3 plugin's class
+/// that refuses `initialize`; a crash or hang is pinned by the host-side
+/// `a_listing_written_before_the_probe_died_is_the_result` and by review, since
+/// no test plugin can be made to fail only at its creation.
 pub fn read_widths(
     main: MainThreadMarker,
     path: &Path,

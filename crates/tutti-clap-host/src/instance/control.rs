@@ -10,7 +10,7 @@ use tutti_plugin_ipc_ffi::FdId;
 use tutti_plugin_types::features::probed;
 use tutti_plugin_types::{
     AutomationMode, BusRole, ChannelLayout, ClapFeature, ContentScale, Control, Delivered,
-    EditorPresence, EditorWindow, Features, Layout, LoadedPlugin, OwnBypass, ParamAccess,
+    EditorPresence, EditorWindow, Features, Layout, Loaded, LoadedPlugin, OwnBypass, ParamAccess,
     ParamEdit, ParamFlags, ParamMapping, ParamWriteError, ParameterInfo, PluginBus, PluginBuses,
     PluginClass, PluginDescriptor, PluginError, PluginResult, PluginTail, PresetId, ProcessWake,
     RenderMode, RenderModeSupport, Request, RescanScope, Samples, StateUse, TimerId, TrackInfo,
@@ -103,7 +103,7 @@ impl ClapLoaded {
     pub(crate) fn measured_descriptor(&self, main: MainThreadMarker) -> PluginDescriptor {
         let bits = editor_bits(self.has_editor(main), self.has_floating_editor(main));
         PluginDescriptor {
-            widths: Some(tutti_plugin_types::Loaded::widths(self)),
+            widths: Some(Loaded::widths(self)),
             ..descriptor_of(&self.info, EditorPresence::measured(bits.has_editor))
         }
     }
