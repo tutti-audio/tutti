@@ -1,12 +1,9 @@
 //! Value-based accuracy tests for YIN.
 //!
-//! `yin.rs`'s own tests are thorough about *behaviour* — ranges refused, silence
-//! unvoiced, a reused detector matching a fresh one — but exactly one of them
-//! checks a frequency (`finds_a440`, ±1 Hz on a single pure tone). The
-//! implementation underneath, `pitch.rs`, has no test module at all: the FFT
-//! autocorrelation, the cumulative-mean normalisation, the first-local-minimum
-//! rule and the parabolic interpolation are reached only through that one
-//! assertion.
+//! The YIN tests in `analyses/yin.rs` (`tests` and `detector_tests`, the latter
+//! on its `PitchDetector`) cover *behaviour* — ranges refused, silence unvoiced,
+//! a reused detector matching a fresh one — and little across the frequency
+//! range.
 //!
 //! This file covers what that leaves open — accuracy across the range, and the
 //! octave errors YIN is specifically known for. These are the checks that do not

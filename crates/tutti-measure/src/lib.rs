@@ -308,6 +308,10 @@
 //!   [`ChromaMeter`]; [`estimate_key`] finds a [`Key`] by
 //!   Krumhansl-Schmuckler over a [`KeyProfile`]; [`detect_chords`] with a
 //!   [`ChordConfig`] smooths triads into [`ChordSpan`]s by Viterbi.
+//!
+//! In the source, `meters/` holds the real-time readings (the [`Measure`]
+//! configs and their meters) and `analyses/` the offline analyses; every public
+//! item is exported from this root.
 #![forbid(unsafe_code)]
 
 mod analyses;

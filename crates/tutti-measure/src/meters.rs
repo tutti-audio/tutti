@@ -1,6 +1,7 @@
-//! The meters: each config is a [`Measure`](crate::Measure) whose meter folds
-//! chunks of a running stream into a reading, with a one-shot entry point over a
-//! whole buffer.
+//! The real-time readings: what a UI meter or a stream folds as it runs. Most
+//! are a config that is a [`Measure`](crate::Measure), whose meter folds chunks
+//! into a reading, with a one-shot entry point over a whole buffer; `stereo` is
+//! the correlation reading and the smoother a stereo meter applies to it.
 
 pub(crate) mod chroma;
 pub(crate) mod loudness;
