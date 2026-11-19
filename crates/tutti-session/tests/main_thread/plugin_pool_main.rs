@@ -81,7 +81,7 @@ fn catalog() -> (Catalog, tempfile::TempDir) {
 
 fn session() -> Session {
     Session::builder()
-        .max_block(MaxBlock::of(Samples(512)))
+        .max_block(MaxBlock::of(Samples::new(512)))
         .build()
         .expect("an offline session builds")
 }
@@ -343,7 +343,7 @@ fn an_in_process_swap_to_other_ports_fails_the_entry() {
 fn an_in_process_swap_waits_for_the_main_thread() {
     let (catalog, _dir) = catalog();
     let mut s = Session::builder()
-        .max_block(MaxBlock::of(Samples(512)))
+        .max_block(MaxBlock::of(Samples::new(512)))
         .build_detached(SampleRate::SR_48K)
         .expect("a detached session builds");
     s.pool(
@@ -775,7 +775,7 @@ fn a_port_change_during_a_sample_rate_change_ends_with_the_new_ports() {
     probe().set(ClapSwitch::RenderMode, 2);
     let (catalog, _dir) = catalog();
     let mut s = Session::builder()
-        .max_block(MaxBlock::of(Samples(512)))
+        .max_block(MaxBlock::of(Samples::new(512)))
         .build_detached(SampleRate::SR_48K)
         .expect("a detached session builds");
     s.pool(

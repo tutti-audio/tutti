@@ -44,7 +44,7 @@ impl std::fmt::Debug for Capture {
 impl InputOpener for Opener {
     fn open(&mut self, config: &MicConfig, rate: SampleRate) -> tutti_cpal::Result<OpenedInput> {
         let mut capture = self.0.lock().unwrap();
-        let (ring, writer) = InletRing::pair(ChannelLayout::STEREO, Samples(1 << 16), rate);
+        let (ring, writer) = InletRing::pair(ChannelLayout::STEREO, Samples::new(1 << 16), rate);
         capture.writer = Some(writer);
         capture.latency = config.latency.clone();
         Ok(OpenedInput {
@@ -127,8 +127,10 @@ impl Rig {
         self.events.extend(self.session.update());
         // A callback's timestamp reports the playback delay each block.
         match self.delay {
-            Some(delay) => self.stream.render_block_delayed(Samples(frames), delay),
-            None => self.stream.render_block(Samples(frames)),
+            Some(delay) => self
+                .stream
+                .render_block_delayed(Samples::new(frames), delay),
+            None => self.stream.render_block(Samples::new(frames)),
         }
         .expect("the stream is open");
         self.events.extend(self.session.update());
@@ -214,23 +216,23 @@ fn roll(rig: &mut Rig) {
 #[test]
 fn a_beat_punch_records_exactly_the_frames_between_its_beats() {
     let dir = tempfile::tempdir().unwrap();
-    let mut rig = rig(InputConfig::default(), Samples(0));
+    let mut rig = rig(InputConfig::default(), Samples::new(0));
     roll(&mut rig);
-    let punch = Punch::at(Beat(0.5)).until(Beat(1.0)).unwrap();
+    let punch = Punch::at(Beat::new(0.5)).until(Beat::new(1.0)).unwrap();
     let take = rig
         .session
         .record(&rig.input, punch, TakeTarget::wav(wav(&dir, "a.wav")))
         .expect("armed");
     let window = take.window();
     let end = window.end.expect("a punch-out");
-    assert_eq!(end.since(window.start), Some(Samples(12_000)));
+    assert_eq!(end.since(window.start), Some(Samples::new(12_000)));
 
     rig.run_until(finished);
     let done = recorded(&rig.events);
     let first = done.placement().first_frame();
     assert_eq!(first, window.start, "the punch-in was in the future");
-    assert_eq!(done.frames(), Samples(12_000));
-    assert_eq!(done.lost(), Samples(0));
+    assert_eq!(done.frames(), Samples::new(12_000));
+    assert_eq!(done.lost(), Samples::new(0));
     let samples = read(done.path().expect("a file"));
     assert_eq!(samples.len(), 12_000, "exactly the frames of [F(a), F(b))");
     assert_eq!(
@@ -254,7 +256,7 @@ fn a_beat_punch_records_exactly_the_frames_between_its_beats() {
 #[test]
 fn a_punch_in_the_past_starts_at_once_and_reports_the_real_frame() {
     let dir = tempfile::tempdir().unwrap();
-    let mut rig = rig(InputConfig::default(), Samples(0));
+    let mut rig = rig(InputConfig::default(), Samples::new(0));
     rig.step(1024);
     let take = rig
         .session
@@ -286,8 +288,8 @@ fn a_punch_in_the_past_starts_at_once_and_reports_the_real_frame() {
 fn placement_is_the_formula_with_each_term_stated() {
     let dir = tempfile::tempdir().unwrap();
     let mut rig = rig(
-        InputConfig::default().offset(Trim::Earlier(Samples(3))),
-        Samples(7),
+        InputConfig::default().offset(Trim::Earlier(Samples::new(3))),
+        Samples::new(7),
     );
     // The streams report: the playback through a callback, the capture
     // through the cell its callback records into.
@@ -313,10 +315,10 @@ fn placement_is_the_formula_with_each_term_stated() {
     rig.run_until(finished);
     let done = recorded(&rig.events);
     let terms = *done.terms();
-    assert_eq!(terms.in_latency, Some(Samples(240)));
-    assert_eq!(terms.out_latency, Some(Samples(480)));
-    assert_eq!(terms.inlet_lead, Samples(7));
-    assert_eq!(terms.offset, Trim::Earlier(Samples(3)));
+    assert_eq!(terms.in_latency, Some(Samples::new(240)));
+    assert_eq!(terms.out_latency, Some(Samples::new(480)));
+    assert_eq!(terms.inlet_lead, Samples::new(7));
+    assert_eq!(terms.offset, Trim::Earlier(Samples::new(3)));
     assert!(terms.is_complete());
     assert_eq!(done.placement().first_frame(), Frame::new(10_000));
     assert_eq!(done.start(), Start::At(Frame::new(10_000 - 727 - 3)));
@@ -329,7 +331,7 @@ fn placement_is_the_formula_with_each_term_stated() {
 #[test]
 fn an_unreported_latency_is_stated_unknown_not_zero() {
     let dir = tempfile::tempdir().unwrap();
-    let mut rig = rig(InputConfig::default(), Samples(7));
+    let mut rig = rig(InputConfig::default(), Samples::new(7));
     rig.step(256);
     let take = rig
         .session
@@ -360,7 +362,7 @@ fn an_unreported_latency_is_stated_unknown_not_zero() {
 #[test]
 fn started_then_finished_once() {
     let dir = tempfile::tempdir().unwrap();
-    let mut rig = rig(InputConfig::default(), Samples(0));
+    let mut rig = rig(InputConfig::default(), Samples::new(0));
     rig.step(256);
     let take = rig
         .session
@@ -391,7 +393,7 @@ fn started_then_finished_once() {
 #[test]
 fn an_open_ended_take_is_finished_by_its_handle() {
     let dir = tempfile::tempdir().unwrap();
-    let mut rig = rig(InputConfig::default(), Samples(0));
+    let mut rig = rig(InputConfig::default(), Samples::new(0));
     rig.step(256);
     let take = rig
         .session
@@ -436,7 +438,7 @@ fn an_open_ended_take_is_finished_by_its_handle() {
 #[test]
 fn a_take_ends_when_its_input_is_removed() {
     let dir = tempfile::tempdir().unwrap();
-    let mut rig = rig(InputConfig::default(), Samples(0));
+    let mut rig = rig(InputConfig::default(), Samples::new(0));
     rig.step(256);
     let path = wav(&dir, "r.wav");
     let _take = rig
@@ -496,7 +498,7 @@ impl Sink for Failing {
 /// source**, and no Finished.
 #[test]
 fn a_sink_that_fails_mid_take_reports_failed_with_its_error() {
-    let mut rig = rig(InputConfig::default(), Samples(0));
+    let mut rig = rig(InputConfig::default(), Samples::new(0));
     rig.step(256);
     let take = rig
         .session
@@ -534,24 +536,24 @@ fn a_sink_that_fails_mid_take_reports_failed_with_its_error() {
 fn what_cannot_be_armed_is_refused_where_it_is_made() {
     let dir = tempfile::tempdir().unwrap();
     assert!(
-        Punch::at(Beat(4.0)).until(Beat(4.0)).is_err(),
+        Punch::at(Beat::new(4.0)).until(Beat::new(4.0)).is_err(),
         "a punch of no length"
     );
     assert!(Punch::at(Frame::new(9)).until(Frame::new(3)).is_err());
-    assert!(Punch::at(Beat(4.0)).until(At::NextBlock).is_err());
+    assert!(Punch::at(Beat::new(4.0)).until(At::NextBlock).is_err());
 
-    let mut rig = rig(InputConfig::default(), Samples(0));
+    let mut rig = rig(InputConfig::default(), Samples::new(0));
     rig.step(64);
     let stopped = rig
         .session
         .record(
             &rig.input,
-            Punch::at(Beat(2.0)),
+            Punch::at(Beat::new(2.0)),
             TakeTarget::wav(wav(&dir, "s.wav")),
         )
         .unwrap_err();
     assert!(
-        matches!(stopped, TakeError::TransportStopped(b) if b == Beat(2.0)),
+        matches!(stopped, TakeError::TransportStopped(b) if b == Beat::new(2.0)),
         "{stopped:?}"
     );
     // A beat against a frame, compared once the beat is a frame.
@@ -560,7 +562,9 @@ fn what_cannot_be_armed_is_refused_where_it_is_made() {
         .session
         .record(
             &rig.input,
-            Punch::at(Frame::new(500_000)).until(Beat(1.0)).unwrap(),
+            Punch::at(Frame::new(500_000))
+                .until(Beat::new(1.0))
+                .unwrap(),
             TakeTarget::wav(wav(&dir, "b.wav")),
         )
         .unwrap_err();
@@ -594,7 +598,7 @@ fn what_cannot_be_armed_is_refused_where_it_is_made() {
 #[test]
 fn a_take_makes_a_clip_only_from_a_file() {
     let dir = tempfile::tempdir().unwrap();
-    let mut rig = rig(InputConfig::default(), Samples(0));
+    let mut rig = rig(InputConfig::default(), Samples::new(0));
     rig.step(256);
     let to_file = rig
         .session

@@ -420,7 +420,7 @@ impl LogSlots {
         for slot in &self.slots[..usize::from(self.len.get())] {
             let mut record = slot.get();
             record.source = source;
-            record.frame = block + Samples(record.frame.get() as usize);
+            record.frame = block + Samples::new(record.frame.get() as usize);
             // A full ring counts the record itself (`Overflow::DropNewest`).
             let _ = sink.ring.push(record);
         }

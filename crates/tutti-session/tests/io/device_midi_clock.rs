@@ -46,7 +46,7 @@ fn clock(
     wire.0.lock().unwrap().clear();
     for _ in 0..blocks {
         stream
-            .render_block(Samples(frames))
+            .render_block(Samples::new(frames))
             .expect("the stream is open");
     }
     let _ = s.update();

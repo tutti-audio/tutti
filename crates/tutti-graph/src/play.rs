@@ -95,7 +95,7 @@ impl Env {
             }
             playing = c.to.playing;
         }
-        at.after(Samples(offset.index() - from))
+        at.after(Samples::new(offset.index() - from))
     }
 
     /// How many play starts (stopped→playing changes) lie inside the block,
@@ -171,7 +171,7 @@ impl PlayState {
     pub(crate) fn end(&mut self, env: &Env) {
         let len = env.block_len.get();
         self.next = match len.checked_sub(1) {
-            Some(last) => env.play_at(Offset::raw(last as u32)).after(Samples(1)),
+            Some(last) => env.play_at(Offset::raw(last as u32)).after(Samples::new(1)),
             None => env.play.start,
         };
         self.playing = env.playing_at_end();
@@ -207,7 +207,7 @@ mod tests {
     use tutti_units::{Beat, Bpm, SampleRate};
 
     fn t(playing: bool) -> TransportPosition {
-        TransportPosition::new(playing, Bpm::of(120.0), Beat(0.0), None)
+        TransportPosition::new(playing, Bpm::of(120.0), Beat::new(0.0), None)
     }
 
     fn env(first: bool, changes: &[(usize, bool)], play: PlayClock) -> Env {
@@ -218,7 +218,7 @@ mod tests {
         Env {
             frame: Frame::new(1_000),
             sample_rate: SampleRate::SR_48K,
-            block_len: Samples(64),
+            block_len: Samples::new(64),
             transport: t(first),
             changes: ch,
             play,
@@ -328,9 +328,9 @@ mod tests {
         assert_ne!(e2.play.start.epoch, e1.play.start.epoch, "in a new epoch");
         s.end(&e2);
         let e3 = env(true, &[], s.begin(true, 0));
-        assert_eq!(e3.play.start, e2.play.start.after(Samples(64)));
+        assert_eq!(e3.play.start, e2.play.start.after(Samples::new(64)));
         s.end(&e3);
-        assert_eq!(reader.read(), e3.play.start.after(Samples(64)));
+        assert_eq!(reader.read(), e3.play.start.after(Samples::new(64)));
     }
 
     /// A block of no frames advances the clock by nothing.
@@ -343,7 +343,7 @@ mod tests {
         let before = s.reading();
         for k in 0..2 {
             let mut empty = env(false, &[], s.begin(false, 0));
-            empty.block_len = Samples(0);
+            empty.block_len = Samples::new(0);
             s.end(&empty);
             assert_eq!(s.reading(), before, "empty block {k}");
             assert_eq!(PlayReader(Arc::clone(&published)).read(), before);

@@ -39,7 +39,7 @@ fn session() -> DetachedSession {
 /// time.
 fn base(seconds: f64) -> Bounce {
     Bounce::project()
-        .range(Range::Seconds(Seconds(0.0), Seconds(seconds)))
+        .range(Range::Seconds(Seconds::new(0.0), Seconds::new(seconds)))
         .clock(ExportClock::frozen())
         .latency(BounceLatency::Keep)
         .tail(BounceTail::None)
@@ -95,7 +95,7 @@ const LATE: usize = 100;
 impl Node for Late {
     fn shape(&self) -> Shape {
         Shape::source_unassigned(ChannelLayout::MONO)
-            .with_latency(tutti_units::Latency::new(Samples(LATE)))
+            .with_latency(tutti_units::Latency::new(Samples::new(LATE)))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -153,7 +153,7 @@ fn stems_are_aligned_with_the_master_and_sum_to_it() {
             .unwrap();
     }
     let frames = 2_000;
-    let seconds = Samples(frames).to_seconds(RATE).get();
+    let seconds = Samples::new(frames).to_seconds(RATE).get();
     let stems = |bounce: Bounce<NodeKey, BufferMaster>| {
         bounce
             .stem_with(Stem::buffers(steady.erase()))
@@ -355,7 +355,7 @@ fn shared_gain_keeps_the_balance_and_each_measures_its_own() {
             .connect(OutPort::new(quiet, 0), Root::output(channel))
             .unwrap();
     }
-    let target = Normalize::peak(Db(-6.0));
+    let target = Normalize::peak(Db::new(-6.0));
     let dir = tempfile::tempdir().unwrap();
     // The three files' samples, and the gain each reports.
     let run = |session: &mut DetachedSession, tag: &str, gain: StemGain| {
@@ -487,7 +487,7 @@ fn a_host_resolves_its_own_names_once() {
     let named = |name| Bounce::<&str>::project().stem_with(Stem::buffers(name));
     let resolved = named("kick")
         .master_buffers()
-        .range(Range::Seconds(Seconds(0.0), Seconds(0.01)))
+        .range(Range::Seconds(Seconds::new(0.0), Seconds::new(0.01)))
         .clock(ExportClock::frozen())
         .try_map(|name| keys.get(name).copied().ok_or(name))
         .expect("kick is a node");

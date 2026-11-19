@@ -92,8 +92,8 @@ fn a_clip_plays_its_note_on_its_frame() {
     s.midi()
         .play_clip(
             synth,
-            Beat(0.0),
-            note(60, MF, Beat(1.0 / 3.0), BeatDuration(1.0)),
+            Beat::new(0.0),
+            note(60, MF, Beat::new(1.0 / 3.0), BeatDuration::new(1.0)),
         )
         .expect("the tap takes MIDI");
     let _ = s.update();
@@ -109,7 +109,11 @@ fn a_clip_edit_updates_in_place() {
     let mut s = offline();
     let (synth, seen) = tap(&mut s);
     s.midi()
-        .play_clip(synth, Beat(0.0), note(60, MF, Beat(0.0), BeatDuration(1.0)))
+        .play_clip(
+            synth,
+            Beat::new(0.0),
+            note(60, MF, Beat::new(0.0), BeatDuration::new(1.0)),
+        )
         .unwrap();
     let clip = s.midi().clip(synth).expect("the target's clip");
     let _ = s.update();
@@ -118,8 +122,8 @@ fn a_clip_edit_updates_in_place() {
     s.midi()
         .play_clip(
             synth,
-            Beat(0.0),
-            note(64, MF, Beat(1.0 / 3.0), BeatDuration(1.0)),
+            Beat::new(0.0),
+            note(64, MF, Beat::new(1.0 / 3.0), BeatDuration::new(1.0)),
         )
         .unwrap();
     let _ = s.update();
@@ -144,8 +148,8 @@ fn a_clip_starts_at_the_beat_it_is_given() {
     s.midi()
         .play_clip(
             synth,
-            Beat(1.0),
-            note(60, MF, Beat(1.0 / 3.0), BeatDuration(1.0)),
+            Beat::new(1.0),
+            note(60, MF, Beat::new(1.0 / 3.0), BeatDuration::new(1.0)),
         )
         .expect("the tap takes MIDI");
     let _ = s.update();
@@ -158,11 +162,14 @@ fn a_clip_starts_at_the_beat_it_is_given() {
 fn a_clip_start_that_is_not_finite_is_refused() {
     let mut s = offline();
     let (synth, _) = tap(&mut s);
-    let nan = Beat(0.0 / std::hint::black_box(0.0));
-    for bad in [nan, Beat(f64::INFINITY)] {
+    let nan = Beat::new(0.0 / std::hint::black_box(0.0));
+    for bad in [nan, Beat::new(f64::INFINITY)] {
         assert!(matches!(
-            s.midi()
-                .play_clip(synth, bad, note(60, MF, Beat(0.0), BeatDuration(1.0))),
+            s.midi().play_clip(
+                synth,
+                bad,
+                note(60, MF, Beat::new(0.0), BeatDuration::new(1.0))
+            ),
             Err(MidiError::BeatNotFinite(_))
         ));
     }
@@ -225,7 +232,7 @@ fn a_target_without_an_event_input_takes_no_clip() {
             0.5,
         )));
     assert!(matches!(
-        s.midi().play_clip(dc, Beat(0.0), std::iter::empty::<TimedMidiEvent>()),
+        s.midi().play_clip(dc, Beat::new(0.0), std::iter::empty::<TimedMidiEvent>()),
         Err(MidiError::NoEventInput(n)) if n == dc.erase()
     ));
     s.remove(dc).unwrap();
@@ -246,8 +253,8 @@ fn a_clip_and_a_live_input_survive_a_re_bind() {
     s.midi()
         .play_clip(
             old,
-            Beat(0.0),
-            note(60, MF, Beat(1.0 / 3.0), BeatDuration(1.0)),
+            Beat::new(0.0),
+            note(60, MF, Beat::new(1.0 / 3.0), BeatDuration::new(1.0)),
         )
         .unwrap();
     let clip = s.midi().clip(old).expect("the target's clip");
@@ -569,7 +576,11 @@ fn the_sessions_midi_nodes_keep_their_reclaimers() {
     let (mut s, input) = with_input(None);
     let (synth, _) = tap(&mut s);
     s.midi()
-        .play_clip(synth, Beat(0.0), note(60, MF, Beat(0.0), BeatDuration(1.0)))
+        .play_clip(
+            synth,
+            Beat::new(0.0),
+            note(60, MF, Beat::new(0.0), BeatDuration::new(1.0)),
+        )
         .expect("the tap takes MIDI");
     let clip = s.midi().clip(synth).expect("the target's clip");
     assert!(s.graph_ref().testing().keeps_reclaimer(clip), "the clip's");
@@ -916,8 +927,8 @@ fn a_hand_wired_event_edge_survives_the_sequencers_feed() {
     let (hand, _) = s.graph().add(MidiClipNode::new(note(
         62,
         MF,
-        Beat(1.0 / 3.0),
-        BeatDuration(1.0),
+        Beat::new(1.0 / 3.0),
+        BeatDuration::new(1.0),
     )));
     s.graph()
         .set_sources(input(synth), [hand.events_out()])
@@ -925,8 +936,8 @@ fn a_hand_wired_event_edge_survives_the_sequencers_feed() {
     s.midi()
         .play_clip(
             synth,
-            Beat(0.0),
-            note(60, MF, Beat(1.0 / 3.0), BeatDuration(1.0)),
+            Beat::new(0.0),
+            note(60, MF, Beat::new(1.0 / 3.0), BeatDuration::new(1.0)),
         )
         .unwrap();
     let clip = s.midi().clip(synth).expect("the target's clip");
@@ -972,7 +983,7 @@ fn a_port_that_loses_events_is_reported() {
     let (synth, _seen) = tap(&mut s);
     let chord = (0..1_100u32).map(|i| {
         TimedMidiEvent::new(
-            Beat(0.0),
+            Beat::new(0.0),
             Message::midi2(
                 MidiChannel::of(((i / 128) % 16) as u8),
                 Voice2::note_on(NoteNumber::of((i % 128) as u8), NoteVelocity::new(MF)),
@@ -981,7 +992,7 @@ fn a_port_that_loses_events_is_reported() {
         .unwrap()
     });
     s.midi()
-        .play_clip(synth, Beat(0.0), chord)
+        .play_clip(synth, Beat::new(0.0), chord)
         .expect("takes MIDI");
     let _ = s.update();
     roll(&s, 512);
@@ -1780,7 +1791,7 @@ fn a_devices_enabling_the_mpe_profile_switches_its_inputs_rules() {
     for channel in 1..=3 {
         assert_eq!(
             ranges.semitones(MidiChannel::of(channel)),
-            tutti_units::Semitones(48.0),
+            tutti_units::Semitones::new(48.0),
             "member {channel}"
         );
     }
@@ -2188,8 +2199,8 @@ fn the_output_latency_is_written_and_read_through_its_target() {
     let target = s.midi().output_latency();
     assert_eq!(s.get(target).unwrap(), OutputLatency::default());
     let latency = OutputLatency::new(
-        tutti_units::Seconds(0.007),
-        OutputOffset::new(Seconds(-0.002)).unwrap(),
+        tutti_units::Seconds::new(0.007),
+        OutputOffset::new(Seconds::new(-0.002)).unwrap(),
     )
     .unwrap();
     s.set(target.to(latency)).unwrap();

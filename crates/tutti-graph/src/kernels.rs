@@ -559,14 +559,14 @@ mod tests {
     fn param(offset: u32, target: f64) -> ParamEvent {
         ParamEvent::ramp(
             Offset::raw(offset),
-            ParamRamp::foreign(tutti_units::ParamId::new(1), target, Samples(0)),
+            ParamRamp::foreign(tutti_units::ParamId::new(1), target, Samples::new(0)),
         )
     }
 
     /// A ring of `n` outputs its input `n` samples later, across blocks.
     #[test]
     fn ring_delays_by_its_length() {
-        let mut r = AudioRing::<f32>::new(Samples(3));
+        let mut r = AudioRing::<f32>::new(Samples::new(3));
         let src: Vec<f32> = (1..=8).map(|x| x as f32).collect();
         let mut dst = vec![0.0; 8];
         r.run(&src[..5], &mut dst[..5], false);
@@ -578,15 +578,15 @@ mod tests {
     /// zero-pads the oldest end.
     #[test]
     fn transfer_keeps_recent_history() {
-        let mut r = AudioRing::<f32>::new(Samples(4));
+        let mut r = AudioRing::<f32>::new(Samples::new(4));
         let mut sink = vec![0.0; 4];
         r.run(&[1.0, 2.0, 3.0, 4.0], &mut sink, false);
-        let mut shorter = AudioRing::<f32>::new(Samples(2));
+        let mut shorter = AudioRing::<f32>::new(Samples::new(2));
         shorter.transfer_from(&r);
         let mut out = vec![0.0; 2];
         shorter.run(&[0.0, 0.0], &mut out, false);
         assert_eq!(out, vec![3.0, 4.0]);
-        let mut longer = AudioRing::<f32>::new(Samples(4));
+        let mut longer = AudioRing::<f32>::new(Samples::new(4));
         longer.transfer_from(&shorter);
         let mut out = vec![0.0; 4];
         longer.run(&[0.0; 4], &mut out, false);
@@ -598,11 +598,11 @@ mod tests {
     /// never grows its queue.
     #[test]
     fn a_transfer_into_too_small_a_fifo_counts_its_loss_and_never_grows() {
-        let mut old = EventFifo::sized(Samples(64), 4, 8);
+        let mut old = EventFifo::sized(Samples::new(64), 4, 8);
         let queued: Vec<Event> = (0..4).map(|i| note(0, false, i)).collect();
         old.push(&queued);
         old.push(&[note(0, true, 10)]);
-        let mut new = EventFifo::sized(Samples(64), 4, 8);
+        let mut new = EventFifo::sized(Samples::new(64), 4, 8);
         // Room for three: shrink it by building one that holds three.
         new.q = VecDeque::with_capacity(3);
         let room = new.q.capacity();
@@ -623,9 +623,9 @@ mod tests {
     /// stages holds all of the queue it takes, so this is a bug's backstop.)
     #[test]
     fn a_transfer_into_a_queue_of_note_offs_counts_what_does_not_fit() {
-        let mut old = EventFifo::sized(Samples(64), 4, 8);
+        let mut old = EventFifo::sized(Samples::new(64), 4, 8);
         old.push(&[note(0, true, 1), note(0, true, 2), note(0, true, 3)]);
-        let mut new = EventFifo::sized(Samples(64), 4, 8);
+        let mut new = EventFifo::sized(Samples::new(64), 4, 8);
         new.q = VecDeque::with_capacity(2);
         let room = new.q.capacity();
         let lost = new.transfer_from(&mut old);
@@ -637,7 +637,7 @@ mod tests {
     /// An event is delivered `len` frames later, in whichever block that is.
     #[test]
     fn fifo_delays_events_across_blocks() {
-        let mut f = EventFifo::sized(Samples(6), 8, 8);
+        let mut f = EventFifo::sized(Samples::new(6), 8, 8);
         let mut out = Vec::with_capacity(8);
         run(
             &mut f,
@@ -656,12 +656,12 @@ mod tests {
     /// refusing one, and delivers all of them in order.
     #[test]
     fn a_due_backlog_makes_room_for_the_blocks_input() {
-        let mut f = EventFifo::sized(Samples(64), 2, 64);
+        let mut f = EventFifo::sized(Samples::new(64), 2, 64);
         let limit = f.limit;
         let backlog: Vec<Event> = (0..limit as u32).map(|i| note(i, false, i)).collect();
         f.push(&backlog);
         // Shorter: the whole backlog is overdue.
-        f.retune(Samples(1));
+        f.retune(Samples::new(1));
         f.resize(2, 64);
         let input = [note(0, false, 100), note(1, false, 101)];
         let mut out = Vec::with_capacity(EventFifo::bound(1, 2, 64));
@@ -685,7 +685,7 @@ mod tests {
     /// frame it was due, in whichever block that is, and in order.
     #[test]
     fn fifo_delays_param_events_across_blocks() {
-        let mut f = EventFifo::sized(Samples(6), 8, 8).with_params();
+        let mut f = EventFifo::sized(Samples::new(6), 8, 8).with_params();
         let block = |params: Vec<ParamEvent>| EventSlot {
             events: Vec::new(),
             params,
@@ -703,7 +703,7 @@ mod tests {
     /// counts it: the compiler gives room only to a source that declares it.
     #[test]
     fn a_fifo_with_no_param_room_drops_param_events() {
-        let mut f = EventFifo::sized(Samples(6), 8, 8);
+        let mut f = EventFifo::sized(Samples::new(6), 8, 8);
         let input = EventSlot {
             events: Vec::new(),
             params: vec![param(0, 1.0)],
@@ -718,7 +718,7 @@ mod tests {
     /// length, whatever the block sizes.
     #[test]
     fn a_feedback_ring_delays_by_its_length_across_ragged_blocks() {
-        let mut r = AudioRing::<f32>::new(Samples(8));
+        let mut r = AudioRing::<f32>::new(Samples::new(8));
         let src: Vec<f32> = (1..=40).map(|x| x as f32).collect();
         let mut got = Vec::new();
         let mut at = 0;
@@ -756,7 +756,7 @@ mod tests {
     /// and when even that is full it evicts the oldest non-note-off.
     #[test]
     fn a_note_off_survives_overflow() {
-        let mut f = EventFifo::sized(Samples(4), 1, 4);
+        let mut f = EventFifo::sized(Samples::new(4), 1, 4);
         let limit = f.limit;
         let cap = f.q.capacity();
         let ons: Vec<Event> = (0..cap as u32 + 5).map(|i| note(0, false, i)).collect();
@@ -779,8 +779,8 @@ mod tests {
     /// what its output slot is priced at.
     #[test]
     fn a_fifo_never_holds_more_than_its_bound() {
-        let mut f = EventFifo::sized(Samples(64), 4, 8);
-        f.retune(Samples(1));
+        let mut f = EventFifo::sized(Samples::new(64), 4, 8);
+        f.retune(Samples::new(1));
         f.resize(4, 8);
         let offs: Vec<Event> = (0..200).map(|i| note(0, true, i)).collect();
         f.push(&offs);
@@ -791,7 +791,7 @@ mod tests {
     /// queued and go out at offset 0 of the next block — late, not lost.
     #[test]
     fn a_full_output_slot_delays_events_rather_than_dropping_them() {
-        let mut f = EventFifo::sized(Samples(1), 16, 8);
+        let mut f = EventFifo::sized(Samples::new(1), 16, 8);
         let burst: Vec<Event> = (0..5)
             .map(|i| Event::midi(Offset::ZERO, Ump([i, 0, 0, 0])))
             .collect();

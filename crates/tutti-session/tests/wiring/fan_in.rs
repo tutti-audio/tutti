@@ -331,7 +331,7 @@ fn the_output_tap_hears_the_sum() {
     let mut tap =
         r.s.graph()
             .taps()
-            .open_output(Samples(1_024))
+            .open_output(Samples::new(1_024))
             .expect("the sources exist");
     assert!(left(&mut r.s).iter().all(|&x| x == A + B));
     r.s.graph()
@@ -344,7 +344,7 @@ fn the_output_tap_hears_the_sum() {
     assert_eq!(
         tap.pop_into(InterleavedMut::new(&mut got, tap.layout()).unwrap())
             .unwrap(),
-        Samples(128)
+        Samples::new(128)
     );
     let lane: Vec<f32> = got.iter().step_by(2).copied().collect();
     assert!(lane[..64].iter().all(|&x| x == A + B), "{lane:?}");

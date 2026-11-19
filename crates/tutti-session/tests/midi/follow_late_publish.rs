@@ -39,8 +39,8 @@ fn a_step_published_behind_the_playhead_moves_no_beat() {
     }
     let published_at = beats.len();
     let behind = TempoMap::new([
-        TempoPoint::step(Beat(0.0), Bpm::of(120.0)),
-        TempoPoint::step(Beat(2.0), Bpm::of(60.0)),
+        TempoPoint::step(Beat::new(0.0), Bpm::of(120.0)),
+        TempoPoint::step(Beat::new(2.0), Bpm::of(60.0)),
     ])
     .unwrap();
     s.set(s.transport_handle().tempo().to(behind))

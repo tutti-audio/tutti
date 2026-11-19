@@ -38,7 +38,7 @@ fn write(path: &Path, rate: SampleRate, channels: u16, interleaved: &[f32]) {
 }
 
 fn peak_blocks(samples_per_block: usize) -> PeakConfig {
-    PeakConfig::new(Samples(samples_per_block))
+    PeakConfig::new(Samples::new(samples_per_block))
 }
 
 fn land<A, S: Float>(
@@ -56,7 +56,12 @@ where
 fn a_sine_of_half_amplitude_has_a_peak_of_half_in_memory() {
     let mut s = session();
     // 1 kHz at 48 kHz: 48 samples a cycle, a sample on every crest.
-    let samples = signal::sine(Hz(1000.0), Amplitude(0.5), RATE, Samples(48_000));
+    let samples = signal::sine(
+        Hz::new(1000.0),
+        Amplitude::new(0.5),
+        RATE,
+        Samples::new(48_000),
+    );
     let wave = Wave::from_mono(RATE, Mono::new(&samples));
     let job = s.analyze(wave, peak_blocks(512));
     let blocks = land(&mut s, &job).unwrap();
@@ -69,7 +74,12 @@ fn a_sine_of_half_amplitude_has_a_peak_of_half_streamed_from_a_file() {
     let mut s = session();
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("sine.wav");
-    let samples = signal::sine(Hz(1000.0), Amplitude(0.5), RATE, Samples(48_000));
+    let samples = signal::sine(
+        Hz::new(1000.0),
+        Amplitude::new(0.5),
+        RATE,
+        Samples::new(48_000),
+    );
     write(&path, RATE, 1, &samples);
     let job = s.analyze::<f32, _>(path.as_path(), peak_blocks(512));
     let blocks = land(&mut s, &job).unwrap();
@@ -135,7 +145,7 @@ fn a_band_above_the_files_nyquist_fails_the_job_with_the_meters_error() {
     let path = dir.path().join("narrow.wav");
     let rate = SampleRate::SR_8K;
     write(&path, rate, 1, &vec![0.0; 8_000]);
-    let band = FrequencyBand::new(Hz(100.0), Hz(20_000.0)).unwrap();
+    let band = FrequencyBand::new(Hz::new(100.0), Hz::new(20_000.0)).unwrap();
     let job = s.analyze::<f32, _>(path, ChromaConfig::new().band(band));
     let failed = land(&mut s, &job).unwrap_err();
     assert!(
@@ -190,7 +200,7 @@ fn a_mono_analysis_of_stereo_audio_reads_the_fold_of_its_channels() {
         wave.append(Interleaved::new(&[level, level], ChannelLayout::STEREO).unwrap())
             .unwrap();
     }
-    let config = SilenceConfig::new(FiniteLevel::of(Db(-40.0)), Seconds(0.01));
+    let config = SilenceConfig::new(FiniteLevel::of(Db::new(-40.0)), Seconds::new(0.01));
     let job = s.analyze(wave, config);
     let regions = land(&mut s, &job).unwrap();
     let spans: Vec<_> = regions

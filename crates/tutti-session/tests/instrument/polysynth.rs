@@ -23,7 +23,7 @@ fn a_strip_gain_of_half_halves_the_steady_output_of_a_held_note() {
     assert!(unity > 1e-3, "the note sounds: {unity}");
 
     rig.session
-        .set(rig.handle.gain().to(Amplitude(0.5)))
+        .set(rig.handle.gain().to(Amplitude::new(0.5)))
         .unwrap();
     // The move ramps over one block; the window is past it.
     rig.render_to(rig.frame() + 4_000);

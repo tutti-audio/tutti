@@ -309,7 +309,7 @@ impl ParamRange {
     /// use tutti_units::{ArcDegrees, Azimuth, UnitParam};
     ///
     /// // 20 degrees either side of straight behind.
-    /// let behind = ParamRange::arc(Azimuth(180.0), ArcDegrees(20.0));
+    /// let behind = ParamRange::arc(Azimuth::new(180.0), ArcDegrees::new(20.0));
     /// let view = behind.view(Some(UnitParam::Azimuth));
     /// assert!(view.contains(180.0) && view.contains(-170.0));
     /// assert!(!view.contains(0.0));
@@ -344,8 +344,8 @@ impl ParamRange {
             return RangeView::Circle;
         }
         RangeView::Arc {
-            centre: Azimuth((lo + hi) * 0.5),
-            half: ArcDegrees(half),
+            centre: Azimuth::new((lo + hi) * 0.5),
+            half: ArcDegrees::new(half),
         }
     }
 
@@ -408,7 +408,7 @@ impl RangeView {
             Self::Arc { centre, half } => {
                 // The arc is in the unit's `f64`; the lane value widens to it
                 // and the result narrows once.
-                let d = centre.shortest_arc_to(Azimuth(value.into()));
+                let d = centre.shortest_arc_to(Azimuth::new(value.into()));
                 F::from_unit(centre.rotate_by(d.clamp(-half, half)))
             }
         }
@@ -438,7 +438,7 @@ impl RangeView {
             Self::Line { lo, hi } => (lo..=hi).contains(&value),
             Self::Circle => value.is_finite(),
             Self::Arc { centre, half } => {
-                let d = centre.shortest_arc_to(Azimuth(value));
+                let d = centre.shortest_arc_to(Azimuth::new(value));
                 d >= -half && d <= half
             }
         }
@@ -695,8 +695,8 @@ impl Ramp {
                     // `done < len`, so `t` is in `(0, 1)`, where
                     // `Linear` evaluates to `t` itself.
                     let t = Normalized::progress(
-                        Samples(self.done as usize),
-                        Samples(self.len as usize),
+                        Samples::new(self.done as usize),
+                        Samples::new(self.len as usize),
                     );
                     self.at(t)
                 };
@@ -1129,7 +1129,15 @@ impl<F: Float> ParamState<F> {
                     events,
                     param,
                     out,
-                    |i| ramp_in(Some(param.param), from, b1, Samples(i), Samples(frames)),
+                    |i| {
+                        ramp_in(
+                            Some(param.param),
+                            from,
+                            b1,
+                            Samples::new(i),
+                            Samples::new(frames),
+                        )
+                    },
                     &mut corners,
                 );
                 self.corner_count[k] = corners.len();
@@ -1146,7 +1154,13 @@ impl<F: Float> ParamState<F> {
             }
             None => {
                 for (i, o) in out.iter_mut().enumerate() {
-                    *o = ramp_in(Some(param.param), from, b1, Samples(i), Samples(frames));
+                    *o = ramp_in(
+                        Some(param.param),
+                        from,
+                        b1,
+                        Samples::new(i),
+                        Samples::new(frames),
+                    );
                 }
             }
         }
@@ -1157,7 +1171,8 @@ impl<F: Float> ParamState<F> {
                 if j >= d {
                     break;
                 }
-                let (out, inn) = fade_gains::<F>(FadeLaw::EqualAmplitude, Samples(j), Samples(d));
+                let (out, inn) =
+                    fade_gains::<F>(FadeLaw::EqualAmplitude, Samples::new(j), Samples::new(d));
                 *o = if circular {
                     // A crossfade of two bearings would sweep through the
                     // mean; the fade turns the short arc by the incoming gain.
@@ -1204,7 +1219,7 @@ mod tests {
     /// not 0, where `new(170, -170)` ordered would read the opposite arc.
     #[test]
     fn an_arc_across_180_contains_180_and_not_0() {
-        let behind = ParamRange::arc(Azimuth(180.0), ArcDegrees(20.0)).view(AZ);
+        let behind = ParamRange::arc(Azimuth::new(180.0), ArcDegrees::new(20.0)).view(AZ);
         for v in [180.0, -180.0, 165.0, -165.0, 160.0, -160.0] {
             assert!(behind.contains(v), "{v}");
         }
@@ -1223,7 +1238,7 @@ mod tests {
     fn a_circular_ranges_span_is_its_arcs_length() {
         assert_eq!(ParamRange::UNBOUNDED.view(AZ).span(), 360.0);
         assert_eq!(ParamRange::new(-180.0, 180.0).view(AZ).span(), 360.0);
-        let arc = |half| ParamRange::arc(Azimuth(0.0), ArcDegrees(half)).view(AZ);
+        let arc = |half| ParamRange::arc(Azimuth::new(0.0), ArcDegrees::new(half)).view(AZ);
         assert_eq!(arc(90.0).span(), 180.0);
         assert_eq!(arc(400.0).span(), 360.0);
         assert_eq!(ParamRange::new(-90.0, 90.0).view(EL).span(), 180.0);
@@ -1238,7 +1253,7 @@ mod tests {
         let r = ParamRange::new(-180.0, 180.0);
         assert_eq!(r.view(AZ).constrain(190.0), -170.0);
         assert_eq!(r.view(EL).constrain(190.0), 180.0);
-        let arc = ParamRange::arc(Azimuth(90.0), ArcDegrees(30.0)).view(AZ);
+        let arc = ParamRange::arc(Azimuth::new(90.0), ArcDegrees::new(30.0)).view(AZ);
         assert_eq!(arc.constrain(100.0), 100.0);
         assert_eq!(arc.constrain(170.0), 120.0);
         assert_eq!(arc.constrain(10.0), 60.0);
@@ -1255,8 +1270,8 @@ mod tests {
     fn a_ramp_lands_on_its_last_frame() {
         let ev = |at: usize, t: f64, len: usize| {
             ParamEvent::ramp(
-                Offset::of(Samples(at), Samples(16)),
-                ParamRamp::new(ParamKey::<Hz>::CUTOFF, Hz(t), Samples(len)),
+                Offset::of(Samples::new(at), Samples::new(16)),
+                ParamRamp::new(ParamKey::<Hz>::CUTOFF, Hz::new(t), Samples::new(len)),
             )
         };
         let events = [ev(4, 100.0, 4), ev(12, -5.0, 0)];
@@ -1294,15 +1309,15 @@ mod tests {
     #[test]
     fn a_ramp_after_a_first_segment_on_its_frame_starts_from_the_base() {
         use crate::param_event::ParamSegment;
-        let at = Offset::of(Samples(4), Samples(8));
+        let at = Offset::of(Samples::new(4), Samples::new(8));
         let seg = ParamSegment::new(
             ParamKey::<Hz>::CUTOFF,
-            Hz(5.0),
-            Hz(9.0),
-            Samples(20),
+            Hz::new(5.0),
+            Hz::new(9.0),
+            Samples::new(20),
             Law::Linear,
         );
-        let ramp = ParamRamp::new(ParamKey::<Hz>::CUTOFF, Hz(0.0), Samples(2));
+        let ramp = ParamRamp::new(ParamKey::<Hz>::CUTOFF, Hz::new(0.0), Samples::new(2));
         let base = |i: usize| 1.0 + i as f32;
         let mut after_segment = [0.0f32; 8];
         let events = [ParamEvent::segment(at, seg), ParamEvent::ramp(at, ramp)];
@@ -1337,12 +1352,12 @@ mod tests {
             for (from, target) in [(0.0f64, 1.0f64), (0.3, -7.9), (440.0, 1234.5)] {
                 // The port renders in `f64` and crosses to `f32` once a frame:
                 // the oracle is the same line, from the base the lane gives it.
-                let from32 = f32::from_unit(Hz(from));
+                let from32 = f32::from_unit(Hz::new(from));
                 let start = f64::from(from32);
                 let frames = len + 4;
                 let events = [ParamEvent::ramp(
-                    Offset::of(Samples(1), Samples(frames)),
-                    ParamRamp::new(ParamKey::<Hz>::CUTOFF, Hz(target), Samples(len)),
+                    Offset::of(Samples::new(1), Samples::new(frames)),
+                    ParamRamp::new(ParamKey::<Hz>::CUTOFF, Hz::new(target), Samples::new(len)),
                 )];
                 let mut r = Ramp::default();
                 let mut out = vec![0.0f32; frames];
@@ -1356,7 +1371,7 @@ mod tests {
                 );
                 for (j, &v) in out[1..].iter().enumerate() {
                     let done = j + 1;
-                    let want = f32::from_unit(Hz(if done >= len {
+                    let want = f32::from_unit(Hz::new(if done >= len {
                         target
                     } else {
                         start + (target - start) * (done as f64 / len as f64)
@@ -1399,9 +1414,15 @@ mod tests {
     fn corners_are_where_the_trajectory_changes_piece() {
         use crate::param_event::ParamSegment;
         let key = ParamKey::<Hz>::CUTOFF;
-        let at = |i: usize| Offset::of(Samples(i), Samples(64));
+        let at = |i: usize| Offset::of(Samples::new(i), Samples::new(64));
         let seg = |from: f64, to: f64, len: usize| {
-            ParamSegment::new(key, Hz(from), Hz(to), Samples(len), Law::Linear)
+            ParamSegment::new(
+                key,
+                Hz::new(from),
+                Hz::new(to),
+                Samples::new(len),
+                Law::Linear,
+            )
         };
         let corners = |events: &[ParamEvent]| {
             let mut buf = [0u32; 64];
@@ -1422,7 +1443,7 @@ mod tests {
         let a = seg(1.0, 2.0, 10);
         assert_eq!(corners(&[ParamEvent::segment(at(4), a)]), [4, 13]);
         // The same piece re-sent resumed at 9, five frames on: still 4, 13.
-        let resent = a.resumed(a.position() + Samples(5), a.length());
+        let resent = a.resumed(a.position() + Samples::new(5), a.length());
         assert_eq!(
             corners(&[
                 ParamEvent::segment(at(4), a),
@@ -1451,7 +1472,7 @@ mod tests {
             [7]
         );
         // A ramp of 3 frames at 20: its frame and the frame it lands on, 22.
-        let ramp = ParamRamp::new(key, Hz(8.0), Samples(3));
+        let ramp = ParamRamp::new(key, Hz::new(8.0), Samples::new(3));
         assert_eq!(corners(&[ParamEvent::ramp(at(20), ramp)]), [20, 22]);
     }
 

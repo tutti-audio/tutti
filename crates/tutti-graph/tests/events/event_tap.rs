@@ -116,7 +116,7 @@ impl Node for Script {
         Shape::EMPTY
             .with_events(0, self.ports)
             .with_event_capacity(tutti_graph::testing::cap_of(self.cap))
-            .with_latency(Latency::new(Samples(self.latency)))
+            .with_latency(Latency::new(Samples::new(self.latency)))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {

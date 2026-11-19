@@ -172,7 +172,7 @@ impl<F: Float> Executor<F> {
                 let mut env = Env {
                     frame: self.clock.frame,
                     sample_rate: rate,
-                    block_len: Samples(frames),
+                    block_len: Samples::new(frames),
                     transport: *transport,
                     changes: *changes,
                     play: PlayClock::ZERO,
@@ -181,7 +181,7 @@ impl<F: Float> Executor<F> {
                 self.inbox.commands.observe(&env);
                 self.clock.history.observe(&env);
                 self.clock.play.end(&env);
-                self.clock.frame += Samples(frames);
+                self.clock.frame += Samples::new(frames);
                 return;
             }
             let max = self.prepare.max_block();
@@ -232,7 +232,7 @@ impl<F: Float> Executor<F> {
             let mut env = Env {
                 frame: *frame,
                 sample_rate: prepare.sample_rate(),
-                block_len: Samples(frames),
+                block_len: Samples::new(frames),
                 transport: *transport,
                 changes: *changes,
                 play: PlayClock::ZERO,
@@ -247,7 +247,7 @@ impl<F: Float> Executor<F> {
                 for o in outputs.iter_mut() {
                     o[..frames].fill(F::ZERO);
                 }
-                *frame += Samples(frames);
+                *frame += Samples::new(frames);
                 return;
             };
             if outputs.len() < plan.rendered_outputs()
@@ -265,7 +265,7 @@ impl<F: Float> Executor<F> {
                     o[..frames].fill(F::ZERO);
                 }
                 commands.observe(&env);
-                *frame += Samples(frames);
+                *frame += Samples::new(frames);
                 return;
             }
             let State {
@@ -553,7 +553,7 @@ impl<F: Float> Executor<F> {
                     root_fade_ended.store(run.seq, Ordering::Release);
                 }
             }
-            *frame += Samples(frames);
+            *frame += Samples::new(frames);
             rendered.fetch_add(1, Ordering::Release);
         });
     }

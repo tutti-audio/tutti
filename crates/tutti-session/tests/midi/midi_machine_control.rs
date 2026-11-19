@@ -422,7 +422,7 @@ fn the_transport_is_sent_as_play_locate_and_stop() {
     let _ = s.update();
     assert_eq!(wire.messages(), [vec![0x7F, 0x03, 0x06, 0x02]]);
 
-    s.locate(Beat(4.0)).unwrap();
+    s.locate(Beat::new(4.0)).unwrap();
     blocks(&s, 1);
     let _ = s.update();
     assert_eq!(
@@ -448,7 +448,7 @@ fn the_transport_is_sent_as_play_locate_and_stop() {
 fn a_locate_while_stopped_sends_a_locate_and_no_play() {
     let wire = Wire::default();
     let mut s = sender(&wire, Recipient::AllCall);
-    s.locate(Beat(4.0)).unwrap();
+    s.locate(Beat::new(4.0)).unwrap();
     blocks(&s, 1);
     let _ = s.update();
     assert_eq!(
@@ -469,7 +469,7 @@ fn a_locate_no_time_code_names_is_counted_and_sends_nothing() {
     let mut s = sender(&wire, Recipient::AllCall);
     let refused = |s: &Session| s.midi_nodes().unwrap().sync_controls.losses().refused;
     let before = refused(&s);
-    s.locate(Beat(4_000_000.0)).unwrap();
+    s.locate(Beat::new(4_000_000.0)).unwrap();
     blocks(&s, 1);
     let _ = s.update();
     assert!(wire.messages().is_empty());

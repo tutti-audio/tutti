@@ -66,7 +66,7 @@ struct Lag;
 impl Node for Lag {
     fn shape(&self) -> Shape {
         Shape::source_unassigned(ChannelLayout::MONO)
-            .with_latency(tutti_units::Latency::new(Samples(LAG_FRAMES)))
+            .with_latency(tutti_units::Latency::new(Samples::new(LAG_FRAMES)))
             .with_tail(tutti_units::Tail::Unknown)
     }
     fn prepare(&mut self, _: &Prepare) {}
@@ -392,7 +392,7 @@ impl Rig {
                     Unforkable(Src {
                         mail: self.mail.clone(),
                     }),
-                    Fade::new(Samples(0), Default::default()),
+                    Fade::new(Samples::new(0), Default::default()),
                 )
                 .ok();
                 ed.commit().ok();
@@ -932,7 +932,7 @@ fn a_crossfaded_source_closes_its_sinks() {
             Unforkable(Src {
                 mail: mail2.clone(),
             }),
-            Fade::new(Samples(MAX * 3), Default::default()),
+            Fade::new(Samples::new(MAX * 3), Default::default()),
         )
         .expect("replace");
         ed.commit().unwrap();
@@ -1009,7 +1009,7 @@ fn a_cut_feedback_edge_delivers_what_is_in_flight_then_closes() {
         .iter()
         .map(|&m| {
             let mut r = Rig::new(m, &[2]);
-            r.feedback = Some(Samples(MAX * 4));
+            r.feedback = Some(Samples::new(MAX * 4));
             r.wire(&[(1, 2)]);
             r.send(on60());
             r.block();
@@ -1034,7 +1034,7 @@ fn a_second_fade_closes_the_first_replacements_keys_when_it_takes_over() {
         let mut r = Rig::new(mode, &[2, 3]);
         r.wire(&[(1, 2), (1, 3)]);
         r.block();
-        let fade = Fade::new(Samples(MAX * 3), Default::default());
+        let fade = Fade::new(Samples::new(MAX * 3), Default::default());
         let swap = |r: &mut Rig, mail: &Mail| {
             let ed = r.ed.as_mut().unwrap();
             ed.replace(NodeKey(1), Unforkable(Src { mail: mail.clone() }), fade)
@@ -1088,7 +1088,7 @@ fn a_third_fade_supersedes_the_waiting_one() {
         let mut r = Rig::new(mode, &[2, 3]);
         r.wire(&[(1, 2), (1, 3)]);
         r.block();
-        let fade = Fade::new(Samples(MAX * 3), Default::default());
+        let fade = Fade::new(Samples::new(MAX * 3), Default::default());
         let swap = |r: &mut Rig, mail: &Mail| {
             let ed = r.ed.as_mut().unwrap();
             ed.replace(NodeKey(1), Unforkable(Src { mail: mail.clone() }), fade)
@@ -1125,7 +1125,7 @@ fn swap_with_fade(r: &mut Rig, mail: &Mail, frames: usize) {
     ed.replace(
         NodeKey(1),
         Unforkable(Src { mail: mail.clone() }),
-        Fade::new(Samples(frames), Default::default()),
+        Fade::new(Samples::new(frames), Default::default()),
     )
     .expect("replaces");
     ed.commit().unwrap();
@@ -1273,7 +1273,7 @@ fn a_hard_replace_during_a_fade_closes_the_running_units_keys() {
         ed.replace(
             NodeKey(1),
             Unforkable(Src { mail: m2.clone() }),
-            Fade::new(Samples(MAX * 6), Default::default()),
+            Fade::new(Samples::new(MAX * 6), Default::default()),
         )
         .unwrap();
         ed.commit().unwrap();
@@ -1287,7 +1287,7 @@ fn a_hard_replace_during_a_fade_closes_the_running_units_keys() {
         ed.replace(
             NodeKey(1),
             Unforkable(Src { mail: m3.clone() }),
-            Fade::new(Samples(0), Default::default()),
+            Fade::new(Samples::new(0), Default::default()),
         )
         .unwrap();
         ed.commit().unwrap();
@@ -1369,7 +1369,7 @@ fn a_hard_replace_around_a_promotion_closes_once() {
                 Unforkable(Src {
                     mail: Arc::default(),
                 }),
-                Fade::new(Samples(0), Default::default()),
+                Fade::new(Samples::new(0), Default::default()),
             )
             .unwrap();
             ed.commit().unwrap();
@@ -1560,7 +1560,7 @@ fn a_source_replaced_by_the_resume_commit_is_closed() {
         Unforkable(Src {
             mail: Arc::default(),
         }),
-        Fade::new(Samples(0), Default::default()),
+        Fade::new(Samples::new(0), Default::default()),
     )
     .unwrap();
     ed.reprepare(common::prepare(MAX * 2)).expect("reprepares");
@@ -1590,7 +1590,7 @@ fn a_replaced_sink_is_not_sent_a_close() {
                 log,
                 audio: false,
             }),
-            Fade::new(Samples(0), Default::default()),
+            Fade::new(Samples::new(0), Default::default()),
         )
         .unwrap();
         ed.spec_mut().events.clear();

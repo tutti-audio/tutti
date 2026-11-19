@@ -34,7 +34,7 @@ impl Node for Src {
 fn offline(builder: SessionBuilder, device: u16) -> Session {
     builder
         .outputs(ChannelLayout::from(device))
-        .max_block(MaxBlock::of(Samples(64)))
+        .max_block(MaxBlock::of(Samples::new(64)))
         .build()
         .expect("builds")
 }
@@ -99,10 +99,12 @@ fn a_strip_without_a_pair_refuses_a_balance_by_name() {
     let mut s = offline(Session::builder(), 2);
     let (stereo, _) = s.graph().add(BusStripNode::stereo());
     let (mono, _) = s.graph().add(BusStripNode::mono());
-    s.set(stereo.balance().to(Balance(0.5)))
+    s.set(stereo.balance().to(Balance::new(0.5)))
         .expect("a stereo strip balances");
     assert_eq!(
-        s.set(mono.balance().to(Balance(0.5))).unwrap_err().kind,
+        s.set(mono.balance().to(Balance::new(0.5)))
+            .unwrap_err()
+            .kind,
         ValueErrorKind::NoSuchTarget
     );
 }

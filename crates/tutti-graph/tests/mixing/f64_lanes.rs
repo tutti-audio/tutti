@@ -81,7 +81,11 @@ impl<F: Float> Node<F> for Ramp {
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_, F>) -> Status {
         if cx.env.frame.get() == 0 {
             let offset = io.offset(self.at).expect("inside the block");
-            let ramp = ParamRamp::new(ParamKey::<Hz>::CUTOFF, Hz(self.target), Samples(self.len));
+            let ramp = ParamRamp::new(
+                ParamKey::<Hz>::CUTOFF,
+                Hz::new(self.target),
+                Samples::new(self.len),
+            );
             let _ = io.event_out(0).push_param(ParamEvent::ramp(offset, ramp));
         }
         Status::Silent
@@ -97,7 +101,7 @@ const FRAMES: usize = 16;
 /// driven by `ramp` and held to `range`.
 fn render(ramp: Ramp, range: Option<ParamRange>) -> Vec<f64> {
     let (mut ed, mut exec): (Editor<f64>, Executor<f64>) = Editor::with_format(prepare(FRAMES));
-    ed.insert(LANE, "lane", Params(Lane(Param::new(Hz(BASE)))));
+    ed.insert(LANE, "lane", Params(Lane(Param::new(Hz::new(BASE)))));
     ed.insert(SRC, "ramp", ForkByClone(ramp));
     let at = ParamIn {
         node: LANE,
@@ -218,7 +222,7 @@ fn a_range_bound_f32_cannot_hold_clamps_exactly() {
 #[test]
 fn a_range_change_lands_on_the_next_block() {
     let (mut ed, mut exec): (Editor<f64>, Executor<f64>) = Editor::with_format(prepare(FRAMES));
-    ed.insert(LANE, "lane", Params(Lane(Param::new(Hz(BASE)))));
+    ed.insert(LANE, "lane", Params(Lane(Param::new(Hz::new(BASE)))));
     ed.insert(
         SRC,
         "ramp",
@@ -466,12 +470,16 @@ fn a_segment_f32_cannot_hold_renders_exactly_in_f64() {
     assert_ne!(f64::from(to as f32), to, "f32 loses the end");
     let seg = ParamSegment::new(
         ParamKey::<Hz>::CUTOFF,
-        Hz(from),
-        Hz(to),
-        Samples(4),
+        Hz::new(from),
+        Hz::new(to),
+        Samples::new(4),
         Law::Linear,
     );
-    let out = render_segment(Params(Lane(Param::new(Hz(BASE)))), UnitParam::Cutoff, seg);
+    let out = render_segment(
+        Params(Lane(Param::new(Hz::new(BASE)))),
+        UnitParam::Cutoff,
+        seg,
+    );
     for k in 1..4 {
         assert_eq!(
             out[k - 1],
@@ -495,13 +503,17 @@ fn a_ten_minute_segment_steps_one_frame_per_frame_at_its_end() {
     assert_ne!(f64::from(odd as f32), odd as f64, "f32 cannot count there");
     let seg = ParamSegment::new(
         ParamKey::<Hz>::CUTOFF,
-        Hz(0.0),
-        Hz(LEN as f64),
-        Samples(LEN),
+        Hz::new(0.0),
+        Hz::new(LEN as f64),
+        Samples::new(LEN),
         Law::Linear,
     )
-    .resumed(Samples(LEN - 16), Samples(LEN));
-    let out = render_segment(Params(Lane(Param::new(Hz(BASE)))), UnitParam::Cutoff, seg);
+    .resumed(Samples::new(LEN - 16), Samples::new(LEN));
+    let out = render_segment(
+        Params(Lane(Param::new(Hz::new(BASE)))),
+        UnitParam::Cutoff,
+        seg,
+    );
     for (j, pair) in out.windows(2).enumerate() {
         assert!(
             (pair[1] - pair[0] - 1.0).abs() < 1e-7,
@@ -523,12 +535,12 @@ fn a_circular_segment_across_the_seam_takes_the_short_way_in_f64() {
     let (from, to) = (180.0 - 1e-8, -180.0 + 1e-8);
     assert_eq!(from as f32, 180.0, "f32 rounds the start onto the seam");
     assert_eq!(to as f32, -180.0, "and the end");
-    let seg = ParamSegment::unit(UnitParam::Azimuth, from, to, Samples(4), Law::Linear);
+    let seg = ParamSegment::unit(UnitParam::Azimuth, from, to, Samples::new(4), Law::Linear);
     let out = render_segment(ForkByClone(Bearing), UnitParam::Azimuth, seg);
     let arc = UnitParam::Azimuth.arc(from, to);
     assert!((arc - 2e-8).abs() < 1e-12, "the short arc is {arc}");
     for k in 1..4 {
-        let want = Azimuth(from + arc * (k as f64 / 4.0)).wrap().get();
+        let want = Azimuth::new(from + arc * (k as f64 / 4.0)).wrap().get();
         assert_eq!(out[k - 1], want, "frame {}", k - 1);
         assert!(out[k - 1].abs() > 179.0, "frame {}: {}", k - 1, out[k - 1]);
     }

@@ -44,7 +44,7 @@ fn offline() -> Session {
     set_server();
     Session::builder()
         .sample_rate(RATE)
-        .max_block(MaxBlock::of(Samples(BLOCK)))
+        .max_block(MaxBlock::of(Samples::new(BLOCK)))
         .build()
         .expect("an offline session builds")
 }
@@ -82,7 +82,7 @@ fn a_plugins_latency_is_the_sessions_and_follows_the_plugin() {
     );
     assert_eq!(
         s.graph_ref().node_latency(node).unwrap(),
-        Samples(tutti_clap_test_plugin::REPORTED_LATENCY_SAMPLES as usize + BLOCK),
+        Samples::new(tutti_clap_test_plugin::REPORTED_LATENCY_SAMPLES as usize + BLOCK),
         "the graph plans PDC against the node's whole latency"
     );
 
@@ -123,7 +123,7 @@ fn a_plugins_tail_ceiling_is_the_plugins_claim() {
     let node = add_probe_on_outputs(&mut s);
     assert_eq!(
         s.graph_ref().node_tail(node).unwrap(),
-        tutti_units::Tail::Finite(Samples(
+        tutti_units::Tail::Finite(Samples::new(
             tutti_clap_test_plugin::REPORTED_TAIL_SAMPLES as usize
         )),
     );
@@ -147,8 +147,8 @@ fn request() -> Bounce<tutti_graph::NodeKey, BufferMaster> {
         .master_buffers()
         .channels(ChannelLayout::STEREO)
         .range(Range::Seconds(
-            tutti_units::Seconds(0.0),
-            tutti_units::Seconds(0.05),
+            tutti_units::Seconds::new(0.0),
+            tutti_units::Seconds::new(0.05),
         ))
         .sample_rate(RATE)
         .clock(ExportClock::frozen())
@@ -171,37 +171,43 @@ fn a_latency_the_plugin_reports_reaches_the_graph() {
     let mut s = offline();
     let node = add_probe_on_outputs(&mut s);
     let own = tutti_clap_test_plugin::REPORTED_LATENCY_SAMPLES as usize;
-    assert_eq!(diagnostics_of(&s, node).reported_latency(), Samples(own));
-    assert_eq!(diagnostics_of(&s, node).latency(), Samples(own + BLOCK));
+    assert_eq!(
+        diagnostics_of(&s, node).reported_latency(),
+        Samples::new(own)
+    );
+    assert_eq!(
+        diagnostics_of(&s, node).latency(),
+        Samples::new(own + BLOCK)
+    );
 
     let _job = s.bounce_start(request()).expect("the bounce starts");
     let deadline = Instant::now() + std::time::Duration::from_secs(10);
-    while diagnostics_of(&s, node).reported_latency() != Samples(own + 300) {
+    while diagnostics_of(&s, node).reported_latency() != Samples::new(own + 300) {
         assert!(Instant::now() < deadline, "the report never arrived");
         round_trip(&s, node);
         std::thread::sleep(std::time::Duration::from_millis(5));
     }
     assert_eq!(
         diagnostics_of(&s, node).latency(),
-        Samples(own + BLOCK),
+        Samples::new(own + BLOCK),
         "the graph has not taken it yet"
     );
 
     let events = s.update();
     assert_eq!(
         s.graph_ref().node_latency(node).unwrap(),
-        Samples(own + 300 + BLOCK),
+        Samples::new(own + 300 + BLOCK),
         "a changed plugin latency reaches the graph"
     );
     assert_eq!(
         diagnostics_of(&s, node).latency(),
-        Samples(own + 300 + BLOCK)
+        Samples::new(own + 300 + BLOCK)
     );
     assert!(
         events.iter().any(|e| matches!(
             e,
             SessionEvent::Plugin(PluginEvent { node: n, change: PluginChange::LatencyChanged { latency }, .. })
-                if *n == node && *latency == Samples(own + 300 + BLOCK)
+                if *n == node && *latency == Samples::new(own + 300 + BLOCK)
         )),
         "{events:?}"
     );
@@ -255,7 +261,7 @@ fn a_crossfaded_plugins_latency_is_the_incoming_ones() {
     told(&outgoing_handle, tutti_plugin_types::RenderMode::Offline);
     let _ = s.update();
     let outgoing = s.graph_ref().node_latency(node).unwrap();
-    assert_eq!(outgoing, Samples(OWN + OFFLINE_EXTRA + BLOCK));
+    assert_eq!(outgoing, Samples::new(OWN + OFFLINE_EXTRA + BLOCK));
 
     let incoming = PluginClient::new(
         tutti_plugin::BridgeConfig::at(
@@ -272,7 +278,7 @@ fn a_crossfaded_plugins_latency_is_the_incoming_ones() {
         .crossfade_plugin(
             node,
             Box::new(incoming),
-            tutti_units::Seconds(0.005),
+            tutti_units::Seconds::new(0.005),
             tutti_graph::FadeLaw::EqualAmplitude,
         )
         .expect("the crossfade is accepted");
@@ -283,14 +289,14 @@ fn a_crossfaded_plugins_latency_is_the_incoming_ones() {
     assert!(s.graph_ref().contains(node), "the node keeps its key");
     assert_eq!(
         s.graph_ref().node_latency(node).unwrap(),
-        Samples(OWN + BLOCK),
+        Samples::new(OWN + BLOCK),
         "the graph plans against the incoming plugin's declared latency, not the outgoing one's"
     );
     told(&incoming_handle, tutti_plugin_types::RenderMode::Offline);
     let _ = s.update();
     assert_eq!(
         s.graph_ref().node_latency(node).unwrap(),
-        Samples(OWN + OFFLINE_EXTRA + BLOCK),
+        Samples::new(OWN + OFFLINE_EXTRA + BLOCK),
         "the latency phase must read the incoming plugin"
     );
 }
@@ -310,7 +316,7 @@ fn a_restart_to_another_callback_size_re_declares_a_plugins_latency() {
             ChannelLayout::STEREO,
             tutti_buffers::SampleFormat::F32,
         )
-        .with_quantum(MaxBlock::of(Samples(quantum)))
+        .with_quantum(MaxBlock::of(Samples::new(quantum)))
     }
     set_server();
     let (driver, stream) = ManualStreamDriver::new();
@@ -334,12 +340,12 @@ fn a_restart_to_another_callback_size_re_declares_a_plugins_latency() {
         .unwrap();
     let _ = s.update();
     let _ = stream
-        .render_block(Samples(512))
+        .render_block(Samples::new(512))
         .expect("the stream is open");
     let _ = s.update();
     assert_eq!(
         s.graph_ref().node_latency(node).unwrap(),
-        Samples(137 + 512),
+        Samples::new(137 + 512),
         "one 512-frame callback"
     );
     assert_eq!(s.latency(), s.graph_ref().node_latency(node).unwrap());
@@ -349,12 +355,12 @@ fn a_restart_to_another_callback_size_re_declares_a_plugins_latency() {
         .expect("restarts");
     assert_eq!(
         s.graph_ref().node_latency(node).unwrap(),
-        Samples(137 + 256),
+        Samples::new(137 + 256),
         "one 256-frame callback"
     );
     assert_eq!(
         s.latency(),
-        Samples(137 + 256),
+        Samples::new(137 + 256),
         "PDC follows before the first block"
     );
 }
@@ -369,7 +375,7 @@ fn a_clock_switch_re_declares_a_plugins_latency_and_keeps_its_handle() {
     set_server();
     let mut s = Session::builder()
         .sample_rate(RATE)
-        .max_block(MaxBlock::of(Samples(480)))
+        .max_block(MaxBlock::of(Samples::new(480)))
         .system_clock()
         .build()
         .expect("builds");
@@ -391,7 +397,7 @@ fn a_clock_switch_re_declares_a_plugins_latency_and_keeps_its_handle() {
     let _ = s.update();
     assert_eq!(
         s.graph_ref().node_latency(node).unwrap(),
-        Samples(137 + 480),
+        Samples::new(137 + 480),
         "one timer block"
     );
 
@@ -403,20 +409,20 @@ fn a_clock_switch_re_declares_a_plugins_latency_and_keeps_its_handle() {
                 ChannelLayout::STEREO,
                 tutti_buffers::SampleFormat::F32,
             )
-            .with_quantum(MaxBlock::of(Samples(256))),
+            .with_quantum(MaxBlock::of(Samples::new(256))),
             driver,
         )
         .unwrap_or_else(|e| panic!("switches: {}", e.error()));
     let _ = stream
-        .render_block(Samples(256))
+        .render_block(Samples::new(256))
         .expect("the stream is open");
     let _ = live.update();
     assert_eq!(
         live.graph_ref().node_latency(node).unwrap(),
-        Samples(137 + 256),
+        Samples::new(137 + 256),
         "one 256-frame callback"
     );
-    assert_eq!(live.latency(), Samples(137 + 256));
+    assert_eq!(live.latency(), Samples::new(137 + 256));
     assert!(
         live.plugin_view(node)
             .expect("hosted")
@@ -441,7 +447,7 @@ fn a_clock_switch_re_declares_a_plugins_latency_and_keeps_its_handle() {
     );
     assert_eq!(
         system.graph_ref().node_latency(node).unwrap(),
-        Samples(137 + 480),
+        Samples::new(137 + 480),
         "one timer block again"
     );
 }

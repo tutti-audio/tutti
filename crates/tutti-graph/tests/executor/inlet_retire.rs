@@ -14,11 +14,11 @@ use tutti_units::{Beat, Bpm, SampleRate, Samples};
 const KEY: NodeKey = NodeKey(7);
 
 fn inlet() -> (InletNode, tutti_graph::TapWriter) {
-    InletNode::pair(ChannelLayout::STEREO, Samples(256))
+    InletNode::pair(ChannelLayout::STEREO, Samples::new(256))
 }
 
 fn render(exec: &mut tutti_graph::Executor, blocks: usize) {
-    let t = TransportPosition::new(true, Bpm::of(120.0), Beat(0.0), None);
+    let t = TransportPosition::new(true, Bpm::of(120.0), Beat::new(0.0), None);
     for _ in 0..blocks {
         let mut chans = vec![vec![0.0f32; 64]; 2];
         let mut outs: Vec<&mut [f32]> = chans.iter_mut().map(Vec::as_mut_slice).collect();
@@ -37,8 +37,10 @@ fn outputs(ed: &mut Editor) {
 /// would panic in a debug build.
 #[test]
 fn replacing_and_removing_an_inlet_drops_it_on_the_control_side() {
-    let (mut ed, mut exec) =
-        Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))));
+    let (mut ed, mut exec) = Editor::new(Prepare::new(
+        SampleRate::SR_48K,
+        MaxBlock::of(Samples::new(64)),
+    ));
     let (first, mut w1) = inlet();
     ed.insert(KEY, "inlet", first);
     outputs(&mut ed);
@@ -50,8 +52,8 @@ fn replacing_and_removing_an_inlet_drops_it_on_the_control_side() {
 
     // A cut, then a crossfade, each over a fresh ring.
     for fade in [
-        Fade::new(Samples(0), FadeLaw::default()),
-        Fade::new(Samples(96), FadeLaw::default()),
+        Fade::new(Samples::new(0), FadeLaw::default()),
+        Fade::new(Samples::new(96), FadeLaw::default()),
     ] {
         let (next, mut w) = inlet();
         ed.replace(KEY, next, fade).expect("replaces");
@@ -106,9 +108,11 @@ impl tutti_graph::IntoNode for DropsInBlock {
 #[cfg(debug_assertions)]
 #[should_panic(expected = "TapReader dropped on the audio thread")]
 fn a_reader_dropped_in_a_block_panics() {
-    let (reader, _writer) = TapReader::pair(2, Samples(8));
-    let (mut ed, mut exec) =
-        Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))));
+    let (reader, _writer) = TapReader::pair(2, Samples::new(8));
+    let (mut ed, mut exec) = Editor::new(Prepare::new(
+        SampleRate::SR_48K,
+        MaxBlock::of(Samples::new(64)),
+    ));
     ed.insert(KEY, "drops", DropsInBlock(Some(reader)));
     outputs(&mut ed);
     ed.commit().expect("compiles");

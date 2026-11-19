@@ -23,7 +23,7 @@ pub fn control_in<F: Float>(value: f64) -> F {
 #[inline]
 pub(crate) fn wrap_in<F: Float>(param: UnitParam, value: F) -> F {
     if param.is_circular() {
-        F::from_f64(Azimuth(value.to_f64()).wrap().get())
+        F::from_f64(Azimuth::new(value.to_f64()).wrap().get())
     } else {
         value
     }
@@ -34,8 +34,8 @@ pub(crate) fn wrap_in<F: Float>(param: UnitParam, value: F) -> F {
 pub(crate) fn arc_in<F: Float>(param: UnitParam, from: F, to: F) -> F {
     if param.is_circular() {
         F::from_f64(
-            Azimuth(from.to_f64())
-                .shortest_arc_to(Azimuth(to.to_f64()))
+            Azimuth::new(from.to_f64())
+                .shortest_arc_to(Azimuth::new(to.to_f64()))
                 .get(),
         )
     } else {
@@ -81,7 +81,7 @@ pub fn ramp_in<F: Float>(param: Option<UnitParam>, from: F, to: F, k: Samples, n
             from,
             to,
             Law::Linear,
-            Normalized::progress(Samples(k + 1), Samples(n)),
+            Normalized::progress(Samples::new(k + 1), Samples::new(n)),
         )
     }
 }

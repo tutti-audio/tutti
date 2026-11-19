@@ -20,7 +20,7 @@ const FADE: usize = 240;
 fn session() -> Session {
     let mut s = Session::builder()
         .sample_rate(SampleRate::SR_48K)
-        .max_block(MaxBlock::of(Samples(64)))
+        .max_block(MaxBlock::of(Samples::new(64)))
         .build()
         .expect("builds");
     let (node, _) = s.graph().add(ForkByClone(Const::frame(&[0.25, 0.75])));

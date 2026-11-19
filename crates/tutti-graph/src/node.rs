@@ -645,7 +645,7 @@ impl Shape {
     /// use tutti_graph::Shape;
     /// use tutti_units::Samples;
     /// use tutti_buffers::ChannelLayout;
-    /// let echo_time = Samples(24_000);
+    /// let echo_time = Samples::new(24_000);
     /// let _ = Shape::through_unassigned(ChannelLayout::MONO).with_latency(echo_time);
     /// ```
     ///
@@ -653,7 +653,7 @@ impl Shape {
     ///
     /// ```compile_fail
     /// use tutti_units::{Latency, Samples};
-    /// let _: Latency = Samples(24_000).into();
+    /// let _: Latency = Samples::new(24_000).into();
     /// ```
     ///
     /// The one spelling is [`Latency::new`], a visible decision:
@@ -662,9 +662,9 @@ impl Shape {
     /// use tutti_graph::Shape;
     /// use tutti_units::{Latency, Samples};
     /// use tutti_buffers::ChannelLayout;
-    /// let lookahead = Latency::new(Samples(512));
+    /// let lookahead = Latency::new(Samples::new(512));
     /// let s = Shape::through_unassigned(ChannelLayout::MONO).with_latency(lookahead);
-    /// assert_eq!(s.latency.samples(), Samples(512));
+    /// assert_eq!(s.latency.samples(), Samples::new(512));
     /// ```
     #[must_use]
     pub const fn with_latency(mut self, latency: Latency) -> Self {
@@ -1212,7 +1212,7 @@ impl Default for TransportPosition {
     /// Stopped at beat zero, 120 BPM, not looping, the block start its own
     /// origin.
     fn default() -> Self {
-        Self::new(false, Bpm::of(120.0), Beat(0.0), None)
+        Self::new(false, Bpm::of(120.0), Beat::new(0.0), None)
     }
 }
 
@@ -1281,7 +1281,7 @@ impl TransportChanges {
         len: 0,
         items: [TransportChange {
             at: Offset::ZERO,
-            to: TransportPosition::new(false, Bpm::of(120.0), Beat(0.0), None),
+            to: TransportPosition::new(false, Bpm::of(120.0), Beat::new(0.0), None),
         }; MAX_TRANSPORT_CHANGES],
     };
 
@@ -1656,7 +1656,7 @@ pub trait Node<F: Float = f32>: Send + 'static {
 ///     fn process(&mut self, _: &Cx<'_>, _: Io<'_>) -> Status { Status::Modified }
 ///     fn reset(&mut self) {}
 /// }
-/// let (mut editor, _exec) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))));
+/// let (mut editor, _exec) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64))));
 /// // Forkable or not? Unsaid, so refused: `Silence: IntoNode` is not satisfied.
 /// editor.insert(NodeKey(1), "silence", Silence);
 /// ```
@@ -1750,10 +1750,10 @@ mod tests {
     /// skipped as a no-op).
     #[test]
     fn a_prepare_carries_the_device_quantum_it_is_given() {
-        let p = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(1024)));
+        let p = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(1024)));
         assert_eq!(p.quantum(), None);
-        let q = p.with_quantum(MaxBlock::of(Samples(480)));
-        assert_eq!(q.quantum(), Some(MaxBlock::of(Samples(480))));
+        let q = p.with_quantum(MaxBlock::of(Samples::new(480)));
+        assert_eq!(q.quantum(), Some(MaxBlock::of(Samples::new(480))));
         assert_eq!(q.max_block(), p.max_block());
         assert_ne!(p, q);
     }
@@ -1762,7 +1762,7 @@ mod tests {
     /// refuses past it rather than truncating.
     #[test]
     fn scratch_fits_every_prepared_block() {
-        let p = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(100)));
+        let p = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(100)));
         let mut s = Scratch::<f32>::new(p.max_block(), 2);
         assert_eq!(s.channel(1, 100).len(), 100);
         assert_eq!(s.channel(0, 7).len(), 7);

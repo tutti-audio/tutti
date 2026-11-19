@@ -29,7 +29,8 @@ pub(super) fn host<K: crate::AppKey, C: Clock<Float = f32>>(
     plugin: PluginRef,
 ) -> Key<AnyPlugin> {
     let node = node.into();
-    let (controls, _) = PluginControls::new(Samples(0), PluginTail::default(), SampleRate::SR_48K);
+    let (controls, _) =
+        PluginControls::new(Samples::new(0), PluginTail::default(), SampleRate::SR_48K);
     let previous = session
         .graph
         .plugins
@@ -48,7 +49,8 @@ pub(super) fn host_served<K: crate::AppKey, C: Clock<Float = f32>>(
     plugin: PluginRef,
 ) -> Key<AnyPlugin> {
     let node = node.into();
-    let (controls, _) = PluginControls::new(Samples(0), PluginTail::default(), SampleRate::SR_48K);
+    let (controls, _) =
+        PluginControls::new(Samples::new(0), PluginTail::default(), SampleRate::SR_48K);
     let previous = session
         .graph
         .plugins

@@ -92,7 +92,7 @@ fn graph(
     sends: Vec<(u64, ParamSegment)>,
     ranges: &[(UnitParam, ParamRange)],
 ) -> (Editor, Executor) {
-    let (mut ed, exec) = Editor::new(Prepare::new(RATE, MaxBlock::of(Samples(256))));
+    let (mut ed, exec) = Editor::new(Prepare::new(RATE, MaxBlock::of(Samples::new(256))));
     ed.insert(NodeKey(PROBE), "probe", Unforkable(Probe(0.0)));
     ed.insert(NodeKey(SENDER), "sender", Unforkable(Sender(sends)));
     let s = ed.spec_mut();
@@ -135,7 +135,7 @@ fn render(ed: &mut Editor, exec: &mut Executor, frames: usize) -> [Vec<f32>; 2] 
 fn both(from: f64, to: f64, len: usize, shape: Law) -> Vec<(u64, ParamSegment)> {
     [UnitParam::Azimuth, UnitParam::Elevation]
         .into_iter()
-        .map(|p| (0, ParamSegment::unit(p, from, to, Samples(len), shape)))
+        .map(|p| (0, ParamSegment::unit(p, from, to, Samples::new(len), shape)))
         .collect()
 }
 
@@ -151,7 +151,7 @@ fn an_azimuth_segment_from_170_to_minus_170_turns_through_180_not_0() {
         let t = (1 + j) as f64 / 100.0;
         // The port renders in `f64` and crosses to `f32` once: within half an
         // `f32` ulp of the closed form at 180.
-        let want = Azimuth(170.0 + 20.0 * t).wrap().get();
+        let want = Azimuth::new(170.0 + 20.0 * t).wrap().get();
         assert!(
             (f64::from(v) - want).abs() < 1e-5,
             "frame {j}: {v} against {want}"
@@ -173,7 +173,7 @@ fn an_azimuth_segment_applies_its_shape_to_the_arc() {
         let t = (1 + j) as f64 / 100.0;
         let g = t * t * t * (t * (6.0 * t - 15.0) + 10.0);
         // The short arc from -160 to 160 is -40.
-        let want = Azimuth(-160.0 - 40.0 * g).wrap().get();
+        let want = Azimuth::new(-160.0 - 40.0 * g).wrap().get();
         assert!(
             (f64::from(v) - want).abs() < 1e-5,
             "frame {j}: {v} against {want}"
@@ -203,7 +203,7 @@ fn the_port_wraps_a_bearing_rather_than_clamping_it() {
     let both_step = |v: f64| {
         [UnitParam::Azimuth, UnitParam::Elevation]
             .into_iter()
-            .map(|p| (0, ParamSegment::unit(p, v, v, Samples(0), Law::Linear)))
+            .map(|p| (0, ParamSegment::unit(p, v, v, Samples::new(0), Law::Linear)))
             .collect::<Vec<_>>()
     };
     let (mut ed, mut exec) = graph(
@@ -220,7 +220,7 @@ fn the_port_wraps_a_bearing_rather_than_clamping_it() {
 /// one to the nearer end, by the short way round.
 #[test]
 fn the_port_holds_a_bearing_to_an_arc_across_180() {
-    let behind = ParamRange::arc(Azimuth(180.0), ArcDegrees(20.0));
+    let behind = ParamRange::arc(Azimuth::new(180.0), ArcDegrees::new(20.0));
     // 195 is -165, inside 160..200: not clamped to a line's 200 or 160.
     // 100 is outside, nearer the 160 end; -100 the 200 (-160) end.
     for (v, want) in [
@@ -232,7 +232,7 @@ fn the_port_holds_a_bearing_to_an_arc_across_180() {
         let (mut ed, mut exec) = graph(
             vec![(
                 0,
-                ParamSegment::unit(UnitParam::Azimuth, v, v, Samples(0), Law::Linear),
+                ParamSegment::unit(UnitParam::Azimuth, v, v, Samples::new(0), Law::Linear),
             )],
             &[(UnitParam::Azimuth, behind)],
         );
@@ -266,7 +266,7 @@ fn a_crossed_range_on_a_circular_param_is_refused() {
     ));
     ed.spec_mut().set_param_range(
         at(UnitParam::Azimuth),
-        ParamRange::arc(Azimuth(180.0), ArcDegrees(10.0)),
+        ParamRange::arc(Azimuth::new(180.0), ArcDegrees::new(10.0)),
     );
     ed.spec_mut()
         .set_param_range(at(UnitParam::Elevation), crossed);
@@ -310,7 +310,7 @@ impl Node for Heavy {
 /// frames of the first probe, on `workers` participants (1: the serial
 /// executor); every probe reads the same.
 fn declick(base: f32, target: f32, workers: usize) -> Vec<f32> {
-    let (mut ed, mut exec) = Editor::new(Prepare::new(RATE, MaxBlock::of(Samples(256))));
+    let (mut ed, mut exec) = Editor::new(Prepare::new(RATE, MaxBlock::of(Samples::new(256))));
     if workers > 1 {
         exec.set_pool(Some(common::test_pool(workers)));
     }
@@ -319,7 +319,7 @@ fn declick(base: f32, target: f32, workers: usize) -> Vec<f32> {
         ed.insert(probe(k), "probe", Unforkable(Heavy(Probe(base))));
     }
     let (from, to) = (f64::from(target), f64::from(target));
-    let step = ParamSegment::unit(UnitParam::Azimuth, from, to, Samples(0), Law::Linear);
+    let step = ParamSegment::unit(UnitParam::Azimuth, from, to, Samples::new(0), Law::Linear);
     ed.insert(
         NodeKey(SENDER),
         "sender",
@@ -389,7 +389,7 @@ fn a_bearings_declick_crosses_the_seam_and_the_pool_agrees_bit_for_bit() {
         let arc = UnitParam::Azimuth.arc(base, target);
         assert_eq!(arc.abs(), 20.0);
         for (j, &v) in serial.iter().enumerate().take(d) {
-            let (_, inn) = FadeLaw::EqualAmplitude.gains(Samples(j), Samples(d));
+            let (_, inn) = FadeLaw::EqualAmplitude.gains(Samples::new(j), Samples::new(d));
             // The fade is a lane in the graph's `f32`.
             let want = UnitParam::Azimuth.wrap(base + arc * inn.get());
             assert!(

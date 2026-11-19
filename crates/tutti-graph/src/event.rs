@@ -376,7 +376,7 @@ impl<'a> SortedEvents<'a> {
             events: self.events,
             params: self.params,
             pos: 0,
-            frames: frames.0,
+            frames: frames.get(),
         }
     }
 }
@@ -505,7 +505,7 @@ pub const MAX_EVENT_PORT_CAPACITY: NonZeroU32 = NonZeroU32::new(8_192).unwrap();
 /// use tutti_units::{SampleRate, Samples};
 ///
 /// let one_per_frame = EventDensity::per_frame(1);
-/// let at = |block| one_per_frame.capacity(&Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(block))));
+/// let at = |block| one_per_frame.capacity(&Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(block))));
 /// assert_eq!(at(64).get(), 256); // the floor
 /// assert_eq!(at(1024).get(), 1024);
 /// assert_eq!(at(1 << 20).get(), 8_192); // the cap
@@ -967,7 +967,7 @@ mod tests {
     fn split(events: &[Event], frames: usize) -> Vec<(std::ops::Range<usize>, Vec<Event>)> {
         SortedEvents::new(events, frames)
             .expect("sorted and in the block")
-            .sub_blocks(Samples(frames))
+            .sub_blocks(Samples::new(frames))
             .map(|(r, e)| (r, e.to_vec()))
             .collect()
     }
@@ -1108,7 +1108,7 @@ mod tests {
         let at = |density: EventDensity, block| {
             density.capacity(&crate::Prepare::new(
                 tutti_units::SampleRate::SR_48K,
-                MaxBlock::of(Samples(block)),
+                MaxBlock::of(Samples::new(block)),
             ))
         };
         let frame = EventDensity::per_frame(1);

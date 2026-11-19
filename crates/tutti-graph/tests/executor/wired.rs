@@ -176,7 +176,7 @@ fn scenario(workers: usize) -> Vec<(Vec<Rewired>, Read)> {
             TapId::of(1),
             vec![Source::Node(out(PROBE, 1))],
             TapAlign::Raw,
-            Samples(64),
+            Samples::new(64),
         )
         .expect("the port exists");
     steps.push(step(&mut ed, &mut exec, &seen, 0));
@@ -353,7 +353,7 @@ fn a_feedback_edge_marks_the_input_and_the_source_output() {
             node: PROBE,
             port: 1,
         },
-        Edge::Feedback(FeedbackFrom::new(out(PROBE, 0), Samples(16))),
+        Edge::Feedback(FeedbackFrom::new(out(PROBE, 0), Samples::new(16))),
     );
     let report = ed.commit().expect("commits");
     render(&mut exec, 0);
@@ -403,7 +403,7 @@ fn a_shape_with_64_ports_reads_bit_63() {
             TapId::of(1),
             vec![Source::Node(out(PROBE, 63))],
             TapAlign::Raw,
-            Samples(64),
+            Samples::new(64),
         )
         .expect("the port exists");
     let _ = ed.commit().expect("commits");

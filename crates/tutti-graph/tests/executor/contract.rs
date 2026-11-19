@@ -60,11 +60,11 @@ fn pulse_row() -> Row {
 fn latent_pulse_row() -> Row {
     Row::new(
         "Pulse, 37 frames of latency",
-        || Box::new(Pulse::new(Latency::new(Samples(37)))),
+        || Box::new(Pulse::new(Latency::new(Samples::new(37)))),
         pulse(),
         Detect::Exact(vec![1.0]),
     )
-    .with_expected_latency(Samples(37))
+    .with_expected_latency(Samples::new(37))
 }
 
 /// Declares `Frames(8)` (a SoundFont's resolution) and quantizes on its own
@@ -94,14 +94,14 @@ fn block_pulse_row() -> Row {
 fn lookahead_row() -> Row {
     Row::new(
         "Lookahead, 45 frames",
-        || Box::new(Lookahead::new(Latency::new(Samples(45)))),
+        || Box::new(Lookahead::new(Latency::new(Samples::new(45)))),
         Excite::Impulse {
             port: 0,
             amplitude: 0.5,
         },
         Detect::Exact(vec![0.5]),
     )
-    .with_expected_latency(Samples(45))
+    .with_expected_latency(Samples::new(45))
 }
 
 /// Compiler-owned param modulation: a step in a modulator
@@ -174,7 +174,7 @@ impl Node for Liar {
     fn shape(&self) -> Shape {
         Shape::source_unassigned(ChannelLayout::MONO)
             .with_events(1, 0)
-            .with_latency(Latency::new(Samples(self.declared)))
+            .with_latency(Latency::new(Samples::new(self.declared)))
             .with_tail(Tail::Unknown)
             .with_event_resolution(self.resolution)
     }
@@ -259,11 +259,11 @@ fn a_rows_lead_is_held_exactly() {
     for path in [Path::Direct, Path::BehindPdc, Path::BlocksRandom] {
         // Declares 5 frames and responds at 6: one frame of lead.
         liar_row(5, 6, Resolution::Sample, Timing::Exact)
-            .with_lead(Samples(1))
+            .with_lead(Samples::new(1))
             .check(path);
         for lead in [0, 2] {
             fails(
-                &liar_row(5, 6, Resolution::Sample, Timing::Exact).with_lead(Samples(lead)),
+                &liar_row(5, 6, Resolution::Sample, Timing::Exact).with_lead(Samples::new(lead)),
                 path,
                 &format!("a one-frame lead checked as {lead}"),
             );
@@ -318,7 +318,7 @@ fn resolution_is_held_as_declared() {
 fn a_row_cannot_pass_what_it_does_not_run() {
     let msg = failure(|| {
         latent_pulse_row()
-            .with_expected_latency(Samples(36))
+            .with_expected_latency(Samples::new(36))
             .check(Path::Direct)
     })
     .expect("a mispinned latency passed");
@@ -370,7 +370,10 @@ fn a_fan_in_tie_goes_by_source_order() {
         }
         g.connect_output(sink, 0, 0);
         let mut r = g
-            .renderer(Prepare::new(SAMPLE_RATE, MaxBlock::of(Samples(MAX_BLOCK))))
+            .renderer(Prepare::new(
+                SAMPLE_RATE,
+                MaxBlock::of(Samples::new(MAX_BLOCK)),
+            ))
             .expect("builds");
         r.render(1_024);
         assert_eq!(
@@ -406,7 +409,7 @@ fn rolling_at_two() -> tutti_graph::TransportPosition {
     tutti_graph::TransportPosition::new(
         true,
         tutti_units::Bpm::of(120.0),
-        tutti_units::Beat(2.0),
+        tutti_units::Beat::new(2.0),
         None,
     )
 }
@@ -428,14 +431,14 @@ fn the_transport_harnesses_hand_the_node_their_transport() {
     let mut changes = TransportChanges::NONE;
     changes
         .push(
-            Offset::of(Samples(2), Samples(4)),
-            tutti_graph::TransportPosition::new(true, Bpm::of(120.0), Beat(10.0), None),
+            Offset::of(Samples::new(2), Samples::new(4)),
+            tutti_graph::TransportPosition::new(true, Bpm::of(120.0), Beat::new(10.0), None),
         )
         .unwrap();
     let env = Env {
         frame: Frame::new(0),
         sample_rate: rate,
-        block_len: Samples(4),
+        block_len: Samples::new(4),
         transport: rolling_at_two(),
         changes,
         play: tutti_graph::PlayClock::ZERO,
@@ -482,7 +485,7 @@ fn the_tail_contract_catches_a_report_that_is_too_short() {
     use common::Ringer;
     use tutti_graph::contract::{assert_honest_tail, prepared};
     let rate = tutti_graph::contract::SAMPLE_RATE;
-    let ceiling = Tail::Finite(Samples(1000));
+    let ceiling = Tail::Finite(Samples::new(1000));
     let check = |r: Ringer| {
         let mut node = prepared(r, rate, 64);
         catch_unwind(AssertUnwindSafe(|| assert_honest_tail(&mut node, rate))).is_ok()
@@ -495,7 +498,7 @@ fn the_tail_contract_catches_a_report_that_is_too_short() {
     );
     assert!(check(Ringer::new(ceiling, 300, 300).wide(2)));
     assert!(check(
-        Ringer::new(ceiling, 300, 300).with_latency(Samples(37))
+        Ringer::new(ceiling, 300, 300).with_latency(Samples::new(37))
     ));
     assert!(check(Ringer::new(
         Tail::Unbounded,
@@ -509,7 +512,7 @@ fn the_tail_contract_catches_a_report_that_is_too_short() {
     assert!(!check(Ringer::new(ceiling, 300, 298)), "one frame short");
     assert!(
         !check(Ringer::new(
-            Tail::Finite(Samples(100)),
+            Tail::Finite(Samples::new(100)),
             300,
             common::NO_REPORT
         )),
