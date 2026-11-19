@@ -279,8 +279,8 @@ fn an_inputs_offset_is_depth_times_span_times_x() {
 }
 
 /// Layers sum in `f64` and the value is the sum, unrounded: the offsets sum to
-/// 11 000 000.0149 and the knob is 0.5, so the value is 11 000 000.5149, which
-/// an `f32` cannot hold. Insertion order does not matter: `new` sorts by id.
+/// 11 000 000 and the knob is 0.5, so the value is 11 000 000.5, which an
+/// `f32` cannot hold. Insertion order does not matter: `new` sorts by id.
 #[test]
 fn layers_sum_in_id_order_in_f64() {
     let l = |id, d| layer(id, beats(4.0), LfoShape::Square, amount(d));
@@ -288,12 +288,11 @@ fn layers_sum_in_id_order_in_f64() {
     let b = program(vec![l(1, 0.1), l(2, 0.7), l(3, 0.3)]);
     assert_eq!(a, b);
     let span = 1.0e7;
-    // Each layer's offset is `shape`'s `f32` depth, widened.
-    let want =
-        0.5f64 + f64::from(0.1f32) * span + f64::from(0.7f32) * span + f64::from(0.3f32) * span;
+    // Each layer's offset is its depth of the span, in `f64`.
+    let want = 0.5f64 + 0.1 * span + 0.7 * span + 0.3 * span;
     // An `f32` cannot hold the sum: it rounds to 11 000 000.5's neighbour.
     assert_ne!(f64::from(want as f32), want);
-    assert_eq!(want, 11_000_000.514_901_161);
+    assert!((want - 11_000_000.5).abs() < 1e-8);
     assert_eq!(
         a.value_at(None, Some(0.5), &at_beat(1.0), span, &[]),
         Some(want)
@@ -322,8 +321,8 @@ fn phase_survives_a_depth_edit() {
         let vb = b.value_at(None, Some(0.0), &t, 10.0, &[]).unwrap();
         let phase = 3.0 * f64::from(k) * 977.0 / SR + 0.125;
         let want = (phase * std::f64::consts::TAU).sin() * 3.0;
-        assert!((va - want).abs() < 1e-5, "{k}: {va} vs {want}");
-        assert!((vb - 2.0 * va).abs() < 1e-5, "{k}: {vb} vs 2 × {va}");
+        assert!((va - want).abs() < 1e-12, "{k}: {va} vs {want}");
+        assert!((vb - 2.0 * va).abs() < 1e-12, "{k}: {vb} vs 2 × {va}");
     }
 }
 
@@ -571,7 +570,8 @@ fn random_waves_replay_by_cycle() {
         // The smooth wave at a cycle's start is the step before it, and
         // runs to the cycle's own step.
         assert_eq!(smooth.raw_at(c, false), hash_bipolar(i64::from(n) - 1));
-        assert!((smooth.raw_at(c + 1.0, true) - hash_bipolar(n.into())).abs() < 1e-5);
+        // The left limit reads `tol` (1e-9 at these cycles) early, on a slope of at most 2.
+        assert!((smooth.raw_at(c + 1.0, true) - hash_bipolar(n.into())).abs() < 1e-8);
     }
     assert!((0..20).any(|n| s.raw_at(f64::from(n), false) != w.raw_at(f64::from(n), false)));
 }
@@ -588,7 +588,7 @@ fn random_steps_cover_the_range() {
             seed,
         };
         let mut buckets = [0u32; 8];
-        let (mut lo, mut hi) = (f32::MAX, f32::MIN);
+        let (mut lo, mut hi) = (f64::MAX, f64::MIN);
         for n in -2048..2048 {
             let v = w.raw_at(f64::from(n) + 0.5, false);
             assert!((-1.0..=1.0).contains(&v), "seed {seed} cycle {n}: {v}");
@@ -627,9 +627,9 @@ fn a_drawn_wave_follows_its_points() {
         },
     ]);
     let w = Waveform::Drawn(Arc::clone(&points));
-    let near = |c: f64, want: f32| {
+    let near = |c: f64, want: f64| {
         let v = w.raw_at(c, false);
-        assert!((v - want).abs() < 1e-6, "at {c}: {v} vs {want}");
+        assert!((v - want).abs() < 1e-12, "at {c}: {v} vs {want}");
     };
     near(0.1, 1.0);
     near(0.3, 0.0);
@@ -641,7 +641,8 @@ fn a_drawn_wave_follows_its_points() {
     // t = √(2/3).
     let want = 0.5 + 0.4 * (2.0f64 / 3.0).sqrt();
     let kinked = w.next_corner(0.6, true, true).expect("a crossing");
-    assert!((kinked - want).abs() < 1e-6, "{kinked} vs {want}");
+    // 30 bisection halvings of the piece (0.4 cycles wide) bound the error by 0.4 * 2^-30.
+    assert!((kinked - want).abs() < 1e-9, "{kinked} vs {want}");
     assert_eq!(w.next_corner(0.6, true, false), Some(0.9));
 }
 
@@ -742,7 +743,7 @@ fn a_curved_bipolar_depth_by_kinks_at_its_zero_crossings() {
 /// scaled offset through a drawn depth wave holding each raw value.
 #[test]
 fn the_unit_depth_by_is_half_raw_plus_one_in_f64() {
-    for raw in [-1.0f32, -0.7, 0.0, 1e-7, 0.3, 0.9, 1.0] {
+    for raw in [-1.0f64, -0.7, 0.0, 1e-7, 0.3, 0.9, 1.0] {
         let held = Waveform::Drawn(Arc::from(vec![PeriodPoint {
             at: Phase::new(0.0),
             value: raw,
@@ -759,11 +760,11 @@ fn the_unit_depth_by_is_half_raw_plus_one_in_f64() {
         };
         let span = 1000.0;
         let off = Amount::offset(&amount(0.25), 1.0, span);
-        let want = 100.0f64 + (-0.0 + off * ((f64::from(raw) + 1.0) * 0.5));
+        let want = 100.0f64 + (-0.0 + off * ((raw + 1.0) * 0.5));
         let d = l.depth_by.clone().expect("scaled");
         assert_eq!(
             d.scale(raw).to_bits(),
-            ((f64::from(raw) + 1.0) * 0.5).to_bits(),
+            ((raw + 1.0) * 0.5).to_bits(),
             "raw {raw}"
         );
         let got = program(vec![l]).value_at(None, Some(100.0), &at_beat(1.0), span, &[]);
@@ -819,7 +820,7 @@ fn new_refuses_a_nan() {
         ..l()
     };
     let nan_const = Layer {
-        wave: Waveform::Const(f32::NAN),
+        wave: Waveform::Const(f64::NAN),
         ..l()
     };
     let nan_depth_by = Layer {
@@ -878,7 +879,7 @@ fn a_circular_params_value_takes_the_short_arc_and_wraps_its_sum() {
             .expect("a value");
         assert!((line - (170.0 - 85.0 * b)).abs() < 1e-3, "beat {b}: {line}");
     }
-    // 170 and a constant layer of 0.1 of a 360 arc (36, to the depth's `f32`) is 206: -154.
+    // 170 and a constant layer of 0.1 of a 360 arc (36) is 206: -154.
     let l = layer(1, beats(4.0), LfoShape::Square, amount(0.1));
     let l = Layer {
         wave: Waveform::Const(1.0),
@@ -887,7 +888,7 @@ fn a_circular_params_value_takes_the_short_arc_and_wraps_its_sum() {
     let q = program(vec![l]);
     assert_eq!(
         q.value_at(Some(az), Some(170.0), &at_beat(1.0), 360.0, &[]),
-        Some(Azimuth::new(170.0 + f64::from(0.1f32) * 360.0).wrap().get())
+        Some(Azimuth::new(170.0 + 0.1 * 360.0).wrap().get())
     );
     assert_eq!(
         q.value_at(
@@ -897,7 +898,7 @@ fn a_circular_params_value_takes_the_short_arc_and_wraps_its_sum() {
             360.0,
             &[]
         ),
-        Some(170.0 + f64::from(0.1f32) * 360.0),
+        Some(170.0 + 0.1 * 360.0),
         "a line's sum is not wrapped"
     );
 }
@@ -909,7 +910,7 @@ fn a_circular_params_value_takes_the_short_arc_and_wraps_its_sum() {
 #[test]
 fn a_periodic_wave_reads_the_fraction_of_its_position() {
     for (shape, phase, expected) in [
-        (LfoShape::Sine, 0.25, 1.0f32),
+        (LfoShape::Sine, 0.25, 1.0f64),
         (LfoShape::Square, 0.1, 1.0),
         (LfoShape::Square, 0.9, -1.0),
         (LfoShape::Sawtooth, 0.5, 0.0),
@@ -918,7 +919,7 @@ fn a_periodic_wave_reads_the_fraction_of_its_position() {
         for cycle in [0.0, 3.0, 1_000.0] {
             let got = wave.raw_at(cycle + phase, false);
             assert!(
-                (got - expected).abs() < 1e-5,
+                (got - expected).abs() < 1e-12,
                 "{shape:?} at {}: expected {expected}, got {got}",
                 cycle + phase
             );
@@ -937,7 +938,7 @@ fn a_negative_position_reads_the_end_of_the_cycle() {
     };
     for cycle in [0.0, -3.0] {
         let got = saw.raw_at(cycle - 0.25, false);
-        assert!((got - 0.5).abs() < 1e-6, "{got} at {}", cycle - 0.25);
+        assert!((got - 0.5).abs() < 1e-12, "{got} at {}", cycle - 0.25);
     }
 }
 
@@ -971,4 +972,32 @@ fn splitmix64_reproduces_the_published_outputs() {
 fn the_hash_of_cycle_zero_is_inside_the_range_and_not_the_floor() {
     let h = hash_bipolar(0);
     assert!(h > -1.0 && h < 1.0, "{h}");
+}
+
+/// A wave's raw value is `f64` end to end: a constant of 1/3 gives an offset of 1/3 of the
+/// span to 1e-15 (an `f32` raw is 1/3 to only 1e-8), and a random step is the splitmix64 word's
+/// top 53 bits over 2^53, mapped to `[-1, 1]`, where 24 bits would quantise it to 2^-23.
+#[test]
+fn a_raw_value_keeps_f64_precision() {
+    let third = 1.0f64 / 3.0;
+    assert!(f64::from(third as f32) != third);
+    let l = Layer {
+        wave: Waveform::Const(third),
+        ..layer(1, beats(4.0), LfoShape::Sine, amount(1.0))
+    };
+    let got = program(vec![l])
+        .value_at(None, Some(0.0), &at_beat(1.0), 1.0, &[])
+        .expect("a value");
+    assert!((got - third).abs() < 1e-15, "{got}");
+    for n in [0i64, 1, 7, -3, 1_000_003] {
+        let want = ((splitmix64(n as u64) >> 11) as f64 / 9_007_199_254_740_992.0) * 2.0 - 1.0;
+        assert_eq!(hash_bipolar(n), want, "index {n}");
+    }
+    assert!(
+        (0..64).any(|n| {
+            let v = hash_bipolar(n);
+            (v * 8_388_608.0).fract() != 0.0
+        }),
+        "a step has bits below 2^-23"
+    );
 }

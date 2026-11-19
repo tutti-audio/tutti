@@ -153,7 +153,7 @@ pub enum Waveform {
     /// One value at every time, whatever the clock: a macro. It has no
     /// corners, and a layer of it does not move, so a lane whose layers are
     /// all constant is steady (one held value, no grid).
-    Const(f32),
+    Const(f64),
 }
 
 /// A breakpoint of a [`Waveform::Drawn`] period.
@@ -164,7 +164,7 @@ pub struct PeriodPoint {
     /// is a mistake, not the next period's start).
     pub at: Phase,
     /// The raw value there, in `[-1, 1]`.
-    pub value: f32,
+    pub value: f64,
     /// The curve of the piece from here to the next point.
     pub curve: Law,
 }
@@ -256,12 +256,12 @@ impl DepthBy {
 
     /// The scale `raw` gives.
     #[inline]
-    fn scale(&self, raw: f32) -> f64 {
+    fn scale(&self, raw: f64) -> f64 {
         let a = self.amount;
         if a.polarity == Polarity::Unipolar && a.curve == Law::Linear {
             // `(raw + 1) / 2` in `f64`, and exactly that at full depth:
             // `1.0 ×` is exact.
-            let u = (f64::from(raw.clamp(-1.0, 1.0)) + 1.0) * 0.5;
+            let u = (raw.clamp(-1.0, 1.0) + 1.0) * 0.5;
             a.depth.get() * u
         } else {
             a.offset(raw, 1.0)
@@ -351,7 +351,7 @@ pub enum ProgramError {
 ///
 /// The clamp to the target's range is the target's (a native param port
 /// clamps per frame) or the plugin lane's, never the program's. Values are
-/// the target's raw `f32` (Hz, linear gain, a plugin's normalised 0..1): the
+/// the target's raw `f64` (Hz, linear gain, a plugin's normalised 0..1): the
 /// program is erased over the unit, as the lane's `ParamSegment`s are.
 ///
 /// Built by [`new`](Self::new), which sorts the layers by id and refuses a
@@ -947,7 +947,7 @@ impl Clock {
 
 /// `hash_bipolar` of cycle `n` under `seed`: seed 0 is the plain sequence.
 #[inline]
-fn hash_cycle(n: f64, seed: u64) -> f32 {
+fn hash_cycle(n: f64, seed: u64) -> f64 {
     hash_bipolar((n as i64).wrapping_add(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) as i64))
 }
 
@@ -959,10 +959,10 @@ fn hash_cycle(n: f64, seed: u64) -> f32 {
 /// wave be a pure function of its clock, replayed after a seek and in a
 /// fork.
 #[inline]
-pub(crate) fn hash_bipolar(n: i64) -> f32 {
+pub(crate) fn hash_bipolar(n: i64) -> f64 {
     let z = splitmix64(n as u64);
-    // Top 24 bits → [0, 1) → [-1, 1].
-    ((z >> 40) as f32 / (1u32 << 24) as f32) * 2.0 - 1.0
+    // Top 53 bits → [0, 1) → [-1, 1].
+    ((z >> 11) as f64 / (1u64 << 53) as f64) * 2.0 - 1.0
 }
 
 /// The splitmix64 output function (Steele, Lea and Flood 2014; Vigna's
@@ -981,7 +981,7 @@ pub(crate) fn splitmix64(mut z: u64) -> u64 {
 impl Waveform {
     /// The raw value on `clock` at `at` (just before it for [`Limit::Before`]);
     /// `None` when the clock gives no position. A constant needs none.
-    fn raw_on(&self, clock: &Clock, at: &ProgramTime, limit: Limit) -> Option<f32> {
+    fn raw_on(&self, clock: &Clock, at: &ProgramTime, limit: Limit) -> Option<f64> {
         match self {
             Self::Const(v) => Some(*v),
             _ => Some(self.raw_limit(clock.cycles(at)?, limit)),
@@ -993,12 +993,12 @@ impl Waveform {
     /// the `floor`-based fraction the phase. A pure function of its address,
     /// so a seek or a fork reads the same value; the control lane and the
     /// audio-rate `tutti_nodes::LfoNode` both evaluate through it.
-    pub fn raw_at(&self, cycles: f64, left: bool) -> f32 {
+    pub fn raw_at(&self, cycles: f64, left: bool) -> f64 {
         let limit = if left { Limit::Before } else { Limit::At };
         self.raw_limit(cycles, limit)
     }
 
-    fn raw_limit(&self, cycles: f64, limit: Limit) -> f32 {
+    fn raw_limit(&self, cycles: f64, limit: Limit) -> f64 {
         let before = limit == Limit::Before;
         let c = if before { cycles - tol(cycles) } else { cycles };
         let n = libm::floor(c);
@@ -1008,7 +1008,7 @@ impl Waveform {
                 LfoShape::Random => hash_cycle(n, *seed),
                 LfoShape::RandomSmooth => {
                     let (a, b) = (hash_cycle(n - 1.0, *seed), hash_cycle(n, *seed));
-                    a + (b - a) * frac as f32
+                    a + (b - a) * frac
                 }
                 periodic => periodic.evaluate_periodic(Phase::new(frac.min(1.0))),
             },
@@ -1078,7 +1078,7 @@ impl Waveform {
                     if kinks {
                         let (a, b) = (hash_cycle(k - 1.0, *seed), hash_cycle(k, *seed));
                         if (a < 0.0 && b > 0.0) || (a > 0.0 && b < 0.0) {
-                            f(k + f64::from(a) / (f64::from(a) - f64::from(b)));
+                            f(k + a / (a - b));
                         }
                     }
                 }
@@ -1106,7 +1106,7 @@ impl Waveform {
 }
 
 /// The drawn period's value at `frac` in `[0, 1)`.
-fn drawn_value(points: &[PeriodPoint], frac: f64) -> f32 {
+fn drawn_value(points: &[PeriodPoint], frac: f64) -> f64 {
     let Some(first) = points.first() else {
         return 0.0;
     };
@@ -1125,27 +1125,25 @@ fn drawn_value(points: &[PeriodPoint], frac: f64) -> f32 {
         let q = points[after];
         (p, p.at.get(), q, q.at.get())
     };
-    // The point values are `f32` lane levels, and so is the piece between
-    // them: the progress crosses into the lane once.
-    let t = f32::from_unit(Normalized::clamped((frac - start) / (end - start)));
+    let t = Normalized::clamped((frac - start) / (end - start)).get();
     p.value + (q.value - p.value) * p.curve.eval_in(t)
 }
 
 /// Where in `(0, 1)` a `curve` piece from `a` to `b` crosses zero, if its
 /// ends have opposite signs: in closed form for a line, by bisection on the
 /// curve otherwise (deterministic: a fixed number of halvings).
-fn crossing(curve: Law, a: f32, b: f32) -> Option<f64> {
+fn crossing(curve: Law, a: f64, b: f64) -> Option<f64> {
     if !((a < 0.0 && b > 0.0) || (a > 0.0 && b < 0.0)) {
         return None;
     }
     if curve == Law::Linear {
-        return Some(f64::from(a) / (f64::from(a) - f64::from(b)));
+        return Some(a / (a - b));
     }
     let (mut lo, mut hi) = (0.0f64, 1.0f64);
     let below = a < 0.0;
     for _ in 0..30 {
         let mid = 0.5 * (lo + hi);
-        let v = Piece::new(f64::from(a), f64::from(b), curve).value(None, Normalized::clamped(mid));
+        let v = Piece::new(a, b, curve).value(None, Normalized::clamped(mid));
         if (v < 0.0) == below {
             lo = mid;
         } else {

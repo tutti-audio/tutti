@@ -267,13 +267,9 @@ fn the_offset_at_raw_unit_is_shape_times_span_for_every_source_kind() {
     let span = 800.0f64;
     for polarity in [Polarity::Bipolar, Polarity::Unipolar] {
         for curve in curves {
-            for raw in [1.0f32, -1.0, 0.5, -0.5] {
+            for raw in [1.0f64, -1.0, 0.5, -0.5] {
                 let depth = Depth::of(-0.35);
-                // A wave's raw value is an `f32` lane; a signal source's (the
-                // follower, the note envelope) is the segment's `f64`.
-                let want = 0.0f64 + (-0.0 + f64::from(shape(raw, depth, polarity, curve)) * span);
-                let want_input =
-                    0.0f64 + (-0.0 + shape(f64::from(raw), depth, polarity, curve) * span);
+                let want = 0.0f64 + (-0.0 + shape(raw, depth, polarity, curve) * span);
                 let r = |source, t| RouteDecl {
                     source: SourceKey(source),
                     to: RouteTarget::Param(t),
@@ -331,13 +327,13 @@ fn the_offset_at_raw_unit_is_shape_times_span_for_every_source_kind() {
                 assert_eq!(at_unit(target(1), &[]), Some(want), "LFO, {case}");
                 assert_eq!(at_unit(target(2), &[]), Some(want), "macro, {case}");
                 assert_eq!(
-                    at_unit(target(3), &[Some(f64::from(raw))]),
-                    Some(want_input),
+                    at_unit(target(3), &[Some(raw)]),
+                    Some(want),
                     "follower, {case}"
                 );
                 assert_eq!(
-                    at_unit(plugin(4, 1), &[Some(f64::from(raw))]),
-                    Some(want_input),
+                    at_unit(plugin(4, 1), &[Some(raw)]),
+                    Some(want),
                     "note envelope, {case}"
                 );
                 assert_eq!(
@@ -401,14 +397,7 @@ fn a_macro_move_changes_exactly_the_programs_it_reaches() {
     let at = time(0.0, 0.0, 1);
     assert_eq!(
         after.programs[&target(2)].value_at(None, Some(0.0), &at, 2.0, &[]),
-        Some(
-            -0.0 + f64::from(shape(
-                -0.75f32,
-                Depth::of(0.2),
-                Polarity::Bipolar,
-                Law::Linear
-            )) * 2.0
-        ),
+        Some(-0.0 + shape(-0.75f64, Depth::of(0.2), Polarity::Bipolar, Law::Linear) * 2.0),
         "depth 0.2 of a span of 2, at the macro's −0.75"
     );
 }
@@ -711,7 +700,7 @@ fn each_refusal_fires_by_name() {
     );
     // Sources out of their domain, and a declared anchor.
     let bad_sources = [
-        Source::Macro { value: f32::NAN },
+        Source::Macro { value: f64::NAN },
         Source::Follower {
             attack: Seconds::new(-0.1),
             release: Seconds::new(0.1),
@@ -724,7 +713,7 @@ fn each_refusal_fires_by_name() {
         },
         lfo(LfoShape::Sine, seconds(f64::NAN)),
         Source::Lfo {
-            wave: Waveform::Const(f32::NAN),
+            wave: Waveform::Const(f64::NAN),
             clock: beats(1.0),
         },
     ];
@@ -984,7 +973,7 @@ fn a_second_rate_edit_near_its_anchor_reanchors() {
 #[test]
 fn a_value_that_is_not_finite_is_refused() {
     let t1 = [(target(1), ranged(0.0, 1.0))];
-    for v in [f32::INFINITY, f32::NAN] {
+    for v in [f64::INFINITY, f64::NAN] {
         let constant = [(
             SourceKey(1),
             Source::Lfo {

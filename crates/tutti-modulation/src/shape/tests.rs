@@ -39,14 +39,14 @@ fn test_sawtooth_down_shape() {
 
 #[test]
 fn shape_linear_bipolar_is_depth_scaled_identity() {
-    assert!(shape(0.0, Depth::FULL, Polarity::Bipolar, Law::Linear).abs() < 1e-3);
-    assert!((shape(1.0, Depth::FULL, Polarity::Bipolar, Law::Linear) - 1.0).abs() < 1e-2);
-    assert!((shape(-1.0, Depth::FULL, Polarity::Bipolar, Law::Linear) + 1.0).abs() < 1e-2);
+    assert!(shape(0.0, Depth::FULL, Polarity::Bipolar, Law::Linear).abs() < 1e-12);
+    assert!((shape(1.0, Depth::FULL, Polarity::Bipolar, Law::Linear) - 1.0).abs() < 1e-12);
+    assert!((shape(-1.0, Depth::FULL, Polarity::Bipolar, Law::Linear) + 1.0).abs() < 1e-12);
 }
 
 #[test]
 fn shape_depth_scales_output() {
-    assert!((shape(1.0, Depth::of(0.5), Polarity::Bipolar, Law::Linear) - 0.5).abs() < 1e-2);
+    assert!((shape(1.0, Depth::of(0.5), Polarity::Bipolar, Law::Linear) - 0.5).abs() < 1e-12);
 }
 
 /// A negative depth inverts the modulator rather than attenuating it — the
@@ -55,15 +55,15 @@ fn shape_depth_scales_output() {
 fn inverted_depth_flips_the_sign() {
     let up = shape(1.0, Depth::FULL, Polarity::Bipolar, Law::Linear);
     let down = shape(1.0, Depth::INVERTED, Polarity::Bipolar, Law::Linear);
-    assert!((up + down).abs() < 1e-6, "{up} and {down} must cancel");
+    assert!((up + down).abs() < 1e-12, "{up} and {down} must cancel");
 }
 
 #[test]
 fn shape_unipolar_maps_negative_to_zero_region() {
     // Unipolar remaps [-1,1]→[0,1]: x=-1 → 0, x=0 → 0.5, x=1 → 1.
-    assert!(shape(-1.0, Depth::FULL, Polarity::Unipolar, Law::Linear).abs() < 1e-2);
-    assert!((shape(0.0, Depth::FULL, Polarity::Unipolar, Law::Linear) - 0.5).abs() < 1e-2);
-    assert!((shape(1.0, Depth::FULL, Polarity::Unipolar, Law::Linear) - 1.0).abs() < 1e-2);
+    assert!(shape(-1.0, Depth::FULL, Polarity::Unipolar, Law::Linear).abs() < 1e-12);
+    assert!((shape(0.0, Depth::FULL, Polarity::Unipolar, Law::Linear) - 0.5).abs() < 1e-12);
+    assert!((shape(1.0, Depth::FULL, Polarity::Unipolar, Law::Linear) - 1.0).abs() < 1e-12);
 }
 
 /// The laws these tests shape through: one of each kind, with the power laws
@@ -81,7 +81,7 @@ const LAWS: [Law; 8] = [
 ];
 
 /// The response curve `shape` applies to a magnitude `x ∈ [0, 1]`.
-fn curve(c: Law, x: f32) -> f32 {
+fn curve(c: Law, x: f64) -> f64 {
     shape(x, Depth::FULL, Polarity::Bipolar, c)
 }
 
@@ -89,9 +89,9 @@ fn curve(c: Law, x: f32) -> f32 {
 #[test]
 fn every_curve_runs_from_zero_to_one() {
     for c in LAWS {
-        assert!(curve(c, 0.0).abs() < 1e-6, "{c:?} at 0: {}", curve(c, 0.0));
+        assert!(curve(c, 0.0).abs() < 1e-12, "{c:?} at 0: {}", curve(c, 0.0));
         assert!(
-            (curve(c, 1.0) - 1.0).abs() < 1e-6,
+            (curve(c, 1.0) - 1.0).abs() < 1e-12,
             "{c:?} at 1: {}",
             curve(c, 1.0)
         );
@@ -105,13 +105,13 @@ fn no_curve_falls_or_leaves_the_unit_range() {
     for c in LAWS {
         let mut last = curve(c, 0.0);
         for i in 1..=1024 {
-            let v = curve(c, i as f32 / 1024.0);
+            let v = curve(c, i as f64 / 1024.0);
             assert!(
                 v >= last,
                 "{c:?} falls at {}: {last} → {v}",
-                i as f32 / 1024.0
+                i as f64 / 1024.0
             );
-            assert!(v <= 1.0, "{c:?} exceeds 1 at {}: {v}", i as f32 / 1024.0);
+            assert!(v <= 1.0, "{c:?} exceeds 1 at {}: {v}", i as f64 / 1024.0);
             last = v;
         }
     }
@@ -129,8 +129,8 @@ fn quad_and_cubic_are_not_linear() {
     ] {
         let up = shape(0.5, Depth::FULL, Polarity::Bipolar, c);
         let down = shape(-0.5, Depth::FULL, Polarity::Bipolar, c);
-        assert!((up - want).abs() < 1e-6, "{c:?}: {up}, want {want}");
-        assert!((down + want).abs() < 1e-6, "{c:?}: {down}, want {}", -want);
+        assert!((up - want).abs() < 1e-12, "{c:?}: {up}, want {want}");
+        assert!((down + want).abs() < 1e-12, "{c:?}: {down}, want {}", -want);
         assert!((up - 0.5).abs() > 0.1, "{c:?} is linear");
     }
     // Unipolar: x = 0 is the middle of the curve.
@@ -140,7 +140,7 @@ fn quad_and_cubic_are_not_linear() {
         Polarity::Unipolar,
         Law::PowerIn(Exponent::of(3.0)),
     );
-    assert!((mid - 0.125).abs() < 1e-6, "CubicIn unipolar at 0: {mid}");
+    assert!((mid - 0.125).abs() < 1e-12, "CubicIn unipolar at 0: {mid}");
 }
 
 #[test]
@@ -163,6 +163,6 @@ fn the_sine_shape_is_the_closed_form_of_the_phase() {
     let at = |p: f64| LfoShape::Sine.evaluate_periodic(Phase::new(p));
     assert_eq!(at(0.25), 1.0);
     assert_eq!(at(0.75), -1.0);
-    assert!(at(0.5).abs() < 1e-7);
-    assert!((at(0.125) - core::f32::consts::FRAC_1_SQRT_2).abs() < 1e-7);
+    assert!(at(0.5).abs() < 1e-15);
+    assert!((at(0.125) - core::f64::consts::FRAC_1_SQRT_2).abs() < 1e-15);
 }

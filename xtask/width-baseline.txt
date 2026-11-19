@@ -22,18 +22,12 @@ crates/tutti-export/src/encode/mod.rs  2  migrating: foundation
 crates/tutti-export/src/render/outputs.rs  2  migrating: foundation
 crates/tutti-export/src/rendered.rs  1  migrating: foundation
 crates/tutti-metering/src/load.rs  8  migrating: foundation
-crates/tutti-modulation/src/compile.rs  1  migrating: B2/B3
-crates/tutti-modulation/src/program.rs  6  migrating: B2/B3
-crates/tutti-modulation/src/shape.rs  2  migrating: B2/B3
-crates/tutti-modulation/src/source/follower.rs  3  migrating: B2/B3
-crates/tutti-modulation/src/sources.rs  2  migrating: B2/B3
 crates/tutti-plugin-host/src/node/loader.rs  1  spec: f32 is the audio width every plugin format processes (CLAP, VST3, VST2, AU)
 crates/tutti-plugin-probe/src/hosted/measure.rs  2  migrating: plugins step 7
 crates/tutti-session/src/bounce.rs  1  migrating: B2/B3
 crates/tutti-session/src/builder.rs  1  migrating: B2/B3
 crates/tutti-session/src/clock.rs  3  migrating: B2/B3
 crates/tutti-session/src/device.rs  1  migrating: B2/B3
-crates/tutti-session/src/modulation.rs  1  migrating: B2/B3
 crates/tutti-session/src/plugin.rs  1  migrating: B2/B3
 crates/tutti-session/src/plugin/lost.rs  1  migrating: plugins step 7
 crates/tutti-voicing/src/channel.rs  3  migrating: foundation

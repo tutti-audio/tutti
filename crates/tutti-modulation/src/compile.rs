@@ -149,7 +149,7 @@ pub enum Source {
     /// Moving it recompiles what it reaches: a layer of [`Waveform::Const`].
     Macro {
         /// The raw value.
-        value: f32,
+        value: f64,
     },
     /// An envelope follower: a node whose audio input the host wires, its
     /// level sent into each lane it reaches.
@@ -338,7 +338,7 @@ pub struct Compiled {
 /// A clock holds no NaN: `compile` refuses a rate, period or phase that is
 /// not finite (an infinite phase would make a carried anchor's jump
 /// `inf − inf`), and an anchor's phase is a finite `Clock::cycles` plus
-/// phase jumps that are each a difference of two finite `f32`s, so their
+/// phase jumps that are each a difference of two finite `f64`s, so their
 /// `f64` sum stays finite.
 impl Eq for Compiled {}
 

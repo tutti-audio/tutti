@@ -31,11 +31,10 @@ pub struct LevelFollower {
     ballistics: Ballistics,
     /// One-pole coefficients at the prepared rate; 0 until `prepare`, so an
     /// unprepared follower's envelope stays at 0.
-    attack_coeff: f32,
-    release_coeff: f32,
-    /// In `f64`, so a long time constant decays at its own rate: in `f32`,
-    /// `1 − c` would round to 1 past about 640 s at 48 kHz and the envelope
-    /// would never decay.
+    attack_coeff: f64,
+    release_coeff: f64,
+    /// The envelope, in `f64`: a long time constant's `1 − c` stays below 1
+    /// and the envelope decays at its own rate.
     env: f64,
     /// `env` at the last grid point: the next leg's start.
     from: f64,
@@ -58,13 +57,13 @@ impl LevelFollower {
     /// One frame's level into the envelope: at least 0 and not NaN (a node
     /// reads a NaN sample as 0); above 1 reads 1.
     #[inline]
-    pub fn follow(&mut self, level: f32) {
-        let level = f64::from(level.min(1.0));
-        let c = f64::from(if level > self.env {
+    pub fn follow(&mut self, level: f64) {
+        let level = level.min(1.0);
+        let c = if level > self.env {
             self.attack_coeff
         } else {
             self.release_coeff
-        });
+        };
         let env = (1.0 - c) * self.env + c * level;
         self.env = if env < FLOOR { 0.0 } else { env };
     }
@@ -75,7 +74,7 @@ impl ControlSource for LevelFollower {
 
     fn prepare(&mut self, rate: SampleRate) {
         let (attack, release) = self.ballistics.coeffs(rate);
-        (self.attack_coeff, self.release_coeff) = (attack as f32, release as f32);
+        (self.attack_coeff, self.release_coeff) = (attack, release);
     }
 
     /// The envelope at 0. It sends nothing of its own here: play frame 0 is a
