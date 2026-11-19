@@ -7,8 +7,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use tutti_buffers::FloatWidth;
 use tutti_buffers::{Float, InputOutput};
 use tutti_plugin_types::{
-    Edit, EditDrain, EditSink, NoteExpressionChanges, PluginError, PluginIo, PluginResult,
-    Processor,
+    Edit, EditDrain, NoteExpressionChanges, PluginError, PluginIo, PluginResult, Processor,
+    ReportSink,
 };
 use tutti_rt::Reader;
 use tutti_units::Normalized;
@@ -32,7 +32,7 @@ pub(crate) struct ProcessorParts {
     pub scratch: Box<AudioScratch>,
     pub ranges: Reader<RangeTable>,
     pub drain: EditDrain,
-    pub reports: EditSink,
+    pub reports: ReportSink,
     pub reports_dropped: Arc<AtomicU64>,
 }
 
@@ -56,7 +56,7 @@ pub struct ClapProcessor {
     pub(crate) drain: EditDrain,
     /// The plugin's own parameter edits (its output `PARAM_VALUE` and gesture
     /// events), on their way to the Controller's `take_reported_edits`.
-    pub(crate) reports: EditSink,
+    pub(crate) reports: ReportSink,
     /// What `reports` refused for want of room, which the Controller counts.
     pub(crate) reports_dropped: Arc<AtomicU64>,
     pub(crate) audio_side: AudioSide,
@@ -280,7 +280,7 @@ impl ClapProcessor {
             let Some(heard) = event.heard(&table.ranges) else {
                 continue;
             };
-            if self.reports.send(Edit::Reported(heard)).is_err() {
+            if self.reports.send(heard).is_err() {
                 self.reports_dropped.fetch_add(1, Ordering::Relaxed);
             }
         }
