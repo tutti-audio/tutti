@@ -17,34 +17,24 @@ pub(crate) fn unpack(packed: u32) -> Option<Ump> {
     parse_exact(MidiGroup::FIRST, &[status, d1, d2]).map(Ump::from)
 }
 
-/// The packed short message of `ump`, a MIDI 1.0 channel voice (type 2) or
-/// system common or real time (type 1) message. The word holds only the
-/// message's own bytes, the rest zero. `None` for any other message type,
-/// which has no MIDI 1.0 byte-stream form, and for a first word whose status
-/// does not belong to its type (a type 2 word needs a channel voice status, a
-/// type 1 word a system one other than SysEx) or whose data bytes are not
-/// 7-bit. The Group is not sent: a byte stream has none.
+/// The packed short message of `ump`: its MIDI 1.0 bytes ([`Ump::midi1_bytes`]),
+/// low byte first, the rest of the word zero. `None` for a UMP that has none.
+/// The Group is not sent: a byte stream has none.
 pub(crate) fn pack(ump: &Ump) -> Option<u32> {
-    let [_, status, d1, d2] = ump.0[0].to_be_bytes();
-    let own = match (ump.message_type(), status) {
-        (2, 0x80..=0xEF) | (1, 0xF1..=0xFF) => match status {
-            0xC0..=0xDF | 0xF1 | 0xF3 => [status, d1, 0],
-            0xF6 | 0xF8..=0xFF => [status, 0, 0],
-            _ => [status, d1, d2],
-        },
-        _ => return None,
-    };
-    parse_exact(MidiGroup::FIRST, &own)?;
-    Some(u32::from_le_bytes([own[0], own[1], own[2], 0]))
+    let mut word = [0; 4];
+    let bytes = ump.midi1_bytes()?;
+    word[..bytes.as_slice().len()].copy_from_slice(bytes.as_slice());
+    Some(u32::from_le_bytes(word))
 }
 
 /// Widens winmm's stamp, milliseconds since the input started in a `u32` that
 /// wraps after 49.7 days, to the time since it started.
 ///
 /// The first stamp is the time since the start. Each later one is read as the
-/// signed difference from the one before it, which is what survives a wrap. A negative difference is a stamp out of order (a SysEx
-/// buffer that completes after a short message that came later): it leaves the
-/// time where it is, so the time never runs backward and never jumps by a wrap.
+/// signed difference from the one before it, which is what survives a wrap. A
+/// negative difference is a stamp out of order (a SysEx buffer that completes
+/// after a short message that came later): it leaves the time where it is, so
+/// the time never runs backward and never jumps by a wrap.
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct Stamps {
     /// The latest in-order stamp; none before the first.

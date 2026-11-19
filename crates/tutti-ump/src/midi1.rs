@@ -10,7 +10,7 @@ use core::slice;
 
 use crate::field::{U7, U14};
 use crate::message::{Address, Bank, Message, Sysex7Packet, SysexStatus, System, Voice1};
-use crate::{CCNumber, MidiChannel, MidiGroup, NoteNumber};
+use crate::{CCNumber, MidiChannel, MidiGroup, NoteNumber, Ump};
 
 // ---- bytes out ---------------------------------------------------------------
 
@@ -136,6 +136,36 @@ impl Bank {
             Midi1Bytes::three(c, 0, self.msb.get()),
             Midi1Bytes::three(c, 32, self.lsb.get()),
         ]
+    }
+}
+
+impl Ump {
+    /// The MIDI 1.0 bytes of a MIDI 1.0 channel voice (type 2) or system common
+    /// or real time (type 1) message, as [`Voice1::bytes`] and [`System::bytes`]
+    /// write them: the message's own bytes, so a byte it does not use in the
+    /// packet is not read. `None` for any other message type (a MIDI 2.0 message
+    /// has no byte-stream form of its own), a status that does not belong to the
+    /// type, an undefined status, and a data byte of 128 or more.
+    ///
+    /// ```
+    /// use tutti_ump::Ump;
+    ///
+    /// let program_change = Ump([0x20C3_0A7F, 0, 0, 0]);
+    /// assert_eq!(program_change.midi1_bytes().unwrap().as_slice(), [0xC3, 0x0A]);
+    /// assert_eq!(Ump([0x4090_3C00, 0xC000_0000, 0, 0]).midi1_bytes(), None);
+    /// ```
+    #[must_use]
+    pub fn midi1_bytes(&self) -> Option<Midi1Bytes> {
+        let bytes = match self.decode().ok()? {
+            Message::Midi1(address, voice) => voice.bytes(address.channel),
+            Message::System(_, system) => system.bytes(),
+            _ => return None,
+        };
+        // The decoder reads a data byte's low 7 bits: bit 7 of a byte the
+        // message uses is a byte that is not a MIDI 1.0 data byte.
+        let [_, _, d1, d2] = self.0[0].to_be_bytes();
+        let used = &[d1, d2][..bytes.as_slice().len() - 1];
+        used.iter().all(|&byte| byte < 0x80).then_some(bytes)
     }
 }
 

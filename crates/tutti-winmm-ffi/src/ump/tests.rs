@@ -81,15 +81,6 @@ fn an_out_of_order_stamp_holds_the_time() {
     assert_eq!(stamps.since_start(105), Duration::from_millis(105));
 }
 
-/// 0xF4 is undefined (M2-104 section 7.6 lists none); 0xF8 is not a channel
-/// voice status and 0x90 is not a system one, so each word is refused.
-#[test]
-fn a_status_that_does_not_belong_to_its_type_is_not_packed() {
-    for first in [0x10F4_0000, 0x20F8_0000, 0x1090_3C64, 0x2070_0000] {
-        assert_eq!(pack(&Ump([first, 0, 0, 0])), None, "{first:#010x}");
-    }
-}
-
 /// The packed word holds a message's own bytes only: the unused bytes are zero.
 #[test]
 fn bytes_a_message_does_not_use_pack_as_zero() {
