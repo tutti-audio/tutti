@@ -52,7 +52,7 @@ pub enum FadeOut {
     Immediate,
 }
 
-/// What the transport should be doing once a locate lands.
+/// What the transport should be doing once a locate completes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum AfterLocate {
     /// Stay (or become) stopped at the target.

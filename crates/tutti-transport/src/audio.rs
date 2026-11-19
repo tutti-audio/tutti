@@ -222,10 +222,10 @@ impl TransportAudio {
     }
 
     /// The transport at the clock's current frame, after
-    /// [`advance`](Self::advance) rolled to a tempo change from
+    /// [`advance`](Self::advance) stopped at a tempo change from
     /// [`tempo_ahead`](Self::tempo_ahead): the tempo and segment the walk
     /// took there. The inputs read at the block's start stay.
-    pub fn current(&mut self) -> tutti_graph::TransportPosition {
+    pub fn position_after_tempo_change(&mut self) -> tutti_graph::TransportPosition {
         self.begin(false)
     }
 

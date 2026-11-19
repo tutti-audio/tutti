@@ -112,7 +112,7 @@ impl TempoWalk {
     /// Advance `clock` `frames` forward, wrapping at `looping`, and following the
     /// map's tempo cell by cell. With `stop`, return right after the first
     /// frame the tempo changed on (the clock standing on it); otherwise advance
-    /// all `frames`. Returns the frames rolled and whether the tempo changed.
+    /// all `frames`. Returns the frames advanced and whether the tempo changed.
     pub fn advance(
         &mut self,
         map: &TempoMap,
@@ -122,20 +122,20 @@ impl TempoWalk {
         stop: bool,
     ) -> (usize, bool) {
         let mut view = map.view(clock.sample_rate());
-        let (mut rolled, mut changed) = (0, false);
-        while rolled < frames {
+        let (mut advanced, mut changed) = (0, false);
+        while advanced < frames {
             let edge = self.frames_to_edge(&mut view);
-            let chunk = (frames - rolled).min(edge);
+            let chunk = (frames - advanced).min(edge);
             match clock.advance_to_wrap(Samples::new(chunk), looping) {
                 Some(wrapped) => {
                     let w = wrapped.get();
-                    rolled += w;
+                    advanced += w;
                     self.frame += w as i64;
                     // A wrap is a seek to the loop start: sync the tempo exactly.
                     changed |= self.sync_tempo(map, clock);
                 }
                 None => {
-                    rolled += chunk;
+                    advanced += chunk;
                     self.frame += chunk as i64;
                     if chunk == edge {
                         changed |= self.sync(&mut view, clock, false);
@@ -146,7 +146,7 @@ impl TempoWalk {
                 break;
             }
         }
-        (rolled, changed)
+        (advanced, changed)
     }
 
     /// The tempo changes inside the next `frames` of a rolling `clock`, at most
@@ -166,8 +166,8 @@ impl TempoWalk {
         let mut out = UpcomingTempo::NONE;
         let mut at = 0;
         while at < frames {
-            let (rolled, changed) = walk.advance(map, &mut clock, frames - at, looping, true);
-            at += rolled;
+            let (advanced, changed) = walk.advance(map, &mut clock, frames - at, looping, true);
+            at += advanced;
             if !changed || at >= frames {
                 break;
             }

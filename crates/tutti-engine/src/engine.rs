@@ -985,7 +985,7 @@ impl<F: Float> Engine<F> {
                     transport.advance(s, &t);
                     pieces.ran();
                     cursor += s;
-                    t = transport.current();
+                    t = transport.position_after_tempo_change();
                     if let Some(o) = Offset::new(Samples::new(cursor), Samples::new(frames)) {
                         pieces.change(o, t);
                     }
