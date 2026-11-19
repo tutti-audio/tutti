@@ -53,7 +53,13 @@ const BODY_MAX_FRAMES: usize = 1 << 16;
 /// ([`Stream::looping_cell`](crate::Stream::looping_cell)): a change near the
 /// playhead is heard this many frames past the block being played, crossfaded
 /// over `DiskStreamerConfig`'s seek crossfade.
-pub const GUARD_FRAMES: u64 = 256;
+pub const GUARD_FRAMES: Samples = Samples::new(256);
+
+/// [`GUARD_FRAMES`] as a straight ring position's step: the ring counts
+/// positions in `u64`.
+fn guard_positions() -> u64 {
+    GUARD_FRAMES.get() as u64
+}
 
 /// Frames of old material a [`FadeRecord`] carries past the fade itself: what
 /// the reader plays if it reaches the switch before the rewrite has.
@@ -661,7 +667,7 @@ pub(crate) fn apply_mapping<F: RingFloat>(
     let mut tries: u32 = 0;
     let (at, fade, record) = loop {
         tries += 1;
-        let mut at = parts.max(busy + GUARD_FRAMES);
+        let mut at = parts.max(busy + guard_positions());
         if let Some(switch) = content.switch_at.filter(|&switch| switch > busy) {
             at = at.min(switch);
         }
@@ -1219,12 +1225,12 @@ mod tests {
         assert_eq!(
             edit,
             Edit::Switch {
-                at: 3_100 + GUARD_FRAMES,
+                at: 3_100 + guard_positions(),
                 fade: true
             }
         );
         assert_eq!(calls.load(std::sync::atomic::Ordering::Relaxed), 2);
-        assert_eq!(writer.content().switch_at, Some(3_100 + GUARD_FRAMES));
+        assert_eq!(writer.content().switch_at, Some(3_100 + guard_positions()));
     }
 
     /// A reader that keeps pace with every read is given up on after four:
@@ -1251,7 +1257,7 @@ mod tests {
         assert_eq!(
             edit,
             Edit::Switch {
-                at: 6_000 + GUARD_FRAMES,
+                at: 6_000 + guard_positions(),
                 fade: true
             }
         );

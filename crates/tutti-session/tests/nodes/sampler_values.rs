@@ -409,7 +409,7 @@ fn a_direction_set_plays_the_voice_backwards(streamed: bool) {
         // voice plays forwards up to the guard, blends the two across the
         // crossfade (each frame between the forward and the reversed one),
         // and plays backwards from the block, the guard and the crossfade on.
-        let guard = tutti_sampler::GUARD_FRAMES as usize;
+        let guard = tutti_sampler::GUARD_FRAMES.get();
         let fade = tutti_sampler::DiskStreamerConfig::default()
             .buffer_config
             .seek_crossfade_frames
@@ -564,7 +564,7 @@ fn landing(streamed: bool) -> usize {
         .buffer_config
         .seek_crossfade_frames
         .get();
-    BLOCK + tutti_sampler::GUARD_FRAMES as usize + fade + 8
+    BLOCK + tutti_sampler::GUARD_FRAMES.get() + fade + 8
 }
 
 /// Asserts `out`, rendered from frame `start`, is `source(f)` at every frame
@@ -676,4 +676,26 @@ fn a_direction_reversed_then_forward_mid_play_lands_on_a_resident_voice() {
 #[test]
 fn a_direction_reversed_then_forward_mid_play_lands_on_a_streamed_voice() {
     a_direction_reversed_then_forward_mid_play(true);
+}
+
+/// **A direction turned mid-play on a free-running voice jumps to the mirrored
+/// frame**: the free cursor is at `p` after `p` frames, and a reversed read
+/// of cursor `p` is source frame `LEN - 1 - p`. After 1 024 frames of
+/// `ramp(f)`, the next frame is `ramp(LEN - 1 - 1024)` and the voice goes on
+/// backwards from there, bit for bit.
+#[test]
+fn a_direction_turned_mid_play_on_a_free_running_voice_jumps_to_the_mirrored_frame() {
+    use tutti_sampler::Direction;
+    let mut rig = Rig::new(false);
+    rig.s.set(rig.clip.window().to(None)).unwrap();
+    let _ = rig.s.update();
+    rig.handle.play().expect("a free-running voice");
+    let forward = rig.render(1_024);
+    assert_source(&forward, 0, 0, |f| f);
+    rig.s
+        .set(rig.clip.direction().to(Direction::Reverse))
+        .unwrap();
+    let _ = rig.s.update();
+    let reversed = rig.render(2_048);
+    assert_source(&reversed, 1_024, 1_024, |f| LEN - 1 - f);
 }

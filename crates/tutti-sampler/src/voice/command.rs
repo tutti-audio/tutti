@@ -534,7 +534,8 @@ impl<F: SamplerFloat> VoiceNodeHandle<F> {
     /// frames past ~2²⁴). The node lends the cell once per block, so a window
     /// published twice between two blocks plays the second. A fork of the node
     /// taken after a publish starts from it. A streamed voice is always
-    /// placed: `None` leaves it at the window it has.
+    /// placed: `None` leaves it at the window it has. Stretch applies only to
+    /// a placed voice, so a stretched clip given `None` plays dry.
     ///
     /// The session writes it (`sampler.window()`); a host driving a node by
     /// hand publishes into it.

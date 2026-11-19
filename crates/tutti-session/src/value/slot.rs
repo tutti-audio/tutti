@@ -444,6 +444,8 @@ node_slot_target!(
     /// [`stop`](tutti_sampler::VoiceNodeHandle::stop) drive such a voice and
     /// refuse a placed one with [`PlayError::Placed`](tutti_sampler::PlayError)).
     /// A streamed voice is always placed: `None` leaves it at its window.
+    /// Stretch applies only to a placed voice, so a stretched clip given
+    /// `None` plays dry.
     ///
     /// A write is staged and published by the next
     /// [`Session::update`](crate::Session::update); the voice reads the window
@@ -481,8 +483,10 @@ node_slot_target!(
     /// A write is staged and published by the next
     /// [`Session::update`](crate::Session::update), and lands as the loop's
     /// does: a resident voice at its next block, a streamed one through the
-    /// streamer's next cycle. A read answers the staged direction, else the
-    /// one in force. A write to a node removed before the update is dropped.
+    /// streamer's next cycle. A free-running voice (no window) turned mid-play
+    /// jumps rather than continuing: its cursor `p` then reads the file
+    /// mirrored, frame `len - 1 - p`, and goes on backwards from there. A read
+    /// answers the staged direction, else the one in force. A write to a node removed before the update is dropped.
     DirectionTarget,
     tutti_sampler::Direction,
     Direction

@@ -23,7 +23,8 @@ pub struct SteerCell<T> {
 }
 
 impl<T> SteerCell<T> {
-    /// A cell holding `value`, with no streamer behind it.
+    /// A cell holding `value`, wired to no streamer: a publish rings nothing.
+    /// Only a stream's own cells ring its streamer.
     #[must_use]
     pub fn new(value: T) -> Self {
         Self {
