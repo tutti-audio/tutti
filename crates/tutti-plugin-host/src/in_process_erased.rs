@@ -1,12 +1,13 @@
 //! An in-process plugin's client, node and rebinder behind its format.
 //!
-//! [`InProcClient<L>`], [`PluginNode<L>`] and [`Rebinder<L>`] are generic over the
+//! [`InProcessClient<L>`], [`PluginNode<L>`] and [`Rebinder<L>`] are generic over the
 //! format's [`Loaded`](tutti_plugin_types::Loaded). A host that holds a plugin of any format keeps these
 //! erased: one box over a private trait, written once here, instead of an enum
 //! with an arm per format and a macro that lists them.
 
 use crate::{
-    InProcClient, NodeControls, PluginMeter, PluginNode, RebindError, Rebinder, Settlement,
+    InProcessClient, NodeControls, PluginNode, PluginTimeSignature, RebindError, Rebinder,
+    Settlement,
 };
 use tutti_graph::{IntoNode, NodeParts};
 use tutti_plugin_types::{InProcess, Layout, MainThreadMarker, RenderMode};
@@ -19,17 +20,17 @@ trait ClientOps: Send {
     fn bind(self: Box<Self>, tempo: TempoReader) -> (InProcessNode, InProcessRebinder);
 }
 
-impl<L> ClientOps for InProcClient<L>
+impl<L> ClientOps for InProcessClient<L>
 where
     L: InProcess + 'static,
     L::Processor: 'static,
 {
     fn set_render_mode(&self, mode: RenderMode) -> bool {
-        InProcClient::set_render_mode(self, mode)
+        InProcessClient::set_render_mode(self, mode)
     }
 
     fn controls(&self) -> NodeControls {
-        InProcClient::controls(self)
+        InProcessClient::controls(self)
     }
 
     fn bind(self: Box<Self>, tempo: TempoReader) -> (InProcessNode, InProcessRebinder) {
@@ -39,12 +40,12 @@ where
 }
 
 /// An in-process plugin's loaded client, whatever its format.
-pub struct InProcessClient(Box<dyn ClientOps>);
+pub struct AnyInProcessClient(Box<dyn ClientOps>);
 
-impl InProcessClient {
+impl AnyInProcessClient {
     /// Erases the format of `client`.
     #[must_use]
-    pub fn new<L>(client: InProcClient<L>) -> Self
+    pub fn new<L>(client: InProcessClient<L>) -> Self
     where
         L: InProcess + 'static,
         L::Processor: 'static,
@@ -52,12 +53,12 @@ impl InProcessClient {
         Self(Box::new(client))
     }
 
-    /// As [`InProcClient::set_render_mode`].
+    /// As [`InProcessClient::set_render_mode`].
     pub fn set_render_mode(&self, mode: RenderMode) -> bool {
         self.0.set_render_mode(mode)
     }
 
-    /// As [`InProcClient::controls`].
+    /// As [`InProcessClient::controls`].
     #[must_use]
     pub fn controls(&self) -> NodeControls {
         self.0.controls()
@@ -65,11 +66,11 @@ impl InProcessClient {
 
     /// The node's meter cell.
     #[must_use]
-    pub fn meter(&self) -> PluginMeter {
+    pub fn meter(&self) -> PluginTimeSignature {
         self.0.controls().meter()
     }
 
-    /// As [`InProcClient::bind`], and the [`InProcessRebinder`] over the same
+    /// As [`InProcessClient::bind`], and the [`InProcessRebinder`] over the same
     /// plugin, binding its successors to `tempo` too.
     #[must_use]
     pub fn bind(self, tempo: TempoReader) -> (InProcessNode, InProcessRebinder) {
@@ -92,7 +93,7 @@ where
     }
 }
 
-/// A bound in-process plugin: the graph node of [`InProcessClient::bind`], or
+/// A bound in-process plugin: the graph node of [`AnyInProcessClient::bind`], or
 /// one a rebinder built.
 pub struct InProcessNode(Box<dyn NodeOps>);
 
@@ -208,7 +209,7 @@ macro_rules! opaque_debug {
 }
 
 opaque_debug!(
-    InProcessClient,
+    AnyInProcessClient,
     InProcessNode,
     InProcessRebinder,
     InProcessRebuilt

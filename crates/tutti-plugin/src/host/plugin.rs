@@ -2,7 +2,7 @@
 //!
 //! Loading returns one owned type rather than a `(node, PluginHandle)` pair
 //! because the hostings are different concrete node types
-//! (`PluginClient<Bound>` and `InProcClient`), and because a plugin is
+//! (`PluginClient<Bound>` and `InProcessClient`), and because a plugin is
 //! more than its node: it also takes per-block MIDI, chord/scale context and
 //! note expression, reached here through capability accessors.
 
@@ -12,7 +12,9 @@ use tutti_plugin_types::{MainThreadMarker, MainWorkHandle};
 use tutti_rt::LockExt;
 
 use crate::host::node::PluginClient;
-use tutti_plugin_host::{Commit, InProcessClient, InProcessNode, InProcessRebinder, PluginHandle};
+use tutti_plugin_host::{
+    AnyInProcessClient, Commit, InProcessNode, InProcessRebinder, PluginHandle,
+};
 use tutti_plugin_ipc::AudioConfig;
 use tutti_plugin_types::BridgeResult;
 #[cfg(any(
@@ -39,7 +41,7 @@ enum Placed {
     Served(Box<PluginClient>),
     /// Built only where a format feature is on.
     #[allow(dead_code)]
-    InProcess(InProcessClient),
+    InProcess(AnyInProcessClient),
 }
 
 /// A loaded plugin: its audio node, its control surface, and the per-block
@@ -309,7 +311,7 @@ impl Plugin {
         let plugin = plugin.identified(&handle.descriptor().id);
         Ok((
             Self {
-                placed: Placed::InProcess(InProcessClient::new(client)),
+                placed: Placed::InProcess(AnyInProcessClient::new(client)),
                 handle,
                 plugin,
             },
@@ -447,7 +449,7 @@ impl Plugin {
     /// The node's meter cell, as a handle of its own, for either hosting:
     /// what a host keeps to install the meter after the plugin has moved
     /// into a graph (the same cell [`set_meter`](Self::set_meter) writes).
-    pub fn meter(&self) -> tutti_plugin_host::PluginMeter {
+    pub fn meter(&self) -> tutti_plugin_host::PluginTimeSignature {
         match &self.placed {
             Placed::Served(c) => c.controls().meter(),
             Placed::InProcess(c) => c.meter(),
@@ -483,7 +485,7 @@ impl Plugin {
     /// Binds the plugin to the reader of the project's tempo map it tells the
     /// plugin the tempo from (and CLAP its slope), wherever it
     /// runs: [`PluginClient::bind`] for a subprocess plugin,
-    /// `InProcClient::bind` for an in-process one. The result is the graph
+    /// `InProcessClient::bind` for an in-process one. The result is the graph
     /// node ([`BoundPlugin`]); `Session::add_pooled_plugin` binds every plugin with
     /// the session's reader, and a host with no session passes a
     /// [`TempoReader::fixed`](tutti_transport::TempoReader::fixed) one.
