@@ -6,8 +6,8 @@ use std::sync::Arc;
 use crossbeam_channel::Sender;
 use tutti_buffers::Wave;
 
+use tutti_buffers::ChannelLayout;
 use tutti_rt::RingFloat;
-use tutti_types::ChannelLayout;
 
 use super::open::Opened;
 use crate::voice::Direction;

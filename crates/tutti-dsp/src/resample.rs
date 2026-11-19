@@ -63,7 +63,7 @@ pub enum ResampleError {
     },
     /// The channel count is more than a `ChannelLayout` holds.
     #[error(transparent)]
-    Layout(#[from] tutti_types::LayoutError),
+    Layout(#[from] tutti_buffers::LayoutError),
     /// A view handed to a streaming resampler is not as wide as the resampler.
     #[error("a view of {got} channels was pushed into a resampler of {expected}")]
     WidthMismatch {

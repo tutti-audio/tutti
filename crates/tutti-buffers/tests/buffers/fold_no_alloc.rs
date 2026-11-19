@@ -5,11 +5,11 @@
 //! gate.
 
 use assert_no_alloc::assert_no_alloc;
-use tutti_buffers::{Fold, Interleaved, InterleavedMut, MonoMut, Planes, PlanesMut};
-use tutti_types::{
+use tutti_buffers::{
     AmbisonicFormat, AmbisonicNormalization, AmbisonicOrder, AmbisonicOrdering, ChannelLayout,
     ChannelTopology, Speaker,
 };
+use tutti_buffers::{Fold, Interleaved, InterleavedMut, MonoMut, Planes, PlanesMut};
 
 fn smpte(n: u16) -> ChannelTopology {
     ChannelTopology::assumed(ChannelLayout::from(n))

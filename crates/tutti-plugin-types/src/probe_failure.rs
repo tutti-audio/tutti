@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use tutti_types::MaxBlock;
+use tutti_buffers::MaxBlock;
 use tutti_units::SampleRate;
 
 use crate::{LoadStage, PluginFormat, ProbeDeath, ResultError};

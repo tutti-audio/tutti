@@ -4,18 +4,18 @@
 
 use std::time::{Duration, Instant};
 
+use tutti_buffers::MaxBlock;
 use tutti_graph::NodeKey;
 use tutti_modulation::{Follower, Lfo};
 use tutti_session::{
     ModTarget, PHASES, ParamRef, PhaseCx, Problem, RouteSpec, Session, SessionEvent, SourceName,
     TargetName,
 };
-use tutti_types::MaxBlock;
 use tutti_units::{Depth, Hz, Samples, UnitParam};
 
 fn session() -> Session {
     Session::builder()
-        .outputs(tutti_types::ChannelLayout::STEREO)
+        .outputs(tutti_buffers::ChannelLayout::STEREO)
         .max_block(MaxBlock::of(Samples(256)))
         .build()
         .expect("builds")

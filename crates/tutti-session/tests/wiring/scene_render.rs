@@ -22,6 +22,8 @@
 //!   law, and ends on the new filter as if it had run from the fade's start:
 //!   a hand-wired graph whose filter hears silence until then.
 
+use tutti_buffers::ChannelLayout;
+use tutti_buffers::MaxBlock;
 use tutti_buffers::PlanesMut;
 use tutti_graph::NodeKey;
 use tutti_graph::{
@@ -32,8 +34,6 @@ use tutti_nodes::{
     DistortionNode, LimiterControls, LimiterNode, ShapeKind, SvfFilterNode, SvfType,
 };
 use tutti_session::{AudioSide, DetachedSession, InPort, Key, OutPort, Root, Session};
-use tutti_types::ChannelLayout;
-use tutti_types::MaxBlock;
 use tutti_units::{Db, Drive, Hz, Q, SampleRate, Samples, Seconds};
 
 const RATE: f64 = 48_000.0;

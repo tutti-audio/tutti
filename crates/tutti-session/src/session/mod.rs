@@ -13,15 +13,13 @@ mod tests;
 mod transport;
 
 pub use event::{CrossfadeControls, SessionEvent};
+#[cfg(feature = "midi")]
+pub use parts::MidiNodes;
 pub use phases::{ModInput, PHASES, Phase, PhaseCx};
 pub use root::RootTopologyStatus;
-#[cfg(feature = "midi")]
-pub use taps::MidiNodes;
 
 use std::fmt::Debug;
 use std::sync::Arc;
-#[cfg(feature = "plugin")]
-use std::time::Instant;
 
 use tutti_engine::{OutputSpec, StreamFaults};
 use tutti_graph::NodeKey;
@@ -34,7 +32,10 @@ use crate::graph::Graph;
 use crate::jobs::Jobs;
 use crate::value::{SlotCell, ValueState, ValueTable};
 use crate::{Clock, Offline, OutputPolicy, RealTime, RemoveError, SessionFloat};
-use parts::{OutputPart, PoolPart, Reports, TransportPart};
+use parts::{
+    BouncePart, DevicePart, EarlyWork, Inputs, MidiPart, OutputPart, PluginPart, PoolPart, Reports,
+    SamplerPart, TransportPart,
+};
 
 /// The bound on an app's key type, the name an app gives a node in its model.
 /// Every `Ord + Clone + Debug + Send + Sync + 'static` type is one.
@@ -63,9 +64,9 @@ impl<T: Ord + Clone + Debug + Send + Sync + 'static> AppKey for T {}
 /// (`MainThreadMarker`): `Session::editor`, `Plugin::presets`.
 ///
 /// ```
-/// use tutti_types::MaxBlock;
+/// use tutti_buffers::MaxBlock;
 /// use tutti_units::{SampleRate, Samples};
-/// use tutti_types::ChannelLayout;
+/// use tutti_buffers::ChannelLayout;
 /// use tutti_buffers::InterleavedMut;
 /// use tutti_graph::ForkByClone;
 /// use tutti_session::{OutPort, Root, Session};
@@ -93,7 +94,6 @@ pub struct Session<K: AppKey = &'static str, C: Clock = Offline> {
     /// Runs the work other threads handed to the main thread when the session
     /// drops on it, before anything else drops (the plugins then close, and
     /// the last field collects what they hand over).
-    #[cfg(feature = "plugin")]
     pub(crate) _early_work: EarlyWork,
     /// What runs the blocks (the clock's [`Running`](Clock::Running)). First,
     /// so a stream stops before the session's own state drops.
@@ -101,119 +101,36 @@ pub struct Session<K: AppKey = &'static str, C: Clock = Offline> {
     pub(crate) graph: Graph<C::Float>,
     /// What the app declared loaded, and the ids of the session's resources.
     pub(crate) pool: PoolPart<K, C>,
-    /// The plugin entries whose node waits to swap to a reloaded plugin.
-    #[cfg(feature = "plugin")]
-    pub(crate) pooled_swaps: std::collections::BTreeSet<crate::PoolKey>,
     /// The transport and the figures of the plan sent last.
     pub(crate) transport: TransportPart,
     /// Where the mix lands: the root, the policy, the engine's output readings.
     pub(crate) output: OutputPart<C::Float>,
     /// What the last update read, for the next one's reports.
     pub(crate) reports: Reports,
-    #[cfg(feature = "midi")]
-    pub(crate) midi: Option<MidiNodes>,
-    /// Clips, live inputs, routes and the outputs.
-    #[cfg(feature = "midi")]
-    pub(crate) midi_state: crate::midi::MidiState,
+    /// The session's MIDI declarations and the OS layer under them.
+    pub(crate) midi: MidiPart,
     /// What modulation applied, and the session's own declarations.
     pub(crate) mods: crate::modulation::ModSession,
-    #[cfg(feature = "midi-hardware")]
-    pub(crate) midi_io: Option<tutti_midi_hardware::MidiSession>,
-    /// Who the session is on the wire, as set ([`Session::policy`]).
-    #[cfg(feature = "midi-hardware")]
-    pub(crate) midi_policy: Arc<crate::value::Cell<crate::MidiPolicy>>,
-    #[cfg(feature = "sampler")]
-    pub(crate) disk_streamer: Option<tutti_sampler::DiskStreamer<tutti_sampler::Running, C::Float>>,
-    /// Names the [`SamplerLoad`](crate::SamplerLoad)s.
-    #[cfg(feature = "sampler")]
-    pub(crate) sampler_opens: tutti_types::Mint,
-    /// What the opens landed, until the host takes it ([`Session::take_stream`]).
-    #[cfg(feature = "sampler")]
-    pub(crate) sampler_streams: crate::sampler::OpenedStreams<C::Float>,
-    /// The one-shot listing of the output devices, until it answers.
-    #[cfg(feature = "device")]
-    pub(crate) output_listing: Option<crate::watch::OutputListing>,
-    /// A listing was started by [`Session::list_outputs_once`].
-    #[cfg(feature = "device")]
-    pub(crate) outputs_listed: bool,
+    /// The disk streamer and the streams the opens landed.
+    #[cfg_attr(
+        not(any(feature = "sampler", feature = "device")),
+        expect(
+            dead_code,
+            reason = "a stream open (feature `sampler`) and a device restart (feature `device`) read it"
+        )
+    )]
+    pub(crate) sampler: SamplerPart<C::Float>,
+    /// The output-device listing.
+    pub(crate) devices: DevicePart,
     /// The capture inputs added ([`Session::add_input`]) and the host they open on.
-    #[cfg(feature = "capture")]
-    pub(crate) inputs: crate::input::Inputs<C::Float>,
-    /// How often a healthy plugin's state is captured.
-    #[cfg(feature = "plugin")]
-    pub(crate) snapshot_interval: std::time::Duration,
-    /// What a hosted plugin's death or hang does; `None`: a pooled plugin's
-    /// node stays silent at its key, a host-inserted plugin's is removed.
-    #[cfg(feature = "plugin")]
-    pub(crate) recovery: Option<crate::RecoveryPolicy>,
-    /// When a hosted plugin's unanswered blocks are a hang.
-    #[cfg(feature = "plugin")]
-    pub(crate) hang: crate::HangPolicy,
-    /// The `now` of the last `Phase::Plugins`: the time a landing reload is
-    /// measured at.
-    #[cfg(feature = "plugin")]
-    pub(crate) plugins_now: Instant,
-    /// The render mode last announced.
-    #[cfg(feature = "plugin")]
-    pub(crate) render_mode: crate::plugin::RenderModeState,
+    pub(crate) inputs: Inputs<C::Float>,
     /// The bounce token and the leftovers' channel.
-    #[cfg(feature = "export")]
-    pub(crate) bounce: crate::bounce::BounceState,
+    pub(crate) bounce: BouncePart,
     /// The blocking work running on the spawner, landed in `Phase::Collect`.
     pub(crate) jobs: Jobs,
-    /// What every plugin this session loads hands to the main thread: the closes of
-    /// a drop off the main thread. The handle is cloned into each load.
-    #[cfg(feature = "plugin")]
-    pub(crate) work: tutti_plugin_types::MainWorkHandle,
-    /// The receiving end of `work`, drained on the main thread by the session's
-    /// update. Declared last, so it drops after every plugin the session holds: a
-    /// close handed over while the session drops is still collected, and
-    /// [`MainWork`](tutti_plugin_types::MainWork)'s own drop runs what is left.
-    #[cfg(feature = "plugin")]
-    pub(crate) main_work: SharedWork,
-}
-
-/// The fallback of `Session::close`, as a field: on the main thread, runs the
-/// work other threads handed over, and the plugins then drop with the fields,
-/// their closes collected by the last field's own drop.
-///
-/// End a session that hosted an in-process plugin with `close` on the main
-/// thread; dropped elsewhere, it leaks those plugins and counts them in
-/// `tutti_plugin_types::MainWork::stranded()`; `MainWork::deferred_drops()` and
-/// `contained_panics()`, both in `tutti_plugin_types`, are the other two
-/// process-wide readings. It is a field, not a `Drop` of the session, so a
-/// session moves to another clock field by field.
-#[cfg(feature = "plugin")]
-#[derive(Debug)]
-pub(crate) struct EarlyWork(pub(crate) SharedWork);
-
-#[cfg(feature = "plugin")]
-impl Drop for EarlyWork {
-    fn drop(&mut self) {
-        if let Some(main) = tutti_plugin_types::MainThreadMarker::new() {
-            self.0.run(main);
-        }
-    }
-}
-
-/// The session's collector, held by the session's last field and its first:
-/// the collector's receiving end is not `Sync`, so it sits behind a lock the
-/// control thread alone takes.
-#[cfg(feature = "plugin")]
-#[derive(Clone, Debug)]
-pub(crate) struct SharedWork(Arc<std::sync::Mutex<tutti_plugin_types::MainWork>>);
-
-#[cfg(feature = "plugin")]
-impl SharedWork {
-    pub(crate) fn new(work: tutti_plugin_types::MainWork) -> Self {
-        Self(Arc::new(std::sync::Mutex::new(work)))
-    }
-
-    /// [`MainWork::run`](tutti_plugin_types::MainWork::run).
-    pub(crate) fn run(&self, main: tutti_plugin_types::MainThreadMarker) -> usize {
-        use tutti_rt::LockExt;
-        self.0.lock_recover().run(main)
-    }
+    /// Plugin hosting. Last, so it drops after every plugin the session holds:
+    /// a close handed over while the session drops is still collected.
+    pub(crate) plugins: PluginPart,
 }
 
 impl Session<&'static str, Offline> {
@@ -320,107 +237,40 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     ) -> (Session<K, N>, C::Running) {
         let Session {
             values,
-            #[cfg(feature = "plugin")]
             _early_work,
             running: old_running,
             graph,
             pool,
-            #[cfg(feature = "plugin")]
-            pooled_swaps,
             transport,
             output,
             reports,
-            #[cfg(feature = "midi")]
             midi,
-            #[cfg(feature = "midi")]
-            midi_state,
             mods,
-            #[cfg(feature = "midi-hardware")]
-            midi_io,
-            #[cfg(feature = "midi-hardware")]
-            midi_policy,
-            #[cfg(feature = "sampler")]
-            disk_streamer,
-            #[cfg(feature = "sampler")]
-            sampler_opens,
-            #[cfg(feature = "sampler")]
-            sampler_streams,
-            #[cfg(feature = "device")]
-            output_listing,
-            #[cfg(feature = "device")]
-            outputs_listed,
-            #[cfg(feature = "capture")]
+            sampler,
+            devices,
             inputs,
-            #[cfg(feature = "plugin")]
-            snapshot_interval,
-            #[cfg(feature = "plugin")]
-            recovery,
-            #[cfg(feature = "plugin")]
-            hang,
-            #[cfg(feature = "plugin")]
-            plugins_now,
-            #[cfg(feature = "plugin")]
-            render_mode,
-            #[cfg(feature = "export")]
             bounce,
             jobs,
-            #[cfg(feature = "plugin")]
-            work,
-            #[cfg(feature = "plugin")]
-            main_work,
+            plugins,
         } = self;
-        let pool = pool.rebind();
         (
             Session {
                 values,
-                #[cfg(feature = "plugin")]
                 _early_work,
                 running,
                 graph,
-                pool,
-                #[cfg(feature = "plugin")]
-                pooled_swaps,
+                pool: pool.rebind(),
                 transport,
                 output,
                 reports,
-                #[cfg(feature = "midi")]
                 midi,
-                #[cfg(feature = "midi")]
-                midi_state,
                 mods,
-                #[cfg(feature = "midi-hardware")]
-                midi_io,
-                #[cfg(feature = "midi-hardware")]
-                midi_policy,
-                #[cfg(feature = "sampler")]
-                disk_streamer,
-                #[cfg(feature = "sampler")]
-                sampler_opens,
-                #[cfg(feature = "sampler")]
-                sampler_streams,
-                #[cfg(feature = "device")]
-                output_listing,
-                #[cfg(feature = "device")]
-                outputs_listed,
-                #[cfg(feature = "capture")]
+                sampler,
+                devices,
                 inputs,
-                #[cfg(feature = "plugin")]
-                snapshot_interval,
-                #[cfg(feature = "plugin")]
-                recovery,
-                #[cfg(feature = "plugin")]
-                hang,
-                #[cfg(feature = "plugin")]
-                plugins_now,
-                #[cfg(feature = "plugin")]
-                render_mode,
-                #[cfg(feature = "export")]
                 bounce,
                 jobs,
-                #[cfg(feature = "plugin")]
-                work,
-                #[cfg(feature = "plugin")]
-                main_work,
+                plugins,
             },
             old_running,
         )
@@ -438,15 +288,11 @@ impl<K: AppKey, C: Clock> Session<K, C> {
         click: Arc<tutti_nodes::ClickSettings>,
     ) {
         use crate::value::{ClickVolumeSlot, MeterSlot, SettingSlot, SlotId, TempoSlot};
-        #[cfg(feature = "midi")]
-        let following = self.midi_state.following_flag();
-        #[cfg(not(feature = "midi"))]
-        let following = Arc::default();
         table.provide(
             SlotId::Tempo,
             Arc::new(TempoSlot {
                 settings: self.transport.settings().clone(),
-                following,
+                following: self.midi.following(),
             }) as SlotCell<Arc<TempoMap>>,
         );
         table.provide(
@@ -462,22 +308,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
             SlotId::OutputPolicy,
             Arc::clone(&self.output.policy) as SlotCell<OutputPolicy>,
         );
-        #[cfg(feature = "midi-hardware")]
-        table.provide(
-            SlotId::MidiPolicy,
-            Arc::clone(&self.midi_policy) as SlotCell<crate::MidiPolicy>,
-        );
-        #[cfg(feature = "midi")]
-        table.provide(
-            SlotId::MpeMode,
-            Arc::new(crate::value::PublishedSlot(self.mpe_cell().clone()))
-                as SlotCell<tutti_midi_protocol::MpeMode>,
-        );
-        #[cfg(feature = "midi")]
-        table.provide(
-            SlotId::OutputLatency,
-            self.midi_state.output_latency_cell() as SlotCell<tutti_midi_runtime::OutputLatency>,
-        );
+        self.midi.provide_values(table);
         table.provide(
             SlotId::ClickMode,
             Arc::new(SettingSlot {
@@ -504,12 +335,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     #[cfg(feature = "plugin")]
     pub fn close(self, main: tutti_plugin_types::MainThreadMarker) {
         let mut session = self;
-        session.main_work.run(main);
-        // The plugins close in the drop below and hand what they cannot do
-        // there to their handles, which feed the collector kept out here;
-        // the session keeps an empty one.
-        let (inert, _) = tutti_plugin_types::MainWork::new();
-        let collected = std::mem::replace(&mut session.main_work, SharedWork::new(inert));
+        let collected = session.plugins.take_collector(main);
         drop(session);
         collected.run(main);
     }
@@ -542,18 +368,8 @@ impl<K: AppKey, C: Clock> Session<K, C> {
         pinned += self.transport.settings().reclaim_tempo();
         // The engine's output folds are swept by the graph (`Graph::reclaim`),
         // offline or on a device, through the `OutputControl` it kept.
-        {
-            pinned += self.mods.state.reclaim();
-        }
-        #[cfg(feature = "midi")]
-        {
-            pinned += self.mpe_cell().reclaim();
-        }
-        #[cfg(feature = "midi-hardware")]
-        if let Some(io) = &self.midi_io {
-            use tutti_rt::Reclaim;
-            pinned += io.ports().inlets().reclaim();
-        }
+        pinned += self.mods.state.reclaim();
+        pinned += self.midi.reclaim();
         pinned
     }
 
@@ -601,13 +417,11 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// What the session holds of `node`, which left the graph, goes.
     fn forget_node(&mut self, node: NodeKey) {
         self.mods.own.forget_node(node);
-        #[cfg(feature = "midi")]
-        if let Some(pair) = self.midi_state.forget_node(node) {
+        if let Some(pair) = self.midi.forget_node(node) {
             // A clip and its transform are one wiring: the other goes too
             // (it is in the graph unless the caller removed it first).
             let _ = self.graph.remove(pair);
         }
-        #[cfg(feature = "capture")]
         self.inputs.forget(node);
     }
 

@@ -111,29 +111,6 @@ impl<K: AppKey, C: Clock> Session<K, C> {
         self.transport.handle.clone()
     }
 
-    /// Sends what a followed MIDI clock asked of the transport, each command at
-    /// the frame it was placed on (`At::NextBlock` for Machine Control), and says
-    /// whether the transport took it. A command the transport's list has no room for is dropped and logged, and the caller counts it
-    /// ([`MidiReport::ClockCommandsRefused`](crate::MidiReport::ClockCommandsRefused)):
-    /// the source says its position again with the next message.
-    #[cfg(feature = "midi")]
-    pub(super) fn send_clock_action(&self, placed: crate::midi_follow::Placed) -> bool {
-        use crate::midi_follow::ClockAction;
-        let event = match placed.action {
-            ClockAction::Play => MotionEvent::Play,
-            ClockAction::Stop => MotionEvent::stop(),
-            ClockAction::Locate(beat) => MotionEvent::locate(beat),
-            ClockAction::PlayFrom(beat) => MotionEvent::play_from(beat),
-        };
-        match self.schedule(placed.at, event) {
-            Ok(()) => true,
-            Err(error) => {
-                tracing::warn!("midi: a followed clock's {event:?} was not sent: {error}");
-                false
-            }
-        }
-    }
-
     /// Loops the transport over `range` from the next block, and arms it: the
     /// engine owns the loop region and takes this as one edit that lands whole
     /// ([`LoopEdit::over`]). Build the range with `LoopRange::try_from(a..b)`,
@@ -186,14 +163,6 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// when the builder inserted one.
     pub fn click_node(&self) -> Option<NodeKey> {
         self.transport.click
-    }
-
-    /// The cell the session's MPE mode is published through: the session's one
-    /// reach into its MIDI state for it. `Midi` and the ports read it from the
-    /// state they are handed ([`MidiState::mpe`](crate::midi)).
-    #[cfg(feature = "midi")]
-    pub(crate) fn mpe_cell(&self) -> &tutti_rt::Publisher<tutti_midi_protocol::MpeMode> {
-        self.midi_state.mpe()
     }
 
     /// The session's MPE mode as a target, written with [`set`](Self::set)

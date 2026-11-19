@@ -27,6 +27,8 @@ use std::time::{Duration, Instant};
 
 use tutti_ump::{DeviceIdentity, IDENTITY_REQUEST, MidiGroup, Sysex7Packets, Ump};
 
+use crate::deadline::Retry;
+
 /// How long a request waits for its reply before it is sent again. One second
 /// is ours: a reply is 15 bytes, under 5 ms on a 31.25 kbaud DIN cable, so a
 /// device that has not answered in a second is not going to.
@@ -53,11 +55,8 @@ pub enum InquiryAction {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Step {
-    /// The request was sent `attempts` times, the last at `sent`.
-    Asking {
-        sent: Instant,
-        attempts: u8,
-    },
+    /// The request was sent, the last time as the retry says.
+    Asking(Retry),
     Done,
 }
 
@@ -74,10 +73,7 @@ impl IdentityInquiry {
     pub fn new(group: MidiGroup, now: Instant) -> (Self, InquiryAction) {
         let inquiry = Self {
             group,
-            step: Step::Asking {
-                sent: now,
-                attempts: 1,
-            },
+            step: Step::Asking(Retry::first(now)),
         };
         let request = inquiry.request();
         (inquiry, InquiryAction::Send(request))
@@ -97,7 +93,7 @@ impl IdentityInquiry {
     #[must_use]
     pub fn deadline(&self) -> Option<Instant> {
         match self.step {
-            Step::Asking { sent, .. } => Some(sent + INQUIRY_TIMEOUT),
+            Step::Asking(retry) => Some(retry.deadline(INQUIRY_TIMEOUT)),
             Step::Done => None,
         }
     }
@@ -112,7 +108,7 @@ impl IdentityInquiry {
     /// after the inquiry gave up, is [`Wait`](InquiryAction::Wait).
     pub fn on_reply(&mut self, identity: DeviceIdentity) -> InquiryAction {
         match self.step {
-            Step::Asking { .. } => {
+            Step::Asking(_) => {
                 self.step = Step::Done;
                 InquiryAction::Answered(identity)
             }
@@ -124,20 +120,18 @@ impl IdentityInquiry {
     /// gone by since the last send, or gives up after [`INQUIRY_ATTEMPTS`].
     /// Calling it early is harmless.
     pub fn on_timeout(&mut self, now: Instant) -> InquiryAction {
-        let Step::Asking { sent, attempts } = self.step else {
+        let Step::Asking(mut retry) = self.step else {
             return InquiryAction::Wait;
         };
-        if now.saturating_duration_since(sent) < INQUIRY_TIMEOUT {
+        if !retry.due(now, INQUIRY_TIMEOUT) {
             return InquiryAction::Wait;
         }
-        if attempts >= INQUIRY_ATTEMPTS {
+        if retry.spent(INQUIRY_ATTEMPTS) {
             self.step = Step::Done;
             return InquiryAction::GaveUp;
         }
-        self.step = Step::Asking {
-            sent: now,
-            attempts: attempts + 1,
-        };
+        retry.resend(now);
+        self.step = Step::Asking(retry);
         InquiryAction::Send(self.request())
     }
 }

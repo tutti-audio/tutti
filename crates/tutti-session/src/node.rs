@@ -396,7 +396,7 @@ param_session_node!(floats: VbapPannerNode, HrtfBinauralNode);
 // (master volume, unison detune and spread) as a `ParamSet`, so a param
 // write reaches it and a fork of it starts from what was set.
 #[cfg(feature = "synth")]
-param_session_node!(f32 => tutti_polysynth::PolySynth);
+param_session_node!(f32 => tutti_polysynth::PolySynth<f32>);
 
 /// A voice as a graph node: its params (the gain) addressed by its set, so a
 /// param write reaches the cell the node reads and a fork starts from the

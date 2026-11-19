@@ -4,9 +4,9 @@
 //! folds run in turn.
 
 use super::{Fold, FoldError, Row, expr_of_coefficients, narrow, row_coefficients};
+use crate::ChannelLayout;
 use crate::{BufferError, Float};
 use alloc::vec::Vec;
-use tutti_types::ChannelLayout;
 
 impl<F: Float> Fold<F> {
     /// The fold that does `self` and then `next`: its coefficients are the

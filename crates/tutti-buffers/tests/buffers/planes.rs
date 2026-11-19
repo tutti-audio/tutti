@@ -1,7 +1,7 @@
 //! `Planes` and `PlanesMut`: construction errors, slices, disjointness.
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::{BufferError, Planes, PlanesMut};
-use tutti_types::ChannelLayout;
 use tutti_units::Samples;
 
 #[test]

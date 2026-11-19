@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 use tutti_buffers::PlanesMut;
 
 use tutti_buffers::InterleavedMut;
+use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_graph::{Cx, Io, Node, Prepare, Shape, Status, Unforkable};
 use tutti_plugin::catalog::{Catalog, Hosting, PluginId, PluginRef};
 use tutti_plugin::error::StateError;
@@ -20,7 +21,6 @@ use tutti_session::{
     OtherPeer, Peer, PeerState, PluginCause, PluginHealth, PoolEvent, PoolState, Presence,
     RecoveryPolicy, Resource, RetryError, Session, SessionEvent, StateJobError, StateJobFailed,
 };
-use tutti_types::{ChannelLayout, MaxBlock};
 use tutti_units::Normalized;
 use tutti_units::ParamId;
 use tutti_units::{SampleRate, Samples, Tail};

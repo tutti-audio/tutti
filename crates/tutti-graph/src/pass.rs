@@ -19,8 +19,8 @@
 //!
 //! Built on the control side (a fold allocates); applied without allocating.
 
+use tutti_buffers::{ChannelTopology, MAX_CHANNELS, Speaker};
 use tutti_buffers::{Float, Fold, FoldError, MonoMut, Planes};
-use tutti_types::{ChannelTopology, MAX_CHANNELS, Speaker};
 
 /// Why a node has no pass: what it would need to declare to be bypassed or
 /// mixed.

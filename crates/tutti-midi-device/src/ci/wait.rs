@@ -1,9 +1,10 @@
 //! The Timeout Wait ACK (M2-101 §5.10, Table 14): how long it asks, and how a
 //! transaction's deadline takes it.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use super::Ack;
+use crate::deadline::Pending;
 
 /// How long an Initiator waits on a peer's answer where the specification gives
 /// no limit: 3 seconds. A Profile Inquiry, Set Profile On or Off, or Details
@@ -52,8 +53,8 @@ impl TimeoutWait {
 
     /// Adds this wait to a transaction's deadline (M2-103 §12.2.1: the wait is
     /// added to the current timeout period).
-    pub(crate) fn extend(self, deadline: &mut Instant) {
-        *deadline += self.duration();
+    pub(crate) fn extend(self, wait: &mut Pending) {
+        wait.extend(self.duration());
     }
 }
 

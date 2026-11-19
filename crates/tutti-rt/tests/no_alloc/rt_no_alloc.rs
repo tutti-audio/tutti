@@ -107,9 +107,9 @@ fn request_word_and_ring_are_allocation_free() {
 /// writer's `push` is the disk thread's and stays outside the claim.
 #[test]
 fn pos_ring_reader_is_allocation_free() {
+    use tutti_buffers::ChannelLayout;
     use tutti_buffers::Interleaved;
     use tutti_rt::PosRing;
-    use tutti_types::ChannelLayout;
     use tutti_units::Samples;
 
     let (mut writer, mut reader) = PosRing::<f32>::new(64, ChannelLayout::STEREO, 8).unwrap();

@@ -44,9 +44,10 @@
 //! Baselines are per-machine and do not travel; see `cargo xtask bench-save`.
 
 use std::hint::black_box;
-use tutti_types::MaxBlock;
+use tutti_buffers::MaxBlock;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_engine::Engine;
 use tutti_graph::NodeKey;
@@ -56,7 +57,6 @@ use tutti_nodes::testing::Osc;
 use tutti_nodes::{BusStripNode, EqBandNode, SvfFilterNode, SvfType};
 use tutti_transport::MotionEvent;
 use tutti_transport::Transport;
-use tutti_types::ChannelLayout;
 use tutti_units::SampleRate;
 use tutti_units::{Bpm, Samples};
 use tutti_units::{Db, Hz, Q};
@@ -321,7 +321,7 @@ fn depth_graph_engine(depth: usize, ours: bool) -> Engine {
     use tutti_graph::{Edge, InPort, OutPort, Source};
     let (mut ed, exec) = tutti_graph::Editor::new(tutti_graph::Prepare::new(
         SampleRate::of(SR),
-        tutti_types::MaxBlock::of(tutti_units::Samples(512)),
+        tutti_buffers::MaxBlock::of(tutti_units::Samples(512)),
     ));
     let src: Box<dyn tutti_graph::Node> = if ours {
         tutti_graph::IntoNode::into_node(Osc::sine(Hz(440.0))).0

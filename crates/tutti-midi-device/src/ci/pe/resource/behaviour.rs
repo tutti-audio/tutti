@@ -818,6 +818,32 @@ fn a_partial_change_does_not_apply_to_binary_data() {
     ));
 }
 
+// A change to a Resource the store declares but holds no data of names the
+// Resource, and so does a Set whose data is another Resource's.
+#[test]
+fn a_publish_that_cannot_be_made_names_the_resource() {
+    let mut link = Link::new(store(), 256);
+    let update = PartialUpdate::new().with(pointer("/a"), PartialValue::Integer(1));
+    let empty = ResourceTarget::try_from(PeResource::ProgramList)
+        .unwrap_or_else(|_| super::exchange::entry_target(PeResource::ProgramList, "none"));
+    assert_eq!(
+        link.resp.change(&empty, update, link.now),
+        Err(PublishError::NoData(PeResource::ProgramList))
+    );
+    let local_on = super::exchange::target(PeResource::LocalOn);
+    assert_eq!(
+        link.resp.publish(
+            &local_on,
+            PeData::ExternalSync(PeExternalSync(true)),
+            link.now
+        ),
+        Err(PublishError::DataOfAnotherResource {
+            data: PeResource::ExternalSync,
+            target: PeResource::LocalOn,
+        })
+    );
+}
+
 // M2-103 §13.1.1 Table 69: a ProgramList entry with `simpleAction` Links, each with
 // its `propData`.
 #[test]

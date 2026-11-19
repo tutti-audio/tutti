@@ -1,5 +1,5 @@
+use tutti_buffers::BusTopology;
 use tutti_buffers::{Planes, PlanesMut};
-use tutti_types::BusTopology;
 use tutti_units::{
     Feedback, Hz, PhaseIncrement, ReadPosition, Real, SampleRate, SampleSpan, Seconds,
 };

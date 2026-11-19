@@ -76,11 +76,11 @@ pub use config::PoolConfig;
 pub use data::{AudioEntry, AudioFile, StreamInfo, Tier, audio_file};
 #[cfg(feature = "soundfont")]
 pub use data::{SoundFontFile, soundfont};
-pub(crate) use entry::Staged;
 pub use entry::{
     Declared, IntoPool, Life, Load, LoadError, Owned, Parking, PoolEntry, PoolSet, Sharing,
     stranded_loads,
 };
+pub(crate) use entry::{Defer, Staged};
 pub use job::{PoolJobError, PoolLoaded, RefreshPool};
 pub use key::PoolKey;
 pub use open::OpenCx;

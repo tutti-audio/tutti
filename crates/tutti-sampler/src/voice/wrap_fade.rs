@@ -12,13 +12,13 @@ use tutti_buffers::Interleaved;
 use tutti_buffers::Planes;
 
 use std::sync::Arc;
+use tutti_buffers::MaxBlock;
 use tutti_graph::declick_frames;
-use tutti_types::MaxBlock;
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::Wave;
 use tutti_graph::{Env, Node, Offset, Prepare, TransportChanges, TransportPosition, contract};
 use tutti_music::{FrameClock, LoopRange};
-use tutti_types::ChannelLayout;
 use tutti_units::{Beat, BeatDuration, Bpm, Frame, SampleRate, Samples};
 
 use super::memory_source::MemorySource;

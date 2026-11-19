@@ -6,6 +6,7 @@ use crate::support::{EncodeConfig, ExportConfig, RenderConfig};
 
 use crate::support::{render_normalized_to_file, render_to_file};
 use tutti_buffers::Interleaved;
+use tutti_buffers::{Bed, ChannelLayout};
 use tutti_codec::{Format, Pcm};
 use tutti_dsp::DitherShape;
 use tutti_export::{Normalize, RenderGraph, Setup};
@@ -13,7 +14,6 @@ use tutti_graph::GraphBuilder;
 use tutti_measure::{LoudnessConfig, measure_loudness};
 use tutti_nodes::testing::Osc;
 use tutti_transport::FrozenClock;
-use tutti_types::{Bed, ChannelLayout};
 use tutti_units::{Db, Hz, SampleRate, Seconds};
 
 const RATE: SampleRate = SampleRate::SR_48K;

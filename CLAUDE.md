@@ -194,7 +194,7 @@ touched.
 - An id type is written with `tutti_types::id!` and minted from a `Mint`.
 - Time and layout have one type each: `tutti_music::LoopRange` for a loop,
   `TimeSignature` and `MeterMap` for meter, `tutti_tempo::TempoMap` for tempo,
-  `ChannelLayout`, `ChannelTopology` and `BusTopology` for channels, and
+  `tutti_buffers::{ChannelLayout, ChannelTopology, BusTopology}` for channels, and
   `tutti_curve::Trajectory<U>` for an automation curve.
 
 ### Unit types
@@ -302,8 +302,8 @@ adapter is [tutti-audio/bevy-tutti](https://github.com/tutti-audio/bevy-tutti).
 
 0. `tutti-alsa-ffi`, `tutti-coremidi-ffi`, `tutti-winmm-ffi`, `tutti-units`,
    `tutti-plugin-ipc-ffi`
-1. `tutti-types`, `tutti-music`, `tutti-ump`
-2. `tutti-midi-protocol`, `tutti-midi-device`, `tutti-curve`, `tutti-buffers`
+1. `tutti-types`, `tutti-music`, `tutti-ump`, `tutti-buffers`
+2. `tutti-midi-protocol`, `tutti-midi-device`, `tutti-curve`
 3. `tutti-rt`
 4. `tutti-graph`, `tutti-dsp`, `tutti-modulation`, `tutti-metering`, `tutti-codec`,
    `tutti-tempo`, `tutti-voicing`, `tutti-sf2`, `tutti-midi-network`

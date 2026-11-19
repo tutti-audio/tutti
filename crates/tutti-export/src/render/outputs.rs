@@ -14,12 +14,12 @@
 
 use std::path::PathBuf;
 
+use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_buffers::{Float, Fold, Interleaved, InterleavedMut, Planes, PlanesMut};
 use tutti_dsp::FftFloat;
 use tutti_graph::TapReader;
 use tutti_measure::Loudness;
 use tutti_transport::RenderClock;
-use tutti_types::{ChannelLayout, ChannelTopology};
 use tutti_units::{Db, SampleRate, Samples};
 
 use crate::control::{Control, Outcome, Stage, Weights};
@@ -72,7 +72,7 @@ struct Lane<F: FftFloat> {
     tap: Option<TapFeed<F>>,
     layout: ChannelLayout,
     /// Whether the target stated its channels' topology.
-    placement: tutti_types::Placement,
+    placement: tutti_buffers::Placement,
     /// The interleaved frames of one block's window, at the target's layout.
     scratch: Vec<F>,
     sink: Sink<F>,
@@ -242,9 +242,9 @@ fn open_lanes<F: FftFloat>(
             Target::Buffers(b) => (b.channels(), b.width.topology()),
         };
         let placement = if topology.is_some() {
-            tutti_types::Placement::Stated
+            tutti_buffers::Placement::Stated
         } else {
-            tutti_types::Placement::Assumed
+            tutti_buffers::Placement::Assumed
         };
         let channels = FileChannels { layout, topology };
         let (fold, tap) = match feed {
@@ -458,7 +458,7 @@ fn finish<F: FftFloat>(
     // Finalizing.
     let mut produced: Vec<Option<Produced<F>>> = Vec::with_capacity(lanes.len());
     let mut files: Vec<PendingFile<F>> = Vec::new();
-    let placements: Vec<tutti_types::Placement> = lanes.iter().map(|l| l.placement).collect();
+    let placements: Vec<tutti_buffers::Placement> = lanes.iter().map(|l| l.placement).collect();
     for (i, lane) in lanes.into_iter().enumerate() {
         match lane.sink {
             Sink::Buffers { planes } => {

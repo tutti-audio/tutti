@@ -12,9 +12,9 @@
 //! steps of a frame in [`PHASES`] order.
 //!
 //! ```
-//! use tutti_types::MaxBlock;
+//! use tutti_buffers::MaxBlock;
 //! use tutti_units::{Hz, SampleRate, Samples};
-//! use tutti_types::ChannelLayout;
+//! use tutti_buffers::ChannelLayout;
 //! use tutti_buffers::InterleavedMut;
 //! use tutti_graph::ForkByClone;
 //! use tutti_nodes::testing::Osc;

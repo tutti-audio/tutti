@@ -7,11 +7,11 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use common::{Pulse, WORKERS, bits, prepare, test_pool};
+use tutti_buffers::ChannelLayout;
 use tutti_graph::{
     Cx, Editor, Executor, ForkByClone, ForkMode, ForkTarget, Io, Node, NodeKey, OutPort, Prepare,
     Shape, Source, Status, TransportPosition, Unforkable, Wake,
 };
-use tutti_types::ChannelLayout;
 
 /// Every `Wake` a placement of a [`Napper`] was given, with that placement's
 /// call counter, in the order the editor placed them.

@@ -146,9 +146,8 @@ pub use tutti_rt::PushError;
 pub use tutti_transport::{FadeOut, LoopRegion, MotionEvent, MotionState, Then, TransportCommand};
 
 // Units, channels, buffers and the musical meter.
-pub use tutti_buffers::{Interleaved, InterleavedMut};
+pub use tutti_buffers::{ChannelLayout, ChannelTopology, Interleaved, InterleavedMut, MaxBlock};
 pub use tutti_music::{Meter, MeterMap, TimeSignature};
-pub use tutti_types::{ChannelLayout, ChannelTopology, MaxBlock};
 pub use tutti_units::{
     Amplitude, At, BarNumber, Beat, Bipolar, Bpm, Cents, Db, Depth, Frame, Hz, Normalized, ParamId,
     Q, SampleRate, Samples, Seconds, Semitones,
@@ -293,6 +292,11 @@ pub mod nodes {
 /// `Sink`, `Pull`), channel folds and the range errors.
 pub mod types {
     pub use tutti_buffers::{
+        AmbisonicFormat, AmbisonicNormalization, AmbisonicOrder, AmbisonicOrderOutOfRange,
+        AmbisonicOrdering, Bed, BusTooWide, BusTopology, ChannelIndex, ChannelIndexOutOfRange,
+        InvalidMaxBlock, LayoutError, MAX_CHANNELS, Placement, Speaker, Speakers, TopologyError,
+    };
+    pub use tutti_buffers::{
         BlockMut, BlockSide, ByWidth, Frames, FramesMut, InputOutput, Mono, MonoMut, PlaneIter,
         PlaneIterMut, Planes, PlanesMut,
     };
@@ -312,13 +316,7 @@ pub mod types {
         Count, Counter, CounterWriter, Drained, Gauge, GaugeWriter, LevelSpan, Panicked, PosFrame,
         Reading, Reclaim, RingFloat, RingSample, Setting, SettingWord, Tally, TallyWriter, Words,
     };
-    pub use tutti_types::{
-        AmbisonicFormat, AmbisonicNormalization, AmbisonicOrder, AmbisonicOrderOutOfRange,
-        AmbisonicOrdering, AtomicSampleRate, Bed, BusTooWide, BusTopology, ChannelIndex,
-        ChannelIndexOutOfRange, InvalidMaxBlock, LayoutError, MAX_CHANNELS, Param, Param64,
-        ParamCell, Speaker, Speakers, TopologyError,
-    };
-    pub use tutti_types::{Mint, Placement};
+    pub use tutti_types::{AtomicSampleRate, Mint, Param, Param64, ParamCell};
     pub use tutti_units::{
         ArcDegrees, Azimuth, Balance, Ballistics, BarCount, BeatDuration, BeatsPerCycle,
         BeatsPerCycleOutOfRange, BipolarOutOfRange, BitDepth, BpmOutOfRange, CentsSpan,
@@ -589,9 +587,9 @@ pub mod modulation {
 #[cfg(feature = "synth")]
 pub mod polysynth {
     pub use tutti_polysynth::{
-        AllocationStrategy, FilterModConfig, FilterType, GlideTime, GlideTimeError, OscillatorType,
-        PolySynth, PortamentoConfig, PortamentoMode, SvfMode, SynthConfig, Tuning, UnisonConfig,
-        UnisonVoices, UnisonVoicesError, VoiceMode,
+        AllocationStrategy, FilterModConfig, FilterType, GlideTime, GlideTimeError, Lane,
+        OscillatorType, PolySynth, PortamentoConfig, PortamentoMode, SvfMode, SynthConfig,
+        SynthFloat, Tuning, UnisonConfig, UnisonVoices, UnisonVoicesError, VoiceMode,
     };
 }
 
@@ -683,12 +681,12 @@ pub mod midi {
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_device::{
         ChannelControllers, ChannelsDetail, CiCategories, CiDeviceId, CiPeer, DataControl,
-        DetailsData, DiscoveryData, Identity, InquiryTarget, ManufacturerProfile, MaxSysexSize,
-        MessageText, Muid, Nak, NameError, NotADataControl, NotADeviceId, NotAMuid, NotASysexSize,
-        NotProfileChannels, NoteData, Outcome, PortDirection, ProcessError, ProcessFeatures,
-        ProductInstanceId, ProfileChange, ProfileDataError, ProfileEntry, ProfileState,
-        ProfileTable, ReportRequest, ReportScope, Request, RequestError, SpecificData,
-        StandardProfile, SystemMessages, WinMmDevice,
+        DetailsData, DiscoveryData, EnabledMpeZones, Identity, InquiryTarget, ManufacturerProfile,
+        MaxSysexSize, MessageText, Muid, Nak, NameError, NotADataControl, NotADeviceId, NotAMuid,
+        NotASysexSize, NotProfileChannels, NoteData, Outcome, PortDirection, ProcessError,
+        ProcessFeatures, ProductInstanceId, ProfileChange, ProfileDataError, ProfileEntry,
+        ProfileState, ProfileTable, ReportRequest, ReportScope, Request, RequestError,
+        SpecificData, StandardProfile, SystemMessages, WinMmDevice,
     };
     pub use tutti_midi_device::{
         NotSetProfileOn, ProfileChannels, ProfileId, ProfileOnRequest, ProfileTarget,
@@ -720,9 +718,10 @@ pub mod midi {
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_protocol::NoMidi1Form;
     pub use tutti_midi_protocol::{
-        ChannelResponse, KeyTable, MmcSegmentError, MpeMode, MpeSpec, MpeZone, MpeZoneConfig,
-        MpeZones, MtcRate, NotFrequencyData, NotSysexDeviceId, PitchBendSensitivity, Recipient,
-        SmpteFrameRate, SmpteTimecode, SysexDeviceId, TuningFrequency, UnknownFrameRate,
+        ChannelResponse, InvalidKeyTable, InvalidMpeZones, KeyTable, MmcSegmentError, MpeMode,
+        MpeSpec, MpeZone, MpeZoneConfig, MpeZones, MtcRate, NotFrequencyData, NotSysexDeviceId,
+        PitchBendSensitivity, Recipient, SmpteFrameRate, SmpteTimecode, SysexDeviceId,
+        TuningFrequency,
     };
     pub use tutti_midi_runtime::{
         ClipEvents, ClockKind, ClockOffset, HarmonyChanges, HarmonyControls, HarmonyNode,
@@ -782,13 +781,13 @@ pub mod midi {
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_device::{
         DeviceId as MidiDeviceId, DeviceInfo, EndpointName, Learned, Match, MidiIdentity, Name,
-        SavedDevice,
+        SavedDevice, Whole,
     };
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_hardware::{
         ChannelCount, ChannelSwitcher, CiChange, CiPeerInfo, DeviceQuery, Errno, ErrnoOutOfRange,
         InputFault, MidiHardwareOptions, PeerId, PeerProfiles, ProfileError, ProfileSwitch,
-        ProfilesChange, Switcher, Whole, WholeSwitcher,
+        ProfilesChange, Switcher, WholeSwitcher,
     };
     #[cfg(all(feature = "session", feature = "midi-hardware"))]
     pub use tutti_session::{
@@ -824,12 +823,13 @@ pub mod midi {
             PeModeList, PeObject, PeOpaque, PeOutcome, PePage, PeProgramEntry, PeProgramList,
             PeReassemblyError, PeReply, PeRequestId, PeResource, PeResourceList, PeResponse,
             PeSignal, PeState, PeStateEntry, PeStateList, PeStatus, PeStatusClass, PeTerminator,
-            PeText, PeTransaction, PeUnreadable, PeVersion, Priority, PropertyName, RefusedAt,
-            RequestRefused, ResIdUse, ResourceDefaults, ResourceEntry, ResourceEntryBuilder,
-            ResourceEvent, ResourceFailure, ResourceGet, ResourceId, ResourceName, ResourceSet,
-            ResourceTarget, ResponderEvent, RoleName, SelectorAction, SetBody, SignificantBits,
-            SimpleAction, SimultaneousRequests, StateId, StateRev, StateSize, StateStamp,
-            StepCount, StreamLimit, SubscribeId, TimeoutWait, TypeHint, UnixSeconds, UpdateKind,
+            PeText, PeTransaction, PeUnreadable, PeVersion, Place, Priority, PropertyName,
+            RefusedAt, RequestRefused, ResIdUse, ResourceDefaults, ResourceEntry,
+            ResourceEntryBuilder, ResourceEvent, ResourceFailure, ResourceGet, ResourceId,
+            ResourceName, ResourceSet, ResourceTarget, ResponderEvent, RoleName, SelectorAction,
+            SetBody, SignificantBits, SimpleAction, SimultaneousRequests, StateId, StateRev,
+            StateSize, StateStamp, StepCount, StreamLimit, SubscribeId, TimeoutWait, TypeHint,
+            UnixSeconds, UpdateKind,
         };
         #[cfg(feature = "midi-hardware")]
         pub use tutti_midi_hardware::{

@@ -2,11 +2,11 @@
 //! the frames a view covers, splits, `from_vecs`, conversions between views.
 
 use core::iter::FusedIterator;
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::{
     Frames, FramesMut, Interleaved, InterleavedMut, Mono, MonoMut, PlaneIter, PlaneIterMut, Planes,
     PlanesMut, StereoPlanes,
 };
-use tutti_types::ChannelLayout;
 use tutti_units::Samples;
 
 const THREE: ChannelLayout = ChannelLayout::from_count(3);

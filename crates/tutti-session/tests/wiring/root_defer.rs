@@ -7,13 +7,13 @@
 //! `s(x) = x^3 (6x^2 - 15x + 10)` at `x = (k + 1) / (n + 1)`, `n` the 240
 //! frames of 5 ms at 48 kHz.
 
+use tutti_buffers::Speaker;
+use tutti_buffers::{BusTopology, ChannelLayout, ChannelTopology, MaxBlock};
 use tutti_buffers::{InterleavedMut, Pull, Source};
 use tutti_graph::Unforkable;
 use tutti_graph::{BusRef, BusSource, Cx, ForkByClone, Io, Node, Prepare, Shape, Status};
 use tutti_nodes::testing::Const;
 use tutti_session::{OutPort, Reopened, Root, RootReader, Session, SessionEvent};
-use tutti_types::Speaker;
-use tutti_types::{BusTopology, ChannelLayout, ChannelTopology, MaxBlock};
 use tutti_units::{SampleRate, Samples};
 
 const BLOCK: usize = 64;

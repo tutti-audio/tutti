@@ -11,8 +11,8 @@
 //! [`RegionOut::push_interleaved`](crate::streamer::prefetch::RegionOut::push_interleaved).
 
 use crate::nonempty;
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::{Float, InterleavedMut, Wave, interleave};
-use tutti_types::ChannelLayout;
 use tutti_units::Samples;
 
 /// Read file frames `at..` of a resident `wave` into `out` (`channels` wide,

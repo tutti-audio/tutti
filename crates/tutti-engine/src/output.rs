@@ -19,7 +19,7 @@
 //! declared with, before the commit that carries its id is sent
 //! ([`OutputControl::publish_root`]). A root with no declaration is the
 //! engine's order for the plan's width
-//! ([`ChannelTopology::assumed`](tutti_types::ChannelTopology::assumed)), at
+//! ([`ChannelTopology::assumed`](tutti_buffers::ChannelTopology::assumed)), at
 //! every width. A root's folds stay published until a plan of a later root has
 //! rendered a block ([`OutputControl::reclaim`]). A root change that cuts ends
 //! the older root at the commit's block. One that crossfades
@@ -64,9 +64,9 @@ use crate::routing::{OutputLevels, Routing, RoutingError, StageTargets};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use tutti_buffers::{BufferError, Float, Fold, FoldError};
+use tutti_buffers::{ChannelLayout, ChannelTopology, MAX_CHANNELS, Placement};
 use tutti_graph::{RootError, RootId};
 use tutti_rt::{LockExt, Publisher};
-use tutti_types::{ChannelLayout, ChannelTopology, MAX_CHANNELS, Placement};
 
 /// The widest device an engine can render into without being told
 /// ([`Engine::support_output`](crate::Engine::support_output)).

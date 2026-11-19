@@ -19,8 +19,9 @@ use tutti_buffers::Interleaved;
 use tutti_sampler::VoiceWindow;
 
 use std::sync::Arc;
-use tutti_types::MaxBlock;
+use tutti_buffers::MaxBlock;
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_buffers::Wave;
 use tutti_engine::Engine;
@@ -30,7 +31,6 @@ use tutti_graph::{OutPort, Source};
 use tutti_music::LoopRange;
 use tutti_sampler::{MemorySource, Playback, SlotId, VoicePool};
 use tutti_transport::{FadeOut, LoopEdit, MotionEvent, Then, Timeline, Transport};
-use tutti_types::ChannelLayout;
 use tutti_units::{At, Beat, Cents, Frame, SampleRate, Samples};
 
 const SR: f64 = 48_000.0;

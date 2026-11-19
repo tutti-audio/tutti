@@ -4,11 +4,11 @@
 //! copy, a reverb's tail covers its ring-out), not from another render.
 
 use tutti_buffers::Planes;
+use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_graph::contract::assert_honest_tail;
 use tutti_graph::contract::{drive, prepared};
 use tutti_graph::{Node, ParamNode};
 use tutti_nodes::{FreeverbNode, ModDelayNode};
-use tutti_types::{BusTopology, ChannelLayout};
 use tutti_units::{SampleRate, Tail, UnitParam};
 
 const SR: SampleRate = SampleRate::SR_48K;

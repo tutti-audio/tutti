@@ -6,11 +6,11 @@
 
 use crate::common;
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::Params;
 use tutti_modulation::Lfo;
 use tutti_session::{OutPort, ParamRef, Root, RouteSpec, Session, ValueErrorKind};
-use tutti_types::ChannelLayout;
 use tutti_units::SampleRate;
 use tutti_units::{BeatsPerCycle, Db, Depth, ParamAddr, UnitAddr, UnitParam};
 

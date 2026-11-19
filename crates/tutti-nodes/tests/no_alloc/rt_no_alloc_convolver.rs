@@ -3,9 +3,9 @@
 //! port). The output stays finite and nothing allocates.
 
 use tutti_buffers::Mono;
+use tutti_buffers::{AmbisonicFormat, AmbisonicOrder, Bed, ChannelTopology, MAX_CHANNELS};
 use tutti_graph::contract::Direct;
 use tutti_nodes::ConvolverNode;
-use tutti_types::{AmbisonicFormat, AmbisonicOrder, Bed, ChannelTopology, MAX_CHANNELS};
 use tutti_units::{Amplitude, SampleRate, Samples};
 
 /// The largest host block the rig is prepared for.

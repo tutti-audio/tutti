@@ -1,8 +1,8 @@
 use super::*;
 use crate::Float;
+use crate::{AmbisonicFormat, AmbisonicOrder, AmbisonicOrdering, LayoutError};
 use crate::{BufferError, InterleavedMut};
 use Speaker::*;
-use tutti_types::{AmbisonicFormat, AmbisonicOrder, AmbisonicOrdering, LayoutError};
 
 fn smpte(n: u16) -> ChannelTopology {
     ChannelTopology::assumed(ChannelLayout::from(n))
@@ -87,7 +87,7 @@ const M: f32 = f32::MINUS_3_DB;
 fn the_stereo_fold_is_the_itu_table() {
     let cases: [(ChannelTopology, [f32; 12], [f32; 12]); 4] = [
         (
-            tutti_types::Bed::Quad.topology(),
+            crate::Bed::Quad.topology(),
             [1.0, 0.0, M, 0.0, 0., 0., 0., 0., 0., 0., 0., 0.],
             [0.0, 1.0, 0.0, M, 0., 0., 0., 0., 0., 0., 0., 0.],
         ),
@@ -128,7 +128,7 @@ fn the_mono_fold_is_the_itu_table() {
         "6 -> 1",
     );
     near(
-        &response(&fold(&tutti_types::Bed::Quad.topology(), &mono), 0),
+        &response(&fold(&crate::Bed::Quad.topology(), &mono), 0),
         &[M, M, M * M, M * M],
         "quad -> 1",
     );
@@ -378,7 +378,7 @@ fn the_same_speakers_in_another_order_is_a_bit_exact_permutation() {
 /// rears and moves the surrounds across at full level.
 #[test]
 fn five_one_to_quad_places_by_position() {
-    let f = fold(&smpte(6), &tutti_types::Bed::Quad.topology());
+    let f = fold(&smpte(6), &crate::Bed::Quad.topology());
     //                 FL   FR   C    LFE  SL   SR
     near(&response(&f, 0), &[1.0, 0.0, M, 0.0, 0.0, 0.0], "FL");
     near(&response(&f, 1), &[0.0, 1.0, M, 0.0, 0.0, 0.0], "FR");
@@ -418,7 +418,7 @@ fn narrowing_below_surround_is_by_position() {
 #[test]
 fn quad_and_side_surround_quad_are_the_same_four_feeds() {
     let side_quad = ChannelTopology::new([FrontLeft, FrontRight, SideLeft, SideRight]).unwrap();
-    let f = fold(&tutti_types::Bed::Quad.topology(), &side_quad);
+    let f = fold(&crate::Bed::Quad.topology(), &side_quad);
     for o in 0..4 {
         let r = response(&f, o);
         assert_eq!(r.iter().filter(|&&g| g == 1.0).count(), 1, "{r:?}");
@@ -563,7 +563,7 @@ fn no_source_channel_is_silently_dropped() {
             "lcr",
             ChannelTopology::new([FrontLeft, FrontRight, FrontCenter]).unwrap(),
         ),
-        ("quad", tutti_types::Bed::Quad.topology()),
+        ("quad", crate::Bed::Quad.topology()),
         (
             "5.0",
             ChannelTopology::new([FrontLeft, FrontRight, FrontCenter, SideLeft, SideRight])
@@ -618,7 +618,7 @@ fn planar_is_the_frame_fold() {
     let all = [
         smpte(1),
         smpte(2),
-        tutti_types::Bed::Quad.topology(),
+        crate::Bed::Quad.topology(),
         smpte(6),
         smpte(8),
         smpte(12),
@@ -1108,7 +1108,7 @@ fn contributions_are_the_itu_table() {
     assert_eq!(pairs(&five_one, 0), [(0, 1.0), (2, M), (4, M)]);
     assert_eq!(pairs(&five_one, 1), [(1, 1.0), (2, M), (5, M)]);
 
-    let quad = fold(&tutti_types::Bed::Quad.topology(), &stereo);
+    let quad = fold(&crate::Bed::Quad.topology(), &stereo);
     assert_eq!(pairs(&quad, 0), [(0, 1.0), (2, M)]);
     assert_eq!(pairs(&quad, 1), [(1, 1.0), (3, M)]);
 
@@ -1575,8 +1575,8 @@ fn ambisonic_narrowing_drops_higher_orders_and_widening_zero_fills() {
 fn speakers_to_ambisonic_and_back_need_a_codec() {
     let first = ambisonic(1, AmbisonicOrdering::Acn, AmbisonicNormalization::Sn3d);
     for speakers in [
-        tutti_types::Bed::Quad.topology(),
-        tutti_types::Bed::Stereo.topology(),
+        crate::Bed::Quad.topology(),
+        crate::Bed::Stereo.topology(),
         ChannelTopology::unassigned(ChannelLayout::QUAD),
     ] {
         assert_eq!(
@@ -1649,7 +1649,7 @@ fn a_2d_normalization_converts_only_to_itself() {
 /// fold.
 #[test]
 fn the_default_levels_are_bs775_minus_3_db() {
-    use tutti_types::Bed;
+    use crate::Bed;
     use tutti_units::Amplitude;
     let m = f32::MINUS_3_DB;
     let levels = FoldLevels::default();
@@ -1667,7 +1667,7 @@ fn the_default_levels_are_bs775_minus_3_db() {
 /// when the fold is built, so it never reaches a signal.
 #[test]
 fn a_level_that_is_not_a_gain_is_refused() {
-    use tutti_types::Bed;
+    use crate::Bed;
     use tutti_units::Amplitude;
     let (five_one, stereo) = (Bed::Surround51.topology(), Bed::Stereo.topology());
     for bad in [f64::NAN, f64::INFINITY, -0.5] {
@@ -1708,7 +1708,7 @@ fn a_level_that_is_not_a_gain_is_refused() {
 /// centre, the surrounds and the heights each at their own gain.
 #[test]
 fn levels_state_the_centre_the_surround_and_the_height_gains() {
-    use tutti_types::Bed;
+    use crate::Bed;
     use tutti_units::Amplitude;
     let levels = FoldLevels {
         centre: Amplitude(0.5),
@@ -1746,7 +1746,7 @@ fn levels_state_the_centre_the_surround_and_the_height_gains() {
 /// the speaker at unity whatever the level says.
 #[test]
 fn a_level_applies_only_where_the_speaker_folds() {
-    use tutti_types::Bed;
+    use crate::Bed;
     use tutti_units::Amplitude;
     let levels = FoldLevels {
         surround: Amplitude(0.25),
@@ -1776,7 +1776,7 @@ fn a_level_applies_only_where_the_speaker_folds() {
 /// channel of a mono destination at `g`; `None` omits it.
 #[test]
 fn the_lfe_level_feeds_the_front_pair_or_the_mono_channel() {
-    use tutti_types::Bed;
+    use crate::Bed;
     use tutti_units::Amplitude;
     let five_one = Bed::Surround51.topology();
     let with = FoldLevels {
@@ -1816,7 +1816,7 @@ fn the_lfe_level_feeds_the_front_pair_or_the_mono_channel() {
 /// out by hand: 5.1 into stereo, then stereo into mono (`(L + R) / 2`).
 #[test]
 fn then_is_the_matrix_product() {
-    use tutti_types::Bed;
+    use crate::Bed;
     let m = f32::MINUS_3_DB;
     let a = fold(&Bed::Surround51.topology(), &Bed::Stereo.topology());
     let b = fold(&Bed::Stereo.topology(), &Bed::Mono.topology());
@@ -1845,7 +1845,7 @@ fn then_is_the_matrix_product() {
 /// not meet is refused.
 #[test]
 fn then_with_an_identity_is_the_other_fold_and_widths_must_meet() {
-    use tutti_types::Bed;
+    use crate::Bed;
     let a = fold(&Bed::Surround51.topology(), &Bed::Stereo.topology());
     let stereo_id = fold(&Bed::Stereo.topology(), &Bed::Stereo.topology());
     assert_eq!(a.then(&stereo_id).unwrap(), a);

@@ -2,9 +2,9 @@
 
 Audio as it sits in memory: the sample formats a file, a device or a plugin port holds, and borrowed views over mono, interleaved and planar runs of them.
 
-A view carries its own width and counts in frames, so a buffer cannot be read at the wrong stride. Converting between formats and between layouts is a function over two views, and every conversion follows one written rule.
+A view carries its own width and counts in frames, so a buffer cannot be read at the wrong stride. Converting between formats and between layouts is a function over two views, and every conversion follows one written rule. The channel family lives here too: how many channels a buffer has (`ChannelLayout`), which speaker each one feeds (`ChannelTopology`), and the largest block a node is asked to render (`MaxBlock`).
 
-It leans only on `tutti-units` (frame counts) and `tutti-types` (channel layouts) and a few small crates (`libm`, `thiserror`, and `serde` if you ask for it), so you can use it on its own wherever you move audio between formats.
+It leans only on `tutti-units` (frame counts) and a few small crates (`libm`, `thiserror`, and `serde` if you ask for it), so you can use it on its own wherever you move audio between formats.
 
 This crate is part of [tutti](https://github.com/tutti-audio/tutti), a real-time audio engine for Rust.
 

@@ -5,10 +5,10 @@
 //! value, and a fold's gain is the fold's stated rule, not another render's.
 
 use tutti_buffers::InterleavedMut;
+use tutti_buffers::{BusTopology, ChannelLayout, ChannelTopology, MaxBlock};
 use tutti_graph::{Cx, Io, Node, Prepare, Shape, Status, Unforkable};
 use tutti_nodes::BusStripNode;
 use tutti_session::{OutPort, Root, Session, SessionBuilder, ValueErrorKind};
-use tutti_types::{BusTopology, ChannelLayout, ChannelTopology, MaxBlock};
 use tutti_units::{Balance, Samples};
 
 /// Constant `values` on its output channels, declaring `out` as its bus.

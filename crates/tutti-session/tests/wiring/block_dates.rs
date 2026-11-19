@@ -2,8 +2,8 @@
 //! frames rendered, and the playhead reads each date back.
 
 use tutti_buffers::InterleavedMut;
+use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_session::{BlockDates, Session};
-use tutti_types::{ChannelLayout, MaxBlock};
 use tutti_units::{SampleRate, Samples};
 
 fn session(dates: BlockDates, rate: f64) -> Session {

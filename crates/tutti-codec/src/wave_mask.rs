@@ -4,7 +4,7 @@
 //! up for its `WAVE_FORMAT_EXTENSIBLE` mask, and the decoder maps a channel
 //! flag back to its speaker (symphonia's flag values are WAVE's bits).
 
-use tutti_types::Speaker;
+use tutti_buffers::Speaker;
 
 /// Every speaker WAVE has a bit for, in ascending bit order.
 const SPEAKER_BITS: [(u32, Speaker); 18] = [

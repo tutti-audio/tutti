@@ -41,8 +41,8 @@ impl Node for Lost {
 mod tests {
     use super::*;
     use tutti_buffers::Planes;
+    use tutti_buffers::{ChannelLayout, MaxBlock};
     use tutti_graph::{ForkByClone, GraphBuilder};
-    use tutti_types::{ChannelLayout, MaxBlock};
     use tutti_units::{Latency, SampleRate, Samples, Tail};
 
     /// **The stand-in keeps the ports and the latency, has no tail, and renders

@@ -11,6 +11,7 @@
 use tutti_graph::testing as common;
 
 use common::{Kind, TestNode, prepare};
+use tutti_buffers::ChannelLayout;
 use tutti_graph::{
     CloseError, CommitError, Cx, Editor, Executor, ForkCause, ForkMode, ForkSource, ForkTarget,
     Forked, IntoNode, Io, Level, MeterReader, Node, NodeParts, Op, Shape, Status,
@@ -18,7 +19,6 @@ use tutti_graph::{
 };
 use tutti_graph::{Edge, InPort, OutPort, Source};
 use tutti_graph::{MeterId, MeterSpec, NodeKey};
-use tutti_types::ChannelLayout;
 use tutti_units::{Beat, Bpm, Samples};
 
 /// A `Kind` whose fork is a fresh node of the same kind.
@@ -752,7 +752,7 @@ fn a_meter_cannot_change_its_width_under_its_cells() {
             .expect("the sources exist");
     r.ed.spec_mut()
         .topology
-        .set_outputs(vec![Source::Zero; tutti_types::MAX_CHANNELS + 1]);
+        .set_outputs(vec![Source::Zero; tutti_buffers::MAX_CHANNELS + 1]);
     assert!(matches!(
         r.ed.commit(),
         Err(CommitError::MeterWidth { meter, .. }) if meter == MeterId::of(2)

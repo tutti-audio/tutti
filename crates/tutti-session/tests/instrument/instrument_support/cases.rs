@@ -635,12 +635,12 @@ pub fn sending_allocates_nothing<S: Subject>() {
     let ok = assert_no_alloc::assert_no_alloc(|| {
         let a = rig.handle.keys_mut().push(Stamp::NextBlock, on).is_ok();
         rig.session.render(
-            &mut tutti_buffers::InterleavedMut::new(&mut buf, tutti_types::ChannelLayout::STEREO)
+            &mut tutti_buffers::InterleavedMut::new(&mut buf, tutti_buffers::ChannelLayout::STEREO)
                 .unwrap(),
         );
         let b = rig.handle.keys_mut().push(Stamp::NextBlock, off).is_ok();
         rig.session.render(
-            &mut tutti_buffers::InterleavedMut::new(&mut buf, tutti_types::ChannelLayout::STEREO)
+            &mut tutti_buffers::InterleavedMut::new(&mut buf, tutti_buffers::ChannelLayout::STEREO)
                 .unwrap(),
         );
         a && b

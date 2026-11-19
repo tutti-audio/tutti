@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock};
 use tutti_session::Root;
 
+use tutti_buffers::ChannelLayout;
 use tutti_codec::{Format, Pcm};
 use tutti_export::{GRAPH_MAX_BLOCK, Normalize, Stage};
 use tutti_graph::{Cx, ForkByClone, Io, Node, NodeKey, Prepare, Shape, Status};
@@ -14,7 +15,6 @@ use tutti_session::{
     Bounce, BounceError, BounceHandle, BounceTail, DetachedSession, ExportClock, FileMaster, Range,
     Session,
 };
-use tutti_types::ChannelLayout;
 use tutti_units::{Db, Frame, SampleRate, Samples};
 
 const RATE: SampleRate = SampleRate::SR_48K;

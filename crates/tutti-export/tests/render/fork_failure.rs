@@ -14,6 +14,7 @@ use tutti_units::Seconds;
 use crate::support::{EncodeConfig, ExportConfig, RenderConfig};
 
 use support::{render_file_under, render_normalized_to_file, render_to_buffers, render_to_file};
+use tutti_buffers::ChannelLayout;
 use tutti_codec::{Format, Pcm};
 use tutti_export::{
     CancelToken, Control, Error, GRAPH_MAX_BLOCK, Normalize, Progress, RenderGraph,
@@ -25,7 +26,6 @@ use tutti_graph::{
 };
 use tutti_graph::{OutPort, Source};
 use tutti_transport::FrozenClock;
-use tutti_types::ChannelLayout;
 use tutti_units::{Db, SampleRate};
 
 const RATE: SampleRate = SampleRate::SR_48K;

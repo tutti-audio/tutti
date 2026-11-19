@@ -23,7 +23,7 @@ use crate::node::{ConstantMask, InPlaceMask, MainPorts, SilenceMask, Wired, Wire
 use crate::param::ParamInput;
 use crate::rtlog::{LogSlots, RtLevel, RtRecord, RtTarget, RtValue};
 use crate::time::Offset;
-use tutti_types::MaxBlock;
+use tutti_buffers::MaxBlock;
 
 /// What a port carries.
 ///
@@ -918,7 +918,7 @@ fn shift(mask: u64, span: PortSpan) -> u64 {
 mod tests {
     use super::*;
     use crate::{Bus, BusRole, Buses, Shape};
-    use tutti_types::{BusTopology, ChannelLayout};
+    use tutti_buffers::{BusTopology, ChannelLayout};
 
     const FRAMES: usize = 4;
 

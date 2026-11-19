@@ -22,7 +22,7 @@
 //! The strip applies it by **placement**. Every left/right pair of its bus
 //! (front, side, back and height pairs alike) takes the law, the left speaker
 //! the left gain and the right speaker the right one. A speaker is paired with
-//! its [`mirror`](tutti_types::Speaker::mirror) when that speaker is on the bus,
+//! its [`mirror`](tutti_buffers::Speaker::mirror) when that speaker is on the bus,
 //! found by the speaker and never by the channel index, so a 5.1 strip balances
 //! `FL`/`FR` and `SL`/`SR` in whatever order its channels run. The centre, the
 //! LFE and any speaker whose mirror is absent take the fader alone.
@@ -43,10 +43,11 @@
 //! `BusStripNode::render`.
 
 use crate::ramp::LastGood;
+use tutti_buffers::{BusTopology, MAX_CHANNELS};
 use tutti_graph::{
     Cx, Inputs, IntoNode, Io, Node, NodeParts, Outputs, ParamNode, ParamSet, Prepare, Shape, Status,
 };
-use tutti_types::{BusTopology, MAX_CHANNELS, Param};
+use tutti_types::Param;
 use tutti_units::UnitParam;
 use tutti_units::{Amplitude, Balance, Tail};
 
@@ -128,7 +129,7 @@ enum Side {
 }
 
 /// The side of each channel of `topology`: a speaker is `Left` or `Right` when
-/// its [`mirror`](tutti_types::Speaker::mirror) is also on the bus, and `Mid` otherwise. A bus
+/// its [`mirror`](tutti_buffers::Speaker::mirror) is also on the bus, and `Mid` otherwise. A bus
 /// with no placement or an ambisonic one has no pair, so every channel is `Mid`.
 /// Control side: runs once.
 fn sides_of(topology: &BusTopology) -> [Side; MAX_CHANNELS] {
@@ -494,8 +495,8 @@ mod tests {
     use super::*;
     use crate::test_support::{RATE, tick};
     use tutti_buffers::Planes;
+    use tutti_buffers::{AmbisonicFormat, AmbisonicOrder, Bed, ChannelLayout, Speaker, Speaker::*};
     use tutti_graph::contract::{assert_param_fork, drive};
-    use tutti_types::{AmbisonicFormat, AmbisonicOrder, Bed, ChannelLayout, Speaker, Speaker::*};
 
     /// The engine's bus at `n` channels.
     fn width(n: u16) -> BusTopology {

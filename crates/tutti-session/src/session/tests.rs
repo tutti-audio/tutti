@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
+use tutti_buffers::ChannelLayout;
 use tutti_music::{MeterChange, MeterMap, TimeSignature};
 use tutti_transport::MeterSlot;
-use tutti_types::ChannelLayout;
 use tutti_units::{Beat, SampleRate};
 
 use crate::Session;
@@ -59,7 +59,7 @@ fn an_update_frees_the_mpe_mode_a_block_held_across_a_replacement() {
         .build_detached(SampleRate::SR_48K)
         .expect("builds");
     let _ = s.update();
-    let cell = s.mpe_cell().clone();
+    let cell = s.midi.state.mpe().clone();
     let mut node = cell.reader();
     {
         let _held = node.lend();

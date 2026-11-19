@@ -6,7 +6,7 @@
 //! `track-info`) answers the plugin's reads from it and tells the plugin when
 //! it changes; a format without keeps the default and drops it.
 
-use tutti_types::ChannelLayout;
+use tutti_buffers::ChannelLayout;
 
 /// What kind of track a plugin sits on.
 ///

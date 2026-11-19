@@ -3,9 +3,9 @@ use crate::VoiceWindow;
 use crate::streamer::{RegionBuffer, StreamId};
 use crate::testing::{MockTransport, block, play};
 use std::path::PathBuf;
+use tutti_buffers::MaxBlock;
 use tutti_graph::RenderMode;
 use tutti_graph::contract::Direct;
-use tutti_types::MaxBlock;
 use tutti_units::{Beat, BeatDuration, Bpm, Samples};
 
 /// The rate the tests' blocks run at.
@@ -798,7 +798,7 @@ fn a_steady_lane_read_writes_the_callers_lanes_as_put_does() {
 
 /// [`wide_clip`] over a ring that states `topology` (its width is the
 /// topology's), so the voice places the ring's channels by it.
-fn placed_clip(topology: tutti_types::ChannelTopology) -> DiskVoice {
+fn placed_clip(topology: tutti_buffers::ChannelTopology) -> DiskVoice {
     const AT: u64 = 22_000;
     let width = usize::from(topology.width().count());
     // The frame the ring is placed into: the file's own width, or the 7.1's
@@ -839,9 +839,9 @@ fn placed_clip(topology: tutti_types::ChannelTopology) -> DiskVoice {
 }
 
 /// A 7.1 file in WAV order: the rears before the sides.
-fn wav_seven_one() -> tutti_types::ChannelTopology {
-    use tutti_types::Speaker::*;
-    tutti_types::ChannelTopology::new([
+fn wav_seven_one() -> tutti_buffers::ChannelTopology {
+    use tutti_buffers::Speaker::*;
+    tutti_buffers::ChannelTopology::new([
         FrontLeft,
         FrontRight,
         FrontCenter,
@@ -856,9 +856,9 @@ fn wav_seven_one() -> tutti_types::ChannelTopology {
 
 /// A 10-channel file with no mask, as the decoder names it: WAVE's first
 /// ten speakers.
-fn named_ten() -> tutti_types::ChannelTopology {
-    use tutti_types::Speaker::*;
-    tutti_types::ChannelTopology::new([
+fn named_ten() -> tutti_buffers::ChannelTopology {
+    use tutti_buffers::Speaker::*;
+    tutti_buffers::ChannelTopology::new([
         FrontLeft,
         FrontRight,
         FrontCenter,

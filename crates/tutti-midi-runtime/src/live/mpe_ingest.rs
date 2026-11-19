@@ -491,9 +491,9 @@ impl ZoneView {
 
 /// How `config` reads under `mono`, the MIDI Mode 4 switches of the MPE 1.1
 /// zones.
-fn view_of(config: &MpeZoneConfig, mono: &[bool; MidiChannel::COUNT as usize]) -> Option<ZoneView> {
-    let first_member = config.member_channels().next()?;
-    Some(ZoneView {
+fn view_of(config: &MpeZoneConfig, mono: &[bool; MidiChannel::COUNT as usize]) -> ZoneView {
+    let first_member = config.first_member();
+    ZoneView {
         spec: config.spec(),
         manager: config.master_channel(),
         first_member: first_member.get(),
@@ -507,7 +507,7 @@ fn view_of(config: &MpeZoneConfig, mono: &[bool; MidiChannel::COUNT as usize]) -
             MpeSpec::Mpe11 => mono[config.master_channel().index()],
             MpeSpec::Profile => config.channel_response() == ChannelResponse::Monophonic,
         },
-    })
+    }
 }
 
 /// The zone of `channel` under `profile` if it has zones, else under `mode`.
@@ -521,7 +521,7 @@ fn zone_view(
         (Some(zones), _) | (None, MpeMode::Zones(zones)) => zones,
         (None, MpeMode::Disabled | MpeMode::SingleChannelRotation { .. }) => return None,
     };
-    view_of(zones.zone_of(channel)?, mono)
+    Some(view_of(zones.zone_of(channel)?, mono))
 }
 
 /// A Control Change at `value` zero on `channel`, `controller`.
@@ -1114,7 +1114,7 @@ impl MpeIngest {
                 // Member Channel of a zone, not to the Manager Channel,
                 // switches the zone between Mode 3 and Mode 4.
                 if let Some(mono) = mode_switch(zone.spec, controller)
-                    && zone.member_channels().next() == Some(ch)
+                    && zone.first_member == ch.get()
                 {
                     state.mono[usize::from(zone.manager.get())] = mono;
                 }

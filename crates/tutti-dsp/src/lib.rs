@@ -4,7 +4,7 @@
 //!
 //! Each algorithm is laid out as its controls (what a caller sets), its model (a [`System`],
 //! and an [`Lti`] where it is linear and time-invariant) and its bank (the per-frame math
-//! over buffers views). Values are `tutti_types` units.
+//! over buffers views). Values are `tutti_units` units.
 //!
 //! ## Catalogue
 //!

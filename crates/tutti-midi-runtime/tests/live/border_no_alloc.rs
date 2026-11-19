@@ -4,6 +4,7 @@
 //! inlet into the event tap's ring, and the sync node's clock, timecode and
 //! Machine Control.
 
+use tutti_buffers::MaxBlock;
 use tutti_graph::{
     Editor, EventEdge, EventIn, EventInletNode, EventInletWriter, EventOut, Harmony, Prepare,
     TransportPosition,
@@ -15,7 +16,6 @@ use tutti_midi_runtime::{
 };
 use tutti_music::{FrameClock, LoopRange};
 use tutti_music::{MeterChange, MeterMap, TimeSignature};
-use tutti_types::MaxBlock;
 use tutti_ump::{MidiChannel, MidiGroup, NoteNumber, NoteVelocity, U7, Ump};
 use tutti_units::{Beat, Bpm, Frame, Moment, SampleRate, Samples};
 

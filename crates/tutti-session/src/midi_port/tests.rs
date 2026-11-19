@@ -1,8 +1,8 @@
 use super::*;
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_midi_device::{EndpointId, PortDirection};
 use tutti_midi_hardware::test_support::{FakeBackend, persistent_endpoint};
-use tutti_types::ChannelLayout;
 use tutti_units::Frame;
 
 fn render(s: &Session, blocks: usize) {
@@ -43,7 +43,7 @@ fn the_stamp_stream_is_carried_across_a_closed_output() {
         .expect("declares");
     let _ = s.update();
     // The device receives JR Timestamps, so the output stamps and its stream moves.
-    s.midi_state.ports.outputs[0]
+    s.midi.state.ports.outputs[0]
         .out
         .as_mut()
         .and_then(UmpOut::device_mut)
@@ -64,20 +64,20 @@ fn the_stamp_stream_is_carried_across_a_closed_output() {
     s.play().expect("room");
     render(&s, 8);
     let _ = s.update();
-    let before = s.midi_state.ports.stream_origin();
+    let before = s.midi.state.ports.stream_origin();
     assert!(before > Frame::ZERO, "the clock moved the stream on");
 
     fake.unplug(EndpointId::from_raw(10));
     let _ = s.update();
     assert_eq!(
-        s.midi_state.ports.stream_origin(),
+        s.midi.state.ports.stream_origin(),
         before,
         "parked as it was"
     );
     fake.plug(persistent_endpoint(10, "Synth"), PortDirection::Output);
     let _ = s.update();
     assert_eq!(
-        s.midi_state.ports.stream_origin(),
+        s.midi.state.ports.stream_origin(),
         before,
         "carried on by the reopened output, not started over"
     );

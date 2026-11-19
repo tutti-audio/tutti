@@ -31,16 +31,16 @@
 //!    second; [`the_latest_placement_wins`] pins it.
 
 use std::sync::Arc;
+use tutti_buffers::MaxBlock;
 use tutti_buffers::Mono;
-use tutti_types::MaxBlock;
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::Wave;
 use tutti_graph::NodeKey;
 use tutti_graph::{Editor, Executor, ForkMode, ForkTarget, Prepare, TransportPosition, Unforkable};
 use tutti_graph::{OutPort, Source};
 use tutti_sampler::testing::{MockTransport, block};
 use tutti_sampler::{MemorySource, Playback, Voice, VoiceNode, VoiceSource, VoiceWindow};
-use tutti_types::ChannelLayout;
 use tutti_units::{Beat, BeatDuration, Bpm, SampleRate, Samples};
 
 const RATE: SampleRate = SampleRate::SR_48K;

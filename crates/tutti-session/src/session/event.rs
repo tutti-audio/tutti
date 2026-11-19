@@ -4,9 +4,9 @@
 use std::any::Any;
 use std::fmt::{self, Formatter};
 
+use tutti_buffers::ChannelTopology;
 use tutti_engine::StreamFault;
 use tutti_graph::{BusSource, CommitError, NodeKey, Wired};
-use tutti_types::ChannelTopology;
 use tutti_units::SampleRate;
 
 use crate::graph::CrossfadeId;

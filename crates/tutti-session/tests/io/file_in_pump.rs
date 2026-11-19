@@ -1,10 +1,10 @@
 //! A pump over a decoded file: `FileIn` is a `Source` whose end (`Ended`) and
 //! whose fault (`Failed`) the pump must tell apart.
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::{Interleaved, Sink, SinkFailed, Source};
 use tutti_codec::FileIn;
 use tutti_session::{PumpLoop, PumpPass};
-use tutti_types::ChannelLayout;
 use tutti_units::Samples;
 
 struct Discard(ChannelLayout);

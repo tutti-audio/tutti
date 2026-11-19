@@ -132,7 +132,7 @@ fn an_independent_reader_recovers_the_samples_at_every_width() {
 fn a_topology_sets_the_mask() {
     let quad = Spec::new(
         crate::Format::Wav(Pcm::Int24),
-        tutti_types::Bed::Quad.topology(),
+        tutti_buffers::Bed::Quad.topology(),
         SampleRate::SR_48K,
     );
     assert_eq!(u32_at(&write_all(&quad, &ramp(4, 2)), 40), 0x33);
@@ -143,7 +143,7 @@ fn a_topology_sets_the_mask() {
     );
     let discrete = Spec::new(
         crate::Format::Wav(Pcm::Int24),
-        tutti_types::ChannelTopology::unassigned(tutti_types::ChannelLayout::QUAD),
+        tutti_buffers::ChannelTopology::unassigned(tutti_buffers::ChannelLayout::QUAD),
         SampleRate::SR_48K,
     );
     assert_eq!(
