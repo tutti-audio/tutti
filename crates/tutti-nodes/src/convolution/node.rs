@@ -22,7 +22,7 @@ use tutti_graph::{
     Buses, Cx, Inputs, IntoNode, Io, Node, NodeParts, Outputs, ParamNode, ParamSet, Prepare, Shape,
     Status,
 };
-use tutti_types::Param;
+use tutti_rt::Param;
 use tutti_units::{Amplitude, Samples, UnitParam};
 use tutti_units::{Latency, Tail};
 

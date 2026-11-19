@@ -47,7 +47,7 @@ use tutti_buffers::{BusTopology, MAX_CHANNELS};
 use tutti_graph::{
     Cx, Inputs, IntoNode, Io, Node, NodeParts, Outputs, ParamNode, ParamSet, Prepare, Shape, Status,
 };
-use tutti_types::Param;
+use tutti_rt::Param;
 use tutti_units::UnitParam;
 use tutti_units::{Amplitude, Balance, Tail};
 

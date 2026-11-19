@@ -12,6 +12,7 @@ use tutti_buffers::MaxBlock;
 use tutti_ump::{MidiChannel, NoteNumber, U7};
 use tutti_units::ParamId;
 
+use atomic_float::AtomicF64;
 use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_graph::{
@@ -27,7 +28,6 @@ use tutti_modulation::{
 use tutti_music::FrameClock;
 use tutti_nodes::testing::Through;
 use tutti_nodes::{Feed, ModHost, Modulation, ReconcileError, Target};
-use tutti_types::AtomicF64;
 use tutti_ump::{Message, Voice1};
 use tutti_units::{
     Amplitude, At, Beat, Bpm, Depth, Frame, Hz, ParamAddr, PhaseIncrement, SampleRate, Samples,

@@ -23,13 +23,13 @@ use crate::{UnisonEngine, VoiceAllocator, VoiceAllocatorConfig};
 use tutti_graph::{EventKind, SubBlocks};
 use tutti_midi_protocol::{PitchBendSensitivity, UniversalReader};
 use tutti_midi_protocol::{channel_voice, narrow_value};
-use tutti_types::Param;
+use tutti_rt::Param;
 use tutti_ump::ControlValue;
 use tutti_ump::NoteId;
 use tutti_ump::{
     Attribute, CCNumber, MidiChannel, NoteNumber, RegisteredPerNoteController, Ump, Voice2,
 };
-use tutti_units::{Amplitude, Hz, Normalized, SampleRate, Samples, Semitones, Tail};
+use tutti_units::{Amplitude, Hz, Normalized, SampleRate, Samples, Semitones, Tail, Velocity};
 use tutti_voicing::{Controller, Effect, Glide, MasterGain, NoteControl, Stop};
 
 /// A polyphonic subtractive synthesizer: a MIDI-driven voice allocator over a
@@ -272,7 +272,7 @@ impl<F: SynthFloat> PolySynth<F> {
                 velocity,
                 attribute,
             } => {
-                self.handle_note_on(note, velocity.normalized(), channel, attribute);
+                self.handle_note_on(note, velocity.velocity(), channel, attribute);
             }
             // Release velocity is not used: the release is the envelope's.
             Voice2::NoteOff { note, .. } => self.handle_note_off(note, channel),
@@ -334,7 +334,7 @@ impl<F: SynthFloat> PolySynth<F> {
     fn handle_note_on(
         &mut self,
         note: NoteNumber,
-        vel_norm: Normalized,
+        vel_norm: Velocity,
         channel: MidiChannel,
         attribute: Attribute,
     ) {
@@ -528,7 +528,7 @@ impl<F: SynthFloat> PolySynth<F> {
         note: NoteNumber,
         channel: MidiChannel,
         tune: Semitones,
-        vel_norm: Normalized,
+        vel_norm: Velocity,
         is_legato: bool,
         glide: Option<Glide>,
     ) {

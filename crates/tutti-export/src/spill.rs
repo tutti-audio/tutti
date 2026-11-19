@@ -177,7 +177,7 @@ impl<F: Float> Drop for Spill<F> {
 
 /// A name beside `target` no other spill (or process) uses.
 fn unique_beside(target: &Path) -> PathBuf {
-    static NEXT: tutti_types::Mint = tutti_types::Mint::new();
+    static NEXT: tutti_rt::Mint = tutti_rt::Mint::new();
     let name = target
         .file_name()
         .map_or_else(|| "export".to_owned(), |n| n.to_string_lossy().into_owned());

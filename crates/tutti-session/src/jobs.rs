@@ -232,7 +232,7 @@ pub(crate) struct Jobs {
     tx: Sender<Arrival>,
     arrivals: Arrivals,
     landers: HashMap<Slot, Lander>,
-    next: tutti_types::Mint,
+    next: tutti_rt::Mint,
     closed: Arc<AtomicBool>,
     /// The default spawner's threads, until they end.
     threads: Vec<ThreadHandle<()>>,
@@ -354,7 +354,7 @@ impl Jobs {
                 taken: VecDeque::new(),
             },
             landers: HashMap::new(),
-            next: tutti_types::Mint::new(),
+            next: tutti_rt::Mint::new(),
             closed: Arc::new(AtomicBool::new(false)),
             threads: Vec::new(),
             landed: LandedQueue::default(),

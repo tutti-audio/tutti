@@ -27,7 +27,7 @@ use tutti_nodes::{
     GateControls, GateNode, InterpolationMode, KeySource, LadderFilterNode, LadderType, MaxDelay,
     ModDelayNode, PhaserControls, PhaserNode, Stages, SvfFilterNode, SvfType,
 };
-use tutti_types::ParamCell;
+use tutti_rt::ParamCell;
 use tutti_units::{
     CompressionRatio, Db, Drive, Feedback, Hz, Q, Resonance, SampleRate, Samples, Seconds,
     UnitParam,

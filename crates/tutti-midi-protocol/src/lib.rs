@@ -70,8 +70,10 @@
 //! A bend as a position on `-1..=1` is
 //! [`BendValue::bipolar`](tutti_ump::BendValue::bipolar) and its inverse
 //! [`BendValue::from_bipolar`](tutti_ump::BendValue::from_bipolar); a velocity
-//! or controller value as a position on `0..=1` is
-//! [`NoteVelocity::normalized`](tutti_ump::NoteVelocity::normalized) and
+//! as a [`Velocity`](tutti_units::Velocity) is
+//! [`NoteVelocity::velocity`](tutti_ump::NoteVelocity::velocity) and its inverse
+//! [`NoteVelocity::from_velocity`](tutti_ump::NoteVelocity::from_velocity); a
+//! controller value as a position on `0..=1` is
 //! [`ControlValue::normalized`](tutti_ump::ControlValue::normalized).
 //!
 //! What the widening does and does not do:

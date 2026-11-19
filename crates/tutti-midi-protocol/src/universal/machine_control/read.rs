@@ -442,7 +442,10 @@ fn field_data(code: u8, d: &[u8]) -> Option<MmcInfoField> {
         0x43 => MmcInfoField::CommandError(command_error(d)?),
         0x44 => MmcInfoField::CommandErrorLevel(one_u7(d)?),
         0x45 => MmcInfoField::TimeStandard(match *d {
-            [byte] if byte & 0x9F == 0 => MtcRate::masked(byte >> 5),
+            [byte] if byte < 0x80 => match MtcRate::from_hours_byte(byte) {
+                (rate, 0) => rate,
+                _ => return None,
+            },
             _ => return None,
         }),
         0x46 => MmcInfoField::TimeCodeSource(one(d, MmcTimeCodeSource::from_wire)?),

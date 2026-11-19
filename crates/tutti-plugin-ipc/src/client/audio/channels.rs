@@ -17,11 +17,11 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use tutti_plugin_types::BlockCounts;
+use tutti_rt::AtomicSampleRate;
 use tutti_rt::{
     AudioThreadCell, Counter, Doorbell, LockExt, Overflow, PackedAtomic, RingReader, RingWriter,
     Sleeper, Tally, TallyWriter, doorbell, ring, tally,
 };
-use tutti_types::AtomicSampleRate;
 use tutti_units::SampleRate;
 
 /// How many commands the audio thread can queue before `push_command` fails.

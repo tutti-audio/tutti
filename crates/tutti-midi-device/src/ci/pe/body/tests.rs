@@ -179,7 +179,6 @@ fn a_limit_is_at_least_one_byte() {
     assert_eq!(BodyLimit::new(0), None);
 }
 
-#[cfg(feature = "serde")]
 #[test]
 fn the_body_limit_is_a_range_checked_value() {
     use tutti_fixtures::{RangeContract, check_range_contract};

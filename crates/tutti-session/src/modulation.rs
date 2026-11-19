@@ -235,7 +235,7 @@ impl Ranged for MixRef {
     type Unit = tutti_units::Mix;
 }
 
-tutti_types::id! {
+tutti_rt::id! {
     /// A modulation source the session declared, named. Minted by [`Mods`]
     /// (`lfo`, `macro_`, `follower`, ...), never built: a value is one this
     /// session returned, so it names a source that was declared, and a removed
@@ -252,12 +252,12 @@ tutti_types::id! {
     /// Nor mint one:
     ///
     /// ```compile_fail,E0624
-    /// let _ = tutti_session::ModSourceId::mint(&tutti_types::Mint::new());
+    /// let _ = tutti_session::ModSourceId::mint(&tutti_rt::Mint::new());
     /// ```
     pub struct ModSourceId;
 }
 
-tutti_types::id! {
+tutti_rt::id! {
     /// A modulation route the session declared, named; as [`ModSourceId`] is for
     /// a source: minted by [`Mods::route`], found again through
     /// [`ModsView::routes`] and [`ModsView::routes_to`].
@@ -271,13 +271,13 @@ tutti_types::id! {
     /// Nor mint one:
     ///
     /// ```compile_fail,E0624
-    /// let _ = tutti_session::ModRouteId::mint(&tutti_types::Mint::new());
+    /// let _ = tutti_session::ModRouteId::mint(&tutti_rt::Mint::new());
     /// ```
     pub struct ModRouteId;
 }
 
 /// The source `key` names: a key of the session's own declarations is minted
-/// from a [`Mint`](tutti_types::Mint), so it is never 0.
+/// from a [`Mint`](tutti_rt::Mint), so it is never 0.
 fn source_id(key: SourceKey) -> ModSourceId {
     ModSourceId::new(key.0).expect("a key the session minted is not 0")
 }
@@ -878,7 +878,7 @@ impl std::fmt::Debug for OwnAutomation {
 #[derive(Default, Debug)]
 pub(crate) struct OwnMods {
     /// Names sources, routes and edges alike.
-    minted: tutti_types::Mint,
+    minted: tutti_rt::Mint,
     sources: BTreeMap<SourceKey, OwnSource>,
     routes: BTreeMap<RouteKey, OwnRoute>,
     ranges: BTreeMap<TargetKey, (f64, f64)>,

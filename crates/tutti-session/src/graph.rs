@@ -64,7 +64,7 @@ use tutti_graph::{
     EventCapacity, EventInletNode, EventInletWriter, EventTapId, MeterId, MeterSpec, MissingSource,
     TapAlign, TapId,
 };
-use tutti_types::Mint;
+use tutti_rt::Mint;
 #[cfg(feature = "plugin")]
 use tutti_units::Latency;
 use tutti_units::{Amplitude, Mix, SampleRate, Seconds, UnitAddr};
@@ -143,7 +143,7 @@ pub enum Feeder {
     Clock,
 }
 
-tutti_types::id! {
+tutti_rt::id! {
     /// A crossfade waiting for a re-prepare, named so its landing can be told
     /// from another's ([`SessionEvent::CrossfadeLanded`](crate::SessionEvent)).
     pub struct CrossfadeId;

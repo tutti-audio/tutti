@@ -41,13 +41,13 @@ impl fmt::Display for ResourceId {
 /// (off the session's own call) takes ids no other token has.
 #[derive(Clone, Debug)]
 pub(crate) struct ResourceIds {
-    last: Arc<tutti_types::Mint>,
+    last: Arc<tutti_rt::Mint>,
 }
 
 impl ResourceIds {
     pub(crate) fn new() -> Self {
         Self {
-            last: Arc::new(tutti_types::Mint::new()),
+            last: Arc::new(tutti_rt::Mint::new()),
         }
     }
 

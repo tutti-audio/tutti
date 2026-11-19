@@ -186,7 +186,7 @@ fn mentions_platform(text: &str) -> bool {
 pub(super) fn owner(krate: &str) -> Option<&'static str> {
     const CORE_CRATES: &[&str] = &[
         "tutti-units",
-        "tutti-types",
+        "tutti-music",
         "tutti-rt",
         "tutti-graph",
         "tutti-engine",
