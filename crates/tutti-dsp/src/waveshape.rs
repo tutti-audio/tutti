@@ -329,7 +329,7 @@ impl<F: Float + Lerp> WaveshaperBank<F> {
 
     /// Runs `input` into `output`, each channel through the curve at the drive.
     ///
-    /// `control signal` is the drive per frame where a port drives it: a frame past its end, or one
+    /// `signal` is the drive per frame where a port drives it: a frame past its end, or one
     /// that is not finite, reads the drive in force: the ramp's value at that frame. Channel `c`
     /// of `input` feeds channel `c` of `output`; a channel past the narrower of the two views is
     /// not touched, and the frames rendered are the fewer of the two

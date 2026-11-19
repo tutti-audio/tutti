@@ -399,7 +399,7 @@ fn brickwall_limiter_fed_ceiling_process_is_allocation_free() {
 /// new ceiling through the `ParamSet` (a new design, retargeted on the audio thread),
 /// 2 000 blocks under `assert_no_alloc`.
 #[test]
-fn brickwall_limiter_moving_cell_and_hostile_lane_are_allocation_free() {
+fn brickwall_limiter_moving_cell_and_hostile_signal_are_allocation_free() {
     use tutti_graph::ParamNode;
     use tutti_graph::contract::Direct;
     use tutti_units::UnitParam;

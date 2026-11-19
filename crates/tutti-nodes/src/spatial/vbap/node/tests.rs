@@ -454,7 +454,7 @@ fn the_panner_declares_its_params() {
 /// value differs from one at the default (else the row would pass on a node
 /// that ignored both).
 #[test]
-fn a_lane_drives_each_param_as_its_cell_would() {
+fn a_signal_drives_each_param_as_its_cell_would() {
     let (left, right) = ([0.5f32; 64], [-0.25f32; 64]);
     let settle = |node: &mut VbapPannerNode<f32>, signal: Option<(usize, f32)>| {
         let held = signal.map(|(_, v)| [v; 64]);
@@ -511,7 +511,7 @@ fn a_lane_drives_each_param_as_its_cell_would() {
 /// The speakers that are silent at both ends are found by rendering both
 /// ends settled, not named, so the row follows the bed.
 #[test]
-fn a_lane_driven_bearing_crosses_the_seam_the_short_way() {
+fn a_signal_driven_bearing_crosses_the_seam_the_short_way() {
     let ones = [1.0f32; 64];
     let at = |bearing: f64| {
         let mut node = prep(VbapPannerNode::<f32>::quad());
@@ -690,7 +690,7 @@ fn a_move_between_grid_points_starts_at_the_next_one() {
 /// quad whose gains change along the way; a 50 ms smoothing would trail it by
 /// tens of degrees.
 #[test]
-fn a_lane_driven_bearing_is_followed_to_the_grid_period() {
+fn a_signal_driven_bearing_is_followed_to_the_grid_period() {
     let mut node = prep(VbapPannerNode::<f32>::quad());
     node.param_set().set(UnitParam::StereoWidth, 0.0);
     let ones = [1.0f32; GRID];

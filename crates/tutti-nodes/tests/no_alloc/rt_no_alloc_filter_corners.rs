@@ -323,7 +323,7 @@ const SPLITS: [f32; 12] = [
 /// The frames a design takes to arrive, and so the grid a square control signal switches on.
 const GRID: usize = 16;
 
-/// The crossover's control signals: the shapes of [`control signal`], and a square that switches between the floor
+/// The crossover's control signals: the shapes of `signal`, and a square that switches between the floor
 /// and the cap at every grid point (`SHAPES`).
 fn crossover_signal<F: Float>(shape: usize) -> Vec<F> {
     if shape == SHAPES {

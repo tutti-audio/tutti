@@ -118,7 +118,7 @@ fn runner(c: &CompressorControls) -> CompressorBank<f32> {
     runner_at(c, RATE)
 }
 
-/// `audio` (one slice per channel) through `bank`, keyed by `key`, with `control signal` as the
+/// `audio` (one slice per channel) through `bank`, keyed by `key`, with `signal` as the
 /// threshold control signal when given, in calls of at most `block` frames.
 fn run_in<F: Float + SimdLanes + Lerp>(
     bank: &mut CompressorBank<F>,

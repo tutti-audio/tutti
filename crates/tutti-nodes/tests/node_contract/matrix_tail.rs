@@ -381,7 +381,7 @@ fn signal() -> Vec<f32> {
 }
 
 /// `node` called on every block of `block` frames over `input`, in two segments split at frame
-/// 1500, where `gain` moves to 0.25 (the node is parked by then), and `control signal` driven on the gain
+/// 1500, where `gain` moves to 0.25 (the node is parked by then), and `signal` driven on the gain
 /// port if given. A block the node answers `Silent` to is zeros, as the graph would leave it.
 fn direct(
     node: ConvolverNode<f32>,

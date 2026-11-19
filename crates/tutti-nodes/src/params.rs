@@ -9,7 +9,7 @@
 //!
 //! A control the kernel reads **per frame** is [`ControlRead::Fast`]: the
 //! kernel takes its port's frames from the [`ControlSignals`](crate::ControlSignals)
-//! (`Params::control signals`), and the reader sees only its cell, the base the member is
+//! (`Params::signals`), and the reader sees only its cell, the base the member is
 //! designed at.
 
 use std::sync::Arc;

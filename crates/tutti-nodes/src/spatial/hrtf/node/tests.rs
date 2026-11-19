@@ -485,7 +485,7 @@ fn the_renderer_declares_its_params() {
 /// The value must change the render from the default's, else the row would
 /// pass on a node that ignored both the control signal and the cell.
 #[test]
-fn a_lane_drives_each_param_as_its_cell_would() {
+fn a_signal_drives_each_param_as_its_cell_would() {
     let input = [0.5f32; BLOCK];
     let settle = |node: &mut HrtfBinauralNode<f32>, signal: Option<(usize, f32)>| {
         let held = signal.map(|(_, v)| [v; BLOCK]);

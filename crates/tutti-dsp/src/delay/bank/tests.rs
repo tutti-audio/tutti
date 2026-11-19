@@ -353,14 +353,14 @@ fn a_feedback_signal_is_the_feedback_of_each_frame() {
     let (d, len) = (16usize, 16 * 8 + 5);
     let family = mono(InterpolationMode::Linear);
     let train = |g: f32, k: usize| g.powi(k as i32);
-    for (signal, g) in [
+    for (level, g) in [
         (0.8f32, 0.8f32),
         (f32::NAN, 0.5),
         (f32::INFINITY, 0.5),
         (5.0, 0.99),
         (-2.0, 0.0),
     ] {
-        let signal = vec![signal; len];
+        let signal = vec![level; len];
         let mut k = runner(&family, &controls(d as f64 / 1024.0, 0.5, 0.0));
         let y = k
             .run_in(&[impulse(len)], [None, Some(&signal)], 64)

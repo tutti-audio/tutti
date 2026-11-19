@@ -9,8 +9,9 @@
 //! ## Catalogue
 //!
 //! - **Model** (`model/`): a [`System`] is what every processor answers (its
-//!   [`latency`](System::latency) and [`tail`](System::tail), a [`Ring`]: how long it keeps sounding
-//!   after its input stops, until its output is quieter than [`TAIL_FLOOR`]), and [`Lti`] the class of a linear time-invariant one
+//!   [`latency`](System::latency) and [`tail`](System::tail), a [`Ring`]: how long the response
+//!   rings until it is a floor below what it carried ([`TAIL_FLOOR`] by default)), and [`Lti`]
+//!   the class of a linear time-invariant one
 //!   ([`frequency_response`](Lti::frequency_response),
 //!   [`spectral_radius`](Lti::spectral_radius), [`l1_norm`](Lti::l1_norm),
 //!   [`hinf_norm`](Lti::hinf_norm), with [`Complex64`]); [`MaxDecay`] is the longest decay

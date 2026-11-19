@@ -34,7 +34,7 @@ fn ceilings() -> Vec<f64> {
     all
 }
 
-/// A bank set to `controls`, rendering `x` on both channels, held or with `control signal`, in
+/// A bank set to `controls`, rendering `x` on both channels, held or with `signal`, in
 /// blocks of `block`.
 fn render_blocks(
     controls: BrickwallControls,
@@ -175,7 +175,7 @@ fn the_render_is_the_clamp_at_any_block() {
 }
 
 /// A fed ceiling is read **per frame**: frame `i` is clamped at the amplitude of
-/// `control signal[i]` dB, a NaN frame at the set ceiling, and `+-inf` frames are
+/// `signal[i]` dB, a NaN frame at the set ceiling, and `+-inf` frames are
 /// ceilings. Whatever the block cut.
 #[test]
 fn a_fed_ceiling_is_read_per_frame() {

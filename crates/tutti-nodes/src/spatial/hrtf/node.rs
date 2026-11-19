@@ -32,8 +32,8 @@ tutti_graph::declare_params!([F: FftFloat] HrtfBinauralNode<F>, n {
 /// It is a graph node (`tutti_graph::Node` and [`ParamNode`]); inserting it
 /// hands back its [`ParamSet`] ([`UnitParam::Azimuth`],
 /// [`Elevation`](tutti_units::UnitParam::Elevation) and [`Wet`](tutti_units::UnitParam::Wet)), which
-/// move the source lock-free while it renders, and a graph's control control signals
-/// may drive all three .
+/// move the source lock-free while it renders, and a graph's control lanes
+/// may drive all three.
 /// Position changes are de-zippered over 50 ms, and each step of the ramp
 /// crossfades between the filters on either side of it. The filter for a
 /// direction is blended across the sphere face that direction crosses. A

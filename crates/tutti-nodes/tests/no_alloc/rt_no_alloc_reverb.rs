@@ -259,7 +259,7 @@ fn the_fdn_parks_and_wakes_without_allocating() {
 /// from the extremes of the control signals every block, and the grid reads and the corners of each
 /// control signal retarget.
 #[test]
-fn the_fdn_with_its_lanes_fed_is_allocation_free() {
+fn the_fdn_with_its_signals_fed_is_allocation_free() {
     let sweep = |lo: f32, hi: f32, up: bool| -> Vec<f32> {
         (0..64)
             .map(|i| {

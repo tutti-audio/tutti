@@ -31,7 +31,7 @@ fn noise(seed: u32) -> Vec<f32> {
 }
 
 /// `node`, prepared for 512-frame blocks, fed `inputs` in blocks of `block` with
-/// `control signals` (each a function of the absolute frame, in port order) cut to match.
+/// `signals` (each a function of the absolute frame, in port order) cut to match.
 fn render<N: Node + ParamNode + 'static>(
     node: N,
     block: usize,
@@ -98,7 +98,7 @@ fn same_at_every_block(what: &str, make: impl Fn() -> Box<dyn Fn(usize) -> Vec<V
 /// other cells moved before the first block, render the same bits whether the
 /// stream arrives in blocks of 1, 17, 64 or 512 frames.
 #[test]
-fn blocks_of_any_length_render_alike_with_lanes_and_moved_cells() {
+fn blocks_of_any_length_render_alike_with_signals_and_moved_cells() {
     let inputs = [noise(1), noise(2)];
     same_at_every_block("svf bell, three signals", || {
         let inputs = inputs.clone();
@@ -219,7 +219,7 @@ fn the_ladder_renders_alike_at_every_block_length_with_signals() {
 /// output there is the held filter's with that drive, bit for bit. (Drive was once
 /// read per sample, outside the solve: a step at 40 would be in the render at 40.)
 #[test]
-fn a_drive_lane_step_is_in_the_render_within_one_segment() {
+fn a_drive_signal_step_is_in_the_render_within_one_segment() {
     const STEP: usize = 40;
     let (old, new) = (1.0f32, 6.0f32);
     let step: Vec<f32> = (0..64).map(|i| if i < STEP { old } else { new }).collect();
@@ -327,7 +327,7 @@ fn held_cells_render_alike_at_every_block_length() {
 /// so an impulse there is answered as the new held filter answers it: 16 frames
 /// after the last point that did not see the step, 24 after the step itself.
 #[test]
-fn a_lane_step_is_in_the_render_within_one_segment() {
+fn a_signal_step_is_in_the_render_within_one_segment() {
     const STEP: usize = 40;
     let (old, new) = (400.0f64, 4_000.0f64);
     // The control signal carries `f32` words.
@@ -405,7 +405,7 @@ fn the_crossover_renders_alike_at_every_block_length_with_signals() {
 /// impulse into a crossover with no state answers with the set in force at that frame, so the
 /// low band there is `a3^2`, `a3 = g^2 / (1 + g (g + sqrt2))`, at that frame's gain.
 #[test]
-fn a_crossover_lane_step_is_held_to_the_next_grid_point_then_ramps() {
+fn a_crossover_signal_step_is_held_to_the_next_grid_point_then_ramps() {
     const STEP: usize = 40;
     let (old, new) = (400.0f64, 4_000.0f64);
     // The control signal carries `f32` words.

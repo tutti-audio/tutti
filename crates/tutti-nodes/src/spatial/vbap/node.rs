@@ -104,8 +104,8 @@ fn ramp_steps(rate: SampleRate) -> u32 {
 /// The ramp of the bearing takes the short arc: from 170 to -170 degrees it
 /// passes through 180, never through the front.
 ///
-/// A param that a control signal drives is followed, not smoothed: a control signal is already a
-/// signal, so the direction at each grid point is the control signal's value at that
+/// A param that a control signal drives is followed, not smoothed: a control signal already has a
+/// value for every frame, so the direction at each grid point is the control signal's value at that
 /// frame (a bearing wrapped), and the gains chord along the short arc to the next
 /// point. A control signal is read every 16 frames, so a source it moves lags it by at most
 /// one grid period. A spread or width reaches the gains at the next grid point
@@ -266,7 +266,7 @@ impl<F: Float> VbapPannerNode<F> {
     /// gains ramp at the gains solved for where they have reached.
     ///
     /// A cell's value is a step, which the bearing and height ramp to over
-    /// [`ramp_steps`] grid points. A control signal is already a signal, so a driven
+    /// [`ramp_steps`] grid points. A driven control signal needs no smoothing, so a driven
     /// coordinate is the control signal's value at the grid point, wrapped for a bearing,
     /// and the gains chord to the next grid point from there.
     fn grid_point(

@@ -115,7 +115,7 @@ fn at_rest(kind: ShapeKind, drive: f64) -> WaveshaperBank<f32> {
     bank
 }
 
-/// `bank` over `channels` (each a plane), one block, with `control signal` the drive per frame.
+/// `bank` over `channels` (each a plane), one block, with `signal` the drive per frame.
 fn run(
     bank: &mut WaveshaperBank<f32>,
     signal: Option<&[f32]>,
@@ -261,7 +261,7 @@ fn a_non_finite_signal_frame_mid_ramp_reads_the_ramp() {
 /// Drive below 0 shapes as 0 and a staircase's below 1 as 1, on the control signal and on the ramp.
 #[test]
 fn the_drive_floors_hold_on_the_signal_and_the_ramp() {
-    // Lane: a hard clip at -2 is drive 0 (silence); a crush at 0.5 is one level per unit.
+    // Control signal: a hard clip at -2 is drive 0 (silence); a crush at 0.5 is one level per unit.
     let mut clip = at_rest(ShapeKind::HardClip, 1.0);
     let out = run(&mut clip, Some(&[-2.0; 4]), &[vec![0.25; 4]]);
     assert_eq!(out[0], [0.0; 4]);

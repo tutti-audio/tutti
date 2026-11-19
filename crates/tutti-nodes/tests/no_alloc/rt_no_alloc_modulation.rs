@@ -224,7 +224,7 @@ fn delay_and_modulation_with_moving_controls_are_allocation_free() {
 /// `Direct`, which feeds a node's param ports. (`Direct::feed` copies the control signal, so it is
 /// fed once, before the gate: the same 64 frames of it play each block.)
 #[test]
-fn a_delay_with_its_lanes_fed_is_allocation_free() {
+fn a_delay_with_its_signals_fed_is_allocation_free() {
     for width in [2u16, 6] {
         let mut rig = Direct::new(delay(width, 0.01, 0.4, 0.3), SampleRate::SR_48K, 64);
         for c in rig.inputs_mut().iter_mut() {
@@ -266,7 +266,7 @@ fn a_delay_with_its_lanes_fed_is_allocation_free() {
 /// and the 6-wide stagger renders every channel's sweep. Through `Direct`, which feeds a
 /// node's param ports.
 #[test]
-fn a_chorus_with_its_lanes_fed_is_allocation_free() {
+fn a_chorus_with_its_signals_fed_is_allocation_free() {
     for width in [2u16, 6] {
         let mut rig = Direct::new(
             ModDelayNode::<f32>::chorus(bus(width)),
@@ -312,7 +312,7 @@ fn a_chorus_with_its_lanes_fed_is_allocation_free() {
 /// the staggered 6-wide chain renders every channel's sweep. Through `Direct`, which feeds a
 /// node's param ports.
 #[test]
-fn a_phaser_with_its_lanes_fed_is_allocation_free() {
+fn a_phaser_with_its_signals_fed_is_allocation_free() {
     for width in [2u16, 6] {
         let phaser = PhaserNode::<f32>::new(
             bus(width),

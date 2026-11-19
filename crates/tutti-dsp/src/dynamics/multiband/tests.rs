@@ -61,7 +61,7 @@ fn unity(freqs: &[f64]) -> MultibandSettings {
 }
 
 /// `audio` (one slice per channel) through `k` in calls of `chunk` frames, band `b`'s
-/// threshold control signal `control signals[b]` where given.
+/// threshold control signal `signals[b]` where given.
 fn run_in<F: Float + SimdLanes + Lerp>(
     k: &mut MultibandBank<F>,
     audio: &[&[F]],

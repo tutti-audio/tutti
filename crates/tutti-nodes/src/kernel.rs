@@ -20,7 +20,7 @@ use tutti_units::{Latency, Real, SampleRate, Samples, Tail};
 use crate::params::{At, ControlSet, HasControl, HasControls, Params};
 use crate::tail_clock::{Heard, TailClock, tail_frames};
 
-/// The most per-frame control control signals a [`ControlSignals`] carries.
+/// The most per-frame control signals a [`ControlSignals`] carries.
 ///
 /// Four serve every effect that reads control signals (a limiter's threshold and ceiling are two).
 pub const MAX_SIGNALS: usize = 4;
@@ -37,7 +37,7 @@ impl<'a, F: Float> ControlSignals<'a, F> {
     /// No control signal is driven.
     pub const NONE: Self = Self([None; MAX_SIGNALS]);
 
-    /// Lane `k`, or `None` when nothing drives it, and for a `k` past [`MAX_SIGNALS`].
+    /// Signal `k`, or `None` when nothing drives it, and for a `k` past [`MAX_SIGNALS`].
     #[must_use]
     pub fn get(&self, k: usize) -> Option<Mono<'a, F>> {
         self.0.get(k).copied().flatten()
@@ -84,7 +84,7 @@ pub trait Kernel: Clone + Send + 'static {
     fn retarget(&mut self, controls: &<Self::Set as ControlSet>::Controls);
 
     /// Runs `input` into `output`, the same number of frames, with the controls a port
-    /// drives per frame in `control signals`. Audio thread: no allocation.
+    /// drives per frame in `signals`. Audio thread: no allocation.
     fn render(
         &mut self,
         input: Planes<'_, Self::Float>,

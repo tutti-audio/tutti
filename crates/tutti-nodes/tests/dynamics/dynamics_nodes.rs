@@ -28,7 +28,7 @@ fn noise(seed: u32, frames: usize, level: f32) -> Vec<f32> {
 }
 
 /// A node that renders `inputs` (one per input channel, the key's after the audio's) in blocks
-/// of `block` frames, `control signals[k]` driving param `k`, and `write` called with the node's
+/// of `block` frames, `signals[k]` driving param `k`, and `write` called with the node's
 /// `ParamSet` before the block that begins at frame `at`.
 fn render<N: Node + ParamNode>(
     node: N,
@@ -199,7 +199,7 @@ fn a_move_between_grid_points_starts_at_the_next_one() {
 /// block below) and a driven control signal give the same render in blocks of 1, 16, 64, 128 and 1024,
 /// with the key bus fed, and the move and the control signal are heard.
 #[test]
-fn a_moved_cell_and_a_driven_lane_render_the_same_bits_in_any_blocks() {
+fn a_moved_cell_and_a_driven_signal_render_the_same_bits_in_any_blocks() {
     const N: usize = 4_096;
     let audio = [noise(1, N, 0.9), noise(2, N, 0.9)];
     let key = [noise(3, N, 0.9), noise(4, N, 0.9)];
