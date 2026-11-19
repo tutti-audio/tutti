@@ -305,6 +305,6 @@ pub use value::{
     SettingTarget, Target, TargetInfo, TempoTarget, ValueError, ValueErrorKind,
 };
 #[cfg(feature = "midi")]
-pub use value::{ClipEventsTarget, HarmonyTarget, OutputLatencyTarget};
+pub use value::{ClipEventsTarget, HarmonyTarget, MpeModeTarget, OutputLatencyTarget};
 #[cfg(feature = "device")]
 pub use watch::{Backoff, DevicePolicy, DeviceWatch, Follow, FollowEvent};

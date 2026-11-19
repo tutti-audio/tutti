@@ -246,12 +246,16 @@ const PORTS_PER_GROUP: usize = MIDI_INPUT_PORTS;
 /// use tutti_units::{SampleRate, Samples};
 /// use tutti_graph::NodeKey;
 /// use tutti_graph::{Editor, Prepare};
+/// use tutti_midi_protocol::MpeMode;
 /// use tutti_midi_runtime::MidiIngestNode;
+/// use tutti_rt::Publisher;
 ///
 /// let (mut editor, _exec) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(512))));
 /// // The inlet is not wired yet.
-/// let controls = editor.insert(NodeKey(1), "midi in", MidiIngestNode::new()).controls;
-/// controls.set_mpe_mode(tutti_midi_protocol::MpeMode::Disabled);
+/// let mode = Publisher::new(MpeMode::Disabled);
+/// let node = MidiIngestNode::new().with_mpe(&mode);
+/// let controls = editor.insert(NodeKey(1), "midi in", node).controls;
+/// controls.clear_mpe_profiles();
 /// ```
 pub struct MidiIngestNode {
     /// The device's translation state.
@@ -264,6 +268,9 @@ pub struct MidiIngestNode {
     out: Box<[UmpAt]>,
     /// The Groups it hears, and so its ports.
     ports: MidiInputPorts,
+    /// The session's MPE mode, read once per block; `None` for a node built
+    /// over none, whose mode is [`MpeMode::Disabled`].
+    mpe_mode: Option<Reader<MpeMode>>,
     /// What a host asked for, read once per block.
     mpe_request: Reader<Requests>,
     /// The cell `mpe_request` reads, which the controls publish to; the node
@@ -293,8 +300,6 @@ type GroupProfiles = [Option<MpeZones>; MidiGroup::COUNT as usize];
 /// What the control side asks of the node, published whole.
 #[derive(Clone, Debug)]
 struct Requests {
-    /// The MPE 1.1 mode, if one was asked for.
-    mode: Option<MpeMode>,
     /// The MPE Profile zones the device enabled.
     profiles: GroupProfiles,
 }
@@ -302,7 +307,6 @@ struct Requests {
 impl Requests {
     fn new() -> Self {
         Self {
-            mode: None,
             profiles: NO_PROFILES,
         }
     }
@@ -351,10 +355,10 @@ impl Device {
     /// ranges first ([`MpeIngest::zone_defaults`]: what an MPE Configuration
     /// Message resets a receiver to, as this node sends an MCM's).
     ///
-    /// **The comparison is load-bearing**: the request latches (the audio
-    /// thread cannot clear it without publishing), and `set_mode` rebuilds
-    /// the ingest, so re-adopting it every block would drop every sounding
-    /// note's voice mapping, and re-send the ranges, every block.
+    /// **The comparison is load-bearing**: the session's cell keeps the mode
+    /// it was last given, so every block reads it, and `set_mode` rebuilds the
+    /// ingest: re-adopting it every block would drop every sounding note's
+    /// voice mapping, and re-send the ranges, every block.
     fn adopt(&mut self, requested: Option<MpeMode>) -> bool {
         let Some(mode) = requested else {
             return false;
@@ -457,6 +461,7 @@ impl MidiIngestNode {
         let cell = Publisher::new(Requests::new());
         let (dropped, dropped_reader) = counter();
         Self {
+            mpe_mode: None,
             mpe_request: cell.reader(),
             request_serial: Arc::default(),
             mpe_request_cell: cell,
@@ -499,17 +504,27 @@ impl MidiIngestNode {
         self
     }
 
-    /// Ingest classic MPE in `mode` from the first block, on every Group.
+    /// Ingest classic MPE in the mode `mode` holds from the first block, on
+    /// every Group, and follow it: a publish to `mode` is adopted at the next
+    /// block. The reader is registered here, so build the node on the control
+    /// side.
+    ///
+    /// A new mode stops and resets the channels that enter or leave MPE
+    /// control (M1-100 section 2.2.3: All Sound Off and Reset All Controllers,
+    /// sent ahead of the new zones' default bend ranges); the others keep
+    /// their notes. Publishing the mode in force changes nothing.
     #[must_use]
-    pub fn with_mpe(mut self, mode: MpeMode) -> Self {
-        self.device.mode = mode;
-        self.device.mpe = MpeIngest::new(mode);
+    pub fn with_mpe(mut self, mode: &Publisher<MpeMode>) -> Self {
+        let initial = *mode.current();
+        self.device.mode = initial;
+        self.device.mpe = MpeIngest::new(initial);
+        self.mpe_mode = Some(mode.reader());
         self
     }
 }
 
-/// The host's handle on a [`MidiIngestNode`]: its MPE mode and the MPE Profile
-/// zones of its device. Cheap to clone.
+/// The host's handle on a [`MidiIngestNode`]: the MPE Profile zones of its
+/// device. Cheap to clone.
 #[derive(Clone, Debug)]
 pub struct MidiIngestControls {
     /// What the node reads; the controls publish to it and read it back with
@@ -522,26 +537,12 @@ pub struct MidiIngestControls {
 }
 
 impl MidiIngestControls {
-    /// Ingest classic MPE in `mode` from the next block. Control thread.
-    ///
-    /// A new mode stops and resets the channels that enter or leave MPE
-    /// control (M1-100 §2.2.3: All Sound Off and Reset All Controllers, sent
-    /// ahead of the new zones' default bend ranges); the others keep their
-    /// notes. Setting the mode in force changes nothing.
-    pub fn set_mpe_mode(&self, mode: MpeMode) {
-        let _serial = self.serial.lock_recover();
-        let mut request = (*self.request.current()).clone();
-        request.mode = Some(mode);
-        self.request.publish(request);
-    }
-
     /// The MIDI-CI MPE Profile zones (M2-120) the device enabled on `group`: from the next block, what the device sends on
     /// that Group follows the zones' rules instead of the mode's, until `zones`
     /// is `None` ([`MpeIngest::set_profile`] says what the change stops and
     /// resets). Control thread. Setting what is set changes nothing.
     ///
-    /// The zones are the device's alone: the mode
-    /// [`set_mpe_mode`](Self::set_mpe_mode) sets is not changed. A device that
+    /// The zones are the device's alone: the session's mode is not changed. A device that
     /// takes the input starts with none, but the control side's record stays
     /// until it is set: clear it when the device goes
     /// ([`clear_mpe_profiles`](Self::clear_mpe_profiles)).
@@ -613,7 +614,8 @@ impl<F: Float> Node<F> for MidiIngestNode {
         // One lend, before any event is translated, stated or not: the mode
         // and the Profile zones are read from the same requests.
         let requests = self.mpe_request.lend();
-        let reset = self.device.adopt(requests.mode);
+        let mode = self.mpe_mode.as_mut().map(|reader| *reader.lend());
+        let reset = self.device.adopt(mode);
         let block_len = cx.env.block_len;
         let first = cx.env.frame;
         // An event's translation goes in whole or not at all: a fan-out cut
