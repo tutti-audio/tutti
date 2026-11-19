@@ -113,7 +113,9 @@ impl MidiOut {
     /// # Errors
     ///
     /// [`Error::TooLong`] for a message past `u32::MAX` bytes, with nothing
-    /// sent; otherwise the failing call. Two failures leave the header and the bytes
+    /// sent; otherwise the failing call.
+    ///
+    /// Two failures leave the header and the bytes
     /// allocated for good, because the driver may still read them: the send
     /// outlasting its timeout ([`Error::NotReturned`]), and an unprepare
     /// that returns any code but `MIDIERR_STILLPLAYING` or success. The port

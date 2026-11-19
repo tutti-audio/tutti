@@ -71,7 +71,9 @@ impl ByteOut {
 
     /// Hands `send` what `ump` puts on the wire: nothing for the packet of a
     /// message not yet whole, one message for a MIDI 1.0 message or the packet
-    /// that completes a SysEx, up to four for a narrowed MIDI 2.0 message. Stops at the first `Err` `send` returns.
+    /// that completes a SysEx, up to four for a narrowed MIDI 2.0 message.
+    ///
+    /// Stops at the first `Err` `send` returns.
     pub(in crate::backend) fn encode<E>(
         &mut self,
         ump: Ump,

@@ -54,3 +54,45 @@ fn a_stamp_after_the_wrap_is_later_by_the_wrapped_difference() {
     assert_eq!(before, Duration::from_millis(u64::from(u32::MAX) - 5));
     assert_eq!(after - before, Duration::from_millis(9));
 }
+
+/// Three stamps across two wraps: each step is the difference modulo 2^32.
+#[test]
+fn stamps_across_two_wraps_accumulate() {
+    let mut stamps = Stamps::default();
+    let step = 0x7FFF_FFFF_u32;
+    let times: Vec<u64> = [step, step.wrapping_mul(2), step.wrapping_mul(3)]
+        .map(|m| stamps.since_start(m).as_millis() as u64)
+        .into();
+    assert_eq!(
+        times,
+        [u64::from(step), 2 * u64::from(step), 3 * u64::from(step)]
+    );
+    // The third stamp is past 2^32 ms in total: the wraps are counted.
+    assert!(times[2] > u64::from(u32::MAX));
+}
+
+/// A stamp 3 ms before the last holds the time, and the next in-order stamp
+/// continues from it.
+#[test]
+fn an_out_of_order_stamp_holds_the_time() {
+    let mut stamps = Stamps::default();
+    assert_eq!(stamps.since_start(100), Duration::from_millis(100));
+    assert_eq!(stamps.since_start(97), Duration::from_millis(100));
+    assert_eq!(stamps.since_start(105), Duration::from_millis(105));
+}
+
+/// 0xF4 is undefined (M2-104 section 7.6 lists none); 0xF8 is not a channel
+/// voice status and 0x90 is not a system one, so each word is refused.
+#[test]
+fn a_status_that_does_not_belong_to_its_type_is_not_packed() {
+    for first in [0x10F4_0000, 0x20F8_0000, 0x1090_3C64, 0x2070_0000] {
+        assert_eq!(pack(&Ump([first, 0, 0, 0])), None, "{first:#010x}");
+    }
+}
+
+/// The packed word holds a message's own bytes only: the unused bytes are zero.
+#[test]
+fn bytes_a_message_does_not_use_pack_as_zero() {
+    assert_eq!(pack(&Ump([0x20C3_0A7F, 0, 0, 0])), Some(0x0000_0AC3));
+    assert_eq!(pack(&Ump([0x10F8_FFFF, 0, 0, 0])), Some(0xF8));
+}
