@@ -14,8 +14,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
 use std::time::{Duration, Instant};
 use tracing::warn;
-use tutti_plugin_ipc::Reaped;
-use tutti_plugin_ipc_ffi::HOST_PID_ENV;
+use tutti_plugin_ipc_ffi::{HOST_PID_ENV, Reaped};
 use tutti_plugin_types::{
     Deadline, Helper, Locator, PluginDescriptor, PluginFormat, ProbeDeath, ProbeError,
     ProbeOutcome, ProbeRefusal, ResultError, read_result,
@@ -43,12 +42,12 @@ fn run_budget(timeout: Duration) -> Duration {
 
 /// The state a measuring probe puts one plugin in.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ProbeState {
+pub struct ProbeState {
     /// A file of the bytes the plugin's own `save_state` wrote.
-    pub(crate) file: PathBuf,
+    pub file: PathBuf,
     /// The descriptor id of the plugin the state is for; `None` is the file's
     /// first plugin.
-    pub(crate) plugin: Option<String>,
+    pub plugin: Option<String>,
 }
 
 /// Reads the descriptor of every plugin a file holds in a `plugin-probe` subprocess, so a plugin that
@@ -64,7 +63,7 @@ pub(crate) struct ProbeState {
 /// [`ProbeError::TimedOut`] if it did not finish within `timeout` (it is killed);
 /// [`ProbeError::Cancelled`] if `stop` was requested (the child is killed and
 /// reaped before this returns).
-pub(crate) fn probe_metadata_with(
+pub fn probe_metadata_with(
     locator: &Locator,
     plugin_path: &Path,
     format: PluginFormat,
@@ -79,7 +78,7 @@ pub(crate) fn probe_metadata_with(
 /// [`PluginDescriptor::measured`] set where the plugin could be measured, and a
 /// plugin that could not be is logged with why. It renders the plugin, so give it
 /// the long deadline
-/// ([`DEFAULT_MEASURE_TIMEOUT`](crate::host::db_probe::DEFAULT_MEASURE_TIMEOUT)):
+/// ([`DEFAULT_MEASURE_TIMEOUT`](crate::DEFAULT_MEASURE_TIMEOUT)):
 /// a plugin that crashes or hangs while rendering is [`ProbeError::Died`] or
 /// [`ProbeError::TimedOut`], as in the load. The probe bounds each plugin's render
 /// itself, so a slow plugin loses its own row and not the file's.
@@ -88,7 +87,7 @@ pub(crate) fn probe_metadata_with(
 /// (`--state`, `--plugin`); the record carries a hash of it.
 ///
 /// The probe is given one budget for its whole run, `timeout` less a margin
-/// ([`run_budget`], `--budget`), which the plugins of a file share: a plugin that
+/// (`--budget`), which the plugins of a file share: a plugin that
 /// is slow, or one that follows slow ones, times out its own rows (logged, no
 /// measurement) while the file's others keep theirs, and the probe ends before
 /// `timeout` and is not killed as a hang. A plugin that never returns from a block
@@ -98,7 +97,7 @@ pub(crate) fn probe_metadata_with(
 ///
 /// As [`probe_metadata_with`]; a plugin that refuses `state` is
 /// [`ProbeRefusal::StateRefused`].
-pub(crate) fn measure_metadata_with(
+pub fn measure_metadata_with(
     locator: &Locator,
     plugin_path: &Path,
     format: PluginFormat,

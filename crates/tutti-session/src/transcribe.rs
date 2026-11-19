@@ -111,7 +111,10 @@ fn note_events(
         let Some(number) = u8::try_from(note.note).ok().and_then(NoteNumber::new) else {
             continue;
         };
-        let (start, end) = (beat_at(tempo, note.start), beat_at(tempo, note.end));
+        let (start, end) = (
+            beat_at(tempo, note.span.start()),
+            beat_at(tempo, note.span.end()),
+        );
         let mut voice = |beat: Beat, voice: Voice2| {
             events.extend(TimedMidiEvent::new(
                 beat,
@@ -171,11 +174,11 @@ fn beat_at(tempo: &mut TempoView<'_>, at: Samples) -> Beat {
 pub fn harmony_from_chords(spans: &[ChordSpan], tempo: &mut TempoView<'_>) -> HarmonyChanges {
     spans
         .iter()
-        .filter_map(|span| {
-            let degrees = degrees(span.quality)?;
-            let root = MIDDLE_C + span.root.semitones_above_c();
+        .filter_map(|chord| {
+            let degrees = degrees(chord.quality)?;
+            let root = MIDDLE_C + chord.root.semitones_above_c();
             Some(TimedHarmony::new(
-                beat_at(tempo, span.start),
+                beat_at(tempo, chord.span.start()),
                 Harmony::chord(root, root, degrees),
             ))
         })

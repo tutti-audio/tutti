@@ -1,5 +1,5 @@
 use super::*;
-use tutti_measure::{Note, PitchClass};
+use tutti_measure::{Note, PitchClass, Region};
 use tutti_tempo::TempoMap;
 use tutti_ump::{MidiChannel, MidiGroup, RegisteredData};
 use tutti_units::{Bpm, Cents, Db, SampleRate};
@@ -14,8 +14,8 @@ fn note(cents: f64, start: usize, end: usize, level: f64) -> NoteEvent {
     NoteEvent {
         note: Note::C4,
         cents: Cents::new(cents),
-        start: Samples::new(start),
-        end: Samples::new(end),
+        span: Region::new(Samples::new(start), Samples::new(end))
+            .expect("a note ends after it starts"),
         velocity: Db::new(level),
     }
 }
@@ -193,14 +193,13 @@ fn a_chord_span_is_one_change_at_its_start_with_its_root_and_quality() {
         ChordSpan {
             root: PitchClass::A,
             quality: ChordQuality::Minor,
-            start: Samples::new(SECOND),
-            end: Samples::new(2 * SECOND),
+            span: Region::new(Samples::new(SECOND), Samples::new(2 * SECOND)).expect("ascending"),
         },
         ChordSpan {
             root: PitchClass::C,
             quality: ChordQuality::Major,
-            start: Samples::new(2 * SECOND),
-            end: Samples::new(3 * SECOND),
+            span: Region::new(Samples::new(2 * SECOND), Samples::new(3 * SECOND))
+                .expect("ascending"),
         },
     ];
     let map = map();

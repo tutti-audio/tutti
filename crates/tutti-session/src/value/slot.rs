@@ -908,8 +908,8 @@ impl<T: Copy + PartialEq + Send + Sync + 'static> Held for tutti_sampler::SteerC
     }
 }
 
-/// A sampler voice's speed cell: a published rate, which `check` bounds to the
-/// range both tiers play.
+/// A sampler voice's speed cell: a published rate. A `PlaybackRate` is already
+/// one both tiers play, so it takes the default `check`.
 #[cfg(feature = "sampler")]
 pub(crate) struct SpeedCell(pub tutti_rt::Publisher<tutti_units::PlaybackRate>);
 
@@ -919,17 +919,6 @@ impl Held for SpeedCell {
 
     fn current(&self) -> Self::Value {
         *self.0.current()
-    }
-
-    fn check(&self, value: &Self::Value) -> Result<(), SetRefusal> {
-        use tutti_units::PlaybackRate;
-        if !value.get().is_finite() {
-            return Err(SetRefusal::NotFinite);
-        }
-        if *value < PlaybackRate::MIN || *value > PlaybackRate::MAX {
-            return Err(SetRefusal::OutOfRange);
-        }
-        Ok(())
     }
 
     fn replace(&self, value: &Self::Value) -> bool {

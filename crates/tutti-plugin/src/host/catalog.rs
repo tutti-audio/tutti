@@ -49,17 +49,15 @@
 //! without waiting for the probe's deadline. Nothing here runs on or reaches
 //! the audio thread.
 
-use crate::host::db_probe::{ProbeState, Probing, probe_fn};
 use crate::host::loadable::{Loadable, Resolved};
 use crate::host::plugin_ref::PluginRef;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError, RwLock};
 use tutti_plugin_db::{
-    BlacklistedFile, FileFacts, FileRow, FilesError, PluginDb, PluginEntry, RowChange, Scan,
-    ScanBusy, ScanError, ScanPoll, Scanner,
+    BlacklistedFile, CatalogConfig, FileFacts, FileRow, FilesError, PluginDb, PluginEntry,
+    ProbeState, Probing, RowChange, Scan, ScanBusy, ScanError, ScanPoll, Scanner, probe_fn,
 };
-use tutti_plugin_ipc::CatalogConfig;
 use tutti_plugin_types::{BridgeError, BridgeResult};
 use tutti_plugin_types::{PluginDescriptor, PluginFormat, PluginId};
 use tutti_rt::LockExt;
@@ -104,8 +102,6 @@ pub struct Catalog {
     /// The blacklisted rows of `db`, republished by every method that changes
     /// the table: what a [`BlacklistView`] reads.
     blacklist: Arc<RwLock<PluginDb>>,
-    /// Whether scans and registrations measure ([`with_measuring`](Self::with_measuring)).
-    measuring: bool,
     config: CatalogConfig,
     persist: Persist,
     unreported: Unreported,
@@ -281,7 +277,7 @@ impl Catalog {
     /// a file by its name when `plugin-probe` is missing.
     fn scanning(&self) -> Probing {
         Probing {
-            measure: self.measuring,
+            measure: self.config.measuring,
             state: None,
             fallback: true,
         }
@@ -318,26 +314,11 @@ impl Catalog {
         Self {
             db,
             blacklist,
-            measuring: false,
             config,
             persist: Arc::new(persist),
             unreported: Unreported::default(),
             pending_save: None,
         }
-    }
-
-    /// Makes this catalog's scans **measure** the plugins they probe: each new or changed file
-    /// is also rendered, in the probe's own
-    /// process, and its descriptors carry [`measured`](PluginDescriptor::measured).
-    /// Off by default: measuring renders each plugin at two configurations, which
-    /// costs seconds a plain probe does not, and a plugin that crashes or hangs
-    /// while rendering is blacklisted like one that crashes in its load. A scan
-    /// skips a file whose time has not changed, so it never measures one it has
-    /// already probed: [`measure`](Self::measure) does.
-    #[must_use]
-    pub fn with_measuring(mut self) -> Self {
-        self.measuring = true;
-        self
     }
 
     /// The database, for reading rows this catalog has no method for.

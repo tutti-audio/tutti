@@ -21,7 +21,7 @@ pub struct SpectralFeatures {
 ///
 /// `rolloff` is the energy share passed to [`spectral_rolloff`], as described there. The bin width
 /// comes from the transform's own geometry, so it cannot disagree with the grid.
-pub fn spectral_features(transform: &StftMagnitude, rolloff: f64) -> Vec<SpectralFeatures> {
+pub fn spectral_features(rolloff: f64, transform: &StftMagnitude) -> Vec<SpectralFeatures> {
     let geometry = transform.geometry();
     let bin_width = geometry.bin_frequency(BinIndex(1));
     let grid = transform.magnitudes().grid();

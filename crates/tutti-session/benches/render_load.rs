@@ -295,7 +295,7 @@ fn scene(block: usize, workers: Workers, variant: Variant) -> Session {
                         }
                     } else {
                         Playback {
-                            speed: PlaybackRate::new_clamped(interval.to_pitch_ratio()),
+                            speed: PlaybackRate::clamped(interval.to_pitch_ratio()),
                             ..play
                         }
                     }

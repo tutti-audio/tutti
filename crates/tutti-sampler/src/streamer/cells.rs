@@ -256,14 +256,14 @@ mod tests {
         // derived `Default` would give if it stopped spelling this out.
         assert_eq!(state.speed(), PlaybackRate::UNITY);
 
-        state.set_speed(PlaybackRate::new_clamped(0.1));
+        state.set_speed(PlaybackRate::clamped(0.1));
         assert_eq!(state.speed(), PlaybackRate::MIN);
 
-        state.set_speed(PlaybackRate::new_clamped(10.0));
+        state.set_speed(PlaybackRate::clamped(10.0));
         assert_eq!(state.speed(), PlaybackRate::MAX);
 
-        state.set_speed(PlaybackRate::new_clamped(2.0));
-        assert_eq!(state.speed(), PlaybackRate::new(2.0));
+        state.set_speed(PlaybackRate::clamped(2.0));
+        assert_eq!(state.speed(), PlaybackRate::of(2.0));
     }
 
     #[test]

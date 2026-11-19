@@ -564,3 +564,51 @@ fn a_framed_packet_parses_back_to_itself() {
         assert_eq!(parse(&wire), [Message::Sysex7(MidiGroup::FIRST, packet)]);
     }
 }
+
+// ---- Ump::midi1_bytes ----------------------------------------------------------
+
+fn midi1_bytes(first: u32) -> Option<Vec<u8>> {
+    Ump([first, 0, 0, 0])
+        .midi1_bytes()
+        .map(|b| b.as_slice().to_vec())
+}
+
+/// M2-104 section 7.3 and 7.6: a type 2 word is a channel voice message and a
+/// type 1 word a system one, the status byte in bits 23-16.
+#[test]
+fn a_type_2_or_type_1_word_is_its_midi1_bytes() {
+    assert_eq!(midi1_bytes(0x2090_3C64), Some(vec![0x90, 0x3C, 0x64]));
+    assert_eq!(midi1_bytes(0x20C3_0A00), Some(vec![0xC3, 0x0A]));
+    assert_eq!(midi1_bytes(0x10F8_0000), Some(vec![0xF8]));
+    assert_eq!(midi1_bytes(0x10F2_0102), Some(vec![0xF2, 0x01, 0x02]));
+}
+
+/// A byte the message does not use is not part of it.
+#[test]
+fn bytes_a_message_does_not_use_are_not_read() {
+    assert_eq!(midi1_bytes(0x20C3_0A7F), Some(vec![0xC3, 0x0A]));
+    assert_eq!(midi1_bytes(0x10F8_FFFF), Some(vec![0xF8]));
+}
+
+#[test]
+fn a_status_that_does_not_belong_to_the_type_has_no_bytes() {
+    // F4 is undefined; F8 is not channel voice; 90 is not system; 70 is no status.
+    for first in [0x10F4_0000, 0x20F8_0000, 0x1090_3C64, 0x2070_0000] {
+        assert_eq!(midi1_bytes(first), None, "{first:#010x}");
+    }
+}
+
+#[test]
+fn a_data_byte_of_128_or_more_has_no_bytes() {
+    assert_eq!(midi1_bytes(0x2090_3C80), None);
+    assert_eq!(midi1_bytes(0x2090_8064), None);
+}
+
+/// Utility (0), Data 64 (3), MIDI 2.0 channel voice (4) and Flex Data (D) are
+/// not MIDI 1.0 byte-stream messages.
+#[test]
+fn another_message_type_has_no_bytes() {
+    for first in [0x0000_0000, 0x3004_7E7F, 0x4090_3C00, 0xD010_0000] {
+        assert_eq!(midi1_bytes(first), None, "{first:#010x}");
+    }
+}

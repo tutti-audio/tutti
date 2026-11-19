@@ -40,10 +40,13 @@ use windows_sys::Win32::Media::{
     MM_MIM_CLOSE, MM_MIM_DATA, MM_MIM_LONGDATA, MM_MIM_LONGERROR, MMSYSERR_INVALHANDLE,
 };
 
+use tutti_ump::Ump;
+
 use super::InputPort;
 use super::error::{Error, MmOperation, OsOperation, check};
 use super::sleeper::{TimerWaiter, TimerWaker, waitable_timer};
 use crate::lifetime::{Outcome, Owner, Poll, Registry, Slot};
+use crate::ump::{Stamps, unpack};
 
 /// How many SysEx buffers an input keeps with winmm, and how long each is:
 /// a message longer than one buffer arrives as consecutive [`Event::Long`]s.
@@ -58,21 +61,22 @@ const LEAVE_POLL: Duration = Duration::from_millis(1);
 /// What winmm delivered, with its stamp.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Event<'a> {
-    /// A short message (`MIM_DATA`): the status byte and its data bytes, low
-    /// byte first, as winmm packs them. Running status is already expanded.
+    /// A short message (`MIM_DATA`) as a MIDI 1.0 UMP on Group 0: type 2 for a
+    /// channel voice message, type 1 for a system one. Running status is
+    /// already expanded. A status that is not a message is not delivered.
     Short {
-        /// The packed message.
-        message: u32,
-        /// Milliseconds since the input started.
-        millis: u32,
+        /// The message.
+        ump: Ump,
+        /// The time since the input started.
+        at: Duration,
     },
     /// Bytes of a System Exclusive message (`MIM_LONGDATA`): a message that
     /// fills a buffer continues in the next event, with no `0xF7` between.
     Long {
         /// The bytes winmm recorded, valid for the call only.
         data: &'a [u8],
-        /// Milliseconds since the input started.
-        millis: u32,
+        /// The time since the input started.
+        at: Duration,
     },
     /// The driver closed the port (`MIM_CLOSE`): the device was removed, or
     /// the driver was stopped. Nothing is delivered after it. Dropping the
@@ -83,7 +87,12 @@ pub enum Event<'a> {
     Closed,
 }
 
-type Handler = Box<dyn FnMut(Event<'_>) + Send>;
+/// The handler, and the widening of the stamps winmm gives it: both are used
+/// under the one lock, one callback at a time.
+struct Sink {
+    handler: Box<dyn FnMut(Event<'_>) + Send>,
+    stamps: Stamps,
+}
 
 /// One SysEx buffer. winmm holds the header's address while it is prepared and
 /// writes the header and the bytes while the buffer is queued, so both are
@@ -124,7 +133,7 @@ impl Buffer {
 
 /// What the callback, the worker and the owner share.
 struct Shared {
-    handler: Mutex<Handler>,
+    handler: Mutex<Sink>,
     buffers: [Buffer; BUFFERS],
     /// The open port, set once `midiInOpen` has returned; the worker queues
     /// buffers on it.
@@ -217,7 +226,10 @@ impl MidiIn {
         port.verify()?;
         let (wake, wait) = waitable_timer()?;
         let shared = Shared {
-            handler: Mutex::new(Box::new(handler)),
+            handler: Mutex::new(Sink {
+                handler: Box::new(handler),
+                stamps: Stamps::default(),
+            }),
             buffers: std::array::from_fn(|_| Buffer::new()),
             handle: AtomicPtr::new(std::ptr::null_mut()),
             dead: AtomicBool::new(false),
@@ -458,19 +470,24 @@ extern "system" fn callback(
     }
 }
 
+/// Hands the handler `event(at)`, `at` being the time since the input started
+/// of the stamp `millis`.
+fn deliver<'a>(shared: &Slot<Shared>, millis: u32, event: &dyn Fn(Duration) -> Event<'a>) {
+    let mut sink = shared
+        .handler
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
+    let at = sink.stamps.since_start(millis);
+    (sink.handler)(event(at));
+}
+
 fn dispatch(shared: &Slot<Shared>, message: u32, param1: usize, param2: usize) {
-    let call = |event: Event<'_>| {
-        let mut handler = shared
-            .handler
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
-        handler(event);
-    };
     match message {
-        MM_MIM_DATA => call(Event::Short {
-            message: param1 as u32,
-            millis: param2 as u32,
-        }),
+        MM_MIM_DATA => {
+            if let Some(ump) = unpack(param1 as u32) {
+                deliver(shared, param2 as u32, &|at| Event::Short { ump, at });
+            }
+        }
         // A bad SysEx message (`MIM_LONGERROR`) comes back with its buffer too:
         // nothing is delivered for it, and the buffer is given back like any.
         MM_MIM_LONGDATA | MM_MIM_LONGERROR => {
@@ -496,13 +513,16 @@ fn dispatch(shared: &Slot<Shared>, message: u32, param1: usize, param2: usize) {
                 // queued again, after this call.
                 let bytes =
                     unsafe { std::slice::from_raw_parts(buffer.data.get().cast::<u8>(), recorded) };
-                call(Event::Long {
-                    data: bytes,
-                    millis: param2 as u32,
-                });
+                deliver(shared, param2 as u32, &|at| Event::Long { data: bytes, at });
             }
         }
-        MM_MIM_CLOSE => call(Event::Closed),
+        MM_MIM_CLOSE => {
+            let mut sink = shared
+                .handler
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            (sink.handler)(Event::Closed);
+        }
         _ => {}
     }
 }

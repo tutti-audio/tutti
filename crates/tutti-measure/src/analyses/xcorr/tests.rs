@@ -1,8 +1,8 @@
 use super::*;
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 
-fn cross_correlate(a: &[f64], b: &[f64], fft: &mut FftScratch<f64>) -> CrossCorrelation {
-    super::cross_correlate(Mono::new(a), Mono::new(b), fft)
+fn cross_correlate(a: &[f64], b: &[f64]) -> CrossCorrelation {
+    super::cross_correlate(Mono::new(a), Mono::new(b))
 }
 
 /// Any sample format correlates at its nominal level: an `i16` copy of a
@@ -17,11 +17,7 @@ fn an_integer_buffer_correlates_at_its_nominal_level() {
             .map(|&v| (v * f64::from(i16::MAX)) as i16)
             .collect()
     };
-    let r = super::cross_correlate(
-        Mono::new(&ints(&late)),
-        Mono::new(&ints(&base)),
-        &mut FftScratch::new(),
-    );
+    let r = super::cross_correlate(Mono::new(&ints(&late)), Mono::new(&ints(&base)));
     assert_eq!(r.peak().unwrap().lag, 40);
 }
 
@@ -34,8 +30,7 @@ fn noise(len: usize, seed: u64) -> Vec<f64> {
 /// `r[lag] = sum a[n + lag] b[n]` summed out lag by lag below.
 #[test]
 fn a_small_case_matches_the_hand_worked_sums() {
-    let mut fft = FftScratch::new();
-    let r = cross_correlate(&[1.0, 2.0, 3.0], &[0.0, 1.0, 0.5], &mut fft);
+    let r = cross_correlate(&[1.0, 2.0, 3.0], &[0.0, 1.0, 0.5]);
     // lag -2: a[0]b[2]                 = 0.5
     // lag -1: a[0]b[1] + a[1]b[2]      = 1 + 1   = 2
     // lag  0: a[0]b[0] + a[1]b[1] + a[2]b[2] = 0 + 2 + 1.5 = 3.5
@@ -55,21 +50,20 @@ fn a_small_case_matches_the_hand_worked_sums() {
 /// and negative the other way, and unequal lengths work.
 #[test]
 fn a_delayed_copy_peaks_at_its_delay_in_either_direction() {
-    let mut fft = FftScratch::new();
     let base = noise(700, 7);
     let delay = 123usize;
 
     let mut late = vec![0.0f64; delay];
     late.extend_from_slice(&base);
-    let r = cross_correlate(&late, &base, &mut fft);
+    let r = cross_correlate(&late, &base);
     assert_eq!(r.peak().unwrap().lag, 123);
 
-    let r = cross_correlate(&base, &late, &mut fft);
+    let r = cross_correlate(&base, &late);
     assert_eq!(r.peak().unwrap().lag, -123);
 
     // The longest lag in range still lands where it should.
     let tail: Vec<f64> = base[600..].to_vec();
-    let r = cross_correlate(&base, &tail, &mut fft);
+    let r = cross_correlate(&base, &tail);
     assert_eq!(r.peak().unwrap().lag, 600);
 }
 
@@ -77,9 +71,8 @@ fn a_delayed_copy_peaks_at_its_delay_in_either_direction() {
 /// result is symmetric about it.
 #[test]
 fn autocorrelation_peaks_at_zero_with_the_energy_and_is_symmetric() {
-    let mut fft = FftScratch::new();
     let x = noise(513, 3);
-    let r = cross_correlate(&x, &x, &mut fft);
+    let r = cross_correlate(&x, &x);
     let energy: f64 = x.iter().map(|v| v * v).sum();
     let peak = r.peak().unwrap();
     assert_eq!(peak.lag, 0);
@@ -94,24 +87,23 @@ fn autocorrelation_peaks_at_zero_with_the_energy_and_is_symmetric() {
 /// oversized bound, and returns `None` for empty input.
 #[test]
 fn peak_within_respects_the_bound() {
-    let mut fft = FftScratch::new();
     let base = noise(300, 11);
     let mut late = vec![0.0f64; 100];
     late.extend_from_slice(&base);
-    let r = cross_correlate(&late, &base, &mut fft);
+    let r = cross_correlate(&late, &base);
     assert_eq!(r.peak_within(Samples::new(100)).unwrap().lag, 100);
     assert_ne!(r.peak_within(Samples::new(99)).unwrap().lag, 100);
     assert_eq!(r.peak_within(Samples::new(usize::MAX)), r.peak());
-    assert_eq!(cross_correlate(&[], &base, &mut fft).peak(), None);
-    assert_eq!(cross_correlate(&base, &[], &mut fft).values().len(), 0);
+    assert_eq!(cross_correlate(&[], &base).peak(), None);
+    assert_eq!(cross_correlate(&base, &[]).values().len(), 0);
 }
 
 /// The shaping hook sees the cross-spectrum before the inverse: zeroing it
 /// zeroes the result.
 #[test]
 fn the_shape_hook_reaches_the_cross_spectrum() {
-    let mut fft = FftScratch::new();
     let x = noise(64, 5);
+    let mut fft = FftScratch::new();
     let r = cross_correlate_shaped(&x, &x, &mut fft, |bins| bins.fill(Complex64::default()));
     assert!(r.values().iter().all(|&v| v == 0.0));
 }

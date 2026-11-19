@@ -209,6 +209,14 @@ pub enum Error {
         /// The call that did not return.
         operation: MmOperation,
     },
+    /// A UMP that has no MIDI 1.0 byte-stream form, which a winmm short message
+    /// is: only MIDI 1.0 channel voice (type 2) and system (type 1) messages
+    /// are sent.
+    #[error("winmm error: a UMP of message type {message_type:#x} has no MIDI 1.0 byte form")]
+    NoMidi1Form {
+        /// The message type, the top nibble of the UMP's first word.
+        message_type: u8,
+    },
     /// A System Exclusive message longer than a buffer winmm takes.
     #[error("winmm error: a message of {len} bytes is too long to send")]
     TooLong {

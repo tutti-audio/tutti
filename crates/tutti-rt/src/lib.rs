@@ -27,6 +27,8 @@
 //!   [`setting_word!`]) in one atomic word, stored by its encoding.
 //! - [`SeqWriter`] / [`SeqReader`] — a sequence lock for a `Pod` value one
 //!   writer overwrites in place and any thread copies whole.
+//! - [`seq_slots()`] — an array of those, one slot per index, that one reader
+//!   drains by changed slot, with an epoch that makes earlier writes stale.
 //! - [`level_cell()`] — a peak and an energy the audio thread folds each block
 //!   into and one reader takes whole since its last take (a level meter's lane).
 //! - [`gauge()`] / [`counter()`] — a reading a node writes and any thread reads:
@@ -42,6 +44,8 @@
 //!   [`ParkedSampleRate`] carry a `SampleRate` the same way.
 //! - [`Mint`] and [`id!`] — a lock-free counter of unique non-zero numbers from 1,
 //!   and the macro that writes an id type minted from one.
+//! - [`SplitMix64`] — the pseudo-random generator: a seeded stream of
+//!   words, and the stateless mix of a counter.
 //!
 //! **Queues and signals**
 //!
@@ -202,10 +206,12 @@ mod request_word;
 mod ring;
 mod scope;
 mod seq_cell;
+mod seq_slots;
 mod setting;
 mod sleep;
 mod spin;
 mod split;
+mod splitmix;
 mod task_graph;
 mod thread;
 mod vec;
@@ -246,10 +252,12 @@ pub use request_word::{RequestBit, RequestBitOutOfRange, RequestBits, RequestWor
 pub use ring::{Drain, Iter, Overflow, PushError, Returned, RingReader, RingWriter, ring};
 pub use scope::{ControlDrop, RtScope, RtScopeGuard};
 pub use seq_cell::{Contended, SeqReader, SeqWriter};
+pub use seq_slots::{SeqSlotsReader, SeqSlotsWriter, seq_slots};
 pub use setting::{Setting, SettingWord};
 pub use sleep::sleep_until_ns;
 pub use spin::BlockWaits;
 pub use split::{ClaimConflict, ClaimTable, Claimed, ClaimedRun, Held, RwView, SplitMut, SplitRw};
+pub use splitmix::SplitMix64;
 pub use task_graph::{Participant, TaskGraph};
 pub use thread::{Panicked, StopToken, ThreadHandle, spawn_named};
 pub use vec::RtVec;

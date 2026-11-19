@@ -124,7 +124,6 @@ fn every_new_clamped_passes_nan_and_saturates_infinity() {
     check!(StereoBalance, -1.0, 1.0, f64);
     check!(Velocity, 0.0, 1.0, f64);
     check!(Elevation, -90.0, 90.0, f64);
-    check!(PlaybackRate, 0.25, 4.0, f64);
     check!(StretchFactor, 0.25, 4.0, f64);
     // The unbounded side stays infinite.
     check!(StereoWidth, 0.0, f64::INFINITY, f64);
