@@ -27,6 +27,7 @@ use tutti_graph::{
 };
 use tutti_graph::{Edge, InPort, OutPort, Source};
 use tutti_music::LoopRange;
+use tutti_rt::SplitMix64;
 use tutti_ump::{CCNumber, MidiChannel, MidiGroup, NoteId, NoteNumber, Ump};
 use tutti_units::{Beat, Bpm, Latency, SampleRate, Samples};
 
@@ -247,14 +248,14 @@ fn run_out(exec: &mut Executor, from: u64, blocks: u64) -> u64 {
     })
 }
 
-struct Rng(u64);
+/// A value below `n` from a `SplitMix64` stream.
+trait Below {
+    fn below(&mut self, n: u64) -> u64;
+}
 
-impl Rng {
+impl Below for SplitMix64 {
     fn below(&mut self, n: u64) -> u64 {
-        self.0 ^= self.0 << 13;
-        self.0 ^= self.0 >> 7;
-        self.0 ^= self.0 << 17;
-        self.0 % n
+        self.next_u64() % n
     }
 }
 
@@ -434,7 +435,7 @@ fn a_small_table_withholds_the_on_it_cannot_keep() {
 /// key is ended and the port drains for 12 blocks. Returns the keys the sink
 /// still holds.
 fn random_relay(seed: u64, ledger: bool) -> usize {
-    let mut r = Rng((seed * 0x9E37_79B9) | 1);
+    let mut r = SplitMix64::new(seed);
     let mut sender_held = [false; 12];
     let mut blocks: Vec<Vec<Ump>> = (0..20)
         .map(|_| {
@@ -504,7 +505,7 @@ fn clip_rig(events: Vec<TimedMidiEvent>) -> (Editor, Executor, Shared) {
 /// stops, then stopped for 20 blocks. Returns the sink's tally and the
 /// events the port refused.
 fn random_clip(seed: u64) -> (Shared, u64) {
-    let mut r = Rng(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1);
+    let mut r = SplitMix64::new(seed);
     let starts = [0u64, 10, 70, 500];
     let events = (0..100 + r.below(500))
         .flat_map(|_| {
@@ -1046,7 +1047,7 @@ fn an_untagged_off_of_a_held_key_settles_a_refused_on_too() {
 /// holds more than the port takes. The notes of a key follow one another, or
 /// (`overlap`) start wherever they like and overlap. Returns the events, the
 /// note-ons and the controllers.
-fn spread_clip(r: &mut Rng, overlap: bool) -> (Vec<TimedMidiEvent>, usize, usize) {
+fn spread_clip(r: &mut SplitMix64, overlap: bool) -> (Vec<TimedMidiEvent>, usize, usize) {
     let bunches = [0u64, 10, 70, 500];
     let mut free = std::collections::HashMap::new();
     let mut events = Vec::new();
@@ -1113,7 +1114,7 @@ fn play(exec: &mut Executor, events: &[TimedMidiEvent], passes: u64) {
 fn the_loss_count_is_exact_through_loops_and_replacements() {
     let (mut refused, mut recovered) = (0, 0);
     for seed in 1..=300u64 {
-        let mut r = Rng(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1);
+        let mut r = SplitMix64::new(seed);
         let overlap = r.below(2) == 0;
         let (first, ons1, ccs1) = spread_clip(&mut r, overlap);
         let passes = 1 + r.below(2);

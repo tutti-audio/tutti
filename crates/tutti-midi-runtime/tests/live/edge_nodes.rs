@@ -1,5 +1,5 @@
 //! The nodes at the graph's MIDI border:
-//! [`MidiIngestNode`] sends the events of its device inlets out of their channels' ports,
+//! [`MidiInputNode`] sends the events of its device inlets out of their channels' ports,
 //! translated; an event tap hands what a port carries back to a control
 //! thread; [`SyncOut`] sends
 //! Beat Clock, timecode and Machine Control on the frames the transport reaches, a
@@ -20,8 +20,8 @@ use tutti_midi_protocol::{
     MpeMode, MpeZoneConfig, MpeZones, MtcRate, PitchBendSensitivity, Recipient, channel_voice,
 };
 use tutti_midi_runtime::{
-    CHANNELLESS_PORT, DeviceEpochs, MIDI_INPUT_EVENT_CAPACITY, MIDI_INPUT_PORTS,
-    MachineControlEvent, MachineControlFollower, MidiIngestNode, MidiInputPorts, MidiOutNode,
+    CHANNELLESS_PORT, DeviceGeneration, MIDI_INPUT_EVENT_CAPACITY, MIDI_INPUT_PORTS,
+    MachineControlEvent, MachineControlFollower, MidiInputNode, MidiInputPorts, MidiOutNode,
     MpeTransformNode, SyncMessages, SyncOut,
 };
 use tutti_rt::Publisher;
@@ -74,19 +74,19 @@ fn rig_with<N: tutti_graph::IntoNode>(
     (rig.editor, rig.exec, controls, rig.seen)
 }
 
-/// An ingest node and the device inlet that feeds it (key 3), over
+/// An input node and the device inlet that feeds it (key 3), over
 /// `ports` sink inputs.
-fn ingest(
-    ingest: Ingest,
+fn input(
+    input: Input,
     ports: u16,
     max: usize,
 ) -> (
     Editor,
     Executor,
-    tutti_midi_runtime::MidiIngestControls,
+    tutti_midi_runtime::MidiInputControls,
     Seen,
 ) {
-    let Ingest { node, inlet } = ingest;
+    let Input { node, inlet } = input;
     rig_with(node, ports, max, |ed| {
         let key = NodeKey(3);
         ed.insert(key, "inlet", inlet);
@@ -115,14 +115,14 @@ impl Script {
     }
 }
 
-/// An ingest node, and the inlet its device's thread has pushed the script
+/// An input node, and the inlet its device's thread has pushed the script
 /// into, every event for its frame; an inlet holds it until its block.
-struct Ingest {
-    node: MidiIngestNode,
+struct Input {
+    node: MidiInputNode,
     inlet: EventInletNode,
 }
 
-impl Ingest {
+impl Input {
     fn new(script: Script) -> Self {
         let (inlet, mut writer) = EventInletNode::pair(EventCapacity::of(4096));
         for (block, batch) in script.0.iter().enumerate() {
@@ -132,7 +132,7 @@ impl Ingest {
             }
         }
         Self {
-            node: MidiIngestNode::new(),
+            node: MidiInputNode::new(),
             inlet,
         }
     }
@@ -190,7 +190,7 @@ fn each_event_leaves_on_its_channels_port() {
         Ump::from(Message::System(MidiGroup::FIRST, System::TimingClock)),
     );
     let wire = Script::new(vec![vec![note(9, 64, 40), note(0, 60, 10), clock]]);
-    let (_ed, mut exec, _c, seen) = ingest(Ingest::new(wire), MIDI_INPUT_PORTS as u16, 512);
+    let (_ed, mut exec, _c, seen) = input(Input::new(wire), MIDI_INPUT_PORTS as u16, 512);
     block(&mut exec, 512);
     let got: Vec<(usize, u64)> = seen.lock().unwrap().iter().map(|s| (s.0, s.1)).collect();
     assert_eq!(got, vec![(0, 10), (9, 40), (CHANNELLESS_PORT, 20)]);
@@ -221,7 +221,7 @@ fn a_groups_channels_leave_on_their_own_ports() {
         group(2, 1, 62),
     ]]);
     let (live, mut exec, _c, seen) =
-        ingest(Ingest::new(wire).hearing(ports), ports.count() as u16, 512);
+        input(Input::new(wire).hearing(ports), ports.count() as u16, 512);
     block(&mut exec, 512);
     let got: Vec<(usize, u8)> = seen
         .lock()
@@ -253,7 +253,7 @@ fn an_rpn_run_split_across_blocks_is_assembled() {
             cc_ev(3, CCNumber::DATA_ENTRY_LSB, 0),
         ],
     ]);
-    let (_ed, mut exec, _c, seen) = ingest(Ingest::new(wire), MIDI_INPUT_PORTS as u16, 512);
+    let (_ed, mut exec, _c, seen) = input(Input::new(wire), MIDI_INPUT_PORTS as u16, 512);
     block(&mut exec, 512);
     block(&mut exec, 512);
     let seen = seen.lock().unwrap();
@@ -292,8 +292,8 @@ fn a_devices_select_and_entry_make_a_run() {
         cc_ev(3, CCNumber::DATA_ENTRY, 10),
         cc_ev(3, CCNumber::DATA_ENTRY_LSB, 0),
     ]];
-    let (_ed, mut exec, _c, seen) = ingest(
-        Ingest::new(Script::new(together)),
+    let (_ed, mut exec, _c, seen) = input(
+        Input::new(Script::new(together)),
         MIDI_INPUT_PORTS as u16,
         512,
     );
@@ -309,31 +309,32 @@ fn a_devices_select_and_entry_make_a_run() {
     );
 }
 
-/// **A departed device's epoch settles only once a block has run**: the node
+/// **A departed device's generation settles only once a block has run**: the node
 /// pushes the release in a block, then says so. After `depart` nothing is
 /// settled until that block has gone, and the block's first frame carries the
 /// Note Off.
 #[test]
-fn a_departed_devices_epoch_settles_only_after_a_block_has_run() {
-    let (mut writer, epochs) = DeviceEpochs::new();
+fn a_departed_devices_generation_settles_only_after_a_block_has_run() {
+    let (mut writer, generation) = DeviceGeneration::new();
     writer.arrive();
     let wire = Script::new(vec![vec![note(0, 60, 10)], vec![]]);
-    let (_ed, mut exec, _c, seen) = ingest(following(wire, &epochs), MIDI_INPUT_PORTS as u16, 512);
+    let (_ed, mut exec, _c, seen) =
+        input(following(wire, &generation), MIDI_INPUT_PORTS as u16, 512);
     block(&mut exec, 512);
-    assert!(epochs.is_settled(), "the block handled the arrival");
+    assert!(generation.is_idle(), "the block handled the arrival");
     assert_eq!(heard(&seen).len(), 1, "the key is down");
     writer.depart();
-    assert!(!epochs.is_settled(), "the departure is owed a block");
+    assert!(!generation.is_idle(), "the departure is owed a block");
     block(&mut exec, 512);
-    assert!(epochs.is_settled(), "the block released and said so");
+    assert!(generation.is_idle(), "the block released and said so");
     assert_eq!(heard(&seen)[1], (512, "off 60".to_string()));
 }
 
-/// **A release that does not fit the block is owed, and the epoch settles only
+/// **A release that does not fit the block is owed, and the generation settles only
 /// when it has gone**: a device holds 800 keys, more than the port's note-off
 /// room (584 at 512 events). Its departure's block sends what fits and the
-/// epoch stays unsettled; the next block's first frame sends the rest, and only
-/// then is the epoch settled.
+/// generation stays unsettled; the next block's first frame sends the rest, and only
+/// then is the generation settled.
 #[test]
 fn a_release_that_does_not_fit_is_owed_and_settles_when_it_has_gone() {
     let keys = |first: u8| -> Vec<UmpAt> {
@@ -341,10 +342,11 @@ fn a_release_that_does_not_fit_is_owed_and_settles_when_it_has_gone() {
             .map(|i| note(first + (i / 100) as u8, (i % 100) as u8, i))
             .collect()
     };
-    let (mut writer, epochs) = DeviceEpochs::new();
+    let (mut writer, generation) = DeviceGeneration::new();
     writer.arrive();
     let wire = Script::new(vec![keys(0), keys(4), vec![], vec![]]);
-    let (_ed, mut exec, _c, seen) = ingest(following(wire, &epochs), MIDI_INPUT_PORTS as u16, 512);
+    let (_ed, mut exec, _c, seen) =
+        input(following(wire, &generation), MIDI_INPUT_PORTS as u16, 512);
     let offs = |from: u64, to: u64| {
         heard(&seen)
             .iter()
@@ -358,7 +360,7 @@ fn a_release_that_does_not_fit_is_owed_and_settles_when_it_has_gone() {
     writer.depart();
     block(&mut exec, 512);
     assert_eq!(offs(1024, 1536), 584, "what the port has room for");
-    assert!(!epochs.is_settled(), "216 are still owed");
+    assert!(!generation.is_idle(), "216 are still owed");
     block(&mut exec, 512);
     assert_eq!(
         offs(1536, 2048),
@@ -372,7 +374,7 @@ fn a_release_that_does_not_fit_is_owed_and_settles_when_it_has_gone() {
             .all(|(frame, _)| *frame == 1536),
         "on its first frame"
     );
-    assert!(epochs.is_settled(), "now the release has gone");
+    assert!(generation.is_idle(), "now the release has gone");
 }
 
 /// **The output node counts what it cannot pass**: two sources feed it 1,200
@@ -416,7 +418,7 @@ fn note_on_ump(i: u64) -> Ump {
 }
 
 /// **An input a new device takes starts empty**: device 0 selects an RPN in
-/// block 0, a new device then arrives at the slot (the epochs move on, which
+/// block 0, a new device then arrives at the slot (the generation move on, which
 /// the node follows with no call from the owner), and the Data Entry in block 1
 /// finds no select to complete, so no Registered Controller is made; with no
 /// new device the same Data Entry completes the run.
@@ -435,11 +437,11 @@ fn a_slot_a_new_device_takes_forgets_the_previous_devices_half_sent_run() {
         ])
     };
     for reopened in [false, true] {
-        let (mut writer, epochs) = DeviceEpochs::new();
-        let Ingest { node, inlet } = Ingest::new(script());
-        let node = node.following(&epochs);
+        let (mut writer, generation) = DeviceGeneration::new();
+        let Input { node, inlet } = Input::new(script());
+        let node = node.following(&generation);
         let (_ed, mut exec, _controls, seen) =
-            ingest(Ingest { node, inlet }, MIDI_INPUT_PORTS as u16, 512);
+            input(Input { node, inlet }, MIDI_INPUT_PORTS as u16, 512);
         block(&mut exec, 512);
         if reopened {
             writer.arrive();
@@ -455,11 +457,11 @@ fn a_slot_a_new_device_takes_forgets_the_previous_devices_half_sent_run() {
     }
 }
 
-/// An ingest node that follows `epochs`, over the script's device.
-fn following(script: Script, epochs: &DeviceEpochs) -> Ingest {
-    let Ingest { node, inlet } = Ingest::new(script);
-    Ingest {
-        node: node.following(epochs),
+/// An input node that follows `generation`, over the script's device.
+fn following(script: Script, generation: &DeviceGeneration) -> Input {
+    let Input { node, inlet } = Input::new(script);
+    Input {
+        node: node.following(generation),
         inlet,
     }
 }
@@ -502,7 +504,7 @@ fn heard(seen: &Seen) -> Vec<(u64, String)> {
 #[test]
 fn a_device_that_lets_go_has_what_it_held_released() {
     for replaced in [false, true] {
-        let (mut writer, epochs) = DeviceEpochs::new();
+        let (mut writer, generation) = DeviceGeneration::new();
         writer.arrive();
         let bend = at(
             30,
@@ -513,7 +515,7 @@ fn a_device_that_lets_go_has_what_it_held_released() {
             vec![note(0, 61, 5)],
         ]);
         let (_ed, mut exec, _c, seen) =
-            ingest(following(wire, &epochs), MIDI_INPUT_PORTS as u16, 512);
+            input(following(wire, &generation), MIDI_INPUT_PORTS as u16, 512);
         block(&mut exec, 512);
         assert_eq!(heard(&seen).len(), 3, "the key, the pedal, the bend");
         seen.lock().unwrap().clear();
@@ -548,8 +550,8 @@ fn a_cable_that_goes_quiet_after_active_sensing_has_its_notes_ended() {
     for (extra, ran_out) in [(None, 15_840u64), (Some(15_000usize), 30_840)] {
         let mut batch = vec![sense, note(0, 60, 0)];
         batch.extend(extra.map(|f| cc_at(f, 0, CCNumber::of(1), 1)));
-        let (_ed, mut exec, _c, seen) = ingest(
-            Ingest::new(Script::new(vec![batch])),
+        let (_ed, mut exec, _c, seen) = input(
+            Input::new(Script::new(vec![batch])),
             MIDI_INPUT_PORTS as u16,
             512,
         );
@@ -573,8 +575,8 @@ fn a_cable_that_goes_quiet_after_active_sensing_has_its_notes_ended() {
 /// blocks.
 #[test]
 fn a_cable_with_no_active_sensing_is_never_judged_gone() {
-    let (_ed, mut exec, _c, seen) = ingest(
-        Ingest::new(Script::new(vec![vec![note(0, 60, 0)]])),
+    let (_ed, mut exec, _c, seen) = input(
+        Input::new(Script::new(vec![vec![note(0, 60, 0)]])),
         MIDI_INPUT_PORTS as u16,
         512,
     );
@@ -614,7 +616,7 @@ fn a_system_reset_ends_its_cables_notes_and_runs_and_is_not_echoed() {
         cc_at(200, 0, CCNumber::DATA_ENTRY, 10),
         cc_at(201, 0, CCNumber::DATA_ENTRY_LSB, 0),
     ]]);
-    let (_ed, mut exec, _c, seen) = ingest(Ingest::new(wire).hearing(two), two.count() as u16, 512);
+    let (_ed, mut exec, _c, seen) = input(Input::new(wire).hearing(two), two.count() as u16, 512);
     block(&mut exec, 512);
     let got = heard(&seen);
     let after: Vec<_> = got.iter().filter(|(f, _)| *f >= 100).cloned().collect();
@@ -658,7 +660,7 @@ fn a_system_reset_reaches_every_channel_of_its_group() {
         other_group,
         reset,
     ]]);
-    let (_ed, mut exec, _c, seen) = ingest(Ingest::new(wire).hearing(two), two.count() as u16, 512);
+    let (_ed, mut exec, _c, seen) = input(Input::new(wire).hearing(two), two.count() as u16, 512);
     block(&mut exec, 512);
     let got = heard(&seen);
     let mut after: Vec<_> = got.iter().filter(|(f, _)| *f >= 100).cloned().collect();
@@ -696,8 +698,8 @@ fn a_requested_mpe_mode_is_adopted_once() {
         vec![bend],
     ]);
     let cell = Publisher::new(MpeMode::Disabled);
-    let (_ed, mut exec, _controls, seen) = ingest(
-        Ingest::new(wire).with_mpe(&cell),
+    let (_ed, mut exec, _controls, seen) = input(
+        Input::new(wire).with_mpe(&cell),
         MIDI_INPUT_PORTS as u16,
         512,
     );
@@ -746,13 +748,13 @@ fn a_requested_mpe_mode_is_adopted_once() {
 #[test]
 fn a_devices_profile_zones_switch_its_rules() {
     let reset = |frame: usize| cc_at(frame, 2, CCNumber::RESET_ALL, 0);
-    let (mut writer, epochs) = DeviceEpochs::new();
+    let (mut writer, generation) = DeviceGeneration::new();
     writer.arrive();
     let node = following(
         Script::new(vec![vec![reset(0)], vec![reset(1)], vec![reset(2)]]),
-        &epochs,
+        &generation,
     );
-    let (_ed, mut exec, controls, seen) = ingest(node, MIDI_INPUT_PORTS as u16, 512);
+    let (_ed, mut exec, controls, seen) = input(node, MIDI_INPUT_PORTS as u16, 512);
     let zone = MpeZones::single(MpeZoneConfig::profile(
         MpeZoneSpan::new(MidiChannel::of(0), MpeChannels::of(4)).unwrap(),
         PitchBendSensitivity::MPE_PROFILE_DEFAULT,
@@ -799,10 +801,13 @@ fn a_devices_profile_zones_switch_its_rules() {
 /// blocks after it, with no further request, send no more of its resets.
 #[test]
 fn a_profile_zone_starts_once_per_request() {
-    let (mut writer, epochs) = DeviceEpochs::new();
+    let (mut writer, generation) = DeviceGeneration::new();
     writer.arrive();
-    let (_ed, mut exec, controls, seen) = ingest(
-        following(Script::new(vec![vec![], vec![], vec![], vec![]]), &epochs),
+    let (_ed, mut exec, controls, seen) = input(
+        following(
+            Script::new(vec![vec![], vec![], vec![], vec![]]),
+            &generation,
+        ),
         MIDI_INPUT_PORTS as u16,
         512,
     );
@@ -839,11 +844,14 @@ fn a_profile_zone_starts_once_per_request() {
 /// heard again.
 #[test]
 fn clearing_a_devices_profiles_returns_it_to_the_rules_it_had() {
-    let (mut writer, epochs) = DeviceEpochs::new();
+    let (mut writer, generation) = DeviceGeneration::new();
     writer.arrive();
     let reset = cc_at(1, 2, CCNumber::RESET_ALL, 0);
-    let (_ed, mut exec, controls, seen) = ingest(
-        following(Script::new(vec![vec![], vec![reset], vec![reset]]), &epochs),
+    let (_ed, mut exec, controls, seen) = input(
+        following(
+            Script::new(vec![vec![], vec![reset], vec![reset]]),
+            &generation,
+        ),
         MIDI_INPUT_PORTS as u16,
         512,
     );
@@ -895,8 +903,8 @@ fn a_host_set_modes_reset_goes_ahead_of_the_blocks_events() {
     );
     let wire = Script::new(vec![vec![range]]);
     let cell = Publisher::new(MpeMode::Disabled);
-    let (_ed, mut exec, _controls, seen) = ingest(
-        Ingest::new(wire).with_mpe(&cell),
+    let (_ed, mut exec, _controls, seen) = input(
+        Input::new(wire).with_mpe(&cell),
         MIDI_INPUT_PORTS as u16,
         512,
     );
@@ -939,8 +947,8 @@ fn a_member_bend_range_fans_out_over_the_zones_ports() {
         cc_ev(2, CCNumber::DATA_ENTRY_LSB, 0),
         note(1, 60, 5),
     ]]);
-    let node = Ingest::new(wire).with_mpe(&Publisher::new(midi::lower_zone(7)));
-    let (_ed, mut exec, _c, seen) = ingest(node, MIDI_INPUT_PORTS as u16, 512);
+    let node = Input::new(wire).with_mpe(&Publisher::new(midi::lower_zone(7)));
+    let (_ed, mut exec, _c, seen) = input(node, MIDI_INPUT_PORTS as u16, 512);
     block(&mut exec, 512);
     let seen = seen.lock().unwrap();
     let mut ranges = BendRanges::default();
@@ -987,8 +995,8 @@ fn a_fan_out_with_no_room_is_dropped_whole_and_counted() {
         note(1, 61, 509),
     ]);
     assert_eq!(batch.len(), MIDI_INPUT_EVENT_CAPACITY);
-    let node = Ingest::new(Script::new(vec![batch])).with_mpe(&Publisher::new(midi::lower_zone(7)));
-    let (_ed, mut exec, controls, seen) = ingest(node, MIDI_INPUT_PORTS as u16, 512);
+    let node = Input::new(Script::new(vec![batch])).with_mpe(&Publisher::new(midi::lower_zone(7)));
+    let (_ed, mut exec, controls, seen) = input(node, MIDI_INPUT_PORTS as u16, 512);
     block(&mut exec, 512);
     let seen = seen.lock().unwrap();
     let mut ranges = BendRanges::default();
@@ -1018,8 +1026,8 @@ fn a_note_off_has_room_past_the_capacity() {
     ]);
     batch.extend((0..4).map(|k| at(508 + k, midi::note_off(MidiChannel::of(1), 61 + k as u8, 0))));
     assert_eq!(batch.len(), MIDI_INPUT_EVENT_CAPACITY);
-    let node = Ingest::new(Script::new(vec![batch])).with_mpe(&Publisher::new(midi::lower_zone(7)));
-    let (_ed, mut exec, controls, seen) = ingest(node, MIDI_INPUT_PORTS as u16, 512);
+    let node = Input::new(Script::new(vec![batch])).with_mpe(&Publisher::new(midi::lower_zone(7)));
+    let (_ed, mut exec, controls, seen) = input(node, MIDI_INPUT_PORTS as u16, 512);
     block(&mut exec, 512);
     let seen = seen.lock().unwrap();
     assert_eq!(seen.iter().filter(|s| s.2.is_note_off()).count(), 4);
@@ -1032,7 +1040,7 @@ fn a_note_off_has_room_past_the_capacity() {
 #[test]
 fn an_input_nodes_fork_is_silent() {
     let wire = Script::new(vec![vec![note(0, 60, 0)]]);
-    let (live, _exec, _c, seen) = ingest(Ingest::new(wire), MIDI_INPUT_PORTS as u16, 512);
+    let (live, _exec, _c, seen) = input(Input::new(wire), MIDI_INPUT_PORTS as u16, 512);
     let prepare = *live.prepare();
     let (_fork, mut fork_exec) = live
         .fork(ForkTarget::Master, ForkMode::Live, prepare)
@@ -1521,7 +1529,7 @@ fn the_transform_node_folds_a_member_and_fans_out_a_managers_pedal() {
 /// **A mode published to the session's cell is adopted at the next block, once**: the
 /// transform starts disabled, so a member's bend passes as a channel bend; the
 /// lower zone then set, the zone's reset ranges go first (thirteen registered
-/// controllers, as the ingest node sends), once however many blocks follow, and
+/// controllers, as the input node sends), once however many blocks follow, and
 /// the member's bend then folds per-note.
 #[test]
 fn a_mode_published_to_the_transforms_cell_is_adopted_once() {

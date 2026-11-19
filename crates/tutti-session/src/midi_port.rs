@@ -11,7 +11,7 @@
 //! that several present devices could be fails the load, with the candidates
 //! ([`MidiPortError::Ambiguous`]).
 //!
-//! An input is fed to the graph through an ingest node of its own, made when
+//! An input is fed to the graph through an input node of its own, made when
 //! the entry loads: it releases the notes its device holds before it goes, and
 //! survives an unplug and a replug, so what is wired to it stays wired. An
 //! output is a [`MidiOutNode`](tutti_midi_runtime::MidiOutNode) of its own,
@@ -26,7 +26,7 @@ use tutti_midi_hardware::{
     ReportAsk,
 };
 use tutti_midi_runtime::{
-    DeviceEpochs, EpochWriter, InputReaders, InputWriters, JrStream, MidiIngestControls,
+    DeviceGeneration, GenerationWriter, InputReaders, InputWriters, JrStream, MidiInputControls,
     MidiInputPorts,
 };
 use tutti_rt::{Counter, Gauge, LockExt};
@@ -282,9 +282,9 @@ pub(crate) struct InputShared {
     /// room for. Made once with the entry; a connection writes them and closes
     /// them when it ends, and the counts are cumulative across connections.
     cells: InputReaders,
-    /// What the port's ingest node lost: translated events its mailbox had no
+    /// What the port's input node lost: translated events its mailbox had no
     /// room for. The node outlives every connection.
-    ingest: MidiIngestControls,
+    input: MidiInputControls,
 }
 
 /// What a handle asked of the device, for the session to send at its next poll,
@@ -585,7 +585,7 @@ impl std::fmt::Debug for InputShared {
 }
 
 impl MidiInput {
-    /// The port's ingest node: the node to wire from and to follow. Its event
+    /// The port's input node: the node to wire from and to follow. Its event
     /// outputs are one per Group and channel
     /// ([`MidiNodes::input_ports`](crate::MidiNodes::input_ports)), which a route
     /// rule, a follower or a tap reads. The node is in the graph while the entry
@@ -636,7 +636,7 @@ impl MidiInput {
     /// list for room, [`late`](Losses::late) are events the inlet emitted at the
     /// first frame of the block that found them, their frame having begun (they
     /// sound, late), and [`refused`](Losses::refused) are events the inlet's
-    /// port refused, translated events its ingest node's mailbox had no room for
+    /// port refused, translated events its input node's mailbox had no room for
     /// in one block, and the MIDI-CI messages its conversation sent that the
     /// device's output refused (a refused message is
     /// not sent again, so the count is how many a peer may never have heard).
@@ -646,7 +646,7 @@ impl MidiInput {
     #[must_use]
     pub fn losses(&self) -> Losses {
         self.shared.cells.lost.get()
-            + self.shared.ingest.losses()
+            + self.shared.input.losses()
             + self.shared.cells.inlet.get()
             + self.shared.cells.ci_refused.get()
     }
@@ -775,11 +775,11 @@ struct InputPort {
     token: Weak<()>,
     shared: Arc<InputShared>,
     node: NodeKey,
-    controls: MidiIngestControls,
-    /// The one writer of the node's epochs.
-    writer: EpochWriter,
-    /// The node's half of them.
-    epochs: DeviceEpochs,
+    controls: MidiInputControls,
+    /// The one writer of the node's generation.
+    writer: GenerationWriter,
+    /// The node's half of it.
+    generation: DeviceGeneration,
     /// The inlet node of the open connection, in the graph.
     inlet: Option<NodeKey>,
     /// What the entry was declared with: what a returning device is matched on.
@@ -814,7 +814,7 @@ struct OutputPort {
 /// An input node that is going: its device's notes are being released.
 struct Retiring {
     node: NodeKey,
-    epochs: DeviceEpochs,
+    generation: DeviceGeneration,
 }
 
 /// The ports of the session, and what they are opened with.
@@ -951,7 +951,7 @@ impl InputPort {
 }
 
 impl Ports {
-    /// The ingest nodes of the ports, and of those going, for the routes to read.
+    /// The input nodes of the ports, and of those going, for the routes to read.
     pub(crate) fn input_nodes(&self) -> Vec<NodeKey> {
         // A node going keeps its routes until it is taken out: its release goes
         // out through them.
@@ -962,13 +962,13 @@ impl Ports {
             .collect()
     }
 
-    /// Whether `node` is the ingest node of an input port.
+    /// Whether `node` is the input node of an input port.
     pub(crate) fn is_input_node(&self, node: NodeKey) -> bool {
         self.inputs.iter().any(|port| port.node == node)
     }
 
     /// Takes the MPE Profile zones the peers of `device` have enabled (M2-120) as
-    /// what its ingest node follows: the zones of every peer on a Group
+    /// what its input node follows: the zones of every peer on a Group
     /// together, or none where no peer has the Profile enabled.
     fn sync_mpe_profiles(&self, io: &MidiSession, device: &DeviceId) {
         let Some(port) = self.inputs.iter().find(|p| p.open.as_ref() == Some(device)) else {
@@ -997,7 +997,7 @@ impl Ports {
     }
 
     /// Opens `info` for the input port at `at` (the port is closed): the inlet
-    /// joins the graph, wired to the ingest node, and a device arrives there.
+    /// joins the graph, wired to the input node, and a device arrives there.
     fn connect_input<F: tutti_buffers::Float>(
         &mut self,
         at: usize,
@@ -1017,8 +1017,8 @@ impl Ports {
         {
             tutti_midi_hardware::Connected::Opened(inlet) => {
                 let key = graph.add_event_inlet(inlet).erase();
-                // The ingest node has the one event input, and the inlet was just
-                // added. A host that removed the ingest node itself leaves it nothing to feed.
+                // The input node has the one event input, and the inlet was just
+                // added. A host that removed the input node itself leaves it nothing to feed.
                 let _ =
                     graph.set_sources(EventInPort::new(port.node, 0), [EventOutPort::new(key, 0)]);
                 port.inlet = Some(key);
@@ -1034,7 +1034,7 @@ impl Ports {
     }
 
     /// Closes the open input port at `at`: the device's notes are released by
-    /// the ingest node, and the inlet leaves the graph.
+    /// the input node, and the inlet leaves the graph.
     fn disconnect_input<F: tutti_buffers::Float>(
         &mut self,
         at: usize,
@@ -1087,7 +1087,7 @@ impl Ports {
     }
 
     /// Ends the ports whose entry was released or swapped, and takes out the
-    /// ingest nodes that have released what their devices held.
+    /// input nodes that have released what their devices held.
     fn retire<F: tutti_buffers::Float>(
         &mut self,
         io: &mut MidiSession,
@@ -1106,7 +1106,7 @@ impl Ports {
             self.notices.extend(port.pending.take_notices());
             self.retiring.push(Retiring {
                 node: port.node,
-                epochs: port.epochs.clone(),
+                generation: port.generation.clone(),
             });
             edits.graph = true;
             edits.routes = true;
@@ -1123,7 +1123,7 @@ impl Ports {
         edits.graph |= self.outputs.len() != before;
         self.retiring.retain(|going| {
             // The node's block that released the notes has run.
-            let done = going.epochs.is_settled();
+            let done = going.generation.is_idle();
             if done {
                 // A host that removed the node itself leaves nothing to take.
                 let _ = graph.remove(going.node);
@@ -1474,7 +1474,7 @@ fn open_device_output(
 }
 
 impl<F: tutti_buffers::Float> crate::Midi<'_, F> {
-    /// Opens the input port of `saved` as `id`: the ingest node joins the graph
+    /// Opens the input port of `saved` as `id`: the input node joins the graph
     /// and the device, when it is present, opens into it.
     pub(crate) fn open_input_port(
         &mut self,
@@ -1494,14 +1494,14 @@ impl<F: tutti_buffers::Float> crate::Midi<'_, F> {
             Resolved::Missing => None,
         };
         let found = found.filter(|info| info.direction.is_input());
-        let (writer, epochs) = DeviceEpochs::new();
+        let (writer, generation) = DeviceGeneration::new();
         let layout = self
             .nodes
             .map_or(MidiInputPorts::FIRST_GROUP, |n| n.input_ports);
-        let node = tutti_midi_runtime::MidiIngestNode::new()
+        let node = tutti_midi_runtime::MidiInputNode::new()
             .hearing(layout)
             .with_mpe(self.state.mpe())
-            .following(&epochs);
+            .following(&generation);
         let (key, controls) = self.graph.add(node);
         let node = key.erase();
         let token = Arc::new(());
@@ -1510,7 +1510,7 @@ impl<F: tutti_buffers::Float> crate::Midi<'_, F> {
         let (writers, cells) = InputWriters::new();
         drop(writers);
         let landed = self.jobs.queue();
-        let ingest = controls.clone();
+        let input = controls.clone();
         let pending = Pending::new(ids);
         let shared = Arc::new_cyclic(|weak| {
             let link = PortLink::new(weak.clone(), landed);
@@ -1523,7 +1523,7 @@ impl<F: tutti_buffers::Float> crate::Midi<'_, F> {
                 requests: Mutex::new(Inbox::default()),
                 link,
                 cells,
-                ingest,
+                input,
             }
         });
         self.state.ports.inputs.push(InputPort {
@@ -1532,7 +1532,7 @@ impl<F: tutti_buffers::Float> crate::Midi<'_, F> {
             node,
             controls,
             writer,
-            epochs,
+            generation,
             inlet: None,
             saved,
             open: None,
@@ -1548,7 +1548,7 @@ impl<F: tutti_buffers::Float> crate::Midi<'_, F> {
                 // The port was never loaded: it leaves with the entry's failure.
                 self.state.ports.inputs.remove(at);
                 let removed = self.graph.remove(node);
-                // The ingest node was added in this call, so it is there.
+                // The input node was added in this call, so it is there.
                 debug_assert!(removed.is_ok());
                 return Err(error);
             }

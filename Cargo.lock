@@ -2893,6 +2893,7 @@ dependencies = [
  "tutti-fixtures",
  "tutti-midi-ci",
  "tutti-platform",
+ "tutti-rt",
  "tutti-ump",
  "tutti-units",
 ]

@@ -3,7 +3,7 @@
 //! inlet ([`InputInlets`](crate::InputInlets)).
 //!
 //! The sink carries no address: an endpoint *is* its stream. Which node hears
-//! what is the graph's wiring (a `MidiIngestNode` in `tutti-midi-runtime`
+//! what is the graph's wiring (a `MidiInputNode` in `tutti-midi-runtime`
 //! sends each channel out of its own event port).
 
 use tutti_graph::UmpAt;

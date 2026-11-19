@@ -75,6 +75,9 @@ pub enum TargetId {
     /// names declares it: a key of another node type than the one the node
     /// is now names no such param.
     Param(NodeKey, UnitAddr, TypeId),
+    /// A parameter of a hosted plugin.
+    #[cfg(feature = "plugin")]
+    PluginParam(NodeKey, tutti_units::ParamId),
     /// One of the session's own values (its tempo, meter or click), or a value
     /// of a node that is not a param (a clip's events).
     Slot(SlotId),
@@ -109,6 +112,8 @@ impl<K> AnyTarget<K> {
     pub fn node(&self) -> Option<NodeKey> {
         match self.id {
             TargetId::Param(node, ..) => Some(node),
+            #[cfg(feature = "plugin")]
+            TargetId::PluginParam(node, _) => Some(node),
             TargetId::Slot(slot) => slot.node(),
         }
     }

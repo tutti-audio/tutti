@@ -83,6 +83,9 @@ pub enum SlotId {
     Gain(Edge),
     /// The range declared on a modulation target.
     Range(ModTarget),
+    /// The automation mode the host tells a plugin.
+    #[cfg(feature = "plugin")]
+    PluginAutomationMode(NodeKey),
     /// The depth of the route from a source into a target.
     RouteDepth((ModSourceId, ModTarget)),
 }
@@ -98,6 +101,8 @@ impl SlotId {
             | Self::Looping(node)
             | Self::Direction(node)
             | Self::Speed(node) => Some(node),
+            #[cfg(feature = "plugin")]
+            Self::PluginAutomationMode(node) => Some(node),
             Self::Automation(TargetKey::Param { node, .. }) => Some(NodeKey(node)),
             _ => None,
         }
@@ -590,7 +595,7 @@ slot_target!(
     /// ([`SessionBuilder::mpe_mode`](crate::SessionBuilder::mpe_mode)),
     /// `Disabled` by default.
     ///
-    /// It is one value for everything that follows it: each input's ingest
+    /// It is one value for everything that follows it: each input's input node
     /// and each clip's MPE transform (the node [`Midi::play_clip`](crate::Midi::play_clip)
     /// wires between a clip and its target) adopts it at its next block, and
     /// a clip played later starts in it. A new mode stops and resets the

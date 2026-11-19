@@ -7,7 +7,7 @@ use tutti_ump::{
 };
 
 /// MIDI 1.0 System Exclusive bytes read as SysEx7 packets (type 3) on the first
-/// Group: a port is one cable. The ingest node reassembles the packets.
+/// Group: a port is one cable. The input node reassembles the packets.
 #[derive(Clone, Debug)]
 pub(in crate::backend) struct ByteIn {
     parser: Midi1Parser,

@@ -433,13 +433,15 @@ fn restore_round_trip(hosting: Hosting) {
             .get()
     };
     let set = |s: &Session, v: f64| {
-        s.plugin_view(node)
+        let target = s
+            .plugin_view(node)
             .unwrap()
             .params()
             .get(CUTOFF)
-            .unwrap()
-            .set(tutti_units::Normalized::of(v))
-            .unwrap();
+            .expect("the plugin declares the parameter")
+            .target();
+
+        s.set(target.to(tutti_units::Normalized::of(v))).unwrap();
     };
 
     set(&s, 0.9);

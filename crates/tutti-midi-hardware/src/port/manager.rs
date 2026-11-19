@@ -64,7 +64,7 @@ impl PortInfo {
 /// [`open_input_port`](Self::open_input_port) and pushes into the
 /// [`InputProducerHandle`] it returns from the driver's own thread; each port
 /// is an event inlet of the [`InputInlets`] the list was built over, whose
-/// node the graph's owner adds and wires to the input's ingest node. When the
+/// node the graph's owner adds and wires to the input's input node. When the
 /// connection closes, `remove_input_port` retires the port.
 ///
 /// Cheap to share: hold it in an `Arc` and hand clones to the session.

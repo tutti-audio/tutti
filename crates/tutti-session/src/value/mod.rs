@@ -41,6 +41,8 @@ mod controls;
 mod depth;
 mod error;
 mod param;
+#[cfg(feature = "plugin")]
+mod plugin;
 mod program;
 mod range;
 mod slot;
@@ -53,8 +55,14 @@ pub(crate) use controls::Write;
 pub use controls::{GainTarget, GainTargetError, MixTarget, ModeTarget};
 pub(crate) use depth::DepthSlot;
 pub use depth::DepthTarget;
+#[cfg(feature = "plugin")]
+pub use error::PluginParamRefusal;
 pub use error::{SetRefusal, ValueError, ValueErrorKind};
 pub use param::{ParamTarget, TargetInfo};
+#[cfg(feature = "plugin")]
+pub(crate) use plugin::{AutomationModeSlot, CarriedParam, PluginEntry};
+#[cfg(feature = "plugin")]
+pub use plugin::{PluginAutomationModeTarget, PluginParamTarget};
 pub(crate) use program::{
     Automation, AutomationCell, AutomationField, Declared, Edited, Field, MacroField, RateField,
 };

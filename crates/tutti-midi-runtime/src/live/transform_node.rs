@@ -6,7 +6,7 @@
 //! come out on each member channel of its zone, as the ingest's docs say. It is
 //! the input edge's transform for a stream that does not come off a wire (a
 //! clip's), so a graph holds the MPE zones in two kinds of place alone, this
-//! node and [`MidiIngestNode`](crate::MidiIngestNode), and no instrument holds
+//! node and [`MidiInputNode`](crate::MidiInputNode), and no instrument holds
 //! any.
 //!
 //! One event input and one event output, every Group. Events that are not MIDI
@@ -38,7 +38,7 @@ use tutti_midi_protocol::{Midi2Translator, MpeMode};
 use tutti_rt::{Counter, CounterWriter, Publisher, Reader, counter};
 use tutti_ump::MidiGroup;
 
-use super::ingest_node::{MIDI_INPUT_EVENT_CAPACITY, MIDI_INPUT_PORT_CAPACITY, Staging};
+use super::input_node::{MIDI_INPUT_EVENT_CAPACITY, MIDI_INPUT_PORT_CAPACITY, Staging};
 use super::mpe_ingest::MpeIngest;
 use super::order::BLANK;
 use crate::schedule::CLIP_EVENT_DENSITY;

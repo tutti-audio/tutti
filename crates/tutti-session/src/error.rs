@@ -224,9 +224,9 @@ pub enum MidiError {
     #[error("MIDI tap")]
     Tap(#[source] tutti_graph::MissingSource),
 
-    /// A follower named a node that is not the ingest node of an input port
+    /// A follower named a node that is not the input node of an input port
     /// (`MidiInput::node`).
-    #[error("{0:?} is not the ingest node of a MIDI input port")]
+    #[error("{0:?} is not the input node of a MIDI input port")]
     NotAnInput(tutti_graph::NodeKey),
 
     /// `Midi::retarget` named a node that is not a clip of the session's.

@@ -141,7 +141,7 @@ fn an_absent_device_loads_lost_unplugged() {
 /// **A device that is unplugged and plugged again goes `Lost` and `Live` on the
 /// same key**: the handle read before follows it, the pool entry stays loaded
 /// throughout, each change is one `ResourceChanged` of presence, and the same
-/// ingest node serves the port.
+/// input node serves the port.
 #[test]
 fn a_replug_goes_live_on_the_same_key_and_node() {
     let (mut s, fake) = session();
@@ -177,7 +177,7 @@ fn a_replug_goes_live_on_the_same_key_and_node() {
     );
     let again = s.midi_input(&"keys").expect("still loaded");
     assert_eq!(again.id(), port.id(), "the same port, not a new one");
-    assert_eq!(again.node(), node, "wired to the same ingest node");
+    assert_eq!(again.node(), node, "wired to the same input node");
     assert!(s.graph_ref().contains(node));
     assert!(!fake.connected_inputs().is_empty());
 }
@@ -450,7 +450,7 @@ fn a_session_without_the_hardware_layer_fails_the_load_by_name() {
 
 /// **A released port reads `Closed`**: once the pool no longer names the entry,
 /// its handle reads `Closed`, the key is not pooled, and the device's
-/// connection and ingest node go with it.
+/// connection and input node go with it.
 #[test]
 fn a_released_handle_reads_closed_and_the_port_goes() {
     let (mut s, fake) = session();
@@ -485,7 +485,7 @@ fn a_released_handle_reads_closed_and_the_port_goes() {
     // The node leaves once it has released what its device held: after a block.
     blocks(&s, 2);
     let _ = s.update();
-    assert!(!s.graph_ref().contains(node), "the ingest node went");
+    assert!(!s.graph_ref().contains(node), "the input node went");
 }
 
 /// How many times the sustain pedal went up (a controller 64 of value 0) in what
@@ -535,8 +535,8 @@ fn centred_bends(seen: &Seen) -> usize {
 /// **What a device holds is released when its port goes**: a key, the sustain
 /// pedal and a bend off centre on the device sound on the synth the route feeds,
 /// and the entry's removal ends them with a note off, a pedal up and a centred
-/// bend, before the ingest node is taken out. (The executor's close of the
-/// inlet's edge ends the keys and the pedal; the bend is the ingest node's own
+/// bend, before the input node is taken out. (The executor's close of the
+/// inlet's edge ends the keys and the pedal; the bend is the input node's own
 /// release alone.)
 #[test]
 fn held_notes_are_released_when_the_port_is_removed() {
@@ -625,11 +625,11 @@ fn held_notes_are_released_when_the_device_is_unplugged() {
     assert_eq!((pedal_ups(&seen), centred_bends(&seen)), (1, 1));
 }
 
-/// **Every input port has an ingest node of its own, and there is no cap**: ten
-/// devices (the fixed ingest took eight) are ten live ports on ten nodes, and
+/// **Every input port has an input node of its own, and there is no cap**: ten
+/// devices (the fixed input node took eight) are ten live ports on ten nodes, and
 /// each device's note reaches a synth routed to all of them.
 #[test]
-fn every_input_port_has_its_own_ingest_node() {
+fn every_input_port_has_its_own_input_node() {
     let (mut s, fake) = session();
     let names: Vec<String> = (1..=10).map(|n| format!("Keys {n}")).collect();
     for (n, name) in names.iter().enumerate() {
@@ -1061,13 +1061,13 @@ fn registered(seen: &Seen) -> usize {
         .count()
 }
 
-/// **The session's MPE mode reaches a port's ingest node**: with no mode the
+/// **The session's MPE mode reaches a port's input node**: with no mode the
 /// routed synth hears no bend range; once `session.mpe()` is written with a
-/// lower zone of three members, the ingest sends the zone's seven default
+/// lower zone of three members, the input node sends the zone's seven default
 /// bend ranges (the master's, and a channel's and a per-note one on each
 /// member) from the next block, and writing the same mode again sends none.
 #[test]
-fn the_sessions_mpe_mode_reaches_a_ports_ingest() {
+fn the_sessions_mpe_mode_reaches_a_ports_input_node() {
     let (mut s, fake) = session();
     plug(&fake, 1, "Keys", PortDirection::Input);
     let _ = s.update();

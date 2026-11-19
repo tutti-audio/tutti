@@ -94,7 +94,7 @@ fn file() -> Result<MidiFile, Box<dyn std::error::Error>> {
 fn run() -> Result<Outcome, Box<dyn std::error::Error>> {
     let mut s = session()?;
 
-    // MPE is set once, on the session: the hardware ingest and every clip's
+    // MPE is set once, on the session: the hardware input node and every clip's
     // transform read it, and no synth holds a zone.
     let zone = MpeZones::new(
         MpeZoneConfig::lower(

@@ -6,7 +6,7 @@
 //! MIDI-2-native receiver only handles per-note messages; it needs no
 //! knowledge of the rotation scheme.
 //!
-//! So [`MpeIngest`] sits at the input edge (in [`MidiIngestNode`](crate::MidiIngestNode))
+//! So [`MpeIngest`] sits at the input edge (in [`MidiInputNode`](crate::MidiInputNode))
 //! and rewrites the classic-MPE channel-spread into **native MIDI-2 per-note
 //! messages**. A channel pitch bend on a member channel becomes a Per-Note Pitch
 //! Bend addressed to the note that channel holds; channel pressure becomes a
@@ -603,8 +603,8 @@ impl MpeIngest {
     }
 
     /// Reconfigure every Group to a new zone layout. Allocates nothing, so the
-    /// ingest node calls it on the audio thread when the cell it follows
-    /// ([`MidiIngestNode::with_mpe`](crate::MidiIngestNode::with_mpe))
+    /// input node calls it on the audio thread when the cell it follows
+    /// ([`MidiInputNode::with_mpe`](crate::MidiInputNode::with_mpe))
     /// publishes a new mode.
     ///
     /// What a channel held or was told is kept where the channel is what it
