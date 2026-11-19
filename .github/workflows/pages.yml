@@ -143,7 +143,7 @@ jobs:
       - run: cargo xtask book site/book
       # The book's links into the reference are relative: `../api/tutti/...`.
       # It covers what the chapters use: export, FLAC and the sound card (`device`).
-      # `--no-deps`: the facade inlines what it re-exports; dependencies stay on docs.rs.
+      # `--no-deps`: the facade inlines what it re-exports; their own pages are left out.
       - run: cargo doc --locked --no-deps -p tutti --features export,encode-flac,device
       - run: cp -r target/doc site/api
       - run: cargo xtask conformance --results junit --out site/conformance
