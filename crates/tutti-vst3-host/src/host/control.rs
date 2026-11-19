@@ -90,7 +90,10 @@ impl Vst3Loaded {
     /// The descriptor for this plugin as loaded: its factory info, with whether
     /// it has an editor measured from the plugin itself.
     pub(super) fn measured_descriptor(&self, main: MainThreadMarker) -> PluginDescriptor {
-        descriptor_of(&self.info, EditorPresence::measured(self.has_editor(main)))
+        PluginDescriptor {
+            widths: Some(tutti_plugin_types::Loaded::widths(self)),
+            ..descriptor_of(&self.info, EditorPresence::measured(self.has_editor(main)))
+        }
     }
 
     /// The capabilities this plugin has, as the shared vocabulary names them.
@@ -244,8 +247,10 @@ impl Vst3Loaded {
 
 impl Control for Vst3Loaded {
     fn info(&self) -> &PluginDescriptor {
-        self.descriptor
-            .get_or_init(|| descriptor_of(&self.info, EditorPresence::Unknown))
+        self.descriptor.get_or_init(|| PluginDescriptor {
+            widths: Some(tutti_plugin_types::Loaded::widths(self)),
+            ..descriptor_of(&self.info, EditorPresence::Unknown)
+        })
     }
 
     /// The wiring read from the plugin now. Latency is read only while the

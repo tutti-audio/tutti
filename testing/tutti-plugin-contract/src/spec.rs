@@ -219,9 +219,10 @@ impl Mode {
 /// The plugin's one bus a side: a stereo main, in every format.
 pub const MAIN_BUS: ChannelLayout = ChannelLayout::STEREO;
 
-/// The audio widths the plugin processes, in every format: 32-bit and 64-bit
-/// (CLAP's ports declare 64-bit support, VST3 answers `canProcessSampleSize`
-/// for `kSample64`, VST2 sets `effFlagsCanDoubleReplacing`).
+/// The audio widths the plugin processes in CLAP, VST3 and VST2: 32-bit and
+/// 64-bit (an AUv2 unit renders 32-bit only). CLAP's ports declare 64-bit
+/// support, VST3 answers `canProcessSampleSize` for `kSample64`, VST2 sets
+/// `effFlagsCanDoubleReplacing`.
 pub const WIDTHS: Widths = Widths::BOTH;
 
 /// The Delay mode's latency.

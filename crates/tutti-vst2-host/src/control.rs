@@ -3,6 +3,7 @@
 
 use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_plugin_types::MainThreadMarker;
+use tutti_plugin_types::Widths;
 use tutti_plugin_types::features::probed;
 use tutti_plugin_types::{
     AutomationMode, ContentScale, Control, EditorPresence, EditorWindow, Features, KeyEvent,
@@ -66,7 +67,7 @@ pub(crate) fn descriptor_of(info: &PluginInfo) -> PluginDescriptor {
         },
         editor: EditorPresence::measured(info.has_editor),
         measured: None,
-        widths: None,
+        widths: Some(Widths::new(info.supports_f64)),
     }
 }
 

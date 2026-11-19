@@ -39,6 +39,27 @@ pub fn describe(
     with_host(main, path, format, None).map(|(plugins, _)| plugins)
 }
 
+/// Reads the audio widths of each plugin in `plugins`, as `format` or, with
+/// none, as the file's extension says, and sets
+/// [`PluginDescriptor::widths`](tutti_plugin_types::PluginDescriptor::widths):
+/// one load of each plugin, without activating it, answered by the format
+/// host's own [`Loaded::widths`](tutti_plugin_types::Loaded::widths). A plugin
+/// that does not load keeps `None`.
+///
+/// **A listing never depends on a load.** [`describe`] and [`describe_measured`]
+/// read the listing; the loads here come after it, and a caller writes the
+/// listing out before it calls this. A plugin that crashes or hangs while it
+/// loads takes this process with it, and the host that spawned it then reads
+/// the listing without widths, never a probe that failed for the whole file.
+pub fn read_widths(
+    main: MainThreadMarker,
+    path: &Path,
+    format: Option<PluginFormat>,
+    plugins: &mut [Described],
+) {
+    read_widths_with_host(main, path, format, plugins);
+}
+
 /// The plugins a measuring probe was asked about: which one takes the state.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct StateFor<'a> {
@@ -102,7 +123,17 @@ mod hosted;
     all(feature = "au", target_os = "macos")
 )))]
 mod hosted {
-    use super::{MainThreadMarker, Measuring, Path, PluginFormat, ProbeRefusal, Read, routing};
+    use super::{
+        Described, MainThreadMarker, Measuring, Path, PluginFormat, ProbeRefusal, Read, routing,
+    };
+
+    pub(super) fn read_widths(
+        _main: MainThreadMarker,
+        _path: &Path,
+        _format: Option<PluginFormat>,
+        _plugins: &mut [Described],
+    ) {
+    }
 
     pub(super) fn with_host(
         _main: MainThreadMarker,
@@ -117,4 +148,4 @@ mod hosted {
     }
 }
 
-use hosted::with_host;
+use hosted::{read_widths as read_widths_with_host, with_host};

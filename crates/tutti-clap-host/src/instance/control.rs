@@ -102,7 +102,10 @@ impl ClapLoaded {
     /// it has an editor measured from the plugin itself.
     pub(crate) fn measured_descriptor(&self, main: MainThreadMarker) -> PluginDescriptor {
         let bits = editor_bits(self.has_editor(main), self.has_floating_editor(main));
-        descriptor_of(&self.info, EditorPresence::measured(bits.has_editor))
+        PluginDescriptor {
+            widths: Some(tutti_plugin_types::Loaded::widths(self)),
+            ..descriptor_of(&self.info, EditorPresence::measured(bits.has_editor))
+        }
     }
 
     /// The descriptor with the editor measured, asking the plugin the first time.

@@ -32,10 +32,30 @@ pub(super) fn with_host(
     }
 }
 
+/// [`fill_widths`] with the host of the format the file is read as. A format
+/// not compiled in has nothing to load, so its plugins keep their widths unread.
+pub(super) fn read_widths(
+    main: MainThreadMarker,
+    path: &Path,
+    format: Option<PluginFormat>,
+    plugins: &mut [Described],
+) {
+    match routing(path, format) {
+        #[cfg(feature = "vst3")]
+        Some(PluginFormat::Vst3) => fill_widths::<tutti_vst3_host::Vst3Loaded>(main, path, plugins),
+        #[cfg(feature = "clap")]
+        Some(PluginFormat::Clap) => fill_widths::<tutti_clap_host::ClapLoaded>(main, path, plugins),
+        #[cfg(feature = "vst2")]
+        Some(PluginFormat::Vst2) => fill_widths::<tutti_vst2_host::Vst2Loaded>(main, path, plugins),
+        Some(PluginFormat::AudioUnit) => audio_unit::widths(main, path, plugins),
+        _ => {}
+    }
+}
+
 /// Audio Units are macOS's alone: the one module that differs by platform.
 #[cfg(all(feature = "au", target_os = "macos"))]
 mod audio_unit {
-    use super::{MainThreadMarker, Measuring, Path, Read};
+    use super::{Described, MainThreadMarker, Measuring, Path, Read};
 
     pub(super) fn run(
         main: MainThreadMarker,
@@ -44,12 +64,16 @@ mod audio_unit {
     ) -> Read {
         super::run::<tutti_au_host::AuLoaded>(main, path, measuring)
     }
+
+    pub(super) fn widths(main: MainThreadMarker, path: &Path, plugins: &mut [Described]) {
+        super::fill_widths::<tutti_au_host::AuLoaded>(main, path, plugins);
+    }
 }
 
 /// Without macOS or the feature, the format is not compiled in.
 #[cfg(not(all(feature = "au", target_os = "macos")))]
 mod audio_unit {
-    use super::{MainThreadMarker, Measuring, Path, PluginFormat, ProbeRefusal, Read};
+    use super::{Described, MainThreadMarker, Measuring, Path, PluginFormat, ProbeRefusal, Read};
 
     pub(super) fn run(
         _main: MainThreadMarker,
@@ -58,6 +82,8 @@ mod audio_unit {
     ) -> Read {
         Err(ProbeRefusal::FormatNotCompiled(PluginFormat::AudioUnit))
     }
+
+    pub(super) fn widths(_main: MainThreadMarker, _path: &Path, _plugins: &mut [Described]) {}
 }
 
 /// Whether the plugin `id` is the one `state` is for: the one named, or, with
@@ -79,17 +105,23 @@ fn widths_of<L: InProcess>(main: MainThreadMarker, path: &Path, id: &PluginId) -
         .map(|loaded| loaded.widths())
 }
 
-/// Describes the file's plugins as `L`, reads each one's widths with one load of
-/// its own, and, when `measuring`, measures each one with another.
+/// Reads the widths of each plugin of `plugins` as `L`, one load each.
+fn fill_widths<L: InProcess>(main: MainThreadMarker, path: &Path, plugins: &mut [Described]) {
+    for plugin in plugins {
+        if let Some(id) = &plugin.id {
+            plugin.descriptor.widths = widths_of::<L>(main, path, id);
+        }
+    }
+}
+
+/// Describes the file's plugins as `L` and, when `measuring`, measures each one
+/// with one load of its own.
 fn run<L: InProcess + Describe>(
     main: MainThreadMarker,
     path: &Path,
     measuring: Option<Measuring<'_>>,
 ) -> Read {
     let mut plugins = L::describe(main, path).map_err(|e| refusal(path, e))?;
-    for (id, descriptor) in &mut plugins {
-        descriptor.widths = widths_of::<L>(main, path, id);
-    }
     let Some((state, run)) = measuring else {
         return Ok((listed(plugins), Vec::new()));
     };
