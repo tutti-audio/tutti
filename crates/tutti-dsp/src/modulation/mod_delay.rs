@@ -43,7 +43,7 @@ use crate::{DelayLine, Glide, InterpolationMode, Lerp, MaxDelay, delay_step};
 
 /// The LFO's slowest rate: 0.01 Hz, a lane's value and a cell's alike. A rate below it
 /// (or negative) reads as it.
-pub const MIN_RATE: Hz = Hz(0.01);
+pub const MIN_RATE: Hz = Hz::new(0.01);
 
 /// The most channels a swept delay has: a bus's.
 pub const MAX_MOD_DELAY_CHANNELS: usize = MAX_CHANNELS;
@@ -72,30 +72,30 @@ pub struct ModDelayControls {
 impl ModDelayControls {
     /// No sweep, no recirculation, at 1 Hz: what a non-finite control falls back to.
     pub const DEFAULT: Self = Self {
-        rate: Hz(1.0),
+        rate: Hz::new(1.0),
         depth: Seconds::ZERO,
         feedback: Feedback::NONE,
     };
 
     /// Chorus: 1 Hz, a 5 ms sweep, 0.3 feedback (for [`Sweep::CHORUS`]).
     pub const CHORUS: Self = Self {
-        rate: Hz(1.0),
-        depth: Seconds(0.005),
-        feedback: Feedback(0.3),
+        rate: Hz::new(1.0),
+        depth: Seconds::new(0.005),
+        feedback: Feedback::new(0.3),
     };
 
     /// Flanger: 0.5 Hz, a 2 ms sweep, 0.7 feedback (for [`Sweep::FLANGER`]).
     pub const FLANGER: Self = Self {
-        rate: Hz(0.5),
-        depth: Seconds(0.002),
-        feedback: Feedback(0.7),
+        rate: Hz::new(0.5),
+        depth: Seconds::new(0.002),
+        feedback: Feedback::new(0.7),
     };
 
     /// The General MIDI chorus: 0.4 Hz, a 1.9 ms sweep, no feedback (for
     /// [`Sweep::GENERAL_MIDI_CHORUS`]).
     pub const GENERAL_MIDI_CHORUS: Self = Self {
-        rate: Hz(0.4),
-        depth: Seconds(0.0019),
+        rate: Hz::new(0.4),
+        depth: Seconds::new(0.0019),
         feedback: Feedback::NONE,
     };
 }
@@ -156,20 +156,20 @@ impl ModDelayLayout {
     /// `c - 1`. Sweeping the channels out of step is what makes it feel wide.
     #[must_use]
     pub fn chorus(input: BusTopology) -> Self {
-        Self::preset(input, Sweep::CHORUS, PhaseIncrement(0.25))
+        Self::preset(input, Sweep::CHORUS, PhaseIncrement::new(0.25))
     }
 
     /// A flanger: [`Sweep::FLANGER`], channels a half cycle apart.
     #[must_use]
     pub fn flanger(input: BusTopology) -> Self {
-        Self::preset(input, Sweep::FLANGER, PhaseIncrement(0.5))
+        Self::preset(input, Sweep::FLANGER, PhaseIncrement::new(0.5))
     }
 
     /// The General MIDI chorus: [`Sweep::GENERAL_MIDI_CHORUS`], channels a quarter cycle
     /// apart, no feedback.
     #[must_use]
     pub fn general_midi_chorus(input: BusTopology) -> Self {
-        Self::preset(input, Sweep::GENERAL_MIDI_CHORUS, PhaseIncrement(0.25))
+        Self::preset(input, Sweep::GENERAL_MIDI_CHORUS, PhaseIncrement::new(0.25))
     }
 
     fn preset(input: BusTopology, sweep: Sweep, step: PhaseIncrement) -> Self {
@@ -208,7 +208,7 @@ impl ModDelayLayout {
     /// [`width`](Self::width) channels and zero after.
     #[must_use]
     pub fn offsets(&self) -> [PhaseIncrement; MAX_MOD_DELAY_CHANNELS] {
-        let mut offsets = [PhaseIncrement(0.0); MAX_MOD_DELAY_CHANNELS];
+        let mut offsets = [PhaseIncrement::new(0.0); MAX_MOD_DELAY_CHANNELS];
         let layout = self.input.layout();
         for (c, o) in (0..self.width())
             .filter_map(|c| layout.index(c))
@@ -287,7 +287,7 @@ impl<F: Float + Lerp> ModDelayBank<F> {
         let depth = depth
             .get()
             .clamp(self.sweep.depth_min().get(), self.sweep.depth_max().get());
-        let depth = SampleSpan::from_seconds(Seconds(depth), self.rate)
+        let depth = SampleSpan::from_seconds(Seconds::new(depth), self.rate)
             .unwrap_or(SampleSpan::ZERO)
             .min(SampleSpan::from_samples(self.cap.frames()));
         let feedback = controls

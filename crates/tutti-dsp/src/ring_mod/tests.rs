@@ -7,7 +7,7 @@ const RATE: SampleRate = SampleRate::SR_48K;
 fn modulator(frequency: f64) -> RingModulator {
     let mut m = RingModulator::new(RATE);
     m.aim(&RingModControls {
-        frequency: Hz(frequency),
+        frequency: Hz::new(frequency),
     });
     m
 }
@@ -67,7 +67,7 @@ fn a_frequency_change_never_jumps_the_phase() {
     let mut m = modulator(440.0);
     let mut out = run(&mut m, &[1.0; 100], 100);
     m.aim(&RingModControls {
-        frequency: Hz(1_000.0),
+        frequency: Hz::new(1_000.0),
     });
     out.extend(run(&mut m, &[1.0; 100], 100));
     for (n, &y) in out.iter().enumerate() {

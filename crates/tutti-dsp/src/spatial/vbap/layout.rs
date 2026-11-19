@@ -23,11 +23,11 @@ const POWER_FLOOR: f64 = 1e-10;
 
 /// A speaker above or below the horizontal plane by more than this makes a
 /// layout [`PanningMode::Spherical`].
-const PLANE_TOLERANCE: ArcDegrees = ArcDegrees(1e-6);
+const PLANE_TOLERANCE: ArcDegrees = ArcDegrees::new(1e-6);
 
 /// An elevation retreat that lands within this of the horizontal plane snaps
 /// to it.
-const ELEVATION_SNAP: ArcDegrees = ArcDegrees(1e-4);
+const ELEVATION_SNAP: ArcDegrees = ArcDegrees::new(1e-4);
 
 /// Whether a layout pans between pairs of speakers or triplets.
 #[derive(Debug, Clone, Copy, PartialEq, Hash, Eq)]
@@ -256,7 +256,7 @@ impl SpeakerLayout {
         self.unit_power_gains(azimuth, elevation, &mut scratch[..self.count]);
         let written = out.len().min(self.count);
         for (out, &g) in out.iter_mut().zip(&scratch[..written]) {
-            *out = Gain(g);
+            *out = Gain::new(g);
         }
         // Silence stays silent: spread would blend in an equal gain.
         if scratch[..written].iter().all(|&g| g == 0.0) {
@@ -362,7 +362,7 @@ fn fold_to_front(azimuth: Azimuth) -> Azimuth {
         // reflection rather than a rotation, so it is computed on the scalar
         // and rebuilt. `wrap` guarantees `-180..180`, so the result lands in
         // `-90..90` and needs no second wrap.
-        Azimuth(deg.signum() * (180.0 - deg.abs()))
+        Azimuth::new(deg.signum() * (180.0 - deg.abs()))
     } else {
         azimuth.wrap()
     }
@@ -381,13 +381,13 @@ fn apply_spread(spread: Spread, gains: &mut [Gain]) {
     }
     let equal_gain = 1.0 / (gains.len() as f64).sqrt();
     for gain in gains.iter_mut() {
-        *gain = Gain(crate::lerp(gain.get(), equal_gain, spread));
+        *gain = Gain::new(crate::lerp(gain.get(), equal_gain, spread));
     }
     let sum_sq: f64 = gains.iter().map(|g| g.get() * g.get()).sum();
     if sum_sq > 0.0 {
         let norm = 1.0 / sum_sq.sqrt();
         for gain in gains.iter_mut() {
-            *gain *= Gain(norm);
+            *gain *= Gain::new(norm);
         }
     }
 }

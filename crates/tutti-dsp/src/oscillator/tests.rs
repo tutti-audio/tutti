@@ -9,7 +9,7 @@ const RATE: SampleRate = SampleRate::SR_48K;
 
 fn render(wave: OscillatorWave, hz: f64, len: usize) -> Vec<f32> {
     let mut osc = Oscillator::new(wave);
-    let step = OscillatorStep::new(Hz(hz), RATE);
+    let step = OscillatorStep::new(Hz::new(hz), RATE);
     (0..len).map(|_| osc.step(step)).collect()
 }
 
@@ -143,18 +143,18 @@ fn the_band_limited_saw_leaves_the_aliased_lines_quiet() {
 #[test]
 fn a_frequency_that_is_not_finite_holds_the_phase() {
     let mut osc = Oscillator::new(OscillatorWave::Saw);
-    osc.step(OscillatorStep::<f32>::new(Hz(1_000.0), RATE));
+    osc.step(OscillatorStep::<f32>::new(Hz::new(1_000.0), RATE));
     let held = osc;
-    osc.step(OscillatorStep::<f32>::new(Hz(f64::NAN), RATE));
+    osc.step(OscillatorStep::<f32>::new(Hz::new(f64::NAN), RATE));
     assert_eq!(osc, held);
-    osc.step(OscillatorStep::<f32>::new(Hz(-5.0), RATE));
+    osc.step(OscillatorStep::<f32>::new(Hz::new(-5.0), RATE));
     assert_eq!(osc, held);
 }
 
 #[test]
 fn reset_returns_the_phase_to_zero() {
     let mut osc = Oscillator::new(OscillatorWave::Sine);
-    osc.step(OscillatorStep::<f32>::new(Hz(1_000.0), RATE));
+    osc.step(OscillatorStep::<f32>::new(Hz::new(1_000.0), RATE));
     osc.reset();
     assert_eq!(osc, Oscillator::new(OscillatorWave::Sine));
 }
@@ -166,7 +166,7 @@ fn an_f64_sine_is_the_closed_form_to_f64_precision() {
     let mut osc = Oscillator::new(OscillatorWave::Sine);
     for n in 0..4_800 {
         let exact = libm::sin(TAU * 1_234.5 * f64::from(n) / RATE.get());
-        let y: f64 = osc.step(OscillatorStep::new(Hz(1_234.5), RATE));
+        let y: f64 = osc.step(OscillatorStep::new(Hz::new(1_234.5), RATE));
         // The phase is a 64-bit count of cycles, whose rounding of `1234.5 / 48000` is
         // 2^-64 a step: far under the bound.
         assert!((y - exact).abs() < 1e-12, "sample {n}: {y} vs {exact}");
@@ -187,7 +187,7 @@ fn an_f64_saw_square_and_triangle_are_their_closed_forms_away_from_the_edges() {
     for (wave, closed) in waves {
         let mut osc = Oscillator::new(wave);
         for n in 0..48 {
-            let y: f64 = osc.step(OscillatorStep::new(Hz(1_000.0), RATE));
+            let y: f64 = osc.step(OscillatorStep::new(Hz::new(1_000.0), RATE));
             let near_edge = n <= 1 || n >= 47 || (23..=25).contains(&n);
             if !near_edge {
                 let want = closed(f64::from(n) / 48.0);
@@ -236,8 +236,8 @@ fn closed_form(wave: OscillatorWave, count: u64, inc: u64) -> f64 {
 /// to `2^-24 / 2.1e-7 = 0.08` steps, a correction error of 0.08.
 #[test]
 fn an_f32_saw_and_square_at_0_01_hz_hold_the_edge_correction_of_the_closed_form() {
-    let step = OscillatorStep::<f32>::new(Hz(0.01), RATE);
-    let inc = PhaseStep::from(PhaseIncrement(0.01 / RATE.get())).get();
+    let step = OscillatorStep::<f32>::new(Hz::new(0.01), RATE);
+    let inc = PhaseStep::from(PhaseIncrement::new(0.01 / RATE.get())).get();
     let bound = 5.0 * 2f64.powi(-24);
     for wave in [OscillatorWave::Saw, OscillatorWave::Square] {
         // Start 3.3 steps before the edges at the wrap and at the half.

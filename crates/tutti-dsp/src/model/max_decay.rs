@@ -16,9 +16,9 @@ tutti_units::ranged! {
 
 impl MaxDecay {
     /// The longest decay a control may ask for by default: 8 s.
-    pub const DEFAULT: MaxDecay = MaxDecay(Seconds(8.0));
+    pub const DEFAULT: MaxDecay = MaxDecay(Seconds::new(8.0));
     /// The most [`new`](Self::new) accepts: 60 s.
-    pub const CAP: Seconds = Seconds(60.0);
+    pub const CAP: Seconds = Seconds::new(60.0);
 }
 
 #[cfg(test)]

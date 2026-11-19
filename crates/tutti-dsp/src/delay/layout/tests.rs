@@ -5,7 +5,7 @@ use super::*;
 use crate::MaxDelayError;
 use crate::delay::times::ChannelTimesError;
 
-const MAX: MaxDelay = MaxDelay::of(Seconds(1.0));
+const MAX: MaxDelay = MaxDelay::of(Seconds::new(1.0));
 
 fn bus(width: u16) -> BusTopology {
     BusTopology::assumed(width.into()).expect("a test width is one bus")
@@ -24,21 +24,26 @@ fn a_max_delay_keeps_the_range_checked_shape() {
         new: MaxDelay::new,
         get: MaxDelay::get,
         of: Some(MaxDelay::of),
-        valid: &[Seconds(1e-9), Seconds(0.1), Seconds(2.0), MaxDelay::CAP],
+        valid: &[
+            Seconds::new(1e-9),
+            Seconds::new(0.1),
+            Seconds::new(2.0),
+            MaxDelay::CAP,
+        ],
         invalid: &[
             Seconds::ZERO,
-            Seconds(-0.1),
-            Seconds(10.000_001),
-            Seconds(1e30),
-            Seconds(f64::NAN),
-            Seconds(f64::INFINITY),
-            Seconds(f64::NEG_INFINITY),
+            Seconds::new(-0.1),
+            Seconds::new(10.000_001),
+            Seconds::new(1e30),
+            Seconds::new(f64::NAN),
+            Seconds::new(f64::INFINITY),
+            Seconds::new(f64::NEG_INFINITY),
         ],
     };
     tutti_fixtures::check_range_contract(&c);
     assert_eq!(
-        MaxDelay::try_from(Seconds(-1.0)),
-        Err(MaxDelayError(Seconds(-1.0)))
+        MaxDelay::try_from(Seconds::new(-1.0)),
+        Err(MaxDelayError(Seconds::new(-1.0)))
     );
 }
 
@@ -47,7 +52,7 @@ fn a_max_delay_keeps_the_range_checked_shape() {
 /// against an absurd rate.
 #[test]
 fn a_max_delay_is_a_line_of_the_exact_ceiling_of_its_frames() {
-    let max = MaxDelay::of(Seconds(0.1));
+    let max = MaxDelay::of(Seconds::new(0.1));
     assert_eq!(max.frames(SampleRate::SR_48K), Samples(4800));
     assert_eq!(max.frames(SampleRate::SR_44K1), Samples(4410));
     assert_eq!(
@@ -98,7 +103,7 @@ fn a_routing_refuses_what_it_cannot_hold() {
         Routing::new(two, &gains(&[0.0, 1.0, 0.7, 0.4])),
         Err(RoutingError::Row {
             row: 1,
-            sum: Amplitude(1.1)
+            sum: Amplitude::new(1.1)
         })
     );
     // A row that sums to exactly 1, and a negative weight, are held.
@@ -204,7 +209,7 @@ fn channel_times_refuse_what_is_not_a_time_and_what_does_not_fit() {
     for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -0.001] {
         assert!(
             matches!(
-                ChannelTimes::each(&[Seconds(0.1), Seconds(bad)]),
+                ChannelTimes::each(&[Seconds::new(0.1), Seconds::new(bad)]),
                 Err(ChannelTimesError::NotATime { channel: 2, .. })
             ),
             "{bad}"
@@ -214,8 +219,8 @@ fn channel_times_refuse_what_is_not_a_time_and_what_does_not_fit() {
         ChannelTimes::each(&[Seconds::ZERO; 16]),
         Err(ChannelTimesError::TooMany { count: 16, max: 15 })
     ));
-    let times = ChannelTimes::each(&[Seconds(0.1), Seconds(0.2)]).unwrap();
-    assert_eq!(times.fixed(), [Seconds(0.1), Seconds(0.2)]);
+    let times = ChannelTimes::each(&[Seconds::new(0.1), Seconds::new(0.2)]).unwrap();
+    assert_eq!(times.fixed(), [Seconds::new(0.1), Seconds::new(0.2)]);
     assert!(!times.is_linked() && ChannelTimes::linked().is_linked());
     assert_eq!(
         stereo().with_times(times).unwrap_err(),
@@ -226,18 +231,18 @@ fn channel_times_refuse_what_is_not_a_time_and_what_does_not_fit() {
         }
     );
     assert!(stereo().with_times(ChannelTimes::linked()).is_ok());
-    let past = ChannelTimes::each(&[Seconds(1.5)]).unwrap();
+    let past = ChannelTimes::each(&[Seconds::new(1.5)]).unwrap();
     assert_eq!(
         stereo().with_times(past).unwrap_err(),
         ChannelTimesError::Past {
             channel: 1,
-            time: Seconds(1.5),
-            max: Seconds(1.0)
+            time: Seconds::new(1.5),
+            max: Seconds::new(1.0)
         }
     );
     assert!(
         stereo()
-            .with_times(ChannelTimes::each(&[Seconds(1.0)]).unwrap())
+            .with_times(ChannelTimes::each(&[Seconds::new(1.0)]).unwrap())
             .is_ok(),
         "the longest is held"
     );

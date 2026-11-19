@@ -10,8 +10,8 @@ const RATE: SampleRate = SampleRate::SR_44K1;
 
 fn controls(room: f64, damp: f64) -> FreeverbControls {
     FreeverbControls {
-        room: Mix(room),
-        damp: Mix(damp),
+        room: Mix::new(room),
+        damp: Mix::new(damp),
     }
 }
 
@@ -315,7 +315,7 @@ fn the_tail_is_the_rt60_of_the_longest_comb_plus_the_chain() {
         Tail::Finite(Samples(at(1.0, 0.0))),
         "the ceiling is the room at its largest"
     );
-    assert_eq!(TAIL_FLOOR, Db(-60.0));
+    assert_eq!(TAIL_FLOOR, Db::new(-60.0));
 }
 
 /// A room size and a damping that move mid-stream move the combs' feedback and damping over

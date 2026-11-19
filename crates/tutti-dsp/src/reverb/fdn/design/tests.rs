@@ -43,14 +43,14 @@ fn every_control_designs_a_stable_network() {
     for d in [FdnLayout::default(), freezable()] {
         for &x in &nasty {
             let c = FdnControls {
-                decay: [Seconds(x); 3],
-                size: Mix(x),
-                diffusion: Mix(x),
-                pre_delay: Seconds(x),
+                decay: [Seconds::new(x); 3],
+                size: Mix::new(x),
+                diffusion: Mix::new(x),
+                pre_delay: Seconds::new(x),
                 modulation: Depth::clamped(x),
-                rate: Hz(x),
-                width: StereoWidth(x),
-                wet: Db(x),
+                rate: Hz::new(x),
+                width: StereoWidth::new(x),
+                wet: Db::new(x),
                 freeze: x > 0.5,
             };
             let n = design_of(&d, &c);
@@ -67,16 +67,16 @@ fn every_control_designs_a_stable_network() {
 fn diffusion_is_the_reflection_vector() {
     let d = freezable();
     assert_eq!(
-        fdn_of(&design_of(&d, &with(|c| c.diffusion = Mix(0.0)))).matrix,
+        fdn_of(&design_of(&d, &with(|c| c.diffusion = Mix::new(0.0)))).matrix,
         Matrix::Diagonal
     );
     assert_eq!(
-        fdn_of(&design_of(&d, &with(|c| c.diffusion = Mix(1.0)))).matrix,
+        fdn_of(&design_of(&d, &with(|c| c.diffusion = Mix::new(1.0)))).matrix,
         Matrix::Householder
     );
     let mut last_axis = f64::INFINITY;
     for diffusion in [0.1, 0.25, 0.5, 0.75, 0.9] {
-        let n = design_of(&d, &with(|c| c.diffusion = Mix(diffusion)));
+        let n = design_of(&d, &with(|c| c.diffusion = Mix::new(diffusion)));
         let Matrix::Reflection(v) = &fdn_of(&n).matrix else {
             panic!("a reflection at {diffusion}")
         };
@@ -100,7 +100,7 @@ fn a_freeze_is_lossless_and_takes_no_input() {
     let n = design_of(&d, &frozen);
     let f = fdn_of(&n);
     assert!(n.is_lossless() && n.is_stable());
-    assert_eq!(n.tail(Db(-60.0)), Ring::Unbounded);
+    assert_eq!(n.tail(Db::new(-60.0)), Ring::Unbounded);
     assert!(
         f.input.iter().all(|&g| g == Gain::SILENT),
         "the input is shut"
@@ -126,7 +126,7 @@ fn lengths_are_whole_frames_that_grow_with_size_and_rate() {
     let d = FdnLayout::default();
     let mut last = vec![0.0f64; 8];
     for size in [0.0, 0.3, 0.6, 1.0] {
-        let n = design_of(&d, &with(|c| c.size = Mix(size)));
+        let n = design_of(&d, &with(|c| c.size = Mix::new(size)));
         let lengths: Vec<f64> = fdn_of(&n).lines.iter().map(|l| l.length.get()).collect();
         assert!(lengths.iter().all(|l| l.fract() == 0.0), "{lengths:?}");
         assert!(lengths.iter().zip(&last).all(|(a, b)| a > b));
@@ -145,7 +145,7 @@ fn lengths_are_whole_frames_that_grow_with_size_and_rate() {
 #[test]
 fn the_input_feeds_every_line_and_the_ears_take_alternate_lines() {
     for n in [2usize, 8, 16] {
-        let d = FdnLayout::new(n, MaxDecay::of(Seconds(2.0)), false).unwrap();
+        let d = FdnLayout::new(n, MaxDecay::of(Seconds::new(2.0)), false).unwrap();
         let net = design_of(&d, &base());
         let f = fdn_of(&net);
         let input = 1.0 / (n as f64).sqrt();
@@ -192,8 +192,8 @@ fn the_capacity_dominates_where_rounding_matters() {
     for k in 1..100 {
         let c = FdnControls {
             decay: [d.max_decay; 3],
-            size: Mix(1.0),
-            diffusion: Mix(f64::from(k) / 100.0),
+            size: Mix::new(1.0),
+            diffusion: Mix::new(f64::from(k) / 100.0),
             pre_delay: MAX_PRE_DELAY,
             modulation: Depth::of(1.0),
             ..FdnControls::DEFAULT
@@ -213,10 +213,10 @@ fn the_capacity_dominates_where_rounding_matters() {
 #[test]
 fn the_wet_gain_is_silent_at_minus_120_and_held_at_24() {
     let d = freezable();
-    let wet_of = |db: f64| design_of(&d, &with(|c| c.wet = Db(db))).wet;
-    assert_eq!(wet_of(-120.0), Db(f64::NEG_INFINITY));
-    assert_eq!(wet_of(-200.0), Db(f64::NEG_INFINITY));
-    assert_eq!(wet_of(-119.0), Db(-119.0));
-    assert_eq!(wet_of(6.0), Db(6.0));
-    assert_eq!(wet_of(30.0), Db(24.0));
+    let wet_of = |db: f64| design_of(&d, &with(|c| c.wet = Db::new(db))).wet;
+    assert_eq!(wet_of(-120.0), Db::new(f64::NEG_INFINITY));
+    assert_eq!(wet_of(-200.0), Db::new(f64::NEG_INFINITY));
+    assert_eq!(wet_of(-119.0), Db::new(-119.0));
+    assert_eq!(wet_of(6.0), Db::new(6.0));
+    assert_eq!(wet_of(30.0), Db::new(24.0));
 }

@@ -44,7 +44,7 @@ const ATMOS: [Position; 11] = [
 fn layout(positions: &[Position]) -> SpeakerLayout {
     let p: Vec<_> = positions
         .iter()
-        .map(|&(a, e)| Direction::new(Azimuth(a), Elevation(e)))
+        .map(|&(a, e)| Direction::new(Azimuth::new(a), Elevation::new(e)))
         .collect();
     SpeakerLayout::new(&p).unwrap()
 }
@@ -76,7 +76,7 @@ fn tuples_of(layout: &SpeakerLayout) -> Vec<Vec<u16>> {
 fn raw(layout: &SpeakerLayout, azimuth: f64, elevation: f64) -> Vec<f64> {
     let mut gains = vec![0.0; layout.speaker_count()];
     layout.tuple_gains(
-        Direction::new(Azimuth(azimuth), Elevation(elevation)),
+        Direction::new(Azimuth::new(azimuth), Elevation::new(elevation)),
         &mut gains,
     );
     gains
@@ -199,8 +199,8 @@ fn the_corrected_gains_are_unit_power_everywhere() {
             for az in (0..360).step_by(15) {
                 for el in (-90..=90).step_by(30) {
                     layout.gains_into(
-                        Azimuth(f64::from(az)),
-                        Elevation(f64::from(el)),
+                        Azimuth::new(f64::from(az)),
+                        Elevation::new(f64::from(el)),
                         Spread::new_clamped(spread),
                         &mut gains,
                     );
@@ -242,7 +242,12 @@ fn a_front_only_pair_mirrors_the_rear_and_hard_pans_outside_it() {
         (345.0, 0.343_724, 0.939_071),
     ] {
         let mut got = [Gain::SILENT; 2];
-        layout.gains_into(Azimuth(az), Elevation(0.0), Spread::POINT, &mut got);
+        layout.gains_into(
+            Azimuth::new(az),
+            Elevation::new(0.0),
+            Spread::POINT,
+            &mut got,
+        );
         assert!(
             (got[0].get() - left).abs() < 1e-6 && (got[1].get() - right).abs() < 1e-6,
             "stereo at {az}: {got:?}, want [{left}, {right}]"
@@ -258,7 +263,7 @@ fn a_surrounding_layout_does_not_fold_its_rear_arc() {
     let layout = SpeakerLayout::from_bed(Bed::Quad).unwrap();
     let at = |az: f64| {
         let mut g = [Gain::SILENT; 4];
-        layout.gains_into(Azimuth(az), Elevation(0.0), Spread::POINT, &mut g);
+        layout.gains_into(Azimuth::new(az), Elevation::new(0.0), Spread::POINT, &mut g);
         g.map(Gain::get)
     };
     let front = at(0.0);
@@ -287,7 +292,7 @@ fn gains_are_not_negative() {
                     assert!(g >= 0.0, "{name} at ({a}, {e}): {g}");
                 }
                 let mut all = vec![Gain::SILENT; layout.speaker_count()];
-                layout.gains_into(Azimuth(a), Elevation(e), Spread::POINT, &mut all);
+                layout.gains_into(Azimuth::new(a), Elevation::new(e), Spread::POINT, &mut all);
                 assert!(all.iter().all(|g| g.get() >= 0.0), "{name} at ({a}, {e})");
             }
         }
@@ -317,7 +322,12 @@ fn a_source_at_a_speaker_puts_all_its_gain_there() {
     for (name, layout, positions) in presets() {
         for (s, &(a, e)) in positions.iter().enumerate() {
             let mut gains = vec![Gain::SILENT; layout.speaker_count()];
-            layout.gains_into(Azimuth(a), Elevation(e), Spread::POINT, &mut gains);
+            layout.gains_into(
+                Azimuth::new(a),
+                Elevation::new(e),
+                Spread::POINT,
+                &mut gains,
+            );
             for (other, g) in gains.iter().enumerate() {
                 let (g, want) = (g.get(), if other == s { 1.0 } else { 0.0 });
                 assert!(
@@ -396,8 +406,8 @@ fn a_shared_edge_has_the_same_gains_on_both_sides() {
     for &&((i, j), _) in &shared {
         let (pi, pj) = (ATMOS[usize::from(i)], ATMOS[usize::from(j)]);
         let (a, b) = (
-            super::super::math::direction(Direction::new(Azimuth(pi.0), Elevation(pi.1))),
-            super::super::math::direction(Direction::new(Azimuth(pj.0), Elevation(pj.1))),
+            super::super::math::direction(Direction::new(Azimuth::new(pi.0), Elevation::new(pi.1))),
+            super::super::math::direction(Direction::new(Azimuth::new(pj.0), Elevation::new(pj.1))),
         );
         let mid = [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
         let normal = super::super::math::cross(a, b);
@@ -439,7 +449,7 @@ fn a_layout_that_cannot_be_tiled_is_refused() {
     let make = |p: &[Position]| {
         let p: Vec<_> = p
             .iter()
-            .map(|&(a, e)| Direction::new(Azimuth(a), Elevation(e)))
+            .map(|&(a, e)| Direction::new(Azimuth::new(a), Elevation::new(e)))
             .collect();
         SpeakerLayout::new(&p).unwrap_err()
     };
@@ -536,8 +546,8 @@ fn a_non_finite_direction_gives_silence_without_panicking() {
             for spread in [0.0, 0.5] {
                 let mut gains = vec![Gain::UNITY; layout.speaker_count()];
                 layout.gains_into(
-                    Azimuth(az),
-                    Elevation(el),
+                    Azimuth::new(az),
+                    Elevation::new(el),
                     Spread::new_clamped(spread),
                     &mut gains,
                 );

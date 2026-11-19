@@ -76,7 +76,7 @@ impl<F: Float + Lerp> DelayGlides<F> {
 /// NaN time is no delay.
 #[inline(always)]
 fn position_of(secs: Seconds, max: Seconds, rate: SampleRate, cap: usize) -> ReadPosition {
-    let secs = Seconds(secs.get().clamp(0.0, max.get()));
+    let secs = Seconds::new(secs.get().clamp(0.0, max.get()));
     ReadPosition::of(secs, rate).min(ReadPosition::from_frames(Samples::new(cap)))
 }
 

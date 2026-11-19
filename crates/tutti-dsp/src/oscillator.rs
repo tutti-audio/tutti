@@ -109,7 +109,7 @@ impl<F: Float> OscillatorStep<F> {
     #[must_use]
     pub fn new(frequency: Hz, rate: SampleRate) -> Self {
         let f = frequency.finite_or(Hz::ZERO).get();
-        let cycles = PhaseIncrement((f / rate.get()).clamp(0.0, 0.5));
+        let cycles = PhaseIncrement::new((f / rate.get()).clamp(0.0, 0.5));
         Self {
             step: PhaseStep::from(cycles),
             cycles: F::from_unit(cycles),

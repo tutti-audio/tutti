@@ -188,19 +188,19 @@ fn latency_is_one_window() {
 #[test]
 fn latency_is_exact() {
     let g = geo(2048, 512);
-    assert_eq!(g.latency(), Seconds(2048.0 / 44_100.0));
+    assert_eq!(g.latency(), Seconds::new(2048.0 / 44_100.0));
 }
 
 /// 441 Hz at 44100 Hz on 1000 points is exactly bin 10; the frequency of bin 10.5 is 463.05 Hz.
 #[test]
 fn a_frequency_on_a_bin_boundary_is_a_whole_bin() {
     let g = StftGeometry::new(SampleRate::SR_44K1, Samples(1000), Samples(250)).unwrap();
-    assert_eq!(g.bin_of(Hz(441.0)), 10.0);
-    assert_eq!(g.bin_of(Hz(441.0)).ceil(), 10.0);
-    assert_eq!(g.frequency_of(10.5), Hz(463.05));
+    assert_eq!(g.bin_of(Hz::new(441.0)), 10.0);
+    assert_eq!(g.bin_of(Hz::new(441.0)).ceil(), 10.0);
+    assert_eq!(g.frequency_of(10.5), Hz::new(463.05));
     let g = StftGeometry::new(SampleRate::SR_48K, Samples(1024), Samples(256)).unwrap();
-    assert_eq!(g.bin_of(Hz(46.875)), 1.0);
-    assert_eq!(g.frequency_of(3.0), Hz(140.625));
+    assert_eq!(g.bin_of(Hz::new(46.875)), 1.0);
+    assert_eq!(g.frequency_of(3.0), Hz::new(140.625));
 }
 
 /// An edge a hair above a bin boundary lands past it: 441.0000001 Hz at 44.1 kHz over
@@ -208,7 +208,7 @@ fn a_frequency_on_a_bin_boundary_is_a_whole_bin() {
 #[test]
 fn an_edge_just_past_a_boundary_keeps_its_side() {
     let g = StftGeometry::new(SampleRate::SR_44K1, Samples(1000), Samples(250)).unwrap();
-    assert_eq!(g.bin_of(Hz(441.000_000_1)).ceil(), 11.0);
+    assert_eq!(g.bin_of(Hz::new(441.000_000_1)).ceil(), 11.0);
 }
 
 /// A frame advances `hop / rate` seconds: 480 / 48000 = 0.01 s.

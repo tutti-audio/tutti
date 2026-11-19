@@ -19,8 +19,8 @@ fn a_full_scale_sine_reads_one_over_root_two() {
 /// A constant block reads its magnitude, whatever its sign.
 #[test]
 fn a_constant_reads_its_magnitude() {
-    assert_eq!(rms(Mono::new(&[0.5f32; 100])), Amplitude(0.5));
-    assert_eq!(rms(Mono::new(&[-0.25f32; 7])), Amplitude(0.25));
+    assert_eq!(rms(Mono::new(&[0.5f32; 100])), Amplitude::new(0.5));
+    assert_eq!(rms(Mono::new(&[-0.25f32; 7])), Amplitude::new(0.25));
 }
 
 /// There is nothing to average, and no level.

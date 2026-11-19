@@ -123,7 +123,7 @@ impl Routing {
             if sum > 1.0 {
                 return Err(RoutingError::Row {
                     row: c,
-                    sum: Amplitude(sum),
+                    sum: Amplitude::new(sum),
                 });
             }
             r.weights[c][..n].copy_from_slice(row);
