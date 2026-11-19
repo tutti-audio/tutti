@@ -26,6 +26,7 @@ pub trait Initiator {
     /// A CI message of the connection's Group arrived.
     fn on_message(&mut self, decoded: &Decoded, now: Instant) -> Vec<Self::Action>;
 
-    /// Time has passed: every wait that has run out ends.
+    /// Time has passed: every wait that has run out ends. Calling it early is
+    /// harmless: a wait that has not run out is kept.
     fn on_timeout(&mut self, now: Instant) -> Vec<Self::Action>;
 }
