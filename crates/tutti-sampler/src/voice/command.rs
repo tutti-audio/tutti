@@ -174,11 +174,11 @@ pub(crate) enum VoiceCommand<F: SamplerFloat> {
     /// Routed by tier: in-memory primes the range on the `MemorySource` in
     /// the drain; streaming is the stream's, which owns the loop-start
     /// fadein head the reader cannot reach: [`VoicePoolHandle::send`] queues
-    /// the command and sets the loop on the voice's [`Stream`] on the calling
-    /// thread. A streaming voice the handle holds no stream for (added without
-    /// one) is not set: the loss is counted ([`PoolDrops`]) and the intent is
-    /// not recorded — a `Playback` claiming a loop the stream never set would
-    /// be replayed as real on the next insert. The drain records a streaming
+    /// the command and publishes the loop to the voice's [`Stream`] on the
+    /// calling thread. A streaming voice the handle holds no stream for (added
+    /// without one) is not set: the loss is counted ([`PoolDrops`]) and the
+    /// intent is not recorded — a `Playback` claiming a loop the stream never
+    /// took would be replayed as real on the next insert. The drain records a streaming
     /// slot's loop only when the handle named that slot's own stream
     /// ([`PoolDrops::loops_not_forwarded`] otherwise).
     UpdateLoop {
@@ -192,8 +192,8 @@ pub(crate) enum VoiceCommand<F: SamplerFloat> {
     /// One command reaches both tiers, which is why it is not folded into
     /// [`UpdateSpeed`](Self::UpdateSpeed): in-memory drives a reversed index in
     /// the hot read, streaming is the stream's direction
-    /// ([`Stream::set_direction`]), which [`VoicePoolHandle::send`] sets on
-    /// the voice's stream beside queueing the record.
+    /// ([`Stream::direction_cell`]), which [`VoicePoolHandle::send`] publishes
+    /// to the voice's stream beside queueing the record.
     UpdateReverse {
         /// The slot to set.
         id: SlotId,
@@ -637,10 +637,10 @@ impl<F: SamplerFloat> VoiceNodeHandle<F> {
 /// reader's width, and shares the rate the reader was last prepared at, so
 /// `send` can build a stretch filter that matches, on this thread. It holds the [`Stream`] of every
 /// streaming voice added through [`add_streaming`](Self::add_streaming), so
-/// `send` sets a streaming voice's loop and direction on its stream itself: the
-/// pool's drain has no stream to set them on, and a stream cannot live in a
-/// voice (its drop sends on a bounded queue, which the audio thread must not
-/// do). A stream ends when its voice is removed.
+/// `send` publishes a streaming voice's loop and direction to its stream itself:
+/// the pool's drain has no stream to publish them to, and a stream cannot live
+/// in a voice (its drop sends on a bounded queue, which the audio thread must
+/// not do). A stream ends when its voice is removed.
 ///
 /// # Ids the drain refused
 ///
@@ -688,11 +688,9 @@ pub struct VoicePoolHandle<F: SamplerFloat> {
 }
 
 /// [`VoicePoolHandle::streams`]: the table is locked for a lookup or for
-/// queueing a command beside changing it, never across a send to the streamer;
-/// each stream has a lock of its own, held across the send, so two commands for
-/// one slot reach its stream and the pool in one order and a command for another
-/// slot (a remove, an in-memory add) never waits on the streamer. Control
-/// threads only.
+/// queueing a command beside changing it; each stream has a lock of its own,
+/// held across the publish, so two commands for one slot reach its stream and
+/// the pool in one order. Control threads only.
 pub(crate) type SlotStreams<F> = Arc<Mutex<HashMap<SlotId, Arc<Mutex<Stream<F>>>>>>;
 
 /// A streaming add that did not reach the pool: why, and the stream, which the
