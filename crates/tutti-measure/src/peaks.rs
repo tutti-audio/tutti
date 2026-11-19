@@ -326,7 +326,7 @@ fn block_of(samples: &[f64]) -> PeakBlock {
 /// Not for the audio thread: the summary grows with the audio, so a push
 /// allocates.
 #[derive(Debug, Clone)]
-pub struct PeakMeter<S: Sample = f32> {
+pub struct PeakMeter<S: Sample> {
     block: usize,
     layout: ChannelLayout,
     /// Per channel: samples of an incomplete block, all the same length.

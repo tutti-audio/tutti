@@ -308,7 +308,7 @@ pub(crate) fn onset_lag(geometry: StftGeometry) -> Samples {
 ///
 /// Not for the audio thread: it keeps one novelty value per frame, so it grows
 /// with the audio and allocates.
-pub struct OnsetMeter<S: Sample = f32> {
+pub struct OnsetMeter<S: Sample> {
     plan: OnsetPlan,
     cutter: FrameCutter,
     fft: FftScratch<f64>,
@@ -464,8 +464,8 @@ pub fn detect_onsets<S: Sample>(
 /// A meter for `plan` fed `samples`, with the caller's scratch lent to it: the
 /// whole-buffer run of the crate's own callers (tempo, notes), which hold a
 /// resolved plan and `f64` samples.
-pub(crate) fn run(plan: OnsetPlan, samples: &[f64], fft: &mut FftScratch<f64>) -> OnsetMeter {
-    let mut meter = OnsetMeter::new(plan);
+pub(crate) fn run(plan: OnsetPlan, samples: &[f64], fft: &mut FftScratch<f64>) -> OnsetMeter<f64> {
+    let mut meter = OnsetMeter::<f64>::new(plan);
     core::mem::swap(&mut meter.fft, fft);
     meter.feed(samples, |_| {});
     core::mem::swap(&mut meter.fft, fft);

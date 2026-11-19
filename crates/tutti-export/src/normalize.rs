@@ -376,13 +376,13 @@ impl Reading {
 /// A loudness meter over channels with a placement.
 struct PlacedMeter {
     layout: ChannelLayout,
-    meter: LoudnessMeter,
+    meter: LoudnessMeter<f32>,
 }
 
 /// A true-peak meter over channels with no placement.
 struct UnplacedMeter {
     layout: ChannelLayout,
-    meter: TruePeakMeter,
+    meter: TruePeakMeter<f32>,
 }
 
 /// What a peak-normalizing output measures with: loudness when its channels
