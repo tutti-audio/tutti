@@ -24,6 +24,9 @@ serde = ["dep:serde", "tutti-plugin-types/serde"]
 [dependencies]
 # `ProbeError`: the typed account a failed probe holds (the probe's wire types).
 tutti-plugin-types = { version = "0.0.1", path = "../tutti-plugin-types", features = ["probe-wire"] }
+# `Reaped`, the guard on the probe's child process, and `HOST_PID_ENV`, how the
+# host states its pid to it.
+tutti-plugin-ipc-ffi = { version = "0.0.1", path = "../tutti-plugin-ipc-ffi" }
 # `spawn_named` and `StopToken`: the scan's worker thread and its stop request.
 tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
 serde = { version = "1", features = ["derive"], optional = true }
@@ -31,10 +34,11 @@ thiserror = { workspace = true, features = ["std"] }
 tracing.workspace = true
 # The scan's progress and change channels.
 crossbeam-channel = "0.5"
+# The probe's private result directory (pure Rust; removed on drop, panic included).
+tempfile = "3"
 
 [dev-dependencies]
 tutti-units = { version = "0.0.1", path = "../tutti-units", default-features = false }
-tempfile = "3"
 # The format the serde round trip runs through.
 serde_json = "1"
 # The non-self-describing format the round trip also runs through.

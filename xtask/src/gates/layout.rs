@@ -141,7 +141,11 @@ const ONLY: &[(&str, &[&str])] = &[
             "tutti-tempo",
         ],
     ),
-    ("tutti-plugin-db", &["tutti-plugin-types", "tutti-rt"]),
+    // The probe client's child guard and its host-pid variable.
+    (
+        "tutti-plugin-db",
+        &["tutti-plugin-types", "tutti-rt", "tutti-plugin-ipc-ffi"],
+    ),
     (
         "tutti-plugin-ipc",
         &[

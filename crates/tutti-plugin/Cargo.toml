@@ -55,8 +55,6 @@ tutti-graph = { version = "0.0.1", path = "../tutti-graph" }
 # The process edge: the wire, the slab, the server's launch and the client of a
 # served plugin.
 tutti-plugin-ipc = { version = "0.0.1", path = "../tutti-plugin-ipc" }
-# `HOST_PID_ENV`: how the host states its pid to the probe it spawns.
-tutti-plugin-ipc-ffi = { version = "0.0.1", path = "../tutti-plugin-ipc-ffi" }
 
 # Shared value vocabulary used across host crates + IPC protocol.
 tutti-plugin-types = { version = "0.0.1", path = "../tutti-plugin-types", features = ["serde", "probe-wire"] }
@@ -81,9 +79,6 @@ tutti-vst2-host = { version = "0.0.1", path = "../tutti-vst2-host", optional = t
 
 # `spawn_named`: the catalog's background save and the probe's tests' threads.
 tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
-
-# The probe's private result directory (pure Rust; removed on drop, panic included).
-tempfile = "3"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # Audio Unit hosting (optional, macOS only): `au` enables nothing elsewhere.
@@ -119,6 +114,8 @@ tutti-export = { path = "../tutti-export", default-features = false }
 tutti-nodes = { path = "../tutti-nodes", default-features = false, features = ["testing"] }
 # The lane's `ControlProgram`, for the tests and the example that build one.
 tutti-modulation = { path = "../tutti-modulation", default-features = false }
+# The catalog tests' scratch directories.
+tempfile = "3"
 # Finds the reference plugins and the plugin-server beside the test binary.
 tutti-fixtures = { path = "../../testing/tutti-fixtures", features = ["plugin"] }
 assert_no_alloc = { version = "1", default-features = false }

@@ -86,13 +86,22 @@ fn scan_picks_up_a_new_file() {
 /// A catalog over a directory holding one copy of the reference plugin, and the
 /// copy's path.
 fn catalog_with_one_plugin(dir: &tempfile::TempDir) -> (Catalog, std::path::PathBuf) {
+    catalog_over_one_plugin(dir, CatalogConfig::new(dir.path()))
+}
+
+/// [`catalog_with_one_plugin`] under `config`, whose scan directories and probe
+/// locator it sets.
+fn catalog_over_one_plugin(
+    dir: &tempfile::TempDir,
+    config: CatalogConfig,
+) -> (Catalog, std::path::PathBuf) {
     let scanned_dir = dir.path().join("plugins");
     std::fs::create_dir(&scanned_dir).expect("the scanned directory");
     let file = scanned_dir.join("Only.clap");
     std::fs::copy(tutti_fixtures::clap_probe(), &file).expect("drop a plugin in");
     let catalog = Catalog::new(
         PluginDb::new(),
-        CatalogConfig::new(dir.path())
+        config
             .scan_dirs(vec![scanned_dir])
             .probe_locator(Locator::at(tutti_fixtures::plugin_probe())),
         |_| Ok(()),
@@ -100,8 +109,8 @@ fn catalog_with_one_plugin(dir: &tempfile::TempDir) -> (Catalog, std::path::Path
     (catalog, file)
 }
 
-/// **A scan measures only when the catalog was told to**: a
-/// plain scan leaves `measured` empty, a catalog `with_measuring` records what
+/// **A scan measures only when the config says to**: a
+/// plain scan leaves `measured` empty, a config that is `measuring()` records what
 /// the probe found, the configuration it was found at and a verdict.
 #[test]
 fn a_scan_measures_only_when_asked() {
@@ -114,8 +123,8 @@ fn a_scan_measures_only_when_asked() {
     );
 
     let dir = tempfile::TempDir::new().expect("a scratch directory");
-    let (catalog, _) = catalog_with_one_plugin(&dir);
-    let mut measuring = catalog.with_measuring();
+    let (mut measuring, _) =
+        catalog_over_one_plugin(&dir, CatalogConfig::new(dir.path()).measuring());
     scan(&mut measuring);
     let (_, descriptor) = measuring.iter().next().expect("the plugin is listed");
     let measured = descriptor.measured.expect("the scan measured it");
