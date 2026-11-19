@@ -1,9 +1,9 @@
 //! The session's node modes (doc 013, "Bypass and mute are graph state", M2's
-//! session half): `Graph::set_mode` and `Graph::mode` over the executor's
+//! session half): `ModeTarget`, `key.mode()`, over the executor's
 //! `NodeMode` (M1, `tutti-graph/tests/mixing/mode.rs`, pins the fades, the bypass
-//! line and the parking; this suite pins what the session adds: the call
-//! reaches the running unit, is a control and not an edit, and refuses a
-//! node that is not there).
+//! line and the parking; this suite pins what the session adds: the write
+//! reaches the running unit, is a control and not an edit, reads back through
+//! `get`, and is refused for a node that is not there).
 //!
 //! Every figure is analytic: a constant `A` through a node that halves it, so
 //! the active output is `A / 2`, the bypassed output is `A` (the node has no
@@ -12,9 +12,9 @@
 
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
-use tutti_graph::{Cx, ForkByClone, Io, Node, NodeKey, Prepare, Shape, Status};
+use tutti_graph::{Cx, ForkByClone, Io, Node, Prepare, Shape, Status};
 use tutti_nodes::testing::Const;
-use tutti_session::{InPort, ModeError, NodeMode, OutPort, Root, Session};
+use tutti_session::{InPort, Key, NodeMode, OutPort, Root, Session, ValueErrorKind};
 
 const A: f32 = 0.25;
 const BLOCK: usize = 64;
@@ -44,7 +44,7 @@ impl Node for Halve {
 
 struct Rig {
     s: Session,
-    halve: NodeKey,
+    halve: Key<ForkByClone<Halve>>,
 }
 
 /// `Const(A) -> Halve -> output 0`, committed once.
@@ -59,10 +59,7 @@ fn rig() -> Rig {
         .unwrap();
     let _ = s.update();
     assert!(!s.graph_ref().is_edited());
-    Rig {
-        s,
-        halve: halve.erase(),
-    }
+    Rig { s, halve }
 }
 
 impl Rig {
@@ -90,25 +87,29 @@ fn each_mode_reaches_the_running_node() {
     let mut r = rig();
     assert!(all_are(&r.settled(), A * 0.5), "active halves");
 
-    r.s.graph().set_mode(r.halve, NodeMode::Bypassed).unwrap();
+    r.s.set(r.halve.mode().to(NodeMode::Bypassed)).unwrap();
     assert!(all_are(&r.settled(), A), "bypassed passes the input");
 
-    r.s.graph().set_mode(r.halve, NodeMode::Muted).unwrap();
+    r.s.set(r.halve.mode().to(NodeMode::Muted)).unwrap();
     assert!(all_are(&r.settled(), 0.0), "muted is +0.0");
 
-    r.s.graph().set_mode(r.halve, NodeMode::Active).unwrap();
+    r.s.set(r.halve.mode().to(NodeMode::Active)).unwrap();
     assert!(all_are(&r.settled(), A * 0.5), "active again");
 }
 
-/// `mode` reads back what `set_mode` stored, and is `Active` for a node never
-/// given one.
+/// A mode reads back through `get` the moment it is written, before any
+/// update, and is `Active` for a node never given one.
 #[test]
 fn mode_reads_back_what_was_set() {
     let mut r = rig();
+    assert_eq!(r.s.get(r.halve.mode()).unwrap(), NodeMode::Active);
+    r.s.set(r.halve.mode().to(NodeMode::Bypassed)).unwrap();
+    assert_eq!(r.s.get(r.halve.mode()).unwrap(), NodeMode::Bypassed);
+    r.s.set(r.halve.mode().modify(|_| NodeMode::Muted)).unwrap();
+    assert_eq!(r.s.get(r.halve.mode()).unwrap(), NodeMode::Muted);
+    // The editor takes it with the next update.
     assert_eq!(r.s.graph_ref().mode(r.halve).unwrap(), NodeMode::Active);
-    r.s.graph().set_mode(r.halve, NodeMode::Bypassed).unwrap();
-    assert_eq!(r.s.graph_ref().mode(r.halve).unwrap(), NodeMode::Bypassed);
-    r.s.graph().set_mode(r.halve, NodeMode::Muted).unwrap();
+    let _ = r.settled();
     assert_eq!(r.s.graph_ref().mode(r.halve).unwrap(), NodeMode::Muted);
 }
 
@@ -120,7 +121,8 @@ fn a_mode_is_not_an_edit() {
     let plan = r.s.graph_ref().testing().sent_plan().expect("a plan");
     let sent = r.s.graph_ref().testing().commits_sent();
 
-    r.s.graph().set_mode(r.halve, NodeMode::Bypassed).unwrap();
+    r.s.set(r.halve.mode().to(NodeMode::Bypassed)).unwrap();
+    let _ = r.s.update();
     assert!(!r.s.graph_ref().is_edited(), "a mode marks nothing edited");
     let _ = r.settled();
 
@@ -133,27 +135,23 @@ fn a_mode_is_not_an_edit() {
     assert!(std::sync::Arc::ptr_eq(&plan, &now), "the same plan");
 }
 
-/// A node that is not in the graph, or no longer is, is refused, and reads
-/// `Active`.
+/// A node that is no longer in the graph is refused at the call, naming the
+/// mode target, whatever the value, and its mode is no longer readable.
 #[test]
-fn a_missing_node_is_refused() {
+fn a_removed_node_is_refused() {
     let mut r = rig();
-    let stranger = NodeKey::fresh();
-    assert_eq!(
-        r.s.graph().set_mode(stranger, NodeMode::Muted),
-        Err(ModeError::NoSuchNode { node: stranger })
-    );
-    assert_eq!(r.s.graph_ref().mode(stranger).unwrap_err().node(), stranger);
-
-    r.s.graph().set_mode(r.halve, NodeMode::Muted).unwrap();
+    r.s.set(r.halve.mode().to(NodeMode::Muted)).unwrap();
     r.s.graph().remove(r.halve).unwrap();
+    let refused = r.s.set(r.halve.mode().to(NodeMode::Bypassed)).unwrap_err();
+    assert_eq!(refused.kind, ValueErrorKind::NoSuchTarget);
+    assert!(refused.target.is_some_and(|t| t.is(r.halve.mode())));
     assert_eq!(
-        r.s.graph().set_mode(r.halve, NodeMode::Bypassed),
-        Err(ModeError::NoSuchNode { node: r.halve })
+        r.s.get(r.halve.mode()).unwrap_err().kind,
+        ValueErrorKind::NoSuchTarget
     );
     assert_eq!(
         r.s.graph_ref().mode(r.halve).unwrap_err().node(),
-        r.halve,
+        r.halve.erase(),
         "a removed node's mode goes with it, and asking for it is refused"
     );
 }

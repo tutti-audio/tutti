@@ -727,11 +727,10 @@ fn a_plugin_that_grows_wider_than_a_block_is_refused_by_name() {
 /// **A node muted before its plugin changes ports is still muted after:** the
 /// swap keeps the mode of the key.
 fn a_muted_node_stays_muted_through_a_port_change() {
-    use tutti_session::NodeMode;
+    use tutti_session::{ModeTarget, NodeMode};
     let mut r = rebound(0);
     let node = r.node;
-    r.s.graph()
-        .set_mode(node, NodeMode::Muted)
+    r.s.set(ModeTarget::of(node).to(NodeMode::Muted))
         .expect("a node can be muted");
     r.change_ports(1);
     let _ = r.until("the wider node", |s| {
@@ -746,12 +745,11 @@ fn a_muted_node_stays_muted_through_a_port_change() {
 /// wider node is at the key, still bypassed, and holds the Processor (the
 /// rebuild stops settling).
 fn a_bypassed_plugin_node_is_re_inserted_and_takes_its_processor() {
-    use tutti_session::NodeMode;
+    use tutti_session::{ModeTarget, NodeMode};
     let mut r = rebound(0);
     let node = r.node;
     r.until("a block", |s| s.graph_ref().node_outputs(node).is_ok());
-    r.s.graph()
-        .set_mode(node, NodeMode::Bypassed)
+    r.s.set(ModeTarget::of(node).to(NodeMode::Bypassed))
         .expect("a node can be bypassed");
     for _ in 0..8 {
         let _ = r.channel(0);
