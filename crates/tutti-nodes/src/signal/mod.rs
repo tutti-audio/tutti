@@ -1,6 +1,6 @@
 //! Signal-driven modulation sources: graph nodes that
 //! send a raw value in `[0, 1]` into a control lane's event input,
-//! addressed `ParamAddr::Id(source.0)`.
+//! addressed `ParamAddr::Id(source.get())`.
 //!
 //! - [`EnvelopeFollowerNode`]: an audio input's level, on the play-clock
 //!   grid, one grid step late.

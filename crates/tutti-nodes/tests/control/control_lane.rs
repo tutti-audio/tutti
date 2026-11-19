@@ -1096,7 +1096,7 @@ fn an_input_offset_is_exact_from_its_frame() {
     let (mut ed, mut exec) = probes(128, &[2], (0.0, 96.0));
     let input = InputLayer {
         id: LayerId(1),
-        source: SourceId(7),
+        source: SourceId::new(ParamId::new(7)),
         amount: amount(0.5),
     };
     let p = ControlProgram::new(None, vec![], vec![input]).expect("valid");
@@ -1157,7 +1157,7 @@ fn a_republished_program_reads_a_new_source() {
     let (mut ed, mut exec) = probes(128, &[2], (0.0, 96.0));
     let input = |src: u32, depth: f64| InputLayer {
         id: LayerId(u64::from(src)),
-        source: SourceId(src),
+        source: SourceId::new(ParamId::new(src)),
         amount: amount(depth),
     };
     let eight = (1..=8).map(|k| input(k, 0.1)).collect();
@@ -1200,7 +1200,7 @@ fn a_reused_source_id_starts_from_nothing() {
     let reads3 = || {
         let input = InputLayer {
             id: LayerId(1),
-            source: SourceId(3),
+            source: SourceId::new(ParamId::new(3)),
             amount: amount(0.5),
         };
         ControlProgram::new(None, vec![], vec![input]).expect("valid")
@@ -1249,7 +1249,7 @@ fn an_unread_source_is_no_point() {
     let (mut ed, mut exec) = probes(128, &[], (0.0, 1.0));
     let input = InputLayer {
         id: LayerId(1),
-        source: SourceId(7),
+        source: SourceId::new(ParamId::new(7)),
         amount: amount(0.5),
     };
     let p = ControlProgram::new(None, vec![], vec![input]).expect("valid");

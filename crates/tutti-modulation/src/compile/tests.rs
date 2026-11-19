@@ -527,14 +527,14 @@ fn an_anchor_is_carried_until_a_play_start() {
 fn a_signal_source_keeps_its_id() {
     let rig = Rig::new();
     let c0 = rig.compile(None, now(1, 0));
-    assert_eq!(c0.nodes[&SourceKey(13)].id, SourceId(0));
-    assert_eq!(c0.nodes[&SourceKey(14)].id, SourceId(1));
+    assert_eq!(c0.nodes[&SourceKey(13)].id, SourceId::new(ParamId::new(0)));
+    assert_eq!(c0.nodes[&SourceKey(14)].id, SourceId::new(ParamId::new(1)));
     let mut more = Rig::new();
     more.sources.push((SourceKey(1), follower()));
     let c1 = more.compile(Some(&c0), now(1, 0));
-    assert_eq!(c1.nodes[&SourceKey(13)].id, SourceId(0));
-    assert_eq!(c1.nodes[&SourceKey(14)].id, SourceId(1));
-    assert_eq!(c1.nodes[&SourceKey(1)].id, SourceId(2));
+    assert_eq!(c1.nodes[&SourceKey(13)].id, SourceId::new(ParamId::new(0)));
+    assert_eq!(c1.nodes[&SourceKey(14)].id, SourceId::new(ParamId::new(1)));
+    assert_eq!(c1.nodes[&SourceKey(1)].id, SourceId::new(ParamId::new(2)));
     assert_eq!(
         c1.nodes[&SourceKey(14)].kind,
         SignalKind::NoteEnvelope { adsr: adsr() }
@@ -547,13 +547,21 @@ fn a_signal_source_keeps_its_id() {
     swap.sources.push((SourceKey(2), follower()));
     let c2 = swap.compile(Some(&c1), now(1, 0));
     assert!(!c2.nodes.contains_key(&SourceKey(13)));
-    assert_eq!(c2.nodes[&SourceKey(2)].id, SourceId(3), "not 13's id");
+    assert_eq!(
+        c2.nodes[&SourceKey(2)].id,
+        SourceId::new(ParamId::new(3)),
+        "not 13's id"
+    );
     // Nor in any later compile.
     swap.sources.push((SourceKey(3), follower()));
     let c3 = swap.compile(Some(&c2), now(1, 0));
-    assert_eq!(c3.nodes[&SourceKey(2)].id, SourceId(3));
-    assert_eq!(c3.nodes[&SourceKey(3)].id, SourceId(4), "never 13's id");
-    assert_eq!(c3.next_source, SourceId(5));
+    assert_eq!(c3.nodes[&SourceKey(2)].id, SourceId::new(ParamId::new(3)));
+    assert_eq!(
+        c3.nodes[&SourceKey(3)].id,
+        SourceId::new(ParamId::new(4)),
+        "never 13's id"
+    );
+    assert_eq!(c3.next_source, SourceId::new(ParamId::new(5)));
 }
 
 /// Each refusal fires, by name.

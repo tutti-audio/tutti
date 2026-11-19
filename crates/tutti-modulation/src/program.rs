@@ -22,8 +22,8 @@ use core::fmt;
 use tutti_curve::{Law, Piece};
 use tutti_rt::{Param, SplitMix64};
 use tutti_units::{
-    Azimuth, Beat, BeatsPerCycle, Depth, Frame, Hz, Normalized, Phase, PhaseIncrement, Real,
-    SamplePosition, SampleRate, UnitParam,
+    Azimuth, Beat, BeatsPerCycle, Depth, Frame, Hz, Normalized, ParamId, Phase, PhaseIncrement,
+    Real, SamplePosition, SampleRate, UnitParam,
 };
 
 use crate::curve::{Curve, CurveSegment};
@@ -86,9 +86,23 @@ impl Eq for DepthSnapshot {}
 pub struct LayerId(pub u64);
 
 /// A signal source's identity on a lane's event input: its events are
-/// addressed `ParamAddr::Id(source.0)` and carry its raw value.
+/// addressed `ParamAddr::Id(source.get())` and carry its raw value.
 #[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
-pub struct SourceId(pub u32);
+pub struct SourceId(ParamId);
+
+impl SourceId {
+    /// The source whose events are addressed `id`.
+    #[must_use]
+    pub const fn new(id: ParamId) -> Self {
+        Self(id)
+    }
+
+    /// The id its events are addressed to.
+    #[must_use]
+    pub const fn get(self) -> ParamId {
+        self.0
+    }
+}
 
 /// The clock a layer's phase runs on.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -270,7 +284,7 @@ impl DepthBy {
 }
 
 /// A signal source's raw value (its events on the lane's event input,
-/// addressed `ParamAddr::Id(source.0)`), shaped into an offset.
+/// addressed `ParamAddr::Id(source.get())`), shaped into an offset.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct InputLayer {
     /// Its identity and sum order (after every [`Layer`]).
