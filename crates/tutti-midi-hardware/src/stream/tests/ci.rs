@@ -4,6 +4,7 @@
 
 use super::*;
 use crate::{Answer, CiChange, PeerId, Polled, ReportEnd};
+use tutti_midi_device::Initiator;
 use tutti_midi_device::{
     CI_VERSION, CiCategories, CiDeviceId, CiHeader, CiMessage, Decoded, Destination, DiscoveryData,
     INQUIRY_TIMEOUT, MaxSysexSize, Muid,

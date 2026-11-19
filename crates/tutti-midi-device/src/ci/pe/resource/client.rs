@@ -332,24 +332,6 @@ impl ResourceInitiator {
         self.map(actions, now)
     }
 
-    /// When [`on_timeout`](Self::on_timeout) is next needed.
-    #[must_use]
-    pub fn deadline(&self) -> Option<Instant> {
-        self.pe.deadline()
-    }
-
-    /// Time has passed.
-    pub fn on_timeout(&mut self, now: Instant) -> Vec<ResourceAction> {
-        let actions = self.pe.on_timeout(now);
-        self.map(actions, now)
-    }
-
-    /// A CI message of the connection's Group arrived.
-    pub fn on_message(&mut self, decoded: &Decoded, now: Instant) -> Vec<ResourceAction> {
-        let actions = self.pe.on_message(decoded, now);
-        self.map(actions, now)
-    }
-
     fn call_id(&mut self) -> CallId {
         let id = CallId(self.next_call);
         self.next_call = self.next_call.wrapping_add(1);
@@ -912,14 +894,16 @@ impl Initiator for ResourceInitiator {
     type Action = ResourceAction;
 
     fn deadline(&self) -> Option<Instant> {
-        Self::deadline(self)
+        self.pe.deadline()
     }
 
     fn on_message(&mut self, decoded: &Decoded, now: Instant) -> Vec<ResourceAction> {
-        Self::on_message(self, decoded, now)
+        let actions = self.pe.on_message(decoded, now);
+        self.map(actions, now)
     }
 
     fn on_timeout(&mut self, now: Instant) -> Vec<ResourceAction> {
-        Self::on_timeout(self, now)
+        let actions = self.pe.on_timeout(now);
+        self.map(actions, now)
     }
 }

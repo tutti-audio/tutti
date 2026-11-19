@@ -1,8 +1,8 @@
 use std::time::Instant;
 
 use tutti_midi_device::{
-    CI_VERSION, Capabilities, CiMessage, Decoded, Endpoint, Muid, ProfileChannels, ProfileId,
-    ProfileInitiator, ProfileTarget, Supports,
+    CI_VERSION, Capabilities, CiMessage, Decoded, Endpoint, Initiator, Muid, ProfileChannels,
+    ProfileId, ProfileInitiator, ProfileTarget, Supports,
 };
 use tutti_ump::{FunctionBlockId, GroupSpan, MidiChannel};
 
@@ -11,15 +11,18 @@ use super::*;
 fn dialect(zones: &[(u8, u16)]) -> Dialect {
     let (mut peer, _) = ProfileInitiator::new(Muid::of(1), Muid::of(2), Instant::now());
     for &(manager, channels) in zones {
-        peer.on_message(&Decoded::Message(CiMessage::ProfileEnabled {
-            source: Muid::of(2),
-            ci_version: CI_VERSION,
-            target: ProfileTarget::Channel {
-                channel: MidiChannel::of(manager),
-                channels: ProfileChannels::of(channels),
-            },
-            profile: ProfileId::MPE,
-        }));
+        peer.on_message(
+            &Decoded::Message(CiMessage::ProfileEnabled {
+                source: Muid::of(2),
+                ci_version: CI_VERSION,
+                target: ProfileTarget::Channel {
+                    channel: MidiChannel::of(manager),
+                    channels: ProfileChannels::of(channels),
+                },
+                profile: ProfileId::MPE,
+            }),
+            Instant::now(),
+        );
     }
     let endpoint = Endpoint::local(
         Supports::of(Capabilities {

@@ -218,81 +218,6 @@ impl ProcessInitiator {
         self.report.is_some()
     }
 
-    /// When the Initiator next needs [`on_timeout`](Self::on_timeout), or `None`
-    /// with nothing waiting.
-    #[must_use]
-    pub fn deadline(&self) -> Option<Instant> {
-        Pending::earliest(
-            self.capabilities
-                .wait()
-                .into_iter()
-                .chain(self.report.map(|report| report.wait)),
-        )
-    }
-
-    /// Time has passed: everything whose wait is over ends. Calling it early is
-    /// harmless.
-    pub fn on_timeout(&mut self, now: Instant) -> Vec<ProcessAction> {
-        let mut actions = Vec::new();
-        if self.capabilities.expire(now) {
-            actions.push(ProcessAction::CapabilitiesTimedOut);
-        }
-        if self.report.is_some_and(|report| report.wait.expired(now)) {
-            self.report = None;
-            actions.push(ProcessAction::ReportTimedOut);
-        }
-        actions
-    }
-
-    /// A CI message of the connection's Group arrived.
-    pub fn on_message(&mut self, decoded: &Decoded, now: Instant) -> Vec<ProcessAction> {
-        let mut actions = Vec::new();
-        let Decoded::Message(message) = decoded else {
-            return actions;
-        };
-        if !self.link.is_from_peer(message) || !self.link.is_to_us(message) {
-            return actions;
-        }
-        let address = message.header().device_id;
-        match message {
-            CiMessage::ProcessCapabilitiesReply { features, .. }
-                if self.capabilities.is_asking() =>
-            {
-                self.capabilities = Handshake::Answered(*features);
-                actions.push(ProcessAction::Capabilities(*features));
-            }
-            CiMessage::MessageReportReply { scope, .. } => {
-                if let Some(report) = self.report.as_mut()
-                    && matches!(report.stage, Stage::AwaitingReply)
-                    && scope.address() == report.request.scope.address()
-                {
-                    report.stage = Stage::Reporting;
-                    report.wait.restart(now, PEER_REPLY_TIMEOUT);
-                    actions.push(ProcessAction::ReportBegan {
-                        declared: scope.within(&report.request.scope),
-                    });
-                }
-            }
-            CiMessage::MessageReportEnd { .. } => {
-                if self.report.is_some_and(|report| {
-                    matches!(report.stage, Stage::Reporting)
-                        && report.request.scope.address() == address
-                }) {
-                    self.report = None;
-                    actions.push(ProcessAction::ReportEnded);
-                }
-            }
-            CiMessage::Ack { ack, .. } => {
-                if let Some(wait) = TimeoutWait::from_ack(ack) {
-                    self.on_wait(address, ack.ack_sub_id2.get(), wait);
-                }
-            }
-            CiMessage::Nak { nak, .. } => self.on_nak(address, nak, &mut actions),
-            _ => {}
-        }
-        actions
-    }
-
     /// A Timeout Wait: the time asked is added to the deadline of the transaction
     /// it names.
     fn on_wait(&mut self, address: CiDeviceId, original: u8, wait: TimeoutWait) {
@@ -347,15 +272,72 @@ impl Initiator for ProcessInitiator {
     type Action = ProcessAction;
 
     fn deadline(&self) -> Option<Instant> {
-        Self::deadline(self)
+        Pending::earliest(
+            self.capabilities
+                .wait()
+                .into_iter()
+                .chain(self.report.map(|report| report.wait)),
+        )
     }
 
     fn on_message(&mut self, decoded: &Decoded, now: Instant) -> Vec<ProcessAction> {
-        Self::on_message(self, decoded, now)
+        let mut actions = Vec::new();
+        let Decoded::Message(message) = decoded else {
+            return actions;
+        };
+        if !self.link.is_from_peer(message) || !self.link.is_to_us(message) {
+            return actions;
+        }
+        let address = message.header().device_id;
+        match message {
+            CiMessage::ProcessCapabilitiesReply { features, .. }
+                if self.capabilities.is_asking() =>
+            {
+                self.capabilities = Handshake::Answered(*features);
+                actions.push(ProcessAction::Capabilities(*features));
+            }
+            CiMessage::MessageReportReply { scope, .. } => {
+                if let Some(report) = self.report.as_mut()
+                    && matches!(report.stage, Stage::AwaitingReply)
+                    && scope.address() == report.request.scope.address()
+                {
+                    report.stage = Stage::Reporting;
+                    report.wait.restart(now, PEER_REPLY_TIMEOUT);
+                    actions.push(ProcessAction::ReportBegan {
+                        declared: scope.within(&report.request.scope),
+                    });
+                }
+            }
+            CiMessage::MessageReportEnd { .. } => {
+                if self.report.is_some_and(|report| {
+                    matches!(report.stage, Stage::Reporting)
+                        && report.request.scope.address() == address
+                }) {
+                    self.report = None;
+                    actions.push(ProcessAction::ReportEnded);
+                }
+            }
+            CiMessage::Ack { ack, .. } => {
+                if let Some(wait) = TimeoutWait::from_ack(ack) {
+                    self.on_wait(address, ack.ack_sub_id2.get(), wait);
+                }
+            }
+            CiMessage::Nak { nak, .. } => self.on_nak(address, nak, &mut actions),
+            _ => {}
+        }
+        actions
     }
 
     fn on_timeout(&mut self, now: Instant) -> Vec<ProcessAction> {
-        Self::on_timeout(self, now)
+        let mut actions = Vec::new();
+        if self.capabilities.expire(now) {
+            actions.push(ProcessAction::CapabilitiesTimedOut);
+        }
+        if self.report.is_some_and(|report| report.wait.expired(now)) {
+            self.report = None;
+            actions.push(ProcessAction::ReportTimedOut);
+        }
+        actions
     }
 }
 
