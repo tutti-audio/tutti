@@ -24,7 +24,7 @@ use tutti_buffers::Float;
 
 use parking_lot::Mutex;
 use tutti_plugin_types::{Features, Loaded, MainThreadMarker, PluginDescriptor, Successor};
-use tutti_rt::ParkedSampleRate;
+use tutti_rt::PendingSampleRate;
 use tutti_transport::TempoReader;
 use tutti_units::ParamId;
 use tutti_units::Samples;
@@ -67,7 +67,7 @@ pub struct Rebinder<L: Loaded, F: Float = f32> {
     reload: Option<Reload>,
     features: Features,
     sample_rate: tutti_units::SampleRate,
-    pending_sample_rate: Arc<ParkedSampleRate>,
+    pending_sample_rate: Arc<PendingSampleRate>,
     /// Where a tick delivers what its pump finds: the handle's listeners.
     /// `None` for a served plugin, whose own listener reports it.
     reporting: Option<Reporting>,

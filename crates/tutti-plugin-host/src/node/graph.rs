@@ -91,7 +91,7 @@ where
             .with_tail(Processing::new(tail).ceiling(rate))
     }
 
-    /// The rate (parked for the plugin, dispatched from the main thread; a
+    /// The rate (pending for the plugin, dispatched from the main thread; a
     /// fork's dispatched here). Control thread.
     ///
     /// The parameter delivery's point room follows the largest block, and
@@ -773,7 +773,7 @@ mod owed_tests {
         );
     }
 
-    /// Starts a rate change the way one parked for the main thread's pump
+    /// Starts a rate change the way one pending for the main thread's pump
     /// does: the Processor is recalled, so the node's next block hands it
     /// back and renders without it.
     fn recall(inner: &parking_lot::Mutex<crate::node::instance::Instance<Vst2Loaded>>) {
