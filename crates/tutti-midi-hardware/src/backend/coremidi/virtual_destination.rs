@@ -117,7 +117,10 @@ impl UmpVirtualDestination {
         // The device watch's client starts before this endpoint's (`hub_first`).
         super::hub_first();
         let destination = UmpDestination::new(name, protocol_of(protocol), move |time, event| {
-            on_event(event, super::host_time::Pairing::now().instant_at(time));
+            on_event(
+                event,
+                super::host_time::Pairing::now().instant_of_stamp(time),
+            );
         })?;
 
         debug!(name, ?protocol, "Created virtual MIDI destination");

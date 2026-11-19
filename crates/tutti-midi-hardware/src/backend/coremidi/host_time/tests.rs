@@ -58,11 +58,14 @@ fn a_now_packet_is_stamped_zero_and_a_scheduled_one_its_host_time() {
 }
 
 // A stamp already read as a duration places a packet as its ticks do: 10 ms
-// before the reading, and the zero stamp ("now") at it.
+// before the reading, and no stamp ("now") at it.
 #[test]
 fn a_duration_stamp_places_a_packet_before_the_reading() {
     let os = Instant::now() + Duration::from_secs(100);
     let pairing = pairing(os);
-    assert_eq!(pairing.instant_at(HOST_NOW - TEN_MS), os - TEN_MS);
-    assert_eq!(pairing.instant_at(Duration::ZERO), os);
+    assert_eq!(
+        pairing.instant_of_stamp(Some(HOST_NOW - TEN_MS)),
+        os - TEN_MS
+    );
+    assert_eq!(pairing.instant_of_stamp(None), os);
 }

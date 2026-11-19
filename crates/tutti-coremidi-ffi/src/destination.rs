@@ -37,7 +37,7 @@ use tutti_ump::{Protocol, Ump, split_stream};
 /// a pointer is a pointer at the ABI, and the block casts it back.
 type ReceiveBlock = RcBlock<dyn Fn(*const c_void, *mut c_void)>;
 
-type OnUmp = Box<dyn FnMut(Duration, Ump) + Send>;
+type OnUmp = Box<dyn FnMut(Option<Duration>, Ump) + Send>;
 
 /// What the receive block and its [`UmpDestination`] share: the callback, which
 /// the destination takes on drop or the block takes after a panic, and the
@@ -55,7 +55,7 @@ struct Callback {
 /// in its message type; the callback gets one call per message, in order, with
 /// its packet's time. The time is the Mach host clock's reading (the one
 /// [`host_ticks`](crate::host_ticks) reads) as the duration since that clock's
-/// origin, which is [`Duration::ZERO`] when the sender gave no time (delivery
+/// origin, or `None` when the sender gave no time (a host time of 0: delivery
 /// now). A packet that ends inside a message drops that tail and counts it
 /// ([`truncated`](Self::truncated)). Owns its endpoint, which is disposed on
 /// drop.
@@ -117,7 +117,7 @@ impl UmpDestination {
     /// [`Error::Call`] when the client or the endpoint cannot be created.
     pub fn new<F>(name: &str, protocol: Protocol, on_ump: F) -> Result<Self, Error>
     where
-        F: FnMut(Duration, Ump) + Send + 'static,
+        F: FnMut(Option<Duration>, Ump) + Send + 'static,
     {
         let protocol = protocol_id(protocol)?;
         let client =
@@ -234,9 +234,9 @@ fn split_packet(
     base: Timebase,
     stamp: MIDITimeStamp,
     words: &[u32],
-    on_ump: &mut dyn FnMut(Duration, Ump),
+    on_ump: &mut dyn FnMut(Option<Duration>, Ump),
 ) -> bool {
-    let time = base.duration(stamp);
+    let time = (stamp != 0).then(|| base.duration(stamp));
     let mut used = 0;
     for ump in split_stream(words) {
         used += ump.words().len();
@@ -380,10 +380,10 @@ mod tests {
             got,
             [
                 (
-                    Duration::from_secs(1),
+                    Some(Duration::from_secs(1)),
                     Ump([0x4090_3C00, 0x8000_0000, 0, 0])
                 ),
-                (Duration::from_secs(1), Ump([0x2090_3C64, 0, 0, 0])),
+                (Some(Duration::from_secs(1)), Ump([0x2090_3C64, 0, 0, 0])),
             ]
         );
     }
@@ -405,7 +405,7 @@ mod tests {
         assert_eq!(got, [Ump([0x2090_3C64, 0, 0, 0])]);
     }
 
-    /// A stamp of 3 ticks at 125/3 is 125 ns, and no stamp is `Duration::ZERO`.
+    /// A stamp of 3 ticks at 125/3 is 125 ns, and no stamp is `None`.
     #[test]
     fn a_stamp_is_its_ticks_by_the_timebase() {
         let mut times = Vec::new();
@@ -414,7 +414,7 @@ mod tests {
                 times.push(time);
             });
         }
-        assert_eq!(times, [Duration::from_nanos(125), Duration::ZERO]);
+        assert_eq!(times, [Some(Duration::from_nanos(125)), None]);
     }
 
     /// A delivered list with a truncated message is counted once and still
