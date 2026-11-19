@@ -894,6 +894,8 @@ const CHECK_FEATURES: &[&str] = &[
     // The session's lib alone, where no dev-dependency unifies a codec feature in.
     r#"cargo clippy --locked -p tutti-session --all-features --lib -- -D warnings"#,
     // A subsystem feature alone: its test binaries compile only what it enables.
+    r#"cargo clippy --locked -p tutti-session --no-default-features --features clap --all-targets -- -D warnings"#,
+    r#"cargo clippy --locked -p tutti-session --no-default-features --features vst3 --all-targets -- -D warnings"#,
     r#"cargo clippy --locked -p tutti-session --no-default-features --features plugin --all-targets -- -D warnings"#,
     r#"cargo clippy --locked -p tutti-session --no-default-features --features midi --all-targets -- -D warnings"#,
 ];

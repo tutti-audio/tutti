@@ -2,7 +2,7 @@
 //! session: the reference CLAP plugin (`clap_probe`), declared as a pool entry.
 
 use crate::pooled::{LoadEntry, LoadPlugin, Spec, catalog_of, probe};
-use crate::support::{clap_probe, plugin_server};
+use crate::support::clap_probe;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tutti_buffers::MaxBlock;
@@ -33,7 +33,7 @@ fn set_server(path: impl AsRef<std::ffi::OsStr>) {
 /// again loads.
 #[test]
 fn a_blacklisted_plugin_does_not_resolve_and_loads_once_unblacklisted() {
-    set_server(plugin_server());
+    set_server(tutti_fixtures::plugin_server());
     let path = clap_probe();
     let plugin = PluginRef::file(&path).expect("a plugin file");
     let (mut catalog, id, _dir) = catalog_of(&plugin);
@@ -98,7 +98,7 @@ fn run_held(held: &Arc<Mutex<Vec<Task>>>) {
 /// its run.
 #[test]
 fn the_blacklist_is_asked_when_the_load_runs() {
-    set_server(plugin_server());
+    set_server(tutti_fixtures::plugin_server());
     let path = clap_probe();
     let plugin = PluginRef::file(&path).expect("a plugin file");
     let (mut catalog, id, _dir) = catalog_of(&plugin);
