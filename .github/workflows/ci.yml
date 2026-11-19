@@ -380,10 +380,19 @@ jobs:
 
       # nextest runs each test in its own process; the audio suites touch device and global state.
       # `au_gui_lifecycle_main` is a `harness = false` main that answers nextest's list protocol.
+      # A pull request and its merge group run the crates their diff reaches (`cargo xtask affected`); a push to
+      # main and a manual run take the whole workspace. An empty selection has no tests to run.
       - name: Test
+        if: needs.changes.outputs.test_packages != ''
         shell: bash
+        env:
+          PACKAGES: ${{ needs.changes.outputs.test_packages }}
         run: |
-          cargo nextest run --locked --workspace --no-fail-fast
+          if [ "$PACKAGES" = all ]; then
+            cargo nextest run --locked --workspace --no-fail-fast
+          else
+            cargo nextest run --locked --no-fail-fast $PACKAGES
+          fi
 
       # The `plugin` suite is feature-gated and the dark-features job is Linux-only; its timing and file naming differ on macOS.
       - name: tutti-session plugin suite (macOS)
@@ -520,10 +529,13 @@ jobs:
       test_more_os: ${{ steps.diff.outputs.test_more_os }}
       deps: ${{ steps.diff.outputs.deps }}
       full: ${{ steps.diff.outputs.full }}
+      test_packages: ${{ steps.diff.outputs.test_packages }}
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+      # `cargo xtask affected` below runs xtask, which is std only and builds in seconds.
+      - run: rustup toolchain install
       - id: diff
         env:
           EVENT: ${{ github.event_name }}
@@ -537,6 +549,7 @@ jobs:
             echo 'test_more_os=["ubuntu-latest","macos-latest"]' >> "$GITHUB_OUTPUT"
             echo "deps=true" >> "$GITHUB_OUTPUT"
             echo "full=true" >> "$GITHUB_OUTPUT"
+            echo "test_packages=all" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           # A pull request runs the light set; its merge group runs the rest.
@@ -548,6 +561,9 @@ jobs:
           # HEAD is the pull request's merge commit, or the merge group's head.
           changed=$(git diff --name-only "$BASE"...HEAD)
           echo "$changed"
+          # The `-p` flags of the crates the diff reaches (`all` when it touches the workspace's shape), for `test`.
+          packages=$(cargo xtask affected "$BASE")
+          echo "test_packages=$packages" >> "$GITHUB_OUTPUT"
           if echo "$changed" | grep -qvE '^(docs/.*|[^/]+\.md)$'; then
             echo "code=true" >> "$GITHUB_OUTPUT"
           else
