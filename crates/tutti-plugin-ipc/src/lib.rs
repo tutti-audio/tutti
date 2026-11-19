@@ -60,9 +60,9 @@ mod process_pipeline_tests;
 pub(crate) use batcher::Batcher;
 pub(crate) use batcher::{BlockPayload, Chunks};
 pub(crate) use client::audio::BridgeListener;
+pub(crate) use client::audio::HarmonyInputs;
 pub use client::audio::{BridgeEvent, BridgeThread};
 pub(crate) use client::audio::{FATES, Fate};
-pub(crate) use client::audio::HarmonyInputs;
 pub use client::{EditorLoader, PluginBridge};
 pub(crate) use wake::Wake;
 // The bridge's free-buffer pool, for the delivery test in `tutti-plugin` that
