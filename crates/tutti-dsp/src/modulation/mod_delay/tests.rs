@@ -302,7 +302,7 @@ fn a_delay_ramp_is_read_in_closed_form_at_the_step_after_those_taken() {
 }
 
 /// Any split of the stream gives the bits of one call, with a delay ramp and a feedback
-/// ramp in flight on every channel and a lane of varied input.
+/// ramp in flight on every channel and a channel of varied input.
 #[test]
 fn any_block_size_gives_the_same_bits() {
     let layout = ModDelayLayout::chorus(bus(3));

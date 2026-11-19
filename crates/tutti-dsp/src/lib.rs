@@ -9,8 +9,9 @@
 //! ## Catalogue
 //!
 //! - **Model** (`model/`): a [`System`] is what every processor answers (its
-//!   [`latency`](System::latency) and [`tail`](System::tail), a [`Ring`] to a floor,
-//!   [`TAIL_FLOOR`] by default), and [`Lti`] the class of a linear time-invariant one
+//!   [`latency`](System::latency) and [`tail`](System::tail), a [`Ring`]: how long the response
+//!   rings until it is a floor below what it carried ([`TAIL_FLOOR`] by default)), and [`Lti`]
+//!   the class of a linear time-invariant one
 //!   ([`frequency_response`](Lti::frequency_response),
 //!   [`spectral_radius`](Lti::spectral_radius), [`l1_norm`](Lti::l1_norm),
 //!   [`hinf_norm`](Lti::hinf_norm), with [`Complex64`]); [`MaxDecay`] is the longest decay
@@ -40,11 +41,11 @@
 //!   a whole number of base frames, [`latency`](OversamplingPlan::latency).
 //! - **Dynamics** (`dynamics/`): the gain curves ([`LimiterCurve`] and the `compute_*`
 //!   functions, [`amplitude_to_db`]); the compressor ([`CompressorBank`], its threshold a
-//!   lane, its makeup a [`Ramp`] over [`GAIN_RAMP`]) and the noise gate ([`GateBank`], its
+//!   control signal, its makeup a [`Ramp`] over [`GAIN_RAMP`]) and the noise gate ([`GateBank`], its
 //!   range ramping likewise), both reading a [`KeySource`] (a side-chain bus or the signal
 //!   itself) through a [`KeyFilter`] if built with one; the lookahead limiter ([`LimiterBank`],
-//!   its threshold and ceiling [`LimiterLanes`], its lookahead its latency); the brickwall
-//!   clipper ([`BrickwallBank`], its ceiling a per-frame lane); the transient shaper
+//!   its threshold and ceiling [`LimiterSignals`], its lookahead its latency); the brickwall
+//!   clipper ([`BrickwallBank`], its ceiling a per-frame control signal); the transient shaper
 //!   ([`TransientBank`]: one gain from a fast and a slow one-pole envelope); the dynamic EQ
 //!   band ([`DynamicEqBank`]: an SVF bell whose gain follows the level of a band-passed key
 //!   through the compressor's static curve, by a [`DynamicMode`]); and the multiband
@@ -56,7 +57,7 @@
 //! - **Delay and modulation** (`delay/`, `modulation/`): [`DelayLine`], a fractional-read
 //!   ring with an [`InterpolationMode`]; the feedback delay ([`DelayBank`] over a
 //!   [`DelayLayout`]: a [`MaxDelay`], its cross-feedback a checked [`Routing`], its time and
-//!   feedback [`Ramp`]s and the per-frame [`DelayLanes`]); the chorus and flanger
+//!   feedback [`Ramp`]s and the per-frame [`DelaySignals`]); the chorus and flanger
 //!   ([`ModDelayBank`] over a [`ModDelayLayout`]: its [`Sweep`] and [`Stagger`] checked, a
 //!   [`Ramp`] per channel's delay, the LFO the caller's on the stream's clock); the phaser
 //!   ([`PhaserChain`]: its [`Stages`] and [`SweepRange`] checked, a [`Ramp`] per channel's
@@ -185,18 +186,18 @@ pub use convolver::{Convolver, IrSpectra, MatrixConvolver, MatrixConvolverError}
 pub use dc_block::{DC_CORNER, DcBlocker, DcBlockerControls, MIN_DC_CORNER};
 pub(crate) use delay::delay_step;
 pub use delay::{
-    ChannelTimes, ChannelTimesError, DELAY_SLEW, DelayBank, DelayControls, DelayLanes, DelayLayout,
-    DelayLine, DelayRamps, InterpolationMode, MAX_DELAY_CHANNELS, MaxDelay, MaxDelayError, Routing,
-    RoutingError,
+    ChannelTimes, ChannelTimesError, DELAY_SLEW, DelayBank, DelayControls, DelayLayout, DelayLine,
+    DelayRamps, DelaySignals, InterpolationMode, MAX_DELAY_CHANNELS, MaxDelay, MaxDelayError,
+    Routing, RoutingError,
 };
 pub use dither::sink::DitherSink;
 pub use dither::{DitherNoise, DitherShape};
 pub use dynamics::{
-    BandReductions, BandSettings, BankShape, BrickwallBank, BrickwallControls, BrickwallLanes,
-    CompressorBank, CompressorControls, CompressorLanes, DynamicEqBank, DynamicEqControls,
-    DynamicMode, GAIN_RAMP, GateBank, GateControls, GateLanes, KeyFilter, KeySource, LimiterBank,
-    LimiterControls, LimiterCurve, LimiterLanes, Lookahead, LookaheadError, MultibandBank,
-    MultibandLanes, MultibandSettings, PeakDetection, TransientBank, TransientControls,
+    BandReductions, BandSettings, BankShape, BrickwallBank, BrickwallControls, BrickwallSignals,
+    CompressorBank, CompressorControls, CompressorSignals, DynamicEqBank, DynamicEqControls,
+    DynamicMode, GAIN_RAMP, GateBank, GateControls, GateSignals, KeyFilter, KeySource, LimiterBank,
+    LimiterControls, LimiterCurve, LimiterSignals, Lookahead, LookaheadError, MultibandBank,
+    MultibandSettings, MultibandSignals, PeakDetection, TransientBank, TransientControls,
     TruePeakError, amplitude_to_db, compute_compressor_gain_reduction, compute_limiter_gain,
 };
 pub use fft::{Complex, Complex32, Complex64, Correlator, FftFloat, FftScratch, RealFft};

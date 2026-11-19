@@ -24,8 +24,8 @@ fn hrtf_forks_from_its_params() {
     assert_param_fork(hrtf());
 }
 
-/// Every param a panner lets a lane drive is one its `ParamSet` addresses,
-/// so a host reaches the cell a lane rides on.
+/// Every param a panner lets a control signal drive is one its `ParamSet` addresses,
+/// so a host reaches the cell a control signal rides on.
 #[test]
 fn a_panner_declares_every_param_it_reads() {
     let vbap = VbapPannerNode::<f32>::stereo();

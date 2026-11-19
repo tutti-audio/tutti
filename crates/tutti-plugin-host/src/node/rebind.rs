@@ -29,7 +29,7 @@ use tutti_transport::TempoReader;
 use tutti_units::ParamId;
 use tutti_units::Samples;
 
-use super::client::{Declared, InProcClient, PluginNode, Reload};
+use super::client::{Declared, InProcessClient, PluginNode, Reload};
 use super::control_backend::Reporting;
 use super::instance::Instance;
 use crate::{DeliveryCounters, PluginControls};
@@ -54,7 +54,7 @@ pub enum RebindError {
 
 /// Builds the node that replaces a plugin node whose plugin changed its ports.
 ///
-/// Made from the node it replaces ([`InProcClient::rebinder`]) and kept on the
+/// Made from the node it replaces ([`InProcessClient::rebinder`]) and kept on the
 /// control side. [`prepare`](Self::prepare) takes the instance lock, so never the
 /// audio thread.
 ///
@@ -166,7 +166,7 @@ where
         // Its own counters: the node it replaces keeps counting into the old
         // ones, which the session banks when it takes the successor's controls.
         let counters = Arc::<DeliveryCounters>::default();
-        let mut client = InProcClient::new(
+        let mut client = InProcessClient::new(
             Arc::clone(&self.inner),
             rt,
             self.descriptor.clone(),
@@ -299,14 +299,14 @@ pub enum Settlement {
 
 impl<L: Loaded, F: Float> PluginNode<L, F> {
     /// The [`Rebinder`] for this node, binding its successors to the tempo
-    /// reader the node was bound to. See [`InProcClient::rebinder`].
+    /// reader the node was bound to. See [`InProcessClient::rebinder`].
     #[must_use]
     pub fn rebinder(&self) -> Rebinder<L, F> {
         self.client.rebinder(self.tempo.clone())
     }
 }
 
-impl<L: Loaded, F: Float> InProcClient<L, F> {
+impl<L: Loaded, F: Float> InProcessClient<L, F> {
     /// The [`Rebinder`] for this node, over the same plugin, binding its
     /// successors to `tempo`.
     #[must_use]

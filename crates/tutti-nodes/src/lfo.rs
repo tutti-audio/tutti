@@ -222,7 +222,7 @@ impl LfoNode {
     /// The wave at `cycles` plus the phase offset, with the depth applied.
     #[inline]
     fn evaluate<F: Float>(&self, cycles: f64, offset: PhaseIncrement, depth: F) -> F {
-        // The wave is `f64`; it crosses into the lane's format once per frame.
+        // The wave is `f64`; it crosses into the output's float once per frame.
         F::from_design(self.wave.raw_at(cycles + offset.get(), false)) * depth
     }
 }
@@ -257,14 +257,14 @@ impl<F: Float> Node<F> for LfoNode {
         let size = io.frames();
         // A driven depth is clamped into `-1..=1` (a written one is within it). A
         // non-finite driven frame reads the cell instead: a NaN rate would
-        // leave the phase NaN for good. The cell crosses into the lane's format once
+        // leave the phase NaN for good. The cell crosses into the output's float once
         // per block.
         let depth_cell = F::from_unit(self.depth.load());
-        let depth_lane = self
+        let depth_signal = self
             .declared_param::<{ UnitParam::Depth as u16 }, _>(&io)
             .frames();
         let depth_at = |i: usize| {
-            depth_lane
+            depth_signal
                 .map(|l| l[i])
                 .filter(|v| v.is_finite())
                 .map_or(depth_cell, |v| v.clamp(F::lit(-1.0), F::lit(1.0)))
@@ -273,7 +273,7 @@ impl<F: Float> Node<F> for LfoNode {
         match self.clock {
             LfoClock::Free => {
                 let rate_cell = self.rate.load().get();
-                let rate_lane = self
+                let rate_signal = self
                     .declared_param::<{ UnitParam::Rate as u16 }, _>(&io)
                     .frames();
                 // The step is accumulated in `f64` for as long as the node runs: an
@@ -287,7 +287,7 @@ impl<F: Float> Node<F> for LfoNode {
                 // The step is rebuilt only when the rate moves.
                 let mut step_of = (rate_cell, lfo_step(rate_cell, per_hz));
                 for (i, o) in out[..size].iter_mut().enumerate() {
-                    let rate = rate_lane
+                    let rate = rate_signal
                         .map(|l| l[i].into())
                         .filter(|v| v.is_finite())
                         .unwrap_or(rate_cell);

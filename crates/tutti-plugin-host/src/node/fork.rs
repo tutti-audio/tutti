@@ -6,7 +6,7 @@
 //!
 //! # Why not a clone of the node
 //!
-//! A clone of [`InProcClient`](super::InProcClient) would share the one plugin instance behind an
+//! A clone of [`InProcessClient`](super::InProcessClient) would share the one plugin instance behind an
 //! `Arc<Mutex<_>>`: a fork by clone would render through the live plugin's
 //! state from the render thread, interleaving its blocks with the live ones.
 //! So the node is not `Clone` at all.

@@ -10,7 +10,7 @@ use tutti_dsp::{FdnBank, FdnControls, FdnLayout, FdnRamps, FreezeMode, Lerp};
 use tutti_graph::{Bus, BusRole, Buses, Cost, MAX_NODE_TAIL, Shape};
 use tutti_units::{Db, Depth, Hz, Mix, SampleRate, Seconds, StereoWidth, Tail};
 
-use crate::kernel::{ControlLanes, Kernel, KernelNode};
+use crate::kernel::{ControlSignals, Kernel, KernelNode};
 
 /// The feedback delay network as a graph node: mono in, stereo out, wet only.
 ///
@@ -159,7 +159,7 @@ impl<F: Float + Lerp> Kernel for FdnKernel<F> {
     fn render(
         &mut self,
         input: Planes<'_, F>,
-        _: ControlLanes<'_, F>,
+        _: ControlSignals<'_, F>,
         output: PlanesMut<'_, '_, F>,
     ) {
         if let Some(r) = &mut self.running {

@@ -27,9 +27,9 @@ use tutti_transport::{ProjectMeter, TimeSignatureSlot, TimeSignatureSlotReader};
 /// playback retires the old value for the control side to free, and the
 /// audio thread never holds the last strong count.
 #[derive(Clone, Default)]
-pub struct PluginMeter(TimeSignatureSlot);
+pub struct PluginTimeSignature(TimeSignatureSlot);
 
-impl PluginMeter {
+impl PluginTimeSignature {
     /// Give the node the project meter: it follows `meter`, so an edit the
     /// host publishes there reaches the running plugin with nothing
     /// re-installed. Replaces any meter installed before.
@@ -102,9 +102,9 @@ impl PluginMeter {
     }
 }
 
-impl std::fmt::Debug for PluginMeter {
+impl std::fmt::Debug for PluginTimeSignature {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("PluginMeter")
+        f.debug_struct("PluginTimeSignature")
             .field("installed", &self.has_meter())
             .finish()
     }
@@ -130,7 +130,7 @@ mod tests {
     /// project meter whose own `reclaim` would reach it.
     #[test]
     fn reclaim_frees_a_meter_cleared_while_a_block_held_it() {
-        let slot = PluginMeter::default();
+        let slot = PluginTimeSignature::default();
         let mut node = slot.reader();
         slot.set_meter(meter_of(3));
         {
@@ -157,7 +157,7 @@ mod tests {
     /// itself is `arc-lend`'s loom model's.
     #[test]
     fn installing_or_clearing_during_a_block_frees_nothing_on_the_audio_thread() {
-        let slot = PluginMeter::default();
+        let slot = PluginTimeSignature::default();
         let mut reader = slot.reader();
         // The host keeps no clone: the slot holds the project meter's only
         // handle.
@@ -199,7 +199,7 @@ mod tests {
     #[test]
     fn a_project_meter_edit_reaches_the_installed_node() {
         let project = meter_of(3);
-        let slot = PluginMeter::default();
+        let slot = PluginTimeSignature::default();
         let mut reader = slot.reader();
         slot.set_meter(project.clone());
         assert!(slot.installed().unwrap().ptr_eq(&project));

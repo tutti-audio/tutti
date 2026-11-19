@@ -14,7 +14,7 @@ use tutti_units::{Hz, SampleRate, Tail};
 #[cfg(test)]
 use tutti_units::{UnitAddr, UnitParam};
 
-use crate::kernel::{ControlLanes, Kernel, KernelNode};
+use crate::kernel::{ControlSignals, Kernel, KernelNode};
 use crate::ramp::LastGood;
 
 /// The crossover frequency cells of a node, and the last finite value each
@@ -225,7 +225,7 @@ impl<F: Float + SimdLanes> Kernel for CrossoverKernel<F> {
     fn render(
         &mut self,
         input: Planes<'_, F>,
-        _: ControlLanes<'_, F>,
+        _: ControlSignals<'_, F>,
         output: PlanesMut<'_, '_, F>,
     ) {
         self.bank.process(&mut self.blend, input, output);
@@ -380,14 +380,14 @@ mod tests {
                 .unwrap(),
         );
         let x = sine(2_000.0, RATE, SETTLE + WINDOW);
-        let lane = [2_000.0f32; 512];
+        let signal = [2_000.0f32; 512];
         let mut low = Vec::new();
         for chunk in x.chunks(512) {
             let out = drive(
                 &mut node,
                 crate::test_support::RATE,
                 Planes::new(&[chunk]).unwrap(),
-                &[Some(&lane[..chunk.len()])],
+                &[Some(&signal[..chunk.len()])],
             );
             low.extend_from_slice(&out[0]);
         }
@@ -502,7 +502,7 @@ mod tests {
         let mut views: Vec<&mut [f64]> = out.iter_mut().map(Vec::as_mut_slice).collect();
         k.render(
             Planes::new(&[&x[..]]).unwrap(),
-            ControlLanes::NONE,
+            ControlSignals::NONE,
             PlanesMut::new(&mut views).unwrap(),
         );
         // 200 Hz's section has radius 0.987: 1e-12 in about 2 100 frames.

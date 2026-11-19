@@ -9,7 +9,7 @@ use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
 use tutti_units::{Hz, Q, SampleRate, Seconds, Semitones, Tail};
 
 use super::filter_bus;
-use crate::kernel::{ControlLanes, Kernel, KernelNode};
+use crate::kernel::{ControlSignals, Kernel, KernelNode};
 
 /// What an [`EnvelopeFilterNode`] is made from: its width, its base cutoff and response, and
 /// optionally its depth, resonance and envelope times.
@@ -176,7 +176,7 @@ impl<F: Float + SimdLanes + Lerp> Kernel for EnvelopeFilterKernel<F> {
     fn render(
         &mut self,
         input: Planes<'_, F>,
-        _: ControlLanes<'_, F>,
+        _: ControlSignals<'_, F>,
         output: PlanesMut<'_, '_, F>,
     ) {
         if let Some(bank) = &mut self.bank {
@@ -213,7 +213,7 @@ mod tests {
         let mut y = vec![0.0f64; x.len()];
         k.render(
             Planes::new(&[&x[..]]).unwrap(),
-            ControlLanes::NONE,
+            ControlSignals::NONE,
             PlanesMut::new(&mut [&mut y[..]]).unwrap(),
         );
         assert!((y[3_999] - c).abs() < 1e-12, "{} against {c}", y[3_999]);

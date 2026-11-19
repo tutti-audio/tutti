@@ -104,10 +104,10 @@ fn ramp_steps(rate: SampleRate) -> u32 {
 /// The ramp of the bearing takes the short arc: from 170 to -170 degrees it
 /// passes through 180, never through the front.
 ///
-/// A param that a lane drives is followed, not smoothed: a lane is already a
-/// signal, so the direction at each grid point is the lane's value at that
+/// A param that a control signal drives is followed, not smoothed: a control signal already has a
+/// value for every frame, so the direction at each grid point is the control signal's value at that
 /// frame (a bearing wrapped), and the gains chord along the short arc to the next
-/// point. A lane is read every 16 frames, so a source it moves lags it by at most
+/// point. A control signal is read every 16 frames, so a source it moves lags it by at most
 /// one grid period. A spread or width reaches the gains at the next grid point
 /// and is blended in with them. The first grid point after construction, a
 /// [`reset`](Node::reset) or a [`prepare`](Node::prepare) lands on the controls
@@ -125,7 +125,7 @@ fn ramp_steps(rate: SampleRate) -> u32 {
 /// grid points. The energy of a chord midpoint is `cos²(Δ/2)` for a gain vector
 /// turning through `Δ` in one grid step, a dip of at most `sin²(Δ/2)`. A cell step
 /// of half a turn ramps at 1.2 degrees of direction per grid step at 48 kHz; a
-/// lane moves the direction as fast as it likes, and the dip follows its speed. A held source is exact everywhere.
+/// control signal moves the direction as fast as it likes, and the dip follows its speed. A held source is exact everywhere.
 ///
 /// Note that LFE is not one of the gains: the panner never feeds it
 /// (a low-passed send, wired by the caller, feeds it), so it reads zero and is outside the law above.
@@ -164,7 +164,7 @@ pub struct VbapPannerNode<F: Float> {
     good: Held,
     /// The bearing the gains are solved for, ramping to a cell's value over
     /// [`ramp_steps`] grid points (one step per grid point) and parked on a
-    /// lane's.
+    /// control signal's.
     aim_azimuth: Ramp<Azimuth>,
     /// The height, as `aim_azimuth`.
     aim_elevation: Ramp<Elevation>,
@@ -261,13 +261,13 @@ impl<F: Float> VbapPannerNode<F> {
     }
 
     /// One grid point, at frame `at` of the block: reads the controls (a
-    /// lane's value at that frame where a lane drives the param, else the
+    /// control signal's value at that frame where a control signal drives the param, else the
     /// block's `cells`), steps the bearing and height one grid step and aims the
     /// gains ramp at the gains solved for where they have reached.
     ///
     /// A cell's value is a step, which the bearing and height ramp to over
-    /// [`ramp_steps`] grid points. A lane is already a signal, so a driven
-    /// coordinate is the lane's value at the grid point, wrapped for a bearing,
+    /// [`ramp_steps`] grid points. A driven control signal needs no smoothing, so a driven
+    /// coordinate is the control signal's value at the grid point, wrapped for a bearing,
     /// and the gains chord to the next grid point from there.
     fn grid_point(
         &mut self,
@@ -275,39 +275,39 @@ impl<F: Float> VbapPannerNode<F> {
         driven: &[Option<&[F]>; 4],
         cells: (Azimuth, Elevation, Spread, StereoWidth),
     ) {
-        // A lane shorter than the block reads as the cell. A lane is the graph's `F`; the
+        // A control signal shorter than the block reads as the cell. A control signal is the graph's `F`; the
         // angles are `f64`, so a driven coordinate widens here, once per grid point, and
         // `Spread` and `StereoWidth` hold an `f32`.
-        let lane = |k: usize| driven[k].and_then(|lane| lane.get(at)).copied();
+        let signal = |k: usize| driven[k].and_then(|signal| signal.get(at)).copied();
         let azimuth = self
             .good
             .azimuth
-            .read(lane(0).map_or(cells.0.get(), Into::into));
+            .read(signal(0).map_or(cells.0.get(), Into::into));
         let elevation = self
             .good
             .elevation
-            .read(lane(1).map_or(cells.1.get(), Into::into));
+            .read(signal(1).map_or(cells.1.get(), Into::into));
         let spread = Spread::new_clamped(
             self.good
                 .spread
-                .read(lane(2).map_or(cells.2.get(), Into::into)),
+                .read(signal(2).map_or(cells.2.get(), Into::into)),
         );
         let width = StereoWidth::new(
             self.good
                 .width
-                .read(lane(3).map_or(cells.3.get(), Into::into)),
+                .read(signal(3).map_or(cells.3.get(), Into::into)),
         );
         let whole = !self.seated;
         steer(
             &mut self.aim_azimuth,
             Azimuth::new(azimuth).wrap(),
-            whole || lane(0).is_some(),
+            whole || signal(0).is_some(),
             self.steps,
         );
         steer(
             &mut self.aim_elevation,
             Elevation::new_clamped(elevation),
-            whole || lane(1).is_some(),
+            whole || signal(1).is_some(),
             self.steps,
         );
         let (azimuth, elevation) = (self.aim_azimuth.now(), self.aim_elevation.now());
@@ -406,7 +406,7 @@ impl<F: Float> Node<F> for VbapPannerNode<F> {
     ///
     /// At each grid point (every 16 frames from the last reset, wherever
     /// the blocks fall) the controls are read and the gains solved; the frames
-    /// until the next point read the ramp between them. A lane that drives a
+    /// until the next point read the ramp between them. A control signal that drives a
     /// param is read at the grid point's frame, a cell once for the block.
     /// Each output channel is rendered over its own planar slice, reading the
     /// speaker that feeds it (LFE: none, so silence). The panner never feeds

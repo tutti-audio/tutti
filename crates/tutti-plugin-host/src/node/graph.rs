@@ -35,7 +35,7 @@ use tutti_graph::{
 };
 use tutti_units::{Latency, Samples, Tail};
 
-use super::client::{InProcClient, Inputs, PluginNode, Rendered, render_with};
+use super::client::{InProcessClient, Inputs, PluginNode, Rendered, render_with};
 use crate::{Call, NodeControls, Snapshot, param_input, transport_info};
 use tutti_plugin_types::{BlockStatus, ProcessOutput, Processing};
 use tutti_plugin_types::{
@@ -683,7 +683,7 @@ where
     }
 }
 
-impl<L: InProcess, F: Float> InProcClient<L, F> {
+impl<L: InProcess, F: Float> InProcessClient<L, F> {
     /// The node's controls: its meter cell and its parameter delivery's
     /// counters, the same [`NodeControls`] inserting it hands back. Its block
     /// is the out-of-process node's chunk: a block's points all count as sent,
@@ -697,7 +697,7 @@ impl<L: InProcess, F: Float> InProcClient<L, F> {
 
 /// The owed path needs a block with no Processor in hand, which only code
 /// inside the crate can bring about on cue (a rate change that recalls the
-/// Processor, through `InProcClient::inner`); the rest of the
+/// Processor, through `InProcessClient::inner`); the rest of the
 /// node's parameter delivery is pinned against the public API in
 /// `tests/vst2_in_process_params.rs`.
 #[cfg(test)]
@@ -710,7 +710,7 @@ mod owed_tests {
     use tutti_graph::{Event, Offset, ParamEvent, ParamRamp};
     use tutti_units::SampleRate;
 
-    use crate::InProcClient;
+    use crate::InProcessClient;
     use crate::PluginHandle;
     use tutti_units::ParamId;
 
@@ -719,7 +719,7 @@ mod owed_tests {
         main: MainThreadMarker,
         path: &std::path::Path,
         rate: SampleRate,
-    ) -> tutti_plugin_types::BridgeResult<(InProcClient<Vst2Loaded>, PluginHandle)> {
+    ) -> tutti_plugin_types::BridgeResult<(InProcessClient<Vst2Loaded>, PluginHandle)> {
         crate::load_client::<Vst2Loaded, f32>(
             main,
             &tutti_fixtures::pumped_work(),

@@ -310,7 +310,7 @@ where
     ///
     /// Off the main thread it runs on the main thread's next tick, and is
     /// `false` if that does not come within the deadline.
-    /// `InProcClient::set_render_mode` is the same call on the node's side.
+    /// `InProcessClient::set_render_mode` is the same call on the node's side.
     fn set_render_mode(&self, mode: RenderMode) -> bool {
         self.on_main(move |main, instance| instance.set_render_mode(main, mode, None))
             .unwrap_or(false)
@@ -416,7 +416,7 @@ mod off_main_tests {
     /// (the harness runs tests on threads it spawns), with a thread standing in for
     /// the main thread's tick: every call through the handle hops to it.
     fn loaded() -> (
-        crate::InProcClient<Vst2Loaded>,
+        crate::InProcessClient<Vst2Loaded>,
         PluginHandle,
         tutti_fixtures::Pump,
     ) {
@@ -428,7 +428,7 @@ mod off_main_tests {
 
     /// The probe, loaded in process, with parameter 1 written to 0.75; its main-thread
     /// work goes to `work`.
-    fn load(work: &MainWorkHandle) -> (crate::InProcClient<Vst2Loaded>, PluginHandle) {
+    fn load(work: &MainWorkHandle) -> (crate::InProcessClient<Vst2Loaded>, PluginHandle) {
         let (client, handle) = crate::load_client::<Vst2Loaded, f32>(
             main_thread(),
             work,

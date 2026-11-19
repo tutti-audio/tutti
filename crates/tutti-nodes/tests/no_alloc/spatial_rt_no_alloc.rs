@@ -179,7 +179,7 @@ fn check_block(
 }
 
 /// The corner sweep of every bed: each placed bed up to the widest, with its
-/// four params moving every block, as cells and as lanes, through ordinary,
+/// four params moving every block, as cells and as control signals, through ordinary,
 /// extreme and hostile values, in blocks that are not multiples of the grid,
 /// with resets and a prepare at another rate between blocks, and a fork, allocates
 /// nothing, renders finite audio, never feeds the LFE, and keeps the power sum
@@ -187,7 +187,7 @@ fn check_block(
 /// fold, every param still) settles within 50 ms and plays every frame at the
 /// unit power of its gains.
 #[test]
-fn vbap_every_bed_under_hostile_cells_and_lanes_is_allocation_free_finite_and_bounded() {
+fn vbap_every_bed_under_hostile_cells_and_signals_is_allocation_free_finite_and_bounded() {
     use tutti_buffers::{MaxBlock, Speaker};
     use tutti_graph::Prepare;
     use tutti_units::Samples;
@@ -219,22 +219,22 @@ fn vbap_every_bed_under_hostile_cells_and_lanes_is_allocation_free_finite_and_bo
         }
         let fork_controls = forked.node.0.param_set();
         let mut health = (true, false, 0.0f32);
-        let mut lane = vec![0.0f32; FRAMES];
+        let mut signal = vec![0.0f32; FRAMES];
 
-        // The hostile phase: every param a cell or a lane, by turns.
+        // The hostile phase: every param a cell or a control signal, by turns.
         for step in 0..600usize {
             let pick = |k: usize| HOSTILE[(step * (k + 3) / 2 + k) % HOSTILE.len()];
             for (k, &param) in params.iter().enumerate() {
                 if (step + k) % 3 == 0 {
-                    // A lane of hostile values, per frame.
-                    for (i, v) in lane.iter_mut().enumerate() {
+                    // A control signal of hostile values, per frame.
+                    for (i, v) in signal.iter_mut().enumerate() {
                         *v = if i % 5 == 0 {
                             pick(k + i)
                         } else {
                             (i * 7 + step) as f32
                         };
                     }
-                    rig.feed(k, Some(&lane));
+                    rig.feed(k, Some(&signal));
                 } else {
                     rig.feed(k, None);
                     controls.set(param, f64::from(pick(k)));
@@ -271,7 +271,7 @@ fn vbap_every_bed_under_hostile_cells_and_lanes_is_allocation_free_finite_and_bo
         assert!(!health.1, "{bed:?}: the LFE was fed");
         assert!(health.2 <= 1.0 + 1e-3, "{bed:?}: power sum {}", health.2);
 
-        // Held: lanes off, a mono fold at an ordinary bearing, the ramp
+        // Held: control signals off, a mono fold at an ordinary bearing, the ramp
         // past; every frame is the unit power of its gains (0.5^2 for the
         // folded input 0.5), within a hair.
         for k in 0..4 {

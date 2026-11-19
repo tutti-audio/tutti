@@ -16,7 +16,7 @@ use tutti_units::UnitParam::{
 
 use super::rt_no_alloc_dynamics::{Corners, addr, sweep};
 
-/// What a lane takes: not a number, infinite, huge, negative, zero and in range, each read at
+/// What a control signal takes: not a number, infinite, huge, negative, zero and in range, each read at
 /// a grid corner by a rate (Hz), a depth (seconds) and a feedback.
 const HOSTILE: &[f32] = &[
     f32::NAN,
@@ -38,7 +38,7 @@ fn bus(width: u16) -> BusTopology {
 /// The chorus and the flanger at every corner, at widths 1, 2 and 6: the rate from below its
 /// floor to 1 kHz, the depth from nothing to a second of delay (held to the sweep's greatest),
 /// the feedback from below nothing to far past the stable bound (held under it), and each as a
-/// hostile lane. The loop gain is held to 0.99, so a bounded input stays under `1 / 0.01`
+/// hostile control signal. The loop gain is held to 0.99, so a bounded input stays under `1 / 0.01`
 /// times itself.
 #[test]
 fn the_swept_delay_corners_are_allocation_free_and_finite() {
@@ -48,8 +48,8 @@ fn the_swept_delay_corners_are_allocation_free_and_finite() {
             (addr(Depth, 0), 0.0, 1.0),
             (addr(Feedback, 0), -1.0, 5.0),
         ],
-        lanes: &[0, 1, 2],
-        lane_values: &[HOSTILE],
+        signals: &[0, 1, 2],
+        signal_values: &[HOSTILE],
         bound: 151.0,
         frames: 19_200,
     };
@@ -59,8 +59,8 @@ fn the_swept_delay_corners_are_allocation_free_and_finite() {
             (addr(Depth, 0), f32::NEG_INFINITY, f32::NAN),
             (addr(Feedback, 0), f32::INFINITY, f32::NAN),
         ],
-        lanes: &[],
-        lane_values: &[],
+        signals: &[],
+        signal_values: &[],
         bound: 151.0,
         frames: 19_200,
     };
@@ -103,7 +103,7 @@ fn the_swept_delay_corners_are_allocation_free_and_finite() {
 }
 
 /// Freeverb at every corner, the live node and the General MIDI send: the room and the damping
-/// from far below `0` to far past `1` and not a number, and each as a hostile lane. The comb
+/// from far below `0` to far past `1` and not a number, and each as a hostile control signal. The comb
 /// loop gain is held to 0.98 and the all-passes' response sums to under 3 each, so a bounded
 /// input stays under `0.015 * 8 * 50 * 81` times itself.
 #[test]
@@ -113,8 +113,8 @@ fn freeverb_corners_are_allocation_free_and_finite() {
             (addr(RoomSize, 0), -1.0e30, 1.0e30),
             (addr(Damping, 0), -2.0, 9.0),
         ],
-        lanes: &[0, 1],
-        lane_values: &[HOSTILE],
+        signals: &[0, 1],
+        signal_values: &[HOSTILE],
         bound: 1_000.0,
         frames: 19_200,
     };
@@ -123,8 +123,8 @@ fn freeverb_corners_are_allocation_free_and_finite() {
             (addr(RoomSize, 0), f32::NAN, f32::INFINITY),
             (addr(Damping, 0), f32::NEG_INFINITY, f32::NAN),
         ],
-        lanes: &[],
-        lane_values: &[],
+        signals: &[],
+        signal_values: &[],
         bound: 1_000.0,
         frames: 19_200,
     };
@@ -168,8 +168,8 @@ fn plate_corners_are_allocation_free_and_finite() {
             (addr(Depth, 0), -5.0, 5.0),
             (addr(Diffusion, 0), -2.0, 9.0),
         ],
-        lanes: &[],
-        lane_values: &[],
+        signals: &[],
+        signal_values: &[],
         bound: 1_000.0,
         frames: 19_200,
     };
@@ -182,8 +182,8 @@ fn plate_corners_are_allocation_free_and_finite() {
             (addr(Depth, 0), f32::NAN, f32::NEG_INFINITY),
             (addr(Diffusion, 0), f32::INFINITY, f32::NAN),
         ],
-        lanes: &[],
-        lane_values: &[],
+        signals: &[],
+        signal_values: &[],
         bound: 1_000.0,
         frames: 19_200,
     };

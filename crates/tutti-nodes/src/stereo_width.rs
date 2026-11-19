@@ -6,7 +6,7 @@ use tutti_dsp::{COEFF_INTERVAL, Lerp, WidthBank, WidthControls};
 use tutti_graph::{Cost, Shape};
 use tutti_units::{SampleRate, StereoWidth, Tail};
 
-use crate::kernel::{ControlLanes, Kernel, KernelNode};
+use crate::kernel::{ControlSignals, Kernel, KernelNode};
 
 /// Stereo width: left/right in, left/right out, `L = M + w S` and `R = M - w S` with the
 /// mid `M = (L + R) / 2` and the side `S = (L - R) / 2` of the input.
@@ -130,7 +130,7 @@ impl<F: Float + Lerp> Kernel for StereoWidthKernel<F> {
     fn render(
         &mut self,
         input: Planes<'_, F>,
-        _: ControlLanes<'_, F>,
+        _: ControlSignals<'_, F>,
         output: PlanesMut<'_, '_, F>,
     ) {
         self.bank.process(input, output);

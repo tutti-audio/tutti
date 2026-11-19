@@ -12,7 +12,7 @@
 //! class with a trait; a system of another kind (a nonlinear one, one that varies in
 //! time) answers through its own queries and is not made to implement [`Lti`].
 //! Modulation is not a class: a control that moves is a trajectory of the controls,
-//! written by a lane or a control source, and the system it moves is the same one.
+//! written by an automation lane or a control source, and the system it moves is the same one.
 //!
 //! [`MaxDecay`] is the longest decay a reverb is built to.
 
