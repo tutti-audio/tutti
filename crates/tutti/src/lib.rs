@@ -286,7 +286,8 @@ pub mod nodes {
     };
 }
 
-/// The unit vocabulary (`tutti-units`, `tutti-music`, `tutti-rt`, `tutti-buffers`) a program names less
+/// The shared vocabulary (units, music types, buffers and the param cells: `tutti-units`,
+/// `tutti-music`, `tutti-buffers`, `tutti-rt`) a program names less
 /// often than the root's units: moments and notes, the parameter cell and its
 /// addresses, shape terms (`Tail`, `Latency`), the edge traits (`Source`,
 /// `Sink`, `Pull`), channel folds and the range errors.
