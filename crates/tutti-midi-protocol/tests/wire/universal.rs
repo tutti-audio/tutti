@@ -3,8 +3,8 @@
 
 use tutti_midi_protocol::{
     Addressed, Addressee, GeneralMidiMode, Heard, MtcFullMessage, MtcRate, MtcTimeCode,
-    NotSysexDeviceId, QuarterFrame, Recipient, SysexDeviceId, Universal, UniversalRead,
-    UniversalReader, read,
+    NotSysexDeviceId, QuarterFrame, Recipient, SmpteFrameRate, SmpteTimecode, SysexDeviceId,
+    Universal, UniversalRead, UniversalReader, read,
 };
 use tutti_ump::Voice1;
 use tutti_ump::{
@@ -154,6 +154,74 @@ fn an_mtc_full_message_writes_the_bytes_of_t9_and_reads_back() {
         framed.push(0xF7);
         assert_eq!(heard(&framed).message, Universal::MtcFullMessage(message));
     }
+}
+
+/// M1 p.53 and T-9: the hours byte is `0rrhhhhh` and the last Quarter Frame
+/// carries its high half as `0rrh`, so one layout states the Full Message, the
+/// MMC time code and the cycle, for every rate and every hour. The expected
+/// bytes are built from the spec's rate codes (0 to 3) and the hour, not from
+/// the encoder.
+#[test]
+fn the_hours_byte_is_the_rate_over_the_hours_in_every_encoding() {
+    for (code, rate) in [
+        (0u8, MtcRate::Fps24),
+        (1, MtcRate::Fps25),
+        (2, MtcRate::Fps2997Df),
+        (3, MtcRate::Fps30),
+    ] {
+        for hours in 0..24u8 {
+            let time = MtcTimeCode::new(rate, hours, 0, 0, 0).unwrap();
+            let spec = (code << 5) | hours;
+            assert_eq!(time.hours_byte(), spec, "{rate:?} hour {hours}");
+            assert_eq!(MtcFullMessage::from(time).payload()[4], spec);
+            let nibbles = time.nibbles();
+            assert_eq!(nibbles[6], hours & 0x0F, "hours low nibble");
+            assert_eq!(
+                nibbles[7],
+                (code << 1) | (hours >> 4),
+                "rate over hours high"
+            );
+            assert_eq!(time.rate(), rate);
+            assert_eq!(MtcTimeCode::from_nibbles(nibbles), Some(time));
+        }
+    }
+}
+
+/// A time code holds its rate once: the SMPTE position it reads as is counted
+/// at the rate it was made with, and the position's labels are its own.
+#[test]
+fn an_mtc_time_code_reads_as_a_smpte_position_at_its_one_rate() {
+    for rate in MtcRate::ALL {
+        let time = MtcTimeCode::new(rate, 1, 2, 3, 4).unwrap();
+        assert_eq!(time.timecode().frame_rate(), rate.frame_rate());
+        assert_eq!(
+            (
+                time.timecode().hours(),
+                time.timecode().minutes(),
+                time.timecode().seconds(),
+                time.timecode().frames()
+            ),
+            (1, 2, 3, 4)
+        );
+        assert_eq!(MtcTimeCode::from_timecode(time.timecode()), Some(time));
+    }
+}
+
+/// M1 p.53: a frame number is below the rate's frame count (24, 25, 30), and
+/// MTC has no code for 29.97 non-drop.
+#[test]
+fn a_frame_at_or_past_the_rate_count_and_a_non_mtc_rate_are_refused() {
+    for rate in MtcRate::ALL {
+        let count = rate.labels_per_second();
+        assert!(
+            MtcTimeCode::new(rate, 0, 0, 0, count - 1).is_some(),
+            "{rate:?}"
+        );
+        assert_eq!(MtcTimeCode::new(rate, 0, 0, 0, count), None, "{rate:?}");
+        assert_eq!(MtcTimeCode::new(rate, 0, 0, 0, 31), None, "{rate:?}");
+    }
+    let non_drop = SmpteTimecode::new(0, 0, 1, 5, SmpteFrameRate::Fps2997Ndf).unwrap();
+    assert_eq!(MtcTimeCode::from_timecode(non_drop), None);
 }
 
 /// UMP section 7.7 (System Exclusive 7): the Full Message of 25 fps
@@ -471,6 +539,24 @@ mod machine_control {
     /// The label of `h:m:s:f` at 30 frames.
     fn label(h: u8, m: u8, s: u8, f: u8) -> MmcTimeLabel {
         MmcTimeLabel::new(MtcTimeCode::new(MtcRate::Fps30, h, m, s, f).unwrap())
+    }
+
+    /// RP-013 p.14 and M1 p.53: the Time Standard field's byte is the rate code
+    /// in bits 5 and 6 over zero hours, so each code reads as its rate.
+    #[test]
+    fn the_time_standard_byte_is_the_rate_code_over_zero_hours() {
+        for (code, rate) in [
+            (0u8, MtcRate::Fps24),
+            (1, MtcRate::Fps25),
+            (2, MtcRate::Fps2997Df),
+            (3, MtcRate::Fps30),
+        ] {
+            assert_eq!(
+                fields(1, &[0x45, 0x01, code << 5]),
+                [MmcInfoField::TimeStandard(rate)],
+                "{rate:?}"
+            );
+        }
     }
 
     /// RP-013 p.15: the commands without data are the codes `01` to `0D`, each
