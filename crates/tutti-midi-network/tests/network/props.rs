@@ -77,11 +77,11 @@ fn command() -> impl Strategy<Value = Command> {
         identity_strategy(),
     )
         .prop_map(|(state, nonce, identity)| {
-            Command::AuthRequired(AuthChallenge {
+            Command::AuthRequired(Box::new(AuthChallenge {
                 state,
                 nonce,
                 identity,
-            })
+            }))
         });
     let user_auth_required = (
         prop_oneof![
@@ -93,11 +93,11 @@ fn command() -> impl Strategy<Value = Command> {
         identity_strategy(),
     )
         .prop_map(|(state, nonce, identity)| {
-            Command::UserAuthRequired(UserAuthChallenge {
+            Command::UserAuthRequired(Box::new(UserAuthChallenge {
                 state,
                 nonce,
                 identity,
-            })
+            }))
         });
     let user_auth = (digest_strategy(), "[a-z]{1,40}").prop_map(|(digest, name)| {
         Command::InvitationWithUserAuth(Box::new(UserAuthentication {

@@ -22,6 +22,10 @@ use objc2_core_midi::{
 };
 use objc2_foundation::{NSArray, NSString};
 use tutti_coremidi_ffi::{UmpEndpointInfo, ump_endpoints};
+use tutti_ump::{
+    BlockDirection, FirstGroup, FunctionBlockCount, FunctionBlockInfo, FunctionBlocks, GroupSpan,
+    Midi1Port, Protocol, UiHint,
+};
 
 const KEYS: &str = "tutti-ffi-test Keys";
 const PORT: &str = "tutti-ffi-test Port";
@@ -117,28 +121,50 @@ fn an_endpoint_reads_back_its_protocol_and_blocks() {
         .find(is_ours)
         .expect("the registered endpoint is listed");
 
-    assert_eq!(ours.protocol, 2, "created in the MIDI 2.0 Protocol");
+    assert_eq!(
+        ours.protocol,
+        Protocol::Midi2,
+        "created in the MIDI 2.0 Protocol"
+    );
     assert!(
-        ours.supports_midi2,
+        ours.offered.midi2,
         "an endpoint created in the MIDI 2.0 Protocol supports it"
     );
-    assert!(ours.source_unique_id.is_some() && ours.destination_unique_id.is_some());
-    let named = |name: &str| ours.blocks.iter().find(|b| b.name == name).unwrap();
-    let keys = named(KEYS);
-    assert_eq!(
-        (keys.direction, keys.first_group, keys.groups, keys.midi1),
-        (3, 0, 2, 0)
+    assert!(
+        ours.offered.static_function_blocks,
+        "the blocks were registered as static"
     );
     assert_eq!(
-        (keys.ui_hint, keys.sysex8_streams, keys.active),
-        (3, 3, true)
+        ours.offered.function_blocks,
+        FunctionBlocks::Count(FunctionBlockCount::of(2))
+    );
+    assert!(ours.source_unique_id.is_some() && ours.destination_unique_id.is_some());
+    let named = |name: &str| {
+        ours.blocks
+            .iter()
+            .find(|b| b.name.as_deref() == Some(name))
+            .unwrap()
+            .info
+    };
+    let groups = |info: FunctionBlockInfo| {
+        (
+            info.first_group.value().map(FirstGroup::get),
+            info.groups_spanned.value().map(GroupSpan::get),
+        )
+    };
+    let keys = named(KEYS);
+    assert_eq!(keys.direction, BlockDirection::Bidirectional);
+    assert_eq!(groups(keys), (Some(0), Some(2)));
+    assert_eq!(keys.midi1, Midi1Port::No);
+    assert_eq!(
+        (keys.ui_hint, keys.max_sysex8_streams, keys.active),
+        (UiHint::Both, 3, true)
     );
     let port = named(PORT);
-    assert_eq!(
-        (port.direction, port.first_group, port.groups, port.midi1),
-        (1, 5, 1, 2)
-    );
-    assert_eq!(port.ui_hint, 2);
+    assert_eq!(port.direction, BlockDirection::Input);
+    assert_eq!(groups(port), (Some(5), Some(1)));
+    assert_eq!(port.midi1, Midi1Port::Restricted);
+    assert_eq!(port.ui_hint, UiHint::Sender);
     assert_ne!(keys.id, port.id, "block numbers are distinct");
 
     // SAFETY: a plain setter on the live endpoint, so it leaves the cache.
@@ -147,5 +173,8 @@ fn an_endpoint_reads_back_its_protocol_and_blocks() {
 }
 
 fn is_ours(endpoint: &UmpEndpointInfo) -> bool {
-    endpoint.blocks.iter().any(|b| b.name == KEYS)
+    endpoint
+        .blocks
+        .iter()
+        .any(|b| b.name.as_deref() == Some(KEYS))
 }

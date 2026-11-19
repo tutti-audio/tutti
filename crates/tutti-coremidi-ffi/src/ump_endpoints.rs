@@ -3,9 +3,11 @@
 //! `MIDIUMPEndpointManager`, `MIDIUMPEndpoint` and `MIDIUMPFunctionBlock` are
 //! Objective-C classes, so `coremidi-sys` (C functions) does not carry them;
 //! `objc2-core-midi`'s generated bindings do, and this module is the only code
-//! that names them. What it returns is plain values holding the OS's own
-//! numbers; `tutti-midi-hardware` turns them into `tutti-midi-device`'s
-//! Function Blocks and checks them against M2-104 there.
+//! that names them. What it returns is `tutti-ump`'s values (a Function
+//! Block Info and an Endpoint Info Notification, with a value the spec does not
+//! define kept as the field's reserved raw); `tutti-midi-hardware` turns them
+//! into `tutti-midi-device`'s Function Blocks and checks them against M2-104
+//! there.
 //!
 //! The classes do not exist before macOS 15. [`ump_endpoints`] asks the
 //! Objective-C runtime for the manager class first and returns
@@ -21,40 +23,35 @@ use objc2::runtime::AnyClass;
 use objc2_core_midi::{
     MIDIUMPEndpoint, MIDIUMPEndpointManager, MIDIUMPFunctionBlock, MIDIUMPProtocolOptions,
 };
+use tutti_ump::{
+    EndpointInfoNotification, FunctionBlockCount, FunctionBlockInfo, FunctionBlocks,
+    OsFunctionBlock, Protocol, UiHint, UmpVersion, read_function_block, read_protocol,
+};
 
 /// One Function Block as CoreMIDI reports it (`MIDIUMPFunctionBlock`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct UmpBlockInfo {
-    /// `functionBlockID`: the block's number.
-    pub id: u8,
-    /// `isEnabled`.
-    pub active: bool,
-    /// `direction`: `kMIDIUMPFunctionBlockDirection*`, 0 unknown, 1 input, 2
-    /// output, 3 bidirectional.
-    pub direction: i32,
-    /// `firstGroup`, from 0.
-    pub first_group: u8,
-    /// `totalGroupsSpanned`.
-    pub groups: u8,
-    /// `MIDI1Info`: 0 not a MIDI 1.0 port, 1 unrestricted, 2 restricted.
-    pub midi1: i32,
-    /// `UIHint`: 0 unknown, 1 receiver, 2 sender, 3 both.
-    pub ui_hint: i32,
-    /// `maxSysEx8Streams`.
-    pub sysex8_streams: u8,
-    /// `name`.
-    pub name: String,
+    /// What the block says of itself, as a Function Block Info Notification
+    /// carries it. A value CoreMIDI reports that the spec does not define is the
+    /// field's reserved raw. `MIDIUMPFunctionBlock` has no MIDI-CI version, so
+    /// that is `0` (none).
+    pub info: FunctionBlockInfo,
+    /// `name`, when it is not empty.
+    pub name: Option<String>,
 }
 
 /// One UMP Endpoint as CoreMIDI reports it (`MIDIUMPEndpoint`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct UmpEndpointInfo {
-    /// `MIDIProtocol`, the protocol in use: `kMIDIProtocol_1_0` is 1,
-    /// `kMIDIProtocol_2_0` is 2.
-    pub protocol: i32,
-    /// Whether `supportedMIDIProtocols` includes the MIDI 2.0 Protocol: the
-    /// endpoint may negotiate it later even while `protocol` is MIDI 1.0.
-    pub supports_midi2: bool,
+    /// `MIDIProtocol`, the protocol in use: `kMIDIProtocol_1_0` is 1 and
+    /// `kMIDIProtocol_2_0` is 2, anything else reserved.
+    pub protocol: Protocol,
+    /// What the endpoint offers, as its Endpoint Info Notification:
+    /// `supportedMIDIProtocols` (the endpoint may negotiate MIDI 2.0 later
+    /// even while `protocol` is MIDI 1.0), whether its blocks are static, how
+    /// many it has and its JR Timestamp capabilities. CoreMIDI reports no UMP
+    /// version, so that is UMP 1.1, which macOS 15 speaks.
+    pub offered: EndpointInfoNotification,
     /// The unique id of the endpoint's source (what a device sends from), when
     /// it has one.
     pub source_unique_id: Option<UniqueId>,
@@ -102,39 +99,83 @@ pub fn ump_endpoints() -> Result<Vec<UmpEndpointInfo>, UmpEndpointsError> {
     .map_err(UmpEndpointsError::Exception)
 }
 
+/// A CoreMIDI enum value as the byte the spec's field holds: one that is no
+/// byte is `u8::MAX`, which no field of an endpoint or block defines.
+fn byte(value: i32) -> u8 {
+    u8::try_from(value).unwrap_or(u8::MAX)
+}
+
+/// The UI hint CoreMIDI's `UIHint` names (`kMIDIUMPFunctionBlockUIHint*`: 0
+/// unknown, 1 receiver, 2 sender, 3 both). It is the two bits the wire carries,
+/// so the bits above them are not part of it.
+fn ui_hint_of(raw: i32) -> UiHint {
+    match raw & 0x3 {
+        0 => UiHint::Unknown,
+        1 => UiHint::Receiver,
+        2 => UiHint::Sender,
+        _ => UiHint::Both,
+    }
+}
+
 fn endpoint_info(endpoint: &MIDIUMPEndpoint) -> UmpEndpointInfo {
     // SAFETY: plain getters on a live endpoint object.
-    let (protocol, supported, source, destination, blocks) = unsafe {
+    let (protocol, supported, source, destination, blocks, is_static, rx_jr, tx_jr) = unsafe {
         (
             endpoint.MIDIProtocol().0,
             endpoint.supportedMIDIProtocols(),
             endpoint.MIDISource(),
             endpoint.MIDIDestination(),
             endpoint.functionBlocks(),
+            endpoint.hasStaticFunctionBlocks(),
+            endpoint.hasJRTSReceiveCapability(),
+            endpoint.hasJRTSTransmitCapability(),
         )
     };
+    let blocks: Vec<UmpBlockInfo> = blocks.iter().map(|b| block_info(&b)).collect();
     UmpEndpointInfo {
-        protocol,
-        supports_midi2: supported.contains(MIDIUMPProtocolOptions::MIDI2),
+        protocol: read_protocol(byte(protocol)),
+        offered: EndpointInfoNotification {
+            version: UmpVersion::V1_1,
+            static_function_blocks: is_static,
+            function_blocks: FunctionBlocks::Count(FunctionBlockCount::saturating(blocks.len())),
+            midi2: supported.contains(MIDIUMPProtocolOptions::MIDI2),
+            midi1: supported.contains(MIDIUMPProtocolOptions::MIDI1),
+            rx_jr,
+            tx_jr,
+        },
         source_unique_id: UniqueId::of(source),
         destination_unique_id: UniqueId::of(destination),
-        blocks: blocks.iter().map(|b| block_info(&b)).collect(),
+        blocks,
     }
 }
 
 fn block_info(block: &MIDIUMPFunctionBlock) -> UmpBlockInfo {
     // SAFETY: plain getters on a live function block object.
-    unsafe {
-        UmpBlockInfo {
-            id: block.functionBlockID(),
-            active: block.isEnabled(),
-            direction: block.direction().0,
-            first_group: block.firstGroup(),
-            groups: block.totalGroupsSpanned(),
-            midi1: block.MIDI1Info().0,
-            ui_hint: block.UIHint().0,
-            sysex8_streams: block.maxSysEx8Streams(),
-            name: block.name().to_string(),
-        }
+    let (id, active, direction, first_group, groups, midi1, ui_hint, sysex8_streams, name) = unsafe {
+        (
+            block.functionBlockID(),
+            block.isEnabled(),
+            block.direction().0,
+            block.firstGroup(),
+            block.totalGroupsSpanned(),
+            block.MIDI1Info().0,
+            block.UIHint().0,
+            block.maxSysEx8Streams(),
+            block.name().to_string(),
+        )
+    };
+    UmpBlockInfo {
+        info: read_function_block(OsFunctionBlock {
+            active,
+            id,
+            direction: byte(direction),
+            ui_hint: ui_hint_of(ui_hint),
+            midi1: byte(midi1),
+            first_group,
+            groups_spanned: groups,
+            midi_ci_version: 0,
+            max_sysex8_streams: sysex8_streams,
+        }),
+        name: (!name.is_empty()).then_some(name),
     }
 }

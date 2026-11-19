@@ -44,8 +44,7 @@ use tutti_rt::{FaultLatch, LockExt};
 
 use crate::InputProducerHandle;
 use crate::backend::by_message::{Refused, by_message};
-use crate::block::RawBlock;
-use crate::capability::{OsEndpoint, UmpCapability};
+use crate::capability::{OsEndpoint, UmpCapability, blocks_of};
 use crate::devices::ChangeSink;
 use crate::devices::reporter::os_devices;
 use crate::endpoints::{DeviceOut, InputConnection, MidiEndpoints, Watch};
@@ -143,7 +142,7 @@ fn endpoint_capability(object: &coremidi::Object, ump: Option<&UmpEndpointInfo>)
 /// `kMIDIPropertyProtocolID`.
 fn input_protocol(source: &coremidi::Object, ump: Option<&UmpEndpointInfo>) -> CmProtocol {
     let midi2 = match ump {
-        Some(ump) => ump.supports_midi2,
+        Some(ump) => ump.offered.midi2,
         None => endpoint_capability(source, None).protocol == Protocol::Midi2,
     };
     if midi2 {
@@ -156,34 +155,14 @@ fn input_protocol(source: &coremidi::Object, ump: Option<&UmpEndpointInfo>) -> C
 /// A UMP Endpoint as a capability: the Protocol it has in use (having blocks is
 /// not having the MIDI 2.0 Protocol) and the blocks the spec can hold.
 fn ump_capability(ump: &UmpEndpointInfo) -> UmpCapability {
-    let protocol = if ump.protocol == PROTOCOL_ID_MIDI_2_0 {
-        Protocol::Midi2
-    } else {
-        Protocol::Midi1
-    };
-    let blocks = ump
-        .blocks
-        .iter()
-        .filter_map(|block| {
-            // CoreMIDI's direction, MIDI 1.0 info and UI hint enums carry the
-            // spec's own values (M2-104 §7.1.8).
-            RawBlock {
-                id: u32::from(block.id),
-                active: block.active,
-                direction: u32::try_from(block.direction).ok()?,
-                first_group: u32::from(block.first_group),
-                groups: u32::from(block.groups),
-                midi1: u32::try_from(block.midi1).unwrap_or(0),
-                ui_hint: u32::try_from(block.ui_hint).unwrap_or(0),
-                // `MIDIUMPFunctionBlock` has no MIDI-CI version of its own.
-                midi_ci_version: 0,
-                sysex8_streams: u32::from(block.sysex8_streams),
-                name: Some(block.name.as_str()),
-            }
-            .function_block()
-        })
-        .collect();
-    UmpCapability { protocol, blocks }
+    UmpCapability {
+        protocol: ump.protocol,
+        blocks: blocks_of(
+            ump.blocks
+                .iter()
+                .map(|block| (block.info, block.name.as_deref())),
+        ),
+    }
 }
 
 /// The UMP Endpoint whose source (`input`) or destination has unique id `id`.
