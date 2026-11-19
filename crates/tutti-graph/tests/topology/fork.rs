@@ -17,7 +17,7 @@ use tutti_graph::{
     Renderer, Shape, Status, Unforkable, param_parts,
 };
 use tutti_graph::{Edge, FeedbackFrom, InPort, OutPort, Source};
-use tutti_types::Param;
+use tutti_rt::Param;
 use tutti_units::{Amplitude, Samples, Tail, UnitParam};
 
 /// Output `c` is `base + c`, so which port feeds a channel reads straight off

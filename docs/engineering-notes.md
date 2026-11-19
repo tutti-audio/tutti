@@ -101,12 +101,11 @@ crates/             everything shipped, directory name = package name
   tutti-units       # The unit newtypes (`Hz`, `Seconds`, `Beat`, ...), `Samples`,
                     #   `Latency`, `Tail`. `no_std`, no alloc, no atomics; no
                     #   workspace dependency; forbids `unsafe`.
-  tutti-types       # `Param<U>`, ids. Names only tutti-units;
-                    #   forbids `unsafe`.
   tutti-music       # Notes, meter, loop ranges, the frame clock, `Adsr`. `no_std`
                     #   + alloc; names only tutti-units; forbids `unsafe`.
   tutti-rt          # Real-time-safe shared-memory primitives: the lock-free and
-                    #   `unsafe` runtime structure, every loom model, `Publisher`.
+                    #   `unsafe` runtime structure, every loom model, `Publisher`;
+                    #   `Param<U>` and the ids.
   tutti-graph       # The graph: `Node` contract, Topology->Plan compiler (PDC),
                     #   executor. Design doc 013.
   tutti-transport   # Transport: tempo, loop, motion state machine, timed commands
@@ -191,8 +190,7 @@ Non-scalar state handed from a control thread to the audio thread — a routing
 table, a `MeterMap`, a coefficient set — goes through
 `tutti_rt::{Publisher, Reader, Loan}`, re-exported from the `arc-lend` crate
 (github.com/tutti-audio/arc-lend, <https://docs.rs/arc-lend>). Scalars
-keep using `Param<U>`. (It was `RtPublish`/`RtRef` in `tutti-types` until it
-moved into its own crate.)
+keep using `Param<U>`.
 
 **The invariant: the audio thread never holds an owning handle to published
 state.** A reading thread lends through a `Reader`, registered on the cell
@@ -325,8 +323,7 @@ for that crate is an `unsafe fn`, which is `no_denormals`. Ours is safe because
 the engine owns every caller and the audit above, and it stays a module in
 `tutti-rt`. That crate holds the engine's runtime primitives, not this function
 alone, and is `publish = false`: it is reachable only by workspace
-crates and consumers that take the repository as a git dependency, no more
-than when it sat in `tutti-types`. Publishing
+crates and consumers that take the repository as a git dependency. Publishing
 `tutti-rt` would raise the question again.
 
 ## Two buffer vocabularies — edges vs graph nodes

@@ -12,7 +12,7 @@ use tutti_ump::NoteNumber;
 use tutti_units::{Cents, Hz, Semitones};
 
 // A second copy of A440. `Note::A4_HZ` is the engine's canonical one but is
-// private to `tutti-types`, and widening its visibility is a bigger change
+// private to `tutti-music`, and widening its visibility is a bigger change
 // than this file should make on its way past. The value is fixed by
 // definition, so the duplication is inert — unlike the *conversions* that used
 // to sit beside it, which are now `Semitones::to_pitch_ratio` and

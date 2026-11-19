@@ -23,7 +23,7 @@ use crate::{UnisonEngine, VoiceAllocator, VoiceAllocatorConfig};
 use tutti_graph::{EventKind, SubBlocks};
 use tutti_midi_protocol::{PitchBendSensitivity, UniversalReader};
 use tutti_midi_protocol::{channel_voice, narrow_value};
-use tutti_types::Param;
+use tutti_rt::Param;
 use tutti_ump::ControlValue;
 use tutti_ump::NoteId;
 use tutti_ump::{

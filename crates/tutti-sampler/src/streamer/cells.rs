@@ -22,8 +22,9 @@
 //! (`prefetch::Ring`): the reader publishes the position it plays and the
 //! streamer follows it, so there is nothing to request and nothing to flush.
 
+use atomic_float::AtomicF64;
 use std::sync::atomic::{AtomicU64, Ordering};
-use tutti_types::{AtomicF64, Param64};
+use tutti_rt::Param64;
 use tutti_units::{Amplitude, PlaybackRate, ReadRate, SrcRatio};
 
 /// A stream's scalar controls and counts: see the module docs for who writes

@@ -76,8 +76,8 @@ use crate::error::Result;
 use decode::Seams;
 use handlers::Handles;
 use thread::Built;
+use tutti_rt::Mint;
 use tutti_rt::RingFloat;
-use tutti_types::Mint;
 use tutti_units::SampleRate;
 
 /// The disk-streaming engine: owns the streamer thread that reads files into

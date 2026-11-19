@@ -6,8 +6,8 @@
     expect(dead_code, reason = "a device restart (feature `device`) is the user")
 )]
 
+use tutti_rt::Mint;
 use tutti_sampler::{DiskStreamer, DiskStreamerConfig, Running};
-use tutti_types::Mint;
 use tutti_units::SampleRate;
 
 use crate::SessionFloat;

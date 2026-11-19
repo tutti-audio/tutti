@@ -288,10 +288,10 @@ mod tests {
 
     #[test]
     fn a_path_pin_moves_and_a_registry_pin_stays() {
-        let m = "tutti-types = { version = \"0.0.1\", path = \"../tutti-types\" }\nfoo = { version = \"0.0.1\" }\ntutti-rt = { path = \"../tutti-rt\" }\n# tutti-x = { version = \"0.0.1\", path = \"x\" }\n";
+        let m = "tutti-units = { version = \"0.0.1\", path = \"../tutti-units\" }\nfoo = { version = \"0.0.1\" }\ntutti-rt = { path = \"../tutti-rt\" }\n# tutti-x = { version = \"0.0.1\", path = \"x\" }\n";
         assert_eq!(
             bump_path_pins(m, "0.0.1", &v("0.1.0")),
-            "tutti-types = { version = \"0.1.0\", path = \"../tutti-types\" }\nfoo = { version = \"0.0.1\" }\ntutti-rt = { path = \"../tutti-rt\" }\n# tutti-x = { version = \"0.0.1\", path = \"x\" }\n"
+            "tutti-units = { version = \"0.1.0\", path = \"../tutti-units\" }\nfoo = { version = \"0.0.1\" }\ntutti-rt = { path = \"../tutti-rt\" }\n# tutti-x = { version = \"0.0.1\", path = \"x\" }\n"
         );
     }
 

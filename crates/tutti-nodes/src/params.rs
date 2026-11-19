@@ -15,10 +15,10 @@
 use std::sync::Arc;
 use std::sync::atomic::Ordering::{Acquire, Relaxed};
 
+use atomic_float::AtomicF64;
 use tutti_buffers::Float;
 use tutti_dsp::{GAIN_GLIDE, Glide};
 use tutti_graph::{Io, ParamSetBuilder};
-use tutti_types::AtomicF64;
 use tutti_units::{SampleRate, UnitAddr};
 
 use crate::kernel::MAX_LANES;
