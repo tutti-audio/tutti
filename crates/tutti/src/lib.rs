@@ -663,7 +663,9 @@ pub mod plugin {
     /// holds.
     pub mod catalog {
         pub use tutti_plugin::catalog::AudioConfig;
-        pub use tutti_plugin_db::{CatalogConfig, PluginDb, Scan, ScanPoll, ScanResult};
+        pub use tutti_plugin_db::{
+            CatalogConfig, FormatMismatch, PluginDb, Probed, Scan, ScanPoll, ScanResult,
+        };
         pub use tutti_plugin_types::{
             Described, FourCc, PluginDescriptor, PluginId, PluginIdError, PluginRole, Uid,
         };
