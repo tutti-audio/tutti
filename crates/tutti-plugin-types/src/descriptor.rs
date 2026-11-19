@@ -238,6 +238,20 @@ impl PluginClass {
     }
 }
 
+#[cfg(feature = "serde")]
+impl From<u32> for AuComponentType {
+    fn from(code: u32) -> Self {
+        Self::from_code(code)
+    }
+}
+
+#[cfg(feature = "serde")]
+impl From<AuComponentType> for u32 {
+    fn from(ty: AuComponentType) -> Self {
+        ty.code()
+    }
+}
+
 impl AuComponentType {
     /// The four-character code of this type (`aufx` for [`Effect`](Self::Effect)).
     #[must_use]
@@ -300,8 +314,13 @@ impl AuComponentType {
 /// A mirror of `tutti-au-host`'s native type, so this crate needs no AU
 /// dependency. [`Unknown`](Self::Unknown) carries the raw four-char code of a
 /// type this enum does not name.
+///
+/// With the `serde` feature it is written as its code and read back through
+/// [`from_code`](Self::from_code), so a code this enum names always reads as
+/// its own variant, never as [`Unknown`](Self::Unknown).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(from = "u32", into = "u32"))]
 pub enum AuComponentType {
     /// `aufx` — audio in, audio out.
     Effect,

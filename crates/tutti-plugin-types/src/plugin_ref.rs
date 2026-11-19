@@ -334,4 +334,94 @@ mod tests {
         let chosen = at("/p/x.clap", Some(clap.clone()));
         assert_eq!(chosen.identified(vst3).id(), Some(&clap));
     }
+
+    /// **A four-character code reads back from its text for every byte in every
+    /// position**, a `.` or `\` or a byte past ASCII escaped, and no two codes
+    /// print alike.
+    #[test]
+    fn a_four_cc_round_trips_for_every_byte_in_every_position() {
+        for position in 0..4 {
+            for byte in 0..=255u8 {
+                let mut bytes = *b"abcd";
+                bytes[position] = byte;
+                let code = FourCc::new(u32::from_be_bytes(bytes));
+                let text = code.to_string();
+                assert!(!text.contains('.'), "{text}: `.` splits an AU id");
+                assert_eq!(text.parse::<FourCc>(), Ok(code), "{text}");
+            }
+        }
+        let alike = [
+            *b"a.cd",
+            *b"a\\cd",
+            [b'a', 0xa9, b'c', b'd'],
+            [b'a', 0xc2, b'c', b'd'],
+        ];
+        let texts: std::collections::HashSet<_> = alike
+            .iter()
+            .map(|b| FourCc::new(u32::from_be_bytes(*b)).to_string())
+            .collect();
+        assert_eq!(texts.len(), alike.len(), "{texts:?}");
+        assert_eq!(
+            FourCc::new(u32::from_be_bytes([0xa9, b'n', b'a', b'm'])).to_string(),
+            "\\xa9nam"
+        );
+        // An escape of a byte that prints as itself, a short or long code, a bad
+        // escape: no text.
+        for text in [
+            "\\x41bcd", "abc", "abcde", "\\xa", "\\xZZbcd", "\\XA9nam", "ab.d",
+        ] {
+            assert!(text.parse::<FourCc>().is_err(), "{text}");
+        }
+    }
+
+    /// **An AU id with a non-ASCII code round-trips whole**, as the probe's
+    /// command line carries it.
+    #[test]
+    fn an_au_id_with_an_escaped_code_round_trips() {
+        let id = PluginId::Au {
+            component_type: AuComponentType::Effect,
+            subtype: FourCc::new(u32::from_be_bytes([0xa9, b'.', b'\\', b' '])),
+            manufacturer: FourCc::new(u32::from_be_bytes(*b"appl")),
+        };
+        assert_eq!(id.to_string().parse::<PluginId>(), Ok(id));
+    }
+
+    /// **Ids have one text each**: a class id reads in either case, a VST2 id is
+    /// digits alone (no sign, no leading zero), and a CLAP id is not empty.
+    #[test]
+    fn an_id_has_one_text() {
+        use crate::PluginIdError as E;
+        let upper = "vst3.00112233-44556677-8899AABB-CCDDEEFF";
+        assert_eq!(upper.to_lowercase().parse::<PluginId>(), upper.parse());
+        for text in ["vst2.+5", "vst2.05", "vst2.", "vst2.-1", "vst2.4294967296"] {
+            assert!(
+                matches!(text.parse::<PluginId>(), Err(E::Vst2(_))),
+                "{text}"
+            );
+        }
+        assert_eq!("vst2.0".parse(), Ok(PluginId::Vst2(0)));
+        assert_eq!("clap.".parse::<PluginId>(), Err(E::EmptyClap));
+    }
+
+    /// **A value the peer cannot make is a decode failure**: an empty CLAP id, an
+    /// id in the old string shape (a project file written before ids were typed
+    /// fails to read; one with no id still reads), and a known component code is
+    /// read as its own type, never as `Unknown`.
+    #[cfg(feature = "serde")]
+    #[test]
+    fn a_document_cannot_make_an_id_the_text_refuses() {
+        let read = |json: &str| serde_json::from_str::<PluginRef>(json);
+        assert!(read(r#"{"path":"/p/x.clap","id":{"Clap":""}}"#).is_err());
+        assert!(read(r#"{"path":"/p/x.clap","format":"Clap","id":"com.vendor.synth"}"#).is_err());
+        assert_eq!(
+            read(r#"{"path":"/p/x.clap","format":"Clap","id":null}"#).unwrap(),
+            PluginRef::file("/p/x.clap")
+        );
+        let unknown = AuComponentType::Unknown(AuComponentType::Effect.code());
+        let back: AuComponentType =
+            serde_json::from_str(&serde_json::to_string(&unknown).unwrap()).unwrap();
+        assert_eq!(back, AuComponentType::Effect);
+        let postcard = postcard::to_allocvec(&PluginId::Clap(String::new())).unwrap();
+        assert!(postcard::from_bytes::<PluginId>(&postcard).is_err());
+    }
 }

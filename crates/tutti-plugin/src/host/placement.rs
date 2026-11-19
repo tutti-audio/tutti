@@ -157,4 +157,17 @@ mod tests {
             Hosting::InProcess
         );
     }
+
+    /// **A ref with no id whose extension names no format is refused at
+    /// placement**, typed, before anything is loaded.
+    #[test]
+    fn a_ref_of_no_format_is_refused_at_placement() {
+        let loadable = Loadable::uncatalogued(tutti_plugin_types::PluginRef::file("/p/notes.txt"));
+        match placement(&loadable) {
+            Err(BridgeError::UnknownFormat { path, .. }) => {
+                assert_eq!(path, Path::new("/p/notes.txt"));
+            }
+            other => panic!("expected UnknownFormat, got {other:?}"),
+        }
+    }
 }

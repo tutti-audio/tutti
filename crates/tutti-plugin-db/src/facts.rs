@@ -94,10 +94,11 @@ mod tests {
             PluginFormat::Clap,
             &facts(mtime),
             vec![Described {
-                id: Some(PluginId::Vst2(1)),
+                id: Some(PluginId::Clap("id".into())),
                 descriptor: PluginDescriptor::new("name", PluginClass::Unknown),
             }],
         )
+        .expect("ids of the row's format")
     }
 
     fn bad(mtime: Option<Mtime>) -> FileRow {

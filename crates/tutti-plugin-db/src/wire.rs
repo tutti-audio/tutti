@@ -30,6 +30,14 @@ pub enum InvalidDb {
         /// The version the record declares.
         found: u64,
     },
+    /// A row holds a plugin id of another format than its own.
+    #[error("the plugin database row of {path:?}: {mismatch}")]
+    FormatMismatch {
+        /// The row's path.
+        path: PathBuf,
+        /// What is wrong with it.
+        mismatch: crate::FormatMismatch,
+    },
     /// Two rows name one path, so the record does not say which one holds.
     #[error("the plugin database lists {0:?} twice")]
     DuplicatePath(PathBuf),
@@ -172,6 +180,11 @@ impl TryFrom<Raw> for PluginDb {
             if db.row(&path).is_some() {
                 return Err(InvalidDb::DuplicatePath(path));
             }
+            row.check_formats()
+                .map_err(|mismatch| InvalidDb::FormatMismatch {
+                    path: path.clone(),
+                    mismatch,
+                })?;
             db.apply(RowChange::put(path, row));
         }
         Ok(db)
@@ -204,7 +217,8 @@ mod tests {
     use crate::table::FileState;
     use tutti_plugin_types::{
         Described, LatencyVerdict, MaxBlock, Measured, NotChecked, PROBE_FLOOR, PluginClass,
-        PluginDescriptor, PluginFormat, PluginId, ProbeConfig, StateHash, TailVerdict, Verdict,
+        PluginDescriptor, PluginFormat, PluginId, ProbeConfig, StateHash, TailVerdict, Uid,
+        Verdict,
     };
     use tutti_units::{Db, SampleRate, Samples};
 
@@ -220,10 +234,13 @@ mod tests {
             PluginFormat::Vst3,
             &facts,
             vec![Described::new(
-                PluginId::Clap(name.into()),
+                PluginId::Vst3(Uid::new(std::array::from_fn(|i| {
+                    name.as_bytes().get(i).copied().unwrap_or(0)
+                }))),
                 PluginDescriptor::new(name, PluginClass::Unknown),
             )],
         )
+        .expect("ids of the row's format")
     }
 
     fn db_of<S: AsRef<str>>(names: &[S]) -> PluginDb {
@@ -520,6 +537,24 @@ mod tests {
             let back: PluginDb = postcard::from_bytes(&bytes).unwrap();
 
             assert_eq!(back, db);
+        }
+    }
+
+    /// **A record whose row holds an id of another format is refused at
+    /// decode**, naming the row's path: the database never holds it.
+    #[test]
+    fn a_row_with_an_id_of_another_format_is_refused_at_decode() {
+        let mut stray = row("a");
+        let FileState::Probed { plugins, .. } = &mut stray.state else {
+            unreachable!("a probed row")
+        };
+        plugins[0].id = Some(PluginId::Vst2(7));
+        let mut db = PluginDb::new();
+        db.apply(RowChange::put("/p/a.vst3", stray));
+        let written = serde_json::to_string(&db).unwrap();
+        match serde_json::from_str::<PluginDb>(&written) {
+            Err(error) => assert!(error.to_string().contains("vst2.7"), "{error}"),
+            Ok(_) => panic!("a mixed-format row was read"),
         }
     }
 }

@@ -21,7 +21,8 @@ fn catalog_over(path: &std::path::Path, format: PluginFormat, id: Option<&str>) 
                 PluginId::Clap(id.into()),
                 PluginDescriptor::new(id, PluginClass::Unknown),
             )],
-        ),
+        )
+        .expect("ids of the row's format"),
         None => FileRow::blacklisted("SIGSEGV during probe".to_string(), &facts),
     };
     let mut db = PluginDb::new();

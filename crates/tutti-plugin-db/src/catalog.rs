@@ -819,7 +819,8 @@ mod tests {
             PluginFormat::Clap,
             &FileFacts::read(&path),
             vec![describe("one"), describe("two")],
-        );
+        )
+        .expect("ids of the row's format");
         let plugins = catalog_with(&path, row);
 
         let refs: Vec<_> = plugins.iter().map(|(r, _)| r).collect();
@@ -963,7 +964,8 @@ mod tests {
             .collect();
         catalog_with(
             path,
-            FileRow::probed(format, &FileFacts::read(path), plugins),
+            FileRow::probed(format, &FileFacts::read(path), plugins)
+                .expect("ids of the row's format"),
         )
     }
 
@@ -981,7 +983,8 @@ mod tests {
 
         db.apply(RowChange::put(
             key(&path),
-            FileRow::probed(PluginFormat::Clap, &facts, Vec::new()),
+            FileRow::probed(PluginFormat::Clap, &facts, Vec::new())
+                .expect("ids of the row's format"),
         ));
         assert_eq!(moved_blacklist(&published, &db), None, "a probed row");
 
@@ -1062,7 +1065,8 @@ mod tests {
                         id: Some(clap("twice")),
                         descriptor: PluginDescriptor::new("twice", PluginClass::Unknown),
                     }],
-                ),
+                )
+                .expect("ids of the row's format"),
             ));
         }
         let plugins = Catalog::new(db, CatalogConfig::new("/nonexistent"), |_| Ok(()));
@@ -1100,7 +1104,8 @@ mod tests {
                         id: None,
                         descriptor: PluginDescriptor::default(),
                     }],
-                ),
+                )
+                .expect("ids of the row's format"),
             ));
         }
         let mut plugins = Catalog::new(db, CatalogConfig::new("/nonexistent"), |_| Ok(()));

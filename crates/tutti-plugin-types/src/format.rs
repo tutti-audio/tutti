@@ -169,7 +169,11 @@ impl FromStr for Uid {
 
 /// A four-character code: an Audio Unit's component subtype or manufacturer.
 ///
-/// Text is the four characters, a space kept (`dls `).
+/// Text is the four bytes, each a printable ASCII character as itself (a space
+/// kept: `dls `) and any other byte, `.` and `\` included, as `\xNN` in
+/// lower-case hex (`\xa9nam`). [`FromStr`] reads the same text back, so every
+/// code round-trips and no two codes read alike. The escape keeps `.` free to
+/// separate the codes of a [`PluginId`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct FourCc(u32);
@@ -190,7 +194,14 @@ impl FourCc {
 
 impl fmt::Display for FourCc {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&String::from_utf8_lossy(&self.0.to_be_bytes()))
+        for byte in self.0.to_be_bytes() {
+            match byte {
+                b'.' | b'\\' => write!(f, "\\x{byte:02x}")?,
+                0x20..=0x7e => write!(f, "{}", char::from(byte))?,
+                _ => write!(f, "\\x{byte:02x}")?,
+            }
+        }
+        Ok(())
     }
 }
 
@@ -198,9 +209,37 @@ impl FromStr for FourCc {
     type Err = PluginIdError;
 
     fn from_str(text: &str) -> Result<Self, Self::Err> {
-        <[u8; 4]>::try_from(text.as_bytes())
+        let bad = || PluginIdError::FourCc(text.to_owned());
+        let raw = text.as_bytes();
+        let mut bytes = Vec::with_capacity(4);
+        let mut at = 0;
+        while at < raw.len() {
+            let byte = match raw[at] {
+                b'\\' => {
+                    let digits = raw.get(at + 1..at + 4).ok_or_else(bad)?;
+                    let lower_hex = |d: &u8| d.is_ascii_digit() || (b'a'..=b'f').contains(d);
+                    if digits[0] != b'x' || !digits[1..].iter().all(lower_hex) {
+                        return Err(bad());
+                    }
+                    let hex = std::str::from_utf8(&digits[1..]).map_err(|_| bad())?;
+                    let byte = u8::from_str_radix(hex, 16).map_err(|_| bad())?;
+                    // Only a byte that prints as itself has no escape: one text per code.
+                    if matches!(byte, 0x20..=0x7e) && byte != b'.' && byte != b'\\' {
+                        return Err(bad());
+                    }
+                    at += 3;
+                    byte
+                }
+                b'.' => return Err(bad()),
+                byte @ 0x20..=0x7e => byte,
+                _ => return Err(bad()),
+            };
+            bytes.push(byte);
+            at += 1;
+        }
+        <[u8; 4]>::try_from(bytes)
             .map(|bytes| Self(u32::from_be_bytes(bytes)))
-            .map_err(|_| PluginIdError::FourCc(text.to_owned()))
+            .map_err(|_| bad())
     }
 }
 
@@ -218,6 +257,7 @@ impl FromStr for FourCc {
 /// [`FromStr`] reads: for a command line and a message, not for storage.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(try_from = "serde_form::Raw"))]
 pub enum PluginId {
     /// A CLAP plugin id (`com.vendor.synth`).
     Clap(String),
@@ -278,12 +318,20 @@ impl FromStr for PluginId {
             .split_once('.')
             .ok_or_else(|| PluginIdError::Format(text.to_owned()))?;
         match PluginFormat::from_extension_id(format) {
+            Some(PluginFormat::Clap) if rest.is_empty() => Err(PluginIdError::EmptyClap),
             Some(PluginFormat::Clap) => Ok(Self::Clap(rest.to_owned())),
             Some(PluginFormat::Vst3) => rest.parse().map(Self::Vst3),
-            Some(PluginFormat::Vst2) => rest
-                .parse()
-                .map(Self::Vst2)
-                .map_err(|_| PluginIdError::Vst2(rest.to_owned())),
+            Some(PluginFormat::Vst2) => {
+                // Digits only, no sign and no leading zero: one text per id.
+                let canonical = !rest.is_empty()
+                    && rest.bytes().all(|b| b.is_ascii_digit())
+                    && (rest == "0" || !rest.starts_with('0'));
+                canonical
+                    .then(|| rest.parse().ok())
+                    .flatten()
+                    .map(Self::Vst2)
+                    .ok_or_else(|| PluginIdError::Vst2(rest.to_owned()))
+            }
             Some(PluginFormat::AudioUnit) => {
                 let mut codes = rest.split('.');
                 match (codes.next(), codes.next(), codes.next(), codes.next()) {
@@ -296,6 +344,48 @@ impl FromStr for PluginId {
                 }
             }
             None => Err(PluginIdError::Format(text.to_owned())),
+        }
+    }
+}
+
+/// What a [`PluginId`] reads from a document or the wire, before it is checked:
+/// the same variants, so the shapes agree. A CLAP id of no characters is
+/// refused, so a value the peer cannot make is a decode failure.
+#[cfg(feature = "serde")]
+mod serde_form {
+    use super::{AuComponentType, FourCc, PluginId, PluginIdError, Uid};
+
+    #[derive(Debug, serde::Deserialize)]
+    pub enum Raw {
+        Clap(String),
+        Vst3(Uid),
+        Au {
+            component_type: AuComponentType,
+            subtype: FourCc,
+            manufacturer: FourCc,
+        },
+        Vst2(u32),
+    }
+
+    impl TryFrom<Raw> for PluginId {
+        type Error = PluginIdError;
+
+        fn try_from(raw: Raw) -> Result<Self, Self::Error> {
+            Ok(match raw {
+                Raw::Clap(id) if id.is_empty() => return Err(PluginIdError::EmptyClap),
+                Raw::Clap(id) => Self::Clap(id),
+                Raw::Vst3(uid) => Self::Vst3(uid),
+                Raw::Au {
+                    component_type,
+                    subtype,
+                    manufacturer,
+                } => Self::Au {
+                    component_type,
+                    subtype,
+                    manufacturer,
+                },
+                Raw::Vst2(id) => Self::Vst2(id),
+            })
         }
     }
 }
@@ -315,6 +405,9 @@ pub enum PluginIdError {
     /// Not `<type>.<subtype>.<manufacturer>`.
     #[error("`{0}` is not an AU id (`<type>.<subtype>.<manufacturer>`)")]
     Au(String),
+    /// A CLAP id of no characters.
+    #[error("a CLAP plugin id is not empty")]
+    EmptyClap,
     /// Not a VST2 `uniqueID`.
     #[error("`{0}` is not a VST2 id (a number)")]
     Vst2(String),

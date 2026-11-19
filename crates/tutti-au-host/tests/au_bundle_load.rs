@@ -136,7 +136,9 @@ fn an_id_of_another_format_is_refused_at_the_call() {
     };
     let text = error.to_string();
     assert!(
-        text.contains(&other.to_string()) && text.contains("au"),
+        text.contains(&format!(
+            "`{other}` is a clap plugin id, and this is the au loader"
+        )),
         "the error names the id and the loader: {text}"
     );
 }

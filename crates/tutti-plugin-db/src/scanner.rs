@@ -14,7 +14,9 @@ use crossbeam_channel::{Receiver, Sender, TryRecvError, TrySendError};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tracing::{debug, info, warn};
-use tutti_plugin_types::{Described, PluginClass, PluginDescriptor, PluginFormat, ProbeError};
+use tutti_plugin_types::{
+    Described, PluginClass, PluginDescriptor, PluginFormat, ProbeError, ProbeRefusal,
+};
 use tutti_rt::{LockExt, StopToken, Tally, TallyWriter, ThreadHandle};
 
 /// How many progress updates wait for the owner before the scan drops the
@@ -554,11 +556,22 @@ impl Job {
             return (ScanOutcome::Failed, None, None);
         }
         match probed {
-            Ok(plugins) => (
-                ScanOutcome::New,
-                Some(RowChange::put(key, FileRow::probed(format, facts, plugins))),
-                None,
-            ),
+            Ok(plugins) => {
+                match FileRow::probed(format, facts, plugins) {
+                    Ok(row) => (ScanOutcome::New, Some(RowChange::put(key, row)), None),
+                    // A probe that read the file as another format than it was asked
+                    // for says nothing worth recording: the file is retried.
+                    Err(mismatch) => {
+                        warn!("probe of {path:?} contradicts its format: {mismatch}");
+                        let refusal = ProbeRefusal::Describe(mismatch.to_string());
+                        (
+                            ScanOutcome::Failed,
+                            None,
+                            Some(ProbeFailure::from(ProbeError::Refused(refusal))),
+                        )
+                    }
+                }
+            }
             Err(failure) if failure.blacklistable() => {
                 warn!("failed to probe plugin {:?}: {}", path, failure.reason());
                 (
@@ -726,7 +739,7 @@ mod tests {
     use std::time::{Duration, UNIX_EPOCH};
     use tempfile::TempDir;
     use tutti_plugin_types::{
-        LoadStage, PluginId, ProbeDeath, ProbeExit, ProbeRefusal, ResultError,
+        LoadStage, PluginId, ProbeDeath, ProbeExit, ProbeRefusal, ResultError, Uid,
     };
 
     fn create_fake_plugin(dir: &Path, name: &str) -> PathBuf {
@@ -992,10 +1005,11 @@ mod tests {
                 PluginFormat::Vst3,
                 &facts,
                 vec![Described {
-                    id: Some(PluginId::Vst2(1)),
+                    id: Some(PluginId::Vst3(Uid::new([1; 16]))),
                     descriptor,
                 }],
             )
+            .expect("ids of the row's format")
         };
         let same = create_fake_plugin(&plugins_dir, "same.vst3");
         let changed = create_fake_plugin(&plugins_dir, "changed.vst3");
@@ -1033,8 +1047,12 @@ mod tests {
             FileRow::probed(
                 PluginFormat::Vst3,
                 &FileFacts::read(&plugin),
-                vec![described("cached")],
-            ),
+                vec![Described::new(
+                    PluginId::Vst3(Uid::new([1; 16])),
+                    PluginDescriptor::new("cached", PluginClass::Unknown),
+                )],
+            )
+            .expect("ids of the row's format"),
         ));
 
         let result = scan_dirs(&scanner_for(dir.path()), &mut db, &[plugins_dir], no_save).unwrap();
@@ -1503,7 +1521,8 @@ mod tests {
             let stale = vec![described("old")];
             db.apply(RowChange::put(
                 p,
-                FileRow::probed(PluginFormat::Clap, &facts, stale),
+                FileRow::probed(PluginFormat::Clap, &facts, stale)
+                    .expect("ids of the row's format"),
             ));
         }
 
