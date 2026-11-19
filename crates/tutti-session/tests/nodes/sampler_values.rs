@@ -52,7 +52,7 @@ fn first_sound(out: &[f32]) -> Option<usize> {
 fn wire(s: &mut Session, node: NodeKey) {
     for port in 0..2 {
         s.graph()
-            .set_sources_hard(Root::output(port), [OutPort::new(node, port)])
+            .set_sources_unfaded(Root::output(port), [OutPort::new(node, port)])
             .unwrap();
     }
 }
@@ -296,7 +296,7 @@ impl Rig {
         let (clip, handle) = s.graph().add(clip.at(Beat::new(0.0)));
         for port in 0..2 {
             s.graph()
-                .set_sources_hard(Root::output(port), [OutPort::new(clip.erase(), 0)])
+                .set_sources_unfaded(Root::output(port), [OutPort::new(clip.erase(), 0)])
                 .unwrap();
         }
         let _ = s.update();

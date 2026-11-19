@@ -1,8 +1,8 @@
 //! Declicked wiring (doc 030 section 4): the session graph's `connect` fades a
 //! new edge in over `DECLICK`, and `disconnect`, `disconnect_all`,
 //! `set_sources` removals and the edges of a removed node fade out over the same
-//! span, leaving the plan when the fade has ended. `Connection::hard` and
-//! `disconnect_hard` opt out.
+//! span, leaving the plan when the fade has ended. `Connection::unfaded` and
+//! `disconnect_unfaded` opt out.
 //!
 //! Every figure is analytic: a constant of 1.0 through an edge whose weight is
 //! the smootherstep `x³(6x² − 15x + 10)` at `x = (j + 1) / 241` at fade frame
@@ -85,7 +85,7 @@ fn a_connect_fades_in_and_reaches_unity_at_declick() {
     );
 }
 
-/// **`.hard()` is the old step**: full weight from the first frame, no entry,
+/// **`.unfaded()` is the old step**: full weight from the first frame, no entry,
 /// no commit to settle.
 #[test]
 fn hard_connects_at_full_weight_at_once() {
@@ -94,7 +94,7 @@ fn hard_connects_at_full_weight_at_once() {
     s.graph()
         .connect(src.out(0), Root::output(0))
         .unwrap()
-        .hard();
+        .unfaded();
     let _ = s.update();
     assert!(
         frames(&mut s, 8)
@@ -119,7 +119,7 @@ fn a_disconnect_fades_out_inside_the_span_and_leaves_the_plan() {
     s.graph()
         .connect(src.out(0), Root::output(0))
         .unwrap()
-        .hard();
+        .unfaded();
     let _ = s.update();
     assert!(frames(&mut s, 4).iter().all(|&x| x == 1.0));
 
@@ -154,7 +154,7 @@ fn a_disconnect_fades_out_inside_the_span_and_leaves_the_plan() {
     assert!(frames(&mut s, 4).iter().all(|&x| x == 0.0));
 }
 
-/// **`disconnect_hard` cuts at once**, and a connect that no plan has heard
+/// **`disconnect_unfaded` cuts at once**, and a connect that no plan has heard
 /// leaves no fade behind.
 #[test]
 fn disconnect_hard_cuts_and_an_unheard_edge_just_goes() {
@@ -163,12 +163,12 @@ fn disconnect_hard_cuts_and_an_unheard_edge_just_goes() {
     s.graph()
         .connect(src.out(0), Root::output(0))
         .unwrap()
-        .hard();
+        .unfaded();
     let _ = s.update();
     assert!(frames(&mut s, 4).iter().all(|&x| x == 1.0));
     assert!(
         s.graph()
-            .disconnect_hard(src.out(0), Root::output(0))
+            .disconnect_unfaded(src.out(0), Root::output(0))
             .unwrap()
     );
     let _ = s.update();
@@ -190,7 +190,7 @@ fn a_reconnect_during_a_fade_out_rises_from_where_it_was() {
     s.graph()
         .connect(src.out(0), Root::output(0))
         .unwrap()
-        .hard();
+        .unfaded();
     let _ = s.update();
     frames(&mut s, 2);
     s.graph().disconnect(src.out(0), Root::output(0)).unwrap();
@@ -221,7 +221,7 @@ fn set_sources_and_remove_fade_what_leaves() {
     let (b, _) = s.graph().add(ForkByClone(Const::mono(2.0)));
     let sink = Root::output(0);
     s.graph()
-        .set_sources_hard(sink, [OutPort::new(a.erase(), 0)])
+        .set_sources_unfaded(sink, [OutPort::new(a.erase(), 0)])
         .unwrap();
     let _ = s.update();
     frames(&mut s, 2);

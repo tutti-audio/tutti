@@ -219,7 +219,7 @@ impl Params {
     }
 }
 
-/// Writes the target, `Target`, `Land` and builders of a slot target whose
+/// Writes the target, `Target`, `Store` and builders of a slot target whose
 /// value type is fixed.
 macro_rules! slot_target {
     ($(#[$meta:meta])* $name:ident, $value:ty, $id:expr) => {
@@ -241,7 +241,7 @@ macro_rules! slot_target {
         impl Target for $name {
             type Value = $value;
         }
-        impl sealed::Land for $name {
+        impl sealed::Store for $name {
             type Cell = SlotCell<$value>;
 
             fn resolve(self, params: &Params) -> Option<(Self::Cell, $value)> {
@@ -254,7 +254,7 @@ macro_rules! slot_target {
                 cell.check(value)
             }
 
-            fn land(cell: &Self::Cell, value: &$value) {
+            fn store(cell: &Self::Cell, value: &$value) {
                 cell.store(value);
             }
         }
@@ -351,7 +351,7 @@ slot_target!(
     SlotId::OutputLatency
 );
 
-/// Writes the target, `Target`, `Land` and builders of a slot target whose
+/// Writes the target, `Target`, `Store` and builders of a slot target whose
 /// `SlotId` is built from a key of the thing it is on (`$key`), with the
 /// value type fixed.
 macro_rules! keyed_slot_target {
@@ -374,7 +374,7 @@ macro_rules! keyed_slot_target {
         impl Target for $name {
             type Value = $value;
         }
-        impl sealed::Land for $name {
+        impl sealed::Store for $name {
             type Cell = SlotCell<$value>;
 
             fn resolve(self, params: &Params) -> Option<(Self::Cell, $value)> {
@@ -387,7 +387,7 @@ macro_rules! keyed_slot_target {
                 cell.check(value)
             }
 
-            fn land(cell: &Self::Cell, value: &$value) {
+            fn store(cell: &Self::Cell, value: &$value) {
                 cell.store(value);
             }
         }
@@ -396,7 +396,7 @@ macro_rules! keyed_slot_target {
 }
 pub(super) use keyed_slot_target;
 
-/// Writes the target, `Target`, `Land` and builders of a slot target on a node
+/// Writes the target, `Target`, `Store` and builders of a slot target on a node
 /// of the graph: its `SlotId` names the node, and the value type is fixed.
 #[cfg(any(feature = "midi", feature = "sampler"))]
 macro_rules! node_slot_target {
@@ -662,7 +662,7 @@ impl<T: SettingWord + PartialEq + Send + Sync + 'static> sealed::Sealed for Sett
 impl<T: SettingWord + PartialEq + Send + Sync + 'static> Target for SettingTarget<T> {
     type Value = T;
 }
-impl<T: SettingWord + PartialEq + Send + Sync + 'static> sealed::Land for SettingTarget<T> {
+impl<T: SettingWord + PartialEq + Send + Sync + 'static> sealed::Store for SettingTarget<T> {
     type Cell = SlotCell<T>;
 
     fn resolve(self, params: &Params) -> Option<(Self::Cell, T)> {
@@ -675,7 +675,7 @@ impl<T: SettingWord + PartialEq + Send + Sync + 'static> sealed::Land for Settin
         cell.check(value)
     }
 
-    fn land(cell: &Self::Cell, value: &T) {
+    fn store(cell: &Self::Cell, value: &T) {
         cell.store(value);
     }
 }

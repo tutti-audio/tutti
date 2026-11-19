@@ -2,11 +2,11 @@
 
 use thiserror::Error;
 
-/// Why [`Session::open_heard_tap`](crate::Session::open_heard_tap) or
-/// [`Session::close_heard_tap`](crate::Session::close_heard_tap) refused.
+/// Why [`Session::open_output_tap`](crate::Session::open_output_tap) or
+/// [`Session::close_output_tap`](crate::Session::close_output_tap) refused.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Error)]
 #[non_exhaustive]
-pub enum HeardTapError {
+pub enum SessionOutputTapError {
     /// The session has no engine, so nothing renders to tap (a detached
     /// session; a plan tap, [`Taps::open`](crate::Taps::open), is
     /// fed by its `render_frame`).

@@ -32,11 +32,11 @@ fn a_route_onto_a_param_scales_an_f64_render_by_the_analytic_gain() {
     s.graph()
         .connect(OutPort::new(dc, 0), gain.input(0))
         .unwrap()
-        .hard();
+        .unfaded();
     s.graph()
         .connect(OutPort::new(gain, 0), Root::output(0))
         .unwrap()
-        .hard();
+        .unfaded();
 
     let target = ParamRef::unit(gain.erase(), UnitParam::Volume);
     let mut m = s.mods_mut();

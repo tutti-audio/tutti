@@ -217,7 +217,7 @@ impl<F: Float> Midi<'_, F> {
     /// Reads the MIDI file at `path` on the session's spawner and converts each
     /// track to a clip value there. Returns at once; the [`LoadedMidi`] lands
     /// in a later [`update`](crate::Session::update) as a
-    /// [`SessionEvent::Landed`](crate::SessionEvent::Landed), or
+    /// [`SessionEvent::JobDone`](crate::SessionEvent::JobDone), or
     /// [`Job::wait`](crate::Job::wait) returns it. A file that cannot be read
     /// lands [`LoadMidiError::Read`]. **Dropping the [`Job`](crate::Job)
     /// discards the result.**

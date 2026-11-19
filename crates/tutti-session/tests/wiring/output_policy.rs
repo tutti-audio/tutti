@@ -31,7 +31,7 @@ fn feed(session: &mut Session, values: &[f32]) {
     for c in 0..values.len() {
         session
             .graph()
-            .set_sources_hard(Root::output(c), [OutPort::new(node, c)])
+            .set_sources_unfaded(Root::output(c), [OutPort::new(node, c)])
             .unwrap();
     }
 }

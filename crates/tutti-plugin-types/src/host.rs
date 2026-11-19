@@ -135,9 +135,9 @@ pub trait Control: EditorWindow {
         ParamWriteError::check_info(id, self.parameters(main).iter().find(|p| p.id() == id))
     }
 
-    /// Sets a parameter. Loaded: applied now. Active: an edit queued to the
-    /// Processor, applied at the head of its next block
-    /// ([`Edit`](crate::Edit)).
+    /// Sets a parameter. Loaded: applied now. Active: a write to the
+    /// Processor's slot for the parameter, applied at the head of its next block
+    /// ([`edit_slots`](crate::edit_slots())).
     ///
     /// **The value is [`Normalized`], the shared seam's domain.** The four
     /// formats disagree on what a parameter value is: VST3 and VST2 speak
@@ -276,11 +276,11 @@ pub trait Control: EditorWindow {
         let _ = main;
     }
 
-    /// Retries the parameter edits an active plugin's full ring refused,
-    /// latest value per parameter. [`Lifecycle::drive`](crate::Lifecycle::drive)
-    /// calls it on every [`Event::Tick`](crate::Event::Tick), so the host must
-    /// keep ticking: with no ticks a refused edit is never retried and the
-    /// plugin keeps the older value.
+    /// The control-side tick of an active plugin: applies what its Processor
+    /// reported and lets retired published values go.
+    /// [`Lifecycle::drive`](crate::Lifecycle::drive) calls it on every
+    /// [`Event::Tick`](crate::Event::Tick), so the host must keep ticking: with
+    /// no ticks a plugin's reports are never applied to its controller.
     fn flush_edits(&mut self, main: MainThreadMarker) {
         let _ = main;
     }
@@ -542,7 +542,7 @@ pub trait Controller: Control + Send {
 /// An in-process format's [`Controller`] holds the [`Loaded`] it was split from
 /// and answers the whole control surface through it. What an activation adds is
 /// one concern: the Controller owns the pipeline of edits to and from the
-/// Processor (an [`EditQueue`](crate::EditQueue) for host writes, a drain for
+/// Processor ([`edit_slots`](crate::edit_slots()) for host writes, a report drain for
 /// what the plugin reported, the ranges the Processor denormalizes against).
 /// This trait names the plugin and the few points where that pipeline joins the
 /// plugin's answers; [`Control`] and [`EditorWindow`] are implemented once for
@@ -573,8 +573,42 @@ pub trait Wraps {
         let _ = (main, id, value);
     }
 
-    /// A state or a preset load took: the writes queued before it are stale, and
-    /// whatever it carried is owed to the Processor.
+    /// A state or a preset load is about to run: the writes queued before it
+    /// are stale, so they are voided first, before the plugin's own load.
+    ///
+    /// A block that began draining before this may still apply what it had
+    /// already collected: it overlapped the load, as a block overlaps any host
+    /// call. Every block that starts after this returns sees the new epoch and
+    /// applies no write from before it.
+    fn before_restore(&mut self, main: MainThreadMarker) {
+        let _ = main;
+    }
+
+    /// Loads a preset. The default is [`restore_preset`](Self::restore_preset);
+    /// a format overrides it to refuse a preset up front, without touching the
+    /// plugin.
+    ///
+    /// A refusal that never reaches the plugin voids no write. A preset that
+    /// reaches the plugin and then fails still voids the pending writes, since
+    /// the plugin may be half-applied.
+    fn load_preset(&mut self, main: MainThreadMarker, id: &PresetId) -> bool {
+        self.restore_preset(main, id)
+    }
+
+    /// The generic preset load: [`before_restore`](Self::before_restore), the
+    /// plugin's own load, then [`after_restore`](Self::after_restore) if it
+    /// loaded.
+    fn restore_preset(&mut self, main: MainThreadMarker, id: &PresetId) -> bool {
+        self.before_restore(main);
+        let loaded = self.plugin_mut().load_preset(main, id);
+        if loaded {
+            self.after_restore(main);
+        }
+        loaded
+    }
+
+    /// A state or a preset load took: whatever it carried is owed to the
+    /// Processor.
     fn after_restore(&mut self, main: MainThreadMarker) {
         let _ = main;
     }
@@ -610,8 +644,8 @@ pub trait Wraps {
         let _ = main;
     }
 
-    /// The control-side tick (every [`Event::Tick`](crate::Event::Tick)): retry
-    /// or apply what the Processor owes, and let retired published values go.
+    /// The control-side tick (every [`Event::Tick`](crate::Event::Tick)): apply
+    /// what the Processor reported, and let retired published values go.
     fn tick(&mut self, main: MainThreadMarker) {
         let _ = main;
     }
@@ -727,6 +761,7 @@ impl<W: Wraps> Control for W {
         bytes: &[u8],
         state_use: StateUse,
     ) -> PluginResult<()> {
+        self.before_restore(main);
         let result = self.plugin_mut().load_state(main, bytes, state_use);
         self.after_restore(main);
         result
@@ -737,11 +772,7 @@ impl<W: Wraps> Control for W {
     }
 
     fn load_preset(&mut self, main: MainThreadMarker, id: &PresetId) -> bool {
-        let loaded = self.plugin_mut().load_preset(main, id);
-        if loaded {
-            self.after_restore(main);
-        }
-        loaded
+        Wraps::load_preset(self, main, id)
     }
 
     fn current_preset(&mut self, main: MainThreadMarker) -> Option<PresetId> {
@@ -926,4 +957,87 @@ pub struct PluginIo<'a, S: Float> {
     pub ctx: &'a ProcessContext<'a>,
     /// What the plugin emitted: MIDI, parameter changes, note expression.
     pub out: &'a mut ProcessOutput,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::StateUse;
+    use crate::fake::{Call, FakeLoaded, FakePlugin};
+
+    /// A [`Wraps`] over the fake that records, at each restore hook, how many
+    /// state loads the plugin had run.
+    struct Rig {
+        plugin: FakeLoaded,
+        handle: FakePlugin,
+        hooks: Vec<(&'static str, usize)>,
+        reaches: bool,
+    }
+
+    impl Rig {
+        fn new(reaches: bool) -> Self {
+            let (handle, plugin) = FakePlugin::new();
+            Self {
+                plugin,
+                handle,
+                hooks: Vec::new(),
+                reaches,
+            }
+        }
+
+        fn loads(&self) -> usize {
+            self.handle
+                .calls()
+                .iter()
+                .filter(|call| matches!(call, Call::LoadState(_)))
+                .count()
+        }
+    }
+
+    impl Wraps for Rig {
+        type Plugin = FakeLoaded;
+
+        fn plugin(&self) -> &FakeLoaded {
+            &self.plugin
+        }
+
+        fn plugin_mut(&mut self) -> &mut FakeLoaded {
+            &mut self.plugin
+        }
+
+        fn before_restore(&mut self, _main: MainThreadMarker) {
+            let loads = self.loads();
+            self.hooks.push(("before", loads));
+        }
+
+        fn after_restore(&mut self, _main: MainThreadMarker) {
+            let loads = self.loads();
+            self.hooks.push(("after", loads));
+        }
+
+        fn load_preset(&mut self, main: MainThreadMarker, id: &PresetId) -> bool {
+            self.reaches && self.restore_preset(main, id)
+        }
+    }
+
+    /// **A state load voids before the plugin's load runs, and takes after.**
+    /// `before_restore` sees no load yet and `after_restore` sees it: moving the
+    /// void behind the load fails here.
+    #[test]
+    fn a_state_load_runs_before_restore_ahead_of_the_plugins_load() {
+        let main = tutti_fixtures::main_thread();
+        let mut rig = Rig::new(true);
+        Control::load_state(&mut rig, main, &[1, 2, 3], StateUse::Project).unwrap();
+        assert_eq!(rig.hooks, [("before", 0), ("after", 1)]);
+    }
+
+    /// **A preset the format refuses up front voids nothing**: no restore hook
+    /// runs, so the writes queued stay.
+    #[test]
+    fn a_refused_preset_runs_no_restore_hook() {
+        let main = tutti_fixtures::main_thread();
+        let mut rig = Rig::new(false);
+        assert!(!Control::load_preset(&mut rig, main, &PresetId::Number(1)));
+        assert!(rig.hooks.is_empty());
+    }
 }

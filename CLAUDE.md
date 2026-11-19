@@ -134,10 +134,10 @@ std only. A rule the compiler already enforces is not a gate.
   after a successful call reads silence, except a tap whose every source was removed:
   it ends (`Pull::Ended`) once drained. Removal returns a `#[must_use] Result`.
 - The session graph declicks wiring (`connect` fades in unless `.hard()`); a test that
-  renders a session wire for another reason wires `.hard()`.
+  renders a session wire for another reason wires `.unfaded()`.
 - An inlet whose rate is not the graph's is refused, never resampled.
 - An app reads the playhead through `Session::playhead()`.
-- An app writes a value one way: `Session::set` (or `Knobs::set`) over an assignment built
+- An app writes a value one way: `Session::set` (or `Values::set`) over an assignment built
   from a target, and reads it with `get`; a new `pub fn set_*` on the session is refused
   (`cargo xtask check-values`, whose baseline only shrinks).
 - A main-thread method takes `MainThreadMarker`. No public type in `tutti-session` holds one, and no `pub fn` is named `run` or `*_blocking`, bar the rows of `xtask/session-api-allow.txt` (`cargo xtask check-session-api`).

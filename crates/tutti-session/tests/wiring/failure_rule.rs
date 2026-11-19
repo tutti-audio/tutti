@@ -82,7 +82,7 @@ fn disconnect_and_sources_refuse_a_node_that_is_not_there() {
         Err(ConnectError::NoSuchNode(GHOST))
     );
     assert_eq!(
-        g.disconnect_hard(a.out(0), ghost_in),
+        g.disconnect_unfaded(a.out(0), ghost_in),
         Err(ConnectError::NoSuchNode(GHOST))
     );
     assert_eq!(

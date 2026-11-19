@@ -17,7 +17,9 @@ use tutti_units::{Amplitude, Mix};
 use super::error::SetRefusal;
 use super::slot::{Slot, SlotCell, SlotId, keyed_slot_target};
 use super::state::Params;
-use super::target::{Effective, Moved, ScalarTarget, Target, TargetId, sealed, target_builders};
+use super::target::{
+    Effective, Modulatable, ScalarTarget, Target, TargetId, sealed, target_builders,
+};
 use crate::Edge;
 
 /// A control written and not yet handed to the editor.
@@ -306,7 +308,7 @@ keyed_slot_target!(
     Gain
 );
 
-impl Moved for GainTarget {}
+impl Modulatable for GainTarget {}
 impl ScalarTarget for GainTarget {
     type Unit = Amplitude;
 }

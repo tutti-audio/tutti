@@ -133,7 +133,11 @@ fn a_restart_reopens_an_added_input_into_the_same_node() {
     let input = session
         .add_input(InputConfig::default().channels(&[0, 1]))
         .expect("opens");
-    session.graph().connect(input.node(), Root).unwrap().hard();
+    session
+        .graph()
+        .connect(input.node(), Root)
+        .unwrap()
+        .unfaded();
     // The wire as the host declared it; the render below needs it in force.
     let wired = session.graph_ref().sources(Root::output(0)).unwrap();
     assert_eq!(wired.len(), 1, "monitored");

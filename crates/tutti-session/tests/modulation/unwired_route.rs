@@ -49,10 +49,10 @@ fn a_route_onto_a_dropped_edge_reads_unresolved() {
         level: 0.5,
     }));
     let (x, _) = g.add(ForkByClone(Through::new(ChannelLayout::STEREO)));
-    g.connect(OutPort::new(a, 0), x.input(0)).unwrap().hard();
-    g.connect(OutPort::new(p, 0), x.input(1)).unwrap().hard();
-    g.connect(x.out(0), Root::output(0)).unwrap().hard();
-    g.connect(x.out(1), Root::output(1)).unwrap().hard();
+    g.connect(OutPort::new(a, 0), x.input(0)).unwrap().unfaded();
+    g.connect(OutPort::new(p, 0), x.input(1)).unwrap().unfaded();
+    g.connect(x.out(0), Root::output(0)).unwrap().unfaded();
+    g.connect(x.out(1), Root::output(1)).unwrap().unfaded();
     let lost = Edge::new(OutPort::new(p, 0), x.input(1));
     let mut m = s.mods_mut();
     m.range(lost, Amplitude::new(-2.0)..Amplitude::new(2.0))

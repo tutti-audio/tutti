@@ -113,7 +113,7 @@ fn a_narrower_reinsert_reports_what_it_dropped_and_keeps_the_rest() {
         (x.out(0), Root::output(0)),
         (x.out(1), Root::output(1)),
     ] {
-        g.connect(from, to).unwrap().hard();
+        g.connect(from, to).unwrap().unfaded();
     }
     for (from, to) in [
         (src.events_out_at(0), x.events_in_at(0)),
@@ -206,8 +206,8 @@ fn a_wider_reinsert_reports_nothing() {
     let g = s.graph();
     let (a, _) = g.add(ForkByClone(Const::mono(A)));
     let (x, _) = g.add(ForkByClone(Pass::<1, 1>));
-    g.connect(OutPort::new(a, 0), x.input(0)).unwrap().hard();
-    g.connect(x.out(0), Root::output(0)).unwrap().hard();
+    g.connect(OutPort::new(a, 0), x.input(0)).unwrap().unfaded();
+    g.connect(x.out(0), Root::output(0)).unwrap().unfaded();
     let events = s.update();
     assert!(!refused(&events));
     s.graph()
@@ -317,10 +317,10 @@ fn a_narrower_reinsert_reports_the_bus_edges_it_dropped() {
     let (a, _) = g.add(ForkByClone(Bused { aux: true }));
     let (y, _) = g.add(ForkByClone(Bused { aux: true }));
     let (t, _) = g.add(ForkByClone(Bused { aux: true }));
-    g.connect(a.bus_out(0), y.bus_in(0)).unwrap().hard();
-    g.connect(a.bus_out(1), y.bus_in(1)).unwrap().hard();
-    g.connect(y.bus_out(0), t.bus_in(0)).unwrap().hard();
-    g.connect(y.bus_out(1), t.bus_in(1)).unwrap().hard();
+    g.connect(a.bus_out(0), y.bus_in(0)).unwrap().unfaded();
+    g.connect(a.bus_out(1), y.bus_in(1)).unwrap().unfaded();
+    g.connect(y.bus_out(0), t.bus_in(0)).unwrap().unfaded();
+    g.connect(y.bus_out(1), t.bus_in(1)).unwrap().unfaded();
     let events = s.update();
     assert!(!refused(&events), "{events:?}");
 
@@ -363,8 +363,8 @@ fn a_narrower_reinsert_reports_the_root_feed_it_dropped() {
     s.declare_root_topology(Some(ChannelTopology::assumed(ChannelLayout::STEREO)))
         .expect("stereo");
     let g = s.graph();
-    g.connect(y.bus_out(0), Root).unwrap().hard();
-    g.connect(y.bus_out(1), Root).unwrap().hard();
+    g.connect(y.bus_out(0), Root).unwrap().unfaded();
+    g.connect(y.bus_out(1), Root).unwrap().unfaded();
     let events = s.update();
     assert!(!refused(&events), "{events:?}");
 
@@ -400,7 +400,7 @@ fn unwired_waits_for_the_commit_that_lands() {
     let (x, _) = g.add(ForkByClone(Pass::<2, 1>));
     let (u, _) = g.add(ForkByClone(Pass::<1, 1>));
     let (v, _) = g.add(ForkByClone(Pass::<1, 1>));
-    g.connect(OutPort::new(a, 0), x.input(1)).unwrap().hard();
+    g.connect(OutPort::new(a, 0), x.input(1)).unwrap().unfaded();
     let _ = s.update();
 
     let g = s.graph();
@@ -411,8 +411,8 @@ fn unwired_waits_for_the_commit_that_lands() {
         FadeLaw::EqualAmplitude,
     )
     .expect("the node is there");
-    g.connect(u.out(0), v.input(0)).unwrap().hard();
-    g.connect(v.out(0), u.input(0)).unwrap().hard();
+    g.connect(u.out(0), v.input(0)).unwrap().unfaded();
+    g.connect(v.out(0), u.input(0)).unwrap().unfaded();
     let events = s.update();
     assert!(refused(&events), "the cycle is refused: {events:?}");
     assert!(unwired(&events).is_empty(), "nothing landed yet");

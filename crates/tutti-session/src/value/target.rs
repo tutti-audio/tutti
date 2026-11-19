@@ -9,7 +9,7 @@ use std::sync::Arc;
 use tutti_graph::NodeKey;
 use tutti_units::UnitAddr;
 
-use super::batch::{Batch, Fail, Stageable};
+use super::batch::{Batch, Failure, Stageable};
 use super::error::SetRefusal;
 use super::slot::SlotId;
 use super::state::Params;
@@ -27,8 +27,8 @@ pub(crate) mod sealed {
     }
 
     /// What the verbs do with a target.
-    pub trait Land: Target {
-        /// What a landing writes through, resolved once under the value lock.
+    pub trait Store: Target {
+        /// What a store writes through, resolved once under the value lock.
         type Cell: Send + Sync + 'static;
 
         /// The cell and the base value now, or `None` when the target is gone.
@@ -38,7 +38,7 @@ pub(crate) mod sealed {
         fn check(cell: &Self::Cell, value: &Self::Value) -> Result<(), SetRefusal>;
 
         /// Stores `value` through `cell`. Infallible and panic-free.
-        fn land(cell: &Self::Cell, value: &Self::Value);
+        fn store(cell: &Self::Cell, value: &Self::Value);
     }
 }
 
@@ -49,7 +49,7 @@ pub(crate) mod sealed {
 /// [`Session::get`](crate::Session::get) take items built from targets. Its
 /// builders are inherent methods every target type has, so a caller imports
 /// no trait to use them: `to`, `modify`, `info`, and `effective` on a
-/// [`Moved`] one.
+/// [`Modulatable`] one.
 pub trait Target: Copy + Send + Sync + 'static + sealed::Sealed {
     /// What the target holds.
     type Value: Clone + PartialEq + Send + Sync + 'static;
@@ -57,13 +57,13 @@ pub trait Target: Copy + Send + Sync + 'static + sealed::Sealed {
 
 /// A target a modulation lane, an automation lane, a mapping or a follower
 /// can move, so it has an [effective](Effective) value beside its base.
-pub trait Moved: Target {}
+pub trait Modulatable: Target {}
 
-/// A [`Moved`] target whose value is a number in a unit.
+/// A [`Modulatable`] target whose value is a number in a unit.
 ///
 /// Named `ScalarTarget` because [`Scalar`](crate::Scalar) is the graph's
 /// trait for a unit a param can hold.
-pub trait ScalarTarget: Moved {
+pub trait ScalarTarget: Modulatable {
     /// The unit of the value.
     type Unit;
 }
@@ -170,15 +170,15 @@ impl<T: Target, F> fmt::Debug for Modify<T, F> {
 }
 
 /// `target.effective()`: the value the audio thread uses, which only a
-/// [`Moved`] target has. [`Session::get`](crate::Session::get) takes no
+/// [`Modulatable`] target has. [`Session::get`](crate::Session::get) takes no
 /// `Effective` yet, so asking for one does not compile.
 #[must_use = "a read is answered by `Session::get`"]
-pub struct Effective<T: Moved> {
+pub struct Effective<T: Modulatable> {
     #[allow(dead_code)]
     pub(crate) target: T,
 }
 
-impl<T: Moved> fmt::Debug for Effective<T> {
+impl<T: Modulatable> fmt::Debug for Effective<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Effective").finish_non_exhaustive()
     }
@@ -206,11 +206,11 @@ pub struct AnyAssign(pub(crate) Arc<dyn Erased>);
 
 /// An [`Assign`] behind a pointer.
 pub trait Erased: Send + Sync {
-    fn stage(&self, batch: &mut Batch<'_>) -> Result<(), Fail>;
+    fn stage(&self, batch: &mut Batch<'_>) -> Result<(), Failure>;
 }
 
-impl<T: sealed::Land> Erased for Assign<T> {
-    fn stage(&self, batch: &mut Batch<'_>) -> Result<(), Fail> {
+impl<T: sealed::Store> Erased for Assign<T> {
+    fn stage(&self, batch: &mut Batch<'_>) -> Result<(), Failure> {
         self.clone().stage(batch)
     }
 }
@@ -221,7 +221,7 @@ impl fmt::Debug for AnyAssign {
     }
 }
 
-impl<T: sealed::Land> Assign<T> {
+impl<T: sealed::Store> Assign<T> {
     /// The assignment with its target erased.
     pub fn erase(self) -> AnyAssign {
         AnyAssign(Arc::new(self))
@@ -237,7 +237,7 @@ pub trait Staged {
     /// Whether the slot's cell takes `value`, which is of the slot's type.
     fn accepts(&self, value: &dyn Any) -> Result<(), SetRefusal>;
     /// Stores it.
-    fn land(self: Box<Self>);
+    fn store(self: Box<Self>);
 }
 
 /// Writes the builders every target type has, from the target's generics.
@@ -258,7 +258,7 @@ macro_rules! target_builders {
             /// An edit: the value `f` builds from the value the call has for
             /// this target, for [`Session::set`](crate::Session::set). `f` runs
             /// under the value lock, so a graph edit (`add`, `remove`,
-            /// `replace`) and a `Knobs` write on another thread wait until it
+            /// `replace`) and a `Values` write on another thread wait until it
             /// returns; it must not wait on another thread.
             pub fn modify<F>(self, f: F) -> $crate::Modify<Self, F>
             where

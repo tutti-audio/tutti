@@ -76,9 +76,9 @@ pub use slot::{
 pub use slot::{ClipEventsTarget, HarmonyTarget, MpeModeTarget, OutputLatencyTarget};
 #[cfg(feature = "sampler")]
 pub use slot::{DirectionTarget, LoopingTarget, SpeedTarget, WindowTarget};
-pub use state::Knobs;
+pub use state::Values;
 pub(crate) use state::{ValueState, ValueTable};
 pub(crate) use target::target_builders;
 pub use target::{
-    AnyAssign, AnyTarget, Assign, Effective, Info, Modify, Moved, ScalarTarget, Target,
+    AnyAssign, AnyTarget, Assign, Effective, Info, Modify, Modulatable, ScalarTarget, Target,
 };
