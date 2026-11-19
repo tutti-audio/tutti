@@ -728,7 +728,7 @@ fn a_midi2_endpoint_arrives_as_midi2_ump() {
         .0
         .send_to_subscribers(
             PortId::of(0),
-            tutti_alsa_ffi::Packet::new(&note_on).unwrap(),
+            &tutti_ump::Ump([note_on[0], note_on[1], 0, 0]),
         )
         .unwrap();
     let got = arrive(&mut pumped, 1);
@@ -845,10 +845,10 @@ fn next_note(device: &Virtual, patience: Duration) -> Option<(u32, Instant)> {
     let deadline = Instant::now() + patience;
     while Instant::now() < deadline {
         match device.0.read_event() {
-            Ok(tutti_alsa_ffi::Read::Event(tutti_alsa_ffi::Event::Ump { packet, .. }))
-                if packet.words()[0] >> 28 == 2 =>
+            Ok(tutti_alsa_ffi::Read::Event(tutti_alsa_ffi::Event::Ump { ump, .. }))
+                if ump.message_type() == 2 =>
             {
-                return Some((packet.words()[0], Instant::now()));
+                return Some((ump.0[0], Instant::now()));
             }
             Ok(tutti_alsa_ffi::Read::Event(_)) => {}
             _ => std::thread::sleep(Duration::from_micros(500)),
@@ -1202,18 +1202,17 @@ fn a_device_on_the_sequencer_is_negotiated_through_the_pump_and_the_output() {
             }));
             while !stop.load(Ordering::Acquire) {
                 match device.0.read_event() {
-                    Ok(Read::Event(Event::Ump { packet, .. })) => {
-                        let Some(ump) = tutti_ump::split_stream(&packet.words()).next() else {
-                            continue;
-                        };
+                    Ok(Read::Event(Event::Ump { ump, .. })) => {
                         let Ok(message @ Message::Stream(_)) = ump.decode() else {
                             continue;
                         };
                         let mut answers: Vec<tutti_ump::Ump> = Vec::new();
                         let _ = endpoint.reply(message, &mut answers);
                         for answer in answers {
-                            let packet = tutti_alsa_ffi::Packet::new(answer.words()).unwrap();
-                            device.0.send_to_subscribers(PortId::of(0), packet).unwrap();
+                            device
+                                .0
+                                .send_to_subscribers(PortId::of(0), &answer)
+                                .unwrap();
                         }
                     }
                     _ => std::thread::sleep(Duration::from_millis(1)),

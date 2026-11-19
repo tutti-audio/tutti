@@ -14,11 +14,10 @@ use crate::backend::by_message::{Refused, by_message};
 use crate::endpoints::DeviceOut;
 use crate::error::{MidiHardwareError, NotFound, Result};
 use crate::stamp::Paired;
-use tutti_alsa_ffi::{
-    Blocking, Client, Packet, PortCaps, PortId, PortKind, QueueClock, UmpVersion,
-};
+use tutti_alsa_ffi::{Blocking, Client, PortCaps, PortId, PortKind, QueueClock, UmpVersion};
 use tutti_midi_device::EndpointId;
 use tutti_midi_runtime::{MidiOut, Outgoing, SendAt, Taken};
+use tutti_ump::Ump;
 
 /// An open ALSA output, as a [`MidiOut`].
 pub struct AlsaOutput {
@@ -49,10 +48,9 @@ impl Sender {
     /// Sends one UMP message now or on the queue at `at`, pairing the queue's
     /// clock with `Instant` first if none is `paired` yet: a batch pairs once,
     /// at its first scheduled packet ([`Paired`]).
-    fn send(&mut self, words: &[u32], at: SendAt, paired: &mut Option<Paired>) -> Result<()> {
-        let packet = Packet::new(words)?;
+    fn send(&mut self, ump: &Ump, at: SendAt, paired: &mut Option<Paired>) -> Result<()> {
         let SendAt::At(instant) = at else {
-            self.seq.send_to_subscribers(self.port, packet)?;
+            self.seq.send_to_subscribers(self.port, ump)?;
             return Ok(());
         };
         let pairing = match *paired {
@@ -62,9 +60,9 @@ impl Sender {
         match pairing.departure(instant) {
             Some(time) => self
                 .seq
-                .send_to_subscribers_at(self.port, packet, &self.queue, time)?,
+                .send_to_subscribers_at(self.port, ump, &self.queue, time)?,
             // Beyond what a queue's clock holds: not schedulable, so now.
-            None => self.seq.send_to_subscribers(self.port, packet)?,
+            None => self.seq.send_to_subscribers(self.port, ump)?,
         }
         Ok(())
     }
@@ -127,7 +125,7 @@ impl MidiOut for AlsaOutput {
                 }
             }
             for (sent, event) in message.packets().iter().enumerate() {
-                if let Err(error) = sender.send(event.ump.words(), event.send, &mut paired) {
+                if let Err(error) = sender.send(&event.ump, event.send, &mut paired) {
                     return Err(Refused { error, sent });
                 }
             }
