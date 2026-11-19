@@ -43,6 +43,9 @@ pub(super) struct Lifecycle {
     editor_closed: Arc<AtomicBool>,
     /// Whether the host's last queued render-mode command said offline.
     offline: Arc<AtomicBool>,
+    /// Whether a lane's thread has told the listener of the crash: one event
+    /// for the bridge, whichever of its two threads sees the end first.
+    announced: Arc<AtomicBool>,
 }
 
 impl Lifecycle {
@@ -56,6 +59,7 @@ impl Lifecycle {
             editor_wants: Arc::new(Mutex::new(None)),
             editor_closed: Arc::new(AtomicBool::new(false)),
             offline: Arc::new(AtomicBool::new(false)),
+            announced: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -139,6 +143,12 @@ impl Lifecycle {
     /// The server's watch, for the guard and the fork to share.
     pub(super) fn watch(&self) -> &Arc<ServerWatch> {
         &self.watch
+    }
+
+    /// Whether the caller is the one to tell the listener of the crash: `true`
+    /// for the first call only.
+    pub(super) fn announce_crash(&self) -> bool {
+        !self.announced.swap(true, Ordering::AcqRel)
     }
 
     pub(super) fn request_shutdown(&self) {

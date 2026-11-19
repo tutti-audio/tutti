@@ -206,6 +206,10 @@ impl AudioBridge {
         // own reply timeout from the same block period, and two copies of the
         // rate would let the two timeouts drift apart.
         let (channels, wait) = Channels::new(sample_rate, Arc::clone(watch.wake()))?;
+        // An end of the server declared by anyone (the process guard, the host)
+        // rings the bridge thread, which waits on a bell and not on the watch's
+        // gate.
+        watch.on_declared(channels.waker());
         let payloads = PayloadPool::new(
             sample_rate,
             channels.refusal_writer(),

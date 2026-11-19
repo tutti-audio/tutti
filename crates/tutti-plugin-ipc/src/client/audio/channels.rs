@@ -325,6 +325,13 @@ impl Channels {
         self.news.store(false, Ordering::Release);
     }
 
+    /// A call that wakes the bridge thread, for what has no `Channels` to hold:
+    /// it holds the bell and no queue.
+    pub(super) fn waker(&self) -> impl Fn() + Send + Sync + use<> {
+        let bell = self.bell.clone();
+        move || bell.ring()
+    }
+
     /// Wake the bridge thread to re-check its stop condition (shutdown).
     /// Publish the condition first. Real-time safe, like the ring in
     /// [`push_command`](Self::push_command).

@@ -257,7 +257,7 @@ fn pump(
     // Unsolicited events read while a command waited for its reply. One
     // buffer for the connection, handed to the listener after each command.
     let mut inbox = Unsolicited::with_lifecycle(lifecycle.clone());
-    while lifecycle.is_running() {
+    while live(lifecycle) {
         let cmd = match channels.pop_command() {
             Some(cmd) => cmd,
             None => match wait.wait(&lanes.control.stream, None) {
@@ -302,6 +302,20 @@ fn pump(
             return;
         }
     }
+    // Out of the loop with the bridge still asked to run: the server was
+    // declared gone by another route (the process guard's exit watch, the host).
+    // The queued blocks are answered as a failed stream's are.
+    if lifecycle.is_crashed() {
+        channels.push_audio_response(AudioResponse::Error { seq: None });
+        drain_with_errors(channels);
+    }
+    notify_external_crash(lifecycle, listener);
+}
+
+/// Whether the thread goes on: the bridge was not asked to stop, and the server
+/// is not declared gone (by this bridge, the process guard or the host).
+fn live(lifecycle: &Lifecycle) -> bool {
+    lifecycle.is_running() && !lifecycle.is_crashed()
 }
 
 /// Declare the bridge dead: latch the cause, then tell whoever is listening.
@@ -331,9 +345,26 @@ fn crash(lifecycle: &Lifecycle, listener: &ListenerSlot, cause: PluginFailure) {
         return;
     }
     lifecycle.mark_crashed(cause.clone());
+    notify_crash(lifecycle, listener, cause);
+}
+
+/// Tells the listener of the crash, once for the bridge.
+fn notify_crash(lifecycle: &Lifecycle, listener: &ListenerSlot, cause: PluginFailure) {
+    if !lifecycle.announce_crash() {
+        return;
+    }
     let cb = listener.lock().clone();
     if let Some(f) = cb.as_ref() {
         f(BridgeEvent::Crashed { cause });
+    }
+}
+
+/// The thread ends: when the server was declared gone by another route (the
+/// process guard's exit watch, the host), no failure of this bridge's stream
+/// told the listener, so it hears it now, with the latched cause.
+fn notify_external_crash(lifecycle: &Lifecycle, listener: &ListenerSlot) {
+    if let Some(cause) = lifecycle.crash_cause() {
+        notify_crash(lifecycle, listener, cause);
     }
 }
 

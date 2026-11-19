@@ -604,7 +604,7 @@ fn a_crash_latches_a_cause_that_outlives_the_call() {
 fn a_listener_hears_the_crash_with_its_cause() {
     use parking_lot::Mutex as PlMutex;
 
-    let mock = MockServer::start("crash-event", |_| Action::Die);
+    let mut mock = MockServer::start("crash-event", |_| Action::Die);
 
     let heard: Arc<PlMutex<Vec<PluginFailure>>> = Arc::new(PlMutex::new(Vec::new()));
     let sink = Arc::clone(&heard);
@@ -626,10 +626,9 @@ fn a_listener_hears_the_crash_with_its_cause() {
         || !heard.lock().is_empty(),
     );
 
-    // Read once, straight after the wait, rather than sleeping to see whether
-    // more arrive. A duplicate could only come from a second `crash` call, and
-    // `pump` returns immediately after the first, so there is no later event to
-    // wait for — a sleep here would be a deadline pretending to be a proof.
+    // Counted once the bridge thread has ended (the shutdown joins it): a second
+    // event would be in the sink by then, and no sleep is needed to wait for one.
+    mock.thread.as_mut().expect("the bridge thread").shutdown();
     let seen = heard.lock().clone();
     assert_eq!(
         seen.len(),
@@ -2073,4 +2072,61 @@ fn a_second_control_call_while_a_reply_is_owed_waits_for_it() {
         *log.lock().unwrap(),
         ["recv 1", "answer 1", "recv 2", "answer 2"]
     );
+}
+
+/// **A server declared gone by another route is heard once, with its cause.**
+/// The process guard's exit watch declares to the shared latch; the stream has
+/// not failed, and the listener must still hear it.
+#[test]
+fn a_crash_declared_by_the_exit_watch_reaches_the_listener_once() {
+    use parking_lot::Mutex as PlMutex;
+
+    let mut mock = MockServer::start("exit-watch", |_| Action::Silent);
+    let heard: Arc<PlMutex<Vec<PluginFailure>>> = Arc::new(PlMutex::new(Vec::new()));
+    let sink = Arc::clone(&heard);
+    mock.bridge.audio().set_listener(Some(Arc::new(move |ev| {
+        if let crate::client::audio::BridgeEvent::Crashed { cause } = ev {
+            sink.lock().push(cause);
+        }
+    })));
+
+    mock.bridge.audio().mark_crashed(PluginFailure::Unreported);
+    tutti_fixtures::wait_until("the listener to hear the end", NOTICE_TIMEOUT, || {
+        !heard.lock().is_empty()
+    });
+    mock.thread.as_mut().expect("the bridge thread").shutdown();
+    let seen = heard.lock().clone();
+    assert!(
+        matches!(seen.as_slice(), [PluginFailure::Unreported]),
+        "heard {seen:?}"
+    );
+}
+
+/// **A shutdown ends while a request is stuck in the server.** The bridge thread
+/// is in a query nobody answers; it leaves when that query's own deadline
+/// (constructed here, short) passes. What is asserted is that the shutdown
+/// completes, not how fast.
+#[test]
+fn a_shutdown_ends_when_a_request_is_stuck_in_the_server() {
+    let (seen, seen_rx) = crossbeam_channel::bounded(1);
+    let timeouts = {
+        let mut t = Timeouts::default();
+        t.param = Duration::from_millis(200);
+        t
+    };
+    let mut mock = MockServer::start_with_timeouts("stuck-shutdown", timeouts, move |msg| {
+        if matches!(msg, HostMessage::GetParameter { .. }) {
+            let _ = seen.try_send(());
+        }
+        Action::Silent
+    });
+    let bridge = Arc::clone(&mock.bridge);
+    let query = std::thread::spawn(move || bridge.audio().parameter(ParamId::new(1)));
+    seen_rx
+        .recv_timeout(NOTICE_TIMEOUT)
+        .expect("the query is stuck in the server");
+
+    let mut thread = mock.thread.take().expect("the bridge thread");
+    call_within(move || thread.shutdown()).expect("the shutdown completes");
+    assert_eq!(query.join().expect("the query's thread"), None);
 }
