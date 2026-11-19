@@ -34,7 +34,7 @@ use tutti_graph::{
     Unforkable,
 };
 use tutti_graph::{Edge, FeedbackFrom, InPort, OutPort, Source};
-use tutti_ump::{Message, MidiChannel, NoteNumber, U7, Ump, Voice1};
+use tutti_ump::{CCNumber, Message, MidiChannel, NoteNumber, U7, U14, Ump, Voice1};
 use tutti_units::{At, Beat, Frame, Latency, Samples, Tail};
 
 /// Run `exec`'s blocks on a [`common::TestPool`] of `workers` participants
@@ -3026,6 +3026,163 @@ fn applying_a_commit_allocates_nothing() {
 #[test]
 fn applying_a_commit_allocates_nothing_in_parallel() {
     applying_a_commit_allocates_nothing_on(4);
+}
+
+/// Writes, on its first block, a MIDI 1.0 note on, every hold pedal down and
+/// the bend off centre on channel 0, and holds them.
+struct Latch {
+    sent: bool,
+}
+
+impl Node for Latch {
+    fn shape(&self) -> Shape {
+        Shape::EMPTY.with_events(0, 1)
+    }
+    fn prepare(&mut self, _: &Prepare) {}
+    fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
+        if !std::mem::replace(&mut self.sent, true) {
+            let ch = MidiChannel::of(0);
+            let cc = |n| midi::m1_cc(ch, CCNumber::of(n), U7::of(127));
+            let held = [
+                midi::m1_note_on(ch, 60, U7::of(100)),
+                cc(64),
+                cc(66),
+                cc(67),
+                cc(69),
+                Message::midi1(ch, Voice1::PitchBend(U14::of(0))).into(),
+            ];
+            for ump in held {
+                let _ = io
+                    .event_out(0)
+                    .push(tutti_graph::Event::midi(tutti_graph::Offset::ZERO, ump));
+            }
+        }
+        Status::Silent
+    }
+    fn reset(&mut self) {}
+}
+
+/// Counts what closes a [`Latch`]: MIDI 1.0 note offs, hold pedals at 0 and
+/// bends at their centre (MIDI 1.0 Pitch Bend, 0x2000).
+struct Closed {
+    offs: Arc<AtomicUsize>,
+    pedals_up: Arc<AtomicUsize>,
+    bends_centred: Arc<AtomicUsize>,
+}
+
+impl Node for Closed {
+    fn shape(&self) -> Shape {
+        Shape::EMPTY.with_events(1, 0)
+    }
+    fn prepare(&mut self, _: &Prepare) {}
+    fn process(&mut self, _: &Cx<'_>, io: Io<'_>) -> Status {
+        for e in io.events(0) {
+            let EventKind::Midi(Ump(w)) = e.kind else {
+                continue;
+            };
+            match (w[0] >> 28, (w[0] >> 20) & 0xf) {
+                (2, 0x8) => &self.offs,
+                (2, 0xb) if w[0] & 0x7f == 0 => &self.pedals_up,
+                (2, 0xe) if w[0] & 0x7f7f == 0x0040 => &self.bends_centred,
+                _ => continue,
+            }
+            .fetch_add(1, Ordering::Relaxed);
+        }
+        Status::Silent
+    }
+    fn reset(&mut self) {}
+}
+
+/// **Closing what a source holds allocates nothing, controllers included**: a
+/// source holds a key, the four hold pedals and an off-centre bend. Its edge is
+/// cut (the close at the commit), and a source replaced twice behind a fade (the
+/// second replace waits, then takes over, and the unit it displaces owes its
+/// closes to the blocks): each close reaches the sink as the key's Note Off,
+/// four pedal-ups (CC 64, 66, 67, 69 at 0) and a centred bend, with no
+/// allocation in the commit or the blocks.
+fn closing_pedals_and_bends_allocates_nothing_on(workers: usize) {
+    let (mut ed, mut exec) = Editor::new(prepare(64));
+    use_pool(&mut exec, workers);
+    let (offs, pedals_up, bends_centred) = (
+        Arc::new(AtomicUsize::new(0)),
+        Arc::new(AtomicUsize::new(0)),
+        Arc::new(AtomicUsize::new(0)),
+    );
+    let closed = || Closed {
+        offs: Arc::clone(&offs),
+        pedals_up: Arc::clone(&pedals_up),
+        bends_centred: Arc::clone(&bends_centred),
+    };
+    let input = vec![0.25f32; 64];
+    let mut outs = vec![vec![0.0f32; 64]; 1];
+    let transport = TransportPosition::default();
+    let mut blocks = |exec: &mut tutti_graph::Executor, n: usize| {
+        for _ in 0..n {
+            let mut slices: Vec<&mut [f32]> = outs.iter_mut().map(|o| &mut o[..]).collect();
+            assert_no_alloc::assert_no_alloc(|| {
+                exec.process(64, &transport, &[&input[..]], &mut slices);
+            });
+        }
+    };
+    let tallies = || [&offs, &pedals_up, &bends_centred].map(|n| n.load(Ordering::Relaxed));
+
+    // Cut: the commit that removes the edge closes what its source holds.
+    ed.insert(NodeKey(1), "latch", Unforkable(Latch { sent: false }));
+    ed.insert(NodeKey(2), "closed", Unforkable(closed()));
+    ed.spec_mut()
+        .connect_events(sink(2, 0), EventEdge::Direct(ev(1, 0)));
+    ed.commit().expect("commits");
+    apply(&mut exec);
+    ed.collect();
+    blocks(&mut exec, 4);
+    assert_eq!(tallies(), [0, 0, 0], "nothing closes while the edge stands");
+    ed.spec_mut().disconnect_events(sink(2, 0), ev(1, 0));
+    ed.commit().expect("commits");
+    apply(&mut exec);
+    blocks(&mut exec, 4);
+    ed.collect();
+    assert_eq!(
+        tallies(),
+        [1, 4, 1],
+        "a cut edge closes the key, pedals and bend"
+    );
+
+    // Promote: a second replace waits behind the first's fade and takes over;
+    // the unit it displaces owes the keys it held.
+    ed.spec_mut()
+        .connect_events(sink(2, 0), EventEdge::Direct(ev(1, 0)));
+    ed.commit().expect("commits");
+    apply(&mut exec);
+    blocks(&mut exec, 4);
+    ed.collect();
+    let fade = Fade::new(Samples(128), FadeLaw::EqualPower);
+    ed.replace(NodeKey(1), Unforkable(Latch { sent: false }), fade)
+        .expect("fits");
+    ed.commit().expect("commits");
+    apply(&mut exec);
+    blocks(&mut exec, 1);
+    ed.replace(NodeKey(1), Unforkable(Latch { sent: false }), fade)
+        .expect("fits");
+    ed.commit().expect("commits");
+    apply(&mut exec);
+    blocks(&mut exec, 16);
+    ed.collect();
+    assert_eq!(
+        tallies(),
+        [3, 12, 3],
+        "each unit that stopped closed its key, pedals and bend"
+    );
+    assert_eq!(exec.dropped_event_count(), 0);
+}
+
+#[test]
+fn closing_pedals_and_bends_allocates_nothing() {
+    closing_pedals_and_bends_allocates_nothing_on(1);
+}
+
+#[test]
+fn parallel_closing_pedals_and_bends_allocates_nothing() {
+    closing_pedals_and_bends_allocates_nothing_on(4);
 }
 
 /// **A pool set while a commit is in flight**: the commit was staged for no
