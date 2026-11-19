@@ -119,7 +119,7 @@ impl MockTransport {
         Env {
             frame: Frame::new(0),
             sample_rate: rate.into(),
-            block_len: Samples(frames),
+            block_len: Samples::new(frames),
             transport: self.transport(),
             changes: TransportChanges::NONE,
             play: tutti_graph::PlayClock::ZERO,

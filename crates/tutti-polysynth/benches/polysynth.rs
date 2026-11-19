@@ -58,10 +58,10 @@ const BLOCK: usize = 64;
 /// Flat and organ-like, so the measured block is a stationary sustain.
 fn flat_envelope() -> Adsr {
     Adsr {
-        attack: Seconds(0.001),
-        decay: Seconds(0.0),
-        sustain: Amplitude(1.0),
-        release: Seconds(0.3),
+        attack: Seconds::new(0.001),
+        decay: Seconds::new(0.0),
+        sustain: Amplitude::new(1.0),
+        release: Seconds::new(0.3),
     }
 }
 
@@ -83,7 +83,7 @@ fn held(cfg: SynthConfig, n: usize) -> Direct<PolySynth<f32>> {
         ..cfg
     };
     let mut synth = Direct::new(PolySynth::<f32>::new(cfg), SampleRate::of(SR), BLOCK);
-    let at = Offset::of(Samples(0), Samples(BLOCK));
+    let at = Offset::of(Samples::new(0), Samples::new(BLOCK));
     let events: Vec<Event> = (0..n)
         .map(|i| {
             Ump::from(Message::midi2(
@@ -163,16 +163,16 @@ fn bench_filter(c: &mut Criterion) {
         (
             "svf-lowpass",
             FilterType::Svf {
-                cutoff: Hz(2_000.0),
-                q: Q(0.707),
+                cutoff: Hz::new(2_000.0),
+                q: Q::new(0.707),
                 mode: SvfMode::Lowpass,
             },
         ),
         (
             "moog-ladder",
             FilterType::Moog {
-                cutoff: Hz(2_000.0),
-                resonance: Resonance(0.3),
+                cutoff: Hz::new(2_000.0),
+                resonance: Resonance::new(0.3),
             },
         ),
     ] {
@@ -221,7 +221,7 @@ fn bench_portamento(c: &mut Criterion) {
                 portamento: Some(PortamentoConfig {
                     mode: PortamentoMode::Always,
                     curve,
-                    time: GlideTime::of(Seconds(10_000.0)),
+                    time: GlideTime::of(Seconds::new(10_000.0)),
                     constant_time: true,
                 }),
                 ..config()
@@ -281,7 +281,7 @@ fn bench_events(c: &mut Criterion) {
     ];
     let events: Vec<Event> = (0..BLOCK)
         .map(|i| {
-            let at = Offset::of(Samples(i), Samples(BLOCK));
+            let at = Offset::of(Samples::new(i), Samples::new(BLOCK));
             Event::midi(at, Ump::from(wire[i % wire.len()]))
         })
         .collect();

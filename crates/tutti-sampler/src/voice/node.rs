@@ -297,7 +297,7 @@ impl<F: SamplerFloat> VoiceNode<F> {
         // it) is the gain the voice already has.
         let gain = driven.map_or_else(
             || self.gain.load(),
-            |v| Amplitude(Into::<f64>::into(v).max(0.0)),
+            |v| Amplitude::new(Into::<f64>::into(v).max(0.0)),
         );
         let gain = if gain.get().is_finite() {
             gain
@@ -549,7 +549,7 @@ impl<F: SamplerFloat> ForkSource<F> for VoiceNodeFork<F> {
         let gain = self
             .params
             .get(UnitParam::Volume)
-            .map_or(voice.play.gain, Amplitude);
+            .map_or(voice.play.gain, Amplitude::new);
         voice.play.gain = gain;
         voice.source.apply_gain(gain);
         let health = voice.fault().map(VoiceHealth);
@@ -632,7 +632,7 @@ mod tests {
         ));
         let prepare = Prepare::new(
             SampleRate::SR_48K,
-            tutti_buffers::MaxBlock::of(tutti_units::Samples(64)),
+            tutti_buffers::MaxBlock::of(tutti_units::Samples::new(64)),
         );
         let free = |play: Playback| {
             let voice = Voice {
@@ -657,7 +657,7 @@ mod tests {
         };
         let (live, fork) = free(Playback::default());
         assert_eq!(live, Tail::Unbounded);
-        assert_eq!(fork, Tail::Finite(tutti_units::Samples(4_800)));
+        assert_eq!(fork, Tail::Finite(tutti_units::Samples::new(4_800)));
 
         let stretched = Playback {
             stretch: tutti_units::StretchFactor::new(2.0),
@@ -665,7 +665,7 @@ mod tests {
         };
         assert_eq!(
             free(stretched).1,
-            Tail::Finite(tutti_units::Samples(9_600)),
+            Tail::Finite(tutti_units::Samples::new(9_600)),
             "a stretch of two plays twice as long"
         );
 

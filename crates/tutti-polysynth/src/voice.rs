@@ -217,8 +217,8 @@ impl Default for VoiceAllocatorConfig {
             max_voices: NonZeroUsize::new(16).unwrap(),
             strategy: AllocationStrategy::Oldest,
             mode: VoiceMode::Poly,
-            bend_range: Semitones(2.0),
-            per_note_bend_range: Semitones(48.0),
+            bend_range: Semitones::new(2.0),
+            per_note_bend_range: Semitones::new(48.0),
         }
     }
 }

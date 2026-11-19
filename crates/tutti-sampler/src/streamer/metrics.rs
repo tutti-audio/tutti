@@ -69,7 +69,7 @@ impl ReadMeter {
     pub(super) fn new() -> Self {
         Self {
             recent_reads: Vec::with_capacity(64),
-            window: Seconds(1.0),
+            window: Seconds::new(1.0),
         }
     }
 

@@ -119,9 +119,9 @@ mod tests {
     /// graph prepares a fork at its render's), in 64-frame blocks, a note-on
     /// at frame 0.
     fn render(mut node: Box<dyn Node>, rate: SampleRate, frames: usize) -> Vec<f32> {
-        node.prepare(&Prepare::new(rate, MaxBlock::of(Samples(64))));
+        node.prepare(&Prepare::new(rate, MaxBlock::of(Samples::new(64))));
         let note = midi::note_on(MidiChannel::FIRST, 60, 0xFFFF);
-        let at = Offset::of(Samples(0), Samples(64));
+        let at = Offset::of(Samples::new(0), Samples::new(64));
         let first = [Event::midi(at, note)];
         let mut out = Vec::with_capacity(frames);
         let mut frame = 0u64;
@@ -129,7 +129,7 @@ mod tests {
             let env = Env {
                 frame: tutti_units::Frame::new(frame),
                 sample_rate: rate,
-                block_len: Samples(64),
+                block_len: Samples::new(64),
                 transport: TransportPosition::default(),
                 changes: TransportChanges::NONE,
                 play: tutti_graph::PlayClock::ZERO,
@@ -183,7 +183,7 @@ mod tests {
         let mut live = unit(&font, U7::of(16));
         // At the render's rate first: preparing at another rate drops the
         // voices (they are built against a rate).
-        live.prepare(&Prepare::new(LIVE, MaxBlock::of(Samples(64))));
+        live.prepare(&Prepare::new(LIVE, MaxBlock::of(Samples::new(64))));
         live.note_on(
             MidiChannel::FIRST,
             NoteNumber::of(60),
@@ -210,14 +210,14 @@ mod tests {
 
     /// `render` with no events at all.
     fn render_quiet(mut node: Box<dyn Node>, rate: SampleRate, frames: usize) -> Vec<f32> {
-        node.prepare(&Prepare::new(rate, MaxBlock::of(Samples(64))));
+        node.prepare(&Prepare::new(rate, MaxBlock::of(Samples::new(64))));
         let mut out = Vec::with_capacity(frames);
         let mut frame = 0u64;
         while out.len() < frames {
             let env = Env {
                 frame: tutti_units::Frame::new(frame),
                 sample_rate: rate,
-                block_len: Samples(64),
+                block_len: Samples::new(64),
                 transport: TransportPosition::default(),
                 changes: TransportChanges::NONE,
                 play: tutti_graph::PlayClock::ZERO,

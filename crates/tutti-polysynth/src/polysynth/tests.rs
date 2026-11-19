@@ -82,13 +82,13 @@ impl Hand {
     /// through `Node::process`.
     fn drive(&mut self, frames: usize, mut queued: Vec<(usize, Ump)>) -> [Vec<f32>; 2] {
         queued.sort_by_key(|e| e.0);
-        let block = tutti_units::Samples(frames);
+        let block = tutti_units::Samples::new(frames);
         let (inside, past): (Vec<(usize, Ump)>, Vec<(usize, Ump)>) =
             queued.into_iter().partition(|e| e.0 < frames);
         let events: Vec<tutti_graph::Event> = inside
             .iter()
             .map(|&(index, ump)| {
-                let at = tutti_graph::Offset::of(tutti_units::Samples(index), block);
+                let at = tutti_graph::Offset::of(tutti_units::Samples::new(index), block);
                 tutti_graph::Event::midi(at, ump)
             })
             .collect();
@@ -132,10 +132,10 @@ fn a_full_block_renders_every_frame() {
         // Near-instant attack, so the note is audible within the first block
         // rather than still ramping up from silence.
         envelope: Adsr {
-            attack: Seconds(0.001),
-            decay: Seconds(0.0),
-            sustain: Amplitude(1.0),
-            release: Seconds(0.5),
+            attack: Seconds::new(0.001),
+            decay: Seconds::new(0.0),
+            sustain: Amplitude::new(1.0),
+            release: Seconds::new(0.5),
         },
         ..Default::default()
     });
@@ -289,7 +289,7 @@ fn test_unison_creates_subvoices() {
         unison: Some(UnisonConfig {
             voice_count: UnisonVoices::of(3),
             detune_cents: tutti_units::CentsSpan::of(15.0),
-            stereo_spread: Spread(0.5),
+            stereo_spread: Spread::new(0.5),
             phase_randomize: false,
         }),
         ..Default::default()
@@ -322,7 +322,7 @@ fn a_volume_write_moves_the_master_volume() {
     // The param word is `f32`: the write widens exactly.
     assert_eq!(
         synth.volume(),
-        tutti_units::Amplitude(f64::from(0.6_f32)),
+        tutti_units::Amplitude::new(f64::from(0.6_f32)),
         "the synth's master volume reflects the write"
     );
     // (A foreign `ParamAddr::Id` is not expressible: a `ParamSet` is
@@ -337,7 +337,7 @@ fn detune_is_addressable_with_unison_absent_without() {
         unison: Some(UnisonConfig {
             voice_count: UnisonVoices::of(3),
             detune_cents: tutti_units::CentsSpan::of(10.0),
-            stereo_spread: Spread(0.5),
+            stereo_spread: Spread::new(0.5),
             phase_randomize: false,
         }),
         ..Default::default()
@@ -359,7 +359,7 @@ fn a_detune_write_recomputes_unison_on_process() {
         unison: Some(UnisonConfig {
             voice_count: UnisonVoices::of(3),
             detune_cents: tutti_units::CentsSpan::of(0.0),
-            stereo_spread: Spread(0.0),
+            stereo_spread: Spread::new(0.0),
             phase_randomize: false,
         }),
         ..Default::default()
@@ -393,15 +393,15 @@ fn test_unison_stereo_output() {
         voice_mode: VoiceMode::Poly,
         oscillator: OscillatorType::Saw,
         envelope: Adsr {
-            attack: Seconds(0.001),
-            decay: Seconds(0.1),
-            sustain: Amplitude(0.8),
-            release: Seconds(0.1),
+            attack: Seconds::new(0.001),
+            decay: Seconds::new(0.1),
+            sustain: Amplitude::new(0.8),
+            release: Seconds::new(0.1),
         }, // Fast attack to get output quickly
         unison: Some(UnisonConfig {
             voice_count: UnisonVoices::of(3),
             detune_cents: tutti_units::CentsSpan::of(15.0),
-            stereo_spread: Spread(1.0), // Full stereo spread
+            stereo_spread: Spread::new(1.0), // Full stereo spread
             phase_randomize: false,
         }),
         ..Default::default()
@@ -470,15 +470,20 @@ fn test_basic_dsp_chain() {
     let mut bank = VoiceBank::<f32>::new(
         OscillatorType::Saw,
         &FilterType::None,
-        &Adsr::new(Seconds(0.001), Seconds(0.1), Amplitude(0.8), Seconds(0.1)),
+        &Adsr::new(
+            Seconds::new(0.001),
+            Seconds::new(0.1),
+            Amplitude::new(0.8),
+            Seconds::new(0.1),
+        ),
         tutti_units::SampleRate::SR_44K1,
         1,
         crate::UnisonVoices::ONE,
     );
-    bank.set_pitch(0, Hz(440.0));
+    bank.set_pitch(0, Hz::new(440.0));
     bank.set_gains(0, Amplitude::UNITY, Amplitude::UNITY);
     bank.snap_gain(0);
-    bank.start(0, Phase(0.3));
+    bank.start(0, Phase::new(0.3));
 
     // Gate closed: the oscillator runs, the envelope holds it at zero.
     let mut closed = 0.0f32;
@@ -510,10 +515,10 @@ fn test_note_off_respects_channel() {
         voice_mode: VoiceMode::Poly,
         oscillator: OscillatorType::Sine,
         envelope: Adsr {
-            attack: Seconds(0.001),
-            decay: Seconds(0.1),
-            sustain: Amplitude(1.0),
-            release: Seconds(0.1),
+            attack: Seconds::new(0.001),
+            decay: Seconds::new(0.1),
+            sustain: Amplitude::new(1.0),
+            release: Seconds::new(0.1),
         },
         ..Default::default()
     });
@@ -562,10 +567,10 @@ fn test_cc64_sustain_pedal_holds_notes() {
         voice_mode: VoiceMode::Poly,
         oscillator: OscillatorType::Sine,
         envelope: Adsr {
-            attack: Seconds(0.001),
-            decay: Seconds(0.0),
-            sustain: Amplitude(1.0),
-            release: Seconds(0.05),
+            attack: Seconds::new(0.001),
+            decay: Seconds::new(0.0),
+            sustain: Amplitude::new(1.0),
+            release: Seconds::new(0.05),
         },
         ..Default::default()
     });
@@ -613,10 +618,10 @@ fn test_cc66_sostenuto_pedal_holds_notes() {
         voice_mode: VoiceMode::Poly,
         oscillator: OscillatorType::Sine,
         envelope: Adsr {
-            attack: Seconds(0.001),
-            decay: Seconds(0.0),
-            sustain: Amplitude(1.0),
-            release: Seconds(0.05),
+            attack: Seconds::new(0.001),
+            decay: Seconds::new(0.0),
+            sustain: Amplitude::new(1.0),
+            release: Seconds::new(0.05),
         },
         ..Default::default()
     });
@@ -676,10 +681,10 @@ fn test_cc120_all_sound_off() {
         voice_mode: VoiceMode::Poly,
         oscillator: OscillatorType::Sine,
         envelope: Adsr {
-            attack: Seconds(0.001),
-            decay: Seconds(0.0),
-            sustain: Amplitude(1.0),
-            release: Seconds(5.0),
+            attack: Seconds::new(0.001),
+            decay: Seconds::new(0.0),
+            sustain: Amplitude::new(1.0),
+            release: Seconds::new(5.0),
         }, // Very long release
         ..Default::default()
     });
@@ -711,10 +716,10 @@ fn test_cc123_all_notes_off() {
         voice_mode: VoiceMode::Poly,
         oscillator: OscillatorType::Sine,
         envelope: Adsr {
-            attack: Seconds(0.001),
-            decay: Seconds(0.0),
-            sustain: Amplitude(1.0),
-            release: Seconds(5.0),
+            attack: Seconds::new(0.001),
+            decay: Seconds::new(0.0),
+            sustain: Amplitude::new(1.0),
+            release: Seconds::new(5.0),
         }, // Long release
         ..Default::default()
     });
@@ -751,10 +756,10 @@ fn test_cc123_respects_channel() {
         voice_mode: VoiceMode::Poly,
         oscillator: OscillatorType::Sine,
         envelope: Adsr {
-            attack: Seconds(0.001),
-            decay: Seconds(0.0),
-            sustain: Amplitude(1.0),
-            release: Seconds(5.0),
+            attack: Seconds::new(0.001),
+            decay: Seconds::new(0.0),
+            sustain: Amplitude::new(1.0),
+            release: Seconds::new(5.0),
         },
         ..Default::default()
     });
@@ -794,10 +799,10 @@ fn test_velocity_zero_note_on_is_note_off() {
         voice_mode: VoiceMode::Poly,
         oscillator: OscillatorType::Sine,
         envelope: Adsr {
-            attack: Seconds(0.001),
-            decay: Seconds(0.0),
-            sustain: Amplitude(1.0),
-            release: Seconds(0.05),
+            attack: Seconds::new(0.001),
+            decay: Seconds::new(0.0),
+            sustain: Amplitude::new(1.0),
+            release: Seconds::new(0.05),
         },
         ..Default::default()
     });
@@ -835,10 +840,10 @@ fn test_legato_mode_no_retrigger() {
         voice_mode: VoiceMode::Legato,
         oscillator: OscillatorType::Sine,
         envelope: Adsr {
-            attack: Seconds(0.001),
-            decay: Seconds(0.0),
-            sustain: Amplitude(1.0),
-            release: Seconds(0.1),
+            attack: Seconds::new(0.001),
+            decay: Seconds::new(0.0),
+            sustain: Amplitude::new(1.0),
+            release: Seconds::new(0.1),
         },
         ..Default::default()
     });
@@ -881,10 +886,10 @@ fn test_mono_mode_retrigger() {
         voice_mode: VoiceMode::Mono,
         oscillator: OscillatorType::Sine,
         envelope: Adsr {
-            attack: Seconds(0.001),
-            decay: Seconds(0.0),
-            sustain: Amplitude(1.0),
-            release: Seconds(0.1),
+            attack: Seconds::new(0.001),
+            decay: Seconds::new(0.0),
+            sustain: Amplitude::new(1.0),
+            release: Seconds::new(0.1),
         },
         ..Default::default()
     });
@@ -917,10 +922,10 @@ fn a_bend_lands_on_the_same_pitch_whether_the_note_was_already_sounding() {
         // derivations coincide and this test cannot fail.
         tuning: crate::Tuning::just_intonation(),
         envelope: Adsr {
-            attack: Seconds(0.001),
-            decay: Seconds(0.0),
-            sustain: Amplitude(1.0),
-            release: Seconds(0.1),
+            attack: Seconds::new(0.001),
+            decay: Seconds::new(0.0),
+            sustain: Amplitude::new(1.0),
+            release: Seconds::new(0.1),
         },
         ..Default::default()
     };
@@ -959,15 +964,15 @@ fn test_portamento_with_pitch_bend() {
         voice_mode: VoiceMode::Poly,
         oscillator: OscillatorType::Sine,
         envelope: Adsr {
-            attack: Seconds(0.001),
-            decay: Seconds(0.0),
-            sustain: Amplitude(1.0),
-            release: Seconds(0.1),
+            attack: Seconds::new(0.001),
+            decay: Seconds::new(0.0),
+            sustain: Amplitude::new(1.0),
+            release: Seconds::new(0.1),
         },
         portamento: Some(PortamentoConfig {
             mode: PortamentoMode::Always,
             curve: Law::Linear,
-            time: crate::GlideTime::of(tutti_units::Seconds(0.05)), // 50ms glide
+            time: crate::GlideTime::of(tutti_units::Seconds::new(0.05)), // 50ms glide
             constant_time: true,
         }),
         ..Default::default()
@@ -1011,10 +1016,10 @@ fn test_polysynth_reset() {
         voice_mode: VoiceMode::Poly,
         oscillator: OscillatorType::Sine,
         envelope: Adsr {
-            attack: Seconds(0.001),
-            decay: Seconds(0.0),
-            sustain: Amplitude(1.0),
-            release: Seconds(5.0),
+            attack: Seconds::new(0.001),
+            decay: Seconds::new(0.0),
+            sustain: Amplitude::new(1.0),
+            release: Seconds::new(5.0),
         },
         ..Default::default()
     });
@@ -1042,10 +1047,10 @@ fn test_mpe_per_voice_pitch_bend() {
         voice_mode: VoiceMode::Poly,
         oscillator: OscillatorType::Sine,
         envelope: Adsr {
-            attack: Seconds(0.001),
-            decay: Seconds(0.0),
-            sustain: Amplitude(1.0),
-            release: Seconds(0.1),
+            attack: Seconds::new(0.001),
+            decay: Seconds::new(0.0),
+            sustain: Amplitude::new(1.0),
+            release: Seconds::new(0.1),
         },
         ..Default::default()
     });
@@ -1128,10 +1133,10 @@ fn test_midi2_per_note_pitch_bend_addresses_one_voice() {
         voice_mode: VoiceMode::Poly,
         oscillator: OscillatorType::Sine,
         envelope: Adsr {
-            attack: Seconds(0.001),
-            decay: Seconds(0.0),
-            sustain: Amplitude(1.0),
-            release: Seconds(0.1),
+            attack: Seconds::new(0.001),
+            decay: Seconds::new(0.0),
+            sustain: Amplitude::new(1.0),
+            release: Seconds::new(0.1),
         },
         ..Default::default()
     });
@@ -1182,10 +1187,10 @@ fn test_midi2_per_note_management_reset_zeroes_only_addressed_voice() {
         voice_mode: VoiceMode::Poly,
         oscillator: OscillatorType::Sine,
         envelope: Adsr {
-            attack: Seconds(0.001),
-            decay: Seconds(0.0),
-            sustain: Amplitude(1.0),
-            release: Seconds(0.1),
+            attack: Seconds::new(0.001),
+            decay: Seconds::new(0.0),
+            sustain: Amplitude::new(1.0),
+            release: Seconds::new(0.1),
         },
         ..Default::default()
     });
@@ -1250,10 +1255,10 @@ fn test_pitch_7_25_retunes_only_the_addressed_note() {
         voice_mode: VoiceMode::Poly,
         oscillator: OscillatorType::Sine,
         envelope: Adsr {
-            attack: Seconds(0.001),
-            decay: Seconds(0.0),
-            sustain: Amplitude(1.0),
-            release: Seconds(0.1),
+            attack: Seconds::new(0.001),
+            decay: Seconds::new(0.0),
+            sustain: Amplitude::new(1.0),
+            release: Seconds::new(0.1),
         },
         ..Default::default()
     });
@@ -1311,10 +1316,10 @@ fn test_per_note_management_detach_freezes_the_note() {
         voice_mode: VoiceMode::Poly,
         oscillator: OscillatorType::Sine,
         envelope: Adsr {
-            attack: Seconds(0.001),
-            decay: Seconds(0.0),
-            sustain: Amplitude(1.0),
-            release: Seconds(0.1),
+            attack: Seconds::new(0.001),
+            decay: Seconds::new(0.0),
+            sustain: Amplitude::new(1.0),
+            release: Seconds::new(0.1),
         },
         ..Default::default()
     });
@@ -1375,10 +1380,10 @@ fn test_per_note_pitch_bend_sensitivity_rpn_updates_range() {
         voice_mode: VoiceMode::Poly,
         oscillator: OscillatorType::Sine,
         envelope: Adsr {
-            attack: Seconds(0.001),
-            decay: Seconds(0.0),
-            sustain: Amplitude(1.0),
-            release: Seconds(0.1),
+            attack: Seconds::new(0.001),
+            decay: Seconds::new(0.0),
+            sustain: Amplitude::new(1.0),
+            release: Seconds::new(0.1),
         },
         ..Default::default()
     });
@@ -1551,10 +1556,10 @@ fn test_reset_all_controllers_spares_per_note() {
         voice_mode: VoiceMode::Poly,
         oscillator: OscillatorType::Sine,
         envelope: Adsr {
-            attack: Seconds(0.001),
-            decay: Seconds(0.0),
-            sustain: Amplitude(1.0),
-            release: Seconds(0.1),
+            attack: Seconds::new(0.001),
+            decay: Seconds::new(0.0),
+            sustain: Amplitude::new(1.0),
+            release: Seconds::new(0.1),
         },
         ..Default::default()
     });
@@ -1595,14 +1600,14 @@ fn test_midi2_registered_per_note_controller_brightness_sets_only_addressed_slid
         voice_mode: VoiceMode::Poly,
         oscillator: OscillatorType::Saw,
         filter: FilterType::Moog {
-            cutoff: Hz(1000.0),
-            resonance: Resonance(0.5),
+            cutoff: Hz::new(1000.0),
+            resonance: Resonance::new(0.5),
         },
         envelope: Adsr {
-            attack: Seconds(0.001),
-            decay: Seconds(0.0),
-            sustain: Amplitude(1.0),
-            release: Seconds(0.1),
+            attack: Seconds::new(0.001),
+            decay: Seconds::new(0.0),
+            sustain: Amplitude::new(1.0),
+            release: Seconds::new(0.1),
         },
         ..Default::default()
     });
@@ -1663,10 +1668,10 @@ fn test_midi2_per_note_gain_addresses_only_one_voice() {
         voice_mode: VoiceMode::Poly,
         oscillator: OscillatorType::Sine,
         envelope: Adsr {
-            attack: Seconds(0.001),
-            decay: Seconds(0.0),
-            sustain: Amplitude(1.0),
-            release: Seconds(0.1),
+            attack: Seconds::new(0.001),
+            decay: Seconds::new(0.0),
+            sustain: Amplitude::new(1.0),
+            release: Seconds::new(0.1),
         },
         ..Default::default()
     });
@@ -1724,10 +1729,10 @@ fn test_mpe_per_voice_pressure() {
         voice_mode: VoiceMode::Poly,
         oscillator: OscillatorType::Sine,
         envelope: Adsr {
-            attack: Seconds(0.001),
-            decay: Seconds(0.0),
-            sustain: Amplitude(1.0),
-            release: Seconds(0.1),
+            attack: Seconds::new(0.001),
+            decay: Seconds::new(0.0),
+            sustain: Amplitude::new(1.0),
+            release: Seconds::new(0.1),
         },
         ..Default::default()
     });
@@ -1775,14 +1780,14 @@ fn test_mpe_per_voice_slide() {
         voice_mode: VoiceMode::Poly,
         oscillator: OscillatorType::Saw,
         filter: FilterType::Moog {
-            cutoff: Hz(1000.0),
-            resonance: Resonance(0.5),
+            cutoff: Hz::new(1000.0),
+            resonance: Resonance::new(0.5),
         },
         envelope: Adsr {
-            attack: Seconds(0.001),
-            decay: Seconds(0.0),
-            sustain: Amplitude(1.0),
-            release: Seconds(0.1),
+            attack: Seconds::new(0.001),
+            decay: Seconds::new(0.0),
+            sustain: Amplitude::new(1.0),
+            release: Seconds::new(0.1),
         },
         ..Default::default()
     });
@@ -1825,10 +1830,10 @@ fn a_channel_bend_is_the_channels_and_sets_no_per_note_pitch() {
         voice_mode: VoiceMode::Poly,
         oscillator: OscillatorType::Sine,
         envelope: Adsr {
-            attack: Seconds(0.001),
-            decay: Seconds(0.0),
-            sustain: Amplitude(1.0),
-            release: Seconds(0.1),
+            attack: Seconds::new(0.001),
+            decay: Seconds::new(0.0),
+            sustain: Amplitude::new(1.0),
+            release: Seconds::new(0.1),
         },
         ..Default::default()
     });
@@ -1867,10 +1872,10 @@ fn test_mpe_pressure_affects_amplitude() {
         voice_mode: VoiceMode::Poly,
         oscillator: OscillatorType::Sine,
         envelope: Adsr {
-            attack: Seconds(0.001),
-            decay: Seconds(0.0),
-            sustain: Amplitude(1.0),
-            release: Seconds(0.1),
+            attack: Seconds::new(0.001),
+            decay: Seconds::new(0.0),
+            sustain: Amplitude::new(1.0),
+            release: Seconds::new(0.1),
         },
         ..Default::default()
     });
@@ -1912,10 +1917,10 @@ fn test_mpe_note_on_resets_expression() {
         voice_mode: VoiceMode::Poly,
         oscillator: OscillatorType::Sine,
         envelope: Adsr {
-            attack: Seconds(0.001),
-            decay: Seconds(0.0),
-            sustain: Amplitude(1.0),
-            release: Seconds(0.05),
+            attack: Seconds::new(0.001),
+            decay: Seconds::new(0.0),
+            sustain: Amplitude::new(1.0),
+            release: Seconds::new(0.05),
         },
         ..Default::default()
     });
@@ -1968,14 +1973,14 @@ fn a_long_block_renders_every_frame_like_short_blocks() {
         polyphony: NonZeroUsize::new(4).unwrap(),
         oscillator: OscillatorType::Saw,
         filter: FilterType::Svf {
-            cutoff: Hz(3_000.0),
-            q: tutti_units::Q(1.0),
+            cutoff: Hz::new(3_000.0),
+            q: tutti_units::Q::new(1.0),
             mode: crate::SvfMode::Lowpass,
         },
         portamento: Some(PortamentoConfig {
             mode: PortamentoMode::Always,
             curve: Law::Linear,
-            time: crate::GlideTime::of(tutti_units::Seconds(0.004)),
+            time: crate::GlideTime::of(tutti_units::Seconds::new(0.004)),
             constant_time: true,
         }),
         ..Default::default()
@@ -2045,11 +2050,16 @@ fn process_and_tick_agree_through_a_glide() {
         polyphony: NonZeroUsize::MIN,
         voice_mode: VoiceMode::Mono,
         oscillator: OscillatorType::Sine,
-        envelope: Adsr::new(Seconds(0.001), Seconds(0.0), Amplitude(1.0), Seconds(0.1)),
+        envelope: Adsr::new(
+            Seconds::new(0.001),
+            Seconds::new(0.0),
+            Amplitude::new(1.0),
+            Seconds::new(0.1),
+        ),
         portamento: Some(PortamentoConfig {
             mode: PortamentoMode::Always,
             curve: Law::Linear,
-            time: crate::GlideTime::of(tutti_units::Seconds(0.05)),
+            time: crate::GlideTime::of(tutti_units::Seconds::new(0.05)),
             constant_time: true,
         }),
         ..Default::default()
@@ -2112,7 +2122,7 @@ fn a_chord_gets_a_distinct_phase_stack_per_voice() {
         unison: Some(UnisonConfig {
             voice_count: UnisonVoices::of(3),
             detune_cents: tutti_units::CentsSpan::of(0.0),
-            stereo_spread: Spread(0.0),
+            stereo_spread: Spread::new(0.0),
             phase_randomize: true,
         }),
         ..Default::default()
@@ -2162,7 +2172,12 @@ fn a_steal_at_a_different_velocity_does_not_click() {
         polyphony: NonZeroUsize::MIN,
         allocation_strategy: crate::AllocationStrategy::Oldest,
         oscillator: OscillatorType::Sine,
-        envelope: Adsr::new(Seconds(0.001), Seconds(0.0), Amplitude(1.0), Seconds(0.1)),
+        envelope: Adsr::new(
+            Seconds::new(0.001),
+            Seconds::new(0.0),
+            Amplitude::new(1.0),
+            Seconds::new(0.1),
+        ),
         ..Default::default()
     });
     queue_midi(&mut synth, &[ev_note_on(0, 45, 127)]);
@@ -2206,8 +2221,8 @@ fn reset_all_controllers_leaves_the_cutoff_alone() {
         polyphony: NonZeroUsize::MIN,
         oscillator: OscillatorType::Saw,
         filter: FilterType::Svf {
-            cutoff: Hz(600.0),
-            q: tutti_units::Q(0.707),
+            cutoff: Hz::new(600.0),
+            q: tutti_units::Q::new(0.707),
             mode: crate::SvfMode::Lowpass,
         },
         ..Default::default()
@@ -2273,12 +2288,12 @@ fn a_fork_renders_the_volume_and_unison_it_was_taken_with() {
             unison: Some(UnisonConfig {
                 voice_count: UnisonVoices::of(3),
                 detune_cents: tutti_units::CentsSpan::of(15.0),
-                stereo_spread: Spread(0.5),
+                stereo_spread: Spread::new(0.5),
                 phase_randomize: false,
             }),
             ..Default::default()
         });
-        synth.set_volume(tutti_units::Amplitude(0.5));
+        synth.set_volume(tutti_units::Amplitude::new(0.5));
         synth.synth
     };
     let render = |fork: PolySynth| {
@@ -2532,7 +2547,7 @@ trait SoundsAt {
 impl SoundsAt for SynthVoice {
     fn per_note_bend(&self) -> tutti_units::Semitones {
         let key = 440.0_f64 * 2.0_f64.powf((f64::from(self.note().get()) - 69.0) / 12.0);
-        tutti_units::Semitones(12.0 * (self.sounding_freq().get() / key).log2())
+        tutti_units::Semitones::new(12.0 * (self.sounding_freq().get() / key).log2())
     }
 }
 
@@ -2737,8 +2752,8 @@ fn a_channels_bend_reaches_no_other_channel() {
         address(0),
         Voice2::PitchBend(BendValue::MIN),
     )));
-    assert_ne!(synth.bends[0].0, 0.0, "channel 0 moved");
-    assert_eq!(synth.bends[5].0, 0.0, "channel 5 did not");
+    assert_ne!(synth.bends[0].get(), 0.0, "channel 0 moved");
+    assert_eq!(synth.bends[5].get(), 0.0, "channel 5 did not");
 }
 
 /// Letting go of the sounding key in a mono synth returns to the most recent
@@ -2827,10 +2842,10 @@ fn steady(extra: impl FnOnce(&mut SynthConfig)) -> Hand {
         oscillator: OscillatorType::Sine,
         filter: FilterType::None,
         envelope: Adsr {
-            attack: Seconds(0.001),
-            decay: Seconds(0.0),
-            sustain: Amplitude(1.0),
-            release: Seconds(0.1),
+            attack: Seconds::new(0.001),
+            decay: Seconds::new(0.0),
+            sustain: Amplitude::new(1.0),
+            release: Seconds::new(0.1),
         },
         ..Default::default()
     };
@@ -3131,7 +3146,7 @@ fn a_per_note_pitch_survives_a_glide() {
         c.portamento = Some(PortamentoConfig {
             mode: PortamentoMode::Always,
             curve: Law::Linear,
-            time: crate::GlideTime::of(tutti_units::Seconds(0.05)),
+            time: crate::GlideTime::of(tutti_units::Seconds::new(0.05)),
             constant_time: true,
         });
     });

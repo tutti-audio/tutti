@@ -43,7 +43,7 @@ const BANK_SELECT_LSB: CCNumber = CCNumber::BANK_SELECT.lsb().unwrap();
 
 /// The gain applied to the mix of every voice, on every plane: the sends carry
 /// it too, so an effect node after the unit is unity-gain.
-const MASTER_VOLUME: Amplitude = Amplitude(0.5);
+const MASTER_VOLUME: Amplitude = Amplitude::new(0.5);
 
 /// One of the unit's five outputs, in port order.
 ///
@@ -499,7 +499,7 @@ impl<F: Float + Lanes> Player<F> {
 
     fn render_block(&mut self) {
         let bends = std::array::from_fn(|i| {
-            MidiChannel::new(i as u8).map_or(Semitones(0.0), |c| self.voicing.channel_pitch(c))
+            MidiChannel::new(i as u8).map_or(Semitones::new(0.0), |c| self.voicing.channel_pitch(c))
         });
         self.voices.process(
             self.font.sample_pool(),
@@ -597,7 +597,7 @@ impl<F: Float + Lanes> Player<F> {
     /// cannot be bounded (it is not finite). The effects after the unit are the
     /// graph's: each node declares its own tail.
     pub(crate) fn ring_out(&self) -> Option<Seconds> {
-        let mut longest = Seconds(0.0);
+        let mut longest = Seconds::new(0.0);
         for preset in self.font.presets() {
             for preset_zone in preset.regions() {
                 let instrument = &self.font.instruments()[preset_zone.instrument_id()];

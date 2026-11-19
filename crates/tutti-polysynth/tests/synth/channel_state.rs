@@ -34,10 +34,10 @@ fn config() -> SynthConfig {
     SynthConfig {
         oscillator: OscillatorType::Sine,
         envelope: Adsr {
-            attack: Seconds(0.001),
-            decay: Seconds(0.0),
-            sustain: Amplitude(1.0),
-            release: Seconds(RELEASE),
+            attack: Seconds::new(0.001),
+            decay: Seconds::new(0.0),
+            sustain: Amplitude::new(1.0),
+            release: Seconds::new(RELEASE),
         },
         polyphony: NonZeroUsize::new(8).unwrap(),
         ..Default::default()
@@ -246,7 +246,7 @@ fn rpn_0_sets_the_bend_range_per_channel() {
 #[test]
 fn the_configured_range_is_the_default() {
     let mut h = hand(SynthConfig {
-        pitch_bend_range: Semitones(5.0),
+        pitch_bend_range: Semitones::new(5.0),
         ..config()
     });
     play(&mut h, &[on(0, 69), bend_up(0)], 0.2);

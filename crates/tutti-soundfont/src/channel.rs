@@ -179,13 +179,13 @@ impl Channel {
     /// unipolar source, so the controller maps to `value / 128`, times an
     /// amount of 200 tenths of a percent).
     pub(crate) fn reverb_send(&self) -> Amplitude {
-        Amplitude(SEND_AMOUNT * (f64::from(self.reverb_send) / 128.0))
+        Amplitude::new(SEND_AMOUNT * (f64::from(self.reverb_send) / 128.0))
     }
 
     /// What CC 93 adds to a voice's chorus send: the default modulator of
     /// section 8.4.9, as [`reverb_send`](Self::reverb_send).
     pub(crate) fn chorus_send(&self) -> Amplitude {
-        Amplitude(SEND_AMOUNT * (f64::from(self.chorus_send) / 128.0))
+        Amplitude::new(SEND_AMOUNT * (f64::from(self.chorus_send) / 128.0))
     }
 }
 

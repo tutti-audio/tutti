@@ -14,7 +14,7 @@ impl SoundFontMath {
     /// threshold, not the spec's. A release time is the time to -100 dB, so a
     /// released voice is dropped at 0.6 of it. `LOG_NON_AUDIBLE` is its natural
     /// log.
-    pub(crate) const NON_AUDIBLE: Amplitude = Amplitude(1.0e-3);
+    pub(crate) const NON_AUDIBLE: Amplitude = Amplitude::new(1.0e-3);
     /// The natural-log fall of a 100 dB amplitude change: `100 / 20 * ln 10`.
     /// The volume envelope's decay and release times are the time to fall this
     /// far (SF2 2.04 section 8.1.2, generators 36 and 38), at a constant dB per second.
@@ -25,18 +25,18 @@ impl SoundFontMath {
     /// A time in absolute timecents as seconds: `2^(x / 1200)`, the 1200th root
     /// of two per timecent.
     pub(crate) fn timecents_to_seconds(timecents: i32) -> Seconds {
-        Seconds(Cents(f64::from(timecents)).to_pitch_ratio())
+        Seconds::new(Cents::new(f64::from(timecents)).to_pitch_ratio())
     }
 
     /// A frequency in absolute cents (section 9.3): 8.176 Hz at 0, an octave per 1200.
     pub(crate) fn cents_to_hertz(cents: i32) -> Hz {
-        Hz(8.176 * Cents(f64::from(cents)).to_pitch_ratio())
+        Hz::new(8.176 * Cents::new(f64::from(cents)).to_pitch_ratio())
     }
 
     /// A key-number scaling of a time (generators 39 and 40 and their volume and
     /// modulation siblings): the factor for `key`, `2^(cents (60 - key) / 1200)`.
     pub(crate) fn key_number_to_multiplying_factor(cents: i32, key: i32) -> f64 {
-        Cents(f64::from(cents * (60 - key))).to_pitch_ratio()
+        Cents::new(f64::from(cents * (60 - key))).to_pitch_ratio()
     }
 
     /// `exp(x)`, or 0 below the audible floor's log.
