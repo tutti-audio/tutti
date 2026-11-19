@@ -3,12 +3,12 @@
 
 use tutti_buffers::{BusTopology, MaxBlock};
 use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_dsp::{Ring, SimdLanes, Sos, SosError, TAIL_FLOOR};
+use tutti_dsp::{DecayTime, SimdLanes, Sos, SosError, TAIL_FLOOR};
 use tutti_graph::Shape;
 use tutti_units::{Db, SampleRate, Samples, Tail};
 
 use super::ramped::{RAMP_STEPS, RampedSos, filter_shape};
-use crate::kernel::{ControlLanes, Kernel};
+use crate::kernel::{ControlSignals, Kernel};
 use crate::params::ControlSet;
 
 /// What a controls type must give [`EqKernel`], kept out of reach of an implementation.
@@ -39,15 +39,15 @@ pub(super) mod sealed {
         /// # Errors
         ///
         /// The design's refusal of the controls.
-        fn ring_out(&self, rate: SampleRate, floor: Db) -> Result<Ring, SosError>;
+        fn decay_time(&self, rate: SampleRate, floor: Db) -> Result<DecayTime, SosError>;
 
-        /// The ring-out of every held controls at `rate`: a bound on `ring_out` over the
-        /// ranges, proven from the designs or [`Ring::Unbounded`].
+        /// The ring-out of every held controls at `rate`: a bound on `decay_time` over the
+        /// ranges, proven from the designs or [`DecayTime::Unbounded`].
         ///
         /// # Errors
         ///
         /// The design's refusal of the ranges.
-        fn ring_ceiling(rate: SampleRate, floor: Db) -> Result<Ring, SosError>;
+        fn decay_ceiling(rate: SampleRate, floor: Db) -> Result<DecayTime, SosError>;
     }
 }
 
@@ -100,10 +100,10 @@ impl<C: EqControls, F: Float + SimdLanes> EqKernel<C, F> {
         self.sos.design(|into| held.design_into(rate, into))
     }
 
-    /// The ring-out over every control: `C::ring_ceiling`.
+    /// The ring-out over every control: `C::decay_ceiling`.
     fn ceiling_at(&self) -> Tail {
-        match C::ring_ceiling(self.rate, TAIL_FLOOR) {
-            Ok(Ring::Finite(t)) => Tail::Finite(Samples::new(
+        match C::decay_ceiling(self.rate, TAIL_FLOOR) {
+            Ok(DecayTime::Finite(t)) => Tail::Finite(Samples::new(
                 (t.get() * self.rate.get()).ceil() as usize + 1,
             )),
             _ => Tail::Unbounded,
@@ -112,8 +112,8 @@ impl<C: EqControls, F: Float + SimdLanes> EqKernel<C, F> {
 
     /// The ring-out at `controls`, read within their ranges.
     fn ring(&self, controls: &C) -> Tail {
-        match controls.held(self.rate).ring_out(self.rate, TAIL_FLOOR) {
-            Ok(Ring::Finite(t)) => {
+        match controls.held(self.rate).decay_time(self.rate, TAIL_FLOOR) {
+            Ok(DecayTime::Finite(t)) => {
                 Tail::Finite(Samples::new((t.get() * self.rate.get()).ceil() as usize))
             }
             _ => Tail::Unbounded,
@@ -151,7 +151,7 @@ impl<C: EqControls, F: Float + SimdLanes> Kernel for EqKernel<C, F> {
     fn render(
         &mut self,
         input: Planes<'_, F>,
-        _: ControlLanes<'_, F>,
+        _: ControlSignals<'_, F>,
         output: PlanesMut<'_, '_, F>,
     ) {
         self.sos.render(input, output);

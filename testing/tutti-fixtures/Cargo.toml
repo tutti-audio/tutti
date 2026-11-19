@@ -16,9 +16,11 @@ publish = false
 # nothing of `midi`, whose signatures name them. It never ships.
 [dependencies]
 tutti-ump = { path = "../../crates/tutti-ump", default-features = false }
-# `MainThreadMarker`, the token `main_thread` makes, and `Mint` (`unique`).
+# `MainThreadMarker`: the harness's token for a main-thread entry.
+tutti-platform = { path = "../../crates/tutti-platform" }
+# `Mint` (`unique`) and `SplitMix64` (`digest`).
 # `tutti-rt` dev-depends on this crate, so its own tests link a second copy of it;
-# they use neither `main_thread` nor `unique`, whose signatures name them.
+# they use neither `digest` nor `unique`, whose signatures name them.
 tutti-rt = { path = "../../crates/tutti-rt" }
 tutti-midi-protocol = { path = "../../crates/tutti-midi-protocol" }
 # The units a signal helper takes (`Hz`, `Amplitude`, `SampleRate`, `Samples`).

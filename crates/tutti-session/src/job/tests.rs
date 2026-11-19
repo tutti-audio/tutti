@@ -158,7 +158,7 @@ fn wait_ends_when_the_sessions_end_of_the_job_is_gone_unanswered() {
 #[test]
 fn a_job_waiting_for_the_main_thread_is_not_waited_for_off_it() {
     // A test thread is not the process's main thread.
-    assert!(tutti_rt::MainThreadMarker::new().is_none());
+    assert!(tutti_platform::MainThreadMarker::new().is_none());
     let mut s = session(Session::builder());
     let (job, ticket) = s.jobs.new_job::<Echo>();
     ticket.waiting_for_main_thread();

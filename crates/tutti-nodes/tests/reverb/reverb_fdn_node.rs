@@ -100,7 +100,7 @@ fn finite(d: &Driven) -> usize {
 fn tail_of(layout: &FdnLayout, c: &FdnControls) -> usize {
     let mut network = Box::new(Network::new(SR));
     layout.design_into(c, SR, &mut network);
-    let tutti_dsp::Ring::Finite(s) = network.tail(Db::new(-60.0)) else {
+    let tutti_dsp::DecayTime::Finite(s) = network.tail(Db::new(-60.0)) else {
         panic!("finite")
     };
     (s.get() * SR.get()).ceil() as usize
@@ -394,13 +394,13 @@ fn a_moved_cell_lands_on_the_grid_whatever_the_blocks() {
 }
 
 /// A control the graph drives is read on the stream's 32-frame grid and at the corners of its
-/// lane, not at the block's last frame, so what is heard does not depend on how the stream is
-/// cut into blocks (the node against itself under cuts); and the lane is heard, since the
+/// control signal, not at the block's last frame, so what is heard does not depend on how the stream is
+/// cut into blocks (the node against itself under cuts); and the control signal is heard, since the
 /// cell it overrides is a different decay.
 #[test]
 fn a_driven_slow_control_is_sampled_on_the_grid_whatever_the_blocks() {
     let len = 4_096;
-    let lane: Vec<f32> = (0..len)
+    let signal: Vec<f32> = (0..len)
         .map(|n| 0.4 + 5.0 * n as f32 / len as f32)
         .collect();
     let x = noise(12, len);
@@ -409,7 +409,7 @@ fn a_driven_slow_control_is_sampled_on_the_grid_whatever_the_blocks() {
         let mut out = vec![Vec::new(), Vec::new()];
         for (i, chunk) in x.chunks(block).enumerate() {
             let at = i * block;
-            let l = &lane[at..at + chunk.len()];
+            let l = &signal[at..at + chunk.len()];
             let params = [driven.then_some(l)];
             for (o, y) in
                 out.iter_mut()
@@ -421,7 +421,7 @@ fn a_driven_slow_control_is_sampled_on_the_grid_whatever_the_blocks() {
         out
     };
     let whole = render(1_024, true);
-    assert_ne!(whole, render(1_024, false), "the lane is heard");
+    assert_ne!(whole, render(1_024, false), "the control signal is heard");
     for block in [1, 16, 64, 128] {
         assert_eq!(render(block, true), whole, "blocks of {block}");
     }

@@ -7,7 +7,7 @@
 //! `<case> --exact` runs that case alone and exits non-zero when it panics. (This
 //! crate names no workspace crate, so it cannot use `tutti_fixtures::main_thread_cases`.)
 
-use tutti_rt::MainThreadMarker;
+use tutti_platform::MainThreadMarker;
 
 /// **The process's main thread holds a token.**
 fn the_main_thread_holds_a_token() {

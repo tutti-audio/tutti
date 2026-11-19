@@ -2473,6 +2473,7 @@ dependencies = [
  "tutti-modulation",
  "tutti-music",
  "tutti-nodes",
+ "tutti-platform",
  "tutti-plugin",
  "tutti-plugin-db",
  "tutti-plugin-host",
@@ -2583,6 +2584,7 @@ dependencies = [
  "tutti-clap-test-plugin",
  "tutti-fixtures",
  "tutti-graph",
+ "tutti-platform",
  "tutti-plugin-types",
  "tutti-rt",
  "tutti-units",
@@ -2609,6 +2611,7 @@ dependencies = [
  "tutti-graph",
  "tutti-midi-protocol",
  "tutti-music",
+ "tutti-platform",
  "tutti-plugin-ipc-ffi",
  "tutti-plugin-types",
  "tutti-rt",
@@ -2643,6 +2646,7 @@ dependencies = [
  "tutti-buffers",
  "tutti-codec",
  "tutti-fixtures",
+ "tutti-platform",
  "tutti-rt",
  "tutti-units",
  "vorbis_rs",
@@ -2678,6 +2682,7 @@ dependencies = [
  "tutti-engine",
  "tutti-graph",
  "tutti-nodes",
+ "tutti-platform",
  "tutti-rt",
  "tutti-transport",
  "tutti-units",
@@ -2720,6 +2725,7 @@ dependencies = [
  "tutti-metering",
  "tutti-music",
  "tutti-nodes",
+ "tutti-platform",
  "tutti-rt",
  "tutti-tempo",
  "tutti-transport",
@@ -2767,6 +2773,7 @@ dependencies = [
  "tutti-buffers",
  "tutti-graph",
  "tutti-midi-protocol",
+ "tutti-platform",
  "tutti-plugin-types",
  "tutti-rt",
  "tutti-shared-plugin",
@@ -2807,6 +2814,7 @@ dependencies = [
  "tutti-fixtures",
  "tutti-graph",
  "tutti-music",
+ "tutti-platform",
  "tutti-rt",
  "tutti-ump",
  "tutti-units",
@@ -2922,6 +2930,7 @@ dependencies = [
  "tutti-midi-hardware",
  "tutti-midi-protocol",
  "tutti-midi-runtime",
+ "tutti-platform",
  "tutti-rt",
  "tutti-ump",
  "tutti-units",
@@ -3037,6 +3046,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "tutti-platform"
+version = "0.0.1"
+dependencies = [
+ "assert_no_alloc",
+ "libc",
+ "thiserror 2.0.21",
+ "thread-priority",
+ "web-time",
+ "windows",
+]
+
+[[package]]
 name = "tutti-plugin"
 version = "0.0.1"
 dependencies = [
@@ -3065,6 +3086,7 @@ dependencies = [
  "tutti-modulation",
  "tutti-music",
  "tutti-nodes",
+ "tutti-platform",
  "tutti-plugin-db",
  "tutti-plugin-host",
  "tutti-plugin-ipc",
@@ -3121,6 +3143,7 @@ dependencies = [
  "tracing",
  "tutti-clap-test-plugin",
  "tutti-fixtures",
+ "tutti-platform",
  "tutti-plugin-ipc-ffi",
  "tutti-plugin-types",
  "tutti-rt",
@@ -3146,6 +3169,7 @@ dependencies = [
  "tutti-modulation",
  "tutti-music",
  "tutti-nodes",
+ "tutti-platform",
  "tutti-plugin-ipc-ffi",
  "tutti-plugin-types",
  "tutti-rt",
@@ -3180,6 +3204,7 @@ dependencies = [
  "tutti-graph",
  "tutti-midi-protocol",
  "tutti-music",
+ "tutti-platform",
  "tutti-plugin-host",
  "tutti-plugin-ipc-ffi",
  "tutti-plugin-types",
@@ -3236,6 +3261,7 @@ dependencies = [
  "tutti-fixtures",
  "tutti-graph",
  "tutti-midi-protocol",
+ "tutti-platform",
  "tutti-plugin-ipc",
  "tutti-plugin-ipc-ffi",
  "tutti-plugin-types",
@@ -3266,6 +3292,7 @@ dependencies = [
  "tutti-fixtures",
  "tutti-graph",
  "tutti-music",
+ "tutti-platform",
  "tutti-plugin-ipc-ffi",
  "tutti-plugin-types",
  "tutti-rt",
@@ -3309,11 +3336,10 @@ dependencies = [
  "libc",
  "loom",
  "thiserror 2.0.21",
- "thread-priority",
  "tutti-buffers",
  "tutti-fixtures",
+ "tutti-platform",
  "tutti-units",
- "windows",
 ]
 
 [[package]]
@@ -3339,6 +3365,7 @@ dependencies = [
  "tutti-modulation",
  "tutti-music",
  "tutti-nodes",
+ "tutti-platform",
  "tutti-rt",
  "tutti-sampler",
  "tutti-tempo",
@@ -3382,6 +3409,7 @@ dependencies = [
  "tutti-modulation",
  "tutti-music",
  "tutti-nodes",
+ "tutti-platform",
  "tutti-plugin",
  "tutti-plugin-db",
  "tutti-plugin-host",
@@ -3820,6 +3848,16 @@ name = "web-sys"
 version = "0.3.107"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d7d179596ff5ec0f6de4db64d54011bde6289cc49603d3a6e4ce3f329207ab88"
+dependencies = [
+ "js-sys",
+ "wasm-bindgen",
+]
+
+[[package]]
+name = "web-time"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5a6580f308b1fad9207618087a65c04e7a10bc77e02c8e84e9b00dd4b12fa0bb"
 dependencies = [
  "js-sys",
  "wasm-bindgen",

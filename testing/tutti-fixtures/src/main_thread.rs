@@ -1,6 +1,6 @@
 //! The token a test passes where a plugin entry wants the main thread.
 
-use tutti_rt::MainThreadMarker;
+use tutti_platform::MainThreadMarker;
 
 /// A main-thread token for the calling thread, which stands in for the main
 /// thread. The test harness runs every test on a thread it spawned, never the

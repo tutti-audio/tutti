@@ -1,4 +1,4 @@
-//! A kernel node solves at the corners of the lanes that drive its slow
+//! A kernel node solves at the corners of the automation lanes that drive its slow
 //! controls, as well as on its grid.
 
 use tutti_buffers::Planes;

@@ -10,7 +10,7 @@ use tutti_dsp::{Lerp, PlateBank, PlateControls, PlateRamps};
 use tutti_graph::{Bus, BusRole, Buses, Cost, MAX_NODE_TAIL, Shape};
 use tutti_units::{Depth, Hz, Mix, SampleRate, Seconds, Tail};
 
-use crate::kernel::{ControlLanes, Kernel, KernelNode};
+use crate::kernel::{ControlSignals, Kernel, KernelNode};
 
 /// What a [`PlateReverbNode`] is made from: the controls it starts at.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -207,7 +207,7 @@ impl<F: Float + Lerp> Kernel for PlateKernel<F> {
     fn render(
         &mut self,
         input: Planes<'_, F>,
-        _: ControlLanes<'_, F>,
+        _: ControlSignals<'_, F>,
         output: PlanesMut<'_, '_, F>,
     ) {
         if let Some(r) = &mut self.running {

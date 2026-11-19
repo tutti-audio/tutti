@@ -63,7 +63,7 @@ mod os;
 /// and `Clone` are free. Made by [`MainThreadMarker::new`].
 ///
 /// ```
-/// use tutti_rt::MainThreadMarker;
+/// use tutti_platform::MainThreadMarker;
 ///
 /// // A doctest's `main` runs on the process's main thread.
 /// let main = MainThreadMarker::new().expect("on the main thread");
@@ -75,7 +75,7 @@ mod os;
 /// main-thread entry:
 ///
 /// ```compile_fail
-/// use tutti_rt::MainThreadMarker;
+/// use tutti_platform::MainThreadMarker;
 ///
 /// let main = MainThreadMarker::new().unwrap();
 /// std::thread::spawn(move || {
@@ -86,7 +86,7 @@ mod os;
 /// Nor shared by reference (`!Sync`):
 ///
 /// ```compile_fail
-/// use tutti_rt::MainThreadMarker;
+/// use tutti_platform::MainThreadMarker;
 ///
 /// let main = MainThreadMarker::new().unwrap();
 /// std::thread::scope(|s| {
@@ -101,7 +101,7 @@ mod os;
 /// cannot make a token off the main thread:
 ///
 /// ```compile_fail
-/// use tutti_rt::MainThreadMarker;
+/// use tutti_platform::MainThreadMarker;
 ///
 /// let _main = MainThreadMarker::new_unchecked();
 /// ```

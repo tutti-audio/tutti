@@ -6,7 +6,7 @@ use tutti_units::{Amplitude, Db, Hz, Q, SampleRate, Seconds};
 use super::MAX_TAIL_FRAMES;
 use super::butterworth::{check_cutoff, check_gain, gain_root};
 use super::{Sos, SosError};
-use crate::{Biquad, Ring};
+use crate::{Biquad, DecayTime};
 
 /// A peaking equalizer, described without a sample rate: the analog bell
 /// `H(s) = (s^2 + s A / Q + 1) / (s^2 + s / (A Q) + 1)` in `s / w0`, for the center `w0`,
@@ -79,7 +79,7 @@ impl MatchedBell {
     /// the larger pole modulus `r`. The repeated-root bound holds for any poles: `|h[m]| <=
     /// K (m + 1) r^(m-2)` for `m >= 2` with `K = |b0| + |b1| + |b2|`, from the all-pole
     /// response `sum p1^k p2^(m-k)`, whose tail sum is `K r^(n-2) ((n + 1) / (1 - r) + r /
-    /// (1 - r)^2)`, solved for `n` by doubling and bisection. [`Ring::Unbounded`] for a pole
+    /// (1 - r)^2)`, solved for `n` by doubling and bisection. [`DecayTime::Unbounded`] for a pole
     /// that is not inside the unit circle, a ring-out past `2^24` frames or a floor that is not a
     /// number or is infinite. A cut rings as
     /// the boost's zeros do.
@@ -87,16 +87,21 @@ impl MatchedBell {
     /// # Errors
     ///
     /// As [`design`](Self::design).
-    pub fn ring_out(&self, center: Hz, rate: SampleRate, floor: Db) -> Result<Ring, SosError> {
+    pub fn decay_time(
+        &self,
+        center: Hz,
+        rate: SampleRate,
+        floor: Db,
+    ) -> Result<DecayTime, SosError> {
         let b = self.section(center, rate)?;
         let eps = floor.to_amplitude();
         Ok(match ring_frames(&b, eps) {
             Some(frames)
                 if eps.get().is_finite() && eps.get() > 0.0 && frames <= MAX_TAIL_FRAMES as f64 =>
             {
-                Ring::Finite(Seconds::new(frames / rate.get()))
+                DecayTime::Finite(Seconds::new(frames / rate.get()))
             }
-            _ => Ring::Unbounded,
+            _ => DecayTime::Unbounded,
         })
     }
 
@@ -125,7 +130,7 @@ impl MatchedBell {
 }
 
 /// The first frame `n` from which `sum |h[m]|` of `b` is at most `eps` for good, by the smaller
-/// of the residue and the repeated-root bounds ([`MatchedBell::ring_out`]); `None` for a pole
+/// of the residue and the repeated-root bounds ([`MatchedBell::decay_time`]); `None` for a pole
 /// not inside the unit circle.
 fn ring_frames(b: &Biquad, eps: Amplitude) -> Option<f64> {
     let eps = eps.get();

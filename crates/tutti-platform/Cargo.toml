@@ -1,0 +1,49 @@
+[package]
+name = "tutti-platform"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "The platform's edges for real-time audio: a clock, named threads, thread priority, the main thread and denormal control, on Unix, Windows and the web"
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+keywords = ["audio", "real-time", "wasm", "clock", "thread"]
+categories = ["multimedia::audio", "os", "wasm"]
+
+[lints]
+workspace = true
+
+[dependencies]
+# `Instant` and `SystemTime`, re-exported at the root: std's types on a native
+# target, `performance.now()` and `Date.now()` on the web.
+web-time = "1.1.0"
+# The `Error` derive of `Panicked`.
+thiserror = { workspace = true, features = ["std"] }
+
+# `request_priority`: the OS thread-priority call, behind one outcome type. The
+# web has no thread priorities.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+thread-priority = "3.1"
+
+# `monotonic_ns`: `clock_gettime`; `sleep_until_ns`: `clock_nanosleep`;
+# `MainThreadMarker`: the thread and process ids.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+# `monotonic_ns`: `QueryPerformanceCounter`; `MainThreadMarker`: the primary thread's id.
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_System_Performance",
+    "Win32_System_Threading",
+] }
+
+[dev-dependencies]
+assert_no_alloc = { version = "1", default-features = false }
+
+# `MainThreadMarker::new` against the process's real main thread: the default harness
+# runs every test on a spawned thread.
+[[test]]
+name = "main_thread"
+path = "tests/main_thread/main.rs"
+harness = false

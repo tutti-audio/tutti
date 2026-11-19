@@ -15,7 +15,7 @@ mod tilt;
 use tutti_units::{Db, Hz, SampleRate, Samples, Seconds};
 
 use crate::filter::{integrator_gains, section_l1};
-use crate::{Biquad, Complex64, Lti, Ring, SvfDesign, System, svf_step};
+use crate::{Biquad, Complex64, DecayTime, Lti, SvfDesign, System, svf_step};
 
 pub use bank::{MAX_SECTIONS, SosBank, SosCoefficients};
 pub use bell::MatchedBell;
@@ -26,7 +26,7 @@ pub use butterworth::{
 pub use tilt::Tilt;
 
 /// The longest impulse response [`Sos::tail`](System::tail) follows, in frames: a longer
-/// ring-out reads as [`Ring::Unbounded`].
+/// ring-out reads as [`DecayTime::Unbounded`].
 const MAX_TAIL_FRAMES: u64 = 1 << 24;
 
 /// A cascade of second-order sections at a sample rate.
@@ -135,12 +135,12 @@ impl System for Sos {
     /// narrow high-order cascade are a ratio of near-equal poles to the order, and their
     /// sum cancels to nothing in `f64`. The run ends once it is past the peak of
     /// the slowest envelope (one time constant per pole) and a window of `3` time constants and a
-    /// period stays a tenth of the floor under the peak. [`Ring::Unbounded`] when a pole is not
+    /// period stays a tenth of the floor under the peak. [`DecayTime::Unbounded`] when a pole is not
     /// inside the unit circle or the run passes `2^24` frames.
-    fn tail(&self, floor: Db) -> Ring {
+    fn tail(&self, floor: Db) -> DecayTime {
         let radius = self.spectral_radius();
         if radius.is_nan() || radius >= 1.0 {
-            return Ring::Unbounded;
+            return DecayTime::Unbounded;
         }
         let (tau, period) = self.slowest();
         let eps = floor.to_amplitude().get();
@@ -169,14 +169,14 @@ impl System for Sos {
                 n += 1;
             }
             if !peak.is_finite() || n > MAX_TAIL_FRAMES {
-                return Ring::Unbounded;
+                return DecayTime::Unbounded;
             }
             if n >= settled && lull < 0.1 * eps * peak {
                 break;
             }
         }
         let frames = last + 1 + (period / 4.0).ceil() as u64;
-        Ring::Finite(Seconds::new(frames as f64 / self.rate.get()))
+        DecayTime::Finite(Seconds::new(frames as f64 / self.rate.get()))
     }
 }
 

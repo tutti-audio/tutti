@@ -611,8 +611,8 @@ impl<F: FftFloat + Lerp> ConvolverNode<F> {
     /// frame, floored at 0 like the setter. A non-finite value reads as the
     /// last finite one (see [`LastGood`]).
     #[inline]
-    fn apply_driven_gain(out: &mut [F], lane: &[F], good: &mut LastGood<F>) {
-        for (o, &g) in out.iter_mut().zip(lane) {
+    fn apply_driven_gain(out: &mut [F], signal: &[F], good: &mut LastGood<F>) {
+        for (o, &g) in out.iter_mut().zip(signal) {
             *o *= good.read(g).max(F::ZERO);
         }
     }
@@ -665,9 +665,9 @@ impl<F: FftFloat + Lerp> ConvolverNode<F> {
         // A driven gain is the graph's signal, which it declicks itself: the
         // block ramp restarts from the value after it.
         let gain = match driven {
-            Some(lane) => {
+            Some(signal) => {
                 self.last = None;
-                WetGain::Driven(&lane[at..at + size])
+                WetGain::Driven(&signal[at..at + size])
             }
             None => {
                 let (ramp, held) = self.begin_block(size);
@@ -733,14 +733,14 @@ impl<F: FftFloat + Lerp> ConvolverNode<F> {
                 }
             }
         }
-        // Every channel reads the driven lane from the same last finite value.
+        // Every channel reads the driven control signal from the same last finite value.
         let good = self.good;
         for c in 0..n {
             let out = &mut outputs.get(c)[at..at + size];
             match &gain {
-                WetGain::Driven(lane) => {
+                WetGain::Driven(signal) => {
                     self.good = good;
-                    Self::apply_driven_gain(out, lane, &mut self.good);
+                    Self::apply_driven_gain(out, signal, &mut self.good);
                 }
                 WetGain::Ramped(ramp, held) => Self::apply_gain(out, ramp, *held),
             }
@@ -1089,15 +1089,15 @@ mod tests {
         ));
         node.set_gain(Amplitude::new(5.0));
         let latency = node.latency_samples().get();
-        let lane: Vec<f32> = (0..256).map(|i| [0.5, 1.0, -2.0, 0.25][i % 4]).collect();
+        let signal: Vec<f32> = (0..256).map(|i| [0.5, 1.0, -2.0, 0.25][i % 4]).collect();
         let out = drive(
             &mut node,
             RATE,
             Planes::new(&[&[1.0; 256]]).unwrap(),
-            &[Some(&lane)],
+            &[Some(&signal)],
         );
         for i in latency..256 {
-            let want = lane[i].max(0.0);
+            let want = signal[i].max(0.0);
             assert!(
                 (out[0][i] - want).abs() < 1e-4,
                 "frame {i} is {} want {want}",
@@ -1125,13 +1125,13 @@ mod tests {
             Planes::new(&[&ones, &ones]).unwrap(),
             &[Some(&[0.5; 256])],
         );
-        let mut lane = [0.25; 256];
-        lane[0] = f32::NAN;
+        let mut signal = [0.25; 256];
+        signal[0] = f32::NAN;
         let out = drive(
             &mut node,
             RATE,
             Planes::new(&[&ones, &ones]).unwrap(),
-            &[Some(&lane)],
+            &[Some(&signal)],
         );
         assert_eq!(out[0][0], 0.5);
         assert_eq!(out[1][0], 0.5);

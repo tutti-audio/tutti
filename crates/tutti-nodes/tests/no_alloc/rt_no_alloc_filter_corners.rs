@@ -1,10 +1,10 @@
 //! The ladder and the crossover allocate nothing at any corner of their controls: every
-//! cell moving between its ends every block, every driven port fed a ramp or a hostile lane
+//! cell moving between its ends every block, every driven port fed a ramp or a hostile control signal
 //! (NaN, an infinity, a value far out of range, a square between the ends), blocks of 1, 7, 33
 //! and 64 frames, widths that fall into every lane group, and `reset`, `prepare` and a fork run
 //! inside the window. The output is finite and under a bound derived below.
 //!
-//! A lane is fed outside the window (`Direct::feed` copies it); the cells move inside it.
+//! A control signal is fed outside the window (`Direct::feed` copies it); the cells move inside it.
 //!
 //! **The ladder's bound.** The saturator holds the loop input to `|u| <= 1` whatever the
 //! controls. A trapezoidal stage `s' = 2 G in + (1 - 2 G) s`, `lp = G in + (1 - G) s` with
@@ -39,8 +39,8 @@ const BLOCKS: [usize; 4] = [1, 7, 33, 64];
 const NAN: f32 = f32::NAN;
 const INF: f32 = f32::INFINITY;
 
-/// A lane's frames: `lo` to `hi` over the block, then each hostile shape.
-fn lane<F: Float>(shape: usize, lo: f32, hi: f32, bad: f32) -> Vec<F> {
+/// A control signal's frames: `lo` to `hi` over the block, then each hostile shape.
+fn signal<F: Float>(shape: usize, lo: f32, hi: f32, bad: f32) -> Vec<F> {
     (0..FRAMES)
         .map(|i| match shape {
             0 => lo + (hi - lo) * i as f32 / (FRAMES - 1) as f32,
@@ -124,7 +124,7 @@ const TYPES: [LadderType; 4] = [
     LadderType::HP24,
 ];
 
-/// The ladder, state `f32` and `f64`, every type, widths 1, 2 and 9, every lane shape on every
+/// The ladder, state `f32` and `f64`, every type, widths 1, 2 and 9, every control signal shape on every
 /// port, the cells moving across their ends each block. The cutoff stays at or under
 /// 11.9 kHz (or is not a number, which the node holds at its last good value); the bound is
 /// the one derived above for a stage gain of at most 1/2.
@@ -152,20 +152,20 @@ fn the_ladder_corners_are_allocation_free_with_every_control_moving() {
                         let set = node.param_set();
                         let mut rig = Direct::<_, $f>::with_format(node, SR, FRAMES);
                         fill(&mut rig);
-                        rig.feed(0, Some(&lane(shape, 1.0, 11_900.0, 5_000.0)));
-                        rig.feed(1, Some(&lane(shape, 0.0, 1.0, 9.0)));
-                        rig.feed(2, Some(&lane(shape, 0.0, 1e30, 1e30)));
+                        rig.feed(0, Some(&signal(shape, 1.0, 11_900.0, 5_000.0)));
+                        rig.feed(1, Some(&signal(shape, 0.0, 1.0, 9.0)));
+                        rig.feed(2, Some(&signal(shape, 0.0, 1e30, 1e30)));
                         let peak = walk(&mut rig, SR, 240, usize::from(width), |i| {
                             set.set(UnitParam::Cutoff, f64::from(CUTOFFS[i % CUTOFFS.len()]));
                             set.set(UnitParam::Q, f64::from(RESONANCES[i % RESONANCES.len()]));
                             set.set(UnitParam::Drive, f64::from(DRIVES[i % DRIVES.len()]));
                         });
                         let peak = peak.unwrap_or_else(|| {
-                            panic!("{ty:?} width {width} lanes {shape}: not finite")
+                            panic!("{ty:?} width {width} signals {shape}: not finite")
                         });
                         assert!(
                             peak <= bound,
-                            "{ty:?} width {width} lanes {shape}: {peak} over {bound}"
+                            "{ty:?} width {width} signals {shape}: {peak} over {bound}"
                         );
                     }
                 }
@@ -177,7 +177,7 @@ fn the_ladder_corners_are_allocation_free_with_every_control_moving() {
 }
 
 /// A cutoff held at the top of the range (1e9, held under 0.998 of Nyquist) with the resonance
-/// and the drive moving across all their ends and every lane shape on them: the bound is the
+/// and the drive moving across all their ends and every control signal shape on them: the bound is the
 /// time-invariant stage's, 4, 16, 9 and 81.
 #[test]
 fn the_ladder_at_a_held_extreme_cutoff_is_allocation_free_and_bounded() {
@@ -199,20 +199,23 @@ fn the_ladder_at_a_held_extreme_cutoff_is_allocation_free_and_bounded() {
                 let set = node.param_set();
                 let mut rig = Direct::new(node, SR, FRAMES);
                 fill(&mut rig);
-                rig.feed(1, Some(&lane(shape, 0.0, 1.0, 9.0)));
-                rig.feed(2, Some(&lane(shape, 0.0, 1e30, 1e30)));
+                rig.feed(1, Some(&signal(shape, 0.0, 1.0, 9.0)));
+                rig.feed(2, Some(&signal(shape, 0.0, 1e30, 1e30)));
                 let peak = walk(&mut rig, SR, 240, 2, |i| {
                     set.set(UnitParam::Q, if i % 2 == 0 { 0.0 } else { 1.0 });
                     set.set(UnitParam::Drive, if i % 3 == 0 { 1e30 } else { 0.01 });
                 })
-                .unwrap_or_else(|| panic!("{ty:?} at {cutoff} Hz lanes {shape}: not finite"));
-                assert!(peak <= bound, "{ty:?} at {cutoff} Hz lanes {shape}: {peak}");
+                .unwrap_or_else(|| panic!("{ty:?} at {cutoff} Hz signals {shape}: not finite"));
+                assert!(
+                    peak <= bound,
+                    "{ty:?} at {cutoff} Hz signals {shape}: {peak}"
+                );
             }
         }
     }
 }
 
-/// The ladder with the cutoff moving anywhere from 1 Hz to past Nyquist (cell and lane, out
+/// The ladder with the cutoff moving anywhere from 1 Hz to past Nyquist (cell and control signal, out
 /// of range values included: 1e9, which the node holds under 0.998 of Nyquist, and the
 /// non-finite ones it holds at the last good value), at 48 and 96 kHz, with the resonance and
 /// the drive moving too. The output is finite and under a bound derived for a stage gain
@@ -256,9 +259,9 @@ fn the_ladder_with_the_cutoff_anywhere_is_finite_and_within_the_stage_bound() {
                 let mut rig = Direct::new(node, rate, FRAMES);
                 fill(&mut rig);
                 let top = 0.4985 * rate.get() as f32;
-                rig.feed(0, Some(&lane(shape, 1.0, top, 1e9)));
-                rig.feed(1, Some(&lane(shape, 0.0, 1.0, 9.0)));
-                rig.feed(2, Some(&lane(shape, 0.0, 1e30, 1e30)));
+                rig.feed(0, Some(&signal(shape, 1.0, top, 1e9)));
+                rig.feed(1, Some(&signal(shape, 0.0, 1.0, 9.0)));
+                rig.feed(2, Some(&signal(shape, 0.0, 1e30, 1e30)));
                 let peak = walk(&mut rig, rate, 240, 2, |i| {
                     set.set(
                         UnitParam::Cutoff,
@@ -266,11 +269,11 @@ fn the_ladder_with_the_cutoff_anywhere_is_finite_and_within_the_stage_bound() {
                     );
                     set.set(UnitParam::Q, if i % 2 == 0 { 1.0 } else { 0.0 });
                 });
-                let peak =
-                    peak.unwrap_or_else(|| panic!("{ty:?} at {rate:?} lanes {shape}: not finite"));
+                let peak = peak
+                    .unwrap_or_else(|| panic!("{ty:?} at {rate:?} signals {shape}: not finite"));
                 assert!(
                     peak <= f64::from(bound),
-                    "{ty:?} at {rate:?} lanes {shape}: {peak} over {bound}"
+                    "{ty:?} at {rate:?} signals {shape}: {peak} over {bound}"
                 );
             }
         }
@@ -317,12 +320,12 @@ const SPLITS: [f32; 12] = [
     1.0, 50.0, 400.0, 1_000.0, 12_000.0, 23_999.0, 1.0e9, 0.0, -5.0, NAN, INF, 24_000.0,
 ];
 
-/// The frames a design takes to arrive, and so the grid a square lane switches on.
+/// The frames a design takes to arrive, and so the grid a square control signal switches on.
 const GRID: usize = 16;
 
-/// The crossover's lanes: the shapes of [`lane`], and a square that switches between the floor
+/// The crossover's control signals: the shapes of `signal`, and a square that switches between the floor
 /// and the cap at every grid point (`SHAPES`).
-fn crossover_lane<F: Float>(shape: usize) -> Vec<F> {
+fn crossover_signal<F: Float>(shape: usize) -> Vec<F> {
     if shape == SHAPES {
         (0..FRAMES)
             .map(|i| {
@@ -334,13 +337,13 @@ fn crossover_lane<F: Float>(shape: usize) -> Vec<F> {
             })
             .collect()
     } else {
-        lane(shape, 1.0, 23_952.0, 1.0e9)
+        signal(shape, 1.0, 23_952.0, 1.0e9)
     }
 }
 
 /// The crossover at every band count and widths 1, 2 and 5 (30 of the 32 channels a rig
 /// drives at 6 bands), every split cell moving across 1 Hz to the cap (and the hostile values)
-/// out of order each block, every lane shape on every split, a square between the ends on every
+/// out of order each block, every control signal shape on every split, a square between the ends on every
 /// grid point among them, with `reset`, `prepare` and blocks of every odd length. The bands are
 /// finite and within the bound derived above.
 #[test]
@@ -362,7 +365,7 @@ fn the_crossover_corners_are_allocation_free_with_every_split_moving() {
                 let mut rig = Direct::new(node, SR, FRAMES);
                 fill(&mut rig);
                 for k in 0..bands - 1 {
-                    rig.feed(k, Some(&crossover_lane(shape)));
+                    rig.feed(k, Some(&crossover_signal(shape)));
                 }
                 let outs = usize::from(width) * bands;
                 let peak = walk(&mut rig, SR, 240, outs, |i| {
@@ -371,10 +374,12 @@ fn the_crossover_corners_are_allocation_free_with_every_split_moving() {
                         set.set(UnitAddr::new(UnitParam::Cutoff, k as u8), f64::from(hz));
                     }
                 })
-                .unwrap_or_else(|| panic!("{bands} bands width {width} lanes {shape}: not finite"));
+                .unwrap_or_else(|| {
+                    panic!("{bands} bands width {width} signals {shape}: not finite")
+                });
                 assert!(
                     peak <= bound,
-                    "{bands} bands width {width} lanes {shape}: {peak} over {bound}"
+                    "{bands} bands width {width} signals {shape}: {peak} over {bound}"
                 );
             }
         }
@@ -382,7 +387,7 @@ fn the_crossover_corners_are_allocation_free_with_every_split_moving() {
 }
 
 /// Splits held at the corners of the range: 1 Hz (the floor), 23 999 Hz and 1e9 (both held
-/// under 0.499 of the rate), with hostile lanes that hold the last good value (not a number,
+/// under 0.499 of the rate), with hostile control signals that hold the last good value (not a number,
 /// an infinity) and cells written with out-of-range values (out of order, below the floor).
 /// The design is the same at every block, so the bound is the held one, derived: a band is a
 /// linear time-invariant cascade of sections, so its output is within the model's l1 norm of the
@@ -403,8 +408,8 @@ fn the_crossover_at_held_extreme_splits_stays_within_the_models_l1_bound() {
             let cells = node.param_set();
             let mut rig = Direct::new(node, SR, FRAMES);
             fill(&mut rig);
-            rig.feed(0, Some(&lane(shape, 1.0, 2.0, 1.0)));
-            rig.feed(1, Some(&lane(shape, 1.0, 2.0, 1.0)));
+            rig.feed(0, Some(&signal(shape, 1.0, 2.0, 1.0)));
+            rig.feed(1, Some(&signal(shape, 1.0, 2.0, 1.0)));
             // The model the kernel retargets: `design_into` over the cell values, which
             // clamps under 0.499 of the rate and orders the splits; the node applies no other fit.
             let controls = CrossoverControls::ordered(&hz).unwrap();
@@ -423,10 +428,10 @@ fn the_crossover_at_held_extreme_splits_stays_within_the_models_l1_bound() {
                     },
                 );
             })
-            .unwrap_or_else(|| panic!("{set:?} lanes {shape}: not finite"));
+            .unwrap_or_else(|| panic!("{set:?} signals {shape}: not finite"));
             assert!(
                 peak <= f64::from(bound),
-                "{set:?} lanes {shape}: {peak} over {bound}"
+                "{set:?} signals {shape}: {peak} over {bound}"
             );
         }
     }

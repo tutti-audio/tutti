@@ -3,7 +3,7 @@ use std::cell::Cell;
 thread_local! {
     /// A stepped clock for this thread, if a test asked: the next read
     /// and the step each read advances it by.
-    static CLOCK: Cell<Option<(std::time::Instant, std::time::Duration)>> =
+    static CLOCK: Cell<Option<(tutti_platform::Instant, std::time::Duration)>> =
         const { Cell::new(None) };
 }
 
@@ -11,7 +11,7 @@ thread_local! {
 /// so a wait's yield (or a helper's leaving) depends on how many waits
 /// it made and not on how long they took.
 pub(crate) fn step_clock(step: std::time::Duration) {
-    CLOCK.with(|c| c.set(Some((std::time::Instant::now(), step))));
+    CLOCK.with(|c| c.set(Some((tutti_platform::Instant::now(), step))));
 }
 
 thread_local! {
@@ -27,7 +27,7 @@ pub(crate) fn count_clock_reads_into(counter: &'static std::sync::atomic::Atomic
     READS.with(|r| r.set(Some(counter)));
 }
 
-pub(super) fn stepped_now() -> Option<std::time::Instant> {
+pub(super) fn stepped_now() -> Option<tutti_platform::Instant> {
     CLOCK.with(|c| {
         let (t, step) = c.get()?;
         c.set(Some((t + step, step)));

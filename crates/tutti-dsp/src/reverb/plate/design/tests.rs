@@ -189,7 +189,10 @@ fn the_network_is_stable_wet_only_and_finite() {
     let n = design(&PlateControls::DEFAULT, SampleRate::SR_48K);
     assert!(fdn_of(&n).is_stable());
     assert!(!n.has_direct_path());
-    assert!(matches!(n.tail(crate::TAIL_FLOOR), crate::Ring::Finite(_)));
+    assert!(matches!(
+        n.tail(crate::TAIL_FLOOR),
+        crate::DecayTime::Finite(_)
+    ));
 }
 
 /// A non-finite control is its default and one past its range is clamped.

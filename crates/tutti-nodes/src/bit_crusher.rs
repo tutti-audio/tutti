@@ -6,7 +6,7 @@ use tutti_dsp::{BitCrusher, BitCrusherControls, COEFF_INTERVAL};
 use tutti_graph::{Cost, Shape};
 use tutti_units::{BitDepth, HoldFactor, SampleRate, Tail};
 
-use crate::kernel::{ControlLanes, Kernel, KernelNode};
+use crate::kernel::{ControlSignals, Kernel, KernelNode};
 
 /// What a [`BitCrusherNode`] is made from: its width and, optionally, its bit depth and hold.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -147,7 +147,7 @@ impl<F: Float> Kernel for BitCrusherKernel<F> {
     fn render(
         &mut self,
         input: Planes<'_, F>,
-        _: ControlLanes<'_, F>,
+        _: ControlSignals<'_, F>,
         output: PlanesMut<'_, '_, F>,
     ) {
         self.crusher.process(input, output);

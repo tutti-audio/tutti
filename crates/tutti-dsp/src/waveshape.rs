@@ -2,8 +2,8 @@
 //! `HardClip`, `Crush` and `SoftCrush`, each one line of arithmetic, and the
 //! [`WaveshaperBank`] that runs one over a block.
 //!
-//! A bank's drive is a [`Ramp`] over [`GAIN_RAMP`], or a lane read per frame where a port drives
-//! it; a frame whose lane value is not finite reads the drive in force, the ramp's value at that
+//! A bank's drive is a [`Ramp`] over [`GAIN_RAMP`], or a control signal read per frame where a port drives
+//! it; a frame whose control signal value is not finite reads the drive in force, the ramp's value at that
 //! frame. Frame `i` reads the ramp at step `taken + 1 + i`, then the block's steps are taken.
 //!
 //! [`Antialiasing`] replaces the curve at each frame by its mean over the segment from the
@@ -329,14 +329,14 @@ impl<F: Float + Lerp> WaveshaperBank<F> {
 
     /// Runs `input` into `output`, each channel through the curve at the drive.
     ///
-    /// `lane` is the drive per frame where a port drives it: a frame past its end, or one
+    /// `signal` is the drive per frame where a port drives it: a frame past its end, or one
     /// that is not finite, reads the drive in force: the ramp's value at that frame. Channel `c`
     /// of `input` feeds channel `c` of `output`; a channel past the narrower of the two views is
     /// not touched, and the frames rendered are the fewer of the two
     /// views'. No allocation.
     pub fn process(
         &mut self,
-        lane: Option<Mono<'_, F>>,
+        signal: Option<Mono<'_, F>>,
         input: Planes<'_, F>,
         mut output: PlanesMut<'_, '_, F>,
     ) {
@@ -347,7 +347,7 @@ impl<F: Float + Lerp> WaveshaperBank<F> {
         let blended = self.drive.blended_frames(frames);
         let taken = self.drive.steps_taken();
         let order = self.antialiasing;
-        if order == Antialiasing::Off && lane.is_none() && blended == 0 {
+        if order == Antialiasing::Off && signal.is_none() && blended == 0 {
             let hardness = kind.hardness(self.drive.target());
             for c in 0..width {
                 let mut plane = output.plane_mut(c);
@@ -364,7 +364,7 @@ impl<F: Float + Lerp> WaveshaperBank<F> {
                 let end = (start + CHUNK).min(frames);
                 for (k, h) in hardness[..end - start].iter_mut().enumerate() {
                     let i = start + k;
-                    let drive = lane
+                    let drive = signal
                         .and_then(|l| l.samples().get(i))
                         .copied()
                         .filter(|d| d.is_finite())

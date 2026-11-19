@@ -18,7 +18,7 @@ pub(crate) mod plate;
 
 use tutti_units::{SampleRate, Seconds, Tail};
 
-use crate::{Ring, Steps};
+use crate::{DecayTime, Steps};
 
 /// The frames between ramp steps in the reverbs that run in chunks ([`FdnBank::CHUNK`](crate::FdnBank::CHUNK),
 /// [`FreeverbBank::CHUNK`](crate::FreeverbBank::CHUNK)).
@@ -33,11 +33,11 @@ pub(crate) fn ramp(rate: SampleRate) -> Steps {
     Steps::Fixed(u32::try_from(chunks).unwrap_or(u32::MAX).max(1))
 }
 
-/// The tail a ring is, in whole frames at `rate`: unbounded when it never ends or is not a
+/// The tail a decay time is, in whole frames at `rate`: unbounded when it never ends or is not a
 /// finite time.
-pub(crate) fn tail_of(ring: Ring, rate: SampleRate) -> Tail {
-    match ring {
-        Ring::Finite(s) if s.get().is_finite() => Tail::Finite(s.to_samples_ceil(rate)),
+pub(crate) fn tail_of(decay: DecayTime, rate: SampleRate) -> Tail {
+    match decay {
+        DecayTime::Finite(s) if s.get().is_finite() => Tail::Finite(s.to_samples_ceil(rate)),
         _ => Tail::Unbounded,
     }
 }

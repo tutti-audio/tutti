@@ -331,9 +331,9 @@ fn mtc_and_an_mmc_locate_state_one_rate() {
             (BLOCK as u64, locate(0x20))
         ]
     );
-    rig.controls.messages().set(SyncMessages {
+    rig.controls.messages().store(SyncMessages {
         rate: MtcRate::Fps30,
-        ..rig.controls.messages().get()
+        ..rig.controls.messages().load()
     });
     let at30 = sysex(&rig.block(BLOCK, stopped(Beat::new(6.0)), &[]));
     let locate = |hours: u8| vec![0x7F, 0x7F, 0x06, 0x44, 0x06, 0x01, hours, 0, 3, 0, 0];
@@ -382,7 +382,7 @@ fn every_message_is_on_the_nodes_group() {
 fn a_setting_lands_at_the_next_block() {
     let mut rig = Rig::new(G, SyncMessages::OFF);
     assert!(rig.block(BLOCK, rolling(Beat::new(1.0)), &[]).is_empty());
-    rig.controls.messages().set(clock());
+    rig.controls.messages().store(clock());
     let got = rig.block(BLOCK, rolling(beat(1.0, BLOCK)), &[]);
     // 1 + 4 096 / 24 000 beats is 4.68 sixteenths: the nearest is 5.
     assert_eq!(
@@ -393,7 +393,7 @@ fn a_setting_lands_at_the_next_block() {
 
     let mut rig = Rig::new(G, SyncMessages::OFF);
     rig.block(BLOCK, rolling(Beat::new(1.0)), &[]);
-    rig.controls.messages().set(mmc(MtcRate::Fps30));
+    rig.controls.messages().store(mmc(MtcRate::Fps30));
     assert!(rig.block(BLOCK, rolling(beat(1.0, BLOCK)), &[]).is_empty());
     let got = sysex(&rig.block(
         BLOCK,
@@ -419,7 +419,7 @@ fn a_fork_sends_what_the_live_node_sent_at_the_fork() {
         .controls;
     rig.feed(NodeKey(1), 0, 0);
     rig.commit();
-    controls.messages().set(clock());
+    controls.messages().store(clock());
     let prepare = *rig.editor.prepare();
     let (_fork, mut exec) = rig
         .editor

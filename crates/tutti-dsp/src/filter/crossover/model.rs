@@ -12,8 +12,8 @@ use super::bands::{CrossoverError, MAX_BANDS, MAX_SPLITS, SOLVE_CEILING, check_b
 use super::blend::Tpt;
 use super::{CrossoverBlend, CrossoverControls};
 use crate::design::prewarp;
-use crate::filter::biquad::{decay_ring, section_l1};
-use crate::{Complex64, Lti, Ring, System};
+use crate::filter::biquad::{decay_time, section_l1};
+use crate::{Complex64, DecayTime, Lti, System};
 
 /// The sections' coefficients of the split at `hz` against `rate`, the frequency held under
 /// [`SOLVE_CEILING`] of the rate.
@@ -150,8 +150,8 @@ impl System for CrossoverModel {
 
     /// The slowest split's pole ring, with the double pole of its squared
     /// sections (`n r^n`).
-    fn tail(&self, floor: Db) -> Ring {
-        decay_ring(self.spectral_radius(), 2, floor, self.sample_rate())
+    fn tail(&self, floor: Db) -> DecayTime {
+        decay_time(self.spectral_radius(), 2, floor, self.sample_rate())
     }
 }
 

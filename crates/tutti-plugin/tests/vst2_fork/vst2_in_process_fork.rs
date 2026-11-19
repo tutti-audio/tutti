@@ -280,7 +280,7 @@ fn a_plugin_without_chunks_forks_with_its_program_and_parameters() {
 }
 
 /// **A fork prepared at another rate tells the plugin that rate**, from its
-/// own `prepare` — nothing pumps a fork's editor, so a rate parked for the
+/// own `prepare` — nothing pumps a fork's editor, so a rate pending for the
 /// main thread (the live node's route) would never reach it.
 fn a_fork_at_another_rate_tells_the_plugin_its_rate() {
     let _lock = lock_probe();

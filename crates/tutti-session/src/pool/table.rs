@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Weak};
 
 use tutti_buffers::Float;
-use tutti_rt::MainThreadMarker;
+use tutti_platform::MainThreadMarker;
 
 use crate::job::Ticket;
 use crate::pool::config::PoolConfig;

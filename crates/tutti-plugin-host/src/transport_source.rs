@@ -77,12 +77,7 @@ pub struct Snapshot {
 /// `systemTime`, VST2 `nanoSeconds`): the OS's monotonic clock in
 /// nanoseconds, the clock a plugin compares these fields against.
 ///
-/// - Linux and the other Unixes: `CLOCK_MONOTONIC` (a vDSO read on Linux).
-/// - macOS: `CLOCK_UPTIME_RAW`, which is `mach_absolute_time` in
-///   nanoseconds: Core Audio's host time (`AudioTimeStamp::mHostTime`, read
-///   through `AudioConvertHostTimeToNanos`) is that clock.
-/// - Windows: `QueryPerformanceCounter`, scaled to nanoseconds by its
-///   frequency (fixed at boot).
+/// Which OS clock it reads is [`tutti_platform::monotonic_ns`]'s.
 ///
 /// The OS's epoch, not one of the host's, so plugins in every process (the
 /// host's and each plugin server's) read one timebase without being handed
@@ -98,7 +93,7 @@ impl HostClock {
     /// vDSO's or QPC's. 2^63 ns is 292 years of uptime, so the saturation
     /// is unreachable.
     pub(crate) fn now_ns(self) -> i64 {
-        tutti_rt::monotonic_ns()
+        tutti_platform::monotonic_ns()
     }
 
     /// The clock `frames` past a reading of `block_ns`, at `rate`: where a

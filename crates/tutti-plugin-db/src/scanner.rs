@@ -14,8 +14,9 @@ use crossbeam_channel::{Receiver, Sender, TryRecvError, TrySendError};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tracing::{debug, info, warn};
+use tutti_platform::{StopToken, ThreadHandle};
 use tutti_plugin_types::{PluginClass, PluginDescriptor, PluginFormat, ProbeError};
-use tutti_rt::{LockExt, StopToken, Tally, TallyWriter, ThreadHandle};
+use tutti_rt::{LockExt, Tally, TallyWriter};
 
 /// How many progress updates wait for the owner before the scan drops the
 /// next one.
@@ -232,7 +233,7 @@ impl Scanner {
         };
         let (tx, rx) = crossbeam_channel::unbounded();
 
-        let worker = tutti_rt::spawn_named("plugin-scanner", None, move |stop| {
+        let worker = tutti_platform::spawn_named("plugin-scanner", None, move |stop| {
             let result = job.run(stop, &progress, |change| {
                 tx.send(Message::Change(change)).is_ok()
             });
@@ -1657,7 +1658,7 @@ mod tests {
 
         // The drop waits for the parked probe: release it from this thread,
         // once the drop has asked the worker to stop.
-        let dropping = tutti_rt::spawn_named("scan-dropper", None, move |_| drop(scan))
+        let dropping = tutti_platform::spawn_named("scan-dropper", None, move |_| drop(scan))
             .expect("the dropping thread starts");
         assert!(
             stop.wait(HANG_GUARD),

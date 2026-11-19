@@ -237,10 +237,11 @@ pub use tutti_session::{SamplerEvent, SamplerLoad};
 /// inserted with `Session::graph().add(node)`.
 pub mod nodes {
     pub use tutti_dsp::{
-        Absorption, AllPass, AllPassForm, Band, BrickwallControls, ChunkSize, Fdn, FirSummary,
-        Full, Gains, HrtfBinauralError, Inline, Lerp, Line, LineModulation, LookaheadError, Matrix,
-        MatrixConvolverError, MaxDecayError, Network, OutputMap as NetworkOutputMap, ResampleError,
-        Ring, SimdLanes, SpeakerGeometryError, Stage, Tap, Taps, WaveshaperControls,
+        Absorption, AllPass, AllPassForm, Band, BrickwallControls, ChunkSize, DecayTime, Fdn,
+        FirSummary, Full, Gains, HrtfBinauralError, Inline, Lerp, Line, LineModulation,
+        LookaheadError, Matrix, MatrixConvolverError, MaxDecayError, Network,
+        OutputMap as NetworkOutputMap, ResampleError, SimdLanes, SpeakerGeometryError, Stage, Tap,
+        Taps, WaveshaperControls,
     };
     pub use tutti_dsp::{Lookahead, MaxDecay, MaxDelay, MaxDelayError, PeakDetection};
     pub use tutti_modulation::{
@@ -282,7 +283,7 @@ pub mod nodes {
     };
     pub use tutti_nodes::{
         BellFilterKernel, BitCrusherKernel, BrickwallKernel, CompressorKernel, Control,
-        ControlLanes, ControlRead, ControlSet, ControlValid, CrossoverKernel, CutFilterKernel,
+        ControlRead, ControlSet, ControlSignals, ControlValid, CrossoverKernel, CutFilterKernel,
         DcBlockerKernel, DelayKernel, DistortionKernel, DynamicEqKernel, EnvelopeFilterKernel,
         EqControls, EqKernel, FdnKernel, Feed, FreeverbKernel, GateKernel, Kernel, KernelNode,
         LadderKernel, LimiterKernel, ModDelayKernel, PhaserKernel, ReconcileError, SvfKernel,
@@ -323,11 +324,12 @@ pub mod types {
         NoteNumberOutOfRange, NoteValue, Pass, PassEnd, PitchClass, SegmentOrigin, TimelineSegment,
         beats_per_sample, first_frame_at_or_after, frames_per_beat, snap_to_whole_frame,
     };
-    pub use tutti_rt::{AtomicSampleRate, Mint, Param, Param64, ParamCell};
+    pub use tutti_platform::Panicked;
     pub use tutti_rt::{
-        Count, Counter, CounterWriter, Drained, Gauge, GaugeWriter, LevelSpan, Panicked, PosFrame,
-        Reading, Reclaim, RingFloat, RingSample, Setting, SettingWord, Tally, TallyWriter, Words,
+        AtomicCell, AtomicWord, Count, Counter, CounterWriter, Drained, Gauge, GaugeWriter,
+        LevelSpan, PosFrame, Reading, Reclaim, RingFloat, RingSample, Tally, TallyWriter, Words,
     };
+    pub use tutti_rt::{AtomicSampleRate, Mint, Param, Param64, ParamCell};
     pub use tutti_units::{
         ArcDegrees, Azimuth, Balance, Ballistics, BarCount, BeatDuration, BeatsPerCycle,
         BeatsPerCycleOutOfRange, BipolarOutOfRange, BitDepth, BpmOutOfRange, CentsSpan,

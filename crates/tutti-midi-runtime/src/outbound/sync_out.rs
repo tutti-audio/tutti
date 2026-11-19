@@ -47,7 +47,7 @@ use tutti_graph::{
 };
 use tutti_midi_protocol::{MtcRate, Recipient};
 use tutti_music::MeterMap;
-use tutti_rt::{Counter, CounterWriter, Publisher, Reader, RtVec, Setting, counter};
+use tutti_rt::{AtomicCell, Counter, CounterWriter, Publisher, Reader, RtVec, counter};
 use tutti_ump::{MidiGroup, Sysex7Packets};
 use tutti_units::{Beat, SampleRate};
 
@@ -83,7 +83,7 @@ const UNPREPARED_RATE: SampleRate = SampleRate::SR_48K;
 pub struct SyncOutControls {
     /// What is sent: read once per block, set through
     /// [`messages`](Self::messages).
-    messages: Setting<SyncMessages>,
+    messages: AtomicCell<SyncMessages>,
     losses: Counter<Losses>,
 }
 
@@ -165,7 +165,7 @@ impl SyncOut {
     ///             ..SyncMessages::OFF
     ///         })
     ///         .into_node();
-    /// assert!(controls.messages().get().clock);
+    /// assert!(controls.messages().load().clock);
     /// ```
     #[must_use]
     pub fn new(group: MidiGroup) -> Self {
@@ -178,7 +178,7 @@ impl SyncOut {
             sender: MachineControlSender::new(Recipient::AllCall, MtcRate::Fps25),
             group,
             controls: Arc::new(SyncOutControls {
-                messages: Setting::new(SyncSettings::new().messages),
+                messages: AtomicCell::new(SyncSettings::new().messages),
                 losses: reader,
             }),
             losses,
@@ -205,7 +205,7 @@ impl SyncOut {
     pub fn sending(self, messages: SyncMessages) -> Self {
         self.controls
             .messages
-            .set(SyncSettings::new().messages(messages).messages);
+            .store(SyncSettings::new().messages(messages).messages);
         self
     }
 }
@@ -252,7 +252,7 @@ impl<F: Float> Node<F> for SyncOut {
 
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_, F>) -> Status {
         let block_len = cx.env.block_len;
-        let messages = self.controls.messages.get();
+        let messages = self.controls.messages.load();
         self.pending.clear();
         let mut dropped = 0u64;
         // Lent once, held across every piece of the block.
@@ -339,7 +339,7 @@ impl<F: Float> ForkSource<F> for SyncFork {
         let meter = self.meter.clone();
         let node = SyncOut::new(self.group)
             .meter(move || (meter.0)())
-            .sending(self.controls.messages.get());
+            .sending(self.controls.messages.load());
         Ok(Forked::new(Box::new(node)))
     }
 }

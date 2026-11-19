@@ -100,7 +100,7 @@ fn a_freeze_is_lossless_and_takes_no_input() {
     let n = design_of(&d, &frozen);
     let f = fdn_of(&n);
     assert!(n.is_lossless() && n.is_stable());
-    assert_eq!(n.tail(Db::new(-60.0)), Ring::Unbounded);
+    assert_eq!(n.tail(Db::new(-60.0)), DecayTime::Unbounded);
     assert!(
         f.input.iter().all(|&g| g == Gain::SILENT),
         "the input is shut"
@@ -203,9 +203,9 @@ fn the_capacity_dominates_where_rounding_matters() {
         };
         let tail = design_at(&d, &c, rate).tail(TAIL_FLOOR);
         let covered = match (bound.tail, tail) {
-            (Ring::Unbounded, _) => true,
-            (Ring::Finite(_), Ring::Unbounded) => false,
-            (Ring::Finite(a), Ring::Finite(b)) => a.get() >= b.get(),
+            (DecayTime::Unbounded, _) => true,
+            (DecayTime::Finite(_), DecayTime::Unbounded) => false,
+            (DecayTime::Finite(a), DecayTime::Finite(b)) => a.get() >= b.get(),
         };
         assert!(covered, "diffusion {k}%: {tail:?} over {:?}", bound.tail);
     }

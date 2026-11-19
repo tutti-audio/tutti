@@ -355,9 +355,9 @@ pub fn input<'a, F: Float>(
 /// # Settings
 ///
 /// A value that is one word by its encoding (a mode: a fieldless enum written
-/// with [`setting_word!`](tutti_rt::setting_word)) is not a param: it has no
+/// with [`atomic_word!`](tutti_rt::atomic_word)) is not a param: it has no
 /// address and no port, and cannot be modulated. It is a
-/// [`Setting<T>`](tutti_rt::Setting) field of the type that owns the cells (the
+/// [`AtomicCell<T>`](tutti_rt::AtomicCell) field of the type that owns the cells (the
 /// node, or the `Arc`-shared controls a node reads), declared after the rows:
 ///
 /// ```text
@@ -371,52 +371,52 @@ pub fn input<'a, F: Float>(
 ///   default and a chained option per entry (`.mode(Mode::On)`) sets the
 ///   initial value. Its fields are
 ///   private to the module that declares it, where the type's constructor
-///   builds each cell with `Setting::new(config.mode)`;
-/// - the control-side handle `owner.mode()`, a `&Setting<Mode>`: `set` lands
+///   builds each cell with `AtomicCell::new(config.mode)`;
+/// - the control-side handle `owner.mode()`, a `&AtomicCell<Mode>`: `store` lands
 ///   at once, with no pending slot;
-/// - the type check that the field `mode` is a `Setting<Mode>` and that `Mode`
-///   is a [`SettingWord`](tutti_rt::SettingWord).
+/// - the type check that the field `mode` is an `AtomicCell<Mode>` and that `Mode`
+///   is an [`AtomicWord`](tutti_rt::AtomicWord).
 ///
-/// The node reads `self.mode.get()` once per block.
+/// The node reads `self.mode.load()` once per block.
 ///
 /// ```
 /// use tutti_graph::declare_params;
-/// use tutti_rt::{Setting, setting_word};
+/// use tutti_rt::{AtomicCell, atomic_word};
 ///
 /// #[derive(Clone, Copy, Debug, PartialEq)]
 /// #[repr(u8)]
 /// enum Mode { Off, On }
-/// setting_word!(Mode { Off, On });
+/// atomic_word!(Mode { Off, On });
 ///
 /// #[derive(Debug)]
 /// struct Controls {
-///     mode: Setting<Mode>,
+///     mode: AtomicCell<Mode>,
 /// }
 ///
 /// declare_params!([] Controls, settings ControlsConfig { mode: Mode = Mode::Off });
 ///
 /// impl Controls {
 ///     fn new(config: ControlsConfig) -> Self {
-///         Self { mode: Setting::new(config.mode) }
+///         Self { mode: AtomicCell::new(config.mode) }
 ///     }
 /// }
 ///
 /// let controls = Controls::new(ControlsConfig::new().mode(Mode::On));
-/// assert_eq!(controls.mode().get(), Mode::On);
-/// controls.mode().set(Mode::Off);
-/// assert_eq!(controls.mode.get(), Mode::Off);
+/// assert_eq!(controls.mode().load(), Mode::On);
+/// controls.mode().store(Mode::Off);
+/// assert_eq!(controls.mode.load(), Mode::Off);
 /// ```
 ///
-/// A cell that is not a `Setting` of the declared type does not compile:
+/// A cell that is not an `AtomicCell` of the declared type does not compile:
 ///
 /// ```compile_fail
 /// use tutti_graph::declare_params;
-/// use tutti_rt::{Setting, setting_word};
+/// use tutti_rt::{AtomicCell, atomic_word};
 ///
 /// #[derive(Clone, Copy, Debug)]
 /// #[repr(u8)]
 /// enum Mode { Off }
-/// setting_word!(Mode { Off });
+/// atomic_word!(Mode { Off });
 ///
 /// struct Controls {
 ///     mode: u8,
@@ -482,10 +482,10 @@ macro_rules! declare_params {
         $($name:ident : $st:ty = $default:expr),+ $(,)?
     }) => {
         const _: () = {
-            fn is_a_setting_word<T: $crate::__private::SettingWord>() {}
+            fn is_a_atomic_word<T: $crate::__private::AtomicWord>() {}
             #[allow(dead_code)]
             fn every_setting_is_a_word() {
-                $(is_a_setting_word::<$st>();)+
+                $(is_a_atomic_word::<$st>();)+
             }
         };
 
@@ -520,8 +520,8 @@ macro_rules! declare_params {
 
         impl<$($g)*> $ty {
             $(
-                #[doc = concat!("The setting `", stringify!($name), "`: `set` on the control side, `get` once per block on the audio side. The owner hands out the cell until the session's key target takes it.")]
-                pub fn $name(&self) -> &$crate::__private::Setting<$st> {
+                #[doc = concat!("The setting `", stringify!($name), "`: `store` on the control side, `load` once per block on the audio side. The owner hands out the cell until the session's key target takes it.")]
+                pub fn $name(&self) -> &$crate::__private::AtomicCell<$st> {
                     &self.$name
                 }
             )+

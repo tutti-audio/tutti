@@ -6,7 +6,7 @@
 //! the scratch a design is made in) runs when the rig is built, outside the gate; the gate
 //! walks only `process`, which designs, retargets the ramps, renders and tracks the tail. The
 //! output stays finite and bounded. The park (the clear, the zero fill of the cut block, the
-//! idle blocks and the wake), a lane driving the slow controls (the longest tail a block takes
+//! idle blocks and the wake), a control signal driving the slow controls (the longest tail a block takes
 //! is designed from them) and a block of non-finite input run under it too.
 
 use tutti_graph::IntoNode;
@@ -254,12 +254,12 @@ fn the_fdn_parks_and_wakes_without_allocating() {
     }
 }
 
-/// The slow controls driven by lanes (the decay, the size and the pre-delay, each swept across
+/// The slow controls driven by control signals (the decay, the size and the pre-delay, each swept across
 /// its whole range inside the block and then back), so the block's longest tail is designed
-/// from the extremes of the lanes every block, and the grid reads and the corners of each
-/// lane retarget.
+/// from the extremes of the control signals every block, and the grid reads and the corners of each
+/// control signal retarget.
 #[test]
-fn the_fdn_with_its_lanes_fed_is_allocation_free() {
+fn the_fdn_with_its_signals_fed_is_allocation_free() {
     let sweep = |lo: f32, hi: f32, up: bool| -> Vec<f32> {
         (0..64)
             .map(|i| {

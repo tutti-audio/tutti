@@ -1,4 +1,5 @@
 use super::*;
+use crate::request_priority;
 
 /// The mapping, without privilege: what each request converts to for the
 /// time-sharing policy. Linux: nice -10 and -20.

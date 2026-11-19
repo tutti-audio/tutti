@@ -272,7 +272,7 @@ mod tests {
         let fired = listener.clone();
         // Detached: a deadlock is what `recv_timeout` below reports, and a
         // handle's drop would wait on it for ever.
-        tutti_rt::spawn_named("listener-fire", None, move |_| {
+        tutti_platform::spawn_named("listener-fire", None, move |_| {
             fired.fire(1);
             fired.fire(2);
             let _ = done.send(());

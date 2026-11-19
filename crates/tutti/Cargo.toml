@@ -28,6 +28,8 @@ tutti-nodes = { version = "0.0.1", path = "../tutti-nodes", default-features = f
 # The types the node catalogue's signatures name; `tutti-nodes` links them already.
 tutti-dsp = { version = "0.0.1", path = "../tutti-dsp", default-features = false }
 tutti-modulation = { version = "0.0.1", path = "../tutti-modulation", default-features = false }
+# `Panicked`, re-exported in `types`: the report of a named thread's body that panicked.
+tutti-platform = { version = "0.0.1", path = "../tutti-platform" }
 tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
 tutti-curve = { version = "0.0.1", path = "../tutti-curve" }
 # The node contract (`tutti::graph`) and the graph's vocabulary at the root.

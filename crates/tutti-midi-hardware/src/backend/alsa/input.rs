@@ -16,7 +16,8 @@ use tutti_alsa_ffi::{
     Blocking, Client, Event, Poller, PortCaps, PortKind, QueueClock, Read, UmpVersion, Wait,
 };
 use tutti_midi_device::EndpointId;
-use tutti_rt::{FaultLatch, ThreadHandle, spawn_named};
+use tutti_platform::{ThreadHandle, spawn_named};
+use tutti_rt::FaultLatch;
 
 /// How long dropping an input waits for its pump to end before it lets the
 /// thread go. A pump ends within a poll wake of the stop; only a read that never

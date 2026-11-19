@@ -37,7 +37,7 @@ use tutti_graph::{
     Shape, Status, declare_params,
 };
 use tutti_music::{Meter, MeterMap};
-use tutti_rt::{Loan, Reader, Setting, setting_word};
+use tutti_rt::{AtomicCell, Loan, Reader, atomic_word};
 use tutti_transport::{ProjectMeter, Transport};
 use tutti_units::Tail;
 use tutti_units::{
@@ -68,7 +68,7 @@ pub enum MetronomeMode {
     Always,
 }
 
-setting_word!(MetronomeMode {
+atomic_word!(MetronomeMode {
     Off,
     PrerollOnly,
     RecordingOnly,
@@ -116,7 +116,7 @@ pub struct ClickSettings {
     volume: AtomicF64,
     /// When the metronome sounds: read once per block, set from the control
     /// side through [`mode`](Self::mode).
-    mode: Setting<MetronomeMode>,
+    mode: AtomicCell<MetronomeMode>,
 }
 
 declare_params!([] ClickSettings, settings ClickConfig {
@@ -127,7 +127,7 @@ impl From<ClickConfig> for ClickSettings {
     fn from(config: ClickConfig) -> Self {
         Self {
             volume: AtomicF64::new(ClickLevel::HALF.get().get()),
-            mode: Setting::new(config.mode),
+            mode: AtomicCell::new(config.mode),
         }
     }
 }
@@ -159,7 +159,7 @@ impl ClickSettings {
         fresh
             .volume
             .store(self.volume.load(Ordering::Acquire), Ordering::Release);
-        fresh.mode().set(self.mode().get());
+        fresh.mode().store(self.mode().load());
         fresh
     }
 }
@@ -508,7 +508,7 @@ impl<F: Float> ClickNode<F> {
     /// block ([`Env::segments`]): a stop inside the block silences the click
     /// from its frame, and a start sounds the beat it lands on, on its frame.
     fn render(&mut self, env: &Env, left: &mut [F], right: &mut [F]) {
-        let mode = self.settings.mode().get();
+        let mode = self.settings.mode().load();
         let in_preroll = self.preroll.load(Ordering::Acquire);
         // The level narrows to the render's format once per block.
         let volume = F::from_unit(self.settings.volume().get());
@@ -689,8 +689,8 @@ mod tests {
             MetronomeMode::Always,
             MetronomeMode::Off,
         ] {
-            settings.mode().set(mode);
-            assert_eq!(settings.mode().get(), mode);
+            settings.mode().store(mode);
+            assert_eq!(settings.mode().load(), mode);
         }
     }
 
@@ -801,7 +801,7 @@ mod tests {
     #[test]
     fn test_click_node_silent_when_paused() {
         let (_, settings, mut node) = make_click();
-        settings.mode().set(MetronomeMode::Always);
+        settings.mode().store(MetronomeMode::Always);
 
         let output = frame(&mut node, STOPPED, 0.0);
         assert_eq!(output[0], 0.0);
@@ -811,7 +811,7 @@ mod tests {
     #[test]
     fn test_click_node_plays_on_beat() {
         let (_, settings, mut node) = make_click();
-        settings.mode().set(MetronomeMode::Always);
+        settings.mode().store(MetronomeMode::Always);
         set_volume(&settings, Amplitude::new(1.0));
 
         assert!(
@@ -827,7 +827,7 @@ mod tests {
     #[test]
     fn test_click_plays_after_loop_wrap() {
         let (_, settings, mut node) = make_click();
-        settings.mode().set(MetronomeMode::Always);
+        settings.mode().store(MetronomeMode::Always);
         set_volume(&settings, Amplitude::new(1.0));
 
         let _ = frame(&mut node, ROLLING, 7.0);
@@ -848,7 +848,7 @@ mod tests {
     #[test]
     fn accent_follows_the_meter_downbeat() {
         let (transport, settings, mut node) = make_click();
-        settings.mode().set(MetronomeMode::Always);
+        settings.mode().store(MetronomeMode::Always);
 
         let accents_at = |node: &mut ClickNode<f32>, beat: f64| {
             Node::<f32>::reset(node);
@@ -880,7 +880,7 @@ mod tests {
     #[test]
     fn click_rate_follows_the_notated_beat() {
         let (transport, settings, mut node) = make_click();
-        settings.mode().set(MetronomeMode::Always);
+        settings.mode().store(MetronomeMode::Always);
         transport
             .settings()
             .project_meter()
@@ -918,7 +918,7 @@ mod tests {
     #[test]
     fn clicks_stay_distinct_across_a_meter_change() {
         let (transport, settings, mut node) = make_click();
-        settings.mode().set(MetronomeMode::Always);
+        settings.mode().store(MetronomeMode::Always);
         // 7/8 (eighth-note beats) for three bars, then 4/4 (quarter-note beats).
         transport
             .settings()
@@ -984,7 +984,7 @@ mod tests {
     #[test]
     fn a_mid_beat_meter_change_clicks_its_downbeat() {
         let (transport, settings, mut node) = make_click();
-        settings.mode().set(MetronomeMode::Always);
+        settings.mode().store(MetronomeMode::Always);
         set_volume(&settings, Amplitude::new(1.0));
         transport
             .settings()
@@ -1021,7 +1021,7 @@ mod tests {
     #[test]
     fn a_republished_meter_is_seen_within_one_block() {
         let (transport, settings, mut node) = make_click();
-        settings.mode().set(MetronomeMode::Always);
+        settings.mode().store(MetronomeMode::Always);
 
         // 4/4 (the default): 2.00..2.10 all belong to the quarter at 2.0.
         let _ = block(&mut node, &env(SR, 10, hundredths_from(2.0)));
@@ -1050,7 +1050,7 @@ mod tests {
     #[test]
     fn negative_beats_do_not_wrap() {
         let (_, settings, mut node) = make_click();
-        settings.mode().set(MetronomeMode::Always);
+        settings.mode().store(MetronomeMode::Always);
 
         // One bar before the start: a downbeat, and no panic or wrap.
         let _ = frame(&mut node, ROLLING, -4.0);
@@ -1071,7 +1071,7 @@ mod tests {
     #[test]
     fn a_block_matches_its_frames_one_by_one() {
         let (_, settings, mut block_node) = make_click();
-        settings.mode().set(MetronomeMode::Always);
+        settings.mode().store(MetronomeMode::Always);
         set_volume(&settings, Amplitude::new(1.0));
 
         // 44.1 kHz at 120 BPM is 1/22050 beat per frame, so starting 20 frames
@@ -1129,7 +1129,7 @@ mod tests {
         for len in [64usize, 40] {
             let transport = Transport::new(SampleRate::of(RATE));
             let settings = Arc::new(ClickSettings::new());
-            settings.mode().set(MetronomeMode::Always);
+            settings.mode().store(MetronomeMode::Always);
             set_volume(&settings, Amplitude::new(1.0));
             let mut node = prepared(
                 ClickNode::new(&transport, settings),
@@ -1195,7 +1195,7 @@ mod tests {
     #[test]
     fn a_start_or_stop_inside_a_block_gates_on_its_frame() {
         let (_, settings, mut node) = make_click();
-        settings.mode().set(MetronomeMode::Always);
+        settings.mode().store(MetronomeMode::Always);
         set_volume(&settings, Amplitude::new(1.0));
 
         // Rolling on beat 3 (its click sounding), stopped at frame 30.
@@ -1230,7 +1230,7 @@ mod tests {
     #[test]
     fn test_preroll_only_mode() {
         let (transport, settings, mut node) = make_click();
-        settings.mode().set(MetronomeMode::PrerollOnly);
+        settings.mode().store(MetronomeMode::PrerollOnly);
         set_volume(&settings, Amplitude::new(1.0));
 
         // Should be silent when not in preroll
@@ -1249,7 +1249,7 @@ mod tests {
     #[test]
     fn test_recording_only_mode() {
         let (transport, settings, mut node) = make_click();
-        settings.mode().set(MetronomeMode::RecordingOnly);
+        settings.mode().store(MetronomeMode::RecordingOnly);
         set_volume(&settings, Amplitude::new(1.0));
         let recording = Deck {
             playing: true,
@@ -1287,7 +1287,7 @@ mod tests {
         type Move = fn(&Transport, &ClickSettings);
         let moves: [(&str, Move); 4] = [
             ("volume", |_, s| set_volume(s, Amplitude::new(1.0))),
-            ("mode", |_, s| s.mode().set(MetronomeMode::Off)),
+            ("mode", |_, s| s.mode().store(MetronomeMode::Off)),
             ("meter", |t, _| {
                 t.settings()
                     .project_meter()
@@ -1303,7 +1303,7 @@ mod tests {
             let settings = Arc::new(ClickSettings::new());
             set_volume(&settings, Amplitude::new(0.5));
             // Recording-only, so the count-in gates it (the render records).
-            settings.mode().set(MetronomeMode::RecordingOnly);
+            settings.mode().store(MetronomeMode::RecordingOnly);
             let node = ClickNode::<f32>::new(&transport, Arc::clone(&settings));
             (transport, settings, ClickFork::of(&node))
         };

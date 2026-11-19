@@ -311,7 +311,7 @@ mod tests {
             "pub struct T { m: MainThreadMarker }",
             "pub struct T { m: Option<MainThreadMarker> }",
             "pub struct T(PhantomData<MainThreadMarker>);",
-            "pub struct T { m: tutti_rt::MainThreadMarker }",
+            "pub struct T { m: tutti_platform::MainThreadMarker }",
             "pub struct T { m: tutti_plugin_types::MainThreadMarker }",
             "pub enum T { A(MainThreadMarker), B }",
             "pub struct T<F: Fn(u8) -> u8> where F: Send { pub m: MainThreadMarker, f: F }",
