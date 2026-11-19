@@ -237,7 +237,7 @@ enum Op {
     Walk(Walk),
     Set {
         call: CallId,
-        resource: PeResource,
+        target: ResourceTarget,
     },
     Subscribe {
         call: CallId,
@@ -480,7 +480,7 @@ impl ResourceInitiator {
         let call = self.call_id();
         let op = Op::Set {
             call,
-            resource: set.target().resource().clone(),
+            target: set.target().clone(),
         };
         let pe_set = PeSet {
             resource: set.target().resource().name(),
@@ -618,7 +618,8 @@ impl ResourceInitiator {
                 }));
             }
             Op::Walk(walk) => self.walked(walk, reply, now, out),
-            Op::Set { call, resource } => {
+            Op::Set { call, target } => {
+                let resource = target.resource().clone();
                 let (result, stamp) = match reply {
                     Ok(r) if resource == PeResource::State => {
                         match StateStamp::read(&r.header.extra) {
@@ -628,6 +629,9 @@ impl ResourceInitiator {
                     }
                     other => (other.map(|r| r.status()), None),
                 };
+                if result.is_ok() {
+                    self.cache.forget(&target);
+                }
                 out.push(event(ResourceEvent::Set {
                     call,
                     resource,

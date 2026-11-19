@@ -10,9 +10,12 @@ use super::super::super::header::{PeCacheTime, PePage, PeReply, PeStatus, PeUpda
 use super::super::super::tree::PeJson;
 use super::super::exchange::{
     Script, entry_target, get, paginating_list, program, program_page, sent_gets,
-    subscribed_script, update,
+    subscribed_script, target, update,
 };
-use super::super::{PeData, PeProgramList, PeResource, ResourceEvent, ResourceGet};
+use super::super::{
+    CanSet, PeData, PeLocalOn, PeProgramList, PeResource, PeResourceList, ResourceEntry,
+    ResourceEvent, ResourceGet, ResourceSet,
+};
 
 fn page(offset: u32) -> ResourceGet {
     ResourceGet::new(entry_target(PeResource::ProgramList, "g")).paged(PePage {
@@ -122,4 +125,53 @@ fn a_subscription_update_overrides_the_cache_time() {
     let (_, actions) = script.init.get(&read, script.now).unwrap();
     script.take(actions);
     assert_eq!(sent_gets(&script), sent + 2, "the update dropped the cache");
+}
+
+// A Set changes the data of the Resource, so what an earlier Get held is no longer
+// it; a Set that failed changed nothing.
+#[test]
+fn a_set_drops_what_a_get_held() {
+    let list = PeResourceList::new().with(
+        ResourceEntry::builder(PeResource::LocalOn)
+            .can_set(CanSet::Full)
+            .build()
+            .unwrap(),
+    );
+    let mut script = Script::new(&list);
+    let read = get(PeResource::LocalOn);
+    let ask = |script: &mut Script| {
+        let sent = sent_gets(script);
+        let (_, actions) = script.init.get(&read, script.now).unwrap();
+        script.take(actions);
+        let went = sent_gets(script) > sent;
+        if went {
+            let id = script.last_get_id();
+            let mut header = PeReply::new(PeStatus::Ok);
+            header.cache_time = Some(PeCacheTime::from_secs(100));
+            script.reply_with(id, PeMessageKind::GET_REPLY, header, b"false".to_vec());
+        }
+        went
+    };
+    let set = |script: &mut Script, status: PeStatus| {
+        let new = ResourceSet::full(
+            target(PeResource::LocalOn),
+            PeData::LocalOn(PeLocalOn(true)),
+        )
+        .unwrap();
+        let (_, actions) = script.init.set(&new, script.now).unwrap();
+        script.take(actions);
+        let id = script.last_request_id();
+        script.reply_with(
+            id,
+            PeMessageKind::SET_REPLY,
+            PeReply::new(status),
+            Vec::new(),
+        );
+    };
+    assert!(ask(&mut script));
+    assert!(!ask(&mut script), "held");
+    set(&mut script, PeStatus::BadRequest);
+    assert!(!ask(&mut script), "a failed Set changed nothing");
+    set(&mut script, PeStatus::Ok);
+    assert!(ask(&mut script), "the Set dropped the data held");
 }
