@@ -12,7 +12,7 @@ use super::{SourceNode, SourcePorts};
 /// An **envelope follower**: the level of its audio input, followed by a
 /// one-pole attack and release ([`LevelFollower`]) and sent raw in `[0, 1]`
 /// as linear pieces on the play-clock grid, one step late, addressed
-/// `ParamAddr::Id(source.0)` for every control lane that reads `source`.
+/// `ParamAddr::Id(source.get())` for every control lane that reads `source`.
 ///
 /// - **The level** of a frame is its **peak over channels**, `max |x_c|`,
 ///   clamped to `[0, 1]` (a NaN sample reads 0). Peak, not RMS: a frame's
