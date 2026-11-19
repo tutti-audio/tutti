@@ -84,7 +84,7 @@ pub struct BitCrusherControls {
 }
 
 impl BitCrusherControls {
-    /// `DEFAULT_BIT_DEPTH` (8 bits) and no hold.
+    /// 8 bits and no hold.
     pub const DEFAULT: Self = Self {
         bits: DEFAULT_BIT_DEPTH,
         hold: HoldFactor::NONE,

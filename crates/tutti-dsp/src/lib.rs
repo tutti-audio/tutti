@@ -64,7 +64,8 @@
 //!   from).
 //! - **Reverb** (`reverb/`): the model, a [`Network`] of [`Stage`]s with analytic queries
 //!   ([`Network::rt60`], [`tail`](System::tail), [`is_stable`](Lti::is_stable), the
-//!   densities); [`FreeverbBank`] (Freeverb's combs and all-passes), [`FdnBank`] (the feedback delay network, over an [`FdnLayout`]) and
+//!   densities); [`FreeverbBank`] (Freeverb's combs and all-passes), [`FdnBank`] (the
+//!   feedback delay network, over an [`FdnLayout`]) and
 //!   [`PlateBank`] (Dattorro's plate), their parameters [`Glide`]s in [`FreeverbGlides`],
 //!   [`FdnGlides`] and [`PlateGlides`]. [`rt60_from_gain`] is the RT60 of a loop of a
 //!   given gain.

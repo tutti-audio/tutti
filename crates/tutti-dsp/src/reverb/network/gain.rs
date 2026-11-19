@@ -31,8 +31,8 @@ pub(crate) fn loop_gain(delay: SampleSpan, rt60: Seconds, rate: SampleRate) -> A
     Db(-60.0 * delay.get() / trips.get()).to_amplitude()
 }
 
-/// The inverse of `loop_gain`: the RT60 of a loop of `delay` frames at
-/// gain `gain`, `-60 d / (fs · 20 log10 g)`.
+/// The RT60 of a loop of `delay` frames at gain `gain`, `-60 d / (fs · 20 log10 g)`: the
+/// time a signal circulating in it takes to fall 60 dB.
 ///
 /// A gain of 0 decays at once (zero seconds); a gain of 1 or more, and a gain
 /// that is NaN or negative (not a loop gain), never settle: infinity.
