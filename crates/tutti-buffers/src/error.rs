@@ -1,7 +1,7 @@
 //! [`BufferError`], the one refusal a view's construction or a conversion gives.
 
 use crate::BlockSide;
-use tutti_types::{ChannelLayout, LayoutError};
+use crate::{ChannelLayout, LayoutError};
 use tutti_units::Samples;
 
 /// Why a view was not built, or a conversion was not run.

@@ -14,13 +14,13 @@ categories = ["multimedia::audio"]
 workspace = true
 
 [features]
-# `serde` for `I24`: a value is its `i32`, refused outside the 24-bit range.
-serde = ["dep:serde"]
+# `serde` for `I24` (its `i32`, refused outside the 24-bit range) and for the wire-carried
+# channel types: `ChannelLayout`, `ChannelTopology` and `MaxBlock`, with `tutti-units`' `serde`.
+serde = ["dep:serde", "tutti-units/serde"]
 
 [dependencies]
-# `Samples`, the frame count every view speaks, and `ChannelLayout`, its width.
+# `Samples`, the frame count every view speaks, and `ranged!`, the range-checked widths.
 tutti-units = { version = "0.0.1", path = "../tutti-units", default-features = false }
-tutti-types = { version = "0.0.1", path = "../tutti-types", default-features = false }
 # Pure-Rust `rint`, `sqrt`, `exp` and kin, so a conversion or a `Float`'s math does
 # not depend on the platform's C math library.
 libm = "0.2.15"
@@ -28,8 +28,8 @@ libm = "0.2.15"
 thiserror = { workspace = true }
 # `Float` is `Pod`: the engine's arena casts lines of it to slices.
 bytemuck = { version = "1.16", default-features = false }
-# `I24`'s `Serialize` and `Deserialize`, behind the `serde` feature.
-serde = { version = "1", optional = true, default-features = false, features = ["derive"] }
+# `Serialize` and `Deserialize` of the wire types, behind the `serde` feature.
+serde = { version = "1", optional = true, default-features = false, features = ["derive", "alloc"] }
 
 [dev-dependencies]
 # The fold's allocation gate: the test binary installs `AllocDisabler`.

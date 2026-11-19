@@ -90,7 +90,6 @@ pub(super) enum Command {
     /// Reads what the plugin said unprompted off the control connection, so
     /// it reaches the listener while no other command is waiting on a reply.
     Drain,
-    Shutdown,
     /// Chunked state read.
     ///
     /// `progress` is advanced per chunk so the waiting caller can tell a slow
@@ -544,7 +543,7 @@ mod tests {
     fn the_announced_layout_precedes_its_resync() {
         let layout = |channels| tutti_plugin_types::Layout {
             inputs: vec![tutti_plugin_types::PluginBus::main(
-                tutti_types::ChannelLayout::from_count(channels),
+                tutti_buffers::ChannelLayout::from_count(channels),
             )],
             outputs: Vec::new(),
         };
@@ -570,7 +569,7 @@ mod tests {
     #[test]
     fn an_implausible_layout_is_dropped_and_counted() {
         use tutti_plugin_types::{Layout, MAX_LAYOUT_BUSES, PluginBus};
-        let stereo = || PluginBus::main(tutti_types::ChannelLayout::STEREO);
+        let stereo = || PluginBus::main(tutti_buffers::ChannelLayout::STEREO);
         let good = Layout {
             inputs: vec![stereo()],
             outputs: vec![stereo()],
@@ -579,7 +578,7 @@ mod tests {
         inbox.io_layout(good.clone());
         inbox.io_layout(Layout {
             inputs: vec![
-                PluginBus::main(tutti_types::ChannelLayout::from_count(0));
+                PluginBus::main(tutti_buffers::ChannelLayout::from_count(0));
                 MAX_LAYOUT_BUSES + 1
             ],
             outputs: Vec::new(),

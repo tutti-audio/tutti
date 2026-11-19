@@ -8,8 +8,9 @@
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
+use tutti_buffers::ChannelLayout;
 use tutti_graph::{Cx, Io, Node, ParamInput, ParamNode, ParamSet, Prepare, Shape, Status};
-use tutti_types::{AtomicF64, ChannelLayout};
+use tutti_types::AtomicF64;
 use tutti_units::Db;
 use tutti_units::{UnitAddr, UnitParam};
 

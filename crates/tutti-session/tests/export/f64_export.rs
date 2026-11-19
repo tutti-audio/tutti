@@ -1,10 +1,11 @@
 //! A bounce of an `f64` session: the fork renders at `f64`, and a constant
 //! `f32` cannot hold reaches the planes and the Float64 file unrounded.
 
+use tutti_buffers::ChannelLayout;
 use tutti_codec::{Format, Pcm};
 use tutti_graph::{ForkByClone, Params};
 use tutti_session::{Bounce, BounceTail, Range, Root, Session};
-use tutti_types::{ChannelLayout, Param};
+use tutti_types::Param;
 use tutti_units::{Amplitude, SampleRate, Seconds};
 
 #[path = "../support/f64_nodes.rs"]

@@ -22,15 +22,15 @@ use tutti_graph::testing as common;
 
 use std::hint::black_box;
 use std::time::{Duration, Instant};
-use tutti_types::MaxBlock;
+use tutti_buffers::MaxBlock;
 
 use common::{WORKERS, test_pool};
+use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_graph::{
     Cx, Editor, Io, Node, Prepare, Shape, Status, TransportChanges, TransportPosition, Unforkable,
 };
 use tutti_graph::{Edge, InPort, OutPort, Source};
-use tutti_types::ChannelLayout;
 use tutti_units::{SampleRate, Samples};
 
 const MAX_BLOCK: usize = 64;

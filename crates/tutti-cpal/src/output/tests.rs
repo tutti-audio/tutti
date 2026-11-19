@@ -1,16 +1,16 @@
 use super::*;
 use std::sync::Arc;
+use tutti_buffers::MaxBlock;
 use tutti_buffers::SampleFormat;
 use tutti_engine::{AudioCallbackState, Engine, ManualStreamDriver};
 use tutti_graph::{Editor, Prepare};
 use tutti_transport::Transport;
-use tutti_types::MaxBlock;
 use tutti_units::{SampleRate, Samples};
 
 fn manual_spec() -> OutputSpec {
     OutputSpec::new(
         SampleRate::SR_48K,
-        tutti_types::ChannelLayout::STEREO,
+        tutti_buffers::ChannelLayout::STEREO,
         SampleFormat::F32,
     )
 }
@@ -79,7 +79,7 @@ fn starting_a_running_engine_is_an_error() {
     let state = empty_state(SampleRate::SR_44K1);
     let mut engine = AudioEngine::from_spec(OutputSpec::new(
         SampleRate::SR_44K1,
-        tutti_types::ChannelLayout::STEREO,
+        tutti_buffers::ChannelLayout::STEREO,
         SampleFormat::F32,
     ));
     let (first, first_stream) = ManualStreamDriver::new();

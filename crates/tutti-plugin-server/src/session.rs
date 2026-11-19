@@ -661,6 +661,7 @@ impl Session {
                 tracing::error!(
                     "plugin-server: the render thread did not return the processor; the plugin is leaked"
                 );
+                crate::leak::note();
             }
             drop(plugin);
             self.work.run(main);

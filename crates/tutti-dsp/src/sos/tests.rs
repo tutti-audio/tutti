@@ -344,8 +344,8 @@ fn the_norms_bound_the_response_and_an_unstable_cascade_is_unbounded() {
 #[test]
 fn a_five_hz_high_pass_at_192_khz_holds_its_gain_and_noise_in_f32() {
     use crate::testing::{sine_fit, steady_deviation};
+    use tutti_buffers::ChannelLayout;
     use tutti_buffers::{Planes, PlanesMut};
-    use tutti_types::ChannelLayout;
     const FS: f64 = 192_000.0;
     const FC: f64 = 5.0;
     let whole = FS as usize;

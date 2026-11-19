@@ -1,8 +1,8 @@
 # tutti-types
 
-Shared building blocks for audio code: channel layouts and the speakers they feed, ids, and the lock-free cell that carries a parameter to the audio thread, over the unit types of `tutti-units`.
+Shared building blocks for audio code: ids and the lock-free cell that carries a parameter to the audio thread, over the unit types of `tutti-units`.
 
-It depends on no other part of tutti but `tutti-units`, so you can use it on its own, for example to describe the channels of an audio device. Most other tutti crates are built on it.
+It depends on no other part of tutti but `tutti-units`, so you can use it on its own. Most other tutti crates are built on it.
 
 This crate is part of [tutti](https://github.com/tutti-audio/tutti), a real-time audio engine for Rust.
 

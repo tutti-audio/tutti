@@ -11,13 +11,13 @@ use std::time::{Duration, Instant};
 
 use crate::fixtures::{SAMPLE_RATE, fan, graph_engine};
 use tutti_buffers::SampleFormat;
+use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_engine::{
     AudioCallbackState, BlockClockReader, BlockReading, OutputSpec, OutputStream, TimerDriver,
 };
 use tutti_graph::NodeKey;
 use tutti_nodes::testing::Const;
 use tutti_transport::Transport;
-use tutti_types::{ChannelLayout, MaxBlock};
 use tutti_units::{SampleRate, Samples};
 
 fn timer_state() -> (Arc<AudioCallbackState>, BlockClockReader) {

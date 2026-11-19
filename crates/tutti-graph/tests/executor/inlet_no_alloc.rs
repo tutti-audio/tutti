@@ -9,10 +9,10 @@
 //! Driven through `tutti_graph::contract::Direct`: the node's own
 //! `Node::process`, called by hand with buffers built once.
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::Interleaved;
 use tutti_graph::InletNode;
 use tutti_graph::contract::Direct;
-use tutti_types::ChannelLayout;
 use tutti_units::{SampleRate, Samples};
 
 /// Blocks with the ring full, then running dry (both branches of the pop).

@@ -15,12 +15,13 @@
 #![cfg(feature = "vst2")]
 
 use std::sync::{Mutex, MutexGuard};
+use tutti_buffers::MaxBlock;
 use tutti_fixtures::main_thread;
 use tutti_plugin_types::Load;
 use tutti_rt::LockExt;
-use tutti_types::MaxBlock;
 use tutti_vst2_host::Vst2Loaded;
 
+use tutti_buffers::ChannelLayout;
 use tutti_graph::contract::Latent;
 use tutti_graph::{
     Env, GraphBuilder, IntoNode, Offset, Prepare, Renderer, TransportChanges, TransportPosition,
@@ -31,7 +32,6 @@ use tutti_music::{BeatsPerBar, MeterChange, MeterMap, NoteValue, TimeSignature};
 use tutti_plugin_host::PluginHandle;
 use tutti_plugin_host::{PluginNode, load_client};
 use tutti_transport::ProjectMeter;
-use tutti_types::ChannelLayout;
 use tutti_units::Latency;
 use tutti_units::{Beat, Bpm, Frame, SampleRate, Samples};
 use tutti_vst2_test_plugin::ProcessCapture;

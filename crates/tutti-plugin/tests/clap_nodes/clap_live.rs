@@ -26,11 +26,12 @@
 
 use crate::clap_probe;
 use clap_probe::{ProbeEnv, load_probe, render};
+use tutti_buffers::MaxBlock;
 use tutti_fixtures::machine_lock;
-use tutti_types::MaxBlock;
 
 use std::ops::Range;
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_engine::Engine;
 use tutti_graph::NodeKey;
@@ -38,7 +39,6 @@ use tutti_graph::{Cx, Editor, Io, Node, Prepare, Shape, Status, Unforkable};
 use tutti_graph::{Edge, InPort, OutPort, Source};
 use tutti_plugin_ipc::RING_SLOTS;
 use tutti_transport::Transport;
-use tutti_types::ChannelLayout;
 use tutti_units::{SampleRate, Samples, Tail};
 
 /// What the probe declares and delays by (`REPORTED_LATENCY_SAMPLES`).

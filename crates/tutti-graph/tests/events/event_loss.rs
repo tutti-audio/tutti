@@ -8,7 +8,7 @@
 use tutti_graph::testing as common;
 
 use std::sync::{Arc, Mutex};
-use tutti_types::MaxBlock;
+use tutti_buffers::MaxBlock;
 
 use common::test_pool;
 

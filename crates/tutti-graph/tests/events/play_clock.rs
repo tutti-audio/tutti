@@ -15,13 +15,13 @@ use tutti_graph::testing as common;
 use std::collections::BTreeMap;
 
 use common::prepare;
+use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_graph::{
     Cx, Editor, Executor, ForkByClone, ForkMode, ForkTarget, Io, Node, Offset, PlayReading,
     Prepare, Reference, Shape, Status, TransportChanges, TransportPosition, Unforkable,
 };
 use tutti_graph::{Edge, InPort, OutPort, Source};
-use tutti_types::ChannelLayout;
 use tutti_units::{Beat, Bpm, Frame, Latency, Samples};
 
 const MAX: usize = 64;

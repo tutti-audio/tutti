@@ -4,7 +4,7 @@ use tutti_units::SampleRate;
 use {
     crate::{FlacLevel, IntDepth},
     tutti_buffers::Interleaved,
-    tutti_types::{ChannelLayout, ChannelTopology},
+    tutti_buffers::{ChannelLayout, ChannelTopology},
 };
 
 /// `frames` frames over `topology` whose sample at `(c, i)` is
@@ -39,7 +39,7 @@ fn a_written_wave_reads_back_as_itself() {
         (
             "quad.wav",
             Format::Wav(Pcm::Int16),
-            tutti_types::Bed::Quad.topology(),
+            tutti_buffers::Bed::Quad.topology(),
         ),
         (
             "stereo.flac",

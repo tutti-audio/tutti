@@ -9,9 +9,9 @@
 
 use crate::pooled::{LoadPlugin, Spec};
 use tutti_buffers::InterleavedMut;
+use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_plugin::catalog::PluginRef;
 use tutti_session::{Root, Session};
-use tutti_types::{ChannelLayout, MaxBlock};
 use tutti_units::{SampleRate, Samples};
 
 const RATE: SampleRate = SampleRate::SR_48K;

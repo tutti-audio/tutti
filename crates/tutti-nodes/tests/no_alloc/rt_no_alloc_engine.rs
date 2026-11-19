@@ -16,7 +16,9 @@
 //! one gates them *inside the engine*, where the executor drives them through
 //! its own buffers and the transport advances on the same `process` call.
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
+use tutti_buffers::MaxBlock;
 use tutti_engine::Engine;
 use tutti_graph::NodeKey;
 use tutti_graph::{Edge, InPort, OutPort, Source};
@@ -24,8 +26,6 @@ use tutti_graph::{Editor, Prepare};
 use tutti_nodes::testing::Osc;
 use tutti_nodes::{BusStripNode, EqBandNode, LimiterControls, LimiterNode, SvfType};
 use tutti_transport::{MotionEvent, Transport};
-use tutti_types::ChannelLayout;
-use tutti_types::MaxBlock;
 use tutti_units::{Db, Hz, Q, SampleRate, Samples};
 
 /// Build an [`Engine`] whose graph is `sine → bell EQ → strip → limiter`,

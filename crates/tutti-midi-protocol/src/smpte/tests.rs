@@ -1,21 +1,22 @@
 use super::*;
 
-/// **Every rate reads back from its discriminant, and no other byte does**:
-/// a byte past 4 is refused with the byte in the error, in every build (it was
-/// a debug-only assertion that fell back to 29.97 drop-frame in release).
+/// **A second holds 24, 25, 30, 30 and 30 frame labels** at 24, 25, 29.97
+/// drop-frame, 29.97 non-drop and 30 fps (SMPTE 12M): the 29.97 rates count
+/// 30 labels a second though they run at 30000/1001 frames.
 #[test]
-fn a_frame_rate_reads_back_from_its_discriminant_and_nothing_else_does() {
-    for rate in [
-        SmpteFrameRate::Fps24,
-        SmpteFrameRate::Fps25,
-        SmpteFrameRate::Fps2997Df,
-        SmpteFrameRate::Fps2997Ndf,
-        SmpteFrameRate::Fps30,
-    ] {
-        assert_eq!(SmpteFrameRate::try_from(rate as u8), Ok(rate));
-    }
-    for raw in 5..=u8::MAX {
-        assert_eq!(SmpteFrameRate::try_from(raw), Err(UnknownFrameRate(raw)));
+fn a_second_holds_the_labels_of_its_frame_rate() {
+    let table = [
+        (SmpteFrameRate::Fps24, 24, 24),
+        (SmpteFrameRate::Fps25, 25, 25),
+        (SmpteFrameRate::Fps2997Df, 30, 30),
+        (SmpteFrameRate::Fps2997Ndf, 30, 30),
+        (SmpteFrameRate::Fps30, 30, 30),
+    ];
+    for (rate, labels, mtc_labels) in table {
+        assert_eq!(rate.labels_per_second(), labels, "{rate:?}");
+        if let Some(mtc) = rate.mtc_rate() {
+            assert_eq!(mtc.labels_per_second(), mtc_labels, "{mtc:?}");
+        }
     }
 }
 

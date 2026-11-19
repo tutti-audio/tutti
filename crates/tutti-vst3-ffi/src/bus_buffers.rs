@@ -11,7 +11,7 @@ use std::marker::PhantomData;
 
 use vst3::Steinberg::Vst::AudioBusBuffers;
 
-use tutti_types::ChannelLayout;
+use tutti_buffers::ChannelLayout;
 
 use crate::error::Vst3Error;
 use crate::sdk::zeroed;
@@ -398,7 +398,7 @@ mod tests {
     use super::{BusBuffers, MIN_PTR_COUNT};
     use crate::types::SampleWidth;
     use std::ffi::c_void;
-    use tutti_types::ChannelLayout;
+    use tutti_buffers::ChannelLayout;
 
     const BLOCK: usize = 64;
 

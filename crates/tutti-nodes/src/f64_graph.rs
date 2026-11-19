@@ -16,13 +16,13 @@ use crate::{
     StereoWidthNode, SvfFilterNode, TiltFilterConfig, TiltFilterNode, TransientShaperConfig,
     TransientShaperNode, TremoloConfig, TremoloNode,
 };
+use tutti_buffers::ChannelLayout;
 use tutti_dsp::{
     DelayControls, FdnControls, FdnLayout, FreeverbControls, LadderType, ShapeKind, Stages, SvfType,
 };
 use tutti_fixtures::signal::{assert_close_f64, wide_signal};
 use tutti_graph::IntoNode;
 use tutti_graph::contract::Direct;
-use tutti_types::ChannelLayout;
 use tutti_units::{
     BitDepth, CompressionRatio, Db, Depth, Drive, Feedback, Hz, Mix, Q, Resonance, SampleRate,
     Seconds, Semitones,
@@ -307,7 +307,7 @@ fn the_linear_nodes_satisfy_superposition() {
         2_400,
     );
     assert_linear(
-        || ModDelayNode::<f64>::chorus(tutti_types::BusTopology::MONO),
+        || ModDelayNode::<f64>::chorus(tutti_buffers::BusTopology::MONO),
         RATE,
         1,
         2_400,

@@ -32,8 +32,8 @@
 //! delay line's sample, so the product rounds by about `u` a trip whatever the form: it is not
 //! stored as a complement.
 
+use tutti_buffers::MAX_CHANNELS;
 use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_types::MAX_CHANNELS;
 use tutti_units::{Hz, ReadPosition, SampleRate, SampleSpan, Samples, Seconds, Tail};
 
 use super::design::{MIN_BANDWIDTH, OUTPUT_GAIN, OUTPUT_TAPS, PlateControls, Point, scaled};

@@ -8,10 +8,10 @@
 //! frames of 5 ms at 48 kHz.
 
 use tutti_buffers::InterleavedMut;
+use tutti_buffers::{ChannelLayout, ChannelTopology, MaxBlock};
 use tutti_graph::ForkByClone;
 use tutti_nodes::testing::Const;
 use tutti_session::{OutPort, Root, Session};
-use tutti_types::{ChannelLayout, ChannelTopology, MaxBlock};
 use tutti_units::{SampleRate, Samples};
 
 const FADE: usize = 240;

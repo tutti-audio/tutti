@@ -27,8 +27,8 @@
 //! site — and where its semantics can be stated, because they are *not* the
 //! semantics of folding first.
 
+use tutti_buffers::{ChannelIndex, ChannelLayout};
 use tutti_buffers::{Interleaved, Mono, PlanesMut, Sample, deinterleave};
-use tutti_types::{ChannelIndex, ChannelLayout};
 use tutti_units::{Amplitude, Samples};
 
 use core::marker::PhantomData;

@@ -5,14 +5,14 @@
 //! shifted or folded frame is visible. The fade itself is
 //! `tutti-session`'s `tests/wiring/engine.rs`.
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
+use tutti_buffers::MaxBlock;
 use tutti_engine::{Engine, HeardOpen, HeardTapError};
 use tutti_graph::NodeKey;
 use tutti_graph::{Cx, Editor, Io, Node, Prepare, Shape, Status, TapReader, Unforkable};
 use tutti_graph::{OutPort, Source};
 use tutti_transport::Transport;
-use tutti_types::ChannelLayout;
-use tutti_types::MaxBlock;
 use tutti_units::{SampleRate, Samples};
 
 const RATE: f64 = 48_000.0;

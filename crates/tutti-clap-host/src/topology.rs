@@ -22,7 +22,7 @@
 //! channel after it, which is why `decode_surround_channel_map` never filters.
 //! The host never tells a plugin a layout, so there is no inverse.
 
-use tutti_types::{ChannelTopology, Speaker, Speakers};
+use tutti_buffers::{ChannelTopology, Speaker, Speakers};
 
 use crate::types::SurroundChannel;
 
@@ -70,7 +70,7 @@ pub fn topology_of(map: &[SurroundChannel]) -> ChannelTopology {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tutti_types::ChannelLayout;
+    use tutti_buffers::ChannelLayout;
 
     /// Every position CLAP names decodes to its speaker, per `clap/ext/surround.h`.
     ///

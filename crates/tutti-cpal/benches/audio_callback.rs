@@ -15,9 +15,10 @@
 
 use std::hint::black_box;
 use std::sync::Arc;
-use tutti_types::MaxBlock;
+use tutti_buffers::MaxBlock;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_engine::{AudioCallbackState, Engine, OutputBlock, process_audio};
 use tutti_graph::{Editor, Prepare, TapReader};
@@ -25,7 +26,6 @@ use tutti_graph::{NodeKey, TapAlign, TapId};
 use tutti_graph::{OutPort, Source};
 use tutti_nodes::testing::Osc;
 use tutti_transport::Transport;
-use tutti_types::ChannelLayout;
 use tutti_units::SampleRate;
 use tutti_units::{Hz, Samples};
 

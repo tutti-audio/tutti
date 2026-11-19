@@ -21,7 +21,7 @@
 //!
 //! ```
 //! use tutti_graph::{Edge, InPort, NodeSpec, OutPort, Source};
-//! use tutti_types::ChannelLayout;
+//! use tutti_buffers::ChannelLayout;
 //! use tutti_graph::{NodeKey, Topology};
 //!
 //! let (osc, gain) = (NodeKey(1), NodeKey(2));
@@ -43,7 +43,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use crate::latency::{ChannelFeed, Feed, LatencyGraph, PortFeed};
 use crate::spec::{EventIn, EventOut};
 use crate::tail::TailGraph;
-use tutti_types::ChannelLayout;
+use tutti_buffers::ChannelLayout;
 use tutti_units::{Samples, Tail};
 
 /// A stable identity for a node, chosen by the **author** of the topology.

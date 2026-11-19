@@ -1,11 +1,11 @@
 //! What binds a meter to audio: the context it is built with and the view each
 //! chunk is pushed as, both read from the chunk the job reads.
 
+use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_buffers::{
     Float, Fold, FoldError, Interleaved, InterleavedMut, Mono, Planes, PlanesMut, StereoPlanes,
     deinterleave, interleave,
 };
-use tutti_types::{ChannelLayout, ChannelTopology};
 use tutti_units::{SampleRate, Samples};
 
 use super::AnalyzeError;
@@ -106,7 +106,7 @@ pub trait AudioContext: sealed_context::Sealed {}
 pub(crate) use sealed_context::Sealed as Bind;
 
 mod sealed_context {
-    use tutti_types::ChannelLayout;
+    use tutti_buffers::ChannelLayout;
     use tutti_units::SampleRate;
 
     /// Builds the context from the audio; unnameable outside the crate.

@@ -6,11 +6,11 @@
 //! Every figure is analytic: constants of exactly representable values, whose
 //! sum is exact in `f32`.
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::ForkByClone;
 use tutti_nodes::testing::{Const, Through};
 use tutti_session::{InPort, OutPort, Root, Session};
-use tutti_types::ChannelLayout;
 use tutti_units::Samples;
 
 const A: f32 = 0.25;

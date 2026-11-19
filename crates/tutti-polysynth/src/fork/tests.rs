@@ -3,7 +3,10 @@ use tutti_graph::{Event, Offset, ParamFork};
 use tutti_ump::{MidiChannel, Ump};
 use tutti_units::{SampleRate, Seconds, UnitParam};
 
-use crate::{Adsr, OscillatorType, PolySynth, SynthConfig, UnisonConfig};
+use crate::{Adsr, OscillatorType, SynthConfig, UnisonConfig};
+
+/// The synth at `f32`, the width these tests run at.
+type PolySynth = crate::PolySynth<f32>;
 use tutti_fixtures::midi;
 
 const RATE: SampleRate = SampleRate::SR_48K;

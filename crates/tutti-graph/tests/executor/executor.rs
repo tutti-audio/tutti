@@ -10,6 +10,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use tutti_ump::{MidiChannel, NoteNumber, U7, Ump};
 
 use common::{Kind, TestNode, prepare};
+use tutti_buffers::ChannelLayout;
 use tutti_fixtures::midi;
 use tutti_graph::NodeKey;
 use tutti_graph::{
@@ -17,7 +18,7 @@ use tutti_graph::{
     Shape, SilenceMask, Status, TransportPosition, Unforkable,
 };
 use tutti_graph::{Edge, InPort, OutPort, Source};
-use tutti_types::{ChannelLayout, Param};
+use tutti_types::Param;
 use tutti_ump::{Message, Voice1};
 use tutti_units::{Amplitude, Latency, Samples, Tail};
 
@@ -1126,7 +1127,7 @@ fn an_unchanged_commit_sends_nothing_and_a_change_still_sends() {
 fn too_few_input_slices_assert_in_debug() {
     let (mut ed, mut exec) = Editor::new(prepare(64));
     ed.insert(SRC, "a", Unforkable(const_node(0.5)));
-    ed.spec_mut().topology.inputs = tutti_types::ChannelLayout::MONO;
+    ed.spec_mut().topology.inputs = tutti_buffers::ChannelLayout::MONO;
     ed.spec_mut().topology.set_outputs(vec![Source::Global(0)]);
     ed.commit().expect("commits");
     render(&mut exec, 16, 1);
@@ -1137,7 +1138,7 @@ fn too_few_input_slices_assert_in_debug() {
 fn too_few_input_slices_render_silence_in_release() {
     let (mut ed, mut exec) = Editor::new(prepare(64));
     ed.insert(SRC, "a", Unforkable(const_node(0.5)));
-    ed.spec_mut().topology.inputs = tutti_types::ChannelLayout::MONO;
+    ed.spec_mut().topology.inputs = tutti_buffers::ChannelLayout::MONO;
     ed.spec_mut().topology.set_outputs(vec![Source::Global(0)]);
     ed.commit().expect("commits");
     let out = render(&mut exec, 16, 1);

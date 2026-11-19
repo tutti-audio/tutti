@@ -29,10 +29,11 @@ use tutti_buffers::Mono;
 use tutti_sampler::VoiceWindow;
 
 use std::sync::Arc;
-use tutti_types::MaxBlock;
+use tutti_buffers::MaxBlock;
 
 use std::sync::atomic::Ordering;
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::Wave;
 use tutti_graph::NodeKey;
 use tutti_graph::{
@@ -41,7 +42,6 @@ use tutti_graph::{
 use tutti_modulation::{Amount, Clock, ControlProgram, Law, Layer, LayerId, Polarity};
 use tutti_nodes::automation::ControlLaneNode;
 use tutti_sampler::{MemorySource, Playback, Voice, VoiceNode, VoiceNodeHandle, VoiceSource};
-use tutti_types::ChannelLayout;
 use tutti_units::{
     Amplitude, Beat, BeatsPerCycle, Bpm, Depth, Frame, PhaseIncrement, SampleRate, Samples,
     UnitParam,

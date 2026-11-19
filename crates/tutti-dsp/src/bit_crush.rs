@@ -14,8 +14,8 @@
 //! The quantizer is applied to the held value every frame, so a depth that moves while a
 //! sample is held changes what is heard of it at once.
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_types::ChannelLayout;
 use tutti_units::{BitDepth, HoldFactor};
 
 /// The word length a quantizer keeps by default, and the one a depth that is not finite

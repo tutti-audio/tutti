@@ -35,7 +35,7 @@
 //! where it stands (ITU-R BS.1770-5, Annex 3, Table 4): 1.41 when its elevation
 //! is under 30 degrees and its azimuth is within 60 to 120 degrees either side,
 //! else 1.0; the LFE adds no loudness (its peak still counts). The angles are the bed's own
-//! ([`Bed::direction`](tutti_types::Bed::direction)), so a 5.1's side speakers (M+110 and M-110) weigh 1.41 and a
+//! ([`Bed::direction`](tutti_buffers::Bed::direction)), so a 5.1's side speakers (M+110 and M-110) weigh 1.41 and a
 //! 7.1's rear speakers (M+135 and M-135) and every upper speaker weigh 1.0, as Table 5
 //! lists them. A quad's side speakers (VST3's FL FR SL SR) stand for the bed's
 //! M+-135 backs and weigh 1.0. `ebur128` has no free weights, so each speaker is given the
@@ -45,8 +45,8 @@
 use core::marker::PhantomData;
 
 use ebur128::{Channel, EbuR128, Mode};
+use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_buffers::{Interleaved, Sample};
-use tutti_types::{ChannelLayout, ChannelTopology};
 use tutti_units::{Amplitude, Db, Direction, SampleRate, Samples};
 
 use crate::convert::{BLOCK, Discard, all_finite, for_blocks, run_len};
@@ -97,7 +97,7 @@ impl<S: Sample> Measure<S> for LoudnessConfig {
     ///
     /// [`Error::AmbisonicLoudness`] for an ambisonic topology;
     /// [`Error::UnplacedLoudnessChannels`] for speakers that are not a
-    /// [`Bed`](tutti_types::Bed)'s, whose angles are unknown;
+    /// [`Bed`](tutti_buffers::Bed)'s, whose angles are unknown;
     /// [`Error::MeterUnavailable`] when `ebur128` cannot meter the rate.
     fn measure(&self, rate: SampleRate) -> Result<LoudnessMeter<S>> {
         let labels = channel_labels(&self.topology)?;

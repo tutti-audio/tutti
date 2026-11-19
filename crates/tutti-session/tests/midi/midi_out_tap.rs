@@ -9,10 +9,10 @@
 use std::sync::{Arc, Mutex};
 
 use crate::common::{MF, note};
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::{EventCapacity, Losses, TapAlign, UmpAt};
 use tutti_midi_runtime::MidiOut;
-use tutti_types::ChannelLayout;
 use tutti_ump::{MidiGroup, Ump};
 use tutti_units::SampleRate;
 

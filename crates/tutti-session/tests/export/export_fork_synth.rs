@@ -12,6 +12,7 @@ use tutti_session::Root;
 
 use tutti_export::Produced;
 
+use tutti_buffers::ChannelLayout;
 use tutti_fixtures::midi;
 use tutti_graph::NodeKey;
 use tutti_graph::contract::Direct;
@@ -25,7 +26,6 @@ use tutti_session::{
 use tutti_sf2::SoundFont;
 use tutti_soundfont::{Settings, SoundFontUnit};
 use tutti_transport::{OfflineTimeline, OfflineTimelineConfig};
-use tutti_types::ChannelLayout;
 use tutti_ump::{Message, MidiChannel, NoteNumber, NoteVelocity, U7, Ump, Voice2};
 use tutti_units::{Amplitude, Beat, Bpm, SampleRate, Samples, Seconds, UnitParam};
 
@@ -76,8 +76,8 @@ fn render_stem(
 }
 
 /// A saw with an instant attack, built at the live graph's rate.
-fn poly() -> PolySynth {
-    PolySynth::new(SynthConfig {
+fn poly() -> PolySynth<f32> {
+    PolySynth::<f32>::new(SynthConfig {
         oscillator: OscillatorType::Saw,
         envelope: Adsr {
             attack: Seconds(0.0),

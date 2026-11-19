@@ -43,12 +43,12 @@
 use crate::support::{EncodeConfig, ExportConfig, RenderConfig};
 
 use crate::support::render_to_file;
+use tutti_buffers::ChannelLayout;
 use tutti_codec::{Format, Pcm};
 use tutti_export::{RenderGraph, Resample, Setup};
 use tutti_graph::GraphBuilder;
 use tutti_nodes::testing::Osc;
 use tutti_transport::FrozenClock;
-use tutti_types::ChannelLayout;
 use tutti_units::Amplitude;
 use tutti_units::Hz;
 use tutti_units::Seconds;

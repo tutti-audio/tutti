@@ -7,10 +7,10 @@
 //! `ParamSet` before each block, so they take the ramped path (a coefficient
 //! solve every few samples), a solo's mute ramp and a bypass.
 
+use tutti_buffers::ChannelLayout;
 use tutti_graph::contract::BlockRig;
 use tutti_graph::{IntoNode, ParamNode};
 use tutti_nodes::{BAND_PARAMS, CrossoverNode, MultibandCompressorNode};
-use tutti_types::ChannelLayout;
 use tutti_units::{Hz, SampleRate};
 use tutti_units::{UnitAddr, UnitParam};
 

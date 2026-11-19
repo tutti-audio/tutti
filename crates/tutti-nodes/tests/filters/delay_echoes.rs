@@ -5,11 +5,11 @@
 //! The rate is a power of two and the times are whole frames over it, so a
 //! delay in frames is exact in `f64`.
 
+use tutti_buffers::BusTopology;
 use tutti_buffers::Planes;
 use tutti_fixtures::signal::{impulse, sine};
 use tutti_graph::contract::{drive, prepared};
 use tutti_nodes::{DelayControls, DelayLayout, DelayNode, InterpolationMode, MaxDelay, Routing};
-use tutti_types::BusTopology;
 use tutti_units::{Amplitude, Feedback, Hz, SampleRate, Samples, Seconds};
 
 // These tests pin the `f32` instantiation, the session's audio format, so their tolerances

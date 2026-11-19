@@ -10,11 +10,11 @@
 //! latency, so its aligned input is its input) and the muted output is `+0.0`,
 //! each exact in `f32`.
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::{Cx, ForkByClone, Io, Node, NodeKey, Prepare, Shape, Status};
 use tutti_nodes::testing::Const;
 use tutti_session::{InPort, ModeError, NodeMode, OutPort, Root, Session};
-use tutti_types::ChannelLayout;
 
 const A: f32 = 0.25;
 const BLOCK: usize = 64;

@@ -419,7 +419,7 @@ impl LoadedPlugin {
 mod tests {
     use super::*;
     use crate::{LatencyVerdict, PROBE_FLOOR, ProbeConfig, StateHash, TailVerdict, Verdict};
-    use tutti_types::MaxBlock;
+    use tutti_buffers::MaxBlock;
     use tutti_units::SampleRate;
 
     fn stereo() -> ChannelTopology {

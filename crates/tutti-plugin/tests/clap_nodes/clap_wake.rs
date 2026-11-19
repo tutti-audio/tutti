@@ -21,11 +21,11 @@ use tutti_fixtures::{machine_lock, main_thread};
 
 use std::time::{Duration, Instant};
 
+use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_clap_host::ClapLoaded;
 use tutti_clap_test_plugin::{ClapProbe, ClapSwitch, StatusMode, WOKEN_LEVEL};
 use tutti_graph::{GraphBuilder, Prepare, Renderer};
 use tutti_plugin_types::Load;
-use tutti_types::{ChannelLayout, MaxBlock};
 use tutti_units::{SampleRate, Samples};
 
 /// How long a wake that never comes is waited for.

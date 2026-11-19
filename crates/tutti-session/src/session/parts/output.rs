@@ -9,10 +9,10 @@
 use std::sync::Arc;
 
 use tutti_buffers::Float;
+use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_engine::HeardTaps;
 use tutti_graph::RootError;
 use tutti_metering::LoadMeter;
-use tutti_types::{ChannelLayout, ChannelTopology};
 
 use crate::graph::Graph;
 use crate::value::Cell;

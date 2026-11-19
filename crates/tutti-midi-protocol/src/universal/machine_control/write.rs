@@ -10,11 +10,11 @@ use super::values::{
     MmcExtension, MmcName, MmcPosition, MmcSelection, MmcShortTimeCode, MmcSlot, MmcTimeCode,
     MmcTimeLabel, MmcTimeTail, MmcUserBits,
 };
-use super::{MmcBytes, MmcTooLong};
+use super::{MmcBytes, MmcBytesRefused};
 use crate::universal::Recipient;
 
 type Out<'a> = &'a mut MmcBytes;
-type Done = Result<(), MmcTooLong>;
+type Done = Result<(), MmcBytesRefused>;
 
 pub(crate) fn name(name: MmcName, out: Out<'_>) -> Done {
     match name.extension() {

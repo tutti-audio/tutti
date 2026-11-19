@@ -10,13 +10,13 @@ use tutti_graph::testing as common;
 
 use common::{WORKERS, bits, prepare, test_pool};
 
+use tutti_buffers::ChannelLayout;
 use tutti_fixtures::midi;
 use tutti_graph::{
     Buses, Chase, Cx, Editor, Event, EventEdge, EventIn, EventKind, EventOut, Executor, Fade,
     FadeLaw, Io, Node, Prepare, Shape, Status, TransportPosition, Unforkable,
 };
 use tutti_graph::{NodeKey, OutPort, Source};
-use tutti_types::ChannelLayout;
 use tutti_ump::{CCNumber, MidiChannel, U7, Ump};
 use tutti_units::Samples;
 

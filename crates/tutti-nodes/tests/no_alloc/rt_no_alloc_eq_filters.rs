@@ -1,10 +1,10 @@
 //! The bell and the tilt do not allocate per block, held and with every control moved
 //! between blocks (a design into the held scratch and the coefficient glide).
 
+use tutti_buffers::ChannelLayout;
 use tutti_graph::IntoNode;
 use tutti_graph::contract::BlockRig;
 use tutti_nodes::{BellFilterConfig, BellFilterNode, TiltFilterConfig, TiltFilterNode};
-use tutti_types::ChannelLayout;
 use tutti_units::{Db, Hz, Q, SampleRate, UnitParam};
 
 /// 16 warm-up blocks, then 2 000 blocks under `assert_no_alloc`, every control moved before each.

@@ -34,7 +34,7 @@
 //! Declining is the point. `MidSide` silently read as `L R` is a stereo image
 //! collapsed to mono-plus-noise, and the count says nothing is wrong.
 
-use tutti_types::{ChannelTopology, Speaker, Speakers};
+use tutti_buffers::{ChannelTopology, Speaker, Speakers};
 
 use crate::channel_layout::AuLayoutTag;
 
@@ -135,7 +135,7 @@ pub fn topology_of(tag: AuLayoutTag) -> Option<ChannelTopology> {
         // Naming six of eight and inventing the rest would be worse than
         // declining: a partly-right order routes most channels correctly and
         // hides the two that are wrong. They become expressible when `Speaker`
-        // grows a wide pair, which is a `tutti-types` decision.
+        // grows a wide pair, which is a `tutti-buffers` decision.
         AuLayoutTag::Octagonal | AuLayoutTag::Cube => return None,
     };
     Some(ChannelTopology::Speakers(Speakers::from_format(
@@ -146,7 +146,7 @@ pub fn topology_of(tag: AuLayoutTag) -> Option<ChannelTopology> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tutti_types::ChannelLayout;
+    use tutti_buffers::ChannelLayout;
 
     /// A decoded tag's width matches the count Apple packs into it.
     ///

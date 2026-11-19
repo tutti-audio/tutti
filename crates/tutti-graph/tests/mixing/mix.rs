@@ -23,12 +23,12 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use common::{Kind, Pair, SpecBehaviour, TestNode, bits, prepare};
+use tutti_buffers::ChannelLayout;
 use tutti_graph::{
     CommitError, Cx, Edge, Editor, EventOut, FadeLaw, ForkMode, ForkTarget, GraphInvalid,
     GraphSpec, InPort, Io, MixError, Node, NodeKey, NodeMix, NodeMode, OutPort, ParamIn, PassError,
     Prepare, Shape, Source, Status, Topology, TransportPosition, Unforkable,
 };
-use tutti_types::ChannelLayout;
 use tutti_units::{Mix, Samples, Tail};
 
 const BLOCK: usize = 64;

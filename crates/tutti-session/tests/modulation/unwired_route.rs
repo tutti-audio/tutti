@@ -4,13 +4,13 @@
 
 use crate::common;
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::{FadeLaw, ForkByClone};
 use tutti_nodes::testing::{Const, Through};
 use tutti_session::{
     Edge, ModTarget, OutPort, Problem, Root, RouteSpec, Session, SessionEvent, TargetName,
 };
-use tutti_types::ChannelLayout;
 use tutti_units::{Amplitude, Depth, Seconds};
 
 use common::probe::Pulse;

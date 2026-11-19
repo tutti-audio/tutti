@@ -1,7 +1,9 @@
 //! `process_audio` drives the transport's clock: a block advances the beat, and
 //! a loop wraps it.
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
+use tutti_buffers::MaxBlock;
 use tutti_engine::{AudioCallbackState, Engine, process_audio};
 use tutti_graph::NodeKey;
 use tutti_graph::{Edge, InPort, OutPort, Source};
@@ -9,8 +11,6 @@ use tutti_graph::{Editor, Prepare};
 use tutti_nodes::testing::Osc;
 use tutti_nodes::{SvfFilterNode, SvfType};
 use tutti_transport::{MotionEvent, Timeline, Transport};
-use tutti_types::ChannelLayout;
-use tutti_types::MaxBlock;
 use tutti_units::{Beat, BeatDuration};
 use tutti_units::{Hz, Q};
 use tutti_units::{SampleRate, Samples};
