@@ -31,7 +31,7 @@
 //!   sync (Beat Clock and MTC decoders), beside the master that sends them.
 //! - [`ClockFollower`]: what a transport that follows an outside Beat Clock or MTC does
 //!   (tempo, play, stop, locate, lock), as a pure state machine; the session places it.
-//! - [`MpeIngest`]: the inbound state (`live`) that rewrites classic-MPE channel
+//! - [`MpeTranslator`]: the inbound state (`live`) that rewrites classic-MPE channel
 //!   spread into native MIDI 2.0 per-note messages, and [`MpeTransformNode`], the same
 //!   as a node of one event stream.
 //!
@@ -53,7 +53,7 @@
 //!   `tutti-midi-file`.
 //! - **No audio, and no ECS.** Nothing here touches a sample buffer.
 //!
-//! MPE lives here as an *ingestion* transform, not as a per-synth state machine:
+//! MPE lives here as an *input* transform, not as a per-synth state machine:
 //! per M2-104, MPE is an input-edge concern, and synth voices track per-note
 //! expression themselves. The transform is the one holder of the MPE zones and
 //! the one receiver of the MPE Configuration Message: it also sends a Manager
@@ -130,17 +130,17 @@
 //!
 //! ## MPE folded to native per-note messages
 //!
-//! `MpeIngest` is the input edge: a member channel's bend is rewritten as a
+//! `MpeTranslator` is the input edge: a member channel's bend is rewritten as a
 //! *per-note* bend addressed at the note that channel holds, so no voice downstream
 //! has to know what MPE is.
 //!
 //! ```rust
-//! use tutti_midi_runtime::MpeIngest;
+//! use tutti_midi_runtime::MpeTranslator;
 //! use tutti_fixtures::midi::{self, lower_zone};
 //! use tutti_graph::Offset;
 //! use tutti_ump::{BendValue, Message, MidiChannel, NoteVelocity, U7, Voice2};
 //!
-//! let mut ingest = MpeIngest::new(lower_zone(7));
+//! let mut translator = MpeTranslator::new(lower_zone(7));
 //!
 //! // A note-on claims member channel 1; the map now resolves that channel.
 //! // Each event becomes none, one, or (a bend range, a manager's pedal or bend)
@@ -148,13 +148,13 @@
 //! let member = MidiChannel::of(1);
 //! let mut sent = Vec::new();
 //! let on = midi::note_on(member, 60, NoteVelocity::from(U7::of(100)).get());
-//! ingest.translate(&(Offset::ZERO, on), |e| sent.push(e));
+//! translator.translate(&(Offset::ZERO, on), |e| sent.push(e));
 //! assert_eq!(sent.len(), 1, "a note-on passes through");
 //!
 //! // A channel-wide bend on that member becomes a per-note bend on note 60.
 //! let bend = midi::pitch_bend(member, 0xC000_0000);
 //! sent.clear();
-//! ingest.translate(&(Offset::ZERO, bend), |e| sent.push(e));
+//! translator.translate(&(Offset::ZERO, bend), |e| sent.push(e));
 //! let [(_, folded)] = sent[..] else { panic!("the channel holds a note") };
 //! let Ok(Message::Midi2(_, Voice2::PerNotePitchBend { note, .. })) = folded.decode() else {
 //!     panic!("a per-note bend")
@@ -165,7 +165,7 @@
 //! ## Refusal is a value on the audio path
 //!
 //! What runs on or feeds the audio thread reports a refusal as a value: a full
-//! mailbox drops and reports a count, and [`MpeIngest::translate`] yields nothing for an
+//! mailbox drops and reports a count, and [`MpeTranslator::translate`] yields nothing for an
 //! event it drops. A fallible control-side call returns its own error
 //! ([`MpeFeaturesError`], [`OffsetOutOfRange`], [`NoTimeCode`]); the file codec's is
 //! `tutti-midi-file`'s `ClipFileError`.
@@ -202,7 +202,7 @@ pub use live::{
     ArrivalClock, CHANNELLESS_PORT, DeviceGeneration, DeviceInput, DeviceWriters, GenerationWriter,
     InputId, InputInlets, InputReaders, InputWriters, LIVE_INLET_CAPACITY, MIDI_INPUT_DENSITY,
     MIDI_INPUT_EVENT_CAPACITY, MIDI_INPUT_PORTS, MidiInputControls, MidiInputNode, MidiInputPorts,
-    MidiKeys, MpeIngest, MpeTransformControls, MpeTransformNode, RouteRule, compile_routes,
+    MidiKeys, MpeTransformControls, MpeTransformNode, MpeTranslator, RouteRule, compile_routes,
 };
 pub use mpe_features::{MpeFeaturesError, ask_mpe_features, mpe_features};
 pub use mpe_zones::mpe_zones;

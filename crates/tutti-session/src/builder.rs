@@ -824,7 +824,7 @@ impl<C: Clock> SessionBuilder<C> {
     }
 
     /// The session's MPE mode to begin with: what the engine's MIDI input
-    /// ingests in, and what a synth added through
+    /// reads in, and what a synth added through
     /// [`Session::add_instrument`](crate::Session::add_instrument) is built
     /// to follow (writing `session.mpe()` changes it later).
     /// Default `Disabled`.

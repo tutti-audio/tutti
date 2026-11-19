@@ -9,7 +9,7 @@
 //!   (a clip's), the one holder of the zones there.
 //! - [`MidiKeys`] is the key helpers over `tutti-graph`'s event inlet, which
 //!   is how a control thread sends into the graph (a keyboard, a preview).
-//! - [`MpeIngest`] is the inbound state that rewrites classic-MPE channel-spread
+//! - [`MpeTranslator`] is the inbound state that rewrites classic-MPE channel-spread
 //!   into native MIDI-2 per-note messages ([`MidiInputNode`] is its caller).
 //! - [`compile_routes`] turns inbound routing rules into which of the input
 //!   node's ports each listener takes.
@@ -18,7 +18,7 @@ pub mod device_generation;
 pub mod input_inlets;
 pub mod input_node;
 pub mod keys;
-pub mod mpe_ingest;
+pub mod mpe_translator;
 pub(crate) mod order;
 mod route;
 mod sensing;
@@ -33,6 +33,6 @@ pub use input_node::{
     MidiInputControls, MidiInputNode, MidiInputPorts,
 };
 pub use keys::{LIVE_INLET_CAPACITY, MidiKeys};
-pub use mpe_ingest::MpeIngest;
+pub use mpe_translator::MpeTranslator;
 pub use route::{RouteRule, compile_routes};
 pub use transform_node::{MpeTransformControls, MpeTransformNode};
