@@ -53,7 +53,7 @@ pub use slot::{
     SettingTarget, TempoTarget,
 };
 #[cfg(feature = "midi")]
-pub use slot::{ClipEventsTarget, HarmonyTarget, OutputLatencyTarget};
+pub use slot::{ClipEventsTarget, HarmonyTarget, MpeModeTarget, OutputLatencyTarget};
 pub use state::Knobs;
 pub(crate) use state::{ValueState, ValueTable};
 pub(crate) use target::target_builders;

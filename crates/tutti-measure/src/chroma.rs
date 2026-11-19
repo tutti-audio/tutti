@@ -353,7 +353,7 @@ impl ChromaPlan {
         };
         let top = magnitudes[lo..=hi].iter().copied().fold(0.0f32, f32::max);
         // A sine of amplitude `a` reads `a * magnitude_gain / 2`.
-        let amplitude = 2.0 * f64::from(top) / f64::from(self.geometry.magnitude_gain());
+        let amplitude = 2.0 * f64::from(top) / self.geometry.magnitude_gain::<f64>();
         if amplitude.is_nan() || amplitude < SILENCE_FLOOR.to_amplitude().get() {
             return false;
         }

@@ -25,6 +25,7 @@ mod cache;
 mod dispatch;
 #[cfg(test)]
 mod plugin_tests;
+pub mod shell;
 pub mod util;
 
 use api::consts::VST_MAGIC;

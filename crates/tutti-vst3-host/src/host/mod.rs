@@ -35,7 +35,6 @@ mod sequencer;
 mod shell;
 mod speakers;
 
-pub use control::descriptor_of;
 pub use controller::Vst3Controller;
 pub use editor_instance::Vst3Editor;
 pub use library::Library;

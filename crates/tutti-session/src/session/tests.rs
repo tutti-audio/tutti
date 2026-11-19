@@ -185,3 +185,27 @@ fn a_refused_write_stages_nothing() {
         "a read is the map in force"
     );
 }
+
+/// **The update's `Reclaim` phase frees the MPE mode a block held across a
+/// replacement**, in the session's own cell: a reader the mode's cell
+/// lends from stands in for a block in progress across the publish.
+#[cfg(feature = "midi")]
+#[test]
+fn an_update_frees_the_mpe_mode_a_block_held_across_a_replacement() {
+    let mut s = Session::builder()
+        .outputs_floor(ChannelLayout::MONO)
+        .build_detached(SampleRate::SR_48K)
+        .expect("builds");
+    let _ = s.update();
+    let cell = s.midi.state.mpe().clone();
+    let mut node = cell.reader();
+    {
+        let _held = node.lend();
+        s.set(s.mpe().to(tutti_fixtures::midi::lower_zone(3)))
+            .unwrap();
+        let _ = s.update();
+    }
+    assert_eq!(cell.retired_len(), 1, "the first mode is retired");
+    let _ = s.update();
+    assert_eq!(cell.retired_len(), 0, "and freed by the reclaim");
+}

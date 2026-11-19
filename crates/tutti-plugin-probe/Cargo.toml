@@ -13,9 +13,8 @@ categories = ["multimedia::audio"]
 [lints]
 workspace = true
 
-# `plugin-probe <path> <result-file>`: spawned by `tutti-plugin`'s catalog,
-# never run by hand. Depends on the format hosts, the descriptor types and the
-# catalog's format names, on the process edge's watch on a host, and on no
+# `plugin-probe <path> <result-file>`: never run by hand. Depends on the format
+# hosts, the descriptor types, the process edge's watch on a host, and on no
 # hosting (`-ipc`, `-host`, `tutti-plugin`).
 [[bin]]
 name = "plugin-probe"
@@ -30,6 +29,7 @@ vst2 = ["dep:tutti-vst2-host"]
 au = ["dep:tutti-au-host"]
 
 [dependencies]
+thiserror = { workspace = true, features = ["std"] }
 tutti-plugin-types = { version = "0.0.1", path = "../tutti-plugin-types", features = ["probe-wire"] }
 # The experiment's units and stimulus: counts and levels, a note, and where in a
 # block it sits.
@@ -53,13 +53,4 @@ name = "tutti_plugin_probe"
 path = "src/lib.rs"
 
 [dev-dependencies]
-# `tests/vst2_not_activated.rs`: the reference VST2 plugin, found beside the test
-# binary, and `libloading` to read what it recorded.
-tutti-fixtures = { path = "../../testing/tutti-fixtures", features = ["plugin"] }
-tutti-vst2-test-plugin = { path = "../../testing/tutti-vst2-test-plugin" }
-# `tests/vst2_shell.rs`: a VST2 file of two plugins.
-tutti-vst2-shell-plugin = { path = "../../testing/tutti-vst2-shell-plugin" }
-libloading.workspace = true
-tutti-vst2-host = { path = "../tutti-vst2-host" }
-tutti-units = { path = "../tutti-units" }
 tempfile = "3"

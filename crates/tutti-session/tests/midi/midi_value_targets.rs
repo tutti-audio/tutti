@@ -389,7 +389,8 @@ fn a_write_after_a_clip_is_replaced_reaches_the_new_node() {
 }
 
 /// **`play_clip` on a target whose clip node was removed from the graph
-/// directly names the error**, and changes nothing.
+/// directly names the error**, and changes nothing: the target's clip is still
+/// the one it had.
 #[test]
 fn play_clip_after_the_clips_node_was_removed_directly_is_refused() {
     let mut s = offline();
@@ -420,6 +421,11 @@ fn play_clip_after_the_clips_node_was_removed_directly_is_refused() {
             ))
         ),
         "{stopped:?}"
+    );
+    assert_eq!(
+        s.midi().clip(synth),
+        Some(clip),
+        "the refused calls leave the target's clip in force"
     );
 }
 

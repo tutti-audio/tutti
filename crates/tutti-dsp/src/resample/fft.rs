@@ -24,7 +24,8 @@ use super::{ResampleError, WindowedSinc};
 use crate::CosineWindow;
 use crate::FftFloat;
 use crate::fft::{Complex, RealFft};
-use tutti_buffers::{Float, Mono, MonoMut, Planes, PlanesMut};
+use tutti_buffers::{Mono, MonoMut, Planes, PlanesMut};
+use tutti_units::Normalized;
 
 /// One block's worth of resampling: the filter, the plans and the scratch.
 #[derive(Debug)]
@@ -46,30 +47,30 @@ struct Unit<F: FftFloat> {
 
 /// The relative cutoff (1.0 is Nyquist) at which a squared Blackman-Harris
 /// windowed sinc of `npoints` taps rolls off to -6 dB at the band edge: a cubic
-/// fit in `1 / npoints`, good for 32 to 2048 taps.
-fn cutoff<F: Float>(npoints: usize) -> F {
-    let [k1, k2, k3] = [13.745_203f32, 121.735_33, 5_964.163].map(F::from_f32);
-    let n = F::from_f32(npoints as f32);
-    F::ONE / (k1 / n + k2 / (n * n) + k3 / (n * n * n) + F::ONE)
+/// fit in `1 / npoints`, good for 32 to 2048 taps. A design figure, in `f64`.
+fn cutoff(npoints: usize) -> Normalized {
+    let [k1, k2, k3] = [13.745_203, 121.735_33, 5_964.163];
+    let n = npoints as f64;
+    Normalized::clamped(1.0 / (k1 / n + k2 / (n * n) + k3 / (n * n * n) + 1.0))
 }
 
-/// A windowed sinc of `npoints` taps at relative cutoff `f_cutoff`, summing to 1
-/// (unity gain at DC): [`WindowedSinc`] over the squared Blackman-Harris window,
-/// whose support is the `npoints` taps and whose peak is tap `npoints / 2`.
-fn sinc_filter<F: Float>(npoints: usize, f_cutoff: F) -> Vec<F> {
-    let cutoff = f_cutoff.to_f64();
+/// A windowed sinc of `npoints` taps at relative cutoff `f_cutoff`, designed in `f64` summing
+/// to `scale` (`1` is unity gain at DC): [`WindowedSinc`] over the squared Blackman-Harris
+/// window, whose support is the `npoints` taps and whose peak is tap `npoints / 2`.
+fn sinc_design(npoints: usize, f_cutoff: Normalized, scale: f64) -> Vec<f64> {
+    let f_cutoff = f_cutoff.get();
     let kernel = WindowedSinc::new(
-        cutoff,
-        npoints as f64 * cutoff / 2.0,
+        f_cutoff,
+        npoints as f64 * f_cutoff / 2.0,
         CosineWindow::BLACKMAN_HARRIS_SQUARED,
     )
     .expect("the cutoff and the tap count are positive and finite");
     let mid = (npoints / 2) as f64;
-    let mut taps: Vec<F> = (0..npoints)
-        .map(|x| F::from_f64(kernel.weight(x as f64 - mid)))
+    let mut taps: Vec<f64> = (0..npoints)
+        .map(|x| kernel.weight(x as f64 - mid))
         .collect();
-    let sum: F = taps.iter().copied().sum();
-    taps.iter_mut().for_each(|t| *t /= sum);
+    let sum: f64 = taps.iter().sum();
+    taps.iter_mut().for_each(|t| *t *= scale / sum);
     taps
 }
 
@@ -79,16 +80,18 @@ impl<F: FftFloat> Unit<F> {
         // when downsampling (anti-alias), the input's when upsampling
         // (anti-image).
         let f_cutoff = if fft_size_in > fft_size_out {
-            cutoff::<F>(fft_size_out) * <F as Float>::from_f32(fft_size_out as f32)
-                / <F as Float>::from_f32(fft_size_in as f32)
+            Normalized::clamped(
+                cutoff(fft_size_out).get() * fft_size_out as f64 / fft_size_in as f64,
+            )
         } else {
-            cutoff::<F>(fft_size_in)
+            cutoff(fft_size_in)
         };
-        let taps = sinc_filter(fft_size_in, f_cutoff);
-        let scale = <F as Float>::from_f32((2 * fft_size_in) as f32);
+        // Scaled by the inverse transform's normalisation, `1 / (2 * fft_size_in)`, in the
+        // design, so each tap crosses once.
+        let taps = sinc_design(fft_size_in, f_cutoff, 1.0 / (2 * fft_size_in) as f64);
         let mut filter_t = vec![F::ZERO; 2 * fft_size_in];
-        for (f, t) in filter_t.iter_mut().zip(&taps) {
-            *f = *t / scale;
+        for (f, t) in filter_t.iter_mut().zip(taps) {
+            *f = F::from_design(t);
         }
         let forward = RealFft::new(2 * fft_size_in);
         let inverse = RealFft::new(2 * fft_size_out);
