@@ -13,5 +13,5 @@ mod hostile_peer_tests;
 pub mod plugin_bridge;
 mod remote_editor;
 
-pub use editor_site::{EditorSite, InProcessEditor, ServedEditor};
+pub use editor_site::EditorSite;
 pub use plugin_bridge::{EditorLoader, PluginBridge};

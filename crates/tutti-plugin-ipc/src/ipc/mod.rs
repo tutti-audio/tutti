@@ -476,7 +476,9 @@ impl Ipc {
             counters.attach_commands_refused(bridge.audio().commands_refused_cell());
             counters.attach_responses_lost(bridge.audio().responses_lost_cell());
             counters.attach_leaked_buffers(bridge.audio().leaked_buffers_cell());
-            counters.attach_mirror_refused(bridge.editor().mirror_refused_cell());
+            if let Some(refused) = bridge.editor().mirror_refused_cell() {
+                counters.attach_mirror_refused(refused);
+            }
         }
         let events = Arc::new(Events {
             latency: AtomicUsize::new(loaded.latency_samples.get()),
