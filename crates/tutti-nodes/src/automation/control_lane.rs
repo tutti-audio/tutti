@@ -444,7 +444,7 @@ impl ControlLaneNode {
     /// its own normalisation: a knob of its own starting at `knob` (`None`:
     /// no knob), and a range of its own, `range` (`(min, max)`), which the
     /// lane clamps to. Never exact mode.
-    pub fn for_id(
+    pub fn by_id(
         id: ParamId,
         program: ControlProgram,
         knob: Option<f64>,
@@ -1240,7 +1240,7 @@ mod tests {
     #[test]
     fn reclaim_frees_a_program_a_block_held_across_its_replacement() {
         let mut node =
-            ControlLaneNode::for_id(ParamId::new(0), ControlProgram::default(), None, (0.0, 1.0));
+            ControlLaneNode::by_id(ParamId::new(0), ControlProgram::default(), None, (0.0, 1.0));
         let controls = node.controls();
         let first = program();
         let gone = Arc::downgrade(&first);
@@ -1260,7 +1260,7 @@ mod tests {
     #[test]
     fn reclaim_frees_a_range_a_block_held_across_its_replacement() {
         let mut node =
-            ControlLaneNode::for_id(ParamId::new(0), ControlProgram::default(), None, (0.0, 1.0));
+            ControlLaneNode::by_id(ParamId::new(0), ControlProgram::default(), None, (0.0, 1.0));
         let controls = node.controls();
         let RangeSource::Own(cell) = &controls.0.range else {
             panic!("a plugin lane owns its range cell");
@@ -1282,7 +1282,7 @@ mod tests {
     /// unranged lane (and a native one, whose range is its port's) refuses it.
     #[test]
     fn set_range_is_a_plugin_lanes_own() {
-        let plugin = ControlLaneNode::for_id(
+        let plugin = ControlLaneNode::by_id(
             ParamId::new(1),
             ControlProgram::default(),
             Some(0.25),

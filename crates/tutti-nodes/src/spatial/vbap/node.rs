@@ -75,8 +75,8 @@ fn glide_steps(rate: SampleRate) -> u32 {
 /// let panner = VbapPannerNode::quad();
 /// panner.param_set().set(UnitParam::Azimuth, 45.0); // front-left
 ///
-/// let mut solo = Standalone::new(panner, Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64))));
-/// let out = solo.render_input(Planes::new(&[&[1.0; 64], &[1.0; 64]]).unwrap());
+/// let mut standalone = Standalone::new(panner, Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64))));
+/// let out = standalone.render_input(Planes::new(&[&[1.0; 64], &[1.0; 64]]).unwrap());
 /// assert_eq!(out.len(), 4); // one channel per speaker
 /// ```
 ///

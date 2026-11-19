@@ -101,7 +101,7 @@ fn a_bound_plugin_does_not_allocate_on_the_audio_thread() {
         depth_by: None,
     };
     let program = ControlProgram::new(None, vec![lfo], vec![]).expect("a valid program");
-    let lfo = ControlLaneNode::for_id(ParamId::new(77), program, Some(0.5), (0.0, 1.0));
+    let lfo = ControlLaneNode::by_id(ParamId::new(77), program, Some(0.5), (0.0, 1.0));
     let prepare = tutti_graph::Prepare::new(
         tutti_units::SampleRate::of(SAMPLE_RATE),
         MaxBlock::of(Samples::new(BLOCK)),
@@ -118,7 +118,7 @@ fn a_bound_plugin_does_not_allocate_on_the_audio_thread() {
             Law::PowerIn(Exponent::of(2.0)),
         ));
     }
-    let lane = ControlLaneNode::for_id(
+    let lane = ControlLaneNode::by_id(
         ParamId::new(78),
         ControlProgram::from_curve(Arc::new(env)),
         None,
