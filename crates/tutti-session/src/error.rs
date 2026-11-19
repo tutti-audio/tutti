@@ -17,8 +17,9 @@ pub enum HeardTapError {
     Tap(#[from] tutti_engine::HeardTapError),
 }
 
-/// Why a declaration was refused: a value declared with a target
-/// ([`Mods::range`](crate::Mods::range)). Nothing is declared. The value
+/// Why a declaration was refused: a value declared with a wire or a target
+/// ([`Connection::gain`](crate::Connection::gain),
+/// [`Mods::range`](crate::Mods::range)). Nothing is declared. The value
 /// declared is the declaration's initial one, and later changes to it are
 /// writes to its target.
 #[derive(Clone, Copy, Debug, PartialEq, Error)]
@@ -474,7 +475,8 @@ pub enum Error {
     #[error(transparent)]
     Connect(#[from] ConnectError),
 
-    /// A declaration was refused ([`Mods::range`](crate::Mods::range)).
+    /// A declaration was refused ([`Mods::range`](crate::Mods::range),
+    /// [`Connection::gain`](crate::Connection::gain)).
     #[error(transparent)]
     Declaration(#[from] DeclarationError),
 

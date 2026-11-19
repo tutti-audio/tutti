@@ -21,7 +21,7 @@ use tutti_buffers::Float;
 use tutti_graph::{BusRef, BusSource, NodeKey};
 use tutti_units::Amplitude;
 
-use crate::{ConnectError, EdgeGainError, Graph};
+use crate::{ConnectError, DeclarationError, Graph};
 
 mod sealed {
     pub trait Sealed {}
@@ -476,46 +476,6 @@ impl Edge {
         self.from.node() == Some(node) || self.to.node() == Some(node)
     }
 
-    /// The edge's gain in `graph`, if it has one: `Some` for a weighted
-    /// edge, `None` for a plain one (a unity weight is an entry, so it is
-    /// `Some(1.0)`; an edge with no entry is aliased, not weighted, and is not
-    /// reported as unity) and for an edge that is not in the graph.
-    ///
-    /// Once the graph has committed the edge's weight this reads its live
-    /// cell, which is also the knob of a modulation route onto the edge.
-    #[must_use]
-    pub fn gain<F: Float>(self, graph: &Graph<F>) -> Option<Amplitude> {
-        graph.edge_gain_of(self)
-    }
-
-    /// Sets the gain of the edge: a multiplier on what `from` adds to `to`'s
-    /// sum. `1.0` is the plain sum (bit for bit, but for a `-0.0` sample into
-    /// a one-edge sink), `0.0` mutes the edge, a negative gain inverts
-    /// polarity. A move of the gain is ramped over one block.
-    ///
-    /// **This is the knob, routed or not.** A modulation route onto the edge
-    /// (`Mods::route`) moves the gain around this value
-    /// and removing the route returns to it: the one writer of the gain is the
-    /// edge's cell.
-    ///
-    /// Giving a plain edge its first gain is structural (the next
-    /// [`update`](crate::Session::update) commits a weighted sum, as adding a
-    /// source does); changing the gain of a weighted edge is a control and
-    /// marks nothing edited.
-    ///
-    /// # Errors
-    ///
-    /// [`EdgeGainError::NoSuchEdge`] when the edge is not in the graph,
-    /// [`EdgeGainError::BusLane`] when it is a lane of a bus edge, and
-    /// [`EdgeGainError::NotFinite`]; the graph is unchanged.
-    pub fn set_gain<F: Float>(
-        self,
-        graph: &mut Graph<F>,
-        gain: Amplitude,
-    ) -> Result<(), EdgeGainError> {
-        graph.set_edge_gain_of(self, gain)
-    }
-
     /// Makes the edge plain again: no gain, aliased when it is its sink's only
     /// source. Returns whether it had one. Structural, so it marks the graph
     /// edited when it did. A modulation route onto the edge makes the gain
@@ -950,25 +910,29 @@ impl<'g, W: Wire, F: Float> Connection<'g, W, F> {
 }
 
 impl<W: Weighted, F: Float> Connection<'_, W, F> {
-    /// Weights every edge of the connection by `gain` (the edge gain of doc
-    /// 013, "Edge gain"): the edges enter the sum at `gain` rather than
-    /// unity. An edge the graph already held only has its gain set.
+    /// Declares a gain lane on every edge of the connection, at `gain`: the
+    /// edges enter the sum at `gain` rather than unity. Adding the lane is
+    /// structural (the next [`update`](crate::Session::update) commits a
+    /// weighted sum, as adding a source does), and it comes only from here:
+    /// later changes to the weight are writes to the edge's
+    /// [`GainTarget`](crate::GainTarget). An edge the graph already held
+    /// keeps its lane at `gain`.
     ///
     /// # Errors
     ///
-    /// [`EdgeGainError::NotFinite`]; the edges this call added are taken
+    /// [`DeclarationError::NotFinite`]; the edges this call added are taken
     /// out again, so nothing is added.
-    pub fn gain(self, gain: Amplitude) -> Result<Self, EdgeGainError> {
+    pub fn gain(self, gain: Amplitude) -> Result<Self, DeclarationError> {
         if !gain.get().is_finite() {
             for (edge, added) in &self.edges {
                 if *added {
                     self.graph.remove_edge(edge.from, edge.to, true);
                 }
             }
-            return Err(EdgeGainError::NotFinite);
+            return Err(DeclarationError::NotFinite);
         }
         for (edge, _) in &self.edges {
-            edge.set_gain(self.graph, gain)?;
+            self.graph.declare_edge_gain(*edge, gain)?;
         }
         Ok(self)
     }

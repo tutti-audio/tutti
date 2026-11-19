@@ -50,7 +50,7 @@ mod verbs;
 
 pub use batch::{IntoAssign, IntoRead};
 pub(crate) use controls::Write;
-pub use controls::{MixTarget, ModeTarget};
+pub use controls::{GainTarget, GainTargetError, MixTarget, ModeTarget};
 pub(crate) use depth::DepthSlot;
 pub use depth::DepthTarget;
 pub use error::{SetRefusal, ValueError, ValueErrorKind};

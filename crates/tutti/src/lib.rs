@@ -190,10 +190,10 @@ pub use tutti_session::{Analyze, AnalyzeError, Audio, AudioContext, AudioInput};
 #[cfg(feature = "session")]
 pub use tutti_session::{
     AnyAssign, AnyTarget, Assign, AutomationTarget, ClickTargets, ClickVolumeTarget, CurveTarget,
-    DepthTarget, Effective, Info, IntoAssign, IntoRead, Knobs, LoopTarget, MacroTarget,
-    MeterTarget, MixTarget, ModeTarget, Modify, Moved, OutputPolicyTarget, ParamTarget,
-    PolarityTarget, RangeTarget, RateTarget, ScalarTarget, SetRefusal, SettingTarget, Target,
-    TargetInfo, TempoTarget, ValueError, ValueErrorKind,
+    DepthTarget, Effective, GainTarget, GainTargetError, Info, IntoAssign, IntoRead, Knobs,
+    LoopTarget, MacroTarget, MeterTarget, MixTarget, ModeTarget, Modify, Moved, OutputPolicyTarget,
+    ParamTarget, PolarityTarget, RangeTarget, RateTarget, ScalarTarget, SetRefusal, SettingTarget,
+    Target, TargetInfo, TempoTarget, ValueError, ValueErrorKind,
 };
 #[cfg(feature = "session")]
 pub use tutti_session::{
@@ -414,7 +414,7 @@ pub mod session {
     pub use tutti_session::Param as PluginParam;
     pub use tutti_session::{
         BlockConfig, Bus as BusEdgeKind, BusSink, Channel as ChannelEdgeKind, Committed,
-        Connection, Crossfade, CrossfadeId, CrossfadeRefused, DeclarationError, EdgeGainError,
+        Connection, Crossfade, CrossfadeId, CrossfadeRefused, DeclarationError,
         Event as EventEdgeKind, EventEdge, EventTapPort, Fanin, Feeder, Graph, HeardOpen,
         HeardTapError, Inlet, InletError, LIVE_MAX_BLOCK, MainBus, MainSink, Meters, NodeSlots,
         NotReopened, Outlet, OutputPlacement, OutputPolicy, OutputPolicyError, PHASES, Peer,

@@ -330,7 +330,12 @@ impl<F: Float> Editor<F> {
 
     /// Whether edge `id` is one the author may weight: an edge of the spec,
     /// and not a lane a bus edge produces (its weight is the fold's).
-    fn check_gain_edge(&self, id: EdgeId) -> Result<(), GraphInvalid> {
+    ///
+    /// # Errors
+    ///
+    /// [`GraphInvalid::GainWithoutEdge`] when `id` is not an edge of the spec,
+    /// and [`GraphInvalid::GainOnBusLane`] for a lane of a bus edge.
+    pub fn check_gain_edge(&self, id: EdgeId) -> Result<(), GraphInvalid> {
         if self.spec.has_edge(id) {
             return Ok(());
         }

@@ -8,7 +8,9 @@ use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_buffers::{FoldError, InterleavedMut};
 use tutti_graph::ForkByClone;
 use tutti_nodes::testing::{Const, Through};
-use tutti_session::{ConnectError, Edge, EdgeGainError, OutPort, Root, Session};
+use tutti_session::{
+    ConnectError, DeclarationError, Edge, GainTargetError, OutPort, Root, Session,
+};
 use tutti_units::Amplitude;
 
 fn offline() -> Session {
@@ -118,7 +120,7 @@ fn a_port_that_is_not_there_is_refused() {
 }
 
 /// **A connection's gain weights what the call added**: `0.5` of 0.5 is heard,
-/// the edge reads back its gain, and a gain that is not a number takes the edge
+/// the edge's target reads back its gain, and a gain that is not a number takes the edge
 /// the call added out again.
 #[test]
 fn a_connections_gain_weights_the_edge_it_added() {
@@ -132,9 +134,16 @@ fn a_connections_gain_weights_the_edge_it_added() {
         .unwrap();
     assert_eq!(first_frame(&mut s), [0.25, 0.0]);
     let edge = Edge::new(src.out(0), Root::output(0));
-    assert_eq!(edge.gain(s.graph_ref()), Some(Amplitude::new(0.5)));
+    let gain = s
+        .graph_ref()
+        .gain_target(edge.source(), edge.sink())
+        .expect("a lane");
+    assert_eq!(s.get(gain).unwrap(), Amplitude::new(0.5));
     assert!(edge.clear_gain(s.graph()));
-    assert_eq!(edge.gain(s.graph_ref()), None);
+    assert_eq!(
+        s.graph_ref().gain_target(edge.source(), edge.sink()),
+        Err(GainTargetError::NoLane(edge))
+    );
     assert_eq!(first_frame(&mut s), [0.5, 0.0]);
 
     let (other, _) = s.graph().add(ForkByClone(Const::mono(0.125)));
@@ -145,7 +154,7 @@ fn a_connections_gain_weights_the_edge_it_added() {
             .hard()
             .gain(Amplitude::new(f64::NAN))
             .err(),
-        Some(EdgeGainError::NotFinite)
+        Some(DeclarationError::NotFinite)
     );
     assert!(
         s.graph_ref().sources(Root::output(1)).unwrap().is_empty(),
