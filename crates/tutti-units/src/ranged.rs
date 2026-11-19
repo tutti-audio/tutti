@@ -28,7 +28,8 @@
 /// ```
 ///
 /// The error derives `Eq` exactly when the raw is a primitive integer, so a
-/// float raw, or a unit raw such as `Db`, can use the macro.
+/// float raw, or a unit raw such as `Db`, can use the macro. The raw is one
+/// name: import a type before naming it here.
 ///
 /// ```
 /// tutti_units::ranged! {
@@ -42,13 +43,16 @@
 /// ```
 ///
 /// ```compile_fail
+/// use tutti_units::Db;
+///
 /// tutti_units::ranged! {
-///     /// A non-negative level.
-///     Level(f64), NotALevel, "a level of at least 0", |raw| raw >= 0.0
+///     /// A floor of at least -60 dB.
+///     Floor(Db), NotAFloor, "a floor of at least -60 dB",
+///     |raw| raw.get() >= -60.0
 /// }
 ///
 /// fn eq<T: Eq>() {}
-/// eq::<NotALevel>();
+/// eq::<NotAFloor>();
 /// ```
 ///
 /// `bits $width` in place of the predicate is the range `0..=(1 << $width) - 1`
