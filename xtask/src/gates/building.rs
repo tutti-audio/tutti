@@ -588,6 +588,12 @@ pub(super) const ALLOW: &[Allow] = &[
         "the one writer of a position ring: a writer handle, not a node, source, spec or config",
     ),
     ty(
+        "crates/tutti-nodes/src/click.rs",
+        "ClickSettings",
+        SETTER,
+        "a live control cell the audio thread reads: it is written while the node renders, not a config",
+    ),
+    ty(
         "crates/tutti-midi-ci/src/initiator.rs",
         "ProfileInitiator::set_on",
         SETTER,

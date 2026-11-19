@@ -140,13 +140,13 @@ impl ClickSettings {
     }
 
     /// Stores the click level; the audio thread reads it at the next block.
-    pub fn store_volume(&self, level: ClickLevel) {
+    pub fn set_volume(&self, level: ClickLevel) {
         self.volume.store(level.get().get(), Ordering::Release);
     }
 
     /// The click level.
     pub fn volume(&self) -> ClickLevel {
-        // Only `store_volume` and `new` write the cell, with a `ClickLevel`.
+        // Only `set_volume` and `new` write the cell, with a `ClickLevel`.
         ClickLevel(Amplitude::new(self.volume.load(Ordering::Acquire)))
     }
 
@@ -787,7 +787,7 @@ mod tests {
     /// Stores a click level, as the session's volume target does after it
     /// has checked the range.
     fn set_volume(settings: &ClickSettings, level: Amplitude) {
-        settings.store_volume(ClickLevel::of(level));
+        settings.set_volume(ClickLevel::of(level));
     }
 
     /// Whether any of `n` one-frame blocks at `beat` sounds.

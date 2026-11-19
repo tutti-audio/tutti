@@ -1081,8 +1081,8 @@ fn the_lane_keeps_every_corner_within_its_capacity() {
             let want = if c.fract() < 0.5 { 1500.0 } else { 500.0 };
             assert_eq!(v, want, "{max}-frame blocks, frame {f}");
         }
-        assert_eq!(controls.thinned(), thinned, "{max}-frame blocks");
-        assert_eq!(controls.truncated(), 0, "{max}-frame blocks");
+        assert_eq!(controls.blocks_thinned(), thinned, "{max}-frame blocks");
+        assert_eq!(controls.blocks_truncated(), 0, "{max}-frame blocks");
     }
 }
 
@@ -1349,7 +1349,7 @@ fn a_lane_fed_fork_reads_its_value_at_frame_0() {
             Prepare::new(SampleRate::of(RATE), MaxBlock::of(Samples::new(64))),
         )
         .expect("forks");
-    assert!(controls.set_knob(700.0));
+    assert!(controls.set_value(700.0));
     let flat: Arc<dyn Curve> = Arc::new(trajectory(&[(0.0, 50.0)]));
     controls.publish(program(Some(flat), vec![]));
 
@@ -1382,14 +1382,14 @@ fn lane_controls_reach_their_own_cells() {
         (0.0, 1.0),
     );
     let c = plugin.controls();
-    assert_eq!(c.knob(), Some(0.25));
-    assert!(c.set_knob(0.75));
-    assert_eq!(c.knob(), Some(0.75));
+    assert_eq!(c.value(), Some(0.25));
+    assert!(c.set_value(0.75));
+    assert_eq!(c.value(), Some(0.75));
     let (mut ed, _exec) = probes(64, &[2], (5.0, 50.0));
     let n = native(&ed, 2, ControlProgram::default(), None);
     let c = n.controls();
-    assert!(!c.set_knob(1.0), "no knob");
-    assert_eq!(c.knob(), None);
+    assert!(!c.set_value(1.0), "no knob");
+    assert_eq!(c.value(), None);
     assert_eq!(c.range(), (5.0, 50.0));
     ed.set_param_range(cutoff(2), ParamRange::new(6.0, 60.0))
         .expect("a probe");

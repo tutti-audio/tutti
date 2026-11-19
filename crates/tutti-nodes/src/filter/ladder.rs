@@ -29,7 +29,7 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 /// Cutoff ([`Hz`]), [`Resonance`] and [`Drive`] are live [`Params`](crate::Params) shared
 /// across clones. A held value costs nothing: the model is designed again only
 /// when the cutoff or resonance moves past a small dead-band or the drive moves
-/// at all ([`LadderControls::moved_from`]). The filter is designed on a 16-frame
+/// at all ([`LadderControls::differs_from`]). The filter is designed on a 16-frame
 /// grid counted from the last reset, at each segment's first frame, and the
 /// coefficients **and the drive** ramp linearly to that solve over the segment, so
 /// an automated control ramps rather than stepping (drive multiplies straight
@@ -215,7 +215,7 @@ control_set! {
     Drive => Drive = drive;
 
     fn moved(&self, applied: &LadderControls, target: &LadderControls) -> bool {
-        target.moved_from(applied)
+        target.differs_from(applied)
     }
 
     fn defaults(&self) -> LadderControls {

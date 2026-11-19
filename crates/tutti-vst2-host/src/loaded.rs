@@ -363,7 +363,7 @@ impl Vst2Loaded {
         // `audioMasterGetTime` from inside `processReplacing` on the audio
         // thread and `audioMasterSizeWindow` / `audioMasterUpdateDisplay` from
         // the GUI thread, so a shared lock here is a priority inversion.
-        // `HostState`'s fields are already lock-free (a seqlock, a request word
+        // `HostState`'s fields are already lock-free (a seqlock, a set of request flags
         // and two `ArrayQueue`s), so the lock bought nothing.
         let host = Arc::new(HostState::new(
             main,
