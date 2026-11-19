@@ -40,7 +40,7 @@ use tutti_modulation::{
     Curve, Declarations, Follower, Law, Lfo, Macro, NoteEnvelope, Polarity, RouteDecl, RouteKey,
     RouteTarget, Source, SourceKey, TargetDecl, TargetKey,
 };
-use tutti_nodes::automation::{LaneControls, RecordMode, Recorder};
+use tutti_nodes::automation::{LaneControls, RecordMode, Recorder, Trajectory};
 use tutti_nodes::{Feed, ReconcileError};
 use tutti_units::{Depth, ParamAddr, ParamId, UnitAddr, UnitParam};
 
@@ -52,7 +52,8 @@ use tutti_buffers::Float;
 
 use crate::graph::Graph;
 use crate::value::{
-    Declared, Edited, Field, MacroField, PublishedSlot, RateField, SlotId, ValueTable,
+    Automation, AutomationCell, AutomationField, Declared, Edited, Field, MacroField,
+    PublishedSlot, RateField, SlotId, ValueTable,
 };
 
 /// How long a modulation target may stay unresolved before it is logged:
@@ -518,13 +519,10 @@ impl<U: crate::Scalar> AutomationTake<U> {
                 && self.recorder.mode().stops_on_release())
     }
 
-    /// The finished trajectory, as the automation curve it becomes.
+    /// The finished trajectory: the automation curve it becomes.
     #[must_use]
-    pub fn finish(self) -> Arc<dyn Curve>
-    where
-        U: Send + Sync + 'static,
-    {
-        Arc::new(self.recorder.finish())
+    pub fn finish(self) -> Trajectory<U> {
+        self.recorder.finish()
     }
 }
 
@@ -533,7 +531,9 @@ impl<U: crate::Scalar> AutomationTake<U> {
 /// again.
 trait OpenTake: std::fmt::Debug + Send {
     fn is_done(&mut self) -> bool;
-    fn finish(self: Box<Self>) -> Arc<dyn Curve>;
+    /// Makes the trajectory the curve of `cell`, which automates the take's
+    /// unit (`Mods::record` took no other).
+    fn finish_into(self: Box<Self>, cell: &dyn AutomationCell);
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
 }
 
@@ -541,8 +541,10 @@ impl<U: crate::Scalar> OpenTake for AutomationTake<U> {
     fn is_done(&mut self) -> bool {
         AutomationTake::is_done(self)
     }
-    fn finish(self: Box<Self>) -> Arc<dyn Curve> {
-        AutomationTake::finish(*self)
+    fn finish_into(self: Box<Self>, cell: &dyn AutomationCell) {
+        if let Some(cell) = cell.as_any().downcast_ref::<Automation<U>>() {
+            cell.set(Arc::new(AutomationTake::finish(*self)));
+        }
     }
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
@@ -883,7 +885,8 @@ impl OwnRoute {
 }
 
 struct OwnAutomation {
-    curve: Arc<dyn Curve>,
+    /// The curve in force: the target of `ParamTarget::automation`.
+    cell: Arc<dyn AutomationCell>,
     take: Option<Box<dyn OpenTake>>,
 }
 
@@ -1065,7 +1068,7 @@ impl OwnMods {
             if automation.take.as_mut().is_some_and(|take| take.is_done())
                 && let Some(take) = automation.take.take()
             {
-                automation.curve = take.finish();
+                take.finish_into(&*automation.cell);
                 // A take becomes done through `Mods` (closed, or
                 // released), which already cleared it; cleared here
                 // too so the build never depends on that.
@@ -1103,7 +1106,7 @@ impl OwnMods {
                 self.ranges.iter().map(|(&k, &(min, max))| (k, min, max)),
                 self.automation.iter().map(|(&k, a)| {
                     // An open take: the knob (the gesture) drives the param.
-                    (k, a.take.is_none().then(|| Arc::clone(&a.curve)))
+                    (k, a.take.is_none().then(|| a.cell.curve()))
                 }),
             ),
         }
@@ -1128,7 +1131,14 @@ impl OwnMods {
             TargetKey::Edge(k) => dead.contains(k),
         };
         self.ranges.retain(|t, _| !gone(t));
+        let unautomated: Vec<SlotId> = self
+            .automation
+            .keys()
+            .filter(|t| gone(t))
+            .map(|&t| SlotId::Automation(t))
+            .collect();
         self.automation.retain(|t, _| !gone(t));
+        self.table.unprovide(&unautomated);
         let lost: Vec<RouteKey> = self
             .routes
             .iter()
@@ -1711,18 +1721,35 @@ impl Mods<'_> {
         self.own.ranges.remove(&key).is_some()
     }
 
-    /// `target` follows `curve` (frozen: a trajectory) where it has a value,
-    /// in place of its knob. Replaces the automation it had.
-    pub fn automate(&mut self, target: impl Into<ModTarget>, curve: Arc<dyn Curve>) {
+    /// Declares `target`'s automation, a lane that follows `curve` (a
+    /// trajectory in the unit of the target's value) where it has a value, in
+    /// place of its knob: whether it did. A target that is already automated
+    /// keeps its curve and answers `false`: the curve then is the target's
+    /// value ([`ParamTarget::automation`](crate::ParamTarget::automation)).
+    pub fn automate<U: crate::Scalar>(
+        &mut self,
+        target: impl Into<ModTarget>,
+        curve: Arc<Trajectory<U>>,
+    ) -> bool {
         let key = self.own.key_of(target.into());
+        if self.own.automation.contains_key(&key) {
+            return false;
+        }
+        let cell = Automation::<U>::new(curve, &self.own.edited);
+        self.own.table.provide_staged(
+            SlotId::Automation(key),
+            PublishedSlot::new(AutomationField(Arc::clone(&cell))),
+        );
         self.own
             .automation
-            .insert(key, OwnAutomation { curve, take: None });
+            .insert(key, OwnAutomation { cell, take: None });
+        true
     }
 
     /// Takes `target`'s automation away (and any take on it).
     pub fn clear_automation(&mut self, target: impl Into<ModTarget>) -> bool {
         let key = self.own.key_of(target.into());
+        self.own.table.unprovide(&[SlotId::Automation(key)]);
         self.own.automation.remove(&key).is_some()
     }
 
@@ -1745,11 +1772,11 @@ impl Mods<'_> {
         let target = target.into();
         let key = self.own.key_of(target);
         match self.own.automation.get_mut(&key) {
-            Some(automation) => {
+            Some(automation) if automation.cell.as_any().is::<Automation<T::Unit>>() => {
                 automation.take = Some(Box::new(take));
                 Ok(())
             }
-            None => Err(NoAutomation { target }),
+            _ => Err(NoAutomation { target }),
         }
     }
 

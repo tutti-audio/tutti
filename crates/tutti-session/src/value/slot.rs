@@ -19,6 +19,8 @@ use tutti_units::{Amplitude, At};
 use super::error::SetRefusal;
 use super::state::Params;
 use super::target::{Target, TargetId, sealed, target_builders};
+use tutti_modulation::TargetKey;
+
 use crate::{ModRouteId, ModSourceId};
 
 /// Which of the session's own values a slot target names.
@@ -59,6 +61,8 @@ pub enum SlotId {
     SourceRate(ModSourceId),
     /// A macro source's value.
     SourceValue(ModSourceId),
+    /// A param's automation curve, by the key the reconciler holds it under.
+    Automation(TargetKey),
 }
 
 impl SlotId {
@@ -67,6 +71,7 @@ impl SlotId {
         match self {
             #[cfg(feature = "midi")]
             Self::ClipEvents(node) | Self::Harmony(node) => Some(node),
+            Self::Automation(TargetKey::Param { node, .. }) => Some(NodeKey(node)),
             _ => None,
         }
     }

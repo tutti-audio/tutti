@@ -6,6 +6,7 @@
 use std::sync::Arc;
 
 use tutti_modulation::{Clock, Law, Lfo, LfoRate, Polarity, ProgramTime, Waveform, shape};
+use tutti_nodes::automation::{Breakpoint, Trajectory};
 use tutti_session::{ModRouteId, ModSourceId, ParamRef, RouteSpec, ValueErrorKind};
 use tutti_units::{Beat, BeatsPerCycle, Bipolar, Depth, Hz, SamplePosition, SampleRate, UnitParam};
 
@@ -35,6 +36,15 @@ fn scene(
     settle(s);
     render(side, 1_024, 128);
     (cutoff, source, route)
+}
+
+/// A trajectory in `Hz` that moves linearly from `from` at beat 0 to `to` at
+/// beat 4.
+fn ramp(from: f64, to: f64) -> Trajectory<Hz> {
+    let mut curve = Trajectory::new();
+    curve.add_breakpoint(Breakpoint::new(Beat(0.0), Hz(from)));
+    curve.add_breakpoint(Breakpoint::new(Beat(4.0), Hz(to)));
+    curve
 }
 
 /// The program the lane on `cutoff` holds now.
@@ -297,10 +307,11 @@ fn a_target_the_source_does_not_have_is_refused_at_the_call() {
     );
 }
 
-/// **A block that adopts a republished program allocates nothing**: the writes
-/// and the update run outside the gate, and the audio side only lends.
+/// **A block that adopts a republished program or automation curve allocates
+/// nothing**: the writes and the update run outside the gate, and the audio
+/// side only lends.
 #[test]
-fn blocks_adopting_a_republished_program_do_not_allocate() {
+fn blocks_adopting_a_republished_program_and_curve_do_not_allocate() {
     let mut s = tutti_session::Session::builder()
         .outputs_floor(tutti_buffers::ChannelLayout::MONO)
         .max_block(tutti_buffers::MaxBlock::of(tutti_units::Samples(128)))
@@ -316,6 +327,7 @@ fn blocks_adopting_a_republished_program_do_not_allocate() {
     let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);
     let mut m = s.mods_mut();
     m.range_raw(cutoff, 0.0, 1_000.0).unwrap();
+    m.automate(cutoff, Arc::new(ramp(100.0, 900.0)));
     let lfo = m.lfo(Lfo::sine().rate(Hz(2.0)));
     let route = m
         .route(RouteSpec::new(lfo, cutoff, Depth::of(0.5)))
@@ -338,10 +350,65 @@ fn blocks_adopting_a_republished_program_do_not_allocate() {
         lfo.rate().to(LfoRate::Hz(Hz(7.0))),
     ))
     .unwrap();
+    s.set(probe.cutoff().automation().to(Arc::new(ramp(900.0, 100.0))))
+        .unwrap();
     let _ = s.update();
     assert_no_alloc::assert_no_alloc(|| {
         for _ in 0..8 {
             render(&s);
         }
     });
+}
+
+/// **An automation curve set lands at the update, and the param's value at a
+/// beat follows it.** A cutoff automated from 100 Hz at beat 0 to 900 Hz at
+/// beat 4 reads 500 at beat 2; set to a ramp from 900 down to 100 it reads 500
+/// at beat 2 and 700 at beat 1. A read before the update is the pending
+/// curve, and a param with no automation has no target.
+#[test]
+fn an_automation_curve_set_lands_at_the_update_and_the_param_follows_it() {
+    let (mut s, _) = rig(1);
+    let (probe, _) = s.graph().add(ProbeUnit::new(300.0));
+    master(&mut s, &[probe.erase()]);
+    let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);
+    let target = probe.cutoff().automation();
+    assert_eq!(
+        s.get(target).unwrap_err().kind,
+        ValueErrorKind::NoSuchTarget,
+        "no lane declared"
+    );
+    let first = Arc::new(ramp(100.0, 900.0));
+    let mut m = s.mods_mut();
+    m.range_raw(cutoff, 0.0, 1_000.0).unwrap();
+    assert!(m.automate(cutoff, Arc::clone(&first)));
+    assert!(
+        !m.automate(cutoff, Arc::new(ramp(0.0, 0.0))),
+        "a declared lane keeps its curve: the target sets it"
+    );
+    settle(&mut s);
+    let at = |s: &tutti_session::DetachedSession, beat: f64| {
+        let program = program(s, cutoff);
+        program
+            .automation()
+            .expect("automated")
+            .value_at(Beat(beat))
+    };
+    assert_eq!(at(&s, 2.0), Some(500.0));
+    assert_eq!(s.get(target).unwrap(), first);
+
+    let second = Arc::new(ramp(900.0, 100.0));
+    s.set(target.to(Arc::clone(&second))).unwrap();
+    assert_eq!(s.get(target).unwrap(), second, "pending");
+    assert_eq!(at(&s, 1.0), Some(300.0), "the lane still plays the first");
+    let _ = s.update();
+    assert_eq!(at(&s, 1.0), Some(700.0));
+    assert_eq!(at(&s, 2.0), Some(500.0));
+    assert_eq!(s.get(target).unwrap(), second);
+
+    s.mods_mut().clear_automation(cutoff);
+    assert_eq!(
+        s.set(target.to(first)).unwrap_err().kind,
+        ValueErrorKind::NoSuchTarget,
+        "a cleared lane has no target"
+    );
 }

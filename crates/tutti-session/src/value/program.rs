@@ -8,14 +8,18 @@
 //! lanes the declaration reaches: no commit, and no phase reset, since the
 //! compile dates an LFO's clock itself.
 
+use std::any::Any;
+use std::marker::PhantomData;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use tutti_modulation::{Clock, Law, LfoRate, Polarity, Source};
+use tutti_modulation::{Clock, Curve, Law, LfoRate, Polarity, Source, TargetKey};
+use tutti_nodes::automation::Trajectory;
 use tutti_rt::LockExt;
 use tutti_units::{Bipolar, Hz, Real};
 
 use super::error::SetRefusal;
+use super::param::ParamTarget;
 use super::slot::{Held, SlotCell, SlotId, keyed_slot_target};
 use super::state::Params;
 use super::target::{Target, TargetId, sealed, target_builders};
@@ -234,5 +238,135 @@ impl ModSourceId {
     #[must_use]
     pub const fn value(self) -> MacroTarget {
         MacroTarget::new(self)
+    }
+}
+
+/// A param's automation curve, in the unit `U` its param is in.
+pub(crate) type Automation<U> = Declared<Arc<Trajectory<U>>>;
+
+/// A param's automation with its unit erased: what the declarations read.
+pub(crate) trait AutomationCell: Send + Sync + 'static {
+    /// The curve in force.
+    fn curve(&self) -> Arc<dyn Curve>;
+
+    /// The cell as the [`Automation`] of its unit.
+    fn as_any(&self) -> &dyn Any;
+}
+
+impl<U: crate::Scalar> AutomationCell for Automation<U> {
+    fn curve(&self) -> Arc<dyn Curve> {
+        self.get()
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+/// A param's automation curve, whole.
+pub(crate) struct AutomationField<U: crate::Scalar>(pub(crate) Arc<Automation<U>>);
+
+impl<U: crate::Scalar> Held for AutomationField<U> {
+    type Value = Arc<Trajectory<U>>;
+
+    fn current(&self) -> Self::Value {
+        self.0.get()
+    }
+
+    fn replace(&self, value: &Self::Value) -> bool {
+        self.0.edit(|now| {
+            let changed = **now != **value;
+            *now = Arc::clone(value);
+            changed
+        });
+        true
+    }
+}
+
+/// A param's automation curve ([`Trajectory`], in the unit `U` the param is
+/// in), as [`ParamTarget::automation`] names it: the breakpoints the lane
+/// plays in place of the param's knob, and where a take lands.
+///
+/// A write is staged and published by the next
+/// [`Session::update`](crate::Session::update) as one republish of the lane;
+/// a read answers the staged curve, else the one in force. The param has the
+/// target once [`Mods::automate`](crate::Mods::automate) declared its lane: a
+/// call that names a param with none fails with `NoSuchTarget`, as one that
+/// names it in another unit does. A take that finishes replaces the curve.
+pub struct AutomationTarget<U> {
+    key: TargetKey,
+    unit: PhantomData<fn() -> U>,
+}
+
+impl<U> AutomationTarget<U> {
+    pub(crate) const fn new(key: TargetKey) -> Self {
+        Self {
+            key,
+            unit: PhantomData,
+        }
+    }
+}
+
+// Written out, as `ParamTarget`'s are: the identity is the key.
+impl<U> Clone for AutomationTarget<U> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+impl<U> Copy for AutomationTarget<U> {}
+impl<U> PartialEq for AutomationTarget<U> {
+    fn eq(&self, other: &Self) -> bool {
+        self.key == other.key
+    }
+}
+impl<U> Eq for AutomationTarget<U> {}
+impl<U> std::hash::Hash for AutomationTarget<U> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.key.hash(state);
+    }
+}
+impl<U> std::fmt::Debug for AutomationTarget<U> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "AutomationTarget<{}>({:?})",
+            std::any::type_name::<U>(),
+            self.key
+        )
+    }
+}
+
+impl<U: crate::Scalar> sealed::Sealed for AutomationTarget<U> {
+    fn id(self) -> TargetId {
+        TargetId::Slot(SlotId::Automation(self.key))
+    }
+}
+impl<U: crate::Scalar> Target for AutomationTarget<U> {
+    type Value = Arc<Trajectory<U>>;
+}
+impl<U: crate::Scalar> sealed::Land for AutomationTarget<U> {
+    type Cell = SlotCell<Arc<Trajectory<U>>>;
+
+    fn resolve(self, params: &Params) -> Option<(Self::Cell, Self::Value)> {
+        let cell = params.slot::<Arc<Trajectory<U>>>(SlotId::Automation(self.key))?;
+        let base = cell.load();
+        Some((cell, base))
+    }
+
+    fn check(cell: &Self::Cell, value: &Self::Value) -> Result<(), SetRefusal> {
+        cell.check(value)
+    }
+
+    fn land(cell: &Self::Cell, value: &Self::Value) {
+        cell.store(value);
+    }
+}
+target_builders!([U: crate::Scalar] AutomationTarget<U>);
+
+impl<U: crate::Scalar> ParamTarget<U> {
+    /// The param's automation curve.
+    #[must_use]
+    pub fn automation(self) -> AutomationTarget<U> {
+        AutomationTarget::new(crate::ParamRef::from(self).key())
     }
 }
