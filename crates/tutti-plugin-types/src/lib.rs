@@ -281,7 +281,7 @@ pub use guard::{contained_panics, ffi_guard};
 pub use host::{
     Control, Controller, Loaded, PluginIo, Processor, Refused, Stuck, Wraps, process_block,
 };
-pub use hosting::{Describe, Editor, EditorWindow, InProcess, Load, Origin, OutOfProcess, Reopen};
+pub use hosting::{Describe, Editor, EditorWindow, InProc, Load, Origin, OutOfProcess, Reopen};
 pub use invalidation::{PluginInvalidation, PluginRefresh, ResyncClass, ResyncKind};
 pub use order::{StableOrder, insertion_sort_by_key};
 pub use points::{PointBuf, PointPool};

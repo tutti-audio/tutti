@@ -9,7 +9,7 @@
 
 use std::path::PathBuf;
 use tutti_fixtures::main_thread;
-use tutti_plugin_types::{Describe, InProcess, Load, PluginRole};
+use tutti_plugin_types::{Describe, InProc, Load, PluginRole};
 use tutti_vst2_author::shell::{ALPHA_ID, ALPHA_NAME, BETA_ID, BETA_NAME, SHELL_ID, SHELL_NAME};
 use tutti_vst2_host::Vst2Loaded;
 

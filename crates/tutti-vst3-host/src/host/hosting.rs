@@ -5,15 +5,15 @@ use std::path::Path;
 
 use tutti_plugin_types::bundle::{ModuleKind, native_module_path};
 use tutti_plugin_types::{
-    Describe, EditorPresence, InProcess, Load, MainThreadMarker, MainWorkHandle, Origin,
-    OutOfProcess, PluginDescriptor, PluginResult,
+    Describe, EditorPresence, InProc, Load, MainThreadMarker, MainWorkHandle, Origin, OutOfProcess,
+    PluginDescriptor, PluginResult,
 };
 
 use super::control::{descriptor_of, plugin_error};
 use super::editor_instance::Vst3Editor;
 use super::loaded::{LoadOptions, Vst3Loaded};
 
-impl InProcess for Vst3Loaded {
+impl InProc for Vst3Loaded {
     fn load_in_process(
         main: MainThreadMarker,
         work: &MainWorkHandle,

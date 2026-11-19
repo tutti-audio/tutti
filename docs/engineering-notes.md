@@ -253,7 +253,7 @@ Rules:
   `Reclaimer`, which `SessionNode::reclaimer` hands the graph as the node
   goes in through `add` or `crossfade` and which leaves with the node:
   clips, harmony, the MIDI input, voices; and each hosted plugin's
-  `PluginMeter`, which a `clear_meter` leaves following no project meter)
+  `PluginTimeSignature`, which a `clear_meter` leaves following no project meter)
   and its own cells (`ProjectMeter`, `Modulation`,
   `HardwareMidiInputs::collect`). `bevy-tutti`'s `reclaim_graph` only runs
   that phase. A first cut had the adapter sweep the clip and voice controls

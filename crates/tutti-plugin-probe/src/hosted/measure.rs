@@ -34,10 +34,10 @@ use tutti_buffers::InputOutput;
 
 use tutti_graph::{MAX_NODE_TAIL, Offset, UmpAt};
 use tutti_plugin_types::{
-    Controller, Deadline, InProcess, LatencyVerdict, Load, MainThreadMarker, MaxBlock,
-    MeasureFailure, Measured, NotChecked, PROBE_FLOOR, PluginDescriptor, PluginError, PluginIo,
-    PluginTail, Prepare, ProbeConfig, ProcessContext, ProcessOutput, Processor, StateHash,
-    TailVerdict, Verdict,
+    Controller, Deadline, InProc, LatencyVerdict, Load, MainThreadMarker, MaxBlock, MeasureFailure,
+    Measured, NotChecked, PROBE_FLOOR, PluginDescriptor, PluginError, PluginIo, PluginTail,
+    Prepare, ProbeConfig, ProcessContext, ProcessOutput, Processor, StateHash, TailVerdict,
+    Verdict,
 };
 use tutti_ump::{
     Address, Attribute, Message, MidiChannel, MidiGroup, NoteNumber, NoteVelocity, Ump, Voice2,
@@ -402,7 +402,7 @@ fn judge(
 /// load, take `state` ([`MeasureFailure::StateRefused`]: the caller asked for
 /// that state, so the probe refuses the file), save its state, activate, render
 /// or deactivate, it has no audio output, or a render passed its deadline.
-pub(crate) fn measure<L: InProcess>(
+pub(crate) fn measure<L: InProc>(
     main: MainThreadMarker,
     path: &Path,
     descriptor: &PluginDescriptor,

@@ -4,7 +4,7 @@ use super::{MainThreadMarker, Measuring, Read, StateFor, routing};
 use std::path::Path;
 use std::time::Instant;
 use tutti_plugin_types::{
-    Describe, InProcess, MeasureFailure, PluginError, PluginFormat, ProbeRefusal, Unmeasured,
+    Describe, InProc, MeasureFailure, PluginError, PluginFormat, ProbeRefusal, Unmeasured,
 };
 
 mod measure;
@@ -67,7 +67,7 @@ fn is_for(state: &StateFor<'_>, id: &str) -> bool {
 
 /// Describes the file's plugins as `L`, and, when `measuring`, measures each one
 /// with one load of its own.
-fn run<L: InProcess + Describe>(
+fn run<L: InProc + Describe>(
     main: MainThreadMarker,
     path: &Path,
     measuring: Option<Measuring<'_>>,

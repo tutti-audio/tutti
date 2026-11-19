@@ -5,8 +5,8 @@ use std::path::Path;
 
 use tutti_plugin_types::bundle::{ModuleKind, native_module_path};
 use tutti_plugin_types::{
-    Describe, EditorPresence, InProcess, Load, MainThreadMarker, MainWorkHandle, Origin,
-    OutOfProcess, PluginDescriptor, PluginResult,
+    Describe, EditorPresence, InProc, Load, MainThreadMarker, MainWorkHandle, Origin, OutOfProcess,
+    PluginDescriptor, PluginResult,
 };
 
 use super::ClapLoaded;
@@ -22,7 +22,7 @@ fn options(load: &Load) -> LoadOptions {
     }
 }
 
-impl InProcess for ClapLoaded {
+impl InProc for ClapLoaded {
     fn load_in_process(
         main: MainThreadMarker,
         work: &MainWorkHandle,

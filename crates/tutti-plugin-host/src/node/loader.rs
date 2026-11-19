@@ -17,7 +17,7 @@ use crate::PluginHandle;
 use crate::{ParameterChangeSink, PluginControls};
 use tutti_plugin_types::{BridgeError, BridgeResult, StateError};
 use tutti_plugin_types::{
-    Features, InProcess, Load, LoadStage, Loaded, LoadedPlugin, PluginDescriptor, PluginTooWide,
+    Features, InProc, Load, LoadStage, Loaded, LoadedPlugin, PluginDescriptor, PluginTooWide,
     Prepare,
 };
 use tutti_units::ParamId;
@@ -77,7 +77,7 @@ impl<L: Loaded + 'static> LoadClientError<L> {
 /// handle.
 ///
 /// `tutti-plugin`'s `Plugin::open` calls this for `.vst` files
-/// when the `vst2` feature is on; call it directly for another [`InProcess`]
+/// when the `vst2` feature is on; call it directly for another [`InProc`]
 /// format, or to get the concrete [`InProcClient`] type. `load` names the
 /// plugin in a file that holds several. Insert the client's node
 /// ([`bind`](InProcClient::bind), then `Editor::insert`). The node and handle
@@ -103,7 +103,7 @@ pub fn load_client<L, F>(
     sample_rate: impl Into<tutti_units::SampleRate>,
 ) -> Result<(InProcClient<L, F>, PluginHandle), LoadClientError<L>>
 where
-    L: InProcess + 'static,
+    L: InProc + 'static,
     L::Processor: 'static,
     F: Float,
 {
@@ -134,7 +134,7 @@ pub fn load_client_restoring<L, F>(
     LoadClientError<L>,
 >
 where
-    L: InProcess + 'static,
+    L: InProc + 'static,
     L::Processor: 'static,
     F: Float,
 {
@@ -183,7 +183,7 @@ fn assemble<L, F>(
     sample_rate: tutti_units::SampleRate,
 ) -> BridgeResult<(InProcClient<L, F>, PluginHandle)>
 where
-    L: InProcess + 'static,
+    L: InProc + 'static,
     L::Processor: 'static,
     F: Float,
 {

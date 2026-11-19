@@ -1,4 +1,4 @@
-//! An in-process plugin of any [`InProcess`] format, behind a handle: its
+//! An in-process plugin of any [`InProc`] format, behind a handle: its
 //! [`AnyThread`] (the hop to the main thread), its [`Health`] and the
 //! [`MainThreadControl`] a handle's token-taking calls reach it by.
 //!
@@ -41,7 +41,7 @@ use super::off_main_wait::{OffMainWait, await_answer};
 use crate::MainThreadControl;
 use crate::ParameterChangeSink;
 use tutti_plugin_types::{
-    AnyThread, AutomationMode, AutomationModeError, BypassWrite, Control, Health, InProcess,
+    AnyThread, AutomationMode, AutomationModeError, BypassWrite, Control, Health, InProc,
     OwnBypass, StateError, bypass_value, is_bypassed,
 };
 use tutti_plugin_types::{ParameterInfo, PluginFailure, RenderMode, TerminationReason};
@@ -51,7 +51,7 @@ use tutti_units::ParamId;
 /// Bundles the shared Mutex with the parameter-change sink so editor
 /// idle calls can drain plugin-internal automation events and notify
 /// the user-installed callback.
-pub(crate) struct ControlBackend<L: InProcess> {
+pub(crate) struct ControlBackend<L: InProc> {
     pub(super) inner: Arc<Mutex<Instance<L>>>,
     pub(crate) param_sink: ParameterChangeSink,
     /// The cell the audio unit parks a rate change in, shared with the
@@ -123,7 +123,7 @@ const OFF_MAIN_DEADLINE: Duration = Duration::from_secs(2);
 
 impl<L> ControlBackend<L>
 where
-    L: InProcess + 'static,
+    L: InProc + 'static,
     L::Processor: 'static,
 {
     /// Runs `work` on the plugin on the main thread, under the instance lock,
@@ -181,7 +181,7 @@ where
 
 impl<L> AnyThread for ControlBackend<L>
 where
-    L: InProcess + 'static,
+    L: InProc + 'static,
     L::Processor: 'static,
 {
     /// `None` for a lost plugin, and when the main thread does not answer.
@@ -328,7 +328,7 @@ where
 /// call into it latches the instance's [`Lost`], which is what this reads, with
 /// no lock. A plugin that takes the host down with it is not observed; the rest
 /// is the trait's defaults.
-impl<L: InProcess> Health for ControlBackend<L> {
+impl<L: InProc> Health for ControlBackend<L> {
     fn is_crashed(&self) -> bool {
         self.lost.is_lost()
     }
@@ -350,7 +350,7 @@ impl<L: InProcess> Health for ControlBackend<L> {
 
 impl<L> MainThreadControl for ControlBackend<L>
 where
-    L: InProcess + 'static,
+    L: InProc + 'static,
     L::Processor: 'static,
 {
     /// Under the instance's lock; not called for a lost plugin.

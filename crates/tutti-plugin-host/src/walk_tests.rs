@@ -15,8 +15,8 @@ use tutti_tempo::{TempoMap, TempoPoint, Transition};
 use tutti_units::{Beat, Bpm, Frame, Latency, SampleRate, Samples};
 
 use crate::{
-    Call, DeliveryCounters, ParamDelivery, PluginMeter, Snapshot, TransportSource, TransportWalk,
-    transport_info,
+    Call, DeliveryCounters, ParamDelivery, PluginTimeSignature, Snapshot, TransportSource,
+    TransportWalk, transport_info,
 };
 
 const RATE: f64 = 48_000.0;
@@ -74,7 +74,7 @@ struct Rig {
 impl Rig {
     fn new(tempo: TempoMap) -> Self {
         let counters = Arc::new(DeliveryCounters::default());
-        let mut source = TransportSource::new(PluginMeter::default().reader());
+        let mut source = TransportSource::new(PluginTimeSignature::default().reader());
         source.go_offline();
         Self {
             params: ParamDelivery::new([], Arc::clone(&counters)),

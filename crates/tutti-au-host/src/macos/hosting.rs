@@ -4,14 +4,14 @@
 use std::path::Path;
 
 use tutti_plugin_types::{
-    Describe, InProcess, Load, MainThreadMarker, MainWorkHandle, Origin, OutOfProcess,
+    Describe, InProc, Load, MainThreadMarker, MainWorkHandle, Origin, OutOfProcess,
     PluginDescriptor, PluginResult,
 };
 
 use crate::editor_instance::AuEditorInstance;
 use crate::instance::AuLoaded;
 
-impl InProcess for AuLoaded {
+impl InProc for AuLoaded {
     fn load_in_process(
         main: MainThreadMarker,
         work: &MainWorkHandle,

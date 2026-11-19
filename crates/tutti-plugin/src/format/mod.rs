@@ -11,6 +11,6 @@
 //!   format dlopens the plugin a second time purely for its window.
 //!
 //! The in-process audio + editor node, generic over any
-//! `tutti_plugin_types::InProcess` format, is `tutti-plugin-host`'s.
+//! `tutti_plugin_types::InProc` format, is `tutti-plugin-host`'s.
 
 pub mod gui;

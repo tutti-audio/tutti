@@ -577,7 +577,7 @@ pub(super) const ALLOW: &[Allow] = &[
     ),
     ty(
         "crates/tutti-plugin-host/",
-        "PluginMeter",
+        "PluginTimeSignature",
         SETTER,
         "a meter slot handle: it installs a project meter into the node's cell, it is not a node, source, spec or config",
     ),

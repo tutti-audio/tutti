@@ -6,22 +6,22 @@
 //! with an arm per format and a macro that lists them.
 
 use crate::{
-    InProcClient, NodeControls, PluginMeter, PluginNode, RebindError, Rebinder, Settlement,
+    InProcClient, NodeControls, PluginNode, PluginTimeSignature, RebindError, Rebinder, Settlement,
 };
 use tutti_graph::{IntoNode, NodeParts};
-use tutti_plugin_types::{InProcess, Layout, MainThreadMarker, RenderMode};
+use tutti_plugin_types::{InProc, Layout, MainThreadMarker, RenderMode};
 use tutti_transport::TempoReader;
 
 /// What a loaded in-process client offers a host, whatever its format.
 trait ClientOps: Send {
     fn set_render_mode(&self, mode: RenderMode) -> bool;
     fn controls(&self) -> NodeControls;
-    fn bind(self: Box<Self>, tempo: TempoReader) -> (InProcessNode, InProcessRebinder);
+    fn bind(self: Box<Self>, tempo: TempoReader) -> (InProcNode, InProcRebinder);
 }
 
 impl<L> ClientOps for InProcClient<L>
 where
-    L: InProcess + 'static,
+    L: InProc + 'static,
     L::Processor: 'static,
 {
     fn set_render_mode(&self, mode: RenderMode) -> bool {
@@ -32,21 +32,21 @@ where
         InProcClient::controls(self)
     }
 
-    fn bind(self: Box<Self>, tempo: TempoReader) -> (InProcessNode, InProcessRebinder) {
-        let rebinder = InProcessRebinder(Box::new(self.rebinder(tempo.clone())));
-        (InProcessNode(Box::new((*self).bind(tempo))), rebinder)
+    fn bind(self: Box<Self>, tempo: TempoReader) -> (InProcNode, InProcRebinder) {
+        let rebinder = InProcRebinder(Box::new(self.rebinder(tempo.clone())));
+        (InProcNode(Box::new((*self).bind(tempo))), rebinder)
     }
 }
 
 /// An in-process plugin's loaded client, whatever its format.
-pub struct InProcessClient(Box<dyn ClientOps>);
+pub struct AnyInProcClient(Box<dyn ClientOps>);
 
-impl InProcessClient {
+impl AnyInProcClient {
     /// Erases the format of `client`.
     #[must_use]
     pub fn new<L>(client: InProcClient<L>) -> Self
     where
-        L: InProcess + 'static,
+        L: InProc + 'static,
         L::Processor: 'static,
     {
         Self(Box::new(client))
@@ -65,14 +65,14 @@ impl InProcessClient {
 
     /// The node's meter cell.
     #[must_use]
-    pub fn meter(&self) -> PluginMeter {
+    pub fn meter(&self) -> PluginTimeSignature {
         self.0.controls().meter()
     }
 
-    /// As [`InProcClient::bind`], and the [`InProcessRebinder`] over the same
+    /// As [`InProcClient::bind`], and the [`InProcRebinder`] over the same
     /// plugin, binding its successors to `tempo` too.
     #[must_use]
-    pub fn bind(self, tempo: TempoReader) -> (InProcessNode, InProcessRebinder) {
+    pub fn bind(self, tempo: TempoReader) -> (InProcNode, InProcRebinder) {
         self.0.bind(tempo)
     }
 }
@@ -84,7 +84,7 @@ trait NodeOps: Send {
 
 impl<L> NodeOps for PluginNode<L>
 where
-    L: InProcess + 'static,
+    L: InProc + 'static,
     L::Processor: 'static,
 {
     fn into_parts(self: Box<Self>) -> NodeParts<NodeControls> {
@@ -92,11 +92,11 @@ where
     }
 }
 
-/// A bound in-process plugin: the graph node of [`InProcessClient::bind`], or
+/// A bound in-process plugin: the graph node of [`AnyInProcClient::bind`], or
 /// one a rebinder built.
-pub struct InProcessNode(Box<dyn NodeOps>);
+pub struct InProcNode(Box<dyn NodeOps>);
 
-impl InProcessNode {
+impl InProcNode {
     /// The node, its controls and its fork source, as [`IntoNode::into_parts`]
     /// of a [`PluginNode`].
     #[must_use]
@@ -130,11 +130,11 @@ impl std::fmt::Debug for Commit {
     }
 }
 
-/// What [`InProcessRebinder::prepare`] built: the node, its controls and the
+/// What [`InProcRebinder::prepare`] built: the node, its controls and the
 /// commit.
-pub struct InProcessRebuilt {
+pub struct InProcRebuilt {
     /// The node over the plugin's new ports.
-    pub node: InProcessNode,
+    pub node: InProcNode,
     /// The node's controls.
     pub controls: NodeControls,
     /// The move of the Processor to the node.
@@ -144,12 +144,12 @@ pub struct InProcessRebuilt {
 trait RebinderOps: Send {
     fn layout(&self) -> Option<Layout>;
     fn settled(&self) -> Settlement;
-    fn prepare(&self) -> Result<InProcessRebuilt, RebindError>;
+    fn prepare(&self) -> Result<InProcRebuilt, RebindError>;
 }
 
 impl<L> RebinderOps for Rebinder<L>
 where
-    L: InProcess + 'static,
+    L: InProc + 'static,
     L::Processor: 'static,
 {
     fn layout(&self) -> Option<Layout> {
@@ -160,11 +160,11 @@ where
         Rebinder::settled(self)
     }
 
-    fn prepare(&self) -> Result<InProcessRebuilt, RebindError> {
+    fn prepare(&self) -> Result<InProcRebuilt, RebindError> {
         let (node, pending) = Rebinder::prepare(self)?;
         let controls = node.controls();
-        Ok(InProcessRebuilt {
-            node: InProcessNode(Box::new(node)),
+        Ok(InProcRebuilt {
+            node: InProcNode(Box::new(node)),
             controls,
             commit: Commit::new(move |main| pending.commit(main)),
         })
@@ -172,9 +172,9 @@ where
 }
 
 /// An in-process plugin's [`Rebinder`], whatever its format.
-pub struct InProcessRebinder(Box<dyn RebinderOps>);
+pub struct InProcRebinder(Box<dyn RebinderOps>);
 
-impl InProcessRebinder {
+impl InProcRebinder {
     /// As [`Rebinder::layout`].
     #[must_use]
     pub fn layout(&self) -> Option<Layout> {
@@ -192,7 +192,7 @@ impl InProcessRebinder {
     /// # Errors
     ///
     /// The refusals of [`Rebinder::prepare`].
-    pub fn prepare(&self) -> Result<InProcessRebuilt, RebindError> {
+    pub fn prepare(&self) -> Result<InProcRebuilt, RebindError> {
         self.0.prepare()
     }
 }
@@ -207,9 +207,4 @@ macro_rules! opaque_debug {
     )+};
 }
 
-opaque_debug!(
-    InProcessClient,
-    InProcessNode,
-    InProcessRebinder,
-    InProcessRebuilt
-);
+opaque_debug!(AnyInProcClient, InProcNode, InProcRebinder, InProcRebuilt);

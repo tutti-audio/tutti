@@ -6,7 +6,7 @@
 tutti_plugin_contract::contract!(
     tutti_plugin_contract::Au,
     gaps = 4,
-    hostings = [InProcess, OutOfProcess]
+    hostings = [InProc, OutOfProcess]
 );
 
 mod ramped {

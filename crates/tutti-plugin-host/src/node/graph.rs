@@ -1,4 +1,4 @@
-//! The in-process plugin as a graph node, over any [`InProcess`] format: MIDI
+//! The in-process plugin as a graph node, over any [`InProc`] format: MIDI
 //! arrives on an event input, on its frame, and the plugin's MIDI-out leaves
 //! on an event output (a plugin that declared `Features::MIDI_OUT`), each
 //! event on the frame the plugin gave it.
@@ -39,8 +39,8 @@ use super::client::{InProcClient, Inputs, PluginNode, Rendered, render_with};
 use crate::{Call, NodeControls, Snapshot, param_input, transport_info};
 use tutti_plugin_types::{BlockStatus, ProcessOutput, Processing};
 use tutti_plugin_types::{
-    ChannelTable, ChordChanges, ChordValue, ExpressiveContext, Features, InProcess, Loaded,
-    Processor, ScaleChanges, ScaleValue, TransportInfo, WireMidi, silence,
+    ChannelTable, ChordChanges, ChordValue, ExpressiveContext, Features, InProc, Loaded, Processor,
+    ScaleChanges, ScaleValue, TransportInfo, WireMidi, silence,
 };
 
 /// A side's handles: one per bus and one for the ports past them.
@@ -665,7 +665,7 @@ fn push_harmony(
 /// offline export) renders a graph holding it.
 ///
 /// [`ForkSource`]: tutti_graph::ForkSource
-impl<L: InProcess + 'static, F: Float> IntoNode<F> for PluginNode<L, F>
+impl<L: InProc + 'static, F: Float> IntoNode<F> for PluginNode<L, F>
 where
     L::Processor: 'static,
 {
@@ -683,7 +683,7 @@ where
     }
 }
 
-impl<L: InProcess, F: Float> InProcClient<L, F> {
+impl<L: InProc, F: Float> InProcClient<L, F> {
     /// The node's controls: its meter cell and its parameter delivery's
     /// counters, the same [`NodeControls`] inserting it hands back. Its block
     /// is the out-of-process node's chunk: a block's points all count as sent,

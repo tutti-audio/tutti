@@ -17,7 +17,7 @@ use tutti_plugin_types::{MainThreadMarker, MainWorkHandle};
 use parking_lot::Mutex;
 use tutti_buffers::FloatWidth;
 use tutti_plugin_types::{
-    Event, Hand, HostOp, InProcess, Layout, Lifecycle, Load, Loaded, MaxBlock, Notice, Origin,
+    Event, Hand, HostOp, InProc, Layout, Lifecycle, Load, Loaded, MaxBlock, Notice, Origin,
     PluginError, PluginFailure, PluginInvalidation, Prepare, Processor, RenderMode,
     RenderModeSupport, SampleRate, Samples, State, Successor, Widths, standing,
 };
@@ -157,7 +157,7 @@ pub(super) struct Instance<L: Loaded> {
     figures: Arc<Figures>,
 }
 
-impl<L: InProcess> Instance<L> {
+impl<L: InProc> Instance<L> {
     /// Loads and activates the plugin at `sample_rate` and blocks of up to
     /// `block_size`, at the width [`Widths::negotiate`] settles `width` on, in
     /// realtime mode, and lends its Processor to the realtime end this returns.

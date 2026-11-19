@@ -1,7 +1,7 @@
 //! `check-hosting`: every hosting marker a format implements is listed in the
 //! plugin contract.
 //!
-//! `impl InProcess for X` or `impl OutOfProcess for X` in a crate's `src/`
+//! `impl InProc for X` or `impl OutOfProcess for X` in a crate's `src/`
 //! needs a contract suite whose format's loaded type is `X` and whose
 //! `contract!(.., hostings = [..])` names that marker. The other direction is
 //! the compiler's: `contract!` asserts each marker it lists, so a listed
@@ -11,7 +11,7 @@
 //! the contract's cases are what hold a format to it. An impl the contract
 //! does not list would be hostable without being tested in that hosting.
 //!
-//! Limits: a textual scan. It sees `impl [<..>] [path::]InProcess for [path::]Name`
+//! Limits: a textual scan. It sees `impl [<..>] [path::]InProc for [path::]Name`
 //! on one line in `crates/*/src`, maps `Name` to a contract format through
 //! `type L = ..::Name;` in `testing/tutti-plugin-contract/src/formats.rs`, and
 //! reads the `contract!` calls in `testing/tutti-plugin-contract/tests/*.rs`
@@ -20,7 +20,7 @@
 use super::{Report, Tree};
 use std::collections::{BTreeMap, BTreeSet};
 
-const MARKERS: [&str; 2] = ["InProcess", "OutOfProcess"];
+const MARKERS: [&str; 2] = ["InProc", "OutOfProcess"];
 const FORMATS: &str = "testing/tutti-plugin-contract/src/formats.rs";
 const SUITES: &str = "testing/tutti-plugin-contract/tests";
 
@@ -229,7 +229,7 @@ pub(super) fn check(tree: &dyn Tree) -> Report {
 
     let mut r = Report::default();
     if impls.is_empty() {
-        r.fail("check-hosting: found no InProcess/OutOfProcess impl; the scan is broken");
+        r.fail("check-hosting: found no InProc/OutOfProcess impl; the scan is broken");
         return r;
     }
     let mut bad = Vec::new();
@@ -281,7 +281,7 @@ mod tests {
             // Test files are not scanned for impls.
             (
                 "crates/tutti-clap-host/tests/t.rs",
-                "impl InProcess for Stray {}\n",
+                "impl InProc for Stray {}\n",
             ),
         ])
     }
@@ -289,8 +289,8 @@ mod tests {
     const FORMATS_OK: &str =
         "impl Format for Clap {\n    type L = tutti_clap_host::ClapLoaded;\n}\n";
     const SUITE_OK: &str =
-        "contract!(\n    Clap,\n    gaps = 2,\n    hostings = [InProcess, OutOfProcess]\n);\n";
-    const HOST_OK: &str = "impl InProcess for ClapLoaded {}\nimpl<'a> tutti_plugin_types::OutOfProcess for crate::ClapLoaded {}\n";
+        "contract!(\n    Clap,\n    gaps = 2,\n    hostings = [InProc, OutOfProcess]\n);\n";
+    const HOST_OK: &str = "impl InProc for ClapLoaded {}\nimpl<'a> tutti_plugin_types::OutOfProcess for crate::ClapLoaded {}\n";
 
     #[test]
     fn impls_each_listed_in_the_contract_pass() {
@@ -303,7 +303,7 @@ mod tests {
 
     #[test]
     fn an_impl_the_contract_does_not_list_fails() {
-        let suite = "contract!(Clap, gaps = 2, hostings = [InProcess]);\n";
+        let suite = "contract!(Clap, gaps = 2, hostings = [InProc]);\n";
         let r = check(&tree(HOST_OK, FORMATS_OK, suite));
         assert_eq!(r.findings[0], "check-hosting: FAIL");
         assert_eq!(
@@ -320,17 +320,16 @@ mod tests {
         let r = check(&tree(HOST_OK, formats, SUITE_OK));
         assert_eq!(r.findings.len(), 3);
         assert!(
-            r.findings[1]
-                .contains("ClapLoaded implements InProcess, but no contract format loads it")
+            r.findings[1].contains("ClapLoaded implements InProc, but no contract format loads it")
         );
     }
 
     #[test]
     fn a_scan_that_finds_no_impl_fails() {
-        let r = check(&tree("// impl InProcess for X {}\n", FORMATS_OK, SUITE_OK));
+        let r = check(&tree("// impl InProc for X {}\n", FORMATS_OK, SUITE_OK));
         assert_eq!(
             r.findings,
-            ["check-hosting: found no InProcess/OutOfProcess impl; the scan is broken"]
+            ["check-hosting: found no InProc/OutOfProcess impl; the scan is broken"]
         );
     }
 }

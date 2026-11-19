@@ -9,7 +9,7 @@ use std::path::Path;
 
 use dpi::Size;
 use tutti_plugin_types::{
-    ContentScale, Control, Editor, EditorCapabilities, EditorError, EditorWindow, InProcess, Load,
+    ContentScale, Control, Editor, EditorCapabilities, EditorError, EditorWindow, InProc, Load,
     MainThreadMarker, MainWorkHandle, ParamEdit, PluginError, PluginResult, WindowHandle,
 };
 use tutti_units::Normalized;
@@ -28,8 +28,8 @@ fn editor_error(reason: String) -> PluginError {
 /// builds: `AuLoaded` is hostable in this process and over IPC:
 ///
 /// ```
-/// use tutti_plugin_types::{InProcess, OutOfProcess};
-/// fn hostable<L: InProcess + OutOfProcess>() {}
+/// use tutti_plugin_types::{InProc, OutOfProcess};
+/// fn hostable<L: InProc + OutOfProcess>() {}
 /// hostable::<tutti_au_host::AuLoaded>();
 /// ```
 #[derive(Debug)]

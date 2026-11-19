@@ -1,7 +1,7 @@
 #![doc = include_str!("../README.md")]
 //! What `plugin-probe` does: read the descriptor of every plugin the file at a path
 //! holds, as the format its extension names, through that format's host
-//! ([`Describe`](tutti_plugin_types::Describe)), and with [`describe_measured`] measure each one ([`InProcess`](tutti_plugin_types::InProcess)).
+//! ([`Describe`](tutti_plugin_types::Describe)), and with [`describe_measured`] measure each one ([`InProc`](tutti_plugin_types::InProc)).
 //!
 //! The binary (`src/main.rs`) is the command line around them.
 

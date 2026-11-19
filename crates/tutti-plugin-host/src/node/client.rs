@@ -1,5 +1,5 @@
 //! `InProcClient`: the graph node (`node.rs`) that drives an in-process
-//! plugin of any hosting ([`Loaded`]: an [`InProcess`](tutti_plugin_types::InProcess)
+//! plugin of any hosting ([`Loaded`]: an [`InProc`](tutti_plugin_types::InProc)
 //! format, or a served plugin, `tutti-plugin-ipc`'s `Ipc`) from the host audio thread.
 //!
 //! The audio thread renders through the Processor the node's realtime end
@@ -44,7 +44,7 @@ use tutti_units::{SampleRate, Samples};
 use super::control_backend::Reporting;
 use super::instance::{Figures, Instance, Lost};
 use crate::{BlockTransport, TransportSource, TransportWalk};
-use crate::{ParamDelivery, PluginControls, PluginMeter, SegmentPoints};
+use crate::{ParamDelivery, PluginControls, PluginTimeSignature, SegmentPoints};
 use tutti_plugin_types::MidiIntake;
 use tutti_plugin_types::{
     ChordChanges, ExpressiveContext, Features, MIDI_STACK_CAPACITY, MidiEventVec, ParameterChanges,
@@ -348,7 +348,7 @@ pub(super) struct TransportFeed {
     /// reaches the node the audio thread runs; a fork has a slot of its own
     /// ([`forked`](Self::forked)). Control side only: the block reads
     /// through `source`.
-    meter: PluginMeter,
+    meter: PluginTimeSignature,
     /// The slot's reader and the clocks (`TransportSource`), the out-of-process
     /// node's own.
     source: TransportSource,
@@ -359,19 +359,19 @@ pub(super) struct TransportFeed {
 
 impl TransportFeed {
     /// A handle on the node's meter cell: what its controls install through.
-    pub(super) fn meter(&self) -> PluginMeter {
+    pub(super) fn meter(&self) -> PluginTimeSignature {
         self.meter.clone()
     }
 
     /// No meter installed, nothing rendered.
     pub(super) fn new() -> Self {
-        Self::over(PluginMeter::default())
+        Self::over(PluginTimeSignature::default())
     }
 
     /// A feed reading `meter`'s cell through a reader registered here,
     /// nothing rendered, on the host clock. Control thread:
     /// registering may allocate.
-    fn over(meter: PluginMeter) -> Self {
+    fn over(meter: PluginTimeSignature) -> Self {
         Self {
             source: TransportSource::new(meter.reader()),
             meter,
@@ -384,7 +384,7 @@ impl TransportFeed {
     /// the out-of-process node's fork), a counter from zero, and, for an
     /// `offline` render, no host clock.
     pub(super) fn forked(&self, offline: bool) -> Self {
-        let mut feed = Self::over(PluginMeter::holding(self.meter.installed()));
+        let mut feed = Self::over(PluginTimeSignature::holding(self.meter.installed()));
         if offline {
             feed.source.go_offline();
         }

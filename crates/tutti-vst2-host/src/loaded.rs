@@ -134,7 +134,7 @@ fn map_category(c: Category, raw: i32) -> Vst2Category {
 ///
 /// # Hosting
 ///
-/// VST2 is [`InProcess`](tutti_plugin_types::InProcess) and not
+/// VST2 is [`InProc`](tutti_plugin_types::InProc) and not
 /// [`OutOfProcess`](tutti_plugin_types::OutOfProcess): an `AEffect` is one
 /// object for its editor and its audio, so no editor-only second instance can
 /// show what an audio instance in another process holds. The
@@ -152,8 +152,8 @@ fn map_category(c: Category, raw: i32) -> Vst2Category {
 /// missing impl and not the setup:
 ///
 /// ```
-/// use tutti_plugin_types::InProcess;
-/// fn here<L: InProcess>() {}
+/// use tutti_plugin_types::InProc;
+/// fn here<L: InProc>() {}
 /// here::<tutti_vst2_host::Vst2Loaded>();
 /// ```
 ///

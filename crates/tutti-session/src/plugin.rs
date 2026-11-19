@@ -119,7 +119,7 @@
 //! # `Phase::RenderMode` (with `export`)
 //!
 //! Offline while an export token lives (§4.3), Realtime otherwise; each
-//! plugin is told per `tutti_plugin_host::needs_announcement`: on a change of
+//! plugin is told per `tutti_plugin_host::needs_notify`: on a change of
 //! mode, or if it was never told.
 
 use std::sync::{Arc, Mutex};
@@ -658,7 +658,7 @@ impl Outgoing {
 #[must_use = "a retired record goes to the graveyard or drops, through `settle`"]
 pub(crate) enum Retired {
     /// An in-process plugin's: its drop waits for the main thread.
-    InProcess(InProcessRecord),
+    InProcess(InProcRecord),
     /// A served plugin's, already dropped.
     Served,
 }
@@ -668,7 +668,7 @@ impl Retired {
     /// thread, a served one drops here.
     fn of(placement: Placement, held: impl std::any::Any + Send) -> Self {
         match placement {
-            Placement::InProcess => Self::InProcess(InProcessRecord {
+            Placement::InProcess => Self::InProcess(InProcRecord {
                 _held: Box::new(held),
             }),
             Placement::Served => Self::Served,
@@ -689,7 +689,7 @@ impl Retired {
 
 /// What an in-process plugin's retirement holds until the main thread drops
 /// it: the only thing the [`Graveyard`] takes.
-pub(crate) struct InProcessRecord {
+pub(crate) struct InProcRecord {
     /// The owner whose drop waits for the main thread.
     _held: Box<dyn std::any::Any + Send>,
 }
@@ -710,7 +710,7 @@ pub(crate) struct InProcessRecord {
 pub(crate) struct Graveyard {
     /// Held to be dropped: a removed in-process plugin's record, or the handle
     /// a crossfade replaced.
-    retired: Vec<InProcessRecord>,
+    retired: Vec<InProcRecord>,
     /// The editors that are alive: those of a retired plugin are closed by
     /// [`exhume`](Self::exhume) before the drop, the open ones are serviced.
     pub(crate) editors: crate::editor::Editors,
@@ -2415,7 +2415,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
     }
 
     /// `Phase::RenderMode`: Offline while an export token lives, Realtime
-    /// otherwise, told per `needs_announcement`. Without `export` nothing
+    /// otherwise, told per `needs_notify`. Without `export` nothing
     /// is ever announced: there is no bounce to announce.
     pub(crate) fn render_mode_phase(&mut self) {
         #[cfg(feature = "export")]
@@ -2427,7 +2427,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
             };
             let changed = self.plugins.render_mode.announced != wanted;
             for hosted in self.graph.plugins.values_mut() {
-                if !tutti_plugin_host::needs_announcement(changed, hosted.told) {
+                if !tutti_plugin_host::needs_notify(changed, hosted.told) {
                     continue;
                 }
                 // `false` means the plugin declined (a CLAP plugin without

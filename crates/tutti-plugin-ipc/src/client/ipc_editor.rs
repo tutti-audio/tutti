@@ -22,12 +22,12 @@ use super::audio::AudioBridge;
 /// which the bridge thread latches (`EditorWantsSize`, `EditorClosed`) for
 /// [`poll_editor_resize_request`](EditorWindow::poll_editor_resize_request) and
 /// for this type's own record of whether an editor is open.
-pub(crate) struct RemoteEditor {
+pub(crate) struct IpcEditor {
     audio: AudioBridge,
     open: bool,
 }
 
-impl RemoteEditor {
+impl IpcEditor {
     pub(crate) fn new(audio: AudioBridge) -> Self {
         Self { audio, open: false }
     }
@@ -50,7 +50,7 @@ fn plugin_error(e: EditorError) -> PluginError {
     PluginError::Editor(e)
 }
 
-impl EditorWindow for RemoteEditor {
+impl EditorWindow for IpcEditor {
     /// Always `true`: whether the plugin has an editor is the descriptor's to
     /// say (`PluginDescriptor::editor`, which the host asks), and one without
     /// is refused by the server when it is asked to open it.

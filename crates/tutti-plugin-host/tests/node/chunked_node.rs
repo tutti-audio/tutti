@@ -5,7 +5,7 @@
 //!
 //! The plugin is a recording format of this file's own (`Rec`): it copies its
 //! input to its output and writes down what each `process` call was handed.
-//! `Rec` is `InProcess` only to be loaded through `load_client`; the thread
+//! `Rec` is `InProc` only to be loaded through `load_client`; the thread
 //! that loads it passes its `Rig` in a thread-local.
 
 use std::cell::RefCell;
@@ -26,10 +26,10 @@ use tutti_midi_protocol::widen_velocity;
 use tutti_plugin_host::{InProcClient, NodeControls, PluginNode, load_client};
 use tutti_plugin_types::{
     BusRole, ChannelLayout, ChannelTopology, ContentScale, Control, Controller, EditorError,
-    EditorWindow, Features, InProcess, Load, Loaded, LoadedPlugin, MainThreadMarker,
-    MainWorkHandle, Origin, ParameterInfo, PluginBus, PluginDescriptor, PluginError, PluginIo,
-    PluginResult, PluginTail, Prepare, ProcessContext, ProcessOutput, Processor, Refused,
-    RenderModeSupport, RestartRules, Samples, Speaker, Stuck, Widths, WindowHandle,
+    EditorWindow, Features, InProc, Load, Loaded, LoadedPlugin, MainThreadMarker, MainWorkHandle,
+    Origin, ParameterInfo, PluginBus, PluginDescriptor, PluginError, PluginIo, PluginResult,
+    PluginTail, Prepare, ProcessContext, ProcessOutput, Processor, Refused, RenderModeSupport,
+    RestartRules, Samples, Speaker, Stuck, Widths, WindowHandle,
 };
 use tutti_tempo::{TempoMap, TempoPoint, Transition};
 use tutti_transport::TempoReader;
@@ -319,7 +319,7 @@ impl Controller for RecController {
     }
 }
 
-impl InProcess for Rec {
+impl InProc for Rec {
     fn load_in_process(
         _: MainThreadMarker,
         work: &MainWorkHandle,
