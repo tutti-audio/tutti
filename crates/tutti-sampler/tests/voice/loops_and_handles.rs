@@ -369,7 +369,7 @@ fn play_restarts_a_free_running_voice_after_a_reset() {
     let (node, handle) = free_node(Playback::default()).with_handle();
     let mut node = tutti_sampler::testing::prepared(node, RATE, BLOCK);
     let t = rolling();
-    let mut block = |node: &mut VoiceNode<f32>| {
+    let block = |node: &mut VoiceNode<f32>| {
         let out = tutti_sampler::testing::block(node, &t, RATE, BLOCK).swap_remove(0);
         t.advance(BLOCK as i64, RATE);
         out
