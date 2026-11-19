@@ -99,9 +99,7 @@ impl ParamSet {
     /// modulation lane, whose knob it is). Clones the `Arc`: control
     /// thread only.
     ///
-    /// A value through the set is an `f64` whatever the param's unit: an
-    /// `f32` unit's cell is widened exactly on a read and rounds to its own
-    /// width on a write ([`ParamCell`]).
+    /// A value through the set is an `f64`, the raw of every unit ([`ParamCell`]).
     pub fn cell(&self, param: impl Into<UnitAddr>) -> Option<ParamCell> {
         self.slot(param.into()).map(|s| s.live.clone())
     }

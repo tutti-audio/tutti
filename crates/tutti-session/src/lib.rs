@@ -12,9 +12,9 @@
 //! steps of a frame in [`PHASES`] order.
 //!
 //! ```
-//! use tutti_types::MaxBlock;
+//! use tutti_buffers::MaxBlock;
 //! use tutti_units::{Hz, SampleRate, Samples};
-//! use tutti_types::ChannelLayout;
+//! use tutti_buffers::ChannelLayout;
 //! use tutti_buffers::InterleavedMut;
 //! use tutti_graph::ForkByClone;
 //! use tutti_nodes::testing::Osc;
@@ -298,13 +298,13 @@ pub use tutti_graph::{
 pub use tutti_ump::{MidiChannel, MidiGroup};
 #[cfg(feature = "midi-hardware")]
 pub use value::MidiPolicyTarget;
-#[cfg(feature = "midi")]
-pub use value::OutputLatencyTarget;
 pub use value::OutputPolicyTarget;
 pub use value::{
     AnyAssign, AnyTarget, Assign, ClickTargets, ClickVolumeTarget, Effective, Info, IntoAssign,
-    IntoRead, Knobs, MeterTarget, Modify, Moved, ParamTarget, ScalarTarget, SetRefusal,
+    IntoRead, Knobs, MeterTarget, Modify, Moved, NodeSlots, ParamTarget, ScalarTarget, SetRefusal,
     SettingTarget, Target, TargetInfo, TempoTarget, ValueError, ValueErrorKind,
 };
+#[cfg(feature = "midi")]
+pub use value::{ClipEventsTarget, HarmonyTarget, OutputLatencyTarget};
 #[cfg(feature = "device")]
 pub use watch::{Backoff, DevicePolicy, DeviceWatch, Follow, FollowEvent};

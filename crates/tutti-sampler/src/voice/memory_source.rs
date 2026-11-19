@@ -9,13 +9,14 @@
 use std::ops::Range;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::{Float, Wave};
 use tutti_graph::{
     Cx, FadeLaw, IntoNode, Io, Node, NodeParts, ParamNode, ParamSet, Prepare, Shape, Status,
     param_parts,
 };
 use tutti_transport::TempoReader;
-use tutti_types::{ChannelLayout, Param, Param64};
+use tutti_types::{Param, Param64};
 use tutti_units::UnitParam;
 use tutti_units::{
     Amplitude, Beat, BeatDuration, PlaybackRate, ReadRate, SamplePosition, SampleRate, Samples,
@@ -31,7 +32,7 @@ use super::slot::Piece;
 use super::types::Direction;
 use crate::lanes::{Gather, Lane, UNPREPARED_FRAMES, audible, scale};
 use crate::{PlaceError, nonempty};
-use tutti_types::MAX_CHANNELS;
+use tutti_buffers::MAX_CHANNELS;
 
 /// The span of timeline a voice occupies: where it starts, and how long it
 /// lasts.

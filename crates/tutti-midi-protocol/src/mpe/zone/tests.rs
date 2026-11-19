@@ -101,6 +101,7 @@ fn zone_layout_places_master_and_members_per_rp053() {
             (first..=last).collect::<Vec<_>>(),
             "span of {label}, ascending"
         );
+        assert_eq!(config.first_member(), ch(first), "first member of {label}");
         // Every channel has exactly the role the span says, and the master is
         // never a member.
         for c in 0..16 {
@@ -122,26 +123,36 @@ fn zone_layout_places_master_and_members_per_rp053() {
 
 #[test]
 fn the_bend_ranges_are_set_independently() {
-    let config = ranged(MpeZone::Lower, 5, PitchBendSensitivity::of(96), MEMBER);
+    let config = ranged(
+        MpeZone::Lower,
+        5,
+        PitchBendSensitivity::from_semitones(U7::of(96)),
+        MEMBER,
+    );
     assert_eq!(
         config.pitch_bend_range_for(config.master_channel()),
-        PitchBendSensitivity::of(96)
+        PitchBendSensitivity::from_semitones(U7::of(96))
     );
     assert_eq!(
         config.pitch_bend_range_for(ch(1)),
-        PitchBendSensitivity::of(48),
+        PitchBendSensitivity::from_semitones(U7::of(48)),
         "member range untouched"
     );
     assert_eq!(config.member_count(), 5);
 
-    let config = ranged(MpeZone::Lower, 5, MASTER, PitchBendSensitivity::of(12));
+    let config = ranged(
+        MpeZone::Lower,
+        5,
+        MASTER,
+        PitchBendSensitivity::from_semitones(U7::of(12)),
+    );
     assert_eq!(
         config.pitch_bend_range_for(ch(1)),
-        PitchBendSensitivity::of(12)
+        PitchBendSensitivity::from_semitones(U7::of(12))
     );
     assert_eq!(
         config.pitch_bend_range_for(config.master_channel()),
-        PitchBendSensitivity::of(2),
+        PitchBendSensitivity::from_semitones(U7::of(2)),
         "master range untouched"
     );
 }
@@ -155,13 +166,13 @@ fn zones_default_to_rp053_ranges_per_role() {
         let config = zone(z, 7);
         assert_eq!(
             config.pitch_bend_range_for(config.master_channel()),
-            PitchBendSensitivity::of(2)
+            PitchBendSensitivity::from_semitones(U7::of(2))
         );
         // Resolving by channel picks the right one for every member.
         for member in config.member_channels() {
             assert_eq!(
                 config.pitch_bend_range_for(member),
-                PitchBendSensitivity::of(48),
+                PitchBendSensitivity::from_semitones(U7::of(48)),
                 "member channel {member:?} must use the member range"
             );
         }
@@ -359,15 +370,15 @@ fn pzone(manager: u8, channels: u8) -> MpeZoneConfig {
 fn the_profile_defaults_the_manager_to_48_and_mpe_1_1_to_2() {
     assert_eq!(
         PitchBendSensitivity::MPE_PROFILE_DEFAULT,
-        PitchBendSensitivity::of(48)
+        PitchBendSensitivity::from_semitones(U7::of(48))
     );
     assert_eq!(
         PitchBendSensitivity::MPE_MEMBER_DEFAULT,
-        PitchBendSensitivity::of(48)
+        PitchBendSensitivity::from_semitones(U7::of(48))
     );
     assert_eq!(
         PitchBendSensitivity::MPE_MASTER_DEFAULT,
-        PitchBendSensitivity::of(2)
+        PitchBendSensitivity::from_semitones(U7::of(2))
     );
 }
 
@@ -379,7 +390,7 @@ fn the_profile_defaults_the_manager_to_48_and_mpe_1_1_to_2() {
 fn a_profile_zone_answers_one_range_for_its_manager_and_a_member() {
     for range in [
         PitchBendSensitivity::MPE_PROFILE_DEFAULT,
-        PitchBendSensitivity::of(24),
+        PitchBendSensitivity::from_semitones(U7::of(24)),
     ] {
         let z = MpeZoneConfig::profile(MpeZoneSpan::new(ch(3), MpeChannels::of(5)).unwrap(), range);
         for c in MidiChannel::all() {
@@ -552,7 +563,7 @@ mod serde_tests {
         // 2.5 semitones is representable in 7.25 fixed point, not in whole
         // semitones, so a semitone round trip would lose it.
         let fractional = PitchBendSensitivity::from_rpn_bits(
-            PitchBendSensitivity::of(2).to_rpn_bits() + (1 << 24),
+            PitchBendSensitivity::from_semitones(U7::of(2)).to_rpn_bits() + (1 << 24),
         );
         let cfg = ranged(MpeZone::Lower, 4, MASTER, fractional);
         let back: MpeZoneConfig =
@@ -601,7 +612,7 @@ mod serde_tests {
         let set = MpeZones::single(pzone(0, 4).with_channel_response(ChannelResponse::Monophonic))
             .with(MpeZoneConfig::profile(
                 MpeZoneSpan::new(ch(8), MpeChannels::of(8)).unwrap(),
-                PitchBendSensitivity::of(24),
+                PitchBendSensitivity::from_semitones(U7::of(24)),
             ))
             .unwrap();
         let json = serde_json::to_string(&set).unwrap();

@@ -10,15 +10,15 @@
 //! `tests/executor/contract.rs` (and the node crates'); this is the end-to-end case
 //! where the transport, the command queue and PDC all meet.
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
+use tutti_buffers::MaxBlock;
 use tutti_engine::Engine;
 use tutti_fixtures::midi;
 use tutti_graph::NodeKey;
 use tutti_graph::contract::{Latent, Pulse};
 use tutti_graph::{EventIn, EventKind, GraphBuilder, Prepare, Unforkable};
 use tutti_transport::{MotionEvent, Transport};
-use tutti_types::ChannelLayout;
-use tutti_types::MaxBlock;
 use tutti_ump::MidiChannel;
 use tutti_units::Latency;
 use tutti_units::{At, Beat, Frame, SampleRate, Samples};

@@ -1,6 +1,6 @@
 //! A non-finite control value never reaches a recursive node's state.
 //!
-//! Every control cell here is a raw `Arc<AtomicF32>` a host can write
+//! Every control cell here is a raw `Arc<AtomicF64>` a host can write
 //! anything into. A NaN or ±∞ that reached a filter integrator, a delay line,
 //! an LFO phase or an envelope follower would stay there for good — every later
 //! sample is computed from it — so the nodes read a non-finite value as
@@ -15,9 +15,10 @@
 // These tests pin the `f32` instantiation, the session's audio format, so their tolerances are `f32`'s.
 
 use std::sync::atomic::Ordering;
+use tutti_buffers::MaxBlock;
 use tutti_buffers::{Mono, Planes};
-use tutti_types::MaxBlock;
 
+use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_fixtures::Noise;
 use tutti_graph::contract::drive;
 use tutti_graph::{Node, ParamNode, Prepare};
@@ -26,7 +27,7 @@ use tutti_nodes::{
     GateControls, GateNode, InterpolationMode, KeySource, LadderFilterNode, LadderType, MaxDelay,
     ModDelayNode, PhaserControls, PhaserNode, Stages, SvfFilterNode, SvfType,
 };
-use tutti_types::{BusTopology, ChannelLayout, ParamCell};
+use tutti_types::ParamCell;
 use tutti_units::{
     CompressionRatio, Db, Drive, Feedback, Hz, Q, Resonance, SampleRate, Samples, Seconds,
     UnitParam,

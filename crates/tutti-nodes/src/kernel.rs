@@ -9,12 +9,12 @@
 
 use core::ops::Range;
 
+use tutti_buffers::MaxBlock;
 use tutti_buffers::{Float, Mono, Planes, PlanesMut};
 use tutti_graph::{
     BusRole, Cx, HasParam, HasParams, InBus, IntoNode, Io, MAX_PORTS, Node, NodeParts, OutBus,
     ParamNode, ParamSet, Prepare, RtLevel, Shape, Status,
 };
-use tutti_types::MaxBlock;
 use tutti_units::{Latency, Real, SampleRate, Samples, Tail};
 
 use crate::params::{At, ControlSet, HasControl, HasControls, Params};
@@ -786,9 +786,9 @@ mod tests {
     /// detected or passed. A zero-width output has nothing to write.
     #[test]
     fn a_bus_with_no_channels_renders_silence() {
+        use tutti_buffers::BusTopology;
         use tutti_graph::contract::Direct;
         use tutti_graph::{Bus, BusRole, Buses};
-        use tutti_types::BusTopology;
         use tutti_units::Db;
 
         #[derive(Clone, Copy, Debug, PartialEq)]

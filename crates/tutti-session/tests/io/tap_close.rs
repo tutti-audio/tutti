@@ -7,11 +7,11 @@
 //! is a tap opened after the first render and one closed by name
 //! (`Graph::close_tap`).
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::ForkByClone;
 use tutti_nodes::testing::Const;
 use tutti_session::{CloseError, DetachedSession, OutPort, Root, Session};
-use tutti_types::ChannelLayout;
 use tutti_units::{SampleRate, Samples};
 
 /// A detached one-output session playing a constant 0.25.

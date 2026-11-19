@@ -2,8 +2,8 @@
 //! onto the output channels, and (where the bed has an LFE) a bass-managed
 //! send, because a panner never feeds the LFE.
 
+use tutti_buffers::{Bed, Speaker};
 use tutti_graph::{GraphBuilder, NodeKey};
-use tutti_types::{Bed, Speaker};
 use tutti_units::{Azimuth, Hz, Q, UnitParam};
 
 use crate::{SvfFilterNode, SvfType, VbapError, VbapPannerNode};

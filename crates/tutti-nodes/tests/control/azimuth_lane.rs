@@ -7,6 +7,7 @@
 
 use std::sync::Arc;
 
+use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_curve::{Breakpoint, Law, Trajectory};
 use tutti_graph::{
     Cx, Editor, EventOut, Executor, ForkByClone, Io, Node, NodeKey, ParamIn, ParamInput,
@@ -16,7 +17,7 @@ use tutti_graph::{OutPort, Source};
 use tutti_modulation::{Amount, Clock, ControlProgram, Layer, LayerId, Polarity, Waveform};
 use tutti_music::FrameClock;
 use tutti_nodes::automation::ControlLaneNode;
-use tutti_types::{AtomicF32, ChannelLayout, MaxBlock};
+use tutti_types::AtomicF64;
 use tutti_units::{ArcDegrees, Azimuth, Beat, Bpm, Depth, SampleRate, Samples, UnitParam};
 
 const RATE: f64 = 48_000.0;
@@ -86,11 +87,11 @@ fn rig(azimuth: ParamRange, elevation: ParamRange) -> (Editor, Executor) {
 
 /// Wires a lane over `program` to `param` of the probe, with `knob` as its
 /// base.
-fn lane(ed: &mut Editor, key: u64, param: UnitParam, program: &ControlProgram, knob: f32) {
+fn lane(ed: &mut Editor, key: u64, param: UnitParam, program: &ControlProgram, knob: f64) {
     let node = ControlLaneNode::for_unit(
         param,
         program.clone(),
-        Some(Arc::new(AtomicF32::new(knob)).into()),
+        Some(Arc::new(AtomicF64::new(knob)).into()),
         Some(ed.param_range_cell(at(param)).expect("committed")),
     );
     ed.insert(NodeKey(key), "lane", node);

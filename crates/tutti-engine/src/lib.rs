@@ -35,11 +35,11 @@
 //!   crate owns the block seam under it ([`StreamDriver`], [`OutputBlock`]), so a
 //!   driver of any other clock calls the same block.
 //! - **The value vocabulary.** The unit newtypes are `tutti-units`'; the `Source`/`Sink` traits
-//!   and the meter math are `tutti-types`'. Delay compensation (`latency_plan`,
+//!   are `tutti-buffers`'. Delay compensation (`latency_plan`,
 //!   `delays`) is `tutti-graph`'s pure pass, applied by the graph compiler.
 //! - **The worker pool and the pre-roll table.** `tutti-graph`'s.
 //! - **The metronome.** `ClickNode` is `tutti-nodes`'.
-//! - **The root width ceiling.** `tutti_types::MAX_CHANNELS` bounds the engine's
+//! - **The root width ceiling.** `tutti_buffers::MAX_CHANNELS` bounds the engine's
 //!   editor, as it bounds a bus.
 //!
 //! ## Example — a graph, an engine, and a transport
@@ -50,10 +50,10 @@
 //! the whole thing runs headless.
 //!
 //! ```rust
-//! use tutti_types::MaxBlock;
+//! use tutti_buffers::MaxBlock;
 //! use tutti_graph::{OutPort, Source};
 //! use tutti_units::{Beat, Bpm, SampleRate, Samples, Tail};
-//! use tutti_types::ChannelLayout;
+//! use tutti_buffers::ChannelLayout;
 //! use tutti_buffers::InterleavedMut;
 //! use tutti_graph::NodeKey;
 //! use tutti_engine::Engine;

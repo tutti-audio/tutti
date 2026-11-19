@@ -31,7 +31,7 @@ use super::error::convert;
 use super::placement::topology_of;
 use super::riff_guard;
 use crate::DecodeError;
-use tutti_types::{ChannelTopology, Placement};
+use tutti_buffers::{ChannelTopology, Placement};
 
 /// Container metadata read from an audio file without decoding any audio.
 ///
@@ -50,7 +50,7 @@ pub struct WaveMetadata {
     /// Which speaker each channel feeds, in the order the samples are in (as
     /// [`Wave::topology`] and [`FileIn::topology`](crate::FileIn::topology)
     /// give it): a lone channel is the centre, a speaker the vocabulary has no
-    /// name for is [`Speaker::Unknown`](tutti_types::Speaker::Unknown), and a
+    /// name for is [`Speaker::Unknown`](tutti_buffers::Speaker::Unknown), and a
     /// container that states a count and no placement is
     /// [`ChannelTopology::assumed`] ([`placement`](Self::placement)). A caller deciding whether a file
     /// can be placed asks this before it loads or opens the file.
@@ -279,9 +279,9 @@ pub(super) fn sample_rate_of(params: &AudioCodecParameters) -> Result<SampleRate
 /// the file's own sample rate and channel count; nothing is resampled. Its
 /// [`topology`](Wave::topology) is what the container names, in the order
 /// the samples are in: a mono file is the centre, a channel that names no
-/// position is [`Speaker::Unassigned`](tutti_types::Speaker::Unassigned), and
+/// position is [`Speaker::Unassigned`](tutti_buffers::Speaker::Unassigned), and
 /// a position the vocabulary has no name for is
-/// [`Speaker::Unknown`](tutti_types::Speaker::Unknown). Reads and
+/// [`Speaker::Unknown`](tutti_buffers::Speaker::Unknown). Reads and
 /// decodes the whole file on the calling thread, so do not call it on the
 /// audio thread.
 ///

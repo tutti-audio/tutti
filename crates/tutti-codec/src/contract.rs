@@ -4,8 +4,8 @@
 use crate::test_sink::{Flaky, Full};
 use crate::{Format, FormatWriter, Result, Spec};
 use std::io::{BufWriter, Cursor, Seek, Write};
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::Interleaved;
-use tutti_types::ChannelLayout;
 use tutti_units::SampleRate;
 
 fn spec(format: Format) -> Spec {

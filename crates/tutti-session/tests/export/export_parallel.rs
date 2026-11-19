@@ -21,12 +21,12 @@ use std::sync::{Arc, Mutex};
 use std::thread::ThreadId;
 use tutti_session::Root;
 
+use tutti_buffers::ChannelLayout;
 use tutti_export::{Produced, Rendered};
 use tutti_graph::{Cx, ForkByClone, Io, Node, Prepare, Shape, Status};
 use tutti_session::{
     Bounce, BounceTail, ExportClock, InPort, OutPort, Range, Session, Stem, Workers,
 };
-use tutti_types::ChannelLayout;
 use tutti_units::{SampleRate, Samples, Seconds};
 
 const RATE: SampleRate = SampleRate::SR_48K;

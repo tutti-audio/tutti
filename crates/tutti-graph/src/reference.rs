@@ -112,6 +112,7 @@ use tutti_curve::{FadeLaw, declick_frames};
 use tutti_rt::with_no_denormals;
 use tutti_units::{Amplitude, At, Frame, Latency, Mix, Normalized, Samples};
 
+use crate::command::Scheduled;
 use crate::event::{Event, EventKind, EventWriter, SortedEvents};
 use crate::history::TransportHistory;
 use crate::io::Io;
@@ -265,6 +266,8 @@ pub struct Reference<F: Float = f32> {
     /// This block's scheduled deliveries, per port, each with its timeline
     /// position (the tie-break after the offset), in scheduling order.
     landing: BTreeMap<EventIn, Vec<(f64, Event)>>,
+    /// The same for scheduled param events.
+    landing_params: BTreeMap<EventIn, Vec<(f64, ParamEvent)>>,
     late: u64,
     unrouted: u64,
     /// Events a node's writer refused past its declared capacity.
@@ -428,6 +431,7 @@ impl<F: Float> Reference<F> {
             playhead: RefPlayhead::default(),
             suspended: None,
             landing: BTreeMap::new(),
+            landing_params: BTreeMap::new(),
             late: 0,
             unrouted: 0,
             dropped: 0,
@@ -442,13 +446,13 @@ impl<F: Float> Reference<F> {
         }
     }
 
-    /// Delivers `kind` into `to` at `at` — the same contract as
+    /// Delivers `payload` into `to` at `at` — the same contract as
     /// `Editor::schedule`, without the queue: a time already past lands at
     /// offset 0 of the next block and is counted late; one whose port is gone
     /// when it falls due is counted unrouted.
     ///
     /// Returns the command's id, for [`cancel`](Self::cancel).
-    pub fn schedule(&mut self, at: At, to: EventIn, kind: EventKind) -> u64 {
+    pub fn schedule(&mut self, at: At, to: EventIn, payload: impl Into<Scheduled>) -> u64 {
         let id = self.next_id;
         self.next_id += 1;
         let pos = match at {
@@ -459,7 +463,7 @@ impl<F: Float> Reference<F> {
             id,
             at,
             to,
-            kind,
+            payload: payload.into(),
             pos,
         });
         id
@@ -1222,6 +1226,7 @@ impl<F: Float> Reference<F> {
             // scheduling order per port; the gather below appends them after the
             // port's own events.
             self.landing.clear();
+            self.landing_params.clear();
             for &(_, len, t) in &pieces {
                 self.playhead
                     .observe(&t, self.prepare.sample_rate().get(), len);
@@ -1241,18 +1246,27 @@ impl<F: Float> Reference<F> {
                         Offset::ZERO
                     }
                 };
-                let (to, kind, pos) = (cmd.to, cmd.kind, cmd.pos);
-                let has_port = self
-                    .units
-                    .get(&to.node)
-                    .is_some_and(|(_, u)| to.port < u.shape().event_in);
-                if has_port {
-                    self.landing
+                let (to, payload, pos) = (cmd.to, cmd.payload, cmd.pos);
+                let has_port = self.units.get(&to.node).is_some_and(|(_, u)| {
+                    let shape = u.shape();
+                    to.port < shape.event_in
+                        && (shape.param_events || matches!(payload, Scheduled::Event(_)))
+                });
+                if !has_port {
+                    self.unrouted += 1;
+                    continue;
+                }
+                match payload {
+                    Scheduled::Event(kind) => self
+                        .landing
                         .entry(to)
                         .or_default()
-                        .push((pos, Event { offset, kind }));
-                } else {
-                    self.unrouted += 1;
+                        .push((pos, Event { offset, kind })),
+                    Scheduled::Param(kind) => self
+                        .landing_params
+                        .entry(to)
+                        .or_default()
+                        .push((pos, ParamEvent { offset, kind })),
                 }
             }
             self.scheduled = waiting;
@@ -1495,6 +1509,13 @@ impl<F: Float> Reference<F> {
                 }
             }
             edges.sort_by_key(|e| e.offset);
+            // Scheduled param events: one more source, after the edges, by
+            // timeline position at a tie, then scheduling order.
+            let mut landed_params = self.landing_params.remove(&at).unwrap_or_default();
+            landed_params.sort_by(|a, b| a.1.offset.cmp(&b.1.offset).then(a.0.total_cmp(&b.0)));
+            param_edges.sort_by_key(|e| e.offset);
+            param_edges.extend(landed_params.into_iter().map(|(_, e)| e));
+            // Stable: the edges' param events keep their place at a tie.
             param_edges.sort_by_key(|e| e.offset);
             pm_ins.push(param_edges);
             if let Some(n) = shape.event_input_capacity {
@@ -2573,7 +2594,7 @@ struct RefCommand {
     id: u64,
     at: At,
     to: EventIn,
-    kind: EventKind,
+    payload: Scheduled,
     /// Its timeline position, unrounded: the frame it was scheduled for
     /// (rescaled on a rate change), or where a beat resolved. The tie-break
     /// after the offset.

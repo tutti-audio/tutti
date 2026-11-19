@@ -11,7 +11,7 @@
 //!
 //! - [`Mono`] / [`MonoMut`]: one channel;
 //! - [`Interleaved`] / [`InterleavedMut`]: whole frames in one slice, carrying
-//!   their [`ChannelLayout`](tutti_types::ChannelLayout);
+//!   their [`ChannelLayout`];
 //! - [`Planes`] / [`PlanesMut`]: one equal-length slice per channel, and
 //!   [`StereoPlanes`], exactly two;
 //! - [`InputOutput`]: one block's frame count with its input and output planes.
@@ -35,7 +35,7 @@
 //!
 //! ```
 //! use tutti_buffers::{convert, deinterleave, Interleaved, InterleavedMut, PlanesMut};
-//! use tutti_types::ChannelLayout;
+//! use tutti_buffers::ChannelLayout;
 //!
 //! let pcm = [16384i16, -16384, 8192, 0]; // two stereo frames
 //! let mut audio = [0.0f32; 4];
@@ -59,7 +59,11 @@
 
 extern crate alloc;
 
+mod ambisonic;
+mod bed;
 mod bounds;
+mod bus;
+mod channels;
 mod convert;
 mod edge;
 mod error;
@@ -67,12 +71,23 @@ mod fold;
 mod i24;
 mod input_output;
 mod interleaved;
+mod max_block;
 mod mono;
 mod planes;
 mod sample;
 mod stereo;
+mod topology;
 mod wave;
 
+pub use ambisonic::{
+    AmbisonicFormat, AmbisonicNormalization, AmbisonicOrder, AmbisonicOrderOutOfRange,
+    AmbisonicOrdering,
+};
+pub use bed::Bed;
+pub use bus::{BusTooWide, BusTopology};
+pub use channels::{
+    ChannelIndex, ChannelIndexOutOfRange, ChannelLayout, LayoutError, MAX_CHANNELS,
+};
 pub use convert::{
     convert, convert_counting_clips, convert_mono, convert_planes, deinterleave, interleave,
 };
@@ -82,10 +97,12 @@ pub use fold::{Fold, FoldEnd, FoldError, FoldLevel, FoldLevels, FoldSpec};
 pub use i24::{I24, I24OutOfRange};
 pub use input_output::{BlockMut, BlockSide, InputOutput};
 pub use interleaved::{Frames, FramesMut, Interleaved, InterleavedMut};
+pub use max_block::{InvalidMaxBlock, MaxBlock};
 pub use mono::{Mono, MonoMut};
 pub use planes::{PlaneIter, PlaneIterMut, Planes, PlanesMut};
 pub use sample::{ByWidth, Float, FloatWidth, NotAFloat, OverFloat, Sample, SampleFormat};
 pub use stereo::StereoPlanes;
+pub use topology::{ChannelTopology, Placement, Speaker, Speakers, TopologyError};
 pub use wave::Wave;
 
 #[cfg(test)]

@@ -6,6 +6,7 @@
 
 use tutti_buffers::Float;
 use tutti_buffers::InterleavedMut;
+use tutti_buffers::{Bed, ChannelLayout, MaxBlock};
 use tutti_engine::{OutputMap, OutputStrip, RoutingError};
 use tutti_graph::ForkByClone;
 use tutti_nodes::testing::Const;
@@ -13,7 +14,6 @@ use tutti_session::{
     OutPort, OutputPolicy, OutputPolicyError, Root, Session, SessionBuilder, SetRefusal,
     ValueError, ValueErrorKind,
 };
-use tutti_types::{Bed, ChannelLayout, MaxBlock};
 use tutti_units::{Amplitude, SampleRate, Samples};
 
 /// The output policy error a write was refused with.

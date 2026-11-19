@@ -980,7 +980,7 @@ pub fn open_at_output_width(
     width: u16,
 ) -> (Au, u16) {
     use tutti_au_host::{AuBusLayout, StreamConfig};
-    use tutti_types::ChannelLayout;
+    use tutti_buffers::ChannelLayout;
 
     let info = unit.require();
     // Probe `has_input` from a throwaway default instance: `StreamConfig` needs

@@ -16,26 +16,14 @@ workspace = true
 
 [features]
 default = []
-# Enables `Serialize`/`Deserialize` on wire-carried value types: `ChannelLayout`
-# (which rides the plugin-load IPC reply via `BusChannels`) and `ChannelTopology`
-# (which rides the same reply once the format hosts report placement), with the
-# unit newtypes they are built from.
-serde = ["dep:serde", "tutti-units/serde"]
+# `serde` on the unit newtypes.
+serde = ["tutti-units/serde"]
 
 [dependencies]
-# `Param<U>` wraps an `Arc<AtomicF32>` (an `f32` unit) or an `Arc<AtomicF64>`
-# (an `f64` unit, `Seconds`).
+# `Param<U>` wraps an `Arc<AtomicF64>`.
 atomic_float = { version = "1.1", default-features = false, features = ["atomic_f64"] }
 # The unit newtypes every value here is built from.
 tutti-units = { version = "0.0.1", path = "../tutti-units" }
-serde = { version = "1", optional = true, default-features = false, features = ["derive", "alloc"] }
-# The `Error` derive of the crate's error types.
-thiserror = { workspace = true }
-
-[dev-dependencies]
-# The topology `Deserialize` impls are tested against a real format.
-serde_json = "1"
-tutti-fixtures = { path = "../../testing/tutti-fixtures" }
 
 [package.metadata.docs.rs]
 all-features = true

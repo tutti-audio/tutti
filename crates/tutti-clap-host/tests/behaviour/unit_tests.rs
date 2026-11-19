@@ -1339,6 +1339,13 @@ fn test_host_posix_fd_register_and_unregister() {
 
     // Unregister again should fail
     assert!(!unsafe { fd_ext.unregister_fd.unwrap()(raw, 42) });
+
+    // A negative number (`-1` is "no descriptor") names none: refused, and
+    // nothing stored for a later wait to borrow.
+    for fd in [-1, i32::MIN] {
+        assert!(!unsafe { fd_ext.register_fd.unwrap()(raw, fd, CLAP_POSIX_FD_READ) });
+    }
+    assert!(state.posix_fds.entries.lock().unwrap().is_empty());
 }
 
 #[cfg(unix)]

@@ -4,11 +4,12 @@
 
 use tutti_midi_protocol::widen_value;
 use tutti_ump::{Bank, CCNumber, U7, U14, Voice2};
+use tutti_units::Amplitude;
 
 /// The amount of the default modulators CC 91 to reverb send and CC 93 to
 /// chorus send (SF2 2.04 sections 8.4.8 and 8.4.9): 200 tenths of a percent,
 /// which is 20% of full level at the controller's top.
-const SEND_AMOUNT: f32 = 0.2;
+const SEND_AMOUNT: f64 = 0.2;
 
 /// A 14-bit controller with its most significant 7 bits replaced (CC 0 to 31).
 /// The least significant 7 bits go to zero (M1 p.12).
@@ -177,14 +178,14 @@ impl Channel {
     /// the default modulator of SF2 2.04 section 8.4.8 (a linear positive
     /// unipolar source, so the controller maps to `value / 128`, times an
     /// amount of 200 tenths of a percent).
-    pub(crate) fn reverb_send(&self) -> f32 {
-        SEND_AMOUNT * (f32::from(self.reverb_send) / 128_f32)
+    pub(crate) fn reverb_send(&self) -> Amplitude {
+        Amplitude(SEND_AMOUNT * (f64::from(self.reverb_send) / 128.0))
     }
 
     /// What CC 93 adds to a voice's chorus send: the default modulator of
     /// section 8.4.9, as [`reverb_send`](Self::reverb_send).
-    pub(crate) fn chorus_send(&self) -> f32 {
-        SEND_AMOUNT * (f32::from(self.chorus_send) / 128_f32)
+    pub(crate) fn chorus_send(&self) -> Amplitude {
+        Amplitude(SEND_AMOUNT * (f64::from(self.chorus_send) / 128.0))
     }
 }
 

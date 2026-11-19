@@ -9,12 +9,13 @@
 
 use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
-use tutti_types::MaxBlock;
+use tutti_buffers::MaxBlock;
 
 use self::common::{FRAMES_PER_BEAT, at, beat_of, connect, off, on, rolling};
 
 use crate::ledger::NoteLedger;
-use crate::{MidiClipControls, MidiClipNode, TimedMidiEvent};
+use crate::{ClipEvents, MidiClipControls, MidiClipNode, TimedMidiEvent};
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::Float;
 use tutti_fixtures::midi;
 use tutti_graph::NodeKey;
@@ -26,7 +27,6 @@ use tutti_graph::{
 };
 use tutti_graph::{Edge, InPort, OutPort, Source};
 use tutti_music::LoopRange;
-use tutti_types::ChannelLayout;
 use tutti_ump::{CCNumber, MidiChannel, MidiGroup, NoteId, NoteNumber, Ump};
 use tutti_units::{Beat, Bpm, Latency, SampleRate, Samples};
 
@@ -1073,7 +1073,7 @@ fn the_loss_count_is_exact_through_loops_and_replacements() {
         play(&mut exec, &first, passes);
         let (mut ons, mut ccs) = (ons1 * passes as usize, ccs1 * passes as usize);
         if replace {
-            controls.set(second.clone());
+            controls.set(second.iter().copied().collect::<ClipEvents>());
             play(&mut exec, &second, 1);
             ons += ons2;
             ccs += ccs2;

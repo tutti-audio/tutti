@@ -20,8 +20,8 @@
 
 use crate::clap_probe;
 use clap_probe::{ProbeEnv, Rig, load_probe, render};
+use tutti_buffers::MaxBlock;
 use tutti_fixtures::machine_lock;
-use tutti_types::MaxBlock;
 
 use tutti_graph::{Env, ForkMode, Offset, TransportChanges, TransportPosition};
 use tutti_music::LoopRange;

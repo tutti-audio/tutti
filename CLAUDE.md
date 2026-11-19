@@ -38,7 +38,9 @@ std only. A rule the compiler already enforces is not a gate.
   pkg-config`).
 - **Windows:** `cargo xtask check-windows` lints for MSVC from Linux; CI's `clippy
   (windows)` lints natively and also runs `tutti-winmm-ffi`'s and `tutti-midi-hardware`'s
-  tests there, `--features synth-tests` included (no other CI job runs tests on Windows).
+  tests there, `--features synth-tests` included, and `tutti-plugin-ipc-ffi`'s and
+  `tutti-plugin-ipc`'s `transport::` tests (the contract's `contract (windows)` job is not
+  required; no other job runs tests on Windows).
   The synth suites open the GS Wavetable Synth, which needs an audio endpoint: the job
   installs a virtual audio driver first (`.github/scripts/install-virtual-audio.ps1`).
   A vst3 SDK enum constant
@@ -192,7 +194,7 @@ touched.
 - An id type is written with `tutti_types::id!` and minted from a `Mint`.
 - Time and layout have one type each: `tutti_music::LoopRange` for a loop,
   `TimeSignature` and `MeterMap` for meter, `tutti_tempo::TempoMap` for tempo,
-  `ChannelLayout`, `ChannelTopology` and `BusTopology` for channels, and
+  `tutti_buffers::{ChannelLayout, ChannelTopology, BusTopology}` for channels, and
   `tutti_curve::Trajectory<U>` for an automation curve.
 
 ### Unit types
@@ -300,8 +302,8 @@ adapter is [tutti-audio/bevy-tutti](https://github.com/tutti-audio/bevy-tutti).
 
 0. `tutti-alsa-ffi`, `tutti-coremidi-ffi`, `tutti-winmm-ffi`, `tutti-units`,
    `tutti-plugin-ipc-ffi`
-1. `tutti-types`, `tutti-music`, `tutti-ump`
-2. `tutti-midi-protocol`, `tutti-midi-device`, `tutti-curve`, `tutti-buffers`
+1. `tutti-types`, `tutti-music`, `tutti-ump`, `tutti-buffers`
+2. `tutti-midi-protocol`, `tutti-midi-device`, `tutti-curve`
 3. `tutti-rt`
 4. `tutti-graph`, `tutti-dsp`, `tutti-modulation`, `tutti-metering`, `tutti-codec`,
    `tutti-tempo`, `tutti-voicing`, `tutti-sf2`, `tutti-midi-network`

@@ -146,9 +146,8 @@ pub use tutti_rt::PushError;
 pub use tutti_transport::{FadeOut, LoopRegion, MotionEvent, MotionState, Then, TransportCommand};
 
 // Units, channels, buffers and the musical meter.
-pub use tutti_buffers::{Interleaved, InterleavedMut};
+pub use tutti_buffers::{ChannelLayout, ChannelTopology, Interleaved, InterleavedMut, MaxBlock};
 pub use tutti_music::{Meter, MeterMap, TimeSignature};
-pub use tutti_types::{ChannelLayout, ChannelTopology, MaxBlock};
 pub use tutti_units::{
     Amplitude, At, BarNumber, Beat, Bipolar, Bpm, Cents, Db, Depth, Frame, Hz, Normalized, ParamId,
     Q, SampleRate, Samples, Seconds, Semitones,
@@ -177,8 +176,6 @@ pub use tutti_plugin::catalog::{Catalog, Hosting, PluginRef};
 pub use tutti_plugin_types::{PluginFailure, PresetError, PresetId, StateUse};
 #[cfg(all(feature = "session", feature = "midi-hardware"))]
 pub use tutti_session::MidiPolicyTarget;
-#[cfg(all(feature = "session", feature = "midi"))]
-pub use tutti_session::OutputLatencyTarget;
 #[cfg(all(feature = "session", feature = "plugin"))]
 pub use tutti_session::Params as PluginParams;
 #[cfg(all(feature = "session", feature = "plugin"))]
@@ -207,6 +204,8 @@ pub use tutti_session::{
 pub use tutti_session::{
     Bounce, BounceError, BounceLatency, BounceTail, Bounced, Range, Stem, StemGain, Written,
 };
+#[cfg(all(feature = "session", feature = "midi"))]
+pub use tutti_session::{ClipEventsTarget, HarmonyTarget, OutputLatencyTarget};
 #[cfg(all(feature = "session", feature = "device"))]
 pub use tutti_session::{Device, DeviceClock, DeviceEvent, LiveSession};
 #[cfg(all(feature = "session", feature = "capture"))]
@@ -239,8 +238,8 @@ pub mod nodes {
     };
     pub use tutti_nodes::automation::Recorder as AutomationRecorder;
     pub use tutti_nodes::automation::{
-        Automatable, AutomationLaneNode, Breakpoint, ControlLaneNode, LaneControls,
-        LiveAutomationLane, RecordMode, RecordingConfig, Trajectory,
+        AutomationLaneNode, Breakpoint, ControlLaneNode, LaneControls, LiveAutomationLane,
+        RecordMode, RecordingConfig, Trajectory,
     };
     pub use tutti_nodes::{
         Antialiasing, AutoPanConfig, AutoPanControls, AutoPanKernel, AutoPanNode, AutoPanSet,
@@ -293,6 +292,11 @@ pub mod nodes {
 /// `Sink`, `Pull`), channel folds and the range errors.
 pub mod types {
     pub use tutti_buffers::{
+        AmbisonicFormat, AmbisonicNormalization, AmbisonicOrder, AmbisonicOrderOutOfRange,
+        AmbisonicOrdering, Bed, BusTooWide, BusTopology, ChannelIndex, ChannelIndexOutOfRange,
+        InvalidMaxBlock, LayoutError, MAX_CHANNELS, Placement, Speaker, Speakers, TopologyError,
+    };
+    pub use tutti_buffers::{
         BlockMut, BlockSide, ByWidth, Frames, FramesMut, InputOutput, Mono, MonoMut, PlaneIter,
         PlaneIterMut, Planes, PlanesMut,
     };
@@ -312,13 +316,7 @@ pub mod types {
         Count, Counter, CounterWriter, Drained, Gauge, GaugeWriter, LevelSpan, Panicked, PosFrame,
         Reading, Reclaim, RingFloat, RingSample, Setting, SettingWord, Tally, TallyWriter, Words,
     };
-    pub use tutti_types::{
-        AmbisonicFormat, AmbisonicNormalization, AmbisonicOrder, AmbisonicOrderOutOfRange,
-        AmbisonicOrdering, AtomicSampleRate, Bed, BusTooWide, BusTopology, ChannelIndex,
-        ChannelIndexOutOfRange, InvalidMaxBlock, LayoutError, MAX_CHANNELS, Param, Param64,
-        ParamCell, ParamRaw, Speaker, Speakers, TopologyError,
-    };
-    pub use tutti_types::{Mint, Placement};
+    pub use tutti_types::{AtomicSampleRate, Mint, Param, Param64, ParamCell};
     pub use tutti_units::{
         ArcDegrees, Azimuth, Balance, Ballistics, BarCount, BeatDuration, BeatsPerCycle,
         BeatsPerCycleOutOfRange, BipolarOutOfRange, BitDepth, BpmOutOfRange, CentsSpan,
@@ -409,11 +407,12 @@ pub mod session {
         BlockConfig, Bus as BusEdgeKind, BusSink, Channel as ChannelEdgeKind, Committed,
         Connection, Crossfade, CrossfadeId, CrossfadeRefused, EdgeGainError,
         Event as EventEdgeKind, EventEdge, EventTapPort, Fanin, Feeder, Graph, HeardOpen,
-        HeardTapError, Inlet, InletError, LIVE_MAX_BLOCK, MainBus, MainSink, Meters, NotReopened,
-        Outlet, OutputPlacement, OutputPolicy, OutputPolicyError, PHASES, Peer, PeerError,
-        Phase as UpdatePhase, PhaseCx, Policy, Presence, RangeError, Reclaimer, Reclaims,
-        RemoveError, Reopened, ReplaceRefused, Resource, ResourceFact, ResourceId, RootDeclaration,
-        RootReader, RootTopologyStatus, SessionNode, Taps, TempoError, Weighted, Wire, root_width,
+        HeardTapError, Inlet, InletError, LIVE_MAX_BLOCK, MainBus, MainSink, Meters, NodeSlots,
+        NotReopened, Outlet, OutputPlacement, OutputPolicy, OutputPolicyError, PHASES, Peer,
+        PeerError, Phase as UpdatePhase, PhaseCx, Policy, Presence, RangeError, Reclaimer,
+        Reclaims, RemoveError, Reopened, ReplaceRefused, Resource, ResourceFact, ResourceId,
+        RootDeclaration, RootReader, RootTopologyStatus, SessionNode, Taps, TempoError, Weighted,
+        Wire, root_width,
     };
     pub use tutti_transport::{
         AudioTaken, LoopEdit, OfflineTimeline, OfflineTimelineConfig, OfflineTransport, TimedError,
@@ -588,9 +587,9 @@ pub mod modulation {
 #[cfg(feature = "synth")]
 pub mod polysynth {
     pub use tutti_polysynth::{
-        AllocationStrategy, FilterModConfig, FilterType, GlideTime, GlideTimeError, OscillatorType,
-        PolySynth, PortamentoConfig, PortamentoMode, SvfMode, SynthConfig, Tuning, UnisonConfig,
-        UnisonVoices, UnisonVoicesError, VoiceMode,
+        AllocationStrategy, FilterModConfig, FilterType, GlideTime, GlideTimeError, Lane,
+        OscillatorType, PolySynth, PortamentoConfig, PortamentoMode, SvfMode, SynthConfig,
+        SynthFloat, Tuning, UnisonConfig, UnisonVoices, UnisonVoicesError, VoiceMode,
     };
 }
 
@@ -719,14 +718,16 @@ pub mod midi {
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_protocol::NoMidi1Form;
     pub use tutti_midi_protocol::{
-        ChannelResponse, KeyTable, MmcSegmentError, MpeMode, MpeSpec, MpeZone, MpeZoneConfig,
-        MpeZones, MtcRate, NotFrequencyData, NotSysexDeviceId, PitchBendSensitivity, Recipient,
-        SmpteFrameRate, SmpteTimecode, SysexDeviceId, TuningFrequency, UnknownFrameRate,
+        ChannelResponse, InvalidKeyTable, InvalidMpeZones, KeyTable, MmcSegmentError, MpeMode,
+        MpeSpec, MpeZone, MpeZoneConfig, MpeZones, MtcRate, NotFrequencyData, NotSysexDeviceId,
+        PitchBendSensitivity, Recipient, SmpteFrameRate, SmpteTimecode, SysexDeviceId,
+        TuningFrequency,
     };
     pub use tutti_midi_runtime::{
-        ClockKind, ClockOffset, MidiClipControls, MidiClipNode, MidiInputPorts, OffsetOutOfRange,
-        OutputLatency, OutputOffset, OutputTerms, SegmentFault, SyncMessages, SyncOut,
-        SyncOutControls,
+        ClipEvents, ClockKind, ClockOffset, HarmonyChanges, HarmonyControls, HarmonyNode,
+        MidiClipControls, MidiClipNode, MidiInputPorts, OffsetOutOfRange, OutputLatency,
+        OutputOffset, OutputTerms, SegmentFault, SyncMessages, SyncOut, SyncOutControls,
+        TimedHarmony,
     };
     pub use tutti_midi_runtime::{MidiKeys, MidiOut, Outgoing, SendAt, Taken, TimedMidiEvent};
     pub use tutti_ump::{
@@ -784,8 +785,9 @@ pub mod midi {
     };
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_hardware::{
-        ChannelCount, ChannelSwitcher, CiChange, CiPeerInfo, DeviceQuery, MidiHardwareOptions,
-        PeerId, PeerProfiles, ProfileError, ProfileSwitch, ProfilesChange, Switcher, WholeSwitcher,
+        ChannelCount, ChannelSwitcher, CiChange, CiPeerInfo, DeviceQuery, Errno, ErrnoOutOfRange,
+        InputFault, MidiHardwareOptions, PeerId, PeerProfiles, ProfileError, ProfileSwitch,
+        ProfilesChange, Switcher, WholeSwitcher,
     };
     #[cfg(all(feature = "session", feature = "midi-hardware"))]
     pub use tutti_session::{

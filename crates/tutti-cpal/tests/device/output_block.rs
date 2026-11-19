@@ -13,9 +13,9 @@
 //! calling the conversion under test.
 
 use crate::support::{dc_state, dc_state_f64};
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::Sample;
 use tutti_engine::OutputBlock;
-use tutti_types::ChannelLayout;
 
 /// A constant `level` graph rendered into a device buffer of `S`.
 fn render<S: Sample>(level: f32) -> [S; 64] {

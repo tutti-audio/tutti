@@ -162,6 +162,27 @@ fn ensure_not_lost(session: &Session) -> BridgeResult<()> {
     Ok(())
 }
 
+/// Whether a connection's end is the peer leaving: a clean end of stream, or
+/// the socket reset or broken under it. Every other error is the peer
+/// breaking the protocol.
+fn host_left(error: &BridgeError) -> bool {
+    use std::io::ErrorKind::{BrokenPipe, ConnectionAborted, ConnectionReset, UnexpectedEof};
+    /// Windows' `ERROR_PIPE_NOT_CONNECTED`, a named pipe read after the peer
+    /// closed: std maps it to no kind (`ERROR_BROKEN_PIPE`, 109, is
+    /// `BrokenPipe`), and no unix errno is 233.
+    const PIPE_NOT_CONNECTED: i32 = 233;
+    match error {
+        BridgeError::ProcessCrashed => true,
+        BridgeError::Io(e) => {
+            matches!(
+                e.kind(),
+                UnexpectedEof | BrokenPipe | ConnectionReset | ConnectionAborted
+            ) || e.raw_os_error() == Some(PIPE_NOT_CONNECTED)
+        }
+        _ => false,
+    }
+}
+
 /// [`serve`] with a tick every `period`.
 pub(crate) fn serve_every(
     session: &mut Session,
@@ -180,14 +201,15 @@ pub(crate) fn serve_every(
     let mut ready: Vec<Ready> = Vec::new();
     loop {
         ensure_not_lost(session)?;
-        // An audio connection that ends is the host leaving, which the control
-        // connection says too; one that was misused is a peer to stop serving.
+        // An audio connection that ends cleanly is the host leaving, which the
+        // control connection says too. Any other end is a peer that broke the
+        // protocol (a frame that does not decode, an oversize or version-skewed
+        // one) while the control connection goes on: logged here, off the
+        // render thread, and the session ends with it.
         if let Some(error) = render.ended()
-            && matches!(
-                **error,
-                BridgeError::ProtocolError(_) | BridgeError::UnexpectedMessage { .. }
-            )
+            && !host_left(error)
         {
+            tracing::error!("plugin-server: the audio connection failed: {error}; ending");
             return Err(BridgeError::AudioConnection {
                 cause: Arc::clone(error),
             });
@@ -250,6 +272,39 @@ pub(crate) fn serve_every(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **Only the peer leaving is "host left"**: a clean end of stream, a
+    /// broken, reset or aborted connection, or a named pipe read after its
+    /// peer closed (`ERROR_PIPE_NOT_CONNECTED`, which std gives no kind). A
+    /// frame that does not decode, an oversize or skewed one, and any other
+    /// I/O error is the peer breaking the protocol.
+    #[test]
+    fn only_the_peer_leaving_is_host_left() {
+        use std::io::{Error, ErrorKind};
+        let io = |e: Error| BridgeError::Io(e);
+        for kind in [
+            ErrorKind::UnexpectedEof,
+            ErrorKind::BrokenPipe,
+            ErrorKind::ConnectionReset,
+            ErrorKind::ConnectionAborted,
+        ] {
+            assert!(host_left(&io(Error::from(kind))), "{kind:?}");
+        }
+        assert!(host_left(&BridgeError::ProcessCrashed));
+        assert!(host_left(&io(Error::from_raw_os_error(233))));
+        for kind in [
+            ErrorKind::InvalidData,
+            ErrorKind::PermissionDenied,
+            ErrorKind::TimedOut,
+        ] {
+            assert!(!host_left(&io(Error::from(kind))), "{kind:?}");
+        }
+        assert!(!host_left(&BridgeError::ProtocolMismatch {
+            expected: 1,
+            got: 2
+        }));
+        assert!(!host_left(&BridgeError::ProtocolError("junk")));
+    }
 
     const PERIOD: Duration = Duration::from_millis(33);
 

@@ -24,13 +24,13 @@ use std::sync::{Arc, Mutex};
 
 use common::{Kind, Pair, Ringer, SpecBehaviour, TestNode, bits, prepare};
 use tutti_buffers::FoldError;
+use tutti_buffers::{BusTopology, ChannelLayout, ChannelTopology, Speaker};
 use tutti_graph::{
     Bus, BusRole, Buses, Cx, Edge, Editor, Event, EventEdge, EventIn, EventKind, EventOut,
     Executor, FadeLaw, ForkByClone, ForkMode, ForkTarget, GraphInvalid, GraphSpec, InPort, Io,
     ModeError, Node, NodeKey, NodeMode, Offset, OutPort, PassError, Prepare, Shape, Source, Status,
     Topology, TransportPosition, Unforkable, ValidGraph,
 };
-use tutti_types::{BusTopology, ChannelLayout, ChannelTopology, Speaker};
 use tutti_ump::Ump;
 use tutti_units::{Latency, Samples, Tail};
 

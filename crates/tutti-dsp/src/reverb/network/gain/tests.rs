@@ -16,17 +16,10 @@ fn a_loop_that_decays_sixty_decibels_per_trip_has_a_thousandth_gain() {
 fn rt60_from_gain_inverts_loop_gain() {
     for rate in [44_100.0, 48_000.0, 96_000.0] {
         for delay in [1.0f64, 37.5, 1116.0, 40_000.0] {
-            for rt60 in [0.05f32, 0.5, 2.0, 8.0] {
-                let g = loop_gain(
-                    SampleSpan::of(delay),
-                    Seconds::from_f32(rt60),
-                    SampleRate::of(rate),
-                );
-                if g.get() <= 1e-6 {
-                    continue; // below f32's resolution of a gain
-                }
-                let back = rt60_from_gain(g, SampleSpan::of(delay), SampleRate::of(rate)).to_f32();
-                assert!((back - rt60).abs() <= 2e-3 * rt60, "{back} vs {rt60}");
+            for rt60 in [0.05f64, 0.5, 2.0, 8.0] {
+                let g = loop_gain(SampleSpan::of(delay), Seconds(rt60), SampleRate::of(rate));
+                let back = rt60_from_gain(g, SampleSpan::of(delay), SampleRate::of(rate)).get();
+                assert!((back - rt60).abs() <= 1e-9 * rt60, "{back} vs {rt60}");
             }
         }
     }
@@ -62,27 +55,27 @@ fn the_edges_of_the_formula() {
         Amplitude::UNITY
     );
     assert_eq!(
-        rt60_from_gain(Amplitude(0.0), SampleSpan::of(100.0), RATE).to_f32(),
+        rt60_from_gain(Amplitude(0.0), SampleSpan::of(100.0), RATE).get(),
         0.0
     );
     assert_eq!(
-        rt60_from_gain(Amplitude(1.0), SampleSpan::of(100.0), RATE).to_f32(),
-        f32::INFINITY
+        rt60_from_gain(Amplitude(1.0), SampleSpan::of(100.0), RATE).get(),
+        f64::INFINITY
     );
     assert_eq!(
-        rt60_from_gain(Amplitude(1.2), SampleSpan::of(100.0), RATE).to_f32(),
-        f32::INFINITY
+        rt60_from_gain(Amplitude(1.2), SampleSpan::of(100.0), RATE).get(),
+        f64::INFINITY
     );
     assert_eq!(
-        rt60_from_gain(Amplitude(f64::NAN), SampleSpan::of(100.0), RATE).to_f32(),
-        f32::INFINITY
+        rt60_from_gain(Amplitude(f64::NAN), SampleSpan::of(100.0), RATE).get(),
+        f64::INFINITY
     );
     assert_eq!(
-        rt60_from_gain(Amplitude(-0.5), SampleSpan::of(100.0), RATE).to_f32(),
-        f32::INFINITY
+        rt60_from_gain(Amplitude(-0.5), SampleSpan::of(100.0), RATE).get(),
+        f64::INFINITY
     );
     assert_eq!(
-        rt60_from_gain(Amplitude(0.5), SampleSpan::of(0.0), RATE).to_f32(),
+        rt60_from_gain(Amplitude(0.5), SampleSpan::of(0.0), RATE).get(),
         0.0
     );
 }

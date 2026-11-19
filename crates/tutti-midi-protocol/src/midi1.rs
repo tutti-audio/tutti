@@ -3,7 +3,7 @@
 
 use tutti_ump::{Message, Midi1Bytes, Ump, Voice1, Voice2};
 
-use crate::{narrow_bend, narrow_note_on_velocity, narrow_value, narrow_velocity};
+use crate::{ExtremeValues, narrow_bend, narrow_note_on_velocity, narrow_value, narrow_velocity};
 
 /// Why a MIDI 2.0 channel voice message has no single MIDI 1.0 message
 /// ([`narrow`]'s refusal): the kind of message, as M2-104 Appendix D.2 groups
@@ -25,8 +25,8 @@ pub enum NoMidi1Form {
     PerNoteManagement,
 }
 
-/// The Default Translation; [`Narrower::with_mode`](crate::Narrower::with_mode) and
-/// [`ExtremeValues::narrow`](crate::ExtremeValues::narrow) run the alternate ones.
+/// The Default Translation; [`narrow_with`] and
+/// [`Narrower::with_mode`](crate::Narrower::with_mode) run the alternate ones.
 ///
 /// `voice` at MIDI 1.0 resolution (M2-115 section 3.4), or the [`NoMidi1Form`]
 /// that says why MIDI 1.0 has no single message for it: per-note controllers
@@ -43,26 +43,46 @@ pub enum NoMidi1Form {
 /// [`NoMidi1Form`] for a per-note message, a registered or assignable
 /// controller, or per-note management.
 pub fn narrow(voice: Voice2) -> Result<Voice1, NoMidi1Form> {
+    narrow_with(ExtremeValues::Scaled, voice)
+}
+
+/// [`narrow`] with the extreme values of `extremes` (M2-104 D.1.5): with
+/// [`Avoided`](ExtremeValues::Avoided), a value above its minimum narrows to at
+/// least 1 and one below its maximum to at most the maximum less 1.
+///
+/// # Errors
+///
+/// [`NoMidi1Form`] for a per-note message, a registered or assignable
+/// controller, or per-note management, as for [`narrow`].
+pub fn narrow_with(extremes: ExtremeValues, voice: Voice2) -> Result<Voice1, NoMidi1Form> {
     Ok(match voice {
         Voice2::NoteOn { note, velocity, .. } => Voice1::NoteOn {
             note,
-            velocity: narrow_note_on_velocity(velocity),
+            velocity: extremes.seven(
+                narrow_note_on_velocity(velocity),
+                u32::from(velocity.get()),
+                16,
+            ),
         },
         Voice2::NoteOff { note, velocity, .. } => Voice1::NoteOff {
             note,
-            velocity: narrow_velocity(velocity),
+            velocity: extremes.seven(narrow_velocity(velocity), u32::from(velocity.get()), 16),
         },
         Voice2::PolyPressure { note, value } => Voice1::PolyPressure {
             note,
-            pressure: narrow_value(value),
+            pressure: extremes.seven(narrow_value(value), value.get(), 32),
         },
         Voice2::ControlChange { controller, value } => Voice1::ControlChange {
             controller,
-            value: narrow_value(value),
+            value: extremes.seven(narrow_value(value), value.get(), 32),
         },
         Voice2::ProgramChange { program, .. } => Voice1::ProgramChange(program),
-        Voice2::ChannelPressure(value) => Voice1::ChannelPressure(narrow_value(value)),
-        Voice2::PitchBend(bend) => Voice1::PitchBend(narrow_bend(bend)),
+        Voice2::ChannelPressure(value) => {
+            Voice1::ChannelPressure(extremes.seven(narrow_value(value), value.get(), 32))
+        }
+        Voice2::PitchBend(bend) => {
+            Voice1::PitchBend(extremes.fourteen(narrow_bend(bend), bend.get()))
+        }
         Voice2::RegisteredPerNote { .. }
         | Voice2::AssignablePerNote { .. }
         | Voice2::PerNotePitchBend { .. } => return Err(NoMidi1Form::PerNote),

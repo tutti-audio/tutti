@@ -1,4 +1,4 @@
-use tutti_types::{BusTopology, ChannelIndex};
+use tutti_buffers::{BusTopology, ChannelIndex};
 use tutti_units::{Feedback, PhaseIncrement, Seconds};
 
 use super::*;

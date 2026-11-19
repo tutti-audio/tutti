@@ -5,13 +5,13 @@
 // These tests pin the `f32` instantiation, the session's audio format, so their tolerances are `f32`'s.
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use tutti_buffers::MaxBlock;
 use tutti_buffers::Planes;
-use tutti_types::MaxBlock;
 
+use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_graph::contract::drive;
 use tutti_graph::{Node, Prepare};
 use tutti_nodes::*;
-use tutti_types::{BusTopology, ChannelLayout};
 use tutti_units::{Db, Feedback, Hz, Q, SampleRate, Samples, Seconds};
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -26,8 +26,8 @@ fn compressor_at_twelve() -> CompressorControls {
     CompressorControls {
         threshold: Db(-12.0),
         ratio: tutti_units::CompressionRatio::new_clamped(4.0),
-        attack: Seconds::from_f32(0.01),
-        release: Seconds::from_f32(0.1),
+        attack: Seconds(0.01),
+        release: Seconds(0.1),
         ..CompressorControls::DEFAULT
     }
 }
@@ -71,7 +71,7 @@ fn probe(name: &str, bad: f32, make: impl FnOnce() -> Box<dyn Node>) -> Option<S
 fn sweep() {
     let mut bad_cases = vec![];
     let d = |v: f32| Db(f64::from(v));
-    let s = |v: f32| Seconds::from_f32(v);
+    let s = |v: f32| Seconds(f64::from(v));
     for (b, bz) in BAD.into_iter().zip(BAD_HZ) {
         let mut add = |r: Option<String>| bad_cases.extend(r);
         for pos in 0..4 {

@@ -2,8 +2,8 @@
 //! topology, so how a root of known or bare channels reaches a device or a
 //! file of which only the width is known lives here, once.
 
+use tutti_buffers::{ChannelLayout, ChannelTopology, Speaker};
 use tutti_buffers::{Float, Fold, FoldEnd, FoldError, FoldLevels};
-use tutti_types::{ChannelLayout, ChannelTopology, Speaker};
 
 /// The generation of the graph root: each commit that changes the root's
 /// declaration carries the next one.

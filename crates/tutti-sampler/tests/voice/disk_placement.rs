@@ -20,16 +20,16 @@ use tutti_sampler::VoiceWindow;
 use tutti_sampler::testing::loop_frames;
 
 use std::path::Path;
-use tutti_types::MaxBlock;
+use tutti_buffers::MaxBlock;
 
 use tutti_buffers::FoldError;
+use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_graph::contract;
 use tutti_sampler::testing::{MockTransport, settle};
 use tutti_sampler::{
     ByHand, Direction, DiskStreamer, DiskVoice, Loop, OpenError, PlaceError, Placement, Stream,
     StreamReader,
 };
-use tutti_types::{ChannelLayout, ChannelTopology};
 use tutti_units::{Beat, Bpm, SampleRate};
 
 const SR: f64 = 48_000.0;
@@ -170,7 +170,7 @@ fn a_wav_order_seven_one_is_permuted_to_the_engines_order() {
     let (_dir, _streamer, reader) = stream(8, WAV_7_1);
     let voice = voice_of(reader);
     let file = {
-        use tutti_types::Speaker::*;
+        use tutti_buffers::Speaker::*;
         ChannelTopology::new([
             FrontLeft,
             FrontRight,
@@ -286,12 +286,12 @@ struct Fixture {
     mask: u32,
     /// The decoder's names for the file's channels, pinned so a change in how
     /// a mask-less file is named fails here and not as a wrong figure.
-    speakers: &'static [tutti_types::Speaker],
+    speakers: &'static [tutti_buffers::Speaker],
     want: [f32; 8],
 }
 
 fn fixtures() -> [Fixture; 3] {
-    use tutti_types::Speaker::*;
+    use tutti_buffers::Speaker::*;
     let m = <f32 as tutti_buffers::Float>::MINUS_3_DB;
     let v = value;
     [
@@ -473,7 +473,7 @@ fn fork(voice: &DiskVoice) -> Box<dyn tutti_graph::Node> {
     node.prepare(
         &tutti_graph::Prepare::new(
             SampleRate::of(SR),
-            tutti_types::MaxBlock::of(tutti_units::Samples(BLOCK)),
+            tutti_buffers::MaxBlock::of(tutti_units::Samples(BLOCK)),
         )
         .with_render_mode(tutti_graph::RenderMode::Offline),
     );
@@ -546,7 +546,7 @@ fn a_fork_placed_read_is_allocation_free() {
                 &mut *direct.node,
                 &tutti_graph::Prepare::new(
                     SampleRate::of(SR),
-                    tutti_types::MaxBlock::of(tutti_units::Samples(BLOCK)),
+                    tutti_buffers::MaxBlock::of(tutti_units::Samples(BLOCK)),
                 )
                 .with_render_mode(tutti_graph::RenderMode::Offline),
             );

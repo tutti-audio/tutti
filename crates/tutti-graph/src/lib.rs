@@ -16,10 +16,10 @@
 //!
 //! ```
 //! # use tutti_buffers::Planes;
-//! use tutti_types::MaxBlock;
+//! use tutti_buffers::MaxBlock;
 //! use tutti_graph::{Cx, ForkByClone, GraphBuilder, Io, Node, Prepare, Shape, Status};
 //! use tutti_units::{SampleRate, Samples};
-//! use tutti_types::ChannelLayout;
+//! use tutti_buffers::ChannelLayout;
 //!
 //! /// A one-pole lowpass.
 //! #[derive(Clone)]
@@ -115,7 +115,7 @@
 //! # use tutti_buffers::Planes;
 //! use tutti_graph::{Cx, ForkByClone, GraphBuilder, Io, Node, Prepare, Shape, Status};
 //! use tutti_units::{SampleRate, Samples};
-//! use tutti_types::{ChannelLayout, MaxBlock};
+//! use tutti_buffers::{ChannelLayout, MaxBlock};
 //!
 //! #[derive(Clone)]
 //! struct Gain(f32);
@@ -152,7 +152,7 @@
 //! # use tutti_buffers::{Float, Planes};
 //! use tutti_graph::{Cx, ForkByClone, GraphBuilder, Io, Node, Prepare, Shape, Status};
 //! use tutti_units::{SampleRate, Samples};
-//! use tutti_types::{ChannelLayout, MaxBlock};
+//! use tutti_buffers::{ChannelLayout, MaxBlock};
 //!
 //! #[derive(Clone)]
 //! struct Half;
@@ -199,7 +199,7 @@
 //! ```
 //! use tutti_graph::{Bus, BusRole, Buses, Cost, Cx, InBus, Io, Node, Prepare, Shape, Status};
 //! use tutti_units::{Latency, Samples, Tail};
-//! use tutti_types::{BusTopology, ChannelLayout};
+//! use tutti_buffers::{BusTopology, ChannelLayout};
 //!
 //! struct Ducker {
 //!     key: InBus,
@@ -269,7 +269,8 @@
 //!     declare_params,
 //! };
 //! use tutti_units::{Amplitude, Real, SampleRate, Samples, UnitParam};
-//! use tutti_types::{ChannelLayout, MaxBlock, Param};
+//! use tutti_types::Param;
+//! use tutti_buffers::{ChannelLayout, MaxBlock};
 //!
 //! #[derive(Clone)]
 //! struct Volume {
@@ -336,7 +337,7 @@
 //!     Cx, Event, EventKind, ForkByClone, GraphBuilder, Io, Node, Offset, Prepare, Shape, Status,
 //! };
 //! use tutti_units::{SampleRate, Samples};
-//! use tutti_types::{ChannelLayout, MaxBlock};
+//! use tutti_buffers::{ChannelLayout, MaxBlock};
 //! use tutti_ump::{Message, MidiChannel, NoteNumber, U7, Ump, Voice1};
 //!
 //! // A declared capacity is never zero: the type says so.
@@ -416,7 +417,7 @@
 //! # use tutti_buffers::Planes;
 //! use tutti_graph::{Cx, ForkByClone, GraphBuilder, Io, Node, Prepare, Shape, Status};
 //! use tutti_units::{SampleRate, Samples, Tail};
-//! use tutti_types::{ChannelLayout, MaxBlock};
+//! use tutti_buffers::{ChannelLayout, MaxBlock};
 //!
 //! /// A feedback echo whose ring-out is `taps` repeats of `period` frames.
 //! #[derive(Clone)]
@@ -475,7 +476,7 @@
 //!   [`Latency`](tutti_units::Latency), which a musical delay in `Samples` or
 //!   `Seconds` cannot be passed as, so the graph's delay compensation (PDC)
 //!   never drags parallel paths behind an echo.
-//! - **Blocks never exceed the [`MaxBlock`](tutti_types::MaxBlock) a node was
+//! - **Blocks never exceed the [`MaxBlock`](tutti_buffers::MaxBlock) a node was
 //!   prepared with** ([`Prepare::max_block`]); every [`Io`] is at most that long,
 //!   so a node that sizes its scratch from it never clamps.
 //! - **Block offsets are not frames.** An event carries an [`Offset`] inside
@@ -537,7 +538,8 @@
 //!   commands bring, and the executor counts the rest as it counts a refused
 //!   write ([`Executor::dropped_event_count`]). The bound holds however the
 //!   edges change at a commit.
-//! - [`Editor::schedule`] delivers an event on an exact frame or beat
+//! - [`Editor::schedule`] delivers an event, or a param ramp or segment to a
+//!   node that declares [`Shape::param_events`], on an exact frame or beat
 //!   ([`At`](tutti_units::At)). A late command lands at the start of the next
 //!   block and is counted ([`Executor::late_command_count`]), never dropped.
 //! - Each node declares how finely it honours event offsets
@@ -690,7 +692,7 @@ mod time;
 mod wake;
 
 pub use builder::{GraphBuilder, Renderer, Solo};
-pub use command::{CANCEL_CAPACITY, COMMAND_CAPACITY, CommandId, ScheduleError};
+pub use command::{CANCEL_CAPACITY, COMMAND_CAPACITY, CommandId, ScheduleError, Scheduled};
 pub use compile::{CompileError, CycleEdge, Shapes, VerifyError, compile};
 pub use controls::{ParamFork, ParamNode, ParamSet, ParamSetBuilder, Params, param_parts};
 pub use cost::{Cost, Schedule, Work};

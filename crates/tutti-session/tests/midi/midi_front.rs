@@ -5,6 +5,7 @@
 use std::sync::Arc;
 
 use crate::common::{Seen, Tap, blocks, offline};
+use tutti_buffers::ChannelLayout;
 use tutti_fixtures::midi;
 use tutti_graph::{
     Cx, EventCapacity, ForkByClone, Instrument, IntoNode, Io, Node, NodeParts, Prepare, Shape,
@@ -12,7 +13,6 @@ use tutti_graph::{
 };
 use tutti_midi_runtime::TimedMidiEvent;
 use tutti_session::{MidiError, Session, SessionNode, TakePlacement};
-use tutti_types::ChannelLayout;
 #[cfg(feature = "serde")]
 use tutti_ump::MidiGroup;
 use tutti_ump::{MidiChannel, NoteNumber, NoteVelocity, Voice2};

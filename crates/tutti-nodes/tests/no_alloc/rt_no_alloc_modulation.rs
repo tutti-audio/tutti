@@ -11,6 +11,8 @@
 //! lanes, and 200 lanes of every layer kind with republishes, knob writes
 //! and range edits between blocks.
 
+use tutti_buffers::MaxBlock;
+use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_fixtures::midi;
 use tutti_graph::contract::{BlockRig, Direct};
 use tutti_graph::{IntoNode, Node, ParamNode, ParamSet};
@@ -18,8 +20,6 @@ use tutti_nodes::{
     ChannelTimes, DelayControls, DelayLayout, DelayNode, InterpolationMode, LfoNode, LfoShape,
     MaxDelay, ModDelayNode, PhaserControls, PhaserNode, Routing, Stages, Stagger, SweepRange,
 };
-use tutti_types::MaxBlock;
-use tutti_types::{BusTopology, ChannelLayout};
 use tutti_ump::{MidiChannel, U7};
 use tutti_units::{
     Ballistics, BeatsPerCycle, Feedback, Hz, PhaseIncrement, Real, SampleRate, Seconds, UnitParam,
@@ -722,10 +722,10 @@ fn lane_for(
 ) -> tutti_nodes::automation::ControlLaneNode {
     use std::sync::Arc;
     use tutti_nodes::automation::ControlLaneNode as L;
-    use tutti_types::AtomicF32;
+    use tutti_types::AtomicF64;
     use tutti_units::{Db, Depth, Feedback, Hz, Mix, ParamKey, Q};
     let p = lane_program(k, 0);
-    let knob = Some(Arc::new(AtomicF32::new(400.0 + k as f32)).into());
+    let knob = Some(Arc::new(AtomicF64::new(400.0 + k as f64)).into());
     let r = Some(range);
     match k % 8 {
         0 => L::for_unit(ParamKey::<Hz>::CUTOFF.addr(), p, knob, r),
@@ -1030,7 +1030,7 @@ fn signal_graph(max: usize) -> (tutti_graph::Editor, tutti_graph::Executor) {
     };
     use tutti_nodes::automation::ControlLaneNode;
     use tutti_nodes::{EnvelopeFollowerNode, NoteEnvelopeNode};
-    use tutti_types::AtomicF32;
+    use tutti_types::AtomicF64;
     use tutti_units::{Amplitude, Depth, Hz, ParamKey, Samples, Seconds, UnitParam};
     let (mut ed, exec) =
         tutti_graph::Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(max))));
@@ -1066,8 +1066,7 @@ fn signal_graph(max: usize) -> (tutti_graph::Editor, tutti_graph::Executor) {
             );
             let follower = EnvelopeFollowerNode::new(
                 id,
-                Ballistics::new(Seconds::from_f32(0.001 + 0.0005 * k as f32), Seconds(0.03))
-                    .unwrap(),
+                Ballistics::new(Seconds(0.001 + 0.0005 * k as f64), Seconds(0.03)).unwrap(),
                 ChannelLayout::STEREO,
             );
             ed.insert(node, "follower", ForkByClone(follower));
@@ -1113,7 +1112,7 @@ fn signal_graph(max: usize) -> (tutti_graph::Editor, tutti_graph::Executor) {
         let lane = ControlLaneNode::for_unit(
             ParamKey::<Hz>::CUTOFF.addr(),
             ControlProgram::new(None, vec![], vec![input]).expect("valid"),
-            Some(Arc::new(AtomicF32::new(0.5)).into()),
+            Some(Arc::new(AtomicF64::new(0.5)).into()),
             Some(ed.param_range_cell(cutoff(k)).expect("committed")),
         );
         let lane_key = NodeKey(6000 + k as u64);

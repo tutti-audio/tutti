@@ -22,14 +22,15 @@
 //! The allocation gate is in `rt_no_alloc_engine.rs`.
 
 use std::sync::{Arc, Mutex};
+use tutti_buffers::MaxBlock;
 use tutti_fixtures::signal::bits;
-use tutti_types::MaxBlock;
 
 use crate::support;
 
 use support::{Change, Segment, beat_of_frame, model_beats, step_map};
 use tutti_engine::Engine;
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_fixtures::midi;
 use tutti_graph::NodeKey;
@@ -42,7 +43,6 @@ use tutti_music::LoopRange;
 use tutti_transport::{
     FadeOut, LoopEdit, MotionEvent, Then, Timeline, Transport, TransportCommand,
 };
-use tutti_types::ChannelLayout;
 use tutti_ump::{MidiChannel, U7};
 use tutti_units::{At, Beat, Bpm, Frame, SampleRate, Samples, Tail};
 
@@ -1014,9 +1014,9 @@ fn a_declick_stop_stops_the_transport_on_its_frame() {
 /// editor's. Never silence.
 #[test]
 fn a_graph_engine_refuses_more_outputs_than_it_folds() {
+    use tutti_buffers::MAX_CHANNELS;
     use tutti_engine::GraphEngineError;
     use tutti_graph::CommitError;
-    use tutti_types::MAX_CHANNELS;
 
     let transport = Transport::new(SampleRate::of(SR));
     let (mut ed, exec) = Editor::new(prepare(256));

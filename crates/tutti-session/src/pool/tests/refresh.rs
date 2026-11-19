@@ -58,7 +58,12 @@ fn read(
 }
 
 fn bytes(session: &crate::DetachedSession, key: &'static str) -> Vec<u8> {
-    session.pool.handle::<_, Read>(&key).unwrap().to_vec()
+    session
+        .pool
+        .entries
+        .handle::<_, Read>(&key)
+        .unwrap()
+        .to_vec()
 }
 
 /// Runs a refresh to its landing: the stat job, then the update that lands it.
@@ -254,6 +259,7 @@ fn an_entry_with_no_stamp_is_stamped_by_the_refresh_and_loads_again() {
     let _ = events(&mut s);
     assert!(
         s.pool
+            .entries
             .stamped_files()
             .iter()
             .all(|(_, _, was)| was.is_none())
@@ -279,6 +285,7 @@ fn a_reload_never_copies_the_stale_value_of_a_held_sibling() {
     let _ = events(&mut s);
     let _hold = s
         .pool
+        .entries
         .hold(&PoolKey::new(&"b"), crate::pool::table::HoldKind::Node)
         .unwrap();
     s.pool(read("a", &path, &reads)).unwrap();

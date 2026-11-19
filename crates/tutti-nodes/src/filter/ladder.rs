@@ -9,10 +9,10 @@
 //! ([`LadderBank`]); the node is a [`KernelNode`] over it, and this file holds the
 //! kernel, the cells and how a block reads them.
 
+use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{Glide, LadderBank, LadderControls, LadderDesign, LadderModel, LadderType, Lanes};
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
-use tutti_types::{BusTopology, ChannelLayout, MaxBlock};
 use tutti_units::{Drive, Hz, Resonance, SampleRate, Tail};
 
 use super::filter_bus;

@@ -17,9 +17,9 @@
 use std::hint::black_box;
 
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::Interleaved;
 use tutti_rt::{PosReader, PosRing, PosWriter};
-use tutti_types::ChannelLayout;
 use tutti_units::Samples;
 
 /// Frames per block.

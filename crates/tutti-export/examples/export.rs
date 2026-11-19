@@ -11,6 +11,7 @@
 //! Run: `cargo run --example export -- <outdir>`
 
 use tutti_buffers::Interleaved;
+use tutti_buffers::{Bed, ChannelLayout};
 use tutti_codec::{FlacLevel, Format, IntDepth, Pcm, Quality};
 use tutti_export::{
     BufferTarget, Control, FileTarget, Job, Normalize, NormalizeSpec, Output, Produced,
@@ -20,7 +21,6 @@ use tutti_graph::GraphBuilder;
 use tutti_measure::{LoudnessConfig, measure_loudness};
 use tutti_nodes::testing::{Const, Osc};
 use tutti_transport::FrozenClock;
-use tutti_types::{Bed, ChannelLayout};
 use tutti_units::Db;
 use tutti_units::{Amplitude, Hz, SampleRate, Samples, Seconds};
 

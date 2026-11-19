@@ -7,8 +7,8 @@
 //! meter is an op in the graph's plan, not this callback's.
 
 use crate::fixtures::{dc_state, rolling_state};
+use tutti_buffers::ChannelLayout;
 use tutti_engine::{MAX_FRAMES, OutputBlock};
-use tutti_types::ChannelLayout;
 
 /// **An over-sized callback renders its head and silences its tail.**
 ///

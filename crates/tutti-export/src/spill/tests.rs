@@ -1,7 +1,7 @@
 use super::*;
 use crate::render::Replay;
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
-use tutti_types::ChannelLayout;
 
 const STEREO: ChannelLayout = ChannelLayout::STEREO;
 

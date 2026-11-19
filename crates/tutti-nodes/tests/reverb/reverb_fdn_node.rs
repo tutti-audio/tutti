@@ -5,9 +5,10 @@
 //! another reverb's render.
 
 use std::sync::Arc;
+use tutti_buffers::MaxBlock;
 use tutti_buffers::Planes;
-use tutti_types::MaxBlock;
 
+use tutti_buffers::ChannelLayout;
 use tutti_dsp::{FdnControls, FdnLayout, FreeverbControls, MaxDecay, Network, System};
 use tutti_graph::contract::{
     Driven, assert_honest_tail, assert_param_fork, drive, drive_input, prepared,
@@ -19,7 +20,7 @@ use tutti_graph::{
 use tutti_modulation::ControlProgram;
 use tutti_nodes::automation::ControlLaneNode;
 use tutti_nodes::{FdnNode, FreeverbNode};
-use tutti_types::{AtomicF32, ChannelLayout};
+use tutti_types::AtomicF64;
 use tutti_units::{
     Db, Depth, Frame, Latency, Mix, SampleRate, Samples, Seconds, Tail, UnitAddr, UnitParam,
 };
@@ -269,7 +270,7 @@ fn the_peak_of_a_driven_control_sets_the_tail() {
 /// at 0.3 s.
 #[test]
 fn a_lane_driving_the_decay_changes_how_long_it_rings() {
-    let ring = |decay: f32| -> f64 {
+    let ring = |decay: f64| -> f64 {
         let node = live(plain(), FdnControls::DEFAULT);
         let mut g = GraphBuilder::new(ChannelLayout::MONO, ChannelLayout::STEREO);
         let (n, _) = g.add_with_controls(node);
@@ -286,7 +287,7 @@ fn a_lane_driving_the_decay_changes_how_long_it_rings() {
         let lane = ControlLaneNode::for_unit(
             UnitParam::Decay,
             program,
-            Some(Arc::new(AtomicF32::new(decay)).into()),
+            Some(Arc::new(AtomicF64::new(decay)).into()),
             None,
         );
         let key = tutti_graph::NodeKey(9_000);

@@ -15,9 +15,9 @@ mod tests;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
+use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_buffers::{Float, Wave};
 use tutti_measure::{Measure, Meter};
-use tutti_types::{ChannelLayout, ChannelTopology};
 use tutti_units::{SampleRate, Samples};
 
 pub use feed::{AudioContext, AudioInput};

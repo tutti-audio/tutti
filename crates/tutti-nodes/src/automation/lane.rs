@@ -3,12 +3,12 @@
 
 use std::sync::Arc;
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::Float;
 use tutti_graph::{
     Cx, ForkCause, ForkMode, ForkSource, Forked, IntoNode, Io, Node, NodeParts, Prepare, Shape,
     Status, control_in,
 };
-use tutti_types::ChannelLayout;
 use tutti_units::{Beat, Latency, Tail};
 
 use super::Curve;
@@ -59,7 +59,7 @@ use super::Curve;
 /// stopped there), which is halfway along it.
 ///
 /// ```
-/// use tutti_types::MaxBlock;
+/// use tutti_buffers::MaxBlock;
 /// use tutti_units::{Amplitude, Beat, Bpm, SampleRate, Samples};
 /// use tutti_graph::{Prepare, Solo, TransportPosition};
 /// use tutti_nodes::automation::{Trajectory, AutomationLaneNode, Breakpoint};
@@ -201,10 +201,10 @@ impl Clone for AutomationLaneNode {
 mod tests {
     use super::*;
     use std::sync::atomic::Ordering;
+    use tutti_buffers::MaxBlock;
     use tutti_curve::{Breakpoint, Trajectory};
     use tutti_graph::{Solo, TransportPosition};
-    use tutti_types::AtomicF32;
-    use tutti_types::MaxBlock;
+    use tutti_types::AtomicF64;
     use tutti_units::{Bpm, Hz, SampleRate, Samples};
 
     fn ramp_trajectory() -> Trajectory<Hz> {
@@ -366,7 +366,7 @@ mod tests {
     }
 
     /// A curve that reads state written after it was built, and freezes it.
-    struct Live(Arc<AtomicF32>);
+    struct Live(Arc<AtomicF64>);
 
     struct Fixed(f64);
 
@@ -378,11 +378,11 @@ mod tests {
 
     impl Curve for Live {
         fn value_at(&self, _: Beat) -> Option<f64> {
-            Some(f64::from(self.0.load(Ordering::Acquire)))
+            Some(self.0.load(Ordering::Acquire))
         }
 
         fn frozen(&self) -> Option<Arc<dyn Curve>> {
-            Some(Arc::new(Fixed(f64::from(self.0.load(Ordering::Acquire)))))
+            Some(Arc::new(Fixed(self.0.load(Ordering::Acquire))))
         }
     }
 
@@ -390,7 +390,7 @@ mod tests {
     /// after the fork does not reach it.
     #[test]
     fn a_fork_freezes_a_live_curve() {
-        let cell = Arc::new(AtomicF32::new(0.25));
+        let cell = Arc::new(AtomicF64::new(0.25));
         let lane = AutomationLaneNode::new(Live(Arc::clone(&cell)));
         let fork = lane.fork_fresh();
         cell.store(0.75, Ordering::Release);

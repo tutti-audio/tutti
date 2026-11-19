@@ -75,7 +75,7 @@ fn svf_filter_mono_process_is_allocation_free() {
 fn svf_filter_stereo_process_is_allocation_free() {
     gate(
         SvfFilterNode::<f32>::with_channels(
-            tutti_types::ChannelLayout::STEREO,
+            tutti_buffers::ChannelLayout::STEREO,
             SvfType::HighPass,
             Hz::new(200.0),
             Q::new(0.707),

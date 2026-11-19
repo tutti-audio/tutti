@@ -22,14 +22,14 @@ use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tutti_buffers::Float;
-use tutti_types::MaxBlock;
+use tutti_buffers::MaxBlock;
 
 use crate::NodeKey;
 use crate::{
     Cx, Editor, Event, EventKind, Executor, Fade, Io, Node, Plan, Prepare, Reference, Shape,
     Shapes, Status, TransportChanges, TransportPosition, ValidGraph, compile,
 };
-use tutti_types::ChannelLayout;
+use tutti_buffers::ChannelLayout;
 use tutti_ump::Ump;
 use tutti_units::{Frame, Latency, SampleRate, Samples, Tail};
 
@@ -279,6 +279,7 @@ impl<F: Float> TestNode<F> {
                 .with_event_capacity(cap_of(cap)),
             Kind::Consumer { inputs } => Shape::source_unassigned(ch(1))
                 .with_events(inputs, 0)
+                .with_param_events()
                 .with_tail(Tail::Unbounded),
             Kind::BoundedConsumer { inputs, cap } => Shape::source_unassigned(ch(1))
                 .with_events(inputs, 0)

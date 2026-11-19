@@ -11,8 +11,8 @@ use std::fs::File;
 use std::io::{self, BufReader, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::{Float, InterleavedMut};
-use tutti_types::ChannelLayout;
 use tutti_units::Samples;
 
 use crate::render::Replay;

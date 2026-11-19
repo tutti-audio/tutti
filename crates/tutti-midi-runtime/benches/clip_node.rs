@@ -11,11 +11,11 @@
 
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 
+use tutti_buffers::MaxBlock;
 use tutti_fixtures::midi;
 use tutti_graph::NodeKey;
 use tutti_graph::{Editor, Executor, Prepare, TransportPosition};
 use tutti_midi_runtime::{MidiClipNode, TimedMidiEvent};
-use tutti_types::MaxBlock;
 use tutti_ump::{MidiChannel, Ump};
 use tutti_units::{Beat, Bpm, SampleRate, Samples};
 

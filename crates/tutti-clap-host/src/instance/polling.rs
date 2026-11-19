@@ -340,7 +340,10 @@ impl ClapLoaded {
             && let Ok(fds) = self.host_state.posix_fds.entries.lock()
         {
             for entry in fds.iter() {
-                out.watch(FdId::new(entry.fd), interest_of(entry.flags));
+                // Registration refused a negative number, so every entry names a descriptor.
+                if let Some(id) = FdId::new(entry.fd) {
+                    out.watch(id, interest_of(entry.flags));
+                }
             }
         }
         let timer = &self.host_state.timer;

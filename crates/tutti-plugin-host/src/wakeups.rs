@@ -114,7 +114,7 @@ mod tests {
             let main = tutti_fixtures::main_thread();
             let (reader, mut writer) = std::io::pipe().unwrap();
             let mut plugin = Asks {
-                fd: FdId::new(reader.as_raw_fd()),
+                fd: FdId::new(reader.as_raw_fd()).unwrap(),
                 deadline: Instant::now() + Duration::from_secs(3600),
                 woken: Vec::new(),
             };

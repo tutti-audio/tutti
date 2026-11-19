@@ -57,8 +57,8 @@ fn lufs_defaults_to_a_minus_one_dbtp_ceiling() {
 
 mod headroom {
     use super::*;
+    use tutti_buffers::ChannelLayout;
     use tutti_codec::{Format, Pcm};
-    use tutti_types::ChannelLayout;
 
     fn config(pcm: Pcm, dither: Option<DitherShape>) -> FileTarget {
         FileTarget::new("unused.wav", Format::Wav(pcm), ChannelLayout::STEREO).dither(dither)
@@ -135,8 +135,8 @@ mod measurer {
     use super::*;
     use crate::control::{CancelToken, Progress};
     use crate::{Outcome, Rendered};
+    use tutti_buffers::{Bed, ChannelTopology};
     use tutti_measure::{LoudnessConfig, measure_loudness};
-    use tutti_types::{Bed, ChannelTopology};
     use tutti_units::{Amplitude, Hz, Samples};
 
     const RATE: SampleRate = SampleRate::SR_48K;

@@ -4,11 +4,11 @@
 //! outputs, its block capacity); a graph past them must be refused on the
 //! control thread rather than reach an audio callback that cannot run it.
 
+use tutti_buffers::ChannelLayout;
+use tutti_buffers::MaxBlock;
 use tutti_graph::NodeKey;
 use tutti_graph::{CommitError, Cx, Editor, Io, Limits, Node, Prepare, Shape, Status, Unforkable};
 use tutti_graph::{OutPort, Source};
-use tutti_types::ChannelLayout;
-use tutti_types::MaxBlock;
 use tutti_units::{SampleRate, Samples};
 
 struct Wide(u16);

@@ -8,9 +8,10 @@
 //! beside the gated pool they share.
 
 use std::sync::Arc;
-use tutti_types::MaxBlock;
+use tutti_buffers::MaxBlock;
 use tutti_ump::{MidiChannel, U7, Ump};
 
+use tutti_buffers::ChannelLayout;
 use tutti_fixtures::midi;
 use tutti_graph::NodeKey;
 use tutti_graph::{
@@ -26,7 +27,7 @@ use tutti_modulation::{
 use tutti_music::FrameClock;
 use tutti_nodes::automation::ControlLaneNode;
 use tutti_nodes::{EnvelopeFollowerNode, NoteEnvelopeNode};
-use tutti_types::{AtomicF32, ChannelLayout};
+use tutti_types::AtomicF64;
 use tutti_ump::NoteVelocity;
 use tutti_units::{
     Amplitude, Ballistics, Beat, Bpm, Depth, Frame, Hz, ParamKey, SampleRate, Samples, Seconds,
@@ -340,7 +341,7 @@ fn lane_to_probe(
     from: u64,
     source: u32,
     depth: f64,
-    knob: f32,
+    knob: f64,
     lane: u64,
     probe: u64,
 ) {
@@ -362,7 +363,7 @@ fn lane_to_probe(
     let node = ControlLaneNode::for_unit(
         ParamKey::<Hz>::CUTOFF.addr(),
         program,
-        Some(Arc::new(AtomicF32::new(knob)).into()),
+        Some(Arc::new(AtomicF64::new(knob)).into()),
         Some(ed.param_range_cell(cutoff(probe)).expect("committed")),
     );
     ed.insert(NodeKey(lane), "lane", node);
@@ -466,20 +467,20 @@ fn pole(tau: f32) -> f64 {
     (-1.0 / (f64::from(tau) * RATE)).exp()
 }
 
-fn follower(source: u32, attack: f32, release: f32, width: ChannelLayout) -> EnvelopeFollowerNode {
+fn follower(source: u32, attack: f64, release: f64, width: ChannelLayout) -> EnvelopeFollowerNode {
     EnvelopeFollowerNode::new(
         SourceId(source),
-        Ballistics::new(Seconds::from_f32(attack), Seconds::from_f32(release)).unwrap(),
+        Ballistics::new(Seconds(attack), Seconds(release)).unwrap(),
         width,
     )
 }
 
-fn adsr(a: f32, d: f32, s: f32, r: f32) -> Adsr {
+fn adsr(a: f64, d: f64, s: f64, r: f64) -> Adsr {
     Adsr {
-        attack: Seconds::from_f32(a),
-        decay: Seconds::from_f32(d),
-        sustain: Amplitude(f64::from(s)),
-        release: Seconds::from_f32(r),
+        attack: Seconds(a),
+        decay: Seconds(d),
+        sustain: Amplitude(s),
+        release: Seconds(r),
     }
 }
 

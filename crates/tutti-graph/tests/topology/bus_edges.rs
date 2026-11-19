@@ -15,6 +15,7 @@ use std::collections::BTreeMap;
 
 use common::{Kind, Pair, TestNode, bits, input_signal, prepare, shapes_of};
 use tutti_buffers::{BufferError, Float, FoldError};
+use tutti_buffers::{BusTopology, ChannelLayout, ChannelTopology};
 use tutti_graph::Node;
 use tutti_graph::{
     Bus, BusError, BusFeed, BusFold, BusRef, BusRole, BusSide, BusSource, Buses, CommitError,
@@ -22,7 +23,6 @@ use tutti_graph::{
     Lowering, NodeKey, Op, OutPort, Plan, Sink, Source, TransportPosition, Unforkable, ValidGraph,
     compile,
 };
-use tutti_types::{BusTopology, ChannelLayout, ChannelTopology};
 use tutti_units::{Amplitude, SampleRate, Samples, Tail};
 
 const BLOCK: usize = 64;

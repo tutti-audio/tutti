@@ -5,11 +5,11 @@
 //! (the figures are the range's, written here, not read from the host).
 
 use crate::pooled::{LoadPlugin, Spec};
+use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_plugin::catalog::PluginRef;
 use tutti_plugin_types::ParamUnit;
 use tutti_session::{DetachedSession, PluginParamError, Root, Session};
-use tutti_types::ChannelLayout;
 use tutti_units::Normalized;
 use tutti_units::ParamId;
 use tutti_units::{Db, Hz, SampleRate};

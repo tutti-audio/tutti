@@ -164,7 +164,7 @@ impl Vst3Loaded {
             .map(
                 |i| match self.plugin.bus_arrangement(main, direction, i as i32) {
                     Ok(arr) => crate::host::speakers::from_arrangement(arr),
-                    Err(_) => ChannelTopology::unassigned(tutti_types::ChannelLayout::EMPTY),
+                    Err(_) => ChannelTopology::unassigned(tutti_buffers::ChannelLayout::EMPTY),
                 },
             )
             .collect()

@@ -10,7 +10,7 @@ static A: assert_no_alloc::AllocDisabler = assert_no_alloc::AllocDisabler;
 mod common;
 #[cfg(feature = "midi")]
 mod held_keys;
-#[cfg(feature = "midi")]
+#[cfg(feature = "midi-hardware")]
 #[path = "../support/tempo.rs"]
 mod tempo;
 // Clips, live inputs, routes and the outputs (`Session::midi`).
@@ -54,6 +54,9 @@ mod midi_out_tap;
 // a recorded take and its placement, a saved route rule.
 #[cfg(feature = "midi")]
 mod midi_front;
+// A clip's events and a harmony node's changes as values: written, equal, removed.
+#[cfg(feature = "midi")]
+mod midi_value_targets;
 // File loads as jobs: a MIDI file and a SoundFont land as events in `update()`.
 #[cfg(feature = "midi")]
 mod loads;

@@ -2,9 +2,10 @@
 //! node set through `Session::set` and the offline `render`, unrounded.
 
 use tutti_buffers::InterleavedMut;
+use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_graph::{ForkByClone, Params};
 use tutti_session::{Offline, Root, Session, Workers};
-use tutti_types::{ChannelLayout, MaxBlock, Param};
+use tutti_types::Param;
 use tutti_units::{Amplitude, Samples};
 
 #[path = "../support/f64_nodes.rs"]

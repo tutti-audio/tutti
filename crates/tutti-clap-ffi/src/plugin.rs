@@ -53,8 +53,8 @@ use std::ptr::{self, NonNull};
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use tutti_buffers::MaxBlock;
 use tutti_rt::LockExt;
-use tutti_types::MaxBlock;
 use tutti_units::{SampleRate, Samples};
 
 /// The smallest block a plugin is activated for: CLAP forbids an empty one.

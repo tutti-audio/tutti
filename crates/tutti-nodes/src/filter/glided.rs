@@ -2,10 +2,10 @@
 //! between designs, the machinery under [`CutFilterKernel`](crate::CutFilterKernel) and
 //! [`EqKernel`](crate::EqKernel).
 
+use tutti_buffers::BusTopology;
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{Glide, Lanes, MAX_SECTIONS, Sos, SosBank, SosCoefficients, SosError};
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
-use tutti_types::BusTopology;
 use tutti_units::SampleRate;
 
 /// The steps the coefficients take to a new design: one grid period.

@@ -30,8 +30,8 @@ use std::sync::Arc;
 
 use crate::FftFloat;
 use crate::design::along;
+use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_buffers::{Fold, Mono, MonoMut, Planes, StereoPlanes};
-use tutti_types::{ChannelLayout, ChannelTopology};
 use tutti_units::{Direction, Mix, Radians, SampleRate};
 
 mod hull;

@@ -15,8 +15,8 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use crossbeam_channel::{Receiver, TryRecvError};
+use tutti_buffers::ChannelLayout;
 use tutti_rt::{PosReader, Publisher};
-use tutti_types::ChannelLayout;
 use tutti_units::{SamplePosition, SampleRate, Samples};
 
 use super::bell::Bell;

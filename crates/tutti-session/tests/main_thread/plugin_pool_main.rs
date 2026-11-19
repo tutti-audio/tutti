@@ -12,13 +12,13 @@ use tutti_buffers::PlanesMut;
 
 use tutti_clap_test_plugin::{ClapProbe, ClapSwitch, Site, ThreadAnswer};
 
+use tutti_buffers::MaxBlock;
 use tutti_plugin::catalog::{Catalog, CatalogConfig, Hosting, Locator, NO_SCAN_DIRS, PluginId};
 use tutti_plugin_db::{PluginDb, ScanPoll};
 use tutti_plugin_types::PluginFormat;
 use tutti_session::{
     JobStatus, LoadError, Peer, PoolError, PoolEvent, PoolState, Presence, Session, SessionEvent,
 };
-use tutti_types::MaxBlock;
 use tutti_units::{SampleRate, Samples};
 
 use crate::support::clap_probe;
@@ -415,7 +415,7 @@ fn restore_round_trip(hosting: Hosting) {
             s.render(
                 &mut tutti_buffers::InterleavedMut::new(
                     &mut out,
-                    tutti_types::ChannelLayout::STEREO,
+                    tutti_buffers::ChannelLayout::STEREO,
                 )
                 .unwrap(),
             );
@@ -541,7 +541,7 @@ impl Rebound {
             self.s.render(
                 &mut tutti_buffers::InterleavedMut::new(
                     &mut out,
-                    tutti_types::ChannelLayout::STEREO,
+                    tutti_buffers::ChannelLayout::STEREO,
                 )
                 .unwrap(),
             );
@@ -557,8 +557,11 @@ impl Rebound {
     fn channel(&mut self, ch: usize) -> Vec<f32> {
         let mut block = vec![f32::NAN; 512 * 2];
         self.s.render(
-            &mut tutti_buffers::InterleavedMut::new(&mut block, tutti_types::ChannelLayout::STEREO)
-                .unwrap(),
+            &mut tutti_buffers::InterleavedMut::new(
+                &mut block,
+                tutti_buffers::ChannelLayout::STEREO,
+            )
+            .unwrap(),
         );
         block.iter().skip(ch).step_by(2).copied().collect()
     }
@@ -891,7 +894,7 @@ fn render_until(
         });
         let mut out = vec![0.0f32; 512 * 2];
         s.render(
-            &mut tutti_buffers::InterleavedMut::new(&mut out, tutti_types::ChannelLayout::STEREO)
+            &mut tutti_buffers::InterleavedMut::new(&mut out, tutti_buffers::ChannelLayout::STEREO)
                 .unwrap(),
         );
         if done(s, [out[out.len() - 2], out[out.len() - 1]]) {
