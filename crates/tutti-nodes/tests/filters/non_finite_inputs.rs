@@ -14,7 +14,7 @@ use tutti_nodes::{
     BrickwallLimiterNode, BusStripNode, DelayControls, DelayNode, EqBandNode, LimiterControls,
     LimiterNode, MaxDelay, SvfType,
 };
-use tutti_types::ParamCell;
+use tutti_rt::ParamCell;
 use tutti_units::{Amplitude, Balance, Db, Hz, Q, SampleRate, Samples, Seconds, UnitParam};
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -66,7 +66,7 @@ fn a_delay_with_an_unusable_maximum_is_refused_and_the_longest_builds() {
         DelayNode::<f32>::mono(longest, DelayControls::DEFAULT),
         DelayNode::<f32>::stereo(longest, DelayControls::DEFAULT),
     ] {
-        node.prepare(&Prepare::new(RATE, MaxBlock::of(Samples(64))));
+        Node::<f32>::prepare(&mut node, &Prepare::new(RATE, MaxBlock::of(Samples(64))));
         assert!(renders_finite(&mut node, 4));
     }
 }
@@ -102,7 +102,7 @@ fn the_strip_holds_off_non_finite_volume_and_balance() {
     for (name, write) in cells {
         for bad in BAD {
             let mut node = BusStripNode::stereo();
-            node.prepare(&Prepare::new(RATE, MaxBlock::of(Samples(64))));
+            Node::<f32>::prepare(&mut node, &Prepare::new(RATE, MaxBlock::of(Samples(64))));
             assert!(renders_finite(&mut node, 2));
             write(&node, bad);
             assert!(

@@ -193,8 +193,7 @@ pub use events::{
 };
 pub use host::{ClapHost, HostState, InputStream, OutputStream};
 pub use instance::{
-    ClapController, ClapEditor, ClapLoaded, ClapProcessContext, ClapProcessor, Flushed,
-    LoadOptions, descriptor_of,
+    ClapController, ClapEditor, ClapLoaded, ClapProcessContext, ClapProcessor, Flushed, LoadOptions,
 };
 // The CLAP-native, voice-addressed note expression is re-exported under its
 // own distinct name (it does NOT shadow the shared

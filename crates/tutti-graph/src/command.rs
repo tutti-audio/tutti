@@ -129,7 +129,7 @@ pub struct CommandId {
 }
 
 /// Pair identities: every command channel takes the next one.
-static NEXT_PAIR: tutti_types::Mint = tutti_types::Mint::new();
+static NEXT_PAIR: tutti_rt::Mint = tutti_rt::Mint::new();
 
 /// Why [`Editor::schedule`](crate::Editor::schedule) refused a command.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]

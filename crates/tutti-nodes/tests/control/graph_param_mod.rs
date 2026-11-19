@@ -25,6 +25,7 @@ use tutti_buffers::MaxBlock;
 use tutti_buffers::{Mono, Planes};
 use tutti_fixtures::Noise;
 
+use atomic_float::AtomicF64;
 use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_curve::Law;
 use tutti_graph::NodeKey;
@@ -40,7 +41,7 @@ use tutti_nodes::{
     LadderFilterNode, LadderType, LimiterControls, LimiterNode, Lookahead, MaxDelay, ModDelayNode,
     PhaserControls, PhaserNode, ShapeKind, Stages, Stagger, SvfFilterNode, SvfType, SweepRange,
 };
-use tutti_types::{AtomicF64, ParamCell};
+use tutti_rt::ParamCell;
 use tutti_units::{
     Amplitude, BeatsPerCycle, CompressionRatio, Db, Depth, Drive, Feedback, Hz, Mix,
     PhaseIncrement, Q, Resonance, SampleRate, Samples, Seconds, UnitAddr, UnitParam,
@@ -534,7 +535,7 @@ fn cases() -> Vec<Case> {
                         .expect("a test width fits a bus"),
                 );
                 if let Some(v) = v {
-                    assert!(n.param_set().set(UnitParam::Balance, f64::from(v)));
+                    assert!(ParamNode::<f32>::param_set(&n).set(UnitParam::Balance, f64::from(v)));
                 }
                 parts_of(n)
             },
@@ -1019,9 +1020,10 @@ fn plain_distortion(d: f64) -> Vec<f32> {
 #[test]
 fn an_authored_write_moves_the_base_under_modulation() {
     let node = DistortionNode::<f32>::with_channels(1u16, ShapeKind::Tanh, Drive::new(1.0));
-    let tutti_types::ParamCell::F64(cell) = tutti_graph::ParamNode::param_set(&node)
+    let cell: Arc<AtomicF64> = tutti_graph::ParamNode::param_set(&node)
         .cell(UnitParam::Drive)
-        .expect("a distortion has a drive");
+        .expect("a distortion has a drive")
+        .into();
     let mut g = GraphBuilder::new(ChannelLayout::MONO, ChannelLayout::MONO);
     let (n, _) = g.add_with_controls(node);
     g.connect_input(0, n, 0).connect_output(n, 0, 0);

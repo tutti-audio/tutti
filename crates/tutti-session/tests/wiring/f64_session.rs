@@ -4,8 +4,8 @@
 use tutti_buffers::InterleavedMut;
 use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_graph::{ForkByClone, Params};
+use tutti_rt::Param;
 use tutti_session::{Offline, Root, Session, Workers};
-use tutti_types::Param;
 use tutti_units::{Amplitude, Samples};
 
 #[path = "../support/f64_nodes.rs"]

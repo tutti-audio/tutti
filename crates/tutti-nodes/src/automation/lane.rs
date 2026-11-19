@@ -200,11 +200,11 @@ impl Clone for AutomationLaneNode {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use atomic_float::AtomicF64;
     use std::sync::atomic::Ordering;
     use tutti_buffers::MaxBlock;
     use tutti_curve::{Breakpoint, Trajectory};
     use tutti_graph::{Solo, TransportPosition};
-    use tutti_types::AtomicF64;
     use tutti_units::{Bpm, Hz, SampleRate, Samples};
 
     fn ramp_trajectory() -> Trajectory<Hz> {

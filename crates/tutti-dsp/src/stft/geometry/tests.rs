@@ -115,7 +115,7 @@ fn a_grid_carries_both_a_window_length_and_a_window_shape() {
     let g = geo(2048, 512);
     assert_eq!(g.window(), Samples(2048));
     assert_eq!(g.window_fn(), CosineWindow::HANN);
-    assert_eq!(g.window_coefficients().len(), 2048);
+    assert_eq!(g.window_coefficients::<f32>().len(), 2048);
 }
 
 /// **The magnitude gain follows the window shape, not just its length.**
@@ -125,17 +125,23 @@ fn a_grid_carries_both_a_window_length_and_a_window_shape() {
 #[test]
 fn magnitude_gain_tracks_the_window_shape() {
     let hann = geo(1024, 256);
-    assert!((hann.magnitude_gain() - 512.0).abs() < 1e-3, "0.5 * 1024");
+    assert!(
+        (hann.magnitude_gain::<f64>() - 512.0).abs() < 1e-9,
+        "0.5 * 1024"
+    );
 
     let blackman = hann.with_window_fn(CosineWindow::BLACKMAN);
     assert!(
-        (blackman.magnitude_gain() - 430.08).abs() < 1e-2,
+        (blackman.magnitude_gain::<f64>() - 430.08).abs() < 1e-9,
         "0.42 * 1024, got {}",
-        blackman.magnitude_gain()
+        blackman.magnitude_gain::<f64>()
     );
 
     let rect = hann.with_window_fn(CosineWindow::RECTANGULAR);
-    assert!((rect.magnitude_gain() - 1024.0).abs() < 1e-3, "1.0 * 1024");
+    assert!(
+        (rect.magnitude_gain::<f64>() - 1024.0).abs() < 1e-9,
+        "1.0 * 1024"
+    );
 }
 
 #[test]

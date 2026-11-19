@@ -575,7 +575,7 @@ impl Planner<'_> {
                 self.run(Cmd::sh("cargo test --locked --doc -p tutti-session --all-features").args(args));
             }
             "test-release" => self.lines(&[
-                "cargo nextest run --locked --release -p tutti-units -p tutti-types -p tutti-rt -p tutti-graph",
+                "cargo nextest run --locked --release -p tutti-units -p tutti-rt -p tutti-graph",
             ]),
             "test-all" => {
                 for d in ["test", "test-features", "test-doc", "test-release"] {
@@ -877,7 +877,6 @@ const NO_STD_TARGET: &str = "aarch64-unknown-none";
 /// the bare build. A crate that becomes `no_std` is one line here.
 const NO_STD_CRATES: &[(&str, &[&str])] = &[
     ("tutti-units", &["serde"]),
-    ("tutti-types", &["serde"]),
     ("tutti-music", &["serde"]),
     ("tutti-ump", &["serde"]),
     ("tutti-midi-protocol", &["serde"]),
@@ -894,6 +893,8 @@ const CHECK_FEATURES: &[&str] = &[
     // The session's lib alone, where no dev-dependency unifies a codec feature in.
     r#"cargo clippy --locked -p tutti-session --all-features --lib -- -D warnings"#,
     // A subsystem feature alone: its test binaries compile only what it enables.
+    r#"cargo clippy --locked -p tutti-session --no-default-features --features clap --all-targets -- -D warnings"#,
+    r#"cargo clippy --locked -p tutti-session --no-default-features --features vst3 --all-targets -- -D warnings"#,
     r#"cargo clippy --locked -p tutti-session --no-default-features --features plugin --all-targets -- -D warnings"#,
     r#"cargo clippy --locked -p tutti-session --no-default-features --features midi --all-targets -- -D warnings"#,
 ];

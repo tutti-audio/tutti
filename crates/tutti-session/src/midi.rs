@@ -23,13 +23,13 @@ use std::sync::Arc;
 use tutti_graph::{EventTapReader, NodeKey, Offset, TapEvent};
 use tutti_midi_protocol::MpeMode;
 use tutti_midi_runtime::{
-    ClipEvents, ClockMap, MidiClipNode, MidiInputPorts, MidiKeys, MpeTransformControls,
-    MpeTransformNode, Outgoing, OutputLatency, OutputPlan, OutputTerms, Placement, RouteRule,
-    SendAt, TimedMidiEvent, compile_routes,
+    ClipEvents, ClockMap, MidiClipNode, MidiInputPorts, MidiKeys, MpeTransformNode, Outgoing,
+    OutputLatency, OutputPlan, OutputTerms, Placement, RouteRule, SendAt, TimedMidiEvent,
+    compile_routes,
 };
 use tutti_music::MeterMap;
+use tutti_rt::Mint;
 use tutti_tempo::TempoMap;
-use tutti_types::Mint;
 use tutti_ump::{MidiChannel, MidiGroup, Ump};
 use tutti_units::{Beat, BeatDuration, Frame, Samples};
 
@@ -586,7 +586,7 @@ impl TakePlacement {
     }
 }
 
-tutti_types::id! {
+tutti_rt::id! {
     /// An id [`Midi::route`] returns, for [`Midi::unroute`].
     pub struct MidiRouteId;
 }
@@ -684,7 +684,6 @@ struct Clip {
     /// The transform node, which is part of the clip's wiring: it goes with
     /// the clip.
     transform: NodeKey,
-    mpe: MpeTransformControls,
     target: NodeKey,
 }
 
@@ -728,8 +727,9 @@ pub(crate) struct MidiState {
     pub(crate) sinks: crate::midi_sink::Sinks,
     /// The ports the pool's `midi_input` and `midi_output` entries opened.
     pub(crate) ports: crate::midi_port::Ports,
-    /// The session's one MPE mode ([`Midi::set_mpe`]).
-    mpe: MpeMode,
+    /// The session's one MPE mode ([`MpeModeTarget`](crate::MpeModeTarget)),
+    /// the cell every ingest and clip transform reads.
+    mpe: tutti_rt::Publisher<MpeMode>,
     /// The tempo the session follows, if it does ([`Midi::follow_tempo`]).
     follow: Option<Follow>,
     /// Whether a live tempo owns the map, as `follow` and `clock` left it:
@@ -791,12 +791,12 @@ impl MidiState {
 
     /// The state with the session's MPE mode as the builder declared it.
     pub(crate) fn with_mpe(mut self, mpe: MpeMode) -> Self {
-        self.mpe = mpe;
+        self.mpe = tutti_rt::Publisher::new(mpe);
         self
     }
 
-    /// The session's MPE mode.
-    pub(crate) fn mpe(&self) -> &MpeMode {
+    /// The cell holding the session's MPE mode.
+    pub(crate) fn mpe(&self) -> &tutti_rt::Publisher<MpeMode> {
         &self.mpe
     }
 
@@ -1105,7 +1105,7 @@ fn compile_feeds<'r, T: Copy + Ord + 'r, F: Float>(
     }
 }
 
-tutti_types::id! {
+tutti_rt::id! {
     /// A file load a [`Midi`] started, named so the event that lands it can be
     /// matched to the call: [`Midi::load_file`] returns one, and
     /// [`MidiReport::FileLoaded`] carries it. The session mints it; it names
@@ -1320,21 +1320,14 @@ impl<F: Float> Midi<'_, F> {
                 let clip = clip.erase();
                 // The clip's MIDI is classic MPE until the transform says
                 // otherwise: it is the one holder of the zones.
-                let (transform, mpe) = self.graph.add(MpeTransformNode::new(self.state.mpe));
+                let (transform, _) = self.graph.add(MpeTransformNode::new(self.state.mpe()));
                 let transform = transform.erase();
                 self.graph.set_feed(
                     transform,
                     Feeder::Sequencer,
                     vec![EventOutPort::new(clip, 0)],
                 );
-                self.state.clips.insert(
-                    clip,
-                    Clip {
-                        transform,
-                        mpe,
-                        target,
-                    },
-                );
+                self.state.clips.insert(clip, Clip { transform, target });
                 clip
             }
         };
@@ -1656,46 +1649,6 @@ impl<F: Float> Midi<'_, F> {
             fallback,
             resolve,
         );
-    }
-
-    // --- MPE ---
-
-    /// The session's one MPE mode: how the hardware input is ingested and how
-    /// the clips' MIDI is. Begins as the builder's
-    /// ([`SessionBuilder::mpe_mode`](crate::SessionBuilder::mpe_mode)),
-    /// `Disabled` by default.
-    #[must_use]
-    pub fn mpe(&self) -> MpeMode {
-        *self.state.mpe()
-    }
-
-    /// Sets the session's MPE mode, once for everything that follows it.
-    ///
-    /// - The hardware input ingests classic MPE in `mode` from the next block
-    ///   ([`MidiIngestControls::set_mpe_mode`](tutti_midi_runtime::MidiIngestControls::set_mpe_mode)),
-    ///   on a session that has the input node.
-    /// - Every clip's transform (the MPE transform [`play_clip`](Self::play_clip)
-    ///   wires between the clip and its target) takes `mode` from its next block,
-    ///   and a clip played after this starts in it.
-    ///
-    /// The transforms are the one holder of the zones: an instrument, whenever
-    /// it was added, reads per-note and per-channel messages and no zone, so
-    /// nothing else needs the mode. A MIDI source played into an instrument by
-    /// hand (`InstrumentHandle::keys_mut`) is not classic MPE and is not
-    /// transformed.
-    ///
-    /// A device that enables the MIDI-CI MPE Profile (M2-120) is not under this
-    /// mode: its input follows the Profile's zones and rules, in the Groups it
-    /// enabled them on, until it disables the Profile or goes. The session
-    /// does that from the peer's Profile reports
-    /// (`MidiReport::CiProfiles`).
-    pub fn set_mpe(&mut self, mode: MpeMode) {
-        self.state.mpe = mode;
-        #[cfg(feature = "midi-hardware")]
-        self.state.ports.set_mpe_mode(mode);
-        for clip in self.state.clips.values() {
-            clip.mpe.set_mode(mode);
-        }
     }
 
     // --- Recording a take ---

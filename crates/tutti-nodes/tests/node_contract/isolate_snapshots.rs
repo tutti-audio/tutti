@@ -485,7 +485,7 @@ fn bus_strip() {
     IsolateRow::new("BusStripNode (stereo)", BusStripNode::stereo)
         .control("volume", |s| s.set_volume(Amplitude(0.5)))
         .control("balance", |s| {
-            assert!(s.param_set().set(UnitParam::Balance, -0.7))
+            assert!(ParamNode::<f32>::param_set(s).set(UnitParam::Balance, -0.7))
         })
         .check();
 }

@@ -2486,7 +2486,6 @@ dependencies = [
  "tutti-soundfont",
  "tutti-tempo",
  "tutti-transport",
- "tutti-types",
  "tutti-ump",
  "tutti-units",
 ]
@@ -2635,7 +2634,6 @@ dependencies = [
  "tutti-codec",
  "tutti-fixtures",
  "tutti-rt",
- "tutti-types",
  "tutti-units",
  "vorbis_rs",
 ]
@@ -2737,10 +2735,10 @@ dependencies = [
  "tutti-measure",
  "tutti-music",
  "tutti-nodes",
+ "tutti-rt",
  "tutti-sampler",
  "tutti-tempo",
  "tutti-transport",
- "tutti-types",
  "tutti-ump",
  "tutti-units",
 ]
@@ -2763,7 +2761,6 @@ dependencies = [
  "tutti-shared-plugin",
  "tutti-shared-plugin-vst3-cpp",
  "tutti-transport",
- "tutti-types",
  "tutti-ump",
  "tutti-units",
  "vst3",
@@ -2786,6 +2783,7 @@ name = "tutti-graph"
 version = "0.0.1"
 dependencies = [
  "assert_no_alloc",
+ "atomic_float",
  "bytemuck",
  "criterion",
  "libc",
@@ -2799,7 +2797,6 @@ dependencies = [
  "tutti-graph",
  "tutti-music",
  "tutti-rt",
- "tutti-types",
  "tutti-ump",
  "tutti-units",
 ]
@@ -2838,7 +2835,7 @@ dependencies = [
 name = "tutti-metering"
 version = "0.0.1"
 dependencies = [
- "tutti-types",
+ "atomic_float",
  "tutti-units",
 ]
 
@@ -2951,7 +2948,6 @@ dependencies = [
  "tutti-rt",
  "tutti-tempo",
  "tutti-transport",
- "tutti-types",
  "tutti-ump",
  "tutti-units",
 ]
@@ -2986,6 +2982,7 @@ version = "0.0.1"
 dependencies = [
  "approx",
  "assert_no_alloc",
+ "atomic_float",
  "criterion",
  "libm",
  "serde",
@@ -3002,7 +2999,6 @@ dependencies = [
  "tutti-nodes",
  "tutti-rt",
  "tutti-transport",
- "tutti-types",
  "tutti-ump",
  "tutti-units",
  "wide",
@@ -3075,6 +3071,7 @@ dependencies = [
  "tutti-shared-plugin",
  "tutti-ump",
  "tutti-units",
+ "tutti-vst2-author",
  "tutti-vst2-host",
  "tutti-vst2-shell-plugin",
  "tutti-vst3-host",
@@ -3120,7 +3117,6 @@ dependencies = [
  "tutti-rt",
  "tutti-tempo",
  "tutti-transport",
- "tutti-types",
  "tutti-ump",
  "tutti-units",
  "tutti-vst2-host",
@@ -3153,7 +3149,6 @@ dependencies = [
  "tutti-plugin-ipc-ffi",
  "tutti-plugin-types",
  "tutti-rt",
- "tutti-types",
  "tutti-ump",
  "tutti-units",
 ]
@@ -3174,20 +3169,17 @@ dependencies = [
 name = "tutti-plugin-probe"
 version = "0.0.1"
 dependencies = [
- "libloading 0.9.1",
  "tempfile",
+ "thiserror 2.0.21",
  "tutti-au-host",
  "tutti-buffers",
  "tutti-clap-host",
- "tutti-fixtures",
  "tutti-graph",
  "tutti-plugin-ipc-ffi",
  "tutti-plugin-types",
  "tutti-ump",
  "tutti-units",
  "tutti-vst2-host",
- "tutti-vst2-shell-plugin",
- "tutti-vst2-test-plugin",
  "tutti-vst3-host",
 ]
 
@@ -3264,7 +3256,7 @@ dependencies = [
  "tutti-modulation",
  "tutti-music",
  "tutti-nodes",
- "tutti-types",
+ "tutti-rt",
  "tutti-ump",
  "tutti-units",
  "tutti-voicing",
@@ -3277,6 +3269,7 @@ version = "0.0.1"
 dependencies = [
  "arc-lend",
  "assert_no_alloc",
+ "atomic_float",
  "bytemuck",
  "libc",
  "loom",
@@ -3315,7 +3308,6 @@ dependencies = [
  "tutti-sampler",
  "tutti-tempo",
  "tutti-transport",
- "tutti-types",
  "tutti-units",
 ]
 
@@ -3324,6 +3316,7 @@ name = "tutti-session"
 version = "0.0.1"
 dependencies = [
  "assert_no_alloc",
+ "atomic_float",
  "dpi",
  "hound",
  "libloading 0.9.1",
@@ -3366,7 +3359,6 @@ dependencies = [
  "tutti-soundfont",
  "tutti-tempo",
  "tutti-transport",
- "tutti-types",
  "tutti-ump",
  "tutti-units",
  "tutti-vst2-test-plugin",
@@ -3451,15 +3443,6 @@ dependencies = [
  "tutti-music",
  "tutti-rt",
  "tutti-tempo",
- "tutti-types",
- "tutti-units",
-]
-
-[[package]]
-name = "tutti-types"
-version = "0.0.1"
-dependencies = [
- "atomic_float",
  "tutti-units",
 ]
 
@@ -3571,10 +3554,11 @@ dependencies = [
  "tutti-music",
  "tutti-plugin-types",
  "tutti-rt",
- "tutti-types",
  "tutti-ump",
  "tutti-units",
+ "tutti-vst2-author",
  "tutti-vst2-ffi",
+ "tutti-vst2-shell-plugin",
  "tutti-vst2-test-plugin",
 ]
 
@@ -3615,7 +3599,6 @@ dependencies = [
  "tutti-plugin-ipc-ffi",
  "tutti-plugin-types",
  "tutti-rt",
- "tutti-types",
  "tutti-ump",
  "tutti-units",
  "vst3",

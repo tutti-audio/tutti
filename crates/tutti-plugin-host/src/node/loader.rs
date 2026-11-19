@@ -5,7 +5,7 @@ use std::path::Path;
 use std::sync::Arc;
 use tutti_buffers::{Float, FloatWidth};
 use tutti_plugin_types::{MainThreadMarker, MainWorkHandle};
-use tutti_types::ParkedSampleRate;
+use tutti_rt::ParkedSampleRate;
 
 use parking_lot::Mutex;
 

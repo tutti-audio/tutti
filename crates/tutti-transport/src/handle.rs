@@ -6,8 +6,8 @@ use super::audio::{AudioTaken, TransportAudio};
 use super::motion::MotionFsm;
 use super::settings::TransportSettings;
 use std::sync::atomic::Ordering;
+use tutti_rt::AtomicSampleRate;
 use tutti_tempo::TempoMap;
-use tutti_types::AtomicSampleRate;
 use tutti_units::{Beat, SampleRate};
 
 /// The two halves of a transport, held together.

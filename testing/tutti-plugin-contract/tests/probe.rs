@@ -32,6 +32,7 @@ use tutti_plugin_types::{
     TailVerdict,
 };
 use tutti_plugin_types::{ProbeDeath, ProbeError, ProbeExit, ProbeOutcome, ProbeRefusal};
+use tutti_vst2_author::shell::{ALPHA_ID, ALPHA_NAME, BETA_ID, BETA_NAME};
 use tutti_vst2_host::Vst2Loaded;
 
 /// A catalog whose probes run in the `plugin-probe` built in this profile, named
@@ -268,11 +269,8 @@ fn a_served_vst3_load_picks_the_class_its_ref_names() {
 /// above.
 #[test]
 fn a_vst2_shell_is_probed_as_its_sub_plugins() {
-    // The shell's sub-plugins: `uniqueID`s spelt as four-character codes, and names, as
-    // `tutti-vst2-shell-plugin` declares them (a dev-dependency to be built, not linked:
-    // its entry point would clash with the shared plugin's).
-    let alpha = i32::from_be_bytes(*b"SHAL");
-    let beta = i32::from_be_bytes(*b"SHBE");
+    // The shell plugin itself is a dev-dependency to be built, not linked: its entry point
+    // would clash with the shared plugin's. Its ids and names come from the author crate.
     let dir = tempfile::tempdir().unwrap();
     let real = tutti_fixtures::cdylib("tutti_vst2_shell_plugin", "tutti-vst2-shell-plugin");
     let path = vst2_named(&dir, "shell.vst", real);
@@ -285,8 +283,8 @@ fn a_vst2_shell_is_probed_as_its_sub_plugins() {
     assert_eq!(
         found,
         [
-            (format!("vst2.{alpha}"), "Shell Alpha".to_string()),
-            (format!("vst2.{beta}"), "Shell Beta".to_string()),
+            (format!("vst2.{ALPHA_ID}"), ALPHA_NAME.to_string()),
+            (format!("vst2.{BETA_ID}"), BETA_NAME.to_string()),
         ]
     );
 

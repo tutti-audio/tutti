@@ -9,7 +9,7 @@
 use std::num::NonZeroU32;
 use tutti_buffers::Float;
 use tutti_dsp::Xorshift32;
-use tutti_types::Param;
+use tutti_rt::Param;
 use tutti_units::{Amplitude, CentsSpan, Pan, Phase, Spread};
 
 pub(crate) const MAX_UNISON_VOICES: usize = UnisonVoices::MAX as usize;
@@ -279,7 +279,7 @@ impl UnisonEngine {
 
         for i in 0..count {
             self.voices[i].phase_offset =
-                Phase::new(f64::from(Xorshift32::to_unit(self.rng.next_u32())));
+                Phase::new(Xorshift32::to_unit::<f64>(self.rng.next_u32()));
         }
         self.all_params()
     }

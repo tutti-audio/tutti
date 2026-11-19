@@ -12,8 +12,8 @@ const ALL: [CosineWindow; 5] = [
 fn periodic_hann_starts_at_zero_and_peaks_at_the_centre() {
     let w = CosineWindow::HANN.coefficients(8);
     assert_eq!(w.len(), 8);
-    assert!(w[0].abs() < 1e-6, "first point is zero");
-    assert!((w[4] - 1.0).abs() < 1e-6, "centre reaches unity");
+    assert!(w[0].abs() < 1e-15, "first point is zero");
+    assert!((w[4] - 1.0).abs() < 1e-15, "centre reaches unity");
     // Periodic: the last point is NOT zero, which is what distinguishes it
     // from the symmetric form and what makes it tile.
     assert!(w[7] > 0.0);
@@ -24,14 +24,15 @@ fn periodic_hann_starts_at_zero_and_peaks_at_the_centre() {
 /// Flat at the derived overlap *and* rippling at half of it. The second half
 /// is what makes the rule tight rather than merely safe: a `cola_overlap`
 /// that returned 16 for everything would pass the first assertion and
-/// needlessly refuse grids that reconstruct perfectly well.
+/// needlessly refuse grids that reconstruct perfectly well. The ripple is in `f64`, so flat is
+/// at rounding, `1e-12`.
 #[test]
 fn the_cola_rule_is_tight() {
     for w in ALL {
         let overlap = w.cola_overlap();
         let flat = cola_ripple(&w, 64, overlap);
         assert!(
-            flat < 1e-4,
+            flat < 1e-12,
             "{:?}-term window is not flat at its own {overlap}x: {flat:.2e}",
             w.terms()
         );
@@ -58,10 +59,10 @@ fn the_cola_rule_is_tight() {
 fn coherent_gain_is_the_measured_mean_at_any_size() {
     for w in ALL {
         for size in [64usize, 1024] {
-            let measured = w.coefficients(size).iter().sum::<f32>() / size as f32;
+            let measured = w.coefficients(size).iter().sum::<f64>() / size as f64;
             let claimed = w.coherent_gain();
             assert!(
-                (measured - claimed).abs() < 1e-6,
+                (measured - claimed).abs() < 1e-14,
                 "{:?}-term at n={size}: claims {claimed}, measures {measured}",
                 w.terms()
             );
@@ -80,7 +81,7 @@ fn the_closed_forms_agree_with_numeric_integration() {
     /// A window with no closed forms, so the trait defaults run.
     struct Numeric(CosineWindow);
     impl Window for Numeric {
-        fn at(&self, t: f32) -> f32 {
+        fn at(&self, t: f64) -> f64 {
             self.0.at(t)
         }
     }
@@ -88,7 +89,7 @@ fn the_closed_forms_agree_with_numeric_integration() {
     for w in ALL {
         let numeric = Numeric(w);
         assert!(
-            (numeric.coherent_gain() - w.coherent_gain()).abs() < 1e-4,
+            (numeric.coherent_gain() - w.coherent_gain()).abs() < 1e-12,
             "{:?}-term: integrated {} vs closed form {}",
             w.terms(),
             numeric.coherent_gain(),
@@ -113,7 +114,7 @@ fn no_window_overshoots_or_goes_negative() {
     for w in ALL {
         for &v in w.coefficients(128).iter() {
             assert!(
-                (-1e-6..=1.0 + 1e-6).contains(&v),
+                (-1e-15..=1.0 + 1e-15).contains(&v),
                 "{:?}-term produced {v}, outside [0, 1]",
                 w.terms()
             );
@@ -132,13 +133,13 @@ fn centred_is_the_periodic_window_shifted_half_a_period() {
     ] {
         for i in 0..=40 {
             let x = f64::from(i) / 40.0 - 0.5;
-            let periodic = f64::from(w.at((x + 0.5) as f32));
-            assert!((w.centred(x) - periodic).abs() < 1e-6, "{w:?} at {x}");
+            let periodic = w.at(x + 0.5);
+            assert!((w.centred(x) - periodic).abs() < 1e-14, "{w:?} at {x}");
         }
     }
-    assert!(CosineWindow::BLACKMAN.centred(0.5).abs() < 1e-7);
-    assert!(CosineWindow::BLACKMAN.centred(-0.5).abs() < 1e-7);
-    assert!((CosineWindow::BLACKMAN.centred(0.0) - 1.0).abs() < 1e-7);
+    assert!(CosineWindow::BLACKMAN.centred(0.5).abs() < 1e-15);
+    assert!(CosineWindow::BLACKMAN.centred(-0.5).abs() < 1e-15);
+    assert!((CosineWindow::BLACKMAN.centred(0.0) - 1.0).abs() < 1e-15);
 }
 
 /// `RECTANGULAR` is exactly the identity, so a caller holding pre-windowed
@@ -182,14 +183,14 @@ fn blackman_harris_squared_is_the_square_of_blackman_harris() {
     let n = 64;
     let w = CosineWindow::BLACKMAN_HARRIS_SQUARED.coefficients(n);
     assert_eq!(CosineWindow::BLACKMAN_HARRIS_SQUARED.terms(), 7);
-    assert!((w[n / 2] - 1.0).abs() < 1e-5, "peak {}", w[n / 2]);
-    assert!(w[0] < 1e-6, "start {}", w[0]);
-    assert!((w[n / 4] - 0.047_293).abs() < 1e-5, "quarter {}", w[n / 4]);
+    assert!((w[n / 2] - 1.0).abs() < 1e-14, "peak {}", w[n / 2]);
+    assert!(w[0] < 1e-8, "start {}", w[0]);
+    assert!((w[n / 4] - 0.047_293).abs() < 1e-6, "quarter {}", w[n / 4]);
     for (x, &got) in w.iter().enumerate() {
         let t = std::f64::consts::TAU * x as f64 / n as f64;
         let bh =
             0.35875 - 0.48829 * t.cos() + 0.14128 * (2.0 * t).cos() - 0.01168 * (3.0 * t).cos();
-        assert!((f64::from(got) - bh * bh).abs() < 1e-6, "tap {x}");
+        assert!((got - bh * bh).abs() < 1e-14, "tap {x}");
     }
 }
 
@@ -217,4 +218,33 @@ fn kaiser_peaks_at_one_in_the_middle_and_ends_at_one_over_i0_of_beta() {
     assert_eq!(k.centred(0.0), 1.0);
     assert!((k.centred(0.5) - 1.0 / 27.239_871_823_604_442).abs() < 1e-14);
     assert!((k.centred(-0.5) - 1.0 / 27.239_871_823_604_442).abs() < 1e-14);
+}
+
+/// The squares of the `f32` Hann coefficients overlap-add at 4x to the constant `3/2`.
+/// `w^2 = 3/8 - cos(t)/2 + cos(2t)/8`, and four quarter-period shifts cancel both cosines.
+/// Each `f32` coefficient is off its design by at most half an ulp, `2^-25` for a value in
+/// `[0.5, 1]` and less below, so a square is off by at most `2 * 2^-25` (`w <= 1`) and the
+/// four overlapping squares by `4 * 2^-24 = 2^-22`. The sum is taken in `f64` over the
+/// widened coefficients, so the accumulation adds nothing.
+#[test]
+fn f32_hann_squares_overlap_add_to_three_halves_within_the_rounding_of_the_taps() {
+    let size = 2048;
+    let hop = size / 4;
+    let taps: Vec<f32> = crate::StftGeometry::new(
+        tutti_units::SampleRate::SR_44K1,
+        tutti_units::Samples(size),
+        tutti_units::Samples(hop),
+    )
+    .unwrap()
+    .window_coefficients();
+    let bound = 2f64.powi(-22);
+    let mut worst = 0.0f64;
+    for i in 0..hop {
+        let sum: f64 = (0..4)
+            .map(|k| f64::from(taps[i + k * hop]))
+            .map(|w| w * w)
+            .sum();
+        worst = worst.max((sum - 1.5).abs());
+    }
+    assert!(worst < bound, "worst {worst:e} vs bound {bound:e}");
 }

@@ -321,7 +321,7 @@ pub use events::{
 };
 pub use host::{
     ControllerMapping, Library, LoadOptions, ProcessFailed, ProcessorAny, Vst3Controller,
-    Vst3Editor, Vst3Loaded, Vst3Processor, class_id, descriptor_of,
+    Vst3Editor, Vst3Loaded, Vst3Processor, class_id,
 };
 pub use types::{
     BusInfo, BusType, ContentScale, EditorCapabilities, KeyswitchKind, NoteExpressionFlags,

@@ -303,7 +303,7 @@ impl<F: Float> SessionNode<F> for tutti_graph::EventInletNode {
 
 /// The metronome as a graph node: its settings are shared through the
 /// transport, no controls and no params.
-impl<F: Float> SessionNode<F> for tutti_nodes::ClickNode {
+impl<F: Float> SessionNode<F> for tutti_nodes::ClickNode<F> {
     fn reclaimer(_: &<Self as IntoNode<F>>::Controls) -> Reclaims {
         Reclaims::Nothing
     }
@@ -344,12 +344,12 @@ impl<F: Float> SessionNode<F> for tutti_midi_runtime::MidiClipNode {
     }
 }
 
-/// The MPE transform: its `MpeTransformControls`, no params; the modes it
-/// replaced freed by its reclaimer.
+/// The MPE transform: its `MpeTransformControls` read its losses, no params;
+/// its mode is the session's cell, which the session sweeps.
 #[cfg(feature = "midi")]
 impl<F: Float> SessionNode<F> for tutti_midi_runtime::MpeTransformNode {
-    fn reclaimer(controls: &tutti_midi_runtime::MpeTransformControls) -> Reclaims {
-        Reclaims::of(controls)
+    fn reclaimer(_: &tutti_midi_runtime::MpeTransformControls) -> Reclaims {
+        Reclaims::Nothing
     }
 }
 
@@ -371,7 +371,7 @@ impl<F: Float> SessionNode<F> for tutti_midi_runtime::HarmonyNode {
     }
 }
 
-/// The MIDI ingest: its `MidiIngestControls`, no params; the MPE modes
+/// The MIDI ingest: its `MidiIngestControls`, no params; the Profile zones
 /// it replaced freed by its reclaimer.
 #[cfg(feature = "midi")]
 impl<F: Float> SessionNode<F> for tutti_midi_runtime::MidiIngestNode {
@@ -488,8 +488,8 @@ mod tests {
     }
 
     /// **Every engine node whose controls publish to it keeps a
-    /// reclaimer**: the clip, the MPE transform, the harmony track, the live
-    /// input, the pool and the voice (a `Clip`'s impl returns the same
+    /// reclaimer**: the clip, the harmony track, the live input, the pool and
+    /// the voice (a `Clip`'s impl returns the same
     /// `VoiceNodeHandle` sweep as the voice's). What each one frees is pinned
     /// with a held loan in its own crate; the graph's sweep of them in
     /// `tests/wiring/graph.rs`.
@@ -498,9 +498,6 @@ mod tests {
         #[cfg(feature = "midi")]
         {
             assert!(keeps_one(tutti_midi_runtime::MidiClipNode::new([])));
-            assert!(keeps_one(tutti_midi_runtime::MpeTransformNode::new(
-                tutti_midi_protocol::MpeMode::Disabled
-            )));
             assert!(keeps_one(tutti_midi_runtime::HarmonyNode::new([])));
             assert!(keeps_one(tutti_midi_runtime::MidiIngestNode::new()));
         }

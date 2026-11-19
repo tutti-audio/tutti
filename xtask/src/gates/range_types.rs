@@ -552,7 +552,7 @@ mod tests {
     use super::super::fake::Mem;
     use super::*;
 
-    const FILE: &str = "crates/tutti-types/src/lib.rs";
+    const FILE: &str = "crates/tutti-rt/src/lib.rs";
 
     fn run(files: &[(&str, &str)], ex: &[(&str, &str, &str)]) -> Report {
         check(&Mem::with(files), ex)

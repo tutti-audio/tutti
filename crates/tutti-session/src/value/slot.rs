@@ -39,6 +39,9 @@ pub enum SlotId {
     /// The MIDI outputs' own latency and offset.
     #[cfg(feature = "midi")]
     OutputLatency,
+    /// The session's MPE mode.
+    #[cfg(feature = "midi")]
+    MpeMode,
     /// The events a MIDI clip node plays.
     #[cfg(feature = "midi")]
     ClipEvents(NodeKey),
@@ -315,6 +318,33 @@ impl crate::Key<tutti_midi_runtime::HarmonyNode> {
     }
 }
 
+#[cfg(feature = "midi")]
+slot_target!(
+    /// The session's MPE mode ([`MpeMode`](tutti_midi_protocol::MpeMode)), as
+    /// `session.mpe()` names it: how the hardware inputs are ingested and how
+    /// every clip's MIDI is transformed. It begins as the builder's
+    /// ([`SessionBuilder::mpe_mode`](crate::SessionBuilder::mpe_mode)),
+    /// `Disabled` by default.
+    ///
+    /// It is one value for everything that follows it: each input's ingest
+    /// and each clip's MPE transform (the node [`Midi::play_clip`](crate::Midi::play_clip)
+    /// wires between a clip and its target) adopts it at its next block, and
+    /// a clip played later starts in it. A new mode stops and resets the
+    /// channels that enter or leave MPE control, and the others keep their
+    /// notes; the mode in force changes nothing. The transforms are the one
+    /// holder of the zones: an instrument, whenever it was added, reads
+    /// per-note and per-channel messages and no zone. A MIDI source played
+    /// into an instrument by hand is not classic MPE and is not transformed.
+    ///
+    /// A device that enables the MIDI-CI MPE Profile (M2-120) is not under this
+    /// mode: its input follows the Profile's zones and rules, in the Groups it
+    /// enabled them on, until it disables the Profile or goes. The session
+    /// does that from the peer's Profile reports (`MidiReport::CiProfiles`).
+    MpeModeTarget,
+    tutti_midi_protocol::MpeMode,
+    SlotId::MpeMode
+);
+
 /// A session setting held in one atomic word ([`SettingWord`]): the click's
 /// [`MetronomeMode`], as `session.click().mode()` names it. The audio thread
 /// reads it once per block; a write lands at once.
@@ -470,6 +500,23 @@ impl Held for tutti_midi_runtime::HarmonyControls {
     }
 }
 
+/// A published cell of a `Copy` value, which the session owns: written
+/// through the cell itself, which publishes when the value differs.
+#[cfg(feature = "midi")]
+impl<T: Copy + PartialEq + Send + Sync + 'static> Held for tutti_rt::Publisher<T> {
+    type Value = T;
+
+    fn current(&self) -> T {
+        *tutti_rt::Publisher::current(self)
+    }
+
+    fn replace(&self, value: &T) {
+        if *tutti_rt::Publisher::current(self) != *value {
+            self.publish(*value);
+        }
+    }
+}
+
 /// A value a node reads through a published cell, written through its
 /// control side ([`Held`]), which publishes when the value differs from the
 /// one in force.
@@ -614,5 +661,39 @@ impl<V: Clone + Send + Sync + 'static> Slot<V> for Cell<V> {
     fn store(&self, value: &V) {
         *self.value.lock_recover() = value.clone();
         self.staged.store(true, Ordering::Release);
+    }
+}
+
+#[cfg(all(test, feature = "midi"))]
+mod tests {
+    use super::*;
+    use tutti_midi_protocol::MpeMode;
+    use tutti_rt::Publisher;
+
+    /// **A value equal to the one in force publishes nothing**: the cell's
+    /// publish number moves for a different value and holds for an equal one.
+    #[test]
+    fn an_equal_value_publishes_nothing_and_a_different_one_publishes() {
+        let cell = Publisher::new(MpeMode::Disabled);
+        let slot = PublishedSlot(cell.clone());
+        let lower = tutti_fixtures::midi::lower_zone(3);
+        let start = cell.seq();
+        slot.store(&MpeMode::Disabled);
+        assert_eq!(cell.seq(), start);
+        slot.store(&lower);
+        assert_eq!(cell.seq(), start + 1);
+        slot.store(&lower);
+        assert_eq!(cell.seq(), start + 1);
+
+        let controls =
+            tutti_graph::IntoNode::<f32>::into_parts(tutti_midi_runtime::MidiClipNode::new([]))
+                .controls;
+        let slot = PublishedSlot(controls.clone());
+        let before = controls.current();
+        slot.store(&Arc::new(tutti_midi_runtime::ClipEvents::default()));
+        assert!(
+            Arc::ptr_eq(&controls.current(), &before),
+            "an equal clip, by value, publishes nothing"
+        );
     }
 }

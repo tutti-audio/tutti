@@ -1,12 +1,10 @@
 //! Linux: the plugin servers this process has running, read from `/proc`.
 
-use crate::support::plugin_server;
-
 /// The plugin servers this process has running: its children whose command
 /// line names the server binary.
 pub(super) fn servers() -> Option<usize> {
     let me = std::process::id().to_string();
-    let server = plugin_server();
+    let server = tutti_fixtures::plugin_server();
     let server = server.file_name().unwrap().to_string_lossy().into_owned();
     let mut n = 0;
     for entry in std::fs::read_dir("/proc").ok()?.flatten() {

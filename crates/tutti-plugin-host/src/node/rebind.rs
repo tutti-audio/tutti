@@ -24,8 +24,8 @@ use tutti_buffers::Float;
 
 use parking_lot::Mutex;
 use tutti_plugin_types::{Features, Loaded, MainThreadMarker, PluginDescriptor, Successor};
+use tutti_rt::ParkedSampleRate;
 use tutti_transport::TempoReader;
-use tutti_types::ParkedSampleRate;
 use tutti_units::ParamId;
 use tutti_units::Samples;
 

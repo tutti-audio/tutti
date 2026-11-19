@@ -3,7 +3,7 @@
 //!
 //! # Why a wrapper and not an extension of `crate`
 //!
-//! Giving `InPort`/`OutPort` a kind in `tutti-types` would break every place
+//! Giving `InPort`/`OutPort` a kind would break every place
 //! that builds them by literal (`InPort { node, port }`). Event edges also
 //! have a different *edge kind* from audio edges (an event edge carries an
 //! offset-merged stream, an audio edge a signal that will be summed), so the

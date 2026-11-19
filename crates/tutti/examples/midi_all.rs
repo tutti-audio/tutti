@@ -106,7 +106,7 @@ fn run() -> Result<Outcome, Box<dyn std::error::Error>> {
         None,
     )
     .ok_or("one lower zone")?;
-    s.midi().set_mpe(MpeMode::Zones(zone));
+    s.set(s.mpe().to(MpeMode::Zones(zone)))?;
 
     // A synth as an instrument: its strip is wired to the master.
     let AddedInstrument {
