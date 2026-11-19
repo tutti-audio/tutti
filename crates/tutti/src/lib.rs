@@ -682,7 +682,7 @@ pub mod plugin {
 /// `MidiInput`, `MidiOutput`, their entries and loaded reports) and what an open one said of itself (`Learned`, `SavedDevice`, `Match`), and the Profiles
 /// its MIDI-CI peers support and how to switch one (`PeerProfiles`,
 /// `ListedProfile`, `SwitchProfile`, `ProfilesChange`). The translation layer
-/// (`Translator`, `Narrower`), the runtime's clock sync and the MIDI-CI codec
+/// (`Midi2Translator`, `Midi1Translator`), the runtime's clock sync and the MIDI-CI codec
 /// belong to `tutti-midi-protocol`, `tutti-midi-runtime` and `tutti-midi-device`.
 /// Feature `midi`.
 #[cfg(feature = "midi")]

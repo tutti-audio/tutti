@@ -916,13 +916,13 @@ fn an_off_refused_twice_is_one_loss() {
     assert_eq!((dropped, lost), (4, 2));
 }
 
-/// Three pedals are down and a release finds the port full: the first lift is
+/// Three pedals are down and a release finds the port full: the first release is
 /// refused (counted by the port, 1) and the other two are not tried but are
 /// skipped and counted (3), all three losses. The next block pays them, each
 /// attempt giving its count back, so the dropped count stays 3 and the lost
 /// count falls by exactly the 3 paid, to 0.
 #[test]
-fn a_refused_pedal_lift_is_counted_and_its_payment_gives_the_count_back() {
+fn a_refused_pedal_release_is_counted_and_its_payment_gives_the_count_back() {
     let pedal = |cc| Act::Send(midi::cc(MidiChannel::FIRST, cc, u32::MAX), None);
     let blocks = || {
         vec![
@@ -941,13 +941,13 @@ fn a_refused_pedal_lift_is_counted_and_its_payment_gives_the_count_back() {
     assert_eq!(
         (dropped, lost),
         (3, 0),
-        "each paid lift gives its count back"
+        "each paid release gives its count back"
     );
     let t = tally.lock().unwrap();
     assert_eq!(
         t.others,
         8 + 3 + 3,
-        "the filler, the pedals down, the lifts"
+        "the filler, the pedals down, the releases"
     );
 }
 
@@ -1191,7 +1191,7 @@ impl<F: Float> Node<F> for SendThenRelease {
 /// Control Change 64 with value 0 and a MIDI 1.0 Pitch Bend at 0x2000, never
 /// a MIDI 2.0 packet (M1 p. 31, Stop; the 14-bit centre is 0x2000, M1 table
 /// of Pitch Bend). A pedal value below 64 is up (M1 CC 64: 0 to 63 is off), so a
-/// pedal sent at 63 is not lifted again.
+/// pedal sent at 63 is not released again.
 #[test]
 fn a_midi_1_pedal_and_bend_are_returned_in_midi_1() {
     use tutti_ump::{Message, U7, U14, Voice1};

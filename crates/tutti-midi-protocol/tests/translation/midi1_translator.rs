@@ -1,9 +1,9 @@
-//! The `Narrower` against M2-104 Appendix D.2 and M2-115, with figures written
+//! The `Midi1Translator` against M2-104 Appendix D.2 and M2-115, with figures written
 //! here from the spec, never read from the code under test.
 
 use tutti_midi_protocol::{
-    ExtremeValues, MpeZoneConfig, Narrower, PerNoteTranslation, PitchBendSensitivity,
-    TranslationMode, Translator,
+    ExtremeValues, Midi1Translator, Midi2Translator, MpeZoneConfig, PerNoteTranslation,
+    PitchBendSensitivity, TranslationMode,
 };
 use tutti_ump::{
     Address, Bank, CCNumber, Message, Midi1Bytes, MidiChannel, MidiGroup, NoteNumber, NoteVelocity,
@@ -13,7 +13,7 @@ use tutti_ump::{BendValue, ControlValue, MpeChannels, MpeZoneSpan};
 
 const A: Address = Address::first(MidiChannel::FIRST);
 
-fn feed(n: &mut Narrower, message: Message) -> Vec<Vec<u8>> {
+fn feed(n: &mut Midi1Translator, message: Message) -> Vec<Vec<u8>> {
     let mut out = Vec::new();
     n.feed(message, |b: Midi1Bytes| out.push(b.as_slice().to_vec()));
     out
@@ -47,7 +47,7 @@ fn nrpn(address: Address, bank: u8, index: u8, value: u32) -> Message {
 /// Spec: m2-104/6.2#4
 #[test]
 fn a_registered_controller_is_four_control_changes() {
-    let mut n = Narrower::new();
+    let mut n = Midi1Translator::new();
     // RPN 0/0 is zero-extended: 14-bit 0x1234 (MSB 0x24, LSB 0x34) in the top bits.
     assert_eq!(
         feed(&mut n, rpn(A, 0, 0, 0x1234 << 18)),
@@ -63,7 +63,7 @@ fn a_registered_controller_is_four_control_changes() {
 /// **D.2.3: an Assignable Controller selects with CC 99 and CC 98.**
 #[test]
 fn an_assignable_controller_selects_with_nrpn_controllers() {
-    let mut n = Narrower::new();
+    let mut n = Midi1Translator::new();
     let out = feed(
         &mut n,
         nrpn(
@@ -91,7 +91,7 @@ fn an_assignable_controller_selects_with_nrpn_controllers() {
 /// another one, for the other kind and on any channel or group.
 #[test]
 fn every_controller_is_the_full_sequence_of_four() {
-    let mut n = Narrower::new();
+    let mut n = Midi1Translator::new();
     let again = [
         vec![0xB0, 101, 0],
         vec![0xB0, 100, 0],
@@ -144,7 +144,7 @@ fn a_passing_select_or_reset_leaves_the_sequence_whole() {
         ]
     };
     for moved in [CCNumber::RPN_LSB, CCNumber::RESET_ALL] {
-        let mut n = Narrower::new();
+        let mut n = Midi1Translator::new();
         feed(&mut n, rpn(A, 0, 0, 0));
         feed(
             &mut n,
@@ -158,7 +158,7 @@ fn a_passing_select_or_reset_leaves_the_sequence_whole() {
         );
         assert_eq!(feed(&mut n, rpn(A, 0, 0, 0)), full());
     }
-    let mut n = Narrower::new();
+    let mut n = Midi1Translator::new();
     feed(&mut n, rpn(A, 0, 0, 0));
     n.reset();
     assert_eq!(feed(&mut n, rpn(A, 0, 0, 0)), full());
@@ -174,7 +174,7 @@ fn a_passing_select_or_reset_leaves_the_sequence_whole() {
 fn rpn_0_to_31_narrows_with_rounding() {
     for (bank, index) in [(0, 7), (0, 31), (1, 0), (1, 31), (127, 7)] {
         let data = |value| {
-            let mut n = Narrower::new();
+            let mut n = Midi1Translator::new();
             let out = feed(&mut n, rpn(A, bank, index, value));
             (u16::from(out[2][2]) << 7) | u16::from(out[3][2])
         };
@@ -192,7 +192,7 @@ fn rpn_0_to_31_narrows_with_rounding() {
 #[test]
 fn other_controllers_narrow_by_shift() {
     let data = |message: Message| {
-        let mut n = Narrower::new();
+        let mut n = Midi1Translator::new();
         let out = feed(&mut n, message);
         (u16::from(out[2][2]) << 7) | u16::from(out[3][2])
     };
@@ -226,7 +226,7 @@ fn a_program_change_with_a_bank_is_always_three_messages() {
             },
         )
     };
-    let mut n = Narrower::new();
+    let mut n = Midi1Translator::new();
     assert_eq!(
         feed(&mut n, pc(5, Some((1, 2)))),
         [vec![0xB0, 0, 1], vec![0xB0, 32, 2], vec![0xC0, 5]]
@@ -247,7 +247,7 @@ fn a_program_change_with_a_bank_is_always_three_messages() {
 /// stateless messages pass as `midi1()` sends them.
 #[test]
 fn a_quiet_note_on_is_velocity_1() {
-    let mut n = Narrower::new();
+    let mut n = Midi1Translator::new();
     let on = Message::Midi2(
         A,
         Voice2::NoteOn {
@@ -262,7 +262,7 @@ fn a_quiet_note_on_is_velocity_1() {
 /// **D.2.8: the relative controllers have no MIDI 1.0 form.**
 #[test]
 fn relative_controllers_send_nothing() {
-    let mut n = Narrower::new();
+    let mut n = Midi1Translator::new();
     let m = Message::Midi2(
         A,
         Voice2::RelativeRegistered {
@@ -274,7 +274,7 @@ fn relative_controllers_send_nothing() {
     assert!(feed(&mut n, m).is_empty());
 }
 
-/// **Translator then Narrower returns the CC sequence a MIDI 1.0 sender
+/// **Midi2Translator then Midi1Translator returns the CC sequence a MIDI 1.0 sender
 /// wrote** (D.3.3 then D.2.3), for the zero-extended RPNs (every 14-bit value
 /// of RPN 0/0, which the rounding must not disturb) and for the scaled ones
 /// (every 14-bit value of an NRPN and of RPN 0/40).
@@ -304,8 +304,8 @@ fn the_round_trip_returns_the_controller_sequence() {
                 cc(0, CCNumber::DATA_ENTRY, msb),
                 cc(0, CCNumber::DATA_ENTRY_LSB, lsb),
             ];
-            let mut t = Translator::new();
-            let mut n = Narrower::new();
+            let mut t = Midi2Translator::new();
+            let mut n = Midi1Translator::new();
             let mut back = Vec::new();
             for ump in sent {
                 if let Some(u) = t.translate(ump) {
@@ -326,8 +326,8 @@ fn the_round_trip_returns_the_controller_sequence() {
     }
 }
 
-fn avoiding() -> Narrower {
-    Narrower::with_mode(TranslationMode {
+fn avoiding() -> Midi1Translator {
+    Midi1Translator::with_mode(TranslationMode {
         extremes: ExtremeValues::Avoided,
         per_note: PerNoteTranslation::Dropped,
     })
@@ -373,7 +373,7 @@ fn note(on: bool, velocity: u16) -> Message {
 /// Spec: m2-104/d.1.5#1
 #[test]
 fn avoided_extremes_move_near_values_off_the_minimum_and_maximum() {
-    let mut default = Narrower::new();
+    let mut default = Midi1Translator::new();
     let mut avoided = avoiding();
     for (value, scaled, kept) in [
         (0x0000_0000, 0, 0),
@@ -447,7 +447,7 @@ fn avoided_extremes_leave_zero_extended_registered_controllers() {
             "{value:#x}"
         );
         assert_eq!(
-            feed(&mut Narrower::new(), rpn(A, 0, 0, value)),
+            feed(&mut Midi1Translator::new(), rpn(A, 0, 0, value)),
             want,
             "{value:#x}"
         );
@@ -463,8 +463,8 @@ fn zone() -> MpeZoneConfig {
     .unwrap()
 }
 
-fn mpe(zone: MpeZoneConfig) -> Narrower {
-    Narrower::with_mode(TranslationMode {
+fn mpe(zone: MpeZoneConfig) -> Midi1Translator {
+    Midi1Translator::with_mode(TranslationMode {
         extremes: ExtremeValues::Scaled,
         per_note: PerNoteTranslation::Mpe(zone),
     })
@@ -510,7 +510,7 @@ fn mpe_gives_each_note_a_member_channel_for_its_per_note_bend() {
         feed(&mut n, per_note_bend(64, 0xFFFF_FFFF)),
         [vec![0xE2, 0x7F, 0x7F]]
     );
-    assert!(feed(&mut Narrower::new(), per_note_bend(60, 0x8000_0000)).is_empty());
+    assert!(feed(&mut Midi1Translator::new(), per_note_bend(60, 0x8000_0000)).is_empty());
 }
 
 /// **D.4.1: a device that understands the MIDI-CI MPE Profile uses its
@@ -613,10 +613,10 @@ fn a_restruck_mpe_note_is_the_longest_sequence() {
             vec![0x91, 60, 0x40],
         ]
     );
-    assert_eq!(sent.len(), Narrower::MAX_MESSAGES);
+    assert_eq!(sent.len(), Midi1Translator::MAX_MESSAGES);
     assert_eq!(
         sent.iter().map(Vec::len).sum::<usize>(),
-        Narrower::MAX_BYTES
+        Midi1Translator::MAX_BYTES
     );
 }
 
@@ -624,7 +624,7 @@ fn a_restruck_mpe_note_is_the_longest_sequence() {
 /// Changes, stays under the bounds.
 #[test]
 fn the_default_translation_stays_under_the_bounds() {
-    let sent = feed(&mut Narrower::new(), rpn(A, 0, 0, 12 << 25));
+    let sent = feed(&mut Midi1Translator::new(), rpn(A, 0, 0, 12 << 25));
     assert_eq!(sent.len(), 4);
     assert_eq!(sent.iter().map(Vec::len).sum::<usize>(), 12);
 }
@@ -659,10 +659,10 @@ fn a_stealing_mpe_note_is_the_longest_sequence() {
         ),
     );
     let sent = feed(&mut n, note_on(64));
-    assert_eq!(sent.len(), Narrower::MAX_MESSAGES);
+    assert_eq!(sent.len(), Midi1Translator::MAX_MESSAGES);
     assert_eq!(
         sent.iter().map(Vec::len).sum::<usize>(),
-        Narrower::MAX_BYTES
+        Midi1Translator::MAX_BYTES
     );
     assert_eq!(sent[0], [sent[4][0] & 0xEF, 60, 0]);
     assert_eq!(sent[4][1], 64);
@@ -673,13 +673,13 @@ fn a_stealing_mpe_note_is_the_longest_sequence() {
 #[test]
 fn the_default_mode_is_the_default_translation() {
     assert!(!TranslationMode::default().is_alternate());
-    assert_eq!(Narrower::new().mode(), TranslationMode::default());
+    assert_eq!(Midi1Translator::new().mode(), TranslationMode::default());
     assert!(mpe(zone()).mode().is_alternate());
     assert!(avoiding().mode().is_alternate());
 }
 
-fn mpe_avoiding() -> Narrower {
-    Narrower::with_mode(TranslationMode {
+fn mpe_avoiding() -> Midi1Translator {
+    Midi1Translator::with_mode(TranslationMode {
         extremes: ExtremeValues::Avoided,
         per_note: PerNoteTranslation::Mpe(zone()),
     })

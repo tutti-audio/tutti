@@ -43,7 +43,7 @@ pub(crate) const fn bend(v: u16) -> u32 {
 /// 4.1: "Translators shall use Zero-Extension Scaling on all Registered
 /// Controller (RPN) Messages where the index (RPN LSB) is 0-31") rather than
 /// scaled Min-Center-Max (section 3.1, index 32 to 127), whatever the bank.
-/// The translator widens by it and the narrower narrows by it, so the two
+/// The translator widens by it and the translator narrows by it, so the two
 /// cannot disagree.
 #[inline]
 pub(crate) const fn zero_extended(index: tutti_ump::U7) -> bool {

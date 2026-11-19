@@ -2,7 +2,7 @@
 //! queued for the device ([`Wire`]).
 //!
 //! The graph's MIDI is one thing (MIDI 2.0 Channel Voice, type `0x4`, after the
-//! input edge's `Translator`), and a device is in a Protocol of its own. The
+//! input edge's `Midi2Translator`), and a device is in a Protocol of its own. The
 //! rule is the spec's, applied at one place, [`OpenOutput::queue`](crate::OpenOutput):
 //!
 //! - **A MIDI 2.0 Protocol endpoint** gets the packets as they are.
@@ -17,9 +17,9 @@
 //! - **A MIDI 1.0 Protocol endpoint**, and a MIDI 1.0 port, gets MIDI 1.0 (§3.2:
 //!   UMP MIDI 1.0 Devices use no message of Message Type 0x4, MIDI 2.0 Channel
 //!   Voice Messages): each type `0x4` packet through one
-//!   [`Narrower`] for the output (M2-104 Appendix D.2, per Group and Channel); type
+//!   [`Midi1Translator`] for the output (M2-104 Appendix D.2, per Group and Channel); type
 //!   `0x2`, System and SysEx7 and every other type pass as they are. A
-//!   packet the narrower has no MIDI 1.0 form for (a per-note controller,
+//!   packet the MIDI 1.0 translator has no MIDI 1.0 form for (a per-note controller,
 //!   D.2.8) is dropped.
 //! - **JR Timestamps** are sent only when the device's configuration says it
 //!   receives them (§7.1.6.2, RXJR: the Sender sends none until a Stream
@@ -31,17 +31,17 @@
 //! when the device is opened, and what the UMP Stream negotiation settled
 //! (`MidiSession::poll`) after it.
 
-use tutti_midi_protocol::Narrower;
+use tutti_midi_protocol::Midi1Translator;
 use tutti_midi_runtime::{Outgoing, Taken};
 use tutti_ump::{Join, Message, Protocol, StreamConfig, Ump, Utility, parse_exact};
 
-/// One device output's wire form: its configuration, the [`Narrower`] that
+/// One device output's wire form: its configuration, the [`Midi1Translator`] that
 /// serves it for as long as it is in MIDI 1.0, and the buffers one batch is
 /// converted in.
 #[derive(Debug)]
 pub(crate) struct Wire {
     config: StreamConfig,
-    narrower: Narrower,
+    midi1_translator: Midi1Translator,
     /// The batch as it goes to the device.
     out: Vec<Outgoing>,
     /// For each input event, how many of `out` it had produced once it was
@@ -53,7 +53,7 @@ impl Wire {
     pub(crate) fn new(config: StreamConfig) -> Self {
         Self {
             config,
-            narrower: Narrower::new(),
+            midi1_translator: Midi1Translator::new(),
             out: Vec::new(),
             ends: Vec::new(),
         }
@@ -63,10 +63,10 @@ impl Wire {
         self.config
     }
 
-    /// The device now has `config`. A change of Protocol resets the narrower.
+    /// The device now has `config`. A change of Protocol resets the MIDI 1.0 translator.
     pub(crate) fn set_config(&mut self, config: StreamConfig) {
         if config.protocol != self.config.protocol {
-            self.narrower.reset();
+            self.midi1_translator.reset();
         }
         self.config = config;
     }
@@ -112,7 +112,7 @@ impl Wire {
                     if let Ok(message) = ump.decode() {
                         let out = &mut self.out;
                         let mut next = first;
-                        narrow_voice(&mut self.narrower, message, |narrowed| {
+                        narrow_voice(&mut self.midi1_translator, message, |narrowed| {
                             out.push(packet(narrowed, next));
                             // The packets of one event are one message: a cut
                             // between a controller's select and its value
@@ -145,12 +145,12 @@ impl Wire {
     }
 }
 
-/// Runs a MIDI 2.0 Channel Voice `message` through `narrower` and calls `out`
+/// Runs a MIDI 2.0 Channel Voice `message` through `midi1_translator` and calls `out`
 /// with each MIDI 1.0 packet it becomes, in the order to send them; returns how
 /// many that was. Any other message, and one with no MIDI 1.0 form (a per-note
 /// controller, D.2.8), is none.
 pub(crate) fn narrow_voice(
-    narrower: &mut Narrower,
+    midi1_translator: &mut Midi1Translator,
     message: Message,
     mut out: impl FnMut(Ump),
 ) -> usize {
@@ -158,7 +158,7 @@ pub(crate) fn narrow_voice(
         return 0;
     };
     let mut count = 0;
-    narrower.feed(message, |bytes| {
+    midi1_translator.feed(message, |bytes| {
         if let Some(packet) = parse_exact(address.group, bytes.as_slice()) {
             out(Ump::from(packet));
             count += 1;

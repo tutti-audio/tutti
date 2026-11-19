@@ -245,13 +245,13 @@ impl<T: Copy + PartialEq> Sending<'_, '_, T> {
         }
     }
 
-    /// Writes the controller lifts the port refused earlier, stopping at the
+    /// Writes the controller releases the port refused earlier, stopping at the
     /// first it refuses again. Each attempt gives its count back, so a delayed
-    /// lift nets zero.
+    /// release nets zero.
     fn pay_controllers(&mut self, at: Offset) {
         let out = &mut *self.out;
-        self.ledger.controllers.pay(|lift| {
-            let taken = out.push(Event::midi(at, lift)).is_ok();
+        self.ledger.controllers.pay(|release| {
+            let taken = out.push(Event::midi(at, release)).is_ok();
             out.recovered();
             taken
         });
@@ -395,7 +395,7 @@ impl<T: Copy + PartialEq> Sending<'_, '_, T> {
     /// protocol it was sent in; one already at rest sends nothing. MIDI 1.0
     /// Detailed Spec p. 31 (Stop) asks for the return; the pedals come after
     /// the offs because a Hold or Sustain pedal that is on holds a note through
-    /// its Note Off and All Notes Off until it is lifted (A-5). An off the port refuses stays owed. Once the port refuses
+    /// its Note Off and All Notes Off until it is released (A-5). An off the port refuses stays owed. Once the port refuses
     /// one the rest are not tried (it is full), but each is owed and counted:
     /// a note that gets no off is a lost event whether or not its push was
     /// attempted.
@@ -423,12 +423,12 @@ impl<T: Copy + PartialEq> Sending<'_, '_, T> {
         });
         self.ledger.recount();
         // Then the controllers: a pedal still down holds the notes just ended
-        // (MIDI 1.0 Detailed Spec A-5), so it is lifted after them.
+        // (MIDI 1.0 Detailed Spec A-5), so it is released after them.
         let out = &mut *self.out;
         let mut full = false;
-        self.ledger.controllers.lift_all(|lift, owed| {
+        self.ledger.controllers.release_all(|release, owed| {
             let attempted = !full;
-            if attempted && out.push(Event::midi(at, lift)).is_ok() {
+            if attempted && out.push(Event::midi(at, release)).is_ok() {
                 if owed {
                     out.recovered();
                 }

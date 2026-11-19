@@ -20,7 +20,7 @@
 //!
 //! A port speaks MIDI 1.0 and is listed as such, so the session never offers it
 //! a MIDI 2.0 message it cannot carry, and what arrives is type 2 packets that
-//! the ingest node's `Translator` widens, as it does for a legacy ALSA port.
+//! the ingest node's `Midi2Translator` widens, as it does for a legacy ALSA port.
 
 pub(super) mod anchor;
 pub(super) mod bytes;
