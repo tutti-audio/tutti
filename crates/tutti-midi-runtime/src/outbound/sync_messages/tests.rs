@@ -64,14 +64,10 @@ fn the_word_is_the_documented_layout() {
 /// device from the low seven bits of its field, the unnamed bits ignored.
 #[test]
 fn every_word_decodes() {
-    let mut state = 0x9E37_79B9_7F4A_7C15_u64;
+    let mut words = tutti_rt::SplitMix64::new(0x9E37_79B9_7F4A_7C15);
     for _ in 0..10_000 {
-        // splitmix64: a spread of words with every bit position exercised.
-        state = state.wrapping_add(0x9E37_79B9_7F4A_7C15);
-        let mut z = state;
-        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-        let word = z ^ (z >> 31);
+        // A spread of words with every bit position exercised.
+        let word = words.next_u64();
         let read = SyncMessages::from_word(word).expect("decoding is total");
         assert_eq!(read.clock, word & 1 != 0);
         assert_eq!(read.mtc, word & 2 != 0);

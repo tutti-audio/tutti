@@ -161,7 +161,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let first: Option<ParamId> = params.iter().next().map(|p| p.id());
     if let Some(id) = first {
         let param = params.get(id)?;
-        param.set(Normalized::clamped(0.5))?;
+        session.set(param.target().to(Normalized::clamped(0.5)))?;
         eprintln!(
             "{} = {}",
             param.info().name(),

@@ -10,7 +10,7 @@
 //! `tutti-midi-hardware`. This crate owns the runtime state that connects them:
 //!
 //! - **MIDI as graph nodes**, sending on `tutti-graph` event ports:
-//!   [`MidiIngestNode`] (a device's inlet in, one port per Group and channel), [`MidiClipNode`] and
+//!   [`MidiInputNode`] (a device's inlet in, one port per Group and channel), [`MidiClipNode`] and
 //!   [`HarmonyNode`] (a timeline), [`SyncOut`] (Beat Clock, MTC and Machine Control). MIDI leaves the graph
 //!   through an event tap (`tutti-graph`'s `EventTapReader`).
 //! - [`ClockMap`]: the pure OS-time to graph-frame map (and back), built from
@@ -18,8 +18,8 @@
 //! - [`InputInlets`] and [`DeviceInput`]: one event inlet per hardware MIDI
 //!   input. The device's thread places each arrival on a frame with a `ClockMap`
 //!   fed the engine's block clock and pushes it into its inlet, so the audio thread
-//!   converts no time; an input's ingest node follows its device through
-//!   [`DeviceEpochs`].
+//!   converts no time; an input's input node follows its device through
+//!   [`DeviceGeneration`].
 //! - [`TempoFollower`]: what a transport that follows an outside tempo applies, as a pure
 //!   value (a Group's Flex Set Tempo and Set Time Signature, M2-104 §7.5.3, §7.5.4); the
 //!   session places the change.
@@ -36,7 +36,7 @@
 //!   as a node of one event stream.
 //!
 //! The MPE zone types (`MpeMode`, `MpeZoneConfig`, ...) are
-//! `tutti-midi-protocol`'s; `MidiIngestNode::with_mpe` takes a `MpeMode` from there.
+//! `tutti-midi-protocol`'s; `MidiInputNode::with_mpe` takes a `MpeMode` from there.
 //! So are the `SmpteFrameRate` and the `SmpteTimecode` the decoders assemble.
 //!
 //! ## What it does not own
@@ -59,17 +59,17 @@
 //! the one receiver of the MPE Configuration Message: it also sends a Manager
 //! Channel's zone-wide messages and its bend on each member channel of its zone,
 //! so an instrument reads one channel at a time and holds no zone.
-//! [`MidiIngestNode`] runs it over a device's wire and [`MpeTransformNode`] over
+//! [`MidiInputNode`] runs it over a device's wire and [`MpeTransformNode`] over
 //! any other event stream (a clip's).
 //!
 //! ## Routing is wiring
 //!
-//! A `MidiIngestNode` sends each event out of the port of its Group and channel,
+//! A `MidiInputNode` sends each event out of the port of its Group and channel,
 //! and a Group's System, SysEx and Flex messages out of that Group's channelless
 //! port (`CHANNELLESS_PORT` for the first). A Group is a channel space of its own
 //! (M2-104 section 2.1.2, Appendix B.1), so each Group the node hears has seventeen
 //! ports; the node hears the first Group unless built with
-//! `MidiIngestNode::hearing(MidiInputPorts::through(last))`, so a one-Group device is
+//! `MidiInputNode::hearing(MidiInputPorts::through(last))`, so a one-Group device is
 //! `MIDI_INPUT_PORTS` ports and costs nothing more. A message with no Group
 //! (Utility, UMP Stream) leaves the first Group's channelless port. Which node hears
 //! which channel is which ports it takes event edges from: `MidiInputPorts::listening`
@@ -199,11 +199,10 @@ mod traits;
 
 pub use clock_map::{ClockMap, ClockReading, GAIN, Observed, RESYNC};
 pub use live::{
-    ArrivalClock, CHANNELLESS_PORT, DeviceEpochs, DeviceInput, DeviceWriters, EpochWriter, InputId,
-    InputInlets, InputReaders, InputWriters, LIVE_INLET_CAPACITY, MIDI_INPUT_DENSITY,
-    MIDI_INPUT_EVENT_CAPACITY, MIDI_INPUT_PORTS, MidiIngestControls, MidiIngestNode,
-    MidiInputPorts, MidiKeys, MpeIngest, MpeTransformControls, MpeTransformNode, RouteRule,
-    compile_routes,
+    ArrivalClock, CHANNELLESS_PORT, DeviceGeneration, DeviceInput, DeviceWriters, GenerationWriter,
+    InputId, InputInlets, InputReaders, InputWriters, LIVE_INLET_CAPACITY, MIDI_INPUT_DENSITY,
+    MIDI_INPUT_EVENT_CAPACITY, MIDI_INPUT_PORTS, MidiInputControls, MidiInputNode, MidiInputPorts,
+    MidiKeys, MpeIngest, MpeTransformControls, MpeTransformNode, RouteRule, compile_routes,
 };
 pub use mpe_features::{MpeFeaturesError, ask_mpe_features, mpe_features};
 pub use mpe_zones::mpe_zones;

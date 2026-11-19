@@ -120,7 +120,7 @@ pub(super) fn prepare(id: EndpointId) -> Result<(Client, QueueClock)> {
     // — see `client::open`.
     let seq = super::client::open(CLIENT, Blocking::NonBlock, UmpVersion::Midi2)?;
     // What the source can speak decides what this client is delivered: a MIDI
-    // 1.0 source arrives as MIDI 1.0 UMP (type 2) and the ingest node's
+    // 1.0 source arrives as MIDI 1.0 UMP (type 2) and the input node's
     // `Midi2Translator` translates it, so the kernel never converts it.
     // The record is read on the open client, and the version is set before the
     // port exists and before the subscription, so no event is delivered at the

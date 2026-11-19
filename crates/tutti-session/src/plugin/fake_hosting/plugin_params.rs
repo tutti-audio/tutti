@@ -8,21 +8,21 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use crate::{
-    AnyPlugin, DetachedSession, Key, PluginChange, PluginEvent, PluginParamError, Session,
-    SessionEvent,
+    AnyPlugin, DetachedSession, Key, PluginChange, PluginEvent, PluginParamError,
+    PluginParamRefusal, Session, SessionEvent, SetRefusal, ValueError, ValueErrorKind,
 };
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{ForkByClone, NodeKey};
 use tutti_nodes::testing::Const;
-use tutti_plugin_host::{PluginHandle, RefreshSink};
+use tutti_plugin_host::{PluginControls, PluginHandle, RefreshSink};
 use tutti_plugin_types::{
     AnyThread, AutomationMode, AutomationModeError, Health, ParamFlags, ParamUnit, ParameterInfo,
-    PluginFailure, PluginRefresh, RenderMode,
+    PluginFailure, PluginRefresh, PluginTail, RenderMode,
 };
 use tutti_rt::LockExt;
 use tutti_units::Normalized;
 use tutti_units::ParamId;
-use tutti_units::{Db, Hz, SampleRate};
+use tutti_units::{Db, Hz, SampleRate, Samples};
 
 const CUTOFF: ParamId = ParamId::new(1);
 const LEVEL: ParamId = ParamId::new(2);
@@ -53,6 +53,9 @@ struct Fake {
     infos: Mutex<Vec<ParameterInfo>>,
     values: Mutex<HashMap<ParamId, Normalized>>,
     sets: Mutex<Vec<(ParamId, Normalized)>>,
+    /// Writes the host made while `held`, which the plugin has not taken yet.
+    held: std::sync::atomic::AtomicBool,
+    pending: Mutex<Vec<(ParamId, Normalized)>>,
 }
 
 impl Fake {
@@ -73,6 +76,19 @@ impl Fake {
             .and_then(|i| i.bounds())
     }
 
+    /// Makes the plugin take the writes held back, in order.
+    fn take_held(&self) {
+        self.held.store(false, std::sync::atomic::Ordering::SeqCst);
+        for (id, value) in std::mem::take(&mut *self.pending.lock_recover()) {
+            self.take(id, value);
+        }
+    }
+
+    fn take(&self, id: ParamId, value: Normalized) {
+        self.values.lock_recover().insert(id, value);
+        self.sets.lock_recover().push((id, value));
+    }
+
     fn sets(&self) -> Vec<(ParamId, f64)> {
         self.sets
             .lock_recover()
@@ -90,8 +106,11 @@ impl AnyThread for Fake {
         self.values.lock_recover().get(&id).copied()
     }
     fn set_parameter_value(&self, id: ParamId, value: Normalized) {
-        self.values.lock_recover().insert(id, value);
-        self.sets.lock_recover().push((id, value));
+        if self.held.load(std::sync::atomic::Ordering::SeqCst) {
+            self.pending.lock_recover().push((id, value));
+        } else {
+            self.take(id, value);
+        }
     }
     fn parameter_plain(&self, id: ParamId, value: Normalized) -> Option<f64> {
         let (min, max) = self.range(id)?;
@@ -272,10 +291,6 @@ fn a_gesture_on_a_read_only_parameter_never_begins() {
         locked.edit(),
         Err(PluginParamError::ReadOnly(id)) if id == LOCKED
     ));
-    assert_eq!(
-        locked.set(Normalized::of(1.0)),
-        Err(PluginParamError::ReadOnly(LOCKED))
-    );
     assert!(changes(update(&mut s)).is_empty());
     assert!(fake.sets().is_empty());
 }
@@ -485,29 +500,16 @@ fn text_and_plain_values_go_through_the_plugin() {
     assert_eq!(fake.sets(), [(LEVEL, 0.5), (LEVEL, 0.75)]);
 }
 
-/// **The automation mode has an error of its own**: the fake carries no such
-/// channel, and says so with `Unsupported`, not an editor error.
-#[test]
-fn the_automation_mode_refusal_is_its_own_type() {
-    let (s, node, _, _) = ready();
-    assert_eq!(
-        s.plugin_view(node)
-            .unwrap()
-            .params()
-            .set_automation_mode(AutomationMode::Writing),
-        Err(AutomationModeError::Unsupported {
-            format: "fake".into()
-        })
-    );
-}
-
 /// **A plugin parameter is targeted by the same reference a native one is**
 /// (`modulation`): `Param::target` is the `ParamRef` a route takes.
 #[test]
 fn a_plugin_parameter_targets_a_modulation_route_through_a_param_ref() {
     let (s, node, _, _) = ready();
     let level = s.plugin_view(node).unwrap().params().get(LEVEL).unwrap();
-    assert_eq!(level.target(), crate::ParamRef::plugin(node, LEVEL));
+    assert_eq!(
+        crate::ParamRef::from(level.target()),
+        crate::ParamRef::plugin(node, LEVEL)
+    );
 }
 
 /// **A plugin's key names a parameter as a route's target** (`modulation`):
@@ -521,7 +523,7 @@ fn a_plugin_key_names_a_parameter_a_route_targets() {
     let (mut s, key, _, _) = session_keyed();
     let _ = update(&mut s);
     let target = key.param(LEVEL);
-    assert_eq!(target, ParamRef::plugin(key, LEVEL));
+    assert_eq!(ParamRef::from(target), ParamRef::plugin(key, LEVEL));
     assert_eq!(
         target,
         s.plugin_view(key)
@@ -629,4 +631,220 @@ fn a_gesture_on_a_parameter_the_rescan_dropped_is_refused() {
         gesture.set(Normalized::of(0.5)),
         Err(PluginParamError::Gone(CUTOFF))
     );
+}
+
+/// Whether `result` failed as `NoSuchTarget`, naming the target.
+fn no_such_target(result: Result<(), ValueError<&'static str>>) -> bool {
+    matches!(
+        result,
+        Err(ValueError {
+            target: Some(_),
+            kind: ValueErrorKind::NoSuchTarget,
+            ..
+        })
+    )
+}
+
+/// The refusal a value call carries, or a panic naming what it did instead.
+fn refusal(result: Result<(), ValueError<&'static str>>) -> PluginParamRefusal {
+    match result {
+        Err(ValueError {
+            kind: ValueErrorKind::Refused(SetRefusal::Plugin(refusal)),
+            ..
+        }) => refusal,
+        other => panic!("a plugin refusal was expected: {other:?}"),
+    }
+}
+
+/// **A set reads back from the mirror before the plugin has it.** The plugin
+/// holds the write back; `get` and the parameter's view answer the new
+/// position, the plugin has taken nothing, and it takes the value when it
+/// takes its writes.
+#[test]
+fn a_set_reads_back_from_the_mirror_before_the_plugin_has_it() {
+    let (mut s, key, fake, _) = session_keyed();
+    let _ = update(&mut s);
+    fake.held.store(true, std::sync::atomic::Ordering::SeqCst);
+
+    s.set(key.param(CUTOFF).to(Normalized::of(0.8))).unwrap();
+
+    assert_eq!(s.get(key.param(CUTOFF)).unwrap(), Normalized::of(0.8));
+    assert_eq!(cutoff(&s, key.erase()).normalized(), Normalized::of(0.8));
+    assert!(fake.sets().is_empty(), "the plugin has not taken it");
+    fake.take_held();
+    assert_eq!(fake.sets(), [(CUTOFF, 0.8)]);
+}
+
+/// **An id the plugin does not declare is no target, for `set` or `get`**: both
+/// fail at the call with `NoSuchTarget` naming the target, and nothing reaches
+/// the plugin.
+#[test]
+fn an_undeclared_id_is_no_target_for_set_or_get() {
+    let (mut s, key, fake, _) = session_keyed();
+    let _ = update(&mut s);
+    let unknown = key.param(ParamId::new(99));
+    assert!(no_such_target(s.set(unknown.to(Normalized::of(0.5)))));
+    assert!(no_such_target(s.get(unknown).map(drop)));
+    assert!(fake.sets().is_empty());
+}
+
+/// **A parameter is no target before the declaration is read**, for `set` or
+/// `get`; once the read lands it is one.
+#[test]
+fn a_parameter_is_no_target_before_the_declaration_is_read() {
+    let (mut s, key, fake, _) = session_keyed();
+    assert!(no_such_target(
+        s.set(key.param(CUTOFF).to(Normalized::of(0.5)))
+    ));
+    assert!(no_such_target(s.get(key.param(CUTOFF)).map(drop)));
+    assert!(fake.sets().is_empty());
+    let _ = update(&mut s);
+    s.set(key.param(CUTOFF).to(Normalized::of(0.5))).unwrap();
+    assert_eq!(fake.sets(), [(CUTOFF, 0.5)]);
+}
+
+/// **A write to a read-only parameter is refused**, and the mirror keeps its
+/// value.
+#[test]
+fn a_read_only_parameter_is_refused() {
+    let (mut s, key, fake, _) = session_keyed();
+    let _ = update(&mut s);
+    assert_eq!(
+        refusal(s.set(key.param(LOCKED).to(Normalized::of(1.0)))),
+        PluginParamRefusal::ReadOnly(LOCKED)
+    );
+    assert_eq!(s.get(key.param(LOCKED)).unwrap(), Normalized::of(0.25));
+    assert!(fake.sets().is_empty());
+}
+
+/// **A batch over two plugin params and one native param is atomic**: a
+/// refused third item lands nothing, and the same batch without it lands all.
+#[test]
+fn a_batch_over_plugin_and_native_params_lands_nothing_when_one_is_refused() {
+    use tutti_nodes::{SvfFilterNode, SvfType};
+    use tutti_units::Q;
+
+    let (mut s, key, fake, _) = session_keyed();
+    let _ = update(&mut s);
+    let (lp, _) = s.graph().add(SvfFilterNode::<f32>::new(
+        SvfType::LowPass,
+        Hz::new(800.0),
+        Q::new(0.707),
+    ));
+    s.commit();
+
+    let refused = s.set((
+        key.param(CUTOFF).to(Normalized::of(0.1)),
+        lp.cutoff().to(Hz::new(300.0)),
+        key.param(LOCKED).to(Normalized::of(0.9)),
+    ));
+    let Err(error) = refused else {
+        panic!("the read-only item refuses the batch");
+    };
+    assert_eq!(error.at, 2);
+    assert_eq!(s.get(key.param(CUTOFF)).unwrap(), Normalized::of(0.5));
+    assert_eq!(s.get(lp.cutoff()).unwrap(), Hz::new(800.0));
+    assert!(fake.sets().is_empty());
+
+    s.set((
+        key.param(CUTOFF).to(Normalized::of(0.1)),
+        lp.cutoff().to(Hz::new(300.0)),
+        key.param(LEVEL).to(Normalized::of(0.9)),
+    ))
+    .unwrap();
+    assert_eq!(fake.sets(), [(CUTOFF, 0.1), (LEVEL, 0.9)]);
+    assert_eq!(s.get(lp.cutoff()).unwrap(), Hz::new(300.0));
+}
+
+/// **A load that moves the plugin's values drops the writes made before it**:
+/// the host wrote `0.9`, the plugin's restored state holds `0.1`, and once the
+/// re-read lands `get` answers the plugin's value, not the earlier write.
+#[test]
+fn a_state_load_replaces_the_values_written_before_it() {
+    let (mut s, key, fake, refresh) = session_keyed();
+    let _ = update(&mut s);
+    s.set(key.param(CUTOFF).to(Normalized::of(0.9))).unwrap();
+    let _ = update(&mut s);
+    assert_eq!(s.get(key.param(CUTOFF)).unwrap(), Normalized::of(0.9));
+
+    fake.values
+        .lock_recover()
+        .insert(CUTOFF, Normalized::of(0.1));
+    refresh.fire(PluginRefresh::ParamValues);
+    let _ = update(&mut s);
+    let _ = update(&mut s);
+    assert_eq!(s.get(key.param(CUTOFF)).unwrap(), Normalized::of(0.1));
+}
+
+/// **A plugin whose format has no automation mode has no target for it**;
+/// the fake declares no `AUTOMATION_STATE`.
+#[test]
+fn a_plugin_without_automation_state_has_no_automation_mode_target() {
+    let (s, node, _, _) = ready();
+    assert_eq!(s.plugin_view(node).unwrap().automation_mode(), None);
+}
+
+/// Replaces the plugin at `node` with `fake` as the node's plugin `plugin`, as
+/// the graph's replace does: the record takes the new handle, the old one is
+/// retired and the value table is told.
+fn replace_with(s: &mut DetachedSession, node: NodeKey, fake: &Arc<Fake>, plugin: &str) {
+    let handle = PluginHandle::from_backend(
+        Arc::clone(fake),
+        None,
+        Default::default(),
+        Default::default(),
+        Default::default(),
+    );
+    let (controls, _) =
+        PluginControls::new(Samples::new(0), PluginTail::default(), SampleRate::SR_48K);
+    let plugin = tutti_plugin::catalog::PluginRef::file(plugin).expect("a plugin file");
+    let hosted = s.graph.plugins.get_mut(&node).expect("a hosted plugin");
+    let outgoing = hosted.replace_hosted(handle, (*controls).clone(), plugin);
+    outgoing.retire().settle(node, &mut s.graph.graveyard);
+    s.graph.provide_plugin(node);
+}
+
+/// **A replace by the same plugin keeps its parameters targets until the new
+/// read lands**: a set made in between is taken by the new handle and `get`
+/// reads it back, and the read that lands then replaces the carried values.
+#[test]
+fn a_replace_by_the_same_plugin_keeps_its_parameters_settable_until_the_read_lands() {
+    let (mut s, key, _, _) = session_keyed();
+    let _ = update(&mut s);
+    let again = Fake::new();
+    replace_with(&mut s, key.erase(), &again, "fake.clap");
+
+    assert_eq!(s.get(key.param(CUTOFF)).unwrap(), Normalized::of(0.5));
+    s.set(key.param(CUTOFF).to(Normalized::of(0.3))).unwrap();
+    assert_eq!(s.get(key.param(CUTOFF)).unwrap(), Normalized::of(0.3));
+    assert_eq!(again.sets(), [(CUTOFF, 0.3)], "the new handle took it");
+    assert_eq!(
+        refusal(s.set(key.param(LOCKED).to(Normalized::of(0.9)))),
+        PluginParamRefusal::ReadOnly(LOCKED),
+        "the carried declaration keeps its access"
+    );
+
+    again
+        .values
+        .lock_recover()
+        .insert(LEVEL, Normalized::of(0.75));
+    let _ = update(&mut s);
+    assert_eq!(s.get(key.param(LEVEL)).unwrap(), Normalized::of(0.75));
+    assert_eq!(s.get(key.param(CUTOFF)).unwrap(), Normalized::of(0.3));
+}
+
+/// **A replace by another plugin leaves no target until its read lands.**
+#[test]
+fn a_replace_by_another_plugin_has_no_target_until_its_read_lands() {
+    let (mut s, key, _, _) = session_keyed();
+    let _ = update(&mut s);
+    let other = Fake::new();
+    replace_with(&mut s, key.erase(), &other, "other.clap");
+
+    assert!(no_such_target(
+        s.set(key.param(CUTOFF).to(Normalized::of(0.3)))
+    ));
+    assert!(other.sets().is_empty());
+    let _ = update(&mut s);
+    s.set(key.param(CUTOFF).to(Normalized::of(0.3))).unwrap();
 }

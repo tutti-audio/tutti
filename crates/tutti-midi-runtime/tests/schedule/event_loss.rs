@@ -254,15 +254,15 @@ fn the_port_follows_the_block() {
     }
 }
 
-/// The ingest node is sized from the block it is prepared for: 512 events up
+/// The input node is sized from the block it is prepared for: 512 events up
 /// to a 4,096-frame block, an eighth of the block's frames past that (1,024 at
 /// 8,192, 2,048 at 16,384).
 #[test]
-fn the_ingest_node_follows_the_block() {
-    use tutti_midi_runtime::MidiIngestNode;
+fn the_input_node_follows_the_block() {
+    use tutti_midi_runtime::MidiInputNode;
 
     for (block, want) in [(64usize, 512u32), (4096, 512), (8192, 1024), (16_384, 2048)] {
-        let mut node = MidiIngestNode::new();
+        let mut node = MidiInputNode::new();
         tutti_graph::Node::<f32>::prepare(
             &mut node,
             &Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(block))),

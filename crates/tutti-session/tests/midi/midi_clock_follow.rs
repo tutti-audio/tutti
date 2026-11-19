@@ -50,7 +50,7 @@ fn rig_hearing(last: MidiGroup) -> (Session, FakeCounters) {
     (s, fake)
 }
 
-/// The ingest node of the input port `"keys"`, which a follower reads.
+/// The input node of the input port `"keys"`, which a follower reads.
 fn input(s: &Session) -> tutti_graph::NodeKey {
     s.midi_input(&"keys").expect("loaded").node()
 }
