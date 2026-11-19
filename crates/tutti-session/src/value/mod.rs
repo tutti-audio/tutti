@@ -56,7 +56,7 @@ pub use controls::{GainTarget, GainTargetError, MixTarget, ModeTarget};
 pub(crate) use depth::DepthSlot;
 pub use depth::DepthTarget;
 #[cfg(feature = "plugin")]
-pub use error::PluginParamRefusal;
+pub use error::{PluginParamRefusal, UnitError};
 pub use error::{SetRefusal, ValueError, ValueErrorKind};
 pub use param::{ParamTarget, TargetInfo};
 #[cfg(feature = "plugin")]

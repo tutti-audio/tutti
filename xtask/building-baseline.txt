@@ -411,8 +411,6 @@ tutti-session  setter  crates/tutti-session/src/graph.rs::Graph::set_sources_unf
 tutti-session  setter  crates/tutti-session/src/midi.rs::Midi::set_route_fallback
 tutti-session  setter  crates/tutti-session/src/midi.rs::Midi::set_routes
 tutti-session  setter  crates/tutti-session/src/modulation.rs::Mods::set_source
-tutti-session  setter  crates/tutti-session/src/plugin_params.rs::Param::set_plain
-tutti-session  setter  crates/tutti-session/src/plugin_params.rs::Param::set_text
 tutti-session  ctor-result  crates/tutti-session/src/recorder.rs::PumpLoop::new
 tutti-session  ctor-result  crates/tutti-session/src/recorder.rs::Recorder::start
 tutti-session  ctor-result  crates/tutti-session/src/recorder.rs::Recorder::start_finite

@@ -1,4 +1,4 @@
-//! `Params::typed` over a real format's own value map: the
+//! `Param::try_unit` over a real format's own value map: the
 //! reference VST2 plugin, in process. Its parameter 1 is labelled `Hz` and
 //! declares the integer range `0..=127`, which VST2 maps linearly
 //! (`tutti-vst2-host`'s `IntegerRange`), so `Hz::new(31.75)` is position `0.25`
@@ -9,7 +9,9 @@ use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_plugin::catalog::PluginRef;
 use tutti_plugin_types::ParamUnit;
-use tutti_session::{DetachedSession, PluginParamError, Root, Session};
+use tutti_session::{
+    DetachedSession, Root, Session, SetRefusal, UnitError, ValueError, ValueErrorKind,
+};
 use tutti_units::Normalized;
 use tutti_units::ParamId;
 use tutti_units::{Db, Hz, SampleRate};
@@ -52,41 +54,48 @@ fn session_with_probe() -> (DetachedSession, NodeKey, libloading::Library) {
     (s, node.erase(), image)
 }
 
-/// **`typed` round-trips plain values through VST2's own map**, and refuses the
-/// wrong unit on the same parameter: `Db` on a parameter that measures hertz.
+/// **A unit target round-trips plain values through VST2's own map**, and
+/// refuses the wrong unit on the same parameter: `Db` on a parameter that
+/// measures hertz.
 fn a_typed_hertz_parameter_round_trips_through_the_formats_own_range() {
     let (s, node, _image) = session_with_probe();
-    let params = s.plugin_view(node).unwrap().params();
+    let param = s.plugin_view(node).unwrap().params().get(HERTZ).unwrap();
     assert_eq!(
-        params.get(HERTZ).unwrap().info().measures(),
+        param.info().measures(),
         Some(ParamUnit::Hertz),
         "the label and the declared range type it"
     );
     assert!(matches!(
-        params.typed::<Db>(HERTZ),
-        Err(PluginParamError::UnitMismatch {
+        param.try_unit::<Db>(),
+        Err(UnitError::UnitMismatch {
             declared: ParamUnit::Hertz,
             ..
         })
     ));
 
-    let hertz = params.typed::<Hz>(HERTZ).unwrap();
-    for (plain, position) in [(0.0, 0.0), (31.75, 0.25), (63.5, 0.5), (127.0, 1.0)] {
-        hertz.set(Hz::new(plain)).unwrap();
+    let hertz = param.try_unit::<Hz>().unwrap();
+    let position = param.target();
+    for (plain, at) in [(0.0, 0.0), (31.75, 0.25), (63.5, 0.5), (127.0, 1.0)] {
+        s.set(hertz.to(Hz::new(plain))).unwrap();
         assert_eq!(
-            hertz.param().normalized(),
-            Normalized::of(position),
-            "{plain} Hz is position {position}"
+            s.get(position).unwrap(),
+            Normalized::of(at),
+            "{plain} Hz is position {at}"
         );
         assert_eq!(
-            hertz.get(),
-            Ok(Hz::new(plain)),
+            s.get(hertz).unwrap(),
+            Hz::new(plain),
             "and reads back as {plain} Hz"
         );
     }
-    assert_eq!(
-        hertz.set(Hz::new(128.0)),
-        Err(PluginParamError::OutOfRange(HERTZ)),
+    assert!(
+        matches!(
+            s.set(hertz.to(Hz::new(128.0))),
+            Err(ValueError {
+                kind: ValueErrorKind::Refused(SetRefusal::OutOfRange),
+                ..
+            })
+        ),
         "past the declared range"
     );
 }

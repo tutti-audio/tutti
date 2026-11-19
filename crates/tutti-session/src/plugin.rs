@@ -815,6 +815,10 @@ pub(crate) struct HostedPlugin {
     /// The lane knobs of the parameters a modulation lane drives: where a set
     /// of one goes.
     pub(crate) driven: crate::plugin_params::Driven,
+    /// The writes to a parameter the plugin dropped after the session read its
+    /// declaration, which the value table counts and
+    /// [`Plugin::losses`] reports as refused.
+    refused_writes: Arc<std::sync::atomic::AtomicU64>,
     /// The read that fills the mirror (a crossfade rebuilt it, the load's read
     /// was not answered, or the plugin announced a rescan), until
     /// `Phase::Plugins` hands it to the host as a job.
@@ -1028,6 +1032,7 @@ impl HostedPlugin {
             mirror,
             gate: Gate::default(),
             driven: crate::plugin_params::Driven::default(),
+            refused_writes: Arc::default(),
             param_read: Some(read),
             carried: None,
             mirror_token: Arc::new(()),
@@ -1147,6 +1152,10 @@ impl HostedPlugin {
         self.banked
             + self.node_losses()
             + tutti_graph::Losses::lost(self.handle.dropped_parameter_events())
+            + tutti_graph::Losses::refused(
+                self.refused_writes
+                    .load(std::sync::atomic::Ordering::Relaxed),
+            )
     }
 
     /// Keeps the declarations and values the mirror holds when `incoming` is
@@ -1286,6 +1295,7 @@ impl HostedPlugin {
             self.driven.clone(),
             &self.mirror,
             self.carried.as_deref(),
+            Arc::clone(&self.refused_writes),
         );
         let mode = self
             .takes_automation_mode()
@@ -1395,8 +1405,9 @@ impl<'a> Plugin<'a> {
     /// - [`evicted`](crate::Losses::evicted): parameter points that replaced
     ///   the last one of a full queue.
     /// - [`refused`](crate::Losses::refused): parameter points for a
-    ///   parameter the node has no slot for, and chords and scales past the
-    ///   capacity of a block's sequencer context.
+    ///   parameter the node has no slot for, writes of a parameter the plugin
+    ///   dropped after the session read its declaration (a rescan), and chords
+    ///   and scales past the capacity of a block's sequencer context.
     ///
     /// The MIDI the plugin sent that the node had no room to put out is in
     /// [`lost`](crate::Losses::lost) too.

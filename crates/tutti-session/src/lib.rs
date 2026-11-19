@@ -256,7 +256,7 @@ pub use midi_hardware::{MidiPolicy, MidiPolicyError};
 #[cfg(feature = "plugin")]
 pub use plugin_diagnostics::{Diagnostics, PluginBuses};
 #[cfg(feature = "plugin")]
-pub use plugin_params::{Param, ParamGesture, Params, PluginParamError, TypedParam};
+pub use plugin_params::{Param, ParamGesture, Params};
 #[cfg(feature = "plugin")]
 pub use plugin_presets::{ListedPreset, PluginPresets};
 pub use policy::{OutputPolicy, OutputPolicyError, Policy};
@@ -319,6 +319,6 @@ pub use value::{ClipEventsTarget, HarmonyTarget, MpeModeTarget, OutputLatencyTar
 #[cfg(feature = "sampler")]
 pub use value::{DirectionTarget, LoopingTarget, SpeedTarget, WindowTarget};
 #[cfg(feature = "plugin")]
-pub use value::{PluginAutomationModeTarget, PluginParamRefusal, PluginParamTarget};
+pub use value::{PluginAutomationModeTarget, PluginParamRefusal, PluginParamTarget, UnitError};
 #[cfg(feature = "device")]
 pub use watch::{Backoff, DevicePolicy, DeviceWatch, Follow, FollowEvent};

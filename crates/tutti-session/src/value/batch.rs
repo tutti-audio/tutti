@@ -88,6 +88,15 @@ impl<'a> Batch<'a> {
         }
     }
 
+    /// The failure of a target that resolved to no cell: the refusal its
+    /// declaration gives, else that it is not there.
+    fn unresolved<T: Store>(&self, target: T) -> Failure {
+        let kind = target
+            .unresolved(self.params)
+            .map_or(ValueErrorKind::NoSuchTarget, ValueErrorKind::Refused);
+        self.fail(target.id(), kind)
+    }
+
     /// Stages the value `make` builds from the target's value so far in this
     /// batch, or from its base when it has none.
     fn apply<T: Store>(
@@ -115,7 +124,7 @@ impl<'a> Batch<'a> {
             None => {
                 let (cell, base) = target
                     .resolve(self.params)
-                    .ok_or_else(|| self.fail(id, ValueErrorKind::NoSuchTarget))?;
+                    .ok_or_else(|| self.unresolved(target))?;
                 let next = make(&base);
                 T::check(&cell, &next).map_err(|r| self.fail(id, ValueErrorKind::Refused(r)))?;
                 self.slots.push(Box::new(Slot::<T> {
@@ -133,7 +142,7 @@ impl<'a> Batch<'a> {
     fn read_base<T: Store>(&mut self, target: T) -> Result<T::Value, Failure> {
         let (_, base) = target
             .resolve(self.params)
-            .ok_or_else(|| self.fail(target.id(), ValueErrorKind::NoSuchTarget))?;
+            .ok_or_else(|| self.unresolved(target))?;
         self.index += 1;
         Ok(base)
     }

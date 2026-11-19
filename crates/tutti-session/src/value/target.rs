@@ -34,6 +34,13 @@ pub(crate) mod sealed {
         /// The cell and the base value now, or `None` when the target is gone.
         fn resolve(self, params: &Params) -> Option<(Self::Cell, Self::Value)>;
 
+        /// Why `resolve` found no cell, when the target is there but its
+        /// declaration no longer makes it one (a plugin parameter whose unit
+        /// a rescan removed); `None` is a target that is gone.
+        fn unresolved(self, _: &Params) -> Option<SetRefusal> {
+            None
+        }
+
         /// Whether `value` may be written through `cell`.
         fn check(cell: &Self::Cell, value: &Self::Value) -> Result<(), SetRefusal>;
 
@@ -75,9 +82,10 @@ pub enum TargetId {
     /// names declares it: a key of another node type than the one the node
     /// is now names no such param.
     Param(NodeKey, UnitAddr, TypeId),
-    /// A parameter of a hosted plugin.
+    /// A parameter of a hosted plugin, in the value type its target names
+    /// (its position, or a unit).
     #[cfg(feature = "plugin")]
-    PluginParam(NodeKey, tutti_units::ParamId),
+    PluginParam(NodeKey, tutti_units::ParamId, TypeId),
     /// One of the session's own values (its tempo, meter or click), or a value
     /// of a node that is not a param (a clip's events).
     Slot(SlotId),
@@ -113,7 +121,7 @@ impl<K> AnyTarget<K> {
         match self.id {
             TargetId::Param(node, ..) => Some(node),
             #[cfg(feature = "plugin")]
-            TargetId::PluginParam(node, _) => Some(node),
+            TargetId::PluginParam(node, ..) => Some(node),
             TargetId::Slot(slot) => slot.node(),
         }
     }

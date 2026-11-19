@@ -80,12 +80,60 @@ pub enum SetRefusal {
     MidiPolicy(#[from] crate::MidiPolicyError),
 }
 
-/// Why a plugin's parameter refused a write ([`SetRefusal::Plugin`]).
+/// Why a plugin's parameter refused a call ([`SetRefusal::Plugin`], and the
+/// lookups of [`Params`](crate::Params)).
 #[cfg(feature = "plugin")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Error)]
 #[non_exhaustive]
 pub enum PluginParamRefusal {
+    /// The plugin's parameters have not been read yet (the read at load was
+    /// not answered and its job has not landed). The session submits the read
+    /// again and lands it in a later update.
+    #[error("the plugin's parameters have not been read yet")]
+    NotRead,
+    /// The plugin declares no parameter with this id, or stopped declaring it
+    /// (a rescan landed).
+    #[error("the plugin declares no parameter {0}")]
+    UnknownParam(tutti_units::ParamId),
     /// The parameter is declared read-only.
     #[error("parameter {0} is read-only")]
     ReadOnly(tutti_units::ParamId),
+    /// The parameter's declaration no longer reads as the target's unit.
+    #[error(transparent)]
+    Unit(#[from] UnitError),
+}
+
+/// Why a plugin parameter is not a target in a tutti unit
+/// ([`Param::try_unit`](crate::Param::try_unit)), or no longer is: the
+/// plugin's declaration is read at every write, so a rescan can end it.
+#[cfg(feature = "plugin")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Error)]
+#[non_exhaustive]
+pub enum UnitError {
+    /// The parameter has no map from position to plain value the host can
+    /// compute (the plugin defines it, as every VST3 parameter does), or
+    /// declares no unit.
+    #[error("parameter {0} declares no unit or no map to its plain value")]
+    NoUnit(tutti_units::ParamId),
+    /// The parameter's declared unit is not one the asked type reads.
+    #[error("parameter {id} measures {declared:?}, which {wanted} does not read")]
+    UnitMismatch {
+        /// The parameter.
+        id: tutti_units::ParamId,
+        /// The unit it declares.
+        declared: tutti_plugin_types::ParamUnit,
+        /// The type asked for.
+        wanted: &'static str,
+    },
+    /// The parameter's declared range holds values the asked type cannot
+    /// (a bipolar percentage as a `Mix`), so its read would not be total.
+    #[error("the range parameter {id} declares in {declared:?} holds values {wanted} cannot")]
+    RangeUnfit {
+        /// The parameter.
+        id: tutti_units::ParamId,
+        /// The unit it declares.
+        declared: tutti_plugin_types::ParamUnit,
+        /// The type asked for.
+        wanted: &'static str,
+    },
 }
