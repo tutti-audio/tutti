@@ -1361,6 +1361,78 @@ fn dropping_the_bridge_ends_a_hung_rate_change() {
     );
 }
 
+/// **A bridge asked to stop tells the server to shut down**, on the control
+/// connection: the server destroys its plugin before it exits, which a kill
+/// never lets it do. The stop is a request the guard makes, and the bridge
+/// declares nothing for the end the server then makes.
+#[test]
+fn a_bridge_asked_to_stop_tells_the_server_to_shut_down() {
+    let (heard, shutdown_seen) = crossbeam_channel::bounded(1);
+    let mock = MockServer::start("shutdown", move |msg| {
+        if matches!(msg, HostMessage::Shutdown) {
+            let _ = heard.try_send(());
+        }
+        Action::Silent
+    });
+
+    mock.thread
+        .as_ref()
+        .expect("the bridge thread")
+        .request_stop();
+
+    shutdown_seen
+        .recv_timeout(NOTICE_TIMEOUT)
+        .expect("the server was never told to shut down");
+    assert!(!mock.bridge.is_crashed(), "a requested stop is no death");
+}
+
+/// The stand-in server of the guard's shutdown test is a shell.
+#[cfg(unix)]
+mod shell_server {
+    use super::*;
+
+    /// **Dropping the guard lets the server run its own shutdown before it ends
+    /// the process**: the stand-in server does what a plugin's `destroy` does (it
+    /// writes a file) when it is told `Shutdown`, and a guard that killed it first
+    /// would never see the file. The mock tells the stand-in by a line on its stdin
+    /// when the bridge's `Shutdown` arrives.
+    #[test]
+    fn dropping_the_guard_lets_the_server_finish_its_shutdown_before_it_is_killed() {
+        use std::process::{Command, Stdio};
+
+        let dir = tempfile::tempdir().expect("a scratch directory");
+        let marker = dir.path().join("destroyed");
+        let mut child = Command::new("sh")
+            .arg("-c")
+            .arg("read _; echo > \"$0\"")
+            .arg(&marker)
+            .stdin(Stdio::piped())
+            .spawn()
+            .expect("the stand-in server spawns");
+        let stdin = Arc::new(std::sync::Mutex::new(child.stdin.take().expect("piped")));
+        let tell = Arc::clone(&stdin);
+        let mut mock = MockServer::start("guard_shutdown", move |msg| {
+            if matches!(msg, HostMessage::Shutdown) {
+                let _ = writeln!(tell.lock().unwrap());
+            }
+            Action::Silent
+        });
+        let mut guard = crate::ProcessGuard::launched(
+            crate::Reaped::new(child),
+            crate::BridgeConfig::at(mock.socket.clone()),
+        )
+        .expect("the exit thread starts");
+        guard.attach(mock.thread.take().expect("the bridge thread"));
+
+        drop(guard);
+
+        assert!(
+            marker.exists(),
+            "the server was killed before it finished its shutdown"
+        );
+    }
+}
+
 /// A dribble **under** the size cap must still end, on the clock.
 ///
 /// This is the hazard `MAX_FRAME_BYTES` does not touch, and the reason the

@@ -1,6 +1,6 @@
 use std::time::{Duration, Instant};
 use tutti_ump::DeviceIdentity;
-use tutti_ump::{MidiChannel, SoftwareRevision, U7};
+use tutti_ump::{MidiChannel, MpeChannels, MpeOverlap, MpeZoneSpan, SoftwareRevision, U7};
 
 use super::super::testing::{
     OTHER, OURS, PEER, channel, header_from, nak_with, target_at, wait, wait_with,
@@ -995,4 +995,57 @@ fn an_inquiry_of_tuttis_own_responder_completes_with_an_empty_table() {
     assert!(initiator.is_known());
     assert!(initiator.table().is_empty());
     assert_eq!(initiator.deadline(), None);
+}
+
+fn zone(manager: u8, channels: u8) -> MpeZoneSpan {
+    MpeZoneSpan::new(
+        MidiChannel::of(manager),
+        MpeChannels::new(channels).unwrap(),
+    )
+    .unwrap()
+}
+
+/// M2-120 §3.4: the zones of the Profile enabled share no Channel; each is
+/// read from the Number of Channels of its Enabled Report.
+#[test]
+fn the_enabled_mpe_zones_are_those_of_the_reported_channel_counts() {
+    let (mut i, _) = known();
+    i.on_message(&enabled(channel(8), ProfileId::MPE, 3));
+    i.on_message(&enabled(channel(0), ProfileId::MPE, 4));
+    let found = i.table().mpe_zones();
+    let zones: Vec<_> = found.zones.unwrap().zones().collect();
+    assert_eq!(zones, [zone(0, 4), zone(8, 3)]);
+    assert!(found.refused.is_empty());
+}
+
+/// M2-120 §3.4: a zone that shares a Channel with a lower one is not held, and
+/// the overlap names both.
+#[test]
+fn an_mpe_zone_over_a_held_zone_is_refused_with_the_overlap() {
+    let (mut i, _) = known();
+    i.on_message(&enabled(channel(0), ProfileId::MPE, 4));
+    i.on_message(&enabled(channel(2), ProfileId::MPE, 3));
+    let found = i.table().mpe_zones();
+    let zones: Vec<_> = found.zones.unwrap().zones().collect();
+    assert_eq!(zones, [zone(0, 4)]);
+    assert_eq!(
+        found.refused,
+        [MpeOverlap {
+            held: zone(0, 4),
+            added: zone(2, 3)
+        }]
+    );
+}
+
+/// An MPE Profile that is not enabled with a count that makes a zone is no
+/// zone: a count of one, a disabled Profile, one enabled on the Group, and one
+/// a Version 1 peer lists with no count.
+#[test]
+fn an_mpe_profile_that_makes_no_zone_is_not_one() {
+    let (mut i, _) = known();
+    i.on_message(&enabled(channel(0), ProfileId::MPE, 1));
+    i.on_message(&disabled(channel(4), ProfileId::MPE, 4));
+    i.on_message(&enabled(CiDeviceId::Group, ProfileId::MPE, 4));
+    i.on_message(&reply(channel(8), &[ProfileId::MPE], &[]));
+    assert_eq!(i.table().mpe_zones(), EnabledMpeZones::default());
 }

@@ -586,9 +586,9 @@ mod tests {
         while !c.bell.is_asleep() {
             std::thread::yield_now();
         }
-        assert_no_alloc::assert_no_alloc(|| assert!(c.push_command(Command::Shutdown)));
+        assert_no_alloc::assert_no_alloc(|| assert!(c.push_command(Command::Reset)));
         let got = rx.recv_timeout(PATIENCE).expect("the push woke the bridge");
-        assert!(matches!(got, Command::Shutdown));
+        assert!(matches!(got, Command::Reset));
         stop.store(true, Ordering::Release);
         c.wake();
         t.join().unwrap();
@@ -608,7 +608,7 @@ mod tests {
             for _ in 0..(i % 64) {
                 std::hint::spin_loop();
             }
-            assert!(c.push_command(Command::Shutdown));
+            assert!(c.push_command(Command::Reset));
             rx.recv_timeout(PATIENCE)
                 .unwrap_or_else(|_| panic!("hand-off {i} was never woken"));
         }
@@ -639,7 +639,7 @@ mod tests {
     fn a_full_command_queue_counts_each_refusal() {
         let (c, _sleeper) = channels();
         for _ in 0..COMMAND_QUEUE_SIZE {
-            assert!(c.push_command(Command::Shutdown));
+            assert!(c.push_command(Command::Reset));
         }
         assert_eq!(
             c.commands_refused_cell().get(),
@@ -648,7 +648,7 @@ mod tests {
         );
         assert_no_alloc::assert_no_alloc(|| {
             for _ in 0..3 {
-                assert!(!c.push_command(Command::Shutdown));
+                assert!(!c.push_command(Command::Reset));
             }
         });
         assert_eq!(c.commands_refused_cell().get(), 3);

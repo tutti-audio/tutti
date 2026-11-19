@@ -31,8 +31,8 @@ pub use entry::{EntryError, PeResourceList, ResourceEntry, ResourceEntryBuilder}
 pub use fields::{
     ClusterKind, CtrlKind, CtrlValueKind, ModeId, NotAPeChannel, NotAPriority, NotAStepCount,
     NotSignificantBits, NotVendorName, ParamPath, PeBankProgram, PeChannel, PeDataError,
-    PeDataFault, PeExtensions, PeMidiMode, PeText, Priority, RoleName, SignificantBits, StepCount,
-    TypeHint,
+    PeDataFault, PeExtensions, PeMidiMode, PeText, Place, Priority, RoleName, SignificantBits,
+    StepCount, TypeHint,
 };
 pub use info::{PeDeviceInfo, PeJsonSchema};
 pub use kind::{CanSet, CustomResource, PeResource, ResIdUse, ResourceDefaults};

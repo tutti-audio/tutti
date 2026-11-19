@@ -681,12 +681,12 @@ pub mod midi {
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_device::{
         ChannelControllers, ChannelsDetail, CiCategories, CiDeviceId, CiPeer, DataControl,
-        DetailsData, DiscoveryData, Identity, InquiryTarget, ManufacturerProfile, MaxSysexSize,
-        MessageText, Muid, Nak, NameError, NotADataControl, NotADeviceId, NotAMuid, NotASysexSize,
-        NotProfileChannels, NoteData, Outcome, PortDirection, ProcessError, ProcessFeatures,
-        ProductInstanceId, ProfileChange, ProfileDataError, ProfileEntry, ProfileState,
-        ProfileTable, ReportRequest, ReportScope, Request, RequestError, SpecificData,
-        StandardProfile, SystemMessages, WinMmDevice,
+        DetailsData, DiscoveryData, EnabledMpeZones, Identity, InquiryTarget, ManufacturerProfile,
+        MaxSysexSize, MessageText, Muid, Nak, NameError, NotADataControl, NotADeviceId, NotAMuid,
+        NotASysexSize, NotProfileChannels, NoteData, Outcome, PortDirection, ProcessError,
+        ProcessFeatures, ProductInstanceId, ProfileChange, ProfileDataError, ProfileEntry,
+        ProfileState, ProfileTable, ReportRequest, ReportScope, Request, RequestError,
+        SpecificData, StandardProfile, SystemMessages, WinMmDevice,
     };
     pub use tutti_midi_device::{
         NotSetProfileOn, ProfileChannels, ProfileId, ProfileOnRequest, ProfileTarget,
@@ -781,13 +781,13 @@ pub mod midi {
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_device::{
         DeviceId as MidiDeviceId, DeviceInfo, EndpointName, Learned, Match, MidiIdentity, Name,
-        SavedDevice,
+        SavedDevice, Whole,
     };
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_hardware::{
         ChannelCount, ChannelSwitcher, CiChange, CiPeerInfo, DeviceQuery, Errno, ErrnoOutOfRange,
         InputFault, MidiHardwareOptions, PeerId, PeerProfiles, ProfileError, ProfileSwitch,
-        ProfilesChange, Switcher, Whole, WholeSwitcher,
+        ProfilesChange, Switcher, WholeSwitcher,
     };
     #[cfg(all(feature = "session", feature = "midi-hardware"))]
     pub use tutti_session::{
@@ -823,12 +823,13 @@ pub mod midi {
             PeModeList, PeObject, PeOpaque, PeOutcome, PePage, PeProgramEntry, PeProgramList,
             PeReassemblyError, PeReply, PeRequestId, PeResource, PeResourceList, PeResponse,
             PeSignal, PeState, PeStateEntry, PeStateList, PeStatus, PeStatusClass, PeTerminator,
-            PeText, PeTransaction, PeUnreadable, PeVersion, Priority, PropertyName, RefusedAt,
-            RequestRefused, ResIdUse, ResourceDefaults, ResourceEntry, ResourceEntryBuilder,
-            ResourceEvent, ResourceFailure, ResourceGet, ResourceId, ResourceName, ResourceSet,
-            ResourceTarget, ResponderEvent, RoleName, SelectorAction, SetBody, SignificantBits,
-            SimpleAction, SimultaneousRequests, StateId, StateRev, StateSize, StateStamp,
-            StepCount, StreamLimit, SubscribeId, TimeoutWait, TypeHint, UnixSeconds, UpdateKind,
+            PeText, PeTransaction, PeUnreadable, PeVersion, Place, Priority, PropertyName,
+            RefusedAt, RequestRefused, ResIdUse, ResourceDefaults, ResourceEntry,
+            ResourceEntryBuilder, ResourceEvent, ResourceFailure, ResourceGet, ResourceId,
+            ResourceName, ResourceSet, ResourceTarget, ResponderEvent, RoleName, SelectorAction,
+            SetBody, SignificantBits, SimpleAction, SimultaneousRequests, StateId, StateRev,
+            StateSize, StateStamp, StepCount, StreamLimit, SubscribeId, TimeoutWait, TypeHint,
+            UnixSeconds, UpdateKind,
         };
         #[cfg(feature = "midi-hardware")]
         pub use tutti_midi_hardware::{

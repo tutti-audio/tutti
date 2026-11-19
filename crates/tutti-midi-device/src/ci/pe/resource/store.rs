@@ -12,12 +12,12 @@ use super::request::ResourceTarget;
 pub enum StoreError {
     /// No entry was declared for the Resource.
     #[error("{0} has no entry declared")]
-    NotDeclared(String),
+    NotDeclared(PeResource),
     /// The entry says whether the Resource has a `resId`, and the value differs.
     #[error("the entry of {resource} says requireResId is {required}")]
     ResIdDisagrees {
         /// The Resource.
-        resource: String,
+        resource: PeResource,
         /// What the entry says.
         required: bool,
     },
@@ -74,10 +74,10 @@ impl ResourceStore {
             .resources
             .iter_mut()
             .find(|s| *s.entry.resource() == resource)
-            .ok_or_else(|| StoreError::NotDeclared(resource.as_str().to_owned()))?;
+            .ok_or_else(|| StoreError::NotDeclared(resource.clone()))?;
         if stored.entry.require_res_id() != res_id.is_some() {
             return Err(StoreError::ResIdDisagrees {
-                resource: resource.as_str().to_owned(),
+                resource,
                 required: stored.entry.require_res_id(),
             });
         }

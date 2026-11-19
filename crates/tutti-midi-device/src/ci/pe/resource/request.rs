@@ -22,65 +22,65 @@ pub enum RequestRefused {
     /// The Resource has entries, and an inquiry for it names one with `resId`
     /// (M2-103 §8.5).
     #[error("{0} needs a resId")]
-    ResIdRequired(String),
+    ResIdRequired(PeResource),
     /// The Resource has no entries, so an inquiry for it carries no `resId`.
     #[error("{0} takes no resId")]
-    ResIdUnused(String),
+    ResIdUnused(PeResource),
     /// Only a List Resource is paginated (M2-103 §8.6).
     #[error("{0} is not a List Resource, which pagination is for")]
-    NotPaginable(String),
+    NotPaginable(PeResource),
     /// The Property Data of a Set belongs to another Resource.
     #[error("the data is of {data} and the Set is for {target}")]
     DataOfAnotherResource {
         /// The Resource of the data.
-        data: String,
+        data: PeResource,
         /// The Resource the Set is for.
-        target: String,
+        target: PeResource,
     },
     /// The ResourceList has no entry for the Resource.
     #[error("{0} is not in the ResourceList")]
-    NotListed(String),
+    NotListed(PeResource),
     /// The entry of the ResourceList does not let the Resource be got.
     #[error("{0} cannot be got")]
-    CannotGet(String),
+    CannotGet(PeResource),
     /// The entry does not let the Resource be set, or set in part.
     #[error("{resource} cannot be set {scope}")]
     CannotSet {
         /// The Resource.
-        resource: String,
+        resource: PeResource,
         /// What was asked: `in whole` or `in part`.
         scope: &'static str,
     },
     /// The entry does not let the Resource be subscribed to.
     #[error("{0} cannot be subscribed to")]
-    CannotSubscribe(String),
+    CannotSubscribe(PeResource),
     /// The entry does not declare pagination.
     #[error("{0} does not paginate")]
-    NotDeclaredPaginable(String),
+    NotDeclaredPaginable(PeResource),
     /// The entry does not declare the encoding.
     #[error("{resource} does not take {encoding}")]
     EncodingNotDeclared {
         /// The Resource.
-        resource: String,
+        resource: PeResource,
         /// The encoding.
         encoding: &'static str,
     },
     /// The entry does not declare Flow Control for Get.
     #[error("{0} does not use Flow Control on Get")]
-    FlowControlNotDeclared(String),
+    FlowControlNotDeclared(PeResource),
     /// The entry does not list the media type of the data.
     #[error("{resource} does not take {media_type}")]
     MediaTypeNotDeclared {
         /// The Resource.
-        resource: String,
+        resource: PeResource,
         /// The media type.
-        media_type: String,
+        media_type: MediaType,
     },
     /// The entry says whether `resId` is used, and the inquiry differs.
     #[error("the entry of {resource} says requireResId is {required}")]
     ResIdDisagrees {
         /// The Resource.
-        resource: String,
+        resource: PeResource,
         /// What the entry says.
         required: bool,
     },
@@ -105,7 +105,7 @@ impl TryFrom<PeResource> for ResourceTarget {
     /// [`RequestRefused::ResIdRequired`] for a Resource that has entries.
     fn try_from(resource: PeResource) -> Result<Self, RequestRefused> {
         if resource.res_id_use() == ResIdUse::Required {
-            return Err(RequestRefused::ResIdRequired(resource.as_str().to_owned()));
+            return Err(RequestRefused::ResIdRequired(resource));
         }
         Ok(Self {
             resource,
@@ -130,7 +130,7 @@ impl ResourceTarget {
     /// [`RequestRefused::ResIdUnused`] for a Resource that has no entries.
     pub fn entry(resource: PeResource, res_id: ResourceId) -> Result<Self, RequestRefused> {
         if resource.res_id_use() == ResIdUse::Unused {
-            return Err(RequestRefused::ResIdUnused(resource.as_str().to_owned()));
+            return Err(RequestRefused::ResIdUnused(resource));
         }
         Ok(Self {
             resource,
@@ -154,7 +154,7 @@ impl ResourceTarget {
     fn agrees_with(&self, entry: &ResourceEntry) -> Result<(), RequestRefused> {
         if entry.require_res_id() != self.res_id.is_some() {
             return Err(RequestRefused::ResIdDisagrees {
-                resource: self.resource.as_str().to_owned(),
+                resource: self.resource.clone(),
                 required: entry.require_res_id(),
             });
         }
@@ -253,7 +253,7 @@ impl ResourceGet {
     ///
     /// The [`RequestRefused`] that names what the entry does not allow.
     pub fn check_get(&self, entry: &ResourceEntry) -> Result<(), RequestRefused> {
-        let name = || self.target.resource.as_str().to_owned();
+        let name = || self.target.resource.clone();
         if !entry.can_get() {
             return Err(RequestRefused::CannotGet(name()));
         }
@@ -268,7 +268,7 @@ impl ResourceGet {
     pub fn check_subscribe(&self, entry: &ResourceEntry) -> Result<(), RequestRefused> {
         if !entry.can_subscribe() {
             return Err(RequestRefused::CannotSubscribe(
-                self.target.resource.as_str().to_owned(),
+                self.target.resource.clone(),
             ));
         }
         self.check_header(entry)
@@ -278,15 +278,13 @@ impl ResourceGet {
     /// entry of the ResourceList (M2-103 §8.6.2).
     pub(super) fn check_page_target(&self) -> Result<(), RequestRefused> {
         if self.page.is_some() && !self.target.resource.is_list() {
-            return Err(RequestRefused::NotPaginable(
-                self.target.resource.as_str().to_owned(),
-            ));
+            return Err(RequestRefused::NotPaginable(self.target.resource.clone()));
         }
         Ok(())
     }
 
     fn check_header(&self, entry: &ResourceEntry) -> Result<(), RequestRefused> {
-        let name = || self.target.resource.as_str().to_owned();
+        let name = || self.target.resource.clone();
         self.target.agrees_with(entry)?;
         self.check_page_target()?;
         if self.page.is_some() && !entry.can_paginate() {
@@ -355,8 +353,8 @@ impl ResourceSet {
     pub fn full(target: ResourceTarget, data: PeData) -> Result<Self, RequestRefused> {
         if data.resource() != *target.resource() {
             return Err(RequestRefused::DataOfAnotherResource {
-                data: data.resource().as_str().to_owned(),
-                target: target.resource().as_str().to_owned(),
+                data: data.resource(),
+                target: target.resource().clone(),
             });
         }
         Ok(Self {
@@ -407,7 +405,7 @@ impl ResourceSet {
     ///
     /// The [`RequestRefused`] that names what the entry does not allow.
     pub fn check(&self, entry: &ResourceEntry) -> Result<(), RequestRefused> {
-        let name = self.target.resource().as_str().to_owned();
+        let name = self.target.resource().clone();
         let (needed, scope) = match self.body {
             SetBody::Full(_) => (CanSet::Full, "in whole"),
             SetBody::Partial(_) => (CanSet::Partial, "in part"),
@@ -439,7 +437,7 @@ impl ResourceSet {
             {
                 return Err(RequestRefused::MediaTypeNotDeclared {
                     resource: name,
-                    media_type: media_type.as_str().to_owned(),
+                    media_type: media_type.clone(),
                 });
             }
         }
