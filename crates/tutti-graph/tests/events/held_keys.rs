@@ -19,10 +19,7 @@ use tutti_graph::{
     TransportPosition, Unforkable,
 };
 use tutti_graph::{NodeKey, Topology};
-use tutti_ump::{
-    Address, CCNumber, ControlValue, Message, MidiChannel, MidiGroup, NoteNumber, U7, U14, Ump,
-    Voice1, Voice2,
-};
+use tutti_ump::{Address, CCNumber, Message, MidiChannel, MidiGroup, NoteNumber, U7, Ump, Voice1};
 use tutti_units::Samples;
 
 type Words = [u32; 4];
@@ -702,55 +699,6 @@ fn a_held_sustain_pedal_is_released() {
     );
     same(&logs);
     assert_eq!(sink_words(&logs[0], 2), vec![on60(), down, off60(), up]);
-}
-
-/// **A cut edge lifts every pedal and centres the bend**: a source holds a key,
-/// the four hold pedals (CC 64 Sustain, 66 Sostenuto, 67 Soft, 69 Hold 2, MIDI
-/// 1.0 Control Change messages) and an off-centre bend, in MIDI 1.0 and in MIDI
-/// 2.0. The cut sends the sink, message by message, each pedal at 0 and the bend
-/// at its centre (0x2000 in MIDI 1.0, 0x80000000 in MIDI 2.0) in the protocol it
-/// was sent in, MIDI 1.0 lanes first, and the key's Note Off after them.
-#[test]
-fn a_cut_edge_lifts_every_pedal_and_centres_the_bend() {
-    let pedals = [64, 66, 67, 69].map(CCNumber::of);
-    let m2_cc = |cc: CCNumber, value: ControlValue| {
-        let address = Address::first(MidiChannel::FIRST);
-        Ump::from(Message::midi2(address, Voice2::control_change(cc, value))).0
-    };
-    let m1_bend = |bend: u16| {
-        let bend = Voice1::PitchBend(U14::of(bend));
-        Ump::from(Message::midi1(MidiChannel::FIRST, bend)).0
-    };
-    let m2_bend = |bend: u32| midi::pitch_bend(Address::first(MidiChannel::FIRST), bend).0;
-    let logs = on_all(
-        |r| {
-            r.wire(&[(1, 2)]);
-            r.send(on60());
-            for cc in pedals {
-                r.send(m1_controller(cc, 127));
-                r.send(m2_cc(cc, ControlValue::MAX));
-            }
-            r.send(m1_bend(0));
-            r.send(m2_bend(0));
-            r.block();
-            r.wire(&[]);
-            r.block();
-        },
-        &[2],
-    );
-    same(&logs);
-    let closes = &sink_words(&logs[0], 2)[1 + 2 * pedals.len() + 2..];
-    let m1_up = pedals.map(|cc| m1_controller(cc, 0));
-    let m2_up = pedals.map(|cc| m2_cc(cc, ControlValue::MIN));
-    assert_eq!(
-        closes,
-        [m1_up[0], m1_up[1], m1_up[2], m1_up[3]]
-            .into_iter()
-            .chain([m1_bend(0x2000)])
-            .chain(m2_up)
-            .chain([m2_bend(0x8000_0000), off60()])
-            .collect::<Vec<_>>()
-    );
 }
 
 /// The source replaced by a new unit: the sink is closed for the old one's
