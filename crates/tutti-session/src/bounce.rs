@@ -1798,7 +1798,13 @@ where
         // The span: the range named, else the transport's loop, else the end
         // the bounce names; never a guess.
         let map = self.transport.settings().tempo_map();
-        let looped = self.transport.motion().loop_region().active();
+        // The loop as set: a staged or just sent region counts, not only the
+        // one the engine has applied.
+        let looped = self
+            .values
+            .get(self.transport.handle.looping())
+            .unwrap_or_else(|_| self.transport.motion().loop_region())
+            .active();
         let range = chosen(range, looped)?;
         let (start, length) = span(range, looped, &map, rate)?;
 
@@ -2509,6 +2515,27 @@ mod tests {
             .expect("renders");
         let seen = seen.lock().unwrap().expect("the edit ran");
         assert_eq!(seen, Some(Bpm::of(75.0)));
+    }
+
+    /// **A bounce after a loop write, with no update between and no block
+    /// rendered, renders the loop as written**: the default range is the
+    /// loop, so the bounce is two beats (one second at 120 BPM), not refused
+    /// for want of a range.
+    #[test]
+    fn a_bounce_after_a_loop_set_renders_the_loop_without_an_update() {
+        let mut session = session();
+        let region = tutti_transport::LoopRegion::new(
+            tutti_music::LoopRange::new(Beat(0.0), Beat(2.0)).unwrap(),
+            true,
+        );
+        session
+            .set(session.transport_handle().looping().to(region))
+            .unwrap();
+        let bounced = session
+            .bounce(Bounce::project().master_buffers())
+            .expect("the loop is the range");
+        let frames = bounced.master().frames();
+        assert_eq!(frames.get(), 48_000, "two beats at 120 BPM and 48 kHz");
     }
 
     /// **A bounce kept in flight past `BOUNCE_STALL_WARNING` is warned about

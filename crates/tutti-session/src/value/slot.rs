@@ -132,6 +132,10 @@ pub(crate) fn erase_staged<C: Held>(slot: Arc<PublishedSlot<C>>) -> Erased {
 pub(crate) trait Stage: Send + Sync + 'static {
     /// Publishes the pending value, if there is one.
     fn publish_pending(&self);
+
+    /// Drops the pending value, if there is one.
+    #[cfg(feature = "midi")]
+    fn discard_pending(&self);
 }
 
 impl Params {
@@ -141,6 +145,16 @@ impl Params {
             .cell
             .downcast_ref::<SlotCell<V>>()
             .cloned()
+    }
+
+    /// Drops the pending value of each slot in `ids`.
+    #[cfg(feature = "midi")]
+    pub(super) fn discard_pending(&self, ids: &[SlotId]) {
+        for id in ids {
+            if let Some(stage) = self.slots.get(id).and_then(|erased| erased.stage.as_ref()) {
+                stage.discard_pending();
+            }
+        }
     }
 
     /// Publishes every pending value, in [`SlotId`] order: the tempo before
@@ -520,6 +534,11 @@ impl<C: Held> Slot<C::Value> for PublishedSlot<C> {
 }
 
 impl<C: Held> Stage for PublishedSlot<C> {
+    #[cfg(feature = "midi")]
+    fn discard_pending(&self) {
+        *self.pending.lock_recover() = None;
+    }
+
     fn publish_pending(&self) {
         let mut pending = self.pending.lock_recover();
         let Some(value) = pending.take() else {

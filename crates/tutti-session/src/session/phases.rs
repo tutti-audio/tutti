@@ -48,10 +48,11 @@ pub enum Phase {
     Modulation,
     /// The values written since the last update that wait for it published
     /// (the tempo map, the meter, the loop region, a clip's events, a
-    /// harmony node's changes), together and in a fixed order: the tempo, the meter, the loop, then each node's by key. Then
-    /// the output policy staged since the last update, applied
-    /// ([`Session::policy`]); then the commit, iff the graph was edited since
-    /// the last one, and the compensation of the plan it sent (or of a re-prepare's resumed plan)
+    /// harmony node's changes), together and in a fixed order: the tempo,
+    /// the meter, the loop, then each node's by key. Then the output policy
+    /// staged since the last update, applied ([`Session::policy`]); then the
+    /// commit, iff the graph was edited since the last one, and the
+    /// compensation of the plan it sent (or of a re-prepare's resumed plan)
     /// published.
     Commit,
     /// Modulation's re-apply and resyncs: while a

@@ -119,8 +119,7 @@ fn a_read_before_the_update_is_the_pending_value_and_the_audio_side_reads_the_ol
 }
 
 /// **A batch of a tempo and a meter lands in one update**: a reader that
-/// lends both after the update sees both new, and before it both old; the
-/// two cells publish in that one update, the tempo first.
+/// lends both after the update sees both new, and before it both old.
 #[test]
 fn a_batch_of_tempo_and_meter_lands_in_one_update() {
     let mut s = detached();

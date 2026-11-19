@@ -158,6 +158,15 @@ impl ValueTable {
             .insert(id, slot::erase_staged(slot));
     }
 
+    /// Drops what was written to the slots `ids` name and not yet published.
+    /// Control thread.
+    #[cfg(feature = "midi")]
+    pub(crate) fn discard_pending(&self, ids: &[SlotId]) {
+        if let Some(held) = self.enter() {
+            held.params().discard_pending(ids);
+        }
+    }
+
     /// Publishes every value written since the last call and not yet
     /// published ([`Slot::store`](slot::Slot::store) on a staging slot), all
     /// together under the value lock. Control thread.
