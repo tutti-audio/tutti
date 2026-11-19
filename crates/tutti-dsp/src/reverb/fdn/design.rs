@@ -25,7 +25,6 @@
 
 use tutti_units::{Db, Depth, Gain, Hz, Mix, SampleRate, SampleSpan, Seconds, StereoWidth};
 
-use crate::finite::finite_or;
 use crate::onepole::cutoff_pole;
 use crate::reverb::network::{
     Absorption, Fdn, Gains, Inline, Line, LineModulation, MAX_LINES, Matrix, Network,
@@ -218,11 +217,6 @@ fn rescaled(a: Absorption, rate: SampleRate) -> Absorption {
     }
 }
 
-/// `v` if finite, else `default`, exactly: a time is not narrowed.
-fn finite_secs(v: Seconds, default: Seconds) -> Seconds {
-    Seconds(finite_or(v.get(), default.get()))
-}
-
 impl FdnLayout {
     /// Designs `c` into `out` in place, at `rate`: the network the bank runs, and the public
     /// entry for designing one (for its analytic queries as much as for running it). A
@@ -237,7 +231,7 @@ impl FdnLayout {
             c.decay[2], // high
         ]
         .map(|s| {
-            let v = finite_secs(s, d.decay[0]);
+            let v = s.finite_or(d.decay[0]);
             v.clamp(MIN_DECAY, self.max_decay)
         });
         let rt60 = if freeze {
@@ -245,12 +239,19 @@ impl FdnLayout {
         } else {
             rt60
         };
-        let size = finite_or(c.size.get(), d.size.get()).clamp(0.0, 1.0);
-        let diffusion = finite_or(c.diffusion.get(), d.diffusion.get()).clamp(0.0, 1.0);
-        let pre = finite_secs(c.pre_delay, Seconds::ZERO).clamp(Seconds::ZERO, MAX_PRE_DELAY);
-        let depth = finite_or(c.modulation.get(), 0.0).abs().min(1.0);
-        let mod_rate = Hz(finite_or(c.rate.get(), d.rate.get())).clamp(RATES.0, RATES.1);
-        let width = finite_or(c.width.get(), 1.0).clamp(0.0, MAX_WIDTH);
+        let size = c.size.finite_or(d.size).get().clamp(0.0, 1.0);
+        let diffusion = c.diffusion.finite_or(d.diffusion).get().clamp(0.0, 1.0);
+        let pre = c
+            .pre_delay
+            .finite_or(Seconds::ZERO)
+            .clamp(Seconds::ZERO, MAX_PRE_DELAY);
+        let depth = c.modulation.get().abs().min(1.0);
+        let mod_rate = c.rate.finite_or(d.rate).clamp(RATES.0, RATES.1);
+        let width = c
+            .width
+            .finite_or(StereoWidth::NATURAL)
+            .get()
+            .clamp(0.0, MAX_WIDTH);
         let wet = {
             let w = c.wet;
             if w.get().is_nan() {

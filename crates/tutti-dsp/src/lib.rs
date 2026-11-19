@@ -132,7 +132,6 @@ mod dither;
 mod dynamics;
 mod fft;
 mod filter;
-mod finite;
 mod fir;
 mod follower;
 mod glide;

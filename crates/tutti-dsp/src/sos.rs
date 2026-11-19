@@ -186,7 +186,7 @@ impl Lti for Sos {
         let forms: Vec<_> = self.sections.iter().map(svf_form).collect();
         for (g, f) in gain.iter_mut().zip(freqs) {
             *g = if output == 0 {
-                let w = core::f64::consts::TAU * f.get() / self.rate.get();
+                let w = f.angle_per_frame(self.rate).get();
                 forms
                     .iter()
                     .fold(Complex64::new(1.0, 0.0), |h, s| h * s.response(w))

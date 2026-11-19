@@ -223,7 +223,7 @@ impl System for LadderModel {
 impl Lti for LadderModel {
     fn frequency_response(&self, output: usize, freqs: &[Hz], gain: &mut [Complex64]) {
         for (g, f) in gain.iter_mut().zip(freqs) {
-            let w = 2.0 * PI * f.get() / self.rate.get();
+            let w = f.angle_per_frame(self.rate).get();
             *g = if output == 0 {
                 self.at(Complex64::from_polar(1.0, -w))
             } else {
