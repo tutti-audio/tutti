@@ -96,7 +96,8 @@ impl Bpm {
     }
 
     /// The tempo of a beat that lasts `period`: 60 over its seconds. `None`
-    /// when `period` is zero, negative or not finite (no tempo has such a beat).
+    /// when `period` is zero, negative or not finite (no tempo has such a beat), or so
+    /// short that 60 over it overflows `Bpm`'s range.
     ///
     /// ```
     /// use tutti_units::{Bpm, Seconds};
