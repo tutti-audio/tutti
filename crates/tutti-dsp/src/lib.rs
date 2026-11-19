@@ -102,6 +102,17 @@
 //! - **Bit crusher and DC blocker** (`bit_crush.rs`, `dc_block.rs`): [`BitCrusher`], a
 //!   sample-and-hold every [`hold_frames`] frames, then [`quantize`] to a bit depth;
 //!   [`DcBlocker`], a first-order high-pass with its pole from [`dc_pole`].
+//! - **Spectral features and onset novelty** (`spectral.rs`, `novelty.rs`): the shape of one
+//!   magnitude spectrum ([`spectral_centroid`], [`spectral_flatness`], [`spectral_rolloff`]) and
+//!   how much a frame differs from the one before ([`spectral_flux`],
+//!   [`high_frequency_content`], [`complex_domain_deviation`], [`spectral_energy`], with
+//!   [`bin_magnitude`]).
+//! - **Sequence decoding** (`viterbi.rs`, `beat.rs`, `sequence.rs`): [`sticky_viterbi`], the best
+//!   state path when every switch costs the same; [`track_beat_frames`], beat placement by
+//!   dynamic programming over a novelty curve (Ellis, 2007); the [`median`] of a set and the
+//!   [`local_maxima`] of a curve.
+//! - **Band edges** (`bands.rs`): [`log_band_edges`] and [`octave_band_edges`], the edges of
+//!   bands with equal ratios between neighbours.
 //! - **Control and small kernels**: [`Glide`], a value that moves to its target in steps
 //!   (with [`Lerp`] and [`Steps`]); [`smooth_toward`], the one-pole step; [`COEFF_INTERVAL`] and
 //!   [`LANES`], the solve interval and channel grouping of the filter banks; [`lerp`],
@@ -121,6 +132,8 @@
 #![forbid(unsafe_code)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
+mod bands;
+mod beat;
 mod bit_crush;
 mod control;
 mod convert;
@@ -139,6 +152,7 @@ mod glide;
 mod interp;
 mod level;
 mod modulation;
+mod novelty;
 mod onepole;
 mod oscillator;
 mod oversample;
@@ -153,14 +167,19 @@ mod waveshape;
 mod model;
 mod resample;
 mod reverb;
+mod sequence;
 mod smoother;
 mod sos;
 mod spatial;
+mod spectral;
 mod stft;
 #[cfg(test)]
 mod testing;
+mod viterbi;
 mod xorshift;
 
+pub use bands::{log_band_edges, octave_band_edges};
+pub use beat::track_beat_frames;
 pub use bit_crush::{BitCrusher, BitCrusherControls, DEFAULT_BIT_DEPTH, hold_frames, quantize};
 pub use control::{COEFF_INTERVAL, LANES};
 pub use convolver::{Convolver, IrSpectra, MatrixConvolver, MatrixConvolverError};
@@ -202,6 +221,9 @@ pub use modulation::phaser::{
     SweepRangeError,
 };
 pub use modulation::sweep::{Stagger, StaggerError, Sweep, SweepError};
+pub use novelty::{
+    bin_magnitude, complex_domain_deviation, high_frequency_content, spectral_energy, spectral_flux,
+};
 pub use oscillator::{Oscillator, OscillatorStep, OscillatorWave};
 pub use oversample::{
     Oversampler, Oversampling, OversamplingFactor, OversamplingPlan, Passband, PassbandError,
@@ -224,6 +246,7 @@ pub use reverb::network::{
 pub use reverb::plate::bank::{PlateBank, PlateGlides};
 pub use reverb::plate::design::{MAX_PLATE_DECAY, PlateControls};
 pub use ring_mod::{RingModControls, RingModulator};
+pub use sequence::{local_maxima, median, median_of_sorted};
 pub use smoother::smooth_toward;
 pub use sos::{
     Butterworth, ButterworthOrder, ButterworthOrderError, CutResponse, LinkwitzRiley,
@@ -234,11 +257,13 @@ pub use spatial::{
     MAX_PREPARED_RATE, MAX_SPHERE_RATE, MIN_SPHERE_RATE, SpeakerGeometryError, SpeakerLayout,
     VbapGains, VbapKernel,
 };
+pub use spectral::{spectral_centroid, spectral_flatness, spectral_rolloff};
 pub use stereo::{MidSide, WidthBank, WidthControls};
 pub use stft::error::StftError;
 pub use stft::geometry::StftGeometry;
 pub use stft::grid::{BinCount, BinIndex, FrameCount, FrameIndex, Grid};
 pub use stft::window::{CosineWindow, Window};
 pub use tremolo::{AutoPan, AutoPanControls, Tremolo, TremoloControls};
+pub use viterbi::sticky_viterbi;
 pub use waveshape::{Antialiasing, ShapeKind, WaveshaperBank, WaveshaperControls};
 pub use xorshift::Xorshift32;

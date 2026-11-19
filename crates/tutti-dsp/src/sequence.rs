@@ -1,6 +1,5 @@
-//! Order statistics and peak picking over a sequence of values, shared by the
-//! analyses that read a curve: the median of a set, and the local maxima of a
-//! curve.
+//! Order statistics and peak picking over a sequence of values: the median of a
+//! set, and the local maxima of a curve.
 
 use core::ops::Range;
 
@@ -10,7 +9,7 @@ use core::ops::Range;
 ///
 /// A NaN sorts above every number under `total_cmp`, so a median that lands on
 /// one is NaN; the caller refuses a NaN it cannot tolerate before the sort.
-pub(crate) fn median_of_sorted<T: Copy + Into<f64>>(sorted: &[T]) -> Option<f64> {
+pub fn median_of_sorted<T: Copy + Into<f64>>(sorted: &[T]) -> Option<f64> {
     let mid = sorted.len() / 2;
     let upper: f64 = (*sorted.get(mid)?).into();
     if sorted.len() % 2 == 1 {
@@ -22,7 +21,7 @@ pub(crate) fn median_of_sorted<T: Copy + Into<f64>>(sorted: &[T]) -> Option<f64>
 
 /// The median of `values` in any order, as [`median_of_sorted`]; `None` for no
 /// values.
-pub(crate) fn median<T: Copy + Into<f64>>(values: &[T]) -> Option<f64> {
+pub fn median<T: Copy + Into<f64>>(values: &[T]) -> Option<f64> {
     let mut sorted = values.to_vec();
     sorted.sort_unstable_by(|a, b| (*a).into().total_cmp(&(*b).into()));
     median_of_sorted(&sorted)
@@ -35,7 +34,7 @@ pub(crate) fn median<T: Copy + Into<f64>>(values: &[T]) -> Option<f64> {
 /// above the one before. A value that compares false with a neighbour (a NaN) is
 /// never a maximum. Indices at or past the end of `values` are skipped, and
 /// neighbours outside `within` are still read.
-pub(crate) fn local_maxima<T: PartialOrd + Copy>(
+pub fn local_maxima<T: PartialOrd + Copy>(
     values: &[T],
     within: Range<usize>,
 ) -> impl Iterator<Item = usize> + '_ {

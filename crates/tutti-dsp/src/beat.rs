@@ -8,12 +8,11 @@
 //! final frame gives the beats. The penalty is on the log ratio, so a gap of
 //! half the period costs the same as one of double.
 //!
-//! Pure functions over a novelty slice; the public entry points are in
-//! [`crate::tempo`].
+//! A pure function over a novelty curve: [`track_beat_frames`].
 
-use tutti_buffers::Mono;
-use tutti_dsp::rms;
+use tutti_buffers::{Float, Mono};
 
+use crate::rms;
 use crate::sequence::{local_maxima, median};
 
 /// The standard deviation of the smoothing kernel as a fraction of the period.
@@ -35,8 +34,12 @@ const TAIL_FRACTION: f64 = 0.5;
 /// own standard deviation first, so `tightness` means the same at any level.
 /// `period` is in frames and may be fractional; `tightness` is the weight of
 /// the gap penalty against the novelty score (0 turns the period off).
-/// Returns ascending frame indices; empty for a flat or too short curve.
-pub(crate) fn track(novelty: &[f64], period: f64, tightness: f64) -> Vec<usize> {
+/// The curve is read at `f64` whatever its float. Returns ascending frame indices;
+/// empty for a flat or too short curve.
+#[must_use]
+pub fn track_beat_frames<F: Float>(novelty: &[F], period: f64, tightness: f64) -> Vec<usize> {
+    let novelty: Vec<f64> = novelty.iter().map(|v| v.convert_to::<f64>()).collect();
+    let novelty = novelty.as_slice();
     let n = novelty.len();
     let local = local_score(novelty, period);
     if n == 0 || local.is_empty() || period.is_nan() || period < 2.0 {
