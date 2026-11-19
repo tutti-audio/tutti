@@ -143,7 +143,9 @@ pub use tutti_graph::{
 };
 pub use tutti_metering::{LoadMeter, LoadReading};
 pub use tutti_rt::PushError;
-pub use tutti_transport::{After, FadeOut, LoopRegion, MotionEvent, MotionState, TransportCommand};
+pub use tutti_transport::{
+    AfterLocate, FadeOut, LoopRegion, MotionEvent, MotionState, TransportCommand,
+};
 
 // Units, channels, buffers and the musical meter.
 pub use tutti_buffers::{ChannelLayout, ChannelTopology, Interleaved, InterleavedMut, MaxBlock};

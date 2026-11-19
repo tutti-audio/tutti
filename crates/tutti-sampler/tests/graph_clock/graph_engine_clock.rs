@@ -30,7 +30,7 @@ use tutti_graph::{Editor, Fade, FadeLaw, Prepare};
 use tutti_graph::{OutPort, Source};
 use tutti_music::LoopRange;
 use tutti_sampler::{MemorySource, Playback, SlotId, VoicePool};
-use tutti_transport::{After, FadeOut, LoopEdit, MotionEvent, Timeline, Transport};
+use tutti_transport::{AfterLocate, FadeOut, LoopEdit, MotionEvent, Timeline, Transport};
 use tutti_units::{At, Beat, Cents, Frame, SampleRate, Samples};
 
 const SR: f64 = 48_000.0;
@@ -341,7 +341,7 @@ fn a_scheduled_locate_lands_on_its_frame() {
                 MotionEvent::Locate {
                     beat: Beat::new(0.25),
                     fade: FadeOut::Immediate,
-                    then: After::Keep,
+                    then: AfterLocate::Keep,
                 },
             )
             .expect("room");

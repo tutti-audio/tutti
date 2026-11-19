@@ -52,7 +52,7 @@ fn run(s: &Session, frames: usize, block: usize, seek: bool) -> Vec<f32> {
                     MotionEvent::Locate {
                         beat: tutti_units::Beat::new(0.75),
                         fade: tutti_transport::FadeOut::Immediate,
-                        then: tutti_transport::After::Keep,
+                        then: tutti_transport::AfterLocate::Keep,
                     },
                 )
                 .expect("room");

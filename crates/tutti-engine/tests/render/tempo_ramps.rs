@@ -27,7 +27,7 @@ use tutti_graph::{
 use tutti_music::{LoopRange, first_frame_at_or_after};
 use tutti_tempo::{TempoMap, TempoPoint, Transition};
 use tutti_transport::{
-    After, FadeOut, LoopEdit, MotionEvent, OfflineTimeline, OfflineTimelineConfig, Transport,
+    AfterLocate, FadeOut, LoopEdit, MotionEvent, OfflineTimeline, OfflineTimelineConfig, Transport,
     render_graph,
 };
 use tutti_units::{At, Beat, Bpm, SampleRate, Samples, Tail};
@@ -464,7 +464,7 @@ fn a_seek_into_the_middle_of_a_ramp_seats_on_the_exact_beat() {
     m.try_send(MotionEvent::Locate {
         beat: Beat::new(2.0),
         fade: FadeOut::Immediate,
-        then: After::Keep,
+        then: AfterLocate::Keep,
     })
     .expect("room");
     render(&engine, 6_000);

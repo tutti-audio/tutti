@@ -54,7 +54,7 @@ pub enum FadeOut {
 
 /// What the transport should be doing once a locate lands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub enum After {
+pub enum AfterLocate {
     /// Stay (or become) stopped at the target.
     #[default]
     Stop,
@@ -91,7 +91,7 @@ pub enum MotionEvent {
         /// Whether to ramp the output down before jumping.
         fade: FadeOut,
         /// What the transport should be doing once the jump lands.
-        then: After,
+        then: AfterLocate,
     },
     /// Begin scrubbing forward.
     FastForward,
@@ -123,7 +123,7 @@ impl MotionEvent {
         Self::Locate {
             beat,
             fade: FadeOut::Declick,
-            then: After::Keep,
+            then: AfterLocate::Keep,
         }
     }
 
@@ -132,7 +132,7 @@ impl MotionEvent {
         Self::Locate {
             beat,
             fade: FadeOut::Declick,
-            then: After::Play,
+            then: AfterLocate::Play,
         }
     }
 
@@ -146,7 +146,7 @@ impl MotionEvent {
         Self::Locate {
             beat,
             fade: FadeOut::Declick,
-            then: After::Stop,
+            then: AfterLocate::Stop,
         }
     }
 }
@@ -679,7 +679,7 @@ mod tests {
 
     /// A completed fade settles the machine itself, not only the mirror: a
     /// declicked seek while rolling ends rolling, so the next scrub-bar seek
-    /// (`After::Keep`) keeps rolling too.
+    /// (`AfterLocate::Keep`) keeps rolling too.
     #[test]
     fn a_seek_after_a_completed_declicked_seek_keeps_rolling() {
         let (m, mut a) = fsm();
