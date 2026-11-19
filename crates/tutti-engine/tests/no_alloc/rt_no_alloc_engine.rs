@@ -399,7 +399,7 @@ fn the_heard_tap_is_allocation_free() {
     let engine = Engine::new(&transport, &mut ed, exec, tutti_engine::BlockDates::Os)
         .expect("within the limits");
     let _ = transport.motion().try_send(MotionEvent::Play);
-    let taps = engine.heard_taps();
+    let taps = engine.output_taps();
     let mut output = vec![0.0f32; 1024 * 2];
     let layout = ChannelLayout::STEREO;
     engine.process(&mut InterleavedMut::new(&mut output, layout).unwrap());

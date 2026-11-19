@@ -360,7 +360,7 @@ order, one PR per step, each deleting what it replaces. It supersedes tasks
    buffer), the plumbing behind tutti-session's `testing` feature
    (`Graph::testing()`, `take_audio_side`, `AudioSide`) or `pub(crate)`, and the
    failure rule (every query, wire removal and modulation call that names a node
-   that is not there is a `Result`); S8: `HeardOpen::Retry` for a busy audio thread,
+   that is not there is a `Result`); S8: `OutputTapOpen::Retry` for a busy audio thread,
    a `LoadMeter` with one reader, and tutti-cpal's one listing,
    `DeviceHost::snapshot`. Then the deferred chase injection (built): a chase whose
    takeover is delayed by a fade is held in the queued crossfade, its injection
