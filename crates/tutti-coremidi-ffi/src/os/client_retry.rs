@@ -5,7 +5,7 @@
 //! fresh server is up about five seconds later. `ClientRetry` decides when to
 //! try again; [`create_client`] is the loop that reads the clock and sleeps.
 
-use crate::error::OsStatus;
+use super::error::OsStatus;
 use std::sync::Mutex;
 use std::time::Duration;
 use tutti_platform::Instant;
@@ -79,6 +79,10 @@ impl ClientRetry {
 
 /// Runs `create` until it succeeds, fails with a status other than
 /// the server's exit, or `RETRY_BOUND` passes; returns the last status then.
+///
+/// The interim path of the ports' client in `tutti-midi-hardware`, which moves here
+/// with the ports; every new caller takes [`SharedClient`](crate::SharedClient)
+/// instead, which retries through this.
 ///
 /// Every client creation in the process goes through here. A window that ends
 /// in failure is remembered process-wide: creations within `RETRY_BOUND` after

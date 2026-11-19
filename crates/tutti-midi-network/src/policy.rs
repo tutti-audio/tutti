@@ -24,14 +24,14 @@ impl Credentials {
 
     /// Adds a shared secret, such as a 4-digit code.
     #[must_use]
-    pub fn with_secret(mut self, secret: impl Into<String>) -> Self {
+    pub fn secret(mut self, secret: impl Into<String>) -> Self {
         self.secret = Some(secret.into());
         self
     }
 
     /// Adds a user name and its password.
     #[must_use]
-    pub fn with_user(mut self, username: Username, password: impl Into<String>) -> Self {
+    pub fn user(mut self, username: Username, password: impl Into<String>) -> Self {
         self.user = Some((username, password.into()));
         self
     }

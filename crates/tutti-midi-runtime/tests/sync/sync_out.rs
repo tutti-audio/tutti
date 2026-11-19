@@ -318,6 +318,7 @@ fn mtc_and_an_mmc_locate_state_one_rate() {
             mtc: true,
             mmc: Some(Recipient::AllCall),
             flex: false,
+            metronome: false,
             rate: MtcRate::Fps25,
         },
     );
@@ -358,6 +359,7 @@ fn every_message_is_on_the_nodes_group() {
             mtc: true,
             mmc: Some(Recipient::AllCall),
             flex: true,
+            metronome: false,
             rate: MtcRate::Fps30,
         },
     );
@@ -483,6 +485,35 @@ fn flex_states_the_tempo_and_the_nodes_meter_once() {
         "no clock bytes"
     );
     assert!(flexes(&rig.block(BLOCK, rolling(beat(0.0, BLOCK)), &[])).is_empty());
+}
+
+/// **Set Metronome is a Complete Flex Data packet to the Group (M2-104
+/// 7.5.5)**, off until set: 6/8 from the top is clocks per click 12, bar parts
+/// 6 + 0 + 0 and no subdivision clicks, on the start's frame, as the words
+/// `0xD010_0002 0x0C06_0000 0 0` (addrs 1, the Group); the same node with the setting off sends none.
+/// Spec: m2-104/7.5.5#3, m2-104/7.5.5#4
+#[test]
+fn set_metronome_is_a_complete_group_packet_and_off_by_default() {
+    use tutti_music::{MeterChange, MeterMap, TimeSignature};
+    let meter = std::sync::Arc::new(tutti_rt::Publisher::new(MeterMap::new([MeterChange::new(
+        Beat::new(0.0),
+        TimeSignature::of(6, 8),
+    )])));
+    let sent = |metronome: bool| {
+        let meter = std::sync::Arc::clone(&meter);
+        let mut rig = Rig::over(SyncOut::new(G).meter(move || meter.reader()).sending(
+            SyncMessages {
+                metronome,
+                ..SyncMessages::OFF
+            },
+        ));
+        rig.block(BLOCK, rolling(Beat::new(0.0)), &[])
+    };
+    assert!(sent(false).is_empty());
+    let got = sent(true);
+    assert_eq!(got.len(), 1);
+    assert_eq!(got[0].0, 0);
+    assert_eq!(got[0].1.0, [0xD010_0002, 0x0C06_0000, 0, 0]);
 }
 
 /// One block of 64 frames under `transport` through `node`; what it sent.
