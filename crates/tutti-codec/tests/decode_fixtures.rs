@@ -15,7 +15,9 @@ use std::path::PathBuf;
 
 use tutti_buffers::Wave;
 use tutti_buffers::{Interleaved, InterleavedMut, PlanesMut, Pull, Source, deinterleave};
-use tutti_codec::{FileIn, read_wave, read_wave_bytes, read_wave_metadata};
+use tutti_codec::{
+    FileIn, read_wave, read_wave_bytes, read_wave_metadata, read_wave_metadata_bytes,
+};
 use tutti_units::Samples;
 
 /// The frames one pull produced, `0` for any verdict (these loops read until
@@ -558,4 +560,53 @@ fn an_a_law_wav_is_16_bit_integers() {
     let wave = read_wave_bytes::<i16>(bytes).expect("decode");
     let want: Vec<i16> = coded.iter().map(|&b| alaw_expand(b)).collect();
     assert_eq!(wave.channel(0).samples(), want.as_slice());
+}
+
+/// The bytes of a file give the metadata its path gives, for every fixture.
+#[test]
+fn the_metadata_of_a_files_bytes_is_the_metadata_of_its_path() {
+    for &name in FIXTURES {
+        let bytes = std::fs::read(asset(name)).expect("fixture");
+        let from_bytes = read_wave_metadata_bytes(bytes).expect("probe bytes");
+        let from_path = read_wave_metadata(asset(name)).expect("probe path");
+        assert_eq!(from_bytes, from_path, "{name}");
+    }
+}
+
+/// A `FileIn` over a reader of a file's bytes decodes the frames `FileIn::open`
+/// decodes from the file, bit for bit, for every fixture.
+#[test]
+fn a_stream_over_a_reader_reads_the_frames_the_path_stream_reads() {
+    /// Every frame `dec` yields, interleaved.
+    fn drain(dec: &mut FileIn) -> Vec<f32> {
+        let mut buf = vec![0.0f32; dec.layout().interleaved_len(Samples::new(333))];
+        let mut all = Vec::new();
+        loop {
+            let n = read(dec, &mut buf);
+            if n == 0 {
+                return all;
+            }
+            all.extend_from_slice(&buf[..dec.layout().interleaved_len(Samples::new(n))]);
+        }
+    }
+    for &name in FIXTURES {
+        let bytes = std::fs::read(asset(name)).expect("fixture");
+        let mut from_reader =
+            FileIn::<f32>::from_reader(std::io::Cursor::new(bytes)).expect("reader");
+        let mut from_path = FileIn::<f32>::open(asset(name)).expect("open");
+        assert_eq!(
+            from_reader.total_frames(),
+            from_path.total_frames(),
+            "{name}"
+        );
+        assert_eq!(from_reader.topology(), from_path.topology(), "{name}");
+        let (a, b) = (drain(&mut from_reader), drain(&mut from_path));
+        assert!(!a.is_empty(), "{name}: decoded nothing");
+        assert!(
+            a.iter()
+                .map(|x| x.to_bits())
+                .eq(b.iter().map(|x| x.to_bits())),
+            "{name}: frames differ"
+        );
+    }
 }

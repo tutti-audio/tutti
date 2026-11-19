@@ -1,9 +1,13 @@
 //! A file being written beside its destination.
 
 use std::path::{Path, PathBuf};
+use tutti_platform::SystemTime;
 
 /// A temporary beside `target`: removed when dropped unless
-/// [`commit`](Self::commit)ted. A leftover that cannot be removed is logged,
+/// [`commit`](Self::commit)ted. Its name carries the target's name, a
+/// process-wide counter (two stagings in one process never share a name) and
+/// the wall clock's nanoseconds (two processes staging one target do not
+/// share one, unless they stage in the same nanosecond with the same count). A leftover that cannot be removed is logged,
 /// not an error: the take's outcome is already decided.
 pub(crate) struct Staged {
     temp: PathBuf,
@@ -17,11 +21,10 @@ impl Staged {
         let name = target
             .file_name()
             .map_or_else(|| "export".to_owned(), |n| n.to_string_lossy().into_owned());
-        let temp = target.with_file_name(format!(
-            ".{name}.{}.{}.tmp",
-            std::process::id(),
-            NEXT.mint()
-        ));
+        let nanos = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map_or(0, |since| since.as_nanos());
+        let temp = target.with_file_name(format!(".{name}.{nanos}.{}.tmp", NEXT.mint()));
         Self {
             temp,
             target: target.to_path_buf(),

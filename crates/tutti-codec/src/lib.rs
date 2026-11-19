@@ -87,7 +87,9 @@ mod writer;
 #[cfg(feature = "encode-aiff")]
 pub use aiff::AiffWriter;
 #[cfg(decode)]
-pub use decode::{FileIn, WaveMetadata, read_wave, read_wave_bytes, read_wave_metadata};
+pub use decode::{
+    FileIn, WaveMetadata, read_wave, read_wave_bytes, read_wave_metadata, read_wave_metadata_bytes,
+};
 pub use decode::{can_decode, decodable_extensions};
 pub use decode_error::DecodeError;
 pub use encoder::{Encoder, Finalized};
@@ -103,5 +105,5 @@ pub use vorbis::VorbisWriter;
 #[cfg(feature = "encode-wav")]
 pub use wav::WavWriter;
 #[cfg(encode)]
-pub use wave_write::write_wave;
+pub use wave_write::{write_wave, write_wave_to};
 pub use writer::FormatWriter;
