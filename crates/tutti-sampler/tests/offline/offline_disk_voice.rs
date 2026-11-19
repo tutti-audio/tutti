@@ -24,9 +24,9 @@ use tutti_buffers::MaxBlock;
 
 use tutti_graph::{Env, ForkHealth, ForkMode, IntoNode, Node, Prepare, TransportChanges, contract};
 use tutti_music::{FrameClock, LoopRange};
-use tutti_sampler::testing::settle;
+use tutti_sampler::testing::wait_for_open;
 use tutti_sampler::{
-    ByHand, DiskStreamer, DiskVoice, Loop, Placement, Playback, Stream, StreamReader, Voice,
+    DiskStreamer, DiskVoice, Loop, Manual, Placement, Playback, Stream, StreamReader, Voice,
     VoiceNode, VoiceSource,
 };
 use tutti_units::{Beat, Bpm, Frame, SampleRate, Samples};
@@ -59,7 +59,7 @@ fn write_ramp(path: &Path, rate: u32, frames: usize) {
 /// A hand-stepped streamer and the handle of the stream it streams: both are
 /// held while the voice plays (dropping the handle ends the stream).
 struct Rig {
-    streamer: DiskStreamer<ByHand<f32>, f32>,
+    streamer: DiskStreamer<Manual<f32>, f32>,
     stream: Stream<f32>,
 }
 
@@ -74,9 +74,9 @@ fn streamer_with(
     path: &Path,
     config: tutti_sampler::DiskStreamerConfig,
 ) -> (Rig, StreamReader<f32>) {
-    let mut streamer = DiskStreamer::by_hand(SampleRate::of(SR), config).expect("builds");
+    let mut streamer = DiskStreamer::manual(SampleRate::of(SR), config).expect("builds");
     let opening = streamer.open(path, Placement::HEAD);
-    let (stream, reader) = settle(&mut streamer, opening).expect("the file opens");
+    let (stream, reader) = wait_for_open(&mut streamer, opening).expect("the file opens");
     (Rig { streamer, stream }, reader)
 }
 
@@ -88,7 +88,7 @@ fn reverse(rig: &mut Rig) {
         .direction_cell()
         .publish(tutti_sampler::Direction::Reverse);
     assert!(
-        rig.streamer.step_until_settled(1_000) < 1_000,
+        rig.streamer.step_until_idle(1_000) < 1_000,
         "the reversed ring settles"
     );
 }
@@ -304,7 +304,7 @@ fn a_fork_loops_as_the_stream_is_looped_when_it_is_taken() {
         rig.stream
             .looping_cell()
             .publish(Some(loop_frames(1_000, 3_000, fade)));
-        let _ = rig.streamer.step_until_settled(1_000);
+        let _ = rig.streamer.step_until_idle(1_000);
 
         let clock = clock_at(SR);
         let mut copy = fork(&voice, SR);
@@ -384,7 +384,7 @@ fn a_forks_crossfaded_loop_is_continuous_at_its_wrap() {
         rig.stream
             .looping_cell()
             .publish(Some(loop_frames(start as usize, end as usize, fade)));
-        let _ = rig.streamer.step_until_settled(1_000);
+        let _ = rig.streamer.step_until_idle(1_000);
 
         let clock = clock_at(SR);
         let mut copy = fork(&voice, SR);
@@ -476,7 +476,7 @@ fn a_fork_of_a_stream_that_is_gone_plays_nothing() {
     } = rig;
     let voice = live_voice(reader, 0.0);
     drop(stream);
-    let _ = streamer.step_until_settled(1_000);
+    let _ = streamer.step_until_idle(1_000);
 
     let clock = clock_at(SR);
     let mut copy = fork(&voice, SR);
@@ -727,7 +727,7 @@ fn a_fork_matches_the_memory_tier_bit_for_bit() {
         let (mut rig, reader) = streamer_with(&path, config);
         if case.loop_.is_some() {
             rig.stream.looping_cell().publish(case.loop_);
-            let _ = rig.streamer.step_until_settled(1_000);
+            let _ = rig.streamer.step_until_idle(1_000);
         }
         // The second stream's handle, held for the whole case.
         let mut _second = None;
@@ -738,11 +738,11 @@ fn a_fork_matches_the_memory_tier_bit_for_bit() {
             write_ramp(&other, SR as u32, 1_000);
             let opening = rig.streamer.open(&other, Placement::HEAD);
             let (second, second_reader) =
-                settle(&mut rig.streamer, opening).expect("the file opens");
+                wait_for_open(&mut rig.streamer, opening).expect("the file opens");
             second
                 .looping_cell()
                 .publish(Some(loop_frames(500, 900, 100)));
-            let _ = rig.streamer.step_until_settled(1_000);
+            let _ = rig.streamer.step_until_idle(1_000);
             _second = Some((second, second_reader));
         }
         let mut voice = live_voice(reader, 1.0);

@@ -9,8 +9,9 @@
 //! ## Catalogue
 //!
 //! - **Model** (`model/`): a [`System`] is what every processor answers (its
-//!   [`latency`](System::latency) and [`tail`](System::tail), a [`Ring`] to a floor,
-//!   [`TAIL_FLOOR`] by default), and [`Lti`] the class of a linear time-invariant one
+//!   [`latency`](System::latency) and [`tail`](System::tail), a [`Ring`]: how long the response
+//!   rings until it is a floor below what it carried ([`TAIL_FLOOR`] by default)), and [`Lti`]
+//!   the class of a linear time-invariant one
 //!   ([`frequency_response`](Lti::frequency_response),
 //!   [`spectral_radius`](Lti::spectral_radius), [`l1_norm`](Lti::l1_norm),
 //!   [`hinf_norm`](Lti::hinf_norm), with [`Complex64`]); [`MaxDecay`] is the longest decay
@@ -20,7 +21,7 @@
 //!   ([`LadderBank`], [`LadderDesign`], [`LadderBlend`], [`LadderModel`], [`LadderType`]) and the
 //!   Linkwitz-Riley crossover ([`CrossoverBank`], [`CrossoverModel`]; a 2 to 6 band
 //!   4th-order split), each one filter per channel over buffers views with its
-//!   coefficients a [`Glide`] the caller aims; the envelope filter ([`EnvelopeFilterBank`]:
+//!   coefficients a [`Ramp`] the caller retargets; the envelope filter ([`EnvelopeFilterBank`]:
 //!   an SVF whose cutoff follows the input's level); [`SimdLanes`], the arithmetic their steps
 //!   run in, and the [`Biquad`] section they share. The state runs in `f32` or `f64`, and
 //!   its transcendentals call `libm`, so results do not depend on the platform's C math
@@ -40,41 +41,41 @@
 //!   a whole number of base frames, [`latency`](OversamplingPlan::latency).
 //! - **Dynamics** (`dynamics/`): the gain curves ([`LimiterCurve`] and the `compute_*`
 //!   functions, [`amplitude_to_db`]); the compressor ([`CompressorBank`], its threshold a
-//!   lane, its makeup a [`Glide`] over [`GAIN_GLIDE`]) and the noise gate ([`GateBank`], its
-//!   range gliding likewise), both reading a [`KeySource`] (a side-chain bus or the signal
+//!   control signal, its makeup a [`Ramp`] over [`GAIN_RAMP`]) and the noise gate ([`GateBank`], its
+//!   range ramping likewise), both reading a [`KeySource`] (a side-chain bus or the signal
 //!   itself) through a [`KeyFilter`] if built with one; the lookahead limiter ([`LimiterBank`],
-//!   its threshold and ceiling [`LimiterLanes`], its lookahead its latency); the brickwall
-//!   clipper ([`BrickwallBank`], its ceiling a per-frame lane); the transient shaper
+//!   its threshold and ceiling [`LimiterSignals`], its lookahead its latency); the brickwall
+//!   clipper ([`BrickwallBank`], its ceiling a per-frame control signal); the transient shaper
 //!   ([`TransientBank`]: one gain from a fast and a slow one-pole envelope); the dynamic EQ
 //!   band ([`DynamicEqBank`]: an SVF bell whose gain follows the level of a band-passed key
 //!   through the compressor's static curve, by a [`DynamicMode`]); and the multiband
 //!   compressor ([`MultibandBank`]: a crossover tree per channel and a [`CompressorBank`]
-//!   per band, each band's makeup, bypass and solo gliding over [`GAIN_GLIDE`]).
+//!   per band, each band's makeup, bypass and solo ramping over [`GAIN_RAMP`]).
 //! - **Convolution** (`convolver/`): [`Convolver`], a uniform or non-uniform partitioned FFT
 //!   convolution over an IR's shared, read-only [`IrSpectra`], and [`MatrixConvolver`] for
 //!   a matrix of impulse responses.
 //! - **Delay and modulation** (`delay/`, `modulation/`): [`DelayLine`], a fractional-read
 //!   ring with an [`InterpolationMode`]; the feedback delay ([`DelayBank`] over a
 //!   [`DelayLayout`]: a [`MaxDelay`], its cross-feedback a checked [`Routing`], its time and
-//!   feedback [`Glide`]s and the per-frame [`DelayLanes`]); the chorus and flanger
+//!   feedback [`Ramp`]s and the per-frame [`DelaySignals`]); the chorus and flanger
 //!   ([`ModDelayBank`] over a [`ModDelayLayout`]: its [`Sweep`] and [`Stagger`] checked, a
-//!   [`Glide`] per channel's delay, the LFO the caller's on the stream's clock); the phaser
-//!   ([`PhaserChain`]: its [`Stages`] and [`SweepRange`] checked, a [`Glide`] per channel's
+//!   [`Ramp`] per channel's delay, the LFO the caller's on the stream's clock); the phaser
+//!   ([`PhaserChain`]: its [`Stages`] and [`SweepRange`] checked, a [`Ramp`] per channel's
 //!   coefficient, [`sweep_hz`] and [`allpass_complement`] the pure pieces the sweep is solved
 //!   from).
 //! - **Reverb** (`reverb/`): the model, a [`Network`] of [`Stage`]s with analytic queries
 //!   ([`Network::rt60`], [`tail`](System::tail), [`is_stable`](Lti::is_stable), the
 //!   densities); [`FreeverbBank`] (Freeverb's combs and all-passes), [`FdnBank`] (the
 //!   feedback delay network, over an [`FdnLayout`]) and
-//!   [`PlateBank`] (Dattorro's plate), their parameters [`Glide`]s in [`FreeverbGlides`],
-//!   [`FdnGlides`] and [`PlateGlides`]. [`rt60_from_gain`] is the RT60 of a loop of a
+//!   [`PlateBank`] (Dattorro's plate), their parameters [`Ramp`]s in [`FreeverbRamps`],
+//!   [`FdnRamps`] and [`PlateRamps`]. [`rt60_from_gain`] is the RT60 of a loop of a
 //!   given gain.
 //! - **Waveshaping** (`waveshape.rs`): [`ShapeKind`], six memoryless curves, and
-//!   [`WaveshaperBank`], which runs one over a block at a gliding or per-frame drive, with
+//!   [`WaveshaperBank`], which runs one over a block at a ramping or per-frame drive, with
 //!   [`Antialiasing`] of the first or second order.
 //! - **Spatial** (`spatial/`): VBAP ([`SpeakerLayout`], Pulkki's pairs and triplets and the
 //!   gain solve over them, [`SpeakerGeometryError`]; [`VbapKernel`] and [`VbapGains`], one
-//!   direction's gains and one channel rendered along a glide between two) and the HRTF
+//!   direction's gains and one channel rendered along a ramp between two) and the HRTF
 //!   binaural convolver ([`HrtfBinaural`]).
 //! - **FFT** (`fft/`): [`RealFft`], a real-input FFT whose arithmetic does not depend on the
 //!   CPU (the convolver also runs it in steps), and [`FftScratch`], reusable plans and
@@ -94,7 +95,7 @@
 //! - **Oscillator** (`oscillator.rs`): [`Oscillator`], a sine, or a saw, square or triangle
 //!   band-limited by PolyBLEP and PolyBLAMP ([`OscillatorWave`]).
 //! - **Stereo and utility** (`polarity.rs`, `stereo.rs`, `pan.rs`): [`Polarity`], the
-//!   channels a block inverts; [`MidSide`] and [`WidthBank`] (the side scaled by a glided
+//!   channels a block inverts; [`MidSide`] and [`WidthBank`] (the side scaled by a ramped
 //!   [`StereoWidth`](tutti_units::StereoWidth)); [`PanLaw`] and [`pan_gains`].
 //! - **Tremolo, auto-pan and ring modulation** (`tremolo.rs`, `ring_mod.rs`): [`Tremolo`]
 //!   and [`AutoPan`], an [`Oscillator`] scaling the level or placing it by [`pan_gains`];
@@ -113,7 +114,7 @@
 //!   [`local_maxima`] of a curve.
 //! - **Band edges** (`bands.rs`): [`log_band_edges`] and [`octave_band_edges`], the edges of
 //!   bands with equal ratios between neighbours.
-//! - **Control and small kernels**: [`Glide`], a value that moves to its target in steps
+//! - **Control and small kernels**: [`Ramp`], a value that moves to its target in steps
 //!   (with [`Lerp`] and [`Steps`]); [`smooth_toward`], the one-pole step; [`COEFF_INTERVAL`] and
 //!   [`CHANNEL_GROUP`], the solve interval and channel grouping of the filter banks; [`lerp`],
 //!   [`cubic_hermite`] and [`parabolic_peak`]; [`rms`].
@@ -146,7 +147,6 @@ mod fft;
 mod filter;
 mod fir;
 mod follower;
-mod glide;
 mod interp;
 mod level;
 mod modulation;
@@ -157,6 +157,7 @@ mod oversample;
 mod pan;
 mod polarity;
 mod position;
+mod ramp;
 mod ring_mod;
 mod sample_convert;
 mod stereo;
@@ -185,18 +186,18 @@ pub use convolver::{Convolver, IrSpectra, MatrixConvolver, MatrixConvolverError}
 pub use dc_block::{DC_CORNER, DcBlocker, DcBlockerControls, MIN_DC_CORNER};
 pub(crate) use delay::delay_step;
 pub use delay::{
-    ChannelTimes, ChannelTimesError, DELAY_SLEW, DelayBank, DelayControls, DelayGlides, DelayLanes,
-    DelayLayout, DelayLine, InterpolationMode, MAX_DELAY_CHANNELS, MaxDelay, MaxDelayError,
+    ChannelTimes, ChannelTimesError, DELAY_SLEW, DelayBank, DelayControls, DelayLayout, DelayLine,
+    DelayRamps, DelaySignals, InterpolationMode, MAX_DELAY_CHANNELS, MaxDelay, MaxDelayError,
     Routing, RoutingError,
 };
 pub use dither::sink::DitherSink;
 pub use dither::{DitherNoise, DitherShape};
 pub use dynamics::{
-    BandReductions, BandSettings, BankShape, BrickwallBank, BrickwallControls, BrickwallLanes,
-    CompressorBank, CompressorControls, CompressorLanes, DynamicEqBank, DynamicEqControls,
-    DynamicMode, GAIN_GLIDE, GateBank, GateControls, GateLanes, KeyFilter, KeySource, LimiterBank,
-    LimiterControls, LimiterCurve, LimiterLanes, Lookahead, LookaheadError, MultibandBank,
-    MultibandLanes, MultibandSettings, PeakDetection, TransientBank, TransientControls,
+    BandReductions, BandSettings, BankShape, BrickwallBank, BrickwallControls, BrickwallSignals,
+    CompressorBank, CompressorControls, CompressorSignals, DynamicEqBank, DynamicEqControls,
+    DynamicMode, GAIN_RAMP, GateBank, GateControls, GateSignals, KeyFilter, KeySource, LimiterBank,
+    LimiterControls, LimiterCurve, LimiterSignals, Lookahead, LookaheadError, MultibandBank,
+    MultibandSettings, MultibandSignals, PeakDetection, TransientBank, TransientControls,
     TruePeakError, amplitude_to_db, compute_compressor_gain_reduction, compute_limiter_gain,
 };
 pub use fft::{Complex, Complex32, Complex64, Correlator, FftFloat, FftScratch, RealFft};
@@ -208,7 +209,6 @@ pub use filter::{
     svf_step,
 };
 pub use fir::{Fir, FirDesign, FirError, FirResponse, MAX_ATTENUATION, kaiser_beta};
-pub use glide::{Glide, Lerp, Steps};
 pub use interp::{ParabolicPeak, cubic_hermite, lerp, parabolic_peak};
 pub use level::rms;
 pub use model::{Lti, MaxDecay, MaxDecayError, Ring, System, TAIL_FLOOR};
@@ -230,13 +230,14 @@ pub use oversample::{
 };
 pub use pan::{PanLaw, pan_gains};
 pub use polarity::{ChannelOutOfRange, Polarity};
+pub use ramp::{Lerp, Ramp, Steps};
 pub use resample::{
     ChunkSize, FftResampler, ResampleError, StreamingResampler, WindowedSinc, needs_resampling,
     resampled_frames,
 };
-pub use reverb::fdn::bank::{FdnBank, FdnGlides};
+pub use reverb::fdn::bank::{FdnBank, FdnRamps};
 pub use reverb::fdn::design::{FdnControls, FdnLayout, FreezeMode, MAX_PRE_DELAY, MIN_DECAY};
-pub use reverb::freeverb::bank::{FreeverbBank, FreeverbGlides};
+pub use reverb::freeverb::bank::{FreeverbBank, FreeverbRamps};
 pub use reverb::freeverb::design::FreeverbControls;
 pub(crate) use reverb::network::loop_gain;
 pub use reverb::network::{
@@ -244,7 +245,7 @@ pub use reverb::network::{
     LineModulation, MAX_CHANNELS, MAX_DENSE, MAX_LINES, MAX_STAGES, MAX_TAPS, Matrix, Network,
     OutputMap, Stage, Tap, Taps, rt60_from_gain,
 };
-pub use reverb::plate::bank::{PlateBank, PlateGlides};
+pub use reverb::plate::bank::{PlateBank, PlateRamps};
 pub use reverb::plate::design::{MAX_PLATE_DECAY, PlateControls};
 pub use ring_mod::{RingModControls, RingModulator};
 pub use sequence::{local_maxima, median, median_of_sorted};

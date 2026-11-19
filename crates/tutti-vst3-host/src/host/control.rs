@@ -174,6 +174,26 @@ impl Vst3Loaded {
         })
     }
 
+    /// Writes `value` to the program-change parameter `param` and carries it
+    /// to the next activation. The caller has checked that the write is allowed.
+    pub(super) fn select_program(
+        &mut self,
+        main: MainThreadMarker,
+        param: ParamId,
+        value: Normalized,
+    ) -> bool {
+        // A program replaces the plugin's other parameters too.
+        self.carried.clear();
+        if self.set_parameter(main, param, value).is_err() {
+            return false;
+        }
+        if self.active.is_active() {
+            // The Controller of this activation queues it to the Processor.
+            self.carried.push((param, value));
+        }
+        true
+    }
+
     /// The parameter write that selects the program `id` names: VST3 has no
     /// load-preset call, so this *is* the load, routed through the parameter
     /// flagged `kIsProgramChange` that owns the list.
@@ -415,23 +435,11 @@ impl Control for Vst3Loaded {
 
     fn load_preset(&mut self, main: MainThreadMarker, id: &PresetId) -> bool {
         match self.program_write(main, id) {
-            Some((param, value)) => {
-                // A refused write leaves what is carried as it was.
-                if self.parameter_writable(main, param).is_err() {
-                    return false;
-                }
-                // A program replaces the plugin's other parameters too.
-                self.carried.clear();
-                if self.set_parameter(main, param, value).is_err() {
-                    return false;
-                }
-                if self.active.is_active() {
-                    // The Controller of this activation queues it to the Processor.
-                    self.carried.push((param, value));
-                }
-                true
+            // A refused write leaves what is carried as it was.
+            Some((param, value)) if self.parameter_writable(main, param).is_ok() => {
+                self.select_program(main, param, value)
             }
-            None => false,
+            _ => false,
         }
     }
 

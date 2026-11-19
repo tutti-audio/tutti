@@ -9,14 +9,14 @@
 use tutti_buffers::{BusTopology, MaxBlock};
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{
-    COEFF_INTERVAL, DELAY_SLEW, GAIN_GLIDE, Glide, Lerp, ModDelayBank, ModDelayControls,
-    ModDelayLayout, Stagger, StaggerError, Steps, Sweep,
+    COEFF_INTERVAL, DELAY_SLEW, GAIN_RAMP, Lerp, ModDelayBank, ModDelayControls, ModDelayLayout,
+    Ramp, Stagger, StaggerError, Steps, Sweep,
 };
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
 use tutti_units::{Feedback, Hz, SampleRate, SampleSpan, Seconds, Tail};
 
 use super::sweep_clock::{SEGMENT, SweepClock};
-use crate::kernel::{ControlLanes, Kernel, KernelNode};
+use crate::kernel::{ControlSignals, Kernel, KernelNode};
 
 /// A swept delay of any width, a chorus or a flanger by its [`Sweep`].
 ///
@@ -41,15 +41,15 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 /// frame.
 ///
 /// - The **rate** is how fast the delay sweeps: chorus and flanger rates are slow, typically
-///   0.1 to 2 Hz, and faster reads as vibrato. **Floored at 0.01 Hz, a lane's value and a
+///   0.1 to 2 Hz, and faster reads as vibrato. **Floored at 0.01 Hz, a control signal's value and a
 ///   cell's alike.** It lands whole, and the LFO's phase is continuous across it.
 /// - The **depth** is a duration added to the base delay, unlike the phaser's unitless depth;
-///   it is clamped into the sweep's range. A cell that moves glides, at no more than
+///   it is clamped into the sweep's range. A cell that moves ramps, at no more than
 ///   [`DELAY_SLEW`] frames of delay per frame: a moving delay is a pitch bend, so it is its
 ///   speed that is bounded.
 /// - The **feedback** is how much of the delayed signal recirculates, clamped into the
 ///   sweep's range; on a flanger it is the most characterful control. A cell that moves
-///   glides over [`GAIN_GLIDE`].
+///   ramps over [`GAIN_RAMP`].
 ///
 /// The output is the wet signal alone; the blend with the dry input is the graph's
 /// (`Editor::set_mix`; the node has no latency, so its aligned input is its input). At fully
@@ -72,7 +72,7 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 /// then nothing recirculates, an output frame is made of input at most
 /// [`max_delay`](Sweep::max_delay) old, and it declares that as its finite tail.
 ///
-/// `F` is the float of the graph it runs in, and of the lines and the glides; a line holds
+/// `F` is the float of the graph it runs in, and of the lines and the ramps; a line holds
 /// `ceil(max_delay * rate)` frames of it, so an `f32` graph halves the memory of an `f64` one.
 pub type ModDelayNode<F> = KernelNode<ModDelayKernel<F>>;
 
@@ -131,7 +131,7 @@ impl<F: Float + Lerp> ModDelayNode<F> {
 }
 
 /// The swept delay's controls, in port order: rate, depth, feedback. Each lands whole on the
-/// stream grid (the kernel's own glides are the depth's, at a pitch bend's speed, and the
+/// stream grid (the kernel's own ramps are the depth's, at a pitch bend's speed, and the
 /// feedback's: the reader must not ramp them across the block as well).
 #[derive(Clone, Copy, Debug)]
 pub struct ModDelaySet;
@@ -139,7 +139,7 @@ pub struct ModDelaySet;
 control_set! {
     ModDelaySet(_s): ModDelayControls = ModDelayControls::DEFAULT;
     live: (all);
-    // How fast the delay sweeps: floored at 0.01 Hz, a lane's value and a cell's alike.
+    // How fast the delay sweeps: floored at 0.01 Hz, a control signal's value and a cell's alike.
     Rate => Hz = rate { whole },
     // The swing, in seconds of delay.
     Depth => Seconds = depth { whole },
@@ -154,7 +154,7 @@ control_set! {
 /// (`SweepClock`) and the solve of each channel's delay.
 ///
 /// The LFO's corners are solved every [`COEFF_INTERVAL`] frames of the stream (a sine per
-/// corner and channel) and each channel's delay glides between them, so the cut of the blocks
+/// corner and channel) and each channel's delay ramps between them, so the cut of the blocks
 /// does not move it: the render is the same whatever the blocks. The chord of a sine over a
 /// step of `h` radians misses it by at most `h^2 / 8` of the depth, 0.03 frames against the
 /// deepest chorus at 5 Hz and 48 kHz. The LFO steps before the frame it sounds in: frame `i`
@@ -163,9 +163,9 @@ control_set! {
 /// point, the rate with the phase continuous across it.
 ///
 /// **A moving depth is a pitch bend**, so its speed is bounded, not its duration: a depth that
-/// moves glides at most [`DELAY_SLEW`] frames of delay per frame, and is solved into a
-/// segment's end corner with the depth the glide has there. The feedback glides over
-/// [`GAIN_GLIDE`].
+/// moves ramps at most [`DELAY_SLEW`] frames of delay per frame, and is solved into a
+/// segment's end corner with the depth the ramp has there. The feedback ramps over
+/// [`GAIN_RAMP`].
 ///
 /// The delay has **no latency**: the sweep is the sound, not processing delay. Its tail is
 /// [`Tail::Unknown`] (a recirculating line), or, for a sweep that cannot recirculate, its
@@ -175,14 +175,14 @@ pub struct ModDelayKernel<F: Float> {
     layout: ModDelayLayout,
     /// `None` until [`prepare`](Kernel::prepare).
     bank: Option<ModDelayBank<F>>,
-    /// The glide length of the feedback: [`GAIN_GLIDE`] at the prepared rate.
+    /// The ramp length of the feedback: [`GAIN_RAMP`] at the prepared rate.
     steps: u32,
     /// Each channel's excursion from the base delay, in frames, across the segment in flight,
     /// from its start corner.
-    delays: Box<[Glide<F>]>,
+    delays: Box<[Ramp<F>]>,
     /// The depth in frames of delay.
-    depth: Glide<F>,
-    feedback: Glide<F>,
+    depth: Ramp<F>,
+    feedback: Ramp<F>,
     clock: SweepClock,
 }
 
@@ -193,9 +193,9 @@ impl<F: Float + Lerp> ModDelayKernel<F> {
         Self {
             bank: None,
             steps: 0,
-            delays: vec![Glide::landed(F::ZERO); layout.width()].into_boxed_slice(),
-            depth: Glide::landed(F::ZERO),
-            feedback: Glide::landed(F::from_unit(d.feedback)),
+            delays: vec![Ramp::new(F::ZERO); layout.width()].into_boxed_slice(),
+            depth: Ramp::new(F::ZERO),
+            feedback: Ramp::new(F::from_unit(d.feedback)),
             clock: SweepClock::new(layout.offsets()),
             layout,
         }
@@ -203,14 +203,17 @@ impl<F: Float + Lerp> ModDelayKernel<F> {
 
     /// Solves the next segment: its start corner is the last one's end (or the LFO's start
     /// after a reset), its end corner the sweep [`COEFF_INTERVAL`] frames on at the LFO's
-    /// step and the depth the glide has there.
+    /// step and the depth the ramp has there.
     fn solve(&mut self) {
         let Some(bank) = &self.bank else {
             return;
         };
         let span = |frames: F| SampleSpan::clamped(frames.into());
         let depth_start = span(self.depth.now());
-        let depth_end = span(self.depth.at(self.depth.taken().saturating_add(SEGMENT)));
+        let depth_end = span(
+            self.depth
+                .at(self.depth.steps_taken().saturating_add(SEGMENT)),
+        );
         self.clock.solve(&mut self.delays, |lfo, end| {
             let depth = if end { depth_end } else { depth_start };
             bank.swept(lfo, depth)
@@ -241,31 +244,31 @@ impl<F: Float + Lerp> Kernel for ModDelayKernel<F> {
     }
 
     /// Sizes a line per channel at `rate` (`ceil(max_delay * rate)` frames: a re-prepare
-    /// empties them, the delays in frames having been the old rate's) and the feedback glide
-    /// from [`GAIN_GLIDE`] at it, the conversion saturating: a prepare must not panic. The
+    /// empties them, the delays in frames having been the old rate's) and the feedback ramp
+    /// from [`GAIN_RAMP`] at it, the conversion saturating: a prepare must not panic. The
     /// sweep restarts.
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
-        self.steps = u32::try_from(GAIN_GLIDE.to_samples_ceil(rate).get()).unwrap_or(u32::MAX);
+        self.steps = u32::try_from(GAIN_RAMP.to_samples_ceil(rate).get()).unwrap_or(u32::MAX);
         self.bank = Some(ModDelayBank::<F>::new(&self.layout, rate));
         self.reset();
     }
 
-    /// Back to silence with the sweep at its start: the lines empty, the glides settled and the
+    /// Back to silence with the sweep at its start: the lines empty, the ramps settled and the
     /// next design landing at once, as a fresh node's first does.
     fn reset(&mut self) {
         if let Some(bank) = &mut self.bank {
             bank.reset();
         }
-        self.depth.settle();
-        self.feedback.settle();
+        self.depth.jump_to_target();
+        self.feedback.jump_to_target();
         for delay in &mut self.delays {
-            delay.settle();
+            delay.jump_to_target();
         }
         self.clock.reset();
         self.clock.unland();
     }
 
-    /// At a grid point it aims the depth and the feedback at `controls`, takes the rate and
+    /// At a grid point it retargets the depth and the feedback to `controls`, takes the rate and
     /// solves the segment: a retarget inside a segment is a control that moved, and waits for
     /// the next grid point (which retargets with the controls in force there). The first
     /// retarget after a prepare or a reset lands the depth and the feedback at once.
@@ -278,12 +281,12 @@ impl<F: Float + Lerp> Kernel for ModDelayKernel<F> {
         let design = bank.design(controls);
         self.clock.set_inc(design.inc);
         self.depth
-            .aim_by(F::from_unit(design.depth), Steps::Rate(DELAY_SLEW));
+            .retarget_by(F::from_unit(design.depth), Steps::Rate(DELAY_SLEW));
         self.feedback
-            .aim_by(F::from_unit(design.feedback), Steps::Fixed(self.steps));
+            .retarget_by(F::from_unit(design.feedback), Steps::Fixed(self.steps));
         if first {
-            self.depth.settle();
-            self.feedback.settle();
+            self.depth.jump_to_target();
+            self.feedback.jump_to_target();
         }
         if self.clock.at_corner() {
             self.solve();
@@ -293,7 +296,7 @@ impl<F: Float + Lerp> Kernel for ModDelayKernel<F> {
     fn render(
         &mut self,
         input: Planes<'_, F>,
-        _: ControlLanes<'_, F>,
+        _: ControlSignals<'_, F>,
         output: PlanesMut<'_, '_, F>,
     ) {
         let frames = input.frames().get().min(output.frames().get());
@@ -576,7 +579,7 @@ mod tests {
     /// the old rate and the next begins on the new, so the delay follows the exact sine of a
     /// phase that kept running, at the old rate to frame 2512 and at the new one after. Frame
     /// 2500 is near a zero crossing, where the delay moves fastest, so a phase that restarted,
-    /// or a rate that landed a segment early or late, is several frames off.
+    /// or a rate that arrives a segment early or late, is several frames off.
     #[test]
     fn a_rate_change_lands_at_its_grid_point_and_the_phase_stays_continuous() {
         let depth = 0.01f64;
@@ -614,7 +617,7 @@ mod tests {
         assert!(sep > 10.0 * bound, "the two rates are told apart: {sep}");
     }
 
-    /// The rate is **floored at 0.01 Hz**, a lane's value and a cell's alike: a rate below it,
+    /// The rate is **floored at 0.01 Hz**, a control signal's value and a cell's alike: a rate below it,
     /// zero or negative, is the floor's step, and not a sweep that stands still or runs
     /// backwards. Over the first 4,800 frames (0.1 s) the delay has risen by `depth * sr *
     /// sin(2 pi 0.01 * 0.1)`, a figure no other rate gives. A rate that is not a number is
@@ -647,16 +650,16 @@ mod tests {
         }
     }
 
-    /// A depth that moves is a pitch bend, so it glides at no more than [`DELAY_SLEW`] frames
+    /// A depth that moves is a pitch bend, so it ramps at no more than [`DELAY_SLEW`] frames
     /// of delay per frame, however far it moves, and **lands exactly**: a depth moved from
     /// 5 ms to 40 ms at 48 kHz is 1,680 frames of excursion at `1/8` a frame, 13,440 frames
-    /// of glide, and the sweep after it is the new depth to the frame. The delay's own motion
+    /// of ramp, and the sweep after it is the new depth to the frame. The delay's own motion
     /// (a slow 0.1 Hz sweep, at most `2 pi rate depth`) adds to the slew, and nothing else
     /// does.
     #[test]
-    fn a_depth_glide_is_bounded_by_the_slew_and_lands_exactly() {
+    fn a_depth_ramp_is_bounded_by_the_slew_and_lands_exactly() {
         let (from, to, hz) = (0.005f64, 0.04f64, 0.1f64);
-        // The glide of 13,440 frames straddles the sweep's crest (the quarter period, frame
+        // The ramp of 13,440 frames straddles the sweep's crest (the quarter period, frame
         // 120,000, where the LFO is at 1), so the excursion's growth is the delay's, a
         // frame a frame at its fastest.
         let (moved, len) = (113_280, 140_000);
@@ -674,11 +677,11 @@ mod tests {
             worst <= slew + steady * 1.02 + 0.01,
             "the delay moved {worst} frames in one"
         );
-        assert!(worst > slew * 0.9, "it glides at the slew: {worst}");
-        let landed = moved + 13_440 + 64;
+        assert!(worst > slew * 0.9, "it ramps at the slew: {worst}");
+        let arrived = moved + 13_440 + 64;
         let amp_at = |n: usize| (trace[n] - BASE) / (to * SR);
         let sine_at = |n: usize| (std::f64::consts::TAU * hz * n as f64 / SR).sin();
-        for n in [landed + 1_000, landed + 6_000, len - 100] {
+        for n in [arrived + 1_000, arrived + 6_000, len - 100] {
             let want = sine_at(n);
             assert!(
                 (amp_at(n) - want).abs() < 2e-3,
@@ -917,19 +920,19 @@ mod tests {
         assert_eq!(fork.param_set().get(UnitParam::Feedback), Some(0.7));
     }
 
-    /// The rate is **floored at 0.01 Hz, a lane's value and a cell's alike**: a rate of
+    /// The rate is **floored at 0.01 Hz, a control signal's value and a cell's alike**: a rate of
     /// -3 Hz, written to the cell or fed on the port, is the 0.01 Hz sweep, which has raised
     /// the 10 ms base by `5 ms * sin(2 pi 0.01 * 0.1 s)`, 1.508 frames, after 0.1 s.
     #[test]
-    fn a_rate_below_the_floor_is_the_floor_in_a_cell_and_on_a_lane() {
+    fn a_rate_below_the_floor_is_the_floor_in_a_cell_and_on_a_signal() {
         let figure = 0.005 * SR * (std::f64::consts::TAU * 0.01 * 0.1).sin();
         let at = 4_800;
-        let delays = |node: ModDelayNode<f32>, lane: Option<f32>| -> Vec<f64> {
+        let delays = |node: ModDelayNode<f32>, signal: Option<f32>| -> Vec<f64> {
             let mut node = prepared(node, RATE, 64);
             let x: Vec<f32> = (0..at + 64).map(|n| n as f32).collect();
             let mut y = Vec::new();
             for chunk in x.chunks(64) {
-                let rate = lane.map(|v| vec![v; chunk.len()]);
+                let rate = signal.map(|v| vec![v; chunk.len()]);
                 let params = [rate.as_deref(), None, None];
                 y.extend(drive(&mut node, RATE, Planes::new(&[chunk]).unwrap(), &params).remove(0));
             }
@@ -948,8 +951,8 @@ mod tests {
             assert!(node.param_set().set(UnitParam::Rate, -3.0));
             delays(node, None)
         };
-        let on_lane = delays(chorus(), Some(-3.0));
-        for (what, d) in [("cell", on_cell), ("lane", on_lane)] {
+        let on_signal = delays(chorus(), Some(-3.0));
+        for (what, d) in [("cell", on_cell), ("signal", on_signal)] {
             assert!(
                 (d[at] - (480.0 + figure)).abs() < 0.05,
                 "a negative rate on a {what}: delay {}, the 0.01 Hz sweep {}",
@@ -961,11 +964,11 @@ mod tests {
 
     /// A control the graph drives is sampled on the stream's 16-frame grid, not at the
     /// block's last frame, so what is heard does not depend on how the stream is cut into
-    /// blocks; and the lane is heard, since the cell it overrides is a different depth.
+    /// blocks; and the control signal is heard, since the cell it overrides is a different depth.
     #[test]
     fn a_driven_slow_control_is_sampled_on_the_grid_whatever_the_blocks() {
         let len = 4_096;
-        let lane: Vec<f32> = (0..len)
+        let signal: Vec<f32> = (0..len)
             .map(|n| 0.001 + 0.009 * n as f32 / len as f32)
             .collect();
         let x: Vec<f32> = (0..len)
@@ -976,7 +979,7 @@ mod tests {
             let mut out = Vec::new();
             for (n, chunk) in x.chunks(block).enumerate() {
                 let at = n * block;
-                let l = &lane[at..at + chunk.len()];
+                let l = &signal[at..at + chunk.len()];
                 let params = [None, driven.then_some(l), None];
                 out.extend(
                     drive(&mut node, RATE, Planes::new(&[chunk]).unwrap(), &params).remove(0),
@@ -985,13 +988,13 @@ mod tests {
             out
         };
         let whole = render(1_024, true);
-        assert_ne!(whole, render(1_024, false), "the lane is heard");
+        assert_ne!(whole, render(1_024, false), "the signal is heard");
         for block in [1, 16, 64, 128] {
             assert_eq!(render(block, true), whole, "blocks of {block}");
         }
     }
 
-    /// A feedback moved at a lane corner **off the grid** waits for the next grid point, as the
+    /// A feedback moved at a control signal corner **off the grid** waits for the next grid point, as the
     /// rate and the depth do: a retarget at frame 5 of a segment (frame 613) renders the same
     /// as at the grid point 624, and differently from the one at 640, with the loop already
     /// ringing (the delay is 480 frames).
@@ -1013,7 +1016,7 @@ mod tests {
     }
 
     /// A reset node equals a fresh one that has the cell: render, move a cell, reset, and the
-    /// render is the fresh node's with that cell (the move lands at once, it does not glide
+    /// render is the fresh node's with that cell (the move lands at once, it does not ramp
     /// from the old value).
     #[test]
     fn a_cell_moved_before_a_reset_lands_at_once_as_on_a_fresh_node() {

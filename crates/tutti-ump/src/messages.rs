@@ -100,7 +100,7 @@ fn part(ump: Ump) -> Part {
 /// Whether a packet is a message of its own or goes with the packet before it.
 ///
 /// A sender that makes several packets of one event (a MIDI 2.0 registered
-/// controller narrowed to the Control Changes that select it and set its value)
+/// controller translated to the Control Changes that select it and set its value)
 /// marks all after the first, so that a cut does not fall between them: a
 /// receiver left with the controller selected and no value is wrong until the
 /// next one.

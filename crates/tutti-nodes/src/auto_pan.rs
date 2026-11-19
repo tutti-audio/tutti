@@ -6,7 +6,7 @@ use tutti_dsp::{AutoPan, AutoPanControls, COEFF_INTERVAL, OscillatorWave, PanLaw
 use tutti_graph::{Cost, Shape};
 use tutti_units::{Depth, Hz, SampleRate, Tail};
 
-use crate::kernel::{ControlLanes, Kernel, KernelNode};
+use crate::kernel::{ControlSignals, Kernel, KernelNode};
 
 /// What an [`AutoPanNode`] is made from: the wave of its LFO, the pan law and where its
 /// controls start.
@@ -142,13 +142,13 @@ impl<F: Float> Kernel for AutoPanKernel<F> {
     }
 
     fn retarget(&mut self, controls: &AutoPanControls) {
-        self.pan.aim(controls);
+        self.pan.retarget(controls);
     }
 
     fn render(
         &mut self,
         input: Planes<'_, F>,
-        _: ControlLanes<'_, F>,
+        _: ControlSignals<'_, F>,
         output: PlanesMut<'_, '_, F>,
     ) {
         self.pan.process(input, output);

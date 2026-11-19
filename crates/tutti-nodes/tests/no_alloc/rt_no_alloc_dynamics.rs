@@ -95,10 +95,10 @@ fn compressor_stereo_process_is_allocation_free() {
     );
 }
 
-/// The compressor's lane path with every cell moving too: the threshold port fed a per-frame
-/// ramp with a NaN frame (the `ControlLanes` lane the kernel reads per frame), and each block
+/// The compressor's control signal path with every cell moving too: the threshold port fed a per-frame
+/// ramp with a NaN frame (the `ControlSignals` control signal the kernel reads per frame), and each block
 /// writes the ratio, the times, the knee and the makeup (a new design on the stream grid, the
-/// makeup gliding) through the `ParamSet`, 6 channels, 2 000 blocks under `assert_no_alloc`.
+/// makeup ramping) through the `ParamSet`, 6 channels, 2 000 blocks under `assert_no_alloc`.
 #[test]
 fn compressor_fed_threshold_and_moving_cells_are_allocation_free() {
     use tutti_graph::ParamNode;
@@ -127,9 +127,9 @@ fn compressor_fed_threshold_and_moving_cells_are_allocation_free() {
             *x = if i % 2 == 0 { 0.8 } else { -0.8 };
         }
     }
-    let mut lane: Vec<f32> = (0..64).map(|i| -30.0 + 0.3 * i as f32).collect();
-    lane[9] = f32::NAN;
-    node.feed(0, Some(&lane));
+    let mut signal: Vec<f32> = (0..64).map(|i| -30.0 + 0.3 * i as f32).collect();
+    signal[9] = f32::NAN;
+    node.feed(0, Some(&signal));
     let set = node.node.param_set();
     for _ in 0..16 {
         node.block();
@@ -357,7 +357,7 @@ fn limiter_node_burst_and_release_are_allocation_free() {
     );
 }
 
-/// The brickwall with its ceiling port fed a per-frame ramp (the `ControlLanes` lane the
+/// The brickwall with its ceiling port fed a per-frame ramp (the `ControlSignals` control signal the
 /// kernel reads each frame), 6 channels, 1 000 blocks under `assert_no_alloc`.
 /// `Direct` feeds the port, which `BlockRig` cannot.
 #[test]
@@ -394,12 +394,12 @@ fn brickwall_limiter_fed_ceiling_process_is_allocation_free() {
     });
 }
 
-/// The brickwall's lane path with the cell moving too, and a lane carrying every
+/// The brickwall's control signal path with the cell moving too, and a control signal carrying every
 /// value the clip must survive (NaN, `+-inf`, a mute): each block writes the cell to a
 /// new ceiling through the `ParamSet` (a new design, retargeted on the audio thread),
 /// 2 000 blocks under `assert_no_alloc`.
 #[test]
-fn brickwall_limiter_moving_cell_and_hostile_lane_are_allocation_free() {
+fn brickwall_limiter_moving_cell_and_hostile_signal_are_allocation_free() {
     use tutti_graph::ParamNode;
     use tutti_graph::contract::Direct;
     use tutti_units::UnitParam;
@@ -418,9 +418,10 @@ fn brickwall_limiter_moving_cell_and_hostile_lane_are_allocation_free() {
             *x = if i % 2 == 0 { 1.5 } else { -1.5 };
         }
     }
-    let mut lane: Vec<f32> = (0..64).map(|i| -12.0 + 0.1875 * i as f32).collect();
-    (lane[3], lane[4], lane[5], lane[6]) = (f32::NAN, f32::INFINITY, f32::NEG_INFINITY, f32::NAN);
-    node.feed(0, Some(&lane));
+    let mut signal: Vec<f32> = (0..64).map(|i| -12.0 + 0.1875 * i as f32).collect();
+    (signal[3], signal[4], signal[5], signal[6]) =
+        (f32::NAN, f32::INFINITY, f32::NEG_INFINITY, f32::NAN);
+    node.feed(0, Some(&signal));
     let set = node.node.param_set();
     node.block();
     assert_no_alloc::assert_no_alloc(|| {
@@ -529,15 +530,15 @@ fn a_limiter_cloned_mid_release_processes_allocation_free() {
 }
 
 /// What a corner sweep drives: the controls a node has at their two ends (a write each block
-/// from one end to the other, so a design is in flight on all of them), the ports a lane
+/// from one end to the other, so a design is in flight on all of them), the ports a control signal
 /// can drive, and the bound its output keeps.
 pub(crate) struct Corners {
     /// Each control and its two ends.
     pub(crate) cells: &'static [(tutti_units::UnitAddr, f32, f32)],
-    /// The param ports that read a lane per frame.
-    pub(crate) lanes: &'static [usize],
-    /// The lane values: a lane cycles through them, so every frame is a corner or hostile.
-    pub(crate) lane_values: &'static [&'static [f32]],
+    /// The param ports that read a control signal per frame.
+    pub(crate) signals: &'static [usize],
+    /// The control signal values: a control signal cycles through them, so every frame is a corner or hostile.
+    pub(crate) signal_values: &'static [&'static [f32]],
     /// The most a sample may reach: the largest ceiling or gain the corners ask for, times
     /// the input.
     pub(crate) bound: f32,
@@ -545,7 +546,7 @@ pub(crate) struct Corners {
     pub(crate) frames: usize,
 }
 
-/// `node` at every corner of `corners`, in blocks of 1, 7, 33 and 64 frames, with the lanes
+/// `node` at every corner of `corners`, in blocks of 1, 7, 33 and 64 frames, with the control signals
 /// fed none and then each of their value sets: each cell written to an end every block
 /// (alternating, then all low, all high), the input a square at `amplitude` with silent
 /// stretches (a parking node parks and wakes), a key sample (from channel `key_from`) that is
@@ -579,13 +580,13 @@ pub(crate) fn sweep<N: tutti_graph::Node + tutti_graph::ParamNode>(
         let blocks = corners.frames.div_ceil(block);
         let outs = usize::from(d.node.shape().audio_out().count());
         let variants: Vec<Option<&[f32]>> = std::iter::once(None)
-            .chain(corners.lane_values.iter().copied().map(Some))
+            .chain(corners.signal_values.iter().copied().map(Some))
             .collect();
         for (v, values) in variants.iter().enumerate() {
-            for &port in corners.lanes {
-                let lane: Option<Vec<f32>> =
+            for &port in corners.signals {
+                let signal: Option<Vec<f32>> =
                     values.map(|vals| (0..64).map(|i| vals[(i + port) % vals.len()]).collect());
-                d.feed(port, lane.as_deref());
+                d.feed(port, signal.as_deref());
             }
             for phase in 0..3usize {
                 let (mut finite, mut within) = (true, true);
@@ -643,11 +644,11 @@ pub(crate) fn sweep<N: tutti_graph::Node + tutti_graph::ParamNode>(
                 });
                 assert!(
                     finite,
-                    "block {block}, lanes {v}, phase {phase}: not finite"
+                    "block {block}, signals {v}, phase {phase}: not finite"
                 );
                 assert!(
                     within,
-                    "block {block}, lanes {v}, phase {phase}: past the bound"
+                    "block {block}, signals {v}, phase {phase}: past the bound"
                 );
             }
             // Between windows: prepared again, and forked, the control side's own work.
@@ -682,7 +683,7 @@ const HOSTILE_DB: &[f32] = &[
 ];
 
 /// The compressor at every corner, stereo and 6 wide, keyed and on its own signal: threshold at
-/// both ends and as a hostile lane, knee, ratio (below 1 and 1000), times (instant and 10 s)
+/// both ends and as a hostile control signal, knee, ratio (below 1 and 1000), times (instant and 10 s)
 /// and makeup (to a clamped 1e30 dB), with an infinite key sample now and then.
 #[test]
 fn the_compressor_corners_are_allocation_free_and_finite() {
@@ -696,8 +697,8 @@ fn the_compressor_corners_are_allocation_free_and_finite() {
             (addr(Release, 0), 0.0, 10.0),
             (addr(GainDb, 0), -120.0, 24.0),
         ],
-        lanes: &[0],
-        lane_values: &[HOSTILE_DB],
+        signals: &[0],
+        signal_values: &[HOSTILE_DB],
         // 24 dB of makeup on a 1.5 square: 23.8.
         bound: 24.0,
         frames: 19_200,
@@ -707,8 +708,8 @@ fn the_compressor_corners_are_allocation_free_and_finite() {
             (addr(GainDb, 0), -1.0e30, 1.0e30),
             (addr(Ratio, 0), 1.0, 1.0),
         ],
-        lanes: &[0],
-        lane_values: &[HOSTILE_DB],
+        signals: &[0],
+        signal_values: &[HOSTILE_DB],
         // The makeup is held to 400 dB: 1e20 on a 1.5 square, a finite gain.
         bound: 1.0e21,
         frames: 19_200,
@@ -720,8 +721,8 @@ fn the_compressor_corners_are_allocation_free_and_finite() {
             (addr(Threshold, 0), -200.0, 60.0),
             (addr(Ratio, 0), 1.0, 1000.0),
         ],
-        lanes: &[0],
-        lane_values: &[HOSTILE_DB],
+        signals: &[0],
+        signal_values: &[HOSTILE_DB],
         bound: 1.5,
         frames: 19_200,
     };
@@ -751,7 +752,7 @@ fn the_compressor_corners_are_allocation_free_and_finite() {
     }
 }
 
-/// The gate at every corner: the threshold at both ends and as a hostile lane, times from
+/// The gate at every corner: the threshold at both ends and as a hostile control signal, times from
 /// instant to 5 s (the hold is 240 000 frames), and the range from 120 dB down to above 0 dB,
 /// with an infinite key sample now and then.
 #[test]
@@ -765,8 +766,8 @@ fn the_gate_corners_are_allocation_free_and_finite() {
             (addr(Release, 0), 0.0, 5.0),
             (addr(Range, 0), -120.0, 12.0),
         ],
-        lanes: &[0],
-        lane_values: &[HOSTILE_DB],
+        signals: &[0],
+        signal_values: &[HOSTILE_DB],
         bound: 1.5,
         frames: 19_200,
     };
@@ -789,8 +790,8 @@ fn the_gate_corners_are_allocation_free_and_finite() {
 
 /// The limiter at every corner, at the shortest lookahead (one frame) and the longest (one
 /// second: 48 000 frames, so a window of 60 000 frames wraps the ring and a reset lands after
-/// it), stereo and 6 wide: the threshold at both ends and as a hostile lane, the ceiling from
-/// -60 to 0 dB and as a lane of the same with non-finite frames, the release from 1 ms to 10 s.
+/// it), stereo and 6 wide: the threshold at both ends and as a hostile control signal, the ceiling from
+/// -60 to 0 dB and as a control signal of the same with non-finite frames, the release from 1 ms to 10 s.
 /// The output stays within the ceiling's top, 0 dB, to the ulps of the curve's roundings.
 #[test]
 fn the_limiter_corners_are_allocation_free_finite_and_under_the_ceiling() {
@@ -806,12 +807,12 @@ fn the_limiter_corners_are_allocation_free_finite_and_under_the_ceiling() {
             (addr(Ceiling, 0), -60.0, 0.0),
             (addr(Release, 0), 0.0, 10.0),
         ],
-        lanes: &[0, 1],
-        lane_values: &[HOSTILE_DB_CEILING],
+        signals: &[0, 1],
+        signal_values: &[HOSTILE_DB_CEILING],
         bound: BOUND,
         frames: 60_000,
     };
-    // Thresholds and ceilings of any size, finite or not, in the cells and in the lanes: the
+    // Thresholds and ceilings of any size, finite or not, in the cells and in the control signals: the
     // output is finite (the gain is clamped, nothing latches) and within what a ceiling of
     // 1e30 dB is held to.
     static HOSTILE: Corners = Corners {
@@ -819,23 +820,23 @@ fn the_limiter_corners_are_allocation_free_finite_and_under_the_ceiling() {
             (addr(Threshold, 0), f32::NEG_INFINITY, -800.0),
             (addr(Ceiling, 0), f32::NEG_INFINITY, 1.0e30),
         ],
-        lanes: &[0, 1],
-        lane_values: &[
+        signals: &[0, 1],
+        signal_values: &[
             &[-1.0e3, -1.0e6, -1.0e10, 1.0e30, -1.0e30, f32::NAN],
             &[1.0e30, -1.0e30, f32::INFINITY, -758.0, -800.0, 0.0],
         ],
         bound: f32::MAX,
         frames: 60_000,
     };
-    // The aimed ceiling is hostile and only the threshold is driven: the ceiling is read from
-    // its cell (1e30 dB or `+inf`) and held, where a lane would be.
+    // The set ceiling is hostile and only the threshold is driven: the ceiling is read from
+    // its cell (1e30 dB or `+inf`) and held, where a control signal would be.
     static HOSTILE_BASE: Corners = Corners {
         cells: &[
             (addr(Ceiling, 0), 1.0e30, f32::INFINITY),
             (addr(Threshold, 0), -200.0, 20.0),
         ],
-        lanes: &[0],
-        lane_values: &[&[-1.0e3, -1.0e6, -1.0e10, f32::NAN, 20.0]],
+        signals: &[0],
+        signal_values: &[&[-1.0e3, -1.0e6, -1.0e10, f32::NAN, 20.0]],
         bound: f32::MAX,
         frames: 60_000,
     };
@@ -844,8 +845,8 @@ fn the_limiter_corners_are_allocation_free_finite_and_under_the_ceiling() {
             (addr(Threshold, 0), f32::NEG_INFINITY, f32::INFINITY),
             (addr(Ceiling, 0), f32::NEG_INFINITY, 0.0),
         ],
-        lanes: &[],
-        lane_values: &[],
+        signals: &[],
+        signal_values: &[],
         bound: BOUND,
         frames: 60_000,
     };
@@ -870,7 +871,7 @@ fn the_limiter_corners_are_allocation_free_finite_and_under_the_ceiling() {
     }
 }
 
-/// The brickwall at every corner: the ceiling from -60 to -0.3 dB, and as a lane of the same
+/// The brickwall at every corner: the ceiling from -60 to -0.3 dB, and as a control signal of the same
 /// with NaN frames, bounds the output at -0.3 dB; with `+-inf` ceilings it passes or mutes
 /// and stays finite.
 #[test]
@@ -878,15 +879,15 @@ fn the_brickwall_corners_are_allocation_free_finite_and_under_the_ceiling() {
     use tutti_units::UnitParam::Ceiling;
     static CORNERS: Corners = Corners {
         cells: &[(addr(Ceiling, 0), -60.0, -0.3)],
-        lanes: &[0],
-        lane_values: &[&[-60.0, -0.3, f32::NAN, -6.0]],
+        signals: &[0],
+        signal_values: &[&[-60.0, -0.3, f32::NAN, -6.0]],
         bound: 0.966_052,
         frames: 19_200,
     };
     static EXTREMES: Corners = Corners {
         cells: &[(addr(Ceiling, 0), f32::NEG_INFINITY, f32::INFINITY)],
-        lanes: &[0],
-        lane_values: &[&[f32::NEG_INFINITY, f32::INFINITY, f32::NAN, 24.0]],
+        signals: &[0],
+        signal_values: &[&[f32::NEG_INFINITY, f32::INFINITY, f32::NAN, 24.0]],
         bound: 1.5,
         frames: 19_200,
     };
@@ -944,13 +945,13 @@ const fn multiband_cells(cutoffs: [(f32, f32); 3]) -> [(tutti_units::UnitAddr, f
 /// knee, ratio, times, makeup, bypass and solo at both ends and alternating; the splits moving
 /// the whole range in order, then at 0, at Nyquist and past it, infinite and out of order (a
 /// set that is refused leaves the last good one standing); the first two bands' thresholds
-/// as hostile lanes.
+/// as hostile control signals.
 #[test]
 fn the_multiband_corners_are_allocation_free_and_finite() {
     static MOVING: Corners = Corners {
         cells: &multiband_cells([(20.0, 300.0), (400.0, 3_000.0), (4_000.0, 23_000.0)]),
-        lanes: &[0, 6],
-        lane_values: &[HOSTILE_DB],
+        signals: &[0, 6],
+        signal_values: &[HOSTILE_DB],
         // Four bands of up to 24 dB of makeup on a 1.5 square, with the overshoot of a
         // moving crossover: a bound the corners stay far under.
         bound: 1.0e6,
@@ -962,8 +963,8 @@ fn the_multiband_corners_are_allocation_free_and_finite() {
             (100.0, 20_000.0),
             (f32::NEG_INFINITY, f32::INFINITY),
         ]),
-        lanes: &[0, 6],
-        lane_values: &[HOSTILE_DB],
+        signals: &[0, 6],
+        signal_values: &[HOSTILE_DB],
         bound: 1.0e6,
         frames: 6_400,
     };
@@ -977,8 +978,8 @@ fn the_multiband_corners_are_allocation_free_and_finite() {
             ),
             (addr(tutti_units::UnitParam::Ratio, 0), 1.0, 1.0),
         ],
-        lanes: &[0, 6],
-        lane_values: &[HOSTILE_DB],
+        signals: &[0, 6],
+        signal_values: &[HOSTILE_DB],
         // The makeup is held to 400 dB: 1e20 on a 1.5 square, a finite gain.
         bound: 1.0e30,
         frames: 6_400,
@@ -993,8 +994,8 @@ fn the_multiband_corners_are_allocation_free_and_finite() {
             (addr(tutti_units::UnitParam::Threshold, 0), -200.0, 60.0),
             (addr(tutti_units::UnitParam::Ratio, 0), 1.0, 1000.0),
         ],
-        lanes: &[0, 6],
-        lane_values: &[HOSTILE_DB],
+        signals: &[0, 6],
+        signal_values: &[HOSTILE_DB],
         bound: 1.0e6,
         frames: 6_400,
     };

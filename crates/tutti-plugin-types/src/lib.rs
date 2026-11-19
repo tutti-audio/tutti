@@ -185,6 +185,7 @@ mod control_role;
 mod deadline;
 mod descriptor;
 mod driver;
+mod edit_slots;
 mod editor;
 mod error;
 mod failure;
@@ -225,6 +226,7 @@ mod probe_wire;
 mod process;
 mod process_wake;
 mod render_mode;
+mod reports;
 mod requests;
 mod state_frame;
 mod state_use;
@@ -272,6 +274,7 @@ pub use channels::{ChannelTable, MAX_BLOCK_CHANNELS, PluginTooWide, sanitize, si
 pub use classification::{ClapFeature, PluginRole, Vst2Category, Vst3PlugType, Vst3SubCategories};
 pub use descriptor::{AuComponentType, Described, EditorPresence, PluginClass, PluginDescriptor};
 pub use driver::{Hand, Lifecycle, Seat, Successor};
+pub use edit_slots::{EditReader, EditWriter, UnknownParam, edit_slots};
 pub use editor::{
     AspectRatio, ContentScale, EditorCapabilities, EditorError, EditorUnit, InvalidContentScale,
     KeyEvent, KeyUse, ModifierConvention, ResizeHints, WindowHandle,
@@ -288,7 +291,8 @@ pub use order::{StableOrder, insertion_sort_by_key};
 pub use plugin_ref::{PluginRef, canonical_path};
 pub use points::{PointBuf, PointPool};
 pub use process_wake::ProcessWake;
-pub use requests::{Edit, EditDrain, EditQueue, EditSink, edits, taken};
+pub use reports::{ReportDrain, ReportSink, reports};
+pub use requests::taken;
 pub use state_frame::{
     BareFrame, FrameReader, MAX_STATE_BYTES, Opened, StateFrame, StateFrameError,
 };

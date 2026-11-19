@@ -6,7 +6,7 @@ use tutti_dsp::{COEFF_INTERVAL, RingModControls, RingModulator};
 use tutti_graph::{Cost, Shape};
 use tutti_units::{Hz, SampleRate, Tail};
 
-use crate::kernel::{ControlLanes, Kernel, KernelNode};
+use crate::kernel::{ControlSignals, Kernel, KernelNode};
 
 /// What a [`RingModNode`] is made from: its width and its starting carrier frequency.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -116,13 +116,13 @@ impl<F: Float> Kernel for RingModKernel<F> {
     }
 
     fn retarget(&mut self, controls: &RingModControls) {
-        self.modulator.aim(controls);
+        self.modulator.retarget(controls);
     }
 
     fn render(
         &mut self,
         input: Planes<'_, F>,
-        _: ControlLanes<'_, F>,
+        _: ControlSignals<'_, F>,
         output: PlanesMut<'_, '_, F>,
     ) {
         self.modulator.process(input, output);

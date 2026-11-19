@@ -17,7 +17,7 @@ use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_buffers::{Float, Mono, Planes, PlanesMut};
 use tutti_dsp::{
     BandSettings, BankShape, COEFF_INTERVAL, CompressorControls, CrossoverControls, CrossoverError,
-    Lerp, MultibandBank, MultibandLanes, MultibandSettings, SimdLanes,
+    Lerp, MultibandBank, MultibandSettings, MultibandSignals, SimdLanes,
 };
 use tutti_graph::{
     Cost, Cx, IntoNode, Io, MAX_PARAM_PORTS, Node, NodeParts, ParamNode, ParamSet, Prepare, Shape,
@@ -188,15 +188,15 @@ impl Band {
     /// graph drives on the band's ports (the threshold is read per frame by the
     /// bank, so its cell is the base it falls back to). A non-finite value reads as
     /// the last finite one.
-    fn read<F: Float>(&mut self, lanes: &[Option<&[F]>; PER_BAND], at: usize) -> BandSettings {
-        let driven = |k: usize| lanes[k].map(|lane| lane[at].into());
+    fn read<F: Float>(&mut self, signals: &[Option<&[F]>; PER_BAND], at: usize) -> BandSettings {
+        let driven = |k: usize| signals[k].map(|signal| signal[at].into());
         let mut take = |k: usize, cell: f64| self.good[k].read(driven(k).unwrap_or(cell));
         let knee = take(KNEE, self.knee.load().get());
         let ratio = take(RATIO, self.ratio.load().get());
         let attack = take(ATTACK, self.attack.load().get());
         let release = take(RELEASE, self.release.load().get());
         let makeup = take(MAKEUP, self.makeup.load().get());
-        // The threshold's lane is the bank's own; only the base is read here.
+        // The threshold's control signal is the bank's own; only the base is read here.
         let threshold = self.good[THRESHOLD].read(self.threshold.load().get());
         BandSettings {
             compressor: CompressorControls {
@@ -217,7 +217,7 @@ impl Band {
 
 /// What the graph drives on the node's param ports for a block, by band and param, and
 /// by crossover: `None` for a port nothing drives.
-struct PortLanes<'a, F: Float> {
+struct PortSignals<'a, F: Float> {
     band: [[Option<&'a [F]>; PER_BAND]; BankShape::MAX_BANDS],
     cutoff: [Option<&'a [F]>; MAX_CROSSOVERS],
 }
@@ -226,7 +226,7 @@ struct PortLanes<'a, F: Float> {
 /// each band is compressed on its own, and the bands are summed.
 ///
 /// `channels` in, `channels` out; the algorithm, its crossover and phase, its grid and its
-/// glides are [`MultibandBank`]'s, which this node runs. Zero latency and
+/// ramps are [`MultibandBank`]'s, which this node runs. Zero latency and
 /// [`Tail::Unknown`] (the crossover's sections ring after the input stops), so it never
 /// parks.
 ///
@@ -257,10 +257,10 @@ struct PortLanes<'a, F: Float> {
 /// whole and the last good set stands.
 ///
 /// The toggles are cells with no port, as [`BusStripNode`](crate::BusStripNode)'s mute is:
-/// they are a block-rate on/off a lane would only flap, and with them the ports would pass
+/// they are a block-rate on/off a control signal would only flap, and with them the ports would pass
 /// the graph's 32.
 ///
-/// A [`reset`](Node::reset) and a clone (a fork) start from silence, and the next aim lands
+/// A [`reset`](Node::reset) and a clone (a fork) start from silence, and the next retarget lands
 /// whole, as a fresh node's first does. A block whose output holds a NaN or an infinity is
 /// passed on as rendered and resets the node after it, its meters back at unity, so nothing
 /// non-finite is latched.
@@ -292,7 +292,7 @@ struct Rig {
 /// The node prepared for one rate and block size.
 struct Tuned<F: Float + SimdLanes + Lerp> {
     bank: MultibandBank<F>,
-    /// The settings the bank was last aimed at.
+    /// The settings the bank was last set to.
     applied: Option<MultibandSettings>,
     rate: SampleRate,
     /// Frames rendered since the last reset: where the stream grid's points fall.
@@ -377,7 +377,7 @@ impl Rig {
     fn read<F: Float>(
         &mut self,
         rate: SampleRate,
-        lanes: &PortLanes<'_, F>,
+        signals: &PortSignals<'_, F>,
         at: usize,
     ) -> MultibandSettings {
         let nb = self.bands.len();
@@ -385,7 +385,7 @@ impl Rig {
         // above 0 is refused, and the last good one stands.
         let targets = self
             .splits
-            .read(rate, |i| lanes.cutoff[i].map(|l| l[at].into()));
+            .read(rate, |i| signals.cutoff[i].map(|l| l[at].into()));
         if let Ok(set) = CrossoverControls::new(&targets[..nb - 1], rate) {
             self.crossover = set;
         }
@@ -394,7 +394,7 @@ impl Rig {
             bands: [BandSettings::DEFAULT; BankShape::MAX_BANDS],
         };
         for (b, band) in self.bands.iter_mut().enumerate() {
-            settings.bands[b] = band.read(&lanes.band[b], at);
+            settings.bands[b] = band.read(&signals.band[b], at);
         }
         settings
     }
@@ -421,17 +421,17 @@ impl<F: Float + SimdLanes + Lerp> Tuned<F> {
 
     /// Aims the bank at `settings`.
     fn apply(&mut self, settings: MultibandSettings) {
-        self.bank.aim(&settings);
+        self.bank.retarget(&settings);
         self.applied = Some(settings);
     }
 
-    /// Renders `frames` of the block through the bank, each band's threshold lane cut to
+    /// Renders `frames` of the block through the bank, each band's threshold control signal cut to
     /// them.
     fn render(
         &mut self,
         input: &[&[F]],
         output: &mut [&mut [F]],
-        lanes: &PortLanes<'_, F>,
+        signals: &PortSignals<'_, F>,
         frames: Range<usize>,
     ) {
         if frames.is_empty() {
@@ -445,23 +445,23 @@ impl<F: Float + SimdLanes + Lerp> Tuned<F> {
         ) else {
             return;
         };
-        let mut thresholds = MultibandLanes::default();
-        for (slot, lane) in thresholds.thresholds.iter_mut().zip(&lanes.band) {
-            *slot = lane[THRESHOLD].map(|l| Mono::new(&l[frames.clone()]));
+        let mut thresholds = MultibandSignals::default();
+        for (slot, signal) in thresholds.thresholds.iter_mut().zip(&signals.band) {
+            *slot = signal[THRESHOLD].map(|l| Mono::new(&l[frames.clone()]));
         }
         self.bank.process(thresholds, input, output);
     }
 
     /// Renders the block cut at the grid points of the stream, the block beginning at
     /// stream frame `position`: each grid point reads the controls at its frame, and one
-    /// that moved aims the bank before the frames after it render. The stretches that did
+    /// that moved retargets the bank before the frames after it render. The stretches that did
     /// not move render together, in one call.
     fn render_steps(
         &mut self,
         rig: &mut Rig,
         input: &[&[F]],
         output: &mut [&mut [F]],
-        lanes: &PortLanes<'_, F>,
+        signals: &PortSignals<'_, F>,
         position: u64,
     ) {
         let rate = self.rate;
@@ -474,11 +474,11 @@ impl<F: Float + SimdLanes + Lerp> Tuned<F> {
             },
             |_, _| None,
             |(tuned, rig, _), at, _| {
-                let target = rig.read(rate, lanes, at);
+                let target = rig.read(rate, signals, at);
                 (tuned.applied.as_ref() != Some(&target)).then_some(target)
             },
             |(tuned, ..), target| tuned.apply(target),
-            |(tuned, _, output), frames| tuned.render(input, output, lanes, frames),
+            |(tuned, _, output), frames| tuned.render(input, output, signals, frames),
         );
     }
 }
@@ -533,20 +533,20 @@ impl<F: Float + SimdLanes + Lerp> Node<F> for MultibandCompressorNode<F> {
 
         // What the graph drives on each port, taken before the split of `io`.
         let nb = self.rig.bands.len();
-        let mut lanes = PortLanes {
+        let mut signals = PortSignals {
             band: [[None; PER_BAND]; BankShape::MAX_BANDS],
             cutoff: [None; MAX_CROSSOVERS],
         };
-        for (i, c) in lanes.cutoff.iter_mut().enumerate().take(nb - 1) {
+        for (i, c) in signals.cutoff.iter_mut().enumerate().take(nb - 1) {
             *c = self
                 .declared_param_at::<{ UnitParam::Cutoff as u16 }, _>(&io, i as u8)
                 .frames();
         }
-        for (b, lane) in lanes.band[..nb].iter_mut().enumerate() {
+        for (b, signal) in signals.band[..nb].iter_mut().enumerate() {
             let band = b as u8;
             // In the order of `BAND_PARAMS`: `declared_param_at` takes its kind as a const
             // generic, which a loop over the array cannot supply.
-            *lane = [
+            *signal = [
                 self.declared_param_at::<{ UnitParam::Threshold as u16 }, _>(&io, band)
                     .frames(),
                 self.declared_param_at::<{ UnitParam::Knee as u16 }, _>(&io, band)
@@ -574,7 +574,7 @@ impl<F: Float + SimdLanes + Lerp> Node<F> for MultibandCompressorNode<F> {
         };
         let position = t.position;
         t.position += n as u64;
-        t.render_steps(rig, input, output, &lanes, position);
+        t.render_steps(rig, input, output, &signals, position);
 
         // Each band's deepest reduction in the block.
         let reading = t.bank.take_reading();
@@ -690,8 +690,8 @@ mod tests {
     // The tests other than the `f64` ones pin the `f32` instantiation, the session's audio
     // format, so their tolerances are `f32`'s.
 
-    /// Frames a 5 ms glide takes at 48 kHz.
-    const GLIDE: usize = 240;
+    /// Frames a 5 ms ramp takes at 48 kHz.
+    const RAMP: usize = 240;
     /// The crossover's flatness tolerance: the `f32` rounding of the input, each band and the
     /// sum, which the lock-in only averages down.
     const TOL: f64 = 1e-6;
@@ -976,7 +976,7 @@ mod tests {
         assert!((meter - reduction).abs() < 1e-3, "{meter} vs {reduction}");
     }
 
-    /// Toggling the bypass glides the band to unity over 5 ms (240 frames at 48 kHz), and the
+    /// Toggling the bypass ramps the band to unity over 5 ms (240 frames at 48 kHz), and the
     /// compressor keeps running meanwhile.
     ///
     /// DC 0.5 through band 0 at -30 dB, 2:1 is reduced by `(30 - 6.02) / 2` dB: 0.1253
@@ -985,7 +985,7 @@ mod tests {
     /// *running* detector's gain (0.1253 again, to 1e-3: a detector reset by
     /// the bypass would end near 0.5).
     #[test]
-    fn toggling_bypass_glides_and_keeps_the_compressor_warm() {
+    fn toggling_bypass_ramps_and_keeps_the_compressor_warm() {
         let (n, c) = node(2);
         let b0 = c.band(0);
         b0.set_threshold(-30.0);
@@ -995,31 +995,31 @@ mod tests {
         let mut n = prepared(n);
         render_chunked(&mut n, &[vec![0.5f32; SETTLE]], 512);
         let reduced = 0.5 * libm::pow(10.0, -(30.0 + 20.0 * libm::log10(0.5)) / 2.0 / 20.0);
-        let step = (0.5 - reduced) / GLIDE as f64;
+        let step = (0.5 - reduced) / RAMP as f64;
 
         b0.set_bypass(true);
-        let up = render_chunked(&mut n, &[vec![0.5f32; GLIDE]], 64).remove(0);
+        let up = render_chunked(&mut n, &[vec![0.5f32; RAMP]], 64).remove(0);
         assert!(
             (up[0] as f64 - reduced).abs() <= 1.5 * step,
             "first {}",
             up[0]
         );
-        assert!((up[GLIDE - 1] - 0.5).abs() < 1e-6, "last {}", up[GLIDE - 1]);
+        assert!((up[RAMP - 1] - 0.5).abs() < 1e-6, "last {}", up[RAMP - 1]);
         assert!(up.windows(2).all(|w| w[1] >= w[0]), "monotone rise");
         // Held bypassed for a while, then released.
         render_chunked(&mut n, &[vec![0.5f32; 4_800]], 512);
         assert_eq!(n.gain_reduction_db(0), Db::UNITY);
         b0.set_bypass(false);
-        let down = render_chunked(&mut n, &[vec![0.5f32; GLIDE]], 64).remove(0);
+        let down = render_chunked(&mut n, &[vec![0.5f32; RAMP]], 64).remove(0);
         assert!(
             (down[0] - 0.5).abs() as f64 <= 1.5 * step,
             "first {}",
             down[0]
         );
         assert!(
-            (down[GLIDE - 1] as f64 - reduced).abs() < 1e-3,
+            (down[RAMP - 1] as f64 - reduced).abs() < 1e-3,
             "last {}",
-            down[GLIDE - 1]
+            down[RAMP - 1]
         );
         assert!(down.windows(2).all(|w| w[1] <= w[0]), "monotone fall");
     }
@@ -1088,9 +1088,9 @@ mod tests {
         let mut n = prepared(n);
         render_chunked(&mut n, &[vec![0.5f32; SETTLE]], 512);
         c.band(1).set_solo(false);
-        let y = render_chunked(&mut n, &[vec![0.5f32; GLIDE]], 64).remove(0);
-        assert!(y[0].abs() <= 1.5 * 0.5 / GLIDE as f32, "first {}", y[0]);
-        assert!((y[GLIDE - 1] - 0.5).abs() < 1e-6, "last {}", y[GLIDE - 1]);
+        let y = render_chunked(&mut n, &[vec![0.5f32; RAMP]], 64).remove(0);
+        assert!(y[0].abs() <= 1.5 * 0.5 / RAMP as f32, "first {}", y[0]);
+        assert!((y[RAMP - 1] - 0.5).abs() < 1e-6, "last {}", y[RAMP - 1]);
         assert!(y.windows(2).all(|w| w[1] >= w[0]), "monotone rise");
     }
 
@@ -1182,20 +1182,20 @@ mod tests {
     /// from the old level to 0 in 240 equal steps, so the first frame is
     /// within a step and a half of 0.5 and the last is 0.
     #[test]
-    fn a_solo_glides_the_mute() {
+    fn a_solo_ramps_the_mute() {
         let (n, c) = node(2);
         unity(&c);
         let mut n = prepared(n);
         let settle = vec![0.5f32; SETTLE];
         render_chunked(&mut n, &[settle], 512);
         c.band(1).set_solo(true);
-        let y = render_chunked(&mut n, &[vec![0.5f32; GLIDE]], 64).remove(0);
+        let y = render_chunked(&mut n, &[vec![0.5f32; RAMP]], 64).remove(0);
         assert!(
-            (y[0] - 0.5).abs() <= 1.5 * 0.5 / GLIDE as f32,
+            (y[0] - 0.5).abs() <= 1.5 * 0.5 / RAMP as f32,
             "first {}",
             y[0]
         );
-        assert!(y[GLIDE - 1].abs() < 1e-6, "last {}", y[GLIDE - 1]);
+        assert!(y[RAMP - 1].abs() < 1e-6, "last {}", y[RAMP - 1]);
         assert!(y.windows(2).all(|w| w[1] <= w[0]), "monotone fall");
     }
 
@@ -1619,7 +1619,7 @@ mod tests {
         assert!((amp(&mut n) - 0.5).abs() < 2e-3);
         c.set_crossover(0, Hz::new(5_000.0));
         let a = amp(&mut n);
-        assert!(a > 0.99, "the consistent set landed: {a}");
+        assert!(a > 0.99, "the consistent set arrived: {a}");
     }
 
     /// A driven make-up port moves its own band: band 1 alone heard (band 0
@@ -1634,11 +1634,11 @@ mod tests {
         let mut n = prepared(n);
         let port = PER_BAND + 5;
         let x = sine(10_000.0, FS, SETTLE + WINDOW);
-        let lane = [6.0f32; 512];
+        let signal = [6.0f32; 512];
         let mut params: Vec<Option<&[f32]>> = vec![None; port + 1];
         let mut y = Vec::new();
         for chunk in x.chunks(512) {
-            params[port] = Some(&lane[..chunk.len()]);
+            params[port] = Some(&signal[..chunk.len()]);
             y.extend_from_slice(&drive(&mut n, RATE, Planes::new(&[chunk]).unwrap(), &params)[0]);
         }
         let x4 = warp(10_000.0, 1_000.0).powi(4);
@@ -1663,10 +1663,10 @@ mod tests {
                 c.band(b).set_release(0.001);
             }
             let mut n = prepared(n);
-            let lane = [-30.0f32; 512];
+            let signal = [-30.0f32; 512];
             let mut params: Vec<Option<&[f32]>> = vec![None; port + 1];
             for _ in 0..SETTLE / 512 {
-                params[port] = Some(&lane);
+                params[port] = Some(&signal);
                 drive(
                     &mut n,
                     RATE,
@@ -1704,10 +1704,10 @@ mod tests {
         // 24000 frames: the block that follows begins on a grid point.
         render_chunked(&mut n, &[vec![0.5f32; SETTLE]], 512);
         let port = 2;
-        let mut lane = [1.0f32; 256];
-        lane[128..].fill(8.0);
+        let mut signal = [1.0f32; 256];
+        signal[128..].fill(8.0);
         let mut params: Vec<Option<&[f32]>> = vec![None; port + 1];
-        params[port] = Some(&lane);
+        params[port] = Some(&signal);
         let y = drive(
             &mut n,
             RATE,
@@ -1734,11 +1734,11 @@ mod tests {
         let mut n = prepared(n);
         let port = 2 * PER_BAND;
         let x = sine(2_000.0, FS, SETTLE + WINDOW);
-        let lane = [2_000.0f32; 512];
+        let signal = [2_000.0f32; 512];
         let mut params: Vec<Option<&[f32]>> = vec![None; port + 1];
         let mut y = Vec::new();
         for chunk in x.chunks(512) {
-            params[port] = Some(&lane[..chunk.len()]);
+            params[port] = Some(&signal[..chunk.len()]);
             y.extend_from_slice(&drive(&mut n, RATE, Planes::new(&[chunk]).unwrap(), &params)[0]);
         }
         let amp = amplitude_at(&y[SETTLE..], 2_000.0, FS);
@@ -1767,7 +1767,7 @@ mod tests {
     }
     /// A cell write reaches the render at the next grid point of the stream, not at the next
     /// block: a makeup written when the stream stands 8 frames past a grid point leaves the
-    /// 8 frames to the next one as they were, and from there the makeup glides over its 240
+    /// 8 frames to the next one as they were, and from there the makeup ramps over its 240
     /// frames, frame `k` at `12 k / 240` dB.
     ///
     /// Unity bands over a settled DC of 0.5, all in band 0.
@@ -1791,7 +1791,7 @@ mod tests {
             );
         }
         for k in 1..=16 {
-            let want = 0.5 * libm::pow(10.0, 12.0 * k as f64 / GLIDE as f64 / 20.0);
+            let want = 0.5 * libm::pow(10.0, 12.0 * k as f64 / RAMP as f64 / 20.0);
             let got = f64::from(y[7 + k]);
             assert!((got - want).abs() < 1e-5, "step {k}: {got} vs {want}");
         }

@@ -6,7 +6,7 @@ use tutti_dsp::{COEFF_INTERVAL, OscillatorWave, Tremolo, TremoloControls};
 use tutti_graph::{Cost, Shape};
 use tutti_units::{Depth, Hz, SampleRate, Tail};
 
-use crate::kernel::{ControlLanes, Kernel, KernelNode};
+use crate::kernel::{ControlSignals, Kernel, KernelNode};
 
 /// What a [`TremoloNode`] is made from: its width, the wave of its LFO and where its
 /// controls start.
@@ -57,8 +57,8 @@ impl TremoloConfig {
 /// at its trough; a negative depth swings it the other way. The LFO starts at phase 0 and
 /// its phase runs on across blocks and rate changes. The rate (`UnitParam::Rate`, a [`Hz`])
 /// and the depth (`UnitParam::Depth`, a [`Depth`]) are live cells; a depth that moves is
-/// sampled at the stream grid (16 frames) and glides over
-/// [`GAIN_GLIDE`](tutti_dsp::GAIN_GLIDE), a rate lands whole, and a value that is not finite
+/// sampled at the stream grid (16 frames) and ramps over
+/// [`GAIN_RAMP`](tutti_dsp::GAIN_RAMP), a rate lands whole, and a value that is not finite
 /// reads as the last one that was.
 ///
 /// No latency and no tail. A [`KernelNode`]. Made from a [`TremoloConfig`]
@@ -137,13 +137,13 @@ impl<F: Float> Kernel for TremoloKernel<F> {
     }
 
     fn retarget(&mut self, controls: &TremoloControls) {
-        self.tremolo.aim(controls);
+        self.tremolo.retarget(controls);
     }
 
     fn render(
         &mut self,
         input: Planes<'_, F>,
-        _: ControlLanes<'_, F>,
+        _: ControlSignals<'_, F>,
         output: PlanesMut<'_, '_, F>,
     ) {
         self.tremolo.process(input, output);

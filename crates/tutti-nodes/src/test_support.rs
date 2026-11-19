@@ -7,7 +7,7 @@ use tutti_units::{Db, Real, SampleRate};
 
 pub(crate) use tutti_fixtures::noise;
 
-use crate::kernel::{ControlLanes, Kernel};
+use crate::kernel::{ControlSignals, Kernel};
 use crate::params::ControlSet;
 
 /// The rate the node helpers below prepare and drive nodes at.
@@ -18,7 +18,7 @@ pub(crate) fn sample_gain(db: Db) -> f32 {
     db.to_amplitude().get() as f32
 }
 
-/// The amplitude of a fed `f32` lane value in dB, as a per-frame read computes it: `10^(db / 20)`
+/// The amplitude of a fed `f32` control signal value in dB, as a per-frame read computes it: `10^(db / 20)`
 /// in `f32` through `libm`.
 pub(crate) fn fed_sample_gain(db: f32) -> f32 {
     libm::powf(10.0, db / 20.0)
@@ -121,12 +121,12 @@ pub(crate) fn render_change<N: Node>(
     (node, out)
 }
 
-/// Asserts that a cell moved between blocks glides on the stream clock, so a write
+/// Asserts that a cell moved between blocks ramps on the stream clock, so a write
 /// renders the same whatever the host's blocks: the render of `after` is the same, bit
 /// for bit, at blocks of 1, 17, 64 and 256 frames, and it is not the render with the cell
 /// left alone. Returns the node rendered at blocks of 64.
 #[track_caller]
-pub(crate) fn assert_cell_glides<N: Node>(
+pub(crate) fn assert_cell_ramps<N: Node>(
     make: impl Fn() -> N,
     change: impl Fn(&N),
     before: &[&[f32]],
@@ -141,13 +141,13 @@ pub(crate) fn assert_cell_glides<N: Node>(
                 .flatten()
                 .zip(at64.iter().flatten())
                 .all(|(a, b)| a.to_bits() == b.to_bits()),
-            "{what}: the glide at blocks of {block} is not the glide at blocks of 64"
+            "{what}: the ramp at blocks of {block} is not the ramp at blocks of 64"
         );
     }
     let (_, held) = render_change(&make, |_: &N| {}, before, after, 64);
     assert!(
         held != at64,
-        "{what}: the change is inaudible, so this run cannot see a glide"
+        "{what}: the change is inaudible, so this run cannot see a ramp"
     );
     node
 }
@@ -257,7 +257,7 @@ pub(crate) fn render_kernel<K: Kernel>(k: &mut K, input: &[Vec<K::Float>]) -> Ve
     let mut outs: Vec<&mut [K::Float]> = out.iter_mut().map(Vec::as_mut_slice).collect();
     k.render(
         Planes::new(&ins).unwrap(),
-        ControlLanes::NONE,
+        ControlSignals::NONE,
         PlanesMut::new(&mut outs).unwrap(),
     );
     out

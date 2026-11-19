@@ -3,7 +3,7 @@ use tutti_fixtures::midi;
 use tutti_graph::EventInletNode;
 use tutti_graph::EventKind;
 use tutti_graph::contract::Direct;
-use tutti_midi_protocol::widen_velocity;
+
 use tutti_ump::{MidiGroup, NoteVelocity, U7, Ump};
 use tutti_units::{Frame, SampleRate};
 
@@ -34,7 +34,7 @@ fn the_key_helpers_match_explicit_events() {
         Stamp::NextBlock,
         MidiChannel::FIRST,
         NoteNumber::of(60),
-        NoteVelocity::new(widen_velocity(U7::of(100)).get()),
+        NoteVelocity::new(NoteVelocity::from(U7::of(100)).get()),
     )
     .unwrap();
     keys.note_off(Stamp::NextBlock, MidiChannel::FIRST, NoteNumber::of(60))
@@ -43,7 +43,11 @@ fn the_key_helpers_match_explicit_events() {
     assert_eq!(
         sent(&d),
         [
-            midi::note_on(MidiChannel::FIRST, 60, widen_velocity(U7::of(100)).get()),
+            midi::note_on(
+                MidiChannel::FIRST,
+                60,
+                NoteVelocity::from(U7::of(100)).get()
+            ),
             midi::note_off(MidiChannel::FIRST, 60, 0),
         ]
     );

@@ -374,21 +374,21 @@ fn stream(width: usize) -> Vec<Vec<f32>> {
 }
 
 /// A driven gain: a value per absolute frame, finite and moving.
-fn lane() -> Vec<f32> {
+fn signal() -> Vec<f32> {
     (0..STREAM)
         .map(|n| 0.5 + 0.25 * ((n % 7) as f32) / 7.0)
         .collect()
 }
 
 /// `node` called on every block of `block` frames over `input`, in two segments split at frame
-/// 1500, where `gain` moves to 0.25 (the node is parked by then), and `lane` driven on the gain
+/// 1500, where `gain` moves to 0.25 (the node is parked by then), and `signal` driven on the gain
 /// port if given. A block the node answers `Silent` to is zeros, as the graph would leave it.
 fn direct(
     node: ConvolverNode<f32>,
     gain: &Param<Amplitude>,
     input: &[Vec<f32>],
     block: usize,
-    lane: Option<&[f32]>,
+    signal: Option<&[f32]>,
 ) -> Vec<Vec<f32>> {
     let mut node = prepared(node, SR, 128);
     let mut out: Vec<Vec<f32>> = vec![Vec::new(); usize::from(node.outputs().count())];
@@ -400,8 +400,8 @@ fn direct(
         while at < hi {
             let n = block.min(hi - at);
             let ins: Vec<&[f32]> = input.iter().map(|c| &c[at..at + n]).collect();
-            let params = [lane.map(|l| &l[at..at + n])];
-            let params: &[Option<&[f32]>] = if lane.is_some() { &params } else { &[] };
+            let params = [signal.map(|l| &l[at..at + n])];
+            let params: &[Option<&[f32]>] = if signal.is_some() { &params } else { &[] };
             for (o, b) in
                 out.iter_mut()
                     .zip(drive(&mut node, SR, Planes::new(&ins).unwrap(), params))
@@ -461,7 +461,7 @@ fn kinds() -> Vec<(&'static str, Make)> {
 /// - the second burst and its tail are a fresh node's at the new gain, bit for bit, and the
 ///   frames past the tail are exact zeros.
 ///
-/// A gain that glided over the first loud block (its ramp frozen while parked), or an engine
+/// A gain that ramped over the first loud block (its ramp frozen while parked), or an engine
 /// that carried its partition phase and round-off across the gap, would differ in the bits.
 #[test]
 fn a_burst_after_a_parked_gap_is_a_fresh_nodes_at_any_block_size() {
@@ -544,10 +544,10 @@ fn direct_once(node: ConvolverNode<f32>, input: &[Vec<f32>]) -> Vec<Vec<f32>> {
 }
 
 /// The same with a gain driven on the `Volume` port, per frame: at every block size the render
-/// is the same bits, and the second burst is a fresh node's under the same lane.
+/// is the same bits, and the second burst is a fresh node's under the same control signal.
 #[test]
 fn a_burst_after_a_parked_gap_is_a_fresh_nodes_with_a_driven_gain() {
-    let lane = lane();
+    let signal = signal();
     for (name, make) in kinds() {
         let input = stream(2);
         let fresh = make();
@@ -558,14 +558,14 @@ fn a_burst_after_a_parked_gap_is_a_fresh_nodes_with_a_driven_gain() {
             &mut fresh,
             SR,
             Planes::new(&ins).unwrap(),
-            &[Some(&lane[3000..STREAM])],
+            &[Some(&signal[3000..STREAM])],
         );
 
         let mut first_render: Option<Vec<Vec<f32>>> = None;
         for block in [64usize, 37, 100, 128] {
             let node = make();
             let gain = node.gain();
-            let got = direct(node, &gain, &input, block, Some(&lane));
+            let got = direct(node, &gain, &input, block, Some(&signal));
             for (c, w) in want.iter().enumerate() {
                 assert!(
                     bits_equal(&got[c][3000..STREAM], w),

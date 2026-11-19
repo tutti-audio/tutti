@@ -20,7 +20,7 @@ use super::{
     Ended, GetProperty, PeFailure, PeerError, Pending, PortLink, PropertySlot, Slot, Subscribe,
     Subscription,
 };
-use crate::job::{LandedQueue, Ticket};
+use crate::job::{JobOutputQueue, Ticket};
 use crate::peer::ResourceIds;
 
 fn failed(status: PeStatus) -> ResourceFailure {
@@ -151,7 +151,7 @@ fn device_id() -> DeviceId {
 /// holds, in flight or waiting, as `Disconnected`.
 #[test]
 fn a_pending_that_ends_as_disconnected_lands_its_property_calls_disconnected() {
-    let queue: LandedQueue = Arc::default();
+    let queue: JobOutputQueue = Arc::default();
     let peer = property_peer(
         device_id(),
         MidiGroup::FIRST,
@@ -178,9 +178,9 @@ fn a_pending_that_ends_as_disconnected_lands_its_property_calls_disconnected() {
         }));
     }
     pending.end(Ended::Disconnected);
-    let mut landed: Vec<_> = queue.lock().unwrap().drain(..).collect();
+    let mut outputs: Vec<_> = queue.lock().unwrap().drain(..).collect();
     for job in &jobs {
-        let result = landed.iter_mut().find_map(|l| l.take(job));
+        let result = outputs.iter_mut().find_map(|l| l.take(job));
         assert_eq!(result, Some(Err(PeerError::Disconnected)));
     }
 }
@@ -190,7 +190,7 @@ fn a_pending_that_ends_as_disconnected_lands_its_property_calls_disconnected() {
 /// the queue's lock released. A lock held across the discard hangs this test.
 #[test]
 fn dropping_a_job_whose_landed_lease_is_live_does_not_deadlock() {
-    let queue: LandedQueue = Arc::default();
+    let queue: JobOutputQueue = Arc::default();
     let link = PortLink::new(std::sync::Weak::new(), Arc::clone(&queue));
     let peer = property_peer(
         device_id(),

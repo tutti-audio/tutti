@@ -1,12 +1,11 @@
-//! `widen` against figures that do not come from its own code: the tables of
+//! `Voice2::from` against figures that do not come from its own code: the tables of
 //! M2-115 section 3.3.3, a bit-by-bit statement of the repeat rule, and the
 //! core rules of section 3.2, each over every value (128 seven-bit values and
 //! 16,384 fourteen-bit values).
 
-use tutti_midi_protocol::{narrow_velocity, widen, widen_velocity};
-use tutti_ump::ControlValue;
 use tutti_ump::{
-    Address, Attribute, CCNumber, Message, NoteNumber, NoteVelocity, U7, U14, Ump, Voice1, Voice2,
+    Address, Attribute, BendValue, CCNumber, ControlValue, Message, NoteNumber, NoteVelocity, U7,
+    U14, Ump, Voice1, Voice2,
 };
 
 /// M2-115 section 3.3 stated bit by bit: up to the centre a left shift; above
@@ -30,7 +29,7 @@ fn repeat_rule(v: u32, src: u32, dst: u32) -> u32 {
 }
 
 fn velocity(v: u8) -> u16 {
-    match widen(Voice1::NoteOff {
+    match Voice2::from(Voice1::NoteOff {
         note: NoteNumber::of(60),
         velocity: U7::of(v),
     }) {
@@ -39,7 +38,7 @@ fn velocity(v: u8) -> u16 {
     }
 }
 fn value(v: u8) -> u32 {
-    match widen(Voice1::ControlChange {
+    match Voice2::from(Voice1::ControlChange {
         controller: CCNumber::of(74),
         value: U7::of(v),
     }) {
@@ -48,7 +47,7 @@ fn value(v: u8) -> u32 {
     }
 }
 fn bend(v: u16) -> u32 {
-    match widen(Voice1::PitchBend(U14::of(v))) {
+    match Voice2::from(Voice1::PitchBend(U14::of(v))) {
         Voice2::PitchBend(b) => b.get(),
         other => panic!("{other:?}"),
     }
@@ -73,19 +72,23 @@ fn m2_115_table_5_velocity() {
     }
 }
 
-/// `widen_velocity`, the public door of the same scaling, at the anchors of
+/// `NoteVelocity::from`, the public door of the same scaling, at the anchors of
 /// M2-115 section 3.2 (the minimum, the centre and the maximum keep their
-/// places) and at Table 5's rows; `narrow_velocity` inverts it on every 7-bit
+/// places) and at Table 5's rows; `NoteVelocity::to_u7` inverts it on every 7-bit
 /// value.
 #[test]
-fn widen_velocity_keeps_the_anchors_and_narrow_inverts_it() {
+fn velocity_from_u7_keeps_the_anchors_and_to_u7_inverts_it() {
     for (v, want) in [(0, 0x0000), (5, 0x0A00), (64, 0x8000), (127, 0xFFFF)] {
-        assert_eq!(widen_velocity(U7::of(v)), NoteVelocity::new(want), "{v}");
+        assert_eq!(
+            NoteVelocity::from(U7::of(v)),
+            NoteVelocity::new(want),
+            "{v}"
+        );
     }
-    assert_eq!(widen_velocity(U7::of(64)), NoteVelocity::CENTER);
+    assert_eq!(NoteVelocity::from(U7::of(64)), NoteVelocity::CENTER);
     for v in 0..=127 {
-        assert_eq!(narrow_velocity(widen_velocity(U7::of(v))), U7::of(v));
-        assert_eq!(widen_velocity(U7::of(v)).get(), velocity(v), "{v}");
+        assert_eq!(NoteVelocity::from(U7::of(v)).to_u7(), U7::of(v));
+        assert_eq!(NoteVelocity::from(U7::of(v)).get(), velocity(v), "{v}");
     }
 }
 
@@ -161,7 +164,7 @@ fn the_core_rules_hold() {
 #[test]
 fn a_note_on_at_velocity_0_is_a_note_off_at_the_centre() {
     assert_eq!(
-        widen(Voice1::NoteOn {
+        Voice2::from(Voice1::NoteOn {
             note: NoteNumber::of(60),
             velocity: U7::of(0)
         }),
@@ -172,7 +175,7 @@ fn a_note_on_at_velocity_0_is_a_note_off_at_the_centre() {
         }
     );
     assert_eq!(
-        widen(Voice1::NoteOn {
+        Voice2::from(Voice1::NoteOn {
             note: NoteNumber::of(60),
             velocity: U7::of(1)
         }),
@@ -184,7 +187,7 @@ fn a_note_on_at_velocity_0_is_a_note_off_at_the_centre() {
     );
     for v in 1..=127u8 {
         assert_eq!(
-            widen(Voice1::NoteOn {
+            Voice2::from(Voice1::NoteOn {
                 note: NoteNumber::of(61),
                 velocity: U7::of(v)
             }),
@@ -208,10 +211,10 @@ fn a_note_off_keeps_its_velocity() {
 }
 
 #[test]
-fn every_variant_widens_and_keeps_its_fields() {
+fn every_variant_translates_and_keeps_its_fields() {
     let n = NoteNumber::of(72);
     assert_eq!(
-        widen(Voice1::PolyPressure {
+        Voice2::from(Voice1::PolyPressure {
             note: n,
             pressure: U7::of(96)
         }),
@@ -221,23 +224,23 @@ fn every_variant_widens_and_keeps_its_fields() {
         }
     );
     assert_eq!(
-        widen(Voice1::ChannelPressure(U7::of(120))),
+        Voice2::from(Voice1::ChannelPressure(U7::of(120))),
         Voice2::ChannelPressure(ControlValue::new(0xF1C7_1C71))
     );
     // No bank: choosing one needs the latched Bank Select.
     assert_eq!(
-        widen(Voice1::ProgramChange(U7::of(33))),
+        Voice2::from(Voice1::ProgramChange(U7::of(33))),
         Voice2::ProgramChange {
             program: U7::of(33),
             bank: None
         }
     );
-    // Every controller, RPN/NRPN and Bank Select selectors included, widens by
+    // Every controller, RPN/NRPN and Bank Select selectors included, translates by
     // value and stays a Control Change on the same controller.
     for c in 0..=127u8 {
         for v in [0u8, 1, 63, 64, 65, 127] {
             assert_eq!(
-                widen(Voice1::ControlChange {
+                Voice2::from(Voice1::ControlChange {
                     controller: CCNumber::of(c),
                     value: U7::of(v)
                 }),
@@ -252,14 +255,14 @@ fn every_variant_widens_and_keeps_its_fields() {
 }
 
 /// The result is a message the codec writes and reads back, and the address is
-/// the caller's: widening never touches it.
+/// the caller's: translating never touches it.
 #[test]
-fn the_widened_message_is_a_message() {
+fn the_translated_message_is_a_message() {
     let address = Address {
         group: tutti_ump::MidiGroup::of(5),
         channel: tutti_ump::MidiChannel::of(9),
     };
-    let voice = widen(Voice1::NoteOn {
+    let voice = Voice2::from(Voice1::NoteOn {
         note: NoteNumber::of(60),
         velocity: U7::of(64),
     });
@@ -269,22 +272,21 @@ fn the_widened_message_is_a_message() {
     assert_eq!(ump.decode(), Ok(Message::Midi2(address, voice)));
 }
 
-/// `widen_value` and `widen_bend` are M2-115 section 3's Min-Center-Max
+/// `ControlValue::from` and `BendValue::from` are M2-115 section 3's Min-Center-Max
 /// scaling of the one value: the minimum, the centre and the maximum land on
 /// the 32-bit minimum, centre and maximum, and the repeat rule fills the rest.
 /// Spec: m2-115/3.1#1
 #[test]
-fn widen_value_and_bend_land_on_the_32_bit_corners() {
-    use tutti_midi_protocol::{widen_bend, widen_value};
-    assert_eq!(widen_value(U7::of(0)), ControlValue::MIN);
-    assert_eq!(widen_value(U7::of(64)), ControlValue::CENTER);
-    assert_eq!(widen_value(U7::of(127)), ControlValue::MAX);
-    assert_eq!(widen_bend(U14::of(0)), tutti_ump::BendValue::MIN);
-    assert_eq!(widen_bend(U14::of(0x2000)), tutti_ump::BendValue::CENTER);
-    assert_eq!(widen_bend(U14::MAX), tutti_ump::BendValue::MAX);
+fn from_u7_and_u14_land_on_the_32_bit_corners() {
+    assert_eq!(ControlValue::from(U7::of(0)), ControlValue::MIN);
+    assert_eq!(ControlValue::from(U7::of(64)), ControlValue::CENTER);
+    assert_eq!(ControlValue::from(U7::of(127)), ControlValue::MAX);
+    assert_eq!(BendValue::from(U14::of(0)), BendValue::MIN);
+    assert_eq!(BendValue::from(U14::of(0x2000)), BendValue::CENTER);
+    assert_eq!(BendValue::from(U14::MAX), BendValue::MAX);
     for v in 0..=127u8 {
         assert_eq!(
-            widen_value(U7::of(v)).get(),
+            ControlValue::from(U7::of(v)).get(),
             repeat_rule(u32::from(v), 7, 32),
             "{v}"
         );

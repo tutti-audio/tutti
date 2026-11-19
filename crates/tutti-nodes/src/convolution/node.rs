@@ -30,7 +30,7 @@ use super::IrLayout;
 use crate::kernel::{slice_in, slice_out};
 use crate::ramp::LastGood;
 use crate::tail_clock::{Heard, TailClock, tail_frames};
-use tutti_dsp::Glide;
+use tutti_dsp::Ramp;
 use tutti_dsp::{Convolver, FftFloat, Lerp, MatrixConvolver, MatrixConvolverError};
 
 /// The block a folded node's scratch holds before `prepare` sizes it to the graph's.
@@ -593,7 +593,7 @@ impl<F: FftFloat + Lerp> ConvolverNode<F> {
     /// Scale one output channel's already-convolved block `out` by the wet gain, in
     /// place, ramped across the block (see [`begin_block`](Self::begin_block)).
     #[inline]
-    fn apply_gain(out: &mut [F], glide: &Glide<F>, held: Option<Amplitude>) {
+    fn apply_gain(out: &mut [F], ramp: &Ramp<F>, held: Option<Amplitude>) {
         if let Some(gain) = held {
             // Nothing moved: a constant in the loop.
             let gain = F::from_unit(gain);
@@ -603,7 +603,7 @@ impl<F: FftFloat + Lerp> ConvolverNode<F> {
             return;
         }
         for (i, o) in out.iter_mut().enumerate() {
-            *o *= glide.at(u32::try_from(i + 1).unwrap_or(u32::MAX));
+            *o *= ramp.at(u32::try_from(i + 1).unwrap_or(u32::MAX));
         }
     }
 
@@ -611,17 +611,17 @@ impl<F: FftFloat + Lerp> ConvolverNode<F> {
     /// frame, floored at 0 like the setter. A non-finite value reads as the
     /// last finite one (see [`LastGood`]).
     #[inline]
-    fn apply_driven_gain(out: &mut [F], lane: &[F], good: &mut LastGood<F>) {
-        for (o, &g) in out.iter_mut().zip(lane) {
+    fn apply_driven_gain(out: &mut [F], signal: &[F], good: &mut LastGood<F>) {
+        for (o, &g) in out.iter_mut().zip(signal) {
             *o *= good.read(g).max(F::ZERO);
         }
     }
 
     /// Read the gain once, and ramp from where the previous block ended. It
     /// scales the output directly — a stepped gain is a click — so a change
-    /// between blocks glides across the next one and lands exactly on the new
+    /// between blocks ramps across the next one and lands exactly on the new
     /// value (a block of one takes it at once).
-    fn begin_block(&mut self, size: usize) -> (Glide<F>, Option<Amplitude>) {
+    fn begin_block(&mut self, size: usize) -> (Ramp<F>, Option<Amplitude>) {
         // The cell's gain narrows once, and a gain that is not finite reads as the last finite
         // one (`from_unit` would saturate an infinity to a finite value).
         let cell = self.gain.load();
@@ -633,10 +633,10 @@ impl<F: FftFloat + Lerp> ConvolverNode<F> {
         let from = self.last.unwrap_or(gain);
         self.last = Some(gain);
         // The ramp runs over the block: its ends narrow once per block.
-        let mut glide = Glide::landed(F::from_unit(from));
-        glide.aim_in(F::from_unit(gain), u32::try_from(size).unwrap_or(u32::MAX));
+        let mut ramp = Ramp::new(F::from_unit(from));
+        ramp.retarget_in(F::from_unit(gain), u32::try_from(size).unwrap_or(u32::MAX));
         let held = (from.get() == gain.get()).then_some(gain);
-        (glide, held)
+        (ramp, held)
     }
 }
 
@@ -645,8 +645,8 @@ enum WetGain<'a, F: FftFloat + Lerp> {
     /// The per-frame values on the wet-gain param port.
     Driven(&'a [F]),
     /// The cell's value, ramped from where the previous block ended; the
-    /// value is `Some` when the glide is flat.
-    Ramped(Glide<F>, Option<Amplitude>),
+    /// value is `Some` when the ramp is flat.
+    Ramped(Ramp<F>, Option<Amplitude>),
 }
 
 impl<F: FftFloat + Lerp> ConvolverNode<F> {
@@ -665,13 +665,13 @@ impl<F: FftFloat + Lerp> ConvolverNode<F> {
         // A driven gain is the graph's signal, which it declicks itself: the
         // block ramp restarts from the value after it.
         let gain = match driven {
-            Some(lane) => {
+            Some(signal) => {
                 self.last = None;
-                WetGain::Driven(&lane[at..at + size])
+                WetGain::Driven(&signal[at..at + size])
             }
             None => {
-                let (glide, held) = self.begin_block(size);
-                WetGain::Ramped(glide, held)
+                let (ramp, held) = self.begin_block(size);
+                WetGain::Ramped(ramp, held)
             }
         };
         let n_in = usize::from(self.inputs.layout().count());
@@ -733,16 +733,16 @@ impl<F: FftFloat + Lerp> ConvolverNode<F> {
                 }
             }
         }
-        // Every channel reads the driven lane from the same last finite value.
+        // Every channel reads the driven control signal from the same last finite value.
         let good = self.good;
         for c in 0..n {
             let out = &mut outputs.get(c)[at..at + size];
             match &gain {
-                WetGain::Driven(lane) => {
+                WetGain::Driven(signal) => {
                     self.good = good;
-                    Self::apply_driven_gain(out, lane, &mut self.good);
+                    Self::apply_driven_gain(out, signal, &mut self.good);
                 }
-                WetGain::Ramped(glide, held) => Self::apply_gain(out, glide, *held),
+                WetGain::Ramped(ramp, held) => Self::apply_gain(out, ramp, *held),
             }
         }
     }
@@ -1089,15 +1089,15 @@ mod tests {
         ));
         node.set_gain(Amplitude::new(5.0));
         let latency = node.latency_samples().get();
-        let lane: Vec<f32> = (0..256).map(|i| [0.5, 1.0, -2.0, 0.25][i % 4]).collect();
+        let signal: Vec<f32> = (0..256).map(|i| [0.5, 1.0, -2.0, 0.25][i % 4]).collect();
         let out = drive(
             &mut node,
             RATE,
             Planes::new(&[&[1.0; 256]]).unwrap(),
-            &[Some(&lane)],
+            &[Some(&signal)],
         );
         for i in latency..256 {
-            let want = lane[i].max(0.0);
+            let want = signal[i].max(0.0);
             assert!(
                 (out[0][i] - want).abs() < 1e-4,
                 "frame {i} is {} want {want}",
@@ -1125,13 +1125,13 @@ mod tests {
             Planes::new(&[&ones, &ones]).unwrap(),
             &[Some(&[0.5; 256])],
         );
-        let mut lane = [0.25; 256];
-        lane[0] = f32::NAN;
+        let mut signal = [0.25; 256];
+        signal[0] = f32::NAN;
         let out = drive(
             &mut node,
             RATE,
             Planes::new(&[&ones, &ones]).unwrap(),
-            &[Some(&lane)],
+            &[Some(&signal)],
         );
         assert_eq!(out[0][0], 0.5);
         assert_eq!(out[1][0], 0.5);

@@ -22,7 +22,7 @@ use tutti_graph::{
     Env, Event, Harmony, LogFilter, Node, Offset, ParamEvent, ParamRamp, PlayClock, RtLevel,
     RtTarget, TransportChanges, TransportPosition,
 };
-use tutti_midi_protocol::widen_velocity;
+
 use tutti_plugin_host::{InProcessClient, NodeControls, PluginNode, load_client};
 use tutti_plugin_types::{
     BusRole, ChannelLayout, ChannelTopology, ContentScale, Control, Controller, EditorError,
@@ -33,7 +33,7 @@ use tutti_plugin_types::{
 };
 use tutti_tempo::{TempoMap, TempoPoint, Transition};
 use tutti_transport::TempoReader;
-use tutti_ump::{Message, MidiChannel, MidiGroup, NoteNumber, U7, Voice2};
+use tutti_ump::{Message, MidiChannel, MidiGroup, NoteNumber, NoteVelocity, U7, Voice2};
 use tutti_units::Normalized;
 use tutti_units::ParamId;
 use tutti_units::{Beat, Bpm, Frame, SampleRate};
@@ -527,7 +527,7 @@ fn note_on(frame: usize, len: usize) -> Event {
         at(frame, len),
         Message::midi2(
             MidiChannel::of(1),
-            Voice2::note_on(NoteNumber::of(60), widen_velocity(U7::of(100))),
+            Voice2::note_on(NoteNumber::of(60), NoteVelocity::from(U7::of(100))),
         ),
     )
 }

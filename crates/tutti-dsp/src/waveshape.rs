@@ -2,9 +2,9 @@
 //! `HardClip`, `Crush` and `SoftCrush`, each one line of arithmetic, and the
 //! [`WaveshaperBank`] that runs one over a block.
 //!
-//! A bank's drive is a [`Glide`] over [`GAIN_GLIDE`], or a lane read per frame where a port drives
-//! it; a frame whose lane value is not finite reads the drive in force, the glide's value at that
-//! frame. Frame `i` reads the glide at step `taken + 1 + i`, then the block's steps are taken.
+//! A bank's drive is a [`Ramp`] over [`GAIN_RAMP`], or a control signal read per frame where a port drives
+//! it; a frame whose control signal value is not finite reads the drive in force, the ramp's value at that
+//! frame. Frame `i` reads the ramp at step `taken + 1 + i`, then the block's steps are taken.
 //!
 //! [`Antialiasing`] replaces the curve at each frame by its mean over the segment from the
 //! previous input to this one, which removes most of what the curve folds back past the Nyquist
@@ -14,7 +14,7 @@ use tutti_buffers::MAX_CHANNELS;
 use tutti_buffers::{Float, Mono, Planes, PlanesMut};
 use tutti_units::{Drive, SampleRate, Samples};
 
-use crate::{GAIN_GLIDE, Glide, Lerp, OversamplingFactor, Steps};
+use crate::{GAIN_RAMP, Lerp, OversamplingFactor, Ramp, Steps};
 
 /// The frames a pass over a block takes at a time: the hardness of a stretch is held in a
 /// stack array.
@@ -266,9 +266,9 @@ impl WaveshaperControls {
 #[derive(Clone, Copy, Debug)]
 pub struct WaveshaperBank<F: Float> {
     kind: ShapeKind,
-    /// The drive, gliding over [`GAIN_GLIDE`].
-    drive: Glide<F>,
-    /// The steps a drive glide takes: [`GAIN_GLIDE`] at the rate.
+    /// The drive, ramping over [`GAIN_RAMP`].
+    drive: Ramp<F>,
+    /// The steps a drive ramp takes: [`GAIN_RAMP`] at the rate.
     steps: u32,
     /// The order the bank shapes with: the one asked for, within what the kind has.
     antialiasing: Antialiasing,
@@ -279,15 +279,15 @@ pub struct WaveshaperBank<F: Float> {
 }
 
 impl<F: Float + Lerp> WaveshaperBank<F> {
-    /// A waveshaper of `kind` at `rate`, at unity drive, to be aimed.
+    /// A waveshaper of `kind` at `rate`, at unity drive, to be set.
     #[must_use]
     pub fn new(kind: ShapeKind, rate: SampleRate) -> Self {
         // 5 ms is a few hundred frames at any real rate; an absurd rate saturates rather
         // than panic, since a prepare must not.
-        let steps = u32::try_from(GAIN_GLIDE.to_samples_ceil(rate).get()).unwrap_or(u32::MAX);
+        let steps = u32::try_from(GAIN_RAMP.to_samples_ceil(rate).get()).unwrap_or(u32::MAX);
         Self {
             kind,
-            drive: Glide::landed(F::from_unit(WaveshaperControls::DEFAULT.drive)),
+            drive: Ramp::new(F::from_unit(WaveshaperControls::DEFAULT.drive)),
             steps,
             antialiasing: Antialiasing::Off,
             history: [[F::ZERO; 2]; MAX_CHANNELS],
@@ -309,34 +309,34 @@ impl<F: Float + Lerp> WaveshaperBank<F> {
         self.antialiasing
     }
 
-    /// Back to rest: [`settle`](Self::settle)s the drive on its target and clears every
-    /// channel's history.
+    /// Back to rest: the drive jumps to its target ([`jump_to_target`](Self::jump_to_target)) and
+    /// every channel's history clears.
     pub fn reset(&mut self) {
-        self.settle();
+        self.jump_to_target();
         self.history = [[F::ZERO; 2]; MAX_CHANNELS];
     }
 
     /// Lands the drive on its target now: back to rest.
-    pub fn settle(&mut self) {
-        self.drive.settle();
+    pub fn jump_to_target(&mut self) {
+        self.drive.jump_to_target();
     }
 
-    /// Aims at `controls`: the drive glides over [`GAIN_GLIDE`]. No allocation.
-    pub fn aim(&mut self, controls: &WaveshaperControls) {
+    /// Aims at `controls`: the drive ramps over [`GAIN_RAMP`]. No allocation.
+    pub fn retarget(&mut self, controls: &WaveshaperControls) {
         self.drive
-            .aim_by(F::from_unit(controls.drive), Steps::Fixed(self.steps));
+            .retarget_by(F::from_unit(controls.drive), Steps::Fixed(self.steps));
     }
 
     /// Runs `input` into `output`, each channel through the curve at the drive.
     ///
-    /// `lane` is the drive per frame where a port drives it: a frame past its end, or one
-    /// that is not finite, reads the drive in force: the glide's value at that frame. Channel `c`
+    /// `signal` is the drive per frame where a port drives it: a frame past its end, or one
+    /// that is not finite, reads the drive in force: the ramp's value at that frame. Channel `c`
     /// of `input` feeds channel `c` of `output`; a channel past the narrower of the two views is
     /// not touched, and the frames rendered are the fewer of the two
     /// views'. No allocation.
     pub fn process(
         &mut self,
-        lane: Option<Mono<'_, F>>,
+        signal: Option<Mono<'_, F>>,
         input: Planes<'_, F>,
         mut output: PlanesMut<'_, '_, F>,
     ) {
@@ -344,10 +344,10 @@ impl<F: Float + Lerp> WaveshaperBank<F> {
         let width = input.channels().min(output.channels());
         debug_assert!(width <= MAX_CHANNELS, "a bank is at most MAX_CHANNELS wide");
         let kind = self.kind;
-        let blended = self.drive.blended(frames);
-        let taken = self.drive.taken();
+        let blended = self.drive.blended_frames(frames);
+        let taken = self.drive.steps_taken();
         let order = self.antialiasing;
-        if order == Antialiasing::Off && lane.is_none() && blended == 0 {
+        if order == Antialiasing::Off && signal.is_none() && blended == 0 {
             let hardness = kind.hardness(self.drive.target());
             for c in 0..width {
                 let mut plane = output.plane_mut(c);
@@ -364,7 +364,7 @@ impl<F: Float + Lerp> WaveshaperBank<F> {
                 let end = (start + CHUNK).min(frames);
                 for (k, h) in hardness[..end - start].iter_mut().enumerate() {
                     let i = start + k;
-                    let drive = lane
+                    let drive = signal
                         .and_then(|l| l.samples().get(i))
                         .copied()
                         .filter(|d| d.is_finite())

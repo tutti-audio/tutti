@@ -4,12 +4,12 @@
 use tutti_buffers::{BusTopology, MaxBlock};
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{
-    COEFF_INTERVAL, GateBank, GateControls, GateLanes, KeyFilter, KeySource, Lerp, SimdLanes,
+    COEFF_INTERVAL, GateBank, GateControls, GateSignals, KeyFilter, KeySource, Lerp, SimdLanes,
 };
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
 use tutti_units::{Db, Hz, Q, SampleRate, Seconds, Tail};
 
-use crate::kernel::{ControlLanes, Kernel, KernelNode};
+use crate::kernel::{ControlSignals, Kernel, KernelNode};
 
 /// A noise gate: `channels = N` means N audio inputs, then (for a side-chain key) N key
 /// inputs, and N outputs, with one **linked** open/closed decision from the loudest key
@@ -44,7 +44,7 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 /// range, the cutoff ([`UnitParam::Cutoff`](tutti_units::UnitParam::Cutoff), [`Hz`], 100 Hz) and
 /// the Q ([`UnitParam::Q`](tutti_units::UnitParam::Q), [`Q`], Butterworth); a node with
 /// [`KeyFilter::Off`] declares neither, as a reverb that cannot freeze declares no freeze.
-/// The filter's coefficients glide to a new cutoff over one grid period.
+/// The filter's coefficients ramp to a new cutoff over one grid period.
 ///
 /// # Controls
 ///
@@ -52,14 +52,14 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 /// across clones, set through the node's [`ParamSet`](tutti_graph::ParamSet) or the
 /// graph's `set_param` (a time under 0 reads as 0 and a range over 0 dB as 0 dB).
 ///
-/// **The threshold is read per frame** when the graph drives it: a lane on its port is the
-/// bank's own ([`GateLanes`]), and the cell is the base a frame nobody drives (or a
+/// **The threshold is read per frame** when the graph drives it: a control signal on its port is the
+/// bank's own ([`GateSignals`]), and the cell is the base a frame nobody drives (or a
 /// non-finite one) is compared against. **Every other control is on the stream grid** (16
 /// frames from the last reset, [`Kernel::GRID`]): a cell write or a driven port is sampled
 /// at the grid's solve frame, so it reaches the render within 16 frames and the render does
 /// not depend on how the stream is cut into blocks. The times land whole (the follower
-/// smooths them), and the range is a ramp, a control moving to a target: it glides over
-/// [`GAIN_GLIDE`](tutti_dsp::GAIN_GLIDE), 5 ms.
+/// smooths them), and the range is a ramp, a control moving to a target: it ramps over
+/// [`GAIN_RAMP`](tutti_dsp::GAIN_RAMP), 5 ms.
 ///
 /// # In a graph
 ///
@@ -172,10 +172,10 @@ control_set! {
     Attack => Seconds = attack { whole },
     Hold => Seconds = hold { whole },
     Release => Seconds = release { whole },
-    // The range glides in the bank, over `GAIN_GLIDE`: the reader must not ramp it
+    // The range ramps in the bank, over `GAIN_RAMP`: the reader must not ramp it
     // across the block as well.
     Range => Db = range { whole },
-    // The filter's coefficients glide in the bank, over one grid period.
+    // The filter's coefficients ramp in the bank, over one grid period.
     Cutoff => Hz = key_cutoff { whole },
     Q => Q = key_q { whole };
 
@@ -197,8 +197,8 @@ pub struct GateKernel<F: Float + SimdLanes> {
     filter: KeyFilter,
     /// `None` until [`prepare`](Kernel::prepare).
     bank: Option<GateBank<F>>,
-    /// Whether the first retarget after `prepare` has landed.
-    landed: bool,
+    /// Whether the first retarget after `prepare` has been applied.
+    applied: bool,
 }
 
 impl<F: Float + SimdLanes + Lerp> GateKernel<F> {
@@ -209,7 +209,7 @@ impl<F: Float + SimdLanes + Lerp> GateKernel<F> {
             key,
             filter,
             bank: None,
-            landed: false,
+            applied: false,
         }
     }
 
@@ -243,7 +243,7 @@ impl<F: Float + SimdLanes + Lerp> Kernel for GateKernel<F> {
 
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
         self.bank = Some(GateBank::new(rate).key_filter(self.filter, self.input.layout()));
-        self.landed = false;
+        self.applied = false;
     }
 
     fn reset(&mut self) {
@@ -254,34 +254,34 @@ impl<F: Float + SimdLanes + Lerp> Kernel for GateKernel<F> {
 
     fn retarget(&mut self, controls: &GateControls) {
         let Some(bank) = &mut self.bank else { return };
-        bank.aim(controls);
-        if !self.landed {
-            bank.settle();
-            self.landed = true;
+        bank.retarget(controls);
+        if !self.applied {
+            bank.jump_to_target();
+            self.applied = true;
         }
     }
 
     fn render(
         &mut self,
         input: Planes<'_, F>,
-        lanes: ControlLanes<'_, F>,
+        signals: ControlSignals<'_, F>,
         output: PlanesMut<'_, '_, F>,
     ) {
-        self.render_keyed(input, input, lanes, output);
+        self.render_keyed(input, input, signals, output);
     }
 
     fn render_keyed(
         &mut self,
         input: Planes<'_, F>,
         key: Planes<'_, F>,
-        lanes: ControlLanes<'_, F>,
+        signals: ControlSignals<'_, F>,
         output: PlanesMut<'_, '_, F>,
     ) {
-        let lanes = GateLanes {
-            threshold: lanes.get(GateSet::THRESHOLD_LANE),
+        let signals = GateSignals {
+            threshold: signals.get(GateSet::THRESHOLD_SIGNAL),
         };
         if let Some(bank) = &mut self.bank {
-            bank.process(lanes, key, input, output);
+            bank.process(signals, key, input, output);
         }
     }
 
@@ -291,8 +291,8 @@ impl<F: Float + SimdLanes + Lerp> Kernel for GateKernel<F> {
 }
 
 impl GateSet {
-    /// The lane of the threshold: the one [`fast`](crate::ControlRead::Fast) row.
-    const THRESHOLD_LANE: usize = 0;
+    /// The control signal of the threshold: the one [`fast`](crate::ControlRead::Fast) row.
+    const THRESHOLD_SIGNAL: usize = 0;
 }
 
 #[cfg(test)]
@@ -346,7 +346,7 @@ mod tests {
         ));
     }
 
-    /// A block longer than 64 frames renders whole: the gain lane is sized from the
+    /// A block longer than 64 frames renders whole: the gain control signal is sized from the
     /// prepared `MaxBlock`, not a constant.
     #[test]
     fn a_block_up_to_the_prepared_maximum_renders() {

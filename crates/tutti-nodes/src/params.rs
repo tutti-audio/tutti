@@ -2,14 +2,14 @@
 //!
 //! A kernel writes a [`ControlSet`]: its addresses, and the conversion between its
 //! `Controls` and the `f64` cells. [`Params`] is the one reader over it,
-//! with one rule for every control: the lane's value at
-//! the solve frame when a lane drives it, else a glide from the controls last
+//! with one rule for every control: the control signal's value at
+//! the solve frame when a control signal drives it, else a ramp from the controls last
 //! designed to the cell's value, each read through [`LastGood`]. Sanitising
 //! (floors, clamps, whole-set validation) is the design's, never the reader's.
 //!
 //! A control the kernel reads **per frame** is [`ControlRead::Fast`]: the
-//! kernel takes its port's frames from the [`ControlLanes`](crate::ControlLanes)
-//! (`Params::lanes`), and the reader sees only its cell, the base the member is
+//! kernel takes its port's frames from the [`ControlSignals`](crate::ControlSignals)
+//! (`Params::signals`), and the reader sees only its cell, the base the member is
 //! designed at.
 
 use std::sync::Arc;
@@ -17,11 +17,11 @@ use std::sync::atomic::Ordering::{Acquire, Relaxed};
 
 use atomic_float::AtomicF64;
 use tutti_buffers::Float;
-use tutti_dsp::{GAIN_GLIDE, Glide};
+use tutti_dsp::{GAIN_RAMP, Ramp};
 use tutti_graph::{Io, ParamSetBuilder};
 use tutti_units::{SampleRate, UnitAddr};
 
-use crate::kernel::MAX_LANES;
+use crate::kernel::MAX_SIGNALS;
 use crate::ramp::LastGood;
 
 /// The most controls a kernel has: the compressor's six, the gate's five and the
@@ -53,12 +53,12 @@ pub trait ControlSet: Clone + core::fmt::Debug + Send + 'static {
         *highest
     }
 
-    /// How the reader takes control `k` (`k < addrs().len()`): whether it glides, lands
-    /// whole or is read per frame, and which values it accepts. [`Control::GLIDE`] by
+    /// How the reader takes control `k` (`k < addrs().len()`): whether it ramps, lands
+    /// whole or is read per frame, and which values it accepts. [`Control::RAMP`] by
     /// default; `control_set!` writes it from each row's flags, so a control is
     /// declared once.
     fn control(&self, _k: usize) -> Control {
-        Control::GLIDE
+        Control::RAMP
     }
 
     /// Whether `target` is far enough from `applied`, the controls the model was last
@@ -71,15 +71,15 @@ pub trait ControlSet: Clone + core::fmt::Debug + Send + 'static {
 /// How the reader takes a control from its cell and its port.
 #[derive(Clone, Copy, Debug, PartialEq, Hash, Eq)]
 pub enum ControlRead {
-    /// A moved cell glides on the stream clock over [`GAIN_GLIDE`], from where the
+    /// A moved cell ramps on the stream clock over [`GAIN_RAMP`], from where the
     /// control stood on the first frame of the block that first sees the write, or its
-    /// port is read at the solve frame when a lane drives it.
-    Glide,
-    /// As [`Glide`](Self::Glide), but a moved cell lands whole: a control whose glide
+    /// port is read at the solve frame when a control signal drives it.
+    Ramp,
+    /// As [`Ramp`](Self::Ramp), but a moved cell lands whole: a control whose ramp
     /// is the kernel's own (a detector's) is not ramped by the reader.
     Whole,
     /// Read **per frame** by the kernel, from its port, into a
-    /// [`ControlLanes`](crate::ControlLanes) lane (the fast controls fill the lanes in row order).
+    /// [`ControlSignals`](crate::ControlSignals) control signal (the fast controls fill the control signals in row order).
     /// The reader takes only its cell, the base the member is designed at, and a
     /// frame nobody drives is clamped at that member. A fast control lands whole.
     Fast,
@@ -105,9 +105,9 @@ pub struct Control {
 }
 
 impl Control {
-    /// A control that glides and accepts finite values: a row with no flags.
-    pub const GLIDE: Self = Self {
-        read: ControlRead::Glide,
+    /// A control that ramps and accepts finite values: a row with no flags.
+    pub const RAMP: Self = Self {
+        read: ControlRead::Ramp,
         valid: ControlValid::Finite,
     };
 
@@ -120,7 +120,7 @@ impl Control {
         }
     }
 
-    /// The row flag `fast`: read per frame from a [`ControlLanes`](crate::ControlLanes) lane.
+    /// The row flag `fast`: read per frame from a [`ControlSignals`](crate::ControlSignals) control signal.
     #[must_use]
     pub(crate) const fn fast(self) -> Self {
         Self {
@@ -148,7 +148,7 @@ impl Control {
     }
 
     /// How many of `controls` are [`ControlRead::Fast`]; `const`, for the macro's check
-    /// against [`MAX_LANES`].
+    /// against [`MAX_SIGNALS`].
     #[must_use]
     pub(crate) const fn fast_count(controls: &[Self]) -> usize {
         let (mut i, mut n) = (0, 0);
@@ -200,9 +200,9 @@ pub trait HasControls<const P: u16>: HasControl<P> {}
 /// leaves off the freeze). A row is `Kind => Unit = field`, a single control;
 /// `Kind[0] => Unit = field[0]` the first of several of a kind (`HasControls`),
 /// and `Kind[i]` with `i` above 0 the others. A row may end in flags, `{ .. }`, that
-/// say how the reader takes it ([`Control`]): `whole` (lands whole, no glide), `fast`
-/// (read per frame into a [`ControlLanes`](crate::ControlLanes) lane, in row order; more fast rows
-/// than [`MAX_LANES`] do not compile) and `not_nan` (accepts `+-inf`). A flag that is
+/// say how the reader takes it ([`Control`]): `whole` (lands whole, no ramp), `fast`
+/// (read per frame into a [`ControlSignals`](crate::ControlSignals) control signal, in row order; more fast rows
+/// than [`MAX_SIGNALS`] do not compile) and `not_nan` (accepts `+-inf`). A flag that is
 /// not one of these does not compile.
 macro_rules! control_set {
     (
@@ -226,11 +226,11 @@ macro_rules! control_set {
 
             fn control(&self, k: usize) -> $crate::params::Control {
                 const ALL: &[$crate::params::Control] = &[$(
-                    $crate::params::Control::GLIDE $($(.$flag())*)?
+                    $crate::params::Control::RAMP $($(.$flag())*)?
                 ),+];
                 const _: () = assert!(
-                    $crate::params::Control::fast_count(ALL) <= $crate::MAX_LANES,
-                    "more fast controls than a ControlLanes has lanes",
+                    $crate::params::Control::fast_count(ALL) <= $crate::MAX_SIGNALS,
+                    "more fast controls than a ControlSignals has signals",
                 );
                 ALL[k]
             }
@@ -282,7 +282,7 @@ macro_rules! control_set {
 /// Where in a block a node reads its controls.
 #[derive(Clone, Copy, Debug)]
 pub struct At {
-    /// The stream frame the block begins on, what a cell's glide is counted on.
+    /// The stream frame the block begins on, what a cell's ramp is counted on.
     pub position: u64,
     /// The frame of the block to read at.
     pub frame: usize,
@@ -290,20 +290,20 @@ pub struct At {
     pub rate: SampleRate,
 }
 
-/// A [`ControlRead::Glide`] cell's glide on the stream clock: from where the control
+/// A [`ControlRead::Ramp`] cell's ramp on the stream clock: from where the control
 /// stood to the cell's value, over the frames from `start`.
 #[derive(Clone, Copy, Debug)]
-struct CellGlide {
-    glide: Glide<f64>,
-    /// The stream frame of the glide's first frame, which reads step 1.
+struct CellRamp {
+    ramp: Ramp<f64>,
+    /// The stream frame of the ramp's first frame, which reads step 1.
     start: u64,
 }
 
-impl CellGlide {
-    /// Landed on `value` at stream frame `start`.
-    fn landed(value: f64, start: u64) -> Self {
+impl CellRamp {
+    /// At rest on `value` at stream frame `start`.
+    fn new(value: f64, start: u64) -> Self {
         Self {
-            glide: Glide::landed(value),
+            ramp: Ramp::new(value),
             start,
         }
     }
@@ -311,7 +311,7 @@ impl CellGlide {
     /// The control's value at stream frame `position`.
     fn at(&self, position: u64) -> f64 {
         let i = position.saturating_sub(self.start);
-        self.glide
+        self.ramp
             .at(u32::try_from(i).map_or(u32::MAX, |i| i.saturating_add(1)))
     }
 }
@@ -326,15 +326,15 @@ pub struct Params<S: ControlSet> {
     good: Vec<LastGood<f64>>,
     /// How each control is read, from [`ControlSet::control`].
     controls: [Control; MAX_CONTROLS],
-    /// The fast controls, by index, in the order of the lanes they fill.
-    fast: [usize; MAX_LANES],
+    /// The fast controls, by index, in the order of the control signals they fill.
+    fast: [usize; MAX_SIGNALS],
     /// How many of `fast` are filled.
     fast_len: usize,
-    /// Each [`ControlRead::Glide`] cell's glide on the stream clock.
-    glides: [CellGlide; MAX_CONTROLS],
-    /// A glide's length in frames: [`GAIN_GLIDE`] at the prepared rate, or none.
-    glide: usize,
-    /// Whether the glides have a value to start from: not after a prepare or a reset,
+    /// Each [`ControlRead::Ramp`] cell's ramp on the stream clock.
+    ramps: [CellRamp; MAX_CONTROLS],
+    /// A ramp's length in frames: [`GAIN_RAMP`] at the prepared rate, or none.
+    ramp: usize,
+    /// Whether the ramps have a value to start from: not after a prepare or a reset,
     /// when a cell lands whole.
     primed: bool,
 }
@@ -344,8 +344,8 @@ impl<S: ControlSet> Params<S> {
     ///
     /// # Panics
     ///
-    /// If `set` has more [`ControlRead::Fast`] controls than [`ControlLanes`](crate::ControlLanes) has
-    /// lanes ([`MAX_LANES`]): only a hand-written [`ControlSet`] can, since
+    /// If `set` has more [`ControlRead::Fast`] controls than [`ControlSignals`](crate::ControlSignals) has
+    /// control signals ([`MAX_SIGNALS`]): only a hand-written [`ControlSet`] can, since
     /// `control_set!` refuses it at compile time.
     #[must_use]
     pub fn new(set: S, initial: &S::Controls) -> Self {
@@ -354,14 +354,14 @@ impl<S: ControlSet> Params<S> {
         set.flatten(initial, &mut value[..n]);
         set.flatten(&set.defaults(), &mut fallback[..n]);
         let (mut cells, mut good) = (Vec::with_capacity(n), Vec::with_capacity(n));
-        let mut controls = [Control::GLIDE; MAX_CONTROLS];
-        let (mut fast, mut fast_len) = ([0; MAX_LANES], 0);
+        let mut controls = [Control::RAMP; MAX_CONTROLS];
+        let (mut fast, mut fast_len) = ([0; MAX_SIGNALS], 0);
         for k in 0..n {
             controls[k] = set.control(k);
             if controls[k].read == ControlRead::Fast {
                 assert!(
-                    fast_len < MAX_LANES,
-                    "more fast controls than a ControlLanes has lanes"
+                    fast_len < MAX_SIGNALS,
+                    "more fast controls than a ControlSignals has signals"
                 );
                 fast[fast_len] = k;
                 fast_len += 1;
@@ -378,53 +378,53 @@ impl<S: ControlSet> Params<S> {
             controls,
             fast,
             fast_len,
-            glides: [CellGlide::landed(0.0, 0); MAX_CONTROLS],
-            glide: 1,
+            ramps: [CellRamp::new(0.0, 0); MAX_CONTROLS],
+            ramp: 1,
             primed: false,
         }
     }
 
-    /// Takes the rate a cell's glide is measured at, and whether a moved cell glides
-    /// at all: a kernel that glides its own coefficients between block
+    /// Takes the rate a cell's ramp is measured at, and whether a moved cell ramps
+    /// at all: a kernel that ramps its own coefficients between block
     /// designs lands it whole. Every cell lands whole on the next
     /// block, as after [`land`](Self::land).
-    pub(crate) fn retune(&mut self, rate: SampleRate, glides: bool) {
-        self.glide = if glides {
-            GAIN_GLIDE.to_samples(rate).get().max(1)
+    pub(crate) fn retune(&mut self, rate: SampleRate, ramps: bool) {
+        self.ramp = if ramps {
+            GAIN_RAMP.to_samples(rate).get().max(1)
         } else {
             1
         };
         self.land();
     }
 
-    /// Back to no glide: every cell lands whole on the next block (a prepare, a reset).
+    /// Back to no ramp: every cell lands whole on the next block (a prepare, a reset).
     pub(crate) fn land(&mut self) {
         self.primed = false;
     }
 
-    /// The block beginning at stream frame `position`: each [`ControlRead::Glide`]
-    /// cell's value, read once for the block, and a glide started from where the control
-    /// stands to it if it moved. A glide is on the stream clock, so it is the same
+    /// The block beginning at stream frame `position`: each [`ControlRead::Ramp`]
+    /// cell's value, read once for the block, and a ramp started from where the control
+    /// stands to it if it moved. A ramp is on the stream clock, so it is the same
     /// whatever the blocks: it starts on the first frame of the block the write is first
-    /// seen in, and arrives [`GAIN_GLIDE`] later.
+    /// seen in, and arrives [`GAIN_RAMP`] later.
     pub(crate) fn begin(&mut self, position: u64) {
         for k in 0..self.cells.len() {
             let control = self.controls[k];
-            if control.read != ControlRead::Glide {
+            if control.read != ControlRead::Ramp {
                 continue;
             }
             let x = self.cells[k].load(Relaxed);
             let to = self.good[k].read_if(x, control.accepts(x));
-            let glide = &mut self.glides[k];
+            let ramp = &mut self.ramps[k];
             if !self.primed {
-                *glide = CellGlide::landed(to, position);
-            } else if to.to_bits() != glide.glide.target().to_bits() {
+                *ramp = CellRamp::new(to, position);
+            } else if to.to_bits() != ramp.ramp.target().to_bits() {
                 // Where it stood on the frame before this block, the last one rendered.
-                let from = glide.at(position.saturating_sub(1));
-                let mut aimed = Glide::landed(from);
-                aimed.aim_in(to, u32::try_from(self.glide).unwrap_or(u32::MAX));
-                *glide = CellGlide {
-                    glide: aimed,
+                let from = ramp.at(position.saturating_sub(1));
+                let mut arriving = Ramp::new(from);
+                arriving.retarget_in(to, u32::try_from(self.ramp).unwrap_or(u32::MAX));
+                *ramp = CellRamp {
+                    ramp: arriving,
                     start: position,
                 };
             }
@@ -433,16 +433,17 @@ impl<S: ControlSet> Params<S> {
     }
 
     /// Each control's lowest and highest value in the block (the cell's where no
-    /// lane drives it), or `None` when no lane does.
+    /// control signal drives it), or `None` when no control signal does.
     fn extremes<G: Float>(&self, io: &Io<'_, G>) -> Option<[[f64; MAX_CONTROLS]; 2]> {
         let mut out = [[0.0; MAX_CONTROLS]; 2];
         let mut driven = false;
         for (k, cell) in self.cells.iter().enumerate() {
-            let lane = io.param(k).frames();
-            driven |= lane.is_some();
+            let signal = io.param(k).frames();
+            driven |= signal.is_some();
             let base = cell.load(Acquire);
             let fold = |pick: fn(f64, f64) -> f64| {
-                lane.into_iter()
+                signal
+                    .into_iter()
                     .flatten()
                     .map(|&v| -> f64 { v.into() })
                     .filter(|v| v.is_finite())
@@ -490,7 +491,7 @@ impl<S: ControlSet> Params<S> {
     /// The controls at `at.frame`: each cell, or the value its port carries when the
     /// graph modulates it, read through [`LastGood`] so a value the control refuses
     /// ([`Control::accepts`]: non-finite by default) reads as unchanged. A
-    /// [`ControlRead::Glide`] cell is its glide at that frame ([`begin`](Self::begin)),
+    /// [`ControlRead::Ramp`] cell is its ramp at that frame ([`begin`](Self::begin)),
     /// a [`ControlRead::Fast`] control is its cell whatever its port carries, and a
     /// [`ControlRead::Whole`] one is its cell.
     pub(crate) fn read<G: Float>(&mut self, io: &Io<'_, G>, at: At) -> S::Controls {
@@ -498,18 +499,18 @@ impl<S: ControlSet> Params<S> {
         let mut value = [0.0f64; MAX_CONTROLS];
         for (k, v) in value[..n].iter_mut().enumerate() {
             let control = self.controls[k];
-            let lane = match control.read {
+            let signal = match control.read {
                 ControlRead::Fast => None,
-                ControlRead::Glide | ControlRead::Whole => io.param(k).frames(),
+                ControlRead::Ramp | ControlRead::Whole => io.param(k).frames(),
             };
-            *v = match (lane, control.read) {
-                (Some(lane), _) => {
-                    let x: f64 = lane[at.frame].into();
+            *v = match (signal, control.read) {
+                (Some(signal), _) => {
+                    let x: f64 = signal[at.frame].into();
                     self.good[k].read_if(x, control.accepts(x))
                 }
-                (None, ControlRead::Glide) => {
-                    debug_assert!(self.primed, "a block reads its glides after `begin`");
-                    self.glides[k].at(at.position + at.frame as u64)
+                (None, ControlRead::Ramp) => {
+                    debug_assert!(self.primed, "a block reads its ramps after `begin`");
+                    self.ramps[k].at(at.position + at.frame as u64)
                 }
                 (None, _) => {
                     let x = self.cells[k].load(Relaxed);
@@ -542,16 +543,16 @@ impl<S: ControlSet> Params<S> {
             .min()
     }
 
-    /// The per-frame lanes of the [`ControlRead::Fast`] controls, for the
-    /// [`ControlLanes`](crate::ControlLanes): the port's frames in the port's own unit, `None` where
+    /// The per-frame control signals of the [`ControlRead::Fast`] controls, for the
+    /// [`ControlSignals`](crate::ControlSignals): the port's frames in the port's own unit, `None` where
     /// nothing drives it. They are the block's, so a caller slices them by the frames it
     /// renders.
-    pub(crate) fn lanes<'a, G: Float>(&self, io: &Io<'a, G>) -> [Option<&'a [G]>; MAX_LANES] {
-        let mut lanes = [None; MAX_LANES];
-        for (lane, &k) in lanes.iter_mut().zip(&self.fast[..self.fast_len]) {
-            *lane = io.param(k).frames();
+    pub(crate) fn signals<'a, G: Float>(&self, io: &Io<'a, G>) -> [Option<&'a [G]>; MAX_SIGNALS] {
+        let mut signals = [None; MAX_SIGNALS];
+        for (signal, &k) in signals.iter_mut().zip(&self.fast[..self.fast_len]) {
+            *signal = io.param(k).frames();
         }
-        lanes
+        signals
     }
 
     /// The controls that ring longest among the values a modulated port takes anywhere
@@ -582,20 +583,20 @@ impl<S: ControlSet> Params<S> {
 mod tests {
     use super::*;
 
-    /// A glide of `n` frames from `from` to `to` begun at stream frame `start`, as
+    /// A ramp of `n` frames from `from` to `to` begun at stream frame `start`, as
     /// [`Params::begin`] builds it.
-    fn aimed(from: f64, to: f64, n: u32, start: u64) -> CellGlide {
-        let mut glide = Glide::landed(from);
-        glide.aim_in(to, n);
-        CellGlide { glide, start }
+    fn retargeted(from: f64, to: f64, n: u32, start: u64) -> CellRamp {
+        let mut ramp = Ramp::new(from);
+        ramp.retarget_in(to, n);
+        CellRamp { ramp, start }
     }
 
-    /// Frame `i` of an `n`-frame glide is `from + (to - from) * (i + 1) / n`, and the
+    /// Frame `i` of an `n`-frame ramp is `from + (to - from) * (i + 1) / n`, and the
     /// last frame is `to` to the bit, whatever the arithmetic rounds to.
     #[test]
-    fn a_cell_glide_is_linear_and_lands_on_its_target_bits() {
+    fn a_cell_ramp_is_linear_and_lands_on_its_target_bits() {
         for (from, to, n) in [(0.7f64, 0.2f64, 64u32), (3.3, 1.1, 17), (0.0, 1.0, 240)] {
-            let g = aimed(from, to, n, 1_000);
+            let g = retargeted(from, to, n, 1_000);
             for i in 0..n - 1 {
                 let want = from + (to - from) * f64::from(i + 1) / f64::from(n);
                 let got = g.at(1_000 + u64::from(i));
@@ -617,26 +618,26 @@ mod tests {
         }
     }
 
-    /// A one-frame glide is the new value on its first frame.
+    /// A one-frame ramp is the new value on its first frame.
     #[test]
-    fn a_one_frame_cell_glide_is_the_new_value() {
-        assert_eq!(aimed(3.0, 9.0, 1, 5).at(5), 9.0);
+    fn a_one_frame_cell_ramp_is_the_new_value() {
+        assert_eq!(retargeted(3.0, 9.0, 1, 5).at(5), 9.0);
     }
 
-    /// A retarget mid-glide starts from the value of the frame before it: the first
-    /// frame of the new glide is one step on from there.
+    /// A retarget mid-ramp starts from the value of the frame before it: the first
+    /// frame of the new ramp is one step on from there.
     #[test]
-    fn a_cell_glide_retargeted_mid_flight_continues_from_its_value() {
-        let first = aimed(0.0, 1.0, 100, 0);
+    fn a_cell_ramp_retargeted_mid_flight_continues_from_its_value() {
+        let first = retargeted(0.0, 1.0, 100, 0);
         let before = first.at(39);
-        let second = aimed(before, 0.25, 50, 40);
+        let second = retargeted(before, 0.25, 50, 40);
         let step = (0.25 - before) / 50.0;
         let got = second.at(40);
         assert!((got - (before + step)).abs() < 1e-12, "{got}");
         assert_eq!(second.at(40 + 49).to_bits(), 0.25f64.to_bits());
     }
 
-    /// A set of one glided control.
+    /// A set of one ramped control.
     #[derive(Clone, Debug)]
     struct One;
 
@@ -657,10 +658,10 @@ mod tests {
         }
     }
 
-    /// The glide length of the stream test, in frames.
+    /// The ramp length of the stream test, in frames.
     const N: u64 = 1_000;
     /// A write lands before these stream frames: a multiple of every block length the
-    /// split test uses, the second inside the first's glide.
+    /// split test uses, the second inside the first's ramp.
     const FIRST: u64 = 448;
     const SECOND: u64 = 896;
     const TOTAL: u64 = 3_136;
@@ -670,7 +671,7 @@ mod tests {
     fn stream(block: u64) -> Vec<f64> {
         let mut params = Params::new(One, &0.0);
         params.retune(SampleRate::SR_48K, true);
-        params.glide = N as usize;
+        params.ramp = N as usize;
         let mut out = Vec::new();
         let mut position = 0;
         while position < TOTAL {
@@ -681,20 +682,20 @@ mod tests {
             }
             params.begin(position);
             for i in 0..block {
-                out.push(params.glides[0].at(position + i));
+                out.push(params.ramps[0].at(position + i));
             }
             position += block;
         }
         out
     }
 
-    /// The first write glides `0 -> 1` over [`N`] frames from the first frame of its
-    /// block; the second, mid-glide, starts from the first glide's value on the frame
+    /// The first write ramps `0 -> 1` over [`N`] frames from the first frame of its
+    /// block; the second, mid-ramp, starts from the first ramp's value on the frame
     /// before its block and takes one step of the new distance on its first frame, and
     /// lands on the target's bits on its last. Expected values are the line
     /// `from + (to - from) * k / n` in `f64`.
     #[test]
-    fn a_cell_written_mid_glide_continues_from_its_value_through_begin() {
+    fn a_cell_written_mid_ramp_continues_from_its_value_through_begin() {
         let got = stream(64);
         let line = |from: f64, to: f64, k: u64| from + (to - from) * k as f64 / N as f64;
         let near = |frame: u64, want: f64| {
@@ -712,9 +713,9 @@ mod tests {
     }
 
     /// The same writes read in blocks of 1, 7 and 64 frames give the same value on every
-    /// frame, bit for bit: a glide is on the stream clock, not the block's.
+    /// frame, bit for bit: a ramp is on the stream clock, not the block's.
     #[test]
-    fn a_cell_glide_is_the_same_whatever_the_blocks() {
+    fn a_cell_ramp_is_the_same_whatever_the_blocks() {
         let whole = stream(64);
         for block in [1, 7] {
             let got = stream(block);

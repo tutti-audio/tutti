@@ -1,9 +1,9 @@
-//! The helpers a design shares: the prewarped gain and the glide fraction.
+//! The helpers a design shares: the prewarped gain and the ramp fraction.
 
 use tutti_buffers::Float;
 use tutti_units::{Hz, Normalized, SampleRate, Samples};
 
-/// `k / n` of the way along a glide of `n` steps, as data of the width `F`: how far a blend
+/// `k / n` of the way along a ramp of `n` steps, as data of the width `F`: how far a blend
 /// of two designs has gone at step `k`.
 #[inline]
 pub(crate) fn along<F: Float>(k: u32, n: u32) -> F {

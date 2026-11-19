@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
-use rand::rngs::StdRng;
-use rand::{RngExt, SeedableRng};
+use crate::testing::uniform;
+use tutti_rt::SplitMix64;
 
 use super::*;
 
@@ -82,11 +82,11 @@ fn the_cubes_hull_triangulates_each_square_face_in_two() {
 #[test]
 fn a_cloud_on_the_sphere_is_a_closed_convex_triangulation() {
     for (seed, n) in [(1u64, 40usize), (2, 300), (3, 700)] {
-        let mut rng = StdRng::seed_from_u64(seed);
+        let mut rng = SplitMix64::new(seed);
         let points: Vec<Vec3> = (0..n)
             .map(|_| {
-                let z: f64 = rng.random_range(-1.0..1.0);
-                let phi: f64 = rng.random_range(0.0..std::f64::consts::TAU);
+                let z: f64 = uniform(&mut rng, -1.0, 1.0);
+                let phi: f64 = uniform(&mut rng, 0.0, std::f64::consts::TAU);
                 let r = (1.0 - z * z).sqrt();
                 [r * phi.cos(), r * phi.sin(), z]
             })

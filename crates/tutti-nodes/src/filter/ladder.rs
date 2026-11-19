@@ -12,13 +12,13 @@
 use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{
-    Glide, LadderBank, LadderBlend, LadderControls, LadderModel, LadderType, SimdLanes,
+    LadderBank, LadderBlend, LadderControls, LadderModel, LadderType, Ramp, SimdLanes,
 };
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
 use tutti_units::{Drive, Hz, Resonance, SampleRate, Tail};
 
 use super::filter_bus;
-use crate::kernel::{ControlLanes, Kernel, KernelNode};
+use crate::kernel::{ControlSignals, Kernel, KernelNode};
 
 /// A Moog-style four-stage ladder filter with resonance and drive, of any
 /// width: `N` audio inputs, `N` outputs.
@@ -32,10 +32,10 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 /// at all ([`LadderControls::differs_from`]). The filter is designed on a 16-frame
 /// grid counted from the last reset, at each segment's first frame, and the
 /// coefficients **and the drive** ramp linearly to that solve over the segment, so
-/// an automated control glides rather than stepping (drive multiplies straight
+/// an automated control ramps rather than stepping (drive multiplies straight
 /// into the saturator and would otherwise click), arrives within 16 frames and
 /// renders the same however the stream is cut into blocks. A cell that moved
-/// glides from the last solve to its value across the block, so it is the one
+/// ramps from the last solve to its value across the block, so it is the one
 /// control whose render depends on the block's length.
 ///
 /// **Resonance is `0.0..=1.0`, not a [`Q`](tutti_units::Q).** It scales the
@@ -55,8 +55,8 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 /// graph, in that port order. A per-frame value on a param port
 /// ([`Io::param`](tutti_graph::Io::param)) **overrides** the corresponding cell
 /// and is sampled at the first frame of each 16-frame segment, with the
-/// coefficients and the drive interpolated over the segment. A lane on the cutoff
-/// or on Q stops the cutoff and Q cells gliding. Unmodulated, the filter reads its
+/// coefficients and the drive interpolated over the segment. A control signal on the cutoff
+/// or on Q stops the cutoff and Q cells ramping. Unmodulated, the filter reads its
 /// cells once per block at the cost of one branch.
 ///
 /// The param is `UnitParam::Q` for consistency with the other filters, but
@@ -115,19 +115,19 @@ impl<F: Float + SimdLanes> LadderFilterNode<F> {
 }
 
 /// The steps the design takes to a new one: one grid period, so a design arrives at the
-/// next grid point. The glide is a ramp (a control moving to a target), not a fade.
-const GLIDE_STEPS: u32 = 16;
+/// next grid point. The ramp is a ramp (a control moving to a target), not a fade.
+const RAMP_STEPS: u32 = 16;
 
-/// The ladder as a [`Kernel`]: a [`LadderBank`] in the float `F` and the glide of the
+/// The ladder as a [`Kernel`]: a [`LadderBank`] in the float `F` and the ramp of the
 /// design (coefficients and drive) every channel shares.
 #[derive(Clone, Debug)]
 pub struct LadderKernel<F: Float + SimdLanes> {
     input: BusTopology,
     bank: LadderBank<F>,
     /// The blend in flight; the first one after `prepare` lands at once.
-    blend: Glide<LadderBlend<F>>,
+    blend: Ramp<LadderBlend<F>>,
     rate: SampleRate,
-    landed: bool,
+    applied: bool,
 }
 
 impl<F: Float + SimdLanes> LadderKernel<F> {
@@ -139,9 +139,9 @@ impl<F: Float + SimdLanes> LadderKernel<F> {
         Self {
             input,
             bank: LadderBank::new(input.layout()),
-            blend: Glide::landed(Self::design(&LadderControls::DEFAULT, rate)),
+            blend: Ramp::new(Self::design(&LadderControls::DEFAULT, rate)),
             rate,
-            landed: false,
+            applied: false,
         }
     }
 
@@ -154,8 +154,8 @@ impl<F: Float + SimdLanes> Kernel for LadderKernel<F> {
     type Float = F;
     type Set = LadderSet;
 
-    // A design arrives at the next grid point: the glide is one grid period long.
-    const GRID: usize = GLIDE_STEPS as usize;
+    // A design arrives at the next grid point: the ramp is one grid period long.
+    const GRID: usize = RAMP_STEPS as usize;
 
     fn shape(&self) -> Shape {
         let output = Bus::banded(self.input, BusRole::Main, 1).expect("one band is a bus");
@@ -168,27 +168,27 @@ impl<F: Float + SimdLanes> Kernel for LadderKernel<F> {
 
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
         self.rate = rate;
-        self.blend = Glide::landed(Self::design(&LadderControls::DEFAULT, rate)).by(GLIDE_STEPS);
-        self.landed = false;
+        self.blend = Ramp::new(Self::design(&LadderControls::DEFAULT, rate)).steps(RAMP_STEPS);
+        self.applied = false;
     }
 
     fn reset(&mut self) {
-        self.blend.settle();
+        self.blend.jump_to_target();
         self.bank.reset();
     }
 
     fn retarget(&mut self, controls: &LadderControls) {
-        self.blend.aim(Self::design(controls, self.rate));
-        if !self.landed {
-            self.blend.settle();
-            self.landed = true;
+        self.blend.retarget(Self::design(controls, self.rate));
+        if !self.applied {
+            self.blend.jump_to_target();
+            self.applied = true;
         }
     }
 
     fn render(
         &mut self,
         input: Planes<'_, F>,
-        _: ControlLanes<'_, F>,
+        _: ControlSignals<'_, F>,
         output: PlanesMut<'_, '_, F>,
     ) {
         self.bank.process(&mut self.blend, input, output);
@@ -607,12 +607,12 @@ mod tests {
 
     // ── Per-block reads ──────────────────────────────────────────────────────
 
-    /// A cutoff written between blocks glides on the stream clock: the render is the
+    /// A cutoff written between blocks ramps on the stream clock: the render is the
     /// same at every block length, under way one 64-frame block in, and arrived
-    /// [`GAIN_GLIDE`](tutti_dsp::GAIN_GLIDE) (240 frames at 48 kHz) after the block it
+    /// [`GAIN_RAMP`](tutti_dsp::GAIN_RAMP) (240 frames at 48 kHz) after the block it
     /// was first seen in.
     #[test]
-    fn a_cutoff_written_between_blocks_glides_on_the_stream() {
+    fn a_cutoff_written_between_blocks_ramps_on_the_stream() {
         const FS: f64 = 48_000.0;
         const HZ: f64 = 1_500.0;
         const RES: f64 = 0.4;
@@ -640,10 +640,10 @@ mod tests {
             1.0 / (p * p * p * p + 4.0 * RES).norm()
         };
         let g_of = |fc: f64| libm::tan(core::f64::consts::PI * fc / FS);
-        // The cell glides 1000 to 1400 Hz over 240 frames from the write at stream frame 256
+        // The cell ramps 1000 to 1400 Hz over 240 frames from the write at stream frame 256
         // (the grid point at its first block): step `k = frame - 255` at a grid point's
         // frame. A design is taken at each grid point (every 16 frames) and the
-        // coefficients glide to it over the 16 frames after: frame `t` is `(t - p + 1) / 16`
+        // coefficients ramp to it over the 16 frames after: frame `t` is `(t - p + 1) / 16`
         // of the way from the design at the grid point `p` before it to the one at `p`.
         let cell = |p: i64| {
             let k = (p - 255).clamp(0, 240) as f64;
@@ -660,7 +660,7 @@ mod tests {
             }
             1e-3 * core::f64::consts::FRAC_1_SQRT_2 * (sum / 64.0).sqrt()
         };
-        // The tone is steady-state at each block's design, so the glide's lag in the stages
+        // The tone is steady-state at each block's design, so the ramp's lag in the stages
         // costs a few percent; a cutoff that never moved or jumped is off by tens.
         let near = |got: f32, want: f64, what: &str| {
             assert!(
@@ -676,22 +676,22 @@ mod tests {
         for (j, &level) in blocks.iter().enumerate() {
             near(level, expect(j), &format!("block {j} after the write"));
         }
-        // A cutoff that jumped would put block 0 at the landed gain, three times the
-        // held one; the glide's first block is well under it.
-        let landed = 1e-3 * core::f64::consts::FRAC_1_SQRT_2 * gain(g_of(1_400.0));
+        // A cutoff that jumped would put block 0 at the final gain, three times the
+        // held one; the ramp's first block is well under it.
+        let arrived = 1e-3 * core::f64::consts::FRAC_1_SQRT_2 * gain(g_of(1_400.0));
         assert!(
-            f64::from(blocks[0]) < 0.8 * landed,
-            "block 0 is not yet landed"
+            f64::from(blocks[0]) < 0.8 * arrived,
+            "block 0 is not yet arrived"
         );
     }
 
     /// Drive multiplies straight into the saturator, so a step would click: a drive
-    /// written between blocks glides on the stream clock like a cutoff, and arrives. The
-    /// level of a high-pass tone below the saturator's knee rises on every block of the glide
-    /// (a drive that jumped would start at its landed level, and one that never moved would
+    /// written between blocks ramps on the stream clock like a cutoff, and arrives. The
+    /// level of a high-pass tone below the saturator's knee rises on every block of the ramp
+    /// (a drive that jumped would start at its final level, and one that never moved would
     /// not rise), starts well under it, and settles on it.
     #[test]
-    fn a_drive_written_between_blocks_glides_on_the_stream() {
+    fn a_drive_written_between_blocks_ramps_on_the_stream() {
         // A high-pass tap, so the saturator's input reaches the output unfiltered.
         let make = || {
             LadderFilterNode::<f32>::with_channels(
@@ -705,20 +705,20 @@ mod tests {
             assert!(n.param_set().set(UnitParam::Drive, 9.0));
         };
         let (low, blocks) = block_levels(make, change, 6_000.0, 0.1);
-        let landed = blocks[7];
-        assert!(landed > 4.0 * low, "the drive arrived: {low} to {landed}");
+        let arrived = blocks[7];
+        assert!(arrived > 4.0 * low, "the drive arrived: {low} to {arrived}");
         assert!(
-            blocks[0] > low && blocks[0] < 0.5 * landed,
-            "block 0 is under way: {low} < {} < {landed}",
+            blocks[0] > low && blocks[0] < 0.5 * arrived,
+            "block 0 is under way: {low} < {} < {arrived}",
             blocks[0]
         );
-        // Four 64-frame blocks of a 240-frame glide: each one louder than the last, then
-        // landed (the glide is done by block 4).
+        // Four 64-frame blocks of a 240-frame ramp: each one louder than the last, then
+        // at rest (the ramp is done by block 4).
         assert!(blocks[..5].windows(2).all(|w| w[1] > w[0]), "{blocks:?}");
         assert!(
             blocks[5..]
                 .iter()
-                .all(|&l| (l - landed).abs() < 0.01 * landed)
+                .all(|&l| (l - arrived).abs() < 0.01 * arrived)
         );
     }
 
@@ -731,13 +731,13 @@ mod tests {
         hz: f64,
         amplitude: f32,
     ) -> (f32, Vec<f32>) {
-        use crate::test_support::{assert_cell_glides, drive_block, prepared, render_change, sine};
+        use crate::test_support::{assert_cell_ramps, drive_block, prepared, render_change, sine};
         let x: Vec<f32> = sine(hz, 48_000.0, 256 + 512)
             .into_iter()
             .map(|s| amplitude * s)
             .collect();
         let (before, after) = ([&x[..256], &x[..256]], [&x[256..], &x[256..]]);
-        assert_cell_glides(&make, &change, &before, &after, "ladder");
+        assert_cell_ramps(&make, &change, &before, &after, "ladder");
         let mut start = prepared(make());
         let low = rms(&drive_block(&mut start, &before)[0][192..]);
         let (_, out) = render_change(&make, &change, &before, &after, 64);

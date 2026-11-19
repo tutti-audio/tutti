@@ -7,7 +7,7 @@
 //! Detailed Specification and of Recommended Practice RP-015.
 
 use crate::support;
-use tutti_midi_protocol::{widen_value, widen_velocity};
+
 use tutti_ump::U7;
 
 use std::num::NonZeroUsize;
@@ -19,7 +19,7 @@ use tutti_midi_protocol::PitchBendSensitivity;
 use tutti_polysynth::{
     Adsr, AllocationStrategy, OscillatorType, PolySynth, SynthConfig, VoiceMode,
 };
-use tutti_ump::{CCNumber, MidiChannel, RegisteredData, Rpn, Ump};
+use tutti_ump::{CCNumber, ControlValue, MidiChannel, NoteVelocity, RegisteredData, Rpn, Ump};
 use tutti_units::{Amplitude, Seconds, Semitones};
 
 const SR: f64 = 48_000.0;
@@ -52,7 +52,7 @@ fn on(channel: u8, note: u8) -> Ump {
     midi::note_on(
         MidiChannel::of(channel),
         note,
-        widen_velocity(U7::of(100)).get(),
+        NoteVelocity::from(U7::of(100)).get(),
     )
 }
 
@@ -64,7 +64,7 @@ fn cc(channel: u8, number: CCNumber, value: u8) -> Ump {
     midi::cc(
         MidiChannel::of(channel),
         number,
-        widen_value(U7::of(value)).get(),
+        ControlValue::from(U7::of(value)).get(),
     )
 }
 

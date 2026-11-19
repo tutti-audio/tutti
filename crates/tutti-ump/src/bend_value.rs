@@ -2,6 +2,8 @@
 
 use tutti_units::Bipolar;
 
+use crate::{U14, scale};
+
 /// The 32-bit value of a MIDI 2.0 Pitch Bend or Per-Note Pitch Bend (M2-104
 /// sections 7.4.11 and 7.4.7), centred on [`CENTER`](Self::CENTER).
 ///
@@ -98,6 +100,36 @@ impl BendValue {
         };
         // The word is on `0..=u32::MAX`; the cast is the wire's 32-bit width.
         Self((f64::from(Self::CENTER.0) + libm::round(b * span)) as u32)
+    }
+}
+
+impl BendValue {
+    /// The bend as 14 bits: the top 14 bits, the downscale of M2-115 section
+    /// 3.4 as a plain right shift.
+    #[inline]
+    #[must_use]
+    pub fn to_u14(self) -> U14 {
+        // `>> 18` leaves 14 bits: the mask removes nothing.
+        U14::masked((self.0 >> 18) as u16)
+    }
+}
+
+/// A 14-bit pitch bend as the 32-bit word of a MIDI 2.0 Pitch Bend, scaled
+/// Min-Center-Max (M2-115 section 3): the 14-bit centre `0x2000` is
+/// [`BendValue::CENTER`]. [`to_u14`](BendValue::to_u14) is its right shift
+/// back.
+///
+/// # Examples
+///
+/// ```
+/// use tutti_ump::{BendValue, U14};
+///
+/// assert_eq!(BendValue::from(U14::of(0x2000)), BendValue::CENTER);
+/// ```
+impl From<U14> for BendValue {
+    #[inline]
+    fn from(bend: U14) -> Self {
+        Self(scale::upscale(u32::from(bend.get()), 14, 32))
     }
 }
 

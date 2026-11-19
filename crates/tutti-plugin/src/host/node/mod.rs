@@ -91,8 +91,6 @@ mod real_stall_tests;
 // call (`tutti-plugin-ipc`'s mock server answers a few).
 #[cfg(all(test, feature = "clap"))]
 mod served_control_tests;
-#[cfg(test)]
-mod tests;
 
 pub use capability_view::TransportView;
 pub(crate) use capability_view::is_declined;

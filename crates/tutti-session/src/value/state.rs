@@ -1,6 +1,6 @@
 //! The session's value state: the value lock and the table of what each node
 //! can be written through, shared by the session, its graph and every
-//! [`Knobs`].
+//! [`Values`].
 
 use std::any::TypeId;
 use std::cell::RefCell;
@@ -14,7 +14,7 @@ use tutti_rt::LockExt;
 use tutti_rt::ParamCell;
 use tutti_units::UnitAddr;
 
-use super::batch::{Batch, Fail, IntoAssign, IntoRead, Readable, Stageable};
+use super::batch::{Batch, Failure, IntoAssign, IntoRead, Readable, Stageable};
 use super::controls::{GainSlot, MixSlot, ModeSlot, NodeControl, Queue, Write};
 use super::error::{ValueError, ValueErrorKind};
 use super::slot::{self, NodeSlots, SlotCell, SlotId};
@@ -212,7 +212,7 @@ impl ValueTable {
         let held = self.enter().ok_or(ValueErrorKind::Reentrant)?;
         let mut batch = Batch::new(held.params());
         assign.stage(&mut batch).map_err(|fail| fail.kind)?;
-        batch.land();
+        batch.store();
         Ok(())
     }
 
@@ -335,7 +335,7 @@ impl ValueTable {
 }
 
 /// The session's value state, one `Arc` independent of the clock: a clock
-/// switch moves it and never rebuilds it. [`Knobs`] hold it weakly, so the
+/// switch moves it and never rebuilds it. [`Values`] hold it weakly, so the
 /// session's owners are the state's owners.
 pub struct ValueState<K> {
     table: Arc<ValueTable>,
@@ -348,7 +348,7 @@ impl<K> fmt::Debug for ValueState<K> {
     }
 }
 
-fn error<K>(fail: Fail) -> ValueError<K> {
+fn error<K>(fail: Failure) -> ValueError<K> {
     ValueError {
         at: fail.at,
         target: fail.target.map(AnyTarget::of),
@@ -381,7 +381,7 @@ impl<K: AppKey> ValueState<K> {
             .ok_or_else(|| whole_call(ValueErrorKind::Reentrant))?;
         let mut batch = Batch::new(held.params());
         assign.stage(&mut batch).map_err(error)?;
-        batch.land();
+        batch.store();
         Ok(())
     }
 
@@ -402,17 +402,17 @@ impl<K: AppKey> ValueState<K> {
     }
 }
 
-/// The session's values for any control-side thread: `Clone + Send`, it
-/// borrows nothing, so a UI thread writes and reads while the session thread
-/// runs. Never for an audio or MIDI callback: a call takes the value lock.
+/// The session's clone-able write handle for values, beside `ValueState` and
+/// `ValueTable`: `Clone + Send`, it borrows nothing, so a UI thread writes
+/// and reads while the session thread runs. Never for an audio or MIDI callback: a call takes the value lock.
 ///
 /// Once the session is gone, every call answers
 /// [`ValueErrorKind::Closed`].
-pub struct Knobs<K: AppKey = &'static str> {
+pub struct Values<K: AppKey = &'static str> {
     state: Weak<ValueState<K>>,
 }
 
-impl<K: AppKey> Knobs<K> {
+impl<K: AppKey> Values<K> {
     pub(crate) fn of(state: &Arc<ValueState<K>>) -> Self {
         Self {
             state: Arc::downgrade(state),
@@ -446,7 +446,7 @@ impl<K: AppKey> Knobs<K> {
     }
 }
 
-impl<K: AppKey> Clone for Knobs<K> {
+impl<K: AppKey> Clone for Values<K> {
     fn clone(&self) -> Self {
         Self {
             state: self.state.clone(),
@@ -454,9 +454,9 @@ impl<K: AppKey> Clone for Knobs<K> {
     }
 }
 
-impl<K: AppKey> fmt::Debug for Knobs<K> {
+impl<K: AppKey> fmt::Debug for Values<K> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Knobs").finish_non_exhaustive()
+        f.debug_struct("Values").finish_non_exhaustive()
     }
 }
 

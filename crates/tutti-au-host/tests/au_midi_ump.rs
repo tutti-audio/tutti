@@ -19,13 +19,13 @@ use tutti_rt::LockExt;
 use tutti_au_ffi::{EventList, Pushed, Wire};
 use tutti_au_host::AuMidiMapping;
 use tutti_graph::Offset;
-use tutti_ump::{CCNumber, MidiChannel, MidiGroup};
+use tutti_ump::{CCNumber, ControlValue, MidiChannel, MidiGroup};
 
 mod support;
 use support::au::Au;
 use support::corpus::SAMPLER;
 use tutti_fixtures::midi;
-use tutti_midi_protocol::widen_value;
+
 use tutti_ump::U7;
 
 static AU_LOCK: Mutex<()> = Mutex::new(());
@@ -80,7 +80,7 @@ fn the_legacy_path_drops_another_group_and_counts_it() {
     let _g = AU_LOCK.lock_recover();
     let (mut au, before) = mapped_sampler();
 
-    au.send_midi(&[cc(1, widen_value(U7::of(127)).get())]);
+    au.send_midi(&[cc(1, ControlValue::from(U7::of(127)).get())]);
     render(&mut au);
     assert_eq!(au.groups_dropped(), 1);
     assert_eq!(
@@ -89,7 +89,7 @@ fn the_legacy_path_drops_another_group_and_counts_it() {
         "a Group 1 controller must not be heard on Group 0's channels"
     );
 
-    au.send_midi(&[cc(0, widen_value(U7::of(127)).get())]);
+    au.send_midi(&[cc(0, ControlValue::from(U7::of(127)).get())]);
     render(&mut au);
     assert_eq!(au.groups_dropped(), 1, "Group 0 is not dropped");
     assert_ne!(au.get_parameter(GAIN).unwrap(), before, "Group 0 is heard");

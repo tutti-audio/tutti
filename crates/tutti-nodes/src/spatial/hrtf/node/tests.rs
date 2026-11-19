@@ -399,12 +399,12 @@ fn clone_shares_the_position_atomics() {
 }
 
 /// Two graph rates above [`MAX_PREPARED_RATE`] share one prepared set, but
-/// the de-zipper still glides in the graph's own time: built at 1.536 MHz
+/// the de-zipper still ramps in the graph's own time: built at 1.536 MHz
 /// and prepared at 1.024 MHz, 50 ms is 51 200 samples, exactly 400 steps,
 /// and leaves `e^-1` of a move. Left at 1.536 MHz's coefficient (600 steps
 /// per 50 ms) it would leave `e^-(2/3)` = 0.51.
 #[test]
-fn a_prepare_above_the_ceiling_retunes_the_glide() {
+fn a_prepare_above_the_ceiling_retunes_the_ramp() {
     assert_eq!(HRTF_STEP, 128, "the rates below assume 128-sample steps");
     let mut node = HrtfBinauralNode::<f32>::new(
         &synthetic_hrir_sphere(48_000, 4),
@@ -439,7 +439,7 @@ fn remaining_after(aim: &mut AngleSmoother, steps: usize) -> f64 {
 /// 2560 samples, exactly twenty 128-sample steps; at 102.4 kHz (after a
 /// retune) it is forty.
 #[test]
-fn the_glide_has_a_50_ms_time_constant_in_audio_time() {
+fn the_ramp_has_a_50_ms_time_constant_in_audio_time() {
     assert_eq!(HRTF_STEP, 128, "the rates below assume 128-sample steps");
     let e_inv = (-1.0f64).exp();
 
@@ -458,7 +458,7 @@ fn the_glide_has_a_50_ms_time_constant_in_audio_time() {
     );
 }
 
-/// The ports a lane can drive are the params the node declares, each with
+/// The ports a control signal can drive are the params the node declares, each with
 /// its cell as the base the graph's modulation rides on.
 #[test]
 fn the_renderer_declares_its_params() {
@@ -478,19 +478,19 @@ fn the_renderer_declares_its_params() {
     );
 }
 
-/// A lane that drives a param is heard as the cell would be: a node whose
-/// lane holds the value, over a cell at another, settles on the render of a
+/// A control signal that drives a param is heard as the cell would be: a node whose
+/// control signal holds the value, over a cell at another, settles on the render of a
 /// node whose cell holds it, for each of the three ports.
 ///
 /// The value must change the render from the default's, else the row would
-/// pass on a node that ignored both the lane and the cell.
+/// pass on a node that ignored both the control signal and the cell.
 #[test]
-fn a_lane_drives_each_param_as_its_cell_would() {
+fn a_signal_drives_each_param_as_its_cell_would() {
     let input = [0.5f32; BLOCK];
-    let settle = |node: &mut HrtfBinauralNode<f32>, lane: Option<(usize, f32)>| {
-        let held = lane.map(|(_, v)| [v; BLOCK]);
+    let settle = |node: &mut HrtfBinauralNode<f32>, signal: Option<(usize, f32)>| {
+        let held = signal.map(|(_, v)| [v; BLOCK]);
         let mut params: [Option<&[f32]>; 3] = [None; 3];
-        if let Some((k, _)) = lane {
+        if let Some((k, _)) = signal {
             params[k] = held.as_ref().map(|v| &v[..]);
         }
         // Ten 50 ms time constants of blocks.
@@ -520,12 +520,12 @@ fn a_lane_drives_each_param_as_its_cell_would() {
             "{param:?}: the value does not change the render, so the row proves nothing"
         );
 
-        let mut lane = make_node();
-        let at_lane = settle(&mut lane, Some((k, value)));
-        for (ch, (a, b)) in at_lane.iter().zip(&at_cell).enumerate() {
+        let mut signal = make_node();
+        let at_signal = settle(&mut signal, Some((k, value)));
+        for (ch, (a, b)) in at_signal.iter().zip(&at_cell).enumerate() {
             assert!(
                 (a - b).abs() < 1e-3,
-                "{param:?}, channel {ch}: the lane settled at {a}, the cell at {b}"
+                "{param:?}, channel {ch}: the signal settled at {a}, the cell at {b}"
             );
         }
     }

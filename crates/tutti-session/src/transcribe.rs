@@ -12,7 +12,7 @@
 
 use tutti_graph::Harmony;
 use tutti_measure::{ChordQuality, ChordSpan, NoteEvent, VelocityRange};
-use tutti_midi_protocol::{PitchBendSensitivity, widen_velocity};
+use tutti_midi_protocol::PitchBendSensitivity;
 use tutti_midi_runtime::{ClipEvents, HarmonyChanges, TimedHarmony, TimedMidiEvent};
 use tutti_tempo::TempoView;
 use tutti_ump::{
@@ -77,7 +77,7 @@ impl NoteMapping {
     fn note_velocity(&self, level: tutti_units::Db) -> NoteVelocity {
         match self.velocity {
             LevelVelocity::Fixed(velocity) => velocity,
-            LevelVelocity::ByLevel(range) => widen_velocity(U7::masked(range.midi(level))),
+            LevelVelocity::ByLevel(range) => NoteVelocity::from(U7::masked(range.midi(level))),
         }
     }
 }

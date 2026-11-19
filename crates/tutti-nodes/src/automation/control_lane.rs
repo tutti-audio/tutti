@@ -83,7 +83,7 @@ impl RangeReader {
 struct Shared {
     /// What the lane reads once per block, through the reader the node
     /// registered on it when it was built. A loan's sequence number
-    /// (`Loan::seq`) tells a republish (a glide) from a block that reads the
+    /// (`Loan::seq`) tells a republish (a ramp) from a block that reads the
     /// same program. The fork and `program()` read `Publisher::current` (a
     /// `Loan` must not leave the block).
     program: Publisher<ControlProgram>,
@@ -131,7 +131,7 @@ pub struct LaneControls(Arc<Shared>);
 
 impl LaneControls {
     /// Hands the lane `program`, from its next block's first frame, as a
-    /// glide from the value in flight. Control thread only.
+    /// ramp from the value in flight. Control thread only.
     pub fn publish(&self, program: ControlProgram) {
         self.publish_arc(Arc::new(program));
     }
@@ -183,7 +183,7 @@ impl LaneControls {
     /// re-wired to another target, or its target replaced, since a lane
     /// sends nothing while nothing moves and a new target would otherwise
     /// hold its own base until something does. The send is a point, not a
-    /// glide: the new target has no value in flight to glide from. Control
+    /// ramp: the new target has no value in flight to ramp from. Control
     /// thread.
     pub fn resync(&self) {
         self.0.resync.store(true, Ordering::Release);
@@ -651,14 +651,14 @@ impl Block<'_> {
         Ok(())
     }
 
-    /// The point at frame `p`: one piece from the value there (or, gliding,
+    /// The point at frame `p`: one piece from the value there (or, ramping,
     /// from the value in flight) to the value just before the next point.
     fn point(
         &self,
         walk: &mut Walk,
         out: &mut Vec<ParamEvent>,
         p: usize,
-        glide: bool,
+        ramp: bool,
     ) -> Result<(), Overflow> {
         let env = self.cx.env;
         let off = Offset::new(Samples::new(p), env.block_len).unwrap_or(Offset::ZERO);
@@ -690,10 +690,10 @@ impl Block<'_> {
             sent: abs,
             next: next_at(next),
         };
-        // A glide that would re-send the piece in flight unchanged (same
+        // A ramp that would re-send the piece in flight unchanged (same
         // end, same next point) leaves it alone: a republish that moves
         // nothing changes no frame.
-        let old = walk.flight.filter(|f| glide && f.seg.is_some());
+        let old = walk.flight.filter(|f| ramp && f.seg.is_some());
         let unchanged = |from: Option<f64>, to: f64, next: Option<f64>, seg: &ParamSegment| {
             old.is_some_and(|o| {
                 o.to.to_bits() == to.to_bits()
@@ -759,7 +759,7 @@ impl Block<'_> {
         let ins = self.inputs_at(walk, pf);
         let n_in = self.program.inputs().len();
         let in_flight = walk.flight.and_then(|f| f.seg.map(|s| (s, f.sent)));
-        let v0 = match (glide, in_flight) {
+        let v0 = match (ramp, in_flight) {
             (true, Some((seg, sent))) => {
                 Some(seg.raw_value_after(abs.since(sent).unwrap_or(Samples::new(0))))
             }
@@ -777,7 +777,7 @@ impl Block<'_> {
             return Ok(());
         };
         if steady {
-            let v = if glide {
+            let v = if ramp {
                 self.value_at(&time, &ins[..n_in]).map(|v| self.clamp(v))
             } else {
                 Some(self.clamp(v0))
@@ -787,7 +787,7 @@ impl Block<'_> {
                 if unchanged(None, v, None, &seg) {
                     return Ok(());
                 }
-                if !glide {
+                if !ramp {
                     self.send(out, p, seg)?;
                     walk.flight = Some(flight(Some((seg, v, v)), None));
                     return Ok(());
@@ -810,7 +810,7 @@ impl Block<'_> {
         consider(corners.play.map(|c| c.get() - time.play.get()));
         consider(moving);
         if !d.is_finite() {
-            // Gliding into a steady value: one grid step.
+            // Ramping into a steady value: one grid step.
             d = f64::from(CONTROL_GRID.stride());
         }
         // A corner on a frame computes a hair off it (a beat in frames): it
@@ -893,7 +893,7 @@ impl Block<'_> {
         let mut from = 0usize;
         let mut cur = at_zero.map(|g| (0usize, g));
         loop {
-            if let Some((p, glide)) = cur {
+            if let Some((p, ramp)) = cur {
                 // Input events on this frame land before its point.
                 while let Some(e) = events.get(ev).filter(|e| e.offset.index() <= p) {
                     if let Some((id, seg)) = self.input_of(e) {
@@ -906,7 +906,7 @@ impl Block<'_> {
                     }
                     ev += 1;
                 }
-                if let Err(o) = self.point(walk, out, p, glide) {
+                if let Err(o) = self.point(walk, out, p, ramp) {
                     if !self.truncate {
                         return Err(o);
                     }
@@ -1077,7 +1077,7 @@ impl<F: Float> Node<F> for ControlLaneNode {
             || knob.map(f64::to_bits) != self.seen.knob
             || range_bits != self.seen.range
             || depths != self.seen.depths;
-        // A resync is a point at frame 0, never a glide (`LaneControls::resync`).
+        // A resync is a point at frame 0, never a ramp (`LaneControls::resync`).
         let resync = s.resync.swap(false, Ordering::AcqRel);
         let t0 = cx.transport_at(Offset::ZERO);
         let p0 = cx.play_at(Offset::ZERO);

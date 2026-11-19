@@ -361,7 +361,7 @@ fn a_live_node_has_its_layouts_params() {
 /// A cell that moves lands on the stream's grid, whatever the blocks: the decay, the size and
 /// the diffusion written between two blocks at frame 1024 (a multiple of every block below)
 /// give the same render in blocks of 1, 16, 64, 128 and 1024 (the node against itself under
-/// cuts), because the reader takes each whole at the grid and the bank's glides are on the
+/// cuts), because the reader takes each whole at the grid and the bank's ramps are on the
 /// stream's chunks, not a block's. And the move is heard.
 #[test]
 fn a_moved_cell_lands_on_the_grid_whatever_the_blocks() {
@@ -394,13 +394,13 @@ fn a_moved_cell_lands_on_the_grid_whatever_the_blocks() {
 }
 
 /// A control the graph drives is read on the stream's 32-frame grid and at the corners of its
-/// lane, not at the block's last frame, so what is heard does not depend on how the stream is
-/// cut into blocks (the node against itself under cuts); and the lane is heard, since the
+/// control signal, not at the block's last frame, so what is heard does not depend on how the stream is
+/// cut into blocks (the node against itself under cuts); and the control signal is heard, since the
 /// cell it overrides is a different decay.
 #[test]
 fn a_driven_slow_control_is_sampled_on_the_grid_whatever_the_blocks() {
     let len = 4_096;
-    let lane: Vec<f32> = (0..len)
+    let signal: Vec<f32> = (0..len)
         .map(|n| 0.4 + 5.0 * n as f32 / len as f32)
         .collect();
     let x = noise(12, len);
@@ -409,7 +409,7 @@ fn a_driven_slow_control_is_sampled_on_the_grid_whatever_the_blocks() {
         let mut out = vec![Vec::new(), Vec::new()];
         for (i, chunk) in x.chunks(block).enumerate() {
             let at = i * block;
-            let l = &lane[at..at + chunk.len()];
+            let l = &signal[at..at + chunk.len()];
             let params = [driven.then_some(l)];
             for (o, y) in
                 out.iter_mut()
@@ -421,7 +421,7 @@ fn a_driven_slow_control_is_sampled_on_the_grid_whatever_the_blocks() {
         out
     };
     let whole = render(1_024, true);
-    assert_ne!(whole, render(1_024, false), "the lane is heard");
+    assert_ne!(whole, render(1_024, false), "the control signal is heard");
     for block in [1, 16, 64, 128] {
         assert_eq!(render(block, true), whole, "blocks of {block}");
     }
@@ -567,7 +567,7 @@ fn a_size_on_the_move_is_not_parked_while_it_still_rings() {
 /// A node frozen from the start with no input, then thawed, renders its ring-out in silence
 /// and parks: and what wakes is a fresh node, bit for bit. The kernel has rendered all along
 /// without hearing a sample, so a park that resets only a node that heard input leaves its
-/// grid, its modulation phases and its glides where the thaw left them.
+/// grid, its modulation phases and its ramps where the thaw left them.
 #[test]
 fn a_node_frozen_without_input_wakes_fresh_after_the_thaw_parks() {
     let frozen = FdnControls {

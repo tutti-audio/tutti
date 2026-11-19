@@ -9,7 +9,7 @@ use tutti_dsp::{
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
 use tutti_units::{CompressionRatio, Db, Hz, Q, SampleRate, Seconds, Tail};
 
-use crate::kernel::{ControlLanes, Kernel, KernelNode};
+use crate::kernel::{ControlSignals, Kernel, KernelNode};
 
 /// What a [`DynamicEqNode`] is made from: its width, the band's centre and Q, and optionally
 /// the curve, the times, the range, the mode and the key.
@@ -127,7 +127,7 @@ impl DynamicEqConfig {
 /// side-chain key) N key inputs, and N outputs.
 ///
 /// A [`KernelNode`] over [`DynamicEqKernel`], the detector, the curve and the bell being
-/// [`DynamicEqBank`]'s (see it for the detector and the gain's glide); this file holds the
+/// [`DynamicEqBank`]'s (see it for the detector and the gain's ramp); this file holds the
 /// cells and how the graph reaches them. Made from a [`DynamicEqConfig`]
 /// (`DynamicEqNode::from`).
 ///
@@ -145,7 +145,7 @@ impl DynamicEqConfig {
 /// [`Hz`]) and Q ([`UnitParam::Q`](tutti_units::UnitParam::Q), [`Q`]), are live
 /// [`Params`](crate::Params) shared across clones. They are on the stream grid (16 frames from
 /// the last reset, [`Kernel::GRID`]), so the render does not depend on how the stream is cut
-/// into blocks; the curve and the times land whole and the bell glides to a new centre or Q.
+/// into blocks; the curve and the times land whole and the bell ramps to a new centre or Q.
 ///
 /// The tail is unknown: a bell rings for as long as its Q says.
 ///
@@ -179,7 +179,7 @@ control_set! {
     Attack => Seconds = attack { whole },
     Release => Seconds = release { whole },
     Range => Db = range { whole },
-    // The bell's and the detector's coefficients glide in the bank, over one grid period.
+    // The bell's and the detector's coefficients ramp in the bank, over one grid period.
     Cutoff => Hz = center { whole },
     Q => Q = q { whole };
 
@@ -197,8 +197,8 @@ pub struct DynamicEqKernel<F: Float + SimdLanes> {
     mode: DynamicMode,
     /// `None` until [`prepare`](Kernel::prepare).
     bank: Option<DynamicEqBank<F>>,
-    /// Whether the first retarget after `prepare` has landed.
-    landed: bool,
+    /// Whether the first retarget after `prepare` has been applied.
+    applied: bool,
 }
 
 impl<F: Float + SimdLanes + Lerp> DynamicEqKernel<F> {
@@ -208,7 +208,7 @@ impl<F: Float + SimdLanes + Lerp> DynamicEqKernel<F> {
             key,
             mode,
             bank: None,
-            landed: false,
+            applied: false,
         }
     }
 }
@@ -236,7 +236,7 @@ impl<F: Float + SimdLanes + Lerp> Kernel for DynamicEqKernel<F> {
 
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
         self.bank = Some(DynamicEqBank::new(self.mode, self.input.layout(), rate));
-        self.landed = false;
+        self.applied = false;
     }
 
     fn reset(&mut self) {
@@ -247,27 +247,27 @@ impl<F: Float + SimdLanes + Lerp> Kernel for DynamicEqKernel<F> {
 
     fn retarget(&mut self, controls: &DynamicEqControls) {
         let Some(bank) = &mut self.bank else { return };
-        bank.aim(controls);
-        if !self.landed {
-            bank.settle();
-            self.landed = true;
+        bank.retarget(controls);
+        if !self.applied {
+            bank.jump_to_target();
+            self.applied = true;
         }
     }
 
     fn render(
         &mut self,
         input: Planes<'_, F>,
-        lanes: ControlLanes<'_, F>,
+        signals: ControlSignals<'_, F>,
         output: PlanesMut<'_, '_, F>,
     ) {
-        self.render_keyed(input, input, lanes, output);
+        self.render_keyed(input, input, signals, output);
     }
 
     fn render_keyed(
         &mut self,
         input: Planes<'_, F>,
         key: Planes<'_, F>,
-        _: ControlLanes<'_, F>,
+        _: ControlSignals<'_, F>,
         output: PlanesMut<'_, '_, F>,
     ) {
         if let Some(bank) = &mut self.bank {
@@ -309,7 +309,7 @@ mod tests {
         let mut y = vec![0.0f64; x.len()];
         k.render(
             Planes::new(&[&x[..]]).unwrap(),
-            ControlLanes::NONE,
+            ControlSignals::NONE,
             PlanesMut::new(&mut [&mut y[..]]).unwrap(),
         );
         assert_eq!(y, x);

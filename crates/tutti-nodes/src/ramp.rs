@@ -28,7 +28,7 @@ use tutti_buffers::Float;
 /// Clamping cannot stand in for this: `f32::clamp` passes NaN through.
 ///
 /// `F` is the width of the control's value: `f32` for a control the graph
-/// carries as a lane, `f64` for one held in an `f64` unit (an angle).
+/// carries as a control signal, `f64` for one held in an `f64` unit (an angle).
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct LastGood<F: Float = f32>(F);
 

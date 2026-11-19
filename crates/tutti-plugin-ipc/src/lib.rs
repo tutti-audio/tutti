@@ -56,6 +56,8 @@ mod wake;
 
 #[cfg(test)]
 mod process_pipeline_tests;
+#[cfg(test)]
+mod served_handle_tests;
 
 pub(crate) use batcher::Batcher;
 pub(crate) use batcher::{BlockPayload, Chunks};

@@ -516,7 +516,7 @@ fn a_direction_change_crossfades_without_a_jump() {
     let target = Azimuth::new(170.0);
     aim(&node.param_set(), target, Elevation::LEVEL);
     let (mut l, mut r) = (Vec::new(), Vec::new());
-    // Half a second: ten time constants of the 50 ms glide.
+    // Half a second: ten time constants of the 50 ms ramp.
     for _ in 0..(SAMPLE_RATE as usize / 2 / 64) {
         let out = drive(&mut node, RATE, Planes::new(&[&ones, &ones]).unwrap(), &[]);
         l.extend_from_slice(&out[0]);

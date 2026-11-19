@@ -3,16 +3,20 @@ use crate::test_support::at;
 
 use tutti_fixtures::midi;
 use tutti_graph::UmpAt;
-use tutti_midi_protocol::widen_velocity;
-use tutti_ump::{MidiChannel, NoteKeyEvent, U7};
+
+use tutti_ump::{MidiChannel, NoteKeyEvent, NoteVelocity, U7};
 
 /// A note at `offset`, which may lie past the 64-frame block the placement test
 /// uses.
 fn note_at(note: u8, offset: usize) -> UmpAt {
     at(
         offset,
-        // 7-bit velocity 100, widened (M2-115).
-        midi::note_on(MidiChannel::FIRST, note, widen_velocity(U7::of(100)).get()),
+        // 7-bit velocity 100, upscaled (M2-115).
+        midi::note_on(
+            MidiChannel::FIRST,
+            note,
+            NoteVelocity::from(U7::of(100)).get(),
+        ),
     )
 }
 

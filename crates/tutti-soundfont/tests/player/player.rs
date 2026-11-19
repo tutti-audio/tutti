@@ -404,7 +404,7 @@ fn a_pan_change_on_a_sounding_note_ramps() {
 }
 
 // Arm 0x40 (hold pedal): 64 and above holds, below does not.
-/// Sustain is down from 64 and holds a released note until it lifts.
+/// Sustain is down from 64 and holds a released note until it releases.
 /// Spec: sf2.midi.cc64.sustain-active, sf2.midi.cc64.sustain-holds
 #[test]
 fn cc_64_holds_released_notes_until_the_pedal_lifts() {

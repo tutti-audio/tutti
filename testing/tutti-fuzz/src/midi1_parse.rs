@@ -1,5 +1,5 @@
-use tutti_midi_protocol::{read, widen_bytes};
-use tutti_ump::{Message, Midi1Parser, MidiGroup, SysexMessage, parse_exact};
+use tutti_midi_protocol::read;
+use tutti_ump::{Message, Midi1Parser, MidiGroup, SysexMessage, Ump, parse_exact};
 
 /// Feeds `data` as a MIDI 1.0 byte stream to the stream parser and as one
 /// message to the stateless readers.
@@ -20,7 +20,7 @@ pub fn midi1_parse(data: &[u8]) {
     }
     let _: Vec<Message> = Midi1Parser::new(group).feed_all(data).collect();
     let _ = parse_exact(group, data);
-    let _ = widen_bytes(group, data);
+    let _ = Ump::from_midi1_bytes(group, data);
     if let Ok(message) = SysexMessage::from_framed(data) {
         let _ = read(message);
     }

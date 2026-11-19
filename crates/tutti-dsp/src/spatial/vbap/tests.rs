@@ -4,7 +4,7 @@ use tutti_buffers::{Mono, MonoMut};
 
 /// `VbapGains::process_channel` over plain slices.
 fn render<F: Float>(
-    glide: &Glide<VbapGains>,
+    ramp: &Ramp<VbapGains>,
     first: u32,
     speaker: Option<usize>,
     fold: &Fold<F>,
@@ -13,7 +13,7 @@ fn render<F: Float>(
     out: &mut [F],
 ) {
     VbapGains::process_channel(
-        glide,
+        ramp,
         first,
         speaker,
         fold,
@@ -23,7 +23,7 @@ fn render<F: Float>(
     );
 }
 
-use crate::Glide;
+use crate::Ramp;
 
 fn gains(mono: bool, a0: f64, b0: f64) -> VbapGains {
     let mut g = VbapGains {
@@ -52,49 +52,49 @@ fn a_held_gain_is_the_fold_times_g_or_the_pair_weighed() {
     let (l, r) = ([0.5f32, -0.25], [0.125f32, 1.0]);
     let mut out = [0.0f32; 2];
     let mono = [(l[0] + r[0]) * 0.5, (l[1] + r[1]) * 0.5];
-    let held = Glide::landed(gains(true, 0.3, 0.0)).by(16);
+    let held = Ramp::new(gains(true, 0.3, 0.0)).steps(16);
     render(&held, 1, Some(0), &fold, &l, &r, &mut out);
     for i in 0..2 {
         assert_eq!(out[i], mono[i] * 0.3);
     }
-    let held = Glide::landed(gains(false, 0.3, 0.7)).by(16);
+    let held = Ramp::new(gains(false, 0.3, 0.7)).steps(16);
     render(&held, 1, Some(0), &fold, &l, &r, &mut out);
     for i in 0..2 {
         assert_eq!(out[i], l[i] * 0.3 + r[i] * 0.7);
     }
 }
 
-/// In `f64` a held gain is `l * a + r * b` and a glide reads `k / 16` at step `k`.
+/// In `f64` a held gain is `l * a + r * b` and a ramp reads `k / 16` at step `k`.
 #[test]
 fn an_f64_render_weighs_the_pair_by_the_widened_gains() {
     let fold = stereo_to_mono::<f64>();
     let (l, r) = ([0.5f64, -0.25], [0.125f64, 1.0]);
     let mut out = [0.0f64; 2];
-    let held = Glide::landed(gains(false, 0.3, 0.7)).by(16);
+    let held = Ramp::new(gains(false, 0.3, 0.7)).steps(16);
     render(&held, 1, Some(0), &fold, &l, &r, &mut out);
     for i in 0..2 {
         assert_eq!(out[i], l[i] * 0.3 + r[i] * 0.7);
     }
-    let mut glide = Glide::landed(gains(true, 0.0, 0.0)).by(16);
-    glide.aim(gains(true, 1.0, 0.0));
-    let (ones, mut ramp) = ([1.0f64; 16], [0.0f64; 16]);
-    render(&glide, 1, Some(0), &fold, &ones, &ones, &mut ramp);
-    for (i, &g) in ramp.iter().enumerate() {
+    let mut ramp = Ramp::new(gains(true, 0.0, 0.0)).steps(16);
+    ramp.retarget(gains(true, 1.0, 0.0));
+    let (ones, mut rendered) = ([1.0f64; 16], [0.0f64; 16]);
+    render(&ramp, 1, Some(0), &fold, &ones, &ones, &mut rendered);
+    for (i, &g) in rendered.iter().enumerate() {
         assert_eq!(g, (i + 1) as f64 / 16.0, "frame {i}");
     }
 }
 
-/// A glide from gain 0 to gain 1 over the grid reads `k / 16` at step `k`
+/// A ramp from gain 0 to gain 1 over the grid reads `k / 16` at step `k`
 /// (exact: a power of two), arrives on the target on step 16, and renders the
 /// same bits cut into any calls.
 #[test]
-fn a_gain_glide_reads_its_step_and_any_cut_gives_the_same_bits() {
+fn a_gain_ramp_reads_its_step_and_any_cut_gives_the_same_bits() {
     let fold = stereo_to_mono();
-    let mut glide = Glide::landed(gains(true, 0.0, 0.0)).by(16);
-    glide.aim(gains(true, 1.0, 0.0));
+    let mut ramp = Ramp::new(gains(true, 0.0, 0.0)).steps(16);
+    ramp.retarget(gains(true, 1.0, 0.0));
     let ones = [1.0f32; 16];
     let mut whole = [0.0f32; 16];
-    render(&glide, 1, Some(0), &fold, &ones, &ones, &mut whole);
+    render(&ramp, 1, Some(0), &fold, &ones, &ones, &mut whole);
     for (i, &g) in whole.iter().enumerate() {
         assert_eq!(g, (i + 1) as f32 / 16.0, "frame {i}");
     }
@@ -104,7 +104,7 @@ fn a_gain_glide_reads_its_step_and_any_cut_gives_the_same_bits() {
         let end = first as usize - 1 + len;
         let at = first as usize - 1;
         render(
-            &glide,
+            &ramp,
             first,
             Some(0),
             &fold,
@@ -116,21 +116,21 @@ fn a_gain_glide_reads_its_step_and_any_cut_gives_the_same_bits() {
     }
     assert_eq!(whole.map(f32::to_bits), cut.map(f32::to_bits));
     let mut none = [1.0f32; 4];
-    render(&glide, 1, None, &fold, &ones[..4], &ones[..4], &mut none);
+    render(&ramp, 1, None, &fold, &ones[..4], &ones[..4], &mut none);
     assert_eq!(none, [0.0; 4], "no speaker is silence");
 }
 
-/// A glide from a mono set to a stereo one crosses between the two weighings:
+/// A ramp from a mono set to a stereo one crosses between the two weighings:
 /// the mono set is half its gain on each side, so the step 8 of 16 is the mean
 /// of the ends' pairs.
 #[test]
-fn a_glide_between_the_branches_blends_their_pairs() {
+fn a_ramp_between_the_branches_blends_their_pairs() {
     let fold = stereo_to_mono();
-    let mut glide = Glide::landed(gains(true, 1.0, 0.0)).by(16);
-    glide.aim(gains(false, 0.0, 1.0));
+    let mut ramp = Ramp::new(gains(true, 1.0, 0.0)).steps(16);
+    ramp.retarget(gains(false, 0.0, 1.0));
     let (l, r) = ([1.0f32; 16], [0.0f32; 16]);
     let mut out = [0.0f32; 16];
-    render(&glide, 1, Some(0), &fold, &l, &r, &mut out);
+    render(&ramp, 1, Some(0), &fold, &l, &r, &mut out);
     // The left weight goes from 0.5 (half of 1.0) to 0.0.
     assert_eq!(out[7], 0.25);
     assert_eq!(out[15], 0.0);
@@ -174,11 +174,11 @@ fn the_spread_is_symmetric_about_the_bearing_away_from_the_seam() {
     assert_eq!(b, Azimuth::new(30.0));
 }
 
-/// A bearing glide from 170 to -170 degrees passes through 180, never through
-/// the front: every step is within 10 degrees of the seam. A height glide is a
+/// A bearing ramp from 170 to -170 degrees passes through 180, never through
+/// the front: every step is within 10 degrees of the seam. A height ramp is a
 /// line.
 #[test]
-fn a_bearing_glide_takes_the_short_arc_and_a_height_glide_a_line() {
+fn a_bearing_ramp_takes_the_short_arc_and_a_height_ramp_a_line() {
     let (from, to) = (Azimuth::new(170.0), Azimuth::new(-170.0));
     for k in 0..=10 {
         let at = from.lerp(&to, k, 10);
@@ -217,17 +217,17 @@ fn a_huge_width_saturates_instead_of_overflowing() {
     }
 }
 
-/// A gain that changes only in the sign of its zero is a glide, not a held
+/// A gain that changes only in the sign of its zero is a ramp, not a held
 /// gain: the frames before the last are `+0.0` and the last lands on the target
 /// `-0.0`, bit for bit.
 #[test]
-fn a_signed_zero_gain_change_is_a_glide_that_lands_on_the_target_bits() {
+fn a_signed_zero_gain_change_is_a_ramp_that_lands_on_the_target_bits() {
     let fold = stereo_to_mono();
-    let mut glide = Glide::landed(gains(true, 0.0, 0.0)).by(16);
-    glide.aim(gains(true, -0.0, 0.0));
+    let mut ramp = Ramp::new(gains(true, 0.0, 0.0)).steps(16);
+    ramp.retarget(gains(true, -0.0, 0.0));
     let ones = [1.0f32; 16];
     let mut out = [1.0f32; 16];
-    render(&glide, 1, Some(0), &fold, &ones, &ones, &mut out);
+    render(&ramp, 1, Some(0), &fold, &ones, &ones, &mut out);
     assert!(out[..15].iter().all(|o| o.to_bits() == 0.0f32.to_bits()));
     assert_eq!(out[15].to_bits(), (-0.0f32).to_bits());
 }

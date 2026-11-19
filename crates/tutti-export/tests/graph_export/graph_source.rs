@@ -400,7 +400,7 @@ fn a_dithered_export_writes_its_dithered_render() {
 /// one mostly in channel 2, with each source's energy over the speakers the
 /// unit energy of its input (`assert_vbap_energy`), in the built render and in
 /// the forked one from the first frame: a panner's first grid point lands on its
-/// bearing whole, and its gains glide on a grid counted from the start, whatever
+/// bearing whole, and its gains ramp on a grid counted from the start, whatever
 /// the render's blocks.
 #[test]
 fn a_surround_mix_folds_to_every_width() {

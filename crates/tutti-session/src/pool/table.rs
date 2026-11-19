@@ -201,11 +201,11 @@ struct Slot<S: Float> {
     holds: Arc<()>,
     /// One strong count for the slot, one for each node [`Hold`].
     pins: Arc<()>,
-    /// The value was released by the kind's [`park`](PoolEntry::park); the
+    /// The value was released by the kind's [`retain`](PoolEntry::retain); the
     /// next declaration loads it again.
     parked: bool,
     /// What the kind does with the value when the entry parks.
-    park: fn(Value) -> Option<Value>,
+    retain: fn(Value) -> Option<Value>,
     /// The file the load reads.
     file: Option<PathBuf>,
     /// The file's stamp as the worker took it before the load that made the
@@ -528,7 +528,7 @@ impl<A: crate::AppKey, C: Clock> Pool<A, C> {
             load,
             reload,
             lost,
-            park,
+            retain,
             file,
             share,
             ..
@@ -548,7 +548,7 @@ impl<A: crate::AppKey, C: Clock> Pool<A, C> {
                     holds: Arc::new(()),
                     pins: Arc::new(()),
                     parked: false,
-                    park,
+                    retain,
                     file,
                     stamp: None,
                     life: Life::new(),
@@ -571,7 +571,7 @@ impl<A: crate::AppKey, C: Clock> Pool<A, C> {
         // latest declaration's.
         slot.reload = reload;
         slot.lost = lost;
-        slot.park = park;
+        slot.retain = retain;
         slot.file = file;
         slot.share = share;
         if slot.parked {
@@ -743,7 +743,7 @@ impl<A: crate::AppKey, C: Clock> Pool<A, C> {
             let Some(value) = slot.loaded.take() else {
                 continue;
             };
-            slot.loaded = (slot.park)(value);
+            slot.loaded = (slot.retain)(value);
             if slot.loaded.is_none() {
                 slot.life.close();
                 slot.life = Life::new();

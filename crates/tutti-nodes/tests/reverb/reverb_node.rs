@@ -245,9 +245,9 @@ fn the_cut_discards_only_what_is_below_the_floor() {
     for c in [gm(), controls(0.9, 0.2), controls(0.1, 0.9)] {
         let tail = tail_of(c);
         let mut bank = FreeverbBank::<f32>::new(SR);
-        let mut glides = bank.glides();
-        bank.aim(&mut glides, &c);
-        glides.settle();
+        let mut ramps = bank.ramps();
+        bank.retarget(&mut ramps, &c);
+        ramps.jump_to_target();
         let frames = tail + 20_000;
         let mut x = vec![0.0f32; frames];
         x[0] = 1.0;
@@ -255,7 +255,7 @@ fn the_cut_discards_only_what_is_below_the_floor() {
         let ins = [x.as_slice()];
         let mut outs: [&mut [f32]; 2] = [&mut l, &mut r];
         bank.process(
-            &mut glides,
+            &mut ramps,
             tutti_buffers::Planes::new(&ins).unwrap(),
             tutti_buffers::PlanesMut::new(&mut outs).unwrap(),
         );
@@ -361,8 +361,8 @@ fn an_idle_reverb_wakes_as_a_fresh_one() {
     }
 }
 
-/// A port the graph drives is read on the stream's 32-frame grid, as the FDN's is: a lane
-/// held at 0.9 renders as a cell at 0.9, whatever the blocks, and a lane that rises through
+/// A port the graph drives is read on the stream's 32-frame grid, as the FDN's is: a control signal
+/// held at 0.9 renders as a cell at 0.9, whatever the blocks, and a control signal that rises through
 /// the stream renders the same cut into blocks of 32, 64 and 100 frames. And the tail is
 /// reported from the *longest* room the port takes in the block, so a decay that falls
 /// through the block is not reported short.
@@ -387,8 +387,8 @@ fn a_modulated_port_is_read_on_the_grid_and_its_peak_sets_the_tail() {
         let mut rig = Rig::new(live(controls(0.5, 0.5)));
         let mut out = vec![Vec::new(), Vec::new()];
         for (k, chunk) in x.chunks(block).enumerate() {
-            let lane = &rising[k * block..k * block + chunk.len()];
-            let params = [driven.then_some(lane), none];
+            let signal = &rising[k * block..k * block + chunk.len()];
+            let params = [driven.then_some(signal), none];
             for (all, more) in out.iter_mut().zip(rig.block(chunk, &params).audio) {
                 all.extend(more);
             }
@@ -396,7 +396,7 @@ fn a_modulated_port_is_read_on_the_grid_and_its_peak_sets_the_tail() {
         out
     };
     let whole = render(32, true);
-    assert_ne!(whole, render(32, false), "the lane is heard");
+    assert_ne!(whole, render(32, false), "the control signal is heard");
     for block in [64, 100] {
         assert_eq!(render(block, true), whole, "blocks of {block}");
     }
@@ -574,7 +574,7 @@ fn an_unprepared_node_declares_nothing_derived_from_a_rate() {
 /// A cell that moves lands on the stream's 32-frame grid, whatever the blocks: the room and
 /// the damping written between two blocks at frame 1024 (a multiple of every block below)
 /// give the same render in blocks of 1, 16, 64, 128 and 1024 (the node against itself under
-/// cuts), because the reader takes each whole at the grid and the bank's glides are on the
+/// cuts), because the reader takes each whole at the grid and the bank's ramps are on the
 /// stream's chunks, not a block's. And the move is heard.
 #[test]
 fn a_moved_cell_lands_on_the_grid_whatever_the_blocks() {
@@ -602,7 +602,7 @@ fn a_moved_cell_lands_on_the_grid_whatever_the_blocks() {
     }
 }
 
-/// A cell that moves **between** grid points starts its glide at the next one: a room and a
+/// A cell that moves **between** grid points starts its ramp at the next one: a room and a
 /// damping written 13 frames past frame 1024 and heard from the block that begins there
 /// render the same as the same write at frame 1056, the next grid point of 32, and
 /// differently from the write at 1088.
@@ -632,7 +632,7 @@ fn a_move_between_grid_points_starts_at_the_next_one() {
 
 /// A reset node equals a fresh one that has the cell: render, move the room and the damping,
 /// reset, and the render is the fresh node's with those cells (the move lands at once, it does
-/// not glide from the old room).
+/// not ramp from the old room).
 #[test]
 fn a_cell_moved_before_a_reset_lands_at_once_as_on_a_fresh_node() {
     let x = noise(21, 4_096);

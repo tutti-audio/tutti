@@ -2,7 +2,6 @@
 //! [`Midi2Translator`] an input edge runs once.
 
 use crate::scale;
-use crate::voice::{widen, widen_velocity};
 use tutti_ump::{
     Address, Attribute, Bank, CCNumber, ControlValue, Message, MidiChannel, MidiGroup,
     NoteVelocity, U7, U14, Ump, Voice1, Voice2,
@@ -68,7 +67,7 @@ struct Channel {
 /// State is kept per group and channel, and the group is kept. What it does
 /// (M2-104 Appendix D.3):
 ///
-/// - **A stateless message** is [`widen`]ed: velocity, pressure, Control
+/// - **A stateless message** is converted by `Voice2::from`: velocity, pressure, Control
 ///   Change and Pitch Bend values scaled Min-Center-Max (M2-115 section 3),
 ///   and a Note On at velocity 0 is a Note Off at release velocity `0x8000`.
 /// - **An RPN or NRPN run** (CC 101 and 100, or 99 and 98, then Data Entry CC
@@ -278,7 +277,7 @@ impl Midi2Translator {
                 if matches!(other, Voice1::NoteOn { .. }) {
                     channel.velocity_low = None;
                 }
-                send(widen(other));
+                send(Voice2::from(other));
             }
         }
         sent
@@ -293,17 +292,13 @@ impl Channel {
     /// are cleared once the Note On or Note Off is parsed).
     fn velocity(&mut self, high: U7) -> NoteVelocity {
         match self.velocity_low.take() {
-            Some(low) => NoteVelocity::new(scale::upscale(
-                u32::from(U14::from_halves(high, low).get()),
-                14,
-                16,
-            ) as u16),
-            None => widen_velocity(high),
+            Some(low) => NoteVelocity::from(U14::from_halves(high, low)),
+            None => NoteVelocity::from(high),
         }
     }
 }
 
-/// A Control Change on `channel`: absorbed into a run or a bank, or widened.
+/// A Control Change on `channel`: absorbed into a run or a bank, or translated.
 fn controller_change(
     channel: &mut Channel,
     controller: CCNumber,
@@ -367,7 +362,7 @@ fn controller_change(
             channel.msb = None;
             channel.pending = false;
             channel.early_lsb = None;
-            send(widen(Voice1::ControlChange { controller, value }));
+            send(Voice2::from(Voice1::ControlChange { controller, value }));
         }
         // CA-031: Bn 58 vv is the lower 7 bits of the next Note On or Note Off's
         // velocity on this channel. It is the MIDI 1.0 spelling of what the
@@ -382,7 +377,7 @@ fn controller_change(
             channel.bank_lsb = value;
             channel.bank_set = true;
         }
-        _ => send(widen(Voice1::ControlChange { controller, value })),
+        _ => send(Voice2::from(Voice1::ControlChange { controller, value })),
     }
 }
 
@@ -405,16 +400,16 @@ fn flush(channel: &mut Channel, send: &mut impl FnMut(Voice2)) {
 fn emit(channel: &mut Channel, lsb: Option<U7>, send: &mut impl FnMut(Voice2)) {
     channel.pending = false;
     let half = |v: Option<U7>| v.unwrap_or(U7::of(0));
-    let data = u32::from(U14::from_halves(half(channel.msb), half(lsb)).get());
+    let data = U14::from_halves(half(channel.msb), half(lsb));
     let voice = match channel.kind {
         Kind::None => return,
         Kind::Registered => {
             let Number { bank, index } = channel.rpn;
-            let value = ControlValue::new(if scale::zero_extended(index) {
-                data << 18
+            let value = if scale::zero_extended(index) {
+                ControlValue::new(u32::from(data.get()) << 18)
             } else {
-                scale::upscale(data, 14, 32)
-            });
+                ControlValue::from(data)
+            };
             Voice2::Registered { bank, index, value }
         }
         Kind::Assignable => {
@@ -422,7 +417,7 @@ fn emit(channel: &mut Channel, lsb: Option<U7>, send: &mut impl FnMut(Voice2)) {
             Voice2::Assignable {
                 bank,
                 index,
-                value: ControlValue::new(scale::upscale(data, 14, 32)),
+                value: ControlValue::from(data),
             }
         }
     };

@@ -9,7 +9,7 @@ use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
 use tutti_units::{Hz, Q, SampleRate, Seconds, Semitones, Tail};
 
 use super::filter_bus;
-use crate::kernel::{ControlLanes, Kernel, KernelNode};
+use crate::kernel::{ControlSignals, Kernel, KernelNode};
 
 /// What an [`EnvelopeFilterNode`] is made from: its width, its base cutoff and response, and
 /// optionally its depth, resonance and envelope times.
@@ -71,7 +71,7 @@ impl EnvelopeFilterConfig {
 /// channel followed with an attack and a release, in `[0, 1]` (0 silent, 1 at full scale).
 ///
 /// The cutoff is designed once per 16 frames of the stream at the envelope then, and the
-/// coefficients glide to it as the SVF's do ([`EnvelopeFilterBank`]). At depth 0 it is a fixed
+/// coefficients ramp to it as the SVF's do ([`EnvelopeFilterBank`]). At depth 0 it is a fixed
 /// SVF at the base.
 ///
 /// The base (`UnitParam::Cutoff`), the resonance (`UnitParam::Q`), the envelope's attack and
@@ -123,8 +123,8 @@ pub struct EnvelopeFilterKernel<F: Float + SimdLanes> {
     ty: SvfType,
     /// `None` until [`prepare`](Kernel::prepare).
     bank: Option<EnvelopeFilterBank<F>>,
-    /// Whether the first retarget after `prepare` has landed.
-    landed: bool,
+    /// Whether the first retarget after `prepare` has been applied.
+    applied: bool,
 }
 
 impl<F: Float + SimdLanes + Lerp> EnvelopeFilterKernel<F> {
@@ -133,7 +133,7 @@ impl<F: Float + SimdLanes + Lerp> EnvelopeFilterKernel<F> {
             input,
             ty,
             bank: None,
-            landed: false,
+            applied: false,
         }
     }
 }
@@ -155,7 +155,7 @@ impl<F: Float + SimdLanes + Lerp> Kernel for EnvelopeFilterKernel<F> {
 
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
         self.bank = Some(EnvelopeFilterBank::new(self.input.layout(), self.ty, rate));
-        self.landed = false;
+        self.applied = false;
     }
 
     fn reset(&mut self) {
@@ -166,17 +166,17 @@ impl<F: Float + SimdLanes + Lerp> Kernel for EnvelopeFilterKernel<F> {
 
     fn retarget(&mut self, controls: &EnvelopeFilterControls) {
         let Some(bank) = &mut self.bank else { return };
-        bank.aim(controls);
-        if !self.landed {
-            bank.settle();
-            self.landed = true;
+        bank.retarget(controls);
+        if !self.applied {
+            bank.jump_to_target();
+            self.applied = true;
         }
     }
 
     fn render(
         &mut self,
         input: Planes<'_, F>,
-        _: ControlLanes<'_, F>,
+        _: ControlSignals<'_, F>,
         output: PlanesMut<'_, '_, F>,
     ) {
         if let Some(bank) = &mut self.bank {
@@ -213,7 +213,7 @@ mod tests {
         let mut y = vec![0.0f64; x.len()];
         k.render(
             Planes::new(&[&x[..]]).unwrap(),
-            ControlLanes::NONE,
+            ControlSignals::NONE,
             PlanesMut::new(&mut [&mut y[..]]).unwrap(),
         );
         assert!((y[3_999] - c).abs() < 1e-12, "{} against {c}", y[3_999]);

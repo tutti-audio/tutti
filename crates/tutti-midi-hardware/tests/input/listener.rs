@@ -39,7 +39,7 @@ impl Listener {
     }
 
     /// As [`over`](Self::over), with the engine's ingest node between the
-    /// inlets and the log: a MIDI 1.0 message arrives widened.
+    /// inlets and the log: a MIDI 1.0 message arrives translated.
     pub fn over_ingest(inlets: &Arc<InputInlets>) -> Self {
         Self::build(inlets, true)
     }

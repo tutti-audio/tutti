@@ -1,17 +1,21 @@
 #![doc = include_str!("../README.md")]
 //! Translation between the MIDI 1.0 and MIDI 2.0 protocols.
 //!
-//! [`widen`] turns a MIDI 1.0 channel voice message into the MIDI 2.0 message
-//! that means the same, so a consumer matches [`Voice2`](tutti_ump::Voice2)
-//! once. It is pure: no state, no allocation, no clock. The group and channel
-//! belong to the packet's [`Address`](tutti_ump::Address), which the caller
-//! keeps unchanged.
+//! `Voice2::from(voice1)` turns a MIDI 1.0 channel voice message into the MIDI
+//! 2.0 message that means the same, so a consumer matches
+//! [`Voice2`](tutti_ump::Voice2) once. It is pure: no state, no allocation, no
+//! clock. The group and channel belong to the packet's
+//! [`Address`](tutti_ump::Address), which the caller keeps unchanged. The
+//! conversions are `From` and `TryFrom` on the voice types and methods on
+//! [`Message`](tutti_ump::Message) and [`Ump`](tutti_ump::Ump), all in
+//! `tutti-ump`.
 //!
-//! [`Midi2Translator`] is the stateful rest of the translation (M2-104 Appendix
-//! D.3): RPN and NRPN runs into Registered and Assignable Controllers, and
-//! Bank Select onto the next Program Change, per group and channel. An input
-//! edge runs it once, so what follows carries MIDI 2.0 channel voice messages.
-//! It calls `widen` for every message that needs no state.
+//! [`Midi2Translator`] is the stateful rest of the translation to MIDI 2.0
+//! (M2-104 Appendix D.3): RPN and NRPN runs into Registered and Assignable
+//! Controllers, and Bank Select onto the next Program Change, per group and
+//! channel. An input edge runs it once, so what follows carries MIDI 2.0
+//! channel voice messages. It calls `Voice2::from` for every message that needs
+//! no state.
 //!
 //! [`Midi1Translator`] is its inverse (M2-104 Appendix D.2), per group and channel:
 //! a Registered or Assignable Controller as its four Control Changes, and a
@@ -20,10 +24,11 @@
 //!
 //! [`channel_voice`] is what an instrument reads a packet with: the channel
 //! voice message it carries as a [`Voice2`](tutti_ump::Voice2), a MIDI 1.0 one
-//! widened, or `None`. [`widen_message`] widens a whole
-//! [`Message`](tutti_ump::Message) and passes every other kind through, for an
-//! edge that forwards what it does not read (a plugin host's MIDI output).
-//! [`widen_bytes`] is the same for the wire bytes of one MIDI 1.0 message.
+//! translated, or `None`. [`Message::to_midi2`](tutti_ump::Message::to_midi2)
+//! translates a whole [`Message`](tutti_ump::Message) and passes every other
+//! kind through, for an edge that forwards what it does not read (a plugin
+//! host's MIDI output). [`Ump::from_midi1_bytes`](tutti_ump::Ump::from_midi1_bytes)
+//! is the same for the wire bytes of one MIDI 1.0 message.
 //!
 //! [`read()`](fn@read) parses one whole System Exclusive message as a Universal one
 //! ([`Universal`]: Identity Request and Reply, General MIDI On and Off, Master
@@ -33,33 +38,33 @@
 //! instrument ([`SysexDeviceId`], or the all-call) out.
 //!
 //! ```
-//! use tutti_midi_protocol::widen;
 //! use tutti_ump::{NoteNumber, U7, Voice1, Voice2};
 //!
 //! let note = NoteNumber::of(60);
 //! let on = Voice1::NoteOn { note, velocity: U7::of(64) };
 //! // 7-bit centre 0x40 is 16-bit centre 0x8000 (M2-115 section 3).
-//! let Voice2::NoteOn { velocity, .. } = widen(on) else { unreachable!() };
+//! let Voice2::NoteOn { velocity, .. } = Voice2::from(on) else { unreachable!() };
 //! assert_eq!(velocity.get(), 0x8000);
 //! ```
 //!
-//! [`narrow_velocity`], [`narrow_value`] and [`narrow_bend`] go the other way
-//! for a consumer that has MIDI 1.0 resolution only (M2-115 section 3.4): the
-//! top bits, as a right shift. `widen` then narrow returns every 7-bit and
-//! 14-bit value it started with. A consumer such as a SoundFont synth works
-//! at MIDI 1.0 resolution and narrows what reaches it.
-//! The widening of one value is [`widen_velocity`], [`widen_value`] and
-//! [`widen_bend`]: they build a [`NoteVelocity`](tutti_ump::NoteVelocity), a
-//! [`ControlValue`](tutti_ump::ControlValue) or a
-//! [`BendValue`](tutti_ump::BendValue) from a 7-bit or 14-bit one, which a
-//! MIDI 2.0 constructor such as `Voice2::note_on` wants.
+//! [`NoteVelocity::to_u7`](tutti_ump::NoteVelocity::to_u7),
+//! [`ControlValue::to_u7`](tutti_ump::ControlValue::to_u7) and
+//! [`BendValue::to_u14`](tutti_ump::BendValue::to_u14) go the other way for a
+//! consumer that has MIDI 1.0 resolution only (M2-115 section 3.4): the top
+//! bits, as a right shift. Translating to MIDI 2.0 then back returns every
+//! 7-bit and 14-bit value it started with. A consumer such as a SoundFont synth
+//! works at MIDI 1.0 resolution and reads what reaches it that way.
+//! One value goes up with `NoteVelocity::from`, `ControlValue::from` and
+//! `BendValue::from` of a 7-bit or 14-bit one, which a MIDI 2.0 constructor such
+//! as `Voice2::note_on` wants.
 //!
 //! Going down has four entry points; pick by what you hold and what you need.
 //!
-//! - [`narrow_message()`](fn@narrow_message) for one stateless
-//!   [`Message`](tutti_ump::Message) to its MIDI 1.0 [`Message`](tutti_ump::Message),
-//!   the group and channel kept (the inverse of [`widen_message`]).
-//! - [`narrow()`](fn@narrow) for one [`Voice2`](tutti_ump::Voice2) to its
+//! - [`Message::try_to_midi1`](tutti_ump::Message::try_to_midi1) for one
+//!   stateless [`Message`](tutti_ump::Message) to its MIDI 1.0
+//!   [`Message`](tutti_ump::Message), the group and channel kept (the inverse of
+//!   [`Message::to_midi2`](tutti_ump::Message::to_midi2)).
+//! - `Voice1::try_from` for one [`Voice2`](tutti_ump::Voice2) to its
 //!   [`Voice1`](tutti_ump::Voice1), when you already hold the voice message.
 //! - [`Midi1Translator`] for a stream of packets that must keep Registered and
 //!   Assignable Controllers and Bank Select: it is the only one with state,
@@ -76,7 +81,7 @@
 //! controller value as a position on `0..=1` is
 //! [`ControlValue::normalized`](tutti_ump::ControlValue::normalized).
 //!
-//! What the widening does and does not do:
+//! What the translation to MIDI 2.0 does and does not do:
 //!
 //! - **Scaling** is Min-Center-Max (M2-115 section 3): minimum, centre and
 //!   maximum map to the same points at every width, and values above the
@@ -93,13 +98,13 @@
 //!   RPN or NRPN run (CC 101/100, 99/98, 6, 38) into one Registered or
 //!   Assignable Controller message, and Bank Select (CC 0 and 32) into a
 //!   Program Change bank. Both need per-group, per-channel assembly, which is
-//!   the [`Midi2Translator`]'s. Here those controllers widen by value like any
+//!   the [`Midi2Translator`]'s. Here those controllers become Control Changes by value like any
 //!   other, so a consumer that wants RPN or NRPN data must not rely on this
 //!   function for it. The 14-bit pairs (CC 1 to 31 with 33 to 63) stay two
 //!   independent messages, as D.3.3 says.
 //!
 //! Translation runs once, at the edge where MIDI 1.0 enters or leaves. Reading
-//! never translates: `tutti-ump` cannot call this crate, so a decoded
+//! never translates, so a decoded
 //! [`Message`](tutti_ump::Message) keeps the protocol it arrived in.
 //!
 //! The crate also holds the values the translation and the instruments share:
@@ -123,11 +128,9 @@
 //! **One input type at the edge:** a packet is a [`Ump`](tutti_ump::Ump), and
 //! [`Midi2Translator::translate`], [`Midi1Translator::feed`], [`midi1()`](fn@midi1) and
 //! [`channel_voice`] take `impl Into<Ump>`, so a decoded
-//! [`Message`](tutti_ump::Message) goes in as it is. The conversion between the
-//! two protocols is `widen`/`narrow` (and `widen_message`, `widen_bytes`) rather
-//! than `From`/`TryFrom` on the voice types: the orphan rule would put the impls in
-//! `tutti-ump`, and with them the M2-115 scaling and the Note On at velocity 0
-//! rule, which `tutti-ump` leaves to translation.
+//! [`Message`](tutti_ump::Message) goes in as it is. The stateless conversions
+//! between the two protocols live in `tutti-ump` with the M2-115 scaling and the
+//! Note On at velocity 0 rule, beside the types they convert.
 //!
 //! The crate depends on `tutti-ump` for the wire types, `tutti-units` for the
 //! quantities it reads and writes (`Semitones`, `Cents`, `Bpm`, `Seconds`) and
@@ -146,7 +149,6 @@ mod midi1_translator;
 mod midi2_translator;
 mod mode;
 mod mpe;
-mod narrow;
 mod per_note_management;
 mod scale;
 mod sensitivity;
@@ -157,10 +159,10 @@ mod universal;
 mod voice;
 
 pub use flex::{flex_tempo, flex_tempo_field, flex_time_signature, flex_time_signature_wire};
-pub use midi1::{NoMidi1Form, midi1, narrow, narrow_message, narrow_with};
+pub use midi1::midi1;
 pub use midi1_translator::Midi1Translator;
 pub use midi2_translator::Midi2Translator;
-pub use mode::{ExtremeValues, PerNoteTranslation, TranslationMode};
+pub use mode::{PerNoteTranslation, TranslationMode};
 #[cfg(feature = "serde")]
 pub use mpe::InvalidMpeZoneConfig;
 pub use mpe::InvalidMpeZones;
@@ -168,7 +170,6 @@ pub use mpe::{
     ChannelResponse, ControllerSupport, MpeFeatures, MpeMode, MpeSpec, MpeZone, MpeZoneConfig,
     MpeZones, PitchBendSupport,
 };
-pub use narrow::{narrow_bend, narrow_note_on_velocity, narrow_value, narrow_velocity};
 pub use per_note_management::{PerNoteManager, PerNotePolicy};
 pub use sensitivity::PitchBendSensitivity;
 #[cfg(feature = "serde")]
@@ -205,6 +206,4 @@ pub use universal::{
     QuarterFramePiece, Recipient, RunReference, SysexDeviceId, Universal, UniversalRead,
     UniversalReader, VitcInsert, read,
 };
-pub use voice::{
-    channel_voice, widen, widen_bend, widen_bytes, widen_message, widen_value, widen_velocity,
-};
+pub use voice::channel_voice;

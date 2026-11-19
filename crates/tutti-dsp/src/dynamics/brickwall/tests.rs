@@ -1,6 +1,6 @@
-use rand::rngs::StdRng;
-use rand::{RngExt, SeedableRng};
+use crate::testing::uniform;
 use tutti_buffers::{Mono, Planes, PlanesMut};
+use tutti_rt::SplitMix64;
 use tutti_units::Db;
 
 use super::*;
@@ -14,7 +14,7 @@ fn ceiling_of(db: f64) -> f32 {
     Db::new(db).to_amplitude().get() as f32
 }
 
-/// The ceiling a fed `f32` lane value runs at: `10^(db / 20)` computed in `f32`, as the per-frame
+/// The ceiling a fed `f32` control signal value runs at: `10^(db / 20)` computed in `f32`, as the per-frame
 /// read does.
 fn fed_ceiling_of(db: f32) -> f32 {
     libm::powf(10.0, db / 20.0)
@@ -29,32 +29,32 @@ fn controls(db: f64) -> BrickwallControls {
 /// The ceilings the tests run at: a grid across the range and seeded draws.
 fn ceilings() -> Vec<f64> {
     let mut all = vec![-96.0, -60.0, -24.0, -6.0, -0.3, 0.0, 3.0, 12.0];
-    let mut rng = StdRng::seed_from_u64(24);
-    all.extend((0..64).map(|_| rng.random_range(-80.0..20.0)));
+    let mut rng = SplitMix64::new(24);
+    all.extend((0..64).map(|_| uniform(&mut rng, -80.0, 20.0)));
     all
 }
 
-/// A bank aimed at `controls`, rendering `x` on both channels, held or with `lane`, in
+/// A bank set to `controls`, rendering `x` on both channels, held or with `signal`, in
 /// blocks of `block`.
 fn render_blocks(
     controls: BrickwallControls,
     x: &[f32],
-    lane: Option<&[f32]>,
+    signal: Option<&[f32]>,
     block: usize,
 ) -> Vec<Vec<f32>> {
     let mut bank = BrickwallBank::<f32>::new();
-    bank.aim(&controls);
+    bank.retarget(&controls);
     let mut out = vec![vec![0.0f32; x.len()]; 2];
     let mut start = 0;
     while start < x.len() {
         let end = (start + block).min(x.len());
         let ins = [&x[start..end]; 2];
-        let lanes = BrickwallLanes {
-            ceiling: lane.map(|l| Mono::new(&l[start..end])),
+        let signals = BrickwallSignals {
+            ceiling: signal.map(|l| Mono::new(&l[start..end])),
         };
         let mut outs: Vec<&mut [f32]> = out.iter_mut().map(|c| &mut c[start..end]).collect();
         bank.process(
-            lanes,
+            signals,
             Planes::new(&ins).unwrap(),
             PlanesMut::new(&mut outs).unwrap(),
         );
@@ -63,7 +63,7 @@ fn render_blocks(
     out
 }
 
-/// `xs` on one channel through a bank aimed at `db`.
+/// `xs` on one channel through a bank set to `db`.
 fn through(db: f64, xs: &[f32]) -> Vec<f32> {
     render_blocks(controls(db), xs, None, 64).remove(0)
 }
@@ -112,9 +112,9 @@ fn the_ceiling_is_the_amplitude_of_the_decibels() {
 /// identity inside the ceiling.
 #[test]
 fn the_bank_is_the_clamp_and_its_four_consequences() {
-    let mut rng = StdRng::seed_from_u64(8);
+    let mut rng = SplitMix64::new(8);
     let mut xs: Vec<f32> = vec![0.0, -0.0, 1.0, -1.0, 0.5, 1e-30, 1e30, f32::MAX, f32::MIN];
-    xs.extend((0..200).map(|_| rng.random_range(-4.0..4.0)));
+    xs.extend((0..200).map(|_| uniform(&mut rng, -4.0, 4.0)));
     xs.extend((-400..=400).map(|i| i as f32 * 0.01));
     let negated: Vec<f32> = xs.iter().map(|x| -x).collect();
     for db in ceilings() {
@@ -150,7 +150,7 @@ fn infinite_ceilings_pass_everything_and_mute() {
     );
 }
 
-/// The render is the clamp of the definition at the aimed ceiling, whatever the block cut
+/// The render is the clamp of the definition at the set ceiling, whatever the block cut
 /// (1, 17, 64, 512 frames) and on every channel.
 #[test]
 fn the_render_is_the_clamp_at_any_block() {
@@ -175,26 +175,26 @@ fn the_render_is_the_clamp_at_any_block() {
 }
 
 /// A fed ceiling is read **per frame**: frame `i` is clamped at the amplitude of
-/// `lane[i]` dB, a NaN frame at the aimed ceiling, and `+-inf` frames are
+/// `signal[i]` dB, a NaN frame at the set ceiling, and `+-inf` frames are
 /// ceilings. Whatever the block cut.
 #[test]
 fn a_fed_ceiling_is_read_per_frame() {
     let x = noise(6, 1024, 2.0);
-    let mut lane: Vec<f32> = (0..x.len()).map(|i| -((i % 40) as f32) * 0.75).collect();
-    lane[3] = f32::NAN;
-    lane[100] = f32::INFINITY;
-    lane[101] = f32::NEG_INFINITY;
+    let mut signal: Vec<f32> = (0..x.len()).map(|i| -((i % 40) as f32) * 0.75).collect();
+    signal[3] = f32::NAN;
+    signal[100] = f32::INFINITY;
+    signal[101] = f32::NEG_INFINITY;
     let base = -6.0;
     let held = ceiling_of(base);
     for block in [1, 17, 64, 512] {
-        for out in render_blocks(controls(base), &x, Some(&lane), block) {
+        for out in render_blocks(controls(base), &x, Some(&signal), block) {
             for (i, (&y, &x)) in out.iter().zip(&x).enumerate() {
-                let want = if lane[i].is_nan() {
+                let want = if signal[i].is_nan() {
                     definition(x, held)
                 } else {
-                    definition(x, fed_ceiling_of(lane[i]))
+                    definition(x, fed_ceiling_of(signal[i]))
                 };
-                assert_eq!(y, want, "block {block}, frame {i}, lane {}", lane[i]);
+                assert_eq!(y, want, "block {block}, frame {i}, signal {}", signal[i]);
             }
         }
     }
@@ -251,10 +251,10 @@ fn an_f64_brickwall_clamps_at_the_f64_amplitude_and_passes_what_is_inside() {
     let x = wide_signal(64);
     let render = |db: f64| -> Vec<f64> {
         let mut bank = BrickwallBank::<f64>::new();
-        bank.aim(&controls(db));
+        bank.retarget(&controls(db));
         let mut y = vec![0.0f64; x.len()];
         bank.process(
-            BrickwallLanes::default(),
+            BrickwallSignals::default(),
             Planes::new(&[&x[..]]).unwrap(),
             PlanesMut::new(&mut [&mut y[..]]).unwrap(),
         );
@@ -274,10 +274,10 @@ fn an_f64_brickwall_clamps_at_the_f64_amplitude_and_passes_what_is_inside() {
 fn an_f32_ceiling_of_800_db_passes_an_infinity_unchanged() {
     let x = [1.0e30f32, -3.0, 0.0, f32::INFINITY, f32::NEG_INFINITY];
     let mut bank = BrickwallBank::<f32>::new();
-    bank.aim(&controls(800.0));
+    bank.retarget(&controls(800.0));
     let mut y = [0.0f32; 5];
     bank.process(
-        BrickwallLanes::default(),
+        BrickwallSignals::default(),
         Planes::new(&[&x[..]]).unwrap(),
         PlanesMut::new(&mut [&mut y[..]]).unwrap(),
     );

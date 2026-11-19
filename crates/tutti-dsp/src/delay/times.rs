@@ -6,8 +6,8 @@ use super::routing::MAX_WIDTH;
 
 /// What a delay's channels past the first are delayed by.
 ///
-/// A delay has one **time control**, channel 0's (and the one a modulation lane drives:
-/// a lane drives every channel). What the other channels do with it is a construction
+/// A delay has one **time control**, channel 0's (and the one a modulation control signal drives:
+/// a control signal drives every channel). What the other channels do with it is a construction
 /// constant, not a control:
 ///
 /// - [`linked`](Self::linked): every channel follows the control, so the channels track

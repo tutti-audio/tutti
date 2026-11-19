@@ -111,7 +111,7 @@ fn a_reset_node_renders_as_a_fresh_one() {
 
 /// A reset node is a fresh one whatever moved before it: after audio rendered at one design, a
 /// cell written to another and a `reset`, the same signal renders the same bits as on a node
-/// built with that cell, so the first design after the reset lands at once and does not glide
+/// built with that cell, so the first design after the reset lands at once and does not ramp
 /// from the one before it.
 #[test]
 fn a_reset_after_a_move_renders_as_a_fresh_node_with_the_moved_controls() {

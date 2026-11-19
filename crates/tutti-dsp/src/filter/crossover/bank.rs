@@ -1,4 +1,4 @@
-//! [`CrossoverBank`]: one Linkwitz-Riley band tree per channel, all channels at one glide of
+//! [`CrossoverBank`]: one Linkwitz-Riley band tree per channel, all channels at one ramp of
 //! [`CrossoverBlend`], over buffers views.
 
 use tutti_buffers::{ChannelLayout, MAX_CHANNELS};
@@ -8,13 +8,13 @@ use super::CrossoverBlend;
 use super::CrossoverState;
 use super::bands::MAX_BANDS;
 use super::blend::Narrowed;
-use crate::{Glide, SimdLanes};
+use crate::{Ramp, SimdLanes};
 
-/// The state of a crossover per channel, every channel read through one glide of
+/// The state of a crossover per channel, every channel read through one ramp of
 /// [`CrossoverBlend`]. The width is fixed when it is built.
 ///
 /// A set of `bands` bands makes `bands * width` output planes, band-major: plane
-/// `band * width + channel` is the channel's band. A split that moves glides: each frame
+/// `band * width + channel` is the channel's band. A split that moves ramps: each frame
 /// runs at the coefficients of a split at some frequency in between (its integrator gain
 /// moves linearly), so the bands are a Butterworth set at every frame, and the sections'
 /// words are bounded for any motion (see the state's docs).
@@ -39,7 +39,7 @@ impl<F: Float + SimdLanes> CrossoverBank<F> {
     }
 
     /// Runs `input` into `output`, frame `i` at `blend.at(taken + 1 + i)`, then
-    /// takes the block's steps from the glide: channel `c` of `input` makes planes `c`,
+    /// takes the block's steps from the ramp: channel `c` of `input` makes planes `c`,
     /// `width + c`, ... of `output`, one a band, for as many frames as the shorter view
     /// holds.
     ///
@@ -47,7 +47,7 @@ impl<F: Float + SimdLanes> CrossoverBank<F> {
     /// past the output's, is not touched. No allocation.
     pub fn process(
         &mut self,
-        blend: &mut Glide<CrossoverBlend>,
+        blend: &mut Ramp<CrossoverBlend>,
         input: Planes<'_, F>,
         mut output: PlanesMut<'_, '_, F>,
     ) {
@@ -66,9 +66,9 @@ impl<F: Float + SimdLanes> CrossoverBank<F> {
                 reached[channel] = band + 1;
             }
         }
-        let blended = blend.blended(frames);
-        // The frames the glide blends read a set per frame: frame-outer, so it is solved once.
-        for (i, step) in (0..blended).zip(blend.taken().saturating_add(1)..) {
+        let blended = blend.blended_frames(frames);
+        // The frames the ramp blends read a set per frame: frame-outer, so it is solved once.
+        for (i, step) in (0..blended).zip(blend.steps_taken().saturating_add(1)..) {
             let c = blend.at(step).narrowed::<F>();
             for (ch, state) in self.state.iter_mut().enumerate().take(channels) {
                 let x = input.plane(ch).samples()[i];

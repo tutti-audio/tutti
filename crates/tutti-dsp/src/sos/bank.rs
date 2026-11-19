@@ -1,11 +1,11 @@
 //! [`SosBank`]: a [`Sos`] run as a cascade of state-variable sections per channel, its
-//! coefficients [`SosCoefficients`] gliding between designs.
+//! coefficients [`SosCoefficients`] ramping between designs.
 
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::{Float, Planes, PlanesMut};
 
 use super::{Sos, svf_form};
-use crate::{Glide, Lerp, SimdLanes, SvfCoefficients, svf_step};
+use crate::{Lerp, Ramp, SimdLanes, SvfCoefficients, svf_step};
 
 /// The most sections a [`SosCoefficients`] holds: order 16 is eight.
 pub const MAX_SECTIONS: usize = 8;
@@ -87,12 +87,12 @@ impl<F: Float + SimdLanes> SosBank<F> {
     }
 
     /// Runs `input` into `output`, frame `i` at `coefficients.at(taken + 1 + i)`, then
-    /// takes the block's steps from the glide. Channel `c` of `input` feeds channel `c` of
+    /// takes the block's steps from the ramp. Channel `c` of `input` feeds channel `c` of
     /// `output`; a channel past the bank's width or the narrower view is not touched. No
     /// allocation.
     pub fn process(
         &mut self,
-        coefficients: &mut Glide<SosCoefficients<F>>,
+        coefficients: &mut Ramp<SosCoefficients<F>>,
         input: Planes<'_, F>,
         mut output: PlanesMut<'_, '_, F>,
     ) {
@@ -102,9 +102,9 @@ impl<F: Float + SimdLanes> SosBank<F> {
             .len()
             .min(input.channels())
             .min(output.channels());
-        let blended = coefficients.blended(frames);
-        let first = coefficients.taken().saturating_add(1);
-        // The frames the glide still blends read a set of their own, once for every channel.
+        let blended = coefficients.blended_frames(frames);
+        let first = coefficients.steps_taken().saturating_add(1);
+        // The frames the ramp still blends read a set of their own, once for every channel.
         for i in 0..blended {
             let set = coefficients.at(first + i as u32);
             for (c, state) in self.state.iter_mut().enumerate().take(width) {

@@ -6,7 +6,7 @@ use tutti_dsp::{COEFF_INTERVAL, DcBlocker, DcBlockerControls, Lerp, MIN_DC_CORNE
 use tutti_graph::{Cost, Shape};
 use tutti_units::{Hz, SampleRate, Tail};
 
-use crate::kernel::{ControlLanes, Kernel, KernelNode};
+use crate::kernel::{ControlSignals, Kernel, KernelNode};
 
 /// What a [`DcBlockerNode`] is made from: its width and, optionally, its corner.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -89,8 +89,8 @@ pub struct DcBlockerKernel<F: Float> {
     width: ChannelLayout,
     rate: SampleRate,
     blocker: DcBlocker<F>,
-    /// Whether the first retarget after `prepare` has landed.
-    landed: bool,
+    /// Whether the first retarget after `prepare` has been applied.
+    applied: bool,
 }
 
 impl<F: Float + Lerp> DcBlockerKernel<F> {
@@ -101,7 +101,7 @@ impl<F: Float + Lerp> DcBlockerKernel<F> {
             width,
             rate,
             blocker: DcBlocker::<F>::new(width, rate),
-            landed: false,
+            applied: false,
         }
     }
 }
@@ -122,32 +122,32 @@ impl<F: Float + Lerp> Kernel for DcBlockerKernel<F> {
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
         self.rate = rate;
         self.blocker = DcBlocker::<F>::new(self.width, rate);
-        self.landed = false;
+        self.applied = false;
     }
 
     /// Silence, and the next design lands at once, as a fresh node's first does.
     fn reset(&mut self) {
         self.blocker.reset();
-        self.landed = false;
+        self.applied = false;
     }
 
     fn retarget(&mut self, controls: &DcBlockerControls) {
-        self.blocker.aim(controls);
-        if !self.landed {
-            self.blocker.settle();
-            self.landed = true;
+        self.blocker.retarget(controls);
+        if !self.applied {
+            self.blocker.jump_to_target();
+            self.applied = true;
         }
     }
 
     fn render(
         &mut self,
         input: Planes<'_, F>,
-        _: ControlLanes<'_, F>,
+        _: ControlSignals<'_, F>,
         output: PlanesMut<'_, '_, F>,
     ) {
         self.blocker.process(input, output);
-        // A design after a render is a move, which glides.
-        self.landed = true;
+        // A design after a render is a move, which ramps.
+        self.applied = true;
     }
 
     /// The ring-out at the lowest corner: the longest over every control.

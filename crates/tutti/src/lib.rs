@@ -192,15 +192,15 @@ pub use tutti_session::{Analyze, AnalyzeError, Audio, AudioContext, AudioInput};
 #[cfg(feature = "session")]
 pub use tutti_session::{
     AnyAssign, AnyTarget, Assign, AutomationTarget, ClickTargets, ClickVolumeTarget, CurveTarget,
-    DepthTarget, Effective, GainTarget, GainTargetError, Info, IntoAssign, IntoRead, Knobs,
-    LoopTarget, MacroTarget, MeterTarget, MixTarget, ModeTarget, Modify, Moved, OutputPolicyTarget,
+    DepthTarget, Effective, GainTarget, GainTargetError, Info, IntoAssign, IntoRead, LoopTarget,
+    MacroTarget, MeterTarget, MixTarget, ModeTarget, Modify, Modulatable, OutputPolicyTarget,
     ParamTarget, PolarityTarget, RangeTarget, RateTarget, ScalarTarget, SetRefusal, SettingTarget,
-    Target, TargetInfo, TempoTarget, ValueError, ValueErrorKind,
+    Target, TargetInfo, TempoTarget, ValueError, ValueErrorKind, Values,
 };
 #[cfg(feature = "session")]
 pub use tutti_session::{
     AppKey, BlockDates, Clock, ConnectError, CrossfadeControls, Edge, EventInPort, EventOutPort,
-    InPort, Job, JobId, JobKind, JobStatus, Key, Landed, NoSuchNode, Offline, OfflineSession,
+    InPort, Job, JobId, JobKind, JobOutput, JobStatus, Key, NoSuchNode, Offline, OfflineSession,
     OutPort, Playhead, RealTime, Root, Session, SessionBuilder, SessionEvent, SessionFloat,
     SystemClock, SystemSession, TransportHandle, WaitError, Workers,
 };
@@ -282,7 +282,7 @@ pub mod nodes {
     };
     pub use tutti_nodes::{
         BellFilterKernel, BitCrusherKernel, BrickwallKernel, CompressorKernel, Control,
-        ControlLanes, ControlRead, ControlSet, ControlValid, CrossoverKernel, CutFilterKernel,
+        ControlRead, ControlSet, ControlSignals, ControlValid, CrossoverKernel, CutFilterKernel,
         DcBlockerKernel, DelayKernel, DistortionKernel, DynamicEqKernel, EnvelopeFilterKernel,
         EqControls, EqKernel, FdnKernel, Feed, FreeverbKernel, GateKernel, Kernel, KernelNode,
         LadderKernel, LimiterKernel, ModDelayKernel, PhaserKernel, ReconcileError, SvfKernel,
@@ -418,12 +418,13 @@ pub mod session {
     pub use tutti_session::{
         BlockConfig, Bus as BusEdgeKind, BusSink, Channel as ChannelEdgeKind, Committed,
         Connection, Crossfade, CrossfadeId, CrossfadeRefused, DeclarationError,
-        Event as EventEdgeKind, EventEdge, EventTapPort, Fanin, Feeder, Graph, HeardTapError,
-        Inlet, InletError, LIVE_MAX_BLOCK, MainBus, MainSink, Meters, NodeSlots, NotReopened,
-        Outlet, OutputPlacement, OutputPolicy, OutputPolicyError, OutputTapOpen, PHASES, Peer,
-        PeerError, Phase as UpdatePhase, PhaseCx, Policy, Presence, Reclaimer, Reclaims,
-        RemoveError, Reopened, ReplaceRefused, Resource, ResourceFact, ResourceId, RootDeclaration,
-        RootReader, RootTopologyStatus, SessionNode, Taps, TempoError, Weighted, Wire, root_width,
+        Event as EventEdgeKind, EventEdge, EventTapPort, Fanin, Feeder, Graph, Inlet, InletError,
+        LIVE_MAX_BLOCK, MainBus, MainSink, Meters, NodeSlots, NotReopened, Outlet, OutputPlacement,
+        OutputPolicy, OutputPolicyError, OutputTapOpen, PHASES, Peer, PeerError,
+        Phase as UpdatePhase, PhaseCx, Policy, Presence, Reclaimer, Reclaims, RemoveError,
+        Reopened, ReplaceRefused, Resource, ResourceFact, ResourceId, RootDeclaration, RootReader,
+        RootTopologyStatus, SessionNode, SessionOutputTapError, Taps, TempoError, Weighted, Wire,
+        root_width,
     };
     pub use tutti_transport::{
         AudioTaken, LoopEdit, OfflineTimeline, OfflineTimelineConfig, OfflineTransport, TimedError,
@@ -432,10 +433,10 @@ pub mod session {
     // The pool.
     pub use tutti_session::Load as PoolLoad;
     pub use tutti_session::{
-        Declared, HandleError, IntoPool, Life, LoadError, OpenCx, Owned, Parking, PoolConfig,
-        PoolEntry, PoolError, PoolEvent, PoolJobError, PoolKey, PoolLoaded, PoolOutcome,
-        PoolReport, PoolSet, PoolState, RefreshPool, RefreshReport, RetryError, Sharing,
-        WhenLoadedError, stranded_loads,
+        Declared, HandleError, IntoPool, Life, LoadError, OpenCx, Owned, PoolConfig, PoolEntry,
+        PoolError, PoolEvent, PoolJobError, PoolKey, PoolLoaded, PoolOutcome, PoolReport, PoolSet,
+        PoolState, RefreshPool, RefreshReport, Retention, RetryError, Sharing, WhenLoadedError,
+        stranded_loads,
     };
     pub use tutti_session::{Task, WorkerError};
 
@@ -455,7 +456,7 @@ pub mod session {
     #[cfg(feature = "capture")]
     pub use tutti_session::{
         Armed, InFlight, InputOpener, OpenedInput, Placement as RecordedPlacement, PunchError,
-        Rolling, Start, TakeEnd, TakeId, Terms, Window,
+        Rolling, Start, TakeEnd, TakeId, TakeLatency, Window,
     };
     // The `audio_file` entry decodes a file, so it needs a decoder.
     #[cfg(feature = "midi")]
@@ -535,8 +536,8 @@ pub mod sampler {
     };
     // A file's probe needs a decoder.
     pub use tutti_sampler::{
-        Loop, LoopError, PlaceError, PlayError, Playback, SendError, SteerCell, StreamingAddError,
-        VoiceWindow,
+        ControlCell, Loop, LoopError, PlaceError, PlayError, Playback, SendError,
+        StreamingAddError, VoiceWindow,
     };
     #[cfg(any(
         feature = "decode-wav",
@@ -732,8 +733,6 @@ pub mod midi {
     };
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_hardware::{MidiThread, NotFound, SeedError};
-    #[cfg(feature = "midi-hardware")]
-    pub use tutti_midi_protocol::NoMidi1Form;
     pub use tutti_midi_protocol::{
         ChannelResponse, InvalidKeyTable, InvalidMpeZones, KeyTable, MmcSegmentError, MpeMode,
         MpeSpec, MpeZone, MpeZoneConfig, MpeZones, MtcRate, NotFrequencyData, NotSysexDeviceId,
@@ -747,6 +746,8 @@ pub mod midi {
         TimedHarmony,
     };
     pub use tutti_midi_runtime::{MidiKeys, MidiOut, Outgoing, SendAt, Taken, TimedMidiEvent};
+    #[cfg(feature = "midi-hardware")]
+    pub use tutti_ump::NoMidi1Form;
     pub use tutti_ump::{
         Accidental, Alteration, AlterationKind, ArticulationAttribute, Attribute, Bank, BarAccents,
         BendValue, BlockDirection, BlockFilter, BlockSelect, ChordBass, ChordName, ChordPitch,
@@ -762,8 +763,8 @@ pub mod midi {
         SysexRef, SysexStatus, SysexStep, System, U4, UiHint, UmpVersion, Unknown, Utility, Voice2,
     };
     pub use tutti_ump::{
-        Address, CCNumber, DeviceIdentity, ManufacturerId, Message, Midi1Parser, MidiChannel,
-        MidiGroup, NoteNumber, NoteVelocity, Protocol, StreamConfig, SysexAssembler,
+        Address, CCNumber, DeviceIdentity, ExtremeValues, ManufacturerId, Message, Midi1Parser,
+        MidiChannel, MidiGroup, NoteNumber, NoteVelocity, Protocol, StreamConfig, SysexAssembler,
         TicksPerQuarterNote, U7, U14, Ump, Voice1,
     };
     pub use tutti_ump::{

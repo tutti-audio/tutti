@@ -1,7 +1,7 @@
 //! Regression gate: modulation + delay nodes must not allocate per-buffer.
 //!
 //! Covers `LfoNode` (free-running and beat-synced), `DelayNode` (mono,
-//! stereo cross-fed, 6-wide, with its time and feedback lanes fed), and the modulation effects `ModDelayNode`
+//! stereo cross-fed, 6-wide, with its time and feedback control signals fed), and the modulation effects `ModDelayNode`
 //! (chorus and flanger) and `PhaserNode`. They are graph nodes, each
 //! driven alone in a graph by `tutti_graph::contract::BlockRig`: its `prepare`
 //! (which sizes the delay lines and the block scratch) runs when the rig is
@@ -173,7 +173,7 @@ fn phaser_node_process_is_allocation_free() {
     );
 }
 
-/// Every control moved each block: the delay time glides at its slew, the chorus depth
+/// Every control moved each block: the delay time ramps at its slew, the chorus depth
 /// sweeps, the phaser's control points are re-solved, the cross-fed delay reads
 /// every tap before writing any line. All of it on preallocated scratch.
 /// The delay's moves go through its `ParamSet`; the others through clones, which share
@@ -181,7 +181,7 @@ fn phaser_node_process_is_allocation_free() {
 #[test]
 fn delay_and_modulation_with_moving_controls_are_allocation_free() {
     // A cross-fed stereo delay whose time and both feedbacks move every block, the
-    // glides in flight on every one.
+    // ramps in flight on every one.
     let node = delay(2, 0.01, 0.4, 0.3);
     let set = node.param_set();
     gate(node, 0.5, 2_000, |i| {
@@ -191,7 +191,7 @@ fn delay_and_modulation_with_moving_controls_are_allocation_free() {
         assert!(set.set(UnitParam::CrossFeedback, f64::from(0.4 * (1.0 - t))));
     });
     // A 6-wide chorus whose rate, depth and feedback all move every block: the depth and
-    // feedback glides are in flight on every one, the rate lands whole at the grid.
+    // feedback ramps are in flight on every one, the rate lands whole at the grid.
     let chorus = ModDelayNode::<f32>::chorus(bus(6));
     let c = chorus.param_set();
     gate(chorus, 0.5, 2_000, |i| {
@@ -201,7 +201,7 @@ fn delay_and_modulation_with_moving_controls_are_allocation_free() {
         assert!(c.set(UnitParam::Feedback, f64::from(0.6 * t)));
     });
     // A 6-wide, 8-stage, staggered phaser whose rate, depth and feedback all move every
-    // block, the glides in flight on every one.
+    // block, the ramps in flight on every one.
     let phaser = PhaserNode::<f32>::new(
         bus(6),
         Stages::of(8),
@@ -219,12 +219,12 @@ fn delay_and_modulation_with_moving_controls_are_allocation_free() {
     });
 }
 
-/// The delay's time and feedback lanes fed per frame (a flanger's sweep, and a feedback
+/// The delay's time and feedback control signals fed per frame (a flanger's sweep, and a feedback
 /// that moves at audio rate), on the cross-fed stereo and the 6-wide delay, through
-/// `Direct`, which feeds a node's param ports. (`Direct::feed` copies the lane, so it is
+/// `Direct`, which feeds a node's param ports. (`Direct::feed` copies the control signal, so it is
 /// fed once, before the gate: the same 64 frames of it play each block.)
 #[test]
-fn a_delay_with_its_lanes_fed_is_allocation_free() {
+fn a_delay_with_its_signals_fed_is_allocation_free() {
     for width in [2u16, 6] {
         let mut rig = Direct::new(delay(width, 0.01, 0.4, 0.3), SampleRate::SR_48K, 64);
         for c in rig.inputs_mut().iter_mut() {
@@ -261,12 +261,12 @@ fn a_delay_with_its_lanes_fed_is_allocation_free() {
     }
 }
 
-/// A chorus with its three slow controls driven (rate, depth and feedback lanes fed): each
-/// is read at the grid's solve frame, the depth and feedback glides move on every solve,
+/// A chorus with its three slow controls driven (rate, depth and feedback control signals fed): each
+/// is read at the grid's solve frame, the depth and feedback ramps move on every solve,
 /// and the 6-wide stagger renders every channel's sweep. Through `Direct`, which feeds a
 /// node's param ports.
 #[test]
-fn a_chorus_with_its_lanes_fed_is_allocation_free() {
+fn a_chorus_with_its_signals_fed_is_allocation_free() {
     for width in [2u16, 6] {
         let mut rig = Direct::new(
             ModDelayNode::<f32>::chorus(bus(width)),
@@ -280,14 +280,14 @@ fn a_chorus_with_its_lanes_fed_is_allocation_free() {
             }
         }
         let tau = std::f32::consts::TAU / 64.0;
-        let lane = |base: f32, swing: f32, k: f32| -> Vec<f32> {
+        let signal = |base: f32, swing: f32, k: f32| -> Vec<f32> {
             (0..64)
                 .map(|i| base + swing * (tau * k * i as f32).sin())
                 .collect()
         };
-        rig.feed(0, Some(&lane(2.0, 1.5, 1.0)));
-        rig.feed(1, Some(&lane(0.006, 0.004, 2.0)));
-        rig.feed(2, Some(&lane(0.4, 0.3, 3.0)));
+        rig.feed(0, Some(&signal(2.0, 1.5, 1.0)));
+        rig.feed(1, Some(&signal(0.006, 0.004, 2.0)));
+        rig.feed(2, Some(&signal(0.4, 0.3, 3.0)));
         for _ in 0..32 {
             rig.block();
         }
@@ -307,12 +307,12 @@ fn a_chorus_with_its_lanes_fed_is_allocation_free() {
     }
 }
 
-/// A phaser with its three slow controls driven (rate, depth and feedback lanes fed): each
-/// is read at the grid's solve frame, the depth and feedback glides move on every solve, and
+/// A phaser with its three slow controls driven (rate, depth and feedback control signals fed): each
+/// is read at the grid's solve frame, the depth and feedback ramps move on every solve, and
 /// the staggered 6-wide chain renders every channel's sweep. Through `Direct`, which feeds a
 /// node's param ports.
 #[test]
-fn a_phaser_with_its_lanes_fed_is_allocation_free() {
+fn a_phaser_with_its_signals_fed_is_allocation_free() {
     for width in [2u16, 6] {
         let phaser = PhaserNode::<f32>::new(
             bus(width),
@@ -330,14 +330,14 @@ fn a_phaser_with_its_lanes_fed_is_allocation_free() {
             }
         }
         let tau = std::f32::consts::TAU / 64.0;
-        let lane = |base: f32, swing: f32, k: f32| -> Vec<f32> {
+        let signal = |base: f32, swing: f32, k: f32| -> Vec<f32> {
             (0..64)
                 .map(|i| base + swing * (tau * k * i as f32).sin())
                 .collect()
         };
-        rig.feed(0, Some(&lane(2.0, 1.5, 1.0)));
-        rig.feed(1, Some(&lane(0.5, 0.5, 2.0)));
-        rig.feed(2, Some(&lane(0.5, 0.4, 3.0)));
+        rig.feed(0, Some(&signal(2.0, 1.5, 1.0)));
+        rig.feed(1, Some(&signal(0.5, 0.5, 2.0)));
+        rig.feed(2, Some(&signal(0.5, 0.4, 3.0)));
         for _ in 0..32 {
             rig.block();
         }
@@ -1473,13 +1473,13 @@ fn an_apply_that_republishes_is_allocation_free_on_the_audio_thread() {
 }
 
 /// A node through `Direct` at `rate`, its cells written by `between(i)` before block `i` and
-/// its ports fed `lanes` (one slice of 64 frames per port, `None` where it is not driven):
+/// its ports fed `signals` (one slice of 64 frames per port, `None` where it is not driven):
 /// eight blocks of warm-up, then 400 blocks under `assert_no_alloc`. Every sample of every
 /// output channel over the 400 is finite and at most `bound` in magnitude.
 fn corner<N: Node + ParamNode>(
     node: N,
     rate: SampleRate,
-    lanes: &[Option<&[f32]>],
+    signals: &[Option<&[f32]>],
     bound: f32,
     between: impl Fn(&ParamSet, usize),
 ) {
@@ -1492,8 +1492,8 @@ fn corner<N: Node + ParamNode>(
             *x = if i % 2 == 0 { INPUT } else { -INPUT };
         }
     }
-    for (k, lane) in lanes.iter().enumerate() {
-        rig.feed(k, *lane);
+    for (k, signal) in signals.iter().enumerate() {
+        rig.feed(k, *signal);
     }
     let mut heard = 0.0f32;
     for i in 0..8 {
@@ -1548,7 +1548,7 @@ fn phaser_bound() -> f32 {
     INPUT / (1.0 - f32::from_unit(Feedback::MAX_STABLE))
 }
 
-/// A lane of 64 frames cycling through `values`.
+/// A control signal of 64 frames cycling through `values`.
 fn cycle(values: &[f32]) -> Vec<f32> {
     (0..64).map(|i| values[i % values.len()]).collect()
 }
@@ -1619,9 +1619,9 @@ fn the_delay_corners_are_allocation_free() {
 /// cells, rewritten every block, and the three ports fed per frame past their ranges.
 #[test]
 fn the_phaser_corners_are_allocation_free() {
-    let rate_lane = cycle(&[-3.0, 0.0, 0.01, 400.0, f32::NAN, 20_000.0]);
-    let depth_lane = cycle(&[-8.0, 8.0, f32::NAN, 0.0, 1.0]);
-    let feedback_lane = cycle(&[-1.0, 5.0, f32::NAN, 0.99, 0.0]);
+    let rate_signal = cycle(&[-3.0, 0.0, 0.01, 400.0, f32::NAN, 20_000.0]);
+    let depth_signal = cycle(&[-8.0, 8.0, f32::NAN, 0.0, 1.0]);
+    let feedback_signal = cycle(&[-1.0, 5.0, f32::NAN, 0.99, 0.0]);
     for (width, stages, range, step, sample_rate) in [
         (
             1u16,
@@ -1658,9 +1658,9 @@ fn the_phaser_corners_are_allocation_free() {
             node,
             rate,
             &[
-                Some(&rate_lane[..]),
-                Some(&depth_lane[..]),
-                Some(&feedback_lane[..]),
+                Some(&rate_signal[..]),
+                Some(&depth_signal[..]),
+                Some(&feedback_signal[..]),
             ],
             phaser_bound(),
             write,

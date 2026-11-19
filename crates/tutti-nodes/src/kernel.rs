@@ -20,24 +20,24 @@ use tutti_units::{Latency, Real, SampleRate, Samples, Tail};
 use crate::params::{At, ControlSet, HasControl, HasControls, Params};
 use crate::tail_clock::{Heard, TailClock, tail_frames};
 
-/// The most per-frame control lanes a [`ControlLanes`] carries.
+/// The most per-frame control signals a [`ControlSignals`] carries.
 ///
-/// Four serve every effect that reads lanes (a limiter's threshold and ceiling are two).
-pub const MAX_LANES: usize = 4;
+/// Four serve every effect that reads control signals (a limiter's threshold and ceiling are two).
+pub const MAX_SIGNALS: usize = 4;
 
-/// The per-frame lanes of a block's [`ControlRead::Fast`](crate::ControlRead::Fast)
+/// The per-frame control signals of a block's [`ControlRead::Fast`](crate::ControlRead::Fast)
 /// controls, in the order of their rows: the frames a port carries, in the port's own unit
 /// and the graph's float `F`, each `None` where nothing drives it.
 ///
-/// Every lane is as long as the frames the call renders.
+/// Every control signal is as long as the frames the call renders.
 #[derive(Clone, Copy, Debug, Default)]
-pub struct ControlLanes<'a, F: Float>([Option<Mono<'a, F>>; MAX_LANES]);
+pub struct ControlSignals<'a, F: Float>([Option<Mono<'a, F>>; MAX_SIGNALS]);
 
-impl<'a, F: Float> ControlLanes<'a, F> {
-    /// No lane is driven.
-    pub const NONE: Self = Self([None; MAX_LANES]);
+impl<'a, F: Float> ControlSignals<'a, F> {
+    /// No control signal is driven.
+    pub const NONE: Self = Self([None; MAX_SIGNALS]);
 
-    /// Lane `k`, or `None` when nothing drives it, and for a `k` past [`MAX_LANES`].
+    /// Signal `k`, or `None` when nothing drives it, and for a `k` past [`MAX_SIGNALS`].
     #[must_use]
     pub fn get(&self, k: usize) -> Option<Mono<'a, F>> {
         self.0.get(k).copied().flatten()
@@ -79,16 +79,16 @@ pub trait Kernel: Clone + Send + 'static {
     /// Back to silence. Audio thread: no allocation.
     fn reset(&mut self);
 
-    /// Designs `controls` and aims the running coefficients at the design. Audio thread:
+    /// Designs `controls` and sets the running coefficients' target to the design. Audio thread:
     /// no allocation.
     fn retarget(&mut self, controls: &<Self::Set as ControlSet>::Controls);
 
     /// Runs `input` into `output`, the same number of frames, with the controls a port
-    /// drives per frame in `lanes`. Audio thread: no allocation.
+    /// drives per frame in `signals`. Audio thread: no allocation.
     fn render(
         &mut self,
         input: Planes<'_, Self::Float>,
-        lanes: ControlLanes<'_, Self::Float>,
+        signals: ControlSignals<'_, Self::Float>,
         output: PlanesMut<'_, '_, Self::Float>,
     );
 
@@ -102,11 +102,11 @@ pub trait Kernel: Clone + Send + 'static {
         &mut self,
         input: Planes<'_, Self::Float>,
         key: Planes<'_, Self::Float>,
-        lanes: ControlLanes<'_, Self::Float>,
+        signals: ControlSignals<'_, Self::Float>,
         output: PlanesMut<'_, '_, Self::Float>,
     ) {
         let _ = key;
-        self.render(input, lanes, output);
+        self.render(input, signals, output);
     }
 
     /// The processing latency, once prepared.
@@ -122,7 +122,7 @@ pub trait Kernel: Clone + Send + 'static {
     /// How long it rings at `controls`, at most [`tail`](Self::tail), erring long: what the
     /// node narrows its tail to. A kernel whose ring-out does not follow its controls leaves
     /// the ceiling. It may design into the kernel's own scratch, and must not change the
-    /// audio state: lines, glides and phase are as they were. Audio thread: no allocation.
+    /// audio state: lines, ramps and phase are as they were. Audio thread: no allocation.
     fn tail_of(&mut self, _controls: &<Self::Set as ControlSet>::Controls) -> Tail {
         self.tail()
     }
@@ -317,7 +317,7 @@ impl<K: Kernel> KernelNode<K> {
         if let Some(t) = &mut self.tuned {
             t.dirty = true;
         }
-        let driven = self.params.lanes(io);
+        let driven = self.params.signals(io);
         let (ins, mut outs) = io.split();
         let (input, _) = slice_in((0..self.inputs).map(|c| ins.get(c)), &frames);
         let (key, keys) = match self.key {
@@ -341,14 +341,14 @@ impl<K: Kernel> KernelNode<K> {
         let Ok(input) = Planes::new(&input[..self.inputs]) else {
             return silence(output);
         };
-        let mut lanes = ControlLanes::<K::Float>::NONE;
-        for (slot, lane) in lanes.0.iter_mut().zip(driven) {
-            *slot = lane.map(|l| Mono::new(&l[frames.clone()]));
+        let mut signals = ControlSignals::<K::Float>::NONE;
+        for (slot, signal) in signals.0.iter_mut().zip(driven) {
+            *slot = signal.map(|l| Mono::new(&l[frames.clone()]));
         }
         match self.key {
-            None => self.kernel.render(input, lanes, output),
+            None => self.kernel.render(input, signals, output),
             Some(_) => match Planes::new(&key[..keys]) {
-                Ok(key) => self.kernel.render_keyed(input, key, lanes, output),
+                Ok(key) => self.kernel.render_keyed(input, key, signals, output),
                 Err(_) => silence(output),
             },
         }
@@ -831,7 +831,7 @@ mod tests {
             fn render(
                 &mut self,
                 _: Planes<'_, f32>,
-                _: ControlLanes<'_, f32>,
+                _: ControlSignals<'_, f32>,
                 _: PlanesMut<'_, '_, f32>,
             ) {
                 unreachable!("an empty bus is refused before the kernel renders");

@@ -1,4 +1,4 @@
-//! The VBAP panner's gains glide on a grid of 16 frames counted from the last
+//! The VBAP panner's gains ramp on a grid of 16 frames counted from the last
 //! reset: the render does not depend on where the blocks fall, a reset node
 //! renders what a fresh one does.
 
@@ -63,7 +63,7 @@ fn bits(channels: &[Vec<f32>]) -> Vec<Vec<u32>> {
 }
 
 /// A panner of `bed`, seated by one grid segment at front-centre, then moved:
-/// the gains glide for the whole render.
+/// the gains ramp for the whole render.
 fn moving(bed: Bed) -> VbapPannerNode<f32> {
     let mut node = prepared(VbapPannerNode::<f32>::new(bed).unwrap(), RATE, 2_048);
     let params = node.param_set();

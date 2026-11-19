@@ -9,14 +9,14 @@
 use tutti_buffers::{BusTopology, MaxBlock};
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{
-    COEFF_INTERVAL, GAIN_GLIDE, Glide, Lerp, MAX_PHASER_CHANNELS, MIN_RATE, PhaserChain,
-    PhaserControls, Stages, Stagger, StaggerError, Steps, SweepRange, allpass_complement, sweep_hz,
+    COEFF_INTERVAL, GAIN_RAMP, Lerp, MAX_PHASER_CHANNELS, MIN_RATE, PhaserChain, PhaserControls,
+    Ramp, Stages, Stagger, StaggerError, Steps, SweepRange, allpass_complement, sweep_hz,
 };
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
 use tutti_units::{Depth, Feedback, Hz, PhaseIncrement, SampleRate, Tail};
 
 use super::sweep_clock::{SEGMENT, SweepClock};
-use crate::kernel::{ControlLanes, Kernel, KernelNode};
+use crate::kernel::{ControlSignals, Kernel, KernelNode};
 
 /// Phaser of any width: `N` audio inputs, `N` outputs.
 ///
@@ -51,14 +51,14 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 /// stream is cut into blocks; a driven port is read at the grid's solve frame.
 ///
 /// - The **rate** is how fast the notches sweep: phaser rates are slow, typically 0.1 to
-///   2 Hz. **Floored at 0.01 Hz, a lane's value and a cell's alike.** It lands whole, and the
+///   2 Hz. **Floored at 0.01 Hz, a control signal's value and a cell's alike.** It lands whole, and the
 ///   LFO's phase is continuous across it.
 /// - The **depth** is a fraction of the sweep range, `0..=1` (a chorus's is seconds of
 ///   delay): 1 sweeps the whole range, 0 parks the notches at its bottom. A cell that moves
-///   glides over [`GAIN_GLIDE`].
+///   ramps over [`GAIN_RAMP`].
 /// - The **feedback** is how much of the chain's output recirculates, clamped into
-///   `0..=`[`Feedback::MAX_STABLE`]. A cell that moves glides over
-///   [`GAIN_GLIDE`].
+///   `0..=`[`Feedback::MAX_STABLE`]. A cell that moves ramps over
+///   [`GAIN_RAMP`].
 ///
 /// The sweep's top is held at 0.90 of Nyquist at the graph's rate, and the authored top is
 /// kept, so a node prepared at a higher rate restores it.
@@ -72,7 +72,7 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 /// sweep**. Its tail is [`Tail::Unknown`] (the feedback
 /// recirculates), so it is never skipped.
 ///
-/// `F` is the float of the graph it runs in, and of the chain and the glides.
+/// `F` is the float of the graph it runs in, and of the chain and the ramps.
 pub type PhaserNode<F> = KernelNode<PhaserKernel<F>>;
 
 impl<F: Float + Lerp> PhaserNode<F> {
@@ -122,7 +122,7 @@ impl<F: Float + Lerp> PhaserNode<F> {
 }
 
 /// The phaser's controls, in port order: rate, depth, feedback. Each lands whole on the
-/// stream grid (the kernel's own glides are the depth's and the feedback's: the reader must
+/// stream grid (the kernel's own ramps are the depth's and the feedback's: the reader must
 /// not ramp them across the block as well).
 #[derive(Clone, Copy, Debug)]
 pub struct PhaserSet;
@@ -130,7 +130,7 @@ pub struct PhaserSet;
 control_set! {
     PhaserSet(_s): PhaserControls = PhaserControls::DEFAULT;
     live: (all);
-    // How fast the notches sweep: floored at 0.01 Hz, a lane's value and a cell's alike.
+    // How fast the notches sweep: floored at 0.01 Hz, a control signal's value and a cell's alike.
     Rate => Hz = rate { whole },
     // A fraction of the sweep range.
     Depth => Depth = depth { whole },
@@ -149,16 +149,16 @@ control_set! {
 /// re-prepare restarts the sweep**). It is not anchored to the transport. The chain's
 /// coefficient is solved at the **corners** of a segment, every [`COEFF_INTERVAL`] frames
 /// of the stream (a `tan` per corner and channel): the segment's start and its end, and each
-/// channel's coefficient glides between them, so the cut of the blocks does not move it: the
+/// channel's coefficient ramps between them, so the cut of the blocks does not move it: the
 /// render is the same whatever the blocks. The chord of the sweep over a segment misses it by
 /// a few millionths at the sweep rates a phaser has (3.5e-6 for 2 Hz), and is exact at a
 /// depth of zero, where every corner is equal. The LFO steps before the frame it sounds in:
 /// frame `i` of a segment sounds the sweep `i + 1` steps on from the segment's start.
 /// A rate that moves lands whole at the next grid point and the phase is continuous across it.
 ///
-/// A depth and a feedback that move glide over [`GAIN_GLIDE`]: a depth move shifts the
+/// A depth and a feedback that move ramp over [`GAIN_RAMP`]: a depth move shifts the
 /// notches, and the feedback is a loop gain. The depth is solved into a segment's end corner
-/// with the depth the glide has there.
+/// with the depth the ramp has there.
 ///
 /// The chain has **no latency**. Its tail is [`Tail::Unknown`]: the closed loop's ring-out has
 /// no closed form a tail could be cut at.
@@ -172,12 +172,12 @@ pub struct PhaserKernel<F: Float> {
     min: Hz,
     max: Hz,
     rate: SampleRate,
-    /// The glide length of the depth and the feedback: [`GAIN_GLIDE`] at the prepared rate.
+    /// The ramp length of the depth and the feedback: [`GAIN_RAMP`] at the prepared rate.
     steps: u32,
     /// The coefficient of each channel across the segment in flight, from its start corner.
-    complements: Box<[Glide<F>]>,
-    depth: Glide<F>,
-    feedback: Glide<F>,
+    complements: Box<[Ramp<F>]>,
+    depth: Ramp<F>,
+    feedback: Ramp<F>,
     /// The LFO and the segments.
     clock: SweepClock,
 }
@@ -215,19 +215,21 @@ impl<F: Float + Lerp> PhaserKernel<F> {
             max: range.max(),
             rate: SampleRate::SR_48K,
             steps: 0,
-            complements: vec![Glide::landed(F::ONE); width].into_boxed_slice(),
-            depth: Glide::landed(F::from_unit(d.depth)),
-            feedback: Glide::landed(F::from_unit(d.feedback)),
+            complements: vec![Ramp::new(F::ONE); width].into_boxed_slice(),
+            depth: Ramp::new(F::from_unit(d.depth)),
+            feedback: Ramp::new(F::from_unit(d.feedback)),
             clock: SweepClock::new(offsets),
         })
     }
 
     /// Solves the next segment: its start corner is the last one's end (or the LFO's start
     /// after a reset), its end corner the sweep [`COEFF_INTERVAL`] frames on at the LFO's
-    /// step and the depth the glide has there.
+    /// step and the depth the ramp has there.
     fn solve(&mut self) {
         let depth_start = self.depth.now();
-        let depth_end = self.depth.at(self.depth.taken().saturating_add(SEGMENT));
+        let depth_end = self
+            .depth
+            .at(self.depth.steps_taken().saturating_add(SEGMENT));
         let (min, max, rate) = (self.min, self.max, self.rate);
         self.clock.solve(&mut self.complements, |lfo, end| {
             let depth = if end { depth_end } else { depth_start };
@@ -259,23 +261,23 @@ impl<F: Float + Lerp> Kernel for PhaserKernel<F> {
     }
 
     /// Prepares for `rate`: the sweep's top is held at 0.90 of Nyquist there (the authored
-    /// top is kept, so a higher rate restores it), the glides take [`GAIN_GLIDE`] at it
+    /// top is kept, so a higher rate restores it), the ramps take [`GAIN_RAMP`] at it
     /// (the conversion saturates: a prepare must not panic), and the sweep restarts.
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
         self.rate = rate;
         self.min = self.range.min();
         self.max = self.range.max().min(rate.nyquist_scaled(0.90));
-        self.steps = u32::try_from(GAIN_GLIDE.to_samples_ceil(rate).get()).unwrap_or(u32::MAX);
+        self.steps = u32::try_from(GAIN_RAMP.to_samples_ceil(rate).get()).unwrap_or(u32::MAX);
         self.reset();
     }
 
-    /// Back to silence with the sweep at its start: the chain empty, the glides landed on
+    /// Back to silence with the sweep at its start: the chain empty, the ramps at rest on
     /// their targets, the next segment solved from the LFO's first phase and the next design
     /// landing at once, as a fresh node's first does.
     fn reset(&mut self) {
         self.chain.reset();
-        self.depth.settle();
-        self.feedback.settle();
+        self.depth.jump_to_target();
+        self.feedback.jump_to_target();
         self.clock.reset();
         self.clock.unland();
     }
@@ -294,11 +296,11 @@ impl<F: Float + Lerp> Kernel for PhaserKernel<F> {
         ));
         let feedback = Feedback::new_clamped(controls.feedback.get());
         let steps = Steps::Fixed(self.steps);
-        self.depth.aim_by(F::from_unit(controls.depth), steps);
-        self.feedback.aim_by(F::from_unit(feedback), steps);
+        self.depth.retarget_by(F::from_unit(controls.depth), steps);
+        self.feedback.retarget_by(F::from_unit(feedback), steps);
         if self.clock.lands() {
-            self.depth.settle();
-            self.feedback.settle();
+            self.depth.jump_to_target();
+            self.feedback.jump_to_target();
         }
         if self.clock.at_corner() {
             self.solve();
@@ -308,7 +310,7 @@ impl<F: Float + Lerp> Kernel for PhaserKernel<F> {
     fn render(
         &mut self,
         input: Planes<'_, F>,
-        _: ControlLanes<'_, F>,
+        _: ControlSignals<'_, F>,
         output: PlanesMut<'_, '_, F>,
     ) {
         let frames = input.frames().get().min(output.frames().get());
@@ -439,7 +441,7 @@ mod tests {
         (ni * dr - nr * di).atan2(nr * dr + ni * di)
     }
 
-    /// The rate is **floored at 0.01 Hz, a lane's value and a cell's alike**: a rate of -3 Hz,
+    /// The rate is **floored at 0.01 Hz, a control signal's value and a cell's alike**: a rate of -3 Hz,
     /// written to the cell or fed on the port, is the 0.01 Hz sweep, which after 0.1 s has
     /// moved the LFO a thousandth of a cycle, so the centre of a 4-stage phaser at full depth
     /// over 200 to 4000 Hz is `200 + 3800 (1 + sin(2 pi 0.001)) / 2`. A 1 kHz sine comes out
@@ -447,7 +449,7 @@ mod tests {
     /// stage, since the coefficient has barely moved). Running backwards at 3 Hz would have
     /// the centre near its trough, 0.3 of a cycle behind, and a different phase.
     #[test]
-    fn a_rate_below_the_floor_is_the_floor_in_a_cell_and_on_a_lane() {
+    fn a_rate_below_the_floor_is_the_floor_in_a_cell_and_on_a_signal() {
         let n = 4_800;
         let centre = 200.0 + 3_800.0 * 0.5 * (1.0 + (std::f64::consts::TAU * 0.001).sin());
         let wanted = 4.0 * stage_phase(centre, 1_000.0);
@@ -464,7 +466,7 @@ mod tests {
         let x: Vec<f32> = (0..n + 64)
             .map(|i| (std::f64::consts::TAU * 1_000.0 * i as f64 / RATE.get()).sin() as f32)
             .collect();
-        let render = |cell: Option<f32>, lane: Option<f32>| {
+        let render = |cell: Option<f32>, signal: Option<f32>| {
             let node = PhaserNode::<f32>::mono(Stages::of(4), controls);
             if let Some(v) = cell {
                 assert!(node.param_set().set(UnitParam::Rate, f64::from(v)));
@@ -472,7 +474,7 @@ mod tests {
             let mut node = prepared(node, RATE, 64);
             let mut y = Vec::new();
             for chunk in x.chunks(64) {
-                let rate = lane.map(|v| vec![v; chunk.len()]);
+                let rate = signal.map(|v| vec![v; chunk.len()]);
                 let params = [rate.as_deref(), None, None];
                 y.extend(drive(&mut node, RATE, Planes::new(&[chunk]).unwrap(), &params).remove(0));
             }
@@ -480,7 +482,7 @@ mod tests {
         };
         for (what, y) in [
             ("cell", render(Some(-3.0), None)),
-            ("lane", render(None, Some(-3.0))),
+            ("signal", render(None, Some(-3.0))),
         ] {
             let w = std::f64::consts::TAU * 1_000.0 / RATE.get();
             let worst = (n - 256..n)
@@ -490,12 +492,12 @@ mod tests {
         }
     }
 
-    /// A depth lane past 1 sweeps the whole range and no further: at 0.01 Hz after 0.1 s the
+    /// A depth control signal past 1 sweeps the whole range and no further: at 0.01 Hz after 0.1 s the
     /// LFO is a thousandth of a cycle on, so a 1 kHz sine through four stages comes out with
     /// the phase of four stages tuned to `200 + 3800 (1 + sin(2 pi 0.001)) / 2` Hz, the
-    /// sweep at depth exactly 1 (a lane at 8 unclamped would put the centre at 15 kHz and more).
+    /// sweep at depth exactly 1 (a control signal at 8 unclamped would put the centre at 15 kHz and more).
     #[test]
-    fn a_depth_lane_past_one_sweeps_the_whole_range_and_no_further() {
+    fn a_depth_signal_past_one_sweeps_the_whole_range_and_no_further() {
         let n = 4_800;
         let centre = 200.0 + 3_800.0 * 0.5 * (1.0 + (std::f64::consts::TAU * 0.001).sin());
         let wanted = 4.0 * stage_phase(centre, 1_000.0);
@@ -512,8 +514,8 @@ mod tests {
             .collect();
         let mut y = Vec::new();
         for chunk in x.chunks(64) {
-            let lane = vec![8.0f32; chunk.len()];
-            let params = [None, Some(&lane[..]), None];
+            let signal = vec![8.0f32; chunk.len()];
+            let params = [None, Some(&signal[..]), None];
             y.extend(drive(&mut node, RATE, Planes::new(&[chunk]).unwrap(), &params).remove(0));
         }
         let w = std::f64::consts::TAU * 1_000.0 / RATE.get();
@@ -525,12 +527,12 @@ mod tests {
 
     /// A control the graph drives is sampled on the stream's 16-frame grid, not at the block's
     /// last frame, so what is heard does not depend on how the stream is cut into blocks
-    /// (the node against itself under cuts, not a reference render); and the lane is heard,
+    /// (the node against itself under cuts, not a reference render); and the control signal is heard,
     /// since the cell it overrides is a different depth.
     #[test]
     fn a_driven_slow_control_is_sampled_on_the_grid_whatever_the_blocks() {
         let len = 4_096;
-        let lane: Vec<f32> = (0..len)
+        let signal: Vec<f32> = (0..len)
             .map(|n| 0.1 + 0.9 * n as f32 / len as f32)
             .collect();
         let x: Vec<f32> = (0..len)
@@ -545,7 +547,7 @@ mod tests {
             let mut out = Vec::new();
             for (n, chunk) in x.chunks(block).enumerate() {
                 let at = n * block;
-                let l = &lane[at..at + chunk.len()];
+                let l = &signal[at..at + chunk.len()];
                 let params = [None, driven.then_some(l), None];
                 out.extend(
                     drive(&mut node, RATE, Planes::new(&[chunk]).unwrap(), &params).remove(0),
@@ -554,7 +556,7 @@ mod tests {
             out
         };
         let whole = render(1_024, true);
-        assert_ne!(whole, render(1_024, false), "the lane is heard");
+        assert_ne!(whole, render(1_024, false), "the signal is heard");
         for block in [1, 16, 64, 128] {
             assert_eq!(render(block, true), whole, "blocks of {block}");
         }
@@ -564,7 +566,7 @@ mod tests {
     /// and the feedback written between two blocks at frame 1024 (a multiple of every block
     /// below) give the same render in blocks of 1, 16, 64, 128 and 1024 (the node against
     /// itself under cuts), because the reader takes each whole at the grid and the
-    /// kernel's glides are on the stream's clock, not a block's. And the move is heard.
+    /// kernel's ramps are on the stream's clock, not a block's. And the move is heard.
     #[test]
     fn a_moved_cell_lands_on_the_grid_whatever_the_blocks() {
         let len = 4_096;
@@ -738,12 +740,12 @@ mod tests {
         }
     }
 
-    /// A depth that glides is solved into a segment's end corner with the depth the glide
-    /// has **there**, sixteen steps on: a depth aimed from 0 to 1 over 240 steps at the
+    /// A depth that ramps is solved into a segment's end corner with the depth the ramp
+    /// has **there**, sixteen steps on: a depth set from 0 to 1 over 240 steps at the
     /// grid point at frame 16 has its start corner at depth 0 (the last segment's end) and
     /// its end corner at `16 / 240`.
     #[test]
-    fn a_gliding_depth_is_solved_with_the_depth_the_glide_has_at_the_segments_end() {
+    fn a_ramping_depth_is_solved_with_the_depth_the_ramp_has_at_the_segments_end() {
         let band = SweepRange::of(Hz::new(300.0), Hz::new(3_000.0));
         let mut k = kernel(1, 4, band, Stagger::NONE);
         let moves = [(0, controls(5.0, 0.0, 0.5)), (16, controls(5.0, 1.0, 0.5))];
@@ -765,24 +767,24 @@ mod tests {
         );
     }
 
-    /// The depth and the feedback glide over `GAIN_GLIDE` (240 frames at 48 kHz) from where
+    /// The depth and the feedback ramp over `GAIN_RAMP` (240 frames at 48 kHz) from where
     /// they were, halfway at the middle frame and landing exactly: not at the block, and not
     /// in one step.
     #[test]
-    fn depth_and_feedback_glide_over_the_gain_glide_and_land_exactly() {
+    fn depth_and_feedback_ramp_over_the_gain_ramp_and_land_exactly() {
         let moves = [(0, controls(1.0, 0.0, 0.2)), (16, controls(1.0, 1.0, 0.8))];
         let after = |frames: usize| {
             let mut k = kernel(1, 4, SweepRange::DEFAULT, Stagger::NONE);
             drive_kernel(&mut k, &moves, &silence(1, frames));
             k
         };
-        // The glide was aimed at frame 16: 120 frames on is half way.
+        // The ramp was set to frame 16: 120 frames on is half way.
         let half = after(16 + 120);
         assert!((half.depth.now() - 0.5).abs() < 1e-6, "depth halfway");
         assert!((half.feedback.now() - 0.5).abs() < 1e-6, "feedback halfway");
-        let landed = after(16 + 240);
-        assert_eq!((landed.depth.now(), landed.feedback.now()), (1.0, 0.8));
-        assert!(!landed.depth.moving() && !landed.feedback.moving());
+        let arrived = after(16 + 240);
+        assert_eq!((arrived.depth.now(), arrived.feedback.now()), (1.0, 0.8));
+        assert!(!arrived.depth.moving() && !arrived.feedback.moving());
     }
 
     /// The rate is floored at 0.01 Hz: a rate of -3 Hz, of zero and of 0.005 Hz is the
@@ -926,7 +928,7 @@ mod tests {
         assert_eq!(blocks(&mut used, 0), blocks(&mut fresh, 0));
     }
 
-    /// A cell that moves **between** grid points starts its glide at the next grid point: a
+    /// A cell that moves **between** grid points starts its ramp at the next grid point: a
     /// rate, a depth and a feedback written 13 frames past frame 1024 and heard from the
     /// block that begins there render the same as the same write at frame 1040, the next
     /// grid point, and differently from the write at 1056.
@@ -958,7 +960,7 @@ mod tests {
 
     /// A reset node equals a fresh one that has the cell: render, move the depth and the
     /// feedback, reset, and the render is the fresh node's with those cells (the move lands at
-    /// once, it does not glide from the old value).
+    /// once, it does not ramp from the old value).
     #[test]
     fn a_cell_moved_before_a_reset_lands_at_once_as_on_a_fresh_node() {
         let x: Vec<f32> = (0..1_000)

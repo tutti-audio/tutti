@@ -5,8 +5,8 @@
 use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{
-    CrossoverBank, CrossoverBlend, CrossoverControls, CrossoverError, CrossoverModel, Glide,
-    MAX_SPLITS, SimdLanes, fit_to_rate,
+    CrossoverBank, CrossoverBlend, CrossoverControls, CrossoverError, CrossoverModel, MAX_SPLITS,
+    Ramp, SimdLanes, fit_to_rate,
 };
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
 use tutti_rt::Param;
@@ -14,7 +14,7 @@ use tutti_units::{Hz, SampleRate, Tail};
 #[cfg(test)]
 use tutti_units::{UnitAddr, UnitParam};
 
-use crate::kernel::{ControlLanes, Kernel, KernelNode};
+use crate::kernel::{ControlSignals, Kernel, KernelNode};
 use crate::ramp::LastGood;
 
 /// The crossover frequency cells of a node, and the last finite value each
@@ -91,13 +91,13 @@ impl Splits {
 /// `UnitAddr::new(UnitParam::Cutoff, i)` in [`Hz`], on the node's
 /// [`ParamSet`](tutti_graph::ParamSet) and a param port the graph can modulate. The
 /// crossovers are solved on a 16-frame grid counted from the last reset, at each
-/// segment's first frame, and the sections glide to that solve over the segment (each
+/// segment's first frame, and the sections ramp to that solve over the segment (each
 /// split's integrator gain moves linearly, so every frame is a Butterworth split of some
 /// frequency in between): a control is in the render up to 16 frames after it was sampled
 /// and arrives within 16 more, and the render does not depend on how audio is split into
-/// blocks. A cell that moved glides, in hertz, from the last solve to its value
+/// blocks. A cell that moved ramps, in hertz, from the last solve to its value
 /// across the block, and a port's value is sampled at the solve frame (a split with a
-/// port does not glide while another's cell does). The design holds each split between
+/// port does not ramp while another's cell does). The design holds each split between
 /// the one below it and about 0.499 of the rate, so a set out of order is solved with
 /// its splits no lower than the one before, and a non-finite write reads as unchanged.
 ///
@@ -131,10 +131,10 @@ impl<F: Float + SimdLanes> CrossoverNode<F> {
 
 /// The frames a design takes to arrive: one grid period, so a design is reached at the
 /// next grid point.
-const GLIDE_STEPS: u32 = 16;
+const RAMP_STEPS: u32 = 16;
 
 /// The Linkwitz-Riley crossover as a [`Kernel`]: a [`CrossoverBank`], the model the controls
-/// design and the coefficients in flight to it. A split that moves glides over the grid:
+/// design and the coefficients in flight to it. A split that moves ramps over the grid:
 /// the sections share their states and a blend of two splits' integrator gains is a split,
 /// so the bands stay a Butterworth set at every frame.
 #[derive(Clone, Debug)]
@@ -143,8 +143,8 @@ pub struct CrossoverKernel<F: Float + SimdLanes> {
     bank: CrossoverBank<F>,
     model: CrossoverModel,
     /// The blend in flight; the first design after `prepare` or `reset` lands at once.
-    blend: Glide<CrossoverBlend>,
-    landed: bool,
+    blend: Ramp<CrossoverBlend>,
+    applied: bool,
     rate: SampleRate,
 }
 
@@ -170,9 +170,9 @@ impl<F: Float + SimdLanes> CrossoverKernel<F> {
         Ok(Self {
             input,
             bank: CrossoverBank::new(input.layout()),
-            blend: Glide::landed(model.blend()).by(GLIDE_STEPS),
+            blend: Ramp::new(model.blend()).steps(RAMP_STEPS),
             model,
-            landed: false,
+            applied: false,
             rate,
         })
     }
@@ -187,8 +187,8 @@ impl<F: Float + SimdLanes> Kernel for CrossoverKernel<F> {
     type Float = F;
     type Set = CrossoverSet;
 
-    // A design arrives at the next grid point: the glide is one grid period long.
-    const GRID: usize = GLIDE_STEPS as usize;
+    // A design arrives at the next grid point: the ramp is one grid period long.
+    const GRID: usize = RAMP_STEPS as usize;
 
     fn shape(&self) -> Shape {
         // Band-major outputs: output `band * channels + channel`.
@@ -203,29 +203,29 @@ impl<F: Float + SimdLanes> Kernel for CrossoverKernel<F> {
 
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
         self.rate = rate;
-        self.landed = false;
+        self.applied = false;
     }
 
     /// Silence, and the next design lands at once, as a fresh node's first does.
     fn reset(&mut self) {
-        self.blend.settle();
-        self.landed = false;
+        self.blend.jump_to_target();
+        self.applied = false;
         self.bank.reset();
     }
 
     fn retarget(&mut self, controls: &CrossoverControls) {
         self.model.design_into(controls, self.rate);
-        self.blend.aim(self.model.blend());
-        if !self.landed {
-            self.blend.settle();
-            self.landed = true;
+        self.blend.retarget(self.model.blend());
+        if !self.applied {
+            self.blend.jump_to_target();
+            self.applied = true;
         }
     }
 
     fn render(
         &mut self,
         input: Planes<'_, F>,
-        _: ControlLanes<'_, F>,
+        _: ControlSignals<'_, F>,
         output: PlanesMut<'_, '_, F>,
     ) {
         self.bank.process(&mut self.blend, input, output);
@@ -380,14 +380,14 @@ mod tests {
                 .unwrap(),
         );
         let x = sine(2_000.0, RATE, SETTLE + WINDOW);
-        let lane = [2_000.0f32; 512];
+        let signal = [2_000.0f32; 512];
         let mut low = Vec::new();
         for chunk in x.chunks(512) {
             let out = drive(
                 &mut node,
                 crate::test_support::RATE,
                 Planes::new(&[chunk]).unwrap(),
-                &[Some(&lane[..chunk.len()])],
+                &[Some(&signal[..chunk.len()])],
             );
             low.extend_from_slice(&out[0]);
         }
@@ -502,7 +502,7 @@ mod tests {
         let mut views: Vec<&mut [f64]> = out.iter_mut().map(Vec::as_mut_slice).collect();
         k.render(
             Planes::new(&[&x[..]]).unwrap(),
-            ControlLanes::NONE,
+            ControlSignals::NONE,
             PlanesMut::new(&mut views).unwrap(),
         );
         // 200 Hz's section has radius 0.987: 1e-12 in about 2 100 frames.

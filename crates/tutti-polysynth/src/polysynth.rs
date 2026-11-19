@@ -21,8 +21,8 @@ use crate::tuning::{A4_FREQ, key_freq};
 use crate::voice::Gate;
 use crate::{UnisonEngine, VoiceAllocator, VoiceAllocatorConfig};
 use tutti_graph::{EventKind, SubBlocks};
+use tutti_midi_protocol::channel_voice;
 use tutti_midi_protocol::{PitchBendSensitivity, UniversalReader};
-use tutti_midi_protocol::{channel_voice, narrow_value};
 use tutti_rt::Param;
 use tutti_ump::ControlValue;
 use tutti_ump::NoteId;
@@ -266,7 +266,7 @@ impl<F: SynthFloat> PolySynth<F> {
         match voice {
             // A MIDI 2.0 Note On at velocity 0 is a Note On (M2-104 §7.4.2),
             // sounding at velocity 0. A MIDI 1.0 one arrives as a `NoteOff`
-            // (`channel_voice` widens it, App. D.3.1).
+            // (`channel_voice` translates it, App. D.3.1).
             Voice2::NoteOn {
                 note,
                 velocity,
@@ -279,7 +279,7 @@ impl<F: SynthFloat> PolySynth<F> {
             Voice2::ControlChange { controller, value } => {
                 // The pedals and the channel-mode controllers mean the same to
                 // every instrument; the rest are this synth's own.
-                match Controller::effect(controller, narrow_value(value)) {
+                match Controller::effect(controller, value.to_u7()) {
                     Some(effect) => self.handle_effect(effect, channel),
                     // The channel's controllers (modulation, volume, pan,
                     // expression, the portamento and legato switches) are the

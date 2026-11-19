@@ -7,8 +7,8 @@ use tutti_dsp::{Ring, SimdLanes, Sos, SosError, TAIL_FLOOR};
 use tutti_graph::Shape;
 use tutti_units::{Db, SampleRate, Samples, Tail};
 
-use super::glided::{GLIDE_STEPS, GlidedSos, filter_shape};
-use crate::kernel::{ControlLanes, Kernel};
+use super::ramped::{RAMP_STEPS, RampedSos, filter_shape};
+use crate::kernel::{ControlSignals, Kernel};
 use crate::params::ControlSet;
 
 /// What a controls type must give [`EqKernel`], kept out of reach of an implementation.
@@ -59,7 +59,7 @@ pub trait EqControls:
 }
 
 /// An equalizer of any width as a [`Kernel`]: the one section `C` designs, run as a
-/// state-variable cascade whose coefficients glide.
+/// state-variable cascade whose coefficients ramp.
 ///
 /// The design is made on the stream's 16-frame grid and reached along a line in the section's
 /// coefficients over the next 16 frames with the state kept. The tail is the ring-out bound
@@ -69,7 +69,7 @@ pub trait EqControls:
 #[derive(Clone, Debug)]
 pub struct EqKernel<C: EqControls, F: Float + SimdLanes> {
     input: BusTopology,
-    sos: GlidedSos<F>,
+    sos: RampedSos<F>,
     rate: SampleRate,
     /// The tail over every control at `rate`.
     ceiling: Tail,
@@ -82,7 +82,7 @@ impl<C: EqControls, F: Float + SimdLanes> EqKernel<C, F> {
     pub(super) fn new(input: BusTopology) -> Self {
         let mut kernel = Self {
             input,
-            sos: GlidedSos::new(input),
+            sos: RampedSos::new(input),
             rate: SampleRate::SR_48K,
             ceiling: Tail::Unknown,
             controls: core::marker::PhantomData,
@@ -125,7 +125,7 @@ impl<C: EqControls, F: Float + SimdLanes> Kernel for EqKernel<C, F> {
     type Float = F;
     type Set = C::Set;
 
-    const GRID: usize = GLIDE_STEPS as usize;
+    const GRID: usize = RAMP_STEPS as usize;
 
     fn shape(&self) -> Shape {
         filter_shape(self.input)
@@ -145,13 +145,13 @@ impl<C: EqControls, F: Float + SimdLanes> Kernel for EqKernel<C, F> {
 
     fn retarget(&mut self, controls: &C) {
         let design = self.design(controls);
-        self.sos.aim(design);
+        self.sos.retarget(design);
     }
 
     fn render(
         &mut self,
         input: Planes<'_, F>,
-        _: ControlLanes<'_, F>,
+        _: ControlSignals<'_, F>,
         output: PlanesMut<'_, '_, F>,
     ) {
         self.sos.render(input, output);

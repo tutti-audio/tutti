@@ -11,8 +11,8 @@ use tutti_graph::Shape;
 use tutti_units::{Hz, SampleRate, Samples, Tail};
 
 use super::filter_bus;
-use super::glided::{GLIDE_STEPS, GlidedSos, filter_shape};
-use crate::kernel::{ControlLanes, Kernel, KernelNode};
+use super::ramped::{RAMP_STEPS, RampedSos, filter_shape};
+use crate::kernel::{ControlSignals, Kernel, KernelNode};
 
 /// The lowest cutoff a filter takes: 10 Hz.
 pub const MIN_CUT_CUTOFF: Hz = Hz::new(10.0);
@@ -87,7 +87,7 @@ impl CutFilterConfig {
 ///
 /// The cutoff is a live [`Hz`] cell (`UnitParam::Cutoff`), designed on a 16-frame grid
 /// and reached along a line in the sections' coefficients over the next 16 frames with the
-/// state kept, so an automated cutoff glides and the cascade stays stable. The response and
+/// state kept, so an automated cutoff ramps and the cascade stays stable. The response and
 /// the order are the node's build: another is another node.
 ///
 /// The tail is the ring-out of the whole cascade at the lowest cutoff ([`Sos`](tutti_dsp::Sos)'s tail,
@@ -123,14 +123,14 @@ control_set! {
     }
 }
 
-/// The filter as a [`Kernel`]: a [`SosBank`](tutti_dsp::SosBank) run with the glide of the
+/// The filter as a [`Kernel`]: a [`SosBank`](tutti_dsp::SosBank) run with the ramp of the
 /// coefficients every channel shares.
 #[derive(Clone, Debug)]
 pub struct CutFilterKernel<F: Float + SimdLanes> {
     input: BusTopology,
     response: CutResponse,
     alignment: CutAlignment,
-    sos: GlidedSos<F>,
+    sos: RampedSos<F>,
     rate: SampleRate,
     /// The tail at each octave from [`MIN_CUT_CUTOFF`] up (`LADDER` rungs at most), found
     /// in `prepare`; the rungs past the Nyquist's are unused.
@@ -145,7 +145,7 @@ impl<F: Float + SimdLanes> CutFilterKernel<F> {
             input,
             response: config.response,
             alignment: config.alignment,
-            sos: GlidedSos::new(input),
+            sos: RampedSos::new(input),
             rate: SampleRate::SR_48K,
             ladder: [Tail::Unknown; LADDER],
         };
@@ -180,7 +180,7 @@ impl<F: Float + SimdLanes> Kernel for CutFilterKernel<F> {
     type Float = F;
     type Set = CutFilterSet;
 
-    const GRID: usize = GLIDE_STEPS as usize;
+    const GRID: usize = RAMP_STEPS as usize;
 
     fn shape(&self) -> Shape {
         filter_shape(self.input)
@@ -209,13 +209,13 @@ impl<F: Float + SimdLanes> Kernel for CutFilterKernel<F> {
 
     fn retarget(&mut self, controls: &CutFilterControls) {
         let design = self.design(controls.cutoff);
-        self.sos.aim(design);
+        self.sos.retarget(design);
     }
 
     fn render(
         &mut self,
         input: Planes<'_, F>,
-        _: ControlLanes<'_, F>,
+        _: ControlSignals<'_, F>,
         output: PlanesMut<'_, '_, F>,
     ) {
         self.sos.render(input, output);
@@ -245,7 +245,7 @@ mod tests {
 
     use super::*;
     use crate::filter::test_utils::{generate_sine, rms};
-    use crate::test_support::{RATE, assert_cell_glides, drive_block, prepared};
+    use crate::test_support::{RATE, assert_cell_ramps, drive_block, prepared};
     use tutti_dsp::TAIL_FLOOR;
     use tutti_graph::contract::assert_param_fork;
     use tutti_graph::{Cost, Node, ParamNode};
@@ -367,11 +367,11 @@ mod tests {
     /// A cutoff moved across the decades mid-sine stays finite and bounded, lands on the
     /// designed response, and renders the same however the host cuts its blocks.
     #[test]
-    fn a_cutoff_glide_stays_finite_and_settles_on_the_design() {
+    fn a_cutoff_ramp_stays_finite_and_settles_on_the_design() {
         let make = || CutFilterNode::from(CutFilterConfig::new(1u16, LP, lr(8)));
         let sine = generate_sine(bin(256), 48_000.0, 8_192);
         let (mut node, out) = {
-            let n = assert_cell_glides(
+            let n = assert_cell_ramps(
                 make,
                 |n: &CutFilterNode<f32>| assert!(n.param_set().set(UnitParam::Cutoff, 4_000.0)),
                 &[&sine[..2_048]],

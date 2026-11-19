@@ -42,7 +42,7 @@
 //! - **Modulation effects** — `ModDelayNode` (chorus and flanger are
 //!   its two `Sweep` presets, a `KernelNode` over `ModDelayKernel`; the General MIDI chorus a third,
 //!   with no feedback and a finite tail) and `PhaserNode` (a `KernelNode` over `PhaserKernel`, its `Stages`
-//!   and `SweepRange` checked; the rate is floored at 0.01 Hz, a lane's value and a cell's alike), both any width.
+//!   and `SweepRange` checked; the rate is floored at 0.01 Hz, a control signal's value and a cell's alike), both any width.
 //! - **Distortion** — `DistortionNode` and its `ShapeKind` waveshapers.
 //! - **Bit crusher** — `BitCrusherNode`, a sample-and-hold and a quantizer, with no tail,
 //!   from a `BitCrusherConfig`.
@@ -63,11 +63,11 @@
 //!   folding between layouts (a bus edge between declared buses).
 //! - **Utilities** — `PolarityNode` (chosen channels inverted, from a `PolarityConfig`),
 //!   `MidSideNode` (stereo L/R to M/S and back, from a `MidSideConfig`) and `StereoWidthNode`
-//!   (the side scaled by a gliding `StereoWidth`, from a `StereoWidthConfig`).
+//!   (the side scaled by a ramping `StereoWidth`, from a `StereoWidthConfig`).
 //! - **Spatial** — `VbapPannerNode` (stereo in, one output per channel of a `Bed`)
 //!   and `HrtfBinauralNode` (two outputs, by FFT convolution against a
 //!   caller-supplied HRIR sphere), both steered by their params (bearing,
-//!   height, spread and width, or the blend), glided. A mix of several panned sources
+//!   height, spread and width, or the blend), ramped. A mix of several panned sources
 //!   is plain fan-in: wire each panner's outputs to the same graph ports.
 //! - **Param ports** — each modulatable node declares its params once, with its
 //!   cells (`tutti_graph::declare_params!`), as param ports, filled per
@@ -366,7 +366,7 @@ pub use strip::BusStripNode;
 // The one node over an effect's algorithm and state: the driver and the trait an
 // algorithm implements to run in it.
 mod kernel;
-pub use kernel::{ControlLanes, Kernel, KernelNode, MAX_LANES};
+pub use kernel::{ControlSignals, Kernel, KernelNode, MAX_SIGNALS};
 
 pub use params::{At, Control, ControlRead, ControlSet, ControlValid, HasControl, Params};
 

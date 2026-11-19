@@ -121,12 +121,12 @@ fn an_f64_take_reads_back_as_a_clip_holding_a_figure_f32_rounds_away() {
         .graph()
         .connect(node.out(0), Root::output(0))
         .unwrap()
-        .hard();
+        .unfaded();
     session
         .graph()
         .connect(node.out(1), Root::output(1))
         .unwrap()
-        .hard();
+        .unfaded();
     let _ = session.update();
     session.play().expect("queued");
     let mut heard = Vec::new();

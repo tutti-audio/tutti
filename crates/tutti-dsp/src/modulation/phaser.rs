@@ -9,17 +9,17 @@
 //! notches are fewer and unevenly spaced where a flanger's are a comb.
 //!
 //! The chain is the kernel: it runs a block through complements that are
-//! [`Glide`]s, one per channel, and a feedback glide. The LFO and the solve of the
+//! [`Ramp`]s, one per channel, and a feedback ramp. The LFO and the solve of the
 //! complements are the caller's: it solves the corners of a segment (the coefficient at
 //! the segment's start and at its end, [`COEFF_INTERVAL`](crate::COEFF_INTERVAL) frames on)
-//! and aims each channel's glide across it, so the cut of the blocks does not move the
+//! and retargets each channel's ramp across it, so the cut of the blocks does not move the
 //! render.
 
 use tutti_buffers::{ChannelLayout, MAX_CHANNELS};
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_units::{Depth, Feedback, Hz};
 
-use crate::{Glide, Lerp};
+use crate::{Lerp, Ramp};
 
 /// The most channels a phaser has: a bus's.
 pub const MAX_PHASER_CHANNELS: usize = MAX_CHANNELS;
@@ -148,7 +148,7 @@ impl Default for SweepRange {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PhaserControls {
     /// The LFO's rate: how fast the notches sweep. Phaser rates are slow, typically 0.1 to
-    /// 2 Hz. **Floored at 0.01 Hz**, a lane's value and a cell's alike ([`MIN_RATE`](crate::MIN_RATE)): a
+    /// 2 Hz. **Floored at 0.01 Hz**, a control signal's value and a cell's alike ([`MIN_RATE`](crate::MIN_RATE)): a
     /// negative rate does not run the sweep backwards. A rate that is not finite is not
     /// taken: the node holds the last finite one (the default's before any).
     pub rate: Hz,
@@ -184,10 +184,10 @@ impl Default for PhaserControls {
 ///
 /// A section with the coefficient `c` (`y = c (x - y1) + x1`, `c` within `2 t` of -1 at a low
 /// centre) runs on its complement `a = 1 + c` ([`allpass_complement`](crate::allpass_complement)):
-/// `y = y1 + ((x1 - x) + a (x - y1))`, whose small terms add first. The glides carry `a`.
+/// `y = y1 + ((x1 - x) + a (x - y1))`, whose small terms add first. The ramps carry `a`.
 ///
 /// The width is fixed when it is built. [`process`](Self::process) runs a block through it
-/// while each channel's coefficient and the feedback glide toward their targets.
+/// while each channel's coefficient and the feedback ramp toward their targets.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PhaserChain<F: Float> {
     stages: Stages,
@@ -232,7 +232,7 @@ impl<F: Float + Lerp> PhaserChain<F> {
 
     /// Runs `input` into `output`, frame `i` at `complements[c].at(taken + 1 + i)` for
     /// channel `c` and `feedback.at(taken + 1 + i)`, then takes the block's steps from the
-    /// glides.
+    /// ramps.
     ///
     /// Each channel's input plus its last output scaled by the feedback goes through the
     /// stages in turn, a frame at a time and each stage across every channel, and the chain's
@@ -244,16 +244,16 @@ impl<F: Float + Lerp> PhaserChain<F> {
     /// The loop is `g z^-1 A(z)` with `A` the all-pass chain, `|A| = 1` on the circle, so it
     /// is stable for any feedback `g` below 1 and rings for about `(1 + N tau) / (1 - g)`
     /// frames at the slowest pole, `tau` a stage's greatest group delay, `(1 + |c|) / (1 - |c|)`
-    /// for a coefficient `c`. The feedback glide's values must stay below
+    /// for a coefficient `c`. The feedback ramp's values must stay below
     /// 1 ([`Feedback::MAX_STABLE`] is the bound a caller holds them to).
     ///
     /// # Panics
     ///
-    /// If `complements` has fewer glides than the chain has channels.
+    /// If `complements` has fewer ramps than the chain has channels.
     pub fn process(
         &mut self,
-        complements: &mut [Glide<F>],
-        feedback: &mut Glide<F>,
+        complements: &mut [Ramp<F>],
+        feedback: &mut Ramp<F>,
         input: Planes<'_, F>,
         mut output: PlanesMut<'_, '_, F>,
     ) {
@@ -272,54 +272,54 @@ impl<F: Float + Lerp> PhaserChain<F> {
             plane.map_or_else(Default::default, |p| &mut p.into_samples_mut()[..frames])
         });
         let complements = &mut complements[..self.width];
-        // The step each glide's first frame reads.
+        // The step each ramp's first frame reads.
         let first: [u32; MAX_PHASER_CHANNELS] = core::array::from_fn(|c| {
             complements
                 .get(c)
-                .map_or(0, |g| g.taken().saturating_add(1))
+                .map_or(0, |g| g.steps_taken().saturating_add(1))
         });
-        let fb_first = feedback.taken().saturating_add(1);
+        let fb_first = feedback.steps_taken().saturating_add(1);
         let mut complement = [F::ZERO; MAX_PHASER_CHANNELS];
-        let mut lane = [F::ZERO; MAX_PHASER_CHANNELS];
+        let mut frame = [F::ZERO; MAX_PHASER_CHANNELS];
         let mut step = 0u32;
         for i in 0..frames {
             let fb = feedback.at(fb_first.saturating_add(step));
             for c in 0..run {
                 complement[c] = complements[c].at(first[c].saturating_add(step));
-                lane[c] = xs[c][i] + self.last[c] * fb;
+                frame[c] = xs[c][i] + self.last[c] * fb;
             }
-            self.chain(&complement[..run], &mut lane[..run]);
+            self.chain(&complement[..run], &mut frame[..run]);
             for c in 0..run {
-                self.last[c] = lane[c];
-                ys[c][i] = lane[c];
+                self.last[c] = frame[c];
+                ys[c][i] = frame[c];
             }
             step = step.saturating_add(1);
         }
         let taken = u32::try_from(frames).unwrap_or(u32::MAX);
-        for glide in complements {
-            glide.advance(taken);
+        for ramp in complements {
+            ramp.advance(taken);
         }
         feedback.advance(taken);
     }
 
-    /// Runs `lane` (one sample per channel) through the stages in turn, each stage across
+    /// Runs `frame` (one sample per channel) through the stages in turn, each stage across
     /// every channel in one inner loop, `coeffs` one coefficient per channel. Each stage's
-    /// output is the next stage's input, and the last is left in `lane`.
+    /// output is the next stage's input, and the last is left in `frame`.
     #[inline(always)]
-    fn chain(&mut self, coeffs: &[F], lane: &mut [F]) {
+    fn chain(&mut self, coeffs: &[F], frame: &mut [F]) {
         let w = self.width;
         for s in 0..self.stages.get() {
             let x1 = &mut self.x1[s * w..(s + 1) * w];
             let y1 = &mut self.y1[s * w..(s + 1) * w];
             for c in 0..coeffs.len() {
-                let input = lane[c];
+                let input = frame[c];
                 // `c (x - y1) + x1` with `c = a - 1`, the stage held as its complement
                 // `a`: the small terms add first, so a low centre (`a` near 0) keeps its
                 // precision.
                 let out = y1[c] + ((x1[c] - input) + coeffs[c] * (input - y1[c]));
                 x1[c] = input;
                 y1[c] = out;
-                lane[c] = out;
+                frame[c] = out;
             }
         }
     }

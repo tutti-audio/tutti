@@ -49,7 +49,7 @@ fn landings(events: &[SessionEvent]) -> Vec<JobId> {
     events
         .iter()
         .filter_map(|e| match e {
-            SessionEvent::Landed(landed) => Some(landed.id()),
+            SessionEvent::JobDone(output) => Some(output.id()),
             _ => None,
         })
         .collect()
@@ -102,12 +102,12 @@ fn a_landing_is_taken_once_and_only_by_its_own_job() {
     let (a, b) = (echo(&mut s, 1), echo(&mut s, 2));
     run_all(&held);
     let mut events = s.update();
-    let SessionEvent::Landed(landed) = &mut events[0] else {
+    let SessionEvent::JobDone(output) = &mut events[0] else {
         panic!("the first event is a landing");
     };
-    assert_eq!(landed.take(&b), None, "another job's landing");
-    assert_eq!(landed.take(&a), Some(Ok(1)));
-    assert_eq!(landed.take(&a), None, "taken");
+    assert_eq!(output.take(&b), None, "another job's landing");
+    assert_eq!(output.take(&a), Some(Ok(1)));
+    assert_eq!(output.take(&a), None, "taken");
 }
 
 #[test]
@@ -222,10 +222,10 @@ fn a_wait_after_the_result_was_taken_answers_already_landed() {
     );
     // The app took b's landing from the event itself.
     let mut events = s.update();
-    let SessionEvent::Landed(landed) = &mut events[0] else {
+    let SessionEvent::JobDone(output) = &mut events[0] else {
         panic!("b's landing");
     };
-    assert_eq!(landed.take(&b), Some(Ok(2)));
+    assert_eq!(output.take(&b), Some(Ok(2)));
     assert_eq!(
         b.wait(&mut s),
         Err(EchoError::Wait(WaitError::AlreadyLanded))

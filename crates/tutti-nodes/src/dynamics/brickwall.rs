@@ -7,25 +7,25 @@
 
 use tutti_buffers::{BusTopology, MaxBlock};
 use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_dsp::{BrickwallBank, BrickwallControls, BrickwallLanes, COEFF_INTERVAL};
+use tutti_dsp::{BrickwallBank, BrickwallControls, BrickwallSignals, COEFF_INTERVAL};
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
 use tutti_units::{Db, SampleRate, Tail};
 
-use crate::kernel::{ControlLanes, Kernel, KernelNode};
+use crate::kernel::{ControlSignals, Kernel, KernelNode};
 
 /// Hard clipper at a ceiling: `channels` wide, no lookahead, zero latency, no tail.
 ///
 /// A [`KernelNode`] over [`BrickwallKernel`], the clip being [`BrickwallBank`]'s; this file
-/// holds the cell and how the graph's lane reaches it.
+/// holds the cell and how the graph's control signal reaches it.
 ///
 /// # The ceiling
 ///
 /// The ceiling (dB) is the node's one control, modulatable by the graph. It is
-/// **read per frame**: a lane on the ceiling's port is the bank's own ([`BrickwallLanes`]),
+/// **read per frame**: a control signal on the ceiling's port is the bank's own ([`BrickwallSignals`]),
 /// a frame clamps at the amplitude of its own value, and the cell is what a frame nobody
 /// drives clamps at. A cell that moves reaches the clamp within 16 frames ([`Kernel::GRID`]). Unmodulated, the node
-/// reads its cell once per block, and a render with a lane that holds the cell's value
-/// is the render with no lane.
+/// reads its cell once per block, and a render with a control signal that holds the cell's value
+/// is the render with no control signal.
 ///
 /// A graph node ([`IntoNode`](tutti_graph::IntoNode)): inserted, its controls are a
 /// [`ParamSet`](tutti_graph::ParamSet) over the ceiling.
@@ -102,7 +102,7 @@ pub struct BrickwallKernel<F: Float> {
 }
 
 impl<F: Float> BrickwallKernel<F> {
-    /// A clipper on `input`, at the full scale until aimed.
+    /// A clipper on `input`, at the full scale until set.
     fn new(input: BusTopology) -> Self {
         Self {
             input,
@@ -132,19 +132,19 @@ impl<F: Float> Kernel for BrickwallKernel<F> {
     fn reset(&mut self) {}
 
     fn retarget(&mut self, controls: &BrickwallControls) {
-        self.bank.aim(controls);
+        self.bank.retarget(controls);
     }
 
     fn render(
         &mut self,
         input: Planes<'_, F>,
-        lanes: ControlLanes<'_, F>,
+        signals: ControlSignals<'_, F>,
         output: PlanesMut<'_, '_, F>,
     ) {
-        let lanes = BrickwallLanes {
-            ceiling: lanes.get(BrickwallSet::CEILING_LANE),
+        let signals = BrickwallSignals {
+            ceiling: signals.get(BrickwallSet::CEILING_SIGNAL),
         };
-        self.bank.process(lanes, input, output);
+        self.bank.process(signals, input, output);
     }
 
     fn tail(&self) -> Tail {
@@ -153,8 +153,8 @@ impl<F: Float> Kernel for BrickwallKernel<F> {
 }
 
 impl BrickwallSet {
-    /// The lane of the ceiling: the one [`fast`](crate::ControlRead::Fast) row.
-    const CEILING_LANE: usize = 0;
+    /// The control signal of the ceiling: the one [`fast`](crate::ControlRead::Fast) row.
+    const CEILING_SIGNAL: usize = 0;
 }
 
 #[cfg(test)]

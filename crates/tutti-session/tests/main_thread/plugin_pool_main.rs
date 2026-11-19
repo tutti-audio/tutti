@@ -532,7 +532,7 @@ fn rebound(layout: u32) -> Rebound {
         (node.out(0), Root::output(0)),
         (node.out(1), Root::output(1)),
     ] {
-        g.connect(from, to).unwrap().hard();
+        g.connect(from, to).unwrap().unfaded();
     }
     // Commits the wiring.
     let _ = s.update();
@@ -942,7 +942,7 @@ fn a_served_plugin_that_grows_its_ports_gets_a_wider_node() {
         (node.out(0), tutti_session::Root::output(0)),
         (node.out(1), tutti_session::Root::output(1)),
     ] {
-        s.graph().connect(from, to).unwrap().hard();
+        s.graph().connect(from, to).unwrap().unfaded();
     }
     let mut refused = false;
     refused |= render_until(&mut s, "the stereo tags", &mut |_, t| t == [1.0, 2.0]);
@@ -995,7 +995,7 @@ fn an_inserted_served_plugin_that_grows_its_ports_gets_a_wider_node() {
         (node.out(0), tutti_session::Root::output(0)),
         (node.out(1), tutti_session::Root::output(1)),
     ] {
-        s.graph().connect(from, to).unwrap().hard();
+        s.graph().connect(from, to).unwrap().unfaded();
     }
     let mut refused = render_until(&mut s, "the stereo tags", &mut |_, t| t == [1.0, 2.0]);
     assert_eq!(s.graph_ref().node_outputs(node).unwrap(), 2);

@@ -77,7 +77,7 @@ impl Drop for AlsaInput {
 /// type 2 and the kernel converts nothing. An Endpoint that offers MIDI 2.0 is
 /// opened as MIDI 2.0 even while it is in MIDI 1.0, because the session asks it
 /// for the MIDI 2.0 Protocol and the client's version is fixed for the pump's
-/// life: a MIDI 1.0 client would have the kernel narrow what the device then
+/// life: a MIDI 1.0 client would have the kernel translate what the device then
 /// sends natively.
 pub(super) fn version_for(endpoint: Option<&tutti_alsa_ffi::UmpEndpoint>) -> UmpVersion {
     match endpoint {
@@ -120,7 +120,7 @@ pub(super) fn prepare(id: EndpointId) -> Result<(Client, QueueClock)> {
     let seq = super::client::open(CLIENT, Blocking::NonBlock, UmpVersion::Midi2)?;
     // What the source can speak decides what this client is delivered: a MIDI
     // 1.0 source arrives as MIDI 1.0 UMP (type 2) and the ingest node's
-    // `Midi2Translator` widens it, so the kernel never converts it.
+    // `Midi2Translator` translates it, so the kernel never converts it.
     // The record is read on the open client, and the version is set before the
     // port exists and before the subscription, so no event is delivered at the
     // other one.

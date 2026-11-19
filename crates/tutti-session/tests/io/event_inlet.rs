@@ -117,7 +117,7 @@ fn an_export_fork_is_accepted_and_silent() {
         .connect(key.events_out(), hear.events_in())
         .unwrap();
     s.graph()
-        .set_sources_hard(Root::output(0), [OutPort::new(hear, 0)])
+        .set_sources_unfaded(Root::output(0), [OutPort::new(hear, 0)])
         .unwrap();
     let _ = s.update();
     writer.push(Stamp::NextBlock, note(1)).unwrap();
@@ -148,7 +148,7 @@ fn an_event_edge_is_cut_with_one_commit_and_not_faded() {
         .connect(key.events_out(), hear.events_in())
         .unwrap();
     s.graph()
-        .set_sources_hard(Root::output(0), [OutPort::new(hear, 0)])
+        .set_sources_unfaded(Root::output(0), [OutPort::new(hear, 0)])
         .unwrap();
     let _ = s.update();
 

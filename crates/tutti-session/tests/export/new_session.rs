@@ -17,7 +17,7 @@ fn a_session_from_new_bounces_a_node_and_renders() {
     let (node, _) = session
         .graph()
         .add(ForkByClone(Const::new(0.25, ChannelLayout::STEREO)));
-    session.graph().connect(node, Root).unwrap().hard();
+    session.graph().connect(node, Root).unwrap().unfaded();
     let planes = session
         .bounce(
             Bounce::project()

@@ -19,7 +19,7 @@ pub struct PoolConfig {
     /// of holds, not of distinct entries, so several holds on one entry count
     /// several. A released entry kept only by older holds is parked: a kind
     /// with something live behind it releases it
-    /// ([`PoolEntry::park`](crate::PoolEntry::park)), and recalling it loads
+    /// ([`PoolEntry::retain`](crate::PoolEntry::retain)), and recalling it loads
     /// again. A node's hold never parks. Default 8.
     pub live_holds: usize,
 }

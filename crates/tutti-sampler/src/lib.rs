@@ -106,7 +106,7 @@
 //! - No decoder feature: a decoder is `tutti-codec`'s `decode-*` feature, which an
 //!   app turns on there. With none on, `probe` and `SampleFacts` are absent: no
 //!   header can be read.
-//! - `testing`: `DiskStreamer::by_hand` and `step_once`, which run the
+//! - `testing`: `DiskStreamer::manual` and `step`, which run the
 //!   streamer's cycle by hand instead of on its thread, and the `testing` module (a
 //!   mock transport and block driver). For tests; a host has no use for it.
 #![forbid(unsafe_code)]
@@ -220,15 +220,15 @@ pub use voice::{
 pub(crate) mod streamer;
 
 pub use streamer::{
-    Block, DiskStreamer, DiskStreamerConfig, GUARD_FRAMES, Open, OpenError, Opening, Placement,
-    RefusedPlacement, Running, SteerCell, Stream, StreamFault, StreamFile, StreamId, StreamPhase,
-    StreamReader, StreamStatus,
+    Block, ControlCell, DiskStreamer, DiskStreamerConfig, GUARD_FRAMES, Open, OpenError,
+    PendingOpen, Placement, RefusedPlacement, Running, Stream, StreamFault, StreamFile, StreamId,
+    StreamPhase, StreamReader, StreamStatus,
 };
 
-// The hand-driven streamer cycle, alongside `DiskStreamer::by_hand`: its driver
+// The hand-driven streamer cycle, alongside `DiskStreamer::manual`: its driver
 // type and its verdict.
 #[cfg(any(test, feature = "testing"))]
-pub use streamer::{ByHand, StepOutcome};
+pub use streamer::{Manual, StepOutcome};
 
 // Header-only probe: what a file is, and whether *this build's* streamer can
 // stream it. Public because the tier decision is the caller's or the
