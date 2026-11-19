@@ -15,14 +15,15 @@
 //! that wants a different reverb, two units into one chorus or no chorus wires
 //! the unit's outputs itself, through [`Graph::connect`](crate::Graph::connect).
 
-use tutti_buffers::BusTopology;
+use tutti_buffers::{BusTopology, Float};
+use tutti_dsp::{Lanes, Lerp};
 use tutti_graph::ParamSet;
 use tutti_nodes::{BusStripNode, FreeverbNode, ModDelayNode};
 use tutti_soundfont::SoundFontUnit;
 use tutti_units::{Amplitude, UnitParam};
 
 use crate::instrument::AddedInstrument;
-use crate::{InstrumentHandle, Key, OutPort, RemoveError, Session};
+use crate::{InstrumentHandle, Key, OutPort, RemoveError, Session, SessionNode};
 
 /// A SoundFont unit wired to its chorus and reverb, and what they sum to.
 ///
@@ -39,35 +40,35 @@ use crate::{InstrumentHandle, Key, OutPort, RemoveError, Session};
 /// here: `Graph::set_mode(gm.out(), NodeMode::Muted)`. A send's level is the font's
 /// and the channel's (CC 91 and CC 93), not a gain's.
 #[derive(Debug)]
-pub struct GeneralMidi {
-    instrument: InstrumentHandle<SoundFontUnit<f32>>,
-    chorus: Key<ModDelayNode<f32>>,
-    reverb: Key<FreeverbNode<f32>>,
+pub struct GeneralMidi<F: Float + Lanes + Lerp> {
+    instrument: InstrumentHandle<SoundFontUnit<F>>,
+    chorus: Key<ModDelayNode<F>>,
+    reverb: Key<FreeverbNode<F>>,
     strip: Key<BusStripNode>,
     strip_params: ParamSet,
 }
 
-impl GeneralMidi {
+impl<F: Float + Lanes + Lerp> GeneralMidi<F> {
     /// The unit, played through its handle.
     #[must_use]
-    pub fn instrument(&self) -> &InstrumentHandle<SoundFontUnit<f32>> {
+    pub fn instrument(&self) -> &InstrumentHandle<SoundFontUnit<F>> {
         &self.instrument
     }
 
     /// The unit's handle, to send with ([`InstrumentHandle::keys_mut`]).
-    pub fn instrument_mut(&mut self) -> &mut InstrumentHandle<SoundFontUnit<f32>> {
+    pub fn instrument_mut(&mut self) -> &mut InstrumentHandle<SoundFontUnit<F>> {
         &mut self.instrument
     }
 
-    /// The chorus, an `f32` node: the unit's chorus send in, the wet chorus out.
+    /// The chorus: the unit's chorus send in, the wet chorus out.
     #[must_use]
-    pub fn chorus(&self) -> Key<ModDelayNode<f32>> {
+    pub fn chorus(&self) -> Key<ModDelayNode<F>> {
         self.chorus
     }
 
-    /// The reverb, an `f32` node: the unit's reverb send in, the wet reverb out.
+    /// The reverb: the unit's reverb send in, the wet reverb out.
     #[must_use]
-    pub fn reverb(&self) -> Key<FreeverbNode<f32>> {
+    pub fn reverb(&self) -> Key<FreeverbNode<F>> {
         self.reverb
     }
 
@@ -81,7 +82,6 @@ impl GeneralMidi {
     /// Sets the gain of the whole mix, a linear amplitude: the dry pair and
     /// both effects. A store into the strip's cell, read once per block.
     pub fn set_gain(&self, gain: Amplitude) {
-        // The param cell is an `f32` word: the gain narrows once.
         self.strip_params.set(UnitParam::Volume, gain.get());
     }
 
@@ -93,7 +93,10 @@ impl GeneralMidi {
     ///
     /// [`RemoveError::NoSuchNode`] naming the first part that was not in the
     /// graph (a part was removed by hand).
-    pub fn remove(self, session: &mut Session) -> Result<(), RemoveError> {
+    pub fn remove<K: crate::AppKey, C: crate::Clock<Float = F>>(
+        self,
+        session: &mut Session<K, C>,
+    ) -> Result<(), RemoveError> {
         let node = self.instrument.node().erase();
         let mut first = session.remove_instrument(self.instrument);
         for node in [
@@ -109,8 +112,12 @@ impl GeneralMidi {
     }
 }
 
-/// `f32` because the strip's nodes (`BusStripNode`, the reverb and chorus kernels) are `Node<f32>` only.
-impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
+impl<K: crate::AppKey, C: crate::Clock> Session<K, C>
+where
+    C::Float: Lanes + Lerp,
+    ModDelayNode<C::Float>: SessionNode<C::Float>,
+    FreeverbNode<C::Float>: SessionNode<C::Float>,
+{
     /// Adds `unit` with a General MIDI chorus and reverb, and a fader that
     /// sums the three.
     ///
@@ -129,17 +136,17 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
     /// event input and five outputs.
     pub fn add_general_midi(
         &mut self,
-        unit: SoundFontUnit<f32>,
-    ) -> Result<GeneralMidi, crate::Error> {
+        unit: SoundFontUnit<C::Float>,
+    ) -> Result<GeneralMidi<C::Float>, crate::Error> {
         let AddedInstrument {
             handle: instrument, ..
         } = self.add_instrument_unwired(unit)?;
         let unit = instrument.node().erase();
         let graph = self.graph();
-        let (chorus, _) = graph.add(ModDelayNode::<f32>::general_midi_chorus(
+        let (chorus, _) = graph.add(ModDelayNode::<C::Float>::general_midi_chorus(
             BusTopology::STEREO,
         ));
-        let (reverb, _) = graph.add(FreeverbNode::<f32>::general_midi());
+        let (reverb, _) = graph.add(FreeverbNode::<C::Float>::general_midi());
         let (strip, strip_params) = graph.add(BusStripNode::stereo());
         // The unit's outputs: dry L/R, chorus send L/R, reverb send.
         graph.connect(OutPort::new(unit, 2), chorus.input(0))?;

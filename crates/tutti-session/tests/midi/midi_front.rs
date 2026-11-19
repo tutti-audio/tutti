@@ -39,7 +39,7 @@ impl IntoNode for Probe {
         self.0.into_parts()
     }
 }
-impl Instrument for Probe {}
+impl Instrument<f32> for Probe {}
 impl SessionNode for Probe {
     fn reclaimer(_: &()) -> tutti_session::Reclaims {
         tutti_session::Reclaims::Nothing
