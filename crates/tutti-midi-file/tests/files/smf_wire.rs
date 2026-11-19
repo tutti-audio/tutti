@@ -913,7 +913,7 @@ fn the_spec_delta_time_example_6144_ticks_at_96_and_500000_is_32_seconds() {
         ]],
     );
     let file = MidiFile::from_bytes(&bytes).unwrap();
-    assert_eq!(metrical(&file).seconds_at(Tick(6144)), Seconds(32.0));
+    assert_eq!(metrical(&file).seconds_at(Tick(6144)), Seconds::new(32.0));
 }
 
 /// Meta events at one tick may come in any order: a Set Tempo then a text and

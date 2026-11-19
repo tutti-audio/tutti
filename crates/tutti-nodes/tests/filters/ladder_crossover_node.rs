@@ -36,8 +36,8 @@ impl Cutoff for LadderFilterNode<f32> {
         LadderFilterNode::<f32>::with_channels(
             ChannelLayout::STEREO,
             LadderType::LP24,
-            Hz(900.0),
-            Resonance(0.7),
+            Hz::new(900.0),
+            Resonance::new(0.7),
         )
     }
     fn set_cutoff(&self, hz: f64) -> bool {
@@ -51,7 +51,8 @@ impl Cutoff for LadderFilterNode<f32> {
 impl Cutoff for CrossoverNode<f32> {
     const NAME: &'static str = "crossover";
     fn build() -> Self {
-        CrossoverNode::<f32>::new(ChannelLayout::STEREO, &[Hz(300.0), Hz(3_000.0)]).unwrap()
+        CrossoverNode::<f32>::new(ChannelLayout::STEREO, &[Hz::new(300.0), Hz::new(3_000.0)])
+            .unwrap()
     }
     fn set_cutoff(&self, hz: f64) -> bool {
         self.param_set()
@@ -221,7 +222,7 @@ fn an_unknown_tail_is_never_narrowed_cut_or_parked() {
             let env = Env {
                 frame: Frame::new(block * 64),
                 sample_rate: SR,
-                block_len: Samples(64),
+                block_len: Samples::new(64),
                 transport: TransportPosition::default(),
                 changes: TransportChanges::NONE,
                 play: PlayClock::ZERO,
@@ -239,8 +240,8 @@ fn an_unknown_tail_is_never_narrowed_cut_or_parked() {
         LadderFilterNode::<f32>::with_channels(
             ChannelLayout::STEREO,
             LadderType::LP24,
-            Hz(1_000.0),
-            Resonance(1.0),
+            Hz::new(1_000.0),
+            Resonance::new(1.0),
         ),
         SR,
         64,
@@ -274,7 +275,7 @@ fn every_band_plane_of_a_wide_crossover_is_written() {
         (3u16, vec![100.0f64, 300.0, 1_000.0, 3_000.0, 9_000.0]),
         (8, vec![200.0, 2_000.0]),
     ] {
-        let hz: Vec<Hz> = splits.iter().map(|&f| Hz(f)).collect();
+        let hz: Vec<Hz> = splits.iter().map(|&f| Hz::new(f)).collect();
         let bands = splits.len() + 1;
         let node = CrossoverNode::<f32>::new(ChannelLayout::from(channels), &hz).unwrap();
         assert_eq!(

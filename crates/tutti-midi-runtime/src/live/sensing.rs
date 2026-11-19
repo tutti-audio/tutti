@@ -27,7 +27,7 @@ use tutti_units::{Frame, SampleRate, Samples, Seconds};
 /// How long a receiver waits for any message once it has seen an Active
 /// Sensing before it judges the cable gone: over 330 ms (p. 32), the spec's 300 ms
 /// and the roughly 10% margin it recommends.
-pub(crate) const ACTIVE_SENSING_JUDGE: Seconds = Seconds(0.330);
+pub(crate) const ACTIVE_SENSING_JUDGE: Seconds = Seconds::new(0.330);
 
 /// The Active Sensing watch of every Group of one device.
 #[derive(Clone, Debug)]

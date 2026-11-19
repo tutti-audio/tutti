@@ -72,8 +72,8 @@ fn convert_refuses_a_length_mismatch_instead_of_copying_short() {
     assert_eq!(
         err,
         BufferError::LengthMismatch {
-            src: Samples(3),
-            dst: Samples(2)
+            src: Samples::new(3),
+            dst: Samples::new(2)
         }
     );
     assert_eq!(dst, [7; 4]);
@@ -108,7 +108,9 @@ fn deinterleave_places_frame_i_channel_c_in_plane_c_at_i() {
 fn interleave_of_a_slice_writes_only_that_slice() {
     let (l, r) = ([1i32, 2, 3, 4], [5, 6, 7, 8]);
     let slices = [&l[..], &r[..]];
-    let p = Planes::new(&slices).unwrap().slice(Samples(1)..Samples(3));
+    let p = Planes::new(&slices)
+        .unwrap()
+        .slice(Samples::new(1)..Samples::new(3));
     let mut out = [0i32; 4];
     interleave(p, InterleavedMut::new(&mut out, ST).unwrap()).unwrap();
     assert_eq!(out, [2, 6, 3, 7]);
@@ -124,8 +126,8 @@ fn interleave_refuses_mismatches_and_writes_nothing() {
             InterleavedMut::new(&mut out, ST).unwrap()
         ),
         Err(BufferError::LengthMismatch {
-            src: Samples(3),
-            dst: Samples(2)
+            src: Samples::new(3),
+            dst: Samples::new(2)
         })
     );
     assert_eq!(
@@ -152,8 +154,8 @@ fn deinterleave_refuses_mismatches_and_writes_nothing() {
             PlanesMut::new(&mut slices).unwrap()
         ),
         Err(BufferError::LengthMismatch {
-            src: Samples(3),
-            dst: Samples(2)
+            src: Samples::new(3),
+            dst: Samples::new(2)
         })
     );
     let mut slices = [&mut a[..]];
@@ -283,8 +285,8 @@ fn convert_planes_refuses_mismatches_and_writes_nothing() {
             PlanesMut::from_vecs(&mut short).unwrap()
         ),
         Err(BufferError::LengthMismatch {
-            src: Samples(3),
-            dst: Samples(2)
+            src: Samples::new(3),
+            dst: Samples::new(2)
         })
     );
     let mut narrow = vec![vec![7i16; 3]];
@@ -358,8 +360,8 @@ fn convert_mono_refuses_a_length_mismatch_and_writes_nothing() {
     assert_eq!(
         convert_mono(Mono::new(&src), MonoMut::new(&mut dst)),
         Err(BufferError::LengthMismatch {
-            src: Samples(3),
-            dst: Samples(2)
+            src: Samples::new(3),
+            dst: Samples::new(2)
         })
     );
     assert_eq!(dst, [7, 7]);

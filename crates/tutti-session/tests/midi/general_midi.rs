@@ -368,7 +368,9 @@ fn muting_the_setup_silences_the_wet_path_too() {
     );
 
     // The instrument's gain is the dry level: zero leaves the reverb heard.
-    gm.instrument().set_gain(tutti_units::Amplitude(0.0));
+    session
+        .set(gm.instrument().gain().to(tutti_units::Amplitude(0.0)))
+        .unwrap();
     for _ in 0..2 {
         peak_of_block(&mut session);
     }

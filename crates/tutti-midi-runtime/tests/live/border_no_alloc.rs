@@ -65,8 +65,10 @@ fn busy(device: &mut EventInletWriter, block: u64) {
 
 #[test]
 fn the_border_nodes_process_without_allocating() {
-    let (mut ed, mut exec) =
-        Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(512))));
+    let (mut ed, mut exec) = Editor::new(Prepare::new(
+        SampleRate::SR_48K,
+        MaxBlock::of(Samples::new(512)),
+    ));
     ed.insert(NodeKey(1), "in", MidiIngestNode::new());
     let mut dev = device(&mut ed, 4);
     let (inlet, writer) = EventInletNode::pair(LIVE_INLET_CAPACITY);
@@ -89,7 +91,7 @@ fn the_border_nodes_process_without_allocating() {
     );
     let mut out = common::sink(&mut ed, 1, &[(1, 0), (1, 3), (2, 0), (3, 0)]);
     ed.commit().unwrap();
-    let t = TransportPosition::new(true, Bpm::of(120.0), Beat(0.0), None);
+    let t = TransportPosition::new(true, Bpm::of(120.0), Beat::new(0.0), None);
     let mut drain = [(0, Ump([0; 4])); 256];
     // Warm up outside the gate.
     busy(&mut dev, 0);
@@ -118,14 +120,18 @@ fn the_border_nodes_process_without_allocating() {
                 assert_no_alloc::permit_alloc(|| {
                     let signature = if b % 40 == 0 { (4, 4) } else { (3, 4) };
                     meter.set_meter(MeterMap::new([
-                        MeterChange::new(Beat(0.0), TimeSignature::of(4, 4)),
-                        MeterChange::new(Beat(0.1), TimeSignature::of(signature.0, signature.1)),
+                        MeterChange::new(Beat::new(0.0), TimeSignature::of(4, 4)),
+                        MeterChange::new(
+                            Beat::new(0.1),
+                            TimeSignature::of(signature.0, signature.1),
+                        ),
                     ]));
                     meter.reclaim();
                 });
             }
             let tempo = Bpm::of(120.0 + f64::from(b % 3) * 10.0);
-            let at = Beat(f64::from(b) * 512.0 / 24_000.0 + if b % 30 == 0 { 40.0 } else { 0.0 });
+            let at =
+                Beat::new(f64::from(b) * 512.0 / 24_000.0 + if b % 30 == 0 { 40.0 } else { 0.0 });
             exec.process(
                 512,
                 &TransportPosition::new(b % 50 != 0, tempo, at, None),
@@ -162,15 +168,17 @@ fn the_border_nodes_process_without_allocating() {
 /// restarts for the next, pays what it owes and settles, block after block.
 #[test]
 fn an_epoch_change_processes_without_allocating() {
-    let (mut ed, mut exec) =
-        Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(512))));
+    let (mut ed, mut exec) = Editor::new(Prepare::new(
+        SampleRate::SR_48K,
+        MaxBlock::of(Samples::new(512)),
+    ));
     let (mut writer, epochs) = DeviceEpochs::new();
     writer.arrive();
     ed.insert(NodeKey(1), "in", MidiIngestNode::new().following(&epochs));
     let mut dev = device(&mut ed, 4);
     let mut out = common::sink(&mut ed, 1, &[(1, 0), (1, 3), (1, 6), (1, 9)]);
     ed.commit().unwrap();
-    let t = TransportPosition::new(true, Bpm::of(120.0), Beat(0.0), None);
+    let t = TransportPosition::new(true, Bpm::of(120.0), Beat::new(0.0), None);
     let mut drain = [(0, Ump([0; 4])); 256];
     // Warm up outside the gate.
     busy(&mut dev, 0);
@@ -205,13 +213,15 @@ fn an_epoch_change_processes_without_allocating() {
 /// **A device output's node passes events without allocating.**
 #[test]
 fn the_midi_out_node_passes_events_without_allocating() {
-    let (mut ed, mut exec) =
-        Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(512))));
+    let (mut ed, mut exec) = Editor::new(Prepare::new(
+        SampleRate::SR_48K,
+        MaxBlock::of(Samples::new(512)),
+    ));
     ed.insert(NodeKey(1), "out", ForkByClone(MidiOutNode::new()));
     let mut dev = device(&mut ed, 4);
     let mut out = common::sink(&mut ed, 1, &[(1, 0)]);
     ed.commit().unwrap();
-    let t = TransportPosition::new(true, Bpm::of(120.0), Beat(0.0), None);
+    let t = TransportPosition::new(true, Bpm::of(120.0), Beat::new(0.0), None);
     let mut drain = [(0, Ump([0; 4])); 256];
     busy(&mut dev, 0);
     exec.process(512, &t, &[], &mut []);
@@ -249,8 +259,10 @@ fn bend_range(device: &mut EventInletWriter, block: u64) {
 /// without allocating, and every member's port carries it.
 #[test]
 fn the_mpe_bend_range_fan_out_processes_without_allocating() {
-    let (mut ed, mut exec) =
-        Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(512))));
+    let (mut ed, mut exec) = Editor::new(Prepare::new(
+        SampleRate::SR_48K,
+        MaxBlock::of(Samples::new(512)),
+    ));
     let mode = Publisher::new(tutti_fixtures::midi::lower_zone(15));
     ed.insert(NodeKey(1), "in", MidiIngestNode::new().with_mpe(&mode));
     let mut dev = device(&mut ed, 4);
@@ -304,8 +316,10 @@ fn gesture(device: &mut EventInletWriter, block: u64) {
 /// without allocating, block after block.
 #[test]
 fn the_mpe_expression_paths_process_without_allocating() {
-    let (mut ed, mut exec) =
-        Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(512))));
+    let (mut ed, mut exec) = Editor::new(Prepare::new(
+        SampleRate::SR_48K,
+        MaxBlock::of(Samples::new(512)),
+    ));
     let mode = Publisher::new(tutti_fixtures::midi::lower_zone(15));
     ed.insert(NodeKey(1), "in", MidiIngestNode::new().with_mpe(&mode));
     let mut dev = device(&mut ed, 4);
@@ -359,8 +373,10 @@ fn mcm(device: &mut EventInletWriter, block: u64, upper: bool) {
 /// is control-side), and the wire alternates upper and lower MCMs.
 #[test]
 fn an_mpe_mode_change_and_an_mcm_process_without_allocating() {
-    let (mut ed, mut exec) =
-        Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(512))));
+    let (mut ed, mut exec) = Editor::new(Prepare::new(
+        SampleRate::SR_48K,
+        MaxBlock::of(Samples::new(512)),
+    ));
     let cell = Publisher::new(MpeMode::Disabled);
     ed.insert(NodeKey(1), "in", MidiIngestNode::new().with_mpe(&cell));
     let mut dev = device(&mut ed, 4);
@@ -400,11 +416,11 @@ fn an_mpe_mode_change_and_an_mcm_process_without_allocating() {
 #[test]
 fn a_block_of_many_loop_passes_walks_without_allocating() {
     const RATE: f64 = 48_000.0;
-    let beat = |frame: f64| Beat(frame / 24_000.0);
+    let beat = |frame: f64| Beat::new(frame / 24_000.0);
     let (start, end) = (beat(1_000.0), beat(1_064.0));
     let (mut ed, mut exec) = Editor::new(Prepare::new(
         SampleRate::of(RATE),
-        MaxBlock::of(Samples(512)),
+        MaxBlock::of(Samples::new(512)),
     ));
     ed.insert(
         NodeKey(1),
@@ -436,7 +452,7 @@ fn a_block_of_many_loop_passes_walks_without_allocating() {
         NodeKey(2),
         "harmony",
         HarmonyNode::new([
-            TimedHarmony::new(Beat(0.0), Harmony::chord(60, 60, 0b1001_0001)),
+            TimedHarmony::new(Beat::new(0.0), Harmony::chord(60, 60, 0b1001_0001)),
             TimedHarmony::new(beat(1_032.0), Harmony::chord(67, 67, 0b1001_0001)),
         ]),
     );
@@ -453,7 +469,7 @@ fn a_block_of_many_loop_passes_walks_without_allocating() {
             &[],
             &mut [],
         );
-        clock.advance(Samples(512), Some(region));
+        clock.advance(Samples::new(512), Some(region));
         out.poll_into(&mut drain)
     };
     // Warm up outside the gate; the clip sends its notes.
@@ -482,7 +498,7 @@ fn a_block_of_many_loop_passes_walks_without_allocating() {
 #[test]
 fn a_clip_overflowing_its_port_refuses_and_retries_without_allocating() {
     const RATE: f64 = 48_000.0;
-    let beat = |frame: f64| Beat(frame / 24_000.0);
+    let beat = |frame: f64| Beat::new(frame / 24_000.0);
     let note = |i: u32| note_on((i / 128 % 16) as u8, (i % 128) as u8);
     let off = |i: u32| midi::note_off(MidiChannel::of((i / 128 % 16) as u8), (i % 128) as u8, 0);
     let mut events = Vec::new();
@@ -501,7 +517,7 @@ fn a_clip_overflowing_its_port_refuses_and_retries_without_allocating() {
     }
     let (mut ed, mut exec) = Editor::new(Prepare::new(
         SampleRate::of(RATE),
-        MaxBlock::of(Samples(64)),
+        MaxBlock::of(Samples::new(64)),
     ));
     ed.insert(NodeKey(1), "clip", MidiClipNode::new(events));
     let mut out = common::sink(&mut ed, 1, &[(1, 0)]);
@@ -541,7 +557,7 @@ fn a_clip_overflowing_its_port_refuses_and_retries_without_allocating() {
 /// stop. None allocates.
 #[test]
 fn a_clip_with_a_full_table_sends_and_pays_without_allocating() {
-    let beat = |frame: u64| Beat(frame as f64 / 24_000.0);
+    let beat = |frame: u64| Beat::new(frame as f64 / 24_000.0);
     let key = |i: u32| {
         (
             MidiGroup::of((i / 2_048) as u8),
@@ -570,8 +586,10 @@ fn a_clip_with_a_full_table_sends_and_pays_without_allocating() {
             .unwrap(),
         ]
     });
-    let (mut ed, mut exec) =
-        Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(512))));
+    let (mut ed, mut exec) = Editor::new(Prepare::new(
+        SampleRate::SR_48K,
+        MaxBlock::of(Samples::new(512)),
+    ));
     ed.insert(NodeKey(1), "clip", MidiClipNode::new(events));
     let mut out = common::sink(&mut ed, 1, &[(1, 0)]);
     ed.commit().unwrap();
@@ -627,13 +645,15 @@ fn a_clip_with_a_full_table_sends_and_pays_without_allocating() {
 /// gate: they are the control thread's.
 #[test]
 fn the_event_inlet_processes_without_allocating() {
-    let (mut ed, mut exec) =
-        Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(512))));
+    let (mut ed, mut exec) = Editor::new(Prepare::new(
+        SampleRate::SR_48K,
+        MaxBlock::of(Samples::new(512)),
+    ));
     let (queue, mut tx) = EventInletNode::pair(LIVE_INLET_CAPACITY);
     ed.insert(NodeKey(1), "timed", queue);
     let mut out = common::sink(&mut ed, 1, &[(1, 0)]);
     ed.commit().unwrap();
-    let t = TransportPosition::new(true, Bpm::of(120.0), Beat(0.0), None);
+    let t = TransportPosition::new(true, Bpm::of(120.0), Beat::new(0.0), None);
     let mut drain = [(0, Ump([0; 4])); 256];
     exec.process(512, &t, &[], &mut []);
     let _ = out.poll_into(&mut drain);
@@ -664,13 +684,15 @@ fn the_event_inlet_processes_without_allocating() {
 /// is the one dropped), every block's processing inside the gate.
 #[test]
 fn the_event_inlet_with_a_full_list_processes_without_allocating() {
-    let (mut ed, mut exec) =
-        Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(512))));
+    let (mut ed, mut exec) = Editor::new(Prepare::new(
+        SampleRate::SR_48K,
+        MaxBlock::of(Samples::new(512)),
+    ));
     let (queue, mut tx) = EventInletNode::pair(LIVE_INLET_CAPACITY);
     ed.insert(NodeKey(1), "timed", queue);
     let mut out = common::sink(&mut ed, 1, &[(1, 0)]);
     ed.commit().unwrap();
-    let t = TransportPosition::new(true, Bpm::of(120.0), Beat(0.0), None);
+    let t = TransportPosition::new(true, Bpm::of(120.0), Beat::new(0.0), None);
     let mut drain = [(0, Ump([0; 4])); 256];
     let on = midi::m1_note_on(MidiChannel::FIRST, 60, U7::of(100));
     let off = midi::m1_note_off(MidiChannel::FIRST, 60, U7::of(0));
@@ -706,8 +728,10 @@ fn the_event_inlet_with_a_full_list_processes_without_allocating() {
 /// gate: it is control-side) without allocating, block after block.
 #[test]
 fn the_mpe_transform_node_processes_without_allocating() {
-    let (mut ed, mut exec) =
-        Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(512))));
+    let (mut ed, mut exec) = Editor::new(Prepare::new(
+        SampleRate::SR_48K,
+        MaxBlock::of(Samples::new(512)),
+    ));
     let cell = Publisher::new(tutti_fixtures::midi::lower_zone(15));
     ed.insert(NodeKey(1), "mpe", MpeTransformNode::new(&cell));
     let mut dev = device(&mut ed, 4);
@@ -758,8 +782,10 @@ fn the_mpe_transform_node_processes_without_allocating() {
 fn machine_control_out_of_a_sync_node_processes_without_allocating() {
     use tutti_graph::{Offset, TransportChanges};
 
-    let (mut ed, mut exec) =
-        Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(512))));
+    let (mut ed, mut exec) = Editor::new(Prepare::new(
+        SampleRate::SR_48K,
+        MaxBlock::of(Samples::new(512)),
+    ));
     let controls = ed
         .insert(
             NodeKey(1),
@@ -774,7 +800,7 @@ fn machine_control_out_of_a_sync_node_processes_without_allocating() {
     let mut out = common::sink(&mut ed, 1, &[(1, 0)]);
     ed.commit().unwrap();
     let at = |playing: bool, beat: f64| {
-        TransportPosition::new(playing, Bpm::of(120.0), Beat(beat), None)
+        TransportPosition::new(playing, Bpm::of(120.0), Beat::new(beat), None)
     };
     let mut changes = TransportChanges::NONE;
     for (frame, to) in [
@@ -783,7 +809,7 @@ fn machine_control_out_of_a_sync_node_processes_without_allocating() {
         (400, at(true, 9.0)),
     ] {
         changes
-            .push(Offset::of(Samples(frame), Samples(512)), to)
+            .push(Offset::of(Samples::new(frame), Samples::new(512)), to)
             .unwrap();
     }
     let mut drain = [(0, Ump([0; 4])); 256];
@@ -846,7 +872,7 @@ fn resetting_the_border_nodes_allocates_nothing() {
         d.set_transport(TransportPosition::new(
             playing,
             Bpm::of(120.0),
-            Beat(beat),
+            Beat::new(beat),
             None,
         ));
         d.block();

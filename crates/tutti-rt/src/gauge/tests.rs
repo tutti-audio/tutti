@@ -48,14 +48,14 @@ impl Reading for Pair {
 
 #[test]
 fn a_gauge_holds_a_unit() {
-    let (mut writer, reduction) = gauge(Db(0.0));
-    writer.set(Db(-12.5));
-    assert_eq!(reduction.get(), Db(-12.5));
-    let (mut writer, cursor) = gauge(SamplePosition(0.0));
-    writer.set(SamplePosition(48_000.25));
+    let (mut writer, reduction) = gauge(Db::new(0.0));
+    writer.set(Db::new(-12.5));
+    assert_eq!(reduction.get(), Db::new(-12.5));
+    let (mut writer, cursor) = gauge(SamplePosition::new(0.0));
+    writer.set(SamplePosition::new(48_000.25));
     assert_eq!(
         cursor.get(),
-        SamplePosition(48_000.25),
+        SamplePosition::new(48_000.25),
         "an f64 unit keeps its width"
     );
 }
@@ -70,33 +70,33 @@ fn an_owners_own_reading_round_trips() {
 #[test]
 fn a_counter_counts_frames() {
     let (mut writer, lost) = counter::<Samples>();
-    writer.add(Samples(512));
-    writer.add(Samples(64));
-    assert_eq!(lost.get(), Samples(576));
+    writer.add(Samples::new(512));
+    writer.add(Samples::new(64));
+    assert_eq!(lost.get(), Samples::new(576));
 }
 
 #[test]
 fn a_gauge_reads_the_latest_value_written() {
-    let (mut writer, reading) = gauge(Db(1.0));
+    let (mut writer, reading) = gauge(Db::new(1.0));
     assert_eq!(
         reading.get(),
-        Db(1.0),
+        Db::new(1.0),
         "before any write: the initial value"
     );
-    writer.set(Db(-4.5));
-    writer.set(Db(2.5));
-    assert_eq!(reading.get(), Db(2.5));
+    writer.set(Db::new(-4.5));
+    writer.set(Db::new(2.5));
+    assert_eq!(reading.get(), Db::new(2.5));
     assert_eq!(
         reading.clone().get(),
-        Db(2.5),
+        Db::new(2.5),
         "a clone reads the same cell"
     );
 }
 
 #[test]
 fn a_gauge_moves_both_ways() {
-    let (mut writer, reading) = gauge(Db(0.0));
-    for level in [Db(3.0), Db(-3.0), Db(0.5), Db(-9.0)] {
+    let (mut writer, reading) = gauge(Db::new(0.0));
+    for level in [Db::new(3.0), Db::new(-3.0), Db::new(0.5), Db::new(-9.0)] {
         writer.set(level);
         assert_eq!(reading.get(), level);
     }
@@ -194,22 +194,22 @@ fn a_cell_reopens_only_once_its_writer_has_dropped() {
 #[test]
 fn a_counter_stays_cumulative_across_writers() {
     let (mut first, total) = counter::<Samples>();
-    first.add(Samples(5));
+    first.add(Samples::new(5));
     drop(first);
     let mut second = total.reopen().unwrap();
-    second.add(Samples(7));
-    assert_eq!(total.get(), Samples(12));
+    second.add(Samples::new(7));
+    assert_eq!(total.get(), Samples::new(12));
 }
 
 #[test]
 fn a_gauge_holds_its_last_reading_across_writers() {
-    let (mut first, level) = gauge(Db(0.0));
-    first.set(Db(-9.0));
+    let (mut first, level) = gauge(Db::new(0.0));
+    first.set(Db::new(-9.0));
     drop(first);
     let mut second = level.reopen().unwrap();
-    assert_eq!(level.get(), Db(-9.0));
-    second.set(Db(-2.0));
-    assert_eq!(level.get(), Db(-2.0));
+    assert_eq!(level.get(), Db::new(-9.0));
+    second.set(Db::new(-2.0));
+    assert_eq!(level.get(), Db::new(-2.0));
 }
 
 #[test]

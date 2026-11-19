@@ -36,7 +36,7 @@
 //! ChannelMode, BasicChannelRx and Tx, ProgramList, LocalOn, ExternalSync, AllCtrlList,
 //! ChCtrlList, CtrlMapList, StateList, State), typed; [`ResourceInitiator`] makes checked Get, Set and
 //! Subscribe calls over [`PeInitiator`], walks paginated lists and keeps the data of a
-//! Subscription; [`ResourceResponder`] serves a [`ResourceStore`] and tells subscribers
+//! Subscription; [`ResourceResponder`] serves the [`ResourceStore`] it is handed and tells subscribers
 //! what changes. [`PartialUpdate`] is a Partial Set or `partial` update, applied to the data.
 //! A device's states are saved with [`ResourceInitiator::get_state`] as a [`SavedState`],
 //! which [`ResourceInitiator::restore_state`] sends back to the device it came from only.

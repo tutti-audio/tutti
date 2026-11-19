@@ -54,7 +54,7 @@ fn rig() -> (Executor, DeviceInput) {
     writer.arrive();
     let (mut editor, exec) = Editor::new(Prepare::new(
         SampleRate::SR_48K,
-        MaxBlock::of(Samples(BLOCK)),
+        MaxBlock::of(Samples::new(BLOCK)),
     ));
     editor.insert(
         NodeKey(1),

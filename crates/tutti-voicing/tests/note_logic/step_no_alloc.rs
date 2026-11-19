@@ -151,7 +151,7 @@ fn step_is_allocation_free_in_every_mode() {
                         match *cmd {
                             Command::Start { id, steal, .. } => {
                                 voices.retain(|v| Some(v.0) != steal);
-                                voices.push((id, Amplitude(0.5)));
+                                voices.push((id, Amplitude::new(0.5)));
                             }
                             Command::Cut(id) => voices.retain(|v| v.0 != id),
                             _ => {}
@@ -169,7 +169,7 @@ fn step_is_allocation_free_in_every_mode() {
 #[test]
 fn per_note_state_is_allocation_free() {
     use tutti_ump::{Address, MidiGroup, RegisteredPerNoteController, U7};
-    let mut state = PerNoteState::new(16, Semitones(48.0));
+    let mut state = PerNoteState::new(16, Semitones::new(48.0));
     let mut twin = state.clone();
     assert_no_alloc(|| {
         for round in 0..400u32 {
@@ -246,7 +246,7 @@ fn universal_is_allocation_free() {
     assert_no_alloc(|| {
         for round in 0..200u16 {
             for k in 40..46 {
-                let level = |_: VoiceId| Some(Amplitude(1.0));
+                let level = |_: VoiceId| Some(Amplitude::new(1.0));
                 std::hint::black_box(core.step(MidiChannel::of(0), on(k), &Grouped, level));
             }
             for message in [
@@ -321,14 +321,14 @@ fn mts_is_allocation_free() {
                 };
                 let channel = MidiChannel::of((round % 3) as u8);
                 for k in 40..46 {
-                    let level = |_: VoiceId| Some(Amplitude(1.0));
+                    let level = |_: VoiceId| Some(Amplitude::new(1.0));
                     std::hint::black_box(core.step(channel, on(k), &Grouped, level));
                 }
                 for (rpn, v) in [
                     (Rpn::TUNING_PROGRAM_SELECT, r % 10),
                     (Rpn::TUNING_BANK_SELECT, r % 3),
                 ] {
-                    let level = |_: VoiceId| Some(Amplitude(1.0));
+                    let level = |_: VoiceId| Some(Amplitude::new(1.0));
                     std::hint::black_box(core.step(channel, select(rpn, v), &Grouped, level));
                 }
                 for message in [

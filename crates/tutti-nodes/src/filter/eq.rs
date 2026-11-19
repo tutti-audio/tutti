@@ -103,9 +103,9 @@ impl<C: EqControls, F: Float + Lanes> EqKernel<C, F> {
     /// The ring-out over every control: `C::ring_ceiling`.
     fn ceiling_at(&self) -> Tail {
         match C::ring_ceiling(self.rate, TAIL_FLOOR) {
-            Ok(Ring::Finite(t)) => {
-                Tail::Finite(Samples((t.get() * self.rate.get()).ceil() as usize + 1))
-            }
+            Ok(Ring::Finite(t)) => Tail::Finite(Samples::new(
+                (t.get() * self.rate.get()).ceil() as usize + 1,
+            )),
             _ => Tail::Unbounded,
         }
     }
@@ -114,7 +114,7 @@ impl<C: EqControls, F: Float + Lanes> EqKernel<C, F> {
     fn ring(&self, controls: &C) -> Tail {
         match controls.held(self.rate).ring_out(self.rate, TAIL_FLOOR) {
             Ok(Ring::Finite(t)) => {
-                Tail::Finite(Samples((t.get() * self.rate.get()).ceil() as usize))
+                Tail::Finite(Samples::new((t.get() * self.rate.get()).ceil() as usize))
             }
             _ => Tail::Unbounded,
         }

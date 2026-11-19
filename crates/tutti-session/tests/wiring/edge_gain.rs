@@ -1,7 +1,6 @@
-//! The session's edge gains (doc 013, "Edge gain", G3): `set_edge_gain`,
-//! `edge_gain` and `clear_edge_gain`, the weighted fan-in forms
-//! `add_source_weighted` and `add_output_source_weighted`, and what removing a
-//! source does to its weight.
+//! The session's edge gains (doc 013, "Edge gain", G3): a gain lane declared
+//! with the wire (`Connection::gain`), its value the `GainTarget`'s, `clear_gain`,
+//! and what removing a source does to its weight.
 //!
 //! Every figure is analytic: constants of exactly representable values and
 //! weights, so the weighted fold `(0.0 + w * a) + b` is exact in `f32`.
@@ -13,7 +12,10 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::NodeKey;
 use tutti_nodes::testing::{Const, Through};
-use tutti_session::{Edge, EdgeGainError, InPort, OutPort, Root, Session};
+use tutti_session::{
+    DeclarationError, Edge, GainTarget, GainTargetError, InPort, OutPort, Root, Session,
+    SetRefusal, ValueErrorKind,
+};
 use tutti_units::Amplitude;
 
 const A: f32 = 0.25;
@@ -78,14 +80,35 @@ impl Rig {
     fn edge_from(&self, from: NodeKey) -> Edge {
         Edge::new(node(from), InPort::new(self.sink, 0))
     }
+
+    /// The value of the gain lane of `from`'s edge into the sink.
+    fn gain_of(&self, from: NodeKey) -> Amplitude {
+        let edge = self.edge_from(from);
+        let target = self
+            .s
+            .graph_ref()
+            .gain_target(edge.source(), edge.sink())
+            .expect("a lane");
+        self.s.get(target).unwrap()
+    }
+
+    /// Whether `from`'s edge into the sink has no gain lane.
+    fn no_lane(&self, from: NodeKey) -> bool {
+        let edge = self.edge_from(from);
+        self.s
+            .graph_ref()
+            .gain_target(edge.source(), edge.sink())
+            .is_err()
+    }
 }
 
-/// Set, read, change and clear: an edge with no entry reads `None` (it is
-/// aliased, not weighted at unity); giving it one is structural and moves the
-/// sum; clearing returns the plain sum and is structural too, and a second
-/// clear finds nothing.
+/// Declare, read, write and clear: a plain edge (aliased, not weighted at
+/// unity) has no gain lane, so it has no target; declaring one is structural
+/// and moves the sum; a write to it reads back at once and reaches the render
+/// with the update; clearing returns the plain sum and is structural too, a
+/// second clear finds nothing, and the cleared lane's target is gone.
 #[test]
-fn an_edge_gain_sets_reads_and_clears() {
+fn an_edge_gain_is_declared_written_read_and_cleared() {
     let mut r = rig();
     r.s.graph()
         .connect(node(r.a), InPort::new(r.sink, 0))
@@ -97,53 +120,91 @@ fn an_edge_gain_sets_reads_and_clears() {
         .hard();
     assert!(all_are(&settled(&mut r.s, 0), A + B));
     let edge = r.edge_from(r.a);
-    assert_eq!(edge.gain(r.s.graph_ref()), None, "plain: no entry");
+    assert_eq!(
+        r.s.graph_ref().gain_target(edge.source(), edge.sink()),
+        Err(GainTargetError::NoLane(edge)),
+        "plain: no lane"
+    );
 
-    edge.set_gain(r.s.graph(), amp(0.5)).expect("an edge");
-    assert!(r.s.graph_ref().is_edited(), "a first gain is structural");
-    assert_eq!(edge.gain(r.s.graph_ref()), Some(amp(0.5)));
+    r.s.graph()
+        .connect(node(r.a), InPort::new(r.sink, 0))
+        .unwrap()
+        .hard()
+        .gain(amp(0.5))
+        .unwrap();
+    assert!(r.s.graph_ref().is_edited(), "a declared lane is structural");
+    let gain =
+        r.s.graph_ref()
+            .gain_target(edge.source(), edge.sink())
+            .expect("a lane");
+    assert_eq!(r.s.get(gain).unwrap(), amp(0.5));
     assert!(all_are(&settled(&mut r.s, 0), (0.0 + 0.5 * A) + B));
 
-    edge.set_gain(r.s.graph(), amp(-2.0)).expect("an edge");
-    assert_eq!(edge.gain(r.s.graph_ref()), Some(amp(-2.0)));
+    r.s.set(gain.to(amp(-2.0))).unwrap();
+    assert_eq!(r.s.get(gain).unwrap(), amp(-2.0), "read back at once");
     assert!(all_are(&settled(&mut r.s, 0), (0.0 + -2.0 * A) + B));
 
     assert!(edge.clear_gain(r.s.graph()));
     assert!(r.s.graph_ref().is_edited(), "clearing is structural");
-    assert_eq!(edge.gain(r.s.graph_ref()), None);
     assert!(all_are(&settled(&mut r.s, 0), A + B), "the plain sum again");
+    assert_eq!(
+        r.s.set(gain.to(amp(1.0))).unwrap_err().kind,
+        ValueErrorKind::NoSuchTarget,
+        "the cleared lane has no target"
+    );
     assert!(!edge.clear_gain(r.s.graph()), "nothing left to clear");
     assert!(!r.s.graph_ref().is_edited());
 }
 
-/// A gain on an edge that is not there is refused, and so is one that is not
-/// a number; the graph is unchanged (nothing edited, no entry). Silence is
-/// never an edge.
+/// An edge that is not there, or a plain one, has no gain target
+/// (`NoLane`), a gain that is not a number is refused at the call and lands
+/// nothing (the lane keeps its weight, nothing is edited), and a lane that
+/// goes with its edge takes its target with it.
 #[test]
-fn a_gain_on_a_missing_edge_or_a_bad_number_is_refused() {
+fn a_gain_target_needs_a_lane_and_a_number() {
     let mut r = rig();
     r.s.graph()
         .connect(node(r.a), InPort::new(r.sink, 0))
         .unwrap()
-        .hard();
+        .hard()
+        .gain(amp(0.5))
+        .unwrap();
     let _ = r.s.update();
     let missing = r.edge_from(r.b);
     assert_eq!(
-        missing.set_gain(r.s.graph(), amp(0.5)),
-        Err(EdgeGainError::NoSuchEdge(missing))
+        r.s.graph_ref()
+            .gain_target(missing.source(), missing.sink()),
+        Err(GainTargetError::NoLane(missing))
     );
     let real = r.edge_from(r.a);
-    assert_eq!(
-        real.set_gain(r.s.graph(), amp(f64::NAN)),
-        Err(EdgeGainError::NotFinite)
+    let gain =
+        r.s.graph_ref()
+            .gain_target(real.source(), real.sink())
+            .expect("a lane");
+    for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        let refused = r.s.set(gain.to(amp(bad))).unwrap_err();
+        assert_eq!(
+            refused.kind,
+            ValueErrorKind::Refused(SetRefusal::NotFinite),
+            "{bad}"
+        );
+    }
+    assert_eq!(r.s.get(gain).unwrap(), amp(0.5), "nothing landed");
+    assert!(
+        all_are(&settled(&mut r.s, 0), 0.5 * A),
+        "the render keeps it"
     );
-    assert_eq!(
-        real.set_gain(r.s.graph(), amp(f64::INFINITY)),
-        Err(EdgeGainError::NotFinite)
-    );
-    assert_eq!(real.gain(r.s.graph_ref()), None);
-    assert_eq!(missing.gain(r.s.graph_ref()), None);
     assert!(!r.s.graph_ref().is_edited(), "a refusal edits nothing");
+
+    r.s.graph()
+        .disconnect_hard(node(r.a), InPort::new(r.sink, 0))
+        .unwrap();
+    let _ = r.s.update();
+    assert_eq!(
+        r.s.set(gain.to(amp(1.0))).unwrap_err().kind,
+        ValueErrorKind::NoSuchTarget,
+        "the edge is gone"
+    );
 }
 
 /// `add_source_weighted` adds the edge and its weight in one edit, and the
@@ -170,8 +231,8 @@ fn add_source_weighted_adds_the_edge_and_its_weight() {
         r.s.graph_ref().sources(InPort::new(sink, 0)).unwrap(),
         [node(a), node(b)]
     );
-    assert_eq!(r.edge_from(a).gain(r.s.graph_ref()), Some(amp(0.5)));
-    assert_eq!(r.edge_from(b).gain(r.s.graph_ref()), Some(amp(-0.25)));
+    assert_eq!(r.gain_of(a), amp(0.5));
+    assert_eq!(r.gain_of(b), amp(-0.25));
     assert!(all_are(&settled(&mut r.s, 0), (0.0 + 0.5 * A) + -0.25 * B));
 
     // Held already: the weight is set, nothing else changes.
@@ -196,7 +257,7 @@ fn add_source_weighted_adds_the_edge_and_its_weight() {
             .hard()
             .gain(amp(f64::NAN))
             .err(),
-        Some(EdgeGainError::NotFinite)
+        Some(DeclarationError::NotFinite)
     );
     assert_eq!(
         r.s.graph_ref().sources(InPort::new(sink, 0)).unwrap(),
@@ -226,14 +287,14 @@ fn add_output_source_weighted_weights_the_channel() {
         r.s.graph_ref().sources(Root::output(1)).unwrap(),
         [node(a), node(b)]
     );
-    assert_eq!(
-        Edge::new(node(a), Root::output(1)).gain(r.s.graph_ref()),
-        Some(amp(0.5))
-    );
+    let weight = |r: &Rig, from| {
+        r.s.graph_ref()
+            .gain_target(node(from), Root::output(1))
+            .expect("a lane")
+    };
+    assert_eq!(r.s.get(weight(&r, a)).unwrap(), amp(0.5));
     assert!(all_are(&settled(&mut r.s, 1), (0.0 + 0.5 * A) + 2.0 * B));
-    Edge::new(node(b), Root::output(1))
-        .set_gain(r.s.graph(), amp(1.0))
-        .expect("an edge");
+    r.s.set(weight(&r, b).to(amp(1.0))).unwrap();
     assert!(all_are(&settled(&mut r.s, 1), (0.0 + 0.5 * A) + 1.0 * B));
     assert!(Edge::new(node(a), Root::output(1)).clear_gain(r.s.graph()));
     assert!(Edge::new(node(b), Root::output(1)).clear_gain(r.s.graph()));
@@ -266,7 +327,7 @@ fn removing_a_source_drops_its_weight() {
     r.s.graph()
         .disconnect_hard(node(a), InPort::new(sink, 0))
         .unwrap();
-    assert_eq!(r.edge_from(a).gain(r.s.graph_ref()), None);
+    assert!(r.no_lane(a));
     assert!(all_are(&settled(&mut r.s, 0), B), "valid, and just b");
     r.s.graph()
         .connect(node(a), InPort::new(sink, 0))
@@ -277,12 +338,16 @@ fn removing_a_source_drops_its_weight() {
         "added back plain, no stale weight"
     );
 
-    let edge = r.edge_from(a);
-    edge.set_gain(r.s.graph(), amp(0.5)).unwrap();
+    r.s.graph()
+        .connect(node(a), InPort::new(sink, 0))
+        .unwrap()
+        .hard()
+        .gain(amp(0.5))
+        .unwrap();
     r.s.graph()
         .set_sources_hard(InPort::new(sink, 0), [node(b)])
         .unwrap();
-    assert_eq!(r.edge_from(a).gain(r.s.graph_ref()), None);
+    assert!(r.no_lane(a));
     assert!(all_are(&settled(&mut r.s, 0), B));
 
     r.s.graph()
@@ -300,8 +365,8 @@ fn removing_a_source_drops_its_weight() {
         .disconnect_hard(node(a), Root::output(1))
         .unwrap();
     assert_eq!(
-        Edge::new(node(a), Root::output(1)).gain(r.s.graph_ref()),
-        None
+        r.s.graph_ref().gain_target(node(a), Root::output(1)),
+        Err(GainTargetError::NoLane(Edge::new(node(a), Root::output(1))))
     );
     assert!(all_are(&settled(&mut r.s, 1), B));
     r.s.graph()
@@ -314,8 +379,8 @@ fn removing_a_source_drops_its_weight() {
         .set_sources_hard(Root::output(1), [node(b)])
         .unwrap();
     assert_eq!(
-        Edge::new(node(a), Root::output(1)).gain(r.s.graph_ref()),
-        None
+        r.s.graph_ref().gain_target(node(a), Root::output(1)),
+        Err(GainTargetError::NoLane(Edge::new(node(a), Root::output(1))))
     );
     assert!(all_are(&settled(&mut r.s, 1), B));
 }
@@ -341,8 +406,11 @@ fn moving_a_weight_marks_no_recompile() {
     let plan = r.s.graph_ref().testing().sent_plan().expect("a plan");
     let commits = r.s.graph_ref().testing().commits_sent();
 
-    let edge = r.edge_from(a);
-    edge.set_gain(r.s.graph(), amp(1.5)).unwrap();
+    let gain =
+        r.s.graph_ref()
+            .gain_target(node(a), InPort::new(sink, 0))
+            .expect("a lane");
+    r.s.set(gain.to(amp(1.5))).unwrap();
     assert!(!r.s.graph_ref().is_edited(), "a control, not a rewire");
     assert!(all_are(&settled(&mut r.s, 0), (0.0 + 1.5 * A) + B));
     assert!(Arc::ptr_eq(
@@ -350,4 +418,71 @@ fn moving_a_weight_marks_no_recompile() {
         &r.s.graph_ref().testing().sent_plan().expect("a plan")
     ));
     assert_eq!(r.s.graph_ref().testing().commits_sent(), commits);
+}
+
+/// **A gain target whose lane is gone is refused at the call**, with no
+/// update in between, by every path that removes a lane: removing the node,
+/// disconnecting the edge, clearing the gain, replacing the sink with a node
+/// that has no such input, and rewriting the sink's sources.
+#[test]
+fn a_gain_target_of_a_removed_lane_is_refused_at_the_call() {
+    use tutti_graph::FadeLaw;
+    use tutti_units::Seconds;
+
+    let lane = |r: &mut Rig| {
+        r.s.graph()
+            .connect(node(r.a), InPort::new(r.sink, 0))
+            .unwrap()
+            .hard()
+            .gain(amp(0.5))
+            .unwrap();
+        let _ = r.s.update();
+        let edge = r.edge_from(r.a);
+        r.s.graph_ref()
+            .gain_target(edge.source(), edge.sink())
+            .expect("a lane")
+    };
+    let refused = |r: &mut Rig, gain: GainTarget, path: &str| {
+        assert_eq!(
+            r.s.set(gain.to(amp(1.0))).unwrap_err().kind,
+            ValueErrorKind::NoSuchTarget,
+            "{path}"
+        );
+    };
+
+    let mut r = rig();
+    let gain = lane(&mut r);
+    r.s.graph().remove(r.a).unwrap();
+    refused(&mut r, gain, "node removal");
+
+    let mut r = rig();
+    let gain = lane(&mut r);
+    r.s.graph()
+        .disconnect(node(r.a), InPort::new(r.sink, 0))
+        .unwrap();
+    refused(&mut r, gain, "disconnect");
+
+    let mut r = rig();
+    let gain = lane(&mut r);
+    assert!(r.edge_from(r.a).clear_gain(r.s.graph()));
+    refused(&mut r, gain, "clear_gain");
+
+    let mut r = rig();
+    let gain = lane(&mut r);
+    r.s.graph()
+        .replace(
+            r.sink,
+            ForkByClone(Const::mono(A)),
+            Seconds(0.0),
+            FadeLaw::EqualAmplitude,
+        )
+        .unwrap();
+    refused(&mut r, gain, "replace at an existing key");
+
+    let mut r = rig();
+    let gain = lane(&mut r);
+    r.s.graph()
+        .set_sources(InPort::new(r.sink, 0), [node(r.b)])
+        .unwrap();
+    refused(&mut r, gain, "set_sources");
 }

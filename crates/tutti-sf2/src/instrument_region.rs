@@ -155,25 +155,25 @@ impl InstrumentRegion {
     /// loader has checked that it is not before the sample data.
     #[must_use]
     pub fn sample_start(&self) -> Samples {
-        Samples(self.raw_sample_start().max(0) as usize)
+        Samples::new(self.raw_sample_start().max(0) as usize)
     }
 
     /// The last sample frame, with the end address offsets applied.
     #[must_use]
     pub fn sample_end(&self) -> Samples {
-        Samples(self.raw_sample_end().max(0) as usize)
+        Samples::new(self.raw_sample_end().max(0) as usize)
     }
 
     /// The loop start frame, with the loop address offsets applied.
     #[must_use]
     pub fn sample_start_loop(&self) -> Samples {
-        Samples(self.raw_sample_start_loop().max(0) as usize)
+        Samples::new(self.raw_sample_start_loop().max(0) as usize)
     }
 
     /// The loop end frame, with the loop address offsets applied.
     #[must_use]
     pub fn sample_end_loop(&self) -> Samples {
-        Samples(self.raw_sample_end_loop().max(0) as usize)
+        Samples::new(self.raw_sample_end_loop().max(0) as usize)
     }
 
     // The addresses as signed frame counts: an offset can take one before the
@@ -246,7 +246,7 @@ impl InstrumentRegion {
     /// The sample header's pitch correction.
     #[must_use]
     pub fn sample_pitch_correction(&self) -> Cents {
-        Cents(f64::from(self.sample_pitch_correction))
+        Cents::new(f64::from(self.sample_pitch_correction))
     }
 
     /// How the sample loops.

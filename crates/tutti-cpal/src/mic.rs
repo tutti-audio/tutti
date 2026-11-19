@@ -535,7 +535,7 @@ impl<F: Float> Capture<F> {
         rec: TapWriter<F>,
         mon: Option<TapWriter<F>>,
     ) -> Self {
-        let frames = Samples(CHUNK_FRAMES);
+        let frames = Samples::new(CHUNK_FRAMES);
         let selected = select.dst_layout();
         Self {
             select,
@@ -554,7 +554,7 @@ impl<F: Float> Capture<F> {
         let device = self.select.src_layout();
         let selected = self.select.dst_layout();
         let whole = device.interleaved_len(device.from_interleaved_len(data.len()));
-        let run_len = device.interleaved_len(Samples(CHUNK_FRAMES)).max(1);
+        let run_len = device.interleaved_len(Samples::new(CHUNK_FRAMES)).max(1);
         for run in data[..whole].chunks(run_len) {
             let frames = device.from_interleaved_len(run.len());
             let held = &mut self.device[..run.len()];

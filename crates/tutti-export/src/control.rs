@@ -339,7 +339,7 @@ impl<'a> Control<'a> {
 
     /// Enters `stage`: always delivered, at the start of its band.
     pub(crate) fn begin(&mut self, stage: Stage, total: Option<Samples>) {
-        self.deliver(stage, 0.0, total.map(|t| (Samples(0), t)));
+        self.deliver(stage, 0.0, total.map(|t| (Samples::new(0), t)));
     }
 
     /// `done` of `total` frames of `stage`: delivered when the stage is
@@ -356,7 +356,7 @@ impl<'a> Control<'a> {
             _ => true,
         };
         if due {
-            let within = if total == Samples(0) {
+            let within = if total == Samples::new(0) {
                 1.0
             } else {
                 done.get() as f32 / total.get() as f32

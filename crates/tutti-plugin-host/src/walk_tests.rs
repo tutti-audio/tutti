@@ -23,7 +23,7 @@ const RATE: f64 = 48_000.0;
 
 fn point(beat: f64, bpm: f64, shape: Transition) -> TempoPoint {
     TempoPoint {
-        beat: Beat(beat),
+        beat: Beat::new(beat),
         tempo: Bpm::of(bpm),
         transition: shape,
     }
@@ -34,13 +34,13 @@ fn point(beat: f64, bpm: f64, shape: Transition) -> TempoPoint {
 fn block(len: usize, transport: TransportPosition, changes: &[(usize, TransportPosition)]) -> Env {
     let mut list = TransportChanges::NONE;
     for &(at, to) in changes {
-        list.push(Offset::of(Samples(at), Samples(len)), to)
+        list.push(Offset::of(Samples::new(at), Samples::new(len)), to)
             .expect("a change");
     }
     Env {
         frame: Frame::new(0),
         sample_rate: SampleRate::of(RATE),
-        block_len: Samples(len),
+        block_len: Samples::new(len),
         transport,
         changes: list,
         play: PlayClock::ZERO,
@@ -48,7 +48,7 @@ fn block(len: usize, transport: TransportPosition, changes: &[(usize, TransportP
 }
 
 fn rolling(bpm: f64, beat: f64) -> TransportPosition {
-    TransportPosition::new(true, Bpm::of(bpm), Beat(beat), None)
+    TransportPosition::new(true, Bpm::of(bpm), Beat::new(beat), None)
 }
 
 /// What the plugin is told for a chunk: its transport at the chunk's first
@@ -107,7 +107,7 @@ impl Rig {
                 let (meter, steady, project, block_ns) = block.parts();
                 if at == 0 {
                     self.changes.clear();
-                    let offset = Offset::of(Samples(0), Samples(frames));
+                    let offset = Offset::of(Samples::new(0), Samples::new(frames));
                     let mut s = Snapshot::at(&cx, offset, steady.at(0), project, block_ns);
                     let mut view = self.tempo.view(env.sample_rate);
                     let settled = s.settle(&mut view);
@@ -204,11 +204,11 @@ fn a_step_inside_a_chunk_is_an_entry_at_its_frame() {
     let map = step_map();
     assert_eq!(
         map.view(SampleRate::of(RATE))
-            .frame_at_or_after(Beat(4.0))
+            .frame_at_or_after(Beat::new(4.0))
             .get()
             - map
                 .view(SampleRate::of(RATE))
-                .frame_at_or_after(Beat(3.99))
+                .frame_at_or_after(Beat::new(3.99))
                 .get(),
         240
     );
@@ -252,7 +252,7 @@ fn a_ramp_chunk_has_its_slope_and_its_cell_edges_are_no_entries() {
     let t = |frames: f64, tempo: f64| {
         let b = rig
             .tempo
-            .beat_at_seconds(tutti_units::Seconds(0.8 + frames / RATE));
+            .beat_at_seconds(tutti_units::Seconds::new(0.8 + frames / RATE));
         rolling(tempo, b.get())
     };
     let env = block(
@@ -272,16 +272,16 @@ fn a_ramp_chunk_has_its_slope_and_its_cell_edges_are_no_entries() {
 /// order.
 #[test]
 fn a_stop_a_start_a_seek_and_a_wrap_are_entries() {
-    let looped = LoopRange::new(Beat(1.0), Beat(2.0)).expect("a loop");
+    let looped = LoopRange::new(Beat::new(1.0), Beat::new(2.0)).expect("a loop");
     let mut rig = Rig::new(TempoMap::constant(Bpm::of(120.0)).expect("a tempo"));
     // 120 BPM: a frame is 1/24 000 beat. Playing from beat 1.5 in the loop
     // [1, 2]; stop at 100 (held at 1.5004), start again at 200, seek to
     // 1.9 at 300 (0.1 beat is 2 400 frames from the end: wrap at 2 700).
     let at = |f: usize| 1.5 + f as f64 / 24_000.0;
-    let t0 = TransportPosition::new(true, Bpm::of(120.0), Beat(1.5), Some(looped));
-    let stopped = TransportPosition::new(false, Bpm::of(120.0), Beat(at(100)), Some(looped));
-    let started = TransportPosition::new(true, Bpm::of(120.0), Beat(at(100)), Some(looped));
-    let sought = TransportPosition::new(true, Bpm::of(120.0), Beat(1.9), Some(looped));
+    let t0 = TransportPosition::new(true, Bpm::of(120.0), Beat::new(1.5), Some(looped));
+    let stopped = TransportPosition::new(false, Bpm::of(120.0), Beat::new(at(100)), Some(looped));
+    let started = TransportPosition::new(true, Bpm::of(120.0), Beat::new(at(100)), Some(looped));
+    let sought = TransportPosition::new(true, Bpm::of(120.0), Beat::new(1.9), Some(looped));
     let env = block(3_000, t0, &[(100, stopped), (200, started), (300, sought)]);
     let p = rig.chunk(3_000, &[env]);
     let flags: Vec<_> = p

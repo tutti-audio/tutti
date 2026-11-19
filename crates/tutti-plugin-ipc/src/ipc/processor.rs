@@ -137,7 +137,7 @@ impl Processor for IpcProcessor {
 
     /// One chunk: the pipeline submits a chunk and plays the one before.
     fn latency(&self) -> Samples {
-        Samples(self.batcher.chunk())
+        Samples::new(self.batcher.chunk())
     }
 
     /// The rate by a queued command, the chunk from the block and quantum,
@@ -162,7 +162,9 @@ impl Processor for IpcProcessor {
         // Live, the latency poll re-plans instead, and a retune never blocks.
         if let Some(super::Watch { wait, .. }) = self.link.watch() {
             self.link.bridge.audio().settle();
-            wait.plan(Samples(self.link.latency().get() + self.batcher.chunk()));
+            wait.plan(Samples::new(
+                self.link.latency().get() + self.batcher.chunk(),
+            ));
         }
         true
     }
@@ -372,7 +374,7 @@ mod tests {
         use tutti_graph::{Offset, UmpAt};
         use tutti_ump::MidiChannel;
 
-        let at = Offset::of(Samples(0), Samples(64));
+        let at = Offset::of(Samples::new(0), Samples::new(64));
         let ons: Vec<UmpAt> = (0..MIDI_STACK_CAPACITY)
             .map(|k| {
                 (

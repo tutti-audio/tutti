@@ -68,21 +68,21 @@ fn assert_echo(got: [f64; ECHO], want: [f64; ECHO], what: &str) {
 fn scene(b: usize, block: usize) -> (TransportPosition, TransportChanges) {
     let base = 4.0 + b as f64;
     let mut changes = TransportChanges::NONE;
-    let rolling = TransportPosition::new(true, Bpm::of(120.0), Beat(base), None);
+    let rolling = TransportPosition::new(true, Bpm::of(120.0), Beat::new(base), None);
     let t = match b % 6 {
         // A plain roll.
         0 => rolling,
         // A seek, far from where the last block left off.
-        1 => TransportPosition::new(true, Bpm::of(120.0), Beat(64.0 + base), None),
+        1 => TransportPosition::new(true, Bpm::of(120.0), Beat::new(64.0 + base), None),
         // A tempo change inside the block, before the second chunk when the
         // block has one; at the last frame otherwise.
         2 => {
             let at = if block > CHUNK { 40 } else { block - 1 };
-            let at = Offset::of(Samples(at), Samples(block));
+            let at = Offset::of(Samples::new(at), Samples::new(block));
             changes
                 .push(
                     at,
-                    TransportPosition::new(true, Bpm::of(90.0), Beat(base + 0.5), None),
+                    TransportPosition::new(true, Bpm::of(90.0), Beat::new(base + 0.5), None),
                 )
                 .expect("a change inside the block");
             rolling
@@ -92,13 +92,15 @@ fn scene(b: usize, block: usize) -> (TransportPosition, TransportChanges) {
         3 => TransportPosition::new(
             true,
             Bpm::of(120.0),
-            Beat(base),
-            Some(LoopRange::new(Beat(base), Beat(base + 32.0 / 24_000.0)).expect("a loop")),
+            Beat::new(base),
+            Some(
+                LoopRange::new(Beat::new(base), Beat::new(base + 32.0 / 24_000.0)).expect("a loop"),
+            ),
         ),
         // Recording.
         4 => rolling.with_recording(true),
         // Stopped.
-        _ => TransportPosition::new(false, Bpm::of(100.0), Beat(base), None),
+        _ => TransportPosition::new(false, Bpm::of(100.0), Beat::new(base), None),
     };
     (t, changes)
 }
@@ -111,7 +113,7 @@ fn scene(b: usize, block: usize) -> (TransportPosition, TransportChanges) {
 fn scene_map(blocks: usize) -> tutti_tempo::TempoMap {
     use tutti_tempo::{TempoMap, TempoPoint, Transition};
     let point = |beat: f64, bpm: f64| TempoPoint {
-        beat: Beat(beat),
+        beat: Beat::new(beat),
         tempo: Bpm::of(bpm),
         transition: Transition::Step,
     };
@@ -151,7 +153,7 @@ fn render_scenes(
         let env = Env {
             frame: r.executor().frame(),
             sample_rate: SampleRate::of(SAMPLE_RATE),
-            block_len: Samples(block),
+            block_len: Samples::new(block),
             transport,
             changes,
             play: tutti_graph::PlayClock::ZERO,
@@ -169,7 +171,7 @@ fn render_scenes(
 }
 
 fn offset(i: usize, block: usize) -> Offset {
-    Offset::of(Samples(i), Samples(block))
+    Offset::of(Samples::new(i), Samples::new(block))
 }
 
 /// **Live**: blocks of one chunk, each answered before the next. The echo of block
@@ -221,9 +223,11 @@ fn the_transport_an_offline_fork_sees_is_env_at_every_chunk() {
         .expect("the probe forks");
     const BLOCK: usize = 2 * CHUNK;
     // A 64-frame device quantum in 128-frame blocks: two chunks a block.
-    let prepare =
-        tutti_graph::Prepare::new(SampleRate::of(SAMPLE_RATE), MaxBlock::of(Samples(BLOCK)))
-            .with_quantum(MaxBlock::of(Samples(CHUNK)));
+    let prepare = tutti_graph::Prepare::new(
+        SampleRate::of(SAMPLE_RATE),
+        MaxBlock::of(Samples::new(BLOCK)),
+    )
+    .with_quantum(MaxBlock::of(Samples::new(CHUNK)));
     let mut rig = Rig::prepared(fork, prepare);
 
     const BLOCKS: usize = 24;
@@ -300,10 +304,12 @@ fn a_plugin_behind_a_latent_path_sees_the_transport_its_input_was_rendered_at() 
         .expect("the probe forks");
     const BLOCK: usize = 2 * CHUNK;
     const ARRIVAL: usize = 40;
-    let prepare =
-        tutti_graph::Prepare::new(SampleRate::of(SAMPLE_RATE), MaxBlock::of(Samples(BLOCK)))
-            .with_quantum(MaxBlock::of(Samples(CHUNK)));
-    let mut rig = Rig::behind(fork, prepare, Latency::new(Samples(ARRIVAL)));
+    let prepare = tutti_graph::Prepare::new(
+        SampleRate::of(SAMPLE_RATE),
+        MaxBlock::of(Samples::new(BLOCK)),
+    )
+    .with_quantum(MaxBlock::of(Samples::new(CHUNK)));
+    let mut rig = Rig::behind(fork, prepare, Latency::new(Samples::new(ARRIVAL)));
 
     const BLOCKS: usize = 24;
     let seen = render_scenes(&mut rig, BLOCKS, BLOCK, false);
@@ -338,12 +344,12 @@ fn ramp_tempo() -> tutti_transport::TempoReader {
     use tutti_tempo::{TempoMap, TempoPoint, Transition};
     let map = TempoMap::new([
         TempoPoint {
-            beat: Beat(0.0),
+            beat: Beat::new(0.0),
             tempo: Bpm::of(120.0),
             transition: Transition::RampTime { end: None },
         },
         TempoPoint {
-            beat: Beat(4.0),
+            beat: Beat::new(4.0),
             tempo: Bpm::of(180.0),
             transition: Transition::Step,
         },
@@ -365,9 +371,11 @@ fn the_plugin_is_told_the_maps_tempo_and_slope() {
         .client
         .fork_instance(ForkMode::Offline, ramp_tempo())
         .expect("the probe forks");
-    let prepare =
-        tutti_graph::Prepare::new(SampleRate::of(SAMPLE_RATE), MaxBlock::of(Samples(CHUNK)))
-            .with_quantum(MaxBlock::of(Samples(CHUNK)));
+    let prepare = tutti_graph::Prepare::new(
+        SampleRate::of(SAMPLE_RATE),
+        MaxBlock::of(Samples::new(CHUNK)),
+    )
+    .with_quantum(MaxBlock::of(Samples::new(CHUNK)));
     let mut rig = Rig::prepared(fork, prepare);
 
     let ins = rig.inputs();
@@ -379,7 +387,7 @@ fn the_plugin_is_told_the_maps_tempo_and_slope() {
     // next block's output (the pipeline holds one chunk).
     for playing in [true, true, false, false] {
         // The engine's own transport says 120 whatever the map says.
-        let transport = TransportPosition::new(playing, Bpm::of(120.0), Beat(1.8), None);
+        let transport = TransportPosition::new(playing, Bpm::of(120.0), Beat::new(1.8), None);
         let changes = TransportChanges::NONE;
         let r = rig.renderer();
         let mut outs: Vec<&mut [f32]> = out.iter_mut().map(|c| &mut c[..]).collect();
@@ -420,7 +428,7 @@ fn event_echo(out: &[f32]) -> Vec<[f64; 5]> {
 fn two_ramps() -> tutti_transport::TempoReader {
     use tutti_tempo::{TempoMap, TempoPoint, Transition};
     let point = |beat: f64, bpm: f64, transition| TempoPoint {
-        beat: Beat(beat),
+        beat: Beat::new(beat),
         tempo: Bpm::of(bpm),
         transition,
     };
@@ -449,9 +457,11 @@ fn a_ramps_end_inside_a_chunk_is_a_transport_event_at_its_frame() {
         .client
         .fork_instance(ForkMode::Offline, two_ramps())
         .expect("the probe forks");
-    let prepare =
-        tutti_graph::Prepare::new(SampleRate::of(SAMPLE_RATE), MaxBlock::of(Samples(CHUNK)))
-            .with_quantum(MaxBlock::of(Samples(CHUNK)));
+    let prepare = tutti_graph::Prepare::new(
+        SampleRate::of(SAMPLE_RATE),
+        MaxBlock::of(Samples::new(CHUNK)),
+    )
+    .with_quantum(MaxBlock::of(Samples::new(CHUNK)));
     let mut rig = Rig::prepared(fork, prepare);
 
     let s0 = (-2.0 + (4.0f64 + 1.25 * 3.999).sqrt()) / 0.625;
@@ -464,12 +474,12 @@ fn a_ramps_end_inside_a_chunk_is_a_transport_event_at_its_frame() {
     let mut out = vec![vec![0.0f32; CHUNK]; rig.outputs()];
     let mut heard = Vec::new();
     for _ in 0..2 {
-        let transport = TransportPosition::new(true, Bpm::of(150.0), Beat(3.999), None);
+        let transport = TransportPosition::new(true, Bpm::of(150.0), Beat::new(3.999), None);
         let mut changes = TransportChanges::NONE;
         changes
             .push(
                 offset(frame, CHUNK),
-                TransportPosition::new(true, Bpm::of(180.0), Beat(4.0), None),
+                TransportPosition::new(true, Bpm::of(180.0), Beat::new(4.0), None),
             )
             .expect("a change");
         let r = rig.renderer();

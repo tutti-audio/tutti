@@ -157,7 +157,7 @@ fn bearing_of(p: [f32; 3]) -> Direction {
     let r = (x * x + y * y + z * z).sqrt();
     let az = (-x).atan2(-z).to_degrees();
     let el = (y / r).asin().to_degrees();
-    Direction::new(Azimuth(az), Elevation(el))
+    Direction::new(Azimuth::new(az), Elevation::new(el))
 }
 
 fn node(bytes: &[u8], rate: u32) -> HrtfBinauralNode<f32> {
@@ -274,7 +274,7 @@ fn straight_ahead_is_balanced_and_hard_left_favours_the_left_ear() {
 
     let (l, r) = ir_of(
         &mut node,
-        Direction::new(Azimuth(90.0), Elevation::LEVEL),
+        Direction::new(Azimuth::new(90.0), Elevation::LEVEL),
         RATE,
         LEN,
     );
@@ -310,7 +310,7 @@ fn a_direction_no_face_covers_takes_the_nearest_vertex() {
 
     let (l, r) = ir_of(
         &mut node,
-        Direction::new(Azimuth(180.0), Elevation::LEVEL),
+        Direction::new(Azimuth::new(180.0), Elevation::LEVEL),
         RATE,
         LEN,
     );
@@ -326,7 +326,7 @@ fn a_direction_no_face_covers_takes_the_nearest_vertex() {
 
     let (l, r) = ir_of(
         &mut node,
-        Direction::new(Azimuth(f64::NAN), Elevation::LEVEL),
+        Direction::new(Azimuth::new(f64::NAN), Elevation::LEVEL),
         RATE,
         LEN,
     );
@@ -526,7 +526,7 @@ fn the_tail_is_the_ring_out_after_the_latency() {
         let rings = last.expect("the impulse sounds") - (lead + latency);
         assert_eq!(
             shape.tail,
-            Tail::Finite(Samples(rings)),
+            Tail::Finite(Samples::new(rings)),
             "offset {offset}: the tail is what sounds after the compensated latency"
         );
         assert_eq!(
@@ -583,12 +583,12 @@ fn the_spheres_rate_and_response_length_are_bounded() {
     let to = 2 * MIN_SPHERE_RATE;
     node.prepare(&Prepare::new(
         SampleRate::of(f64::from(to)),
-        MaxBlock::of(Samples(64)),
+        MaxBlock::of(Samples::new(64)),
     ));
     let fifty_ms = to as usize / 20;
     assert_eq!(
         node.shape().tail,
-        Tail::Finite(Samples(fifty_ms - 1)),
+        Tail::Finite(Samples::new(fifty_ms - 1)),
         "50 ms at {to} Hz is {fifty_ms} frames"
     );
 }
@@ -608,7 +608,7 @@ fn the_prepared_rate_is_held_to_its_ceiling() {
         r[0] = 1.0;
         r
     });
-    let at_ceiling = Tail::Finite(Samples(512 - 1));
+    let at_ceiling = Tail::Finite(Samples::new(512 - 1));
 
     let mut node =
         HrtfBinauralNode::<f32>::new(&bytes, SampleRate::of(2.0 * f64::from(MAX_PREPARED_RATE)))
@@ -620,19 +620,19 @@ fn the_prepared_rate_is_held_to_its_ceiling() {
 
     node.prepare(&Prepare::new(
         SampleRate::of(f64::from(RATE)),
-        MaxBlock::of(Samples(64)),
+        MaxBlock::of(Samples::new(64)),
     ));
-    assert_eq!(node.shape().tail, Tail::Finite(Samples(32 - 1)));
+    assert_eq!(node.shape().tail, Tail::Finite(Samples::new(32 - 1)));
     node.prepare(&Prepare::new(
         SampleRate::of(1e10),
-        MaxBlock::of(Samples(64)),
+        MaxBlock::of(Samples::new(64)),
     ));
     assert_eq!(node.shape().tail, at_ceiling, "prepared at 1e10 Hz");
 
     // The set prepared at the ceiling renders: an impulse comes out.
     node2.prepare(&Prepare::new(
         SampleRate::of(1e10),
-        MaxBlock::of(Samples(1024)),
+        MaxBlock::of(Samples::new(1024)),
     ));
     let mut impulse = vec![0.0f32; 1024];
     impulse[0] = 1.0;
@@ -869,7 +869,7 @@ fn the_render_is_independent_of_the_block_length() {
     let (verts, faces) = icosahedron();
     let bytes = sphere_bytes(RATE, LEN, &verts, &faces, mirrored_response(&verts, LEN));
     let input = noise(1000);
-    let at = Direction::new(Azimuth(37.0), Elevation(12.0));
+    let at = Direction::new(Azimuth::new(37.0), Elevation::new(12.0));
     let reference = render_in_blocks(&bytes, &input, 64, at, &[]);
     assert!(energy(&reference.0) > 0.0, "the reference is silent");
     for block in [1, 7, 33] {
@@ -896,10 +896,16 @@ fn a_moving_source_is_independent_of_the_block_length() {
     let (verts, faces) = icosahedron();
     let bytes = sphere_bytes(RATE, LEN, &verts, &faces, mirrored_response(&verts, LEN));
     let input = noise(1536);
-    let start = Direction::new(Azimuth(37.0), Elevation(12.0));
+    let start = Direction::new(Azimuth::new(37.0), Elevation::new(12.0));
     let moves = [
-        (320, Direction::new(Azimuth(-120.0), Elevation(-30.0))),
-        (832, Direction::new(Azimuth(80.0), Elevation(50.0))),
+        (
+            320,
+            Direction::new(Azimuth::new(-120.0), Elevation::new(-30.0)),
+        ),
+        (
+            832,
+            Direction::new(Azimuth::new(80.0), Elevation::new(50.0)),
+        ),
     ];
     let reference = render_in_blocks(&bytes, &input, 64, start, &moves);
     assert!(energy(&reference.0) > 0.0, "the reference is silent");
@@ -930,7 +936,7 @@ fn the_panner_takes_the_mean_of_a_stereo_pair() {
     let negated: Vec<f32> = x.iter().map(|v| -v).collect();
     let render = |l: &[f32], r: &[f32]| -> Vec<f32> {
         let mut node = node(&bytes, RATE);
-        aim(&node.param_set(), Azimuth(37.0), Elevation(12.0));
+        aim(&node.param_set(), Azimuth::new(37.0), Elevation::new(12.0));
         Node::reset(&mut node);
         let mut out = Vec::new();
         for (cl, cr) in l.chunks(64).zip(r.chunks(64)) {

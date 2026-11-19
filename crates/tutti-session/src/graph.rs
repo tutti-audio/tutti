@@ -80,10 +80,10 @@ pub use observe::{Meters, NotReopened, Reopened, RootReader, Taps};
 pub use testing::{AudioSide, Testing};
 
 use crate::key::{Bus, BusSink, Fanin, InEnd, Inlet, MainSink, OutEnd, Outlet, Wire};
-use crate::value::{ValueTable, Write};
+use crate::value::{GainTarget, GainTargetError, ValueTable, Write};
 use crate::{
-    ConnectError, Connection, Edge, EdgeGainError, EventInPort, EventOutPort, InPort, InletError,
-    Key, NoSuchNode, OutPort, RemoveError, Root, SessionNode,
+    ConnectError, Connection, DeclarationError, Edge, EventInPort, EventOutPort, InPort,
+    InletError, Key, NoSuchNode, OutPort, RemoveError, Root, SessionNode,
 };
 use tutti_rt::LockExt;
 
@@ -1326,6 +1326,7 @@ impl<F: Float> Graph<F> {
             entry.reclaimer = None;
         }
         self.note_pass(node);
+        self.sweep_gain_targets();
         self.edited = true;
         Ok(controls)
     }
@@ -1932,6 +1933,7 @@ impl<F: Float> Graph<F> {
         // The edges it feeds fade out first: the node stays in the editor,
         // rendering, until they have.
         self.editor.remove_declicked(node);
+        self.sweep_gain_targets();
         self.feeds.remove(&node);
         for feeds in self.feeds.values_mut() {
             for sources in feeds.values_mut() {
@@ -2202,6 +2204,7 @@ impl<F: Float> Graph<F> {
         });
         if plain {
             self.editor.spec_mut().clear_edge_gain(id);
+            self.sweep_gain_targets();
         }
         self.edited = true;
     }
@@ -2218,6 +2221,12 @@ impl<F: Float> Graph<F> {
     }
 
     fn drop_edge(&mut self, id: EdgeId, hard: bool) -> bool {
+        let dropped = self.drop_edge_now(id, hard);
+        self.sweep_gain_targets();
+        dropped
+    }
+
+    fn drop_edge_now(&mut self, id: EdgeId, hard: bool) -> bool {
         if !self.editor.spec().has_edge(id) {
             return false;
         }
@@ -2712,34 +2721,78 @@ impl<F: Float> Graph<F> {
         Ok(())
     }
 
-    pub(crate) fn edge_gain_of(&self, edge: Edge) -> Option<Amplitude> {
-        let id = Self::edge_id(edge)?;
-        // An edge fading out is no longer the author's.
-        if self.fading_out(id) {
-            return None;
-        }
-        self.editor.edge_gain(id)
-    }
-
-    pub(crate) fn set_edge_gain_of(
+    /// Gives `edge` a gain lane at `gain`: the declaration of a weighted
+    /// wire ([`Connection::gain`](crate::Connection::gain)), which is
+    /// structural, as a plain edge aliases where a lane needs a sum. An edge
+    /// that has one keeps it at `gain`. The lane's value is then the
+    /// [`GainTarget`]'s.
+    pub(crate) fn declare_edge_gain(
         &mut self,
         edge: Edge,
         gain: Amplitude,
-    ) -> Result<(), EdgeGainError> {
-        let id = Self::edge_id(edge).ok_or(EdgeGainError::NoSuchEdge(edge))?;
+    ) -> Result<(), DeclarationError> {
+        if !gain.get().is_finite() {
+            return Err(DeclarationError::NotFinite);
+        }
+        let Some(id) = Self::edge_id(edge) else {
+            return Ok(());
+        };
         if self.fading_out(id) {
-            return Err(EdgeGainError::NoSuchEdge(edge));
+            return Ok(());
         }
         let had = self.editor.spec().gains.contains_key(&id);
-        self.editor.set_edge_gain(id, gain).map_err(|e| match e {
-            GraphInvalid::GainWithoutEdge { .. } => EdgeGainError::NoSuchEdge(edge),
-            GraphInvalid::GainOnBusLane { .. } => EdgeGainError::BusLane(edge),
-            _ => EdgeGainError::NotFinite,
-        })?;
-        if !had {
+        // The wire is in the graph (a connection just made it), and a bus
+        // lane is not a wire a connection weights: the only refusal left is
+        // the gain, checked above.
+        if self.editor.set_edge_gain(id, gain).is_ok() && !had {
             self.edited = true;
         }
         Ok(())
+    }
+
+    /// Whether `edge` still has the gain lane its target was made for: it is
+    /// in the graph, not fading out, and holds an entry.
+    fn has_gain_lane(&self, edge: Edge) -> bool {
+        let ends = [edge.source().node(), edge.sink().node()];
+        ends.into_iter()
+            .flatten()
+            .all(|node| self.nodes.contains_key(&node))
+            && Self::edge_id(edge).is_some_and(|id| {
+                !self.fading_out(id) && self.editor.spec().gains.contains_key(&id)
+            })
+    }
+
+    /// Forgets the gain target of every edge that has lost its lane: removed,
+    /// fading out, or cleared. Control thread.
+    fn sweep_gain_targets(&mut self) {
+        for edge in self.values.gain_edges() {
+            if !self.has_gain_lane(edge) {
+                self.values.retire_gain(edge);
+            }
+        }
+    }
+
+    /// The gain target of `edge`, made on the first ask and seeded with the
+    /// lane's value.
+    ///
+    /// # Errors
+    ///
+    /// [`GainTargetError::NoLane`] when the edge is not in the graph or has
+    /// no gain lane, [`GainTargetError::BusLane`] for a lane of a bus edge.
+    pub fn gain_target(&self, from: OutPort, to: InPort) -> Result<GainTarget, GainTargetError> {
+        let edge = Edge::new(from, to);
+        let id = Self::edge_id(edge).ok_or(GainTargetError::NoLane(edge))?;
+        match self.editor.check_gain_edge(id) {
+            Ok(()) => {}
+            Err(GraphInvalid::GainOnBusLane { .. }) => return Err(GainTargetError::BusLane(edge)),
+            Err(_) => return Err(GainTargetError::NoLane(edge)),
+        }
+        if !self.has_gain_lane(edge) {
+            return Err(GainTargetError::NoLane(edge));
+        }
+        let seed = self.editor.edge_gain(id).unwrap_or(Amplitude::UNITY);
+        self.values.provide_gain(edge, seed);
+        Ok(GainTarget::new(edge))
     }
 
     pub(crate) fn clear_edge_gain_of(&mut self, edge: Edge) -> bool {
@@ -2762,6 +2815,7 @@ impl<F: Float> Graph<F> {
             self.editor.spec_mut().clear_edge_gain(id).is_some()
         };
         self.edited |= cleared;
+        self.sweep_gain_targets();
         cleared
     }
 
@@ -2787,10 +2841,10 @@ impl<F: Float> Graph<F> {
     }
 
     /// Hands the editor the controls written since the last call: each
-    /// node's mode and mix, as the editor's own
+    /// node's mode and mix and each edge's gain, as the editor's own
     /// controls, which a running node reads from its next block with no
-    /// commit and no edit. A control whose node has since left the graph is
-    /// dropped.
+    /// commit and no edit. A control whose node or edge has since left the
+    /// graph is dropped.
     ///
     /// A hosted plugin with a bypass of its own is not bypassed by the
     /// executor: the host writes the plugin's bypass with the mode
@@ -2798,6 +2852,7 @@ impl<F: Float> Graph<F> {
     /// Off the main thread an in-process plugin's write is lost, and it is
     /// kept only by a tick on the main thread.
     pub(crate) fn apply_controls(&mut self) {
+        self.sweep_gain_targets();
         for write in self.values.take_writes() {
             match write {
                 Write::Mode(node, mode) => {
@@ -2814,6 +2869,13 @@ impl<F: Float> Graph<F> {
                 Write::Mix(node, mix) => {
                     if !self.editor.is_leaving(node) {
                         let _ = self.editor.set_mix(node, mix);
+                    }
+                }
+                Write::Gain(edge, gain) => {
+                    if let Some(id) = Self::edge_id(edge)
+                        && !self.fading_out(id)
+                    {
+                        let _ = self.editor.set_edge_gain(id, gain);
                     }
                 }
             }
@@ -2922,6 +2984,7 @@ impl<F: Float> Graph<F> {
         for id in stale {
             spec.clear_edge_gain(id);
         }
+        self.sweep_gain_targets();
     }
 
     // --- Param modulation ---
@@ -3856,7 +3919,7 @@ impl tutti_nodes::ModHost for ModHostOver<'_> {
         else {
             // A node's mix: the node the host's key names. The mix's knob is
             // the unit's own cell, which the reconciler takes from the
-            // editor: `Graph::set_mix` is the one writer.
+            // editor: `MixTarget` is the one writer.
             if let tutti_modulation::TargetKey::Mix(bits) = target {
                 return Some(tutti_nodes::Target::Mix {
                     node: self.keys.node(bits)?,
@@ -3867,7 +3930,7 @@ impl tutti_nodes::ModHost for ModHostOver<'_> {
                 return None;
             };
             // The gain's knob is the edge's own cell, which the reconciler
-            // takes from the editor: `Graph::set_edge_gain` is the one writer.
+            // takes from the editor: `GainTarget` is the one writer.
             return Some(tutti_nodes::Target::Edge {
                 id: Graph::<f32>::edge_id(self.keys.edge(key)?)?,
             });

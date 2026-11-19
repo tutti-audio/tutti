@@ -1128,7 +1128,7 @@ fn a_format_1_tempo_map_is_the_first_track() {
         ],
     );
     assert_eq!(
-        metrical(&kept).tempo_map().tempo_at(Beat(0.0)),
+        metrical(&kept).tempo_map().tempo_at(Beat::new(0.0)),
         Bpm::of(60.0)
     );
 }
@@ -1151,7 +1151,7 @@ fn a_format_0_tempo_map_is_the_scattered_tempos() {
     );
     let map = metrical(&file).tempo_map().clone();
     assert_eq!(map.points().len(), 3);
-    let at = |beat| map.tempo_at(Beat(beat));
+    let at = |beat| map.tempo_at(Beat::new(beat));
     assert_eq!(
         (at(0.5), at(2.5), at(5.5)),
         (Bpm::of(120.0), Bpm::of(60.0), Bpm::of(240.0))

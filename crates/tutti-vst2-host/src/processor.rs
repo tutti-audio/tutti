@@ -282,7 +282,7 @@ impl Vst2Processor {
         ctx: &Vst2ProcessContext,
     ) -> &MidiEventVec {
         self.midi.out.clear();
-        let num_samples = io.frames().0;
+        let num_samples = io.frames().get();
         if num_samples == 0 {
             return &self.midi.out;
         }

@@ -160,25 +160,28 @@ pub(super) fn profile_table(
     profile: super::ProfileId,
     enabled: bool,
 ) -> super::ProfileTable {
-    use super::{CiMessage, Decoded, Muid, ProfileInitiator};
+    use super::{CiMessage, Decoded, Initiator, Muid, ProfileInitiator};
     let (mut peer, _) =
         ProfileInitiator::new(Muid::of(OURS), Muid::of(PEER), std::time::Instant::now());
     let header = header_from(PEER, address);
     let target = target_at(address, 1);
-    peer.on_message(&Decoded::Message(if enabled {
-        CiMessage::ProfileEnabled {
-            source: header.source,
-            ci_version: header.ci_version,
-            target,
-            profile,
-        }
-    } else {
-        CiMessage::ProfileDisabled {
-            source: header.source,
-            ci_version: header.ci_version,
-            target,
-            profile,
-        }
-    }));
+    peer.on_message(
+        &Decoded::Message(if enabled {
+            CiMessage::ProfileEnabled {
+                source: header.source,
+                ci_version: header.ci_version,
+                target,
+                profile,
+            }
+        } else {
+            CiMessage::ProfileDisabled {
+                source: header.source,
+                ci_version: header.ci_version,
+                target,
+                profile,
+            }
+        }),
+        std::time::Instant::now(),
+    );
     peer.table().clone()
 }

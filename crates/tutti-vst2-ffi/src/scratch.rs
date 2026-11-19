@@ -144,7 +144,7 @@ impl RenderScratch {
         len: usize,
     ) {
         self.check_block(len);
-        let piece = Samples(start)..Samples(start + len);
+        let piece = Samples::new(start)..Samples(start + len);
         // A block with no input channels has no frames to slice: it stages silence.
         let inputs = if inputs.channels() == 0 {
             Planes::default()
@@ -324,7 +324,7 @@ mod tests {
         let mut l = [-1.0f32; 8];
         let mut chans = [&mut l[..]];
         let mut outs = PlanesMut::new(&mut chans).expect("one channel");
-        let mut piece = outs.slice_mut(Samples(0)..Samples(4));
+        let mut piece = outs.slice_mut(Samples::new(0)..Samples(4));
         emit(&rows, &mut piece, 4);
         assert_eq!(l, [0.0, 1.0, 2.0, 3.0, -1.0, -1.0, -1.0, -1.0]);
     }

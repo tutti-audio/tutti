@@ -217,7 +217,7 @@ fn finish(g: GraphBuilder, plugin: NodeKey, controls: PluginControls) -> Rig {
     let graph = g
         .renderer(Prepare::new(
             SampleRate::of(SAMPLE_RATE),
-            MaxBlock::of(Samples(BLOCK)),
+            MaxBlock::of(Samples::new(BLOCK)),
         ))
         .expect("the rig compiles");
     Rig {
@@ -262,7 +262,7 @@ fn the_probe_declares_the_latency_this_suite_expects() {
 
     assert_eq!(
         probe.client.latency(),
-        Samples(PROBE_LATENCY),
+        Samples::new(PROBE_LATENCY),
         "the host must report the plugin's own declared figure"
     );
 
@@ -271,13 +271,13 @@ fn the_probe_declares_the_latency_this_suite_expects() {
     ));
     assert_eq!(
         rig.graph.editor().spec().topology.nodes[&rig.plugin].latency,
-        Samples(EXPECTED_TOTAL_LATENCY),
+        Samples::new(EXPECTED_TOTAL_LATENCY),
         "the NODE must declare the plugin's figure PLUS the pipeline chunk \
          ({PROBE_LATENCY} + {BLOCK}); only this reaches the compiler's PDC"
     );
     assert_eq!(
         rig.controls.declared_latency().samples(),
-        Samples(EXPECTED_TOTAL_LATENCY),
+        Samples::new(EXPECTED_TOTAL_LATENCY),
         "the controls a host keeps declare the same sum"
     );
 }
@@ -352,7 +352,7 @@ fn with_compensation_both_paths_land_on_the_same_sample() {
     ));
     assert_eq!(
         rig.total_latency(),
-        Samples(EXPECTED_TOTAL_LATENCY),
+        Samples::new(EXPECTED_TOTAL_LATENCY),
         "the plan's total is the worst path's latency"
     );
 
@@ -410,7 +410,7 @@ fn a_latency_change_reaches_pdc_at_the_next_commit() {
     let mut rig = two_paths(probe.client.bind(
         tutti_transport::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
     ));
-    assert_eq!(rig.total_latency(), Samples(EXPECTED_TOTAL_LATENCY));
+    assert_eq!(rig.total_latency(), Samples::new(EXPECTED_TOTAL_LATENCY));
 
     let (reported, heard) = std::sync::mpsc::channel();
     let _hearing = handle.subscribe(move |notice| {
@@ -433,7 +433,7 @@ fn a_latency_change_reaches_pdc_at_the_next_commit() {
     let declared = rig.controls.declared_latency();
     assert_eq!(
         declared.samples(),
-        Samples(EXPECTED_TOTAL_LATENCY + EXTRA),
+        Samples::new(EXPECTED_TOTAL_LATENCY + EXTRA),
         "the controls took the announced figure"
     );
     rig.graph
@@ -447,7 +447,7 @@ fn a_latency_change_reaches_pdc_at_the_next_commit() {
 
     assert_eq!(
         rig.total_latency(),
-        Samples(EXPECTED_TOTAL_LATENCY + EXTRA),
+        Samples::new(EXPECTED_TOTAL_LATENCY + EXTRA),
         "the re-plan must carry the plugin's NEW figure plus the pipeline chunk"
     );
 

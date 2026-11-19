@@ -221,7 +221,7 @@ fn drive_block(
         let in_refs: Vec<&[f32]> = inputs.iter().map(|v| v.as_slice()).collect();
         let mut out_refs: Vec<&mut [f32]> = outs.iter_mut().map(|v| v.as_mut_slice()).collect();
         let mut buffer = InputOutput::from_slices(
-            tutti_plugin_types::Samples(in_refs[0].len()),
+            tutti_plugin_types::Samples::new(in_refs[0].len()),
             &in_refs,
             &mut out_refs,
         )
@@ -489,7 +489,7 @@ fn host_handles_in_place_style_buffers() {
         let in_refs: Vec<&[f32]> = inputs.iter().map(|v| v.as_slice()).collect();
         let mut out_refs: Vec<&mut [f32]> = outs.iter_mut().map(|v| v.as_mut_slice()).collect();
         let mut buffer = InputOutput::from_slices(
-            tutti_plugin_types::Samples(in_refs[0].len()),
+            tutti_plugin_types::Samples::new(in_refs[0].len()),
             &in_refs,
             &mut out_refs,
         )
@@ -959,7 +959,7 @@ fn take_sysex_input(controls: &ProbeControls) -> (u32, u32, Vec<u8>) {
 
 /// The offset `k` frames into `drive_midi_block`'s 64-frame block.
 fn at(k: usize) -> Offset {
-    Offset::of(Samples(k), Samples(64))
+    Offset::of(Samples::new(k), Samples::new(64))
 }
 
 /// The SysEx7 packets of `payload`, each `k` frames into the block.
@@ -980,7 +980,7 @@ fn drive_midi_block(inst: &mut Active<f32>, midi: &[UmpAt]) {
     let in_refs: Vec<&[f32]> = ins.iter().map(|v| v.as_slice()).collect();
     let mut out_refs: Vec<&mut [f32]> = outs.iter_mut().map(|v| v.as_mut_slice()).collect();
     let mut buffer = InputOutput::from_slices(
-        tutti_plugin_types::Samples(in_refs[0].len()),
+        tutti_plugin_types::Samples::new(in_refs[0].len()),
         &in_refs,
         &mut out_refs,
     )

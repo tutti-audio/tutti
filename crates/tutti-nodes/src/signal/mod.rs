@@ -40,17 +40,17 @@ struct PlayWalk {
 impl PlayWalk {
     fn new(cx: &Cx<'_>, len: usize) -> Self {
         let first = cx.play_at(Offset::ZERO);
-        let last = Offset::new(Samples(len - 1), cx.env.block_len).unwrap_or(Offset::ZERO);
-        let straight = cx.play_at(last) == first.after(Samples(len - 1));
+        let last = Offset::new(Samples::new(len - 1), cx.env.block_len).unwrap_or(Offset::ZERO);
+        let straight = cx.play_at(last) == first.after(Samples::new(len - 1));
         Self { first, straight }
     }
 
     /// The reading at frame `i` of the block.
     fn at(&self, cx: &Cx<'_>, i: usize) -> PlayReading {
         if self.straight {
-            self.first.after(Samples(i))
+            self.first.after(Samples::new(i))
         } else {
-            cx.play_at(Offset::new(Samples(i), cx.env.block_len).unwrap_or(Offset::ZERO))
+            cx.play_at(Offset::new(Samples::new(i), cx.env.block_len).unwrap_or(Offset::ZERO))
         }
     }
 

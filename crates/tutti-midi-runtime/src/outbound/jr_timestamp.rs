@@ -95,7 +95,9 @@ impl JrStamper {
     pub(crate) fn stamp_block(&self, events: &[UmpAt], origin: Frame, out: &mut Vec<UmpAt>) {
         out.reserve(events.len() * 2);
         for ev in events {
-            let ticks = self.clock.ticks_at(origin + Samples(ev.0.get() as usize));
+            let ticks = self
+                .clock
+                .ticks_at(origin + Samples::new(ev.0.get() as usize));
             out.push((ev.0, Message::Utility(Utility::JrTimestamp(ticks)).into()));
             out.push(*ev);
         }
@@ -112,7 +114,7 @@ impl JrStamper {
             .iter()
             .map(|e| e.0.get() as usize)
             .max()
-            .map_or(Samples::ZERO, |m| Samples(m + 1))
+            .map_or(Samples::ZERO, |m| Samples::new(m + 1))
     }
 }
 

@@ -7,7 +7,7 @@
 //! reply says they support MIDI Message Report. A request is made only from such
 //! a handle, so an app cannot ask a peer that never declared the category or
 //! answered that it lacks the feature. The handle is a snapshot: the peer may be
-//! lost before the request is sent, and that is refused ([`ReportError::NoSuchPeer`]).
+//! lost before the request is sent, and that is refused ([`PeerError::NoSuchPeer`]).
 //!
 //! A report is a Reply, the MIDI messages themselves, and an End. The End is an
 //! [`Answer::Report`](crate::Answer::Report); the messages between the Reply and
@@ -19,32 +19,38 @@ use std::sync::Arc;
 use tutti_midi_device::{DeviceId, Muid, ProcessFeatures, ReportRequest};
 use tutti_ump::MidiGroup;
 
+use crate::peer::{PeerError, PeerRef};
+
 /// A peer that declared Process Inquiry and answered that it supports MIDI
 /// Message Report: the handle a [`ReportAsk`] is made from.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Reporter {
-    pub(crate) device: DeviceId,
-    pub(crate) group: MidiGroup,
-    pub(crate) muid: Muid,
+    pub(crate) at: PeerRef,
 }
 
 impl Reporter {
     /// The input device the peer was found on.
     #[must_use]
     pub const fn device(&self) -> &DeviceId {
-        &self.device
+        self.at.device()
     }
 
     /// The Group of the connection the peer answered on.
     #[must_use]
     pub const fn group(&self) -> MidiGroup {
-        self.group
+        self.at.peer().group
     }
 
     /// The peer's MUID.
     #[must_use]
     pub const fn muid(&self) -> Muid {
-        self.muid
+        self.at.peer().muid
+    }
+
+    /// The peer, as every handle of MIDI-CI names one.
+    #[must_use]
+    pub const fn at(&self) -> &PeerRef {
+        &self.at
     }
 
     /// A request that the peer report what `request` asks
@@ -71,16 +77,13 @@ impl ReportAsk {
     /// The input device the request was made from.
     #[must_use]
     pub const fn device(&self) -> &DeviceId {
-        &self.peer.device
+        self.peer.at.device()
     }
 
     /// The peer the request is for.
     #[must_use]
     pub const fn peer(&self) -> crate::ci::PeerId {
-        crate::ci::PeerId {
-            group: self.peer.group,
-            muid: self.peer.muid,
-        }
+        self.peer.at.peer()
     }
 
     /// Whether `peers`, the peers an input can ask for a report now, still hold
@@ -88,17 +91,13 @@ impl ReportAsk {
     ///
     /// # Errors
     ///
-    /// [`ReportError::NoSuchPeer`] when the peer is gone or no longer supports
+    /// [`PeerError::NoSuchPeer`] when the peer is gone or no longer supports
     /// MIDI Message Report.
     pub fn check<'a>(
         &self,
         peers: impl IntoIterator<Item = &'a Reporter>,
-    ) -> Result<(), ReportError> {
-        if peers.into_iter().any(|peer| *peer == self.peer) {
-            Ok(())
-        } else {
-            Err(ReportError::NoSuchPeer)
-        }
+    ) -> Result<(), PeerError> {
+        self.peer.at.find(peers, |peer| &peer.at).map(|_| ())
     }
 }
 
@@ -121,17 +120,4 @@ pub enum ProcessChange {
     CapabilitiesRefused,
     /// The peer is gone (lost, or MIDI-CI ended): its Initiator went with it.
     Dropped,
-}
-
-/// A [`ReportAsk`] that cannot be made.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
-#[non_exhaustive]
-pub enum ReportError {
-    /// The device the request was made from is no longer an open input.
-    #[error("the device is not an open input")]
-    NotOpen,
-    /// The peer is not one found on that input that supports MIDI Message Report
-    /// (it was lost, or has since answered that it does not).
-    #[error("no such MIDI-CI peer supporting MIDI Message Report on that input")]
-    NoSuchPeer,
 }

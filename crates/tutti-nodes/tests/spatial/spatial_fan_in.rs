@@ -21,7 +21,10 @@ fn settled_energy(bed: Bed, bearings: &[f64]) -> Vec<f32> {
         .collect();
     vbap_mix(&mut g, bed, &sources).expect("a bed with speakers");
     let mut r = g
-        .renderer(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(256))))
+        .renderer(Prepare::new(
+            SampleRate::SR_48K,
+            MaxBlock::of(Samples::new(256)),
+        ))
         .expect("builds");
     let mut last = Vec::new();
     for _ in 0..49 {

@@ -47,7 +47,7 @@ use crate::DecodeError;
 
 /// A frame count from the file's `u64`, saturating where `usize` is narrower.
 fn frames(n: u64) -> Samples {
-    Samples(usize::try_from(n).unwrap_or(usize::MAX))
+    Samples::new(usize::try_from(n).unwrap_or(usize::MAX))
 }
 
 /// What [`FileIn::error`] reports when the stream ends before the container's
@@ -81,7 +81,7 @@ const TRUNCATED: &str = "stream ended before the container's frame count";
 /// let width = usize::from(file.layout().count());
 /// let mut buf = vec![0.0f32; 1024 * width];
 /// let out = InterleavedMut::new(&mut buf, file.layout())?;
-/// file.seek(Samples(48_000))?; // start one second in, at 48 kHz
+/// file.seek(Samples::new(48_000))?; // start one second in, at 48 kHz
 /// if let Pull::Frames(frames) = file.pull(out) {
 ///     println!("read {} frames of {width} channels", frames.get());
 /// }
@@ -299,7 +299,7 @@ impl<S: Sample> FileIn<S> {
             self.leftover.clear();
             self.leftover_pos = 0;
             self.leftover
-                .resize(layout.interleaved_len(Samples(frames)), S::SILENCE);
+                .resize(layout.interleaved_len(Samples::new(frames)), S::SILENCE);
             let planes = Planes::from_vecs(planes).expect("every plane holds the packet's frames");
             let out = InterleavedMut::new(&mut self.leftover, layout)
                 .expect("the buffer holds whole frames");
@@ -358,7 +358,7 @@ impl<S: Sample> FileIn<S> {
             // The frames before the fault are the caller's; the fault is
             // reported by the next call, which finds nothing more to read.
             Some(fault) if filled == 0 => Err(fault.clone()),
-            _ => Ok(Samples(filled)),
+            _ => Ok(Samples::new(filled)),
         }
     }
 
@@ -384,8 +384,9 @@ impl<S: Sample> FileIn<S> {
                 let want = (capacity_frames - filled).min(avail);
                 let held = Interleaved::new(&self.leftover, layout)
                     .expect("the buffer holds whole frames");
-                let src = held.slice(Samples(self.leftover_pos)..Samples(self.leftover_pos + want));
-                let mut dst = out.slice_mut(Samples(filled)..Samples(filled + want));
+                let src = held
+                    .slice(Samples::new(self.leftover_pos)..Samples::new(self.leftover_pos + want));
+                let mut dst = out.slice_mut(Samples::new(filled)..Samples::new(filled + want));
                 dst.samples_mut().copy_from_slice(src.samples());
                 self.leftover_pos += want;
                 filled += want;
@@ -570,7 +571,7 @@ impl<S: Sample> Source for FileIn<S> {
         let (filled, fault) = self.fill(out);
         self.fault = fault;
         if filled > 0 {
-            Pull::Frames(Samples(filled))
+            Pull::Frames(Samples::new(filled))
         } else if self.fault.is_some() {
             Pull::Failed
         } else {

@@ -31,7 +31,7 @@ pub(crate) fn device_rate(rate: cpal::SampleRate) -> Result<SampleRate> {
 /// The callback size asked of a device that offers a range: 512 frames
 /// (10.7 ms at 48 kHz), a common DAW default, clamped into what the device
 /// supports.
-pub const PREFERRED_QUANTUM: MaxBlock = MaxBlock::of(Samples(512));
+pub const PREFERRED_QUANTUM: MaxBlock = MaxBlock::of(Samples::new(512));
 
 /// The [`SampleFormat`] a device's `format` reports in an [`OutputSpec`], or
 /// [`Error::InvalidConfig`] for a type the driver does not build. `I8`, `I16`,
@@ -94,7 +94,8 @@ fn quantum_for(range: &cpal::SupportedBufferSize) -> Option<MaxBlock> {
             // A device reporting a range with no usable size (a zero `max`)
             // has no quantum to open with.
             let (min, max) = ((min as usize).max(1), (max as usize).min(MAX_FRAMES));
-            (min <= max).then(|| MaxBlock::of(Samples(PREFERRED_QUANTUM.get().clamp(min, max))))
+            (min <= max)
+                .then(|| MaxBlock::of(Samples::new(PREFERRED_QUANTUM.get().clamp(min, max))))
         }
         cpal::SupportedBufferSize::Unknown => None,
     }

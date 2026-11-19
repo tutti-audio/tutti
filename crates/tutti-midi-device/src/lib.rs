@@ -96,7 +96,7 @@ pub use ci::{
     DefaultCcLevel, Destination, DetailsData, DiscoveryData, Drawbar, DrawbarSetting, DrumControl,
     DrumFeatures, DrumInstrument, DrumNoteMapLevel, DrumSounds, EnabledMpeZones, EndpointInfo,
     EndpointStatus, EntryError, GetStateError, Gm2ChannelCount, Gm2FunctionBlock, Gm2Role,
-    Gm2SingleChannel, InquiryTarget, JsonPointer, LinkRole, ListTooLong, ListedTwice,
+    Gm2SingleChannel, Initiator, InquiryTarget, JsonPointer, LinkRole, ListTooLong, ListedTwice,
     MAX_LIST_ENTRIES, ManufacturerProfile, MaxSysexSize, MediaType, MessageText, ModeId, Muid,
     MutuallyExclusiveSet, Nak, NakStatus, NotABodyLimit, NotABufferLimit, NotAChunkNo,
     NotADataControl, NotADeviceId, NotADrawbarSetting, NotAGm2ChannelCount, NotAMuid,

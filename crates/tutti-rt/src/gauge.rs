@@ -252,11 +252,11 @@ impl Count for tutti_units::Samples {
     type Words = [u64; 1];
     #[inline]
     fn to_words(self) -> [u64; 1] {
-        [self.0 as u64]
+        [self.get() as u64]
     }
     #[inline]
     fn from_words([count]: [u64; 1]) -> Self {
-        Self(usize::try_from(count).unwrap_or(usize::MAX))
+        Self::new(usize::try_from(count).unwrap_or(usize::MAX))
     }
 }
 
@@ -332,11 +332,11 @@ impl Shared {
 /// use tutti_rt::gauge;
 /// use tutti_units::Db;
 ///
-/// let (mut writer, reduction) = gauge(Db(0.0));
-/// writer.set(Db(-6.0));
-/// assert_eq!(reduction.get(), Db(-6.0));
-/// writer.set(Db(-3.0)); // a level moves both ways
-/// assert_eq!(reduction.clone().get(), Db(-3.0));
+/// let (mut writer, reduction) = gauge(Db::new(0.0));
+/// writer.set(Db::new(-6.0));
+/// assert_eq!(reduction.get(), Db::new(-6.0));
+/// writer.set(Db::new(-3.0)); // a level moves both ways
+/// assert_eq!(reduction.clone().get(), Db::new(-3.0));
 /// ```
 pub struct Gauge<U: Reading> {
     cell: Arc<Shared>,
@@ -381,14 +381,14 @@ impl<U: Reading> Gauge<U> {
     /// use tutti_rt::gauge;
     /// use tutti_units::Db;
     ///
-    /// let (mut writer, level) = gauge(Db(0.0));
-    /// writer.set(Db(-6.0));
+    /// let (mut writer, level) = gauge(Db::new(0.0));
+    /// writer.set(Db::new(-6.0));
     /// assert!(level.reopen().is_none()); // the writer is live
     /// drop(writer);
     /// let mut again = level.reopen().expect("the writer dropped");
-    /// assert_eq!(level.get(), Db(-6.0)); // the last value stays
-    /// again.set(Db(-1.0));
-    /// assert_eq!(level.get(), Db(-1.0));
+    /// assert_eq!(level.get(), Db::new(-6.0)); // the last value stays
+    /// again.set(Db::new(-1.0));
+    /// assert_eq!(level.get(), Db::new(-1.0));
     /// ```
     pub fn reopen(&self) -> Option<GaugeWriter<U>> {
         self.cell.reopen().then(|| GaugeWriter {

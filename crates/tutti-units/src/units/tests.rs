@@ -27,18 +27,33 @@ fn new_and_get_are_the_one_way_between_a_unit_and_its_raw() {
 fn from_is_the_spelling_for_single_answer_conversions() {
     // Each of these delegates to its inherent method, so the two spellings
     // cannot drift.
-    assert_eq!(Semitones::from(Cents(150.0)), Cents(150.0).to_semitones());
-    assert_eq!(Cents::from(Semitones(1.5)), Semitones(1.5).to_cents());
-    assert_eq!(Radians::from(Phase(0.25)), Phase(0.25).to_radians());
     assert_eq!(
-        StereoWidth::from(Correlation(0.25)),
-        Correlation(0.25).to_stereo_width()
+        Semitones::from(Cents::new(150.0)),
+        Cents::new(150.0).to_semitones()
     );
-    assert_eq!(Db::from(Amplitude(0.5)), Db::from_amplitude(Amplitude(0.5)));
-    assert_eq!(Amplitude::from(Db(-6.0)), Db(-6.0).to_amplitude());
+    assert_eq!(
+        Cents::from(Semitones::new(1.5)),
+        Semitones::new(1.5).to_cents()
+    );
+    assert_eq!(
+        Radians::from(Phase::new(0.25)),
+        Phase::new(0.25).to_radians()
+    );
+    assert_eq!(
+        StereoWidth::from(Correlation::new(0.25)),
+        Correlation::new(0.25).to_stereo_width()
+    );
+    assert_eq!(
+        Db::from(Amplitude::new(0.5)),
+        Db::from_amplitude(Amplitude::new(0.5))
+    );
+    assert_eq!(Amplitude::from(Db::new(-6.0)), Db::new(-6.0).to_amplitude());
 
     // And they round-trip where the pair is mutually inverse.
-    assert_eq!(Cents::from(Semitones::from(Cents(1200.0))), Cents(1200.0));
+    assert_eq!(
+        Cents::from(Semitones::from(Cents::new(1200.0))),
+        Cents::new(1200.0)
+    );
 }
 
 /// The `From`/named-method split, as a ledger — the same discipline the
@@ -47,7 +62,10 @@ fn from_is_the_spelling_for_single_answer_conversions() {
 #[test]
 fn conversions_that_stay_named_and_why() {
     // Needs a second input, so it is not a two-type conversion at all.
-    assert_eq!(Seconds(1.0).to_samples(SampleRate::SR_48K), Samples(48_000));
+    assert_eq!(
+        Seconds::new(1.0).to_samples(SampleRate::SR_48K),
+        Samples::new(48_000)
+    );
 
     // What stays named is the case where the second input is real. A
     // policy knob hiding inside a conversion is not that case — it is
@@ -56,8 +74,8 @@ fn conversions_that_stay_named_and_why() {
 
     // Target is a bare scalar, and two different units convert into it —
     // as `From` impls these would be two meanings of one target type.
-    assert!(Cents(1200.0).to_pitch_ratio() == 2.0);
-    assert!(Semitones(12.0).to_pitch_ratio() == 2.0);
+    assert!(Cents::new(1200.0).to_pitch_ratio() == 2.0);
+    assert!(Semitones::new(12.0).to_pitch_ratio() == 2.0);
 
     // `ArcDegrees` has no radians conversion at all. `Azimuth` and
     // `Elevation` do (as `From`), so adding one here would look like
@@ -68,8 +86,11 @@ fn conversions_that_stay_named_and_why() {
 
 #[test]
 fn clamp_stays_in_the_unit_type() {
-    assert_eq!(Hz(20_000.0).clamp(Hz(20.0), Hz(18_000.0)), Hz(18_000.0));
-    assert_eq!(Mix(1.5).clamp(Mix::DRY, Mix::WET), Mix::WET);
+    assert_eq!(
+        Hz::new(20_000.0).clamp(Hz::new(20.0), Hz::new(18_000.0)),
+        Hz::new(18_000.0)
+    );
+    assert_eq!(Mix::new(1.5).clamp(Mix::DRY, Mix::WET), Mix::WET);
 }
 
 /// The module's one non-finite rule, for every `new_clamped`: NaN stays
@@ -112,9 +133,12 @@ fn every_new_clamped_passes_nan_and_saturates_infinity() {
     check!(BitDepth, 1.0, 32.0, f64);
     check!(HoldFactor, 1.0, f64::INFINITY, f64);
     // In-range values pass untouched, and -0.0 keeps its sign bit.
-    assert_eq!(StereoWidth::new_clamped(1.5), StereoWidth(1.5));
-    assert_eq!(CompressionRatio::new_clamped(4.0), CompressionRatio(4.0));
-    assert_eq!(Q::new_clamped(0.7), Q(0.7));
+    assert_eq!(StereoWidth::new_clamped(1.5), StereoWidth::new(1.5));
+    assert_eq!(
+        CompressionRatio::new_clamped(4.0),
+        CompressionRatio::new(4.0)
+    );
+    assert_eq!(Q::new_clamped(0.7), Q::new(0.7));
     assert_eq!(
         StereoWidth::new_clamped(-0.0).get().to_bits(),
         (-0.0f64).to_bits()
@@ -136,14 +160,14 @@ fn the_wraps_hold_their_half_open_range_at_the_seam() {
     ] {
         let p = Phase::wrapped(v);
         assert!((0.0..1.0).contains(&p.get()), "wrapped({v:e}) = {p}");
-        assert_eq!(p, Phase(below_one), "{v:e}");
+        assert_eq!(p, Phase::new(below_one), "{v:e}");
     }
     // Ordinary inputs keep their exact figures.
-    assert_eq!(Phase::wrapped(-0.25), Phase(0.75));
-    assert_eq!(Phase::wrapped(0.0), Phase(0.0));
-    assert_eq!(Phase::wrapped(1.0), Phase(0.0));
-    assert_eq!(Phase::wrapped(2.0), Phase(0.0));
-    assert_eq!(Phase::wrapped(-1.0), Phase(0.0));
+    assert_eq!(Phase::wrapped(-0.25), Phase::new(0.75));
+    assert_eq!(Phase::wrapped(0.0), Phase::new(0.0));
+    assert_eq!(Phase::wrapped(1.0), Phase::new(0.0));
+    assert_eq!(Phase::wrapped(2.0), Phase::new(0.0));
+    assert_eq!(Phase::wrapped(-1.0), Phase::new(0.0));
     // NaN and the infinities give NaN.
     for v in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
         assert!(Phase::wrapped(v).get().is_nan());
@@ -155,43 +179,52 @@ fn the_wraps_hold_their_half_open_range_at_the_seam() {
         -180.000_000_000_000_06,
         -180.000_000_000_000_1,
     ] {
-        let a = Azimuth(v).wrap().get();
+        let a = Azimuth::new(v).wrap().get();
         assert!((-180.0..180.0).contains(&a), "{v} wrapped to {a}");
     }
-    assert_eq!(Azimuth((-180.0_f64).next_down()).wrap(), Azimuth(top));
-    assert_eq!(Azimuth(190.0).wrap(), Azimuth(-170.0));
-    assert_eq!(Azimuth(-190.0).wrap(), Azimuth(170.0));
-    assert_eq!(Azimuth(180.0).wrap(), Azimuth(-180.0));
-    assert_eq!(Azimuth(-180.0).wrap(), Azimuth(-180.0));
-    assert!(Azimuth(f64::NAN).wrap().get().is_nan());
-    assert!(Azimuth(f64::INFINITY).wrap().get().is_nan());
+    assert_eq!(
+        Azimuth::new((-180.0_f64).next_down()).wrap(),
+        Azimuth::new(top)
+    );
+    assert_eq!(Azimuth::new(190.0).wrap(), Azimuth::new(-170.0));
+    assert_eq!(Azimuth::new(-190.0).wrap(), Azimuth::new(170.0));
+    assert_eq!(Azimuth::new(180.0).wrap(), Azimuth::new(-180.0));
+    assert_eq!(Azimuth::new(-180.0).wrap(), Azimuth::new(-180.0));
+    assert!(Azimuth::new(f64::NAN).wrap().get().is_nan());
+    assert!(Azimuth::new(f64::INFINITY).wrap().get().is_nan());
 
-    assert!(Radians(f64::NAN).wrapped_signed().get().is_nan());
-    assert!(Radians(f64::INFINITY).wrapped_signed().get().is_nan());
+    assert!(Radians::new(f64::NAN).wrapped_signed().get().is_nan());
+    assert!(Radians::new(f64::INFINITY).wrapped_signed().get().is_nan());
 
     let below_one = 1.0_f64.next_down();
-    assert_eq!(Beat(-1e-20).fract(), BeatDuration(below_one));
-    assert_eq!(SamplePosition(-1e-20).fract(), below_one);
-    assert_eq!(Beat(2.25).fract(), BeatDuration(0.25));
-    assert_eq!(Beat(-0.75).fract(), BeatDuration(0.25));
-    assert_eq!(Beat(3.0).fract(), BeatDuration(0.0));
-    assert!(Beat(f64::NAN).fract().get().is_nan());
-    assert!(Beat(f64::INFINITY).fract().get().is_nan());
+    assert_eq!(Beat::new(-1e-20).fract(), BeatDuration::new(below_one));
+    assert_eq!(SamplePosition::new(-1e-20).fract(), below_one);
+    assert_eq!(Beat::new(2.25).fract(), BeatDuration::new(0.25));
+    assert_eq!(Beat::new(-0.75).fract(), BeatDuration::new(0.25));
+    assert_eq!(Beat::new(3.0).fract(), BeatDuration::new(0.0));
+    assert!(Beat::new(f64::NAN).fract().get().is_nan());
+    assert!(Beat::new(f64::INFINITY).fract().get().is_nan());
 
-    let four = BeatDuration(4.0);
+    let four = BeatDuration::new(4.0);
     assert_eq!(
-        BeatDuration(-1e-20).rem_euclid(four),
-        BeatDuration(4.0_f64.next_down())
+        BeatDuration::new(-1e-20).rem_euclid(four),
+        BeatDuration::new(4.0_f64.next_down())
     );
-    assert_eq!(BeatDuration(-1.0).rem_euclid(four), BeatDuration(3.0));
-    assert_eq!(BeatDuration(9.0).rem_euclid(four), BeatDuration(1.0));
     assert_eq!(
-        BeatDuration(-1e-20).rem_euclid(BeatDuration(-4.0)),
-        BeatDuration(4.0_f64.next_down())
+        BeatDuration::new(-1.0).rem_euclid(four),
+        BeatDuration::new(3.0)
+    );
+    assert_eq!(
+        BeatDuration::new(9.0).rem_euclid(four),
+        BeatDuration::new(1.0)
+    );
+    assert_eq!(
+        BeatDuration::new(-1e-20).rem_euclid(BeatDuration::new(-4.0)),
+        BeatDuration::new(4.0_f64.next_down())
     );
     assert!(
-        BeatDuration(1.0)
-            .rem_euclid(BeatDuration(0.0))
+        BeatDuration::new(1.0)
+            .rem_euclid(BeatDuration::new(0.0))
             .get()
             .is_nan()
     );

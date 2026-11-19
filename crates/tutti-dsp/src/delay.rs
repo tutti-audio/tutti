@@ -163,7 +163,7 @@ impl<F: Float> DelayLine<F> {
 /// per channel, and its caller holds the delay as a position and lowers the feedback once
 /// per frame after the clamp that makes it one.
 #[inline(always)]
-pub fn delay_step<F: Float>(
+pub(crate) fn delay_step<F: Float>(
     line: &mut DelayLine<F>,
     x: F,
     d: ReadPosition,

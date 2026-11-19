@@ -467,9 +467,9 @@ impl MidiClipControls {
 /// use tutti_fixtures::midi;
 /// use tutti_ump::{MidiChannel, NoteVelocity};
 ///
-/// let (mut editor, _exec) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(512))));
+/// let (mut editor, _exec) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(512))));
 /// let on = midi::note_on(MidiChannel::FIRST, 60, 0xFFFF);
-/// let clip = MidiClipNode::new([TimedMidiEvent::new(Beat(1.0), on).unwrap()]);
+/// let clip = MidiClipNode::new([TimedMidiEvent::new(Beat::new(1.0), on).unwrap()]);
 /// let controls = editor.insert(NodeKey(1), "clip", clip).controls;
 /// assert_eq!(controls.len(), 1);
 /// ```

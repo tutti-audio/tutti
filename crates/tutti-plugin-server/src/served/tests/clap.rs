@@ -155,7 +155,7 @@ fn a_plugin_without_the_tail_extension_has_an_unknown_tail() {
         ClapInstance::load_first(main_thread(), path, 44100.0, 512, FloatWidth::F32).expect("load");
     assert_eq!(
         instance.loaded().tail,
-        PluginTail::Finite(Samples(
+        PluginTail::Finite(Samples::new(
             tutti_clap_test_plugin::REPORTED_TAIL_SAMPLES as usize
         ))
     );
@@ -394,7 +394,7 @@ fn a_deactivated_instance_renders_silence_and_tells_the_host() {
     let mut output = vec![vec![0.5f64; 64]; 2];
     let mut output_slices: Vec<&mut [f64]> = output.iter_mut().map(|v| v.as_mut_slice()).collect();
     let buffer = InputOutput::from_slices(
-        tutti_plugin_types::Samples(input_slices[0].len()),
+        tutti_plugin_types::Samples::new(input_slices[0].len()),
         &input_slices,
         &mut output_slices,
     )
@@ -768,7 +768,7 @@ fn a_latency_that_depends_on_the_rate_is_reread_after_a_rate_change() {
         .set_sample_rate(main_thread(), SampleRate::of(48000.0))
         .expect("rate change");
 
-    let now = Samples(before.0 + 11);
+    let now = Samples::new(before.get() + 11);
     assert_eq!(instance.take_changes().latency, Some(now));
     assert_eq!(instance.loaded().latency_samples, now, "the host's copy");
     assert_eq!(instance.take_changes().latency, None, "once");
@@ -793,7 +793,10 @@ fn a_restart_reports_the_latency_after_it() {
 
     instance.service_requests();
 
-    assert_eq!(instance.take_changes().latency, Some(Samples(before.0 + 7)));
+    assert_eq!(
+        instance.take_changes().latency,
+        Some(Samples::new(before.get() + 7))
+    );
 }
 
 /// **`latency.changed` on an active plugin is served by a re-activation,
@@ -819,7 +822,10 @@ fn latency_changed_on_an_active_plugin_restarts_it() {
     instance.service_requests();
 
     assert_eq!(crate::test_utils::clap_probe_activation_count(), 1);
-    assert_eq!(instance.take_changes().latency, Some(Samples(before.0 + 5)));
+    assert_eq!(
+        instance.take_changes().latency,
+        Some(Samples::new(before.get() + 5))
+    );
 }
 
 /// **A `latency.changed()` a plugin raises from inside `activate` is
@@ -1028,7 +1034,7 @@ fn process_blocks(instance: &mut ClapInstance, blocks: usize) {
         let mut output_slices: Vec<&mut [f32]> =
             output_data.iter_mut().map(|v| v.as_mut_slice()).collect();
         let buffer = InputOutput::from_slices(
-            tutti_plugin_types::Samples(input_slices[0].len()),
+            tutti_plugin_types::Samples::new(input_slices[0].len()),
             &input_slices,
             &mut output_slices,
         )
@@ -1115,7 +1121,7 @@ fn test_clap_process_f32_silence() {
         output_data.iter_mut().map(|v| v.as_mut_slice()).collect();
 
     let buffer = InputOutput::from_slices(
-        tutti_plugin_types::Samples(input_slices[0].len()),
+        tutti_plugin_types::Samples::new(input_slices[0].len()),
         &input_slices,
         &mut output_slices,
     )
@@ -1166,7 +1172,7 @@ fn test_clap_process_f32_with_note() {
             output_data.iter_mut().map(|v| v.as_mut_slice()).collect();
 
         let buffer = InputOutput::from_slices(
-            tutti_plugin_types::Samples(input_slices[0].len()),
+            tutti_plugin_types::Samples::new(input_slices[0].len()),
             &input_slices,
             &mut output_slices,
         )
@@ -1201,7 +1207,7 @@ fn test_clap_process_f32_with_note() {
             output_data.iter_mut().map(|v| v.as_mut_slice()).collect();
 
         let buffer = InputOutput::from_slices(
-            tutti_plugin_types::Samples(input_slices[0].len()),
+            tutti_plugin_types::Samples::new(input_slices[0].len()),
             &input_slices,
             &mut output_slices,
         )
@@ -1302,7 +1308,7 @@ fn test_reference_process_f32_silence() {
         output_data.iter_mut().map(|v| v.as_mut_slice()).collect();
 
     let buffer = InputOutput::from_slices(
-        tutti_plugin_types::Samples(input_slices[0].len()),
+        tutti_plugin_types::Samples::new(input_slices[0].len()),
         &input_slices,
         &mut output_slices,
     )
@@ -1347,7 +1353,7 @@ fn test_reference_process_f32_with_note() {
             output_data.iter_mut().map(|v| v.as_mut_slice()).collect();
 
         let buffer = InputOutput::from_slices(
-            tutti_plugin_types::Samples(input_slices[0].len()),
+            tutti_plugin_types::Samples::new(input_slices[0].len()),
             &input_slices,
             &mut output_slices,
         )
@@ -1438,7 +1444,7 @@ fn test_clap_lifecycle_processing_starts_on_process() {
     let mut output_slices: Vec<&mut [f32]> =
         output_data.iter_mut().map(|v| v.as_mut_slice()).collect();
     let buffer = InputOutput::from_slices(
-        tutti_plugin_types::Samples(input_slices[0].len()),
+        tutti_plugin_types::Samples::new(input_slices[0].len()),
         &input_slices,
         &mut output_slices,
     )
@@ -1914,7 +1920,7 @@ fn test_clap_process_with_param_automation() {
         output_data.iter_mut().map(|v| v.as_mut_slice()).collect();
 
     let buffer = InputOutput::from_slices(
-        tutti_plugin_types::Samples(input_slices[0].len()),
+        tutti_plugin_types::Samples::new(input_slices[0].len()),
         &input_slices,
         &mut output_slices,
     )
@@ -1962,7 +1968,7 @@ fn test_clap_process_with_note_expression() {
         output_data.iter_mut().map(|v| v.as_mut_slice()).collect();
 
     let buffer = InputOutput::from_slices(
-        tutti_plugin_types::Samples(input_slices[0].len()),
+        tutti_plugin_types::Samples::new(input_slices[0].len()),
         &input_slices,
         &mut output_slices,
     )
@@ -2004,7 +2010,7 @@ fn test_clap_process_with_transport() {
         output_data.iter_mut().map(|v| v.as_mut_slice()).collect();
 
     let buffer = InputOutput::from_slices(
-        tutti_plugin_types::Samples(input_slices[0].len()),
+        tutti_plugin_types::Samples::new(input_slices[0].len()),
         &input_slices,
         &mut output_slices,
     )
@@ -2290,7 +2296,7 @@ fn test_clap_sample_rate_change() {
         output_data.iter_mut().map(|v| v.as_mut_slice()).collect();
 
     let buffer = InputOutput::from_slices(
-        tutti_plugin_types::Samples(input_slices[0].len()),
+        tutti_plugin_types::Samples::new(input_slices[0].len()),
         &input_slices,
         &mut output_slices,
     )
@@ -2331,7 +2337,7 @@ fn test_clap_sample_rate_cycle_multiple() {
             output_data.iter_mut().map(|v| v.as_mut_slice()).collect();
 
         let buffer = InputOutput::from_slices(
-            tutti_plugin_types::Samples(input_slices[0].len()),
+            tutti_plugin_types::Samples::new(input_slices[0].len()),
             &input_slices,
             &mut output_slices,
         )

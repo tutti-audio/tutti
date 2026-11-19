@@ -58,7 +58,7 @@ impl Rig {
         let env = Env {
             frame: Frame::new(self.frame),
             sample_rate: SR,
-            block_len: Samples(input.len()),
+            block_len: Samples::new(input.len()),
             transport: TransportPosition::default(),
             changes: TransportChanges::NONE,
             play: PlayClock::ZERO,
@@ -86,7 +86,7 @@ fn noise(seed: u32, frames: usize) -> Vec<f32> {
 }
 
 fn impulse() -> Vec<f32> {
-    tutti_fixtures::signal::impulse(tutti_units::Samples(BLOCK))
+    tutti_fixtures::signal::impulse(tutti_units::Samples::new(BLOCK))
 }
 
 fn finite(d: &Driven) -> usize {
@@ -100,7 +100,7 @@ fn finite(d: &Driven) -> usize {
 fn tail_of(layout: &FdnLayout, c: &FdnControls) -> usize {
     let mut network = Box::new(Network::new(SR));
     layout.design_into(c, SR, &mut network);
-    let tutti_dsp::Ring::Finite(s) = network.tail(Db(-60.0)) else {
+    let tutti_dsp::Ring::Finite(s) = network.tail(Db::new(-60.0)) else {
         panic!("finite")
     };
     (s.get() * SR.get()).ceil() as usize
@@ -151,7 +151,7 @@ fn the_freeze_is_a_port_only_where_the_layout_can_freeze() {
     );
     assert_eq!(
         p.shape().latency,
-        Latency::new(Samples(0)),
+        Latency::new(Samples::new(0)),
         "a pre-delay is not latency"
     );
 }
@@ -163,7 +163,7 @@ fn the_freeze_is_a_port_only_where_the_layout_can_freeze() {
 fn the_reported_tail_is_the_networks_and_honest() {
     for decay in [0.3, 1.0, 2.5] {
         let c = FdnControls {
-            decay: [Seconds(decay); 3],
+            decay: [Seconds::new(decay); 3],
             ..FdnControls::DEFAULT
         };
         let mut rig = Rig::new(node(plain(), c));
@@ -235,7 +235,7 @@ fn the_peak_of_a_driven_control_sets_the_tail() {
         &[Some(&falling), Some(&falling), Some(&falling)],
     );
     let at_peak = FdnControls {
-        decay: [Seconds(2.5); 3],
+        decay: [Seconds::new(2.5); 3],
         ..FdnControls::DEFAULT
     };
     assert!(
@@ -244,8 +244,8 @@ fn the_peak_of_a_driven_control_sets_the_tail() {
         finite(&d)
     );
     let big = FdnControls {
-        size: Mix(1.0),
-        pre_delay: Seconds(0.2),
+        size: Mix::new(1.0),
+        pre_delay: Seconds::new(0.2),
         ..FdnControls::DEFAULT
     };
     let (high, low): (Vec<f32>, Vec<f32>) = (
@@ -277,7 +277,7 @@ fn a_lane_driving_the_decay_changes_how_long_it_rings() {
         g.connect_input(0, n, 0).connect_output(n, 0, 0);
         g.connect_output(n, 1, 1);
         let mut r = g
-            .renderer(Prepare::new(SR, MaxBlock::of(Samples(100))))
+            .renderer(Prepare::new(SR, MaxBlock::of(Samples::new(100))))
             .expect("the graph builds");
         let at = ParamIn {
             node: n,
@@ -329,7 +329,7 @@ fn a_fork_shares_no_cell() {
 #[test]
 fn a_non_finite_write_is_ignored() {
     let c = FdnControls {
-        decay: [Seconds(0.9); 3],
+        decay: [Seconds::new(0.9); 3],
         ..FdnControls::DEFAULT
     };
     let (mut hostile, mut calm) = (Rig::new(node(plain(), c)), Rig::new(node(plain(), c)));
@@ -459,7 +459,7 @@ fn a_reset_node_renders_as_a_fresh_one() {
 #[test]
 fn a_parked_node_wakes_as_a_fresh_one() {
     let c = FdnControls {
-        decay: [Seconds(0.3); 3],
+        decay: [Seconds::new(0.3); 3],
         ..FdnControls::DEFAULT
     };
     let mut rig = Rig::new(node(plain(), c));
@@ -526,8 +526,8 @@ fn a_clone_starts_silent_and_shares_the_cells() {
 #[test]
 fn a_size_on_the_move_is_not_parked_while_it_still_rings() {
     let c = FdnControls {
-        decay: [Seconds(1.0); 3],
-        size: Mix(1.0),
+        decay: [Seconds::new(1.0); 3],
+        size: Mix::new(1.0),
         modulation: Depth::of(0.0),
         ..FdnControls::DEFAULT
     };
@@ -628,7 +628,7 @@ fn the_declared_tail_is_within_the_graphs_bound_or_unbounded() {
         default.get() < 2_000_000,
         "nothing stretches the ceiling: {default:?}"
     );
-    let nineteen = FdnLayout::new(8, MaxDecay::of(Seconds(19.0)), false).unwrap();
+    let nineteen = FdnLayout::new(8, MaxDecay::of(Seconds::new(19.0)), false).unwrap();
     let Tail::Finite(long) = at(nineteen, SampleRate::SR_48K) else {
         panic!("a finite ceiling")
     };
@@ -639,7 +639,7 @@ fn the_declared_tail_is_within_the_graphs_bound_or_unbounded() {
     );
     // A 40 s room at 96 kHz is past 2.88 million frames (what bounded a tail at 48 kHz) and
     // within the sixty seconds the graph takes at that rate.
-    let forty = FdnLayout::new(8, MaxDecay::of(Seconds(40.0)), false).unwrap();
+    let forty = FdnLayout::new(8, MaxDecay::of(Seconds::new(40.0)), false).unwrap();
     let Tail::Finite(room) = at(forty, SampleRate::SR_96K) else {
         panic!("a finite ceiling")
     };

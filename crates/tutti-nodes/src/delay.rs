@@ -269,13 +269,13 @@ mod tests {
 
     /// A rate at which a time of `n / 1024` seconds is exactly `n` frames.
     const RATE: SampleRate = SampleRate::of(1_024.0);
-    const MAX: MaxDelay = MaxDelay::of(Seconds(1.0));
+    const MAX: MaxDelay = MaxDelay::of(Seconds::new(1.0));
 
     fn controls(time: f64, feedback: f64, cross: f64) -> DelayControls {
         DelayControls {
-            time: Seconds(time),
-            feedback: Feedback(feedback),
-            cross_feedback: Feedback(cross),
+            time: Seconds::new(time),
+            feedback: Feedback::new(feedback),
+            cross_feedback: Feedback::new(cross),
         }
     }
 
@@ -360,7 +360,7 @@ mod tests {
             (shape.audio_in().count(), shape.audio_out().count()),
             (2, 2)
         );
-        assert_eq!(shape.latency, Latency::new(Samples(0)));
+        assert_eq!(shape.latency, Latency::new(Samples::new(0)));
         assert_eq!(shape.tail, Tail::Unknown);
         assert_eq!(
             d.param_base(0),
@@ -400,7 +400,7 @@ mod tests {
     #[test]
     fn the_stereo_channels_echo_at_their_own_times() {
         let layout = DelayLayout::new(BusTopology::STEREO, MAX, InterpolationMode::Linear)
-            .with_times(ChannelTimes::each(&[Seconds(frames(10.0))]).unwrap())
+            .with_times(ChannelTimes::each(&[Seconds::new(frames(10.0))]).unwrap())
             .unwrap();
         let node = DelayNode::<f32>::from_layout(layout, controls(frames(5.0), 0.0, 0.0));
         let out = frames_of(node, &impulses(2, 12, &[0, 1]), &[]);
@@ -506,9 +506,13 @@ mod tests {
     #[test]
     fn a_dense_routing_at_full_feedback_stays_bounded() {
         let b = bus(4);
-        let layout = DelayLayout::new(b, MaxDelay::of(Seconds(0.1)), InterpolationMode::Linear)
-            .with_routing(Routing::normalized(b, &[Gain::UNITY; 16]).unwrap())
-            .unwrap();
+        let layout = DelayLayout::new(
+            b,
+            MaxDelay::of(Seconds::new(0.1)),
+            InterpolationMode::Linear,
+        )
+        .with_routing(Routing::normalized(b, &[Gain::UNITY; 16]).unwrap())
+        .unwrap();
         let node = DelayNode::<f32>::from_layout(layout, controls(0.002, 0.99, 0.99));
         let out = frames_of(node, &impulses(4, 8_001, &[0, 1, 2, 3]), &[]);
         let peak = out
@@ -526,7 +530,7 @@ mod tests {
     #[test]
     fn a_time_past_the_line_is_the_longest() {
         let rate = SampleRate::SR_44K1;
-        let node = DelayNode::<f32>::mono(MaxDelay::of(Seconds(0.1)), controls(5.0, 0.0, 0.0));
+        let node = DelayNode::<f32>::mono(MaxDelay::of(Seconds::new(0.1)), controls(5.0, 0.0, 0.0));
         let mut node = prepared(node, rate, 4_800);
         let x = impulses(1, 4_800, &[0]);
         let out = drive(&mut node, rate, Planes::new(&[&x[0]]).unwrap(), &[]);
@@ -735,7 +739,7 @@ mod tests {
             MAX,
             InterpolationMode::Linear,
         ));
-        k.prepare(RATE, MaxBlock::of(Samples(len)));
+        k.prepare(RATE, MaxBlock::of(Samples::new(len)));
         let moves = [(0, controls(frames(d as f64), 0.6, 0.0))];
         let y = drive_kernel(&mut k, &moves, &[x]).remove(0);
         assert_close_f64(&y, &want, 2.0f64.powi(-45));

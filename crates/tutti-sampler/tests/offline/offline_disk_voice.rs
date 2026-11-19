@@ -95,7 +95,7 @@ fn reverse(rig: &mut Rig) {
 
 /// The live voice of the stream `reader` reads, placed at `beat`.
 fn live_voice(reader: StreamReader<f32>, beat: f64) -> DiskVoice<f32> {
-    DiskVoice::from_reader(reader, VoiceWindow::from(Beat(beat)))
+    DiskVoice::from_reader(reader, VoiceWindow::from(Beat::new(beat)))
 }
 
 /// A render's transport: a frame clock at 120 BPM (counted, as an export's
@@ -113,7 +113,7 @@ impl Clock {
         Env {
             frame: Frame::new(self.frame.get()),
             sample_rate: c.sample_rate(),
-            block_len: Samples(len),
+            block_len: Samples::new(len),
             transport: tutti_graph::TransportPosition::counted(
                 true,
                 c.tempo(),
@@ -128,7 +128,7 @@ impl Clock {
 
     fn advance(&self, n: usize) {
         let mut c = self.clock.get();
-        c.advance(Samples(n), self.looping);
+        c.advance(Samples::new(n), self.looping);
         self.clock.set(c);
         self.frame.set(self.frame.get() + n as u64);
     }
@@ -167,7 +167,7 @@ fn fork_unprepared(node: impl IntoNode) -> Fork {
 fn fork(voice: &DiskVoice<f32>, rate: f64) -> Fork {
     let mut f = fork_unprepared(voice.clone());
     f.node.prepare(
-        &Prepare::new(SampleRate::of(rate), MaxBlock::of(Samples(BLOCK)))
+        &Prepare::new(SampleRate::of(rate), MaxBlock::of(Samples::new(BLOCK)))
             .with_render_mode(tutti_graph::RenderMode::Offline),
     );
     f
@@ -197,7 +197,7 @@ fn clock_at(rate: f64) -> Clock {
 fn looping_clock_at(rate: f64, looping: Option<LoopRange>) -> Clock {
     Clock {
         clock: Cell::new(FrameClock::new(
-            Beat(0.0),
+            Beat::new(0.0),
             Bpm::of(120.0),
             SampleRate::of(rate),
         )),
@@ -227,7 +227,7 @@ fn a_fork_plays_the_file_from_the_frame_its_beat_falls_on() {
 
     let mut node_fork = fork_unprepared(node);
     node_fork.node.prepare(
-        &Prepare::new(SampleRate::of(SR), MaxBlock::of(Samples(BLOCK)))
+        &Prepare::new(SampleRate::of(SR), MaxBlock::of(Samples::new(BLOCK)))
             .with_render_mode(tutti_graph::RenderMode::Offline),
     );
     for (what, mut copy) in [
@@ -564,7 +564,7 @@ fn a_stretched_fork_reads_at_the_stretchers_rate() {
     write_ramp(&path, SR as u32, 20_000);
     let (_streamer, reader) = streamer_on(&path);
     let voice = live_voice(reader, 0.0);
-    voice.set_stretch_rate(tutti_units::ReadRate(0.5));
+    voice.set_stretch_rate(tutti_units::ReadRate::new(0.5));
     let clock = clock_at(SR);
     let mut copy = fork(&voice, SR);
     let [l, _] = render(&mut *copy.node, &clock, 8_192);
@@ -617,7 +617,7 @@ fn a_fork_follows_a_looping_render_timeline() {
     write_ramp(&path, SR as u32, 60_000);
     let (_streamer, reader) = streamer_on(&path);
     let voice = live_voice(reader, 0.0);
-    let clock = looping_clock_at(SR, LoopRange::new(Beat(0.0), Beat(1.01)));
+    let clock = looping_clock_at(SR, LoopRange::new(Beat::new(0.0), Beat::new(1.01)));
     let mut copy = fork(&voice, SR);
     let [l, _] = render(&mut *copy.node, &clock, 60_000);
     for (k, &got) in l.iter().enumerate() {
@@ -757,7 +757,7 @@ fn a_fork_matches_the_memory_tier_bit_for_bit() {
         }
         let clock = clock_at(SR);
         let mut source =
-            tutti_sampler::MemorySource::placed(Arc::new(wave), VoiceWindow::from(Beat(1.0)))
+            tutti_sampler::MemorySource::placed(Arc::new(wave), VoiceWindow::from(Beat::new(1.0)))
                 .expect("a placeable wave");
         source.set_speed(tutti_units::PlaybackRate::new(case.speed));
         source.set_loop(case.loop_);
@@ -777,7 +777,7 @@ fn a_fork_matches_the_memory_tier_bit_for_bit() {
         };
         memory.prepare(&Prepare::new(
             SampleRate::of(SR),
-            MaxBlock::of(Samples(BLOCK)),
+            MaxBlock::of(Samples::new(BLOCK)),
         ));
         let mut copy = fork(&voice, SR);
 

@@ -134,7 +134,7 @@ impl EventRig {
     fn with_output(rate: f64, max_block: usize, ports: u16, output: Output) -> Self {
         let (mut editor, exec) = Editor::new(Prepare::new(
             SampleRate::of(rate),
-            MaxBlock::of(Samples(max_block)),
+            MaxBlock::of(Samples::new(max_block)),
         ));
         let seen = Seen::default();
         editor.insert(

@@ -41,52 +41,54 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
             "svf",
             Box::new(SvfFilterNode::<f32>::new(
                 SvfType::LowPass,
-                Hz(1_000.0),
-                Q(0.707),
+                Hz::new(1_000.0),
+                Q::new(0.707),
             )),
         ),
         (
             "ladder",
             Box::new(LadderFilterNode::<f32>::new(
                 LadderType::LP24,
-                Hz(1_000.0),
-                Resonance(0.5),
+                Hz::new(1_000.0),
+                Resonance::new(0.5),
             )),
         ),
         (
             "crossover",
-            Box::new(CrossoverNode::<f32>::new(ChannelLayout::STEREO, &[Hz(1_000.0)]).unwrap()),
+            Box::new(
+                CrossoverNode::<f32>::new(ChannelLayout::STEREO, &[Hz::new(1_000.0)]).unwrap(),
+            ),
         ),
         (
             // A feedback line of a whole number of frames: one sample circulating in it falls
             // on a block's last frame only when the period lines up.
             "delay",
             Box::new(DelayNode::<f32>::mono(
-                MaxDelay::of(Seconds(0.05)),
+                MaxDelay::of(Seconds::new(0.05)),
                 DelayControls {
-                    time: Seconds(0.01),
-                    feedback: Feedback(0.9),
+                    time: Seconds::new(0.01),
+                    feedback: Feedback::new(0.9),
                     ..DelayControls::DEFAULT
                 },
             )),
         ),
         (
             "distortion",
-            Box::new(DistortionNode::<f32>::new(ShapeKind::Tanh, Drive(4.0))),
+            Box::new(DistortionNode::<f32>::new(ShapeKind::Tanh, Drive::new(4.0))),
         ),
         // The antialiasing's history is the shaper's own state: a non-finite sample enters it
         // as 0, so it is heard at its own frame.
         (
             "distortion first order",
             Box::new(
-                DistortionNode::<f32>::new(ShapeKind::Tanh, Drive(4.0))
+                DistortionNode::<f32>::new(ShapeKind::Tanh, Drive::new(4.0))
                     .antialiasing(Antialiasing::FirstOrder),
             ),
         ),
         (
             "distortion second order",
             Box::new(
-                DistortionNode::<f32>::new(ShapeKind::Softsign, Drive(4.0))
+                DistortionNode::<f32>::new(ShapeKind::Softsign, Drive::new(4.0))
                     .antialiasing(Antialiasing::SecondOrder),
             ),
         ),
@@ -123,38 +125,39 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
             "bell filter",
             Box::new(BellFilterNode::from(BellFilterConfig::new(
                 ChannelLayout::STEREO,
-                Hz(2_000.0),
-                Q(2.0),
-                Db(6.0),
+                Hz::new(2_000.0),
+                Q::new(2.0),
+                Db::new(6.0),
             ))),
         ),
         (
             "tilt filter",
             Box::new(TiltFilterNode::from(TiltFilterConfig::new(
                 ChannelLayout::STEREO,
-                Hz(1_000.0),
-                Db(6.0),
+                Hz::new(1_000.0),
+                Db::new(6.0),
             ))),
         ),
         (
             "dynamic eq",
             Box::new(DynamicEqNode::<f32>::from(
-                DynamicEqConfig::de_esser(ChannelLayout::STEREO, Hz(6_000.0)).threshold(Db(-60.0)),
+                DynamicEqConfig::de_esser(ChannelLayout::STEREO, Hz::new(6_000.0))
+                    .threshold(Db::new(-60.0)),
             )),
         ),
         (
             "envelope filter",
             Box::new(EnvelopeFilterNode::<f32>::from(
-                EnvelopeFilterConfig::new(ChannelLayout::STEREO, Hz(500.0), SvfType::BandPass)
-                    .depth(Semitones(24.0)),
+                EnvelopeFilterConfig::new(ChannelLayout::STEREO, Hz::new(500.0), SvfType::BandPass)
+                    .depth(Semitones::new(24.0)),
             )),
         ),
         (
             "transient shaper",
             Box::new(TransientShaperNode::<f32>::from(
                 TransientShaperConfig::new(ChannelLayout::STEREO)
-                    .attack(Db(12.0))
-                    .sustain(Db(-6.0)),
+                    .attack(Db::new(12.0))
+                    .sustain(Db::new(-6.0)),
             )),
         ),
         (
@@ -174,7 +177,7 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
         ),
         (
             "brickwall",
-            Box::new(BrickwallLimiterNode::<f32>::new(Db(-1.0))),
+            Box::new(BrickwallLimiterNode::<f32>::new(Db::new(-1.0))),
         ),
         (
             "chorus",
@@ -201,8 +204,8 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
         (
             "freeverb",
             Box::new(FreeverbNode::<f32>::live(FreeverbControls {
-                room: Mix(0.9),
-                damp: Mix(0.2),
+                room: Mix::new(0.9),
+                damp: Mix::new(0.2),
             })),
         ),
         (
@@ -242,7 +245,7 @@ fn noise(state: &mut u32) -> f32 {
 /// and returns which blocks' outputs hold a non-finite sample.
 fn poisoned_blocks(node: Box<dyn Node>, bad: f32) -> Vec<u64> {
     let mut node = node;
-    node.prepare(&Prepare::new(SR, MaxBlock::of(Samples(BLOCK))));
+    node.prepare(&Prepare::new(SR, MaxBlock::of(Samples::new(BLOCK))));
     let width = usize::from(node.shape().audio_in().count());
     let mut state = 0x9E37_79B9u32;
     let mut out = Vec::new();
@@ -260,7 +263,7 @@ fn poisoned_blocks(node: Box<dyn Node>, bad: f32) -> Vec<u64> {
         let env = Env {
             frame: Frame::new(block * BLOCK as u64),
             sample_rate: SR,
-            block_len: Samples(BLOCK),
+            block_len: Samples::new(BLOCK),
             transport: TransportPosition::default(),
             changes: TransportChanges::NONE,
             play: PlayClock::ZERO,
@@ -356,7 +359,7 @@ mod logged {
         blocks: u64,
     ) -> Vec<RtRecord> {
         let (mut ed, mut exec): (Editor, Executor) =
-            Editor::new(Prepare::new(SR, MaxBlock::of(Samples(BLOCK))));
+            Editor::new(Prepare::new(SR, MaxBlock::of(Samples::new(BLOCK))));
         let [src, fx] = [1, 2].map(NodeKey);
         ed.insert(
             src,

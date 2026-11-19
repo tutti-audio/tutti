@@ -227,7 +227,7 @@ impl UnisonEngine {
     pub fn recompute_params(&mut self) {
         let count = usize::from(self.config.voice_count.get());
 
-        let amplitude = Amplitude(1.0 / (count as f64).sqrt());
+        let amplitude = Amplitude::new(1.0 / (count as f64).sqrt());
         // A converter, not a divide: the span's unit changes from cents to
         // semitones here.
         let detune_semitones = self.config.detune_cents.to_semitones();
@@ -243,7 +243,7 @@ impl UnisonEngine {
             // voice's position stays in the unit, and the exponent conversion
             // happens once at the end.
             let freq_ratio = (detune_semitones * position).to_pitch_ratio();
-            let pan = Pan(position * self.config.stereo_spread.get());
+            let pan = Pan::new(position * self.config.stereo_spread.get());
 
             // The phase offset is kept: it is the last `randomize_phases`
             // draw, not a function of detune or spread, and a detune moving

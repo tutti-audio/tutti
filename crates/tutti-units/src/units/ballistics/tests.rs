@@ -3,7 +3,7 @@ use super::*;
 const RATE: f64 = 48_000.0;
 
 fn pair(attack: f64, release: f64) -> Ballistics {
-    Ballistics::new(Seconds(attack), Seconds(release)).expect("a valid pair")
+    Ballistics::new(Seconds::new(attack), Seconds::new(release)).expect("a valid pair")
 }
 
 /// The coefficients are `1 - exp(-1 / (t * rate))`, the one-pole step that closes `1 - 1/e`
@@ -27,7 +27,7 @@ fn coeffs_are_one_minus_exp_of_minus_one_over_time_times_rate() {
 fn coeff_over_one_sample_is_the_coefficient_at_that_rate() {
     let b = pair(0.01, 0.1);
     let (attack, release) = b.coeffs(SampleRate::of(RATE));
-    let dt = Seconds(1.0 / RATE);
+    let dt = Seconds::new(1.0 / RATE);
     assert!((b.coeff_over(true, dt) - attack).abs() < 1e-9);
     assert!((b.coeff_over(false, dt) - release).abs() < 1e-9);
 }
@@ -38,8 +38,8 @@ fn coeff_over_one_sample_is_the_coefficient_at_that_rate() {
 fn coeff_over_one_time_constant_closes_one_minus_inverse_e() {
     let b = pair(0.01, 0.1);
     let want = 1.0 - (-1.0f64).exp();
-    assert!((b.coeff_over(true, Seconds(0.01)) - want).abs() < 1e-6);
-    assert!((b.coeff_over(false, Seconds(0.1)) - want).abs() < 1e-6);
+    assert!((b.coeff_over(true, Seconds::new(0.01)) - want).abs() < 1e-6);
+    assert!((b.coeff_over(false, Seconds::new(0.1)) - want).abs() < 1e-6);
 }
 
 /// The convention: an instant (zero) time is coefficient 1, closing the whole gap, and a
@@ -48,20 +48,31 @@ fn coeff_over_one_time_constant_closes_one_minus_inverse_e() {
 fn a_zero_time_is_coefficient_one_and_a_zero_step_holds() {
     let b = pair(0.0, 0.0);
     assert_eq!(b.coeffs(SampleRate::of(RATE)), (1.0, 1.0));
-    assert_eq!(b.coeff_over(true, Seconds(0.001)), 1.0);
-    assert_eq!(b.coeff_over(false, Seconds(0.001)), 1.0);
-    assert_eq!(pair(0.1, 0.1).coeff_over(true, Seconds(0.0)), 0.0);
+    assert_eq!(b.coeff_over(true, Seconds::new(0.001)), 1.0);
+    assert_eq!(b.coeff_over(false, Seconds::new(0.001)), 1.0);
+    assert_eq!(pair(0.1, 0.1).coeff_over(true, Seconds::new(0.0)), 0.0);
 }
 
 /// A time that is negative, NaN or infinite is refused, in either position.
 #[test]
 fn a_negative_or_non_finite_time_is_refused() {
     for bad in [-0.001, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
-        assert_eq!(Ballistics::new(Seconds(bad), Seconds(0.1)), None, "{bad}");
-        assert_eq!(Ballistics::new(Seconds(0.1), Seconds(bad)), None, "{bad}");
+        assert_eq!(
+            Ballistics::new(Seconds::new(bad), Seconds::new(0.1)),
+            None,
+            "{bad}"
+        );
+        assert_eq!(
+            Ballistics::new(Seconds::new(0.1), Seconds::new(bad)),
+            None,
+            "{bad}"
+        );
     }
     let b = pair(0.01, 0.1);
-    assert_eq!((b.attack(), b.release()), (Seconds(0.01), Seconds(0.1)));
+    assert_eq!(
+        (b.attack(), b.release()),
+        (Seconds::new(0.01), Seconds::new(0.1))
+    );
 }
 
 /// A document holds only a valid pair: a refused time fails to deserialize.

@@ -201,7 +201,7 @@ impl<F: Float + Lerp> PhaserKernel<F> {
             Some(got) if got != width => return Err(StaggerError::Length { width, got }),
             _ => {}
         }
-        let mut offsets = [PhaseIncrement(0.0); MAX_PHASER_CHANNELS];
+        let mut offsets = [PhaseIncrement::new(0.0); MAX_PHASER_CHANNELS];
         let layout = input.layout();
         for (c, o) in (0..width).filter_map(|c| layout.index(c)).zip(&mut offsets) {
             *o = stagger.offset(c);
@@ -289,7 +289,7 @@ impl<F: Float + Lerp> Kernel for PhaserKernel<F> {
         // A control reaches here finite (the cells' reader holds the last finite value); the
         // rate is floored and the feedback clamped.
         self.clock.set_inc(PhaseIncrement::per_sample(
-            Hz(controls.rate.get().max(MIN_RATE.get())),
+            Hz::new(controls.rate.get().max(MIN_RATE.get())),
             self.rate,
         ));
         let feedback = Feedback::new_clamped(controls.feedback.get());
@@ -384,7 +384,7 @@ mod tests {
             (shape.audio_in().count(), shape.audio_out().count()),
             (3, 3)
         );
-        assert_eq!(shape.latency, Latency::new(Samples(0)));
+        assert_eq!(shape.latency, Latency::new(Samples::new(0)));
         assert_eq!(shape.tail, Tail::Unknown);
         assert_eq!(node.param_base(0), Some(0.3), "the rate's base is its cell");
         assert_eq!(node.param_base(1), Some(0.5));
@@ -397,7 +397,7 @@ mod tests {
     /// A stagger that names an offset per channel must name the bus's.
     #[test]
     fn a_stagger_of_the_wrong_length_is_refused_at_construction() {
-        let two = Stagger::each(&[PhaseIncrement(0.0), PhaseIncrement(0.5)]).unwrap();
+        let two = Stagger::each(&[PhaseIncrement::new(0.0), PhaseIncrement::new(0.5)]).unwrap();
         let new = |w| {
             PhaserNode::<f32>::new(
                 bus(w),
@@ -414,7 +414,7 @@ mod tests {
         );
         // A step, and no stagger, fit any width.
         for width in [1, 2, 6, 16] {
-            for any in [Stagger::of_step(PhaseIncrement(0.25)), Stagger::NONE] {
+            for any in [Stagger::of_step(PhaseIncrement::new(0.25)), Stagger::NONE] {
                 let node = PhaserNode::<f32>::new(
                     bus(width),
                     Stages::of(4),
@@ -502,7 +502,7 @@ mod tests {
         let unclamped = 200.0 + 3_800.0 * 0.5 * 8.0;
         assert!((4.0 * stage_phase(unclamped, 1_000.0) - wanted).abs() > 0.1);
         let controls = PhaserControls {
-            rate: Hz(0.01),
+            rate: Hz::new(0.01),
             feedback: Feedback::NONE,
             ..PhaserControls::DEFAULT
         };
@@ -603,7 +603,7 @@ mod tests {
             let node = PhaserNode::<f32>::mono(
                 Stages::of(6),
                 PhaserControls {
-                    feedback: Feedback(fb),
+                    feedback: Feedback::new(fb),
                     ..PhaserControls::DEFAULT
                 },
             );
@@ -627,9 +627,9 @@ mod tests {
 
     fn controls(rate: f64, depth: f64, feedback: f64) -> PhaserControls {
         PhaserControls {
-            rate: Hz(rate),
+            rate: Hz::new(rate),
             depth: Depth::of(depth),
-            feedback: Feedback(feedback),
+            feedback: Feedback::new(feedback),
         }
     }
 
@@ -637,7 +637,7 @@ mod tests {
     fn kernel(width: u16, stages: usize, range: SweepRange, stagger: Stagger) -> PhaserKernel<f32> {
         let mut k = PhaserKernel::<f32>::new(bus(width), Stages::of(stages), range, stagger)
             .expect("a stagger that fits");
-        k.prepare(RATE, MaxBlock::of(Samples(64)));
+        k.prepare(RATE, MaxBlock::of(Samples::new(64)));
         k
     }
 
@@ -651,7 +651,7 @@ mod tests {
         offset: f64,
         steps: usize,
     ) -> f32 {
-        let inc = PhaseIncrement::per_sample(Hz(rate), RATE);
+        let inc = PhaseIncrement::per_sample(Hz::new(rate), RATE);
         let mut p = Phase::START;
         for _ in 0..steps {
             p = p.advance(inc);
@@ -670,7 +670,7 @@ mod tests {
     /// a little past the first.
     #[test]
     fn the_corners_of_a_segment_are_the_sweep_at_the_lfo_phase() {
-        let band = SweepRange::of(Hz(300.0), Hz(3_000.0));
+        let band = SweepRange::of(Hz::new(300.0), Hz::new(3_000.0));
         let mut k = kernel(1, 4, band, Stagger::NONE);
         k.retarget(&controls(5.0, 1.0, 0.5));
         let start = exact_complement(band, 5.0, 1.0, 0.0, 0);
@@ -685,11 +685,17 @@ mod tests {
     /// sine of its own offset.
     #[test]
     fn each_channel_is_staggered_by_its_step_and_a_full_cycle_is_none() {
-        let band = SweepRange::of(Hz(300.0), Hz(3_000.0));
+        let band = SweepRange::of(Hz::new(300.0), Hz::new(3_000.0));
         for (stagger, offsets) in [
-            (Stagger::of_step(PhaseIncrement(0.25)), [0.0f64, 0.25, 0.5]),
-            (Stagger::of_step(PhaseIncrement(1.0)), [0.0, 0.0, 0.0]),
-            (Stagger::of_step(PhaseIncrement(1.25)), [0.0, 0.25, 0.5]),
+            (
+                Stagger::of_step(PhaseIncrement::new(0.25)),
+                [0.0f64, 0.25, 0.5],
+            ),
+            (Stagger::of_step(PhaseIncrement::new(1.0)), [0.0, 0.0, 0.0]),
+            (
+                Stagger::of_step(PhaseIncrement::new(1.25)),
+                [0.0, 0.25, 0.5],
+            ),
         ] {
             let mut k = kernel(3, 4, band, stagger);
             k.retarget(&controls(1.0, 1.0, 0.5));
@@ -712,7 +718,7 @@ mod tests {
     /// directly, on the stream's lattice from the first block.
     #[test]
     fn between_corners_the_coefficient_is_the_chord_read_a_step_ahead() {
-        let band = SweepRange::of(Hz(300.0), Hz(3_000.0));
+        let band = SweepRange::of(Hz::new(300.0), Hz::new(3_000.0));
         let c = controls(5.0, 1.0, 0.0);
         for n in [0usize, 1, 7, 15, 16, 17, 31, 32, 40, 47] {
             let mut k = kernel(1, 2, band, Stagger::NONE);
@@ -738,7 +744,7 @@ mod tests {
     /// its end corner at `16 / 240`.
     #[test]
     fn a_gliding_depth_is_solved_with_the_depth_the_glide_has_at_the_segments_end() {
-        let band = SweepRange::of(Hz(300.0), Hz(3_000.0));
+        let band = SweepRange::of(Hz::new(300.0), Hz::new(3_000.0));
         let mut k = kernel(1, 4, band, Stagger::NONE);
         let moves = [(0, controls(5.0, 0.0, 0.5)), (16, controls(5.0, 1.0, 0.5))];
         drive_kernel(&mut k, &moves, &silence(1, 17));
@@ -786,7 +792,7 @@ mod tests {
     #[test]
     fn a_rate_below_the_floor_is_the_floor() {
         let walked = |hz: f64, steps: usize| {
-            let step = PhaseStep::from(PhaseIncrement::per_sample(Hz(hz), RATE));
+            let step = PhaseStep::from(PhaseIncrement::per_sample(Hz::new(hz), RATE));
             (0..steps).fold(RunningPhase::START, |p, _| p.advance(step))
         };
         for (rate, effective) in [
@@ -829,22 +835,22 @@ mod tests {
     fn the_range_is_capped_at_0_9_nyquist_and_a_rising_rate_restores_the_authored_top() {
         let top = |range: SweepRange, sr: f64| {
             let mut k = kernel(1, 4, range, Stagger::NONE);
-            k.prepare(SampleRate::of(sr), MaxBlock::of(Samples(64)));
+            k.prepare(SampleRate::of(sr), MaxBlock::of(Samples::new(64)));
             (k.min, k.max)
         };
         assert_eq!(
             top(SweepRange::DEFAULT, 8_000.0).1,
-            Hz(3_600.0),
+            Hz::new(3_600.0),
             "0.90 of a 4 kHz Nyquist"
         );
-        assert_eq!(top(SweepRange::DEFAULT, 48_000.0).1, Hz(4_000.0));
-        let wide = SweepRange::of(Hz(300.0), Hz(30_000.0));
-        assert_eq!(top(wide, 48_000.0), (Hz(300.0), Hz(21_600.0)));
-        assert_eq!(top(wide, 96_000.0).1, Hz(30_000.0));
+        assert_eq!(top(SweepRange::DEFAULT, 48_000.0).1, Hz::new(4_000.0));
+        let wide = SweepRange::of(Hz::new(300.0), Hz::new(30_000.0));
+        assert_eq!(top(wide, 48_000.0), (Hz::new(300.0), Hz::new(21_600.0)));
+        assert_eq!(top(wide, 96_000.0).1, Hz::new(30_000.0));
         let mut k = kernel(1, 4, wide, Stagger::NONE);
-        k.prepare(SampleRate::of(48_000.0), MaxBlock::of(Samples(64)));
-        k.prepare(SampleRate::of(96_000.0), MaxBlock::of(Samples(64)));
-        assert_eq!(k.max, Hz(30_000.0));
+        k.prepare(SampleRate::of(48_000.0), MaxBlock::of(Samples::new(64)));
+        k.prepare(SampleRate::of(96_000.0), MaxBlock::of(Samples::new(64)));
+        assert_eq!(k.max, Hz::new(30_000.0));
     }
 
     /// A rate that moves lands at its **grid point** and the LFO's phase is continuous
@@ -855,7 +861,7 @@ mod tests {
     #[test]
     fn a_rate_change_lands_at_its_grid_point_and_the_phase_stays_continuous() {
         let (slow, fast) = (controls(2.0, 1.0, 0.5), controls(9.0, 1.0, 0.5));
-        let inc = |hz: f64| PhaseStep::from(PhaseIncrement::per_sample(Hz(hz), RATE));
+        let inc = |hz: f64| PhaseStep::from(PhaseIncrement::per_sample(Hz::new(hz), RATE));
         let walk = |first: usize, second: usize| {
             let p = (0..first).fold(RunningPhase::START, |p, _| p.advance(inc(2.0)));
             (0..second).fold(p, |p, _| p.advance(inc(9.0)))
@@ -882,7 +888,7 @@ mod tests {
             2,
             4,
             SweepRange::DEFAULT,
-            Stagger::of_step(PhaseIncrement(0.25)),
+            Stagger::of_step(PhaseIncrement::new(0.25)),
         );
         let loud = vec![vec![1.0f32; 1_000]; 2];
         drive_kernel(&mut k, &[(0, controls(3.0, 1.0, 0.7))], &loud);
@@ -891,7 +897,7 @@ mod tests {
             RunningPhase::START,
             "the sweep was running"
         );
-        k.prepare(RATE, MaxBlock::of(Samples(64)));
+        k.prepare(RATE, MaxBlock::of(Samples::new(64)));
         assert_eq!(k.clock.state(), (RunningPhase::START, 0, false));
         let y = drive_kernel(&mut k, &[(0, controls(3.0, 1.0, 0.7))], &silence(2, 200));
         assert!(y.iter().flatten().all(|&s| s == 0.0));
@@ -1013,7 +1019,7 @@ mod tests {
         }
         let controls = PhaserControls {
             depth: Depth::of(0.0),
-            feedback: Feedback(0.5),
+            feedback: Feedback::new(0.5),
             ..PhaserControls::DEFAULT
         };
         let mut k = PhaserKernel::<f64>::new(
@@ -1023,7 +1029,7 @@ mod tests {
             Stagger::NONE,
         )
         .unwrap();
-        k.prepare(RATE, MaxBlock::of(Samples(len)));
+        k.prepare(RATE, MaxBlock::of(Samples::new(len)));
         let y = drive_kernel(&mut k, &[(0, controls)], &[x]).remove(0);
         assert_close_f64(&y, &want, 2.0f64.powi(-45));
     }

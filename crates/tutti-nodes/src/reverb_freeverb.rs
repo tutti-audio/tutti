@@ -227,7 +227,7 @@ mod tests {
         let mut x = vec![0.0f64; len];
         x[0] = x0;
         let mut k = FreeverbKernel::<f64>::new(None);
-        k.prepare(SampleRate::SR_44K1, MaxBlock::of(Samples(len)));
+        k.prepare(SampleRate::SR_44K1, MaxBlock::of(Samples::new(len)));
         let moves = [(0, FreeverbControls::GENERAL_MIDI)];
         let y = drive_kernel(&mut k, &moves, &[x]);
         let mut want = vec![0.0f64; len];

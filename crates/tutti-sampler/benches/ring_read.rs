@@ -54,7 +54,7 @@ fn voices(n: usize, frames: usize) -> Vec<Voice> {
             let view = Interleaved::new(&data, ChannelLayout::STEREO).expect("whole frames");
             assert_eq!(
                 writer.push(view),
-                Ok(Samples(frames)),
+                Ok(Samples::new(frames)),
                 "the ring fills whole"
             );
             Voice {

@@ -41,10 +41,10 @@ impl VolumeEnvelope {
             attack_slope: 0.0,
             decay_slope: 0.0,
             release_slope: 0.0,
-            attack_start_time: Seconds(0.0),
-            hold_start_time: Seconds(0.0),
-            decay_start_time: Seconds(0.0),
-            release_start_time: Seconds(0.0),
+            attack_start_time: Seconds::new(0.0),
+            hold_start_time: Seconds::new(0.0),
+            decay_start_time: Seconds::new(0.0),
+            release_start_time: Seconds::new(0.0),
             sustain_level: Amplitude::SILENT,
             release_level: Amplitude::SILENT,
             processed_sample_count: 0,
@@ -69,7 +69,7 @@ impl VolumeEnvelope {
         self.attack_start_time = delay;
         self.hold_start_time = self.attack_start_time + attack;
         self.decay_start_time = self.hold_start_time + hold;
-        self.release_start_time = Seconds(0.0);
+        self.release_start_time = Seconds::new(0.0);
 
         self.sustain_level = sustain.clamp(Amplitude::SILENT, Amplitude::UNITY);
         self.release_level = Amplitude::SILENT;
@@ -82,7 +82,7 @@ impl VolumeEnvelope {
     }
 
     fn elapsed(&self) -> Seconds {
-        Seconds(self.processed_sample_count as f64 / f64::from(self.sample_rate))
+        Seconds::new(self.processed_sample_count as f64 / f64::from(self.sample_rate))
     }
 
     pub(crate) fn release(&mut self) {
@@ -131,8 +131,9 @@ impl VolumeEnvelope {
                 true
             }
             EnvelopeStage::Attack => {
-                self.value =
-                    Amplitude(self.attack_slope * (current_time - self.attack_start_time).get());
+                self.value = Amplitude::new(
+                    self.attack_slope * (current_time - self.attack_start_time).get(),
+                );
                 true
             }
             EnvelopeStage::Hold => {
@@ -140,7 +141,7 @@ impl VolumeEnvelope {
                 true
             }
             EnvelopeStage::Decay => {
-                self.value = Amplitude(SoundFontMath::exp_cutoff(
+                self.value = Amplitude::new(SoundFontMath::exp_cutoff(
                     self.decay_slope * (current_time - self.decay_start_time).get(),
                 ))
                 .max(self.sustain_level);
@@ -186,12 +187,12 @@ mod tests {
         let mut envelope = VolumeEnvelope::new(&Render::new(SampleRate::of(RATE)));
         // No delay, a 1 ms attack, no hold.
         envelope.start(
-            Seconds(0.0),
-            Seconds(0.001),
-            Seconds(0.0),
-            Seconds(decay),
+            Seconds::new(0.0),
+            Seconds::new(0.001),
+            Seconds::new(0.0),
+            Seconds::new(decay),
             sustain,
-            Seconds(release),
+            Seconds::new(release),
         );
         envelope
     }
@@ -257,7 +258,7 @@ mod tests {
     fn a_quick_release_falls_100_db_in_its_time() {
         let mut envelope = envelope(10.0, Amplitude::UNITY, 5.0);
         envelope.process(frames(0.01));
-        envelope.release_within(Seconds(0.01));
+        envelope.release_within(Seconds::new(0.01));
         envelope.release();
         envelope.process(frames(0.005));
         assert!((-db(envelope.value()) - 50.0).abs() < DB);

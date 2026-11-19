@@ -26,7 +26,7 @@ fn synth_row() -> Row {
                     pulse_width: Normalized::of(0.5),
                 },
                 envelope: Adsr {
-                    attack: tutti_units::Seconds(0.0),
+                    attack: tutti_units::Seconds::new(0.0),
                     ..Default::default()
                 },
                 ..Default::default()
@@ -38,7 +38,7 @@ fn synth_row() -> Row {
         },
         Detect::Threshold(1e-6),
     )
-    .with_lead(Samples(1))
+    .with_lead(Samples::new(1))
 }
 
 tutti_graph::contract_tests!(event polysynth => synth_row());

@@ -20,7 +20,7 @@ use tutti_voicing::{ChannelState, Glide, NoteControl};
 /// every release is given at its start, to avoid a pop. The spec says "rapidly"
 /// and no more (SF2 2.04 section 8.1.2, generator 57); this is tutti's figure,
 /// the shortest release a voice can have.
-pub(crate) const QUICK_RELEASE: Seconds = Seconds(0.01);
+pub(crate) const QUICK_RELEASE: Seconds = Seconds::new(0.01);
 
 use crate::channel::Channel;
 use crate::lfo::Lfo;
@@ -68,7 +68,7 @@ fn low_pass_model(cutoff: Hz, resonance: Amplitude, rate: SampleRate) -> Option<
     let controls = SvfControls {
         ty: SvfType::LowPass,
         freq: cutoff,
-        q: Q(q),
+        q: Q::new(q),
         gain: Db::UNITY,
     };
     Some(SvfModel::new(controls, rate))
@@ -221,25 +221,25 @@ impl<F: Float + Lanes> Voice<F> {
             key: 0,
             velocity: 0,
             played: 0,
-            transpose: Semitones(0.0),
+            transpose: Semitones::new(0.0),
             glide: None,
             note: NoteControls::DEFAULT,
-            tune: Semitones(0.0),
+            tune: Semitones::new(0.0),
             note_gain: Amplitude::SILENT,
-            cutoff: Hz(0.0),
+            cutoff: Hz::new(0.0),
             resonance: Amplitude::SILENT,
-            vib_lfo_to_pitch: Semitones(0.0),
-            mod_lfo_to_pitch: Semitones(0.0),
-            mod_env_to_pitch: Semitones(0.0),
-            mod_lfo_to_cutoff: Cents(0.0),
-            mod_env_to_cutoff: Cents(0.0),
+            vib_lfo_to_pitch: Semitones::new(0.0),
+            mod_lfo_to_pitch: Semitones::new(0.0),
+            mod_env_to_pitch: Semitones::new(0.0),
+            mod_lfo_to_cutoff: Cents::new(0.0),
+            mod_env_to_cutoff: Cents::new(0.0),
             dynamic_cutoff: false,
             mod_lfo_to_volume: Db::UNITY,
             dynamic_volume: false,
-            instrument_pan: Pan(0.0),
+            instrument_pan: Pan::new(0.0),
             instrument_reverb: Amplitude::SILENT,
             instrument_chorus: Amplitude::SILENT,
-            smoothed_cutoff: Hz(0.0),
+            smoothed_cutoff: Hz::new(0.0),
             voice_state: VoiceState::Playing,
             voice_length: 0,
         }
@@ -247,7 +247,7 @@ impl<F: Float + Lanes> Voice<F> {
 
     pub(crate) fn start(&mut self, region: &RegionPair, channel: i32, key: i32, velocity: i32) {
         self.played = key;
-        self.transpose = Semitones(0.0);
+        self.transpose = Semitones::new(0.0);
         self.glide = None;
         // Generators 46 and 47 (SF2 2.04 section 8.1.2) force the key and the
         // velocity of the zone: everything keyed on either reads the forced one.
@@ -269,8 +269,8 @@ impl<F: Float + Lanes> Voice<F> {
             // the concave curve, read as 40 log10(v / 127) dB; at v = 1 this gives 84 dB, not
             // the curve's 127/128 of 960 cB), less generator 48's attenuation whole (8.1.2),
             // less half of generator 9's resonance, the DC cut the filter's Q brings (8.1.2).
-            let curve = Db::from_amplitude(Amplitude(f64::from(velocity) / 127.0));
-            let filter_attenuation = Db(0.5 * region.initial_filter_q().get());
+            let curve = Db::from_amplitude(Amplitude::new(f64::from(velocity) / 127.0));
+            let filter_attenuation = Db::new(0.5 * region.initial_filter_q().get());
             self.note_gain =
                 (curve + curve - region.initial_attenuation() - filter_attenuation).to_amplitude();
         } else {
@@ -291,19 +291,19 @@ impl<F: Float + Lanes> Voice<F> {
             self.mod_lfo_to_cutoff.get() != 0.0 || self.mod_env_to_cutoff.get() != 0.0;
 
         self.mod_lfo_to_volume = region.modulation_lfo_to_volume();
-        self.dynamic_volume = self.mod_lfo_to_volume > Db(0.05);
+        self.dynamic_volume = self.mod_lfo_to_volume > Db::new(0.05);
 
         // A sample of a stereo pair sounds on its own side (section 7.10); any
         // other takes the zone's pan.
         self.instrument_pan = match region.instrument.sample_side() {
-            Some(Side::Left) => Pan(-1.0),
-            Some(Side::Right) => Pan(1.0),
+            Some(Side::Left) => Pan::new(-1.0),
+            Some(Side::Right) => Pan::new(1.0),
             None => region.pan(),
         };
         // Tenths of a percent to a fraction of full level (section 8.1.2,
         // generators 15 and 16).
-        self.instrument_reverb = Amplitude(0.001 * f64::from(region.reverb_effects_send()));
-        self.instrument_chorus = Amplitude(0.001 * f64::from(region.chorus_effects_send()));
+        self.instrument_reverb = Amplitude::new(0.001 * f64::from(region.reverb_effects_send()));
+        self.instrument_chorus = Amplitude::new(0.001 * f64::from(region.chorus_effects_send()));
 
         RegionEx::start_volume_envelope(&mut self.vol_env, region, key, velocity);
         RegionEx::start_modulation_envelope(&mut self.mod_env, region, key, velocity);
@@ -337,32 +337,32 @@ impl<F: Float + Lanes> Voice<F> {
     pub(crate) fn retarget(&mut self, key: NoteNumber, tune: Semitones, glide: Option<Glide>) {
         self.tune = tune;
         let key = i32::from(key.get());
-        self.transpose += Semitones(f64::from(key - self.played));
+        self.transpose += Semitones::new(f64::from(key - self.played));
         self.played = key;
         self.glide = glide.map(|g| self.glide_run(g));
     }
 
     fn glide_run(&self, glide: Glide) -> GlideRun {
         GlideRun {
-            offset: Semitones(f64::from(i32::from(glide.from.get()) - self.played))
+            offset: Semitones::new(f64::from(i32::from(glide.from.get()) - self.played))
                 + glide.from_tune
                 - self.tune,
             frames: glide.time.to_samples(self.rate),
-            done: Samples(0),
+            done: Samples::new(0),
         }
     }
 
     /// The glide's offset now, and its advance by `frames`.
     fn step_glide(&mut self, frames: usize) -> Semitones {
         let Some(run) = &mut self.glide else {
-            return Semitones(0.0);
+            return Semitones::new(0.0);
         };
         let offset = if run.frames.get() > 0 {
             run.offset * (1.0 - Normalized::progress(run.done, run.frames).get())
         } else {
-            Semitones(0.0)
+            Semitones::new(0.0)
         };
-        run.done = Samples(run.done.get() + frames);
+        run.done = Samples::new(run.done.get() + frames);
         if run.done >= run.frames {
             self.glide = None;
         }
@@ -381,12 +381,16 @@ impl<F: Float + Lanes> Voice<F> {
     /// no generator in a SoundFont voice to drive and is dropped.
     pub(crate) fn control(&mut self, control: NoteControl) {
         match control {
-            NoteControl::Pitch(pitch) => self.note.pitch = Some(Semitones(pitch.note_number())),
+            NoteControl::Pitch(pitch) => {
+                self.note.pitch = Some(Semitones::new(pitch.note_number()))
+            }
             NoteControl::Registered(RegisteredPerNoteController::Volume, value) => {
-                self.note.volume = Amplitude(ControlValue::new(value).normalized().get());
+                self.note.volume = Amplitude::new(ControlValue::new(value).normalized().get());
             }
             NoteControl::Registered(RegisteredPerNoteController::Pan, value) => {
-                self.note.pan = Some(Pan(2.0 * ControlValue::new(value).normalized().get() - 1.0));
+                self.note.pan = Some(Pan::new(
+                    2.0 * ControlValue::new(value).normalized().get() - 1.0,
+                ));
             }
             NoteControl::Pressure(_)
             | NoteControl::Registered(..)
@@ -463,7 +467,7 @@ impl<F: Float + Lanes> Voice<F> {
         let pitch = self
             .note
             .pitch
-            .unwrap_or(Semitones(f64::from(self.key)) + self.tune)
+            .unwrap_or(Semitones::new(f64::from(self.key)) + self.tune)
             + self.transpose
             + glide
             + vib_pitch_change
@@ -515,13 +519,16 @@ impl<F: Float + Lanes> Voice<F> {
         let mut mix_gain = self.note_gain
             * (channel_gain * note_volume * note_volume * self.vol_env.value().get());
         if self.dynamic_volume {
-            let level = Db(self.mod_lfo_to_volume.get() * self.mod_lfo.value().get());
+            let level = Db::new(self.mod_lfo_to_volume.get() * self.mod_lfo.value().get());
             mix_gain *= level.to_amplitude().get();
         }
 
         // RP-036's pan: the channel's or the note's, plus the zone's.
         let pan = self.note.pan.unwrap_or_else(|| state.pan());
-        let (left, right) = pan_gains(Pan(pan.get() + self.instrument_pan.get()), PanLaw::Rp036);
+        let (left, right) = pan_gains(
+            Pan::new(pan.get() + self.instrument_pan.get()),
+            PanLaw::Rp036,
+        );
         self.current_mix_gain_left = F::from_unit(mix_gain * left.get());
         self.current_mix_gain_right = F::from_unit(mix_gain * right.get());
 
@@ -550,7 +557,7 @@ impl<F: Float + Lanes> Voice<F> {
 /// A send: the channel's level and the zone's, summed and limited to the generator's
 /// range (section 8.1.3, 0 to 1000 tenths of a percent).
 fn send(channel: Amplitude, instrument: Amplitude) -> Amplitude {
-    Amplitude(channel.get() + instrument.get()).clamp(Amplitude::SILENT, Amplitude::UNITY)
+    Amplitude::new(channel.get() + instrument.get()).clamp(Amplitude::SILENT, Amplitude::UNITY)
 }
 
 #[cfg(test)]
@@ -558,9 +565,9 @@ mod tests {
     use super::*;
     use tutti_dsp::Complex64;
     const RATE: SampleRate = SampleRate::SR_44K1;
-    const CUTOFF: Hz = Hz(500.0);
+    const CUTOFF: Hz = Hz::new(500.0);
     /// SF2's lowest filter cutoff, 1500 absolute cents (generator 8): about 20 Hz.
-    const FLOOR: Hz = Hz(20.0);
+    const FLOOR: Hz = Hz::new(20.0);
 
     /// The steady-state gain of the voice's low-pass at `hz`, measured by
     /// running a sine through the section the voice runs.
@@ -610,7 +617,7 @@ mod tests {
     #[test]
     fn the_low_pass_has_unity_gain_at_dc_whatever_the_resonance() {
         for db in [0.0, 6.0, 12.0, 24.0] {
-            let g = gain(Db(db).to_amplitude(), 10.0);
+            let g = gain(Db::new(db).to_amplitude(), 10.0);
             assert!((g - 1.0).abs() < 0.01, "{db} dB: {g}");
         }
     }
@@ -629,7 +636,7 @@ mod tests {
     fn the_gain_at_the_cutoff_is_q_and_the_peak_is_the_spec_peak_height() {
         let g = (core::f64::consts::PI * CUTOFF.get() / RATE.get()).tan();
         for db in [0.0, 6.0, 12.0, 24.0] {
-            let resonance = Db(db).to_amplitude();
+            let resonance = Db::new(db).to_amplitude();
             let want = resonance.get();
             let q = q_of(want);
             let sampling = 1.0 - (core::f64::consts::PI / 88.0).cos();
@@ -667,7 +674,7 @@ mod tests {
     /// Spec: sf2.synth.filter.shape, sf2.gen.initialFilterFc
     #[test]
     fn the_stopband_follows_the_closed_form_at_twelve_db_per_octave() {
-        let resonance = Db(6.0).to_amplitude();
+        let resonance = Db::new(6.0).to_amplitude();
         let q = q_of(resonance.get());
         for hz in [2_000.0, 4_000.0, 8_000.0] {
             let got = gain(resonance, hz);
@@ -686,8 +693,8 @@ mod tests {
     #[test]
     fn a_cutoff_near_nyquist_is_no_filter() {
         let none = Amplitude::UNITY;
-        assert!(low_pass::<f32>(Hz(0.4 * RATE.get()), none, RATE).is_some());
-        assert!(low_pass::<f32>(Hz(0.5 * RATE.get()), none, RATE).is_none());
+        assert!(low_pass::<f32>(Hz::new(0.4 * RATE.get()), none, RATE).is_some());
+        assert!(low_pass::<f32>(Hz::new(0.5 * RATE.get()), none, RATE).is_none());
     }
 
     /// `H(e^jw)` of the trapezoidal section with coefficients `c`, from its state
@@ -767,7 +774,7 @@ mod tests {
         let a = f64::from(x);
         for rate in [SampleRate::SR_48K, SampleRate::SR_96K] {
             for db in [0.0, 12.0] {
-                let resonance = Db(db).to_amplitude();
+                let resonance = Db::new(db).to_amplitude();
                 let c32 = low_pass::<f32>(FLOOR, resonance, rate).expect("below Nyquist");
                 let q = q_of(resonance.get());
                 let frames = settle(q, FLOOR, rate, 1e-13);
@@ -813,7 +820,7 @@ mod tests {
             assert_eq!(rate.get() % hz, 0.0, "the window is whole periods");
             let period = (rate.get() / hz) as usize;
             for db in [0.0, 12.0] {
-                let resonance = Db(db).to_amplitude();
+                let resonance = Db::new(db).to_amplitude();
                 let model = low_pass_model(FLOOR, resonance, rate).expect("below Nyquist");
                 let c64 = SvfCoefficients::<f64>::from(&model);
                 let c32 = SvfCoefficients::<f32>::from(&model);
@@ -881,8 +888,8 @@ mod tests {
         last: usize,
     ) -> f64 {
         let channels = vec![Channel::new(false); 16];
-        let states = [ChannelState::new(Semitones(2.0)); 16];
-        let bends = [Semitones(0.0); 16];
+        let states = [ChannelState::new(Semitones::new(2.0)); 16];
+        let bends = [Semitones::new(0.0); 16];
         let preset = &font.presets()[0].regions()[0];
         let instrument = &font.instruments()[preset.instrument_id()].regions()[0];
         let mut voice = Voice::<F>::new(&Render::new(rate));

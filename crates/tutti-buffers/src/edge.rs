@@ -262,12 +262,12 @@ mod tests {
     /// them.
     #[test]
     fn a_pull_names_why_it_has_no_frames() {
-        assert_eq!(Pull::Frames(Samples(3)).ready(), Ok(Samples(3)));
+        assert_eq!(Pull::Frames(Samples::new(3)).ready(), Ok(Samples::new(3)));
         assert_eq!(Pull::<Samples>::Starved.ready(), Err(Stop::Starved));
         assert_eq!(Pull::<Samples>::Ended.ready(), Err(Stop::Ended));
         assert_eq!(Pull::<Samples>::Failed.ready(), Err(Stop::Failed));
 
-        assert_eq!(Pull::Frames(Samples(3)).stop(), None);
+        assert_eq!(Pull::Frames(Samples::new(3)).stop(), None);
         assert_eq!(Pull::<Samples>::Starved.stop(), Some(Stop::Starved));
         assert_eq!(Pull::<Samples>::Ended.stop(), Some(Stop::Ended));
         assert_eq!(Pull::<Samples>::Failed.stop(), Some(Stop::Failed));
@@ -277,7 +277,7 @@ mod tests {
     #[test]
     fn map_keeps_the_verdict() {
         assert_eq!(
-            Pull::Frames(Samples(2)).map(|n| n.get() * 2),
+            Pull::Frames(Samples::new(2)).map(|n| n.get() * 2),
             Pull::Frames(4)
         );
         assert_eq!(Pull::<Samples>::Ended.map(|n| n.get()), Pull::Ended);

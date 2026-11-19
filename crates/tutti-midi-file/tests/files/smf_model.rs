@@ -246,7 +246,10 @@ fn the_end_of_a_track_is_kept() {
 
     let file = read(&bytes);
     assert_eq!(file.tracks()[0].end(), Tick(4 * u64::from(BEAT)));
-    assert_eq!(metrical(&file).beat_at(metrical(&file).end()), Beat(4.0));
+    assert_eq!(
+        metrical(&file).beat_at(metrical(&file).end()),
+        Beat::new(4.0)
+    );
     assert_eq!(read(&file.to_bytes()).tracks()[0].end(), Tick(1920));
 }
 
@@ -266,7 +269,7 @@ fn a_sysex_between_notes_does_not_shift_the_beat_grid() {
     ));
     let ticks: Vec<u64> = unspecified(&file, 0).iter().map(|(t, _)| t.0).collect();
     assert_eq!(ticks, [0, 240, 480, 960]);
-    assert_eq!(metrical(&file).beat_at(Tick(960)), Beat(2.0));
+    assert_eq!(metrical(&file).beat_at(Tick(960)), Beat::new(2.0));
 }
 
 /// **Format 2 keeps its sequences apart, each on its own tempo map.**
@@ -299,7 +302,7 @@ fn format_2_keeps_its_sequences_apart() {
     let sequences: Vec<_> = sequences(&file).sequences().collect();
     let tempos: Vec<Bpm> = sequences
         .iter()
-        .map(|s| s.tempo_map().tempo_at(Beat(0.0)))
+        .map(|s| s.tempo_map().tempo_at(Beat::new(0.0)))
         .collect();
     assert_eq!(tempos, [Bpm::of(120.0), Bpm::of(60.0)]);
     let seconds = |tick: u64| -> Vec<Seconds> {
@@ -308,9 +311,12 @@ fn format_2_keeps_its_sequences_apart() {
             .map(|s| s.seconds_at(Tick(tick * u64::from(BEAT))))
             .collect()
     };
-    assert_eq!(seconds(1), [Seconds(0.5), Seconds(1.0)]);
-    assert_eq!(seconds(2), [Seconds(1.0), Seconds(2.0)]);
-    assert_eq!(sequences[1].beat_at(Tick(2 * u64::from(BEAT))), Beat(2.0));
+    assert_eq!(seconds(1), [Seconds::new(0.5), Seconds::new(1.0)]);
+    assert_eq!(seconds(2), [Seconds::new(1.0), Seconds::new(2.0)]);
+    assert_eq!(
+        sequences[1].beat_at(Tick(2 * u64::from(BEAT))),
+        Beat::new(2.0)
+    );
     // Each sequence's events are its own track's, at its own beats.
     for sequence in &sequences {
         let beats: Vec<Beat> = sequence
@@ -318,7 +324,7 @@ fn format_2_keeps_its_sequences_apart() {
             .filter(|(_, e)| matches!(e, FileEvent::Message(_)))
             .map(|(beat, _)| beat)
             .collect();
-        assert_eq!(beats, [Beat(1.0)]);
+        assert_eq!(beats, [Beat::new(1.0)]);
     }
     // The same two tracks as format 1 share one map and one timeline.
     let parallel = read(&smf(
@@ -335,7 +341,7 @@ fn format_2_keeps_its_sequences_apart() {
     assert_eq!(metrical(&parallel).events().count(), 4);
     assert!(parallel.timebase().metrical().is_some());
     assert_eq!(
-        metrical(&parallel).tempo_map().tempo_at(Beat(0.0)),
+        metrical(&parallel).tempo_map().tempo_at(Beat::new(0.0)),
         Bpm::of(120.0)
     );
 }
@@ -361,14 +367,23 @@ fn a_format_2_sequences_tempo_changes_stay_in_that_sequence() {
     ));
     let sequences: Vec<_> = sequences(&file).sequences().collect();
     let at = |beats: u64| Tick(beats * u64::from(BEAT));
-    assert_eq!(sequences[0].tempo_map().tempo_at(Beat(5.0)), Bpm::of(120.0));
+    assert_eq!(
+        sequences[0].tempo_map().tempo_at(Beat::new(5.0)),
+        Bpm::of(120.0)
+    );
     assert_eq!(sequences[0].tempo_map().points().len(), 1);
-    assert_eq!(sequences[1].tempo_map().tempo_at(Beat(0.5)), Bpm::of(120.0));
-    assert_eq!(sequences[1].tempo_map().tempo_at(Beat(1.0)), Bpm::of(60.0));
-    assert_eq!(sequences[0].seconds_at(at(1)), Seconds(0.5));
-    assert_eq!(sequences[0].seconds_at(at(3)), Seconds(1.5));
-    assert_eq!(sequences[1].seconds_at(at(1)), Seconds(0.5));
-    assert_eq!(sequences[1].seconds_at(at(3)), Seconds(2.5));
+    assert_eq!(
+        sequences[1].tempo_map().tempo_at(Beat::new(0.5)),
+        Bpm::of(120.0)
+    );
+    assert_eq!(
+        sequences[1].tempo_map().tempo_at(Beat::new(1.0)),
+        Bpm::of(60.0)
+    );
+    assert_eq!(sequences[0].seconds_at(at(1)), Seconds::new(0.5));
+    assert_eq!(sequences[0].seconds_at(at(3)), Seconds::new(1.5));
+    assert_eq!(sequences[1].seconds_at(at(1)), Seconds::new(0.5));
+    assert_eq!(sequences[1].seconds_at(at(3)), Seconds::new(2.5));
 }
 
 /// Format 1: the tracks stay apart and named, and the merged view is sorted by
@@ -401,7 +416,7 @@ fn merged_events_are_in_time_order_ties_in_track_order() {
     // The two events at beat 4: track 0's off, then track 1's on.
     let at4: Vec<&FileEvent> = merged
         .iter()
-        .filter(|(b, _)| *b == Beat(4.0))
+        .filter(|(b, _)| *b == Beat::new(4.0))
         .map(|(_, e)| *e)
         .collect();
     let (a, b) = (off(0, 60, 0), on(1, 69, 100));
@@ -424,7 +439,7 @@ fn the_tempo_map_follows_the_file() {
             RawEvent::note_off(4 * BEAT, 0, 60, 0), // at beat 8
         ]],
     ));
-    let close = |a: Seconds, b: f64| assert!((a.0 - b).abs() < 1e-12, "{a:?} vs {b}");
+    let close = |a: Seconds, b: f64| assert!((a.get() - b).abs() < 1e-12, "{a:?} vs {b}");
     let beats = |beats: f64| Tick((beats * f64::from(BEAT)) as u64);
     close(metrical(&file).seconds_at(beats(0.0)), 0.0);
     close(metrical(&file).seconds_at(beats(1.0)), 0.5);
@@ -432,14 +447,14 @@ fn the_tempo_map_follows_the_file() {
     close(metrical(&file).seconds_at(beats(5.5)), 3.5);
     close(metrical(&file).seconds_at(metrical(&file).end()), 6.0);
     assert_eq!(
-        metrical(&file).tempo_map().tempo_at(Beat(3.99)),
+        metrical(&file).tempo_map().tempo_at(Beat::new(3.99)),
         Bpm::of(120.0)
     );
     assert_eq!(
-        metrical(&file).tempo_map().tempo_at(Beat(4.0)),
+        metrical(&file).tempo_map().tempo_at(Beat::new(4.0)),
         Bpm::of(60.0)
     );
-    assert_eq!(metrical(&file).beat_at(Tick(480)), Beat(1.0));
+    assert_eq!(metrical(&file).beat_at(Tick(480)), Beat::new(1.0));
     // And it comes back out: the tempo events are events of the track.
     assert_eq!(
         metrical(&read(&file.to_bytes())).seconds_at(beats(8.0)),
@@ -469,11 +484,11 @@ fn the_tempo_map_pools_every_track() {
     assert_eq!(points.len(), 2);
     assert_eq!(
         (points[0].beat, points[0].tempo),
-        (Beat(0.0), Bpm::of(100.0))
+        (Beat::new(0.0), Bpm::of(100.0))
     );
     assert_eq!(
         (points[1].beat, points[1].tempo),
-        (Beat(4.0), Bpm::of(60.0))
+        (Beat::new(4.0), Bpm::of(60.0))
     );
 }
 
@@ -489,16 +504,16 @@ fn a_file_with_no_tempo_plays_at_120() {
     );
     assert_eq!(
         metrical(&none).seconds_at(Tick(2 * u64::from(BEAT))),
-        Seconds(1.0)
+        Seconds::new(1.0)
     );
 
     let later = read(&smf(0, &[vec![RawEvent::tempo(2 * BEAT, 1_000_000)]]));
     assert_eq!(
-        metrical(&later).tempo_map().tempo_at(Beat(0.0)),
+        metrical(&later).tempo_map().tempo_at(Beat::new(0.0)),
         Bpm::of(120.0)
     );
     assert_eq!(
-        metrical(&later).tempo_map().tempo_at(Beat(2.0)),
+        metrical(&later).tempo_map().tempo_at(Beat::new(2.0)),
         Bpm::of(60.0)
     );
 }
@@ -515,7 +530,7 @@ fn the_later_of_two_tempos_on_one_tick_governs() {
     ));
     assert_eq!(metrical(&file).tempo_map().points().len(), 1);
     assert_eq!(
-        metrical(&file).tempo_map().tempo_at(Beat(0.0)),
+        metrical(&file).tempo_map().tempo_at(Beat::new(0.0)),
         Bpm::of(60.0)
     );
 }

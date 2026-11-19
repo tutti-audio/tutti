@@ -61,9 +61,13 @@ fn vbap_panner_tick() {
 #[test]
 fn reset_keeps_the_authored_placement() {
     let mut panner = prep(VbapPannerNode::<f32>::surround_5_1());
-    aim(&panner.param_set(), Azimuth(45.0), Elevation(15.0));
-    panner.spread.store(Spread(0.3));
-    panner.width.store(StereoWidth(1.5));
+    aim(
+        &panner.param_set(),
+        Azimuth::new(45.0),
+        Elevation::new(15.0),
+    );
+    panner.spread.store(Spread::new(0.3));
+    panner.width.store(StereoWidth::new(1.5));
 
     Node::reset(&mut panner);
 
@@ -110,7 +114,11 @@ fn reset_seats_the_glide_on_the_commanded_position() {
         // Where the panner ends up once the 50 ms ramp has run out: a hard
         // pan, so the opposite channel is silent.
         let mut settled = prep(VbapPannerNode::<f32>::stereo());
-        aim(&settled.param_set(), Azimuth(bearing), Elevation::LEVEL);
+        aim(
+            &settled.param_set(),
+            Azimuth::new(bearing),
+            Elevation::LEVEL,
+        );
         let mut reference = [0.0f32; 2];
         for _ in 0..48_000 {
             tick(&mut settled, &input, &mut reference);
@@ -127,7 +135,7 @@ fn reset_seats_the_glide_on_the_commanded_position() {
         for _ in 0..64 {
             tick(&mut panner, &input, &mut scratch);
         }
-        aim(&panner.param_set(), Azimuth(bearing), Elevation::LEVEL);
+        aim(&panner.param_set(), Azimuth::new(bearing), Elevation::LEVEL);
         Node::reset(&mut panner);
 
         let mut after = [0.0f32; 2];
@@ -149,7 +157,7 @@ fn a_bearing_written_after_the_first_block_glides() {
     let input = [1.0f32, 1.0f32];
 
     let mut settled = prep(VbapPannerNode::<f32>::stereo());
-    aim(&settled.param_set(), Azimuth(90.0), Elevation::LEVEL);
+    aim(&settled.param_set(), Azimuth::new(90.0), Elevation::LEVEL);
     let mut reference = [0.0f32; 2];
     for _ in 0..48_000 {
         tick(&mut settled, &input, &mut reference);
@@ -158,7 +166,7 @@ fn a_bearing_written_after_the_first_block_glides() {
     let mut panner = prep(VbapPannerNode::<f32>::stereo());
     let mut scratch = [0.0f32; 2];
     tick(&mut panner, &input, &mut scratch);
-    aim(&panner.param_set(), Azimuth(90.0), Elevation::LEVEL);
+    aim(&panner.param_set(), Azimuth::new(90.0), Elevation::LEVEL);
     let mut mid_glide = [0.0f32; 2];
     for _ in 0..64 {
         tick(&mut panner, &input, &mut mid_glide);
@@ -176,7 +184,11 @@ fn a_bearing_written_after_the_first_block_glides() {
 #[test]
 fn reset_on_a_clone_does_not_move_the_original() {
     let panner = VbapPannerNode::<f32>::stereo();
-    aim(&panner.param_set(), Azimuth(-60.0), Elevation(20.0));
+    aim(
+        &panner.param_set(),
+        Azimuth::new(-60.0),
+        Elevation::new(20.0),
+    );
 
     let mut cloned = panner.clone();
     Node::reset(&mut cloned);
@@ -256,14 +268,14 @@ fn vbap_clone_shares_atomics() {
     );
 
     // -- spread: its own cell.
-    panner.spread.store(Spread(0.3));
+    panner.spread.store(Spread::new(0.3));
     assert!(
         (cloned.spread.load().get() - 0.3).abs() < 0.001,
         "the clone did not see the original's spread: {} -- a snapshotting \
          clone would freeze an offline render at the clone-time value",
         cloned.spread.load().get()
     );
-    cloned.spread.store(Spread(0.8));
+    cloned.spread.store(Spread::new(0.8));
     assert!(
         (panner.spread.load().get() - 0.8).abs() < 0.001,
         "the original did not see the clone's spread: {}",
@@ -271,13 +283,13 @@ fn vbap_clone_shares_atomics() {
     );
 
     // -- width: its own cell too.
-    panner.width.store(StereoWidth(1.5));
+    panner.width.store(StereoWidth::new(1.5));
     assert!(
         (cloned.width.load().get() - 1.5).abs() < 0.001,
         "the clone did not see the original's width: {}",
         cloned.width.load().get()
     );
-    cloned.width.store(StereoWidth(0.4));
+    cloned.width.store(StereoWidth::new(0.4));
     assert!(
         (panner.width.load().get() - 0.4).abs() < 0.001,
         "the original did not see the clone's width: {}",
@@ -297,7 +309,7 @@ fn a_clone_glides_at_the_originals_sample_rate() {
     let (mut a, mut b) = ([0.0f32; 2], [0.0f32; 2]);
     tick_at(&mut original, rate, &[1.0, 1.0], &mut a);
     tick_at(&mut clone, rate, &[1.0, 1.0], &mut b);
-    aim(&original.param_set(), Azimuth(60.0), Elevation::LEVEL);
+    aim(&original.param_set(), Azimuth::new(60.0), Elevation::LEVEL);
     let start = a;
     let mut at_48k_length = a;
     for i in 0..4_800 {
@@ -321,7 +333,7 @@ fn a_non_finite_control_reads_as_unchanged() {
     for value in bad {
         for which in 0..4 {
             let mut node = prep(VbapPannerNode::<f32>::surround_5_1());
-            aim(&node.param_set(), Azimuth(30.0), Elevation::LEVEL);
+            aim(&node.param_set(), Azimuth::new(30.0), Elevation::LEVEL);
             let (mut out, input) = ([0.0f32; 6], [0.5f32, -0.25]);
             let mut all_finite = true;
             let mut run = |node: &mut VbapPannerNode<f32>, frames: usize| {
@@ -332,22 +344,22 @@ fn a_non_finite_control_reads_as_unchanged() {
             };
             run(&mut node, 64);
             match which {
-                0 => node.azimuth.store(Azimuth(value)),
-                1 => node.elevation.store(Elevation(value)),
-                2 => node.spread.store(Spread(value)),
-                _ => node.width.store(StereoWidth(value)),
+                0 => node.azimuth.store(Azimuth::new(value)),
+                1 => node.elevation.store(Elevation::new(value)),
+                2 => node.spread.store(Spread::new(value)),
+                _ => node.width.store(StereoWidth::new(value)),
             }
             // Everything else moves in the same block.
             if which != 0 {
-                node.azimuth.store(Azimuth(-70.0));
+                node.azimuth.store(Azimuth::new(-70.0));
             }
             if which != 2 {
-                node.spread.store(Spread(0.4));
+                node.spread.store(Spread::new(0.4));
             }
             run(&mut node, 4_800);
-            aim(&node.param_set(), Azimuth(10.0), Elevation(5.0));
-            node.spread.store(Spread(0.1));
-            node.width.store(StereoWidth(1.0));
+            aim(&node.param_set(), Azimuth::new(10.0), Elevation::new(5.0));
+            node.spread.store(Spread::new(0.1));
+            node.width.store(StereoWidth::new(1.0));
             run(&mut node, 4_800);
             assert!(all_finite, "control {which} = {value} reached the output");
         }
@@ -363,9 +375,9 @@ fn the_inserted_params_move_the_running_node() {
 
     let mut solo = Solo::new(
         VbapPannerNode::<f32>::stereo(),
-        Prepare::new(RATE, MaxBlock::of(Samples(64))),
+        Prepare::new(RATE, MaxBlock::of(Samples::new(64))),
     );
-    aim(solo.controls(), Azimuth(90.0), Elevation::LEVEL);
+    aim(solo.controls(), Azimuth::new(90.0), Elevation::LEVEL);
     // 100 ms: past the 50 ms glide.
     let ones = vec![1.0f32; 4_800];
     let out = solo.render_input(Planes::new(&[&ones, &ones]).unwrap());
@@ -413,10 +425,10 @@ fn a_channels_speaker_skips_the_lfe() {
 #[test]
 fn the_panner_declares_its_params() {
     let node = VbapPannerNode::<f32>::stereo();
-    node.azimuth.store(Azimuth(10.0));
-    node.elevation.store(Elevation(20.0));
-    node.spread.store(Spread(0.3));
-    node.width.store(StereoWidth(1.5));
+    node.azimuth.store(Azimuth::new(10.0));
+    node.elevation.store(Elevation::new(20.0));
+    node.spread.store(Spread::new(0.3));
+    node.width.store(StereoWidth::new(1.5));
     assert_eq!(
         node.shape().params.as_slice(),
         &[
@@ -503,7 +515,7 @@ fn a_lane_driven_bearing_crosses_the_seam_the_short_way() {
     let ones = [1.0f32; 64];
     let at = |bearing: f64| {
         let mut node = prep(VbapPannerNode::<f32>::quad());
-        node.azimuth.store(Azimuth(bearing));
+        node.azimuth.store(Azimuth::new(bearing));
         Node::reset(&mut node);
         drive(
             &mut node,
@@ -526,7 +538,7 @@ fn a_lane_driven_bearing_crosses_the_seam_the_short_way() {
     );
 
     let mut node = prep(VbapPannerNode::<f32>::quad());
-    node.azimuth.store(Azimuth(170.0));
+    node.azimuth.store(Azimuth::new(170.0));
     Node::reset(&mut node);
     let lane = [190.0f32; 64];
     let mut loudest_front = 0.0f32;
@@ -600,8 +612,8 @@ fn a_bearing_step_across_the_seam_glides_along_the_short_arc() {
 
         let n = glide_steps(rate);
         let (a, b) = (
-            solve(Bed::Quad, Azimuth(170.0)),
-            solve(Bed::Quad, Azimuth(-170.0)),
+            solve(Bed::Quad, Azimuth::new(170.0)),
+            solve(Bed::Quad, Azimuth::new(-170.0)),
         );
         let mut worst_chord_gap = 0.0f64;
         for j in 1..=n + 2 {
@@ -609,7 +621,7 @@ fn a_bearing_step_across_the_seam_glides_along_the_short_arc() {
             for front in [0, 1] {
                 assert!(out[front].iter().all(|&s| s == 0.0), "{rate:?} point {j}");
             }
-            let bearing = Azimuth(170.0 + 20.0 * j.min(n) as f64 / n as f64).wrap();
+            let bearing = Azimuth::new(170.0 + 20.0 * j.min(n) as f64 / n as f64).wrap();
             let want = solve(Bed::Quad, bearing);
             for c in 0..4 {
                 let want = want[c].get() as f32;
@@ -642,10 +654,13 @@ fn a_move_between_grid_points_starts_at_the_next_one() {
         Planes::new(&[&ones[..8], &ones[..8]]).unwrap(),
         &[],
     );
-    aim(&node.param_set(), Azimuth(90.0), Elevation::LEVEL);
+    aim(&node.param_set(), Azimuth::new(90.0), Elevation::LEVEL);
     let tail = drive(&mut node, RATE, Planes::new(&[&ones, &ones]).unwrap(), &[]);
-    let old = solve(Bed::Surround51, Azimuth(0.0));
-    let one_step = solve(Bed::Surround51, Azimuth(90.0 / glide_steps(RATE) as f64));
+    let old = solve(Bed::Surround51, Azimuth::new(0.0));
+    let one_step = solve(
+        Bed::Surround51,
+        Azimuth::new(90.0 / glide_steps(RATE) as f64),
+    );
     let speakers = speaker_of_channel(Bed::Surround51);
     for (c, speaker) in speakers.iter().enumerate() {
         let held = head[c][0].to_bits();
@@ -680,7 +695,7 @@ fn a_lane_driven_bearing_is_followed_to_the_grid_period() {
     node.param_set().set(UnitParam::StereoWidth, 0.0);
     let ones = [1.0f32; GRID];
     // The lane is the graph's `f32`: the bearing narrows into it.
-    let lane_at = |frame: usize| Azimuth(100.0 + 0.3 * frame as f64).wrap().get() as f32;
+    let lane_at = |frame: usize| Azimuth::new(100.0 + 0.3 * frame as f64).wrap().get() as f32;
     let mut crossed = false;
     for j in 0..60 {
         let lane: Vec<f32> = (0..GRID).map(|i| lane_at(j * GRID + i)).collect();
@@ -691,7 +706,7 @@ fn a_lane_driven_bearing_is_followed_to_the_grid_period() {
             Planes::new(&[&ones, &ones]).unwrap(),
             &[Some(&lane), None, None, None],
         );
-        let want = solve(Bed::Quad, Azimuth(f64::from(lane[0])));
+        let want = solve(Bed::Quad, Azimuth::new(f64::from(lane[0])));
         for c in 0..4 {
             let want = want[c].get() as f32;
             assert!(
