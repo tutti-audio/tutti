@@ -590,7 +590,7 @@ impl crate::Key<tutti_midi_runtime::HarmonyNode> {
 #[cfg(feature = "midi")]
 slot_target!(
     /// The session's MPE mode ([`MpeMode`](tutti_midi_protocol::MpeMode)), as
-    /// `session.mpe()` names it: how the hardware inputs are ingested and how
+    /// `session.mpe()` names it: how the hardware inputs are read and how
     /// every clip's MIDI is transformed. It begins as the builder's
     /// ([`SessionBuilder::mpe_mode`](crate::SessionBuilder::mpe_mode)),
     /// `Disabled` by default.

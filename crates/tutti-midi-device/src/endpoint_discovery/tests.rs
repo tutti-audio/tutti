@@ -95,7 +95,7 @@ fn run(
                     sent.push(p);
                     next = Some(p);
                 }
-                DiscoveryAction::Settled(e) => return (DiscoveryAction::Settled(e), sent),
+                DiscoveryAction::Ended(e) => return (DiscoveryAction::Ended(e), sent),
                 DiscoveryAction::Wait | DiscoveryAction::Changed => {}
             }
         }
@@ -126,11 +126,11 @@ fn the_happy_path_reaches_midi2_with_jr() {
 
     let mut peer = device();
     let (end, sent) = run(&mut c, &mut peer, first, at(t0, 10));
-    assert_eq!(end, DiscoveryAction::Settled(DiscoveryEnding::Negotiated));
+    assert_eq!(end, DiscoveryAction::Ended(DiscoveryEnding::Negotiated));
     assert_eq!(sent.len(), 3);
     assert_eq!(sent[1].0, [0xF005_0203, 0, 0, 0]);
     assert_eq!(sent[2].0, [0xF010_FF03, 0, 0, 0]);
-    assert_eq!(c.settled(), Some(DiscoveryEnding::Negotiated));
+    assert_eq!(c.ending(), Some(DiscoveryEnding::Negotiated));
     assert_eq!(c.deadline(), None);
 
     // The peer now holds the configuration it was asked for, and the
@@ -168,7 +168,7 @@ fn the_happy_path_reaches_midi2_with_jr() {
 
 // A peer that supports only MIDI 1.0 gets no Stream Configuration Request: what
 // it reports already is what is wanted. Its one block has no name, so the
-// connection settles when the NAME_GRACE after its Info has passed.
+// connection ends when the NAME_GRACE after its Info has passed.
 #[test]
 fn a_midi1_peer_is_not_asked_to_change() {
     let t0 = Instant::now();
@@ -186,7 +186,7 @@ fn a_midi1_peer_is_not_asked_to_change() {
     assert_eq!(c.on_timeout(at(t0, 99)), DiscoveryAction::Wait);
     assert_eq!(
         c.on_timeout(at(t0, 100)),
-        DiscoveryAction::Settled(DiscoveryEnding::Negotiated)
+        DiscoveryAction::Ended(DiscoveryEnding::Negotiated)
     );
     assert_eq!(c.endpoint().active().protocol, Protocol::Midi1);
     assert_eq!(c.endpoint().name().unwrap().as_str(), "Keystep");
@@ -272,7 +272,7 @@ fn a_peer_already_configured_is_not_asked() {
         &mut Vec::<Ump>::new(),
     );
     let (end, sent) = run(&mut c, &mut peer, first, t0);
-    assert_eq!(end, DiscoveryAction::Settled(DiscoveryEnding::Negotiated));
+    assert_eq!(end, DiscoveryAction::Ended(DiscoveryEnding::Negotiated));
     assert_eq!(sent.len(), 2);
     assert_eq!(c.endpoint().active(), configured);
 }
@@ -322,7 +322,7 @@ fn a_notification_of_another_protocol_is_reported_as_it_is() {
     let t0 = Instant::now();
     let mut c = requested(t0);
     let a = c.on_message(notification(Protocol::Midi1, false, true), at(t0, 5));
-    assert_eq!(a, DiscoveryAction::Settled(DiscoveryEnding::Negotiated));
+    assert_eq!(a, DiscoveryAction::Ended(DiscoveryEnding::Negotiated));
     assert_eq!(
         c.endpoint().active(),
         StreamConfig {
@@ -355,13 +355,13 @@ fn another_message_does_not_answer_the_request() {
         c.on_message(Message::Utility(tutti_ump::Utility::Noop), t0),
         DiscoveryAction::Wait
     );
-    assert_eq!(c.settled(), None);
+    assert_eq!(c.ending(), None);
 }
 
 // No reply at all: sent again at each STEP_TIMEOUT, three attempts in all, then a
 // MIDI 1.0 device with its one inferred block. Time is passed as values.
 #[test]
-fn a_silent_peer_settles_as_midi1_after_the_retries() {
+fn a_silent_peer_ends_as_midi1_after_the_retries() {
     let t0 = Instant::now();
     let (mut c, first) = EndpointDiscovery::new(t0);
     let first = discovery_of(first);
@@ -373,9 +373,9 @@ fn a_silent_peer_settles_as_midi1_after_the_retries() {
     assert_eq!(c.on_timeout(at(t0, 2999)), DiscoveryAction::Wait);
     assert_eq!(
         c.on_timeout(at(t0, 3000)),
-        DiscoveryAction::Settled(DiscoveryEnding::Midi1Fallback)
+        DiscoveryAction::Ended(DiscoveryEnding::Midi1Fallback)
     );
-    assert_eq!(c.settled(), Some(DiscoveryEnding::Midi1Fallback));
+    assert_eq!(c.ending(), Some(DiscoveryEnding::Midi1Fallback));
 
     let e = c.endpoint();
     assert_eq!(e.active().protocol, Protocol::Midi1);
@@ -401,7 +401,7 @@ fn a_retry_that_is_answered_goes_on() {
     assert_eq!(again, first);
     let mut peer = device();
     let (end, _) = run(&mut c, &mut peer, again, at(t0, 1100));
-    assert_eq!(end, DiscoveryAction::Settled(DiscoveryEnding::Negotiated));
+    assert_eq!(end, DiscoveryAction::Ended(DiscoveryEnding::Negotiated));
 }
 
 // A peer that told us something but never its Stream Configuration is not one
@@ -432,7 +432,7 @@ fn a_peer_that_never_notifies_its_configuration_is_midi1() {
     c.on_timeout(at(t0, 2000));
     assert_eq!(
         c.on_timeout(at(t0, 3000)),
-        DiscoveryAction::Settled(DiscoveryEnding::Midi1Fallback)
+        DiscoveryAction::Ended(DiscoveryEnding::Midi1Fallback)
     );
     assert_eq!(c.endpoint().active().protocol, Protocol::Midi1);
     assert_eq!(
@@ -454,7 +454,7 @@ fn an_unanswered_request_falls_back_to_midi1() {
     c.on_timeout(at(t0, 2000));
     assert_eq!(
         c.on_timeout(at(t0, 3000)),
-        DiscoveryAction::Settled(DiscoveryEnding::Midi1Fallback)
+        DiscoveryAction::Ended(DiscoveryEnding::Midi1Fallback)
     );
     assert_eq!(c.endpoint().active().protocol, Protocol::Midi1);
     assert!(c.endpoint().capabilities().midi2);
@@ -515,7 +515,7 @@ fn block_name_packet(n: u8, form: Form, text: &[u8]) -> Message {
     })
 }
 
-// Function Blocks that do not all arrive: the protocol is settled, so the
+// Function Blocks that do not all arrive: the protocol is chosen, so the
 // connection ends with the blocks it has after the retries, not as MIDI 1.0.
 #[test]
 fn missing_function_blocks_end_the_connection_with_what_came() {
@@ -531,7 +531,7 @@ fn missing_function_blocks_end_the_connection_with_what_came() {
     c.on_timeout(at(t0, 2000));
     assert_eq!(
         c.on_timeout(at(t0, 3000)),
-        DiscoveryAction::Settled(DiscoveryEnding::Negotiated)
+        DiscoveryAction::Ended(DiscoveryEnding::Negotiated)
     );
     assert_eq!(c.endpoint().active().protocol, Protocol::Midi1);
     assert_eq!(c.endpoint().function_blocks().count(), 1);
@@ -539,7 +539,7 @@ fn missing_function_blocks_end_the_connection_with_what_came() {
 }
 
 // A Name that follows its block's Info within the grace is kept, and when every
-// block has both the connection settles without waiting.
+// block has both the connection ends without waiting.
 #[test]
 fn a_name_within_the_grace_is_kept() {
     let t0 = Instant::now();
@@ -552,7 +552,7 @@ fn a_name_within_the_grace_is_kept() {
         DiscoveryAction::Wait
     );
     let a = c.on_message(block_name_packet(1, Form::Complete, b"one"), at(t0, 20));
-    assert_eq!(a, DiscoveryAction::Settled(DiscoveryEnding::Negotiated));
+    assert_eq!(a, DiscoveryAction::Ended(DiscoveryEnding::Negotiated));
     assert_eq!(
         c.endpoint()
             .function_block(id(0))
@@ -573,7 +573,7 @@ fn a_name_within_the_grace_is_kept() {
     );
 }
 
-// A reply after the connection settled changes nothing.
+// A reply after the connection ended changes nothing.
 #[test]
 fn a_reply_after_settling_is_ignored() {
     let t0 = Instant::now();
@@ -590,14 +590,14 @@ fn a_reply_after_settling_is_ignored() {
         assert_eq!(c.on_message(msg(r), at(t0, 3100)), DiscoveryAction::Wait);
     }
     assert_eq!(*c.endpoint(), before);
-    assert_eq!(c.settled(), Some(DiscoveryEnding::Midi1Fallback));
+    assert_eq!(c.ending(), Some(DiscoveryEnding::Midi1Fallback));
 }
 
 // §7.1.6.1 step 3: the Protocol and JR Timestamps in use are what the last
-// Stream Configuration Notification says, so one after a negotiated settle is
+// Stream Configuration Notification says, so one after a negotiated ending is
 // followed (and answered `Changed`); one that repeats what is held is not.
 #[test]
-fn a_notification_after_a_negotiated_settle_is_followed() {
+fn a_notification_after_a_negotiated_ending_is_followed() {
     let t0 = Instant::now();
     let (mut c, first) = EndpointDiscovery::new(t0);
     let first = discovery_of(first);
@@ -605,7 +605,7 @@ fn a_notification_after_a_negotiated_settle_is_followed() {
     run(&mut c, &mut peer, first, t0);
     assert_eq!(
         c.on_timeout(at(t0, 100)),
-        DiscoveryAction::Settled(DiscoveryEnding::Negotiated)
+        DiscoveryAction::Ended(DiscoveryEnding::Negotiated)
     );
     assert_eq!(c.endpoint().active().protocol, Protocol::Midi1);
     assert_eq!(
@@ -621,9 +621,9 @@ fn a_notification_after_a_negotiated_settle_is_followed() {
     );
 }
 
-/// A connection that has settled with `n` blocks, 0 to n-1, all named, and
+/// A connection that has ended with `n` blocks, 0 to n-1, all named, and
 /// declares its blocks `is_static`.
-fn settled_with_blocks(t0: Instant, n: u8, is_static: bool) -> EndpointDiscovery {
+fn ended_with_blocks(t0: Instant, n: u8, is_static: bool) -> EndpointDiscovery {
     let mut c = in_blocks_declaring(t0, n, is_static);
     for i in 0..n {
         c.on_message(info_of(i), t0);
@@ -631,7 +631,7 @@ fn settled_with_blocks(t0: Instant, n: u8, is_static: bool) -> EndpointDiscovery
     for i in 0..n {
         c.on_message(block_name_packet(i, Form::Complete, b"old"), t0);
     }
-    assert_eq!(c.settled(), Some(DiscoveryEnding::Negotiated));
+    assert_eq!(c.ending(), Some(DiscoveryEnding::Negotiated));
     c
 }
 
@@ -645,11 +645,11 @@ fn info_moved(n: u8, first_group: u8) -> Message {
 
 // §6.1.1: an Endpoint that declares its blocks static changes none of
 // the properties of its Function Blocks after initial discovery: a Function
-// Block Info or Name after the settle is not read.
+// Block Info or Name after the ending is not read.
 #[test]
 fn static_function_blocks_ignore_a_later_info_and_name() {
     let t0 = Instant::now();
-    let mut c = settled_with_blocks(t0, 2, true);
+    let mut c = ended_with_blocks(t0, 2, true);
     let before = *c.endpoint();
     assert_eq!(
         c.on_message(info_moved(1, 9), at(t0, 50)),
@@ -668,7 +668,7 @@ fn static_function_blocks_ignore_a_later_info_and_name() {
 #[test]
 fn function_blocks_that_are_not_static_follow_a_later_info_and_name() {
     let t0 = Instant::now();
-    let mut c = settled_with_blocks(t0, 2, false);
+    let mut c = ended_with_blocks(t0, 2, false);
     assert_eq!(
         c.on_message(info_moved(1, 9), at(t0, 50)),
         DiscoveryAction::Changed
@@ -706,7 +706,7 @@ fn function_blocks_that_are_not_static_follow_a_later_info_and_name() {
 
 // §7.1.7: the numbers are `0..NFB`, NFB being what Endpoint Info declared. An
 // Info for another number is not a block of this Endpoint, before or after the
-// settle, and does not raise the count the connection waits for.
+// ending, and does not raise the count the connection waits for.
 #[test]
 fn a_block_outside_the_declared_count_is_not_read() {
     let t0 = Instant::now();
@@ -719,7 +719,7 @@ fn a_block_outside_the_declared_count_is_not_read() {
     c.on_message(block_name_packet(0, Form::Complete, b"a"), t0);
     assert_eq!(
         c.on_message(block_name_packet(1, Form::Complete, b"b"), t0),
-        DiscoveryAction::Settled(DiscoveryEnding::Negotiated)
+        DiscoveryAction::Ended(DiscoveryEnding::Negotiated)
     );
     assert_eq!(c.on_message(info_of(6), at(t0, 10)), DiscoveryAction::Wait);
     assert_eq!(c.endpoint().function_blocks().count(), 2);
@@ -749,7 +749,7 @@ fn a_declared_count_above_32_is_refused() {
     c.on_timeout(at(t0, 2000));
     assert_eq!(
         c.on_timeout(at(t0, 3000)),
-        DiscoveryAction::Settled(DiscoveryEnding::Midi1Fallback)
+        DiscoveryAction::Ended(DiscoveryEnding::Midi1Fallback)
     );
     // 32 is the most there are, and is heard.
     let (mut c, _) = EndpointDiscovery::new(t0);
@@ -873,7 +873,7 @@ fn block_names_of_two_blocks_do_not_mix() {
     c.on_message(block_name_packet(1, Form::End, b"end"), t0);
     assert_eq!(
         c.on_timeout(at(t0, 100)),
-        DiscoveryAction::Settled(DiscoveryEnding::Negotiated)
+        DiscoveryAction::Ended(DiscoveryEnding::Negotiated)
     );
     let name = |n| {
         c.endpoint()

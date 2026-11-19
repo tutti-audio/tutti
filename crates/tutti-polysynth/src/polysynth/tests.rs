@@ -1073,7 +1073,7 @@ fn test_mpe_per_voice_pitch_bend() {
 
     // A native per-note pitch bend addressed to the ch1 note (60) must affect
     // only that voice. Classic-MPE channel bends are rewritten to this native
-    // form at the input edge (`MpeIngest`); the synth is zone-agnostic and only
+    // form at the input edge (`MpeTranslator`); the synth is zone-agnostic and only
     // ever sees native per-note messages.
     let bend = midi::per_note_pitch_bend(MidiChannel::of(1), 60, u32::MAX);
     queue_midi(&mut synth, &[bend]);

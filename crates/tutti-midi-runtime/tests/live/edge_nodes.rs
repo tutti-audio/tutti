@@ -309,12 +309,12 @@ fn a_devices_select_and_entry_make_a_run() {
     );
 }
 
-/// **A departed device's generation settles only once a block has run**: the node
+/// **A departed device's generation is handled only once a block has run**: the node
 /// pushes the release in a block, then says so. After `depart` nothing is
-/// settled until that block has gone, and the block's first frame carries the
+/// handled until that block has gone, and the block's first frame carries the
 /// Note Off.
 #[test]
-fn a_departed_devices_generation_settles_only_after_a_block_has_run() {
+fn a_departed_devices_generation_is_handled_only_after_a_block_has_run() {
     let (mut writer, generation) = DeviceGeneration::new();
     writer.arrive();
     let wire = Script::new(vec![vec![note(0, 60, 10)], vec![]]);
@@ -330,13 +330,13 @@ fn a_departed_devices_generation_settles_only_after_a_block_has_run() {
     assert_eq!(heard(&seen)[1], (512, "off 60".to_string()));
 }
 
-/// **A release that does not fit the block is owed, and the generation settles only
+/// **A release that does not fit the block is owed, and the generation is handled only
 /// when it has gone**: a device holds 800 keys, more than the port's note-off
 /// room (584 at 512 events). Its departure's block sends what fits and the
-/// generation stays unsettled; the next block's first frame sends the rest, and only
-/// then is the generation settled.
+/// generation stays unhandled; the next block's first frame sends the rest, and only
+/// then is the generation handled.
 #[test]
-fn a_release_that_does_not_fit_is_owed_and_settles_when_it_has_gone() {
+fn a_release_that_does_not_fit_is_owed_and_is_handled_when_it_has_gone() {
     let keys = |first: u8| -> Vec<UmpAt> {
         (0..400usize)
             .map(|i| note(first + (i / 100) as u8, (i % 100) as u8, i))

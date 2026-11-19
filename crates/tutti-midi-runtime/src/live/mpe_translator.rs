@@ -1,12 +1,12 @@
-//! MPE ingestion as an input-edge **transform**.
+//! MPE translation as an input-edge **transform**.
 //!
 //! Per M2-104 (Appendix C.3, §7.4.7), classic MPE — spreading notes across
 //! member channels so a channel-wide pitch bend / pressure / CC74 acts *per
-//! note* — is a **MIDI-1 ingestion concern**, not a synthesis concern. A
+//! note* — is a **MIDI-1 input concern**, not a synthesis concern. A
 //! MIDI-2-native receiver only handles per-note messages; it needs no
 //! knowledge of the rotation scheme.
 //!
-//! So [`MpeIngest`] sits at the input edge (in [`MidiInputNode`](crate::MidiInputNode))
+//! So [`MpeTranslator`] sits at the input edge (in [`MidiInputNode`](crate::MidiInputNode))
 //! and rewrites the classic-MPE channel-spread into **native MIDI-2 per-note
 //! messages**. A channel pitch bend on a member channel becomes a Per-Note Pitch
 //! Bend addressed to the note that channel holds; channel pressure becomes a
@@ -40,7 +40,7 @@
 //! or the MIDI-CI MPE Profile (M2-120 Appendix E, Table 15). A zone carries its
 //! specification ([`MpeZoneConfig::spec`]), fixed by the constructor that built
 //! it: the zones of [`MpeMode`] are usually MPE 1.1's and the zones
-//! [`set_profile`](MpeIngest::set_profile) enables the Profile's, so no
+//! [`set_profile`](MpeTranslator::set_profile) enables the Profile's, so no
 //! branch elsewhere asks which is in force. A message the table prohibits is
 //! ignored (M1-100 §2.3.1). A channel in no zone is conventional and passes
 //! whole (M1-100 §2.2.1).
@@ -56,7 +56,7 @@
 //!
 //! A Mono Mode On or Poly Mode On sent to a zone's lowest-numbered member
 //! channel, not to its manager, switches the zone between MIDI Mode 4 and
-//! Mode 3 (§2.2.4.3). The ingest records only that switch; what Mono means for
+//! Mode 3 (§2.2.4.3). The translator records only that switch; what Mono means for
 //! a note is the instrument's own `tutti_voicing::VoiceConfig`. A Poly Key
 //! Pressure on a member channel is not filtered: it cannot be told from a
 //! native per-note pressure message.
@@ -85,8 +85,8 @@
 //! the controllers of every channel that enters or leaves MPE control
 //! (§2.2.3). An MCM from the wire sends, for each such channel, All Sound Off
 //! and Reset All Controllers before the zone's default ranges, and a host-set
-//! mode ([`MpeIngest::set_mode`]) leaves them for
-//! [`zone_defaults`](MpeIngest::zone_defaults), which the host sends. A channel
+//! mode ([`MpeTranslator::set_mode`]) leaves them for
+//! [`zone_defaults`](MpeTranslator::zone_defaults), which the host sends. A channel
 //! that did not change keeps its notes and what it was told.
 //!
 //! # Bend ranges
@@ -105,17 +105,17 @@
 //! of an MCM sets the master channel to ±2 semitones and every member
 //! channel to ±48). The message is absorbed, so the reset goes on in its
 //! place: RPN #00/00 = 2 on the master and RPN #00/07 = 48 on each member
-//! ([`MpeIngest::zone_defaults`], which a host-set mode change sends too).
+//! ([`MpeTranslator::zone_defaults`], which a host-set mode change sends too).
 //!
 //! An input event therefore yields none, one, or (a bend range, an MCM) one
-//! per channel of a zone: [`translate`](MpeIngest::translate) calls its `out`
+//! per channel of a zone: [`translate`](MpeTranslator::translate) calls its `out`
 //! for each, in order, and holds nothing between calls.
 //!
 //! # Real-time safety
 //!
 //! Runs on the audio thread inside the pre-block phase: no allocation, no
 //! locking. The channel→note maps are fixed-size and pre-built at
-//! [`MpeIngest::new`], so reconfiguring is off-RT and rebuilds the whole
+//! [`MpeTranslator::new`], so reconfiguring is off-RT and rebuilds the whole
 //! transform.
 
 use tutti_graph::Offset;
@@ -356,7 +356,7 @@ fn combined(member: Option<u32>, manager: Option<u32>) -> Option<u32> {
 /// Construct with the app-configured [`MpeMode`]; feed every inbound (already
 /// MIDI-2-normalized) event through [`translate`](Self::translate).
 #[derive(Debug)]
-pub struct MpeIngest {
+pub struct MpeTranslator {
     /// The mode the host set: every Group starts in it, and a Group's own
     /// Configuration Messages change that Group's alone.
     mode: MpeMode,
@@ -388,7 +388,7 @@ struct GroupState {
     mono: [bool; MidiChannel::COUNT as usize],
     /// The channels the last host-set zone change took into or out of MPE
     /// control, one bit each, whose notes the next
-    /// [`zone_defaults`](MpeIngest::zone_defaults) stops.
+    /// [`zone_defaults`](MpeTranslator::zone_defaults) stops.
     entered: u16,
 }
 
@@ -580,8 +580,8 @@ fn to_members(
     }
 }
 
-impl MpeIngest {
-    /// An ingest configured for `mode` on every Group, holding no notes.
+impl MpeTranslator {
+    /// A translator configured for `mode` on every Group, holding no notes.
     pub fn new(mode: MpeMode) -> Self {
         Self {
             mode,
