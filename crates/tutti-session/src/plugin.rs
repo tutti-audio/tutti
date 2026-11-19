@@ -119,12 +119,14 @@
 //! # `Phase::RenderMode` (with `export`)
 //!
 //! Offline while an export token lives (§4.3), Realtime otherwise; each
-//! plugin is told per `tutti_plugin_host::needs_announcement`: on a change of
+//! plugin is told per `tutti_plugin_host::needs_notify`: on a change of
 //! mode, or if it was never told.
 
 use std::sync::{Arc, Mutex};
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use tutti_platform::Instant;
 use tutti_plugin_types::{MainThreadMarker, StateUse};
 use tutti_rt::LockExt;
 
@@ -817,6 +819,10 @@ pub(crate) struct HostedPlugin {
     /// was not answered, or the plugin announced a rescan), until
     /// `Phase::Plugins` hands it to the host as a job.
     param_read: Option<tutti_plugin_host::ParamRead>,
+    /// What the outgoing mirror declared, when a replace put the same plugin
+    /// ([`PluginRef::is_same_plugin`]) at the node: the value table keeps these
+    /// declarations and values until the new read lands, which replaces them.
+    carried: Option<Vec<crate::value::CarriedParam>>,
     /// Held by that job: a later read mints a new one, and the earlier read
     /// lands nowhere.
     mirror_token: Arc<()>,
@@ -1023,6 +1029,7 @@ impl HostedPlugin {
             gate: Gate::default(),
             driven: crate::plugin_params::Driven::default(),
             param_read: Some(read),
+            carried: None,
             mirror_token: Arc::new(()),
             silenced: false,
             pooled: None,
@@ -1062,6 +1069,7 @@ impl HostedPlugin {
         controls: PluginControls,
         plugin: PluginRef,
     ) -> Outgoing {
+        self.carry_declaration(&plugin);
         self.plugin = plugin;
         let outgoing = self.adopt(handle, Placement::Served);
         self.set_node((*controls).clone());
@@ -1078,6 +1086,7 @@ impl HostedPlugin {
         node: NodeControls,
         plugin: PluginRef,
     ) -> Outgoing {
+        self.carry_declaration(&plugin);
         self.plugin = plugin;
         let outgoing = self.adopt(handle, Placement::InProcess);
         self.set_node(node);
@@ -1138,6 +1147,25 @@ impl HostedPlugin {
         self.banked
             + self.node_losses()
             + tutti_graph::Losses::lost(self.handle.dropped_parameter_events())
+    }
+
+    /// Keeps the declarations and values the mirror holds when `incoming` is
+    /// the plugin at the node again (a recovery, a rebuild), so its parameters
+    /// stay targets until the new read lands. Another plugin keeps none.
+    fn carry_declaration(&mut self, incoming: &PluginRef) {
+        if !self.plugin.is_same_plugin(incoming) {
+            self.carried = None;
+            return;
+        }
+        let held = self.mirror.is_ready().then(|| {
+            self.mirror
+                .descriptors()
+                .iter()
+                .enumerate()
+                .map(|(at, info)| crate::value::CarriedParam::new(info, self.mirror.value_at(at)))
+                .collect()
+        });
+        self.carried = held.or_else(|| self.carried.take());
     }
 
     /// [`replace`](Self::replace)'s handle half: everything but the
@@ -1242,6 +1270,29 @@ impl HostedPlugin {
         );
     }
 
+    /// Whether the plugin reacts to the host's automation mode.
+    pub(crate) fn takes_automation_mode(&self) -> bool {
+        self.handle
+            .loaded()
+            .features
+            .contains(tutti_plugin_types::Features::AUTOMATION_STATE)
+    }
+
+    /// Registers the plugin's parameters and automation mode with the value
+    /// table at `node`, as the mirror and the handle hold them now.
+    pub(crate) fn provide_values(&self, node: NodeKey, table: &crate::value::ValueTable) {
+        let entry = crate::value::PluginEntry::new(
+            self.handle.clone(),
+            self.driven.clone(),
+            &self.mirror,
+            self.carried.as_deref(),
+        );
+        let mode = self
+            .takes_automation_mode()
+            .then(|| crate::value::AutomationModeSlot::cell(self.handle.clone()));
+        table.provide_plugin(node, entry, mode);
+    }
+
     /// Asks for the parameters to be read again (the plugin announced a
     /// rescan): a fresh read, handed to the host at the next
     /// `Phase::Plugins`, and a fresh token, so a read still in flight lands
@@ -1266,20 +1317,20 @@ impl HostedPlugin {
 pub enum AnyPlugin {}
 
 impl Key<AnyPlugin> {
-    /// Parameter `id` of the plugin, as the reference a modulation route or an
-    /// automation lane targets: the same one
-    /// [`Param::target`](crate::Param::target) gives and a native node's param
-    /// method does, so a route names a plugin's parameter and a native one
-    /// through one type.
+    /// Parameter `id` of the plugin, as the target `session.set` writes and a
+    /// modulation route or an automation lane targets: the same one
+    /// [`Param::target`](crate::Param::target) gives, and it converts into the
+    /// [`ParamRef`](crate::ParamRef) a native node's param does, so a route
+    /// names a plugin's parameter and a native one alike.
     ///
     /// A plain value, like a native param's: it borrows no session and checks
-    /// nothing. An id the plugin does not declare is refused where the
-    /// reference is resolved (a route's resolution, `Mods`'s
-    /// [`Problem`](crate::Problem)), as [`ParamRef::plugin`](crate::ParamRef::plugin)'s
-    /// is; [`Plugin::params`] resolves one now.
+    /// nothing. An id the plugin does not declare is refused where the target
+    /// is written ([`SetRefusal::Plugin`](crate::SetRefusal::Plugin)) or a route
+    /// is resolved (`Mods`'s [`Problem`](crate::Problem));
+    /// [`Plugin::params`] resolves one now.
     #[must_use]
-    pub fn param(self, id: ParamId) -> crate::ParamRef {
-        crate::ParamRef::plugin(self, id)
+    pub fn param(self, id: ParamId) -> crate::PluginParamTarget {
+        crate::PluginParamTarget::new(self.erase(), id)
     }
 }
 
@@ -1424,6 +1475,16 @@ impl<'a> Plugin<'a> {
     /// plugin reports and the host sets.
     pub fn params(&self) -> Params<'a> {
         Params::new(self.node, self.hosted)
+    }
+
+    /// The target of the automation mode the host tells the plugin, or `None`
+    /// for a plugin whose format has no such channel
+    /// ([`Features::AUTOMATION_STATE`](tutti_plugin_types::Features) clear).
+    #[must_use]
+    pub fn automation_mode(&self) -> Option<crate::PluginAutomationModeTarget> {
+        self.hosted
+            .takes_automation_mode()
+            .then(|| crate::PluginAutomationModeTarget::new(self.node))
     }
 }
 
@@ -1591,6 +1652,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
             hosted.param_read = unread;
             hosted.gate.declare(&hosted.mirror);
         }
+        self.graph.provide_plugin(key.erase());
         (key, rebinder)
     }
 
@@ -1686,8 +1748,10 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
         match values {
             Ok(values) => {
                 hosted.mirror.land(values);
+                hosted.carried = None;
                 hosted.driven.report_knobs(&hosted.mirror);
                 hosted.gate.declare(&hosted.mirror);
+                self.graph.provide_plugin(node);
                 true
             }
             Err(read) => {
@@ -1915,6 +1979,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
             }
         }
         let latency_after = self.graph.node_latency(node).unwrap_or_default();
+        let table = self.graph.value_table();
         let Some(hosted) = self.graph.plugins.get_mut(&node) else {
             return;
         };
@@ -1941,6 +2006,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
             hosted.param_read = unread;
             hosted.mirror_token = Arc::new(());
             hosted.gate.declare(&hosted.mirror);
+            hosted.provide_values(node, &table);
         }
         let restore = match (restore, withheld) {
             (StateRestore::NoSnapshot, Some(age)) => StateRestore::Withheld { age },
@@ -2193,6 +2259,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
         self.plugins.now = now;
         let interval = self.plugins.snapshot_interval;
         let hang_policy = self.plugins.hang;
+        let values = self.graph.value_table();
         let mut dead = Vec::new();
         let mut gave_up = Vec::new();
         // Nodes of plugins that are gone whose silent stand-in the graph has
@@ -2366,9 +2433,12 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
             // A value the plugin reported or the host set goes into the knob
             // of the lane driving that parameter, if one does.
             let driven = &hosted.driven;
+            let mut applied = Vec::new();
             hosted.mirror.drain_edits(|id, value| {
                 driven.write(id, value);
+                applied.push((id, value));
             });
+            values.note_plugin_values(node, &applied);
 
             if let Some(tail) = declared_tail {
                 self.graph.refresh_node_tail(node, tail);
@@ -2415,7 +2485,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
     }
 
     /// `Phase::RenderMode`: Offline while an export token lives, Realtime
-    /// otherwise, told per `needs_announcement`. Without `export` nothing
+    /// otherwise, told per `needs_notify`. Without `export` nothing
     /// is ever announced: there is no bounce to announce.
     pub(crate) fn render_mode_phase(&mut self) {
         #[cfg(feature = "export")]
@@ -2427,7 +2497,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
             };
             let changed = self.plugins.render_mode.announced != wanted;
             for hosted in self.graph.plugins.values_mut() {
-                if !tutti_plugin_host::needs_announcement(changed, hosted.told) {
+                if !tutti_plugin_host::needs_notify(changed, hosted.told) {
                     continue;
                 }
                 // `false` means the plugin declined (a CLAP plugin without

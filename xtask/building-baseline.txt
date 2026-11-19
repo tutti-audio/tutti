@@ -334,8 +334,8 @@ tutti-plugin-host  setter  crates/tutti-plugin-host/src/control_handle.rs::Plugi
 tutti-plugin-host  setter  crates/tutti-plugin-host/src/control_handle.rs::PluginHandle::set_track_info
 tutti-plugin-host  setter  crates/tutti-plugin-host/src/controls.rs::NodeControls::set_meter
 tutti-plugin-host  setter  crates/tutti-plugin-host/src/controls.rs::PluginControls::set_pipeline
-tutti-plugin-host  setter  crates/tutti-plugin-host/src/in_process_erased.rs::InProcessClient::set_render_mode
-tutti-plugin-host  setter  crates/tutti-plugin-host/src/node/client.rs::InProcClient::set_render_mode
+tutti-plugin-host  setter  crates/tutti-plugin-host/src/in_process_erased.rs::AnyInProcessClient::set_render_mode
+tutti-plugin-host  setter  crates/tutti-plugin-host/src/node/client.rs::InProcessClient::set_render_mode
 tutti-plugin-host  option-arg  crates/tutti-plugin-host/src/control_handle.rs::PluginHandle::with_server_pid
 
 # tutti-plugin-ipc
@@ -461,7 +461,6 @@ tutti-session  setter  crates/tutti-session/src/midi.rs::Midi::set_routes
 tutti-session  setter  crates/tutti-session/src/modulation.rs::Mods::set_source
 tutti-session  setter  crates/tutti-session/src/plugin_params.rs::Param::set_plain
 tutti-session  setter  crates/tutti-session/src/plugin_params.rs::Param::set_text
-tutti-session  setter  crates/tutti-session/src/plugin_params.rs::Params::set_automation_mode
 tutti-session  ctor-result  crates/tutti-session/src/recorder.rs::PumpLoop::new
 tutti-session  ctor-result  crates/tutti-session/src/recorder.rs::Recorder::start
 tutti-session  ctor-result  crates/tutti-session/src/recorder.rs::Recorder::start_finite

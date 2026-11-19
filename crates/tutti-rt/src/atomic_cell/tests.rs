@@ -7,7 +7,7 @@ enum Mode {
     Preroll,
     Always = 7,
 }
-setting_word!(Mode {
+atomic_word!(Mode {
     Off,
     Preroll,
     Always
@@ -34,22 +34,22 @@ fn a_word_no_variant_encodes_is_refused() {
 /// A cell returns the last value set, for each variant in turn.
 #[test]
 fn a_get_returns_the_last_set() {
-    let cell = Setting::new(Mode::Preroll);
-    assert_eq!(cell.get(), Mode::Preroll);
+    let cell = AtomicCell::new(Mode::Preroll);
+    assert_eq!(cell.load(), Mode::Preroll);
     for mode in [Mode::Always, Mode::Off, Mode::Always] {
-        cell.set(mode);
-        assert_eq!(cell.get(), mode);
+        cell.store(mode);
+        assert_eq!(cell.load(), mode);
     }
 }
 
-/// A `SettingWord` whose decode refuses its own encoding is caught at the
+/// A `AtomicWord` whose decode refuses its own encoding is caught at the
 /// write that would have stored the word.
 #[test]
 #[should_panic(expected = "refuses the word")]
 fn a_broken_encoding_is_refused_at_the_write() {
     #[derive(Clone, Copy)]
     struct Broken;
-    impl SettingWord for Broken {
+    impl AtomicWord for Broken {
         fn to_word(self) -> u64 {
             1
         }
@@ -57,5 +57,5 @@ fn a_broken_encoding_is_refused_at_the_write() {
             None
         }
     }
-    let _ = Setting::new(Broken);
+    let _ = AtomicCell::new(Broken);
 }

@@ -2,8 +2,8 @@
 
 use crate::error::Result;
 use crate::stamp::Paired;
-use std::time::Instant;
 use tutti_alsa_ffi::{Blocking, Client, QueueClock, UmpVersion};
+use tutti_platform::Instant;
 
 /// Opens a client in UMP mode speaking `version`, named `name` to other clients.
 ///

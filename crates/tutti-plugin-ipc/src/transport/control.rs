@@ -25,7 +25,8 @@ use interprocess::local_socket::traits::Stream as _;
 use std::io::Read;
 use std::path::Path;
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tutti_platform::Instant;
 
 /// Duplex byte stream to the plugin-server.
 pub type ControlStream = Stream;

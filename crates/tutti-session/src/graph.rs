@@ -946,6 +946,7 @@ impl Graph {
         self.nodes.insert(node, Entry { reclaimer: None });
         self.note_pass(node);
         self.plugins.insert(node, hosted);
+        self.provide_plugin(node);
         self.write_own_bypass(node);
         self.edited = true;
         (Key::new(node), rebinder)
@@ -1034,6 +1035,7 @@ impl Graph {
                         );
                     }
                 }
+                self.provide_plugin(node);
                 self.write_own_bypass(node);
                 Ok(rebinder)
             }
@@ -1089,6 +1091,7 @@ impl Graph {
                         );
                     }
                 }
+                self.provide_plugin(node);
                 Ok(rebinder)
             }
             Err(ReplaceRefused::Failed(refused)) => Err(ReplaceRefused::Failed(refused)),
@@ -1274,6 +1277,16 @@ impl<F: Float> Graph<F> {
         let controls = self.swap_node(node, incoming, fade, law)?;
         self.address::<N>(node, &controls);
         Ok(controls)
+    }
+
+    /// Registers the plugin hosted at `node` with the value table, as its
+    /// record holds it now: the commit step every change of a plugin's handle
+    /// or parameter read ends with.
+    #[cfg(feature = "plugin")]
+    pub(crate) fn provide_plugin(&self, node: NodeKey) {
+        if let Some(hosted) = self.plugins.get(&node) {
+            hosted.provide_values(node, &self.values);
+        }
     }
 
     /// The swap under [`replace`](Self::replace) and a crossfade, addressing

@@ -6,7 +6,8 @@
 //!
 use interprocess::local_socket::{ListenerOptions, traits::Listener as _};
 use std::io::Read;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tutti_platform::Instant;
 use tutti_plugin_ipc::{
     BridgeMessage, FrameBuf, HostMessage, MAX_FRAME_BYTES, read_frame, write_frame,
 };

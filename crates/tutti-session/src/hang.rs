@@ -15,7 +15,9 @@
 //! [`RecoveryPolicy`](crate::RecoveryPolicy) is set: detection ends the hung
 //! server, and what follows its death is recovery's.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use tutti_platform::Instant;
 
 use tutti_plugin_types::TerminationReason;
 

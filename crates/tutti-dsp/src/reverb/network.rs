@@ -96,7 +96,7 @@ impl Band {
 ///
 /// Freeze is a property of the network, not a flag: every absorption gain at
 /// unity with an orthogonal matrix is a lossless loop ([`is_lossless`](Self::is_lossless)),
-/// marginally stable, and its [`tail`](crate::System::tail) is [`Ring::Unbounded`](crate::Ring::Unbounded).
+/// marginally stable, and its [`tail`](crate::System::tail) is [`DecayTime::Unbounded`](crate::DecayTime::Unbounded).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Network {
     /// The rate the frame counts are in.

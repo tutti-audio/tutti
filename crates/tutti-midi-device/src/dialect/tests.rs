@@ -1,4 +1,4 @@
-use std::time::Instant;
+use tutti_platform::Instant;
 
 use tutti_ump::{
     BlockDirection, FirstGroup, FunctionBlockId, GroupSpan, Midi1Port, MidiChannel, Protocol,

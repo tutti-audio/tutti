@@ -1,7 +1,7 @@
 //! Reading MIDI 1.0 from a winmm input.
 
 use std::sync::Arc;
-use std::time::Instant;
+use tutti_platform::Instant;
 
 use super::super::legacy_port::anchor::Anchor;
 use super::super::legacy_port::bytes::ByteIn;

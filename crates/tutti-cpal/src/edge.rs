@@ -15,7 +15,9 @@
 //! difference to read (the playback before the callback, say), and that is
 //! `None`, "not reported", never zero.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use tutti_platform::Instant;
 
 use tutti_buffers::{Float, Sample};
 use tutti_engine::{BackendErrorKind, StreamFaults};

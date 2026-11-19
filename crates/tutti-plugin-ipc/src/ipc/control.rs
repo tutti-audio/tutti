@@ -165,7 +165,7 @@ macro_rules! served_control {
                 &mut self,
                 main: MainThreadMarker,
                 ready: &[tutti_plugin_ipc_ffi::Ready],
-                now: std::time::Instant,
+                now: tutti_platform::Instant,
             ) {
                 self.link.bridge.editor().wake(main, ready, now);
             }

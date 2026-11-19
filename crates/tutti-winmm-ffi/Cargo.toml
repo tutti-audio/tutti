@@ -26,6 +26,8 @@ windows-sys = { workspace = true, features = [
   "Win32_Security",
 ] }
 tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false }
+# `Instant`, the one clock type.
+tutti-platform = { version = "0.0.1", path = "../tutti-platform" }
 
 # The protocol's atomics and lock become loom's under the loom cfg flag, so the
 # `loom_model` unit module in `src/lifetime.rs` models the shipped code. Only

@@ -18,7 +18,7 @@
 
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use tutti_platform::Instant;
 use tutti_rt::LockExt;
 
 use tutti_graph::Losses;

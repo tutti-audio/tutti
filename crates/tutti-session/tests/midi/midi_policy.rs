@@ -2,7 +2,9 @@
 //! fake OS. The fake peer is the wire's other end: what the session sends is
 //! the fake's sink, what the peer says is the input's producer.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use tutti_platform::Instant;
 
 use crate::common::{MF, blocks, note, play};
 use tutti_graph::Losses;

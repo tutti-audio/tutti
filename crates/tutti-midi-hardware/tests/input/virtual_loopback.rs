@@ -3,7 +3,8 @@
 //! crosses it arrives whole and in order.
 
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tutti_platform::Instant;
 
 use super::listener::Listener;
 

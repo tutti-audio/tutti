@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use tutti_buffers::Float;
-use tutti_rt::MainThreadMarker;
+use tutti_platform::MainThreadMarker;
 
 use crate::pool::open::OpenCx;
 use crate::{PeerError, Presence, WorkerError};

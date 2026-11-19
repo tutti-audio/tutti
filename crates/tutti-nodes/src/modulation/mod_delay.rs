@@ -16,7 +16,7 @@ use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
 use tutti_units::{Feedback, Hz, SampleRate, SampleSpan, Seconds, Tail};
 
 use super::sweep_clock::{SEGMENT, SweepClock};
-use crate::kernel::{ControlLanes, Kernel, KernelNode};
+use crate::kernel::{ControlSignals, Kernel, KernelNode};
 
 /// A swept delay of any width, a chorus or a flanger by its [`Sweep`].
 ///
@@ -41,7 +41,7 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 /// frame.
 ///
 /// - The **rate** is how fast the delay sweeps: chorus and flanger rates are slow, typically
-///   0.1 to 2 Hz, and faster reads as vibrato. **Floored at 0.01 Hz, a lane's value and a
+///   0.1 to 2 Hz, and faster reads as vibrato. **Floored at 0.01 Hz, a control signal's value and a
 ///   cell's alike.** It lands whole, and the LFO's phase is continuous across it.
 /// - The **depth** is a duration added to the base delay, unlike the phaser's unitless depth;
 ///   it is clamped into the sweep's range. A cell that moves ramps, at no more than
@@ -139,7 +139,7 @@ pub struct ModDelaySet;
 control_set! {
     ModDelaySet(_s): ModDelayControls = ModDelayControls::DEFAULT;
     live: (all);
-    // How fast the delay sweeps: floored at 0.01 Hz, a lane's value and a cell's alike.
+    // How fast the delay sweeps: floored at 0.01 Hz, a control signal's value and a cell's alike.
     Rate => Hz = rate { whole },
     // The swing, in seconds of delay.
     Depth => Seconds = depth { whole },
@@ -296,7 +296,7 @@ impl<F: Float + Lerp> Kernel for ModDelayKernel<F> {
     fn render(
         &mut self,
         input: Planes<'_, F>,
-        _: ControlLanes<'_, F>,
+        _: ControlSignals<'_, F>,
         output: PlanesMut<'_, '_, F>,
     ) {
         let frames = input.frames().get().min(output.frames().get());
@@ -617,7 +617,7 @@ mod tests {
         assert!(sep > 10.0 * bound, "the two rates are told apart: {sep}");
     }
 
-    /// The rate is **floored at 0.01 Hz**, a lane's value and a cell's alike: a rate below it,
+    /// The rate is **floored at 0.01 Hz**, a control signal's value and a cell's alike: a rate below it,
     /// zero or negative, is the floor's step, and not a sweep that stands still or runs
     /// backwards. Over the first 4,800 frames (0.1 s) the delay has risen by `depth * sr *
     /// sin(2 pi 0.01 * 0.1)`, a figure no other rate gives. A rate that is not a number is
@@ -920,19 +920,19 @@ mod tests {
         assert_eq!(fork.param_set().get(UnitParam::Feedback), Some(0.7));
     }
 
-    /// The rate is **floored at 0.01 Hz, a lane's value and a cell's alike**: a rate of
+    /// The rate is **floored at 0.01 Hz, a control signal's value and a cell's alike**: a rate of
     /// -3 Hz, written to the cell or fed on the port, is the 0.01 Hz sweep, which has raised
     /// the 10 ms base by `5 ms * sin(2 pi 0.01 * 0.1 s)`, 1.508 frames, after 0.1 s.
     #[test]
-    fn a_rate_below_the_floor_is_the_floor_in_a_cell_and_on_a_lane() {
+    fn a_rate_below_the_floor_is_the_floor_in_a_cell_and_on_a_signal() {
         let figure = 0.005 * SR * (std::f64::consts::TAU * 0.01 * 0.1).sin();
         let at = 4_800;
-        let delays = |node: ModDelayNode<f32>, lane: Option<f32>| -> Vec<f64> {
+        let delays = |node: ModDelayNode<f32>, signal: Option<f32>| -> Vec<f64> {
             let mut node = prepared(node, RATE, 64);
             let x: Vec<f32> = (0..at + 64).map(|n| n as f32).collect();
             let mut y = Vec::new();
             for chunk in x.chunks(64) {
-                let rate = lane.map(|v| vec![v; chunk.len()]);
+                let rate = signal.map(|v| vec![v; chunk.len()]);
                 let params = [rate.as_deref(), None, None];
                 y.extend(drive(&mut node, RATE, Planes::new(&[chunk]).unwrap(), &params).remove(0));
             }
@@ -951,8 +951,8 @@ mod tests {
             assert!(node.param_set().set(UnitParam::Rate, -3.0));
             delays(node, None)
         };
-        let on_lane = delays(chorus(), Some(-3.0));
-        for (what, d) in [("cell", on_cell), ("lane", on_lane)] {
+        let on_signal = delays(chorus(), Some(-3.0));
+        for (what, d) in [("cell", on_cell), ("signal", on_signal)] {
             assert!(
                 (d[at] - (480.0 + figure)).abs() < 0.05,
                 "a negative rate on a {what}: delay {}, the 0.01 Hz sweep {}",
@@ -964,11 +964,11 @@ mod tests {
 
     /// A control the graph drives is sampled on the stream's 16-frame grid, not at the
     /// block's last frame, so what is heard does not depend on how the stream is cut into
-    /// blocks; and the lane is heard, since the cell it overrides is a different depth.
+    /// blocks; and the control signal is heard, since the cell it overrides is a different depth.
     #[test]
     fn a_driven_slow_control_is_sampled_on_the_grid_whatever_the_blocks() {
         let len = 4_096;
-        let lane: Vec<f32> = (0..len)
+        let signal: Vec<f32> = (0..len)
             .map(|n| 0.001 + 0.009 * n as f32 / len as f32)
             .collect();
         let x: Vec<f32> = (0..len)
@@ -979,7 +979,7 @@ mod tests {
             let mut out = Vec::new();
             for (n, chunk) in x.chunks(block).enumerate() {
                 let at = n * block;
-                let l = &lane[at..at + chunk.len()];
+                let l = &signal[at..at + chunk.len()];
                 let params = [None, driven.then_some(l), None];
                 out.extend(
                     drive(&mut node, RATE, Planes::new(&[chunk]).unwrap(), &params).remove(0),
@@ -988,13 +988,13 @@ mod tests {
             out
         };
         let whole = render(1_024, true);
-        assert_ne!(whole, render(1_024, false), "the lane is heard");
+        assert_ne!(whole, render(1_024, false), "the signal is heard");
         for block in [1, 16, 64, 128] {
             assert_eq!(render(block, true), whole, "blocks of {block}");
         }
     }
 
-    /// A feedback moved at a lane corner **off the grid** waits for the next grid point, as the
+    /// A feedback moved at a control signal corner **off the grid** waits for the next grid point, as the
     /// rate and the depth do: a retarget at frame 5 of a segment (frame 613) renders the same
     /// as at the grid point 624, and differently from the one at 640, with the loop already
     /// ringing (the delay is 480 frames).

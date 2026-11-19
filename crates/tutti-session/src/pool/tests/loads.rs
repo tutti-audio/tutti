@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, ThreadId};
 
-use tutti_rt::MainThreadMarker;
+use tutti_platform::MainThreadMarker;
 
 use super::{Spawned, events, session, state, took};
 use crate::{

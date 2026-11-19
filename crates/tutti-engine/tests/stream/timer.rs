@@ -7,7 +7,8 @@
 //! dated by deadlines, the latency reads zero, and the stop joins.
 
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tutti_platform::Instant;
 
 use crate::fixtures::{SAMPLE_RATE, fan, graph_engine};
 use tutti_buffers::SampleFormat;

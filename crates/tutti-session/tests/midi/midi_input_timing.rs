@@ -11,7 +11,9 @@
 //! the figures for a late reading and a re-anchor, and the count carried across a
 //! reconnect, are the runtime tests' (`input_inlets`) and the clock map's.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use tutti_platform::Instant;
 
 use crate::common::blocks;
 use tutti_midi_device::{DeviceInfo, EndpointId, PortDirection};
@@ -53,7 +55,7 @@ fn keys(s: &mut Session) -> DeviceInfo {
 /// The `Instant` the OS clock reads at `ns`, a date the playhead reads back: one
 /// pairing of the two readings of the same clock.
 fn instant_at(ns: i64) -> Instant {
-    let (now, base) = (Instant::now(), tutti_rt::monotonic_ns());
+    let (now, base) = (Instant::now(), tutti_platform::monotonic_ns());
     let span = Duration::from_nanos((ns - base).unsigned_abs());
     if ns >= base { now + span } else { now - span }
 }

@@ -30,7 +30,8 @@ mod clap_probe;
 mod pressure_rig;
 
 use pressure_rig::{BLOCK, Planes, fill_sine, load_half_stalled};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tutti_platform::Instant;
 
 /// Blocks run before timing, so the pipeline is carrying audio.
 const WARM_UP: usize = 64;

@@ -12,7 +12,7 @@
 //! stops writing what no one will land.
 //!
 //! The default spawner starts each task on a thread of
-//! [`tutti_rt::spawn_named`]. When the session drops, `Jobs` stops and joins
+//! [`tutti_platform::spawn_named`]. When the session drops, `Jobs` stops and joins
 //! those threads within [`DROP_BOUND`]; a thread still running after it (a
 //! worker blocked on the main thread, say) is detached with a `tracing`
 //! warning and **outlives the session** until its work returns.
@@ -33,9 +33,11 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tutti_platform::Instant;
 
-use tutti_rt::{LockExt, ThreadHandle};
+use tutti_platform::ThreadHandle;
+use tutti_rt::LockExt;
 
 use crate::job::{Cancel, Job, JobKind, JobOutputQueue, Ticket};
 use crate::{Clock, Session, SessionEvent, WorkerError};
@@ -174,7 +176,7 @@ type Lander = Box<dyn FnMut(&mut dyn JobSession, Arrival, &mut Vec<SessionEvent>
 /// Where the session starts its tasks.
 #[derive(Clone, Default)]
 pub(crate) enum Spawner {
-    /// A named thread per task, through [`tutti_rt::spawn_named`]; `Jobs`
+    /// A named thread per task, through [`tutti_platform::spawn_named`]; `Jobs`
     /// keeps the handles. A thread that cannot start drops its task, which
     /// lands as [`WorkerError::Dropped`].
     #[default]
@@ -423,7 +425,9 @@ impl Jobs {
             Spawner::Threads => {
                 self.threads.retain(|thread| !thread.is_finished());
                 // A start that fails drops its closure, and the task in it.
-                if let Ok(thread) = tutti_rt::spawn_named("tutti-job", None, move |_| task.run()) {
+                if let Ok(thread) =
+                    tutti_platform::spawn_named("tutti-job", None, move |_| task.run())
+                {
                     self.threads.push(thread);
                 }
             }
@@ -571,7 +575,8 @@ mod tests {
     use super::*;
     use std::sync::Mutex;
     use std::sync::mpsc::sync_channel;
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
+    use tutti_platform::Instant;
     use tutti_units::SampleRate;
 
     fn session(builder: crate::SessionBuilder) -> crate::DetachedSession {

@@ -3,7 +3,9 @@
 //! peer that answers, refuses or stays silent, with the session's clock set by
 //! the test.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use tutti_platform::Instant;
 
 use tutti_midi_ci::{
     ChannelControllers, CiHeader, CiMessage, DataControl, NakStatus, NoteData, PEER_REPLY_TIMEOUT,

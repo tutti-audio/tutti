@@ -2,7 +2,9 @@
 //! pieces: `split_message` for what the peer sends and a `PeReassembler` for what
 //! it receives. Each test names the property of the spec it holds.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use tutti_platform::Instant;
 
 use tutti_ump::U7;
 

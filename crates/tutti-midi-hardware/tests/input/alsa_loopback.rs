@@ -12,7 +12,8 @@
 //! (`sudo modprobe snd-seq-dummy`) and fails without them.
 
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tutti_platform::Instant;
 
 use super::listener::Listener;
 

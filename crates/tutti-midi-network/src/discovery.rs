@@ -265,9 +265,9 @@ impl Browser {
 
     /// The next Host event, waiting up to `timeout` for one.
     pub fn next_event(&self, timeout: Duration) -> Option<HostEvent> {
-        let deadline = std::time::Instant::now() + timeout;
+        let deadline = tutti_platform::Instant::now() + timeout;
         loop {
-            let left = deadline.saturating_duration_since(std::time::Instant::now());
+            let left = deadline.saturating_duration_since(tutti_platform::Instant::now());
             match self.events.recv_timeout(left).ok()? {
                 ServiceEvent::ServiceResolved(service) => {
                     return Some(match FoundHost::from_service(&service) {

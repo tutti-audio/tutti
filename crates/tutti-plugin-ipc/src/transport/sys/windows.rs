@@ -8,7 +8,8 @@ use std::os::windows::io::{AsHandle, OwnedHandle};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tutti_platform::Instant;
 
 /// Converts a host-chosen socket path into the local-socket name for this
 /// platform.

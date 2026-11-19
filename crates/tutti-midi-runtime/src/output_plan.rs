@@ -34,7 +34,9 @@
 //! latency would otherwise schedule minutes ahead), and the caller counts what
 //! was refused. A frame the clock cannot place is sent [`Now`](SendAt::Now).
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use tutti_platform::Instant;
 
 use tutti_graph::Offset;
 use tutti_ump::{Join, Spans, Ump, spans_joined};

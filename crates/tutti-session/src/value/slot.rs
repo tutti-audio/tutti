@@ -11,7 +11,7 @@ use std::sync::atomic::Ordering;
 use tutti_graph::NodeKey;
 use tutti_music::MeterMap;
 use tutti_nodes::{ClickLevel, ClickSettings, MetronomeMode};
-use tutti_rt::{LockExt, Setting, SettingWord};
+use tutti_rt::{AtomicCell, AtomicWord, LockExt};
 use tutti_tempo::TempoMap;
 use tutti_transport::{LoopEdit, LoopRegion, ProjectMeter, Transport, TransportSettings};
 use tutti_units::{Amplitude, At};
@@ -83,6 +83,9 @@ pub enum SlotId {
     Gain(Edge),
     /// The range declared on a modulation target.
     Range(ModTarget),
+    /// The automation mode the host tells a plugin.
+    #[cfg(feature = "plugin")]
+    PluginAutomationMode(NodeKey),
     /// The depth of the route from a source into a target.
     RouteDepth((ModSourceId, ModTarget)),
 }
@@ -98,6 +101,8 @@ impl SlotId {
             | Self::Looping(node)
             | Self::Direction(node)
             | Self::Speed(node) => Some(node),
+            #[cfg(feature = "plugin")]
+            Self::PluginAutomationMode(node) => Some(node),
             Self::Automation(TargetKey::Param { node, .. }) => Some(NodeKey(node)),
             _ => None,
         }
@@ -609,7 +614,7 @@ slot_target!(
     SlotId::MpeMode
 );
 
-/// A session setting held in one atomic word ([`SettingWord`]): the click's
+/// A session setting held in one atomic word ([`AtomicWord`]): the click's
 /// [`MetronomeMode`], as `session.click().mode()` names it. The audio thread
 /// reads it once per block; a write lands at once.
 pub struct SettingTarget<T> {
@@ -654,15 +659,15 @@ impl<T> std::fmt::Debug for SettingTarget<T> {
     }
 }
 
-impl<T: SettingWord + PartialEq + Send + Sync + 'static> sealed::Sealed for SettingTarget<T> {
+impl<T: AtomicWord + PartialEq + Send + Sync + 'static> sealed::Sealed for SettingTarget<T> {
     fn id(self) -> TargetId {
         TargetId::Slot(self.id)
     }
 }
-impl<T: SettingWord + PartialEq + Send + Sync + 'static> Target for SettingTarget<T> {
+impl<T: AtomicWord + PartialEq + Send + Sync + 'static> Target for SettingTarget<T> {
     type Value = T;
 }
-impl<T: SettingWord + PartialEq + Send + Sync + 'static> sealed::Store for SettingTarget<T> {
+impl<T: AtomicWord + PartialEq + Send + Sync + 'static> sealed::Store for SettingTarget<T> {
     type Cell = SlotCell<T>;
 
     fn resolve(self, params: &Params) -> Option<(Self::Cell, T)> {
@@ -679,7 +684,7 @@ impl<T: SettingWord + PartialEq + Send + Sync + 'static> sealed::Store for Setti
         cell.store(value);
     }
 }
-target_builders!([T: SettingWord + PartialEq + Send + Sync + 'static] SettingTarget<T>);
+target_builders!([T: AtomicWord + PartialEq + Send + Sync + 'static] SettingTarget<T>);
 
 // The session's cells.
 
@@ -951,17 +956,17 @@ impl Slot<Amplitude> for ClickVolumeSlot {
     }
 }
 
-/// A [`Setting`] inside a shared owner, found by `project`.
+/// A [`AtomicCell`] inside a shared owner, found by `project`.
 pub(crate) struct SettingSlot<O, T> {
     pub owner: Arc<O>,
-    pub project: fn(&O) -> &Setting<T>,
+    pub project: fn(&O) -> &AtomicCell<T>,
 }
 
-impl<O: Send + Sync + 'static, T: SettingWord + Send + Sync + 'static> Slot<T>
+impl<O: Send + Sync + 'static, T: AtomicWord + Send + Sync + 'static> Slot<T>
     for SettingSlot<O, T>
 {
     fn load(&self) -> T {
-        (self.project)(&self.owner).get()
+        (self.project)(&self.owner).load()
     }
 
     fn check(&self, _: &T) -> Result<(), SetRefusal> {
@@ -969,7 +974,7 @@ impl<O: Send + Sync + 'static, T: SettingWord + Send + Sync + 'static> Slot<T>
     }
 
     fn store(&self, value: &T) {
-        (self.project)(&self.owner).set(*value);
+        (self.project)(&self.owner).store(*value);
     }
 }
 

@@ -40,7 +40,8 @@
 //! received messages and time as a value (M2-104 §7.1, M2-100 Table 4).
 //!
 //! ```
-//! use std::time::{Duration, Instant};
+//! use std::time::Duration;
+//! use tutti_platform::Instant;
 //! use tutti_midi_device::{DiscoveryAction, EndpointDiscovery, DiscoveryEnding, STEP_TIMEOUT};
 //!
 //! let start = Instant::now();

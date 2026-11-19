@@ -43,6 +43,8 @@ tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false
 tutti-clap-host = { version = "0.0.1", path = "../tutti-clap-host", optional = true }
 tutti-vst3-host = { version = "0.0.1", path = "../tutti-vst3-host", optional = true }
 tutti-vst2-host = { version = "0.0.1", path = "../tutti-vst2-host", optional = true }
+# `Instant`, the one clock type.
+tutti-platform = { version = "0.0.1", path = "../tutti-platform" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # Audio Units: macOS only; `au` enables nothing elsewhere.

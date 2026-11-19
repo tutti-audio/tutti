@@ -1,4 +1,4 @@
-//! `InProcClient`: the graph node (`node.rs`) that drives an in-process
+//! `InProcessClient`: the graph node (`node.rs`) that drives an in-process
 //! plugin of any hosting ([`Loaded`]: an [`InProcess`](tutti_plugin_types::InProcess)
 //! format, or a served plugin, `tutti-plugin-ipc`'s `Ipc`) from the host audio thread.
 //!
@@ -36,7 +36,7 @@ use parking_lot::Mutex;
 use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_graph::{Bus, Buses, Cx, Offset, Shape};
 use tutti_plugin_types::{Layout, LoadedPlugin, PluginBus};
-use tutti_rt::ParkedSampleRate;
+use tutti_rt::PendingSampleRate;
 use tutti_tempo::TempoView;
 use tutti_transport::TempoReader;
 use tutti_units::{SampleRate, Samples};
@@ -44,7 +44,7 @@ use tutti_units::{SampleRate, Samples};
 use super::control_backend::Reporting;
 use super::instance::{Figures, Instance, Lost};
 use crate::{BlockTransport, TransportSource, TransportWalk};
-use crate::{ParamDelivery, PluginControls, PluginMeter, SegmentPoints};
+use crate::{ParamDelivery, PluginControls, PluginTimeSignature, SegmentPoints};
 use tutti_plugin_types::MidiIntake;
 use tutti_plugin_types::{
     ChordChanges, ExpressiveContext, Features, MIDI_STACK_CAPACITY, MidiEventVec, ParameterChanges,
@@ -74,7 +74,7 @@ use tutti_units::ParamId;
 /// library, restored from this one's saved state. See
 /// [`PluginNode::fork_instance`]. The client becomes a graph node by
 /// [`bind`](Self::bind)ing it to the project's tempo map.
-pub struct InProcClient<L: Loaded, F: Float = f32> {
+pub struct InProcessClient<L: Loaded, F: Float = f32> {
     /// The plugin's control side. Control threads only: the audio thread
     /// renders through `rt`.
     pub(super) inner: Arc<Mutex<Instance<L>>>,
@@ -141,7 +141,7 @@ pub struct InProcClient<L: Loaded, F: Float = f32> {
     /// the out-of-process client gets from its command queue.
     ///
     /// Shared with the control backend, which drains it.
-    pub(super) pending_sample_rate: Arc<ParkedSampleRate>,
+    pub(super) pending_sample_rate: Arc<PendingSampleRate>,
     /// Who tells the plugin the rate the node is prepared at.
     pub(super) rate_delivery: RateDelivery,
     /// A fork's rate could not be told to the plugin (its `prepare` ran off the
@@ -226,7 +226,7 @@ pub struct InProcClient<L: Loaded, F: Float = f32> {
 /// lifecycle poisons, through which nothing else is published) has no
 /// controller left to stop under, so its node does not run `stop`: the Processor drops with the end, as the Processor of a lost plugin
 /// does when the session retires its node.
-impl<L: Loaded, F: Float> Drop for InProcClient<L, F> {
+impl<L: Loaded, F: Float> Drop for InProcessClient<L, F> {
     fn drop(&mut self) {
         if self.lost.is_lost() || self.rt.held().is_none() {
             return;
@@ -236,9 +236,9 @@ impl<L: Loaded, F: Float> Drop for InProcClient<L, F> {
 }
 
 /// Omits `inner`: formatting must not wait on the control side's lock.
-impl<L: Loaded, F: Float> std::fmt::Debug for InProcClient<L, F> {
+impl<L: Loaded, F: Float> std::fmt::Debug for InProcessClient<L, F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("InProcClient")
+        f.debug_struct("InProcessClient")
             .field("descriptor", &self.descriptor)
             .field("sample_rate", &self.sample_rate)
             .finish_non_exhaustive()
@@ -316,12 +316,12 @@ fn buses_of(plugin: &[PluginBus]) -> Buses {
 /// Who tells the plugin the rate the node is prepared at.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum RateDelivery {
-    /// Off the main thread, parked in `pending_sample_rate` for the main
+    /// Off the main thread, pending in `pending_sample_rate` for the main
     /// thread's editor pump (`Backend::editor_idle`) to dispatch: the live
     /// instance.
-    Parked,
+    Pending,
     /// Off the main thread, refused (silence until a `prepare` on it): a fork.
-    /// Nothing pumps a fork's editor (it has no handle), so a parked rate
+    /// Nothing pumps a fork's editor (it has no handle), so a pending rate
     /// would never reach it.
     InPrepare,
 }
@@ -344,11 +344,11 @@ pub(super) enum RateDelivery {
 #[derive(Clone, Debug)]
 pub(super) struct TransportFeed {
     /// The node's meter slot, shared with its controls
-    /// ([`InProcClient::controls`]), so a meter installed through them
+    /// ([`InProcessClient::controls`]), so a meter installed through them
     /// reaches the node the audio thread runs; a fork has a slot of its own
     /// ([`forked`](Self::forked)). Control side only: the block reads
     /// through `source`.
-    meter: PluginMeter,
+    meter: PluginTimeSignature,
     /// The slot's reader and the clocks (`TransportSource`), the out-of-process
     /// node's own.
     source: TransportSource,
@@ -359,19 +359,19 @@ pub(super) struct TransportFeed {
 
 impl TransportFeed {
     /// A handle on the node's meter cell: what its controls install through.
-    pub(super) fn meter(&self) -> PluginMeter {
+    pub(super) fn meter(&self) -> PluginTimeSignature {
         self.meter.clone()
     }
 
     /// No meter installed, nothing rendered.
     pub(super) fn new() -> Self {
-        Self::over(PluginMeter::default())
+        Self::over(PluginTimeSignature::default())
     }
 
     /// A feed reading `meter`'s cell through a reader registered here,
     /// nothing rendered, on the host clock. Control thread:
     /// registering may allocate.
-    fn over(meter: PluginMeter) -> Self {
+    fn over(meter: PluginTimeSignature) -> Self {
         Self {
             source: TransportSource::new(meter.reader()),
             meter,
@@ -384,7 +384,7 @@ impl TransportFeed {
     /// the out-of-process node's fork), a counter from zero, and, for an
     /// `offline` render, no host clock.
     pub(super) fn forked(&self, offline: bool) -> Self {
-        let mut feed = Self::over(PluginMeter::holding(self.meter.installed()));
+        let mut feed = Self::over(PluginTimeSignature::holding(self.meter.installed()));
         if offline {
             feed.source.go_offline();
         }
@@ -438,7 +438,7 @@ impl TransportFeed {
 }
 
 /// An in-process client bound to the project's tempo map
-/// ([`InProcClient::bind`]): the graph node. It owns the reader, lends
+/// ([`InProcessClient::bind`]): the graph node. It owns the reader, lends
 /// the map once per block, read through a view at the block's rate. Only this type is a
 /// [`Node<F>`](tutti_graph::Node) and an [`IntoNode<F>`](tutti_graph::IntoNode), for the
 /// graph float `F` the plugin was activated at (a plugin that does not process
@@ -449,7 +449,7 @@ impl TransportFeed {
 /// The default `F = f32` is the common width and converts nothing; it is
 /// staging until every caller names its graph's float.
 pub struct PluginNode<L: Loaded, F: Float = f32> {
-    pub(super) client: InProcClient<L, F>,
+    pub(super) client: InProcessClient<L, F>,
     pub(super) tempo: TempoReader,
 }
 
@@ -460,14 +460,14 @@ impl<L: Loaded, F: Float> std::fmt::Debug for PluginNode<L, F> {
 }
 
 impl<L: Loaded, F: Float> std::ops::Deref for PluginNode<L, F> {
-    type Target = InProcClient<L, F>;
-    fn deref(&self) -> &InProcClient<L, F> {
+    type Target = InProcessClient<L, F>;
+    fn deref(&self) -> &InProcessClient<L, F> {
         &self.client
     }
 }
 
 impl<L: Loaded, F: Float> std::ops::DerefMut for PluginNode<L, F> {
-    fn deref_mut(&mut self) -> &mut InProcClient<L, F> {
+    fn deref_mut(&mut self) -> &mut InProcessClient<L, F> {
         &mut self.client
     }
 }
@@ -478,11 +478,11 @@ impl<L: Loaded, F: Float> std::ops::DerefMut for PluginNode<L, F> {
 /// Last write wins. A rate superseded before anyone drained it never reached
 /// the plugin, so dropping it loses nothing — the plugin only needs to hear the
 /// rate it is about to run at.
-pub(super) fn queue_sample_rate(cell: &ParkedSampleRate, rate: SampleRate) {
-    cell.park(rate, Ordering::Relaxed);
+pub(super) fn queue_sample_rate(cell: &PendingSampleRate, rate: SampleRate) {
+    cell.set(rate, Ordering::Relaxed);
 }
 
-/// Dispatch a parked rate, if any, and report whether one reached the plugin.
+/// Dispatch a pending rate, if any, and report whether one reached the plugin.
 ///
 /// Main thread only: `Instance::set_sample_rate` deactivates and activates the
 /// plugin, which allocates. This is the drain half of the deferral
@@ -491,7 +491,7 @@ pub(super) fn queue_sample_rate(cell: &ParkedSampleRate, rate: SampleRate) {
 /// thread has handed it back.
 pub(super) fn drain_sample_rate<L: Loaded>(
     main: MainThreadMarker,
-    cell: &ParkedSampleRate,
+    cell: &PendingSampleRate,
     inner: &Mutex<Instance<L>>,
 ) -> bool {
     let Some(rate) = cell.take(Ordering::Relaxed) else {
@@ -511,7 +511,7 @@ pub(super) struct Reload {
     pub(super) work: MainWorkHandle,
 }
 
-impl<L: Loaded, F: Float> InProcClient<L, F> {
+impl<L: Loaded, F: Float> InProcessClient<L, F> {
     /// A client over `inner`, which it locks once for the plugin's lost flag:
     /// a caller must not hold that lock.
     pub(super) fn new(
@@ -522,7 +522,7 @@ impl<L: Loaded, F: Float> InProcClient<L, F> {
         declared: Declared,
         features: Features,
         sample_rate: SampleRate,
-        pending_sample_rate: Arc<ParkedSampleRate>,
+        pending_sample_rate: Arc<PendingSampleRate>,
         counters: Option<Arc<crate::DeliveryCounters>>,
         parameters: impl IntoIterator<Item = ParamId>,
         spares: usize,
@@ -593,7 +593,7 @@ impl<L: Loaded, F: Float> InProcClient<L, F> {
             features,
             sample_rate,
             pending_sample_rate,
-            rate_delivery: RateDelivery::Parked,
+            rate_delivery: RateDelivery::Pending,
             rate_refused: false,
             prepared_mode: tutti_graph::RenderMode::Realtime,
             event_input,
@@ -663,7 +663,7 @@ impl<L: Loaded, F: Float> InProcClient<L, F> {
     }
 }
 
-impl<L: Loaded, F: Float> InProcClient<L, F> {
+impl<L: Loaded, F: Float> InProcessClient<L, F> {
     /// The chunk in flight is dropped (a reset, a re-prepare): the walk of its
     /// transport ends, and the MIDI the Processor held for it is lost, counted
     /// now in the delivery's dropped MIDI and in the executor's at the next
@@ -756,7 +756,7 @@ impl<L: Loaded, F: Float> InProcClient<L, F> {
     }
 
     /// Take `sample_rate` as the rate blocks run at, and hand it to the
-    /// plugin as [`RateDelivery`] says: parked for the main thread (see
+    /// plugin as [`RateDelivery`] says: pending for the main thread (see
     /// `pending_sample_rate`), or, on a fork, dispatched here. What the
     /// node's `prepare` does with its rate. (The transport snapshot's rate is
     /// the block's own, from its `Env`.)
@@ -788,9 +788,9 @@ impl<L: Loaded, F: Float> InProcClient<L, F> {
             return;
         }
         match self.rate_delivery {
-            // Off the main thread the bracket cannot run: parked for the main
+            // Off the main thread the bracket cannot run: pending for the main
             // thread's pump.
-            RateDelivery::Parked => queue_sample_rate(&self.pending_sample_rate, rate),
+            RateDelivery::Pending => queue_sample_rate(&self.pending_sample_rate, rate),
             // A fork has no pump: the refusal is recorded (`rate_refused`), the
             // node renders silence rather than audio at the wrong rate, and the
             // next `prepare` on the main thread clears it.

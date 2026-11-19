@@ -21,7 +21,7 @@ use tutti_vst3_ffi::{Module, Plugin};
 /// One pass of the run loop at an instant an hour on, so a timer the loop still
 /// holds is due, then one at the clock for the descriptors.
 fn run_past_every_timer(plugin: &Plugin, main: MainThreadMarker) {
-    let an_hour_on = std::time::Instant::now() + Duration::from_secs(3600);
+    let an_hour_on = tutti_platform::Instant::now() + Duration::from_secs(3600);
     plugin.wake_editor_loop(main, &[], an_hour_on);
     plugin.run_editor_loop_iteration(main);
 }

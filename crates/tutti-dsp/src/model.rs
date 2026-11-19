@@ -2,7 +2,7 @@
 //! of one that is linear and time-invariant.
 //!
 //! A [`System`] is the mathematical object a processor realizes: its
-//! [`latency`](System::latency) and its [`tail`](System::tail), a [`Ring`] measured to a
+//! [`latency`](System::latency) and its [`tail`](System::tail), a [`DecayTime`] measured to a
 //! floor ([`TAIL_FLOOR`] by default). [`Lti`] is the class of a linear time-invariant
 //! one, with the queries its mathematics has ([`frequency_response`](Lti::frequency_response),
 //! [`spectral_radius`](Lti::spectral_radius), [`l1_norm`](Lti::l1_norm),
@@ -12,7 +12,7 @@
 //! class with a trait; a system of another kind (a nonlinear one, one that varies in
 //! time) answers through its own queries and is not made to implement [`Lti`].
 //! Modulation is not a class: a control that moves is a trajectory of the controls,
-//! written by a lane or a control source, and the system it moves is the same one.
+//! written by an automation lane or a control source, and the system it moves is the same one.
 //!
 //! [`MaxDecay`] is the longest decay a reverb is built to.
 
@@ -22,4 +22,4 @@ mod system;
 
 pub use lti::Lti;
 pub use max_decay::{MaxDecay, MaxDecayError};
-pub use system::{Ring, System, TAIL_FLOOR};
+pub use system::{DecayTime, System, TAIL_FLOOR};

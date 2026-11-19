@@ -3,7 +3,7 @@
 //! fake OS plugs and unplugs the devices.
 
 use std::collections::BTreeSet;
-use std::time::Instant;
+use tutti_platform::Instant;
 
 use crate::common::{MF, Seen, blocks, note, play, tap};
 use tutti_fixtures::midi;
@@ -782,7 +782,7 @@ fn an_output_port_follows_its_device_through_an_unplug() {
         .unwrap()
         .sync_controls
         .messages()
-        .set(tutti_midi_runtime::SyncMessages {
+        .store(tutti_midi_runtime::SyncMessages {
             clock: true,
             ..tutti_midi_runtime::SyncMessages::OFF
         });
@@ -886,10 +886,13 @@ fn sent_until(
     what: &str,
     done: impl Fn(&[tutti_ump::Ump]) -> bool,
 ) -> Vec<tutti_ump::Ump> {
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    let deadline = tutti_platform::Instant::now() + std::time::Duration::from_secs(30);
     let mut sent = Vec::new();
     while !done(&sent) {
-        assert!(std::time::Instant::now() < deadline, "{what}: {sent:?}");
+        assert!(
+            tutti_platform::Instant::now() < deadline,
+            "{what}: {sent:?}"
+        );
         std::thread::sleep(std::time::Duration::from_millis(5));
         sent.extend(sent_by_the_port(fake));
     }
@@ -1014,7 +1017,7 @@ fn an_output_port_counts_what_its_device_refused() {
         .unwrap()
         .sync_controls
         .messages()
-        .set(tutti_midi_runtime::SyncMessages {
+        .store(tutti_midi_runtime::SyncMessages {
             clock: true,
             ..tutti_midi_runtime::SyncMessages::OFF
         });
@@ -1040,7 +1043,7 @@ fn an_output_port_counts_the_events_its_tap_had_no_room_for() {
         .unwrap()
         .sync_controls
         .messages()
-        .set(tutti_midi_runtime::SyncMessages {
+        .store(tutti_midi_runtime::SyncMessages {
             clock: true,
             ..tutti_midi_runtime::SyncMessages::OFF
         });

@@ -1,6 +1,6 @@
 //! Every node runs inside `with_no_denormals`, on the serial executor and on
 //! every participant of a pool, helpers included (doc 013, "The parallel
-//! executor"; `tutti_rt::with_no_denormals`).
+//! executor"; `tutti_platform::with_no_denormals`).
 //!
 //! The graph is `PROBES` independent nodes, each busy for a few tens of
 //! microseconds so that helpers find work. A probe multiplies the smallest
@@ -21,8 +21,9 @@
 use tutti_graph::testing as common;
 
 use std::hint::black_box;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tutti_buffers::MaxBlock;
+use tutti_platform::Instant;
 
 use common::{WORKERS, test_pool};
 use tutti_buffers::ChannelLayout;

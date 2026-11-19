@@ -33,7 +33,7 @@ use std::sync::Arc;
 
 use crossbeam_channel::Sender;
 use tutti_buffers::Wave;
-use tutti_rt::{PriorityRequest, StopToken, ThreadHandle, spawn_named};
+use tutti_platform::{PriorityRequest, StopToken, ThreadHandle, spawn_named};
 
 use super::StreamerSender;
 use super::cache::LruCache;

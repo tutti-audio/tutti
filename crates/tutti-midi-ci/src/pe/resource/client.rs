@@ -2,7 +2,7 @@
 //! Resources (M2-103 §3.2, §8 to §11, §14), over [`PeInitiator`].
 
 use std::num::NonZeroU32;
-use std::time::Instant;
+use tutti_platform::Instant;
 
 use super::super::capabilities::PeCapabilities;
 use super::super::chunk::PeRequestId;

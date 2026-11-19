@@ -739,7 +739,7 @@ impl<C: Clock> SessionBuilder<C> {
     /// each [`Task`](crate::Task) and calls [`Task::run`](crate::Task::run) on a
     /// thread of its own (`tokio::task::spawn_blocking`, a rayon pool); what
     /// the job reports lands in [`Session::update`]. The default is a named
-    /// `tutti_rt::spawn_named` thread per task; dropping the session stops
+    /// `tutti_platform::spawn_named` thread per task; dropping the session stops
     /// them within 100 ms, and a thread still running then (a worker blocked on
     /// the main thread) is detached with a `tracing` warning and outlives the
     /// session. A task the spawner drops unrun ends as

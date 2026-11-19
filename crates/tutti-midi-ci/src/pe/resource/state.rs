@@ -3,7 +3,7 @@
 
 use std::fmt;
 use std::num::NonZeroU32;
-use std::time::Instant;
+use tutti_platform::Instant;
 
 use tutti_ump::DeviceIdentity;
 

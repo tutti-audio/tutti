@@ -57,13 +57,13 @@ impl DeviceListing {
         list: impl FnOnce() -> Result<Vec<DeviceId>> + Send + 'static,
     ) -> Result<Self> {
         let (tx, result) = mpsc::channel();
-        std::thread::Builder::new()
-            .name("tutti-device-list".into())
-            .spawn(move || {
-                // The receiver may be gone by now; nobody wants the answer.
-                let _ = tx.send(list());
-            })
-            .map_err(|e| Error::InvalidConfig(format!("cannot start the device listing: {e}")))?;
+        // Detached: dropping the listing never waits on a host that may never answer.
+        tutti_platform::spawn_named("tutti-device-list", None, move |_| {
+            // The receiver may be gone by now; nobody wants the answer.
+            let _ = tx.send(list());
+        })
+        .map_err(|e| Error::InvalidConfig(format!("cannot start the device listing: {e}")))?
+        .detach();
         Ok(Self {
             result,
             done: false,
@@ -105,11 +105,11 @@ mod tests {
         .unwrap();
         assert!(matches!(listing.poll(), Listed::Pending));
         release.send(()).unwrap();
-        let deadline = std::time::Instant::now() + Duration::from_secs(20);
+        let deadline = tutti_platform::Instant::now() + Duration::from_secs(20);
         let listed = loop {
             match listing.poll() {
                 Listed::Pending => {
-                    assert!(std::time::Instant::now() < deadline, "no answer");
+                    assert!(tutti_platform::Instant::now() < deadline, "no answer");
                     std::thread::yield_now();
                 }
                 other => break other,
@@ -129,11 +129,11 @@ mod tests {
     #[test]
     fn a_worker_that_panics_is_a_failure() {
         let mut listing = DeviceListing::spawn_with(|| panic!("host exploded")).unwrap();
-        let deadline = std::time::Instant::now() + Duration::from_secs(20);
+        let deadline = tutti_platform::Instant::now() + Duration::from_secs(20);
         let listed = loop {
             match listing.poll() {
                 Listed::Pending => {
-                    assert!(std::time::Instant::now() < deadline, "still pending");
+                    assert!(tutti_platform::Instant::now() < deadline, "still pending");
                     std::thread::yield_now();
                 }
                 other => break other,

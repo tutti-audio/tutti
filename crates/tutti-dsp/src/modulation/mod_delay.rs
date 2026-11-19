@@ -41,7 +41,7 @@ use tutti_units::{
 use super::sweep::{Stagger, StaggerError, Sweep};
 use crate::{DelayLine, InterpolationMode, Lerp, MaxDelay, Ramp, delay_step};
 
-/// The LFO's slowest rate: 0.01 Hz, a lane's value and a cell's alike. A rate below it
+/// The LFO's slowest rate: 0.01 Hz, a control signal's value and a cell's alike. A rate below it
 /// (or negative) reads as it.
 pub const MIN_RATE: Hz = Hz::new(0.01);
 
@@ -56,7 +56,7 @@ const READ: InterpolationMode = InterpolationMode::Linear;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ModDelayControls {
     /// The LFO's rate: how fast the delay sweeps. Chorus and flanger rates are slow,
-    /// typically 0.1 to 2 Hz; faster reads as vibrato. **Floored at 0.01 Hz**, a lane's
+    /// typically 0.1 to 2 Hz; faster reads as vibrato. **Floored at 0.01 Hz**, a control signal's
     /// value and a cell's alike ([`MIN_RATE`]). Not finite reads as the default's.
     pub rate: Hz,
     /// How far the delay moves either side of the base, in seconds of delay (not a

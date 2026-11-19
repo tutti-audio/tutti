@@ -271,6 +271,11 @@ pub(crate) const RECIPES: &[(&str, &str, &str)] = &[
         "a platform cfg stands only on a mod declaration, bar the temporary rows",
     ),
     (
+        "check-platform",
+        "",
+        "`Instant` and `SystemTime::now` come from `tutti_platform`: std's panic on wasm",
+    ),
+    (
         "check-buffers",
         "",
         "a public item names audio with a fixed sample format only as a row of xtask/buffers-fixed.txt, and a hand interleave loop or frame-times-width length in src only as a row of xtask/buffers-loops.txt",
@@ -368,6 +373,11 @@ pub(crate) const RECIPES: &[(&str, &str, &str)] = &[
         "rustdoc as CI does, per feature, the docs.rs build on a dated nightly, and umbrella-api (needs cargo-public-api)",
     ),
     ("check-loom", "", "clippy under --cfg loom"),
+    (
+        "check-wasm",
+        "",
+        "clippy for wasm32-unknown-unknown: tutti-platform and tutti, lib only",
+    ),
     (
         "check-no-std",
         "",
@@ -697,6 +707,7 @@ impl Planner<'_> {
             "check-building" => self.out.push(Step::Gate(Gate::Building)),
             "check-values" => self.out.push(Step::Gate(Gate::Values)),
             "check-logging" => self.out.push(Step::Gate(Gate::Logging)),
+            "check-platform" => self.out.push(Step::Gate(Gate::Platform)),
             "check-test-time" => self.out.push(Step::Gate(Gate::TestTime)),
             "check-units-bare" => self.out.push(Step::Gate(Gate::UnitsBare)),
             "check-width" => self.out.push(Step::Gate(Gate::Width)),
@@ -755,6 +766,9 @@ impl Planner<'_> {
             "check-no-std" => self.check_no_std(),
             "check-loom" => self.lines(&[
                 r#"RUSTFLAGS="--cfg loom" cargo clippy --locked -p tutti-rt -p tutti-plugin-ipc-ffi -p tutti-winmm-ffi --all-targets -- -D warnings"#,
+            ]),
+            "check-wasm" => self.lines(&[
+                "cargo clippy --locked --target wasm32-unknown-unknown -p tutti-platform -p tutti --lib -- -D warnings",
             ]),
             "book" => {
                 let [out] = Self::params(name, args, [""])?;
@@ -830,7 +844,7 @@ impl Planner<'_> {
                     "check-paths", "check-session", "check-guards", "check-ffi", "check-errors",
                     "check-layout", "check-range-types", "check-hosting", "check-lints",
                     "check-value-traits", "check-submodule-pins", "check-doc-refs",
-                    "check-pointers", "check-comments", "check-platform-seam", "check-doc-idents",
+                    "check-pointers", "check-comments", "check-platform-seam", "check-platform", "check-doc-idents",
                     "check-passive-tests", "check-alloc-binaries", "check-buffers",
                     "check-building", "check-umbrella", "check-logging", "check-test-time",
                     "check-session-api", "check-values", "check-units-bare", "check-width",
@@ -842,7 +856,7 @@ impl Planner<'_> {
                 for d in [
                     "gates", "lint", "deny", "check-conformance",
                     "check-features", "package",
-                    "check-no-std", "check-loom", "test", "test-features", "test-doc",
+                    "check-no-std", "check-loom", "check-wasm", "test", "test-features", "test-doc",
                     "test-release", "doc",
                 ] {
                     self.dep(d)?;
@@ -943,7 +957,7 @@ const MIRI: &[&str] = &[
 const LOOM: &[&str] = &[
     r#"LOOM_MAX_PREEMPTIONS=4 RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test pos_ring_loom"#,
     r#"RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test packed_atomic_loom"#,
-    r#"RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test setting_loom"#,
+    r#"RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test atomic_cell_loom"#,
     r#"RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test seq_cell_loom"#,
     r#"RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test cell_loom"#,
     r#"RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test handoff_loom -- --nocapture"#,

@@ -12,11 +12,12 @@
 use crate::{BridgeConfig, BridgeThread, ServerWatch};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tutti_platform::Instant;
+use tutti_platform::{StopToken, ThreadHandle};
 use tutti_plugin_ipc_ffi::{ExitWait, Reaped};
 use tutti_plugin_types::{Deadline, PluginFailure};
 use tutti_rt::LockExt;
-use tutti_rt::{StopToken, ThreadHandle};
 
 /// How long the exit thread waits on the OS between looks at its stop flag.
 /// Only bounds how long a dropped guard waits to join it when the process was
@@ -70,7 +71,7 @@ impl ProcessGuard {
         let watch = Arc::new(ServerWatch::new());
         let wait = Arc::new(process.exit_wait());
         let process = Arc::new(Mutex::new(Some(process)));
-        let spawned = tutti_rt::spawn_named("plugin-exit", None, {
+        let spawned = tutti_platform::spawn_named("plugin-exit", None, {
             let process = Arc::clone(&process);
             let wait = Arc::clone(&wait);
             let watch = Arc::clone(&watch);
@@ -217,7 +218,7 @@ fn await_end(
 /// is a `wait`, which a process in uninterruptible sleep never returns from.
 fn reap_elsewhere(process: Reaped) {
     let slot = Arc::new(Mutex::new(Some(process)));
-    let spawned = tutti_rt::spawn_named("plugin-reap", None, {
+    let spawned = tutti_platform::spawn_named("plugin-reap", None, {
         let slot = Arc::clone(&slot);
         move |_: &StopToken| drop(slot.lock_recover().take())
     });

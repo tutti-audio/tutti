@@ -11,7 +11,8 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tutti_platform::Instant;
 use tutti_plugin::catalog::{Catalog, CatalogConfig, Hosting, Locator, PluginId, PluginRef};
 use tutti_plugin_db::{PluginDb, ScanPoll};
 use tutti_plugin_types::MainThreadMarker;

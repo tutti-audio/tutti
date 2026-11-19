@@ -16,7 +16,9 @@ use tutti_buffers::{InterleavedMut, PlanesMut};
 use tutti_session::Root;
 use tutti_session::{PluginChange, PluginEvent};
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use tutti_platform::Instant;
 
 use support::clap_probe;
 use tutti_buffers::ChannelLayout;
@@ -203,7 +205,7 @@ fn a_modulation_lane_on_the_plugin_survives_its_replacement() {
     drive.update(&mut s);
     wait_for_values(&mut drive, &mut s, node);
 
-    let gain = node.param(ParamId::new(GAIN));
+    let gain = ParamRef::from(node.param(ParamId::new(GAIN)));
     {
         let mut m = s.mods_mut();
         m.range_raw(gain, 0.0, 1.0).unwrap();
@@ -269,7 +271,7 @@ fn a_crossfaded_plugin_keeps_its_lane_and_a_removed_one_drops_it() {
     let node = add_probe(&mut s);
     drive.update(&mut s);
     wait_for_values(&mut drive, &mut s, node);
-    let gain = node.param(ParamId::new(GAIN));
+    let gain = ParamRef::from(node.param(ParamId::new(GAIN)));
     {
         let mut m = s.mods_mut();
         m.range_raw(gain, 0.0, 1.0).unwrap();
@@ -330,13 +332,14 @@ fn a_crossfaded_plugin_keeps_its_lane_and_a_removed_one_drops_it() {
 
 /// Sets the probe's gain to `value` through the session's params.
 fn set_gain(s: &DetachedSession, node: impl Into<NodeKey> + Copy, value: f64) {
-    s.plugin_view(node)
+    let target = s
+        .plugin_view(node)
         .unwrap()
         .params()
         .get(ParamId::new(GAIN))
         .unwrap()
-        .set(Normalized::of(value))
-        .unwrap();
+        .target();
+    s.set(target.to(Normalized::of(value))).unwrap();
 }
 
 /// How far a plugin's value may be from the one a lane plays: the plugin
@@ -359,7 +362,7 @@ fn a_set_under_a_lane_writes_the_knob() {
     let node = add_probe(&mut s);
     drive.update(&mut s);
     wait_for_values(&mut drive, &mut s, node);
-    let gain = node.param(ParamId::new(GAIN));
+    let gain = ParamRef::from(node.param(ParamId::new(GAIN)));
     {
         let mut m = s.mods_mut();
         m.range_raw(gain, 0.0, 1.0).unwrap();
@@ -410,7 +413,7 @@ fn a_set_right_after_the_lane_is_added_writes_the_knob() {
     let node = add_probe(&mut s);
     drive.update(&mut s);
     wait_for_values(&mut drive, &mut s, node);
-    let gain = node.param(ParamId::new(GAIN));
+    let gain = ParamRef::from(node.param(ParamId::new(GAIN)));
     {
         let mut m = s.mods_mut();
         m.range_raw(gain, 0.0, 1.0).unwrap();
@@ -443,7 +446,7 @@ fn a_set_after_the_lane_is_removed_goes_to_the_plugin() {
     let node = add_probe(&mut s);
     drive.update(&mut s);
     wait_for_values(&mut drive, &mut s, node);
-    let gain = node.param(ParamId::new(GAIN));
+    let gain = ParamRef::from(node.param(ParamId::new(GAIN)));
     let route = {
         let mut m = s.mods_mut();
         m.range_raw(gain, 0.0, 1.0).unwrap();
@@ -492,7 +495,7 @@ fn a_read_landing_under_a_lane_keeps_the_knob_in_the_mirror() {
     let (entry, node) = add_probe_keyed(&mut s);
     drive.update(&mut s);
     wait_for_values(&mut drive, &mut s, node);
-    let gain = node.param(ParamId::new(GAIN));
+    let gain = ParamRef::from(node.param(ParamId::new(GAIN)));
     {
         let mut m = s.mods_mut();
         m.range_raw(gain, 0.0, 1.0).unwrap();
@@ -575,7 +578,7 @@ fn an_export_is_the_live_render_on_a_clap_gain() {
     drive.update(&mut s);
     wait_for_values(&mut drive, &mut s, node);
 
-    let gain = node.param(ParamId::new(GAIN));
+    let gain = ParamRef::from(node.param(ParamId::new(GAIN)));
     {
         let mut m = s.mods_mut();
         m.range_raw(gain, 0.0, 1.0).unwrap();

@@ -2,7 +2,8 @@
 //! the waiting left to the platform.
 
 use std::sync::{Mutex, MutexGuard};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tutti_platform::Instant;
 use tutti_rt::LockExt;
 
 use super::schedule::{Next, Outbox};

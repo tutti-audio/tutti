@@ -39,8 +39,10 @@
 //! every block the host sends after that answer.
 
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::{Duration, Instant};
-use tutti_rt::{LockExt, StopToken, ThreadHandle};
+use std::time::Duration;
+use tutti_platform::Instant;
+use tutti_platform::{StopToken, ThreadHandle};
+use tutti_rt::LockExt;
 
 use std::borrow::Cow;
 use tutti_buffers::Float;
@@ -902,7 +904,7 @@ impl RenderThread {
         let ended = Arc::new(OnceLock::new());
         let wake = side.wake.clone();
         let slot = Arc::new(Mutex::new(Some(side)));
-        let spawned = tutti_rt::spawn_named("plugin-render", None, {
+        let spawned = tutti_platform::spawn_named("plugin-render", None, {
             let (ended, slot) = (Arc::clone(&ended), Arc::clone(&slot));
             move |stop: &StopToken| {
                 let side = slot.lock_recover().take().expect("the side is taken once");
@@ -961,7 +963,7 @@ impl RenderThread {
 #[derive(Debug)]
 pub(crate) enum NotHome {
     /// The thread panicked.
-    Panicked(tutti_rt::Panicked),
+    Panicked(tutti_platform::Panicked),
     /// The thread is still running (a plugin that does not return from a block).
     Stuck,
 }

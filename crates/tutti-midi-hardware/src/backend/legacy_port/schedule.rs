@@ -1,7 +1,8 @@
 //! Items held until their time and released in order.
 
 use std::collections::VecDeque;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tutti_platform::Instant;
 
 /// What waits for a time: items released earliest first, those due at the same
 /// instant in the order they were pushed.

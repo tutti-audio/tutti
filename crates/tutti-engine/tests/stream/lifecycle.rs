@@ -9,7 +9,6 @@ use crate::fixtures::{SAMPLE_RATE, fan, graph_engine, rolling_state, spec};
 use std::convert::Infallible;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::Instant;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::SampleFormat;
 use tutti_engine::{
@@ -17,6 +16,7 @@ use tutti_engine::{
     StreamFaultKind, StreamHost,
 };
 use tutti_graph::{Cx, ForkByClone, Io, Node, NodeKey, Prepare, Shape, Status};
+use tutti_platform::Instant;
 use tutti_transport::Transport;
 use tutti_units::SampleRate;
 use tutti_units::Samples;

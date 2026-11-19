@@ -1,7 +1,7 @@
 use super::*;
 use tutti_buffers::Planes;
 
-use std::time::Instant;
+use tutti_platform::Instant;
 
 use tutti_buffers::{Interleaved, InterleavedMut, Sink};
 use tutti_engine::{BackendErrorKind, STALL_GRACE};

@@ -4,7 +4,8 @@
 //! not unknown).
 
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tutti_platform::Instant;
 
 use tutti_buffers::MaxBlock;
 use tutti_graph::UmpAt;
@@ -45,7 +46,7 @@ fn the_midi_clock_reaches_the_output_on_the_timers_blocks() {
         .unwrap()
         .sync_controls
         .messages()
-        .set(tutti_midi_runtime::SyncMessages {
+        .store(tutti_midi_runtime::SyncMessages {
             clock: true,
             ..tutti_midi_runtime::SyncMessages::OFF
         });

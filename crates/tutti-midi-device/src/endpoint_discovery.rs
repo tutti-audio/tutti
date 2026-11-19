@@ -22,7 +22,9 @@
 //! the Names have [`NAME_GRACE`] to follow, since a block with no name sends
 //! none.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use tutti_platform::Instant;
 
 use bitflags::bitflags;
 use tutti_ump::{

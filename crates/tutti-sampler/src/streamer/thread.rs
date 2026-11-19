@@ -13,7 +13,8 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use tutti_rt::{Parker, PriorityRequest, StopToken, ThreadHandle};
+use tutti_platform::{PriorityRequest, StopToken, ThreadHandle};
+use tutti_rt::Parker;
 use tutti_units::SampleRate;
 
 use super::bell::{Bell, StreamerSender};
@@ -256,7 +257,8 @@ impl<F: RingFloat> Manual<F> {
 #[cfg(test)]
 mod tests {
     use std::thread;
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
+    use tutti_platform::Instant;
 
     use super::*;
     use crate::streamer::command::StreamId;

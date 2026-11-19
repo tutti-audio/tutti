@@ -7,13 +7,13 @@
 use tutti_buffers::{BusTopology, MaxBlock};
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{
-    COEFF_INTERVAL, LimiterBank, LimiterControls, LimiterLanes, Lookahead, PeakDetection,
+    COEFF_INTERVAL, LimiterBank, LimiterControls, LimiterSignals, Lookahead, PeakDetection,
     TruePeakError,
 };
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
 use tutti_units::{Db, SampleRate, Samples, Seconds, Tail};
 
-use crate::kernel::{ControlLanes, Kernel, KernelNode};
+use crate::kernel::{ControlSignals, Kernel, KernelNode};
 
 /// A lookahead limiter: `N` audio inputs and `N` outputs, with gain reduction **linked**
 /// across all channels.
@@ -60,8 +60,8 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 /// set through the node's [`ParamSet`](tutti_graph::ParamSet) or the graph's `set_param`
 /// (a release under 1 ms reads as 1 ms, and a NaN threshold or ceiling is ignored).
 ///
-/// **The threshold and the ceiling are read per frame** when the graph drives them: a lane
-/// on their ports is the bank's own ([`LimiterLanes`]), and the cell is the base a frame
+/// **The threshold and the ceiling are read per frame** when the graph drives them: a control signal
+/// on their ports is the bank's own ([`LimiterSignals`]), and the cell is the base a frame
 /// nobody drives (or a non-finite one) is read at. **The release is on the stream grid** (16
 /// frames from the last reset, [`Kernel::GRID`]): a cell write or a driven port is sampled
 /// at the grid's solve frame, so it reaches the render within 16 frames and the render does
@@ -219,15 +219,15 @@ impl<F: Float> Kernel for LimiterKernel<F> {
     fn render(
         &mut self,
         input: Planes<'_, F>,
-        lanes: ControlLanes<'_, F>,
+        signals: ControlSignals<'_, F>,
         output: PlanesMut<'_, '_, F>,
     ) {
-        let lanes = LimiterLanes {
-            threshold: lanes.get(LimiterSet::THRESHOLD_LANE),
-            ceiling: lanes.get(LimiterSet::CEILING_LANE),
+        let signals = LimiterSignals {
+            threshold: signals.get(LimiterSet::THRESHOLD_SIGNAL),
+            ceiling: signals.get(LimiterSet::CEILING_SIGNAL),
         };
         if let Some(bank) = &mut self.bank {
-            bank.process(lanes, input, output);
+            bank.process(signals, input, output);
         }
     }
 
@@ -244,10 +244,10 @@ impl<F: Float> Kernel for LimiterKernel<F> {
 }
 
 impl LimiterSet {
-    /// The lane of the threshold: the first [`fast`](crate::ControlRead::Fast) row.
-    const THRESHOLD_LANE: usize = 0;
-    /// The lane of the ceiling: the second.
-    const CEILING_LANE: usize = 1;
+    /// The control signal of the threshold: the first [`fast`](crate::ControlRead::Fast) row.
+    const THRESHOLD_SIGNAL: usize = 0;
+    /// The control signal of the ceiling: the second.
+    const CEILING_SIGNAL: usize = 1;
 }
 
 #[cfg(test)]
@@ -474,8 +474,8 @@ mod tests {
         assert!(out[0] > 0.9 * new, "and it is the new ceiling: {}", out[0]);
     }
 
-    /// A driven ceiling lane is the ceiling of each frame, **not the one the stream's
-    /// 16-frame grid samples**: a lane that is 0 dB on even frames and -20 dB on odd ones
+    /// A driven ceiling control signal is the ceiling of each frame, **not the one the stream's
+    /// 16-frame grid samples**: a control signal that is 0 dB on even frames and -20 dB on odd ones
     /// (the grid's frames are all even) bounds what comes out of the delay for frame `i` by
     /// frame `i`'s own ceiling, which a ceiling read at the grid's frames, always 0 dB, would
     /// not.
@@ -486,17 +486,17 @@ mod tests {
             RATE_44K,
         );
         let latency = lim.shape().latency.samples().get();
-        let lane = |i: usize| if i.is_multiple_of(2) { 0.0f32 } else { -20.0 };
+        let signal = |i: usize| if i.is_multiple_of(2) { 0.0f32 } else { -20.0 };
         let low = sample_gain(Db::new(-20.0));
         let mut out = [0.0f32; 2];
         let mut outputs = Vec::new();
         for i in 0..4_000 {
-            tick_fed(&mut lim, &[1.0, 1.0], &[None, Some(lane(i))], &mut out);
+            tick_fed(&mut lim, &[1.0, 1.0], &[None, Some(signal(i))], &mut out);
             outputs.push(out[0]);
         }
         let mut reached = false;
         for (i, &y) in outputs.iter().enumerate().skip(latency) {
-            let bound = sample_gain(Db::new(f64::from(lane(i - latency)))) * (1.0 + 1e-6);
+            let bound = sample_gain(Db::new(f64::from(signal(i - latency)))) * (1.0 + 1e-6);
             assert!(y.abs() <= bound, "frame {i}: {y} over {bound}");
             reached |= i > 2_000 && (i - latency) % 2 == 1 && y.abs() > 0.9 * low;
         }
@@ -506,7 +506,7 @@ mod tests {
         );
     }
 
-    /// A threshold lane is the threshold of its frame: a quiet signal is moved by the drive
+    /// A threshold control signal is the threshold of its frame: a quiet signal is moved by the drive
     /// (the ceiling over the threshold in dB), so a fed -30 dB against the cell's -10 dB
     /// raises it by 24 dB and not 4.
     #[test]

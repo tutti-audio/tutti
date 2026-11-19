@@ -12,8 +12,9 @@
 //! ```
 
 use std::hint::black_box;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tutti_buffers::{Interleaved, InterleavedMut};
+use tutti_platform::Instant;
 
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use tutti_graph::TapReader;

@@ -25,7 +25,7 @@ mod off_main_wait;
 mod rebind;
 mod width_error;
 
-pub use client::{InProcClient, PluginNode};
+pub use client::{InProcessClient, PluginNode};
 pub use loader::{
     ClientOverError, LoadClientError, client_over, load_client, load_client_restoring,
 };

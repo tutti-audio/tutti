@@ -1,6 +1,8 @@
 //! A bounded wait for a condition another thread makes true.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use tutti_platform::Instant;
 
 /// How long [`wait_until`] sleeps between looks at the condition.
 const POLL: Duration = Duration::from_millis(1);

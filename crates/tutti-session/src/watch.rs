@@ -38,7 +38,9 @@
 //! WASAPI, CoreAudio and JACK is unmeasured, which is why the poll interval is
 //! the host's to choose ([`DevicePoller::spawn`](tutti_cpal::DevicePoller::spawn)).
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use tutti_platform::Instant;
 
 use tutti_cpal::{
     DeviceChange, DeviceId, DeviceListing, DeviceRoster, DeviceSelector, Listed, Snapshot,

@@ -64,6 +64,8 @@ criterion.workspace = true
 wide = { version = "1.6", default-features = false }
 tutti-graph = { path = "../tutti-graph", features = ["contract"] }
 tutti-engine = { path = "../tutti-engine" }
+# `Instant`, the one clock type.
+tutti-platform = { path = "../tutti-platform" }
 
 [[bench]]
 name = "engine_render"

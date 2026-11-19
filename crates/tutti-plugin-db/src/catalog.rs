@@ -108,7 +108,7 @@ pub struct Catalog {
     persist: Persist,
     unreported: Unreported,
     /// The write a finished rescan started on its own thread.
-    pending_save: Option<tutti_rt::ThreadHandle<()>>,
+    pending_save: Option<tutti_platform::ThreadHandle<()>>,
 }
 
 impl std::fmt::Debug for Catalog {
@@ -461,7 +461,7 @@ impl Catalog {
             Arc::clone(&self.persist),
             Arc::clone(&self.unreported),
         );
-        let spawned = tutti_rt::spawn_named("plugin-db-save", None, move |_| {
+        let spawned = tutti_platform::spawn_named("plugin-db-save", None, move |_| {
             let (copy, persist, unreported) = for_thread;
             let _ = persist_unattended(&persist, &unreported, &copy);
         });
@@ -1180,7 +1180,7 @@ mod tests {
             Ok(())
         });
 
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        let deadline = tutti_platform::Instant::now() + std::time::Duration::from_secs(60);
         let mut scan = plugins.scan().unwrap();
         let end = loop {
             match plugins.try_apply(&mut scan) {
@@ -1192,7 +1192,7 @@ mod tests {
         // A hang guard: `try_apply` returns at once, and one that waited for the
         // save would take the save's 300 s hold.
         assert!(
-            std::time::Instant::now() < deadline,
+            tutti_platform::Instant::now() < deadline,
             "try_apply waited for the save"
         );
         started_rx

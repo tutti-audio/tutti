@@ -34,8 +34,9 @@ tutti-transport = { version = "0.0.1", path = "../tutti-transport" }
 tutti-tempo = { version = "0.0.1", path = "../tutti-tempo" }
 tutti-metering = { version = "0.0.1", path = "../tutti-metering" }
 tutti-engine = { version = "0.0.1", path = "../tutti-engine" }
-# `monotonic_ns`, the OS clock the engine's block clock is on (the MIDI inputs'
-# arrival stamps are related to it); `Publisher` for the tests that publish.
+# `MainThreadMarker`, `monotonic_ns`, `spawn_named`: the session's main-thread proof, system clock and worker threads.
+tutti-platform = { version = "0.0.1", path = "../tutti-platform" }
+# `Publisher` for the tests that publish.
 tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
 tutti-nodes = { version = "0.0.1", path = "../tutti-nodes", default-features = false }
 thiserror = { workspace = true, features = ["std"] }

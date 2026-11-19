@@ -34,6 +34,8 @@ tutti-plugin-types = { version = "0.0.1", path = "../tutti-plugin-types" }
 tutti-buffers = { version = "0.0.1", path = "../tutti-buffers" }
 # `GraphPool`: a graph worker pool as the `TaskPool` that serves `clap.thread-pool`.
 tutti-graph = { version = "0.0.1", path = "../tutti-graph" }
+# `with_no_denormals`: the guard around a plugin's process call.
+tutti-platform = { version = "0.0.1", path = "../tutti-platform" }
 tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
 # `Beat` and `BeatDuration`: what a `transport-control` request carries.
 tutti-units = { version = "0.0.1", path = "../tutti-units" }

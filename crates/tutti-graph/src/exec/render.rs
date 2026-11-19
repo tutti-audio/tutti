@@ -3,8 +3,9 @@
 use std::sync::atomic::Ordering;
 use tutti_buffers::Float;
 
+use tutti_platform::with_no_denormals;
 use tutti_rt::RingWriter;
-use tutti_rt::{RtScope, with_no_denormals};
+use tutti_rt::RtScope;
 use tutti_units::Samples;
 
 use super::commit::{Crossfade, retire_fade};

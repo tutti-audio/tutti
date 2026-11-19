@@ -10,7 +10,8 @@ use crate::testing::loop_frames;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tutti_platform::Instant;
 
 use tutti_units::{Beat, Bpm, Samples};
 
@@ -396,9 +397,9 @@ fn a_panic_while_a_loop_is_captured_faults_that_stream() {
 
 fn refuse(
     _name: &str,
-    _priority: Option<tutti_rt::PriorityRequest>,
-    _body: Box<dyn FnOnce(&tutti_rt::StopToken) + Send>,
-) -> std::io::Result<tutti_rt::ThreadHandle<()>> {
+    _priority: Option<tutti_platform::PriorityRequest>,
+    _body: Box<dyn FnOnce(&tutti_platform::StopToken) + Send>,
+) -> std::io::Result<tutti_platform::ThreadHandle<()>> {
     Err(std::io::Error::other("no threads"))
 }
 

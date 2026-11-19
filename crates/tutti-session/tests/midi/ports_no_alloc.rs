@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::Instant;
+use tutti_platform::Instant;
 
 use crate::common::{MF, play};
 use tutti_buffers::ChannelLayout;
@@ -62,7 +62,7 @@ fn an_input_and_an_output_port_render_without_allocating() {
         .unwrap()
         .sync_controls
         .messages()
-        .set(tutti_midi_runtime::SyncMessages {
+        .store(tutti_midi_runtime::SyncMessages {
             clock: true,
             ..tutti_midi_runtime::SyncMessages::OFF
         });

@@ -139,12 +139,15 @@ mod clap {
                 held: std::time::Duration::from_secs(5),
             });
 
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let deadline = tutti_platform::Instant::now() + std::time::Duration::from_secs(10);
         let cause = loop {
             if let PluginHealth::Died { cause } = s.plugin_view(node).unwrap().health() {
                 break cause;
             }
-            assert!(std::time::Instant::now() < deadline, "it never read Died");
+            assert!(
+                tutti_platform::Instant::now() < deadline,
+                "it never read Died"
+            );
             render_block(&s);
             std::thread::sleep(std::time::Duration::from_millis(5));
         };

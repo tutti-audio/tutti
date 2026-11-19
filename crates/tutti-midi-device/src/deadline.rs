@@ -1,7 +1,9 @@
 //! The sans-IO timing vocabulary of the discoverers: a send that is repeated. Every
 //! method takes the `now` it is asked at.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use tutti_platform::Instant;
 
 /// A request sent `attempts` times, the last at `sent`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

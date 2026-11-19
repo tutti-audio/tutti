@@ -74,8 +74,9 @@ use pressure_rig::{
     BLOCK, GraphUnit, Planes, SAMPLE_RATE, STALL, fill_sine, load_half_stalled, load_n,
     load_stalled, peak,
 };
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tutti_fixtures::machine_lock;
+use tutti_platform::Instant;
 
 /// One block's worth of wall time — the audio callback's deadline.
 const PERIOD: Duration = Duration::from_nanos((BLOCK as f64 / SAMPLE_RATE * 1e9) as u64);
@@ -757,7 +758,7 @@ fn answering_plugins_carry_audio_beside_stalled_ones() {
 ///
 /// What "raised" means is derived, not restated: a scratch thread of this
 /// process makes the same call `request_audio_priority` makes
-/// (`tutti_rt::request_priority(PriorityRequest::Highest)`), under the same
+/// (`tutti_platform::request_priority(PriorityRequest::Highest)`), under the same
 /// limits the server inherits from it, and the server must match what it
 /// got. Where the OS refuses (an unprivileged CI runner: `RLIMIT_NICE` 0 and
 /// no `CAP_SYS_NICE`), both stay where they started, and this checks only
@@ -786,7 +787,8 @@ fn plugin_server_audio_thread_is_raised_where_the_os_allows() {
 
     let _machine = machine_lock();
     let (raised, expected) = std::thread::spawn(|| {
-        let raised = tutti_rt::request_priority(tutti_rt::PriorityRequest::Highest).is_granted();
+        let raised =
+            tutti_platform::request_priority(tutti_platform::PriorityRequest::Highest).is_granted();
         (raised, sched("/proc/thread-self/stat"))
     })
     .join()

@@ -41,6 +41,8 @@ tutti-plugin-types = { version = "0.0.1", path = "../tutti-plugin-types" }
 # The sample width of the served pipeline's channels (`Float`) and the block views.
 tutti-buffers = { version = "0.0.1", path = "../tutti-buffers", features = ["serde"] }
 
+# `spawn_named`, `request_priority`, `with_no_denormals`: the server's render and control threads.
+tutti-platform = { version = "0.0.1", path = "../tutti-platform" }
 tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
 tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false }
 tutti-graph = { version = "0.0.1", path = "../tutti-graph" }

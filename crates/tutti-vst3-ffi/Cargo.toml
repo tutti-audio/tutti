@@ -39,6 +39,8 @@ vst3 = "0.3"
 # The Linux `IRunLoop` polls the descriptors a plugin registered; the run loop's
 # typed values (`Ready`, `Interest`, `FdId`) are named on every platform.
 tutti-plugin-ipc-ffi = { version = "0.0.1", path = "../tutti-plugin-ipc-ffi" }
+# `Instant`, the one clock type.
+tutti-platform = { version = "0.0.1", path = "../tutti-platform" }
 
 # The VST3 macOS module entry point is `bundleEntry(CFBundleRef)`, so building a
 # CFBundleRef for the `.vst3` bundle needs CoreFoundation. macOS only.

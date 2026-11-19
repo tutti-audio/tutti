@@ -178,6 +178,33 @@ pub(super) fn statements(code: &str) -> Vec<Statement> {
         .collect()
 }
 
+/// Every `use` statement of lexed `code` (public or not), as `(offset of the `use`, its
+/// leaves)`.
+pub(super) fn item_uses(code: &str) -> Vec<(usize, Vec<Leaf>)> {
+    let b = code.as_bytes();
+    let mut out = Vec::new();
+    let mut from = 0;
+    while let Some(at) = find_word_from(code, "use", from) {
+        from = at + 3;
+        let before = code[..at].trim_end();
+        let starts_item = match before.as_bytes().last() {
+            None => true,
+            Some(b';' | b'}' | b'{' | b']' | b')') => true,
+            Some(_) => before.ends_with("pub"),
+        };
+        if !starts_item || b.get(from).is_some_and(|c| is_word(*c)) {
+            continue;
+        }
+        let Some(semi) = code[from..].find(';') else {
+            continue;
+        };
+        let mut found = Vec::new();
+        leaves(&tokens(&code[from..from + semi]), &mut 0, &[], &mut found);
+        out.push((at, found));
+    }
+    out
+}
+
 /// The `pub use` leaves of the source `src`.
 pub(super) fn uses(src: &str) -> Vec<Leaf> {
     statements(&blank(src))

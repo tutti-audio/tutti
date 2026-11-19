@@ -8,7 +8,7 @@
 
 use crate::common::blocks;
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use tutti_platform::Instant;
 
 use tutti_midi_device::EndpointId;
 use tutti_midi_hardware::test_support::{FakeBackend, FakeCounters, endpoint};
@@ -397,7 +397,7 @@ fn sender(wire: &Wire, to: Recipient) -> Session {
         .unwrap()
         .sync_controls
         .messages()
-        .set(SyncMessages {
+        .store(SyncMessages {
             mmc: Some(to),
             rate: MtcRate::Fps30,
             ..SyncMessages::OFF
@@ -489,7 +489,7 @@ fn nothing_is_sent_unless_asked_and_it_can_be_stopped() {
         .unwrap()
         .sync_controls
         .messages()
-        .set(SyncMessages::OFF);
+        .store(SyncMessages::OFF);
     s.play().unwrap();
     blocks(&s, 2);
     let _ = s.update();

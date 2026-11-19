@@ -108,8 +108,9 @@ fn a_midi2_endpoint_is_covered_by_enumeration() {
 #[test]
 fn a_scheduled_packet_arrives_after_the_one_sent_now() {
     use std::sync::mpsc;
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
     use tutti_midi_runtime::{Outgoing, SendAt};
+    use tutti_platform::Instant;
     use tutti_ump::MidiChannel;
 
     let (tx, rx) = mpsc::channel();

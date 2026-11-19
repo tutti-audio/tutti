@@ -45,9 +45,10 @@
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tutti_au_ffi::Property;
 use tutti_au_ffi::property::{Latency, ParameterList, TailTime};
+use tutti_platform::Instant;
 
 use tutti_au_host::{AuEvent, AuParameterListener, EventAddress};
 use tutti_units::Samples;

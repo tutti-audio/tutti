@@ -11,7 +11,7 @@
 //! arithmetic of every other thread that ran afterwards on the same core.
 //!
 //! ```
-//! use tutti_rt::with_no_denormals;
+//! use tutti_platform::with_no_denormals;
 //!
 //! fn audio_callback(buffer: &mut [f32]) {
 //!     with_no_denormals(|| {
@@ -104,7 +104,7 @@ use core::marker::PhantomData;
 /// # Examples
 ///
 /// ```
-/// use tutti_rt::with_no_denormals;
+/// use tutti_platform::with_no_denormals;
 ///
 /// let mut buffer = [1.0_f32; 4];
 /// let sum = with_no_denormals(|| {

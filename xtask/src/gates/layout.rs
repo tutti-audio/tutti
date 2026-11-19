@@ -49,6 +49,7 @@ fn skipped(dir: &str) -> bool {
 
 /// Lowest first. A normal or build dependency must land in a strictly lower layer.
 pub(super) const LAYERS: &[&[&str]] = &[
+    &["tutti-platform"],
     &["tutti-units", "tutti-plugin-ipc-ffi"],
     &["tutti-music", "tutti-ump", "tutti-buffers"],
     &[
@@ -104,31 +105,52 @@ pub(super) const LAYERS: &[&[&str]] = &[
 
 /// The crates whose normal and build dependencies on workspace crates are exactly these.
 const ONLY: &[(&str, &[&str])] = &[
+    // The platform's edges name no workspace crate: every other crate may depend on it.
+    ("tutti-platform", &[]),
     (
         "tutti-midi-protocol",
         &["tutti-ump", "tutti-music", "tutti-units"],
     ),
-    ("tutti-midi-ci", &["tutti-ump", "tutti-units"]),
+    (
+        "tutti-midi-ci",
+        &["tutti-ump", "tutti-units", "tutti-platform"],
+    ),
     (
         "tutti-midi-device",
-        &["tutti-midi-ci", "tutti-ump", "tutti-units"],
+        &[
+            "tutti-midi-ci",
+            "tutti-ump",
+            "tutti-units",
+            "tutti-platform",
+        ],
     ),
-    // The OS edges: the UMP types for what the spec defines, nothing else.
-    ("tutti-alsa-ffi", &["tutti-ump"]),
-    ("tutti-coremidi-ffi", &["tutti-ump"]),
-    ("tutti-winmm-ffi", &["tutti-ump"]),
+    // The OS edges: the UMP types for what the spec defines and the platform's clock, nothing else.
+    ("tutti-alsa-ffi", &["tutti-ump", "tutti-platform"]),
+    ("tutti-coremidi-ffi", &["tutti-ump", "tutti-platform"]),
+    ("tutti-winmm-ffi", &["tutti-ump", "tutti-platform"]),
     ("tutti-ump", &["tutti-units"]),
     // The unit vocabulary a `Gauge<U>` and a `Param<U>` hold (`Reading` for a `Unit`), the
     // channel layout a position ring is written in and the `Sample` formats the
     // audio-shaped structures are generic over.
-    ("tutti-rt", &["tutti-units", "tutti-buffers"]),
+    (
+        "tutti-rt",
+        &["tutti-units", "tutti-buffers", "tutti-platform"],
+    ),
     (
         "tutti-midi-network",
-        &["tutti-ump", "tutti-midi-ci", "tutti-units"],
+        &[
+            "tutti-ump",
+            "tutti-midi-ci",
+            "tutti-units",
+            "tutti-platform",
+        ],
     ),
     ("tutti-metering", &["tutti-units"]),
     // The staged files' `Mint` and the encoders' worker threads (`spawn_named`).
-    ("tutti-codec", &["tutti-units", "tutti-buffers", "tutti-rt"]),
+    (
+        "tutti-codec",
+        &["tutti-units", "tutti-buffers", "tutti-rt", "tutti-platform"],
+    ),
     ("tutti-tempo", &["tutti-units", "tutti-music"]),
     (
         "tutti-voicing",
@@ -148,7 +170,12 @@ const ONLY: &[(&str, &[&str])] = &[
     // The probe client's child guard and its host-pid variable.
     (
         "tutti-plugin-db",
-        &["tutti-plugin-types", "tutti-rt", "tutti-plugin-ipc-ffi"],
+        &[
+            "tutti-plugin-types",
+            "tutti-rt",
+            "tutti-plugin-ipc-ffi",
+            "tutti-platform",
+        ],
     ),
     (
         "tutti-plugin-ipc",
@@ -160,6 +187,7 @@ const ONLY: &[(&str, &[&str])] = &[
             "tutti-ump",
             "tutti-plugin-types",
             "tutti-plugin-ipc-ffi",
+            "tutti-platform",
         ],
     ),
     (
@@ -175,6 +203,7 @@ const ONLY: &[(&str, &[&str])] = &[
             "tutti-rt",
             "tutti-ump",
             "tutti-plugin-ipc-ffi",
+            "tutti-platform",
         ],
     ),
     // The server is `Ipc` hosting over the served formats: the wire, the vocabulary and the CLAP, VST3 and AU hosts.
@@ -194,6 +223,7 @@ const ONLY: &[(&str, &[&str])] = &[
             "tutti-clap-host",
             "tutti-vst3-host",
             "tutti-au-host",
+            "tutti-platform",
         ],
     ),
     // The probe reads one file as a format host would: the hosts, the descriptor
@@ -213,6 +243,7 @@ const ONLY: &[(&str, &[&str])] = &[
             "tutti-vst3-host",
             "tutti-vst2-host",
             "tutti-au-host",
+            "tutti-platform",
         ],
     ),
     ("tutti-dsp", &["tutti-units", "tutti-buffers", "tutti-rt"]),
@@ -241,11 +272,14 @@ const ONLY: &[(&str, &[&str])] = &[
             "tutti-rt",
             "tutti-ump",
             "tutti-curve",
+            "tutti-platform",
         ],
     ),
 ];
 
 const CODEC_LIBS: &[&str] = &["symphonia", "flacenc", "aifc", "vorbis_rs"];
+/// The platform libraries `tutti-platform` alone names, in either spelling.
+const PLATFORM_LIBS: &[&str] = &["web-time", "web_time", "thread-priority", "thread_priority"];
 const ENCODERS: &[&str] = &["flacenc", "aifc", "vorbis_rs", "md-5"];
 
 /// A crate that names `winnow`, and the parser modules that may.
@@ -442,6 +476,19 @@ pub(super) fn check(tree: &dyn Tree, cargo: &dyn Cargo) -> Report {
             if CODEC_LIBS.contains(&dep.as_str()) && *kind != Kind::Dev {
                 bad.push(format!(
                     "{dep} is a {} dependency of {}; the codec libraries are tutti-codec's alone",
+                    kind.label(),
+                    p.name
+                ));
+            }
+        }
+    }
+
+    // The platform libraries stay behind tutti-platform, for every kind of dependency.
+    for p in pkgs.iter().filter(|p| p.name != "tutti-platform") {
+        for (dep, kind) in &p.deps {
+            if PLATFORM_LIBS.contains(&dep.as_str()) {
+                bad.push(format!(
+                    "{dep} is a {} dependency of {}; the platform libraries are tutti-platform's alone",
                     kind.label(),
                     p.name
                 ));
@@ -709,7 +756,7 @@ mod tests {
     fn a_layered_workspace_passes() {
         let r = run(&base());
         assert!(r.passed(), "{:?}", r.findings);
-        assert_eq!(r.out[0], "check-layout: ok (6 members, 51 ranked)");
+        assert_eq!(r.out[0], "check-layout: ok (6 members, 52 ranked)");
     }
 
     #[test]
@@ -720,7 +767,7 @@ mod tests {
             "[dependencies]\ntutti-graph = { path = \"../tutti-graph\" }\n",
         ));
         assert!(r.findings.iter().any(|l| {
-            l.contains("tutti-units -> tutti-graph (normal) points up or sideways (layer 0 -> 4)")
+            l.contains("tutti-units -> tutti-graph (normal) points up or sideways (layer 1 -> 5)")
         }));
         // A dev-dependency may point anywhere.
         let r = with((
@@ -885,7 +932,7 @@ mod tests {
     }
 
     #[test]
-    fn an_os_edge_names_the_ump_types_only() {
+    fn an_os_edge_names_the_ump_types_and_the_platform_only() {
         let os = |dir, krate, dep| {
             let mut v = base();
             v.push(("crates/tutti-music", "tutti-music", ""));
@@ -896,7 +943,11 @@ mod tests {
             ("crates/tutti-alsa-ffi", "tutti-alsa-ffi"),
             ("crates/tutti-coremidi-ffi", "tutti-coremidi-ffi"),
         ] {
-            let r = os(dir, krate, "[dependencies]\ntutti-ump = { path = \"x\" }\n");
+            let r = os(
+                dir,
+                krate,
+                "[dependencies]\ntutti-ump = { path = \"x\" }\ntutti-platform = { path = \"x\" }\n",
+            );
             assert!(r.passed(), "{:?}", r.findings);
             let r = os(
                 dir,
@@ -904,7 +955,7 @@ mod tests {
                 "[dependencies]\ntutti-music = { path = \"x\" }\n",
             );
             assert!(r.findings.iter().any(|l| l.contains(&format!(
-                "{krate} may depend on [\"tutti-ump\"] only; it depends on {{\"tutti-music\"}}"
+                "{krate} may depend on [\"tutti-platform\", \"tutti-ump\"] only; it depends on {{\"tutti-music\"}}"
             ))));
         }
     }
@@ -923,8 +974,33 @@ mod tests {
             "[dependencies]\ntutti-units = { path = \"x\" }\ntutti-ump = { path = \"x\" }\n",
         ));
         assert!(r.findings.iter().any(|l| l.contains(
-            "tutti-rt may depend on [\"tutti-buffers\", \"tutti-units\"] only; it depends on {\"tutti-ump\"}"
+            "tutti-rt may depend on [\"tutti-buffers\", \"tutti-platform\", \"tutti-units\"] only; it depends on {\"tutti-ump\"}"
         )));
+    }
+
+    #[test]
+    fn the_platform_libraries_are_the_platform_crates_alone() {
+        let r = with((
+            "crates/tutti-graph",
+            "tutti-graph",
+            "[dependencies]\nweb-time = \"1\"\n[dev-dependencies]\nthread-priority = \"3\"\n",
+        ));
+        for lib in ["web-time is a normal", "thread-priority is a dev"] {
+            assert!(
+                r.findings.iter().any(|l| l.contains(lib)
+                    && l.contains("the platform libraries are tutti-platform's alone")),
+                "{lib}: {:?}",
+                r.findings
+            );
+        }
+        let mut v = base();
+        v.push((
+            "crates/tutti-platform",
+            "tutti-platform",
+            "[dependencies]\nweb-time = \"1\"\nthread-priority = \"3\"\n",
+        ));
+        let r = run(&v);
+        assert!(r.passed(), "{:?}", r.findings);
     }
 
     #[test]

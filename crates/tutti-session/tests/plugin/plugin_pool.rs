@@ -5,8 +5,10 @@
 //! Build the server and the probe first: `cargo build -p tutti-plugin-server
 //! -p tutti-plugin-probe`.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
 use tutti_buffers::PlanesMut;
+use tutti_platform::Instant;
 
 use tutti_buffers::InterleavedMut;
 use tutti_buffers::{ChannelLayout, MaxBlock};
@@ -442,13 +444,15 @@ fn an_initial_state_is_restored_and_two_keys_load_two_plugins() {
     loaded(&mut s, "a");
     let a = s.add_pooled_plugin(&"a").unwrap();
     let set = Normalized::of(0.9);
-    s.plugin_view(a)
+    let target = s
+        .plugin_view(a)
         .unwrap()
         .params()
         .get(CUTOFF)
-        .unwrap()
-        .set(set)
-        .unwrap();
+        .expect("the plugin declares the parameter")
+        .target();
+
+    s.set(target.to(set)).unwrap();
     let state = s
         .plugin_view(a)
         .unwrap()
@@ -527,13 +531,15 @@ fn a_state_job_saves_what_the_plugin_holds_and_refuses_by_name() {
     ));
 
     let set = Normalized::of(0.9);
-    s.plugin_view(a)
+    let target = s
+        .plugin_view(a)
         .unwrap()
         .params()
         .get(CUTOFF)
-        .unwrap()
-        .set(set)
-        .unwrap();
+        .expect("the plugin declares the parameter")
+        .target();
+
+    s.set(target.to(set)).unwrap();
     let saving = s
         .save_state(&"a", StateUse::Project)
         .expect("a node holds the plugin");

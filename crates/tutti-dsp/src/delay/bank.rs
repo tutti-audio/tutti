@@ -11,9 +11,9 @@
 //! **Time** is channel 0's control, and the channels past the first follow it
 //! ([`ChannelTimes::linked`](crate::ChannelTimes::linked)) or hold a time of their own
 //! ([`ChannelTimes::each`](crate::ChannelTimes::each)). A
-//! lane drives the time and the feedback **per frame** ([`DelayLanes`]): a delay time
-//! moved at audio rate is a flanger, a lane frame that is not finite falls back to the
-//! ramped value, and a lane frame is the trajectory itself, not ramped. The time ramps at
+//! control signal drives the time and the feedback **per frame** ([`DelaySignals`]): a delay time
+//! moved at audio rate is a flanger, a control signal frame that is not finite falls back to the
+//! ramped value, and a control signal frame is the trajectory itself, not ramped. The time ramps at
 //! most [`DELAY_SLEW`] frames of delay per frame (a moving delay is a pitch bend, so its
 //! speed is bounded and not its duration), the feedback and the cross-feedback over a
 //! length the caller sets.
@@ -93,11 +93,11 @@ fn stable_pair<F: Float>(fb: F, cross: F, bound: F) -> (F, F) {
     (F::from_unit(fb), F::from_unit(cross))
 }
 
-/// The per-frame lanes a delay reads beside its audio, in the audio's float, each
-/// `None` where nothing drives it. A lane is at least as long as the frames a call renders;
+/// The per-frame control signals a delay reads beside its audio, in the audio's float, each
+/// `None` where nothing drives it. A control signal is at least as long as the frames a call renders;
 /// a frame past its end is not driven.
 #[derive(Clone, Copy, Debug, Default)]
-pub struct DelayLanes<'a, F: Float> {
+pub struct DelaySignals<'a, F: Float> {
     /// The delay time in seconds, of every channel.
     pub time: Option<Mono<'a, F>>,
     /// The feedback.
@@ -198,14 +198,14 @@ impl<F: Float + Lerp> DelayBank<F> {
     /// takes the block's steps from them.
     ///
     /// Channel `c` of `input` feeds channel `c` of `output`; a channel past the bank's width,
-    /// or past the narrower of the two views, is not touched. A time lane frame is clamped
-    /// into the line, and one that is not finite is the ramped delay; a feedback lane frame
+    /// or past the narrower of the two views, is not touched. A time control signal frame is clamped
+    /// into the line, and one that is not finite is the ramped delay; a feedback control signal frame
     /// is clamped into the stable range, and one that is not finite is the ramped feedback.
     /// No allocation.
     pub fn process(
         &mut self,
         ramps: &mut DelayRamps<F>,
-        lanes: DelayLanes<'_, F>,
+        signals: DelaySignals<'_, F>,
         input: Planes<'_, F>,
         mut output: PlanesMut<'_, '_, F>,
     ) {
@@ -230,8 +230,8 @@ impl<F: Float + Lerp> DelayBank<F> {
         let g = *ramps;
         let bound = F::from_unit(Feedback::MAX_STABLE);
         let (time, feedback) = (
-            lanes.time.map(|l| l.samples()),
-            lanes.feedback.map(|l| l.samples()),
+            signals.time.map(|l| l.samples()),
+            signals.feedback.map(|l| l.samples()),
         );
         let cf = g.cross.now();
         let coupled = !self.routing.is_none() && (cf != F::ZERO || g.cross.target() != F::ZERO);
@@ -250,7 +250,7 @@ impl<F: Float + Lerp> DelayBank<F> {
         let linked = self.linked;
         let (rate, cap) = (self.rate, self.cap);
         // The rate crosses into the data's float once per block.
-        let lane_rate = F::from_unit(rate);
+        let signal_rate = F::from_unit(rate);
         let line_end = ReadPosition::from_frames(Samples::new(cap));
         let base = |c: usize, delay: ReadPosition| {
             if c == 0 || linked { delay } else { g.own[c] }
@@ -269,7 +269,7 @@ impl<F: Float + Lerp> DelayBank<F> {
                 |c, _| base(c, delay),
             );
         } else {
-            // A feedback lane is clamped, and a frame that is not finite is the ramped
+            // A feedback control signal is clamped, and a frame that is not finite is the ramped
             // feedback; self- and cross-feedback feed the same loop, so they are bounded as
             // a pair whatever drives them.
             let gain = |i: usize| -> (F, F) {
@@ -280,12 +280,12 @@ impl<F: Float + Lerp> DelayBank<F> {
                 stable_pair(fb, at(&g.cross, i), bound)
             };
             let delay_at = |c: usize, i: usize| -> ReadPosition {
-                // A lane value is seconds in the audio's own float: frames in that float, then
-                // a position by the one data-to-position direction. A lane-driven time has the
-                // lane's own precision; a held time keeps the exact `ReadPosition::of` path.
+                // A control signal value is seconds in the audio's own float: frames in that float, then
+                // a position by the one data-to-position direction. A time driven by a control signal has the
+                // control signal's own precision; a held time keeps the exact `ReadPosition::of` path.
                 match time.and_then(|s| s.get(i)) {
                     Some(&x) if x.is_finite() => {
-                        F::offset_position(ReadPosition::START, x * lane_rate).min(line_end)
+                        F::offset_position(ReadPosition::START, x * signal_rate).min(line_end)
                     }
                     _ => base(c, time_at(i)),
                 }

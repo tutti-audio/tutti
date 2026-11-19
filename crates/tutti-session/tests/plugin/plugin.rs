@@ -24,8 +24,9 @@ use tutti_session::{PluginChange, PluginEvent};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tutti_buffers::MaxBlock;
+use tutti_platform::Instant;
 
 use support::clap_probe;
 use tutti_buffers::ChannelLayout;
@@ -243,7 +244,7 @@ fn a_dropped_export_job_restores_realtime_on_the_next_update() {
 }
 
 /// **A plugin added mid-export is told Offline** on its first update:
-/// `needs_announcement`'s `!told` half, end to end. The mode has not changed
+/// `needs_notify`'s `!told` half, end to end. The mode has not changed
 /// since the export announced it, so only "never told" reaches the new
 /// plugin.
 #[test]
@@ -568,12 +569,15 @@ fn a_crashed_plugin_comes_back_at_its_node_with_its_last_state() {
     let id = gain_param(&s, node);
 
     // A value worth restoring, and a snapshot of it.
-    s.plugin_view(node)
+    let target = s
+        .plugin_view(node)
         .unwrap()
         .params()
         .get(id)
-        .expect("the plugin declares the gain")
-        .set(tutti_units::Normalized::of(0.25))
+        .expect("the plugin declares the parameter")
+        .target();
+
+    s.set(target.to(tutti_units::Normalized::of(0.25)))
         .expect("the gain is writable");
     let deadline = Instant::now() + Duration::from_secs(10);
     while !is_quarter(param(&s, node, id)) {
@@ -1287,12 +1291,15 @@ fn a_snapshot_that_kills_the_load_is_withheld_from_the_next_attempt() {
     let (node, _) = wired_probe(&mut s);
     let id = gain_param(&s, node);
     // A state that is not the plugin's default.
-    s.plugin_view(node)
+    let target = s
+        .plugin_view(node)
         .unwrap()
         .params()
         .get(id)
-        .expect("the plugin declares the gain")
-        .set(tutti_units::Normalized::of(0.25))
+        .expect("the plugin declares the parameter")
+        .target();
+
+    s.set(target.to(tutti_units::Normalized::of(0.25)))
         .expect("the gain is writable");
     let deadline = Instant::now() + Duration::from_secs(10);
     while !is_quarter(param(&s, node, id)) {

@@ -1,4 +1,5 @@
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tutti_platform::Instant;
 
 use tutti_midi_runtime::ACTIVE_SENSING_INTERVAL;
 use tutti_ump::{Message, MidiGroup, Protocol, System, Ump};

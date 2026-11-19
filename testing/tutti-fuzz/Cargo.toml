@@ -20,6 +20,8 @@ tutti-midi-ci = { path = "../../crates/tutti-midi-ci" }
 tutti-midi-file = { path = "../../crates/tutti-midi-file" }
 tutti-midi-protocol = { path = "../../crates/tutti-midi-protocol" }
 tutti-ump = { path = "../../crates/tutti-ump" }
+# `Instant`, the one clock type.
+tutti-platform = { version = "0.0.1", path = "../../crates/tutti-platform" }
 
 [dev-dependencies]
 tutti-fixtures = { path = "../tutti-fixtures" }

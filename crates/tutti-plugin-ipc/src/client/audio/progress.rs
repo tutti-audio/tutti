@@ -55,7 +55,8 @@
 use super::ask::Ask;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tutti_platform::Instant;
 use tutti_plugin_types::{StateError, Timeouts};
 
 /// How often [`StateProgress::wait`] rechecks the counter.

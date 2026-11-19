@@ -9,7 +9,7 @@
 //!
 //! # The OS time is an [`Instant`]
 //!
-//! `std::time::Instant` is the OS's monotonic clock on every target, so the map
+//! `tutti_platform::Instant` is the OS's monotonic clock on every target, so the map
 //! is tied to none. A backend whose timestamps are on another scale (CoreMIDI's
 //! host time, an ALSA queue's own zero) converts them to an `Instant` where it
 //! reads them, by pairing one reading of its scale with `Instant::now()`.
@@ -50,7 +50,9 @@
 //! instant at the new rate, as the executor does to its clock on a re-prepare
 //! ([`Frame::rescaled`]).
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use tutti_platform::Instant;
 
 use tutti_units::{Frame, Moment, SampleRate, Seconds};
 

@@ -66,11 +66,11 @@ impl Rig {
     }
 
     /// `audio` (one slice per channel) through the bank in blocks of `block`, with the
-    /// time and feedback lanes when given.
+    /// time and feedback control signals when given.
     fn run_in(
         &mut self,
         audio: &[Vec<f32>],
-        lanes: [Option<&[f32]>; 2],
+        signals: [Option<&[f32]>; 2],
         block: usize,
     ) -> Vec<Vec<f32>> {
         let n = audio[0].len();
@@ -80,13 +80,13 @@ impl Rig {
             let end = (at + block).min(n);
             let ins: Vec<&[f32]> = audio.iter().map(|c| &c[at..end]).collect();
             let mut outs: Vec<&mut [f32]> = out.iter_mut().map(|c| &mut c[at..end]).collect();
-            let lanes = DelayLanes {
-                time: lanes[0].map(|l| Mono::new(&l[at..end])),
-                feedback: lanes[1].map(|l| Mono::new(&l[at..end])),
+            let signals = DelaySignals {
+                time: signals[0].map(|l| Mono::new(&l[at..end])),
+                feedback: signals[1].map(|l| Mono::new(&l[at..end])),
             };
             self.bank.process(
                 &mut self.ramps,
-                lanes,
+                signals,
                 Planes::new(&ins).unwrap(),
                 PlanesMut::new(&mut outs).unwrap(),
             );
@@ -298,12 +298,12 @@ fn a_time_ramp_is_bounded_by_the_slew_and_lands_exactly() {
     assert!((at(3999) - 400.0).abs() < 2e-3, "and held: {}", at(3999));
 }
 
-/// A time lane, in seconds, is the delay of **every frame**: a ramp through a delay swept
-/// by a sine (a flanger's) is the ramp at the lane's time, `y[n] = n - tau[n]`, read off
+/// A time control signal, in seconds, is the delay of **every frame**: a ramp through a delay swept
+/// by a sine (a flanger's) is the ramp at the control signal's time, `y[n] = n - tau[n]`, read off
 /// the output frame by frame; and a frame that is not finite, or not a time, is the
 /// ramped delay (here 20 frames), and one past the longest delay is the longest.
 #[test]
-fn a_time_lane_is_the_delay_of_each_frame() {
+fn a_time_signal_is_the_delay_of_each_frame() {
     let family = mono(InterpolationMode::Linear);
     let len = 4_000;
     let tau = |n: usize| -> f32 {
@@ -314,17 +314,17 @@ fn a_time_lane_is_the_delay_of_each_frame() {
             _ => (40.0 + 25.0 * (n as f32 * 0.01).sin()) / 1024.0,
         }
     };
-    let lane: Vec<f32> = (0..len).map(tau).collect();
+    let signal: Vec<f32> = (0..len).map(tau).collect();
     let ramp: Vec<f32> = (0..len).map(|n| n as f32).collect();
     let mut k = runner(&family, &controls(20.0 / 1024.0, 0.0, 0.0));
-    let y = k.run_in(&[ramp], [Some(&lane), None], 64).remove(0);
+    let y = k.run_in(&[ramp], [Some(&signal), None], 64).remove(0);
     for n in 1_200..len {
         let want = match n % 500 {
             100 | 200 => 20.0,
             // Past the longest delay: the longest (1024 frames), which a ramp of fewer
             // frames has not reached: the line holds only the zeros from before the start.
             300 => 1024.0,
-            _ => f64::from(lane[n]) * 1024.0,
+            _ => f64::from(signal[n]) * 1024.0,
         };
         let got = n as f64 - f64::from(y[n]);
         if n % 500 == 300 {
@@ -339,30 +339,32 @@ fn a_time_lane_is_the_delay_of_each_frame() {
     // never.
     let mut x = impulse(1_300);
     x[0] = 1.0;
-    let lane = vec![1e9f32; 1_300];
+    let signal = vec![1e9f32; 1_300];
     let mut k = runner(&family, &controls(20.0 / 1024.0, 0.0, 0.0));
-    let y = k.run_in(&[x], [Some(&lane), None], 64).remove(0);
+    let y = k.run_in(&[x], [Some(&signal), None], 64).remove(0);
     assert_eq!(y.iter().position(|&s| s != 0.0), Some(1024));
 }
 
-/// A feedback lane is the feedback of every frame: held at `g` it is the echo train of a
+/// A feedback control signal is the feedback of every frame: held at `g` it is the echo train of a
 /// cell at `g`; a frame that is not finite is the ramped cell's (here 0.5); and a value
 /// past the stable range is the range's last (0.99).
 #[test]
-fn a_feedback_lane_is_the_feedback_of_each_frame() {
+fn a_feedback_signal_is_the_feedback_of_each_frame() {
     let (d, len) = (16usize, 16 * 8 + 5);
     let family = mono(InterpolationMode::Linear);
     let train = |g: f32, k: usize| g.powi(k as i32);
-    for (lane, g) in [
+    for (level, g) in [
         (0.8f32, 0.8f32),
         (f32::NAN, 0.5),
         (f32::INFINITY, 0.5),
         (5.0, 0.99),
         (-2.0, 0.0),
     ] {
-        let lane = vec![lane; len];
+        let signal = vec![level; len];
         let mut k = runner(&family, &controls(d as f64 / 1024.0, 0.5, 0.0));
-        let y = k.run_in(&[impulse(len)], [None, Some(&lane)], 64).remove(0);
+        let y = k
+            .run_in(&[impulse(len)], [None, Some(&signal)], 64)
+            .remove(0);
         for (i, &s) in y.iter().enumerate() {
             let want = if i >= d && i % d == 0 && (i / d == 1 || g > 0.0) {
                 train(g, i / d - 1)
@@ -371,7 +373,7 @@ fn a_feedback_lane_is_the_feedback_of_each_frame() {
             };
             assert!(
                 (s - want).abs() < 1e-5,
-                "lane gives {g}, frame {i}: {s}, want {want}"
+                "signal gives {g}, frame {i}: {s}, want {want}"
             );
         }
     }
@@ -439,7 +441,7 @@ fn a_feedback_past_the_stable_range_is_the_greatest_stable_one() {
 }
 
 /// The render is a function of the stream, not of where its blocks fall: a moving delay,
-/// both feedbacks ramping and both lanes driving give the same bits in any split of the
+/// both feedbacks ramping and both control signals driving give the same bits in any split of the
 /// stream, on the coupled loop and the uncoupled one.
 #[test]
 fn any_split_of_the_stream_renders_the_same_bits() {
@@ -461,11 +463,11 @@ fn any_split_of_the_stream_renders_the_same_bits() {
         .map(|n| 0.3 + 0.4 * (n as f32 * 0.003).sin())
         .collect();
     for layout in [stereo(), stereo_apart(40.0 / 1024.0)] {
-        for lanes in [[None, None], [Some(&time[..]), Some(&feedback[..])]] {
+        for signals in [[None, None], [Some(&time[..]), Some(&feedback[..])]] {
             let render = |block: usize| {
                 let mut k = Rig::at(&layout, &controls(10.0 / 1024.0, 0.2, 0.1), BINARY);
                 k.retarget(&controls(300.0 / 1024.0, 0.7, 0.5));
-                k.run_in(&x, lanes, block)
+                k.run_in(&x, signals, block)
             };
             let whole = render(len);
             for block in [1, 7, 16, 64, 333] {
@@ -508,7 +510,7 @@ fn a_clone_keeps_the_capacity_and_the_echoes_in_flight() {
     let mut out = vec![0.0f32; 1_100];
     copy.process(
         &mut k.ramps,
-        DelayLanes::default(),
+        DelaySignals::default(),
         Planes::new(&[&silence[..]]).unwrap(),
         PlanesMut::new(&mut [&mut out[..]]).unwrap(),
     );
@@ -529,7 +531,7 @@ fn an_f64_impulse_arrives_at_the_delay() {
     let mut outs = [&mut y[..]];
     bank.process(
         &mut ramps,
-        DelayLanes::default(),
+        DelaySignals::default(),
         Planes::new(&ins).unwrap(),
         PlanesMut::new(&mut outs).unwrap(),
     );
@@ -547,7 +549,7 @@ fn run_wide(layout: &DelayLayout, c: &DelayControls, x: &[Vec<f64>]) -> Vec<Vec<
     let mut outs: Vec<&mut [f64]> = out.iter_mut().map(Vec::as_mut_slice).collect();
     bank.process(
         &mut ramps,
-        DelayLanes::default(),
+        DelaySignals::default(),
         Planes::new(&ins).unwrap(),
         PlanesMut::new(&mut outs).unwrap(),
     );

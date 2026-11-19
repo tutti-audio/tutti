@@ -3,7 +3,8 @@
 use std::os::fd::OwnedFd;
 use std::os::unix::net::UnixStream;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tutti_platform::Instant;
 
 use super::poll::{ErrorRun, read_fault, wait_fault};
 use crate::InputFault;
@@ -16,7 +17,8 @@ use tutti_alsa_ffi::{
     Blocking, Client, Event, Poller, PortCaps, PortKind, QueueClock, Read, UmpVersion, Wait,
 };
 use tutti_midi_device::EndpointId;
-use tutti_rt::{FaultLatch, ThreadHandle, spawn_named};
+use tutti_platform::{ThreadHandle, spawn_named};
+use tutti_rt::FaultLatch;
 
 /// How long dropping an input waits for its pump to end before it lets the
 /// thread go. A pump ends within a poll wake of the stop; only a read that never

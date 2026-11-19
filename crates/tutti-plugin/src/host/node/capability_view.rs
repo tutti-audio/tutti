@@ -76,7 +76,7 @@ pub struct TransportView<'a>(&'a mut PluginClient);
 impl TransportView<'_> {
     /// Install the project meter the snapshot's signature and bar are read
     /// from: the node's meter follows it (see
-    /// [`PluginMeter`](tutti_plugin_host::PluginMeter)), so a later edit reaches it.
+    /// [`PluginTimeSignature`](tutti_plugin_host::PluginTimeSignature)), so a later edit reaches it.
     pub fn set_meter(&mut self, meter: tutti_transport::ProjectMeter) {
         self.0.controls().set_meter(meter);
     }

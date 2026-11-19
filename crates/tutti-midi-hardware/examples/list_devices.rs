@@ -13,7 +13,9 @@
 //! cargo run --example list_devices
 //! ```
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use tutti_platform::Instant;
 
 use tutti_midi_device::Endpoint;
 use tutti_midi_hardware::{Devices, RecvTimeoutError};

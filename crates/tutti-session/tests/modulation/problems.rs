@@ -2,7 +2,9 @@
 //! lists a `Problem` for each refusal, unresolved target and unfed follower,
 //! and its `Display` names the node and the param.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use tutti_platform::Instant;
 
 use tutti_buffers::MaxBlock;
 use tutti_graph::NodeKey;

@@ -58,7 +58,7 @@
 //! `par.rs`; [`Executor::set_pool`] turns it on.)
 //!
 //! Walks [`Plan::ops`] in order, inside a flush-to-zero scope
-//! ([`with_no_denormals`](tutti_rt::with_no_denormals)). Per block it never allocates when no commit is
+//! ([`with_no_denormals`](tutti_platform::with_no_denormals)). Per block it never allocates when no commit is
 //! pending (see `tests/rt_no_alloc.rs`) and hands every node the **whole
 //! block** and its sorted events.
 //!

@@ -6,7 +6,7 @@ use tutti_dsp::{COEFF_INTERVAL, OscillatorWave, Tremolo, TremoloControls};
 use tutti_graph::{Cost, Shape};
 use tutti_units::{Depth, Hz, SampleRate, Tail};
 
-use crate::kernel::{ControlLanes, Kernel, KernelNode};
+use crate::kernel::{ControlSignals, Kernel, KernelNode};
 
 /// What a [`TremoloNode`] is made from: its width, the wave of its LFO and where its
 /// controls start.
@@ -143,7 +143,7 @@ impl<F: Float> Kernel for TremoloKernel<F> {
     fn render(
         &mut self,
         input: Planes<'_, F>,
-        _: ControlLanes<'_, F>,
+        _: ControlSignals<'_, F>,
         output: PlanesMut<'_, '_, F>,
     ) {
         self.tremolo.process(input, output);

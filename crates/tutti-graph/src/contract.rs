@@ -1195,17 +1195,12 @@ impl Schedule {
     fn blocks(self, total: u64) -> Vec<usize> {
         let mut out = Vec::new();
         let mut done = 0u64;
-        // xorshift64: no dependency, and the same schedule every run.
-        let mut s = 0x9e37_79b9_7f4a_7c15u64;
+        // A fixed seed: the same schedule every run.
+        let mut rng = tutti_rt::SplitMix64::new(0);
         while done < total {
             let n = match self {
                 Schedule::Fixed(n) => n,
-                Schedule::Random => {
-                    s ^= s << 13;
-                    s ^= s >> 7;
-                    s ^= s << 17;
-                    1 + (s % MAX_BLOCK as u64) as usize
-                }
+                Schedule::Random => 1 + (rng.next_u64() % MAX_BLOCK as u64) as usize,
             };
             out.push(n);
             done += n as u64;

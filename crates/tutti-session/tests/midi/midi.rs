@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use tutti_session::Stamp;
 
 #[cfg(feature = "midi-hardware")]
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tutti_graph::Losses;
 #[cfg(feature = "midi-hardware")]
 use tutti_graph::NodeKey;
@@ -20,6 +20,8 @@ use tutti_midi_device::{EndpointId, PortDirection};
 #[cfg(feature = "midi-hardware")]
 use tutti_midi_runtime::{CHANNELLESS_PORT, MIDI_INPUT_PORTS};
 use tutti_midi_runtime::{LIVE_INLET_CAPACITY, TimedMidiEvent};
+#[cfg(feature = "midi-hardware")]
+use tutti_platform::Instant;
 use tutti_rt::PushError;
 #[cfg(feature = "midi-hardware")]
 use tutti_ump::MidiGroup;
@@ -522,7 +524,7 @@ fn clocked(sink: Arc<dyn tutti_midi_runtime::MidiOut>) -> Session {
         .unwrap()
         .sync_controls
         .messages()
-        .set(tutti_midi_runtime::SyncMessages {
+        .store(tutti_midi_runtime::SyncMessages {
             clock: true,
             ..tutti_midi_runtime::SyncMessages::OFF
         });
@@ -2100,7 +2102,7 @@ fn an_output_port_stamps_as_the_devices_configuration_says() {
         .unwrap()
         .sync_controls
         .messages()
-        .set(tutti_midi_runtime::SyncMessages {
+        .store(tutti_midi_runtime::SyncMessages {
             clock: true,
             ..tutti_midi_runtime::SyncMessages::OFF
         });
@@ -2156,7 +2158,7 @@ fn a_device_that_receives_jr_has_every_message_prefixed_by_a_timestamp() {
         .unwrap()
         .sync_controls
         .messages()
-        .set(tutti_midi_runtime::SyncMessages {
+        .store(tutti_midi_runtime::SyncMessages {
             clock: true,
             ..tutti_midi_runtime::SyncMessages::OFF
         });

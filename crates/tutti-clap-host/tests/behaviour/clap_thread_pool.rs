@@ -12,7 +12,8 @@
 
 use std::path::Path;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tutti_platform::Instant;
 use tutti_rt::LockExt;
 
 use tutti_buffers::InputOutput;

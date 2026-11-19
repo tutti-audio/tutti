@@ -529,7 +529,9 @@ fn wait_for_reply(bridge: &PluginBridge, slab: &AudioSlab, seq: u64, budget: std
     if bridge
         .audio()
         .progress()
-        .wait_until(std::time::Instant::now() + budget, || slab.has_output(seq))
+        .wait_until(tutti_platform::Instant::now() + budget, || {
+            slab.has_output(seq)
+        })
     {
         return;
     }
@@ -1062,7 +1064,7 @@ fn counters_on(bridge: &PluginBridge) -> Arc<ChunkCounters> {
 /// of the bridge thread, the server's end) wakes the check of, failing after
 /// [`WAIT_BUDGET`].
 fn wait_for(bridge: &PluginBridge, what: &str, done: impl FnMut() -> bool) {
-    let deadline = std::time::Instant::now() + WAIT_BUDGET;
+    let deadline = tutti_platform::Instant::now() + WAIT_BUDGET;
     assert!(
         bridge.audio().progress().wait_until(deadline, done),
         "{what}"
@@ -1717,7 +1719,7 @@ fn a_blocks_status_reaches_the_host_with_its_chunk() {
         );
         // The bridge thread counts a reply once it is available to the next
         // collect: wait for it.
-        let deadline = std::time::Instant::now() + WAIT_BUDGET;
+        let deadline = tutti_platform::Instant::now() + WAIT_BUDGET;
         assert!(
             bridge.audio().progress().wait_until(deadline, || bridge
                 .audio()

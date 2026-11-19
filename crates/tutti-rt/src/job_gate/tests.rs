@@ -113,7 +113,8 @@ fn a_panicking_job_closes_the_gate() {
 /// deterministically.
 #[test]
 fn run_waits_for_a_helper_still_inside() {
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
+    use tutti_platform::Instant;
     let gate = JobGate::new(2);
     let inside = AtomicBool::new(false);
     let left = AtomicBool::new(false);

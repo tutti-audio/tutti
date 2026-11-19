@@ -1,6 +1,8 @@
 //! [`Deadline`]: when a wait's time is up, a rule over clock readings.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use tutti_platform::Instant;
 
 /// When a wait's time is up: a rule over clock readings, which its caller takes.
 /// It reads no clock, so a test passes constructed instants.

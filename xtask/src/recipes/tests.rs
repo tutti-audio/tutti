@@ -100,6 +100,7 @@ fn the_ported_gates_are_in_process_steps_and_ci_runs_them() {
         ("check-comments", "gate check-comments"),
         ("check-alloc-binaries", "gate check-alloc-binaries"),
         ("check-platform-seam", "gate check-platform-seam"),
+        ("check-platform", "gate check-platform"),
         ("check-conformance", "gate check-conformance"),
     ] {
         assert_eq!(dry(recipe, &[]), [gate]);
@@ -131,6 +132,7 @@ fn the_ported_gates_are_in_process_steps_and_ci_runs_them() {
         "gate check-comments",
         "gate check-alloc-binaries",
         "gate check-platform-seam",
+        "gate check-platform",
         "gate check-conformance",
     ] {
         assert!(ci.iter().any(|l| l == want), "{want}");
@@ -213,6 +215,17 @@ fn loom_recipes_carry_their_environment() {
         dry("check-loom", &[]),
         [
             "RUSTFLAGS='--cfg loom' cargo clippy --locked -p tutti-rt -p tutti-plugin-ipc-ffi -p tutti-winmm-ffi --all-targets -- -D warnings"
+        ]
+    );
+}
+
+/// The web build check is the command CI's clippy job runs.
+#[test]
+fn check_wasm_lints_the_platform_crate_and_the_umbrella_for_the_web() {
+    assert_eq!(
+        dry("check-wasm", &[]),
+        [
+            "cargo clippy --locked --target wasm32-unknown-unknown -p tutti-platform -p tutti --lib -- -D warnings"
         ]
     );
 }

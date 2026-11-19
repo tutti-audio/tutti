@@ -18,7 +18,7 @@ use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
 use tutti_units::{Drive, Hz, Resonance, SampleRate, Tail};
 
 use super::filter_bus;
-use crate::kernel::{ControlLanes, Kernel, KernelNode};
+use crate::kernel::{ControlSignals, Kernel, KernelNode};
 
 /// A Moog-style four-stage ladder filter with resonance and drive, of any
 /// width: `N` audio inputs, `N` outputs.
@@ -55,7 +55,7 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 /// graph, in that port order. A per-frame value on a param port
 /// ([`Io::param`](tutti_graph::Io::param)) **overrides** the corresponding cell
 /// and is sampled at the first frame of each 16-frame segment, with the
-/// coefficients and the drive interpolated over the segment. A lane on the cutoff
+/// coefficients and the drive interpolated over the segment. A control signal on the cutoff
 /// or on Q stops the cutoff and Q cells ramping. Unmodulated, the filter reads its
 /// cells once per block at the cost of one branch.
 ///
@@ -188,7 +188,7 @@ impl<F: Float + SimdLanes> Kernel for LadderKernel<F> {
     fn render(
         &mut self,
         input: Planes<'_, F>,
-        _: ControlLanes<'_, F>,
+        _: ControlSignals<'_, F>,
         output: PlanesMut<'_, '_, F>,
     ) {
         self.bank.process(&mut self.blend, input, output);

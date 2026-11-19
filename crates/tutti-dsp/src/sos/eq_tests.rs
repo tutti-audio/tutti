@@ -1,7 +1,7 @@
 use core::f64::consts::PI;
 
 use super::*;
-use crate::{Complex64, Ring};
+use crate::{Complex64, DecayTime};
 use tutti_units::Q;
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -364,10 +364,10 @@ fn eps() -> f64 {
     crate::TAIL_FLOOR.to_amplitude().get()
 }
 
-fn frames(ring: Ring) -> usize {
-    match ring {
-        Ring::Finite(s) => (s.get() * RATE.get()).round() as usize,
-        Ring::Unbounded => panic!("unbounded"),
+fn frames(decay: DecayTime) -> usize {
+    match decay {
+        DecayTime::Finite(s) => (s.get() * RATE.get()).round() as usize,
+        DecayTime::Unbounded => panic!("unbounded"),
     }
 }
 
@@ -382,7 +382,7 @@ fn the_bell_ring_out_brings_the_tail_sum_under_the_floor() {
             for db in [-24.0f64, -6.0, 6.0, 24.0] {
                 let reported = frames(
                     MatchedBell::new(Q::new(q), Db::new(db))
-                        .ring_out(Hz::new(fc), RATE, crate::TAIL_FLOOR)
+                        .decay_time(Hz::new(fc), RATE, crate::TAIL_FLOOR)
                         .unwrap(),
                 );
                 let b = bell(fc, q, db);
@@ -401,7 +401,7 @@ fn the_tilt_ring_out_is_the_first_frame_the_tail_sum_is_under_the_floor() {
         for db in [-24.0f64, -6.0, 6.0, 24.0] {
             let reported = frames(
                 Tilt::new(Db::new(db))
-                    .ring_out(Hz::new(fc), RATE, crate::TAIL_FLOOR)
+                    .decay_time(Hz::new(fc), RATE, crate::TAIL_FLOOR)
                     .unwrap(),
             );
             let needed = tail_frame(&impulse_response(&tilt(fc, db), 1 << 20), eps());
@@ -413,13 +413,13 @@ fn the_tilt_ring_out_is_the_first_frame_the_tail_sum_is_under_the_floor() {
     }
 }
 
-/// `Tilt::ring_out_over` is at least the ring-out of every tilt in its ranges: centers 20 Hz
+/// `Tilt::decay_time_over` is at least the ring-out of every tilt in its ranges: centers 20 Hz
 /// to 0.99 Nyquist, gains within 24 dB.
 #[test]
 fn the_tilt_ceiling_covers_every_tilt_in_its_ranges() {
     let top = RATE.nyquist_scaled(0.99);
     let ceiling = frames(
-        Tilt::ring_out_over(Hz::new(20.0), top, Db::new(24.0), RATE, crate::TAIL_FLOOR).unwrap(),
+        Tilt::decay_time_over(Hz::new(20.0), top, Db::new(24.0), RATE, crate::TAIL_FLOOR).unwrap(),
     );
     for fc in (0..)
         .map(|k| 20.0 * 1.15f64.powi(k))
@@ -428,7 +428,7 @@ fn the_tilt_ceiling_covers_every_tilt_in_its_ranges() {
         for db in (-12..=12).map(|k| 2.0 * k as f64) {
             let own = frames(
                 Tilt::new(Db::new(db))
-                    .ring_out(Hz::new(fc), RATE, crate::TAIL_FLOOR)
+                    .decay_time(Hz::new(fc), RATE, crate::TAIL_FLOOR)
                     .unwrap(),
             );
             assert!(own <= ceiling, "fc {fc} gain {db}: {own} > {ceiling}");
@@ -446,7 +446,7 @@ fn a_stopped_sustained_sine_at_a_narrow_boost_rings_under_the_floor_within_the_t
     let b = bell(fc, q, db);
     let reported = frames(
         MatchedBell::new(Q::new(q), Db::new(db))
-            .ring_out(Hz::new(fc), RATE, crate::TAIL_FLOOR)
+            .decay_time(Hz::new(fc), RATE, crate::TAIL_FLOOR)
             .unwrap(),
     );
     let on = 600_000;
@@ -467,7 +467,7 @@ fn a_stopped_sustained_sine_at_a_narrow_boost_rings_under_the_floor_within_the_t
 }
 
 /// A floor that is not a number or is infinite reads as an unbounded ring-out, for the bell and
-/// the tilt, and `ring_out_over` takes the ends of the centers in either order.
+/// the tilt, and `decay_time_over` takes the ends of the centers in either order.
 #[test]
 fn a_floor_that_is_not_a_number_is_unbounded_and_the_ends_of_the_centers_may_swap() {
     for floor in [
@@ -476,15 +476,18 @@ fn a_floor_that_is_not_a_number_is_unbounded_and_the_ends_of_the_centers_may_swa
         Db::new(f64::NEG_INFINITY),
     ] {
         let bell =
-            MatchedBell::new(Q::new(1.0), Db::new(6.0)).ring_out(Hz::new(1000.0), RATE, floor);
-        let tilt = Tilt::new(Db::new(6.0)).ring_out(Hz::new(1000.0), RATE, floor);
+            MatchedBell::new(Q::new(1.0), Db::new(6.0)).decay_time(Hz::new(1000.0), RATE, floor);
+        let tilt = Tilt::new(Db::new(6.0)).decay_time(Hz::new(1000.0), RATE, floor);
         assert!(
-            matches!((bell, tilt), (Ok(Ring::Unbounded), Ok(Ring::Unbounded))),
+            matches!(
+                (bell, tilt),
+                (Ok(DecayTime::Unbounded), Ok(DecayTime::Unbounded))
+            ),
             "{floor:?}"
         );
     }
     let over = |lo, hi| {
-        Tilt::ring_out_over(
+        Tilt::decay_time_over(
             Hz::new(lo),
             Hz::new(hi),
             Db::new(24.0),

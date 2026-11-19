@@ -7,7 +7,7 @@ use crate::devices::reporter::Reporter;
 use crate::endpoints::Watch;
 use crate::error::{MidiHardwareError, MidiThread, Result};
 use tutti_midi_device::OsDevice;
-use tutti_rt::{ThreadHandle, spawn_named};
+use tutti_platform::{ThreadHandle, spawn_named};
 
 /// How often the list is read again: a device plugged in shows within this.
 pub(in crate::backend) const INTERVAL: Duration = Duration::from_secs(1);

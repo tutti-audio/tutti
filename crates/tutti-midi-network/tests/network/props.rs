@@ -3,7 +3,8 @@
 //! datagrams a peer can read.
 
 use std::net::SocketAddr;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tutti_platform::Instant;
 
 use proptest::prelude::*;
 use tutti_midi_network::{

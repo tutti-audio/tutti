@@ -7,7 +7,7 @@
 //! below: unix polls (through the process edge's one OS layer), elsewhere no
 //! plugin has a descriptor and the pass is timers alone.
 
-use std::time::Instant;
+use tutti_platform::Instant;
 
 use tutti_plugin_ipc_ffi::Ready;
 use tutti_plugin_types::{EditorWindow, MainThreadMarker, Wakeups};

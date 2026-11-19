@@ -26,7 +26,8 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tutti_platform::Instant;
 use tutti_rt::LockExt;
 
 use core_foundation::runloop::CFRunLoop;
@@ -38,7 +39,7 @@ use crate::endpoints::{NoWatch, Watch};
 use crate::error::{MidiHardwareError, MidiThread, Result};
 use tutti_coremidi_ffi::{Operation, OsStatus};
 use tutti_midi_device::OsDevice;
-use tutti_rt::spawn_named;
+use tutti_platform::spawn_named;
 
 /// A run loop that returns sooner than this had nothing to wait for. A loop that
 /// has a source but was stopped (`CFRunLoopStop`, which nothing here sends)
