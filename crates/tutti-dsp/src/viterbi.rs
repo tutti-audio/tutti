@@ -22,7 +22,9 @@ use tutti_buffers::Float;
 /// A tie takes the state that stays, then the lower state. Fewer than two
 /// states have nothing to switch to and decode to state 0 throughout. No
 /// frames decode to an empty path. `states` is a `u16`, so a back pointer is
-/// two bytes per frame and state.
+/// two bytes per frame and state. It allocates the table of back pointers
+/// (`frames * states` of them) and the path, so it is for the control or
+/// offline side, not the audio thread.
 ///
 /// ```
 /// use tutti_dsp::sticky_viterbi;

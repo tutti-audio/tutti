@@ -20,7 +20,8 @@ pub fn median_of_sorted<T: Copy + Into<f64>>(sorted: &[T]) -> Option<f64> {
 }
 
 /// The median of `values` in any order, as [`median_of_sorted`]; `None` for no
-/// values.
+/// values. It sorts a copy, so it allocates: it is for the control or offline
+/// side, not the audio thread.
 pub fn median<T: Copy + Into<f64>>(values: &[T]) -> Option<f64> {
     let mut sorted = values.to_vec();
     sorted.sort_unstable_by(|a, b| (*a).into().total_cmp(&(*b).into()));

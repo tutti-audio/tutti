@@ -105,8 +105,8 @@
 //! - **Spectral features and onset novelty** (`spectral.rs`, `novelty.rs`): the shape of one
 //!   magnitude spectrum ([`spectral_centroid`], [`spectral_flatness`], [`spectral_rolloff`]) and
 //!   how much a frame differs from the one before ([`spectral_flux`],
-//!   [`high_frequency_content`], [`complex_domain_deviation`], [`spectral_energy`], with
-//!   [`bin_magnitude`]).
+//!   [`high_frequency_content`], [`complex_domain_deviation`], [`spectral_energy`]), and
+//!   [`bin_magnitude`], the modulus they take of a bin.
 //! - **Sequence decoding** (`viterbi.rs`, `beat.rs`, `sequence.rs`): [`sticky_viterbi`], the best
 //!   state path when every switch costs the same; [`track_beat_frames`], beat placement by
 //!   dynamic programming over a novelty curve (Ellis, 2007); the [`median`] of a set and the

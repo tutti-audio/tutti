@@ -20,7 +20,8 @@ pub fn spectral_flux<F: Float>(previous: &[F], current: &[Complex<F>]) -> f64 {
         .sum()
 }
 
-/// A bin's magnitude, taken at `f64`.
+/// A bin's modulus `hypot(re, im)`, widened to `f64` and computed by `libm`, so
+/// it is the same on every platform (the standard library's `hypot` is not).
 #[must_use]
 pub fn bin_magnitude<F: Float>(bin: Complex<F>) -> f64 {
     libm::hypot(bin.re.convert_to::<f64>(), bin.im.convert_to::<f64>())
