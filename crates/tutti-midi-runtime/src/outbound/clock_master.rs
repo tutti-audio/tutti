@@ -35,8 +35,10 @@
 //! even frame of the timeline from the wrapped beat, so a loop start that is
 //! not on an even frame leaves up to two frames with no quarter-frames.
 //! - **Set Tempo** and **Set Time Signature** (Flex Data, M2-104 §7.5.3 and
-//!   §7.5.4; when [`SyncMessages::flex`] is set), on the clock's Group, with or
-//!   without the clock bytes enabled. Set Tempo goes out on the first 24-PPQN
+//!   §7.5.4, when [`SyncMessages::flex`] is set) and **Set Metronome** (§7.5.5,
+//!   when [`SyncMessages::metronome`] is set), on the clock's Group, with or
+//!   without the clock bytes enabled; a Set Metronome goes on the frames a Set
+//!   Time Signature would. Set Tempo goes out on the first 24-PPQN
 //!   tick position at or after the tempo in force changes, Set Time Signature on
 //!   the first bar boundary at or after the meter in force changes. Where
 //!   playback starts the tempo goes out on the first tick position (the start
@@ -57,7 +59,7 @@ use tutti_units::{BarCount, Beat, BeatDuration, Bpm, SampleRate, Samples, Second
 
 use tutti_midi_protocol::{
     MtcFullMessage, MtcRate, MtcTimeCode, QuarterFrameCycle, QuarterFramePiece, SmpteTimecode,
-    flex_tempo_field, flex_time_signature_wire, song_position,
+    flex_metronome, flex_tempo_field, flex_time_signature_wire, song_position,
 };
 
 use super::sync_messages::SyncMessages;
@@ -105,6 +107,8 @@ struct FlexOut {
     tempo: Option<u32>,
     /// The meter last sent, under the same reset.
     meter: Option<TimeSignature>,
+    /// The meter whose Set Metronome was last sent, under the same reset.
+    metronome: Option<TimeSignature>,
 }
 
 impl FlexOut {
@@ -112,6 +116,7 @@ impl FlexOut {
         was_playing: false,
         tempo: None,
         meter: None,
+        metronome: None,
     };
 }
 
@@ -301,7 +306,10 @@ impl ClockMaster {
             self.flex.tempo = None;
             self.flex.meter = None;
         }
-        if !messages.clock && !messages.mtc && messages.flex && block_size != 0 {
+        if flex_started || !messages.metronome {
+            self.flex.metronome = None;
+        }
+        if !messages.clock && !messages.mtc && messages.any_flex() && block_size != 0 {
             // Flex alone: no clock bytes or timecode, and the clock's own edge
             // and locate state is left as it was.
             if transport.playing {
@@ -311,6 +319,7 @@ impl ClockMaster {
                 for pass in clock.passes(Samples::new(block_size), region) {
                     let Some(meter) = meter else { break };
                     self.send_flex(
+                        messages,
                         meter,
                         &pass,
                         block_size,
@@ -439,8 +448,16 @@ impl ClockMaster {
             if messages.clock {
                 self.tick_clock(&pass, block_size, beats_per_sample, emit);
             }
-            if let Some(meter) = meter.filter(|_| messages.flex) {
-                self.send_flex(meter, &pass, block_size, beats_per_sample, tempo, emit);
+            if let Some(meter) = meter.filter(|_| messages.any_flex()) {
+                self.send_flex(
+                    messages,
+                    meter,
+                    &pass,
+                    block_size,
+                    beats_per_sample,
+                    tempo,
+                    emit,
+                );
             }
             if messages.mtc {
                 self.tick_mtc(&pass, block_size, sample_rate, beats_per_sample, emit);
@@ -514,12 +531,15 @@ impl ClockMaster {
     /// Emit the Flex tempo and meter due in `pass`: a Set Tempo on the first
     /// 24-PPQN tick frame (the grid [`tick_clock`](Self::tick_clock) places) if
     /// `tempo` is not what was last stated, and a Set Time Signature on each
-    /// bar boundary whose meter is not. The tempo is the segment's, constant
+    /// bar boundary whose meter is not, followed on the same frame by a Set
+    /// Metronome when [`SyncMessages::metronome`] is on and that meter is not
+    /// the one it last stated. The tempo is the segment's, constant
     /// over the pass, so a change waits for the first tick at or after the
     /// segment's start, in this pass or a later one. `meter` is the project
     /// meter, lent once by [`tick`](Self::tick) for every pass of the block.
     fn send_flex(
         &mut self,
+        messages: SyncMessages,
         meter: &MeterMap,
         pass: &Pass,
         block_size: usize,
@@ -528,7 +548,8 @@ impl ClockMaster {
         emit: &mut impl FnMut(UmpAt),
     ) {
         let field = flex_tempo_field(tempo);
-        if self.flex.tempo != Some(field)
+        if messages.flex
+            && self.flex.tempo != Some(field)
             && let Some(k) = tick_frames(pass, beats_per_sample).next()
         {
             emit((
@@ -554,8 +575,9 @@ impl ClockMaster {
             .filter(|&k| k < pass.len.get())
         {
             let signature = meter.at(boundary);
-            if self.flex.meter != Some(signature) {
-                // A whole-note meter has no standard message: it is stated by none.
+            if messages.flex && self.flex.meter != Some(signature) {
+                // A whole-note meter has no standard Set Time Signature: it is stated
+                // by none (its Set Metronome, 96 clocks, is still sent below).
                 if let Some(wire) = flex_time_signature_wire(signature) {
                     emit((
                         frame_offset(pass.start.get() + k, block_size),
@@ -563,6 +585,17 @@ impl ClockMaster {
                     ));
                 }
                 self.flex.meter = Some(signature);
+            }
+            if messages.metronome && self.flex.metronome != Some(signature) {
+                // A meter with no Set Metronome form (a 64th-note beat) sends none, and
+                // the receiver keeps the click it was last told.
+                if let Some(metronome) = flex_metronome(signature) {
+                    emit((
+                        frame_offset(pass.start.get() + k, block_size),
+                        Message::Flex(self.group, Flex::SetMetronome(metronome)).into(),
+                    ));
+                }
+                self.flex.metronome = Some(signature);
             }
             bar += BarCount::new(1);
             let next = meter.bar_start(bar);

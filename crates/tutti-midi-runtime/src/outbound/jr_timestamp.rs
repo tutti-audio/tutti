@@ -219,7 +219,7 @@ pub struct JrStream {
 impl JrStream {
     /// A stream stamping at `sample_rate` Hz, starting at origin 0.
     ///
-    /// Stamps only. Use [`with_clock`](Self::with_clock) for a conformant
+    /// Stamps only. Use [`clock`](Self::clock) for a conformant
     /// sender: §7.2.2.3 makes a receiver ignore timestamps it has no clock for.
     pub fn new(sample_rate: SampleRate) -> Self {
         Self::with_stamper(JrStamper::new(sample_rate))
@@ -241,7 +241,7 @@ impl JrStream {
     /// where one is due — including blocks with no events at all, which is why
     /// the cadence cannot ride on [`stamp`](Self::stamp) alone.
     #[must_use]
-    pub fn with_clock(mut self, sample_rate: SampleRate) -> Self {
+    pub fn clock(mut self, sample_rate: SampleRate) -> Self {
         self.emitter = Some(JrClockEmitter::new(sample_rate));
         self
     }

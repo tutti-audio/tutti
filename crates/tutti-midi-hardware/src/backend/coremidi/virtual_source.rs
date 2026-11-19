@@ -55,7 +55,7 @@ impl UmpVirtualSource {
         if !spec.function_blocks().is_empty() {
             return Err(MidiHardwareError::VirtualBlocksUnsupported);
         }
-        Self::new(spec.name().as_str(), spec.protocol())
+        Self::new(spec.name().as_str(), spec.protocol)
     }
 
     /// Creates a virtual source named `name` carrying `protocol`.
@@ -63,8 +63,8 @@ impl UmpVirtualSource {
         // CoreMIDI sends notifications to the run loop of the process's first
         // client, so the device watch's client starts before the source's own
         // (see `hub_first`).
-        super::hub_first();
-        let source = UmpSource::new(name, protocol_of(protocol))?;
+        let client = super::hub_first()?;
+        let source = UmpSource::new(client, name, protocol_of(protocol))?;
         debug!(name, ?protocol, "Created virtual MIDI source");
         Ok(Self {
             source,
