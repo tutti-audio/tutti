@@ -114,8 +114,8 @@ fn read(handle: &PluginHandle, i: u32) -> Option<f64> {
 /// A ramp to `value` on parameter `id` (a VST2 index) at block frame `at`.
 fn ramp(at: usize, id: u32, value: f64) -> ParamEvent {
     ParamEvent::ramp(
-        Offset::of(Samples(at), Samples(BLOCK)),
-        ParamRamp::foreign(ParamId::new(id), value, Samples(0)),
+        Offset::of(Samples::new(at), Samples::new(BLOCK)),
+        ParamRamp::foreign(ParamId::new(id), value, Samples::new(0)),
     )
 }
 
@@ -236,12 +236,15 @@ fn an_export_renders_an_edit_made_in_the_plugin_as_live_does() {
     let (plugin, controls) = g.add_with_controls(client);
     g.connect_events(lane, 0, plugin, 0);
     g.pipe_output(plugin);
-    let prepare = Prepare::new(SampleRate::of(SAMPLE_RATE), MaxBlock::of(Samples(BLOCK)));
+    let prepare = Prepare::new(
+        SampleRate::of(SAMPLE_RATE),
+        MaxBlock::of(Samples::new(BLOCK)),
+    );
     let mut live = g.renderer(prepare).expect("the graph compiles");
     live.set_transport(TransportPosition::new(
         true,
         Bpm::of(120.0),
-        Beat(0.0),
+        Beat::new(0.0),
         None,
     ));
     let channel_0 = |out: &[Vec<f32>]| out[0].last().copied();

@@ -101,7 +101,7 @@ fn activations_seen_by_the_plugin(instance: &mut Vst3Instance) -> u32 {
         let mut output_slices: Vec<&mut [f32]> =
             output.iter_mut().map(|v| v.as_mut_slice()).collect();
         let buffer = InputOutput::from_slices(
-            tutti_plugin_types::Samples(input_slices[0].len()),
+            tutti_plugin_types::Samples::new(input_slices[0].len()),
             &input_slices,
             &mut output_slices,
         )
@@ -211,18 +211,18 @@ fn a_latency_that_follows_the_rate_is_reread_after_a_rate_change() {
         FloatWidth::F32,
     )
     .expect("the vendored VST3 probe loads");
-    assert_eq!(instance.wiring.latency_samples, Samples(44));
+    assert_eq!(instance.wiring.latency_samples, Samples::new(44));
     assert!(instance.poll(main_thread()).is_empty());
 
     instance
         .set_sample_rate(main_thread(), SampleRate::of(96_000.0))
         .expect("rate change");
 
-    assert_eq!(instance.wiring.latency_samples, Samples(96));
+    assert_eq!(instance.wiring.latency_samples, Samples::new(96));
     assert!(
         matches!(
             instance.poll(main_thread()).as_slice(),
-            [BridgeMessage::LatencyChanged { samples }] if *samples == Samples(96)
+            [BridgeMessage::LatencyChanged { samples }] if *samples == Samples::new(96)
         ),
         "the new figure reaches the host"
     );
@@ -686,7 +686,7 @@ fn test_vst3_process_f32_silence() {
         output_data.iter_mut().map(|v| v.as_mut_slice()).collect();
 
     let buffer = InputOutput::from_slices(
-        tutti_plugin_types::Samples(input_slices[0].len()),
+        tutti_plugin_types::Samples::new(input_slices[0].len()),
         &input_slices,
         &mut output_slices,
     )
@@ -727,7 +727,7 @@ fn test_vst3_process_f32_with_note() {
             output_data.iter_mut().map(|v| v.as_mut_slice()).collect();
 
         let buffer = InputOutput::from_slices(
-            tutti_plugin_types::Samples(input_slices[0].len()),
+            tutti_plugin_types::Samples::new(input_slices[0].len()),
             &input_slices,
             &mut output_slices,
         )
@@ -761,7 +761,7 @@ fn test_vst3_process_f32_with_note() {
             output_data.iter_mut().map(|v| v.as_mut_slice()).collect();
 
         let buffer = InputOutput::from_slices(
-            tutti_plugin_types::Samples(input_slices[0].len()),
+            tutti_plugin_types::Samples::new(input_slices[0].len()),
             &input_slices,
             &mut output_slices,
         )

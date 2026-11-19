@@ -679,7 +679,7 @@ mod tests {
         for tail in [
             PluginTail::Unknown,
             PluginTail::None,
-            PluginTail::Finite(Samples(96_000)),
+            PluginTail::Finite(Samples::new(96_000)),
             PluginTail::Unbounded,
         ] {
             let bytes = postcard::to_allocvec(&BridgeMessage::TailChanged { tail }).unwrap();

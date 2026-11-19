@@ -344,7 +344,7 @@ fn a_plugin_still_processes_after_a_refused_activation() {
     let mut outputs: Vec<&mut [f32]> = output_data.iter_mut().map(|v| v.as_mut_slice()).collect();
 
     let mut buffer = InputOutput::from_slices(
-        tutti_plugin_types::Samples(inputs[0].len()),
+        tutti_plugin_types::Samples::new(inputs[0].len()),
         &inputs,
         &mut outputs,
     )

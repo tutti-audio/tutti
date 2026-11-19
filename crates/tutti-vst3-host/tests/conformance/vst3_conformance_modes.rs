@@ -237,7 +237,7 @@ fn live_realtime_prefetch_toggle_is_spec_clean() {
         let in_refs: Vec<&[f32]> = ins.iter().map(|v| v.as_slice()).collect();
         let mut out_refs: Vec<&mut [f32]> = outs.iter_mut().map(|v| v.as_mut_slice()).collect();
         let mut buffer = InputOutput::new(
-            tutti_plugin_types::Samples(in_refs[0].len()),
+            tutti_plugin_types::Samples::new(in_refs[0].len()),
             Planes::new(&in_refs).expect("equal channels"),
             PlanesMut::new(&mut out_refs).expect("equal channels"),
         )
@@ -350,7 +350,7 @@ fn plugin_observes_the_offline_mode_we_requested() {
         let in_refs: Vec<&[f32]> = ins.iter().map(|v| v.as_slice()).collect();
         let mut out_refs: Vec<&mut [f32]> = outs.iter_mut().map(|v| v.as_mut_slice()).collect();
         let mut buffer = InputOutput::new(
-            tutti_plugin_types::Samples(in_refs[0].len()),
+            tutti_plugin_types::Samples::new(in_refs[0].len()),
             Planes::new(&in_refs).expect("equal channels"),
             PlanesMut::new(&mut out_refs).expect("equal channels"),
         )

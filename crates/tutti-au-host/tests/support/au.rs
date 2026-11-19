@@ -51,7 +51,7 @@ fn refusal(error: PluginError) -> AuError {
 }
 
 fn prepare_of(rate: SampleRate, block: u32) -> Prepare {
-    Prepare::new(rate, MaxBlock::of(Samples(block as usize)))
+    Prepare::new(rate, MaxBlock::of(Samples::new(block as usize)))
 }
 
 impl Au {
@@ -202,7 +202,7 @@ impl Au {
         }
         let result = self.reconfigure_stream(rate, block);
         if result.is_ok() {
-            self.prepare = Prepare::new(rate, MaxBlock::of(Samples(block as usize)))
+            self.prepare = Prepare::new(rate, MaxBlock::of(Samples::new(block as usize)))
                 .with_mode(self.prepare.mode());
         }
         if was_active {
@@ -455,6 +455,7 @@ fn render<S: Float>(
     } else {
         PlanesMut::new(&mut outs).expect("equal channels")
     };
-    let mut io = InputOutput::new(Samples(n), input, output).expect("the channels hold the block");
+    let mut io =
+        InputOutput::new(Samples::new(n), input, output).expect("the channels hold the block");
     processor.render_planes(&mut io)
 }

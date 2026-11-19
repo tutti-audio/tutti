@@ -159,7 +159,7 @@ fn load_with(tempo: tutti_transport::TempoReader) -> (PluginNode<Vst2Loaded>, Pl
 }
 
 fn prepare_at(rate: f64) -> Prepare {
-    Prepare::new(SampleRate::of(rate), MaxBlock::of(Samples(BLOCK)))
+    Prepare::new(SampleRate::of(rate), MaxBlock::of(Samples::new(BLOCK)))
 }
 
 /// A live editor holding `node` at `key`, both its outputs global.
@@ -403,7 +403,7 @@ fn a_fork_reads_its_transport_from_the_render() {
     client
         .controls()
         .set_meter(tutti_transport::ProjectMeter::new(MeterMap::new([
-            MeterChange::new(Beat(0.0), seven_eight),
+            MeterChange::new(Beat::new(0.0), seven_eight),
         ])));
 
     let key = NodeKey(6);
@@ -416,7 +416,12 @@ fn a_fork_reads_its_transport_from_the_render() {
         )
         .expect("forks");
     let mut renderer = Renderer::new(fork_ed, fork_exec);
-    renderer.set_transport(TransportPosition::new(true, Bpm::of(93.0), Beat(5.0), None));
+    renderer.set_transport(TransportPosition::new(
+        true,
+        Bpm::of(93.0),
+        Beat::new(5.0),
+        None,
+    ));
     let _ = renderer.render(BLOCK);
 
     let cap = read_capture();

@@ -2391,7 +2391,7 @@ mod tests {
 
     /// The offset `k` frames into the block.
     fn at(k: usize) -> Offset {
-        Offset::of(Samples(k), Samples(BLOCK))
+        Offset::of(Samples::new(k), Samples::new(BLOCK))
     }
 
     /// The packet of `words`, zero-padded to four, at offset `k`.
@@ -3590,7 +3590,7 @@ mod tests {
 
     fn cc_message(group: u8) -> UmpAt {
         (
-            Offset::of(Samples(0), Samples(64)),
+            Offset::of(Samples::new(0), Samples::new(64)),
             Message::Midi1(
                 Address::new(MidiGroup::new(group).unwrap(), MidiChannel::FIRST),
                 Voice1::ControlChange {
@@ -3633,7 +3633,7 @@ mod tests {
                 tutti_ump::Sysex7Packets::from_payload(MidiGroup::new(group).unwrap(), &payload)
                     .expect("seven-bit bytes");
             let ump = packets.into_iter().next().expect("one packet");
-            (Offset::of(Samples(0), Samples(64)), ump)
+            (Offset::of(Samples::new(0), Samples::new(64)), ump)
         };
         let mut list = InputEventList::new(InputRooms::new(1024));
         list.set_note_ports(&[false, false]);

@@ -40,7 +40,7 @@ const REFUSES_HIGH_RATES: &str = "14";
 const REFUSES_OFFLINE: &str = "15";
 
 fn prepare() -> Prepare {
-    Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(256)))
+    Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(256)))
 }
 
 /// The lock, and the misbehaviour the next load sees.
@@ -121,7 +121,7 @@ fn render(
             let mut outputs = [a.as_mut_slice(), b.as_mut_slice(), c.as_mut_slice()];
             let mut io = PluginIo {
                 buffer: InputOutput::from_slices(
-                    tutti_plugin_types::Samples(inputs[0].len()),
+                    tutti_plugin_types::Samples::new(inputs[0].len()),
                     &inputs,
                     &mut outputs,
                 )
@@ -140,7 +140,7 @@ fn render(
             let mut outputs = [a.as_mut_slice(), b.as_mut_slice(), c.as_mut_slice()];
             let mut io = PluginIo {
                 buffer: InputOutput::from_slices(
-                    tutti_plugin_types::Samples(inputs[0].len()),
+                    tutti_plugin_types::Samples::new(inputs[0].len()),
                     &inputs,
                     &mut outputs,
                 )
@@ -175,7 +175,7 @@ fn activation_splits_the_plugin_and_renders_at_the_prepared_width() {
     assert!(!processor.is_f64());
     assert_eq!(
         controller.latency(main_thread()),
-        Samples(controller.loaded().latency_samples(main_thread()) as usize),
+        Samples::new(controller.loaded().latency_samples(main_thread()) as usize),
         "the trait's figure is the plugin's"
     );
     assert_eq!(
@@ -238,7 +238,7 @@ fn a_block_past_i32_max_is_refused() {
     let probe = Probe::behaving();
     let too_big = Prepare::new(
         SampleRate::SR_48K,
-        MaxBlock::of(Samples(i32::MAX as usize + 1)),
+        MaxBlock::of(Samples::new(i32::MAX as usize + 1)),
     );
     let refused = probe
         .load()
@@ -408,7 +408,7 @@ impl Block {
         let ctx = ProcessContext::new();
         let mut io = PluginIo {
             buffer: InputOutput::from_slices(
-                tutti_plugin_types::Samples(inputs[0].len()),
+                tutti_plugin_types::Samples::new(inputs[0].len()),
                 &inputs,
                 &mut channels,
             )

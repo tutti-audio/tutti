@@ -247,7 +247,7 @@ fn serve_lane(
                 for n in 0..count {
                     std::thread::sleep(gap);
                     let event = BridgeMessage::LatencyChanged {
-                        samples: tutti_plugin_types::Samples(n),
+                        samples: tutti_plugin_types::Samples::new(n),
                     };
                     if send_bridge_msg(&stream, &event).is_err() {
                         return;
@@ -271,7 +271,7 @@ fn serve_lane(
                 let mut s = &stream;
                 for n in 0.. {
                     let body = postcard::to_allocvec(&BridgeMessage::LatencyChanged {
-                        samples: tutti_plugin_types::Samples(n),
+                        samples: tutti_plugin_types::Samples::new(n),
                     })
                     .unwrap();
                     let prefix = (body.len() as u32).to_be_bytes();
@@ -656,7 +656,7 @@ fn an_unprompted_event_reaches_the_listener_while_no_command_waits() {
     let mock = MockServer::start("unprompted", |msg| match msg {
         HostMessage::SetRenderMode { .. } => {
             Action::Reply(Box::new(BridgeMessage::LatencyChanged {
-                samples: tutti_plugin_types::Samples(77),
+                samples: tutti_plugin_types::Samples::new(77),
             }))
         }
         _ => Action::Silent,
