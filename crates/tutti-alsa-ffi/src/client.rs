@@ -8,6 +8,7 @@ use crate::error::{Error, Operation, Result, address_byte, check};
 use crate::event::Event;
 use crate::records::{PoolRecord, PortRecord, StatusRecord};
 use crate::sys;
+use tutti_ump::Ump;
 
 /// `-EAGAIN`: nothing queued yet on a non-blocking client.
 const EAGAIN: i32 = -11;
@@ -19,40 +20,6 @@ const EAGAIN: i32 = -11;
 /// [`Error::NulInName`] when `name` has a NUL, which a C string cannot hold.
 pub(crate) fn c_name(name: &str) -> Result<CString> {
     CString::new(name).map_err(|source| Error::NulInName { source })
-}
-
-/// One UMP message: one to four words, which is the whole of any UMP message.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Packet {
-    /// The message's words, the rest zero: the fixed field of an event.
-    words: [u32; 4],
-}
-
-impl Packet {
-    /// The message in `words`.
-    ///
-    /// # Errors
-    ///
-    /// [`Error::PacketLength`] when `words` is empty or has more than four.
-    pub fn new(words: &[u32]) -> Result<Self> {
-        if words.is_empty() || words.len() > 4 {
-            return Err(Error::PacketLength { len: words.len() });
-        }
-        let mut field = [0; 4];
-        field[..words.len()].copy_from_slice(words);
-        Ok(Self { words: field })
-    }
-
-    /// The fixed field of a received event.
-    pub(crate) fn from_field(words: [u32; 4]) -> Self {
-        Self { words }
-    }
-
-    /// The message's four words, the rest zero.
-    #[must_use]
-    pub fn words(&self) -> [u32; 4] {
-        self.words
-    }
 }
 
 /// What [`Client::read_event`] found.
@@ -356,8 +323,8 @@ impl Client {
     ///
     /// `snd_seq_ump_event_output_direct`'s code; `-EAGAIN` on a
     /// [`Blocking::NonBlock`] client whose destination has no room.
-    pub fn send_to_subscribers(&self, port: PortId, packet: Packet) -> Result<()> {
-        self.send_ump_event(port, packet, None)
+    pub fn send_to_subscribers(&self, port: PortId, ump: &Ump) -> Result<()> {
+        self.send_ump_event(port, ump, None)
     }
 
     /// Sends one UMP message to everything subscribed to `port`, held by
@@ -373,20 +340,15 @@ impl Client {
     pub fn send_to_subscribers_at(
         &self,
         port: PortId,
-        packet: Packet,
+        ump: &Ump,
         queue: &QueueClock,
         at: Duration,
     ) -> Result<()> {
-        self.send_ump_event(port, packet, Some((queue.queue, at)))
+        self.send_ump_event(port, ump, Some((queue.queue, at)))
     }
 
     /// The one send: direct, or scheduled on a queue of this client's.
-    fn send_ump_event(
-        &self,
-        port: PortId,
-        packet: Packet,
-        on: Option<(u8, Duration)>,
-    ) -> Result<()> {
+    fn send_ump_event(&self, port: PortId, ump: &Ump, on: Option<(u8, Duration)>) -> Result<()> {
         let operation = Operation::UmpEventOutputDirect;
         let mut ev = sys::snd_seq_ump_event_t {
             // `SND_SEQ_EVENT_NONE`. For a UMP event the type field is unused:
@@ -423,7 +385,9 @@ impl Client {
             ev.time[..4].copy_from_slice(&secs.to_ne_bytes());
             ev.time[4..].copy_from_slice(&at.subsec_nanos().to_ne_bytes());
         }
-        ev.ump = packet.words;
+        // The message's own words, the rest of the event's fixed field zero.
+        let words = ump.words();
+        ev.ump[..words.len()].copy_from_slice(words);
 
         // SAFETY: `self.seq` is open; `ev` is a fully initialised event of the
         // measured layout (the compile-time asserts in `sys`), which alsa-lib
@@ -695,22 +659,6 @@ impl QueueClock {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// A message of one to four words is held whole, the rest zero; none or
-    /// five is refused rather than sent short or cut.
-    #[test]
-    fn a_packet_is_one_to_four_words_and_zero_padded() {
-        assert_eq!(Packet::new(&[1, 2]).unwrap().words, [1, 2, 0, 0]);
-        assert_eq!(Packet::new(&[1, 2, 3, 4]).unwrap().words, [1, 2, 3, 4]);
-        assert!(matches!(
-            Packet::new(&[]),
-            Err(Error::PacketLength { len: 0 })
-        ));
-        assert!(matches!(
-            Packet::new(&[1, 2, 3, 4, 5]),
-            Err(Error::PacketLength { len: 5 })
-        ));
-    }
 
     /// A name with a NUL is refused, not renamed.
     #[test]

@@ -8,8 +8,7 @@
 //! reads the protocol it carries instead of taking it for a legacy port.
 
 use tutti_alsa_ffi::{
-    Blocking, Client, Operation, Packet, PortCaps, PortId, PortKind, UmpBlock, UmpEndpoint,
-    UmpVersion,
+    Blocking, Client, Operation, PortCaps, PortId, PortKind, UmpBlock, UmpEndpoint, UmpVersion,
 };
 use tutti_midi_device::{FunctionBlock, UMP_VERSION};
 use tutti_rt::LockExt;
@@ -96,9 +95,7 @@ impl SourceBackend for AlsaVirtualSource {
         // A poisoned lock guards a client handle and a port number, which a
         // panic cannot leave half-written.
         let inner = self.inner.lock_recover();
-        inner
-            .0
-            .send_to_subscribers(inner.1, Packet::new(ump.words())?)?;
+        inner.0.send_to_subscribers(inner.1, ump)?;
         Ok(())
     }
 }
