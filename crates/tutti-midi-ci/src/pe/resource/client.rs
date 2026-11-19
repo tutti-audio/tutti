@@ -16,6 +16,7 @@ use super::super::limits::{MediaType, SubscribeId};
 use super::super::partial::PartialUpdate;
 use super::super::reassemble::PeFlowControl;
 use super::super::tree::{PeJson, PeJsonError};
+use super::cache::GetCache;
 use super::data::PeData;
 use super::entry::{PeResourceList, ResourceEntry};
 use super::fields::PeDataError;
@@ -231,6 +232,7 @@ enum Op {
     Get {
         call: CallId,
         target: ResourceTarget,
+        page: Option<PePage>,
     },
     Walk(Walk),
     Set {
@@ -279,6 +281,7 @@ pub struct ResourceInitiator {
     list: Option<PeResourceList>,
     ops: Vec<(PeRequestId, Op)>,
     subs: Vec<Sub>,
+    cache: GetCache,
     next_call: u32,
 }
 
@@ -298,6 +301,7 @@ impl ResourceInitiator {
             list: None,
             ops: Vec::new(),
             subs: Vec::new(),
+            cache: GetCache::default(),
             next_call: 0,
         };
         let out = this.map(actions, now);
@@ -361,7 +365,10 @@ impl ResourceInitiator {
         Ok(self.map(actions, now))
     }
 
-    /// Get Property Data.
+    /// Get Property Data. While the `cacheTime` of an earlier reply to the same
+    /// request (Resource, entry and page) has not elapsed at `now`, the data is
+    /// that reply's, ends at once as [`ResourceEvent::Got`], and nothing is sent
+    /// (M2-103 §7.4.3). A Subscription update of the Resource drops what is held.
     ///
     /// # Errors
     ///
@@ -379,9 +386,18 @@ impl ResourceInitiator {
             get.check_get(entry)?;
         }
         let call = self.call_id();
+        if let Some(data) = self.cache.fresh(get.target(), get.page(), now) {
+            let got = event(ResourceEvent::Got {
+                call,
+                target: get.target().clone(),
+                result: Ok(data.clone()),
+            });
+            return Ok((call, vec![got]));
+        }
         let op = Op::Get {
             call,
             target: get.target().clone(),
+            page: get.page(),
         };
         let actions = self.start(PeCall::Get(pe_get(get)), op, now)?;
         Ok((call, actions))
@@ -589,8 +605,12 @@ impl ResourceInitiator {
                 Ok(_) => {}
                 Err(failure) => out.push(event(ResourceEvent::ResourceListFailed(failure))),
             },
-            Op::Get { call, target } => {
+            Op::Get { call, target, page } => {
+                let cache_time = reply.as_ref().ok().and_then(|r| r.header.cache_time);
                 let result = reply.and_then(|r| decode(target.resource(), &r));
+                if let (Ok(data), Some(time)) = (&result, cache_time) {
+                    self.cache.keep(&target, page, data.clone(), time, now);
+                }
                 out.push(event(ResourceEvent::Got {
                     call,
                     target,
@@ -822,6 +842,7 @@ impl ResourceInitiator {
                 let Some(sub) = self.subs.iter_mut().find(|s| s.id == subscribe_id) else {
                     return;
                 };
+                self.cache.forget(&sub.target);
                 let applied = match &change {
                     PeChange::Full(bytes) => {
                         read_full(sub.target.resource(), media_type.as_ref(), bytes)
