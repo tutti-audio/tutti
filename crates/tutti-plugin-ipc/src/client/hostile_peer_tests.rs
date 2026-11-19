@@ -23,19 +23,19 @@
 
 use super::PluginBridge;
 use crate::client::audio::BridgeThread;
-use crate::protocol::{
-    BridgeMessage, ChannelLayout, HostMessage, PROTOCOL_VERSION, ParamId, SlabLayout,
-};
 use crate::transport::shm::RING_SLOTS;
 use crate::unique_socket_path;
+use crate::{BridgeMessage, HostMessage, PROTOCOL_VERSION, SlabLayout};
 use std::io::{Read, Write};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 use tutti_buffers::FloatWidth;
 use tutti_fixtures::main_thread;
+use tutti_plugin_types::ChannelLayout;
 use tutti_plugin_types::{BridgeError, PluginFailure, StateError, Timeouts};
 use tutti_units::Normalized;
+use tutti_units::ParamId;
 use tutti_units::SampleRate;
 
 use interprocess::local_socket::{ListenerOptions, Stream, traits::Listener as _};
@@ -247,7 +247,7 @@ fn serve_lane(
                 for n in 0..count {
                     std::thread::sleep(gap);
                     let event = BridgeMessage::LatencyChanged {
-                        samples: crate::protocol::Samples(n),
+                        samples: tutti_plugin_types::Samples(n),
                     };
                     if send_bridge_msg(&stream, &event).is_err() {
                         return;
@@ -271,7 +271,7 @@ fn serve_lane(
                 let mut s = &stream;
                 for n in 0.. {
                     let body = postcard::to_allocvec(&BridgeMessage::LatencyChanged {
-                        samples: crate::protocol::Samples(n),
+                        samples: tutti_plugin_types::Samples(n),
                     })
                     .unwrap();
                     let prefix = (body.len() as u32).to_be_bytes();
@@ -657,7 +657,7 @@ fn an_unprompted_event_reaches_the_listener_while_no_command_waits() {
     let mock = MockServer::start("unprompted", |msg| match msg {
         HostMessage::SetRenderMode { .. } => {
             Action::Reply(Box::new(BridgeMessage::LatencyChanged {
-                samples: crate::protocol::Samples(77),
+                samples: tutti_plugin_types::Samples(77),
             }))
         }
         _ => Action::Silent,
@@ -672,7 +672,7 @@ fn an_unprompted_event_reaches_the_listener_while_no_command_waits() {
 
     assert!(
         mock.bridge
-            .set_render_mode_rt(crate::protocol::RenderMode::Realtime)
+            .set_render_mode_rt(tutti_plugin_types::RenderMode::Realtime)
     );
     tutti_fixtures::wait_until(
         "the server's unprompted latency change to be heard",
@@ -726,7 +726,7 @@ fn a_layout_with_absurdly_many_buses_is_dropped_on_receipt() {
     })));
     assert!(
         mock.bridge
-            .set_render_mode_rt(crate::protocol::RenderMode::Realtime)
+            .set_render_mode_rt(tutti_plugin_types::RenderMode::Realtime)
     );
     tutti_fixtures::wait_until("the real layout", NOTICE_TIMEOUT, || {
         !layouts.lock().is_empty()
@@ -934,7 +934,7 @@ fn an_absurd_length_prefix_does_not_hang_or_exhaust_memory() {
 /// timeout.
 #[test]
 fn the_frame_cap_is_the_boundary_it_claims_to_be() {
-    use crate::protocol::MAX_FRAME_BYTES;
+    use crate::MAX_FRAME_BYTES;
 
     let over =
         MockServer::start_with_timeouts("cap-over", unreachable_deadline(), |msg| match msg {
@@ -1419,7 +1419,7 @@ mod shell_server {
         });
         let mut guard = crate::ProcessGuard::launched(
             crate::Reaped::new(child),
-            crate::BridgeConfig::at(mock.socket.clone()),
+            &crate::BridgeConfig::at(mock.socket.clone()),
         )
         .expect("the exit thread starts");
         guard.attach(mock.thread.take().expect("the bridge thread"));
@@ -1486,7 +1486,7 @@ fn an_under_cap_dribble_is_stopped_by_the_total_deadline() {
 /// the reassembler has: first, middle, last, and a partial final chunk.
 #[test]
 fn a_state_larger_than_one_frame_round_trips() {
-    use crate::protocol::STATE_CHUNK_BYTES;
+    use crate::STATE_CHUNK_BYTES;
 
     // A byte pattern, not zeros: a chunking bug that drops or reorders a piece
     // leaves the length right and the contents wrong, which zeros would hide.

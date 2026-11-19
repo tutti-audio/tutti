@@ -349,12 +349,9 @@ tutti-plugin-ipc  setter  crates/tutti-plugin-ipc/src/client/audio/mod.rs::Audio
 tutti-plugin-ipc  setter  crates/tutti-plugin-ipc/src/client/audio/mod.rs::AudioBridge::set_render_mode_rt
 tutti-plugin-ipc  setter  crates/tutti-plugin-ipc/src/client/audio/mod.rs::AudioBridge::set_track_info
 tutti-plugin-ipc  setter  crates/tutti-plugin-ipc/src/client/composite.rs::PluginBridge::set_automation_state_rt
-tutti-plugin-ipc  setter  crates/tutti-plugin-ipc/src/client/composite.rs::PluginBridge::set_editor_scale
-tutti-plugin-ipc  setter  crates/tutti-plugin-ipc/src/client/composite.rs::PluginBridge::set_editor_size
 tutti-plugin-ipc  setter  crates/tutti-plugin-ipc/src/client/composite.rs::PluginBridge::set_listener
 tutti-plugin-ipc  setter  crates/tutti-plugin-ipc/src/client/composite.rs::PluginBridge::set_parameter_rt
 tutti-plugin-ipc  setter  crates/tutti-plugin-ipc/src/client/composite.rs::PluginBridge::set_render_mode_rt
-tutti-plugin-ipc  setter  crates/tutti-plugin-ipc/src/client/composite.rs::PluginBridge::set_track_info
 
 # tutti-plugin-types
 tutti-plugin-types  ctor-result  crates/tutti-plugin-types/src/format.rs::PluginFormat::from_extension
@@ -481,7 +478,6 @@ tutti-session  setter  crates/tutti-session/src/modulation.rs::RouteMut::set_pol
 tutti-session  setter  crates/tutti-session/src/plugin_params.rs::Param::set_plain
 tutti-session  setter  crates/tutti-session/src/plugin_params.rs::Param::set_text
 tutti-session  setter  crates/tutti-session/src/plugin_params.rs::Params::set_automation_mode
-tutti-session  setter  crates/tutti-session/src/session/transport.rs::Session::set_loop
 tutti-session  ctor-result  crates/tutti-session/src/recorder.rs::PumpLoop::new
 tutti-session  ctor-result  crates/tutti-session/src/recorder.rs::Recorder::start
 tutti-session  ctor-result  crates/tutti-session/src/recorder.rs::Recorder::start_finite

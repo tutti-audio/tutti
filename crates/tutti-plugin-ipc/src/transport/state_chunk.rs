@@ -12,7 +12,7 @@
 //! the host reassembles what a plugin produced, and the server reassembles what
 //! a project file supplied. Neither end may trust the other's sequencing.
 
-use crate::protocol::STATE_CHUNK_BYTES;
+use crate::STATE_CHUNK_BYTES;
 use tutti_plugin_types::MAX_STATE_BYTES;
 
 /// Splits `data` into wire-sized pieces, as `(seq, last, bytes)`.

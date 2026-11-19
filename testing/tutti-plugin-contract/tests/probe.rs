@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use tutti_plugin::catalog::{
-    Catalog, CatalogConfig, DEFAULT_MEASURE_TIMEOUT, DEFAULT_PROBE_TIMEOUT, Locator, NO_SCAN_DIRS,
+    Catalog, CatalogConfig, DEFAULT_MEASURE_TIMEOUT, DEFAULT_PROBE_TIMEOUT, Locator,
     PluginDescriptor, PluginRef, ProbeFailure, ScanPoll,
 };
 use tutti_plugin_contract::{
@@ -39,7 +39,7 @@ use tutti_vst2_host::Vst2Loaded;
 /// through [`Locator::at`], so nothing writes the process-global environment. Its
 /// sentinel lives in `dir`.
 fn config(dir: &Path) -> CatalogConfig {
-    CatalogConfig::new(dir, NO_SCAN_DIRS).probe_locator(Locator::at(tutti_fixtures::plugin_probe()))
+    CatalogConfig::new(dir).probe_locator(Locator::at(tutti_fixtures::plugin_probe()))
 }
 
 /// Runs the catalog task `start` makes to its end and returns the database it

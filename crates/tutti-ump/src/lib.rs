@@ -109,6 +109,7 @@ mod mpe_zone;
 mod note_id;
 mod note_velocity;
 mod orchestral;
+mod os;
 mod reserved;
 mod rpn;
 mod sysex;
@@ -168,6 +169,7 @@ pub use note_velocity::NoteVelocity;
 pub use orchestral::{
     MuteAmount, MuteError, MuteMessage, MuteState, MuteType, PlayingPosition, ReservedMuteType,
 };
+pub use os::{OsFunctionBlock, read_function_block, read_protocol};
 pub use reserved::{Field, Reserved, ReservedAccents, ReservedAttribute};
 pub use rpn::{RegisteredData, Rpn};
 pub use sysex::{

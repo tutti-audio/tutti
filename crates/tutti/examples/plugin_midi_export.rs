@@ -60,13 +60,10 @@ fn load(
     plugin: &Path,
     state: Option<Vec<u8>>,
 ) -> Result<tutti::Key<tutti::AnyPlugin>, Box<dyn std::error::Error>> {
-    use tutti::plugin::catalog::{CatalogConfig, NO_SCAN_DIRS, PluginDb, PluginId, ScanPoll};
+    use tutti::plugin::catalog::{CatalogConfig, PluginDb, PluginId, ScanPoll};
     let dir = tempfile::TempDir::new()?;
-    let mut catalog = tutti::Catalog::new(
-        PluginDb::new(),
-        CatalogConfig::new(dir.path(), NO_SCAN_DIRS),
-        |_| Ok(()),
-    );
+    let mut catalog =
+        tutti::Catalog::new(PluginDb::new(), CatalogConfig::new(dir.path()), |_| Ok(()));
     let mut probe = catalog.register(plugin)?;
     let scanned = loop {
         match catalog.try_apply(&mut probe) {

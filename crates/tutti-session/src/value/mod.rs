@@ -14,6 +14,12 @@
 //!   seeing the value the call has built so far for its target:
 //!   `(n.modify(|x| x + 1), n.modify(|x| x + 1))` adds two, and
 //!   `(a.to(1), a.modify(|x| x + 1))` gives 2.
+//! - **Landing.** A value the audio thread reads through a published cell (the
+//!   tempo map, the meter, the loop region, a node's clip or changes) is
+//!   staged by the write, a later write replacing it, and published with the
+//!   others staged by the next [`Session::update`] in one fixed order; a read
+//!   answers the staged value, else the one in force. A value in an atomic
+//!   cell (a param, the click) lands at once.
 //! - **Atomic.** Every item is checked and every `modify` has run before
 //!   anything lands, and the error's `at` is the first failing item. A batch is
 //!   never one cut for the audio thread: two stores can straddle a block.
@@ -24,6 +30,7 @@
 //!
 //! [`Session::set`]: crate::Session::set
 //! [`Session::get`]: crate::Session::get
+//! [`Session::update`]: crate::Session::update
 
 mod batch;
 mod error;
@@ -38,12 +45,12 @@ pub use error::{SetRefusal, ValueError, ValueErrorKind};
 pub use param::{ParamTarget, TargetInfo};
 #[cfg(feature = "midi-hardware")]
 pub use slot::MidiPolicyTarget;
-#[cfg(feature = "midi")]
-pub(crate) use slot::PublishedSlot;
-pub(crate) use slot::{Cell, ClickVolumeSlot, MeterSlot, SettingSlot, SlotCell, SlotId, TempoSlot};
+pub(crate) use slot::{
+    Cell, ClickVolumeSlot, LoopCell, PublishedSlot, SettingSlot, SlotCell, SlotId, TempoCell,
+};
 pub use slot::{
-    ClickTargets, ClickVolumeTarget, MeterTarget, NodeSlots, OutputPolicyTarget, SettingTarget,
-    TempoTarget,
+    ClickTargets, ClickVolumeTarget, LoopTarget, MeterTarget, NodeSlots, OutputPolicyTarget,
+    SettingTarget, TempoTarget,
 };
 #[cfg(feature = "midi")]
 pub use slot::{ClipEventsTarget, HarmonyTarget, MpeModeTarget, OutputLatencyTarget};

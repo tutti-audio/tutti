@@ -2,20 +2,20 @@
 //! local socket (Unix domain socket on Unix, named pipe on Windows).
 //!
 //! Wire: `[u32 big-endian length][postcard payload]` both directions, with the body capped at
-//! [`MAX_FRAME_BYTES`](crate::protocol::MAX_FRAME_BYTES) — the length arrives from the peer, so it
+//! [`MAX_FRAME_BYTES`](crate::MAX_FRAME_BYTES) — the length arrives from the peer, so it
 //! is checked before it is believed, in both `send` and `recv`. EOF at either end surfaces as
 //! [`BridgeError::ProcessCrashed`], and so does a length prefix over the cap: a peer that cannot
 //! frame has desynchronised the stream, and there is no resynchronisation point to recover to.
 //!
 //! **Two independent bounds, because they answer different questions.**
-//! [`MAX_FRAME_BYTES`](crate::protocol::MAX_FRAME_BYTES) bounds how *much* a peer can make the host
+//! [`MAX_FRAME_BYTES`](crate::MAX_FRAME_BYTES) bounds how *much* a peer can make the host
 //! allocate; the deadline in [`read_exact_by`] bounds how *long* a peer can make it wait. A size
 //! cap alone does not bound time — an under-cap frame delivered one byte per receive timeout is
 //! still unbounded, because `SO_RCVTIMEO` restarts on every syscall while `read_exact` loops. Both
 //! are needed and neither subsumes the other.
 
 use crate::protocol::frame::{decode_body, decode_prefix, write_frame};
-use crate::protocol::{BridgeMessage, HostMessage};
+use crate::{BridgeMessage, HostMessage};
 use tutti_plugin_types::{BridgeError, BridgeResult};
 
 use super::sys::Wakeup;
@@ -150,7 +150,7 @@ const POLL_INTERVAL: Duration = Duration::from_millis(250);
 /// Measured on a `UnixStream` pair: a 300 ms receive timeout survived 2.3 s of
 /// one-byte-per-200 ms dribble, and the ceiling scales with the frame size, so
 /// a legitimate under-cap frame is as exploitable as an over-cap one. That is
-/// why [`MAX_FRAME_BYTES`](crate::protocol::MAX_FRAME_BYTES) does not close this on its own.
+/// why [`MAX_FRAME_BYTES`](crate::MAX_FRAME_BYTES) does not close this on its own.
 ///
 /// The deadline is **total**, not per-syscall, and progress does not extend it.
 /// That is the whole point: a peer controls the pacing but not the wall clock.
@@ -559,7 +559,7 @@ mod tests {
     /// and no MIDI, the common one; a change list that is not empty is a `Vec` the decode builds.
     #[test]
     fn a_block_round_trip_allocates_nothing_once_warm() {
-        use crate::protocol::ProcessAudioData;
+        use crate::ProcessAudioData;
         use crate::protocol::frame::read_frame;
 
         let mut p = pair();
@@ -619,7 +619,7 @@ mod tests {
 
     fn latency_msg(samples: i64) -> BridgeMessage {
         BridgeMessage::LatencyChanged {
-            samples: crate::protocol::Samples(samples as usize),
+            samples: tutti_plugin_types::Samples(samples as usize),
         }
     }
 

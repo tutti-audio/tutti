@@ -127,11 +127,11 @@ impl Plugin {
     ///
     /// ```no_run
     /// # fn ex() -> Result<(), Box<dyn std::error::Error>> {
-    /// use tutti_plugin::catalog::{Catalog, CatalogConfig, NO_SCAN_DIRS, Plugin, PluginId};
+    /// use tutti_plugin::catalog::{Catalog, CatalogConfig, Plugin, PluginId};
     /// use tutti_plugin_db::PluginDb;
     /// use tutti_plugin_types::PluginFormat;
     /// # let dir = std::path::PathBuf::from("/my/app/state");
-    /// let catalog = Catalog::new(PluginDb::new(), CatalogConfig::new(dir, NO_SCAN_DIRS), |_| Ok(()));
+    /// let catalog = Catalog::new(PluginDb::new(), CatalogConfig::new(dir), |_| Ok(()));
     /// let foo = catalog
     ///     .resolve(&PluginId::new(PluginFormat::Vst3, "vst3.00112233-44556677-8899AABB-CCDDEEFF"))
     ///     .bind()?;

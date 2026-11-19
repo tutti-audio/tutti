@@ -4,9 +4,14 @@
 /// of 2 or 3, a key letter of 8 to 15, a Function Block direction of 0, a
 /// controller number Appendix A leaves open, and so on.
 ///
-/// Only the decoder builds one, so a sender can name no reserved value
-/// (M2-104 §2.1.3): every message a caller constructs encodes a defined
-/// value. A message read from the wire keeps its reserved value and
+/// Only the decoder builds one, and the readers of what an operating system
+/// reports ([`read_function_block`](crate::read_function_block),
+/// [`read_protocol`](crate::read_protocol)), which read it as the decoder does
+/// a Function Block Info or a Stream Configuration word. A caller names a
+/// reserved value (M2-104 §2.1.3) only by reading one, with the decoder,
+/// [`read_function_block`](crate::read_function_block) or
+/// [`read_protocol`](crate::read_protocol): every message a caller constructs
+/// otherwise encodes a defined value. A message read from the wire keeps its reserved value and
 /// re-encodes exactly, so a forwarder passes a later revision's message on
 /// unchanged.
 ///
@@ -157,8 +162,10 @@ impl ReservedAccents {
 }
 
 /// A field a table bounds, as read from the wire: a value in range, or the
-/// [`Reserved`] raw outside it. Only the decoder builds the second, so a sender
-/// writes a value in range, and a message a receiver read re-encodes exactly.
+/// [`Reserved`] raw outside it. Only the decoder and the readers of an operating
+/// system's report ([`read_function_block`](crate::read_function_block)) build the
+/// second, so a caller names a reserved raw only by reading one, and a message a
+/// receiver read re-encodes exactly.
 ///
 /// ```compile_fail,E0423
 /// use tutti_ump::{Field, FunctionBlockId, Reserved};
@@ -203,6 +210,17 @@ impl<T: Copy> Field<T> {
         match self {
             Self::Value(value) => get(value),
             Self::Reserved(reserved) => reserved.get(),
+        }
+    }
+}
+
+impl<T: Copy + TryFrom<u8>> Field<T> {
+    /// The field a byte reads as: the value when it is in range, else the
+    /// reserved raw as read.
+    pub(crate) fn from_raw(raw: u8) -> Self {
+        match T::try_from(raw) {
+            Ok(value) => Self::Value(value),
+            Err(_) => Self::Reserved(Reserved::wire(raw)),
         }
     }
 }

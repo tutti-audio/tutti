@@ -9,18 +9,18 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-use super::MidiEventVec;
-use super::ParamId;
-use super::Samples;
 use super::process::ProcessAudioData;
 use super::shm::SlabLayout;
-use super::{
-    LoadedPlugin, ParameterInfo, PluginDescriptor, PluginFormat, PluginTail, Preset, PresetId,
-};
 use dpi::Size;
 use tutti_buffers::FloatWidth;
+use tutti_plugin_types::MidiEventVec;
+use tutti_plugin_types::Samples;
 use tutti_plugin_types::{BlockStatus, ContentScale, Load, StateUse};
+use tutti_plugin_types::{
+    LoadedPlugin, ParameterInfo, PluginDescriptor, PluginFormat, PluginTail, Preset, PresetId,
+};
 use tutti_units::Normalized;
+use tutti_units::ParamId;
 use tutti_units::SampleRate;
 
 /// Wire-deserialization fallback for [`HostMessage::LoadPlugin::block_size`]
@@ -113,8 +113,8 @@ pub enum HostMessage {
     /// Enter or leave an automation gesture, so the plugin can record it.
     SetAutomationState {
         /// Format-neutral automation mode; the format loader encodes it onto its
-        /// own ABI server-side. See [`AutomationMode`](crate::protocol::AutomationMode).
-        mode: crate::protocol::AutomationMode,
+        /// own ABI server-side. See [`AutomationMode`](tutti_plugin_types::AutomationMode).
+        mode: tutti_plugin_types::AutomationMode,
     },
     /// Read one parameter's current normalized value.
     GetParameter {
@@ -152,7 +152,7 @@ pub enum HostMessage {
     /// hand the plugin a corrupt blob it would then try to parse.
     ///
     /// [`MAX_STATE_BYTES`]: tutti_plugin_types::MAX_STATE_BYTES
-    /// [`MAX_FRAME_BYTES`]: crate::protocol::MAX_FRAME_BYTES
+    /// [`MAX_FRAME_BYTES`]: crate::MAX_FRAME_BYTES
     LoadStateChunk {
         /// Position in the sequence, starting at 0 and incrementing by one.
         seq: u32,
@@ -182,7 +182,7 @@ pub enum HostMessage {
     /// and unrepresentable.
     SetRenderMode {
         /// Realtime or offline.
-        mode: crate::protocol::RenderMode,
+        mode: tutti_plugin_types::RenderMode,
     },
     /// Ask for the plugin's preset list.
     GetPresetList,
@@ -194,7 +194,7 @@ pub enum HostMessage {
     /// the wrong preset rather than failing.
     LoadPreset {
         /// Opaque, format-shaped preset id taken from the plugin's own list.
-        id: crate::protocol::PresetId,
+        id: tutti_plugin_types::PresetId,
     },
     /// Ask which preset the plugin considers current.
     GetCurrentPreset,
@@ -204,7 +204,7 @@ pub enum HostMessage {
     /// to its format's domain.
     GetParameterText {
         /// Which parameter — opaque handle or positional index, per format.
-        param_id: crate::protocol::ParamId,
+        param_id: tutti_units::ParamId,
         /// The value to render, normalized.
         #[serde(with = "super::wire::normalized")]
         value: tutti_units::Normalized,
@@ -216,7 +216,7 @@ pub enum HostMessage {
     /// `parameter_value_from_text`.
     GetParameterValueFromText {
         /// Which parameter — opaque handle or positional index, per format.
-        param_id: crate::protocol::ParamId,
+        param_id: tutti_units::ParamId,
         /// Display text to parse, in whatever form the plugin renders.
         text: String,
     },
@@ -245,7 +245,7 @@ pub enum HostMessage {
     /// [`BridgeMessage::ParameterPlain`].
     GetParameterPlain {
         /// Which parameter — opaque handle or positional index, per format.
-        param_id: crate::protocol::ParamId,
+        param_id: tutti_units::ParamId,
         /// The value to convert, normalized.
         #[serde(with = "super::wire::normalized")]
         value: tutti_units::Normalized,
@@ -255,7 +255,7 @@ pub enum HostMessage {
     /// [`BridgeMessage::ParameterNormalized`].
     GetParameterNormalized {
         /// Which parameter — opaque handle or positional index, per format.
-        param_id: crate::protocol::ParamId,
+        param_id: tutti_units::ParamId,
         /// The plain value, in the parameter's own unit.
         plain: f64,
     },
@@ -395,7 +395,7 @@ pub enum BridgeMessage {
     /// changes and `End` arrive in the order the plugin made them.
     ParameterChanged {
         /// The edit.
-        edit: crate::protocol::ParamEdit,
+        edit: tutti_plugin_types::ParamEdit,
     },
     /// Plugin reported a latency change at runtime. Host updates the
     /// corresponding `PluginClient::set_latency` so the latency the node

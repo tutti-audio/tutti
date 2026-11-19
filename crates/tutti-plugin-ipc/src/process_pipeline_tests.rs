@@ -63,22 +63,22 @@ const CHANNELS: usize = 2;
 const GAIN: f32 = 2.0;
 
 /// The tests' side of each chunk: an empty payload, and the plugin's MIDI-out
-/// kept as collected, so a test reads what the bridge returned.
+/// kept as emitted while the chunk plays, so a test reads what the bridge
+/// returned.
 impl crate::Chunks for MidiEventVec {
-    fn begin(&mut self, _at: usize, _chunk: usize) {}
+    fn begin(&mut self, _at: usize, _chunk: usize) {
+        self.clear();
+    }
     fn take(&mut self, _from: usize, _n: usize, _at: usize) {}
 
     fn payload(&mut self, _frames: usize) -> BlockPayload {
         BlockPayload::new(tutti_units::SampleRate::SR_48K)
     }
 
-    fn midi_out(&mut self, events: &MidiEventVec) {
-        self.clear();
-        self.try_extend_from_slice(events)
-            .expect("an emptied list holds a full one");
+    fn emit(&mut self, _frame: usize, event: tutti_plugin_types::WireMidi) {
+        self.try_push(event)
+            .expect("an emptied list holds a chunk's MIDI-out");
     }
-
-    fn emit(&mut self, _frame: usize, _event: tutti_plugin_types::WireMidi) {}
 }
 
 /// `CHANNELS` planar channels of `BATCH_SIZE` frames: the buffers the
@@ -1580,8 +1580,6 @@ impl crate::Chunks for StatusProbe {
         BlockPayload::new(tutti_units::SampleRate::SR_48K)
     }
 
-    fn midi_out(&mut self, _events: &MidiEventVec) {}
-
     fn status(&mut self, status: BlockStatus) {
         self.said.push(status);
     }
@@ -1654,7 +1652,6 @@ struct LossProbe {
     midi: usize,
     unsent: usize,
     refused: Vec<usize>,
-    out: MidiEventVec,
 }
 
 impl crate::Chunks for LossProbe {
@@ -1678,10 +1675,6 @@ impl crate::Chunks for LossProbe {
 
     fn refused(&mut self, midi: usize) {
         self.refused.push(midi);
-    }
-
-    fn midi_out(&mut self, events: &MidiEventVec) {
-        self.out.clone_from(events);
     }
 
     fn emit(&mut self, _frame: usize, _event: tutti_plugin_types::WireMidi) {}

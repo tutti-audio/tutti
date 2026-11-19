@@ -25,7 +25,7 @@
 //! use tutti_units::SampleRate;
 //! use tutti_graph::{Editor, Prepare};
 //! use tutti_plugin::catalog::{
-//!     Catalog, CatalogConfig, NO_SCAN_DIRS, Plugin, PluginId,
+//!     Catalog, CatalogConfig, Plugin, PluginId,
 //! };
 //! use tutti_plugin_db::PluginDb;
 //! use tutti_plugin_types::PluginFormat;
@@ -40,7 +40,7 @@
 //! // a load takes what the catalog resolved (so its blacklist is asked).
 //! let catalog = Catalog::new(
 //!     PluginDb::new(), // or the one the app deserialized
-//!     CatalogConfig::new("/my/app/state", NO_SCAN_DIRS),
+//!     CatalogConfig::new("/my/app/state"),
 //!     |_db| Ok(()),
 //! );
 //! let id = PluginId::new(PluginFormat::Vst3, "vst3.00112233-44556677-8899AABB-CCDDEEFF");
@@ -410,10 +410,10 @@ pub use tutti_units::ParamId;
 /// with [`try_apply`](catalog::Catalog::try_apply); dropping a task cancels it.
 ///
 /// ```no_run
-/// use tutti_plugin::catalog::{Catalog, CatalogConfig, NO_SCAN_DIRS, ScanPoll};
+/// use tutti_plugin::catalog::{Catalog, CatalogConfig, ScanPoll};
 /// use tutti_plugin_db::PluginDb;
 /// # fn ex(dir: std::path::PathBuf) -> Result<(), Box<dyn std::error::Error>> {
-/// let mut catalog = Catalog::new(PluginDb::new(), CatalogConfig::new(dir, NO_SCAN_DIRS), |_| Ok(()));
+/// let mut catalog = Catalog::new(PluginDb::new(), CatalogConfig::new(dir), |_| Ok(()));
 /// let mut task = catalog.register("/Library/Audio/Plug-Ins/CLAP/Some.clap")?;
 /// let result = loop {
 ///     match catalog.try_apply(&mut task) {
@@ -445,7 +445,7 @@ pub mod catalog {
         FileFailure, FilesError, PluginDb, ProbeFailure, Scan, ScanBusy, ScanError, ScanPoll,
         ScanResult,
     };
-    pub use tutti_plugin_ipc::{AudioConfig, CatalogConfig, NO_SCAN_DIRS};
+    pub use tutti_plugin_ipc::{AudioConfig, CatalogConfig};
     pub use tutti_plugin_types::{PluginDescriptor, PluginId, PluginRole};
 }
 
