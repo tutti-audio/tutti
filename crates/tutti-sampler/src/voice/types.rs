@@ -101,7 +101,7 @@ impl From<bool> for Direction {
     clippy::large_enum_variant,
     reason = "the voice is built once on the control thread and read in place; boxing the memory tier would put a pointer chase in front of every per-sample read, the cost the enum exists to avoid"
 )]
-pub enum VoiceSource<F: SamplerFloat = f32> {
+pub enum VoiceSource<F: SamplerFloat> {
     /// The whole source is resident in memory.
     Memory(MemorySource<F>),
     /// The source streams incrementally from the streamer's ring.
@@ -175,12 +175,25 @@ impl<F: SamplerFloat> VoiceSource<F> {
         }
     }
 
-    /// Update the timeline window.
-    #[inline]
-    pub(crate) fn apply_window(&mut self, window: VoiceWindow) {
+    /// The window the source plays on the transport: `None` for a
+    /// free-running memory voice. A streamed voice is always placed.
+    pub(crate) fn window(&self) -> Option<VoiceWindow> {
         match self {
-            Self::Memory(s) => s.set_window(window),
-            Self::Disk(s) => s.set_window(window),
+            Self::Memory(s) => s.window(),
+            Self::Disk(s) => Some(s.window()),
+        }
+    }
+
+    /// Update the timeline window: `None` frees a memory voice to run on its
+    /// own cursor, and leaves a streamed voice, which is always placed, where
+    /// it is.
+    #[inline]
+    pub(crate) fn apply_window(&mut self, window: Option<VoiceWindow>) {
+        match (self, window) {
+            (Self::Memory(s), Some(window)) => s.set_window(window),
+            (Self::Memory(s), None) => s.free_run(),
+            (Self::Disk(s), Some(window)) => s.set_window(window),
+            (Self::Disk(_), None) => {}
         }
     }
 }
@@ -234,7 +247,7 @@ impl Default for Playback {
 /// One voice's playback state — what a [`VoicePool`](super::VoicePool) stores
 /// per slot.
 #[derive(Debug)]
-pub struct Voice<F: SamplerFloat = f32> {
+pub struct Voice<F: SamplerFloat> {
     /// The audio itself, resident or streaming.
     pub source: VoiceSource<F>,
     /// The control intent applied to [`source`](Self::source).

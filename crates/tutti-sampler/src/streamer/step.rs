@@ -28,7 +28,7 @@
 use super::StreamerSender;
 use super::command::StreamerCommand;
 use super::config::BufferConfig;
-use super::handlers::{Handles, Local, handle_command};
+use super::handlers::{Handles, Local, follow_steering, handle_command};
 use super::io::refill::{FILL_THRESHOLD, refill_all, refill_all_parallel};
 use super::record::{Record, Streams};
 use tutti_rt::RingFloat;
@@ -75,7 +75,7 @@ pub enum StepOutcome {
 /// borrows nothing. Both the thread's loop and a test driver build one
 /// and call [`step`](Self::step) repeatedly; the only difference between them is
 /// what happens *between* the calls.
-pub(crate) struct StreamerCycle<F: RingFloat = f32> {
+pub(crate) struct StreamerCycle<F: RingFloat> {
     local: Local<F>,
     config: BufferConfig,
 }
@@ -101,7 +101,7 @@ impl<F: RingFloat> StreamerCycle<F> {
     /// Run one cycle: drain every queued command, free every ring's retired
     /// controls, then — when any channel is streaming — refill the rings.
     ///
-    /// A direction change is a command, applied in the drain, so the refill
+    /// A loop or direction change is taken before the refill, so the refill
     /// writes the new mapping this cycle.
     ///
     /// `drain` is called until it yields `None`; commands are applied
@@ -114,6 +114,10 @@ impl<F: RingFloat> StreamerCycle<F> {
         while let Some(cmd) = drain() {
             handle_command(cmd, shared, &self.config, &mut self.local);
         }
+
+        // The loop and direction each live stream's control side asks for, so
+        // the refill below writes the new mapping this cycle.
+        follow_steering(&self.config, &mut self.local);
 
         // Every ring's retired controls, whether or not this cycle publishes
         // one: the streamer is their only publisher, and its cycle is the

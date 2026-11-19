@@ -38,12 +38,15 @@ fn the_served_control_and_any_thread_answer_alike() {
         BridgeConfig::at(
             tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source"),
         ),
-        tutti_fixtures::clap_probe().to_path_buf(),
-        tutti_plugin_types::PluginFormat::Clap,
-        tutti_plugin_types::Load::new(),
-        SampleRate::SR_48K,
-        None,
-        tutti_plugin_types::StateUse::Project,
+        &tutti_plugin_ipc::LoadRequest {
+            origin: &tutti_plugin_types::Origin::new(
+                tutti_fixtures::clap_probe(),
+                tutti_plugin_types::Load::new(),
+            ),
+            format: tutti_plugin_types::PluginFormat::Clap,
+            rate: SampleRate::SR_48K,
+            restore: None,
+        },
         Some(tutti_plugin_ipc::EditorLoader::new(
             crate::format::gui::load_gui_instance,
             tutti_fixtures::detached_work(),
@@ -120,12 +123,15 @@ fn a_live_served_load_reaches_the_plugin_in_the_context_it_names() {
         BridgeConfig::at(
             tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source"),
         ),
-        tutti_fixtures::clap_probe().to_path_buf(),
-        tutti_plugin_types::PluginFormat::Clap,
-        tutti_plugin_types::Load::new(),
-        SampleRate::SR_48K,
-        None,
-        tutti_plugin_types::StateUse::Project,
+        &tutti_plugin_ipc::LoadRequest {
+            origin: &tutti_plugin_types::Origin::new(
+                tutti_fixtures::clap_probe(),
+                tutti_plugin_types::Load::new(),
+            ),
+            format: tutti_plugin_types::PluginFormat::Clap,
+            rate: SampleRate::SR_48K,
+            restore: None,
+        },
         Some(tutti_plugin_ipc::EditorLoader::new(
             crate::format::gui::load_gui_instance,
             tutti_fixtures::detached_work(),
@@ -168,12 +174,15 @@ fn a_client_with_no_editor_loader_asks_the_real_server_for_its_editor() {
         BridgeConfig::at(
             tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source"),
         ),
-        tutti_fixtures::clap_probe().to_path_buf(),
-        tutti_plugin_types::PluginFormat::Clap,
-        tutti_plugin_types::Load::new(),
-        SampleRate::SR_48K,
-        None,
-        tutti_plugin_types::StateUse::Project,
+        &tutti_plugin_ipc::LoadRequest {
+            origin: &tutti_plugin_types::Origin::new(
+                tutti_fixtures::clap_probe(),
+                tutti_plugin_types::Load::new(),
+            ),
+            format: tutti_plugin_types::PluginFormat::Clap,
+            rate: SampleRate::SR_48K,
+            restore: None,
+        },
         None,
     )
     .expect("the probe launches in a real plugin-server with no editor loader");
@@ -211,12 +220,15 @@ fn a_served_bypass_write_is_lost_when_the_link_is_dead() {
         BridgeConfig::at(
             tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source"),
         ),
-        tutti_fixtures::clap_probe().to_path_buf(),
-        tutti_plugin_types::PluginFormat::Clap,
-        tutti_plugin_types::Load::new(),
-        SampleRate::SR_48K,
-        None,
-        tutti_plugin_types::StateUse::Project,
+        &tutti_plugin_ipc::LoadRequest {
+            origin: &tutti_plugin_types::Origin::new(
+                tutti_fixtures::clap_probe(),
+                tutti_plugin_types::Load::new(),
+            ),
+            format: tutti_plugin_types::PluginFormat::Clap,
+            rate: SampleRate::SR_48K,
+            restore: None,
+        },
         Some(tutti_plugin_ipc::EditorLoader::new(
             crate::format::gui::load_gui_instance,
             tutti_fixtures::detached_work(),
@@ -259,12 +271,15 @@ fn a_normal_teardown_leaves_the_forks_watch_alive() {
         BridgeConfig::at(
             tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source"),
         ),
-        tutti_fixtures::clap_probe().to_path_buf(),
-        tutti_plugin_types::PluginFormat::Clap,
-        tutti_plugin_types::Load::new(),
-        SampleRate::SR_48K,
-        None,
-        tutti_plugin_types::StateUse::Project,
+        &tutti_plugin_ipc::LoadRequest {
+            origin: &tutti_plugin_types::Origin::new(
+                tutti_fixtures::clap_probe(),
+                tutti_plugin_types::Load::new(),
+            ),
+            format: tutti_plugin_types::PluginFormat::Clap,
+            rate: SampleRate::SR_48K,
+            restore: None,
+        },
         None,
     )
     .expect("the probe launches in a real plugin-server");

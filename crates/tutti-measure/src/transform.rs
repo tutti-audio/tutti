@@ -18,10 +18,10 @@
 use tutti_buffers::{Mono, MonoMut, Sample};
 use tutti_units::{Amplitude, SampleRate, Samples};
 
-use crate::convert::to_f32;
+use crate::convert::widen;
 
 use crate::{Error, Result};
-use tutti_dsp::Complex32;
+use tutti_dsp::Complex64;
 use tutti_dsp::CosineWindow;
 use tutti_dsp::FftScratch;
 use tutti_dsp::StftGeometry;
@@ -30,34 +30,34 @@ use tutti_dsp::{BinIndex, FrameCount, FrameIndex, Grid};
 /// Linear magnitudes, in the units the transform produced. **The invertible
 /// form.**
 ///
-/// Distinct from [`NormalizedMagnitudes`] on purpose. As bare `Vec<f32>` both
+/// Distinct from [`NormalizedMagnitudes`] on purpose. As bare `Vec<f64>` both
 /// reach the inverse interchangeably, and passing the normalized set compiles
 /// and yields audio scaled by `1/peak` — quiet, plausible, and hard to notice.
 #[derive(Debug, Clone, PartialEq)]
-pub struct RawMagnitudes(Grid<f32>);
+pub struct RawMagnitudes(Grid<f64>);
 
 impl RawMagnitudes {
     /// Wraps a `frames x bins` grid of linear magnitudes.
     #[must_use]
-    pub fn new(grid: Grid<f32>) -> Self {
+    pub fn new(grid: Grid<f64>) -> Self {
         Self(grid)
     }
 
     /// The underlying `frames x bins` grid, borrowed.
     #[inline]
-    pub fn grid(&self) -> &Grid<f32> {
+    pub fn grid(&self) -> &Grid<f64> {
         &self.0
     }
 
     /// The largest magnitude anywhere in the grid.
     pub fn peak(&self) -> Amplitude {
-        Amplitude(f64::from(
+        Amplitude(
             self.0
                 .as_slice()
                 .iter()
                 .copied()
-                .fold(0.0f32, |a, b| a.max(b)),
-        ))
+                .fold(0.0f64, |a, b| a.max(b)),
+        )
     }
 
     /// Scales to `0..1` against the peak, returning the display-only form.
@@ -68,8 +68,7 @@ impl RawMagnitudes {
     pub fn normalize(&self) -> NormalizedMagnitudes {
         let peak = self.peak();
         let values = if peak.get() > 0.0 {
-            // The grid is an `f32` table: the scale narrows once.
-            let inv = (1.0 / peak.get()) as f32;
+            let inv = 1.0 / peak.get();
             self.0.as_slice().iter().map(|m| m * inv).collect()
         } else {
             self.0.as_slice().to_vec()
@@ -85,14 +84,14 @@ impl RawMagnitudes {
 /// only — there is no path from here back to audio.
 #[derive(Debug, Clone, PartialEq)]
 pub struct NormalizedMagnitudes {
-    values: Grid<f32>,
+    values: Grid<f64>,
     peak: Amplitude,
 }
 
 impl NormalizedMagnitudes {
     /// The `frames x bins` grid of `0..1` values, borrowed.
     #[inline]
-    pub fn grid(&self) -> &Grid<f32> {
+    pub fn grid(&self) -> &Grid<f64> {
         &self.values
     }
 
@@ -111,7 +110,7 @@ impl NormalizedMagnitudes {
 /// would force a deinterleave per edit.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Stft {
-    bins: Grid<Complex32>,
+    bins: Grid<Complex64>,
     geometry: StftGeometry,
 }
 
@@ -124,7 +123,7 @@ pub struct Stft {
 #[derive(Debug, Clone, PartialEq)]
 pub struct StftPolar {
     magnitudes: RawMagnitudes,
-    phases: Grid<f32>,
+    phases: Grid<f64>,
     geometry: StftGeometry,
 }
 
@@ -142,7 +141,7 @@ pub struct StftMagnitude {
 impl Stft {
     /// The complex bins as a `frames x bins` grid, `DC..=Nyquist` per frame.
     #[inline]
-    pub fn bins(&self) -> &Grid<Complex32> {
+    pub fn bins(&self) -> &Grid<Complex64> {
         &self.bins
     }
 
@@ -176,7 +175,7 @@ impl Stft {
     /// discarded for this read only.
     #[inline]
     pub fn magnitude_at(&self, frame: FrameIndex, bin: BinIndex) -> Amplitude {
-        Amplitude(f64::from(self.bins.at(frame, bin).norm()))
+        Amplitude(self.bins.at(frame, bin).norm())
     }
 
     /// Converts to magnitude/phase. Lossless.
@@ -200,7 +199,7 @@ impl Stft {
     /// Discards phase. One-way, and the return type says so.
     #[must_use]
     pub fn to_magnitude(&self) -> StftMagnitude {
-        let magnitudes: Vec<f32> = self.bins.as_slice().iter().map(|b| b.norm()).collect();
+        let magnitudes: Vec<f64> = self.bins.as_slice().iter().map(|b| b.norm()).collect();
         StftMagnitude {
             magnitudes: RawMagnitudes(self.bins.same_shape(magnitudes)),
             geometry: self.geometry,
@@ -215,13 +214,13 @@ impl Stft {
     /// match this transform's `frames x bins` shape.
     pub fn resynthesize_masked<S: Sample>(
         &self,
-        mask: &Grid<Complex32>,
-        fft: &mut FftScratch,
+        mask: &Grid<Complex64>,
+        fft: &mut FftScratch<f64>,
     ) -> Result<Vec<S>> {
         if !self.bins.same_shape_as(mask) {
             return Err(Error::GridShapeDisagreement);
         }
-        let masked: Vec<Complex32> = self
+        let masked: Vec<Complex64> = self
             .bins
             .as_slice()
             .iter()
@@ -246,7 +245,7 @@ impl StftPolar {
     /// The phase half, in radians — same `frames x bins` shape as the
     /// magnitudes.
     #[inline]
-    pub fn phases(&self) -> &Grid<f32> {
+    pub fn phases(&self) -> &Grid<f64> {
         &self.phases
     }
 
@@ -455,9 +454,9 @@ pub fn stft<S: Sample>(
     request: StftRequest,
     samples: Mono<'_, S>,
     rate: impl Into<SampleRate>,
-    fft: &mut FftScratch,
+    fft: &mut FftScratch<f64>,
 ) -> Result<Stft> {
-    let samples = to_f32(samples.samples());
+    let samples = widen(samples.samples());
     let (start, end) = request.range.resolve(samples.len());
     let slice = &samples[start..end];
     let geometry = request.resolve_cola(rate, Samples(slice.len()))?;
@@ -473,7 +472,7 @@ pub fn stft_polar<S: Sample>(
     request: StftRequest,
     samples: Mono<'_, S>,
     rate: impl Into<SampleRate>,
-    fft: &mut FftScratch,
+    fft: &mut FftScratch<f64>,
 ) -> Result<StftPolar> {
     Ok(stft(request, samples, rate, fft)?.to_polar())
 }
@@ -491,9 +490,9 @@ pub fn stft_magnitude<S: Sample>(
     request: StftRequest,
     samples: Mono<'_, S>,
     rate: impl Into<SampleRate>,
-    fft: &mut FftScratch,
+    fft: &mut FftScratch<f64>,
 ) -> Result<StftMagnitude> {
-    let samples = to_f32(samples.samples());
+    let samples = widen(samples.samples());
     let (start, end) = request.range.resolve(samples.len());
     let slice = &samples[start..end];
     let geometry = request.resolve(rate, Samples(slice.len()))?;
@@ -504,7 +503,7 @@ pub fn stft_magnitude<S: Sample>(
 ///
 /// Weighted overlap-add with per-sample window-sum normalization, which is
 /// exact when the geometry is COLA — and [`Stft`] can only be built on one.
-pub fn istft<S: Sample>(transform: &Stft, fft: &mut FftScratch) -> Vec<S> {
+pub fn istft<S: Sample>(transform: &Stft, fft: &mut FftScratch<f64>) -> Vec<S> {
     let geometry = transform.geometry;
     let frames = transform.bins.frames();
     let window_len = geometry.window().get();
@@ -514,10 +513,10 @@ pub fn istft<S: Sample>(transform: &Stft, fft: &mut FftScratch) -> Vec<S> {
         return Vec::new();
     }
 
-    let window = geometry.window_coefficients::<f32>();
-    let mut out = vec![0.0f32; out_len];
-    let mut window_sum = vec![0.0f32; out_len];
-    let mut frame_buf = vec![0.0f32; window_len];
+    let window = geometry.window_coefficients::<f64>();
+    let mut out = vec![0.0f64; out_len];
+    let mut window_sum = vec![0.0f64; out_len];
+    let mut frame_buf = vec![0.0f64; window_len];
 
     for frame in frames.indices() {
         fft.inverse(transform.bins.row(frame), MonoMut::new(&mut frame_buf));
@@ -538,13 +537,13 @@ pub fn istft<S: Sample>(transform: &Stft, fft: &mut FftScratch) -> Vec<S> {
 
 /// The shared forward pass. Both entry points differ only in what they accept
 /// and what they return.
-fn compute(samples: &[f32], geometry: StftGeometry, fft: &mut FftScratch) -> Stft {
+fn compute(samples: &[f64], geometry: StftGeometry, fft: &mut FftScratch<f64>) -> Stft {
     let frames = geometry.frames_for(Samples(samples.len()));
     let bins_per_frame = geometry.bins_per_frame();
-    let window = geometry.window_coefficients::<f32>();
+    let window = geometry.window_coefficients::<f64>();
     let window_len = geometry.window().get();
 
-    let mut bins = vec![Complex32::default(); frames.get() * bins_per_frame.get()];
+    let mut bins = vec![Complex64::default(); frames.get() * bins_per_frame.get()];
     for frame in frames.indices() {
         let offset = frame.get() * geometry.hop().get();
         let start = frame.get() * bins_per_frame.get();

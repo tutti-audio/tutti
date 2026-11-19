@@ -159,7 +159,7 @@ impl Default for MemorySourceConfig {
 /// change in [`set_loop`](Self::set_loop) — the audio thread drains
 /// the pool's loop command inline. The one exception is
 /// [`set_wave`](Self::set_wave), which is control-thread only.
-pub struct MemorySource<F: Float = f32> {
+pub struct MemorySource<F: Float> {
     wave: Arc<Wave<F>>,
     position: Param64<SamplePosition>,
 
@@ -391,10 +391,16 @@ impl<F: Float> MemorySource<F> {
     /// Places the source on the transport at `window`, or moves its window.
     /// The next frame reads at the new window.
     ///
-    /// A free-running source that is sent this (a free-running voice given
-    /// `UpdatePlacement`) becomes transport-gated, as a `DiskVoice` always is.
+    /// A free-running source that is given a window becomes transport-gated,
+    /// as a `DiskVoice` always is.
     pub fn set_window(&mut self, window: VoiceWindow) {
         self.placement = Some(window);
+    }
+
+    /// Takes the source off the transport: it reads on its own cursor from
+    /// the next frame.
+    pub fn free_run(&mut self) {
+        self.placement = None;
     }
 
     /// Places this source on the transport at `window`.
@@ -585,7 +591,7 @@ impl<F: Float> MemorySource<F> {
     }
 
     /// Sets the loop, or clears it with `None` (one-shot playback). In-memory
-    /// only: a stream's loop is the stream's (`Stream::set_loop`), which is
+    /// only: a stream's loop is the stream's (`Stream::looping_cell`), which is
     /// why this is inherent rather than a shared trait method.
     ///
     /// The loop plays whole frames, and the fade leads into the loop's start:
@@ -1142,6 +1148,56 @@ impl<F: Float> MemorySource<F> {
         });
         if !blended && !sounds {
             return Piece::Silent;
+        }
+        Piece::Ready
+    }
+
+    /// One reversed free-running output frame into `out`: the file read
+    /// mirrored at the cursor, which steps by `read_rate`; at the file's first
+    /// frame the cursor stops.
+    #[inline]
+    fn free_frame_reversed_into(&mut self, out: &mut [F]) {
+        if !self.playing.load(Ordering::Relaxed) {
+            out.fill(F::ZERO);
+            return;
+        }
+        let pos = self.position.load().get();
+        if pos >= self.wave.len().get() as f64 {
+            self.playing.store(false, Ordering::Relaxed);
+            out.fill(F::ZERO);
+            return;
+        }
+        self.read_placed_into(SamplePosition(pos), Direction::Reverse, out);
+        self.apply_gain(out);
+        let next = pos + self.read_rate().advance(Samples(1)).get();
+        self.position.store(SamplePosition::new(next));
+    }
+
+    /// The free-running read of `frames` block frames into frames `0..frames`
+    /// of the first `n` `head` lanes: each frame is the cursor's own step,
+    /// gained by the source's gain. Reversed, the cursor counts straight
+    /// positions and reads the file mirrored (the loop ignored, as a placed
+    /// read's is), stopping at the first frame. [`Piece::Silent`] while the
+    /// cursor is stopped (nothing is written, and the cursor stays).
+    pub(crate) fn render_free<H: AsMut<[F]>>(
+        &mut self,
+        direction: Direction,
+        frames: usize,
+        n: usize,
+        head: &mut [H],
+    ) -> Piece {
+        if !self.playing.load(Ordering::Relaxed) {
+            return Piece::Silent;
+        }
+        let mut frame = [F::ZERO; MAX_CHANNELS];
+        for i in 0..frames {
+            match direction {
+                Direction::Forward => self.free_frame_into(&mut frame[..n]),
+                Direction::Reverse => self.free_frame_reversed_into(&mut frame[..n]),
+            }
+            for (lane, &sample) in head.iter_mut().zip(&frame[..n]) {
+                lane.as_mut()[i] = sample;
+            }
         }
         Piece::Ready
     }

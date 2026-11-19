@@ -13,7 +13,8 @@ use tutti_graph::{
     Prepare, Shape, Status, TransportPosition,
 };
 use tutti_modulation::{
-    CONTROL_GRID, Clock, ControlProgram, CurveSegment, MAX_LANE_INPUTS, ProgramTime, Waveform,
+    CONTROL_GRID, Clock, ControlProgram, CurveSegment, DepthSnapshot, MAX_LANE_INPUTS, ProgramTime,
+    Waveform,
 };
 use tutti_rt::ParamCell;
 use tutti_rt::{Publisher, Reader};
@@ -283,6 +284,8 @@ struct Seen {
     seq: Option<u64>,
     knob: Option<u64>,
     range: (u64, u64),
+    /// The program's depths at the last block's start.
+    depths: DepthSnapshot,
     /// The frame after the last block, the transport and play clock at its
     /// last frame: how a seek between blocks is told from a roll.
     end: Option<(Frame, TransportPosition, PlayReading)>,
@@ -371,6 +374,7 @@ fn fresh_seen() -> Seen {
         seq: None,
         knob: None,
         range: (0, 0),
+        depths: DepthSnapshot::EMPTY,
         end: None,
     }
 }
@@ -473,7 +477,9 @@ impl ControlLaneNode {
     /// never a lend), the knob and the range, so it needs no read state of
     /// its own.
     fn fresh_over(s: &Shared, make: &Arc<MakeSegment>, native: bool) -> Self {
-        let program = s.program.current();
+        // Depth cells of its own, so a depth moved after the fork does not
+        // reach it.
+        let program = Arc::new(s.program.current().detached());
         let knob = s.knob.as_ref().map(ParamCell::detached);
         let range = match &s.range {
             RangeSource::None => RangeSource::None,
@@ -575,6 +581,8 @@ struct Block<'b> {
     /// Thinning failed already: drop past the capacity instead.
     truncate: bool,
     seconds: bool,
+    /// The program's depths, loaded once for the block.
+    depths: DepthSnapshot,
 }
 
 impl Block<'_> {
@@ -604,13 +612,13 @@ impl Block<'_> {
     /// The program's value at `time`, for the lane's param.
     fn value_at(&self, time: &ProgramTime, ins: &[Option<f64>]) -> Option<f64> {
         self.program
-            .value_at(self.unit, self.knob, time, self.span, ins)
+            .value_at_in(self.unit, self.knob, time, self.span, ins, &self.depths)
     }
 
     /// The program's left limit at `time`, for the lane's param.
     fn value_before(&self, time: &ProgramTime, ins: &[Option<f64>]) -> Option<f64> {
         self.program
-            .value_before(self.unit, self.knob, time, self.span, ins)
+            .value_before_in(self.unit, self.knob, time, self.span, ins, &self.depths)
     }
 
     /// The earliest arrival of an input still moving at `at`, in frames.
@@ -1040,6 +1048,7 @@ impl<F: Float> Node<F> for ControlLaneNode {
             s.unranged.fetch_add(1, Ordering::Relaxed);
         }
         let range_bits = (range.0.to_bits(), range.1.to_bits());
+        let depths = program.depth_snapshot();
         if seq != self.seen.seq {
             // A new program: forget every input it does not read, so a
             // source id a later program reuses starts from nothing, never from the
@@ -1052,7 +1061,8 @@ impl<F: Float> Node<F> for ControlLaneNode {
         }
         let changed = seq != self.seen.seq
             || knob.map(f64::to_bits) != self.seen.knob
-            || range_bits != self.seen.range;
+            || range_bits != self.seen.range
+            || depths != self.seen.depths;
         // A resync is a point at frame 0, never a glide (`LaneControls::resync`).
         let resync = s.resync.swap(false, Ordering::AcqRel);
         let t0 = cx.transport_at(Offset::ZERO);
@@ -1084,6 +1094,7 @@ impl<F: Float> Node<F> for ControlLaneNode {
             stride: u64::from(CONTROL_GRID.stride()),
             truncate: false,
             seconds: has_seconds(program),
+            depths,
         };
         let mut thinned = false;
         loop {
@@ -1123,6 +1134,7 @@ impl<F: Float> Node<F> for ControlLaneNode {
             seq,
             knob: knob.map(f64::to_bits),
             range: range_bits,
+            depths,
             end: Some((
                 env.frame + Samples(len),
                 cx.transport_at(last),

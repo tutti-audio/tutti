@@ -48,7 +48,18 @@ const BODY_MAX_FRAMES: usize = 1 << 16;
 
 /// How far past the in-flight block a rewrite may start, in frames: room for
 /// the streamer to rewrite before the reader gets there.
-pub(crate) const GUARD_FRAMES: u64 = 256;
+///
+/// It is the latency of a change to a streamed voice's loop or direction
+/// ([`Stream::looping_cell`](crate::Stream::looping_cell)): a change near the
+/// playhead is heard this many frames past the block being played, crossfaded
+/// over `DiskStreamerConfig`'s seek crossfade.
+pub const GUARD_FRAMES: Samples = Samples::new(256);
+
+/// [`GUARD_FRAMES`] as a straight ring position's step: the ring counts
+/// positions in `u64`.
+fn guard_positions() -> u64 {
+    GUARD_FRAMES.get() as u64
+}
 
 /// Frames of old material a [`FadeRecord`] carries past the fade itself: what
 /// the reader plays if it reaches the switch before the rewrite has.
@@ -180,7 +191,7 @@ pub(crate) fn straight(slot: u64) -> SamplePosition {
 /// A switch the reader crosses: the old mapping's frames around it, so the
 /// reader can fade from what it would have played to what the ring now holds.
 #[derive(Clone, Debug)]
-pub(crate) struct FadeRecord<F: Float = f32> {
+pub(crate) struct FadeRecord<F: Float> {
     /// The straight position of `data`'s first frame.
     pub(crate) start: u64,
     /// Frames in `data`.
@@ -198,7 +209,7 @@ pub(crate) struct FadeRecord<F: Float = f32> {
 /// What [`RingControl`] carries for the reader's taps; the streamer changes it
 /// only by publishing a new [`RingControl`].
 #[derive(Clone, Debug)]
-pub(crate) struct RingMap<F: Float = f32> {
+pub(crate) struct RingMap<F: Float> {
     pub(crate) before: Arrangement,
     pub(crate) after: Arrangement,
     /// The switch: positions from here read `after`.
@@ -247,7 +258,7 @@ impl<F: Float> RingMap<F> {
 /// the one asked for (a lead-in that cannot be read downgrades it to a hard
 /// loop), and that is what a fork plays.
 #[derive(Clone, Debug)]
-pub(crate) struct RingControl<F: Float = f32> {
+pub(crate) struct RingControl<F: Float> {
     /// How to read the slots.
     pub(crate) map: RingMap<F>,
     /// The direction the stream plays in.
@@ -273,7 +284,7 @@ impl<F: Float> RingControl<F> {
 /// blends toward, and — for a short loop — its body, captured once when the
 /// loop is set so no refill re-reads them.
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct RingLoop<F: Float = f32> {
+pub(crate) struct RingLoop<F: Float> {
     span: LoopSpan,
     /// The `span.fade()` frames leading into `span.resume()` (the fade's
     /// lead-in, `[resume - fade, resume)`), flat interleaved at the ring's
@@ -391,7 +402,7 @@ impl<F: Float> RingLoop<F> {
 /// What a stream's straight positions hold: a direction, the file's length,
 /// and (going forward) a loop.
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct Mapping<F: Float = f32> {
+pub(crate) struct Mapping<F: Float> {
     pub(crate) reverse: bool,
     pub(crate) len: Option<Samples>,
     pub(crate) ring_loop: Option<RingLoop<F>>,
@@ -561,7 +572,7 @@ impl<F: Float> Mapping<F> {
 /// from it on (and for every later write). `None`: no switch, `current`
 /// everywhere.
 #[derive(Clone, Debug)]
-pub(crate) struct Content<F: Float = f32> {
+pub(crate) struct Content<F: Float> {
     pub(crate) before: Mapping<F>,
     pub(crate) current: Mapping<F>,
     pub(crate) switch_at: Option<u64>,
@@ -656,7 +667,7 @@ pub(crate) fn apply_mapping<F: RingFloat>(
     let mut tries: u32 = 0;
     let (at, fade, record) = loop {
         tries += 1;
-        let mut at = parts.max(busy + GUARD_FRAMES);
+        let mut at = parts.max(busy + guard_positions());
         if let Some(switch) = content.switch_at.filter(|&switch| switch > busy) {
             at = at.min(switch);
         }
@@ -828,7 +839,7 @@ mod tests {
         }
     }
 
-    fn ring_loop(wave: &Wave, range: (u64, u64), fade: usize) -> RingLoop {
+    fn ring_loop(wave: &Wave, range: (u64, u64), fade: usize) -> RingLoop<f32> {
         let reads = std::cell::Cell::new(0);
         let mut read = reader(wave, 1, &reads);
         let looped = crate::testing::loop_frames(range.0 as usize, range.1 as usize, fade);
@@ -836,7 +847,7 @@ mod tests {
         captured.expect("a loop").0
     }
 
-    fn fill(mapping: &Mapping, wave: &Wave, pos: u64, frames: usize, ch: usize) -> Vec<f32> {
+    fn fill(mapping: &Mapping<f32>, wave: &Wave, pos: u64, frames: usize, ch: usize) -> Vec<f32> {
         let layout = ChannelLayout::try_from(ch).expect("a test width is small");
         let mut out = vec![0.0f32; layout.interleaved_len(Samples(frames))];
         let reads = std::cell::Cell::new(0);
@@ -848,7 +859,7 @@ mod tests {
         out
     }
 
-    fn loop_frames(wave: &Wave, range: (u64, u64), fade: usize) -> Mapping {
+    fn loop_frames(wave: &Wave, range: (u64, u64), fade: usize) -> Mapping<f32> {
         Mapping {
             reverse: false,
             len: Some(wave.len()),
@@ -1055,7 +1066,7 @@ mod tests {
                 ..Mapping::plain(Samples::new(len))
             },
         ];
-        let span_of = |m: &Mapping| m.ring_loop.as_ref().map(|l| *l.span());
+        let span_of = |m: &Mapping<f32>| m.ring_loop.as_ref().map(|l| *l.span());
         for mapping in &mappings {
             let slots = fill(mapping, &wave, 0, 12_000, 1);
             let arrangement = mapping.arrangement();
@@ -1144,7 +1155,7 @@ mod tests {
     /// A 20 000-frame mono ring writer holding frames `0..10_000` of a
     /// resident ramp, unlooped, with its reader's block in flight at
     /// `[0, 64)`; the reader, for a hook to move; and the ramp.
-    fn switching_ring() -> (RegionOut, tutti_rt::PosReader, Arc<Wave>) {
+    fn switching_ring() -> (RegionOut<f32>, tutti_rt::PosReader, Arc<Wave>) {
         use super::super::command::StreamId;
         use super::super::prefetch::RegionBuffer;
         const LEN: usize = 20_000;
@@ -1214,12 +1225,12 @@ mod tests {
         assert_eq!(
             edit,
             Edit::Switch {
-                at: 3_100 + GUARD_FRAMES,
+                at: 3_100 + guard_positions(),
                 fade: true
             }
         );
         assert_eq!(calls.load(std::sync::atomic::Ordering::Relaxed), 2);
-        assert_eq!(writer.content().switch_at, Some(3_100 + GUARD_FRAMES));
+        assert_eq!(writer.content().switch_at, Some(3_100 + guard_positions()));
     }
 
     /// A reader that keeps pace with every read is given up on after four:
@@ -1246,7 +1257,7 @@ mod tests {
         assert_eq!(
             edit,
             Edit::Switch {
-                at: 6_000 + GUARD_FRAMES,
+                at: 6_000 + guard_positions(),
                 fade: true
             }
         );

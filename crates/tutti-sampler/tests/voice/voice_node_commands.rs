@@ -55,7 +55,7 @@ fn flat_wave(len: usize) -> Arc<Wave> {
 }
 
 /// A voice placed on the transport at `[start, start + 1)`.
-fn voice_at(start: f64) -> Voice {
+fn voice_at(start: f64) -> Voice<f32> {
     let source = MemorySource::new(flat_wave(48_000))
         .expect("a placeable wave")
         .placed_at(VoiceWindow::span(Beat(start), BeatDuration(1.0)));
@@ -65,7 +65,7 @@ fn voice_at(start: f64) -> Voice {
     }
 }
 
-fn node_at(start: f64) -> VoiceNode {
+fn node_at(start: f64) -> VoiceNode<f32> {
     VoiceNode::with_channels(voice_at(start), ChannelLayout::MONO)
 }
 
@@ -79,7 +79,7 @@ fn peak(node: &mut dyn tutti_graph::Node, beat: f64) -> f32 {
 }
 
 /// A graph holding `node` at key 1 on output 0, committed; its controls.
-fn graph_with(node: VoiceNode) -> (Editor, Executor, tutti_sampler::VoiceNodeHandle) {
+fn graph_with(node: VoiceNode<f32>) -> (Editor, Executor, tutti_sampler::VoiceNodeHandle<f32>) {
     let (mut ed, mut exec) = Editor::new(Prepare::new(RATE, MaxBlock::of(Samples(256))));
     let handle = ed.insert(NodeKey(1), "voice", node).controls;
     ed.spec_mut()
@@ -137,7 +137,9 @@ fn a_queued_placement_moves_a_live_voice() {
         "silent before the move — the playhead is outside the window"
     );
 
-    handle.set_window(VoiceWindow::span(Beat(10.0), BeatDuration(1.0)));
+    handle
+        .window_cell()
+        .publish(Some(VoiceWindow::span(Beat(10.0), BeatDuration(1.0))));
 
     assert!(
         peak(&mut node, 10.0) > 0.5,
@@ -182,7 +184,9 @@ fn a_command_reaches_a_node_across_a_commit() {
         "still silent: nothing was sent"
     );
 
-    handle.set_window(VoiceWindow::span(Beat(10.0), BeatDuration(1.0)));
+    handle
+        .window_cell()
+        .publish(Some(VoiceWindow::span(Beat(10.0), BeatDuration(1.0))));
 
     assert!(
         render_peak(&mut exec, 10.0) > 0.5,
@@ -215,7 +219,9 @@ fn a_fork_steals_no_commands() {
         .expect("a memory voice forks");
     fork.apply_pending();
 
-    handle.set_window(VoiceWindow::span(Beat(10.0), BeatDuration(1.0)));
+    handle
+        .window_cell()
+        .publish(Some(VoiceWindow::span(Beat(10.0), BeatDuration(1.0))));
 
     // The fork renders first, and must take nothing.
     let _ = render_peak(&mut fork, 10.0);
@@ -259,7 +265,9 @@ fn a_placement_sent_after_the_insert_reaches_a_fork() {
         .expect("forks");
     before.apply_pending();
 
-    handle.set_window(VoiceWindow::span(Beat(10.0), BeatDuration(1.0)));
+    handle
+        .window_cell()
+        .publish(Some(VoiceWindow::span(Beat(10.0), BeatDuration(1.0))));
 
     let (_after_ed, mut after) = ed
         .fork(ForkTarget::Master, ForkMode::Live, prepare)
@@ -285,15 +293,21 @@ fn a_placement_sent_after_the_insert_reaches_a_fork() {
 #[test]
 fn the_latest_placement_wins() {
     let (mut first_only, first_handle) = node_at(0.0).with_handle();
-    first_handle.set_window(VoiceWindow::span(Beat(10.0), BeatDuration(1.0)));
+    first_handle
+        .window_cell()
+        .publish(Some(VoiceWindow::span(Beat(10.0), BeatDuration(1.0))));
     assert!(
         peak(&mut first_only, 10.0) > 0.5,
         "the first window alone sounds at beat 10"
     );
 
     let (mut node, handle) = node_at(0.0).with_handle();
-    handle.set_window(VoiceWindow::span(Beat(10.0), BeatDuration(1.0)));
-    handle.set_window(VoiceWindow::span(Beat(20.0), BeatDuration(1.0)));
+    handle
+        .window_cell()
+        .publish(Some(VoiceWindow::span(Beat(10.0), BeatDuration(1.0))));
+    handle
+        .window_cell()
+        .publish(Some(VoiceWindow::span(Beat(20.0), BeatDuration(1.0))));
     assert!(
         peak(&mut node, 10.0) < 1e-6,
         "the first move was replaced before the block: beat 10 is outside the \

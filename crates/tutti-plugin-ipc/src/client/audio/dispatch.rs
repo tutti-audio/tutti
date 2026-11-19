@@ -1,8 +1,10 @@
 //! Per-command IPC choreography for the bridge thread.
 
-use super::channels::{Channels, Fate};
+use super::channels::{BridgeSide, Fate};
+#[cfg(test)]
+use super::channels::{Channels, response_ring};
 use super::lifecycle::Lifecycle;
-use super::messages::{AudioResponse, Command, Unsolicited};
+use super::messages::{AudioCommand, AudioResponse, ControlCommand, Unsolicited};
 use super::payload_pool::PayloadPool;
 use super::progress::StateProgress;
 use crate::error::unexpected_message;
@@ -46,7 +48,7 @@ const MIN_PROCESS_TIMEOUT: Duration = Duration::from_millis(2);
 /// cannot help any live block and continuing to wait only starves the queue.
 const MAX_PROCESS_TIMEOUT: Duration = Duration::from_millis(50);
 
-/// How long a [`Command::Drain`] waits for the control connection to say more
+/// How long [`read_news`] waits for the control connection to say more
 /// once it has gone quiet: news the server sent is already in the socket.
 const DRAIN_UNSOLICITED: Duration = Duration::from_millis(1);
 
@@ -119,7 +121,7 @@ fn is_stale(seq: u64, newest: u64) -> bool {
 /// there is what paired a block with its predecessor's reply, and a query with
 /// a stale `AudioProcessed`.
 ///
-/// Owned by `pump` and passed in, rather than living in [`Channels`]: only the
+/// Owned by `pump` and passed in, rather than living in [`Channels`](super::channels::Channels): only the
 /// bridge thread ever reads or writes it, so an `Arc<AtomicU32>` would advertise
 /// a sharing that does not exist. The [`PartialFrame`] must have exactly this
 /// scope for a different reason — it describes a position in *this* connection's
@@ -252,11 +254,11 @@ impl Owed {
     /// rejects it) but its MIDI-out is the plugin's real output and the socket
     /// is its only path. Dropping it silently loses notes from any block whose
     /// reply ran late. Only a block's counts as late
-    /// ([`Channels::note_late`]): the counters are about blocks.
+    /// ([`Channels::note_late`](super::channels::Channels::note_late)): the counters are about blocks.
     ///
     /// A block's reply naming a block never sent is no owed reply: it is
     /// handed back as the answer, for the caller to refuse.
-    fn take(&mut self, msg: BridgeMessage, channels: &Channels) -> Option<BridgeMessage> {
+    fn take(&mut self, msg: BridgeMessage, channels: &mut BridgeSide) -> Option<BridgeMessage> {
         if matches!(msg, BridgeMessage::AudioProcessed { seq, .. } if !channels.sent(seq)) {
             return Some(msg);
         }
@@ -352,7 +354,7 @@ fn next_reply(
     stream: &mut ControlStream,
     inbox: &mut Unsolicited,
     owed: &mut Owed,
-    channels: &Channels,
+    channels: &mut BridgeSide,
     budget: Duration,
 ) -> BridgeResult<Option<BridgeMessage>> {
     let deadline = Instant::now() + budget;
@@ -381,7 +383,7 @@ fn answer(
     stream: &mut ControlStream,
     inbox: &mut Unsolicited,
     owed: &mut Owed,
-    channels: &Channels,
+    channels: &mut BridgeSide,
     budget: Duration,
     late: Late,
 ) -> BridgeResult<Option<BridgeMessage>> {
@@ -410,23 +412,20 @@ pub(super) struct Lanes {
     pub(super) control: Lane,
 }
 
-pub(super) fn handle(
-    cmd: Command,
-    lanes: &mut Lanes,
-    channels: &Channels,
+/// Sends a block or a reset; `true` when a block was sent (a stale one is
+/// skipped, and the control lane's news is looked at only after a sent block:
+/// skipping a backlog must stay cheap).
+pub(super) fn handle_audio(
+    cmd: AudioCommand,
+    lane: &mut Lane,
+    channels: &mut BridgeSide,
     payloads: &PayloadPool,
     inbox: &mut Unsolicited,
-    lifecycle: &Lifecycle,
-) -> BridgeResult<()> {
-    let Lanes {
-        audio: Lane {
-            stream: audio_stream,
-            owed: audio_owed,
-        },
-        control: Lane { stream, owed },
-    } = lanes;
+) -> BridgeResult<bool> {
+    let Lane { stream, owed } = lane;
+    let mut went = false;
     match cmd {
-        Command::Process(mut payload) => {
+        AudioCommand::Process(mut payload) => {
             let seq = payload.seq;
             let num_samples = payload.num_samples;
 
@@ -442,21 +441,21 @@ pub(super) fn handle(
                 // complete it from the next block's packets, with these
                 // missing. (No wire change: a gap is never sent.)
                 for e in &payload.midi_events {
-                    audio_owed.intake.admit(e);
+                    owed.intake.admit(e);
                 }
-                audio_owed.intake.lost();
+                owed.intake.lost();
                 channels.note_dropped_midi(payload.midi_events.len() as u64);
-                audio_owed.carry(&payload.param_changes);
+                owed.carry(&payload.param_changes);
                 payloads.return_params(core::mem::take(&mut payload.param_changes));
                 payloads.recycle(payload);
-                return Ok(());
+                return Ok(false);
             }
 
-            if !audio_owed.carried.is_empty() {
-                audio_owed.merge_carried(&mut payload.param_changes);
+            if !owed.carried.is_empty() {
+                owed.merge_carried(&mut payload.param_changes);
             }
             let before = payload.midi_events.len();
-            payload.midi_events.retain(|e| audio_owed.intake.admit(e));
+            payload.midi_events.retain(|e| owed.intake.admit(e));
             channels.note_dropped_midi((before - payload.midi_events.len()) as u64);
             let msg = HostMessage::ProcessAudio(ProcessAudioData {
                 seq: payload.seq,
@@ -477,7 +476,7 @@ pub(super) fn handle(
             let timeout = channels
                 .reply_wait()
                 .unwrap_or_else(|| process_timeout(num_samples, channels.sample_rate()));
-            let sent = ipc::send(audio_stream, &msg);
+            let sent = ipc::send(stream, &msg);
             // The parameter-change buffer goes back to the audio thread's free
             // list once its contents are on the wire (sent or not: a failed
             // send crashes the bridge below, and the buffer is no use to it).
@@ -485,17 +484,11 @@ pub(super) fn handle(
                 payloads.return_params(data.param_changes);
             }
             sent?;
+            went = true;
 
             // Replies owed from earlier blocks come first and are forwarded
             // (`Owed::take`); then this block's own, within its budget.
-            match answer(
-                audio_stream,
-                inbox,
-                audio_owed,
-                channels,
-                timeout,
-                Late::Block,
-            )? {
+            match answer(stream, inbox, owed, channels, timeout, Late::Block)? {
                 // **A missed block budget costs the block, not the connection.**
                 //
                 // [`process_timeout`] is a few block periods with a 2 ms floor,
@@ -571,25 +564,33 @@ pub(super) fn handle(
                     channels.note_replied();
                 }
             }
-            // The plugin's news arrives on the control lane, which a block does
-            // not read: take what is there, as the blocks' replies used to
-            // carry it in. Nothing waits: a frame begun is finished (and one a
-            // late request still owes is taken off), and the rest is for later.
-            if ipc::has_pending(stream) {
-                let finish = owed.finish;
-                next_reply(stream, inbox, owed, channels, finish)?;
-            }
         }
-        Command::SetParameter { param_id, value } => {
+        AudioCommand::Reset => {
+            ipc::send(stream, &HostMessage::Reset)?;
+        }
+    }
+    Ok(went)
+}
+
+pub(super) fn handle_control(
+    cmd: ControlCommand,
+    lane: &mut Lane,
+    channels: &mut BridgeSide,
+    inbox: &mut Unsolicited,
+    lifecycle: &Lifecycle,
+) -> BridgeResult<()> {
+    let Lane { stream, owed } = lane;
+    match cmd {
+        ControlCommand::SetParameter { param_id, value } => {
             ipc::send(stream, &HostMessage::SetParameter { param_id, value })?;
         }
-        Command::SetAutomationState { mode } => {
+        ControlCommand::SetAutomationState { mode } => {
             ipc::send(stream, &HostMessage::SetAutomationState { mode })?;
         }
-        Command::SetTrackInfo { info } => {
+        ControlCommand::SetTrackInfo { info } => {
             ipc::send(stream, &HostMessage::SetTrackInfo { info: *info })?;
         }
-        Command::SetSampleRate { rate } => {
+        ControlCommand::SetSampleRate { rate } => {
             ipc::send(stream, &HostMessage::SetSampleRate { rate })?;
             // Wait for the answer: the plugin's re-activation is the slowest
             // thing the bridge asks of it, and what it says decides whether
@@ -647,19 +648,10 @@ pub(super) fn handle(
                 }
             }
         }
-        Command::SetRenderMode { mode } => {
+        ControlCommand::SetRenderMode { mode } => {
             ipc::send(stream, &HostMessage::SetRenderMode { mode })?;
         }
-        Command::Reset => {
-            ipc::send(audio_stream, &HostMessage::Reset)?;
-        }
-        Command::Drain => {
-            // Only the plugin's unsolicited news is coming, and `next_reply`
-            // files each into the inbox as it reads: what is left over is an
-            // answer owed to nobody.
-            while next_reply(stream, inbox, owed, channels, DRAIN_UNSOLICITED)?.is_some() {}
-        }
-        Command::SaveState {
+        ControlCommand::SaveState {
             state_use,
             progress,
             reply,
@@ -667,7 +659,7 @@ pub(super) fn handle(
             ipc::send(stream, &HostMessage::SaveState { state_use })?;
             reply.send(recv_state(stream, inbox, owed, channels, &progress)?);
         }
-        Command::LoadState {
+        ControlCommand::LoadState {
             state_use,
             data,
             progress,
@@ -739,7 +731,7 @@ pub(super) fn handle(
             };
             reply.send(value);
         }
-        Command::GetParameterList { reply } => {
+        ControlCommand::GetParameterList { reply } => {
             ipc::send(stream, &HostMessage::GetParameterList)?;
             let value = match ask(stream, inbox, owed, channels, lifecycle, |m| {
                 matches!(m, BridgeMessage::ParameterList { .. })
@@ -749,7 +741,7 @@ pub(super) fn handle(
             };
             reply.send(value);
         }
-        Command::GetPresetList { reply } => {
+        ControlCommand::GetPresetList { reply } => {
             ipc::send(stream, &HostMessage::GetPresetList)?;
             let value = match ask(stream, inbox, owed, channels, lifecycle, |m| {
                 matches!(m, BridgeMessage::PresetList { .. })
@@ -759,7 +751,7 @@ pub(super) fn handle(
             };
             reply.send(value);
         }
-        Command::LoadPreset { id, reply } => {
+        ControlCommand::LoadPreset { id, reply } => {
             ipc::send(stream, &HostMessage::LoadPreset { id })?;
             let ok = matches!(
                 ask(stream, inbox, owed, channels, lifecycle, |m| matches!(
@@ -770,7 +762,7 @@ pub(super) fn handle(
             );
             reply.send(ok);
         }
-        Command::SetupSharedMemory {
+        ControlCommand::SetupSharedMemory {
             shm_name,
             layout,
             reply,
@@ -787,7 +779,7 @@ pub(super) fn handle(
             );
             reply.send(ok);
         }
-        Command::GetCurrentPreset { reply } => {
+        ControlCommand::GetCurrentPreset { reply } => {
             ipc::send(stream, &HostMessage::GetCurrentPreset)?;
             let value = match ask(stream, inbox, owed, channels, lifecycle, |m| {
                 matches!(m, BridgeMessage::CurrentPreset { .. })
@@ -797,7 +789,7 @@ pub(super) fn handle(
             };
             reply.send(value);
         }
-        Command::GetParameter { param_id, reply } => {
+        ControlCommand::GetParameter { param_id, reply } => {
             ipc::send(stream, &HostMessage::GetParameter { param_id })?;
             let value = match ask(stream, inbox, owed, channels, lifecycle, |m| {
                 matches!(m, BridgeMessage::ParameterValue { .. })
@@ -807,7 +799,7 @@ pub(super) fn handle(
             };
             reply.send(value);
         }
-        Command::GetParameterText {
+        ControlCommand::GetParameterText {
             param_id,
             value,
             reply,
@@ -821,7 +813,7 @@ pub(super) fn handle(
             };
             reply.send(text);
         }
-        Command::GetParameterValueFromText {
+        ControlCommand::GetParameterValueFromText {
             param_id,
             text,
             reply,
@@ -838,7 +830,7 @@ pub(super) fn handle(
             };
             reply.send(value);
         }
-        Command::GetParameterPlain {
+        ControlCommand::GetParameterPlain {
             param_id,
             value,
             reply,
@@ -852,7 +844,7 @@ pub(super) fn handle(
             };
             reply.send(plain);
         }
-        Command::OpenEditor {
+        ControlCommand::OpenEditor {
             parent,
             scale,
             reply,
@@ -876,10 +868,10 @@ pub(super) fn handle(
             };
             reply.send(value);
         }
-        Command::CloseEditor => {
+        ControlCommand::CloseEditor => {
             ipc::send(stream, &HostMessage::CloseEditor)?;
         }
-        Command::SetEditorSize { size, reply } => {
+        ControlCommand::SetEditorSize { size, reply } => {
             ipc::send(stream, &HostMessage::SetEditorSize { size })?;
             let value = match answer(
                 stream,
@@ -899,7 +891,7 @@ pub(super) fn handle(
             };
             reply.send(value);
         }
-        Command::GetParameterNormalized {
+        ControlCommand::GetParameterNormalized {
             param_id,
             plain,
             reply,
@@ -920,6 +912,19 @@ pub(super) fn handle(
     Ok(())
 }
 
+/// Reads what the plugin said unprompted off the control connection: each
+/// frame is filed into `inbox` as `next_reply` reads it, and what is left over
+/// is an answer owed to nobody.
+pub(super) fn read_news(
+    lane: &mut Lane,
+    channels: &mut BridgeSide,
+    inbox: &mut Unsolicited,
+) -> BridgeResult<()> {
+    let Lane { stream, owed } = lane;
+    while next_reply(stream, inbox, owed, channels, DRAIN_UNSOLICITED)?.is_some() {}
+    Ok(())
+}
+
 /// A query's reply, within [`Timeouts::param`](tutti_plugin_types::Timeouts::param): `None` when it does not come
 /// in time, which the query answers as "cannot be asked" (and the reply is
 /// owed). A timeout here was a `?` that crashed a healthy bridge.
@@ -927,7 +932,7 @@ fn ask(
     stream: &mut ControlStream,
     inbox: &mut Unsolicited,
     owed: &mut Owed,
-    channels: &Channels,
+    channels: &mut BridgeSide,
     lifecycle: &Lifecycle,
     answers: fn(&BridgeMessage) -> bool,
 ) -> BridgeResult<Option<BridgeMessage>> {
@@ -967,7 +972,7 @@ fn recv_state(
     stream: &mut ControlStream,
     inbox: &mut Unsolicited,
     owed: &mut Owed,
-    channels: &Channels,
+    channels: &mut BridgeSide,
     progress: &StateProgress,
 ) -> BridgeResult<std::result::Result<Vec<u8>, StateError>> {
     let mut acc = Reassembler::default();
@@ -1114,32 +1119,38 @@ mod tests {
     /// the answer.
     #[test]
     fn owed_frames_are_taken_in_order_before_the_answer() {
-        let channels = Channels::new(SampleRate::SR_48K, std::sync::Arc::default()).0;
+        let (writer, mut replies, _lost) = response_ring();
+        let mut channels = BridgeSide::new(
+            Channels::new(SampleRate::SR_48K, std::sync::Arc::default())
+                .expect("the channels")
+                .0,
+            writer,
+        );
         let mut owed = Owed::finishing(Timeouts::default().drain);
         channels.note_submitted(3);
         owed.owe(Late::Block);
         owed.owe(Late::Answer(is_value));
         owed.owe(Late::StateRest);
 
-        assert!(owed.take(processed(3), &channels).is_none());
+        assert!(owed.take(processed(3), &mut channels).is_none());
         assert!(matches!(
-            channels.pop_audio_response(),
+            replies.pop(),
             Some(AudioResponse::AudioProcessed { seq: 3, .. })
         ));
         assert_eq!(channels.block_counts().late, 1);
         let value = BridgeMessage::ParameterValue {
             value: Some(tutti_units::Normalized::of(0.25)),
         };
-        assert!(owed.take(value, &channels).is_none());
-        assert!(owed.take(chunk(0, false), &channels).is_none());
-        assert!(owed.take(chunk(1, true), &channels).is_none());
+        assert!(owed.take(value, &mut channels).is_none());
+        assert!(owed.take(chunk(0, false), &mut channels).is_none());
+        assert!(owed.take(chunk(1, true), &mut channels).is_none());
         assert!(owed.late.is_empty());
 
         let list = BridgeMessage::ParameterList {
             parameters: Vec::new(),
         };
         assert!(matches!(
-            owed.take(list, &channels),
+            owed.take(list, &mut channels),
             Some(BridgeMessage::ParameterList { .. })
         ));
         assert_eq!(
@@ -1154,7 +1165,12 @@ mod tests {
     /// against the next; the server's `Error` answers any request.
     #[test]
     fn a_frame_of_another_kind_lets_an_owed_answer_go() {
-        let channels = Channels::new(SampleRate::SR_48K, std::sync::Arc::default()).0;
+        let mut channels = BridgeSide::new(
+            Channels::new(SampleRate::SR_48K, std::sync::Arc::default())
+                .expect("the channels")
+                .0,
+            response_ring().0,
+        );
         let list = || BridgeMessage::ParameterList {
             parameters: Vec::new(),
         };
@@ -1163,7 +1179,7 @@ mod tests {
         owed.owe(Late::Answer(is_value));
         owed.owe(Late::StateRest);
         assert!(matches!(
-            owed.take(list(), &channels),
+            owed.take(list(), &mut channels),
             Some(BridgeMessage::ParameterList { .. })
         ));
         assert!(owed.late.is_empty());
@@ -1172,7 +1188,7 @@ mod tests {
         let error = BridgeMessage::Error {
             message: "refused".into(),
         };
-        assert!(owed.take(error, &channels).is_none());
+        assert!(owed.take(error, &mut channels).is_none());
         assert!(owed.late.is_empty());
     }
 

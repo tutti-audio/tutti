@@ -32,7 +32,10 @@ use tutti_ump::{
 
 use crate::deadline::Retry;
 use crate::endpoint::{Endpoint, MAX_FUNCTION_BLOCKS, UMP_VERSION};
-use crate::name::{BlockName, EndpointName, ProductInstanceId};
+use crate::name::{
+    BLOCK_NAME_BYTES, BlockName, ENDPOINT_NAME_BYTES, EndpointName, INSTANCE_ID_BYTES,
+    ProductInstanceId,
+};
 
 /// How long a step waits for its answer before it is sent again.
 ///
@@ -116,9 +119,9 @@ pub struct EndpointDiscovery {
     step: Step,
     retry: Retry,
     endpoint: Endpoint,
-    endpoint_name: StreamTextAssembler<98>,
-    instance_id: StreamTextAssembler<42>,
-    block_name: StreamTextAssembler<91>,
+    endpoint_name: StreamTextAssembler<ENDPOINT_NAME_BYTES>,
+    instance_id: StreamTextAssembler<INSTANCE_ID_BYTES>,
+    block_name: StreamTextAssembler<BLOCK_NAME_BYTES>,
     block_names: [Option<BlockName>; MAX_FUNCTION_BLOCKS],
 }
 
@@ -267,12 +270,12 @@ impl EndpointDiscovery {
             Stream::DeviceIdentity(identity) => self.endpoint.identity = Some(identity),
             Stream::EndpointName(form, bytes) => {
                 if let Some(text) = self.endpoint_name.feed(0, form, &bytes) {
-                    self.endpoint.name = EndpointName::from_bytes(text);
+                    self.endpoint.name = EndpointName::new(text.as_str());
                 }
             }
             Stream::ProductInstanceId(form, bytes) => {
                 if let Some(text) = self.instance_id.feed(0, form, &bytes) {
-                    self.endpoint.instance_id = ProductInstanceId::from_bytes(text);
+                    self.endpoint.instance_id = ProductInstanceId::new(text.as_str());
                 }
             }
             Stream::StreamConfigurationNotification(config) => {
@@ -328,7 +331,7 @@ impl EndpointDiscovery {
                 // One name is open at a time: another block's Start drops it.
                 if let Some(text) = self.block_name.feed(block.get(), form, &bytes)
                     && let (Some(name_text), Some(slot)) = (
-                        BlockName::from_bytes(text),
+                        BlockName::new(text.as_str()),
                         self.block_names.get_mut(usize::from(block.get())),
                     )
                 {
@@ -393,7 +396,7 @@ impl EndpointDiscovery {
                     return DiscoveryAction::Wait;
                 };
                 let (Some(name), Some(Some(held))) = (
-                    BlockName::from_bytes(text),
+                    BlockName::new(text.as_str()),
                     self.endpoint.blocks.get_mut(usize::from(block.get())),
                 ) else {
                     return DiscoveryAction::Wait;

@@ -138,12 +138,12 @@ fn served<F: Format>(
     unsafe { std::env::set_var("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server()) };
     let Launched { ipc, .. } = Ipc::launch(
         IpcConfig::at(tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source")),
-        path,
-        F::FORMAT,
-        Load::new(),
-        SampleRate::of(RATE),
-        None,
-        tutti_plugin_types::StateUse::Project,
+        &tutti_plugin_ipc::LoadRequest {
+            origin: &tutti_plugin_types::Origin::new(path, Load::new()),
+            format: F::FORMAT,
+            rate: SampleRate::of(RATE),
+            restore: None,
+        },
         Some(tutti_plugin_ipc::EditorLoader::new(
             no_editor,
             tutti_fixtures::detached_work(),

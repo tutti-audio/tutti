@@ -273,7 +273,7 @@ fn a_note_through_the_setup_rings_out_within_the_summed_tails() {
 /// A setup on a font of one zone with a 0.25 s release, its mix on the graph's
 /// outputs, and a function that renders a block of it and returns the peak of
 /// both channels.
-fn short_release_setup() -> (Session, GeneralMidi) {
+fn short_release_setup() -> (Session, GeneralMidi<f32>) {
     use tutti_fixtures::sf2::{Inst, Preset, bytes, generator};
     let font = Arc::new(
         SoundFont::from_reader(&mut std::io::Cursor::new(bytes(
@@ -378,10 +378,11 @@ fn muting_the_setup_silences_the_wet_path_too() {
     );
 
     session
-        .graph()
-        .set_mode(gm.out(), NodeMode::Muted)
+        .set(gm.out().mode().to(NodeMode::Muted))
         .expect("the fader is in the graph");
-    for _ in 0..2 {
+    // The mode reaches the node with the update after the first block, and
+    // its fade is two blocks.
+    for _ in 0..3 {
         peak_of_block(&mut session);
     }
     for block in 0..8 {

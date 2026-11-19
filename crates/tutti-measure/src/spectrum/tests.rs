@@ -8,7 +8,7 @@ use tutti_units::{Amplitude, SampleRate};
 
 const RATE: f64 = 48_000.0;
 
-/// f32 transform and window error budget, in dB: a relative amplitude
+/// The `f32` test signals' rounding error budget, in dB: a relative amplitude
 /// error of `1e-4` (about 100x `eps * log2(N)` for the sizes here) is
 /// `20 log10(1 + 1e-4)`.
 const FFT_TOL: f64 = 1e-3;
@@ -29,12 +29,12 @@ fn plan(cfg: &SpectrumConfig) -> SpectrumPlan {
     cfg.plan(SampleRate::of(RATE)).unwrap()
 }
 
-fn meter(cfg: &SpectrumConfig) -> SpectrumMeter {
+fn meter(cfg: &SpectrumConfig) -> SpectrumMeter<f32> {
     cfg.measure(SampleRate::of(RATE)).unwrap()
 }
 
 /// Pushes a finite block and returns whether it completed a frame.
-fn push_frames(state: &mut SpectrumMeter, block: &[f32]) -> bool {
+fn push_frames(state: &mut SpectrumMeter<f32>, block: &[f32]) -> bool {
     let mut frames = Vec::new();
     state.push(Mono::new(block), &mut frames).unwrap();
     !frames.is_empty()
@@ -48,7 +48,7 @@ fn tone(len: usize, freq: f64, amp: f64) -> Vec<f32> {
 
 /// Feeds `signal` a hop at a time (so at most one frame completes per
 /// call), returning the state and the levels after each frame.
-fn run(cfg: &SpectrumConfig, signal: &[f32]) -> (SpectrumMeter, Vec<Vec<Db>>) {
+fn run(cfg: &SpectrumConfig, signal: &[f32]) -> (SpectrumMeter<f32>, Vec<Vec<Db>>) {
     let mut state = meter(cfg);
     let mut frames = Vec::new();
     for block in signal.chunks(plan(cfg).geometry.hop().get()) {
@@ -90,7 +90,7 @@ fn a_bin_centred_sine_reads_its_amplitude() {
             );
         }
         // Leakage of a periodic Hann at a bin centre is exactly zero; what
-        // is left is f32 rounding, far under -100 dB.
+        // is left is the `f32` input's rounding, far under -100 dB.
         assert!(levels[29].get() < -100.0 && levels[35].get() < -100.0);
     }
     assert_eq!(state.frequencies()[32], Hz(1000.0));
@@ -573,7 +573,7 @@ fn the_hold_is_a_whole_number_of_frames_without_over_holding() {
                 .peak_decay(PeakDecay::of(Db(1.0))),
             SampleRate::of(10_000_000.0)
         )
-        .map(|_: SpectrumMeter| ()),
+        .map(|_: SpectrumMeter<f32>| ()),
         Err(Error::PeakHoldTooLong { .. })
     ));
 }
@@ -610,7 +610,7 @@ fn bad_settings_are_errors() {
             &cfg.spectrogram(FrameCount(usize::MAX)),
             SampleRate::of(RATE)
         )
-        .map(|_: SpectrumMeter| ()),
+        .map(|_: SpectrumMeter<f32>| ()),
         Err(Error::SpectrogramTooLarge { .. })
     ));
     assert_eq!(
@@ -618,7 +618,7 @@ fn bad_settings_are_errors() {
             &cfg.spectrogram(FrameCount((1 << 22) / 513 + 1)),
             SampleRate::of(RATE)
         )
-        .map(|_: SpectrumMeter| ()),
+        .map(|_: SpectrumMeter<f32>| ()),
         Err(Error::SpectrogramTooLarge {
             cells: ((1 << 22) / 513 + 1) * 513,
             max: 1 << 22
@@ -627,7 +627,7 @@ fn bad_settings_are_errors() {
     assert!(
         cfg.spectrogram(FrameCount((1 << 22) / 513))
             .measure(SampleRate::of(RATE))
-            .map(|_: SpectrumMeter| ())
+            .map(|_: SpectrumMeter<f32>| ())
             .is_ok()
     );
     let banded = cfg
@@ -636,7 +636,7 @@ fn bad_settings_are_errors() {
             band: band(100.0, 20_000.0),
         })
         .measure(SampleRate::of(RATE))
-        .map(|_: SpectrumMeter| ());
+        .map(|_: SpectrumMeter<f32>| ());
     assert!(
         matches!(banded, Err(Error::EmptyBand { .. })),
         "4000 bands of 513 bins cannot all hold a bin"
@@ -651,14 +651,14 @@ fn bad_settings_are_errors() {
     assert!(matches!(
         oct(48, 1e-30, 20_000.0)
             .measure(SampleRate::of(RATE))
-            .map(|_: SpectrumMeter| ()),
+            .map(|_: SpectrumMeter<f32>| ()),
         Err(Error::TooManyBands { max: 4096, .. })
     ));
     assert!(
         matches!(
             oct(48, 100.0, 20_000.0)
                 .measure(SampleRate::of(RATE))
-                .map(|_: SpectrumMeter| ()),
+                .map(|_: SpectrumMeter<f32>| ()),
             Err(Error::EmptyBand { .. })
         ),
         "1/48 octave is finer than the bins"
@@ -680,13 +680,13 @@ fn bad_settings_are_errors() {
     assert!(matches!(
         oct(1, 100.0, 30_000.0)
             .measure(SampleRate::of(RATE))
-            .map(|_: SpectrumMeter| ()),
+            .map(|_: SpectrumMeter<f32>| ()),
         Err(Error::AboveNyquist { .. })
     ));
     assert!(matches!(
         oct(1, 100.0, 150.0)
             .measure(SampleRate::of(RATE))
-            .map(|_: SpectrumMeter| ()),
+            .map(|_: SpectrumMeter<f32>| ()),
         Err(Error::EmptyFrequencyRange { .. })
     ));
     // Returning to per-bin outputs multiplies the cells per column: a
@@ -695,14 +695,14 @@ fn bad_settings_are_errors() {
     assert!(
         banded
             .measure(SampleRate::of(RATE))
-            .map(|_: SpectrumMeter| ())
+            .map(|_: SpectrumMeter<f32>| ())
             .is_ok()
     );
     assert!(matches!(
         banded
             .banding(Banding::Bins)
             .measure(SampleRate::of(RATE))
-            .map(|_: SpectrumMeter| ()),
+            .map(|_: SpectrumMeter<f32>| ()),
         Err(Error::SpectrogramTooLarge { .. })
     ));
 }
@@ -754,7 +754,7 @@ fn input_is_checked_and_state_stays_finite() {
             .all(|l| l.get().is_finite())
     );
     // The power is clamped to `MAX_POWER`, so no level passes its decibels.
-    let ceiling = Db::from_power(f64::from(MAX_POWER));
+    let ceiling = Db::from_power(MAX_POWER);
     assert!(state.levels().iter().all(|&l| l <= ceiling));
     push_frames(&mut state, &vec![0.0f32; 600]);
     assert!(state.levels().iter().all(|l| l.get().is_finite()));

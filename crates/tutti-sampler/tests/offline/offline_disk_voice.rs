@@ -59,31 +59,34 @@ fn write_ramp(path: &Path, rate: u32, frames: usize) {
 /// A hand-stepped streamer and the handle of the stream it streams: both are
 /// held while the voice plays (dropping the handle ends the stream).
 struct Rig {
-    streamer: DiskStreamer<ByHand>,
-    stream: Stream,
+    streamer: DiskStreamer<ByHand<f32>, f32>,
+    stream: Stream<f32>,
 }
 
 /// A hand-stepped disk streamer streaming `path`, primed, and the stream's
 /// reader.
-fn streamer_on(path: &Path) -> (Rig, StreamReader) {
+fn streamer_on(path: &Path) -> (Rig, StreamReader<f32>) {
     streamer_with(path, Default::default())
 }
 
 /// [`streamer_on`], with `config`.
-fn streamer_with(path: &Path, config: tutti_sampler::DiskStreamerConfig) -> (Rig, StreamReader) {
-    let mut streamer = DiskStreamer::manual(SampleRate::of(SR), config).expect("builds");
+fn streamer_with(
+    path: &Path,
+    config: tutti_sampler::DiskStreamerConfig,
+) -> (Rig, StreamReader<f32>) {
+    let mut streamer = DiskStreamer::by_hand(SampleRate::of(SR), config).expect("builds");
     let opening = streamer.open(path, Placement::HEAD);
     let (stream, reader) = settle(&mut streamer, opening).expect("the file opens");
     (Rig { streamer, stream }, reader)
 }
 
 /// Turns the rig's stream to reverse and lets the streamer apply it: the
-/// direction is the stream's (`Stream::set_direction`), published with its
+/// direction is the stream's (`Stream::direction_cell`), published with its
 /// ring's control, where a fork reads it.
 fn reverse(rig: &mut Rig) {
     rig.stream
-        .set_direction(tutti_sampler::Direction::Reverse)
-        .expect("the streamer is alive");
+        .direction_cell()
+        .publish(tutti_sampler::Direction::Reverse);
     assert!(
         rig.streamer.step_until_settled(1_000) < 1_000,
         "the reversed ring settles"
@@ -91,7 +94,7 @@ fn reverse(rig: &mut Rig) {
 }
 
 /// The live voice of the stream `reader` reads, placed at `beat`.
-fn live_voice(reader: StreamReader, beat: f64) -> DiskVoice {
+fn live_voice(reader: StreamReader<f32>, beat: f64) -> DiskVoice<f32> {
     DiskVoice::from_reader(reader, VoiceWindow::from(Beat(beat)))
 }
 
@@ -161,7 +164,7 @@ fn fork_unprepared(node: impl IntoNode) -> Fork {
 
 /// Fork `voice` for a render at `rate`, as a graph fork does: forked, then
 /// prepared.
-fn fork(voice: &DiskVoice, rate: f64) -> Fork {
+fn fork(voice: &DiskVoice<f32>, rate: f64) -> Fork {
     let mut f = fork_unprepared(voice.clone());
     f.node.prepare(
         &Prepare::new(SampleRate::of(rate), MaxBlock::of(Samples(BLOCK)))
@@ -299,8 +302,8 @@ fn a_fork_loops_as_the_stream_is_looped_when_it_is_taken() {
 
     for fade in [0usize, 100] {
         rig.stream
-            .set_loop(Some(loop_frames(1_000, 3_000, fade)))
-            .expect("the streamer is alive");
+            .looping_cell()
+            .publish(Some(loop_frames(1_000, 3_000, fade)));
         let _ = rig.streamer.step_until_settled(1_000);
 
         let clock = clock_at(SR);
@@ -379,8 +382,8 @@ fn a_forks_crossfaded_loop_is_continuous_at_its_wrap() {
         (0.0, 2_281.0, 256, false),
     ] {
         rig.stream
-            .set_loop(Some(loop_frames(start as usize, end as usize, fade)))
-            .expect("the streamer is alive");
+            .looping_cell()
+            .publish(Some(loop_frames(start as usize, end as usize, fade)));
         let _ = rig.streamer.step_until_settled(1_000);
 
         let clock = clock_at(SR);
@@ -723,9 +726,7 @@ fn a_fork_matches_the_memory_tier_bit_for_bit() {
         }
         let (mut rig, reader) = streamer_with(&path, config);
         if case.loop_.is_some() {
-            rig.stream
-                .set_loop(case.loop_)
-                .expect("the streamer is alive");
+            rig.stream.looping_cell().publish(case.loop_);
             let _ = rig.streamer.step_until_settled(1_000);
         }
         // The second stream's handle, held for the whole case.
@@ -736,11 +737,11 @@ fn a_fork_matches_the_memory_tier_bit_for_bit() {
             let other = dir.path().join("other.wav");
             write_ramp(&other, SR as u32, 1_000);
             let opening = rig.streamer.open(&other, Placement::HEAD);
-            let (mut second, second_reader) =
+            let (second, second_reader) =
                 settle(&mut rig.streamer, opening).expect("the file opens");
             second
-                .set_loop(Some(loop_frames(500, 900, 100)))
-                .expect("the streamer is alive");
+                .looping_cell()
+                .publish(Some(loop_frames(500, 900, 100)));
             let _ = rig.streamer.step_until_settled(1_000);
             _second = Some((second, second_reader));
         }

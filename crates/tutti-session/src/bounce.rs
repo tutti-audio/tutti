@@ -1770,6 +1770,7 @@ where
         // The fork renders the project as set: the staged tempo, meter and
         // loop are published first.
         self.values.publish_pending();
+        self.graph.apply_controls();
         let Bounce {
             master,
             stems,

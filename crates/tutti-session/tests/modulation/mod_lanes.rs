@@ -31,9 +31,10 @@ use tutti_modulation::{
 use tutti_nodes::automation::{Breakpoint, RecordMode, Trajectory};
 use tutti_nodes::{Feed, ReconcileError};
 use tutti_session::{
-    AudioSide, AutomationTake, DetachedSession, MixRef, ModInput, ModKeys, ModRefusal, ModRouteId,
-    ModTarget, NoSuchModRoute, NoSuchModSource, OutPort, PHASES, ParamRef, PhaseCx, Problem, Root,
-    RouteSpec, Session, SessionEvent, TargetName, declare_targets,
+    AudioSide, AutomationTake, DepthTarget, DetachedSession, MixRef, ModInput, ModKeys, ModRefusal,
+    ModRouteId, ModSourceId, ModTarget, NoSuchModRoute, NoSuchModSource, OutPort, PHASES, ParamRef,
+    ParamTarget, PhaseCx, Problem, Root, RouteSpec, Session, SessionEvent, TargetName,
+    declare_targets,
 };
 use tutti_units::{
     Amplitude, Beat, Bpm, Depth, Drive, Frame, Hz, SampleRate, Samples, Seconds, UnitParam,
@@ -51,7 +52,7 @@ const DECLICK: usize = 240;
 
 /// A detached session of `outputs` channels at 48 kHz, its audio side taken:
 /// the executor on this side, played in device-sized blocks.
-fn rig(outputs: usize) -> (DetachedSession, AudioSide) {
+pub(crate) fn rig(outputs: usize) -> (DetachedSession, AudioSide) {
     let mut s = Session::builder()
         .outputs_floor(ChannelLayout::clamped(outputs))
         .build_detached(SampleRate::DEFAULT)
@@ -62,7 +63,7 @@ fn rig(outputs: usize) -> (DetachedSession, AudioSide) {
 }
 
 /// Output channel `c` from `nodes[c]`'s port 0.
-fn master(s: &mut DetachedSession, nodes: &[NodeKey]) {
+pub(crate) fn master(s: &mut DetachedSession, nodes: &[NodeKey]) {
     for (c, &n) in nodes.iter().enumerate() {
         s.graph()
             .set_sources(Root::output(c), [OutPort::new(n, 0)])
@@ -71,7 +72,7 @@ fn master(s: &mut DetachedSession, nodes: &[NodeKey]) {
 }
 
 /// Updates until nothing is left to resolve: nodes committed, then lanes.
-fn settle(s: &mut DetachedSession) {
+pub(crate) fn settle(s: &mut DetachedSession) {
     for _ in 0..4 {
         let _ = s.update();
     }
@@ -96,7 +97,7 @@ fn render_n(side: &mut AudioSide, channels: usize, frames: usize, block: usize) 
 }
 
 /// [`render_n`] of one output.
-fn render(side: &mut AudioSide, frames: usize, block: usize) -> Vec<Vec<f32>> {
+pub(crate) fn render(side: &mut AudioSide, frames: usize, block: usize) -> Vec<Vec<f32>> {
     render_n(side, 1, frames, block)
 }
 
@@ -334,7 +335,7 @@ fn a_removed_source_leaves_no_node_and_no_layer() {
 
 /// **A knob written after a route edit is the knob.** The cutoff's knob is
 /// the node's own cell, written through `Session::set`; a depth edit
-/// republishes the lane and writes no knob, so the knob written before it and
+/// writes the lane's depth cell and no knob, so the knob written before it and
 /// the one written after it are each the base the LFO rides on.
 #[test]
 fn a_knob_written_after_a_route_edit_is_the_knob() {
@@ -345,18 +346,15 @@ fn a_knob_written_after_a_route_edit_is_the_knob() {
     let mut m = s.mods_mut();
     m.range_raw(cutoff, 0.0, 1_000.0).unwrap();
     let lfo = m.lfo(Lfo::sine().rate(Hz(2.0)));
-    let route = m
-        .route(RouteSpec::new(lfo, cutoff, Depth::of(0.3)))
+    m.route(RouteSpec::new(lfo, cutoff, Depth::of(0.3)))
         .unwrap();
     settle(&mut s);
     render(&mut side, 1_024, 128);
 
     s.set(probe.cutoff().to(Hz(300.0))).unwrap();
     let _ = s.update();
-    s.mods_mut()
-        .route_of(route)
-        .expect("the route")
-        .set_depth(Depth::of(0.2));
+    s.set(DepthTarget::of(lfo, cutoff).to(Depth::of(0.2)))
+        .unwrap();
     let _ = s.update();
     let a = render(&mut side, 2_048, 128);
     s.set(probe.cutoff().to(Hz(700.0))).unwrap();
@@ -454,7 +452,7 @@ fn a_take_suspends_the_automation_then_restores_it() {
     lane.add_breakpoint(Breakpoint::new(Beat(0.0), Hz(800.0)));
     let mut m = s.mods_mut();
     m.range_raw(cutoff, 0.0, 1_000.0).unwrap();
-    m.automate(cutoff, Arc::new(lane));
+    assert!(m.automate(cutoff, Arc::new(lane)));
     settle(&mut s);
     let last = |out: &[Vec<f32>]| *out[0].last().expect("rendered");
     assert_eq!(
@@ -716,7 +714,7 @@ fn a_node_crossfaded_to_another_param_list_keeps_modulating() {
     master(&mut s, &[probe.erase()]);
     let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);
     let mut m = s.mods_mut();
-    m.range_raw(cutoff, 0.0, 1_000.0).unwrap();
+    m.range(probe.cutoff(), Hz(0.0)..Hz(1_000.0)).unwrap();
     let offset = m.macro_(1.0);
     m.route(RouteSpec::new(offset, cutoff, Depth::of(0.25)))
         .unwrap();
@@ -745,7 +743,8 @@ fn a_node_crossfaded_to_another_param_list_keeps_modulating() {
     let out = render(&mut side, 4_096, 128);
     assert_eq!(*out[0].last().unwrap(), 650.0, "the new node, modulated");
 
-    s.mods_mut().range_raw(cutoff, 0.0, 2_000.0).unwrap();
+    s.set(probe.cutoff().range().to(Hz(0.0)..Hz(2_000.0)))
+        .unwrap();
     let _ = s.update();
     let out = render(&mut side, 1_024, 128);
     assert_eq!(*out[0].last().unwrap(), 900.0, "a later range edit lands");
@@ -867,18 +866,16 @@ fn a_routes_polarity_and_curve_reach_the_render() {
     settle(&mut s);
     assert_holds(&render(&mut side, 1_024, 128)[0], 700.0, "bipolar linear");
 
-    s.mods_mut()
-        .route_of(route)
-        .unwrap()
-        .set_polarity(tutti_modulation::Polarity::Unipolar);
+    s.set(route.polarity().to(tutti_modulation::Polarity::Unipolar))
+        .unwrap();
     settle(&mut s);
     assert_holds(&render(&mut side, 1_024, 128)[0], 800.0, "unipolar");
 
-    s.mods_mut()
-        .route_of(route)
-        .unwrap()
-        .set_polarity(tutti_modulation::Polarity::Bipolar)
-        .set_curve(tutti_modulation::Law::Hold);
+    s.set((
+        route.polarity().to(tutti_modulation::Polarity::Bipolar),
+        route.curve().to(tutti_modulation::Law::Hold),
+    ))
+    .unwrap();
     settle(&mut s);
     assert_holds(&render(&mut side, 1_024, 128)[0], 500.0, "bipolar hold");
 
@@ -1006,25 +1003,25 @@ fn idle(s: &DetachedSession) -> bool {
 }
 
 /// One update, then a block rendered, as a device would between updates.
-fn frame(s: &mut DetachedSession, side: &mut AudioSide) {
+pub(crate) fn frame(s: &mut DetachedSession, side: &mut AudioSide) {
     let _ = s.update();
     render(side, 128, 128);
 }
 
 /// A cutoff probe (knob 500, range `0..=1000`) on output 0, a sine at `rate`
 /// Hz routed into it at `depth`, settled. Returns the probe's param, the
-/// route's key.
+/// source and the route's key.
 fn lfo_scene(
     s: &mut DetachedSession,
     side: &mut AudioSide,
     rate: f64,
     depth: f64,
-) -> (ParamRef, ModRouteId) {
+) -> (ParamTarget<Hz>, ModSourceId, ModRouteId) {
     let (filter, _) = s.graph().add(ProbeUnit::new(500.0));
     master(s, &[filter.erase()]);
-    let cutoff = ParamRef::unit(filter, UnitParam::Cutoff);
+    let cutoff = filter.cutoff();
     let mut m = s.mods_mut();
-    m.range_raw(cutoff, 0.0, 1_000.0).unwrap();
+    m.range(cutoff, Hz(0.0)..Hz(1_000.0)).unwrap();
     let lfo = m.lfo(Lfo::sine().rate(Hz(rate)));
     let route = m
         .route(RouteSpec::new(lfo, cutoff, Depth::of(depth)))
@@ -1034,10 +1031,10 @@ fn lfo_scene(
     }
     assert_eq!(s.mod_state().problems().next(), None);
     assert!(
-        s.mod_state().lane(cutoff.key()).is_some(),
+        s.mod_state().lane(ParamRef::from(cutoff).key()).is_some(),
         "precondition: a lane"
     );
-    (cutoff, route)
+    (cutoff, lfo, route)
 }
 
 /// **A range or depth edit sends no plan; a follower route sends one.** Doc
@@ -1054,14 +1051,12 @@ fn range_and_depth_edits_send_no_plan_and_a_follower_route_one_commit() {
     let (mut s, mut side) = rig(1);
     // A rate low enough that one block barely moves it: the render after an
     // edit is read against the edit, not the wave.
-    let (cutoff, route) = lfo_scene(&mut s, &mut side, 0.5, 0.3);
+    let (cutoff, lfo, _) = lfo_scene(&mut s, &mut side, 0.5, 0.3);
     let settled = sent(&s);
 
     // The depth: 0.3 → 0.0, the knob alone.
-    s.mods_mut()
-        .route_of(route)
-        .expect("the route")
-        .set_depth(Depth::of(0.0));
+    s.set(DepthTarget::of(lfo, cutoff).to(Depth::of(0.0)))
+        .unwrap();
     for _ in 0..3 {
         frame(&mut s, &mut side);
         assert!(Arc::ptr_eq(&sent(&s), &settled), "a depth edit sent a plan");
@@ -1074,7 +1069,7 @@ fn range_and_depth_edits_send_no_plan_and_a_follower_route_one_commit() {
     );
 
     // The range: clamped to 600..=700, the knob (500) reads 600.
-    s.mods_mut().range_raw(cutoff, 600.0, 700.0).unwrap();
+    s.set(cutoff.range().to(Hz(600.0)..Hz(700.0))).unwrap();
     for _ in 0..3 {
         frame(&mut s, &mut side);
         assert!(Arc::ptr_eq(&sent(&s), &settled), "a range edit sent a plan");
@@ -1083,7 +1078,7 @@ fn range_and_depth_edits_send_no_plan_and_a_follower_route_one_commit() {
     let v = render(&mut side, 128, 128);
     assert!(v[0].iter().all(|&x| x == 600.0), "the range clamps: {v:?}");
     // And back to 0..=1000 (a route's depth is a fraction of the span).
-    s.mods_mut().range_raw(cutoff, 0.0, 1_000.0).unwrap();
+    s.set(cutoff.range().to(Hz(0.0)..Hz(1_000.0))).unwrap();
     frame(&mut s, &mut side);
     assert!(Arc::ptr_eq(&sent(&s), &settled), "a range edit sent a plan");
 
@@ -1129,7 +1124,7 @@ fn range_and_depth_edits_send_no_plan_and_a_follower_route_one_commit() {
 fn a_depth_slider_keeps_phase() {
     let (mut s, mut side) = rig(1);
     let rate = 4.0;
-    let (_, route) = lfo_scene(&mut s, &mut side, rate, 0.3);
+    let (cutoff, lfo, _) = lfo_scene(&mut s, &mut side, rate, 0.3);
     let settled = sent(&s);
     // `lfo_scene` rendered its updates' blocks: the clock is past them.
     let start = 4 * 128;
@@ -1148,10 +1143,8 @@ fn a_depth_slider_keeps_phase() {
         );
     }
 
-    s.mods_mut()
-        .route_of(route)
-        .expect("the route")
-        .set_depth(Depth::of(0.1));
+    s.set(DepthTarget::of(lfo, cutoff).to(Depth::of(0.1)))
+        .unwrap();
     let _ = s.update();
     assert!(Arc::ptr_eq(&sent(&s), &settled), "a depth edit sent a plan");
     let after = render(&mut side, 12_000, 128).swap_remove(0);

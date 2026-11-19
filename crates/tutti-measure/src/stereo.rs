@@ -109,13 +109,13 @@ pub fn correlate<S: Sample>(planes: StereoPlanes<'_, S>) -> StereoReading {
     }
     let (left, right) = (planes.left(), planes.right());
 
-    // f64 accumulators: these sums run over whole blocks and f32 loses
-    // precision quickly on the squared terms.
+    // Un-centred f64 accumulators over the whole block: the correlation is
+    // `Σlr / sqrt(Σll·Σrr)`, so no mean is removed and nothing cancels.
     let (mut sum_ll, mut sum_rr, mut sum_lr) = (0.0f64, 0.0, 0.0);
     let (mut sum_mid, mut sum_side) = (0.0f64, 0.0f64);
 
     for i in 0..n {
-        let (l, r) = (left[i].to_f64(), right[i].to_f64());
+        let (l, r) = (left[i].convert_to::<f64>(), right[i].convert_to::<f64>());
         sum_ll += l * l;
         sum_rr += r * r;
         sum_lr += l * r;

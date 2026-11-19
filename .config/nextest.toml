@@ -5,6 +5,10 @@
 # graph's differential crossfades about 25 s, the CLAP live tests up to 17 s);
 # five minutes leaves room for a loaded machine. Every profile inherits it.
 [profile.default]
+# A bench is `cargo bench`'s, never a test: a `harness = false` bench runs its
+# timing loop when nextest asks it to list its tests, which fails the listing
+# (`--all-targets`). `--ignore-default-filter` lists one on purpose.
+default-filter = "not kind(bench)"
 slow-timeout = { period = "60s", terminate-after = 5 }
 
 # Opening and dropping one VST3 image from many threads takes about 50 s on CI's

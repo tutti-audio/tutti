@@ -1224,7 +1224,7 @@ impl tutti_graph::Node for RampSource {
 /// The probe adds 24 frames to its latency (and its delay) once it is told to
 /// render offline, as a plugin with a higher-quality offline mode does. The
 /// fork is told so asynchronously; its `prepare` waits for the change to land
-/// (`PluginBridge::settle`) before the fork's graph is compiled, so the
+/// (`AudioBridge::settle`) before the fork's graph is compiled, so the
 /// export's plan carries 137 + 24 + the render's chunk (its `MaxBlock`,
 /// `GRAPH_MAX_BLOCK`: an export has no device) and trims exactly that: the render is
 /// the ramp from frame 0, sample for sample, and the fork reports no fault.
@@ -1365,12 +1365,12 @@ fn a_served_restore_loads_the_preset_and_the_state_into_a_fresh_served_instance(
 
     let launched = Ipc::launch(
         BridgeConfig::at(unique_socket_path().expect("a socket path")),
-        tutti_fixtures::clap_probe().to_path_buf(),
-        PluginFormat::Clap,
-        Load::new(),
-        SampleRate::of(SAMPLE_RATE),
-        None,
-        StateUse::Duplicate,
+        &tutti_plugin_ipc::LoadRequest {
+            origin: &tutti_plugin_types::Origin::new(tutti_fixtures::clap_probe(), Load::new()),
+            format: PluginFormat::Clap,
+            rate: SampleRate::of(SAMPLE_RATE),
+            restore: None,
+        },
         None,
     )
     .expect("a fresh probe launches");
@@ -1386,7 +1386,7 @@ fn a_served_restore_loads_the_preset_and_the_state_into_a_fresh_served_instance(
         |(), bytes| ipc.load_state(bytes, StateUse::Duplicate),
     )
     .expect("the preset and the state load");
-    assert_eq!(ipc.bridge().parameter(GAIN), Some(gain_at(-6.0)));
+    assert_eq!(ipc.bridge().audio().parameter(GAIN), Some(gain_at(-6.0)));
 }
 
 /// **An export renders a graph of plugins the same on a worker pool as

@@ -384,7 +384,7 @@ fn ragged_at_512<N: Node>(node: N) {
 
 /// A memory source reading `wave` placed at beat 0, and how it plays:
 /// `stretch`.
-fn placed_parts(wave: &Arc<Wave>, stretch: f64) -> (MemorySource, Playback) {
+fn placed_parts(wave: &Arc<Wave>, stretch: f64) -> (MemorySource<f32>, Playback) {
     let sampler = MemorySource::placed(wave.clone(), VoiceWindow::from(Beat::new(0.0)))
         .expect("a placeable wave");
     let play = Playback {
@@ -399,7 +399,7 @@ fn placed_parts(wave: &Arc<Wave>, stretch: f64) -> (MemorySource, Playback) {
 }
 
 /// [`placed_parts`] as a voice.
-fn placed_voice(wave: &Arc<Wave>, stretch: f64) -> Voice {
+fn placed_voice(wave: &Arc<Wave>, stretch: f64) -> Voice<f32> {
     let (sampler, play) = placed_parts(wave, stretch);
     Voice {
         source: VoiceSource::Memory(sampler),
@@ -408,7 +408,7 @@ fn placed_voice(wave: &Arc<Wave>, stretch: f64) -> Voice {
 }
 
 /// Inserts `parts` in `pool` at `id`.
-fn insert(pool: &mut VoicePool, id: u128, (source, play): (MemorySource, Playback)) {
+fn insert(pool: &mut VoicePool<f32>, id: u128, (source, play): (MemorySource<f32>, Playback)) {
     pool.insert(SlotId(id), source, play);
 }
 
@@ -1195,10 +1195,10 @@ fn voice_node_command_drain_does_not_allocate() {
     // Queue more than one block's worth, so the drain loop runs repeatedly
     // rather than taking its empty fast path once.
     for i in 0..8u64 {
-        handle.set_window(VoiceWindow::span(
+        handle.window_cell().publish(Some(VoiceWindow::span(
             Beat::new(i as f64 * 0.25),
             BeatDuration(4.0),
-        ));
+        )));
     }
 
     assert_no_alloc::assert_no_alloc(|| {

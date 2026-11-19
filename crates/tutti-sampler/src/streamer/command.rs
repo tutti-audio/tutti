@@ -10,8 +10,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_rt::RingFloat;
 
 use super::open::Opened;
-use crate::voice::Direction;
-use crate::{Loop, OpenError};
+use crate::OpenError;
 
 tutti_rt::id! {
     /// One open stream's identity: minted on the control side when the open is
@@ -25,10 +24,10 @@ tutti_rt::id! {
 
 /// Where the streamer answers an open: one cell, written once by the streamer
 /// and read once by [`Opening::poll`](crate::Opening::poll).
-pub(crate) type Reply<F = f32> = Sender<Result<Opened<F>, OpenError>>;
+pub(crate) type Reply<F> = Sender<Result<Opened<F>, OpenError>>;
 
 /// What the decode thread made of a file: the whole wave, or why there is none.
-pub(crate) struct Decoded<F: RingFloat = f32>(pub(crate) Result<Arc<Wave<F>>, OpenError>);
+pub(crate) struct Decoded<F: RingFloat>(pub(crate) Result<Arc<Wave<F>>, OpenError>);
 
 impl<F: RingFloat> std::fmt::Debug for Decoded<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -41,7 +40,7 @@ impl<F: RingFloat> std::fmt::Debug for Decoded<F> {
 
 /// Command sent to the Streamer thread.
 #[derive(Debug)]
-pub(crate) enum StreamerCommand<F: RingFloat = f32> {
+pub(crate) enum StreamerCommand<F: RingFloat> {
     /// Open `file_path` as stream `id`, its window starting at frame `start`,
     /// and answer on `reply`.
     Open {
@@ -65,26 +64,6 @@ pub(crate) enum StreamerCommand<F: RingFloat = f32> {
     /// step that handles this. Sent by `Drop for Stream`. A stream the
     /// streamer no longer holds ignores it.
     Close { stream: StreamId },
-
-    /// Enable looping on a stream. The streamer captures the loop (range and
-    /// crossfade, plus the fade's lead-in, read once) into the stream's ring
-    /// mapping and records the loop as applied (`handle_loop`). A stream the
-    /// streamer no longer holds ignores it.
-    SetStreamLoop { stream: StreamId, looped: Loop },
-    /// Clear looping on a stream, so it plays through to the end without
-    /// wrapping, repositioned as a loop change is. A stream the streamer no
-    /// longer holds ignores it.
-    ClearStreamLoop { stream: StreamId },
-
-    /// Turn a stream to `direction`. Reverse is a mapping (the file mirrored,
-    /// the loop ignored), so the change is the streamer's: a switch the reader
-    /// crossfades across just past the block it is in. The direction is
-    /// published in the stream's `RingControl`, where the voice and a fork read
-    /// it. A stream the streamer no longer holds ignores it.
-    SetDirection {
-        stream: StreamId,
-        direction: Direction,
-    },
 
     /// The session rate moved (`DiskStreamer::set_sample_rate` stored it before
     /// sending this): re-derive every open stream's conversion ratio against

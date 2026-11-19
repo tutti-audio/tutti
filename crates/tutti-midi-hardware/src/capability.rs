@@ -13,7 +13,7 @@
 //! here rather than restated; the blocks are `tutti-midi-device`'s `FunctionBlock`.
 
 use tutti_midi_device::{Capabilities, Endpoint, EndpointId, FunctionBlock, Identity, Supports};
-use tutti_ump::{Protocol, StreamConfig};
+use tutti_ump::{FunctionBlockInfo, Protocol, StreamConfig};
 
 /// What an endpoint can carry, and the blocks it declares.
 ///
@@ -123,6 +123,33 @@ impl UmpCapability {
         }
         endpoint
     }
+}
+
+/// The Function Blocks an OS declares: each as the OS describes it, in the
+/// order given, read as a receiver reads what a device reports
+/// ([`FunctionBlock::received`]): a UI hint the direction rules out reads as
+/// unknown, a MIDI 1.0 port over several Groups or of a reserved value as not a
+/// port, an over-long name is cut and a name with a NUL or a Byte Order Mark
+/// dropped, the block kept. A block that is still out of range (a number above
+/// 31, a Group span off the end, a reserved direction) is left out, never
+/// clamped, and logged at `warn` with its fields.
+pub(crate) fn blocks_of<'a>(
+    blocks: impl IntoIterator<Item = (FunctionBlockInfo, Option<&'a str>)>,
+) -> Vec<FunctionBlock> {
+    blocks
+        .into_iter()
+        .filter_map(|(info, name)| {
+            let block = FunctionBlock::received(&info, name);
+            if block.is_none() {
+                tracing::warn!(
+                    ?info,
+                    ?name,
+                    "an OS Function Block the spec cannot hold is left out"
+                );
+            }
+            block
+        })
+        .collect()
 }
 
 /// A protocol this engine can speak: a reserved value reads as MIDI 1.0.

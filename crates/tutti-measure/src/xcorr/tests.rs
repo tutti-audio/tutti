@@ -1,20 +1,20 @@
 use super::*;
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 
-fn cross_correlate(a: &[f32], b: &[f32], fft: &mut FftScratch) -> CrossCorrelation {
+fn cross_correlate(a: &[f64], b: &[f64], fft: &mut FftScratch<f64>) -> CrossCorrelation {
     super::cross_correlate(Mono::new(a), Mono::new(b), fft)
 }
 
 /// Any sample format correlates at its nominal level: an `i16` copy of a
-/// buffer peaks at the same lag as the `f32` original.
+/// buffer peaks at the same lag as the `f64` original.
 #[test]
 fn an_integer_buffer_correlates_at_its_nominal_level() {
     let base = noise(300, 21);
-    let mut late = vec![0.0f32; 40];
+    let mut late = vec![0.0f64; 40];
     late.extend_from_slice(&base);
-    let ints = |x: &[f32]| -> Vec<i16> {
+    let ints = |x: &[f64]| -> Vec<i16> {
         x.iter()
-            .map(|&v| (v * f32::from(i16::MAX)) as i16)
+            .map(|&v| (v * f64::from(i16::MAX)) as i16)
             .collect()
     };
     let r = super::cross_correlate(
@@ -25,7 +25,7 @@ fn an_integer_buffer_correlates_at_its_nominal_level() {
     assert_eq!(r.peak().unwrap().lag, 40);
 }
 
-fn noise(len: usize, seed: u64) -> Vec<f32> {
+fn noise(len: usize, seed: u64) -> Vec<f64> {
     let mut rng = StdRng::seed_from_u64(seed);
     (0..len).map(|_| rng.random_range(-1.0..1.0)).collect()
 }
@@ -59,7 +59,7 @@ fn a_delayed_copy_peaks_at_its_delay_in_either_direction() {
     let base = noise(700, 7);
     let delay = 123usize;
 
-    let mut late = vec![0.0f32; delay];
+    let mut late = vec![0.0f64; delay];
     late.extend_from_slice(&base);
     let r = cross_correlate(&late, &base, &mut fft);
     assert_eq!(r.peak().unwrap().lag, 123);
@@ -68,7 +68,7 @@ fn a_delayed_copy_peaks_at_its_delay_in_either_direction() {
     assert_eq!(r.peak().unwrap().lag, -123);
 
     // The longest lag in range still lands where it should.
-    let tail: Vec<f32> = base[600..].to_vec();
+    let tail: Vec<f64> = base[600..].to_vec();
     let r = cross_correlate(&base, &tail, &mut fft);
     assert_eq!(r.peak().unwrap().lag, 600);
 }
@@ -80,7 +80,7 @@ fn autocorrelation_peaks_at_zero_with_the_energy_and_is_symmetric() {
     let mut fft = FftScratch::new();
     let x = noise(513, 3);
     let r = cross_correlate(&x, &x, &mut fft);
-    let energy: f32 = x.iter().map(|v| v * v).sum();
+    let energy: f64 = x.iter().map(|v| v * v).sum();
     let peak = r.peak().unwrap();
     assert_eq!(peak.lag, 0);
     assert!((peak.value - energy).abs() < energy * 1e-4);
@@ -96,7 +96,7 @@ fn autocorrelation_peaks_at_zero_with_the_energy_and_is_symmetric() {
 fn peak_within_respects_the_bound() {
     let mut fft = FftScratch::new();
     let base = noise(300, 11);
-    let mut late = vec![0.0f32; 100];
+    let mut late = vec![0.0f64; 100];
     late.extend_from_slice(&base);
     let r = cross_correlate(&late, &base, &mut fft);
     assert_eq!(r.peak_within(Samples(100)).unwrap().lag, 100);
@@ -112,6 +112,6 @@ fn peak_within_respects_the_bound() {
 fn the_shape_hook_reaches_the_cross_spectrum() {
     let mut fft = FftScratch::new();
     let x = noise(64, 5);
-    let r = cross_correlate_shaped(&x, &x, &mut fft, |bins| bins.fill(Complex32::default()));
+    let r = cross_correlate_shaped(&x, &x, &mut fft, |bins| bins.fill(Complex64::default()));
     assert!(r.values().iter().all(|&v| v == 0.0));
 }

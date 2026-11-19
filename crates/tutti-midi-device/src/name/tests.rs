@@ -41,13 +41,6 @@ fn a_name_is_held_in_nfc() {
         BlockName::new(decomposed).unwrap().as_bytes(),
         composed.as_bytes()
     );
-    // The wire's bytes are read the same way.
-    assert_eq!(
-        EndpointName::from_bytes(decomposed.as_bytes())
-            .unwrap()
-            .as_str(),
-        composed
-    );
     // A name that is NFC already is kept as it is.
     assert_eq!(EndpointName::new(composed).unwrap().as_str(), composed);
     // The bound is on the composed bytes: 49 "e"+accent are 147 bytes as sent
@@ -62,8 +55,6 @@ fn a_leading_byte_order_mark_is_refused() {
     let bom = "\u{FEFF}Piano";
     assert!(EndpointName::new(bom).is_none());
     assert!(BlockName::new(bom).is_none());
-    assert!(EndpointName::from_bytes(bom.as_bytes()).is_none());
-    assert!(BlockName::from_bytes(b"\xEF\xBB\xBFPiano").is_none());
     assert!(EndpointName::new("Piano").is_some());
 }
 
@@ -147,14 +138,17 @@ fn a_refused_text_says_why() {
     );
     assert_eq!(EndpointName::parse("a\0b"), Err(NameError::Nul));
     assert_eq!(EndpointName::parse("\u{FEFF}Keys"), Err(NameError::Bom));
-    assert_eq!(ProductInstanceId::parse("a\0"), Err(NameError::Nul));
+    assert_eq!(
+        ProductInstanceId::parse("a\0"),
+        Err(InstanceIdError::NotPrintableAscii)
+    );
     assert_eq!(
         ProductInstanceId::parse("caf\u{e9}"),
-        Err(NameError::NotPrintableAscii)
+        Err(InstanceIdError::NotPrintableAscii)
     );
     assert_eq!(
         ProductInstanceId::parse(&"a".repeat(43)),
-        Err(NameError::TooLong { max: 42 })
+        Err(InstanceIdError::TooLong { max: 42 })
     );
     assert_eq!(
         MessageText::try_from("a".repeat(104).as_str()),
@@ -236,4 +230,68 @@ fn a_truncated_name_still_refuses_a_nul_and_a_bom() {
     assert_eq!(BlockName::truncated("\u{FEFF}a"), None);
     let long_with_nul = format!("{}\0", "a".repeat(200));
     assert_eq!(BlockName::truncated(&long_with_nul), None);
+}
+
+/// A multibyte character that would straddle the bound is refused whole: 90
+/// bytes and an e-acute is 92, 89 and one is exactly 91.
+#[test]
+fn a_character_straddling_the_bound_is_refused_not_split() {
+    let straddling = format!("{}é", "a".repeat(90));
+    assert_eq!(
+        BlockName::new(&straddling),
+        None,
+        "an e-acute across byte 91 is refused"
+    );
+    assert_eq!(
+        BlockName::parse(&straddling),
+        Err(NameError::TooLong { max: 91 })
+    );
+    let exact = format!("{}é", "a".repeat(89));
+    assert_eq!(BlockName::new(&exact).unwrap().as_bytes().len(), 91);
+}
+
+#[cfg(feature = "serde")]
+mod serde_text {
+    use super::*;
+
+    /// A name and an Id serialise as their bare text and read back; a decode
+    /// that is not a name is refused.
+    #[test]
+    fn the_text_types_round_trip_as_text_and_refuse_a_bad_decode() {
+        let name = EndpointName::new("Cafe\u{301}").unwrap();
+        assert_eq!(serde_json::to_string(&name).unwrap(), "\"Caf\u{e9}\"");
+        assert_eq!(
+            serde_json::from_str::<EndpointName>("\"Caf\u{e9}\"").unwrap(),
+            name
+        );
+        let id = ProductInstanceId::new("SN-0001").unwrap();
+        assert_eq!(serde_json::to_string(&id).unwrap(), "\"SN-0001\"");
+        assert_eq!(
+            serde_json::from_str::<ProductInstanceId>("\"SN-0001\"").unwrap(),
+            id
+        );
+        assert!(serde_json::from_str::<EndpointName>(&format!("\"{}\"", "a".repeat(99))).is_err());
+        assert!(serde_json::from_str::<EndpointName>("\"\\u0000\"").is_err());
+        assert!(serde_json::from_str::<ProductInstanceId>("\"caf\u{e9}\"").is_err());
+        assert!(
+            serde_json::from_str::<ProductInstanceId>(&format!("\"{}\"", "a".repeat(43))).is_err()
+        );
+    }
+}
+
+/// M2-104 §7.1.5 sets no minimum, so an empty Id is one.
+#[test]
+fn an_empty_instance_id_is_accepted() {
+    assert_eq!(ProductInstanceId::new("").unwrap().as_str(), "");
+}
+
+/// The character check runs before the length: text that is too long and also
+/// holds a non-printable byte is refused as `NotPrintableAscii`.
+#[test]
+fn an_instance_id_names_its_character_before_its_length() {
+    let both = format!("{}\u{7f}", "a".repeat(50));
+    assert_eq!(
+        ProductInstanceId::parse(&both),
+        Err(InstanceIdError::NotPrintableAscii)
+    );
 }

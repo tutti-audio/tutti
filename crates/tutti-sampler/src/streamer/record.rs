@@ -29,7 +29,7 @@ use super::prefetch::RegionOut;
 use super::status::{Served, StatusCell, StreamFault};
 use crate::Loop;
 use crate::voice::Direction;
-use tutti_rt::RingFloat;
+use tutti_rt::{Exclusive, Reader, RingFloat};
 use tutti_units::{SampleRate, Samples, SrcRatio};
 
 /// Where a stream is in its life. A closed stream has no record, so there is
@@ -48,7 +48,7 @@ pub(super) enum Phase {
 /// One open stream: everything the streamer holds for it.
 ///
 /// Dropping it ends the stream (module docs).
-pub(super) struct Record<F: RingFloat = f32> {
+pub(super) struct Record<F: RingFloat> {
     phase: Phase,
     /// The ring's writer, the decoder and the resident wave.
     pub(super) out: RegionOut<F>,
@@ -74,6 +74,19 @@ pub(super) struct Record<F: RingFloat = f32> {
     /// Its work panicked: faulted, and removed at the end of the cycle
     /// ([`Streams::reap`]).
     dead: bool,
+    /// The loop the control side asks for, lent on each cycle. `Exclusive`
+    /// keeps the streamer `Sync` (a reader is `Send`, not `Sync`): only the
+    /// streamer's thread reaches it.
+    looping: Exclusive<Reader<Option<Loop>>>,
+    /// The loop the stream was last asked for, so a cycle applies a request
+    /// once, when it changes. A stream starts asked for no loop, the value its
+    /// cell opens holding.
+    asked_loop: Option<Loop>,
+    /// The direction the control side asks for, held as the loop is.
+    direction: Exclusive<Reader<Direction>>,
+    /// The direction the stream was last asked for: forwards, the value its
+    /// cell opens holding.
+    asked_direction: Direction,
 }
 
 impl<F: RingFloat> Record<F> {
@@ -84,6 +97,8 @@ impl<F: RingFloat> Record<F> {
         file_frames: Samples,
         pin: StreamPin,
         status: Arc<StatusCell>,
+        looping: Reader<Option<Loop>>,
+        direction: Reader<Direction>,
     ) -> Self {
         Self {
             phase: Phase::Opening,
@@ -95,7 +110,31 @@ impl<F: RingFloat> Record<F> {
             status,
             fill: 0.0,
             dead: false,
+            looping: Exclusive::new(looping),
+            asked_loop: None,
+            direction: Exclusive::new(direction),
+            asked_direction: Direction::Forward,
         }
+    }
+
+    /// The loop the control side now asks for, when it differs from the one
+    /// last asked. A stream starts asked for no loop.
+    pub(super) fn loop_asked(&mut self) -> Option<Option<Loop>> {
+        let ask = *self.looping.get_mut().lend();
+        (ask != self.asked_loop).then(|| {
+            self.asked_loop = ask;
+            ask
+        })
+    }
+
+    /// The direction the control side now asks for, when it differs from the
+    /// one last asked. A stream starts asked for forwards.
+    pub(super) fn direction_asked(&mut self) -> Option<Direction> {
+        let ask = *self.direction.get_mut().lend();
+        (ask != self.asked_direction).then(|| {
+            self.asked_direction = ask;
+            ask
+        })
     }
 
     /// Runs `work` on this stream under `catch_unwind`. A panic is this stream's
@@ -182,17 +221,13 @@ impl<F: RingFloat> Drop for Record<F> {
 }
 
 /// A command as the pure step sees it: data, with the file work already done.
-pub(super) enum Cmd<F: RingFloat = f32> {
+pub(super) enum Cmd<F: RingFloat> {
     /// A stream the driver has built, in [`Phase::Opening`].
     Open(Box<Record<F>>),
     /// The open's reader reached its caller: the stream is [`Phase::Live`].
     Opened(StreamId),
     /// End the stream.
     Close(StreamId),
-    /// Set (`Some`) or clear (`None`) the stream's loop.
-    Loop(StreamId, Option<Loop>),
-    /// Turn the stream to a direction.
-    Direction(StreamId, Direction),
 }
 
 /// What the driver does after a step. Nothing here is the table's own change:
@@ -203,12 +238,6 @@ pub(super) enum Effect {
     Live(StreamId),
     /// The stream's record is gone, and its region with it.
     Freed(StreamId),
-    /// Capture this loop into the stream's ring and record it as applied
-    /// (`handle_loop`): it reads the file.
-    Loop(StreamId, Option<Loop>),
-    /// Turn the stream's ring to this direction (`handle_direction`): a
-    /// mapping change, which reads the file for the fade's record.
-    Direction(StreamId, Direction),
 }
 
 /// Every open stream, one [`Record`] each, found by id.
@@ -217,7 +246,7 @@ pub(super) enum Effect {
 /// `&mut Record` (`par_iter_mut` needs `Send`, not `Sync`), a session has tens
 /// of streams, and a command finds its stream by a scan of ids that are
 /// minted once and never reused.
-pub(super) struct Streams<F: RingFloat = f32> {
+pub(super) struct Streams<F: RingFloat> {
     records: Vec<Record<F>>,
     /// What the last step asked of the driver.
     effects: Vec<Effect>,
@@ -244,6 +273,7 @@ impl<F: RingFloat> Streams<F> {
         self.records.iter().position(|r| r.id() == id)
     }
 
+    #[cfg(test)]
     pub(super) fn get(&self, id: StreamId) -> Option<&Record<F>> {
         self.records.iter().find(|r| r.id() == id)
     }
@@ -302,16 +332,6 @@ pub(super) fn step<F: RingFloat>(streams: &mut Streams<F>, cmd: Cmd<F>) -> &[Eff
                 // Dropping the record is the free.
                 streams.records.swap_remove(at);
                 streams.effects.push(Effect::Freed(id));
-            }
-        }
-        Cmd::Loop(id, ask) => {
-            if streams.get(id).is_some_and(Record::is_live) {
-                streams.effects.push(Effect::Loop(id, ask));
-            }
-        }
-        Cmd::Direction(id, direction) => {
-            if streams.get(id).is_some_and(Record::is_live) {
-                streams.effects.push(Effect::Direction(id, direction));
             }
         }
     }

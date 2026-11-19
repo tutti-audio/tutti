@@ -6,7 +6,7 @@ use std::fmt;
 
 use tutti_ump::{Bank, U7};
 
-use super::super::limits::{NotValid, PropertyName, text_type};
+use super::super::limits::{PeTextError, PropertyName, text_type};
 use super::super::tree::{PeJson, PeObject};
 
 tutti_units::ranged! {
@@ -39,23 +39,34 @@ tutti_units::ranged! {
     StepCount(u32), NotAStepCount, "a step count (at least 1)", |raw| raw >= 1
 }
 
+// Owned: the type has no bound, or counts characters, which no byte-bounded
+// `Text` expresses.
 text_type! {
     /// A string a Resource requires: not empty (M2-103 §8.3).
-    PeText, "required text",
-    |t| !t.is_empty()
+    PeText, String, PeTextError,
+    |t| if t.is_empty() { Err(PeTextError::Empty) } else { Ok(()) }
 }
 
 text_type! {
     /// The identifier of a Mode: 1 to 36 characters (M2-106 §2.2).
-    ModeId, "mode id",
-    |t| (1..=36).contains(&t.chars().count())
+    ModeId, String, PeTextError,
+    |t| chars_between(t, 36)
 }
 
 text_type! {
     /// The name of a Link role this crate has no type for: 1 to 32 characters
     /// (M2-103 Table 64).
-    RoleName, "link role",
-    |t| (1..=32).contains(&t.chars().count())
+    RoleName, String, PeTextError,
+    |t| chars_between(t, 32)
+}
+
+/// `text` of 1 to `max` characters.
+fn chars_between(text: &str, max: usize) -> Result<(), PeTextError> {
+    match text.chars().count() {
+        0 => Err(PeTextError::Empty),
+        n if n > max => Err(PeTextError::TooManyChars { max }),
+        _ => Ok(()),
+    }
 }
 
 /// A JSON Pointer that names a parameter: at most 256 bytes (M2-117 Table 5).
@@ -370,12 +381,6 @@ impl PeDataError {
             place: place.into(),
             fault,
         }
-    }
-}
-
-impl From<NotValid> for PeDataFault {
-    fn from(error: NotValid) -> Self {
-        Self::NotValid(error.what)
     }
 }
 

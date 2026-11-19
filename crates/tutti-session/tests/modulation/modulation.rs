@@ -16,8 +16,8 @@ use tutti_buffers::InterleavedMut;
 use tutti_graph::ForkByClone;
 use tutti_graph::NodeKey;
 use tutti_modulation::{
-    Declarations, Follower, Lfo, RouteDecl, RouteKey, RouteTarget, Source, SourceKey, TargetDecl,
-    TargetKey,
+    Declarations, Follower, Lfo, Polarity, RouteDecl, RouteKey, RouteTarget, Source, SourceKey,
+    TargetDecl, TargetKey,
 };
 use tutti_nodes::{Feed, ReconcileError};
 use tutti_session::{
@@ -591,7 +591,7 @@ fn a_re_apply_that_moves_the_latency_publishes_it() {
 }
 
 /// **The update frees a lane's program a block held across its
-/// replacement**: a route's depth edited while a borrow on the lane's cell
+/// replacement**: a route's polarity edited while a borrow on the lane's cell
 /// (a block in progress) is held republishes the lane's program, and once
 /// the borrow goes the next update's `Reclaim` phase frees the old one with
 /// nothing published again. The lanes are inserted by the reconciler, not
@@ -615,10 +615,7 @@ fn an_update_frees_a_program_a_block_held_across_a_route_edit() {
     let mut block = lane.probe_reader();
     {
         let _held = block.lend();
-        s.mods_mut()
-            .route_of(route)
-            .expect("the route")
-            .set_depth(Depth::of(0.25));
+        s.set(route.polarity().to(Polarity::Unipolar)).unwrap();
         let _ = s.update();
         assert_eq!(lane.retired_programs(), 1, "republished, the old held");
     }
@@ -636,7 +633,7 @@ fn an_own_edit_after_a_steady_state_applies() {
     let (probe, _) = s.graph().add(ProbeUnit::new(500.0));
     let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);
     let mut m = s.mods_mut();
-    m.range_raw(cutoff, 0.0, 1_000.0).unwrap();
+    m.range(probe.cutoff(), Hz(0.0)..Hz(1_000.0)).unwrap();
     let lfo = m.lfo(Lfo::sine().rate(Hz(2.0)));
     let route = m
         .route(RouteSpec::new(lfo, cutoff, Depth::of(0.5)))
@@ -654,17 +651,15 @@ fn an_own_edit_after_a_steady_state_applies() {
     };
     let before = program(&s);
 
-    s.mods_mut()
-        .route_of(route)
-        .expect("the route")
-        .set_depth(Depth::of(0.25));
+    s.set(route.polarity().to(Polarity::Unipolar)).unwrap();
     let _ = s.update();
     assert!(
         !std::sync::Arc::ptr_eq(&before, &program(&s)),
-        "the depth edit is republished"
+        "the polarity edit is republished"
     );
 
-    s.mods_mut().range_raw(cutoff, 0.0, 2_000.0).unwrap();
+    s.set(probe.cutoff().range().to(Hz(0.0)..Hz(2_000.0)))
+        .unwrap();
     let _ = s.update();
     let range = s
         .graph()
