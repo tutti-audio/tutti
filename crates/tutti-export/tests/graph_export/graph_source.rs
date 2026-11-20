@@ -34,7 +34,9 @@ use crate::support::{render_normalized_to_file, render_to_buffers, render_to_fil
 use tutti_buffers::{Bed, BusTopology, ChannelLayout};
 use tutti_codec::{Format, Pcm};
 use tutti_dsp::DitherShape;
-use tutti_export::{Error, GRAPH_MAX_BLOCK, Normalize, RenderGraph, Rendered, Resample, Setup};
+use tutti_export::{
+    GRAPH_MAX_BLOCK, Normalize, RenderError, RenderGraph, Rendered, Resample, Setup,
+};
 use tutti_graph::{Cx, GraphBuilder, Io, Node, Prepare, Shape, Status, Unforkable};
 use tutti_nodes::LimiterConfig;
 use tutti_nodes::testing::{Const, Osc, vbap_mix};
@@ -578,7 +580,7 @@ fn a_crossed_pair_is_refused_at_construction() {
     for (editor, executor) in [(editor_a, executor_b), (editor_b, executor_a)] {
         let r = RenderGraph::assemble(editor, executor, Setup::new());
         assert!(
-            matches!(r, Err(Error::InvalidConfig(_))),
+            matches!(r, Err(RenderError::InvalidConfig(_))),
             "a crossed pair was wrapped"
         );
     }
@@ -596,7 +598,7 @@ fn a_graph_prepared_at_another_rate_is_refused() {
         &config(Pcm::Float32, ChannelLayout::STEREO),
         &FrozenClock,
     );
-    assert!(matches!(r, Err(Error::InvalidConfig(_))), "{r:?}");
+    assert!(matches!(r, Err(RenderError::InvalidConfig(_))), "{r:?}");
 }
 
 /// The graph is handed the render clock's transport, block by block, read

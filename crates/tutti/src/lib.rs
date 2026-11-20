@@ -440,7 +440,7 @@ pub mod session {
     };
     #[cfg(feature = "export")]
     pub use tutti_export::{
-        ConfigError, Error, JobError, Rendered, RenderedError, TargetError, Unmeasured,
+        ConfigError, JobError, RenderError, Rendered, RenderedError, TargetError, Unmeasured,
     };
     pub use tutti_graph::{
         BusError, BusRef, BusSource, CloseError, CommitError, Inserted, MissingSource, MixError,

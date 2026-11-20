@@ -337,7 +337,7 @@ fn a_plugin_fork_that_crashes_mid_export_is_a_named_failure() {
     feed_with(&mut session, probe, ForkByClone(Const::mono(0.25)));
     env.set("TUTTI_CLAP_PROBE_CRASH_ON_BLOCK", "8");
     match session.bounce(buffers(2.0)) {
-        Err(BounceError::Export(tutti_export::Error::ForkFailed { key, kind, .. })) => {
+        Err(BounceError::Export(tutti_export::RenderError::ForkFailed { key, kind, .. })) => {
             assert_eq!(key, probe);
             assert_eq!(kind, tutti_graph::ForkFaultKind::Crashed);
         }
