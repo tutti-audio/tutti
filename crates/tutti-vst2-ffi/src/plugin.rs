@@ -1,5 +1,7 @@
 //! Plugin specific structures.
 
+use crate::{UnknownPrimitive, primitive_enum::primitive_enum};
+
 primitive_enum! {
     /// Plugin type. Generally either Effect or Synth.
     ///
@@ -37,7 +39,7 @@ primitive_enum! {
 primitive_enum! {
     #[derive(Clone, Copy, Debug)]
     #[doc(hidden)]
-    pub enum OpCode: i32 {
+    pub enum EffectOpCode: i32 {
         /// Called when plugin is initialized.
         Initialize,
         /// Called when plugin is being shut down.
@@ -47,19 +49,19 @@ primitive_enum! {
         ChangePreset,
         /// [return]: current preset number.
         GetCurrentPresetNum,
-        /// [ptr]: char array with new preset name, limited to `consts::MAX_PRESET_NAME_LEN`.
+        /// [ptr]: char array with new preset name, limited to `MAX_PRESET_NAME_LEN`.
         SetCurrentPresetName,
-        /// [ptr]: char buffer for current preset name, limited to `consts::MAX_PRESET_NAME_LEN`.
+        /// [ptr]: char buffer for current preset name, limited to `MAX_PRESET_NAME_LEN`.
         GetCurrentPresetName,
 
         /// [index]: parameter
-        /// [ptr]: char buffer, limited to `consts::MAX_PARAM_STR_LEN` (e.g. "db", "ms", etc)
+        /// [ptr]: char buffer, limited to `MAX_PARAM_STR_LEN` (e.g. "db", "ms", etc)
         GetParameterLabel,
         /// [index]: parameter
-        /// [ptr]: char buffer, limited to `consts::MAX_PARAM_STR_LEN` (e.g. "0.5", "ROOM", etc).
+        /// [ptr]: char buffer, limited to `MAX_PARAM_STR_LEN` (e.g. "0.5", "ROOM", etc).
         GetParameterDisplay,
         /// [index]: parameter
-        /// [ptr]: char buffer, limited to `consts::MAX_PARAM_STR_LEN` (e.g. "Release", "Gain")
+        /// [ptr]: char buffer, limited to `MAX_PARAM_STR_LEN` (e.g. "Release", "Gain")
         GetParameterName,
 
         /// Deprecated.
@@ -118,7 +120,7 @@ primitive_enum! {
         _GetNumCategories,
 
         /// [index]: program name
-        /// [ptr]: char buffer for name, limited to `consts::MAX_PRESET_NAME_LEN`
+        /// [ptr]: char buffer for name, limited to `MAX_PRESET_NAME_LEN`
         /// [return]: true for success
         GetPresetName,
 
@@ -176,9 +178,9 @@ primitive_enum! {
         /// Deprecated.
         _GetErrorText,
 
-        /// [ptr]: buffer for vendor name, limited to `consts::MAX_VENDOR_STR_LEN`.
+        /// [ptr]: buffer for vendor name, limited to `MAX_VENDOR_STR_LEN`.
         GetVendorName,
-        /// [ptr]: buffer for product name, limited to `consts::MAX_PRODUCT_STR_LEN`.
+        /// [ptr]: buffer for product name, limited to `MAX_PRODUCT_STR_LEN`.
         GetProductName,
         /// [return]: vendor specific version.
         GetVendorVersion,
@@ -256,7 +258,7 @@ primitive_enum! {
         /// takes two `VstSpeakerArrangement**` in getSpeakerArrangement, and its dispatcher
         /// forwards `value` and `ptr` to them unchanged.
         GetSpeakerArrangement,
-        /// [ptr]: buffer for plugin name, limited to `consts::MAX_PRODUCT_STR_LEN`.
+        /// [ptr]: buffer for plugin name, limited to `MAX_PRODUCT_STR_LEN`.
         /// [return]: next plugin's uniqueID.
         ShellGetNextPlugin,
 
@@ -289,132 +291,62 @@ primitive_enum! {
     }
 }
 
-/// A structure representing static plugin information.
+/// What a plugin says about itself in its `AEffect` and `effGet*String` answers, read when
+/// the instance is made, before `effOpen`.
+///
+/// The pin, parameter and program counts and the latency are not here: a plugin may change
+/// them after `effOpen`, so the instance reads them from the `AEffect` when asked.
 #[derive(Clone, Debug)]
 pub struct Info {
-    /// Plugin Name.
+    /// The plugin's name (`effGetEffectName`, else `effGetProductString`).
     pub name: String,
 
-    /// Plugin Vendor.
+    /// The plugin's vendor (`effGetVendorString`).
     pub vendor: String,
 
-    /// Number of different presets.
-    pub presets: i32,
-
-    /// Number of parameters.
-    pub parameters: i32,
-
-    /// Number of inputs.
-    pub inputs: i32,
-
-    /// Number of outputs.
-    pub outputs: i32,
-
-    /// Number of MIDI input channels (1-16), or 0 for the default of 16 channels.
-    pub midi_inputs: i32,
-
-    /// Number of MIDI output channels (1-16), or 0 for the default of 16 channels.
-    pub midi_outputs: i32,
-
-    /// Unique plugin ID. Can be registered with Steinberg to prevent conflicts with other plugins.
-    ///
-    /// This ID is used to identify a plugin during save and load of a preset and project.
+    /// Unique plugin ID, which identifies the plugin in a saved preset or project.
     pub unique_id: i32,
 
-    /// Plugin version (e.g. 0001 = `v0.0.0.1`, 1283 = `v1.2.8.3`).
+    /// The plugin's version (`AEffect::version`).
     pub version: i32,
 
-    /// Plugin category. Possible values are found in `enums::PluginCategory`.
-    ///
-    /// Falls back to [`Category::Unknown`] for a code this enum does not name.
-    /// [`category_code`](Self::category_code) keeps the number in that case, so
-    /// a host can tell a plugin that answered `kPlugCategUnknown` from one that
-    /// answered something we do not recognise.
-    pub category: Category,
+    /// The plugin's `effGetPlugCategory` answer: the [`Category`] it names, or the code it
+    /// answered that VST 2.4 gives no meaning (`kPlugCategUnknown` is a named [`Category`]).
+    pub category: Result<Category, UnknownPrimitive>,
 
-    /// The raw `effGetPlugCategory` return, before it was matched against
-    /// [`Category`].
-    ///
-    /// VST 2.4 assigns meanings to 0..=11 and plugins do return values outside
-    /// that; discarding the number turned every such answer into `Unknown`,
-    /// which is also what a plugin that genuinely does not classify itself
-    /// returns. Keeping it costs one `i32` and is the only way back to what the
-    /// plugin actually said.
-    pub category_code: i32,
-
-    /// Latency of the plugin in samples.
-    ///
-    /// This reports how many samples it takes for the plugin to create an output (group delay).
-    pub initial_delay: i32,
-
-    /// Indicates that preset data is handled in formatless chunks.
-    ///
-    /// If false, host saves and restores plugin by reading/writing parameter data. If true, it is
-    /// up to the plugin to manage saving preset data by implementing the
-    /// `{get, load}_{preset, bank}_chunks()` methods. Default is `false`.
+    /// Indicates that preset data is handled in formatless chunks (`effFlagsProgramChunks`).
     pub preset_chunks: bool,
 
-    /// Indicates whether this plugin can process f64 based `AudioBuffer` buffers.
-    ///
-    /// Default is `false`.
+    /// Indicates whether this plugin can process `f64` buffers (`effFlagsCanDoubleReplacing`).
     pub f64_precision: bool,
-
-    /// If this is true, the plugin will not produce sound when the input is silence.
-    ///
-    /// Default is `false`.
-    pub silent_when_stopped: bool,
-}
-
-impl Default for Info {
-    fn default() -> Info {
-        Info {
-            name: "VST".to_string(),
-            vendor: String::new(),
-
-            presets: 1, // default preset
-            parameters: 0,
-            inputs: 2, // Stereo in,out
-            outputs: 2,
-
-            midi_inputs: 0,
-            midi_outputs: 0,
-
-            unique_id: 0, // This must be changed.
-            version: 1,   // v0.0.0.1
-
-            category: Category::Effect,
-            // Kept in step with `category` above: the two describe one answer,
-            // and a default that disagreed with itself would be a worse lie
-            // than either alone.
-            category_code: Category::Effect as i32,
-
-            initial_delay: 0,
-
-            preset_chunks: false,
-            f64_precision: false,
-            silent_when_stopped: false,
-        }
-    }
 }
 
 /// Features which are optionally supported by a plugin. These are queried by the host at run time.
 #[derive(Debug)]
-#[allow(missing_docs)]
 pub enum CanDo {
+    /// `sendVstEvents`.
     SendEvents,
+    /// `sendVstMidiEvent`.
     SendMidiEvent,
+    /// `receiveVstEvents`.
     ReceiveEvents,
+    /// `receiveVstMidiEvent`.
     ReceiveMidiEvent,
+    /// `receiveVstTimeInfo`.
     ReceiveTimeInfo,
+    /// `offline`.
     Offline,
+    /// `midiProgramNames`.
     MidiProgramNames,
+    /// `bypass`.
     Bypass,
+    /// `receiveVstSysexEvent`.
     ReceiveSysExEvent,
-
-    //Bitwig specific?
+    /// `midiSingleNoteTuningChange`.
     MidiSingleNoteTuningChange,
+    /// `midiKeyBasedInstrumentControl`.
     MidiKeyBasedInstrumentControl,
-
+    /// Any other query string, verbatim.
     Other(String),
 }
 
