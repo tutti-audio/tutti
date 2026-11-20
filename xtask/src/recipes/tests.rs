@@ -227,7 +227,7 @@ fn check_wasm_lints_the_platform_crate_the_rt_crate_and_the_umbrella_with_the_we
         dry("check-wasm", &[]),
         [
             "cargo clippy --locked --target wasm32-unknown-unknown -p tutti-platform -p tutti-rt -p tutti --lib -- -D warnings",
-            "cargo clippy --locked --target wasm32-unknown-unknown -p tutti --lib --features sampler,soundfont,synth,analyze,decode-wav,decode-flac,decode-mp3,decode-ogg,encode-wav,export,midi -- -D warnings",
+            "cargo clippy --locked --target wasm32-unknown-unknown -p tutti --lib --features sampler,soundfont,synth,analyze,decode-wav,decode-flac,decode-mp3,decode-ogg,encode-wav,encode-aiff,export,record,midi -- -D warnings",
         ]
     );
 }
