@@ -191,7 +191,7 @@ fn the_pure_render_feeds_the_meter() {
 /// source's level within the block).
 #[test]
 fn the_master_reads_before_the_declick() {
-    use tutti_timeline::MotionEvent;
+    use tutti_timeline::MotionCommand;
     let transport = Transport::new(SampleRate::of(RATE));
     let (mut ed, exec) = Editor::new(Prepare::new(
         SampleRate::of(RATE),
@@ -217,13 +217,13 @@ fn the_master_reads_before_the_declick() {
         tutti_engine::BlockDates::Os,
     )
     .expect("limits");
-    let _ = transport.motion().try_send(MotionEvent::Play);
+    let _ = transport.motion().try_send(MotionCommand::Play);
     render(&engine, 512, 1);
     assert_eq!(meter.read()[0].peak.get(), 0.5);
 
     // A declicked stop with no lead time: the output falls to zero over the
     // fade, the graph's own signal does not.
-    let _ = transport.motion().try_send(MotionEvent::stop());
+    let _ = transport.motion().try_send(MotionCommand::stop());
     let out = render(&engine, 512, 1);
     assert_eq!(out[0], 0.0, "the device buffer starts the stop at zero");
     let faded = (out.iter().map(|s| s * s).sum::<f32>() / out.len() as f32).sqrt();

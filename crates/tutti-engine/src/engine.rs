@@ -126,7 +126,7 @@ use tutti_rt::{AudioThreadCell, Counter, Gauge, Reader, RtScope};
 #[cfg(doc)]
 use tutti_timeline::MotionFsm;
 use tutti_timeline::{
-    AudioTaken, FadeOut, IMMEDIATE_RESERVE, MotionEvent, SCHEDULE_CAPACITY, Scheduled,
+    AudioTaken, FadeOut, IMMEDIATE_RESERVE, MotionCommand, SCHEDULE_CAPACITY, Scheduled,
     TransportAudio, TransportCommand,
 };
 use tutti_units::{At, Frame};
@@ -1109,9 +1109,9 @@ fn declicks(command: &TransportCommand) -> bool {
     matches!(
         command,
         TransportCommand::Motion(
-            MotionEvent::Stop {
+            MotionCommand::Stop {
                 fade: FadeOut::Declick
-            } | MotionEvent::Locate {
+            } | MotionCommand::Locate {
                 fade: FadeOut::Declick,
                 ..
             }
@@ -1613,7 +1613,7 @@ mod tests {
     use tutti_buffers::Placement;
     use tutti_graph::Prepare;
     use tutti_timeline::Timeline;
-    use tutti_timeline::{MotionEvent, Transport};
+    use tutti_timeline::{MotionCommand, Transport};
     use tutti_units::{Amplitude, Bpm};
 
     /// `GraphEngineError` is an `Error` a caller can box and move; the bound is
@@ -1684,7 +1684,7 @@ mod tests {
             Engine::new(&transport, &mut ed, exec, crate::BlockDates::Os).expect("empty graph");
         transport
             .motion()
-            .schedule(At::Frame(Frame::new(100)), MotionEvent::Play)
+            .schedule(At::Frame(Frame::new(100)), MotionCommand::Play)
             .expect("room");
         let settings = &transport.settings();
         let mut render = engine.graph.borrow_mut();
@@ -1730,7 +1730,7 @@ mod tests {
         ));
         let engine =
             Engine::new(&transport, &mut ed, exec, crate::BlockDates::Os).expect("empty graph");
-        let _ = transport.motion().try_send(MotionEvent::Play);
+        let _ = transport.motion().try_send(MotionCommand::Play);
         let mut buf = vec![1.0f32; 64 * 2];
         let mut seg = vec![1.0f32; 64 * 2];
         {
@@ -1801,7 +1801,7 @@ mod tests {
             ));
             let engine =
                 Engine::new(&transport, &mut ed, exec, crate::BlockDates::Os).expect("empty graph");
-            let _ = transport.motion().try_send(MotionEvent::Play);
+            let _ = transport.motion().try_send(MotionCommand::Play);
             engine.process(&mut InterleavedMut::new(&mut buf, ChannelLayout::STEREO).unwrap());
             assert!(transport.is_rolling());
         }
@@ -1811,7 +1811,7 @@ mod tests {
         ));
         let engine = Engine::new(&transport, &mut ed, exec, crate::BlockDates::Os)
             .expect("the first engine is gone");
-        let _ = transport.motion().try_send(MotionEvent::stop_unfaded());
+        let _ = transport.motion().try_send(MotionCommand::stop_unfaded());
         engine.process(&mut InterleavedMut::new(&mut buf, ChannelLayout::STEREO).unwrap());
         assert!(!transport.is_rolling(), "the machine knew it was rolling");
     }
@@ -1852,11 +1852,11 @@ mod tests {
             ));
             let engine =
                 Engine::new(&transport, &mut ed, exec, crate::BlockDates::Os).expect("empty graph");
-            let stop = MotionEvent::stop_unfaded();
+            let stop = MotionCommand::stop_unfaded();
             if first_is_play {
                 transport
                     .motion()
-                    .try_send(MotionEvent::Play)
+                    .try_send(MotionCommand::Play)
                     .expect("room");
                 transport
                     .motion()
@@ -1869,7 +1869,7 @@ mod tests {
                     .expect("room");
                 transport
                     .motion()
-                    .try_send(MotionEvent::Play)
+                    .try_send(MotionCommand::Play)
                     .expect("room");
             }
             let mut buf = vec![0.0f32; 64 * 2];
@@ -1904,7 +1904,7 @@ mod tests {
         let engine = engine_for(&transport);
         transport
             .motion()
-            .try_send(MotionEvent::play_from(Beat::new(8.0)))
+            .try_send(MotionCommand::play_from(Beat::new(8.0)))
             .expect("room");
         let mut buf = vec![0.0f32; 64 * 2];
         engine.process(&mut InterleavedMut::new(&mut buf, ChannelLayout::STEREO).unwrap());
@@ -1926,7 +1926,7 @@ mod tests {
             .expect("room");
         transport
             .motion()
-            .try_send(MotionEvent::play_from(Beat::new(3.99)))
+            .try_send(MotionCommand::play_from(Beat::new(3.99)))
             .expect("room");
         let mut buf = vec![0.0f32; 1024 * 2];
         engine.process(&mut InterleavedMut::new(&mut buf, ChannelLayout::STEREO).unwrap());
@@ -1947,7 +1947,7 @@ mod tests {
         ));
         let engine =
             Engine::new(&transport, &mut ed, exec, crate::BlockDates::Os).expect("empty graph");
-        let _ = transport.motion().try_send(MotionEvent::Play);
+        let _ = transport.motion().try_send(MotionCommand::Play);
         let mut render = engine.graph.borrow_mut();
         let mut pieces = GraphPieces {
             changes: TransportChanges::NONE,
@@ -1975,7 +1975,7 @@ mod tests {
             .motion()
             .schedule(
                 At::Frame(Frame::new(700)),
-                tutti_timeline::MotionEvent::stop(),
+                tutti_timeline::MotionCommand::stop(),
             )
             .expect("room");
         let walk = engine.walk(

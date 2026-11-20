@@ -146,7 +146,7 @@ pub use tutti_rt::PushError;
 #[cfg(feature = "session")]
 pub use tutti_engine::{BlockCounts, Load};
 pub use tutti_timeline::{
-    AfterLocate, FadeOut, LoopRegion, MotionEvent, MotionState, TransportCommand,
+    AfterLocate, FadeOut, LoopRegion, MotionCommand, MotionState, TransportCommand,
 };
 
 // Units, channels, buffers and the musical meter.

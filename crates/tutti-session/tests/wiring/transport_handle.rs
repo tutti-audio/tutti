@@ -4,7 +4,7 @@ use tutti_buffers::InterleavedMut;
 use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_music::LoopRange;
 use tutti_session::{Session, TransportHandle};
-use tutti_timeline::{FadeOut, LoopRegion, MotionEvent, TimedError};
+use tutti_timeline::{FadeOut, LoopRegion, MotionCommand, TimedError};
 use tutti_units::{At, Beat, Bpm, Frame, Samples};
 
 fn offline() -> Session {
@@ -64,16 +64,16 @@ fn a_handle_stop_halts_a_session_play() {
 fn a_handle_refuses_a_beat_play_while_stopped() {
     let s = offline();
     let handle = s.transport_handle();
-    let refused = std::thread::spawn(move || handle.schedule(Beat::new(1.0), MotionEvent::Play))
+    let refused = std::thread::spawn(move || handle.schedule(Beat::new(1.0), MotionCommand::Play))
         .join()
         .unwrap();
     assert!(matches!(
         refused,
-        Err(TimedError::BeatWhileStopped(MotionEvent::Play))
+        Err(TimedError::BeatWhileStopped(MotionCommand::Play))
     ));
     assert!(matches!(
-        s.schedule(Beat::new(1.0), MotionEvent::Play),
-        Err(TimedError::BeatWhileStopped(MotionEvent::Play))
+        s.schedule(Beat::new(1.0), MotionCommand::Play),
+        Err(TimedError::BeatWhileStopped(MotionCommand::Play))
     ));
 }
 
@@ -85,10 +85,10 @@ fn the_session_and_its_handles_share_the_rolling_record() {
     let s = offline();
     let handle = s.transport_handle();
     s.play().unwrap();
-    handle.schedule(Beat::new(4.0), MotionEvent::Play).unwrap();
+    handle.schedule(Beat::new(4.0), MotionCommand::Play).unwrap();
     handle.stop(FadeOut::Immediate).unwrap();
     assert!(matches!(
-        s.schedule(Beat::new(4.0), MotionEvent::Play),
+        s.schedule(Beat::new(4.0), MotionCommand::Play),
         Err(TimedError::BeatWhileStopped(_))
     ));
 }
@@ -100,14 +100,14 @@ fn the_session_and_its_handles_share_the_rolling_record() {
 fn a_next_block_schedule_updates_the_rolling_record() {
     let s = offline();
     let handle = s.transport_handle();
-    handle.schedule(At::NextBlock, MotionEvent::Play).unwrap();
-    assert!(handle.schedule(Beat::new(4.0), MotionEvent::Play).is_ok());
+    handle.schedule(At::NextBlock, MotionCommand::Play).unwrap();
+    assert!(handle.schedule(Beat::new(4.0), MotionCommand::Play).is_ok());
     handle
-        .schedule(At::NextBlock, MotionEvent::stop_unfaded())
+        .schedule(At::NextBlock, MotionCommand::stop_unfaded())
         .unwrap();
     assert!(matches!(
-        handle.schedule(Beat::new(5.0), MotionEvent::Play),
-        Err(TimedError::BeatWhileStopped(MotionEvent::Play))
+        handle.schedule(Beat::new(5.0), MotionCommand::Play),
+        Err(TimedError::BeatWhileStopped(MotionCommand::Play))
     ));
 }
 
@@ -124,8 +124,8 @@ fn a_stop_sent_after_a_rendered_play_refuses_a_beat_play() {
     let handle = s.transport_handle();
     handle.stop(FadeOut::Immediate).unwrap();
     assert!(matches!(
-        handle.schedule(Beat::new(8.0), MotionEvent::Play),
-        Err(TimedError::BeatWhileStopped(MotionEvent::Play))
+        handle.schedule(Beat::new(8.0), MotionCommand::Play),
+        Err(TimedError::BeatWhileStopped(MotionCommand::Play))
     ));
 }
 
@@ -136,15 +136,15 @@ fn a_play_timed_at_a_frame_counts_as_rolling_once_rendered() {
     let s = offline();
     let handle = s.transport_handle();
     handle
-        .schedule(Frame::new(1_000), MotionEvent::Play)
+        .schedule(Frame::new(1_000), MotionCommand::Play)
         .unwrap();
     assert!(matches!(
-        handle.schedule(Beat::new(8.0), MotionEvent::Play),
-        Err(TimedError::BeatWhileStopped(MotionEvent::Play))
+        handle.schedule(Beat::new(8.0), MotionCommand::Play),
+        Err(TimedError::BeatWhileStopped(MotionCommand::Play))
     ));
     render(&s, 3);
     assert!(s.playhead().playing());
-    assert!(handle.schedule(Beat::new(8.0), MotionEvent::Play).is_ok());
+    assert!(handle.schedule(Beat::new(8.0), MotionCommand::Play).is_ok());
 }
 
 /// **A handle reads and cancels the timed commands in flight.**
@@ -153,7 +153,7 @@ fn a_handle_counts_and_cancels_scheduled_commands() {
     let s = offline();
     let handle = s.transport_handle();
     handle
-        .schedule(Frame::new(48_000), MotionEvent::Play)
+        .schedule(Frame::new(48_000), MotionCommand::Play)
         .unwrap();
     assert_eq!(handle.scheduled_outstanding(), 1);
     handle.cancel_scheduled();

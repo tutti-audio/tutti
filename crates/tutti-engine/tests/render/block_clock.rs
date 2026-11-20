@@ -8,7 +8,7 @@ use tutti_buffers::InterleavedMut;
 use tutti_buffers::MaxBlock;
 use tutti_engine::{BlockDates, Engine};
 use tutti_graph::{Editor, Prepare};
-use tutti_timeline::MotionEvent;
+use tutti_timeline::MotionCommand;
 use tutti_timeline::Transport;
 use tutti_units::{Beat, Seconds};
 use tutti_units::{Frame, SampleRate, Samples};
@@ -36,7 +36,7 @@ thread_local! {
 }
 
 /// Sends `event` over the last engine this test built.
-fn motion(event: MotionEvent) {
+fn motion(event: MotionCommand) {
     TRANSPORTS.with(|t| {
         t.borrow()
             .last()
@@ -102,7 +102,7 @@ fn a_stop_and_a_locate_land_in_one_snapshot() {
         (false, Beat::new(0.0), Frame::new(0))
     );
 
-    motion(MotionEvent::Play);
+    motion(MotionCommand::Play);
     render(&engine, 480, false);
     let p = reader.playhead();
     assert!(p.playing(), "the play landed on the call's first frame");
@@ -118,7 +118,7 @@ fn a_stop_and_a_locate_land_in_one_snapshot() {
     assert!((p.beat().get() - beat_of(480)).abs() < 1e-12);
     assert!((p.seconds().get() - p.beat().get() / 2.0).abs() < 1e-12);
 
-    motion(MotionEvent::stop_unfaded());
+    motion(MotionCommand::stop_unfaded());
     render(&engine, 480, false);
     let p = reader.playhead();
     assert!(
@@ -132,7 +132,7 @@ fn a_stop_and_a_locate_land_in_one_snapshot() {
     );
     assert!((p.seconds().get() - p.beat().get() / 2.0).abs() < 1e-12);
 
-    motion(MotionEvent::locate(Beat::new(8.0)));
+    motion(MotionCommand::locate(Beat::new(8.0)));
     render(&engine, 480, false);
     let p = reader.playhead();
     assert_eq!(
@@ -150,7 +150,7 @@ fn a_stop_and_a_locate_land_in_one_snapshot() {
 fn a_reader_on_another_thread_never_sees_two_calls_mixed() {
     let engine = engine();
     let reader = engine.block_clock();
-    motion(MotionEvent::Play);
+    motion(MotionCommand::Play);
     render(&engine, 480, false);
     let done = std::sync::atomic::AtomicBool::new(false);
     let reads = std::thread::scope(|scope| {

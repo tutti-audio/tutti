@@ -315,7 +315,7 @@ impl TransportAudio {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{MotionEvent, Timeline};
+    use crate::{MotionCommand, Timeline};
     use tutti_units::{At, Frame};
 
     fn constant(bpm: f64) -> std::sync::Arc<TempoMap> {
@@ -340,7 +340,7 @@ mod tests {
     fn a_waiting_command_outlives_its_audio_side() {
         let t = Transport::new(SampleRate::SR_48K);
         t.motion
-            .schedule(At::Beat(tutti_units::Beat::new(1000.0)), MotionEvent::Play)
+            .schedule(At::Beat(tutti_units::Beat::new(1000.0)), MotionCommand::Play)
             .expect("room");
         let mut first = t.audio(SampleRate::SR_48K).expect("first");
         first.drain_commands();
@@ -364,10 +364,10 @@ mod tests {
         let t = Transport::new(SampleRate::SR_48K);
         let mut a = t.audio(SampleRate::SR_48K).expect("first");
         t.motion
-            .schedule(At::Frame(Frame::new(0)), MotionEvent::Play)
+            .schedule(At::Frame(Frame::new(0)), MotionCommand::Play)
             .expect("room");
         t.motion
-            .schedule(At::NextBlock, MotionEvent::stop_unfaded())
+            .schedule(At::NextBlock, MotionCommand::stop_unfaded())
             .expect("room");
         a.drain_commands();
         assert_eq!(a.pending().len(), 2);
@@ -406,7 +406,7 @@ mod tests {
         t.settings.set_tempo_map(map);
         let mut a = t.audio(SampleRate::of(rate)).expect("first");
         t.motion
-            .schedule(At::NextBlock, MotionEvent::Play)
+            .schedule(At::NextBlock, MotionCommand::Play)
             .expect("room");
         a.drain_commands();
         let _ = a.begin_block();
@@ -464,7 +464,7 @@ mod tests {
         let t = Transport::new(SampleRate::SR_48K);
         let mut a = t.audio(SampleRate::SR_48K).expect("first");
         t.motion
-            .schedule(At::NextBlock, MotionEvent::Play)
+            .schedule(At::NextBlock, MotionCommand::Play)
             .expect("room");
         a.drain_commands();
         let _ = a.begin_block();

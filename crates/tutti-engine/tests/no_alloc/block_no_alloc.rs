@@ -32,7 +32,7 @@ use tutti_graph::{Editor, MeterReader, Prepare, TapReader};
 use tutti_graph::{MeterId, MeterSpec, NodeKey, TapId, TapOptions};
 use tutti_nodes::testing::Osc;
 use tutti_nodes::{SvfFilterConfig, SvfFilterNode, SvfType};
-use tutti_timeline::{MotionEvent, Transport};
+use tutti_timeline::{MotionCommand, Transport};
 use tutti_units::{Bpm, Hz, Q, SampleRate, Samples};
 const SAMPLE_RATE: f64 = 48_000.0;
 
@@ -118,7 +118,7 @@ fn rolling_state_with(
     let state = AudioCallbackState::new(engine);
 
     transport.settings().set_tempo(Bpm::of(120.0));
-    let _ = transport.motion().try_send(MotionEvent::Play);
+    let _ = transport.motion().try_send(MotionCommand::Play);
 
     (transport, state, meter, reader)
 }

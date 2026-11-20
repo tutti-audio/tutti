@@ -15,7 +15,7 @@ use tutti_graph::{FadeLaw, ForkByClone};
 use tutti_nodes::testing::{Osc, Through};
 use tutti_nodes::{LimiterConfig, LimiterControls, LimiterNode};
 use tutti_session::{Crossfade, Error, InPort, LiveSession, OutPort, Root, Session};
-use tutti_timeline::MotionEvent;
+use tutti_timeline::MotionCommand;
 use tutti_units::{At, Db, Frame, Hz, SampleRate, Samples, Seconds};
 
 const OLD: f64 = 44_100.0;
@@ -121,7 +121,7 @@ fn a_restart_at_a_new_rate_re_rates_the_graph_and_everything_on_it() {
     let (mut s, old, _, lim) = engine();
     let t = s.transport_handle();
     t.play().expect("room");
-    t.schedule(At::Frame(Frame::new(66_150)), MotionEvent::stop_unfaded())
+    t.schedule(At::Frame(Frame::new(66_150)), MotionCommand::stop_unfaded())
         .expect("room");
     let before = play(&mut s, &old, 441, 100);
     assert!(
@@ -162,7 +162,7 @@ fn a_restart_at_a_new_rate_re_rates_the_graph_and_everything_on_it() {
     // Sent after the restart, before the first block at the new rate: already
     // in 48 kHz frames (1.75 s of wall clock), so the rate's adoption must
     // leave it where it is.
-    t.schedule(At::Frame(Frame::new(84_000)), MotionEvent::Play)
+    t.schedule(At::Frame(Frame::new(84_000)), MotionCommand::Play)
         .expect("room");
 
     let mut after = play(&mut s, &new, 480, 1);
