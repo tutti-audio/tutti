@@ -11,5 +11,5 @@ mod support;
 
 mod block_no_alloc;
 mod fault_records;
-mod load_meter;
+mod load;
 mod rt_no_alloc_engine;

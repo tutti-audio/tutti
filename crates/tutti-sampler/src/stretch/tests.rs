@@ -1610,7 +1610,7 @@ fn stretch_factor_changes_the_source_consumption_rate() {
 /// (must be bit-identical); clone again and render (must differ, so the move
 /// is audible and the check can fail).
 ///
-/// Nothing can break this at runtime: the cells are owned `AtomicF32`s, not `Arc`s,
+/// Nothing can break this at runtime: the cells are owned atomic cells, not `Arc`s,
 /// so a clone that shared them with its original would not compile. The
 /// property is structural; the test stays as the isolate row's record.
 #[test]

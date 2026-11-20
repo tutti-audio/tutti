@@ -112,6 +112,7 @@ use tutti_graph::{
 };
 
 use crate::block_clock::{BlockClock, BlockClockReader, BlockDates, DateKeeper, Pose};
+use crate::load::{self, BlockCounts, Load, Writers};
 use crate::output::{DEFAULT_DEVICE_WIDTHS, OutputControl, OutputFolds};
 use crate::routing::StageTargets;
 use crate::stage::OutputStage;
@@ -120,9 +121,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::MAX_CHANNELS;
 use tutti_buffers::{Float, FoldError, Interleaved, InterleavedMut, Planes};
-use tutti_metering::{LoadMeter, LoadRecorder};
 use tutti_platform::Instant;
-use tutti_rt::{AudioThreadCell, Reader, RtScope};
+use tutti_rt::{AudioThreadCell, Counter, Gauge, Reader, RtScope};
 #[cfg(doc)]
 use tutti_transport::MotionFsm;
 use tutti_transport::{
@@ -195,9 +195,9 @@ pub struct Engine<F: Float = f32> {
     /// The block capacity (the editor's `MaxBlock` limit).
     capacity: Samples,
     /// Records each block's render time against its budget.
-    load: AudioThreadCell<LoadRecorder>,
-    /// The reading half of `load`.
-    meter: Option<LoadMeter>,
+    load: AudioThreadCell<Writers>,
+    /// The readers of what `load` writes.
+    readings: (Gauge<Load>, Counter<BlockCounts>),
     /// The tap after the fader, the audio thread's ends.
     hearing: AudioThreadCell<crate::hearing::Hearing<F>>,
     /// Its control side.
@@ -219,7 +219,7 @@ impl<F: Float> std::fmt::Debug for Engine<F> {
             .field("graph", &self.graph)
             .field("fader", &self.fader)
             .field("capacity", &self.capacity)
-            .field("meter", &self.meter)
+            .field("readings", &self.readings)
             .finish_non_exhaustive()
     }
 }
@@ -238,7 +238,7 @@ struct GraphRender<F: Float> {
     stride: usize,
     playhead: Playhead,
     /// The executor's [`dropped_event_count`](Executor::dropped_event_count) already
-    /// forwarded to the load meter.
+    /// forwarded to the block counts.
     dropped_seen: u64,
     /// Where each render call's start stands on the OS clock and the graph's
     /// frame clock: what a producer thread's `ClockMap` is fed
@@ -505,7 +505,7 @@ impl<F: Float> Engine<F> {
         // Seeded from the executor; no test here can cover it, since the
         // executor is always fresh at `Engine::new`.
         let dropped_seen = executor.dropped_event_count();
-        let (recorder, meter) = LoadMeter::pair();
+        let (writers, load, blocks) = load::link();
         let (output_taps, hearing) = crate::hearing::link();
         let clock = BlockClock::new();
         let clock_reader = clock.reader();
@@ -535,8 +535,8 @@ impl<F: Float> Engine<F> {
             }),
             fader: AudioThreadCell::new(Fader::new(fade_frames(rate))),
             capacity: Samples::new(stride),
-            load: AudioThreadCell::new(recorder),
-            meter: Some(meter),
+            load: AudioThreadCell::new(writers),
+            readings: (load, blocks),
             hearing: AudioThreadCell::new(hearing),
             output_taps,
             clock_reader,
@@ -560,7 +560,7 @@ impl<F: Float> Engine<F> {
     /// width where it has one, and the root the same: see
     /// [`fold_to_width`](tutti_graph::fold_to_width). A buffer of a width not
     /// supported is not rendered into: the call is silent and counted in
-    /// [`LoadReading::silenced`](tutti_metering::LoadReading::silenced), in
+    /// [`BlockCounts::silenced`], in
     /// every build.
     ///
     /// Where a mono root lands: the centre of a 6, 8 or 12-wide device, the
@@ -606,33 +606,29 @@ impl<F: Float> Engine<F> {
         self.capacity
     }
 
-    /// The DSP-load meter every [`process`](Self::process) and
-    /// [`process_segment`](Self::process_segment) call feeds: the call's
-    /// wall time against its block's real-time budget. `None` once a host has
-    /// taken it ([`take_load_meter`](Self::take_load_meter)); until then it
-    /// can be read with [`peek`](LoadMeter::peek) and
-    /// [`reset`](LoadMeter::reset), which leave the peak for the one reader.
+    /// The engine's [`Load`]: every [`process`](Self::process) and
+    /// [`process_segment`](Self::process_segment) call's wall time against its
+    /// block's real-time budget, smoothed. Any number of clones read the one
+    /// cell, from any thread, and nothing resets on read.
     ///
     /// What it times is the whole call, which is what a device deadline
     /// counts, the plan's meter ops included; a driver's own work around
     /// it (tutti-cpal's sample-format conversion, one linear pass) is not in
-    /// it. The
-    /// budget is each graph block's frames at the rate that block ran at,
-    /// summed, so a call that straddles a re-prepare's rate change is held
+    /// it. The budget is each graph block's frames at the rate that block ran
+    /// at, summed, so a call that straddles a re-prepare's rate change is held
     /// to the rate in effect for each piece. A block refused the graph
     /// (rendered silent, an audible dropout) is not timed; it is counted in
-    /// [`LoadReading::silenced`](tutti_metering::LoadReading::silenced). Events the
-    /// graph dropped (an event port past its capacity) are counted in
-    /// [`LoadReading::dropped_events`](tutti_metering::LoadReading::dropped_events).
-    pub fn load_meter(&self) -> Option<&LoadMeter> {
-        self.meter.as_ref()
+    /// [`BlockCounts::silenced`].
+    pub fn load(&self) -> Gauge<Load> {
+        self.readings.0.clone()
     }
 
-    /// Hands the DSP-load meter's reader to its one consumer, which owns it
-    /// from here ([`load_meter`](Self::load_meter) has what the call took).
-    /// `None` when it was taken already.
-    pub fn take_load_meter(&mut self) -> Option<LoadMeter> {
-        self.meter.take()
+    /// What the engine's blocks amounted to: blocks timed, over budget and
+    /// silenced, and the events the graph dropped (an event port past its
+    /// capacity). Cumulative; an app diffs two readings. Any number of clones
+    /// read the one cell, from any thread.
+    pub fn blocks(&self) -> Counter<BlockCounts> {
+        self.readings.1.clone()
     }
 
     /// A reader of the block clock: each [`process`](Self::process) and
@@ -710,7 +706,7 @@ impl<F: Float> Engine<F> {
             output.fill(F::ZERO);
             self.heard(output, output_layout, 0, frames);
             if let Some(mut load) = self.load.try_borrow_mut() {
-                load.record_silenced();
+                load.silenced();
             }
             return;
         };
@@ -761,9 +757,9 @@ impl<F: Float> Engine<F> {
         }
         let mut load = self.load.borrow_mut();
         if unplaced {
-            load.record_silenced();
+            load.silenced();
         }
-        load.record_dropped_events(g.take_dropped_events());
+        load.dropped_events(g.take_dropped_events());
         load.record(Seconds::new(start.elapsed().as_secs_f64()), budget);
     }
 
@@ -808,7 +804,7 @@ impl<F: Float> Engine<F> {
 
     #[inline]
     fn process_stamped(&self, output: &mut InterleavedMut<'_, F>, stamp: Option<i64>) {
-        // Timed for the load meter (`load_meter`): see `process_segment`.
+        // Timed for the load meter (`load`): see `process_segment`.
         let start = Instant::now();
         let out_ch = output.channels();
         let output_layout = output.layout();
@@ -833,7 +829,7 @@ impl<F: Float> Engine<F> {
             output.fill(F::ZERO);
             self.heard(output, output_layout, 0, frames);
             if let Some(mut load) = self.load.try_borrow_mut() {
-                load.record_silenced();
+                load.silenced();
             }
             return;
         };
@@ -886,9 +882,9 @@ impl<F: Float> Engine<F> {
         }
         let mut load = self.load.borrow_mut();
         if unplaced {
-            load.record_silenced();
+            load.silenced();
         }
-        load.record_dropped_events(g.take_dropped_events());
+        load.dropped_events(g.take_dropped_events());
         load.record(Seconds::new(start.elapsed().as_secs_f64()), budget);
     }
 
@@ -1992,9 +1988,8 @@ mod tests {
         assert_eq!(walk.gain.items[0], (0, Gain::Aim(Some(Frame::new(700)))));
     }
 
-    /// A block refused the graph is a dropout the meter counts, not times:
-    /// `silenced` counts both entry points, `blocks` neither, and a reset
-    /// zeroes it.
+    /// A block refused the graph is a dropout the counter counts, not times:
+    /// `silenced` counts both entry points and `blocks` neither.
     #[test]
     fn a_block_refused_the_graph_counts_as_silenced() {
         use tutti_buffers::ChannelLayout;
@@ -2013,13 +2008,11 @@ mod tests {
                 &mut InterleavedMut::new(&mut buf, ChannelLayout::STEREO).unwrap(),
             );
         }
-        let r = engine.load_meter().expect("not taken").peek();
+        let r = engine.blocks().get();
         assert_eq!((r.silenced, r.blocks), (2, 0));
         engine.process(&mut InterleavedMut::new(&mut buf, ChannelLayout::STEREO).unwrap());
-        let r = engine.load_meter().expect("not taken").peek();
+        let r = engine.blocks().get();
         assert_eq!((r.silenced, r.blocks), (2, 1));
-        engine.load_meter().expect("not taken").reset();
-        assert_eq!(engine.load_meter().expect("not taken").peek().silenced, 0);
     }
 
     /// `width` outputs, channel `c` holding `10 * width + c + 1`.
@@ -2208,7 +2201,7 @@ mod tests {
             &mut InterleavedMut::new(&mut out, ChannelLayout::from(40u16)).unwrap(),
         );
         assert!(out.iter().all(|&s| s == 0.0));
-        assert_eq!(engine.load_meter().expect("not taken").peek().silenced, 1);
+        assert_eq!(engine.blocks().get().silenced, 1);
     }
 
     /// A root the device has no place for (five channels into three: either
@@ -2229,13 +2222,13 @@ mod tests {
         let mut out = vec![-9.0f32; 3 * 8];
         engine.process_segment(&mut InterleavedMut::new(&mut out, three).unwrap());
         assert!(out.iter().all(|&s| s == 0.0), "{out:?}");
-        assert_eq!(engine.load_meter().expect("not taken").peek().silenced, 1);
+        assert_eq!(engine.blocks().get().silenced, 1);
         let seven = ChannelLayout::from(7u16);
         let mut out = vec![-9.0f32; 7 * 8];
         engine.process_segment(&mut InterleavedMut::new(&mut out, seven).unwrap());
         // Ramp(5) writes 51..=55; the rest of the 7-wide device is silent.
         assert_eq!(&out[..7], &[51.0, 52.0, 53.0, 54.0, 55.0, 0.0, 0.0]);
-        assert_eq!(engine.load_meter().expect("not taken").peek().silenced, 1);
+        assert_eq!(engine.blocks().get().silenced, 1);
     }
 
     /// Renders one 8-frame segment of the committed graph into a device of `device`
@@ -2432,10 +2425,10 @@ mod tests {
         let control = engine.output_control();
         let buses = Some(ChannelTopology::unassigned(ChannelLayout::QUAD));
         declare(&mut ed, &control, buses, six).unwrap();
-        let before = engine.load_meter().expect("not taken").peek().silenced;
+        let before = engine.blocks().get().silenced;
         assert_eq!(first_frame(&engine, 6), [41.0, 42.0, 43.0, 44.0, 0.0, 0.0]);
         assert_eq!(
-            engine.load_meter().expect("not taken").peek().silenced,
+            engine.blocks().get().silenced,
             before,
             "the first block of the new root is not silenced"
         );
@@ -2471,7 +2464,7 @@ mod tests {
                     engine.process_segment(&mut InterleavedMut::new(&mut out, six).unwrap());
                     blocks += 1;
                 }
-                engine.load_meter().expect("not taken").peek().silenced
+                engine.blocks().get().silenced
             });
             for i in 0..2_000 {
                 let root = (i % 2 == 0).then(|| ChannelTopology::unassigned(ChannelLayout::QUAD));

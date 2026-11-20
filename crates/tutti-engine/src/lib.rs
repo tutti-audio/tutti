@@ -22,8 +22,8 @@
 //! - **Level metering.** A meter is an op in the compiled plan, on the outputs or
 //!   any node's port (`tutti-graph`'s `Editor::open_meter`, `MeterReader`), per
 //!   channel and before the engine's fold and declick. The engine holds no master
-//!   meter and no stereo fold. `LoadMeter` is `tutti-metering`'s: the engine times
-//!   each block and writes it, because it is not audio.
+//!   meter and no stereo fold. The engine times each block and writes
+//!   its [`Load`] and [`BlockCounts`], because they are not audio.
 //! - **Taps.** Copying audio out of the graph is `tutti-graph`'s (`Editor::open_tap`,
 //!   `TapReader`), an op in the compiled plan, before the declick fader. The engine
 //!   writes the other kind itself: `Engine::output_taps()` opens a tap on its
@@ -128,6 +128,7 @@ mod engine;
 mod faults;
 mod hearing;
 mod latency;
+mod load;
 mod manual;
 mod output;
 mod restart;
@@ -144,6 +145,7 @@ pub use faults::{
 };
 pub use hearing::{OutputTapError, OutputTapOpen, OutputTaps};
 pub use latency::StreamLatency;
+pub use load::{BlockCounts, LOAD_MEAN_TIME_CONSTANT, Load};
 pub use manual::{ManualRunning, ManualStream, ManualStreamDriver};
 pub use output::{MAX_PENDING_ROOTS, OutputControl, OutputPlacement};
 pub use restart::{Stopped, StreamHost};

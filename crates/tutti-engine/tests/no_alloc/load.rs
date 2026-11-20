@@ -1,12 +1,12 @@
-//! The engine's load meter, end to end: `Engine::process` and
+//! The engine's load and block counts, end to end: `Engine::process` and
 //! `process_segment` time the whole call against the block's budget.
 //!
 //! The figures come from a node that spins for a known duration, so the
 //! load has a floor no scheduler can lower: a spin of `k` budgets is a load
 //! of at least `k`. Where a test also needs a ceiling it is generous and
 //! says why, because wall time on a shared machine has no upper bound.
-//! The meter's arithmetic (mean, peak, reset) is pinned exactly, on fake
-//! durations, by the unit tests beside it (`metering/load.rs`).
+//! The smoothing arithmetic is pinned exactly, on constructed durations, by
+//! the unit tests beside it (`load/tests.rs`).
 
 use std::time::Duration;
 
@@ -73,19 +73,16 @@ fn budget(frames: usize) -> Duration {
 }
 
 /// A block whose render spins for twice its budget reads a load of at least
-/// two, counts one block over budget, and shows as the peak exactly once.
+/// two (the first block seeds the mean) and counts one block over budget.
 #[test]
-fn a_block_past_its_deadline_counts_and_peaks_once() {
-    let (mut engine, _t, _ed) = engine(budget(64) * 2, 64);
-    let mut meter = engine.take_load_meter().expect("not taken");
+fn a_block_past_its_deadline_reads_its_load_and_counts_once() {
+    let (engine, _t, _ed) = engine(budget(64) * 2, 64);
+    let (load, blocks) = (engine.load(), engine.blocks());
     let mut out = vec![0.0f32; 64];
     engine.process(&mut InterleavedMut::new(&mut out, ChannelLayout::MONO).unwrap());
-    let r = meter.take();
-    assert_eq!(r.blocks, 1);
-    assert_eq!(r.over_budget, 1);
-    assert!(r.last >= 2.0, "{}", r.last);
-    assert!(r.peak >= 2.0, "{}", r.peak);
-    assert_eq!(meter.take().peak, 0.0, "the take reset the peak");
+    let r = blocks.get();
+    assert_eq!((r.blocks, r.over_budget), (1, 1));
+    assert!(load.get().get() >= 2.0, "{:?}", load.get());
 }
 
 /// The budget is the whole call's frames, summed over the graph blocks a
@@ -101,16 +98,17 @@ fn a_block_past_its_deadline_counts_and_peaks_once() {
 /// load), and it still catches a budget of one piece (load ≥ 3).
 #[test]
 fn the_budget_is_the_whole_calls_frames_across_graph_blocks() {
-    let (mut engine, _t, _ed) = engine(budget(4096).mul_f64(1.5), 4096);
-    let mut meter = engine.take_load_meter().expect("not taken");
+    let (engine, _t, _ed) = engine(budget(4096).mul_f64(1.5), 4096);
+    let (load, blocks) = (engine.load(), engine.blocks());
     let mut out = vec![0.0f32; 8192];
     engine.process(&mut InterleavedMut::new(&mut out, ChannelLayout::MONO).unwrap());
-    let r = meter.take();
-    assert!((1.5..2.9).contains(&r.last), "process: {}", r.last);
-    assert_eq!(r.over_budget, 1);
+    let seeded = load.get().get();
+    assert!((1.5..2.9).contains(&seeded), "process: {seeded}");
+    assert_eq!(blocks.get().over_budget, 1);
     engine.process_segment(&mut InterleavedMut::new(&mut out, ChannelLayout::MONO).unwrap());
-    let r = meter.take();
-    assert!((1.5..2.9).contains(&r.last), "segment: {}", r.last);
+    let smoothed = load.get().get();
+    assert!((1.5..2.9).contains(&smoothed), "segment: {smoothed}");
+    let r = blocks.get();
     assert_eq!((r.blocks, r.over_budget), (2, 2));
 }
 
@@ -118,22 +116,22 @@ fn the_budget_is_the_whole_calls_frames_across_graph_blocks() {
 /// `process_segment` (each recording a block) and the reads.
 #[test]
 fn recording_the_load_is_allocation_free() {
-    let (mut engine, _t, mut ed) = engine(Duration::ZERO, 64);
+    let (engine, _t, mut ed) = engine(Duration::ZERO, 64);
     let mut out = vec![0.0f32; 64];
     // Installing the commit allocates on the first block, before the gate.
     engine.process(&mut InterleavedMut::new(&mut out, ChannelLayout::MONO).unwrap());
     ed.collect();
-    let mut meter = engine.take_load_meter().expect("not taken");
-    meter.reset();
+    let (load, blocks) = (engine.load(), engine.blocks());
+    let before = blocks.get().blocks;
     assert_no_alloc::assert_no_alloc(|| {
         for _ in 0..16 {
             engine.process(&mut InterleavedMut::new(&mut out, ChannelLayout::MONO).unwrap());
             engine
                 .process_segment(&mut InterleavedMut::new(&mut out, ChannelLayout::MONO).unwrap());
-            let _ = meter.take();
+            let _ = (load.get(), blocks.get());
         }
     });
-    assert_eq!(meter.take().blocks, 32);
+    assert_eq!(blocks.get().blocks - before, 32);
 }
 
 /// A mono source that also writes `per_block` events to its one event
@@ -166,12 +164,11 @@ impl tutti_graph::Node for Burst {
     fn reset(&mut self) {}
 }
 
-/// Events a node writes past its port's capacity reach the load meter: a
-/// node writing 100 more than the default capacity each block reads 100
-/// dropped per device block, from `process` and `process_segment` both,
-/// and a reset zeroes the count.
+/// Events a node writes past its port's capacity reach the block counts: a
+/// node writing 100 more than the default capacity each block adds 100
+/// dropped per device block, from `process` and `process_segment` both.
 #[test]
-fn events_past_a_ports_capacity_reach_the_meter() {
+fn events_past_a_ports_capacity_reach_the_block_counts() {
     let transport = Transport::new(SampleRate::of(RATE));
     let (mut ed, exec) = Editor::new(Prepare::new(
         SampleRate::of(RATE),
@@ -186,18 +183,14 @@ fn events_past_a_ports_capacity_reach_the_meter() {
             port: 0,
         })]);
     ed.commit().expect("commits");
-    let mut engine = Engine::new(&transport, &mut ed, exec, tutti_engine::BlockDates::Os)
+    let engine = Engine::new(&transport, &mut ed, exec, tutti_engine::BlockDates::Os)
         .expect("within the limits");
-    let mut meter = engine.take_load_meter().expect("not taken");
+    let blocks = engine.blocks();
     let mut out = vec![0.0f32; 64];
     engine.process(&mut InterleavedMut::new(&mut out, ChannelLayout::MONO).unwrap());
-    assert_eq!(meter.peek().dropped_events, 100);
+    assert_eq!(blocks.get().dropped_events, 100);
     engine.process(&mut InterleavedMut::new(&mut out, ChannelLayout::MONO).unwrap());
-    assert_eq!(meter.peek().dropped_events, 200);
+    assert_eq!(blocks.get().dropped_events, 200);
     engine.process_segment(&mut InterleavedMut::new(&mut out, ChannelLayout::MONO).unwrap());
-    assert_eq!(meter.peek().dropped_events, 300);
-    meter.reset();
-    assert_eq!(meter.peek().dropped_events, 0);
-    engine.process(&mut InterleavedMut::new(&mut out, ChannelLayout::MONO).unwrap());
-    assert_eq!(meter.take().dropped_events, 100);
+    assert_eq!(blocks.get().dropped_events, 300);
 }

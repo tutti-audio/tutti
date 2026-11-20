@@ -3,7 +3,7 @@
 //!
 //! Its own module because the one property it adds over an atomic per field
 //! is the reason it exists: a range's `(min, max)` held as two
-//! `AtomicF32`s could pair one write's `min` with another
+//! atomic floats could pair one write's `min` with another
 //! write's `max`; held as one `PackedAtomic` it cannot. The `loom` model in
 //! `tests/packed_atomic_loom.rs` runs this code and checks exactly that.
 
@@ -35,7 +35,7 @@ const WORD: usize = std::mem::size_of::<u64>();
 /// `size_of::<T>() <= 8`, not a native atomic width.
 ///
 /// Wait-free on both sides; no allocation. A plain cell, as a `Param<U>`'s
-/// `AtomicF32` is: one `Release` store and one `Acquire` load of one word,
+/// atomic cell is: one `Release` store and one `Acquire` load of one word,
 /// and no protocol between cells. Nothing is published through it, so
 /// `Relaxed` would be sound for the value itself; `Release`/`Acquire` costs
 /// nothing on x86 and is not measurable on ARM.
