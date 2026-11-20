@@ -9,9 +9,7 @@ use tutti_platform::Instant;
 use crate::common::{MF, blocks, note, play};
 use tutti_graph::Losses;
 use tutti_midi_ci::Muid;
-use tutti_midi_ci::{
-    CiCategories, CiHeader, CiMessage, Decoded, DiscoveryData, EndpointName, MaxSysexSize,
-};
+use tutti_midi_ci::{CiCategories, CiHeader, CiMessage, Decoded, DiscoveryData, MaxSysexSize};
 use tutti_midi_device::{
     Capabilities, Endpoint, EndpointId, MidiIdentity, PortDirection, Supports,
 };
@@ -23,6 +21,7 @@ use tutti_session::{
     EventInPort, MidiPolicy, MidiPolicyError, MidiReport, PHASES, PhaseCx, Session, SessionEvent,
     SetRefusal, ValueErrorKind, midi_input, midi_output,
 };
+use tutti_ump::EndpointName;
 use tutti_ump::{
     DeviceIdentity, DiscoveryFilter, ManufacturerId, Message, MidiGroup, Protocol, Stream,
     StreamConfig, SysexAssembler, SysexStep, U7, Ump, UmpVersion,

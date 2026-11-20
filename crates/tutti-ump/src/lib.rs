@@ -108,6 +108,7 @@ mod midi_group;
 mod midi_translation;
 mod mixed_data;
 mod mpe_zone;
+mod name;
 mod note_id;
 mod note_velocity;
 mod orchestral;
@@ -168,6 +169,10 @@ pub use mixed_data::{
     MixedDataPackets, MixedDataSet, MixedDataStep, NotChunkSize,
 };
 pub use mpe_zone::{MpeOverlap, MpeZoneSet, MpeZoneSpan};
+pub use name::{
+    BLOCK_NAME_BYTES, BlockName, ENDPOINT_NAME_BYTES, EndpointName, INSTANCE_ID_BYTES,
+    InstanceIdError, Name, NameError, ProductInstanceId,
+};
 pub use note_id::NoteId;
 pub use note_velocity::NoteVelocity;
 pub use orchestral::{

@@ -23,9 +23,9 @@
 use std::sync::Mutex;
 use tutti_rt::LockExt;
 
-use tutti_midi_ci::EndpointName;
 use tutti_midi_device::FunctionBlock;
 use tutti_midi_protocol::{Midi1Translator, Midi2Translator};
+use tutti_ump::EndpointName;
 use tutti_ump::{Message, Ump};
 
 use crate::InputProducerHandle;

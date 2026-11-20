@@ -35,7 +35,7 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
 
-use crate::TapId;
+use crate::{TapAlign, TapId};
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::{BufferError, Interleaved, InterleavedMut, PlanesMut, Pull, Source};
 use tutti_rt::{Bell, ControlDrop, FaultLatch};
@@ -44,6 +44,47 @@ use tutti_units::{Frame, Samples};
 
 use crate::slots::AudioSlots;
 use tutti_buffers::Float;
+
+/// How a tap is opened: its ring capacity, where its copy sits in time and who
+/// is rung as it writes. Taken by [`Editor::open_tap`](crate::Editor::open_tap).
+#[derive(Debug)]
+pub struct TapOptions {
+    capacity: Samples,
+    align: TapAlign,
+    bell: Option<Bell>,
+}
+
+impl TapOptions {
+    /// Options for a tap whose every lane is a ring of `capacity` frames:
+    /// aligned to the output ([`TapAlign::ToOutput`]), ringing no bell.
+    pub fn new(capacity: Samples) -> Self {
+        Self {
+            capacity,
+            align: TapAlign::default(),
+            bell: None,
+        }
+    }
+
+    /// Where the copy sits in time.
+    #[must_use]
+    pub fn align(mut self, align: TapAlign) -> Self {
+        self.align = align;
+        self
+    }
+
+    /// Rings `bell` after each block the writer writes, when the tap ends and
+    /// when the writer drops: a reader awaiting its frames wakes on the audio
+    /// thread's ring and never polls.
+    #[must_use]
+    pub fn bell(mut self, bell: Bell) -> Self {
+        self.bell = Some(bell);
+        self
+    }
+
+    pub(crate) fn into_parts(self) -> (Samples, TapAlign, Option<Bell>) {
+        (self.capacity, self.align, self.bell)
+    }
+}
 
 /// The executor's end of a tap: every lane's ring producer, written together.
 ///

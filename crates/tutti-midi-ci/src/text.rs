@@ -6,7 +6,7 @@ use std::str::FromStr;
 use std::vec::Vec;
 
 use super::escape::{hex4, is_plain, push_utf16_escapes, utf16_escapes_len};
-use crate::name::NameError;
+use tutti_ump::NameError;
 
 /// The human-readable text of an ACK or NAK, held as the text it says and
 /// written as the pure ASCII the wire carries.
@@ -197,4 +197,24 @@ fn encoded_len(text: &str) -> usize {
             c => utf16_escapes_len(c),
         })
         .sum()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_message_text_longer_than_its_encoded_bound_is_refused_with_the_bound() {
+        assert_eq!(
+            MessageText::try_from("a".repeat(104).as_str()),
+            Err(NameError::TooLong { max: 103 })
+        );
+    }
+
+    #[test]
+    fn a_message_text_displays_and_parses_as_its_text() {
+        let text: MessageText = "done".parse().unwrap();
+        assert_eq!(text.to_string(), "done");
+        assert_eq!(text.as_ref() as &str, "done");
+    }
 }

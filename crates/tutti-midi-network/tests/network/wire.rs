@@ -1,7 +1,6 @@
 //! The wire format: byte layouts from the specification's tables and
 //! examples, the refusals, and sequence numbers.
 
-use tutti_midi_ci::{EndpointName, ProductInstanceId};
 use tutti_midi_network::{
     AuthChallenge, AuthMethods, AuthState, Bye, ByeReason, ByeText, Command, DatagramBuilder,
     Digest, EndpointIdentity, Header, Invitation, Nak, NakReason, NakText, Nonce, ParseError,
@@ -10,6 +9,7 @@ use tutti_midi_network::{
     Username, parse,
 };
 use tutti_ump::Ump;
+use tutti_ump::{EndpointName, ProductInstanceId};
 
 use crate::sim::identity;
 

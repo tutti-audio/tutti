@@ -358,6 +358,12 @@ pub(super) const ALLOW: &[Allow] = &[
         "creating a staged file to encode into: the failure is the OS's, not a value's",
     ),
     ty(
+        "crates/tutti-tempo/",
+        "TempoMap::from_beats",
+        CTOR,
+        "a conversion from measured beats that can fail on the input: the beats' count and order are the caller's, not a value's",
+    ),
+    ty(
         "crates/tutti-platform/",
         "Stamp::of",
         CTOR,

@@ -214,7 +214,7 @@ pub enum PumpPass {
 /// use tutti_buffers::{ChannelLayout, MaxBlock};
 /// use tutti_buffers::Sink;
 /// use tutti_graph::NodeKey;
-/// use tutti_graph::{TapAlign, TapId};
+/// use tutti_graph::{TapId, TapOptions};
 ///
 /// /// A stereo source: 0.25 on the left, -0.25 on the right.
 /// struct Tone;
@@ -237,7 +237,7 @@ pub enum PumpPass {
 /// let out = |port| Source::Node(OutPort { node: NodeKey(1), port });
 /// editor.spec_mut().topology.set_outputs([out(0), out(1)]);
 /// let reader = editor
-///     .open_tap(TapId::of(1), vec![out(0), out(1)], TapAlign::ToOutput, Samples::new(1024))
+///     .open_tap(TapId::of(1), vec![out(0), out(1)], TapOptions::new(Samples::new(1024)))
 ///     .expect("the ports exist");
 /// editor.commit().expect("compiles");
 /// executor.apply_pending();

@@ -9,7 +9,7 @@ use std::net::{IpAddr, SocketAddr};
 use std::time::Duration;
 
 use mdns_sd::{ResolvedService, ServiceDaemon, ServiceEvent, ServiceInfo};
-use tutti_midi_ci::{InstanceIdError, NameError};
+use tutti_ump::{InstanceIdError, NameError};
 
 use crate::EndpointIdentity;
 
