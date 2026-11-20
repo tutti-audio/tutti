@@ -21,14 +21,14 @@ mod tests;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use tutti_buffers::{ChannelLayout, ChannelTopology};
+use tutti_buffers::ChannelTopology;
 use tutti_buffers::{Float, Wave};
 use tutti_measure::{Measure, Meter};
 #[cfg(codec)]
 use tutti_platform::Asset;
 use tutti_units::{SampleRate, Samples};
 
-pub use feed::{AudioContext, AudioInput};
+pub use feed::{AudioContext, AudioInput, BindError};
 use feed::{Bind, Chunk, View};
 pub use live::{Analyzer, AnalyzerError};
 
@@ -111,20 +111,9 @@ pub enum AnalyzeError {
     #[cfg(codec)]
     #[error("the audio file could not be decoded: {0}")]
     Decode(#[from] tutti_codec::DecodeError),
-    /// The analysis reads two channels and the audio is of another width.
-    #[error("the analysis reads {needs:?} audio, and the audio is {found:?}")]
-    Width {
-        /// The width the analysis reads.
-        needs: ChannelLayout,
-        /// The audio's width.
-        found: ChannelLayout,
-    },
-    /// The audio's channels cannot be folded to one for a mono analysis.
-    #[error("the audio's channels cannot be folded to mono: {0}")]
-    Fold(#[from] tutti_buffers::FoldError),
-    /// A chunk was not a whole number of frames of the audio's width.
-    #[error("a chunk of the audio is malformed: {0}")]
-    Buffer(#[from] tutti_buffers::BufferError),
+    /// The audio's channels cannot be shown to the meter in the view it takes.
+    #[error(transparent)]
+    Bind(#[from] BindError),
     /// The worker did not finish.
     #[error(transparent)]
     Worker(#[from] WorkerError),
@@ -174,10 +163,9 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     ///
     /// The job fails with [`AnalyzeError::Measure`] when the meter refuses the
     /// audio or a chunk, `AnalyzeError::Decode` when a file cannot be
-    /// decoded, [`AnalyzeError::Width`] when a stereo analysis is given audio
-    /// of another width, [`AnalyzeError::Fold`] when a mono analysis has no
-    /// fold from the audio's topology, [`AnalyzeError::Buffer`] when a chunk
-    /// is not a valid view, and [`AnalyzeError::Worker`] or
+    /// decoded, [`AnalyzeError::Bind`] when the audio cannot be shown to the meter
+    /// (a stereo analysis of audio of another width, a mono analysis with no
+    /// fold from the audio's topology, a chunk that is not a valid view), and [`AnalyzeError::Worker`] or
     /// [`AnalyzeError::Wait`] when the job's worker fails or is dropped.
     pub fn analyze<S, A>(&mut self, audio: impl Into<Audio<S>>, analysis: A) -> Job<Analyze<A, S>>
     where

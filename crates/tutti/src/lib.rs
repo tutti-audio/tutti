@@ -189,7 +189,7 @@ pub use tutti_session::{
 };
 #[cfg(all(feature = "session", feature = "analyze"))]
 pub use tutti_session::{
-    Analyze, AnalyzeError, Analyzer, AnalyzerError, Audio, AudioContext, AudioInput,
+    Analyze, AnalyzeError, Analyzer, AnalyzerError, Audio, AudioContext, AudioInput, BindError,
 };
 #[cfg(feature = "session")]
 pub use tutti_session::{

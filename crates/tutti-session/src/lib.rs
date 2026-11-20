@@ -145,7 +145,7 @@ mod watch;
 
 #[cfg(feature = "analyze")]
 pub use analyze::{
-    Analyze, AnalyzeError, Analyzer, AnalyzerError, Audio, AudioContext, AudioInput,
+    Analyze, AnalyzeError, Analyzer, AnalyzerError, Audio, AudioContext, AudioInput, BindError,
 };
 #[cfg(feature = "export")]
 pub use bounce::{

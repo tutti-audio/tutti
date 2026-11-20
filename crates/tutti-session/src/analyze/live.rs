@@ -13,7 +13,7 @@ use tutti_measure::{Measure, Meter};
 use tutti_units::{SampleRate, Samples};
 
 use super::feed::{Bind, Chunk, View};
-use super::{AnalyzeError, AudioContext, AudioInput};
+use super::{AudioContext, AudioInput, BindError};
 
 /// Frames shown to the meter at a time.
 const CHUNK_FRAMES: Samples = Samples::new(16_384);
@@ -33,7 +33,7 @@ pub enum AnalyzerError {
     /// a stereo analysis on a tap of another width, or a mono analysis with
     /// no fold from the tap's width.
     #[error("the tap's channels cannot be shown to the analysis: {0}")]
-    Layout(#[from] AnalyzeError),
+    Bind(#[from] BindError),
 }
 
 /// A tap with a meter's state: the app drains it with

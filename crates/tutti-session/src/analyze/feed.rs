@@ -1,14 +1,33 @@
 //! What binds a meter to audio: the context it is built with and the view each
 //! chunk is pushed as, both read from the chunk the job reads.
 
-use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_buffers::{
-    Float, Fold, FoldError, Interleaved, InterleavedMut, Mono, Planes, PlanesMut, StereoPlanes,
-    deinterleave, interleave,
+    BufferError, Float, Fold, FoldError, Interleaved, InterleavedMut, Mono, Planes, PlanesMut,
+    StereoPlanes, deinterleave, interleave,
 };
+use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_units::{SampleRate, Samples};
 
-use super::AnalyzeError;
+/// Why a chunk cannot be shown to a meter in the view it takes: what binding
+/// a stream to a meter, offline or live, can refuse.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum BindError {
+    /// The analysis reads two channels and the audio is of another width.
+    #[error("the analysis reads {needs:?} audio, and the audio is {found:?}")]
+    Width {
+        /// The width the analysis reads.
+        needs: ChannelLayout,
+        /// The audio's width.
+        found: ChannelLayout,
+    },
+    /// The audio's channels cannot be folded to one for a mono analysis.
+    #[error("the audio's channels cannot be folded to mono: {0}")]
+    Fold(#[from] FoldError),
+    /// A chunk was not a whole number of frames of the audio's width.
+    #[error("a chunk of the audio is malformed: {0}")]
+    Buffer(#[from] BufferError),
+}
 
 /// How a chunk holds its frames.
 #[derive(Debug)]
@@ -66,7 +85,7 @@ impl<'w, S: Float> Chunk<'w, S> {
 
     /// The interleaved buffer to fill with `frames` frames (decoded, or popped
     /// from a tap).
-    pub(crate) fn fill(&mut self, frames: Samples) -> Result<InterleavedMut<'_, S>, AnalyzeError> {
+    pub(crate) fn fill(&mut self, frames: Samples) -> Result<InterleavedMut<'_, S>, BindError> {
         self.held = Layout::Interleaved;
         self.data.clear();
         self.data
@@ -153,7 +172,7 @@ impl sealed_context::Sealed for () {
 /// [`Interleaved`] is the chunk interleaved. [`Mono`] is the audio itself when
 /// it is mono, otherwise the chunk folded to one channel by the audio's own
 /// topology. [`StereoPlanes`] is a stereo chunk's two planes; audio of another
-/// width is refused with [`AnalyzeError::Width`]. A wave in memory is read
+/// width is refused with [`BindError::Width`]. A wave in memory is read
 /// through its own planes, and a file's frames are interleaved by nature: each
 /// is converted only to the shape a meter asks for.
 ///
@@ -165,18 +184,18 @@ pub(crate) use sealed::Sealed as View;
 mod sealed {
     use tutti_buffers::Float;
 
-    use super::{AnalyzeError, Chunk};
+    use super::{BindError, Chunk};
 
     /// Makes the view from a chunk; unnameable outside the crate.
     pub trait Sealed<'a, S: Float>: Sized {
-        fn view<'w: 'a>(chunk: &'a mut Chunk<'w, S>) -> Result<Self, AnalyzeError>;
+        fn view<'w: 'a>(chunk: &'a mut Chunk<'w, S>) -> Result<Self, BindError>;
     }
 }
 
 impl<'a, S: Float> AudioInput<'a, S> for Interleaved<'a, S> {}
 
 impl<'a, S: Float> sealed::Sealed<'a, S> for Interleaved<'a, S> {
-    fn view<'w: 'a>(chunk: &'a mut Chunk<'w, S>) -> Result<Self, AnalyzeError> {
+    fn view<'w: 'a>(chunk: &'a mut Chunk<'w, S>) -> Result<Self, BindError> {
         let layout = chunk.layout;
         match &chunk.held {
             Layout::Interleaved => Ok(Interleaved::new(&chunk.data, layout)?),
@@ -199,7 +218,7 @@ impl<'a, S: Float> sealed::Sealed<'a, S> for Interleaved<'a, S> {
 impl<'a, S: Float> AudioInput<'a, S> for Mono<'a, S> {}
 
 impl<'a, S: Float> sealed::Sealed<'a, S> for Mono<'a, S> {
-    fn view<'w: 'a>(chunk: &'a mut Chunk<'w, S>) -> Result<Self, AnalyzeError> {
+    fn view<'w: 'a>(chunk: &'a mut Chunk<'w, S>) -> Result<Self, BindError> {
         let layout = chunk.layout;
         if layout == ChannelLayout::MONO {
             return Ok(match &chunk.held {
@@ -226,10 +245,10 @@ impl<'a, S: Float> sealed::Sealed<'a, S> for Mono<'a, S> {
 impl<'a, S: Float> AudioInput<'a, S> for StereoPlanes<'a, S> {}
 
 impl<'a, S: Float> sealed::Sealed<'a, S> for StereoPlanes<'a, S> {
-    fn view<'w: 'a>(chunk: &'a mut Chunk<'w, S>) -> Result<Self, AnalyzeError> {
+    fn view<'w: 'a>(chunk: &'a mut Chunk<'w, S>) -> Result<Self, BindError> {
         let layout = chunk.layout;
         if layout != ChannelLayout::STEREO {
-            return Err(AnalyzeError::Width {
+            return Err(BindError::Width {
                 needs: ChannelLayout::STEREO,
                 found: layout,
             });

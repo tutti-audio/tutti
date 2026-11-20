@@ -157,7 +157,7 @@ impl<F: Float> Taps<'_, F> {
     /// # Errors
     ///
     /// [`AnalyzerError::Measure`] when the analysis cannot be bound to the
-    /// graph's rate and the tap's width, [`AnalyzerError::Layout`] when the
+    /// graph's rate and the tap's width, [`AnalyzerError::Bind`] when the
     /// tap's width has no view of the kind the meter takes, and
     /// [`AnalyzerError::MissingSource`] for a source that is not in the graph
     /// now. Nothing is opened on an error.
