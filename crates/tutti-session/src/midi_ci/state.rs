@@ -2,8 +2,9 @@
 //! got and set through the Property Exchange calls of its listed Resources.
 
 use tutti_midi_ci::{
-    CallError, MediaType, OpaqueBody, PeData, PeEncoding, PeResource, PeState, RequestRefused,
-    ResourceFailure, ResourceGet, ResourceSet, ResourceTarget, StateId,
+    CallError, MediaType, OpaqueBody, PeData, PeDataError, PeDataFault, PeEncoding, PeResource,
+    PeState, Place, RequestRefused, ResourceFailure, ResourceGet, ResourceSet, ResourceTarget,
+    StateId,
 };
 use tutti_midi_hardware::PropertyCall;
 
@@ -48,11 +49,13 @@ impl ListedPeer {
             listing(&resource.entry),
             InputRequest::Get,
             move |got: Result<PeData, PeerError<PeFailure>>| match got {
-                Ok(data) => data
-                    .into_state()
-                    .map_err(|e| {
+                Ok(data) => PeState::try_from(data)
+                    .map_err(|_| {
                         StateJobFailed::Device(PeerError::Refused(PeFailure::Unreadable(
-                            ResourceFailure::from(e),
+                            ResourceFailure::Data(PeDataError {
+                                place: Place::of("State"),
+                                fault: PeDataFault::WrongType("State"),
+                            }),
                         )))
                     })
                     .map(|state| match state.body() {

@@ -832,14 +832,12 @@ fn the_full_state_id_is_a_state_id_and_a_resource_id() {
     assert_eq!(StateId::FULL_STATE.resource_id().as_str(), "fullState");
 }
 
-/// The Property Data of State is a state; the data of another Resource is not.
+/// The Property Data of State converts to a state, and the data of another
+/// Resource comes back unchanged.
 #[test]
-fn only_the_data_of_state_is_a_state() {
+fn only_the_data_of_state_converts_to_a_state() {
     let state = PeState::octets(vec![1, 2]);
-    assert_eq!(PeData::State(state.clone()).into_state(), Ok(state));
-    assert!(
-        PeData::LocalOn(crate::PeLocalOn(true))
-            .into_state()
-            .is_err()
-    );
+    assert_eq!(PeState::try_from(PeData::State(state.clone())), Ok(state));
+    let other = PeData::LocalOn(crate::PeLocalOn(true));
+    assert_eq!(PeState::try_from(other.clone()), Err(other));
 }

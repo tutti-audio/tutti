@@ -414,18 +414,6 @@ impl PeState {
     }
 }
 
-impl PeData {
-    /// The state this Property Data is.
-    ///
-    /// # Errors
-    ///
-    /// [`PeDataError`] when it is the Property Data of another Resource.
-    pub fn into_state(self) -> Result<PeState, PeDataError> {
-        PeState::try_from(self)
-            .map_err(|_| PeDataError::new("State", PeDataFault::WrongType("State")))
-    }
-}
-
 /// The revision and time a device gives a state: the `stateRev` and `timestamp` of
 /// the header of a reply to Get State and to Set State (M2-111 §3.2, §3.3).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
