@@ -274,8 +274,11 @@ impl Catalog {
         }
     }
 
-    /// What a scan's probe does: measures if the catalog was told to, and lists
-    /// a file by its name when `plugin-probe` is missing.
+    /// What a scan's probe does. A catalog told to measure renders each plugin
+    /// ([`Probing::Measure`]), and a missing `plugin-probe` is a failure of that
+    /// file, recorded as nothing and retried. Otherwise it reads each descriptor
+    /// ([`Probing::Describe`]) and lists a file by its name when `plugin-probe` is
+    /// missing.
     fn scanning(&self) -> Probing {
         if self.config.measuring {
             Probing::Measure { state: None }

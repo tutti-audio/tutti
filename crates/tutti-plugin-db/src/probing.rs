@@ -149,4 +149,26 @@ mod tests {
         assert_eq!(failure.error, ProbeError::ProbeNotFound);
         assert!(!failure.blacklistable());
     }
+
+    /// **A measuring probe with no `plugin-probe` fails the file**: nothing else
+    /// can measure, so the file is neither listed by its name nor blacklisted,
+    /// while a describing probe with the fallback lists it.
+    #[test]
+    fn a_measuring_probe_without_a_probe_binary_fails_the_file() {
+        let config =
+            CatalogConfig::new("/pedal").probe_locator(Locator::at("/definitely/not/plugin-probe"));
+        let path = Path::new("/plugins/Plain.vst3");
+        let stop = StopToken::new();
+
+        let measuring = probe_fn(&config, Probing::Measure { state: None });
+        let failure = measuring(path, PluginFormat::Vst3, &stop)
+            .expect_err("a measurement is not answered with filename metadata");
+        assert_eq!(failure.error, ProbeError::ProbeNotFound);
+        assert!(!failure.blacklistable());
+
+        let describing = probe_fn(&config, Probing::Describe { fallback: true });
+        let listed = describing(path, PluginFormat::Vst3, &stop)
+            .expect("a describing scan lists the file by its name");
+        assert_eq!(listed.len(), 1);
+    }
 }
