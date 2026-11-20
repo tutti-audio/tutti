@@ -1,8 +1,7 @@
-//! The pool's jobs: the wait for every declared entry ([`PoolLoaded`]) and the
-//! files check ([`RefreshPool`]).
+//! The pool's jobs: the wait for every declared entry ([`PoolLoaded`]).
 
 use crate::job::job_kind;
-use crate::{PoolReport, RefreshReport, WaitError, WorkerError};
+use crate::{PoolReport, WaitError, WorkerError};
 
 /// Why a pool job ended without its result.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, thiserror::Error)]
@@ -22,11 +21,4 @@ job_kind! {
     /// no declared entry is pending, as a [`PoolReport`] of the keys of type
     /// `K`.
     pub PoolLoaded<K> => PoolReport<K>, PoolJobError
-}
-
-job_kind! {
-    /// The check of the files the pool's entries read
-    /// ([`Session::refresh_pool`](crate::Session::refresh_pool)): it lands a
-    /// [`RefreshReport`].
-    pub RefreshPool => RefreshReport, PoolJobError
 }

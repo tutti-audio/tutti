@@ -1,10 +1,13 @@
-//! Endpoints this process publishes for other applications to connect to.
+//! The endpoint this process publishes for other applications to connect to.
 //!
-//! A [`VirtualSource`] is an endpoint other applications read from: this
-//! process sends UMP into it. A [`VirtualDestination`] is one they write to:
-//! this process receives what they send. The two are different types, so
-//! receiving on a source and sending to a destination do not compile. Dropping
-//! either removes the endpoint from the system.
+//! A UMP Endpoint is bidirectional (M2-104 §7.1), and a [`VirtualEndpoint`] is
+//! one: other applications read what this process sends
+//! ([`send`](VirtualEndpoint::send), [`sender`](VirtualEndpoint::sender)) and
+//! write what this process receives, which is delivered into an
+//! [`InputProducerHandle`] exactly as a device input does, so its events are
+//! stamped on the same clock and reach the graph through the same inlets. The
+//! Function Blocks of the [`VirtualSpec`] declare which way each Group goes.
+//! Dropping the endpoint removes it from the system.
 //!
 //! An endpoint is described by a [`VirtualSpec`]: its name, its Device Identity and
 //! Product Instance Id, the UMP protocol it carries, and the Function Blocks it
@@ -14,32 +17,33 @@
 //! Blocks where the platform cannot publish them is
 //! [`MidiHardwareError::VirtualBlocksUnsupported`](crate::MidiHardwareError::VirtualBlocksUnsupported). The protocol is
 //! the exception, because a platform may carry the other one than asked for:
-//! [`VirtualSource::protocol`] and [`VirtualDestination::protocol`] report the
-//! one the endpoint was created with.
+//! [`VirtualEndpoint::protocol`] reports the one the endpoint was created with.
+//!
+//! # What each platform publishes
+//!
+//! - **Linux:** one sequencer client with one UMP Endpoint record and one port
+//!   that is readable and writable.
+//! - **macOS 15 and later, with Function Blocks:** one `MIDIUMPMutableEndpoint`,
+//!   which has a source and a destination, and the OS numbers the blocks itself
+//!   ([`VirtualEndpoint::blocks`] reads the numbers peers see).
+//! - **macOS without Function Blocks:** a source and a destination under one name,
+//!   which is what CoreMIDI offers for an endpoint with no blocks to declare (before
+//!   macOS 15 it is all CoreMIDI offers).
+//!
+//! On macOS a peer reads from the endpoint's source and writes to its destination;
+//! on Linux it subscribes to the one port in either direction.
 //!
 //! # Main thread
 //!
-//! Opening an endpoint takes a [`MainThreadMarker`], and a [`VirtualSource`] and a
-//! [`VirtualDestination`] are `!Send` and `!Sync` on every platform: macOS 15's UMP
-//! endpoint with Function Blocks is a main-thread object, and the traits an
-//! endpoint has do not differ by operating system. Other backends ignore the
-//! marker. What sends from another thread is a [`VirtualSender`]
-//! ([`VirtualSource::sender`]).
-//!
-//! On macOS an endpoint with Function Blocks is one UMP Endpoint, which has both a
-//! source and a destination: a [`VirtualSource`] has an inert destination whose
-//! messages it counts ([`VirtualSource::losses`]), and a [`VirtualDestination`] has
-//! an inert source it never sends on. The OS numbers the blocks itself
-//! ([`VirtualSource::blocks`] reads the numbers peers see).
-//!
-//! A destination delivers into an [`InputProducerHandle`], exactly as a device
-//! input does, so its events are stamped on the same clock and reach the graph
-//! through the same inlets.
+//! Opening an endpoint takes a [`MainThreadMarker`], and a [`VirtualEndpoint`] is
+//! `!Send` and `!Sync` on every platform: macOS 15's UMP endpoint with Function
+//! Blocks is a main-thread object, and the traits an endpoint has do not differ by
+//! operating system. Other backends ignore the marker. What sends from another
+//! thread is a [`VirtualSender`] ([`VirtualEndpoint::sender`]).
 
 use std::sync::{Arc, Mutex};
 use tutti_rt::LockExt;
 
-use tutti_graph::Losses;
 use tutti_midi_device::FunctionBlock;
 use tutti_midi_protocol::{Midi1Translator, Midi2Translator};
 use tutti_platform::{Executor, MainThreadMarker};
@@ -47,7 +51,6 @@ use tutti_ump::{DeviceIdentity, EndpointName, FunctionBlockId, Message, ProductI
 
 use crate::InputProducerHandle;
 use crate::backend;
-use crate::endpoints::InputConnection;
 use crate::error::Result;
 use crate::wire::translate_voice;
 
@@ -67,8 +70,8 @@ pub enum VirtualProtocol {
 /// optional Product Instance Id (§7.1.5) it is built with: an app gives the one it
 /// presents to the session ([`MidiSession::present`](crate::MidiSession::present))
 /// and the Id the session reports ([`MidiSession::instance_id`](crate::MidiSession::instance_id)),
-/// so other apps recognise the endpoint again. macOS publishes both with the
-/// endpoint's Function Blocks. The ALSA backend does not publish the identity yet.
+/// so other apps recognise the endpoint again. Both backends publish both: macOS
+/// with the endpoint's Function Blocks, ALSA in the endpoint's record.
 #[derive(Clone, Debug)]
 #[must_use = "a spec does nothing until an endpoint is opened from it"]
 pub struct VirtualSpec {
@@ -106,7 +109,7 @@ impl VirtualSpec {
 
     /// The endpoint declaring `block`, replacing a block of the same number. The
     /// number another application reads for the block is the platform's, which
-    /// [`VirtualSource::blocks`] and [`VirtualDestination::blocks`] report.
+    /// [`VirtualEndpoint::blocks`] reports.
     pub fn block(mut self, block: FunctionBlock) -> Self {
         self.blocks.retain(|held| held.id() != block.id());
         self.blocks.push(block);
@@ -123,7 +126,7 @@ impl VirtualSpec {
     #[must_use]
     #[allow(
         dead_code,
-        reason = "the macOS backend reads it; the ALSA backend does not publish the identity yet"
+        reason = "the ALSA and macOS backends read it; Windows has no virtual endpoint"
     )]
     pub(crate) fn device(&self) -> &DeviceIdentity {
         &self.device
@@ -133,7 +136,7 @@ impl VirtualSpec {
     #[must_use]
     #[allow(
         dead_code,
-        reason = "the macOS backend reads it; the ALSA backend does not publish the identity yet"
+        reason = "the ALSA and macOS backends read it; Windows has no virtual endpoint"
     )]
     pub(crate) fn instance(&self) -> Option<&ProductInstanceId> {
         self.instance.as_ref()
@@ -146,22 +149,17 @@ impl VirtualSpec {
     }
 }
 
-/// The platform's side of a [`VirtualSource`]: the endpoint itself, which stays
+/// The platform's side of a [`VirtualEndpoint`]: the endpoint itself, which stays
 /// on the thread that opened it.
-pub(crate) trait SourceBackend {
+pub(crate) trait EndpointBackend {
     /// What sends on the endpoint from any thread. It does not keep the endpoint
     /// alive: once the endpoint is dropped a send is
     /// [`MidiHardwareError::EndpointGone`](crate::MidiHardwareError::EndpointGone).
-    /// A send never reaches the OS after the endpoint is gone, and the drop waits for
-    /// a send in flight.
+    /// The drop waits for a send in flight, and no send reaches the OS after it.
     fn sender(&self) -> Arc<dyn SenderBackend>;
 
-    /// What the endpoint dropped: the messages written to a destination that
-    /// the OS lists beside a source it publishes with Function Blocks. Nothing for
-    /// a backend with no such destination.
-    fn losses(&self) -> Losses {
-        Losses::NONE
-    }
+    /// Whether the endpoint is still delivering what peers write to it.
+    fn is_alive(&self) -> bool;
 
     /// The numbers the OS gave the blocks, indexed by the number the spec gave each,
     /// when it numbers them itself; `None` when it publishes the spec's own.
@@ -170,21 +168,12 @@ pub(crate) trait SourceBackend {
     }
 }
 
-/// The platform's send on a [`VirtualSource`], from any thread.
+/// The platform's send on a [`VirtualEndpoint`], from any thread.
 pub(crate) trait SenderBackend: Send + Sync {
-    /// Publishes one UMP message to the endpoint's subscribers.
+    /// Publishes one UMP message to the endpoint's subscribers. Never called
+    /// from the endpoint's own receive callback: a send holds the endpoint's
+    /// live lock, which its drop waits on.
     fn send(&self, ump: &Ump) -> Result<()>;
-}
-
-/// The platform's side of a [`VirtualDestination`]: the endpoint itself.
-pub(crate) trait DestinationBackend {
-    /// Whether the endpoint is still delivering.
-    fn is_alive(&self) -> bool;
-
-    /// As [`SourceBackend::block_numbers`].
-    fn block_numbers(&self) -> Option<&[FunctionBlockId]> {
-        None
-    }
 }
 
 /// The numbers other applications read for `spec`'s blocks, in the order the spec
@@ -199,13 +188,7 @@ fn published_numbers(spec: &VirtualSpec, os: Option<&[FunctionBlockId]>) -> Vec<
         .collect()
 }
 
-impl<T: InputConnection> DestinationBackend for T {
-    fn is_alive(&self) -> bool {
-        InputConnection::is_alive(self)
-    }
-}
-
-/// How a source brings a message to its protocol.
+/// How an endpoint brings a message to its protocol.
 enum Conversion {
     /// A MIDI 1.0 endpoint: MIDI 2.0 voice messages translate through the one
     /// [`Midi1Translator`] of the endpoint's life (M2-104 Appendix D.2).
@@ -216,7 +199,7 @@ enum Conversion {
     ToMidi2(Box<Mutex<Midi2Translator>>),
 }
 
-/// What a source and its senders share: the platform's send and the narrowing
+/// What an endpoint and its senders share: the platform's send and the narrowing
 /// state of the endpoint's life.
 struct Outbound {
     sender: Arc<dyn SenderBackend>,
@@ -262,18 +245,19 @@ impl Outbound {
     }
 }
 
-/// An endpoint other applications read from.
+/// The endpoint this process publishes: other applications read what it sends and
+/// write what it receives.
 ///
 /// `!Send` and `!Sync` on every platform (see the module docs): it stays on the
 /// thread that opened it, and [`sender`](Self::sender) is what sends from another.
 ///
 /// ```compile_fail,E0277
 /// fn crosses_threads<T: Send>() {}
-/// crosses_threads::<tutti_midi_hardware::VirtualSource>();
+/// crosses_threads::<tutti_midi_hardware::VirtualEndpoint>();
 /// ```
 #[must_use = "dropping it removes the endpoint"]
-pub struct VirtualSource {
-    backend: Box<dyn SourceBackend>,
+pub struct VirtualEndpoint {
+    backend: Box<dyn EndpointBackend>,
     outbound: Arc<Outbound>,
     name: EndpointName,
     protocol: VirtualProtocol,
@@ -281,24 +265,20 @@ pub struct VirtualSource {
     _main: MainThreadMarker,
 }
 
-impl core::fmt::Debug for VirtualSource {
+impl core::fmt::Debug for VirtualEndpoint {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("VirtualSource")
+        f.debug_struct("VirtualEndpoint")
             .field("name", &self.name.as_str())
             .field("protocol", &self.protocol)
             .finish_non_exhaustive()
     }
 }
 
-impl VirtualSource {
-    /// Publishes the endpoint `spec` describes. `main` proves the caller is on the
-    /// main thread, where macOS requires an endpoint with Function Blocks to be
-    /// made and dropped.
-    ///
-    /// On macOS an endpoint with Function Blocks is a UMP Endpoint, which has a
-    /// destination as well as a source; the OS lists a destination of the spec's
-    /// name, and what is written to it is dropped and counted
-    /// ([`losses`](Self::losses)).
+impl VirtualEndpoint {
+    /// Publishes the endpoint `spec` describes, delivering what peers write to it
+    /// into `producer`; a backend that reads on a thread of its own starts it on
+    /// `executor`. `main` proves the caller is on the main thread, where macOS
+    /// requires an endpoint with Function Blocks to be made and dropped.
     ///
     /// # Errors
     ///
@@ -306,8 +286,13 @@ impl VirtualSource {
     /// backend, [`MidiHardwareError::VirtualBlocksUnsupported`](crate::MidiHardwareError::VirtualBlocksUnsupported)
     /// when `spec` declares Function Blocks the platform cannot publish, and the
     /// platform's own error when the OS refuses the endpoint.
-    pub fn open(spec: &VirtualSpec, main: MainThreadMarker) -> Result<Self> {
-        let (backend, protocol) = backend::open_virtual_source(spec, main)?;
+    pub fn open(
+        executor: &Executor,
+        spec: &VirtualSpec,
+        producer: InputProducerHandle,
+        main: MainThreadMarker,
+    ) -> Result<Self> {
+        let (backend, protocol) = backend::open_virtual_endpoint(executor, spec, producer, main)?;
         let conversion = match protocol {
             VirtualProtocol::Midi1 => {
                 Conversion::ToMidi1(Box::new(Mutex::new(Midi1Translator::new())))
@@ -361,21 +346,19 @@ impl VirtualSource {
     }
 
     /// A handle that sends as [`send`](Self::send) does from any thread. It does
-    /// not keep the endpoint alive: after the source is dropped its sends are
-    /// [`MidiHardwareError::EndpointGone`](crate::MidiHardwareError::EndpointGone),
-    /// and none reaches the OS after the drop (the drop waits for a send in flight).
+    /// not keep the endpoint alive: after the endpoint is dropped its sends are
+    /// [`MidiHardwareError::EndpointGone`](crate::MidiHardwareError::EndpointGone).
     pub fn sender(&self) -> VirtualSender {
         VirtualSender {
             outbound: Arc::clone(&self.outbound),
         }
     }
 
-    /// What the endpoint dropped: the messages written to the destination the OS
-    /// lists beside a source with Function Blocks on macOS, counted `refused`.
-    /// Nothing on other platforms.
+    /// Whether the endpoint is still delivering: `false` once its reader ended
+    /// on an error, while the endpoint is still published.
     #[must_use]
-    pub fn losses(&self) -> Losses {
-        self.backend.losses()
+    pub fn is_alive(&self) -> bool {
+        self.backend.is_alive()
     }
 
     /// The numbers other applications read for the spec's Function Blocks, in the
@@ -400,7 +383,7 @@ impl VirtualSource {
     }
 }
 
-/// A [`VirtualSource`]'s send, from any thread.
+/// A [`VirtualEndpoint`]'s send, from any thread.
 ///
 /// ```
 /// fn crosses_threads<T: Clone + Send + Sync>() {}
@@ -418,99 +401,15 @@ impl core::fmt::Debug for VirtualSender {
 }
 
 impl VirtualSender {
-    /// As [`VirtualSource::send`].
+    /// As [`VirtualEndpoint::send`].
     ///
     /// # Errors
     ///
-    /// As [`VirtualSource::send`], and
+    /// As [`VirtualEndpoint::send`], and
     /// [`MidiHardwareError::EndpointGone`](crate::MidiHardwareError::EndpointGone)
-    /// once the source is dropped.
+    /// once the endpoint is dropped.
     pub fn send(&self, ump: Ump) -> Result<()> {
         self.outbound.send(ump)
-    }
-}
-
-/// An endpoint other applications write to; what they send is delivered to the
-/// [`InputProducerHandle`] it was opened with.
-///
-/// `!Send` and `!Sync` on every platform (see the module docs).
-///
-/// On macOS a destination with Function Blocks is a UMP Endpoint, which has a source
-/// as well as a destination; the OS lists a source of the spec's name, and nothing
-/// is ever sent on it.
-///
-/// ```compile_fail,E0277
-/// fn crosses_threads<T: Send>() {}
-/// crosses_threads::<tutti_midi_hardware::VirtualDestination>();
-/// ```
-#[must_use = "dropping it removes the endpoint"]
-pub struct VirtualDestination {
-    connection: Box<dyn DestinationBackend>,
-    name: EndpointName,
-    protocol: VirtualProtocol,
-    blocks: Vec<FunctionBlockId>,
-    _main: MainThreadMarker,
-}
-
-impl core::fmt::Debug for VirtualDestination {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("VirtualDestination")
-            .field("name", &self.name.as_str())
-            .field("protocol", &self.protocol)
-            .finish_non_exhaustive()
-    }
-}
-
-impl VirtualDestination {
-    /// Publishes the endpoint `spec` describes, delivering into `producer`; a
-    /// backend that reads on a thread of its own starts it on `executor`. `main`
-    /// proves the caller is on the main thread.
-    ///
-    /// # Errors
-    ///
-    /// As [`VirtualSource::open`].
-    pub fn open(
-        executor: &Executor,
-        spec: &VirtualSpec,
-        producer: InputProducerHandle,
-        main: MainThreadMarker,
-    ) -> Result<Self> {
-        let (connection, protocol) =
-            backend::open_virtual_destination(executor, spec, producer, main)?;
-        let blocks = published_numbers(spec, connection.block_numbers());
-        Ok(Self {
-            connection,
-            name: spec.name,
-            protocol,
-            blocks,
-            _main: main,
-        })
-    }
-
-    /// The numbers other applications read for the spec's Function Blocks, as
-    /// [`VirtualSource::blocks`].
-    #[must_use]
-    pub fn blocks(&self) -> &[FunctionBlockId] {
-        &self.blocks
-    }
-
-    /// Whether the endpoint is still delivering: `false` once its reader ended
-    /// on an error, while the endpoint is still published.
-    #[must_use]
-    pub fn is_alive(&self) -> bool {
-        self.connection.is_alive()
-    }
-
-    /// The endpoint's name.
-    #[must_use]
-    pub fn name(&self) -> &EndpointName {
-        &self.name
-    }
-
-    /// The protocol the endpoint was created with.
-    #[must_use]
-    pub fn protocol(&self) -> VirtualProtocol {
-        self.protocol
     }
 }
 

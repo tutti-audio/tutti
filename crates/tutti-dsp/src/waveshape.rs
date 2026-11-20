@@ -1,5 +1,5 @@
 //! Memoryless waveshaping curves ([`ShapeKind`]): `Tanh`, `Atan`, `Softsign`,
-//! `HardClip`, `Crush` and `SoftCrush`, each one line of arithmetic, and the
+//! `HardClip`, `TriangleFold`, `Crush` and `SoftCrush`, each a few lines of arithmetic, and the
 //! [`WaveshaperBank`] that runs one over a block.
 //!
 //! A bank's drive is a [`Ramp`] over [`GAIN_RAMP`], or a control signal read per frame where a port drives
@@ -33,6 +33,11 @@ pub enum ShapeKind {
     Softsign,
     /// Hard clip to ±1.
     HardClip,
+    /// The triangle fold (a wavefolder): the input, at the drive, reflected back into `-1..=1`
+    /// at each edge instead of stopping there, so it is the identity inside `-1..=1`, `2 - x`
+    /// from 1 to 3, `x - 4` from 3 to 5, and so on with a period of 4. Unlike the clip it
+    /// stays in range by turning, so a driven signal gains harmonics as it folds.
+    TriangleFold,
     /// Bitcrush-style staircase quantization.
     Crush,
     /// Smoothed staircase quantization.
@@ -59,6 +64,10 @@ macro_rules! with_kind {
             }
             ShapeKind::HardClip => {
                 const $k: ShapeKind = ShapeKind::HardClip;
+                $body
+            }
+            ShapeKind::TriangleFold => {
+                const $k: ShapeKind = ShapeKind::TriangleFold;
                 $body
             }
             ShapeKind::Crush => {
@@ -118,6 +127,7 @@ impl ShapeKind {
                 y / (one + y.abs())
             }
             Self::HardClip => (x * hardness).clamp(-one, one),
+            Self::TriangleFold => triangle_fold(x * hardness),
             Self::Crush => (x * hardness).round() / hardness,
             Self::SoftCrush => {
                 let y = x * hardness;
@@ -149,6 +159,30 @@ impl ShapeKind {
     }
 }
 
+/// `u` reduced by whole periods of the triangle fold to `-2..=2`: `u - 4 round(u / 4)`, exact
+/// (each step is a power-of-two scaling, a rounding to a whole number, or a subtraction of two
+/// floats within a factor of two). A `u` past the float's range reads as its end, so a finite
+/// input never makes a non-finite fold.
+#[inline(always)]
+fn fold_phase<F: Float>(u: F) -> F {
+    let u = u.clamp(-F::MAX * F::lit(0.25), F::MAX * F::lit(0.25));
+    u - F::lit(4.0) * (u * F::lit(0.25)).round()
+}
+
+/// The triangle fold of `u`: the triangle wave of period 4 and amplitude 1 that is `u` on
+/// `-1..=1`, `2 - u` on `1..=3`, and odd (`2 / pi asin(sin(pi u / 2))`).
+#[inline(always)]
+fn triangle_fold<F: Float>(u: F) -> F {
+    let (w, one) = (fold_phase(u), F::ONE);
+    if w > one {
+        F::lit(2.0) - w
+    } else if w < -one {
+        F::lit(-2.0) - w
+    } else {
+        w
+    }
+}
+
 /// The ninth-order smoothstep: `0 → 0`, `1 → 1`, with the first four
 /// derivatives zero at both ends, so each [`ShapeKind::SoftCrush`] step is a
 /// smooth S rather than a jump. The coefficients are exact in both widths.
@@ -170,6 +204,10 @@ fn smooth9<F: Float>(x: F) -> F {
 ///
 /// **Second-order** ADAA, from `x`, `x'` and `x''`, with `D(p, q) = (F2(p) - F2(q)) / (p - q)`,
 /// outputs `2 (D(x, x') - D(x', x'')) / (x - x'')`.
+///
+/// The triangle fold's quotient is the two linear pieces' mean where the segment holds a kink
+/// (at an odd integer) and is under 1 long, and the periodic antiderivative's difference over a
+/// gap of at least 1, so it needs no guard.
 ///
 /// Each quotient is written as differences that do not cancel (`x - x'`, `|x| - |x'|`,
 /// `clamp(x) - clamp(x')`, `ln_1p` of a ratio of differences, the hard clip's second order as

@@ -24,6 +24,7 @@ use crate::plan::{Op, Plan};
 use crate::play::PlayClock;
 use crate::rtlog::LogLane;
 use crate::slots::{EventSlots, SlotFlags};
+use tutti_music::MeterMap;
 
 /// After a block in which a crossfade reached its end: retire each ended
 /// fade's outgoing unit into the commit that started it, and start the fade
@@ -120,7 +121,7 @@ impl<F: Float> Executor<F> {
     ) {
         with_no_denormals(|| {
             self.apply_pending();
-            self.render_applied(frames, transport, changes, inputs, outputs);
+            self.render_applied(frames, transport, changes, inputs, outputs, None);
         });
     }
 
@@ -143,6 +144,10 @@ impl<F: Float> Executor<F> {
     /// in release the block renders silence into what was given, running no
     /// node.
     ///
+    /// `meter` is the project's meter for this block, lent by the host once
+    /// for the block and handed to every node through [`Cx::meter`](crate::Cx#structfield.meter) (serial or
+    /// on a pool); `None` where the host has none.
+    ///
     /// # Panics
     ///
     /// As [`process_with_changes`](Self::process_with_changes).
@@ -153,6 +158,7 @@ impl<F: Float> Executor<F> {
         changes: &TransportChanges,
         inputs: &[&[F]],
         outputs: &mut [&mut [F]],
+        meter: Option<&MeterMap>,
     ) {
         let _rt = RtScope::enter();
         // `move` captures `self` as one pointer; the precise capture of every
@@ -343,6 +349,7 @@ impl<F: Float> Executor<F> {
                         plan,
                         env: &env,
                         history,
+                        meter,
                         frames,
                         max,
                         cap,
@@ -468,6 +475,7 @@ impl<F: Float> Executor<F> {
                                 cap,
                                 env: &env,
                                 history,
+                                meter,
                             };
                             st.at = unit as usize;
                             fade_ended |= node_dispatch(u, &head, &mut st);

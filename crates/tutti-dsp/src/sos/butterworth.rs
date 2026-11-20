@@ -6,17 +6,21 @@ use core::f64::consts::PI;
 use tutti_units::{Db, Hz, Q, SampleRate};
 
 use super::Sos;
+use super::analog::{Poles, Stage, push_stage};
+use crate::Complex64;
 use crate::design::prewarp;
-use crate::{Biquad, Complex64};
 
 tutti_units::ranged! {
-    /// The order of a Butterworth filter, `1..=16`: `6 * order` dB per octave, up to 96. A
-    /// [`LinkwitzRiley`] filter of this order halves has twice it.
+    /// The order of a Butterworth, Chebyshev or elliptic filter, `1..=16`: `6 * order` dB per
+    /// octave of asymptotic slope, up to 96. A [`LinkwitzRiley`] filter of this order halves
+    /// has twice it.
     ButterworthOrder(u8), ButterworthOrderError, "an order within 1..=16",
     |raw| raw >= 1 && raw <= 16
 }
 
-/// What a [`Butterworth`] or [`LinkwitzRiley`] passes.
+/// What a [`Butterworth`], [`ChebyshevI`](super::ChebyshevI), [`ChebyshevII`](super::ChebyshevII),
+/// [`Elliptic`](super::Elliptic) or [`LinkwitzRiley`]
+/// passes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum CutResponse {
@@ -74,6 +78,15 @@ pub(super) fn check_gain(gain: Db) -> Result<Db, SosError> {
         Ok(gain)
     } else {
         Err(SosError::GainOutOfRange { gain })
+    }
+}
+
+/// `q` when it is finite and above 0.
+pub(super) fn check_q(q: Q) -> Result<Q, SosError> {
+    if q.get().is_finite() && q.get() > 0.0 {
+        Ok(q)
+    } else {
+        Err(SosError::QOutOfRange { q })
     }
 }
 
@@ -185,11 +198,8 @@ impl LinkwitzRiley {
 
 /// The sections of a Butterworth filter of `order`, each `repeats` times, into `into`.
 ///
-/// The analog poles are `exp(j pi (2m + N + 1) / 2N)` on the unit circle; the cutoff `g =
-/// tan(pi fc / fs)` scales them (low-pass `s = g p`, high-pass `s = g / p`) and the bilinear
-/// map `z = (1 + s) / (1 - s)` takes them to the plane. A conjugate pair is the section
-/// `1 + a1 z^-1 + a2 z^-2` with `a1 = -2 Re z`, `a2 = |z|^2`, over the zeros at `-1`
-/// (low-pass) or `1` scaled to a gain of 1 at DC or Nyquist.
+/// The analog poles are `exp(j pi (2m + N + 1) / 2N)` on the unit circle, each stage of unit
+/// DC gain and with its zeros at infinity; [`push_stage`] takes them to the plane.
 fn cascade(
     response: CutResponse,
     order: u8,
@@ -198,49 +208,34 @@ fn cascade(
     rate: SampleRate,
     into: &mut Sos,
 ) -> Result<(), SosError> {
-    let fc = check_cutoff(cutoff, rate)?;
-    let g = prewarp(fc, rate);
+    let g = prewarp(check_cutoff(cutoff, rate)?, rate);
     let n = usize::from(order);
-    let section = |a1: f64, a2: f64, first: bool| {
-        let (gain, sign) = match response {
-            CutResponse::LowPass => ((1.0 + a1 + a2) / if first { 2.0 } else { 4.0 }, 1.0),
-            CutResponse::HighPass => ((1.0 - a1 + a2) / if first { 2.0 } else { 4.0 }, -1.0),
-        };
-        if first {
-            // The first-order sections have a2 = 0: gain = (1 +- a1) / 2.
-            Biquad {
-                b0: gain,
-                b1: sign * gain,
-                b2: 0.0,
-                a1,
-                a2: 0.0,
-            }
-        } else {
-            Biquad {
-                b0: gain,
-                b1: sign * 2.0 * gain,
-                b2: gain,
-                a1,
-                a2,
-            }
-        }
-    };
     into.rate = rate;
     into.sections.clear();
-    let mut push = |b: Biquad| (0..repeats).for_each(|_| into.sections.push(b));
+    let mut push = |poles: Poles| {
+        let at = into.sections.len();
+        push_stage(
+            into,
+            response,
+            g,
+            Stage {
+                poles,
+                zero: None,
+                dc: 1.0,
+            },
+        );
+        let stage = into.sections[at];
+        (1..repeats).for_each(|_| into.sections.push(stage));
+    };
     if n % 2 == 1 {
-        // The pole at -1, mapped to z = (1 - g) / (1 + g) either way.
-        push(section(-(1.0 - g) / (1.0 + g), 0.0, true));
+        push(Poles::Real(-1.0));
     }
     for m in (0..n / 2).rev() {
         let theta = PI * (2 * m + 1) as f64 / (2 * n) as f64;
-        let p = Complex64::new(-libm::sin(theta), libm::cos(theta));
-        let s = match response {
-            CutResponse::LowPass => p * g,
-            CutResponse::HighPass => Complex64::new(g, 0.0) / p,
-        };
-        let z = (1.0 + s) / (1.0 - s);
-        push(section(-2.0 * z.re, z.norm_sqr(), false));
+        push(Poles::Pair(Complex64::new(
+            -libm::sin(theta),
+            libm::cos(theta),
+        )));
     }
     Ok(())
 }

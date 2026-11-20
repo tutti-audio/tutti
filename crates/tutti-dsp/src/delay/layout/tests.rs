@@ -1,6 +1,8 @@
 use tutti_buffers::BusTopology;
 use tutti_units::{Amplitude, Gain, SampleRate, Samples, Seconds};
 
+use tutti_music::{NoteDuration, NoteValue};
+
 use super::*;
 use crate::MaxDelayError;
 use crate::delay::times::ChannelTimesError;
@@ -8,7 +10,7 @@ use crate::delay::times::ChannelTimesError;
 const MAX: MaxDelay = MaxDelay::of(Seconds::new(1.0));
 
 fn bus(width: u16) -> BusTopology {
-    BusTopology::assumed(width.into()).expect("a test width is one bus")
+    BusTopology::default_for(width.into()).expect("a test width is one bus")
 }
 
 /// A stereo delay: the default swap routing, the channels linked in time.
@@ -215,7 +217,11 @@ fn a_layout_takes_a_routing_for_its_own_bus_and_defaults_by_its_width() {
     for w in [1u16, 3, 6] {
         let f = DelayLayout::new(bus(w), MAX, InterpolationMode::Linear);
         assert!(f.routing().is_none(), "width {w}");
-        assert!(f.times().is_linked(), "width {w}");
+        assert_eq!(
+            f.timing(),
+            &DelayTiming::Free(ChannelTimes::linked()),
+            "width {w}"
+        );
     }
     // The stereo default is the swap whatever the interpolation or maximum.
     let f = DelayLayout::new(
@@ -276,5 +282,55 @@ fn channel_times_refuse_what_is_not_a_time_and_what_does_not_fit() {
             .build()
             .is_ok(),
         "the longest is held"
+    );
+}
+
+/// A delay's times are seconds or notes, the last the builder is told: `synced` after `times`
+/// is synced and `times` after `synced` is in seconds, so no layout holds both.
+#[test]
+fn a_layout_is_timed_by_seconds_or_by_notes_never_both() {
+    let notes = NoteTimes::all(NoteDuration::QUARTER);
+    let seconds = ChannelTimes::try_from(&[Seconds::new(0.5)][..]).unwrap();
+    let synced = stereo_builder()
+        .times(seconds)
+        .synced(notes)
+        .build()
+        .unwrap();
+    assert_eq!(synced.timing(), &DelayTiming::Synced(notes));
+    let free = stereo_builder()
+        .synced(notes)
+        .times(seconds)
+        .build()
+        .unwrap();
+    assert_eq!(free.timing(), &DelayTiming::Free(seconds));
+}
+
+/// Notes are for every channel or one for each: a different count is refused at the width it
+/// misses, and no notes at all, or more than a bus, never make a `NoteTimes`.
+#[test]
+fn note_times_fit_the_width_they_are_built_for() {
+    let eighth = NoteDuration::from(NoteValue::EIGHTH);
+    let two = NoteTimes::try_from(&[NoteDuration::QUARTER, eighth][..]).unwrap();
+    assert!(stereo_builder().synced(two).build().is_ok());
+    assert!(
+        stereo_builder()
+            .synced(NoteTimes::all(eighth))
+            .build()
+            .is_ok()
+    );
+    assert_eq!(
+        DelayLayout::builder(bus(3), MAX, InterpolationMode::Linear)
+            .synced(two)
+            .build()
+            .unwrap_err(),
+        DelayLayoutError::Notes(NoteTimesError::Length { width: 3, got: 2 })
+    );
+    assert_eq!(
+        NoteTimes::try_from(&[][..]).unwrap_err(),
+        NoteTimesError::Empty
+    );
+    assert_eq!(
+        NoteTimes::try_from(&[eighth; 17][..]).unwrap_err(),
+        NoteTimesError::TooMany { count: 17, max: 16 }
     );
 }

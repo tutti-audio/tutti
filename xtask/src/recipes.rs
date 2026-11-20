@@ -41,6 +41,9 @@ pub(crate) enum Step {
     RequireLlvmCov,
     /// `deny`'s probe: fails with the install hint when cargo-deny is missing.
     RequireCargoDeny,
+    /// `test-wasm`'s probe: fails when `wasm-bindgen-test-runner` is not at the
+    /// version `Cargo.lock` pins for `wasm-bindgen`.
+    RequireWasmRunner,
     /// The release edits (`release.rs`): the workspace version, the path
     /// dependency pins and the changelog section.
     Release(Version),
@@ -84,6 +87,10 @@ impl Step {
             }
             Step::RequireCargoDeny => {
                 "cargo deny --version || fail (cargo install cargo-deny --version 0.20.2 --locked)"
+                    .to_owned()
+            }
+            Step::RequireWasmRunner => {
+                "wasm-bindgen-test-runner --version == Cargo.lock's wasm-bindgen, or fail"
                     .to_owned()
             }
             Step::UmbrellaApi(dir) => format!(
@@ -133,9 +140,14 @@ pub(crate) const RECIPES: &[(&str, &str, &str)] = &[
         "the release-profile suites of the lock-free crates",
     ),
     (
+        "test-wasm",
+        "",
+        "run the web suite under node (needs node, `wasm-bindgen-cli` at Cargo.lock's version)",
+    ),
+    (
         "test-all",
         "",
-        "test, test-features, test-doc, test-release",
+        "test, test-features, test-doc, test-release, test-wasm",
     ),
     (
         "check-features",
@@ -609,9 +621,15 @@ impl Planner<'_> {
                 "cargo nextest run --locked --release -p tutti-units -p tutti-rt -p tutti-graph",
             ]),
             "test-all" => {
-                for d in ["test", "test-features", "test-doc", "test-release"] {
+                for d in ["test", "test-features", "test-doc", "test-release", "test-wasm"] {
                     self.dep(d)?;
                 }
+            }
+            "test-wasm" => {
+                self.out.push(Step::RequireWasmRunner);
+                self.lines(&[
+                    "cargo test --locked --target wasm32-unknown-unknown -p tutti-web-test",
+                ]);
             }
             "check-features" => self.lines(CHECK_FEATURES),
             "test-features" => self.lines(TEST_FEATURES),
@@ -775,7 +793,7 @@ impl Planner<'_> {
             ]),
             "check-wasm" => self.lines(&[
                 "cargo clippy --locked --target wasm32-unknown-unknown -p tutti-platform -p tutti-rt -p tutti --lib -- -D warnings",
-                "cargo clippy --locked --target wasm32-unknown-unknown -p tutti --lib --features sampler,soundfont,synth,analyze,decode-wav,decode-flac,decode-mp3,decode-ogg,encode-wav,encode-aiff,export,record,midi -- -D warnings",
+                "cargo clippy --locked --target wasm32-unknown-unknown -p tutti --lib --features sampler,soundfont,synth,analyze,decode-wav,decode-flac,decode-mp3,decode-ogg,encode-wav,encode-flac,encode-aiff,export,record,midi -- -D warnings",
             ]),
             "book" => {
                 let [out] = Self::params(name, args, [""])?;
@@ -865,7 +883,7 @@ impl Planner<'_> {
                     "gates", "lint", "deny", "check-conformance",
                     "check-features", "package",
                     "check-no-std", "check-loom", "check-wasm", "test", "test-features", "test-doc",
-                    "test-release", "doc",
+                    "test-release", "test-wasm", "doc",
                 ] {
                     self.dep(d)?;
                 }
@@ -908,7 +926,7 @@ impl Planner<'_> {
         for a in [
             "-p tutti-shared-plugin --all-targets",
             "-p tutti-export --lib",
-            "-p tutti-codec --features encode-wav,encode-aiff,encode-flac,decode-wav,decode-flac,decode-mp3,decode-ogg,serde --all-targets",
+            "-p tutti-codec --features encode-wav,encode-aiff,encode-flac,decode-wav,decode-flac,decode-mp3,decode-ogg --all-targets",
             "-p tutti-plugin -p tutti-plugin-types --features tutti-plugin/clap,tutti-plugin/vst3,tutti-plugin/vst2,tutti-plugin/serde --all-targets",
             "-p tutti-plugin-db --features serde --all-targets",
             "-p tutti-vst2-host --all-targets",
@@ -1006,3 +1024,30 @@ const BENCH: &[&str] = &[
 
 #[cfg(test)]
 mod tests;
+
+/// The `version` of the package `name` in a `Cargo.lock` text, if it has one.
+pub(crate) fn locked_version(lock: &str, name: &str) -> Option<String> {
+    let mut lines = lock.lines();
+    while let Some(line) = lines.next() {
+        if line.trim() == format!("name = \"{name}\"") {
+            let version = lines.next()?.trim().strip_prefix("version = ")?;
+            return Some(version.trim_matches('"').to_owned());
+        }
+    }
+    None
+}
+
+/// Whether the runner's `--version` output (`wasm-bindgen-test-runner 0.2.130`) names
+/// the `wasm-bindgen` version `Cargo.lock` holds; the error is the message to print.
+pub(crate) fn check_wasm_runner(lock: &str, runner_output: &str) -> Result<(), String> {
+    let locked = locked_version(lock, "wasm-bindgen")
+        .ok_or("Cargo.lock has no wasm-bindgen package".to_owned())?;
+    let found = runner_output.split_whitespace().last().unwrap_or_default();
+    if found == locked {
+        Ok(())
+    } else {
+        Err(format!(
+            "wasm-bindgen-test-runner {found} does not match Cargo.lock's wasm-bindgen {locked}: install it with cargo install --locked wasm-bindgen-cli --version {locked}"
+        ))
+    }
+}

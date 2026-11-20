@@ -6,6 +6,7 @@
 static A: assert_no_alloc::AllocDisabler = assert_no_alloc::AllocDisabler;
 
 mod block_dates;
+mod build_frame;
 mod bus_edges;
 mod compensation;
 mod connect;

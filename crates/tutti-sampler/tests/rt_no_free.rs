@@ -154,7 +154,7 @@ fn stream() -> (
     write_wav(&path);
     let mut streamer =
         DiskStreamer::manual(SampleRate::SR_48K, Default::default()).expect("builds");
-    let opening = streamer.open(&path, StreamStart::HEAD);
+    let opening = streamer.open_stream(&path, StreamStart::HEAD);
     let (stream, reader) = wait_for_open(&mut streamer, opening).expect("the file opens");
     (dir, streamer, stream, reader)
 }

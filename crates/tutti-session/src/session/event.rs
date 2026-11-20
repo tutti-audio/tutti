@@ -208,10 +208,6 @@ pub enum SessionEvent {
     /// See [`MidiReport`](crate::MidiReport).
     #[cfg(feature = "midi")]
     Midi(crate::MidiReport),
-    /// A stream an [`open_stream`](crate::Session::open_stream) started opened or
-    /// failed to. See [`SamplerEvent`](crate::SamplerEvent).
-    #[cfg(feature = "sampler")]
-    Sampler(crate::SamplerEvent),
     /// A hosted plugin's event, by area: what the plugin reported (its own edit of a parameter, a
     /// new tail) and every transition of its life (died, reloading, recovered,
     /// gave up). See [`PluginEvent`](crate::PluginEvent).

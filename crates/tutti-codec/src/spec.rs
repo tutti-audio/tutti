@@ -13,10 +13,7 @@ use tutti_units::SampleRate;
 /// [`layout`](Self::layout) is its length, so the two cannot disagree. The fields
 /// are private (a [`new`](Self::new) and getters), and the format carries its own
 /// settings, so nothing here is read by a format that cannot use it, except the
-/// topology, which WAV (the speaker mask) and Ogg Vorbis (the channel order) read.
-/// WAV writes the samples as given. Ogg Vorbis permutes 3 to 8 channels into the
-/// order its specification fixes for the width, and refuses a width whose
-/// speakers it cannot place (see `VorbisWriter`); the other formats ignore it.
+/// topology, which WAV (the speaker mask) reads; the other formats ignore it.
 ///
 /// A spec has no width of its own to disagree with its topology, and its
 /// fields are not written outside the crate:
@@ -52,12 +49,12 @@ impl Spec {
     }
 
     /// A file of `layout` at `rate` whose speakers are what a bare width is
-    /// taken to mean ([`ChannelTopology::assumed`]: mono, stereo, quad, 5.1, 7.1
+    /// taken to mean ([`ChannelTopology::default_for`]: mono, stereo, quad, 5.1, 7.1
     /// and 7.1.4 named, unassigned channels for every other width). A caller
     /// that knows better passes its own topology to [`new`](Self::new).
     #[must_use]
     pub fn of_width(format: Format, layout: ChannelLayout, rate: SampleRate) -> Self {
-        Self::new(format, ChannelTopology::assumed(layout), rate)
+        Self::new(format, ChannelTopology::default_for(layout), rate)
     }
 
     /// The container and its settings.
@@ -66,8 +63,7 @@ impl Spec {
         self.format
     }
 
-    /// Which speaker each file channel feeds, for the WAV speaker mask and Ogg
-    /// Vorbis's channel order.
+    /// Which speaker each file channel feeds, for the WAV speaker mask.
     #[must_use]
     pub fn topology(&self) -> &ChannelTopology {
         &self.topology

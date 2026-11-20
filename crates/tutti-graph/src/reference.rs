@@ -106,7 +106,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use crate::MAX_NODE_LATENCY;
 use crate::NodeKey;
 use crate::lane::fade_gains;
-use crate::{Edge, EdgeId, InPort, OutPort, Sink, Source};
+use crate::{Edge, EdgeId, InPort, OutPort, PortSink, PortSource};
 use tutti_buffers::Float;
 use tutti_curve::{FadeLaw, declick_frames};
 use tutti_platform::with_no_denormals;
@@ -829,7 +829,7 @@ impl<F: Float> Reference<F> {
             let mut best = Latency::ZERO;
             for (at, e) in flat_edges(g.topology()) {
                 if at.node == k
-                    && let Edge::Direct(Source::Node(p)) = e
+                    && let Edge::Direct(PortSource::Node(p)) = e
                 {
                     best = best.max(arrive(p.node, g, lat, memo) + lat(p.node));
                 }
@@ -852,7 +852,7 @@ impl<F: Float> Reference<F> {
                 }
             }
             for (id, gain) in g.gains() {
-                if let (Sink::Port(at), Some(from)) = (id.sink, gain.source)
+                if let (PortSink::Port(at), Some(from)) = (id.sink, gain.source)
                     && at.node == k
                 {
                     best = best.max(arrive(from.node, g, lat, memo) + lat(from.node));
@@ -869,8 +869,8 @@ impl<F: Float> Reference<F> {
         let mut delays: BTreeMap<DelayKey, Samples> = BTreeMap::new();
         for (&at, e) in flat_edges(t) {
             let dep = match *e {
-                Edge::Direct(Source::Node(p)) => departure(p.node).samples(),
-                Edge::Direct(Source::Global(_)) => Samples::ZERO,
+                Edge::Direct(PortSource::Node(p)) => departure(p.node).samples(),
+                Edge::Direct(PortSource::Global(_)) => Samples::ZERO,
                 _ => continue,
             };
             let Edge::Direct(from) = *e else { continue };
@@ -911,9 +911,9 @@ impl<F: Float> Reference<F> {
         }
         // The output time is the latest departure over every source of every
         // channel; each source of a summed channel is delayed to it on its own.
-        let source_departure = |s: &Source| match *s {
-            Source::Node(p) => departure(p.node).samples(),
-            Source::Global(_) | Source::Zero => Samples::ZERO,
+        let source_departure = |s: &PortSource| match *s {
+            PortSource::Node(p) => departure(p.node).samples(),
+            PortSource::Global(_) | PortSource::Zero => Samples::ZERO,
         };
         let total = t
             .outputs
@@ -927,7 +927,7 @@ impl<F: Float> Reference<F> {
                     .gains()
                     .iter()
                     .filter_map(|(id, g)| match (id.sink, g.source) {
-                        (Sink::Output(_), Some(from)) => Some(departure(from.node).samples()),
+                        (PortSink::Output(_), Some(from)) => Some(departure(from.node).samples()),
                         _ => None,
                     }),
             )
@@ -936,8 +936,8 @@ impl<F: Float> Reference<F> {
         for (&id, gain) in graph.gains() {
             let Some(from) = gain.source else { continue };
             let to = match id.sink {
-                Sink::Port(at) => arrival[&at.node].samples(),
-                Sink::Output(_) => total,
+                PortSink::Port(at) => arrival[&at.node].samples(),
+                PortSink::Output(_) => total,
             };
             let d = to
                 .checked_sub(departure(from.node).samples())
@@ -949,7 +949,7 @@ impl<F: Float> Reference<F> {
         for (ch, sources) in t.outputs.iter().enumerate() {
             for s in sources {
                 let d = total.checked_sub(source_departure(s)).unwrap_or_default();
-                if !d.is_zero() && *s != Source::Zero {
+                if !d.is_zero() && *s != PortSource::Zero {
                     delays.insert(
                         DelayKey::Output {
                             channel: ch as u16,
@@ -1282,7 +1282,7 @@ impl<F: Float> Reference<F> {
                     .filter(|(at, _)| at.node == k)
                     .flat_map(|(_, es)| es)
                     .filter_map(|e| match e {
-                        Edge::Direct(Source::Node(p)) => Some(p.node),
+                        Edge::Direct(PortSource::Node(p)) => Some(p.node),
                         _ => None,
                     })
                     .collect();
@@ -1300,7 +1300,7 @@ impl<F: Float> Reference<F> {
                     }
                 }
                 for (id, gain) in graph.gains() {
-                    if let (Sink::Port(at), Some(from)) = (id.sink, gain.source)
+                    if let (PortSink::Port(at), Some(from)) = (id.sink, gain.source)
                         && at.node == k
                     {
                         v.push(from.node);
@@ -1363,9 +1363,9 @@ impl<F: Float> Reference<F> {
                 let mut addends: Vec<RefAddend<F>> = Vec::new();
                 for source in sorted(sources) {
                     let mut buf = match source {
-                        Source::Node(p) => audio[&p].clone(),
-                        Source::Global(g) => inputs[g as usize][..frames].to_vec(),
-                        Source::Zero => vec![F::ZERO; frames],
+                        PortSource::Node(p) => audio[&p].clone(),
+                        PortSource::Global(g) => inputs[g as usize][..frames].to_vec(),
+                        PortSource::Zero => vec![F::ZERO; frames],
                     };
                     let key = DelayKey::Output {
                         channel: ch as u16,
@@ -1375,7 +1375,7 @@ impl<F: Float> Reference<F> {
                         delay_line(line, &mut buf);
                     }
                     let id = EdgeId {
-                        sink: Sink::Output(ch as u16),
+                        sink: PortSink::Output(ch as u16),
                         from: Edge::Direct(source),
                     };
                     let weight = self.lane_weight(&graph, id, &targets, frames, &events);
@@ -1433,9 +1433,9 @@ impl<F: Float> Reference<F> {
             let mut addends: Vec<RefAddend<F>> = Vec::new();
             for edge in sorted(t.edges.get(&at).map_or(&[][..], Vec::as_slice)) {
                 let mut buf = match edge {
-                    Edge::Direct(Source::Zero) => vec![F::ZERO; frames],
-                    Edge::Direct(Source::Global(g)) => inputs[g as usize][..frames].to_vec(),
-                    Edge::Direct(Source::Node(p)) => audio[&p].clone(),
+                    Edge::Direct(PortSource::Zero) => vec![F::ZERO; frames],
+                    Edge::Direct(PortSource::Global(g)) => inputs[g as usize][..frames].to_vec(),
+                    Edge::Direct(PortSource::Node(p)) => audio[&p].clone(),
                     Edge::Feedback(f) => {
                         let line =
                             &self.fb_audio[&(f.from, graph.generation(f.from.node), f.delay)];
@@ -1448,7 +1448,7 @@ impl<F: Float> Reference<F> {
                     delay_line(line, &mut buf);
                 }
                 let id = EdgeId {
-                    sink: Sink::Port(at),
+                    sink: PortSink::Port(at),
                     from: edge,
                 };
                 let weight = self.lane_weight(graph, id, targets, frames, events);
@@ -1472,7 +1472,7 @@ impl<F: Float> Reference<F> {
             // later does with its events.
             let mut edges: Vec<Event> = Vec::new();
             let mut param_edges: Vec<ParamEvent> = Vec::new();
-            // Source order is `(NodeKey, port)` of the source, whatever order
+            // PortSource order is `(NodeKey, port)` of the source, whatever order
             // the spec lists them in: re-keyed by source here, where the
             // compiler sorts its list.
             let by_source: BTreeMap<EventOut, EventEdge> = graph
@@ -1609,6 +1609,7 @@ impl<F: Float> Reference<F> {
             env,
             arrival: self.arrival[&key],
             history: &self.history,
+            meter: None,
         };
         // A crossfade here: the outgoing unit first, on its own copy of the
         // inputs, with no events; what it emits goes nowhere.
@@ -3032,7 +3033,7 @@ fn flat_edges(t: &crate::Topology) -> impl Iterator<Item = (&InPort, &Edge)> {
         .flat_map(|(at, es)| es.iter().map(move |e| (at, e)))
 }
 
-/// A sink's sources in source order: `Edge`'s and `Source`'s derived `Ord`,
+/// A sink's sources in source order: `Edge`'s and `PortSource`'s derived `Ord`,
 /// whatever order the spec lists them in (the compiler sorts its list alike).
 fn sorted<T: Copy + Ord>(set: &[T]) -> Vec<T> {
     let mut v = set.to_vec();

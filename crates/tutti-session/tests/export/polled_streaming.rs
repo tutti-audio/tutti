@@ -7,21 +7,13 @@ use std::time::Duration;
 
 use tutti_buffers::ChannelLayout;
 use tutti_platform::{Executor, Instant};
-use tutti_sampler::{Clip, StreamPhase, StreamStart};
-use tutti_session::{
-    AudioEntry, Bounce, BounceLatency, BounceTail, PoolState, Range, Root, SamplerEvent,
-    SamplerLoad, Session, SessionEvent, audio_file,
-};
+use tutti_sampler::{Clip, StreamFault, StreamPhase, StreamStart};
+use tutti_session::{Bounce, BounceLatency, BounceTail, Range, Root, Session};
 use tutti_units::{Beat, SampleRate, Seconds};
 
 const RATE: f64 = 48_000.0;
 /// File frames: a second of audio.
 const LEN: usize = 48_000;
-/// Updates a landing may take. A bound that only guards a hang: the streamer's task
-/// is woken by the bells' tick thread, which no count of updates orders against, so
-/// it is generous and the loop yields.
-const UPDATES: usize = 1_000_000;
-
 /// Frame `i` of the ramp file: distinct per frame, exact in `f32`.
 fn value(i: usize) -> f32 {
     (i as f32 + 1.0) * 1e-5
@@ -51,34 +43,28 @@ fn session() -> Session {
         .expect("a session builds on a polled executor")
 }
 
-/// Updates until a sampler event lands.
-fn updates_until_sampler(s: &mut Session) -> Option<SamplerEvent> {
-    for _ in 0..UPDATES {
-        for event in s.update() {
-            if let SessionEvent::Sampler(event) = event {
-                return Some(event);
-            }
-        }
-        std::thread::yield_now();
-    }
-    None
+/// Reads `asset` on the calling thread and applies it to `s`.
+fn open(
+    s: &mut Session,
+    asset: impl Into<tutti_platform::Asset>,
+) -> (tutti_sampler::Stream<f32>, tutti_sampler::StreamReader<f32>) {
+    let opened = s
+        .open_stream(asset, StreamStart::HEAD)
+        .expect("a streamer")
+        .run()
+        .expect("the file reads");
+    s.apply(opened).expect("the session serves it")
 }
 
-/// **An open stream is primed.** The streamer answers the open on its own thread, the
-/// open's job lands inside a later update, and the ring fills.
+/// **An open stream is primed.** The app reads the file and the session applies it; the
+/// streamer's own thread fills the ring.
 #[test]
 fn updates_prime_an_open_streams_ring() {
     let dir = tempfile::tempdir().expect("a temp dir");
     let path = dir.path().join("ramp.wav");
     write_ramp(&path);
     let mut s = session();
-    let id = s.open_stream(&path, StreamStart::HEAD).expect("a streamer");
-    let landed = updates_until_sampler(&mut s);
-    assert!(
-        matches!(landed, Some(SamplerEvent::Opened { id: opened }) if opened == id),
-        "{landed:?}"
-    );
-    let (stream, _reader) = s.take_stream(id).expect("the landed stream");
+    let (stream, _reader) = open(&mut s, &path);
     // A hang guard by deadline: the streamer's thread primes the ring on its own.
     let deadline = Instant::now() + Duration::from_secs(10);
     while stream.status().phase == StreamPhase::Opening && Instant::now() < deadline {
@@ -100,13 +86,7 @@ fn a_bounce_of_a_streamed_ramp_at_unity_reproduces_the_files_frames() {
     let path = dir.path().join("ramp.wav");
     write_ramp(&path);
     let mut s = session();
-    let id: SamplerLoad = s.open_stream(&path, StreamStart::HEAD).expect("a streamer");
-    let landed = updates_until_sampler(&mut s);
-    assert!(
-        matches!(landed, Some(SamplerEvent::Opened { id: opened }) if opened == id),
-        "{landed:?}"
-    );
-    let (stream, reader) = s.take_stream(id).expect("the landed stream");
+    let (stream, reader) = open(&mut s, &path);
     let (node, _handle) = s
         .graph()
         .add(Clip::streaming(reader, stream).at(Beat::new(0.0)));
@@ -134,70 +114,37 @@ fn a_bounce_of_a_streamed_ramp_at_unity_reproduces_the_files_frames() {
     }
 }
 
-/// **A pool load runs inside `update`.** A resident `audio_file` entry lands as
-/// `Loaded` with the ramp's frames, and nothing ran before the first update.
+/// **A dropped session ends its streamer: an open stream is told it is gone.** The
+/// streamer's task waits on its bell; the session's drop wakes it, and its thread ends the
+/// task and drops the stream's record, which publishes `Faulted(StreamerGone)` to the
+/// handle the app still holds.
 #[test]
-fn a_pool_load_runs_inside_update() {
+fn a_dropped_session_ends_its_streamer_and_tells_the_stream() {
     let dir = tempfile::tempdir().expect("a temp dir");
     let path = dir.path().join("ramp.wav");
     write_ramp(&path);
-    let mut s = session();
-    s.pool(audio_file("ramp", &path)).expect("a declaration");
-    assert!(
-        !matches!(s.pool_state(&"ramp"), Some(PoolState::Loaded)),
-        "nothing runs outside update"
-    );
-    for _ in 0..UPDATES {
-        let _ = s.update();
-        if matches!(s.pool_state(&"ramp"), Some(PoolState::Loaded)) {
-            break;
-        }
-    }
-    let Ok(AudioEntry::Resident(wave)) = s.audio(&"ramp") else {
-        panic!("the entry is resident once loaded");
-    };
-    assert_eq!(wave.len().get(), LEN);
-    assert_eq!(wave.at(0, LEN - 1), value(LEN - 1));
-}
-
-/// **A dropped session ends its streamer: the open stream's source is released.** The
-/// stream is opened from bytes the test also holds, so the source's reference count shows
-/// whether the streamer still holds the stream. The streamer's task waits on its bell;
-/// the session's drop wakes it, and its thread ends the task and drops the stream with its
-/// source.
-#[test]
-fn a_dropped_session_ends_its_streamer_and_releases_the_streams_source() {
-    let dir = tempfile::tempdir().expect("a temp dir");
-    let path = dir.path().join("ramp.wav");
-    write_ramp(&path);
-    let bytes: std::sync::Arc<[u8]> = std::fs::read(&path).expect("reads").into();
     let executor = Executor::new();
     let mut s = Session::builder()
         .sample_rate(SampleRate::of(RATE))
         .executor(executor.clone())
         .build()
         .expect("a session builds on a polled executor");
-    let id = s
-        .open_stream(std::sync::Arc::clone(&bytes), StreamStart::HEAD)
-        .expect("a streamer");
-    let landed = updates_until_sampler(&mut s);
-    assert!(
-        matches!(landed, Some(SamplerEvent::Opened { id: opened }) if opened == id),
-        "{landed:?}"
-    );
-    assert!(
-        std::sync::Arc::strong_count(&bytes) > 1,
-        "the open stream holds its source"
+    let (stream, _reader) = open(&mut s, &path);
+    assert_ne!(
+        stream.status().phase,
+        StreamPhase::Faulted(StreamFault::StreamerGone)
     );
     drop(s);
     // A hang guard by deadline: the streamer's thread is woken by the bell.
     let deadline = Instant::now() + Duration::from_secs(10);
-    while std::sync::Arc::strong_count(&bytes) > 1 && Instant::now() < deadline {
+    while stream.status().phase != StreamPhase::Faulted(StreamFault::StreamerGone)
+        && Instant::now() < deadline
+    {
         std::thread::park_timeout(Duration::from_millis(1));
     }
     assert_eq!(
-        std::sync::Arc::strong_count(&bytes),
-        1,
+        stream.status().phase,
+        StreamPhase::Faulted(StreamFault::StreamerGone),
         "the woken streamer never ended and dropped the stream"
     );
     drop(executor);

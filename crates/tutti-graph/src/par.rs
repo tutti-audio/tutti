@@ -88,6 +88,7 @@ use crate::plan::{Op, Plan, Span};
 use crate::rtlog::LogLane;
 use crate::slots::{ArenaView, EventSlot, EventSlots, EventsView, SharedFlags};
 use tutti_buffers::MaxBlock;
+use tutti_music::MeterMap;
 
 /// A pool of threads that runs a job on several of them — what the parallel
 /// executor (and a CLAP plugin's `clap.thread-pool` request) asks of a
@@ -272,6 +273,8 @@ pub(crate) struct Block<'b, 'o, F: Float = f32> {
     pub(crate) env: &'b Env,
     /// Observed before the block, read-only while it runs.
     pub(crate) history: &'b TransportHistory,
+    /// The project's meter for the block, lent by the host.
+    pub(crate) meter: Option<&'b MeterMap>,
     pub(crate) frames: usize,
     pub(crate) max: MaxBlock,
     pub(crate) cap: usize,
@@ -307,6 +310,7 @@ struct Shared<'s, 'o, F: Float = f32> {
     env: &'s Env,
     /// The executor's, shared read-only by every participant.
     history: &'s TransportHistory,
+    meter: Option<&'s MeterMap>,
     frames: usize,
     max: MaxBlock,
     cap: usize,
@@ -389,6 +393,7 @@ pub(crate) fn run_block<F: Float>(
             plan: b.plan,
             env: b.env,
             history: b.history,
+            meter: b.meter,
             frames: b.frames,
             max: b.max,
             cap: b.cap,
@@ -578,6 +583,7 @@ impl<F: Float> Shared<'_, '_, F> {
                     cap: self.cap,
                     env: self.env,
                     history: self.history,
+                    meter: self.meter,
                 };
                 let mut st = OpState {
                     arena: &mut a,

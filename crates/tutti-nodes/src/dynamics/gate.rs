@@ -7,7 +7,7 @@ use tutti_dsp::{
     COEFF_INTERVAL, GateBank, GateControls, GateSignals, KeyFilter, KeySource, Lerp, SimdLanes,
 };
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
-use tutti_units::{Db, Hz, Q, SampleRate, Seconds, Tail};
+use tutti_units::{CompressionRatio, Db, Hz, Q, SampleRate, Seconds, Tail};
 
 use crate::kernel::{ControlSignals, Kernel, KernelNode};
 
@@ -32,6 +32,10 @@ use crate::kernel::{ControlSignals, Kernel, KernelNode};
 ///   `graph.connect(kick.bus_out(0), gate.bus_in(1))` in `tutti-session`, or each key
 ///   channel into the inputs after the audio.
 ///
+/// A finite [`ratio`](GateControls::ratio) (`UnitParam::Ratio`, after the range) makes the gate a
+/// downward expander ([`GateBank`]): the gain under the threshold falls `ratio` dB per dB down
+/// to the range. The ratio is a live control, read on the grid.
+///
 /// The node declares no tail: the release decays after the key goes silent, but it only
 /// scales, so a silent input is a silent output.
 ///
@@ -47,7 +51,7 @@ use crate::kernel::{ControlSignals, Kernel, KernelNode};
 ///
 /// # Controls
 ///
-/// Threshold, attack, hold, release and range are live [`Params`](crate::Params) shared
+/// Threshold, attack, hold, release, range and ratio are live [`Params`](crate::Params) shared
 /// across clones, set through the node's [`ParamSet`](tutti_graph::ParamSet) or the
 /// graph's `set_param` (a time under 0 reads as 0 and a range over 0 dB as 0 dB).
 ///
@@ -84,7 +88,7 @@ impl GateConfig {
     /// key filter and at [`GateControls::DEFAULT`].
     ///
     /// The main bus keeps its speaker placement. A width past one bus is refused by
-    /// [`BusTopology::assumed`] before it reaches here: `new(BusTopology::assumed(n)?)`.
+    /// [`BusTopology::default_for`] before it reaches here: `new(BusTopology::default_for(n)?)`.
     #[must_use]
     pub fn new(input: BusTopology) -> Self {
         Self {
@@ -172,7 +176,7 @@ control_set! {
         key_q: s.q,
         ..GateControls::DEFAULT
     };
-    live: (if s.filter == KeyFilter::Off { 5 } else { 7 });
+    live: (if s.filter == KeyFilter::Off { 6 } else { 8 });
     Threshold => Db = threshold { fast },
     Attack => Seconds = attack { whole },
     Hold => Seconds = hold { whole },
@@ -180,6 +184,8 @@ control_set! {
     // The range ramps in the bank, over `GAIN_RAMP`: the reader must not ramp it
     // across the block as well.
     Range => Db = range { whole },
+    // A ratio of `+inf` is a gate, so it is valid at infinity.
+    Ratio => CompressionRatio = ratio { whole, not_nan },
     // The filter's coefficients ramp in the bank, over one grid period.
     Cutoff => Hz = key_cutoff { whole },
     Q => Q = key_q { whole };
@@ -446,6 +452,61 @@ mod tests {
         assert!((out[0] - want).abs() < 1e-5, "{} vs {want}", out[0]);
     }
 
+    /// A ratio written through the param set moves the settled gain to the closed form: a key
+    /// 12 dB under the -20 dB threshold is at the range (-60 dB) at the default infinite ratio,
+    /// and settles at `-(r - 1) 12` dB after a write of `r = 2` and of `r = 4` (-36 dB), to
+    /// `f32`'s `1e-5`.
+    #[test]
+    fn a_moved_ratio_moves_the_settled_gain_to_the_closed_form() {
+        let mut node = prepared_at(
+            GateNode::<f32>::from(
+                GateConfig::new(BusTopology::MONO)
+                    .key(KeySource::Sidechain)
+                    .controls(with_range(four(-20.0, 0.0, 0.0, 0.0), -60.0)),
+            ),
+            RATE_44K,
+        );
+        let mut out = [0.0f32];
+        let key = 10f32.powf(-32.0 / 20.0);
+        for (ratio, want_db) in [(f64::INFINITY, -60.0f32), (2.0, -12.0), (4.0, -36.0)] {
+            assert!(node.param_set().set(UnitParam::Ratio, ratio));
+            for _ in 0..2000 {
+                tick(&mut node, &[0.5, key], &mut out);
+            }
+            let want = 0.5 * 10f32.powf(want_db / 20.0);
+            assert!(
+                (out[0] / want - 1.0).abs() < 1e-4,
+                "ratio {ratio}: {} vs {want}",
+                out[0]
+            );
+        }
+    }
+
+    /// A ratio of 2 in the controls the node is built with makes it a downward expander: a
+    /// side-chain key 12 dB under the -20 dB threshold settles at `-(2 - 1) 12 = -12` dB, the
+    /// range (-60 dB) not reached, to `f32`'s `1e-5`.
+    #[test]
+    fn a_built_ratio_makes_the_node_an_expander() {
+        let mut node = prepared_at(
+            GateNode::<f32>::from(
+                GateConfig::new(BusTopology::MONO)
+                    .key(KeySource::Sidechain)
+                    .controls(GateControls {
+                        ratio: CompressionRatio::new(2.0),
+                        ..with_range(four(-20.0, 0.0, 0.0, 0.0), -60.0)
+                    }),
+            ),
+            RATE_44K,
+        );
+        let mut out = [0.0f32];
+        let key = 10f32.powf(-32.0 / 20.0);
+        for _ in 0..2000 {
+            tick(&mut node, &[0.5, key], &mut out);
+        }
+        let want = 0.5 * 10f32.powf(-12.0 / 20.0);
+        assert!((out[0] - want).abs() < 1e-5, "{} vs {want}", out[0]);
+    }
+
     /// `reset` clears the follower and the hold: after it a gate that was open and holding
     /// is closed.
     #[test]
@@ -489,7 +550,7 @@ mod tests {
     #[test]
     fn the_width_and_the_key_choice_are_the_port_layout() {
         let c = four(-20.0, 0.001, 0.01, 0.1);
-        let wide = BusTopology::assumed(tutti_buffers::ChannelLayout::from(4u16))
+        let wide = BusTopology::default_for(tutti_buffers::ChannelLayout::from(4u16))
             .expect("at most one bus wide");
         for (node, inputs, outputs) in [
             (
@@ -568,11 +629,11 @@ mod tests {
             ),
             GateNode::<f32>::from(GateConfig::new(BusTopology::MONO).controls(c)),
         ] {
-            let bases: Vec<_> = (0..5).map(|k| node.param_base(k)).collect();
+            let bases: Vec<_> = (0..6).map(|k| node.param_base(k)).collect();
             assert_eq!(
                 bases,
-                [-35.0, 0.002, 0.03, 0.25, -15.0].map(Some),
-                "threshold, attack, hold, release, range"
+                [-35.0, 0.002, 0.03, 0.25, -15.0, f64::INFINITY].map(Some),
+                "threshold, attack, hold, release, range, ratio"
             );
         }
     }
@@ -620,13 +681,17 @@ mod tests {
                 UnitParam::Attack,
                 UnitParam::Hold,
                 UnitParam::Release,
-                UnitParam::Range
+                UnitParam::Range,
+                UnitParam::Ratio
             ][..]
         );
         assert_eq!(shape.audio_in().count(), 2);
         assert_eq!(shape.latency, tutti_units::Latency::ZERO);
         assert_eq!(shape.tail, tutti_units::Tail::None);
-        for (k, base) in [-20.0, 0.0001, 0.01, 0.1, -30.0].into_iter().enumerate() {
+        for (k, base) in [-20.0, 0.0001, 0.01, 0.1, -30.0, f64::INFINITY]
+            .into_iter()
+            .enumerate()
+        {
             assert_eq!(m.param_base(k), Some(base), "control {k}'s base");
         }
     }

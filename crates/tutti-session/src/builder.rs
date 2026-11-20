@@ -7,7 +7,7 @@ use std::sync::Arc;
 use tutti_buffers::MAX_CHANNELS;
 use tutti_buffers::{ChannelLayout, ChannelTopology, MaxBlock};
 use tutti_graph::NodeKey;
-use tutti_nodes::{ClickNode, ClickSettings};
+use tutti_nodes::{ClickNode, ClickNodeConfig, ClickSettings};
 use tutti_timeline::Transport;
 use tutti_units::SampleRate;
 
@@ -230,6 +230,9 @@ impl Default for Workers {
 /// What every build path shares: the graph, the transport, the click, the
 /// MIDI nodes, and what the engine's callback state holds.
 pub(crate) struct Parts<F: Float> {
+    /// The session's executor, which also runs the MIDI hardware's background work.
+    executor: tutti_platform::Executor,
+    drive: crate::drive::Drive,
     graph: Graph<F>,
     transport: Transport,
     click: Option<NodeKey>,
@@ -433,8 +436,11 @@ impl<F: SessionFloat> SessionBuilder<Offline<F>> {
         );
         graph.set_render_workers(self.opts.render_workers);
         graph.declare_root(self.opts.root.clone(), true)?;
+        let (executor, drive) = self.session_executor()?;
         self.session(
             Parts {
+                executor,
+                drive,
                 graph,
                 transport,
                 click: None,
@@ -695,9 +701,9 @@ impl<C: Clock> SessionBuilder<C> {
     /// States what the output device's channels are: an interface wired as
     /// 5.1 on its six outputs, say. The graph root is folded into it by
     /// speaker. Without it the device is taken to be the engine's order for
-    /// its width ([`ChannelTopology::assumed`]: mono, stereo, quad, 5.1, 7.1,
+    /// its width ([`ChannelTopology::default_for`]: mono, stereo, quad, 5.1, 7.1,
     /// 7.1.4, and independent channels at any other width) and is read back as
-    /// [`Placement::Assumed`](tutti_buffers::Placement::Assumed)
+    /// [`Placement::Default`](tutti_buffers::Placement::Default)
     /// ([`Session::output_device`]).
     ///
     /// The statement is the device's width: a build whose device has another
@@ -751,8 +757,9 @@ impl<C: Clock> SessionBuilder<C> {
     }
 
     /// The [`Executor`](tutti_platform::Executor) that runs the session's background
-    /// work: its jobs (a file load, a plugin round trip), its disk streamer and a
-    /// recording's pump. Each is a future, and what a job reports lands in
+    /// work: its jobs (a file load, a plugin round trip), its disk streamer, a
+    /// recording's pump and the MIDI hardware's (an input's pump, the device watch,
+    /// Active Sensing, the legacy poll). Each is a future, and what a job reports lands in
     /// [`Session::update`].
     ///
     /// Without one the session makes its own and, where a thread can start, drives it
@@ -761,7 +768,8 @@ impl<C: Clock> SessionBuilder<C> {
     /// [`Session::update`] drives the queue (up to a fixed count of tasks per call) or
     /// the app does, with [`Executor::spawn_threads`](tutti_platform::Executor) or its own
     /// calls. Nothing runs between updates then, so a live stream is fed only as often
-    /// as the app updates.
+    /// as the app updates, and so is the MIDI hardware's background work (until
+    /// core-engine's R2-last).
     ///
     /// Dropping the session drops its clone of the executor: every task still queued is
     /// dropped unrun, and its job ends `Dropped` for whoever awaits it. Dropping the
@@ -789,12 +797,20 @@ impl<C: Clock> SessionBuilder<C> {
     }
 
     /// Open the OS MIDI layer: its devices are listed by
-    /// [`Midi::devices`](crate::Midi::devices) and opened by the pool's
-    /// [`midi_input`](crate::midi_input) and [`midi_output`](crate::midi_output)
-    /// entries, each input feeding the graph through an input node and an event
+    /// [`Midi::devices`](crate::Midi::devices) and opened by
+    /// [`Session::open_midi_input`](crate::Session::open_midi_input) and
+    /// [`Session::open_midi_output`](crate::Session::open_midi_output),
+    /// each input feeding the graph through an input node and an event
     /// inlet of its own, with `config` (where input times come from). Who the
     /// session is on the wire (MIDI-CI, its UMP Endpoint) is the session's
     /// [`MidiPolicy`](crate::MidiPolicy). Default off.
+    ///
+    /// The layer's background work (an input's pump, the device watch, Active
+    /// Sensing, the legacy ports' poll) runs on the session's
+    /// [`executor`](Self::executor). Until core-engine's R2-last, a
+    /// session built with the app's own executor drives it inside
+    /// [`Session::update`], so in that mode this work advances only while the app
+    /// calls `update`.
     #[cfg(feature = "midi-hardware")]
     #[must_use]
     pub fn midi_hardware(mut self, config: tutti_midi_hardware::MidiHardwareConfig) -> Self {
@@ -919,6 +935,7 @@ impl<C: Clock> SessionBuilder<C> {
         quantum: Option<MaxBlock>,
         outputs: usize,
     ) -> Result<Parts<C::Float>> {
+        let (executor, drive) = self.session_executor()?;
         // Built first so its port list can feed the graph's MIDI input.
         #[cfg(feature = "midi-hardware")]
         let backend = self.opts.midi_backend.take();
@@ -933,10 +950,10 @@ impl<C: Clock> SessionBuilder<C> {
             );
             let io = match backend {
                 Some(MidiBackend(backend)) => {
-                    tutti_midi_hardware::MidiSession::open_over(backend, inlets, options)
+                    tutti_midi_hardware::MidiSession::open_over(&executor, backend, inlets, options)
                         .map_err(crate::Error::MidiHardware)?
                 }
-                None => tutti_midi_hardware::MidiSession::open(inlets, options)
+                None => tutti_midi_hardware::MidiSession::open(&executor, inlets, options)
                     .map_err(crate::Error::MidiHardware)?,
             };
             // Subscribed before anything can plug in unseen: `Phase::Poll`
@@ -960,11 +977,13 @@ impl<C: Clock> SessionBuilder<C> {
         graph.set_render_worker_start(self.opts.render_worker_start.take());
         let click_settings = Arc::new(ClickSettings::new());
 
-        // The metronome. It reads the beat, play and record state from its
-        // block's `Env`, and the count-in flag off the transport (read only).
+        // The metronome. It reads the beat, the play, record and count-in state
+        // and the meter from its block's `Env`.
         // It is not wired to the output: what it feeds is the host's
         // declaration, like every other node's.
-        let (click, _settings) = graph.add(ClickNode::new(&transport, Arc::clone(&click_settings)));
+        let (click, _settings) = graph.add(ClickNode::from(ClickNodeConfig::new(Arc::clone(
+            &click_settings,
+        ))));
 
         // The engine's MIDI as graph nodes: the sync node (sends nothing until a
         // host sets its messages). An input port's input node and an output's
@@ -985,6 +1004,8 @@ impl<C: Clock> SessionBuilder<C> {
         };
 
         Ok(Parts {
+            executor,
+            drive,
             graph,
             transport,
             click: Some(click.erase()),
@@ -998,6 +1019,18 @@ impl<C: Clock> SessionBuilder<C> {
         })
     }
 
+    /// The session's executor, the app's or a new one, and what drives it.
+    fn session_executor(&self) -> Result<(tutti_platform::Executor, crate::drive::Drive)> {
+        Ok(match &self.opts.executor {
+            Some(executor) => (executor.clone(), crate::drive::Drive::update()),
+            None => {
+                let executor = tutti_platform::Executor::new();
+                let drive = crate::drive::Drive::background(&executor)?;
+                (executor, drive)
+            }
+        })
+    }
+
     /// The session over `parts`, `engine` its offline engine if any, with
     /// (`sampler`) a disk streamer when `streamer`.
     fn session<N: Clock<Float = C::Float>>(
@@ -1007,24 +1040,19 @@ impl<C: Clock> SessionBuilder<C> {
         streamer: bool,
     ) -> Result<Session<&'static str, N>> {
         let bells = tutti_rt::Bells::new().map_err(crate::Error::Bells)?;
-        let (executor, drive) = match &self.opts.executor {
-            Some(executor) => (executor.clone(), crate::drive::Drive::update()),
-            None => {
-                let executor = tutti_platform::Executor::new();
-                let drive = crate::drive::Drive::background(&executor)?;
-                (executor, drive)
-            }
-        };
+        let executor = parts.executor.clone();
         let sampler = crate::session::parts::SamplerPart::new(
             streamer,
             parts.graph.prepared().sample_rate(),
             &executor,
             &bells,
         )?;
-        let (plugins, _early_work) = crate::session::parts::PluginPart::new(&self.opts.plugins);
+        let (plugins, _early_work) =
+            crate::session::parts::PluginPart::new(&self.opts.plugins, &executor);
         let table = parts.graph.value_table();
         let click_settings = Arc::clone(&parts.click_settings);
         let session = Session {
+            id: crate::apply::SessionId::new(),
             values: crate::value::ValueState::new(Arc::clone(&table)),
             _early_work,
             running,
@@ -1048,7 +1076,7 @@ impl<C: Clock> SessionBuilder<C> {
             devices: Default::default(),
             inputs: crate::session::parts::Inputs::from_options(&mut self.opts),
             bounce: Default::default(),
-            jobs: crate::jobs::Jobs::new(executor, drive, bells),
+            jobs: crate::jobs::Jobs::new(executor, parts.drive, bells),
             plugins,
         };
         session.provide_values(&table, click_settings);
@@ -1101,7 +1129,7 @@ impl<C: Clock> SessionBuilder<C> {
                 .into());
             }
             Some(stated) => stated.clone(),
-            None => ChannelTopology::assumed(device),
+            None => ChannelTopology::default_for(device),
         };
         match &self.opts.root {
             // The same check `Graph::declare_root` makes a step later; made
@@ -1114,7 +1142,7 @@ impl<C: Clock> SessionBuilder<C> {
                     tutti_buffers::FoldError::from(tutti_buffers::BufferError::from(e))
                 })?;
                 tutti_graph::fold_to_topology::<C::Float>(
-                    &ChannelTopology::assumed(width),
+                    &ChannelTopology::default_for(width),
                     &placed,
                 )?;
             }

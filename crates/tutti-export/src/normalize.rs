@@ -44,10 +44,10 @@ use crate::output::FileTarget;
 /// active reads -70 LUFS.
 ///
 /// The placement is the file's [`topology`](crate::FileTarget::topology). A
-/// file that states none is taken to be [`ChannelTopology::assumed`] for its
+/// file that states none is taken to be [`ChannelTopology::default_for`] for its
 /// width (1, 2, 4, 6, 8 or 12 channels) and its [`Written`] reports
-/// [`Placement::Assumed`](tutti_buffers::Placement::Assumed). Any other width
-/// has no assumed placement, so a `Lufs` output of it is refused when the
+/// [`Placement::Default`](tutti_buffers::Placement::Default). Any other width
+/// has no default layout, so a `Lufs` output of it is refused when the
 /// render starts ([`TargetError::UnplacedLoudness`](crate::TargetError)):
 /// state a topology. [`Peak`](Self::Peak) needs no placement; true peak folds
 /// over every channel, and a `Peak` file with no placement reports no loudness
@@ -240,7 +240,7 @@ impl Normalize {
     /// The limit is one LSB plus the dither's amplitude (0 for none, half an
     /// LSB for rectangular, one for triangular) below full scale; a target or
     /// ceiling already under it is unchanged, and a format that does not
-    /// quantize ([`Pcm::Float32`](tutti_codec::Pcm::Float32), Ogg Vorbis) has no
+    /// quantize ([`Pcm::Float32`](tutti_codec::Pcm::Float32)) has no
     /// limit.
     pub(crate) fn within(self, target: &FileTarget) -> Self {
         let Some(limit) = headroom_ceiling(target) else {

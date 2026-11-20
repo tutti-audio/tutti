@@ -13,7 +13,7 @@ use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
 use tutti_buffers::FloatWidth;
-use tutti_platform::Instant;
+use tutti_platform::{Executor, Instant};
 use tutti_plugin_ipc_ffi::{Blob, Reaped};
 use tutti_plugin_types::MAX_CHUNK;
 use tutti_plugin_types::StateUse;
@@ -116,8 +116,12 @@ impl Restore<'_> {
 ///
 /// The server cannot be found or spawned, it does not connect or answer the
 /// handshake in time, or it fails to load the plugin.
-pub fn launch(config: &IpcConfig, request: &LoadRequest<'_>) -> IpcResult<LaunchedServer> {
-    launch_with_state(&Locator::Search, config, request)
+pub fn launch(
+    config: &IpcConfig,
+    request: &LoadRequest<'_>,
+    executor: &Executor,
+) -> IpcResult<LaunchedServer> {
+    launch_with_state(&Locator::Search, config, request, executor)
 }
 
 /// [`launch`], with the server binary named explicitly rather than searched
@@ -136,6 +140,7 @@ pub(super) fn launch_with(
     plugin_path: &Path,
     format: PluginFormat,
     sample_rate: SampleRate,
+    executor: &Executor,
 ) -> IpcResult<LaunchedServer> {
     let origin = PluginRef::file(plugin_path);
     launch_with_state(
@@ -147,6 +152,7 @@ pub(super) fn launch_with(
             rate: sample_rate,
             restore: None,
         },
+        executor,
     )
 }
 
@@ -158,9 +164,10 @@ pub(super) fn launch_with_state(
     locator: &Locator,
     config: &IpcConfig,
     request: &LoadRequest<'_>,
+    executor: &Executor,
 ) -> IpcResult<LaunchedServer> {
     config.timeouts.validate()?;
-    let server = ProcessGuard::launched(spawn_process(locator, config)?, config)
+    let server = ProcessGuard::launched(spawn_process(locator, config)?, config, executor)
         .map_err(IpcError::ExitUnwatched)?;
 
     // The guard is borrowed, not moved: the connect retry asks its watch so a
@@ -757,6 +764,7 @@ mod tests {
             Path::new("/nonexistent.vst3"),
             PluginFormat::Vst3,
             SampleRate::SR_48K,
+            tutti_fixtures::executor(),
         ) {
             Err(e) => e,
             // Cannot happen (`sleep` never sends `Ready`), but reap rather than
@@ -830,6 +838,7 @@ mod tests {
                     state_use: StateUse::Project,
                 }),
             },
+            tutti_fixtures::executor(),
         )
     }
 
@@ -1163,6 +1172,7 @@ mod tests {
             &not_a_plugin,
             PluginFormat::Vst3,
             SampleRate::SR_48K,
+            tutti_fixtures::executor(),
         ) {
             Err(e) => e,
             Ok(server) => {
@@ -1379,9 +1389,12 @@ mod tests {
         // The listener above stands in for the server, so there is no child to
         // watch — but `handshake` takes a guard to notice a spawn that died. A
         // lingering stand-in stays alive for the whole test; the guard kills it.
-        let stand_in =
-            ProcessGuard::launched(Reaped::new(spawn_stand_in(StandIn::Lingers)), &config)
-                .expect("the exit thread starts");
+        let stand_in = ProcessGuard::launched(
+            Reaped::new(spawn_stand_in(StandIn::Lingers)),
+            &config,
+            tutti_fixtures::executor(),
+        )
+        .expect("the exit thread starts");
         let err = handshake(&config, &stand_in)
             .expect_err("a stale server must not complete the handshake");
         drop(stand_in);
@@ -1499,8 +1512,12 @@ mod tests {
 
         let mut child = spawn_stand_in(StandIn::BindsOnByte(path.clone()));
         let mut release = child.stdin.take().expect("the stand-in's stdin is piped");
-        let stand_in = ProcessGuard::launched(Reaped::new(child), &IpcConfig::at(path.clone()))
-            .expect("the exit thread starts");
+        let stand_in = ProcessGuard::launched(
+            Reaped::new(child),
+            &IpcConfig::at(path.clone()),
+            tutti_fixtures::executor(),
+        )
+        .expect("the exit thread starts");
 
         let (running, is_running) = std::sync::mpsc::channel();
         let result = std::thread::scope(|scope| {
@@ -1541,6 +1558,7 @@ mod tests {
         let dead = ProcessGuard::launched(
             Reaped::new(spawn_stand_in(StandIn::Exits)),
             &IpcConfig::at(path.clone()),
+            tutti_fixtures::executor(),
         )
         .expect("the exit thread starts");
 
@@ -1676,6 +1694,7 @@ mod tests {
                 rate: SampleRate::SR_48K,
                 restore: None,
             },
+            tutti_fixtures::executor(),
         )
         .expect("the reference plugin launches");
         let guard = &launched.server;

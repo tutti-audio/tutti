@@ -8,7 +8,7 @@
 //! [`step`](super::record::step), not this.)
 //!
 //! This module is that work with the sleeping removed. [`StreamerCycle::step`]
-//! drains the command queue, polls the whole-file decodes, runs the refill, and reports what the loop should
+//! drains the command queue, runs the refill, and reports what the loop should
 //! do next as a [`StepOutcome`]. The loop in [`loop_body`](super::loop_body) is
 //! then the sleeping layer and nothing else.
 //!
@@ -25,7 +25,6 @@
 //! `streamer_loop` is written in terms of `StreamerCycle::step`, so a
 //! divergence between what tests drive and what ships is not representable.
 
-use super::StreamerSender;
 use super::command::StreamerCommand;
 use super::config::BufferConfig;
 use super::handlers::{Handles, Local, follow_steering, handle_command};
@@ -89,11 +88,9 @@ impl<F: RingFloat> StreamerCycle<F> {
 
     /// A cycle whose scratch is pre-sized for one `config.chunk_size` refill.
     ///
-    /// `reports` is the streamer's own queue, which its decode thread answers
-    /// on.
-    pub(crate) fn new(config: BufferConfig, reports: StreamerSender<F>) -> Self {
+    pub(crate) fn new(config: BufferConfig) -> Self {
         Self {
-            local: Local::new(config.chunk_size, reports),
+            local: Local::new(config.chunk_size),
             config,
         }
     }
@@ -145,13 +142,9 @@ impl<F: RingFloat> StreamerCycle<F> {
         mut drain: impl FnMut() -> Option<StreamerCommand<F>>,
     ) -> StepOutcome {
         while let Some(cmd) = drain() {
-            handle_command(cmd, shared, &self.config, &mut self.local);
+            handle_command(cmd, shared, &mut self.local);
         }
-        // One chunk of every whole-file decode in flight. Its answer is applied by
-        // the next cycle's drain, so while any runs this cycle reports more to do.
-        let decoding = self.local.lane.poll();
-        let outcome = self.refill(shared);
-        if decoding { StepOutcome::Busy } else { outcome }
+        self.refill(shared)
     }
 
     fn refill(&mut self, shared: &Handles<F>) -> StepOutcome {
@@ -251,8 +244,7 @@ mod tests {
     fn a_cycle_is_idle_until_a_stream_is_live() {
         let config = BufferConfig::default();
         let shared = Handles::detached(&config, SampleRate::SR_48K);
-        let (reports, _queue) = crossbeam_channel::bounded(8);
-        let mut cycle = StreamerCycle::new(config, StreamerSender::from(reports));
+        let mut cycle = StreamerCycle::new(config);
         assert_eq!(cycle.step(&shared, || None), StepOutcome::Idle, "no stream");
 
         let id = StreamId::of(1);
@@ -280,9 +272,7 @@ mod tests {
     fn a_cycle_frees_a_control_the_reader_held_across_its_replacement() {
         let config = BufferConfig::default();
         let shared = Handles::detached(&config, SampleRate::SR_48K);
-        let (reports, _queue) = crossbeam_channel::bounded(8);
-        let reports = StreamerSender::from(reports);
-        let mut cycle = StreamerCycle::new(config, reports);
+        let mut cycle = StreamerCycle::new(config);
         let id = StreamId::of(1);
         let (record, ring, _pos) =
             super::super::record::tests::record(id, PathBuf::from("t.wav"), 1024, 1u16);
@@ -312,9 +302,7 @@ mod tests {
     fn a_cycle_frees_a_control_the_reader_held_across_a_loop_publish() {
         let config = BufferConfig::default();
         let shared = Handles::detached(&config, SampleRate::SR_48K);
-        let (reports, _queue) = crossbeam_channel::bounded(8);
-        let reports = StreamerSender::from(reports);
-        let mut cycle = StreamerCycle::new(config, reports);
+        let mut cycle = StreamerCycle::new(config);
         let (record, ring, _pos) = super::super::record::tests::record(
             StreamId::of(1),
             PathBuf::from("t.wav"),

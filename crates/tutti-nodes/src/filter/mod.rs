@@ -1,5 +1,5 @@
 //! Filter nodes: state-variable, Moog ladder, parametric EQ band, the Butterworth and
-//! Linkwitz-Riley high-pass and low-pass, the matched bell and the tilt, and the
+//! Linkwitz-Riley high-pass and low-pass, the matched bell, the tilt, the graphic equalizer and the
 //! Linkwitz-Riley crossover, each a kernel on the one driver. The algorithms are
 //! `tutti-dsp`'s.
 
@@ -9,6 +9,7 @@ mod cut;
 mod envelope;
 mod eq;
 pub mod eq_band;
+mod graphic_eq;
 pub mod ladder;
 mod ramped;
 pub mod svf;
@@ -28,6 +29,9 @@ pub use envelope::{
 };
 pub use eq::{EqControls, EqKernel};
 pub use eq_band::{EqBandConfig, EqBandNode};
+pub use graphic_eq::{
+    GraphicEqConfig, GraphicEqControls, GraphicEqKernel, GraphicEqNode, GraphicEqSet,
+};
 pub use ladder::{LadderFilterConfig, LadderFilterNode, LadderKernel, LadderSet};
 pub use svf::{SvfFilterConfig, SvfFilterNode, SvfKernel, SvfSet};
 pub use tilt::{
@@ -58,13 +62,13 @@ fn eq_gain(gain: Db) -> Db {
 }
 
 /// The bus a filter built for a width runs on: the engine's order for it
-/// ([`BusTopology::assumed`]).
+/// ([`BusTopology::default_for`]).
 ///
 /// # Panics
 ///
 /// Past 16 channels: a filter is one bus.
 fn filter_bus(width: ChannelLayout) -> BusTopology {
-    BusTopology::assumed(width).expect("a filter is at most 16 channels wide")
+    BusTopology::default_for(width).expect("a filter is at most 16 channels wide")
 }
 
 #[cfg(test)]

@@ -101,7 +101,6 @@ full = [
     "export",
     "encode-flac",
     "encode-aiff",
-    "encode-vorbis",
 ]
 
 # The sound card. NOT default.
@@ -124,7 +123,6 @@ decode-ogg = ["codec", "tutti-codec/decode-ogg"]
 encode-wav = ["codec", "tutti-codec/encode-wav"]
 encode-flac = ["codec", "tutti-codec/encode-flac"]
 encode-aiff = ["codec", "tutti-codec/encode-aiff"]
-encode-vorbis = ["codec", "tutti-codec/encode-vorbis"]
 
 # `tutti::codec` and `Wave` — `tutti-codec`: the decoder and the encoders `export`
 # writes through. Implied by every format, so it is rarely named directly.
@@ -160,8 +158,7 @@ analyze = ["session", "dep:tutti-measure", "tutti-session?/analyze"]
 # implies `device` and `record`.
 capture = ["record", "device", "tutti-cpal/capture", "tutti-session/capture"]
 # Export. `export` is the offline renderer and WAV, which is pure Rust; FLAC and
-# AIFF are pure Rust and opt-in (`encode-flac`, `encode-aiff`), and `encode-vorbis` is the one path to C (the
-# Vorbis library, `ogg_next_sys`).
+# AIFF are pure Rust and opt-in (`encode-flac`, `encode-aiff`).
 export = ["dep:tutti-export", "encode-wav", "tutti-session?/export"]
 
 # --- plugin hosting ---------------------------------------------------------

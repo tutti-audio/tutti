@@ -19,12 +19,20 @@
 //! target, and ramps over [`GAIN_RAMP`] as a [`Ramp`]. The times only move what the
 //! follower is smoothing toward, and the follower is the smoother: they land whole.
 //!
+//! A finite [`ratio`](GateControls::ratio) makes the gate a **downward expander**. A closed
+//! gate's gain is no longer the range but follows the key: a level `x` dB under the threshold
+//! has a gain of `-(ratio - 1) x` dB, floored at the range, so the output falls `ratio` dB for
+//! every dB the input falls under the threshold, down to the range. The follower then runs
+//! toward that gain, as the fraction of the way from the range to unity, in place of toward 0:
+//! the attack while it rises and the release while it falls. The infinite ratio, the
+//! default, has the range as the target at every level under the threshold, which is the gate.
+//!
 //! The gate has no latency (the detector is on the key, never ahead of it) and no tail (the
 //! gain only scales, so a silent signal is a silent output whatever the follower is doing).
 
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::{Float, Mono, Planes, PlanesMut};
-use tutti_units::{Amplitude, Db, Hz, Q, SampleRate, Seconds};
+use tutti_units::{Amplitude, CompressionRatio, Db, Hz, Q, SampleRate, Seconds};
 
 use super::curves::{db_gain, gate_gain_at, level_db};
 use super::gain_pass::{CHUNK, GAIN_RAMP, floored, key_levels};
@@ -51,6 +59,10 @@ pub struct GateControls {
     /// effectively silent, a gentler value ducks, `0` is no gate at all). Above 0 reads
     /// as 0.
     pub range: Db,
+    /// How fast the gain falls under the threshold: `ratio` dB for each dB the key is under it,
+    /// down to the `range`. The infinite ratio (the default) is a gate: a key
+    /// under the threshold is at the range at once. A NaN reads as the gate.
+    pub ratio: CompressionRatio,
     /// The cutoff of the key filter: read only by a bank built with
     /// [`key_filter`](GateBank::key_filter). Held in the SVF's range.
     pub key_cutoff: Hz,
@@ -59,7 +71,8 @@ pub struct GateControls {
 }
 
 impl GateControls {
-    /// A gate that passes everything: threshold at -40 dB, no times and a range of 0 dB.
+    /// A gate that passes everything: threshold at -40 dB, no times, a range of 0 dB and the
+    /// infinite ratio.
     /// What a non-finite control falls back to.
     pub const DEFAULT: Self = Self {
         threshold: Db::new(-40.0),
@@ -67,6 +80,7 @@ impl GateControls {
         hold: Seconds::ZERO,
         release: Seconds::ZERO,
         range: Db::UNITY,
+        ratio: CompressionRatio::new(f64::INFINITY),
         key_cutoff: KeyFilter::DEFAULT_CUTOFF,
         key_q: KeyFilter::DEFAULT_Q,
     };
@@ -82,6 +96,8 @@ impl Default for GateControls {
 /// the times as one-pole poles at the rate, the hold in frames and the closed gain.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Design<F> {
+    /// The threshold in dB, the level an expander measures how far under it the key is from.
+    threshold_db: Db,
     /// The threshold as a linear level: the detector compares in the linear domain, so no
     /// `log10` runs per frame.
     threshold: Amplitude,
@@ -94,6 +110,9 @@ struct Design<F> {
     hold_samples: usize,
     /// The closed gain's level in dB, at most 0.
     range: Db,
+    /// The ratio less 1, the dB the gain falls per dB the key is under the threshold; `None` is
+    /// the infinite ratio, where the gain is the range at every level under it.
+    slope: Option<F>,
 }
 
 impl<F: Float> Design<F> {
@@ -106,12 +125,17 @@ impl<F: Float> Design<F> {
         // longest count. `floored` floors the attack and release.
         let hold = Seconds::new(c.hold.get().max(0.0));
         let ballistics = Follower::of(floored(c.attack, c.release), rate);
+        let ratio = c.ratio.get();
+        let slope = (!ratio.is_nan() && ratio < f64::INFINITY)
+            .then(|| F::from_unit(CompressionRatio::new_clamped(ratio)) - F::ONE);
         Self {
+            threshold_db: threshold,
             threshold: threshold.to_amplitude(),
             silence_opens: Db::FLOOR >= threshold,
             ballistics,
             hold_samples: hold.to_samples_floor(rate).get(),
             range: c.range.finite_or(d.range).min(Db::UNITY),
+            slope,
         }
     }
 }
@@ -123,6 +147,19 @@ impl<F: Float> Design<F> {
 #[inline]
 fn opens<F: Float>(level: F, threshold: F, silence_opens: bool) -> bool {
     level >= threshold || (level <= F::ZERO && silence_opens)
+}
+
+/// The follower's target for a key `under` dB under the threshold (`> 0`) of a downward
+/// expander of `slope` (the ratio less 1) over the closed gain `range` (an amplitude): the
+/// fraction of the way from `range` to unity at which the gain `10^(-slope * under / 20)`
+/// sits, 0 where it is at or under the range.
+#[inline]
+fn expander_fraction<F: Float>(slope: F, under: F, range: F) -> F {
+    if range >= F::ONE {
+        return F::ZERO;
+    }
+    let gain = db_gain(-(slope * under));
+    ((gain - range) / (F::ONE - range)).max(F::ZERO)
 }
 
 /// The per-frame control signal a gate reads beside its audio, in the bank's float, `None` where nothing
@@ -248,6 +285,7 @@ impl<F: Float + SimdLanes + Lerp> GateBank<F> {
         let width = input.channels().min(output.channels());
         let d = self.design;
         let threshold = F::from_unit(d.threshold);
+        let threshold_db = F::from_unit(d.threshold_db);
         let blended = self.range.blended_frames(frames);
         let taken = self.range.steps_taken();
         let held = db_gain(self.range.target());
@@ -265,23 +303,15 @@ impl<F: Float + SimdLanes + Lerp> GateBank<F> {
             for (k, g) in gains.iter_mut().enumerate() {
                 let i = start + k;
                 let level = *g;
-                let open = match signals
+                let (open, threshold_db) = match signals
                     .threshold
                     .and_then(|l| l.samples().get(i))
                     .copied()
                     .filter(|t| t.is_finite())
                 {
-                    Some(t) => level_db(level) >= t,
-                    None => opens(level, threshold, d.silence_opens),
+                    Some(t) => (level_db(level) >= t, t),
+                    None => (opens(level, threshold, d.silence_opens), threshold_db),
                 };
-                if open {
-                    self.hold_counter = d.hold_samples;
-                    d.ballistics.follow_raw(&mut self.follower, F::ONE);
-                } else if self.hold_counter > 0 {
-                    self.hold_counter -= 1;
-                } else {
-                    d.ballistics.follow_raw(&mut self.follower, F::ZERO);
-                }
                 let range = if i < blended {
                     db_gain(
                         self.range
@@ -290,6 +320,20 @@ impl<F: Float + SimdLanes + Lerp> GateBank<F> {
                 } else {
                     held
                 };
+                if open {
+                    self.hold_counter = d.hold_samples;
+                    d.ballistics.follow_raw(&mut self.follower, F::ONE);
+                } else if self.hold_counter > 0 {
+                    self.hold_counter -= 1;
+                } else {
+                    let target = match d.slope {
+                        Some(slope) => {
+                            expander_fraction(slope, threshold_db - level_db(level), range)
+                        }
+                        None => F::ZERO,
+                    };
+                    d.ballistics.follow_raw(&mut self.follower, target);
+                }
                 *g = gate_gain_at(self.follower.value(), range);
             }
             for c in 0..width {

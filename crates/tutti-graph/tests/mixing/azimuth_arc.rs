@@ -15,7 +15,7 @@ use tutti_graph::{
     ParamEvent, ParamIn, ParamInput, ParamRange, ParamSegment, Prepare, Shape, Status,
     TransportPosition, Unforkable,
 };
-use tutti_graph::{OutPort, Source};
+use tutti_graph::{OutPort, PortSource};
 use tutti_units::{ArcDegrees, Azimuth, SampleRate, Samples, UnitParam};
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -97,7 +97,7 @@ fn graph(
     ed.insert(NodeKey(SENDER), "sender", Unforkable(Sender(sends)));
     let s = ed.spec_mut();
     s.topology.set_outputs((0..2).map(|c| {
-        Source::Node(OutPort {
+        PortSource::Node(OutPort {
             node: NodeKey(PROBE),
             port: c,
         })
@@ -326,7 +326,7 @@ fn declick(base: f32, target: f32, workers: usize) -> Vec<f32> {
         Unforkable(Sender(vec![(64, step)])),
     );
     ed.spec_mut().topology.set_outputs((0..WIDTH).map(|k| {
-        Source::Node(OutPort {
+        PortSource::Node(OutPort {
             node: probe(k),
             port: 0,
         })

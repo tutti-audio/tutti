@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use tutti_buffers::Float;
-use tutti_platform::{Asset, MainThreadMarker};
+use tutti_platform::MainThreadMarker;
 
 use crate::pool::open::OpenCx;
 use crate::{PeerError, Presence, WorkerError};
@@ -32,7 +32,7 @@ pub(crate) type Value = Box<dyn Any + Send>;
 /// A kind with something live behind it (a plugin, a capture, a MIDI port)
 /// makes its `Handle` a [`Peer`](crate::Peer), whose
 /// [`Cause`](crate::Peer::Cause) is the kind's own reason it is not live; a
-/// data kind (a wave, a SoundFont) makes it the loaded value or a view of it.
+/// kind with nothing live behind it makes it the loaded value or a view of it.
 /// A peer handle keeps the entry's [`Life`] and reads
 /// [`Presence::Closed`] through [`Life::presence`] once the entry is
 /// released.
@@ -50,17 +50,6 @@ pub trait PoolEntry<S: Float = f32>: Send + 'static {
     /// The job that loads the entry, described and not started.
     fn load(&self) -> PoolLoad<Self::Loaded, S>;
 
-    /// The asset the load reads, for a kind whose value comes from one.
-    ///
-    /// The worker that runs the load takes the asset's [`Identity`](tutti_platform::Identity) (a file's
-    /// path and stamp) before the load reads it, and
-    /// [`Session::refresh_pool`](crate::Session::refresh_pool) compares it
-    /// with the asset's now and loads the entry again when they differ. An
-    /// asset of bytes never differs. The default is a kind with no asset.
-    fn asset(&self) -> Option<Asset> {
-        None
-    }
-
     /// The handle for a loaded value. `life` is the entry's: it reads closed
     /// once the entry is released or swapped to another identity.
     fn handle(loaded: &Self::Loaded, life: &Life) -> Self::Handle;
@@ -72,15 +61,15 @@ pub trait PoolEntry<S: Float = f32>: Send + 'static {
     /// The kind decides; the pool only asks, and
     /// [`Session::retry`](crate::Session::retry) reopens an entry for which it
     /// is true by running [`load`](Self::load) again. The default is `false`: a
-    /// data kind is never lost.
+    /// kind with nothing live behind it is never lost.
     fn is_lost(_loaded: &Self::Loaded) -> bool {
         false
     }
 
     /// What the pool does with a loaded value that only snapshots hold, past
     /// the depth ([`PoolConfig::live_holds`](crate::PoolConfig::live_holds)):
-    /// [`Retention::Keep`] it, as a data kind does (a shared `Arc` costs
-    /// memory, not a process or a device), or [`Retention::Release`] it, as a
+    /// [`Retention::Keep`] it, as a kind with nothing live behind it does (a
+    /// shared `Arc` costs memory, not a process or a device), or [`Retention::Release`] it, as a
     /// kind with something live behind it does (a plugin's process, a capture's
     /// device). The default keeps.
     ///
@@ -401,7 +390,7 @@ pub enum LoadError {
     Probe(Arc<tutti_sampler::ProbeError>),
     /// An asset declared streamed cannot be streamed by this build: its
     /// container reports no length, its decoder cannot seek, or no codec covers
-    /// it. Carries the asset's [`name`](Asset::name).
+    /// it. Carries the asset's [`name`](tutti_platform::Asset::name).
     #[cfg(feature = "sampler")]
     #[error("{0} cannot be streamed")]
     NotStreamable(String),
@@ -409,10 +398,6 @@ pub enum LoadError {
     #[cfg(feature = "soundfont")]
     #[error(transparent)]
     SoundFont(Arc<tutti_sf2::Error>),
-    /// A MIDI port could not be opened.
-    #[cfg(feature = "midi-hardware")]
-    #[error(transparent)]
-    Midi(Arc<crate::MidiPortError>),
     /// A plugin did not open.
     #[cfg(feature = "plugin")]
     #[error(transparent)]
@@ -435,6 +420,13 @@ pub enum LoadError {
     #[cfg(feature = "plugin")]
     #[error("the node could not swap to the landed plugin: {0}")]
     PluginSwap(Arc<crate::CrossfadeRefused>),
+    /// A load panicked (a decoder, a parser); `message` is the panic's, when it
+    /// was a string.
+    #[error("a load panicked: {message}")]
+    Panicked {
+        /// The panic's message, or a placeholder for a payload of another type.
+        message: String,
+    },
     /// The load's job did not finish: it panicked, or the executor dropped it.
     #[error(transparent)]
     Job(#[from] WorkerError),
@@ -473,8 +465,6 @@ pub(crate) struct Item<K, S: Float> {
     pub(crate) reload: Reload<S>,
     pub(crate) lost: fn(&Value) -> bool,
     pub(crate) retain: fn(Value) -> Option<Value>,
-    /// The asset the load reads, as the entry declared it.
-    pub(crate) asset: Option<Asset>,
     pub(crate) share: Option<Cloner>,
 }
 
@@ -498,8 +488,7 @@ impl<K, S: Float> fmt::Debug for PoolSet<K, S> {
     }
 }
 
-/// One entry, declared under the pool key `K`: what a kind's builder
-/// (`audio_file(key, path)`) returns. `M` says whether it is one instance per
+/// One entry, declared under the pool key `K`: what a kind's builder returns. `M` says whether it is one instance per
 /// key ([`Owned`]) or shares its load with the keys of the same identity
 /// ([`Sharing`]).
 #[must_use = "an entry is declared by passing it to Session::pool"]
@@ -519,14 +508,6 @@ pub struct Owned;
 #[derive(Clone, Copy, Debug)]
 pub struct Sharing;
 
-impl<K, E, M> Declared<K, E, M> {
-    /// The entry, for a kind's builder to set its options on.
-    #[cfg(feature = "midi")]
-    pub(crate) fn entry_mut(&mut self) -> &mut E {
-        &mut self.entry
-    }
-}
-
 impl<K, E> Declared<K, E, Owned> {
     /// `entry`, declared under `key`: one instance per key, even when another
     /// key is declared with the same identity.
@@ -543,8 +524,7 @@ impl<K, E> Declared<K, E, Sharing> {
     /// `entry`, declared under `key` as a resource that shares: another key
     /// declared with the same kind and identity, and shared too, shares this
     /// one's load, and every handle reads the same loaded value (a
-    /// [`Clone`] of it, an `Arc`). The data kinds (`audio_file` and
-    /// `soundfont`) are declared this way; a kind with
+    /// [`Clone`] of it, an `Arc`). A kind with
     /// something live behind it (a plugin client, a capture) uses
     /// [`new`](Declared::new).
     ///
@@ -666,7 +646,6 @@ impl<K, S: Float> Item<K, S> {
             load: entry.load().erase(),
             lost: lost::<E, S>,
             retain: retain::<E, S>,
-            asset: entry.asset(),
             share,
             reload: Box::new(move || entry.load().erase()),
         }

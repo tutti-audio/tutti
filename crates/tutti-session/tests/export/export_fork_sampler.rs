@@ -217,7 +217,7 @@ fn streamer_on(
 ) {
     let mut streamer =
         DiskStreamer::manual(SampleRate::of(RATE), Default::default()).expect("builds");
-    let opening = streamer.open(path, StreamStart::HEAD);
+    let opening = streamer.open_stream(path, StreamStart::HEAD);
     let (stream, reader) = wait_for_open(&mut streamer, opening).expect("the file opens");
     assert!(streamer.step_until_idle(1_000) < 1_000, "the ring primes");
     ((streamer, stream), reader)

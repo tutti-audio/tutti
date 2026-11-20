@@ -74,14 +74,14 @@
 //!
 //! ## Virtual endpoints
 //!
-//! A [`VirtualSource`] is an endpoint this process publishes for other
-//! applications to read from, and a [`VirtualDestination`] one they write to; a
-//! [`VirtualSpec`] gives the name, the Device Identity and Product Instance Id,
-//! the [`VirtualProtocol`] and the Function Blocks. Opening one takes a
-//! `MainThreadMarker`, and both types are `!Send` and `!Sync` on every platform
+//! A [`VirtualEndpoint`] is the one UMP Endpoint this process publishes for other
+//! applications to connect to: they read what it sends and write what it
+//! receives. A [`VirtualSpec`] gives the name, the Device Identity and Product
+//! Instance Id, the [`VirtualProtocol`] and the Function Blocks. Opening one takes
+//! a `MainThreadMarker`, and the type is `!Send` and `!Sync` on every platform
 //! (macOS's UMP Endpoint is a main-thread object); a [`VirtualSender`] sends from
-//! another thread. A destination delivers into an [`InputProducerHandle`], so its events
-//! take the path a device input's do. Where the platform cannot publish what the
+//! another thread. What peers write is delivered into an [`InputProducerHandle`],
+//! so its events take the path a device input's do. Where the platform cannot publish what the
 //! spec asks, opening says so: [`MidiHardwareError::Unsupported`] where there is no backend
 //! or the API has no virtual ports (Windows Multimedia),
 //! [`MidiHardwareError::VirtualBlocksUnsupported`] for Function Blocks on macOS before 15,
@@ -91,6 +91,16 @@
 //! refusal named). On Linux the sequencer is
 //! opened as a MIDI 2.0 client when the kernel has that mode and as a MIDI 1.0
 //! client otherwise; the endpoint reports the protocol it got.
+//!
+//! ## Background work
+//!
+//! The work that waits on the OS (an ALSA input's pump, the device watch, Active
+//! Sensing, the legacy ports' poll) runs as futures on the [`Executor`](tutti_platform::Executor)
+//! the session is opened with: the ALSA input and watch each on a dedicated thread of
+//! it, Active Sensing and the poll as timer loops. Each component holds its task and
+//! drops it to stop. Until core-engine's R2-last, an
+//! executor the app drives (a session built with its own) runs this work only while
+//! the app drives it: in `tutti-session`, only inside `update`.
 //!
 //! ## Quick start
 //!
@@ -299,9 +309,7 @@ pub use profiles::{
 pub use properties::{PropertyAsk, PropertyCall, PropertyChange, PropertyPeer};
 pub use session::{Connected, DeviceQuery, MidiHardwareConfig, MidiSession, Polled, Presented};
 pub use stream::{Basis, DeviceStream, InputTiming};
-pub use virtual_endpoint::{
-    VirtualDestination, VirtualProtocol, VirtualSender, VirtualSource, VirtualSpec,
-};
+pub use virtual_endpoint::{VirtualEndpoint, VirtualProtocol, VirtualSender, VirtualSpec};
 
 // --- Standard MIDI File codec: NOT here ---
 //

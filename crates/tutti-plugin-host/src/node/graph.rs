@@ -4,7 +4,7 @@
 //! event on the frame the plugin gave it.
 //!
 //! **Parameters** arrive on the same event input: a ramp or a curve segment
-//! (a control lane addressed by id, `ControlLaneNode::by_id`), addressed by
+//! (a control lane addressed by id, `ForeignLaneConfig`), addressed by
 //! the plugin's own parameter id.
 //! They go through the out-of-process node's delivery (`host::node`'s
 //! `param_delivery` and `param_input`): a slot per parameter declared at

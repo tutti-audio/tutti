@@ -2,7 +2,7 @@
 //! input per target, one clip per target, the hardware input's route rules,
 //! and the outputs, each a [`MidiOutNode`](tutti_midi_runtime::MidiOutNode)
 //! whose event tap [`Phase::MidiOut`] drains to a device's output
-//! (`midi_output`) or a host's own sink ([`midi_sink`](crate::midi_sink())).
+//! (`MidiOutput`, feature `midi-hardware`) or a host's own sink ([`MidiSink`](crate::MidiSink)).
 //!
 //! Every piece is wiring. A clip is a `MidiClipNode`, a live input a
 //! an event inlet, each the session's own node fed into its target's event
@@ -19,7 +19,7 @@ use tutti_buffers::Float;
 use tutti_graph::UmpAt;
 use tutti_platform::Instant;
 
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use tutti_graph::{EventTapReader, NodeKey, Offset, TapEvent};
 use tutti_midi_protocol::MpeMode;
 use tutti_midi_runtime::{
@@ -174,7 +174,7 @@ pub(crate) struct OutputTiming {
 pub(crate) const MIDI_OUT_TAP_CAPACITY: tutti_graph::EventCapacity =
     tutti_graph::EventCapacity::of(1024);
 
-/// Whether a host's own sink ([`midi_sink`](crate::midi_sink())) is sent JR
+/// Whether a host's own sink ([`MidiSink`](crate::MidiSink)) is sent JR
 /// Timestamps (M2-104-UM §7.2.2.2). It gates timestamps, not delivery: with it
 /// off the events still go out, unstamped. A device's output has no such choice:
 /// it stamps iff its negotiated configuration receives JR Timestamps.
@@ -191,7 +191,7 @@ pub enum Stamping {
 }
 
 /// A UMP MIDI output and its JR stamp stream: where one output node's events
-/// go, a `midi_output` entry's device or a `midi_sink` entry's [`MidiOut`](tutti_midi_runtime::MidiOut).
+/// go, an output port's device or a sink's [`MidiOut`](tutti_midi_runtime::MidiOut).
 ///
 /// The sink carries UMP words to the wire, so JR Timestamps and other
 /// MIDI-2-only messages survive, which is the whole reason this type exists:
@@ -552,6 +552,65 @@ fn route_drain(
     }
 }
 
+/// What the handles of an output port, an input port or a sink share: its
+/// record and its node. Clones of a handle share one claim.
+#[derive(Debug)]
+pub(crate) struct Claim<S> {
+    pub(crate) shared: Arc<S>,
+    pub(crate) node: NodeKey,
+}
+
+/// A port or sink that is swept when its handles are all dropped.
+pub(crate) trait Sweepable {
+    /// Whether a handle lives.
+    fn is_held(&self) -> bool;
+    /// The output node.
+    fn node(&self) -> NodeKey;
+    /// Reads the tap dry and sends it on.
+    fn drain(&mut self, timing: Option<&OutputTiming>);
+}
+
+/// Closes the `ports` whose handles were all dropped: what their taps held is
+/// sent first, and then their nodes leave the graph. Whether the graph was
+/// edited.
+pub(crate) fn sweep_dropped<P: Sweepable, F: Float>(
+    ports: &mut Vec<P>,
+    graph: &mut Graph<F>,
+    timing: Option<&OutputTiming>,
+) -> bool {
+    let mut edited = false;
+    ports.retain_mut(|port| {
+        let held = port.is_held();
+        if !held {
+            port.drain(timing);
+            // A host that removed the node itself leaves nothing to take.
+            let _ = graph.remove(port.node());
+            edited = true;
+        }
+        held
+    });
+    edited
+}
+
+/// The session's side of a [`Claim`]: a weak reference, so a port or sink is
+/// held exactly as long as some handle of it lives.
+#[derive(Debug)]
+pub(crate) struct Held<S>(Weak<Claim<S>>);
+
+impl<S> Held<S> {
+    /// The new claim on `shared` and `node`, and the session's side of it.
+    pub(crate) fn new(shared: Arc<S>, node: NodeKey) -> (Arc<Claim<S>>, Self) {
+        let claim = Arc::new(Claim { shared, node });
+        let held = Self(Arc::downgrade(&claim));
+        (claim, held)
+    }
+
+    /// Whether a handle lives.
+    pub(crate) fn is_held(&self) -> bool {
+        self.0.strong_count() > 0
+    }
+}
+
 tutti_rt::id! {
     /// An id [`Midi::route`] returns, for [`Midi::unroute`].
     pub struct MidiRouteId;
@@ -687,9 +746,9 @@ pub(crate) struct MidiState {
     /// Whether a host's last `set_routes` declared any rule or fallback:
     /// the routes are then the host's, and the session's own are refused.
     host_routes: bool,
-    /// The sinks the pool's `midi_sink` entries opened.
+    /// The sinks opened by `open_midi_sink`.
     pub(crate) sinks: crate::midi_sink::Sinks,
-    /// The ports the pool's `midi_input` and `midi_output` entries opened.
+    /// The ports opened by `open_midi_input` and `open_midi_output`.
     pub(crate) ports: crate::midi_port::Ports,
     /// The session's one MPE mode ([`MpeModeTarget`](crate::MpeModeTarget)),
     /// the cell every input and clip transform reads.
@@ -711,6 +770,9 @@ pub(crate) struct MidiState {
     /// audio output's latency. `None` offline, where every event
     /// is sent at once.
     output_clock: Option<OutputClockSource>,
+    /// The `now` of the last [`midi_out_phase`](Self::midi_out_phase): the time
+    /// an open's final drain of a dropped output is timed by.
+    last_now: Option<Instant>,
     /// The outputs' own latency and offset ([`Midi::output_latency`]).
     output_latency: LatencyCell,
     /// The session's subscription to the device list: `Phase::Poll` reads it
@@ -783,7 +845,7 @@ impl MidiState {
         Some(clip)
     }
 
-    /// `Phase::Poll`, for the ports: retires those whose entry ended, takes in
+    /// `Phase::Poll`, for the ports: retires those whose handles were all dropped, takes in
     /// the devices that came and went (each a [`MidiReport`], and a port that
     /// held one reads it as its [`Presence`](crate::Presence)), sends what the
     /// handles asked of the MIDI-CI peers, steps the UMP Stream negotiations and
@@ -983,10 +1045,11 @@ impl MidiState {
     pub(crate) fn midi_out_phase<F: Float>(&mut self, graph: &mut Graph<F>, now: Instant) -> bool {
         // A graph re-rated outside the device hook (`Graph::set_sample_rate`)
         // is followed here, before this update's events are read.
+        self.last_now = Some(now);
         let mut edited = self.follow_rate(graph, now);
         let timing = self.output_timing(now);
         edited |= self.sinks.drain(graph, timing.as_ref());
-        self.ports.drain_outputs(timing.as_ref());
+        edited |= self.ports.drain_outputs(graph, timing.as_ref());
         edited
     }
 }
@@ -1104,6 +1167,38 @@ impl<'a, F: Float> Midi<'a, F> {
 }
 
 impl<F: Float> Midi<'_, F> {
+    /// Closes the ports and sinks whose handles were all dropped, so a device
+    /// they held can be opened again by the call that follows. An input leaves
+    /// through [`Ports::retire`](crate::midi_port::Ports), which `update`'s poll
+    /// runs as well; an output or a sink leaves through the sweep that
+    /// `update`'s `Phase::MidiOut` runs as well, which first sends what its
+    /// node rendered before the drop (an event queued in the block just before
+    /// the drop can be lost). That final drain is timed by the `now` of the last
+    /// `update`, so it is placed as that update's drain would have been; before
+    /// any `update` there is no output clock and it is sent at once.
+    ///
+    /// The graph edits go uncommitted here: the next `update` commits them.
+    pub(crate) fn close_dropped(&mut self) {
+        let timing = self
+            .state
+            .last_now
+            .and_then(|now| self.state.output_timing(now));
+        // The sweeps' `edited` results are not read: the graph is edited in
+        // place, and the next `update` commits it.
+        let _ = self.state.sinks.close_dropped(self.graph, timing.as_ref());
+        let _ = self
+            .state
+            .ports
+            .close_dropped_outputs(self.graph, timing.as_ref());
+        #[cfg(feature = "midi-hardware")]
+        if let Some(io) = self.io.as_deref_mut() {
+            let edits = self.state.ports.retire(io, self.graph);
+            if edits.routes {
+                self.compile_session_routes();
+            }
+        }
+    }
+
     /// `target`, if it takes MIDI: it is in the graph with an event input.
     fn takes_midi(&self, target: NodeKey) -> Result<()> {
         if self.graph.node_event_inputs(target).is_ok_and(|n| n > 0) {
@@ -1292,7 +1387,7 @@ impl<F: Float> Midi<'_, F> {
     /// the transport's beat 0, with [`play_clip`](Self::play_clip)'s clip,
     /// looping and bounce behaviour. The clip starts at its own beats; a
     /// caller who wants an offset rebuilds the events and uses `play_clip`. The track is the one
-    /// [`load_midi`](Self::load_midi) landed
+    /// [`load_midi`](Self::load_midi) returned
     /// ([`LoadedMidi::track`](crate::LoadedMidi::track)); its events are built
     /// already, so this publishes a shared value and converts nothing.
     ///
@@ -1983,7 +2078,7 @@ impl<F: Float> Midi<'_, F> {
     /// sound an event (it is sent that much earlier) and a trim on top
     /// (positive sends later), added to the terms every event is timed by
     /// ([`output_terms`](Self::output_terms)). A write applies from the next
-    /// drain, to every `midi_sink` and `midi_output` entry: it is one setting
+    /// drain, to every sink and output port: it is one setting
     /// of the session, not an output's.
     #[must_use]
     pub const fn output_latency(&self) -> crate::OutputLatencyTarget {

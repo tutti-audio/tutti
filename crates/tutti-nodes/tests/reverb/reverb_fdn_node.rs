@@ -18,8 +18,8 @@ use tutti_graph::{
     Env, GraphBuilder, MAX_NODE_TAIL, Node, ParamIn, ParamNode, PlayClock, Prepare, Status,
     TransportChanges, TransportPosition,
 };
-use tutti_modulation::ControlProgram;
-use tutti_nodes::automation::ControlLaneNode;
+use tutti_modulation::ControlProgramBuilder;
+use tutti_nodes::automation::{ControlLaneNode, UnitLaneConfig};
 use tutti_nodes::{FdnConfig, FdnNode, FreeverbConfig, FreeverbNode};
 use tutti_units::{
     Db, Depth, Frame, Latency, Mix, SampleRate, Samples, Seconds, Tail, UnitAddr, UnitParam,
@@ -283,12 +283,10 @@ fn a_lane_driving_the_decay_changes_how_long_it_rings() {
             node: n,
             param: UnitAddr::new(UnitParam::Decay, 0),
         };
-        let program = ControlProgram::new(None, vec![], vec![]).expect("a program");
-        let lane = ControlLaneNode::for_unit(
-            UnitParam::Decay,
-            program,
-            Some(Arc::new(AtomicF64::new(decay)).into()),
-            None,
+        let program = ControlProgramBuilder::new().build().expect("a program");
+        let lane = ControlLaneNode::from(
+            UnitLaneConfig::new(UnitParam::Decay, program)
+                .knob(Arc::new(AtomicF64::new(decay)).into()),
         );
         let key = tutti_graph::NodeKey(9_000);
         let editor = r.editor_mut();

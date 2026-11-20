@@ -60,6 +60,12 @@ use tutti_ump::{GroupSpan, MidiGroup};
 
 /// The set of open MIDI inputs, and the endpoints available to open.
 ///
+/// The background work (an input's pump, the device watch, Active Sensing, the
+/// legacy ports' poll) runs on the [`Executor`] it is opened with. Until
+/// core-engine's R2-last, an executor the app drives (a session built
+/// with its own) runs that work only while the app drives it: in `tutti-session`,
+/// only inside `update`.
+///
 /// One owner holds it (the host's resource, or the session's) and changes it
 /// through `&mut self`; it is not `Clone`. The output is not part of it:
 /// [`connect_output`](Self::connect_output) returns the [`OpenOutput`], which
@@ -71,8 +77,9 @@ use tutti_ump::{GroupSpan, MidiGroup};
 /// [`OpenInput`] closes its connection, then retires its port), then the ring
 /// manager handle, then the devices and the backend whose client every
 /// connection was opened on. Closing a connection stops its driver: the ALSA
-/// backend joins its pump thread, which drops the producer handle before the
-/// port is retired. On macOS the handle lives in the input callback, which
+/// backend wakes its pump out of `poll` and drops the pump's task, so the pump
+/// returns on its own thread, which drops the producer handle and closes the
+/// client; the port is retired without waiting for that. On macOS the handle lives in the input callback, which
 /// CoreMIDI retains and may release (and so drop the handle) after the port is
 /// disposed; a push in that window lands in a ring nobody drains, which is
 /// harmless. The order is about not leaving ports behind, not about soundness:

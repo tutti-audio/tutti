@@ -63,11 +63,12 @@ fn curves_are_pinned() {
     }
 }
 
-const KINDS: [ShapeKind; 6] = [
+const KINDS: [ShapeKind; 7] = [
     ShapeKind::Tanh,
     ShapeKind::Atan,
     ShapeKind::Softsign,
     ShapeKind::HardClip,
+    ShapeKind::TriangleFold,
     ShapeKind::Crush,
     ShapeKind::SoftCrush,
 ];
@@ -89,6 +90,9 @@ fn closed_f64(kind: ShapeKind, x: f64, d: f64) -> f64 {
         ShapeKind::Atan => (x * d * half_pi).atan() / half_pi,
         ShapeKind::Softsign => x * d / (1.0 + (x * d).abs()),
         ShapeKind::HardClip => (x * d).clamp(-1.0, 1.0),
+        ShapeKind::TriangleFold => {
+            2.0 / std::f64::consts::PI * (std::f64::consts::FRAC_PI_2 * x * d).sin().asin()
+        }
         ShapeKind::Crush => (x * d).round() / d.max(1.0),
         ShapeKind::SoftCrush => {
             let (d, y) = (d.max(1.0), x * d.max(1.0));
@@ -1108,4 +1112,121 @@ fn an_f32_input_of_1e30_gives_a_finite_output_at_every_order() {
             }
         }
     }
+}
+
+/// The triangle fold at chosen drives and inputs is the closed form: `x` times the drive
+/// reflected into `-1..=1` with a period of 4, to 1e-6 (`f32`), and it is the theory closed
+/// form, `2 / pi asin(sin(pi u / 2))`, to the same.
+#[test]
+fn the_triangle_fold_is_the_reflection_of_the_driven_input_at_chosen_points() {
+    let exact = [
+        // Inside -1..=1 the identity.
+        (0.3, 1.0, 0.3),
+        (-0.75, 1.0, -0.75),
+        // 1 is the first peak; past it the signal comes back down: u = 1.5 is 0.5.
+        (1.0, 1.0, 1.0),
+        (1.5, 1.0, 0.5),
+        (2.0, 1.0, 0.0),
+        (2.5, 1.0, -0.5),
+        // The trough is at 3, and the period closes at 4.
+        (3.0, 1.0, -1.0),
+        (3.5, 1.0, -0.5),
+        (4.5, 1.0, 0.5),
+        (5.5, 1.0, 0.5),
+        // The drive scales the input first: 0.75 at 2 is 1.5, 1.25 at 3 is 3.75.
+        (0.75, 2.0, 0.5),
+        (-0.75, 2.0, -0.5),
+        (1.25, 3.0, -0.25),
+        (-0.8, 3.0, 0.4f32),
+    ];
+    for (x, drive, want) in exact {
+        let got = ShapeKind::TriangleFold.apply::<f32>(x, Drive::new(drive));
+        assert!(
+            (f64::from(got) - f64::from(want)).abs() < 1e-6,
+            "fold({x}, drive {drive}) = {got}, want {want}"
+        );
+        let theory = closed(ShapeKind::TriangleFold, x, drive);
+        assert!(
+            (f64::from(got) - theory).abs() < 1e-6,
+            "fold({x}, drive {drive}) = {got}, theory {theory}"
+        );
+    }
+    // Every drive and input stays in -1..=1.
+    for drive in [0.5, 1.0, 7.3, 100.0] {
+        for x in noise(5, 256, 5.0) {
+            assert!(
+                ShapeKind::TriangleFold
+                    .apply::<f32>(x, Drive::new(drive))
+                    .abs()
+                    <= 1.0
+            );
+        }
+    }
+}
+
+/// `F1` of the triangle fold, from its Fourier series: the fold is
+/// `8 / pi^2 sum_{k odd} (-1)^((k-1)/2) sin(k pi u / 2) / k^2`, so its integral from 0 is
+/// `16 / pi^3 sum_{k odd} (-1)^((k-1)/2) (1 - cos(k pi u / 2)) / k^3`. Over 20 000 terms the
+/// tail is under `16 / pi^3 * 2 / (4 * 20000^2)`, 3e-10.
+fn fold_f1_fourier(u: f64) -> f64 {
+    let pi = std::f64::consts::PI;
+    let sum: f64 = (0..20_000)
+        .map(|n| {
+            let k = f64::from(2 * n + 1);
+            let sign = if n % 2 == 0 { 1.0 } else { -1.0 };
+            sign * (1.0 - (k * pi * u / 2.0).cos()) / (k * k * k)
+        })
+        .sum();
+    16.0 / (pi * pi * pi) * sum
+}
+
+/// First-order ADAA of the triangle fold is the quotient of the antiderivative at both ends of
+/// the segment: `(F1(u) - F1(u')) / (u - u')`, `u = drive x`, at a segment inside one linear
+/// piece, one across a kink with a gap under 1, one across several kinks and periods, and one
+/// at another drive. The antiderivative is the Fourier series' ([`fold_f1_fourier`]), so the
+/// bound is its tail, 3e-10 over the gap (at least 0.15): 1e-8.
+#[test]
+fn first_order_fold_is_the_antiderivative_quotient_at_chosen_segments() {
+    let cases = [
+        // Inside one piece.
+        (0.5, -0.25, 1.0),
+        // Across the kink at 1, 0.15 wide.
+        (0.9, 1.05, 1.0),
+        // Across the kinks at 1 and 3 and the period's edge.
+        (-2.3, 3.1, 1.0),
+        // At drive 2.5 the segment is 0.25 to 1.25: across the kink at a gap of 1.
+        (0.1, 0.5, 2.5),
+    ];
+    for (before, now, drive) in cases {
+        let got = through_f64(
+            ShapeKind::TriangleFold,
+            drive,
+            Antialiasing::FirstOrder,
+            &[before, now],
+        )[1];
+        let (b, a) = (before * drive, now * drive);
+        let want = (fold_f1_fourier(a) - fold_f1_fourier(b)) / (a - b);
+        assert!(
+            (got - want).abs() < 1e-8,
+            "{before} to {now} at {drive}: {got} against {want}"
+        );
+    }
+}
+
+/// A segment far under the guard across a kink keeps its closed form at `f32`: from `0.999` to
+/// `1.001` the fold is `1 - |u - 1|`, whose mean is `1 - ((1 - b)^2 + (a - 1)^2) / (2 (a -
+/// b))`, to 4 eps of `f32` (a sum of a few terms of order 1, each rounded once); a plain
+/// quotient of the antiderivative's values is off by `eps / gap`, 6e-5.
+#[test]
+fn first_order_fold_across_a_kink_at_a_tiny_gap_holds_to_a_few_epsilon() {
+    let (b, a) = (0.999f32, 1.001f32);
+    let mut bank = antialiased(ShapeKind::TriangleFold, 1.0, Antialiasing::FirstOrder);
+    let y = run(&mut bank, None, &[vec![b, a]]).remove(0)[1];
+    let (b, a) = (f64::from(b), f64::from(a));
+    let want = 1.0 - ((1.0 - b).powi(2) + (a - 1.0).powi(2)) / (2.0 * (a - b));
+    let eps = f64::from(f32::EPSILON);
+    assert!(
+        (f64::from(y) - want).abs() < 4.0 * eps,
+        "{y} against {want}"
+    );
 }

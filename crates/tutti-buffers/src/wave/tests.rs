@@ -1,5 +1,5 @@
 use super::*;
-use crate::Speaker;
+use crate::{Bed, Speaker};
 use crate::{I24, interleave};
 
 const STEREO: ChannelLayout = ChannelLayout::STEREO;
@@ -96,19 +96,19 @@ fn channel_mut_writes_through() {
     assert_eq!(w.planes().plane(0).samples(), &[0.0, 0.75, -0.5]);
 }
 
-/// A wave built from a count takes `ChannelTopology::assumed` and says it
+/// A wave built from a count takes `ChannelTopology::default_for` and says it
 /// guessed, and one built from a topology keeps it, one channel per speaker,
 /// as stated.
 #[test]
-fn a_count_is_assumed_and_a_topology_is_kept_as_stated() {
+fn a_count_takes_the_default_layout_and_a_topology_is_kept_as_stated() {
     for n in [1u16, 2, 4, 6, 8, 12] {
         let w = Wave::<f32>::new(usize::from(n), SampleRate::SR_48K);
         assert_eq!(
             w.topology(),
-            &ChannelTopology::assumed(ChannelLayout::from(n)),
+            &ChannelTopology::default_for(ChannelLayout::from(n)),
             "{n}"
         );
-        assert_eq!(w.placement(), Placement::Assumed, "{n}");
+        assert_eq!(w.placement(), Placement::Default, "{n}");
     }
     for n in [3usize, 5, 7, 16] {
         assert_eq!(
@@ -222,4 +222,26 @@ fn mapping_an_f64_wave_with_a_cast_is_every_sample_cast() {
             assert_eq!(w32.at(c, i), w64.at(c, i) as f32);
         }
     }
+}
+
+/// Equality is samples, rate and speakers: the same wave with its topology
+/// stated or the default for its width is equal, and a different sample, rate or speaker is not.
+#[test]
+fn equality_ignores_where_the_topology_came_from() {
+    let stated = || Wave::with_topology(Bed::Mono.topology(), SampleRate::SR_48K);
+    let default = || Wave::<f32>::new(1, SampleRate::SR_48K);
+    let fill = |mut w: Wave<f32>, v: f32| {
+        w.append(Interleaved::new(&[v, 0.5], ChannelLayout::MONO).unwrap())
+            .unwrap();
+        w
+    };
+    let (a, b) = (fill(stated(), 0.25), fill(default(), 0.25));
+    assert_ne!(a.placement(), b.placement());
+    assert_eq!(a, b);
+    assert_ne!(a, fill(default(), 0.75), "a sample differs");
+    let mut other_rate = Wave::<f32>::new(1, SampleRate::SR_44K1);
+    other_rate
+        .append(Interleaved::new(&[0.25, 0.5], ChannelLayout::MONO).unwrap())
+        .unwrap();
+    assert_ne!(a, other_rate, "the rate differs");
 }

@@ -31,7 +31,7 @@
 //! use tutti_polysynth::{
 //!     Adsr, FilterType, OscillatorType, PolySynth, SynthConfig,
 //! };
-//! use tutti_graph::{OutPort, Source};
+//! use tutti_graph::{OutPort, PortSource};
 //! use tutti_units::{Amplitude, Hz, Resonance, SampleRate, Samples, Seconds, UnitParam};
 //! use tutti_graph::NodeKey;
 //! use tutti_graph::{Editor, Prepare};
@@ -59,7 +59,7 @@
 //! let synth_key = NodeKey(1);
 //! let params = editor.insert(synth_key, "synth", synth).controls;
 //! editor.spec_mut().topology.set_outputs((0..2)
-//!     .map(|port| Source::Node(OutPort { node: synth_key, port })));
+//!     .map(|port| PortSource::Node(OutPort { node: synth_key, port })));
 //! editor.commit().expect("a one-node graph commits");
 //!
 //! // Its controls: the live params, by address.
@@ -74,9 +74,8 @@
 //! resonance) are modulated live by `FilterModConfig`, CC74, CC71 and MPE slide.
 //!
 //! Nothing else on a synth that is in a graph is live but its `ParamSet`: the
-//! master volume, and with a unison engine the detune and stereo spread. Before
-//! insertion, `&mut self` setters take typed values (`set_volume(Amplitude)`),
-//! and a node cannot be reached by them once it is inserted.
+//! master volume, and with a unison engine the detune and stereo spread. The
+//! volume it starts at is `SynthConfig::volume`.
 //!
 //! `SynthConfig::polyphony` is a `NonZeroUsize` (a synth of no voices cannot be
 //! written) with no upper bound. Every voice is built up front, so it is a memory

@@ -114,7 +114,7 @@ fn silence_and_flat_chroma_are_errors() {
     let mut tilted = [0.5f64; CLASSES];
     tilted[0] = 0.51;
     assert!(estimate_key_from_mean(KeyProfile::Krumhansl, &tilted).is_ok());
-    let none = Grid::new(Vec::new(), FrameCount(0), BinCount(CLASSES)).unwrap();
+    let none = Grid::try_from((Vec::new(), FrameCount(0), BinCount(CLASSES))).unwrap();
     assert_eq!(
         estimate_key(KeyProfile::Krumhansl, &none).unwrap_err(),
         Error::NoTonalContent
@@ -132,7 +132,7 @@ fn bad_chroma_is_refused() {
     assert_eq!(e(&x), Error::NonFiniteInput);
     x[3] = -0.1;
     assert_eq!(e(&x), Error::NegativeInput);
-    let wide = Grid::new(vec![0.5; 13], FrameCount(1), BinCount(13)).unwrap();
+    let wide = Grid::try_from((vec![0.5; 13], FrameCount(1), BinCount(13))).unwrap();
     assert_eq!(
         estimate_key(KeyProfile::Krumhansl, &wide),
         Err(Error::NotTwelveClasses { columns: 13 })
@@ -147,7 +147,7 @@ fn a_grid_is_read_as_its_mean() {
     let b = profile_chroma(5, Mode::Minor, KeyProfile::Krumhansl);
     let rows = |first: &[f64; 12], second: &[f64; 12]| {
         let data = [first.as_slice(), second.as_slice(), second.as_slice()].concat();
-        Grid::new(data, FrameCount(3), BinCount(CLASSES)).unwrap()
+        Grid::try_from((data, FrameCount(3), BinCount(CLASSES))).unwrap()
     };
     let est = estimate_key(KeyProfile::Krumhansl, &rows(&a, &b)).unwrap();
     assert_eq!(

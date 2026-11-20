@@ -11,11 +11,9 @@ use tutti_buffers::ChannelLayout;
 ///
 /// The settings live in the variant, so a combination a format cannot write is
 /// not expressible: FLAC holds integer widths only (`depth` is an
-/// [`IntDepth`]), and Ogg Vorbis, which is lossy and float internally, has no
-/// width at all.
+/// [`IntDepth`]).
 ///
-/// Each variant exists only with its cargo feature (`encode-wav`, `encode-aiff`, `encode-flac`,
-/// `encode-vorbis`), so a format this build cannot write cannot be named.
+/// Each variant exists only with its cargo feature (`encode-wav`, `encode-aiff`, `encode-flac`), so a format this build cannot write cannot be named.
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[non_exhaustive]
 pub enum Format {
@@ -34,12 +32,6 @@ pub enum Format {
         /// The encoder effort.
         level: FlacLevel,
     },
-    /// Lossy Ogg Vorbis. Vorbis's own channel mappings cap the width at 8.
-    #[cfg(feature = "encode-vorbis")]
-    Vorbis {
-        /// The target VBR quality.
-        quality: Quality,
-    },
 }
 
 /// `Wav(Pcm::Int24)`: the format an export defaults to.
@@ -57,7 +49,7 @@ impl Format {
     /// # Errors
     ///
     /// [`Error::UnknownExtension`] if the extension is not one of `wav`,
-    /// `flac`, `aiff`, `aif` or `ogg`, or names a format this build lacks.
+    /// `flac`, `aiff` or `aif`, or names a format this build lacks.
     pub fn from_extension(ext: &str) -> Result<Self> {
         let ext = ext.to_lowercase();
         match ext.as_str() {
@@ -70,10 +62,6 @@ impl Format {
             }),
             #[cfg(feature = "encode-aiff")]
             "aiff" | "aif" => Ok(Self::Aiff(Pcm::default())),
-            #[cfg(feature = "encode-vorbis")]
-            "ogg" => Ok(Self::Vorbis {
-                quality: Quality::default(),
-            }),
             _ => Err(Error::UnknownExtension {
                 extension: if ext.is_empty() { "(none)".into() } else { ext },
             }),
@@ -96,7 +84,7 @@ impl Format {
     }
 
     /// The integer width this format quantizes to, or `None` when it does not
-    /// quantize (`Float32`, and Ogg Vorbis, which takes the float stream).
+    /// quantize (`Float32`).
     #[must_use]
     pub fn int_depth(&self) -> Option<IntDepth> {
         match *self {
@@ -106,8 +94,6 @@ impl Format {
             Self::Aiff(pcm) => pcm.int_depth(),
             #[cfg(feature = "encode-flac")]
             Self::Flac { depth, .. } => Some(depth),
-            #[cfg(feature = "encode-vorbis")]
-            Self::Vorbis { .. } => None,
         }
     }
 
@@ -124,8 +110,6 @@ impl Format {
             Self::Aiff(_) => None,
             #[cfg(feature = "encode-flac")]
             Self::Flac { .. } => None,
-            #[cfg(feature = "encode-vorbis")]
-            Self::Vorbis { .. } => None,
         }
     }
 }
@@ -149,80 +133,6 @@ pub enum FlacLevel {
     Standard,
     /// Linear prediction at order 12 (levels 7 and 8).
     Best,
-}
-
-/// The target quality of an Ogg Vorbis stream, `0.0` (lowest) to `1.0`
-/// (highest). The default is `0.5`.
-///
-/// Always in range: [`new`](Self::new) refuses anything else, and NaN.
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "serde", serde(try_from = "f32", into = "f32"))]
-pub struct Quality(f32);
-
-/// A quality outside `0.0..=1.0`, or NaN ([`Quality::try_from`]).
-#[derive(Debug, Clone, Copy, PartialEq, thiserror::Error)]
-#[error("a Vorbis quality is 0.0 to 1.0, not {0:?}")]
-pub struct QualityOutOfRange(pub f32);
-
-impl Quality {
-    /// The lowest quality.
-    pub const LOWEST: Quality = Quality(0.0);
-    /// The highest quality.
-    pub const HIGHEST: Quality = Quality(1.0);
-
-    /// The quality, or `None` when `raw` is outside `0.0..=1.0` or NaN.
-    ///
-    /// ```
-    /// # #[cfg(feature = "encode-vorbis")] {
-    /// use tutti_codec::Quality;
-    ///
-    /// assert_eq!(Quality::new(0.5).map(Quality::get), Some(0.5));
-    /// assert_eq!(Quality::new(1.5), None);
-    /// # }
-    /// ```
-    #[must_use]
-    pub fn new(raw: f32) -> Option<Quality> {
-        (0.0..=1.0).contains(&raw).then_some(Quality(raw))
-    }
-
-    /// The quality for a literal or a constant. For a value that arrives from
-    /// outside, use [`new`](Self::new).
-    ///
-    /// # Panics
-    ///
-    /// When `raw` is outside `0.0..=1.0` or NaN.
-    #[must_use]
-    #[track_caller]
-    pub fn of(raw: f32) -> Quality {
-        Self::new(raw).expect("a quality is 0.0 to 1.0")
-    }
-
-    /// The raw quality, `0.0..=1.0`.
-    #[must_use]
-    pub fn get(self) -> f32 {
-        self.0
-    }
-}
-
-impl Default for Quality {
-    fn default() -> Self {
-        Quality(0.5)
-    }
-}
-
-impl TryFrom<f32> for Quality {
-    type Error = QualityOutOfRange;
-
-    fn try_from(raw: f32) -> std::result::Result<Self, QualityOutOfRange> {
-        Self::new(raw).ok_or(QualityOutOfRange(raw))
-    }
-}
-
-impl From<Quality> for f32 {
-    fn from(quality: Quality) -> f32 {
-        quality.0
-    }
 }
 
 #[cfg(test)]

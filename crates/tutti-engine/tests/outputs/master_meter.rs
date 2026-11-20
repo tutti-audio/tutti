@@ -10,7 +10,7 @@ use tutti_buffers::MaxBlock;
 use tutti_engine::Engine;
 use tutti_graph::{Editor, MeterReader, Prepare};
 use tutti_graph::{MeterId, MeterSpec, NodeKey};
-use tutti_graph::{OutPort, Source};
+use tutti_graph::{OutPort, PortSource};
 use tutti_timeline::Transport;
 use tutti_units::{SampleRate, Samples};
 
@@ -52,12 +52,12 @@ fn engine(
     ed.insert(NodeKey(1), "dc", tutti_graph::Unforkable(Dc(level)));
     ed.spec_mut().topology.set_outputs((0..outputs).map(|c| {
         if channel.is_none_or(|only| only == c) {
-            Source::Node(OutPort {
+            PortSource::Node(OutPort {
                 node: NodeKey(1),
                 port: 0,
             })
         } else {
-            Source::Zero
+            PortSource::Zero
         }
     }));
     let meter = ed
@@ -200,7 +200,7 @@ fn the_master_reads_before_the_declick() {
     ed.insert(NodeKey(1), "dc", tutti_graph::Unforkable(Dc(0.5)));
     ed.spec_mut()
         .topology
-        .set_outputs(vec![Source::Node(OutPort {
+        .set_outputs(vec![PortSource::Node(OutPort {
             node: NodeKey(1),
             port: 0,
         })]);
@@ -283,12 +283,12 @@ fn a_block_longer_than_the_capacity_is_measured_whole() {
     );
     ed.spec_mut().topology.set_outputs((0..6).map(|c| {
         if c == 2 {
-            Source::Node(OutPort {
+            PortSource::Node(OutPort {
                 node: NodeKey(1),
                 port: 0,
             })
         } else {
-            Source::Zero
+            PortSource::Zero
         }
     }));
     let mut meter = ed
@@ -326,8 +326,9 @@ fn a_block_longer_than_the_capacity_is_measured_whole() {
 fn a_stereo_root_folds_to_a_stereo_device_unchanged() {
     let mut folded = [0.0f32; 2];
     let stereo = tutti_buffers::ChannelLayout::STEREO;
-    let fold = tutti_graph::fold_to_width(&tutti_buffers::ChannelTopology::assumed(stereo), stereo)
-        .unwrap();
+    let fold =
+        tutti_graph::fold_to_width(&tutti_buffers::ChannelTopology::default_for(stereo), stereo)
+            .unwrap();
     fold.frame(&[0.25, -0.75], &mut folded);
     assert!(fold.is_identity());
     assert_eq!(

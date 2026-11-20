@@ -38,8 +38,8 @@ use crate::{
 /// streamer reads ahead, for a file too long to hold). Every builder method
 /// reads the same on both, and both play what the file holds at the same
 /// frames. The sampler never picks the tier: the caller does, by the
-/// constructor it calls (the session's `audio_file` entry, resident or
-/// `.streamed()`, says which a file is declared as).
+/// constructor it calls (the session's `load_audio` handle says which a file
+/// was loaded as: a wave, or a header to stream).
 ///
 /// A resident clip's width is the wave's own (placed by the wave's
 /// [`topology`](Wave::topology), as every [`MemorySource`] places it; at most
@@ -121,7 +121,7 @@ impl<F: SamplerFloat> Clip<F> {
     }
 
     /// A streamed clip over `stream` and the `reader` it opened with (a
-    /// [`DiskStreamer::open`](crate::DiskStreamer::open) or
+    /// [`DiskStreamer::adopt`](crate::DiskStreamer::adopt) or
     /// `Session::open_stream`), at beat 0, at unit gain, playing once. The
     /// clip owns the stream: it ends when the clip's node leaves the graph.
     pub fn streaming(reader: StreamReader<F>, stream: Stream<F>) -> Self {
@@ -145,7 +145,7 @@ impl<F: SamplerFloat> Clip<F> {
     ///
     /// [`PlaceError`] when the wave has no place in that width (a channel no
     /// speaker names), or [`PlaceError::Streamed`] for a streamed clip, whose
-    /// width is its stream's (`DiskStreamer::open_into` chooses it).
+    /// width is its stream's (`DiskStreamer::open_stream_into` chooses it).
     pub fn channels(mut self, channels: impl Into<ChannelLayout>) -> Result<Self, PlaceError> {
         let Tier::Resident { wave, source } = &mut self.tier else {
             return Err(PlaceError::Streamed);

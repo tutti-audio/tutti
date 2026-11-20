@@ -38,7 +38,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_buffers::Wave;
 use tutti_engine::Engine;
-use tutti_graph::{Editor, NodeKey, OutPort, Prepare, Source};
+use tutti_graph::{Editor, NodeKey, OutPort, PortSource, Prepare};
 use tutti_sampler::{MemorySource, Playback, SlotId, VoicePool};
 use tutti_tempo::{TempoMap, TempoPoint, Transition};
 use tutti_timeline::{MotionCommand, Transport};
@@ -149,7 +149,7 @@ fn render(
         }
     }
     ed.spec_mut().topology.set_outputs((0..2).map(|port| {
-        Source::Node(OutPort {
+        PortSource::Node(OutPort {
             node: NodeKey(1),
             port,
         })

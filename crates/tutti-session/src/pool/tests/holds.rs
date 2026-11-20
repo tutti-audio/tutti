@@ -44,7 +44,7 @@ impl PoolEntry for Device {
     }
 }
 
-/// A kind that keeps its value when parked (the default), as a data kind does.
+/// A kind that keeps its value when parked (the default), as a kind with nothing live behind it does.
 struct Shared {
     loads: Arc<AtomicUsize>,
 }

@@ -43,6 +43,8 @@ fn record(protocol: Protocol, blocks: Vec<UmpBlock>) -> UmpEndpoint {
             tx_jr: false,
         },
         name: None,
+        device: None,
+        instance: None,
         blocks,
     }
 }

@@ -111,14 +111,14 @@ impl BusTopology {
     }
 
     /// What a bare `width` is taken to mean, as a bus: the placement
-    /// [`ChannelTopology::assumed`] gives it. `None` past [`MAX_CHANNELS`].
+    /// [`ChannelTopology::default_for`] gives it. `None` past [`MAX_CHANNELS`].
     ///
     /// For a node or a design built for a width and nothing more (a filter of
-    /// `n` channels): what its bus states is the engine's assumption, said
+    /// `n` channels): what its bus states is the engine's default layout, said
     /// once there.
     #[must_use]
-    pub fn assumed(width: ChannelLayout) -> Option<Self> {
-        Self::try_from(&ChannelTopology::assumed(width)).ok()
+    pub fn default_for(width: ChannelLayout) -> Option<Self> {
+        Self::try_from(&ChannelTopology::default_for(width)).ok()
     }
 
     /// The speaker each channel feeds, in channel order, or `None` for an
@@ -190,29 +190,35 @@ mod tests {
     use super::*;
     use crate::AmbisonicOrder;
 
-    /// A bare width is the assumed placement, or unassigned where there is
+    /// A bare width is the default layout for its width, or unassigned where there is
     /// none, and refused past the cap.
     #[test]
-    fn an_assumed_bus_is_the_assumed_topology() {
+    fn a_default_bus_is_the_default_topology() {
         assert_eq!(
-            BusTopology::assumed(ChannelLayout::MONO),
+            BusTopology::default_for(ChannelLayout::MONO),
             Some(BusTopology::MONO)
         );
         assert_eq!(
-            BusTopology::assumed(ChannelLayout::STEREO),
+            BusTopology::default_for(ChannelLayout::STEREO),
             Some(BusTopology::STEREO)
         );
         assert_eq!(
-            BusTopology::assumed(ChannelLayout::from_count(12)),
+            BusTopology::default_for(ChannelLayout::from_count(12)),
             Some(BusTopology::from(Bed::Surround714))
         );
         let nine = ChannelLayout::from_count(9);
         assert!(
-            ChannelTopology::assumed(nine).is_unassigned(),
+            ChannelTopology::default_for(nine).is_unassigned(),
             "the case needs a width with no order"
         );
-        assert_eq!(BusTopology::assumed(nine), BusTopology::unassigned(nine));
-        assert_eq!(BusTopology::assumed(ChannelLayout::from_count(17)), None);
+        assert_eq!(
+            BusTopology::default_for(nine),
+            BusTopology::unassigned(nine)
+        );
+        assert_eq!(
+            BusTopology::default_for(ChannelLayout::from_count(17)),
+            None
+        );
     }
 
     /// `new` and `TryFrom` agree on the edge of the range, a width of 16 is a

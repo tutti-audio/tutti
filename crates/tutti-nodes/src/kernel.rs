@@ -12,10 +12,10 @@ use core::ops::Range;
 use tutti_buffers::MaxBlock;
 use tutti_buffers::{Float, Mono, Planes, PlanesMut};
 use tutti_graph::{
-    BusRole, Cx, HasParam, HasParams, InBus, IntoNode, Io, MAX_PORTS, Node, NodeParts, OutBus,
-    ParamNode, ParamSet, Prepare, RtLevel, Shape, Status,
+    BusRole, Cx, HasParam, HasParams, InBus, IntoNode, Io, MAX_PORTS, Node, NodeParts, Offset,
+    OutBus, ParamNode, ParamSet, Prepare, RtLevel, Shape, Status,
 };
-use tutti_units::{Latency, Real, SampleRate, Samples, Tail};
+use tutti_units::{Bpm, Latency, Real, SampleRate, Samples, Tail};
 
 use crate::params::{At, ControlSet, HasControl, HasControls, Params};
 use crate::tail_clock::{Heard, TailClock, tail_frames};
@@ -78,6 +78,14 @@ pub trait Kernel: Clone + Send + 'static {
 
     /// Back to silence. Audio thread: no allocation.
     fn reset(&mut self);
+
+    /// The tempo of the block's first frame, as the transport says it
+    /// ([`Cx::transport_at`]): called once at the start of each block, before the block's
+    /// controls are read. A stopped transport has its set tempo. The default ignores it.
+    /// Audio thread: no allocation.
+    fn tempo(&mut self, tempo: Bpm) {
+        let _ = tempo;
+    }
 
     /// Designs `controls` and sets the running coefficients' target to the design. Audio thread:
     /// no allocation.
@@ -205,6 +213,111 @@ impl<K: Kernel> std::fmt::Debug for KernelNode<K> {
     }
 }
 
+/// What a [`KernelNode`] is made from: a [`Kernel`], the [`ControlSet`] that addresses its
+/// params and the controls it starts at.
+///
+/// The way a node author outside this crate builds a node from a kernel of their own:
+/// `KernelNode::from(config)`. The width is the kernel's: its [`shape`](Kernel::shape)
+/// declares the buses.
+///
+/// ```
+/// use tutti_buffers::{BusTopology, MaxBlock, Planes, PlanesMut};
+/// use tutti_graph::{Buses, Shape};
+/// use tutti_nodes::{ControlSet, ControlSignals, Kernel, KernelConfig, KernelNode};
+/// use tutti_units::{SampleRate, Tail, UnitAddr};
+///
+/// /// A kernel with no params.
+/// #[derive(Clone, Debug)]
+/// struct NoParams;
+///
+/// impl ControlSet for NoParams {
+///     type Controls = ();
+///     fn addrs(&self) -> &'static [UnitAddr] {
+///         &[]
+///     }
+///     fn defaults(&self) {}
+///     fn flatten(&self, _: &(), _: &mut [f64]) {}
+///     fn assemble(&self, _: &[f64]) {}
+/// }
+///
+/// /// A mono pass-through.
+/// #[derive(Clone)]
+/// struct Wire;
+///
+/// impl Kernel for Wire {
+///     type Float = f32;
+///     type Set = NoParams;
+///     const GRID: usize = 16;
+///     fn shape(&self) -> Shape {
+///         Shape::buses(Buses::main(BusTopology::MONO), Buses::main(BusTopology::MONO))
+///     }
+///     fn prepare(&mut self, _: SampleRate, _: MaxBlock) {}
+///     fn reset(&mut self) {}
+///     fn retarget(&mut self, _: &()) {}
+///     fn render(
+///         &mut self,
+///         input: Planes<'_, f32>,
+///         _: ControlSignals<'_, f32>,
+///         mut output: PlanesMut<'_, '_, f32>,
+///     ) {
+///         output
+///             .plane_mut(0)
+///             .samples_mut()
+///             .copy_from_slice(input.plane(0).samples());
+///     }
+///     fn tail(&self) -> Tail {
+///         Tail::None
+///     }
+/// }
+///
+/// let node = KernelNode::from(KernelConfig::new(Wire, NoParams));
+/// # let _ = node;
+/// ```
+#[derive(Clone)]
+pub struct KernelConfig<K: Kernel> {
+    kernel: K,
+    set: K::Set,
+    controls: <K::Set as ControlSet>::Controls,
+}
+
+impl<K: Kernel> std::fmt::Debug for KernelConfig<K> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("KernelConfig").finish_non_exhaustive()
+    }
+}
+
+impl<K: Kernel> KernelConfig<K> {
+    /// A kernel with its `set`, the controls at the set's [`defaults`](ControlSet::defaults).
+    #[must_use]
+    pub fn new(kernel: K, set: K::Set) -> Self {
+        let controls = set.defaults();
+        Self {
+            kernel,
+            set,
+            controls,
+        }
+    }
+
+    /// The controls the node starts at.
+    #[must_use]
+    pub fn controls(mut self, controls: <K::Set as ControlSet>::Controls) -> Self {
+        self.controls = controls;
+        self
+    }
+}
+
+/// The node of `config`. It has no rate until the graph's `prepare` gives it one and renders
+/// silence before. Allocates: build it before the node goes live.
+///
+/// # Panics
+///
+/// If the kernel's [`shape`](Kernel::shape) declares no output bus.
+impl<K: Kernel> From<KernelConfig<K>> for KernelNode<K> {
+    fn from(config: KernelConfig<K>) -> Self {
+        Self::with_kernel(config.kernel, config.set, config.controls)
+    }
+}
+
 impl<K: Kernel> KernelNode<K> {
     /// A node running `kernel`, its cells `set` at `controls`. It has no rate until the
     /// graph's `prepare` gives it one and renders silence before. Allocates: build it
@@ -214,7 +327,11 @@ impl<K: Kernel> KernelNode<K> {
     ///
     /// If the kernel's [`shape`](Kernel::shape) declares no output bus.
     #[must_use]
-    pub fn with_kernel(kernel: K, set: K::Set, controls: <K::Set as ControlSet>::Controls) -> Self {
+    pub(crate) fn with_kernel(
+        kernel: K,
+        set: K::Set,
+        controls: <K::Set as ControlSet>::Controls,
+    ) -> Self {
         const { assert!(K::GRID > 0, "a kernel's grid is at least one frame") };
         let shape = kernel.shape();
         let out = shape.output_bus(0).expect("a kernel has an output");
@@ -565,7 +682,7 @@ impl<K: Kernel> Node<K::Float> for KernelNode<K> {
         self.clear();
     }
 
-    fn process(&mut self, _cx: &Cx<'_>, mut io: Io<'_, K::Float>) -> Status {
+    fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_, K::Float>) -> Status {
         let Some(t) = &mut self.tuned else {
             return Status::Silent;
         };
@@ -575,6 +692,8 @@ impl<K: Kernel> Node<K::Float> for KernelNode<K> {
         }
         let (position, rate, applied) = (t.position, t.rate, t.applied);
         t.position += size as u64;
+
+        self.kernel.tempo(cx.transport_at(Offset::ZERO).tempo);
 
         self.params.begin(position);
         let target = self.params.read(
@@ -686,6 +805,9 @@ impl<K: Kernel> IntoNode<K::Float> for KernelNode<K> {
         tutti_graph::param_parts(self)
     }
 }
+
+#[cfg(test)]
+mod latency_tail;
 
 #[cfg(test)]
 mod tests {
@@ -841,5 +963,124 @@ mod tests {
                 "{main:?}, key {key:?}"
             );
         }
+    }
+
+    /// What a mono pass-through kernel hears of the tempo: the last and the count of the
+    /// [`tempo`](Kernel::tempo) calls.
+    #[derive(Clone, Debug, Default)]
+    struct Heard {
+        last: std::sync::Arc<std::sync::atomic::AtomicU64>,
+        calls: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    /// A mono pass-through that records the tempo it is told.
+    #[derive(Clone)]
+    struct Tempo {
+        heard: Heard,
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    struct NoControls {
+        gain: tutti_units::Db,
+    }
+    #[derive(Clone, Copy, Debug)]
+    struct NoControlsSet;
+    control_set! {
+        NoControlsSet(_s): NoControls = NoControls { gain: tutti_units::Db::new(0.0) };
+        live: (all);
+        GainDb => tutti_units::Db = gain { whole };
+        fn defaults(&self) -> NoControls {
+            NoControls { gain: tutti_units::Db::new(0.0) }
+        }
+    }
+
+    impl Kernel for Tempo {
+        type Float = f32;
+        type Set = NoControlsSet;
+        const GRID: usize = 16;
+        fn shape(&self) -> Shape {
+            use tutti_graph::Buses;
+            Shape::buses(
+                Buses::main(BusTopology::MONO),
+                Buses::main(BusTopology::MONO),
+            )
+        }
+        fn prepare(&mut self, _: SampleRate, _: MaxBlock) {}
+        fn reset(&mut self) {}
+        fn tempo(&mut self, tempo: Bpm) {
+            use std::sync::atomic::Ordering::Relaxed;
+            self.heard.last.store(tempo.get().to_bits(), Relaxed);
+            self.heard.calls.fetch_add(1, Relaxed);
+        }
+        fn retarget(&mut self, _: &NoControls) {}
+        fn render(
+            &mut self,
+            input: Planes<'_, f32>,
+            _: ControlSignals<'_, f32>,
+            mut output: PlanesMut<'_, '_, f32>,
+        ) {
+            output
+                .plane_mut(0)
+                .samples_mut()
+                .copy_from_slice(input.plane(0).samples());
+        }
+        fn tail(&self) -> Tail {
+            Tail::None
+        }
+    }
+
+    fn tempo_node() -> (KernelNode<Tempo>, Heard) {
+        let heard = Heard::default();
+        let kernel = Tempo {
+            heard: heard.clone(),
+        };
+        let node = KernelNode::with_kernel(
+            kernel,
+            NoControlsSet,
+            NoControls {
+                gain: tutti_units::Db::new(0.0),
+            },
+        );
+        (prepared(node, SampleRate::SR_48K, 64), heard)
+    }
+
+    fn block_under(node: &mut KernelNode<Tempo>, transport: TransportPosition) {
+        let env = Env {
+            frame: Frame::new(0),
+            sample_rate: SampleRate::SR_48K,
+            block_len: Samples::new(64),
+            transport,
+            changes: TransportChanges::NONE,
+            play: PlayClock::ZERO,
+        };
+        drive_input(
+            node,
+            &env,
+            Planes::new(&[&[0.0f32; 64][..]]).unwrap(),
+            &[],
+            &[],
+        );
+    }
+
+    /// A kernel is told, once a block, the tempo of the transport the
+    /// block runs under: 90 bpm playing, and a stopped transport's set 75 bpm (a stopped
+    /// transport holds its position and its tempo).
+    #[test]
+    fn a_kernel_hears_the_transports_tempo_once_a_block() {
+        use std::sync::atomic::Ordering::Relaxed;
+        use tutti_units::Beat;
+        let (mut node, heard) = tempo_node();
+        block_under(
+            &mut node,
+            TransportPosition::new(true, Bpm::of(90.0), Beat::new(8.0), None),
+        );
+        assert_eq!(f64::from_bits(heard.last.load(Relaxed)), 90.0);
+        assert_eq!(heard.calls.load(Relaxed), 1);
+        block_under(
+            &mut node,
+            TransportPosition::new(false, Bpm::of(75.0), Beat::new(3.0), None),
+        );
+        assert_eq!(f64::from_bits(heard.last.load(Relaxed)), 75.0);
+        assert_eq!(heard.calls.load(Relaxed), 2);
     }
 }

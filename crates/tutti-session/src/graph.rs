@@ -58,7 +58,7 @@ use tutti_graph::{
     TapWriter,
 };
 use tutti_graph::{
-    Edge as RawEdge, EdgeId, InPort as RawIn, NodeKey, OutPort as RawOut, Sink, Source,
+    Edge as RawEdge, EdgeId, InPort as RawIn, NodeKey, OutPort as RawOut, PortSink, PortSource,
 };
 use tutti_graph::{
     EventCapacity, EventInletNode, EventInletWriter, EventTapId, MeterId, MeterSpec, MissingSource,
@@ -139,7 +139,7 @@ pub enum Feeder {
     /// A host's declarations.
     Declared,
     /// The session's MIDI clock, which feeds every output port
-    /// (`midi_output`, feature `midi-hardware`).
+    /// (`open_midi_output`, feature `midi-hardware`).
     Clock,
 }
 
@@ -305,7 +305,7 @@ struct Placed<F: Float> {
 /// `Editor`: the edit/commit boundary stays visible.
 pub struct Graph<F: Float = f32> {
     editor: Editor<F>,
-    local: Option<Local<F>>,
+    local: Option<Box<Local<F>>>,
     nodes: BTreeMap<NodeKey, Entry>,
     /// What each node's params are written through: the session's value
     /// table, which the session's `Values` share.
@@ -521,7 +521,7 @@ impl<F: Float> Graph<F> {
         let (mut editor, exec) = Editor::<F>::with_format(prepare_for(rate, max_block, quantum));
         let topology = &mut editor.spec_mut().topology;
         topology.inputs = inputs;
-        topology.set_outputs(vec![Source::Zero; outputs]);
+        topology.set_outputs(vec![PortSource::Zero; outputs]);
         // Declared and on from the start: a host reads the master level
         // without asking for it.
         // `Outputs` names no source, so the open cannot be refused.
@@ -533,11 +533,11 @@ impl<F: Float> Graph<F> {
         master_meter.enable();
         Self {
             editor,
-            local: Some(Local {
+            local: Some(Box::new(Local {
                 exec,
                 #[cfg(feature = "testing")]
                 scratch: Vec::new(),
-            }),
+            })),
             nodes: BTreeMap::new(),
             values: ValueTable::new(),
             edited: true,
@@ -1360,7 +1360,7 @@ impl<F: Float> Graph<F> {
             // A feedback edge is reported as the pair of ports it joins.
             let source = match id.from {
                 RawEdge::Direct(source) => source,
-                RawEdge::Feedback(f) => Source::Node(f.from),
+                RawEdge::Feedback(f) => PortSource::Node(f.from),
             };
             // Explicit silence is no wire an app made: nothing to report.
             let Some(from) = OutPort::of_source(source) else {
@@ -2056,19 +2056,19 @@ impl<F: Float> Graph<F> {
     // --- Edges ---
 
     /// The graph's raw source for an [`OutPort`].
-    fn raw_source(port: OutPort) -> Option<Source> {
+    fn raw_source(port: OutPort) -> Option<PortSource> {
         match port.end() {
-            OutEnd::Node(node, index) => Some(Source::Node(RawOut {
+            OutEnd::Node(node, index) => Some(PortSource::Node(RawOut {
                 node,
                 port: u16::try_from(index).ok()?,
             })),
-            OutEnd::Input(index) => Some(Source::Global(u16::try_from(index).ok()?)),
+            OutEnd::Input(index) => Some(PortSource::Global(u16::try_from(index).ok()?)),
         }
     }
 
     /// The graph's raw sources for `ports`: a port whose index no `u16` holds is
     /// a source that does not exist, named, never dropped.
-    fn raw_sources(&self, ports: &[OutPort]) -> Result<Vec<Source>, MissingSource> {
+    fn raw_sources(&self, ports: &[OutPort]) -> Result<Vec<PortSource>, MissingSource> {
         ports
             .iter()
             .map(|&port| {
@@ -2105,8 +2105,8 @@ impl<F: Float> Graph<F> {
     /// port has.
     pub(crate) fn edge_id(edge: Edge) -> Option<EdgeId> {
         let sink = match edge.sink().end() {
-            InEnd::Node(..) => Sink::Port(Self::raw_in(edge.sink())?),
-            InEnd::Output(channel) => Sink::Output(u16::try_from(channel).ok()?),
+            InEnd::Node(..) => PortSink::Port(Self::raw_in(edge.sink())?),
+            InEnd::Output(channel) => PortSink::Output(u16::try_from(channel).ok()?),
         };
         Some(EdgeId {
             sink,
@@ -2114,16 +2114,16 @@ impl<F: Float> Graph<F> {
         })
     }
 
-    /// The source a raw [`Source`] names, `None` for a node the session did
+    /// The source a raw [`PortSource`] names, `None` for a node the session did
     /// not insert (a lane) or silence.
-    fn lift(&self, source: Source) -> Option<OutPort> {
+    fn lift(&self, source: PortSource) -> Option<OutPort> {
         match source {
-            Source::Node(p) => self
+            PortSource::Node(p) => self
                 .nodes
                 .contains_key(&p.node)
                 .then(|| OutPort::new(p.node, usize::from(p.port))),
-            Source::Global(port) => Some(Root::input(usize::from(port))),
-            Source::Zero => None,
+            PortSource::Global(port) => Some(Root::input(usize::from(port))),
+            PortSource::Zero => None,
         }
     }
 
@@ -2261,8 +2261,8 @@ impl<F: Float> Graph<F> {
         }
         let spec = self.editor.spec_mut();
         let removed = match id.sink {
-            Sink::Port(at) => spec.disconnect(at, id.from),
-            Sink::Output(channel) => match id.from {
+            PortSink::Port(at) => spec.disconnect(at, id.from),
+            PortSink::Output(channel) => match id.from {
                 RawEdge::Direct(source) => {
                     usize::from(channel) < spec.topology.outputs.len()
                         && spec.disconnect_output(usize::from(channel), source)
@@ -2288,7 +2288,7 @@ impl<F: Float> Graph<F> {
                     .into_iter()
                     .flatten()
                     .map(|&from| EdgeId {
-                        sink: Sink::Port(at),
+                        sink: PortSink::Port(at),
                         from,
                     })
                     .collect()
@@ -2300,7 +2300,7 @@ impl<F: Float> Graph<F> {
                 .into_iter()
                 .flatten()
                 .map(|&s| EdgeId {
-                    sink: Sink::Output(channel as u16),
+                    sink: PortSink::Output(channel as u16),
                     from: RawEdge::Direct(s),
                 })
                 .collect(),
@@ -2375,7 +2375,7 @@ impl<F: Float> Graph<F> {
         from: Vec<OutPort>,
         hard: bool,
     ) -> Result<(), ConnectError> {
-        let mut want: Vec<(Source, OutPort)> = Vec::new();
+        let mut want: Vec<(PortSource, OutPort)> = Vec::new();
         for port in from {
             self.check_wire(port, to)?;
             let source = Self::raw_source(port).ok_or(ConnectError::NoSuchOutPort(port))?;
@@ -2687,7 +2687,7 @@ impl<F: Float> Graph<F> {
                 // its width.
                 let source = tutti_buffers::ChannelTopology::from(out_topology);
                 let placed = if source.is_unassigned() {
-                    tutti_buffers::ChannelTopology::assumed(source.width())
+                    tutti_buffers::ChannelTopology::default_for(source.width())
                 } else {
                     source
                 };
@@ -3423,7 +3423,7 @@ impl<F: Float> Graph<F> {
     /// order for the width the graph has.
     pub(crate) fn root_in_force(&self) -> tutti_buffers::ChannelTopology {
         self.root.clone().unwrap_or_else(|| {
-            tutti_buffers::ChannelTopology::assumed(ChannelLayout::clamped(self.outputs()))
+            tutti_buffers::ChannelTopology::default_for(ChannelLayout::clamped(self.outputs()))
         })
     }
 
@@ -3432,7 +3432,7 @@ impl<F: Float> Graph<F> {
     fn placed_topology(&self) -> Option<tutti_buffers::ChannelTopology> {
         let placed = self.output.as_ref()?;
         Some(placed.control.device(placed.device).map_or_else(
-            || tutti_buffers::ChannelTopology::assumed(placed.device),
+            || tutti_buffers::ChannelTopology::default_for(placed.device),
             |p| p.topology,
         ))
     }
@@ -3557,7 +3557,7 @@ impl<F: Float> Graph<F> {
                         tutti_buffers::FoldError::from(tutti_buffers::BufferError::from(e))
                     })?;
                     tutti_graph::fold_to_topology::<f32>(
-                        &tutti_buffers::ChannelTopology::assumed(width),
+                        &tutti_buffers::ChannelTopology::default_for(width),
                         placed,
                     )?;
                 }
@@ -4138,7 +4138,7 @@ mod root_fade_tests {
     use super::*;
     use std::sync::Arc;
     use tutti_buffers::Bed;
-    use tutti_graph::{FadeLaw, ForkByClone, OutPort, RootId, Source};
+    use tutti_graph::{FadeLaw, ForkByClone, OutPort, PortSource, RootId};
     use tutti_nodes::testing::Const;
     use tutti_tempo::TempoMap;
     use tutti_units::Bpm;
@@ -4155,10 +4155,10 @@ mod root_fade_tests {
         );
         let (node, _) = g.add(ForkByClone(Const::mono(1.0)));
         let node = NodeKey::from(node);
-        g.editor
-            .spec_mut()
-            .topology
-            .set_outputs([Source::Node(OutPort { node, port: 0 }), Source::Zero]);
+        g.editor.spec_mut().topology.set_outputs([
+            PortSource::Node(OutPort { node, port: 0 }),
+            PortSource::Zero,
+        ]);
         g.commit();
         (g, node)
     }

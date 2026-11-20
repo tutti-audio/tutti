@@ -34,29 +34,19 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// Starts queued worker stages while fewer than the configured number run.
     /// Each landing starts the next.
     pub(crate) fn pool_pump(&mut self) {
-        while let Some(Worker {
-            flight,
-            work,
-            asset,
-        }) = self.pool.entries.next_worker()
-        {
+        while let Some(Worker { flight, work }) = self.pool.entries.next_worker() {
             let defer = self.plugins.main_deferral();
             // A main stage the worker made drops its output on the main thread
             // wherever the stage itself is dropped: the jobs' channel, a session
             // that ends.
-            // The identity is taken before the load reads the asset, so a change
-            // during the read shows at the next refresh.
             self.jobs.submit(
-                move || {
-                    let loaded_from = asset.and_then(|asset| asset.identity());
-                    (loaded_from, work().map(|staged| staged.deferring(defer)))
-                },
+                move || work().map(|staged| staged.deferring(defer)),
                 move |session, done, _| {
-                    let (loaded_from, done) = match done {
-                        Ok((loaded_from, done)) => (loaded_from, done),
-                        Err(failed) => (None, Err(LoadError::Job(failed))),
+                    let done = match done {
+                        Ok(done) => done,
+                        Err(failed) => Err(LoadError::Job(failed)),
                     };
-                    session.land_pool_load(flight, loaded_from, done);
+                    session.land_pool_load(flight, done);
                 },
             );
         }

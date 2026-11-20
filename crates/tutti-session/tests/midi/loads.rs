@@ -1,22 +1,15 @@
-//! A MIDI file load is a job: `Midi::load_midi` returns a `Job<LoadMidi>` at
-//! once and the `LoadedMidi` arrives through `JobOutput::take` in `update()`, or
-//! `Job::wait` returns it. Each track arrives as a clip value built on the
-//! worker. A SoundFont is a pool entry, loaded the pool's way.
+//! A MIDI file load is a value: `Midi::load_midi` returns a `LoadMidi` and
+//! `run()` returns the `LoadedMidi`, each track a clip value. A SoundFont is a pool entry, loaded the pool's way.
 //!
 //! The fixtures are bytes written by hand, so every figure is the file's own
 //! (SMF 1.0): ticks over the division are beats, a Set Tempo of 500 000
 //! microseconds is a quarter note in half a second.
 
 use std::path::{Path, PathBuf};
-use std::time::Duration;
-use tutti_platform::Instant;
 
 use tutti_midi_file::{Normalized, TimelineDrop};
 use tutti_music::TimeSignature;
-use tutti_session::{
-    DetachedSession, LoadMidiError, LoadedMidi, NoCommonTimelineError, Session, SessionEvent,
-    TrackError,
-};
+use tutti_session::{DetachedSession, LoadedMidi, NoCommonTimelineError, Session, TrackError};
 use tutti_units::{Beat, SampleRate, Seconds};
 
 fn session() -> DetachedSession {
@@ -65,10 +58,9 @@ fn write(dir: &Path, name: &str, bytes: &[u8]) -> PathBuf {
     path
 }
 
-/// Loads the file at `path` and waits for it.
-fn load(s: &mut DetachedSession, path: PathBuf) -> Result<LoadedMidi, LoadMidiError> {
-    let job = s.midi().load_midi(path);
-    job.wait(s)
+/// Loads the file at `path`.
+fn load(s: &mut DetachedSession, path: PathBuf) -> Result<LoadedMidi, tutti_midi_file::ReadError> {
+    s.midi().load_midi(path).run()
 }
 
 /// A file held only as bytes loads as the file at its path does: the same
@@ -83,8 +75,7 @@ fn a_midi_file_loads_from_bytes_as_its_tracks() {
         ],
     );
     let mut s = session();
-    let job = s.midi().load_midi(bytes);
-    let loaded = job.wait(&mut s).expect("loads");
+    let loaded = s.midi().load_midi(bytes).run().expect("loads");
     assert_eq!(loaded.file().tracks().len(), 2);
     assert_eq!(loaded.track(1).unwrap().events.len(), 4);
     let tempo = loaded.tempo().expect("one timeline");
@@ -246,116 +237,100 @@ fn a_file_in_smpte_time_lands_and_says_why_it_has_no_clip_or_timeline() {
 }
 
 #[test]
-fn a_missing_file_lands_a_read_error() {
+fn a_missing_file_is_an_io_read_error() {
     let dir = tempfile::tempdir().unwrap();
     let outcome = load(&mut session(), dir.path().join("none.mid"));
     assert!(
-        matches!(outcome, Err(LoadMidiError::Read(_))),
+        matches!(outcome, Err(tutti_midi_file::ReadError::Io(_))),
         "{outcome:?}"
     );
-}
-
-/// The result arrives in `update()` through `JobOutput::take`, each load with its
-/// own job and file.
-#[test]
-fn two_loads_land_in_update_each_for_its_own_job() {
-    let dir = tempfile::tempdir().unwrap();
-    let a = write(
-        dir.path(),
-        "a.mid",
-        &smf(0, &[track(&[&TEMPO_120, &THREE_FOUR, &note(0, 60)])]),
-    );
-    let b = write(
-        dir.path(),
-        "b.mid",
-        &smf(
-            0,
-            &[track(&[
-                &TEMPO_120,
-                &THREE_FOUR,
-                &note(0, 60),
-                &note(0, 62),
-            ])],
-        ),
-    );
-    let mut s = session();
-    let (ja, jb) = (s.midi().load_midi(a), s.midi().load_midi(b));
-    assert_ne!(ja.id(), jb.id());
-    let (mut got_a, mut got_b) = (None, None);
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while got_a.is_none() || got_b.is_none() {
-        assert!(Instant::now() < deadline, "the loads never landed");
-        for event in s.update() {
-            if let SessionEvent::JobDone(mut output) = event {
-                got_a = got_a.or(output.take(&ja));
-                got_b = got_b.or(output.take(&jb));
-            }
-        }
-        std::thread::yield_now();
-    }
-    let events = |got: Option<Result<LoadedMidi, LoadMidiError>>| {
-        got.unwrap().unwrap().track(0).unwrap().events.len()
-    };
-    assert_eq!((events(got_a), events(got_b)), (2, 4));
 }
 
 #[cfg(feature = "soundfont")]
 mod soundfont {
     use super::*;
-    use tutti_session::{LoadError, PoolState, soundfont};
-    use tutti_soundfont::{Settings, SoundFontUnit};
+    use tutti_session::LoadError;
+    use tutti_soundfont::Settings;
 
-    /// Updates until the entry under `key` is no longer pending.
-    fn settled(s: &mut DetachedSession, key: &'static str) -> PoolState {
-        let deadline = tutti_platform::Instant::now() + std::time::Duration::from_secs(20);
-        loop {
-            let _ = s.update();
-            match s.pool_state(&key) {
-                Some(PoolState::Loading) => {}
-                Some(state) => return state,
-                None => panic!("the entry is not declared"),
+    /// The record count of the `phdr` chunk of the SoundFont `bytes` (SF2 2.04
+    /// section 7.2): a 38-byte record per preset, and a terminal record.
+    fn declared_presets(bytes: &[u8]) -> usize {
+        fn chunks(mut body: &[u8]) -> Vec<(&[u8], &[u8])> {
+            let mut found = Vec::new();
+            while body.len() >= 8 {
+                let size = u32::from_le_bytes(body[4..8].try_into().unwrap()) as usize;
+                let end = (8 + size).min(body.len());
+                found.push((&body[..4], &body[8..end]));
+                body = &body[(end + (size & 1)).min(body.len())..];
             }
-            assert!(
-                tutti_platform::Instant::now() < deadline,
-                "the font never landed"
-            );
-            std::thread::sleep(std::time::Duration::from_millis(1));
+            found
         }
+        let (_, riff) = chunks(bytes).into_iter().next().expect("a RIFF chunk");
+        let pdta = chunks(&riff[4..])
+            .into_iter()
+            .find(|(id, body)| *id == b"LIST" && body.starts_with(b"pdta"))
+            .expect("a pdta list");
+        let (_, phdr) = chunks(&pdta.1[4..])
+            .into_iter()
+            .find(|(id, _)| *id == b"phdr")
+            .expect("a phdr chunk");
+        phdr.len() / 38 - 1
     }
 
+    /// **A load reads the presets the file declares**: the `phdr` record count
+    /// less its terminal record, and a unit builds from the handle's font.
     #[test]
-    fn a_soundfont_entry_loads_a_font_a_unit_is_built_from() {
-        let mut s = session();
-        s.pool(soundfont(
-            "gm",
-            tutti_fixtures::asset("soundfonts/TimGM6mb.sf2"),
-        ))
-        .unwrap();
-        assert!(matches!(settled(&mut s, "gm"), PoolState::Loaded));
-        let font = s.soundfont(&"gm").unwrap();
-        let unit = SoundFontUnit::<f32>::new(font, Settings::new());
+    fn load_soundfont_reads_the_presets_the_file_declares() {
+        let path = tutti_fixtures::asset("soundfonts/TimGM6mb.sf2");
+        let declared = declared_presets(&std::fs::read(&path).unwrap());
+        assert!(declared > 0);
+        let font = session().load_soundfont(path).run().unwrap();
+        assert_eq!(font.font().presets().len(), declared);
+        let unit = Settings::new().build::<f32>(std::sync::Arc::clone(font.font()));
         assert!(unit.is_ok(), "{:?}", unit.err());
     }
 
     #[test]
-    fn a_soundfont_entry_loads_from_bytes() {
+    fn a_soundfont_loads_from_bytes_and_never_changes() {
         let bytes = std::fs::read(tutti_fixtures::asset("soundfonts/TimGM6mb.sf2")).unwrap();
-        let mut s = session();
-        s.pool(soundfont("gm", bytes)).unwrap();
-        assert!(matches!(settled(&mut s, "gm"), PoolState::Loaded));
-        assert!(!s.soundfont(&"gm").unwrap().presets().is_empty());
+        let declared = declared_presets(&bytes);
+        let font = session().load_soundfont(bytes).run().unwrap();
+        assert_eq!(font.font().presets().len(), declared);
+        assert!(!font.changed(), "an asset of bytes never changes");
     }
 
     #[test]
-    fn a_file_that_is_no_soundfont_fails_its_entry_with_a_soundfont_error() {
+    fn a_file_that_is_no_soundfont_is_a_soundfont_error() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("junk.sf2");
         std::fs::write(&path, b"this is not a RIFF file at all").unwrap();
-        let mut s = session();
-        s.pool(soundfont("junk", path)).unwrap();
         assert!(matches!(
-            settled(&mut s, "junk"),
-            PoolState::Failed(LoadError::SoundFont(_))
+            session().load_soundfont(path).run(),
+            Err(LoadError::SoundFont(_))
         ));
+    }
+
+    /// **`changed` is the file's identity moving**: its modification time here.
+    #[test]
+    fn a_soundfont_is_changed_once_its_file_is_rewritten() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("gm.sf2");
+        std::fs::copy(tutti_fixtures::asset("soundfonts/TimGM6mb.sf2"), &path).unwrap();
+        let at = |seconds: u64| {
+            std::fs::File::options()
+                .write(true)
+                .open(&path)
+                .and_then(|file| {
+                    file.set_modified(
+                        std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(seconds),
+                    )
+                })
+                .unwrap();
+        };
+        at(1_000);
+        let font = session().load_soundfont(&path).run().unwrap();
+        assert!(!font.changed());
+        at(2_000);
+        assert!(font.changed());
     }
 }

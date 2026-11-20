@@ -347,7 +347,7 @@ fn a_restart_the_hook_refuses_leaves_the_device_placement_as_it_was() {
     use tutti_buffers::{Bed, Placement};
     let (mut s, _old, _osc, lim) = engine();
     let before = s.output_device().expect("an engine renders it");
-    assert_eq!(before.placement, Placement::Assumed);
+    assert_eq!(before.placement, Placement::Default);
     let (loop_back, ()) = s.graph().add(ForkByClone(Through::mono()));
     s.graph()
         .set_sources(InPort::new(loop_back, 0), [OutPort::new(lim, 0)])

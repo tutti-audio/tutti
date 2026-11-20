@@ -17,7 +17,9 @@
 //!   coefficient solve shared across the channels), `EqBandNode`, `CutFilterNode`, a
 //!   Butterworth or Linkwitz-Riley high-pass or low-pass of 6 to 96 dB per octave,
 //!   `BellFilterNode`, a peaking equalizer matched to the analog bell up to Nyquist, and
-//!   `TiltFilterNode`, a first-order tilt about a pivot, and
+//!   `TiltFilterNode`, a first-order tilt about a pivot,
+//!   `GraphicEqNode`, a bank of cookbook peaking bells at the ISO 266 octave or third-octave
+//!   centers, and
 //!   `EnvelopeFilterNode`, an SVF whose cutoff follows the input's level.
 //! - **Crossover** — `CrossoverNode`, which makes `bands × channels` outputs from
 //!   `tutti_dsp::CrossoverBank`, a 2 to 6 band Linkwitz-Riley 4th-order split (the
@@ -56,10 +58,16 @@
 //!   transport beat (a span fixed at build); its depth and rate are read per frame.
 //! - **Oscillator** — [`OscillatorNode`], a mono source: a sine, or a saw, square or triangle
 //!   band-limited by `tutti_dsp::Oscillator`; its frequency (`Frequency`) and level (`Volume`) are read per frame.
+//! - **Noise** — [`NoiseNode`], a mono source of white, pink or brown noise
+//!   (`tutti_dsp::Noise`) from a seed; its level (`Volume`) is read per frame.
 //! - **Dry/wet** — the convolver, delay, chorus/flanger, phaser and the two reverbs output their wet signal only; blend with the input through the graph's `set_mix`.
 //! - **Level and pan modulation** — `TremoloNode` and `AutoPanNode` (an LFO of a chosen
 //!   `OscillatorWave` scales the level, or places a stereo pair by a `PanLaw`) and `RingModNode`
 //!   (the input times a sine carrier), from a `TremoloConfig`, `AutoPanConfig` and `RingModConfig`.
+//! - **Comb filter and frequency shifter** — `CombFilterNode` (a feedforward or feedback
+//!   `CombForm` of one delay, its coefficient live) and `FrequencyShifterNode` (single-sideband
+//!   modulation by a signed shift in hertz through a Hilbert all-pass network, with no latency),
+//!   from a `CombFilterConfig` and a `FrequencyShifterConfig`.
 //! - **Mixing** — `BusStripNode` (volume / balance; a mute or bypass is the graph's `NodeMode`).
 //!   Summing is the graph's: a port or an output channel sums its sources; so is
 //!   folding between layouts (a bus edge between declared buses).
@@ -206,7 +214,7 @@
 //!
 //! - Filters: [`SvfFilterNode`] ([`SvfType`]), [`LadderFilterNode`]
 //!   ([`LadderType`]), [`EqBandNode`], [`CutFilterNode`] ([`CutResponse`]), [`BellFilterNode`],
-//!   [`TiltFilterNode`], [`EnvelopeFilterNode`], [`FirConvolverConfig`] (a
+//!   [`TiltFilterNode`], [`GraphicEqNode`] ([`GraphicBands`]), [`EnvelopeFilterNode`], [`FirConvolverConfig`] (a
 //!   linear-phase equalizer: a [`tutti_dsp::Fir`] through the convolver); the coefficient solvers
 //!   [`SvfDesign::new`](tutti_dsp::SvfDesign::new) and
 //!   [`LadderDesign::new`](tutti_dsp::LadderDesign::new); a node runs in the float of the
@@ -274,16 +282,20 @@ pub use tutti_units::{
 
 mod click;
 pub use click::{
-    ClickConfig, ClickLevel, ClickLevelError, ClickNode, ClickSettings, ClickState, MetronomeMode,
+    ClickConfig, ClickLevel, ClickLevelError, ClickNode, ClickNodeConfig, ClickSettings,
+    ClickState, MetronomeMode,
 };
 
 mod lfo;
 // `LfoShape` and `Waveform` are re-exported from `tutti-modulation` through
 // `lfo`, so `use tutti_nodes::LfoShape` works.
-pub use lfo::{LfoClock, LfoNode, LfoShape, Waveform};
+pub use lfo::{LfoClock, LfoConfig, LfoNode, LfoShape, Waveform};
 
 mod oscillator;
-pub use oscillator::OscillatorNode;
+pub use oscillator::{OscillatorConfig, OscillatorNode};
+
+mod noise;
+pub use noise::{NoiseConfig, NoiseNode};
 
 mod delay;
 pub use delay::{DelayConfig, DelayKernel, DelayNode, DelaySet};
@@ -292,8 +304,8 @@ pub use delay::{DelayConfig, DelayKernel, DelayNode, DelaySet};
 // `tutti-dsp`'s only.
 pub use tutti_dsp::{
     ChannelTimes, ChannelTimesError, DelayControls, DelayLayout, DelayLayoutBuilder,
-    DelayLayoutError, FeedbackRouting, FeedbackRoutingBuilder, FeedbackRoutingError,
-    InterpolationMode, MaxDelay, MaxDelayError,
+    DelayLayoutError, DelayTiming, FeedbackRouting, FeedbackRoutingBuilder, FeedbackRoutingError,
+    InterpolationMode, MaxDelay, MaxDelayError, NoteTimes, NoteTimesError,
 };
 
 mod distortion;
@@ -324,8 +336,14 @@ pub use filter::{
 pub use filter::{
     EnvelopeFilterConfig, EnvelopeFilterKernel, EnvelopeFilterNode, EnvelopeFilterSet,
 };
+pub use filter::{
+    GraphicEqConfig, GraphicEqControls, GraphicEqKernel, GraphicEqNode, GraphicEqSet,
+};
 pub use tutti_dsp::EnvelopeFilterControls;
-pub use tutti_dsp::{ButterworthOrder, CutResponse};
+pub use tutti_dsp::GraphicBands;
+pub use tutti_dsp::{
+    ButterworthOrder, CutResponse, EllipticTolerances, PassbandRipple, StopbandAttenuation,
+};
 // The types in the filter nodes' signatures stay reachable from here; the
 // algorithms behind them (`SvfDesign`, `LadderDesign`, `CrossoverModel`) are
 // `tutti-dsp`'s only.
@@ -368,7 +386,19 @@ pub use auto_pan::{AutoPanConfig, AutoPanKernel, AutoPanNode, AutoPanSet};
 pub use ring_mod::{RingModConfig, RingModKernel, RingModNode, RingModSet};
 pub use tremolo::{TremoloConfig, TremoloKernel, TremoloNode, TremoloSet};
 // The controls those start at, the wave of their LFOs and the law an auto-pan places by.
-pub use tutti_dsp::{AutoPanControls, OscillatorWave, PanLaw, RingModControls, TremoloControls};
+pub use tutti_dsp::{
+    AutoPanControls, NoiseColour, OscillatorWave, PanLaw, RingModControls, TremoloControls,
+};
+
+// Comb filter and frequency shifter.
+mod comb;
+mod frequency_shifter;
+pub use comb::{CombFilterConfig, CombFilterKernel, CombFilterNode, CombFilterSet};
+pub use frequency_shifter::{
+    FrequencyShifterConfig, FrequencyShifterKernel, FrequencyShifterNode, FrequencyShifterSet,
+};
+// The controls those start at and the form of a comb.
+pub use tutti_dsp::{CombControls, CombForm, FrequencyShifterControls};
 
 // The mixer strip: volume, stereo balance, mute. Ungated: a fader is not a
 // spatial concept.
@@ -378,7 +408,7 @@ pub use strip::{BusStripConfig, BusStripNode};
 // The one node over an effect's algorithm and state: the driver and the trait an
 // algorithm implements to run in it.
 mod kernel;
-pub use kernel::{ControlSignals, Kernel, KernelNode, MAX_SIGNALS};
+pub use kernel::{ControlSignals, Kernel, KernelConfig, KernelNode, MAX_SIGNALS};
 
 pub use params::{At, Control, ControlRead, ControlSet, ControlValid, HasControl, Params};
 
@@ -423,7 +453,8 @@ pub use tutti_dsp::{
 // (`SignalSource`): nodes that send a raw value into control lanes.
 mod signal;
 pub use signal::{
-    EnvelopeFollowerNode, NoteEnvelopeNode, SOURCE_EVENT_CAPACITY, SourceNode, SourcePorts,
+    EnvelopeFollowerConfig, EnvelopeFollowerNode, NoteEnvelopeConfig, NoteEnvelopeNode,
+    SOURCE_EVENT_CAPACITY, SourceNode, SourcePorts,
 };
 
 // Declarations compiled and applied to an `Editor` as lanes, signal-source

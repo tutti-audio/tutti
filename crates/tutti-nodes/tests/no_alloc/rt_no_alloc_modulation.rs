@@ -15,16 +15,17 @@ use tutti_buffers::MaxBlock;
 use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_fixtures::midi;
 use tutti_graph::contract::{BlockRig, Direct};
-use tutti_graph::{IntoNode, Node, ParamNode, ParamSet};
+use tutti_graph::{IntoNode, Node, ParamNode, ParamSet, TransportPosition};
+use tutti_music::{NoteDuration, NoteModifier, NoteValue};
 use tutti_nodes::{
     ChannelTimes, DelayConfig, DelayControls, DelayLayout, DelayNode, FeedbackRouting,
-    InterpolationMode, LfoNode, LfoShape, MaxDelay, ModDelayConfig, ModDelayNode, PhaserConfig,
-    PhaserNode, Stages, Stagger, SweepRange,
+    InterpolationMode, LfoConfig, LfoNode, LfoShape, MaxDelay, ModDelayConfig, ModDelayNode,
+    NoteTimes, PhaserConfig, PhaserNode, Stages, Stagger, SweepRange,
 };
 use tutti_ump::{MidiChannel, U7};
 use tutti_units::{
-    Ballistics, BeatsPerCycle, Feedback, Hz, ParamId, PhaseIncrement, Real, SampleRate, Seconds,
-    UnitParam,
+    Ballistics, Beat, BeatsPerCycle, Bpm, Feedback, Hz, ParamId, PhaseIncrement, Real, SampleRate,
+    Seconds, UnitParam,
 };
 
 /// A node through `BlockRig`: its inputs an alternating signal of
@@ -61,7 +62,7 @@ fn gate<N: IntoNode>(node: N, amplitude: f32, blocks: usize, mut between: impl F
 #[test]
 fn lfo_node_process_is_allocation_free() {
     gate(
-        LfoNode::new(LfoShape::Sine).with_rate(Hz::new(2.0_f64)),
+        LfoNode::from(LfoConfig::new(LfoShape::Sine).rate(Hz::new(2.0_f64))),
         0.0,
         5_000,
         |_| {},
@@ -73,7 +74,7 @@ fn lfo_random_shape_process_is_allocation_free() {
     // RandomSmooth hashes its cycle index on its own path. Fast enough
     // to step inside the warm-up, so the node is audible there.
     gate(
-        LfoNode::new(LfoShape::RandomSmooth).with_rate(Hz::new(200.0_f64)),
+        LfoNode::from(LfoConfig::new(LfoShape::RandomSmooth).rate(Hz::new(200.0_f64))),
         0.0,
         5_000,
         |_| {},
@@ -86,9 +87,11 @@ fn lfo_random_shape_process_is_allocation_free() {
 #[test]
 fn beat_synced_lfo_process_is_allocation_free() {
     gate(
-        LfoNode::new(LfoShape::Sine)
-            .with_beat_sync(BeatsPerCycle::of(4.0))
-            .with_phase_offset(PhaseIncrement::new(0.25)),
+        LfoNode::from(
+            LfoConfig::new(LfoShape::Sine)
+                .beat_sync(BeatsPerCycle::of(4.0))
+                .phase_offset(PhaseIncrement::new(0.25)),
+        ),
         0.0,
         5_000,
         |_| {},
@@ -100,7 +103,7 @@ fn beat_synced_lfo_process_is_allocation_free() {
 fn delay(width: u16, time: f64, feedback: f64, cross: f64) -> DelayNode<f32> {
     DelayNode::<f32>::from(
         DelayConfig::new(DelayLayout::new(
-            BusTopology::assumed(ChannelLayout::from(width)).expect("a test width is one bus"),
+            BusTopology::default_for(ChannelLayout::from(width)).expect("a test width is one bus"),
             MaxDelay::of(Seconds::new(2.0)),
             InterpolationMode::Linear,
         ))
@@ -133,7 +136,7 @@ fn wide_6ch_delay_node_process_is_allocation_free() {
 
 /// A bus of `width` channels on the engine's order.
 fn bus(width: u16) -> BusTopology {
-    BusTopology::assumed(ChannelLayout::from(width)).expect("a test width is one bus")
+    BusTopology::default_for(ChannelLayout::from(width)).expect("a test width is one bus")
 }
 
 #[test]
@@ -400,10 +403,12 @@ fn lane_graph(max: usize) -> (tutti_graph::Editor, tutti_graph::Executor) {
     use std::sync::Arc;
     use tutti_graph::NodeKey;
     use tutti_graph::{EventOut, ParamIn, Prepare, Unforkable};
-    use tutti_graph::{OutPort, Source};
+    use tutti_graph::{OutPort, PortSource};
     use tutti_modulation::ControlProgram;
     use tutti_nodes::automation::Exponent;
-    use tutti_nodes::automation::{Breakpoint, ControlLaneNode, Curve, Law, Trajectory};
+    use tutti_nodes::automation::{
+        Breakpoint, ControlLaneNode, Curve, Law, Trajectory, UnitLaneConfig,
+    };
     use tutti_units::{Beat, Hz, ParamKey, Samples, UnitParam};
     let mut shaped = Trajectory::new();
     shaped.add_breakpoint(Breakpoint::with_law(
@@ -431,7 +436,10 @@ fn lane_graph(max: usize) -> (tutti_graph::Editor, tutti_graph::Executor) {
     clamped.add_breakpoint(Breakpoint::new(Beat::new(0.45), Hz::new(1.0)));
     let key = ParamKey::<Hz>::CUTOFF;
     let lane = |curve: Arc<dyn Curve>| {
-        ControlLaneNode::for_unit(key.addr(), ControlProgram::from_curve(curve), None, None)
+        ControlLaneNode::from(UnitLaneConfig::new(
+            key.addr(),
+            ControlProgram::from_curve(curve),
+        ))
     };
     let lanes = [
         lane(Arc::new(shaped.clone())),
@@ -455,7 +463,7 @@ fn lane_graph(max: usize) -> (tutti_graph::Editor, tutti_graph::Executor) {
             },
             EventOut { node: l, port: 0 },
         );
-        outputs.push(Source::Node(OutPort { node: p, port: 0 }));
+        outputs.push(PortSource::Node(OutPort { node: p, port: 0 }));
     }
     ed.spec_mut().topology.set_outputs(outputs);
     ed.commit().expect("commits");
@@ -643,7 +651,7 @@ impl tutti_graph::Node for Probe8 {
 fn lane_program(k: usize, generation: u32) -> tutti_modulation::ControlProgram {
     use std::sync::Arc;
     use tutti_modulation::{
-        Amount, Clock, ControlProgram, Law, Layer, LayerId, LfoShape, PeriodPoint, Polarity,
+        Amount, Clock, ControlProgramBuilder, Law, Layer, LayerId, LfoShape, PeriodPoint, Polarity,
         Waveform,
     };
     use tutti_nodes::automation::{Breakpoint, Exponent, Trajectory};
@@ -712,7 +720,11 @@ fn lane_program(k: usize, generation: u32) -> tutti_modulation::ControlProgram {
             (Some(curve), vec![layer(seconds, shape(LfoShape::Sawtooth))])
         }
     };
-    ControlProgram::new(automation, layers, vec![]).expect("a valid program")
+    let mut builder = ControlProgramBuilder::new().layers(layers);
+    if let Some(automation) = automation {
+        builder = builder.automation(automation);
+    }
+    builder.build().expect("a valid program")
 }
 
 /// Lane `k` for param `k % 8` of its probe, built against that port's
@@ -724,20 +736,23 @@ fn lane_for(
     use atomic_float::AtomicF64;
     use std::sync::Arc;
     use tutti_nodes::automation::ControlLaneNode as L;
+    use tutti_nodes::automation::UnitLaneConfig;
     use tutti_units::{Db, Depth, Feedback, Hz, Mix, ParamKey, Q};
-    let p = lane_program(k, 0);
-    let knob = Some(Arc::new(AtomicF64::new(400.0 + k as f64)).into());
-    let r = Some(range);
-    match k % 8 {
-        0 => L::for_unit(ParamKey::<Hz>::CUTOFF.addr(), p, knob, r),
-        1 => L::for_unit(ParamKey::<Q>::Q.addr(), p, knob, r),
-        2 => L::for_unit(ParamKey::<Db>::GAIN_DB.addr(), p, knob, r),
-        3 => L::for_unit(ParamKey::<Mix>::WET.addr(), p, knob, r),
-        4 => L::for_unit(ParamKey::<Feedback>::FEEDBACK.addr(), p, knob, r),
-        5 => L::for_unit(ParamKey::<Depth>::DEPTH.addr(), p, knob, r),
-        6 => L::for_unit(ParamKey::<Hz>::RATE.addr(), p, knob, r),
-        _ => L::for_unit(ParamKey::<Db>::THRESHOLD.addr(), p, knob, r),
-    }
+    let addr = match k % 8 {
+        0 => ParamKey::<Hz>::CUTOFF.addr(),
+        1 => ParamKey::<Q>::Q.addr(),
+        2 => ParamKey::<Db>::GAIN_DB.addr(),
+        3 => ParamKey::<Mix>::WET.addr(),
+        4 => ParamKey::<Feedback>::FEEDBACK.addr(),
+        5 => ParamKey::<Depth>::DEPTH.addr(),
+        6 => ParamKey::<Hz>::RATE.addr(),
+        _ => ParamKey::<Db>::THRESHOLD.addr(),
+    };
+    L::from(
+        UnitLaneConfig::new(addr, lane_program(k, 0))
+            .knob(Arc::new(AtomicF64::new(400.0 + k as f64)).into())
+            .range(range),
+    )
 }
 
 /// 200 lanes into the params of 25 [`Probe8`]s (one lane per port: a port
@@ -751,7 +766,7 @@ fn lanes_200(
 ) {
     use tutti_graph::NodeKey;
     use tutti_graph::{EventOut, ParamIn, ParamRange, Prepare, Unforkable};
-    use tutti_graph::{OutPort, Source};
+    use tutti_graph::{OutPort, PortSource};
     use tutti_units::Samples;
     let (mut ed, exec) = tutti_graph::Editor::new(Prepare::new(
         SampleRate::SR_48K,
@@ -767,7 +782,7 @@ fn lanes_200(
             ed.spec_mut()
                 .topology
                 .outputs
-                .push(vec![Source::Node(OutPort {
+                .push(vec![PortSource::Node(OutPort {
                     node: NodeKey(1000 + j),
                     port: p,
                 })]);
@@ -807,7 +822,7 @@ fn lane_moves(
         }
     }
     for (k, c) in controls.iter().enumerate().skip(block % 7).step_by(7) {
-        c.set_value(f64::from(300.0 + ((k + block) % 13) as f32 * 20.0));
+        c.store(f64::from(300.0 + ((k + block) % 13) as f32 * 20.0));
     }
     if block % 15 == 14 {
         for k in (block % 9..200).step_by(9) {
@@ -1027,13 +1042,16 @@ fn signal_graph(max: usize) -> (tutti_graph::Editor, tutti_graph::Executor) {
     use atomic_float::AtomicF64;
     use std::sync::Arc;
     use tutti_graph::NodeKey;
-    use tutti_graph::{Edge, InPort, OutPort, Source};
+    use tutti_graph::{Edge, InPort, OutPort, PortSource};
     use tutti_graph::{EventEdge, EventIn, EventOut, ForkByClone, ParamIn, ParamRange, Prepare};
     use tutti_modulation::{
-        Adsr, Amount, ControlProgram, InputLayer, Law, LayerId, Polarity, SourceId,
+        Adsr, Amount, ControlProgramBuilder, InputLayer, Law, LayerId, Polarity, SourceId,
     };
     use tutti_nodes::automation::ControlLaneNode;
-    use tutti_nodes::{EnvelopeFollowerNode, NoteEnvelopeNode};
+    use tutti_nodes::automation::UnitLaneConfig;
+    use tutti_nodes::{
+        EnvelopeFollowerConfig, EnvelopeFollowerNode, NoteEnvelopeConfig, NoteEnvelopeNode,
+    };
     use tutti_units::{Amplitude, Depth, Hz, ParamKey, Samples, Seconds, UnitParam};
     let (mut ed, exec) = tutti_graph::Editor::new(Prepare::new(
         SampleRate::SR_48K,
@@ -1049,7 +1067,7 @@ fn signal_graph(max: usize) -> (tutti_graph::Editor, tutti_graph::Executor) {
         ed.spec_mut()
             .topology
             .outputs
-            .push(vec![Source::Node(OutPort {
+            .push(vec![PortSource::Node(OutPort {
                 node: probe(k),
                 port: 0,
             })]);
@@ -1069,17 +1087,17 @@ fn signal_graph(max: usize) -> (tutti_graph::Editor, tutti_graph::Executor) {
                     width: 300 + 11 * k as u64,
                 }),
             );
-            let follower = EnvelopeFollowerNode::new(
+            let follower = EnvelopeFollowerNode::from(EnvelopeFollowerConfig::new(
+                ChannelLayout::STEREO,
                 id,
                 Ballistics::new(Seconds::new(0.001 + 0.0005 * k as f64), Seconds::new(0.03))
                     .unwrap(),
-                ChannelLayout::STEREO,
-            );
+            ));
             ed.insert(node, "follower", ForkByClone(follower));
             for port in 0..2 {
                 ed.spec_mut().topology.edges.insert(
                     InPort { node, port },
-                    vec![Edge::Direct(Source::Node(OutPort { node: src, port }))],
+                    vec![Edge::Direct(PortSource::Node(OutPort { node: src, port }))],
                 );
             }
         } else {
@@ -1099,7 +1117,7 @@ fn signal_graph(max: usize) -> (tutti_graph::Editor, tutti_graph::Executor) {
             ed.insert(
                 node,
                 "envelope",
-                ForkByClone(NoteEnvelopeNode::new(id, adsr)),
+                ForkByClone(NoteEnvelopeNode::from(NoteEnvelopeConfig::new(id, adsr))),
             );
             ed.spec_mut().connect_events(
                 EventIn { node, port: 0 },
@@ -1115,11 +1133,16 @@ fn signal_graph(max: usize) -> (tutti_graph::Editor, tutti_graph::Executor) {
                 curve: Law::Linear,
             },
         };
-        let lane = ControlLaneNode::for_unit(
-            ParamKey::<Hz>::CUTOFF.addr(),
-            ControlProgram::new(None, vec![], vec![input]).expect("valid"),
-            Some(Arc::new(AtomicF64::new(0.5)).into()),
-            Some(ed.param_range_cell(cutoff(k)).expect("committed")),
+        let lane = ControlLaneNode::from(
+            UnitLaneConfig::new(
+                ParamKey::<Hz>::CUTOFF.addr(),
+                ControlProgramBuilder::new()
+                    .inputs(vec![input])
+                    .build()
+                    .expect("valid"),
+            )
+            .knob(Arc::new(AtomicF64::new(0.5)).into())
+            .range(ed.param_range_cell(cutoff(k)).expect("committed")),
         );
         let lane_key = NodeKey(6000 + k as u64);
         ed.insert(lane_key, "lane", lane);
@@ -1306,7 +1329,7 @@ fn signal_sources_are_allocation_free_serial_and_on_a_pool() {
 #[test]
 fn an_apply_that_republishes_is_allocation_free_on_the_audio_thread() {
     use tutti_graph::NodeKey;
-    use tutti_graph::{Edge, InPort, OutPort, Source};
+    use tutti_graph::{Edge, InPort, OutPort, PortSource};
     use tutti_graph::{Editor, ForkByClone, Prepare, TransportPosition};
     use tutti_modulation::{
         Clock, Declarations, Law, Polarity, RouteDecl, RouteKey, RouteTarget, Source as ModSource,
@@ -1374,9 +1397,12 @@ fn an_apply_that_republishes_is_allocation_free_on_the_audio_thread() {
             node: filter,
             port: 0,
         },
-        vec![Edge::Direct(Source::Node(OutPort { node: saw, port: 0 }))],
+        vec![Edge::Direct(PortSource::Node(OutPort {
+            node: saw,
+            port: 0,
+        }))],
     );
-    topology.set_outputs(vec![Source::Node(OutPort {
+    topology.set_outputs(vec![PortSource::Node(OutPort {
         node: filter,
         port: 0,
     })]);
@@ -1616,6 +1642,74 @@ fn the_delay_corners_are_allocation_free() {
             assert!(cells.set(UnitParam::CrossFeedback, if i & 2 == 2 { 1.0 } else { 0.0 }));
         },
     );
+}
+
+/// A tempo-synced delay: its times follow a tempo that moves every block, from a crawl to a
+/// sprint, and the retarget and the ramps it aims allocate nothing. 400 blocks of the input
+/// are run before the gate is armed, so the loop walks real DSP.
+#[test]
+fn the_synced_delay_following_a_moving_tempo_is_allocation_free_and_finite() {
+    let notes = [
+        NoteDuration::new(NoteValue::SIXTEENTH, NoteModifier::Triplet),
+        NoteDuration::new(NoteValue::of(64), NoteModifier::Dotted),
+    ];
+    let layout = DelayLayout::builder(
+        BusTopology::STEREO,
+        MaxDelay::of(MaxDelay::CAP),
+        InterpolationMode::CubicHermite,
+    )
+    .synced(NoteTimes::try_from(&notes[..]).expect("two notes"))
+    .build()
+    .unwrap();
+    let node = DelayNode::<f32>::from(DelayConfig::new(layout).controls(DelayControls {
+        feedback: Feedback::new(0.5),
+        cross_feedback: Feedback::new(0.25),
+        ..DelayControls::DEFAULT
+    }));
+    let mut rig = Direct::new(node, SampleRate::SR_48K, 64);
+    for c in rig.inputs_mut().iter_mut() {
+        for (i, x) in c.into_samples_mut().iter_mut().enumerate() {
+            *x = if i % 2 == 0 { INPUT } else { -INPUT };
+        }
+    }
+    let tempo_at = |i: usize| Bpm::of(if i.is_multiple_of(2) { 20.0 } else { 300.0 });
+    let mut heard = 0.0f32;
+    for i in 0..400 {
+        rig.set_transport(TransportPosition::new(
+            true,
+            tempo_at(i),
+            Beat::new(0.0),
+            None,
+        ));
+        rig.block();
+        heard += rig
+            .output()
+            .plane(0)
+            .samples()
+            .iter()
+            .map(|s| s.abs())
+            .sum::<f32>();
+    }
+    assert!(heard > 1e-6, "the delay rendered silence");
+    let (mut peak, mut finite) = (0.0f32, true);
+    assert_no_alloc::assert_no_alloc(|| {
+        for i in 0..400 {
+            rig.set_transport(TransportPosition::new(
+                true,
+                tempo_at(i),
+                Beat::new(0.0),
+                None,
+            ));
+            rig.block();
+            for c in 0..2 {
+                for s in rig.output().plane(c).samples() {
+                    finite &= s.is_finite();
+                    peak = peak.max(s.abs());
+                }
+            }
+        }
+    });
+    assert!(finite && peak <= loop_bound(), "peak {peak}");
 }
 
 /// The phaser at the corners of everything it is built to and told: the fewest and the most

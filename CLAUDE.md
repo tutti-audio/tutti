@@ -24,6 +24,7 @@ cargo xtask test-all                       # every test tier CI runs
 cargo xtask doc                            # rustdoc as CI runs it
 cargo xtask check-loom                     # clippy under --cfg loom
 cargo xtask check-windows                  # Windows lints from Linux
+cargo xtask test-wasm                      # the web suite under node (needs `wasm-bindgen-cli` at Cargo.lock's version)
 cargo xtask check-wasm                     # clippy for wasm32-unknown-unknown
 cargo xtask deny                           # needs cargo-deny 0.20.2 (`cargo install --locked`)
 ```
@@ -141,7 +142,7 @@ std only. A rule the compiler already enforces is not a gate.
 - An app writes a value one way: `Session::set` (or `Values::set`) over an assignment built
   from a target, and reads it with `get`; a new `pub fn set_*` on the session is refused
   (`cargo xtask check-values`, whose baseline only shrinks).
-- A main-thread method takes `MainThreadMarker`. No public type in `tutti-session` holds one, and no `pub fn` is named `run` or `*_blocking`, bar the rows of `xtask/session-api-allow.txt` (`cargo xtask check-session-api`).
+- A main-thread method takes `MainThreadMarker`. No public type in `tutti-session` holds one, no `pub fn` is named `*_blocking` and no borrowing `pub fn run` (a work value's `run(self ..)` is the app's call), bar the rows of `xtask/session-api-allow.txt` (`cargo xtask check-session-api`).
 
 ### The audio thread
 
@@ -338,4 +339,4 @@ adapter is [tutti-audio/bevy-tutti](https://github.com/tutti-audio/bevy-tutti).
   `tutti-codec`'s decode module, `winnow` in the listed parser modules, `web_time` and
   `thread_priority` in `tutti-platform`).
 - A codec format is a cargo feature (`encode-*`, `decode-*`), none on by default; a decode
-  feature pulls no encoder, and the C Vorbis library is `encode-vorbis`'s alone.
+  feature pulls no encoder.

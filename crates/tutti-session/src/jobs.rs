@@ -310,16 +310,8 @@ impl fmt::Debug for PluginLanding<'_> {
 /// lander is typed to nothing of the clock, so the jobs in flight at a clock
 /// switch land on the converted session.
 pub(crate) trait JobSession {
-    /// A pool load's worker ended: the identity it read under and what it staged.
-    fn land_pool_load(
-        &mut self,
-        flight: u64,
-        loaded_from: Option<tutti_platform::Identity>,
-        done: Result<crate::pool::Staged, crate::LoadError>,
-    );
-
-    /// A pool refresh's check ended: the entries whose file changed reload.
-    fn land_pool_refresh(&mut self, checked: Vec<crate::pool::Checked>) -> crate::RefreshReport;
+    /// A pool load's worker ended with what it staged.
+    fn land_pool_load(&mut self, flight: u64, done: Result<crate::pool::Staged, crate::LoadError>);
 
     /// What a hosted plugin's job ended with.
     #[cfg(feature = "plugin")]
@@ -327,26 +319,14 @@ pub(crate) trait JobSession {
 }
 
 impl<K: crate::AppKey, C: Clock> JobSession for Session<K, C> {
-    fn land_pool_load(
-        &mut self,
-        flight: u64,
-        loaded_from: Option<tutti_platform::Identity>,
-        done: Result<crate::pool::Staged, crate::LoadError>,
-    ) {
+    fn land_pool_load(&mut self, flight: u64, done: Result<crate::pool::Staged, crate::LoadError>) {
         self.pool.entries.worker_ended();
-        self.pool.entries.stamped(flight, loaded_from);
         match done {
             Ok(crate::pool::Staged::Done(value)) => self.pool.entries.land(flight, Ok(value)),
             Ok(crate::pool::Staged::Main(stage)) => self.pool.entries.stage_main(flight, stage),
             Err(error) => self.pool.entries.land(flight, Err(error)),
         }
         self.pool_pump();
-    }
-
-    fn land_pool_refresh(&mut self, checked: Vec<crate::pool::Checked>) -> crate::RefreshReport {
-        let (starts, refreshed) = self.pool.entries.reload_changed(checked);
-        self.pool_start(starts);
-        refreshed
     }
 
     #[cfg(feature = "plugin")]
@@ -390,6 +370,13 @@ impl Jobs {
 
     /// Runs `work` on the executor as a typed job. `land` runs in a later
     /// [`Session::update`] with the worker's end and the job's ticket.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "the job table's tests submit on the pool; no session call does"
+        )
+    )]
     pub(crate) fn submit_job<J, R, W, L>(&mut self, work: W, land: L) -> Job<J>
     where
         J: JobKind,
@@ -579,37 +566,6 @@ impl Jobs {
         L: FnMut(&mut dyn JobSession, Stream<M, R>, &mut Vec<SessionEvent>) + Send + 'static,
     {
         self.start(place, move |landings| async move { work(&landings) }, land);
-    }
-
-    /// Runs `future` on the executor as a job whose work awaits (a reply, say), and
-    /// lands its result like [`submit`](Self::submit). The future must not block.
-    #[cfg_attr(
-        not(feature = "sampler"),
-        expect(dead_code, reason = "the stream open (feature `sampler`) is its user")
-    )]
-    pub(crate) fn submit_future<R, Fut, L>(&mut self, future: Fut, land: L)
-    where
-        R: Send + 'static,
-        Fut: Future<Output = R> + Send + 'static,
-        L: FnOnce(&mut dyn JobSession, Result<R, WorkerError>, &mut Vec<SessionEvent>)
-            + Send
-            + 'static,
-    {
-        let mut land = Some(land);
-        self.start(
-            Place::Pool,
-            move |_: Landings<std::convert::Infallible>| future,
-            move |session, landed, events| {
-                let end = match landed {
-                    Stream::Message(never) => match never {},
-                    Stream::Done(result) => Ok(result),
-                    Stream::Failed(failed) => Err(failed),
-                };
-                if let Some(land) = land.take() {
-                    land(session, end, events);
-                }
-            },
-        );
     }
 
     fn start<M, R, F, W, L>(&mut self, place: Place<'_>, make: W, land: L)

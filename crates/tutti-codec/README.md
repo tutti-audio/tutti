@@ -1,6 +1,6 @@
 # tutti-codec
 
-Reads and writes audio files: WAV, FLAC, MP3 and Ogg can be read, and WAV, AIFF, FLAC and Ogg Vorbis can be written.
+Reads and writes audio files: WAV, FLAC, MP3 and Ogg can be read, and WAV, AIFF and FLAC can be written.
 
 Each format is a cargo feature and none is on by default, so you only compile what you need. It depends only on `tutti-units` (units such as hertz and decibels), `tutti-buffers` and `tutti-platform`, so it can be used on its own.
 

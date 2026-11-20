@@ -641,7 +641,7 @@ pub struct DeviceRestart {
     /// What the new device's channels are, when the host states it
     /// ([`topology`](Self::topology)); `None` takes the engine's order for
     /// the device's width, and the device is read back as
-    /// [`Placement::Assumed`](tutti_buffers::Placement::Assumed). It is the
+    /// [`Placement::Default`](tutti_buffers::Placement::Default). It is the
     /// request's own: another device is wired another way, so a statement
     /// made for the device the session opened on is not carried over.
     pub topology: Option<ChannelTopology>,
@@ -865,7 +865,7 @@ impl<K: crate::AppKey, C: Clock> Session<K, C> {
     ) -> Result<()> {
         let placed = topology
             .cloned()
-            .unwrap_or_else(|| ChannelTopology::assumed(channels));
+            .unwrap_or_else(|| ChannelTopology::default_for(channels));
         if placed.width() != channels {
             return Err(tutti_buffers::FoldError::from(
                 tutti_buffers::BufferError::WidthMismatch {
@@ -886,7 +886,7 @@ impl<K: crate::AppKey, C: Clock> Session<K, C> {
             } else {
                 crate::root_width(ChannelLayout::clamped(self.graph.outputs()), channels)
             };
-            ChannelTopology::assumed(ChannelLayout::clamped(width))
+            ChannelTopology::default_for(ChannelLayout::clamped(width))
         });
         // The policy in force has to place the root on the new device too: a
         // device a map does not fit is refused, never reset to the identity;

@@ -1,4 +1,4 @@
-//! `Devices` against CoreMIDI: a virtual destination is a device to every
+//! `Devices` against CoreMIDI: a virtual endpoint is a device to every
 //! client, so creating and dropping one is a hot-plug.
 
 use std::time::Duration;
@@ -7,7 +7,7 @@ use tutti_platform::Instant;
 
 use super::*;
 use crate::Devices;
-use crate::backend::coremidi::UmpVirtualDestination;
+use crate::backend::coremidi::tests::plain;
 use crate::endpoints::MidiEndpoints;
 use crate::virtual_endpoint::VirtualProtocol;
 use tutti_midi_device::DeviceEvent;
@@ -61,19 +61,18 @@ fn until(devices: &Watched, want: impl Fn(&DeviceEvent) -> bool) -> DeviceEvent 
     );
 }
 
-/// A virtual destination that appears is `Added` and, dropped, `Removed`; the
+/// A virtual endpoint that appears is `Added` and, dropped, `Removed`; the
 /// watch's registration ends with `Devices`. On GitHub's macOS runner CoreMIDI
 /// sent the background client no notification, so this passes on the hub's own
 /// look (see `watch.rs`); without `hub.notify` in the timer the first wait times out
 /// there.
 #[test]
-fn a_virtual_destination_comes_and_goes_and_the_watch_unregisters() {
+fn a_virtual_endpoint_comes_and_goes_and_the_watch_unregisters() {
     let name = format!("tutti-test-{}", std::process::id());
     let devices = Watched::open();
     assert_eq!(registered(), 1);
 
-    let destination =
-        UmpVirtualDestination::new(&name, VirtualProtocol::Midi2, |_| {}).expect("creates");
+    let destination = plain(&name, VirtualProtocol::Midi2, |_| {});
     let added = until(
         &devices,
         |e| matches!(e, DeviceEvent::Added(i) if i.name.contains(&name)),
@@ -90,27 +89,25 @@ fn a_virtual_destination_comes_and_goes_and_the_watch_unregisters() {
 }
 
 /// With an output port opened before the watch (a port is made on the process's
-/// client like the watch's own registration), a virtual destination that appears
+/// client like the watch's own registration), a virtual endpoint that appears
 /// is still reported `Added`: the change reaches the watch's receiver, which is
 /// waited on (`PATIENCE` only guards a hang).
 #[test]
 fn a_change_is_reported_when_an_output_port_comes_first() {
     let pid = std::process::id();
     let first_name = format!("tutti-port-first-{pid}");
-    let first =
-        UmpVirtualDestination::new(&first_name, VirtualProtocol::Midi2, |_| {}).expect("creates");
+    let first = plain(&first_name, VirtualProtocol::Midi2, |_| {});
     let backend = crate::backend::coremidi::CoreMidiEndpoints::new();
     let id = backend
         .outputs()
         .into_iter()
         .find(|e| e.name.contains(&first_name))
-        .expect("the virtual destination is listed")
+        .expect("the virtual endpoint is listed")
         .id;
     let out = backend.open_output(id).expect("opens");
     let devices = Watched::open();
     let name = format!("tutti-after-port-{pid}");
-    let destination =
-        UmpVirtualDestination::new(&name, VirtualProtocol::Midi2, |_| {}).expect("creates");
+    let destination = plain(&name, VirtualProtocol::Midi2, |_| {});
     until(
         &devices,
         |e| matches!(e, DeviceEvent::Added(i) if i.name.contains(&name)),
@@ -118,18 +115,19 @@ fn a_change_is_reported_when_an_output_port_comes_first() {
     drop((destination, out, first));
 }
 
-/// As above, with a virtual source created before the watch: a destination that
+/// As above, with a virtual endpoint created before the watch: another that
 /// appears after the watch opened is still reported.
 #[test]
-fn a_change_is_reported_when_a_virtual_source_comes_first() {
-    use crate::backend::coremidi::UmpVirtualSource;
+fn a_change_is_reported_when_a_virtual_endpoint_comes_first() {
     let pid = std::process::id();
-    let source = UmpVirtualSource::new(&format!("tutti-source-{pid}"), VirtualProtocol::Midi2)
-        .expect("creates");
+    let source = plain(
+        &format!("tutti-source-{pid}"),
+        VirtualProtocol::Midi2,
+        |_| {},
+    );
     let devices = Watched::open();
     let name = format!("tutti-after-source-{pid}");
-    let destination =
-        UmpVirtualDestination::new(&name, VirtualProtocol::Midi2, |_| {}).expect("creates");
+    let destination = plain(&name, VirtualProtocol::Midi2, |_| {});
     until(
         &devices,
         |e| matches!(e, DeviceEvent::Added(i) if i.name.contains(&name)),

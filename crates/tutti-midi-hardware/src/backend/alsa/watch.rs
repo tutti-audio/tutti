@@ -56,7 +56,7 @@ use crate::devices::reporter::Reporter;
 use crate::endpoints::Watch;
 use crate::error::{MidiHardwareError, MidiThread, Result};
 use tutti_alsa_ffi::{
-    Announced, Blocking, Client, Event, Poller, PortCaps, PortKind, Read, UmpVersion, Wait,
+    Announced, Client, Event, Poller, PortCaps, PortKind, Read, UmpVersion, Wait,
 };
 use tutti_midi_device::{EndpointId, OsDevice};
 use tutti_platform::{Executor, Task};
@@ -483,7 +483,7 @@ enum Woken {
 
 impl Announce {
     fn open(stop: UnixStream) -> Result<Self> {
-        let seq = super::client::open("tutti-watch", Blocking::NonBlock, UmpVersion::Midi2)?;
+        let seq = super::client::open("tutti-watch", UmpVersion::Midi2)?;
         // Write-only and not subscribable: nobody lists this port as a device.
         let port = seq.open_port("tutti-watch", PortCaps::WRITE, PortKind::APPLICATION)?;
         seq.connect_from_announce(port)?;
@@ -517,7 +517,8 @@ impl Announce {
         let mut found = Drained::default();
         let mut errors = ErrorRun::default();
         loop {
-            let read = match self.seq.client().read_event() {
+            let polled = self.seq.client().read_event();
+            let read = match polled {
                 Ok(Read::Event(event)) => event,
                 Ok(Read::Empty) => return found,
                 Err(e) => {
@@ -593,7 +594,7 @@ pub(super) fn start(
     };
     let failures = sink.clone();
     let mut tracker = Tracker::new(Reporter::new(sink));
-    tracker.seed(|| announce.drain(), || snapshot(announce.seq.client()))?;
+    tracker.seed(|| announce.drain(), || snapshot(&announce.seq.client()))?;
     let task = executor
         .spawn_dedicated(MidiThread::DeviceWatch.name(), None, async move {
             let run = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -607,7 +608,7 @@ pub(super) fn start(
                             tracker.step(
                                 first,
                                 || announce.drain(),
-                                || snapshot(announce.seq.client()),
+                                || snapshot(&announce.seq.client()),
                             );
                         }
                         Ok(Woken::Stopped) => return None,

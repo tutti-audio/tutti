@@ -12,7 +12,7 @@ use std::hash::{Hash, Hasher};
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{
     Edge, Feed, FeedbackFrom, InPort, Invalid, LatencyGraph, NodeKey, NodeSpec, OutPort, PortFeed,
-    Sink, Source, TapAlign, TapId, TapSpec, Topology, graph_tail, latency_plan,
+    PortSink, PortSource, TapAlign, TapId, TapSpec, Topology, graph_tail, latency_plan,
 };
 use tutti_units::{SampleRate, Samples, Tail};
 
@@ -43,8 +43,8 @@ fn chain() -> Topology {
     t.nodes.insert(A, spec("dc", 0, 1));
     t.nodes.insert(B, spec("gain", 1, 1));
     t.edges
-        .insert(at(B, 0), vec![Edge::Direct(Source::Node(out(A, 0)))]);
-    t.set_outputs(vec![Source::Node(out(B, 0))]);
+        .insert(at(B, 0), vec![Edge::Direct(PortSource::Node(out(A, 0)))]);
+    t.set_outputs(vec![PortSource::Node(out(B, 0))]);
     t
 }
 
@@ -62,12 +62,12 @@ fn unequal_latency_diamond() -> Topology {
     );
     t.nodes.insert(C, spec("mix", 2, 1));
     t.edges
-        .insert(at(B, 0), vec![Edge::Direct(Source::Node(out(A, 0)))]);
+        .insert(at(B, 0), vec![Edge::Direct(PortSource::Node(out(A, 0)))]);
     t.edges
-        .insert(at(C, 0), vec![Edge::Direct(Source::Node(out(B, 0)))]);
+        .insert(at(C, 0), vec![Edge::Direct(PortSource::Node(out(B, 0)))]);
     t.edges
-        .insert(at(C, 1), vec![Edge::Direct(Source::Node(out(D, 0)))]);
-    t.set_outputs(vec![Source::Node(out(C, 0))]);
+        .insert(at(C, 1), vec![Edge::Direct(PortSource::Node(out(D, 0)))]);
+    t.set_outputs(vec![PortSource::Node(out(C, 0))]);
     t
 }
 
@@ -145,18 +145,18 @@ fn validate_reports_every_fault_at_once() {
 
     // (1) an edge from a port A does not have
     t.edges
-        .insert(at(B, 0), vec![Edge::Direct(Source::Node(out(A, 7)))]);
+        .insert(at(B, 0), vec![Edge::Direct(PortSource::Node(out(A, 7)))]);
     // (2) an edge into a port B does not have
     t.edges
-        .insert(at(B, 9), vec![Edge::Direct(Source::Node(out(A, 0)))]);
+        .insert(at(B, 9), vec![Edge::Direct(PortSource::Node(out(A, 0)))]);
     // (3) an edge naming a node that is not in the map
     t.edges
-        .insert(at(A, 0), vec![Edge::Direct(Source::Node(out(C, 0)))]);
+        .insert(at(A, 0), vec![Edge::Direct(PortSource::Node(out(C, 0)))]);
     // (4) a global-input edge past the declared input width
     t.edges
-        .insert(at(B, 1), vec![Edge::Direct(Source::Global(5))]);
+        .insert(at(B, 1), vec![Edge::Direct(PortSource::Global(5))]);
     // (5) an output channel from a port that does not exist
-    t.set_outputs(vec![Source::Node(out(B, 3))]);
+    t.set_outputs(vec![PortSource::Node(out(B, 3))]);
 
     let errs = t.validate().expect_err("five faults");
 
@@ -197,13 +197,16 @@ fn validate_refuses_a_duplicate_edge_in_one_set() {
     t.nodes.insert(A, spec("dc", 0, 2));
     t.nodes.insert(B, spec("dc", 0, 1));
     t.nodes.insert(C, spec("mix", 2, 1));
-    let from_a = Edge::Direct(Source::Node(out(A, 0)));
-    let from_b = Edge::Direct(Source::Node(out(B, 0)));
+    let from_a = Edge::Direct(PortSource::Node(out(A, 0)));
+    let from_b = Edge::Direct(PortSource::Node(out(B, 0)));
 
     // Two distinct sources, and one source on two ports: both fine.
     t.edges.insert(at(C, 0), vec![from_a, from_b]);
     t.edges.insert(at(C, 1), vec![from_a]);
-    t.outputs = vec![vec![Source::Node(out(C, 0)), Source::Node(out(A, 1))]];
+    t.outputs = vec![vec![
+        PortSource::Node(out(C, 0)),
+        PortSource::Node(out(A, 1)),
+    ]];
     t.validate().expect("distinct sources are a set");
 
     // The same edge twice at an input port, not adjacent.
@@ -212,34 +215,37 @@ fn validate_refuses_a_duplicate_edge_in_one_set() {
     assert_eq!(
         errs,
         vec![Invalid::DuplicateEdge {
-            at: Sink::Port(at(C, 0)),
+            at: PortSink::Port(at(C, 0)),
             edge: from_a
         }]
     );
 
     // The same source twice at an output channel.
     t.edges.insert(at(C, 0), vec![from_a, from_b]);
-    t.outputs = vec![vec![Source::Node(out(C, 0)), Source::Node(out(C, 0))]];
+    t.outputs = vec![vec![
+        PortSource::Node(out(C, 0)),
+        PortSource::Node(out(C, 0)),
+    ]];
     let errs = t.validate().expect_err("a duplicate output");
     assert_eq!(
         errs,
         vec![Invalid::DuplicateEdge {
-            at: Sink::Output(0),
-            edge: Edge::Direct(Source::Node(out(C, 0)))
+            at: PortSink::Output(0),
+            edge: Edge::Direct(PortSource::Node(out(C, 0)))
         }]
     );
 }
 
 /// Silence has one representation, the empty set, so `validate` refuses a
-/// stored `Source::Zero`: alone, beside another source, at an input port or at
+/// stored `PortSource::Zero`: alone, beside another source, at an input port or at
 /// an output channel. The empty set (and an absent key) is fine.
 #[test]
 fn validate_refuses_a_stored_zero_alone_and_beside_others() {
     let mut t = Topology::default();
     t.nodes.insert(A, spec("dc", 0, 1));
     t.nodes.insert(C, spec("mix", 1, 1));
-    let zero = Edge::Direct(Source::Zero);
-    let from_a = Edge::Direct(Source::Node(out(A, 0)));
+    let zero = Edge::Direct(PortSource::Zero);
+    let from_a = Edge::Direct(PortSource::Node(out(A, 0)));
     let fb = Edge::Feedback(FeedbackFrom::new(out(C, 0), Samples::new(64)));
 
     t.edges.insert(at(C, 0), vec![]);
@@ -257,7 +263,7 @@ fn validate_refuses_a_stored_zero_alone_and_beside_others() {
         assert_eq!(
             errs,
             vec![Invalid::StoredSilence {
-                at: Sink::Port(at(C, 0))
+                at: PortSink::Port(at(C, 0))
             }],
             "{set:?}"
         );
@@ -265,8 +271,8 @@ fn validate_refuses_a_stored_zero_alone_and_beside_others() {
 
     t.edges.remove(&at(C, 0));
     for set in [
-        vec![Source::Zero],
-        vec![Source::Node(out(C, 0)), Source::Zero],
+        vec![PortSource::Zero],
+        vec![PortSource::Node(out(C, 0)), PortSource::Zero],
     ] {
         t.outputs = vec![set.clone()];
         let mut errs = t.validate().expect_err("a stored Zero");
@@ -274,7 +280,7 @@ fn validate_refuses_a_stored_zero_alone_and_beside_others() {
         assert_eq!(
             errs,
             vec![Invalid::StoredSilence {
-                at: Sink::Output(0)
+                at: PortSink::Output(0)
             }],
             "{set:?}"
         );
@@ -286,8 +292,8 @@ fn validate_refuses_a_stored_zero_alone_and_beside_others() {
 /// the last edge, so a port that was wired and cleared equals one never wired.
 #[test]
 fn connect_and_disconnect_keep_the_set_canonical() {
-    let from_a = Edge::Direct(Source::Node(out(A, 0)));
-    let from_b = Edge::Direct(Source::Node(out(B, 0)));
+    let from_a = Edge::Direct(PortSource::Node(out(A, 0)));
+    let from_b = Edge::Direct(PortSource::Node(out(B, 0)));
     let mut one = Topology::default();
     one.connect(at(C, 0), from_b);
     one.connect(at(C, 0), from_a);
@@ -317,11 +323,11 @@ fn a_tap_lane_naming_a_missing_source_is_not_a_fault() {
         TapId::of(7),
         TapSpec::Ports {
             sources: vec![
-                Source::Node(out(B, 0)),
-                Source::Zero,
-                Source::Node(out(B, 3)),
-                Source::Node(out(C, 0)),
-                Source::Global(5),
+                PortSource::Node(out(B, 0)),
+                PortSource::Zero,
+                PortSource::Node(out(B, 3)),
+                PortSource::Node(out(C, 0)),
+                PortSource::Global(5),
             ],
             align: TapAlign::ToOutput,
         },
@@ -338,10 +344,10 @@ fn a_cycle_is_rejected_unless_feedback_breaks_it() {
     t.nodes.insert(A, spec("gain", 1, 1));
     t.nodes.insert(B, spec("gain", 1, 1));
     t.edges
-        .insert(at(B, 0), vec![Edge::Direct(Source::Node(out(A, 0)))]);
+        .insert(at(B, 0), vec![Edge::Direct(PortSource::Node(out(A, 0)))]);
     t.edges
-        .insert(at(A, 0), vec![Edge::Direct(Source::Node(out(B, 0)))]);
-    t.set_outputs(vec![Source::Node(out(B, 0))]);
+        .insert(at(A, 0), vec![Edge::Direct(PortSource::Node(out(B, 0)))]);
+    t.set_outputs(vec![PortSource::Node(out(B, 0))]);
 
     let errs = t.validate().expect_err("a -> b -> a");
     let cycle = errs
@@ -419,18 +425,18 @@ fn insertion_order_does_not_change_the_value() {
 
     // The same graph, every insertion reversed.
     let mut backward = Topology {
-        outputs: vec![vec![Source::Node(out(C, 0))]],
+        outputs: vec![vec![PortSource::Node(out(C, 0))]],
         ..Topology::default()
     };
     backward
         .edges
-        .insert(at(C, 1), vec![Edge::Direct(Source::Node(out(D, 0)))]);
+        .insert(at(C, 1), vec![Edge::Direct(PortSource::Node(out(D, 0)))]);
     backward
         .edges
-        .insert(at(C, 0), vec![Edge::Direct(Source::Node(out(B, 0)))]);
+        .insert(at(C, 0), vec![Edge::Direct(PortSource::Node(out(B, 0)))]);
     backward
         .edges
-        .insert(at(B, 0), vec![Edge::Direct(Source::Node(out(A, 0)))]);
+        .insert(at(B, 0), vec![Edge::Direct(PortSource::Node(out(A, 0)))]);
     backward.nodes.insert(C, spec("mix", 2, 1));
     backward.nodes.insert(
         B,
@@ -452,7 +458,7 @@ fn insertion_order_does_not_change_the_value() {
 
 /// The default topology has **no** global inputs.
 ///
-/// Not a formality: with any global inputs, a `Source::Global(1)` typo would
+/// Not a formality: with any global inputs, a `PortSource::Global(1)` typo would
 /// resolve against them instead of being rejected as out of range.
 /// `ChannelLayout` has no `Default`, so the impl is hand-written; this pins its
 /// *choice* of width, which the compiler cannot.
@@ -463,7 +469,7 @@ fn the_default_topology_has_no_global_inputs() {
 
     let mut t = chain();
     t.edges
-        .insert(at(B, 0), vec![Edge::Direct(Source::Global(1))]);
+        .insert(at(B, 0), vec![Edge::Direct(PortSource::Global(1))]);
     let errs = t.validate().expect_err("no global input to name");
     assert!(
         errs.iter()

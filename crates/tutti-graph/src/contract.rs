@@ -1891,6 +1891,7 @@ pub fn drive_input_params<F: Float>(
         env,
         arrival: Latency::ZERO,
         history: TransportHistory::none(),
+        meter: None,
     };
     let max = Prepare::new(env.sample_rate, MaxBlock::of(Samples::new(frames))).max_block();
     let reported = std::cell::Cell::new(None);
@@ -2158,12 +2159,12 @@ impl<F: Float> BlockRig<F> {
                     node: key,
                     port: c as u16,
                 },
-                crate::Edge::Direct(crate::Source::Global(c as u16)),
+                crate::Edge::Direct(crate::PortSource::Global(c as u16)),
             );
         }
         topology.outputs = (0..outs)
             .map(|c| {
-                vec![crate::Source::Node(OutPort {
+                vec![crate::PortSource::Node(OutPort {
                     node: key,
                     port: c as u16,
                 })]
@@ -2551,6 +2552,7 @@ impl<N: Node<F> + ?Sized, F: Float> Direct<N, F> {
             env,
             arrival: Latency::ZERO,
             history: TransportHistory::none(),
+            meter: None,
         };
         let max = Prepare::new(self.rate, MaxBlock::of(Samples::new(self.frames))).max_block();
         let io = Io::new(

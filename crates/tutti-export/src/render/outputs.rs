@@ -244,7 +244,7 @@ fn open_lanes<F: FftFloat>(
         let placement = if topology.is_some() {
             tutti_buffers::Placement::Stated
         } else {
-            tutti_buffers::Placement::Assumed
+            tutti_buffers::Placement::Default
         };
         let channels = FileChannels { layout, topology };
         let (fold, tap) = match feed {
@@ -530,8 +530,7 @@ fn measure<F: FftFloat>(
     };
     let mut measurer = Measurer::new(out_rate, &waiting.target.effective_topology(), normalize)
         .map_err(unmeasurable)?;
-    let ch = usize::from(layout.count());
-    let mut resampler: Option<Resampler<F>> = resampler_for(&waiting.target, rate, ch)?;
+    let mut resampler: Option<Resampler<F>> = resampler_for(&waiting.target, rate, layout)?;
     let mut staging: Vec<F> = Vec::new();
     let mut replay = waiting.spill.replay()?;
     let chunk = chunk_frames(rate).get();

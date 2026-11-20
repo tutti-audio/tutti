@@ -16,7 +16,7 @@ use tutti_graph::{
     Forked, GraphBuilder, IntoNode, Io, Node, NodeParts, ParamNode, ParamSet, PendingFork, Prepare,
     Renderer, Shape, Status, Unforkable, param_parts,
 };
-use tutti_graph::{Edge, FeedbackFrom, InPort, OutPort, Source};
+use tutti_graph::{Edge, FeedbackFrom, InPort, OutPort, PortSource};
 use tutti_rt::Param;
 use tutti_units::{Amplitude, Samples, Tail, UnitParam};
 
@@ -207,8 +207,8 @@ fn gain() -> Forkable {
     })
 }
 
-fn out(node: NodeKey, port: u16) -> Source {
-    Source::Node(OutPort { node, port })
+fn out(node: NodeKey, port: u16) -> PortSource {
+    PortSource::Node(OutPort { node, port })
 }
 
 fn render(ed: Editor, exec: tutti_graph::Executor, frames: usize) -> Vec<Vec<f32>> {
@@ -609,7 +609,7 @@ fn a_node_fork_fans_out_as_clone_isolated_does() {
             ed.insert(key, "consts", ForkByClone(unit));
             ed.spec_mut()
                 .topology
-                .set_outputs(vec![Source::Zero; graph_outs]);
+                .set_outputs(vec![PortSource::Zero; graph_outs]);
             let (fe, fx) = ed
                 .fork(ForkTarget::Node(key), ForkMode::Live, prepare(64))
                 .expect("forks");
@@ -1406,7 +1406,7 @@ fn a_build_whose_commit_fails_hands_back_the_graph() {
             node: NodeKey(1),
             port: 0,
         },
-        vec![Edge::Direct(Source::Global(0))],
+        vec![Edge::Direct(PortSource::Global(0))],
     );
     let pending = ed
         .fork_gather(ForkTarget::Master, ForkMode::Live, pre)

@@ -232,10 +232,9 @@ fn f32_hann_squares_overlap_add_to_three_halves_within_the_rounding_of_the_taps(
     let hop = size / 4;
     let taps: Vec<f32> = crate::StftGeometry::new(
         tutti_units::SampleRate::SR_44K1,
-        tutti_units::Samples::new(size),
-        tutti_units::Samples::new(hop),
+        crate::WindowLength::new(tutti_units::Samples::new(size)).unwrap(),
+        crate::HopSize::new(tutti_units::Samples::new(hop)).unwrap(),
     )
-    .unwrap()
     .window_coefficients();
     let bound = 2f64.powi(-22);
     let mut worst = 0.0f64;

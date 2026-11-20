@@ -14,7 +14,7 @@ use tutti_graph::{
     CommitError, Cx, Editor, Executor, Fade, FadeLaw, Io, MAX_NODE_TAIL, Node, Prepare, Shape,
     Status, TransportPosition, Unforkable,
 };
-use tutti_graph::{Edge, InPort, OutPort, Source};
+use tutti_graph::{Edge, InPort, OutPort, PortSource};
 use tutti_units::{SampleRate, Samples, Tail};
 
 const NODE: NodeKey = NodeKey(1);
@@ -79,11 +79,14 @@ fn graph_at(tail: Tail, prepared: Prepare) -> (Editor, Executor, Arc<AtomicUsize
             node: NODE,
             port: 0,
         },
-        vec![Edge::Direct(Source::Node(OutPort { node: SRC, port: 0 }))],
+        vec![Edge::Direct(PortSource::Node(OutPort {
+            node: SRC,
+            port: 0,
+        }))],
     );
     ed.spec_mut()
         .topology
-        .set_outputs(vec![Source::Node(OutPort {
+        .set_outputs(vec![PortSource::Node(OutPort {
             node: NODE,
             port: 0,
         })]);
@@ -220,11 +223,11 @@ fn set_tail_does_not_cut_a_fade() {
             node: NodeKey(2),
             port: 0,
         },
-        vec![Edge::Direct(Source::Global(0))],
+        vec![Edge::Direct(PortSource::Global(0))],
     );
     ed.spec_mut()
         .topology
-        .set_outputs(vec![Source::Node(OutPort {
+        .set_outputs(vec![PortSource::Node(OutPort {
             node: NodeKey(2),
             port: 0,
         })]);

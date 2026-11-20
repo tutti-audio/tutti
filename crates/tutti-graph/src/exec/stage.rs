@@ -1230,8 +1230,8 @@ pub(super) fn sort_by_offset(events: &mut [Event]) {
 /// fed, as an index into `delays`; of equal lengths, the lowest key. The choice
 /// is a function of the set of rings, not of their order in the plan: what a
 /// source on a new channel starts from, with none of its history zero-filled.
-fn ring_by_source(delays: &[crate::DelaySpec]) -> BTreeMap<crate::Source, usize> {
-    let mut by_source: BTreeMap<crate::Source, usize> = BTreeMap::new();
+fn ring_by_source(delays: &[crate::DelaySpec]) -> BTreeMap<crate::PortSource, usize> {
+    let mut by_source: BTreeMap<crate::PortSource, usize> = BTreeMap::new();
     for (i, d) in delays.iter().enumerate() {
         let DelayKey::Output { from, .. } = d.key else {
             continue;
@@ -1256,7 +1256,7 @@ fn copy_origin(
     plan: &Plan,
     key: &DelayKey,
     old: &BTreeMap<DelayKey, usize>,
-    by_source: &BTreeMap<crate::Source, usize>,
+    by_source: &BTreeMap<crate::PortSource, usize>,
 ) -> Option<usize> {
     let DelayKey::Output { channel, from } = *key else {
         return None;
@@ -1275,18 +1275,18 @@ fn copy_origin(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{DelaySpec, NodeKey, OutPort, Source};
+    use crate::{DelaySpec, NodeKey, OutPort, PortSource};
     use tutti_units::Samples;
 
-    fn ring(channel: u16, from: Source, len: usize) -> DelaySpec {
+    fn ring(channel: u16, from: PortSource, len: usize) -> DelaySpec {
         DelaySpec {
             key: DelayKey::Output { channel, from },
             len: Samples::new(len),
         }
     }
 
-    fn source(node: u64) -> Source {
-        Source::Node(OutPort {
+    fn source(node: u64) -> PortSource {
+        PortSource::Node(OutPort {
             node: NodeKey(node),
             port: 0,
         })

@@ -6,7 +6,7 @@
 //! to feed it.
 
 use tutti_buffers::Float;
-use tutti_dsp::{FftFloat, StftGeometry};
+use tutti_dsp::{ColaGeometry, FftFloat, HopSize, StftGeometry, WindowLength};
 
 use super::vocoder::Vocoder;
 use super::{FftSize, MAX_BUFFER_SIZE};
@@ -201,8 +201,12 @@ impl<F: Float + FftFloat> Unit<F> {
     /// or overlaps under 75%, cannot reconstruct. Neither is reachable here:
     /// `FftSize::hop` is exactly `size / 4`.
     pub(super) fn geometry(sample_rate: impl Into<SampleRate>, fft_size: FftSize) -> StftGeometry {
-        StftGeometry::cola(sample_rate, fft_size.size(), fft_size.hop())
+        let window =
+            WindowLength::new(fft_size.size()).expect("BUG: an FftSize is a nonzero window");
+        let hop = HopSize::new(fft_size.hop()).expect("BUG: an FftSize hop is a nonzero size/4");
+        ColaGeometry::try_from(StftGeometry::new(sample_rate.into(), window, hop))
             .expect("BUG: FftSize hop is size/4, which is COLA-valid")
+            .into()
     }
 
     /// Channel width — the number of vocoders, and this unit's in/out arity.

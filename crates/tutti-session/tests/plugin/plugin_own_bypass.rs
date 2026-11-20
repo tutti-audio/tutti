@@ -111,6 +111,7 @@ fn a_plugin_replacing_another_under_a_bypassed_node_is_bypassed_as_it_enters() {
         tutti_plugin_ipc::IpcConfig::at(
             tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source"),
         ),
+        tutti_fixtures::executor(),
         &tutti_fixtures::detached_work(),
         &Loadable::uncatalogued(PluginRef::file(plugin_file())),
         SampleRate::SR_48K,

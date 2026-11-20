@@ -140,8 +140,8 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     }
 
     /// [`midi`](Self::midi) and, beside it, the source of the ids of the
-    /// session's resources: the two borrow disjoint fields, so a stage that
-    /// opens a peer holds both.
+    /// session's resources: the two borrow disjoint fields, so an open that
+    /// mints a peer's id holds both.
     #[cfg(feature = "midi")]
     pub(crate) fn midi_and_ids(
         &mut self,

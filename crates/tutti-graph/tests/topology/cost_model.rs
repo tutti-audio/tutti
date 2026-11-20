@@ -12,7 +12,7 @@ use common::{Kind, TestNode, WORKERS, bits, test_pool};
 use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_graph::{Cost, Editor, Executor, Schedule, TransportPosition, Unforkable};
-use tutti_graph::{Edge, InPort, OutPort, Source};
+use tutti_graph::{Edge, InPort, OutPort, PortSource};
 use tutti_units::{Beat, Bpm, Samples};
 
 const MAX_BLOCK: usize = 256;
@@ -36,7 +36,7 @@ fn sum(inputs: usize, cost: Option<Cost>) -> Unforkable<TestNode> {
     })
 }
 
-fn wire(ed: &mut Editor, node: u64, port: u16, from: Source) {
+fn wire(ed: &mut Editor, node: u64, port: u16, from: PortSource) {
     ed.spec_mut().topology.edges.insert(
         InPort {
             node: NodeKey(node),
@@ -46,8 +46,8 @@ fn wire(ed: &mut Editor, node: u64, port: u16, from: Source) {
     );
 }
 
-fn node(key: u64) -> Source {
-    Source::Node(OutPort {
+fn node(key: u64) -> PortSource {
+    PortSource::Node(OutPort {
         node: NodeKey(key),
         port: 0,
     })
@@ -80,7 +80,7 @@ fn fans(ed: &mut Editor, fans: usize, lanes: usize, gains: Option<Cost>, sums: O
         for l in 0..lanes {
             let k = s + 1 + l as u64;
             ed.insert(NodeKey(k), "gain", gain(gains));
-            wire(ed, k, 0, Source::Global(f as u16));
+            wire(ed, k, 0, PortSource::Global(f as u16));
             wire(ed, s, l as u16, node(k));
         }
         outputs.push(node(s));
@@ -95,7 +95,7 @@ fn wide(ed: &mut Editor, lanes: usize, depth: usize, cost: Option<Cost>) {
     let s = 1_000_000;
     ed.insert(NodeKey(s), "sum", sum(lanes, Some(Cost::Light)));
     for l in 0..lanes {
-        let mut last = Source::Global(0);
+        let mut last = PortSource::Global(0);
         for d in 0..depth {
             let k = 1_000 * (l as u64 + 1) + d as u64;
             ed.insert(NodeKey(k), "gain", gain(cost));
@@ -220,7 +220,7 @@ fn packed_siblings_render_bit_identically() {
             // Every fifth gain declares nothing (heavy).
             let cost = (l % 5 != 4).then_some(Cost::Light);
             ed.insert(NodeKey(l + 1), "gain", gain(cost));
-            wire(&mut ed, l + 1, 0, Source::Global(0));
+            wire(&mut ed, l + 1, 0, PortSource::Global(0));
             wire(&mut ed, s, l as u16, node(l + 1));
         }
         ed.spec_mut().topology.set_outputs(vec![node(s)]);

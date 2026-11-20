@@ -2,7 +2,7 @@
 
 use crate::error::Result;
 use crate::stamp::Paired;
-use tutti_alsa_ffi::{Blocking, Client, QueueClock, UmpVersion};
+use tutti_alsa_ffi::{Client, QueueClock, UmpVersion};
 use tutti_platform::Instant;
 
 /// Opens a client in UMP mode speaking `version`, named `name` to other clients.
@@ -11,12 +11,11 @@ use tutti_platform::Instant;
 /// the graph sends); an input takes the protocol of its source (see
 /// `input::open`), so that a MIDI 1.0 source is never converted by the kernel.
 ///
-/// One client per connection, not one per backend: a blocking read on a shared
-/// client would have every input pump contending on one handle, and one device
-/// going quiet would stall the others. Enumeration opens a short-lived client of
-/// its own for the same reason: it must not block behind a pump.
-pub(super) fn open(name: &str, blocking: Blocking, version: UmpVersion) -> Result<Client> {
-    Ok(Client::open(name, blocking, version)?)
+/// One client per connection, not one per backend: a shared client would have
+/// every input pump contending on one handle. Enumeration opens a short-lived
+/// client of its own for the same reason: it must not wait behind a pump.
+pub(super) fn open(name: &str, version: UmpVersion) -> Result<Client> {
+    Ok(Client::open(name, version)?)
 }
 
 /// `clock` read between two readings of `Instant`, as a pairing of the two

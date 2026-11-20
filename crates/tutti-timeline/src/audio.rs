@@ -16,6 +16,8 @@ use super::tempo_reader::TempoReader;
 use super::timed::{CommandQueueAudio, Scheduled, TransportCommand};
 use super::walk::UpcomingTempo;
 use std::sync::atomic::Ordering;
+use tutti_music::MeterMap;
+use tutti_rt::{Loan, Reader};
 use tutti_tempo::TempoMap;
 use tutti_units::{Beat, BeatDuration, Bpm, SampleRate, Seconds};
 
@@ -76,6 +78,10 @@ pub struct TransportAudio {
     tempo_map: TempoReader,
     /// The publisher's count at the last block that took the map.
     seen: u64,
+    /// The project's meter, lent once per rendered block
+    /// ([`meter`](Self::meter)). Registered here, on the control side, when
+    /// the audio side is taken.
+    meter: Reader<MeterMap>,
     /// Whether the map in force changes tempo: the clock then follows it,
     /// lending it for each step that needs it and
     /// dropping the loan at the end of the step. A constant map leaves this
@@ -127,6 +133,7 @@ impl TransportAudio {
             control: Control::read(&settings, loop_region, tempo),
             tempo_map,
             seen,
+            meter: settings.project_meter().reader(),
             stepped,
             schedule: CommandQueueAudio::new(transport.motion.timed().clone()),
             motion,
@@ -198,6 +205,14 @@ impl TransportAudio {
     fn begin(&mut self, take_seek: bool) -> tutti_graph::TransportPosition {
         let control = self.control;
         self.with_map(|clock, map| clock.begin(&control, take_seek, map))
+    }
+
+    /// The project's meter, lent for one rendered block and handed to the
+    /// graph with it (`Executor::render_applied`). Wait-free; drop the loan
+    /// at the block's end, never keep it across blocks.
+    #[must_use = "a loan dropped at once lends nothing"]
+    pub fn meter(&mut self) -> Loan<'_, MeterMap> {
+        self.meter.lend()
     }
 
     /// The tempo changes inside the next `frames` of the block that began

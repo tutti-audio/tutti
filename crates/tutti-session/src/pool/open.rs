@@ -23,11 +23,10 @@ use crate::{Clock, Session};
 /// the MIDI state half changed.
 pub struct OpenCx<'a, S: Float = f32> {
     rate: SampleRate,
-    ids: &'a mut crate::peer::ResourceIds,
     #[cfg(feature = "midi")]
     midi: crate::Midi<'a, S>,
     #[cfg(not(feature = "midi"))]
-    _float: PhantomData<fn() -> S>,
+    _float: PhantomData<(&'a (), fn() -> S)>,
 }
 
 impl<'a, S: Float> OpenCx<'a, S> {
@@ -37,44 +36,13 @@ impl<'a, S: Float> OpenCx<'a, S> {
         session: &'a mut Session<K, C>,
     ) -> Self {
         let rate = session.transport.sample_rate();
-        #[cfg(feature = "midi")]
-        let (midi, ids) = session.midi_and_ids();
-        #[cfg(not(feature = "midi"))]
-        let ids = &mut session.pool.resource_ids;
         Self {
             rate,
-            ids,
             #[cfg(feature = "midi")]
-            midi,
+            midi: session.midi(),
             #[cfg(not(feature = "midi"))]
             _float: PhantomData,
         }
-    }
-
-    /// The id of a new resource: no other token of this session has it. The
-    /// peer a stage opens takes its id here.
-    #[cfg_attr(
-        not(feature = "midi"),
-        expect(
-            dead_code,
-            reason = "the pool's MIDI sinks and ports (feature `midi`) mint their ids here"
-        )
-    )]
-    pub(crate) fn mint_resource_id(&mut self) -> crate::ResourceId {
-        self.ids.mint()
-    }
-
-    /// The session's source of ids, for a peer that mints the ids of what it holds
-    /// as it goes.
-    #[cfg_attr(
-        not(feature = "midi-hardware"),
-        expect(
-            dead_code,
-            reason = "the pool's MIDI input ports (feature `midi-hardware`) take it"
-        )
-    )]
-    pub(crate) fn resource_ids(&self) -> crate::peer::ResourceIds {
-        self.ids.clone()
     }
 
     /// The graph's sample rate now.

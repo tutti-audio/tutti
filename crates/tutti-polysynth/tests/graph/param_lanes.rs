@@ -10,10 +10,12 @@ use tutti_graph::NodeKey;
 use tutti_graph::{
     Editor, EventEdge, EventIn, EventOut, ParamIn, ParamRange, Prepare, Renderer, TransportPosition,
 };
-use tutti_graph::{OutPort, Source};
+use tutti_graph::{OutPort, PortSource};
 use tutti_midi_runtime::{MidiClipNode, TimedMidiEvent};
-use tutti_modulation::{Amount, Clock, ControlProgram, Law, Layer, LayerId, Polarity, Waveform};
-use tutti_nodes::automation::ControlLaneNode;
+use tutti_modulation::{
+    Amount, Clock, ControlProgram, ControlProgramBuilder, Law, Layer, LayerId, Polarity, Waveform,
+};
+use tutti_nodes::automation::{ControlLaneNode, UnitLaneConfig};
 use tutti_polysynth::{Adsr, OscillatorType, PolySynth, SynthConfig, UnisonConfig, UnisonVoices};
 use tutti_ump::{Message, MidiChannel, NoteNumber, NoteVelocity, Voice2};
 use tutti_units::{
@@ -30,7 +32,13 @@ const LANE: NodeKey = NodeKey(3);
 /// A saw synth with no attack; with `unison`, three sub-voices at
 /// `detune` cents and no spread.
 fn synth(unison: bool, detune: f64) -> PolySynth<f32> {
+    synth_at(unison, detune, tutti_units::Amplitude::UNITY)
+}
+
+/// [`synth`] starting at master volume `volume`.
+fn synth_at(unison: bool, detune: f64, volume: tutti_units::Amplitude) -> PolySynth<f32> {
     PolySynth::<f32>::new(SynthConfig {
+        volume,
         oscillator: OscillatorType::Saw,
         envelope: Adsr {
             attack: Seconds::new(0.0),
@@ -62,7 +70,10 @@ fn constant(depth: f64) -> ControlProgram {
         },
         depth_by: None,
     };
-    ControlProgram::new(None, vec![layer], vec![]).expect("valid")
+    ControlProgramBuilder::new()
+        .layers(vec![layer])
+        .build()
+        .expect("valid")
 }
 
 /// A lane on one of the synth's params: which, its range, and the constant
@@ -110,7 +121,7 @@ fn render_with_knob(synth: PolySynth<f32>, drive: Option<Drive>) -> ([Vec<f32>; 
     );
     ed.spec_mut()
         .topology
-        .set_outputs((0..2).map(|port| Source::Node(OutPort { node: SYNTH, port })));
+        .set_outputs((0..2).map(|port| PortSource::Node(OutPort { node: SYNTH, port })));
     ed.commit().expect("commits");
     let driven = drive.as_ref().map(|d| d.param);
     if let Some(d) = drive {
@@ -123,12 +134,11 @@ fn render_with_knob(synth: PolySynth<f32>, drive: Option<Drive>) -> ([Vec<f32>; 
         let range = ed
             .param_range_cell(at)
             .expect("the synth declares the param as a port");
-        let lane = ControlLaneNode::for_unit(
-            d.param,
-            constant(d.depth),
-            params.cell(d.param),
-            Some(range),
-        );
+        let mut config = UnitLaneConfig::new(d.param, constant(d.depth)).range(range);
+        if let Some(knob) = params.cell(d.param) {
+            config = config.knob(knob);
+        }
+        let lane = ControlLaneNode::from(config);
         ed.insert(LANE, "lane", lane);
         ed.spec_mut().connect_param(
             at,
@@ -161,12 +171,10 @@ fn render_with_knob(synth: PolySynth<f32>, drive: Option<Drive>) -> ([Vec<f32>; 
 /// sends to the port and never writes it).
 #[test]
 fn a_lane_drives_the_master_volume_around_its_cell() {
-    let mut plain = synth(false, 0.0);
-    plain.set_volume(tutti_units::Amplitude::new(0.5));
+    let plain = synth_at(false, 0.0, tutti_units::Amplitude::new(0.5));
     let [undriven, _] = render(plain, None);
 
-    let mut driven_synth = synth(false, 0.0);
-    driven_synth.set_volume(tutti_units::Amplitude::new(0.5));
+    let driven_synth = synth_at(false, 0.0, tutti_units::Amplitude::new(0.5));
     let ([driven, _], knob) = render_with_knob(
         driven_synth,
         Some(Drive {

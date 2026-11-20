@@ -23,12 +23,10 @@ use tutti_units::Samples;
 /// of a take is an error at the block that hit it, not a short file that
 /// reports success; [`finish`](Self::finish) closes the file exactly once.
 ///
-/// The sink is any `Write + Seek + Send + 'static`: a file, or memory. (`Send`
-/// and `'static` because Ogg Vorbis encodes on a thread that takes the sink;
-/// the bound is the same whichever features are on, since bounds that followed
-/// the features would be worse. In return an `Encoder` is `Send`, so a
-/// recording can move it to its pump thread.) A file written beside its path and
-/// moved into place when whole is a [`FileEncoder`].
+/// The sink is any `Write + Seek`: a file, or memory. Every block is encoded on
+/// the thread that calls [`write`](Self::write), and an `Encoder` is `Send` when
+/// its sink is, so a recording can move it to its pump thread. A file written
+/// beside its path and moved into place when whole is a [`FileEncoder`].
 ///
 /// ```
 /// # #[cfg(feature = "encode-wav")] {
@@ -47,14 +45,14 @@ use tutti_units::Samples;
 /// # }
 /// # Ok::<(), tutti_codec::Error>(())
 /// ```
-pub struct Encoder<W: Write + Seek + Send + 'static> {
+pub struct Encoder<W: Write + Seek> {
     inner: Inner<W>,
     layout: ChannelLayout,
     /// The first failure of a `write`, kept for `finish` to report.
     first_error: Option<Error>,
 }
 
-impl<W: Write + Seek + Send + 'static> std::fmt::Debug for Encoder<W> {
+impl<W: Write + Seek> std::fmt::Debug for Encoder<W> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Encoder")
             .field("layout", &self.layout)
@@ -62,21 +60,19 @@ impl<W: Write + Seek + Send + 'static> std::fmt::Debug for Encoder<W> {
     }
 }
 
-enum Inner<W: Write + Seek + Send + 'static> {
+enum Inner<W: Write + Seek> {
     #[cfg(feature = "encode-wav")]
     Wav(crate::WavWriter<W>),
     #[cfg(feature = "encode-aiff")]
     Aiff(Box<crate::AiffWriter<W>>),
     #[cfg(feature = "encode-flac")]
     Flac(Box<crate::FlacWriter<W>>),
-    #[cfg(feature = "encode-vorbis")]
-    Vorbis(Box<crate::VorbisWriter<W>>),
     // No format feature: `Format` has no value, so neither has this.
     #[cfg(not(encode))]
     Never(std::convert::Infallible, std::marker::PhantomData<W>),
 }
 
-impl<W: Write + Seek + Send + 'static> Inner<W> {
+impl<W: Write + Seek> Inner<W> {
     #[cfg_attr(not(encode), expect(unused_variables))]
     fn open(spec: &Spec, sink: W) -> Result<Self> {
         match spec.format() {
@@ -89,10 +85,6 @@ impl<W: Write + Seek + Send + 'static> Inner<W> {
             #[cfg(feature = "encode-flac")]
             Format::Flac { depth, level } => Ok(Self::Flac(Box::new(crate::FlacWriter::create(
                 spec, depth, level, sink,
-            )?))),
-            #[cfg(feature = "encode-vorbis")]
-            Format::Vorbis { quality } => Ok(Self::Vorbis(Box::new(crate::VorbisWriter::create(
-                spec, quality, sink,
             )?))),
         }
     }
@@ -108,7 +100,7 @@ pub(crate) fn check_planned(spec: &Spec, frames: Samples) -> Result<()> {
     }
 }
 
-impl<W: Write + Seek + Send + 'static> Encoder<W> {
+impl<W: Write + Seek> Encoder<W> {
     /// Starts a file of `spec` in `sink`, writing its header.
     ///
     /// # Errors
@@ -142,8 +134,6 @@ impl<W: Write + Seek + Send + 'static> Encoder<W> {
             Inner::Aiff(_) => {}
             #[cfg(feature = "encode-flac")]
             Inner::Flac(_) => {}
-            #[cfg(feature = "encode-vorbis")]
-            Inner::Vorbis(_) => {}
             #[cfg(not(encode))]
             Inner::Never(never, _) => match *never {},
         }
@@ -161,9 +151,8 @@ impl<W: Write + Seek + Send + 'static> Encoder<W> {
     /// [`Error::BlockWidth`] for a block of another width than the spec's;
     /// [`Error::Io`] when the sink fails (a full disk); [`Error::WavTooLarge`]
     /// when a WAV file reaches its size limit, after the frames that fit were
-    /// written; [`Error::Encoding`] when the codec rejects the block. (Ogg
-    /// Vorbis encodes on a thread of its own, so its failure may reach the
-    /// next `write` or `finish` instead.) After an error the file is not a complete take: [`finish`](Self::finish) still
+    /// written; [`Error::Encoding`] when the codec rejects the block. After an
+    /// error the file is not a complete take: [`finish`](Self::finish) still
     /// closes what was written for a caller that keeps it, and
     /// [`abort`](Self::abort) discards it.
     pub fn write<S: Sample>(&mut self, block: Interleaved<'_, S>) -> Result<()> {
@@ -188,8 +177,6 @@ impl<W: Write + Seek + Send + 'static> Encoder<W> {
             Inner::Aiff(w) => w.write(block),
             #[cfg(feature = "encode-flac")]
             Inner::Flac(w) => w.write(block),
-            #[cfg(feature = "encode-vorbis")]
-            Inner::Vorbis(w) => w.write(block),
             #[cfg(not(encode))]
             Inner::Never(never, _) => match *never {},
         }
@@ -224,8 +211,6 @@ impl<W: Write + Seek + Send + 'static> Encoder<W> {
             Inner::Aiff(w) => w.finish()?,
             #[cfg(feature = "encode-flac")]
             Inner::Flac(w) => w.finish()?,
-            #[cfg(feature = "encode-vorbis")]
-            Inner::Vorbis(w) => w.finish()?,
             #[cfg(not(encode))]
             Inner::Never(never, _) => match never {},
         };
@@ -380,9 +365,8 @@ impl FileEncoder {
     /// sizes are the whole frames in the file, and a torn last frame is cut
     /// off. This holds for WAV (the RIFF and `data` sizes) and AIFF (the COMM
     /// frame count, the SSND and FORM sizes). FLAC states no length it needs (a
-    /// zero STREAMINFO total and MD5 mean unknown), and Ogg Vorbis is a stream
-    /// of pages, so neither is patched; the last FLAC frame or Vorbis page may
-    /// be cut short. [`Unfinished::header_describes_frames`] is `false` when a WAV's or
+    /// zero STREAMINFO total and MD5 mean unknown), so neither is patched; the
+    /// last FLAC frame may be cut short. [`Unfinished::header_describes_frames`] is `false` when a WAV's or
     /// AIFF's patch failed, and the file is kept all the same: its header then
     /// states no frames.
     ///
@@ -471,7 +455,7 @@ pub struct Unfinished {
     /// Whether the file's header describes the frames kept: `true` when the
     /// header now states the lengths of the frames on disk (a WAV or AIFF that
     /// was patched), or needs none (FLAC, whose STREAMINFO total of 0 means
-    /// unknown; an Ogg Vorbis stream, read up to its last whole page). `false`
+    /// unknown). `false`
     /// only when a patch the format needs failed.
     pub header_describes_frames: bool,
 }

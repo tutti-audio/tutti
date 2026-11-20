@@ -1,6 +1,5 @@
 //! `check-layout`: the repo layout and the crate layering, read from the
-//! workspace's manifests (no build, no `cargo metadata`; the C-library check is
-//! the one place a `cargo tree` is asked, through [`Cargo`]).
+//! workspace's manifests (no build, no `cargo metadata`, no `cargo tree`).
 //!
 //! Layout:
 //! - every workspace member under `crates/` is directly `crates/<package-name>`,
@@ -24,17 +23,14 @@
 //! The codec libraries are `tutti-codec`'s alone, and `winnow` is named in
 //! [`WINNOW_HOMES`]'s parser modules alone; in `tutti-codec`'s manifest a
 //! `decode-*` feature enables no encoder library and an `encode-*` feature no
-//! `symphonia`. `export` alone on `tutti-session` and `tutti`
-//! reaches no C library: `cargo tree -i ogg_next_sys`
-//! finds nothing, and with `encode-vorbis` it still does, so the check cannot pass
-//! by looking at nothing.
+//! `symphonia`.
 //!
 //! A rule the layers already state is not stated twice: `tutti-units`,
 //! `tutti-plugin-ipc-ffi` and every other layer-0 crate depend on no workspace
 //! crate because nothing sits below layer 0.
 
 use super::toml::{Kind, Toml, strings};
-use super::{Cargo, Report, Tree};
+use super::{Report, Tree};
 use std::collections::{BTreeMap, BTreeSet};
 
 const SKIPPED_DIRS: &[&str] = &["target", ".git"];
@@ -161,13 +157,15 @@ const ONLY: &[(&str, &[&str])] = &[
         ],
     ),
     // The facade over the hosting: the generic host, the wire, the catalog and
-    // the vocabulary, the graph a plugin is a node of, and the format hosts an
-    // in-process load or an editor needs.
+    // the vocabulary, the graph a plugin is a node of, the executor a served
+    // plugin's exit watch runs on, and the format hosts an in-process load or an
+    // editor needs.
     (
         "tutti-plugin",
         &[
             "tutti-buffers",
             "tutti-graph",
+            "tutti-platform",
             "tutti-plugin-db",
             "tutti-plugin-host",
             "tutti-plugin-ipc",
@@ -260,7 +258,10 @@ const ONLY: &[(&str, &[&str])] = &[
             "tutti-platform",
         ],
     ),
-    ("tutti-dsp", &["tutti-units", "tutti-buffers", "tutti-rt"]),
+    (
+        "tutti-dsp",
+        &["tutti-units", "tutti-music", "tutti-buffers", "tutti-rt"],
+    ),
     ("tutti-curve", &["tutti-units"]),
     ("tutti-buffers", &["tutti-units"]),
     (
@@ -291,10 +292,10 @@ const ONLY: &[(&str, &[&str])] = &[
     ),
 ];
 
-const CODEC_LIBS: &[&str] = &["symphonia", "flacenc", "aifc", "vorbis_rs"];
+const CODEC_LIBS: &[&str] = &["symphonia", "flacenc", "aifc"];
 /// The platform libraries `tutti-platform` alone names, in either spelling.
 const PLATFORM_LIBS: &[&str] = &["web-time", "web_time", "thread-priority", "thread_priority"];
-const ENCODERS: &[&str] = &["flacenc", "aifc", "vorbis_rs", "md-5"];
+const ENCODERS: &[&str] = &["flacenc", "aifc", "md-5"];
 
 /// A crate that names `winnow`, and the parser modules that may.
 pub(super) const WINNOW_HOMES: &[(&str, &[&str])] = &[
@@ -320,9 +321,6 @@ pub(super) const WINNOW_HOMES: &[(&str, &[&str])] = &[
         ],
     ),
 ];
-
-/// The crates that can reach a C library through `encode-vorbis`.
-const OGG_PACKAGES: &[&str] = &["tutti-session", "tutti"];
 
 pub(super) struct Pkg {
     pub(super) name: String,
@@ -370,7 +368,7 @@ pub(super) fn packages(tree: &dyn Tree, bad: &mut Vec<String>) -> Vec<Pkg> {
     out
 }
 
-pub(super) fn check(tree: &dyn Tree, cargo: &dyn Cargo) -> Report {
+pub(super) fn check(tree: &dyn Tree) -> Report {
     let mut bad: Vec<String> = Vec::new();
     let pkgs = packages(tree, &mut bad);
     let by_name: BTreeMap<&str, &Pkg> = pkgs.iter().map(|p| (p.name.as_str(), p)).collect();
@@ -571,40 +569,6 @@ pub(super) fn check(tree: &dyn Tree, cargo: &dyn Cargo) -> Report {
         }
     }
 
-    // `export` alone pulls no C library.
-    for pkg in OGG_PACKAGES.iter().filter(|p| by_name.contains_key(*p)) {
-        let reaches = |features: &str| {
-            cargo.tree(&[
-                "-p",
-                pkg,
-                "-e",
-                "normal",
-                "-i",
-                "ogg_next_sys",
-                "--features",
-                features,
-                "--no-default-features",
-            ])
-        };
-        if reaches("export").is_ok_and(|o| o.contains("ogg_next_sys")) {
-            bad.push(format!(
-                "{pkg} with `export` alone reaches ogg_next_sys; only `encode-vorbis` may"
-            ));
-        }
-        match reaches("export,encode-vorbis") {
-            Ok(o) if o.contains("ogg_next_sys") => {}
-            Ok(_) => bad.push(format!(
-                "{pkg} with `export,encode-vorbis` no longer reaches ogg_next_sys; the check sees nothing ()"
-            )),
-            Err(e) => {
-                let e: String = e.trim().chars().take(200).collect();
-                bad.push(format!(
-                    "{pkg} with `export,encode-vorbis` no longer reaches ogg_next_sys; the check sees nothing ({e})"
-                ));
-            }
-        }
-    }
-
     // Whole dependency sets.
     let deps_of = |name: &str, kinds: &[Kind]| -> BTreeSet<String> {
         by_name
@@ -717,7 +681,7 @@ pub(super) fn check(tree: &dyn Tree, cargo: &dyn Cargo) -> Report {
 
 #[cfg(test)]
 mod tests {
-    use super::super::fake::{Mem, NoCargo, OggCargo};
+    use super::super::fake::Mem;
     use super::*;
 
     /// A workspace of `(dir, name, manifest body)` members.
@@ -756,7 +720,7 @@ mod tests {
     }
 
     fn run(members: &[(&str, &str, &str)]) -> Report {
-        check(&ws(members), &NoCargo)
+        check(&ws(members))
     }
 
     fn with(extra: (&'static str, &'static str, &'static str)) -> Report {
@@ -838,7 +802,7 @@ mod tests {
         let mut m = ws(&base());
         m.files
             .insert("crates/stray/Cargo.toml".into(), String::new());
-        assert!(check(&m, &NoCargo).findings[1].contains("crates/stray is not a workspace member"));
+        assert!(check(&m).findings[1].contains("crates/stray is not a workspace member"));
     }
 
     #[test]
@@ -846,11 +810,11 @@ mod tests {
         let mut m = ws(&base());
         m.files
             .insert("testing/conformance/clap.txt".into(), String::new());
-        assert!(check(&m, &NoCargo).passed());
+        assert!(check(&m).passed());
         m.files
             .insert("testing/conformance-other/x.txt".into(), String::new());
         assert!(
-            check(&m, &NoCargo)
+            check(&m)
                 .findings
                 .iter()
                 .any(|l| l.contains("testing/conformance-other is not a workspace member"))
@@ -1046,7 +1010,7 @@ mod tests {
             "// winnow\nuse winnow::Parser;\n".into(),
         );
         assert!(
-            check(&m, &NoCargo)
+            check(&m)
                 .findings
                 .iter()
                 .any(|l| l.contains("crates/tutti-midi-file/src/lib.rs names winnow outside"))
@@ -1059,28 +1023,18 @@ mod tests {
             "crates/tutti-midi-file/src/smf/read.rs".into(),
             "use winnow::Parser;\n".into(),
         );
-        assert!(
-            check(&m, &NoCargo)
-                .findings
-                .iter()
-                .all(|l| !l.contains("winnow"))
-        );
+        assert!(check(&m).findings.iter().all(|l| !l.contains("winnow")));
         // The Universal SysEx grammar is the protocol crate's one parser module.
         m.files.insert(
             "crates/tutti-midi-protocol/src/universal/read.rs".into(),
             "use winnow::Parser;\n".into(),
         );
-        assert!(
-            check(&m, &NoCargo)
-                .findings
-                .iter()
-                .all(|l| !l.contains("winnow"))
-        );
+        assert!(check(&m).findings.iter().all(|l| !l.contains("winnow")));
         m.files.insert(
             "crates/tutti-midi-protocol/src/universal.rs".into(),
             "use winnow::Parser;\n".into(),
         );
-        assert!(check(&m, &NoCargo).findings.iter().any(|l| {
+        assert!(check(&m).findings.iter().any(|l| {
             l.contains("crates/tutti-midi-protocol/src/universal.rs names winnow outside")
         }));
         // The MIDI-CI grammar is the MIDI-CI crate's one parser module.
@@ -1089,7 +1043,7 @@ mod tests {
             "use winnow::Parser;\n".into(),
         );
         assert!(
-            check(&m, &NoCargo)
+            check(&m)
                 .findings
                 .iter()
                 .all(|l| !l.contains("tutti-midi-ci/src/read.rs"))
@@ -1099,7 +1053,7 @@ mod tests {
             "use winnow::Parser;\n".into(),
         );
         assert!(
-            check(&m, &NoCargo)
+            check(&m)
                 .findings
                 .iter()
                 .any(|l| l.contains("crates/tutti-midi-ci/src/lib.rs names winnow outside"))
@@ -1108,14 +1062,14 @@ mod tests {
 
     #[test]
     fn codec_features_keep_readers_and_writers_apart() {
-        let features = "[features]\ndecode-ogg = [\n  \"dep:symphonia\",\n  \"dep:vorbis_rs\",\n]\nencode-wav = [\"symphonia?/wav\"]\nencode-flac = [\"dep:flacenc\"]\n";
+        let features = "[features]\ndecode-ogg = [\n  \"dep:symphonia\",\n  \"dep:aifc\",\n]\nencode-wav = [\"symphonia?/wav\"]\nencode-flac = [\"dep:flacenc\"]\n";
         let mut v = base();
         v.push(("crates/tutti-codec", "tutti-codec", features));
         let r = run(&v);
         assert!(
             r.findings
                 .iter()
-                .any(|l| l.contains("decode-ogg enables an encoder library ([\"vorbis_rs\"])"))
+                .any(|l| l.contains("decode-ogg enables an encoder library ([\"aifc\"])"))
         );
         assert!(
             r.findings
@@ -1126,38 +1080,6 @@ mod tests {
             r.findings.iter().filter(|l| l.contains("enables")).count(),
             2
         );
-    }
-
-    #[test]
-    fn export_alone_reaches_no_c_library_and_export_ogg_still_does() {
-        let mut v = base();
-        v.push(("crates/tutti-session", "tutti-session", ""));
-        let m = ws(&v);
-        // The tree the check expects: ogg only through `encode-vorbis`.
-        let r = check(
-            &m,
-            &OggCargo {
-                export_reaches: false,
-                ogg_reaches: true,
-            },
-        );
-        assert!(r.passed(), "{:?}", r.findings);
-        let r = check(
-            &m,
-            &OggCargo {
-                export_reaches: true,
-                ogg_reaches: true,
-            },
-        );
-        assert!(r.findings[1].contains("tutti-session with `export` alone reaches ogg_next_sys"));
-        let r = check(
-            &m,
-            &OggCargo {
-                export_reaches: false,
-                ogg_reaches: false,
-            },
-        );
-        assert!(r.findings[1].contains("no longer reaches ogg_next_sys"));
     }
 
     #[test]

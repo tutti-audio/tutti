@@ -29,7 +29,7 @@ use tutti_vst2_host::Vst2Loaded;
 
 use tutti_graph::NodeKey;
 use tutti_graph::{Editor, ForkMode, ForkTarget, IntoNode, Prepare, Renderer, TransportPosition};
-use tutti_graph::{OutPort, Source};
+use tutti_graph::{OutPort, PortSource};
 use tutti_music::{BeatsPerBar, MeterChange, MeterMap, NoteValue, TimeSignature};
 use tutti_plugin_host::PluginHandle;
 use tutti_plugin_host::{PluginNode, load_client};
@@ -167,7 +167,7 @@ fn live_graph(key: NodeKey, node: impl IntoNode) -> Editor {
     editor
         .spec_mut()
         .topology
-        .set_outputs((0..2).map(|port| Source::Node(OutPort { node: key, port })));
+        .set_outputs((0..2).map(|port| PortSource::Node(OutPort { node: key, port })));
     editor
 }
 
@@ -259,7 +259,7 @@ fn a_plugin_without_chunks_forks_with_its_program_and_parameters() {
     editor
         .spec_mut()
         .topology
-        .set_outputs((0..2).map(|port| Source::Node(OutPort { node: key, port })));
+        .set_outputs((0..2).map(|port| PortSource::Node(OutPort { node: key, port })));
     editor.commit().expect("commits");
     let mut renderer = Renderer::new(editor, exec);
     assert_renders(&renderer.render(BLOCK * 2), 10_750.0, "the fork");
@@ -352,6 +352,7 @@ fn a_plugin_handed_back_by_into_client_forks() {
     let _env = ProbeEnv::new(true);
     let plugin = tutti_plugin::catalog::Plugin::open(
         main_thread(),
+        tutti_fixtures::executor(),
         &tutti_fixtures::pumped_work(),
         &tutti_plugin_db::Loadable::uncatalogued(tutti_plugin_types::PluginRef::file(
             tutti_fixtures::vst2_probe(),
@@ -477,7 +478,7 @@ fn a_live_fork_keeps_the_live_render_mode() {
         editor
             .spec_mut()
             .topology
-            .set_outputs(vec![Source::Node(OutPort { node: key, port: 0 })]);
+            .set_outputs(vec![PortSource::Node(OutPort { node: key, port: 0 })]);
         editor.commit().expect("commits");
         let _ = Renderer::new(editor, exec).render(BLOCK);
         assert_eq!(read_capture().process_level, level, "{mode:?}");

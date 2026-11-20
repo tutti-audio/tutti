@@ -1,12 +1,13 @@
-//! Offline analysis as a job: [`Session::analyze`] folds a wave or a file
-//! through any [`Measure`]'s meter on a worker and lands the meter's output.
+//! Offline analysis as a value: [`Session::analyze`] returns an [`Analyze`]
+//! that, when the app runs it, folds a wave or a file through any
+//! [`Measure`]'s meter and returns the meter's output.
 //!
 //! The audio states the rate and the width, so the caller states only the
 //! analysis: the meter's [`Context`](Measure::Context) is built from them
 //! ([`AudioContext`]) and each chunk is shown to the meter in the view it
 //! takes ([`AudioInput`]). A file is decoded one chunk at a time and never
 //! held whole; a wave in memory is cut into the same chunks, so the two tiers
-//! land the same output.
+//! return the same output.
 //!
 //! The same binding serves a live [`Analyzer`]: a tap opened by
 //! [`Taps::analyzer`](crate::Taps::analyzer), which binds the meter to the
@@ -18,7 +19,6 @@ mod live;
 #[cfg(test)]
 mod tests;
 
-use std::marker::PhantomData;
 use std::sync::Arc;
 
 use tutti_buffers::ChannelTopology;
@@ -32,8 +32,7 @@ pub use feed::{AudioContext, AudioInput, BindError};
 use feed::{Bind, Chunk, View};
 pub use live::{Analyzer, AnalyzerError};
 
-use crate::job::{Cancel, sealed};
-use crate::{AppKey, Clock, Job, JobKind, Session, WaitError, WorkerError};
+use crate::{AppKey, Clock, Session};
 
 /// Frames decoded, and pushed to the meter, at a time.
 const CHUNK_FRAMES: Samples = Samples::new(16_384);
@@ -43,14 +42,14 @@ const CHUNK_FRAMES: Samples = Samples::new(16_384);
 ///
 /// Converts from what the session already holds: an [`Arc<Wave<S>>`](Wave) or
 /// a [`Wave<S>`]; with a decoder, an [`Asset`] or a path; and with a decoder and
-/// feature `sampler`, a pooled `AudioEntry`. An asset, and a streamed entry, are decoded
-/// chunk by chunk on the job's worker into `S`.
+/// feature `sampler`, a `LoadedAudio`. An asset, and a streamed load, are decoded
+/// chunk by chunk into `S` as the analysis runs.
 #[derive(Clone, Debug)]
 #[non_exhaustive]
 pub enum Audio<S: Float = f32> {
     /// A wave in memory, read in its own format.
     Wave(Arc<Wave<S>>),
-    /// A file or bytes, decoded on the worker as the analysis folds it.
+    /// A file or bytes, decoded as the analysis folds it.
     #[cfg(codec)]
     File(Asset),
 }
@@ -89,11 +88,11 @@ impl<S: Float> From<&std::path::Path> for Audio<S> {
 }
 
 #[cfg(all(feature = "sampler", codec))]
-impl<S: Float> From<crate::AudioEntry<S>> for Audio<S> {
-    fn from(entry: crate::AudioEntry<S>) -> Self {
-        match entry {
-            crate::AudioEntry::Resident(wave) => Self::Wave(wave),
-            crate::AudioEntry::Streamed(info) => Self::File(info.asset().clone()),
+impl<S: Float> From<crate::LoadedAudio<S>> for Audio<S> {
+    fn from(audio: crate::LoadedAudio<S>) -> Self {
+        match audio.data() {
+            crate::AudioData::Resident(wave) => Self::Wave(Arc::clone(wave)),
+            crate::AudioData::Streamed(_) => Self::File(audio.asset().clone()),
         }
     }
 }
@@ -114,41 +113,69 @@ pub enum AnalyzeError {
     /// The audio's channels cannot be shown to the meter in the view it takes.
     #[error(transparent)]
     Bind(#[from] BindError),
-    /// The worker did not finish.
-    #[error(transparent)]
-    Worker(#[from] WorkerError),
-    /// The wait could not run ([`Job::wait`]).
-    #[error(transparent)]
-    Wait(#[from] WaitError),
 }
 
-/// The kind of [`Session::analyze`]: the job lands the meter's
-/// [`Output`](Meter::Output) over the whole audio.
+/// An analysis of one audio, built by [`Session::analyze`] and not yet run:
+/// [`run`](Self::run) folds the audio through the meter and returns its
+/// [`Output`](Meter::Output).
+///
+/// It holds the audio and the analysis and nothing of the session, so the app
+/// runs it on any thread it chooses; dropping it unrun cancels it.
 #[derive(Debug)]
-pub struct Analyze<A, S: Float>(PhantomData<fn() -> (A, S)>);
-
-impl<S: Float, A: Measure<S> + 'static> sealed::Sealed for Analyze<A, S> where
-    <A::Meter as Meter>::Output: Send + 'static
-{
+#[must_use = "work does nothing until it runs"]
+pub struct Analyze<A, S: Float = f32> {
+    audio: Audio<S>,
+    analysis: A,
 }
 
-impl<S: Float, A: Measure<S> + 'static> JobKind for Analyze<A, S>
+impl<A, S> Analyze<A, S>
 where
-    <A::Meter as Meter>::Output: Send + 'static,
+    S: Float,
+    A: Measure<S>,
+    A::Context: AudioContext,
+    for<'a> <A::Meter as Meter>::Input<'a>: AudioInput<'a, S>,
 {
-    type Output = <A::Meter as Meter>::Output;
-    type Error = AnalyzeError;
+    /// Folds the audio through the meter the analysis builds, on the calling
+    /// thread, and returns the meter's output.
+    ///
+    /// The cost is a full read of the audio: a file is decoded a chunk at a
+    /// time, so its length is not held in memory, and the call returns when
+    /// the last chunk is folded.
+    ///
+    /// # Errors
+    ///
+    /// [`AnalyzeError::Measure`] when the meter refuses the audio or a chunk,
+    /// `AnalyzeError::Decode` when a file cannot be decoded, and
+    /// [`AnalyzeError::Bind`] when the audio cannot be shown to the meter (a
+    /// stereo analysis of audio of another width, a mono analysis with no
+    /// fold from the audio's topology, a chunk that is not a valid view).
+    pub fn run(self) -> Result<<A::Meter as Meter>::Output, AnalyzeError> {
+        let mut reader = Reader::open(&self.audio)?;
+        let topology = reader.topology();
+        let context = A::Context::from_audio(reader.sample_rate(), topology.width());
+        let mut meter = self.analysis.measure(context)?;
+        let mut chunk = Chunk::new(&topology);
+        loop {
+            reader.next(&mut chunk)?;
+            if chunk.is_empty() {
+                return Ok(meter.finish());
+            }
+            meter.push(
+                <<A::Meter as Meter>::Input<'_> as View<'_, S>>::view(&mut chunk)?,
+                &mut Discard,
+            )?;
+        }
+    }
 }
 
 impl<K: AppKey, C: Clock> Session<K, C> {
-    /// Folds `audio` through the meter `analysis` builds, on a worker, and
-    /// lands the meter's output in a later [`update`](Self::update).
+    /// An [`Analyze`] of `audio` through the meter `analysis` builds; nothing
+    /// is read until the app calls [`run`](Analyze::run), which runs on the
+    /// caller's thread and costs a full read of the audio.
     ///
     /// The rate and the width come from the audio: the analysis is bound to
     /// them ([`AudioContext`]), so a config that cannot hold the audio's rate
-    /// fails the job. A file is decoded a chunk at a time, so its length is
-    /// not held in memory. Dropping the [`Job`] cancels the analysis between
-    /// chunks.
+    /// fails the run.
     ///
     /// The analysis reads the measure's own format `S` (`A: Measure<S>`): a
     /// [`Wave<S>`] is read through its own planes, and a file is decoded into
@@ -158,33 +185,15 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// one states `S` (`analyze::<f32, _>`).
     ///
     /// The analysis is generic, never boxed: [`Meter`] is not object-safe.
-    ///
-    /// # Errors
-    ///
-    /// The job fails with [`AnalyzeError::Measure`] when the meter refuses the
-    /// audio or a chunk, `AnalyzeError::Decode` when a file cannot be
-    /// decoded, [`AnalyzeError::Bind`] when the audio cannot be shown to the meter
-    /// (a stereo analysis of audio of another width, a mono analysis with no
-    /// fold from the audio's topology, a chunk that is not a valid view), and [`AnalyzeError::Worker`] or
-    /// [`AnalyzeError::Wait`] when the job's worker fails or is dropped.
-    pub fn analyze<S, A>(&mut self, audio: impl Into<Audio<S>>, analysis: A) -> Job<Analyze<A, S>>
+    pub fn analyze<S, A>(&self, audio: impl Into<Audio<S>>, analysis: A) -> Analyze<A, S>
     where
         S: Float,
-        A: Measure<S> + Send + 'static,
-        A::Context: AudioContext,
-        <A::Meter as Meter>::Output: Send + 'static,
-        for<'a> <A::Meter as Meter>::Input<'a>: AudioInput<'a, S>,
+        A: Measure<S>,
     {
-        let audio = audio.into();
-        self.jobs.submit_job(
-            move |cancel| run(&audio, &analysis, cancel),
-            |_, done, ticket| {
-                ticket.land(match done {
-                    Ok(answer) => answer,
-                    Err(failed) => Err(failed.into()),
-                });
-            },
-        )
+        Analyze {
+            audio: audio.into(),
+            analysis,
+        }
     }
 }
 
@@ -250,40 +259,7 @@ impl<'w, S: Float> Reader<'w, S> {
     }
 }
 
-/// The worker's whole job: bind, fold every chunk, finish.
-fn run<S, A>(
-    audio: &Audio<S>,
-    analysis: &A,
-    cancel: &Cancel,
-) -> Result<<A::Meter as Meter>::Output, AnalyzeError>
-where
-    S: Float,
-    A: Measure<S>,
-    A::Context: AudioContext,
-    for<'a> <A::Meter as Meter>::Input<'a>: AudioInput<'a, S>,
-{
-    let mut reader = Reader::open(audio)?;
-    let topology = reader.topology();
-    let context = A::Context::from_audio(reader.sample_rate(), topology.width());
-    let mut meter = analysis.measure(context)?;
-    let mut chunk = Chunk::new(&topology);
-    loop {
-        // A dropped job reads nothing more: its result is discarded.
-        if cancel.is_cancelled() {
-            return Err(WorkerError::Dropped.into());
-        }
-        reader.next(&mut chunk)?;
-        if chunk.is_empty() {
-            return Ok(meter.finish());
-        }
-        meter.push(
-            <<A::Meter as Meter>::Input<'_> as View<'_, S>>::view(&mut chunk)?,
-            &mut Discard,
-        )?;
-    }
-}
-
-/// The sink for the items a push yields: the job lands the output alone.
+/// The sink for the items a push yields: the run returns the output alone.
 struct Discard;
 
 impl<T> Extend<T> for Discard {

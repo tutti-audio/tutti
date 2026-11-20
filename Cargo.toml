@@ -5,6 +5,7 @@ members = [
     "crates/tutti",
     "crates/tutti-session",
     "testing/tutti-verify",
+    "testing/tutti-web-test",
     "testing/tutti-book",
     "crates/tutti-engine",
     "crates/tutti-timeline",

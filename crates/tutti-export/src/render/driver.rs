@@ -40,7 +40,7 @@ pub(crate) struct FileChannels<'a> {
 impl FileChannels<'_> {
     /// The fold from a source of `outputs` channels. The source is what it
     /// declared (`root`: the graph's root, or a tap's placement), or else the engine's order for its width (a bare 4 is
-    /// quad); the file the topology it states or else the same assumption for
+    /// quad); the file the topology it states or else the default layout for
     /// its width; where either has no order, or the file states unassigned
     /// channels, the channels go by index ([`fold_to_width`],
     /// [`Fold::by_index`]).
@@ -70,13 +70,13 @@ impl FileChannels<'_> {
         let Some(topology) = self.topology else {
             let fold = match root {
                 Some(root) => fold_to_width(root, self.layout),
-                None => fold_to_width(&ChannelTopology::assumed(graph), self.layout),
+                None => fold_to_width(&ChannelTopology::default_for(graph), self.layout),
             };
             return fold.map_err(|e| ConfigError::Placement(e).into());
         };
         let from = match root {
             Some(root) => root.clone(),
-            None => ChannelTopology::assumed(graph),
+            None => ChannelTopology::default_for(graph),
         };
         // A file that names no speaker takes the graph's channels by index,
         // as it says; `between` never pads by a guess.
@@ -461,10 +461,7 @@ impl<F: Float> Replay<F> for PlaneSource<'_, F> {
 /// The frames the replay of planes hands out per block: 64, which only paces
 /// the encoder.
 ///
-/// Not raised to the graph's block: Ogg Vorbis's bytes depend on how its
-/// input is split into `encode_audio_block` calls, so this size is part of
-/// what a replayed Ogg export writes, and a 1024-frame replay measured no
-/// faster for the PCM formats.
+/// Not raised to the graph's block: a 1024-frame replay measured no faster.
 pub(crate) const REPLAY_BLOCK: usize = 64;
 
 /// Pull the whole render out of `src`, gating each block, handing every block

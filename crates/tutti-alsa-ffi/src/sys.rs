@@ -25,7 +25,7 @@
     reason = "FFI type names mirror alsa-lib's C spelling, so a reader can grep the header"
 )]
 
-use std::os::raw::{c_char, c_int, c_short, c_uint, c_void};
+use std::os::raw::{c_char, c_int, c_short, c_uchar, c_uint, c_void};
 
 /// Opaque sequencer handle.
 #[derive(Debug)]
@@ -319,8 +319,8 @@ unsafe extern "C" {
     ) -> c_int;
 
     // UMP event I/O. @@ALSA_1.2.10
-    /// Read one UMP event. Blocks unless the client was opened non-blocking, in
-    /// which case it returns `-EAGAIN` when the queue is empty.
+    /// Read one UMP event. Returns `-EAGAIN` when the queue is empty (the client is
+    /// opened non-blocking).
     ///
     /// The event is owned by alsa-lib and valid only until the next call — it
     /// must be copied out, never retained.
@@ -482,6 +482,19 @@ unsafe extern "C" {
     pub fn snd_ump_endpoint_info_get_num_blocks(info: *const snd_ump_endpoint_info_t) -> c_uint;
     pub fn snd_ump_endpoint_info_get_version(info: *const snd_ump_endpoint_info_t) -> c_uint;
     pub fn snd_ump_endpoint_info_get_flags(info: *const snd_ump_endpoint_info_t) -> c_uint;
+    pub fn snd_ump_endpoint_info_get_manufacturer_id(
+        info: *const snd_ump_endpoint_info_t,
+    ) -> c_uint;
+    pub fn snd_ump_endpoint_info_get_family_id(info: *const snd_ump_endpoint_info_t) -> c_uint;
+    pub fn snd_ump_endpoint_info_get_model_id(info: *const snd_ump_endpoint_info_t) -> c_uint;
+    /// The four software revision bytes: a pointer into `info`, valid until it is freed.
+    pub fn snd_ump_endpoint_info_get_sw_revision(
+        info: *const snd_ump_endpoint_info_t,
+    ) -> *const c_uchar;
+    /// The product instance id: a pointer into `info`, valid until it is freed.
+    pub fn snd_ump_endpoint_info_get_product_id(
+        info: *const snd_ump_endpoint_info_t,
+    ) -> *const c_char;
     /// The endpoint's name: a pointer into `info`, valid until it is freed.
     pub fn snd_ump_endpoint_info_get_name(info: *const snd_ump_endpoint_info_t) -> *const c_char;
 }
@@ -510,6 +523,22 @@ unsafe extern "C" {
     pub fn snd_ump_endpoint_info_set_flags(info: *mut snd_ump_endpoint_info_t, flags: c_uint);
     pub fn snd_ump_endpoint_info_set_num_blocks(info: *mut snd_ump_endpoint_info_t, n: c_uint);
     pub fn snd_ump_endpoint_info_set_name(info: *mut snd_ump_endpoint_info_t, name: *const c_char);
+    pub fn snd_ump_endpoint_info_set_manufacturer_id(
+        info: *mut snd_ump_endpoint_info_t,
+        id: c_uint,
+    );
+    pub fn snd_ump_endpoint_info_set_family_id(info: *mut snd_ump_endpoint_info_t, id: c_uint);
+    pub fn snd_ump_endpoint_info_set_model_id(info: *mut snd_ump_endpoint_info_t, id: c_uint);
+    /// Copies four bytes from `revision`.
+    pub fn snd_ump_endpoint_info_set_sw_revision(
+        info: *mut snd_ump_endpoint_info_t,
+        revision: *const c_uchar,
+    );
+    /// Copies the string, truncated to the record's 128 bytes.
+    pub fn snd_ump_endpoint_info_set_product_id(
+        info: *mut snd_ump_endpoint_info_t,
+        id: *const c_char,
+    );
     pub fn snd_ump_block_info_set_block_id(info: *mut snd_ump_block_info_t, id: c_uint);
     pub fn snd_ump_block_info_set_active(info: *mut snd_ump_block_info_t, active: c_uint);
     pub fn snd_ump_block_info_set_direction(info: *mut snd_ump_block_info_t, direction: c_uint);

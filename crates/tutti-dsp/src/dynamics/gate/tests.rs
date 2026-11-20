@@ -1,7 +1,7 @@
 use crate::testing::uniform;
 use tutti_buffers::{Float, Mono, Planes, PlanesMut};
 use tutti_rt::SplitMix64;
-use tutti_units::{Db, SampleRate, Seconds};
+use tutti_units::{CompressionRatio, Db, SampleRate, Seconds};
 
 use super::*;
 use crate::testing::noise;
@@ -22,6 +22,7 @@ fn controls(threshold: f64, attack: f64, hold: f64, release: f64, range: f64) ->
         hold: Seconds::new(hold),
         release: Seconds::new(release),
         range: Db::new(range),
+        ratio: CompressionRatio::new(f64::INFINITY),
         ..GateControls::DEFAULT
     }
 }
@@ -66,6 +67,12 @@ fn hostile() -> Vec<GateControls> {
             ..base
         },
     ];
+    for ratio in [f64::NAN, 0.5, f64::MAX, f64::NEG_INFINITY] {
+        all.push(GateControls {
+            ratio: CompressionRatio::new(ratio),
+            ..base
+        });
+    }
     for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
         all.push(GateControls {
             threshold: Db::new(bad),
@@ -861,4 +868,114 @@ fn an_f32_three_hundred_second_release_at_192_khz_still_closes_along_the_closed_
         worst <= bound,
         "{worst} off the closed form, bound {bound:e}"
     );
+}
+
+/// The last frame of a constant key `under` dB under `threshold` dB, gating a signal of ones in
+/// an `f64` bank at rest on `c` (no times, so the follower is on its target at once).
+fn settled_gain_under(c: &GateControls, under: f64) -> f64 {
+    let level = 10f64.powf((c.threshold.get() - under) / 20.0);
+    let key = vec![level; 64];
+    run_f64(c, &vec![1.0; 64], &key)[63]
+}
+
+fn expander(threshold: f64, ratio: f64, range: f64) -> GateControls {
+    GateControls {
+        ratio: CompressionRatio::new(ratio),
+        ..controls(threshold, 0.0, 0.0, 0.0, range)
+    }
+}
+
+/// A downward expander's static curve: a key `x` dB under the threshold has a gain of
+/// `-(ratio - 1) x` dB, floored at the range. At ratios 2 and 4 from 3 dB to 30 dB under a
+/// threshold of -20 dB, over a range of -80 dB, the gain is `10^(-(ratio - 1) x / 20)` or the
+/// range's, to `1e-10` (the `log10` and `powf` of the detector in `f64`).
+#[test]
+fn an_expander_gain_falls_ratio_db_per_db_under_the_threshold_to_the_range() {
+    let range = Db::new(-80.0).to_amplitude().get();
+    for ratio in [2.0, 4.0] {
+        for under in [3.0, 10.0, 17.5, 30.0] {
+            let want = 10f64.powf(-(ratio - 1.0) * under / 20.0).max(range);
+            let got = settled_gain_under(&expander(-20.0, ratio, -80.0), under);
+            assert!(
+                (got / want - 1.0).abs() < 1e-10,
+                "ratio {ratio}, {under} dB under: {got} against {want}"
+            );
+        }
+    }
+    // Ratio 4 at 30 dB under asks for -90 dB: the floor, exactly.
+    assert_eq!(
+        settled_gain_under(&expander(-20.0, 4.0, -80.0), 30.0),
+        range
+    );
+}
+
+/// A key over the threshold is open at unity gain whatever the ratio, and a ratio of 1 is no
+/// expansion: the gain is unity at every level under the threshold too.
+#[test]
+fn an_expander_is_unity_over_the_threshold_and_at_a_ratio_of_one() {
+    for ratio in [1.0, 2.0, 4.0] {
+        let got = settled_gain_under(&expander(-20.0, ratio, -80.0), -10.0);
+        assert!((got - 1.0).abs() < 1e-12, "ratio {ratio} over: {got}");
+    }
+    for under in [3.0, 40.0] {
+        let got = settled_gain_under(&expander(-20.0, 1.0, -80.0), under);
+        assert!(
+            (got - 1.0).abs() < 1e-12,
+            "ratio 1, {under} dB under: {got}"
+        );
+    }
+}
+
+/// The infinite ratio is the gate: a key a hair under the threshold is at the range at once, a
+/// NaN ratio reads as the gate, and a ratio under 1 reads as 1. The assertions are those of
+/// `a_level_either_side_of_the_threshold_opens_or_closes`.
+#[test]
+fn the_infinite_ratio_is_the_gate_and_a_ratio_under_one_reads_as_one() {
+    let range = Db::new(-30.0).to_amplitude().get();
+    for threshold in [-20.0f64, 6.0] {
+        for ratio in [f64::INFINITY, f64::NAN] {
+            let c = expander(threshold, ratio, -30.0);
+            let closed = settled_gain_under(&c, 0.001 * 8.686);
+            assert!((closed / range - 1.0).abs() < 1e-12, "{ratio}: {closed}");
+            assert!((settled_gain_under(&c, -0.001 * 8.686) - 1.0).abs() < 1e-12);
+        }
+    }
+    let under_one = settled_gain_under(&expander(-20.0, 0.5, -80.0), 10.0);
+    assert!((under_one - 1.0).abs() < 1e-12, "{under_one}");
+}
+
+/// The follower runs toward the expander's gain with the release: a key that drops from over the
+/// threshold to 10 dB under it at ratio 2 (a gain of -10 dB) takes the gain from 1 to
+/// `g = 10^(-10 / 20)` along `g + (1 - g) (1 - c)^n`, `c` the release's one-pole coefficient,
+/// to `1e-9` (the range, -80 dB, is under `g`, so the fraction `(g - r) / (1 - r)` maps back to it).
+#[test]
+fn an_expander_follows_the_release_toward_its_gain() {
+    let (tau, range) = (0.002, -80.0);
+    let c = GateControls {
+        ratio: CompressionRatio::new(2.0),
+        ..controls(-20.0, 0.0, 0.0, tau, range)
+    };
+    let mut bank = GateBank::<f64>::new(RATE);
+    bank.retarget(&c);
+    bank.jump_to_target();
+    let mut key = vec![1.0; 100];
+    key.extend(vec![10f64.powf(-30.0 / 20.0); 400]);
+    let mut out = vec![0.0f64; key.len()];
+    bank.process(
+        GateSignals::default(),
+        Planes::new(&[&key]).unwrap(),
+        Planes::new(&[&vec![1.0; key.len()]]).unwrap(),
+        PlanesMut::new(&mut [&mut out[..]]).unwrap(),
+    );
+    assert_eq!(out[99], 1.0);
+    let coeff = Seconds::new(tau).one_pole_coeff(RATE);
+    let g = 10f64.powf(-10.0 / 20.0);
+    for n in [0usize, 10, 100, 399] {
+        let want = g + (1.0 - g) * (1.0 - coeff).powi(n as i32 + 1);
+        assert!(
+            (out[100 + n] - want).abs() < 1e-9,
+            "frame {n}: {} against {want}",
+            out[100 + n]
+        );
+    }
 }

@@ -87,7 +87,7 @@ fn run<N: Node>(
 /// figure is the op's.
 fn channel_sum(c: &mut Criterion) {
     use tutti_buffers::ChannelLayout;
-    use tutti_graph::{Editor, Prepare, Source, TransportPosition};
+    use tutti_graph::{Editor, PortSource, Prepare, TransportPosition};
     use tutti_units::Samples;
 
     let mut g = c.benchmark_group("channel_sum");
@@ -98,12 +98,12 @@ fn channel_sum(c: &mut Criterion) {
             ed.spec_mut().topology.inputs = ChannelLayout::from(sources * width);
             ed.spec_mut()
                 .topology
-                .set_outputs(vec![Source::Zero; width as usize]);
+                .set_outputs(vec![PortSource::Zero; width as usize]);
             for channel in 0..width {
                 for k in 0..sources {
                     ed.spec_mut()
                         .topology
-                        .connect_output(channel as usize, Source::Global(k * width + channel));
+                        .connect_output(channel as usize, PortSource::Global(k * width + channel));
                 }
             }
             ed.commit().expect("commits");
@@ -283,7 +283,8 @@ fn delay(c: &mut Criterion) {
         || {
             DelayNode::<f32>::from(
                 DelayConfig::new(DelayLayout::new(
-                    BusTopology::assumed(ChannelLayout::from(6u16)).expect("at most one bus wide"),
+                    BusTopology::default_for(ChannelLayout::from(6u16))
+                        .expect("at most one bus wide"),
                     MaxDelay::of(Seconds::new(1.0)),
                     InterpolationMode::Linear,
                 ))
@@ -333,7 +334,8 @@ fn limiter(c: &mut Criterion) {
         || {
             LimiterNode::<f32>::from(
                 LimiterConfig::new(
-                    BusTopology::assumed(ChannelLayout::from(6u16)).expect("at most one bus wide"),
+                    BusTopology::default_for(ChannelLayout::from(6u16))
+                        .expect("at most one bus wide"),
                 )
                 .controls(LimiterControls::DEFAULT),
             )
@@ -419,7 +421,8 @@ fn dynamics(c: &mut Criterion) {
         || {
             GateNode::<f32>::from(
                 GateConfig::new(
-                    BusTopology::assumed(ChannelLayout::from(6u16)).expect("at most one bus wide"),
+                    BusTopology::default_for(ChannelLayout::from(6u16))
+                        .expect("at most one bus wide"),
                 )
                 .key(KeySource::Sidechain)
                 .controls(gate_controls()),
@@ -460,7 +463,8 @@ fn dynamics(c: &mut Criterion) {
         || {
             CompressorNode::<f32>::from(
                 CompressorConfig::new(
-                    BusTopology::assumed(ChannelLayout::from(6u16)).expect("at most one bus wide"),
+                    BusTopology::default_for(ChannelLayout::from(6u16))
+                        .expect("at most one bus wide"),
                 )
                 .key(KeySource::Sidechain)
                 .controls(compressor_controls()),

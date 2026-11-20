@@ -19,8 +19,8 @@ mod follower;
 mod note_envelope;
 mod sender;
 
-pub use follower::EnvelopeFollowerNode;
-pub use note_envelope::NoteEnvelopeNode;
+pub use follower::{EnvelopeFollowerConfig, EnvelopeFollowerNode};
+pub use note_envelope::{NoteEnvelopeConfig, NoteEnvelopeNode};
 pub use sender::{SOURCE_EVENT_CAPACITY, SourceNode, SourcePorts};
 
 use tutti_graph::{Cx, Offset, PlayReading};

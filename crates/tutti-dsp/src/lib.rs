@@ -27,9 +27,11 @@
 //!   its transcendentals call `libm`, so results do not depend on the platform's C math
 //!   library.
 //! - **Cascaded sections** (`sos/`): [`Sos`], a list of [`Biquad`]s, an [`Lti`] whose
-//!   [`tail`](System::tail) is the whole cascade's; the closed-form [`Butterworth`] and
-//!   [`LinkwitzRiley`] designs (6 to 96 dB per octave), the [`MatchedBell`] peaking
-//!   equalizer, the [`Tilt`] shelf, the BS.1770 [`KWeighting`] and [`SosBank`], which runs
+//!   [`tail`](System::tail) is the whole cascade's; the closed-form [`Butterworth`],
+//!   [`ChebyshevI`], [`ChebyshevII`], [`Elliptic`] and [`LinkwitzRiley`] designs (up to 96 dB
+//!   per octave of asymptotic slope), the [`MatchedBell`] peaking
+//!   equalizer, the [`Tilt`] shelf, the Audio EQ [`Cookbook`] filters, the [`GraphicBands`]
+//!   graphic equalizer design, the BS.1770 [`KWeighting`] and [`SosBank`], which runs
 //!   one as state-variable sections over [`SosCoefficients`].
 //! - **FIR design** (`fir/`): [`FirDesign`] describes a Kaiser windowed-sinc filter (a
 //!   [`FirResponse`], a transition and an attenuation) and designs it at a rate into a
@@ -66,7 +68,12 @@
 //!   [`Ramp`] per channel's delay, the LFO the caller's on the stream's clock); the phaser
 //!   ([`PhaserChain`]: its [`Stages`] and [`SweepRange`] checked, a [`Ramp`] per channel's
 //!   coefficient, [`sweep_hz`] and [`allpass_complement`] the pure pieces the sweep is solved
-//!   from).
+//!   from); the vibrato preset ([`ModDelayControls::vibrato`], a pitch swing in cents mapped to
+//!   a depth by its closed form); the comb and all-pass delay filters ([`CombFilter`] and
+//!   [`CombBank`] over a [`CombForm`], [`AllPassFilter`] in Schroeder's lattice form or
+//!   Freeverb's); and the frequency shifter ([`FrequencyShifterBank`]: a Hilbert network of two
+//!   all-pass chains, [`QUADRATURE_ERROR`] over [`quadrature_band`], and single-sideband
+//!   modulation by a signed shift).
 //! - **Reverb** (`reverb/`): the model, a [`Network`] of [`Stage`]s with analytic queries
 //!   ([`Network::rt60`], [`tail`](System::tail), [`is_stable`](Lti::is_stable), the
 //!   densities); [`FreeverbBank`] (Freeverb's combs and all-passes), [`FdnBank`] (the
@@ -74,7 +81,7 @@
 //!   [`PlateBank`] (Dattorro's plate), their parameters [`Ramp`]s in [`FreeverbRamps`],
 //!   [`FdnRamps`] and [`PlateRamps`]. [`rt60_from_gain`] is the RT60 of a loop of a
 //!   given gain.
-//! - **Waveshaping** (`waveshape.rs`): [`ShapeKind`], six memoryless curves, and
+//! - **Waveshaping** (`waveshape.rs`): [`ShapeKind`], seven memoryless curves, and
 //!   [`WaveshaperBank`], which runs one over a block at a ramping or per-frame drive, with
 //!   [`Antialiasing`] of the first or second order.
 //! - **Spatial** (`spatial/`): VBAP ([`SpeakerLayout`], Pulkki's pairs and triplets and the
@@ -90,13 +97,16 @@
 //!   the C library's `sin` and `cos`, so not across libms). Values cross as
 //!   [`Complex32`] and [`Complex64`].
 //! - **STFT vocabulary** (`stft/`): [`CosineWindow`] and the [`Window`] trait,
-//!   [`StftGeometry`] (window, hop, shape and rate, validated together), and [`Grid`] with
-//!   its typed indices; [`StftError`] is what they refuse with.
-//! - **Resampling** (`resample/`): [`WindowedSinc`], [`FftResampler`] (failing with a
-//!   [`ResampleError`]) and [`StreamingResampler`], sized by a [`ChunkSize`].
+//!   [`StftGeometry`] (a [`WindowLength`], a [`HopSize`], shape and rate), the
+//!   [`ColaGeometry`] an inverse accepts, and [`Grid`] with its typed indices; [`StftError`] is
+//!   what a [`Grid`] or a [`ColaGeometry`] refuses with.
+//! - **Resampling** (`resample/`): [`WindowedSinc`] and [`StreamingResampler`] (made from a
+//!   [`StreamingResamplerConfig`], sized by a [`ChunkSize`], failing with a [`ResampleError`]).
 //! - **Dither** (`dither/`): [`DitherNoise`] ([`DitherShape`]) and [`DitherSink`], the
 //!   `tutti_buffers::Sink` adapter that dithers on its way to a fixed-point format, with
 //!   [`NoiseShaping`] as its optional error feedback.
+//! - **Noise** (`noise.rs`): [`Noise`], a seeded white, pink (Kellet's filter) or brown
+//!   (leaky integrator) source ([`NoiseColour`]).
 //! - **Oscillator** (`oscillator.rs`): [`Oscillator`], a sine, or a saw, square or triangle
 //!   band-limited by PolyBLEP and PolyBLAMP ([`OscillatorWave`]).
 //! - **Stereo and utility** (`polarity.rs`, `stereo.rs`, `pan.rs`): [`Polarity`], the
@@ -137,10 +147,12 @@
 #![forbid(unsafe_code)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
+mod all_pass;
 mod bands;
 mod beat;
 mod bit_crush;
 mod channel_group;
+mod comb;
 mod control_rate;
 mod convolver;
 mod dc_block;
@@ -152,10 +164,12 @@ mod fft;
 mod filter;
 mod fir;
 mod follower;
+mod frequency_shifter;
 mod interp;
 mod level;
 mod loudness;
 mod modulation;
+mod noise;
 mod novelty;
 mod onepole;
 mod oscillator;
@@ -183,10 +197,12 @@ mod stft;
 mod testing;
 mod viterbi;
 
+pub use all_pass::AllPassFilter;
 pub use bands::{log_band_edges, octave_band_edges};
 pub use beat::track_beat_frames;
 pub use bit_crush::{BitCrusher, BitCrusherControls, hold_frames, quantize};
 pub use channel_group::CHANNEL_GROUP;
+pub use comb::{CombBank, CombControls, CombFilter, CombForm};
 pub use control_rate::COEFF_INTERVAL;
 pub use convolver::{
     Convolver, IrSpectra, MatrixConvolver, MatrixConvolverConfig, MatrixConvolverError,
@@ -195,9 +211,9 @@ pub use dc_block::{DC_CORNER, DcBlocker, DcBlockerControls, MIN_DC_CORNER};
 pub(crate) use delay::delay_step;
 pub use delay::{
     ChannelTimes, ChannelTimesError, DELAY_SLEW, DelayBank, DelayControls, DelayLayout,
-    DelayLayoutBuilder, DelayLayoutError, DelayLine, DelayRamps, DelaySignals, FeedbackRouting,
-    FeedbackRoutingBuilder, FeedbackRoutingError, InterpolationMode, MAX_DELAY_CHANNELS, MaxDelay,
-    MaxDelayError,
+    DelayLayoutBuilder, DelayLayoutError, DelayLine, DelayRamps, DelaySignals, DelayTiming,
+    FeedbackRouting, FeedbackRoutingBuilder, FeedbackRoutingError, InterpolationMode,
+    MAX_DELAY_CHANNELS, MaxDelay, MaxDelayError, NoteTimes, NoteTimesError,
 };
 pub use dither::shaping::NoiseShaping;
 pub use dither::sink::DitherSink;
@@ -223,6 +239,9 @@ pub use fir::{
     Fir, FirDesign, FirError, FirResponse, LinearPhaseDesign, MAX_ATTENUATION, MAX_GRID,
     kaiser_beta,
 };
+pub use frequency_shifter::{
+    FrequencyShifterBank, FrequencyShifterControls, QUADRATURE_ERROR, quadrature_band,
+};
 pub use interp::{ParabolicPeak, cubic_hermite, lerp, parabolic_peak};
 pub use level::rms;
 pub use loudness::{ChannelWeight, ChannelWeightError, ChannelWeights, channel_weights};
@@ -237,6 +256,7 @@ pub use modulation::phaser::{
     SweepRangeError,
 };
 pub use modulation::sweep::{Stagger, StaggerError, Sweep, SweepBuilder, SweepError};
+pub use noise::{Noise, NoiseColour};
 pub use novelty::{
     bin_magnitude, complex_domain_deviation, high_frequency_content, spectral_energy, spectral_flux,
 };
@@ -248,8 +268,8 @@ pub use pan::{PanLaw, pan_gains};
 pub use polarity::{ChannelOutOfRange, Polarity};
 pub use ramp::{Lerp, Ramp, Steps};
 pub use resample::{
-    ChunkSize, FftResampler, ResampleError, StreamingResampler, WindowedSinc, needs_resampling,
-    resampled_frames,
+    ChunkSize, ResampleError, StreamingResampler, StreamingResamplerConfig, WindowedSinc,
+    needs_resampling, resampled_frames,
 };
 pub use reverb::fdn::bank::{FdnBank, FdnRamps};
 pub use reverb::fdn::design::{FdnControls, FdnLayout, FreezeMode, MAX_PRE_DELAY, MIN_DECAY};
@@ -267,8 +287,10 @@ pub use ring_mod::{RingModControls, RingModulator};
 pub use sequence::{local_maxima, median, median_of_sorted};
 pub use smoother::smooth_toward;
 pub use sos::{
-    Butterworth, ButterworthOrder, ButterworthOrderError, CutResponse, KWeighting, LinkwitzRiley,
-    MAX_GAIN_MAGNITUDE, MAX_SECTIONS, MatchedBell, Sos, SosBank, SosCoefficients, SosError, Tilt,
+    Butterworth, ButterworthOrder, ButterworthOrderError, ChebyshevI, ChebyshevII, Cookbook,
+    CutResponse, Elliptic, EllipticTolerances, GraphicBands, KWeighting, LinkwitzRiley,
+    MAX_GAIN_MAGNITUDE, MAX_SECTIONS, MatchedBell, PassbandRipple, PassbandRippleError, Sos,
+    SosBank, SosCoefficients, SosError, StopbandAttenuation, StopbandAttenuationError, Tilt,
 };
 pub use spatial::{
     HRTF_LATENCY, HRTF_STEP, HrirMeasurement, HrirSphere, HrtfBinaural, HrtfBinauralError,
@@ -278,7 +300,9 @@ pub use spatial::{
 pub use spectral::{spectral_centroid, spectral_flatness, spectral_rolloff};
 pub use stereo::{MidSide, WidthBank, WidthControls};
 pub use stft::error::StftError;
-pub use stft::geometry::StftGeometry;
+pub use stft::geometry::{
+    ColaGeometry, HopSize, HopSizeError, StftGeometry, WindowLength, WindowLengthError,
+};
 pub use stft::grid::{BinCount, BinIndex, FrameCount, FrameIndex, Grid};
 pub use stft::window::{CosineWindow, Window};
 pub use tremolo::{AutoPan, AutoPanControls, Tremolo, TremoloControls};

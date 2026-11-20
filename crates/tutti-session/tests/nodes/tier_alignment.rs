@@ -29,7 +29,7 @@ use tutti_graph::ForkByClone;
 use tutti_nodes::testing::Const;
 use tutti_nodes::{LimiterConfig, LimiterControls, LimiterNode};
 use tutti_sampler::{DiskVoice, MemorySource, StreamPhase, StreamStart, VoiceWindow};
-use tutti_session::{InPort, OutPort, Root, SamplerEvent, Session, SessionEvent};
+use tutti_session::{InPort, OutPort, Root, Session};
 use tutti_units::{Beat, Db, SampleRate, Samples};
 
 const RATE: f64 = 48_000.0;
@@ -102,22 +102,13 @@ fn render(tier: Tier) -> (Vec<f32>, Vec<f32>, Samples) {
     // the stream.
     let (voice, stream) = match tier {
         Tier::Disk => {
-            // The streamer opens the stream on its own thread, and the open
-            // lands in `update()`.
-            let id = s
+            // The app reads the file, and the session puts it in service.
+            let opened = s
                 .open_stream(&path, StreamStart::HEAD)
-                .expect("an offline session streams");
-            let deadline = Instant::now() + Duration::from_secs(10);
-            let (stream, reader) = 'opened: loop {
-                for event in s.update() {
-                    if let SessionEvent::Sampler(SamplerEvent::Opened { id: opened }) = event {
-                        assert_eq!(opened, id);
-                        break 'opened s.take_stream(id).expect("the landed stream");
-                    }
-                }
-                assert!(Instant::now() < deadline, "the stream did not open");
-                std::thread::sleep(Duration::from_millis(1));
-            };
+                .expect("an offline session streams")
+                .run()
+                .expect("the file reads");
+            let (stream, reader) = s.apply(opened).expect("the session serves it");
             let voice = DiskVoice::from_reader(reader, VoiceWindow::from(Beat::new(1.0)));
             (s.graph().add(voice).0.erase(), Some(stream))
         }

@@ -287,7 +287,7 @@ fn a_delay_insert_adds_no_compensation_to_the_other_paths() {
 #[test]
 fn a_limiter_summed_with_a_dry_path_reports_the_limiter_latency() {
     use tutti_buffers::ChannelLayout;
-    use tutti_graph::Source;
+    use tutti_graph::PortSource;
     use tutti_graph::{GraphBuilder, Prepare};
     use tutti_nodes::{LimiterConfig, LimiterControls, LimiterNode};
     use tutti_units::Latency;
@@ -303,7 +303,7 @@ fn a_limiter_summed_with_a_dry_path_reports_the_limiter_latency() {
     ));
     g.connect_input(0, lim, 0);
     g.connect_output(lim, 0, 0);
-    g.add_output(0, Source::Global(0));
+    g.add_output(0, PortSource::Global(0));
     let mut r = g
         .renderer(Prepare::new(SR, MaxBlock::of(Samples::new(BLOCK))))
         .expect("builds");
@@ -544,7 +544,7 @@ fn folded_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::Sampl
     block_size: tutti_units::Samples,
 ) -> Result<tutti_nodes::ConvolverNode<F>, tutti_nodes::ConvolverError> {
     let width = tutti_buffers::ChannelLayout::try_from(irs.len()).expect("a test width fits");
-    let bus = tutti_buffers::BusTopology::assumed(width).expect("a test width fits a bus");
+    let bus = tutti_buffers::BusTopology::default_for(width).expect("a test width fits a bus");
     tutti_nodes::ConvolverNode::try_from(
         tutti_nodes::ConvolverConfig::new(bus, irs)
             .folded()

@@ -133,8 +133,8 @@ impl FileTarget {
         }
     }
 
-    /// Which speaker each file channel feeds: for the WAV speaker mask, Ogg
-    /// Vorbis's channel order and the fold onto the file. It replaces the
+    /// Which speaker each file channel feeds: for the WAV speaker mask
+    /// and the fold onto the file. It replaces the
     /// width [`new`](Self::new) was given: the file is as wide as the
     /// topology, and without one it has the engine's order for the width
     /// ([`Written::placement`] reports which).
@@ -153,7 +153,7 @@ impl FileTarget {
 
     /// The noise added when an integer width is quantized: triangular unless
     /// this or [`no_dither`](Self::no_dither) says otherwise. A format with no
-    /// integer width (`Pcm::Float32`, Ogg Vorbis) ignores it.
+    /// integer width (`Pcm::Float32`) ignores it.
     #[must_use]
     pub fn dither(mut self, shape: DitherShape) -> Self {
         self.dither = Some(shape);
@@ -174,8 +174,8 @@ impl FileTarget {
     /// [`Normalize::Lufs`] weights loudness by where each channel's speaker
     /// stands, so it needs a placement: the topology stated by
     /// [`topology`](Self::topology), or, for a file that states none,
-    /// [`ChannelTopology::assumed`] for its width, which
-    /// [`Written::placement`] reports as `Assumed`. A width with no assumed
+    /// [`ChannelTopology::default_for`] for its width, which
+    /// [`Written::placement`] reports as `Default`. A width with no default
     /// placement (3, 5, 7 or 9 channels, say) is refused when the render
     /// starts ([`TargetError::UnplacedLoudness`]), before any frame is
     /// rendered.
@@ -221,22 +221,22 @@ impl FileTarget {
     }
 
     /// Whether the file's speakers are stated ([`topology`](Self::topology))
-    /// or assumed from its width ([`ChannelTopology::assumed`]).
+    /// or the default layout for its width ([`ChannelTopology::default_for`]).
     #[must_use]
     pub(crate) fn placement(&self) -> tutti_buffers::Placement {
         match self.width {
             Width::Placed(_) => tutti_buffers::Placement::Stated,
-            Width::Count(_) => tutti_buffers::Placement::Assumed,
+            Width::Count(_) => tutti_buffers::Placement::Default,
         }
     }
 
     /// The speakers the file's channels feed: the stated topology, or
-    /// [`ChannelTopology::assumed`] for its width ([`placement`](Self::placement)
+    /// [`ChannelTopology::default_for`] for its width ([`placement`](Self::placement)
     /// says which).
     pub(crate) fn effective_topology(&self) -> ChannelTopology {
         match &self.width {
             Width::Placed(topology) => topology.clone(),
-            Width::Count(layout) => ChannelTopology::assumed(*layout),
+            Width::Count(layout) => ChannelTopology::default_for(*layout),
         }
     }
 }
@@ -480,7 +480,7 @@ pub enum TargetError {
     NormalizeOfPlanes,
     /// A [`Normalize::Lufs`] output whose channels name no speakers: loudness
     /// is weighted by each speaker's placement, and a file with no stated
-    /// topology is taken to be [`ChannelTopology::assumed`] for its width, which
+    /// topology is taken to be [`ChannelTopology::default_for`] for its width, which
     /// has a placement at 1, 2, 4, 6, 8 and 12 channels only. State a topology
     /// ([`FileTarget::topology`]) that is a known bed, or normalize by
     /// [`Normalize::Peak`].

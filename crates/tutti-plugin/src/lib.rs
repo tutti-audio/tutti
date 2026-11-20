@@ -46,7 +46,14 @@
 //! let id: PluginId = "vst3.00112233-44556677-8899AABB-CCDDEEFF".parse()?;
 //! let loadable = catalog.resolve(&id).bind()?;
 //! let (_collector, work) = tutti_plugin_types::MainWork::new();
-//! let plugin = Plugin::open_served(&AudioConfig::default(), &work, &loadable, SampleRate::SR_48K)?;
+//! let executor = tutti_platform::Executor::new();
+//! let plugin = Plugin::open_served(
+//!     &AudioConfig::default(),
+//!     &executor,
+//!     &work,
+//!     &loadable,
+//!     SampleRate::SR_48K,
+//! )?;
 //! println!("{} by {}", plugin.descriptor().name, plugin.descriptor().vendor);
 //!
 //! // Two handles, one subprocess: keep the control surface before the node goes

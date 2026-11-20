@@ -31,8 +31,10 @@ use tutti_graph::{
     Editor, EventOut, GraphBuilder, IntoNode, NodeMix, NodeParts, ParamIn, ParamNode, ParamRange,
     Prepare, Renderer, declick_frames,
 };
-use tutti_modulation::{Amount, Clock, ControlProgram, Layer, LayerId, Polarity, Waveform};
-use tutti_nodes::automation::ControlLaneNode;
+use tutti_modulation::{
+    Amount, Clock, ControlProgram, ControlProgramBuilder, Layer, LayerId, Polarity, Waveform,
+};
+use tutti_nodes::automation::{ControlLaneNode, UnitLaneConfig};
 use tutti_nodes::{
     BrickwallLimiterConfig, BrickwallLimiterNode, BusStripConfig, BusStripNode, CompressorConfig,
     CompressorControls, CompressorNode, DelayConfig, DelayControls, DelayLayout, DelayNode,
@@ -73,7 +75,7 @@ fn bursts(seed: u32) -> Vec<f32> {
 fn delay_of(w: usize) -> DelayNode<f32> {
     DelayNode::<f32>::from(
         DelayConfig::new(DelayLayout::new(
-            BusTopology::assumed(ChannelLayout::try_from(w).expect("a test width is small"))
+            BusTopology::default_for(ChannelLayout::try_from(w).expect("a test width is small"))
                 .expect("at most one bus wide"),
             MaxDelay::of(Seconds::new(0.01)),
             InterpolationMode::Linear,
@@ -114,8 +116,15 @@ fn konst(depth: f64) -> Layer {
 /// have been committed); one without sends its knob, unranged.
 fn drive(ed: &mut Editor, at: ParamIn, knob: impl Into<ParamCell>, layers: Vec<Layer>) {
     let range = (!layers.is_empty()).then(|| ed.param_range_cell(at).expect("committed"));
-    let program = ControlProgram::new(None, layers, vec![]).expect("a valid program");
-    let lane = ControlLaneNode::for_unit(at.param, program, Some(knob.into()), range);
+    let program = ControlProgramBuilder::new()
+        .layers(layers)
+        .build()
+        .expect("a valid program");
+    let mut config = UnitLaneConfig::new(at.param, program).knob(knob.into());
+    if let Some(range) = range {
+        config = config.range(range);
+    }
+    let lane = ControlLaneNode::from(config);
     ed.insert(LANE, "lane", lane);
     ed.spec_mut().connect_param(
         at,
@@ -232,7 +241,7 @@ fn render_mix(node: NodeParts<()>, mix: MixIs) -> Vec<Vec<f32>> {
 /// A phaser of `w` channels, four stages, at its default sweep and controls.
 fn phaser_of_width(w: usize) -> PhaserNode<f32> {
     PhaserNode::<f32>::try_from(PhaserConfig::new(
-        BusTopology::assumed(ChannelLayout::try_from(w).expect("a test width is small"))
+        BusTopology::default_for(ChannelLayout::try_from(w).expect("a test width is small"))
             .expect("at most one bus wide"),
         Stages::of(4),
     ))
@@ -289,8 +298,10 @@ fn cases() -> Vec<Case> {
     fn comp(w: usize) -> CompressorNode<f32> {
         CompressorNode::<f32>::from(
             CompressorConfig::new(
-                BusTopology::assumed(ChannelLayout::try_from(w).expect("a test width is small"))
-                    .expect("at most one bus wide"),
+                BusTopology::default_for(
+                    ChannelLayout::try_from(w).expect("a test width is small"),
+                )
+                .expect("at most one bus wide"),
             )
             .key(KeySource::Sidechain)
             .controls(CompressorControls {
@@ -305,8 +316,10 @@ fn cases() -> Vec<Case> {
     fn gate(w: usize) -> GateNode<f32> {
         GateNode::<f32>::from(
             GateConfig::new(
-                BusTopology::assumed(ChannelLayout::try_from(w).expect("a test width is small"))
-                    .expect("at most one bus wide"),
+                BusTopology::default_for(
+                    ChannelLayout::try_from(w).expect("a test width is small"),
+                )
+                .expect("at most one bus wide"),
             )
             .key(KeySource::Sidechain)
             .controls(GateControls {
@@ -322,8 +335,10 @@ fn cases() -> Vec<Case> {
     fn lim(w: usize) -> LimiterNode<f32> {
         LimiterNode::<f32>::from(
             LimiterConfig::new(
-                BusTopology::assumed(ChannelLayout::try_from(w).expect("a test width is small"))
-                    .expect("at most one bus wide"),
+                BusTopology::default_for(
+                    ChannelLayout::try_from(w).expect("a test width is small"),
+                )
+                .expect("at most one bus wide"),
             )
             .controls(LimiterControls::DEFAULT),
         )
@@ -528,7 +543,7 @@ fn cases() -> Vec<Case> {
                 let n = BusStripNode::from(BusStripConfig::new(
                     ChannelLayout::try_from(w)
                         .ok()
-                        .and_then(BusTopology::assumed)
+                        .and_then(BusTopology::default_for)
                         .expect("a test width fits a bus"),
                 ));
                 if let Some(v) = v {
@@ -547,7 +562,7 @@ fn cases() -> Vec<Case> {
                 let n = BusStripNode::from(BusStripConfig::new(
                     ChannelLayout::try_from(w)
                         .ok()
-                        .and_then(BusTopology::assumed)
+                        .and_then(BusTopology::default_for)
                         .expect("a test width fits a bus"),
                 ));
                 if let Some(v) = v {
@@ -570,8 +585,10 @@ fn block_rate_cases() -> Vec<Case> {
     fn comp(w: usize) -> CompressorNode<f32> {
         CompressorNode::<f32>::from(
             CompressorConfig::new(
-                BusTopology::assumed(ChannelLayout::try_from(w).expect("a test width is small"))
-                    .expect("at most one bus wide"),
+                BusTopology::default_for(
+                    ChannelLayout::try_from(w).expect("a test width is small"),
+                )
+                .expect("at most one bus wide"),
             )
             .key(KeySource::Sidechain)
             .controls(CompressorControls {
@@ -588,8 +605,10 @@ fn block_rate_cases() -> Vec<Case> {
     fn gate(w: usize) -> GateNode<f32> {
         GateNode::<f32>::from(
             GateConfig::new(
-                BusTopology::assumed(ChannelLayout::try_from(w).expect("a test width is small"))
-                    .expect("at most one bus wide"),
+                BusTopology::default_for(
+                    ChannelLayout::try_from(w).expect("a test width is small"),
+                )
+                .expect("at most one bus wide"),
             )
             .key(KeySource::Sidechain)
             .controls(GateControls {
@@ -604,7 +623,7 @@ fn block_rate_cases() -> Vec<Case> {
     }
     fn chorus(w: usize) -> ModDelayNode<f32> {
         ModDelayNode::<f32>::from(ModDelayConfig::chorus(
-            BusTopology::assumed(ChannelLayout::try_from(w).expect("a test width is small"))
+            BusTopology::default_for(ChannelLayout::try_from(w).expect("a test width is small"))
                 .expect("at most one bus wide"),
         ))
     }
@@ -726,7 +745,7 @@ fn block_rate_cases() -> Vec<Case> {
                 // limiter lets go between bursts, so its release is heard.
                 let n = LimiterNode::<f32>::from(
                     LimiterConfig::new(
-                        BusTopology::assumed(
+                        BusTopology::default_for(
                             ChannelLayout::try_from(w).expect("a test width is small"),
                         )
                         .expect("at most one bus wide"),
@@ -793,7 +812,7 @@ fn block_rate_cases() -> Vec<Case> {
             param: UnitParam::Depth,
             make: |w, v| {
                 let n = ModDelayNode::<f32>::from(ModDelayConfig::flanger(
-                    BusTopology::assumed(
+                    BusTopology::default_for(
                         ChannelLayout::try_from(w).expect("a test width is small"),
                     )
                     .expect("at most one bus wide"),
@@ -937,7 +956,7 @@ fn mix_cases() -> Vec<MixCase> {
             name: "chorus mix",
             make: |w| {
                 parts_of(ModDelayNode::<f32>::from(ModDelayConfig::chorus(
-                    BusTopology::assumed(
+                    BusTopology::default_for(
                         ChannelLayout::try_from(w).expect("a test width is small"),
                     )
                     .expect("at most one bus wide"),
@@ -948,7 +967,7 @@ fn mix_cases() -> Vec<MixCase> {
             name: "flanger mix",
             make: |w| {
                 parts_of(ModDelayNode::<f32>::from(ModDelayConfig::flanger(
-                    BusTopology::assumed(
+                    BusTopology::default_for(
                         ChannelLayout::try_from(w).expect("a test width is small"),
                     )
                     .expect("at most one bus wide"),
@@ -1137,11 +1156,9 @@ fn an_unmodulated_param_adds_nothing_to_the_plan() {
         ))
         .expect("builds");
     // The lane is in the graph, unconnected, from the start.
-    let lane = ControlLaneNode::for_unit(
-        UnitParam::Drive,
-        ControlProgram::default(),
-        Some(Arc::new(AtomicF64::new(5.0)).into()),
-        None,
+    let lane = ControlLaneNode::from(
+        UnitLaneConfig::new(UnitParam::Drive, ControlProgram::default())
+            .knob(Arc::new(AtomicF64::new(5.0)).into()),
     );
     let controls = r.editor_mut().insert(LANE, "lane", lane).controls;
     r.editor_mut().commit().expect("commits");
