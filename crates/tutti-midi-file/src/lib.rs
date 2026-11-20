@@ -160,7 +160,6 @@ mod fault;
 mod file;
 mod kind;
 mod smf;
-mod write;
 
 pub use clip_file::ClipFileError;
 pub use config::{OutOfOrder, Refusal, TrackPart, TracksError};
@@ -180,4 +179,3 @@ pub use smf::{
     SmfDivision, SmfTicksPerFrame, SmfTicksPerFrameOutOfRange, SmfTicksPerQuarter,
     SmfTicksPerQuarterOutOfRange,
 };
-pub use write::WriteOptions;

@@ -3,6 +3,7 @@
 use std::path::PathBuf;
 
 use thiserror::Error;
+use tutti_platform::StagedCommitError;
 
 use crate::{ClipFileError, SmfParseError, TracksError};
 
@@ -56,29 +57,33 @@ pub enum ReadError {
     Tracks(#[from] TracksError),
 }
 
-/// Why a file could not be written ([`MidiFile::write`](crate::MidiFile::write),
-/// [`WriteOptions::write`](crate::WriteOptions::write)).
+/// Why a file could not be written ([`MidiFile::write`](crate::MidiFile::write)).
 #[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum WriteError {
     /// Something (a file, a directory or a symlink) is at the path and the
-    /// write was told to create it new
-    /// ([`WriteOptions::create_new`](crate::WriteOptions::create_new)); it is
-    /// untouched.
+    /// destination was told to
+    /// [`create_new`](tutti_platform::Destination::create_new); it is
+    /// untouched. The complete file stays at
+    /// [`kept`](tutti_platform::StagedCommitError::kept) of the source.
     #[error("{} already exists", path.display())]
     Exists {
         /// The path that is taken.
         path: PathBuf,
+        /// The refused commit, which names where the staged file is kept.
+        #[source]
+        source: StagedCommitError,
     },
 
-    /// Creating, writing or syncing the temporary file beside the target
-    /// failed.
+    /// The temporary file beside the target could not be created or written.
+    /// Nothing is left behind.
     #[error("could not stage the file beside the target")]
     Stage(#[source] std::io::Error),
 
-    /// Renaming the temporary file onto the target failed.
-    #[error("could not rename the staged file onto the target")]
-    Rename(#[source] std::io::Error),
+    /// The sync or the move into place failed. The target is untouched and the
+    /// complete file is kept at [`kept`](StagedCommitError::kept).
+    #[error(transparent)]
+    Commit(#[from] StagedCommitError),
 
     /// The writer given to the write failed.
     #[error("could not write to the writer")]
