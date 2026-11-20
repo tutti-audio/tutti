@@ -220,7 +220,11 @@ impl PluginEntry {
     fn write(&self, id: ParamId, value: Normalized) {
         self.note(id, value);
         if !self.driven.write(id, value) {
-            self.handle.send_parameter(id, value);
+            // `writable` passed, so the plugin declared `id` when its parameters
+            // were read; one it dropped since is refused here, and the mirror
+            // resyncs at the next read of its list. A value table's `store` is
+            // infallible, so the refusal is dropped here.
+            let _ = self.handle.send_parameter(id, value);
         }
         self.reporter.report(id, value);
     }

@@ -16,72 +16,32 @@
 //! (13 fires in a few seconds); with another client created first, on the
 //! calling thread, it never fired in four seconds, and fired when that thread
 //! ran its own run loop. So the hub starts before any other client the backend
-//! creates (`hub_first`, called by both creation sites, starts it), and a host
-//! that creates a client of its own earlier still takes the notifications. The hub thread therefore also looks
-//! again once a second whenever its loop has nothing to wait for (a loop with no
-//! source returns at once), which finds a hot-plug in about a second in that
-//! case. Nothing here has been run on a Mac with a main run loop.
+//! creates (`hub_first` starts it, and every endpoint and port is created on it),
+//! and a host that creates a client of its own earlier still takes the
+//! notifications. The hub thread therefore runs its loop with
+//! `tutti_coremidi_ffi::run_notifications`, which, only where the loop has no
+//! notification source, looks again once a second on a timer; that finds a hot-plug
+//! in about a second in that case. Nothing here has been run on a Mac with a main
+//! run loop.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
-use tutti_platform::Instant;
 use tutti_rt::LockExt;
-
-use core_foundation::runloop::CFRunLoop;
 
 use crate::devices::ChangeSink;
 use crate::devices::reporter::Reporter;
 use crate::endpoints::{NoWatch, Watch};
 use crate::error::{MidiHardwareError, MidiThread, Result};
-use tutti_coremidi_ffi::SharedClient;
+use tutti_coremidi_ffi::{SharedClient, run_notifications};
 use tutti_midi_device::OsDevice;
 use tutti_platform::spawn_named;
 
-/// A run loop that returns sooner than this had nothing to wait for. A loop that
-/// has a source but was stopped (`CFRunLoopStop`, which nothing here sends)
-/// would look the same; the cost is a rest and one extra look, which is
-/// harmless because a look reports only a difference.
-const IDLE_RETURN: Duration = Duration::from_millis(50);
-/// How long the hub thread rests before it runs the loop again after such a
-/// return, so a loop with no source is four wakes a second and not a spin.
-const IDLE_REST: Duration = Duration::from_millis(250);
-/// How often a hub whose run loop has no source looks again by itself: the
-/// fallback for a process whose first CoreMIDI client was not the hub's.
+/// How often a hub whose run loop has no notification source looks again by
+/// itself: the fallback for a process whose first CoreMIDI client was not the hub's.
+/// A hub whose loop has the source (the usual case) never looks on a timer.
 const IDLE_LOOK: Duration = Duration::from_secs(1);
-
-/// When a hub whose run loop has no source looks by itself: every method takes
-/// the time it is given.
-struct IdleLooks {
-    looked: Instant,
-}
-
-impl IdleLooks {
-    fn new(now: Instant) -> Self {
-        Self { looked: now }
-    }
-
-    /// Whether a run of the loop that lasted `ran` had nothing to wait for.
-    fn is_idle(ran: Duration) -> bool {
-        ran < IDLE_RETURN
-    }
-
-    /// Whether a look is due at `now`, after a rest; when it is, it is taken.
-    fn look_due(&mut self, now: Instant) -> bool {
-        let due = now.saturating_duration_since(self.looked) >= IDLE_LOOK;
-        if due {
-            self.looked = now;
-        }
-        due
-    }
-
-    /// The loop waited for a source and returned at `now`: notifications reach
-    /// it, so the timer starts over.
-    fn waited(&mut self, now: Instant) {
-        self.looked = now;
-    }
-}
 
 /// One registered watch: the reporting state of a `Devices`, and the sink to
 /// tell if it fails.
@@ -177,24 +137,12 @@ fn start_hub() -> Result<(&'static Hub, SharedClient)> {
             });
             let _ = ready.send(client);
             // The client lives as long as the process.
-            if client.is_err() {
+            let Ok(client) = client else {
                 return;
-            }
-            let mut looks = IdleLooks::new(Instant::now());
-            loop {
-                let started = Instant::now();
-                CFRunLoop::run_current();
-                if IdleLooks::is_idle(started.elapsed()) {
-                    // The loop had nothing to wait for: no notification
-                    // can reach it, so look on a timer instead.
-                    std::thread::sleep(IDLE_REST);
-                    if looks.look_due(Instant::now()) {
-                        hub.notify();
-                    }
-                } else {
-                    looks.waited(Instant::now());
-                }
-            }
+            };
+            // The loop runs for the thread's life; where it has no notification
+            // source, its timer has the watches look.
+            run_notifications(client, IDLE_LOOK, move || hub.notify());
         })
         .map_err(|source| MidiHardwareError::Spawn {
             thread: MidiThread::DeviceWatch,

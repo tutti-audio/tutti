@@ -6,10 +6,10 @@ use tutti_plugin_types::MainThreadMarker;
 use tutti_plugin_types::features::probed;
 use tutti_plugin_types::{
     AutomationMode, ContentScale, Control, EditorPresence, EditorWindow, Features, KeyEvent,
-    KeyUse, LoadedPlugin, ModifierConvention, OwnBypass, ParamAccess, ParamEdit, ParamMapping,
-    ParamWriteError, ParameterInfo, PluginClass, PluginDescriptor, PluginError, PluginResult,
-    PluginTail, Preset, PresetId, RenderModeSupport, Request, RescanScope, Samples, StateUse,
-    Vst3SubCategories, WindowHandle, bypass_parameter,
+    KeyUse, Loaded, LoadedPlugin, ModifierConvention, OwnBypass, ParamAccess, ParamEdit,
+    ParamMapping, ParamWriteError, ParameterInfo, PluginClass, PluginDescriptor, PluginError,
+    PluginResult, PluginTail, Preset, PresetId, RenderModeSupport, Request, RescanScope, Samples,
+    StateUse, Vst3SubCategories, WindowHandle, bypass_parameter,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -61,6 +61,7 @@ pub(super) fn descriptor_of(info: &PluginInfo, editor: EditorPresence) -> Plugin
         },
         editor,
         measured: None,
+        widths: None,
     }
 }
 
@@ -89,7 +90,10 @@ impl Vst3Loaded {
     /// The descriptor for this plugin as loaded: its factory info, with whether
     /// it has an editor measured from the plugin itself.
     pub(super) fn measured_descriptor(&self, main: MainThreadMarker) -> PluginDescriptor {
-        descriptor_of(&self.info, EditorPresence::measured(self.has_editor(main)))
+        PluginDescriptor {
+            widths: Some(Loaded::widths(self)),
+            ..descriptor_of(&self.info, EditorPresence::measured(self.has_editor(main)))
+        }
     }
 
     /// The capabilities this plugin has, as the shared vocabulary names them.
@@ -243,8 +247,10 @@ impl Vst3Loaded {
 
 impl Control for Vst3Loaded {
     fn info(&self) -> &PluginDescriptor {
-        self.descriptor
-            .get_or_init(|| descriptor_of(&self.info, EditorPresence::Unknown))
+        self.descriptor.get_or_init(|| PluginDescriptor {
+            widths: Some(Loaded::widths(self)),
+            ..descriptor_of(&self.info, EditorPresence::Unknown)
+        })
     }
 
     /// The wiring read from the plugin now. Latency is read only while the

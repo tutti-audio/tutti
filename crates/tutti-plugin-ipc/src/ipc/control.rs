@@ -12,8 +12,8 @@ use tutti_plugin_types::{
     Control, Delivered, EditorCapabilities, EditorPresence, EditorWindow, Features, Health,
     LoadedPlugin, MainThreadMarker, OwnBypass, ParameterInfo, PluginDescriptor, PluginError,
     PluginFailure, PluginResult, Preset, PresetId, ProcessWake, RenderMode, RenderModeSupport,
-    Request, SampleRate, StateError, StateUse, TerminationReason, TrackInfo, WindowHandle,
-    bypass_value,
+    Request, SampleRate, StateError, StateUse, TerminationReason, TrackInfo, UnknownParam,
+    WindowHandle, bypass_value,
 };
 use tutti_rt::LockExt;
 use tutti_units::Normalized;
@@ -39,30 +39,50 @@ macro_rules! served_control {
                 self.link.bridge.audio().parameter(id)
             }
 
-            /// Fire-and-forget, and the realtime path: the write is sent as it is.
-            /// It reads no cache, takes no lock and holds no `Arc`, so the audio
-            /// thread never waits or frees here; the server's own
+            /// Fire-and-forget on the control queue: a parameter the declared
+            /// list this link already holds does not name fails at the call
+            /// ([`UnknownParam`]), and a write to any other parameter is queued as
+            /// it is (a full queue refuses it, counted
+            /// (`PluginControls::refused_commands`)). The server's own
             /// `Control::set_parameter` refuses a write the plugin does not
-            /// declare or declares read-only, and writes nothing. The client-side
-            /// check, which names the error, is [`Control::set_parameter`].
+            /// declare or declares read-only, and writes nothing. The
+            /// client-side check, which names the error and may ask the plugin,
+            /// is [`Control::set_parameter`].
+            ///
+            /// A control-side call: it reads the declared list under a lock,
+            /// and is not for the audio thread.
             ///
             /// Stays `Normalized` to the wire, which carries its `f64`.
             /// The server's decode refuses a value outside 0..=1 (NaN
             /// included): the wire is a foreign boundary and the peer is
             /// another process.
-            fn set_parameter_value(&self, id: ParamId, value: Normalized) {
-                // A full command queue refuses the write, counted
-                // (`PluginControls::refused_commands`).
+            fn set_parameter_value(
+                &self,
+                id: ParamId,
+                value: Normalized,
+            ) -> Result<(), UnknownParam> {
+                if let Some(list) = self.link.declared_if_known()
+                    && list.binary_search_by_key(&id, |&(known, _)| known).is_err()
+                {
+                    return Err(UnknownParam(id));
+                }
                 let _ = self.link.bridge.set_parameter_rt(id, value);
+                Ok(())
             }
 
             /// A parameter bypass is a parameter write, [`Lost`](BypassWrite::Lost)
             /// when the command queue refuses it or the link is gone, so the
-            /// session writes it again. A property bypass is not claimed by a
-            /// served plugin.
+            /// session writes it again, and [`Refused`](BypassWrite::Refused)
+            /// for a parameter the declared list does not name. A property
+            /// bypass is not claimed by a served plugin.
             fn set_bypassed(&self, site: OwnBypass, bypassed: bool) -> BypassWrite {
                 match site {
                     OwnBypass::Parameter(id) => {
+                        if let Some(list) = self.link.declared_if_known()
+                            && list.binary_search_by_key(&id, |&(known, _)| known).is_err()
+                        {
+                            return BypassWrite::Refused;
+                        }
                         if self
                             .link
                             .bridge
@@ -214,8 +234,8 @@ macro_rules! served_control {
                 // parameters kept on the client; the write itself is
                 // fire-and-forget across the wire.
                 self.parameter_writable(main, id)?;
-                AnyThread::set_parameter_value(self, id, value);
-                Ok(())
+                AnyThread::set_parameter_value(self, id, value)
+                    .map_err(|UnknownParam(id)| tutti_plugin_types::ParamWriteError::Undeclared(id))
             }
 
             /// From the declared parameters the client keeps, not a round trip

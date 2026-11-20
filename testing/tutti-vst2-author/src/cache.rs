@@ -1,9 +1,7 @@
 use std::sync::Arc;
 
-use tutti_vst2_ffi::{
-    editor::Editor,
-    plugin::{Info, PluginParameters},
-};
+use crate::editor::Editor;
+use crate::plugin::{Info, PluginParameters};
 
 pub struct PluginCache {
     pub info: Info,

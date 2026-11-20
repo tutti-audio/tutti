@@ -111,6 +111,7 @@ impl AuLoaded {
                         },
                         editor: EditorPresence::Unknown,
                         measured: None,
+                        widths: None,
                     },
                 ))
             })

@@ -2193,7 +2193,9 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
         let snapshot_age = hosted
             .snapshot_from
             .map(|t| now.saturating_duration_since(t));
-        // blocks: a plugin load is an IPC round trip; the plugin lane awaits its reply.
+        // blocks: a plugin load is an IPC round trip, bounded by the load deadlines.
+        // On a polled executor `spawn_dedicated` runs inside `update`'s poll, so this job stalls
+        // `update` until the plugin lane makes it await its reply.
         self.jobs.submit_blocking(
             "tutti-reload",
             move || load.run(),
@@ -2415,7 +2417,9 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
 
             if let Some(read) = hosted.param_read.take() {
                 let token = Arc::clone(&hosted.mirror_token);
-                // blocks: the parameter read is an IPC round trip.
+                // blocks: the parameter read is an IPC round trip, bounded by `param_wait`.
+                // On a polled executor `spawn_dedicated` runs inside `update`'s poll, so this job
+                // stalls `update` until the plugin lane makes it await its reply.
                 self.jobs.submit_blocking(
                     "tutti-params",
                     move || read.run(),
@@ -2459,7 +2463,9 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
             }
             if let Some((handle, token)) = snapshot {
                 let asked = now;
-                // blocks: the state save is an IPC round trip.
+                // blocks: the state save is an IPC round trip, bounded by `state_wait`.
+                // On a polled executor `spawn_dedicated` runs inside `update`'s poll, so this job
+                // stalls `update` until the plugin lane makes it await its reply.
                 self.jobs.submit_blocking(
                     "tutti-snapshot",
                     move || handle.save_state(StateUse::Project),
@@ -2571,7 +2577,13 @@ mod tests {
                 .find(|(a, _)| *a == id)
                 .map(|&(_, v)| Normalized::clamped(f64::from(v)))
         }
-        fn set_parameter_value(&self, _id: ParamId, _value: Normalized) {}
+        fn set_parameter_value(
+            &self,
+            _id: ParamId,
+            _value: Normalized,
+        ) -> Result<(), tutti_plugin_types::UnknownParam> {
+            Ok(())
+        }
         fn parameter_plain(&self, _id: ParamId, _value: Normalized) -> Option<f64> {
             None
         }

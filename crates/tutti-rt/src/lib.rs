@@ -230,7 +230,7 @@ pub use request_flags::{AtomicRequestFlags, RequestFlag, RequestFlagOutOfRange, 
 pub use ring::{Drain, Iter, Overflow, PushError, Returned, RingReader, RingWriter, ring};
 pub use scope::{ControlDrop, RtScope, RtScopeGuard};
 pub use seq_cell::{Contended, SeqReader, SeqWriter};
-pub use seq_slots::{SeqSlotsReader, SeqSlotsWriter, seq_slots};
+pub use seq_slots::{EpochWatch, SeqSlotsReader, SeqSlotsWriter, seq_slots};
 pub use spin::BlockWaits;
 pub use split::{ClaimConflict, ClaimTable, Claimed, ClaimedRun, Held, RwView, SplitMut, SplitRw};
 pub use splitmix::SplitMix64;

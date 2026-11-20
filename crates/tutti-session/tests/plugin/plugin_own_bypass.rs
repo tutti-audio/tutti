@@ -151,7 +151,9 @@ fn a_restore_that_leaves_the_bypass_on_under_an_active_node_is_reconciled() {
         let _ = s.update();
     }
     let handle = s.plugin_view(node).expect("hosted").handle().clone();
-    handle.send_parameter(BYPASS, Normalized::of(1.0));
+    handle
+        .send_parameter(BYPASS, Normalized::of(1.0))
+        .expect("a declared parameter");
     assert!(
         until_told(&mut s, node, 1.0),
         "the plugin's own bypass went on"
