@@ -150,9 +150,9 @@ pub(crate) fn triangle<V: Lane>(p: V, dt: V, inv_dt: V) -> V {
 
 /// Pink noise from white, by Paul Kellet's three-pole "economy" filter.
 ///
-/// Within ±0.05 dB of a −3 dB/octave slope from about 10 Hz to Nyquist at
-/// 44.1 kHz, and three multiply-adds per lane — the refined seven-pole version
-/// buys accuracy below 10 Hz, where a synth voice has nothing to say.
+/// Within about ±0.5 dB of a −3 dB/octave slope (Kellet's stated figure for the economy
+/// form, above about 10 Hz at 44.1 kHz), and three multiply-adds per lane; the refined
+/// seven-pole version is tighter than a synth voice's noise needs.
 /// The output gain of `0.12` brings the RMS to about 0.2, near a sine at −14 dBFS, so the
 /// noise oscillator sits at a level comparable to the pitched ones.
 #[inline(always)]

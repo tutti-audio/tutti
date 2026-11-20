@@ -342,6 +342,7 @@ fn the_distortion_holds_off_non_finite_controls() {
         ShapeKind::Atan,
         ShapeKind::Softsign,
         ShapeKind::HardClip,
+        ShapeKind::TriangleFold,
         ShapeKind::Crush,
         ShapeKind::SoftCrush,
     ] {
