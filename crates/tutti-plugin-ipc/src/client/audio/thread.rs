@@ -90,9 +90,16 @@ impl IpcThread {
             audio: parker,
             control: control_wait,
         } = waits;
+        // The response ring's writer is the audio lane's alone: it lives in the
+        // audio lane's state, which its guard owns.
         let orphans = (
             Orphaned::new(&channels, &lifecycle, &listener),
-            Orphaned::new(&channels, &lifecycle, &listener),
+            Orphaned::of_audio(
+                &channels,
+                &lifecycle,
+                &listener,
+                AudioState::new(lifecycle.timeouts().drain, responses),
+            ),
         );
         let (stream_tx, stream_rx) = mpsc::channel();
         let (audio_ended, control_ended) = (Arc::new(Latch::default()), Arc::new(Latch::default()));
@@ -122,7 +129,6 @@ impl IpcThread {
             audio_lane(
                 AudioLaneParts {
                     channels: channels.clone(),
-                    responses,
                     parker,
                     payloads,
                     lifecycle: lifecycle.clone(),
@@ -186,7 +192,6 @@ fn live(lifecycle: &Lifecycle) -> bool {
 /// What the audio lane's task owns.
 struct AudioLaneParts {
     channels: Channels,
-    responses: ResponseWriter,
     parker: Parker,
     payloads: PayloadPool,
     lifecycle: Lifecycle,
@@ -209,11 +214,26 @@ struct ControlLaneParts {
 /// Declares the bridge dead when a lane's task is dropped before it ended: the
 /// executor shut down under it, or never ran it. A lane that ended itself
 /// disarms it. The task holds one from its creation, as it holds its [`Finish`].
+///
+/// The audio lane's guard owns the lane's state (and, once connected, its
+/// connection), so a dropped audio lane answers the queued blocks and the block
+/// in flight with errors exactly as a crash does.
 struct Orphaned {
     channels: Channels,
     lifecycle: Lifecycle,
     listener: ListenerSlot,
     ended: bool,
+    audio: Held,
+}
+
+/// What the audio lane's guard holds.
+enum Held {
+    /// The control lane's guard holds nothing.
+    Nothing,
+    /// The audio lane before it has connected.
+    State(AudioState),
+    /// The audio lane connected.
+    Lane(Lane<AudioState>),
 }
 
 impl Orphaned {
@@ -223,23 +243,67 @@ impl Orphaned {
             lifecycle: lifecycle.clone(),
             listener: Arc::clone(listener),
             ended: false,
+            audio: Held::Nothing,
+        }
+    }
+
+    /// The audio lane's guard, holding its `state`.
+    fn of_audio(
+        channels: &Channels,
+        lifecycle: &Lifecycle,
+        listener: &ListenerSlot,
+        state: AudioState,
+    ) -> Self {
+        let mut guard = Self::new(channels, lifecycle, listener);
+        guard.audio = Held::State(state);
+        guard
+    }
+
+    /// The audio lane's state, before and after it has connected.
+    fn audio_state(&mut self) -> Option<&mut AudioState> {
+        match &mut self.audio {
+            Held::Nothing => None,
+            Held::State(state) => Some(state),
+            Held::Lane(lane) => Some(&mut lane.state),
+        }
+    }
+
+    /// The audio lane has connected on `stream`.
+    fn connected(&mut self, stream: ControlStream) {
+        if let Held::State(state) = std::mem::replace(&mut self.audio, Held::Nothing) {
+            self.audio = Held::Lane(Lane { stream, state });
+        }
+    }
+
+    /// The connected audio lane.
+    fn lane(&mut self) -> Option<&mut Lane<AudioState>> {
+        match &mut self.audio {
+            Held::Lane(lane) => Some(lane),
+            _ => None,
         }
     }
 }
 
 impl Drop for Orphaned {
     fn drop(&mut self) {
-        if !self.ended {
-            crash(&self.lifecycle, &self.listener, PluginFailure::StreamClosed);
-            drop_controls(&self.channels);
+        if self.ended {
+            return;
         }
+        crash(&self.lifecycle, &self.listener, PluginFailure::StreamClosed);
+        if self.lifecycle.is_crashed() {
+            let channels = self.channels.clone();
+            if let Some(state) = self.audio_state() {
+                state.respond(&channels, AudioResponse::Error { seq: None });
+                drain_with_errors(&channels, state);
+            }
+        }
+        drop_controls(&self.channels);
     }
 }
 
 async fn audio_lane(parts: AudioLaneParts, mut orphaned: Orphaned, _finish: Finish) {
     let AudioLaneParts {
         channels,
-        responses,
         mut parker,
         payloads,
         lifecycle,
@@ -247,21 +311,20 @@ async fn audio_lane(parts: AudioLaneParts, mut orphaned: Orphaned, _finish: Fini
         socket_path,
         control_stream,
     } = parts;
-    // The response ring's writer is this lane's alone: it lives in the audio
-    // lane's state.
-    let mut state = AudioState::new(lifecycle.timeouts().drain, responses);
     // A bridge that never connects is as dead as one whose socket drops later,
     // and the audio thread tells them apart only through `is_crashed`. Every
     // exit below must mark the crash: returning silently would leave the flag
     // false forever, so the batcher's crash check could never fire, and the
     // output would be silent only because the slab sequence happened never to
     // match.
-    let (audio, control) = match connect_lanes(&socket_path) {
+    let (audio, control) = match connect_lanes(&socket_path, lifecycle.timeouts().call) {
         Ok(streams) => streams,
         Err(failure) => {
             crash(&lifecycle, &listener, failure);
             // A block queued before the crash was marked is never sent.
-            drain_with_errors(&channels, &mut state);
+            if let Some(state) = orphaned.audio_state() {
+                drain_with_errors(&channels, state);
+            }
             drop_controls(&channels);
             orphaned.ended = true;
             return;
@@ -278,23 +341,25 @@ async fn audio_lane(parts: AudioLaneParts, mut orphaned: Orphaned, _finish: Fini
                 ))),
             },
         );
-        drain_with_errors(&channels, &mut state);
+        if let Some(state) = orphaned.audio_state() {
+            drain_with_errors(&channels, state);
+        }
         drop_controls(&channels);
         orphaned.ended = true;
         return;
     }
-    audio_loop(
-        &channels,
-        &mut parker,
-        &payloads,
-        &lifecycle,
-        &listener,
-        Lane {
-            stream: audio,
-            state,
-        },
-    )
-    .await;
+    orphaned.connected(audio);
+    if let Some(lane) = orphaned.lane() {
+        audio_loop(
+            &channels,
+            &mut parker,
+            &payloads,
+            &lifecycle,
+            &listener,
+            lane,
+        )
+        .await;
+    }
     // The control lane ends on the same condition, rung awake by whatever ended
     // this one.
     channels.wake();
@@ -339,7 +404,10 @@ async fn control_lane(parts: ControlLaneParts, mut orphaned: Orphaned, _finish: 
 /// here is not reachable today — but this is a wire boundary, the check is one
 /// comparison off the audio path, and a silently-ignored version field is how
 /// a skew becomes a mis-parse instead of an error.
-fn connect_lanes(socket_path: &Path) -> Result<(ControlStream, ControlStream), PluginFailure> {
+fn connect_lanes(
+    socket_path: &Path,
+    ready_within: Duration,
+) -> Result<(ControlStream, ControlStream), PluginFailure> {
     let connect = || {
         let stream = ipc::connect(socket_path).map_err(|e| PluginFailure::Connect {
             source: Arc::new(e),
@@ -347,15 +415,19 @@ fn connect_lanes(socket_path: &Path) -> Result<(ControlStream, ControlStream), P
         Ok(stream)
     };
     let mut audio = connect()?;
-    expect_ready(ipc::recv::<AudioReply>(&mut audio).map(|r| match r {
-        AudioReply::Ready { protocol_version } => Ok(protocol_version),
-        other => Err(format!("{other:?}")),
-    }))?;
+    expect_ready(
+        ipc::recv_within::<AudioReply>(&mut audio, ready_within).map(|r| match r {
+            AudioReply::Ready { protocol_version } => Ok(protocol_version),
+            other => Err(format!("{other:?}")),
+        }),
+    )?;
     let mut control = connect()?;
-    expect_ready(ipc::recv::<ControlFrame>(&mut control).map(|f| match f {
-        ControlFrame::Ready { protocol_version } => Ok(protocol_version),
-        other => Err(format!("{other:?}")),
-    }))?;
+    expect_ready(
+        ipc::recv_within::<ControlFrame>(&mut control, ready_within).map(|f| match f {
+            ControlFrame::Ready { protocol_version } => Ok(protocol_version),
+            other => Err(format!("{other:?}")),
+        }),
+    )?;
     Ok((audio, control))
 }
 
@@ -364,21 +436,25 @@ fn connect_lanes(socket_path: &Path) -> Result<(ControlStream, ControlStream), P
 ///
 /// **Idle, the thread parks on its [`Parker`]**, unparked by a push, by
 /// `shutdown` and by a crash anyone declares. It does not read the control
-/// connection. There is no timeout in the park: a spurious return (the executor's
-/// stop unparks the thread) loops, and the loop returns to the executor first.
+/// connection. There is no timeout in the park.
+///
+/// **A block's turn makes no call into the executor**: it pops, sends, waits for
+/// the reply and answers into the ring, and loops. The executor is reached only
+/// when the lane wakes from idle with nothing queued (a spurious wake-up, or the
+/// executor's stop, which unparks the thread): the lane then returns to it once,
+/// so a stopping executor drops an idle lane. An executor's call (a wake, a
+/// queue push, its timers' lock) on this thread would put the Highest-priority
+/// lane behind the executor's other threads.
 async fn audio_loop(
     channels: &Channels,
     parker: &mut Parker,
     payloads: &PayloadPool,
     lifecycle: &Lifecycle,
     listener: &ListenerSlot,
-    mut lane: Lane<AudioState>,
+    lane: &mut Lane<AudioState>,
 ) {
     let mut failed = false;
     while live(lifecycle) {
-        // The executor looks at the task between two commands and two idle
-        // wake-ups: a block's turn costs one return to it.
-        yield_now().await;
         // Read before the pop: a block pushed after this read is not counted,
         // and one counted was queued, so an empty queue means it was dealt with.
         let pushed = channels.pushed();
@@ -398,7 +474,12 @@ async fn audio_loop(
             // unpark cannot be lost and `shutdown` unparks too, so there is
             // no timeout; the executor's stop unparks the thread as well, and
             // the loop's next turn returns to the executor.
-            channels.wait_for_block(parker, || !live(lifecycle));
+            // A wake-up with nothing to do is the executor's stop (it unparks the
+            // thread) or a spurious one: the task returns to the executor, which
+            // drops it if it is stopping. A wake-up with work does not.
+            if !channels.wait_for_block(parker, || !live(lifecycle)) && live(lifecycle) {
+                yield_now().await;
+            }
             continue;
         };
         // The settings asked for before a block go before it. A `Reset` takes
@@ -409,7 +490,7 @@ async fn audio_loop(
                 apply_setting(channels, lifecycle, setting);
             }
         }
-        let result = handle_audio(cmd, &mut lane, channels, payloads, lifecycle);
+        let result = handle_audio(cmd, lane, channels, payloads, lifecycle);
         channels.turn_done();
 
         if let Err(e) = result {
@@ -879,7 +960,6 @@ mod tests {
         let audio = audio_lane(
             AudioLaneParts {
                 channels: channels.clone(),
-                responses: response_ring().0,
                 parker: waits.audio,
                 payloads: payloads_of(&channels),
                 lifecycle: lifecycle.clone(),
@@ -887,7 +967,12 @@ mod tests {
                 socket_path: PathBuf::new(),
                 control_stream: stream_tx,
             },
-            Orphaned::new(&channels, &lifecycle, &listener),
+            Orphaned::of_audio(
+                &channels,
+                &lifecycle,
+                &listener,
+                AudioState::new(timeouts().drain, response_ring().0),
+            ),
             Finish::new(&audio_ended),
         );
         let control = control_lane(
@@ -934,6 +1019,151 @@ mod tests {
         rig.thread.shutdown();
     }
 
+    /// **A dropped audio lane answers the queued blocks as a crash does**: the
+    /// executor that took the task shut down with a block queued, and the block
+    /// gets its error and leaves the queue.
+    #[test]
+    fn a_dropped_audio_lane_answers_the_queued_blocks() {
+        let (channels, waits) =
+            Channels::new(SampleRate::SR_48K, Arc::default()).expect("the channels");
+        let lifecycle = Lifecycle::new(Arc::new(crate::ServerWatch::new()), timeouts());
+        let listener = silent_listener();
+        let (writer, mut replies, _lost) = response_ring();
+        let (stream_tx, _stream_rx) = mpsc::channel();
+        let lane = audio_lane(
+            AudioLaneParts {
+                channels: channels.clone(),
+                parker: waits.audio,
+                payloads: payloads_of(&channels),
+                lifecycle: lifecycle.clone(),
+                listener: Arc::clone(&listener),
+                socket_path: PathBuf::new(),
+                control_stream: stream_tx,
+            },
+            Orphaned::of_audio(
+                &channels,
+                &lifecycle,
+                &listener,
+                AudioState::new(timeouts().drain, writer),
+            ),
+            Finish::new(&Arc::new(Latch::default())),
+        );
+        assert!(channels.push_block(payload_with_midi(2)));
+
+        drop(lane);
+
+        assert!(channels.pop_block().is_none(), "the queue is drained");
+        assert_eq!(channels.dropped_midi_cell().get(), 2);
+        let mut errors = 0;
+        while let Some(response) = replies.pop() {
+            assert!(matches!(response, AudioResponse::Error { .. }));
+            errors += 1;
+        }
+        assert!(
+            errors >= 2,
+            "the in flight slot and the queued block: {errors}"
+        );
+    }
+
+    /// **A server that accepts and never says `Ready` is a crash at the
+    /// handshake deadline**, and the lane ends: neither `shutdown` nor an
+    /// executor's drop waits on a silent peer. (The guard is under the 30 s a
+    /// read without the bound took.)
+    #[test]
+    fn a_server_that_never_says_ready_crashes_the_bridge_at_the_deadline() {
+        let (channels, waits) =
+            Channels::new(SampleRate::SR_48K, Arc::default()).expect("the channels");
+        let mut short = timeouts();
+        short.call = Duration::from_millis(100);
+        let lifecycle = Lifecycle::new(Arc::new(crate::ServerWatch::new()), short);
+        let socket = crate::unique_socket_path().expect("the OS has a random source");
+        let _ = std::fs::remove_file(&socket);
+        let listener = ListenerOptions::new()
+            .name(ipc::socket_name(&socket).expect("socket name"))
+            .create_sync()
+            .expect("listen");
+        let thread = IpcThread::spawn(
+            tutti_fixtures::executor(),
+            channels.clone(),
+            response_ring().0,
+            waits,
+            payloads_of(&channels),
+            lifecycle.clone(),
+            silent_listener(),
+            socket,
+        )
+        .expect("the lanes start");
+        let _silent = listener.accept().expect("the audio connection");
+        let lanes = thread.lanes.as_ref().expect("the lanes run");
+        assert!(
+            lanes.audio_ended.wait(Duration::from_secs(20)),
+            "the audio lane waits on a peer that never speaks"
+        );
+        assert!(lifecycle.is_crashed());
+        assert!(matches!(
+            lifecycle.crash_cause(),
+            Some(PluginFailure::Handshake { .. })
+        ));
+    }
+
+    /// **A late reply to a block the lane gave up on is skipped by its `seq`**:
+    /// the next block's wait reads it, forwards it as the abandoned block's, and
+    /// goes on to the next block's own answer.
+    #[test]
+    fn a_late_reply_is_skipped_by_seq_on_the_next_block() {
+        let mut rig = rig(tutti_fixtures::executor());
+        let processed = |seq| AudioReply::AudioProcessed {
+            latency_us: 0,
+            seq,
+            midi_out: Default::default(),
+            status: Default::default(),
+            refused: false,
+        };
+        let block = |seq| {
+            let AudioCommand::Process(mut payload) = payload_with_midi(0) else {
+                unreachable!()
+            };
+            payload.seq = seq;
+            AudioCommand::Process(payload)
+        };
+        let mut heard = Vec::new();
+        fn hear(rig: &mut Rig, heard: &mut Vec<AudioResponse>, count: usize) {
+            tutti_fixtures::wait_until("the responses", HANG_GUARD, || {
+                while let Some(response) = rig.replies.pop() {
+                    heard.push(response);
+                }
+                heard.len() >= count
+            });
+        }
+
+        // Block 1 is sent and unanswered: its budget (a few block periods) runs
+        // out, and the lane answers the block with an error and goes on.
+        assert!(rig.channels.push_block(block(1)));
+        let _first: AudioRequest = crate::read_frame(&mut &rig.audio_peer).expect("block 1");
+        hear(&mut rig, &mut heard, 1);
+        assert!(matches!(heard[0], AudioResponse::Error { seq: Some(1) }));
+
+        // The reply arrives late, and block 2 is sent. Its wait has no deadline
+        // here, so only the skip by `seq` decides what it takes as its answer.
+        rig.channels.set_reply_wait(Some(HANG_GUARD));
+        crate::write_frame(&mut &rig.audio_peer, &processed(1)).expect("the late reply");
+        assert!(rig.channels.push_block(block(2)));
+        let _second: AudioRequest = crate::read_frame(&mut &rig.audio_peer).expect("block 2");
+        crate::write_frame(&mut &rig.audio_peer, &processed(2)).expect("block 2's reply");
+        hear(&mut rig, &mut heard, 3);
+
+        assert!(matches!(
+            heard[1],
+            AudioResponse::AudioProcessed { seq: 1, .. }
+        ));
+        assert!(matches!(
+            heard[2],
+            AudioResponse::AudioProcessed { seq: 2, .. }
+        ));
+        assert!(!rig.lifecycle.is_crashed());
+        rig.thread.shutdown();
+    }
+
     /// Records the threads that wake it.
     struct Recorder(std::sync::Mutex<Vec<std::thread::ThreadId>>);
 
@@ -970,7 +1200,6 @@ mod tests {
         let lane = audio_lane(
             AudioLaneParts {
                 channels: channels.clone(),
-                responses: response_ring().0,
                 parker: waits.audio,
                 payloads: payloads_of(&channels),
                 lifecycle: lifecycle.clone(),
@@ -978,7 +1207,12 @@ mod tests {
                 socket_path: socket,
                 control_stream: stream_tx,
             },
-            Orphaned::new(&channels, &lifecycle, &listener),
+            Orphaned::of_audio(
+                &channels,
+                &lifecycle,
+                &listener,
+                AudioState::new(timeouts().drain, response_ring().0),
+            ),
             Finish::new(&audio_ended),
         );
         let recorder = Arc::new(Recorder(std::sync::Mutex::new(Vec::new())));
@@ -994,6 +1228,7 @@ mod tests {
             })
         };
         let polling = polling_rx.recv().expect("the poller's id");
+        let woken = Arc::clone(&recorder);
 
         // The lane connects; the audio callback's side then queues a block and
         // rings the lane, and the peer ends the connection once the block is read.
@@ -1013,6 +1248,17 @@ mod tests {
             },
         )
         .expect("ready");
+        // A wake-up with nothing queued returns the lane to the executor once
+        // (rung until the lane is parked to hear it): the record is not empty,
+        // so the check below has wakes to judge.
+        tutti_fixtures::wait_until(
+            "the idle lane to return to the executor",
+            HANG_GUARD,
+            || {
+                channels.wake();
+                !woken.0.lock().unwrap().is_empty()
+            },
+        );
         assert!(channels.push_block(payload_with_midi(1)));
         channels.wake();
         let _sent: AudioRequest = crate::read_frame(&mut &audio_peer).expect("the block");
@@ -1020,6 +1266,7 @@ mod tests {
         poller.join().expect("the lane ended");
 
         let woken_by = recorder.0.lock().unwrap().clone();
+        assert!(!woken_by.is_empty(), "the record has the lane's own wakes");
         assert!(
             woken_by.iter().all(|thread| *thread == polling),
             "a thread other than the lane's own woke it"
