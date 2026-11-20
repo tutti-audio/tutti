@@ -485,6 +485,8 @@ pub(super) fn build_param_info(
         .with_unit(info.units_string())
         .with_range(range)
         .with_steps(steps)
+        // No plain map: the plugin's controller owns it
+        // (`normalizedParamToPlain`, whatever its shape).
         .with_flags(KNOWN, reported)
         .with_group(group)
         .with_measures(measures)

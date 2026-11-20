@@ -61,7 +61,11 @@ impl WriteOptions<'_> {
         let Self { file, create_new } = self;
         let bytes = file.encode();
         match dst.into() {
-            Destination::Path(path) => write_staged(&bytes, &path, create_new),
+            // Either option refuses an existing file: the destination's or this one's.
+            Destination::Path {
+                path,
+                create_new: refuse,
+            } => write_staged(&bytes, &path, create_new || refuse),
             Destination::Writer(writer) => writer.write_all(&bytes).map_err(WriteError::Writer),
         }
     }

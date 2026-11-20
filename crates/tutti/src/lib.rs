@@ -327,7 +327,8 @@ pub mod types {
         beats_per_sample, first_frame_at_or_after, frames_per_beat, snap_to_whole_frame,
     };
     pub use tutti_platform::{
-        Asset, Destination, Executor, Identity, Open, Panicked, PriorityRequest, ReadSeek, Stamp,
+        Asset, Destination, Executor, Identity, Open, Panicked, PriorityRequest, ReadSeek, Staged,
+        StagedCommitError, StagedFile, Stamp,
     };
     pub use tutti_rt::{
         AtomicCell, AtomicWord, Bell, Bells, Count, Counter, CounterWriter, Drained, Gauge,
@@ -653,11 +654,11 @@ pub mod plugin {
     pub use tutti_plugin_types::{
         AuComponentType, AutomationModeError, Axis, BlockCounts, BridgeError, BridgeResult,
         ClapFeature, ContentScale, ControlRole, EditorPresence, EmptyVersionText, Helper,
-        InvalidContentScale, KeyEvent, KeyUse, LatencyVerdict, Locator, Measured, NotChecked,
-        ParamFlags, ParamRange, ParamSteps, ParamUnit, ParameterInfo, PlainUnit, PluginClass,
-        PluginError, PluginFormat, PluginTooWide, PluginVersion, ProbeConfig, StateError,
-        StateHash, TailVerdict, UnknownExtension, Verdict, VersionText, Vst2Category, Vst3PlugType,
-        Vst3SubCategories,
+        InvalidContentScale, KeyEvent, KeyUse, LatencyVerdict, LinearRange, Locator, Measured,
+        NotChecked, ParamFlags, ParamRange, ParamSteps, ParamUnit, ParameterInfo, PlainMap,
+        PlainUnit, PluginClass, PluginError, PluginFormat, PluginTooWide, PluginVersion,
+        ProbeConfig, StateError, StateHash, TailVerdict, UnknownExtension, Verdict, VersionText,
+        Vst2Category, Vst3PlugType, Vst3SubCategories,
     };
     pub use tutti_plugin_types::{EditorError, LoadStage, TerminationReason};
     pub use tutti_plugin_types::{

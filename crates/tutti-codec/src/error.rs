@@ -16,6 +16,12 @@ pub enum Error {
     #[error("I/O error: {0}")]
     Io(#[from] io::Error),
 
+    /// A finished file could not be put in place: it is complete and kept at
+    /// the error's `kept` path, for the caller to move or delete, and what was
+    /// at the destination is untouched.
+    #[error(transparent)]
+    Commit(#[from] tutti_platform::StagedCommitError),
+
     /// A buffer that is not whole frames of its width.
     #[error(transparent)]
     Buffer(#[from] tutti_buffers::BufferError),
@@ -68,6 +74,7 @@ impl Clone for Error {
     fn clone(&self) -> Self {
         match self {
             Self::Io(e) => Self::Io(io::Error::new(e.kind(), e.to_string())),
+            Self::Commit(e) => Self::Commit(e.clone()),
             Self::Buffer(e) => Self::Buffer(*e),
             Self::Spec(e) => Self::Spec(e.clone()),
             Self::UnknownExtension { extension } => Self::UnknownExtension {

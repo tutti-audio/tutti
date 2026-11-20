@@ -490,7 +490,9 @@ impl InProcessEditor {
     fn forward_edits(&self, edits: Vec<ParamEdit>) {
         for edit in edits {
             if let ParamEdit::Change { id, value, .. } = edit {
-                self.audio.set_parameter_rt(id, value);
+                // An id the editor reports is the plugin's own; the table
+                // follows its list, so the write has a slot.
+                let _ = self.audio.write_parameter(id, value);
             }
             self.audio.report_edit(edit);
         }
@@ -717,7 +719,7 @@ fn mode_of_code(code: u8) -> Option<AutomationMode> {
 /// The cosmetic mirror of the realtime setters onto the in-process editor.
 ///
 /// The in-process editor is a second instance of the plugin whose parameter and
-/// automation calls are main-thread calls, and `set_parameter_rt` and
+/// automation calls are main-thread calls, and `set_parameter_value` and
 /// `set_automation_state_rt` run wherever the node's controls are written. So
 /// they queue here (never blocking, never allocating) and the main-thread
 /// [`editor_idle`](EditorSite::editor_idle) applies what was queued.

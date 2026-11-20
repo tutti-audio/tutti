@@ -24,17 +24,19 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use tutti_plugin_types::BlockCounts;
+use tutti_plugin_types::EditReader;
 use tutti_rt::AtomicSampleRate;
+use tutti_rt::AudioThreadCell;
 use tutti_rt::{
     Counter, LockExt, Overflow, PackedAtomic, Parker, RingReader, RingWriter, Tally, TallyWriter,
     Unparker, parker, ring, tally,
 };
-use tutti_units::SampleRate;
+use tutti_units::{Normalized, ParamId, SampleRate};
 
 /// How many commands each lane's queue holds before a push fails. The block
 /// queue's size also bounds how many `Process` payloads can be outstanding at
 /// once, which is why [`super::payload_pool::PayloadPool`] sizes itself from it.
-pub(super) const COMMAND_QUEUE_SIZE: usize = 128;
+pub(crate) const COMMAND_QUEUE_SIZE: usize = 128;
 const RESPONSE_QUEUE_SIZE: usize = 128;
 
 /// A control command with the newest block sequence submitted when it was
@@ -101,6 +103,14 @@ pub(super) struct Channels {
     /// `0`. An offline render has no deadline, so a reply the server is slow
     /// to send is the server's, not an abandoned block's.
     reply_wait_ns: Arc<AtomicU64>,
+    /// The host's parameter writes the audio lane drains into the next block it
+    /// sends ([`AudioBridge::write_parameter`](super::AudioBridge::write_parameter)):
+    /// the one reader of the slots the host's writer fills, `None` until the
+    /// first write names the plugin's parameters. Claimed, never locked: the
+    /// audio lane's thread claims it without waiting at each block (a refused
+    /// claim drains at the next), and a control thread that installs a reader or
+    /// flushes claims it waiting.
+    host_edits: Arc<AudioThreadCell<Option<EditReader>>>,
     /// How many blocks the bridge thread abandoned on a missed budget, ever:
     /// a loss, and with [`replies`](Self::replies) the hang verdict's input.
     abandoned: Tally<u64>,
@@ -319,6 +329,7 @@ impl Channels {
             control_bell,
             sample_rate: Arc::new(AtomicSampleRate::new(sample_rate)),
             reply_wait_ns: Arc::new(AtomicU64::new(0)),
+            host_edits: Arc::new(AudioThreadCell::new(None)),
             abandoned_writer: abandoned.writer(),
             abandoned,
             late_writer: late.writer(),
@@ -348,6 +359,45 @@ impl Channels {
                 control: control_wait,
             },
         ))
+    }
+
+    /// Installs the reader of the slots the host's writer fills, replacing the
+    /// previous one: what it had not yielded goes with it. Control side: waits
+    /// for a drain that holds the cell.
+    pub(super) fn install_host_edits(&self, reader: EditReader) {
+        *self.claim_host_edits() = Some(reader);
+    }
+
+    /// Takes the cell, waiting while the audio lane drains. Control side.
+    fn claim_host_edits(&self) -> tutti_rt::BorrowGuard<'_, Option<EditReader>> {
+        loop {
+            if let Some(guard) = self.host_edits.try_borrow_mut() {
+                return guard;
+            }
+            std::thread::yield_now();
+        }
+    }
+
+    /// Hands `apply` each parameter the host wrote since the last drain, with
+    /// its latest value. The audio lane's thread, once per block: a refused
+    /// claim (a control thread flushes) drains nothing, and the slots keep what
+    /// they hold.
+    pub(super) fn drain_host_edits(&self, apply: impl FnMut(ParamId, Normalized)) {
+        if let Some(mut cell) = self.host_edits.try_borrow_mut()
+            && let Some(reader) = cell.as_mut()
+        {
+            reader.drain(apply);
+        }
+    }
+
+    /// What no block has taken, claiming the cell: a flush's, which sends it
+    /// ahead of whatever it must precede. Control side.
+    pub(super) fn take_host_edits(&self) -> Vec<(ParamId, Normalized)> {
+        let mut taken = Vec::new();
+        if let Some(reader) = self.claim_host_edits().as_mut() {
+            reader.drain(|id, value| taken.push((id, value)));
+        }
+        taken
     }
 
     /// The current sample rate. `Relaxed` suffices: it only sizes a timeout, so

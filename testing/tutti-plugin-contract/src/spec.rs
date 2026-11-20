@@ -402,6 +402,25 @@ pub struct Surface {
     pub reports_automatable: bool,
     /// How the format names the presets it lists ([`PROGRAMS`]).
     pub preset_ids: PresetIds,
+    /// The plain map the format declares for `level`, `aux`, `tone` and `meter`.
+    pub plain_map: MapKind,
+    /// The plain map the format declares for `mode`, the five-position selector.
+    pub mode_plain_map: MapKind,
+}
+
+/// Which plain map a format declares for a parameter
+/// (`ParameterInfo::plain_map`): CLAP and AU speak plain values with no
+/// normalized one, so the host's line over the declared range, stepped on its
+/// integer for CLAP's stepped `mode`; VST3 and a VST2 with no integer range
+/// leave the map to the plugin.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MapKind {
+    /// The line between the declared ends.
+    Linear,
+    /// The line, each value on its integer.
+    Stepped,
+    /// The plugin's own map.
+    PluginDefined,
 }
 
 /// The role every VST3 plugin of ours declares, by parameter (function names
@@ -444,6 +463,8 @@ pub const CLAP: Surface = Surface {
     reports_access: true,
     reports_automatable: true,
     preset_ids: PresetIds::Numbered,
+    plain_map: MapKind::Linear,
+    mode_plain_map: MapKind::Stepped,
 };
 
 /// VST2: no editor in the plugin, a live render mode, an automate report.
@@ -467,6 +488,8 @@ pub const VST2: Surface = Surface {
     reports_access: false,
     reports_automatable: false,
     preset_ids: PresetIds::Numbered,
+    plain_map: MapKind::PluginDefined,
+    mode_plain_map: MapKind::PluginDefined,
 };
 
 /// VST3 from the Rust plugin: an editor once selected, the mode read at activation, an edit of `aux` to 0.75 on each state
@@ -491,6 +514,8 @@ pub const VST3: Surface = Surface {
     reports_access: true,
     reports_automatable: true,
     preset_ids: PresetIds::Programs,
+    plain_map: MapKind::PluginDefined,
+    mode_plain_map: MapKind::PluginDefined,
 };
 
 /// VST3 from the C++ plugin: no editor, an edit of `aux` to 0.75 on each state
@@ -515,6 +540,8 @@ pub const VST3_CPP: Surface = Surface {
     reports_access: true,
     reports_automatable: true,
     preset_ids: PresetIds::Programs,
+    plain_map: MapKind::PluginDefined,
+    mode_plain_map: MapKind::PluginDefined,
 };
 
 /// AU, from the shared plugin's Audio Unit shell: no editor (the shell offers no
@@ -542,4 +569,6 @@ pub const AU: Surface = Surface {
     reports_access: true,
     reports_automatable: false,
     preset_ids: PresetIds::Numbered,
+    plain_map: MapKind::Linear,
+    mode_plain_map: MapKind::Linear,
 };
