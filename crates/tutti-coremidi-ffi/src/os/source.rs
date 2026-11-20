@@ -1,19 +1,17 @@
 //! A **native-UMP** virtual MIDI source: an endpoint created with
 //! `MIDISourceCreateWithProtocol` and fed raw UMP words through
 //! `MIDIReceivedEventList`, so MIDI 2.0 messages (per-note controllers, JR
-//! Timestamps) reach the wire. The safe `coremidi` wrapper has only the MIDI 1.0
-//! source, whose send path is legacy packet bytes.
+//! Timestamps) reach the wire.
 
 use super::client::SharedClient;
 use super::error::{Error, Operation, OsStatus};
+use super::event_list::{EventList, capacity};
 use core_foundation::base::TCFType;
 use core_foundation::string::CFString;
 use coremidi_sys::{
-    ByteCount, MIDIEndpointDispose, MIDIEndpointRef, MIDIEventList, MIDIEventListAdd,
-    MIDIEventListInit, MIDIProtocolID, MIDIReceivedEventList, MIDISourceCreateWithProtocol,
-    MIDITimeStamp, kMIDIProtocol_1_0, kMIDIProtocol_2_0,
+    MIDIEndpointDispose, MIDIEndpointRef, MIDIProtocolID, MIDIReceivedEventList,
+    MIDISourceCreateWithProtocol, MIDITimeStamp, kMIDIProtocol_1_0, kMIDIProtocol_2_0,
 };
-use std::mem::MaybeUninit;
 use tutti_ump::{Protocol, Ump};
 
 /// CoreMIDI's id (`MIDIProtocolID`) for the protocol a virtual endpoint
@@ -85,32 +83,21 @@ impl UmpSource {
     ///
     /// # Errors
     ///
-    /// [`Error::Call`] when `MIDIReceivedEventList` returns a non-zero status.
+    /// [`Error::Call`] when `MIDIReceivedEventList` returns a non-zero status, and
+    /// [`Error::EventListFull`] when the message does not fit an event list (a
+    /// message is at most 4 words, so it always does).
     pub fn send(&self, ump: &Ump) -> Result<(), Error> {
-        let words = ump.words();
-
-        // A `MIDIEventList` holds one packet of up to 64 words inline, so a single
-        // message of up to 4 words always fits and `Add` cannot return NULL.
-        let mut list = MaybeUninit::<MIDIEventList>::uninit();
-        let list_ptr = list.as_mut_ptr();
-        let list_size = std::mem::size_of::<MIDIEventList>();
-
-        // SAFETY: `list_ptr` addresses the whole `MIDIEventList`, and `Init`
-        // is what initialises it; `assume_init_ref` below is reached only
-        // after both calls have run. `list_size` is that allocation's real size,
-        // so `Add` cannot write past it, and `words` outlives the call.
-        let status = unsafe {
-            let packet = MIDIEventListInit(list_ptr, self.protocol);
-            MIDIEventListAdd(
-                list_ptr,
-                list_size as ByteCount,
-                packet,
-                MIDI_TIMESTAMP_NOW,
-                words.len() as ByteCount,
-                words.as_ptr(),
-            );
-            MIDIReceivedEventList(self.source, list.assume_init_ref() as *const MIDIEventList)
-        };
+        // A single message is at most 4 words, one packet.
+        let mut buffer = [0u32; capacity(1, 4)];
+        let list = EventList::new(
+            &mut buffer,
+            self.protocol,
+            [(MIDI_TIMESTAMP_NOW, ump.words())],
+        )?;
+        // SAFETY: `self.source` is the endpoint `new` created, disposed only on
+        // drop, and `list` points to an initialised event list that outlives the
+        // call, which CoreMIDI copies.
+        let status = unsafe { MIDIReceivedEventList(self.source, list.as_ptr()) };
 
         OsStatus::check(status).map_err(|status| Error::call(Operation::ReceivedEventList, status))
     }

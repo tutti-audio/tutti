@@ -136,7 +136,7 @@ fn clip_of(path: &Path, streamed: bool) -> tutti_sampler::Clip<f32> {
     match s.audio(&"ramp").expect("loaded") {
         AudioEntry::Resident(wave) => tutti_sampler::Clip::new(wave).expect("a placeable wave"),
         AudioEntry::Streamed(info) => {
-            s.open_stream(info.path(), Placement::HEAD)
+            s.open_stream(info.asset().clone(), Placement::HEAD)
                 .expect("a streamer");
             match landed(&mut s, 1).pop() {
                 Some(SamplerEvent::Opened { id }) => {

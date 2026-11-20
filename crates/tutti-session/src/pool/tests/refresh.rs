@@ -6,6 +6,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use tutti_platform::Asset;
+
 use super::{Spawned, events, session, state};
 use crate::{Declared, Life, Load, LoadError, PoolEntry, PoolKey, RefreshReport, Sharing};
 
@@ -34,8 +36,8 @@ impl PoolEntry for Read {
         })
     }
 
-    fn file(&self) -> Option<&Path> {
-        Some(&self.path)
+    fn asset(&self) -> Option<Asset> {
+        Some(Asset::from(self.path.as_path()))
     }
 
     fn handle(loaded: &Arc<Vec<u8>>, _: &Life) -> Arc<Vec<u8>> {
@@ -82,6 +84,58 @@ fn loaded(dir: &Path, text: &[u8]) -> (crate::DetachedSession, Spawned, PathBuf,
     spawned.run_all();
     let _ = events(&mut s);
     (s, spawned, path, reads)
+}
+
+/// A kind that reads an asset of bytes: its identity never changes.
+struct Held {
+    asset: Asset,
+}
+
+impl PoolEntry for Held {
+    type Identity = u8;
+    type Loaded = u8;
+    type Handle = u8;
+
+    fn identity(&self) -> u8 {
+        0
+    }
+
+    fn load(&self) -> Load<u8> {
+        let asset = self.asset.clone();
+        Load::on_worker(move || {
+            asset
+                .open()
+                .map(|_| 0)
+                .map_err(|_| LoadError::Job(crate::WorkerError::Dropped))
+        })
+    }
+
+    fn asset(&self) -> Option<Asset> {
+        Some(self.asset.clone())
+    }
+
+    fn handle(loaded: &u8, _: &Life) -> u8 {
+        *loaded
+    }
+}
+
+#[test]
+fn an_asset_of_bytes_never_refreshes() {
+    let (mut s, spawned) = session();
+    s.pool(Declared::new(
+        "a",
+        Held {
+            asset: Asset::from(b"one".to_vec()),
+        },
+    ))
+    .unwrap();
+    spawned.run_all();
+    let _ = events(&mut s);
+    for _ in 0..2 {
+        let found = refreshed(&mut s, &spawned);
+        assert!(found.reloaded().is_empty() && found.unreadable().is_empty());
+        assert!(spawned.take().is_empty(), "nothing started");
+    }
 }
 
 #[test]
@@ -240,8 +294,8 @@ impl PoolEntry for Unstamped {
         Load::ready(0)
     }
 
-    fn file(&self) -> Option<&Path> {
-        Some(&self.path)
+    fn asset(&self) -> Option<Asset> {
+        Some(Asset::from(self.path.as_path()))
     }
 
     fn handle(loaded: &u8, _: &Life) -> u8 {

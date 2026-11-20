@@ -3,13 +3,13 @@
 //! The control side of a stream is [`Stream`](crate::Stream); the reader it
 //! hands its voice is the reply of its open ([`PendingOpen`](crate::PendingOpen)).
 
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use tutti_buffers::{Float, Wave};
+use tutti_platform::Asset;
 use tutti_units::SampleRate;
 
-/// The file a stream plays: where it is, its own rate and, when the streamer
+/// The file a stream plays: the [`Asset`] it is read from, its own rate and, when the streamer
 /// holds it decoded whole, the wave.
 ///
 /// Immutable, built once when the stream opens and shared by the
@@ -21,32 +21,33 @@ use tutti_units::SampleRate;
 /// control, and a stream that has ended is its status.
 ///
 /// A live voice may be the last holder, and its drop can land where the graph
-/// frees units, never the audio thread; what it frees is a path and a wave the
+/// frees units, never the audio thread; what it frees is an asset and a wave the
 /// streamer's writer shares.
 #[derive(Clone)]
 pub struct StreamFile<F: Float> {
-    path: PathBuf,
+    asset: Asset,
     file_rate: SampleRate,
     resident: Option<Arc<Wave<F>>>,
 }
 
 impl<F: Float> StreamFile<F> {
     pub(crate) fn new(
-        path: PathBuf,
+        asset: impl Into<Asset>,
         file_rate: SampleRate,
         resident: Option<Arc<Wave<F>>>,
     ) -> Self {
         Self {
-            path,
+            asset: asset.into(),
             file_rate,
             resident,
         }
     }
 
-    /// The file the stream was opened on. A fork re-opens it by this path.
+    /// What the stream was opened on. A fork opens it again through
+    /// [`Asset::open`].
     #[must_use]
-    pub fn path(&self) -> &Path {
-        &self.path
+    pub fn asset(&self) -> &Asset {
+        &self.asset
     }
 
     /// The file's own sample rate, from its header.
@@ -68,7 +69,7 @@ impl<F: Float> StreamFile<F> {
 impl<F: Float> std::fmt::Debug for StreamFile<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("StreamFile")
-            .field("path", &self.path)
+            .field("asset", &self.asset)
             .field("file_rate", &self.file_rate)
             .field("resident", &self.resident.is_some())
             .finish()

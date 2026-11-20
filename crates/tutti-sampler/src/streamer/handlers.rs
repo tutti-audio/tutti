@@ -6,7 +6,6 @@
 //! needs, runs the pure step over the table, and performs the effects.
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use std::sync::atomic::Ordering;
@@ -34,6 +33,7 @@ use crate::voice::Direction;
 use crate::voice::interp::Place;
 use crate::voice_width;
 use tutti_buffers::ChannelLayout;
+use tutti_platform::Asset;
 use tutti_rt::RingFloat;
 
 /// Arc'd handles shared between the control side and the streamer loop.
@@ -98,7 +98,7 @@ pub(super) struct Local<F: RingFloat> {
 /// An open of a file that cannot seek, waiting for the decode lane.
 pub(super) struct Pending<F: RingFloat> {
     id: StreamId,
-    file_path: PathBuf,
+    asset: Asset,
     start: u64,
     width: Option<ChannelLayout>,
     reply: Reply<F>,
@@ -133,14 +133,14 @@ pub(super) fn handle_command<F: RingFloat>(
     match cmd {
         StreamerCommand::Open {
             id,
-            file_path,
+            asset,
             start,
             width,
             reply,
         } => {
             let open = Pending {
                 id,
-                file_path,
+                asset,
                 start,
                 width,
                 reply,
@@ -164,7 +164,7 @@ pub(super) fn handle_command<F: RingFloat>(
     }
 }
 
-/// Try to open an incremental disk decoder for `file_path`. Returns
+/// Try to open an incremental disk decoder for `asset`. Returns
 /// `Some((metadata, decoder))` when the format is seekable (has a frame count
 /// and the decoder opened), so the region can stream real ranges from disk.
 /// Returns `None` — signalling the whole-file fallback, on the decode lane —
@@ -178,16 +178,16 @@ pub(super) fn handle_command<F: RingFloat>(
 /// the next time the conditions changed.
 #[cfg(codec)]
 fn open_stream<F: RingFloat>(
-    file_path: &std::path::Path,
+    asset: &Asset,
 ) -> Option<(tutti_codec::WaveMetadata, tutti_codec::FileIn<F>)> {
-    if !crate::probe(file_path).ok()?.streamable {
+    if !crate::probe(asset.clone()).ok()?.streamable {
         return None;
     }
     // Streamable, so both of these succeed — but they are still fallible calls
     // and are handled rather than unwrapped: the probe read the header a moment
     // ago, and a file can be replaced between the two reads.
-    let meta = tutti_codec::read_wave_metadata(file_path).ok()?;
-    let decoder = tutti_codec::FileIn::<F>::open(file_path).ok()?;
+    let meta = tutti_codec::read_wave_metadata(asset.clone()).ok()?;
+    let decoder = tutti_codec::FileIn::<F>::open(asset.clone()).ok()?;
     Some((meta, decoder))
 }
 
@@ -219,12 +219,12 @@ enum Begun<F: RingFloat> {
     Decoding,
 }
 
-/// Probes `file_path` for how to feed stream `id`: a seeking decoder, a wave
+/// Probes `asset` for how to feed stream `id`: a seeking decoder, a wave
 /// the cache already holds, or else a whole-file decode on the decode lane.
 /// The streamer's thread reads a header here and nothing more.
 fn begin<F: RingFloat>(
     id: StreamId,
-    file_path: &Path,
+    asset: &Asset,
     shared: &Handles<F>,
     lane: &mut DecodeLane<F>,
 ) -> Result<Begun<F>, OpenError> {
@@ -233,24 +233,24 @@ fn begin<F: RingFloat>(
     // back to the whole-file path when the format isn't seekable (no frame
     // count) or opening the stream decoder fails.
     #[cfg(codec)]
-    if let Some((meta, decoder)) = open_stream(file_path) {
+    if let Some((meta, decoder)) = open_stream(asset) {
         return Ok(Begun::Ready(Source::Stream(meta, Box::new(decoder))));
     }
-    if let Some(wave) = shared.cache.get(file_path) {
+    if let Some(wave) = asset.identity().and_then(|key| shared.cache.get(&key)) {
         return Ok(Begun::Ready(Source::Whole(wave)));
     }
     // With no decoder compiled in, a miss has nowhere to be filled.
     #[cfg(not(codec))]
     {
         let _ = (id, lane);
-        Err(super::decode::unreadable(file_path))
+        Err(super::decode::unreadable(asset))
     }
     #[cfg(codec)]
     {
-        // A file that is not there is no job: it fails now, where the lane
-        // would only fail it later.
-        std::fs::File::open(file_path).map_err(|error| OpenError::Io(error.kind()))?;
-        lane.submit(shared, id, file_path.to_path_buf())?;
+        // A source that cannot be opened is no job: it fails now, where the
+        // lane would only fail it later.
+        asset.open().map_err(|error| OpenError::Io(error.kind()))?;
+        lane.submit(shared, id, asset.clone())?;
         Ok(Begun::Decoding)
     }
 }
@@ -274,7 +274,7 @@ fn handle_open<F: RingFloat>(
     local: &mut Local<F>,
 ) {
     let begun = catch_unwind(AssertUnwindSafe(|| {
-        begin(open.id, &open.file_path, shared, &mut local.lane)
+        begin(open.id, &open.asset, shared, &mut local.lane)
     }));
     match begun {
         Ok(Ok(Begun::Ready(source))) => complete(open, Ok(source), shared, config, local),
@@ -283,7 +283,7 @@ fn handle_open<F: RingFloat>(
         Err(payload) => {
             tracing::error!(
                 "opening {} panicked: {}",
-                open.file_path.display(),
+                open.asset.name(),
                 panic_message(payload.as_ref())
             );
             complete(open, Err(OpenError::Format), shared, config, local);
@@ -302,19 +302,19 @@ fn complete<F: RingFloat>(
 ) {
     let Pending {
         id,
-        file_path,
+        asset,
         start,
         width,
         reply,
     } = open;
     let built = source.and_then(|source| {
         catch_unwind(AssertUnwindSafe(|| {
-            build_stream(id, file_path.clone(), start, width, source, shared, config)
+            build_stream(id, asset.clone(), start, width, source, shared, config)
         }))
         .unwrap_or_else(|payload| {
             tracing::error!(
                 "building the stream of {} panicked: {}",
-                file_path.display(),
+                asset.name(),
                 panic_message(payload.as_ref())
             );
             Err(OpenError::Format)
@@ -336,7 +336,7 @@ fn complete<F: RingFloat>(
     }
 }
 
-/// Build the stream `id` on `file_path` from frame `start`: its record and
+/// Build the stream `id` on `asset` from frame `start`: its record and
 /// what its reader is made of.
 ///
 /// Builds the region ring at the file's own width and pins the wave in the
@@ -344,7 +344,7 @@ fn complete<F: RingFloat>(
 /// when `None`) is built, and so refused, before anything is built.
 fn build_stream<F: RingFloat>(
     id: StreamId,
-    file_path: PathBuf,
+    asset: Asset,
     start: u64,
     width: Option<ChannelLayout>,
     source: Source<F>,
@@ -387,7 +387,7 @@ fn build_stream<F: RingFloat>(
     // offline fork's own read of the file all work at the file's width).
     let (mut producer, ring, pos) = RegionBuffer::for_file(
         id,
-        file_path.clone(),
+        asset.clone(),
         buffer_capacity,
         file_topology,
         Some(Samples::new(file_length as usize)),
@@ -425,16 +425,16 @@ fn build_stream<F: RingFloat>(
     // incremental-decode path the wave isn't cached, so `pin` finds no entry and
     // the guard is inert — harmless. Held by the record, so it releases when
     // the stream closes.
-    let pin = shared.cache.pin(&file_path);
+    let pin = shared.cache.pin(asset.identity().as_ref());
 
     // The conversion ratio is the streamer's to write: derived here against the
     // session rate as it is now, and again on each rate event.
     let cells = Arc::new(Cells::new());
     cells.set_src_ratio(SrcRatio::for_rates(file_sr, shared.session_rate.get()));
     let status = Arc::new(StatusCell::new());
-    // What a fork plays, immutable: the file's path and rate, and the wave when
+    // What a fork plays, immutable: the asset and the file's rate, and the wave when
     // the writer holds it whole.
-    let file = Arc::new(StreamFile::new(file_path, file_sr, whole));
+    let file = Arc::new(StreamFile::new(asset, file_sr, whole));
     let control = ring.control_cell();
     // The loop and direction the control side asks for: the record reads
     // them, the stream's handle (and the voice node, for a node) publishes.
@@ -517,7 +517,7 @@ fn capture_loop<F: RingFloat>(record: &mut Record<F>, ask: Option<Loop>, config:
                 "could not read the crossfade lead-in of loop {:?} in {}; \
                  the loop plays hard",
                 ask,
-                writer.file_path().display()
+                writer.asset().name()
             );
             recorded = Some(ask.hard());
         }

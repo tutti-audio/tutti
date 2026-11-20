@@ -249,6 +249,7 @@ pub(super) fn rig_gated(label: &str, gate: Option<ReplyGate>) -> Rig {
             class: PluginClass::Unknown,
             editor: EditorPresence::Absent,
             measured: None,
+            widths: None,
         },
         loaded: LoadedPlugin {
             inputs: vec![PluginBus::main(ChannelLayout::STEREO)],

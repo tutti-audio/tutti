@@ -54,7 +54,7 @@ primitive_enum! {
         /// [return]: `VstTimeInfo` pointer or null if not supported.
         GetTime,
         /// Inform host that the plugin has MIDI events ready to be processed. Should be called at the
-        /// end of `Plugin::process`.
+        /// end of the plugin's process call.
         /// [ptr]: `VstEvents*` the events to be processed.
         /// [return]: 1 if supported and processed OK.
         ProcessEvents,
@@ -231,10 +231,6 @@ pub trait Host {
     /// `audioMasterProcessEvents`, as a view only the callback can make.
     fn process_plugin_events(&self, events: api::PluginEvents<'_>) {}
 
-    /// Send events to the host. This is the plugin's call, on a `HostCallback`; the host
-    /// side is [`process_plugin_events`](Self::process_plugin_events).
-    fn process_events(&self, events: &api::Events) {}
-
     /// Get time information.
     fn get_time_info(&self, mask: i32) -> Option<TimeInfo> {
         None
@@ -304,9 +300,8 @@ pub trait Host {
 
     /// Refresh UI after the plugin's parameters changed.
     ///
-    /// Note: some hosts will call some `PluginParameters` methods from within the `update_display`
-    /// call, including `get_parameter`, `get_parameter_label`, `get_parameter_name`
-    /// and `get_parameter_text`.
+    /// Note: some hosts query parameters from within the `update_display` call, through the
+    /// parameter value, label, name and text opcodes.
     fn update_display(&self) {}
 }
 
@@ -2601,137 +2596,6 @@ impl PluginInstance {
     }
 }
 
-/// Used for constructing `AudioBuffer` instances on the host.
-///
-/// This struct contains all necessary allocations for an `AudioBuffer` apart
-/// from the actual sample arrays. This way, the inner processing loop can
-/// be allocation free even if `AudioBuffer` instances are repeatedly created.
-///
-/// ```rust
-/// # use tutti_vst2_ffi::host::HostBuffer;
-/// # use tutti_vst2_ffi::plugin::Plugin;
-/// # fn test<P: Plugin>(plugin: &mut P) {
-/// let mut host_buffer: HostBuffer<f32> = HostBuffer::new(2, 2);
-/// let inputs = vec![vec![0.0; 1000]; 2];
-/// let mut outputs = vec![vec![0.0; 1000]; 2];
-/// let mut audio_buffer = host_buffer.bind(&inputs, &mut outputs);
-/// plugin.process(&mut audio_buffer);
-/// # }
-/// ```
-#[derive(Debug)]
-pub struct HostBuffer<T: Float> {
-    inputs: Vec<*const T>,
-    outputs: Vec<*mut T>,
-}
-
-impl<T: Float> HostBuffer<T> {
-    /// Create a `HostBuffer` for a given number of input and output channels.
-    pub fn new(input_count: usize, output_count: usize) -> HostBuffer<T> {
-        HostBuffer {
-            inputs: vec![ptr::null(); input_count],
-            outputs: vec![ptr::null_mut(); output_count],
-        }
-    }
-
-    /// Create a `HostBuffer` for the number of input and output channels
-    /// specified in an `Info` struct.
-    pub fn from_info(info: &Info) -> HostBuffer<T> {
-        HostBuffer::new(info.inputs as usize, info.outputs as usize)
-    }
-
-    /// Bind sample arrays to the `HostBuffer` to create an `AudioBuffer` to pass to a plugin.
-    ///
-    /// The buffer borrows the arrays for as long as it lives (`'a`), so the arrays cannot
-    /// be dropped or reused while a plugin can still read or write them through it:
-    ///
-    /// ```compile_fail
-    /// # use tutti_vst2_ffi::host::HostBuffer;
-    /// let mut host_buffer: HostBuffer<f32> = HostBuffer::new(1, 1);
-    /// let mut buffer = {
-    ///     let inputs = vec![vec![0.0f32; 4]];
-    ///     let mut outputs = vec![vec![0.0f32; 4]];
-    ///     host_buffer.bind(&inputs, &mut outputs)
-    /// };
-    /// let _ = buffer.split();
-    /// ```
-    ///
-    /// # Panics
-    /// This function will panic if more inputs or outputs are supplied than the `HostBuffer`
-    /// was created for, or if the sample arrays do not all have the same length.
-    pub fn bind<'a, I, O>(
-        &'a mut self,
-        input_arrays: &'a [I],
-        output_arrays: &'a mut [O],
-    ) -> AudioBuffer<'a, T>
-    where
-        I: AsRef<[T]>,
-        O: AsMut<[T]>,
-    {
-        // Check that number of desired inputs and outputs fit in allocation
-        if input_arrays.len() > self.inputs.len() {
-            panic!("Too many inputs for HostBuffer");
-        }
-        if output_arrays.len() > self.outputs.len() {
-            panic!("Too many outputs for HostBuffer");
-        }
-
-        // Initialize raw pointers and find common length
-        let mut length = None;
-        for (i, input) in input_arrays.iter().map(|r| r.as_ref()).enumerate() {
-            self.inputs[i] = input.as_ptr();
-            match length {
-                None => length = Some(input.len()),
-                Some(old_length) => {
-                    if input.len() != old_length {
-                        panic!("Mismatching lengths of input arrays");
-                    }
-                }
-            }
-        }
-        for (i, output) in output_arrays.iter_mut().map(|r| r.as_mut()).enumerate() {
-            self.outputs[i] = output.as_mut_ptr();
-            match length {
-                None => length = Some(output.len()),
-                Some(old_length) => {
-                    if output.len() != old_length {
-                        panic!("Mismatching lengths of output arrays");
-                    }
-                }
-            }
-        }
-        let length = length.unwrap_or(0);
-
-        // Construct AudioBuffer
-        //
-        // SAFETY: the first `input_arrays.len()` / `output_arrays.len()` slots of
-        // `self.inputs`/`self.outputs` were just set (the counts fit, checked above), each
-        // from a slice of `length` samples, and the output slices are distinct `&mut` so
-        // they do not alias. The pointers address data reached through `input_arrays` /
-        // `output_arrays`, which are borrowed for `'a` (the buffer's lifetime), as
-        // `from_raw` requires; `self` is borrowed for `'a` too, so the pointer tables
-        // outlive the buffer.
-        unsafe {
-            AudioBuffer::from_raw(
-                input_arrays.len(),
-                output_arrays.len(),
-                self.inputs.as_ptr(),
-                self.outputs.as_mut_ptr(),
-                length,
-            )
-        }
-    }
-
-    /// Number of input channels supported by this `HostBuffer`.
-    pub fn input_count(&self) -> usize {
-        self.inputs.len()
-    }
-
-    /// Number of output channels supported by this `HostBuffer`.
-    pub fn output_count(&self) -> usize {
-        self.outputs.len()
-    }
-}
-
 /// How many `PluginLoader::instance` calls are between the start of `main` and the
 /// adoption (or refusal) of the effect it returned, on any thread.
 static LOADS_IN_PROGRESS: AtomicUsize = AtomicUsize::new(0);
@@ -2894,7 +2758,56 @@ extern "C" fn callback_wrapper<T: Host>(
 mod tests {
     use super::*;
     use crate::api::Supported;
-    use crate::host::HostBuffer;
+
+    /// Pointer tables for building an `AudioBuffer` over test sample arrays.
+    struct HostBuffer<T: Float> {
+        inputs: Vec<*const T>,
+        outputs: Vec<*mut T>,
+    }
+
+    impl<T: Float> HostBuffer<T> {
+        fn new(input_count: usize, output_count: usize) -> HostBuffer<T> {
+            HostBuffer {
+                inputs: vec![ptr::null(); input_count],
+                outputs: vec![ptr::null_mut(); output_count],
+            }
+        }
+
+        /// An `AudioBuffer` over the arrays, which are borrowed as long as it lives.
+        fn bind<'a, I, O>(
+            &'a mut self,
+            input_arrays: &'a [I],
+            output_arrays: &'a mut [O],
+        ) -> AudioBuffer<'a, T>
+        where
+            I: AsRef<[T]>,
+            O: AsMut<[T]>,
+        {
+            assert!(input_arrays.len() <= self.inputs.len());
+            assert!(output_arrays.len() <= self.outputs.len());
+            let mut length = None;
+            for (i, input) in input_arrays.iter().map(|r| r.as_ref()).enumerate() {
+                self.inputs[i] = input.as_ptr();
+                assert_eq!(*length.get_or_insert(input.len()), input.len());
+            }
+            for (i, output) in output_arrays.iter_mut().map(|r| r.as_mut()).enumerate() {
+                self.outputs[i] = output.as_mut_ptr();
+                assert_eq!(*length.get_or_insert(output.len()), output.len());
+            }
+            // SAFETY: the first `input_arrays.len()` / `output_arrays.len()` slots were just
+            // set from slices of `length` samples, the output slices are distinct `&mut`,
+            // and the arrays and `self` are borrowed for `'a`, the buffer's lifetime.
+            unsafe {
+                AudioBuffer::from_raw(
+                    input_arrays.len(),
+                    output_arrays.len(),
+                    self.inputs.as_ptr(),
+                    self.outputs.as_mut_ptr(),
+                    length.unwrap_or(0),
+                )
+            }
+        }
+    }
 
     /// `PluginInstance::start_process` / `stop_process` must dispatch the
     /// opcodes the plugin-side dispatcher in `interfaces.rs` actually matches
@@ -3256,31 +3169,6 @@ mod tests {
         assert_eq!(*SEEN.lock().unwrap(), [(1, 7, b"program".to_vec())]);
     }
 
-    /// A plugin's chunk-**save** failure must be representable through the trait
-    /// (`effSetChunk` has no return value to carry a refusal on; `effGetChunk` has the length).
-    #[test]
-    fn a_chunk_refusal_is_representable() {
-        use crate::plugin::PluginParameters;
-
-        struct RefusingParams;
-        impl PluginParameters for RefusingParams {
-            fn try_get_preset_data(&self) -> Result<Vec<u8>, GetChunkError> {
-                Err(GetChunkError::Failed(-1))
-            }
-        }
-
-        assert!(
-            RefusingParams.try_get_preset_data().is_err(),
-            "a plugin must be able to report a failed chunk save"
-        );
-
-        // The default must still succeed, so the assertion above is not
-        // satisfied by a blanket failure.
-        struct AcceptingParams;
-        impl PluginParameters for AcceptingParams {}
-        assert_eq!(AcceptingParams.try_get_preset_data(), Ok(Vec::new()));
-    }
-
     /// A *failed* save and an *empty* save must not produce the same value.
     #[test]
     fn failed_chunk_save_is_distinguishable_from_an_empty_one() {
@@ -3431,29 +3319,6 @@ mod tests {
             "absent and a real zero must stay distinguishable — if they merge, \
              callers have no way to recover which happened"
         );
-    }
-
-    #[test]
-    fn host_buffer() {
-        const LENGTH: usize = 1_000_000;
-        let mut host_buffer: HostBuffer<f32> = HostBuffer::new(2, 2);
-        let input_left = vec![1.0; LENGTH];
-        let input_right = vec![1.0; LENGTH];
-        let mut output_left = vec![0.0; LENGTH];
-        let mut output_right = vec![0.0; LENGTH];
-        // `bind` borrows the slices of arrays for the buffer's lifetime, so they outlive it.
-        let inputs = [&input_left, &input_right];
-        let mut outputs = [&mut output_left, &mut output_right];
-        {
-            let mut audio_buffer = host_buffer.bind(&inputs, &mut outputs);
-            for (input, output) in audio_buffer.zip() {
-                for (i, o) in input.iter().zip(output) {
-                    *o = *i * 2.0;
-                }
-            }
-        }
-        assert_eq!(output_left, vec![2.0; LENGTH]);
-        assert_eq!(output_right, vec![2.0; LENGTH]);
     }
 
     /// `Host` that answers `audioMasterCurrentId` with its own number.

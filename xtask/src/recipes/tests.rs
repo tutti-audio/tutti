@@ -221,11 +221,11 @@ fn loom_recipes_carry_their_environment() {
 
 /// The web build check is the command CI's clippy job runs.
 #[test]
-fn check_wasm_lints_the_platform_crate_and_the_umbrella_for_the_web() {
+fn check_wasm_lints_the_platform_crate_the_rt_crate_and_the_umbrella_for_the_web() {
     assert_eq!(
         dry("check-wasm", &[]),
         [
-            "cargo clippy --locked --target wasm32-unknown-unknown -p tutti-platform -p tutti --lib -- -D warnings"
+            "cargo clippy --locked --target wasm32-unknown-unknown -p tutti-platform -p tutti-rt -p tutti --lib -- -D warnings"
         ]
     );
 }

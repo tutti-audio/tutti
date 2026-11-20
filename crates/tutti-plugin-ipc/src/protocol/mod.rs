@@ -125,14 +125,15 @@ pub(crate) mod wire;
 /// - **Version 46** replaces `LoadPlugin`'s `load` (a string choice of plugin)
 ///   with `plugin`, an optional `PluginId`, and `PluginLoaded` names the plugin
 ///   it opened (`id`); a descriptor carries no id.
-/// - **Version 47** replaces the host's `SetParameter` (a write on the control
+/// - **Version 47**: `PluginDescriptor` carries `widths`.
+/// - **Version 48** replaces the host's `SetParameter` (a write on the control
 ///   connection) with `ApplyParameters` (the parameters no block has carried,
 ///   on the audio connection in order with the blocks, answered by
 ///   `ParametersApplied`): a write now rides the next block's parameter
 ///   changes, and is sent as its own message only ahead of a request that
 ///   observes the plugin (its state, a parameter's value). The server applies it
 ///   through the format's own route for parameters outside a block.
-pub const PROTOCOL_VERSION: u32 = 47;
+pub const PROTOCOL_VERSION: u32 = 48;
 
 /// Largest control-socket frame body either end will allocate for, in bytes.
 ///

@@ -45,7 +45,7 @@ use args::{Args, Measure, USAGE, Usage};
 use std::path::Path;
 use std::process::ExitCode;
 use tutti_platform::Instant;
-use tutti_plugin_probe::{StateFor, describe, describe_measured};
+use tutti_plugin_probe::{StateFor, describe, describe_measured, read_widths};
 use tutti_plugin_types::{
     Deadline, MainThreadMarker, ProbeExit, ProbeOutcome, ProbeRefusal, write_result,
 };
@@ -111,10 +111,23 @@ fn main() -> ExitCode {
     };
     let outcome = match described {
         Ok((plugins, _)) if plugins.is_empty() => ProbeOutcome::Failed(ProbeRefusal::Empty),
-        Ok((plugins, unmeasured)) => ProbeOutcome::Described {
-            plugins,
-            unmeasured,
-        },
+        Ok((mut plugins, unmeasured)) => {
+            // The listing is written before any plugin is loaded for its widths,
+            // so a plugin that dies loading costs the widths and not the listing:
+            // the host reads the result file whatever the exit.
+            let listing = ProbeOutcome::Described {
+                plugins: plugins.clone(),
+                unmeasured: unmeasured.clone(),
+            };
+            if let Err(code) = write(&result, &listing) {
+                return code;
+            }
+            read_widths(main, &path, format, &mut plugins);
+            ProbeOutcome::Described {
+                plugins,
+                unmeasured,
+            }
+        }
         Err(refusal) => ProbeOutcome::Failed(refusal),
     };
     finish(&result, outcome)
@@ -141,11 +154,16 @@ fn usage(result: &Path) -> ExitCode {
 
 /// Writes the outcome to the result file.
 fn finish(result: &Path, outcome: ProbeOutcome) -> ExitCode {
-    match write_result(result, &outcome) {
+    match write(result, &outcome) {
         Ok(()) => ExitCode::from(ProbeExit::Written.code()),
-        Err(e) => {
-            eprintln!("plugin-probe: cannot write {}: {e}", result.display());
-            ExitCode::from(ProbeExit::ResultUnwritable.code())
-        }
+        Err(code) => code,
     }
+}
+
+/// Writes `outcome` to `result`, or the exit code that says it could not.
+fn write(result: &Path, outcome: &ProbeOutcome) -> Result<(), ExitCode> {
+    write_result(result, outcome).map_err(|e| {
+        eprintln!("plugin-probe: cannot write {}: {e}", result.display());
+        ExitCode::from(ProbeExit::ResultUnwritable.code())
+    })
 }

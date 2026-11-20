@@ -24,6 +24,7 @@ use tutti_buffers::MaxBlock;
 
 use tutti_graph::{Env, ForkHealth, ForkMode, IntoNode, Node, Prepare, TransportChanges, contract};
 use tutti_music::{FrameClock, LoopRange};
+use tutti_platform::Asset;
 use tutti_sampler::testing::wait_for_open;
 use tutti_sampler::{
     DiskStreamer, DiskVoice, Loop, Manual, Placement, Playback, Stream, StreamReader, Voice,
@@ -65,17 +66,17 @@ struct Rig {
 
 /// A hand-stepped disk streamer streaming `path`, primed, and the stream's
 /// reader.
-fn streamer_on(path: &Path) -> (Rig, StreamReader<f32>) {
-    streamer_with(path, Default::default())
+fn streamer_on(asset: impl Into<Asset>) -> (Rig, StreamReader<f32>) {
+    streamer_with(asset, Default::default())
 }
 
 /// [`streamer_on`], with `config`.
 fn streamer_with(
-    path: &Path,
+    asset: impl Into<Asset>,
     config: tutti_sampler::DiskStreamerConfig,
 ) -> (Rig, StreamReader<f32>) {
     let mut streamer = DiskStreamer::manual(SampleRate::of(SR), config).expect("builds");
-    let opening = streamer.open(path, Placement::HEAD);
+    let opening = streamer.open(asset, Placement::HEAD);
     let (stream, reader) = wait_for_open(&mut streamer, opening).expect("the file opens");
     (Rig { streamer, stream }, reader)
 }
@@ -244,6 +245,29 @@ fn a_fork_plays_the_file_from_the_frame_its_beat_falls_on() {
             assert_eq!(l[48_000 + k], value(k), "{what}: left, file frame {k}");
             assert_eq!(r[48_000 + k], -value(k), "{what}: right, file frame {k}");
         }
+    }
+}
+
+/// **A fork of a stream opened on bytes plays the source frames exactly.** A
+/// ramp WAV held only as a `Vec<u8>` asset streams live, and a fork at unity
+/// speed (the file's own rate, the voice at beat 0) opens the asset again for
+/// itself: render frame `k` is file frame `k`, on both channels.
+#[test]
+fn a_fork_of_a_bytes_stream_renders_the_source_frames() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let path = dir.path().join("ramp.wav");
+    write_ramp(&path, SR as u32, 20_000);
+    let bytes = std::fs::read(&path).expect("reads");
+    drop(dir); // nothing but the bytes remains
+    let (_streamer, reader) = streamer_on(bytes);
+    let voice = live_voice(reader, 0.0);
+    let mut copy = fork(&voice, SR);
+    let clock = clock_at(SR);
+    let [l, r] = render(&mut *copy.node, &clock, 20_000);
+    assert_eq!(copy.fault(), None, "the fork opened the bytes again");
+    for k in 0..20_000 {
+        assert_eq!(l[k], value(k), "left, file frame {k}");
+        assert_eq!(r[k], -value(k), "right, file frame {k}");
     }
 }
 

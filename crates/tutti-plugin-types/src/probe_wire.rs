@@ -25,7 +25,7 @@ const TAG: [u8; 4] = *b"TPRB";
 /// version mismatch is [`ResultError::ProtocolMismatch`] and not a decode
 /// error. Nothing derives the version from the types; a test that pinned the
 /// bytes of a value would pin tutti's own output, which is no spec.
-const VERSION: u8 = 7;
+const VERSION: u8 = 8;
 
 /// Magic, the version, then the payload length as a little-endian `u64`.
 const HEADER: usize = TAG.len() + 1 + 8;
@@ -169,18 +169,19 @@ pub fn read_result(result: &Path) -> Result<Option<ProbeOutcome>, ResultError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{MeasureFailure, PluginDescriptor, PluginId};
+    use crate::{MeasureFailure, PluginDescriptor, PluginId, Widths};
 
     fn described() -> ProbeOutcome {
-        let plugin = |id: &str| Described {
+        let plugin = |id: &str, widths| Described {
             id: Some(PluginId::Clap(id.into())),
             descriptor: PluginDescriptor {
                 name: id.into(),
+                widths,
                 ..PluginDescriptor::default()
             },
         };
         ProbeOutcome::Described {
-            plugins: vec![plugin("test"), plugin("other")],
+            plugins: vec![plugin("test", Some(Widths::BOTH)), plugin("other", None)],
             unmeasured: vec![Unmeasured {
                 plugin: PluginId::Clap("other".into()),
                 failure: MeasureFailure::NoAudioOutput,
