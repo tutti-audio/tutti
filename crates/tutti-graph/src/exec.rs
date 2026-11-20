@@ -378,7 +378,9 @@ struct Clock {
     frame: Frame,
     /// The transport over the last frames, for nodes behind a latent path
     /// (`Cx::transport_at`). Fed every block, whatever it renders.
-    history: TransportHistory,
+    /// Boxed: its ring of pieces is most of the executor's size, and the box is
+    /// made once, with the executor.
+    history: Box<TransportHistory>,
     /// The graph's play clock (`src/play.rs`): kept here, handed to every
     /// node in its `Env`, published for the editor.
     play: PlayState,
@@ -478,7 +480,7 @@ impl<F: Float> Executor<F> {
             state: State::empty(prepare.max_block().get()),
             clock: Clock {
                 frame: Frame::ZERO,
-                history: TransportHistory::new(),
+                history: Box::new(TransportHistory::new()),
                 play: PlayState::new(ends.play),
             },
             dropped: Dropped::new(),

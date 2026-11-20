@@ -227,7 +227,8 @@ impl<F: Float> std::fmt::Debug for Engine<F> {
 /// The graph's executor, the clock that feeds its `Env`, and the
 /// planar scratch its outputs land in before the fold.
 struct GraphRender<F: Float> {
-    exec: Executor<F>,
+    /// Boxed once at construction, so an `Engine` moves cheaply.
+    exec: Box<Executor<F>>,
     /// The transport's audio side: motion machine, playhead clock and
     /// commands. The graph reads the transport from `Env`, so the engine
     /// drives the clock itself; every node reads what it publishes from its
@@ -517,7 +518,7 @@ impl<F: Float> Engine<F> {
         let stage = AudioThreadCell::new(output.stage().reader());
         Ok(Self {
             graph: AudioThreadCell::new(GraphRender {
-                exec: executor,
+                exec: Box::new(executor),
                 transport: audio,
                 scratch: vec![F::ZERO; SCRATCH_CHUNKS * stride],
                 stride,
