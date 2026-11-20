@@ -6,7 +6,7 @@
 use tutti_dsp::{FreeverbControls, SvfType};
 use tutti_graph::contract::prepared;
 use tutti_graph::{Node, ParamNode};
-use tutti_nodes::{FreeverbNode, SvfFilterNode};
+use tutti_nodes::{FreeverbConfig, FreeverbNode, SvfFilterNode};
 use tutti_units::{Hz, Q, SampleRate, UnitAddr, UnitParam};
 
 const SR: SampleRate = SampleRate::SR_48K;
@@ -32,11 +32,7 @@ fn a_design_nodes_ports_start_at_its_first_cell() {
     assert_eq!(filter.param_base(0), Some(1_000.0));
     assert!(filter.param_set().get(UnitParam::Wet).is_none());
 
-    let live = prepared(
-        FreeverbNode::<f32>::live(FreeverbControls::GENERAL_MIDI),
-        SR,
-        BLOCK,
-    );
+    let live = prepared(FreeverbNode::<f32>::from(FreeverbConfig::new()), SR, BLOCK);
     assert_eq!(
         live.shape().params.as_slice(),
         [
@@ -50,7 +46,11 @@ fn a_design_nodes_ports_start_at_its_first_cell() {
     );
     assert!(live.param_set().get(UnitParam::Wet).is_none());
 
-    let fixed = prepared(FreeverbNode::<f32>::default(), SR, BLOCK);
+    let fixed = prepared(
+        FreeverbNode::<f32>::from(FreeverbConfig::general_midi()),
+        SR,
+        BLOCK,
+    );
     assert!(fixed.shape().params.as_slice().is_empty());
     assert_eq!(fixed.param_base(0), None);
 }
