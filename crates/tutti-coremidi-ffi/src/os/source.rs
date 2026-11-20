@@ -93,8 +93,8 @@ impl UmpSource {
 
 /// Publishes one UMP message on the source `endpoint` in `protocol`, delivered now.
 ///
-/// `endpoint` is a live source: the caller owns it and disposes it only after the
-/// last call. The list CoreMIDI reads is built here and copied by the call.
+/// `endpoint` is a live source: the caller keeps it alive across the call, and
+/// disposes it only when no call is running. The list CoreMIDI reads is built here and copied by the call.
 pub(crate) fn publish(
     endpoint: MIDIEndpointRef,
     protocol: MIDIProtocolID,
@@ -151,22 +151,6 @@ mod tests {
             UmpSource::new(test_client(), "tutti-ffi-test", read_protocol(3)),
             Err(Error::ReservedProtocol)
         ));
-    }
-
-    /// A send on the reference of a disposed endpoint is accepted: CoreMIDI looks
-    /// the reference up, finds no endpoint and returns status 0, so a racing send
-    /// is harmless but silent. This is what `UmpSender` guards against with its own
-    /// flag; it is observed behaviour of macOS, which this test notices changing.
-    #[test]
-    fn a_send_on_a_disposed_endpoints_reference_is_accepted_without_error() {
-        let source =
-            UmpSource::new(test_client(), "tutti-ffi-test", Protocol::Midi2).expect("CoreMIDI");
-        let (reference, protocol) = (source.source, source.protocol);
-        drop(source);
-        assert_eq!(
-            publish(reference, protocol, &Ump([0x0020_1234, 0, 0, 0])),
-            Ok(())
-        );
     }
 
     /// A message of every length reaches the endpoint: a 1-word JR Timestamp, a

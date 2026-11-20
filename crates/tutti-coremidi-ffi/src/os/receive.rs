@@ -85,6 +85,31 @@ pub(crate) struct Receiver {
 // CoreMIDI still has in flight.
 unsafe impl Send for Receiver {}
 
+/// A receiver's counters, readable after the receiver is gone.
+#[derive(Clone)]
+pub(crate) struct Counts(Arc<Callback>);
+
+impl Counts {
+    /// As [`Receiver::faults`].
+    pub(crate) fn faults(&self) -> u64 {
+        self.0.faults.load(Ordering::Relaxed)
+    }
+
+    /// As [`Receiver::truncated`].
+    pub(crate) fn truncated(&self) -> u64 {
+        self.0.truncated.load(Ordering::Relaxed)
+    }
+}
+
+impl core::fmt::Debug for Counts {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("Counts")
+            .field("faults", &self.faults())
+            .field("truncated", &self.truncated())
+            .finish()
+    }
+}
+
 impl Receiver {
     /// A receiver for callers that take only the messages.
     pub(crate) fn ump<F>(mut on_ump: F) -> Self
@@ -130,6 +155,11 @@ impl Receiver {
         RcBlock::as_ptr(&self.block).cast::<c_void>() as MIDIReceiveBlock
     }
 
+    /// A handle on this receiver's counters that outlives it.
+    pub(crate) fn counts(&self) -> Counts {
+        Counts(Arc::clone(&self.callback))
+    }
+
     /// How many panics in the callback have been caught: 0, or 1 once the
     /// callback panicked and was dropped.
     pub(crate) fn faults(&self) -> u64 {
@@ -139,29 +169,6 @@ impl Receiver {
     /// How many packets ended inside a message, whose tail was dropped.
     pub(crate) fn truncated(&self) -> u64 {
         self.callback.truncated.load(Ordering::Relaxed)
-    }
-}
-
-/// A receiver's counters, readable after the receiver is gone.
-#[derive(Clone)]
-pub(crate) struct Counts(Arc<Callback>);
-
-impl Counts {
-    /// As [`Receiver::faults`].
-    pub(crate) fn faults(&self) -> u64 {
-        self.0.faults.load(Ordering::Relaxed)
-    }
-
-    /// As [`Receiver::truncated`].
-    pub(crate) fn truncated(&self) -> u64 {
-        self.0.truncated.load(Ordering::Relaxed)
-    }
-}
-
-impl Receiver {
-    /// A handle on this receiver's counters that outlives it.
-    pub(crate) fn counts(&self) -> Counts {
-        Counts(Arc::clone(&self.callback))
     }
 }
 

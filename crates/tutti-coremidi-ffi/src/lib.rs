@@ -38,20 +38,10 @@
 #![deny(clippy::undocumented_unsafe_blocks, clippy::missing_safety_doc)]
 #![warn(unsafe_op_in_unsafe_fn)]
 
-// The OS-free checks and decisions: tested everywhere, and used by `os`. Off
-// macOS they build for their tests only, so what only `os` uses is unused there.
+// The OS-free checks and decisions: one seam, since only `os` uses them off tests.
 #[cfg(any(target_os = "macos", test))]
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-mod blocks;
-#[cfg(any(target_os = "macos", test))]
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-mod find;
-#[cfg(any(target_os = "macos", test))]
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-mod notification;
-#[cfg(any(target_os = "macos", test))]
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-mod unique_id;
+mod checks;
 
 // The one platform seam: the macOS half, or nothing.
 #[cfg(target_os = "macos")]

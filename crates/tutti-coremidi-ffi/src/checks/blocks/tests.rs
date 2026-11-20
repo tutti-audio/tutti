@@ -188,3 +188,66 @@ fn a_reserved_direction_or_midi1_status_is_refused() {
 fn no_blocks_map_to_no_blocks() {
     assert_eq!(platform_blocks(&[]), Ok(Vec::new()));
 }
+
+fn named(name: &str) -> PlatformBlock {
+    PlatformBlock {
+        name: name.into(),
+        direction: 3,
+        first_group: 0,
+        groups_spanned: 1,
+        max_sysex8_streams: 0,
+        midi1: 0,
+        ui_hint: 0,
+        enabled: true,
+    }
+}
+
+fn listed(pairs: &[(&str, u8)]) -> Vec<(String, u8)> {
+    pairs.iter().map(|(n, k)| ((*n).into(), *k)).collect()
+}
+
+/// Distinct names are matched by name, so a listing in another order still gives
+/// each registered block its own number.
+#[test]
+fn numbers_are_matched_to_registered_blocks_by_name() {
+    let registered = [named("a"), named("b")];
+    assert_eq!(
+        numbers_in_registered_order(&registered, &listed(&[("b", 7), ("a", 6)])),
+        Some(vec![6, 7])
+    );
+}
+
+/// Names that repeat or are empty cannot identify a block, so the listed order is
+/// the registered order.
+#[test]
+fn numbers_of_unnamed_or_repeated_blocks_follow_the_listed_order() {
+    let registered = [named(""), named("")];
+    assert_eq!(
+        numbers_in_registered_order(&registered, &listed(&[("", 4), ("", 5)])),
+        Some(vec![4, 5])
+    );
+    let twins = [named("x"), named("x")];
+    assert_eq!(
+        numbers_in_registered_order(&twins, &listed(&[("x", 1), ("x", 2)])),
+        Some(vec![1, 2])
+    );
+}
+
+/// A listing of another count, or without a registered name, is not of the
+/// registered blocks.
+#[test]
+fn a_listing_that_is_not_of_the_registered_blocks_has_no_numbers() {
+    let registered = [named("a"), named("b")];
+    assert_eq!(
+        numbers_in_registered_order(&registered, &listed(&[("a", 1)])),
+        None
+    );
+    assert_eq!(
+        numbers_in_registered_order(&registered, &listed(&[("a", 1), ("c", 2)])),
+        None
+    );
+    assert_eq!(
+        numbers_in_registered_order(&registered, &listed(&[("a", 1), ("a", 2)])),
+        None
+    );
+}

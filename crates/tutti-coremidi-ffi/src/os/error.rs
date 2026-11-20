@@ -1,7 +1,7 @@
 //! The errors of a CoreMIDI call.
 
 use super::objc_exception::ObjcException;
-use crate::blocks::BlockRefusal;
+use crate::checks::blocks::BlockRefusal;
 use std::fmt;
 
 /// A CoreMIDI `OSStatus`: the code a call returned.
@@ -122,10 +122,19 @@ pub enum Error {
     /// CoreMIDI numbered a Function Block outside the 5 bits the spec holds.
     #[error("CoreMIDI numbered a Function Block {0}, which the spec cannot hold")]
     BlockNumber(u8),
+    /// CoreMIDI listed blocks other than the ones registered (another count, or a
+    /// registered name that is not listed once).
+    #[error("CoreMIDI listed {listed} Function Blocks for the {registered} registered")]
+    BlockReadBack {
+        /// How many blocks were registered.
+        registered: usize,
+        /// How many CoreMIDI listed.
+        listed: usize,
+    },
     /// The Product Instance Id is past the 42 characters CoreMIDI accepts.
     #[error("a Product Instance Id of {len} characters is past the 42 CoreMIDI accepts")]
     InstanceIdTooLong {
-        /// Its length in bytes.
+        /// Its length in characters (the id is ASCII, so bytes are characters).
         len: usize,
     },
     /// The endpoint a send was for has been dropped.

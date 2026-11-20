@@ -21,7 +21,7 @@ use super::error::{Error, Operation};
 use super::objc_exception::catch;
 use super::receive::{Counts, Receiver};
 use super::source::{protocol_id, publish};
-use crate::blocks::{PlatformBlock, platform_blocks};
+use crate::checks::blocks::{PlatformBlock, numbers_in_registered_order, platform_blocks};
 use block2::DynBlock;
 use coremidi_sys::{MIDIEndpointRef, MIDIProtocolID};
 use objc2::AnyThread;
@@ -33,14 +33,14 @@ use objc2_core_midi::{
     MIDIUMPFunctionBlockUIHint, MIDIUMPMutableEndpoint, MIDIUMPMutableFunctionBlock,
 };
 use objc2_foundation::{NSArray, NSError, NSString};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, PoisonError, RwLock};
 use std::time::Duration;
 use tutti_platform::MainThreadMarker;
 use tutti_ump::{DeviceIdentity, FunctionBlockId, FunctionBlockInfo, Protocol, U7, Ump};
 
 /// The longest Product Instance Id CoreMIDI accepts, in characters
-/// (`MIDIUMPMutableEndpoint`'s header: a longer one is an error).
+/// (`MIDIUMPMutableEndpoint`'s header: a longer one is an error). The id is ASCII
+/// (M2-104 §7.1.5), so its length in bytes is its length in characters.
 const MAX_INSTANCE_ID: usize = 42;
 
 /// A 14-bit value as the two 7-bit bytes the wire holds it in, LSB first (M2-104
@@ -60,7 +60,7 @@ fn uinteger14(bytes: [U7; 2]) -> u16 {
 ///
 /// It stays on the main thread that made it:
 ///
-/// ```compile_fail
+/// ```compile_fail,E0277
 /// fn send<T: Send>() {}
 /// send::<tutti_coremidi_ffi::UmpEndpoint>();
 /// ```
@@ -95,25 +95,17 @@ impl core::fmt::Debug for UmpEndpoint {
 ///
 /// `Clone`, `Send` and `Sync` without an `unsafe impl`: the source is an opaque
 /// `u32` handle into CoreMIDI, whose objects are internally synchronised, and the
-/// rest is atomics. A send after the endpoint is dropped is
-/// [`Error::EndpointGone`]; one that races the drop reaches CoreMIDI with the
-/// reference of a disposed endpoint, which looks it up, finds nothing and returns
-/// status 0, so such a send is accepted and delivered nowhere (never undefined).
+/// rest is a lock and atomics. A send holds a read lock on whether the endpoint is
+/// live for the whole call, and dropping the endpoint takes the write lock before
+/// it disposes anything, so no send is in flight when the endpoint goes and none
+/// that follows reaches CoreMIDI: it is [`Error::EndpointGone`]. A send blocks for
+/// that drop only while it runs, and a sender is not used on the audio thread.
 #[derive(Clone, Debug)]
 pub struct UmpSender {
     source: MIDIEndpointRef,
     protocol: MIDIProtocolID,
-    live: Arc<AtomicBool>,
+    live: Arc<RwLock<bool>>,
     counts: Counts,
-}
-
-impl core::fmt::Debug for Counts {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("Counts")
-            .field("faults", &self.faults())
-            .field("truncated", &self.truncated())
-            .finish()
-    }
 }
 
 impl UmpSender {
@@ -125,7 +117,8 @@ impl UmpSender {
     /// [`Error::EndpointGone`] once the endpoint is dropped, and [`Error::Call`]
     /// when `MIDIReceivedEventList` returns a non-zero status.
     pub fn send(&self, ump: &Ump) -> Result<(), Error> {
-        if !self.live.load(Ordering::Acquire) {
+        let live = self.live.read().unwrap_or_else(PoisonError::into_inner);
+        if !*live {
             return Err(Error::EndpointGone);
         }
         publish(self.source, self.protocol, ump)
@@ -162,10 +155,11 @@ impl UmpEndpoint {
     /// Before any call into CoreMIDI: [`Error::ReservedProtocol`] for a reserved
     /// `protocol`, [`Error::Block`] for a block CoreMIDI cannot carry (checked
     /// before the class lookup, so it is the same on every macOS), and
-    /// [`Error::InstanceIdTooLong`]. Then [`Error::UmpEndpointUnsupported`] before
+    /// [`Error::InstanceIdTooLong`] (past 42 characters). Then [`Error::UmpEndpointUnsupported`] before
     /// macOS 15, [`Error::Exception`] when CoreMIDI raises an Objective-C
     /// exception, [`Error::Objc`] or [`Error::NoObject`] when CoreMIDI refuses
-    /// the endpoint, and [`Error::BlockNumber`] for a number the spec cannot hold.
+    /// the endpoint, [`Error::BlockNumber`] for a number the spec cannot hold, and
+    /// [`Error::BlockReadBack`] when CoreMIDI lists blocks other than the registered ones.
     /// An `Err` leaves no endpoint published.
     pub fn new<F>(
         main: MainThreadMarker,
@@ -214,7 +208,7 @@ impl UmpEndpoint {
                 return Err(error);
             }
         };
-        let live = Arc::new(AtomicBool::new(true));
+        let live = Arc::new(RwLock::new(true));
         Ok(Self {
             endpoint: made,
             sender: UmpSender {
@@ -229,12 +223,20 @@ impl UmpEndpoint {
         })
     }
 
+    /// How many panics in the endpoint's callback have been caught: 0, or 1 once
+    /// the callback panicked and was dropped.
+    #[must_use]
+    pub fn faults(&self) -> u64 {
+        self.sender.faults()
+    }
+
     /// A handle that sends on the endpoint's source from any thread.
     pub fn sender(&self) -> UmpSender {
         self.sender.clone()
     }
 
-    /// The numbers CoreMIDI gave the blocks, in the order they were registered.
+    /// The numbers CoreMIDI gave the blocks, in the order of the `blocks` the
+    /// endpoint was created with: the first is the number of the first block given.
     #[must_use]
     pub fn blocks(&self) -> &[FunctionBlockId] {
         &self.blocks
@@ -294,16 +296,20 @@ fn create(
     unsafe { endpoint.setEnabled_error(true) }
         .map_err(|e| objc(Operation::EnableUmpEndpoint, &e))?;
     // SAFETY: plain getters on the live endpoint and its blocks.
-    let (source, numbers) = unsafe {
+    let (source, listed) = unsafe {
         (
             endpoint.MIDISource(),
             endpoint
                 .functionBlocks()
                 .iter()
-                .map(|block| block.functionBlockID())
+                .map(|block| (block.name().to_string(), block.functionBlockID()))
                 .collect::<Vec<_>>(),
         )
     };
+    let numbers = numbers_in_registered_order(blocks, &listed).ok_or(Error::BlockReadBack {
+        registered: blocks.len(),
+        listed: listed.len(),
+    })?;
     let numbers = numbers
         .into_iter()
         .map(|number| FunctionBlockId::new(number).ok_or(Error::BlockNumber(number)))
@@ -341,23 +347,29 @@ fn objc(operation: Operation, error: &NSError) -> Error {
     }
 }
 
-/// Disables `endpoint` and releases it, each inside [`catch`] since releasing runs
-/// the object's dealloc. A refusal or an exception here has nowhere to go: the
-/// object is released either way, which removes the endpoint.
+/// Disables `endpoint` and releases it, each in its own [`catch`] (releasing runs the
+/// object's dealloc), so a disable that raises still releases. A refusal or an
+/// exception has nowhere to go: the object is released either way, which removes
+/// the endpoint.
 fn disable_and_release(endpoint: Retained<MIDIUMPMutableEndpoint>) {
     let _ = autoreleasepool(|_| {
         catch(|| {
             // SAFETY: a plain message to the live endpoint, which this owns.
             unsafe { endpoint.setEnabled_error(false) }.ok();
-            drop(endpoint);
         })
     });
+    let _ = autoreleasepool(|_| catch(|| drop(endpoint)));
 }
 
 impl Drop for UmpEndpoint {
     fn drop(&mut self) {
-        // Sends that start after this are refused by name.
-        self.sender.live.store(false, Ordering::Release);
+        // Waits for a send in flight, then sends are refused by name: nothing
+        // reaches CoreMIDI once this releases the lock.
+        *self
+            .sender
+            .live
+            .write()
+            .unwrap_or_else(PoisonError::into_inner) = false;
         if let Some(endpoint) = self.endpoint.take() {
             disable_and_release(endpoint);
         }
@@ -368,7 +380,7 @@ impl Drop for UmpEndpoint {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::blocks::{
+    use crate::checks::blocks::{
         DIRECTION_BIDIRECTIONAL, DIRECTION_INPUT, DIRECTION_OUTPUT, MIDI1_NOT_A_PORT,
         MIDI1_RESTRICTED, MIDI1_UNRESTRICTED, UI_HINT_BOTH, UI_HINT_RECEIVER, UI_HINT_SENDER,
         UI_HINT_UNKNOWN,

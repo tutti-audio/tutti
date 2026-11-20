@@ -197,5 +197,37 @@ fn platform_block(
     })
 }
 
+/// The numbers CoreMIDI gave the blocks, in the order they were registered, from the
+/// `(name, number)` pairs it lists: by name when every registered name is non-empty
+/// and distinct, since a listing need not keep the order, and otherwise in the
+/// listed order, which the count guards. `None` when the listing is not of the
+/// registered blocks: another count, or a name that is not listed exactly once.
+pub(crate) fn numbers_in_registered_order(
+    registered: &[PlatformBlock],
+    listed: &[(String, u8)],
+) -> Option<Vec<u8>> {
+    if registered.len() != listed.len() {
+        return None;
+    }
+    let names: Vec<&str> = registered.iter().map(|b| b.name.as_str()).collect();
+    let distinct = names
+        .iter()
+        .enumerate()
+        .all(|(i, name)| !name.is_empty() && !names[..i].contains(name));
+    if !distinct {
+        return Some(listed.iter().map(|(_, number)| *number).collect());
+    }
+    names
+        .iter()
+        .map(|name| {
+            let mut found = listed.iter().filter(|(listed, _)| listed == name);
+            match (found.next(), found.next()) {
+                (Some((_, number)), None) => Some(*number),
+                _ => None,
+            }
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests;

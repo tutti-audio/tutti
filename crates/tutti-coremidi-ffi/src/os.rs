@@ -16,10 +16,10 @@ mod ump_destination;
 mod ump_endpoint;
 mod ump_endpoints;
 
-pub use crate::blocks::{BlockField, BlockRefusal};
-pub use crate::find::FindError;
-pub use crate::notification::Notification;
-pub use crate::unique_id::UniqueId;
+pub use crate::checks::blocks::{BlockField, BlockRefusal};
+pub use crate::checks::find::FindError;
+pub use crate::checks::notification::Notification;
+pub use crate::checks::unique_id::UniqueId;
 pub use client::SharedClient;
 pub use endpoint::{Endpoint, destinations, find_destination, find_source, sources};
 pub use error::{Error, Operation, OsStatus};
