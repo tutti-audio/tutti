@@ -17,8 +17,8 @@ use tutti_midi_hardware::{PeerId, PropertyCall};
 use tutti_ump::MidiGroup;
 
 use super::{
-    Ended, GetProperty, PeFailure, PeerError, Pending, PortLink, PropertySlot, Slot, Subscribe,
-    Subscription,
+    Ended, GetProperty, PeFailure, PeerError, Pending, PortLink, PropertySlot, Reply, Slot,
+    Subscribe, Subscription,
 };
 use crate::job::{JobOutputQueue, Ticket};
 use crate::peer::ResourceIds;
@@ -174,7 +174,7 @@ fn a_pending_that_ends_as_disconnected_lands_its_property_calls_disconnected() {
             peer: id,
             request: ask.clone(),
             sent,
-            tickets: vec![ticket],
+            tickets: vec![Reply::Job(ticket)],
         }));
     }
     pending.end(Ended::Disconnected);
@@ -229,4 +229,34 @@ fn a_peer_keeps_its_id_and_another_muid_has_its_own() {
     let other = pending.peer_id(at(0x0045_6789));
     assert_ne!(other, first);
     assert_eq!(pending.peer_id(at(0x0012_3456)), first);
+}
+
+/// A request whose answering end is dropped without an answer resolves to
+/// `Disconnected`: the session ended it, and the future never waits for ever.
+#[test]
+fn a_request_whose_sender_is_dropped_resolves_to_disconnected() {
+    use std::future::Future;
+    use std::pin::pin;
+    use std::task::{Context, Poll, Waker};
+
+    use super::Request;
+
+    let (sender, request) = Request::<u8>::new();
+    drop(sender);
+    let mut request = pin!(request);
+    let mut cx = Context::from_waker(Waker::noop());
+    assert_eq!(
+        request.as_mut().poll(&mut cx),
+        Poll::Ready(Err(PeerError::Disconnected))
+    );
+}
+
+/// A request answered after it was dropped is harmless: the answer goes nowhere.
+#[test]
+fn an_answer_to_a_dropped_request_is_discarded() {
+    use super::Request;
+
+    let (sender, request) = Request::<PeData>::new();
+    drop(request);
+    Reply::<GetProperty>::Future(sender).land(Err(PeerError::TimedOut));
 }

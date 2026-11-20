@@ -597,7 +597,7 @@ fn a_state_job_saves_what_the_plugin_holds_and_refuses_by_name() {
 }
 
 /// **A save of a plugin whose server was terminated lands the crash, not a
-/// state:** the job ends as `StateJobFailed::Plugin(PluginCrashed)`, and no
+/// state:** the job ends as `StateJobFailed::State(PluginCrashed)`, and no
 /// empty state is saved as the real thing.
 #[test]
 fn a_state_job_of_a_dead_plugin_lands_the_plugins_refusal() {
@@ -620,7 +620,7 @@ fn a_state_job_of_a_dead_plugin_lands_the_plugins_refusal() {
     assert!(
         matches!(
             landed,
-            Err(StateJobFailed::Plugin(StateError::PluginCrashed))
+            Err(StateJobFailed::State(StateError::PluginCrashed))
         ),
         "the plugin's refusal: {landed:?}"
     );

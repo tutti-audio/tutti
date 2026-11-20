@@ -28,7 +28,6 @@ use super::command::StreamId;
 use super::control::StreamFile;
 use super::control_cell::ControlCell;
 use super::loops::RingControl;
-use super::oneshot::{Receiver, Unanswered};
 use super::prefetch::SharedReader;
 use super::status::StatusCell;
 use super::stream::{Stream, StreamerPort};
@@ -36,6 +35,7 @@ use crate::voice::Direction;
 use crate::voice::interp::Place;
 use crate::{Loop, PlaceError};
 use tutti_rt::RingFloat;
+use tutti_rt::{OneshotReceiver, Unanswered};
 
 /// Where in the file a stream's reader starts, in file frames.
 ///
@@ -181,7 +181,7 @@ impl<F: RingFloat> std::fmt::Debug for Opened<F> {
 #[must_use = "an open nobody polls is abandoned"]
 pub struct PendingOpen<F: RingFloat> {
     id: StreamId,
-    reply: Receiver<Result<Opened<F>, OpenError>>,
+    reply: OneshotReceiver<Result<Opened<F>, OpenError>>,
     /// The streamer's command queue, which the stream it answers with sends
     /// on.
     port: StreamerPort<F>,
@@ -190,7 +190,7 @@ pub struct PendingOpen<F: RingFloat> {
 impl<F: RingFloat> PendingOpen<F> {
     pub(crate) fn new(
         id: StreamId,
-        reply: Receiver<Result<Opened<F>, OpenError>>,
+        reply: OneshotReceiver<Result<Opened<F>, OpenError>>,
         port: StreamerPort<F>,
     ) -> Self {
         Self { id, reply, port }

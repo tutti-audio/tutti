@@ -49,6 +49,7 @@ use crate::job::{JobOutputQueue, Ticket, job_kind};
 use crate::midi_port::{Ended, InputRequest, InputShared};
 use crate::peer::{ResourceId, ResourceIds};
 use crate::{Job, PeerError};
+use reply::Request;
 
 job_kind!(
     /// A peer's Profile switch: the state the peer's Enabled or Disabled Report
@@ -64,8 +65,11 @@ job_kind!(
 );
 
 mod state;
+pub use state::{RestorePeerState, SavePeerState};
+mod reply;
 mod subscription;
 
+pub(crate) use reply::Reply;
 pub(crate) use subscription::{EndSubscription, Subscriptions};
 pub use subscription::{Subscribe, Subscription, SubscriptionCause};
 
@@ -157,39 +161,46 @@ impl PortLink {
         &self,
         request: R,
         lists: impl FnOnce(&crate::MidiInputInfo, &R) -> bool,
-        make: impl FnOnce(R, Ticket<J>) -> InputRequest,
+        make: impl FnOnce(R, Reply<J>) -> InputRequest,
     ) -> Job<J>
     where
         J: crate::JobKind<Error = PeerError<E>>,
     {
         let (job, ticket) = Ticket::new(&self.outputs);
-        match self.shared.upgrade() {
-            None => ticket.land(Err(PeerError::Disconnected)),
-            Some(shared) => shared.push(request, ticket, lists, make),
-        }
+        self.queue(request, Reply::Job(ticket), lists, make);
         job
     }
 
-    /// A job of kind `K` for `request`, whose answer is the request's own `J`
-    /// answer mapped by `map`: queued as [`submit`](Self::submit) does.
-    fn submit_mapped<J, K, R, E>(
+    /// A [`Request`] for `request`, queued as [`submit`](Self::submit) queues a
+    /// job: it resolves when the peer answers, or at once when the port cannot
+    /// take it.
+    fn request<J, R>(
         &self,
         request: R,
         lists: impl FnOnce(&crate::MidiInputInfo, &R) -> bool,
-        make: impl FnOnce(R, Ticket<J>) -> InputRequest,
-        map: impl FnOnce(Result<J::Output, J::Error>) -> Result<K::Output, K::Error> + Send + 'static,
-    ) -> Job<K>
+        make: impl FnOnce(R, Reply<J>) -> InputRequest,
+    ) -> Request<J::Output>
     where
-        J: crate::JobKind<Error = PeerError<E>>,
-        K: crate::JobKind,
+        J: crate::JobKind<Error = PeerError<PeFailure>>,
     {
-        let (job, ticket) = Ticket::new(&self.outputs);
-        let ticket = Ticket::mapped(ticket, map);
+        let (sender, asked) = Request::new();
+        self.queue(request, Reply::Future(sender), lists, make);
+        asked
+    }
+
+    fn queue<J, R, E>(
+        &self,
+        request: R,
+        reply: Reply<J>,
+        lists: impl FnOnce(&crate::MidiInputInfo, &R) -> bool,
+        make: impl FnOnce(R, Reply<J>) -> InputRequest,
+    ) where
+        J: crate::JobKind<Error = PeerError<E>>,
+    {
         match self.shared.upgrade() {
-            None => ticket.land(Err(PeerError::Disconnected)),
-            Some(shared) => shared.push(request, ticket, lists, make),
+            None => reply.land(Err(PeerError::Disconnected)),
+            Some(shared) => shared.push(request, reply, lists, make),
         }
-        job
     }
 
     /// A job that ended at the call, as `error`.
@@ -218,8 +229,6 @@ pub struct ListedPeer {
     /// The device the peer is on, as the input said of it when the peer was
     /// listed: whose state a [`PeerState`](crate::PeerState) of the peer is.
     device: SavedDevice,
-    /// How the peer's requests reach its port.
-    link: PortLink,
     info: CiPeerInfo,
     profiles: Option<ProfilePeer>,
     report: Option<ReportPeer>,
@@ -239,15 +248,10 @@ impl PartialEq for ListedPeer {
 }
 
 impl ListedPeer {
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "the parts of a listed peer are of different kinds"
-    )]
     pub(crate) fn new(
         id: ResourceId,
         port: ResourceId,
         device: SavedDevice,
-        link: PortLink,
         info: CiPeerInfo,
         profiles: Option<ProfilePeer>,
         report: Option<ReportPeer>,
@@ -257,7 +261,6 @@ impl ListedPeer {
             id,
             port,
             device,
-            link,
             info,
             profiles,
             report,
@@ -677,7 +680,7 @@ struct Slot<R, J: crate::JobKind> {
     peer: PeerId,
     request: R,
     sent: bool,
-    tickets: Vec<Ticket<J>>,
+    tickets: Vec<Reply<J>>,
 }
 
 /// The requests a port has made of its peers and they have not answered.
@@ -804,7 +807,7 @@ impl Pending {
         &mut self,
         io: &mut MidiSession,
         switch: ProfileSwitch,
-        ticket: Ticket<SwitchProfile>,
+        ticket: Reply<SwitchProfile>,
     ) {
         let key = (switch.peer(), switch_at(&switch.request()));
         let last = self
@@ -831,7 +834,7 @@ impl Pending {
         &mut self,
         io: &mut MidiSession,
         ask: ReportAsk,
-        ticket: Ticket<RequestReport>,
+        ticket: Reply<RequestReport>,
     ) {
         let last = self.reports.iter_mut().rev().find(|s| s.peer == ask.peer());
         if let Some(slot) = last.filter(|s| s.request == ask) {
@@ -853,7 +856,7 @@ impl Pending {
         &mut self,
         io: &mut MidiSession,
         ask: PropertyAsk,
-        ticket: Ticket<GetProperty>,
+        ticket: Reply<GetProperty>,
     ) {
         if let Some(PropertySlot::Get(slot)) = self.last_for(&ask).filter(|s| *s.ask() == ask) {
             slot.tickets.push(ticket);
@@ -874,7 +877,7 @@ impl Pending {
         &mut self,
         io: &mut MidiSession,
         ask: PropertyAsk,
-        ticket: Ticket<SetProperty>,
+        ticket: Reply<SetProperty>,
     ) {
         if let Some(PropertySlot::Set(slot)) = self.last_for(&ask).filter(|s| *s.ask() == ask) {
             slot.tickets.push(ticket);
@@ -895,7 +898,7 @@ impl Pending {
         &mut self,
         io: &mut MidiSession,
         ask: PropertyAsk,
-        ticket: Ticket<Subscribe>,
+        ticket: Reply<Subscribe>,
     ) {
         self.properties.push(PropertySlot::Subscribe(Slot {
             peer: peer_of(&ask),
@@ -911,7 +914,7 @@ impl Pending {
         &mut self,
         io: &mut MidiSession,
         ask: PropertyAsk,
-        ticket: Ticket<EndSubscription>,
+        ticket: Reply<EndSubscription>,
     ) {
         self.properties.push(PropertySlot::Unsubscribe(Slot {
             peer: peer_of(&ask),

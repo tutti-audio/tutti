@@ -188,7 +188,8 @@ pub use tutti_session::windows_from_signal;
 pub use tutti_session::{
     AddPluginError, AnyPlugin, Diagnostics, ListedPreset, LoadPreset, Opened, Plugin, PluginBuses,
     PluginChange, PluginDeclaration, PluginEvent, PluginHealth, PluginInfo, PluginPresets,
-    PooledPlugin, PortCounts, PresetJobError, PresetJobFailed, RestoreError,
+    PooledPlugin, PortCounts, PresetJobError, PresetJobFailed, RestoreError, RestoreState,
+    SaveState,
 };
 #[cfg(all(feature = "session", feature = "analyze"))]
 pub use tutti_session::{
@@ -501,8 +502,6 @@ pub mod session {
     // The `audio_file` entry decodes a file, so it needs a decoder.
     #[cfg(feature = "midi")]
     pub use tutti_session::MidiNodes;
-    #[cfg(any(feature = "plugin", feature = "midi-hardware"))]
-    pub use tutti_session::StateJobFailed;
     #[cfg(all(
         feature = "sampler",
         any(
@@ -532,13 +531,11 @@ pub mod session {
     pub use tutti_session::{
         Editor, EditorCallError, GiveUp, HangPolicy, LoadedPlugin, ParamGesture, PluginCause,
         PluginEntry as PoolPluginEntry, PluginPorts, PortsRefusal, Recovery, RecoveryAction,
-        RecoveryEvent, RecoveryFailure, RecoveryPolicy, ReloadCause, StateJobError, StateRestore,
-        StateView,
+        RecoveryEvent, RecoveryFailure, RecoveryPolicy, ReloadCause, StateJobError, StateJobFailed,
+        StateRestore, StateView,
     };
     #[cfg(feature = "soundfont")]
     pub use tutti_session::{GeneralMidi, SoundFontFile, soundfont};
-    #[cfg(any(feature = "plugin", feature = "midi-hardware"))]
-    pub use tutti_session::{RestoreState, SaveState};
 }
 
 /// Audio file settings (`tutti-codec`): the `Spec` a file is written with, the
@@ -858,7 +855,8 @@ pub mod midi {
     pub use tutti_session::{
         ChannelProfile, ListedPeer, ListedProfile, MidiInputInfo, MidiOutputInfo, MidiPolicy,
         MidiPolicyError, MidiPortError, NoHardware, OutputOptions, PortCause, ProfilePeer,
-        ReportPeer, RequestReport, SwitchProfile, WholeProfile, midi_input, midi_output,
+        ReportPeer, RequestReport, RestorePeerState, SavePeerState, SwitchProfile, WholeProfile,
+        midi_input, midi_output,
     };
     #[cfg(feature = "midi-hardware")]
     pub use tutti_ump::{EndpointName, InstanceIdError, Name, NameError, ProductInstanceId};

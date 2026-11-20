@@ -1,8 +1,7 @@
-//! A one-shot channel, used for the reply of an open: the streamer sends once and the open's owner
-//! reads once, by [`try_recv`](Receiver::try_recv) or by awaiting.
+//! A one-shot channel: one control-side thread answers once and the asker reads once, by [`try_recv`](OneshotReceiver::try_recv) or by awaiting.
 //!
-//! A send wakes the receiver's [`Waker`]; the streamer is a control-side future,
-//! never the audio thread, so the wake may do what a `Waker` does.
+//! A send wakes the receiver's [`Waker`]. The sender is never the audio thread, so the wake may
+//! do what a `Waker` does.
 
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::task::{Context, Poll, Waker};
@@ -21,18 +20,18 @@ fn lock<T>(shared: &Shared<T>) -> MutexGuard<'_, State<T>> {
 }
 
 /// The sending end: answers once.
-pub(crate) struct Sender<T> {
+pub struct OneshotSender<T> {
     shared: Shared<T>,
 }
 
 /// The receiving end: reads the answer once.
-pub(crate) struct Receiver<T> {
+pub struct OneshotReceiver<T> {
     shared: Shared<T>,
 }
 
 /// Nothing to read: the answer has not come, or never will.
 #[derive(Debug, PartialEq, Eq)]
-pub(crate) enum Unanswered {
+pub enum Unanswered {
     /// Not sent yet.
     Empty,
     /// The sender dropped without sending.
@@ -40,7 +39,7 @@ pub(crate) enum Unanswered {
 }
 
 /// A sender and its receiver.
-pub(crate) fn oneshot<T>() -> (Sender<T>, Receiver<T>) {
+pub fn oneshot<T>() -> (OneshotSender<T>, OneshotReceiver<T>) {
     let shared = Arc::new(Mutex::new(State {
         value: None,
         waker: None,
@@ -48,20 +47,20 @@ pub(crate) fn oneshot<T>() -> (Sender<T>, Receiver<T>) {
         receiver_gone: false,
     }));
     (
-        Sender {
+        OneshotSender {
             shared: Arc::clone(&shared),
         },
-        Receiver { shared },
+        OneshotReceiver { shared },
     )
 }
 
-impl<T> Sender<T> {
+impl<T> OneshotSender<T> {
     /// Answers, and wakes the receiver's task.
     ///
     /// # Errors
     ///
     /// `value` back when the receiver is gone.
-    pub(crate) fn send(self, value: T) -> Result<(), T> {
+    pub fn send(self, value: T) -> Result<(), T> {
         let waker = {
             let mut state = lock(&self.shared);
             if state.receiver_gone {
@@ -77,7 +76,7 @@ impl<T> Sender<T> {
     }
 }
 
-impl<T> Drop for Sender<T> {
+impl<T> Drop for OneshotSender<T> {
     fn drop(&mut self) {
         let waker = {
             let mut state = lock(&self.shared);
@@ -90,13 +89,13 @@ impl<T> Drop for Sender<T> {
     }
 }
 
-impl<T> Receiver<T> {
+impl<T> OneshotReceiver<T> {
     /// The answer if it came.
     ///
     /// # Errors
     ///
     /// [`Unanswered`] when it has not, or never will.
-    pub(crate) fn try_recv(&self) -> Result<T, Unanswered> {
+    pub fn try_recv(&self) -> Result<T, Unanswered> {
         let mut state = lock(&self.shared);
         match state.value.take() {
             Some(value) => Ok(value),
@@ -106,7 +105,7 @@ impl<T> Receiver<T> {
     }
 
     /// [`try_recv`](Self::try_recv) for a future: pending stores the task's waker.
-    pub(crate) fn poll_recv(&self, cx: &mut Context<'_>) -> Poll<Result<T, Unanswered>> {
+    pub fn poll_recv(&self, cx: &mut Context<'_>) -> Poll<Result<T, Unanswered>> {
         let mut state = lock(&self.shared);
         match state.value.take() {
             Some(value) => Poll::Ready(Ok(value)),
@@ -119,21 +118,21 @@ impl<T> Receiver<T> {
     }
 }
 
-impl<T> Drop for Receiver<T> {
+impl<T> Drop for OneshotReceiver<T> {
     fn drop(&mut self) {
         lock(&self.shared).receiver_gone = true;
     }
 }
 
-impl<T> std::fmt::Debug for Receiver<T> {
+impl<T> std::fmt::Debug for OneshotReceiver<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Receiver").finish_non_exhaustive()
+        f.debug_struct("OneshotReceiver").finish_non_exhaustive()
     }
 }
 
-impl<T> std::fmt::Debug for Sender<T> {
+impl<T> std::fmt::Debug for OneshotSender<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Sender").finish_non_exhaustive()
+        f.debug_struct("OneshotSender").finish_non_exhaustive()
     }
 }
 

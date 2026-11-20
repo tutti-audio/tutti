@@ -135,8 +135,6 @@ mod sampler;
 mod session;
 #[cfg(all(feature = "analyze", feature = "sampler"))]
 mod signal_windows;
-#[cfg(any(feature = "plugin", feature = "midi-hardware"))]
-mod state_job;
 #[cfg(feature = "device")]
 mod switch;
 #[cfg(feature = "capture")]
@@ -203,8 +201,8 @@ pub use midi::{Midi, MidiRouteId, MidiRouteRule, Stamping, TakePlacement};
 #[cfg(feature = "midi-hardware")]
 pub use midi_ci::{
     ChannelProfile, GetProperty, ListedPeer, ListedProfile, ListedResource, PeFailure, ProfilePeer,
-    ReportPeer, RequestReport, ResourcePeer, SetProperty, Subscribe, Subscription,
-    SubscriptionCause, SwitchProfile, WholeProfile,
+    ReportPeer, RequestReport, ResourcePeer, RestorePeerState, SavePeerState, SetProperty,
+    Subscribe, Subscription, SubscriptionCause, SwitchProfile, WholeProfile,
 };
 #[cfg(feature = "midi")]
 pub use midi_follow::{FollowClock, FollowMachineControl, FollowTempo};
@@ -236,8 +234,8 @@ pub use peer_state::{OtherPeer, PeerState, SavedPeer};
 pub use plugin::{
     AddPluginError, AnyPlugin, LoadPreset, LoadedPlugin, Plugin, PluginCause, PluginChange,
     PluginDeclaration, PluginEntry, PluginEvent, PluginHealth, PluginInfo, PluginPorts,
-    PooledPlugin, PortsRefusal, PresetJobError, PresetJobFailed, RestoreError, StateJobError,
-    StateRestore, StateView,
+    PooledPlugin, PortsRefusal, PresetJobError, PresetJobFailed, RestoreError, RestoreState,
+    SaveState, StateJobError, StateJobFailed, StateRestore, StateView,
 };
 pub(crate) use pool::Pool;
 #[cfg(all(feature = "sampler", codec))]
@@ -252,8 +250,6 @@ pub use pool::{
 pub(crate) use pool::{Hold, HoldKind};
 #[cfg(feature = "soundfont")]
 pub use pool::{SoundFontFile, soundfont};
-#[cfg(any(feature = "plugin", feature = "midi-hardware"))]
-pub use state_job::{RestoreState, SaveState, StateJobFailed};
 
 #[cfg(feature = "plugin")]
 use hang::HangDetector;

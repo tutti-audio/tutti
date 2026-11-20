@@ -1105,9 +1105,29 @@ mod state {
     };
     use tutti_midi_device::{Learned, SavedDevice};
     use tutti_session::Peer as _;
-    use tutti_session::{PeFailure, PeerError, PeerState, SavedPeer, StateJobFailed};
+    use tutti_session::{PeFailure, PeerError, PeerState, SavedPeer};
 
-    use super::{Wire, store};
+    use std::future::Future;
+    use std::pin::pin;
+    use std::task::{Context, Poll, Waker};
+
+    use tutti_midi_device::EndpointId;
+
+    use super::{RAW, Wire, store};
+
+    /// Polls `future` between the session's steps until it resolves. The bound is
+    /// simulated milliseconds, not time: it guards a request that never resolves.
+    fn drive<F: Future>(wire: &mut Wire, future: F) -> F::Output {
+        let mut future = pin!(future);
+        let mut cx = Context::from_waker(Waker::noop());
+        for _ in 0..2000 {
+            if let Poll::Ready(out) = future.as_mut().poll(&mut cx) {
+                return out;
+            }
+            wire.step(1);
+        }
+        panic!("the request never resolved");
+    }
 
     fn full_state() -> StateId {
         StateId::FULL_STATE
@@ -1142,29 +1162,24 @@ mod state {
     }
 
     /// **A device's state is its `fullState`, saved and restored through its
-    /// State resource** (M2-111 §3): a save lands the bytes the device holds with
-    /// the media type it declared, as the state of the device; a restore of other
-    /// bytes is a Set the device keeps, and a save after it reads them back.
+    /// State resource** (M2-111 §3): a save resolves to the bytes the device holds
+    /// with the media type it declared, as the state of the device; a restore of
+    /// other bytes is a Set the device keeps, and a save after it reads them back.
     #[test]
     fn a_devices_full_state_is_saved_and_restored_through_its_state_resource() {
         let mut wire = Wire::new(serving(&[1, 2, 3]));
         let device = peer(&wire);
-        let save = device.save_state();
-        wire.run(60);
-        let state = wire.result(&save).expect("landed").expect("saved");
+        let state = drive(&mut wire, device.save_state()).expect("saved");
         assert_eq!(state.bytes(), [1, 2, 3]);
         assert_eq!(*state.media_type(), MediaType::OCTET_STREAM);
         assert_eq!(*state.peer(), SavedPeer::Device(device.device().clone()));
 
         let other = PeerState::new(state.peer().clone(), MediaType::OCTET_STREAM, vec![9, 8]);
         let restore = device.restore_state(other).expect("the same device");
-        wire.run(60);
-        assert!(matches!(wire.result(&restore), Some(Ok(()))));
+        drive(&mut wire, restore).expect("restored");
         assert_eq!(held(&wire), [9, 8], "the device keeps what was set");
 
-        let again = device.save_state();
-        wire.run(60);
-        let state = wire.result(&again).expect("landed").expect("saved");
+        let state = drive(&mut wire, device.save_state()).expect("saved");
         assert_eq!(state.bytes(), [9, 8]);
     }
 
@@ -1205,28 +1220,56 @@ mod state {
     fn a_device_without_a_state_resource_fails_with_it_named() {
         let mut wire = Wire::new(store());
         let device = peer(&wire);
-        let named = StateJobFailed::Device(PeerError::Refused(PeFailure::NotSent(
-            CallError::Refused(RequestRefused::NotListed(PeResource::State)),
+        let named = PeerError::Refused(PeFailure::NotSent(CallError::Refused(
+            RequestRefused::NotListed(PeResource::State),
         )));
-        let save = device.save_state();
         let state = PeerState::new(
             SavedPeer::Device(device.device().clone()),
             MediaType::OCTET_STREAM,
             vec![1],
         );
+        assert_eq!(drive(&mut wire, device.save_state()), Err(named.clone()));
         let restore = device.restore_state(state).expect("the same device");
+        assert_eq!(drive(&mut wire, restore), Err(named));
+    }
+
+    /// **A save whose device goes away resolves to `Disconnected`, and never
+    /// hangs**: the device never answers, is unplugged, and the future ends.
+    #[test]
+    fn a_save_whose_device_goes_away_resolves_to_disconnected() {
+        let mut wire = Wire::new(serving(&[1]));
+        wire.peer.reply = super::Reply::Silent;
+        let device = peer(&wire);
+        let save = device.save_state();
         wire.run(20);
+        wire.fake.unplug(EndpointId::from_raw(RAW));
+        assert_eq!(drive(&mut wire, save), Err(PeerError::Disconnected));
+    }
+
+    /// **A save whose session is dropped resolves to `Disconnected`**: the future
+    /// outlives everything that could answer it.
+    #[test]
+    fn a_save_whose_session_is_dropped_resolves_to_disconnected() {
+        let wire = Wire::new(serving(&[1]));
+        let save = peer(&wire).save_state();
+        drop(wire);
+        let mut cx = Context::from_waker(Waker::noop());
+        let mut save = pin!(save);
         assert_eq!(
-            wire.result(&save).expect("landed").unwrap_err().to_string(),
-            named.to_string()
+            save.as_mut().poll(&mut cx),
+            Poll::Ready(Err(PeerError::Disconnected))
         );
-        assert!(matches!(
-            wire.result(&restore),
-            Some(Err(StateJobFailed::Device(PeerError::Refused(
-                PeFailure::NotSent(CallError::Refused(RequestRefused::NotListed(
-                    PeResource::State
-                )))
-            ))))
-        ));
+    }
+
+    /// **A save dropped before the device answers is harmless**: the answer goes
+    /// nowhere, and the next save of the same device resolves.
+    #[test]
+    fn a_dropped_save_leaves_the_next_one_working() {
+        let mut wire = Wire::new(serving(&[4, 5]));
+        let device = peer(&wire);
+        drop(device.save_state());
+        wire.run(60);
+        let state = drive(&mut wire, device.save_state()).expect("saved");
+        assert_eq!(state.bytes(), [4, 5]);
     }
 }

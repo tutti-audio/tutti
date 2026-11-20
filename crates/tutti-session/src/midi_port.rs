@@ -33,10 +33,9 @@ use tutti_rt::{Counter, Gauge, LockExt};
 use tutti_ump::StreamConfig;
 use tutti_units::{Resyncs, Seconds};
 
-use crate::job::Ticket;
 use crate::midi::{LossReaders, LossWriters, UmpOut, loss_cells};
 use crate::midi_ci::{
-    EndSubscription, GetProperty, ListedPeer, Pending, PortLink, ProfilePeer, ReportPeer,
+    EndSubscription, GetProperty, ListedPeer, Pending, PortLink, ProfilePeer, Reply, ReportPeer,
     RequestReport, ResourcePeer, SetProperty, Subscribe, SwitchProfile,
 };
 use crate::pool::{Declared, HandleError, Life, Load, LoadError, PoolEntry};
@@ -285,12 +284,12 @@ pub(crate) struct InputShared {
 /// What a handle asked of the device, for the session to send at its next poll,
 /// with the ticket of the job that waits for the answer.
 pub(crate) enum InputRequest {
-    Profile(ProfileSwitch, Ticket<SwitchProfile>),
-    Report(ReportAsk, Ticket<RequestReport>),
-    Get(PropertyAsk, Ticket<GetProperty>),
-    Set(PropertyAsk, Ticket<SetProperty>),
-    Subscribe(PropertyAsk, Ticket<Subscribe>),
-    Unsubscribe(PropertyAsk, Ticket<EndSubscription>),
+    Profile(ProfileSwitch, Reply<SwitchProfile>),
+    Report(ReportAsk, Reply<RequestReport>),
+    Get(PropertyAsk, Reply<GetProperty>),
+    Set(PropertyAsk, Reply<SetProperty>),
+    Subscribe(PropertyAsk, Reply<Subscribe>),
+    Unsubscribe(PropertyAsk, Reply<EndSubscription>),
 }
 
 impl InputRequest {
@@ -357,9 +356,9 @@ impl InputShared {
     pub(crate) fn push<J, R, E>(
         &self,
         request: R,
-        ticket: Ticket<J>,
+        ticket: Reply<J>,
         lists: impl FnOnce(&MidiInputInfo, &R) -> bool,
-        make: impl FnOnce(R, Ticket<J>) -> InputRequest,
+        make: impl FnOnce(R, Reply<J>) -> InputRequest,
     ) where
         J: crate::JobKind<Error = PeerError<E>>,
     {
@@ -885,7 +884,6 @@ fn input_info(
                 pending.peer_id(id),
                 port,
                 SavedDevice::new(device.clone(), learned),
-                link.clone(),
                 info.clone(),
                 profiles
                     .iter()

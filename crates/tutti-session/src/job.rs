@@ -411,13 +411,8 @@ pub(crate) struct Ticket<J: JobKind> {
     id: JobId,
     cell: Arc<Cell>,
     queue: JobOutputQueue,
-    /// Where a result goes instead of the queue: another job's ticket, after the
-    /// kind's own result is mapped to that job's ([`Ticket::mapped`]).
-    forward: Option<Forward<J>>,
     _kind: PhantomData<fn() -> J>,
 }
-
-type Forward<J> = Box<dyn FnOnce(Result<<J as JobKind>::Output, <J as JobKind>::Error>) + Send>;
 
 impl<J: JobKind> Ticket<J> {
     pub(crate) fn new(queue: &JobOutputQueue) -> (Job<J>, Self) {
@@ -440,27 +435,9 @@ impl<J: JobKind> Ticket<J> {
                 id,
                 cell,
                 queue: Arc::clone(queue),
-                forward: None,
                 _kind: PhantomData,
             },
         )
-    }
-
-    /// A ticket of this kind that lands what `map` makes of its result on
-    /// `target`: the job of `target` is the job of the request the ticket is
-    /// given to, so its cancellation and status are the job's.
-    #[cfg(feature = "midi-hardware")]
-    pub(crate) fn mapped<K: JobKind>(
-        target: Ticket<K>,
-        map: impl FnOnce(Result<J::Output, J::Error>) -> Result<K::Output, K::Error> + Send + 'static,
-    ) -> Self {
-        Self {
-            id: target.id,
-            cell: Arc::clone(&target.cell),
-            queue: Arc::clone(&target.queue),
-            forward: Some(Box::new(move |result| target.land(map(result)))),
-            _kind: PhantomData,
-        }
     }
 
     pub(crate) fn cancel(&self) -> Cancel {
@@ -503,11 +480,7 @@ impl<J: JobKind> Ticket<J> {
 
     /// Queues the result to land in the next update, unless the job was
     /// dropped.
-    pub(crate) fn land(mut self, result: Result<J::Output, J::Error>) {
-        if let Some(forward) = self.forward.take() {
-            forward(result);
-            return;
-        }
+    pub(crate) fn land(self, result: Result<J::Output, J::Error>) {
         {
             let mut queue = self.queue.lock_recover();
             // Under the lock the drop's purge takes: a landing is queued before

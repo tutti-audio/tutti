@@ -8,9 +8,9 @@ use tutti_platform::Asset;
 use tutti_buffers::ChannelLayout;
 use tutti_rt::RingFloat;
 
-use super::oneshot::Sender;
 use super::open::Opened;
 use crate::OpenError;
+use tutti_rt::OneshotSender;
 
 tutti_rt::id! {
     /// One open stream's identity: minted on the control side when the open is
@@ -24,7 +24,7 @@ tutti_rt::id! {
 
 /// Where the streamer answers an open: one cell, written once by the streamer
 /// and read once by [`PendingOpen::poll`](crate::PendingOpen::poll).
-pub(crate) type Reply<F> = Sender<Result<Opened<F>, OpenError>>;
+pub(crate) type Reply<F> = OneshotSender<Result<Opened<F>, OpenError>>;
 
 /// What the decode thread made of a file: the whole wave, or why there is none.
 pub(crate) struct Decoded<F: RingFloat>(pub(crate) Result<Arc<Wave<F>>, OpenError>);
