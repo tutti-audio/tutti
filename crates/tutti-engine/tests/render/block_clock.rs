@@ -8,8 +8,8 @@ use tutti_buffers::InterleavedMut;
 use tutti_buffers::MaxBlock;
 use tutti_engine::{BlockDates, Engine};
 use tutti_graph::{Editor, Prepare};
-use tutti_transport::MotionEvent;
-use tutti_transport::Transport;
+use tutti_timeline::MotionEvent;
+use tutti_timeline::Transport;
 use tutti_units::{Beat, Seconds};
 use tutti_units::{Frame, SampleRate, Samples};
 

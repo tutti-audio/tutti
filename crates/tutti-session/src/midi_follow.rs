@@ -90,7 +90,7 @@ use tutti_midi_runtime::{
 };
 use tutti_music::MeterMap;
 use tutti_tempo::TempoMap;
-use tutti_transport::{ProjectMeter, TransportSettings};
+use tutti_timeline::{ProjectMeter, TransportSettings};
 use tutti_ump::MidiGroup;
 use tutti_units::{At, Beat, Bpm, Frame, Seconds};
 

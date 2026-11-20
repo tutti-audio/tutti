@@ -345,7 +345,7 @@ fn the_node_carries_midi_on_its_event_ports() {
 
     let takes_only = open("0");
     let shape = tutti_graph::IntoNode::into_parts(takes_only.bind(
-        tutti_transport::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
+        tutti_timeline::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
     ))
     .node
     .shape();
@@ -353,7 +353,7 @@ fn the_node_carries_midi_on_its_event_ports() {
 
     let both = open("1");
     let shape = tutti_graph::IntoNode::into_parts(both.bind(
-        tutti_transport::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
+        tutti_timeline::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
     ))
     .node
     .shape();
@@ -403,7 +403,7 @@ fn the_node_reports_the_decoded_tail_rather_than_unknown() {
         assert_eq!(
             tutti_graph::Node::shape(
                 &unit.bind(
-                    tutti_transport::TempoReader::constant(tutti_units::Bpm::of(120.0))
+                    tutti_timeline::TempoReader::constant(tutti_units::Bpm::of(120.0))
                         .expect("a tempo")
                 )
             )
@@ -438,7 +438,7 @@ fn midi_past_the_blocks_capacity_is_counted() {
     let controls = unit.controls();
     let mut unit = Direct::new(
         unit.bind(
-            tutti_transport::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
+            tutti_timeline::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
         ),
         SampleRate::of(SAMPLE_RATE),
         512,

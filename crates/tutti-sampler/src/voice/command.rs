@@ -339,7 +339,7 @@ pub(super) fn ask<T: Copy + PartialEq>(cell: &ControlCell<T>, value: T) {
 
 /// A command never reached the pool, and the work it carried is gone.
 ///
-/// Modelled on `tutti_transport::TimedError`: the two failures are told apart
+/// Modelled on `tutti_timeline::TimedError`: the two failures are told apart
 /// because a caller acts on them differently.
 ///
 /// A dropped add is a note that never sounds; a dropped remove is a voice

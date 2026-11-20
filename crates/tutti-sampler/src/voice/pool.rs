@@ -29,7 +29,7 @@ use tutti_graph::{
     RenderMode, Shape, Status,
 };
 use tutti_rt::{Overflow, RingReader, RingWriter, ring};
-use tutti_transport::TempoReader;
+use tutti_timeline::TempoReader;
 use tutti_units::{SampleRate, Tail};
 
 // ---------------------------------------------------------------------------
@@ -376,7 +376,7 @@ impl<F: SamplerFloat> VoicePool<F> {
     }
 
     /// This pool reading the project's tempo map through `tempo`
-    /// ([`TransportSettings::tempo_reader`](tutti_transport::TransportSettings::tempo_reader)).
+    /// ([`TransportSettings::tempo_reader`](tutti_timeline::TransportSettings::tempo_reader)).
     ///
     /// A placed voice plays at its own speed from the frame the playhead
     /// reaches its start, so over a map whose tempo changes (steps, ramps)

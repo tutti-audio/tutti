@@ -38,7 +38,7 @@ use tutti_graph::{
 };
 use tutti_music::{Meter, MeterMap};
 use tutti_rt::{AtomicCell, Loan, Reader, atomic_word};
-use tutti_transport::{ProjectMeter, Transport};
+use tutti_timeline::{ProjectMeter, Transport};
 use tutti_units::Tail;
 use tutti_units::{
     Amplitude, Beat, Hz, Phase, PhaseIncrement, PhaseStep, RunningPhase, Samples, Seconds,

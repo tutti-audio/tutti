@@ -19,18 +19,17 @@ use crate::kernel::{ControlSignals, Kernel, KernelNode};
 /// A [`KernelNode`] over [`CompressorKernel`], the detector and the gain being
 /// [`CompressorBank`]'s; this file holds the cells and how the graph reaches them.
 ///
-/// - [`new`](Self::new): any width up to one bus (16 channels), on a checked
-///   [`BusTopology`], with the [`KeySource`] and the [`CompressorControls`] you give it.
-/// - [`mono`](Self::mono): 1 input, 1 output, listening to its own signal.
-/// - [`stereo`](Self::stereo): 2 inputs (L, R), 2 outputs, linked gain, listening to its
-///   own signal.
+/// Made from a [`CompressorConfig`] (`CompressorNode::from`): any width up to one bus (16
+/// channels), on a checked [`BusTopology`], with the [`KeySource`], the [`KeyFilter`] and the
+/// [`CompressorControls`] it names. The gain is linked, so the stereo image does not shift
+/// when one side is louder.
 ///
 /// # The key
 ///
-/// The detector listens to a [`KeySource`], chosen when the node is built. `mono` and
-/// `stereo` listen to the compressor's own signal ([`KeySource::Own`]), as an ordinary
+/// The detector listens to a [`KeySource`], chosen when the node is built. A config listens to
+/// the compressor's own signal ([`KeySource::Own`]) unless told otherwise, as an ordinary
 /// compressor does: no key bus, nothing to wire. A side-chain compressor is built by naming
-/// its key, `new(.., KeySource::Sidechain, ..)`, so a compressor added like any effect never
+/// its key, `CompressorConfig::key(KeySource::Sidechain)`, so a compressor added like any effect never
 /// waits on one. Its key is a second bus after the audio inputs, **and it must be wired**:
 /// the graph feeds an unconnected input silence, which compresses nothing, so a compressor
 /// whose key nobody wired does nothing. Wire it with a bus edge, for example
@@ -42,7 +41,7 @@ use crate::kernel::{ControlSignals, Kernel, KernelNode};
 ///
 /// # The key filter
 ///
-/// [`key_filter`](Self::key_filter) puts a [`KeyFilter`] on the key: the detector hears the
+/// [`CompressorConfig::key_filter`] puts a [`KeyFilter`] on the key: the detector hears the
 /// key through a high-pass or a band-pass, and the signal the gain is applied to is never
 /// filtered. It is off by default. A node built with one has two more controls after the
 /// makeup, the cutoff ([`UnitParam::Cutoff`](tutti_units::UnitParam::Cutoff), [`Hz`], 100 Hz) and
@@ -75,65 +74,75 @@ use crate::kernel::{ControlSignals, Kernel, KernelNode};
 /// `F` is the float of the graph it runs in, and of the detector, the gain and the key filter.
 pub type CompressorNode<F> = KernelNode<CompressorKernel<F>>;
 
-impl<F: Float + SimdLanes + Lerp> CompressorNode<F> {
-    /// A compressor on the bus `input`, its detector on `key`, running at `controls`.
+/// What a [`CompressorNode`] is made from: its main bus, the key its detector listens to, the
+/// filter on that key and the controls it starts at.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CompressorConfig {
+    input: BusTopology,
+    key: KeySource,
+    filter: KeyFilter,
+    controls: CompressorControls,
+}
+
+impl CompressorConfig {
+    /// A compressor on the bus `input` that listens to its own signal ([`KeySource::Own`]),
+    /// with no key filter and at [`CompressorControls::DEFAULT`], which does nothing (ratio 1,
+    /// threshold 0 dB): a caller names what it wants with [`controls`](Self::controls).
     ///
-    /// The main bus keeps its speaker placement; a [`KeySource::Sidechain`] is a second bus
-    /// as wide, which is a level to read, not a placement, so it has none. **A side-chain key
-    /// must be wired** (see the [type](CompressorNode)); a [`KeySource::Own`] compressor
-    /// listens to its own signal and has no key bus. `new(BusTopology::STEREO, KeySource::Own, ..)`
-    /// is [`stereo`](Self::stereo); an `n`-channel one on the engine's order
-    /// for that width is `new(BusTopology::assumed(n)?, ..)`, which refuses a width past
-    /// one bus.
-    ///
-    /// The controls are as [`CompressorControls`] says, and are the cells' values: the
-    /// threshold (`Db`, typically negative, since 0 dB is full scale), the knee width, the
-    /// ratio (`4.0` is 4 dB in for 1 dB out above the threshold; at least 1, no expansion),
-    /// the envelope times (short attacks catch transients, long releases sound smoother)
-    /// and the makeup gain (applied after the reduction, unconditionally). The envelope's
-    /// one-pole coefficients are derived from the times at the rate
-    /// [`Node::prepare`](tutti_graph::Node::prepare) hands it.
-    /// [`CompressorControls::DEFAULT`] does nothing (ratio 1, threshold 0 dB), so a caller
-    /// names what it wants: `CompressorControls { threshold, ratio, ..CompressorControls::DEFAULT }`.
+    /// The main bus keeps its speaker placement. A width past one bus is refused by
+    /// [`BusTopology::assumed`] before it reaches here: `new(BusTopology::assumed(n)?)`.
     #[must_use]
-    pub fn new(input: BusTopology, key: KeySource, controls: CompressorControls) -> Self {
-        Self::with_kernel(
-            CompressorKernel::new(input, key, KeyFilter::Off),
-            CompressorSet::new(KeyFilter::Off, controls.key_cutoff, controls.key_q),
-            controls,
-        )
+    pub fn new(input: BusTopology) -> Self {
+        Self {
+            input,
+            key: KeySource::Own,
+            filter: KeyFilter::Off,
+            controls: CompressorControls::DEFAULT,
+        }
     }
 
-    /// This compressor with its detector hearing the key through `filter`, starting at the
-    /// `key_cutoff` and `key_q` of the controls it was built with (100 Hz and Butterworth in
-    /// the default's). The node gains the cutoff and Q controls after its others;
-    /// [`KeyFilter::Off`], the default, has none, and the two fields of the controls are only
-    /// what a later filter starts at. Chain it onto the constructor, before the node is
-    /// inserted: the values its controls hold carry over.
+    /// The signal the detector listens to. A [`KeySource::Sidechain`] is a second bus as wide
+    /// as the main one, which is a level to read, not a placement, so it has none.
+    /// **A side-chain key must be wired** (see the [node](CompressorNode)).
+    #[must_use]
+    pub fn key(self, key: KeySource) -> Self {
+        Self { key, ..self }
+    }
+
+    /// The filter the detector hears the key through, starting at the `key_cutoff` and
+    /// `key_q` of the [`controls`](Self::controls) (100 Hz and Butterworth in the default's).
+    /// The node gains the cutoff and Q controls after its others; [`KeyFilter::Off`], the
+    /// default, has none, and the two fields of the controls are only what a later filter
+    /// starts at.
     #[must_use]
     pub fn key_filter(self, filter: KeyFilter) -> Self {
-        self.rebuilt(
-            |k| k.with_key_filter(filter),
-            |set| set.with_key_filter(filter),
+        Self { filter, ..self }
+    }
+
+    /// The values the node's cells start at: the threshold (`Db`, typically negative, since 0 dB
+    /// is full scale), the knee width, the ratio (`4.0` is 4 dB in for 1 dB out above the
+    /// threshold; at least 1, no expansion), the envelope times (short attacks catch
+    /// transients, long releases sound smoother) and the makeup gain (applied after the
+    /// reduction, unconditionally), as [`CompressorControls`] says. The envelope's one-pole
+    /// coefficients are derived from the times at the rate
+    /// [`Node::prepare`](tutti_graph::Node::prepare) hands it.
+    #[must_use]
+    pub fn controls(self, controls: CompressorControls) -> Self {
+        Self { controls, ..self }
+    }
+}
+
+impl<F: Float + SimdLanes + Lerp> From<CompressorConfig> for CompressorNode<F> {
+    fn from(config: CompressorConfig) -> Self {
+        Self::with_kernel(
+            CompressorKernel::new(config.input, config.key, config.filter),
+            CompressorSet::new(
+                config.filter,
+                config.controls.key_cutoff,
+                config.controls.key_q,
+            ),
+            config.controls,
         )
-    }
-
-    /// Returns a mono compressor that listens to its own signal: 1 input, 1 output.
-    ///
-    /// A compressor keyed from another signal is [`new`](Self::new) with
-    /// [`KeySource::Sidechain`].
-    #[must_use]
-    pub fn mono(controls: CompressorControls) -> Self {
-        Self::new(BusTopology::MONO, KeySource::Own, controls)
-    }
-
-    /// Returns a stereo compressor that listens to its own signal: 2 inputs (L, R), 2 outputs.
-    ///
-    /// The gain is **linked**: one reduction computed from the louder channel and applied
-    /// to both, so the stereo image does not shift when one side is louder.
-    #[must_use]
-    pub fn stereo(controls: CompressorControls) -> Self {
-        Self::new(BusTopology::STEREO, KeySource::Own, controls)
     }
 }
 
@@ -152,11 +161,6 @@ pub struct CompressorSet {
 impl CompressorSet {
     fn new(filter: KeyFilter, cutoff: Hz, q: Q) -> Self {
         Self { filter, cutoff, q }
-    }
-
-    /// This set with the key filter `filter`.
-    fn with_key_filter(self, filter: KeyFilter) -> Self {
-        Self { filter, ..self }
     }
 }
 
@@ -211,12 +215,6 @@ impl<F: Float + SimdLanes + Lerp> CompressorKernel<F> {
             bank: None,
             applied: false,
         }
-    }
-
-    /// This kernel with its detector's key through `filter`.
-    fn with_key_filter(mut self, filter: KeyFilter) -> Self {
-        self.filter = filter;
-        self
     }
 }
 
@@ -319,10 +317,10 @@ mod tests {
     }
 
     fn comp(threshold: f64, ratio: f64, attack: f64, release: f64) -> CompressorNode<f32> {
-        CompressorNode::<f32>::new(
-            BusTopology::MONO,
-            KeySource::Sidechain,
-            four(threshold, ratio, attack, release),
+        CompressorNode::<f32>::from(
+            CompressorConfig::new(BusTopology::MONO)
+                .key(KeySource::Sidechain)
+                .controls(four(threshold, ratio, attack, release)),
         )
     }
 
@@ -330,14 +328,14 @@ mod tests {
     /// `ParamSet` and shares no cell with it.
     #[test]
     fn a_fork_shares_no_cell() {
-        assert_param_fork(CompressorNode::<f32>::new(
-            BusTopology::STEREO,
-            KeySource::Sidechain,
-            CompressorControls {
-                knee: Db::new(6.0),
-                makeup: Db::new(3.0),
-                ..four(-20.0, 4.0, 0.001, 0.1)
-            },
+        assert_param_fork(CompressorNode::<f32>::from(
+            CompressorConfig::new(BusTopology::STEREO)
+                .key(KeySource::Sidechain)
+                .controls(CompressorControls {
+                    knee: Db::new(6.0),
+                    makeup: Db::new(3.0),
+                    ..four(-20.0, 4.0, 0.001, 0.1)
+                }),
         ));
     }
 
@@ -405,11 +403,15 @@ mod tests {
         assert!(out.iter().all(|s| s.is_finite()), "after reset");
     }
 
-    /// The mono shorthand compresses its own signal: no key bus (one input a channel), and
+    /// A compressor with its own key compresses its own signal: no key bus (one input a channel), and
     /// with nothing wired a loud signal is reduced and a quiet one under the threshold is not.
     #[test]
-    fn the_mono_shorthand_compresses_its_own_signal() {
-        let mk = || CompressorNode::<f32>::mono(four(-20.0, 4.0, 0.0001, 0.1));
+    fn a_compressor_with_its_own_key_compresses_its_own_signal() {
+        let mk = || {
+            CompressorNode::<f32>::from(
+                CompressorConfig::new(BusTopology::MONO).controls(four(-20.0, 4.0, 0.0001, 0.1)),
+            )
+        };
         let shape = mk().shape();
         assert_eq!(
             (shape.audio_in().count(), shape.audio_out().count()),
@@ -453,13 +455,13 @@ mod tests {
     fn test_compressor_soft_knee_differs_from_hard_knee() {
         let mut hard = prepared_at(comp(-20.0, 4.0, 0.0001, 0.1), RATE_44K);
         let mut soft = prepared_at(
-            CompressorNode::<f32>::new(
-                BusTopology::MONO,
-                KeySource::Sidechain,
-                CompressorControls {
-                    knee: Db::new(12.0),
-                    ..four(-20.0, 4.0, 0.0001, 0.1)
-                },
+            CompressorNode::<f32>::from(
+                CompressorConfig::new(BusTopology::MONO)
+                    .key(KeySource::Sidechain)
+                    .controls(CompressorControls {
+                        knee: Db::new(12.0),
+                        ..four(-20.0, 4.0, 0.0001, 0.1)
+                    }),
             ),
             RATE_44K,
         );
@@ -480,13 +482,13 @@ mod tests {
     #[test]
     fn test_compressor_makeup_gain() {
         let mut with = prepared_at(
-            CompressorNode::<f32>::new(
-                BusTopology::MONO,
-                KeySource::Sidechain,
-                CompressorControls {
-                    makeup: Db::new(6.0),
-                    ..four(-20.0, 4.0, 0.0001, 0.1)
-                },
+            CompressorNode::<f32>::from(
+                CompressorConfig::new(BusTopology::MONO)
+                    .key(KeySource::Sidechain)
+                    .controls(CompressorControls {
+                        makeup: Db::new(6.0),
+                        ..four(-20.0, 4.0, 0.0001, 0.1)
+                    }),
             ),
             RATE_44K,
         );
@@ -535,10 +537,10 @@ mod tests {
     #[test]
     fn test_compressor_stereo_reduces_on_loud_sidechain() {
         let mut node = prepared_at(
-            CompressorNode::<f32>::new(
-                BusTopology::STEREO,
-                KeySource::Sidechain,
-                four(-20.0, 4.0, 0.0001, 0.1),
+            CompressorNode::<f32>::from(
+                CompressorConfig::new(BusTopology::STEREO)
+                    .key(KeySource::Sidechain)
+                    .controls(four(-20.0, 4.0, 0.0001, 0.1)),
             ),
             RATE_44K,
         );
@@ -551,42 +553,66 @@ mod tests {
     }
 
     /// `2 * width` inputs (audio, then key) and `width` outputs for a side-chain compressor
-    /// and `width` inputs for an own-key one, at every width, from `new` and from the
-    /// shorthands: the shorthands listen to their own signal at their width.
+    /// and `width` inputs for an own-key one, at every width: a config listens to its
+    /// own signal at its width unless it names a key.
     #[test]
-    fn the_constructors_and_the_key_choice_are_the_port_layout() {
+    fn the_width_and_the_key_choice_are_the_port_layout() {
         let c = four(-20.0, 4.0, 0.001, 0.1);
         let wide = BusTopology::assumed(tutti_buffers::ChannelLayout::from(4u16))
             .expect("at most one bus wide");
         for (node, inputs, outputs) in [
             (
-                CompressorNode::<f32>::new(BusTopology::MONO, KeySource::Sidechain, c),
+                CompressorNode::<f32>::from(
+                    CompressorConfig::new(BusTopology::MONO)
+                        .key(KeySource::Sidechain)
+                        .controls(c),
+                ),
                 2,
                 1,
             ),
             (
-                CompressorNode::<f32>::new(BusTopology::STEREO, KeySource::Sidechain, c),
+                CompressorNode::<f32>::from(
+                    CompressorConfig::new(BusTopology::STEREO)
+                        .key(KeySource::Sidechain)
+                        .controls(c),
+                ),
                 4,
                 2,
             ),
             (
-                CompressorNode::<f32>::new(wide, KeySource::Sidechain, c),
+                CompressorNode::<f32>::from(
+                    CompressorConfig::new(wide)
+                        .key(KeySource::Sidechain)
+                        .controls(c),
+                ),
                 8,
                 4,
             ),
             (
-                CompressorNode::<f32>::new(BusTopology::MONO, KeySource::Own, c),
+                CompressorNode::<f32>::from(CompressorConfig::new(BusTopology::MONO).controls(c)),
                 1,
                 1,
             ),
             (
-                CompressorNode::<f32>::new(BusTopology::STEREO, KeySource::Own, c),
+                CompressorNode::<f32>::from(CompressorConfig::new(BusTopology::STEREO).controls(c)),
                 2,
                 2,
             ),
-            (CompressorNode::<f32>::new(wide, KeySource::Own, c), 4, 4),
-            (CompressorNode::<f32>::mono(c), 1, 1),
-            (CompressorNode::<f32>::stereo(c), 2, 2),
+            (
+                CompressorNode::<f32>::from(CompressorConfig::new(wide).controls(c)),
+                4,
+                4,
+            ),
+            (
+                CompressorNode::<f32>::from(CompressorConfig::new(BusTopology::MONO).controls(c)),
+                1,
+                1,
+            ),
+            (
+                CompressorNode::<f32>::from(CompressorConfig::new(BusTopology::STEREO).controls(c)),
+                2,
+                2,
+            ),
         ] {
             let shape = node.shape();
             assert_eq!(
@@ -596,9 +622,9 @@ mod tests {
         }
     }
 
-    /// The controls given to a constructor are the cells' values, all six of them.
+    /// The controls given to a config are the cells' values, all six of them.
     #[test]
-    fn the_constructor_controls_reach_the_cells() {
+    fn the_config_controls_reach_the_cells() {
         let c = CompressorControls {
             threshold: Db::new(-18.0),
             knee: Db::new(6.0),
@@ -609,8 +635,12 @@ mod tests {
             ..CompressorControls::DEFAULT
         };
         for node in [
-            CompressorNode::<f32>::new(BusTopology::STEREO, KeySource::Sidechain, c),
-            CompressorNode::<f32>::new(BusTopology::MONO, KeySource::Own, c),
+            CompressorNode::<f32>::from(
+                CompressorConfig::new(BusTopology::STEREO)
+                    .key(KeySource::Sidechain)
+                    .controls(c),
+            ),
+            CompressorNode::<f32>::from(CompressorConfig::new(BusTopology::MONO).controls(c)),
         ] {
             let bases: Vec<_> = (0..6).map(|k| node.param_base(k)).collect();
             assert_eq!(

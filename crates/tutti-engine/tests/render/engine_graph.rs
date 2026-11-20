@@ -40,7 +40,7 @@ use tutti_graph::{
 };
 use tutti_graph::{OutPort, Source};
 use tutti_music::LoopRange;
-use tutti_transport::{
+use tutti_timeline::{
     AfterLocate, FadeOut, LoopEdit, MotionEvent, Timeline, Transport, TransportCommand,
 };
 use tutti_ump::{MidiChannel, U7};
@@ -509,7 +509,7 @@ fn fade_step() -> f32 {
 #[allow(clippy::type_complexity)]
 fn dc_run(
     blocks: usize,
-    script: impl Fn(&tutti_transport::MotionFsm, usize),
+    script: impl Fn(&tutti_timeline::MotionFsm, usize),
 ) -> (Vec<f32>, Vec<(f64, bool)>) {
     let transport = Transport::new(SampleRate::of(SR));
     let log = Arc::new(Mutex::new(Vec::new()));
@@ -1432,7 +1432,7 @@ fn a_re_prepare_keeps_the_beat_and_a_frame_command_on_wall_clock_time() {
 #[test]
 fn a_transport_has_one_playhead_writer() {
     use tutti_engine::GraphEngineError;
-    use tutti_transport::AudioTaken;
+    use tutti_timeline::AudioTaken;
 
     let transport = Transport::new(SampleRate::of(SR));
     let (engine, _ed) = graph_engine(&transport, 256, Unforkable(Clocked), 3);

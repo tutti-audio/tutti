@@ -44,7 +44,7 @@ use tutti_graph::{OutPort, Source};
 use tutti_music::FrameClock;
 use tutti_sampler::{MemorySource, SlotId, VoicePool};
 use tutti_tempo::TempoMap;
-use tutti_transport::{
+use tutti_timeline::{
     MotionEvent, OfflineTimeline, OfflineTimelineConfig, Transport, render_graph,
 };
 use tutti_units::{Beat, Bpm, Frame, SampleRate, Samples};

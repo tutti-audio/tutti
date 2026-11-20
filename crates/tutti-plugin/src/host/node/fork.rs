@@ -214,7 +214,7 @@ pub(crate) struct ServedFork {
     /// same map (the project's, live or offline), through a reader cloned from
     /// this one at the gather, on the control thread, where a registration
     /// may allocate.
-    tempo: tutti_transport::TempoReader,
+    tempo: tutti_timeline::TempoReader,
 }
 
 impl ServedFork {
@@ -223,7 +223,7 @@ impl ServedFork {
     }
 
     /// A source over any client, its fork lending the map through `tempo`.
-    fn reading<S>(client: &PluginClient<S>, tempo: tutti_transport::TempoReader) -> Self {
+    fn reading<S>(client: &PluginClient<S>, tempo: tutti_timeline::TempoReader) -> Self {
         Self {
             tempo,
             bridge: Arc::downgrade(&client.bridge),
@@ -297,7 +297,7 @@ struct Capture {
     sources: ForkedSources,
     /// A reader of the project's tempo map of the fork's own, registered at
     /// the gather.
-    tempo: tutti_transport::TempoReader,
+    tempo: tutti_timeline::TempoReader,
     mode: ForkMode,
 }
 
@@ -400,7 +400,7 @@ impl PluginClient<Unbound> {
     pub fn fork_instance(
         &self,
         mode: ForkMode,
-        tempo: tutti_transport::TempoReader,
+        tempo: tutti_timeline::TempoReader,
     ) -> Result<PluginClient<Bound>, PluginForkError> {
         ServedFork::reading(self, tempo).instance(mode)
     }
