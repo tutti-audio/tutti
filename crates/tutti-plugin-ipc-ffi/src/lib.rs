@@ -59,7 +59,10 @@ mod os;
 mod reaped;
 mod wakeups;
 
-pub use exit::{ExitWait, HOST_PID_ENV, Host, host_pid, watch_host, watch_spawner};
+pub use exit::ExitWait;
+// A loom build leaves the executor out (see `tutti-platform`), and the host watch with it.
+#[cfg(not(loom))]
+pub use exit::{HOST_PID_ENV, Host, host_pid, watch_host, watch_spawner};
 pub use harden::protect_host_memory;
 pub use header::{Direction, RING_SLOTS, SLAB_HEADER_BYTES, SlabHeader, slot_for};
 pub use lifetime::{bind_to_host, has_ended, kill_group, own_group};
