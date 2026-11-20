@@ -64,10 +64,12 @@ units! {
             Release => Seconds, Range => Db, Cutoff => Hz, Q => Q
         }
         tutti_nodes::GateNode<f32> {
-            Threshold => Db, Attack => Seconds, Hold => Seconds, Release => Seconds, Range => Db
+            Threshold => Db, Attack => Seconds, Hold => Seconds, Release => Seconds, Range => Db,
+            Ratio => CompressionRatio
         }
         tutti_nodes::GateNode<f64> {
-            Threshold => Db, Attack => Seconds, Hold => Seconds, Release => Seconds, Range => Db
+            Threshold => Db, Attack => Seconds, Hold => Seconds, Release => Seconds, Range => Db,
+            Ratio => CompressionRatio
         }
         tutti_nodes::LimiterNode<f32> { Threshold => Db, Ceiling => Db, Release => Seconds }
         tutti_nodes::LimiterNode<f64> { Threshold => Db, Ceiling => Db, Release => Seconds }
@@ -92,6 +94,7 @@ units! {
         tutti_nodes::PhaserNode<f32> { Rate => Hz, Depth => Depth, Feedback => Feedback }
         tutti_nodes::LfoNode { Depth => Depth, Rate => Hz }
         tutti_nodes::OscillatorNode { Frequency => Hz, Volume => Amplitude }
+        tutti_nodes::NoiseNode<f32> { Volume => Amplitude }
         tutti_nodes::FreeverbNode<f32> { RoomSize => Mix, Damping => Mix }
         tutti_nodes::ConvolverNode<f32> { Volume => Amplitude }
         tutti_nodes::PlateReverbNode<f32> {

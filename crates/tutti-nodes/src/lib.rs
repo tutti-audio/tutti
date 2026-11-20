@@ -58,6 +58,8 @@
 //!   transport beat (a span fixed at build); its depth and rate are read per frame.
 //! - **Oscillator** — [`OscillatorNode`], a mono source: a sine, or a saw, square or triangle
 //!   band-limited by `tutti_dsp::Oscillator`; its frequency (`Frequency`) and level (`Volume`) are read per frame.
+//! - **Noise** — [`NoiseNode`], a mono source of white, pink or brown noise
+//!   (`tutti_dsp::Noise`) from a seed; its level (`Volume`) is read per frame.
 //! - **Dry/wet** — the convolver, delay, chorus/flanger, phaser and the two reverbs output their wet signal only; blend with the input through the graph's `set_mix`.
 //! - **Level and pan modulation** — `TremoloNode` and `AutoPanNode` (an LFO of a chosen
 //!   `OscillatorWave` scales the level, or places a stereo pair by a `PanLaw`) and `RingModNode`
@@ -292,6 +294,9 @@ pub use lfo::{LfoClock, LfoConfig, LfoNode, LfoShape, Waveform};
 mod oscillator;
 pub use oscillator::{OscillatorConfig, OscillatorNode};
 
+mod noise;
+pub use noise::{NoiseConfig, NoiseNode};
+
 mod delay;
 pub use delay::{DelayConfig, DelayKernel, DelayNode, DelaySet};
 // `InterpolationMode`, the routing, the channel times and the controls are in `DelayConfig`'s
@@ -381,7 +386,9 @@ pub use auto_pan::{AutoPanConfig, AutoPanKernel, AutoPanNode, AutoPanSet};
 pub use ring_mod::{RingModConfig, RingModKernel, RingModNode, RingModSet};
 pub use tremolo::{TremoloConfig, TremoloKernel, TremoloNode, TremoloSet};
 // The controls those start at, the wave of their LFOs and the law an auto-pan places by.
-pub use tutti_dsp::{AutoPanControls, OscillatorWave, PanLaw, RingModControls, TremoloControls};
+pub use tutti_dsp::{
+    AutoPanControls, NoiseColour, OscillatorWave, PanLaw, RingModControls, TremoloControls,
+};
 
 // Comb filter and frequency shifter.
 mod comb;
