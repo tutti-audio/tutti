@@ -3039,7 +3039,7 @@ struct BusGraph {
 fn bus_of(width: usize, named: bool) -> Bus {
     let layout = ChannelLayout::from_count(width as u16);
     let topology = if named {
-        BusTopology::try_from(&ChannelTopology::assumed(layout)).expect("fits a bus")
+        BusTopology::try_from(&ChannelTopology::default_for(layout)).expect("fits a bus")
     } else {
         BusTopology::unassigned(layout).expect("fits a bus")
     };

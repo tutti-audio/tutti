@@ -30,7 +30,7 @@ fn design(bands: &[Sos]) -> Fir {
 
 /// `width` channels on the engine's placement, as a bus.
 fn bus(width: u16) -> BusTopology {
-    BusTopology::assumed(ChannelLayout::from_count(width)).expect("a test width fits a bus")
+    BusTopology::default_for(ChannelLayout::from_count(width)).expect("a test width fits a bus")
 }
 
 fn node(width: u16, fir: &Fir) -> ConvolverNode<f64> {

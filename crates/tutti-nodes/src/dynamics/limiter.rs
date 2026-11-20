@@ -94,7 +94,7 @@ impl LimiterConfig {
     /// The gain is linked: the peak is the loudest channel of the frame, and every channel
     /// is scaled by the one gain, so a loud peak in one ducks them all together and the
     /// image does not shift. An `n`-channel limiter on the engine's order for that width is
-    /// `new(BusTopology::assumed(n)?)`, which refuses a width past one bus.
+    /// `new(BusTopology::default_for(n)?)`, which refuses a width past one bus.
     #[must_use]
     pub fn new(input: BusTopology) -> Self {
         Self {
@@ -339,7 +339,7 @@ mod tests {
             (2, 2)
         );
         let wide =
-            BusTopology::assumed(ChannelLayout::from(6u16)).expect("six channels are one bus");
+            BusTopology::default_for(ChannelLayout::from(6u16)).expect("six channels are one bus");
         assert_eq!(
             ports(LimiterNode::<f32>::from(
                 LimiterConfig::new(wide)
@@ -584,7 +584,7 @@ mod tests {
     #[test]
     fn a_wide_limiter_links_the_gain_across_all_channels() {
         let wide =
-            BusTopology::assumed(ChannelLayout::from(6u16)).expect("six channels are one bus");
+            BusTopology::default_for(ChannelLayout::from(6u16)).expect("six channels are one bus");
         let mut lim = prepared_at(
             LimiterNode::<f32>::from(LimiterConfig::new(wide).controls(LimiterControls::DEFAULT)),
             RATE_44K,

@@ -273,7 +273,7 @@ pub struct Written {
     ///
     /// `Some` only when a placement-weighted loudness was measured: for a
     /// `Peak` or `Lufs` output whose channels have a placement (stated, or
-    /// assumed for a width that has a bed). A `Peak` output with none (an
+    /// the default layout for a width that has a bed). A `Peak` output with none (an
     /// unplaced width such as 3 channels) measured the true peak alone, and
     /// reports `None` rather than a loudness no placement stands behind;
     /// [`gain`](Self::gain) is still its peak normalization.
@@ -281,8 +281,8 @@ pub struct Written {
     /// Whether the file's channels were placed by the output
     /// ([`FileTarget::topology`]: [`Stated`](tutti_buffers::Placement::Stated))
     /// or taken to be the engine's order for the width
-    /// ([`ChannelTopology::assumed`](tutti_buffers::ChannelTopology::assumed):
-    /// [`Assumed`](tutti_buffers::Placement::Assumed)). A `Lufs` normalize
+    /// ([`ChannelTopology::default_for`](tutti_buffers::ChannelTopology::default_for):
+    /// [`Default`](tutti_buffers::Placement::Default)). A `Lufs` normalize
     /// weighted the file's loudness by that placement.
     pub placement: tutti_buffers::Placement,
 }

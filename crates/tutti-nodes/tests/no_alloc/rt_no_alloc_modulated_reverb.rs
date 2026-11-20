@@ -32,7 +32,7 @@ const HOSTILE: &[f32] = &[
 ];
 
 fn bus(width: u16) -> BusTopology {
-    BusTopology::assumed(ChannelLayout::from(width)).expect("one bus")
+    BusTopology::default_for(ChannelLayout::from(width)).expect("one bus")
 }
 
 /// The chorus and the flanger at every corner, at widths 1, 2 and 6: the rate from below its

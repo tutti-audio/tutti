@@ -283,7 +283,8 @@ fn delay(c: &mut Criterion) {
         || {
             DelayNode::<f32>::from(
                 DelayConfig::new(DelayLayout::new(
-                    BusTopology::assumed(ChannelLayout::from(6u16)).expect("at most one bus wide"),
+                    BusTopology::default_for(ChannelLayout::from(6u16))
+                        .expect("at most one bus wide"),
                     MaxDelay::of(Seconds::new(1.0)),
                     InterpolationMode::Linear,
                 ))
@@ -333,7 +334,8 @@ fn limiter(c: &mut Criterion) {
         || {
             LimiterNode::<f32>::from(
                 LimiterConfig::new(
-                    BusTopology::assumed(ChannelLayout::from(6u16)).expect("at most one bus wide"),
+                    BusTopology::default_for(ChannelLayout::from(6u16))
+                        .expect("at most one bus wide"),
                 )
                 .controls(LimiterControls::DEFAULT),
             )
@@ -419,7 +421,8 @@ fn dynamics(c: &mut Criterion) {
         || {
             GateNode::<f32>::from(
                 GateConfig::new(
-                    BusTopology::assumed(ChannelLayout::from(6u16)).expect("at most one bus wide"),
+                    BusTopology::default_for(ChannelLayout::from(6u16))
+                        .expect("at most one bus wide"),
                 )
                 .key(KeySource::Sidechain)
                 .controls(gate_controls()),
@@ -460,7 +463,8 @@ fn dynamics(c: &mut Criterion) {
         || {
             CompressorNode::<f32>::from(
                 CompressorConfig::new(
-                    BusTopology::assumed(ChannelLayout::from(6u16)).expect("at most one bus wide"),
+                    BusTopology::default_for(ChannelLayout::from(6u16))
+                        .expect("at most one bus wide"),
                 )
                 .key(KeySource::Sidechain)
                 .controls(compressor_controls()),

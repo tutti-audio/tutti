@@ -139,7 +139,7 @@ fn a_topology_sets_the_mask() {
     assert_eq!(
         u32_at(&write_all(&spec(4, Pcm::Int24), &ramp(4, 2)), 40),
         0x33,
-        "a bare 4 is the assumed quad"
+        "a bare 4 is the default quad"
     );
     let discrete = Spec::new(
         crate::Format::Wav(Pcm::Int24),

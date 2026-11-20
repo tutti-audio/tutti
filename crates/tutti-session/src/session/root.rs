@@ -155,8 +155,8 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// [`Stated`](tutti_buffers::Placement::Stated)
     /// ([`SessionBuilder::device_topology`](crate::SessionBuilder::device_topology),
     /// `DeviceRestart::topology`) or
-    /// [`Assumed`](tutti_buffers::Placement::Assumed) from the device's width
-    /// alone ([`ChannelTopology::assumed`]). `None` for a session with no
+    /// [`Default`](tutti_buffers::Placement::Default) from the device's width
+    /// alone ([`ChannelTopology::default_for`]). `None` for a session with no
     /// engine (a detached one).
     #[must_use]
     pub fn output_device(&self) -> Option<crate::OutputPlacement> {

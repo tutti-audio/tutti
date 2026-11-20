@@ -61,7 +61,7 @@ fn main_bus(topology: BusTopology) -> Bus {
 
 /// The SMPTE order of `n` channels (1, 2 or 6 here), as a main bus.
 fn smpte(n: usize) -> Bus {
-    let topology = ChannelTopology::assumed(ch(n));
+    let topology = ChannelTopology::default_for(ch(n));
     main_bus(BusTopology::try_from(&topology).expect("fits a bus"))
 }
 

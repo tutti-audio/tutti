@@ -15,6 +15,7 @@ use tutti_buffers::BusTopology;
 use tutti_units::{Feedback, Seconds};
 
 use super::max_delay::MaxDelay;
+use super::notes::{NoteTimes, NoteTimesError};
 use super::routing::{FeedbackRouting, FeedbackRoutingError, MAX_WIDTH};
 use super::times::{ChannelTimes, ChannelTimesError};
 use crate::InterpolationMode;
@@ -40,7 +41,7 @@ pub const MAX_DELAY_CHANNELS: usize = MAX_WIDTH;
 pub struct DelayControls {
     /// The delay of channel 0, and of every channel that follows it
     /// ([`ChannelTimes::linked`]): clamped into `0..=max_delay`. A time that is not finite is not taken: the node holds the
-    /// last finite one.
+    /// last finite one. Inert on a [synced](DelayTiming::Synced) delay, whose times are its notes'.
     pub time: Seconds,
     /// How much of a channel's own delayed tap recirculates into its line. Bounded, with
     /// the cross-feedback, as a pair
@@ -67,22 +68,33 @@ impl Default for DelayControls {
     }
 }
 
+/// Where a delay's times come from: seconds, or note durations at the session's tempo. One or
+/// the other for the whole delay, chosen where the layout is built.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum DelayTiming {
+    /// The time control is channel 0's, in seconds, and the channels past the first follow it
+    /// or hold [`ChannelTimes`] of their own.
+    Free(ChannelTimes),
+    /// Each channel is delayed by a note ([`NoteTimes`]) at the tempo, and the time control is
+    /// inert.
+    Synced(NoteTimes),
+}
+
 /// What a delay is built to: `input` wide, each channel a line of up to a [`MaxDelay`],
 /// read with an [`InterpolationMode`], recirculating through its own tap and, with a
-/// [`FeedbackRouting`], the others', its channels past the first following the time control or
-/// holding [`ChannelTimes`] of their own.
+/// [`FeedbackRouting`], the others', timed by its [`DelayTiming`].
 #[derive(Clone, Copy, Debug)]
 pub struct DelayLayout {
     input: BusTopology,
     max_delay: MaxDelay,
     interpolation: InterpolationMode,
     routing: FeedbackRouting,
-    times: ChannelTimes,
+    timing: DelayTiming,
 }
 
 impl DelayLayout {
     /// A delay on the bus `input`, holding up to `max_delay`, reading with
-    /// `interpolation`, its channels linked in time and routed by the default for its
+    /// `interpolation`, its channels linked in seconds and routed by the default for its
     /// width.
     #[must_use]
     pub fn new(input: BusTopology, max_delay: MaxDelay, interpolation: InterpolationMode) -> Self {
@@ -96,12 +108,12 @@ impl DelayLayout {
             max_delay,
             interpolation,
             routing,
-            times: ChannelTimes::linked(),
+            timing: DelayTiming::Free(ChannelTimes::linked()),
         }
     }
 
-    /// A [`DelayLayoutBuilder`] for the same delay, to give it a routing or channel times of
-    /// its own.
+    /// A [`DelayLayoutBuilder`] for the same delay, to give it a routing, channel times of
+    /// its own or times in notes.
     #[must_use]
     pub const fn builder(
         input: BusTopology,
@@ -113,7 +125,7 @@ impl DelayLayout {
             max_delay,
             interpolation,
             routing: None,
-            times: ChannelTimes::linked(),
+            timing: DelayTiming::Free(ChannelTimes::linked()),
         }
     }
 
@@ -147,14 +159,14 @@ impl DelayLayout {
         &self.routing
     }
 
-    /// The times of the channels past the first.
+    /// Where the channels' times come from.
     #[must_use]
-    pub const fn times(&self) -> &ChannelTimes {
-        &self.times
+    pub const fn timing(&self) -> &DelayTiming {
+        &self.timing
     }
 }
 
-/// The terminal step of a [`DelayLayout`] with a routing or channel times of its own:
+/// The terminal step of a [`DelayLayout`] with a routing, channel times or note times of its own:
 /// [`build`](Self::build) checks them against the bus and the longest delay, which the
 /// options cannot see.
 #[derive(Clone, Copy, Debug)]
@@ -163,7 +175,7 @@ pub struct DelayLayoutBuilder {
     max_delay: MaxDelay,
     interpolation: InterpolationMode,
     routing: Option<FeedbackRouting>,
-    times: ChannelTimes,
+    timing: DelayTiming,
 }
 
 /// A refused [`DelayLayout`].
@@ -176,6 +188,9 @@ pub enum DelayLayoutError {
     /// The channel times do not fit the bus or the longest delay.
     #[error(transparent)]
     Times(#[from] ChannelTimesError),
+    /// The note times do not fit the bus.
+    #[error(transparent)]
+    Notes(#[from] NoteTimesError),
 }
 
 impl DelayLayoutBuilder {
@@ -186,10 +201,19 @@ impl DelayLayoutBuilder {
         self
     }
 
-    /// Delays the channels past the first by `times`.
+    /// Delays the channels past the first by `times`, in seconds. Replaces
+    /// [`synced`](Self::synced): a delay's times are in seconds or in notes, never both.
     #[must_use]
     pub const fn times(mut self, times: ChannelTimes) -> Self {
-        self.times = times;
+        self.timing = DelayTiming::Free(times);
+        self
+    }
+
+    /// Delays every channel by a note at the session's tempo, and the time control does
+    /// nothing. Replaces [`times`](Self::times).
+    #[must_use]
+    pub const fn synced(mut self, notes: NoteTimes) -> Self {
+        self.timing = DelayTiming::Synced(notes);
         self
     }
 
@@ -199,8 +223,10 @@ impl DelayLayoutBuilder {
     ///
     /// [`FeedbackRoutingError::Width`] when the routing is for another bus,
     /// [`ChannelTimesError::Length`] unless the times are [linked](ChannelTimes::linked) or
-    /// have one time for each channel past the first, and [`ChannelTimesError::Past`] for a
-    /// time past the longest delay.
+    /// have one time for each channel past the first, [`ChannelTimesError::Past`] for a
+    /// time past the longest delay, and [`NoteTimesError::Length`] unless the notes are
+    /// [for all](NoteTimes::all) or one for each channel. A note longer than the delay holds
+    /// at the tempo is read as the longest delay.
     pub fn build(self) -> Result<DelayLayout, DelayLayoutError> {
         let mut layout = DelayLayout::new(self.input, self.max_delay, self.interpolation);
         if let Some(routing) = self.routing {
@@ -213,25 +239,37 @@ impl DelayLayoutBuilder {
             }
             layout.routing = routing;
         }
-        let times = self.times;
-        if !times.is_linked() && times.fixed().len() != layout.width() - 1 {
-            return Err(ChannelTimesError::Length {
-                width: layout.width(),
-                expected: layout.width() - 1,
-                got: times.fixed().len(),
+        match self.timing {
+            DelayTiming::Free(times) => {
+                if !times.is_linked() && times.fixed().len() != layout.width() - 1 {
+                    return Err(ChannelTimesError::Length {
+                        width: layout.width(),
+                        expected: layout.width() - 1,
+                        got: times.fixed().len(),
+                    }
+                    .into());
+                }
+                let max = self.max_delay.get();
+                if let Some(i) = times.fixed().iter().position(|t| t.get() > max.get()) {
+                    return Err(ChannelTimesError::Past {
+                        channel: i + 1,
+                        time: times.fixed()[i],
+                        max,
+                    }
+                    .into());
+                }
             }
-            .into());
-        }
-        let max = self.max_delay.get();
-        if let Some(i) = times.fixed().iter().position(|t| t.get() > max.get()) {
-            return Err(ChannelTimesError::Past {
-                channel: i + 1,
-                time: times.fixed()[i],
-                max,
+            DelayTiming::Synced(notes) => {
+                if !notes.is_linked() && notes.notes().len() != layout.width() {
+                    return Err(NoteTimesError::Length {
+                        width: layout.width(),
+                        got: notes.notes().len(),
+                    }
+                    .into());
+                }
             }
-            .into());
         }
-        layout.times = times;
+        layout.timing = self.timing;
         Ok(layout)
     }
 }

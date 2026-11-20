@@ -272,8 +272,8 @@ impl<F: FftFloat> HrtfBinaural<F> {
             current,
             face_hint,
             fold: Fold::between(
-                &ChannelTopology::assumed(ChannelLayout::STEREO),
-                &ChannelTopology::assumed(ChannelLayout::MONO),
+                &ChannelTopology::default_for(ChannelLayout::STEREO),
+                &ChannelTopology::default_for(ChannelLayout::MONO),
             )
             .expect("stereo folds to mono"),
             sphere,
