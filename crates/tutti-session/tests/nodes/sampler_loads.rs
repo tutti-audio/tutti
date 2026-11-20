@@ -102,7 +102,9 @@ fn a_session_without_a_streamer_refuses_an_open_at_the_call() {
 
 /// The clip over the file's `audio_file` entry, declared in `tier`: the wave of
 /// a resident entry, the stream a streamed entry's path opens.
-fn clip_of(path: &Path, streamed: bool) -> tutti_sampler::Clip<f32> {
+/// The session is returned with the clip: it owns the streamer that feeds a
+/// streamed clip's ring, which ends with it.
+fn clip_of(path: &Path, streamed: bool) -> (Session, tutti_sampler::Clip<f32>) {
     let mut s = session();
     let entry = audio_file("ramp", path);
     s.pool(if streamed { entry.streamed() } else { entry })
@@ -113,7 +115,7 @@ fn clip_of(path: &Path, streamed: bool) -> tutti_sampler::Clip<f32> {
         let _ = s.update();
         std::thread::sleep(Duration::from_millis(1));
     }
-    match s.audio(&"ramp").expect("loaded") {
+    let clip = match s.audio(&"ramp").expect("loaded") {
         AudioEntry::Resident(wave) => tutti_sampler::Clip::new(wave).expect("a placeable wave"),
         AudioEntry::Streamed(info) => {
             let opened = s
@@ -125,7 +127,8 @@ fn clip_of(path: &Path, streamed: bool) -> tutti_sampler::Clip<f32> {
             tutti_sampler::Clip::streaming(reader, stream)
         }
         other => panic!("unexpected entry {other:?}"),
-    }
+    };
+    (s, clip)
 }
 
 /// Renders `clip` at beat 0 on a rolling session for `frames` frames,
@@ -169,7 +172,7 @@ fn a_clip_of_either_tier_plays_the_files_samples() {
     let path = dir.path().join("ramp.wav");
     write_ramp(&path);
     for residency in [false, true] {
-        let clip = clip_of(&path, residency);
+        let (_origin, clip) = clip_of(&path, residency);
         assert_eq!(clip.is_streamed(), residency);
         let heard = play(clip.at(Beat::new(0.0)), 3_000);
         // The transport starts on the render's next block, so the file begins
