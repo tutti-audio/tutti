@@ -66,6 +66,7 @@ impl TapOptions {
     }
 
     /// Where the copy sits in time.
+    #[must_use]
     pub fn align(mut self, align: TapAlign) -> Self {
         self.align = align;
         self
@@ -74,6 +75,7 @@ impl TapOptions {
     /// Rings `bell` after each block the writer writes, when the tap ends and
     /// when the writer drops: a reader awaiting its frames wakes on the audio
     /// thread's ring and never polls.
+    #[must_use]
     pub fn bell(mut self, bell: Bell) -> Self {
         self.bell = Some(bell);
         self
