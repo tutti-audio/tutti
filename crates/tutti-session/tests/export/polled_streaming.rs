@@ -3,9 +3,10 @@
 //! primes and bounces with no thread but those and the bells' tick.
 
 use std::path::Path;
+use std::time::Duration;
 
 use tutti_buffers::ChannelLayout;
-use tutti_platform::Executor;
+use tutti_platform::{Executor, Instant};
 use tutti_sampler::{Clip, Placement, StreamPhase};
 use tutti_session::{
     AudioEntry, Bounce, BounceLatency, BounceTail, PoolState, Range, Root, SamplerEvent,
@@ -78,11 +79,14 @@ fn updates_prime_an_open_streams_ring() {
         "{landed:?}"
     );
     let (stream, _reader) = s.take_stream(id).expect("the landed stream");
-    assert!(
-        (0..UPDATES).any(|_| {
-            std::thread::yield_now();
-            stream.status().phase != StreamPhase::Opening
-        }),
+    // A hang guard by deadline: the streamer's thread primes the ring on its own.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while stream.status().phase == StreamPhase::Opening && Instant::now() < deadline {
+        std::thread::yield_now();
+    }
+    assert_ne!(
+        stream.status().phase,
+        StreamPhase::Opening,
         "the ring is never primed"
     );
 }
@@ -186,12 +190,14 @@ fn a_dropped_session_ends_its_streamer_and_releases_the_streams_source() {
         "the open stream holds its source"
     );
     drop(s);
-    // A bound that only guards a hang: the streamer's thread is woken by the bell.
-    assert!(
-        (0..UPDATES).any(|_| {
-            std::thread::yield_now();
-            std::sync::Arc::strong_count(&bytes) == 1
-        }),
+    // A hang guard by deadline: the streamer's thread is woken by the bell.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while std::sync::Arc::strong_count(&bytes) > 1 && Instant::now() < deadline {
+        std::thread::yield_now();
+    }
+    assert_eq!(
+        std::sync::Arc::strong_count(&bytes),
+        1,
         "the woken streamer never ended and dropped the stream"
     );
     drop(executor);

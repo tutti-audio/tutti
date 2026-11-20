@@ -20,15 +20,26 @@ use crate::priority::PriorityRequest;
 mod timers;
 
 pub use async_task::Task;
-// What the platform module makes public: `Threads` on a native target, nothing on the web.
-#[allow(unused_imports)]
-pub use os::*;
 pub use timers::Sleep;
 use timers::Timers;
 
 #[cfg_attr(not(target_arch = "wasm32"), path = "executor/native.rs")]
 #[cfg_attr(target_arch = "wasm32", path = "executor/wasm.rs")]
 mod os;
+
+/// Threads that drive an [`Executor`]'s queue, started by `Executor::spawn_threads` on a
+/// native target. The web has no constructor for it.
+///
+/// Each fires the due sleeps, runs a ready task, and parks until a task is scheduled or the
+/// next deadline falls due. Dropping the `Threads` stops and joins them; a drop on one of
+/// the threads itself (the last holder of a waker, say) does not join that thread. The
+/// executor it drives stays alive while it does.
+#[must_use = "dropping `Threads` stops and joins its threads"]
+#[derive(Debug)]
+pub struct Threads {
+    /// Held for its drop, which stops and joins the threads.
+    _threads: os::Threads,
+}
 
 /// A `Mutex`'s guard whether or not a panicking holder poisoned it. Each lock here
 /// guards a queue or a slot that a panic leaves consistent.

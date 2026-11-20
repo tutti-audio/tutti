@@ -153,15 +153,8 @@ fn stop_and_join(threads: Vec<Worker>, timers: &Timers) {
     }
 }
 
-/// Threads that drive an [`Executor`]'s queue, started by
-/// [`spawn_threads`](Executor::spawn_threads).
-///
-/// Each fires the due sleeps, runs a ready task, and parks until a task is scheduled or the
-/// next deadline falls due. Dropping the `Threads` stops and joins them; a drop on one of
-/// the threads itself (the last holder of a waker, say) does not join that thread. The
-/// executor it drives stays alive while it does.
-#[must_use = "dropping `Threads` stops and joins its threads"]
-pub struct Threads {
+/// The native half of [`super::Threads`]: the started threads and the executor they drive.
+pub(super) struct Threads {
     executor: Executor,
     workers: Vec<Worker>,
 }
@@ -182,14 +175,14 @@ impl Drop for Threads {
 }
 
 impl Executor {
-    /// Starts `n` threads that drive this executor's queue, until the returned [`Threads`]
+    /// Starts `n` threads that drive this executor's queue, until the returned [`Threads`](super::Threads)
     /// drops. Native targets only: a web page starts no threads, and its caller drives with
     /// [`run_until_stalled`](Self::run_until_stalled).
     ///
     /// # Errors
     ///
     /// The OS's refusal to start a thread; none stays running.
-    pub fn spawn_threads(&self, n: NonZeroUsize) -> io::Result<Threads> {
+    pub fn spawn_threads(&self, n: NonZeroUsize) -> io::Result<super::Threads> {
         let shared = &self.handle.shared;
         let mut started = Vec::with_capacity(n.get());
         for index in 0..n.get() {
@@ -207,9 +200,11 @@ impl Executor {
                 }
             }
         }
-        Ok(Threads {
-            executor: self.clone(),
-            workers: started,
+        Ok(super::Threads {
+            _threads: Threads {
+                executor: self.clone(),
+                workers: started,
+            },
         })
     }
 }

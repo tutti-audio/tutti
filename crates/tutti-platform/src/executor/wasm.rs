@@ -44,3 +44,7 @@ pub(super) fn spawn_dedicated<T: Send + 'static>(
 ) -> io::Result<Task<T>> {
     Ok(executor.spawn(future))
 }
+
+/// No value: a web page starts no threads, so nothing builds a [`super::Threads`].
+#[derive(Debug)]
+pub(super) enum Threads {}
