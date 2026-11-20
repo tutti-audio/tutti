@@ -470,7 +470,7 @@ fn unclamped(automation: Option<Arc<dyn Curve>>) -> TargetDecl {
 /// gesture) drives it; when it is finished, its trajectory becomes the target's
 /// automation.
 ///
-/// It is finished once [stopped](Mods::stop_take), or, in a mode that stops on
+/// It is finished once [stopped](Self::stop), or, in a mode that stops on
 /// release ([`RecordMode::Touch`]), once the recorder is released after a
 /// touch. Feed the recorder through [`recorder_mut`](Self::recorder_mut) as
 /// the gesture moves.
@@ -511,7 +511,14 @@ impl<U: crate::Scalar> AutomationTake<U> {
         &mut self.recorder
     }
 
-    /// Whether the take is finished: stopped ([`Mods::stop_take`]), or a touch
+    /// Stops the take: on the next modulation phase its trajectory becomes the
+    /// automation. A touch take stops by itself on release; a write or latch
+    /// take stops here.
+    pub fn stop(&mut self) {
+        self.closed = true;
+    }
+
+    /// Whether the take is finished: stopped ([`stop`](Self::stop)), or a touch
     /// take released after a touch. Notes a touch in progress, so call it once
     /// per update.
     pub fn is_finished(&mut self) -> bool {
@@ -1845,20 +1852,6 @@ impl Mods<'_> {
             .get_mut(&key)
             .and_then(|a| a.take.as_mut())
             .and_then(|take| take.as_any_mut().downcast_mut())
-    }
-
-    /// Stops the take open on `target`: on the next modulation phase its
-    /// trajectory becomes the target's automation. A touch take ends by itself
-    /// on release; a write or latch take ends here. `false` when no take is
-    /// open on `target`.
-    pub fn stop_take<T: Ranged>(&mut self, target: T) -> bool {
-        match self.take_mut(target) {
-            Some(take) => {
-                take.closed = true;
-                true
-            }
-            None => false,
-        }
     }
 
     /// The key the reconciler holds `target` under: what
