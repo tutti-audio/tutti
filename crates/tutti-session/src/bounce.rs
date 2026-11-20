@@ -538,7 +538,8 @@ impl<N, M, F: Float> Bounce<N, M, F> {
         self
     }
 
-    /// What the master file's channels are (the WAV speaker mask); the engine's order for the width without it.
+    /// What the master file's channels are (the WAV speaker mask); the engine's order for the
+    /// width without it.
     /// The file is as wide as the topology, so it replaces
     /// [`channels`](Self::channels) named before it.
     pub fn file_topology(mut self, topology: ChannelTopology) -> Self {
