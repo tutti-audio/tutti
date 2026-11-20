@@ -8,7 +8,7 @@ use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_graph::contract::assert_declared_tail;
 use tutti_graph::contract::{drive, prepared};
 use tutti_graph::{Node, ParamNode};
-use tutti_nodes::{FreeverbNode, ModDelayNode};
+use tutti_nodes::{FreeverbConfig, FreeverbNode, ModDelayConfig, ModDelayNode};
 use tutti_units::{SampleRate, Tail, UnitParam};
 
 const SR: SampleRate = SampleRate::SR_48K;
@@ -38,7 +38,7 @@ fn impulse_response<N: Node>(node: N, frames: usize) -> Vec<Vec<f32>> {
 }
 
 fn chorus() -> ModDelayNode<f32> {
-    ModDelayNode::<f32>::general_midi_chorus(BusTopology::STEREO)
+    ModDelayNode::<f32>::from(ModDelayConfig::general_midi_chorus(BusTopology::STEREO))
 }
 
 fn last_nonzero(channel: &[f32]) -> Option<usize> {
@@ -122,8 +122,8 @@ fn the_general_midi_chorus_declares_its_delay_as_its_tail() {
 #[test]
 fn a_recirculating_chorus_keeps_an_unknown_tail() {
     for node in [
-        ModDelayNode::<f32>::chorus(BusTopology::STEREO),
-        ModDelayNode::<f32>::flanger(BusTopology::STEREO),
+        ModDelayNode::<f32>::from(ModDelayConfig::chorus(BusTopology::STEREO)),
+        ModDelayNode::<f32>::from(ModDelayConfig::flanger(BusTopology::STEREO)),
     ] {
         assert_eq!(prepared(node, SR, BLOCK).shape().tail, Tail::Unknown);
     }
@@ -133,11 +133,14 @@ fn a_recirculating_chorus_keeps_an_unknown_tail() {
 /// has gone round (a wet-only effect passes nothing straight through).
 #[test]
 fn the_reverb_is_mono_in_stereo_out_and_wet_only() {
-    let node = FreeverbNode::<f32>::general_midi();
+    let node = FreeverbNode::<f32>::from(FreeverbConfig::general_midi());
     let shape = node.shape();
     assert_eq!(shape.audio_in(), ChannelLayout::MONO);
     assert_eq!(shape.audio_out(), ChannelLayout::STEREO);
-    let out = impulse_response(FreeverbNode::<f32>::general_midi(), 2_000);
+    let out = impulse_response(
+        FreeverbNode::<f32>::from(FreeverbConfig::general_midi()),
+        2_000,
+    );
     assert_eq!(out.len(), 2);
     // 1116 frames at 44.1 kHz is 1215 at 48 kHz (Freeverb's tuning, scaled).
     assert!(out[0][..1215].iter().all(|&s| s == 0.0));
@@ -149,11 +152,18 @@ fn the_reverb_is_mono_in_stereo_out_and_wet_only() {
 /// node is prepared at 48 kHz, so the tail is figured at that rate.
 #[test]
 fn the_reverbs_tail_covers_its_ring_out() {
-    let node = prepared(FreeverbNode::<f32>::general_midi(), SR, BLOCK);
+    let node = prepared(
+        FreeverbNode::<f32>::from(FreeverbConfig::general_midi()),
+        SR,
+        BLOCK,
+    );
     let Tail::Finite(tail) = node.shape().tail else {
         panic!("a finite tail, not {:?}", node.shape().tail)
     };
-    let out = impulse_response(FreeverbNode::<f32>::general_midi(), tail.get() + 20_000);
+    let out = impulse_response(
+        FreeverbNode::<f32>::from(FreeverbConfig::general_midi()),
+        tail.get() + 20_000,
+    );
     let peak = tutti_fixtures::signal::peak_planes(&out);
     let rang = out
         .iter()
@@ -177,7 +187,11 @@ fn the_reverbs_tail_covers_its_ring_out() {
 /// one does.
 #[test]
 fn reset_empties_the_room() {
-    let mut node = prepared(FreeverbNode::<f32>::general_midi(), SR, BLOCK);
+    let mut node = prepared(
+        FreeverbNode::<f32>::from(FreeverbConfig::general_midi()),
+        SR,
+        BLOCK,
+    );
     let burst = vec![1.0f32; BLOCK];
     for _ in 0..40 {
         drive(&mut node, SR, Planes::new(&[&burst]).unwrap(), &[]);

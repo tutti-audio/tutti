@@ -36,10 +36,11 @@ use tutti_graph::{
 use tutti_modulation::{Amount, Clock, ControlProgram, Layer, LayerId, Polarity, Waveform};
 use tutti_nodes::automation::ControlLaneNode;
 use tutti_nodes::{
-    BrickwallLimiterNode, BusStripNode, CompressorControls, CompressorNode, DelayControls,
-    DelayNode, DistortionNode, GateControls, GateNode, InterpolationMode, KeySource,
-    LadderFilterNode, LadderType, LimiterControls, LimiterNode, Lookahead, MaxDelay, ModDelayNode,
-    PhaserControls, PhaserNode, ShapeKind, Stages, Stagger, SvfFilterNode, SvfType, SweepRange,
+    BrickwallLimiterNode, BusStripNode, CompressorControls, CompressorNode, DelayConfig,
+    DelayControls, DelayLayout, DelayNode, DistortionNode, GateControls, GateNode,
+    InterpolationMode, KeySource, LadderFilterNode, LadderType, LimiterControls, LimiterNode,
+    Lookahead, MaxDelay, ModDelayConfig, ModDelayNode, PhaserConfig, PhaserNode, ShapeKind, Stages,
+    SvfFilterNode, SvfType,
 };
 use tutti_rt::ParamCell;
 use tutti_units::{
@@ -71,16 +72,18 @@ fn bursts(seed: u32) -> Vec<f32> {
 
 /// A delay `w` channels wide: 10 ms of line, a 0.3 ms time and half feedback.
 fn delay_of(w: usize) -> DelayNode<f32> {
-    DelayNode::<f32>::new(
-        BusTopology::assumed(ChannelLayout::try_from(w).expect("a test width is small"))
-            .expect("at most one bus wide"),
-        MaxDelay::of(Seconds::new(0.01)),
-        InterpolationMode::Linear,
-        DelayControls {
+    DelayNode::<f32>::from(
+        DelayConfig::new(DelayLayout::new(
+            BusTopology::assumed(ChannelLayout::try_from(w).expect("a test width is small"))
+                .expect("at most one bus wide"),
+            MaxDelay::of(Seconds::new(0.01)),
+            InterpolationMode::Linear,
+        ))
+        .controls(DelayControls {
             time: Seconds::new(0.0003),
             feedback: Feedback::new(0.5),
             cross_feedback: Feedback::NONE,
-        },
+        }),
     )
 }
 
@@ -229,14 +232,11 @@ fn render_mix(node: NodeParts<()>, mix: MixIs) -> Vec<Vec<f32>> {
 
 /// A phaser of `w` channels, four stages, at its default sweep and controls.
 fn phaser_of_width(w: usize) -> PhaserNode<f32> {
-    PhaserNode::<f32>::new(
+    PhaserNode::<f32>::try_from(PhaserConfig::new(
         BusTopology::assumed(ChannelLayout::try_from(w).expect("a test width is small"))
             .expect("at most one bus wide"),
         Stages::of(4),
-        SweepRange::DEFAULT,
-        Stagger::NONE,
-        PhaserControls::DEFAULT,
-    )
+    ))
     .expect("a step fits any width")
 }
 
@@ -589,10 +589,10 @@ fn block_rate_cases() -> Vec<Case> {
         )
     }
     fn chorus(w: usize) -> ModDelayNode<f32> {
-        ModDelayNode::<f32>::chorus(
+        ModDelayNode::<f32>::from(ModDelayConfig::chorus(
             BusTopology::assumed(ChannelLayout::try_from(w).expect("a test width is small"))
                 .expect("at most one bus wide"),
-        )
+        ))
     }
     fn phaser(w: usize) -> PhaserNode<f32> {
         phaser_of_width(w)
@@ -775,12 +775,12 @@ fn block_rate_cases() -> Vec<Case> {
             name: "flanger depth",
             param: UnitParam::Depth,
             make: |w, v| {
-                let n = ModDelayNode::<f32>::flanger(
+                let n = ModDelayNode::<f32>::from(ModDelayConfig::flanger(
                     BusTopology::assumed(
                         ChannelLayout::try_from(w).expect("a test width is small"),
                     )
                     .expect("at most one bus wide"),
-                );
+                ));
                 if let Some(v) = v {
                     assert!(n.param_set().set(UnitParam::Depth, f64::from(v)));
                 }
@@ -919,23 +919,23 @@ fn mix_cases() -> Vec<MixCase> {
         MixCase {
             name: "chorus mix",
             make: |w| {
-                parts_of(ModDelayNode::<f32>::chorus(
+                parts_of(ModDelayNode::<f32>::from(ModDelayConfig::chorus(
                     BusTopology::assumed(
                         ChannelLayout::try_from(w).expect("a test width is small"),
                     )
                     .expect("at most one bus wide"),
-                ))
+                )))
             },
         },
         MixCase {
             name: "flanger mix",
             make: |w| {
-                parts_of(ModDelayNode::<f32>::flanger(
+                parts_of(ModDelayNode::<f32>::from(ModDelayConfig::flanger(
                     BusTopology::assumed(
                         ChannelLayout::try_from(w).expect("a test width is small"),
                     )
                     .expect("at most one bus wide"),
-                ))
+                )))
             },
         },
         MixCase {

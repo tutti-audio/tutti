@@ -5,14 +5,15 @@
 // These tests pin the `f32` instantiation, the session's audio format, so their tolerances are `f32`'s.
 
 use std::sync::atomic::Ordering;
+use tutti_buffers::BusTopology;
 use tutti_buffers::MaxBlock;
 use tutti_buffers::Planes;
 
 use tutti_graph::contract::drive;
 use tutti_graph::{Node, ParamNode, Prepare};
 use tutti_nodes::{
-    BrickwallLimiterNode, BusStripNode, DelayControls, DelayNode, EqBandNode, LimiterControls,
-    LimiterNode, MaxDelay, SvfType,
+    BrickwallLimiterNode, BusStripNode, DelayConfig, DelayControls, DelayLayout, DelayNode,
+    EqBandNode, InterpolationMode, LimiterControls, LimiterNode, MaxDelay, SvfType,
 };
 use tutti_rt::ParamCell;
 use tutti_units::{Amplitude, Balance, Db, Hz, Q, SampleRate, Samples, Seconds, UnitParam};
@@ -63,8 +64,16 @@ fn a_delay_with_an_unusable_maximum_is_refused_and_the_longest_builds() {
     }
     let longest = MaxDelay::of(MaxDelay::CAP);
     for mut node in [
-        DelayNode::<f32>::mono(longest, DelayControls::DEFAULT),
-        DelayNode::<f32>::stereo(longest, DelayControls::DEFAULT),
+        DelayNode::<f32>::from(DelayConfig::new(DelayLayout::new(
+            BusTopology::MONO,
+            longest,
+            InterpolationMode::Linear,
+        ))),
+        DelayNode::<f32>::from(DelayConfig::new(DelayLayout::new(
+            BusTopology::STEREO,
+            longest,
+            InterpolationMode::Linear,
+        ))),
     ] {
         Node::<f32>::prepare(
             &mut node,
@@ -77,12 +86,16 @@ fn a_delay_with_an_unusable_maximum_is_refused_and_the_longest_builds() {
 /// A NaN initial delay time is read as zero, whatever the maximum.
 #[test]
 fn a_delay_with_a_nan_initial_time_starts_at_zero() {
-    let node = DelayNode::<f32>::mono(
-        MaxDelay::of(Seconds::new(0.1)),
-        DelayControls {
+    let node = DelayNode::<f32>::from(
+        DelayConfig::new(DelayLayout::new(
+            BusTopology::MONO,
+            MaxDelay::of(Seconds::new(0.1)),
+            InterpolationMode::Linear,
+        ))
+        .controls(DelayControls {
             time: Seconds::new(f64::NAN),
             ..DelayControls::DEFAULT
-        },
+        }),
     );
     assert_eq!(node.param_base(0), Some(0.0), "the time is port 0");
 }

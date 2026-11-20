@@ -23,13 +23,14 @@
 //!
 //! Every row is a graph node (`Row::new`).
 
+use tutti_buffers::BusTopology;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::Mono;
 use tutti_graph::contract::{Detect, Excite, Row};
 use tutti_graph::contract_tests;
 use tutti_nodes::{
-    CrossoverNode, DelayControls, DelayNode, LimiterControls, LimiterNode, MaxDelay,
-    MultibandCompressorNode,
+    CrossoverNode, DelayConfig, DelayControls, DelayLayout, DelayNode, InterpolationMode,
+    LimiterControls, LimiterNode, MaxDelay, MultibandCompressorNode,
 };
 use tutti_units::{Db, Feedback, Hz, Samples, Seconds};
 
@@ -84,13 +85,17 @@ fn delay_line_row() -> Row {
     Row::new(
         "DelayNode (zero delay)",
         || {
-            Box::new(DelayNode::<f32>::mono(
-                MaxDelay::of(Seconds::new(1.0_f64)),
-                DelayControls {
+            Box::new(DelayNode::<f32>::from(
+                DelayConfig::new(DelayLayout::new(
+                    BusTopology::MONO,
+                    MaxDelay::of(Seconds::new(1.0_f64)),
+                    InterpolationMode::Linear,
+                ))
+                .controls(DelayControls {
                     time: Seconds::new(0.0_f64),
                     feedback: Feedback::new(0.0_f64),
                     ..DelayControls::DEFAULT
-                },
+                }),
             ))
         },
         impulse(0),

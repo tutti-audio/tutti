@@ -1,7 +1,7 @@
 use tutti_units::{Amplitude, Db, Gain, SampleSpan, Seconds, StereoWidth};
 
 use super::*;
-use crate::reverb::network::{Gains, Inline, LineModulation, OutputMap, Tap, Taps};
+use crate::reverb::network::{Gains, Inline, LineModulation, NetworkOutputMap, Tap, Taps};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 
@@ -39,7 +39,7 @@ fn fdn(lines: &[Line], matrix: Matrix, input: &[f64], output: &[f64]) -> Fdn {
         lines: Inline::from_slice(lines).unwrap(),
         matrix,
         input: gains(input),
-        output: OutputMap { rows },
+        output: NetworkOutputMap { rows },
     }
 }
 

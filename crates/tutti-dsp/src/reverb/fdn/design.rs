@@ -28,7 +28,7 @@ use tutti_units::{Db, Depth, Gain, Hz, Mix, SampleRate, SampleSpan, Seconds, Ste
 use crate::onepole::cutoff_pole;
 use crate::reverb::network::{
     Absorption, Fdn, Gains, Inline, Line, LineModulation, MAX_LINES, Matrix, Network,
-    NetworkCapacity, OutputMap, Stage, pre_delay_frames,
+    NetworkCapacity, NetworkOutputMap, Stage, pre_delay_frames,
 };
 use crate::{DecayTime, MaxDecay, TAIL_FLOOR};
 
@@ -355,7 +355,7 @@ impl FdnLayout {
             lines,
             matrix,
             input,
-            output: OutputMap { rows },
+            output: NetworkOutputMap { rows },
         }));
         out.width = StereoWidth::new(width);
         out.wet = wet;

@@ -17,8 +17,9 @@ use tutti_fixtures::midi;
 use tutti_graph::contract::{BlockRig, Direct};
 use tutti_graph::{IntoNode, Node, ParamNode, ParamSet};
 use tutti_nodes::{
-    ChannelTimes, DelayControls, DelayLayout, DelayNode, InterpolationMode, LfoNode, LfoShape,
-    MaxDelay, ModDelayNode, PhaserControls, PhaserNode, Routing, Stages, Stagger, SweepRange,
+    ChannelTimes, DelayConfig, DelayControls, DelayLayout, DelayNode, FeedbackRouting,
+    InterpolationMode, LfoNode, LfoShape, MaxDelay, ModDelayConfig, ModDelayNode, PhaserConfig,
+    PhaserNode, Stages, Stagger, SweepRange,
 };
 use tutti_ump::{MidiChannel, U7};
 use tutti_units::{
@@ -97,15 +98,17 @@ fn beat_synced_lfo_process_is_allocation_free() {
 /// A delay at `time` seconds and `feedback`, `cross` cross-fed, `width` wide, holding up to
 /// two seconds.
 fn delay(width: u16, time: f64, feedback: f64, cross: f64) -> DelayNode<f32> {
-    DelayNode::<f32>::new(
-        BusTopology::assumed(ChannelLayout::from(width)).expect("a test width is one bus"),
-        MaxDelay::of(Seconds::new(2.0)),
-        InterpolationMode::Linear,
-        DelayControls {
+    DelayNode::<f32>::from(
+        DelayConfig::new(DelayLayout::new(
+            BusTopology::assumed(ChannelLayout::from(width)).expect("a test width is one bus"),
+            MaxDelay::of(Seconds::new(2.0)),
+            InterpolationMode::Linear,
+        ))
+        .controls(DelayControls {
             time: Seconds::new(time),
             feedback: Feedback::new(feedback),
             cross_feedback: Feedback::new(cross),
-        },
+        }),
     )
 }
 
@@ -136,7 +139,7 @@ fn bus(width: u16) -> BusTopology {
 #[test]
 fn chorus_node_process_is_allocation_free() {
     gate(
-        ModDelayNode::<f32>::chorus(BusTopology::STEREO),
+        ModDelayNode::<f32>::from(ModDelayConfig::chorus(BusTopology::STEREO)),
         0.4,
         2_000,
         |_| {},
@@ -146,7 +149,7 @@ fn chorus_node_process_is_allocation_free() {
 #[test]
 fn flanger_node_process_is_allocation_free() {
     gate(
-        ModDelayNode::<f32>::flanger(BusTopology::STEREO),
+        ModDelayNode::<f32>::from(ModDelayConfig::flanger(BusTopology::STEREO)),
         0.4,
         2_000,
         |_| {},
@@ -156,7 +159,7 @@ fn flanger_node_process_is_allocation_free() {
 #[test]
 fn general_midi_chorus_node_process_is_allocation_free() {
     gate(
-        ModDelayNode::<f32>::general_midi_chorus(BusTopology::STEREO),
+        ModDelayNode::<f32>::from(ModDelayConfig::general_midi_chorus(BusTopology::STEREO)),
         0.4,
         2_000,
         |_| {},
@@ -167,7 +170,7 @@ fn general_midi_chorus_node_process_is_allocation_free() {
 fn phaser_node_process_is_allocation_free() {
     // 4-stage phaser. `prepare` sizes the chain, but `process` must reuse it.
     gate(
-        PhaserNode::<f32>::mono(Stages::of(4), PhaserControls::DEFAULT),
+        PhaserNode::<f32>::try_from(PhaserConfig::new(BusTopology::MONO, Stages::of(4))).unwrap(),
         0.4,
         2_000,
         |_| {},
@@ -193,7 +196,7 @@ fn delay_and_modulation_with_moving_controls_are_allocation_free() {
     });
     // A 6-wide chorus whose rate, depth and feedback all move every block: the depth and
     // feedback ramps are in flight on every one, the rate lands whole at the grid.
-    let chorus = ModDelayNode::<f32>::chorus(bus(6));
+    let chorus = ModDelayNode::<f32>::from(ModDelayConfig::chorus(bus(6)));
     let c = chorus.param_set();
     gate(chorus, 0.5, 2_000, |i| {
         let t = (i % 50) as f32 / 50.0;
@@ -203,12 +206,9 @@ fn delay_and_modulation_with_moving_controls_are_allocation_free() {
     });
     // A 6-wide, 8-stage, staggered phaser whose rate, depth and feedback all move every
     // block, the ramps in flight on every one.
-    let phaser = PhaserNode::<f32>::new(
-        bus(6),
-        Stages::of(8),
-        SweepRange::DEFAULT,
-        Stagger::of_step(PhaseIncrement::new(0.2)),
-        PhaserControls::DEFAULT,
+    let phaser = PhaserNode::<f32>::try_from(
+        PhaserConfig::new(bus(6), Stages::of(8))
+            .stagger(Stagger::of_step(PhaseIncrement::new(0.2))),
     )
     .expect("a step fits any width");
     let p = phaser.param_set();
@@ -270,7 +270,7 @@ fn a_delay_with_its_signals_fed_is_allocation_free() {
 fn a_chorus_with_its_signals_fed_is_allocation_free() {
     for width in [2u16, 6] {
         let mut rig = Direct::new(
-            ModDelayNode::<f32>::chorus(bus(width)),
+            ModDelayNode::<f32>::from(ModDelayConfig::chorus(bus(width))),
             SampleRate::SR_48K,
             64,
         );
@@ -315,12 +315,9 @@ fn a_chorus_with_its_signals_fed_is_allocation_free() {
 #[test]
 fn a_phaser_with_its_signals_fed_is_allocation_free() {
     for width in [2u16, 6] {
-        let phaser = PhaserNode::<f32>::new(
-            bus(width),
-            Stages::of(6),
-            SweepRange::DEFAULT,
-            Stagger::of_step(PhaseIncrement::new(0.25)),
-            PhaserControls::DEFAULT,
+        let phaser = PhaserNode::<f32>::try_from(
+            PhaserConfig::new(bus(width), Stages::of(6))
+                .stagger(Stagger::of_step(PhaseIncrement::new(0.25))),
         )
         .expect("a step fits any width");
         let mut rig = Direct::new(phaser, SampleRate::SR_48K, 64);
@@ -1578,8 +1575,11 @@ fn the_delay_corners_are_allocation_free() {
             InterpolationMode::Linear,
             InterpolationMode::CubicHermite,
         ] {
-            let node =
-                DelayNode::<f32>::new(bus(width), max, interpolation, DelayControls::DEFAULT);
+            let node = DelayNode::<f32>::from(DelayConfig::new(DelayLayout::new(
+                bus(width),
+                max,
+                interpolation,
+            )));
             let write = |cells: &ParamSet, i: usize| {
                 assert!(cells.set(UnitParam::DelayTime, if i & 1 == 1 { 1e9 } else { 0.0 }));
                 assert!(cells.set(UnitParam::Feedback, if i & 2 == 2 { 1.0 } else { 0.0 }));
@@ -1597,13 +1597,13 @@ fn the_delay_corners_are_allocation_free() {
     }
     // Every channel of a bus recirculating into the next, each with a time of its own.
     let wide = bus(16);
-    let layout = DelayLayout::new(wide, cap, InterpolationMode::CubicHermite)
-        .with_routing(Routing::ring(wide))
-        .expect("a ring on its own bus")
-        .with_times(ChannelTimes::each(&[Seconds::new(10.0); 15]).expect("fifteen times"))
-        .expect("one time for each channel past the first");
+    let layout = DelayLayout::builder(wide, cap, InterpolationMode::CubicHermite)
+        .routing(FeedbackRouting::ring(wide))
+        .times(ChannelTimes::try_from(&[Seconds::new(10.0); 15][..]).expect("fifteen times"))
+        .build()
+        .unwrap();
     corner(
-        DelayNode::<f32>::from_layout(layout, DelayControls::DEFAULT),
+        DelayNode::<f32>::from(DelayConfig::new(layout)),
         SampleRate::SR_48K,
         &[Some(&time[..]), Some(&feedback[..]), Some(&cross[..])],
         loop_bound(),
@@ -1640,12 +1640,10 @@ fn the_phaser_corners_are_allocation_free() {
         ),
         (2, 12, SweepRange::DEFAULT, 0.25, 192_000.0),
     ] {
-        let node = PhaserNode::<f32>::new(
-            bus(width),
-            Stages::of(stages),
-            range,
-            Stagger::of_step(PhaseIncrement::new(step)),
-            PhaserControls::DEFAULT,
+        let node = PhaserNode::<f32>::try_from(
+            PhaserConfig::new(bus(width), Stages::of(stages))
+                .range(range)
+                .stagger(Stagger::of_step(PhaseIncrement::new(step))),
         )
         .expect("a step fits any width");
         let rate = SampleRate::of(sample_rate);

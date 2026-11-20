@@ -286,12 +286,12 @@ pub struct Fdn {
     /// The input gains `B`: one per line.
     pub input: Gains,
     /// The output gains `C`.
-    pub output: OutputMap,
+    pub output: NetworkOutputMap,
 }
 
 /// The output gains `C`: one row per output channel, one gain per line.
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct OutputMap {
+pub struct NetworkOutputMap {
     /// The rows.
     pub rows: Inline<Gains, MAX_CHANNELS>,
 }
