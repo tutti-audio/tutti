@@ -596,9 +596,10 @@ fn stems_that_take_the_masters_gain_still_sum_to_it() {
 }
 
 /// A rename that fails after another landed is `NotCommitted`, naming the file
-/// that landed, which is kept; the file that did not is not left behind and
-/// what was in its way is as it was. A first rename that fails is the plain
-/// error, with nothing landed.
+/// that landed, which is kept; the file that did not land is kept where the
+/// commit error names it, and what was in its way is as it was. A first rename
+/// that fails is the plain commit error, with nothing landed and the outputs
+/// after it removed.
 ///
 /// The second target is a directory, which a file cannot replace.
 #[test]
@@ -623,7 +624,15 @@ fn a_rename_that_fails_after_another_landed_is_not_committed() {
     match err {
         Error::NotCommitted { landed, cause } => {
             assert_eq!(landed, std::slice::from_ref(&first));
-            assert!(matches!(cause, tutti_codec::Error::Io(_)), "{cause:?}");
+            let tutti_codec::Error::Commit(commit) = &cause else {
+                panic!("a failed rename is a commit error, got {cause:?}");
+            };
+            let kept = commit.kept().to_path_buf();
+            assert!(
+                std::fs::read(&kept).unwrap().starts_with(b"RIFF"),
+                "the unlanded file is kept whole"
+            );
+            std::fs::remove_file(&kept).unwrap();
         }
         other => panic!("{other:?}"),
     }
@@ -656,8 +665,16 @@ fn a_rename_that_fails_after_another_landed_is_not_committed() {
         &mut Control::none(),
     )
     .expect_err("a file cannot replace a directory");
-    assert!(matches!(err, Error::Io(_)), "{err:?}");
+    let Error::Encode(tutti_codec::Error::Commit(commit)) = &err else {
+        panic!("a failed first rename is a commit error, got {err:?}");
+    };
+    std::fs::remove_file(commit.kept()).unwrap();
     assert!(!dir.path().join("third.wav").exists());
+    assert_eq!(
+        names(dir.path()),
+        ["first.wav", "second.wav"],
+        "only the targets remain"
+    );
 }
 
 /// Outputs that contradict each other are named errors before anything is

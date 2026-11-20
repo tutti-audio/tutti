@@ -597,7 +597,9 @@ pub(crate) struct PendingFile<F: FftFloat> {
 /// given. A rename that fails after others landed is
 /// [`Error::NotCommitted`], naming what landed, which is kept: nothing is
 /// rolled back. One that fails before any landed is the rename's own error.
-/// Every file that did not land is removed.
+/// The file whose rename failed is kept beside its path and named by the
+/// error ([`tutti_codec::Error::Commit`]); every other file that did not land
+/// is removed.
 pub(crate) fn finalize_files<F: FftFloat>(
     files: Vec<PendingFile<F>>,
     control: &mut Control<'_>,
