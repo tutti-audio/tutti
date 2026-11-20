@@ -19,14 +19,18 @@ tracing.workspace = true
 # `Instant` and `SystemTime`, re-exported at the root: std's types on a native
 # target, `performance.now()` and `Date.now()` on the web.
 web-time = "1.1.0"
-# `Executor`: the run queue (`async-executor`) and the `Task` a spawn returns (`async-task`).
-async-executor.workspace = true
-async-task.workspace = true
 # The `Error` derive of `Panicked`.
 thiserror = { workspace = true, features = ["std"] }
 
 # `request_priority`: the OS thread-priority call, behind one outcome type. The
 # web has no thread priorities.
+# `Executor`: the run queue (`async-executor`) and the `Task` a spawn returns (`async-task`).
+# A loom build leaves the executor out: its models cover `tutti-rt`'s atomics, and
+# `async-executor` does not build under the loom cfg.
+[target.'cfg(not(loom))'.dependencies]
+async-executor.workspace = true
+async-task.workspace = true
+
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 thread-priority = "3.1"
 

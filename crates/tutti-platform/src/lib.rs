@@ -73,6 +73,8 @@
 mod asset;
 mod clock;
 mod denormals;
+// A loom build leaves the executor out (see the manifest).
+#[cfg(not(loom))]
 mod executor;
 mod main_thread;
 mod priority;
@@ -85,6 +87,7 @@ pub use asset::{
 };
 pub use clock::monotonic_ns;
 pub use denormals::with_no_denormals;
+#[cfg(not(loom))]
 pub use executor::*;
 pub use main_thread::MainThreadMarker;
 pub use priority::{PriorityOutcome, PriorityRequest, Scheduling, request_priority};
