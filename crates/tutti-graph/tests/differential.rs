@@ -19,7 +19,7 @@ use common::{Kind, Pair, Word, bits, input_signal};
 use proptest::prelude::*;
 use tutti_buffers::{BusTopology, ChannelLayout, ChannelTopology};
 use tutti_graph::Topology;
-use tutti_graph::{Bus, BusRef, BusRole, BusSource, Buses, NodeKey, TapAlign, TapId, TapSpec};
+use tutti_graph::{Bus, BusRef, BusRole, BusSource, Buses, NodeKey, TapId, TapOptions, TapSpec};
 use tutti_graph::{Edge, EdgeGain, EdgeId, FeedbackFrom, InPort, NodeSpec, OutPort, Sink, Source};
 use tutti_graph::{EventEdge, EventIn, EventOut, GraphSpec, Unforkable};
 use tutti_units::{Amplitude, Samples};
@@ -606,7 +606,7 @@ proptest! {
             // harness compiles `spec` itself: give the editor the same nodes.
             pair.editor.spec_mut().topology.nodes = spec.topology.nodes.clone();
             pair.editor.spec_mut().topology.inputs = spec.topology.inputs;
-            let mut tap = pair.editor.open_tap(TapId::of(1), outputs, TapAlign::ToOutput, Samples::new(1 << 16)).expect("the sources exist");
+            let mut tap = pair.editor.open_tap(TapId::of(1), outputs, TapOptions::new(Samples::new(1 << 16))).expect("the sources exist");
             let mut heard = pair.editor.open_output_tap(TapId::of(2), channels, Samples::new(1 << 16)).expect("the sources exist");
             pair.switch(&valid, &desc.kinds);
             let width = tap.width();

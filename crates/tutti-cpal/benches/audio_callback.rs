@@ -22,7 +22,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_engine::{AudioCallbackState, Engine, OutputBlock, process_audio};
 use tutti_graph::{Editor, Prepare, TapReader};
-use tutti_graph::{NodeKey, TapAlign, TapId};
+use tutti_graph::{NodeKey, TapId, TapOptions};
 use tutti_graph::{OutPort, Source};
 use tutti_nodes::testing::Osc;
 use tutti_transport::Transport;
@@ -53,13 +53,8 @@ fn state(outputs: usize, tap_open: bool) -> (Arc<AudioCallbackState>, Option<Tap
             .flatten()
             .copied()
             .collect();
-        ed.open_tap(
-            TapId::of(1),
-            sources,
-            TapAlign::ToOutput,
-            Samples::new(8192),
-        )
-        .expect("the sources exist")
+        ed.open_tap(TapId::of(1), sources, TapOptions::new(Samples::new(8192)))
+            .expect("the sources exist")
     });
     ed.commit().expect("commits");
     let engine = Engine::new(

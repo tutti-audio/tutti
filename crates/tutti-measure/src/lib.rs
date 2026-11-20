@@ -175,7 +175,7 @@
 //! use tutti_units::{Beat, Bpm, SampleRate, Samples};
 //! use tutti_buffers::{PlanesMut, StereoPlanes};
 //! use tutti_graph::NodeKey;
-//! use tutti_graph::{TapAlign, TapId};
+//! use tutti_graph::{TapId, TapOptions};
 //!
 //! /// A stereo source: 0.5 on the left, -0.5 on the right.
 //! struct Tone;
@@ -197,7 +197,7 @@
 //! editor.insert(NodeKey(1), "tone", Unforkable(Tone));
 //! let out = |port| Source::Node(OutPort { node: NodeKey(1), port });
 //! editor.spec_mut().topology.set_outputs([out(0), out(1)]);
-//! let mut tap = editor.open_tap(TapId::of(1), vec![out(0), out(1)], TapAlign::ToOutput, Samples::new(256)).expect("the ports exist");
+//! let mut tap = editor.open_tap(TapId::of(1), vec![out(0), out(1)], TapOptions::new(Samples::new(256))).expect("the ports exist");
 //! editor.commit().expect("compiles");
 //! executor.apply_pending();
 //! editor.collect();

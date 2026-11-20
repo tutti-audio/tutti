@@ -54,7 +54,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::{Float, Interleaved, InterleavedMut, Sink, SinkFailed};
 use tutti_codec::{FileEncoder, Format, Spec};
 use tutti_engine::StreamLatency;
-use tutti_graph::{MissingSource, NodeKey, TapAlign, TapReader};
+use tutti_graph::{MissingSource, NodeKey, TapAlign, TapOptions, TapReader};
 use tutti_platform::{Staged, StagedCommitError};
 use tutti_rt::{Bell, Listener};
 use tutti_tempo::TempoMap;
@@ -900,10 +900,12 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
         let ports: Vec<_> = (0..width).map(|channel| node.out(channel)).collect();
         // A second of frames: the pump moves what the tap holds each time it wakes.
         let capacity = rate.one_second();
-        let reader =
-            self.graph
-                .taps()
-                .open_with_bell(&ports, TapAlign::Raw, capacity, stop.bell.clone())?;
+        let reader = self.graph.taps().open(
+            &ports,
+            TapOptions::new(capacity)
+                .align(TapAlign::Raw)
+                .bell(stop.bell.clone()),
+        )?;
 
         let id = TakeId::mint(self.inputs.takes());
         let shared = Arc::new(Shared::default());
