@@ -267,7 +267,8 @@ pub mod nodes {
         Taps, WaveshaperControls,
     };
     pub use tutti_dsp::{
-        Biquad, FirError, LinearPhaseDesign, Lti, MatchedBell, Sos, SosError, System, Tilt,
+        Biquad, Butterworth, ButterworthOrder, ButterworthOrderError, CutResponse, FirError,
+        LinearPhaseDesign, LinkwitzRiley, Lti, MatchedBell, Sos, SosError, System, Tilt,
     };
     pub use tutti_dsp::{Lookahead, MaxDecay, MaxDelay, MaxDelayError, PeakDetection};
     pub use tutti_modulation::{
@@ -287,21 +288,20 @@ pub mod nodes {
     };
     pub use tutti_nodes::{
         BAND_PARAMS, BellFilterConfig, BellFilterControls, BellFilterNode, BitCrusherConfig,
-        BitCrusherControls, BitCrusherNode, BrickwallLimiterNode, BusStripNode, ButterworthOrder,
-        ChannelTimes, ChannelTimesError, ClickConfig, ClickLevel, ClickLevelError, ClickSettings,
-        ClickState, CompressorControls, CompressorNode, ConvolverError, ConvolverNode,
-        CrossoverControls, CrossoverError, CrossoverNode, CutAlignment, CutFilterConfig,
-        CutFilterControls, CutFilterNode, CutResponse, DcBlockerConfig, DcBlockerControls,
-        DcBlockerNode, DelayControls, DelayLayout, DelayNode, DistortionNode, DynamicEqConfig,
-        DynamicEqControls, DynamicEqNode, DynamicMode, EnvelopeFilterConfig,
-        EnvelopeFilterControls, EnvelopeFilterNode, EnvelopeFollowerNode, EqBandNode, FdnControls,
-        FdnLayout, FdnNode, FreeverbControls, FreeverbNode, FreezeMode, GateControls, GateNode,
-        HrtfBinauralNode, InterpolationMode, IrLayout, KeyFilter, KeySource, LadderControls,
-        LadderFilterNode, LadderType, LfoClock, LfoNode, LimiterControls, LimiterNode,
-        LinearPhaseEqConfig, LinearPhaseEqNode, MetronomeMode, ModDelayControls, ModDelayNode,
-        MultibandCompressorNode, MultibandControls, NoteEnvelopeNode, OscillatorNode,
-        OversamplingFactor, PhaserControls, PhaserNode, PlateControls, PlateReverbConfig,
-        PlateReverbNode, PortSide, Routing as FeedbackRouting,
+        BitCrusherControls, BitCrusherNode, BrickwallLimiterNode, BusStripNode, ChannelTimes,
+        ChannelTimesError, ClickConfig, ClickLevel, ClickLevelError, ClickSettings, ClickState,
+        CompressorControls, CompressorNode, ConvolverError, ConvolverNode, CrossoverControls,
+        CrossoverError, CrossoverNode, CutAlignment, CutFilterConfig, CutFilterControls,
+        CutFilterNode, DcBlockerConfig, DcBlockerControls, DcBlockerNode, DelayControls,
+        DelayLayout, DelayNode, DistortionNode, DynamicEqConfig, DynamicEqControls, DynamicEqNode,
+        DynamicMode, EnvelopeFilterConfig, EnvelopeFilterControls, EnvelopeFilterNode,
+        EnvelopeFollowerNode, EqBandNode, FdnControls, FdnLayout, FdnNode, FreeverbControls,
+        FreeverbNode, FreezeMode, GateControls, GateNode, HrtfBinauralNode, InterpolationMode,
+        IrLayout, KeyFilter, KeySource, LadderControls, LadderFilterNode, LadderType, LfoClock,
+        LfoNode, LimiterControls, LimiterNode, LinearPhaseEqConfig, LinearPhaseEqNode,
+        MetronomeMode, ModDelayControls, ModDelayNode, MultibandCompressorNode, MultibandControls,
+        NoteEnvelopeNode, OscillatorNode, OversamplingFactor, PhaserControls, PhaserNode,
+        PlateControls, PlateReverbConfig, PlateReverbNode, PortSide, Routing as FeedbackRouting,
         RoutingError as FeedbackRoutingError, SOURCE_EVENT_CAPACITY, ShapeKind, SourceNode,
         SourcePorts, Stages, StagesError, Stagger, StaggerError, SvfControls, SvfFilterNode,
         SvfType, Sweep, SweepError, SweepRange, SweepRangeError, TiltFilterConfig,
