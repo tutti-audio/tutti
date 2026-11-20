@@ -653,21 +653,25 @@ fn device(n: u64, name: &str) -> OsDevice {
     }
 }
 
-static LOOKS: AtomicUsize = AtomicUsize::new(0);
-
 fn listed() -> Vec<OsDevice> {
-    LOOKS.fetch_add(1, Ordering::SeqCst);
     LISTED.lock().unwrap().clone()
 }
 
-struct Polled(tutti_platform::Executor);
+/// Held by the poll's snapshot, so its count says whether the poll's future lives.
+struct Polled(tutti_platform::Executor, Arc<()>);
 
 impl MidiEndpoints for Polled {
     fn watch(&self, sink: ChangeSink) -> Result<Box<dyn Watch>> {
         Ok(Box::new(poll::start(
             &self.0,
             sink,
-            listed,
+            {
+                let witness = Arc::clone(&self.1);
+                move || {
+                    let _held = &witness;
+                    listed()
+                }
+            },
             Duration::from_millis(5),
         )?))
     }
@@ -695,7 +699,12 @@ fn the_poll_seeds_then_reports_a_device_that_appears_and_one_that_goes() {
     *LISTED.lock().unwrap() = vec![device(1, "A")];
     let executor = tutti_platform::Executor::new();
     let threads = executor.spawn_threads(std::num::NonZeroUsize::MIN).unwrap();
-    let devices = Devices::open_over(&executor, Box::new(Polled(executor.clone()))).unwrap();
+    let witness = Arc::new(());
+    let devices = Devices::open_over(
+        &executor,
+        Box::new(Polled(executor.clone(), Arc::clone(&witness))),
+    )
+    .unwrap();
     assert_eq!(devices.list().len(), 1, "seeded before open returns");
     let events = devices.subscribe();
 
@@ -711,17 +720,18 @@ fn the_poll_seeds_then_reports_a_device_that_appears_and_one_that_goes() {
     };
     assert_eq!(removed.name, "A");
 
-    // Once the last holder drops, the task is cancelled: with the drivers
-    // stopped (so no look is under way) and started again, no look follows. The
-    // window gives a surviving task, looking every 5 ms, the chance to show; a
-    // longer one only makes the check stricter.
+    // Once the last holder drops, the task is cancelled and its future dropped
+    // with the snapshot closure that holds the witness: with the drivers stopped
+    // and the queue run, the witness is the test's alone and no look follows.
     drop(events);
     drop(devices);
     drop(threads);
-    let looks = LOOKS.load(Ordering::SeqCst);
-    let _threads = executor.spawn_threads(std::num::NonZeroUsize::MIN).unwrap();
-    std::thread::sleep(Duration::from_millis(50));
-    assert_eq!(LOOKS.load(Ordering::SeqCst), looks);
+    executor.run_until_stalled();
+    assert_eq!(
+        Arc::strong_count(&witness),
+        1,
+        "the poll's future is dropped"
+    );
 }
 
 /// A backend that hands the test its `ChangeSink` and watches nothing.
@@ -764,6 +774,8 @@ fn a_poll_ends_when_its_executor_has_shut_down() {
     let executor = tutti_platform::Executor::new();
     let _devices = Devices::open_over(&executor, Box::new(Captured(Arc::clone(&slot)))).unwrap();
     let sink = slot.lock().unwrap().take().unwrap();
+    // The executor made here drops at once, so its timer is already shut down:
+    // the poll's first sleep fails.
     let timer = tutti_platform::Executor::new().timer();
     let (done, finished) = std::sync::mpsc::channel();
     std::thread::spawn(move || {

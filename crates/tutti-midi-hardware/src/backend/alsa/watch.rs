@@ -559,8 +559,7 @@ impl Drop for AlsaWatch {
     /// Closing the stop pair wakes the thread out of `poll`, and the watch
     /// returns `Woken::Stopped`; the task drops second, which ends the future on
     /// its thread. A cancelled future does not leave a syscall it is blocked in,
-    /// so only the stop wakes it. A report reaches the sink only from that
-    /// thread, and none after the future ends.
+    /// so only the stop wakes it; what follows is as [`Watch`] says.
     fn drop(&mut self) {
         drop(self.stop.take());
         drop(self.task.take());

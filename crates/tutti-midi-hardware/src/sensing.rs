@@ -1,4 +1,5 @@
-//! The Active Sensing heartbeat of one output: a task on the executor that sends
+//! The Active Sensing heartbeat of one output: a task on the executor that, while
+//! the executor is driven, sends
 //! `0xFE` whenever the output has been silent for
 //! [`ACTIVE_SENSING_INTERVAL`](tutti_midi_runtime::ACTIVE_SENSING_INTERVAL).
 //!

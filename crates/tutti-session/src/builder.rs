@@ -230,8 +230,11 @@ impl Default for Workers {
 /// What every build path shares: the graph, the transport, the click, the
 /// MIDI nodes, and what the engine's callback state holds.
 pub(crate) struct Parts<F: Float> {
-    /// The session's executor, which also runs the MIDI hardware's background work.
+    /// The session's executor, the one the MIDI hardware opened on: `session()`
+    /// clones it into the session's jobs, sampler and plugins.
     executor: tutti_platform::Executor,
+    /// What drives `executor` (threads of its own, or the app's `update`); the
+    /// session's jobs take it over in `session()`.
     drive: crate::drive::Drive,
     graph: Graph<F>,
     transport: Transport,

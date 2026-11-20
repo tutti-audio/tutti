@@ -56,9 +56,10 @@ impl InputConnection for AlsaInput {
 impl Drop for AlsaInput {
     /// Closing the stop end wakes the pump out of `poll`, and the pump returns
     /// at once; the task then drops, and the future ends on its thread, which
-    /// closes the client and so unsubscribes the port. The task drops second: a
-    /// cancelled future does not leave a syscall it is blocked in, so only the
-    /// stop wakes it.
+    /// closes the client and so unsubscribes the port. The pump returns because
+    /// `poll` wakes, not because the task is cancelled: its body is synchronous
+    /// inside the async block and never awaits, so a cancelled future does not
+    /// leave a syscall it is blocked in, and only the stop wakes it.
     fn drop(&mut self) {
         drop(self.stop.take());
         drop(self.pump.take());

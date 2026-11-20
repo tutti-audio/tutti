@@ -12,8 +12,8 @@ use tutti_platform::{Executor, Instant, Task, Timer};
 /// How often the list is read again: a device plugged in shows within this.
 pub(in crate::backend) const INTERVAL: Duration = Duration::from_secs(1);
 
-/// A running poll: a task on the executor. Dropping it cancels the task, so no
-/// report reaches the sink after a look under way ends.
+/// A running poll: a task on the executor. Dropping it cancels the task, as
+/// [`Watch`] says.
 pub(in crate::backend) struct PollWatch {
     _task: Task<()>,
 }
@@ -31,7 +31,7 @@ impl Watch for PollWatch {}
 pub(in crate::backend) fn start(
     executor: &Executor,
     sink: ChangeSink,
-    snapshot: fn() -> Vec<OsDevice>,
+    mut snapshot: impl FnMut() -> Vec<OsDevice> + Send + 'static,
     interval: Duration,
 ) -> Result<PollWatch> {
     let failures = sink.clone();
@@ -54,7 +54,7 @@ pub(in crate::backend) async fn run(
     timer: Timer,
     mut reporter: Reporter,
     failures: ChangeSink,
-    snapshot: fn() -> Vec<OsDevice>,
+    mut snapshot: impl FnMut() -> Vec<OsDevice>,
     interval: Duration,
 ) {
     loop {

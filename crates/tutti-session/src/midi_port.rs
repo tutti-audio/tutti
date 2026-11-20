@@ -646,12 +646,19 @@ impl<K: crate::AppKey, C: crate::Clock> std::fmt::Debug for OpenMidiOutput<'_, K
 
 impl<K: crate::AppKey, C: crate::Clock> OpenMidiOutput<'_, K, C> {
     /// Whether the port sends Active Sensing (`0xFE`) for its whole life: from
-    /// its own thread, whenever it has been silent for 270 ms
+    /// a task on the session's executor, whenever it has been silent for 270 ms
     /// ([`ACTIVE_SENSING_INTERVAL`](tutti_midi_runtime::ACTIVE_SENSING_INTERVAL)),
-    /// until the port closes, and again on each device it reopens on. A stalled
-    /// [`update`](Session::update) does not stop it, and a receiver that has
-    /// seen one releases its notes when they stop (MIDI 1.0 Detailed
+    /// until the port closes, and again on each device it reopens on. A receiver
+    /// that has seen one releases its notes when they stop (MIDI 1.0 Detailed
     /// Specification p. 32). Off by default.
+    ///
+    /// **A session built with the app's own executor
+    /// ([`SessionBuilder::executor`](crate::SessionBuilder::executor)) sends it
+    /// only while the app drives the executor, inside [`update`](Session::update)
+    /// until core-engine's R2-last: when the app stops calling `update`, Active
+    /// Sensing stops and the receiver releases its notes after about 300 ms.**
+    /// A session that makes its own executor is driven on threads of its own, and
+    /// a stalled `update` does not stop it.
     ///
     /// A port whose device is in the MIDI 2.0 Protocol sends none: MIDI 2.0
     /// has no Active Sensing. It starts when a negotiation moves the device to
