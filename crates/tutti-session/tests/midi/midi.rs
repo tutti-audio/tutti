@@ -1076,6 +1076,8 @@ fn a_midi_ci_peer_that_answers_discovery_is_in_the_ports_info() {
     let start = Instant::now();
     let mut noticed = false;
     let mut replied = false;
+    let mut source = None;
+    let mut early = None;
     for ms in 0..40 {
         let now = start + Duration::from_millis(ms);
         for event in update_at(&mut s, now) {
@@ -1102,16 +1104,28 @@ fn a_midi_ci_peer_that_answers_discovery_is_in_the_ports_info() {
                 && !replied
             {
                 replied = true;
+                source = Some(header.source);
                 // The later MUID answers first: the list is still by MUID.
-                for source in [later, peer] {
-                    let reply = CiMessage::DiscoveryReply {
-                        header: CiHeader::new(source),
-                        to: header.source,
-                        data,
-                    };
-                    answers.extend(reply.packets(MidiGroup::FIRST).unwrap());
-                }
+                let reply = CiMessage::DiscoveryReply {
+                    header: CiHeader::new(later),
+                    to: header.source,
+                    data,
+                };
+                answers.extend(reply.packets(MidiGroup::FIRST).unwrap());
             }
+        }
+        if ms == 20 {
+            early = port
+                .info()
+                .peers()
+                .first()
+                .map(|p| (p.peer_id().muid, p.id()));
+            let reply = CiMessage::DiscoveryReply {
+                header: CiHeader::new(peer),
+                to: source.expect("the session sent a Discovery"),
+                data,
+            };
+            answers.extend(reply.packets(MidiGroup::FIRST).unwrap());
         }
         for ump in answers {
             assert!(fake.send_input(raw, ump, now));
@@ -1131,6 +1145,11 @@ fn a_midi_ci_peer_that_answers_discovery_is_in_the_ports_info() {
     assert_eq!(first.port(), port.id());
     assert_ne!(first.id(), second.id(), "each peer has its own id");
     assert_ne!(first.id(), port.id());
+    assert_eq!(
+        early,
+        Some((later, second.id())),
+        "a peer keeps its id when another peer is found and the listing refreshes"
+    );
     for listed in [first, second] {
         assert!(
             listed.profiles().is_none()

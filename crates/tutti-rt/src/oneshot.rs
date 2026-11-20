@@ -1,4 +1,5 @@
-//! A one-shot channel: one control-side thread answers once and the asker reads once, by [`try_recv`](OneshotReceiver::try_recv) or by awaiting.
+//! A one-shot channel: one control-side thread answers once and the asker reads
+//! once, by [`try_recv`](OneshotReceiver::try_recv) or by awaiting.
 //!
 //! A send wakes the receiver's [`Waker`]. The sender is never the audio thread, so the wake may
 //! do what a `Waker` does.
@@ -28,6 +29,11 @@ pub struct OneshotSender<T> {
 pub struct OneshotReceiver<T> {
     shared: Shared<T>,
 }
+
+/// The sender dropped without answering: what a poll finds when nothing will
+/// ever come.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct SenderGone;
 
 /// Nothing to read: the answer has not come, or never will.
 #[derive(Debug, PartialEq, Eq, Hash)]
@@ -105,11 +111,11 @@ impl<T> OneshotReceiver<T> {
     }
 
     /// [`try_recv`](Self::try_recv) for a future: pending stores the task's waker.
-    pub fn poll_recv(&self, cx: &mut Context<'_>) -> Poll<Result<T, Unanswered>> {
+    pub fn poll_recv(&self, cx: &mut Context<'_>) -> Poll<Result<T, SenderGone>> {
         let mut state = lock(&self.shared);
         match state.value.take() {
             Some(value) => Poll::Ready(Ok(value)),
-            None if state.sender_gone => Poll::Ready(Err(Unanswered::Disconnected)),
+            None if state.sender_gone => Poll::Ready(Err(SenderGone)),
             None => {
                 state.waker = Some(cx.waker().clone());
                 Poll::Pending

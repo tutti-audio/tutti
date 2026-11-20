@@ -17,7 +17,7 @@ use tutti_midi_hardware::{PeerId, PropertyCall};
 use tutti_ump::MidiGroup;
 
 use super::{
-    Ended, GetProperty, PeFailure, PeerError, Pending, PortLink, PropertySlot, Reply, Slot,
+    Ended, GetProperty, Landing, PeFailure, PeerError, Pending, PortLink, PropertySlot, Slot,
     Subscribe, Subscription,
 };
 use crate::job::{JobOutputQueue, Ticket};
@@ -174,7 +174,7 @@ fn a_pending_that_ends_as_disconnected_lands_its_property_calls_disconnected() {
             peer: id,
             request: ask.clone(),
             sent,
-            tickets: vec![Reply::Job(ticket)],
+            tickets: vec![Landing::Job(ticket)],
         }));
     }
     pending.end(Ended::Disconnected);
@@ -215,20 +215,35 @@ fn dropping_a_job_whose_landed_lease_is_live_does_not_deadlock() {
     assert!(queue.lock().unwrap().is_empty());
 }
 
-/// A peer's id is minted once per Group and MUID: asking again, also after the
-/// peer left and came back, gives the same id, and another MUID has its own.
+/// A peer's id is minted once per Group and MUID and kept while the listing
+/// holds the peer: another MUID has its own, and a peer a refresh did not list is
+/// forgotten, so the one that returns is a new peer with a new id.
 #[test]
-fn a_peer_keeps_its_id_and_another_muid_has_its_own() {
+fn a_listed_peer_keeps_its_id_and_a_peer_that_was_not_listed_loses_it() {
     let pending = Pending::new(ResourceIds::new());
     let at = |muid: u32| PeerId {
         group: MidiGroup::FIRST,
         muid: Muid::of(muid),
     };
-    let first = pending.peer_id(at(0x0012_3456));
-    assert_eq!(pending.peer_id(at(0x0012_3456)), first);
-    let other = pending.peer_id(at(0x0045_6789));
-    assert_ne!(other, first);
-    assert_eq!(pending.peer_id(at(0x0012_3456)), first);
+    let (a, b) = (at(0x0012_3456), at(0x0045_6789));
+    let [first, other] = pending.peer_ids(&[a, b])[..] else {
+        panic!("two ids for two peers");
+    };
+    assert_ne!(first, other, "each peer has its own id");
+    assert_eq!(
+        pending.peer_ids(&[a, b]),
+        [first, other],
+        "kept while listed"
+    );
+    assert_eq!(pending.peer_ids(&[b]), [other]);
+    let [again, still] = pending.peer_ids(&[a, b])[..] else {
+        panic!("two ids for two peers");
+    };
+    assert_ne!(
+        again, first,
+        "a peer that was not listed returns as a new one"
+    );
+    assert_eq!(still, other);
 }
 
 /// A request whose answering end is dropped without an answer resolves to
@@ -239,9 +254,9 @@ fn a_request_whose_sender_is_dropped_resolves_to_disconnected() {
     use std::pin::pin;
     use std::task::{Context, Poll, Waker};
 
-    use super::Request;
+    use super::PeerReply;
 
-    let (sender, request) = Request::<u8>::new();
+    let (sender, request) = PeerReply::<u8>::new();
     drop(sender);
     let mut request = pin!(request);
     let mut cx = Context::from_waker(Waker::noop());

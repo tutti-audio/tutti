@@ -357,10 +357,10 @@ fn a_changed_identity_invalidates_the_old_muid_and_starts_discovery_as_the_new()
         1,
         "found again under the new MUID"
     );
-    assert_eq!(
+    assert_ne!(
         port.info().peers()[0].id(),
         old_id,
-        "the peer that was dropped and found again under its MUID has its id again"
+        "a peer that was dropped and is found again is listed anew, with a new id"
     );
     let _ = clock.profile_changes();
     s.set(s.policy::<MidiPolicy>().to(MidiPolicy::default()))

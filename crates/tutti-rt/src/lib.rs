@@ -217,7 +217,7 @@ pub use last_out::{LastOut, Party};
 pub use level_cell::{LevelReader, LevelSpan, LevelWriter, level_cell};
 pub use lock::LockExt;
 pub use mint::Mint;
-pub use oneshot::{OneshotReceiver, OneshotSender, Unanswered, oneshot};
+pub use oneshot::{OneshotReceiver, OneshotSender, SenderGone, Unanswered, oneshot};
 pub use packed_atomic::PackedAtomic;
 pub use param::{Param, Param64, ParamCell};
 pub use parker::{Parker, Unparker, parker};

@@ -1,35 +1,37 @@
-//! A request to a MIDI-CI peer is a typed [`Job`] (feature `midi-hardware`).
+//! Requests to a MIDI-CI peer (feature `midi-hardware`).
 //!
-//! The Profiles an input's peers list
-//! ([`ListedPeer::profiles`](crate::ListedPeer::profiles)) and the peers it
-//! can ask for a MIDI Message Report
-//! ([`ListedPeer::report`](crate::ListedPeer::report))
-//! are handles that carry their port's request queue, so a request names only
-//! what the peer listed: [`ChannelProfile::enable`], [`WholeProfile::enable`]
-//! and `disable` return a [`Job<SwitchProfile>`](Job), [`ReportPeer::request`]
-//! a [`Job<RequestReport>`](Job). The job lands in the [`update`](crate::Session::update)
-//! after the poll that reads the peer's answer, as
-//! [`SessionEvent::JobDone`].
+//! An input lists its peers ([`MidiInputInfo::peers`](crate::MidiInputInfo::peers)),
+//! each a [`ListedPeer`] that carries its port's request queue, so a request
+//! names only what the peer listed. The session sends the requests and reads the
+//! peers' answers in its [`update`](crate::Session::update).
 //!
-//! A peer's Property Exchange Resources
-//! ([`ListedPeer::resources`](crate::ListedPeer::resources)) are
-//! handles the same way: [`ListedResource::fetch`] returns a [`Job<GetProperty>`](Job)
-//! landing the Property Data, [`ListedResource::write`] a [`Job<SetProperty>`](Job)
-//! landing the status of the reply, [`ListedResource::subscribe`] a
-//! [`Job<Subscribe>`](Job) landing a [`Subscription`] lease. While the lease is live
-//! the session keeps the Resource's Property Data current
+//! A peer's state is a future: [`ListedPeer::save_state`] returns a
+//! [`SavePeerState`] and [`ListedPeer::restore_state`] a [`RestorePeerState`].
+//! Each resolves in a later `update`, so keep updating while you await one, and
+//! dropping one is harmless.
+//!
+//! The other requests are still typed [`Job`]s, which land in the `update` after
+//! the poll that reads the peer's answer, as [`SessionEvent::JobDone`]:
+//! [`ChannelProfile::enable`], [`WholeProfile::enable`] and `disable` return a
+//! [`Job<SwitchProfile>`](Job), [`ReportPeer::request`] a
+//! [`Job<RequestReport>`](Job), and for a peer's Property Exchange Resources
+//! ([`ListedPeer::resources`]) [`ListedResource::fetch`] returns a
+//! [`Job<GetProperty>`](Job), [`ListedResource::write`] a
+//! [`Job<SetProperty>`](Job) and [`ListedResource::subscribe`] a
+//! [`Job<Subscribe>`](Job) landing a [`Subscription`] lease. While the lease is
+//! live the session keeps the Resource's Property Data current
 //! ([`ResourcePeer::property`]); dropping the lease ends the Subscription with the
 //! peer.
 //!
 //! Each fails with [`PeerError`]: [`PeerError::Disconnected`] when the peer
-//! leaves before the job lands, [`PeerError::TimedOut`] when it does not answer
-//! in time, [`PeerError::Refused`] with its NAK (a Profile switch or a report) or
-//! its [`PeFailure`] (a Property Exchange call). A request made of a port that
-//! is lost, or of a peer, Profile or Resource the port no longer lists (a
-//! [`ListedResource`] whose peer's ResourceList changed since it was read), fails at
-//! the call: the job is returned already ended, as [`PeerError::Disconnected`].
+//! leaves before the answer, [`PeerError::TimedOut`] when it does not answer in
+//! time, [`PeerError::Refused`] with its NAK (a Profile switch or a report) or its
+//! [`PeFailure`] (a Property Exchange call). A request made of a port that is
+//! lost, or of a peer, Profile or Resource the port no longer lists, fails at the
+//! call: it is returned already ended, as [`PeerError::Disconnected`].
 
-use std::sync::Weak;
+use std::collections::BTreeMap;
+use std::sync::{Mutex, Weak};
 
 use tutti_midi_ci::{
     BodyLimit, CallError, CiDeviceId, Nak, PeData, PeOutcome, PeReply, PeResource, PeSignal,
@@ -42,6 +44,7 @@ use tutti_midi_hardware::{
     PeerProfiles, ProfileSwitch, PropertyAsk, PropertyCall, PropertyPeer, ReportAsk, ReportEnd,
     Reporter as ListedReporter, WholeSwitcher as ListedWhole,
 };
+use tutti_rt::LockExt;
 use tutti_ump::MidiChannel;
 
 use crate::SessionEvent;
@@ -49,7 +52,7 @@ use crate::job::{JobOutputQueue, Ticket, job_kind};
 use crate::midi_port::{Ended, InputRequest, InputShared};
 use crate::peer::{ResourceId, ResourceIds};
 use crate::{Job, PeerError};
-use reply::Request;
+use reply::PeerReply;
 
 job_kind!(
     /// A peer's Profile switch: the state the peer's Enabled or Disabled Report
@@ -69,7 +72,7 @@ pub use state::{RestorePeerState, SavePeerState};
 mod reply;
 mod subscription;
 
-pub(crate) use reply::Reply;
+pub(crate) use reply::Landing;
 pub(crate) use subscription::{EndSubscription, Subscriptions};
 pub use subscription::{Subscribe, Subscription, SubscriptionCause};
 
@@ -161,39 +164,39 @@ impl PortLink {
         &self,
         request: R,
         lists: impl FnOnce(&crate::MidiInputInfo, &R) -> bool,
-        make: impl FnOnce(R, Reply<J>) -> InputRequest,
+        make: impl FnOnce(R, Landing<J>) -> InputRequest,
     ) -> Job<J>
     where
         J: crate::JobKind<Error = PeerError<E>>,
     {
         let (job, ticket) = Ticket::new(&self.outputs);
-        self.queue(request, Reply::Job(ticket), lists, make);
+        self.queue(request, Landing::Job(ticket), lists, make);
         job
     }
 
     /// A [`Request`] for `request`, queued as [`submit`](Self::submit) queues a
     /// job: it resolves when the peer answers, or at once when the port cannot
     /// take it.
-    fn request<J, R>(
+    fn reply<J, R>(
         &self,
         request: R,
         lists: impl FnOnce(&crate::MidiInputInfo, &R) -> bool,
-        make: impl FnOnce(R, Reply<J>) -> InputRequest,
-    ) -> Request<J::Output>
+        make: impl FnOnce(R, Landing<J>) -> InputRequest,
+    ) -> PeerReply<J::Output>
     where
         J: crate::JobKind<Error = PeerError<PeFailure>>,
     {
-        let (sender, asked) = Request::new();
-        self.queue(request, Reply::Future(sender), lists, make);
+        let (sender, asked) = PeerReply::new();
+        self.queue(request, Landing::Future(sender), lists, make);
         asked
     }
 
     fn queue<J, R, E>(
         &self,
         request: R,
-        reply: Reply<J>,
+        reply: Landing<J>,
         lists: impl FnOnce(&crate::MidiInputInfo, &R) -> bool,
-        make: impl FnOnce(R, Reply<J>) -> InputRequest,
+        make: impl FnOnce(R, Landing<J>) -> InputRequest,
     ) where
         J: crate::JobKind<Error = PeerError<E>>,
     {
@@ -222,7 +225,7 @@ impl std::fmt::Debug for PortLink {
 /// Discovery declared ([`info`](Self::info)) and the handles of what it offers,
 /// each `None` for a peer that did not declare it. It names its port and its
 /// [`PeerId`]; its requests go through the port's queue.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ListedPeer {
     id: ResourceId,
     port: ResourceId,
@@ -233,18 +236,6 @@ pub struct ListedPeer {
     profiles: Option<ProfilePeer>,
     report: Option<ReportPeer>,
     resources: Option<ResourcePeer>,
-}
-
-impl PartialEq for ListedPeer {
-    fn eq(&self, other: &Self) -> bool {
-        self.id == other.id
-            && self.port == other.port
-            && self.device == other.device
-            && self.info == other.info
-            && self.profiles == other.profiles
-            && self.report == other.report
-            && self.resources == other.resources
-    }
 }
 
 impl ListedPeer {
@@ -268,9 +259,9 @@ impl ListedPeer {
         }
     }
 
-    /// The peer's id in the session: minted when its input first lists it and
-    /// the same while the input lists it, and again if it leaves and returns
-    /// with the same Group and MUID.
+    /// The peer's id in the session, as a [`Resource`](crate::Resource) is named: minted when
+    /// its input first lists it, and the same for as long as the input lists it
+    /// ([`peer_id`](Self::peer_id) is its Group and MUID on the wire).
     #[must_use]
     pub const fn id(&self) -> ResourceId {
         self.id
@@ -289,7 +280,8 @@ impl ListedPeer {
         &self.device
     }
 
-    /// The peer's Group and MUID.
+    /// The peer's Group and MUID, which name it on the wire
+    /// ([`id`](Self::id) names it in the session).
     #[must_use]
     pub const fn peer_id(&self) -> PeerId {
         self.info.id()
@@ -654,10 +646,47 @@ impl ListedResource {
     }
 }
 
+/// A handle the hardware layer holds of one peer, named by its Group and MUID.
+pub(crate) trait AtPeer {
+    fn peer_id(&self) -> PeerId;
+}
+
+impl AtPeer for PeerProfiles {
+    fn peer_id(&self) -> PeerId {
+        PeerId {
+            group: self.group(),
+            muid: self.muid(),
+        }
+    }
+}
+
+impl AtPeer for ListedReporter {
+    fn peer_id(&self) -> PeerId {
+        PeerId {
+            group: self.group(),
+            muid: self.muid(),
+        }
+    }
+}
+
+impl AtPeer for PropertyPeer {
+    fn peer_id(&self) -> PeerId {
+        PeerId {
+            group: self.group(),
+            muid: self.muid(),
+        }
+    }
+}
+
+/// The handle of `peer` among `handles`, if one is.
+pub(crate) fn at_peer<T: AtPeer>(handles: &[T], peer: PeerId) -> Option<&T> {
+    handles.iter().find(|handle| handle.peer_id() == peer)
+}
+
 /// Whether the port's info still lists the peer of `ask`.
 pub(crate) fn listed_peer(info: &crate::MidiInputInfo, ask: &PropertyAsk) -> bool {
     info.property_peers()
-        .any(|peer| peer.group() == ask.peer().group() && peer.muid() == ask.peer().muid())
+        .any(|peer| peer.peer_id() == peer_of(ask))
 }
 
 /// Whether the port's info still lists the peer of `ask` with the Resource's
@@ -667,7 +696,7 @@ fn listing(entry: &ResourceEntry) -> impl FnOnce(&crate::MidiInputInfo, &Propert
         listed_peer(info, ask)
             && info
                 .property_peers()
-                .find(|peer| peer.group() == ask.peer().group() && peer.muid() == ask.peer().muid())
+                .find(|peer| peer.peer_id() == peer_of(ask))
                 .is_some_and(|peer| peer.resources().entry(entry.resource()) == Some(entry))
     }
 }
@@ -680,7 +709,7 @@ struct Slot<R, J: crate::JobKind> {
     peer: PeerId,
     request: R,
     sent: bool,
-    tickets: Vec<Reply<J>>,
+    tickets: Vec<Landing<J>>,
 }
 
 /// The requests a port has made of its peers and they have not answered.
@@ -702,9 +731,11 @@ pub(crate) struct Pending {
     /// What the live Subscriptions hold.
     subs: Subscriptions,
     ids: ResourceIds,
-    /// The id of each peer the port has listed: kept when the peer leaves, so
-    /// one that returns with the same Group and MUID has its id again.
-    peer_ids: std::sync::Mutex<std::collections::BTreeMap<PeerId, ResourceId>>,
+    /// The id of each peer the port lists: kept for as long as the peer stays
+    /// listed, so a refresh of the listing gives it the same id, and dropped
+    /// when a refresh lists the peer no more, so a peer that returns after that
+    /// is a new one with a new id.
+    peer_ids: Mutex<BTreeMap<PeerId, ResourceId>>,
 }
 
 /// A Property Exchange call sent to a peer, or waiting to be, in the order the
@@ -771,7 +802,7 @@ impl PropertySlot {
 
 /// Whether two asks are of one peer of the port.
 fn same_peer(a: &PropertyAsk, b: &PropertyAsk) -> bool {
-    a.peer().group() == b.peer().group() && a.peer().muid() == b.peer().muid()
+    peer_of(a) == peer_of(b)
 }
 
 /// The peer `ask` is of.
@@ -791,14 +822,19 @@ impl Pending {
             full: Vec::new(),
             subs: Subscriptions::default(),
             ids,
-            peer_ids: std::sync::Mutex::default(),
+            peer_ids: Mutex::default(),
         }
     }
 
-    /// The id of `peer`: minted when the port first lists it.
-    pub(crate) fn peer_id(&self, peer: PeerId) -> ResourceId {
-        let mut ids = tutti_rt::LockExt::lock_recover(&self.peer_ids);
-        *ids.entry(peer).or_insert_with(|| self.ids.mint())
+    /// The ids of the peers `listed`, in its order: minted when a peer is first
+    /// listed, and dropped for the peers `listed` no longer holds.
+    pub(crate) fn peer_ids(&self, listed: &[PeerId]) -> Vec<ResourceId> {
+        let mut ids = self.peer_ids.lock_recover();
+        ids.retain(|peer, _| listed.contains(peer));
+        listed
+            .iter()
+            .map(|peer| *ids.entry(*peer).or_insert_with(|| self.ids.mint()))
+            .collect()
     }
 
     /// Takes in a switch the app asked for: sent now when nothing else is out
@@ -807,7 +843,7 @@ impl Pending {
         &mut self,
         io: &mut MidiSession,
         switch: ProfileSwitch,
-        ticket: Reply<SwitchProfile>,
+        ticket: Landing<SwitchProfile>,
     ) {
         let key = (switch.peer(), switch_at(&switch.request()));
         let last = self
@@ -834,7 +870,7 @@ impl Pending {
         &mut self,
         io: &mut MidiSession,
         ask: ReportAsk,
-        ticket: Reply<RequestReport>,
+        ticket: Landing<RequestReport>,
     ) {
         let last = self.reports.iter_mut().rev().find(|s| s.peer == ask.peer());
         if let Some(slot) = last.filter(|s| s.request == ask) {
@@ -856,7 +892,7 @@ impl Pending {
         &mut self,
         io: &mut MidiSession,
         ask: PropertyAsk,
-        ticket: Reply<GetProperty>,
+        ticket: Landing<GetProperty>,
     ) {
         if let Some(PropertySlot::Get(slot)) = self.last_for(&ask).filter(|s| *s.ask() == ask) {
             slot.tickets.push(ticket);
@@ -877,7 +913,7 @@ impl Pending {
         &mut self,
         io: &mut MidiSession,
         ask: PropertyAsk,
-        ticket: Reply<SetProperty>,
+        ticket: Landing<SetProperty>,
     ) {
         if let Some(PropertySlot::Set(slot)) = self.last_for(&ask).filter(|s| *s.ask() == ask) {
             slot.tickets.push(ticket);
@@ -898,7 +934,7 @@ impl Pending {
         &mut self,
         io: &mut MidiSession,
         ask: PropertyAsk,
-        ticket: Reply<Subscribe>,
+        ticket: Landing<Subscribe>,
     ) {
         self.properties.push(PropertySlot::Subscribe(Slot {
             peer: peer_of(&ask),
@@ -914,7 +950,7 @@ impl Pending {
         &mut self,
         io: &mut MidiSession,
         ask: PropertyAsk,
-        ticket: Reply<EndSubscription>,
+        ticket: Landing<EndSubscription>,
     ) {
         self.properties.push(PropertySlot::Unsubscribe(Slot {
             peer: peer_of(&ask),

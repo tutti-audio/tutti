@@ -1161,24 +1161,38 @@ mod state {
         wire.port.info().peers()[0].clone()
     }
 
-    /// **A device's state is its `fullState`, saved and restored through its
-    /// State resource** (M2-111 §3): a save resolves to the bytes the device holds
-    /// with the media type it declared, as the state of the device; a restore of
-    /// other bytes is a Set the device keeps, and a save after it reads them back.
+    /// **A save lands the bytes the device holds** (M2-111 §3): with the media
+    /// type it declared, as the state of this device.
     #[test]
-    fn a_devices_full_state_is_saved_and_restored_through_its_state_resource() {
+    fn a_save_lands_the_bytes_and_media_type_the_device_holds() {
         let mut wire = Wire::new(serving(&[1, 2, 3]));
         let device = peer(&wire);
         let state = drive(&mut wire, device.save_state()).expect("saved");
         assert_eq!(state.bytes(), [1, 2, 3]);
         assert_eq!(*state.media_type(), MediaType::OCTET_STREAM);
-        assert_eq!(*state.peer(), SavedPeer::Device(device.device().clone()));
+    }
 
-        let other = PeerState::new(state.peer().clone(), MediaType::OCTET_STREAM, vec![9, 8]);
+    /// **A save is the state of the device it was taken from**, so a restore to
+    /// another device is refused.
+    #[test]
+    fn a_save_names_the_device_it_came_from() {
+        let mut wire = Wire::new(serving(&[1]));
+        let device = peer(&wire);
+        let state = drive(&mut wire, device.save_state()).expect("saved");
+        assert_eq!(*state.peer(), SavedPeer::Device(device.device().clone()));
+    }
+
+    /// **A restore is a Set the device keeps**: a save after it reads the bytes
+    /// back.
+    #[test]
+    fn a_restore_is_a_set_the_device_keeps_and_a_save_reads_back() {
+        let mut wire = Wire::new(serving(&[1, 2, 3]));
+        let device = peer(&wire);
+        let saved = drive(&mut wire, device.save_state()).expect("saved");
+        let other = PeerState::new(saved.peer().clone(), MediaType::OCTET_STREAM, vec![9, 8]);
         let restore = device.restore_state(other).expect("the same device");
         drive(&mut wire, restore).expect("restored");
         assert_eq!(held(&wire), [9, 8], "the device keeps what was set");
-
         let state = drive(&mut wire, device.save_state()).expect("saved");
         assert_eq!(state.bytes(), [9, 8]);
     }
@@ -1233,6 +1247,44 @@ mod state {
         assert_eq!(drive(&mut wire, restore), Err(named));
     }
 
+    /// **A future resolves in the session's updates, not by itself**: polled with
+    /// no update it stays pending, and the updates that send the Get and read the
+    /// answer make it ready.
+    #[test]
+    fn a_save_is_pending_until_the_session_updates() {
+        let mut wire = Wire::new(serving(&[1, 2]));
+        let device = peer(&wire);
+        let mut save = pin!(device.save_state());
+        let mut cx = Context::from_waker(Waker::noop());
+        for _ in 0..3 {
+            assert!(
+                save.as_mut().poll(&mut cx).is_pending(),
+                "no update has run"
+            );
+        }
+        let state = drive(&mut wire, save).expect("saved");
+        assert_eq!(state.bytes(), [1, 2]);
+    }
+
+    /// **Two saves asked together share one Get and one answer**: both resolve to
+    /// the same state, and the device is asked once.
+    #[test]
+    fn two_saves_asked_together_share_one_get_and_one_answer() {
+        let mut wire = Wire::new(serving(&[3, 4]));
+        let device = peer(&wire);
+        let (first, second) = (device.save_state(), device.save_state());
+        let first = drive(&mut wire, first).expect("saved");
+        let second = drive(&mut wire, second).expect("saved");
+        assert_eq!(first, second);
+        let gets = wire
+            .peer
+            .asked
+            .iter()
+            .filter(|a| matches!(a, super::Asked::Get(name) if name == "State"))
+            .count();
+        assert_eq!(gets, 1, "one Get answered both: {:?}", wire.peer.asked);
+    }
+
     /// **A save whose device goes away resolves to `Disconnected`, and never
     /// hangs**: the device never answers, is unplugged, and the future ends.
     #[test]
@@ -1244,6 +1296,83 @@ mod state {
         wire.run(20);
         wire.fake.unplug(EndpointId::from_raw(RAW));
         assert_eq!(drive(&mut wire, save), Err(PeerError::Disconnected));
+    }
+
+    /// **A restore whose device goes away mid-request resolves to
+    /// `Disconnected`**, as a save does.
+    #[test]
+    fn a_restore_whose_device_goes_away_resolves_to_disconnected() {
+        let mut wire = Wire::new(serving(&[1]));
+        wire.peer.reply = super::Reply::Silent;
+        let device = peer(&wire);
+        let state = PeerState::new(
+            SavedPeer::Device(device.device().clone()),
+            MediaType::OCTET_STREAM,
+            vec![5],
+        );
+        let restore = device.restore_state(state).expect("the same device");
+        wire.run(20);
+        wire.fake.unplug(EndpointId::from_raw(RAW));
+        assert_eq!(drive(&mut wire, restore), Err(PeerError::Disconnected));
+    }
+
+    /// **A restore whose port is released resolves to `Released`**: the entry the
+    /// handle came from is gone.
+    #[test]
+    fn a_restore_whose_port_is_released_resolves_to_released() {
+        let mut wire = Wire::new(serving(&[1]));
+        wire.peer.reply = super::Reply::Silent;
+        let device = peer(&wire);
+        let state = PeerState::new(
+            SavedPeer::Device(device.device().clone()),
+            MediaType::OCTET_STREAM,
+            vec![5],
+        );
+        let restore = device.restore_state(state).expect("the same device");
+        wire.run(20);
+        wire.s
+            .pool(Vec::<
+                tutti_session::Declared<&str, tutti_session::MidiInputEntry>,
+            >::new())
+            .expect("declares nothing");
+        assert_eq!(drive(&mut wire, restore), Err(PeerError::Released));
+    }
+
+    /// **A `ListedPeer` kept after its peer left fails a save with
+    /// `Disconnected`**: the port no longer lists the peer it asks.
+    #[test]
+    fn a_listed_peer_kept_after_its_peer_left_resolves_a_save_to_disconnected() {
+        let mut wire = Wire::new(serving(&[1]));
+        let device = peer(&wire);
+        let muid = wire.peer.muid;
+        for ump in (tutti_midi_ci::CiMessage::InvalidateMuid {
+            header: tutti_midi_ci::CiHeader::new(muid),
+            target: muid,
+        })
+        .packets(tutti_ump::MidiGroup::FIRST)
+        .unwrap()
+        {
+            let now = wire.start + std::time::Duration::from_millis(wire.ms);
+            assert!(wire.fake.send_input(EndpointId::from_raw(RAW), ump, now));
+        }
+        wire.run(20);
+        assert!(wire.port.info().peers().is_empty(), "the peer left");
+        assert_eq!(
+            drive(&mut wire, device.save_state()),
+            Err(PeerError::Disconnected)
+        );
+    }
+
+    /// **A save dropped before the device answers is harmless**: the answer goes
+    /// nowhere, and the next save of the same device resolves.
+    #[test]
+    fn a_dropped_save_leaves_the_next_one_working() {
+        let mut wire = Wire::new(serving(&[4, 5]));
+        let device = peer(&wire);
+        drop(device.save_state());
+        wire.run(60);
+        let state = drive(&mut wire, device.save_state()).expect("saved");
+        assert_eq!(state.bytes(), [4, 5]);
     }
 
     /// **A save whose session is dropped resolves to `Disconnected`**: the future
@@ -1259,17 +1388,5 @@ mod state {
             save.as_mut().poll(&mut cx),
             Poll::Ready(Err(PeerError::Disconnected))
         );
-    }
-
-    /// **A save dropped before the device answers is harmless**: the answer goes
-    /// nowhere, and the next save of the same device resolves.
-    #[test]
-    fn a_dropped_save_leaves_the_next_one_working() {
-        let mut wire = Wire::new(serving(&[4, 5]));
-        let device = peer(&wire);
-        drop(device.save_state());
-        wire.run(60);
-        let state = drive(&mut wire, device.save_state()).expect("saved");
-        assert_eq!(state.bytes(), [4, 5]);
     }
 }

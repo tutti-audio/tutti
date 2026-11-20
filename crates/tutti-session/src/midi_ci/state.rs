@@ -1,5 +1,9 @@
-//! A device's state as requests: the `fullState` of its State resource (M2-111),
+//! A device's state as futures: the `fullState` of its State resource (M2-111),
 //! got and set through the Property Exchange calls of its listed Resources.
+//!
+//! A call is queued when it is made, sent in the session's next
+//! [`update`](crate::Session::update), and resolved in the update that reads the
+//! device's answer: keep updating while you await it.
 
 use std::future::Future;
 use std::pin::Pin;
@@ -14,38 +18,45 @@ use tutti_midi_device::SavedDevice;
 use tutti_midi_hardware::PropertyCall;
 
 use super::{
-    GetProperty, InputRequest, ListedPeer, ListedResource, PeFailure, Request, SetProperty, listing,
+    GetProperty, InputRequest, ListedPeer, ListedResource, PeFailure, PeerReply, SetProperty,
+    listing,
 };
 use crate::{OtherPeer, PeerError, PeerState, SavedPeer};
 
 /// A save of a device's state in flight: it resolves to the state the device
 /// sent, or to why it did not.
 ///
-/// The device answers on tutti's MIDI thread. Dropping the future drops the
-/// answer; a device or session that goes away resolves it to
-/// [`PeerError::Disconnected`].
+/// It resolves in a later [`Session::update`](crate::Session::update): keep
+/// updating while you await it. Dropping it drops the answer; a device or session
+/// that goes away resolves it to [`PeerError::Disconnected`].
 #[derive(Debug)]
 #[must_use = "a save is answered only when it is awaited"]
 pub struct SavePeerState {
-    request: Request<PeData>,
-    device: SavedDevice,
+    reply: PeerReply<PeData>,
+    /// The device the state is of: taken when the future resolves.
+    device: Option<SavedDevice>,
 }
 
 impl Future for SavePeerState {
     type Output = Result<PeerState, PeerError<PeFailure>>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let Poll::Ready(got) = Pin::new(&mut self.request).poll(cx) else {
+        let Poll::Ready(got) = Pin::new(&mut self.reply).poll(cx) else {
             return Poll::Pending;
         };
-        let device = self.device.clone();
+        let device = self
+            .device
+            .take()
+            .expect("a future is not polled once ready");
         Poll::Ready(got.and_then(|data| {
-            let state = PeState::try_from(data).map_err(|_| {
-                PeerError::Refused(PeFailure::Unreadable(ResourceFailure::Data(PeDataError {
-                    place: Place::of("State"),
-                    fault: PeDataFault::WrongType("State"),
-                })))
-            })?;
+            let PeData::State(state) = data else {
+                return Err(PeerError::Refused(PeFailure::Unreadable(
+                    ResourceFailure::Data(PeDataError {
+                        place: Place::of("State"),
+                        fault: PeDataFault::OfResource(data.resource()),
+                    }),
+                )));
+            };
             let (media_type, bytes) = match state.body() {
                 OpaqueBody::Binary { media_type, bytes } => (media_type.clone(), bytes.clone()),
                 OpaqueBody::Json(json) => (MediaType::JSON, json.encode()),
@@ -58,25 +69,24 @@ impl Future for SavePeerState {
 /// A restore of a device's state in flight: it resolves once the device has
 /// answered its Set, or to why it did not.
 ///
-/// The device answers on tutti's MIDI thread, as for [`SavePeerState`].
+/// It resolves in a later [`Session::update`](crate::Session::update), as
+/// [`SavePeerState`] does.
 #[derive(Debug)]
 #[must_use = "a restore is answered only when it is awaited"]
 pub struct RestorePeerState {
-    request: Request<PeStatus>,
+    reply: PeerReply<PeStatus>,
 }
 
 impl Future for RestorePeerState {
     type Output = Result<(), PeerError<PeFailure>>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        Pin::new(&mut self.request)
-            .poll(cx)
-            .map(|set| set.map(drop))
+        Pin::new(&mut self.reply).poll(cx).map(|set| set.map(drop))
     }
 }
 
 impl ListedPeer {
-    /// The State resource the peer's ResourceList names, if it does.
+    /// The State resource the peer's ResourceList names, or why there is none.
     fn state_resource(&self) -> Result<ListedResource, PeerError<PeFailure>> {
         self.resources()
             .and_then(|peer| peer.listed().find(|l| *l.resource() == PeResource::State))
@@ -91,32 +101,36 @@ impl ListedPeer {
     /// (M2-111 §3.2), resolving to the body as it came with the media type the
     /// device declared.
     ///
-    /// The Get is queued as any peer call is and the device answers on tutti's
-    /// MIDI thread. A peer whose ResourceList has no State resource resolves to
-    /// [`PeFailure::NotSent`].
+    /// The Get is queued as any peer call is, sent in the session's next
+    /// [`update`](crate::Session::update) and resolved in the update that reads
+    /// the device's answer: keep updating while you await it. A peer whose
+    /// ResourceList has no State resource resolves to [`PeFailure::NotSent`], and
+    /// one that is no longer listed to [`PeerError::Disconnected`].
     #[must_use = "a save is answered only when it is awaited"]
     pub fn save_state(&self) -> SavePeerState {
-        let device = self.device.clone();
-        let request = self
+        let reply = self
             .state_resource()
             .and_then(|resource| {
                 let get = Self::full_state()
                     .map(|target| ResourceGet::new(target).encoded(encoding_of(&resource)))
                     .map_err(not_sent)?;
-                Ok(resource.link.request::<GetProperty, _>(
+                Ok(resource.link.reply::<GetProperty, _>(
                     resource.peer.ask(PropertyCall::Get(get)),
                     listing(&resource.entry),
                     InputRequest::Get,
                 ))
             })
-            .unwrap_or_else(Request::failed);
-        SavePeerState { request, device }
+            .unwrap_or_else(PeerReply::failed);
+        SavePeerState {
+            reply,
+            device: Some(self.device.clone()),
+        }
     }
 
     /// Restores `state` to the device: a Set of its State resource's
     /// `fullState` with the body and media type `state` holds, resolving once the
-    /// device answers it. The device answers on tutti's MIDI thread, as for
-    /// [`save_state`](Self::save_state).
+    /// device answers it. It is sent and resolved in the session's updates, as
+    /// [`save_state`](Self::save_state) is.
     ///
     /// # Errors
     ///
@@ -125,7 +139,7 @@ impl ListedPeer {
     #[must_use = "a restore is answered only when it is awaited"]
     pub fn restore_state(&self, state: PeerState) -> Result<RestorePeerState, OtherPeer> {
         state.check_for(&SavedPeer::Device(self.device.clone()))?;
-        let request = self
+        let reply = self
             .state_resource()
             .and_then(|resource| {
                 let body =
@@ -136,14 +150,14 @@ impl ListedPeer {
                     .and_then(|target| ResourceSet::full(target, PeData::State(body)))
                     .map(|set| set.encoded(encoding_of(&resource)))
                     .map_err(not_sent)?;
-                Ok(resource.link.request::<SetProperty, _>(
+                Ok(resource.link.reply::<SetProperty, _>(
                     resource.peer.ask(PropertyCall::Set(set)),
                     listing(&resource.entry),
                     InputRequest::Set,
                 ))
             })
-            .unwrap_or_else(Request::failed);
-        Ok(RestorePeerState { request })
+            .unwrap_or_else(PeerReply::failed);
+        Ok(RestorePeerState { reply })
     }
 }
 

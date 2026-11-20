@@ -22,8 +22,8 @@ use std::sync::{Arc, Mutex, Weak};
 use tutti_graph::{EventTapReader, Losses, NodeKey};
 use tutti_midi_device::{DeviceId, DeviceInfo, Learned, Match, Resolved, SavedDevice};
 use tutti_midi_hardware::{
-    Answer, DeviceStream, InputFault, MidiSession, PeerProfiles, ProfileSwitch, PropertyAsk,
-    PropertyPeer, ReportAsk,
+    Answer, CiPeerInfo, DeviceStream, InputFault, MidiSession, PeerProfiles, ProfileSwitch,
+    PropertyAsk, PropertyPeer, ReportAsk,
 };
 use tutti_midi_runtime::{
     DeviceGeneration, GenerationWriter, InputReaders, InputWriters, JrStream, MidiInputControls,
@@ -35,8 +35,8 @@ use tutti_units::{Resyncs, Seconds};
 
 use crate::midi::{LossReaders, LossWriters, UmpOut, loss_cells};
 use crate::midi_ci::{
-    EndSubscription, GetProperty, ListedPeer, Pending, PortLink, ProfilePeer, Reply, ReportPeer,
-    RequestReport, ResourcePeer, SetProperty, Subscribe, SwitchProfile,
+    EndSubscription, GetProperty, Landing, ListedPeer, Pending, PortLink, ProfilePeer, ReportPeer,
+    RequestReport, ResourcePeer, SetProperty, Subscribe, SwitchProfile, at_peer,
 };
 use crate::pool::{Declared, HandleError, Life, LoadError, PoolEntry, PoolLoad};
 use crate::{
@@ -282,14 +282,14 @@ pub(crate) struct InputShared {
 }
 
 /// What a handle asked of the device, for the session to send at its next poll,
-/// with the ticket of the job that waits for the answer.
+/// with the `Landing` that lands the answer.
 pub(crate) enum InputRequest {
-    Profile(ProfileSwitch, Reply<SwitchProfile>),
-    Report(ReportAsk, Reply<RequestReport>),
-    Get(PropertyAsk, Reply<GetProperty>),
-    Set(PropertyAsk, Reply<SetProperty>),
-    Subscribe(PropertyAsk, Reply<Subscribe>),
-    Unsubscribe(PropertyAsk, Reply<EndSubscription>),
+    Profile(ProfileSwitch, Landing<SwitchProfile>),
+    Report(ReportAsk, Landing<RequestReport>),
+    Get(PropertyAsk, Landing<GetProperty>),
+    Set(PropertyAsk, Landing<SetProperty>),
+    Subscribe(PropertyAsk, Landing<Subscribe>),
+    Unsubscribe(PropertyAsk, Landing<EndSubscription>),
 }
 
 impl InputRequest {
@@ -356,9 +356,9 @@ impl InputShared {
     pub(crate) fn push<J, R, E>(
         &self,
         request: R,
-        ticket: Reply<J>,
+        ticket: Landing<J>,
         lists: impl FnOnce(&MidiInputInfo, &R) -> bool,
-        make: impl FnOnce(R, Reply<J>) -> InputRequest,
+        make: impl FnOnce(R, Landing<J>) -> InputRequest,
     ) where
         J: crate::JobKind<Error = PeerError<E>>,
     {
@@ -875,27 +875,21 @@ fn input_info(
     let profiles = io.profiles(&device.id);
     let reporters = io.report_peers(&device.id);
     let properties = io.property_peers(&device.id);
-    let peers = io
-        .ci_peers(&device.id)
+    let infos = io.ci_peers(&device.id);
+    let ids = pending.peer_ids(&infos.iter().map(CiPeerInfo::id).collect::<Vec<_>>());
+    let peers = infos
         .iter()
-        .map(|info| {
+        .zip(ids)
+        .map(|(info, peer_id)| {
             let id = info.id();
             ListedPeer::new(
-                pending.peer_id(id),
+                peer_id,
                 port,
                 SavedDevice::new(device.clone(), learned),
                 info.clone(),
-                profiles
-                    .iter()
-                    .find(|p| p.group() == id.group && p.muid() == id.muid)
-                    .map(|p| ProfilePeer::new(link.clone(), p.clone())),
-                reporters
-                    .iter()
-                    .find(|p| p.group() == id.group && p.muid() == id.muid)
-                    .map(|p| ReportPeer::new(link.clone(), p.clone())),
-                properties
-                    .iter()
-                    .find(|p| p.group() == id.group && p.muid() == id.muid)
+                at_peer(&profiles, id).map(|p| ProfilePeer::new(link.clone(), p.clone())),
+                at_peer(&reporters, id).map(|p| ReportPeer::new(link.clone(), p.clone())),
+                at_peer(&properties, id)
                     .map(|p| ResourcePeer::new(link.clone(), p.clone(), pending.bodies(id))),
             )
         })
