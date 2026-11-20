@@ -155,7 +155,7 @@ impl<S: tutti_buffers::Float> PoolEntry<S> for AudioFile {
 
     fn load(&self) -> PoolLoad<Self::Loaded, S> {
         let (asset, tier) = (self.asset.clone(), self.tier);
-        PoolLoad::on_worker(move || match tier {
+        PoolLoad::on_app(move || match tier {
             Tier::Resident => resident::<S>(asset),
             Tier::Streamed => {
                 let facts = probe(&asset)?;
@@ -247,7 +247,7 @@ impl<S: tutti_buffers::Float> PoolEntry<S> for SoundFontFile {
 
     fn load(&self) -> PoolLoad<Self::Loaded, S> {
         let asset = self.asset.clone();
-        PoolLoad::on_worker(move || {
+        PoolLoad::on_app(move || {
             tutti_sf2::SoundFont::open(asset)
                 .map(Arc::new)
                 .map_err(|error| LoadError::SoundFont(Arc::new(error)))

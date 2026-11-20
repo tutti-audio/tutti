@@ -8,7 +8,7 @@ use std::thread::{self, ThreadId};
 
 use tutti_platform::MainThreadMarker;
 
-use super::{Spawned, events, session, state, took};
+use super::{Spawned, events, state, took, worker_session as session};
 use crate::{
     Declared, HandleError, JobStatus, Life, LoadError, PoolConfig, PoolEntry, PoolError, PoolLoad,
     PoolOutcome, Presence, RetryError, Session, WorkerError,
@@ -355,28 +355,27 @@ fn a_main_stage_is_accepted_once_an_update_has_run_on_a_main_thread() {
 }
 
 #[test]
-fn a_session_stage_runs_in_update_on_the_session_thread_with_no_worker() {
+fn a_session_stage_runs_in_the_declare_call_on_the_session_thread_with_no_worker() {
     let (mut s, spawned) = session();
     let log = Log::default();
     s.pool(declare(&stub("a", How::Session, &log))).unwrap();
-    assert_eq!(state(&s, "a").as_deref(), Some("opening"));
+    assert_eq!(
+        log.entries(),
+        ["session a at 48000"],
+        "it ran in pool, given the session's rate"
+    );
+    assert_eq!(log.thread_of("session a at 48000"), thread::current().id());
+    assert_eq!(state(&s, "a").as_deref(), Some("loaded"), "no update ran");
     assert!(
         spawned.run_until_stalled() == 0,
         "a session stage has no worker"
     );
-    assert!(log.entries().is_empty(), "it runs in update, not in pool");
+    assert!(s.take_loads().is_empty(), "and none is handed to the app");
     assert_eq!(events(&mut s), [("a", "loaded".to_owned())]);
-    assert_eq!(
-        log.entries(),
-        ["session a at 48000"],
-        "given the session's rate"
-    );
-    assert_eq!(log.thread_of("session a at 48000"), thread::current().id());
-    assert_eq!(state(&s, "a").as_deref(), Some("loaded"));
 }
 
 #[test]
-fn a_session_stage_that_panics_fails_its_entry_and_not_the_update() {
+fn a_session_stage_that_panics_fails_its_entry_and_not_the_declare_call() {
     let (mut s, _) = session();
     struct Panics;
     impl PoolEntry for Panics {
@@ -390,6 +389,10 @@ fn a_session_stage_that_panics_fails_its_entry_and_not_the_update() {
         fn handle(_: &(), _: &Life) {}
     }
     s.pool(Declared::new("a", Panics)).unwrap();
+    assert!(matches!(
+        s.pool_state(&"a"),
+        Some(crate::PoolState::Failed(_))
+    ));
     assert_eq!(
         events(&mut s),
         [(

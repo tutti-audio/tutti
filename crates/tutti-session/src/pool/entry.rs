@@ -106,16 +106,19 @@ pub enum Retention<T> {
 }
 
 /// The description of a load: the stages that end in the loaded value or a
-/// [`LoadError`], and the thread each runs on.
+/// [`LoadError`], and where each runs.
 ///
-/// - [`on_worker`](Self::on_worker): one stage on a thread of the session's
-///   executor, which finishes the load there.
-/// - [`on_worker_then_main`](Self::on_worker_then_main): a worker stage whose
-///   output goes by value to a stage on the main thread, which finishes it.
+/// - [`on_app`](Self::on_app): one stage the app runs, anywhere, as the
+///   [`LoadData`](crate::LoadData) of [`Session::take_loads`](crate::Session::take_loads);
+///   [`Session::apply`](crate::Session::apply) then installs its output.
 /// - [`on_session`](Self::on_session): one stage on the session's own thread,
-///   inside [`Session::update`](crate::Session::update), with no worker stage.
+///   inside the call that declares the entry.
 /// - [`ready`](Self::ready): no stage; the value lands when the pool declares
 ///   the entry.
+/// - [`on_worker`](Self::on_worker) and
+///   [`on_worker_then_main`](Self::on_worker_then_main): stages on a thread of
+///   the session's executor, and then the main thread. A plugin entry loads so
+///   until it is handed out as a [`LoadEntry`](crate::LoadEntry).
 #[must_use = "a load runs when the pool declares its entry"]
 pub struct PoolLoad<T, S: Float = f32> {
     pub(crate) step: Step<T, S>,
@@ -126,9 +129,13 @@ pub struct PoolLoad<T, S: Float = f32> {
 /// What a load's stages are, by the thread the first one runs on.
 pub(crate) enum Step<T, S: Float> {
     Ready(T),
+    Data(DataWork),
     Worker(Box<dyn FnOnce() -> Result<Staged, LoadError> + Send>),
     Session(Box<dyn FnOnce(&mut OpenCx<'_, S>) -> Result<T, LoadError> + Send>),
 }
+
+/// The stage the app runs: it reads and decodes, and holds nothing of the session.
+pub(crate) type DataWork = Box<dyn FnOnce() -> Result<Value, LoadError> + Send>;
 
 /// What a worker stage hands on: the finished value, or the main-thread stage
 /// that finishes it.
@@ -243,6 +250,21 @@ impl Staged {
 }
 
 impl<T: Send + 'static, S: Float> PoolLoad<T, S> {
+    /// A load that finishes in one stage the app runs: `work`, as the
+    /// [`LoadData`](crate::LoadData) that [`Session::take_loads`](crate::Session::take_loads)
+    /// hands out for the entry.
+    ///
+    /// The entry reads [`PoolState::Loading`](crate::PoolState::Loading) until the
+    /// app applies the output ([`Session::apply`](crate::Session::apply)). `work`
+    /// is built again when its [`LoadData`](crate::LoadData) is dropped without its
+    /// output being applied, so it may run more than once.
+    pub fn on_app(work: impl FnOnce() -> Result<T, LoadError> + Send + 'static) -> Self {
+        Self {
+            step: Step::Data(Box::new(move || work().map(|done| Box::new(done) as Value))),
+            main: false,
+        }
+    }
+
     /// A load that finishes in one stage: `work`, on a thread of the session's
     /// executor.
     pub fn on_worker(work: impl FnOnce() -> Result<T, LoadError> + Send + 'static) -> Self {
@@ -286,10 +308,10 @@ impl<T: Send + 'static, S: Float> PoolLoad<T, S> {
     }
 
     /// A load that is one stage on the session's own thread, run inside the
-    /// [`update`](crate::Session::update) after the entry is declared, with no
-    /// worker stage. `open` is given what the session thread owns that an open
-    /// needs ([`OpenCx`]); the entry reads
-    /// [`PoolState::Opening`](crate::PoolState::Opening) until it runs.
+    /// call that declares the entry ([`Session::pool`](crate::Session::pool),
+    /// [`Session::retry`](crate::Session::retry)), so it never waits for an
+    /// [`update`](crate::Session::update). `open` is given what the session thread
+    /// owns that an open needs ([`OpenCx`]), and must not block.
     pub fn on_session(
         open: impl FnOnce(&mut OpenCx<'_, S>) -> Result<T, LoadError> + Send + 'static,
     ) -> Self {
@@ -316,6 +338,7 @@ impl<T: Send + 'static, S: Float> PoolLoad<T, S> {
     pub(crate) fn erase(self) -> PoolLoad<Value, S> {
         let step = match self.step {
             Step::Ready(value) => Step::Ready(Box::new(value) as Value),
+            Step::Data(work) => Step::Data(work),
             Step::Worker(work) => Step::Worker(work),
             Step::Session(open) => Step::Session(Box::new(move |cx| {
                 open(cx).map(|done| Box::new(done) as Value)

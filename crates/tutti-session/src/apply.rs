@@ -87,7 +87,6 @@ impl<F: SessionFloat, T: sealed::Sealed<F>> Apply<F> for T {
 }
 
 pub(crate) use sealed::Cut;
-#[cfg(feature = "sampler")]
 pub(crate) use sealed::Sealed;
 
 impl<K: AppKey, C: Clock> Session<K, C> {

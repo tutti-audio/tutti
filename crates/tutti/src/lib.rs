@@ -474,10 +474,11 @@ pub mod session {
     pub use tutti_session::PoolLoad;
     pub use tutti_session::WorkerError;
     pub use tutti_session::{
-        Apply, Declared, HandleError, IntoPool, Life, LoadError, OpenCx, Owned, PoolConfig,
-        PoolEntry, PoolError, PoolEvent, PoolJobError, PoolKey, PoolLoaded, PoolOutcome,
-        PoolReport, PoolSet, PoolState, RefreshError, RefreshPool, RefreshReport, RefreshedPool,
-        Retention, RetryError, Sharing, WhenLoadedError, stranded_loads,
+        Apply, Declared, HandleError, IntoPool, Life, LoadData, LoadEntry, LoadError, LoadedEntry,
+        OpenCx, Owned, PoolApplyError, PoolConfig, PoolEntry, PoolError, PoolEvent, PoolJobError,
+        PoolKey, PoolLoaded, PoolOutcome, PoolReport, PoolSet, PoolState, RefreshError,
+        RefreshPool, RefreshReport, RefreshedPool, Retention, RetryError, Sharing, WhenLoadedError,
+        stranded_loads,
     };
 
     #[cfg(feature = "export")]

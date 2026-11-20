@@ -249,25 +249,19 @@ fn a_missing_file_is_an_io_read_error() {
 #[cfg(feature = "soundfont")]
 mod soundfont {
     use super::*;
-    use tutti_session::{LoadError, PoolState, soundfont};
+    use tutti_session::{LoadEntry, LoadError, PoolState, soundfont};
     use tutti_soundfont::Settings;
 
-    /// Updates until the entry under `key` is no longer pending.
+    /// Runs the loads the session hands out and applies them: the entry under
+    /// `key` is then no longer pending.
     fn settled(s: &mut DetachedSession, key: &'static str) -> PoolState {
-        let deadline = tutti_platform::Instant::now() + std::time::Duration::from_secs(20);
-        loop {
-            let _ = s.update();
-            match s.pool_state(&key) {
-                Some(PoolState::Loading) => {}
-                Some(state) => return state,
-                None => panic!("the entry is not declared"),
-            }
-            assert!(
-                tutti_platform::Instant::now() < deadline,
-                "the font never landed"
-            );
-            std::thread::sleep(std::time::Duration::from_millis(1));
+        for load in s.take_loads() {
+            let LoadEntry::Data(load) = load else {
+                panic!("a SoundFont entry is a data load");
+            };
+            s.apply(load.run()).expect("a load handed out applies");
         }
+        s.pool_state(&key).expect("the entry is declared")
     }
 
     #[test]

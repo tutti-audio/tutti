@@ -24,8 +24,8 @@
 //! Each kind of entry is a [`PoolEntry`]; `audio_file` (feature `sampler` and a `decode-*`) and
 //! `soundfont` (feature `soundfont`) are the data kinds, and
 //! `Session::plugin_entry` (feature `plugin`) declares a plugin, which a node
-//! then takes (`Session::add_pooled_plugin`). A load's outcome lands
-//! in [`Session::update`] as a [`SessionEvent::Pool`](crate::SessionEvent::Pool), and
+//! then takes (`Session::add_pooled_plugin`). A load's outcome is reported by
+//! [`Session::update`] as a [`SessionEvent::Pool`](crate::SessionEvent::Pool), and
 //! [`Session::pool_state`] reads where an entry stands. A handle read by key
 //! (`Session::audio`, `Session::soundfont`) is a clone that owns nothing:
 //! dropping it leaves its entry loaded. [`Session::when_loaded`] runs a
@@ -38,21 +38,40 @@
 //!
 //! # Stages
 //!
-//! A [`PoolLoad`] has one to two stages, each on a named thread: a worker of the
-//! session's executor ([`PoolLoad::on_worker`]), a worker and then the main thread
-//! ([`PoolLoad::on_worker_then_main`]), the session's own thread
-//! ([`PoolLoad::on_session`]), or none ([`PoolLoad::ready`]). At most
-//! [`PoolConfig::parallel_loads`] worker stages run at once; the rest wait in
-//! declaration order. A stage on the main thread or the session's thread runs
-//! in an [`update`](Session::update) on it.
+//! # Loads
+//!
+//! A [`PoolLoad`] is one of a few values:
+//!
+//! - [`PoolLoad::on_app`], a data kind's (`audio_file`, `soundfont`): the work the
+//!   app runs. [`Session::take_loads`] hands out each declared entry whose load
+//!   has not been handed out, once, in declaration order, as a
+//!   [`LoadEntry`]; [`LoadData::run`] reads the asset anywhere, without the
+//!   session, to a [`LoadedEntry`]; and [`Session::apply`] installs it:
+//!   handles, `when_loaded` runs, the old value dropped when the identity
+//!   changed, and for a failed load the entry reads failed and its old value's
+//!   handles read closed. A value dropped without its output being applied
+//!   makes the entry available to the next `take_loads`; an output of an entry
+//!   released, declared again with another identity or loaded again since is
+//!   [`PoolApplyError::Stale`]. Until applied the entry reads
+//!   [`PoolState::Loading`], and a bounce refuses it
+//!   (`BounceError::PoolPending`, feature `export`).
+//! - [`PoolLoad::on_session`], a MIDI port's or sink's: a stage on the session's
+//!   own thread, which runs inside the call that declares the entry
+//!   ([`Session::pool`], [`Session::retry`]) and never waits for an
+//!   [`update`](Session::update). [`PoolLoad::ready`] is the entry given its
+//!   value, which lands in the same call.
+//! - [`PoolLoad::on_worker`] and [`PoolLoad::on_worker_then_main`], a plugin's:
+//!   stages on a thread of the session's executor and then the main thread,
+//!   at most [`PoolConfig::parallel_loads`] worker stages at once, which land in
+//!   an [`update`](Session::update). They go when plugin entries are handed
+//!   out as [`LoadEntry`] values too.
 //!
 //! Two keys of a kind that shares ([`Declared::shared`]) with the same
 //! identity share one load and the one loaded value; any other kind is one
 //! instance per key.
 //!
 //! [`Session::pool_loaded`] reports every declared entry's outcome once none
-//! is pending, and a bounce refuses while one is
-//! (`BounceError::PoolPending`, feature `export`).
+//! is pending: a data entry is pending until the app applies its load.
 
 #[cfg(feature = "soundfont")]
 use std::sync::Arc;
@@ -65,6 +84,7 @@ mod data;
 mod entry;
 mod job;
 mod key;
+mod load;
 mod open;
 mod refresh;
 mod report;
@@ -83,6 +103,7 @@ pub use entry::{
 pub(crate) use entry::{Defer, Staged};
 pub use job::{PoolJobError, PoolLoaded};
 pub use key::PoolKey;
+pub use load::{LoadData, LoadEntry, LoadedEntry, PoolApplyError};
 pub use open::OpenCx;
 pub use refresh::{RefreshError, RefreshPool, RefreshReport, RefreshedPool};
 pub use report::{PoolOutcome, PoolReport};
@@ -110,12 +131,15 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// Declaring a key again with the same identity does not retry a failed
     /// load; [`retry`](Self::retry) does.
     ///
-    /// Returns at once. Each load's outcome lands as a
-    /// [`SessionEvent::Pool`](crate::SessionEvent::Pool) in a later [`update`](Self::update), those of one
-    /// update in the order the set names them, then the releases, by key within a key type.
-    /// An outcome that landed while its entry was held is reported when the
-    /// pool declares the entry again. At most
-    /// [`PoolConfig::parallel_loads`] worker stages run at once.
+    /// Returns at once. A new key starts a load: a data entry's waits for
+    /// [`take_loads`](Self::take_loads), a MIDI port's completes in this call, and
+    /// a plugin's runs on a thread of the session's executor, at most
+    /// [`PoolConfig::parallel_loads`] at once. Each load's outcome is reported
+    /// as a [`SessionEvent::Pool`](crate::SessionEvent::Pool) in the next
+    /// [`update`](Self::update), those of one update in the order the set names
+    /// them, then the releases, by key within a key type. An outcome that
+    /// landed while its entry was held is reported when the pool declares the
+    /// entry again.
     ///
     /// # Errors
     ///
@@ -136,11 +160,32 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
         Ok(())
     }
 
+    /// The loads of the declared entries that have not been handed out, once, in
+    /// declaration order: each is a value the app runs, anywhere, and hands back
+    /// to [`apply`](Self::apply).
+    ///
+    /// A data entry's load is handed out once; a second call finds it taken. One
+    /// whose [`LoadData`] was dropped without its output being applied is handed
+    /// out again, and [`retry`](Self::retry) arms a failed entry again. Two keys of
+    /// a kind that shares with one identity are one load. An entry whose load
+    /// completes inside the declare call (a MIDI port, a provided value) is
+    /// never handed out, and a plugin entry is loaded by the session until it is.
+    pub fn take_loads(&mut self) -> Vec<LoadEntry<C::Float>> {
+        let cut = crate::apply::Cut::of(self);
+        self.pool
+            .entries
+            .take_offers()
+            .into_iter()
+            .map(|offered| LoadEntry::Data(LoadData::new(cut, offered)))
+            .collect()
+    }
+
     /// Loads an entry again, with the identity it has: one that
     /// [failed](PoolState::Failed), or a loaded one its kind reads as lost.
     ///
     /// A failed entry loads as it did when declared (the plugin installed
-    /// since, the file written). A loaded entry whose handle reads lost
+    /// since, the file written): a data entry's load is handed out by the next
+    /// [`take_loads`](Self::take_loads). A loaded entry whose handle reads lost
     /// (a plugin that gave up, a device unplugged mid-run) reopens: its load
     /// runs again, and the entry reads [`PoolState::Reloading`] until it lands
     /// as a [`PoolEvent::Reloaded`]. It is the kind that decides whether an
@@ -163,9 +208,10 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
 
     /// The wait for every declared entry's outcome: it lands once no declared
     /// entry is pending, as a [`PoolReport`] of each key's outcome. Entries
-    /// that failed are in it, as [`PoolOutcome::Failed`]. An offline session
-    /// waits on this job ([`Job::wait`](crate::Job::wait)) before it renders.
-    /// Dropping the [`Job`](crate::Job) ends the wait.
+    /// that failed are in it, as [`PoolOutcome::Failed`]. A data entry is
+    /// pending until the app applies its load ([`take_loads`](Self::take_loads)),
+    /// which nothing waits for here. Dropping the [`Job`](crate::Job) ends the
+    /// wait.
     ///
     /// `P` is the type of the keys the pool was declared with; keys of another
     /// type are not in the report.

@@ -9,7 +9,7 @@ use tutti_buffers::InterleavedMut;
 use tutti_fixtures::wait_until;
 use tutti_graph::ForkByClone;
 use tutti_sampler::StreamStart;
-use tutti_session::{AudioEntry, OutPort, PoolState, Root, Session, SessionEvent, audio_file};
+use tutti_session::{AudioEntry, OutPort, PoolState, Root, Session, audio_file};
 use tutti_units::{Beat, SampleRate};
 
 #[path = "../support/f64_nodes.rs"]
@@ -39,22 +39,14 @@ fn write_ramp(path: &std::path::Path) {
     tutti_fixtures::signal::write_wav_f32(path, SampleRate::of(RATE), 1, &samples);
 }
 
-/// Updates `s` until `done` finds what it waits for in what the update landed.
-fn until<T>(
-    s: &mut tutti_session::OfflineSession<&'static str, f64>,
-    what: &str,
-    mut done: impl FnMut(
-        &mut tutti_session::OfflineSession<&'static str, f64>,
-        Vec<SessionEvent>,
-    ) -> Option<T>,
-) -> T {
-    let mut found = None;
-    wait_until(what, Duration::from_secs(20), || {
-        let events = s.update();
-        found = done(s, events);
-        found.is_some()
-    });
-    found.expect("the wait ended on it")
+/// Runs the loads the session hands out and applies them.
+fn load_all(s: &mut tutti_session::OfflineSession<&'static str, f64>) {
+    for load in s.take_loads() {
+        let tutti_session::LoadEntry::Data(load) = load else {
+            panic!("an audio file is a data load");
+        };
+        s.apply(load.run()).expect("a load handed out applies");
+    }
 }
 
 /// Frame `i` of the `f64` ramp file: `FINE` scaled, so no frame is an `f32`.
@@ -93,9 +85,8 @@ fn a_pooled_resident_wave_holds_f64_frames_and_its_clip_plays_them() {
     write_f64_ramp(&path);
     let mut s = session();
     s.pool(audio_file("ramp", &path)).expect("a declaration");
-    until(&mut s, "the entry", |s, _| {
-        matches!(s.pool_state(&"ramp"), Some(PoolState::Loaded)).then_some(())
-    });
+    load_all(&mut s);
+    assert!(matches!(s.pool_state(&"ramp"), Some(PoolState::Loaded)));
     let AudioEntry::Resident(wave) = s.audio(&"ramp").expect("loaded") else {
         panic!("a resident entry");
     };

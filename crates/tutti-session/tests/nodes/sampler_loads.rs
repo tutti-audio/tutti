@@ -11,7 +11,8 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_sampler::{OpenError, StreamPhase, StreamStart};
 use tutti_session::{
-    AudioEntry, OpenStreamError, OutPort, PoolState, Root, SamplerError, Session, audio_file,
+    AudioEntry, LoadEntry, OpenStreamError, OutPort, PoolState, Root, SamplerError, Session,
+    audio_file,
 };
 use tutti_units::{Beat, SampleRate};
 
@@ -112,12 +113,8 @@ fn clip_of(path: &Path, streamed: bool) -> (Session, tutti_sampler::Clip<f32>) {
     let entry = audio_file("ramp", path);
     s.pool(if streamed { entry.streamed() } else { entry })
         .expect("a declaration");
-    let deadline = Instant::now() + Duration::from_secs(20);
-    while !matches!(s.pool_state(&"ramp"), Some(PoolState::Loaded)) {
-        assert!(Instant::now() < deadline, "the entry never loaded");
-        let _ = s.update();
-        std::thread::sleep(Duration::from_millis(1));
-    }
+    load_all(&mut s);
+    assert!(matches!(s.pool_state(&"ramp"), Some(PoolState::Loaded)));
     let clip = match s.audio(&"ramp").expect("loaded") {
         AudioEntry::Resident(wave) => tutti_sampler::Clip::new(wave).expect("a placeable wave"),
         AudioEntry::Streamed(info) => {
@@ -222,13 +219,20 @@ fn a_clip_of_either_tier_plays_the_files_samples() {
     }
 }
 
-/// Updates until the entry under `key` has landed.
+/// Runs the loads the session hands out and applies them: the entry under
+/// `key` has landed.
 fn settle(s: &mut Session, key: &'static str) {
-    let deadline = Instant::now() + Duration::from_secs(60);
-    while !matches!(s.pool_state(&key), Some(PoolState::Loaded)) {
-        assert!(Instant::now() < deadline, "the entry never loaded");
-        let _ = s.update();
-        std::thread::sleep(Duration::from_millis(1));
+    load_all(s);
+    assert!(matches!(s.pool_state(&key), Some(PoolState::Loaded)));
+}
+
+/// Runs the loads the session hands out and applies them.
+fn load_all(s: &mut Session) {
+    for load in s.take_loads() {
+        let LoadEntry::Data(load) = load else {
+            panic!("an audio file is a data load");
+        };
+        s.apply(load.run()).expect("a load handed out applies");
     }
 }
 
@@ -290,10 +294,6 @@ fn the_threshold_is_part_of_the_identity() {
     assert!(matches!(s.audio(&"a"), Ok(AudioEntry::Resident(_))));
     s.pool(audio_file("a", &path).streamed_above((LEN as u64) * 4 - 1))
         .expect("a declaration");
-    let deadline = Instant::now() + Duration::from_secs(20);
-    while !matches!(s.audio(&"a"), Ok(AudioEntry::Streamed(_))) {
-        assert!(Instant::now() < deadline, "the entry never reloaded");
-        let _ = s.update();
-        std::thread::sleep(Duration::from_millis(1));
-    }
+    load_all(&mut s);
+    assert!(matches!(s.audio(&"a"), Ok(AudioEntry::Streamed(_))));
 }

@@ -4,6 +4,7 @@
 use std::any::TypeId;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Weak};
 
 use tutti_buffers::Float;
@@ -12,8 +13,8 @@ use tutti_platform::{Asset, Identity, MainThreadMarker};
 use crate::job::Ticket;
 use crate::pool::config::PoolConfig;
 use crate::pool::entry::{
-    Cloner, ErasedIdentity, Item, Life, LoadError, MainStage, PoolEntry, PoolLoad, PoolSet, Reload,
-    Staged, Step, Value,
+    Cloner, DataWork, ErasedIdentity, Item, Life, LoadError, MainStage, PoolEntry, PoolLoad,
+    PoolSet, Reload, Staged, Step, Value,
 };
 use crate::pool::key::PoolKey;
 use crate::pool::refresh::{Checked, RefreshError, RefreshReport, Stamped};
@@ -27,16 +28,15 @@ use crate::{Clock, PoolLoaded, SessionEvent};
 #[derive(Clone, Debug)]
 #[non_exhaustive]
 pub enum PoolState {
-    /// Declared; its load has not landed: it waits for a worker (at most
-    /// [`PoolConfig::parallel_loads`](crate::PoolConfig::parallel_loads) run at
-    /// once) or its worker stage runs.
+    /// Declared; its load has not landed: the app has not applied it
+    /// ([`Session::take_loads`](crate::Session::take_loads),
+    /// [`Session::apply`](crate::Session::apply)), or it waits for a worker (at
+    /// most [`PoolConfig::parallel_loads`](crate::PoolConfig::parallel_loads) run
+    /// at once) or its worker stage runs.
     Loading,
     /// Declared; its worker stage is done and its stage on the main thread
     /// waits for an [`update`](crate::Session::update) on it.
     WaitingForMainThread,
-    /// Declared; its stage on the session's thread waits for the next
-    /// [`update`](crate::Session::update).
-    Opening,
     /// Declared and loaded.
     Loaded,
     /// Declared and loaded; its identity changed and the new load has not
@@ -58,7 +58,8 @@ pub enum PoolState {
     Held,
 }
 
-/// An entry's change, as [`SessionEvent::Pool`] reports it.
+/// An entry's change, as [`SessionEvent::Pool`] reports it, in the
+/// [`update`](crate::Session::update) after the load was applied or landed.
 #[derive(Clone, Debug)]
 #[non_exhaustive]
 pub enum PoolEvent {
@@ -174,7 +175,6 @@ struct Rank {
 enum Stage {
     Loading,
     Main,
-    Opening,
 }
 
 impl Stage {
@@ -182,7 +182,6 @@ impl Stage {
         match self {
             Self::Loading => PoolState::Loading,
             Self::Main => PoolState::WaitingForMainThread,
-            Self::Opening => PoolState::Opening,
         }
     }
 }
@@ -251,10 +250,7 @@ impl<S: Float> Slot<S> {
     const fn pending(&self) -> bool {
         matches!(
             self.state,
-            PoolState::Loading
-                | PoolState::Reloading
-                | PoolState::WaitingForMainThread
-                | PoolState::Opening
+            PoolState::Loading | PoolState::Reloading | PoolState::WaitingForMainThread
         )
     }
 
@@ -296,6 +292,58 @@ struct Flight {
     needs_main: bool,
     /// The identity the worker took of the entries' asset.
     loaded_from: Option<Identity>,
+    /// The stage the app runs, for a load that has one.
+    offer: Option<Offer>,
+}
+
+/// A load the app runs: waiting to be handed out, or handed out and not yet
+/// applied.
+struct Offer {
+    /// The stage, until it is handed out.
+    work: Option<DataWork>,
+    /// Set by the handed-out value when it is dropped without its output being
+    /// applied: the stage is then built again and handed out again.
+    returned: Option<Arc<AtomicBool>>,
+}
+
+/// A load handed to the app: the flight it lands under, the first key that waits
+/// on it, and the stage with the guard that reports it dropped.
+pub(crate) struct Offered {
+    pub(crate) flight: u64,
+    pub(crate) key: PoolKey,
+    pub(crate) asset: Option<Asset>,
+    pub(crate) work: DataWork,
+    pub(crate) handout: Handout,
+}
+
+/// What a handed-out load reports when it is dropped without its output being
+/// applied: the entry's load is available to the next
+/// [`take_loads`](crate::Session::take_loads).
+pub(crate) struct Handout {
+    returned: Arc<AtomicBool>,
+    applied: bool,
+}
+
+impl Handout {
+    fn new(returned: Arc<AtomicBool>) -> Self {
+        Self {
+            returned,
+            applied: false,
+        }
+    }
+
+    /// The output was applied: the load is not handed out again.
+    pub(crate) const fn settle(&mut self) {
+        self.applied = true;
+    }
+}
+
+impl Drop for Handout {
+    fn drop(&mut self) {
+        if !self.applied {
+            self.returned.store(true, Ordering::Release);
+        }
+    }
 }
 
 /// A worker stage the pool let start: its flight, the stage, and the asset whose
@@ -310,12 +358,6 @@ pub(crate) struct Worker {
 struct Queued {
     flight: u64,
     work: Box<dyn FnOnce() -> Result<Staged, LoadError> + Send>,
-}
-
-/// A stage on the session's thread, waiting for the next update.
-pub(crate) struct Opening<S: Float> {
-    pub(crate) flight: u64,
-    pub(crate) open: Box<dyn FnOnce(&mut crate::OpenCx<'_, S>) -> Result<Value, LoadError> + Send>,
 }
 
 /// A stage on the main thread, with its worker's output, waiting for an update
@@ -354,7 +396,6 @@ pub(crate) struct Pool<A: crate::AppKey, C: Clock> {
     queue: VecDeque<Queued>,
     /// Worker stages started and not landed.
     running: usize,
-    openings: Vec<Opening<C::Float>>,
     main: Vec<MainItem>,
     /// An update has run on the main thread: the stages that wait for it run.
     main_seen: bool,
@@ -387,7 +428,6 @@ impl<A: crate::AppKey, C: Clock> Pool<A, C> {
             flights: BTreeMap::new(),
             queue: VecDeque::new(),
             running: 0,
-            openings: Vec::new(),
             main: Vec::new(),
             main_seen: false,
             queued: Vec::new(),
@@ -418,7 +458,6 @@ impl<A: crate::AppKey, C: Clock> Pool<A, C> {
             flights: self.flights,
             queue: self.queue,
             running: self.running,
-            openings: self.openings,
             main: self.main,
             main_seen: self.main_seen,
             queued: self.queued,
@@ -608,11 +647,7 @@ impl<A: crate::AppKey, C: Clock> Pool<A, C> {
     fn begin(&mut self, key: &PoolKey, load: PoolLoad<Value, C::Float>) -> Option<Start<C::Float>> {
         let generation = self.next_generation();
         let needs_main = load.needs_main();
-        let stage = if matches!(load.step, Step::Session(_)) {
-            Stage::Opening
-        } else {
-            Stage::Loading
-        };
+        let stage = Stage::Loading;
         if self.slots[key].share.is_some() {
             if let Some((copy, loaded_from)) = self.sibling_value(key) {
                 let slot = self.slots.get_mut(key).expect("the slot is declared");
@@ -644,6 +679,7 @@ impl<A: crate::AppKey, C: Clock> Pool<A, C> {
                 share: slot.share,
                 needs_main,
                 loaded_from: None,
+                offer: None,
             },
         );
         Some(Start {
@@ -807,12 +843,84 @@ impl<A: crate::AppKey, C: Clock> Pool<A, C> {
         self.running -= 1;
     }
 
-    pub(crate) fn open(&mut self, opening: Opening<C::Float>) {
-        self.openings.push(opening);
+    /// Keeps `work`, the stage of the load the flight is, for the app to take.
+    pub(crate) fn offer(&mut self, flight: u64, work: DataWork) {
+        if let Some(flight) = self.flights.get_mut(&flight) {
+            flight.offer = Some(Offer {
+                work: Some(work),
+                returned: None,
+            });
+        }
     }
 
-    pub(crate) fn take_openings(&mut self) -> Vec<Opening<C::Float>> {
-        std::mem::take(&mut self.openings)
+    /// The first key still waiting on the flight.
+    pub(crate) fn first_waiting(&self, flight: u64) -> Option<PoolKey> {
+        self.flights.get(&flight)?.targets.iter().find_map(|key| {
+            self.slots
+                .get(key)
+                .is_some_and(|slot| slot.generation == flight)
+                .then(|| key.clone())
+        })
+    }
+
+    /// The loads the app has not been given, in declaration order, handed out
+    /// once: one whose handed-out value was dropped without its output being
+    /// applied is built again. A load no entry waits on any more is forgotten.
+    pub(crate) fn take_offers(&mut self) -> Vec<Offered> {
+        let flights: Vec<u64> = self
+            .flights
+            .iter()
+            .filter(|(_, flight)| flight.offer.is_some())
+            .map(|(id, _)| *id)
+            .collect();
+        let mut out = Vec::new();
+        for id in flights {
+            let Some(key) = self.first_waiting(id) else {
+                self.flights.remove(&id);
+                continue;
+            };
+            let returned = self.flights[&id]
+                .offer
+                .as_ref()
+                .and_then(|offer| offer.returned.as_ref())
+                .is_some_and(|flag| flag.load(Ordering::Acquire));
+            let rebuilt = if returned {
+                match (self.slots[&key].reload)().step {
+                    Step::Data(work) => Some(work),
+                    _ => continue,
+                }
+            } else {
+                None
+            };
+            let asset = self.slots[&key].asset.clone();
+            let Some(offer) = self
+                .flights
+                .get_mut(&id)
+                .and_then(|flight| flight.offer.as_mut())
+            else {
+                continue;
+            };
+            if rebuilt.is_some() {
+                offer.work = rebuilt;
+            }
+            let Some(work) = offer.work.take() else {
+                continue;
+            };
+            let flag = Arc::new(AtomicBool::new(false));
+            offer.returned = Some(Arc::clone(&flag));
+            out.push((
+                self.slots[&key].order,
+                Offered {
+                    flight: id,
+                    key,
+                    asset,
+                    work,
+                    handout: Handout::new(flag),
+                },
+            ));
+        }
+        out.sort_by_key(|(order, offered)| (*order, offered.flight));
+        out.into_iter().map(|(_, offered)| offered).collect()
     }
 
     /// A flight's worker stage ended with a stage for the main thread: it

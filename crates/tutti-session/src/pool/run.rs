@@ -1,5 +1,6 @@
-//! Running the pool's loads: the worker stages the executor takes, the stages
-//! on the main thread and on the session's own, and the landings.
+//! Running the pool's loads: the stages the session itself runs (a ready value,
+//! the session's own thread), the worker stages the executor takes, the stages
+//! on the main thread, and the landings.
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
@@ -8,7 +9,7 @@ use tutti_platform::MainThreadMarker;
 use crate::jobs::panic_message;
 use crate::pool::entry::{LoadError, Step, Value};
 use crate::pool::open::OpenCx;
-use crate::pool::table::{Opening, Start, Worker};
+use crate::pool::table::{Start, Worker};
 use crate::{Session, WorkerError};
 
 /// A panic in a stage the session runs itself, as a load's failure.
@@ -19,12 +20,21 @@ fn panicked(payload: &(dyn std::any::Any + Send)) -> LoadError {
 }
 
 impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
-    /// Hands what the diff started to the stage it begins with.
+    /// Hands what the diff started to the stage it begins with. A ready value
+    /// and a stage on the session's own thread complete here, before the call
+    /// that declared them returns; a stage the app runs waits for
+    /// [`take_loads`](Self::take_loads).
     pub(crate) fn pool_start(&mut self, starts: Vec<Start<C::Float>>) {
         for Start { flight, load } in starts {
             match load.step {
                 Step::Ready(value) => self.pool.entries.land(flight, Ok(value)),
-                Step::Session(open) => self.pool.entries.open(Opening { flight, open }),
+                Step::Session(open) => {
+                    let done: Result<Value, LoadError> =
+                        catch_unwind(AssertUnwindSafe(|| open(&mut OpenCx::new(self))))
+                            .unwrap_or_else(|payload| Err(panicked(payload.as_ref())));
+                    self.pool.entries.land(flight, done);
+                }
+                Step::Data(work) => self.pool.entries.offer(flight, work),
                 Step::Worker(work) => self.pool.entries.enqueue(flight, work),
             }
         }
@@ -78,21 +88,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
         }
     }
 
-    /// Runs the stages that wait on the session's own thread.
-    fn pool_openings(&mut self) {
-        for Opening { flight, open } in self.pool.entries.take_openings() {
-            if !self.pool.entries.live(flight) {
-                self.pool.entries.end_flight(flight);
-                continue;
-            }
-            let done: Result<Value, LoadError> =
-                catch_unwind(AssertUnwindSafe(|| open(&mut OpenCx::new(self))))
-                    .unwrap_or_else(|payload| Err(panicked(payload.as_ref())));
-            self.pool.entries.land(flight, done);
-        }
-    }
-
-    /// What `update` does for the pool: runs the stages waiting for this
+    /// What `update` does for the pool: runs the stages waiting for the main
     /// thread, lands what came back, and reports the entries' outcomes since
     /// the last update.
     pub(crate) fn pool_events(
@@ -103,7 +99,6 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
         if let Some(main) = main {
             self.pool_main_stages(main);
         }
-        self.pool_openings();
         self.pool.entries.sweep();
         // Before the waits settle: a swap the graph refuses fails the entry the
         // wait would otherwise report as loaded.

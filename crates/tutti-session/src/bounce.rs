@@ -1090,8 +1090,8 @@ pub enum BounceError {
     #[error("another bounce is in flight")]
     InFlight,
     /// A declared pool entry has not landed: a bounce never forks a pending
-    /// entry silently. These are the pending entries' keys, in
-    /// declaration order; wait with [`Session::pool_loaded`] first.
+    /// entry silently. These are the pending entries' keys, in declaration
+    /// order; run and apply the loads of [`Session::take_loads`] first.
     #[error("{} pool entries are still loading", .0.len())]
     PoolPending(Vec<crate::PoolKey>),
     /// The bounce asks for something no render could give.
@@ -2162,10 +2162,10 @@ mod tests {
     }
 
     /// **A bounce refuses while a declared pool entry is pending**, naming it,
-    /// and renders once it landed.
+    /// and renders once the app applied its load.
     #[test]
     fn a_bounce_is_refused_while_a_declared_pool_entry_is_pending() {
-        use crate::{Declared, Life, PoolEntry, PoolKey, PoolLoad};
+        use crate::{Declared, Life, LoadEntry, PoolEntry, PoolKey, PoolLoad};
 
         struct Slow;
         impl PoolEntry for Slow {
@@ -2174,18 +2174,11 @@ mod tests {
             type Handle = ();
             fn identity(&self) {}
             fn load(&self) -> PoolLoad<()> {
-                PoolLoad::on_worker(|| Ok(()))
+                PoolLoad::on_app(|| Ok(()))
             }
             fn handle(_: &(), _: &Life) {}
         }
-        let mut session = Session::builder()
-            .executor(tutti_platform::Executor::new())
-            .build_detached(RATE)
-            .unwrap();
-        let (dc, _) = session
-            .graph()
-            .add(ForkByClone(tutti_nodes::testing::Const::mono(0.0)));
-        session.graph().connect(dc, Root).unwrap();
+        let mut session = session();
         session.pool(Declared::new("slow", Slow)).unwrap();
         match session.bounce(short()) {
             Err(BounceError::PoolPending(keys)) => {
@@ -2193,7 +2186,10 @@ mod tests {
             }
             other => panic!("refused naming the pending entry, got {other:?}"),
         }
-        let _ = session.update();
+        for load in session.take_loads() {
+            let LoadEntry::Data(load) = load;
+            session.apply(load.run()).unwrap();
+        }
         assert!(session.bounce(short()).is_ok(), "landed, so it renders");
     }
 

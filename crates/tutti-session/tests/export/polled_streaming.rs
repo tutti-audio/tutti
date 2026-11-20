@@ -9,17 +9,14 @@ use tutti_buffers::ChannelLayout;
 use tutti_platform::{Executor, Instant};
 use tutti_sampler::{Clip, StreamFault, StreamPhase, StreamStart};
 use tutti_session::{
-    AudioEntry, Bounce, BounceLatency, BounceTail, PoolState, Range, Root, Session, audio_file,
+    AudioEntry, Bounce, BounceLatency, BounceTail, LoadEntry, PoolState, Range, Root, Session,
+    audio_file,
 };
 use tutti_units::{Beat, SampleRate, Seconds};
 
 const RATE: f64 = 48_000.0;
 /// File frames: a second of audio.
 const LEN: usize = 48_000;
-/// Updates a landing may take. A bound that only guards a hang: the streamer's task
-/// is woken by the bells' tick thread, which no count of updates orders against, so
-/// it is generous and the loop yields.
-const UPDATES: usize = 1_000_000;
 
 /// Frame `i` of the ramp file: distinct per frame, exact in `f32`.
 fn value(i: usize) -> f32 {
@@ -121,24 +118,28 @@ fn a_bounce_of_a_streamed_ramp_at_unity_reproduces_the_files_frames() {
     }
 }
 
-/// **A pool load runs inside `update`.** A resident `audio_file` entry lands as
-/// `Loaded` with the ramp's frames, and nothing ran before the first update.
+/// **A pool load is run and applied by the app.** A resident `audio_file` entry
+/// reads `Loading` until the app runs its load and applies the output, then
+/// `Loaded` with the ramp's frames.
 #[test]
-fn a_pool_load_runs_inside_update() {
+fn a_pool_load_runs_where_the_app_runs_it() {
     let dir = tempfile::tempdir().expect("a temp dir");
     let path = dir.path().join("ramp.wav");
     write_ramp(&path);
     let mut s = session();
     s.pool(audio_file("ramp", &path)).expect("a declaration");
-    assert!(
-        !matches!(s.pool_state(&"ramp"), Some(PoolState::Loaded)),
-        "nothing runs outside update"
-    );
-    for _ in 0..UPDATES {
+    for _ in 0..3 {
         let _ = s.update();
-        if matches!(s.pool_state(&"ramp"), Some(PoolState::Loaded)) {
-            break;
-        }
+    }
+    assert!(
+        matches!(s.pool_state(&"ramp"), Some(PoolState::Loading)),
+        "no update runs a data load"
+    );
+    for load in s.take_loads() {
+        let LoadEntry::Data(load) = load else {
+            panic!("an audio file is a data load");
+        };
+        s.apply(load.run()).expect("a load handed out applies");
     }
     let Ok(AudioEntry::Resident(wave)) = s.audio(&"ramp") else {
         panic!("the entry is resident once loaded");

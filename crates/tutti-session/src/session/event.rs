@@ -246,7 +246,8 @@ pub enum SessionEvent {
         /// The root's topology the reader was opened for.
         topology: ChannelTopology,
     },
-    /// A pool entry's change: its load landed or failed, a reload landed, or it
+    /// A pool entry's change: its load landed (a data entry's when the app applies it)
+    /// or failed, a reload landed, or it
     /// was released. See [`PoolEvent`]; `key` is the key the
     /// app declared it under ([`PoolKey::get`](PoolKey::get)).
     Pool {

@@ -301,6 +301,23 @@ fn a_sink_is_a_pool_entry_that_a_new_sink_replaces() {
     assert_ne!(now.id(), sink.id());
 }
 
+/// **A sink is loaded when the declare call returns**: the session's own
+/// thread opens it inside `pool`, so its handle reads `Live` and its node is in
+/// the graph before any `update`, and the load is never handed to the app.
+#[test]
+fn a_sink_is_loaded_when_the_declare_call_returns() {
+    let mut s = Session::builder()
+        .sample_rate(SampleRate::of(RATE))
+        .build()
+        .expect("builds");
+    s.pool(midi_sink("out", Arc::new(Wire::default())))
+        .expect("declares");
+    let sink = s.midi_sink(&"out").expect("loaded with no update");
+    assert_eq!(sink.presence(), Presence::Live);
+    assert!(s.graph_ref().contains(sink.node()), "the sink's node");
+    assert!(s.take_loads().is_empty(), "nothing for the app to run");
+}
+
 /// **Releasing the entry ends the sink**: its handle reads `Closed`, its node
 /// leaves the graph, and a clip that was wired to it is heard by nobody.
 #[test]
