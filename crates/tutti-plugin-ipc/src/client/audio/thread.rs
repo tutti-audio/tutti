@@ -1208,23 +1208,76 @@ mod tests {
     }
 
     /// **A lane fed without a break stops with the executor**: the audio lane
-    /// is answered block after block, so it never idles, and dropping the last
-    /// executor clone still ends it (the drop joins its thread).
+    /// is answered block after block, so it rarely idles, and dropping the last
+    /// executor clone still ends it (the drop joins its thread). The control
+    /// lane is not started, so nothing else's end declares the bridge dead and
+    /// stops the lane through that.
     #[test]
     fn a_busy_lane_stops_when_the_executor_drops() {
         use std::sync::atomic::{AtomicBool, Ordering};
 
         let executor = Executor::new();
-        let mut rig = rig(&executor);
-        let (audio_ended, _) = rig.ended();
-        let feeding = Arc::new(AtomicBool::new(true));
+        let (channels, waits) =
+            Channels::new(SampleRate::SR_48K, Arc::default()).expect("the channels");
+        let lifecycle = Lifecycle::new(Arc::new(crate::ServerWatch::new()), timeouts());
+        let listener = silent_listener();
+        let socket = crate::unique_socket_path().expect("the OS has a random source");
+        let _ = std::fs::remove_file(&socket);
+        let served = ListenerOptions::new()
+            .name(ipc::socket_name(&socket).expect("socket name"))
+            .create_sync()
+            .expect("listen");
+        let (stream_tx, _stream_rx) = mpsc::channel();
+        let ended = Arc::new(Latch::default());
+        let (responses, mut replies, _lost) = response_ring();
+        let lane = executor
+            .spawn_dedicated(
+                "test-lane",
+                None,
+                audio_lane(
+                    AudioLaneParts {
+                        channels: channels.clone(),
+                        parker: waits.audio,
+                        payloads: payloads_of(&channels),
+                        lifecycle: lifecycle.clone(),
+                        listener: Arc::clone(&listener),
+                        socket_path: socket,
+                        control_stream: stream_tx,
+                        executor: executor.downgrade(),
+                        ready_within: HANG_GUARD,
+                    },
+                    Orphaned::of_audio(
+                        &channels,
+                        &lifecycle,
+                        &listener,
+                        AudioState::new(timeouts().drain, responses),
+                    ),
+                    Finish::new(&ended),
+                ),
+            )
+            .expect("the lane starts");
+        let audio_peer = Arc::new(served.accept().expect("the audio connection"));
+        crate::write_frame(
+            &mut &*audio_peer,
+            &AudioReply::Ready {
+                protocol_version: crate::PROTOCOL_VERSION,
+            },
+        )
+        .expect("ready");
+        let control_peer = served.accept().expect("the control connection");
+        crate::write_frame(
+            &mut &control_peer,
+            &ControlFrame::Ready {
+                protocol_version: crate::PROTOCOL_VERSION,
+            },
+        )
+        .expect("ready");
+
         // The server answers every block as it comes.
-        let audio_peer = Arc::new(rig.audio_peer);
         let peer = Arc::clone(&audio_peer);
         let server = std::thread::spawn(move || {
-            let audio_peer = &*peer;
             while let Ok(AudioRequest::ProcessAudio(block)) =
-                crate::read_frame::<_, AudioRequest>(&mut &*audio_peer)
+                crate::read_frame::<_, AudioRequest>(&mut &*peer)
             {
                 let reply = AudioReply::AudioProcessed {
                     latency_us: 0,
@@ -1233,13 +1286,14 @@ mod tests {
                     status: Default::default(),
                     refused: false,
                 };
-                if crate::write_frame(&mut &*audio_peer, &reply).is_err() {
+                if crate::write_frame(&mut &*peer, &reply).is_err() {
                     break;
                 }
             }
         });
+        let feeding = Arc::new(AtomicBool::new(true));
         let feeder = {
-            let (channels, feeding) = (rig.channels.clone(), Arc::clone(&feeding));
+            let (channels, feeding) = (channels.clone(), Arc::clone(&feeding));
             std::thread::spawn(move || {
                 let mut seq = 0;
                 while feeding.load(Ordering::Acquire) {
@@ -1255,9 +1309,8 @@ mod tests {
                 }
             })
         };
-        // The lane is answering blocks.
         tutti_fixtures::wait_until("the lane to answer blocks", HANG_GUARD, || {
-            rig.replies.pop().is_some()
+            replies.pop().is_some()
         });
 
         let (dropped_tx, dropped_rx) = mpsc::channel();
@@ -1268,10 +1321,11 @@ mod tests {
         let dropped = dropped_rx.recv_timeout(HANG_GUARD);
         feeding.store(false, Ordering::Release);
         assert!(dropped.is_ok(), "the executor's drop waits on a busy lane");
-        assert!(audio_ended.is_raised(), "the lane outlived the executor");
+        assert!(ended.is_raised(), "the lane outlived the executor");
         feeder.join().expect("the feeder ends");
         drop(audio_peer);
         let _ = server.join();
+        drop(lane);
     }
 
     /// Records the threads that wake it.
