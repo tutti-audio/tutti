@@ -60,9 +60,8 @@ impl Subject for Soundfont {
     fn rig() -> Rig {
         let settings = Settings::new();
         let path = tutti_fixtures::asset("soundfonts/TimGM6mb.sf2");
-        let mut file = std::fs::File::open(&path).expect("the test font is in the checkout");
         let font =
-            std::sync::Arc::new(SoundFont::from_reader(&mut file).expect("the test font parses"));
+            std::sync::Arc::new(SoundFont::open(path.as_path()).expect("the test font parses"));
         let unit = SoundFontUnit::new(font, settings).expect("builds");
         let mut session = offline_session();
         let AddedInstrument { handle, .. } = session

@@ -47,6 +47,28 @@
 //! orders inside the swap's read-modify-write, and its model then loses a
 //! ring no execution of the swap has.
 //!
+//! # Shutdown
+//!
+//! Dropping the [`Bells`] sets `shut` and runs one **last pass** over every
+//! live bell (`Shared::last_pass`): on the tick thread's way out, or, with the
+//! inline tick, in the drop itself. The last pass takes every stored waker.
+//! A rung bell's waker is woken, as in a pass; an unrung bell's is dropped
+//! unwoken, which breaks the cycle a parked future makes (executor task,
+//! future, [`Listener`], its state, stored waker, task).
+//!
+//! After `shut`, a wait poll never leaves a waker stored: step 2 is skipped
+//! when `shut` is already set, and a poll that stored one checks `shut` after
+//! step 3's fence and takes the waker back if it is set. `shut`'s store, then
+//! a fence, then the last pass's takes, pair with the poll's store of the
+//! waker, then a fence, then its load of `shut`: either the last pass finds
+//! the waker, or the poll sees `shut` and removes it itself.
+//!
+//! Only a ring that happens-before the drop is delivered. A ring concurrent
+//! with it can land after the last pass read the bell unrung: its waker is
+//! released unwoken, and the future stays parked under an executor that
+//! outlives the set. An owner that rings at shutdown drops what rings before
+//! the [`Bells`].
+//!
 //! The model in `tests/bells_loom.rs` runs this code.
 //!
 //! # Drops
@@ -88,6 +110,8 @@ struct State {
     /// without it, so the tick thread's park check is two atomic loads that
     /// the fences order (a mutex is not ordered by a fence).
     waiting: AtomicBool,
+    /// The set's `shut` flag, which the wait poll reads.
+    shut: Arc<AtomicBool>,
 }
 
 impl State {
@@ -113,7 +137,7 @@ impl State {
 /// What the ticks and the bells share.
 struct Shared {
     bells: Mutex<Vec<Arc<State>>>,
-    shut: AtomicBool,
+    shut: Arc<AtomicBool>,
     unparker: Unparker,
 }
 
@@ -140,12 +164,35 @@ impl Shared {
             }
         }
     }
+
+    /// The pass at shutdown: take the waker of every live bell, waking a rung
+    /// bell's and dropping an unrung one's unwoken, so no stored waker
+    /// outlives the set. Call it after `shut` is set; the fence pairs with a
+    /// wait poll's (see "Shutdown" in the module docs). Wakes and drops
+    /// outside every lock.
+    fn last_pass(&self) {
+        fence(Ordering::SeqCst);
+        let live: Vec<Arc<State>> = self.bells().clone();
+        for state in live {
+            let rung = state.rung.load(Ordering::Acquire);
+            // An unrung bell's waker drops unwoken at the end of the `if`.
+            if let Some(waker) = state.take_waker()
+                && rung
+            {
+                waker.wake();
+            }
+        }
+    }
 }
 
 /// The control-side set of bells: one per session, and the tick that wakes
 /// their futures. See the module docs (`src/bells.rs`).
 ///
-/// Dropping it stops the tick thread, if there is one, and joins it.
+/// Dropping it stops the tick thread, if there is one, and joins it. A bell
+/// rung before the drop wakes its waiting future; a future still waiting on an
+/// unrung bell is never woken again, and its waker is released. After the drop
+/// a wait poll stores no waker. Only a ring that happens-before the drop is
+/// delivered, so drop what rings at shutdown first.
 #[must_use]
 pub struct Bells {
     shared: Arc<Shared>,
@@ -168,7 +215,7 @@ impl Bells {
         let (unparker, parker) = parker();
         let shared = Arc::new(Shared {
             bells: Mutex::new(Vec::new()),
-            shut: AtomicBool::new(false),
+            shut: Arc::new(AtomicBool::new(false)),
             unparker,
         });
         (shared, parker)
@@ -181,6 +228,7 @@ impl Bells {
             rung: AtomicBool::new(false),
             waker: Mutex::new(None),
             waiting: AtomicBool::new(false),
+            shut: Arc::clone(&self.shared.shut),
         });
         self.shared.bells().push(Arc::clone(&state));
         (
@@ -205,7 +253,9 @@ impl Drop for Bells {
     fn drop(&mut self) {
         self.shared.shut.store(true, Ordering::Release);
         self.shared.unparker.unpark();
-        // The thread handle, a field, joins when it drops after this.
+        // With a tick thread, it runs the last pass on its way out and the
+        // handle, a field, joins it when it drops after this.
+        self.tick.shut(&self.shared);
     }
 }
 
@@ -293,6 +343,10 @@ impl Listener {
         if state.rung.swap(false, Ordering::Acquire) {
             return Poll::Ready(());
         }
+        if state.shut.load(Ordering::Acquire) {
+            // A ring before the shut may land after the swap above.
+            return Self::after_shut(state);
+        }
         state.store_waker(cx.waker().clone());
         // Pairs with the fence in the ring's `unpark`: a ring after this fence
         // finds the waker stored; one before it is seen here.
@@ -302,7 +356,24 @@ impl Listener {
             state.rung.swap(false, Ordering::Release);
             return Poll::Ready(());
         }
+        // The last pass's fence is the other half: it finds the waker stored
+        // above, or `shut` is seen here and the waker is not left behind.
+        if state.shut.load(Ordering::Acquire) {
+            state.take_waker();
+            return Self::after_shut(state);
+        }
         Poll::Pending
+    }
+
+    /// A poll that sees `shut` stores no waker: `Ready` for a ring that
+    /// landed before the shut (the load of `shut` acquires it), else
+    /// `Pending`.
+    fn after_shut(state: &State) -> Poll<()> {
+        if state.rung.swap(false, Ordering::Acquire) {
+            Poll::Ready(())
+        } else {
+            Poll::Pending
+        }
     }
 }
 
