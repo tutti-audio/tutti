@@ -154,7 +154,7 @@ mod fake_hosting;
 mod lost;
 mod rebind;
 pub use rebind::PortsRefusal;
-mod preset_job;
+mod preset;
 mod state;
 pub(crate) use lost::Lost;
 
@@ -163,7 +163,7 @@ pub use entry::{
     AddPluginError, LoadedPlugin, PluginCause, PluginDeclaration, PluginInfo, PluginPorts,
     PoolPluginEntry, PooledPlugin,
 };
-pub use preset_job::{LoadPreset, PresetJobError, PresetJobFailed};
+pub use preset::{LoadPreset, LoadedPreset, PresetStartError};
 pub use state::{PluginApplyError, RestoreState, RestoredState, SaveState, StateStartError};
 
 use crate::SavedPeer;
@@ -1488,6 +1488,18 @@ impl<'a> Plugin<'a> {
     #[must_use]
     pub fn losses(&self) -> crate::Losses {
         self.hosted.losses()
+    }
+
+    /// The presets the plugin lists, read now on the main thread: the list of
+    /// the plugin instance at this node, which [`Session::load_preset`] takes
+    /// back. A plugin that lists none, or is gone, has an empty list.
+    pub fn presets(&self, main: MainThreadMarker) -> crate::PluginPresets {
+        let handle = &self.hosted.handle;
+        let presets = crate::PluginPresets::new(handle.preset_support(), handle.instance());
+        if presets.support().can_list() {
+            presets.fill(handle.presets(main));
+        }
+        presets
     }
 
     /// The plugin's saved states: the last good one and the withheld one.
