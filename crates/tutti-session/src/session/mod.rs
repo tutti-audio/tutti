@@ -109,7 +109,9 @@ pub struct Session<K: AppKey = &'static str, C: Clock = Offline> {
     pub(crate) midi: MidiPart,
     /// What modulation applied, and the session's own declarations.
     pub(crate) mods: crate::modulation::ModSession,
-    /// The disk streamer and the streams the opens landed.
+    /// The disk streamer and the streams the opens landed. Declared before `jobs`, so it
+    /// drops first: its drop rings the streamer's bell, and the ring only reaches the
+    /// streamer's task while the bells `jobs` owns still have their final pass to run.
     pub(crate) sampler: SamplerPart<C::Float>,
     /// The output-device listing.
     pub(crate) devices: DevicePart,
@@ -117,7 +119,9 @@ pub struct Session<K: AppKey = &'static str, C: Clock = Offline> {
     pub(crate) inputs: Inputs<C::Float>,
     /// The bounce token and the leftovers' channel.
     pub(crate) bounce: BouncePart,
-    /// The blocking work running on the executor, landed in `Phase::Collect`.
+    /// The blocking work running on the executor, landed in `Phase::Collect`, and the
+    /// bells the session's futures await. Declared after `sampler` and every other part
+    /// that rings a bell (fields drop in declaration order): the bells drop last.
     pub(crate) jobs: Jobs,
     /// Plugin hosting. Last, so it drops after every plugin the session holds:
     /// a close handed over while the session drops is still collected.
