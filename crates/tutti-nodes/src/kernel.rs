@@ -205,6 +205,111 @@ impl<K: Kernel> std::fmt::Debug for KernelNode<K> {
     }
 }
 
+/// What a [`KernelNode`] is made from: a [`Kernel`], the [`ControlSet`] that addresses its
+/// params and the controls it starts at.
+///
+/// The way a node author outside this crate builds a node from a kernel of their own:
+/// `KernelNode::from(config)`. The width is the kernel's: its [`shape`](Kernel::shape)
+/// declares the buses.
+///
+/// ```
+/// use tutti_buffers::{BusTopology, MaxBlock, Planes, PlanesMut};
+/// use tutti_graph::{Buses, Shape};
+/// use tutti_nodes::{ControlSet, ControlSignals, Kernel, KernelConfig, KernelNode};
+/// use tutti_units::{SampleRate, Tail, UnitAddr};
+///
+/// /// A kernel with no params.
+/// #[derive(Clone, Debug)]
+/// struct NoParams;
+///
+/// impl ControlSet for NoParams {
+///     type Controls = ();
+///     fn addrs(&self) -> &'static [UnitAddr] {
+///         &[]
+///     }
+///     fn defaults(&self) {}
+///     fn flatten(&self, _: &(), _: &mut [f64]) {}
+///     fn assemble(&self, _: &[f64]) {}
+/// }
+///
+/// /// A mono pass-through.
+/// #[derive(Clone)]
+/// struct Wire;
+///
+/// impl Kernel for Wire {
+///     type Float = f32;
+///     type Set = NoParams;
+///     const GRID: usize = 16;
+///     fn shape(&self) -> Shape {
+///         Shape::buses(Buses::main(BusTopology::MONO), Buses::main(BusTopology::MONO))
+///     }
+///     fn prepare(&mut self, _: SampleRate, _: MaxBlock) {}
+///     fn reset(&mut self) {}
+///     fn retarget(&mut self, _: &()) {}
+///     fn render(
+///         &mut self,
+///         input: Planes<'_, f32>,
+///         _: ControlSignals<'_, f32>,
+///         mut output: PlanesMut<'_, '_, f32>,
+///     ) {
+///         output
+///             .plane_mut(0)
+///             .samples_mut()
+///             .copy_from_slice(input.plane(0).samples());
+///     }
+///     fn tail(&self) -> Tail {
+///         Tail::None
+///     }
+/// }
+///
+/// let node = KernelNode::from(KernelConfig::new(Wire, NoParams));
+/// # let _ = node;
+/// ```
+#[derive(Clone)]
+pub struct KernelConfig<K: Kernel> {
+    kernel: K,
+    set: K::Set,
+    controls: <K::Set as ControlSet>::Controls,
+}
+
+impl<K: Kernel> std::fmt::Debug for KernelConfig<K> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("KernelConfig").finish_non_exhaustive()
+    }
+}
+
+impl<K: Kernel> KernelConfig<K> {
+    /// A kernel with its `set`, the controls at the set's [`defaults`](ControlSet::defaults).
+    #[must_use]
+    pub fn new(kernel: K, set: K::Set) -> Self {
+        let controls = set.defaults();
+        Self {
+            kernel,
+            set,
+            controls,
+        }
+    }
+
+    /// The controls the node starts at.
+    #[must_use]
+    pub fn controls(mut self, controls: <K::Set as ControlSet>::Controls) -> Self {
+        self.controls = controls;
+        self
+    }
+}
+
+/// The node of `config`. It has no rate until the graph's `prepare` gives it one and renders
+/// silence before. Allocates: build it before the node goes live.
+///
+/// # Panics
+///
+/// If the kernel's [`shape`](Kernel::shape) declares no output bus.
+impl<K: Kernel> From<KernelConfig<K>> for KernelNode<K> {
+    fn from(config: KernelConfig<K>) -> Self {
+        Self::with_kernel(config.kernel, config.set, config.controls)
+    }
+}
+
 impl<K: Kernel> KernelNode<K> {
     /// A node running `kernel`, its cells `set` at `controls`. It has no rate until the
     /// graph's `prepare` gives it one and renders silence before. Allocates: build it
@@ -214,7 +319,11 @@ impl<K: Kernel> KernelNode<K> {
     ///
     /// If the kernel's [`shape`](Kernel::shape) declares no output bus.
     #[must_use]
-    pub fn with_kernel(kernel: K, set: K::Set, controls: <K::Set as ControlSet>::Controls) -> Self {
+    pub(crate) fn with_kernel(
+        kernel: K,
+        set: K::Set,
+        controls: <K::Set as ControlSet>::Controls,
+    ) -> Self {
         const { assert!(K::GRID > 0, "a kernel's grid is at least one frame") };
         let shape = kernel.shape();
         let out = shape.output_bus(0).expect("a kernel has an output");
@@ -233,14 +342,6 @@ impl<K: Kernel> KernelNode<K> {
             key,
             tuned: None,
         }
-    }
-
-    /// The node with its kernel edited by `edit`, before the node has a rate: the kernel reads
-    /// what it was given at its `prepare`.
-    #[must_use]
-    pub(crate) fn map_kernel(mut self, edit: impl FnOnce(&mut K)) -> Self {
-        edit(&mut self.kernel);
-        self
     }
 
     /// Back to silence: the grid counted from here, no ring-out owed, no input heard.
@@ -694,6 +795,9 @@ impl<K: Kernel> IntoNode<K::Float> for KernelNode<K> {
         tutti_graph::param_parts(self)
     }
 }
+
+#[cfg(test)]
+mod latency_tail;
 
 #[cfg(test)]
 mod tests {

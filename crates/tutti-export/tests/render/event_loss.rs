@@ -11,7 +11,9 @@ use crate::support::{ExportConfig, RenderConfig, write_buffers};
 
 use support::{render_buffers_under, render_file_under, render_to_buffers, render_to_file};
 use tutti_buffers::ChannelLayout;
-use tutti_export::{CancelToken, Control, Error, EventLossPolicy, Progress, RenderGraph, Setup};
+use tutti_export::{
+    CancelToken, Control, EventLossPolicy, Progress, RenderError, RenderGraph, Setup,
+};
 use tutti_graph::{Cx, Event, GraphBuilder, Io, Node, Prepare, Shape, Status};
 use tutti_nodes::testing::Osc;
 use tutti_timeline::FrozenClock;
@@ -97,7 +99,10 @@ fn a_render_that_dropped_events_stops_at_the_first_block_that_did() {
         &mut Control::new(&token).on_progress(&mut record),
     )
     .expect_err("events were dropped");
-    assert!(matches!(err, Error::EventsDropped { count: 6 }), "{err:?}");
+    assert!(
+        matches!(err, RenderError::EventsDropped { count: 6 }),
+        "{err:?}"
+    );
     assert_eq!(
         rendered_frames,
         [Some(0)],
@@ -140,7 +145,10 @@ fn a_render_that_lost_events_replaces_nothing() {
 
     let err = render_to_file(graph(), &config(EventLossPolicy::Fail), &FrozenClock, &path)
         .expect_err("events were dropped");
-    assert!(matches!(err, Error::EventsDropped { count: 6 }), "{err:?}");
+    assert!(
+        matches!(err, RenderError::EventsDropped { count: 6 }),
+        "{err:?}"
+    );
     assert_eq!(std::fs::read(&path).unwrap(), before);
     assert_eq!(leftovers(), vec!["out.wav".to_string()], "no temporary");
 
@@ -155,7 +163,10 @@ fn a_render_that_lost_events_replaces_nothing() {
         &path,
     )
     .expect_err("events were dropped");
-    assert!(matches!(err, Error::EventsDropped { count: 6 }), "{err:?}");
+    assert!(
+        matches!(err, RenderError::EventsDropped { count: 6 }),
+        "{err:?}"
+    );
     assert_eq!(std::fs::read(&path).unwrap(), before);
     assert_eq!(leftovers(), vec!["out.wav".to_string()], "no temporary");
 
@@ -201,7 +212,10 @@ fn write_buffers_applies_the_event_loss_policy() {
     std::fs::write(&path, b"old").unwrap();
     let err = write_buffers(&rendered, &config(EventLossPolicy::Fail), &path)
         .expect_err("the planes lost events");
-    assert!(matches!(err, Error::EventsDropped { count: 12 }), "{err:?}");
+    assert!(
+        matches!(err, RenderError::EventsDropped { count: 12 }),
+        "{err:?}"
+    );
     assert_eq!(std::fs::read(&path).unwrap(), b"old");
 
     let written =

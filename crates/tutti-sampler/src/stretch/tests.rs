@@ -1477,8 +1477,7 @@ fn vocoder_reconstructs_under_a_non_hann_window() {
     let size = fft.size().get();
     let hop = fft.hop().get();
 
-    let geometry =
-        Unit::geometry(SampleRate::of(sample_rate), fft).with_window_fn(CosineWindow::HAMMING);
+    let geometry = Unit::geometry(SampleRate::of(sample_rate), fft).shape(CosineWindow::HAMMING);
     // Hamming COLAs at 4x, same as Hann, so this grid genuinely inverts.
     assert!(geometry.is_cola(), "Hamming at 4x must be COLA");
     let mut v = Vocoder::new(geometry);

@@ -1,5 +1,5 @@
 //! A hosted plugin's parameters as views:
-//! [`PluginParams`], [`Param`] and [`ParamGesture`].
+//! [`PluginParams`], [`PluginParam`] and [`ParamGesture`].
 //!
 //! Every one of them borrows the session through [`Plugin`](crate::Plugin), so
 //! none can outlive what it names. The descriptors a [`PluginParams`] shows are the
@@ -97,7 +97,7 @@ impl Driven {
         self.knobs
             .lock_recover()
             .get(&id)
-            .is_some_and(|lane| lane.set_value(value.get()))
+            .is_some_and(|lane| lane.store(value.get()))
     }
 
     /// Replaces the driven parameters with `knobs`; nothing is touched while
@@ -161,14 +161,14 @@ impl<'a> PluginParams<'a> {
         self.len() == 0
     }
 
-    /// Resolves parameter `id` once. The [`Param`] reads its value from the
+    /// Resolves parameter `id` once. The [`PluginParam`] reads its value from the
     /// session's mirror.
     ///
     /// # Errors
     ///
     /// [`PluginParamRefusal::NotRead`] before the parameters are read;
     /// [`PluginParamRefusal::UnknownParam`] for an id the plugin does not declare.
-    pub fn get(&self, id: ParamId) -> Result<Param<'a>, PluginParamRefusal> {
+    pub fn get(&self, id: ParamId) -> Result<PluginParam<'a>, PluginParamRefusal> {
         if !self.is_ready() {
             return Err(PluginParamRefusal::NotRead);
         }
@@ -177,7 +177,7 @@ impl<'a> PluginParams<'a> {
             .mirror
             .position(id)
             .ok_or(PluginParamRefusal::UnknownParam(id))?;
-        Ok(Param {
+        Ok(PluginParam {
             params: *self,
             position,
         })
@@ -196,14 +196,14 @@ impl<'a> PluginParams<'a> {
 /// the module docs for why that is as long as the parameter list can stay
 /// as it is.
 #[derive(Debug, Clone, Copy)]
-pub struct Param<'a> {
+pub struct PluginParam<'a> {
     params: PluginParams<'a>,
     /// Where the parameter is in the mirror's list: valid while the read that
     /// made it is the mirror's, which the borrow guarantees.
     position: usize,
 }
 
-impl<'a> Param<'a> {
+impl<'a> PluginParam<'a> {
     /// What the plugin declares about the parameter.
     #[must_use]
     pub fn info(&self) -> &'a ParameterInfo {
@@ -284,7 +284,7 @@ impl<'a> Param<'a> {
     /// `None` where the format has none.
     ///
     /// A bare `f64`, on purpose: a plugin's plain value has no tutti unit unless
-    /// the plugin declares one, and [`Param::try_unit`] is the typed door for that.
+    /// the plugin declares one, and [`PluginParam::try_unit`] is the typed door for that.
     #[must_use]
     pub fn plain(&self) -> Option<f64> {
         self.params
@@ -320,7 +320,7 @@ impl<'a> Param<'a> {
     }
 }
 
-/// A host's hold on a parameter: made by [`Param::edit`], which begins the
+/// A host's hold on a parameter: made by [`PluginParam::edit`], which begins the
 /// gesture, and ended when it drops.
 ///
 /// **It is the one handle that is owned, with no borrow of the session.** A drag

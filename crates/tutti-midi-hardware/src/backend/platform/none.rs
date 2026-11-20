@@ -2,9 +2,10 @@
 //! sequencer API. The stub is its backend.
 
 use crate::InputProducerHandle;
-use crate::endpoints::{InputConnection, MidiEndpoints};
+use crate::endpoints::MidiEndpoints;
 use crate::error::Result;
-use crate::virtual_endpoint::{SourceBackend, VirtualProtocol, VirtualSpec};
+use crate::virtual_endpoint::{EndpointBackend, VirtualProtocol, VirtualSpec};
+use tutti_platform::MainThreadMarker;
 
 /// Returns this platform's MIDI backend: the stub.
 pub(crate) fn active() -> Box<dyn MidiEndpoints> {
@@ -12,18 +13,12 @@ pub(crate) fn active() -> Box<dyn MidiEndpoints> {
 }
 
 /// Refuses: the stub has no virtual endpoints.
-pub(crate) fn open_virtual_source(
-    spec: &VirtualSpec,
-) -> Result<(Box<dyn SourceBackend>, VirtualProtocol)> {
-    super::stub::open_virtual_source(spec)
-}
-
-/// Refuses: the stub has no virtual endpoints.
-pub(crate) fn open_virtual_destination(
+pub(crate) fn open_virtual_endpoint(
     spec: &VirtualSpec,
     producer: InputProducerHandle,
-) -> Result<(Box<dyn InputConnection>, VirtualProtocol)> {
-    super::stub::open_virtual_destination(spec, producer)
+    main: MainThreadMarker,
+) -> Result<(Box<dyn EndpointBackend>, VirtualProtocol)> {
+    super::stub::open_virtual_endpoint(spec, producer, main)
 }
 
 /// No platform call exists to fail, so [`MidiHardwareError::Os`] is never

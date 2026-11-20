@@ -334,7 +334,7 @@ impl<F: Float + SimdLanes + Lerp> From<MultibandCompressorConfig> for MultibandC
     fn from(config: MultibandCompressorConfig) -> Self {
         let MultibandCompressorConfig { input, bands } = config;
         let defaults = default_crossovers(bands);
-        let crossover = CrossoverControls::ordered(defaults)
+        let crossover = CrossoverControls::try_from(defaults)
             .expect("the default splits are positive and strictly increasing");
         Self {
             rig: Rig {
@@ -394,7 +394,7 @@ impl Rig {
         let targets = self
             .splits
             .read(rate, |i| signals.cutoff[i].map(|l| l[at].into()));
-        if let Ok(set) = CrossoverControls::new(&targets[..nb - 1], rate) {
+        if let Ok(set) = CrossoverControls::try_from((&targets[..nb - 1], rate)) {
             self.crossover = set;
         }
         let mut settings = MultibandSettings {

@@ -211,7 +211,8 @@ fn open_routes_a_vst2_to_the_in_process_backend() {
     // host actually meets, and it is what makes this test exercise the routing
     // rather than the naming.
     let src = tutti_fixtures::vst2_probe().to_path_buf();
-    let staged = std::env::temp_dir().join("tutti-probe-open-routing.vst");
+    let scratch = tempfile::tempdir().expect("a scratch directory");
+    let staged = scratch.path().join("tutti-probe-open-routing.vst");
     std::fs::copy(&src, &staged)
         .unwrap_or_else(|e| panic!("staging {src:?} -> {staged:?} failed: {e}"));
 
@@ -234,7 +235,7 @@ fn open_routes_a_vst2_to_the_in_process_backend() {
     // environment concurrently.
     unsafe { std::env::set_var("TUTTI_VST2_PROBE_EDITOR", "1") };
     let plugin = tutti_plugin::catalog::Plugin::open(
-        Some(main_thread()),
+        main_thread(),
         &tutti_fixtures::pumped_work(),
         &tutti_plugin_db::Loadable::uncatalogued(tutti_plugin_types::PluginRef::file(
             staged.clone(),
@@ -304,7 +305,8 @@ fn the_node_carries_midi_on_its_event_ports() {
     // `.dylib`, so stage it under a `.vst` name — same reason as
     // `open_routes_a_vst2_to_the_in_process_backend`.
     let src = tutti_fixtures::vst2_probe().to_path_buf();
-    let staged = std::env::temp_dir().join("tutti-probe-midi-ports.vst");
+    let scratch = tempfile::tempdir().expect("a scratch directory");
+    let staged = scratch.path().join("tutti-probe-midi-ports.vst");
     std::fs::copy(&src, &staged)
         .unwrap_or_else(|e| panic!("staging {src:?} -> {staged:?} failed: {e}"));
 
@@ -331,7 +333,7 @@ fn the_node_carries_midi_on_its_event_ports() {
             std::env::set_var("TUTTI_VST2_PROBE_MIDI_OUTPUTS", outputs);
         }
         let plugin = tutti_plugin::catalog::Plugin::open(
-            Some(main_thread()),
+            main_thread(),
             &tutti_fixtures::pumped_work(),
             &tutti_plugin_db::Loadable::uncatalogued(tutti_plugin_types::PluginRef::file(
                 staged.clone(),

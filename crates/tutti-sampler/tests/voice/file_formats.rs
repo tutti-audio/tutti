@@ -11,7 +11,7 @@ use std::path::Path;
 use tutti_buffers::Planes;
 use tutti_graph::contract;
 use tutti_sampler::testing::{MockTransport, wait_for_open};
-use tutti_sampler::{DiskStreamer, DiskVoice, Placement, VoiceWindow};
+use tutti_sampler::{DiskStreamer, DiskVoice, StreamStart, VoiceWindow};
 use tutti_units::{Beat, Bpm, SampleRate};
 
 const SR: u32 = 48_000;
@@ -62,7 +62,7 @@ fn write_f32(path: &Path) {
 fn streamed(path: &Path) -> Vec<Vec<f32>> {
     let rate = SampleRate::of(f64::from(SR));
     let mut streamer = DiskStreamer::manual(rate, Default::default()).expect("builds");
-    let opening = streamer.open(path, Placement::HEAD);
+    let opening = streamer.open_stream(path, StreamStart::HEAD);
     let (_stream, reader) = wait_for_open(&mut streamer, opening).expect("the file opens");
     assert!(streamer.step_until_idle(1_000) < 1_000, "the ring primes");
     let voice = DiskVoice::from_reader(reader, VoiceWindow::from(Beat::new(0.0)));

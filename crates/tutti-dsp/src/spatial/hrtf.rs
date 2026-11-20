@@ -53,7 +53,7 @@ pub const HRTF_STEP: usize = 128;
 /// reverb's pre-delay, and is not latency.
 pub const HRTF_LATENCY: usize = HRTF_STEP;
 
-/// The error returned when an `HrtfBinauralNode`
+/// The error returned when an [`HrirSphere`]
 /// cannot be built from its HRIR data.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
@@ -164,11 +164,11 @@ pub enum HrtfBinauralError {
     NoFace,
 }
 
-/// The lowest sphere rate `HrtfBinauralNode::new`
+/// The lowest sphere rate `HrirSphere::from_bytes`
 /// accepts, in Hz.
 pub const MIN_SPHERE_RATE: u32 = 8_000;
 
-/// The highest sphere rate `HrtfBinauralNode::new`
+/// The highest sphere rate `HrirSphere::from_bytes`
 /// accepts, in Hz.
 pub const MAX_SPHERE_RATE: u32 = 384_000;
 
@@ -240,20 +240,14 @@ impl<F: FftFloat> std::fmt::Debug for HrtfBinaural<F> {
 }
 
 impl<F: FftFloat> HrtfBinaural<F> {
-    /// Parses `hrir_bytes` and prepares the sphere at `sample_rate`, aimed at
-    /// `aim`. Control thread.
+    /// Prepares `sphere` at `sample_rate`, aimed at `aim`. Control thread.
     ///
-    /// # Errors
-    ///
-    /// An [`HrtfBinauralError`] if the bytes are not a well-formed sphere.
-    pub fn new(
-        hrir_bytes: &[u8],
-        sample_rate: SampleRate,
-        aim: Direction,
-    ) -> Result<Self, HrtfBinauralError> {
-        let sphere = Arc::new(HrirSphere::from_bytes(hrir_bytes)?);
+    /// The sphere is shared: a renderer and its [`fresh`](Self::fresh) copies read the one
+    /// parsed [`HrirSphere`].
+    #[must_use]
+    pub fn new(sphere: Arc<HrirSphere>, sample_rate: SampleRate, aim: Direction) -> Self {
         let set = Arc::new(HrtfSet::build(&sphere, rate_key(sample_rate), HRTF_STEP));
-        Ok(Self::over(sphere, set, aim))
+        Self::over(sphere, set, aim)
     }
 
     /// A renderer over a prepared set, with cleared streaming state, aimed
@@ -301,7 +295,7 @@ impl<F: FftFloat> HrtfBinaural<F> {
     /// block size keeps the tail in flight. Two graph rates above
     /// [`MAX_PREPARED_RATE`] share one set. Allocates on a new rate: control
     /// thread only.
-    pub fn set_sample_rate(&mut self, sample_rate: SampleRate, aim: impl FnOnce() -> Direction) {
+    pub fn prepare(&mut self, sample_rate: SampleRate, aim: impl FnOnce() -> Direction) {
         let rate = rate_key(sample_rate);
         if rate == self.set.rate {
             return;

@@ -21,8 +21,8 @@ use tutti_ump::{
 /// Long enough to be a failure, not a race: the announce arrives at once.
 const PATIENCE: Duration = Duration::from_secs(20);
 
-/// `Devices` with one subscription, and the blocking batch `wait` these tests
-/// are written around.
+/// `Devices` with one subscription, and the batch `wait` these tests are
+/// written around.
 struct Watched {
     devices: Devices,
     events: crate::DeviceEvents,
@@ -73,12 +73,8 @@ impl Virtual {
 }
 
 fn plug(name: &str) -> Virtual {
-    let seq = super::client::open(
-        name,
-        tutti_alsa_ffi::Blocking::NonBlock,
-        tutti_alsa_ffi::UmpVersion::Midi2,
-    )
-    .expect("a sequencer to open (modprobe snd-seq)");
+    let seq = super::client::open(name, tutti_alsa_ffi::UmpVersion::Midi2)
+        .expect("a sequencer to open (modprobe snd-seq)");
     let caps = PortCaps::READ | PortCaps::SUBS_READ | PortCaps::WRITE | PortCaps::SUBS_WRITE;
     seq.open_port("port", caps, PortKind::MIDI_GENERIC | PortKind::APPLICATION)
         .expect("a port");
@@ -259,12 +255,8 @@ fn a_saved_alsa_device_resolves_by_name_only() {
 fn a_port_gaining_its_capabilities_is_added_as_a_duplex() {
     let devices = Watched::open();
     let name = unique("caps");
-    let seq = super::client::open(
-        &name,
-        tutti_alsa_ffi::Blocking::NonBlock,
-        tutti_alsa_ffi::UmpVersion::Midi2,
-    )
-    .expect("a sequencer to open (modprobe snd-seq)");
+    let seq = super::client::open(&name, tutti_alsa_ffi::UmpVersion::Midi2)
+        .expect("a sequencer to open (modprobe snd-seq)");
     let kind = PortKind::MIDI_GENERIC | PortKind::APPLICATION;
     let port = seq
         .open_port("port", PortCaps::SUBS_READ, kind)
@@ -667,8 +659,8 @@ impl Pumped {
 /// A legacy (non-UMP) sequencer client with a subscribable port, the kind of
 /// source a MIDI 1.0 device or an old application is.
 fn plug_legacy(name: &str) -> Virtual {
-    let seq = tutti_alsa_ffi::Client::open_legacy(name, tutti_alsa_ffi::Blocking::NonBlock)
-        .expect("a sequencer to open (modprobe snd-seq)");
+    let seq =
+        tutti_alsa_ffi::Client::open_legacy(name).expect("a sequencer to open (modprobe snd-seq)");
     let caps = PortCaps::READ | PortCaps::SUBS_READ;
     seq.open_port("port", caps, PortKind::MIDI_GENERIC | PortKind::APPLICATION)
         .expect("a port");
@@ -748,6 +740,8 @@ fn only_a_source_that_cannot_speak_midi2_is_opened_as_midi1() {
         protocol,
         offered: offered(midi1, midi2),
         name: None,
+        device: None,
+        instance: None,
         blocks: Vec::new(),
     };
     let version = super::input::version_for;
@@ -962,8 +956,8 @@ fn fill(output: &super::output::AlsaOutput) -> usize {
 
 /// **The output never waits for room.** Events held for a minute fill the
 /// client's own output pool; a batch longer than the pool holds comes back at
-/// once with what it took, short of the batch, where a blocking client would
-/// wait for the pool to drain, which takes the minute.
+/// once with what it took, short of the batch, never waiting for the pool to
+/// drain, which takes the minute.
 #[test]
 fn an_output_with_a_full_pool_takes_what_fits_and_does_not_wait() {
     use tutti_midi_runtime::MidiOut;
@@ -974,8 +968,8 @@ fn an_output_with_a_full_pool_takes_what_fits_and_does_not_wait() {
     let batch = vec![held; 10_000];
     let started = Instant::now();
     let taken = output.queue_timed(&batch);
-    // A blocking client waits for the pool to drain, which takes the minute the
-    // events are held; returning before half of it is returning without waiting.
+    // Waiting for the pool to drain takes the minute the events are held;
+    // returning before half of it is returning without waiting.
     assert!(
         started.elapsed() < Duration::from_secs(30),
         "waited {:?} for room in the pool",
@@ -1100,6 +1094,8 @@ fn plug_ump(name: &str, protocol: Protocol) -> Virtual {
             protocol,
             offered: offered(true, true),
             name: Some("Endpoint".into()),
+            device: None,
+            instance: None,
             blocks: vec![tutti_alsa_ffi::UmpBlock {
                 info: FunctionBlockInfo {
                     active: true,

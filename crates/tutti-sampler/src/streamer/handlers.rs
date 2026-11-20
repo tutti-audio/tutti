@@ -5,34 +5,32 @@
 //! `handle_command` — the driver of [`step`]: it does the file work a command
 //! needs, runs the pure step over the table, and performs the effects.
 
-use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
 
 use std::sync::atomic::Ordering;
 use tutti_rt::AtomicSampleRate;
 use tutti_units::{SampleRate, Samples, SrcRatio};
 
-use super::StreamerSender;
 use super::cache::LruCache;
 use super::cells::Cells;
-use super::command::{Decoded, Reply, StreamId, StreamerCommand};
+use super::command::{StreamId, StreamerCommand};
 use super::config::BufferConfig;
 use super::control::StreamFile;
 use super::control_cell::ControlCell;
 #[cfg(test)]
 use super::decode::Seams;
-use super::decode::{DecodeLane, panic_message};
+use super::decode::Source;
 use super::loops::{LeadIn, Mapping, RingLoop, apply_mapping, buffer_size_for_file};
 use super::metrics::Metrics;
-use super::open::{OpenError, Opened};
+use super::open::Opened;
 use super::prefetch::RegionBuffer;
 use super::record::{Cmd, Record, Streams, step};
 use super::status::StatusCell;
 use crate::Loop;
-use crate::nonempty;
 use crate::voice::Direction;
 use crate::voice::interp::Place;
 use crate::voice_width;
+use crate::{PlaceError, nonempty};
 use tutti_buffers::ChannelLayout;
 use tutti_platform::Asset;
 use tutti_rt::RingFloat;
@@ -110,106 +108,41 @@ pub(super) struct Local<F: RingFloat> {
     pub streams: Streams<F>,
     /// Flat interleaved refill scratch. Streamer-thread-local, so it may grow.
     pub interleave_buffer: Vec<F>,
-    /// The thread whole-file decodes run on, started on first use.
-    pub lane: DecodeLane<F>,
-    /// Opens waiting on the lane, until their `Decoded` arrives.
-    pub pending: Vec<Pending<F>>,
-}
-
-/// An open of a file that cannot seek, waiting for the decode lane.
-pub(super) struct Pending<F: RingFloat> {
-    id: StreamId,
-    asset: Asset,
-    start: u64,
-    width: Option<ChannelLayout>,
-    reply: Reply<F>,
 }
 
 impl<F: RingFloat> Local<F> {
     /// Thread-local state with no streams, a scratch buffer pre-sized for one
-    /// `base_chunk_size` refill. `reports` is the queue the decode lane
-    /// answers on.
-    pub(super) fn new(base_chunk_size: usize, reports: StreamerSender<F>) -> Self {
+    /// `base_chunk_size` refill.
+    pub(super) fn new(base_chunk_size: usize) -> Self {
         Self {
             streams: Streams::new(),
             interleave_buffer: Vec::with_capacity(base_chunk_size),
-            lane: DecodeLane::new(reports),
-            pending: Vec::new(),
         }
     }
 }
 
-/// Dispatch one command on the streamer thread.
-///
-/// An open is answered on its own reply. Every other command is a pure
-/// [`step`] over the table, and silently no-ops for a stream the streamer no
-/// longer holds: commands race the streams they name, and there is no caller
-/// left to report to by the time the streamer sees one.
+/// Dispatch one command on the streamer thread: a pure [`step`] over the
+/// table, which silently no-ops for a stream the streamer no longer holds:
+/// commands race the streams they name, and there is no caller left to report
+/// to by the time the streamer sees one.
 pub(super) fn handle_command<F: RingFloat>(
     cmd: StreamerCommand<F>,
     shared: &Handles<F>,
-    config: &BufferConfig,
     local: &mut Local<F>,
 ) {
     match cmd {
-        StreamerCommand::Open {
-            id,
-            asset,
-            start,
-            width,
-            reply,
-        } => {
-            let open = Pending {
-                id,
-                asset,
-                start,
-                width,
-                reply,
-            };
-            handle_open(open, shared, config, local);
-        }
-        StreamerCommand::Decoded {
-            id,
-            wave: Decoded(wave),
-        } => {
-            if let Some(at) = local.pending.iter().position(|open| open.id == id) {
-                let open = local.pending.swap_remove(at);
-                let source = wave.map(Source::Whole);
-                complete(open, source, shared, config, local);
-            }
+        // The stream is live before the handle that names it is used: a
+        // record is never refilled while `Opening`.
+        StreamerCommand::Adopt(record) => {
+            let id = record.id();
+            let _ = step(&mut local.streams, Cmd::Open(record));
+            let _ = step(&mut local.streams, Cmd::Opened(id));
         }
         StreamerCommand::Close { stream } => {
             let _ = step(&mut local.streams, Cmd::Close(stream));
         }
         StreamerCommand::SessionRate => local.streams.rerate(shared.session_rate.get()),
     }
-}
-
-/// Try to open an incremental disk decoder for `asset`. Returns
-/// `Some((metadata, decoder))` when the format is seekable (has a frame count
-/// and the decoder opened), so the region can stream real ranges from disk.
-/// Returns `None` — signalling the whole-file fallback, on the decode lane —
-/// when a codec feature isn't compiled in, the probe fails, or the format is
-/// non-seekable.
-///
-/// The verdict comes from [`crate::probe()`], not from a local copy of the
-/// rule. A host picks a playback tier before any of this runs, and it must
-/// reach the same conclusion this function does — so "can the streamer stream it"
-/// is asked in exactly one place. Re-deriving it here is how the two would drift
-/// the next time the conditions changed.
-#[cfg(codec)]
-fn open_stream<F: RingFloat>(
-    asset: &Asset,
-) -> Option<(tutti_codec::WaveMetadata, tutti_codec::FileIn<F>)> {
-    if !crate::probe(asset.clone()).ok()?.streamable {
-        return None;
-    }
-    // Streamable, so both of these succeed — but they are still fallible calls
-    // and are handled rather than unwrapped: the probe read the header a moment
-    // ago, and a file can be replaced between the two reads.
-    let meta = tutti_codec::read_wave_metadata(asset.clone()).ok()?;
-    let decoder = tutti_codec::FileIn::<F>::open(asset.clone()).ok()?;
-    Some((meta, decoder))
 }
 
 /// The incremental decoder a seekable stream reads through; none without a
@@ -219,151 +152,13 @@ type Decoder<F> = tutti_codec::FileIn<F>;
 #[cfg(not(codec))]
 type Decoder<F> = (std::convert::Infallible, std::marker::PhantomData<F>);
 
-/// What a stream's ring is fed from: a decoder that seeks in the file, or the
-/// file decoded whole.
-enum Source<F: RingFloat> {
-    #[cfg(codec)]
-    Stream(tutti_codec::WaveMetadata, Box<tutti_codec::FileIn<F>>),
-    Whole(Arc<tutti_buffers::Wave<F>>),
-}
-
-/// Where an open stands after its probe.
-enum Begun<F: RingFloat> {
-    /// Its source is in hand.
-    Ready(Source<F>),
-    /// The file is being decoded whole on the decode lane; the open waits for
-    /// its `Decoded`.
-    #[cfg_attr(
-        not(codec),
-        allow(dead_code, reason = "with no decoder a miss fails at once")
-    )]
-    Decoding,
-}
-
-/// Probes `asset` for how to feed stream `id`: a seeking decoder, a wave
-/// the cache already holds, or else a whole-file decode on the decode lane.
-/// The streamer's thread reads a header here and nothing more.
-fn begin<F: RingFloat>(
-    id: StreamId,
-    asset: &Asset,
-    shared: &Handles<F>,
-    lane: &mut DecodeLane<F>,
-) -> Result<Begun<F>, OpenError> {
-    // Probe metadata (frame count / sample rate) for ring sizing + src_ratio
-    // WITHOUT decoding the whole file. Prefer real incremental streaming; fall
-    // back to the whole-file path when the format isn't seekable (no frame
-    // count) or opening the stream decoder fails.
-    #[cfg(codec)]
-    if let Some((meta, decoder)) = open_stream(asset) {
-        return Ok(Begun::Ready(Source::Stream(meta, Box::new(decoder))));
-    }
-    if let Some(wave) = asset.identity().and_then(|key| shared.cache.get(&key)) {
-        return Ok(Begun::Ready(Source::Whole(wave)));
-    }
-    // With no decoder compiled in, a miss has nowhere to be filled.
-    #[cfg(not(codec))]
-    {
-        let _ = (id, lane);
-        Err(super::decode::unreadable(asset))
-    }
-    #[cfg(codec)]
-    {
-        // A source that cannot be opened is no job: it fails now, where the
-        // lane would only fail it later.
-        asset.open().map_err(|error| OpenError::Io(error.kind()))?;
-        lane.submit(shared, id, asset.clone());
-        Ok(Begun::Decoding)
-    }
-}
-
-/// Open stream `open.id`, its window starting at frame `open.start`, and answer
-/// on `open.reply`: the reader's parts, or why there is none.
-///
-/// A file that cannot seek waits for the decode lane (`Pending`); everything
-/// else is built here, now. The stream is a record in the table from the
-/// moment it is built ([`Phase::Opening`](super::record::Phase)) and goes live
-/// before its reply is sent, so a handle never reads `Opening`. A caller that
-/// dropped its `PendingOpen` before the answer abandoned the open, so the stream
-/// is closed again rather than fed for nobody.
-///
-/// The probe and the build run under `catch_unwind`: a decoder that panics on
-/// a file fails that open (`OpenError::Format`), not the streamer.
-fn handle_open<F: RingFloat>(
-    open: Pending<F>,
-    shared: &Handles<F>,
-    config: &BufferConfig,
-    local: &mut Local<F>,
-) {
-    let begun = catch_unwind(AssertUnwindSafe(|| {
-        begin(open.id, &open.asset, shared, &mut local.lane)
-    }));
-    match begun {
-        Ok(Ok(Begun::Ready(source))) => complete(open, Ok(source), shared, config, local),
-        Ok(Ok(Begun::Decoding)) => local.pending.push(open),
-        Ok(Err(error)) => complete(open, Err(error), shared, config, local),
-        Err(payload) => {
-            tracing::error!(
-                "opening {} panicked: {}",
-                open.asset.name(),
-                panic_message(payload.as_ref())
-            );
-            complete(open, Err(OpenError::Format), shared, config, local);
-        }
-    }
-}
-
-/// Answers `open` from `source`: builds its stream, puts the record in the
-/// table and replies with the reader's parts, or replies with the failure.
-fn complete<F: RingFloat>(
-    open: Pending<F>,
-    source: Result<Source<F>, OpenError>,
-    shared: &Handles<F>,
-    config: &BufferConfig,
-    local: &mut Local<F>,
-) {
-    let Pending {
-        id,
-        asset,
-        start,
-        width,
-        reply,
-    } = open;
-    let built = source.and_then(|source| {
-        catch_unwind(AssertUnwindSafe(|| {
-            build_stream(id, asset.clone(), start, width, source, shared, config)
-        }))
-        .unwrap_or_else(|payload| {
-            tracing::error!(
-                "building the stream of {} panicked: {}",
-                asset.name(),
-                panic_message(payload.as_ref())
-            );
-            Err(OpenError::Format)
-        })
-    });
-    match built {
-        Err(error) => {
-            let _ = reply.send(Err(error));
-        }
-        Ok((record, opened)) => {
-            // The stream is live before its handle exists, so a handle never
-            // reads `Opening`; a caller that has gone is a close.
-            let _ = step(&mut local.streams, Cmd::Open(Box::new(record)));
-            let _ = step(&mut local.streams, Cmd::Opened(id));
-            if reply.send(Ok(opened)).is_err() {
-                let _ = step(&mut local.streams, Cmd::Close(id));
-            }
-        }
-    }
-}
-
 /// Build the stream `id` on `asset` from frame `start`: its record and
-/// what its reader is made of.
+/// what its reader is made of. Control thread: it allocates the ring.
 ///
 /// Builds the region ring at the file's own width and pins the wave in the
 /// cache for the stream's lifetime. The placement into `width` (the file's own
 /// when `None`) is built, and so refused, before anything is built.
-fn build_stream<F: RingFloat>(
+pub(super) fn build_stream<F: RingFloat>(
     id: StreamId,
     asset: Asset,
     start: u64,
@@ -371,7 +166,7 @@ fn build_stream<F: RingFloat>(
     source: Source<F>,
     shared: &Handles<F>,
     config: &BufferConfig,
-) -> Result<(Record<F>, Opened<F>), OpenError> {
+) -> Result<(Record<F>, Opened<F>), PlaceError> {
     let (file_length, file_sr, file_topology, decoder, resident): (_, _, _, Option<Decoder<F>>, _) =
         match source {
             // Decoder metadata carries the header's integer rate.
@@ -395,7 +190,7 @@ fn build_stream<F: RingFloat>(
     // Where the file's channels go in the voice, built (and so refused) now,
     // before a ring exists to free again.
     let width = voice_width(width.unwrap_or_else(|| nonempty(file_topology.width())));
-    let place = Place::for_topology(&file_topology, width).map_err(OpenError::Placement)?;
+    let place = Place::for_topology(&file_topology, width)?;
 
     // Sizing only: a rate that moves before the ratio is set below changes the
     // ring's depth, never what it plays.
@@ -440,7 +235,7 @@ fn build_stream<F: RingFloat>(
     RegionBuffer::place(&mut producer, start);
 
     // Pin the streamed wave in the LRU cache for the stream's lifetime. On the
-    // whole-file path the decode lane inserted the file into the cache, so this
+    // whole-file path the open's decode inserted the file into the cache, so this
     // protects that resident Wave from being evicted mid-read (a fully-buffered
     // stream goes cold and would otherwise be picked as the LRU victim). On the
     // incremental-decode path the wave isn't cached, so `pin` finds no entry and

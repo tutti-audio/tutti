@@ -1,7 +1,7 @@
 //! What a stream plays ([`StreamFile`], what an export fork reads).
 //!
 //! The control side of a stream is [`Stream`](crate::Stream); the reader it
-//! hands its voice is the reply of its open ([`PendingOpen`](crate::PendingOpen)).
+//! hands its voice is the value of its adopt ([`DiskStreamer::adopt`](crate::DiskStreamer::adopt)).
 
 use std::sync::Arc;
 

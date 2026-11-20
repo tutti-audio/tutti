@@ -386,8 +386,11 @@ fn a_host_that_ends_in_the_control_phase_shuts_the_server_down() {
         Ok(ControlFrame::Ready { .. })
     ));
     let (ended, server_ended) = std::sync::mpsc::channel();
-    tutti_plugin_ipc_ffi::watch_host(server, move || ended.send(()).expect("listening"))
-        .expect("the watch starts");
+    let executor = tutti_platform::Executor::new();
+    let _watch = tutti_plugin_ipc_ffi::watch_host(&executor, server, move || {
+        ended.send(()).expect("listening");
+    })
+    .expect("the watch starts");
 
     drop(host.0.stdin.take());
     host.0.wait().expect("the host ends");

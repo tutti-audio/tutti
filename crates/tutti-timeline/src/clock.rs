@@ -50,6 +50,10 @@ pub(crate) struct Control {
     /// [`Transport::recording`](tutti_graph::TransportPosition::recording). Read once
     /// per block, like the rest; no command moves it mid-block.
     pub recording: bool,
+    /// Whether a count-in is running, for the graph's
+    /// [`TransportPosition::count_in`](tutti_graph::TransportPosition::count_in). Read
+    /// once per block, like the rest.
+    pub count_in: bool,
 }
 
 impl Control {
@@ -62,6 +66,7 @@ impl Control {
             paused: settings.is_paused(),
             loop_region,
             recording: settings.is_recording(),
+            count_in: settings.in_preroll(),
         }
     }
 
@@ -311,6 +316,7 @@ impl TransportClock {
             control.loop_region.active(),
         )
         .with_recording(control.recording)
+        .counting_in(control.count_in)
     }
 
     /// Advance `frames` under `from`, the transport the last
@@ -373,6 +379,7 @@ impl TransportClock {
                     from.looping,
                 )
                 .with_recording(from.recording())
+                .counting_in(from.count_in())
             })
     }
 
@@ -466,6 +473,7 @@ impl TransportClock {
             paused: self.links.paused.load(Ordering::Acquire),
             loop_region,
             recording: false,
+            count_in: false,
         };
         let t = self.begin(&control, true, None);
         let first = self.clock.beat();

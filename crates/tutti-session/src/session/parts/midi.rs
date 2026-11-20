@@ -12,7 +12,7 @@ use tutti_platform::Instant;
 
 use tutti_buffers::Float;
 use tutti_graph::NodeKey;
-use tutti_timeline::MotionEvent;
+use tutti_timeline::MotionCommand;
 use tutti_units::{SampleRate, Samples};
 
 use super::TransportPart;
@@ -177,10 +177,10 @@ impl MidiPart {
 
     fn send_action(placed: Placed, handle: &TransportHandle) -> bool {
         let event = match placed.action {
-            ClockAction::Play => MotionEvent::Play,
-            ClockAction::Stop => MotionEvent::stop(),
-            ClockAction::Locate(beat) => MotionEvent::locate(beat),
-            ClockAction::PlayFrom(beat) => MotionEvent::play_from(beat),
+            ClockAction::Play => MotionCommand::Play,
+            ClockAction::Stop => MotionCommand::stop(),
+            ClockAction::Locate(beat) => MotionCommand::locate(beat),
+            ClockAction::PlayFrom(beat) => MotionCommand::play_from(beat),
         };
         match handle.schedule(placed.at, event) {
             Ok(()) => true,

@@ -38,10 +38,10 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_buffers::Wave;
 use tutti_engine::Engine;
-use tutti_graph::{Editor, NodeKey, OutPort, Prepare, Source};
+use tutti_graph::{Editor, NodeKey, OutPort, PortSource, Prepare};
 use tutti_sampler::{MemorySource, Playback, SlotId, VoicePool};
 use tutti_tempo::{TempoMap, TempoPoint, Transition};
-use tutti_timeline::{MotionEvent, Transport};
+use tutti_timeline::{MotionCommand, Transport};
 use tutti_units::{Beat, BeatDuration, Bpm, SampleRate, Samples};
 
 const SR: f64 = 48_000.0;
@@ -149,7 +149,7 @@ fn render(
         }
     }
     ed.spec_mut().topology.set_outputs((0..2).map(|port| {
-        Source::Node(OutPort {
+        PortSource::Node(OutPort {
             node: NodeKey(1),
             port,
         })
@@ -160,7 +160,7 @@ fn render(
     transport.settings().set_tempo_map(Arc::clone(map));
     transport
         .motion()
-        .try_send(MotionEvent::Play)
+        .try_send(MotionCommand::Play)
         .expect("room");
     let mut left = Vec::with_capacity(frames + block);
     let mut buf = vec![0.0f32; block * 2];

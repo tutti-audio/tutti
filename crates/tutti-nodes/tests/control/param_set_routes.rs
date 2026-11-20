@@ -12,26 +12,25 @@
 //! drives a control lane whose knob is the filter's cell.
 
 use std::sync::atomic::Ordering;
-use tutti_buffers::MaxBlock;
-use tutti_buffers::{Mono, Planes};
+use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock, Mono, Planes};
 use tutti_fixtures::signal::peak;
 
-use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_curve::Law;
 use tutti_graph::NodeKey;
 use tutti_graph::{
     Cx, Editor, EventOut, GraphBuilder, Io, Node, ParamIn, ParamNode, ParamRange, ParamSet,
     Prepare, Renderer, Shape, Status, Unforkable,
 };
-use tutti_graph::{OutPort, Source};
+use tutti_graph::{OutPort, PortSource};
 use tutti_modulation::{
-    Amount, Clock, ControlProgram, Layer, LayerId, LfoShape, Polarity, Waveform,
+    Amount, Clock, ControlProgramBuilder, Layer, LayerId, LfoShape, Polarity, Waveform,
 };
-use tutti_nodes::automation::ControlLaneNode;
+use tutti_nodes::automation::{ControlLaneNode, UnitLaneConfig};
 use tutti_nodes::{
-    CompressorConfig, CompressorControls, CompressorNode, KeySource, LadderFilterNode, LadderType,
-    LfoNode, LimiterConfig, LimiterControls, LimiterNode, ModDelayConfig, ModDelayNode,
-    PhaserConfig, PhaserNode, Stages, SvfFilterNode, SvfType,
+    CompressorConfig, CompressorControls, CompressorNode, KeySource, LadderFilterConfig,
+    LadderFilterNode, LadderType, LfoConfig, LfoNode, LimiterConfig, LimiterControls, LimiterNode,
+    ModDelayConfig, ModDelayNode, PhaserConfig, PhaserNode, Stages, SvfFilterConfig, SvfFilterNode,
+    SvfType,
 };
 use tutti_units::UnitParam;
 use tutti_units::{
@@ -50,11 +49,10 @@ fn addresses<N: ParamNode>(node: &N, p: UnitParam) -> bool {
 }
 
 fn svf() -> SvfFilterNode<f32> {
-    SvfFilterNode::<f32>::with_channels(
-        ChannelLayout::STEREO,
-        SvfType::LowPass,
-        Hz::new(1000.0),
-        Q::new(0.7),
+    SvfFilterNode::<f32>::from(
+        SvfFilterConfig::new(ChannelLayout::STEREO, SvfType::LowPass)
+            .freq(Hz::new(1000.0))
+            .q(Q::new(0.7)),
     )
 }
 
@@ -77,11 +75,10 @@ fn a_param_the_set_lacks_has_no_address() {
 
 #[test]
 fn ladder_addresses_q_and_drive_but_not_feedback() {
-    let node = LadderFilterNode::<f32>::with_channels(
-        ChannelLayout::STEREO,
-        LadderType::LP24,
-        Hz::new(800.0),
-        Resonance::new(0.5),
+    let node = LadderFilterNode::<f32>::from(
+        LadderFilterConfig::new(ChannelLayout::STEREO, LadderType::LP24)
+            .freq(Hz::new(800.0))
+            .res(Resonance::new(0.5)),
     );
     assert!(addresses(&node, UnitParam::Cutoff));
     assert!(addresses(&node, UnitParam::Q));
@@ -129,7 +126,7 @@ fn an_lfo_lane_sweeps_around_a_real_filters_cutoff_cell() {
     ed.insert(probe, "probe", Unforkable(Probe));
     ed.spec_mut()
         .topology
-        .set_outputs(vec![Source::Node(OutPort {
+        .set_outputs(vec![PortSource::Node(OutPort {
             node: probe,
             port: 0,
         })]);
@@ -159,13 +156,20 @@ fn an_lfo_lane_sweeps_around_a_real_filters_cutoff_cell() {
         },
         depth_by: None,
     };
-    let program = ControlProgram::new(None, vec![layer], vec![]).expect("valid");
+    let program = ControlProgramBuilder::new()
+        .layers(vec![layer])
+        .build()
+        .expect("valid");
     let knob = filter
         .param_set()
         .cell(UnitParam::Cutoff)
         .expect("addressed");
     let range = ed.param_range_cell(at).expect("committed");
-    let lane = ControlLaneNode::for_unit(UnitParam::Cutoff, program, Some(knob), Some(range));
+    let lane = ControlLaneNode::from(
+        UnitLaneConfig::new(UnitParam::Cutoff, program)
+            .knob(knob)
+            .range(range),
+    );
     ed.insert(NodeKey(2), "lane", lane);
     ed.spec_mut().connect_param(
         at,
@@ -244,10 +248,17 @@ fn render_chorus(
             },
             depth_by: None,
         };
-        let program = ControlProgram::new(None, vec![layer], vec![]).expect("valid");
+        let program = ControlProgramBuilder::new()
+            .layers(vec![layer])
+            .build()
+            .expect("valid");
         let knob = params.cell(UnitParam::Rate).expect("the chorus has a rate");
         let range = ed.param_range_cell(at).expect("committed");
-        let lane = ControlLaneNode::for_unit(UnitParam::Rate, program, Some(knob), Some(range));
+        let lane = ControlLaneNode::from(
+            UnitLaneConfig::new(UnitParam::Rate, program)
+                .knob(knob)
+                .range(range),
+        );
         ed.insert(NodeKey(9_000), "lane", lane);
         ed.spec_mut().connect_param(
             at,
@@ -364,8 +375,7 @@ fn convolver_addresses_nothing() {
     // Room size is baked into the IR, the gain has no address and the mix is
     // the graph's (`NodeMix::ADDR`, not a node's param).
     // A minimal unit IR is fine — only the param surface is probed.
-    let node =
-        tutti_nodes::ConvolverNode::shared_ir(2u16, Mono::new(&[1.0]), Samples::new(64)).unwrap();
+    let node = shared_ir_node(2u16, Mono::new(&[1.0]), Samples::new(64)).unwrap();
     assert!(!addresses(&node, UnitParam::Wet));
     assert!(!addresses(&node, UnitParam::RoomSize));
     assert!(!addresses(&node, UnitParam::Cutoff));
@@ -377,9 +387,11 @@ fn convolver_addresses_nothing() {
 /// after the render.
 fn render_lfo(param: UnitParam, range: ParamRange, depth: f64) -> (Vec<f32>, f64) {
     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::MONO);
-    let lfo = LfoNode::new(LfoShape::Sine)
-        .with_rate(Hz::new(1.0))
-        .with_depth(Depth::of(0.25));
+    let lfo = LfoNode::from(
+        LfoConfig::new(LfoShape::Sine)
+            .rate(Hz::new(1.0))
+            .depth(Depth::of(0.25)),
+    );
     let (n, params) = g.add_with_controls(lfo);
     g.connect_output(n, 0, 0);
     let at = ParamIn {
@@ -409,11 +421,18 @@ fn render_lfo(param: UnitParam, range: ParamRange, depth: f64) -> (Vec<f32>, f64
         },
         depth_by: None,
     };
-    let program = ControlProgram::new(None, vec![layer], vec![]).expect("valid");
+    let program = ControlProgramBuilder::new()
+        .layers(vec![layer])
+        .build()
+        .expect("valid");
     let range = ed
         .param_range_cell(at)
         .expect("the LFO declares it as a port");
-    let lane = ControlLaneNode::for_unit(param, program, Some(knob.clone()), Some(range));
+    let lane = ControlLaneNode::from(
+        UnitLaneConfig::new(param, program)
+            .knob(knob.clone())
+            .range(range),
+    );
     ed.insert(NodeKey(9_000), "lane", lane);
     ed.spec_mut().connect_param(
         at,
@@ -512,12 +531,15 @@ where
         },
         depth_by: None,
     };
-    let program = ControlProgram::new(None, vec![layer], vec![]).expect("valid");
+    let program = ControlProgramBuilder::new()
+        .layers(vec![layer])
+        .build()
+        .expect("valid");
     let knob = params.cell(param).expect("the node addresses it");
     let range = ed
         .param_range_cell(at)
         .expect("the node declares it as a port");
-    let lane = ControlLaneNode::for_unit(param, program, Some(knob), Some(range));
+    let lane = ControlLaneNode::from(UnitLaneConfig::new(param, program).knob(knob).range(range));
     ed.insert(NodeKey(9_000), "lane", lane);
     ed.spec_mut().connect_param(
         at,
@@ -706,9 +728,11 @@ fn an_lfo_reads_a_driven_depth_per_frame() {
     use tutti_graph::contract::ParamPulse;
     use tutti_units::{Frame, UnitAddr};
     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::MONO);
-    let lfo = LfoNode::new(LfoShape::Square)
-        .with_rate(Hz::new(1.0))
-        .with_depth(Depth::of(0.25));
+    let lfo = LfoNode::from(
+        LfoConfig::new(LfoShape::Square)
+            .rate(Hz::new(1.0))
+            .depth(Depth::of(0.25)),
+    );
     let (n, _) = g.add_with_controls(lfo);
     g.connect_output(n, 0, 0);
     let pulse = g.add(Unforkable(ParamPulse::new(
@@ -741,14 +765,11 @@ fn an_lfo_reads_a_driven_depth_per_frame() {
 /// route removed, then 512 frames more, in blocks of `block`: the output, the
 /// shelf's DC gain at each frame.
 fn shelf_handed_back(block: usize) -> Vec<f32> {
-    let shelf = SvfFilterNode::<f32>::with_controls(
-        ChannelLayout::MONO,
-        tutti_nodes::SvfControls {
-            ty: SvfType::LowShelf,
-            freq: Hz::new(1000.0),
-            q: Q::new(0.7),
-            gain: Db::new(0.0),
-        },
+    let shelf = SvfFilterNode::<f32>::from(
+        SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowShelf)
+            .freq(Hz::new(1000.0))
+            .q(Q::new(0.7))
+            .gain(Db::new(0.0)),
     );
     let mut g = GraphBuilder::new(ChannelLayout::MONO, ChannelLayout::MONO);
     let (n, params) = g.add_with_controls(shelf);
@@ -782,10 +803,17 @@ fn shelf_handed_back(block: usize) -> Vec<f32> {
         },
         depth_by: None,
     };
-    let program = ControlProgram::new(None, vec![layer], vec![]).expect("valid");
+    let program = ControlProgramBuilder::new()
+        .layers(vec![layer])
+        .build()
+        .expect("valid");
     let knob = params.cell(UnitParam::GainDb).expect("addressed");
     let range = ed.param_range_cell(at).expect("a port");
-    let lane = ControlLaneNode::for_unit(UnitParam::GainDb, program, Some(knob), Some(range));
+    let lane = ControlLaneNode::from(
+        UnitLaneConfig::new(UnitParam::GainDb, program)
+            .knob(knob)
+            .range(range),
+    );
     let lane_out = EventOut {
         node: NodeKey(9_000),
         port: 0,
@@ -836,4 +864,19 @@ fn a_control_a_lane_lets_go_of_is_handed_back_without_a_step() {
             "blocks of {block} differ from blocks of 64"
         );
     }
+}
+
+fn unassigned_bus(width: impl Into<tutti_buffers::ChannelLayout>) -> tutti_buffers::BusTopology {
+    tutti_buffers::BusTopology::unassigned(width.into()).expect("a test width fits a bus")
+}
+
+/// `width` unassigned channels sharing the response `ir`.
+fn shared_ir_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::Sample>(
+    width: impl Into<tutti_buffers::ChannelLayout>,
+    ir: tutti_buffers::Mono<'_, S>,
+    block_size: tutti_units::Samples,
+) -> Result<tutti_nodes::ConvolverNode<F>, tutti_nodes::ConvolverError> {
+    tutti_nodes::ConvolverNode::try_from(
+        tutti_nodes::ConvolverConfig::new(unassigned_bus(width), &[ir]).block_size(block_size),
+    )
 }

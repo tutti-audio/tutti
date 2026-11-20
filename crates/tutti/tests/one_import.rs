@@ -7,9 +7,10 @@
 
 use tutti::graph::Node;
 use tutti::{
-    At, BarNumber, Beat, Bpm, Cents, ChannelLayout, Db, Frame, Meter, MeterMap, MotionEvent,
+    At, BarNumber, Beat, Bpm, Cents, ChannelLayout, Db, Frame, Meter, MeterMap, MotionCommand,
     SampleRate, Seconds, TransportCommand,
 };
+use tutti_nodes::LfoConfig;
 use tutti_nodes::testing::Const;
 use tutti_timeline::Transport;
 
@@ -59,7 +60,7 @@ fn the_measurement_vocabulary_arrives_and_converts() {
 #[test]
 fn the_dsp_library_and_the_node_contract_are_reachable() {
     // A `tutti-nodes` unit, built and driven through `tutti::` alone.
-    let _lfo = tutti::nodes::LfoNode::new(tutti::nodes::LfoShape::Sine);
+    let _lfo = tutti::nodes::LfoNode::from(LfoConfig::new(tutti::nodes::LfoShape::Sine));
     // The node contract, `tutti::graph::Node`, on a node whose crate is a
     // dev-dependency.
     let node = Const::frame(&[0.5, 0.5]);
@@ -102,13 +103,13 @@ fn a_timed_transport_program_needs_only_the_root() {
     let transport = Transport::new(SampleRate::SR_48K);
     transport
         .motion()
-        .schedule(At::Frame(Frame::new(128)), MotionEvent::Play)
+        .schedule(At::Frame(Frame::new(128)), MotionCommand::Play)
         .expect("room");
     transport
         .motion()
         .schedule(
             At::Beat(Beat::new(16.0)),
-            TransportCommand::Motion(MotionEvent::stop()),
+            TransportCommand::Motion(MotionCommand::stop()),
         )
         .expect("room");
     assert_eq!(transport.motion().scheduled_outstanding(), 2);

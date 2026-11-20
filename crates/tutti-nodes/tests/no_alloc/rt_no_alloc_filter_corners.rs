@@ -27,10 +27,13 @@
 //! them on every grid point, and values the node holds or clamps.
 
 use tutti_buffers::Float;
-use tutti_buffers::{ChannelLayout, MaxBlock};
+use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
 use tutti_graph::contract::Direct;
 use tutti_graph::{Node, ParamNode, Prepare};
-use tutti_nodes::{CrossoverNode, LadderFilterNode, LadderType};
+use tutti_nodes::{
+    CrossoverConfig, CrossoverControls, CrossoverNode, LadderFilterConfig, LadderFilterNode,
+    LadderType,
+};
 use tutti_units::{Hz, Resonance, SampleRate, Samples, UnitAddr, UnitParam};
 
 const SR: SampleRate = SampleRate::SR_48K;
@@ -143,11 +146,10 @@ fn the_ladder_corners_are_allocation_free_with_every_control_moving() {
                 } * 1.001;
                 for width in [1u16, 2, 9] {
                     for shape in 0..SHAPES {
-                        let node = LadderFilterNode::<$f>::with_channels(
-                            ChannelLayout::from(width),
-                            ty,
-                            Hz::new(1_000.0),
-                            Resonance::new(0.5),
+                        let node = LadderFilterNode::<$f>::from(
+                            LadderFilterConfig::new(ChannelLayout::from(width), ty)
+                                .freq(Hz::new(1_000.0))
+                                .res(Resonance::new(0.5)),
                         );
                         let set = node.param_set();
                         let mut rig = Direct::<_, $f>::with_format(node, SR, FRAMES);
@@ -190,11 +192,10 @@ fn the_ladder_at_a_held_extreme_cutoff_is_allocation_free_and_bounded() {
         } * 1.001;
         for cutoff in [1.0e9f64, 23_900.0, 1.0] {
             for shape in 0..SHAPES {
-                let node = LadderFilterNode::<f32>::with_channels(
-                    ChannelLayout::STEREO,
-                    ty,
-                    Hz::new(cutoff),
-                    Resonance::new(1.0),
+                let node = LadderFilterNode::<f32>::from(
+                    LadderFilterConfig::new(ChannelLayout::STEREO, ty)
+                        .freq(Hz::new(cutoff))
+                        .res(Resonance::new(1.0)),
                 );
                 let set = node.param_set();
                 let mut rig = Direct::new(node, SR, FRAMES);
@@ -249,11 +250,10 @@ fn the_ladder_with_the_cutoff_anywhere_is_finite_and_within_the_stage_bound() {
                 }
             };
             for shape in 0..SHAPES {
-                let node = LadderFilterNode::<f32>::with_channels(
-                    ChannelLayout::STEREO,
-                    ty,
-                    Hz::new(1_000.0),
-                    Resonance::new(0.5),
+                let node = LadderFilterNode::<f32>::from(
+                    LadderFilterConfig::new(ChannelLayout::STEREO, ty)
+                        .freq(Hz::new(1_000.0))
+                        .res(Resonance::new(0.5)),
                 );
                 let set = node.param_set();
                 let mut rig = Direct::new(node, rate, FRAMES);
@@ -284,8 +284,11 @@ fn the_ladder_with_the_cutoff_anywhere_is_finite_and_within_the_stage_bound() {
 /// cells), then walked with its own cells moving.
 #[test]
 fn a_forked_ladder_and_crossover_are_allocation_free() {
-    let ladder =
-        LadderFilterNode::<f32>::new(LadderType::HP24, Hz::new(800.0), Resonance::new(0.9));
+    let ladder = LadderFilterNode::<f32>::from(
+        LadderFilterConfig::new(ChannelLayout::MONO, LadderType::HP24)
+            .freq(Hz::new(800.0))
+            .res(Resonance::new(0.9)),
+    );
     let fork = ladder.fork_fresh();
     let set = fork.param_set();
     let mut rig = Direct::new(fork, SR, FRAMES);
@@ -297,9 +300,11 @@ fn a_forked_ladder_and_crossover_are_allocation_free() {
         );
     });
     assert!(peak.is_some_and(|p| p <= 16.0 * 1.001), "{peak:?}");
-    let crossover =
-        CrossoverNode::<f32>::new(ChannelLayout::STEREO, &[Hz::new(200.0), Hz::new(2_000.0)])
-            .unwrap();
+    let crossover = CrossoverNode::<f32>::try_from(CrossoverConfig::new(
+        BusTopology::STEREO,
+        CrossoverControls::try_from(&[Hz::new(200.0), Hz::new(2_000.0)][..]).unwrap(),
+    ))
+    .unwrap();
     let fork = crossover.fork_fresh();
     let set = fork.param_set();
     let mut rig = Direct::new(fork, SR, FRAMES);
@@ -360,7 +365,11 @@ fn the_crossover_corners_are_allocation_free_with_every_split_moving() {
                 let initial: Vec<Hz> = (0..bands - 1)
                     .map(|i| Hz::new(150.0 * 3f64.powi(i as i32)))
                     .collect();
-                let node = CrossoverNode::<f32>::new(ChannelLayout::from(width), &initial).unwrap();
+                let node = CrossoverNode::<f32>::try_from(CrossoverConfig::new(
+                    BusTopology::default_for(ChannelLayout::from(width)).unwrap(),
+                    CrossoverControls::try_from(&initial[..]).unwrap(),
+                ))
+                .unwrap();
                 let set = node.param_set();
                 let mut rig = Direct::new(node, SR, FRAMES);
                 fill(&mut rig);
@@ -395,7 +404,8 @@ fn the_crossover_corners_are_allocation_free_with_every_split_moving() {
 /// norms), with a factor 1.001 for the `f32` rounding.
 #[test]
 fn the_crossover_at_held_extreme_splits_stays_within_the_models_l1_bound() {
-    use tutti_dsp::{CrossoverControls, CrossoverModel, Lti};
+    use tutti_buffers::BusTopology;
+    use tutti_dsp::{CrossoverBands, CrossoverControls, CrossoverModel, Lti};
     for set in [
         [1.0f64, 2.0],
         [23_999.0, 24_000.0],
@@ -404,7 +414,11 @@ fn the_crossover_at_held_extreme_splits_stays_within_the_models_l1_bound() {
     ] {
         for shape in [1usize, 3, 4] {
             let hz = [Hz::new(set[0]), Hz::new(set[1])];
-            let node = CrossoverNode::<f32>::new(ChannelLayout::STEREO, &hz).unwrap();
+            let node = CrossoverNode::<f32>::try_from(CrossoverConfig::new(
+                BusTopology::STEREO,
+                CrossoverControls::try_from(&hz[..]).unwrap(),
+            ))
+            .unwrap();
             let cells = node.param_set();
             let mut rig = Direct::new(node, SR, FRAMES);
             fill(&mut rig);
@@ -412,8 +426,8 @@ fn the_crossover_at_held_extreme_splits_stays_within_the_models_l1_bound() {
             rig.feed(1, Some(&signal(shape, 1.0, 2.0, 1.0)));
             // The model the kernel retargets: `design_into` over the cell values, which
             // clamps under 0.499 of the rate and orders the splits; the node applies no other fit.
-            let controls = CrossoverControls::ordered(&hz).unwrap();
-            let model = CrossoverModel::designed(3, &controls, SR).unwrap();
+            let controls = CrossoverControls::try_from(&hz[..]).unwrap();
+            let model = CrossoverModel::designed(CrossoverBands::of(3), &controls, SR);
             let bound = 0.5 * model.l1_norm() as f32 * 1.001;
             let peak = walk(&mut rig, SR, 240, 6, |i| {
                 // A write the node holds at the last good value, or one that lands on the

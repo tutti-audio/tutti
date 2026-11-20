@@ -20,10 +20,10 @@ use std::path::Path;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{
-    ChunkSize, CrossoverBank, CrossoverControls, CrossoverModel, LadderBank, LadderBlend,
-    LadderControls, LadderModel, LadderType, PhaserChain, Ramp, SimdLanes, Stages,
-    StreamingResampler, SvfBank, SvfCoefficients, SvfControls, SvfModel, SvfType,
-    allpass_complement,
+    ChunkSize, CrossoverBands, CrossoverBank, CrossoverControls, CrossoverModel, LadderBank,
+    LadderBlend, LadderControls, LadderModel, LadderType, PhaserChain, Ramp, SimdLanes, Stages,
+    StreamingResampler, StreamingResamplerConfig, SvfBank, SvfCoefficients, SvfControls, SvfModel,
+    SvfType, allpass_complement,
 };
 use tutti_fixtures::signal::write_wav_f32;
 use tutti_units::{Db, Drive, Hz, Q, Resonance, SampleRate};
@@ -200,8 +200,12 @@ fn crossover(dir: &Path, cases: &mut Cases) {
         ("lr4_3band", vec![300.0, 3_000.0]),
     ] {
         let hz: Vec<Hz> = splits.iter().map(|&f| Hz::new(f)).collect();
-        let c = CrossoverControls::new(&hz, rate).expect("controls");
-        let model = CrossoverModel::designed(splits.len() + 1, &c, rate).expect("bands");
+        let c = CrossoverControls::try_from((&hz[..], rate)).expect("controls");
+        let model = CrossoverModel::designed(
+            CrossoverBands::new(splits.len() + 1).expect("bands"),
+            &c,
+            rate,
+        );
         let mut bank = CrossoverBank::<f64>::new(ChannelLayout::MONO);
         let mut coefficients = Ramp::new(model.blend());
         // One channel per band, band 0 first.
@@ -281,11 +285,13 @@ fn resample(dir: &Path, cases: &mut Cases) {
             let secs = 1.0;
             let input = multisine(from, secs, &freqs, 0.5);
             let (mut rs, out) = (
-                StreamingResampler::new(
-                    1,
-                    SampleRate::of(from),
-                    SampleRate::of(to),
-                    ChunkSize::N1024,
+                StreamingResampler::try_from(
+                    StreamingResamplerConfig::new(
+                        ChannelLayout::MONO,
+                        SampleRate::of(from),
+                        SampleRate::of(to),
+                    )
+                    .chunk(ChunkSize::N1024),
                 )
                 .expect("resampler"),
                 &mut vec![Vec::<f32>::new()],

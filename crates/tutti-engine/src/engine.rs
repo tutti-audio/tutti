@@ -41,7 +41,7 @@
 //! **Beats** are resolved with the graph's rule (`tutti_graph::Env::due`):
 //! the first frame at or after the beat that playback reaches, the piece's
 //! own transport deciding. A beat continuous playback already crossed is late;
-//! one a seek or loop jumped over waits (`tutti_graph::Playhead`).
+//! one a seek or loop jumped over waits (`tutti_graph::BeatCrossings`).
 //!
 //! **The declick is audio only, and its fade-out ends on the command's
 //! frame.** A declick stop or seek moves the transport on its command's
@@ -107,7 +107,7 @@
 //! callback never meets a graph it cannot render.
 
 use tutti_graph::{
-    CommitError, Due, Editor, Env, Executor, FadeLaw, Limits, Offset, Playhead, RootId,
+    BeatCrossings, CommitError, Due, Editor, Env, Executor, FadeLaw, Limits, Offset, RootId,
     TransportChanges, declick_frames, fade_gains, fade_in,
 };
 
@@ -126,7 +126,7 @@ use tutti_rt::{AudioThreadCell, Counter, Gauge, Reader, RtScope};
 #[cfg(doc)]
 use tutti_timeline::MotionFsm;
 use tutti_timeline::{
-    AudioTaken, FadeOut, IMMEDIATE_RESERVE, MotionEvent, SCHEDULE_CAPACITY, Scheduled,
+    AudioTaken, FadeOut, IMMEDIATE_RESERVE, MotionCommand, SCHEDULE_CAPACITY, Scheduled,
     TransportAudio, TransportCommand,
 };
 use tutti_units::{At, Frame};
@@ -227,7 +227,8 @@ impl<F: Float> std::fmt::Debug for Engine<F> {
 /// The graph's executor, the clock that feeds its `Env`, and the
 /// planar scratch its outputs land in before the fold.
 struct GraphRender<F: Float> {
-    exec: Executor<F>,
+    /// Boxed once at construction, so an `Engine` moves cheaply.
+    exec: Box<Executor<F>>,
     /// The transport's audio side: motion machine, playhead clock and
     /// commands. The graph reads the transport from `Env`, so the engine
     /// drives the clock itself; every node reads what it publishes from its
@@ -236,7 +237,7 @@ struct GraphRender<F: Float> {
     /// `SCRATCH_CHUNKS` planar channels of `stride` frames each.
     scratch: Vec<F>,
     stride: usize,
-    playhead: Playhead,
+    crossings: BeatCrossings,
     /// The executor's [`dropped_event_count`](Executor::dropped_event_count) already
     /// forwarded to the block counts.
     dropped_seen: u64,
@@ -517,11 +518,11 @@ impl<F: Float> Engine<F> {
         let stage = AudioThreadCell::new(output.stage().reader());
         Ok(Self {
             graph: AudioThreadCell::new(GraphRender {
-                exec: executor,
+                exec: Box::new(executor),
                 transport: audio,
                 scratch: vec![F::ZERO; SCRATCH_CHUNKS * stride],
                 stride,
-                playhead: Playhead::new(),
+                crossings: BeatCrossings::new(),
                 dropped_seen,
                 clock,
                 dates: DateKeeper::new(dates),
@@ -732,7 +733,7 @@ impl<F: Float> Engine<F> {
             budget.add(Samples::new(len), rate);
             // Kept current, so a later `process` tells a late beat from one
             // jumped over across this block too.
-            g.playhead.observe(&Env {
+            g.crossings.observe(&Env {
                 frame: g.exec.frame(),
                 sample_rate: rate,
                 block_len: Samples::new(len),
@@ -852,7 +853,7 @@ impl<F: Float> Engine<F> {
             let walk = self.walk(
                 Track {
                     transport: &mut g.transport,
-                    playhead: &mut g.playhead,
+                    crossings: &mut g.crossings,
                 },
                 frame0,
                 len,
@@ -912,7 +913,7 @@ impl<F: Float> Engine<F> {
     ) -> Walk {
         let Track {
             transport,
-            playhead,
+            crossings,
         } = track;
         let fade = fade_frames(rate);
         let mut walk = Walk {
@@ -922,10 +923,10 @@ impl<F: Float> Engine<F> {
         };
         let mut t = walk.start;
         let mut cursor = 0;
-        // The playhead as of the start of the current piece. Each piece is
+        // The crossing tracker as of the start of the current piece. Each piece is
         // observed with its real length once it is cut; before that, a copy
         // observes it with the rest of the block, to answer `crossed`.
-        let mut base = *playhead;
+        let mut base = *crossings;
         transport.drain_commands();
         loop {
             // The map's tempo steps from the cursor on, assuming no command
@@ -1029,7 +1030,7 @@ impl<F: Float> Engine<F> {
             changes: TransportChanges::NONE,
             play: tutti_graph::PlayClock::ZERO,
         });
-        *playhead = base;
+        *crossings = base;
         transport.advance(frames - cursor, &t);
         pieces.ran();
         walk.frames = frames;
@@ -1080,10 +1081,10 @@ impl<F: Float> Engine<F> {
 }
 
 /// The render state a block's walk moves: the transport its commands go
-/// through, and the playhead it observes.
+/// through, and the crossings it observes.
 struct Track<'a> {
     transport: &'a mut TransportAudio,
-    playhead: &'a mut Playhead,
+    crossings: &'a mut BeatCrossings,
 }
 
 /// What a block's walk leaves for after the render.
@@ -1109,9 +1110,9 @@ fn declicks(command: &TransportCommand) -> bool {
     matches!(
         command,
         TransportCommand::Motion(
-            MotionEvent::Stop {
+            MotionCommand::Stop {
                 fade: FadeOut::Declick
-            } | MotionEvent::Locate {
+            } | MotionCommand::Locate {
                 fade: FadeOut::Declick,
                 ..
             }
@@ -1467,13 +1468,18 @@ impl<F: Float> GraphRender<F> {
             gain_old: chunks.next().expect("a chunk for the old root's gains"),
             gain_new: chunks.next().expect("a chunk for the new root's gains"),
         };
-        self.exec.render_applied(
-            len,
-            transport,
-            changes,
-            &[],
-            &mut outs[..rendered.min(ROOT_BANKS * MAX_CHANNELS)],
-        );
+        // The project's meter, lent once for this block and dropped with it.
+        {
+            let meter = self.transport.meter();
+            self.exec.render_applied(
+                len,
+                transport,
+                changes,
+                &[],
+                &mut outs[..rendered.min(ROOT_BANKS * MAX_CHANNELS)],
+                Some(&*meter),
+            );
+        }
         // The block that ends the fade is the old root's last: from here the
         // new root is the oldest in use.
         self.installed.store(
@@ -1613,7 +1619,7 @@ mod tests {
     use tutti_buffers::Placement;
     use tutti_graph::Prepare;
     use tutti_timeline::Timeline;
-    use tutti_timeline::{MotionEvent, Transport};
+    use tutti_timeline::{MotionCommand, Transport};
     use tutti_units::{Amplitude, Bpm};
 
     /// `GraphEngineError` is an `Error` a caller can box and move; the bound is
@@ -1684,7 +1690,7 @@ mod tests {
             Engine::new(&transport, &mut ed, exec, crate::BlockDates::Os).expect("empty graph");
         transport
             .motion()
-            .schedule(At::Frame(Frame::new(100)), MotionEvent::Play)
+            .schedule(At::Frame(Frame::new(100)), MotionCommand::Play)
             .expect("room");
         let settings = &transport.settings();
         let mut render = engine.graph.borrow_mut();
@@ -1694,11 +1700,11 @@ mod tests {
             },
             settings,
         };
-        let mut playhead = Playhead::new();
+        let mut crossings = BeatCrossings::new();
         let walk = engine.walk(
             Track {
                 transport: &mut render.transport,
-                playhead: &mut playhead,
+                crossings: &mut crossings,
             },
             Frame::ZERO,
             512,
@@ -1730,7 +1736,7 @@ mod tests {
         ));
         let engine =
             Engine::new(&transport, &mut ed, exec, crate::BlockDates::Os).expect("empty graph");
-        let _ = transport.motion().try_send(MotionEvent::Play);
+        let _ = transport.motion().try_send(MotionCommand::Play);
         let mut buf = vec![1.0f32; 64 * 2];
         let mut seg = vec![1.0f32; 64 * 2];
         {
@@ -1801,7 +1807,7 @@ mod tests {
             ));
             let engine =
                 Engine::new(&transport, &mut ed, exec, crate::BlockDates::Os).expect("empty graph");
-            let _ = transport.motion().try_send(MotionEvent::Play);
+            let _ = transport.motion().try_send(MotionCommand::Play);
             engine.process(&mut InterleavedMut::new(&mut buf, ChannelLayout::STEREO).unwrap());
             assert!(transport.is_rolling());
         }
@@ -1811,7 +1817,7 @@ mod tests {
         ));
         let engine = Engine::new(&transport, &mut ed, exec, crate::BlockDates::Os)
             .expect("the first engine is gone");
-        let _ = transport.motion().try_send(MotionEvent::stop_unfaded());
+        let _ = transport.motion().try_send(MotionCommand::stop_unfaded());
         engine.process(&mut InterleavedMut::new(&mut buf, ChannelLayout::STEREO).unwrap());
         assert!(!transport.is_rolling(), "the machine knew it was rolling");
     }
@@ -1852,11 +1858,11 @@ mod tests {
             ));
             let engine =
                 Engine::new(&transport, &mut ed, exec, crate::BlockDates::Os).expect("empty graph");
-            let stop = MotionEvent::stop_unfaded();
+            let stop = MotionCommand::stop_unfaded();
             if first_is_play {
                 transport
                     .motion()
-                    .try_send(MotionEvent::Play)
+                    .try_send(MotionCommand::Play)
                     .expect("room");
                 transport
                     .motion()
@@ -1869,7 +1875,7 @@ mod tests {
                     .expect("room");
                 transport
                     .motion()
-                    .try_send(MotionEvent::Play)
+                    .try_send(MotionCommand::Play)
                     .expect("room");
             }
             let mut buf = vec![0.0f32; 64 * 2];
@@ -1904,7 +1910,7 @@ mod tests {
         let engine = engine_for(&transport);
         transport
             .motion()
-            .try_send(MotionEvent::play_from(Beat::new(8.0)))
+            .try_send(MotionCommand::play_from(Beat::new(8.0)))
             .expect("room");
         let mut buf = vec![0.0f32; 64 * 2];
         engine.process(&mut InterleavedMut::new(&mut buf, ChannelLayout::STEREO).unwrap());
@@ -1926,7 +1932,7 @@ mod tests {
             .expect("room");
         transport
             .motion()
-            .try_send(MotionEvent::play_from(Beat::new(3.99)))
+            .try_send(MotionCommand::play_from(Beat::new(3.99)))
             .expect("room");
         let mut buf = vec![0.0f32; 1024 * 2];
         engine.process(&mut InterleavedMut::new(&mut buf, ChannelLayout::STEREO).unwrap());
@@ -1947,16 +1953,16 @@ mod tests {
         ));
         let engine =
             Engine::new(&transport, &mut ed, exec, crate::BlockDates::Os).expect("empty graph");
-        let _ = transport.motion().try_send(MotionEvent::Play);
+        let _ = transport.motion().try_send(MotionCommand::Play);
         let mut render = engine.graph.borrow_mut();
         let mut pieces = GraphPieces {
             changes: TransportChanges::NONE,
         };
-        let mut playhead = Playhead::new();
+        let mut crossings = BeatCrossings::new();
         let walk = engine.walk(
             Track {
                 transport: &mut render.transport,
-                playhead: &mut playhead,
+                crossings: &mut crossings,
             },
             Frame::ZERO,
             512,
@@ -1975,13 +1981,13 @@ mod tests {
             .motion()
             .schedule(
                 At::Frame(Frame::new(700)),
-                tutti_timeline::MotionEvent::stop(),
+                tutti_timeline::MotionCommand::stop(),
             )
             .expect("room");
         let walk = engine.walk(
             Track {
                 transport: &mut render.transport,
-                playhead: &mut playhead,
+                crossings: &mut crossings,
             },
             Frame::ZERO,
             512,
@@ -2046,10 +2052,10 @@ mod tests {
     /// commit.
     fn rewire(ed: &mut Editor, width: u16) {
         use tutti_graph::NodeKey;
-        use tutti_graph::{OutPort, Source};
+        use tutti_graph::{OutPort, PortSource};
         ed.insert(NodeKey(1), "ramp", tutti_graph::Unforkable(Ramp(width)));
         ed.spec_mut().topology.set_outputs((0..width).map(|port| {
-            Source::Node(OutPort {
+            PortSource::Node(OutPort {
                 node: NodeKey(1),
                 port,
             })
@@ -2909,14 +2915,14 @@ mod tests {
     /// Feeds the constant at key 1 to channel `channel` of a `width`-wide
     /// root, the others silent, in the editor's spec.
     fn feed(ed: &mut Editor, width: usize, channel: usize) {
-        use tutti_graph::{NodeKey, OutPort, Source};
-        let dc = Source::Node(OutPort {
+        use tutti_graph::{NodeKey, OutPort, PortSource};
+        let dc = PortSource::Node(OutPort {
             node: NodeKey(1),
             port: 0,
         });
         ed.spec_mut()
             .topology
-            .set_outputs((0..width).map(|c| if c == channel { dc } else { Source::Zero }));
+            .set_outputs((0..width).map(|c| if c == channel { dc } else { PortSource::Zero }));
     }
 
     /// The smootherstep `s(x) = x³ (6x² − 15x + 10)` the equal-amplitude
@@ -3345,7 +3351,7 @@ mod tests {
         let control = engine.output_control();
         move_root(&mut ed, &control, None, 2, 1);
         let mut heard: Vec<f32> = block_with(&engine, 2, || {});
-        let dc = tutti_graph::Source::Node(tutti_graph::OutPort {
+        let dc = tutti_graph::PortSource::Node(tutti_graph::OutPort {
             node: tutti_graph::NodeKey(1),
             port: 0,
         });
@@ -3421,18 +3427,18 @@ mod tests {
     /// starts from the same history, so it has no gap either.
     #[test]
     fn a_compensated_old_root_crossfades_out_with_its_history() {
-        use tutti_graph::{NodeKey, OutPort, Source};
+        use tutti_graph::{NodeKey, OutPort, PortSource};
         let (mut ed, exec) = Editor::new(Prepare::new(
             SampleRate::SR_48K,
             MaxBlock::of(Samples::new(8)),
         ));
         ed.insert(NodeKey(1), "count", tutti_graph::Unforkable(Count(0.0)));
         ed.insert(NodeKey(2), "late", tutti_graph::Unforkable(Late));
-        let count = Source::Node(OutPort {
+        let count = PortSource::Node(OutPort {
             node: NodeKey(1),
             port: 0,
         });
-        let late = Source::Node(OutPort {
+        let late = PortSource::Node(OutPort {
             node: NodeKey(2),
             port: 0,
         });
@@ -3491,18 +3497,18 @@ mod tests {
     /// the new root's (none), not the old root's 16.
     #[test]
     fn a_latent_source_the_new_root_lacks_does_not_move_the_new_root() {
-        use tutti_graph::{NodeKey, OutPort, Source};
+        use tutti_graph::{NodeKey, OutPort, PortSource};
         let (mut ed, exec) = Editor::new(Prepare::new(
             SampleRate::SR_48K,
             MaxBlock::of(Samples::new(8)),
         ));
         ed.insert(NodeKey(1), "count", tutti_graph::Unforkable(Count(0.0)));
         ed.insert(NodeKey(2), "late", tutti_graph::Unforkable(Late));
-        let count = Source::Node(OutPort {
+        let count = PortSource::Node(OutPort {
             node: NodeKey(1),
             port: 0,
         });
-        let late = Source::Node(OutPort {
+        let late = PortSource::Node(OutPort {
             node: NodeKey(2),
             port: 0,
         });
@@ -3532,7 +3538,9 @@ mod tests {
             .publish_root(id, None, ChannelLayout::STEREO)
             .unwrap();
         ed.spec_mut().root_id = id;
-        ed.spec_mut().topology.set_outputs([count, Source::Zero]);
+        ed.spec_mut()
+            .topology
+            .set_outputs([count, PortSource::Zero]);
         ed.commit().expect("commits");
         assert_eq!(
             ed.base().map(|p| p.total_latency().samples()),

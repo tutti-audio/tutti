@@ -64,7 +64,8 @@ fn primed(
 ) {
     let (streamer, bells) = streamer();
     let (stream, reader) =
-        wait_for_open_threaded(streamer.open(path, Placement::HEAD)).expect("opens");
+        wait_for_open_threaded(&streamer, streamer.open_stream(path, StreamStart::HEAD))
+            .expect("opens");
     assert!(
         until(BOUND, || stream.status().phase != StreamPhase::Opening),
         "the stream never primed"
@@ -94,7 +95,8 @@ fn an_open_wakes_an_idle_streamer() {
     let dir = tempfile::tempdir().expect("a temp dir");
     let path = long_file(dir.path());
     let (streamer, _bells) = streamer();
-    let _ = wait_for_open_threaded(streamer.open(&path, Placement::HEAD)).expect("opens");
+    let _ = wait_for_open_threaded(&streamer, streamer.open_stream(&path, StreamStart::HEAD))
+        .expect("opens");
 }
 
 /// **A ring below its refill threshold wakes an idle streamer**: the

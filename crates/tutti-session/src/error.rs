@@ -321,7 +321,7 @@ impl std::fmt::Display for RouteDeclarer {
 ///
 /// Each variant wraps a subsystem error via `#[from]`. Device failures arrive
 /// as one `Device` variant (feature `device`) rather than a per-CPAL-call
-/// spread: `tutti_cpal::Error` owns that distinction.
+/// spread: `tutti_cpal::DeviceError` owns that distinction.
 #[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum Error {
@@ -429,10 +429,10 @@ pub enum Error {
     Clock(#[from] tutti_engine::StartError<tutti_engine::TimerError>),
 
     /// Audio device failure: enumeration, stream construction, or playback.
-    /// Wraps `tutti_cpal::Error`, which owns every CPAL concern.
+    /// Wraps `tutti_cpal::DeviceError`, which owns every CPAL concern.
     #[cfg(feature = "device")]
     #[error(transparent)]
-    Device(#[from] tutti_cpal::Error),
+    Device(#[from] tutti_cpal::DeviceError),
 
     /// A MIDI failure of any kind: the OS port layer, a file, a send, a
     /// route, or a target that takes no MIDI. One variant for the area;

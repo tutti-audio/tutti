@@ -12,7 +12,7 @@ use tutti_graph::{
     Status,
 };
 use tutti_midi_runtime::TimedMidiEvent;
-use tutti_session::{MidiError, Session, SessionNode, TakePlacement};
+use tutti_session::{MidiError, Session, SessionNode};
 #[cfg(feature = "serde")]
 use tutti_ump::MidiGroup;
 use tutti_ump::{MidiChannel, NoteNumber, NoteVelocity, Voice2};
@@ -216,30 +216,6 @@ fn recording_a_target_with_no_event_input_is_refused() {
         s.midi().tap(dc, EventCapacity::of(8)),
         Err(MidiError::NoEventInput(n)) if n == dc.erase()
     ));
-}
-
-/// **A take is placed `F - (input + output + lead) + trim`**, at 0 where that
-/// reaches before the clock's start: 1,000 - (100 + 200 + 50) + 10 = 660, and
-/// a frame inside the compensation lands on the trim alone.
-#[test]
-fn a_take_is_placed_by_the_documented_figures() {
-    let p = TakePlacement {
-        input: Samples::new(100),
-        output: Samples::new(200),
-        lead: Samples::new(50),
-        trim: Samples::new(10),
-    };
-    assert_eq!(p.place(Frame::new(1_000)), Frame::new(660));
-    assert_eq!(
-        p.place(Frame::new(300)),
-        Frame::new(10),
-        "saturates at the start"
-    );
-    assert_eq!(
-        TakePlacement::default().place(Frame::new(77)),
-        Frame::new(77),
-        "no compensation, no move"
-    );
 }
 
 // --- MPE ---------------------------------------------------------------------

@@ -26,7 +26,7 @@
 //!   end, after every output has been finalized and the fork and the event loss
 //!   have been checked. A render that fails or is cancelled leaves every path as it
 //!   was. The renames are the one step that is not undone: if one fails after others
-//!   succeeded the error is `Error::NotCommitted`, which names the files in place.
+//!   succeeded the error is `RenderError::NotCommitted`, which names the files in place.
 //! - `write_buffers` encodes planes a caller already holds into the `FileTarget`
 //!   that describes the file.
 //!
@@ -36,12 +36,11 @@
 //! that is handed a `Progress`, a `Stage` and one fraction of the whole render.
 //! `Control::none()` is a render nobody watches or stops. A cancelled render is
 //! `Outcome::Cancelled`, with every temporary removed and every target as it was.
-//! Encoding is WAV, FLAC, AIFF or OGG Vorbis, each
-//! behind its own `tutti-codec` feature (`encode-wav`, `encode-flac`, `encode-aiff`,
-//! `encode-vorbis`). **None is on by default**: `encode-vorbis` links the C Vorbis
-//! library, so a consumer names the formats it writes. The umbrellas (`tutti`,
-//! `tutti-session`) forward them under the same names; their `export` feature
-//! implies `encode-wav` only, so `encode-vorbis` is the one path to C.
+//! Encoding is WAV, FLAC or AIFF, each
+//! behind its own `tutti-codec` feature (`encode-wav`, `encode-flac`, `encode-aiff`).
+//! **None is on by default**, so a consumer names the formats it writes. The
+//! umbrellas (`tutti`, `tutti-session`) forward them under the same names; their
+//! `export` feature implies `encode-wav` only.
 //!
 //! This crate re-exports no other crate's type: a `Format` or `Pcm` is
 //! `tutti_codec`'s, a `ChannelLayout` is `tutti_buffers`', and the clocks (`RenderClock`,
@@ -170,8 +169,8 @@
 //!
 //! ## Features
 //!
-//! None. The formats are `tutti-codec`'s `encode-wav`, `encode-flac`,
-//! `encode-aiff` and `encode-vorbis` (a consumer turns them on beside this
+//! None. The formats are `tutti-codec`'s `encode-wav`, `encode-flac`
+//! and `encode-aiff` (a consumer turns them on beside this
 //! crate), and a `Format` variant exists only with its feature.
 //!
 //! Resampling (`tutti_dsp::StreamingResampler`, an FFT resampler on
@@ -187,7 +186,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 mod error;
-pub use error::{ConfigError, Error, Result, Unmeasured};
+pub use error::{ConfigError, RenderError, Result, Unmeasured};
 
 mod control;
 use control::Weights;
@@ -253,7 +252,7 @@ pub struct Written {
     /// format's `MAX` or `MIN`, held there by the rule in
     /// [`Sample`](tutti_buffers::Sample); an infinity is counted. A NaN is
     /// written as 0 and is not counted. `0` for a format that does not quantize (`Pcm::Float32`,
-    /// `Pcm::Float64`, and Ogg Vorbis, whose encoder takes the float stream). A
+    /// `Pcm::Float64`). A
     /// normalizing export keeps its target and ceiling one LSB plus the dither
     /// amplitude below full scale for an integer format, so this stays `0`
     /// unless the programme itself was past full scale.
@@ -296,7 +295,7 @@ pub struct Written {
 /// master export at all: nothing here is generic over the count.
 fn frame_width(layout: ChannelLayout) -> Result<usize> {
     match layout.count() {
-        0 => Err(Error::UnsupportedChannels),
+        0 => Err(RenderError::UnsupportedChannels),
         n => Ok(n as usize),
     }
 }
@@ -330,7 +329,7 @@ fn frame_width(layout: ChannelLayout) -> Result<usize> {
 /// and the event loss have been checked: a render that fails, or is
 /// cancelled, leaves every path as it was and no temporary. The renames are
 /// the one step that is not undone: if one fails after others succeeded the
-/// error is [`Error::NotCommitted`] and the files already in place are kept.
+/// error is [`RenderError::NotCommitted`] and the files already in place are kept.
 /// The finished file whose rename failed is kept beside its path, named by
 /// the error ([`tutti_codec::Error::Commit`]): moving or deleting it is the
 /// caller's.
@@ -346,26 +345,26 @@ fn frame_width(layout: ChannelLayout) -> Result<usize> {
 ///
 /// # Errors
 ///
-/// [`Error::NoOutputs`] for an empty list; [`Error::UnsupportedChannels`] for
-/// a target of no channels; [`Error::Target`] for an output that cannot be
+/// [`RenderError::NoOutputs`] for an empty list; [`RenderError::UnsupportedChannels`] for
+/// a target of no channels; [`RenderError::Target`] for an output that cannot be
 /// rendered as given ([`TargetError`]: a tap whose lanes are not as wide as
 /// its placement or cannot be placed on the target, a gain taken from an
 /// output that does not measure, two outputs with one path);
-/// [`Error::InvalidConfig`] if the graph was prepared at another rate or its
+/// [`RenderError::InvalidConfig`] if the graph was prepared at another rate or its
 /// editor does not feed its executor, or the graph's channels cannot be placed
 /// on a target's ([`ConfigError::Placement`]); an encoder's refusal of a format
-/// and width ([`Error::Encode`], before anything is rendered);
-/// [`Error::RenderTooLarge`] for planes that cannot be held;
-/// [`Error::ForkFailed`] if a forked node (a hosted plugin) failed during the
-/// render and [`Error::EventsDropped`] if the graph lost an event and the
+/// and width ([`RenderError::Encode`], before anything is rendered);
+/// [`RenderError::RenderTooLarge`] for planes that cannot be held;
+/// [`RenderError::ForkFailed`] if a forked node (a hosted plugin) failed during the
+/// render and [`RenderError::EventsDropped`] if the graph lost an event and the
 /// job's policy is [`EventLossPolicy::Fail`] (the default), both checked
 /// before anything is put in place;
-/// [`Error::TapOverrun`] and [`Error::TapStarved`] from a tap;
-/// [`Error::Unmeasurable`] for a normalizing output whose audio has no reading
+/// [`RenderError::TapOverrun`] and [`RenderError::TapStarved`] from a tap;
+/// [`RenderError::Unmeasurable`] for a normalizing output whose audio has no reading
 /// to take a gain from (silent, under 400 ms or under the loudness gate for
 /// [`Normalize::Lufs`], at the true-peak floor for [`Normalize::Peak`], or a
-/// width or rate the meter does not take); [`Error::Resample`];
-/// [`Error::Io`] and [`Error::NotCommitted`].
+/// width or rate the meter does not take); [`RenderError::Resample`];
+/// [`RenderError::Io`] and [`RenderError::NotCommitted`].
 pub fn render<F: FftFloat>(
     graph: &mut RenderGraph<F>,
     job: &Job,
@@ -427,12 +426,12 @@ fn the_one<F: FftFloat>(mut produced: Vec<Produced<F>>) -> Produced<F> {
 ///
 /// # Errors
 ///
-/// [`Error::UnsupportedChannels`] for a zero-channel target;
-/// [`Error::Target`] with [`TargetError::NormalizeOfPlanes`] for a target that
-/// asks to normalize; [`Error::InvalidConfig`] ([`ConfigError::Placement`]) for
+/// [`RenderError::UnsupportedChannels`] for a zero-channel target;
+/// [`RenderError::Target`] with [`TargetError::NormalizeOfPlanes`] for a target that
+/// asks to normalize; [`RenderError::InvalidConfig`] ([`ConfigError::Placement`]) for
 /// a plane width the fold cannot place onto the file's (a channel is never
-/// dropped to make it fit); [`Error::EventsDropped`] under
-/// [`EventLossPolicy::Fail`]; [`Error::Resample`] or [`Error::Encode`] from the
+/// dropped to make it fit); [`RenderError::EventsDropped`] under
+/// [`EventLossPolicy::Fail`]; [`RenderError::Resample`] or [`RenderError::Encode`] from the
 /// resample and encode stages.
 pub fn write_buffers<F: FftFloat>(
     rendered: &Rendered<F>,
@@ -441,7 +440,7 @@ pub fn write_buffers<F: FftFloat>(
 ) -> Result<Written> {
     frame_width(target.channels())?;
     if target.normalize.is_some() {
-        return Err(Error::Target {
+        return Err(RenderError::Target {
             output: 0,
             why: TargetError::NormalizeOfPlanes,
         });

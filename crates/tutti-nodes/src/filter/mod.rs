@@ -1,5 +1,5 @@
 //! Filter nodes: state-variable, Moog ladder, parametric EQ band, the Butterworth and
-//! Linkwitz-Riley high-pass and low-pass, the matched bell and the tilt, and the
+//! Linkwitz-Riley high-pass and low-pass, the matched bell, the tilt, the graphic equalizer and the
 //! Linkwitz-Riley crossover, each a kernel on the one driver. The algorithms are
 //! `tutti-dsp`'s.
 
@@ -9,6 +9,7 @@ mod cut;
 mod envelope;
 mod eq;
 pub mod eq_band;
+mod graphic_eq;
 pub mod ladder;
 mod ramped;
 pub mod svf;
@@ -18,7 +19,7 @@ pub use bell::{
     BellFilterConfig, BellFilterControls, BellFilterKernel, BellFilterNode, BellFilterSet,
 };
 pub(crate) use crossover::Splits;
-pub use crossover::{CrossoverKernel, CrossoverNode, CrossoverSet};
+pub use crossover::{CrossoverConfig, CrossoverKernel, CrossoverNode, CrossoverSet};
 pub use cut::{
     CutAlignment, CutFilterConfig, CutFilterControls, CutFilterKernel, CutFilterNode, CutFilterSet,
     MIN_CUT_CUTOFF,
@@ -27,9 +28,12 @@ pub use envelope::{
     EnvelopeFilterConfig, EnvelopeFilterKernel, EnvelopeFilterNode, EnvelopeFilterSet,
 };
 pub use eq::{EqControls, EqKernel};
-pub use eq_band::EqBandNode;
-pub use ladder::{LadderFilterNode, LadderKernel, LadderSet};
-pub use svf::{SvfFilterNode, SvfKernel, SvfSet};
+pub use eq_band::{EqBandConfig, EqBandNode};
+pub use graphic_eq::{
+    GraphicEqConfig, GraphicEqControls, GraphicEqKernel, GraphicEqNode, GraphicEqSet,
+};
+pub use ladder::{LadderFilterConfig, LadderFilterNode, LadderKernel, LadderSet};
+pub use svf::{SvfFilterConfig, SvfFilterNode, SvfKernel, SvfSet};
 pub use tilt::{
     TiltFilterConfig, TiltFilterControls, TiltFilterKernel, TiltFilterNode, TiltFilterSet,
 };

@@ -16,9 +16,10 @@ use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_graph::contract::{drive, prepared};
 use tutti_graph::{Node, ParamNode, ParamSet};
 use tutti_nodes::{
-    DelayConfig, DelayControls, DelayLayout, DelayNode, InterpolationMode, LadderFilterNode,
-    LadderType, MaxDelay, ModDelayConfig, ModDelayControls, ModDelayLayout, ModDelayNode,
-    PhaserConfig, PhaserControls, PhaserNode, Stages, Stagger, SvfFilterNode, SvfType, Sweep,
+    DelayConfig, DelayControls, DelayLayout, DelayNode, InterpolationMode, LadderFilterConfig,
+    LadderFilterNode, LadderType, MaxDelay, ModDelayConfig, ModDelayControls, ModDelayLayout,
+    ModDelayNode, PhaserConfig, PhaserControls, PhaserNode, Stages, Stagger, SvfFilterConfig,
+    SvfFilterNode, SvfType, Sweep,
 };
 use tutti_units::{Feedback, Hz, PhaseIncrement, Q, Resonance, SampleRate, Seconds, UnitParam};
 
@@ -138,15 +139,18 @@ fn assert_width_generic<N: Node + ParamNode + 'static>(
 }
 
 fn svf(layout: ChannelLayout) -> SvfFilterNode<f32> {
-    SvfFilterNode::<f32>::with_channels(layout, SvfType::LowPass, Hz::new(1_000.0), Q::new(0.9))
+    SvfFilterNode::<f32>::from(
+        SvfFilterConfig::new(layout, SvfType::LowPass)
+            .freq(Hz::new(1_000.0))
+            .q(Q::new(0.9)),
+    )
 }
 
 fn ladder(layout: ChannelLayout) -> LadderFilterNode<f32> {
-    LadderFilterNode::<f32>::with_channels(
-        layout,
-        LadderType::LP24,
-        Hz::new(900.0),
-        Resonance::new(0.6),
+    LadderFilterNode::<f32>::from(
+        LadderFilterConfig::new(layout, LadderType::LP24)
+            .freq(Hz::new(900.0))
+            .res(Resonance::new(0.6)),
     )
 }
 

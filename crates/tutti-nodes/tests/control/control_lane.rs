@@ -19,13 +19,13 @@ use tutti_graph::{
     Node, Offset, ParamEvent, ParamIn, ParamKind, ParamRange, ParamSegment, Prepare, Shape, Status,
     TransportChanges, TransportPosition, control_in, declick_frames,
 };
-use tutti_graph::{OutPort, Source};
+use tutti_graph::{OutPort, PortSource};
 use tutti_modulation::{
-    Amount, Clock, ControlProgram, Curve, DepthBy, InputLayer, Layer, LayerId, LfoShape,
-    PeriodPoint, Polarity, RateAnchor, SourceId, Waveform,
+    Amount, Clock, ControlProgram, ControlProgramBuilder, Curve, DepthBy, InputLayer, Layer,
+    LayerId, LfoShape, PeriodPoint, Polarity, RateAnchor, SourceId, Waveform,
 };
 use tutti_music::FrameClock;
-use tutti_nodes::automation::{ControlLaneNode, LaneControls};
+use tutti_nodes::automation::{ControlLaneNode, ForeignLaneConfig, LaneControls, UnitLaneConfig};
 use tutti_units::{
     Beat, BeatsPerCycle, Bpm, Depth, Frame, Hz, Normalized, ParamId, ParamKey, Phase,
     PhaseIncrement, SampleRate, Samples, UnitParam,
@@ -147,8 +147,8 @@ fn cutoff(node: u64) -> ParamIn {
     }
 }
 
-fn out(node: u64, port: u16) -> Source {
-    Source::Node(OutPort {
+fn out(node: u64, port: u16) -> PortSource {
+    PortSource::Node(OutPort {
         node: NodeKey(node),
         port,
     })
@@ -176,12 +176,12 @@ fn probes(max: usize, probes: &[u64], range: (f64, f64)) -> (Editor, Executor) {
 /// A native lane for `probe`'s cutoff: knob `knob` (its own cell, as a
 /// node's `Param` cell would be), the port's own range cell.
 fn native(ed: &Editor, probe: u64, program: ControlProgram, knob: Option<f64>) -> ControlLaneNode {
-    ControlLaneNode::for_unit(
-        ParamKey::<Hz>::CUTOFF.addr(),
-        program,
-        knob.map(|k| Arc::new(AtomicF64::new(k)).into()),
-        Some(ed.param_range_cell(cutoff(probe)).expect("committed")),
-    )
+    let mut config = UnitLaneConfig::new(ParamKey::<Hz>::CUTOFF.addr(), program)
+        .range(ed.param_range_cell(cutoff(probe)).expect("committed"));
+    if let Some(k) = knob {
+        config = config.knob(Arc::new(AtomicF64::new(k)).into());
+    }
+    ControlLaneNode::from(config)
 }
 
 /// Inserts `lane` at `key`, wired to `probe`'s cutoff; returns its controls.
@@ -324,7 +324,11 @@ fn layer(id: u64, clock: Clock, wave: Waveform, amount: Amount) -> Layer {
 }
 
 fn program(automation: Option<Arc<dyn Curve>>, layers: Vec<Layer>) -> ControlProgram {
-    ControlProgram::new(automation, layers, vec![]).expect("a valid program")
+    let mut builder = ControlProgramBuilder::new().layers(layers);
+    if let Some(automation) = automation {
+        builder = builder.automation(automation);
+    }
+    builder.build().expect("a valid program")
 }
 
 /// A linear trajectory through `points` (beat, value).
@@ -375,11 +379,13 @@ fn automation_replaces_the_knob_and_the_clamp_is_per_frame() {
         Some(1000.0),
     );
     wire(&mut ed, 1, lane, 2);
-    let plugin = ControlLaneNode::by_id(
-        ParamId::new(9),
-        program(Some(flat), vec![]),
-        Some(1000.0),
-        (0.0, 2000.0),
+    let plugin = ControlLaneNode::from(
+        ForeignLaneConfig::new(
+            ParamId::new(9),
+            program(Some(flat), vec![]),
+            ParamRange::new(0.0, 2000.0),
+        )
+        .knob(1000.0),
     );
     wire_sink(&mut ed, 3, plugin, 4);
     ed.commit().expect("commits");
@@ -415,12 +421,11 @@ fn automation_replaces_the_knob_and_the_clamp_is_per_frame() {
     let (mut ed, mut exec) = probes(128, &[2], (0.0, f64::from(BOUND)));
     let lane = native(&ed, 2, program(Some(ramp()), vec![]), Some(0.0));
     wire(&mut ed, 1, lane, 2);
-    let plugin = ControlLaneNode::by_id(
+    let plugin = ControlLaneNode::from(ForeignLaneConfig::new(
         ParamId::new(9),
         program(Some(ramp()), vec![]),
-        None,
-        (0.0, f64::from(BOUND)),
-    );
+        ParamRange::new(0.0, f64::from(BOUND)),
+    ));
     wire_sink(&mut ed, 3, plugin, 4);
     ed.commit().expect("commits");
     let (mut host, mut all) = (Host::new(), Vec::new());
@@ -564,7 +569,9 @@ fn an_export_is_the_live_render_bit_for_bit() {
     wire_sink(
         &mut ed,
         300,
-        ControlLaneNode::by_id(ParamId::new(5), foreign, Some(0.5), (0.0, 1.0)),
+        ControlLaneNode::from(
+            ForeignLaneConfig::new(ParamId::new(5), foreign, ParamRange::new(0.0, 1.0)).knob(0.5),
+        ),
         301,
     );
     ed.commit().expect("commits");
@@ -808,8 +815,10 @@ fn a_lane_sees_two_depths_stored_in_one_block_whatever_their_bits() {
         depth_by: None,
     };
     let (d1, d2) = (Param::new(Depth::of(0.125)), Param::new(Depth::of(0.125)));
-    let mut program =
-        ControlProgram::new(None, vec![constant(1), constant(2)], vec![]).expect("a valid program");
+    let mut program = ControlProgramBuilder::new()
+        .layers(vec![constant(1), constant(2)])
+        .build()
+        .expect("a valid program");
     program
         .bind_depths([(LayerId(1), d1.handle()), (LayerId(2), d2.handle())])
         .expect("two cells");
@@ -856,12 +865,11 @@ fn a_plugin_lane_sends_linear_grid_pieces() {
         SampleRate::of(RATE),
         MaxBlock::of(Samples::new(128)),
     ));
-    let lane = ControlLaneNode::by_id(
+    let lane = ControlLaneNode::from(ForeignLaneConfig::new(
         ParamId::new(3),
         ControlProgram::from_curve(Arc::clone(&curve)),
-        None,
-        (0.0, 1.0),
-    );
+        ParamRange::new(0.0, 1.0),
+    ));
     wire_sink(&mut ed, 1, lane, 2);
     ed.commit().expect("commits");
     let (mut host, mut all) = (Host::new(), Vec::new());
@@ -1099,7 +1107,10 @@ fn an_input_offset_is_exact_from_its_frame() {
         source: SourceId::new(ParamId::new(7)),
         amount: amount(0.5),
     };
-    let p = ControlProgram::new(None, vec![], vec![input]).expect("valid");
+    let p = ControlProgramBuilder::new()
+        .inputs(vec![input])
+        .build()
+        .expect("valid");
     let lane = native(&ed, 2, p, Some(10.0));
     wire(&mut ed, 1, lane, 2);
     let step = |v| ParamSegment::by_id(ParamId::new(7), v, v, Samples::new(0), Law::Linear);
@@ -1160,8 +1171,11 @@ fn a_republished_program_reads_a_new_source() {
         source: SourceId::new(ParamId::new(src)),
         amount: amount(depth),
     };
-    let eight = (1..=8).map(|k| input(k, 0.1)).collect();
-    let p = ControlProgram::new(None, vec![], eight).expect("valid");
+    let eight: Vec<InputLayer> = (1..=8).map(|k| input(k, 0.1)).collect();
+    let p = ControlProgramBuilder::new()
+        .inputs(eight)
+        .build()
+        .expect("valid");
     let lane = native(&ed, 2, p, Some(10.0));
     let controls = wire(&mut ed, 1, lane, 2);
     let step = |src: u32, v: f64| {
@@ -1176,7 +1190,10 @@ fn a_republished_program_reads_a_new_source() {
     let mut all = Vec::new();
     for k in 0..10 {
         if k == 4 {
-            let nine = ControlProgram::new(None, vec![], vec![input(9, 0.5)]).expect("valid");
+            let nine = ControlProgramBuilder::new()
+                .inputs(vec![input(9, 0.5)])
+                .build()
+                .expect("valid");
             controls.publish(nine);
         }
         let got = block(&mut ed, &mut exec, &stopped, &TransportChanges::NONE, 128);
@@ -1203,7 +1220,10 @@ fn a_reused_source_id_starts_from_nothing() {
             source: SourceId::new(ParamId::new(3)),
             amount: amount(0.5),
         };
-        ControlProgram::new(None, vec![], vec![input]).expect("valid")
+        ControlProgramBuilder::new()
+            .inputs(vec![input])
+            .build()
+            .expect("valid")
     };
     let lane = native(&ed, 2, reads3(), Some(10.0));
     let controls = wire(&mut ed, 1, lane, 2);
@@ -1252,8 +1272,13 @@ fn an_unread_source_is_no_point() {
         source: SourceId::new(ParamId::new(7)),
         amount: amount(0.5),
     };
-    let p = ControlProgram::new(None, vec![], vec![input]).expect("valid");
-    let lane = ControlLaneNode::by_id(ParamId::new(3), p, Some(0.25), (0.0, 1.0));
+    let p = ControlProgramBuilder::new()
+        .inputs(vec![input])
+        .build()
+        .expect("valid");
+    let lane = ControlLaneNode::from(
+        ForeignLaneConfig::new(ParamId::new(3), p, ParamRange::new(0.0, 1.0)).knob(0.25),
+    );
     wire_sink(&mut ed, 1, lane, 2);
     let step = |v| ParamSegment::by_id(ParamId::new(99), v, v, Samples::new(0), Law::Linear);
     let plan = (1..60).map(|k| (k * 10, step(k as f64 / 100.0))).collect();
@@ -1349,7 +1374,7 @@ fn a_lane_fed_fork_reads_its_value_at_frame_0() {
             Prepare::new(SampleRate::of(RATE), MaxBlock::of(Samples::new(64))),
         )
         .expect("forks");
-    assert!(controls.set_value(700.0));
+    assert!(controls.store(700.0));
     let flat: Arc<dyn Curve> = Arc::new(trajectory(&[(0.0, 50.0)]));
     controls.publish(program(Some(flat), vec![]));
 
@@ -1375,20 +1400,22 @@ fn a_lane_fed_fork_reads_its_value_at_frame_0() {
 /// built without a knob refuses one.
 #[test]
 fn lane_controls_reach_their_own_cells() {
-    let plugin = ControlLaneNode::by_id(
-        ParamId::new(1),
-        ControlProgram::default(),
-        Some(0.25),
-        (0.0, 1.0),
+    let plugin = ControlLaneNode::from(
+        ForeignLaneConfig::new(
+            ParamId::new(1),
+            ControlProgram::default(),
+            ParamRange::new(0.0, 1.0),
+        )
+        .knob(0.25),
     );
     let c = plugin.controls();
     assert_eq!(c.value(), Some(0.25));
-    assert!(c.set_value(0.75));
+    assert!(c.store(0.75));
     assert_eq!(c.value(), Some(0.75));
     let (mut ed, _exec) = probes(64, &[2], (5.0, 50.0));
     let n = native(&ed, 2, ControlProgram::default(), None);
     let c = n.controls();
-    assert!(!c.set_value(1.0), "no knob");
+    assert!(!c.store(1.0), "no knob");
     assert_eq!(c.value(), None);
     assert_eq!(c.range(), (5.0, 50.0));
     ed.set_param_range(cutoff(2), ParamRange::new(6.0, 60.0))
@@ -1426,7 +1453,9 @@ fn a_constant_layer_is_one_held_value() {
     for (layers, rolling) in cases {
         let (mut ed, mut exec) = probes(128, &[], (0.0, 1.0));
         let p = program(None, layers);
-        let lane = ControlLaneNode::by_id(ParamId::new(3), p, Some(0.25), (0.0, 1.0));
+        let lane = ControlLaneNode::from(
+            ForeignLaneConfig::new(ParamId::new(3), p, ParamRange::new(0.0, 1.0)).knob(0.25),
+        );
         wire_sink(&mut ed, 1, lane, 2);
         ed.commit().expect("commits");
         let mut host = Host::new();

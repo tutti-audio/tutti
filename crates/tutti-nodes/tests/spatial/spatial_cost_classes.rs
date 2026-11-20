@@ -3,10 +3,9 @@
 //! undeclared ones, and the render on a pool is bit for bit the serial one.
 
 use std::sync::Arc;
-use tutti_buffers::MaxBlock;
+use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_fixtures::signal::plane_bits as bits;
 
-use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_graph::ParamNode;
 use tutti_graph::WorkerPool;
@@ -14,7 +13,7 @@ use tutti_graph::{
     Cost, Cx, Editor, Executor, Io, Node, Prepare, Schedule, Shape, Status, TransportPosition,
     Unforkable,
 };
-use tutti_graph::{Edge, InPort, OutPort, Source};
+use tutti_graph::{Edge, InPort, OutPort, PortSource};
 use tutti_nodes::VbapPannerNode;
 use tutti_nodes::testing::aim;
 use tutti_units::{Azimuth, Beat, Bpm, Elevation, SampleRate, Samples};
@@ -47,7 +46,7 @@ impl<N: Node> Node for Undeclared<N> {
 
 /// A stereo panner aimed by `k`.
 fn panner(k: u64) -> VbapPannerNode<f32> {
-    let node = VbapPannerNode::<f32>::stereo();
+    let node = vbap::<f32>(tutti_buffers::Bed::Stereo);
     aim(
         &node.param_set(),
         Azimuth::new(-30.0 + 4.0 * k as f64),
@@ -56,7 +55,7 @@ fn panner(k: u64) -> VbapPannerNode<f32> {
     node
 }
 
-fn wire(ed: &mut Editor, to: NodeKey, port: u16, from: Source) {
+fn wire(ed: &mut Editor, to: NodeKey, port: u16, from: PortSource) {
     ed.spec_mut()
         .topology
         .edges
@@ -83,7 +82,7 @@ fn graph(workers: usize, declared: bool) -> Executor {
     ed.spec_mut().topology.inputs = ChannelLayout::STEREO;
     let sources = PANNERS + HEAVY;
     // Two silent global outputs, which the fan-in below fills.
-    ed.spec_mut().topology.set_outputs([Source::Zero; 2]);
+    ed.spec_mut().topology.set_outputs([PortSource::Zero; 2]);
     for k in 0..sources {
         let key = NodeKey(k + 1);
         if declared && k < PANNERS {
@@ -92,12 +91,12 @@ fn graph(workers: usize, declared: bool) -> Executor {
             ed.insert(key, "vbap", Unforkable(Undeclared(panner(k))));
         }
         for c in 0..2u16 {
-            wire(&mut ed, key, c, Source::Global(c));
+            wire(&mut ed, key, c, PortSource::Global(c));
             // The graph's fan-in: output channel `c` holds every panner's
             // port `c`, and the graph sums them.
             ed.spec_mut()
                 .topology
-                .connect_output(c as usize, Source::Node(OutPort { node: key, port: c }));
+                .connect_output(c as usize, PortSource::Node(OutPort { node: key, port: c }));
         }
     }
     ed.commit().expect("commits");
@@ -139,9 +138,9 @@ fn render(exec: &mut Executor) -> Vec<Vec<f32>> {
 #[test]
 fn a_panner_is_moderate() {
     for node in [
-        VbapPannerNode::<f32>::stereo(),
-        VbapPannerNode::<f32>::quad(),
-        VbapPannerNode::<f32>::surround_5_1(),
+        vbap::<f32>(tutti_buffers::Bed::Stereo),
+        vbap::<f32>(tutti_buffers::Bed::Quad),
+        vbap::<f32>(tutti_buffers::Bed::Surround51),
     ] {
         assert_eq!(node.shape().cost, Cost::Moderate);
     }
@@ -181,4 +180,10 @@ fn moderate_panners_pack_and_render_bit_identically() {
         assert!(exec.is_parallel());
         assert_eq!(bits(&serial), bits(&render(&mut exec)), "{workers} workers");
     }
+}
+
+/// A panner over `bed`.
+fn vbap<F: tutti_buffers::Float>(bed: tutti_buffers::Bed) -> tutti_nodes::VbapPannerNode<F> {
+    tutti_nodes::VbapPannerNode::try_from(tutti_nodes::VbapPannerConfig::new(bed))
+        .expect("a bed with speakers to pan between")
 }

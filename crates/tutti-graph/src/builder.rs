@@ -46,7 +46,7 @@
 //! editor's own [`CommitError`].
 
 use crate::NodeKey;
-use crate::{Edge, FeedbackFrom, InPort, NodeSpec, OutPort, Source};
+use crate::{Edge, FeedbackFrom, InPort, NodeSpec, OutPort, PortSource};
 use tutti_buffers::ChannelLayout;
 use tutti_units::{Frame, Samples};
 
@@ -325,10 +325,10 @@ impl<F: Float> GraphBuilder<F> {
         }
     }
 
-    fn check_source(&self, source: Source) -> Source {
+    fn check_source(&self, source: PortSource) -> PortSource {
         match source {
-            Source::Node(p) => Source::Node(self.check_out(p.node, p.port as usize)),
-            Source::Global(i) => {
+            PortSource::Node(p) => PortSource::Node(self.check_out(p.node, p.port as usize)),
+            PortSource::Global(i) => {
                 let n = self.inputs();
                 assert!(
                     (i as usize) < n,
@@ -336,12 +336,12 @@ impl<F: Float> GraphBuilder<F> {
                 );
                 source
             }
-            Source::Zero => source,
+            PortSource::Zero => source,
         }
     }
 
     /// Feeds `node`'s input `port` from `source` and nothing else: it
-    /// **replaces** the port's set with that one source (`Source::Zero`
+    /// **replaces** the port's set with that one source (`PortSource::Zero`
     /// clears it). [`connect`](Self::connect) adds.
     ///
     /// # Panics
@@ -349,16 +349,16 @@ impl<F: Float> GraphBuilder<F> {
     /// If the port or the source is out of range, or `source` is an output
     /// of `node` itself (a self-loop is a cycle; see
     /// [`feedback`](Self::feedback)).
-    pub fn set_source(&mut self, node: NodeKey, port: usize, source: Source) -> &mut Self {
+    pub fn set_source(&mut self, node: NodeKey, port: usize, source: PortSource) -> &mut Self {
         assert!(
-            !matches!(source, Source::Node(p) if p.node == node),
+            !matches!(source, PortSource::Node(p) if p.node == node),
             "{node:?} cannot feed itself directly; use `feedback`"
         );
         let at = self.check_in(node, port);
         let source = self.check_source(source);
         // Silence is the empty set: no key, never a stored `Zero`.
         let edges = &mut self.spec.topology.edges;
-        if source == Source::Zero {
+        if source == PortSource::Zero {
             edges.remove(&at);
         } else {
             edges.insert(at, vec![Edge::Direct(source)]);
@@ -378,19 +378,19 @@ impl<F: Float> GraphBuilder<F> {
         to: NodeKey,
         to_port: usize,
     ) -> &mut Self {
-        let source = Source::Node(self.check_out(from, from_port));
+        let source = PortSource::Node(self.check_out(from, from_port));
         self.add_source(to, to_port, source)
     }
 
     /// Adds `source` to the sources of `node`'s input `port`, beside what it
-    /// holds. `Source::Zero` adds nothing: silence is the empty set.
+    /// holds. `PortSource::Zero` adds nothing: silence is the empty set.
     ///
     /// # Panics
     ///
     /// As [`set_source`](Self::set_source).
-    pub fn add_source(&mut self, node: NodeKey, port: usize, source: Source) -> &mut Self {
+    pub fn add_source(&mut self, node: NodeKey, port: usize, source: PortSource) -> &mut Self {
         assert!(
-            !matches!(source, Source::Node(p) if p.node == node),
+            !matches!(source, PortSource::Node(p) if p.node == node),
             "{node:?} cannot feed itself directly; use `feedback`"
         );
         let at = self.check_in(node, port);
@@ -400,13 +400,13 @@ impl<F: Float> GraphBuilder<F> {
     }
 
     /// Feeds `node`'s input `port` from exactly `sources`, replacing whatever
-    /// it held (the empty slice clears it, and so does a `Source::Zero`,
+    /// it held (the empty slice clears it, and so does a `PortSource::Zero`,
     /// which is never stored).
     ///
     /// # Panics
     ///
     /// As [`set_source`](Self::set_source), for every source.
-    pub fn set_sources(&mut self, node: NodeKey, port: usize, sources: &[Source]) -> &mut Self {
+    pub fn set_sources(&mut self, node: NodeKey, port: usize, sources: &[PortSource]) -> &mut Self {
         self.disconnect(node, port);
         for &source in sources {
             self.add_source(node, port, source);
@@ -420,7 +420,7 @@ impl<F: Float> GraphBuilder<F> {
     /// # Panics
     ///
     /// If the port or the source is out of range.
-    pub fn disconnect_from(&mut self, node: NodeKey, port: usize, source: Source) -> &mut Self {
+    pub fn disconnect_from(&mut self, node: NodeKey, port: usize, source: PortSource) -> &mut Self {
         let at = self.check_in(node, port);
         let source = self.check_source(source);
         self.spec.topology.disconnect(at, Edge::Direct(source));
@@ -451,13 +451,13 @@ impl<F: Float> GraphBuilder<F> {
     /// source, not one: see [`disconnect_from`](Self::disconnect_from)),
     /// which is the same value as one never wired.
     pub fn disconnect(&mut self, node: NodeKey, port: usize) -> &mut Self {
-        self.set_source(node, port, Source::Zero)
+        self.set_source(node, port, PortSource::Zero)
     }
 
     /// Adds global input `global` to the sources of `to`'s input `to_port`,
     /// as [`connect`](Self::connect) does for a node's output.
     pub fn connect_input(&mut self, global: usize, to: NodeKey, to_port: usize) -> &mut Self {
-        self.add_source(to, to_port, Source::Global(global as u16))
+        self.add_source(to, to_port, PortSource::Global(global as u16))
     }
 
     /// Adds `from`'s output `from_port` to the sources of global output
@@ -465,17 +465,17 @@ impl<F: Float> GraphBuilder<F> {
     /// sources sum, as at an input port. [`set_output`](Self::set_output) is
     /// the one-source form.
     pub fn connect_output(&mut self, from: NodeKey, from_port: usize, global: usize) -> &mut Self {
-        let source = Source::Node(self.check_out(from, from_port));
+        let source = PortSource::Node(self.check_out(from, from_port));
         self.add_output(global, source)
     }
 
-    /// Adds `source` to the sources of global output `channel`. `Source::Zero`
+    /// Adds `source` to the sources of global output `channel`. `PortSource::Zero`
     /// adds nothing.
     ///
     /// # Panics
     ///
     /// If `channel` or `source` is out of range.
-    pub fn add_output(&mut self, channel: usize, source: Source) -> &mut Self {
+    pub fn add_output(&mut self, channel: usize, source: PortSource) -> &mut Self {
         self.check_channel(channel);
         let source = self.check_source(source);
         self.spec.topology.connect_output(channel, source);
@@ -495,10 +495,10 @@ impl<F: Float> GraphBuilder<F> {
     /// # Panics
     ///
     /// If `channel` or `source` is out of range.
-    pub fn set_output(&mut self, channel: usize, source: Source) -> &mut Self {
+    pub fn set_output(&mut self, channel: usize, source: PortSource) -> &mut Self {
         self.check_channel(channel);
         self.spec.topology.outputs[channel] = match self.check_source(source) {
-            Source::Zero => Vec::new(),
+            PortSource::Zero => Vec::new(),
             source => vec![source],
         };
         self
@@ -513,12 +513,12 @@ impl<F: Float> GraphBuilder<F> {
         let outs = self.output_count(from);
         for c in 0..self.input_count(to) {
             let source = if outs > 0 {
-                Source::Node(OutPort {
+                PortSource::Node(OutPort {
                     node: from,
                     port: (c % outs) as u16,
                 })
             } else {
-                Source::Zero
+                PortSource::Zero
             };
             self.set_source(to, c, source);
         }
@@ -533,9 +533,9 @@ impl<F: Float> GraphBuilder<F> {
         let globals = self.inputs();
         for c in 0..self.input_count(node) {
             let source = if globals > 0 {
-                Source::Global((c % globals) as u16)
+                PortSource::Global((c % globals) as u16)
             } else {
-                Source::Zero
+                PortSource::Zero
             };
             self.set_source(node, c, source);
         }
@@ -552,12 +552,12 @@ impl<F: Float> GraphBuilder<F> {
         let outs = self.output_count(node);
         for c in 0..self.outputs() {
             let source = if outs > 0 {
-                Source::Node(OutPort {
+                PortSource::Node(OutPort {
                     node,
                     port: (c % outs) as u16,
                 })
             } else {
-                Source::Zero
+                PortSource::Zero
             };
             self.set_output(c, source);
         }
@@ -586,12 +586,12 @@ impl<F: Float> GraphBuilder<F> {
             for c in 0..self.input_count(key) {
                 // The builder wires one source per output channel.
                 let source = if outputs.is_empty() {
-                    Source::Zero
+                    PortSource::Zero
                 } else {
                     outputs[c % outputs.len()]
                         .first()
                         .copied()
-                        .unwrap_or(Source::Zero)
+                        .unwrap_or(PortSource::Zero)
                 };
                 self.set_source(key, c, source);
             }

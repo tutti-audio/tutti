@@ -13,7 +13,7 @@
 //! its latency, a target placed an update late) are not repeated here.
 
 use crate::common;
-use tutti_buffers::BusTopology;
+use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_buffers::{InterleavedMut, PlanesMut};
 
 use std::cell::Cell;
@@ -22,7 +22,6 @@ use tutti_platform::Instant;
 
 use tutti_ump::{MidiChannel, NoteNumber, U7};
 
-use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_graph::{Cx, Event, FadeLaw, ForkByClone, Io, Node, Prepare, Shape, Status};
 use tutti_modulation::{
@@ -496,6 +495,43 @@ fn a_take_suspends_the_automation_then_restores_it() {
     );
 }
 
+/// **A latch take ends only when it is stopped.** The recorder is touched and
+/// released: a latch take stays open (it holds the released value), and
+/// `AutomationTake::stop` makes its trajectory the automation on the next
+/// update, so 650 plays.
+#[test]
+fn a_latch_take_becomes_the_automation_when_stopped() {
+    let (mut s, mut side) = rig(1);
+    let (probe, _) = s.graph().add(ProbeUnit::new(300.0));
+    master(&mut s, &[probe.erase()]);
+    let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);
+    let cutoff_key = probe.cutoff();
+    let mut lane = Trajectory::new().with_range(Hz::new(0.0), Hz::new(1_000.0));
+    lane.add_breakpoint(Breakpoint::new(Beat::new(0.0), Hz::new(800.0)));
+    let mut m = s.mods_mut();
+    m.range_raw(cutoff, 0.0, 1_000.0).unwrap();
+    assert!(m.automate(cutoff, Arc::new(lane)));
+    m.record(
+        cutoff_key,
+        AutomationTake::record(RecordMode::Latch, Hz::new(0.0), Hz::new(1_000.0)),
+    )
+    .unwrap();
+    let take = m.take_mut(cutoff_key).expect("the take is open");
+    take.recorder_mut().touch(Beat::new(0.0), Hz::new(650.0));
+    take.recorder_mut().release(Beat::new(1.0), Hz::new(650.0));
+    let _ = s.update();
+    assert!(
+        s.mods_mut().take_mut(cutoff_key).is_some(),
+        "a released latch take stays open"
+    );
+
+    s.mods_mut().take_mut(cutoff_key).unwrap().stop();
+    let _ = s.update();
+    assert!(s.mods_mut().take_mut(cutoff_key).is_none(), "stopped");
+    let last = *render(&mut side, 512, 128)[0].last().expect("rendered");
+    assert_eq!(last, 650.0, "the take's trajectory plays");
+}
+
 // ---------------------------------------------------------- refusal --
 
 /// The refusals of one `update`, in order.
@@ -905,7 +941,9 @@ fn a_routes_polarity_and_curve_reach_the_render() {
 #[test]
 fn a_bus_strips_volume_and_pan_take_lanes() {
     let (mut s, _side) = rig(2);
-    let (strip, _) = s.graph().add(tutti_nodes::BusStripNode::stereo());
+    let (strip, _) = s.graph().add(tutti_nodes::BusStripNode::from(
+        tutti_nodes::BusStripConfig::new(BusTopology::STEREO),
+    ));
     let mut m = s.mods_mut();
     let offset = m.macro_(0.5);
     for param in [UnitParam::Volume, UnitParam::Balance] {

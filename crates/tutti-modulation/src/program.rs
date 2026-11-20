@@ -31,11 +31,11 @@ use crate::shape::{LfoShape, Polarity, shape};
 
 /// Time-function layers one program holds, at most: a lane keeps per-layer
 /// state in arrays this long, so it never allocates on the audio thread.
-/// [`ControlProgram::new`] refuses past it ([`ProgramError::TooManyLayers`]).
+/// [`ControlProgramBuilder::build`] refuses past it ([`ProgramError::TooManyLayers`]).
 pub const MAX_LANE_LAYERS: usize = 16;
 
 /// Event-input layers one program holds, at most; see [`MAX_LANE_LAYERS`].
-/// [`ControlProgram::new`] refuses past it ([`ProgramError::TooManyInputs`]).
+/// [`ControlProgramBuilder::build`] refuses past it ([`ProgramError::TooManyInputs`]).
 pub const MAX_LANE_INPUTS: usize = 8;
 
 /// Depth cells one program holds, at most: one per layer and per input.
@@ -322,7 +322,7 @@ pub struct Corners {
     pub play: Option<SamplePosition>,
 }
 
-/// Why [`ControlProgram::new`] refused a program.
+/// Why [`ControlProgramBuilder::build`] refused a program.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum ProgramError {
@@ -368,13 +368,13 @@ pub enum ProgramError {
 /// the target's raw `f64` (Hz, linear gain, a plugin's normalised 0..1): the
 /// program is erased over the unit, as the lane's `ParamSegment`s are.
 ///
-/// Built by [`new`](Self::new), which sorts the layers by id and refuses a
+/// Built by [`ControlProgramBuilder`], which sorts the layers by id and refuses a
 /// program past the lane's fixed per-layer state; the fields are private so
 /// every program a lane reads holds those invariants.
 ///
 /// ```
 /// use tutti_modulation::{
-///     Amount, Clock, ControlProgram, Law, Layer, LayerId, LfoShape, Polarity,
+///     Amount, Clock, ControlProgramBuilder, ControlProgram, Law, Layer, LayerId, LfoShape, Polarity,
 ///     ProgramTime, Waveform,
 /// };
 /// use tutti_units::{Beat, BeatsPerCycle, Depth, PhaseIncrement, SamplePosition, SampleRate};
@@ -387,7 +387,7 @@ pub enum ProgramError {
 ///     amount: Amount { depth: Depth::of(0.25), polarity: Polarity::Bipolar, curve: Law::Linear },
 ///     depth_by: None,
 /// };
-/// let program = ControlProgram::new(None, vec![square], vec![]).unwrap();
+/// let program = ControlProgramBuilder::new().layers([square]).build().unwrap();
 /// let at = |beat| ProgramTime {
 ///     beat: Beat::new(beat),
 ///     play: SamplePosition::new(0.0),
@@ -420,7 +420,7 @@ impl fmt::Debug for ControlProgram {
 
 /// Equal when the layers are equal and the automation is the same curve
 /// (`Arc` identity: a curve has no equality of its own). [`Eq`]:
-/// [`new`](ControlProgram::new) refuses a NaN anywhere in a program, so
+/// [`build`](ControlProgramBuilder::build) refuses a NaN anywhere in a program, so
 /// every program equals itself.
 impl PartialEq for ControlProgram {
     fn eq(&self, other: &Self) -> bool {
@@ -452,21 +452,70 @@ fn tol(x: f64) -> f64 {
     (x.abs() * 1e-12).max(1e-9)
 }
 
-impl ControlProgram {
-    /// A program of `automation` (taken as its [`frozen`](Curve::frozen)
-    /// copy when it has one, so the lane never reads a cell through it),
-    /// `layers` and `inputs`, each sorted by id.
+/// A [`ControlProgram`] in the making: its automation, layers and inputs, checked together by
+/// [`build`](Self::build).
+///
+/// Finishing sorts the layers and the inputs by id and refuses what no lane can run, so it is
+/// a terminal call and not a constructor.
+#[derive(Default)]
+pub struct ControlProgramBuilder {
+    automation: Option<Arc<dyn Curve>>,
+    layers: Vec<Layer>,
+    inputs: Vec<InputLayer>,
+}
+
+impl core::fmt::Debug for ControlProgramBuilder {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("ControlProgramBuilder")
+            .field("automation", &self.automation.is_some())
+            .field("layers", &self.layers.len())
+            .field("inputs", &self.inputs.len())
+            .finish()
+    }
+}
+
+impl ControlProgramBuilder {
+    /// A builder of a program with no automation, no layers and no inputs.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// The automation curve, taken as its [`frozen`](Curve::frozen) copy when it has one, so
+    /// the lane never reads a cell through it.
+    #[must_use]
+    pub fn automation(mut self, automation: Arc<dyn Curve>) -> Self {
+        self.automation = Some(automation);
+        self
+    }
+
+    /// Adds `layers`.
+    #[must_use]
+    pub fn layers(mut self, layers: impl IntoIterator<Item = Layer>) -> Self {
+        self.layers.extend(layers);
+        self
+    }
+
+    /// Adds `inputs`.
+    #[must_use]
+    pub fn inputs(mut self, inputs: impl IntoIterator<Item = InputLayer>) -> Self {
+        self.inputs.extend(inputs);
+        self
+    }
+
+    /// The program, its layers and inputs each sorted by id.
     ///
     /// # Errors
     ///
     /// Past [`MAX_LANE_LAYERS`] or [`MAX_LANE_INPUTS`], two layers with one
     /// id, a drawn wave whose points do not ascend in `[0, 1)` with finite
     /// values, or a NaN in a layer.
-    pub fn new(
-        automation: Option<Arc<dyn Curve>>,
-        mut layers: Vec<Layer>,
-        mut inputs: Vec<InputLayer>,
-    ) -> Result<Self, ProgramError> {
+    pub fn build(self) -> Result<ControlProgram, ProgramError> {
+        let Self {
+            automation,
+            mut layers,
+            mut inputs,
+        } = self;
         if layers.len() > MAX_LANE_LAYERS {
             return Err(ProgramError::TooManyLayers {
                 count: layers.len(),
@@ -502,14 +551,16 @@ impl ControlProgram {
                 }
             }
         }
-        Ok(Self {
+        Ok(ControlProgram {
             automation: automation.map(|c| c.frozen().unwrap_or(c)),
             layers: layers.into_boxed_slice(),
             inputs: inputs.into_boxed_slice(),
             depths: Box::new([]),
         })
     }
+}
 
+impl ControlProgram {
     /// Makes `depths` the depth of the layers and inputs they
     /// name, each read from its cell when a lane takes a
     /// [snapshot](Self::depth_snapshot); an id no layer or input has is

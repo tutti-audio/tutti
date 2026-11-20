@@ -308,12 +308,12 @@ impl<F: Float> GraphSource<'_, F> {
     ///
     /// # Errors
     ///
-    /// [`Error::ForkFailed`](crate::Error::ForkFailed) naming the first unit
+    /// [`RenderError::ForkFailed`](crate::RenderError::ForkFailed) naming the first unit
     /// that failed.
     pub(crate) fn check_health(&self) -> crate::Result<()> {
         self.editor
             .fork_health()
-            .map_err(|fault| crate::Error::ForkFailed {
+            .map_err(|fault| crate::RenderError::ForkFailed {
                 key: fault.key,
                 kind: fault.kind,
                 cause: fault.cause,
@@ -372,7 +372,7 @@ pub(crate) fn lost_over(before: (u64, u64), after: (u64, u64)) -> u64 {
 /// Fails a render that lost events under `EventLossPolicy::Fail`
 pub(crate) fn check_loss(policy: crate::EventLossPolicy, lost: u64) -> crate::Result<()> {
     if lost > 0 && policy == crate::EventLossPolicy::Fail {
-        return Err(crate::Error::EventsDropped { count: lost });
+        return Err(crate::RenderError::EventsDropped { count: lost });
     }
     Ok(())
 }
@@ -461,10 +461,7 @@ impl<F: Float> Replay<F> for PlaneSource<'_, F> {
 /// The frames the replay of planes hands out per block: 64, which only paces
 /// the encoder.
 ///
-/// Not raised to the graph's block: Ogg Vorbis's bytes depend on how its
-/// input is split into `encode_audio_block` calls, so this size is part of
-/// what a replayed Ogg export writes, and a 1024-frame replay measured no
-/// faster for the PCM formats.
+/// Not raised to the graph's block: a 1024-frame replay measured no faster.
 pub(crate) const REPLAY_BLOCK: usize = 64;
 
 /// Pull the whole render out of `src`, gating each block, handing every block
@@ -484,7 +481,7 @@ pub(crate) const REPLAY_BLOCK: usize = 64;
 /// Under [`EventLossPolicy::Fail`](crate::EventLossPolicy::Fail) the render
 /// stops at the first block that has lost an event, after that block's
 /// progress and cancel check (a render that was cancelled is not judged), with
-/// [`Error::EventsDropped`](crate::Error::EventsDropped) counting what had
+/// [`RenderError::EventsDropped`](crate::RenderError::EventsDropped) counting what had
 /// been lost by then: a render that is going to fail does not spend the rest
 /// of its length first.
 pub(crate) fn drive<F: Float, C>(

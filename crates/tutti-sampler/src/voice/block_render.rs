@@ -166,22 +166,22 @@ fn the_block_read_is_the_same_at_any_block_length() {
     // short-block one.
     let mut streamer = DiskStreamer::manual(SampleRate::of(SR), DiskStreamerConfig::default())
         .expect("streamer builds");
-    let openings: Vec<_> = (0..8)
-        .map(|_| streamer.open(&path, crate::Placement::HEAD))
-        .collect();
+    // Each stream's handle is held for the whole render: dropping it would end
+    // the stream.
+    let (_streams, mut readers): (Vec<_>, Vec<_>) = (0..8)
+        .map(|_| {
+            let read = streamer
+                .open_stream(&path, crate::StreamStart::HEAD)
+                .run()
+                .expect("the file reads");
+            let (stream, reader) = streamer.adopt(read).expect("adopts");
+            (stream, Some(reader))
+        })
+        .unzip();
     assert!(
         streamer.step_until_idle(512) < 512,
         "the rings never primed"
     );
-    // Each stream's handle is held for the whole render: dropping it would end
-    // the stream.
-    let (_streams, mut readers): (Vec<_>, Vec<_>) = openings
-        .into_iter()
-        .map(|opening| match opening.poll() {
-            crate::Open::Ready(stream, reader) => (stream, Some(reader)),
-            other => panic!("a primed stream answers its open: {other:?}"),
-        })
-        .unzip();
     // A stream's reader is its voice's, once: each voice takes its own.
     let mut disk = |stream: usize| {
         let reader = readers[stream]

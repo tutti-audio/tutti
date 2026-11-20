@@ -16,7 +16,6 @@
 #       foundation  units, types, curve and plumbing: the last f32 unit families
 crates/tutti-buffers/src/fold.rs  1  migrating: foundation
 crates/tutti-buffers/src/fold/ambisonic.rs  1  migrating: foundation
-crates/tutti-codec/src/format.rs  2  migrating: foundation
 crates/tutti-export/src/control.rs  5  migrating: foundation
 crates/tutti-export/src/encode/mod.rs  2  migrating: foundation
 crates/tutti-export/src/render/outputs.rs  2  migrating: foundation

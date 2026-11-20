@@ -4,7 +4,7 @@
 
 use core::ops::RangeInclusive;
 
-use tutti_dsp::{FrameCount, StftGeometry};
+use tutti_dsp::{FrameCount, HopSize, StftGeometry, WindowLength};
 use tutti_units::{Hz, SampleRate, Samples};
 
 use crate::convert::BLOCK;
@@ -67,8 +67,9 @@ impl Framing {
     ///
     /// As [`check`](Self::check).
     pub(crate) fn geometry(self, rate: SampleRate) -> Result<StftGeometry> {
-        self.check()?;
-        Ok(StftGeometry::new(rate, self.window, self.hop)?)
+        let window = WindowLength::new(self.window).ok_or(Error::ZeroWindow)?;
+        let hop = HopSize::new(self.hop).ok_or(Error::ZeroHop)?;
+        Ok(StftGeometry::new(rate, window, hop))
     }
 }
 

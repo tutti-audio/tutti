@@ -1,38 +1,101 @@
-//! [`watch_host`]: a thread that runs a function when a named process ends, and
+//! [`watch_host`]: a task that runs a function when a named process ends, and
 //! [`watch_spawner`]: the same for the process that spawned this one.
 
+use std::future::poll_fn;
+use std::task::Poll;
 use std::time::Duration;
 
+use tutti_platform::{Executor, Task, monotonic_ns, sleep_until_ns};
+
+use super::Waited;
 use super::platform::Imp;
 
 /// How often the watch asks whether the host still runs on a platform where
-/// the OS gives no wake for another process's end, or refused one.
+/// the OS gives no wake for another process's end, or refused one, and the
+/// longest the OS wait runs before the task is polled again: a dropped
+/// [`Task`] ends the watch within this.
 const NAP: Duration = Duration::from_millis(250);
 
-/// Runs `on_gone` on a thread of its own once the process `host` has ended, for
-/// a server whose host dying must end it wherever it is blocked. The thread
-/// runs for the life of the process, or until the host ends, and is named
-/// `host-watch`.
+/// Pauses the dedicated thread for `duration`: the platform's blocking sleep.
+fn pause(duration: Duration) {
+    let nanos = i64::try_from(duration.as_nanos()).unwrap_or(i64::MAX);
+    sleep_until_ns(monotonic_ns().saturating_add(nanos));
+}
+
+/// Runs `on_gone` once the process `host` has ended, on a thread of the
+/// `executor`'s of its own named `host-watch`, for a server whose host dying must
+/// end it wherever it is blocked. The task runs until the host ends or the
+/// returned [`Task`] is dropped, which cancels the watch within a quarter of a
+/// second; [`detach`](Task::detach) keeps it for the life of the executor.
 ///
 /// The wait is the OS's (a pidfd on Linux, a kqueue event on macOS, the process
 /// handle on Windows), so nothing polls. Where it gives none, or refused one,
-/// the thread asks [`process_exists`](crate::process_exists) every 250 ms. A
+/// the task asks [`process_exists`](crate::process_exists) every 250 ms. A
 /// `host` that has ended already runs `on_gone` at once.
 ///
 /// # Errors
 ///
 /// The thread could not be started.
-pub fn watch_host(host: u32, on_gone: impl FnOnce() + Send + 'static) -> std::io::Result<()> {
-    // Detached: the watch lives as long as the process, or until the host ends.
-    tutti_platform::spawn_named("host-watch", None, move |_| {
-        if !Imp::of_pid(host).is_some_and(|imp| imp.wait_ended()) {
-            while crate::process_exists(host) {
-                std::thread::sleep(NAP);
+pub fn watch_host(
+    executor: &Executor,
+    host: u32,
+    on_gone: impl FnOnce() + Send + 'static,
+) -> std::io::Result<Task<()>> {
+    watch(
+        executor,
+        host,
+        |host| Imp::of_pid(host).map(|imp| move |slice| imp.wait(slice)),
+        pause,
+        on_gone,
+    )
+}
+
+/// [`watch_host`] over its two choices: how to ask the OS for a wake (made on the
+/// watch's thread, `None` when there is none), and how the poll pauses between
+/// asks. A failed ask falls back to the poll for as long as it fails; it is never
+/// an end.
+fn watch<W: FnMut(Duration) -> Waited + Send>(
+    executor: &Executor,
+    host: u32,
+    wake: impl FnOnce(u32) -> Option<W> + Send + 'static,
+    mut nap: impl FnMut(Duration) + Send + 'static,
+    on_gone: impl FnOnce() + Send + 'static,
+) -> std::io::Result<Task<()>> {
+    executor.spawn_dedicated("host-watch", None, async move {
+        let mut wake = wake(host);
+        loop {
+            let waited = wake.as_mut().map(|wait| wait(NAP));
+            match waited {
+                Some(Waited::Ended) => break,
+                Some(Waited::Running) => {}
+                // No wake, or one that cannot be asked: look for the process.
+                Some(Waited::Failed) | None => {
+                    if !crate::process_exists(host) {
+                        break;
+                    }
+                    nap(NAP);
+                }
             }
+            yield_now().await;
         }
         on_gone();
     })
-    .map(tutti_platform::ThreadHandle::detach)
+}
+
+/// Returns to the executor once, so that a cancelled [`Task`] is seen between
+/// two waits.
+async fn yield_now() {
+    let mut yielded = false;
+    poll_fn(|cx| {
+        if yielded {
+            Poll::Ready(())
+        } else {
+            yielded = true;
+            cx.waker().wake_by_ref();
+            Poll::Pending
+        }
+    })
+    .await;
 }
 
 /// The environment variable through which a host states its own PID to the
@@ -92,22 +155,23 @@ fn host_given(stated: Option<&str>, parent: Option<u32>, exists: impl FnOnce(u32
 }
 
 /// [`watch_host`] on the host that spawned this process ([`host_pid`]): runs
-/// `on_gone` on a thread of its own when it ends, or at once if it already has.
-/// Returns `false`, watching nothing, when the host is unknown.
+/// `on_gone` on a thread of the `executor`'s when it ends, or at once if it
+/// already has. Returns `None`, watching nothing, when the host is unknown.
 ///
 /// # Errors
 ///
 /// The thread could not be started.
-pub fn watch_spawner(on_gone: impl FnOnce() + Send + 'static) -> std::io::Result<bool> {
+pub fn watch_spawner(
+    executor: &Executor,
+    on_gone: impl FnOnce() + Send + 'static,
+) -> std::io::Result<Option<Task<()>>> {
     match host_pid() {
-        Host::Running(host) => watch_host(host, on_gone).map(|()| true),
-        Host::Gone => {
-            tutti_platform::spawn_named("host-watch", None, move |_| on_gone()).map(|handle| {
-                handle.detach();
-                true
-            })
-        }
-        Host::Unknown => Ok(false),
+        Host::Running(host) => watch_host(executor, host, on_gone).map(Some),
+        // Nothing polls here: the thread only runs the function.
+        Host::Gone => executor
+            .spawn_dedicated("host-watch", None, async move { on_gone() })
+            .map(Some),
+        Host::Unknown => Ok(None),
     }
 }
 
@@ -115,7 +179,8 @@ pub fn watch_spawner(on_gone: impl FnOnce() + Send + 'static) -> std::io::Result
 mod tests {
     use super::*;
     use std::process::Command;
-    use std::sync::mpsc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, mpsc};
 
     /// The most a test waits for an event: a guard against a hang.
     const HANG_GUARD: Duration = Duration::from_secs(600);
@@ -128,35 +193,165 @@ mod tests {
         let mut child = Command::new("sleep").arg("600").spawn().expect("sleep");
         let watch = Imp::of_pid(child.id()).expect("a running process can be watched");
         child.kill().expect("kill");
-        assert!(watch.wait_ended(), "its end wakes the watch");
+        assert!(
+            matches!(watch.wait(Duration::from_secs(600)), Waited::Ended),
+            "its end wakes the watch"
+        );
         child.wait().expect("reaped");
     }
 
+    /// A child that runs until it is killed.
+    fn running() -> std::process::Child {
+        Command::new("sleep").arg("600").spawn().expect("sleep")
+    }
+
+    /// Drops `executor`, which joins the watch's thread, and counts the messages
+    /// still in `ended`: how many more times `on_gone` ran.
+    fn runs_after(executor: Executor, ended: &mpsc::Receiver<()>) -> usize {
+        drop(executor);
+        ended.iter().count()
+    }
+
     /// **The end of the host runs the function.** The child is reaped, so the
-    /// function runs whether the thread registered its watch before the end or
-    /// found the process gone.
+    /// function runs whether the task registered its watch before the end or
+    /// found the process gone. The executor's drop joins the watch's thread and
+    /// drops the sender, so the receiver sees every message the function sent.
     #[test]
     fn the_end_of_the_host_runs_the_function() {
-        let mut child = Command::new("sleep").arg("600").spawn().expect("sleep");
+        let executor = Executor::new();
+        let mut child = running();
         let (gone, ended) = mpsc::channel();
-        watch_host(child.id(), move || gone.send(()).expect("the test listens"))
-            .expect("the watch starts");
+        let task = watch_host(&executor, child.id(), move || {
+            gone.send(()).expect("the test listens");
+        })
+        .expect("the watch starts");
 
         child.kill().expect("kill");
         child.wait().expect("reaped");
         ended.recv_timeout(HANG_GUARD).expect("its end is learned");
+        drop(task);
+        assert_eq!(runs_after(executor, &ended), 0, "the function ran again");
     }
 
     /// **A host that ended before the watch began runs the function too.**
     #[test]
     fn a_host_that_ended_before_the_watch_runs_the_function() {
+        let executor = Executor::new();
         let mut child = Command::new("true").spawn().expect("true");
         let pid = child.id();
         child.wait().expect("reaped");
         let (gone, ended) = mpsc::channel();
-        watch_host(pid, move || gone.send(()).expect("the test listens"))
-            .expect("the watch starts");
+        let task = watch_host(&executor, pid, move || {
+            gone.send(()).expect("the test listens");
+        })
+        .expect("the watch starts");
         ended.recv_timeout(HANG_GUARD).expect("its end is learned");
+        drop(task);
+        assert_eq!(runs_after(executor, &ended), 0);
+    }
+
+    /// **Without an OS wake the poll ends when the host ends.** The pause is
+    /// injected: its first call is where the host ends, so the watch sees the
+    /// process gone at its next ask and runs the function after one pause.
+    #[test]
+    fn the_poll_without_a_wake_ends_when_the_host_ends() {
+        let executor = Executor::new();
+        let mut child = running();
+        let pid = child.id();
+        let pauses = Arc::new(AtomicUsize::new(0));
+        let (gone, ended) = mpsc::channel();
+        let task = watch(
+            &executor,
+            pid,
+            |_| None::<fn(Duration) -> Waited>,
+            {
+                let pauses = Arc::clone(&pauses);
+                move |_| {
+                    pauses.fetch_add(1, Ordering::SeqCst);
+                    child.kill().expect("kill");
+                    child.wait().expect("reaped");
+                }
+            },
+            move || gone.send(()).expect("the test listens"),
+        )
+        .expect("the watch starts");
+        ended.recv_timeout(HANG_GUARD).expect("its end is learned");
+        drop(task);
+        assert_eq!(runs_after(executor, &ended), 0);
+        assert_eq!(pauses.load(Ordering::SeqCst), 1);
+    }
+
+    /// **A failed OS wait is never an end.** The wait fails every time while the
+    /// host runs, so the watch must fall back to asking for the process: the
+    /// function runs only after the injected pause, where the host ends. A failure
+    /// read as an end runs it at the first ask, before any pause.
+    #[test]
+    fn a_failed_os_wait_is_not_the_end_of_the_host() {
+        let executor = Executor::new();
+        let mut child = running();
+        let pid = child.id();
+        let asks = Arc::new(AtomicUsize::new(0));
+        let pauses = Arc::new(AtomicUsize::new(0));
+        let (gone, ended) = mpsc::channel();
+        let task = watch(
+            &executor,
+            pid,
+            {
+                let asks = Arc::clone(&asks);
+                move |_| {
+                    Some(move |_| {
+                        asks.fetch_add(1, Ordering::SeqCst);
+                        Waited::Failed
+                    })
+                }
+            },
+            {
+                let pauses = Arc::clone(&pauses);
+                move |_| {
+                    pauses.fetch_add(1, Ordering::SeqCst);
+                    child.kill().expect("kill");
+                    child.wait().expect("reaped");
+                }
+            },
+            move || gone.send(()).expect("the test listens"),
+        )
+        .expect("the watch starts");
+        ended.recv_timeout(HANG_GUARD).expect("its end is learned");
+        drop(task);
+        assert_eq!(runs_after(executor, &ended), 0);
+        assert_eq!(pauses.load(Ordering::SeqCst), 1, "the host ran at the ask");
+        assert_eq!(
+            asks.load(Ordering::SeqCst),
+            2,
+            "asked again after the pause"
+        );
+    }
+
+    /// **A dropped task ends the watch without running the function**, even
+    /// while the host runs: the task is polled (its first pause says so) before it
+    /// is dropped, and the executor's drop would otherwise join a thread that
+    /// never returns.
+    #[test]
+    fn a_dropped_watch_never_runs_the_function() {
+        let executor = Executor::new();
+        let mut child = running();
+        let (gone, ended) = mpsc::channel();
+        let (polled, started) = mpsc::channel();
+        let task = watch(
+            &executor,
+            child.id(),
+            |_| None::<fn(Duration) -> Waited>,
+            move |_| {
+                let _ = polled.send(());
+            },
+            move || gone.send(()).expect("the test listens"),
+        )
+        .expect("the watch starts");
+        started.recv_timeout(HANG_GUARD).expect("the watch runs");
+        drop(task);
+        assert_eq!(runs_after(executor, &ended), 0);
+        child.kill().expect("kill");
+        child.wait().expect("reaped");
     }
 
     /// **A stated host is the host while it runs, parent or not**: a wrapper

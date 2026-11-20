@@ -132,7 +132,8 @@ use tutti_rt::LockExt;
 
 use tutti_graph::NodeKey;
 use tutti_plugin::catalog::Plugin as HostPlugin;
-use tutti_plugin_db::{Hosting, Loadable};
+use tutti_plugin::catalog::{ResolvedHosting, RestoreRefused};
+use tutti_plugin_db::Loadable;
 use tutti_plugin_host::{Liveness, LivenessVerdict};
 use tutti_plugin_host::{
     NodeControls, PluginControls, PluginHandle, PluginSignal, PluginStatus, Subscription,
@@ -159,8 +160,8 @@ pub(crate) use lost::Lost;
 
 use entry::PooledLink;
 pub use entry::{
-    AddPluginError, LoadedPlugin, PluginCause, PluginDeclaration, PluginEntry, PluginInfo,
-    PluginPorts, PooledPlugin,
+    AddPluginError, LoadedPlugin, PluginCause, PluginDeclaration, PluginInfo, PluginPorts,
+    PoolPluginEntry, PooledPlugin,
 };
 pub use preset_job::{LoadPreset, PresetJobError, PresetJobFailed};
 pub use state_job::{RestoreState, SaveState, StateJobError, StateJobFailed};
@@ -219,20 +220,14 @@ impl PluginLoad {
     pub(crate) fn run(self) -> PluginLoaded {
         let loadable = self.loadable.clone();
         let config = self.config.clone();
-        let refused = self
+        let opened = match self
             .loadable
             .check()
-            .err()
-            .or_else(|| tutti_plugin::catalog::placement(&self.loadable).err());
-        let opened = if let Some(refusal) = refused {
-            Opened::Done(Box::new(Open::refused(refusal)))
-        } else if matches!(
-            tutti_plugin::catalog::placement(&self.loadable),
-            Ok(Hosting::InProcess)
-        ) {
-            Opened::OnMain(Box::new(self))
-        } else {
-            Opened::Done(Box::new(self.open(None)))
+            .and_then(|()| tutti_plugin::catalog::placement(&self.loadable))
+        {
+            Err(refusal) => Opened::Done(Box::new(Open::refused(refusal))),
+            Ok(ResolvedHosting::InProcess) => Opened::OnMain(Box::new(self)),
+            Ok(ResolvedHosting::OutOfProcess) => Opened::Done(Box::new(self.open(Opening::Served))),
         };
         PluginLoaded {
             loadable,
@@ -241,21 +236,40 @@ impl PluginLoad {
         }
     }
 
-    /// [`run`](Self::run)'s open, on this thread. `main` is the proof that it is
-    /// the main thread, which a plugin hosted in process needs.
-    fn open(self, main: Option<MainThreadMarker>) -> Open {
+    /// [`run`](Self::run)'s open, on this thread.
+    fn open(self, at: Opening) -> Open {
         // The state goes in **before the plugin is activated** (`open_with_state`):
         // a plugin may take its mode from the state at activation. A refusal
         // does not abort the load: a plugin at its defaults beats no plugin. But
         // it is not silent.
-        let (plugin, restore) = match HostPlugin::open_with_state(
-            main,
-            &self.work,
-            &self.config,
-            &self.loadable,
-            self.rate,
-            self.state.as_deref().map(PeerState::bytes),
-        ) {
+        let state = self.state.as_deref().map(PeerState::bytes);
+        let opened = match (at, state) {
+            (Opening::Served, None) => {
+                HostPlugin::open_served(&self.config, &self.work, &self.loadable, self.rate)
+                    .map(|plugin| (plugin, None))
+            }
+            (Opening::Served, Some(state)) => HostPlugin::open_served_restoring(
+                &self.config,
+                &self.work,
+                &self.loadable,
+                self.rate,
+                state,
+            )
+            .map(|(plugin, restore)| (plugin, Some(restore))),
+            (Opening::OnMain(main), None) => {
+                HostPlugin::open_in_process(main, &self.work, &self.loadable, self.rate)
+                    .map(|plugin| (plugin, None))
+            }
+            (Opening::OnMain(main), Some(state)) => HostPlugin::open_in_process_restoring(
+                main,
+                &self.work,
+                &self.loadable,
+                self.rate,
+                state,
+            )
+            .map(|(plugin, restore)| (plugin, Some(restore))),
+        };
+        let (plugin, restore) = match opened {
             Ok((plugin, restore)) => (Ok(plugin), restore),
             // The server died, or stopped answering, inside the step that
             // restores the state it was staged (`StateRestore`; a failure
@@ -263,10 +277,11 @@ impl PluginLoad {
             // is what the load is held against (the reload's landing withholds it).
             Err(e @ tutti_plugin_types::IpcError::StateRestore { .. }) if self.state.is_some() => {
                 let reason = e.to_string();
-                (Err(e), Some(Err(reason)))
+                (Err(e), Some(Err(RestoreRefused::Served(reason))))
             }
             Err(e) => (Err(e), None),
         };
+        let restore = restore.map(|restore| restore.map_err(|refused| refused.to_string()));
         if let (Ok(plugin), Some(Err(e))) = (&plugin, &restore) {
             tracing::warn!(
                 "{}: saved state was not restored ({e}); the plugin is loaded at its \
@@ -327,6 +342,14 @@ impl Open {
 /// again (the plugin's list was unavailable).
 pub(crate) type ParamValues =
     Result<tutti_plugin_host::ParamSnapshot, Box<tutti_plugin_host::ParamRead>>;
+
+/// Where a load is opened: on the job's thread, or on the main thread an
+/// in-process plugin is confined to.
+#[derive(Clone, Copy)]
+enum Opening {
+    Served,
+    OnMain(MainThreadMarker),
+}
 
 /// What a `PluginLoad`'s run did.
 enum Opened {
@@ -389,7 +412,16 @@ impl PluginLoaded {
     fn finish(self, main: Option<MainThreadMarker>) -> (Loadable, AudioConfig, Open) {
         let open = match self.opened {
             Opened::Done(open) => *open,
-            Opened::OnMain(load) => (*load).open(main),
+            Opened::OnMain(load) => match main {
+                Some(main) => (*load).open(Opening::OnMain(main)),
+                None => Open::refused(IpcError::LoadFailed {
+                    path: Some(load.loadable.plugin().path().to_path_buf()),
+                    stage: tutti_plugin_types::LoadStage::Opening,
+                    reason: "a plugin hosted in the host process loads on the main thread and \
+                             needs it"
+                        .into(),
+                }),
+            },
         };
         (self.loadable, self.config, open)
     }
@@ -1330,7 +1362,7 @@ pub enum AnyPlugin {}
 impl Key<AnyPlugin> {
     /// Parameter `id` of the plugin, as the target `session.set` writes and a
     /// modulation route or an automation lane targets: the same one
-    /// [`Param::target`](crate::Param::target) gives, and it converts into the
+    /// [`PluginParam::target`](crate::PluginParam::target) gives, and it converts into the
     /// [`ParamRef`](crate::ParamRef) a native node's param does, so a route
     /// names a plugin's parameter and a native one alike.
     ///
@@ -2779,7 +2811,7 @@ mod tests {
             let plugin = PluginRef::file("fake.clap");
             self.recovering(
                 plugin.clone(),
-                Loadable::uncatalogued(plugin).hosting(Hosting::InProcess),
+                Loadable::uncatalogued(plugin).hosting(tutti_plugin_db::Hosting::InProcess),
             );
         }
 

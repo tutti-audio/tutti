@@ -16,8 +16,8 @@ mod svf;
 pub use biquad::Biquad;
 pub(crate) use biquad::section_l1;
 pub use crossover::{
-    CrossoverBank, CrossoverBlend, CrossoverControls, CrossoverError, CrossoverModel, MAX_SPLITS,
-    SOLVE_CEILING, fit_to_rate,
+    CrossoverBands, CrossoverBandsError, CrossoverBank, CrossoverBlend, CrossoverControls,
+    CrossoverError, CrossoverModel, MAX_SPLITS, SOLVE_CEILING, fit_to_rate,
 };
 pub use envelope::{EnvelopeFilterBank, EnvelopeFilterControls};
 pub use ladder::{

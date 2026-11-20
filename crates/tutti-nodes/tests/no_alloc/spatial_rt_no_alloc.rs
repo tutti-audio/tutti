@@ -4,13 +4,12 @@
 //! The gate lives in the crate that owns the panners: `assert_no_alloc`
 //! installs a global allocator, which only a test binary of that crate may do.
 
-use tutti_buffers::Bed;
-use tutti_buffers::MaxBlock;
+use tutti_buffers::{Bed, MaxBlock};
 use tutti_graph::ParamNode;
 use tutti_graph::contract::{BlockRig, Direct};
 use tutti_graph::{IntoNode, Node};
-use tutti_nodes::VbapPannerNode;
 use tutti_nodes::testing::aim;
+use tutti_nodes::{VbapPannerConfig, VbapPannerNode};
 use tutti_units::Elevation;
 use tutti_units::SampleRate;
 use tutti_units::{Azimuth, UnitParam};
@@ -47,7 +46,7 @@ fn gate<N: IntoNode>(node: N, warm: usize) {
 
 #[test]
 fn vbap_panner_stereo_process_is_allocation_free() {
-    let node = VbapPannerNode::<f32>::stereo();
+    let node = vbap::<f32>(tutti_buffers::Bed::Stereo);
     aim(&node.param_set(), Azimuth::new(30.0), Elevation::new(0.0));
     // One warm-up block.
     gate(node, 1);
@@ -65,7 +64,7 @@ fn vbap_panner_stereo_process_is_allocation_free() {
 /// inside the solve that does.
 #[test]
 fn vbap_folded_rear_arc_is_allocation_free() {
-    let mut node = VbapPannerNode::<f32>::stereo();
+    let mut node = vbap::<f32>(tutti_buffers::Bed::Stereo);
     // 200 degrees wraps to -160, well past the lateral axis: the fold fires and
     // mirrors it to -20. Plain VBAP would leave this bearing silent.
     aim(&node.param_set(), Azimuth::new(200.0), Elevation::new(0.0));
@@ -90,7 +89,7 @@ fn vbap_folded_rear_arc_is_allocation_free() {
 /// nothing per-round reaches the heap.
 #[test]
 fn vbap_elevation_retreat_is_allocation_free() {
-    let mut node = VbapPannerNode::<f32>::quad();
+    let mut node = vbap::<f32>(tutti_buffers::Bed::Quad);
     // Straight up: a 2D ring cannot solve this, so the retreat runs.
     aim(&node.param_set(), Azimuth::new(0.0), Elevation::new(90.0));
     Node::reset(&mut node);
@@ -200,7 +199,7 @@ fn vbap_every_bed_under_hostile_cells_and_signals_is_allocation_free_finite_and_
         UnitParam::StereoWidth,
     ];
     for bed in Bed::ALL {
-        let Ok(node) = VbapPannerNode::<f32>::new(bed) else {
+        let Ok(node) = VbapPannerNode::<f32>::try_from(VbapPannerConfig::new(bed)) else {
             assert_eq!(bed, Bed::Mono);
             continue;
         };
@@ -344,11 +343,8 @@ fn sphere_bytes(
 
 #[test]
 fn hrtf_binaural_process_is_allocation_free() {
-    use tutti_nodes::HrtfBinauralNode;
-
     let bytes = synthetic_hrir_sphere(48_000, 64);
-    let node =
-        HrtfBinauralNode::<f32>::new(&bytes, SampleRate::SR_48K).expect("synthetic sphere parses");
+    let node = hrtf::<f32>(&bytes).expect("synthetic sphere parses");
     aim(&node.param_set(), Azimuth::new(30.0), Elevation::new(0.0));
     // Three blocks: past the first step's latency, so the gate sees signal.
     // Nothing grows lazily, so nothing needs to warm before the window.
@@ -361,11 +357,8 @@ fn hrtf_binaural_process_is_allocation_free() {
 /// after insertion.
 #[test]
 fn hrtf_binaural_moving_source_is_allocation_free() {
-    use tutti_nodes::HrtfBinauralNode;
-
     let bytes = synthetic_hrir_sphere(48_000, 64);
-    let node =
-        HrtfBinauralNode::<f32>::new(&bytes, SampleRate::SR_48K).expect("synthetic sphere parses");
+    let node = hrtf::<f32>(&bytes).expect("synthetic sphere parses");
     let (mut rig, controls) = BlockRig::new(node, SampleRate::SR_48K, 64);
     for c in rig.inputs_mut().iter_mut() {
         let c = c.into_samples_mut();
@@ -398,8 +391,6 @@ fn hrtf_binaural_moving_source_is_allocation_free() {
 /// step scans the vertices for the nearest.
 #[test]
 fn hrtf_binaural_nearest_vertex_fallback_is_allocation_free() {
-    use tutti_nodes::HrtfBinauralNode;
-
     let verts = [
         [0.0, 0.0, -1.0],
         [-0.5, 0.0, -0.866],
@@ -407,25 +398,24 @@ fn hrtf_binaural_nearest_vertex_fallback_is_allocation_free() {
         [0.0, 0.0, 1.0],
     ];
     let bytes = sphere_bytes(48_000, 64, &verts, &[[0, 1, 2]]);
-    let node = HrtfBinauralNode::<f32>::new(&bytes, SampleRate::SR_48K).expect("the sphere parses");
+    let node = hrtf::<f32>(&bytes).expect("the sphere parses");
     aim(&node.param_set(), Azimuth::new(180.0), Elevation::new(0.0));
     gate(node, 3);
 }
 
-/// A re-prepare at the rate the node already has (a new block size) keeps
+/// A re-prepare at the rate the node was first prepared at (a new block size) keeps
 /// the prepared sphere, so it allocates nothing.
 #[test]
 fn hrtf_binaural_same_rate_prepare_is_allocation_free() {
     use tutti_graph::Prepare;
-    use tutti_nodes::HrtfBinauralNode;
 
     let bytes = synthetic_hrir_sphere(48_000, 64);
-    let mut node =
-        HrtfBinauralNode::<f32>::new(&bytes, SampleRate::SR_48K).expect("synthetic sphere parses");
+    let mut node = hrtf::<f32>(&bytes).expect("synthetic sphere parses");
     let prepare = Prepare::new(
         SampleRate::SR_48K,
         tutti_buffers::MaxBlock::of(tutti_units::Samples::new(256)),
     );
+    node.prepare(&prepare);
     assert_no_alloc::assert_no_alloc(|| node.prepare(&prepare));
 }
 
@@ -436,12 +426,11 @@ fn hrtf_binaural_same_rate_prepare_is_allocation_free() {
 #[test]
 fn hrtf_binaural_resampled_set_in_split_blocks_is_allocation_free() {
     use tutti_graph::Prepare;
-    use tutti_nodes::HrtfBinauralNode;
+
     use tutti_units::{Samples, Tail};
 
     let bytes = synthetic_hrir_sphere(48_000, 64);
-    let mut node =
-        HrtfBinauralNode::<f32>::new(&bytes, SampleRate::SR_48K).expect("synthetic sphere parses");
+    let mut node = hrtf::<f32>(&bytes).expect("synthetic sphere parses");
     aim(&node.param_set(), Azimuth::new(30.0), Elevation::new(0.0));
     node.prepare(&Prepare::new(
         SampleRate::SR_44K1,
@@ -469,4 +458,21 @@ fn hrtf_binaural_resampled_set_in_split_blocks_is_allocation_free() {
             .any(|s| s.abs() > 1e-6),
         "the node rendered silence; the gate walked no DSP"
     );
+}
+
+/// A panner over `bed`.
+fn vbap<F: tutti_buffers::Float>(bed: tutti_buffers::Bed) -> tutti_nodes::VbapPannerNode<F> {
+    tutti_nodes::VbapPannerNode::try_from(tutti_nodes::VbapPannerConfig::new(bed))
+        .expect("a bed with speakers to pan between")
+}
+
+/// A binaural node over the sphere in `bytes`, prepared at `rate`.
+fn hrtf<F: tutti_dsp::FftFloat>(
+    bytes: &[u8],
+) -> Result<tutti_nodes::HrtfBinauralNode<F>, tutti_dsp::HrtfBinauralError> {
+    Ok(tutti_nodes::HrtfBinauralNode::from(
+        tutti_nodes::HrtfBinauralConfig::new(std::sync::Arc::new(
+            tutti_dsp::HrirSphere::from_bytes(bytes)?,
+        )),
+    ))
 }

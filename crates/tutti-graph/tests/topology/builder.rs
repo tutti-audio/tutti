@@ -16,7 +16,7 @@ use tutti_graph::{
     Cx, Editor, EventEdge, EventIn, EventOut, ForkByClone, GraphBuilder, Io, Node, Prepare,
     Renderer, Shape, Status, TransportPosition, Unforkable,
 };
-use tutti_graph::{Edge, FeedbackFrom, InPort, OutPort, Source};
+use tutti_graph::{Edge, FeedbackFrom, InPort, OutPort, PortSource};
 use tutti_units::{Beat, Frame, Samples};
 
 fn signal(n: usize) -> Vec<f32> {
@@ -68,7 +68,7 @@ fn ch(n: usize) -> ChannelLayout {
 
 /// What the builder feeds `node`'s input `port`. An absent edge reads
 /// silence, as an explicit `Zero` does.
-fn source_of(g: &GraphBuilder, node: NodeKey, port: u16) -> Source {
+fn source_of(g: &GraphBuilder, node: NodeKey, port: u16) -> PortSource {
     match g
         .spec()
         .topology
@@ -79,7 +79,7 @@ fn source_of(g: &GraphBuilder, node: NodeKey, port: u16) -> Source {
         Some([Edge::Direct(s)]) => *s,
         Some([Edge::Feedback(_)]) => panic!("no feedback in these graphs"),
         Some(several) => panic!("one source per port here, got {several:?}"),
-        None => Source::Zero,
+        None => PortSource::Zero,
     }
 }
 
@@ -89,7 +89,7 @@ fn source_of(g: &GraphBuilder, node: NodeKey, port: u16) -> Source {
 fn assert_wired(
     g: &GraphBuilder,
     want: &[(NodeKey, net_rule::Node)],
-    outputs: &[Source],
+    outputs: &[PortSource],
     case: &str,
 ) {
     for (key, n) in want {
@@ -105,7 +105,11 @@ fn assert_wired(
         g.spec().topology.outputs,
         outputs
             .iter()
-            .map(|s| if *s == Source::Zero { vec![] } else { vec![*s] })
+            .map(|s| if *s == PortSource::Zero {
+                vec![]
+            } else {
+                vec![*s]
+            })
             .collect::<Vec<_>>(),
         "{case}: global outputs"
     );
@@ -116,7 +120,7 @@ fn assert_wired(
 fn assert_renders(
     got: &[Vec<f32>],
     want: &[(NodeKey, net_rule::Node)],
-    outputs: &[Source],
+    outputs: &[PortSource],
     frames: usize,
     case: &str,
 ) {
@@ -140,11 +144,11 @@ mod net_rule {
     /// A node: its output width and what feeds each of its inputs.
     pub struct Node {
         pub outs: usize,
-        pub sources: Vec<Source>,
+        pub sources: Vec<PortSource>,
     }
 
-    fn port(node: NodeKey, port: usize) -> Source {
-        Source::Node(OutPort {
+    fn port(node: NodeKey, port: usize) -> PortSource {
+        PortSource::Node(OutPort {
             node,
             port: port as u16,
         })
@@ -152,13 +156,13 @@ mod net_rule {
 
     /// `pipe(a, b)`: input `c` of `b` reads `a`'s port
     /// `c % a_outs`; silence when `a` has no outputs.
-    pub fn pipe_all(a: NodeKey, a_outs: usize, b_ins: usize) -> Vec<Source> {
+    pub fn pipe_all(a: NodeKey, a_outs: usize, b_ins: usize) -> Vec<PortSource> {
         (0..b_ins)
             .map(|c| {
                 if a_outs > 0 {
                     port(a, c % a_outs)
                 } else {
-                    Source::Zero
+                    PortSource::Zero
                 }
             })
             .collect()
@@ -166,13 +170,13 @@ mod net_rule {
 
     /// `pipe_output(n)`: global output `c` reads `n`'s port
     /// `c % n_outs`; silence when `n` has no outputs.
-    pub fn pipe_output(n: NodeKey, n_outs: usize, outputs: usize) -> Vec<Source> {
+    pub fn pipe_output(n: NodeKey, n_outs: usize, outputs: usize) -> Vec<PortSource> {
         (0..outputs)
             .map(|c| {
                 if n_outs > 0 {
                     port(n, c % n_outs)
                 } else {
-                    Source::Zero
+                    PortSource::Zero
                 }
             })
             .collect()
@@ -180,13 +184,13 @@ mod net_rule {
 
     /// `pipe_input(n)`: input `c` reads global input `c % globals`;
     /// silence when there are none.
-    pub fn pipe_input(globals: usize, ins: usize) -> Vec<Source> {
+    pub fn pipe_input(globals: usize, ins: usize) -> Vec<PortSource> {
         (0..ins)
             .map(|c| {
                 if globals > 0 {
-                    Source::Global((c % globals) as u16)
+                    PortSource::Global((c % globals) as u16)
                 } else {
-                    Source::Zero
+                    PortSource::Zero
                 }
             })
             .collect()
@@ -200,16 +204,16 @@ mod net_rule {
         globals: usize,
         outputs: usize,
         widths: &[(usize, usize)],
-    ) -> (Vec<(NodeKey, Node)>, Vec<Source>) {
+    ) -> (Vec<(NodeKey, Node)>, Vec<PortSource>) {
         let mut nodes = Vec::new();
-        let mut outs = vec![Source::Zero; outputs];
+        let mut outs = vec![PortSource::Zero; outputs];
         for (k, &(ins, w)) in widths.iter().enumerate() {
             let key = NodeKey(k as u64);
             let sources = if k == 0 {
                 if globals > 0 {
                     pipe_input(globals, ins)
                 } else {
-                    vec![Source::Zero; ins]
+                    vec![PortSource::Zero; ins]
                 }
             } else {
                 (0..ins)
@@ -217,7 +221,7 @@ mod net_rule {
                         if outputs > 0 {
                             outs[i % outputs]
                         } else {
-                            Source::Zero
+                            PortSource::Zero
                         }
                     })
                     .collect()
@@ -232,10 +236,10 @@ mod net_rule {
     /// [`Width`] node's output `c` is `c + 1` plus the sum of its inputs,
     /// evaluated in the order the nodes were added (every source precedes
     /// the node it feeds in these graphs).
-    pub fn constants(nodes: &[(NodeKey, Node)], outputs: &[Source]) -> Vec<f32> {
+    pub fn constants(nodes: &[(NodeKey, Node)], outputs: &[PortSource]) -> Vec<f32> {
         let mut value: Vec<(NodeKey, Vec<f32>)> = Vec::new();
-        let read = |value: &[(NodeKey, Vec<f32>)], s: &Source| match s {
-            Source::Node(OutPort { node, port }) => {
+        let read = |value: &[(NodeKey, Vec<f32>)], s: &PortSource| match s {
+            PortSource::Node(OutPort { node, port }) => {
                 value
                     .iter()
                     .find(|(k, _)| k == node)
@@ -274,7 +278,7 @@ fn builder_builds_what_a_hand_written_spec_builds() {
     g.connect_input(0, mix, 0)
         .feedback(lp, 0, mix, 1, fb_delay)
         .connect(mix, 0, lp, 0)
-        .set_output(0, Source::Node(OutPort { node: lp, port: 0 }))
+        .set_output(0, PortSource::Node(OutPort { node: lp, port: 0 }))
         .connect_output(fold, 0, 1)
         .connect_events(emit, 0, fold, 0);
     assert_eq!(
@@ -321,16 +325,18 @@ fn builder_builds_what_a_hand_written_spec_builds() {
     };
     spec.topology
         .edges
-        .insert(at(0, 0), vec![Edge::Direct(Source::Global(0))]);
+        .insert(at(0, 0), vec![Edge::Direct(PortSource::Global(0))]);
     spec.topology.edges.insert(
         at(0, 1),
         vec![Edge::Feedback(FeedbackFrom::new(from(1, 0), fb_delay))],
     );
     spec.topology
         .edges
-        .insert(at(1, 0), vec![Edge::Direct(Source::Node(from(0, 0)))]);
-    spec.topology
-        .set_outputs(vec![Source::Node(from(1, 0)), Source::Node(from(3, 0))]);
+        .insert(at(1, 0), vec![Edge::Direct(PortSource::Node(from(0, 0)))]);
+    spec.topology.set_outputs(vec![
+        PortSource::Node(from(1, 0)),
+        PortSource::Node(from(3, 0)),
+    ]);
     spec.connect_events(
         EventIn {
             node: NodeKey(3),
@@ -407,7 +413,7 @@ fn pipe_connects_ports_in_order_as_net_pipe_all() {
     for c in 0..3 {
         assert_eq!(
             source_of(&g, b, c),
-            Source::Node(OutPort { node: a, port: c })
+            PortSource::Node(OutPort { node: a, port: c })
         );
     }
 }
@@ -440,9 +446,9 @@ fn pipe_output_fans_out_as_net_does() {
     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ch(6));
     let key = g.add(node(0, 2));
     g.pipe_output(key);
-    let ports: Vec<Source> = (0..6)
+    let ports: Vec<PortSource> = (0..6)
         .map(|c| {
-            Source::Node(OutPort {
+            PortSource::Node(OutPort {
                 node: key,
                 port: c % 2,
             })
@@ -452,7 +458,11 @@ fn pipe_output_fans_out_as_net_does() {
         g.spec().topology.outputs,
         ports
             .iter()
-            .map(|s| if *s == Source::Zero { vec![] } else { vec![*s] })
+            .map(|s| if *s == PortSource::Zero {
+                vec![]
+            } else {
+                vec![*s]
+            })
             .collect::<Vec<_>>()
     );
 }
@@ -594,7 +604,7 @@ fn renderer_drives_blocks_and_interleaves() {
     assert_eq!(r.executor().frame(), Frame::new(280));
 }
 
-/// Silence is the empty set and `Source::Zero` is never stored: every writer
+/// Silence is the empty set and `PortSource::Zero` is never stored: every writer
 /// normalises, so two topologies built the old ways (a stored `Zero`, an
 /// absent key) compare and hash equal.
 #[test]
@@ -615,24 +625,27 @@ fn every_writer_normalises_silence_to_the_empty_set() {
     let mut g = GraphBuilder::new(ChannelLayout::MONO, ChannelLayout::STEREO);
     let a = g.add(node(1, 1));
     assert_eq!(g.spec().topology.outputs, vec![vec![], vec![]]);
-    g.set_source(a, 0, Source::Global(0));
+    g.set_source(a, 0, PortSource::Global(0));
     assert_eq!(g.spec().topology.edges.len(), 1);
     g.disconnect(a, 0);
     assert!(g.spec().topology.edges.is_empty(), "cleared port: no key");
-    g.set_output(1, Source::Zero);
-    assert_eq!(g.spec().topology.outputs[1], Vec::<Source>::new());
+    g.set_output(1, PortSource::Zero);
+    assert_eq!(g.spec().topology.outputs[1], Vec::<PortSource>::new());
 
     // `Topology`'s writers.
     let mut t = tutti_graph::Topology::default();
-    t.set_outputs([Source::Zero, Source::Node(OutPort { node: a, port: 0 })]);
-    assert_eq!(t.outputs[0], Vec::<Source>::new());
-    t.connect(at, Edge::Direct(Source::Zero));
+    t.set_outputs([
+        PortSource::Zero,
+        PortSource::Node(OutPort { node: a, port: 0 }),
+    ]);
+    assert_eq!(t.outputs[0], Vec::<PortSource>::new());
+    t.connect(at, Edge::Direct(PortSource::Zero));
     assert!(t.edges.is_empty(), "connecting silence stores nothing");
 
     // The two old ways agree: "no key" and "never wired" are one value.
     let mut wired_then_cleared = tutti_graph::Topology::default();
-    wired_then_cleared.connect(at, Edge::Direct(Source::Global(0)));
-    wired_then_cleared.disconnect(at, Edge::Direct(Source::Global(0)));
+    wired_then_cleared.connect(at, Edge::Direct(PortSource::Global(0)));
+    wired_then_cleared.disconnect(at, Edge::Direct(PortSource::Global(0)));
     assert_eq!(wired_then_cleared, tutti_graph::Topology::default());
     assert_eq!(
         hash(&wired_then_cleared),
@@ -642,12 +655,14 @@ fn every_writer_normalises_silence_to_the_empty_set() {
     // `Editor::remove` leaves an emptied channel empty.
     let (mut ed, _exec) = Editor::new(prepare(64));
     ed.insert(NodeKey(1), "w", node(0, 1));
-    ed.spec_mut().topology.set_outputs([Source::Node(OutPort {
-        node: NodeKey(1),
-        port: 0,
-    })]);
+    ed.spec_mut()
+        .topology
+        .set_outputs([PortSource::Node(OutPort {
+            node: NodeKey(1),
+            port: 0,
+        })]);
     ed.remove(NodeKey(1));
-    assert_eq!(ed.spec().topology.outputs, vec![Vec::<Source>::new()]);
+    assert_eq!(ed.spec().topology.outputs, vec![Vec::<PortSource>::new()]);
 }
 
 /// `connect`, `connect_input`, `connect_output` and `feedback` **add** a source
@@ -665,8 +680,8 @@ fn connect_adds_and_set_source_replaces() {
         node: sink,
         port: 0,
     };
-    let from_one = Source::Node(OutPort { node: one, port: 0 });
-    let from_two = Source::Node(OutPort { node: two, port: 1 });
+    let from_one = PortSource::Node(OutPort { node: one, port: 0 });
+    let from_two = PortSource::Node(OutPort { node: two, port: 1 });
     let held = |g: &GraphBuilder| {
         g.spec()
             .topology

@@ -10,7 +10,7 @@ use tutti_buffers::MaxBlock;
 use tutti_engine::Engine;
 use tutti_graph::{Editor, MeterReader, Prepare};
 use tutti_graph::{MeterId, MeterSpec, NodeKey};
-use tutti_graph::{OutPort, Source};
+use tutti_graph::{OutPort, PortSource};
 use tutti_timeline::Transport;
 use tutti_units::{SampleRate, Samples};
 
@@ -52,12 +52,12 @@ fn engine(
     ed.insert(NodeKey(1), "dc", tutti_graph::Unforkable(Dc(level)));
     ed.spec_mut().topology.set_outputs((0..outputs).map(|c| {
         if channel.is_none_or(|only| only == c) {
-            Source::Node(OutPort {
+            PortSource::Node(OutPort {
                 node: NodeKey(1),
                 port: 0,
             })
         } else {
-            Source::Zero
+            PortSource::Zero
         }
     }));
     let meter = ed
@@ -191,7 +191,7 @@ fn the_pure_render_feeds_the_meter() {
 /// source's level within the block).
 #[test]
 fn the_master_reads_before_the_declick() {
-    use tutti_timeline::MotionEvent;
+    use tutti_timeline::MotionCommand;
     let transport = Transport::new(SampleRate::of(RATE));
     let (mut ed, exec) = Editor::new(Prepare::new(
         SampleRate::of(RATE),
@@ -200,7 +200,7 @@ fn the_master_reads_before_the_declick() {
     ed.insert(NodeKey(1), "dc", tutti_graph::Unforkable(Dc(0.5)));
     ed.spec_mut()
         .topology
-        .set_outputs(vec![Source::Node(OutPort {
+        .set_outputs(vec![PortSource::Node(OutPort {
             node: NodeKey(1),
             port: 0,
         })]);
@@ -217,13 +217,13 @@ fn the_master_reads_before_the_declick() {
         tutti_engine::BlockDates::Os,
     )
     .expect("limits");
-    let _ = transport.motion().try_send(MotionEvent::Play);
+    let _ = transport.motion().try_send(MotionCommand::Play);
     render(&engine, 512, 1);
     assert_eq!(meter.read()[0].peak.get(), 0.5);
 
     // A declicked stop with no lead time: the output falls to zero over the
     // fade, the graph's own signal does not.
-    let _ = transport.motion().try_send(MotionEvent::stop());
+    let _ = transport.motion().try_send(MotionCommand::stop());
     let out = render(&engine, 512, 1);
     assert_eq!(out[0], 0.0, "the device buffer starts the stop at zero");
     let faded = (out.iter().map(|s| s * s).sum::<f32>() / out.len() as f32).sqrt();
@@ -283,12 +283,12 @@ fn a_block_longer_than_the_capacity_is_measured_whole() {
     );
     ed.spec_mut().topology.set_outputs((0..6).map(|c| {
         if c == 2 {
-            Source::Node(OutPort {
+            PortSource::Node(OutPort {
                 node: NodeKey(1),
                 port: 0,
             })
         } else {
-            Source::Zero
+            PortSource::Zero
         }
     }));
     let mut meter = ed

@@ -1,11 +1,14 @@
-//! The bell and the tilt do not allocate per block, held and with every control moved
+//! The bell, the tilt and the graphic equalizer do not allocate per block, held and with every control moved
 //! between blocks (a design into the held scratch and the coefficient ramp).
 
-use tutti_buffers::ChannelLayout;
+use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_graph::IntoNode;
 use tutti_graph::contract::BlockRig;
-use tutti_nodes::{BellFilterConfig, BellFilterNode, TiltFilterConfig, TiltFilterNode};
-use tutti_units::{Db, Hz, Q, SampleRate, UnitParam};
+use tutti_nodes::{
+    BellFilterConfig, BellFilterNode, GraphicBands, GraphicEqConfig, GraphicEqNode,
+    TiltFilterConfig, TiltFilterNode,
+};
+use tutti_units::{Db, Hz, Q, SampleRate, UnitAddr, UnitParam};
 
 /// 16 warm-up blocks, then 2 000 blocks under `assert_no_alloc`, every control moved before each.
 fn run<N: IntoNode>(node: N, moves: impl Fn(&N::Controls, usize)) {
@@ -61,4 +64,18 @@ fn tilt_filter_process_is_allocation_free_with_every_control_moving() {
         c.set(UnitParam::Cutoff, if even { 80.0 } else { 15_000.0 });
         c.set(UnitParam::GainDb, if even { 15.0 } else { -15.0 });
     });
+}
+
+#[test]
+fn graphic_eq_process_is_allocation_free_with_every_band_moving() {
+    for bands in [GraphicBands::Octave, GraphicBands::ThirdOctave] {
+        let config = GraphicEqConfig::new(BusTopology::STEREO, bands);
+        run(GraphicEqNode::from(config), |c, i| {
+            for band in 0..bands.count() {
+                let up = (i + band).is_multiple_of(2);
+                let addr = UnitAddr::new(UnitParam::GainDb, u8::try_from(band).unwrap());
+                c.set(addr, if up { 15.0 } else { -15.0 });
+            }
+        });
+    }
 }

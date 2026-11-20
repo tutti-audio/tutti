@@ -6,9 +6,9 @@
 //! which lists endpoints with their `UniqueId`, name and protocol read from one
 //! object and takes one again by id, never by list position. Every CoreMIDI call is
 //! `tutti-coremidi-ffi`'s, behind safe handles: the process's one client, the input
-//! and output ports (UMP words in and out), the virtual endpoints ([`virtual_source`],
-//! [`virtual_destination`]), the run loop of the device watch ([`watch`]) and the Mach
-//! clock (`host_time`); this crate forbids `unsafe`.
+//! and output ports (UMP words in and out), the virtual endpoint
+//! ([`virtual_endpoint`]), the run loop of the device watch ([`watch`]) and the
+//! Mach clock (`host_time`); this crate forbids `unsafe`.
 //!
 //! # Protocol is asked, not assumed
 //!
@@ -38,21 +38,20 @@ use crate::capability::{OsEndpoint, carries_midi2_only, from_os, legacy};
 use crate::devices::ChangeSink;
 use crate::devices::reporter::os_devices;
 use crate::endpoints::{DeviceOut, InputConnection, MidiEndpoints, Watch};
-use crate::error::{NotFound, Result};
+use crate::error::{MidiHardwareError, NotFound, Result};
+use crate::virtual_endpoint::VirtualSpec;
 use tutti_coremidi_ffi::{
     Endpoint as OsObject, InputPort, OutputPort, SharedClient, UmpEndpointInfo, UmpEndpointsError,
     UniqueId, ump_endpoints,
 };
 use tutti_midi_device::{Endpoint, EndpointId, Identity, OsDevice};
 use tutti_midi_runtime::{MidiOut, Outgoing, Taken};
-use tutti_ump::{Protocol, read_protocol};
+use tutti_ump::{FunctionBlockInfo, Protocol, read_protocol};
 
 mod host_time;
-mod virtual_destination;
-mod virtual_source;
+mod virtual_endpoint;
 mod watch;
-pub(crate) use virtual_destination::UmpVirtualDestination;
-pub(crate) use virtual_source::UmpVirtualSource;
+pub(crate) use virtual_endpoint::UmpVirtualEndpoint;
 
 /// The process's one CoreMIDI client, started with the device watch's hub on first
 /// use. CoreMIDI sends notifications to the run loop of the thread that created the
@@ -64,6 +63,27 @@ pub(crate) use virtual_source::UmpVirtualSource;
 /// creates no endpoint or port), or startup deadlocks.
 pub(crate) fn hub_first() -> Result<SharedClient> {
     watch::client()
+}
+
+/// The Function Blocks `spec` declares, as the Function Block Info and name
+/// `tutti-coremidi-ffi` creates them from.
+fn block_infos(spec: &VirtualSpec) -> Vec<(FunctionBlockInfo, Option<&str>)> {
+    spec.function_blocks()
+        .iter()
+        .map(|block| (block.info(), block.name().map(|name| name.as_str())))
+        .collect()
+}
+
+/// A failure to create an endpoint with Function Blocks as this crate reports it:
+/// the OS having no such endpoint (before macOS 15) is
+/// [`MidiHardwareError::VirtualBlocksUnsupported`], anything else CoreMIDI's own.
+fn open_error(error: tutti_coremidi_ffi::Error) -> MidiHardwareError {
+    match error {
+        tutti_coremidi_ffi::Error::UmpEndpointUnsupported => {
+            MidiHardwareError::VirtualBlocksUnsupported
+        }
+        other => MidiHardwareError::Os(other),
+    }
 }
 
 /// An endpoint's name: the display name Audio MIDI Setup shows, else its bare name,

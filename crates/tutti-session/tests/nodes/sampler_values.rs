@@ -281,7 +281,7 @@ impl Rig {
             let mut streamer =
                 tutti_sampler::DiskStreamer::manual(SampleRate::of(RATE), Default::default())
                     .expect("builds");
-            let opening = streamer.open(&path, tutti_sampler::Placement::HEAD);
+            let opening = streamer.open_stream(&path, tutti_sampler::StreamStart::HEAD);
             let (stream, reader) = tutti_sampler::testing::wait_for_open(&mut streamer, opening)
                 .expect("the file opens");
             (Clip::streaming(reader, stream), Some(streamer))

@@ -111,7 +111,7 @@ where
     /// A chunk the meter refuses (a NaN or an infinity, which a node may pass
     /// on) is skipped and counted ([`refused`](Self::refused)); the chunks
     /// after it are shown as usual. Once the tap has ended
-    /// ([`is_ended`](Self::is_ended)) or failed ([`is_failed`](Self::is_failed)) there is nothing more.
+    /// ([`is_finished`](Self::is_finished)) or failed ([`is_failed`](Self::is_failed)) there is nothing more.
     pub fn try_iter(&mut self) -> impl Iterator<Item = <A::Meter as Meter>::Item> + '_ {
         self.drain();
         self.items.drain(..)
@@ -181,7 +181,7 @@ impl<A: Measure<F>, F: Float> Analyzer<A, F> {
     /// Whether the tap has ended: every source was removed and what the tap
     /// held was drained. Read after a [`try_iter`](Self::try_iter).
     #[must_use]
-    pub fn is_ended(&self) -> bool {
+    pub fn is_finished(&self) -> bool {
         self.ended
     }
 
@@ -190,7 +190,7 @@ impl<A: Measure<F>, F: Float> Analyzer<A, F> {
     /// end: the frames before it were shown, and nothing more is read. The
     /// chunk is built at the tap's width when it opens, so no input of the
     /// app's reaches it; it is reported, never folded into
-    /// [`is_ended`](Self::is_ended).
+    /// [`is_finished`](Self::is_finished).
     #[must_use]
     pub fn is_failed(&self) -> bool {
         self.failed

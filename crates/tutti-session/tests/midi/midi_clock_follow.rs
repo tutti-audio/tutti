@@ -17,7 +17,7 @@ use tutti_session::{
     FollowClock, FollowTempo, MidiError, MidiReport, Session, SessionEvent, SetRefusal,
     ValueErrorKind,
 };
-use tutti_timeline::MotionEvent;
+use tutti_timeline::MotionCommand;
 use tutti_ump::{Message, MidiGroup, Sysex7Packets, System, U7, U14, Ump};
 use tutti_units::{At, Bpm, SampleRate};
 
@@ -373,7 +373,7 @@ fn a_clock_command_the_transport_refuses_is_counted() {
     for _ in 0..50 {
         blocks(&s, 1);
         // The list is full again before the update that places what the tap held.
-        while s.schedule(At::NextBlock, MotionEvent::stop()).is_ok() {}
+        while s.schedule(At::NextBlock, MotionCommand::stop()).is_ok() {}
         for event in s.update() {
             if let SessionEvent::Midi(MidiReport::ClockCommandsRefused(n)) = event {
                 refused += n;

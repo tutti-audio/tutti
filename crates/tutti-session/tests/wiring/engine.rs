@@ -15,10 +15,11 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::Op;
 use tutti_graph::{TapAlign, TapOptions};
+use tutti_music::{MeterChange, MeterMap, TimeSignature};
 use tutti_nodes::MetronomeMode;
 use tutti_nodes::testing::Const;
 use tutti_session::{CloseError, MissingSource, OutPort, Root, Session};
-use tutti_timeline::MotionEvent;
+use tutti_timeline::MotionCommand;
 use tutti_units::{Amplitude, Beat, SampleRate, Samples};
 
 const RATE: f64 = 48_000.0;
@@ -49,7 +50,7 @@ fn run(s: &Session, frames: usize, block: usize, seek: bool) -> Vec<f32> {
             transport
                 .schedule(
                     tutti_units::At::NextBlock,
-                    MotionEvent::Locate {
+                    MotionCommand::Locate {
                         beat: tutti_units::Beat::new(0.75),
                         fade: tutti_timeline::FadeOut::Immediate,
                         then: tutti_timeline::AfterLocate::Keep,
@@ -118,6 +119,69 @@ fn the_click_sounds_on_every_beat_across_the_seek() {
         vec![1, 24_001, 48_001, 60_417, 66_417, 90_417, 114_417, 138_417],
         "a click on every beat, across the seek"
     );
+}
+
+/// The session's click at full volume on both outputs under `meter`,
+/// rolling from beat 5 (the click is `render_click`'s), `frames` stereo
+/// frames in 512-frame device blocks.
+fn render_click_under(meter: MeterMap, frames: usize) -> Vec<f32> {
+    let mut s = offline();
+    s.set((
+        s.click().mode().to(MetronomeMode::Always),
+        s.click().volume().to(Amplitude::new(1.0)),
+        s.transport_handle().meter().to(meter),
+    ))
+    .unwrap();
+    let click = s.click_node().expect("the builder inserts the click");
+    for port in 0..2 {
+        s.graph()
+            .set_sources_unfaded(Root::output(port), [OutPort::new(click, port)])
+            .unwrap();
+    }
+    let _ = s.update();
+    s.transport_handle()
+        .schedule(
+            tutti_units::At::NextBlock,
+            MotionCommand::play_from(Beat::new(5.0)),
+        )
+        .expect("room");
+    let mut out = Vec::with_capacity(frames * 2);
+    let mut buf = vec![0.0f32; 512 * 2];
+    while out.len() < frames * 2 {
+        s.render(&mut InterleavedMut::new(&mut buf, ChannelLayout::STEREO).unwrap());
+        out.extend_from_slice(&buf);
+    }
+    out.truncate(frames * 2);
+    out
+}
+
+/// **The session's click accents the bar the project's meter changes to, on
+/// the change's frame.** Rolling from beat 5 under 4/4 then 3/4 from beat
+/// 6.5 at 120 BPM and 48 kHz (24 000 frames a beat): clicks on beats 5 and 6,
+/// then a bar begins at 6.5 (frame 36 000, mid-block) and is accented, 7.5
+/// and 8.5 are its other beats, and 9.5 begins the next bar. Each is heard a
+/// frame after its beat (its first sample is `sin(0)`); an accent peaks at
+/// 1.0 and the others at 0.7.
+#[test]
+fn the_session_click_accents_follow_the_project_meter_from_its_change() {
+    let meter = MeterMap::new([
+        MeterChange::new(Beat::new(0.0), TimeSignature::of(4, 4)),
+        MeterChange::new(Beat::new(6.5), TimeSignature::of(3, 4)),
+    ]);
+    let rendered = render_click_under(meter, 120_000);
+    let got = onsets(&rendered);
+    assert_eq!(got, vec![1, 24_001, 36_001, 60_001, 84_001, 108_001]);
+    let left: Vec<f32> = rendered.iter().step_by(2).copied().collect();
+    let accents: Vec<bool> = got
+        .iter()
+        .map(|&f| {
+            left[f..f + 1_440]
+                .iter()
+                .fold(0.0f32, |m, x| m.max(x.abs()))
+                > 0.85
+        })
+        .collect();
+    assert_eq!(accents, [false, false, true, false, false, true]);
 }
 
 /// **The graph runs at the rate it was built at.** At 120 BPM and 48 kHz
@@ -740,10 +804,10 @@ fn a_tap_steps_at_a_transport_stop_where_the_output_fades() {
     let motion = s.transport_handle();
     motion.play().expect("room");
     motion
-        .schedule(At::Frame(Frame::new(2_000)), MotionEvent::stop())
+        .schedule(At::Frame(Frame::new(2_000)), MotionCommand::stop())
         .expect("room");
     motion
-        .schedule(At::Frame(Frame::new(4_000)), MotionEvent::Play)
+        .schedule(At::Frame(Frame::new(4_000)), MotionCommand::Play)
         .expect("room");
     let (mut heard, mut tapped) = (Vec::new(), Vec::new());
     let mut block = vec![0.0f32; 64 * 2];
@@ -810,10 +874,10 @@ fn the_heard_tap_carries_the_fade_at_a_stop() {
     let motion = s.transport_handle();
     motion.play().expect("room");
     motion
-        .schedule(At::Frame(Frame::new(2_000)), MotionEvent::stop())
+        .schedule(At::Frame(Frame::new(2_000)), MotionCommand::stop())
         .expect("room");
     motion
-        .schedule(At::Frame(Frame::new(4_000)), MotionEvent::Play)
+        .schedule(At::Frame(Frame::new(4_000)), MotionCommand::Play)
         .expect("room");
     let mut device = Vec::new();
     let mut block = vec![0.0f32; 64 * 2];

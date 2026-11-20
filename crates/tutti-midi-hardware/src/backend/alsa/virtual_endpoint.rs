@@ -1,23 +1,25 @@
 //! Virtual endpoints on the sequencer: a client of this process with one port
-//! other clients subscribe to.
+//! that other clients subscribe to and write to.
 //!
 //! The client is a UMP client speaking the protocol the spec asks for, or MIDI
 //! 1.0 where the kernel's sequencer has no MIDI 2.0 client mode; the protocol it
 //! got is what the endpoint reports. It publishes a UMP Endpoint record (the
-//! protocol, and the spec's Function Blocks), so an application enumerating it
-//! reads the protocol it carries instead of taking it for a legacy port.
+//! protocol, the spec's Device Identity and Product Instance Id, and its Function
+//! Blocks), so an application enumerating it reads the protocol it carries
+//! instead of taking it for a legacy port.
 
 use tutti_alsa_ffi::{
-    Blocking, Client, Operation, PortCaps, PortId, PortKind, UmpBlock, UmpEndpoint, UmpVersion,
+    Client, ClientHandle, Operation, PortCaps, PortId, PortKind, UmpBlock, UmpEndpoint, UmpVersion,
 };
 use tutti_midi_device::{FunctionBlock, UMP_VERSION};
-use tutti_rt::LockExt;
 use tutti_ump::{EndpointInfoNotification, FunctionBlockCount, FunctionBlocks, Protocol, Ump};
 
 use super::input::{self, AlsaInput};
 use crate::InputProducerHandle;
+use crate::endpoints::InputConnection;
 use crate::error::{MidiHardwareError, Result};
-use crate::virtual_endpoint::{SourceBackend, VirtualProtocol, VirtualSpec};
+use crate::virtual_endpoint::{EndpointBackend, SenderBackend, VirtualProtocol, VirtualSpec};
+use std::sync::{Arc, PoisonError, RwLock};
 
 /// The sequencer's version for a protocol.
 fn version_of(protocol: VirtualProtocol) -> UmpVersion {
@@ -29,9 +31,9 @@ fn version_of(protocol: VirtualProtocol) -> UmpVersion {
 
 /// Opens the endpoint's client in the protocol the spec asks for, or in MIDI 1.0
 /// when the kernel refuses a MIDI 2.0 client; the protocol it got goes with it.
-fn open_client(spec: &VirtualSpec, blocking: Blocking) -> Result<(Client, VirtualProtocol)> {
+fn open_client(spec: &VirtualSpec) -> Result<(Client, VirtualProtocol)> {
     let name = spec.name().as_str();
-    match super::client::open(name, blocking, version_of(spec.protocol)) {
+    match super::client::open(name, version_of(spec.protocol)) {
         Ok(client) => Ok((client, spec.protocol)),
         Err(MidiHardwareError::Os(tutti_alsa_ffi::Error::Call {
             operation: Operation::SetClientMidiVersion,
@@ -40,7 +42,7 @@ fn open_client(spec: &VirtualSpec, blocking: Blocking) -> Result<(Client, Virtua
             // The call that fails when the kernel has no MIDI 2.0 client mode.
             tracing::debug!("virtual MIDI endpoint falls back to MIDI 1.0 ({source})");
             Ok((
-                super::client::open(name, blocking, UmpVersion::Midi1)?,
+                super::client::open(name, UmpVersion::Midi1)?,
                 VirtualProtocol::Midi1,
             ))
         }
@@ -56,8 +58,8 @@ fn ump_block(block: &FunctionBlock) -> UmpBlock {
     }
 }
 
-/// Publishes the endpoint record on `client`: the protocol it carries and the
-/// spec's blocks.
+/// Publishes the endpoint record on `client`: the protocol it carries, the spec's
+/// Device Identity and Product Instance Id, and its blocks.
 fn publish(client: &Client, spec: &VirtualSpec, protocol: VirtualProtocol) -> Result<()> {
     let (in_use, midi1, midi2) = match protocol {
         VirtualProtocol::Midi1 => (Protocol::Midi1, true, false),
@@ -79,58 +81,83 @@ fn publish(client: &Client, spec: &VirtualSpec, protocol: VirtualProtocol) -> Re
             tx_jr: false,
         },
         name: Some(spec.name().as_str().to_owned()),
+        device: Some(*spec.device()),
+        instance: spec.instance().copied(),
         blocks,
     })?;
     Ok(())
 }
 
-/// A virtual source: the client's readable, subscribable port.
-pub(crate) struct AlsaVirtualSource {
-    // `Client` is `Send` and not `Sync`; sends are rare and short.
-    inner: std::sync::Mutex<(Client, PortId)>,
+/// A virtual endpoint: the client's one port, which peers subscribe to and
+/// write to, read by a pump into the producer. Dropping it stops the pump and
+/// closes the client, which removes the endpoint.
+pub(crate) struct AlsaVirtualEndpoint {
+    input: AlsaInput,
+    port: PortId,
+    /// Read-locked by a send for its whole call and cleared under the write lock
+    /// by `Drop`, so a drop waits for a send in flight and no send follows it.
+    live: Arc<RwLock<bool>>,
 }
 
-impl SourceBackend for AlsaVirtualSource {
+impl Drop for AlsaVirtualEndpoint {
+    fn drop(&mut self) {
+        *self.live.write().unwrap_or_else(PoisonError::into_inner) = false;
+    }
+}
+
+/// A send on a virtual endpoint's client, which it does not keep open.
+struct AlsaSender {
+    client: ClientHandle,
+    port: PortId,
+    live: Arc<RwLock<bool>>,
+}
+
+impl SenderBackend for AlsaSender {
     fn send(&self, ump: &Ump) -> Result<()> {
-        // A poisoned lock guards a client handle and a port number, which a
-        // panic cannot leave half-written.
-        let inner = self.inner.lock_recover();
-        inner.0.send_to_subscribers(inner.1, ump)?;
+        let live = self.live.read().unwrap_or_else(PoisonError::into_inner);
+        if !*live {
+            return Err(MidiHardwareError::EndpointGone);
+        }
+        self.client
+            .with(|client| client.send_to_subscribers(self.port, ump))
+            .ok_or(MidiHardwareError::EndpointGone)??;
         Ok(())
     }
 }
 
-/// Publishes a virtual source for `spec`.
-pub(crate) fn source(spec: &VirtualSpec) -> Result<(AlsaVirtualSource, VirtualProtocol)> {
-    let (client, protocol) = open_client(spec, Blocking::Block)?;
-    let port = client.open_port(
-        spec.name().as_str(),
-        PortCaps::READ | PortCaps::SUBS_READ,
-        PortKind::MIDI_GENERIC | PortKind::APPLICATION,
-    )?;
-    publish(&client, spec, protocol)?;
-    Ok((
-        AlsaVirtualSource {
-            inner: std::sync::Mutex::new((client, port)),
-        },
-        protocol,
-    ))
+impl EndpointBackend for AlsaVirtualEndpoint {
+    fn sender(&self) -> Arc<dyn SenderBackend> {
+        Arc::new(AlsaSender {
+            client: self.input.client(),
+            port: self.port,
+            live: Arc::clone(&self.live),
+        })
+    }
+
+    fn is_alive(&self) -> bool {
+        InputConnection::is_alive(&self.input)
+    }
 }
 
-/// Publishes a virtual destination for `spec`: the client's writable,
-/// subscribable port, read by a pump into `producer`, each event stamped by the
-/// kernel as it arrives.
-pub(crate) fn destination(
+/// Publishes a virtual endpoint for `spec`: one client with one UMP Endpoint
+/// record and one port that is readable, writable and subscribable. What peers
+/// write to it is read by a pump into `producer`, each event stamped by the
+/// kernel as it arrives; what the app sends goes to the port's subscribers.
+pub(crate) fn endpoint(
     spec: &VirtualSpec,
     producer: InputProducerHandle,
-) -> Result<(AlsaInput, VirtualProtocol)> {
-    let (client, protocol) = open_client(spec, Blocking::NonBlock)?;
+) -> Result<(AlsaVirtualEndpoint, VirtualProtocol)> {
+    // Non-blocking: the pump reads until the queue is empty and then waits in
+    // `poll`, and a send from another thread shares the client with it.
+    let (client, protocol) = open_client(spec)?;
     let port = client.open_port(
         spec.name().as_str(),
-        PortCaps::WRITE | PortCaps::SUBS_WRITE,
+        PortCaps::READ | PortCaps::SUBS_READ | PortCaps::WRITE | PortCaps::SUBS_WRITE,
         PortKind::MIDI_GENERIC | PortKind::APPLICATION,
     )?;
     publish(&client, spec, protocol)?;
     let clock = client.stamp_port(port)?;
-    Ok((input::start(client, clock, producer)?, protocol))
+    let input = input::start(client, clock, producer)?;
+    let live = Arc::new(RwLock::new(true));
+    Ok((AlsaVirtualEndpoint { input, port, live }, protocol))
 }

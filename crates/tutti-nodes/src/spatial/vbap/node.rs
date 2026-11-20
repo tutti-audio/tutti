@@ -1,6 +1,5 @@
-use super::error::Result;
-use tutti_buffers::{Bed, ChannelLayout, ChannelTopology};
-use tutti_buffers::{Float, Fold, Mono, MonoMut};
+use super::error::{Result, VbapError};
+use tutti_buffers::{Bed, BusTopology, ChannelLayout, ChannelTopology, Float, Fold, Mono, MonoMut};
 use tutti_dsp::{COEFF_INTERVAL, Lerp, Ramp, SpeakerLayout, VbapGains, VbapKernel};
 use tutti_graph::{Cx, IntoNode, Io, Node, NodeParts, ParamNode, ParamSet, Prepare, Shape, Status};
 use tutti_rt::Param;
@@ -51,11 +50,8 @@ fn ramp_steps(rate: SampleRate) -> u32 {
 
 /// A VBAP loudspeaker panner: stereo in, one output per channel of a [`Bed`].
 ///
-/// Build it with [`new`](Self::new) from a bed, whose speakers sit where
-/// `tutti_buffers::Bed::direction` puts them, or from a preset
-/// ([`stereo`](Self::stereo), [`quad`](Self::quad),
-/// [`surround_5_1`](Self::surround_5_1), [`surround_7_1`](Self::surround_7_1),
-/// [`atmos_7_1_4`](Self::atmos_7_1_4)), which is `new` over one bed. It is a
+/// Build it from a [`VbapPannerConfig`] over a bed, whose speakers sit where
+/// `tutti_buffers::Bed::direction` puts them. It is a
 /// graph node (`tutti_graph::Node` and [`ParamNode`]); inserting it hands back its
 /// [`ParamSet`] ([`UnitParam::Azimuth`], [`Elevation`](tutti_units::UnitParam::Elevation),
 /// [`Spread`](tutti_units::UnitParam::Spread) and [`StereoWidth`](tutti_units::UnitParam::StereoWidth)),
@@ -67,12 +63,12 @@ fn ramp_steps(rate: SampleRate) -> u32 {
 ///
 /// ```
 /// # use tutti_buffers::Planes;
-/// use tutti_buffers::MaxBlock;
+/// use tutti_buffers::{Bed, MaxBlock};
 /// use tutti_units::{SampleRate, Samples, UnitParam};
 /// use tutti_graph::{ParamNode, Prepare, Standalone};
-/// use tutti_nodes::VbapPannerNode;
+/// use tutti_nodes::{VbapPannerConfig, VbapPannerNode};
 ///
-/// let panner = VbapPannerNode::quad();
+/// let panner = VbapPannerNode::<f32>::try_from(VbapPannerConfig::new(Bed::Quad)).unwrap();
 /// panner.param_set().set(UnitParam::Azimuth, 45.0); // front-left
 ///
 /// let mut standalone = Standalone::new(panner, Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64))));
@@ -180,16 +176,51 @@ pub struct VbapPannerNode<F: Float> {
     seated: bool,
 }
 
-impl<F: Float> VbapPannerNode<F> {
-    /// Creates a panner over `bed`: stereo in, the bed's channels out, in the
-    /// bed's order ([`Bed::topology`]), each placed speaker at its
-    /// [`Bed::direction`] and the LFE, if the bed has one, silent.
+/// What a [`VbapPannerNode`] is made from: the bus it pans over.
+///
+/// The bus names a [`Bed`] ([`Bed::from_topology`]), whose speakers sit where
+/// [`Bed::direction`] puts them; [`TryFrom`] makes the node.
+///
+/// ```
+/// use tutti_buffers::Bed;
+/// use tutti_nodes::{VbapPannerConfig, VbapPannerNode};
+///
+/// let panner = VbapPannerNode::<f32>::try_from(VbapPannerConfig::new(Bed::Quad)).unwrap();
+/// assert_eq!(panner.channels().count(), 4);
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct VbapPannerConfig {
+    output: BusTopology,
+}
+
+impl VbapPannerConfig {
+    /// A panner over the speakers of `output`: stereo in, the bus's channels out.
+    #[must_use]
+    pub fn new(output: impl Into<BusTopology>) -> Self {
+        Self {
+            output: output.into(),
+        }
+    }
+}
+
+impl<F: Float> TryFrom<VbapPannerConfig> for VbapPannerNode<F> {
+    type Error = VbapError;
+
+    /// A panner over the config's bus: stereo in, the bus's channels out, in the bus's
+    /// order, each placed speaker at its [`Bed::direction`] and the LFE, if the bus has
+    /// one, silent.
+    ///
+    /// The refusal is of the one bus: a placement VBAP can pan over is a [`Bed`] with at
+    /// least two speakers, which `BusTopology` cannot say.
     ///
     /// # Errors
-    /// [`VbapError::Geometry`](super::VbapError::Geometry) for a bed whose
-    /// speakers cannot be panned over: [`Bed::Mono`].
-    pub fn new(bed: Bed) -> Result<Self> {
-        let layout = SpeakerLayout::from_bed(bed)?;
+    ///
+    /// [`VbapError::NotABed`] for a bus that places no bed, and
+    /// [`VbapError::Geometry`] for a bed whose speakers cannot be panned over: [`Bed::Mono`].
+    fn try_from(config: VbapPannerConfig) -> Result<Self> {
+        let bed =
+            Bed::from_topology(&ChannelTopology::from(config.output)).ok_or(VbapError::NotABed)?;
+        let layout = SpeakerLayout::try_from(bed)?;
         let steps = ramp_steps(SampleRate::SR_48K);
         let mut kernel = VbapKernel::new(layout);
         let gains = kernel.gains(
@@ -221,40 +252,9 @@ impl<F: Float> VbapPannerNode<F> {
             seated: false,
         })
     }
+}
 
-    /// Creates a 2-out panner over the stereo bed (`Bed::Stereo`, ±30°).
-    pub fn stereo() -> Self {
-        Self::preset(Bed::Stereo)
-    }
-
-    /// Creates a 4-out panner over the quad bed (`Bed::Quad`, FL/FR/BL/BR, no LFE).
-    pub fn quad() -> Self {
-        Self::preset(Bed::Quad)
-    }
-
-    /// Creates a 6-out panner over 5.1 (`Bed::Surround51`). The LFE channel is
-    /// left silent here and fed separately by the caller's wiring.
-    pub fn surround_5_1() -> Self {
-        Self::preset(Bed::Surround51)
-    }
-
-    /// Creates an 8-out panner over 7.1 (`Bed::Surround71`). Like 5.1, the LFE
-    /// channel is fed separately.
-    pub fn surround_7_1() -> Self {
-        Self::preset(Bed::Surround71)
-    }
-
-    /// Creates a 12-out panner over 7.1.4 (`Bed::Surround714`): 7.1 plus four
-    /// height speakers.
-    pub fn atmos_7_1_4() -> Self {
-        Self::preset(Bed::Surround714)
-    }
-
-    /// [`new`](Self::new) over a bed that has two or more speakers.
-    fn preset(bed: Bed) -> Self {
-        Self::new(bed).expect("a preset bed has speakers to pan between")
-    }
-
+impl<F: Float> VbapPannerNode<F> {
     /// The output channels: the bed's width.
     pub fn channels(&self) -> ChannelLayout {
         self.layout

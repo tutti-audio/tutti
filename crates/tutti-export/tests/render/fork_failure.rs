@@ -17,14 +17,14 @@ use support::{render_file_under, render_normalized_to_file, render_to_buffers, r
 use tutti_buffers::ChannelLayout;
 use tutti_codec::{Format, Pcm};
 use tutti_export::{
-    CancelToken, Control, Error, GRAPH_MAX_BLOCK, Normalize, Progress, RenderGraph,
+    CancelToken, Control, GRAPH_MAX_BLOCK, Normalize, Progress, RenderError, RenderGraph,
 };
 use tutti_graph::NodeKey;
 use tutti_graph::{
     Cx, Editor, ForkCause, ForkFaultKind, ForkHealth, ForkMode, ForkSource, Forked, IntoNode, Io,
     Node, NodeParts, Prepare, Shape, Status,
 };
-use tutti_graph::{OutPort, Source};
+use tutti_graph::{OutPort, PortSource};
 use tutti_timeline::FrozenClock;
 use tutti_units::{Db, SampleRate};
 
@@ -96,7 +96,7 @@ fn fork() -> (RenderGraph, Arc<Crashed>, Editor) {
     live.insert(NodeKey(1), "watched", Watched(Arc::clone(&probe)));
     live.spec_mut()
         .topology
-        .set_outputs(vec![Source::Node(OutPort {
+        .set_outputs(vec![PortSource::Node(OutPort {
             node: NodeKey(1),
             port: 0,
         })]);
@@ -120,10 +120,10 @@ fn config() -> ExportConfig {
     }
 }
 
-fn is_crash(err: &Error) -> bool {
+fn is_crash(err: &RenderError) -> bool {
     matches!(
         err,
-        Error::ForkFailed { key, kind: ForkFaultKind::Crashed, .. } if *key == NodeKey(1)
+        RenderError::ForkFailed { key, kind: ForkFaultKind::Crashed, .. } if *key == NodeKey(1)
     )
 }
 

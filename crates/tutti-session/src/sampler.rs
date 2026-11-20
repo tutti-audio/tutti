@@ -1,68 +1,30 @@
-//! The session's sampler: a disk stream opened on the session's executor, and
-//! what lands from it in [`Session::update`](crate::Session::update).
+//! The session's sampler: a disk stream opened by work the app runs, and
+//! taken back as a value.
 //!
-//! The streamer opens a file on a thread of its own, so an open takes as long
-//! as the file's header and its first reads. [`Session::open_stream`] starts
-//! one and returns at once; the open ends as
-//! [`SamplerEvent::Opened`] with the call's [`SamplerLoad`], under
-//! [`SessionEvent::Sampler`], and the stream is then
-//! [taken](Session::take_stream) by that id in the session's float; or it ends
-//! as [`SamplerEvent::OpenFailed`] with the reason.
+//! Reading a file takes as long as the file's header and its first reads, and
+//! the app's thread is the one that waits: [`Session::open_stream`] cuts the
+//! work ([`OpenStream`]), [`run`](OpenStream::run) does it anywhere without the
+//! session, and [`Session::apply`] puts what it read in service, answering the
+//! stream's control side and the reader its voice is built from, in the
+//! session's float:
+//!
+//! ```ignore
+//! let opened = session.open_stream("take_1.wav", StreamStart::HEAD)?.run()?;
+//! let (stream, reader) = session.apply(opened)?;
+//! ```
 //!
 //! What a file is, resident or streamed, is the pool's: an
 //! `audio_file` entry (with a `tutti-codec` decoder on) reads as an
 //! `AudioEntry`, and a streamed one names the path
 //! [`open_stream`](Session::open_stream) opens.
 
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
-
 use tutti_platform::Asset;
-use tutti_sampler::{OpenError, Placement, Stream, StreamReader};
+use tutti_sampler::{AdoptError, OpenError, Stream, StreamReader, StreamStart};
 
-use tutti_rt::LockExt;
+use crate::apply::{Cut, Sealed};
+use crate::{AppKey, Clock, Session, SessionFloat};
 
-use crate::WorkerError;
-use crate::{Session, SessionEvent};
-
-tutti_rt::id! {
-    /// An open ([`Session::open_stream`]) the session started, named so the event that lands it can be matched to the call:
-    /// [`SamplerEvent::Opened`] and [`SamplerEvent::OpenFailed`] carry it. The
-    /// session mints it; it names nothing else.
-    pub struct SamplerLoad;
-}
-
-/// The opened streams a session holds until the host takes them: both halves
-/// of each, in the session's float, by the id of the open that made them.
-pub(crate) type OpenedStreams<F> = Arc<Mutex<HashMap<SamplerLoad, (Stream<F>, StreamReader<F>)>>>;
-
-/// A sampler event of the session, one per open that ended.
-#[derive(Debug)]
-#[non_exhaustive]
-pub enum SamplerEvent {
-    /// An open [`Session::open_stream`] started finished: the stream is
-    /// running and waits in the session for the host to
-    /// [`take`](Session::take_stream) it by `id`.
-    Opened {
-        /// The id [`Session::open_stream`] returned.
-        id: SamplerLoad,
-    },
-    /// An open did not finish, and will not.
-    OpenFailed {
-        /// The id [`Session::open_stream`] returned.
-        id: SamplerLoad,
-        /// Why.
-        error: SamplerError,
-    },
-}
-
-impl From<SamplerEvent> for SessionEvent {
-    fn from(event: SamplerEvent) -> Self {
-        Self::Sampler(event)
-    }
-}
-
-/// Why a sampler call or open did not go through.
+/// Why a sampler call did not go through.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum SamplerError {
@@ -73,79 +35,158 @@ pub enum SamplerError {
     /// The disk streamer could not be started ([`SessionBuilder`](crate::SessionBuilder)).
     #[error(transparent)]
     Streamer(#[from] tutti_sampler::Error),
-    /// The streamer could not open the file: it is missing or unreadable, is
-    /// not audio this build decodes, cannot be placed into a voice, or the
-    /// streamer thread is gone.
-    #[error(transparent)]
-    Open(#[from] OpenError),
-    /// The open's job did not finish: it panicked, or the executor dropped it.
-    #[error(transparent)]
-    Job(#[from] WorkerError),
 }
 
-impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
-    /// Opens `path` as a disk stream, its reader starting at `place`, on the
-    /// session's executor. Returns at once; the stream lands as
-    /// [`SamplerEvent::Opened`] with the returned id in a later
-    /// [`update`](Self::update), on the thread that calls `update()`. A file
-    /// that cannot be opened lands as [`SamplerEvent::OpenFailed`], a job that
-    /// did not finish as [`SamplerError::Job`] in it.
+/// Why a read file did not become a stream ([`Session::apply`] of an
+/// [`OpenedStream`]).
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum OpenStreamError<F: SessionFloat> {
+    /// The file was read for another session, which cannot serve it here:
+    /// open it again from this one.
+    #[error("the file was read for another session: open it again")]
+    Stale,
+    /// The file's channels cannot be placed into the voice's width: a channel
+    /// no speaker names, or a narrowing with an unordered end.
+    #[error(transparent)]
+    Place(#[from] tutti_sampler::PlaceError),
+    /// The session's streamer is gone, so nothing would feed the stream.
+    #[error("the session's disk streamer is gone")]
+    StreamerGone,
+    /// The streamer's command queue is full. Nothing was lost: apply this output
+    /// again after the next [`update`](Session::update).
+    #[error("the session's disk streamer is busy: apply the file again after the next update")]
+    Busy(OpenedStream<F>),
+}
+
+/// The session's name for what the streamer refused to adopt.
+fn adopt_refusal<F: SessionFloat>(cut: Cut, error: AdoptError<F>) -> OpenStreamError<F> {
+    match error {
+        AdoptError::Placement(error) => OpenStreamError::Place(error),
+        AdoptError::Busy(opened) => OpenStreamError::Busy(OpenedStream {
+            cut,
+            opened: *opened,
+        }),
+        // `AdoptError` is `non_exhaustive`: what it may yet name is a streamer that
+        // cannot take the stream.
+        AdoptError::StreamerGone | _ => OpenStreamError::StreamerGone,
+    }
+}
+
+/// The reading of a file as a disk stream, cut from the session by
+/// [`Session::open_stream`].
+///
+/// It holds the asset and nothing of the session: run it on any thread, then
+/// hand the result to [`Session::apply`](crate::Session::apply).
+#[derive(Debug)]
+#[must_use = "an open does nothing until it runs"]
+pub struct OpenStream<F: SessionFloat> {
+    cut: Cut,
+    read: tutti_sampler::OpenStream<F>,
+}
+
+impl<F: SessionFloat> OpenStream<F> {
+    /// Reads the file: a seeking decoder when the file can seek, else the
+    /// whole file decoded, on this thread. The session is not touched.
     ///
-    /// The voice is as wide as the file (`tutti_sampler::voice_width`). Sending
-    /// the open waits while the streamer's command queue is full, as every
-    /// stream command does.
+    /// # Errors
+    ///
+    /// [`OpenError::Io`] when the file cannot be opened, [`OpenError::Format`]
+    /// when it is not audio this build decodes.
+    pub fn run(self) -> Result<OpenedStream<F>, OpenError> {
+        Ok(OpenedStream {
+            cut: self.cut,
+            opened: self.read.run()?,
+        })
+    }
+}
+
+/// A file read for a disk stream ([`OpenStream::run`]), which the session takes
+/// back with [`Session::apply`](crate::Session::apply): the stream's control
+/// side and the reader its voice is built from, in the session's float. The
+/// reader is the voice's (`DiskVoice::from_reader`); the stream is the control
+/// side, which a `VoiceNode::streaming` or a pool's `add_streaming` takes, so
+/// the voice sounds for as long as the node or the pool slot lives. Dropping
+/// the stream ends it.
+///
+/// A session applies only what was read in its own float; the other is a type
+/// error:
+///
+/// ```compile_fail
+/// # use tutti_session::{OpenedStream, Session};
+/// fn wrong(session: &mut Session, opened: OpenedStream<f64>) {
+///     let _ = session.apply(opened); // `Session` is an `f32` session
+/// }
+/// ```
+///
+/// Its compiling twin applies what its own float read:
+///
+/// ```
+/// # use tutti_session::{OpenedStream, Session};
+/// fn right(session: &mut Session, opened: OpenedStream<f32>) {
+///     let _ = session.apply(opened);
+/// }
+/// ```
+#[derive(Debug)]
+#[must_use = "a read file is a stream only once the session applies it"]
+pub struct OpenedStream<F: SessionFloat> {
+    cut: Cut,
+    opened: tutti_sampler::OpenedStream<F>,
+}
+
+impl<F: SessionFloat> Sealed<F> for OpenedStream<F> {
+    type Applied = (Stream<F>, StreamReader<F>);
+    type Error = OpenStreamError<F>;
+
+    fn cut(&self) -> &Cut {
+        &self.cut
+    }
+
+    fn stale() -> OpenStreamError<F> {
+        OpenStreamError::Stale
+    }
+
+    fn apply_to<K: AppKey, C: Clock<Float = F>>(
+        self,
+        session: &mut Session<K, C>,
+    ) -> Result<(Stream<F>, StreamReader<F>), OpenStreamError<F>> {
+        let Self { cut, opened } = self;
+        let streamer = session
+            .sampler
+            .streamer
+            .as_ref()
+            .ok_or(OpenStreamError::StreamerGone)?;
+        streamer
+            .adopt(opened)
+            .map_err(|error| adopt_refusal(cut, error))
+    }
+}
+
+impl<K: AppKey, C: Clock> Session<K, C> {
+    /// Cuts the reading of `asset` as a disk stream, its reader starting at
+    /// `start`: the work the app runs ([`OpenStream::run`]) and hands back to
+    /// [`apply`](Self::apply). The voice is as wide as the file
+    /// (`tutti_sampler::voice_width`). The session is not touched until the
+    /// apply, which never waits: a full streamer queue gives the output back in
+    /// [`OpenStreamError::Busy`], to apply again after the next
+    /// [`update`](Self::update).
     ///
     /// # Errors
     ///
     /// [`SamplerError::NoStreamer`] when the session holds no disk streamer.
-    #[must_use = "the id matches the event that lands the open"]
     pub fn open_stream(
-        &mut self,
+        &self,
         asset: impl Into<Asset>,
-        place: Placement,
-    ) -> Result<SamplerLoad, SamplerError> {
+        start: StreamStart,
+    ) -> Result<OpenStream<C::Float>, SamplerError> {
         let streamer = self
             .sampler
             .streamer
             .as_ref()
             .ok_or(SamplerError::NoStreamer)?;
-        let opening = streamer.open(asset, place);
-        let id = SamplerLoad::mint(&self.sampler.opens);
-        let landed = Arc::clone(&self.sampler.streams);
-        self.jobs.submit_future(opening, move |_, done, events| {
-            let event = match done {
-                Ok(Ok(opened)) => {
-                    landed.lock_recover().insert(id, opened);
-                    SamplerEvent::Opened { id }
-                }
-                Ok(Err(error)) => SamplerEvent::OpenFailed {
-                    id,
-                    error: error.into(),
-                },
-                Err(failed) => SamplerEvent::OpenFailed {
-                    id,
-                    error: failed.into(),
-                },
-            };
-            events.push(event.into());
-        });
-        Ok(id)
-    }
-
-    /// The stream an open landed ([`SamplerEvent::Opened`]): the voice's
-    /// reader and the control side, in the session's float. The reader is the
-    /// voice's (`DiskVoice::from_reader`); the stream is the control side,
-    /// which a `VoiceNode::streaming` or a pool's `add_streaming` takes, so the
-    /// voice sounds for as long as the node or the pool slot lives. Dropping the
-    /// stream ends it.
-    ///
-    /// `None` for an id that has not landed, failed, or was taken already. A
-    /// stream no one takes is dropped with the session.
-    #[must_use = "the stream ends when it is dropped"]
-    pub fn take_stream(
-        &mut self,
-        id: SamplerLoad,
-    ) -> Option<(Stream<C::Float>, StreamReader<C::Float>)> {
-        self.sampler.streams.lock_recover().remove(&id)
+        Ok(OpenStream {
+            cut: Cut::of(self),
+            read: streamer.open_stream(asset, start),
+        })
     }
 }

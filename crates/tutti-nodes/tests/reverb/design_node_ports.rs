@@ -3,10 +3,11 @@
 //! The state-variable filter and a live Freeverb start their ports at the first cell; the fixed
 //! General MIDI send has none.
 
+use tutti_buffers::ChannelLayout;
 use tutti_dsp::{FreeverbControls, SvfType};
 use tutti_graph::contract::prepared;
 use tutti_graph::{Node, ParamNode};
-use tutti_nodes::{FreeverbConfig, FreeverbNode, SvfFilterNode};
+use tutti_nodes::{FreeverbConfig, FreeverbNode, SvfFilterConfig, SvfFilterNode};
 use tutti_units::{Hz, Q, SampleRate, UnitAddr, UnitParam};
 
 const SR: SampleRate = SampleRate::SR_48K;
@@ -17,7 +18,11 @@ const BLOCK: usize = 64;
 #[test]
 fn a_design_nodes_ports_start_at_its_first_cell() {
     let filter = prepared(
-        SvfFilterNode::<f32>::new(SvfType::LowPass, Hz::new(1_000.0), Q::new(0.707)),
+        SvfFilterNode::<f32>::from(
+            SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
+                .freq(Hz::new(1_000.0))
+                .q(Q::new(0.707)),
+        ),
         SR,
         BLOCK,
     );

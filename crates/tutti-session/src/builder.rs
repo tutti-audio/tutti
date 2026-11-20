@@ -7,7 +7,7 @@ use std::sync::Arc;
 use tutti_buffers::MAX_CHANNELS;
 use tutti_buffers::{ChannelLayout, ChannelTopology, MaxBlock};
 use tutti_graph::NodeKey;
-use tutti_nodes::{ClickNode, ClickSettings};
+use tutti_nodes::{ClickNode, ClickNodeConfig, ClickSettings};
 use tutti_timeline::Transport;
 use tutti_units::SampleRate;
 
@@ -529,7 +529,7 @@ impl<F: SessionFloat> SessionBuilder<crate::DeviceClock<F>> {
     /// The choice holds across every restart ([`Session::restart`](crate::Session),
     /// the device watch's restarts, and a restart onto any other device). A
     /// device that lacks the format fails that restart with
-    /// [`tutti_cpal::Error::OutputFormatUnavailable`], through the restart's
+    /// [`tutti_cpal::DeviceError::OutputFormatUnavailable`], through the restart's
     /// usual failure path, and never opens at another format. The same error
     /// fails [`build`](Self::build). A switch from the system clock
     /// ([`Session::into_device`](crate::Session)) takes its own
@@ -574,7 +574,7 @@ impl<F: SessionFloat> SessionBuilder<crate::DeviceClock<F>> {
     ) -> Result<crate::LiveSession<&'static str, F>>
     where
         D: tutti_engine::StreamDriver<F>,
-        D::Error: Into<tutti_cpal::Error>,
+        D::Error: Into<tutti_cpal::DeviceError>,
     {
         let device = self.config.device().clone();
         self.build_on(
@@ -960,11 +960,13 @@ impl<C: Clock> SessionBuilder<C> {
         graph.set_render_worker_start(self.opts.render_worker_start.take());
         let click_settings = Arc::new(ClickSettings::new());
 
-        // The metronome. It reads the beat, play and record state from its
-        // block's `Env`, and the count-in flag off the transport (read only).
+        // The metronome. It reads the beat, the play, record and count-in state
+        // and the meter from its block's `Env`.
         // It is not wired to the output: what it feeds is the host's
         // declaration, like every other node's.
-        let (click, _settings) = graph.add(ClickNode::new(&transport, Arc::clone(&click_settings)));
+        let (click, _settings) = graph.add(ClickNode::from(ClickNodeConfig::new(Arc::clone(
+            &click_settings,
+        ))));
 
         // The engine's MIDI as graph nodes: the sync node (sends nothing until a
         // host sets its messages). An input port's input node and an output's
@@ -1025,6 +1027,7 @@ impl<C: Clock> SessionBuilder<C> {
         let table = parts.graph.value_table();
         let click_settings = Arc::clone(&parts.click_settings);
         let session = Session {
+            id: crate::apply::SessionId::new(),
             values: crate::value::ValueState::new(Arc::clone(&table)),
             _early_work,
             running,

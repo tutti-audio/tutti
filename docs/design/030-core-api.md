@@ -19,7 +19,7 @@ repeated here:
   are behind `settings()` and `motion()`.
 - #632:
   - `Graph::connect` and `chain`;
-  - the session transport verbs and `schedule(impl Into<At>, MotionEvent)`;
+  - the session transport verbs and `schedule(impl Into<At>, MotionCommand)`;
   - the `Clip` builder;
   - one `tutti::Error`;
   - a feature-gated prelude;

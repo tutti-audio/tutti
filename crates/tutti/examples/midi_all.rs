@@ -20,9 +20,10 @@
 use tutti::midi::{
     self, AddedInstrument, FileEvent, Layout, LeadTrack, Message, MidiChannel, MidiFile, MidiGroup,
     MidiHardwareConfig, MidiRouteRule, MpeMode, MpeZoneConfig, MpeZones, NoteNumber, NoteVelocity,
-    PitchBendSensitivity, SmfDivision, TakePlacement, Tick, TicksPerQuarterNote, Track, U7, Voice1,
+    PitchBendSensitivity, SmfDivision, Tick, TicksPerQuarterNote, Track, U7, Voice1,
 };
 use tutti::polysynth::{PolySynth, SynthConfig};
+use tutti::session::{Start, TakeLatency, Trim};
 use tutti::{
     ChannelLayout, Error, EventCapacity, Frame, InterleavedMut, MaxBlock, SampleRate, Samples,
     Session, SessionEvent, Stamp,
@@ -118,12 +119,11 @@ fn run() -> Result<Outcome, Box<dyn std::error::Error>> {
     let mut take = s.midi().tap(synth.node(), EventCapacity::of(256))?;
 
     // A clip from a file's timeline: the packets it holds at their beats.
-    // The load is a job on the session's worker, which converts each track to
-    // a clip value; `wait` runs updates until it lands.
+    // The load is a value the app runs: `run` reads the file and converts each
+    // track to a clip value on this thread.
     let path = std::env::temp_dir().join(format!("tutti-midi-all-{}.mid", std::process::id()));
     file()?.write(&path)?;
-    let job = s.midi().load_midi(&path);
-    let loaded = job.wait(&mut s);
+    let loaded = s.midi().load_midi(&path).run();
     std::fs::remove_file(&path)?;
     let loaded = loaded?;
     s.midi().play_track(synth.node(), loaded.track(0)?)?;
@@ -193,14 +193,19 @@ fn run() -> Result<Outcome, Box<dyn std::error::Error>> {
 
     // The take: what was played, each event on its frame of the graph, placed
     // where the performer meant it for this device's latencies (figures a host
-    // reads off its devices; here zero, and a 10 ms trim).
-    let placement = TakePlacement {
-        trim: Samples::new(480),
-        ..TakePlacement::default()
-    };
+    // reads off its devices; here none reported, and a 10 ms trim).
+    let latency = TakeLatency::new(None, None, Samples::ZERO, Trim::Later(Samples::new(480)));
     let take = take
         .drain()
-        .map(|e| (e.frame, placement.place(e.frame)))
+        .map(|e| {
+            let placed = match latency.place(e.frame) {
+                Start::At(frame) => frame,
+                // `place` never clamps; a start before the clock's origin
+                // is clamped to the first frame here.
+                Start::BeforeOrigin(_) => Frame::new(0),
+            };
+            (e.frame, placed)
+        })
         .collect();
     Ok(Outcome {
         peak,

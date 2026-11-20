@@ -7,8 +7,8 @@ use tutti_graph::{
 };
 use tutti_units::{Db, Hz, Q};
 
-use super::svf::SvfFilterNode;
-use tutti_dsp::{SimdLanes, SvfControls, SvfType};
+use super::svf::{SvfFilterConfig, SvfFilterNode};
+use tutti_dsp::{SimdLanes, SvfType};
 
 /// Parametric EQ band: an [`SvfFilterNode`] at one channel. 1 input, 1
 /// output.
@@ -20,36 +20,57 @@ use tutti_dsp::{SimdLanes, SvfControls, SvfType};
 /// (`Graph::set_mode`), the graph's for every node: a crossfade of
 /// [`DECLICK`](tutti_graph::DECLICK), bit-exact once it is over.
 ///
-/// `F` is the float of the graph it runs in.
+/// Made from an [`EqBandConfig`] (`EqBandNode::from`). `F` is the float of the graph it runs in.
 #[derive(Clone, Debug)]
 pub struct EqBandNode<F: Float + SimdLanes> {
     svf: SvfFilterNode<F>,
 }
 
-impl<F: Float + SimdLanes> EqBandNode<F> {
-    /// Builds a band of `filter_type` at
-    /// `frequency`, `q` and `gain_db`.
-    ///
-    /// `gain_db` is read only by [`Bell`](SvfType::Bell),
-    /// [`LowShelf`](SvfType::LowShelf) and [`HighShelf`](SvfType::HighShelf) —
-    /// the usual EQ-band types. On the others it is stored and ignored.
-    ///
-    pub fn new(
-        filter_type: SvfType,
-        frequency: impl Into<Hz>,
-        q: impl Into<Q>,
-        gain_db: impl Into<Db>,
-    ) -> Self {
+/// What an [`EqBandNode`] is made from: the response of its band and its controls' start.
+///
+/// A config starts as an [`SvfFilterConfig`] of one channel does: 1 kHz, Butterworth, 0 dB.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EqBandConfig {
+    svf: SvfFilterConfig,
+}
+
+impl EqBandConfig {
+    /// A band of the response `filter_type`.
+    #[must_use]
+    pub fn new(filter_type: SvfType) -> Self {
         Self {
-            svf: SvfFilterNode::<F>::with_controls(
-                ChannelLayout::MONO,
-                SvfControls {
-                    ty: filter_type,
-                    freq: frequency.into(),
-                    q: q.into(),
-                    gain: gain_db.into(),
-                },
-            ),
+            svf: SvfFilterConfig::new(ChannelLayout::MONO, filter_type),
+        }
+    }
+
+    /// The cutoff, centre or corner at the start.
+    #[must_use]
+    pub fn freq(mut self, frequency: Hz) -> Self {
+        self.svf = self.svf.freq(frequency);
+        self
+    }
+
+    /// The resonance at the start.
+    #[must_use]
+    pub fn q(mut self, q: Q) -> Self {
+        self.svf = self.svf.q(q);
+        self
+    }
+
+    /// The gain at the start, read only by [`Bell`](SvfType::Bell),
+    /// [`LowShelf`](SvfType::LowShelf) and [`HighShelf`](SvfType::HighShelf), the usual
+    /// EQ-band types. On the others it is stored and ignored.
+    #[must_use]
+    pub fn gain(mut self, gain: Db) -> Self {
+        self.svf = self.svf.gain(gain);
+        self
+    }
+}
+
+impl<F: Float + SimdLanes> From<EqBandConfig> for EqBandNode<F> {
+    fn from(config: EqBandConfig) -> Self {
+        Self {
+            svf: SvfFilterNode::from(config.svf),
         }
     }
 }
@@ -127,19 +148,23 @@ mod tests {
     /// authored values and shares none of them.
     #[test]
     fn a_fork_severs_the_inner_filters_cells() {
-        assert_param_fork(EqBandNode::<f32>::new(
-            SvfType::Bell,
-            Hz::new(1000.0),
-            Q::new(1.0),
-            Db::new(6.0),
+        assert_param_fork(EqBandNode::<f32>::from(
+            EqBandConfig::new(SvfType::Bell)
+                .freq(Hz::new(1000.0))
+                .q(Q::new(1.0))
+                .gain(Db::new(6.0)),
         ));
     }
 
     /// The band declares the inner filter's tail, not the shape default.
     #[test]
     fn the_band_rings_on_as_its_filter_does() {
-        let band =
-            EqBandNode::<f32>::new(SvfType::Bell, Hz::new(1000.0), Q::new(8.0), Db::new(12.0));
+        let band = EqBandNode::<f32>::from(
+            EqBandConfig::new(SvfType::Bell)
+                .freq(Hz::new(1000.0))
+                .q(Q::new(8.0))
+                .gain(Db::new(12.0)),
+        );
         assert_eq!(band.shape().tail, tutti_units::Tail::Unknown);
     }
 
@@ -147,7 +172,12 @@ mod tests {
     fn test_eq_band_f32_variant_compiles_and_runs() {
         let input = generate_sine(1000.0, 44100.0, 1024);
         let out = render(
-            EqBandNode::<f32>::new(SvfType::Bell, Hz::new(1000.0), Q::new(1.0), Db::new(6.0)),
+            EqBandNode::<f32>::from(
+                EqBandConfig::new(SvfType::Bell)
+                    .freq(Hz::new(1000.0))
+                    .q(Q::new(1.0))
+                    .gain(Db::new(6.0)),
+            ),
             &input,
         );
         assert!(
@@ -160,7 +190,12 @@ mod tests {
     fn test_eq_band_bell_boost() {
         let sine = generate_sine(1000.0, 44100.0, 4096);
         let out = render(
-            EqBandNode::<f32>::new(SvfType::Bell, Hz::new(1000.0), Q::new(1.0), Db::new(12.0)),
+            EqBandNode::<f32>::from(
+                EqBandConfig::new(SvfType::Bell)
+                    .freq(Hz::new(1000.0))
+                    .q(Q::new(1.0))
+                    .gain(Db::new(12.0)),
+            ),
             &sine,
         );
         let rms_in = rms(&sine[512..]);
@@ -175,20 +210,20 @@ mod tests {
     fn test_eq_band_filter_type_change() {
         let high = generate_sine(5000.0, 44100.0, 2048);
         let out_lp = render(
-            EqBandNode::<f32>::new(
-                SvfType::LowPass,
-                Hz::new(500.0),
-                Q::new(0.707),
-                Db::new(0.0),
+            EqBandNode::<f32>::from(
+                EqBandConfig::new(SvfType::LowPass)
+                    .freq(Hz::new(500.0))
+                    .q(Q::new(0.707))
+                    .gain(Db::new(0.0)),
             ),
             &high,
         );
         let out_hp = render(
-            EqBandNode::<f32>::new(
-                SvfType::HighPass,
-                Hz::new(500.0),
-                Q::new(0.707),
-                Db::new(0.0),
+            EqBandNode::<f32>::from(
+                EqBandConfig::new(SvfType::HighPass)
+                    .freq(Hz::new(500.0))
+                    .q(Q::new(0.707))
+                    .gain(Db::new(0.0)),
             ),
             &high,
         );
@@ -207,11 +242,11 @@ mod tests {
         use crate::test_support::{F64_TOLERANCE, RATE, render_f64};
         const DC: f64 = 0x2000_0001 as f64 / 2_147_483_648.0;
         let x = vec![DC; 4_096];
-        let node = EqBandNode::<f64>::new(
-            SvfType::LowPass,
-            Hz::new(1_000.0),
-            Q::new(0.707),
-            Db::new(0.0),
+        let node = EqBandNode::<f64>::from(
+            EqBandConfig::new(SvfType::LowPass)
+                .freq(Hz::new(1_000.0))
+                .q(Q::new(0.707))
+                .gain(Db::new(0.0)),
         );
         let settled = render_f64(node, RATE, &[&x], 4_096)[0][4_095];
         assert!(

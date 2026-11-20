@@ -41,7 +41,7 @@ use tutti_modulation::{
     Curve, Declarations, Follower, Law, Lfo, Macro, NoteEnvelope, Polarity, RouteDecl, RouteKey,
     RouteTarget, Source, SourceKey, TargetDecl, TargetKey,
 };
-use tutti_nodes::automation::{LaneControls, RecordMode, Recorder, Trajectory};
+use tutti_nodes::automation::{AutomationRecorder, LaneControls, RecordMode, Trajectory};
 use tutti_nodes::{Feed, ReconcileError};
 use tutti_rt::Param;
 use tutti_units::{Depth, ParamAddr, ParamId, UnitAddr, UnitParam};
@@ -467,10 +467,10 @@ fn unclamped(automation: Option<Arc<dyn Curve>>) -> TargetDecl {
 
 /// A recording take on an automated target (doc 014 §8.2, "Recording").
 /// While it is open the target declares no automation, so its knob (the
-/// gesture) drives it; when it is done, its trajectory becomes the target's
+/// gesture) drives it; when it is finished, its trajectory becomes the target's
 /// automation.
 ///
-/// It is done once [`close`](Self::close)d, or, in a mode that stops on
+/// It is finished once [stopped](Self::stop), or, in a mode that stops on
 /// release ([`RecordMode::Touch`]), once the recorder is released after a
 /// touch. Feed the recorder through [`recorder_mut`](Self::recorder_mut) as
 /// the gesture moves.
@@ -479,16 +479,16 @@ fn unclamped(automation: Option<Arc<dyn Curve>>) -> TargetDecl {
 /// of the target it is opened on.
 #[derive(Debug)]
 pub struct AutomationTake<U: crate::Scalar> {
-    recorder: Recorder<U>,
+    recorder: AutomationRecorder<U>,
     touched: bool,
     closed: bool,
 }
 
 impl<U: crate::Scalar> AutomationTake<U> {
     /// A take recording into `recorder` (a fresh one, or
-    /// `Recorder::overdub` over the lane's trajectory).
+    /// `AutomationRecorder::overdub` over the lane's trajectory).
     #[must_use]
-    pub fn new(recorder: Recorder<U>) -> Self {
+    pub fn new(recorder: AutomationRecorder<U>) -> Self {
         Self {
             recorder,
             touched: false,
@@ -498,28 +498,30 @@ impl<U: crate::Scalar> AutomationTake<U> {
 
     /// A fresh `mode` take over `min..=max`.
     pub fn record(mode: RecordMode, min: U, max: U) -> Self {
-        Self::new(Recorder::new(mode, min, max))
+        Self::new(AutomationRecorder::new(mode, min, max))
     }
 
     /// The recorder.
-    pub fn recorder(&self) -> &Recorder<U> {
+    pub fn recorder(&self) -> &AutomationRecorder<U> {
         &self.recorder
     }
 
     /// The recorder, to touch, record and release.
-    pub fn recorder_mut(&mut self) -> &mut Recorder<U> {
+    pub fn recorder_mut(&mut self) -> &mut AutomationRecorder<U> {
         &mut self.recorder
     }
 
-    /// Ends the take: on the next modulation phase its trajectory becomes the
-    /// automation.
-    pub fn close(&mut self) {
+    /// Stops the take: on the next modulation phase its trajectory becomes the
+    /// automation. A touch take stops by itself on release; a write or latch
+    /// take stops here.
+    pub fn stop(&mut self) {
         self.closed = true;
     }
 
-    /// Whether the take is done: closed, or a touch take released after a
-    /// touch. Notes a touch in progress, so call it once per update.
-    pub fn is_done(&mut self) -> bool {
+    /// Whether the take is finished: stopped ([`stop`](Self::stop)), or a touch
+    /// take released after a touch. Notes a touch in progress, so call it once
+    /// per update.
+    pub fn is_finished(&mut self) -> bool {
         if self.recorder.is_taking() {
             self.touched = true;
         }
@@ -540,7 +542,7 @@ impl<U: crate::Scalar> AutomationTake<U> {
 /// is named by [`ModTarget`] and not by a unit. [`Mods::take_mut`] names the unit
 /// again.
 trait OpenTake: std::fmt::Debug + Send {
-    fn is_done(&mut self) -> bool;
+    fn is_finished(&mut self) -> bool;
     /// Makes the trajectory the curve of `cell`, which automates the take's
     /// unit (`Mods::record` took no other).
     fn finish_into(self: Box<Self>, cell: &dyn AutomationCell);
@@ -548,8 +550,8 @@ trait OpenTake: std::fmt::Debug + Send {
 }
 
 impl<U: crate::Scalar> OpenTake for AutomationTake<U> {
-    fn is_done(&mut self) -> bool {
-        AutomationTake::is_done(self)
+    fn is_finished(&mut self) -> bool {
+        AutomationTake::is_finished(self)
     }
     fn finish_into(self: Box<Self>, cell: &dyn AutomationCell) {
         if let Some(cell) = cell.as_any().downcast_ref::<Automation<U>>() {
@@ -1089,15 +1091,18 @@ impl OwnMods {
         }
     }
 
-    /// Closes the takes that are done: each one's trajectory becomes its
+    /// Closes the takes that are finished: each one's trajectory becomes its
     /// target's automation.
     fn close_takes(&mut self) {
         for automation in self.automation.values_mut() {
-            if automation.take.as_mut().is_some_and(|take| take.is_done())
+            if automation
+                .take
+                .as_mut()
+                .is_some_and(|take| take.is_finished())
                 && let Some(take) = automation.take.take()
             {
                 take.finish_into(&*automation.cell);
-                // A take becomes done through `Mods` (closed, or
+                // A take becomes finished through `Mods` (stopped, or
                 // released), which already cleared it; cleared here
                 // too so the build never depends on that.
                 self.built = None;
@@ -1292,7 +1297,7 @@ impl ModSession {
         host.is_some() || !self.own.is_empty() || self.state.applied
     }
 
-    /// `Phase::Modulation`: closes the session's own takes that are done,
+    /// `Phase::Modulation`: closes the session's own takes that are finished,
     /// then applies.
     pub(crate) fn modulation_phase<F: Float>(
         &mut self,
@@ -1810,7 +1815,7 @@ impl Mods<'_> {
         self.own.automation.remove(&key).is_some()
     }
 
-    /// Opens a recording take on `target`'s automation: until it is done
+    /// Opens a recording take on `target`'s automation: until it is finished
     /// the knob plays, then its trajectory replaces the automation.
     ///
     /// # Errors

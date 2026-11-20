@@ -23,9 +23,9 @@ use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_graph::Node;
 use tutti_graph::contract::Direct;
 use tutti_nodes::{
-    DelayConfig, DelayControls, DelayLayout, DelayNode, InterpolationMode, LadderFilterNode,
-    LadderType, MaxDelay, ModDelayConfig, ModDelayNode, PhaserConfig, PhaserNode, Stages,
-    SvfFilterNode, SvfType,
+    DelayConfig, DelayControls, DelayLayout, DelayNode, InterpolationMode, LadderFilterConfig,
+    LadderFilterNode, LadderType, MaxDelay, ModDelayConfig, ModDelayNode, PhaserConfig, PhaserNode,
+    Stages, SvfFilterConfig, SvfFilterNode, SvfType,
 };
 use tutti_units::{Feedback, Hz, Q, Resonance, SampleRate, Seconds};
 
@@ -84,11 +84,13 @@ fn run_node(c: &mut Criterion, group: &str, width: usize, node: impl Node, fed: 
 fn svf(c: &mut Criterion) {
     for w in [2usize, 6] {
         let make = || {
-            SvfFilterNode::<f32>::with_channels(
-                ChannelLayout::try_from(w).expect("a test width is small"),
-                SvfType::LowPass,
-                Hz::new(1_000.0),
-                Q::new(0.707),
+            SvfFilterNode::<f32>::from(
+                SvfFilterConfig::new(
+                    ChannelLayout::try_from(w).expect("a test width is small"),
+                    SvfType::LowPass,
+                )
+                .freq(Hz::new(1_000.0))
+                .q(Q::new(0.707)),
             )
         };
         run_node(c, "svf", w, make(), None);
@@ -98,11 +100,13 @@ fn svf(c: &mut Criterion) {
 
 fn ladder(c: &mut Criterion) {
     for w in [2usize, 6] {
-        let node = LadderFilterNode::<f32>::with_channels(
-            ChannelLayout::try_from(w).expect("a test width is small"),
-            LadderType::LP24,
-            Hz::new(1_000.0),
-            Resonance::new(0.5),
+        let node = LadderFilterNode::<f32>::from(
+            LadderFilterConfig::new(
+                ChannelLayout::try_from(w).expect("a test width is small"),
+                LadderType::LP24,
+            )
+            .freq(Hz::new(1_000.0))
+            .res(Resonance::new(0.5)),
         );
         run_node(c, "ladder", w, node, None);
     }

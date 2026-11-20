@@ -17,12 +17,12 @@ use tutti_buffers::InterleavedMut;
 use tutti_engine::Engine;
 use tutti_graph::NodeKey;
 use tutti_graph::{Cx, Editor, Executor, Io, Node, Prepare, Shape, Status, Unforkable};
-use tutti_graph::{OutPort, Source};
+use tutti_graph::{OutPort, PortSource};
 use tutti_music::{LoopRange, first_frame_at_or_after};
 use tutti_tempo::{TempoMap, TempoPoint, Transition};
 use tutti_timeline::{
-    AfterLocate, FadeOut, LoopEdit, MotionEvent, OfflineTimeline, OfflineTimelineConfig, Transport,
-    render_graph,
+    AfterLocate, FadeOut, LoopEdit, MotionCommand, OfflineTimeline, OfflineTimelineConfig,
+    Transport, render_graph,
 };
 use tutti_units::{At, Beat, Bpm, SampleRate, Samples, Tail};
 
@@ -65,7 +65,7 @@ fn graph(log: &Log) -> (Editor, Executor) {
     ed.insert(NodeKey(1), "beats", Unforkable(BeatLog(Arc::clone(log))));
     ed.spec_mut()
         .topology
-        .set_outputs(vec![Source::Node(OutPort {
+        .set_outputs(vec![PortSource::Node(OutPort {
             node: NodeKey(1),
             port: 0,
         })]);
@@ -118,7 +118,7 @@ fn live(map: &Arc<TempoMap>, start: f64, blocks: &[usize], total: usize) -> Seen
     transport.settings().set_tempo_map(Arc::clone(map));
     transport
         .motion()
-        .try_send(MotionEvent::play_from(Beat::new(start)))
+        .try_send(MotionCommand::play_from(Beat::new(start)))
         .expect("room");
     let mut done = 0;
     for &n in blocks.iter().cycle() {
@@ -286,10 +286,10 @@ fn a_seek_seats_at_the_exact_beat_in_its_step() {
         .expect("within the limits");
     transport.settings().set_tempo_map(steps(&points));
     let m = &transport.motion();
-    m.try_send(MotionEvent::play_from(Beat::new(0.0)))
+    m.try_send(MotionCommand::play_from(Beat::new(0.0)))
         .expect("room");
     render(&engine, 1_000);
-    let locate = |beat: f64| MotionEvent::Locate {
+    let locate = |beat: f64| MotionCommand::Locate {
         beat: Beat::new(beat),
         fade: FadeOut::Immediate,
         then: AfterLocate::Keep,
@@ -341,7 +341,7 @@ fn a_loop_wrap_takes_the_tempo_where_it_lands() {
         .expect("room");
     transport
         .motion()
-        .try_send(MotionEvent::play_from(Beat::new(3.5)))
+        .try_send(MotionCommand::play_from(Beat::new(3.5)))
         .expect("room");
     let total = 150_000;
     let mut done = 0;

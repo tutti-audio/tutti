@@ -12,11 +12,13 @@ fn resample_blocked(
     block: Option<usize>,
 ) -> Vec<Vec<f32>> {
     let n = planes[0].len();
-    let mut r = StreamingResampler::new(
-        planes.len(),
-        SampleRate::from_hz(from).unwrap(),
-        SampleRate::from_hz(to).unwrap(),
-        chunk,
+    let mut r = StreamingResampler::try_from(
+        StreamingResamplerConfig::new(
+            ChannelLayout::try_from(planes.len()).unwrap(),
+            SampleRate::from_hz(from).unwrap(),
+            SampleRate::from_hz(to).unwrap(),
+        )
+        .chunk(chunk),
     )
     .unwrap();
     let mut out = vec![Vec::new(); planes.len()];
@@ -132,8 +134,15 @@ fn the_signal_survives_every_blocking() {
 #[test]
 fn the_carry_stays_under_one_chunk_between_pushes() {
     for chunk in ChunkSize::PRESETS {
-        let mut r =
-            StreamingResampler::new(2, SampleRate::SR_44K1, SampleRate::SR_48K, chunk).unwrap();
+        let mut r = StreamingResampler::try_from(
+            StreamingResamplerConfig::new(
+                ChannelLayout::STEREO,
+                SampleRate::SR_44K1,
+                SampleRate::SR_48K,
+            )
+            .chunk(chunk),
+        )
+        .unwrap();
         let mut out = vec![Vec::new(); 2];
         let block = vec![vec![0.25f32; 37]; 2];
         for i in 0..2_000 {
@@ -156,11 +165,13 @@ fn the_carry_stays_under_one_chunk_between_pushes() {
 fn resample(planes: &[Vec<f32>], from: u32, to: u32, chunk: ChunkSize) -> Vec<Vec<f32>> {
     // The `u32`s keep the call sites below reading as plain rates; the
     // conversion is here, once.
-    let mut r = StreamingResampler::new(
-        planes.len(),
-        SampleRate::from_hz(from).unwrap(),
-        SampleRate::from_hz(to).unwrap(),
-        chunk,
+    let mut r = StreamingResampler::try_from(
+        StreamingResamplerConfig::new(
+            ChannelLayout::try_from(planes.len()).unwrap(),
+            SampleRate::from_hz(from).unwrap(),
+            SampleRate::from_hz(to).unwrap(),
+        )
+        .chunk(chunk),
     )
     .unwrap();
     let mut out = vec![Vec::new(); planes.len()];
@@ -354,11 +365,13 @@ fn dc_passes_with_unit_gain() {
 fn an_f64_stream_has_the_rounded_length_and_unit_dc_gain() {
     for (from, to) in [(44_100u32, 48_000u32), (48_000, 44_100)] {
         let n = from as usize / 2;
-        let mut r = StreamingResampler::<f64>::new(
-            1,
-            SampleRate::from_hz(from).unwrap(),
-            SampleRate::from_hz(to).unwrap(),
-            ChunkSize::N1024,
+        let mut r = StreamingResampler::<f64>::try_from(
+            StreamingResamplerConfig::new(
+                ChannelLayout::MONO,
+                SampleRate::from_hz(from).unwrap(),
+                SampleRate::from_hz(to).unwrap(),
+            )
+            .chunk(ChunkSize::N1024),
         )
         .unwrap();
         let input = vec![vec![0.5f64; n]];
@@ -490,11 +503,13 @@ fn upsampling_cuts_at_the_input_band_edge() {
 #[test]
 fn an_unusable_rate_is_an_error() {
     let new = |from: f64, to: f64| {
-        StreamingResampler::<f32>::new(
-            1,
-            SampleRate::of(from),
-            SampleRate::of(to),
-            ChunkSize::N1024,
+        StreamingResampler::<f32>::try_from(
+            StreamingResamplerConfig::new(
+                ChannelLayout::MONO,
+                SampleRate::of(from),
+                SampleRate::of(to),
+            )
+            .chunk(ChunkSize::N1024),
         )
     };
     for bad in [0.4, 1e300, 4_294_967_296.0] {
@@ -633,26 +648,20 @@ fn rates_of_one_whole_hz_are_no_conversion() {
     );
 }
 
-/// A channel count a `ChannelLayout` cannot hold is refused by `new`, with the layout error.
-#[test]
-fn new_refuses_a_width_over_the_layout_limit() {
-    let channels = usize::from(u16::MAX) + 1;
-    let made = StreamingResampler::<f32>::new(
-        channels,
-        SampleRate::from_hz(44_100).unwrap(),
-        SampleRate::from_hz(48_000).unwrap(),
-        ChunkSize::MIN,
-    );
-    assert!(matches!(made, Err(ResampleError::Layout(_))));
-}
-
 /// A view narrower or wider than the resampler is refused with both widths and consumes
 /// nothing: the next matching push gives what a fresh resampler gives.
 #[test]
 fn a_view_of_another_width_is_refused_and_leaves_the_resampler_unchanged() {
     let make = || {
-        StreamingResampler::<f32>::new(2, SampleRate::SR_44K1, SampleRate::SR_48K, ChunkSize::N512)
-            .unwrap()
+        StreamingResampler::<f32>::try_from(
+            StreamingResamplerConfig::new(
+                ChannelLayout::STEREO,
+                SampleRate::SR_44K1,
+                SampleRate::SR_48K,
+            )
+            .chunk(ChunkSize::N512),
+        )
+        .unwrap()
     };
     let signal: Vec<Vec<f32>> = (0..2).map(|c| vec![0.1 * (c + 1) as f32; 3000]).collect();
     let mut fresh = make();

@@ -6,19 +6,19 @@
 //! for frame on the graph's own clock ([`TapReader::next_frame`]), and runs the
 //! pump into a sink on the session's executor, which the audio thread wakes by a
 //! bell as the tap fills. Nothing is resampled or shifted
-//! in the file: where the take belongs is metadata, a [`Placement`] the take
+//! in the file: where the take belongs is metadata, a [`TakePlacement`] the take
 //! states term by term.
 //!
 //! # Where the take is placed
 //!
 //! A sample the inlet emits at graph frame `F` was played by the performer in
-//! answer to what the device played [`out_latency`](TakeLatency::out_latency) after it
-//! was rendered, and reached the graph [`in_latency`](TakeLatency::in_latency) plus the
-//! inlet's [`lead`](TakeLatency::inlet_lead) after it was sung, so the take's first
+//! answer to what the device played [`output`](TakeLatency::output) after it
+//! was rendered, and reached the graph [`input`](TakeLatency::input) plus the
+//! inlet's [`lead`](TakeLatency::lead) after it was sung, so the take's first
 //! frame belongs at
 //!
 //! ```text
-//! start = F - (in_latency + out_latency + inlet_lead) + offset
+//! start = F - (input + output + lead) + offset
 //! ```
 //!
 //! A latency the device has not reported is not a zero: the term is `None` in
@@ -62,7 +62,7 @@ use tutti_units::{At, Beat, Frame, SampleRate, Samples, Seconds};
 
 use crate::WorkerError;
 use crate::jobs::{Landings, Stream, StreamRun};
-use crate::{Input, Session, SessionEvent, Trim};
+use crate::{Input, Session, SessionEvent, Start, TakeLatency, Trim};
 
 /// How many frames the pump moves a pass.
 const PASS_FRAMES: usize = 1024;
@@ -318,84 +318,17 @@ impl LatencyProbe {
     }
 }
 
-/// The latency of a take's placement, each as the take found it: a reading, read
-/// from [`Placement::latency`] or [`Recorded::latency`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[non_exhaustive]
-pub struct TakeLatency {
-    /// The capture's delay: how long before a graph block a frame was sung.
-    /// `None`: the input has not reported one.
-    pub in_latency: Option<Samples>,
-    /// The playback's delay: how long after a block was rendered it was
-    /// heard. `None`: the output has not reported one.
-    pub out_latency: Option<Samples>,
-    /// The inlet's fixed lead (`OpenedInput::lead`).
-    pub inlet_lead: Samples,
-    /// The input's manual trim (`InputConfig::offset`).
-    pub offset: Trim,
-}
-
-impl TakeLatency {
-    /// The latency of a placement.
-    #[must_use]
-    pub(crate) fn new(
-        in_latency: Option<Samples>,
-        out_latency: Option<Samples>,
-        inlet_lead: Samples,
-        offset: Trim,
-    ) -> Self {
-        Self {
-            in_latency,
-            out_latency,
-            inlet_lead,
-            offset,
-        }
-    }
-
-    /// Whether both latencies were reported. When they were not, the start is
-    /// placed by the figures that were reported, and is that much later than it belongs.
-    #[must_use]
-    pub fn is_complete(&self) -> bool {
-        self.in_latency.is_some() && self.out_latency.is_some()
-    }
-
-    /// The start this latency puts a take whose first frame is graph frame
-    /// `first` at: `first - (in + out + lead) + offset`, with an unreported
-    /// latency left out.
-    #[must_use]
-    pub fn start(&self, first: Frame) -> Start {
-        let behind = self.in_latency.map_or(0, Samples::get) as i128
-            + self.out_latency.map_or(0, Samples::get) as i128
-            + self.inlet_lead.get() as i128;
-        let at = i128::from(first.get()) - behind + self.offset.frames();
-        match u64::try_from(at) {
-            Ok(frame) => Start::At(Frame::new(frame)),
-            Err(_) => Start::BeforeOrigin(Samples::new(usize::try_from(-at).unwrap_or(usize::MAX))),
-        }
-    }
-}
-
-/// A frame on the graph's clock that a take's start can fall before: a take
-/// armed in the first moments of a session, placed earlier than it began.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Start {
-    /// The frame.
-    At(Frame),
-    /// Before the clock's origin by this many frames.
-    BeforeOrigin(Samples),
-}
-
 /// Where a take that has started belongs: the first frame it holds, the latency
 /// and the start they give. Metadata: nothing is shifted in the file.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Placement {
+pub struct TakePlacement {
     first: Frame,
     latency: TakeLatency,
     start: Start,
     start_beat: Beat,
 }
 
-impl Placement {
+impl TakePlacement {
     /// The graph frame of the take's first frame: `F`.
     #[must_use]
     pub fn first_frame(&self) -> Frame {
@@ -467,20 +400,20 @@ impl Anchor {
 #[derive(Debug)]
 enum Started {
     /// The first frame is in.
-    Placed(Placement),
+    Placed(TakePlacement),
 }
 
 /// What the pump shares with the take's handle.
 #[derive(Debug, Default)]
 struct Shared {
-    placement: OnceLock<Placement>,
+    placement: OnceLock<TakePlacement>,
 }
 
 /// A recording that has ended: what it holds and where it belongs.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Recorded {
     path: Option<PathBuf>,
-    placement: Placement,
+    placement: TakePlacement,
     frames: Samples,
     lost: Samples,
     end: TakeEnd,
@@ -512,7 +445,7 @@ impl Recorded {
 
     /// Where it belongs.
     #[must_use]
-    pub fn placement(&self) -> &Placement {
+    pub fn placement(&self) -> &TakePlacement {
         &self.placement
     }
 
@@ -522,7 +455,7 @@ impl Recorded {
         &self.placement.latency
     }
 
-    /// Where it belongs on the graph's clock ([`Placement::start`]).
+    /// Where it belongs on the graph's clock ([`TakePlacement::start`]).
     #[must_use]
     pub fn start(&self) -> Start {
         self.placement.start
@@ -542,7 +475,7 @@ impl Recorded {
     }
 
     /// The take as a clip, in the session's float, that starts where it
-    /// belongs ([`Placement::start_beat`]): add it to the graph, in place of
+    /// belongs ([`TakePlacement::start_beat`]): add it to the graph, in place of
     /// the input if you like (`graph.replace(input.node(), done.clip()?)`), and
     /// a bounce can fork it. Present with the `sampler` feature and a
     /// `tutti-codec` `decode-*` feature on.
@@ -575,7 +508,7 @@ pub enum TakeEvent {
         /// The take.
         id: TakeId,
         /// Where it belongs.
-        placement: Placement,
+        placement: TakePlacement,
     },
     /// The take ended, by its punch-out, by [`Take::finish`] or because its
     /// input was removed ([`Recorded::end`]), and its sink closed. Reported
@@ -645,7 +578,7 @@ pub enum TakeError {
     /// A take written to a file keeps the file beside its path in `unfinished`
     /// (a full disk on a write, a failed header or close) and leaves the path alone: the frames so far are
     /// there, and the app owns the file, to move or delete. It is unfinished:
-    /// a FLAC or Ogg Vorbis file may end in a cut frame or page, and a WAV's or
+    /// a FLAC file may end in a cut frame, and a WAV's or
     /// AIFF's header states the whole frames on disk only if
     /// [`header_describes_frames`](tutti_codec::Unfinished::header_describes_frames) says so.
     /// `unfinished` is `None` for a sink of the caller's.
@@ -791,7 +724,7 @@ impl Take<Rolling> {
     ///
     /// Never: a rolling take has its placement.
     #[must_use]
-    pub fn placement(&self) -> &Placement {
+    pub fn placement(&self) -> &TakePlacement {
         self.shared
             .placement
             .get()
@@ -1139,7 +1072,7 @@ impl<F: Float> Pump<F> {
         let Ok(silence) = Interleaved::new(&silence, layout) else {
             return Err(TakeError::NeverStarted);
         };
-        let mut placement: Option<Placement> = None;
+        let mut placement: Option<TakePlacement> = None;
         // The graph frame the next frame written belongs to.
         let mut cursor: Option<Frame> = None;
         let (mut written, mut lost) = (0usize, 0usize);
@@ -1261,12 +1194,12 @@ impl<F: Float> Pump<F> {
 
     /// The placement of a take whose first frame is `first`: the device's
     /// delay as it reports now.
-    fn place(&self, first: Frame) -> Placement {
-        let (in_latency, out_latency) = self.probe.read(self.anchor.rate);
+    fn place(&self, first: Frame) -> TakePlacement {
+        let (input, output) = self.probe.read(self.anchor.rate);
         let (lead, offset) = self.terms;
-        let latency = TakeLatency::new(in_latency, out_latency, lead, offset);
-        let start = latency.start(first);
-        Placement {
+        let latency = TakeLatency::new(input, output, lead, offset);
+        let start = latency.place(first);
+        TakePlacement {
             first,
             latency,
             start,
@@ -1324,27 +1257,6 @@ mod tests {
     /// exactly the frames of its window.** Frames 0..100 arrive, 100..150 are
     /// lost, 150..250 arrive: the take holds 250 frames, the lost 50 are zeros
     /// where they were, and the later frames are not shifted back.
-    /// The formula itself, with a start before the clock's origin kept as such
-    /// rather than clamped, and a latency not reported leaving `is_complete`
-    /// false.
-    #[test]
-    fn a_start_before_the_origin_is_stated_not_clamped() {
-        let latency = TakeLatency::new(
-            Some(Samples::new(240)),
-            Some(Samples::new(480)),
-            Samples::new(7),
-            Trim::NONE,
-        );
-        assert_eq!(latency.start(Frame::new(1_000)), Start::At(Frame::new(273)));
-        assert_eq!(
-            latency.start(Frame::new(100)),
-            Start::BeforeOrigin(Samples::new(627))
-        );
-        assert!(latency.is_complete());
-        let partial = TakeLatency::new(Some(Samples::new(240)), None, Samples::new(0), Trim::NONE);
-        assert!(!partial.is_complete());
-    }
-
     #[test]
     fn a_lost_gap_is_silence_in_place_and_counted() {
         let (reader, mut writer) = TapReader::pair(1, Samples::new(4096));

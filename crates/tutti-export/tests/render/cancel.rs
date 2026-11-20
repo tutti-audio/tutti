@@ -11,7 +11,7 @@ use crate::support::{EncodeConfig, ExportConfig, RenderConfig};
 
 use support::{render_buffers_under, render_file_under, render_to_file};
 use tutti_buffers::ChannelLayout;
-use tutti_codec::{FlacLevel, Format, IntDepth, Pcm, Quality};
+use tutti_codec::{FlacLevel, Format, IntDepth, Pcm};
 use tutti_export::{
     CancelToken, Control, FileTarget, GRAPH_MAX_BLOCK, Normalize, NormalizeSpec, Outcome, Output,
     Produced, Progress, RenderGraph, Resample, Setup, Stage, Written, render,
@@ -46,13 +46,6 @@ fn flac() -> Format {
     }
 }
 
-/// Ogg Vorbis at the default quality.
-fn vorbis() -> Format {
-    Format::Vorbis {
-        quality: Quality::default(),
-    }
-}
-
 fn config_of(format: Format, frames: usize) -> ExportConfig {
     ExportConfig {
         render: RenderConfig {
@@ -73,11 +66,10 @@ fn config(format: Format) -> ExportConfig {
     config_of(format, BLOCKS * GRAPH_MAX_BLOCK.get())
 }
 
-fn formats() -> [(Format, &'static str); 4] {
+fn formats() -> [(Format, &'static str); 3] {
     [
         (Format::Wav(Pcm::Int16), "wav"),
         (flac(), "flac"),
-        (vorbis(), "ogg"),
         (Format::Aiff(Pcm::Int16), "aiff"),
     ]
 }
@@ -270,7 +262,7 @@ fn a_failed_rename_leaves_the_target_and_keeps_the_file() {
         std::fs::write(target.join("keep"), b"x").unwrap();
         let err = render_to_file(graph(), &config(format), &FrozenClock, &target)
             .expect_err("a directory cannot be replaced by a file");
-        let tutti_export::Error::Encode(tutti_codec::Error::Commit(commit)) = &err else {
+        let tutti_export::RenderError::Encode(tutti_codec::Error::Commit(commit)) = &err else {
             panic!("{ext}: a failed rename is a commit error, got {err}");
         };
         assert!(target.join("keep").exists(), "{ext}");
@@ -285,7 +277,10 @@ fn a_failed_rename_leaves_the_target_and_keeps_the_file() {
         let missing = dir.path().join("no-such-dir").join(format!("m.{ext}"));
         let err = render_to_file(graph(), &config(format), &FrozenClock, &missing)
             .expect_err("the directory does not exist");
-        assert!(matches!(err, tutti_export::Error::Io(_)), "{ext}: {err}");
+        assert!(
+            matches!(err, tutti_export::RenderError::Io(_)),
+            "{ext}: {err}"
+        );
     }
 }
 

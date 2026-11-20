@@ -9,11 +9,11 @@
 //!   [`ControlLaneNode`], which sends a target's whole `ControlProgram`
 //!   (automation and modulation) as curve-segment events for a param port
 //!   (a piece's [`Law`] rides in the segment);
-//! - the capture-side [`Recorder`], fed `(beat, value)` samples during a write /
+//! - the capture-side [`AutomationRecorder`], fed `(beat, value)` samples during a write /
 //!   touch / latch take and handing back an trajectory.
 //!
 //! The map from a host's target vocabulary to its recorders stays host-side; the
-//! engine holds no registry and no target trait. See [`Recorder`] for why.
+//! engine holds no registry and no target trait. See [`AutomationRecorder`] for why.
 
 mod control_lane;
 mod lane;
@@ -24,9 +24,9 @@ mod recording;
 // re-exported here for the automation consumers.
 #[doc(hidden)]
 pub use control_lane::LaneProbe;
-pub use control_lane::{ControlLaneNode, LaneControls};
-pub use lane::{AutomationLaneNode, LiveAutomationLane};
-pub use recording::{RecordMode, Recorder, RecordingConfig};
+pub use control_lane::{ControlLaneNode, ForeignLaneConfig, LaneControls, UnitLaneConfig};
+pub use lane::{AutomationLaneConfig, AutomationLaneNode, LiveAutomationLane};
+pub use recording::{AutomationRecorder, RecordMode, RecordingConfig};
 pub use tutti_modulation::Curve;
 
 pub use tutti_curve::{Breakpoint, Curvature, Exponent, Law, Trajectory};

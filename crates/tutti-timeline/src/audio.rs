@@ -16,6 +16,8 @@ use super::tempo_reader::TempoReader;
 use super::timed::{CommandQueueAudio, Scheduled, TransportCommand};
 use super::walk::UpcomingTempo;
 use std::sync::atomic::Ordering;
+use tutti_music::MeterMap;
+use tutti_rt::{Loan, Reader};
 use tutti_tempo::TempoMap;
 use tutti_units::{Beat, BeatDuration, Bpm, SampleRate, Seconds};
 
@@ -76,6 +78,10 @@ pub struct TransportAudio {
     tempo_map: TempoReader,
     /// The publisher's count at the last block that took the map.
     seen: u64,
+    /// The project's meter, lent once per rendered block
+    /// ([`meter`](Self::meter)). Registered here, on the control side, when
+    /// the audio side is taken.
+    meter: Reader<MeterMap>,
     /// Whether the map in force changes tempo: the clock then follows it,
     /// lending it for each step that needs it and
     /// dropping the loan at the end of the step. A constant map leaves this
@@ -127,6 +133,7 @@ impl TransportAudio {
             control: Control::read(&settings, loop_region, tempo),
             tempo_map,
             seen,
+            meter: settings.project_meter().reader(),
             stepped,
             schedule: CommandQueueAudio::new(transport.motion.timed().clone()),
             motion,
@@ -198,6 +205,14 @@ impl TransportAudio {
     fn begin(&mut self, take_seek: bool) -> tutti_graph::TransportPosition {
         let control = self.control;
         self.with_map(|clock, map| clock.begin(&control, take_seek, map))
+    }
+
+    /// The project's meter, lent for one rendered block and handed to the
+    /// graph with it (`Executor::render_applied`). Wait-free; drop the loan
+    /// at the block's end, never keep it across blocks.
+    #[must_use = "a loan dropped at once lends nothing"]
+    pub fn meter(&mut self) -> Loan<'_, MeterMap> {
+        self.meter.lend()
     }
 
     /// The tempo changes inside the next `frames` of the block that began
@@ -315,7 +330,7 @@ impl TransportAudio {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{MotionEvent, Timeline};
+    use crate::{MotionCommand, Timeline};
     use tutti_units::{At, Frame};
 
     fn constant(bpm: f64) -> std::sync::Arc<TempoMap> {
@@ -340,7 +355,10 @@ mod tests {
     fn a_waiting_command_outlives_its_audio_side() {
         let t = Transport::new(SampleRate::SR_48K);
         t.motion
-            .schedule(At::Beat(tutti_units::Beat::new(1000.0)), MotionEvent::Play)
+            .schedule(
+                At::Beat(tutti_units::Beat::new(1000.0)),
+                MotionCommand::Play,
+            )
             .expect("room");
         let mut first = t.audio(SampleRate::SR_48K).expect("first");
         first.drain_commands();
@@ -364,10 +382,10 @@ mod tests {
         let t = Transport::new(SampleRate::SR_48K);
         let mut a = t.audio(SampleRate::SR_48K).expect("first");
         t.motion
-            .schedule(At::Frame(Frame::new(0)), MotionEvent::Play)
+            .schedule(At::Frame(Frame::new(0)), MotionCommand::Play)
             .expect("room");
         t.motion
-            .schedule(At::NextBlock, MotionEvent::stop_unfaded())
+            .schedule(At::NextBlock, MotionCommand::stop_unfaded())
             .expect("room");
         a.drain_commands();
         assert_eq!(a.pending().len(), 2);
@@ -406,7 +424,7 @@ mod tests {
         t.settings.set_tempo_map(map);
         let mut a = t.audio(SampleRate::of(rate)).expect("first");
         t.motion
-            .schedule(At::NextBlock, MotionEvent::Play)
+            .schedule(At::NextBlock, MotionCommand::Play)
             .expect("room");
         a.drain_commands();
         let _ = a.begin_block();
@@ -464,7 +482,7 @@ mod tests {
         let t = Transport::new(SampleRate::SR_48K);
         let mut a = t.audio(SampleRate::SR_48K).expect("first");
         t.motion
-            .schedule(At::NextBlock, MotionEvent::Play)
+            .schedule(At::NextBlock, MotionCommand::Play)
             .expect("room");
         a.drain_commands();
         let _ = a.begin_block();

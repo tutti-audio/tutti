@@ -18,9 +18,9 @@ use tutti_buffers::Float;
 use tutti_graph::NodeKey;
 use tutti_graph::{
     CommitError, EdgeGain, EdgeId, Editor, EventEdge, EventIn, EventKind, EventOut, ForkByClone,
-    NodeMix, ParamIn, ParamRange, ParamRangeCell, PassError, ScheduleError, Sink,
+    NodeMix, ParamIn, ParamRange, ParamRangeCell, PassError, PortSink, ScheduleError,
 };
-use tutti_graph::{Edge, InPort, OutPort, Source};
+use tutti_graph::{Edge, InPort, OutPort, PortSource};
 use tutti_modulation::{
     CompileError, Compiled, ControlProgram, Declarations, LayerId, RouteDecl, RouteKey,
     RouteTarget, SignalKind, SignalSource, Source as ModSource, SourceId, SourceKey, TargetDecl,
@@ -29,8 +29,10 @@ use tutti_modulation::{
 use tutti_rt::{Param, ParamCell};
 use tutti_units::{At, Depth, ParamAddr, ParamId};
 
-use crate::automation::{ControlLaneNode, LaneControls};
-use crate::signal::{EnvelopeFollowerNode, NoteEnvelopeNode};
+use crate::automation::{ControlLaneNode, ForeignLaneConfig, LaneControls, UnitLaneConfig};
+use crate::signal::{
+    EnvelopeFollowerConfig, EnvelopeFollowerNode, NoteEnvelopeConfig, NoteEnvelopeNode,
+};
 
 /// A `ModHost` resolves the host's modulation keys to graph nodes.
 ///
@@ -80,7 +82,7 @@ pub enum Target {
     /// plugin's): the event input of `node` the lane feeds, and the knob the
     /// lane's own cell starts at (the plugin's value as the host mirrors
     /// it). Later writes go through the lane's
-    /// [`LaneControls::set_value`] ([`Modulation::lane`]).
+    /// [`LaneControls::store`] ([`Modulation::lane`]).
     Foreign {
         /// The node hosting the parameter.
         node: NodeKey,
@@ -96,7 +98,7 @@ pub enum Target {
     /// ([`Editor::edge_gain_cell`]), as a native target's is the node's
     /// `Param`: the base the lane's offsets add to, in the gain's own units
     /// (`1.0` is unity), written by whoever sets the edge's gain
-    /// (`Editor::set_edge_gain`, [`LaneControls::set_value`]: one cell, so one
+    /// (`Editor::set_edge_gain`, [`LaneControls::store`]: one cell, so one
     /// writer). A route modulates around the base and its removal returns to
     /// it. The edge's entry is made when the target first resolves (an edge
     /// with none is a plain addend), and the lane is built once the commit
@@ -112,7 +114,7 @@ pub enum Target {
     /// `0..=1`). Its knob is the node's own mix cell
     /// ([`Editor::mix_cell`]), as an edge's is its gain cell: the base the
     /// lane's offsets add to, written by whoever sets the mix
-    /// ([`Editor::set_mix`], [`LaneControls::set_value`]: one cell, so one
+    /// ([`Editor::set_mix`], [`LaneControls::store`]: one cell, so one
     /// writer). A route modulates around the base and its removal returns to
     /// it. The lane is built once a commit has placed the node's unit.
     Mix {
@@ -309,8 +311,8 @@ impl Bind {
             Self::Native { at, .. } | Self::Mix { at, .. } => Some(at.node),
             Self::Foreign { to, .. } => Some(to.node),
             Self::Edge { id, .. } => match id.sink {
-                Sink::Port(at) => Some(at.node),
-                Sink::Output(_) => None,
+                PortSink::Port(at) => Some(at.node),
+                PortSink::Output(_) => None,
             },
         }
     }
@@ -421,7 +423,8 @@ struct SourcePlan {
 ///     Clock, Law, Declarations, LfoShape, Polarity, RouteDecl, RouteKey, RouteTarget,
 ///     Source, SourceKey, TargetDecl, TargetKey, Waveform,
 /// };
-/// use tutti_nodes::{Feed, ModHost, Modulation, SvfFilterNode, SvfType, Target};
+/// use tutti_buffers::ChannelLayout;
+/// use tutti_nodes::{Feed, ModHost, Modulation, SvfFilterConfig, SvfFilterNode, SvfType, Target};
 /// use tutti_graph::NodeKey;
 /// use tutti_units::{Depth, Hz, ParamAddr, PhaseIncrement, SampleRate, Samples, UnitParam, Q};
 /// use tutti_rt::{Param, ParamCell};
@@ -431,7 +434,11 @@ struct SourcePlan {
 /// let params = editor.insert(
 ///     filter,
 ///     "svf",
-///     SvfFilterNode::<f32>::new(SvfType::LowPass, Hz::new(1_000.0), Q::new(0.7)),
+///     SvfFilterNode::<f32>::from(
+///         SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
+///             .freq(Hz::new(1_000.0))
+///             .q(Q::new(0.7)),
+///     ),
 /// )
 /// .controls;
 /// // A native target's range cell exists once its node is placed.
@@ -971,16 +978,19 @@ impl Modulation {
             let replacing = rebuilt.contains(&source);
             match plan.decl.kind {
                 SignalKind::Follower { .. } => {
-                    let mut node = EnvelopeFollowerNode::from_decl(&plan.decl, plan.width)
-                        .expect("a follower's declaration");
+                    let mut node = EnvelopeFollowerNode::from(
+                        EnvelopeFollowerConfig::from_decl(plan.width, &plan.decl)
+                            .expect("a follower's declaration"),
+                    );
                     if replacing {
                         node = node.replacing();
                     }
                     editor.insert(plan.key, "envelope-follower", ForkByClone(node));
                 }
                 SignalKind::NoteEnvelope { .. } => {
-                    let mut node =
-                        NoteEnvelopeNode::from_decl(&plan.decl).expect("a note envelope's");
+                    let mut node = NoteEnvelopeNode::from(
+                        NoteEnvelopeConfig::from_decl(&plan.decl).expect("a note envelope's"),
+                    );
                     if replacing {
                         node = node.replacing();
                     }
@@ -1041,8 +1051,14 @@ impl Modulation {
                         .set_param_range(*at, ParamRange::new(min, max))
                         .expect("checked: a node, and compile refuses a NaN bound");
                     let cell = editor.param_range_cell(*at);
-                    let node =
-                        ControlLaneNode::for_unit(at.param, program.clone(), knob.clone(), cell);
+                    let mut config = UnitLaneConfig::new(at.param, program.clone());
+                    if let Some(knob) = knob.clone() {
+                        config = config.knob(knob);
+                    }
+                    if let Some(cell) = cell {
+                        config = config.range(cell);
+                    }
+                    let node = ControlLaneNode::from(config);
                     let controls = editor.insert(key, "control-lane", node).controls;
                     editor
                         .spec_mut()
@@ -1053,11 +1069,10 @@ impl Modulation {
                     editor
                         .set_edge_gain_range(*id, ParamRange::new(min, max))
                         .expect("checked: the edge, and compile refuses a NaN bound");
-                    let node = ControlLaneNode::for_unit(
-                        EdgeGain::ADDR,
-                        program.clone(),
-                        Some(knob.clone()),
-                        Some(range.clone()),
+                    let node = ControlLaneNode::from(
+                        UnitLaneConfig::new(EdgeGain::ADDR, program.clone())
+                            .knob(knob.clone())
+                            .range(range.clone()),
                     );
                     let controls = editor.insert(key, "control-lane", node).controls;
                     editor
@@ -1069,11 +1084,10 @@ impl Modulation {
                     editor
                         .set_param_range(*at, ParamRange::new(min, max))
                         .expect("checked: the node, and compile refuses a NaN bound");
-                    let node = ControlLaneNode::for_unit(
-                        NodeMix::ADDR,
-                        program.clone(),
-                        Some(knob.clone()),
-                        Some(range.clone()),
+                    let node = ControlLaneNode::from(
+                        UnitLaneConfig::new(NodeMix::ADDR, program.clone())
+                            .knob(knob.clone())
+                            .range(range.clone()),
                     );
                     let controls = editor.insert(key, "control-lane", node).controls;
                     editor
@@ -1082,7 +1096,12 @@ impl Modulation {
                     controls
                 }
                 Bind::Foreign { to, id, knob, .. } => {
-                    let node = ControlLaneNode::by_id(*id, program.clone(), *knob, (min, max));
+                    let mut config =
+                        ForeignLaneConfig::new(*id, program.clone(), ParamRange::new(min, max));
+                    if let Some(knob) = *knob {
+                        config = config.knob(knob);
+                    }
+                    let node = ControlLaneNode::from(config);
                     let controls = editor.insert(key, "control-lane", node).controls;
                     editor
                         .spec_mut()
@@ -1427,7 +1446,7 @@ impl Modulation {
             .flat_map(|(at, es)| es.iter().map(move |e| (at, e)))
         {
             // A feedback edge is a declared cycle, delayed: not a path.
-            if let Edge::Direct(Source::Node(p)) = edge {
+            if let Edge::Direct(PortSource::Node(p)) = edge {
                 link(p.node, at.node);
             }
         }
@@ -1446,7 +1465,7 @@ impl Modulation {
         // A lane driving the gain of an edge into a port runs before the
         // node.
         for (id, g) in &spec.gains {
-            if let (Sink::Port(at), Some(from)) = (id.sink, g.source) {
+            if let (PortSink::Port(at), Some(from)) = (id.sink, g.source) {
                 link(from.node, at.node);
             }
         }
@@ -1560,7 +1579,7 @@ fn wire_feed<F: Float>(editor: &mut Editor<F>, key: NodeKey, feed: Option<Feed>)
             for port in 0..width {
                 t.edges.insert(
                     InPort { node: key, port },
-                    vec![Edge::Direct(Source::Node(OutPort { node: from, port }))],
+                    vec![Edge::Direct(PortSource::Node(OutPort { node: from, port }))],
                 );
             }
         }
@@ -1587,7 +1606,7 @@ fn unwire_feed<F: Float>(
             let t = &mut editor.spec_mut().topology;
             for port in 0..width.count() {
                 let at = InPort { node: key, port };
-                let ours = Edge::Direct(Source::Node(OutPort { node: from, port }));
+                let ours = Edge::Direct(PortSource::Node(OutPort { node: from, port }));
                 t.disconnect(at, ours);
             }
         }

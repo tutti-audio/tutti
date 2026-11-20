@@ -33,15 +33,15 @@
 //!
 //! An entry that reads an asset takes the asset's [`Identity`](tutti_platform::Identity)
 //! on the worker that loads it (a file's is its path and stamp, bytes' is minted
-//! once), and [`Session::refresh_pool`] takes it again on a worker and loads
-//! again the entries whose asset changed; the diff itself never reads metadata.
+//! once), and [`Session::refresh_pool`] takes it again, where the app runs it, and
+//! [`Session::apply`] loads again the entries whose asset changed; the diff itself never reads metadata.
 //!
 //! # Stages
 //!
-//! A [`Load`] has one to two stages, each on a named thread: a worker of the
-//! session's executor ([`Load::on_worker`]), a worker and then the main thread
-//! ([`Load::on_worker_then_main`]), the session's own thread
-//! ([`Load::on_session`]), or none ([`Load::ready`]). At most
+//! A [`PoolLoad`] has one to two stages, each on a named thread: a worker of the
+//! session's executor ([`PoolLoad::on_worker`]), a worker and then the main thread
+//! ([`PoolLoad::on_worker_then_main`]), the session's own thread
+//! ([`PoolLoad::on_session`]), or none ([`PoolLoad::ready`]). At most
 //! [`PoolConfig::parallel_loads`] worker stages run at once; the rest wait in
 //! declaration order. A stage on the main thread or the session's thread runs
 //! in an [`update`](Session::update) on it.
@@ -77,15 +77,14 @@ pub use data::{AudioEntry, AudioFile, StreamInfo, Tier, audio_file};
 #[cfg(feature = "soundfont")]
 pub use data::{SoundFontFile, soundfont};
 pub use entry::{
-    Declared, IntoPool, Life, Load, LoadError, Owned, PoolEntry, PoolSet, Retention, Sharing,
+    Declared, IntoPool, Life, LoadError, Owned, PoolEntry, PoolLoad, PoolSet, Retention, Sharing,
     stranded_loads,
 };
 pub(crate) use entry::{Defer, Staged};
-pub use job::{PoolJobError, PoolLoaded, RefreshPool};
+pub use job::{PoolJobError, PoolLoaded};
 pub use key::PoolKey;
 pub use open::OpenCx;
-pub(crate) use refresh::Checked;
-pub use refresh::RefreshReport;
+pub use refresh::{RefreshError, RefreshPool, RefreshReport, RefreshedPool};
 pub use report::{PoolOutcome, PoolReport};
 pub(crate) use table::Pool;
 pub use table::{HandleError, PoolError, PoolEvent, PoolState, RetryError, WhenLoadedError};
@@ -122,9 +121,9 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     ///
     /// [`PoolError::DuplicateKey`] for a key the set names twice;
     /// [`PoolError::NeedsMainThread`] for a key whose own load has a stage on
-    /// the main thread ([`Load::on_worker_then_main`]) when no update has run
+    /// the main thread ([`PoolLoad::on_worker_then_main`]) when no update has run
     /// on the main thread and this call is not on it. A key of the same kind
-    /// whose load is [`Load::on_worker`] is not refused. The call refuses the
+    /// whose load is [`PoolLoad::on_worker`] is not refused. The call refuses the
     /// set whole: nothing of it is applied.
     pub fn pool<P>(&mut self, parts: impl IntoPool<P, C::Float>) -> Result<(), PoolError<P>>
     where
@@ -212,14 +211,15 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
         self.pool.entries.when_loaded(key, Box::new(then))
     }
 
-    /// Checks the assets the pool's entries read, on a worker, and loads again
-    /// the entries whose asset changed.
+    /// The check of the assets the pool's entries read, as a value the app
+    /// runs.
     ///
     /// Each entry that reads an asset took the asset's
     /// [`Identity`](tutti_platform::Identity) when it loaded (a file's is its
-    /// path with its length and modification time). The check takes each
-    /// identity again and compares: an entry whose identity differs reloads as
-    /// it does for a changed identity (the old value stays until the new one
+    /// path with its length and modification time). [`RefreshPool::run`] takes
+    /// each identity again, anywhere the app likes, and
+    /// [`apply`](Self::apply) compares: an entry whose identity differs reloads
+    /// as it does for a changed identity (the old value stays until the new one
     /// lands, as a [`PoolEvent::Reloaded`]), and two keys that share a load
     /// reload with one. An entry whose asset can no longer be opened keeps what
     /// it has, and is named as unreadable. An entry with no identity (its file
@@ -229,21 +229,19 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// never changes, so it never reloads, and an asset that never has an
     /// identity is not watched.
     ///
+    /// The refresh is cut from the pool as it stands now: an entry released,
+    /// declared again or loaded again before the apply makes it
+    /// [`RefreshError::Stale`], and nothing is applied; run the refresh again.
+    ///
     /// This is the one place the pool reads file metadata: [`pool`](Self::pool)
     /// never does, so a key declared after its file changed shares the loaded
     /// entry until the next refresh, and a plugin binary that changed on disk
-    /// or a provided asset is never detected. The result arrives in a later
-    /// [`update`](Self::update) as a [`RefreshReport`], or as the job's failure.
-    /// Dropping the job cancels the reloads the check would start.
-    pub fn refresh_pool(&mut self) -> crate::Job<RefreshPool> {
-        let assets = self.pool.entries.stamped_files();
-        self.jobs.submit_job(
-            move |_| refresh::check(assets),
-            move |session, done, ticket| match done {
-                // A dropped job reloads nothing.
-                Ok(checked) => ticket.complete(|| Ok(session.land_pool_refresh(checked))),
-                Err(failed) => ticket.land(Err(failed.into())),
-            },
+    /// or a provided asset is never detected. Dropping the value reloads
+    /// nothing.
+    pub fn refresh_pool(&self) -> RefreshPool {
+        RefreshPool::new(
+            crate::apply::Cut::of(self),
+            self.pool.entries.stamped_files(),
         )
     }
 

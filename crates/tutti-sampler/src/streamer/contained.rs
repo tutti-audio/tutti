@@ -1,6 +1,6 @@
 //! End to end: what a stream reports ([`StreamStatus`]), a
-//! panic contained to its stream, a fallible construction, and the decode
-//! lane. The status cell's own table is `status.rs`'s and the step's is
+//! panic contained to its stream, a fallible construction, and whole-file
+//! decodes. The status cell's own table is `status.rs`'s and the step's is
 //! `record/tests.rs`'s; these drive a streamer, hand-stepped and threaded.
 
 use crate::VoiceWindow;
@@ -102,11 +102,13 @@ impl Driver {
     fn open(&mut self, path: &Path) -> (Stream<f32>, StreamReader<f32>) {
         let opened = match self {
             Self::Hand(s) => {
-                let opening = s.open(path, Placement::HEAD);
+                let opening = s.open_stream(path, StreamStart::HEAD);
                 wait_for_open(s.as_mut(), opening).expect("the file opens")
             }
-            Self::Threaded(t) => wait_for_open_threaded(t.streamer.open(path, Placement::HEAD))
-                .expect("the file opens"),
+            Self::Threaded(t) => {
+                wait_for_open_threaded(&t.streamer, t.streamer.open_stream(path, StreamStart::HEAD))
+                    .expect("the file opens")
+            }
         };
         self.until("the stream to be primed", || {
             opened.0.status().phase != StreamPhase::Opening
@@ -149,7 +151,7 @@ fn a_decode_fault_is_faulted_and_the_voice_reads_silence() {
 
     let mut sampler =
         DiskStreamer::manual(SampleRate::of(rate), Default::default()).expect("builds");
-    let opening = sampler.open(&path, Placement::HEAD);
+    let opening = sampler.open_stream(&path, StreamStart::HEAD);
     let (stream, reader) = wait_for_open(&mut sampler, opening).expect("a cut file opens");
     assert_eq!(
         stream.status().phase,
@@ -182,7 +184,7 @@ fn the_end_of_the_file_is_ended_and_a_loop_has_none() {
     let path = constant_file(dir.path(), "short.wav", 8_000, 1, 0.25);
     let mut sampler =
         DiskStreamer::<_, f32>::manual(SampleRate::SR_8K, Default::default()).expect("builds");
-    let opening = sampler.open(&path, Placement::HEAD);
+    let opening = sampler.open_stream(&path, StreamStart::HEAD);
     let (stream, mut reader) = wait_for_open(&mut sampler, opening).expect("opens");
     assert_eq!(
         stream.status().phase,
@@ -215,7 +217,7 @@ fn underruns_are_read_from_the_status() {
     let path = constant_file(dir.path(), "a.wav", 8_000, 1, 0.25);
     let mut sampler =
         DiskStreamer::<_, f32>::manual(SampleRate::SR_8K, Default::default()).expect("builds");
-    let opening = sampler.open(&path, Placement::HEAD);
+    let opening = sampler.open_stream(&path, StreamStart::HEAD);
     let (stream, reader) = wait_for_open(&mut sampler, opening).expect("opens");
     assert_eq!(stream.status().underruns, 0);
 
@@ -281,21 +283,9 @@ fn a_dropped_streamer_future_publishes_streamer_gone() {
         &bells,
     )
     .expect("the future spawns");
-    let mut opening = Some(streamer.open(&path, Placement::HEAD));
-    let mut opened = None;
-    assert!(
-        polled_until(|| {
-            match opening.take().map(PendingOpen::poll) {
-                Some(Open::Ready(stream, reader)) => opened = Some((stream, reader)),
-                Some(Open::Pending(again)) => opening = Some(again),
-                Some(Open::Failed(error)) => panic!("{error}"),
-                None => {}
-            }
-            opened.is_some()
-        }),
-        "the streamer never answered the open"
-    );
-    let (stream, _reader) = opened.expect("opened");
+    let (stream, _reader) =
+        wait_for_open_threaded(&streamer, streamer.open_stream(&path, StreamStart::HEAD))
+            .expect("the file opens");
     assert_ne!(
         stream.status().phase,
         StreamPhase::Faulted(StreamFault::StreamerGone)
@@ -430,13 +420,13 @@ fn a_panic_while_a_loop_is_captured_faults_that_stream() {
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
-// The decode lane.
+// Whole-file decodes.
 // ---------------------------------------------------------------------------
 
 /// The repo's mp3 with the marker of its length (the `Info` tag of its first
 /// frame) overwritten, so the container reports no frame count: a file that
-/// cannot seek, which a stream decodes whole. Pinned as such, or the lane
-/// tests prove nothing.
+/// cannot seek, which a stream decodes whole. Pinned as such, or the
+/// whole-file tests prove nothing.
 pub(super) fn mp3(dir: &Path) -> PathBuf {
     let mut bytes = std::fs::read(tutti_fixtures::asset("audio/stereo.mp3")).expect("fixture");
     let at = bytes
@@ -453,11 +443,11 @@ pub(super) fn mp3(dir: &Path) -> PathBuf {
     path
 }
 
-/// **A file that cannot seek opens through the decode lane and plays what
+/// **A file that cannot seek opens by being decoded whole, and plays what
 /// the file holds**, hand-stepped and threaded: the first frames of its ring
 /// are the decoded file's.
 #[test]
-fn a_file_that_cannot_seek_opens_through_the_decode_lane() {
+fn a_file_that_cannot_seek_opens_by_decoding_it_whole() {
     let dir = tempfile::tempdir().expect("a temp dir");
     let path = mp3(dir.path());
     let wave = tutti_codec::read_wave::<f32>(&path).expect("the fixture decodes");
@@ -482,61 +472,8 @@ fn a_file_that_cannot_seek_opens_through_the_decode_lane() {
     }
 }
 
-/// **A non-seekable file opens while another stream keeps refilling**: the decode
-/// reads a chunk per cycle, so a stream on the same streamer is refilled in the
-/// cycles the decode takes, and the open completes when the decode does.
-#[test]
-fn a_decode_in_flight_does_not_stop_another_stream() {
-    const RATE: u32 = 4_000;
-    let dir = tempfile::tempdir().expect("a temp dir");
-    let long = constant_file(dir.path(), "long.wav", RATE, 40, 0.25);
-    let near_end = u64::from(RATE) * 38;
-    // A chunk of 256 frames: the fixture takes many cycles to decode.
-    let seams = Seams {
-        decode_chunk: Some(Samples::new(256)),
-        ..Seams::default()
-    };
-    let mut sampler = DiskStreamer::<Manual<f32>, f32>::manual_with(
-        tutti_units::SampleRate::of(f64::from(RATE)),
-        Default::default(),
-        seams,
-    )
-    .expect("builds");
-    let busy = sampler.open(&long, Placement::HEAD);
-    let (_busy, mut reader) = wait_for_open(&mut sampler, busy).expect("opens");
-    let before = reader.ring.window().1;
-
-    let mut opening = sampler.open(mp3(dir.path()), Placement::HEAD);
-    // The first cycle starts the decode, which one chunk does not finish.
-    let _ = sampler.step();
-    opening = match opening.poll() {
-        Open::Pending(again) => again,
-        other => panic!("one chunk of the decode answered the open: {other:?}"),
-    };
-
-    drop(reader.block(
-        Samples::new(near_end as usize),
-        [span(near_end, near_end + 4), span(0, 0)],
-    ));
-    let _ = sampler.step();
-    assert!(
-        reader.ring.window().1 > before,
-        "the other stream was not refilled while the decode ran"
-    );
-    let opening = match opening.poll() {
-        Open::Pending(again) => again,
-        other => panic!("the decode is still running, yet the open answered: {other:?}"),
-    };
-    let _ = sampler.step_until_idle(10_000);
-    assert!(
-        matches!(opening.poll(), Open::Ready(..)),
-        "the open completes once the decode does"
-    );
-}
-
-/// **A panic in the decode is that open's failure, not the lane's**: the
-/// first open of a file whose decode panics fails with `Format`, and the next
-/// open through the same lane succeeds.
+/// **A panic in the decode is that open's failure**: the first read of a file
+/// whose decode panics fails with `Format`, and the next read of it succeeds.
 #[test]
 fn a_panicking_decode_fails_that_open_only() {
     let dir = tempfile::tempdir().expect("a temp dir");
@@ -556,15 +493,15 @@ fn a_panicking_decode_fails_that_open_only() {
         seams,
     )
     .expect("builds");
-    let opening = sampler.open(&path, Placement::HEAD);
+    let opening = sampler.open_stream(&path, StreamStart::HEAD);
     let answer = wait_for_open(&mut sampler, opening);
     assert!(
         matches!(&answer, Err(OpenError::Format)),
         "{:?}",
         answer.map(|_| ())
     );
-    let opening = sampler.open(&path, Placement::HEAD);
-    wait_for_open(&mut sampler, opening).expect("the lane decodes the next file");
+    let opening = sampler.open_stream(&path, StreamStart::HEAD);
+    wait_for_open(&mut sampler, opening).expect("the next read decodes the file");
 }
 
 // ---------------------------------------------------------------------------
@@ -588,7 +525,7 @@ fn a_fork_plays_the_loop_as_applied_not_as_asked() {
         Default::default(),
     )
     .expect("builds");
-    let opening = sampler.open(&path, Placement::HEAD);
+    let opening = sampler.open_stream(&path, StreamStart::HEAD);
     let (stream, reader) = wait_for_open(&mut sampler, opening).expect("a cut file opens");
     let voice = DiskVoice::from_reader(reader, VoiceWindow::from(Beat::new(0.0)));
 
@@ -633,7 +570,7 @@ fn a_stream_names_its_file() {
     let wav = constant_file(dir.path(), "a.wav", 8_000, 1, 0.25);
     let mut sampler =
         DiskStreamer::<_, f32>::manual(SampleRate::SR_8K, Default::default()).expect("builds");
-    let opening = sampler.open(&wav, Placement::HEAD);
+    let opening = sampler.open_stream(&wav, StreamStart::HEAD);
     let (stream, reader) = wait_for_open(&mut sampler, opening).expect("opens");
     assert_eq!(stream.file().asset().name(), wav.display().to_string());
     assert_eq!(stream.file().file_rate(), SampleRate::SR_8K);
@@ -646,7 +583,7 @@ fn a_stream_names_its_file() {
         let wave = tutti_codec::read_wave::<f32>(&mp3).expect("the fixture decodes");
         let mut sampler =
             DiskStreamer::<_, f32>::manual(wave.sample_rate(), Default::default()).expect("builds");
-        let opening = sampler.open(&mp3, Placement::HEAD);
+        let opening = sampler.open_stream(&mp3, StreamStart::HEAD);
         let (stream, _reader) = wait_for_open(&mut sampler, opening).expect("opens");
         assert_eq!(stream.file().asset().name(), mp3.display().to_string());
         assert_eq!(stream.file().file_rate(), wave.sample_rate());
@@ -672,7 +609,7 @@ fn a_fork_of_a_closed_stream_fails_even_after_a_decode_fault() {
         Default::default(),
     )
     .expect("builds");
-    let opening = sampler.open(&path, Placement::HEAD);
+    let opening = sampler.open_stream(&path, StreamStart::HEAD);
     let (stream, reader) = wait_for_open(&mut sampler, opening).expect("a cut file opens");
     assert_eq!(
         stream.status().phase,
@@ -712,7 +649,7 @@ fn a_stream_of_bytes_plays_the_files_frames() {
     let bytes = std::fs::read(&path).expect("fixture");
     let mut sampler =
         DiskStreamer::<_, f32>::manual(wave.sample_rate(), Default::default()).expect("builds");
-    let opening = sampler.open(Asset::from(bytes).hint("flac"), Placement::HEAD);
+    let opening = sampler.open_stream(Asset::from(bytes).hint("flac"), StreamStart::HEAD);
     let (stream, mut reader) = wait_for_open(&mut sampler, opening).expect("opens");
     assert!(
         stream.file().resident().is_none(),
@@ -745,8 +682,7 @@ impl tutti_platform::Open for Anonymous {
     }
 }
 
-/// A streamer whose decode thread counts the whole-file decodes it is asked
-/// for.
+/// A streamer whose opens count the whole-file decodes they run.
 fn counting_streamer() -> (
     DiskStreamer<Manual<f32>, f32>,
     Arc<std::sync::atomic::AtomicUsize>,
@@ -777,7 +713,7 @@ fn a_bytes_asset_opened_twice_decodes_once() {
     let asset = Asset::from(bytes).hint("mp3");
     let (mut sampler, decodes) = counting_streamer();
     for _ in 0..2 {
-        let opening = sampler.open(asset.clone(), Placement::HEAD);
+        let opening = sampler.open_stream(asset.clone(), StreamStart::HEAD);
         wait_for_open(&mut sampler, opening).expect("opens");
     }
     assert_eq!(decodes.load(Ordering::SeqCst), 1, "decoded again");
@@ -795,7 +731,7 @@ fn an_asset_without_identity_is_never_cached() {
     assert!(asset.identity().is_none(), "setup");
     let (mut sampler, decodes) = counting_streamer();
     for _ in 0..2 {
-        let opening = sampler.open(asset.clone(), Placement::HEAD);
+        let opening = sampler.open_stream(asset.clone(), StreamStart::HEAD);
         wait_for_open(&mut sampler, opening).expect("opens");
     }
     assert_eq!(decodes.load(Ordering::SeqCst), 2, "cached");

@@ -2,6 +2,7 @@
 //! process path. The panner tests are `spatial_rt_no_alloc.rs`.
 
 use tutti_buffers::{Mono, MonoMut};
+use tutti_nodes::ConvolverNode;
 use tutti_units::Drive;
 use tutti_units::{SampleRate, Samples, Seconds};
 
@@ -29,10 +30,9 @@ fn gate_at<N: tutti_graph::IntoNode>(node: N, block: usize) {
 #[test]
 fn convolver_process_is_allocation_free() {
     use tutti_fixtures::signal::decay_ir;
-    use tutti_nodes::ConvolverNode;
 
     let ir = decay_ir(2048, Seconds::new(0.3), SampleRate::SR_48K);
-    gate(ConvolverNode::new(Mono::new(&ir), Samples::new(512)));
+    gate(mono_node(Mono::new(&ir), Samples::new(512)));
 }
 #[test]
 fn fir_convolver_process_is_allocation_free() {
@@ -47,23 +47,20 @@ fn fir_convolver_process_is_allocation_free() {
         .design(SampleRate::SR_48K, &[bell])
         .unwrap();
     gate(
-        FirConvolverConfig::new(tutti_buffers::ChannelLayout::STEREO, &fir)
-            .block_size(Samples::new(64))
-            .build::<f32>()
-            .unwrap(),
+        ConvolverNode::<f32>::try_from(
+            FirConvolverConfig::new(tutti_buffers::BusTopology::STEREO, &fir)
+                .block_size(Samples::new(64)),
+        )
+        .unwrap(),
     );
 }
 #[test]
 fn dual_mono_convolver_process_is_allocation_free() {
     use tutti_fixtures::signal::decay_ir;
-    use tutti_nodes::ConvolverNode;
 
     let ir_l = decay_ir(2048, Seconds::new(0.3), SampleRate::SR_48K);
     let ir_r = decay_ir(2048, Seconds::new(0.4), SampleRate::SR_48K);
-    gate(
-        ConvolverNode::per_channel(&[Mono::new(&ir_l), Mono::new(&ir_r)], Samples::new(512))
-            .unwrap(),
-    );
+    gate(per_channel_node(&[Mono::new(&ir_l), Mono::new(&ir_r)], Samples::new(512)).unwrap());
 }
 
 /// The incremental accumulation runs in every block between two partition
@@ -72,11 +69,10 @@ fn dual_mono_convolver_process_is_allocation_free() {
 #[test]
 fn convolver_mid_cycle_blocks_are_allocation_free() {
     use tutti_fixtures::signal::decay_ir;
-    use tutti_nodes::ConvolverNode;
 
     let ir = decay_ir(8192, Seconds::new(0.3), SampleRate::SR_48K);
     for block in [37usize, 100, 128, 1000] {
-        gate_at(ConvolverNode::new(Mono::new(&ir), Samples::new(256)), block);
+        gate_at(mono_node(Mono::new(&ir), Samples::new(256)), block);
     }
 }
 
@@ -139,7 +135,6 @@ fn convolver_tail_levels_are_allocation_free() {
 #[test]
 fn folded_six_channel_convolver_process_is_allocation_free() {
     use tutti_fixtures::signal::decay_ir;
-    use tutti_nodes::ConvolverNode;
 
     let irs: Vec<Vec<f32>> = (0..6)
         .map(|c| {
@@ -151,7 +146,7 @@ fn folded_six_channel_convolver_process_is_allocation_free() {
         })
         .collect();
     let refs: Vec<Mono<'_, f32>> = irs.iter().map(|ir| Mono::new(ir)).collect();
-    gate(ConvolverNode::folded(&refs, Samples::new(256)).unwrap());
+    gate(folded_node(&refs, Samples::new(256)).unwrap());
 }
 
 /// Every curve of the shaper, plain and at every oversampling factor, unfed and with its drive
@@ -160,7 +155,7 @@ fn folded_six_channel_convolver_process_is_allocation_free() {
 #[test]
 fn distortion_process_is_allocation_free_fed_and_unfed() {
     use tutti_graph::contract::Direct;
-    use tutti_nodes::{DistortionNode, OversamplingFactor, ShapeKind};
+    use tutti_nodes::{DistortionConfig, DistortionNode, OversamplingFactor, ShapeKind};
     use tutti_units::SampleRate;
 
     let kinds = [
@@ -183,9 +178,14 @@ fn distortion_process_is_allocation_free_fed_and_unfed() {
         let mut unfed: Vec<Vec<f32>> = Vec::new();
         for fed in [false, true] {
             let node = match factor {
-                None => DistortionNode::<f32>::with_channels(3u16, kind, Drive::new(2.0)),
-                Some(f) => DistortionNode::<f32>::with_channels(3u16, kind, Drive::new(2.0))
-                    .oversampling(f),
+                None => DistortionNode::<f32>::from(
+                    DistortionConfig::new(3u16, kind).drive(Drive::new(2.0)),
+                ),
+                Some(f) => DistortionNode::<f32>::from(
+                    DistortionConfig::new(3u16, kind)
+                        .drive(Drive::new(2.0))
+                        .oversampling(f),
+                ),
             };
             let mut node = Direct::new(node, SampleRate::SR_48K, 64);
             assert_eq!(
@@ -241,7 +241,9 @@ fn distortion_process_is_allocation_free_fed_and_unfed() {
 #[test]
 fn distortion_antialiasing_is_allocation_free_fed_and_unfed() {
     use tutti_graph::contract::Direct;
-    use tutti_nodes::{Antialiasing, DistortionNode, OversamplingFactor, ShapeKind};
+    use tutti_nodes::{
+        Antialiasing, DistortionConfig, DistortionNode, OversamplingFactor, ShapeKind,
+    };
     use tutti_units::SampleRate;
 
     let kinds = [
@@ -257,13 +259,15 @@ fn distortion_antialiasing_is_allocation_free_fed_and_unfed() {
         for order in [Antialiasing::FirstOrder, Antialiasing::SecondOrder] {
             for oversampled in [false, true] {
                 for fed in [false, true] {
-                    let node = DistortionNode::<f32>::with_channels(3u16, kind, Drive::new(2.0))
+                    let config = DistortionConfig::new(3u16, kind)
+                        .drive(Drive::new(2.0))
                         .antialiasing(order);
-                    let node = if oversampled {
-                        node.oversampling(OversamplingFactor::X4)
+                    let config = if oversampled {
+                        config.oversampling(OversamplingFactor::X4)
                     } else {
-                        node
+                        config
                     };
+                    let node = DistortionNode::<f32>::from(config);
                     let mut node = Direct::new(node, SampleRate::SR_48K, 64);
                     for (c, x) in node.inputs_mut().iter_mut().enumerate() {
                         let x = x.into_samples_mut();
@@ -293,4 +297,46 @@ fn distortion_antialiasing_is_allocation_free_fed_and_unfed() {
             }
         }
     }
+}
+
+fn unassigned_bus(width: impl Into<tutti_buffers::ChannelLayout>) -> tutti_buffers::BusTopology {
+    tutti_buffers::BusTopology::unassigned(width.into()).expect("a test width fits a bus")
+}
+
+/// A one-channel convolver over `ir`.
+fn mono_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::Sample>(
+    ir: tutti_buffers::Mono<'_, S>,
+    block_size: tutti_units::Samples,
+) -> tutti_nodes::ConvolverNode<F> {
+    tutti_nodes::ConvolverNode::try_from(
+        tutti_nodes::ConvolverConfig::new(tutti_buffers::BusTopology::MONO, &[ir])
+            .block_size(block_size),
+    )
+    .expect("one response on a mono bus")
+}
+
+/// One response per channel, at as many unassigned channels as responses.
+fn per_channel_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::Sample>(
+    irs: &[tutti_buffers::Mono<'_, S>],
+    block_size: tutti_units::Samples,
+) -> Result<tutti_nodes::ConvolverNode<F>, tutti_nodes::ConvolverError> {
+    let width = tutti_buffers::ChannelLayout::try_from(irs.len()).expect("a test width fits");
+    tutti_nodes::ConvolverNode::try_from(
+        tutti_nodes::ConvolverConfig::new(unassigned_bus(width), irs).block_size(block_size),
+    )
+}
+
+/// Every input folded to mono, then one response per output, at the engine's placement of
+/// that many channels.
+fn folded_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::Sample>(
+    irs: &[tutti_buffers::Mono<'_, S>],
+    block_size: tutti_units::Samples,
+) -> Result<tutti_nodes::ConvolverNode<F>, tutti_nodes::ConvolverError> {
+    let width = tutti_buffers::ChannelLayout::try_from(irs.len()).expect("a test width fits");
+    let bus = tutti_buffers::BusTopology::default_for(width).expect("a test width fits a bus");
+    tutti_nodes::ConvolverNode::try_from(
+        tutti_nodes::ConvolverConfig::new(bus, irs)
+            .folded()
+            .block_size(block_size),
+    )
 }

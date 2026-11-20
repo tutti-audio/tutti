@@ -1,6 +1,6 @@
 //! [`FirConvolverConfig`]: a linear-phase filter through the convolver.
 
-use tutti_buffers::ChannelLayout;
+use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_dsp::{Fir, LinearPhaseDesign, MatchedBell, Sos, Tilt};
 use tutti_graph::Node;
 use tutti_units::{Db, Hz, Q, SampleRate, Samples, Tail};
@@ -28,11 +28,16 @@ fn design(bands: &[Sos]) -> Fir {
         .unwrap()
 }
 
+/// `width` channels on the engine's placement, as a bus.
+fn bus(width: u16) -> BusTopology {
+    BusTopology::default_for(ChannelLayout::from_count(width)).expect("a test width fits a bus")
+}
+
 fn node(width: u16, fir: &Fir) -> ConvolverNode<f64> {
-    FirConvolverConfig::new(ChannelLayout::from_count(width), fir)
-        .block_size(Samples::new(BLOCK))
-        .build()
-        .unwrap()
+    ConvolverNode::try_from(
+        FirConvolverConfig::new(bus(width), fir).block_size(Samples::new(BLOCK)),
+    )
+    .unwrap()
 }
 
 /// The node's output for a unit impulse at frame 0 of each channel in `on`, over `frames`.
@@ -129,23 +134,15 @@ fn channels_do_not_couple() {
     }
 }
 
-/// A width of no channels or past a bus is refused by name, never a panic.
+/// A bus of no channels is refused by name, never a panic.
 #[test]
-fn a_wrong_width_is_refused_by_name() {
+fn a_bus_of_no_channels_is_refused_by_name() {
     let fir = design(&bands());
-    let block = Samples::new(BLOCK);
     assert_eq!(
-        FirConvolverConfig::new(ChannelLayout::from_count(0), &fir)
-            .block_size(block)
-            .build::<f32>()
-            .unwrap_err(),
+        ConvolverNode::<f32>::try_from(
+            FirConvolverConfig::new(BusTopology::EMPTY, &fir).block_size(Samples::new(BLOCK))
+        )
+        .unwrap_err(),
         ConvolverError::NoChannels
     );
-    assert!(matches!(
-        FirConvolverConfig::new(ChannelLayout::from_count(17), &fir)
-            .block_size(block)
-            .build::<f32>()
-            .unwrap_err(),
-        ConvolverError::TooWide { channels: 17 }
-    ));
 }

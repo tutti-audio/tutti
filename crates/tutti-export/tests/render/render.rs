@@ -5,7 +5,7 @@
 //! broken and an upmix export came to panic, both with a green suite. Every test
 //! here fails against the code as it was.
 //!
-//! The cases below write WAV, FLAC, Ogg and AIFF (the dev-dependency on
+//! The cases below write WAV, FLAC and AIFF (the dev-dependency on
 //! `tutti-codec` turns every encoder on). `hound` decodes the results back.
 //!
 //! Every graph here is built with `tutti_graph::GraphBuilder` and rendered
@@ -13,12 +13,10 @@
 
 use crate::support;
 use crate::support::{EncodeConfig, ExportConfig, RenderConfig};
-use tutti_buffers::Mono;
+use tutti_buffers::{Bed, ChannelLayout, ChannelTopology, Mono};
 
 use crate::support::{render_to_buffers, render_to_file};
-use tutti_buffers::ChannelTopology;
-use tutti_buffers::{Bed, ChannelLayout};
-use tutti_codec::{FlacLevel, Format, IntDepth, Pcm, Quality};
+use tutti_codec::{FlacLevel, Format, IntDepth, Pcm};
 use tutti_export::{RenderGraph, Resample, Setup};
 use tutti_graph::{Cx, ForkByClone, GraphBuilder, Io, Node, Prepare, Shape, Status};
 use tutti_nodes::testing::{Const, Osc};
@@ -57,13 +55,6 @@ fn flac() -> Format {
     }
 }
 
-/// Ogg Vorbis at the default quality.
-fn vorbis() -> Format {
-    Format::Vorbis {
-        quality: Quality::default(),
-    }
-}
-
 fn config(format: Format, layout: ChannelLayout) -> ExportConfig {
     ExportConfig {
         render: RenderConfig {
@@ -81,12 +72,11 @@ fn config(format: Format, layout: ChannelLayout) -> ExportConfig {
 }
 
 #[test]
-fn all_four_formats_export() {
+fn all_three_formats_export() {
     let d = tempfile::tempdir().unwrap();
     for (f, ext) in [
         (Format::Wav(Pcm::Int24), "wav"),
         (flac(), "flac"),
-        (vorbis(), "ogg"),
         (Format::Aiff(Pcm::Int24), "aiff"),
     ] {
         let p = d.path().join(format!("a.{ext}"));
@@ -240,9 +230,7 @@ fn a_convolver_reports_its_ir_ring_out() {
     let ir = vec![0.5f32; 4096];
     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::MONO);
     let src = g.add(Const::mono(0.5));
-    let conv = g
-        .add_with_controls(tutti_nodes::ConvolverNode::with_ir(Mono::new(&ir)))
-        .0;
+    let conv = g.add_with_controls(convolver(&ir)).0;
     g.connect(src, 0, conv, 0).pipe_output(conv);
 
     assert_eq!(
@@ -260,12 +248,8 @@ fn cascaded_convolvers_sum_their_tails() {
     let b = vec![0.5f32; 2048];
     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::MONO);
     let src = g.add(Const::mono(0.5));
-    let first = g
-        .add_with_controls(tutti_nodes::ConvolverNode::with_ir(Mono::new(&a)))
-        .0;
-    let second = g
-        .add_with_controls(tutti_nodes::ConvolverNode::with_ir(Mono::new(&b)))
-        .0;
+    let first = g.add_with_controls(convolver(&a)).0;
+    let second = g.add_with_controls(convolver(&b)).0;
     g.connect(src, 0, first, 0)
         .connect(first, 0, second, 0)
         .pipe_output(second);
@@ -306,9 +290,7 @@ fn one_silent_node_makes_the_figure_partial_without_losing_it() {
     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::MONO);
     let src = g.add(Const::mono(0.5));
     let quiet = g.add(ForkByClone(Unreporting));
-    let conv = g
-        .add_with_controls(tutti_nodes::ConvolverNode::with_ir(Mono::new(&ir)))
-        .0;
+    let conv = g.add_with_controls(convolver(&ir)).0;
     g.connect(src, 0, quiet, 0)
         .connect(quiet, 0, conv, 0)
         .pipe_output(conv);
@@ -407,9 +389,7 @@ fn resolving_a_reported_graph_keeps_its_own_figure() {
     let ir = vec![0.5f32; 4096];
     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::MONO);
     let src = g.add(Const::mono(0.5));
-    let conv = g
-        .add_with_controls(tutti_nodes::ConvolverNode::with_ir(Mono::new(&ir)))
-        .0;
+    let conv = g.add_with_controls(convolver(&ir)).0;
     g.connect(src, 0, conv, 0).pipe_output(conv);
 
     let reported = built(g, RATE).reported_tail();
@@ -428,10 +408,13 @@ fn resolving_a_reported_graph_keeps_its_own_figure() {
 /// nodes that genuinely have none is load-bearing, not cosmetic.
 #[test]
 fn a_stateless_node_reports_no_tail_rather_than_an_unknown_one() {
+    use tutti_buffers::ChannelLayout;
     use tutti_graph::Node;
+    use tutti_nodes::{DistortionConfig, ShapeKind};
 
-    let dist =
-        tutti_nodes::DistortionNode::<f32>::new(tutti_nodes::ShapeKind::Tanh, Drive::new(1.0));
+    let dist = tutti_nodes::DistortionNode::<f32>::from(
+        DistortionConfig::new(ChannelLayout::STEREO, ShapeKind::Tanh).drive(Drive::new(1.0)),
+    );
     // A kernel node's tail is unknown until it has a rate.
     let dist = tutti_graph::contract::prepared(dist, RATE, 64);
     assert_eq!(dist.shape().tail, tutti_units::Tail::None);
@@ -556,7 +539,6 @@ fn normalized_audio_can_be_written_to_every_format() {
     for (format, ext) in [
         (Format::Wav(Pcm::Int24), "wav"),
         (flac(), "flac"),
-        (vorbis(), "ogg"),
         (Format::Aiff(Pcm::Int24), "aiff"),
     ] {
         s.encode.format = format;
@@ -614,16 +596,6 @@ fn a_resample_reaches_every_format_not_just_wav() {
         (flac_frames as i64 - 48_000).abs() < 512,
         "flac: header says 48000 but payload holds {flac_frames} frames \
          (44100 means the resample was skipped)"
-    );
-
-    // Ogg: same property, read from the final page's granule position.
-    s.encode.format = vorbis();
-    let po = d.path().join("r.ogg");
-    render_to_file(dc(RATE), &s, &FrozenClock, &po).unwrap();
-    let ogg_frames = ogg_granule(&po);
-    assert!(
-        (ogg_frames as i64 - 48_000).abs() < 2048,
-        "ogg: header says 48000 but granule reports {ogg_frames} frames"
     );
 }
 
@@ -837,7 +809,7 @@ fn a_sub_gating_block_render_cannot_be_loudness_normalized() {
     assert!(
         matches!(
             err,
-            tutti_export::Error::Unmeasurable {
+            tutti_export::RenderError::Unmeasurable {
                 reason: Unmeasured::BelowGate,
                 output: Some(0),
                 channels,
@@ -920,48 +892,6 @@ fn flac_frame_count(path: &std::path::Path) -> u64 {
         | (si[17] as u64)
 }
 
-/// Granule position of the last Ogg page — the total frames encoded.
-///
-/// Walks pages by seeking the `OggS` capture pattern rather than stepping
-/// blindly: a page body can contain those four bytes, and a naive walk that
-/// mis-steps once reads a random eight bytes as a granule (it reported 3830784
-/// for a 96000-frame file while I was writing this).
-fn ogg_granule(path: &std::path::Path) -> u64 {
-    let b = std::fs::read(path).unwrap();
-    let mut last = 0i64;
-    let mut i = 0usize;
-    while let Some(off) = find_from(&b, b"OggS", i) {
-        if off + 27 > b.len() {
-            break;
-        }
-        let gran = i64::from_le_bytes(b[off + 6..off + 14].try_into().unwrap());
-        let segs = b[off + 26] as usize;
-        if off + 27 + segs > b.len() {
-            break;
-        }
-        // -1 marks a page that completes no packet; it is not a frame count.
-        if gran >= 0 {
-            last = gran;
-        }
-        let body: usize = b[off + 27..off + 27 + segs]
-            .iter()
-            .map(|&s| s as usize)
-            .sum();
-        i = off + 27 + segs + body;
-    }
-    last as u64
-}
-
-fn find_from(hay: &[u8], needle: &[u8], from: usize) -> Option<usize> {
-    if from >= hay.len() {
-        return None;
-    }
-    hay[from..]
-        .windows(needle.len())
-        .position(|w| w == needle)
-        .map(|p| p + from)
-}
-
 /// Silence cannot be normalized. Owner decision (lane E1): exact silence is
 /// unmeasurable, so it is `Unmeasurable` (`Silent` for a peak target,
 /// `BelowGate` for a loudness one) and nothing is written. It used to be
@@ -1001,7 +931,7 @@ fn normalizing_silence_is_refused() {
         let err = render_normalized_to_file(silence(), &cfg, &FrozenClock, normalize, &path)
             .expect_err("silence has no reading");
         assert!(
-            matches!(&err, tutti_export::Error::Unmeasurable { reason, .. } if *reason == want),
+            matches!(&err, tutti_export::RenderError::Unmeasurable { reason, .. } if *reason == want),
             "{err:?}"
         );
         assert!(!path.exists());
@@ -1120,7 +1050,7 @@ fn an_unmeasurable_rate_fails_rather_than_writing_un_normalized_audio() {
     .expect_err("an unmeasurable rate must not report success");
 
     assert!(
-        matches!(err, tutti_export::Error::Unmeasurable { .. }),
+        matches!(err, tutti_export::RenderError::Unmeasurable { .. }),
         "expected Unmeasurable, got {err:?}"
     );
 }
@@ -1276,7 +1206,7 @@ fn a_zero_width_export_is_rejected_not_a_divide_by_zero() {
     )
     .expect_err("a zero-channel render must not report success");
     assert!(
-        matches!(err, tutti_export::Error::UnsupportedChannels),
+        matches!(err, tutti_export::RenderError::UnsupportedChannels),
         "expected UnsupportedChannels, got {err:?}"
     );
 }
@@ -1287,7 +1217,7 @@ fn a_zero_width_export_is_rejected_not_a_divide_by_zero() {
 /// renders.
 #[test]
 fn a_graph_with_no_place_in_the_file_is_refused() {
-    use tutti_export::{ConfigError, Error};
+    use tutti_export::{ConfigError, RenderError};
     let five = || {
         let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::from(5u16));
         let id = g.add(Const::new(0.25, ChannelLayout::from(5u16)));
@@ -1303,7 +1233,7 @@ fn a_graph_with_no_place_in_the_file_is_refused() {
         assert!(
             matches!(
                 err,
-                Err(Error::InvalidConfig(ConfigError::Placement(
+                Err(RenderError::InvalidConfig(ConfigError::Placement(
                     tutti_buffers::FoldError::Unplaced { channel, .. }
                 ))) if channel == usize::from(width)
             ),
@@ -1334,7 +1264,7 @@ fn four_buses(root: Option<ChannelTopology>) -> RenderGraph {
 }
 
 /// The first frame of every plane of a render.
-fn first_frame(graph: &mut RenderGraph, width: u16) -> Result<Vec<f32>, tutti_export::Error> {
+fn first_frame(graph: &mut RenderGraph, width: u16) -> Result<Vec<f32>, tutti_export::RenderError> {
     let cfg = config(Format::Wav(Pcm::Float32), ChannelLayout::from(width));
     let out = render_to_buffers(graph, &cfg, &FrozenClock)?;
     Ok(out.planes().iter().map(|p| p[0]).collect())
@@ -1364,15 +1294,15 @@ fn a_declared_root_is_what_the_file_is_placed_from() {
     // Four buses cannot be placed in a stereo file.
     assert!(matches!(
         first_frame(&mut graph, 2),
-        Err(tutti_export::Error::InvalidConfig(ConfigError::Placement(
-            FoldError::Unplaced { channel: 2, .. }
-        )))
+        Err(tutti_export::RenderError::InvalidConfig(
+            ConfigError::Placement(FoldError::Unplaced { channel: 2, .. })
+        ))
     ));
     // A declaration of another width than the graph is refused.
     let mut graph = four_buses(Some(ChannelTopology::unassigned(ChannelLayout::from(6u16))));
     assert!(matches!(
         first_frame(&mut graph, 6),
-        Err(tutti_export::Error::InvalidConfig(ConfigError::Root(
+        Err(tutti_export::RenderError::InvalidConfig(ConfigError::Root(
             tutti_graph::RootError::Width { .. }
         )))
     ));
@@ -1464,4 +1394,13 @@ fn export_spends_the_ceiling_of_a_node_that_narrows_its_tail() {
     let out = render_to_buffers(graph, &cfg, &FrozenClock).unwrap();
     let duration = 8_820; // 0.2 s at 44.1 kHz
     assert_eq!(out.frames().get(), duration + 4_000);
+}
+
+/// A one-channel convolver over `ir`, with the default head partition.
+fn convolver(ir: &[f32]) -> tutti_nodes::ConvolverNode<f32> {
+    tutti_nodes::ConvolverNode::try_from(tutti_nodes::ConvolverConfig::new(
+        tutti_buffers::BusTopology::MONO,
+        &[Mono::new(ir)],
+    ))
+    .expect("one response on a mono bus")
 }

@@ -51,13 +51,13 @@
 //!
 //! ```rust
 //! use tutti_buffers::MaxBlock;
-//! use tutti_graph::{OutPort, Source};
+//! use tutti_graph::{OutPort, PortSource};
 //! use tutti_units::{Beat, Bpm, SampleRate, Samples, Tail};
 //! use tutti_buffers::ChannelLayout;
 //! use tutti_buffers::InterleavedMut;
 //! use tutti_graph::NodeKey;
 //! use tutti_engine::Engine;
-//! use tutti_timeline::{MotionEvent, Timeline, Transport};
+//! use tutti_timeline::{MotionCommand, Timeline, Transport};
 //! use tutti_graph::{Cx, Editor, ForkByClone, Io, Node, Prepare, Shape, Status};
 //!
 //! // A node reads the transport from each block's `Env`. This one puts the beat
@@ -92,7 +92,7 @@
 //! let beats = NodeKey(1);
 //! editor.insert(beats, "beats", ForkByClone(Beats));
 //! editor.spec_mut().topology.set_outputs((0..2)
-//!     .map(|port| Source::Node(OutPort { node: beats, port })));
+//!     .map(|port| PortSource::Node(OutPort { node: beats, port })));
 //! editor.commit().expect("the graph compiles");
 //!
 //! let engine = Engine::new(&transport, &mut editor, executor, tutti_engine::BlockDates::Os).expect("within the limits");
@@ -104,7 +104,7 @@
 //! transport.settings().set_tempo(Bpm::of(90.0));
 //! transport
 //!     .motion()
-//!     .try_send(MotionEvent::play_from(Beat::new(8.0)))
+//!     .try_send(MotionCommand::play_from(Beat::new(8.0)))
 //!     .expect("the motion queue has room at startup");
 //!
 //! let mut block = vec![0.0f32; 256 * 2];

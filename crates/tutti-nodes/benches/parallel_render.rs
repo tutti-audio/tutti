@@ -44,10 +44,10 @@ use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_m
 use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_graph::WorkerPool;
-use tutti_graph::{Edge, InPort, OutPort, Source};
+use tutti_graph::{Edge, InPort, OutPort, PortSource};
 use tutti_graph::{Editor, Executor, Prepare, TransportPosition, Unforkable};
 use tutti_nodes::testing::Osc;
-use tutti_nodes::{SvfFilterNode, SvfType};
+use tutti_nodes::{SvfFilterConfig, SvfFilterNode, SvfType};
 use tutti_units::{Hz, Q, SampleRate, Samples};
 
 const SR: f64 = 48_000.0;
@@ -58,7 +58,7 @@ const WORKERS: [usize; 4] = [1, 2, 4, 8];
 fn out(ed: &mut Editor, from: NodeKey) {
     ed.spec_mut().topology.connect_output(
         0,
-        Source::Node(OutPort {
+        PortSource::Node(OutPort {
             node: from,
             port: 0,
         }),
@@ -68,7 +68,7 @@ fn out(ed: &mut Editor, from: NodeKey) {
 fn wire(ed: &mut Editor, node: NodeKey, port: u16, from: NodeKey) {
     ed.spec_mut().topology.edges.insert(
         InPort { node, port },
-        vec![Edge::Direct(Source::Node(OutPort {
+        vec![Edge::Direct(PortSource::Node(OutPort {
             node: from,
             port: 0,
         }))],
@@ -92,7 +92,7 @@ fn wide(lanes: usize, depth: usize, workers: usize) -> Executor {
     }
     // One silent global output, which each lane's end joins as a source: the
     // graph's fan-in sums them.
-    ed.spec_mut().topology.set_outputs([Source::Zero]);
+    ed.spec_mut().topology.set_outputs([PortSource::Zero]);
     for lane in 0..lanes {
         let base = 1_000 * (lane as u64 + 1);
         let osc = NodeKey(base);
@@ -103,10 +103,10 @@ fn wide(lanes: usize, depth: usize, workers: usize) -> Executor {
             ed.insert(
                 k,
                 "svf",
-                SvfFilterNode::<f32>::new(
-                    SvfType::LowPass,
-                    Hz::new(500.0 + (lane * depth + i) as f64 * 3.0),
-                    Q::new(0.7),
+                SvfFilterNode::<f32>::from(
+                    SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
+                        .freq(Hz::new(500.0 + (lane * depth + i) as f64 * 3.0))
+                        .q(Q::new(0.7)),
                 ),
             );
             wire(&mut ed, k, 0, last);
@@ -182,13 +182,13 @@ fn tiny(lanes: usize, light: bool, workers: usize) -> Executor {
     ed.spec_mut().topology.inputs = ChannelLayout::MONO;
     // One silent global output, which each lane's end joins as a source: the
     // graph's fan-in sums them.
-    ed.spec_mut().topology.set_outputs([Source::Zero]);
+    ed.spec_mut().topology.set_outputs([PortSource::Zero]);
     for lane in 0..lanes {
         let k = NodeKey(lane as u64 + 1);
         gain(&mut ed, k, lane, light);
         ed.spec_mut().topology.edges.insert(
             InPort { node: k, port: 0 },
-            vec![Edge::Direct(Source::Global(0))],
+            vec![Edge::Direct(PortSource::Global(0))],
         );
         out(&mut ed, k);
     }
@@ -221,7 +221,7 @@ fn mixed(lanes: usize, depth: usize, fan: usize, light: bool, workers: usize) ->
     }
     // One silent global output, which each lane's end joins as a source: the
     // graph's fan-in sums them.
-    ed.spec_mut().topology.set_outputs([Source::Zero]);
+    ed.spec_mut().topology.set_outputs([PortSource::Zero]);
     for lane in 0..lanes {
         let base = 1_000 * (lane as u64 + 1);
         let osc = NodeKey(base);
@@ -232,10 +232,10 @@ fn mixed(lanes: usize, depth: usize, fan: usize, light: bool, workers: usize) ->
             ed.insert(
                 k,
                 "svf",
-                SvfFilterNode::<f32>::new(
-                    SvfType::LowPass,
-                    Hz::new(500.0 + (lane * depth + i) as f64 * 3.0),
-                    Q::new(0.7),
+                SvfFilterNode::<f32>::from(
+                    SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
+                        .freq(Hz::new(500.0 + (lane * depth + i) as f64 * 3.0))
+                        .q(Q::new(0.7)),
                 ),
             );
             wire(&mut ed, k, 0, last);

@@ -37,11 +37,13 @@ fn devices_over_the_stub_is_empty_and_quiet() {
 /// the named error rather than returning an endpoint that does nothing.
 #[test]
 fn virtual_endpoints_report_unsupported() {
-    let spec = VirtualSpec::new(tutti_ump::EndpointName::new("tutti-stub").unwrap());
-    assert!(matches!(
-        open_virtual_source(&spec),
-        Err(MidiHardwareError::Unsupported(_))
-    ));
+    let spec = VirtualSpec::new(
+        tutti_ump::EndpointName::new("tutti-stub").unwrap(),
+        tutti_fixtures::midi::device_identity(),
+        None,
+    );
+    // The stub publishes nothing, so the stand-in marker is enough.
+    let main = tutti_fixtures::main_thread();
     let inlets = tutti_midi_runtime::InputInlets::new(
         tutti_graph::EventCapacity::of(8),
         std::time::Duration::ZERO,
@@ -49,7 +51,7 @@ fn virtual_endpoints_report_unsupported() {
     let ports = crate::HardwareMidiInputs::new(inlets);
     let producer = ports.open_input_port("virtual").0;
     assert!(matches!(
-        open_virtual_destination(&spec, producer),
+        open_virtual_endpoint(&spec, producer, main),
         Err(MidiHardwareError::Unsupported(_))
     ));
 }

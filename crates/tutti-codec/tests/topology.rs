@@ -145,59 +145,32 @@ fn the_fixtures_state_their_speakers() {
     }
 }
 
-/// Ogg Vorbis states its speakers by count and writes its planes in the Vorbis
-/// I order (`FL FC FR RL RR LFE` at six); the decoder hands them in the
-/// topology's order, so the plane of each speaker is where the topology says.
-/// Encoded here straight through `vorbis_rs`, one tone per Vorbis-order
-/// plane, so the figures are the spec's table and not our writer's.
-#[cfg(all(feature = "encode-vorbis", feature = "decode-ogg"))]
+/// Ogg Vorbis states its speakers by count and stores its planes in the Vorbis I
+/// order (`FL FC FR RL RR LFE` at six, section 4.3.9); the decoder hands them in
+/// the topology's order, so the plane of each speaker is where the topology says.
+///
+/// `audio/surround_51.ogg` holds one pure tone per speaker: FL 150 Hz, FC 130,
+/// FR 110, BL 90, BR 70, LFE 50, for one second at 44.1 kHz. It was encoded by
+/// libvorbis through ffmpeg from the speakers' WAVE order (`FL FR FC LFE BL BR`),
+/// which the encoder permutes into Vorbis's:
+///
+/// ```text
+/// ffmpeg -f lavfi -i "aevalsrc=0.5*sin(2*PI*150*t)|0.5*sin(2*PI*110*t)|0.5*sin(2*PI*130*t)|0.5*sin(2*PI*50*t)|0.5*sin(2*PI*90*t)|0.5*sin(2*PI*70*t):channel_layout=5.1:sample_rate=44100:duration=1" -c:a libvorbis -q:a 6 surround_51.ogg
+/// ```
+#[cfg(feature = "decode-ogg")]
 #[test]
 fn a_vorbis_six_decodes_in_the_topologys_order() {
-    use std::num::{NonZeroU8, NonZeroU32};
-    use vorbis_rs::{VorbisBitrateManagementStrategy, VorbisEncoderBuilder};
-
-    // Vorbis I section 4.3.9: 6 channels are front left, front centre, front
-    // right, rear left, rear right, LFE.
-    let vorbis_order = [
-        FrontLeft,
-        FrontCenter,
-        FrontRight,
-        BackLeft,
-        BackRight,
-        LowFrequency,
-    ];
-    // One pure tone per plane, each a different frequency (so the identity of a
-    // plane survives the codec's gain, which treats the LFE differently), the
-    // LFE lowest since the encoder low-passes it.
-    let hz =
-        |s: tutti_buffers::Speaker| 150 - 20 * vorbis_order.iter().position(|&x| x == s).unwrap();
+    let hz = |s: tutti_buffers::Speaker| match s {
+        FrontLeft => 150,
+        FrontCenter => 130,
+        FrontRight => 110,
+        BackLeft => 90,
+        BackRight => 70,
+        LowFrequency => 50,
+        other => panic!("{other:?} is not in a 5.1 file"),
+    };
     let rate = 44_100usize;
-    let planes: Vec<Vec<f32>> = vorbis_order
-        .iter()
-        .map(|&s| {
-            (0..rate)
-                .map(|i| {
-                    0.5 * (i as f32 * std::f32::consts::TAU * hz(s) as f32 / rate as f32).sin()
-                })
-                .collect()
-        })
-        .collect();
-    let mut out = Vec::new();
-    let mut enc = VorbisEncoderBuilder::new(
-        NonZeroU32::new(rate as u32).unwrap(),
-        NonZeroU8::new(6).unwrap(),
-        &mut out,
-    )
-    .unwrap()
-    .bitrate_management_strategy(VorbisBitrateManagementStrategy::QualityVbr {
-        target_quality: 0.9,
-    })
-    .build()
-    .unwrap();
-    enc.encode_audio_block(&planes).unwrap();
-    enc.finish().unwrap();
-
-    let wave = read_wave::<f32>(out).expect("decodes");
+    let wave = read_wave::<f32>(asset("surround_51.ogg")).expect("decodes");
     assert_eq!(wave.channels(), 6);
     // Rising zero crossings in the middle half second: `hz / 2` of them.
     let crossings = |c: usize| {

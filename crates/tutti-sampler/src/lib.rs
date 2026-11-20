@@ -117,7 +117,7 @@
 //! - [`MemorySource`]: in-memory playback of a [`Wave`], configured with
 //!   [`MemorySourceConfig`], [`Loop`] and [`VoiceWindow`].
 //! - [`DiskVoice`]: disk-streamed playback, built from the [`StreamReader`] a
-//!   [`DiskStreamer::open`] answers with.
+//!   [`DiskStreamer::adopt`] answers with.
 //! - [`DiskStreamer`]: owns the streamer future; a stream it opens is a
 //!   [`Stream`] (the control side: steer it, drop it to end it) and a
 //!   [`StreamReader`] (the voice's).
@@ -220,9 +220,9 @@ pub use voice::{
 pub(crate) mod streamer;
 
 pub use streamer::{
-    Block, ControlCell, DiskStreamer, DiskStreamerConfig, GUARD_FRAMES, Open, OpenError,
-    PendingOpen, Placement, RefusedPlacement, Running, Stream, StreamFault, StreamFile, StreamId,
-    StreamPhase, StreamReader, StreamStatus,
+    AdoptError, Block, ControlCell, DiskStreamer, DiskStreamerConfig, GUARD_FRAMES, OpenError,
+    OpenStream, OpenedStream, RefusedStreamStart, Running, Stream, StreamFault, StreamFile,
+    StreamId, StreamPhase, StreamReader, StreamStart, StreamStatus,
 };
 
 // The hand-driven streamer cycle, alongside `DiskStreamer::manual`: its driver

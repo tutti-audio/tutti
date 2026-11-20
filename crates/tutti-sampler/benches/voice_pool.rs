@@ -34,9 +34,8 @@ use tutti_buffers::Wave;
 use tutti_graph::contract::Direct;
 use tutti_sampler::testing::MockTransport;
 use tutti_sampler::{
-    DiskStreamer, DiskStreamerConfig, DiskVoice, Loop, Manual, MemorySource, Open, Placement,
-    Playback, SlotId, StepOutcome, Stream, Voice, VoiceNode, VoicePool, VoicePoolHandle,
-    VoiceSource,
+    DiskStreamer, DiskStreamerConfig, DiskVoice, Loop, Manual, MemorySource, Playback, SlotId,
+    StepOutcome, Stream, StreamStart, Voice, VoiceNode, VoicePool, VoicePoolHandle, VoiceSource,
 };
 use tutti_units::{Beat, Bpm, Cents, PlaybackRate, SampleRate, StretchFactor};
 
@@ -328,18 +327,20 @@ fn pool_knobs(
             w.finalize().expect("finalize wav");
             let mut s = DiskStreamer::manual(SampleRate::of(SR), DiskStreamerConfig::default())
                 .expect("streamer builds");
-            let openings: Vec<_> = (0..n).map(|_| s.open(&path, Placement::HEAD)).collect();
+            let opened: Vec<_> = (0..n)
+                .map(|_| {
+                    let read = s.open_stream(&path, StreamStart::HEAD).run();
+                    s.adopt(read.expect("the file reads")).expect("adopts")
+                })
+                .collect();
             for _ in 0..4096 {
                 if s.step() != StepOutcome::Busy {
                     break;
                 }
             }
-            let voices = openings
+            let voices = opened
                 .into_iter()
-                .map(|opening| {
-                    let Open::Ready(stream, reader) = opening.poll() else {
-                        panic!("a primed stream answers its open");
-                    };
+                .map(|(stream, reader)| {
                     Built::Disk(
                         DiskVoice::from_reader(reader, VoiceWindow::from(knobs.start)),
                         stream,

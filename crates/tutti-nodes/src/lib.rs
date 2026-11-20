@@ -17,7 +17,9 @@
 //!   coefficient solve shared across the channels), `EqBandNode`, `CutFilterNode`, a
 //!   Butterworth or Linkwitz-Riley high-pass or low-pass of 6 to 96 dB per octave,
 //!   `BellFilterNode`, a peaking equalizer matched to the analog bell up to Nyquist, and
-//!   `TiltFilterNode`, a first-order tilt about a pivot, and
+//!   `TiltFilterNode`, a first-order tilt about a pivot,
+//!   `GraphicEqNode`, a bank of cookbook peaking bells at the ISO 266 octave or third-octave
+//!   centers, and
 //!   `EnvelopeFilterNode`, an SVF whose cutoff follows the input's level.
 //! - **Crossover** — `CrossoverNode`, which makes `bands × channels` outputs from
 //!   `tutti_dsp::CrossoverBank`, a 2 to 6 band Linkwitz-Riley 4th-order split (the
@@ -104,16 +106,19 @@
 //!
 //! ```rust
 //! # use tutti_buffers::Planes;
-//! use tutti_buffers::MaxBlock;
+//! use tutti_buffers::{ChannelLayout, MaxBlock};
 //! use tutti_units::{Hz, Q, UnitParam};
 //! use tutti_graph::{Prepare, Standalone};
-//! use tutti_nodes::{SvfFilterNode, SvfType};
+//! use tutti_nodes::{SvfFilterConfig, SvfFilterNode, SvfType};
 //! use tutti_units::{SampleRate, Samples};
 //!
 //! // A lowpass alone in a graph, fed by the graph's input. The filter is a
 //! // graph node: inserted, it hands back its `ParamSet` — cutoff, Q and
 //! // gain by `UnitParam` — and the graph prepares it at the graph's rate.
-//! let filter = SvfFilterNode::new(SvfType::LowPass, Hz::new(800.0), Q::new(0.707));
+//! let config = SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
+//!     .freq(Hz::new(800.0))
+//!     .q(Q::new(0.707));
+//! let filter = SvfFilterNode::from(config);
 //! let mut standalone = Standalone::new(filter, Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64))));
 //! let out = standalone.render_input(Planes::new(&[&[1.0; 64]]).unwrap());
 //!
@@ -203,7 +208,7 @@
 //!
 //! - Filters: [`SvfFilterNode`] ([`SvfType`]), [`LadderFilterNode`]
 //!   ([`LadderType`]), [`EqBandNode`], [`CutFilterNode`] ([`CutResponse`]), [`BellFilterNode`],
-//!   [`TiltFilterNode`], [`EnvelopeFilterNode`], [`FirConvolverConfig`] (a
+//!   [`TiltFilterNode`], [`GraphicEqNode`] ([`GraphicBands`]), [`EnvelopeFilterNode`], [`FirConvolverConfig`] (a
 //!   linear-phase equalizer: a [`tutti_dsp::Fir`] through the convolver); the coefficient solvers
 //!   [`SvfDesign::new`](tutti_dsp::SvfDesign::new) and
 //!   [`LadderDesign::new`](tutti_dsp::LadderDesign::new); a node runs in the float of the
@@ -239,8 +244,8 @@
 //! - Modules: [`automation`] (lanes and recording).
 //!
 
-// The fallible constructions are the crossover's (`CrossoverControls::new`,
-// `CrossoverNode::new`), all `CrossoverError`; the rest of this crate has no `Error` type.
+// The fallible constructions are the crossover's (`CrossoverControls::try_from`,
+// `CrossoverNode::try_from`), all `CrossoverError`; the rest of this crate has no `Error` type.
 
 // Per-block control reads and the ramps that keep them from stepping.
 mod buses;
@@ -271,16 +276,17 @@ pub use tutti_units::{
 
 mod click;
 pub use click::{
-    ClickConfig, ClickLevel, ClickLevelError, ClickNode, ClickSettings, ClickState, MetronomeMode,
+    ClickConfig, ClickLevel, ClickLevelError, ClickNode, ClickNodeConfig, ClickSettings,
+    ClickState, MetronomeMode,
 };
 
 mod lfo;
 // `LfoShape` and `Waveform` are re-exported from `tutti-modulation` through
 // `lfo`, so `use tutti_nodes::LfoShape` works.
-pub use lfo::{LfoClock, LfoNode, LfoShape, Waveform};
+pub use lfo::{LfoClock, LfoConfig, LfoNode, LfoShape, Waveform};
 
 mod oscillator;
-pub use oscillator::OscillatorNode;
+pub use oscillator::{OscillatorConfig, OscillatorNode};
 
 mod delay;
 pub use delay::{DelayConfig, DelayKernel, DelayNode, DelaySet};
@@ -294,7 +300,7 @@ pub use tutti_dsp::{
 };
 
 mod distortion;
-pub use distortion::{DistortionKernel, DistortionNode, DistortionSet};
+pub use distortion::{DistortionConfig, DistortionKernel, DistortionNode, DistortionSet};
 // `ShapeKind` and `OversamplingFactor` are in `DistortionNode`'s signatures; what is behind
 // them is `tutti-dsp`'s.
 pub use tutti_dsp::{Antialiasing, OversamplingFactor, ShapeKind};
@@ -312,15 +318,20 @@ pub use tutti_dsp::DcBlockerControls;
 mod filter;
 pub use filter::{
     BellFilterConfig, BellFilterControls, BellFilterKernel, BellFilterNode, BellFilterSet,
-    CrossoverKernel, CrossoverNode, CrossoverSet, CutAlignment, CutFilterConfig, CutFilterControls,
-    CutFilterKernel, CutFilterNode, CutFilterSet, EqBandNode, EqControls, EqKernel,
-    LadderFilterNode, LadderKernel, LadderSet, MIN_CUT_CUTOFF, SvfFilterNode, SvfKernel, SvfSet,
-    TiltFilterConfig, TiltFilterControls, TiltFilterKernel, TiltFilterNode, TiltFilterSet,
+    CrossoverConfig, CrossoverKernel, CrossoverNode, CrossoverSet, CutAlignment, CutFilterConfig,
+    CutFilterControls, CutFilterKernel, CutFilterNode, CutFilterSet, EqBandConfig, EqBandNode,
+    EqControls, EqKernel, LadderFilterConfig, LadderFilterNode, LadderKernel, LadderSet,
+    MIN_CUT_CUTOFF, SvfFilterConfig, SvfFilterNode, SvfKernel, SvfSet, TiltFilterConfig,
+    TiltFilterControls, TiltFilterKernel, TiltFilterNode, TiltFilterSet,
 };
 pub use filter::{
     EnvelopeFilterConfig, EnvelopeFilterKernel, EnvelopeFilterNode, EnvelopeFilterSet,
 };
+pub use filter::{
+    GraphicEqConfig, GraphicEqControls, GraphicEqKernel, GraphicEqNode, GraphicEqSet,
+};
 pub use tutti_dsp::EnvelopeFilterControls;
+pub use tutti_dsp::GraphicBands;
 pub use tutti_dsp::{ButterworthOrder, CutResponse};
 // The types in the filter nodes' signatures stay reachable from here; the
 // algorithms behind them (`SvfDesign`, `LadderDesign`, `CrossoverModel`) are
@@ -369,12 +380,12 @@ pub use tutti_dsp::{AutoPanControls, OscillatorWave, PanLaw, RingModControls, Tr
 // The mixer strip: volume, stereo balance, mute. Ungated: a fader is not a
 // spatial concept.
 mod strip;
-pub use strip::BusStripNode;
+pub use strip::{BusStripConfig, BusStripNode};
 
 // The one node over an effect's algorithm and state: the driver and the trait an
 // algorithm implements to run in it.
 mod kernel;
-pub use kernel::{ControlSignals, Kernel, KernelNode, MAX_SIGNALS};
+pub use kernel::{ControlSignals, Kernel, KernelConfig, KernelNode, MAX_SIGNALS};
 
 pub use params::{At, Control, ControlRead, ControlSet, ControlValid, HasControl, Params};
 
@@ -398,7 +409,9 @@ pub use tutti_dsp::{
 
 // The spatial panners: VBAP speaker panning and binaural HRTF rendering.
 mod spatial;
-pub use spatial::{HrtfBinauralNode, VbapError, VbapPannerNode};
+pub use spatial::{
+    HrtfBinauralConfig, HrtfBinauralNode, VbapError, VbapPannerConfig, VbapPannerNode,
+};
 
 mod modulation;
 pub use modulation::{
@@ -417,7 +430,8 @@ pub use tutti_dsp::{
 // (`SignalSource`): nodes that send a raw value into control lanes.
 mod signal;
 pub use signal::{
-    EnvelopeFollowerNode, NoteEnvelopeNode, SOURCE_EVENT_CAPACITY, SourceNode, SourcePorts,
+    EnvelopeFollowerConfig, EnvelopeFollowerNode, NoteEnvelopeConfig, NoteEnvelopeNode,
+    SOURCE_EVENT_CAPACITY, SourceNode, SourcePorts,
 };
 
 // Declarations compiled and applied to an `Editor` as lanes, signal-source
@@ -425,7 +439,9 @@ pub use signal::{
 mod reconcile;
 pub use reconcile::{Applied, Feed, ModHost, Modulation, ReconcileError, Target};
 mod convolution;
-pub use convolution::{ConvolverError, ConvolverNode, FirConvolverConfig, IrLayout, PortSide};
+pub use convolution::{
+    ConvolverConfig, ConvolverError, ConvolverNode, FirConvolverConfig, IrLayout,
+};
 
 // Test and stimulus nodes (`Const`, `Osc`, `Through`, `Split`, `Sink`): what a
 // test, example or bench wires a graph out of.

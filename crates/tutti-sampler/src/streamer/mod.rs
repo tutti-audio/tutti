@@ -25,7 +25,6 @@ mod io;
 mod loop_body;
 mod loops;
 mod metrics;
-mod oneshot;
 mod open;
 mod prefetch;
 mod record;
@@ -57,7 +56,9 @@ pub use block::Block;
 pub(crate) use block::RingReader;
 pub use control::StreamFile;
 pub use control_cell::ControlCell;
-pub use open::{Open, OpenError, PendingOpen, Placement, RefusedPlacement, StreamReader};
+use decode::Stage;
+pub use decode::{OpenStream, OpenedStream};
+pub use open::{AdoptError, OpenError, RefusedStreamStart, StreamReader, StreamStart};
 pub(crate) use status::StatusCell;
 pub use status::{StreamFault, StreamPhase, StreamStatus};
 pub use stream::Stream;
@@ -76,7 +77,7 @@ pub(crate) use prefetch::RegionBuffer;
 
 use crate::error::Result;
 use decode::Seams;
-use handlers::Handles;
+use handlers::{Handles, build_stream};
 use thread::Built;
 use tutti_platform::Asset;
 use tutti_platform::Executor;
@@ -91,8 +92,10 @@ use tutti_units::SampleRate;
 ///
 /// A host builds one at startup with [`start`](Self::start) and holds it for the
 /// lifetime of the audio engine; dropping it asks the streamer future to end. A
-/// stream is opened with [`open`](Self::open), whose reply is the stream's
-/// control-side [`Stream`] and the [`StreamReader`] a
+/// stream is opened in two steps: [`open_stream`](Self::open_stream) is the
+/// work of reading the file, which the app runs on a thread of its own
+/// ([`OpenStream::run`]), and [`adopt`](Self::adopt) takes what it read back and
+/// answers with the stream's control-side [`Stream`] and the [`StreamReader`] a
 /// [`DiskVoice`](crate::DiskVoice) is built from; [`sample_rate`](Self::sample_rate)
 /// is the session rate it streams at.
 ///
@@ -111,7 +114,7 @@ use tutti_units::SampleRate;
 ///
 /// ```no_run
 /// use tutti_units::Beat;
-/// use tutti_sampler::{DiskStreamer, DiskVoice, Open, Placement, Running, VoiceWindow};
+/// use tutti_sampler::{DiskStreamer, DiskVoice, StreamStart, Running, VoiceWindow};
 ///
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// let executor = tutti_platform::Executor::new();
@@ -123,18 +126,10 @@ use tutti_units::SampleRate;
 ///     &bells,
 /// )?;
 ///
-/// // The streamer opens the file on its own; the reply is polled, and
-/// // a poll that is not ready hands the `PendingOpen` back (awaiting it is the
-/// // other way to wait).
-/// let mut opening = streamer.open("take_1.wav", Placement::HEAD);
-/// let (stream, reader) = loop {
-///     match opening.poll() {
-///         Open::Ready(stream, reader) => break (stream, reader),
-///         Open::Pending(again) => opening = again,
-///         Open::Failed(error) => return Err(error.into()),
-///     }
-///     std::thread::sleep(std::time::Duration::from_millis(1));
-/// };
+/// // Reading the file is the app's work: run it here, or on any thread, then
+/// // hand what it read to the streamer.
+/// let opened = streamer.open_stream("take_1.wav", StreamStart::HEAD).run()?;
+/// let (stream, reader) = streamer.adopt(opened)?;
 ///
 /// // The reader is the voice's, by value: place it at beat 0 for the file's
 /// // full length. `voice` is a graph node: insert it into the graph that
@@ -180,6 +175,8 @@ pub struct DiskStreamer<D, F: RingFloat> {
     driver: D,
     /// The next stream's identity, minted here on the control side.
     next_stream: Mint,
+    /// What a stream's ring is sized and placed by.
+    config: BufferConfig,
 }
 
 // The driver holds a stop handle or a cycle that can't derive `Debug`; print
@@ -240,13 +237,15 @@ impl<F: RingFloat> DiskStreamer<Running, F> {
 
     /// The streamer over `built`, its future spawned.
     fn from_built(built: Built<F>, executor: &Executor) -> Result<Self> {
-        let (streamer_tx, shared) = (built.command_sender(), built.shared());
+        let (streamer_tx, shared, config) =
+            (built.command_sender(), built.shared(), built.config());
 
         Ok(DiskStreamer {
             streamer_tx,
             shared,
             driver: built.start(executor)?,
             next_stream: Mint::new(),
+            config,
         })
     }
 
@@ -285,13 +284,15 @@ impl<F: RingFloat> DiskStreamer<Manual<F>, F> {
     ) -> Result<Self> {
         let bells = Bells::new().map_err(crate::Error::Spawn)?;
         let built = Built::new(256, sample_rate, config.buffer_config, seams, &bells);
-        let (streamer_tx, shared) = (built.command_sender(), built.shared());
+        let (streamer_tx, shared, config) =
+            (built.command_sender(), built.shared(), built.config());
 
         Ok(DiskStreamer {
             streamer_tx,
             shared,
             driver: built.manual(),
             next_stream: Mint::new(),
+            config,
         })
     }
 
@@ -336,24 +337,22 @@ impl<F: RingFloat> DiskStreamer<Manual<F>, F> {
 }
 
 impl<D, F: RingFloat> DiskStreamer<D, F> {
-    /// Opens `asset` as a new stream, its reader starting at `place`, and
-    /// answers with an [`PendingOpen`]: poll it for the stream's [`Stream`] and its
-    /// one [`StreamReader`]. The voice is as wide as the file
-    /// ([`voice_width`](crate::voice_width)); [`open_into`](Self::open_into)
+    /// The reading of `asset` as a new stream, its reader starting at `place`:
+    /// run it ([`OpenStream::run`]) on the thread that reads files, then
+    /// [`adopt`](Self::adopt) what it read for the stream's [`Stream`] and its one
+    /// [`StreamReader`]. The voice is as wide as the file
+    /// ([`voice_width`](crate::voice_width)); [`open_stream_into`](Self::open_stream_into)
     /// asks for another width.
     ///
-    /// Every open is a stream of its own, with its own ring: two opens of one
-    /// file are two streams, and a reader belongs to the open it came from.
-    ///
-    /// Control thread. It waits while the streamer's queue is full, as every
-    /// stream command does. A streamer that is gone answers
-    /// [`OpenError::StreamerGone`] at the first poll.
-    pub fn open(&self, asset: impl Into<Asset>, place: Placement) -> PendingOpen<F> {
+    /// Every adopt is a stream of its own, with its own ring: two opens of one
+    /// file are two streams, and a reader belongs to the open it came from. Nothing
+    /// is read until the value runs, and the streamer is not asked for anything.
+    pub fn open_stream(&self, asset: impl Into<Asset>, place: StreamStart) -> OpenStream<F> {
         self.open_as(asset.into(), place, None)
     }
 
-    /// [`open`](Self::open) for a voice `width` channels wide: the file's
-    /// channels are placed into it by their
+    /// [`open_stream`](Self::open_stream) for a voice `width` channels wide: the
+    /// file's channels are placed into it by their
     /// [`ChannelTopology`](tutti_buffers::ChannelTopology), as
     /// [`memory_voice`](crate::memory_voice) places a wave. A file in another
     /// order than the engine's (a WAV 7.1 lists the rears before the sides) is
@@ -361,34 +360,88 @@ impl<D, F: RingFloat> DiskStreamer<D, F> {
     /// and a mono one takes the centre of a wider frame. A placement that
     /// cannot be made (a channel no speaker names, or a narrowing with an
     /// unordered end: a 5.1 file into 5 channels) is
-    /// [`OpenError::Placement`], and nothing is opened.
-    pub fn open_into(
+    /// [`AdoptError::Placement`], and nothing is opened.
+    pub fn open_stream_into(
         &self,
         asset: impl Into<Asset>,
-        place: Placement,
+        place: StreamStart,
         width: tutti_buffers::ChannelLayout,
-    ) -> PendingOpen<F> {
+    ) -> OpenStream<F> {
         self.open_as(asset.into(), place, Some(width))
     }
 
     fn open_as(
         &self,
         asset: Asset,
-        place: Placement,
+        place: StreamStart,
         width: Option<tutti_buffers::ChannelLayout>,
-    ) -> PendingOpen<F> {
-        let id = StreamId::mint(&self.next_stream);
-        let (reply, answer) = oneshot::oneshot();
-        // A refused send drops the command and with it `reply`, which is how
-        // a gone streamer reaches the caller: the answer is disconnected.
-        let _ = self.streamer_tx.send(StreamerCommand::Open {
-            id,
+    ) -> OpenStream<F> {
+        OpenStream::new(
             asset,
-            start: place.frame(),
+            place,
             width,
-            reply,
-        });
-        PendingOpen::new(id, answer, StreamerPort::new(self.streamer_tx.clone()))
+            std::sync::Arc::clone(&self.shared.cache),
+            #[cfg(codec)]
+            std::sync::Arc::clone(&self.shared.metrics),
+            #[cfg(test)]
+            self.shared.seams.decode_hook.clone(),
+        )
+    }
+
+    /// Puts a read file in service as a stream: builds its ring and sends it to
+    /// the streamer, which feeds it from then on. The stream is the control
+    /// thread's handle and the reader the voice's, by value.
+    ///
+    /// Control thread: it allocates the ring. It never waits: a full command
+    /// queue gives the open back as [`AdoptError::Busy`], to adopt again once
+    /// the streamer has taken what it holds.
+    ///
+    /// # Errors
+    ///
+    /// [`AdoptError::Placement`] when the file's channels cannot be placed into the
+    /// voice's width ([`open_stream_into`](Self::open_stream_into)),
+    /// [`AdoptError::StreamerGone`] when the streamer is gone, and
+    /// [`AdoptError::Busy`] when its queue is full: nothing is left running in
+    /// any case.
+    pub fn adopt(
+        &self,
+        opened: OpenedStream<F>,
+    ) -> std::result::Result<(Stream<F>, StreamReader<F>), AdoptError<F>> {
+        let OpenedStream {
+            asset,
+            start,
+            width,
+            stage,
+        } = opened;
+        let (record, parts) = match stage {
+            Stage::Read(source) => build_stream(
+                StreamId::mint(&self.next_stream),
+                asset.clone(),
+                start.frame(),
+                width,
+                source,
+                &self.shared,
+                &self.config,
+            )
+            .map(|(record, parts)| (Box::new(record), parts))
+            .map_err(AdoptError::Placement)?,
+            Stage::Built(record, parts) => (record, parts),
+        };
+        match self.streamer_tx.try_send(StreamerCommand::Adopt(record)) {
+            Ok(()) => Ok(open::serve(
+                parts,
+                StreamerPort::new(self.streamer_tx.clone()),
+            )),
+            Err(crossbeam_channel::TrySendError::Full(StreamerCommand::Adopt(record))) => {
+                Err(AdoptError::Busy(Box::new(OpenedStream {
+                    asset,
+                    start,
+                    width,
+                    stage: Stage::Built(record, parts),
+                })))
+            }
+            Err(_) => Err(AdoptError::StreamerGone),
+        }
     }
 
     /// The session rate: the one the streamer was built with, or the one
@@ -464,7 +517,7 @@ mod tests {
         write_tone(&path, 48_000, 2.0);
         let mut sampler =
             DiskStreamer::<_, f32>::manual(SampleRate::SR_48K, Default::default()).unwrap();
-        let opening = sampler.open(&path, Placement::HEAD);
+        let opening = sampler.open_stream(&path, StreamStart::HEAD);
         let (stream, reader) =
             crate::testing::wait_for_open(&mut sampler, opening).expect("the file opens");
         for fade in [0usize, 500] {
@@ -525,7 +578,7 @@ mod tests {
 
         let mut sampler = DiskStreamer::manual(SampleRate::SR_44K1, Default::default()).unwrap();
         let stream = |sampler: &mut DiskStreamer<Manual<f32>, f32>, path: &std::path::Path| {
-            let opening = sampler.open(path, Placement::HEAD);
+            let opening = sampler.open_stream(path, StreamStart::HEAD);
             crate::testing::wait_for_open(sampler, opening).expect("the file opens")
         };
 
@@ -583,7 +636,7 @@ mod tests {
 
         let mut sampler =
             DiskStreamer::<_, f32>::manual(SampleRate::SR_48K, Default::default()).unwrap();
-        let opening = sampler.open(&path, Placement::HEAD);
+        let opening = sampler.open_stream(&path, StreamStart::HEAD);
         let (stream, reader) =
             crate::testing::wait_for_open(&mut sampler, opening).expect("the file opens");
         let ring = Arc::downgrade(&reader.ring);

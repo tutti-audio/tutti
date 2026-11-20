@@ -12,7 +12,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::{Mono, MonoMut, Planes, PlanesMut, Sample};
 use tutti_units::Samples;
 
-use super::Convolver;
+use super::{Convolver, DEFAULT_BLOCK_SIZE};
 use crate::FftFloat;
 
 /// Frames a call is cut into: the size of the scratch, fixed at construction.
@@ -41,6 +41,74 @@ pub enum MatrixConvolverError {
     },
 }
 
+/// What a [`MatrixConvolver`] is made from: its shape, one impulse response per path, and
+/// optionally the head partition; [`build`](Self::build) makes the matrix.
+///
+/// The responses are input-major: the response of the path from input `i` to output `o` is
+/// `irs[i * outputs + o]`. For a 2 by 2 matrix that is `[LL, LR, RL, RR]`, with
+/// `out_L = in_L * LL + in_R * RL`. The shape and the response count depend on each other,
+/// which no type holds, so [`build`](Self::build) is fallible.
+#[derive(Clone, Copy, Debug)]
+pub struct MatrixConvolverConfig<'a, S: Sample> {
+    inputs: ChannelLayout,
+    outputs: ChannelLayout,
+    irs: &'a [Mono<'a, S>],
+    block_size: Samples,
+}
+
+impl<'a, S: Sample> MatrixConvolverConfig<'a, S> {
+    /// A matrix of `inputs` by `outputs` channels over `irs`, with a head partition of 512
+    /// frames.
+    #[must_use]
+    pub fn new(inputs: ChannelLayout, outputs: ChannelLayout, irs: &'a [Mono<'a, S>]) -> Self {
+        Self {
+            inputs,
+            outputs,
+            irs,
+            block_size: DEFAULT_BLOCK_SIZE,
+        }
+    }
+
+    /// The head partition, rounded up to a power of two: the latency.
+    #[must_use]
+    pub fn block_size(self, block_size: Samples) -> Self {
+        Self { block_size, ..self }
+    }
+
+    /// The matrix, in the float `F`.
+    ///
+    /// # Errors
+    ///
+    /// [`MatrixConvolverError::NoChannels`] for a width of none, and
+    /// [`MatrixConvolverError::IrCount`] when the responses are not `inputs * outputs` many.
+    pub fn build<F: FftFloat>(self) -> Result<MatrixConvolver<F>, MatrixConvolverError> {
+        let (rows, cols) = (
+            usize::from(self.inputs.count()),
+            usize::from(self.outputs.count()),
+        );
+        if rows == 0 || cols == 0 {
+            return Err(MatrixConvolverError::NoChannels);
+        }
+        let want = rows * cols;
+        if self.irs.len() != want {
+            return Err(MatrixConvolverError::IrCount {
+                inputs: rows,
+                outputs: cols,
+                want,
+                got: self.irs.len(),
+            });
+        }
+        Ok(MatrixConvolver::assemble(
+            self.inputs,
+            self.outputs,
+            self.irs
+                .iter()
+                .map(|ir| Convolver::new(*ir, self.block_size))
+                .collect(),
+        ))
+    }
+}
+
 /// A matrix of partitioned FFT convolutions in the float `F`.
 ///
 /// Built once on the control side: every path's spectra, running state and the call
@@ -62,46 +130,8 @@ pub struct MatrixConvolver<F: FftFloat> {
 }
 
 impl<F: FftFloat> MatrixConvolver<F> {
-    /// A matrix of `inputs` by `outputs` channels from `irs`, input-major: the response of
-    /// the path from input `i` to output `o` is `irs[i * outputs + o]`. For a 2 by 2
-    /// matrix that is `[LL, LR, RL, RR]`, with `out_L = in_L * LL + in_R * RL`.
-    ///
-    /// `block_size` is rounded up to a power of two; it is the latency.
-    ///
-    /// # Errors
-    ///
-    /// [`MatrixConvolverError::NoChannels`] for a width of none, and
-    /// [`MatrixConvolverError::IrCount`] when `irs` is not `inputs * outputs` long.
-    pub fn new<S: Sample>(
-        inputs: ChannelLayout,
-        outputs: ChannelLayout,
-        irs: &[Mono<'_, S>],
-        block_size: Samples,
-    ) -> Result<Self, MatrixConvolverError> {
-        let (rows, cols) = (usize::from(inputs.count()), usize::from(outputs.count()));
-        if rows == 0 || cols == 0 {
-            return Err(MatrixConvolverError::NoChannels);
-        }
-        let want = rows * cols;
-        if irs.len() != want {
-            return Err(MatrixConvolverError::IrCount {
-                inputs: rows,
-                outputs: cols,
-                want,
-                got: irs.len(),
-            });
-        }
-        Ok(Self::assemble(
-            inputs,
-            outputs,
-            irs.iter()
-                .map(|ir| Convolver::new(*ir, block_size))
-                .collect(),
-        ))
-    }
-
-    /// A 2 by 2 matrix from `[LL, LR, RL, RR]` ([`new`](Self::new)'s order), which cannot
-    /// be the wrong shape.
+    /// A 2 by 2 matrix from `[LL, LR, RL, RR]` ([`MatrixConvolverConfig`]'s order), which
+    /// cannot be the wrong shape.
     #[must_use]
     pub fn two_by_two<S: Sample>(irs: [Mono<'_, S>; 4], block_size: Samples) -> Self {
         Self::assemble(

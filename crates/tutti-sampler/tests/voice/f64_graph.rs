@@ -15,8 +15,8 @@ use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_graph::{Prepare, Standalone, TransportPosition};
 use tutti_sampler::testing::wait_for_open;
 use tutti_sampler::{
-    Direction, DiskStreamer, DiskVoice, Manual, MemorySource, MemorySourceConfig, Placement,
-    Playback, SlotId, Voice, VoiceNode, VoicePool, VoiceSource, VoiceWindow,
+    Direction, DiskStreamer, DiskVoice, Manual, MemorySource, MemorySourceConfig, Playback, SlotId,
+    StreamStart, Voice, VoiceNode, VoicePool, VoiceSource, VoiceWindow,
 };
 use tutti_units::{Beat, Bpm, SampleRate, Samples};
 
@@ -202,7 +202,7 @@ fn disk(
     let mut streamer =
         DiskStreamer::<Manual<f64>, f64>::manual(SampleRate::of(RATE), Default::default())
             .expect("builds");
-    let opening = streamer.open(path, Placement::HEAD);
+    let opening = streamer.open_stream(path, StreamStart::HEAD);
     let (stream, reader) = wait_for_open(&mut streamer, opening).expect("the file opens");
     if direction == Direction::Reverse {
         stream.direction_cell().publish(direction);
@@ -265,7 +265,7 @@ fn a_streamed_node_in_an_f64_graph_plays_the_files_values() {
     let mut streamer =
         DiskStreamer::<Manual<f64>, f64>::manual(SampleRate::of(RATE), Default::default())
             .expect("builds");
-    let opening = streamer.open(&path, Placement::HEAD);
+    let opening = streamer.open_stream(&path, StreamStart::HEAD);
     let (stream, reader) = wait_for_open(&mut streamer, opening).expect("the file opens");
     let voice = DiskVoice::from_reader(reader, VoiceWindow::from(Beat::new(0.0)));
     let node = VoiceNode::streaming(voice, stream, Playback::default());

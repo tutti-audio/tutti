@@ -15,7 +15,7 @@ use tutti_graph::{
     CommitError, Cx, Editor, Executor, Io, Node, Prepare, Reference, Shape, Status,
     TransportPosition, Unforkable,
 };
-use tutti_graph::{Edge, InPort, OutPort, Source};
+use tutti_graph::{Edge, InPort, OutPort, PortSource};
 use tutti_units::{Latency, SampleRate, Samples};
 
 /// The delay the plugin actually runs.
@@ -97,15 +97,15 @@ fn graph_at(plugin: Plugin, prepared: Prepare) -> (Editor, Executor) {
     for k in [PLUGIN, DRY] {
         t.edges.insert(
             InPort { node: k, port: 0 },
-            vec![Edge::Direct(Source::Global(0))],
+            vec![Edge::Direct(PortSource::Global(0))],
         );
     }
     t.set_outputs(vec![
-        Source::Node(OutPort {
+        PortSource::Node(OutPort {
             node: PLUGIN,
             port: 0,
         }),
-        Source::Node(OutPort { node: DRY, port: 0 }),
+        PortSource::Node(OutPort { node: DRY, port: 0 }),
     ]);
     (ed, exec)
 }

@@ -15,8 +15,6 @@
 # owner   the lane that migrates it: core-foundation, core-engine, plugin or midi
 
 # core-foundation
-tutti-codec  spawn  crates/tutti-codec/src/flac.rs::FrameWriter::start  core-foundation
-tutti-codec  spawn_dedicated  crates/tutti-codec/src/vorbis.rs::VorbisWriter::create  core-foundation
 tutti-rt  spawn_dedicated  crates/tutti-rt/src/bells/tick_thread.rs::Tick::start  core-foundation
 
 # core-engine
@@ -32,8 +30,6 @@ tutti-plugin-ipc  spawn_dedicated  crates/tutti-plugin-ipc/src/client/audio/thre
 tutti-plugin-ipc  spawn_dedicated  crates/tutti-plugin-ipc/src/client/audio/thread.rs::run_thread  plugin
 tutti-plugin-ipc  spawn_dedicated  crates/tutti-plugin-ipc/src/process_guard.rs::ProcessGuard::launched  plugin
 tutti-plugin-ipc  spawn_dedicated  crates/tutti-plugin-ipc/src/process_guard.rs::reap_elsewhere  plugin
-tutti-plugin-ipc-ffi  spawn_dedicated  crates/tutti-plugin-ipc-ffi/src/exit/host_watch.rs::watch_host  plugin
-tutti-plugin-ipc-ffi  spawn  crates/tutti-plugin-ipc-ffi/src/exit/host_watch.rs::watch_spawner  plugin
 tutti-plugin-server  spawn_dedicated  crates/tutti-plugin-server/src/render.rs::RenderThread::spawn  plugin
 tutti-plugin-server  spawn  crates/tutti-plugin-server/src/server.rs::beat_while  plugin
 

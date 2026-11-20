@@ -16,11 +16,11 @@
 //! List the output devices:
 //!
 //! ```rust,no_run
-//! use tutti_cpal::{AudioHost, DeviceHost, Direction};
+//! use tutti_cpal::{AudioHost, DeviceHost, DeviceDirection};
 //!
 //! # fn main() -> tutti_cpal::Result<()> {
 //! let snapshot = DeviceHost::open(AudioHost::Default)?.snapshot()?;
-//! for device in snapshot.devices(Direction::Output) {
+//! for device in snapshot.devices(DeviceDirection::Output) {
 //!     println!("{}: {}", device, device.name());
 //! }
 //! # Ok(())
@@ -33,7 +33,7 @@
 //! ```rust,no_run
 //! use tutti_buffers::MaxBlock;
 //! use std::sync::Arc;
-//! use tutti_graph::{OutPort, Source};
+//! use tutti_graph::{OutPort, PortSource};
 //! use tutti_engine::Engine;
 //! use tutti_timeline::Transport;
 //! use tutti_units::{Hz, Samples};
@@ -54,7 +54,7 @@
 //! let (mut editor, executor) = Editor::new(Prepare::new(sample_rate, MaxBlock::of(Samples::new(512))));
 //! let tone = NodeKey(1);
 //! editor.insert(tone, "tone", Osc::sine(Hz::new(440.0)));
-//! editor.spec_mut().topology.set_outputs(vec![Source::Node(OutPort { node: tone, port: 0 }); 2]);
+//! editor.spec_mut().topology.set_outputs(vec![PortSource::Node(OutPort { node: tone, port: 0 }); 2]);
 //! editor.commit()?;
 //!
 //! // The engine owns the executor and the transport's clock; the editor stays
@@ -105,7 +105,7 @@
 //!   inlet (`tutti-graph`'s `InletNode`) and a `tutti-codec` sink. Without it the crate is output-only.
 //! - `jack` — the JACK host ([`AudioHost::Jack`]). Linux and the BSDs only, and
 //!   needs libjack at build time; elsewhere, or without the feature, opening JACK
-//!   returns [`Error::HostUnavailable`].
+//!   returns [`DeviceError::HostUnavailable`].
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![forbid(unsafe_code)]
 
@@ -126,16 +126,16 @@ mod mic;
 
 pub use driver::TuttiDriver;
 pub use driver_seam::{CpalDriver, CpalStream, PREFERRED_QUANTUM};
-pub use error::{Error, Result};
+pub use error::{DeviceError, Result};
 pub use host::{AudioHost, DeviceHost, DeviceSelector, available_hosts};
 pub use listing::{DeviceListing, Listed};
 pub use output::{AudioEngine, OutputConfig, Resolved};
 pub use poller::{DevicePoller, MIN_POLL_INTERVAL};
-pub use roster::{DeviceChange, DeviceId, DeviceRoster, Direction, Snapshot, SnapshotSource};
+pub use roster::{DeviceChange, DeviceDirection, DeviceId, DeviceRoster, Snapshot, SnapshotSource};
 pub use supported::SupportedConfig;
 
 // Re-exported because this crate's public surface already names cpal types
-// (cpal errors inside `Error`), so a consumer needs the vocabulary and should
+// (cpal errors inside `DeviceError`), so a consumer needs the vocabulary and should
 // not have to pin a matching cpal version of its own.
 pub use cpal;
 

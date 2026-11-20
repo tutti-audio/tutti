@@ -157,8 +157,16 @@ const TOPOLOGY: &str = "a loudness config holds the channel topology the weights
     which is the analysis's channel model, not a width choice; the call checks the view's width against it";
 const STEREO_ONLY: &str = "a stereo-only node: mid/side, width and auto-pan are defined on a \
     left and right pair, so the width is not a choice and the config takes none";
+const MONO_ONLY: &str = "a mono-only node: an EQ band is one filter section on one channel, so \
+    the width is not a choice and the config takes none";
 const STEREO_PLATE: &str = "a stereo-only node: the plate's two tank halves feed the left and \
     right ears, so the width is not a choice and the config takes none";
+const FIXED_SOURCE: &str = "a source with no audio input and one fixed output (mono, or the \
+    metronome's stereo pair): the width is not a choice, so the config takes none";
+const NO_AUDIO_PORT: &str = "a node with no audio port: it reads a curve, a program or MIDI and \
+    sends or renders one value, so there is no width to choose";
+const KERNEL_WIDTH: &str = "a kernel's width is its own: the buses its `shape` declares, so the \
+    config takes none";
 const MONO_IN_STEREO_OUT: &str = "a reverb with a fixed shape, mono in and stereo out: its width \
     is not a choice and the config takes none";
 const OVER_A_LAYOUT: &str = "a node over a checked dsp layout: the layout's bus is the width, \
@@ -255,7 +263,7 @@ pub(super) const ALLOW: &[Allow] = &[
     ),
     Allow {
         path: "crates/tutti-midi-hardware/src/virtual_endpoint.rs",
-        owner: "VirtualSource::open",
+        owner: "VirtualEndpoint::open",
         rules: &[Rule::CtorResult],
         reason: "opening an OS endpoint: the OS refuses, not a value a type could forbid",
     },
@@ -447,7 +455,7 @@ pub(super) const ALLOW: &[Allow] = &[
     ),
     ty(
         "crates/tutti-midi-hardware/",
-        "VirtualDestination::open",
+        "VirtualEndpoint::open",
         CTOR,
         "opening an OS endpoint: the failure is the OS's, not a value's",
     ),
@@ -537,6 +545,45 @@ pub(super) const ALLOW: &[Allow] = &[
     ),
     ty("crates/tutti-au-host/", "StreamConfig", WIDTH, NOT_A_NODE),
     ty("crates/tutti-cpal/", "OutputConfig", WIDTH, NOT_A_NODE),
+    ty(
+        "crates/tutti-nodes/",
+        "OscillatorConfig",
+        WIDTH,
+        FIXED_SOURCE,
+    ),
+    ty("crates/tutti-nodes/", "LfoConfig", WIDTH, FIXED_SOURCE),
+    ty(
+        "crates/tutti-nodes/",
+        "ClickNodeConfig",
+        WIDTH,
+        FIXED_SOURCE,
+    ),
+    ty(
+        "crates/tutti-nodes/",
+        "AutomationLaneConfig",
+        WIDTH,
+        FIXED_SOURCE,
+    ),
+    ty(
+        "crates/tutti-nodes/",
+        "NoteEnvelopeConfig",
+        WIDTH,
+        NO_AUDIO_PORT,
+    ),
+    ty(
+        "crates/tutti-nodes/",
+        "UnitLaneConfig",
+        WIDTH,
+        NO_AUDIO_PORT,
+    ),
+    ty(
+        "crates/tutti-nodes/",
+        "ForeignLaneConfig",
+        WIDTH,
+        NO_AUDIO_PORT,
+    ),
+    ty("crates/tutti-nodes/", "KernelConfig", WIDTH, KERNEL_WIDTH),
+    ty("crates/tutti-nodes/", "EqBandConfig", WIDTH, MONO_ONLY),
     ty("crates/tutti-nodes/", "MidSideConfig", WIDTH, STEREO_ONLY),
     ty(
         "crates/tutti-nodes/",
@@ -545,6 +592,12 @@ pub(super) const ALLOW: &[Allow] = &[
         STEREO_ONLY,
     ),
     ty("crates/tutti-nodes/", "AutoPanConfig", WIDTH, STEREO_ONLY),
+    ty(
+        "crates/tutti-nodes/",
+        "HrtfBinauralConfig",
+        WIDTH,
+        "a stereo-only node: the binaural renderer folds a pair to mono and writes the left and right ear, so the width is not a choice and the config takes none",
+    ),
     ty(
         "crates/tutti-nodes/",
         "PlateReverbConfig",

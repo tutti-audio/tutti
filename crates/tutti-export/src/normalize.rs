@@ -95,7 +95,7 @@ pub enum Normalize {
     /// true peak is -100 dBTP gets about +99 dB, and the gain is applied
     /// (it is reported in [`Written::gain`]). Only exact silence, a true
     /// peak at the floor ([`Db::FLOOR`]), is refused
-    /// ([`Error::Unmeasurable`](crate::Error::Unmeasurable)); there is no
+    /// ([`RenderError::Unmeasurable`](crate::RenderError::Unmeasurable)); there is no
     /// invented threshold between the two.
     Peak {
         /// True-peak level to land on, in dBTP. Typically negative — 0 leaves no
@@ -144,10 +144,10 @@ impl Normalize {
     ///
     /// # Errors
     ///
-    /// [`Error::TopologyWidth`](crate::Error::TopologyWidth) when `topology`
+    /// [`RenderError::TopologyWidth`](crate::RenderError::TopologyWidth) when `topology`
     /// is not as wide as `rendered`.
     ///
-    /// [`Error::Unmeasurable`](crate::Error::Unmeasurable) when the audio has
+    /// [`RenderError::Unmeasurable`](crate::RenderError::Unmeasurable) when the audio has
     /// no usable reading, and `reason` says which:
     ///
     /// - [`Unmeasured::Format`]: the meter will not
@@ -172,7 +172,7 @@ impl Normalize {
         topology: &ChannelTopology,
     ) -> Result<Db> {
         if topology.width() != rendered.layout() {
-            return Err(crate::Error::TopologyWidth {
+            return Err(crate::RenderError::TopologyWidth {
                 topology: topology.width(),
                 rendered: rendered.layout(),
             });
@@ -203,7 +203,7 @@ impl Normalize {
         total: Samples,
         control: &mut Control<'_>,
     ) -> Result<Outcome<Reading>> {
-        let unmeasurable = |reason| crate::Error::Unmeasurable {
+        let unmeasurable = |reason| crate::RenderError::Unmeasurable {
             output: None,
             channels: rendered.layout(),
             sample_rate: rendered.sample_rate(),
@@ -240,7 +240,7 @@ impl Normalize {
     /// The limit is one LSB plus the dither's amplitude (0 for none, half an
     /// LSB for rectangular, one for triangular) below full scale; a target or
     /// ceiling already under it is unchanged, and a format that does not
-    /// quantize ([`Pcm::Float32`](tutti_codec::Pcm::Float32), Ogg Vorbis) has no
+    /// quantize ([`Pcm::Float32`](tutti_codec::Pcm::Float32)) has no
     /// limit.
     pub(crate) fn within(self, target: &FileTarget) -> Self {
         let Some(limit) = headroom_ceiling(target) else {

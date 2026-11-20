@@ -24,7 +24,7 @@ use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_m
 use tutti_buffers::{BusTopology, ChannelLayout, Float};
 use tutti_graph::contract::Direct;
 use tutti_graph::{Cx, Io, Node, ParamNode, Prepare, Shape, Status};
-use tutti_nodes::BusStripNode;
+use tutti_nodes::{BusStripConfig, BusStripNode};
 use tutti_rt::SplitMix64;
 use tutti_units::{Amplitude, SampleRate};
 
@@ -92,15 +92,15 @@ fn strip(c: &mut Criterion) {
         g.throughput(Throughput::Elements((BLOCK * width as usize) as u64));
 
         let mut d = Direct::new(
-            BusStripNode::new(
+            BusStripNode::from(BusStripConfig::new(
                 BusTopology::default_for(ChannelLayout::from(width))
                     .expect("a bench width fits a bus"),
-            ),
+            )),
             SR,
             BLOCK,
         );
         fill_noise(&mut d);
-        d.node.set_volume(Amplitude::new(0.5));
+        d.node.volume().store(Amplitude::new(0.5));
         assert!(ParamNode::<f32>::param_set(&*d.node).set(tutti_units::UnitParam::Balance, 0.25));
         d.block();
         g.bench_with_input(BenchmarkId::new("steady", width), &width, |b, _| {
@@ -115,7 +115,8 @@ fn strip(c: &mut Criterion) {
             b.iter(|| {
                 flip = !flip;
                 d.node
-                    .set_volume(Amplitude::new(if flip { 0.75 } else { 0.5 }));
+                    .volume()
+                    .store(Amplitude::new(if flip { 0.75 } else { 0.5 }));
                 d.block();
                 black_box(d.output().plane(0).samples()[BLOCK - 1]);
             })

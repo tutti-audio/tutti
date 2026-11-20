@@ -1,30 +1,24 @@
 //! The macOS platform: CoreMIDI.
 
 use crate::InputProducerHandle;
-use crate::endpoints::{InputConnection, MidiEndpoints};
+use crate::endpoints::MidiEndpoints;
 use crate::error::Result;
-use crate::virtual_endpoint::{SourceBackend, VirtualProtocol, VirtualSpec};
+use crate::virtual_endpoint::{EndpointBackend, VirtualProtocol, VirtualSpec};
+use tutti_platform::MainThreadMarker;
 
 /// Returns this platform's MIDI backend.
 pub(crate) fn active() -> Box<dyn MidiEndpoints> {
     Box::new(super::coremidi::CoreMidiEndpoints::new())
 }
 
-/// Publishes the virtual source `spec` describes.
-pub(crate) fn open_virtual_source(
-    spec: &VirtualSpec,
-) -> Result<(Box<dyn SourceBackend>, VirtualProtocol)> {
-    let source = super::coremidi::UmpVirtualSource::open(spec)?;
-    Ok((Box::new(source), spec.protocol))
-}
-
-/// Publishes the virtual destination `spec` describes, delivering into `producer`.
-pub(crate) fn open_virtual_destination(
+/// Publishes the virtual endpoint `spec` describes, delivering into `producer`.
+pub(crate) fn open_virtual_endpoint(
     spec: &VirtualSpec,
     producer: InputProducerHandle,
-) -> Result<(Box<dyn InputConnection>, VirtualProtocol)> {
-    let destination = super::coremidi::UmpVirtualDestination::open(spec, producer)?;
-    Ok((Box::new(destination), spec.protocol))
+    main: MainThreadMarker,
+) -> Result<(Box<dyn EndpointBackend>, VirtualProtocol)> {
+    let endpoint = super::coremidi::UmpVirtualEndpoint::open(spec, producer, main)?;
+    Ok((Box::new(endpoint), spec.protocol))
 }
 
 /// The platform's own error, as [`MidiHardwareError::Os`] carries it.

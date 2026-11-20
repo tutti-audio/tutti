@@ -44,7 +44,7 @@ pub enum PlaceError {
     #[error("the wave cannot be placed: {0}")]
     Fold(#[from] tutti_buffers::FoldError),
     /// A streamed clip's width is its stream's, chosen when the stream was
-    /// opened ([`DiskStreamer::open_into`](crate::DiskStreamer::open_into));
+    /// opened ([`DiskStreamer::open_stream_into`](crate::DiskStreamer::open_stream_into));
     /// a clip cannot be placed at another.
     #[error("a streamed clip is as wide as its stream, which was opened at that width")]
     Streamed,

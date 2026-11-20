@@ -70,7 +70,7 @@ fn node() -> HrtfBinauralNode<f32> {
     let rate = SAMPLE_RATE.get() as u32;
     let bytes = synthetic_hrir_sphere(rate, 64);
     // Born at the contract's rate; the graph prepares it at that rate too.
-    let node = HrtfBinauralNode::<f32>::new(&bytes, SAMPLE_RATE).expect("the sphere parses");
+    let node = hrtf::<f32>(&bytes).expect("the sphere parses");
     aim(&node.param_set(), Azimuth::new(90.0), Elevation::new(0.0));
     node
 }
@@ -93,3 +93,14 @@ fn hrtf_row(ear: u16) -> Row {
 
 contract_tests!(audio hrtf_left => hrtf_row(0));
 contract_tests!(audio hrtf_right => hrtf_row(1));
+
+/// A binaural node over the sphere in `bytes`, prepared at `rate`.
+fn hrtf<F: tutti_dsp::FftFloat>(
+    bytes: &[u8],
+) -> Result<tutti_nodes::HrtfBinauralNode<F>, tutti_dsp::HrtfBinauralError> {
+    Ok(tutti_nodes::HrtfBinauralNode::from(
+        tutti_nodes::HrtfBinauralConfig::new(std::sync::Arc::new(
+            tutti_dsp::HrirSphere::from_bytes(bytes)?,
+        )),
+    ))
+}

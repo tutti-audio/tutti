@@ -14,7 +14,7 @@ use std::path::Path;
 
 use tutti_buffers::ChannelLayout;
 use tutti_codec::{Format, Pcm};
-use tutti_export::{Error, Normalize, Produced, Resample, TargetError};
+use tutti_export::{Normalize, Produced, RenderError, Resample, TargetError};
 use tutti_graph::{Cx, ForkByClone, Io, Node, NodeKey, Prepare, Shape, Status};
 use tutti_nodes::testing::Const;
 use tutti_session::{
@@ -281,7 +281,7 @@ fn a_stem_that_cannot_be_placed_is_refused_not_truncated() {
     for stem in [to_mono, wrong_width] {
         let b = bounce(0.01).stem_with(stem);
         match refused(&mut session, b) {
-            BounceError::Export(Error::Target { output: 1, why }) => {
+            BounceError::Export(RenderError::Target { output: 1, why }) => {
                 assert!(
                     matches!(why, TargetError::Placement(_) | TargetError::Lanes { .. }),
                     "{why:?}"

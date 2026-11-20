@@ -66,7 +66,7 @@ fn a_blocked_enumeration_does_not_hold_the_update_and_lands_when_it_answers() {
 }
 
 /// **A listing that fails reports the cpal error itself**, not its text: the
-/// event carries the `tutti_cpal::Error` the enumeration returned.
+/// event carries the `tutti_cpal::DeviceError` the enumeration returned.
 #[test]
 fn a_failed_listing_reports_the_typed_error() {
     let (driver, _stream) = ManualStreamDriver::new();
@@ -82,7 +82,7 @@ fn a_failed_listing_reports_the_typed_error() {
         )
         .expect("builds with no device");
     s.list_outputs(
-        DeviceListing::spawn_with(|| Err(tutti_cpal::Error::InvalidDevice("no card".into())))
+        DeviceListing::spawn_with(|| Err(tutti_cpal::DeviceError::InvalidDevice("no card".into())))
             .expect("the listing thread starts"),
     );
     let deadline = Instant::now() + Duration::from_secs(20);
@@ -93,7 +93,7 @@ fn a_failed_listing_reports_the_typed_error() {
         });
         if let Some(why) = failed {
             assert!(
-                matches!(&why, tutti_cpal::Error::InvalidDevice(what) if what == "no card"),
+                matches!(&why, tutti_cpal::DeviceError::InvalidDevice(what) if what == "no card"),
                 "{why:?}"
             );
             break;

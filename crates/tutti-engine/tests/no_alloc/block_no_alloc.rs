@@ -27,12 +27,12 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_buffers::MaxBlock;
 use tutti_engine::{AudioCallbackState, Engine, MAX_FRAMES, OutputBlock, process_audio};
-use tutti_graph::{Edge, InPort, OutPort, Source};
+use tutti_graph::{Edge, InPort, OutPort, PortSource};
 use tutti_graph::{Editor, MeterReader, Prepare, TapReader};
 use tutti_graph::{MeterId, MeterSpec, NodeKey, TapId, TapOptions};
 use tutti_nodes::testing::Osc;
-use tutti_nodes::{SvfFilterNode, SvfType};
-use tutti_timeline::{MotionEvent, Transport};
+use tutti_nodes::{SvfFilterConfig, SvfFilterNode, SvfType};
+use tutti_timeline::{MotionCommand, Transport};
 use tutti_units::{Bpm, Hz, Q, SampleRate, Samples};
 const SAMPLE_RATE: f64 = 48_000.0;
 
@@ -67,20 +67,24 @@ fn rolling_state_with(
     ed.insert(
         filter,
         "filter",
-        SvfFilterNode::<f32>::new(SvfType::LowPass, Hz::new(2_000.0), Q::new(0.7)),
+        SvfFilterNode::<f32>::from(
+            SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
+                .freq(Hz::new(2_000.0))
+                .q(Q::new(0.7)),
+        ),
     );
     ed.spec_mut().topology.edges.insert(
         InPort {
             node: filter,
             port: 0,
         },
-        vec![Edge::Direct(Source::Node(OutPort {
+        vec![Edge::Direct(PortSource::Node(OutPort {
             node: source,
             port: 0,
         }))],
     );
     ed.spec_mut().topology.set_outputs(vec![
-        Source::Node(OutPort {
+        PortSource::Node(OutPort {
             node: filter,
             port: 0,
         });
@@ -114,7 +118,7 @@ fn rolling_state_with(
     let state = AudioCallbackState::new(engine);
 
     transport.settings().set_tempo(Bpm::of(120.0));
-    let _ = transport.motion().try_send(MotionEvent::Play);
+    let _ = transport.motion().try_send(MotionCommand::Play);
 
     (transport, state, meter, reader)
 }

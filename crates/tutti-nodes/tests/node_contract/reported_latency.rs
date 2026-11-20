@@ -9,17 +9,14 @@
 //! the output with an impulse, because the number alone cannot fail on a node
 //! whose DSP drifted away from it.
 
-use tutti_buffers::MaxBlock;
-use tutti_buffers::Mono;
-use tutti_buffers::Planes;
-use tutti_buffers::{BusTopology, ChannelLayout};
+use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock, Mono, Planes};
 use tutti_graph::contract::{drive, prepared};
 use tutti_graph::{GraphBuilder, IntoNode, Node, Prepare};
 use tutti_nodes::testing::Through;
 use tutti_nodes::{
-    ChannelTimes, CrossoverNode, DelayConfig, DelayControls, DelayLayout, DelayNode,
-    InterpolationMode, MaxDelay, ModDelayConfig, ModDelayNode, MultibandBands,
-    MultibandCompressorConfig, MultibandCompressorNode,
+    ChannelTimes, CrossoverConfig, CrossoverControls, CrossoverNode, DelayConfig, DelayControls,
+    DelayLayout, DelayNode, InterpolationMode, MaxDelay, ModDelayConfig, ModDelayNode,
+    MultibandBands, MultibandCompressorConfig, MultibandCompressorNode,
 };
 use tutti_units::Latency;
 use tutti_units::{Feedback, Hz, Mix, Seconds};
@@ -106,8 +103,11 @@ fn onsets(ch: &[f32]) -> Vec<usize> {
 /// the summed output answers well above zero.
 #[test]
 fn crossover_and_multiband_report_zero_latency_and_respond_at_frame_0() {
-    let xo = CrossoverNode::<f32>::new(ChannelLayout::MONO, &[Hz::new(300.0), Hz::new(3_000.0)])
-        .unwrap();
+    let xo = CrossoverNode::<f32>::try_from(CrossoverConfig::new(
+        BusTopology::MONO,
+        CrossoverControls::try_from(&[Hz::new(300.0), Hz::new(3_000.0)][..]).unwrap(),
+    ))
+    .unwrap();
     assert_eq!(declared(&xo), Latency::ZERO);
     for (b, band) in impulse_response(xo, 64).iter().enumerate() {
         assert!(band[0] > 0.0, "band {b} is silent at frame 0");
@@ -287,7 +287,7 @@ fn a_delay_insert_adds_no_compensation_to_the_other_paths() {
 #[test]
 fn a_limiter_summed_with_a_dry_path_reports_the_limiter_latency() {
     use tutti_buffers::ChannelLayout;
-    use tutti_graph::Source;
+    use tutti_graph::PortSource;
     use tutti_graph::{GraphBuilder, Prepare};
     use tutti_nodes::{LimiterConfig, LimiterControls, LimiterNode};
     use tutti_units::Latency;
@@ -303,7 +303,7 @@ fn a_limiter_summed_with_a_dry_path_reports_the_limiter_latency() {
     ));
     g.connect_input(0, lim, 0);
     g.connect_output(lim, 0, 0);
-    g.add_output(0, Source::Global(0));
+    g.add_output(0, PortSource::Global(0));
     let mut r = g
         .renderer(Prepare::new(SR, MaxBlock::of(Samples::new(BLOCK))))
         .expect("builds");
@@ -338,7 +338,7 @@ mod convolver {
     #[test]
     fn convolver_dry_and_wet_leave_together_at_the_reported_latency() {
         for mix in [0.0_f64, 0.5, 1.0] {
-            let node = ConvolverNode::<f32>::new(Mono::new(&[1.0]), Samples::new(256));
+            let node = mono_node::<f32, _>(Mono::new(&[1.0]), Samples::new(256));
 
             let latency = node.latency_samples().get();
             assert_eq!(latency, 256);
@@ -370,10 +370,10 @@ mod convolver {
         type Build = fn() -> ConvolverNode<f32>;
         let builds: [(&str, Build); 7] = [
             ("mono", || {
-                ConvolverNode::<f32>::shared_ir(2u16, Mono::new(&[1.0]), Samples::new(128)).unwrap()
+                shared_ir_node::<f32, _>(2u16, Mono::new(&[1.0]), Samples::new(128)).unwrap()
             }),
             ("dual mono", || {
-                ConvolverNode::<f32>::per_channel(
+                per_channel_node::<f32, _>(
                     &[Mono::new(&[1.0]), Mono::new(&[1.0])],
                     Samples::new(128),
                 )
@@ -381,7 +381,7 @@ mod convolver {
             }),
             ("true stereo", || {
                 let one = [1.0_f32];
-                ConvolverNode::<f32>::true_stereo(
+                true_stereo_node::<f32, _>(
                     Mono::new(&one[..]),
                     Mono::new(&one[..]),
                     Mono::new(&one[..]),
@@ -390,22 +390,17 @@ mod convolver {
                 )
             }),
             ("folded", || {
-                ConvolverNode::<f32>::folded(
-                    &[Mono::new(&[1.0]), Mono::new(&[1.0])],
-                    Samples::new(128),
-                )
-                .unwrap()
+                folded_node::<f32, _>(&[Mono::new(&[1.0]), Mono::new(&[1.0])], Samples::new(128))
+                    .unwrap()
             }),
             ("shared x6", || {
-                ConvolverNode::<f32>::shared_ir(6u16, Mono::new(&[1.0]), Samples::new(128)).unwrap()
+                shared_ir_node::<f32, _>(6u16, Mono::new(&[1.0]), Samples::new(128)).unwrap()
             }),
             ("per_channel x6", || {
-                ConvolverNode::<f32>::per_channel(&[Mono::new(&[1.0_f32]); 6], Samples::new(128))
-                    .unwrap()
+                per_channel_node::<f32, _>(&[Mono::new(&[1.0_f32]); 6], Samples::new(128)).unwrap()
             }),
             ("folded x6", || {
-                ConvolverNode::<f32>::folded(&[Mono::new(&[1.0_f32]); 6], Samples::new(128))
-                    .unwrap()
+                folded_node::<f32, _>(&[Mono::new(&[1.0_f32]); 6], Samples::new(128)).unwrap()
             }),
         ];
         for (name, build) in builds {
@@ -436,7 +431,7 @@ mod convolver {
     #[test]
     fn convolver_reset_clears_the_buffered_take() {
         let mut node = prepared(
-            ConvolverNode::<f32>::new(Mono::new(&[1.0]), Samples::new(64)),
+            mono_node::<f32, _>(Mono::new(&[1.0]), Samples::new(64)),
             SR,
             256,
         );
@@ -459,7 +454,7 @@ mod convolver {
     /// latency, so channels 1 and 2 each pre-roll by exactly that block.
     #[test]
     fn a_delay_after_a_convolver_adds_nothing_to_its_compensation() {
-        let conv = ConvolverNode::<f32>::new(Mono::new(&[1.0]), Samples::new(256));
+        let conv = mono_node::<f32, _>(Mono::new(&[1.0]), Samples::new(256));
         let latency = conv.latency_samples();
         let mut g = GraphBuilder::new(ChannelLayout::MONO, ChannelLayout::from_count(3));
         let (conv, _) = g.add_with_controls(conv);
@@ -502,4 +497,73 @@ mod convolver {
         assert_eq!(plan.total_latency(), Latency::new(latency));
         assert_eq!(plan.compensation(), &[Samples::new(0), latency, latency]);
     }
+}
+
+fn unassigned_bus(width: impl Into<tutti_buffers::ChannelLayout>) -> tutti_buffers::BusTopology {
+    tutti_buffers::BusTopology::unassigned(width.into()).expect("a test width fits a bus")
+}
+
+/// A one-channel convolver over `ir`.
+fn mono_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::Sample>(
+    ir: tutti_buffers::Mono<'_, S>,
+    block_size: tutti_units::Samples,
+) -> tutti_nodes::ConvolverNode<F> {
+    tutti_nodes::ConvolverNode::try_from(
+        tutti_nodes::ConvolverConfig::new(tutti_buffers::BusTopology::MONO, &[ir])
+            .block_size(block_size),
+    )
+    .expect("one response on a mono bus")
+}
+
+/// `width` unassigned channels sharing the response `ir`.
+fn shared_ir_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::Sample>(
+    width: impl Into<tutti_buffers::ChannelLayout>,
+    ir: tutti_buffers::Mono<'_, S>,
+    block_size: tutti_units::Samples,
+) -> Result<tutti_nodes::ConvolverNode<F>, tutti_nodes::ConvolverError> {
+    tutti_nodes::ConvolverNode::try_from(
+        tutti_nodes::ConvolverConfig::new(unassigned_bus(width), &[ir]).block_size(block_size),
+    )
+}
+
+/// One response per channel, at as many unassigned channels as responses.
+fn per_channel_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::Sample>(
+    irs: &[tutti_buffers::Mono<'_, S>],
+    block_size: tutti_units::Samples,
+) -> Result<tutti_nodes::ConvolverNode<F>, tutti_nodes::ConvolverError> {
+    let width = tutti_buffers::ChannelLayout::try_from(irs.len()).expect("a test width fits");
+    tutti_nodes::ConvolverNode::try_from(
+        tutti_nodes::ConvolverConfig::new(unassigned_bus(width), irs).block_size(block_size),
+    )
+}
+
+/// Every input folded to mono, then one response per output, at the engine's placement of
+/// that many channels.
+fn folded_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::Sample>(
+    irs: &[tutti_buffers::Mono<'_, S>],
+    block_size: tutti_units::Samples,
+) -> Result<tutti_nodes::ConvolverNode<F>, tutti_nodes::ConvolverError> {
+    let width = tutti_buffers::ChannelLayout::try_from(irs.len()).expect("a test width fits");
+    let bus = tutti_buffers::BusTopology::default_for(width).expect("a test width fits a bus");
+    tutti_nodes::ConvolverNode::try_from(
+        tutti_nodes::ConvolverConfig::new(bus, irs)
+            .folded()
+            .block_size(block_size),
+    )
+}
+
+/// True stereo from `[LL, LR, RL, RR]`.
+fn true_stereo_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::Sample>(
+    ll: tutti_buffers::Mono<'_, S>,
+    lr: tutti_buffers::Mono<'_, S>,
+    rl: tutti_buffers::Mono<'_, S>,
+    rr: tutti_buffers::Mono<'_, S>,
+    block_size: tutti_units::Samples,
+) -> tutti_nodes::ConvolverNode<F> {
+    tutti_nodes::ConvolverNode::try_from(
+        tutti_nodes::ConvolverConfig::new(tutti_buffers::BusTopology::STEREO, &[ll, lr, rl, rr])
+            .true_stereo()
+            .block_size(block_size),
+    )
+    .expect("four responses on a stereo pair")
 }

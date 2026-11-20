@@ -552,42 +552,6 @@ fn route_drain(
     }
 }
 
-/// Where a take's events belong on the timeline: the figure
-/// [`Midi::tap`]'s readers are placed by. A note played at graph frame `F`
-/// was answered by output the device played `output` after it was rendered, and
-/// reached the graph `input` plus the inlet's `lead` after it was played, so
-/// it was meant for `F - (input + output + lead) + trim`.
-///
-/// A pure function of the figures a host reads (the device's reported
-/// latencies, the inlet's lead) and sets (the trim); the session keeps none of
-/// them.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct TakePlacement {
-    /// How long a played event took to reach the graph (the device's input latency).
-    pub input: Samples,
-    /// How long the graph's output took to be heard (the device's output latency).
-    pub output: Samples,
-    /// The inlet's fixed lead: the distance a hardware event is placed after it arrived.
-    pub lead: Samples,
-    /// The user's manual trim for a device that misreports, added after.
-    pub trim: Samples,
-}
-
-impl TakePlacement {
-    /// The frame an event the tap read at `frame` was played for, at 0 where the
-    /// compensation reaches before the start of the clock.
-    #[must_use]
-    pub fn place(self, frame: Frame) -> Frame {
-        let back = self
-            .input
-            .get()
-            .saturating_add(self.output.get())
-            .saturating_add(self.lead.get());
-        let back = u64::try_from(back).unwrap_or(u64::MAX);
-        Frame::new(frame.get().saturating_sub(back)) + self.trim
-    }
-}
-
 tutti_rt::id! {
     /// An id [`Midi::route`] returns, for [`Midi::unroute`].
     pub struct MidiRouteId;
@@ -1328,7 +1292,7 @@ impl<F: Float> Midi<'_, F> {
     /// the transport's beat 0, with [`play_clip`](Self::play_clip)'s clip,
     /// looping and bounce behaviour. The clip starts at its own beats; a
     /// caller who wants an offset rebuilds the events and uses `play_clip`. The track is the one
-    /// [`load_midi`](Self::load_midi) landed
+    /// [`load_midi`](Self::load_midi) returned
     /// ([`LoadedMidi::track`](crate::LoadedMidi::track)); its events are built
     /// already, so this publishes a shared value and converts nothing.
     ///
@@ -1642,7 +1606,7 @@ impl<F: Float> Midi<'_, F> {
     /// event's [`frame`](TapEvent::frame) is the frame of the graph's clock it
     /// was due on, as it left the inlet and before the target heard it; where
     /// a take places it on the timeline is
-    /// [`TakePlacement::place`] (the frame minus the input and
+    /// [`TakeLatency::place`](crate::TakeLatency::place) (the frame minus the input and
     /// output latency and the inlet's lead, plus the user's trim).
     ///
     /// The tap is on **the keys' inlet only**: a clip ([`play_clip`](Self::play_clip))

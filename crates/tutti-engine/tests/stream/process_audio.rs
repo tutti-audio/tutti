@@ -6,11 +6,11 @@ use tutti_buffers::InterleavedMut;
 use tutti_buffers::MaxBlock;
 use tutti_engine::{AudioCallbackState, Engine, process_audio};
 use tutti_graph::NodeKey;
-use tutti_graph::{Edge, InPort, OutPort, Source};
+use tutti_graph::{Edge, InPort, OutPort, PortSource};
 use tutti_graph::{Editor, Prepare};
 use tutti_nodes::testing::Osc;
-use tutti_nodes::{SvfFilterNode, SvfType};
-use tutti_timeline::{MotionEvent, Timeline, Transport};
+use tutti_nodes::{SvfFilterConfig, SvfFilterNode, SvfType};
+use tutti_timeline::{MotionCommand, Timeline, Transport};
 use tutti_units::{Beat, BeatDuration};
 use tutti_units::{Hz, Q};
 use tutti_units::{SampleRate, Samples};
@@ -35,21 +35,25 @@ fn build_callback_state(sample_rate: f64) -> (Transport, AudioCallbackState) {
     ed.insert(
         filter,
         "filter",
-        SvfFilterNode::<f32>::new(SvfType::LowPass, Hz::new(2_000.0), Q::new(0.7)),
+        SvfFilterNode::<f32>::from(
+            SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
+                .freq(Hz::new(2_000.0))
+                .q(Q::new(0.7)),
+        ),
     );
     ed.spec_mut().topology.edges.insert(
         InPort {
             node: filter,
             port: 0,
         },
-        vec![Edge::Direct(Source::Node(OutPort {
+        vec![Edge::Direct(PortSource::Node(OutPort {
             node: source,
             port: 0,
         }))],
     );
     // The filter's single output on both device channels.
     ed.spec_mut().topology.set_outputs(vec![
-        Source::Node(OutPort {
+        PortSource::Node(OutPort {
             node: filter,
             port: 0,
         });
@@ -68,7 +72,7 @@ fn test_transport_advances_with_graph() {
     let (transport, state) = build_callback_state(sample_rate);
 
     transport.settings().set_tempo(tutti_units::Bpm::of(120.0));
-    let _ = transport.motion().try_send(MotionEvent::Play);
+    let _ = transport.motion().try_send(MotionCommand::Play);
 
     let frames = 256;
     let mut output = vec![0.0f32; frames * 2];
@@ -100,10 +104,10 @@ fn test_transport_loop_wrapping() {
             ),
         )
         .expect("room");
-    let _ = transport.motion().try_send(MotionEvent::Play);
+    let _ = transport.motion().try_send(MotionCommand::Play);
     let _ = transport
         .motion()
-        .try_send(MotionEvent::locate(Beat::new(3.99)));
+        .try_send(MotionCommand::locate(Beat::new(3.99)));
 
     let frames = 1024;
     let mut output = vec![0.0f32; frames * 2];

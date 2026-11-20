@@ -1,7 +1,7 @@
 //! A standalone voice can be told to move, and the telling reaches the node
 //! the graph renders.
 //!
-//! Placement is not a scalar param: a window is a [`Beat`] (`f64`) plus an
+//! StreamStart is not a scalar param: a window is a [`Beat`] (`f64`) plus an
 //! optional duration, and truncating a beat position to `f32` re-introduces
 //! the ~2²⁴ cliff that `Sample.loop_start` was moved to `SamplePosition` (f64)
 //! to escape — so it takes the tier the engine reserves for multi-field
@@ -38,7 +38,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::Wave;
 use tutti_graph::NodeKey;
 use tutti_graph::{Editor, Executor, ForkMode, ForkTarget, Prepare, TransportPosition, Unforkable};
-use tutti_graph::{OutPort, Source};
+use tutti_graph::{OutPort, PortSource};
 use tutti_sampler::testing::{MockTransport, block};
 use tutti_sampler::{MemorySource, Playback, Voice, VoiceNode, VoiceSource, VoiceWindow};
 use tutti_units::{Beat, BeatDuration, Bpm, SampleRate, Samples};
@@ -84,7 +84,7 @@ fn graph_with(node: VoiceNode<f32>) -> (Editor, Executor, tutti_sampler::VoiceNo
     let handle = ed.insert(NodeKey(1), "voice", node).controls;
     ed.spec_mut()
         .topology
-        .set_outputs(vec![Source::Node(OutPort {
+        .set_outputs(vec![PortSource::Node(OutPort {
             node: NodeKey(1),
             port: 0,
         })]);

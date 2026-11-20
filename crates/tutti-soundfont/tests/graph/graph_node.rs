@@ -32,7 +32,7 @@ fn font() -> Arc<SoundFont> {
 }
 
 fn unit() -> SoundFontUnit<f32> {
-    SoundFontUnit::new(font(), Settings::new()).expect("builds")
+    Settings::new().build(font()).expect("builds")
 }
 
 /// A clip playing middle C at `frame` into the unit, both at key 1 and 2,
@@ -62,7 +62,7 @@ fn graph(unit: SoundFontUnit<f32>, rate: f64, frame: u64) -> (Editor, Executor) 
         }),
     );
     ed.spec_mut().topology.set_outputs((0..2).map(|port| {
-        tutti_graph::Source::Node(tutti_graph::OutPort {
+        tutti_graph::PortSource::Node(tutti_graph::OutPort {
             node: NodeKey(2),
             port,
         })

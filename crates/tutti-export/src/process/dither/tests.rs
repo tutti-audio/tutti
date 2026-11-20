@@ -1,6 +1,6 @@
 use super::*;
 use tutti_buffers::ChannelLayout;
-use tutti_codec::{Format, Pcm, Quality};
+use tutti_codec::{Format, Pcm};
 
 fn config(dither: Option<DitherShape>, format: Format) -> FileTarget {
     let target = FileTarget::new("unused.wav", format, ChannelLayout::STEREO);
@@ -23,18 +23,6 @@ fn a_float_width_is_never_dithered() {
             None
         );
     }
-}
-
-/// An Ogg export with dither on adds nothing.
-#[test]
-fn ogg_is_never_dithered() {
-    let cfg = config(
-        Some(DitherShape::Triangular),
-        Format::Vorbis {
-            quality: Quality::default(),
-        },
-    );
-    assert_eq!(dither_shape(&cfg), None);
 }
 
 #[test]

@@ -4,10 +4,9 @@
 //! Every figure is analytic: a source writes a constant exactly representable
 //! value, and a fold's gain is the fold's stated rule, not another render's.
 
-use tutti_buffers::InterleavedMut;
-use tutti_buffers::{BusTopology, ChannelLayout, ChannelTopology, MaxBlock};
+use tutti_buffers::{BusTopology, ChannelLayout, ChannelTopology, InterleavedMut, MaxBlock};
 use tutti_graph::{Cx, Io, Node, Prepare, Shape, Status, Unforkable};
-use tutti_nodes::BusStripNode;
+use tutti_nodes::{BusStripConfig, BusStripNode};
 use tutti_session::{OutPort, Root, Session, SessionBuilder, ValueErrorKind};
 use tutti_units::{Balance, Samples};
 
@@ -62,7 +61,7 @@ fn a_mono_source_reaches_both_sides_of_a_stereo_strip() {
         values: vec![0.5],
         out: BusTopology::MONO,
     }));
-    let (strip, _) = g.add(BusStripNode::stereo());
+    let (strip, _) = g.add(BusStripNode::from(BusStripConfig::new(BusTopology::STEREO)));
     g.connect(src.bus_out(0), strip.bus_in(0))
         .expect("a mono bus folds onto a stereo one")
         .unfaded();
@@ -84,7 +83,7 @@ fn a_stereo_strip_feeds_a_declared_surround_root() {
         values: vec![0.25, 0.75],
         out: BusTopology::STEREO,
     }));
-    let (strip, _) = g.add(BusStripNode::stereo());
+    let (strip, _) = g.add(BusStripNode::from(BusStripConfig::new(BusTopology::STEREO)));
     g.connect(src, strip).expect("same width").unfaded();
     g.connect(strip.bus_out(0), Root)
         .expect("a placed stereo bus folds onto 5.1")
@@ -97,8 +96,12 @@ fn a_stereo_strip_feeds_a_declared_surround_root() {
 #[test]
 fn a_strip_without_a_pair_refuses_a_balance_by_name() {
     let mut s = offline(Session::builder(), 2);
-    let (stereo, _) = s.graph().add(BusStripNode::stereo());
-    let (mono, _) = s.graph().add(BusStripNode::mono());
+    let (stereo, _) = s
+        .graph()
+        .add(BusStripNode::from(BusStripConfig::new(BusTopology::STEREO)));
+    let (mono, _) = s
+        .graph()
+        .add(BusStripNode::from(BusStripConfig::new(BusTopology::MONO)));
     s.set(stereo.balance().to(Balance::new(0.5)))
         .expect("a stereo strip balances");
     assert_eq!(

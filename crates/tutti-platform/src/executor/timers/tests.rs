@@ -126,7 +126,7 @@ fn a_sleep_with_a_past_deadline_resolves_on_its_first_poll() {
     let waker = waker();
     let mut cx = Context::from_waker(&waker);
     let mut sleep = Sleep::new(&timers, Instant::now());
-    assert!(Pin::new(&mut sleep).poll(&mut cx).is_ready());
+    assert_eq!(Pin::new(&mut sleep).poll(&mut cx), Poll::Ready(Ok(())));
 }
 
 #[test]
@@ -150,14 +150,35 @@ fn fire_wakes_the_sleeps_due_and_counts_them() {
 }
 
 #[test]
-fn a_closed_queue_arms_no_sleep() {
+fn closing_wakes_every_waiting_sleep_and_a_closed_queue_resolves_at_once() {
     let timers = Arc::new(Timers::new());
-    timers.close();
     let counting = Arc::new(Counting(AtomicUsize::new(0)));
     let waker = Waker::from(Arc::clone(&counting));
     let mut cx = Context::from_waker(&waker);
-    let mut sleep = Sleep::new(&timers, Instant::now() + Duration::from_secs(3600));
-    assert!(Pin::new(&mut sleep).poll(&mut cx).is_pending());
+    let far = Instant::now() + Duration::from_secs(3600);
+    let mut first = Sleep::new(&timers, far);
+    let mut second = Sleep::new(&timers, far);
+    assert!(Pin::new(&mut first).poll(&mut cx).is_pending());
+    assert!(Pin::new(&mut second).poll(&mut cx).is_pending());
+    timers.close();
+    assert_eq!(
+        counting.0.load(Ordering::SeqCst),
+        2,
+        "each waiting sleep woke"
+    );
+    assert_eq!(
+        Pin::new(&mut first).poll(&mut cx),
+        Poll::Ready(Err(Shutdown))
+    );
+    assert_eq!(
+        Pin::new(&mut second).poll(&mut cx),
+        Poll::Ready(Err(Shutdown))
+    );
+    let mut later = Sleep::new(&timers, far);
+    assert_eq!(
+        Pin::new(&mut later).poll(&mut cx),
+        Poll::Ready(Err(Shutdown))
+    );
     assert_eq!(lock(&timers.state).due.next_deadline(), None);
     assert_eq!(Arc::strong_count(&counting), 2, "no waker is kept");
 }

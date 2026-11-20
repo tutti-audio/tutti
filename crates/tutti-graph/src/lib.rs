@@ -725,7 +725,8 @@ pub use bus_edge::{BusError, BusFeed, BusFold, BusRef, BusSide, BusSource, Lower
 pub use gain::{EdgeFade, EdgeGain};
 pub use graph::{
     Edge, EdgeId, EventTapId, EventTapSource, EventTapSpec, FeedbackFrom, InPort, Invalid, MeterId,
-    MeterSpec, NodeKey, NodeSpec, OutPort, Sink, Source, TapAlign, TapId, TapSpec, Topology, Valid,
+    MeterSpec, NodeKey, NodeSpec, OutPort, PortSink, PortSource, TapAlign, TapId, TapSpec,
+    Topology, Valid,
 };
 pub use history::TransportHistory;
 pub use inlet::{InletNode, InletRing};
@@ -770,7 +771,7 @@ pub use rtlog::{
 pub use spec::{EventEdge, EventIn, EventOut, GraphInvalid, GraphSpec, ValidGraph};
 pub use tail::{GraphTail, MAX_NODE_TAIL, TailGraph, graph_tail};
 pub use tap::{TapOptions, TapReader, TapWriter};
-pub use time::{Continuity, Due, Offset, Playhead};
+pub use time::{BeatCrossings, Continuity, Due, Offset};
 pub use tutti_rt::BlockWaits;
 // The reading is a value type, `tutti-units`' (the modulation compiler
 // carries one without naming the graph); the clock that keeps it is here.

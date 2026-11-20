@@ -14,9 +14,9 @@ use tutti_engine::{
 use tutti_units::SampleRate;
 
 use crate::driver_seam::{CpalDriver, choose_output_config, spec_from_supported};
-use crate::error::{Error, Result};
+use crate::error::{DeviceError, Result};
 use crate::host::{AudioHost, DeviceHost, DeviceSelector, device_name};
-use crate::roster::{DeviceId, Direction};
+use crate::roster::{DeviceDirection, DeviceId};
 
 /// What [`AudioEngine`] opens: the output device and its sample format.
 /// [`new`](Self::new) names the device at its default format; `Default` is the
@@ -61,7 +61,7 @@ impl OutputConfig {
 
     /// Opens the device at `format`, at its default rate and width. An
     /// unsigned device format opens as the signed format of its width, and a
-    /// format the device does not offer is [`Error::OutputFormatUnavailable`],
+    /// format the device does not offer is [`DeviceError::OutputFormatUnavailable`],
     /// never another format.
     #[must_use]
     pub fn sample_format(mut self, format: SampleFormat) -> Self {
@@ -102,7 +102,7 @@ fn output_config(
         Some(_) => device
             .supported_output_configs()
             .map_err(|e| {
-                Error::InvalidDevice(format!("cannot query {name:?} output configs: {e}"))
+                DeviceError::InvalidDevice(format!("cannot query {name:?} output configs: {e}"))
             })?
             .collect(),
         None => Vec::new(),
@@ -111,7 +111,7 @@ fn output_config(
         supported.into_iter(),
         device
             .default_output_config()
-            .map_err(Error::DeviceNotAvailable)?,
+            .map_err(DeviceError::DeviceNotAvailable)?,
         wanted,
         &name,
     )
@@ -188,7 +188,7 @@ impl Opened {
         match self {
             Self::Supplied => Ok(None),
             Self::Named(name) => Ok(Some(name.clone())),
-            Self::Unnamed(why) => Err(Error::InvalidDevice(format!(
+            Self::Unnamed(why) => Err(DeviceError::InvalidDevice(format!(
                 "the opened device could not be named: {why}"
             ))),
         }
@@ -222,11 +222,11 @@ impl AudioEngine {
     ///
     /// # Errors
     /// As [`new`](Self::new), plus whatever resolving the device on `host`
-    /// reports, and [`Error::OutputFormatUnavailable`] for a chosen format the
+    /// reports, and [`DeviceError::OutputFormatUnavailable`] for a chosen format the
     /// device does not offer.
     pub fn open(host: DeviceHost, config: impl Into<OutputConfig>) -> Result<Self> {
         let config = config.into();
-        let device = host.device(Direction::Output, &config.device)?;
+        let device = host.device(DeviceDirection::Output, &config.device)?;
         let (spec, _) = spec_from_supported(&output_config(&device, config.sample_format)?)?;
         Ok(Self {
             stream: OutputStream::new(spec),
@@ -241,7 +241,7 @@ impl AudioEngine {
     /// whole lifecycle — start, render, fault, stop, restart — with no sound
     /// card. Such an engine can only be started with
     /// [`start_with`](Self::start_with); [`start`](Self::start) returns
-    /// [`Error::InvalidDevice`], and [`opened_name`](Self::opened_name) is
+    /// [`DeviceError::InvalidDevice`], and [`opened_name`](Self::opened_name) is
     /// `Ok(None)`.
     #[must_use]
     pub fn from_spec(spec: OutputSpec) -> Self {
@@ -285,19 +285,19 @@ impl AudioEngine {
     /// [`faults`](Self::faults).
     ///
     /// # Errors
-    /// [`Error::AlreadyRunning`] if a stream is running (it is left running),
-    /// [`Error::InvalidDevice`] for an unresolvable selector,
-    /// [`Error::DeviceNotAvailable`] if the config cannot be read,
-    /// [`Error::OutputFormatUnavailable`] for a chosen format the device does
-    /// not offer, [`Error::InvalidConfig`] for a sample format the engine does
+    /// [`DeviceError::AlreadyRunning`] if a stream is running (it is left running),
+    /// [`DeviceError::InvalidDevice`] for an unresolvable selector,
+    /// [`DeviceError::DeviceNotAvailable`] if the config cannot be read,
+    /// [`DeviceError::OutputFormatUnavailable`] for a chosen format the device does
+    /// not offer, [`DeviceError::InvalidConfig`] for a sample format the engine does
     /// not build,
-    /// or [`Error::BuildStream`] / [`Error::PlayStream`] from CPAL.
+    /// or [`DeviceError::BuildStream`] / [`DeviceError::PlayStream`] from CPAL.
     pub fn start<F: Float>(&mut self, state: Arc<AudioCallbackState<F>>) -> Result<()>
     where
-        CpalDriver: StreamDriver<F, Error = crate::Error>,
+        CpalDriver: StreamDriver<F, Error = crate::DeviceError>,
     {
         if self.is_running() {
-            return Err(Error::AlreadyRunning);
+            return Err(DeviceError::AlreadyRunning);
         }
         let (driver, spec, opened) = self.resolve()?;
         self.stream.start_at(state, spec, driver)?;
@@ -335,13 +335,13 @@ impl AudioEngine {
         target: Option<&(DeviceHost, OutputConfig)>,
     ) -> Result<(CpalDriver, OutputSpec, Opened)> {
         let Some((host, config)) = target else {
-            return Err(Error::InvalidDevice(
+            return Err(DeviceError::InvalidDevice(
                 "this engine was built from a bare spec and has no device to open; \
                  use `start_with` and supply a driver"
                     .into(),
             ));
         };
-        let device = host.device(Direction::Output, &config.device)?;
+        let device = host.device(DeviceDirection::Output, &config.device)?;
         let (spec, format) = spec_from_supported(&output_config(&device, config.sample_format)?)?;
         // What it is called is recorded by the caller once the stream runs
         // (`opened`): a restart that fails leaves the name of the device the
@@ -361,14 +361,14 @@ impl AudioEngine {
     /// The hook's error, or what the driver's `open` reports, as `E`, **with
     /// the host back** and its stream stopped at its old spec: nothing plays,
     /// and the driver the host ran is to be started again by the caller.
-    pub fn start_resolved<F: Float, E: From<Error>>(
+    pub fn start_resolved<F: Float, E: From<DeviceError>>(
         self,
         host: tutti_engine::StreamHost<F>,
         resolved: Resolved,
         rerate: impl FnOnce(&OutputSpec, &tutti_engine::Stopped<'_, F>) -> core::result::Result<(), E>,
     ) -> core::result::Result<crate::TuttiDriver<F>, (tutti_engine::StreamHost<F>, E)>
     where
-        CpalDriver: StreamDriver<F, Error = crate::Error>,
+        CpalDriver: StreamDriver<F, Error = crate::DeviceError>,
     {
         let (spec, driver, opened) = resolved.into_parts();
         crate::TuttiDriver::take_over(host, spec, driver, rerate, self.target, opened)
@@ -382,15 +382,15 @@ impl AudioEngine {
     /// # Errors
     /// As [`start_resolved`](Self::start_resolved).
     #[cfg(feature = "testing")]
-    pub fn start_on<F: Float, D: StreamDriver<F>, E: From<Error>>(
+    pub fn start_on<F: Float, D: StreamDriver<F>, E: From<DeviceError>>(
         self,
         host: tutti_engine::StreamHost<F>,
         driver: D,
         rerate: impl FnOnce(&OutputSpec, &tutti_engine::Stopped<'_, F>) -> core::result::Result<(), E>,
     ) -> core::result::Result<crate::TuttiDriver<F>, (tutti_engine::StreamHost<F>, E)>
     where
-        CpalDriver: StreamDriver<F, Error = crate::Error>,
-        D::Error: Into<Error>,
+        CpalDriver: StreamDriver<F, Error = crate::DeviceError>,
+        D::Error: Into<DeviceError>,
     {
         let spec = self.spec().clone();
         crate::TuttiDriver::take_over(host, spec, driver, rerate, self.target, self.opened)
@@ -405,16 +405,16 @@ impl AudioEngine {
     /// each callback by hand. Clears [`faults`](Self::faults).
     ///
     /// # Errors
-    /// [`Error::AlreadyRunning`] if a stream is running (it is left running);
+    /// [`DeviceError::AlreadyRunning`] if a stream is running (it is left running);
     /// otherwise whatever the driver's [`open`](StreamDriver::open) reports; for
-    /// [`CpalDriver`], [`Error::BuildStream`] / [`Error::PlayStream`] from CPAL.
+    /// [`CpalDriver`], [`DeviceError::BuildStream`] / [`DeviceError::PlayStream`] from CPAL.
     pub fn start_with<F: Float, D: StreamDriver<F>>(
         &mut self,
         state: Arc<AudioCallbackState<F>>,
         driver: D,
     ) -> Result<()>
     where
-        D::Error: Into<Error>,
+        D::Error: Into<DeviceError>,
     {
         Ok(self.stream.start_with(state, driver)?)
     }
@@ -468,7 +468,7 @@ impl AudioEngine {
     /// device, by design.
     ///
     /// # Errors
-    /// [`Error::InvalidDevice`] when the device opened but the host could
+    /// [`DeviceError::InvalidDevice`] when the device opened but the host could
     /// not name it.
     pub fn opened_name(&self) -> Result<Option<String>> {
         self.opened.name()

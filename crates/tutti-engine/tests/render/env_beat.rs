@@ -34,16 +34,16 @@ use tutti_graph::NodeKey;
 use tutti_graph::{
     Cx, Editor, Env, Executor, IntoNode, Io, Node, Prepare, Shape, Status, Unforkable,
 };
-use tutti_graph::{Edge, InPort, OutPort, Source};
+use tutti_graph::{Edge, InPort, OutPort, PortSource};
 use tutti_music::LoopRange;
-use tutti_nodes::{ClickNode, ClickSettings, MetronomeMode};
+use tutti_nodes::{ClickNode, ClickNodeConfig, ClickSettings, MetronomeMode};
 use tutti_timeline::{
-    AfterLocate, FadeOut, LoopEdit, MotionEvent, OfflineTimeline, OfflineTimelineConfig, Timeline,
-    Transport, TransportCommand, render_graph,
+    AfterLocate, FadeOut, LoopEdit, MotionCommand, OfflineTimeline, OfflineTimelineConfig,
+    Timeline, Transport, TransportCommand, render_graph,
 };
 use tutti_units::{At, Beat, Bpm, Frame, SampleRate, Samples, Tail};
 
-const SR: f64 = 48_000.0;
+pub(crate) const SR: f64 = 48_000.0;
 
 type Log = Arc<Mutex<Vec<(f32, f32)>>>;
 
@@ -130,10 +130,13 @@ fn wire_clock(ed: &mut Editor, sink: impl IntoNode<Controls = ()>, width: u16) {
     for port in 0..2 {
         topology.edges.insert(
             InPort { node: SINK, port },
-            vec![Edge::Direct(Source::Node(OutPort { node: CLOCK, port }))],
+            vec![Edge::Direct(PortSource::Node(OutPort {
+                node: CLOCK,
+                port,
+            }))],
         );
     }
-    topology.set_outputs((0..width).map(|port| Source::Node(OutPort { node: SINK, port })));
+    topology.set_outputs((0..width).map(|port| PortSource::Node(OutPort { node: SINK, port })));
     ed.commit().expect("commits");
 }
 
@@ -153,7 +156,7 @@ fn graph_engine(
     (engine, ed)
 }
 
-fn render(engine: &Engine, layout: ChannelLayout, n: usize) -> Vec<f32> {
+pub(crate) fn render(engine: &Engine, layout: ChannelLayout, n: usize) -> Vec<f32> {
     let mut buf = vec![0.0f32; n * layout.count() as usize];
     engine.process(&mut InterleavedMut::new(&mut buf, layout).unwrap());
     buf
@@ -188,13 +191,13 @@ fn the_env_walk_is_the_env_beat() {
     let env_beats = Arc::clone(&sink.1);
     let (graph, _ed) = graph_engine(&transport, Unforkable(sink), 1);
 
-    let locate = |beat: f64| MotionEvent::Locate {
+    let locate = |beat: f64| MotionCommand::Locate {
         beat: Beat::new(beat),
         fade: FadeOut::Immediate,
         then: AfterLocate::Keep,
     };
     let m = &transport.motion();
-    m.try_send(MotionEvent::Play).expect("room");
+    m.try_send(MotionCommand::Play).expect("room");
     let at = |f: u64| At::Frame(Frame::new(f));
     // Armed with the playhead inside it (~0.03): wraps from ~1 600.
     m.schedule(
@@ -217,9 +220,9 @@ fn the_env_walk_is_the_env_beat() {
     .expect("room");
     // Into it, just before its end: wraps ~300 frames on.
     m.schedule(at(6_000), locate(1.99)).expect("room");
-    m.schedule(at(8_000), MotionEvent::stop_unfaded())
+    m.schedule(at(8_000), MotionCommand::stop_unfaded())
         .expect("room");
-    m.schedule(at(9_500), MotionEvent::Play).expect("room");
+    m.schedule(at(9_500), MotionCommand::Play).expect("room");
     m.schedule(at(30_000), TransportCommand::Loop(LoopEdit::armed(false)))
         .expect("room");
     let blocks = blocks(40_000);
@@ -305,7 +308,7 @@ fn the_env_walk_is_the_env_beat() {
 /// One zero frame is not silence: a click's sine reads an exact zero where its phase
 /// wraps to a whole cycle. A sine below a quarter of the rate never reads two exact
 /// zeros in a row, so two silent frames are silence.
-fn onsets(stereo: &[f32]) -> Vec<usize> {
+pub(crate) fn onsets(stereo: &[f32]) -> Vec<usize> {
     let left: Vec<f32> = stereo.iter().step_by(2).copied().collect();
     (1..left.len())
         .filter(|&f| left[f] != 0.0 && left[f.saturating_sub(2)..f].iter().all(|&x| x == 0.0))
@@ -335,7 +338,7 @@ fn click_clicks_on_the_model_beats() {
     settings.set_volume(tutti_nodes::ClickLevel::of(tutti_units::Amplitude::new(
         1.0,
     )));
-    let click = ClickNode::new(&transport, settings);
+    let click = ClickNode::from(ClickNodeConfig::new(settings));
     let (mut ed, exec) = Editor::new(Prepare::new(
         SampleRate::of(SR),
         MaxBlock::of(Samples::new(512)),
@@ -344,12 +347,12 @@ fn click_clicks_on_the_model_beats() {
     ed.insert(CLICK, "click", click);
     ed.spec_mut()
         .topology
-        .set_outputs((0..2).map(|port| Source::Node(OutPort { node: CLICK, port })));
+        .set_outputs((0..2).map(|port| PortSource::Node(OutPort { node: CLICK, port })));
     ed.commit().expect("commits");
     let graph = Engine::new(&transport, &mut ed, exec, tutti_engine::BlockDates::Os)
         .expect("within the limits");
     let m = &transport.motion();
-    m.try_send(MotionEvent::Play).expect("room");
+    m.try_send(MotionCommand::Play).expect("room");
     // 151 BPM from the beat frame 20 111 reaches at 120: a step inside a block.
     transport.settings().set_tempo_map(step_map(&[
         (0.0, 120.0),
@@ -357,7 +360,7 @@ fn click_clicks_on_the_model_beats() {
     ]));
     m.schedule(
         At::Frame(Frame::new(30_000)),
-        MotionEvent::Locate {
+        MotionCommand::Locate {
             beat: Beat::new(6.9),
             fade: FadeOut::Immediate,
             then: AfterLocate::Keep,
@@ -401,7 +404,7 @@ fn click_clicks_on_the_model_beats() {
 // ---- offline ---------------------------------------------------------------
 
 /// Logs every block's `Env`.
-struct EnvLog(Arc<Mutex<Vec<Env>>>);
+pub(crate) struct EnvLog(pub(crate) Arc<Mutex<Vec<Env>>>);
 
 impl Node for EnvLog {
     fn shape(&self) -> Shape {
@@ -417,7 +420,7 @@ impl Node for EnvLog {
 }
 
 /// An `EnvLog` at key 1, on the global output.
-fn env_graph(max_block: usize, log: &Arc<Mutex<Vec<Env>>>) -> (Editor, Executor) {
+pub(crate) fn env_graph(max_block: usize, log: &Arc<Mutex<Vec<Env>>>) -> (Editor, Executor) {
     let (mut ed, exec) = Editor::new(Prepare::new(
         SampleRate::of(SR),
         MaxBlock::of(Samples::new(max_block)),
@@ -425,7 +428,7 @@ fn env_graph(max_block: usize, log: &Arc<Mutex<Vec<Env>>>) -> (Editor, Executor)
     ed.insert(NodeKey(1), "env", Unforkable(EnvLog(Arc::clone(log))));
     ed.spec_mut()
         .topology
-        .set_outputs(vec![Source::Node(OutPort {
+        .set_outputs(vec![PortSource::Node(OutPort {
             node: NodeKey(1),
             port: 0,
         })]);
@@ -468,7 +471,7 @@ fn an_offline_render_sees_the_live_engine_transport() {
         .expect("room");
     live_t
         .motion()
-        .try_send(MotionEvent::play_from(Beat::new(BAR_2)))
+        .try_send(MotionCommand::play_from(Beat::new(BAR_2)))
         .expect("room");
     for &n in &blocks {
         render(&live, ChannelLayout::MONO, n);

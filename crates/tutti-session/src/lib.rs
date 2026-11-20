@@ -61,6 +61,7 @@
 
 #[cfg(feature = "analyze")]
 mod analyze;
+mod apply;
 #[cfg(feature = "export")]
 mod bounce;
 mod builder;
@@ -88,6 +89,8 @@ mod instrument;
 mod job;
 mod jobs;
 mod key;
+#[cfg(any(feature = "capture", feature = "midi"))]
+mod latency;
 #[cfg(feature = "midi")]
 mod midi;
 #[cfg(feature = "midi-hardware")]
@@ -150,6 +153,7 @@ mod watch;
 pub use analyze::{
     Analyze, AnalyzeError, Analyzer, AnalyzerError, Audio, AudioContext, AudioInput, BindError,
 };
+pub use apply::Apply;
 #[cfg(feature = "export")]
 pub use bounce::{
     AnyStem, Bounce, BounceConfigError, BounceError, BounceHandle, BounceJob, BounceLatency,
@@ -187,7 +191,7 @@ pub use graph::{
     NotReopened, Reopened, ReplaceRefused, RootReader, Taps,
 };
 #[cfg(feature = "capture")]
-pub use input::{Input, InputConfig, InputOpener, OpenedInput, Trim};
+pub use input::{Input, InputConfig, InputOpener, OpenedInput};
 #[cfg(feature = "midi")]
 pub use instrument::{AddedInstrument, AnyNode, InstrumentHandle, NotInstrument};
 pub use job::{Job, JobId, JobKind, JobOutput, JobStatus, WaitError, WorkerError};
@@ -196,8 +200,10 @@ pub use key::{
     EventTapPort, Fanin, InPort, Inlet, Key, MainBus, MainSink, OutPort, Outlet, Root,
     RootDeclaration, Weighted, Wire,
 };
+#[cfg(any(feature = "capture", feature = "midi"))]
+pub use latency::{Start, TakeLatency, Trim};
 #[cfg(feature = "midi")]
-pub use midi::{Midi, MidiRouteId, MidiRouteRule, Stamping, TakePlacement};
+pub use midi::{Midi, MidiRouteId, MidiRouteRule, Stamping};
 #[cfg(feature = "midi-hardware")]
 pub use midi_ci::{
     ChannelProfile, GetProperty, ListedProfile, ListedResource, PeFailure, ProfilePeer, ReportPeer,
@@ -208,8 +214,7 @@ pub use midi_ci::{
 pub use midi_follow::{FollowClock, FollowMachineControl, FollowTempo};
 #[cfg(feature = "midi")]
 pub use midi_load::{
-    DroppedEvent, LoadMidi, LoadMidiError, LoadReport, LoadedMidi, LoadedTrack,
-    NoCommonTimelineError, TrackError,
+    DroppedEvent, LoadMidi, LoadReport, LoadedMidi, LoadedTrack, NoCommonTimelineError, TrackError,
 };
 #[cfg(feature = "midi-hardware")]
 pub use midi_port::{
@@ -233,7 +238,7 @@ pub use peer_state::{OtherPeer, PeerState, SavedPeer};
 #[cfg(feature = "plugin")]
 pub use plugin::{
     AddPluginError, AnyPlugin, LoadPreset, LoadedPlugin, Plugin, PluginCause, PluginChange,
-    PluginDeclaration, PluginEntry, PluginEvent, PluginHealth, PluginInfo, PluginPorts,
+    PluginDeclaration, PluginEvent, PluginHealth, PluginInfo, PluginPorts, PoolPluginEntry,
     PooledPlugin, PortsRefusal, PresetJobError, PresetJobFailed, RestoreError, RestoreState,
     SaveState, StateJobError, StateJobFailed, StateRestore, StateView,
 };
@@ -241,10 +246,10 @@ pub(crate) use pool::Pool;
 #[cfg(all(feature = "sampler", codec))]
 pub use pool::{AudioEntry, AudioFile, StreamInfo, Tier, audio_file};
 pub use pool::{
-    Declared, HandleError, IntoPool, Life, Load, LoadError, OpenCx, Owned, PoolConfig, PoolEntry,
-    PoolError, PoolEvent, PoolJobError, PoolKey, PoolLoaded, PoolOutcome, PoolReport, PoolSet,
-    PoolState, RefreshPool, RefreshReport, Retention, RetryError, Sharing, WhenLoadedError,
-    stranded_loads,
+    Declared, HandleError, IntoPool, Life, LoadError, OpenCx, Owned, PoolConfig, PoolEntry,
+    PoolError, PoolEvent, PoolJobError, PoolKey, PoolLoad, PoolLoaded, PoolOutcome, PoolReport,
+    PoolSet, PoolState, RefreshError, RefreshPool, RefreshReport, RefreshedPool, Retention,
+    RetryError, Sharing, WhenLoadedError, stranded_loads,
 };
 #[cfg(feature = "plugin")]
 pub(crate) use pool::{Hold, HoldKind};
@@ -260,7 +265,7 @@ pub use midi_hardware::{MidiPolicy, MidiPolicyError};
 #[cfg(feature = "plugin")]
 pub use plugin_diagnostics::{Diagnostics, PluginBuses};
 #[cfg(feature = "plugin")]
-pub use plugin_params::{Param, ParamGesture, PluginParams};
+pub use plugin_params::{ParamGesture, PluginParam, PluginParams};
 #[cfg(feature = "plugin")]
 pub use plugin_presets::{ListedPreset, PluginPresets};
 pub use policy::{OutputPolicy, OutputPolicyError, Policy};
@@ -274,7 +279,7 @@ pub use recovery::{
     ReloadCause,
 };
 #[cfg(feature = "sampler")]
-pub use sampler::{SamplerError, SamplerEvent, SamplerLoad};
+pub use sampler::{OpenStream, OpenStreamError, OpenedStream, SamplerError};
 #[cfg(feature = "midi")]
 pub use session::MidiNodes;
 pub use session::ModInput;
@@ -287,8 +292,8 @@ pub use signal_windows::windows_from_signal;
 pub use switch::ClockError;
 #[cfg(feature = "capture")]
 pub use take::{
-    Armed, InFlight, Placement, Punch, PunchError, Recorded, Rolling, Start, Take, TakeEnd,
-    TakeError, TakeEvent, TakeId, TakeLatency, TakeTarget, Window,
+    Armed, InFlight, Punch, PunchError, Recorded, Rolling, Take, TakeEnd, TakeError, TakeEvent,
+    TakeId, TakePlacement, TakeTarget, Window,
 };
 #[cfg(all(feature = "midi", feature = "analyze"))]
 pub use transcribe::{LevelVelocity, NoteCents, NoteMapping, clip_from_notes, harmony_from_chords};

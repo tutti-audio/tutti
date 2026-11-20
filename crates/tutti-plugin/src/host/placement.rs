@@ -5,8 +5,18 @@ use std::path::Path;
 use tutti_plugin_db::{Hosting, Loadable};
 use tutti_plugin_types::{IpcError, IpcResult, PluginFormat};
 
-/// Where the load of `plugin` runs: [`Hosting::InProcess`] or
-/// [`Hosting::OutOfProcess`], never `Auto`. An in-process load (and the
+/// Where a load runs, once the request ([`Hosting`]) is resolved against the
+/// format and the build: `Auto` is not one of the two.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ResolvedHosting {
+    /// In a `plugin-server` subprocess ([`Plugin::open_served`](crate::catalog::Plugin::open_served)).
+    OutOfProcess,
+    /// In the host's own process, on the main thread ([`Plugin::open`](crate::catalog::Plugin::open)).
+    InProcess,
+}
+
+/// Where the load of `plugin` runs: [`ResolvedHosting::InProcess`] or
+/// [`ResolvedHosting::OutOfProcess`]. An in-process load (and the
 /// instance's drop) is confined to the main thread; an out-of-process one
 /// loads from any thread.
 ///
@@ -16,7 +26,7 @@ use tutti_plugin_types::{IpcError, IpcResult, PluginFormat};
 /// [`IpcError::NotInProcess`] for a format this build cannot host in
 /// process: the answer is the format's and the build's, so it comes before
 /// a server or a file is looked for.
-pub fn placement(plugin: &Loadable) -> IpcResult<Hosting> {
+pub fn placement(plugin: &Loadable) -> IpcResult<ResolvedHosting> {
     resolve(
         plugin.requested_hosting(),
         plugin.plugin().path(),
@@ -37,38 +47,25 @@ pub(crate) fn format_of(plugin: &Loadable) -> IpcResult<PluginFormat> {
     })
 }
 
-/// Where a load of the `format` plugin at `path` runs when it asks for `hosting`:
-/// `InProcess` or `OutOfProcess`, never `Auto`.
-fn resolve(hosting: Hosting, path: &Path, format: PluginFormat) -> IpcResult<Hosting> {
-    let name = format_name(format);
+/// Where a load of the `format` plugin at `path` runs when it asks for `hosting`.
+fn resolve(hosting: Hosting, path: &Path, format: PluginFormat) -> IpcResult<ResolvedHosting> {
     match (hosting, format) {
         (Hosting::OutOfProcess, PluginFormat::Vst2) => Err(IpcError::NotOutOfProcess {
             path: path.to_path_buf(),
-            format: name,
+            format,
         }),
-        (Hosting::OutOfProcess, _) => Ok(Hosting::OutOfProcess),
+        (Hosting::OutOfProcess, _) => Ok(ResolvedHosting::OutOfProcess),
         (Hosting::InProcess, _) | (Hosting::Auto, PluginFormat::Vst2) => {
             if in_process_built(format) {
-                Ok(Hosting::InProcess)
+                Ok(ResolvedHosting::InProcess)
             } else {
                 Err(IpcError::NotInProcess {
                     path: path.to_path_buf(),
-                    format: name,
+                    format,
                 })
             }
         }
-        (Hosting::Auto, _) => Ok(Hosting::OutOfProcess),
-    }
-}
-
-/// The format as a user knows it.
-fn format_name(format: PluginFormat) -> &'static str {
-    match format {
-        PluginFormat::Vst3 => "VST3",
-        PluginFormat::Vst2 => "VST2",
-        PluginFormat::Clap => "CLAP",
-        PluginFormat::AudioUnit => "AU",
-        _ => "plugin",
+        (Hosting::Auto, _) => Ok(ResolvedHosting::OutOfProcess),
     }
 }
 
@@ -102,7 +99,7 @@ mod tests {
             let path = Path::new("P");
             assert_eq!(
                 resolve(Hosting::Auto, path, format).unwrap(),
-                Hosting::OutOfProcess,
+                ResolvedHosting::OutOfProcess,
                 "{format:?}"
             );
         }
@@ -119,7 +116,10 @@ mod tests {
         .unwrap_err();
         assert!(matches!(
             err,
-            IpcError::NotOutOfProcess { format: "VST2", .. }
+            IpcError::NotOutOfProcess {
+                format: PluginFormat::Vst2,
+                ..
+            }
         ));
     }
 
@@ -130,7 +130,13 @@ mod tests {
     fn vst2_in_process_needs_its_feature() {
         for hosting in [Hosting::Auto, Hosting::InProcess] {
             let err = resolve(hosting, Path::new("P.vst"), PluginFormat::Vst2).unwrap_err();
-            assert!(matches!(err, IpcError::NotInProcess { format: "VST2", .. }));
+            assert!(matches!(
+                err,
+                IpcError::NotInProcess {
+                    format: PluginFormat::Vst2,
+                    ..
+                }
+            ));
         }
     }
 
@@ -138,7 +144,13 @@ mod tests {
     #[test]
     fn clap_in_process_needs_its_feature() {
         let err = resolve(Hosting::InProcess, Path::new("P.clap"), PluginFormat::Clap).unwrap_err();
-        assert!(matches!(err, IpcError::NotInProcess { format: "CLAP", .. }));
+        assert!(matches!(
+            err,
+            IpcError::NotInProcess {
+                format: PluginFormat::Clap,
+                ..
+            }
+        ));
     }
 
     #[cfg(feature = "clap")]
@@ -146,7 +158,7 @@ mod tests {
     fn clap_in_process_is_admitted_with_its_feature() {
         assert_eq!(
             resolve(Hosting::InProcess, Path::new("P.clap"), PluginFormat::Clap).unwrap(),
-            Hosting::InProcess
+            ResolvedHosting::InProcess
         );
     }
 

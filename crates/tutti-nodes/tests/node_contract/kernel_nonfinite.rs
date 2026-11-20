@@ -9,13 +9,14 @@ use tutti_graph::contract::drive_input;
 use tutti_graph::{Env, Node, PlayClock, Prepare, TransportChanges, TransportPosition};
 use tutti_nodes::{
     Antialiasing, AutoPanConfig, AutoPanNode, BrickwallLimiterConfig, BrickwallLimiterNode,
-    CompressorConfig, CompressorControls, CompressorNode, CrossoverNode, DelayConfig,
-    DelayControls, DelayLayout, DelayNode, DistortionNode, DynamicEqConfig, DynamicEqNode,
-    FdnConfig, FdnNode, FreeverbConfig, FreeverbNode, GateConfig, GateControls, GateNode,
-    InterpolationMode, LadderFilterNode, LimiterConfig, LimiterControls, LimiterNode, MaxDelay,
-    ModDelayConfig, ModDelayNode, MultibandBands, MultibandCompressorConfig,
-    MultibandCompressorNode, PeakDetection, PhaserConfig, PhaserNode, PlateReverbConfig,
-    PlateReverbNode, RingModConfig, RingModNode, SvfFilterNode, TremoloConfig, TremoloNode,
+    CompressorConfig, CompressorControls, CompressorNode, CrossoverConfig, CrossoverControls,
+    CrossoverNode, DelayConfig, DelayControls, DelayLayout, DelayNode, DistortionConfig,
+    DistortionNode, DynamicEqConfig, DynamicEqNode, FdnConfig, FdnNode, FreeverbConfig,
+    FreeverbNode, GateConfig, GateControls, GateNode, InterpolationMode, LadderFilterConfig,
+    LadderFilterNode, LimiterConfig, LimiterControls, LimiterNode, MaxDelay, ModDelayConfig,
+    ModDelayNode, MultibandBands, MultibandCompressorConfig, MultibandCompressorNode,
+    PeakDetection, PhaserConfig, PhaserNode, PlateReverbConfig, PlateReverbNode, RingModConfig,
+    RingModNode, SvfFilterConfig, SvfFilterNode, TremoloConfig, TremoloNode,
 };
 use tutti_nodes::{
     BellFilterConfig, BellFilterNode, BitCrusherConfig, BitCrusherNode, ButterworthOrder,
@@ -23,6 +24,7 @@ use tutti_nodes::{
     EnvelopeFilterConfig, EnvelopeFilterNode, LevellerConfig, LevellerNode, TiltFilterConfig,
     TiltFilterNode, TransientShaperConfig, TransientShaperNode,
 };
+use tutti_nodes::{GraphicBands, GraphicEqConfig, GraphicEqNode};
 use tutti_rt::SplitMix64;
 use tutti_units::{
     BitDepth, Db, Drive, Feedback, Frame, HoldFactor, Hz, Mix, Q, Resonance, SampleRate, Samples,
@@ -42,24 +44,28 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
     vec![
         (
             "svf",
-            Box::new(SvfFilterNode::<f32>::new(
-                SvfType::LowPass,
-                Hz::new(1_000.0),
-                Q::new(0.707),
+            Box::new(SvfFilterNode::<f32>::from(
+                SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
+                    .freq(Hz::new(1_000.0))
+                    .q(Q::new(0.707)),
             )),
         ),
         (
             "ladder",
-            Box::new(LadderFilterNode::<f32>::new(
-                LadderType::LP24,
-                Hz::new(1_000.0),
-                Resonance::new(0.5),
+            Box::new(LadderFilterNode::<f32>::from(
+                LadderFilterConfig::new(ChannelLayout::MONO, LadderType::LP24)
+                    .freq(Hz::new(1_000.0))
+                    .res(Resonance::new(0.5)),
             )),
         ),
         (
             "crossover",
             Box::new(
-                CrossoverNode::<f32>::new(ChannelLayout::STEREO, &[Hz::new(1_000.0)]).unwrap(),
+                CrossoverNode::<f32>::try_from(CrossoverConfig::new(
+                    BusTopology::STEREO,
+                    CrossoverControls::try_from(&[Hz::new(1_000.0)][..]).unwrap(),
+                ))
+                .unwrap(),
             ),
         ),
         (
@@ -81,23 +87,28 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
         ),
         (
             "distortion",
-            Box::new(DistortionNode::<f32>::new(ShapeKind::Tanh, Drive::new(4.0))),
+            Box::new(DistortionNode::<f32>::from(
+                DistortionConfig::new(ChannelLayout::STEREO, ShapeKind::Tanh)
+                    .drive(Drive::new(4.0)),
+            )),
         ),
         // The antialiasing's history is the shaper's own state: a non-finite sample enters it
         // as 0, so it is heard at its own frame.
         (
             "distortion first order",
-            Box::new(
-                DistortionNode::<f32>::new(ShapeKind::Tanh, Drive::new(4.0))
+            Box::new(DistortionNode::<f32>::from(
+                DistortionConfig::new(ChannelLayout::STEREO, ShapeKind::Tanh)
+                    .drive(Drive::new(4.0))
                     .antialiasing(Antialiasing::FirstOrder),
-            ),
+            )),
         ),
         (
             "distortion second order",
-            Box::new(
-                DistortionNode::<f32>::new(ShapeKind::Softsign, Drive::new(4.0))
+            Box::new(DistortionNode::<f32>::from(
+                DistortionConfig::new(ChannelLayout::STEREO, ShapeKind::Softsign)
+                    .drive(Drive::new(4.0))
                     .antialiasing(Antialiasing::SecondOrder),
-            ),
+            )),
         ),
         (
             "compressor",
@@ -137,6 +148,13 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
                 Hz::new(2_000.0),
                 Q::new(2.0),
                 Db::new(6.0),
+            ))),
+        ),
+        (
+            "graphic eq",
+            Box::new(GraphicEqNode::from(GraphicEqConfig::new(
+                BusTopology::STEREO,
+                GraphicBands::ThirdOctave,
             ))),
         ),
         (
@@ -337,7 +355,7 @@ mod logged {
     use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
     use tutti_graph::{
         Cx, Edge, Editor, Executor, InPort, IntoNode, Io, LogFilter, Node, NodeKey, OutPort,
-        Prepare, RtLevel, RtLogReaders, RtRecord, RtValue, Shape, Source, Status,
+        PortSource, Prepare, RtLevel, RtLogReaders, RtRecord, RtValue, Shape, Status,
         TransportPosition, Unforkable,
     };
     use tutti_nodes::{
@@ -402,10 +420,10 @@ mod logged {
         for port in 0..2u16 {
             topology.edges.insert(
                 InPort { node: fx, port },
-                vec![Edge::Direct(Source::Node(OutPort { node: src, port }))],
+                vec![Edge::Direct(PortSource::Node(OutPort { node: src, port }))],
             );
         }
-        topology.set_outputs((0..2).map(|port| Source::Node(OutPort { node: fx, port })));
+        topology.set_outputs((0..2).map(|port| PortSource::Node(OutPort { node: fx, port })));
         ed.commit().expect("commits");
         exec.apply_pending();
         ed.collect();

@@ -5,11 +5,15 @@
 
 // These tests pin the `f32` instantiation, the session's audio format, so their tolerances are `f32`'s.
 
+use tutti_buffers::BusTopology;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::Planes;
 use tutti_graph::contract::{drive, drive_input, prepared};
 use tutti_graph::{Env, Node, ParamNode, PlayClock, Status, TransportChanges, TransportPosition};
-use tutti_nodes::{CrossoverNode, LadderFilterNode, LadderType};
+use tutti_nodes::{
+    CrossoverConfig, CrossoverControls, CrossoverNode, LadderFilterConfig, LadderFilterNode,
+    LadderType,
+};
 use tutti_units::{Frame, Hz, Resonance, SampleRate, Samples, Tail, UnitAddr, UnitParam};
 
 const SR: SampleRate = SampleRate::SR_48K;
@@ -33,11 +37,10 @@ trait Cutoff: Node + ParamNode + Clone + 'static {
 impl Cutoff for LadderFilterNode<f32> {
     const NAME: &'static str = "ladder";
     fn build() -> Self {
-        LadderFilterNode::<f32>::with_channels(
-            ChannelLayout::STEREO,
-            LadderType::LP24,
-            Hz::new(900.0),
-            Resonance::new(0.7),
+        LadderFilterNode::<f32>::from(
+            LadderFilterConfig::new(ChannelLayout::STEREO, LadderType::LP24)
+                .freq(Hz::new(900.0))
+                .res(Resonance::new(0.7)),
         )
     }
     fn set_cutoff(&self, hz: f64) -> bool {
@@ -51,8 +54,11 @@ impl Cutoff for LadderFilterNode<f32> {
 impl Cutoff for CrossoverNode<f32> {
     const NAME: &'static str = "crossover";
     fn build() -> Self {
-        CrossoverNode::<f32>::new(ChannelLayout::STEREO, &[Hz::new(300.0), Hz::new(3_000.0)])
-            .unwrap()
+        CrossoverNode::<f32>::try_from(CrossoverConfig::new(
+            BusTopology::STEREO,
+            CrossoverControls::try_from(&[Hz::new(300.0), Hz::new(3_000.0)][..]).unwrap(),
+        ))
+        .unwrap()
     }
     fn set_cutoff(&self, hz: f64) -> bool {
         self.param_set()
@@ -237,11 +243,10 @@ fn an_unknown_tail_is_never_narrowed_cut_or_parked() {
         ring
     };
     let mut resonant = prepared(
-        LadderFilterNode::<f32>::with_channels(
-            ChannelLayout::STEREO,
-            LadderType::LP24,
-            Hz::new(1_000.0),
-            Resonance::new(1.0),
+        LadderFilterNode::<f32>::from(
+            LadderFilterConfig::new(ChannelLayout::STEREO, LadderType::LP24)
+                .freq(Hz::new(1_000.0))
+                .res(Resonance::new(1.0)),
         ),
         SR,
         64,
@@ -277,7 +282,11 @@ fn every_band_plane_of_a_wide_crossover_is_written() {
     ] {
         let hz: Vec<Hz> = splits.iter().map(|&f| Hz::new(f)).collect();
         let bands = splits.len() + 1;
-        let node = CrossoverNode::<f32>::new(ChannelLayout::from(channels), &hz).unwrap();
+        let node = CrossoverNode::<f32>::try_from(CrossoverConfig::new(
+            BusTopology::default_for(ChannelLayout::from(channels)).unwrap(),
+            CrossoverControls::try_from(&hz[..]).unwrap(),
+        ))
+        .unwrap();
         assert_eq!(
             usize::from(node.shape().audio_out().count()),
             usize::from(channels) * bands
