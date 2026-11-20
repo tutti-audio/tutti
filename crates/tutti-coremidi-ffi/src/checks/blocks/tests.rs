@@ -250,4 +250,10 @@ fn a_listing_that_is_not_of_the_registered_blocks_has_no_numbers() {
         numbers_in_registered_order(&registered, &listed(&[("a", 1), ("a", 2)])),
         None
     );
+    // Unnamed blocks are matched by order, so only the count can refuse a listing.
+    let unnamed = [named(""), named("")];
+    assert_eq!(
+        numbers_in_registered_order(&unnamed, &listed(&[("", 1)])),
+        None
+    );
 }
