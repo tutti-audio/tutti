@@ -57,7 +57,7 @@ fn midi2() -> Endpoint {
 }
 
 fn session_over(os: Endpoint, direction: PortDirection, device: Endpoint) -> Wire {
-    session_over_with(os, direction, device, crate::MidiHardwareOptions::new())
+    session_over_with(os, direction, device, crate::MidiHardwareConfig::new())
 }
 
 /// As [`session_over`], with inputs timed by `timing`.
@@ -71,7 +71,7 @@ fn session_over_timing(
         os,
         direction,
         device,
-        crate::MidiHardwareOptions::new().input_timing(timing),
+        crate::MidiHardwareConfig::new().input_timing(timing),
     )
 }
 
@@ -104,7 +104,7 @@ fn session_over_with(
     os: Endpoint,
     direction: PortDirection,
     device: Endpoint,
-    options: crate::MidiHardwareOptions,
+    options: crate::MidiHardwareConfig,
 ) -> Wire {
     let (backend, counters) = FakeBackend::build_with(vec![], vec![], usize::MAX);
     let inlets =

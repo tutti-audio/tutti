@@ -3,8 +3,8 @@
 
 use keyboard_types::{Code, Key as KeyboardKey, Modifiers, NamedKey};
 use tutti_plugin_types::{KeyEvent, ModifierConvention};
-use tutti_vst2_ffi::api::ModifierKey;
-use tutti_vst2_ffi::editor::{Key, KeyCode as Vst2KeyCode};
+use tutti_vst2_ffi::ModifierKey;
+use tutti_vst2_ffi::{Key, KeyCode as Vst2KeyCode};
 
 /// The key as `effEditKeyDown`'s three arguments, or `None` when VST 2 cannot write it: a
 /// character outside ASCII or a string of several (`[index]` is one ASCII character), or a

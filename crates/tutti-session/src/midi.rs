@@ -553,7 +553,7 @@ fn route_drain(
 }
 
 /// Where a take's events belong on the timeline: the figure
-/// [`Midi::record`]'s readers are placed by. A note played at graph frame `F`
+/// [`Midi::tap`]'s readers are placed by. A note played at graph frame `F`
 /// was answered by output the device played `output` after it was rendered, and
 /// reached the graph `input` plus the inlet's `lead` after it was played, so
 /// it was meant for `F - (input + output + lead) + trim`.
@@ -1172,7 +1172,7 @@ impl<F: Float> Midi<'_, F> {
     /// clip ([`play_clip`](Self::play_clip)).
     ///
     /// A target has one live input and its keys are the inlet's one
-    /// producer: they are handed out once. [`record`](Self::record) opens the
+    /// producer: they are handed out once. [`tap`](Self::tap) opens the
     /// inlet too, and leaves the keys for this call.
     ///
     /// # Errors
@@ -1623,9 +1623,9 @@ impl<F: Float> Midi<'_, F> {
         );
     }
 
-    // --- Recording a take ---
+    // --- Tapping what is played ---
 
-    /// Records what is played into `target`: an event tap on the event output
+    /// Taps what is played into `target`: an event tap on the event output
     /// of the inlet that feeds it, which every note sent through its keys
     /// passes. For an instrument with a handle
     /// ([`Session::add_instrument`](crate::Session::add_instrument),
@@ -1661,7 +1661,7 @@ impl<F: Float> Midi<'_, F> {
     ///
     /// [`MidiError::NoEventInput`] when `target` is not in the graph or takes no MIDI,
     /// and [`MidiError::Tap`] when the live input's port is gone from the graph.
-    pub fn record(
+    pub fn tap(
         &mut self,
         target: impl Into<NodeKey>,
         capacity: tutti_graph::EventCapacity,

@@ -2,7 +2,7 @@
 
 use std::os::raw::c_void;
 
-pub use tutti_vst2_ffi::editor::{Key, KeyCode, Rect};
+pub use tutti_vst2_ffi::{Key, KeyCode, Rect};
 
 /// Implemented by plugin editors.
 #[allow(unused_variables)]

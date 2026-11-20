@@ -18,6 +18,7 @@ mod brickwall;
 mod compressor;
 mod dynamic_eq;
 mod gate;
+mod leveller;
 mod limiter;
 mod multiband;
 mod transient;
@@ -26,6 +27,7 @@ pub use brickwall::{BrickwallKernel, BrickwallLimiterNode, BrickwallSet};
 pub use compressor::{CompressorKernel, CompressorNode, CompressorSet};
 pub use dynamic_eq::{DynamicEqConfig, DynamicEqKernel, DynamicEqNode, DynamicEqSet};
 pub use gate::{GateKernel, GateNode, GateSet};
+pub use leveller::{LevellerConfig, LevellerKernel, LevellerNode, LevellerSet};
 pub use limiter::{LimiterKernel, LimiterNode, LimiterSet};
 pub use multiband::{BAND_PARAMS, MultibandCompressorNode, MultibandControls};
 pub use transient::{

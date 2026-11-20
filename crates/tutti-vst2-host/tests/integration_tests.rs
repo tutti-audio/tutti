@@ -393,10 +393,9 @@ fn an_undocumented_can_do_answer_is_not_an_affirmative() {
 /// A plugin declaring MIDI output pins and answering `Maybe` to
 /// `sendVstMidiEvent` emits MIDI.
 ///
-/// `get_info()` hardcodes `midi_outputs` to 0, so a pin term read from it would
-/// be a dead `false`: `Maybe` would resolve to `false` and the plugin's MIDI
-/// output would be dropped. `Maybe` is the common answer: plugins that route
-/// MIDI routinely declare pins and never implement `effCanDo`.
+/// The pin count is read from the live opcode, so `Maybe` resolves on it rather than to
+/// `false`, which would drop the plugin's MIDI output. `Maybe` is the common answer:
+/// plugins that route MIDI routinely declare pins and never implement `effCanDo`.
 #[test]
 fn a_maybe_answer_with_declared_output_pins_emits_midi() {
     let _guard = lock_probe();
@@ -1132,7 +1131,7 @@ fn declining_the_effect_name_falls_back_to_the_product_string() {
 
 /// `default_value` reports the plugin's load-time state, not its live value.
 ///
-/// VST2 has no default-value opcode — none of the 61 in `OpCode` returns one,
+/// VST2 has no default-value opcode — none of the 61 in `EffectOpCode` returns one,
 /// and `effGetParameterProperties` carries a range but no default. So the only
 /// observable default is the plugin's initial state, snapshotted at load.
 ///
