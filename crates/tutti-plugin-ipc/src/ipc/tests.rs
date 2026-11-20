@@ -21,7 +21,7 @@ use crate::Request as WireRequest;
 use crate::{
     AudioReply, AudioRequest, AudioSlab, ControlFrame, ControlReply, ControlRequest, Framed, Ipc,
     IpcController, IpcEvent, IpcParts, IpcProcessor, News, PROTOCOL_VERSION, PluginBridge,
-    ProcessGuard, RING_SLOTS, ReqId, SlabLayout, unique_socket_path,
+    ProcessGuard, RING_SLOTS, ReqId, SlabHandle, SlabLayout, unique_socket_path,
 };
 
 const CEILING: usize = 64;
@@ -290,6 +290,14 @@ fn mock_with(
             else {
                 break;
             };
+            // A setup's slab follows its frame on the stream.
+            if let ControlRequest::SetupSharedMemory { slab, .. } = &message {
+                let received =
+                    SlabHandle::receive(crate::transport::connection(&served), slab.clone());
+                if received.is_err() {
+                    break;
+                }
+            }
             // Recorded before it is answered: a count read after the reply sees it.
             log.push(Sent::Control(message.clone()));
             match &message {

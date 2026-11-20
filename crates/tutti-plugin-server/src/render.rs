@@ -313,6 +313,17 @@ struct LossWriters {
     back_refused: TallyWriter<u64>,
 }
 
+/// Why the render thread did not take a command.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub(crate) enum RenderStalled {
+    /// The render thread has ended.
+    #[error("the render thread is gone")]
+    Gone,
+    /// The render thread took no command within the patience: it has stopped.
+    #[error("the render thread takes no commands")]
+    Full,
+}
+
 /// The main thread's end of the render thread's queues.
 pub(crate) struct RenderLink {
     ties: Ties,
@@ -351,17 +362,23 @@ impl RenderLink {
 
     /// Attaches `slab`: the render thread takes it with scratch sized to its
     /// layout, in the format blocks are rendered in.
-    pub(crate) fn attach_slab(&mut self, slab: SlabWriter) {
+    ///
+    /// # Errors
+    ///
+    /// The render thread did not take it: the slab is dropped, and the host is
+    /// told its setup failed.
+    pub(crate) fn attach_slab(&mut self, slab: SlabWriter) -> Result<(), RenderStalled> {
         let layout = slab.layout_ref().clone();
         let scratch = Box::new(AudioScratch::for_layout(self.format, &layout));
+        self.send(ToRender::Slab { slab, scratch })?;
         self.slab_layout = Some(layout);
-        self.send(ToRender::Slab { slab, scratch });
+        Ok(())
     }
 
     /// Detaches the slab (an unload).
     pub(crate) fn detach_slab(&mut self) {
         self.slab_layout = None;
-        self.send(ToRender::DropSlab);
+        self.tell(ToRender::DropSlab);
     }
 
     /// Renders in `format` from the next block on: scratch of the slab's shape
@@ -373,7 +390,7 @@ impl RenderLink {
         self.format = format;
         if let Some(layout) = &self.slab_layout {
             let scratch = Box::new(AudioScratch::for_layout(format, layout));
-            self.send(ToRender::Scratch(scratch));
+            self.tell(ToRender::Scratch(scratch));
         }
     }
 
@@ -383,7 +400,7 @@ impl RenderLink {
         self.params = (queues, points);
         let mut output = ProcessOutput::default();
         output.reserve_params(queues, points);
-        self.send(ToRender::Output(Box::new(output)));
+        self.tell(ToRender::Output(Box::new(output)));
     }
 
     /// Re-reserves the plugin's parameter output for `queues` parameters, at
@@ -441,10 +458,14 @@ impl RenderLink {
     }
 
     /// Queues `command` and wakes the render thread, waiting for it to make
-    /// room if the queue is full. A command the render thread does not take
-    /// within [`SEND_PATIENCE`] is dropped and logged: the render thread has
-    /// stopped.
-    pub(crate) fn send(&mut self, command: ToRender) {
+    /// room if the queue is full.
+    ///
+    /// # Errors
+    ///
+    /// [`RenderStalled::Gone`] if the render thread has ended, and
+    /// [`RenderStalled::Full`] if it took no command within [`SEND_PATIENCE`];
+    /// the command is dropped either way.
+    pub(crate) fn send(&mut self, command: ToRender) -> Result<(), RenderStalled> {
         self.reap();
         let mut command = command;
         let patience = Patience::new(Instant::now(), SEND_PATIENCE);
@@ -453,23 +474,27 @@ impl RenderLink {
             match self.to.push(command) {
                 Ok(()) => {
                     self.ties.wake.ring();
-                    return;
+                    return Ok(());
                 }
                 Err(Returned {
                     error: PushError::Disconnected,
                     ..
-                }) => {
-                    tracing::error!("plugin-server: the render thread is gone");
-                    return;
-                }
+                }) => return Err(RenderStalled::Gone),
                 Err(Returned { value, .. }) => command = value,
             }
             if patience.left(Instant::now()).is_none() {
-                tracing::error!("plugin-server: the render thread takes no commands");
-                return;
+                return Err(RenderStalled::Full);
             }
             // Room is made when the render thread takes a command.
             self.ties.settle.wait_past(seen, patience);
+        }
+    }
+
+    /// [`send`](Self::send) for a command nothing answers for: a refusal is
+    /// logged, and the host learns of it from the commands that are answered.
+    pub(crate) fn tell(&mut self, command: ToRender) {
+        if let Err(e) = self.send(command) {
+            tracing::error!("plugin-server: {e}");
         }
     }
 
@@ -501,7 +526,7 @@ impl RenderLink {
     pub(crate) fn barrier(&mut self) -> u64 {
         self.barrier_sent += 1;
         let id = self.barrier_sent;
-        self.send(ToRender::Barrier(id));
+        self.tell(ToRender::Barrier(id));
         id
     }
 
@@ -1207,12 +1232,12 @@ mod tests {
     fn a_drain_that_replaces_the_slab_refits_the_params_and_changes_format_never_allocates() {
         let (mut link, mut side) = link().expect("bells");
         let (_first_host, first) = slab(256);
-        link.attach_slab(first);
+        link.attach_slab(first).unwrap();
         link.reserve_params(4, 64);
         side.drain();
 
         let (_second_host, second) = slab(4096);
-        link.attach_slab(second);
+        link.attach_slab(second).unwrap();
         link.fit_params(300);
         link.set_format(FloatWidth::F64);
         assert_no_alloc::assert_no_alloc(|| side.drain());
@@ -1316,7 +1341,7 @@ mod tests {
             let (_slab_host, slab) = slab(256);
             let settle = link.ties().settle.clone();
             let seen = settle.seen();
-            link.attach_slab(slab);
+            link.attach_slab(slab).unwrap();
             settle.wait_past(
                 seen,
                 Patience::new(Instant::now(), Duration::from_secs(600)),
@@ -1452,14 +1477,15 @@ mod tests {
     fn seated(plugin: Faulty) -> (RenderLink, RenderSide, impl Sized) {
         let (mut link, mut side) = link().expect("bells");
         let (host, writer) = slab(FRAMES);
-        link.attach_slab(writer);
+        link.attach_slab(writer).unwrap();
         link.send(ToRender::Config(RenderConfig {
             max_block: FRAMES,
             inputs: 2,
             outputs: 2,
             ..RenderConfig::new()
-        }));
-        link.send(ToRender::Seat(Box::new(plugin)));
+        }))
+        .unwrap();
+        link.send(ToRender::Seat(Box::new(plugin))).unwrap();
         side.drain();
         (link, side, host)
     }

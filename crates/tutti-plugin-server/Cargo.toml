@@ -50,6 +50,9 @@ tutti-graph = { version = "0.0.1", path = "../tutti-graph" }
 # Cross-platform local IPC (Unix sockets on Unix, named pipes on Windows)
 interprocess = { version = "2" }
 
+# The error of a command the render thread does not take.
+thiserror = { workspace = true, features = ["std"] }
+
 # Logging
 tracing.workspace = true
 tracing-subscriber = { workspace = true, features = ["env-filter"] }

@@ -14,8 +14,8 @@
 //! still unbounded, because `SO_RCVTIMEO` restarts on every syscall while `read_exact` loops. Both
 //! are needed and neither subsumes the other.
 
-use crate::Framed;
 use crate::protocol::frame::{decode_body, decode_prefix, write_frame};
+use crate::{ControlRequest, Framed, ReqId, Request, SlabHandle, SlabLayout};
 use tutti_plugin_types::{IpcError, IpcResult};
 
 use super::sys::Wakeup;
@@ -76,18 +76,50 @@ pub(crate) fn connect_within(socket: &Path, send_timeout: Duration) -> IpcResult
 /// frame may be on the wire, and the connection cannot go on.
 pub fn send<T: Framed>(stream: &mut ControlStream, msg: &T) -> IpcResult<()> {
     write_frame(stream, msg).map_err(|e| match e {
-        IpcError::Io(io)
-            if io.kind() == std::io::ErrorKind::TimedOut
-                || io.kind() == std::io::ErrorKind::WouldBlock =>
-        {
-            IpcError::Timeout {
-                operation: "send",
-                after: SEND_TIMEOUT,
-                partial: true,
-            }
-        }
+        IpcError::Io(io) => send_failed(io),
         other => other,
     })
+}
+
+/// A write error as the error of a send: a timeout is [`IpcError::Timeout`] with
+/// `partial` set, and anything else the OS's.
+fn send_failed(io: std::io::Error) -> IpcError {
+    if io.kind() == std::io::ErrorKind::TimedOut || io.kind() == std::io::ErrorKind::WouldBlock {
+        IpcError::Timeout {
+            operation: "send",
+            after: SEND_TIMEOUT,
+            partial: true,
+        }
+    } else {
+        IpcError::Io(io)
+    }
+}
+
+/// Writes the request that points the server at `slab`, and then the slab.
+///
+/// The frame carries the layout and what of the slab a frame can carry
+/// ([`SlabHandle::wire`]); the slab follows it as its own message, which the
+/// server's transport reads right after the frame. This is the only way a
+/// `SetupSharedMemory` is written, so the frame never goes without its slab.
+///
+/// # Errors
+///
+/// As [`send`], and a failure to send the slab itself, which like any failure
+/// after the frame's first byte leaves the stream mid-message: the connection
+/// cannot go on.
+pub fn send_setup(
+    stream: &mut ControlStream,
+    id: ReqId,
+    layout: SlabLayout,
+    slab: &SlabHandle,
+) -> IpcResult<()> {
+    let body = ControlRequest::SetupSharedMemory {
+        slab: slab.wire(),
+        layout,
+    };
+    send(stream, &Request { id, body })?;
+    slab.send(super::sys::connection(stream))
+        .map_err(send_failed)
 }
 
 /// How long the unbounded [`recv`] entry may wait for a whole frame.
@@ -553,6 +585,42 @@ mod tests {
             peer: Some(peer),
             path,
         }
+    }
+
+    /// **A setup is a frame and then its slab, and the slab opens the creator's
+    /// memory.** The server's end reads the `SetupSharedMemory` frame, takes the
+    /// slab right after it, and maps what the host wrote into.
+    #[test]
+    fn a_setup_is_a_frame_then_the_slab_it_announced() {
+        use crate::protocol::frame::read_frame;
+        use crate::{AudioSlab, RING_SLOTS, SlabLayout};
+        let layout = SlabLayout {
+            samples_per_channel: 8,
+            format: tutti_buffers::FloatWidth::F32,
+            slots: RING_SLOTS as u32,
+            inputs: vec![tutti_plugin_types::ChannelLayout::MONO],
+            outputs: vec![tutti_plugin_types::ChannelLayout::MONO],
+        };
+        let (mut host_slab, handle) = AudioSlab::create(layout.clone()).unwrap();
+        host_slab.write(1, 0, &[0.25f32; 8]).unwrap();
+        host_slab.publish(1);
+
+        let mut p = pair();
+        let mut server = p.take_peer();
+        send_setup(&mut p.host, ReqId::new(7), layout.clone(), &handle).unwrap();
+
+        let Request { id, body } = read_frame(&mut server).unwrap();
+        assert_eq!(id, ReqId::new(7));
+        let ControlRequest::SetupSharedMemory { slab, layout: got } = body else {
+            panic!("the frame is not a setup");
+        };
+        assert_eq!(got, layout);
+        let received = SlabHandle::receive(super::super::sys::connection(&server), slab).unwrap();
+        let opened = AudioSlab::open(&received, layout).unwrap();
+        let mut back = [0.0f32; 8];
+        assert!(opened.has_input(1), "the host's published block is visible");
+        opened.read_input_into(1, 0, &mut back).unwrap();
+        assert_eq!(back, [0.25f32; 8]);
     }
 
     /// **A block's round trip allocates nothing once the buffers are warm**: the host sends
