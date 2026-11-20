@@ -3,7 +3,9 @@
 //! ones need `cargo build -p tutti-plugin-server` first, as `CLAUDE.md` says),
 //! and a VST2 file refused for `OutOfProcess` with no server looked for.
 
-use tutti_plugin::catalog::{Hosting, Loadable, Plugin, PluginRef};
+use tutti_plugin::catalog::Plugin;
+use tutti_plugin_db::{Hosting, Loadable};
+use tutti_plugin_types::PluginRef;
 use tutti_plugin_types::{IpcError, SampleRate};
 
 const RATE: f64 = 48_000.0;
@@ -111,7 +113,7 @@ mod clap {
         assert_eq!(plugin.handle().server_pid(), None);
         assert_eq!(
             plugin.plugin().id(),
-            Some(&tutti_plugin::catalog::PluginId::Clap(
+            Some(&tutti_plugin_types::PluginId::Clap(
                 tutti_clap_test_plugin::PLUGIN_ID
                     .to_str()
                     .expect("utf-8")

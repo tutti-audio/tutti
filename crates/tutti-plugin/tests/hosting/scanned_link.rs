@@ -3,9 +3,11 @@
 
 #![cfg(all(feature = "clap", unix))]
 
-use tutti_plugin::catalog::{Catalog, CatalogConfig, Hosting, Locator, Plugin, PluginId};
+use tutti_plugin::catalog::Plugin;
+use tutti_plugin_db::{Catalog, CatalogConfig, Hosting};
 use tutti_plugin_db::{PluginDb, ScanPoll};
 use tutti_plugin_types::PluginFormat;
+use tutti_plugin_types::{Locator, PluginId};
 
 /// **A scanned link to a differently named target loads by its catalog
 /// key**: the row is CLAP though its file is `libfoo.so`, so the load that
