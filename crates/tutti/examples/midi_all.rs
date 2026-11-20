@@ -23,10 +23,10 @@ use tutti::midi::{
     PitchBendSensitivity, SmfDivision, Tick, TicksPerQuarterNote, Track, U7, Voice1,
 };
 use tutti::polysynth::{PolySynth, SynthConfig};
-use tutti::session::{Start, TakeLatency};
+use tutti::session::{Start, TakeLatency, Trim};
 use tutti::{
     ChannelLayout, Error, EventCapacity, Frame, InterleavedMut, MaxBlock, SampleRate, Samples,
-    Session, SessionEvent, Stamp, Trim,
+    Session, SessionEvent, Stamp,
 };
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -194,13 +194,15 @@ fn run() -> Result<Outcome, Box<dyn std::error::Error>> {
 
     // The take: what was played, each event on its frame of the graph, placed
     // where the performer meant it for this device's latencies (figures a host
-    // reads off its devices; here zero, and a 10 ms trim).
+    // reads off its devices; here none reported, and a 10 ms trim).
     let latency = TakeLatency::new(None, None, Samples::ZERO, Trim::Later(Samples::new(480)));
     let take = take
         .drain()
         .map(|e| {
             let placed = match latency.place(e.frame) {
                 Start::At(frame) => frame,
+                // `place` never clamps; a start before the clock's origin
+                // is clamped to the first frame here.
                 Start::BeforeOrigin(_) => Frame::new(0),
             };
             (e.frame, placed)

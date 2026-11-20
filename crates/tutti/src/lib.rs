@@ -182,8 +182,6 @@ pub use tutti_plugin_types::{PluginFailure, PluginRef, PresetError, PresetId, St
 pub use tutti_session::MidiPolicyTarget;
 #[cfg(all(feature = "session", feature = "plugin"))]
 pub use tutti_session::PluginParams;
-#[cfg(all(feature = "session", any(feature = "capture", feature = "midi")))]
-pub use tutti_session::Trim;
 #[cfg(all(feature = "session", feature = "analyze", feature = "sampler"))]
 pub use tutti_session::windows_from_signal;
 #[cfg(all(feature = "session", feature = "plugin"))]
@@ -500,7 +498,7 @@ pub mod session {
         TakePlacement, Window,
     };
     #[cfg(any(feature = "capture", feature = "midi"))]
-    pub use tutti_session::{Start, TakeLatency};
+    pub use tutti_session::{Start, TakeLatency, Trim};
     // The `audio_file` entry decodes a file, so it needs a decoder.
     #[cfg(feature = "midi")]
     pub use tutti_session::MidiNodes;
