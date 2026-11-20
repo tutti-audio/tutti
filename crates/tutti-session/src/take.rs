@@ -842,7 +842,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
         let reader =
             self.graph
                 .taps()
-                .open_waking(&ports, TapAlign::Raw, capacity, stop.bell.clone())?;
+                .open_with_bell(&ports, TapAlign::Raw, capacity, stop.bell.clone())?;
 
         let id = TakeId::mint(self.inputs.takes());
         let shared = Arc::new(Shared::default());

@@ -149,7 +149,7 @@ impl<F: Float> Taps<'_, F> {
         not(feature = "capture"),
         expect(dead_code, reason = "a take's pump (feature `capture`) is its user")
     )]
-    pub(crate) fn open_waking(
+    pub(crate) fn open_with_bell(
         &mut self,
         sources: &[OutPort],
         align: TapAlign,
@@ -161,7 +161,7 @@ impl<F: Float> Taps<'_, F> {
         let reader = self
             .graph
             .editor
-            .open_tap_waking(id, sources, align, capacity, Some(bell))?;
+            .open_tap_with_bell(id, sources, align, capacity, bell)?;
         self.graph.edited = true;
         Ok(reader)
     }

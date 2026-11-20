@@ -53,17 +53,28 @@ impl<F: Float> Editor<F> {
         align: TapAlign,
         capacity: Samples,
     ) -> Result<TapReader<F>, MissingSource> {
-        self.open_tap_waking(id, sources, align, capacity, None)
+        self.open_tap_ringing(id, sources, align, capacity, None)
     }
 
     /// [`open_tap`](Self::open_tap) whose writer rings `bell` after each block it
-    /// writes, and whose end rings it too: a reader awaiting its frames wakes on the
-    /// audio thread's ring and never polls.
+    /// writes, whose end rings it too, and whose writer's drop rings it: a reader
+    /// awaiting its frames wakes on the audio thread's ring and never polls.
     ///
     /// # Errors
     ///
     /// [`MissingSource`] naming the first lane's source that is not in the spec now.
-    pub fn open_tap_waking(
+    pub fn open_tap_with_bell(
+        &mut self,
+        id: TapId,
+        sources: Vec<Source>,
+        align: TapAlign,
+        capacity: Samples,
+        bell: tutti_rt::Bell,
+    ) -> Result<TapReader<F>, MissingSource> {
+        self.open_tap_ringing(id, sources, align, capacity, Some(bell))
+    }
+
+    fn open_tap_ringing(
         &mut self,
         id: TapId,
         sources: Vec<Source>,
