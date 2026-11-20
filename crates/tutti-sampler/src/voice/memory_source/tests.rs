@@ -1301,7 +1301,7 @@ fn a_placed_fork_reads_the_renders_transport() {
 fn a_mono_wave_goes_to_the_centre_of_a_node_that_has_one() {
     let transport = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
     // Which channels carry the mono sample at each width: all of them where the
-    // assumed placement has no centre (a fan), the front pair of a quad, and the
+    // default layout has no centre (a fan), the front pair of a quad, and the
     // centre of 5.1, 7.1 and 7.1.4.
     let all: fn(usize) -> bool = |_| true;
     let centre: fn(usize) -> bool = |c| c == 2;

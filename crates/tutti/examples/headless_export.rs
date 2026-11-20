@@ -75,9 +75,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 2. The same project into memory, and a measurement of it.
     let rendered = tone().bounce(first(1.0).master_buffers())?.into_master();
     let flat = rendered.interleaved();
-    // `tutti` exports no path to `Bed`, so the placement is the assumed one for
+    // `tutti` exports no path to `Bed`, so the placement is the default layout for
     // two channels, which is a stereo bed.
-    let cfg = LoudnessConfig::new(ChannelTopology::assumed(ChannelLayout::STEREO));
+    let cfg = LoudnessConfig::new(ChannelTopology::default_for(ChannelLayout::STEREO));
     let loudness = measure_loudness(
         &cfg,
         Interleaved::new(&flat, ChannelLayout::STEREO).unwrap(),

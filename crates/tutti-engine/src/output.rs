@@ -19,7 +19,7 @@
 //! declared with, before the commit that carries its id is sent
 //! ([`OutputControl::publish_root`]). A root with no declaration is the
 //! engine's order for the plan's width
-//! ([`ChannelTopology::assumed`](tutti_buffers::ChannelTopology::assumed)), at
+//! ([`ChannelTopology::default_for`](tutti_buffers::ChannelTopology::default_for)), at
 //! every width. A root's folds stay published until a plan of a later root has
 //! rendered a block ([`OutputControl::reclaim`]). A root change that cuts ends
 //! the older root at the commit's block. One that crossfades
@@ -47,7 +47,7 @@
 //! # What the device is
 //!
 //! A device states its channel count and nothing else (a backend has no channel
-//! map), so it is [`Assumed`](Placement::Assumed) to be the engine's order for
+//! map), so it takes the default layout for
 //! its width where it has one (mono, stereo, quad, 5.1, 7.1, 7.1.4), and a 5.1
 //! root plays folded on a stereo device and a 7.1 root plays on a 5.1 one by
 //! position. A caller that knows the wiring states it
@@ -102,15 +102,15 @@ impl<F: Float> RootFolds<F> {
     /// declared root has the one width it was declared at, and a pair that
     /// cannot be placed has no fold.
     fn build(&self, width: usize, device: &DeviceEntry, routing: &Routing) -> Option<Fold<F>> {
-        let assumed;
+        let default;
         let root = match &self.topology {
             Some(root) if usize::from(root.width().count()) != width => return None,
             Some(root) => root,
             None => {
-                assumed = ChannelTopology::assumed(
+                default = ChannelTopology::default_for(
                     ChannelLayout::try_from(width).expect("a root width is within MAX_CHANNELS"),
                 );
-                &assumed
+                &default
             }
         };
         routing.fold(root, &device.topology).ok()
@@ -194,8 +194,8 @@ impl<F: Float> OutputFolds<F> {
         }
         self.set_device(
             DeviceEntry {
-                topology: ChannelTopology::assumed(device),
-                placement: Placement::Assumed,
+                topology: ChannelTopology::default_for(device),
+                placement: Placement::Default,
             },
             slot,
         );
@@ -409,8 +409,8 @@ impl<F: Float> OutputControl<F> {
                 placement: Placement::Stated,
             },
             None => DeviceEntry {
-                topology: ChannelTopology::assumed(device),
-                placement: Placement::Assumed,
+                topology: ChannelTopology::default_for(device),
+                placement: Placement::Default,
             },
         };
         self.update(|folds| {
@@ -474,7 +474,7 @@ impl<F: Float> OutputControl<F> {
         if let Some(root) = &root {
             let placed = self
                 .device(device)
-                .map_or_else(|| ChannelTopology::assumed(device), |d| d.topology);
+                .map_or_else(|| ChannelTopology::default_for(device), |d| d.topology);
             // A refusal of the fold itself is the call's; a map that does not
             // fit leaves the pair with no fold, which a commit names.
             if let Err(RoutingError::Fold(refused)) =

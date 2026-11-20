@@ -21,6 +21,8 @@ tutti-rt = { version = "0.0.1", path = "../tutti-rt", default-features = false }
 # `ChannelLayout`, `Interleaved` and the downmix helpers. Nothing here needs
 # the engine runtime, so these are the only tutti edges.
 tutti-units = { version = "0.0.1", path = "../tutti-units", default-features = false }
+# `NoteDuration`, the length of a tempo-synced delay time.
+tutti-music = { version = "0.0.1", path = "../tutti-music", default-features = false }
 
 # `RealFft` (`fft/real.rs`), the one real-input FFT of the convolver, the
 # analyzers in `tutti-measure`, the time-stretch vocoder, the HRTF panner and the export

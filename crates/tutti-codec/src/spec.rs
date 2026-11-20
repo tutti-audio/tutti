@@ -49,12 +49,12 @@ impl Spec {
     }
 
     /// A file of `layout` at `rate` whose speakers are what a bare width is
-    /// taken to mean ([`ChannelTopology::assumed`]: mono, stereo, quad, 5.1, 7.1
+    /// taken to mean ([`ChannelTopology::default_for`]: mono, stereo, quad, 5.1, 7.1
     /// and 7.1.4 named, unassigned channels for every other width). A caller
     /// that knows better passes its own topology to [`new`](Self::new).
     #[must_use]
     pub fn of_width(format: Format, layout: ChannelLayout, rate: SampleRate) -> Self {
-        Self::new(format, ChannelTopology::assumed(layout), rate)
+        Self::new(format, ChannelTopology::default_for(layout), rate)
     }
 
     /// The container and its settings.

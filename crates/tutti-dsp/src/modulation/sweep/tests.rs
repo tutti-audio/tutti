@@ -5,7 +5,7 @@ use super::*;
 use crate::{MaxDelay, ModDelayLayout};
 
 fn bus(width: u16) -> BusTopology {
-    BusTopology::assumed(width.into()).expect("a test width is one bus")
+    BusTopology::default_for(width.into()).expect("a test width is one bus")
 }
 
 fn step(x: f64) -> Stagger {

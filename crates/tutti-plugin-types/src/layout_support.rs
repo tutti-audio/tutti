@@ -74,7 +74,7 @@ mod tests {
     use crate::{BusRole, ChannelLayout, ChannelTopology, PluginBus};
 
     fn stereo() -> ChannelTopology {
-        ChannelTopology::assumed(ChannelLayout::STEREO)
+        ChannelTopology::default_for(ChannelLayout::STEREO)
     }
 
     fn one_bus_each(
@@ -132,7 +132,7 @@ mod tests {
     /// was said, and not enough of it is usable.
     #[test]
     fn a_topology_disagreeing_with_its_width_is_not_full() {
-        let mono = ChannelTopology::assumed(ChannelLayout::MONO);
+        let mono = ChannelTopology::default_for(ChannelLayout::MONO);
         let loaded = one_bus_each(Some(mono), Some(stereo()));
         assert_eq!(LayoutSupport::of(&loaded), LayoutSupport::Partial);
         assert_ne!(LayoutSupport::of(&loaded), LayoutSupport::Full);

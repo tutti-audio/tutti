@@ -4,6 +4,7 @@
 mod bank;
 mod layout;
 mod max_delay;
+mod notes;
 mod ring;
 mod routing;
 mod taps;
@@ -11,10 +12,11 @@ mod times;
 
 pub use bank::{DelayBank, DelayRamps, DelaySignals};
 pub use layout::{
-    DELAY_SLEW, DelayControls, DelayLayout, DelayLayoutBuilder, DelayLayoutError,
+    DELAY_SLEW, DelayControls, DelayLayout, DelayLayoutBuilder, DelayLayoutError, DelayTiming,
     MAX_DELAY_CHANNELS,
 };
 pub use max_delay::{MaxDelay, MaxDelayError};
+pub use notes::{NoteTimes, NoteTimesError};
 pub(crate) use ring::DelayRing;
 pub use routing::{FeedbackRouting, FeedbackRoutingBuilder, FeedbackRoutingError};
 pub(crate) use taps::{ring_seconds, trips};

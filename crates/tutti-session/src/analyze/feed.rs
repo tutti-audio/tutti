@@ -62,7 +62,7 @@ impl<'w, S: Float> Chunk<'w, S> {
         Self {
             held: Layout::Interleaved,
             layout: topology.width(),
-            to_mono: Fold::between(topology, &ChannelTopology::assumed(ChannelLayout::MONO)),
+            to_mono: Fold::between(topology, &ChannelTopology::default_for(ChannelLayout::MONO)),
             data: Vec::new(),
             interleaved: Vec::new(),
             planes: Vec::new(),

@@ -113,7 +113,7 @@ mod tests {
     /// A 5.1 map converts to the engine's own channel order.
     ///
     /// CLAP's own 5.1 ordering — `FL FR FC LFE SL SR` — is the engine's order, so
-    /// this is asserted against `ChannelTopology::assumed` rather than a literal:
+    /// this is asserted against `ChannelTopology::default_for` rather than a literal:
     /// the claim is that the two agree, not that a list was copied correctly.
     #[test]
     fn a_51_channel_map_matches_the_engines_order() {
@@ -123,7 +123,7 @@ mod tests {
             .collect();
         assert_eq!(
             topology_of(&map),
-            ChannelTopology::assumed(ChannelLayout::from(6u16)),
+            ChannelTopology::default_for(ChannelLayout::from(6u16)),
             "CLAP FL FR FC LFE SL SR is the engine's 5.1 order"
         );
     }

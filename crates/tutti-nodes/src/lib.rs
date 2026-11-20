@@ -304,8 +304,8 @@ pub use delay::{DelayConfig, DelayKernel, DelayNode, DelaySet};
 // `tutti-dsp`'s only.
 pub use tutti_dsp::{
     ChannelTimes, ChannelTimesError, DelayControls, DelayLayout, DelayLayoutBuilder,
-    DelayLayoutError, FeedbackRouting, FeedbackRoutingBuilder, FeedbackRoutingError,
-    InterpolationMode, MaxDelay, MaxDelayError,
+    DelayLayoutError, DelayTiming, FeedbackRouting, FeedbackRoutingBuilder, FeedbackRoutingError,
+    InterpolationMode, MaxDelay, MaxDelayError, NoteTimes, NoteTimesError,
 };
 
 mod distortion;

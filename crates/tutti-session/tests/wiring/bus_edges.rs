@@ -25,7 +25,7 @@ fn layout(n: u16) -> ChannelLayout {
 }
 
 fn named(n: u16) -> BusTopology {
-    BusTopology::try_from(&ChannelTopology::assumed(layout(n))).unwrap()
+    BusTopology::try_from(&ChannelTopology::default_for(layout(n))).unwrap()
 }
 
 fn unassigned(n: u16) -> BusTopology {
@@ -291,7 +291,7 @@ fn a_lane_has_no_gain_target_and_a_removed_node_takes_its_bus_edges() {
 // ---------------------------------------------------------------------------
 
 fn smpte(n: u16) -> ChannelTopology {
-    ChannelTopology::assumed(layout(n))
+    ChannelTopology::default_for(layout(n))
 }
 
 /// Both output channels of a committed block.

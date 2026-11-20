@@ -124,7 +124,7 @@ pub struct TransientShaperKernel<F: Float + Lerp> {
 impl<F: Float + Lerp> TransientShaperKernel<F> {
     fn new(config: &TransientShaperConfig) -> Self {
         Self {
-            input: BusTopology::assumed(config.width)
+            input: BusTopology::default_for(config.width)
                 .expect("a transient shaper is at most 16 channels wide"),
             fast: config.fast,
             slow: config.slow,
