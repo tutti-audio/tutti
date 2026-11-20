@@ -24,7 +24,7 @@ tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
 bytemuck = { version = "1.16", features = ["derive", "min_const_generics"] }
 # `Engine` renders a `tutti_graph::Executor`.
 tutti-graph = { version = "0.0.1", path = "../tutti-graph" }
-tutti-transport = { version = "0.0.1", path = "../tutti-transport" }
+tutti-timeline = { version = "0.0.1", path = "../tutti-timeline" }
 
 [dev-dependencies]
 # The same crate as the dependency above, with the sample-accuracy contract

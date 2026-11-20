@@ -36,7 +36,7 @@ use crate::stream::{OutputSpec, RunningStream, StreamDriver};
 ///     AudioCallbackState, Engine, ManualStreamDriver, OutputSpec, OutputStream,
 /// };
 /// use tutti_graph::{Editor, Prepare};
-/// use tutti_transport::Transport;
+/// use tutti_timeline::Transport;
 /// use tutti_units::{SampleRate, Samples};
 /// use tutti_buffers::{ChannelLayout, MaxBlock};
 ///

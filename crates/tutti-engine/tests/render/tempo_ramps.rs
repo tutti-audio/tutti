@@ -26,7 +26,7 @@ use tutti_graph::{
 };
 use tutti_music::{LoopRange, first_frame_at_or_after};
 use tutti_tempo::{TempoMap, TempoPoint, Transition};
-use tutti_transport::{
+use tutti_timeline::{
     AfterLocate, FadeOut, LoopEdit, MotionEvent, OfflineTimeline, OfflineTimelineConfig, Transport,
     render_graph,
 };

@@ -17,7 +17,7 @@ use tutti_session::{
     FollowClock, FollowTempo, MidiError, MidiReport, Session, SessionEvent, SetRefusal,
     ValueErrorKind,
 };
-use tutti_transport::MotionEvent;
+use tutti_timeline::MotionEvent;
 use tutti_ump::{Message, MidiGroup, Sysex7Packets, System, U7, U14, Ump};
 use tutti_units::{At, Bpm, SampleRate};
 

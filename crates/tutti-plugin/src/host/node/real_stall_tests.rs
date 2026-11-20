@@ -139,7 +139,7 @@ fn graph_of(client: PluginClient) -> (Renderer, tutti_plugin_host::PluginControl
     let layout = |n: usize| ChannelLayout::from_count(u16::try_from(n).expect("a few ports"));
     let mut g = GraphBuilder::new(layout(client.inputs()), layout(client.outputs()));
     let (key, controls) = g.add_with_controls(client.bind(
-        tutti_transport::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
+        tutti_timeline::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
     ));
     g.pipe_input(key).pipe_output(key);
     let renderer = g
@@ -488,7 +488,7 @@ fn half_chunk_rig(
 ) {
     let controls = client.controls();
     let node = tutti_graph::IntoNode::into_node(client.bind(
-        tutti_transport::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
+        tutti_timeline::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
     ))
     .0;
     let mut unit = tutti_graph::contract::Direct::boxed(node, SampleRate::of(SAMPLE_RATE), BLOCK);

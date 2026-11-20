@@ -27,7 +27,7 @@ use tutti_nodes::testing::Osc;
 use tutti_nodes::{
     BusStripNode, EqBandConfig, EqBandNode, LimiterConfig, LimiterControls, LimiterNode, SvfType,
 };
-use tutti_transport::{MotionEvent, Transport};
+use tutti_timeline::{MotionEvent, Transport};
 use tutti_units::{Db, Hz, Q, SampleRate, Samples};
 
 /// Build an [`Engine`] whose graph is `sine → bell EQ → strip → limiter`,

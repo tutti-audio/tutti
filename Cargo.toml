@@ -7,7 +7,7 @@ members = [
     "testing/tutti-verify",
     "testing/tutti-book",
     "crates/tutti-engine",
-    "crates/tutti-transport",
+    "crates/tutti-timeline",
     "crates/tutti-tempo",
     "crates/tutti-curve",
     # The sample formats (`Sample`, `Float`, `I24`) and the borrowed mono, interleaved

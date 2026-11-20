@@ -18,7 +18,7 @@ use tutti_export::{
 };
 use tutti_graph::GraphBuilder;
 use tutti_nodes::testing::Const;
-use tutti_transport::FrozenClock;
+use tutti_timeline::FrozenClock;
 use tutti_units::Seconds;
 use tutti_units::{Db, SampleRate, Samples};
 

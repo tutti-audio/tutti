@@ -32,7 +32,7 @@ use tutti_engine::Engine;
 use tutti_graph::{Editor, Executor, NodeKey, Prepare};
 use tutti_midi_runtime::{SyncMessages, SyncOut};
 use tutti_tempo::{TempoMap, TempoPoint, Transition};
-use tutti_transport::{AfterLocate, FadeOut, MotionEvent, Transport};
+use tutti_timeline::{AfterLocate, FadeOut, MotionEvent, Transport};
 use tutti_ump::{Message, System, U14};
 use tutti_units::{Beat, Bpm, SampleRate, Samples};
 

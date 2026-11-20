@@ -21,7 +21,7 @@
 //! use tutti_plugin::PluginClient;
 //! use tutti_plugin_host::PluginControls;
 //! use tutti_graph::NodeKey;
-//! use tutti_transport::TempoReader;
+//! use tutti_timeline::TempoReader;
 //! fn insert(client: PluginClient, tempo: TempoReader, editor: &mut Editor) -> PluginControls {
 //!     editor.insert(NodeKey(1), "plugin", client.bind(tempo)).controls
 //! }
@@ -141,7 +141,7 @@ pub struct Bound {
     node: Box<PluginNode<Ipc>>,
     /// The project's tempo map reader the node was bound to, kept so a fork
     /// clones it on the control side (its own registration on the same cell).
-    tempo: tutti_transport::TempoReader,
+    tempo: tutti_timeline::TempoReader,
 }
 
 impl std::fmt::Debug for Bound {
@@ -179,7 +179,7 @@ impl std::fmt::Debug for Bound {
 /// use tutti_plugin::PluginClient;
 /// use tutti_plugin_host::PluginControls;
 /// use tutti_graph::NodeKey;
-/// use tutti_transport::TempoReader;
+/// use tutti_timeline::TempoReader;
 /// fn insert(client: PluginClient, tempo: TempoReader, editor: &mut Editor) -> PluginControls {
 ///     editor.insert(NodeKey(1), "plugin", client.bind(tempo)).controls
 /// }
@@ -476,10 +476,10 @@ impl PluginClient<Unbound> {
     ///
     /// `Session` hands every plugin it inserts a reader of its own
     /// (`TransportSettings::tempo_reader`); a host with no session builds one
-    /// over a fixed map ([`TempoReader::fixed`](tutti_transport::TempoReader::fixed)).
+    /// over a fixed map ([`TempoReader::fixed`](tutti_timeline::TempoReader::fixed)).
     /// A fork of the node clones it.
     #[must_use]
-    pub fn bind(self, tempo: tutti_transport::TempoReader) -> PluginClient<Bound> {
+    pub fn bind(self, tempo: tutti_timeline::TempoReader) -> PluginClient<Bound> {
         let Self {
             bridge,
             descriptor,

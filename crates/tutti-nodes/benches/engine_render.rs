@@ -57,8 +57,8 @@ use tutti_nodes::testing::Osc;
 use tutti_nodes::{
     BusStripNode, EqBandConfig, EqBandNode, SvfFilterConfig, SvfFilterNode, SvfType,
 };
-use tutti_transport::MotionEvent;
-use tutti_transport::Transport;
+use tutti_timeline::MotionEvent;
+use tutti_timeline::Transport;
 use tutti_units::SampleRate;
 use tutti_units::{Bpm, Samples};
 use tutti_units::{Db, Hz, Q};

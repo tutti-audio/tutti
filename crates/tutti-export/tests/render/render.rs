@@ -22,7 +22,7 @@ use tutti_codec::{FlacLevel, Format, IntDepth, Pcm, Quality};
 use tutti_export::{RenderGraph, Resample, Setup};
 use tutti_graph::{Cx, ForkByClone, GraphBuilder, Io, Node, Prepare, Shape, Status};
 use tutti_nodes::testing::{Const, Osc};
-use tutti_transport::{FrozenClock, RenderClock};
+use tutti_timeline::{FrozenClock, RenderClock};
 use tutti_units::Seconds;
 use tutti_units::{Amplitude, Drive, Hz, SampleRate};
 

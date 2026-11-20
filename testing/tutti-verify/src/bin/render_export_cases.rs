@@ -175,7 +175,7 @@ fn main() -> tutti_export::Result<()> {
             let w = render_one(
                 &mut graph,
                 &cfg.job(),
-                &tutti_transport::FrozenClock,
+                &tutti_timeline::FrozenClock,
                 Output::master(cfg.file_target(dir.join(&name), None)),
                 &mut Control::none(),
             )?
