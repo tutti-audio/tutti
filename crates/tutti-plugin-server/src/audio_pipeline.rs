@@ -1299,7 +1299,7 @@ mod tests {
     /// `process_is_alloc_free` above drives `NanPlugin`, which returns without
     /// touching a loader at all, so nothing in it can observe what a loader does
     /// with the plugin's output. This one covers the whole chain: slab read,
-    /// COM-boundary crossing, `Served::render`, the host crate's copy into
+    /// COM-boundary crossing, `Server::render`, the host crate's copy into
     /// the pipeline's reusable `ProcessOutput`, sanitize, and slab write.
     ///
     /// Hermetic: the probe is the vendored `audio-probe`, built by this crate's
@@ -1327,14 +1327,14 @@ mod tests {
     #[cfg(feature = "vst3")]
     #[test]
     fn process_through_the_real_vst3_loader_is_alloc_free() {
-        use crate::served::{Served, ServedPlugin};
+        use crate::served::{Server, ServerPlugin};
         use tutti_vst3_host::Vst3Loaded;
 
         const N: usize = 128;
         const SR: f64 = 48_000.0;
 
         let _lock = crate::test_utils::plugin_load_lock();
-        let (mut plugin, _) = Served::<Vst3Loaded>::load(
+        let (mut plugin, _) = Server::<Vst3Loaded>::load(
             tutti_fixtures::main_thread(),
             &tutti_fixtures::detached_work(),
             &tutti_plugin_types::PluginRef::file(crate::test_utils::vst3_probe_path()),

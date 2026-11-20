@@ -9,7 +9,7 @@ use tutti_platform::Instant;
 
 use crate::audio_pipeline::Clock;
 use crate::render::{RenderConfig, RenderLink, RenderSide, ToRender, link};
-use crate::served::AnyServed;
+use crate::served::AnyServer;
 use crate::ties::Ties;
 use dpi::Size;
 use tutti_buffers::FloatWidth;
@@ -17,7 +17,7 @@ use tutti_plugin_ipc::state_chunk::{self, ChunkError, Reassembler};
 use tutti_plugin_ipc::{AudioSlab, ControlReply, ControlRequest, News, StagedState, Working};
 use tutti_plugin_ipc_ffi::Ready;
 use tutti_plugin_types::{
-    BridgeResult, EditorError, MAX_STATE_BYTES, MainThreadMarker, MainWork, MainWorkHandle,
+    EditorError, IpcResult, MAX_STATE_BYTES, MainThreadMarker, MainWork, MainWorkHandle,
     ParameterQueue, PluginError, PluginFormat, PluginId, PluginRef, PluginResult, SampleRate,
     StateUse, Wakeups, WindowHandle,
 };
@@ -85,7 +85,7 @@ impl Reaction {
 pub(crate) struct Session {
     /// The hosted plugin, or `None` before a load and after an unload. Every
     /// handler that needs one refuses explicitly rather than going silent.
-    plugin: Option<AnyServed>,
+    plugin: Option<AnyServer>,
     /// What the plugin's drops off the main thread hand over: run on every tick and
     /// after an unload.
     work: MainWork,
@@ -217,7 +217,7 @@ impl Session {
         &mut self,
         main: MainThreadMarker,
         msg: ControlRequest,
-    ) -> BridgeResult<Reaction> {
+    ) -> IpcResult<Reaction> {
         self.handle_with(main, msg, &mut |_| {})
     }
 
@@ -231,7 +231,7 @@ impl Session {
         main: MainThreadMarker,
         msg: ControlRequest,
         interim: &mut dyn FnMut(Working),
-    ) -> BridgeResult<Reaction> {
+    ) -> IpcResult<Reaction> {
         let reaction = self.dispatch(main, msg, interim);
         // What the message changed that a block reads reaches the render thread
         // before the host is answered, so every block it sends after the answer
@@ -245,7 +245,7 @@ impl Session {
         main: MainThreadMarker,
         msg: ControlRequest,
         interim: &mut dyn FnMut(Working),
-    ) -> BridgeResult<Reaction> {
+    ) -> IpcResult<Reaction> {
         use ControlRequest as M;
         match msg {
             M::LoadPlugin {
@@ -726,7 +726,7 @@ impl Session {
         preferred_format: FloatWidth,
         declared: Option<StagedState>,
         interim: &mut dyn FnMut(Working),
-    ) -> BridgeResult<Reaction> {
+    ) -> IpcResult<Reaction> {
         // What a host staged for this load, restored before the activation: only
         // when the load declares exactly it. Staged here or declared here and not
         // the other, or of another length, is a host that is out of step with
@@ -755,7 +755,7 @@ impl Session {
             }
         }
         let mut restoring = || interim(Working::Restoring);
-        let (plugin, state_error, seat) = match AnyServed::load(
+        let (plugin, state_error, seat) = match AnyServer::load(
             main,
             &self.work_handle,
             &PluginRef::of(path, plugin),
@@ -1062,16 +1062,12 @@ mod tests {
         }
 
         /// One message of the control connection, on the session.
-        fn handle(
-            &mut self,
-            main: MainThreadMarker,
-            msg: ControlRequest,
-        ) -> BridgeResult<Reaction> {
+        fn handle(&mut self, main: MainThreadMarker, msg: ControlRequest) -> IpcResult<Reaction> {
             self.session.handle(main, msg)
         }
 
         /// One message of the audio connection, on the render side.
-        fn handle_audio(&mut self, msg: AudioRequest) -> BridgeResult<Option<AudioReply>> {
+        fn handle_audio(&mut self, msg: AudioRequest) -> IpcResult<Option<AudioReply>> {
             let mut side = self.side();
             side.poll_seat();
             side.handle(msg)
@@ -2828,7 +2824,7 @@ mod tests {
         );
     }
 
-    /// The probe bundle `AnyServed::load` picks the format from, as a session
+    /// The probe bundle `AnyServer::load` picks the format from, as a session
     /// loads it, with a slab sized to what the plugin declared.
     #[cfg(feature = "vst3")]
     fn load_vst3_probe(name: &str) -> (Rig, SlabWriter) {
@@ -3053,7 +3049,7 @@ mod tests {
         assert_eq!(s.side().pipeline().param_queues(), 1);
 
         match s.plugin.as_ref().unwrap() {
-            AnyServed::Vst3(p) => p.plugin_restart_component(K_PARAM_TITLES_CHANGED),
+            AnyServer::Vst3(p) => p.plugin_restart_component(K_PARAM_TITLES_CHANGED),
             #[allow(unreachable_patterns)]
             _ => unreachable!("the probe is a VST3"),
         }
@@ -3082,7 +3078,7 @@ mod tests {
             clap.parameters(main_thread()).len()
         );
 
-        let (vst3, _) = crate::served::Served::<tutti_vst3_host::Vst3Loaded>::load(
+        let (vst3, _) = crate::served::Server::<tutti_vst3_host::Vst3Loaded>::load(
             main_thread(),
             &tutti_fixtures::detached_work(),
             &tutti_plugin_types::PluginRef::file(crate::test_utils::vst3_probe_path()),
@@ -3095,7 +3091,7 @@ mod tests {
             crate::ties::ties().expect("bells").0,
         )
         .expect("the vendored VST3 probe loads");
-        let vst3: &dyn crate::served::ServedPlugin = &vst3;
+        let vst3: &dyn crate::served::ServerPlugin = &vst3;
         assert!(vst3.parameter_count(main_thread()) > 0);
         assert_eq!(
             vst3.parameter_count(main_thread()),

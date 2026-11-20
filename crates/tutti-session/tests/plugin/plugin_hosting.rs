@@ -7,7 +7,7 @@ use std::time::Duration;
 use tutti_buffers::MaxBlock;
 use tutti_platform::Instant;
 use tutti_plugin::catalog::{Hosting, PluginRef};
-use tutti_plugin_types::BridgeError;
+use tutti_plugin_types::IpcError;
 use tutti_session::{LoadError, PoolEvent, Session, SessionEvent};
 use tutti_units::Samples;
 
@@ -108,7 +108,7 @@ fn the_blacklist_is_asked_when_the_load_runs() {
     run_held(&held);
     match outcome(&mut s, main) {
         PoolEvent::Failed(LoadError::Plugin(error)) => match &*error {
-            BridgeError::Blacklisted { reason, .. } => assert_eq!(reason, "hung in its load"),
+            IpcError::Blacklisted { reason, .. } => assert_eq!(reason, "hung in its load"),
             other => panic!("expected a Blacklisted refusal, got {other:?}"),
         },
         other => panic!("expected a Blacklisted refusal at load, got {other:?}"),
@@ -146,7 +146,7 @@ fn vst2_asked_for_out_of_process_is_refused_at_load() {
         None,
     ) {
         Err(LoadError::Plugin(error)) => match &*error {
-            BridgeError::NotOutOfProcess { format, .. } => assert_eq!(*format, "VST2"),
+            IpcError::NotOutOfProcess { format, .. } => assert_eq!(*format, "VST2"),
             other => panic!("expected NotOutOfProcess, got {other:?}"),
         },
         other => panic!("expected NotOutOfProcess, got {other:?}"),

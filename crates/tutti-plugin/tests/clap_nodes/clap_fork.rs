@@ -37,7 +37,7 @@ use tutti_graph::{
 };
 use tutti_graph::{OutPort, Source};
 use tutti_plugin::PluginClient;
-use tutti_plugin::{BridgeConfig, PluginRenderFault, Timeouts};
+use tutti_plugin::{IpcConfig, PluginRenderFault, Timeouts};
 use tutti_plugin_host::PluginHandle;
 use tutti_plugin_types::PluginForkError;
 use tutti_transport::{OfflineTimeline, OfflineTimelineConfig, render_graph};
@@ -500,13 +500,13 @@ fn a_fork_whose_server_dies_mid_render_is_a_crashed_fault() {
 fn a_fork_whose_server_hangs_is_a_timed_out_fault() {
     let _lock = machine_lock();
     let _env = env();
-    let config = BridgeConfig {
+    let config = IpcConfig {
         timeouts: {
             let mut t = Timeouts::default();
             t.call = Duration::from_secs(1);
             t
         },
-        ..BridgeConfig::at(tutti_plugin::unique_socket_path().expect("the OS has a random source"))
+        ..IpcConfig::at(tutti_plugin::unique_socket_path().expect("the OS has a random source"))
     };
     let probe = load_probe_with(config, SAMPLE_RATE);
     let _hang = ProbeEnv::new().block_from(5);
@@ -719,13 +719,13 @@ fn export_through_a_fork(live: &Editor) -> tutti_export::Result<tutti_export::Re
 fn an_export_through_a_failing_fork_fails_by_name() {
     let _lock = machine_lock();
     let _env = env();
-    let config = BridgeConfig {
+    let config = IpcConfig {
         timeouts: {
             let mut t = Timeouts::default();
             t.call = Duration::from_secs(1);
             t
         },
-        ..BridgeConfig::at(tutti_plugin::unique_socket_path().expect("the OS has a random source"))
+        ..IpcConfig::at(tutti_plugin::unique_socket_path().expect("the OS has a random source"))
     };
     let probe = load_probe_with(config, SAMPLE_RATE);
     probe
@@ -1410,7 +1410,7 @@ fn a_served_restore_loads_the_preset_and_the_state_into_a_fresh_served_instance(
     std::fs::write(&preset, b"x").expect("a preset file");
 
     let launched = Ipc::launch(
-        BridgeConfig::at(unique_socket_path().expect("a socket path")),
+        IpcConfig::at(unique_socket_path().expect("a socket path")),
         &tutti_plugin_ipc::LoadRequest {
             origin: &tutti_plugin_types::PluginRef::file(tutti_fixtures::clap_probe()),
             format: PluginFormat::Clap,

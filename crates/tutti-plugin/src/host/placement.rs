@@ -3,7 +3,7 @@
 
 use std::path::Path;
 use tutti_plugin_db::{Hosting, Loadable};
-use tutti_plugin_types::{BridgeError, BridgeResult, PluginFormat};
+use tutti_plugin_types::{IpcError, IpcResult, PluginFormat};
 
 /// Where the load of `plugin` runs: [`Hosting::InProcess`] or
 /// [`Hosting::OutOfProcess`], never `Auto`. An in-process load (and the
@@ -12,11 +12,11 @@ use tutti_plugin_types::{BridgeError, BridgeResult, PluginFormat};
 ///
 /// # Errors
 ///
-/// [`BridgeError::NotOutOfProcess`] for a VST2 plugin asked to be served,
-/// [`BridgeError::NotInProcess`] for a format this build cannot host in
+/// [`IpcError::NotOutOfProcess`] for a VST2 plugin asked to be served,
+/// [`IpcError::NotInProcess`] for a format this build cannot host in
 /// process: the answer is the format's and the build's, so it comes before
 /// a server or a file is looked for.
-pub fn placement(plugin: &Loadable) -> BridgeResult<Hosting> {
+pub fn placement(plugin: &Loadable) -> IpcResult<Hosting> {
     resolve(
         plugin.requested_hosting(),
         plugin.plugin().path(),
@@ -28,23 +28,21 @@ pub fn placement(plugin: &Loadable) -> BridgeResult<Hosting> {
 ///
 /// # Errors
 ///
-/// [`BridgeError::UnknownFormat`] for a plugin with no id whose file's extension
+/// [`IpcError::UnknownFormat`] for a plugin with no id whose file's extension
 /// names no format.
-pub(crate) fn format_of(plugin: &Loadable) -> BridgeResult<PluginFormat> {
-    plugin
-        .format()
-        .map_err(|source| BridgeError::UnknownFormat {
-            path: plugin.plugin().path().to_path_buf(),
-            source,
-        })
+pub(crate) fn format_of(plugin: &Loadable) -> IpcResult<PluginFormat> {
+    plugin.format().map_err(|source| IpcError::UnknownFormat {
+        path: plugin.plugin().path().to_path_buf(),
+        source,
+    })
 }
 
 /// Where a load of the `format` plugin at `path` runs when it asks for `hosting`:
 /// `InProcess` or `OutOfProcess`, never `Auto`.
-fn resolve(hosting: Hosting, path: &Path, format: PluginFormat) -> BridgeResult<Hosting> {
+fn resolve(hosting: Hosting, path: &Path, format: PluginFormat) -> IpcResult<Hosting> {
     let name = format_name(format);
     match (hosting, format) {
-        (Hosting::OutOfProcess, PluginFormat::Vst2) => Err(BridgeError::NotOutOfProcess {
+        (Hosting::OutOfProcess, PluginFormat::Vst2) => Err(IpcError::NotOutOfProcess {
             path: path.to_path_buf(),
             format: name,
         }),
@@ -53,7 +51,7 @@ fn resolve(hosting: Hosting, path: &Path, format: PluginFormat) -> BridgeResult<
             if in_process_built(format) {
                 Ok(Hosting::InProcess)
             } else {
-                Err(BridgeError::NotInProcess {
+                Err(IpcError::NotInProcess {
                     path: path.to_path_buf(),
                     format: name,
                 })
@@ -121,7 +119,7 @@ mod tests {
         .unwrap_err();
         assert!(matches!(
             err,
-            BridgeError::NotOutOfProcess { format: "VST2", .. }
+            IpcError::NotOutOfProcess { format: "VST2", .. }
         ));
     }
 
@@ -132,10 +130,7 @@ mod tests {
     fn vst2_in_process_needs_its_feature() {
         for hosting in [Hosting::Auto, Hosting::InProcess] {
             let err = resolve(hosting, Path::new("P.vst"), PluginFormat::Vst2).unwrap_err();
-            assert!(matches!(
-                err,
-                BridgeError::NotInProcess { format: "VST2", .. }
-            ));
+            assert!(matches!(err, IpcError::NotInProcess { format: "VST2", .. }));
         }
     }
 
@@ -143,10 +138,7 @@ mod tests {
     #[test]
     fn clap_in_process_needs_its_feature() {
         let err = resolve(Hosting::InProcess, Path::new("P.clap"), PluginFormat::Clap).unwrap_err();
-        assert!(matches!(
-            err,
-            BridgeError::NotInProcess { format: "CLAP", .. }
-        ));
+        assert!(matches!(err, IpcError::NotInProcess { format: "CLAP", .. }));
     }
 
     #[cfg(feature = "clap")]
@@ -164,7 +156,7 @@ mod tests {
     fn a_ref_of_no_format_is_refused_at_placement() {
         let loadable = Loadable::uncatalogued(tutti_plugin_types::PluginRef::file("/p/notes.txt"));
         match placement(&loadable) {
-            Err(BridgeError::UnknownFormat { path, .. }) => {
+            Err(IpcError::UnknownFormat { path, .. }) => {
                 assert_eq!(path, Path::new("/p/notes.txt"));
             }
             other => panic!("expected UnknownFormat, got {other:?}"),

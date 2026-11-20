@@ -22,7 +22,7 @@
 //! unbounded allocation, no panic escaping into the audio thread.
 
 use super::PluginBridge;
-use crate::client::audio::BridgeThread;
+use crate::client::audio::IpcThread;
 use crate::transport::shm::RING_SLOTS;
 use crate::unique_socket_path;
 use crate::{
@@ -37,7 +37,7 @@ use tutti_buffers::FloatWidth;
 use tutti_fixtures::main_thread;
 use tutti_platform::Instant;
 use tutti_plugin_types::ChannelLayout;
-use tutti_plugin_types::{BridgeError, PluginFailure, StateError, Timeouts};
+use tutti_plugin_types::{IpcError, PluginFailure, StateError, Timeouts};
 use tutti_units::Normalized;
 use tutti_units::ParamId;
 use tutti_units::SampleRate;
@@ -87,8 +87,8 @@ fn no_editor(
     _: &tutti_plugin_types::MainWorkHandle,
     plugin: &tutti_plugin_types::PluginRef,
     _: tutti_plugin_types::PluginFormat,
-) -> tutti_plugin_types::BridgeResult<Box<dyn tutti_plugin_types::Editor>> {
-    Err(tutti_plugin_types::BridgeError::LoadFailed {
+) -> tutti_plugin_types::IpcResult<Box<dyn tutti_plugin_types::Editor>> {
+    Err(tutti_plugin_types::IpcError::LoadFailed {
         path: Some(plugin.path().to_path_buf()),
         stage: tutti_plugin_types::LoadStage::Opening,
         reason: "no editor in these tests".into(),
@@ -325,7 +325,7 @@ struct MockServer {
     /// The ring the bridge's audio lane answers blocks into.
     replies: crate::client::audio::Replies,
     /// `Option` only so `Drop` can take it out and `mem::forget` it; see there.
-    thread: Option<BridgeThread>,
+    thread: Option<IpcThread>,
     server: Option<std::thread::JoinHandle<()>>,
     socket: std::path::PathBuf,
 }
@@ -494,7 +494,7 @@ impl Drop for MockServer {
     /// Both obvious joins can block indefinitely in exactly the scenarios this
     /// file constructs, and a hang in teardown is as bad as a hang in the test:
     ///
-    /// - `BridgeThread::shutdown` joins the bridge thread, which may be parked
+    /// - `IpcThread::shutdown` joins the bridge thread, which may be parked
     ///   in `recv_within` waiting out a reply timeout.
     /// - joining the mock server thread waits on a socket read that only ends
     ///   when the host hangs up — which the line above was supposed to cause.
@@ -505,7 +505,7 @@ impl Drop for MockServer {
     ///
     /// So the socket file is removed and both threads are detached. Each exits
     /// on its own once its read fails or its timeout expires; the process is a
-    /// test binary that is about to end anyway. `BridgeThread`'s own `Drop`
+    /// test binary that is about to end anyway. `IpcThread`'s own `Drop`
     /// joins, so it is `mem::forget`-ed rather than dropped — the cost is a
     /// detached thread for the life of the test binary, and the alternative is
     /// a run that never finishes.
@@ -606,14 +606,14 @@ fn a_server_that_dies_mid_session_marks_the_bridge_crashed() {
 // ── The cause, and who hears about it ────────────────────────────────────────
 
 /// Whether `cause` is what a peer that closes the connection leaves: the EOF
-/// as `StreamClosed`, or a reset as `Io` over the I/O `BridgeError`.
+/// as `StreamClosed`, or a reset as `Io` over the I/O `IpcError`.
 fn is_closed_stream(cause: Option<&PluginFailure>) -> bool {
     use std::error::Error;
     match cause {
         Some(PluginFailure::StreamClosed) => true,
         Some(io @ PluginFailure::Io { .. }) => matches!(
-            io.source().and_then(|s| s.downcast_ref::<BridgeError>()),
-            Some(BridgeError::Io(_))
+            io.source().and_then(|s| s.downcast_ref::<IpcError>()),
+            Some(IpcError::Io(_))
         ),
         _ => false,
     }
@@ -621,14 +621,14 @@ fn is_closed_stream(cause: Option<&PluginFailure>) -> bool {
 
 /// A mid-session death latches *why*, not just *that*.
 ///
-/// The cause has to be captured where the failure is noticed: `BridgeError` is
+/// The cause has to be captured where the failure is noticed: `IpcError` is
 /// not `Clone` and is dropped as soon as the failing call returns, so a host
 /// that polls afterwards could otherwise only report a placeholder, identical
 /// for every death alike.
 ///
 /// Asserts the cause's kind, not its text: a closed stream reads as
 /// `StreamClosed` (EOF) or, where the OS reports a reset instead, `Io` with
-/// the `BridgeError` as its `source`. Pinning the text would make this a test
+/// the `IpcError` as its `source`. Pinning the text would make this a test
 /// of the OS.
 #[test]
 fn a_crash_latches_a_cause_that_outlives_the_call() {
@@ -677,7 +677,7 @@ fn a_listener_hears_the_crash_with_its_cause() {
     let heard: Arc<PlMutex<Vec<PluginFailure>>> = Arc::new(PlMutex::new(Vec::new()));
     let sink = Arc::clone(&heard);
     mock.bridge.audio().set_listener(Some(Arc::new(move |ev| {
-        if let crate::client::audio::BridgeEvent::Crashed { cause } = ev {
+        if let crate::client::audio::IpcEvent::Crashed { cause } = ev {
             sink.lock().push(cause);
         }
     })));
@@ -732,7 +732,7 @@ fn an_unprompted_event_reaches_the_listener_while_no_command_waits() {
     let heard: Arc<PlMutex<Vec<usize>>> = Arc::new(PlMutex::new(Vec::new()));
     let sink = Arc::clone(&heard);
     mock.bridge.audio().set_listener(Some(Arc::new(move |ev| {
-        if let crate::client::audio::BridgeEvent::LatencyChanged { samples } = ev {
+        if let crate::client::audio::IpcEvent::LatencyChanged { samples } = ev {
             sink.lock().push(samples.get());
         }
     })));
@@ -756,7 +756,7 @@ fn an_unprompted_event_reaches_the_listener_while_no_command_waits() {
 /// once, and both resyncs.
 #[test]
 fn a_layout_with_absurdly_many_buses_is_dropped_on_receipt() {
-    use crate::client::audio::BridgeEvent;
+    use crate::client::audio::IpcEvent;
     use parking_lot::Mutex as PlMutex;
     use tutti_plugin_types::{Layout, PluginBus};
 
@@ -789,8 +789,8 @@ fn a_layout_with_absurdly_many_buses_is_dropped_on_receipt() {
     mock.bridge
         .audio()
         .set_listener(Some(Arc::new(move |ev| match ev {
-            BridgeEvent::IoLayout(layout) => sink.lock().push(layout),
-            BridgeEvent::Resync(_) => {
+            IpcEvent::IoLayout(layout) => sink.lock().push(layout),
+            IpcEvent::Resync(_) => {
                 count.fetch_add(1, Ordering::Relaxed);
             }
             _ => {}
@@ -1522,7 +1522,7 @@ mod shell_server {
         });
         let mut guard = crate::ProcessGuard::launched(
             tutti_plugin_ipc_ffi::Reaped::new(child),
-            &crate::BridgeConfig::at(mock.socket.clone()),
+            &crate::IpcConfig::at(mock.socket.clone()),
         )
         .expect("the exit thread starts");
         guard.attach(mock.thread.take().expect("the bridge thread"));

@@ -19,8 +19,8 @@ use super::DeclaredCache;
 use crate::Request as WireRequest;
 
 use crate::{
-    AudioReply, AudioRequest, AudioSlab, BridgeEvent, ControlFrame, ControlReply, ControlRequest,
-    Framed, Ipc, IpcController, IpcParts, IpcProcessor, News, PROTOCOL_VERSION, PluginBridge,
+    AudioReply, AudioRequest, AudioSlab, ControlFrame, ControlReply, ControlRequest, Framed, Ipc,
+    IpcController, IpcEvent, IpcParts, IpcProcessor, News, PROTOCOL_VERSION, PluginBridge,
     ProcessGuard, RING_SLOTS, ReqId, SlabLayout, unique_socket_path,
 };
 
@@ -108,7 +108,7 @@ struct Mock {
     /// Buses the plugin announces while the server is asked to open a slab,
     /// before it answers: a change that lands inside an activation.
     announce_during_setup: Arc<Mutex<Option<tutti_plugin_types::Layout>>>,
-    _bridge: crate::BridgeThread,
+    _bridge: crate::IpcThread,
 }
 
 impl Mock {
@@ -139,8 +139,8 @@ fn no_editor(
     _: &tutti_plugin_types::MainWorkHandle,
     plugin: &tutti_plugin_types::PluginRef,
     _: tutti_plugin_types::PluginFormat,
-) -> tutti_plugin_types::BridgeResult<Box<dyn tutti_plugin_types::Editor>> {
-    Err(tutti_plugin_types::BridgeError::LoadFailed {
+) -> tutti_plugin_types::IpcResult<Box<dyn tutti_plugin_types::Editor>> {
+    Err(tutti_plugin_types::IpcError::LoadFailed {
         path: Some(plugin.path().to_path_buf()),
         stage: tutti_plugin_types::LoadStage::Opening,
         reason: "no editor in these tests".into(),
@@ -812,9 +812,9 @@ fn recording_editor(
     _: &tutti_plugin_types::MainWorkHandle,
     plugin: &tutti_plugin_types::PluginRef,
     format: tutti_plugin_types::PluginFormat,
-) -> tutti_plugin_types::BridgeResult<Box<dyn tutti_plugin_types::Editor>> {
+) -> tutti_plugin_types::IpcResult<Box<dyn tutti_plugin_types::Editor>> {
     *EDITOR_LOAD.lock().unwrap() = Some((plugin.clone(), format));
-    Err(tutti_plugin_types::BridgeError::LoadFailed {
+    Err(tutti_plugin_types::IpcError::LoadFailed {
         path: Some(plugin.path().to_path_buf()),
         stage: tutti_plugin_types::LoadStage::Opening,
         reason: "records the choice and loads nothing".into(),
@@ -1234,7 +1234,7 @@ fn a_resync_with_a_changed_list_flips_the_answer() {
     let arrived: Arc<Log<()>> = Arc::default();
     let heard = Arc::clone(&arrived);
     ipc.forward_events(Some(Arc::new(move |event| {
-        if matches!(event, BridgeEvent::Resync(ResyncKind::ParamTitles)) {
+        if matches!(event, IpcEvent::Resync(ResyncKind::ParamTitles)) {
             heard.push(());
         }
     })));
@@ -1294,9 +1294,7 @@ fn a_write_waits_for_the_news_the_bridge_has_not_delivered() {
     let first = AtomicBool::new(true);
     let held_tx = Mutex::new(held_tx);
     ipc.forward_events(Some(Arc::new(move |event| {
-        if matches!(event, BridgeEvent::LatencyChanged { .. })
-            && first.swap(false, Ordering::SeqCst)
-        {
+        if matches!(event, IpcEvent::LatencyChanged { .. }) && first.swap(false, Ordering::SeqCst) {
             held_tx.lock().unwrap().send(()).unwrap();
             let _ = release_rx.lock().unwrap().recv();
         }
@@ -1354,7 +1352,7 @@ fn a_values_resync_keeps_the_declared_list() {
     let arrived: Arc<Log<()>> = Arc::default();
     let heard = Arc::clone(&arrived);
     ipc.forward_events(Some(Arc::new(move |event| {
-        if matches!(event, BridgeEvent::Resync(ResyncKind::ParamValues)) {
+        if matches!(event, IpcEvent::Resync(ResyncKind::ParamValues)) {
             heard.push(());
         }
     })));

@@ -1,10 +1,10 @@
-//! `Served<AuLoaded>` against the units macOS ships. macOS only.
+//! `Server<AuLoaded>` against the units macOS ships. macOS only.
 
 use super::*;
 use tutti_au_host::AuLoaded;
 use tutti_buffers::{FloatWidth, InputOutput};
 
-impl Served<AuLoaded> {
+impl Server<AuLoaded> {
     /// `load_first` for the plugin `plugin` names, in
     /// 32-bit.
     fn load_with(
@@ -35,10 +35,10 @@ use tutti_plugin_types::{
     RescanScope, SampleRate, Samples,
 };
 
-type AuInstance = Served<AuLoaded>;
+type AuInstance = Server<AuLoaded>;
 
 /// The test-side views of the instance.
-impl Served<AuLoaded> {
+impl Server<AuLoaded> {
     /// The unit, whichever half holds it.
     fn loaded_ref(&self) -> Option<&AuLoaded> {
         match &self.lifecycle {
@@ -297,7 +297,7 @@ fn test_au_parameter_list_via_trait() {
     let params = au.parameters(main_thread());
     assert!(
         !params.is_empty(),
-        "AUDelay should have parameters through `ServedPlugin`"
+        "AUDelay should have parameters through `ServerPlugin`"
     );
 }
 

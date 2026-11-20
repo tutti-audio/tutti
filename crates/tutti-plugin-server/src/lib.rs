@@ -10,7 +10,7 @@
 //! Unix socket (a named pipe on Windows), and moves audio through a shared-memory
 //! slab. A plugin that crashes takes down this process and nothing else.
 //!
-//! It is one generic shell, `Served<L: OutOfProcess>`, over what each served
+//! It is one generic shell, `Server<L: OutOfProcess>`, over what each served
 //! format's host crate implements (`Loaded`, `Processor`, `Controller`, `Control`):
 //! a format is a row of the `served!` table, which calls `F::load_served`, so a row
 //! for a format that cannot be served from another process does not compile. VST2
@@ -47,7 +47,7 @@
 //! ```
 //!
 //! The path is the one the host chose: a path this process derived itself could
-//! never meet the host that spawned it. `BridgeError` is `tutti-plugin-types`';
+//! never meet the host that spawned it. `IpcError` is `tutti-plugin-types`';
 //! the wire protocol and its version are defined in `tutti-plugin-ipc`. A load
 //! carries which plugin of a file that exports several to load
 //! (`LoadPlugin::load`).
@@ -81,7 +81,7 @@
 //! that crashes or hangs takes down this process, not the host's. It is **not a
 //! security boundary**: the process runs as the host's user, so a hostile plugin
 //! can do what that user can do. The host's side of this
-//! (`BridgeConfig::protect_host_memory`) is documented in `tutti-plugin-ipc`.
+//! (`IpcConfig::protect_host_memory`) is documented in `tutti-plugin-ipc`.
 //!
 //! ## Features
 //!

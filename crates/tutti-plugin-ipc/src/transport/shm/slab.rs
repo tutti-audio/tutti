@@ -71,8 +71,8 @@ use std::sync::Arc;
 use tutti_buffers::Float;
 use tutti_buffers::FloatWidth;
 use tutti_plugin_types::MAX_BLOCK_CHANNELS;
-use tutti_plugin_types::{BridgeError, BridgeResult, SlabAccessError, SlabLayoutError};
 use tutti_plugin_types::{BusChannels, ChannelLayout};
+use tutti_plugin_types::{IpcError, IpcResult, SlabAccessError, SlabLayoutError};
 
 use tutti_plugin_ipc_ffi::{
     Direction, MappingWriter, RING_SLOTS, SLAB_HEADER_BYTES, SharedMapping, slot_for,
@@ -106,12 +106,12 @@ impl AudioSlab {
     ///
     /// Returns an error if `layout` is refused ([`SlabLayoutError`]), or if the
     /// backing file exists or cannot be created, sized or mapped.
-    pub fn create(name: impl Into<String>, layout: SlabLayout) -> BridgeResult<SlabWriter> {
+    pub fn create(name: impl Into<String>, layout: SlabLayout) -> IpcResult<SlabWriter> {
         let bytes = check_layout(&layout)?;
         let name = name.into();
-        // Stamped before it returns: the peer is told the slab's name only
+        // Sequenced before it returns: the peer is told the slab's name only
         // after this, and the header's magic is released last.
-        let writer = MappingWriter::create(&name, bytes).map_err(BridgeError::from)?;
+        let writer = MappingWriter::create(&name, bytes).map_err(IpcError::from)?;
         let slab = Self {
             mapping: Arc::clone(writer.mapping()),
             name,
@@ -134,12 +134,12 @@ impl AudioSlab {
     /// [`create`](Self::create)), the file cannot be opened or mapped, or it is
     /// too short, is not a tutti slab, or was written with a different header
     /// version.
-    pub fn open(name: impl Into<String>, layout: SlabLayout) -> BridgeResult<SlabWriter> {
+    pub fn open(name: impl Into<String>, layout: SlabLayout) -> IpcResult<SlabWriter> {
         let bytes = check_layout(&layout)?;
         let name = name.into();
         // Checks the length before the header, and the header before this
         // side trusts a byte.
-        let writer = MappingWriter::open(&name, bytes).map_err(BridgeError::from)?;
+        let writer = MappingWriter::open(&name, bytes).map_err(IpcError::from)?;
         let slab = Self {
             mapping: Arc::clone(writer.mapping()),
             name,

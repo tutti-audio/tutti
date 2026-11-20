@@ -1,13 +1,13 @@
 //! How a loaded plugin runs: [`AudioConfig`], the audio knobs lowered into a
-//! [`BridgeConfig`] for each plugin subprocess. Read per load; where plugins
+//! [`IpcConfig`] for each plugin subprocess. Read per load; where plugins
 //! live and what a scan does is `tutti-plugin-db`'s `CatalogConfig`.
 
-use super::bridge::{BridgeConfig, RandomSourceError};
+use super::bridge::{IpcConfig, RandomSourceError};
 use tutti_buffers::FloatWidth;
 use tutti_plugin_types::Timeouts;
 
 /// How a loaded plugin runs: the audio knobs lowered into each plugin
-/// subprocess's [`BridgeConfig`].
+/// subprocess's [`IpcConfig`].
 #[derive(Debug, Clone)]
 pub struct AudioConfig {
     /// Preferred audio sample format.
@@ -15,7 +15,7 @@ pub struct AudioConfig {
 
     /// Largest block, in **frames** per channel, that will cross the bridge.
     ///
-    /// Becomes [`BridgeConfig::max_buffer_size`] and sizes the shared slab, so
+    /// Becomes [`IpcConfig::max_buffer_size`] and sizes the shared slab, so
     /// a later block may not exceed it.
     pub buffer_size: usize,
 
@@ -23,7 +23,7 @@ pub struct AudioConfig {
     pub timeouts: Timeouts,
 
     /// Whether the host clears its dumpable flag before it spawns its first
-    /// plugin server ([`BridgeConfig::protect_host_memory`]). Off by default, and
+    /// plugin server ([`IpcConfig::protect_host_memory`]). Off by default, and
     /// irreversible for the process: a later `false` does not undo an earlier
     /// `true`.
     pub protect_host_memory: bool,
@@ -72,7 +72,7 @@ impl AudioConfig {
     }
 
     /// Sets whether the host protects its memory from the plugins it spawns
-    /// ([`BridgeConfig::protect_host_memory`]).
+    /// ([`IpcConfig::protect_host_memory`]).
     #[must_use]
     pub fn protect_host_memory(mut self, protect: bool) -> Self {
         self.protect_host_memory = protect;
@@ -87,13 +87,13 @@ impl AudioConfig {
     ///
     /// The operating system's random source cannot be read, so no socket name
     /// can be made.
-    pub fn to_bridge_config(&self) -> Result<BridgeConfig, RandomSourceError> {
-        Ok(BridgeConfig {
+    pub fn to_bridge_config(&self) -> Result<IpcConfig, RandomSourceError> {
+        Ok(IpcConfig {
             preferred_format: self.format,
             max_buffer_size: self.buffer_size,
             timeouts: self.timeouts,
             protect_host_memory: self.protect_host_memory,
-            ..BridgeConfig::at(crate::unique_socket_path()?)
+            ..IpcConfig::at(crate::unique_socket_path()?)
         })
     }
 }

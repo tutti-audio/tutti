@@ -15,7 +15,7 @@ use tutti_plugin_ipc::{
     AudioReply, ControlFrame, ControlRequest, PROTOCOL_VERSION, ReqId, Request, Working,
 };
 use tutti_plugin_types::MainThreadMarker;
-use tutti_plugin_types::{BridgeError, BridgeResult};
+use tutti_plugin_types::{IpcError, IpcResult};
 
 /// Ask the OS for the highest priority it grants this thread, now that it is
 /// about to do nothing but per-block audio work (the render thread, and a
@@ -107,8 +107,8 @@ impl PluginServer {
     ///
     /// The thread is not the process's main thread, or the OS refused the
     /// session's bells.
-    pub fn new(socket: PathBuf) -> BridgeResult<Self> {
-        let main = MainThreadMarker::new().ok_or(BridgeError::ProtocolError(
+    pub fn new(socket: PathBuf) -> IpcResult<Self> {
+        let main = MainThreadMarker::new().ok_or(IpcError::ProtocolError(
             "the plugin server must be built on the process's main thread",
         ))?;
         let (session, render) = Session::new()?;
@@ -159,7 +159,7 @@ impl PluginServer {
     /// connection fails. The handshake connection closing is the host's way of
     /// ending that phase, not an error. However it ends, the plugin is
     /// released first.
-    pub fn run(mut self) -> BridgeResult<Ended> {
+    pub fn run(mut self) -> IpcResult<Ended> {
         let served = self.serve();
         // Idempotent: the paths that never reached the control phase.
         self.served.stop();
@@ -177,7 +177,7 @@ impl PluginServer {
     }
 
     /// The phases of [`run`](Self::run), up to the plugin's release.
-    fn serve(&mut self) -> BridgeResult<()> {
+    fn serve(&mut self) -> IpcResult<()> {
         let listener = TransportListener::bind(&self.socket)?;
 
         // First connection: handshake.
@@ -202,7 +202,7 @@ impl PluginServer {
         let side = self
             .render
             .take()
-            .ok_or(BridgeError::ProtocolError("the audio phase runs once"))?;
+            .ok_or(IpcError::ProtocolError("the audio phase runs once"))?;
         let render = RenderThread::spawn(side, Some(Box::new(audio))).map_err(|failed| {
             // Whole again, for the release.
             self.render = Some(failed.side);
@@ -277,11 +277,11 @@ impl PluginServer {
         }
     }
 
-    fn handshake_phase(&mut self, transport: &mut ControlTransport) -> BridgeResult<bool> {
+    fn handshake_phase(&mut self, transport: &mut ControlTransport) -> IpcResult<bool> {
         loop {
             let Request { id, body } = match transport.recv() {
                 Ok(request) => request,
-                Err(BridgeError::Io(_)) => return Ok(false),
+                Err(IpcError::Io(_)) => return Ok(false),
                 Err(e) => return Err(e),
             };
             let reaction = if matches!(body, ControlRequest::LoadPlugin { .. }) {
@@ -318,7 +318,7 @@ impl PluginServer {
         transport: &mut ControlTransport,
         id: ReqId,
         body: ControlRequest,
-    ) -> BridgeResult<Reaction> {
+    ) -> IpcResult<Reaction> {
         let restoring = AtomicBool::new(false);
         let done = StopToken::new();
         let pulse = transport.pulser();
@@ -359,7 +359,7 @@ impl PluginServer {
         &mut self,
         transport: &mut ControlTransport,
         render: &RenderThread,
-    ) -> BridgeResult<()> {
+    ) -> IpcResult<()> {
         let main = self.main;
         crate::main_loop::serve(&mut self.session, transport, main, render)
     }

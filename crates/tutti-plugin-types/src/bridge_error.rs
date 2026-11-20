@@ -1,7 +1,7 @@
-//! [`BridgeError`], the host-side error most calls return, and
+//! [`IpcError`], the host-side error most calls return, and
 //! [`PluginForkError`], why forking a plugin for an offline render failed.
 //!
-//! `BridgeError` names the subprocess, the shared memory and the wire, none of
+//! `IpcError` names the subprocess, the shared memory and the wire, none of
 //! which a format loader knows about; the lean [`PluginError`] the loaders'
 //! capability traits return converts to and from it with `From`.
 
@@ -25,7 +25,7 @@ use crate::{
 /// distinguishes this from the format-agnostic [`PluginError`].
 #[derive(Error, Debug)]
 #[non_exhaustive]
-pub enum BridgeError {
+pub enum IpcError {
     /// A [`Timeouts`](crate::Timeouts) with a zero deadline was configured.
     #[error(transparent)]
     Timeouts(#[from] crate::ZeroTimeout),
@@ -213,7 +213,7 @@ pub enum BridgeError {
     StateRestore {
         /// The bridge failure the restore ended in.
         #[source]
-        cause: Box<BridgeError>,
+        cause: Box<IpcError>,
     },
 
     /// The plugin failed while processing audio.
@@ -239,7 +239,7 @@ pub enum BridgeError {
     AudioConnection {
         /// What the connection ended with.
         #[source]
-        cause: Arc<BridgeError>,
+        cause: Arc<IpcError>,
     },
 
     /// An underlying I/O operation failed.
@@ -267,12 +267,12 @@ pub enum BridgeError {
     StaleServer {
         /// The decode failure.
         #[source]
-        cause: Box<BridgeError>,
+        cause: Box<IpcError>,
     },
 }
 
-/// A host operation's result, erroring as [`BridgeError`].
-pub type BridgeResult<T> = std::result::Result<T, BridgeError>;
+/// A host operation's result, erroring as [`IpcError`].
+pub type IpcResult<T> = std::result::Result<T, IpcError>;
 
 /// Why a hosted plugin could not be forked by state transfer.
 ///
@@ -305,7 +305,7 @@ pub enum PluginForkError {
         path: PathBuf,
         /// Why the load failed.
         #[source]
-        source: BridgeError,
+        source: IpcError,
     },
 
     /// The live instance has no origin (it was not loaded from a file the
@@ -332,48 +332,48 @@ fn of_path(path: &Option<PathBuf>) -> String {
 }
 
 /// Widens the lean [`PluginError`] a format loader returns into a
-/// `BridgeError`, keeping every payload.
+/// `IpcError`, keeping every payload.
 ///
-/// A [`PluginError::Load`] becomes [`BridgeError::LoadFailed`] with no `path`:
+/// A [`PluginError::Load`] becomes [`IpcError::LoadFailed`] with no `path`:
 /// the loader names none. A state failure keeps its [`StateError`] (a bare
 /// [`PluginError::State`] message is a plugin's refusal,
 /// [`StateError::Rejected`]); a [`PluginError::Bridge`] unwraps to the
-/// `BridgeError` it carried.
-impl From<PluginError> for BridgeError {
+/// `IpcError` it carried.
+impl From<PluginError> for IpcError {
     fn from(e: PluginError) -> Self {
         match e {
-            PluginError::Load { stage, reason } => BridgeError::LoadFailed {
+            PluginError::Load { stage, reason } => IpcError::LoadFailed {
                 path: None,
                 stage,
                 reason,
             },
-            PluginError::State(msg) => BridgeError::State(StateError::Rejected(msg)),
-            PluginError::StateFailed(err) => BridgeError::State(err),
-            PluginError::Process(msg) => BridgeError::ProcessError(Cow::Owned(msg)),
-            PluginError::Block(why) => BridgeError::ProcessError(Cow::Borrowed(why)),
-            PluginError::Editor(err) => BridgeError::Editor(err),
+            PluginError::State(msg) => IpcError::State(StateError::Rejected(msg)),
+            PluginError::StateFailed(err) => IpcError::State(err),
+            PluginError::Process(msg) => IpcError::ProcessError(Cow::Owned(msg)),
+            PluginError::Block(why) => IpcError::ProcessError(Cow::Borrowed(why)),
+            PluginError::Editor(err) => IpcError::Editor(err),
             PluginError::Bridge(err) => *err,
-            PluginError::Other(msg) => BridgeError::Other(msg),
+            PluginError::Other(msg) => IpcError::Other(msg),
         }
     }
 }
 
-/// Narrows a `BridgeError` into the lean [`PluginError`] a format loader
+/// Narrows a `IpcError` into the lean [`PluginError`] a format loader
 /// returns.
 ///
 /// A variant the lean type has a counterpart for keeps its payload, except that
-/// a [`BridgeError::LoadFailed`] drops its `path` (a [`PluginError::Load`] names
+/// a [`IpcError::LoadFailed`] drops its `path` (a [`PluginError::Load`] names
 /// none). Every other variant (`ServerNotFound`, `ProtocolMismatch`, ...)
 /// travels whole as [`PluginError::Bridge`], so widening it again returns the
 /// same value.
-impl From<BridgeError> for PluginError {
-    fn from(e: BridgeError) -> Self {
+impl From<IpcError> for PluginError {
+    fn from(e: IpcError) -> Self {
         match e {
-            BridgeError::LoadFailed { stage, reason, .. } => PluginError::Load { stage, reason },
-            BridgeError::State(err) => PluginError::StateFailed(err),
-            BridgeError::ProcessError(msg) => PluginError::Process(msg.into_owned()),
-            BridgeError::Editor(err) => PluginError::Editor(err),
-            BridgeError::Other(msg) => PluginError::Other(msg),
+            IpcError::LoadFailed { stage, reason, .. } => PluginError::Load { stage, reason },
+            IpcError::State(err) => PluginError::StateFailed(err),
+            IpcError::ProcessError(msg) => PluginError::Process(msg.into_owned()),
+            IpcError::Editor(err) => PluginError::Editor(err),
+            IpcError::Other(msg) => PluginError::Other(msg),
             other => PluginError::Bridge(Box::new(other)),
         }
     }
@@ -388,7 +388,7 @@ impl From<PluginError> for StateError {
         match e {
             PluginError::StateFailed(err) => err,
             PluginError::State(msg) => StateError::Rejected(msg),
-            PluginError::Bridge(b) if matches!(*b, BridgeError::ProcessCrashed) => {
+            PluginError::Bridge(b) if matches!(*b, IpcError::ProcessCrashed) => {
                 StateError::PluginCrashed
             }
             other => StateError::Rejected(other.to_string()),
@@ -396,7 +396,7 @@ impl From<PluginError> for StateError {
     }
 }
 
-impl BridgeError {
+impl IpcError {
     /// Turn a server-reported error message into a `LoadFailed` at the
     /// `Opening` stage. The stage is coarse because the server's own
     /// error-message protocol doesn't carry a stage tag.
@@ -423,15 +423,15 @@ mod tests {
             bytes: 7,
             after: Duration::from_millis(250),
         };
-        match BridgeError::from(PluginError::StateFailed(stalled.clone())) {
-            BridgeError::State(err) => assert_eq!(err, stalled),
+        match IpcError::from(PluginError::StateFailed(stalled.clone())) {
+            IpcError::State(err) => assert_eq!(err, stalled),
             other => panic!("expected State, got {other:?}"),
         }
         assert!(matches!(
-            BridgeError::from(PluginError::State("truncated".into())),
-            BridgeError::State(StateError::Rejected(m)) if m == "truncated"
+            IpcError::from(PluginError::State("truncated".into())),
+            IpcError::State(StateError::Rejected(m)) if m == "truncated"
         ));
-        match PluginError::from(BridgeError::State(StateError::Busy)) {
+        match PluginError::from(IpcError::State(StateError::Busy)) {
             PluginError::StateFailed(StateError::Busy) => {}
             other => panic!("expected StateFailed(Busy), got {other:?}"),
         }
@@ -440,11 +440,11 @@ mod tests {
     /// A load error widens with stage and reason intact and no invented path.
     #[test]
     fn widening_a_load_error_names_no_path() {
-        match BridgeError::from(PluginError::Load {
+        match IpcError::from(PluginError::Load {
             stage: LoadStage::Factory,
             reason: "no factory entry point".into(),
         }) {
-            BridgeError::LoadFailed {
+            IpcError::LoadFailed {
                 path,
                 stage,
                 reason,
@@ -466,7 +466,7 @@ mod tests {
             StateError::Busy
         );
         assert_eq!(
-            StateError::from(PluginError::Bridge(Box::new(BridgeError::ProcessCrashed))),
+            StateError::from(PluginError::Bridge(Box::new(IpcError::ProcessCrashed))),
             StateError::PluginCrashed
         );
         assert_eq!(
@@ -480,19 +480,19 @@ mod tests {
     #[test]
     fn process_editor_and_other_failures_keep_their_variant() {
         assert!(matches!(
-            BridgeError::from(PluginError::Process("underrun".into())),
-            BridgeError::ProcessError(m) if m == "underrun"
+            IpcError::from(PluginError::Process("underrun".into())),
+            IpcError::ProcessError(m) if m == "underrun"
         ));
         assert!(matches!(
-            BridgeError::from(PluginError::Other("odd".into())),
-            BridgeError::Other(m) if m == "odd"
+            IpcError::from(PluginError::Other("odd".into())),
+            IpcError::Other(m) if m == "odd"
         ));
-        let widened = BridgeError::from(PluginError::Editor(EditorError::GuiNotSupported {
+        let widened = IpcError::from(PluginError::Editor(EditorError::GuiNotSupported {
             format: "vst3".into(),
         }));
         assert!(matches!(
             &widened,
-            BridgeError::Editor(EditorError::GuiNotSupported { format }) if format == "vst3"
+            IpcError::Editor(EditorError::GuiNotSupported { format }) if format == "vst3"
         ));
         assert!(matches!(
             PluginError::from(widened),
@@ -504,27 +504,24 @@ mod tests {
     /// to the same variant, so nothing is flattened to text on the way.
     #[test]
     fn a_bridge_only_failure_round_trips_whole() {
-        let narrowed = PluginError::from(BridgeError::ProcessCrashed);
+        let narrowed = PluginError::from(IpcError::ProcessCrashed);
         assert!(matches!(
             narrowed,
-            PluginError::Bridge(ref b) if matches!(**b, BridgeError::ProcessCrashed)
+            PluginError::Bridge(ref b) if matches!(**b, IpcError::ProcessCrashed)
         ));
-        assert!(matches!(
-            BridgeError::from(narrowed),
-            BridgeError::ProcessCrashed
-        ));
+        assert!(matches!(IpcError::from(narrowed), IpcError::ProcessCrashed));
     }
 
     /// A load failure names its path only when it has one, and keeps its stage
     /// and reason through the narrowing.
     #[test]
     fn a_load_failure_names_its_path_only_when_it_has_one() {
-        let with = BridgeError::load_from_server(std::path::Path::new("/x.vst3"), "refused".into());
+        let with = IpcError::load_from_server(std::path::Path::new("/x.vst3"), "refused".into());
         assert_eq!(
             with.to_string(),
             "the plugin at /x.vst3 failed to load at the opening library stage: refused"
         );
-        let without = BridgeError::from(PluginError::Load {
+        let without = IpcError::from(PluginError::Load {
             stage: LoadStage::Activation,
             reason: "refused".into(),
         });
@@ -544,14 +541,14 @@ mod tests {
     /// A timeout and a restore failure read as one sentence each.
     #[test]
     fn a_timeout_and_a_restore_failure_read_as_one_sentence() {
-        let timeout = BridgeError::Timeout {
+        let timeout = IpcError::Timeout {
             operation: "recv",
             after: Duration::from_millis(250),
             partial: false,
         };
         assert_eq!(timeout.to_string(), "recv timed out after 250ms");
-        let restore = BridgeError::StateRestore {
-            cause: Box::new(BridgeError::ProcessCrashed),
+        let restore = IpcError::StateRestore {
+            cause: Box::new(IpcError::ProcessCrashed),
         };
         assert_eq!(
             restore.to_string(),
@@ -568,8 +565,8 @@ mod tests {
         use std::error::Error;
         let errors: Vec<(Box<dyn Error>, &str)> = vec![
             (
-                Box::new(BridgeError::StateRestore {
-                    cause: Box::new(BridgeError::Timeout {
+                Box::new(IpcError::StateRestore {
+                    cause: Box::new(IpcError::Timeout {
                         operation: "a reply",
                         after: Duration::from_secs(5),
                         partial: false,
@@ -578,37 +575,37 @@ mod tests {
                 "timed out after 5s",
             ),
             (
-                Box::new(BridgeError::State(StateError::Stalled {
+                Box::new(IpcError::State(StateError::Stalled {
                     bytes: 3,
                     after: Duration::from_secs(2),
                 })),
                 "stalled after 3 bytes",
             ),
             (
-                Box::new(BridgeError::Editor(EditorError::PluginCrashed)),
+                Box::new(IpcError::Editor(EditorError::PluginCrashed)),
                 "has crashed",
             ),
             (
-                Box::new(BridgeError::ExitUnwatched(std::io::Error::other(
+                Box::new(IpcError::ExitUnwatched(std::io::Error::other(
                     "no thread to spare",
                 ))),
                 "no thread to spare",
             ),
             (
-                Box::new(BridgeError::Serialization(
+                Box::new(IpcError::Serialization(
                     postcard::Error::DeserializeUnexpectedEnd,
                 )),
                 "expected more data",
             ),
             (
-                Box::new(BridgeError::ServerExited {
+                Box::new(IpcError::ServerExited {
                     cause: PluginFailure::StreamClosed,
                 }),
                 "stream closed",
             ),
             (
-                Box::new(BridgeError::AudioConnection {
-                    cause: Arc::new(BridgeError::ProtocolError("a reset on the wrong socket")),
+                Box::new(IpcError::AudioConnection {
+                    cause: Arc::new(IpcError::ProtocolError("a reset on the wrong socket")),
                 }),
                 "a reset on the wrong socket",
             ),
@@ -619,7 +616,7 @@ mod tests {
             (
                 Box::new(PluginForkError::Load {
                     path: PathBuf::from("plugin.clap"),
-                    source: BridgeError::ProcessCrashed,
+                    source: IpcError::ProcessCrashed,
                 }),
                 "bridge process crashed",
             ),

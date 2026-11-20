@@ -4,7 +4,7 @@
 use super::ask::Reply;
 #[cfg(test)]
 use super::channels::response_ring;
-use super::channels::{Channels, Fate, ResponseWriter};
+use super::channels::{BatchOutcome, Channels, ResponseWriter};
 use super::lifecycle::Lifecycle;
 use super::messages::{AudioCommand, AudioResponse, ControlCommand, Setting, Unsolicited};
 use super::payload_pool::PayloadPool;
@@ -21,8 +21,8 @@ use crate::{
 use crossbeam_channel::RecvTimeoutError;
 use std::time::Duration;
 use tutti_platform::Instant;
-use tutti_plugin_types::{BridgeError, BridgeResult, ResyncKind, StateError};
 use tutti_plugin_types::{Deadline, MidiIntake};
+use tutti_plugin_types::{IpcError, IpcResult, ResyncKind, StateError};
 use tutti_plugin_types::{ParameterChanges, ParameterPoint, ParameterQueue};
 use tutti_units::SampleRate;
 use tutti_units::{Normalized, ParamId};
@@ -127,7 +127,7 @@ enum AudioKey {
 
 /// What an audio-lane request the lane stopped waiting for still has coming.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum AudioLate {
+pub(super) enum AbandonedAudio {
     /// A block's `AudioProcessed`: its MIDI is forwarded.
     Block,
     /// The one `ParametersApplied` of an `ApplyParameters`.
@@ -145,8 +145,8 @@ fn audio_key(reply: &AudioReply) -> Option<AudioKey> {
 }
 
 /// A server's fault, as the connection-level error it ends the lane with.
-fn fault(fault: Fault) -> BridgeError {
-    BridgeError::ProtocolError(match fault {
+fn fault(fault: Fault) -> IpcError {
+    IpcError::ProtocolError(match fault {
         Fault::Unknown => "a reply to a request this lane never made",
         Fault::Flooded { .. } => "the server left too many requests unanswered",
     })
@@ -166,7 +166,7 @@ pub(super) struct AudioState {
     /// ([`Timeouts::drain`](tutti_plugin_types::Timeouts::drain)).
     finish: Duration,
     /// The requests sent and not yet heard the end of, by key.
-    conv: Conversation<AudioKey, AudioLate>,
+    conv: Conversation<AudioKey, AbandonedAudio>,
     /// The id of the last request that carried one.
     last_id: u64,
     /// Where the last read stopped, so a timeout resumes rather than restarts.
@@ -312,14 +312,14 @@ impl AudioState {
         awaited: AudioKey,
         now: Instant,
         channels: &Channels,
-    ) -> BridgeResult<Option<AudioReply>> {
+    ) -> IpcResult<Option<AudioReply>> {
         let key = audio_key(&reply).ok_or_else(|| fault(Fault::Unknown))?;
         match self.conv.hear(key, true, now).map_err(fault)? {
             Heard::Answer { .. } if key == awaited => Ok(Some(reply)),
-            Heard::Answer { .. } => Err(BridgeError::ProtocolError(
+            Heard::Answer { .. } => Err(IpcError::ProtocolError(
                 "an answer to a request this lane is not waiting for",
             )),
-            Heard::Late(AudioLate::Block) => {
+            Heard::Abandoned(AbandonedAudio::Block) => {
                 if let AudioReply::AudioProcessed {
                     seq,
                     midi_out,
@@ -328,12 +328,12 @@ impl AudioState {
                     ..
                 } = reply
                 {
-                    channels.note_fate(
+                    channels.note_outcome(
                         seq,
                         if refused {
-                            Fate::Refused
+                            BatchOutcome::Refused
                         } else {
-                            Fate::Published
+                            BatchOutcome::Published
                         },
                     );
                     self.respond(
@@ -348,12 +348,12 @@ impl AudioState {
                 }
                 Ok(None)
             }
-            Heard::Late(AudioLate::Params) => Ok(None),
+            Heard::Abandoned(AbandonedAudio::Params) => Ok(None),
         }
     }
 
     /// Stops waiting for `key`: its reply is late when it comes.
-    fn give_up(&mut self, key: AudioKey) -> BridgeResult<()> {
+    fn give_up(&mut self, key: AudioKey) -> IpcResult<()> {
         self.conv.abandon(key).map_err(fault)
     }
 }
@@ -377,7 +377,7 @@ fn wait_audio(
     state: &mut AudioState,
     channels: &Channels,
     key: AudioKey,
-) -> BridgeResult<Option<AudioReply>> {
+) -> IpcResult<Option<AudioReply>> {
     loop {
         let Some(left) = state.conv.left(key, Instant::now()) else {
             return Ok(None);
@@ -388,7 +388,7 @@ fn wait_audio(
                     return Ok(Some(answer));
                 }
             }
-            Err(BridgeError::Timeout { partial: true, .. }) => {
+            Err(IpcError::Timeout { partial: true, .. }) => {
                 let frame =
                     ipc::recv_resumable::<AudioReply>(stream, state.finish, &mut state.partial)?;
                 let answer = state.hear(frame, key, Instant::now(), channels)?;
@@ -397,7 +397,7 @@ fn wait_audio(
                 }
                 return Ok(answer);
             }
-            Err(BridgeError::Timeout { partial: false, .. }) => {
+            Err(IpcError::Timeout { partial: false, .. }) => {
                 state.give_up(key)?;
                 return Ok(None);
             }
@@ -408,7 +408,7 @@ fn wait_audio(
 
 /// What a control request the lane stopped waiting for still has coming.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum Late {
+pub(super) enum Abandoned {
     /// Nothing is done with it: a query's reply, or the rest of a state.
     Discard,
     /// A rate change's answer, which settles the plugin's rate refusal.
@@ -433,7 +433,7 @@ pub(super) struct ControlState {
     /// read reports as EOF rather than as a timeout.
     finish: Duration,
     /// The requests sent and not yet heard the end of, by id.
-    conv: Conversation<ReqId, Late>,
+    conv: Conversation<ReqId, Abandoned>,
     /// The id of the last request sent.
     last_id: u64,
     /// Where the last read stopped, so a timeout resumes rather than restarts.
@@ -483,7 +483,7 @@ impl ControlState {
         awaited: Option<ReqId>,
         now: Instant,
         inbox: &mut Unsolicited,
-    ) -> BridgeResult<Option<ControlReply>> {
+    ) -> IpcResult<Option<ControlReply>> {
         match frame {
             ControlFrame::News(news) => {
                 file_news(inbox, news);
@@ -495,17 +495,17 @@ impl ControlState {
                 self.conv.extend(id, now);
                 Ok(None)
             }
-            ControlFrame::Ready { .. } => Err(BridgeError::ProtocolError(
+            ControlFrame::Ready { .. } => Err(IpcError::ProtocolError(
                 "a second handshake on a connection that is in use",
             )),
             ControlFrame::Reply { id, reply } => {
                 match self.conv.hear(id, reply.ends(), now).map_err(fault)? {
                     Heard::Answer { .. } if awaited == Some(id) => Ok(Some(reply)),
-                    Heard::Answer { .. } => Err(BridgeError::ProtocolError(
+                    Heard::Answer { .. } => Err(IpcError::ProtocolError(
                         "an answer to a request this lane is not waiting for",
                     )),
-                    Heard::Late(Late::Discard) => Ok(None),
-                    Heard::Late(Late::Rate) => {
+                    Heard::Abandoned(Abandoned::Discard) => Ok(None),
+                    Heard::Abandoned(Abandoned::Rate) => {
                         if let ControlReply::SampleRateSet { rate, error } = reply {
                             inbox.late_rate_answer(rate, error);
                         }
@@ -517,7 +517,7 @@ impl ControlState {
     }
 
     /// Stops waiting for `id`: its frames are late when they come.
-    fn give_up(&mut self, id: ReqId) -> BridgeResult<Waited> {
+    fn give_up(&mut self, id: ReqId) -> IpcResult<Waited> {
         self.conv.abandon(id).map_err(fault)?;
         Ok(Waited::GaveUp)
     }
@@ -529,10 +529,10 @@ fn ask(
     stream: &mut ControlStream,
     state: &mut ControlState,
     body: ControlRequest,
-    late: Late,
+    late: Abandoned,
     window: Duration,
     ceiling: Duration,
-) -> BridgeResult<ReqId> {
+) -> IpcResult<ReqId> {
     let id = state.fresh();
     state.conv.open(id, late, Instant::now(), window, ceiling);
     ipc::send(stream, &Request { id, body })?;
@@ -544,7 +544,7 @@ pub(super) fn tell(
     stream: &mut ControlStream,
     state: &mut ControlState,
     body: ControlRequest,
-) -> BridgeResult<()> {
+) -> IpcResult<()> {
     let id = state.fresh();
     ipc::send(stream, &Request { id, body })
 }
@@ -563,7 +563,7 @@ fn wait_for(
     state: &mut ControlState,
     id: ReqId,
     slice: Option<Duration>,
-) -> BridgeResult<Waited> {
+) -> IpcResult<Waited> {
     loop {
         let Some(left) = state.conv.left(id, Instant::now()) else {
             return Ok(Waited::GaveUp);
@@ -575,7 +575,7 @@ fn wait_for(
                     return Ok(Waited::Reply(reply));
                 }
             }
-            Err(BridgeError::Timeout { partial: true, .. }) => {
+            Err(IpcError::Timeout { partial: true, .. }) => {
                 let frame =
                     ipc::recv_resumable::<ControlFrame>(stream, state.finish, &mut state.partial)?;
                 return match state.hear(frame, Some(id), Instant::now(), inbox)? {
@@ -583,7 +583,7 @@ fn wait_for(
                     None => state.give_up(id),
                 };
             }
-            Err(BridgeError::Timeout { partial: false, .. }) => {
+            Err(IpcError::Timeout { partial: false, .. }) => {
                 if slice.is_some() && !state.conv.is_due(id, Instant::now()) {
                     return Ok(Waited::Pending);
                 }
@@ -602,10 +602,10 @@ fn query(
     inbox: &mut Unsolicited,
     lifecycle: &Lifecycle,
     body: ControlRequest,
-) -> BridgeResult<Option<ControlReply>> {
+) -> IpcResult<Option<ControlReply>> {
     let window = lifecycle.timeouts().param;
     let Lane { stream, state } = lane;
-    let id = ask(stream, state, body, Late::Discard, window, window)?;
+    let id = ask(stream, state, body, Abandoned::Discard, window, window)?;
     match wait_for(stream, inbox, state, id, None)? {
         Waited::Reply(reply) => Ok(Some(reply)),
         Waited::Pending | Waited::GaveUp => Ok(None),
@@ -630,7 +630,7 @@ pub(super) fn handle_audio(
     channels: &Channels,
     payloads: &PayloadPool,
     lifecycle: &Lifecycle,
-) -> BridgeResult<()> {
+) -> IpcResult<()> {
     let Lane { stream, state } = lane;
     match cmd {
         AudioCommand::Process(mut payload) => {
@@ -643,7 +643,7 @@ pub(super) fn handle_audio(
             // thread stopped expecting this block two blocks ago.
             if is_stale(seq, channels.newest_submitted()) {
                 channels.note_skipped();
-                channels.note_fate(seq, Fate::Skipped);
+                channels.note_outcome(seq, BatchOutcome::Skipped);
                 // Its MIDI is lost, counted, and so is the rest of every
                 // SysEx open in it: the server's reassembler would otherwise
                 // complete it from the next block's packets, with these
@@ -690,7 +690,7 @@ pub(super) fn handle_audio(
             let key = AudioKey::Block(seq);
             state
                 .conv
-                .open(key, AudioLate::Block, Instant::now(), timeout, timeout);
+                .open(key, AbandonedAudio::Block, Instant::now(), timeout, timeout);
             let sent = ipc::send(stream, &msg);
             // The parameter-change buffer goes back to the audio thread's free
             // list once its contents are on the wire (sent or not: a failed
@@ -731,7 +731,7 @@ pub(super) fn handle_audio(
                         // A reply to a block not yet sent is a peer making
                         // fates up, not an answer.
                         AudioReply::AudioProcessed { seq: replied, .. } if replied > seq => {
-                            return Err(BridgeError::ProtocolError(
+                            return Err(IpcError::ProtocolError(
                                 "an AudioProcessed for a block that was never sent",
                             ));
                         }
@@ -750,12 +750,12 @@ pub(super) fn handle_audio(
                             refused,
                             ..
                         } => {
-                            channels.note_fate(
+                            channels.note_outcome(
                                 seq,
                                 if refused {
-                                    Fate::Refused
+                                    BatchOutcome::Refused
                                 } else {
-                                    Fate::Published
+                                    BatchOutcome::Published
                                 },
                             );
                             state.respond(
@@ -801,7 +801,7 @@ pub(super) fn handle_audio(
             let window = lifecycle.timeouts().param_wait();
             state
                 .conv
-                .open(key, AudioLate::Params, Instant::now(), window, window);
+                .open(key, AbandonedAudio::Params, Instant::now(), window, window);
             ipc::send(
                 stream,
                 &AudioRequest::ApplyParameters {
@@ -881,7 +881,7 @@ fn fence(
     lane: &mut Lane<ControlState>,
     inbox: &mut Unsolicited,
     lifecycle: &Lifecycle,
-) -> BridgeResult<()> {
+) -> IpcResult<()> {
     query(lane, inbox, lifecycle, ControlRequest::GetCurrentPreset)?;
     Ok(())
 }
@@ -904,7 +904,7 @@ pub(super) fn handle_control(
     lane: &mut Lane<ControlState>,
     inbox: &mut Unsolicited,
     lifecycle: &Lifecycle,
-) -> BridgeResult<()> {
+) -> IpcResult<()> {
     match cmd {
         ControlCommand::SetAutomationState { mode } => {
             tell(
@@ -933,7 +933,7 @@ pub(super) fn handle_control(
                 stream,
                 state,
                 ControlRequest::SaveState { state_use },
-                Late::Discard,
+                Abandoned::Discard,
                 window,
                 Duration::MAX,
             )?;
@@ -971,7 +971,7 @@ pub(super) fn handle_control(
             let window = progress.deadline();
             state
                 .conv
-                .open(id, Late::Discard, Instant::now(), window, window);
+                .open(id, Abandoned::Discard, Instant::now(), window, window);
             for (seq, last, bytes) in state_chunk::split(&data) {
                 let n = bytes.len();
                 ipc::send(
@@ -1133,7 +1133,7 @@ pub(super) fn handle_control(
                 stream,
                 state,
                 ControlRequest::OpenEditor { parent, scale },
-                Late::Discard,
+                Abandoned::Discard,
                 window,
                 window,
             )?;
@@ -1161,7 +1161,7 @@ pub(super) fn handle_control(
                 stream,
                 state,
                 ControlRequest::SetEditorSize { size },
-                Late::Discard,
+                Abandoned::Discard,
                 window,
                 window,
             )?;
@@ -1205,7 +1205,7 @@ pub(super) fn handle_setting(
     lane: &mut Lane<ControlState>,
     inbox: &mut Unsolicited,
     lifecycle: &Lifecycle,
-) -> BridgeResult<()> {
+) -> IpcResult<()> {
     match setting {
         Setting::SampleRate(rate) => {
             // Wait for the answer: the plugin's re-activation is the slowest
@@ -1222,7 +1222,7 @@ pub(super) fn handle_setting(
                 stream,
                 state,
                 ControlRequest::SetSampleRate { rate },
-                Late::Rate,
+                Abandoned::Rate,
                 budget,
                 budget,
             )?;
@@ -1235,7 +1235,7 @@ pub(super) fn handle_setting(
                     }
                     // No answer is a refusal, not a dead connection: the plugin
                     // may still be re-activating. Its late answer is recognised
-                    // by its id when it arrives (`Late::Rate`) and settles the
+                    // by its id when it arrives (`Abandoned::Rate`) and settles the
                     // state.
                     Waited::GaveUp => {
                         apply_rate_reply(
@@ -1259,7 +1259,7 @@ pub(super) fn handle_setting(
                         break;
                     }
                     Waited::Reply(other) => {
-                        return Err(BridgeError::UnexpectedMessage {
+                        return Err(IpcError::UnexpectedMessage {
                             expected: "SampleRateSet",
                             got: format!("{other:?}").into(),
                         });
@@ -1288,22 +1288,19 @@ pub(super) fn handle_setting(
 /// Reads what the plugin said unprompted off the control connection: each
 /// frame is filed into `inbox` as it is read, and a frame that answers nothing
 /// the lane is waiting for is the server's fault.
-pub(super) fn read_news(
-    lane: &mut Lane<ControlState>,
-    inbox: &mut Unsolicited,
-) -> BridgeResult<()> {
+pub(super) fn read_news(lane: &mut Lane<ControlState>, inbox: &mut Unsolicited) -> IpcResult<()> {
     let Lane { stream, state } = lane;
     loop {
         match ipc::recv_resumable::<ControlFrame>(stream, DRAIN_UNSOLICITED, &mut state.partial) {
             Ok(frame) => {
                 state.hear(frame, None, Instant::now(), inbox)?;
             }
-            Err(BridgeError::Timeout { partial: true, .. }) => {
+            Err(IpcError::Timeout { partial: true, .. }) => {
                 let frame =
                     ipc::recv_resumable::<ControlFrame>(stream, state.finish, &mut state.partial)?;
                 state.hear(frame, None, Instant::now(), inbox)?;
             }
-            Err(BridgeError::Timeout { partial: false, .. }) => return Ok(()),
+            Err(IpcError::Timeout { partial: false, .. }) => return Ok(()),
             Err(e) => return Err(e),
         }
     }
@@ -1311,7 +1308,7 @@ pub(super) fn read_news(
 
 /// Collect a chunked `StateChunk` sequence into one state.
 ///
-/// Returns the caller's `BridgeResult` rather than propagating, because none of
+/// Returns the caller's `IpcResult` rather than propagating, because none of
 /// the ways this fails is a connection failure: an over-limit state, a
 /// misordered sequence and a stalled one are all *this plugin's* problem, and
 /// crashing the bridge for any of them would take down a session whose socket is
@@ -1322,7 +1319,7 @@ pub(super) fn read_news(
 /// **Whenever this stops before the answer has ended, the rest is late**: the
 /// server sends the whole sequence whatever this end made of it, and the
 /// conversation recognises the chunks by the request's id and drops them
-/// ([`Late::Discard`]) until the last, so a later request never reads one as its
+/// ([`Abandoned::Discard`]) until the last, so a later request never reads one as its
 /// answer.
 ///
 /// Each chunk restarts the request's window (`progress`'s deadline), not a share
@@ -1339,7 +1336,7 @@ fn recv_state(
     state: &mut ControlState,
     id: ReqId,
     progress: &StateProgress,
-) -> BridgeResult<std::result::Result<Vec<u8>, StateError>> {
+) -> IpcResult<std::result::Result<Vec<u8>, StateError>> {
     let mut acc = Reassembler::default();
     loop {
         let msg = match wait_for(stream, inbox, state, id, None)? {
@@ -1482,7 +1479,7 @@ mod tests {
     }
 
     /// Opens `key` on `state` and gives up on it: its reply is late.
-    fn abandoned(state: &mut AudioState, key: AudioKey, late: AudioLate) {
+    fn abandoned(state: &mut AudioState, key: AudioKey, late: AbandonedAudio) {
         state.conv.open(key, late, Instant::now(), WINDOW, WINDOW);
         state.give_up(key).expect("room to give up");
     }
@@ -1494,10 +1491,10 @@ mod tests {
     #[test]
     fn a_late_block_reply_is_forwarded_and_counted_late() {
         let (mut state, mut replies, channels) = audio_state();
-        abandoned(&mut state, AudioKey::Block(3), AudioLate::Block);
+        abandoned(&mut state, AudioKey::Block(3), AbandonedAudio::Block);
         state.conv.open(
             AudioKey::Block(4),
-            AudioLate::Block,
+            AbandonedAudio::Block,
             Instant::now(),
             WINDOW,
             WINDOW,
@@ -1525,7 +1522,7 @@ mod tests {
     fn a_late_apply_parameters_acknowledgement_is_dropped() {
         let (mut state, mut replies, channels) = audio_state();
         let id = state.fresh();
-        abandoned(&mut state, AudioKey::Params(id), AudioLate::Params);
+        abandoned(&mut state, AudioKey::Params(id), AbandonedAudio::Params);
         let heard = state.hear(
             AudioReply::ParametersApplied { id },
             AudioKey::Block(1),
@@ -1544,7 +1541,7 @@ mod tests {
         let (mut state, _replies, channels) = audio_state();
         state.conv.open(
             AudioKey::Block(1),
-            AudioLate::Block,
+            AbandonedAudio::Block,
             Instant::now(),
             WINDOW,
             WINDOW,
@@ -1556,7 +1553,7 @@ mod tests {
             assert!(
                 matches!(
                     state.hear(reply, AudioKey::Block(1), Instant::now(), &channels),
-                    Err(BridgeError::ProtocolError(_))
+                    Err(IpcError::ProtocolError(_))
                 ),
                 "a reply to nothing this lane sent was accepted"
             );
@@ -1567,7 +1564,7 @@ mod tests {
         ControlState::new(Timeouts::default().drain)
     }
 
-    fn open(state: &mut ControlState, id: u64, late: Late) -> ReqId {
+    fn open(state: &mut ControlState, id: u64, late: Abandoned) -> ReqId {
         let id = ReqId::new(id);
         state.conv.open(id, late, Instant::now(), WINDOW, WINDOW);
         id
@@ -1580,11 +1577,11 @@ mod tests {
     fn late_control_frames_are_dropped_by_id_and_the_answer_is_its_own() {
         let mut state = control_state();
         let mut inbox = Unsolicited::new();
-        let query = open(&mut state, 1, Late::Discard);
-        let save = open(&mut state, 2, Late::Discard);
+        let query = open(&mut state, 1, Abandoned::Discard);
+        let save = open(&mut state, 2, Abandoned::Discard);
         state.give_up(query).unwrap();
         state.give_up(save).unwrap();
-        let next = open(&mut state, 3, Late::Discard);
+        let next = open(&mut state, 3, Abandoned::Discard);
 
         assert!(matches!(
             state.hear(value(1), Some(next), Instant::now(), &mut inbox),
@@ -1622,7 +1619,7 @@ mod tests {
     fn an_error_answers_only_its_own_request() {
         let mut state = control_state();
         let mut inbox = Unsolicited::new();
-        let first = open(&mut state, 1, Late::Discard);
+        let first = open(&mut state, 1, Abandoned::Discard);
         let error = |id| ControlFrame::Reply {
             id,
             reply: ControlReply::Error {
@@ -1657,7 +1654,7 @@ mod tests {
         let id = ReqId::new(1);
         state
             .conv
-            .open(id, Late::Discard, t, WINDOW, Duration::from_secs(600));
+            .open(id, Abandoned::Discard, t, WINDOW, Duration::from_secs(600));
         let at = |secs| t + Duration::from_secs(secs);
 
         let news = ControlFrame::News(News::PluginReloaded);

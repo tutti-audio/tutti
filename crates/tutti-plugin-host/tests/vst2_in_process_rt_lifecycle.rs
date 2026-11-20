@@ -479,7 +479,7 @@ fn the_output_is_what_the_plugin_wrote() {
 /// the load's reason is the [`PluginTooWide`] text for the input direction,
 /// the first one checked.
 fn a_plugin_wider_than_a_block_is_refused_at_load() {
-    use tutti_plugin_types::{BridgeError, LoadStage, PluginTooWide};
+    use tutti_plugin_types::{IpcError, LoadStage, PluginTooWide};
 
     const WIDE: usize = 18;
 
@@ -502,10 +502,8 @@ fn a_plugin_wider_than_a_block_is_refused_at_load() {
         std::env::remove_var("TUTTI_VST2_PROBE_INPUTS");
         std::env::remove_var("TUTTI_VST2_PROBE_OUTPUTS");
     }
-    let Err(tutti_plugin_host::LoadClientError::Failed(BridgeError::LoadFailed {
-        stage,
-        reason,
-        ..
+    let Err(tutti_plugin_host::LoadClientError::Failed(IpcError::LoadFailed {
+        stage, reason, ..
     })) = loaded
     else {
         panic!("a plugin of {WIDE} channels has no node");

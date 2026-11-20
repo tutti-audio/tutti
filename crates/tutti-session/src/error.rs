@@ -466,10 +466,10 @@ pub enum Error {
     Sampler(#[from] crate::SamplerError),
 
     /// Plugin-host bridge failure (VST2/VST3/CLAP). Wraps
-    /// `tutti_plugin_types::BridgeError`.
+    /// `tutti_plugin_types::IpcError`.
     #[cfg(feature = "plugin")]
     #[error("Plugin: {0}")]
-    Plugin(#[from] tutti_plugin_types::BridgeError),
+    Plugin(#[from] tutti_plugin_types::IpcError),
 
     /// A whole-bus connection was refused ([`Graph::connect`](crate::Graph::connect)).
     #[error(transparent)]

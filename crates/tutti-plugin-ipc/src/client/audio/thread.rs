@@ -13,13 +13,13 @@
 use super::ListenerSlot;
 #[cfg(test)]
 use super::channels::response_ring;
-use super::channels::{Channels, ResponseWriter, Stamped, Waits};
+use super::channels::{Channels, ResponseWriter, Sequenced, Waits};
 use super::dispatch::{
     AudioState, ControlState, Lane, apply_setting, handle_audio, handle_control, handle_setting,
     read_news, tell,
 };
 use super::lifecycle::Lifecycle;
-use super::messages::{AudioCommand, AudioResponse, BridgeEvent, ControlCommand, Unsolicited};
+use super::messages::{AudioCommand, AudioResponse, ControlCommand, IpcEvent, Unsolicited};
 use super::payload_pool::PayloadPool;
 use crate::transport::control::{self as ipc, ControlStream, ControlWait};
 use crate::{AudioReply, ControlFrame, ControlRequest};
@@ -27,27 +27,27 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 use tutti_platform::ThreadHandle;
-use tutti_plugin_types::{BridgeError, BridgeResult, PluginFailure};
+use tutti_plugin_types::{IpcError, IpcResult, PluginFailure};
 use tutti_rt::Parker;
 
 /// The bridge's audio lane thread of an `AudioBridge`, which owns the control
 /// lane's: it speaks to the server for the queues. Dropping it shuts both down
 /// and joins them.
-pub struct BridgeThread {
+pub struct IpcThread {
     channels: Channels,
     lifecycle: Lifecycle,
     handle: Option<ThreadHandle<()>>,
 }
 
-impl std::fmt::Debug for BridgeThread {
+impl std::fmt::Debug for IpcThread {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("BridgeThread")
+        f.debug_struct("IpcThread")
             .field("running", &self.handle.is_some())
             .finish_non_exhaustive()
     }
 }
 
-impl BridgeThread {
+impl IpcThread {
     pub(super) fn spawn(
         channels: Channels,
         responses: ResponseWriter,
@@ -108,7 +108,7 @@ impl BridgeThread {
     }
 }
 
-impl Drop for BridgeThread {
+impl Drop for IpcThread {
     fn drop(&mut self) {
         self.shutdown();
     }
@@ -170,7 +170,7 @@ fn run_thread(
                 &lifecycle,
                 &listener,
                 PluginFailure::Connect {
-                    source: Arc::new(BridgeError::Io(e)),
+                    source: Arc::new(IpcError::Io(e)),
                 },
             );
             drain_with_errors(&channels, &mut state);
@@ -273,7 +273,7 @@ fn audio_loop(
 
         if let Err(e) = result {
             // The error is classified here, at the only place it exists.
-            // `BridgeError` is not `Clone`, and the crash notification outlives
+            // `IpcError` is not `Clone`, and the crash notification outlives
             // this frame, so the failure holds it behind an `Arc`.
             crash(lifecycle, listener, PluginFailure::from_stream(e));
             failed = true;
@@ -319,7 +319,7 @@ fn control_loop(
     }
     // The control command taken off its queue and not yet sent, with the end of
     // its wait for the blocks before it.
-    let mut held: Option<(Stamped<ControlCommand>, tutti_platform::Instant)> = None;
+    let mut held: Option<(Sequenced<ControlCommand>, tutti_platform::Instant)> = None;
     while live(lifecycle) {
         if held.is_none() {
             held = channels.pop_control().map(|cmd| {
@@ -370,7 +370,7 @@ fn control_loop(
                 }
                 // A ring: look at the queue and the stop condition again.
                 Ok(_) => continue,
-                Err(e) => Err(BridgeError::Io(e)),
+                Err(e) => Err(IpcError::Io(e)),
             }
         };
         drain_unsolicited(&mut inbox, channels, listener);
@@ -406,13 +406,13 @@ fn say_shutdown(lifecycle: &Lifecycle, lane: &mut Lane<ControlState>) {
 /// The reason is spelled out per case rather than as one string: a version skew
 /// and a peer that never said `Ready` are different problems for whoever reads
 /// the message, and the first is actionable.
-fn expect_ready(read: BridgeResult<Result<u32, String>>) -> Result<(), PluginFailure> {
+fn expect_ready(read: IpcResult<Result<u32, String>>) -> Result<(), PluginFailure> {
     let source = match read {
         Ok(Ok(version)) => match crate::protocol::check_protocol_version(version) {
             Ok(()) => return Ok(()),
             Err(skew) => skew,
         },
-        Ok(Err(got)) => BridgeError::UnexpectedMessage {
+        Ok(Err(got)) => IpcError::UnexpectedMessage {
             expected: "Ready",
             got: got.into(),
         },
@@ -462,7 +462,7 @@ fn notify_crash(lifecycle: &Lifecycle, listener: &ListenerSlot, cause: PluginFai
     }
     let cb = listener.lock().clone();
     if let Some(f) = cb.as_ref() {
-        f(BridgeEvent::Crashed { cause });
+        f(IpcEvent::Crashed { cause });
     }
 }
 
@@ -500,7 +500,7 @@ fn drain_with_errors(channels: &Channels, state: &mut AudioState) {
 /// Drop every queued control-lane command: a request's caller, holding the
 /// other end of its reply, is told at once that none is coming.
 fn drop_controls(channels: &Channels) {
-    while let Some(Stamped { cmd, .. }) = channels.pop_control() {
+    while let Some(Sequenced { cmd, .. }) = channels.pop_control() {
         drop(cmd);
     }
 }
@@ -620,7 +620,7 @@ mod tests {
         );
         assert_eq!(
             heard.last().map(String::as_str),
-            Some(format!("{:?}", BridgeEvent::Resync(ResyncKind::ParamValues)).as_str())
+            Some(format!("{:?}", IpcEvent::Resync(ResyncKind::ParamValues)).as_str())
         );
     }
 }

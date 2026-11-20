@@ -1,4 +1,4 @@
-//! The typed causes inside a [`BridgeError`](crate::BridgeError): what is wrong
+//! The typed causes inside a [`IpcError`](crate::IpcError): what is wrong
 //! with a frame, an audio slab's layout, or a slab access.
 
 use thiserror::Error;

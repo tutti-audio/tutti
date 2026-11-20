@@ -1,4 +1,4 @@
-//! [`Served<L>`]: one plugin of any [`OutOfProcess`] format, in this process.
+//! [`Server<L>`]: one plugin of any [`OutOfProcess`] format, in this process.
 //!
 //! The host crate of each format is the interpreter of its plugin's lifecycle
 //! (activation, restarts, requests). This is the server's one shell over them:
@@ -11,7 +11,7 @@
 //! What the formats still differ in, that only this process does, is
 //! [`ServerSide`]'s.
 //!
-//! What the plugin tells the host between blocks is [`Served::poll`]'s answer:
+//! What the plugin tells the host between blocks is [`Server::poll`]'s answer:
 //! each [`Notice`] of the core as the [`News`] that carries it.
 
 use crate::ties::{Patience, Ties};
@@ -35,7 +35,7 @@ mod any;
 mod au;
 mod format;
 
-pub(crate) use any::AnyServed;
+pub(crate) use any::AnyServer;
 pub(crate) use format::ServerSide;
 
 #[cfg(test)]
@@ -72,9 +72,9 @@ pub(crate) trait Render {
 
 /// What the session asks of the loaded plugin, with its format erased.
 ///
-/// Object-safe, implemented by [`Served<L>`] alone; the
+/// Object-safe, implemented by [`Server<L>`] alone; the
 /// `served!` table's enum lends it as a trait object.
-pub(crate) trait ServedPlugin {
+pub(crate) trait ServerPlugin {
     /// The file and plugin the load opened: the id is the plugin's, whatever
     /// the load chose.
     fn origin(&self) -> &PluginRef;
@@ -191,7 +191,7 @@ pub(crate) trait ServedPlugin {
 
 /// A plugin of format `L` that the server runs: its [`Lifecycle`], the
 /// Processor's seat, the core's state, and what the host has not yet been told.
-pub(crate) struct Served<L: OutOfProcess> {
+pub(crate) struct Server<L: OutOfProcess> {
     lifecycle: Lifecycle<L>,
     state: State,
     hand: Hand<L::Processor>,
@@ -223,7 +223,7 @@ const HOME_PATIENCE: Duration = Duration::from_secs(3);
 /// A Processor that is still on the render thread when the plugin is dropped
 /// must not outlive the Controller that destroys the plugin, so the plugin is
 /// leaked instead: only a render thread stuck inside the plugin reaches it.
-impl<L: OutOfProcess> Drop for Served<L> {
+impl<L: OutOfProcess> Drop for Server<L> {
     fn drop(&mut self) {
         if matches!(
             self.lifecycle,
@@ -249,7 +249,7 @@ fn load_failed(stage: LoadStage, reason: String) -> PluginError {
     PluginError::Load { stage, reason }
 }
 
-impl<L: ServerSide> Served<L> {
+impl<L: ServerSide> Server<L> {
     /// Loads the plugin `plugin` names, not activated.
     ///
     /// # Errors
@@ -582,7 +582,7 @@ impl<L: ServerSide> Served<L> {
         matches!(self.lifecycle, Lifecycle::Active { .. })
     }
 
-    /// [`ServedPlugin::poll`]'s pass, leaving what the host should be told in
+    /// [`ServerPlugin::poll`]'s pass, leaving what the host should be told in
     /// `events`.
     ///
     /// The plugin's main-thread work runs first (`take_requests` serves what
@@ -682,7 +682,7 @@ impl<L: ServerSide> Served<L> {
     }
 }
 
-impl<L: ServerSide> ServedPlugin for Served<L> {
+impl<L: ServerSide> ServerPlugin for Server<L> {
     fn origin(&self) -> &PluginRef {
         &self.origin
     }

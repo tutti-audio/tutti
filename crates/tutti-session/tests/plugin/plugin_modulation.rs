@@ -287,7 +287,7 @@ fn a_crossfaded_plugin_keeps_its_lane_and_a_removed_one_drops_it() {
     );
 
     let incoming = PluginClient::new(
-        tutti_plugin::BridgeConfig::at(
+        tutti_plugin::IpcConfig::at(
             tutti_plugin::unique_socket_path().expect("the OS has a random source"),
         ),
         &tutti_fixtures::detached_work(),

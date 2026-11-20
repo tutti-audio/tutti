@@ -637,8 +637,8 @@ pub mod soundfont {
 #[cfg(feature = "plugin")]
 pub mod plugin {
     pub use tutti_plugin::{
-        AutomationMode, BridgeConfig, MainThreadMarker, MainWork, MainWorkHandle,
-        PluginRenderFault, Preset,
+        AutomationMode, IpcConfig, MainThreadMarker, MainWork, MainWorkHandle, PluginRenderFault,
+        Preset,
     };
     pub use tutti_plugin_db::ScanBusy;
     pub use tutti_plugin_db::{
@@ -652,13 +652,13 @@ pub mod plugin {
     pub use tutti_plugin_types::bundle::ModuleKind;
     pub use tutti_plugin_types::features::{FeatureReport, Features};
     pub use tutti_plugin_types::{
-        AuComponentType, AutomationModeError, Axis, BlockCounts, BridgeError, BridgeResult,
-        ClapFeature, ContentScale, ControlRole, EditorPresence, EmptyVersionText, Helper,
-        InvalidContentScale, KeyEvent, KeyUse, LatencyVerdict, LinearRange, Locator, Measured,
-        NotChecked, ParamFlags, ParamRange, ParamSteps, ParamUnit, ParameterInfo, PlainMap,
-        PlainUnit, PluginClass, PluginError, PluginFormat, PluginTooWide, PluginVersion,
-        ProbeConfig, StateError, StateHash, TailVerdict, UnknownExtension, Verdict, VersionText,
-        Vst2Category, Vst3PlugType, Vst3SubCategories,
+        AuComponentType, AutomationModeError, Axis, BlockCounts, ClapFeature, ContentScale,
+        ControlRole, EditorPresence, EmptyVersionText, Helper, InvalidContentScale, IpcError,
+        IpcResult, KeyEvent, KeyUse, LatencyVerdict, LinearRange, Locator, Measured, NotChecked,
+        ParamFlags, ParamRange, ParamSteps, ParamUnit, ParameterInfo, PlainMap, PlainUnit,
+        PluginClass, PluginError, PluginFormat, PluginTooWide, PluginVersion, ProbeConfig,
+        StateError, StateHash, TailVerdict, UnknownExtension, Verdict, VersionText, Vst2Category,
+        Vst3PlugType, Vst3SubCategories,
     };
     pub use tutti_plugin_types::{EditorError, LoadStage, TerminationReason};
     pub use tutti_plugin_types::{

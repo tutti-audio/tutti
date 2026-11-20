@@ -19,7 +19,7 @@ use tutti_units::{SampleRate, Samples};
 
 use crate::PluginClient;
 use tutti_fixtures::machine_lock;
-use tutti_plugin_ipc::BridgeConfig;
+use tutti_plugin_ipc::IpcConfig;
 use tutti_plugin_types::Timeouts;
 
 const LOAD_RATE: f64 = 48_000.0;
@@ -52,14 +52,14 @@ fn a_late_rate_answer_does_not_silence_an_offline_fork() {
     );
     env.set("TUTTI_CLAP_PROBE_RENDER_MODE", "1");
     let live = PluginClient::new(
-        BridgeConfig {
+        IpcConfig {
             // The fork reopens under the live plugin's configuration.
             timeouts: {
                 let mut t = Timeouts::default();
                 t.rate = RATE_TIMEOUT;
                 t
             },
-            ..BridgeConfig::at(
+            ..IpcConfig::at(
                 tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source"),
             )
         },

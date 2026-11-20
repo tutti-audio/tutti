@@ -14,7 +14,7 @@ use tutti_plugin_ipc::{
     AUDIO_REPLY_FRAME_BYTES, AUDIO_REQUEST_FRAME_BYTES, AudioReply, AudioRequest, ControlFrame,
     FrameBuf, Framed, Request, read_frame, write_frame,
 };
-use tutti_plugin_types::{BridgeResult, Deadline};
+use tutti_plugin_types::{Deadline, IpcResult};
 
 use crate::main_loop::Bell;
 use crate::main_loop::{Listener as PlatformListener, Stream as PlatformStream};
@@ -40,7 +40,7 @@ pub(crate) type ControlTransport = dyn Transport<Request, ControlFrame>;
 
 /// Writes a frame to a connection from a thread other than the one serving
 /// it ([`Transport::pulser`]).
-pub(crate) type Pulser<Out> = Box<dyn Fn(&Out) -> BridgeResult<()> + Send + Sync>;
+pub(crate) type Pulser<Out> = Box<dyn Fn(&Out) -> IpcResult<()> + Send + Sync>;
 
 /// One framed, blocking message channel to the host.
 ///
@@ -55,7 +55,7 @@ pub(crate) trait Transport<In, Out>: Send {
     /// prefix over the lane's frame cap (a peer that cannot frame), or a payload
     /// postcard cannot decode — the last meaning a protocol-version mismatch the
     /// `Ready` handshake failed to catch.
-    fn recv(&mut self) -> BridgeResult<In>;
+    fn recv(&mut self) -> IpcResult<In>;
 
     /// Wait up to `timeout` (`None`: for ever) for the host to have something to
     /// read: `Ok(true)` when a [`recv`](Self::recv) now will find a frame begun
@@ -74,7 +74,7 @@ pub(crate) trait Transport<In, Out>: Send {
         &mut self,
         timeout: Option<std::time::Duration>,
         wake: &Bell,
-    ) -> BridgeResult<bool>;
+    ) -> IpcResult<bool>;
 
     /// The connection's own OS stream, for a wait that also covers descriptors
     /// of the plugin's ([`crate::main_loop`]); `None` for a transport that is
@@ -91,7 +91,7 @@ pub(crate) trait Transport<In, Out>: Send {
     ///
     /// Returns an error if the payload cannot be serialized, or if the write
     /// fails — a broken pipe here means the host went away.
-    fn send(&mut self, msg: &Out) -> BridgeResult<()>;
+    fn send(&mut self, msg: &Out) -> IpcResult<()>;
 
     /// A writer for the connection that another thread may call while this one
     /// is serving a request, to say the server is at work on it: its frames
@@ -192,7 +192,7 @@ impl SocketTransport<AudioRequest, AudioReply> {
 }
 
 impl<In: Framed, Out: Framed> Transport<In, Out> for SocketTransport<In, Out> {
-    fn recv(&mut self) -> BridgeResult<In> {
+    fn recv(&mut self) -> IpcResult<In> {
         // The frame is bounded before it is allocated (see
         // [`CONTROL_FRAME_BYTES`](tutti_plugin_ipc::CONTROL_FRAME_BYTES)). The server is the more exposed end: it loads
         // untrusted plugin binaries, and one that corrupts its memory could
@@ -227,7 +227,7 @@ impl<In: Framed, Out: Framed> Transport<In, Out> for SocketTransport<In, Out> {
         &mut self,
         timeout: Option<std::time::Duration>,
         wake: &Bell,
-    ) -> BridgeResult<bool> {
+    ) -> IpcResult<bool> {
         crate::main_loop::wait_readable(&self.stream, timeout, wake)
     }
 
@@ -235,7 +235,7 @@ impl<In: Framed, Out: Framed> Transport<In, Out> for SocketTransport<In, Out> {
         Some(&self.stream)
     }
 
-    fn send(&mut self, msg: &Out) -> BridgeResult<()> {
+    fn send(&mut self, msg: &Out) -> IpcResult<()> {
         // Reachable with an oversize body through `StateData`, whose chunk is
         // whatever the plugin hands back from `get_state`.
         let _writing = self.writing.lock().unwrap_or_else(PoisonError::into_inner);
@@ -268,7 +268,7 @@ impl TransportListener {
     /// Returns an error if the path is not a valid socket name, or if the
     /// socket cannot be created — a directory that does not exist, or one this
     /// process may not write to.
-    pub(crate) fn bind(socket_path: &std::path::Path) -> BridgeResult<Self> {
+    pub(crate) fn bind(socket_path: &std::path::Path) -> IpcResult<Self> {
         // A no-op on Windows, where the endpoint is a pipe rather than a file.
         let _ = std::fs::remove_file(socket_path);
         // Must agree with the host's `connect`, which is why both go through the
@@ -288,17 +288,17 @@ impl TransportListener {
     /// `accept(2)` returns inherits the listener's flag, and every read on it
     /// then fails with `WouldBlock`). A host that dies while this waits is the
     /// host watch's to end the process ([`crate::server`]).
-    pub(crate) fn accept(&self) -> BridgeResult<SocketTransport<Request, ControlFrame>> {
+    pub(crate) fn accept(&self) -> IpcResult<SocketTransport<Request, ControlFrame>> {
         Ok(SocketTransport::new(self.accept_stream()?))
     }
 
     /// [`accept`](Self::accept) for the audio connection, whose transport reads
     /// and writes through fixed buffers ([`SocketTransport::audio`]).
-    pub(crate) fn accept_audio(&self) -> BridgeResult<SocketTransport<AudioRequest, AudioReply>> {
+    pub(crate) fn accept_audio(&self) -> IpcResult<SocketTransport<AudioRequest, AudioReply>> {
         Ok(SocketTransport::audio(self.accept_stream()?)?)
     }
 
-    fn accept_stream(&self) -> BridgeResult<PlatformStream> {
+    fn accept_stream(&self) -> IpcResult<PlatformStream> {
         Ok(self.listener.accept()?)
     }
 }
@@ -310,7 +310,7 @@ mod recv_tests {
     use std::os::fd::OwnedFd;
     use std::os::unix::net::UnixStream;
     use tutti_plugin_ipc::CONTROL_FRAME_BYTES;
-    use tutti_plugin_types::BridgeError;
+    use tutti_plugin_types::IpcError;
 
     /// A length prefix over the cap is a framing violation by the host, not
     /// this process crashing: the error names the frame and the limit, and is
@@ -328,7 +328,7 @@ mod recv_tests {
         let len = u32::try_from(CONTROL_FRAME_BYTES + 1).expect("the cap fits a u32 prefix");
         host.write_all(&len.to_be_bytes()).expect("write prefix");
         match transport.recv() {
-            Err(BridgeError::FrameTooLarge(e)) => assert_eq!(e.len, CONTROL_FRAME_BYTES + 1),
+            Err(IpcError::FrameTooLarge(e)) => assert_eq!(e.len, CONTROL_FRAME_BYTES + 1),
             other => panic!("expected FrameTooLarge, got {other:?}"),
         }
     }

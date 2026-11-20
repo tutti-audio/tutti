@@ -230,7 +230,7 @@ pub(super) enum AudioResponse {
 /// Delivered to a listener installed on `super::AudioBridge` via
 /// `set_listener`; the bridge thread invokes it after draining replies.
 #[derive(Debug, Clone)]
-pub enum BridgeEvent {
+pub enum IpcEvent {
     /// The plugin's processing latency changed, in frames.
     LatencyChanged {
         /// The latency it reports now.
@@ -277,7 +277,7 @@ pub enum BridgeEvent {
     /// fires once, from the site that noticed, and is terminal: the engine
     /// offers no relaunch, so recovery means loading a fresh plugin.
     ///
-    /// `cause` holds the `BridgeError` that ended the stream behind an `Arc`
+    /// `cause` holds the `IpcError` that ended the stream behind an `Arc`
     /// (that type is not `Clone`, and the reason has to outlive the call that
     /// produced it), reached as the failure's `source`. A host that asks later
     /// gets the real reason instead of a placeholder.
@@ -338,7 +338,7 @@ pub(super) const UNSOLICITED_PARAMS: usize = 128;
 ///
 /// Filled one kind at a time ([`param`](Self::param),
 /// [`latency`](Self::latency), [`tail`](Self::tail), [`resync`](Self::resync)),
-/// so [`Crashed`](BridgeEvent::Crashed), which the bridge sends from the site
+/// so [`Crashed`](IpcEvent::Crashed), which the bridge sends from the site
 /// that noticed, cannot come through here.
 pub(super) struct Unsolicited {
     params: std::collections::VecDeque<ParamEdit>,
@@ -475,10 +475,9 @@ impl Unsolicited {
     /// The held events, leaving the buffer empty, in the order the type
     /// documents: structural resyncs, parameters, latency, tail, refresh
     /// resyncs.
-    pub(super) fn drain(&mut self) -> impl Iterator<Item = BridgeEvent> + '_ {
-        let raised =
-            |flag: &mut bool, kind| std::mem::take(flag).then_some(BridgeEvent::Resync(kind));
-        let layout = self.io_layout.take().map(BridgeEvent::IoLayout);
+    pub(super) fn drain(&mut self) -> impl Iterator<Item = IpcEvent> + '_ {
+        let raised = |flag: &mut bool, kind| std::mem::take(flag).then_some(IpcEvent::Resync(kind));
+        let layout = self.io_layout.take().map(IpcEvent::IoLayout);
         let structural = [
             raised(&mut self.reloaded, ResyncKind::Reloaded),
             raised(&mut self.io, ResyncKind::Io),
@@ -490,22 +489,19 @@ impl Unsolicited {
         let params = self
             .params
             .drain(..)
-            .map(|edit| BridgeEvent::ParameterChanged { edit });
+            .map(|edit| IpcEvent::ParameterChanged { edit });
         let latency = self
             .latency
             .take()
-            .map(|samples| BridgeEvent::LatencyChanged { samples });
-        let tail = self
-            .tail
-            .take()
-            .map(|tail| BridgeEvent::TailChanged { tail });
+            .map(|samples| IpcEvent::LatencyChanged { samples });
+        let tail = self.tail.take().map(|tail| IpcEvent::TailChanged { tail });
         let transport = self
             .transport
             .drain(..)
-            .map(|request| BridgeEvent::Transport { request });
-        let rate = self.rate.take().map(BridgeEvent::RateRefusal);
+            .map(|request| IpcEvent::Transport { request });
+        let rate = self.rate.take().map(IpcEvent::RateRefusal);
         let process =
-            std::mem::take(&mut self.process_requested).then_some(BridgeEvent::ProcessRequested);
+            std::mem::take(&mut self.process_requested).then_some(IpcEvent::ProcessRequested);
         layout
             .into_iter()
             .chain(structural.into_iter().flatten())
@@ -544,13 +540,13 @@ mod tests {
         inbox
             .drain()
             .map(|ev| match ev {
-                BridgeEvent::ParameterChanged { edit } => format!("p{}", edit.id()),
-                BridgeEvent::LatencyChanged { samples } => format!("latency {}", samples.get()),
-                BridgeEvent::TailChanged { .. } => "tail".to_owned(),
-                BridgeEvent::ProcessRequested => "process".to_owned(),
-                BridgeEvent::Transport { request } => format!("transport {request:?}"),
-                BridgeEvent::Resync(kind) => format!("{kind:?}"),
-                BridgeEvent::IoLayout(_) => "io layout".to_owned(),
+                IpcEvent::ParameterChanged { edit } => format!("p{}", edit.id()),
+                IpcEvent::LatencyChanged { samples } => format!("latency {}", samples.get()),
+                IpcEvent::TailChanged { .. } => "tail".to_owned(),
+                IpcEvent::ProcessRequested => "process".to_owned(),
+                IpcEvent::Transport { request } => format!("transport {request:?}"),
+                IpcEvent::Resync(kind) => format!("{kind:?}"),
+                IpcEvent::IoLayout(_) => "io layout".to_owned(),
                 other => panic!("unexpected {other:?}"),
             })
             .collect()
@@ -570,11 +566,11 @@ mod tests {
         inbox.io_layout(layout(2));
         inbox.io_layout(layout(4));
         inbox.resync(ResyncKind::Io);
-        let heard: Vec<BridgeEvent> = inbox.drain().collect();
+        let heard: Vec<IpcEvent> = inbox.drain().collect();
         assert!(
             matches!(
                 heard.as_slice(),
-                [BridgeEvent::IoLayout(l), BridgeEvent::Resync(ResyncKind::Io)]
+                [IpcEvent::IoLayout(l), IpcEvent::Resync(ResyncKind::Io)]
                     if *l == layout(4)
             ),
             "{heard:?}"
@@ -607,9 +603,9 @@ mod tests {
             outputs: Vec::new(),
         });
         assert_eq!(inbox.take_dropped(), 2);
-        let heard: Vec<BridgeEvent> = inbox.drain().collect();
+        let heard: Vec<IpcEvent> = inbox.drain().collect();
         assert!(
-            matches!(heard.as_slice(), [BridgeEvent::IoLayout(l)] if *l == good),
+            matches!(heard.as_slice(), [IpcEvent::IoLayout(l)] if *l == good),
             "{heard:?}"
         );
     }

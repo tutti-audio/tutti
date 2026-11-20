@@ -17,7 +17,7 @@ use crate::{
     AudioReply, AudioRequest, ControlFrame, ControlReply, ControlRequest, Framed, News,
     PROTOCOL_VERSION, Request,
 };
-use crate::{BridgeEvent, BridgeThread};
+use crate::{IpcEvent, IpcThread};
 use param_list::ParamList as _;
 use std::sync::Arc;
 use tutti_buffers::FloatWidth;
@@ -38,8 +38,8 @@ fn no_editor(
     _: &tutti_plugin_types::MainWorkHandle,
     plugin: &tutti_plugin_types::PluginRef,
     _: tutti_plugin_types::PluginFormat,
-) -> tutti_plugin_types::BridgeResult<Box<dyn tutti_plugin_types::Editor>> {
-    Err(tutti_plugin_types::BridgeError::LoadFailed {
+) -> tutti_plugin_types::IpcResult<Box<dyn tutti_plugin_types::Editor>> {
+    Err(tutti_plugin_types::IpcError::LoadFailed {
         path: Some(plugin.path().to_path_buf()),
         stage: tutti_plugin_types::LoadStage::Opening,
         reason: "no editor in these tests".into(),
@@ -187,7 +187,7 @@ fn serve_lanes(
 /// `Some(..)` sends that answer back, `None` silently drops.
 fn handle_with_mock_server(
     respond: impl Fn(ControlRequest) -> Option<ControlReply> + Send + 'static,
-) -> (PluginHandle, BridgeThread, std::thread::JoinHandle<()>) {
+) -> (PluginHandle, IpcThread, std::thread::JoinHandle<()>) {
     use interprocess::local_socket::ListenerOptions;
 
     let path = unique_socket_path().expect("the OS has a random source");
@@ -273,7 +273,7 @@ fn handle_with_multi_reply_server(
 ) -> (
     PluginHandle,
     Arc<PluginBridge>,
-    BridgeThread,
+    IpcThread,
     std::thread::JoinHandle<()>,
 ) {
     use interprocess::local_socket::ListenerOptions;
@@ -409,19 +409,19 @@ fn trailing_unsolicited_events_dont_poison_next_reply() {
         bridge
             .audio()
             .set_listener(Some(Arc::new(move |ev| match ev {
-                BridgeEvent::LatencyChanged { samples } => {
+                IpcEvent::LatencyChanged { samples } => {
                     latency_seen.store(samples.get(), Ordering::Release);
                 }
-                BridgeEvent::ParameterChanged { edit } => {
+                IpcEvent::ParameterChanged { edit } => {
                     *param_seen.lock() = edit.value().map(|v| (edit.id().get(), v.get() as f32));
                 }
-                BridgeEvent::TailChanged { .. }
-                | BridgeEvent::Resync(_)
-                | BridgeEvent::IoLayout(_)
-                | BridgeEvent::RateRefusal(_)
-                | BridgeEvent::ProcessRequested
-                | BridgeEvent::Transport { .. }
-                | BridgeEvent::Crashed { .. } => {}
+                IpcEvent::TailChanged { .. }
+                | IpcEvent::Resync(_)
+                | IpcEvent::IoLayout(_)
+                | IpcEvent::RateRefusal(_)
+                | IpcEvent::ProcessRequested
+                | IpcEvent::Transport { .. }
+                | IpcEvent::Crashed { .. } => {}
             })));
     }
 
@@ -448,7 +448,7 @@ fn trailing_unsolicited_events_dont_poison_next_reply() {
 }
 
 /// A `TailChanged` message arriving on the control stream must reach a
-/// listener as a `BridgeEvent::TailChanged` carrying the same arm.
+/// listener as a `IpcEvent::TailChanged` carrying the same arm.
 ///
 /// This is the client half of the runtime-tail path. The server half
 /// (`a_clap_tail_change_reaches_the_event_list`, in `tutti-plugin-server`)
@@ -484,7 +484,7 @@ fn a_tail_change_reaches_the_listener() {
     {
         let tail_seen = Arc::clone(&tail_seen);
         bridge.audio().set_listener(Some(Arc::new(move |ev| {
-            if let BridgeEvent::TailChanged { tail } = ev {
+            if let IpcEvent::TailChanged { tail } = ev {
                 *tail_seen.lock() = Some(tail);
             }
         })));

@@ -23,7 +23,7 @@
 use crate::error::codec;
 use std::cell::RefCell;
 use std::io::{Read, Write};
-use tutti_plugin_types::{BridgeError, BridgeResult, FrameTooLarge};
+use tutti_plugin_types::{FrameTooLarge, IpcError, IpcResult};
 
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -92,10 +92,10 @@ pub fn decode_prefix(prefix: [u8; 4], cap: usize) -> std::result::Result<usize, 
 ///
 /// A codec error for a body that does not decode, or that has bytes left
 /// after the message: either is a protocol-version skew the handshake missed.
-pub fn decode_body<T: DeserializeOwned>(body: &[u8]) -> BridgeResult<T> {
+pub fn decode_body<T: DeserializeOwned>(body: &[u8]) -> IpcResult<T> {
     match postcard::take_from_bytes(body).map_err(codec)? {
         (msg, []) => Ok(msg),
-        (_, rest) => Err(BridgeError::TrailingBytes {
+        (_, rest) => Err(IpcError::TrailingBytes {
             left: rest.len(),
             frame: body.len(),
         }),
@@ -130,9 +130,9 @@ thread_local! {
 ///
 /// # Errors
 ///
-/// `FrameTooLarge` (as `BridgeError::FrameTooLarge`) when the body is
+/// `FrameTooLarge` (as `IpcError::FrameTooLarge`) when the body is
 /// over the cap, with nothing written; a serialization or I/O error otherwise.
-pub fn write_frame<W: Write, T: Framed>(w: &mut W, msg: &T) -> BridgeResult<()> {
+pub fn write_frame<W: Write, T: Framed>(w: &mut W, msg: &T) -> IpcResult<()> {
     OUT.with_borrow_mut(|frame| {
         frame.clear();
         frame.extend_from_slice(&[0; 4]);
@@ -159,10 +159,10 @@ pub fn write_frame<W: Write, T: Framed>(w: &mut W, msg: &T) -> BridgeResult<()> 
 /// # Errors
 ///
 /// An I/O error on EOF or a short read; `FrameTooLarge` (as
-/// [`BridgeError::FrameTooLarge`]) for an advertised length over the cap,
+/// [`IpcError::FrameTooLarge`]) for an advertised length over the cap,
 /// before any allocation; a codec error for a body that does not decode as
 /// exactly one message.
-pub fn read_frame<R: Read, T: Framed>(r: &mut R) -> BridgeResult<T> {
+pub fn read_frame<R: Read, T: Framed>(r: &mut R) -> IpcResult<T> {
     let mut prefix = [0u8; 4];
     r.read_exact(&mut prefix)?;
     let len = decode_prefix(prefix, T::CAP)?;
@@ -171,7 +171,7 @@ pub fn read_frame<R: Read, T: Framed>(r: &mut R) -> BridgeResult<T> {
         body.resize(len, 0);
         let msg = r
             .read_exact(body)
-            .map_err(BridgeError::from)
+            .map_err(IpcError::from)
             .and_then(|()| decode_body(body));
         keep(body);
         msg
@@ -223,7 +223,7 @@ impl FrameBuf {
     /// length over the inbound capacity (or the type's [`Framed::CAP`]), before any
     /// body is read; a codec error for a body that does not decode as exactly
     /// one message.
-    pub fn read<R: Read, T: Framed>(&mut self, r: &mut R) -> BridgeResult<T> {
+    pub fn read<R: Read, T: Framed>(&mut self, r: &mut R) -> IpcResult<T> {
         let mut prefix = [0u8; PREFIX_BYTES];
         r.read_exact(&mut prefix)?;
         let len = decode_prefix(prefix, T::CAP)?;
@@ -245,7 +245,7 @@ impl FrameBuf {
     ///
     /// A serialization error when the message does not fit the outbound
     /// capacity, with nothing written; an I/O error otherwise.
-    pub fn write<W: Write, T: Framed>(&mut self, w: &mut W, msg: &T) -> BridgeResult<()> {
+    pub fn write<W: Write, T: Framed>(&mut self, w: &mut W, msg: &T) -> IpcResult<()> {
         let (prefix, body) = self.outbound.split_at_mut(PREFIX_BYTES);
         let len = postcard::to_slice(msg, body).map_err(codec)?.len();
         prefix.copy_from_slice(&encode_prefix(len, T::CAP)?);
@@ -338,7 +338,7 @@ mod tests {
         let mut wire: &[u8] = &5u32.to_be_bytes();
         assert_eq!(
             buf.read::<_, u8>(&mut wire).unwrap_err().to_string(),
-            BridgeError::from(FrameTooLarge { len: 5, limit: 4 }).to_string()
+            IpcError::from(FrameTooLarge { len: 5, limit: 4 }).to_string()
         );
         let mut sink = Vec::new();
         assert!(buf.write(&mut sink, &[0u8; 8]).is_err());
@@ -355,7 +355,7 @@ mod tests {
     fn a_body_with_bytes_after_the_message_is_refused() {
         assert_eq!(decode_body::<u16>(&[0x82, 0x02]).unwrap(), 0x0102);
         match decode_body::<u16>(&[0x82, 0x02, 0x00]) {
-            Err(BridgeError::TrailingBytes { left: 1, frame: 3 }) => {}
+            Err(IpcError::TrailingBytes { left: 1, frame: 3 }) => {}
             other => panic!("expected TrailingBytes, got {other:?}"),
         }
     }
@@ -391,7 +391,7 @@ mod tests {
     fn the_lanes_hold_different_caps() {
         let over_audio_reply = u32::try_from(AudioReply::CAP + 1).unwrap().to_be_bytes();
         match read_frame::<_, AudioReply>(&mut over_audio_reply.as_slice()) {
-            Err(BridgeError::FrameTooLarge(e)) => {
+            Err(IpcError::FrameTooLarge(e)) => {
                 assert_eq!((e.len, e.limit), (AudioReply::CAP + 1, AudioReply::CAP));
             }
             other => panic!("expected FrameTooLarge, got {other:?}"),
@@ -400,7 +400,7 @@ mod tests {
         assert!(
             !matches!(
                 read_frame::<_, ControlFrame>(&mut control),
-                Err(BridgeError::FrameTooLarge(_))
+                Err(IpcError::FrameTooLarge(_))
             ),
             "a length the control lane's cap holds is not refused for its size"
         );

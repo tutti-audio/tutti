@@ -52,7 +52,7 @@ use tutti_rt::LockExt;
 
 use tutti_buffers::FloatWidth;
 use tutti_plugin_types::{
-    BridgeError, BridgeResult, ChunkCounters, Controller, LoadStage, Loaded, LoadedPlugin,
+    ChunkCounters, Controller, IpcError, IpcResult, LoadStage, Loaded, LoadedPlugin,
     MainThreadMarker, ParamAccess, ParamWriteError, ParameterChanges, ParameterQueue,
     PluginDescriptor, PluginError, PluginFormat, PluginRef, PluginResult, PluginTail, Prepare,
     PresetId, ProcessWake, Refused, Reopen, Request, RestartRules, ResyncKind, SampleRate, Samples,
@@ -63,7 +63,7 @@ use tutti_units::ParamId;
 
 use crate::subprocess::swap_slab;
 use crate::{
-    AudioSlab, Batcher, BridgeConfig, BridgeEvent, BridgeListener, EditorLoader, LoadRequest,
+    AudioSlab, Batcher, BridgeListener, EditorLoader, IpcConfig, IpcEvent, LoadRequest,
     OfflineWait, PluginBridge, ProcessGuard, Replies, Restore, SlabWriter, launch,
     unique_socket_path,
 };
@@ -71,9 +71,9 @@ use crate::{
 /// Where a served plugin came from: what [`Ipc::reopen_restoring`] launches
 /// again.
 #[derive(Clone)]
-pub struct IpcOrigin {
+pub struct LaunchSpec {
     /// The launch's configuration. A reopen gives it a socket of its own.
-    pub config: BridgeConfig,
+    pub config: IpcConfig,
     /// The plugin file, and which plugin of it the first launch chose.
     pub origin: PluginRef,
     /// The format that opens it, as the first launch named it.
@@ -83,7 +83,7 @@ pub struct IpcOrigin {
     pub load_editor: Option<EditorLoader>,
 }
 
-impl IpcOrigin {
+impl LaunchSpec {
     /// A fresh instance of the plugin, from the same file and configuration
     /// in a server of its own (its own socket), at `rate`, with `state`
     /// restored before it is activated, as the state of a duplicate. See
@@ -92,8 +92,8 @@ impl IpcOrigin {
     /// # Errors
     ///
     /// As [`Ipc::launch`].
-    pub fn reopen(&self, rate: SampleRate, state: Option<&[u8]>) -> BridgeResult<Launched> {
-        let config = BridgeConfig {
+    pub fn reopen(&self, rate: SampleRate, state: Option<&[u8]>) -> IpcResult<Launched> {
+        let config = IpcConfig {
             // Its own rendezvous: two bridges on one socket path is the
             // collision `unique_socket_path` exists to prevent.
             socket_path: unique_socket_path()?,
@@ -115,9 +115,9 @@ impl IpcOrigin {
     }
 }
 
-impl std::fmt::Debug for IpcOrigin {
+impl std::fmt::Debug for LaunchSpec {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("IpcOrigin")
+        f.debug_struct("LaunchSpec")
             .field("path", &self.origin.path())
             .finish_non_exhaustive()
     }
@@ -151,7 +151,7 @@ pub struct IpcParts {
     /// The per-chunk wait of an offline fork (`Timeouts::call`).
     pub timeout: Duration,
     /// Where it came from, or `None` for one that cannot be reopened.
-    pub origin: Option<IpcOrigin>,
+    pub origin: Option<LaunchSpec>,
 }
 
 impl std::fmt::Debug for IpcParts {
@@ -230,17 +230,17 @@ impl DeclaredCache {
 }
 
 impl Events {
-    fn on(&self, event: BridgeEvent) {
+    fn on(&self, event: IpcEvent) {
         match &event {
-            BridgeEvent::LatencyChanged { samples } => {
+            IpcEvent::LatencyChanged { samples } => {
                 self.latency.store(samples.get(), Ordering::Release);
                 self.ask(Request::LatencyChanged);
             }
-            BridgeEvent::TailChanged { tail } => {
+            IpcEvent::TailChanged { tail } => {
                 *self.tail.lock_recover() = *tail;
                 self.ask(Request::TailChanged);
             }
-            BridgeEvent::IoLayout(layout) => {
+            IpcEvent::IoLayout(layout) => {
                 *self.layout.lock_recover() = Some(layout.clone());
             }
             // The restart the core plans for it ([`RESTARTS`](Loaded::RESTARTS))
@@ -248,12 +248,12 @@ impl Events {
             // layout above names; the pump that takes the request reports it.
             // A bus change also changes what the plugin declares (its
             // parameters may follow its buses).
-            BridgeEvent::Resync(ResyncKind::Io) => {
+            IpcEvent::Resync(ResyncKind::Io) => {
                 self.declared.forget();
                 self.audio.invalidate_host_edits();
                 self.ask(Request::IoChanged);
             }
-            BridgeEvent::ProcessRequested => {
+            IpcEvent::ProcessRequested => {
                 if let Some(wake) = self.wake.get() {
                     wake.raise();
                 }
@@ -263,8 +263,8 @@ impl Events {
             // its buses), and death (a dead plugin has none). Not `ParamValues`,
             // which every dropped parameter event raises and which says nothing
             // of the list: a forget on it would make the next write a round trip.
-            BridgeEvent::Resync(ResyncKind::ParamTitles | ResyncKind::Reloaded)
-            | BridgeEvent::Crashed { .. } => {
+            IpcEvent::Resync(ResyncKind::ParamTitles | ResyncKind::Reloaded)
+            | IpcEvent::Crashed { .. } => {
                 self.declared.forget();
                 self.audio.invalidate_host_edits();
             }
@@ -293,7 +293,7 @@ pub(crate) struct Link {
     pub(crate) ceiling: usize,
     pub(crate) parameters: usize,
     pub(crate) timeout: Duration,
-    pub(crate) origin: Option<IpcOrigin>,
+    pub(crate) origin: Option<LaunchSpec>,
     pub(crate) counters: Arc<ChunkCounters>,
     /// The slab `counters` asks whether a chunk was answered: the one the
     /// current activation renders through.
@@ -562,10 +562,10 @@ impl Ipc {
     /// The server cannot be found or spawned, the handshake fails or times
     /// out, the plugin fails to load, or the bridge cannot be set up.
     pub fn launch(
-        config: BridgeConfig,
+        config: IpcConfig,
         request: &LoadRequest<'_>,
         load_editor: Option<EditorLoader>,
-    ) -> BridgeResult<Launched> {
+    ) -> IpcResult<Launched> {
         let server = launch(&config, request)?;
         let LoadRequest { format, rate, .. } = *request;
         // The plugin the server opened, so a reopen and the editor instance
@@ -603,7 +603,7 @@ impl Ipc {
             rate,
             parameters,
             timeout,
-            origin: Some(IpcOrigin {
+            origin: Some(LaunchSpec {
                 config,
                 origin: origin.clone(),
                 format,
@@ -630,9 +630,9 @@ impl Ipc {
     ///
     /// This plugin has no origin (it was built by [`Ipc::new`] with none), or
     /// as [`launch`](Self::launch).
-    pub fn reopen_restoring(&self, state: Option<&[u8]>) -> BridgeResult<Launched> {
+    pub fn reopen_restoring(&self, state: Option<&[u8]>) -> IpcResult<Launched> {
         let Some(origin) = &self.link.origin else {
-            return Err(BridgeError::LoadFailed {
+            return Err(IpcError::LoadFailed {
                 path: None,
                 stage: LoadStage::Opening,
                 reason: "this served plugin has no origin to reopen".into(),
@@ -706,7 +706,7 @@ impl Ipc {
 
     /// Where it came from, for a fork to reopen (`None`: built by
     /// [`Ipc::new`] with none).
-    pub fn origin(&self) -> Option<&IpcOrigin> {
+    pub fn origin(&self) -> Option<&LaunchSpec> {
         self.link.origin.as_ref()
     }
 

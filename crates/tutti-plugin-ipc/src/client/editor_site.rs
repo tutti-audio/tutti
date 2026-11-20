@@ -4,7 +4,7 @@
 //! knows which. CLAP, VST3 and AU keep an editor-only second instance in the
 //! host, which the host's [`EditorLoader`] loads on the first open
 //! (`InProcessEditor`); a bridge made with no loader opens the editor on the
-//! served instance in the server (`ServedEditor`). Every editor call is one
+//! served instance in the server (`ServerEditor`). Every editor call is one
 //! `match` on the site.
 
 use super::audio::AudioBridge;
@@ -35,7 +35,7 @@ pub struct EditorSite {
 #[derive(Debug)]
 enum Site {
     InProcess(Box<InProcessEditor>),
-    Served(Box<ServedEditor>),
+    Served(Box<ServerEditor>),
 }
 
 /// The editor-only instance in this process: loaded with the [`EditorLoader`]
@@ -62,7 +62,7 @@ pub(crate) struct InProcessEditor {
 }
 
 /// The editor in the server: every window call is a message to it.
-pub(crate) struct ServedEditor {
+pub(crate) struct ServerEditor {
     audio: AudioBridge,
     remote: Mutex<IpcEditor>,
 }
@@ -75,9 +75,9 @@ impl std::fmt::Debug for InProcessEditor {
     }
 }
 
-impl std::fmt::Debug for ServedEditor {
+impl std::fmt::Debug for ServerEditor {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ServedEditor").finish_non_exhaustive()
+        f.debug_struct("ServerEditor").finish_non_exhaustive()
     }
 }
 
@@ -100,7 +100,7 @@ impl EditorSite {
                 baseline: Mutex::new(None),
                 mirror: GuiMirror::new(),
             })),
-            None => Site::Served(Box::new(ServedEditor {
+            None => Site::Served(Box::new(ServerEditor {
                 audio: audio.clone(),
                 remote: Mutex::new(IpcEditor::new(audio.clone())),
             })),
@@ -303,7 +303,7 @@ impl Drop for EditorSite {
     }
 }
 
-impl ServedEditor {
+impl ServerEditor {
     /// Runs a call of the editor in the server, its refusal as the
     /// [`EditorError`] the bridge's editor calls answer with.
     fn call<T>(

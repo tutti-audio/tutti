@@ -40,7 +40,7 @@ use tutti_platform::Instant;
 
 use tutti_plugin_ipc::{ControlFrame, Request};
 use tutti_plugin_ipc_ffi::Ready;
-use tutti_plugin_types::{BridgeError, BridgeResult, MainThreadMarker, StateError, Wakeups};
+use tutti_plugin_types::{IpcError, IpcResult, MainThreadMarker, StateError, Wakeups};
 
 use crate::render::RenderThread;
 use crate::session::{Reaction, Session};
@@ -115,7 +115,7 @@ impl Native {
         wakeups: &Wakeups,
         bell: &Bell,
         ready: &mut Vec<Ready>,
-    ) -> BridgeResult<bool> {
+    ) -> IpcResult<bool> {
         ready.clear();
         match transport.stream() {
             Some(stream) => self.wait_on(stream, wakeups, timeout, bell, ready),
@@ -138,7 +138,7 @@ pub(crate) fn serve(
     transport: &mut ControlTransport,
     main: MainThreadMarker,
     render: &RenderThread,
-) -> BridgeResult<()> {
+) -> IpcResult<()> {
     serve_every(
         session,
         transport,
@@ -156,10 +156,10 @@ pub(crate) fn serve(
 /// # Errors
 ///
 /// [`StateError::PluginCrashed`], when the plugin is lost.
-fn ensure_not_lost(session: &Session) -> BridgeResult<()> {
+fn ensure_not_lost(session: &Session) -> IpcResult<()> {
     if session.plugin_lost() {
         tracing::error!("plugin-server: the plugin is lost; the server exits");
-        return Err(BridgeError::State(StateError::PluginCrashed));
+        return Err(IpcError::State(StateError::PluginCrashed));
     }
     Ok(())
 }
@@ -167,15 +167,15 @@ fn ensure_not_lost(session: &Session) -> BridgeResult<()> {
 /// Whether a connection's end is the peer leaving: a clean end of stream, or
 /// the socket reset or broken under it. Every other error is the peer
 /// breaking the protocol.
-fn host_left(error: &BridgeError) -> bool {
+fn host_left(error: &IpcError) -> bool {
     use std::io::ErrorKind::{BrokenPipe, ConnectionAborted, ConnectionReset, UnexpectedEof};
     /// Windows' `ERROR_PIPE_NOT_CONNECTED`, a named pipe read after the peer
     /// closed: std maps it to no kind (`ERROR_BROKEN_PIPE`, 109, is
     /// `BrokenPipe`), and no unix errno is 233.
     const PIPE_NOT_CONNECTED: i32 = 233;
     match error {
-        BridgeError::ProcessCrashed => true,
-        BridgeError::Io(e) => {
+        IpcError::ProcessCrashed => true,
+        IpcError::Io(e) => {
             matches!(
                 e.kind(),
                 UnexpectedEof | BrokenPipe | ConnectionReset | ConnectionAborted
@@ -193,7 +193,7 @@ pub(crate) fn serve_every(
     main: MainThreadMarker,
     render: &RenderThread,
     period: Duration,
-) -> BridgeResult<()> {
+) -> IpcResult<()> {
     let bell = session.ties().bell.clone();
     let host_gone = session.ties().host_gone.clone();
     let mut ticker = Ticker::new(Instant::now(), period);
@@ -212,7 +212,7 @@ pub(crate) fn serve_every(
             && !host_left(error)
         {
             tracing::error!("plugin-server: the audio connection failed: {error}; ending");
-            return Err(BridgeError::AudioConnection {
+            return Err(IpcError::AudioConnection {
                 cause: Arc::clone(error),
             });
         }
@@ -283,7 +283,7 @@ mod tests {
     #[test]
     fn only_the_peer_leaving_is_host_left() {
         use std::io::{Error, ErrorKind};
-        let io = |e: Error| BridgeError::Io(e);
+        let io = |e: Error| IpcError::Io(e);
         for kind in [
             ErrorKind::UnexpectedEof,
             ErrorKind::BrokenPipe,
@@ -292,7 +292,7 @@ mod tests {
         ] {
             assert!(host_left(&io(Error::from(kind))), "{kind:?}");
         }
-        assert!(host_left(&BridgeError::ProcessCrashed));
+        assert!(host_left(&IpcError::ProcessCrashed));
         assert!(host_left(&io(Error::from_raw_os_error(233))));
         for kind in [
             ErrorKind::InvalidData,
@@ -301,11 +301,11 @@ mod tests {
         ] {
             assert!(!host_left(&io(Error::from(kind))), "{kind:?}");
         }
-        assert!(!host_left(&BridgeError::ProtocolMismatch {
+        assert!(!host_left(&IpcError::ProtocolMismatch {
             expected: 1,
             got: 2
         }));
-        assert!(!host_left(&BridgeError::ProtocolError("junk")));
+        assert!(!host_left(&IpcError::ProtocolError("junk")));
     }
 
     const PERIOD: Duration = Duration::from_millis(33);

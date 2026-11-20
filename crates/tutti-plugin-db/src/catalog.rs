@@ -59,7 +59,7 @@ use crate::{
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError, RwLock};
-use tutti_plugin_types::{BridgeError, BridgeResult};
+use tutti_plugin_types::{IpcError, IpcResult};
 use tutti_plugin_types::{PluginDescriptor, PluginFormat, PluginId, PluginRef};
 use tutti_rt::LockExt;
 
@@ -186,14 +186,14 @@ fn blacklist_row(db: &PluginDb, canonical: &Path) -> Option<FileRow> {
 /// The refusal of a blacklist's `row` for `plugin`, whose file is read now: the
 /// one rule behind [`Catalog::check`] and
 /// [`BlacklistView::check`].
-fn refusal(row: Option<FileRow>, canonical: &Path, plugin: &PluginRef) -> BridgeResult<()> {
+fn refusal(row: Option<FileRow>, canonical: &Path, plugin: &PluginRef) -> IpcResult<()> {
     let Some(row) = row else {
         return Ok(());
     };
     if !row.is_blacklisted_and_unchanged(&FileFacts::read(canonical)) {
         return Ok(());
     }
-    Err(BridgeError::Blacklisted {
+    Err(IpcError::Blacklisted {
         path: plugin.path().to_path_buf(),
         reason: row
             .blacklist_reason()
@@ -224,9 +224,9 @@ impl BlacklistView {
     ///
     /// # Errors
     ///
-    /// [`BridgeError::Blacklisted`] with the recorded reason when the plugin's
+    /// [`IpcError::Blacklisted`] with the recorded reason when the plugin's
     /// file is blacklisted and unchanged.
-    pub fn check(&self, plugin: &PluginRef) -> BridgeResult<()> {
+    pub fn check(&self, plugin: &PluginRef) -> IpcResult<()> {
         let canonical = key(plugin.path());
         let row = blacklist_row(
             &self.rows.read().unwrap_or_else(PoisonError::into_inner),
@@ -594,11 +594,11 @@ impl Catalog {
     ///
     /// # Errors
     ///
-    /// [`BridgeError::Blacklisted`] with the recorded reason when the plugin's
+    /// [`IpcError::Blacklisted`] with the recorded reason when the plugin's
     /// file is blacklisted and unchanged; a host can offer to load it anyway
     /// (a load that does not name the catalog) or to
     /// [`unblacklist`](Self::unblacklist) it.
-    pub fn check(&self, plugin: &PluginRef) -> BridgeResult<()> {
+    pub fn check(&self, plugin: &PluginRef) -> IpcResult<()> {
         let canonical = key(plugin.path());
         refusal(blacklist_row(&self.db, &canonical), &canonical, plugin)
     }
@@ -861,7 +861,7 @@ mod tests {
         let plugins = catalog_with(&path, blacklisted_row(&path, "SIGSEGV during probe"));
 
         match plugins.check(&PluginRef::file(&path)) {
-            Err(BridgeError::Blacklisted { path: p, reason }) => {
+            Err(IpcError::Blacklisted { path: p, reason }) => {
                 assert_eq!(p, path);
                 assert_eq!(reason, "SIGSEGV during probe");
             }
@@ -927,7 +927,7 @@ mod tests {
         assert!(
             matches!(
                 fresh.check(&PluginRef::file(&path)),
-                Err(BridgeError::Blacklisted { .. })
+                Err(IpcError::Blacklisted { .. })
             ),
             "unchanged and blacklisted: the check must refuse"
         );

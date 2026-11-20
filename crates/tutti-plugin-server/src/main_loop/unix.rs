@@ -5,7 +5,7 @@
 //! replaces the wait, without touching the loop's logic.
 
 use tutti_plugin_ipc_ffi::{Interest, Ready, Watch};
-use tutti_plugin_types::{BridgeResult, Wakeups};
+use tutti_plugin_types::{IpcResult, Wakeups};
 
 #[path = "unix_bell.rs"]
 mod bell;
@@ -37,7 +37,7 @@ impl Native {
         timeout: std::time::Duration,
         bell: &Bell,
         ready: &mut Vec<Ready>,
-    ) -> BridgeResult<bool> {
+    ) -> IpcResult<bool> {
         use std::os::fd::AsFd;
 
         self.asked.clear();
@@ -78,7 +78,7 @@ pub(crate) fn wait_readable(
     stream: &Stream,
     timeout: Option<std::time::Duration>,
     wake: &Bell,
-) -> BridgeResult<bool> {
+) -> IpcResult<bool> {
     use std::os::fd::AsFd;
 
     loop {

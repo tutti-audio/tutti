@@ -105,11 +105,11 @@ use tutti_plugin_host::{
     Rebinder, RefreshSink, TransportSink, client_over,
 };
 use tutti_plugin_ipc::{
-    BridgeConfig, BridgeEvent, Ipc, IpcController, IpcOrigin, Launched, LoadRequest, PluginBridge,
+    Ipc, IpcConfig, IpcController, IpcEvent, LaunchSpec, Launched, LoadRequest, PluginBridge,
     Restore,
 };
 use tutti_plugin_types::{
-    BridgeError, BridgeResult, Features, LoadStage, LoadedPlugin, MainWorkHandle, MaxBlock,
+    Features, IpcError, IpcResult, LoadStage, LoadedPlugin, MainWorkHandle, MaxBlock,
     ParameterChanges, PluginDescriptor, PluginInvalidation, PluginRef, PluginTail, Prepare,
     ResyncClass,
 };
@@ -208,7 +208,7 @@ pub struct PluginClient<S = Unbound> {
     /// guard), shared with `PluginClient::handle`.
     served: IpcController,
     /// Where this instance came from, so a fork can load another of it.
-    origin: IpcOrigin,
+    origin: LaunchSpec,
     /// The plugin this is, with the id it reports.
     plugin: PluginRef,
     /// On a **fork** only: whether it has failed while rendering
@@ -245,17 +245,17 @@ impl PluginClient<Unbound> {
     ///
     /// # Errors
     ///
-    /// Returns [`BridgeError::NotOutOfProcess`] for a VST2 file (it runs in the
-    /// host's process: see `Plugin::open`), and a [`BridgeError`] if the
+    /// Returns [`IpcError::NotOutOfProcess`] for a VST2 file (it runs in the
+    /// host's process: see `Plugin::open`), and a [`IpcError`] if the
     /// plugin-server cannot be found or spawned, the handshake fails or times out, the
     /// plugin fails to load (a ref's id that names no plugin of the file is the
     /// format's own load failure), or the IPC bridge cannot be set up.
     pub fn new(
-        config: BridgeConfig,
+        config: IpcConfig,
         work: &MainWorkHandle,
         plugin: &Loadable,
         sample_rate: SampleRate,
-    ) -> BridgeResult<Self> {
+    ) -> IpcResult<Self> {
         Self::open(config, work, plugin, sample_rate, None).map(|(client, _)| client)
     }
 
@@ -270,12 +270,12 @@ impl PluginClient<Unbound> {
     ///
     /// As [`new`](Self::new).
     pub fn open(
-        config: BridgeConfig,
+        config: IpcConfig,
         work: &MainWorkHandle,
         plugin: &Loadable,
         sample_rate: SampleRate,
         state: Option<&[u8]>,
-    ) -> BridgeResult<(Self, Option<std::result::Result<(), String>>)> {
+    ) -> IpcResult<(Self, Option<std::result::Result<(), String>>)> {
         plugin.check()?;
         let format = crate::host::placement::format_of(plugin)?;
         let plugin = plugin.plugin();
@@ -283,7 +283,7 @@ impl PluginClient<Unbound> {
         // A VST2 plugin is not served (its editor and audio are one object):
         // refused here, typed, before a server is started for it.
         if format == tutti_plugin_types::PluginFormat::Vst2 {
-            return Err(BridgeError::NotOutOfProcess {
+            return Err(IpcError::NotOutOfProcess {
                 path: plugin_path,
                 format: "VST2",
             });
@@ -312,14 +312,14 @@ impl PluginClient<Unbound> {
     /// sinks the bridge's events go to, and the generic node, activated at the
     /// slab's chunk ceiling (a graph's `prepare` then narrows it). Needs no
     /// main thread.
-    fn over(ipc: Ipc) -> BridgeResult<Self> {
+    fn over(ipc: Ipc) -> IpcResult<Self> {
         let bridge = Arc::clone(ipc.bridge());
         let descriptor = ipc.descriptor().clone();
         let loaded = ipc.loaded().clone();
         let rate = ipc.rate();
         // The plugin's file, when the ipc knows it: the path of a failure here.
         let origin_path = ipc.origin().map(|o| o.origin.path().to_path_buf());
-        let failed = |reason: String| BridgeError::LoadFailed {
+        let failed = |reason: String| IpcError::LoadFailed {
             path: origin_path.clone(),
             stage: LoadStage::Activation,
             reason,
@@ -363,42 +363,42 @@ impl PluginClient<Unbound> {
         let listener_invalidate_sink = invalidate_sink.clone();
         let listener_transport_sink = transport_sink.clone();
         ipc.forward_events(Some(Arc::new(move |ev| match ev {
-            BridgeEvent::LatencyChanged { samples } => {
+            IpcEvent::LatencyChanged { samples } => {
                 let reported = PluginInvalidation::Latency { samples };
                 reports.take_report(&reported);
                 listener_invalidate_sink.fire(reported);
             }
-            BridgeEvent::TailChanged { tail } => {
+            IpcEvent::TailChanged { tail } => {
                 let reported = PluginInvalidation::Tail { tail };
                 reports.take_report(&reported);
                 listener_invalidate_sink.fire(reported);
             }
-            BridgeEvent::ParameterChanged { edit } => {
+            IpcEvent::ParameterChanged { edit } => {
                 listener_param_sink.fire(edit);
             }
-            BridgeEvent::Resync(kind) => match kind.classify() {
+            IpcEvent::Resync(kind) => match kind.classify() {
                 ResyncClass::Refresh(r) => listener_refresh_sink.fire(r),
                 ResyncClass::Invalidate(i) => listener_invalidate_sink.fire(i),
             },
-            BridgeEvent::RateRefusal(Some((rate, reason))) => {
+            IpcEvent::RateRefusal(Some((rate, reason))) => {
                 listener_invalidate_sink.fire(PluginInvalidation::RateRefused { rate, reason });
             }
-            BridgeEvent::RateRefusal(None) => {
+            IpcEvent::RateRefusal(None) => {
                 listener_invalidate_sink.fire(PluginInvalidation::RateRestored);
             }
             // Structural and terminal. No cell is updated alongside it the
             // way latency and tail are: there is no new value to cache, and the
             // crash flag this mirrors was already set by the bridge thread
             // before it fired — see `thread::crash`.
-            BridgeEvent::Crashed { cause } => {
+            IpcEvent::Crashed { cause } => {
                 listener_invalidate_sink.fire(PluginInvalidation::Crashed { cause });
             }
             // The wake it raises is bound through `Control::bind_wake` and
             // raised by `Ipc` before this listener runs.
-            BridgeEvent::ProcessRequested => {}
+            IpcEvent::ProcessRequested => {}
             // The layout is read from the link when the `Io` resync that follows it lands.
-            BridgeEvent::IoLayout(_) => {}
-            BridgeEvent::Transport { request } => listener_transport_sink.fire(request),
+            IpcEvent::IoLayout(_) => {}
+            IpcEvent::Transport { request } => listener_transport_sink.fire(request),
         })));
 
         // The parameter list, once, while loading blocks anyway: the node's

@@ -416,7 +416,7 @@ pub enum LoadError {
     /// A plugin did not open.
     #[cfg(feature = "plugin")]
     #[error(transparent)]
-    Plugin(Arc<tutti_plugin_types::BridgeError>),
+    Plugin(Arc<tutti_plugin_types::IpcError>),
     /// The plugin's id names no plugin of the catalog, or several.
     #[cfg(feature = "plugin")]
     #[error(transparent)]

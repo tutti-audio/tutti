@@ -54,7 +54,7 @@ pub(crate) enum Heard<T> {
     },
     /// The frame belongs to a request the lane gave up on, which carried this
     /// tag. The request is forgotten once its last frame is heard.
-    Late(T),
+    Abandoned(T),
 }
 
 /// One request the lane is owed an answer to.
@@ -182,7 +182,7 @@ impl<K: Copy + Eq, T: Copy> Conversation<K, T> {
                 self.entries.remove(at);
                 self.abandoned -= 1;
             }
-            return Ok(Heard::Late(tag));
+            return Ok(Heard::Abandoned(tag));
         }
         if ends {
             self.entries.remove(at);
@@ -270,7 +270,7 @@ mod tests {
             Ok(Heard::Answer { ends: true }),
             "the awaited request's answer"
         );
-        assert_eq!(c.hear(1, true, at(t, 13)), Ok(Heard::Late('a')));
+        assert_eq!(c.hear(1, true, at(t, 13)), Ok(Heard::Abandoned('a')));
         assert_eq!(c.hear(1, true, at(t, 14)), Err(Fault::Unknown), "it ended");
     }
 
@@ -294,9 +294,9 @@ mod tests {
         c.open(7, 's', t, WINDOW, CEILING);
         c.abandon(7).unwrap();
         for _ in 0..3 {
-            assert_eq!(c.hear(7, false, at(t, 20)), Ok(Heard::Late('s')));
+            assert_eq!(c.hear(7, false, at(t, 20)), Ok(Heard::Abandoned('s')));
         }
-        assert_eq!(c.hear(7, true, at(t, 21)), Ok(Heard::Late('s')));
+        assert_eq!(c.hear(7, true, at(t, 21)), Ok(Heard::Abandoned('s')));
         assert_eq!(c.hear(7, false, at(t, 22)), Err(Fault::Unknown));
     }
 
@@ -389,7 +389,7 @@ mod tests {
         c.abandon(1).unwrap();
         c.open(2, 'b', at(t, 1), WINDOW, CEILING);
         for secs in 2..9 {
-            assert_eq!(c.hear(1, false, at(t, secs)), Ok(Heard::Late('a')));
+            assert_eq!(c.hear(1, false, at(t, secs)), Ok(Heard::Abandoned('a')));
         }
         assert_eq!(c.left(2, at(t, 9)), Some(Duration::from_secs(2)));
         assert!(c.is_due(2, at(t, 11)));
@@ -407,8 +407,8 @@ mod tests {
         }
         c.open(3, 'a', t, WINDOW, CEILING);
         assert_eq!(c.abandon(3), Err(Fault::Flooded { abandoned: 4 }));
-        assert_eq!(c.hear(0, true, t), Ok(Heard::Late('a')));
-        assert_eq!(c.hear(1, true, t), Ok(Heard::Late('a')));
+        assert_eq!(c.hear(0, true, t), Ok(Heard::Abandoned('a')));
+        assert_eq!(c.hear(1, true, t), Ok(Heard::Abandoned('a')));
         c.open(4, 'a', t, WINDOW, CEILING);
         assert_eq!(c.abandon(4), Ok(()), "late replies give their room back");
     }
