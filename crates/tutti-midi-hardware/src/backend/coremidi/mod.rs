@@ -38,14 +38,15 @@ use crate::capability::{OsEndpoint, carries_midi2_only, from_os, legacy};
 use crate::devices::ChangeSink;
 use crate::devices::reporter::os_devices;
 use crate::endpoints::{DeviceOut, InputConnection, MidiEndpoints, Watch};
-use crate::error::{NotFound, Result};
+use crate::error::{MidiHardwareError, NotFound, Result};
+use crate::virtual_endpoint::VirtualSpec;
 use tutti_coremidi_ffi::{
     Endpoint as OsObject, InputPort, OutputPort, SharedClient, UmpEndpointInfo, UmpEndpointsError,
     UniqueId, ump_endpoints,
 };
 use tutti_midi_device::{Endpoint, EndpointId, Identity, OsDevice};
 use tutti_midi_runtime::{MidiOut, Outgoing, Taken};
-use tutti_ump::{Protocol, read_protocol};
+use tutti_ump::{FunctionBlockInfo, Protocol, read_protocol};
 
 mod host_time;
 mod virtual_destination;
@@ -64,6 +65,27 @@ pub(crate) use virtual_source::UmpVirtualSource;
 /// creates no endpoint or port), or startup deadlocks.
 pub(crate) fn hub_first() -> Result<SharedClient> {
     watch::client()
+}
+
+/// The Function Blocks `spec` declares, as the Function Block Info and name
+/// `tutti-coremidi-ffi` creates them from.
+fn block_infos(spec: &VirtualSpec) -> Vec<(FunctionBlockInfo, Option<&str>)> {
+    spec.function_blocks()
+        .iter()
+        .map(|block| (block.info(), block.name().map(|name| name.as_str())))
+        .collect()
+}
+
+/// A failure to create an endpoint with Function Blocks as this crate reports it:
+/// the OS having no such endpoint (before macOS 15) is
+/// [`MidiHardwareError::VirtualBlocksUnsupported`], anything else CoreMIDI's own.
+fn open_error(error: tutti_coremidi_ffi::Error) -> MidiHardwareError {
+    match error {
+        tutti_coremidi_ffi::Error::UmpEndpointUnsupported => {
+            MidiHardwareError::VirtualBlocksUnsupported
+        }
+        other => MidiHardwareError::Os(other),
+    }
 }
 
 /// An endpoint's name: the display name Audio MIDI Setup shows, else its bare name,

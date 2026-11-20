@@ -6,8 +6,9 @@
 //! receiving on a source and sending to a destination do not compile. Dropping
 //! either removes the endpoint from the system.
 //!
-//! An endpoint is described by a [`VirtualSpec`]: its name, the UMP protocol it
-//! carries, and the Function Blocks it declares. What a platform cannot do is an
+//! An endpoint is described by a [`VirtualSpec`]: its name, its Device Identity and
+//! Product Instance Id, the UMP protocol it carries, and the Function Blocks it
+//! declares. What a platform cannot do is an
 //! error from the call that asks for it: creating on a platform with no backend
 //! is [`MidiHardwareError::Unsupported`](crate::MidiHardwareError::Unsupported), and declaring Function
 //! Blocks where the platform cannot publish them is
@@ -16,17 +17,33 @@
 //! [`VirtualSource::protocol`] and [`VirtualDestination::protocol`] report the
 //! one the endpoint was created with.
 //!
+//! # Main thread
+//!
+//! Opening an endpoint takes a [`MainThreadMarker`], and a [`VirtualSource`] and a
+//! [`VirtualDestination`] are `!Send` and `!Sync` on every platform: macOS 15's UMP
+//! endpoint with Function Blocks is a main-thread object, and the traits an
+//! endpoint has do not differ by operating system. Other backends ignore the
+//! marker. What sends from another thread is a [`VirtualSender`]
+//! ([`VirtualSource::sender`]).
+//!
+//! On macOS an endpoint with Function Blocks is one UMP Endpoint, which has both a
+//! source and a destination: a [`VirtualSource`] has an inert destination whose
+//! messages it counts ([`VirtualSource::losses`]), and a [`VirtualDestination`] has
+//! an inert source it never sends on. The OS numbers the blocks itself
+//! ([`VirtualSource::blocks`] reads the numbers peers see).
+//!
 //! A destination delivers into an [`InputProducerHandle`], exactly as a device
 //! input does, so its events are stamped on the same clock and reach the graph
 //! through the same inlets.
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tutti_rt::LockExt;
 
+use tutti_graph::Losses;
 use tutti_midi_device::FunctionBlock;
 use tutti_midi_protocol::{Midi1Translator, Midi2Translator};
-use tutti_ump::EndpointName;
-use tutti_ump::{Message, Ump};
+use tutti_platform::MainThreadMarker;
+use tutti_ump::{DeviceIdentity, EndpointName, FunctionBlockId, Message, ProductInstanceId, Ump};
 
 use crate::InputProducerHandle;
 use crate::backend;
@@ -45,20 +62,36 @@ pub enum VirtualProtocol {
 
 /// What a virtual endpoint is: built with [`new`](Self::new), which starts a
 /// MIDI 2.0 endpoint with no Function Blocks.
+///
+/// The endpoint is declared with the Device Identity (M2-104 §7.1.3) and the
+/// optional Product Instance Id (§7.1.5) it is built with: an app gives the one it
+/// presents to the session ([`MidiSession::present`](crate::MidiSession::present))
+/// and the Id the session reports ([`MidiSession::instance_id`](crate::MidiSession::instance_id)),
+/// so other apps recognise the endpoint again. macOS publishes both with the
+/// endpoint's Function Blocks. The ALSA backend does not publish the identity yet.
 #[derive(Clone, Debug)]
 #[must_use = "a spec does nothing until an endpoint is opened from it"]
 pub struct VirtualSpec {
     name: EndpointName,
+    device: DeviceIdentity,
+    instance: Option<ProductInstanceId>,
     /// The protocol asked for; the backends read it.
     pub(crate) protocol: VirtualProtocol,
     blocks: Vec<FunctionBlock>,
 }
 
 impl VirtualSpec {
-    /// An endpoint named `name`, carrying MIDI 2.0.
-    pub fn new(name: EndpointName) -> Self {
+    /// An endpoint named `name`, identified as `device` with Product Instance Id
+    /// `instance`, carrying MIDI 2.0.
+    pub fn new(
+        name: EndpointName,
+        device: DeviceIdentity,
+        instance: Option<ProductInstanceId>,
+    ) -> Self {
         Self {
             name,
+            device,
+            instance,
             protocol: VirtualProtocol::Midi2,
             blocks: Vec::new(),
         }
@@ -71,7 +104,9 @@ impl VirtualSpec {
         self
     }
 
-    /// The endpoint declaring `block`, replacing a block of the same number.
+    /// The endpoint declaring `block`, replacing a block of the same number. The
+    /// number another application reads for the block is the platform's, which
+    /// [`VirtualSource::blocks`] and [`VirtualDestination::blocks`] report.
     pub fn block(mut self, block: FunctionBlock) -> Self {
         self.blocks.retain(|held| held.id() != block.id());
         self.blocks.push(block);
@@ -84,6 +119,26 @@ impl VirtualSpec {
         &self.name
     }
 
+    /// The Device Identity the endpoint is declared with.
+    #[must_use]
+    #[allow(
+        dead_code,
+        reason = "the macOS backend reads it; the ALSA backend does not publish the identity yet"
+    )]
+    pub(crate) fn device(&self) -> &DeviceIdentity {
+        &self.device
+    }
+
+    /// The Product Instance Id the endpoint is declared with, when it has one.
+    #[must_use]
+    #[allow(
+        dead_code,
+        reason = "the macOS backend reads it; the ALSA backend does not publish the identity yet"
+    )]
+    pub(crate) fn instance(&self) -> Option<&ProductInstanceId> {
+        self.instance.as_ref()
+    }
+
     /// The Function Blocks declared, in the order they were added.
     #[must_use]
     pub fn function_blocks(&self) -> &[FunctionBlock] {
@@ -91,10 +146,63 @@ impl VirtualSpec {
     }
 }
 
-/// The platform's side of a [`VirtualSource`].
-pub(crate) trait SourceBackend: Send + Sync {
+/// The platform's side of a [`VirtualSource`]: the endpoint itself, which stays
+/// on the thread that opened it.
+pub(crate) trait SourceBackend {
+    /// What sends on the endpoint from any thread. It does not keep the endpoint
+    /// alive: once the endpoint is dropped a send is
+    /// [`MidiHardwareError::EndpointGone`](crate::MidiHardwareError::EndpointGone).
+    /// A send never reaches the OS after the endpoint is gone, and the drop waits for
+    /// a send in flight.
+    fn sender(&self) -> Arc<dyn SenderBackend>;
+
+    /// What the endpoint dropped: the messages written to a destination that
+    /// the OS lists beside a source it publishes with Function Blocks. Nothing for
+    /// a backend with no such destination.
+    fn losses(&self) -> Losses {
+        Losses::NONE
+    }
+
+    /// The numbers the OS gave the blocks, indexed by the number the spec gave each,
+    /// when it numbers them itself; `None` when it publishes the spec's own.
+    fn block_numbers(&self) -> Option<&[FunctionBlockId]> {
+        None
+    }
+}
+
+/// The platform's send on a [`VirtualSource`], from any thread.
+pub(crate) trait SenderBackend: Send + Sync {
     /// Publishes one UMP message to the endpoint's subscribers.
     fn send(&self, ump: &Ump) -> Result<()>;
+}
+
+/// The platform's side of a [`VirtualDestination`]: the endpoint itself.
+pub(crate) trait DestinationBackend {
+    /// Whether the endpoint is still delivering.
+    fn is_alive(&self) -> bool;
+
+    /// As [`SourceBackend::block_numbers`].
+    fn block_numbers(&self) -> Option<&[FunctionBlockId]> {
+        None
+    }
+}
+
+/// The numbers other applications read for `spec`'s blocks, in the order the spec
+/// declares them: the OS's, indexed by the number the spec gave, or the spec's own.
+fn published_numbers(spec: &VirtualSpec, os: Option<&[FunctionBlockId]>) -> Vec<FunctionBlockId> {
+    spec.function_blocks()
+        .iter()
+        .map(|block| {
+            os.and_then(|os| os.get(usize::from(block.id().get())).copied())
+                .unwrap_or_else(|| block.id())
+        })
+        .collect()
+}
+
+impl<T: InputConnection> DestinationBackend for T {
+    fn is_alive(&self) -> bool {
+        InputConnection::is_alive(self)
+    }
 }
 
 /// How a source brings a message to its protocol.
@@ -108,13 +216,69 @@ enum Conversion {
     ToMidi2(Box<Mutex<Midi2Translator>>),
 }
 
+/// What a source and its senders share: the platform's send and the narrowing
+/// state of the endpoint's life.
+struct Outbound {
+    sender: Arc<dyn SenderBackend>,
+    conversion: Conversion,
+}
+
+impl Outbound {
+    fn send(&self, ump: Ump) -> Result<()> {
+        let ump = match &self.conversion {
+            Conversion::ToMidi1(midi1_translator) => {
+                // A packet no message is defined for, and any that is not MIDI 2.0
+                // voice, is forwarded as it is.
+                let Ok(message @ Message::Midi2(..)) = ump.decode() else {
+                    return self.sender.send(&ump);
+                };
+                // The packets go in order under the lock: the MIDI 1.0 translator assumes
+                // that what it emitted was sent before the next message.
+                let mut midi1_translator = midi1_translator.lock_recover();
+                let mut sent = Ok(());
+                let count = translate_voice(&mut midi1_translator, message, |packet| {
+                    if sent.is_ok() {
+                        sent = self.sender.send(&packet);
+                    }
+                });
+                if count == 0 {
+                    // A MIDI 2.0 voice message with a MIDI 1.0 form translates to at
+                    // least one packet, so zero packets is a message with none:
+                    // `Message::try_to_midi1` returns its `NoMidi1Form` here and its
+                    // `Ok` is not reached.
+                    message.try_to_midi1()?;
+                }
+                return sent;
+            }
+            Conversion::ToMidi2(translator) => {
+                let translated = translator.lock_recover().translate(ump);
+                match translated {
+                    Some(ump) => ump,
+                    None => return Ok(()),
+                }
+            }
+        };
+        self.sender.send(&ump)
+    }
+}
+
 /// An endpoint other applications read from.
+///
+/// `!Send` and `!Sync` on every platform (see the module docs): it stays on the
+/// thread that opened it, and [`sender`](Self::sender) is what sends from another.
+///
+/// ```compile_fail,E0277
+/// fn crosses_threads<T: Send>() {}
+/// crosses_threads::<tutti_midi_hardware::VirtualSource>();
+/// ```
 #[must_use = "dropping it removes the endpoint"]
 pub struct VirtualSource {
     backend: Box<dyn SourceBackend>,
-    conversion: Conversion,
+    outbound: Arc<Outbound>,
     name: EndpointName,
     protocol: VirtualProtocol,
+    blocks: Vec<FunctionBlockId>,
+    _main: MainThreadMarker,
 }
 
 impl core::fmt::Debug for VirtualSource {
@@ -127,7 +291,14 @@ impl core::fmt::Debug for VirtualSource {
 }
 
 impl VirtualSource {
-    /// Publishes the endpoint `spec` describes.
+    /// Publishes the endpoint `spec` describes. `main` proves the caller is on the
+    /// main thread, where macOS requires an endpoint with Function Blocks to be
+    /// made and dropped.
+    ///
+    /// On macOS an endpoint with Function Blocks is a UMP Endpoint, which has a
+    /// destination as well as a source; the OS lists a destination of the spec's
+    /// name, and what is written to it is dropped and counted
+    /// ([`losses`](Self::losses)).
     ///
     /// # Errors
     ///
@@ -135,8 +306,8 @@ impl VirtualSource {
     /// backend, [`MidiHardwareError::VirtualBlocksUnsupported`](crate::MidiHardwareError::VirtualBlocksUnsupported)
     /// when `spec` declares Function Blocks the platform cannot publish, and the
     /// platform's own error when the OS refuses the endpoint.
-    pub fn open(spec: &VirtualSpec) -> Result<Self> {
-        let (backend, protocol) = backend::open_virtual_source(spec)?;
+    pub fn open(spec: &VirtualSpec, main: MainThreadMarker) -> Result<Self> {
+        let (backend, protocol) = backend::open_virtual_source(spec, main)?;
         let conversion = match protocol {
             VirtualProtocol::Midi1 => {
                 Conversion::ToMidi1(Box::new(Mutex::new(Midi1Translator::new())))
@@ -145,11 +316,18 @@ impl VirtualSource {
                 Conversion::ToMidi2(Box::new(Mutex::new(Midi2Translator::new())))
             }
         };
+        let outbound = Arc::new(Outbound {
+            sender: backend.sender(),
+            conversion,
+        });
+        let blocks = published_numbers(spec, backend.block_numbers());
         Ok(Self {
             backend,
-            conversion,
+            outbound,
             name: spec.name,
             protocol,
+            blocks,
+            _main: main,
         })
     }
 
@@ -179,40 +357,34 @@ impl VirtualSource {
     /// per-note controller, per-note management); nothing is sent. Otherwise
     /// the platform's error when the OS refuses the message.
     pub fn send(&self, ump: Ump) -> Result<()> {
-        let ump = match &self.conversion {
-            Conversion::ToMidi1(midi1_translator) => {
-                // A packet no message is defined for, and any that is not MIDI 2.0
-                // voice, is forwarded as it is.
-                let Ok(message @ Message::Midi2(..)) = ump.decode() else {
-                    return self.backend.send(&ump);
-                };
-                // The packets go in order under the lock: the MIDI 1.0 translator assumes
-                // that what it emitted was sent before the next message.
-                let mut midi1_translator = midi1_translator.lock_recover();
-                let mut sent = Ok(());
-                let count = translate_voice(&mut midi1_translator, message, |packet| {
-                    if sent.is_ok() {
-                        sent = self.backend.send(&packet);
-                    }
-                });
-                if count == 0 {
-                    // A MIDI 2.0 voice message with a MIDI 1.0 form translates to at
-                    // least one packet, so zero packets is a message with none:
-                    // `Message::try_to_midi1` returns its `NoMidi1Form` here and its
-                    // `Ok` is not reached.
-                    message.try_to_midi1()?;
-                }
-                return sent;
-            }
-            Conversion::ToMidi2(translator) => {
-                let translated = translator.lock_recover().translate(ump);
-                match translated {
-                    Some(ump) => ump,
-                    None => return Ok(()),
-                }
-            }
-        };
-        self.backend.send(&ump)
+        self.outbound.send(ump)
+    }
+
+    /// A handle that sends as [`send`](Self::send) does from any thread. It does
+    /// not keep the endpoint alive: after the source is dropped its sends are
+    /// [`MidiHardwareError::EndpointGone`](crate::MidiHardwareError::EndpointGone),
+    /// and none reaches the OS after the drop (the drop waits for a send in flight).
+    pub fn sender(&self) -> VirtualSender {
+        VirtualSender {
+            outbound: Arc::clone(&self.outbound),
+        }
+    }
+
+    /// What the endpoint dropped: the messages written to the destination the OS
+    /// lists beside a source with Function Blocks on macOS, counted `refused`.
+    /// Nothing on other platforms.
+    #[must_use]
+    pub fn losses(&self) -> Losses {
+        self.backend.losses()
+    }
+
+    /// The numbers other applications read for the spec's Function Blocks, in the
+    /// order the spec declares them: the platform's own when it numbers the blocks
+    /// (macOS does, in order of the spec's numbers), the spec's numbers where it
+    /// publishes those (ALSA).
+    #[must_use]
+    pub fn blocks(&self) -> &[FunctionBlockId] {
+        &self.blocks
     }
 
     /// The endpoint's name.
@@ -228,13 +400,56 @@ impl VirtualSource {
     }
 }
 
+/// A [`VirtualSource`]'s send, from any thread.
+///
+/// ```
+/// fn crosses_threads<T: Clone + Send + Sync>() {}
+/// crosses_threads::<tutti_midi_hardware::VirtualSender>();
+/// ```
+#[derive(Clone)]
+pub struct VirtualSender {
+    outbound: Arc<Outbound>,
+}
+
+impl core::fmt::Debug for VirtualSender {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("VirtualSender").finish_non_exhaustive()
+    }
+}
+
+impl VirtualSender {
+    /// As [`VirtualSource::send`].
+    ///
+    /// # Errors
+    ///
+    /// As [`VirtualSource::send`], and
+    /// [`MidiHardwareError::EndpointGone`](crate::MidiHardwareError::EndpointGone)
+    /// once the source is dropped.
+    pub fn send(&self, ump: Ump) -> Result<()> {
+        self.outbound.send(ump)
+    }
+}
+
 /// An endpoint other applications write to; what they send is delivered to the
 /// [`InputProducerHandle`] it was opened with.
+///
+/// `!Send` and `!Sync` on every platform (see the module docs).
+///
+/// On macOS a destination with Function Blocks is a UMP Endpoint, which has a source
+/// as well as a destination; the OS lists a source of the spec's name, and nothing
+/// is ever sent on it.
+///
+/// ```compile_fail,E0277
+/// fn crosses_threads<T: Send>() {}
+/// crosses_threads::<tutti_midi_hardware::VirtualDestination>();
+/// ```
 #[must_use = "dropping it removes the endpoint"]
 pub struct VirtualDestination {
-    connection: Box<dyn InputConnection>,
+    connection: Box<dyn DestinationBackend>,
     name: EndpointName,
     protocol: VirtualProtocol,
+    blocks: Vec<FunctionBlockId>,
+    _main: MainThreadMarker,
 }
 
 impl core::fmt::Debug for VirtualDestination {
@@ -247,18 +462,33 @@ impl core::fmt::Debug for VirtualDestination {
 }
 
 impl VirtualDestination {
-    /// Publishes the endpoint `spec` describes, delivering into `producer`.
+    /// Publishes the endpoint `spec` describes, delivering into `producer`. `main`
+    /// proves the caller is on the main thread.
     ///
     /// # Errors
     ///
     /// As [`VirtualSource::open`].
-    pub fn open(spec: &VirtualSpec, producer: InputProducerHandle) -> Result<Self> {
-        let (connection, protocol) = backend::open_virtual_destination(spec, producer)?;
+    pub fn open(
+        spec: &VirtualSpec,
+        producer: InputProducerHandle,
+        main: MainThreadMarker,
+    ) -> Result<Self> {
+        let (connection, protocol) = backend::open_virtual_destination(spec, producer, main)?;
+        let blocks = published_numbers(spec, connection.block_numbers());
         Ok(Self {
             connection,
             name: spec.name,
             protocol,
+            blocks,
+            _main: main,
         })
+    }
+
+    /// The numbers other applications read for the spec's Function Blocks, as
+    /// [`VirtualSource::blocks`].
+    #[must_use]
+    pub fn blocks(&self) -> &[FunctionBlockId] {
+        &self.blocks
     }
 
     /// Whether the endpoint is still delivering: `false` once its reader ended
@@ -298,7 +528,7 @@ mod tests {
         fail_at: usize,
     }
 
-    impl SourceBackend for Recorder {
+    impl SenderBackend for Recorder {
         fn send(&self, ump: &Ump) -> Result<()> {
             if self.calls.fetch_add(1, Ordering::SeqCst) == self.fail_at {
                 return Err(MidiHardwareError::Unsupported("recorder"));
@@ -308,19 +538,17 @@ mod tests {
         }
     }
 
-    fn midi1_source(fail_at: usize) -> (VirtualSource, Arc<Mutex<Vec<Ump>>>) {
+    fn midi1_source(fail_at: usize) -> (Outbound, Arc<Mutex<Vec<Ump>>>) {
         let sent = Arc::new(Mutex::new(Vec::new()));
-        let source = VirtualSource {
-            backend: Box::new(Recorder {
+        let outbound = Outbound {
+            sender: Arc::new(Recorder {
                 sent: sent.clone(),
                 calls: AtomicUsize::new(0),
                 fail_at,
             }),
             conversion: Conversion::ToMidi1(Box::new(Mutex::new(Midi1Translator::new()))),
-            name: EndpointName::new("recorder").unwrap(),
-            protocol: VirtualProtocol::Midi1,
         };
-        (source, sent)
+        (outbound, sent)
     }
 
     fn bend_range(semitones: u32) -> Ump {
@@ -356,12 +584,12 @@ mod tests {
     #[test]
     fn a_refused_send_makes_the_next_registered_controller_send_its_select_again() {
         // The first controller's second packet (CC 100) is refused.
-        let (source, sent) = midi1_source(1);
+        let (outbound, sent) = midi1_source(1);
         assert!(matches!(
-            source.send(bend_range(12)),
+            outbound.send(bend_range(12)),
             Err(MidiHardwareError::Unsupported(_))
         ));
-        source.send(bend_range(7)).unwrap();
+        outbound.send(bend_range(7)).unwrap();
         // CC 101 of the first; then the whole sequence of the second.
         assert_eq!(controllers(&sent), [101, 101, 100, 6, 38]);
     }
@@ -386,14 +614,14 @@ mod tests {
             per_note: PerNoteTranslation::Mpe(zone),
         });
         // Send 0 (the Note On) succeeds and send 1 (the RPN's CC 101) is refused.
-        let (mut source, sent) = midi1_source(1);
-        source.conversion = Conversion::ToMidi1(Box::new(Mutex::new(midi1_translator)));
+        let (mut outbound, sent) = midi1_source(1);
+        outbound.conversion = Conversion::ToMidi1(Box::new(Mutex::new(midi1_translator)));
         let address = Address {
             group: MidiGroup::FIRST,
             channel: MidiChannel::FIRST,
         };
         let note = NoteNumber::of(60);
-        source
+        outbound
             .send(
                 Message::midi2(
                     address,
@@ -406,8 +634,8 @@ mod tests {
                 .into(),
             )
             .unwrap();
-        assert!(source.send(bend_range(12)).is_err());
-        source
+        assert!(outbound.send(bend_range(12)).is_err());
+        outbound
             .send(
                 Message::midi2(
                     address,
@@ -427,9 +655,9 @@ mod tests {
     // M2-104 Appendix D.2.3: the same controller twice is the four messages twice.
     #[test]
     fn a_second_value_of_the_same_parameter_sends_the_select_again() {
-        let (source, sent) = midi1_source(usize::MAX);
-        source.send(bend_range(12)).unwrap();
-        source.send(bend_range(7)).unwrap();
+        let (outbound, sent) = midi1_source(usize::MAX);
+        outbound.send(bend_range(12)).unwrap();
+        outbound.send(bend_range(7)).unwrap();
         assert_eq!(controllers(&sent), [101, 100, 6, 38, 101, 100, 6, 38]);
     }
 }
