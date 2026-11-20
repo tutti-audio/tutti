@@ -18,7 +18,7 @@
 use super::ask::ControlSlot;
 use super::ask::Reply;
 use super::messages::{AudioCommand, AudioResponse, ControlCommand, Setting};
-use crate::transport::control::{ControlBell, ControlWait, control_bell};
+use crate::transport::control::{ControlUnparker, ControlWait, control_unparker};
 use crossbeam::queue::ArrayQueue;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -45,7 +45,7 @@ const RESPONSE_QUEUE_SIZE: usize = 128;
 /// reached the server before the blocks pushed ahead of it (a `save_state`
 /// that misses a block's parameter writes) would read a state the host has
 /// already moved past.
-pub(super) struct Stamped<T> {
+pub(super) struct Sequenced<T> {
     pub(super) after: u64,
     pub(super) cmd: T,
 }
@@ -55,7 +55,7 @@ pub(super) struct Channels {
     /// What rides the audio lane: blocks, resets, render modes.
     blocks: Arc<ArrayQueue<AudioCommand>>,
     /// What rides the control lane: every other request.
-    controls: Arc<ArrayQueue<Stamped<ControlCommand>>>,
+    controls: Arc<ArrayQueue<Sequenced<ControlCommand>>>,
     /// The newest block sequence **pushed** (queued, not merely submitted):
     /// stored after a push succeeds, so a refused push never advances it and a
     /// block counted here is already in the queue. A control command is stamped
@@ -64,7 +64,7 @@ pub(super) struct Channels {
     pushed: Arc<AtomicU64>,
     /// The newest block sequence the audio lane has dealt with: answered by the
     /// server (or abandoned at its budget), or skipped as stale. A control command stamped with a sequence
-    /// waits for it ([`Stamped`]), so it never reaches the server ahead of a
+    /// waits for it ([`Sequenced`]), so it never reaches the server ahead of a
     /// block submitted before it.
     handled: Arc<AtomicU64>,
     /// Whether a control request owes a reply: one at a time.
@@ -88,7 +88,7 @@ pub(super) struct Channels {
     unparker: Unparker,
     /// The control lane's bell: its thread waits on the control stream and this
     /// together, so a request or the server's news ends the wait at once.
-    control_bell: ControlBell,
+    control_unparker: ControlUnparker,
     /// The negotiated sample rate, as `f64::to_bits`. Lives here rather than
     /// only on `AudioBridge` because *both* threads size a timeout from the
     /// block period — the bridge thread its reply timeout, and the staleness
@@ -166,9 +166,9 @@ pub(super) struct Channels {
     skipped: Tally<u64>,
     /// The bridge thread's writer of `skipped`, minted in `new`.
     skipped_writer: TallyWriter<u64>,
-    /// What became of each of the last [`FATES`] chunks the bridge thread
+    /// What became of each of the last [`BATCH_OUTCOMES`] chunks the bridge thread
     /// dealt with, for the batcher to look up.
-    fates: Arc<Fates>,
+    fates: Arc<BatchOutcomes>,
     /// The control thread is reading the control connection for news: set when
     /// its wait ended on the stream, cleared after the lane is read dry and
     /// the events are delivered.
@@ -185,12 +185,12 @@ pub(super) struct Channels {
     progress: Arc<crate::Wake>,
 }
 
-/// How many chunks back [`Fates`] remembers.
-pub(crate) const FATES: usize = 16;
+/// How many chunks back [`BatchOutcomes`] remembers.
+pub(crate) const BATCH_OUTCOMES: usize = 16;
 
 /// What the bridge thread learned of a chunk.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Fate {
+pub(crate) enum BatchOutcome {
     /// The server published its audio: the reply said so.
     Published,
     /// The server did not publish it: its input slot had been recycled.
@@ -199,7 +199,7 @@ pub(crate) enum Fate {
     Skipped,
 }
 
-/// The last [`FATES`] chunks' fates, one word each: the sequence above two
+/// The last [`BATCH_OUTCOMES`] chunks' fates, one word each: the sequence above two
 /// bits of fate, so a lookup of a sequence the entry no longer holds finds
 /// nothing. Written by the bridge thread alone, read on the audio thread.
 ///
@@ -207,35 +207,35 @@ pub(crate) enum Fate {
 /// gated by the slab's sequence words), so a reader sees a fate or not yet,
 /// and tries again at its next look. The cell's `Acquire`/`Release` is its
 /// own contract and nothing here relies on it.
-struct Fates([PackedAtomic<u64>; FATES]);
+struct BatchOutcomes([PackedAtomic<u64>; BATCH_OUTCOMES]);
 
-impl Fates {
+impl BatchOutcomes {
     fn new() -> Self {
         Self(std::array::from_fn(|_| PackedAtomic::new(0)))
     }
 
     /// Stores `seq`'s fate, unless the word already holds a newer chunk's: a
     /// late reply to an old chunk (a server that stalled for more than
-    /// [`FATES`] chunks) must not erase the newer fate. A plain load decides:
+    /// [`BATCH_OUTCOMES`] chunks) must not erase the newer fate. A plain load decides:
     /// only the bridge thread writes.
-    fn record(&self, seq: u64, fate: Fate) {
-        let word = &self.0[(seq % FATES as u64) as usize];
+    fn record(&self, seq: u64, fate: BatchOutcome) {
+        let word = &self.0[(seq % BATCH_OUTCOMES as u64) as usize];
         if unpack(word.load()).0 > seq {
             return;
         }
         word.store(pack(seq, fate.code()));
     }
 
-    fn get(&self, seq: u64) -> Option<Fate> {
-        let (held, code) = unpack(self.0[(seq % FATES as u64) as usize].load());
+    fn get(&self, seq: u64) -> Option<BatchOutcome> {
+        let (held, code) = unpack(self.0[(seq % BATCH_OUTCOMES as u64) as usize].load());
         if held != seq {
             return None;
         }
-        Fate::from_code(code)
+        BatchOutcome::from_code(code)
     }
 }
 
-/// Bits of a [`Fates`] word that hold the fate's code; the sequence is above.
+/// Bits of a [`BatchOutcomes`] word that hold the fate's code; the sequence is above.
 const CODE_BITS: u32 = 2;
 
 /// The word for `seq` with fate `code`: the code in the low [`CODE_BITS`] bits,
@@ -250,7 +250,7 @@ fn unpack(word: u64) -> (u64, u64) {
     (word >> CODE_BITS, word & ((1 << CODE_BITS) - 1))
 }
 
-impl Fate {
+impl BatchOutcome {
     /// The fate's code in a word: 1, 2 or 3, never 0 (an empty word's).
     fn code(self) -> u64 {
         match self {
@@ -312,7 +312,7 @@ impl Channels {
         progress: Arc<crate::Wake>,
     ) -> std::io::Result<(Self, Waits)> {
         let (unparker, parker) = parker();
-        let (control_bell, control_wait) = control_bell()?;
+        let (control_unparker, control_wait) = control_unparker()?;
         let (dropped_param_events, dropped_midi, skipped) = (tally(), tally(), tally());
         let (abandoned, late, commands_refused, leaked_buffers, unapplied) =
             (tally(), tally(), tally(), tally(), tally());
@@ -326,7 +326,7 @@ impl Channels {
             requests: Arc::default(),
             newest_seq: Arc::new(AtomicU64::new(0)),
             unparker,
-            control_bell,
+            control_unparker,
             sample_rate: Arc::new(AtomicSampleRate::new(sample_rate)),
             reply_wait_ns: Arc::new(AtomicU64::new(0)),
             host_edits: Arc::new(AudioThreadCell::new(None)),
@@ -347,7 +347,7 @@ impl Channels {
             dropped_midi,
             skipped_writer: skipped.writer(),
             skipped,
-            fates: Arc::new(Fates::new()),
+            fates: Arc::new(BatchOutcomes::new()),
             news: Arc::default(),
             probe: Arc::default(),
             progress,
@@ -533,17 +533,17 @@ impl Channels {
     /// the pushes.
     pub(super) fn wake(&self) {
         self.unparker.unpark();
-        self.control_bell.ring();
+        self.control_unparker.unpark();
         self.progress.notify();
     }
 
     /// A call that wakes both lanes' threads, for what has no `Channels` to
     /// hold: it holds the two bells and no queue.
     pub(super) fn waker(&self) -> impl Fn() + Send + Sync + use<> {
-        let (unparker, control_bell) = (self.unparker.clone(), self.control_bell.clone());
+        let (unparker, control_unparker) = (self.unparker.clone(), self.control_unparker.clone());
         move || {
             unparker.unpark();
-            control_bell.ring();
+            control_unparker.unpark();
         }
     }
 
@@ -652,14 +652,14 @@ impl Channels {
     /// Record what became of chunk `seq`. Bridge thread only. A chunk not
     /// yet submitted has no fate: a peer-supplied `seq` far ahead would
     /// otherwise claim a word of the ring and erase the fates behind it.
-    pub(super) fn note_fate(&self, seq: u64, fate: Fate) {
+    pub(super) fn note_outcome(&self, seq: u64, fate: BatchOutcome) {
         if self.sent(seq) {
             self.fates.record(seq, fate);
         }
     }
 
-    /// What became of chunk `seq`, while it is among the last [`FATES`].
-    pub(super) fn fate(&self, seq: u64) -> Option<Fate> {
+    /// What became of chunk `seq`, while it is among the last [`BATCH_OUTCOMES`].
+    pub(super) fn fate(&self, seq: u64) -> Option<BatchOutcome> {
         self.fates.get(seq)
     }
 
@@ -723,11 +723,11 @@ impl Channels {
     /// control request stall audio.
     pub(super) fn push_control(&self, cmd: ControlCommand) -> bool {
         let after = self.pushed();
-        if self.controls.push(Stamped { after, cmd }).is_err() {
+        if self.controls.push(Sequenced { after, cmd }).is_err() {
             self.note_command_refused();
             return false;
         }
-        self.control_bell.ring();
+        self.control_unparker.unpark();
         true
     }
 
@@ -778,7 +778,7 @@ impl Channels {
                 Setting::Fence => slots.fence = Some(applied),
             }
         }
-        self.control_bell.ring();
+        self.control_unparker.unpark();
         // A control command waiting for blocks the audio lane is holding for
         // this setting must see it.
         self.progress.notify();
@@ -808,7 +808,7 @@ impl Channels {
         self.unapplied.clone()
     }
 
-    pub(super) fn pop_control(&self) -> Option<Stamped<ControlCommand>> {
+    pub(super) fn pop_control(&self) -> Option<Sequenced<ControlCommand>> {
         self.controls.pop()
     }
 
@@ -892,13 +892,21 @@ mod tests {
         assert_eq!(pack(5, 3), 0b10111);
         assert_eq!(unpack(0b10111), (5, 3));
         let max = u64::MAX >> CODE_BITS;
-        for seq in [0, 1, FATES as u64, max] {
-            for fate in [Fate::Published, Fate::Refused, Fate::Skipped] {
+        for seq in [0, 1, BATCH_OUTCOMES as u64, max] {
+            for fate in [
+                BatchOutcome::Published,
+                BatchOutcome::Refused,
+                BatchOutcome::Skipped,
+            ] {
                 let (held, code) = unpack(pack(seq, fate.code()));
-                assert_eq!((held, Fate::from_code(code)), (seq, Some(fate)));
+                assert_eq!((held, BatchOutcome::from_code(code)), (seq, Some(fate)));
             }
         }
-        assert_eq!(Fate::from_code(0), None, "an empty word holds no fate");
+        assert_eq!(
+            BatchOutcome::from_code(0),
+            None,
+            "an empty word holds no fate"
+        );
         assert_eq!(unpack(0), (0, 0));
     }
 
@@ -930,11 +938,15 @@ mod tests {
     fn a_fate_for_a_block_never_submitted_is_dropped() {
         let (c, _) = channels();
         c.note_submitted(3);
-        c.note_fate(3, Fate::Published);
-        for hostile in [4, 3 + FATES as u64, u64::MAX >> 1, u64::MAX] {
-            c.note_fate(hostile, Fate::Refused);
+        c.note_outcome(3, BatchOutcome::Published);
+        for hostile in [4, 3 + BATCH_OUTCOMES as u64, u64::MAX >> 1, u64::MAX] {
+            c.note_outcome(hostile, BatchOutcome::Refused);
         }
-        assert_eq!(c.fate(3), Some(Fate::Published), "block 3's fate survived");
+        assert_eq!(
+            c.fate(3),
+            Some(BatchOutcome::Published),
+            "block 3's fate survived"
+        );
         assert_eq!(c.fate(4), None);
     }
 

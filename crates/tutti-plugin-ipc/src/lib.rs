@@ -15,7 +15,7 @@
 //! crashes or hangs takes down its server, which the host sees as one plugin
 //! failing. It is **not a security boundary**: the server runs as the host's
 //! user, and a plugin there can do what that user can do, `ptrace` or write the
-//! host's memory included. [`BridgeConfig::protect_host_memory`] clears the
+//! host's memory included. [`IpcConfig::protect_host_memory`] clears the
 //! host's dumpable flag on Linux for the plugins it spawns afterwards (it also
 //! stops core dumps and a same-user debugger or crash handler attaching, so it
 //! is the app's choice and off by default). On macOS the equivalent is the app's
@@ -62,19 +62,19 @@ mod served_handle_tests;
 
 pub(crate) use batcher::Batcher;
 pub(crate) use batcher::{BlockPayload, Chunks};
-pub(crate) use client::audio::BridgeListener;
 pub(crate) use client::audio::HarmonyInputs;
-pub use client::audio::{AudioBridge, BridgeEvent, BridgeThread, Replies};
-pub(crate) use client::audio::{FATES, Fate};
+pub(crate) use client::audio::IpcListener;
+pub use client::audio::{AudioBridge, IpcEvent, IpcThread, Replies};
+pub(crate) use client::audio::{BATCH_OUTCOMES, BatchOutcome};
 pub use client::{EditorLoader, EditorSite, PluginBridge};
 pub(crate) use wake::Wake;
 // The bridge's free-buffer pool, for the delivery test in `tutti-plugin` that
 // fills it the way the node does.
 #[doc(hidden)]
 pub use client::audio::{PARAM_BUFFERS, PayloadPool};
-pub use config::{AudioConfig, BridgeConfig, RandomSourceError, unique_socket_path};
+pub use config::{AudioConfig, IpcConfig, RandomSourceError, unique_socket_path};
 pub use error::PluginRenderFault;
-pub use ipc::{Ipc, IpcController, IpcOrigin, IpcParts, IpcProcessor, Launched};
+pub use ipc::{Ipc, IpcController, IpcParts, IpcProcessor, LaunchSpec, Launched};
 pub use offline_wait::OfflineWait;
 pub use process_guard::ProcessGuard;
 pub use protocol::frame::{FrameBuf, read_frame, write_frame};

@@ -138,7 +138,7 @@ use tutti_plugin_host::{
     NodeControls, PluginControls, PluginHandle, PluginSignal, PluginStatus, Subscription,
 };
 use tutti_plugin_types::{
-    BridgeError, ParamEdit, PluginFailure, PluginInvalidation, PluginRefresh, PluginTail,
+    IpcError, ParamEdit, PluginFailure, PluginInvalidation, PluginRefresh, PluginTail,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -211,7 +211,7 @@ impl PluginLoad {
     /// instance's init, with no subprocess to wait for).
     ///
     /// A load the catalog refuses, or whose hosting the format cannot have
-    /// ([`BridgeError::NotOutOfProcess`] for VST2 asked to be served), is
+    /// ([`IpcError::NotOutOfProcess`] for VST2 asked to be served), is
     /// refused here, before anything is opened.
     pub(crate) fn run(self) -> PluginLoaded {
         let loadable = self.loadable.clone();
@@ -258,9 +258,7 @@ impl PluginLoad {
             // restores the state it was staged (`StateRestore`; a failure
             // before that step is a load failure and blames nothing): the state
             // is what the load is held against (the reload's landing withholds it).
-            Err(e @ tutti_plugin_types::BridgeError::StateRestore { .. })
-                if self.state.is_some() =>
-            {
+            Err(e @ tutti_plugin_types::IpcError::StateRestore { .. }) if self.state.is_some() => {
                 let reason = e.to_string();
                 (Err(e), Some(Err(reason)))
             }
@@ -305,7 +303,7 @@ struct Mirror {
 
 /// An opened plugin (or why it did not open) and its parameter mirror.
 struct Open {
-    plugin: Result<HostPlugin, BridgeError>,
+    plugin: Result<HostPlugin, IpcError>,
     /// The state restore, if one was asked for: the plugin's refusal, as text.
     restore: Option<Result<(), String>>,
     mirror: Option<Mirror>,
@@ -313,7 +311,7 @@ struct Open {
 
 impl Open {
     /// A load that did not open: `why`.
-    fn refused(why: BridgeError) -> Self {
+    fn refused(why: IpcError) -> Self {
         Self {
             plugin: Err(why),
             restore: None,
@@ -3370,7 +3368,7 @@ mod tests {
             panic!("{cause:?}");
         };
         assert!(
-            matches!(&**source, BridgeError::Blacklisted { reason, .. } if reason == "crashed the scanner"),
+            matches!(&**source, IpcError::Blacklisted { reason, .. } if reason == "crashed the scanner"),
             "{source:?}"
         );
     }

@@ -288,7 +288,7 @@ tutti-plugin-host  setter  crates/tutti-plugin-host/src/node/client.rs::InProces
 tutti-plugin-host  option-arg  crates/tutti-plugin-host/src/control_handle.rs::PluginHandle::with_server_pid
 
 # tutti-plugin-ipc
-tutti-plugin-ipc  config-width  crates/tutti-plugin-ipc/src/config/bridge.rs::BridgeConfig::at
+tutti-plugin-ipc  config-width  crates/tutti-plugin-ipc/src/config/bridge.rs::IpcConfig::at
 tutti-plugin-ipc  ctor-result  crates/tutti-plugin-ipc/src/process_guard.rs::ProcessGuard::launched
 tutti-plugin-ipc  setter  crates/tutti-plugin-ipc/src/batcher.rs::Batcher::set_offline_wait
 tutti-plugin-ipc  setter  crates/tutti-plugin-ipc/src/client/audio/mod.rs::AudioBridge::set_listener

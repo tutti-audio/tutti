@@ -14,7 +14,7 @@
 //! one it writes and reads, and the bridge only asks the server to open a new one
 //! ([`AudioBridge::setup_shared_memory`]).
 //!
-//! The bridge's threads live in [`BridgeThread`] (the audio lane's, which owns the
+//! The bridge's threads live in [`IpcThread`] (the audio lane's, which owns the
 //! control lane's); its `Drop` shuts them down. **A block never waits behind a
 //! control request**: each lane has its own thread, queue and wake-up.
 
@@ -31,7 +31,7 @@ use crate::ServerWatch;
 use crate::SlabLayout;
 use dpi::Size;
 use tutti_plugin_types::{
-    BlockStatus, BridgeResult, ContentScale, Delivered, EditWriter, EditorError, PluginFailure,
+    BlockStatus, ContentScale, Delivered, EditWriter, EditorError, IpcResult, PluginFailure,
     StateError, StateUse, UnknownParam, edit_slots,
 };
 use tutti_plugin_types::{
@@ -90,7 +90,7 @@ pub(crate) use channels::COMMAND_QUEUE_SIZE;
 use channels::Channels;
 pub use channels::Replies;
 pub(crate) use channels::response_ring;
-pub(crate) use channels::{FATES, Fate};
+pub(crate) use channels::{BATCH_OUTCOMES, BatchOutcome};
 use lifecycle::Lifecycle;
 use messages::{AudioCommand, AudioResponse, ControlCommand, Setting};
 use parking_lot::Mutex;
@@ -101,8 +101,8 @@ use std::sync::Arc;
 use std::time::Duration;
 use tutti_plugin_types::Timeouts;
 
-pub use messages::BridgeEvent;
-pub use thread::BridgeThread;
+pub use messages::IpcEvent;
+pub use thread::IpcThread;
 
 /// Waits up to `wait` for the bridge's answer to a query. The callers pass a
 /// [`Timeouts`] wait (`param_wait`, `settle_wait`), which is the bridge's own
@@ -118,9 +118,9 @@ fn await_reply<T>(
 /// Listener for plugin-originated unsolicited events. Invoked on either lane's
 /// thread (plain OS threads, so it can be called concurrently) — blocking is
 /// OK, but prefer posting to a channel and returning promptly.
-pub(crate) type BridgeListener = Arc<dyn Fn(BridgeEvent) + Send + Sync>;
+pub(crate) type IpcListener = Arc<dyn Fn(IpcEvent) + Send + Sync>;
 
-pub(super) type ListenerSlot = Arc<Mutex<Option<BridgeListener>>>;
+pub(super) type ListenerSlot = Arc<Mutex<Option<IpcListener>>>;
 
 /// The audio side of a served plugin: the realtime-safe command and response
 /// bus to the server, and the control-thread queries answered over it. Clone
@@ -208,7 +208,7 @@ impl Replies {
 
 impl AudioBridge {
     /// Connects to the server at `socket_path` and spawns the bridge thread,
-    /// which speaks for the queues; dropping the [`BridgeThread`] stops it.
+    /// which speaks for the queues; dropping the [`IpcThread`] stops it.
     ///
     /// # Errors
     ///
@@ -218,7 +218,7 @@ impl AudioBridge {
         sample_rate: SampleRate,
         watch: Arc<ServerWatch>,
         timeouts: Timeouts,
-    ) -> BridgeResult<(Self, BridgeThread, Replies)> {
+    ) -> IpcResult<(Self, IpcThread, Replies)> {
         // The rate lives on `Channels`, not here: the bridge thread sizes its
         // own reply timeout from the same block period, and two copies of the
         // rate would let the two timeouts drift apart.
@@ -235,7 +235,7 @@ impl AudioBridge {
         let lifecycle = Lifecycle::new(watch, timeouts);
         let listener: ListenerSlot = Arc::new(Mutex::new(None));
         let (responses, replies, responses_lost) = response_ring();
-        let thread = BridgeThread::spawn(
+        let thread = IpcThread::spawn(
             channels.clone(),
             responses,
             waits,
@@ -268,7 +268,7 @@ impl AudioBridge {
     /// `None` to clear. The callback runs on a lane's thread after each
     /// dispatched command: the control lane's for the plugin's news, either's
     /// for a crash.
-    pub fn set_listener(&self, listener: Option<BridgeListener>) {
+    pub fn set_listener(&self, listener: Option<IpcListener>) {
         *self.listener.lock() = listener;
     }
 
@@ -278,7 +278,7 @@ impl AudioBridge {
     pub(super) fn report_edit(&self, edit: tutti_plugin_types::ParamEdit) {
         let listener = self.listener.lock().clone();
         if let Some(listener) = listener {
-            listener(BridgeEvent::ParameterChanged { edit });
+            listener(IpcEvent::ParameterChanged { edit });
         }
     }
 
@@ -288,7 +288,7 @@ impl AudioBridge {
     pub(super) fn report_transport(&self, request: tutti_plugin_types::TransportRequest) {
         let listener = self.listener.lock().clone();
         if let Some(listener) = listener {
-            listener(BridgeEvent::Transport { request });
+            listener(IpcEvent::Transport { request });
         }
     }
 
@@ -412,7 +412,7 @@ impl AudioBridge {
     }
 
     /// What the bridge thread learned of chunk `seq`, among the last few.
-    pub(crate) fn chunk_fate(&self, seq: u64) -> Option<Fate> {
+    pub(crate) fn batch_outcome(&self, seq: u64) -> Option<BatchOutcome> {
         self.channels.fate(seq)
     }
 

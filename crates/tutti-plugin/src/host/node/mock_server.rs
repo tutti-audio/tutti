@@ -74,7 +74,7 @@ pub(super) struct Rig {
 
 /// The bridge thread and the server thread: the rig lives while they do.
 pub(super) struct Threads {
-    _bridge: tutti_plugin_ipc::BridgeThread,
+    _bridge: tutti_plugin_ipc::IpcThread,
     _server: std::thread::JoinHandle<()>,
 }
 
@@ -93,8 +93,8 @@ fn no_editor(
     _: &tutti_plugin_types::MainWorkHandle,
     plugin: &tutti_plugin_types::PluginRef,
     _: tutti_plugin_types::PluginFormat,
-) -> tutti_plugin_types::BridgeResult<Box<dyn tutti_plugin_types::Editor>> {
-    Err(tutti_plugin_types::BridgeError::LoadFailed {
+) -> tutti_plugin_types::IpcResult<Box<dyn tutti_plugin_types::Editor>> {
+    Err(tutti_plugin_types::IpcError::LoadFailed {
         path: Some(plugin.path().to_path_buf()),
         stage: tutti_plugin_types::LoadStage::Opening,
         reason: "no editor in these tests".into(),

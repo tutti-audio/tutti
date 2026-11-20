@@ -4,7 +4,7 @@
 //! Wire: `[u32 big-endian length][postcard payload]` both directions, with the body capped at
 //! the message type's own cap ([`Framed::CAP`]) — the length arrives from the peer, so it
 //! is checked before it is believed, in both `send` and `recv`. EOF at either end surfaces as
-//! [`BridgeError::ProcessCrashed`], and so does a length prefix over the cap: a peer that cannot
+//! [`IpcError::ProcessCrashed`], and so does a length prefix over the cap: a peer that cannot
 //! frame has desynchronised the stream, and there is no resynchronisation point to recover to.
 //!
 //! **Two independent bounds, because they answer different questions.**
@@ -16,10 +16,10 @@
 
 use crate::Framed;
 use crate::protocol::frame::{decode_body, decode_prefix, write_frame};
-use tutti_plugin_types::{BridgeError, BridgeResult};
+use tutti_plugin_types::{IpcError, IpcResult};
 
 use super::sys::Wakeup;
-pub use super::sys::{ControlBell, ControlWait, Watch, control_bell, socket_name};
+pub use super::sys::{ControlUnparker, ControlWait, Watch, control_unparker, socket_name};
 use interprocess::local_socket::Stream;
 use interprocess::local_socket::traits::Stream as _;
 use std::io::Read;
@@ -46,7 +46,7 @@ pub const SEND_TIMEOUT: Duration = Duration::from_secs(10);
 /// # Errors
 ///
 /// The socket name is invalid or nothing is listening on it.
-pub fn connect(socket: &Path) -> BridgeResult<ControlStream> {
+pub fn connect(socket: &Path) -> IpcResult<ControlStream> {
     connect_within(socket, SEND_TIMEOUT)
 }
 
@@ -57,7 +57,7 @@ pub fn connect(socket: &Path) -> BridgeResult<ControlStream> {
 /// pipe, as it does for reads, and there a hung server's writes end when the
 /// server is ended (the session's hang verdict kills it, closing the pipe).
 /// Arming is therefore best-effort and its failure is not an error.
-pub(crate) fn connect_within(socket: &Path, send_timeout: Duration) -> BridgeResult<ControlStream> {
+pub(crate) fn connect_within(socket: &Path, send_timeout: Duration) -> IpcResult<ControlStream> {
     let name = socket_name(socket)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
     let stream = Stream::connect(name)?;
@@ -72,15 +72,15 @@ pub(crate) fn connect_within(socket: &Path, send_timeout: Duration) -> BridgeRes
 /// A frame the peer must reject (over the cap, or not encodable) is refused
 /// with nothing written, so the stream stays synchronised: a send the host
 /// itself declines is not a crash. A write the peer does not take within the
-/// send deadline is [`BridgeError::Timeout`] with `partial` set: some of the
+/// send deadline is [`IpcError::Timeout`] with `partial` set: some of the
 /// frame may be on the wire, and the connection cannot go on.
-pub fn send<T: Framed>(stream: &mut ControlStream, msg: &T) -> BridgeResult<()> {
+pub fn send<T: Framed>(stream: &mut ControlStream, msg: &T) -> IpcResult<()> {
     write_frame(stream, msg).map_err(|e| match e {
-        BridgeError::Io(io)
+        IpcError::Io(io)
             if io.kind() == std::io::ErrorKind::TimedOut
                 || io.kind() == std::io::ErrorKind::WouldBlock =>
         {
-            BridgeError::Timeout {
+            IpcError::Timeout {
                 operation: "send",
                 after: SEND_TIMEOUT,
                 partial: true,
@@ -311,7 +311,7 @@ fn recv_by<T: Framed>(
     deadline: Instant,
     partial: &mut PartialFrame,
     wakeup: &Wakeup,
-) -> BridgeResult<T> {
+) -> IpcResult<T> {
     if !partial.have_len {
         let mut prefix = partial.prefix;
         let r = read_exact_by(
@@ -335,7 +335,7 @@ fn recv_by<T: Framed>(
         // [`send`].
         let len = decode_prefix(partial.prefix, T::CAP).map_err(|e| {
             tracing::warn!("plugin server sent a {e}; treating it as a crash");
-            BridgeError::ProcessCrashed
+            IpcError::ProcessCrashed
         })?;
         // The buffer is the connection's: its capacity is kept between frames
         // (and trimmed after a large one, `clear`), so a block's reply reads
@@ -373,7 +373,7 @@ fn recv_by<T: Framed>(
 /// Still deadline-bounded, by [`HANDSHAKE_TIMEOUT`]: "no timeout" on a socket
 /// means a peer that never speaks parks this thread forever, and the handshake
 /// runs before any crash reporting exists to notice.
-pub fn recv<T: Framed>(stream: &mut ControlStream) -> BridgeResult<T> {
+pub fn recv<T: Framed>(stream: &mut ControlStream) -> IpcResult<T> {
     let deadline = Instant::now() + HANDSHAKE_TIMEOUT;
     // The handshake has no resume path — a failure here ends the connection —
     // so the cursor is local and dropped with the frame it describes.
@@ -395,7 +395,7 @@ pub fn recv<T: Framed>(stream: &mut ControlStream) -> BridgeResult<T> {
 /// to survive a timeout and keep the connection must use [`recv_resumable`]
 /// instead; this one is for the paths where a timeout is already fatal
 /// (handshake, probe, launch).
-pub fn recv_within<T: Framed>(stream: &mut ControlStream, timeout: Duration) -> BridgeResult<T> {
+pub fn recv_within<T: Framed>(stream: &mut ControlStream, timeout: Duration) -> IpcResult<T> {
     let mut partial = PartialFrame::default();
     recv_resumable(stream, timeout, &mut partial)
 }
@@ -414,17 +414,17 @@ pub fn recv_resumable<T: Framed>(
     stream: &mut ControlStream,
     timeout: Duration,
     partial: &mut PartialFrame,
-) -> BridgeResult<T> {
+) -> IpcResult<T> {
     let deadline = Instant::now() + timeout;
     with_poll_timeout(stream, timeout, |s, wakeup| {
         recv_by(s, deadline, partial, wakeup)
     })
     .map_err(|e| match e {
-        BridgeError::Io(io)
+        IpcError::Io(io)
             if io.kind() == std::io::ErrorKind::TimedOut
                 || io.kind() == std::io::ErrorKind::WouldBlock =>
         {
-            BridgeError::Timeout {
+            IpcError::Timeout {
                 operation: "recv",
                 after: timeout,
                 partial: partial.in_progress(),
@@ -479,8 +479,8 @@ pub fn recv_resumable<T: Framed>(
 fn with_poll_timeout<T>(
     stream: &mut ControlStream,
     budget: Duration,
-    f: impl FnOnce(&mut ControlStream, &Wakeup) -> BridgeResult<T>,
-) -> BridgeResult<T> {
+    f: impl FnOnce(&mut ControlStream, &Wakeup) -> IpcResult<T>,
+) -> IpcResult<T> {
     let poll = budget.min(POLL_INTERVAL).max(Duration::from_millis(1));
     let wakeup = Wakeup::arm(stream, poll);
     let result = f(stream, &wakeup);
@@ -497,9 +497,9 @@ fn annotate(e: std::io::Error, stage: &str) -> std::io::Error {
     std::io::Error::new(e.kind(), format!("reading the {stage}: {e}"))
 }
 
-fn crashed_on_eof(e: std::io::Error) -> BridgeError {
+fn crashed_on_eof(e: std::io::Error) -> IpcError {
     if e.kind() == std::io::ErrorKind::UnexpectedEof {
-        BridgeError::ProcessCrashed
+        IpcError::ProcessCrashed
     } else {
         e.into()
     }
@@ -666,7 +666,7 @@ mod tests {
         let err = recv_resumable::<ControlFrame>(host, Duration::from_millis(20), &mut partial)
             .unwrap_err();
         match err {
-            BridgeError::Timeout { partial: p, .. } => assert!(
+            IpcError::Timeout { partial: p, .. } => assert!(
                 p,
                 "the prefix was consumed, so the stream is mid-frame and the \
                  timeout must say so — a caller told otherwise would restart \
@@ -761,7 +761,7 @@ mod tests {
         // The peer sends nothing at all.
         let err = recv_within::<ControlFrame>(&mut p.host, Duration::from_millis(20)).unwrap_err();
         match err {
-            BridgeError::Timeout { partial, .. } => assert!(
+            IpcError::Timeout { partial, .. } => assert!(
                 !partial,
                 "no byte was ever sent, so the stream is still on a frame \
                  boundary — reporting `partial` here would make every idle \
@@ -793,7 +793,7 @@ mod tests {
         }
         let err = recv_within::<ControlFrame>(&mut p.host, Duration::from_millis(50)).unwrap_err();
         match err {
-            BridgeError::Timeout { partial, .. } => assert!(
+            IpcError::Timeout { partial, .. } => assert!(
                 partial,
                 "the prefix and 8 body bytes were consumed, so the stream is \
                  mid-frame. Reporting it as clean would let a caller resume and \
@@ -848,7 +848,7 @@ mod tests {
                 .expect("the send never gave up on a peer that reads nothing");
             let _ = std::fs::remove_file(&path);
             assert!(
-                matches!(result, Err(BridgeError::Timeout { partial: true, .. })),
+                matches!(result, Err(IpcError::Timeout { partial: true, .. })),
                 "{result:?}"
             );
         }

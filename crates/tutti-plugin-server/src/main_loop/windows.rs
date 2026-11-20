@@ -5,7 +5,7 @@
 //! touching the loop's logic.
 
 use tutti_plugin_ipc_ffi::Ready;
-use tutti_plugin_types::{BridgeResult, Wakeups};
+use tutti_plugin_types::{IpcResult, Wakeups};
 
 #[path = "windows_bell.rs"]
 mod bell;
@@ -36,7 +36,7 @@ impl Native {
         timeout: std::time::Duration,
         bell: &Bell,
         _ready: &mut Vec<Ready>,
-    ) -> BridgeResult<bool> {
+    ) -> IpcResult<bool> {
         wait_readable(stream, Some(timeout), bell)
     }
 }
@@ -61,7 +61,7 @@ pub(crate) fn wait_readable(
     stream: &Stream,
     timeout: Option<std::time::Duration>,
     wake: &Bell,
-) -> BridgeResult<bool> {
+) -> IpcResult<bool> {
     use std::os::windows::io::AsHandle;
     use std::time::Duration;
     use tutti_platform::Instant;

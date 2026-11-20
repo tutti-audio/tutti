@@ -6,7 +6,7 @@ use tutti_plugin::catalog::{
 };
 use tutti_plugin_db::{FileFacts, FileRow, RowChange, canonical_path};
 use tutti_plugin_types::Described;
-use tutti_plugin_types::{BridgeError, PluginClass, PluginDescriptor, PluginFormat, SampleRate};
+use tutti_plugin_types::{IpcError, PluginClass, PluginDescriptor, PluginFormat, SampleRate};
 
 /// A catalog whose one file `path` holds the plugin `id` of `format`, or, with no
 /// `id`, is blacklisted for `reason`.
@@ -46,7 +46,7 @@ fn an_uncatalogued_plugin_does_not_consult_a_blacklist() {
     )
     .expect_err("the fixture is not a loadable plugin");
     assert!(
-        !matches!(err, BridgeError::Blacklisted { .. }),
+        !matches!(err, IpcError::Blacklisted { .. }),
         "an uncatalogued plugin has no blacklist to be refused by, got {err:?}"
     );
 }
@@ -74,7 +74,7 @@ fn a_plugin_blacklisted_after_its_resolve_is_refused_at_the_load() {
     )
     .expect_err("the plugin is blacklisted now");
     assert!(
-        matches!(&err, BridgeError::Blacklisted { reason, .. } if reason == "crashed while scanning"),
+        matches!(&err, IpcError::Blacklisted { reason, .. } if reason == "crashed while scanning"),
         "{err:?}"
     );
 }

@@ -24,7 +24,7 @@
 //! load-bearing rather than decorative.
 
 use crate::Batcher;
-use crate::BridgeThread;
+use crate::IpcThread;
 use crate::PluginBridge;
 use tutti_fixtures::machine_lock;
 
@@ -36,7 +36,7 @@ use crate::unique_socket_path;
 use crate::{
     AudioReply, AudioRequest, ControlFrame, Framed, PROTOCOL_VERSION, Request, SlabLayout,
 };
-use crate::{AudioSlab, Chunks, FATES, RING_SLOTS, Replies, SlabWriter};
+use crate::{AudioSlab, BATCH_OUTCOMES, Chunks, RING_SLOTS, Replies, SlabWriter};
 use std::sync::Arc;
 use tutti_buffers::FloatWidth;
 use tutti_buffers::{InputOutput, Planes, PlanesMut};
@@ -52,8 +52,8 @@ fn no_editor(
     _: &tutti_plugin_types::MainWorkHandle,
     plugin: &tutti_plugin_types::PluginRef,
     _: tutti_plugin_types::PluginFormat,
-) -> tutti_plugin_types::BridgeResult<Box<dyn tutti_plugin_types::Editor>> {
-    Err(tutti_plugin_types::BridgeError::LoadFailed {
+) -> tutti_plugin_types::IpcResult<Box<dyn tutti_plugin_types::Editor>> {
+    Err(tutti_plugin_types::IpcError::LoadFailed {
         path: Some(plugin.path().to_path_buf()),
         stage: tutti_plugin_types::LoadStage::Opening,
         reason: "no editor in these tests".into(),
@@ -203,7 +203,7 @@ fn stereo_layout() -> SlabLayout {
 /// node's batcher owns in production (`SlabWriter`: one per direction).
 type Rig = (
     Arc<PluginBridge>,
-    BridgeThread,
+    IpcThread,
     std::thread::JoinHandle<()>,
     SlabWriter,
     Replies,
@@ -810,7 +810,7 @@ fn a_stale_slot_holding_real_audio_still_yields_silence() {
 ///
 /// Returned deliberately without a server thread — the point is a bridge that
 /// never publishes to the slab.
-fn bridge_with_no_server() -> (Arc<PluginBridge>, BridgeThread, SlabWriter, Replies) {
+fn bridge_with_no_server() -> (Arc<PluginBridge>, IpcThread, SlabWriter, Replies) {
     let path = unique_socket_path().expect("the OS has a random source");
     let _ = std::fs::remove_file(&path);
 
@@ -1120,7 +1120,7 @@ fn a_chunk_the_server_refuses_is_counted_refused() {
     // Block 4 sees chunk 2 in the ring; chunk 1's fate is not read yet.
     block();
     wait_for(&bridge, "chunk 1's fate", || {
-        bridge.audio().chunk_fate(1) == Some(crate::Fate::Refused)
+        bridge.audio().batch_outcome(1) == Some(crate::BatchOutcome::Refused)
     });
     // Chunk 4 is answered before block 5, so block 5's collect finds it and
     // neither of its two looks can count it late.
@@ -1164,7 +1164,7 @@ fn a_chunk_the_server_never_accounts_for_is_counted_unanswered() {
     let mut output = Planar::new();
     let mut midi_out = MidiEventVec::new();
 
-    for sent in 1..=2 * FATES as u64 {
+    for sent in 1..=2 * BATCH_OUTCOMES as u64 {
         drive_one_block(&mut batcher, &bridge, &input, &mut output, &mut midi_out);
         wait_for(&bridge, "the bridge to deal with the chunk", || {
             bridge.audio().block_counts().abandoned + bridge.audio().skipped_cell().get() >= sent
@@ -1302,7 +1302,7 @@ fn silence_on_a_crashed_bridge_does_not_allocate() {
 /// a plugin that misses one deadline is slow, not dead, and the slab's sequence
 /// check already turns a missing reply into silence for that block alone.
 ///
-/// But the timeout surfaces as `BridgeError::Timeout` out of `recv_reply`, and
+/// But the timeout surfaces as `IpcError::Timeout` out of `recv_reply`, and
 /// `handle` returns it through `?` into `pump`, which treats *every* `handle`
 /// error as connection-level: it calls `crash()`, latches the cause, drains the
 /// queue with errors and **returns**, ending the thread. From then on

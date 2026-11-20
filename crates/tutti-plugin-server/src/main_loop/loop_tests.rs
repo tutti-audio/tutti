@@ -21,7 +21,7 @@ use tutti_plugin_ipc::{
     AudioReply, AudioRequest, AudioSlab, ControlFrame, ControlReply, ControlRequest,
     ProcessAudioData, ReqId, Request, read_frame, write_frame,
 };
-use tutti_plugin_types::{BridgeError, BridgeResult, ContentScale};
+use tutti_plugin_types::{ContentScale, IpcError, IpcResult};
 
 use super::{Native, Stream, serve_every};
 
@@ -94,7 +94,7 @@ impl Script {
 }
 
 impl Transport<Request, ControlFrame> for Script {
-    fn wait_readable(&mut self, timeout: Option<Duration>, _: &Bell) -> BridgeResult<bool> {
+    fn wait_readable(&mut self, timeout: Option<Duration>, _: &Bell) -> IpcResult<bool> {
         let timeout = timeout.expect("the loop waits for a bounded time");
         if let Some(on_wait) = self.on_wait.as_mut() {
             on_wait();
@@ -103,18 +103,18 @@ impl Transport<Request, ControlFrame> for Script {
         self.wait_inner(timeout)
     }
 
-    fn recv(&mut self) -> BridgeResult<Request> {
+    fn recv(&mut self) -> IpcResult<Request> {
         self.recv_inner()
     }
 
-    fn send(&mut self, msg: &ControlFrame) -> BridgeResult<()> {
+    fn send(&mut self, msg: &ControlFrame) -> IpcResult<()> {
         self.heard.push(msg.clone());
         Ok(())
     }
 }
 
 impl Script {
-    fn wait_inner(&mut self, _timeout: Duration) -> BridgeResult<bool> {
+    fn wait_inner(&mut self, _timeout: Duration) -> IpcResult<bool> {
         match self.steps.front() {
             Some(Step::Call(_)) => {
                 let Some(Step::Call(call)) = self.steps.pop_front() else {
@@ -156,7 +156,7 @@ impl Script {
         }
     }
 
-    fn recv_inner(&mut self) -> BridgeResult<Request> {
+    fn recv_inner(&mut self) -> IpcResult<Request> {
         self.message_due_by = None;
         match self.steps.pop_front() {
             Some(Step::Send(body)) => {
@@ -166,7 +166,7 @@ impl Script {
                     body,
                 })
             }
-            _ => Err(BridgeError::Io(std::io::Error::new(
+            _ => Err(IpcError::Io(std::io::Error::new(
                 std::io::ErrorKind::BrokenPipe,
                 "the script is over",
             ))),
@@ -284,7 +284,7 @@ fn run_ticking(fixture: &mut Fixture, script: &mut Script, tick: Duration) {
     drop(render);
     // A script that ends ends in `recv`'s refusal; any other end is a failure.
     assert!(
-        matches!(result, Err(BridgeError::Io(ref e)) if e.to_string() == "the script is over")
+        matches!(result, Err(IpcError::Io(ref e)) if e.to_string() == "the script is over")
             || result.is_ok(),
         "{result:?}"
     );
@@ -436,7 +436,7 @@ fn a_lost_plugin_ends_the_server_abnormally() {
     assert!(
         matches!(
             result,
-            Err(BridgeError::State(
+            Err(IpcError::State(
                 tutti_plugin_types::StateError::PluginCrashed
             ))
         ),
@@ -484,8 +484,8 @@ fn an_undecodable_audio_frame_ends_the_session() {
     assert!(
         matches!(
             result,
-            Err(BridgeError::AudioConnection { ref cause })
-                if matches!(**cause, BridgeError::Serialization(_))
+            Err(IpcError::AudioConnection { ref cause })
+                if matches!(**cause, IpcError::Serialization(_))
         ),
         "{result:?}"
     );

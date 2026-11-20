@@ -23,7 +23,7 @@ use tutti_graph::NodeKey;
 use tutti_nodes::testing::Const;
 use tutti_plugin_host::Liveness;
 use tutti_plugin_host::PluginHandle;
-use tutti_plugin_types::{BridgeError, ParameterInfo, PluginFailure};
+use tutti_plugin_types::{IpcError, ParameterInfo, PluginFailure};
 use tutti_units::Normalized;
 use tutti_units::ParamId;
 use tutti_units::SampleRate;
@@ -186,7 +186,7 @@ fn a_non_plugin_node_never_marks_the_graph_edited() {
 #[test]
 fn a_dead_plugin_reports_the_engines_cause_not_a_placeholder() {
     let latched = PluginFailure::Connect {
-        source: Arc::new(BridgeError::Io(std::io::Error::new(
+        source: Arc::new(IpcError::Io(std::io::Error::new(
             std::io::ErrorKind::NotFound,
             "No such file or directory",
         ))),
@@ -200,10 +200,10 @@ fn a_dead_plugin_reports_the_engines_cause_not_a_placeholder() {
         matches!(cause, PluginFailure::Connect { .. }),
         "the cause must be the engine's latched failure, carried through as its kind: {cause:?}"
     );
-    // The `BridgeError` behind it is still the `source`, not flattened to text.
+    // The `IpcError` behind it is still the `source`, not flattened to text.
     let source = std::error::Error::source(cause).expect("a connect failure has a source");
     assert!(
-        matches!(source.downcast_ref::<BridgeError>(), Some(BridgeError::Io(e))
+        matches!(source.downcast_ref::<IpcError>(), Some(IpcError::Io(e))
             if e.kind() == std::io::ErrorKind::NotFound),
         "{source:?}"
     );

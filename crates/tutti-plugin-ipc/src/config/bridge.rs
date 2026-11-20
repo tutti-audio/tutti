@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use thiserror::Error;
 use tutti_buffers::FloatWidth;
-use tutti_plugin_types::{BridgeError, Timeouts};
+use tutti_plugin_types::{IpcError, Timeouts};
 
 /// The operating system's random source could not be read, so no name that
 /// another local user cannot guess can be made.
@@ -13,7 +13,7 @@ use tutti_plugin_types::{BridgeError, Timeouts};
 #[error("the operating system's random source is unreadable: {0}")]
 pub struct RandomSourceError(getrandom::Error);
 
-impl From<RandomSourceError> for BridgeError {
+impl From<RandomSourceError> for IpcError {
     fn from(e: RandomSourceError) -> Self {
         Self::Io(std::io::Error::other(e))
     }
@@ -86,7 +86,7 @@ fn unguessable() -> Result<String, RandomSourceError> {
 ///
 /// Most hosts never build one: [`AudioConfig`](crate::AudioConfig)
 /// covers the settings an application tunes, and each load derives a
-/// `BridgeConfig` from it. `tutti-plugin-server` takes one to know where to
+/// `IpcConfig` from it. `tutti-plugin-server` takes one to know where to
 /// listen.
 ///
 /// [`at`](Self::at) takes the socket path and uses the `tutti_audio_` slab
@@ -95,7 +95,7 @@ fn unguessable() -> Result<String, RandomSourceError> {
 /// the operating system's random source, which can fail, and a fixed one would
 /// make every default a collision.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BridgeConfig {
+pub struct IpcConfig {
     /// Local-socket path this bridge's host/server pair meet on (on Windows,
     /// its final component names a named pipe).
     ///
@@ -125,7 +125,7 @@ pub struct BridgeConfig {
     pub protect_host_memory: bool,
 }
 
-impl BridgeConfig {
+impl IpcConfig {
     /// A configuration whose bridge meets its server at `socket_path`: a fresh
     /// [`unique_socket_path`] for a host, the path the host chose for the
     /// server.
@@ -155,8 +155,8 @@ mod tests {
     /// test of the helper alone passes even when `new()` stops calling it.
     #[test]
     fn each_new_config_gets_its_own_socket_path() {
-        let a = BridgeConfig::at(unique_socket_path().expect("the OS has a random source"));
-        let b = BridgeConfig::at(unique_socket_path().expect("the OS has a random source"));
+        let a = IpcConfig::at(unique_socket_path().expect("the OS has a random source"));
+        let b = IpcConfig::at(unique_socket_path().expect("the OS has a random source"));
         assert_ne!(
             a.socket_path, b.socket_path,
             "two fresh configs share a socket path: the second bridge to bind \
@@ -189,13 +189,13 @@ mod tests {
     /// and the shape through which a shared path would propagate.
     #[test]
     fn partial_update_from_default_still_gets_a_unique_socket() {
-        let a = BridgeConfig {
+        let a = IpcConfig {
             max_buffer_size: 1,
-            ..BridgeConfig::at(unique_socket_path().expect("the OS has a random source"))
+            ..IpcConfig::at(unique_socket_path().expect("the OS has a random source"))
         };
-        let b = BridgeConfig {
+        let b = IpcConfig {
             max_buffer_size: 2,
-            ..BridgeConfig::at(unique_socket_path().expect("the OS has a random source"))
+            ..IpcConfig::at(unique_socket_path().expect("the OS has a random source"))
         };
         assert_ne!(a.socket_path, b.socket_path);
     }

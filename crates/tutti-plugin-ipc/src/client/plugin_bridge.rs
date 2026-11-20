@@ -1,11 +1,11 @@
 //! Plugin bridge — a served plugin's audio and its editor.
 
-use super::audio::{AudioBridge, BridgeThread, Replies};
+use super::audio::{AudioBridge, IpcThread, Replies};
 use super::editor_site::EditorSite;
 use crate::ServerWatch;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tutti_plugin_types::{BridgeResult, Delivered, Editor, PluginFormat, PluginRef, Timeouts};
+use tutti_plugin_types::{Delivered, Editor, IpcResult, PluginFormat, PluginRef, Timeouts};
 use tutti_plugin_types::{MainThreadMarker, MainWorkHandle, StateError};
 use tutti_units::{Normalized, ParamId, SampleRate};
 
@@ -45,12 +45,8 @@ pub struct EditorLoader {
 
 /// How an [`EditorLoader`] makes an editor: the work collector, the plugin (its
 /// file and the id chosen in it) and the format that opens it.
-type EditorLoad = fn(
-    MainThreadMarker,
-    &MainWorkHandle,
-    &PluginRef,
-    PluginFormat,
-) -> BridgeResult<Box<dyn Editor>>;
+type EditorLoad =
+    fn(MainThreadMarker, &MainWorkHandle, &PluginRef, PluginFormat) -> IpcResult<Box<dyn Editor>>;
 
 impl EditorLoader {
     /// A loader that makes the editor instance with `load`, which hands its close
@@ -65,7 +61,7 @@ impl EditorLoader {
         main: MainThreadMarker,
         plugin: &PluginRef,
         format: PluginFormat,
-    ) -> BridgeResult<Box<dyn Editor>> {
+    ) -> IpcResult<Box<dyn Editor>> {
         (self.load)(main, &self.work, plugin, format)
     }
 }
@@ -83,7 +79,7 @@ impl PluginBridge {
     /// GUI instance to be lazily loaded on first `open_editor`.
     ///
     /// Returns an `Arc<Self>` (for cheap cloning into the audio graph), a
-    /// `BridgeThread` (whose `Drop` shuts down the bridge thread) and the
+    /// `IpcThread` (whose `Drop` shuts down the bridge thread) and the
     /// [`Replies`] the pipeline reads the plugin's replies from, the ring's
     /// one consumer.
     ///
@@ -103,7 +99,7 @@ impl PluginBridge {
         sample_rate: SampleRate,
         watch: Arc<ServerWatch>,
         timeouts: Timeouts,
-    ) -> BridgeResult<(Arc<Self>, BridgeThread, Replies)> {
+    ) -> IpcResult<(Arc<Self>, IpcThread, Replies)> {
         timeouts.validate()?;
         let (audio, bridge_thread, replies) =
             AudioBridge::new(socket_path, sample_rate, watch, timeouts)?;

@@ -1113,7 +1113,7 @@ fn copy_process_output(output: ProcessOutputRef<'_>, out: &mut tutti_plugin_type
 }
 
 // A Processor moves by value through activation (`Staged`, `Lifecycle`, the
-// server's `Served`), and every debug frame on that path holds a copy. Its
+// server's `Server`), and every debug frame on that path holds a copy. Its
 // large buffers are boxed, so it stays small; a new inline array that tips
 // this bound fails the build.
 const _: () = assert!(size_of::<ProcessorAny>() <= 4096);

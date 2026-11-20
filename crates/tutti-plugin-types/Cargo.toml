@@ -57,7 +57,7 @@ tutti-plugin-ipc-ffi = { version = "0.0.1", path = "../tutti-plugin-ipc-ffi" }
 serde = { version = "1", features = ["derive"], optional = true }
 raw-window-handle = "0.6"
 # The wire codec: the probe result file's encoding, and unconditional because
-# `BridgeError::Serialization` carries `postcard::Error` as its source.
+# `IpcError::Serialization` carries `postcard::Error` as its source.
 postcard = { version = "1.1.3", default-features = false, features = ["use-std"] }
 # The editor's sizes, which name their unit (`dpi::Size`), and `ContentScale`'s check.
 dpi.workspace = true

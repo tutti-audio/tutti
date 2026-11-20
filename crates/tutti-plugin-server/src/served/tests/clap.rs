@@ -20,7 +20,7 @@ use tutti_plugin_types::ChannelLayout;
 use tutti_plugin_types::{EditorPresence, Features, PluginTail, RenderModeSupport, Request};
 use tutti_ump::U7;
 
-type ClapInstance = Served<HostLoaded>;
+type ClapInstance = Server<HostLoaded>;
 
 /// What a pass told the host that is not the layout, as these tests read it.
 #[derive(Debug, Default, PartialEq)]
@@ -34,7 +34,7 @@ struct ClapChanges {
 /// The test-side views of the instance: the plugin whichever half holds it,
 /// and the pass and its results kept apart so a test can read them one at a
 /// time.
-impl Served<HostLoaded> {
+impl Server<HostLoaded> {
     pub(crate) fn clap_loaded(&self) -> &HostLoaded {
         match &self.lifecycle {
             Lifecycle::Loaded(plugin) | Lifecycle::Refused { plugin, .. } => plugin,
@@ -2599,7 +2599,7 @@ fn the_track_the_host_sends_reaches_the_served_plugin() {
     let probe = crate::test_utils::clap();
     probe.hostext_reset();
 
-    ServedPlugin::set_track_info(
+    ServerPlugin::set_track_info(
         &mut instance,
         main_thread(),
         &TrackInfo {

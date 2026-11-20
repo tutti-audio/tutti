@@ -9,7 +9,7 @@
 //! drops (i.e., after both the graph has released the node *and* every
 //! user-held handle has dropped).
 
-use crate::{BridgeConfig, BridgeThread, ServerWatch};
+use crate::{IpcConfig, IpcThread, ServerWatch};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -43,7 +43,7 @@ pub struct ProcessGuard {
     wait: Option<Arc<ExitWait>>,
     watch: Arc<ServerWatch>,
     exit_thread: Option<ThreadHandle<()>>,
-    _bridge_thread: Option<BridgeThread>,
+    _bridge_thread: Option<IpcThread>,
     /// The control socket's file, removed when the guard drops.
     socket_path: PathBuf,
     /// How long a server told to shut down has to end before it is killed.
@@ -67,7 +67,7 @@ impl ProcessGuard {
     ///
     /// The exit thread cannot start: a server whose end nobody watches is not
     /// run, and `process` is killed and reaped as it drops.
-    pub fn launched(process: Reaped, config: &BridgeConfig) -> std::io::Result<Self> {
+    pub fn launched(process: Reaped, config: &IpcConfig) -> std::io::Result<Self> {
         let watch = Arc::new(ServerWatch::new());
         let wait = Arc::new(process.exit_wait());
         let process = Arc::new(Mutex::new(Some(process)));
@@ -106,7 +106,7 @@ impl ProcessGuard {
 
     /// Hand over the bridge thread once it exists; it shuts down with the
     /// process.
-    pub fn attach(&mut self, bridge_thread: BridgeThread) {
+    pub fn attach(&mut self, bridge_thread: IpcThread) {
         self._bridge_thread = Some(bridge_thread);
     }
 
@@ -280,7 +280,7 @@ mod tests {
         let child = command.spawn().expect("the child spawns");
         ProcessGuard::launched(
             Reaped::new(child),
-            &BridgeConfig::at(crate::unique_socket_path().expect("the OS has a random source")),
+            &IpcConfig::at(crate::unique_socket_path().expect("the OS has a random source")),
         )
         .expect("the exit thread starts")
     }

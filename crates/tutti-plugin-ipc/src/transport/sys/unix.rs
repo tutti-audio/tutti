@@ -84,27 +84,27 @@ impl Watch {
     }
 }
 
-/// The ringing side of a control thread's wait ([`control_bell`]): wakes the
+/// The unparking side of a control thread's wait ([`control_unparker`]): wakes the
 /// wait from any thread, the audio thread included.
 ///
 /// A non-blocking socket pair whose read end the wait polls beside the control
-/// stream; a ring writes one byte, so the wait ends at once. It takes no lock and
+/// stream; an unpark writes one byte, so the wait ends at once. It takes no lock and
 /// allocates nothing.
 #[derive(Clone)]
-pub struct ControlBell {
+pub struct ControlUnparker {
     tx: Arc<UnixStream>,
 }
 
-impl ControlBell {
+impl ControlUnparker {
     /// Ends the control thread's wait now, or its next one.
-    pub fn ring(&self) {
+    pub fn unpark(&self) {
         // A full socket already holds a byte the thread has not read: its wait
         // ends either way.
         let _ = (&*self.tx).write(&[1]);
     }
 }
 
-/// The waiting side of a control thread's wait ([`control_bell`]).
+/// The waiting side of a control thread's wait ([`control_unparker`]).
 pub struct ControlWait {
     rx: UnixStream,
 }
@@ -123,11 +123,11 @@ pub struct Woken {
 /// # Errors
 ///
 /// The OS refused the socket pair.
-pub fn control_bell() -> std::io::Result<(ControlBell, ControlWait)> {
+pub fn control_unparker() -> std::io::Result<(ControlUnparker, ControlWait)> {
     let (tx, rx) = UnixStream::pair()?;
     tx.set_nonblocking(true)?;
     rx.set_nonblocking(true)?;
-    Ok((ControlBell { tx: Arc::new(tx) }, ControlWait { rx }))
+    Ok((ControlUnparker { tx: Arc::new(tx) }, ControlWait { rx }))
 }
 
 impl ControlWait {
@@ -228,11 +228,11 @@ mod tests {
             .expect("listen");
         let host = crate::transport::control::connect(&path).expect("connect");
         let mut peer = listener.accept().expect("accept");
-        let (bell, wait) = control_bell().expect("a bell");
+        let (bell, wait) = control_unparker().expect("a bell");
         let now = Some(Duration::ZERO);
 
         assert_eq!(wait.wait(&host, now).expect("wait"), Woken::default());
-        bell.ring();
+        bell.unpark();
         let rung = Woken {
             stream: false,
             rung: true,

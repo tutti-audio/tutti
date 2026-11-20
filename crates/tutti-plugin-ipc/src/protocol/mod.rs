@@ -210,13 +210,13 @@ pub const STATE_CHUNK_BYTES: usize = 4 * 1024 * 1024;
 ///
 /// # Errors
 ///
-/// [`BridgeError::ProtocolMismatch`](tutti_plugin_types::BridgeError::ProtocolMismatch)
+/// [`IpcError::ProtocolMismatch`](tutti_plugin_types::IpcError::ProtocolMismatch)
 /// when the versions differ.
-pub(crate) fn check_protocol_version(got: u32) -> tutti_plugin_types::BridgeResult<()> {
+pub(crate) fn check_protocol_version(got: u32) -> tutti_plugin_types::IpcResult<()> {
     if got == PROTOCOL_VERSION {
         Ok(())
     } else {
-        Err(tutti_plugin_types::BridgeError::ProtocolMismatch {
+        Err(tutti_plugin_types::IpcError::ProtocolMismatch {
             expected: PROTOCOL_VERSION,
             got,
         })

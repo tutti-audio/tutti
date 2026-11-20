@@ -4,9 +4,9 @@ use tutti_plugin_ipc::News;
 use tutti_plugin_types::{Control, ProcessOutput, Request};
 use tutti_vst3_host::Vst3Loaded;
 
-type Vst3Instance = Served<Vst3Loaded>;
+type Vst3Instance = Server<Vst3Loaded>;
 
-impl Served<Vst3Loaded> {
+impl Server<Vst3Loaded> {
     /// The plugin, whichever half holds it.
     pub(crate) fn vst3_loaded(&self) -> &Vst3Loaded {
         match &self.lifecycle {

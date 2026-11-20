@@ -4,9 +4,9 @@
 //! This is the *lean* error the shared traits speak — it carries only the
 //! failure modes a format loader can produce (load, state, process, editor),
 //! never the IPC/host-coupled variants (`ServerNotFound`, `ProtocolMismatch`,
-//! `Timeout`, …) that live on [`BridgeError`](crate::BridgeError). The host
-//! crate maps `PluginError` into its richer `BridgeError` at the IPC boundary;
-//! a `BridgeError` with no lean counterpart travels in [`PluginError::Bridge`].
+//! `Timeout`, …) that live on [`IpcError`](crate::IpcError). The host
+//! crate maps `PluginError` into its richer `IpcError` at the IPC boundary;
+//! a `IpcError` with no lean counterpart travels in [`PluginError::Bridge`].
 
 use crate::editor::EditorError;
 use crate::load_stage::LoadStage;
@@ -14,7 +14,7 @@ use crate::load_stage::LoadStage;
 /// Failure produced by a plugin-instance capability trait method.
 ///
 /// Deliberately narrow: only the failure modes a format loader can hit. The
-/// `tutti-plugin` host crate widens this into its `BridgeError` (which adds
+/// `tutti-plugin` host crate widens this into its `IpcError` (which adds
 /// the IPC/subprocess variants) via `From<PluginError>`.
 #[derive(Debug, thiserror::Error)]
 pub enum PluginError {
@@ -51,9 +51,9 @@ pub enum PluginError {
     Editor(#[from] EditorError),
     /// A bridge failure with no lean counterpart (the subprocess, the socket,
     /// the shared memory), kept whole so widening it back to a
-    /// [`BridgeError`](crate::BridgeError) loses nothing.
+    /// [`IpcError`](crate::IpcError) loses nothing.
     #[error(transparent)]
-    Bridge(Box<crate::BridgeError>),
+    Bridge(Box<crate::IpcError>),
     /// Any other failure that doesn't fit the categories above.
     #[error("plugin error: {0}")]
     Other(String),

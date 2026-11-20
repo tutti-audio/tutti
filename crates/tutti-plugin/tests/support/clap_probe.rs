@@ -38,7 +38,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_graph::contract::Latent;
 use tutti_graph::{GraphBuilder, Prepare, Renderer, Unforkable};
-use tutti_plugin::BridgeConfig;
+use tutti_plugin::IpcConfig;
 use tutti_plugin::{Bound, PluginClient};
 use tutti_plugin_host::{PluginControls, PluginHandle};
 use tutti_units::{Latency, SampleRate, Samples};
@@ -446,7 +446,7 @@ pub struct LoadedProbe {
 /// the audio node.
 ///
 /// `TUTTI_PLUGIN_SERVER` rather than a `tutti_plugin_types::Locator`: `PluginClient::new` takes
-/// a `BridgeConfig`, which carries no locator field, so the environment is the
+/// a `IpcConfig`, which carries no locator field, so the environment is the
 /// only lever a test has. It is set here rather than once per suite so the value
 /// is visible in the one place that depends on it.
 ///
@@ -456,14 +456,14 @@ pub struct LoadedProbe {
 /// failure to load is a broken fixture rather than an outcome worth asserting.
 pub fn load_probe(sample_rate: f64) -> LoadedProbe {
     load_probe_with(
-        BridgeConfig::at(tutti_plugin::unique_socket_path().expect("the OS has a random source")),
+        IpcConfig::at(tutti_plugin::unique_socket_path().expect("the OS has a random source")),
         sample_rate,
     )
 }
 
 /// [`load_probe`] with a bridge config of the caller's (shorter
 /// `Timeouts`, say).
-pub fn load_probe_with(config: BridgeConfig, sample_rate: f64) -> LoadedProbe {
+pub fn load_probe_with(config: IpcConfig, sample_rate: f64) -> LoadedProbe {
     // SAFETY: `exclusive()` is held; see `ProbeEnv::set`.
     unsafe { std::env::set_var("TUTTI_PLUGIN_SERVER", plugin_server_path()) };
 

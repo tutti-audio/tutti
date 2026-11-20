@@ -107,7 +107,7 @@ fn a_plugin_replacing_another_under_a_bypassed_node_is_bypassed_as_it_enters() {
 
     let outgoing_pid = s.plugin_view(node).expect("hosted").handle().server_pid();
     let incoming = PluginClient::new(
-        tutti_plugin::BridgeConfig::at(
+        tutti_plugin::IpcConfig::at(
             tutti_plugin::unique_socket_path().expect("the OS has a random source"),
         ),
         &tutti_fixtures::detached_work(),

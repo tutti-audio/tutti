@@ -130,7 +130,7 @@ pub enum PluginInvalidation {
     ///
     /// A host that misses this event is not left guessing — `PluginHandle`'s
     /// status query reports the same cause, latched. See
-    /// `BridgeEvent::Crashed` for why both exist.
+    /// `IpcEvent::Crashed` for why both exist.
     Crashed {
         /// Why the plugin died, latched at the detection site.
         cause: PluginFailure,

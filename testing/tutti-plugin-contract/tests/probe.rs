@@ -26,10 +26,10 @@ use tutti_plugin_contract::{
     state_with_rings, vst3_cpp_module, vst3_module,
 };
 use tutti_plugin_db::PluginDb;
-use tutti_plugin_ipc::{BridgeConfig as IpcConfig, Ipc, Launched};
+use tutti_plugin_ipc::{Ipc, IpcConfig, Launched};
 use tutti_plugin_types::{
-    BridgeError, BridgeResult, Editor, InProcess, LatencyVerdict, LoadStage, MainThreadMarker,
-    MaxBlock, Measured, NotChecked, PROBE_FLOOR, SampleRate, Samples, StateHash, TailVerdict,
+    Editor, InProcess, IpcError, IpcResult, LatencyVerdict, LoadStage, MainThreadMarker, MaxBlock,
+    Measured, NotChecked, PROBE_FLOOR, SampleRate, Samples, StateHash, TailVerdict,
 };
 use tutti_plugin_types::{ProbeDeath, ProbeError, ProbeExit, ProbeOutcome, ProbeRefusal};
 use tutti_vst2_author::shell::{ALPHA_ID, ALPHA_NAME, BETA_ID, BETA_NAME};
@@ -224,8 +224,8 @@ fn no_editor(
     _: &tutti_plugin_types::MainWorkHandle,
     plugin: &PluginRef,
     _: tutti_plugin_types::PluginFormat,
-) -> BridgeResult<Box<dyn Editor>> {
-    Err(BridgeError::LoadFailed {
+) -> IpcResult<Box<dyn Editor>> {
+    Err(IpcError::LoadFailed {
         path: Some(plugin.path().to_path_buf()),
         stage: LoadStage::Opening,
         reason: "these tests load no editor".into(),

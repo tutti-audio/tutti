@@ -1,7 +1,7 @@
 //! macOS: an Audio Unit's editor loads through `tutti-au-host`.
 
 use tutti_plugin_types::{
-    BridgeError, BridgeResult, Editor, LoadStage, MainThreadMarker, MainWorkHandle, PluginRef,
+    Editor, IpcError, IpcResult, LoadStage, MainThreadMarker, MainWorkHandle, PluginRef,
 };
 
 /// The editor-only instance of the Audio Unit at `path`.
@@ -10,11 +10,11 @@ pub(super) fn audio_unit(
     main: MainThreadMarker,
     work: &MainWorkHandle,
     plugin: &PluginRef,
-) -> BridgeResult<Box<dyn Editor>> {
+) -> IpcResult<Box<dyn Editor>> {
     let editor = <tutti_au_host::AuLoaded as tutti_plugin_types::OutOfProcess>::load_editor(
         main, work, plugin,
     )
-    .map_err(|e| BridgeError::LoadFailed {
+    .map_err(|e| IpcError::LoadFailed {
         path: Some(plugin.path().to_path_buf()),
         stage: LoadStage::Opening,
         reason: format!("AU GUI-only load failed: {e}"),
@@ -28,8 +28,8 @@ pub(super) fn audio_unit(
     _main: MainThreadMarker,
     _work: &MainWorkHandle,
     plugin: &PluginRef,
-) -> BridgeResult<Box<dyn Editor>> {
-    Err(BridgeError::LoadFailed {
+) -> IpcResult<Box<dyn Editor>> {
+    Err(IpcError::LoadFailed {
         path: Some(plugin.path().to_path_buf()),
         stage: LoadStage::Opening,
         reason: "Audio Unit editors need the `au` feature".into(),

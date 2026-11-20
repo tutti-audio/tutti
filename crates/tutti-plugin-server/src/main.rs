@@ -16,7 +16,7 @@ use std::process::ExitCode;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::filter::LevelFilter;
 use tutti_plugin_server::{EXIT_PLUGIN_LEAKED, Ended, PluginServer};
-use tutti_plugin_types::BridgeResult;
+use tutti_plugin_types::IpcResult;
 
 fn main() -> ExitCode {
     tracing_subscriber::fmt()
@@ -38,7 +38,7 @@ fn main() -> ExitCode {
     }
 }
 
-fn serve() -> BridgeResult<Ended> {
+fn serve() -> IpcResult<Ended> {
     let socket_path = env::args()
         .nth(1)
         .expect("Socket path required as first argument");

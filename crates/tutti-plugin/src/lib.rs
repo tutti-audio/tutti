@@ -76,7 +76,7 @@
 //! shell over each served format's `Loaded`, CLAP, VST3 and AU; VST2 is not served,
 //! its editor and audio instance being one object, so it runs in the host's
 //! process and a VST2 path refuses out-of-process hosting with
-//! [`BridgeError::NotOutOfProcess`](tutti_plugin_types::BridgeError::NotOutOfProcess)).
+//! [`IpcError::NotOutOfProcess`](tutti_plugin_types::IpcError::NotOutOfProcess)).
 //! The host talks to it over two channels:
 //!
 //! - **Control** (Unix socket / named pipe) — editor open/close, parameter reads,
@@ -128,8 +128,8 @@
 //!   observations spanning 50 ms, and
 //!   [`needs_notify`](tutti_plugin_host::needs_notify)) are
 //!   `tutti-plugin-host`'s.
-//! - [`BridgeConfig`] — low-level bridge tuning (buffer size, timeouts).
-//! - [`BridgeError`](tutti_plugin_types::BridgeError) — the error most calls return.
+//! - [`IpcConfig`] — low-level bridge tuning (buffer size, timeouts).
+//! - [`IpcError`](tutti_plugin_types::IpcError) — the error most calls return.
 //!
 //! ## Features
 //!
@@ -366,7 +366,7 @@ pub use error::{
 mod format;
 mod host;
 
-pub use tutti_plugin_ipc::{BridgeConfig, unique_socket_path};
+pub use tutti_plugin_ipc::{IpcConfig, unique_socket_path};
 
 // The main-thread token the editor, state and polling entries take; a host
 // makes it once, on its UI thread, with `MainThreadMarker::new`. `MainWork` is the

@@ -2,7 +2,7 @@
 //!
 //! A row is a variant, the format's [`Loaded`](tutti_plugin_types::Loaded)
 //! type, and the [`PluginFormat`] a load names for it. The row's type is the argument of
-//! [`Served`], which is bounded by
+//! [`Server`], which is bounded by
 //! [`OutOfProcess`](tutti_plugin_types::OutOfProcess) (through
 //! [`ServerSide`](super::ServerSide)), so a row for a format that cannot be
 //! served from another process (VST2: its `AEffect` fuses editor and audio)
@@ -15,7 +15,7 @@ use tutti_plugin_types::{
     PluginResult, StateUse,
 };
 
-use super::{Served, ServedPlugin};
+use super::{Server, ServerPlugin};
 use crate::render::{End, RenderEnd};
 use crate::ties::Ties;
 
@@ -26,11 +26,11 @@ macro_rules! served {
         /// Every variant is behind its format's feature (AU also behind macOS),
         /// so a build with none has an uninhabited enum.
         #[allow(clippy::large_enum_variant)] // One per subprocess; boxing buys nothing.
-        pub(crate) enum AnyServed {
-            $($(#[$cfg])* $name(Served<$loaded>),)*
+        pub(crate) enum AnyServer {
+            $($(#[$cfg])* $name(Server<$loaded>),)*
         }
 
-        impl AnyServed {
+        impl AnyServer {
             /// Loads the plugin `plugin` names and
             /// activates it, as `format`: the file's extension does not choose
             /// it, so a link whose target has another extension is opened as
@@ -66,7 +66,7 @@ macro_rules! served {
                 match format {
                     $($(#[$cfg])* $format => {
                         let (hand, rt) = Hand::threaded();
-                        let (plugin, state_error) = Served::<$loaded>::load(
+                        let (plugin, state_error) = Server::<$loaded>::load(
                             main,
                             work,
                             plugin,
@@ -98,7 +98,7 @@ macro_rules! served {
 
             /// The plugin, its format erased.
             #[allow(unreachable_patterns)] // every arm is feature-gated: with none, no value exists
-            pub(crate) fn plugin(&self) -> &dyn ServedPlugin {
+            pub(crate) fn plugin(&self) -> &dyn ServerPlugin {
                 match self {
                     $($(#[$cfg])* Self::$name(plugin) => plugin,)*
                     _ => unreachable!("no format is served"),
@@ -118,7 +118,7 @@ macro_rules! served {
 
             /// [`plugin`](Self::plugin), exclusively.
             #[allow(unreachable_patterns)] // as above
-            pub(crate) fn plugin_mut(&mut self) -> &mut dyn ServedPlugin {
+            pub(crate) fn plugin_mut(&mut self) -> &mut dyn ServerPlugin {
                 match self {
                     $($(#[$cfg])* Self::$name(plugin) => plugin,)*
                     _ => unreachable!("no format is served"),
@@ -139,8 +139,8 @@ served! {
     Au(tutti_au_host::AuLoaded, PluginFormat::AudioUnit),
 }
 
-// One `AnyServed` is moved by value through the load path, and every debug
-// frame there holds a copy: it is as large as its largest format's `Served`.
+// One `AnyServer` is moved by value through the load path, and every debug
+// frame there holds a copy: it is as large as its largest format's `Server`.
 // The Processors box their buffers; a format that inlines a large one fails
 // the build.
-const _: () = assert!(size_of::<AnyServed>() <= 8192);
+const _: () = assert!(size_of::<AnyServer>() <= 8192);

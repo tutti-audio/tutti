@@ -1,14 +1,14 @@
 //! The server-death tests that read `/proc` or name the server's pid.
 
 use super::*;
-use tutti_plugin_types::{BridgeError, TerminationReason};
+use tutti_plugin_types::{IpcError, TerminationReason};
 
-/// **A reload that fails to load reports the `BridgeError` as the cause's
+/// **A reload that fails to load reports the `IpcError` as the cause's
 /// `source`.** The plugin is loaded from a copy of the reference plugin; the
 /// copy is deleted once it is running, and its first server aborts on its
 /// 40th block. Every replacement is then asked to load a file that is gone,
 /// so each attempt fails with the server's load error: `Reloading` and
-/// `GaveUp` carry `RecoveryFailure::ReloadFailed`, with the `BridgeError`
+/// `GaveUp` carry `RecoveryFailure::ReloadFailed`, with the `IpcError`
 /// behind it, not as text.
 #[test]
 fn a_reload_that_fails_to_load_carries_the_bridge_error_as_its_source() {
@@ -80,8 +80,8 @@ fn a_reload_that_fails_to_load_carries_the_bridge_error_as_its_source() {
     let source = attempt.source().expect("a failed load has a source");
     assert!(
         matches!(
-            source.downcast_ref::<BridgeError>(),
-            Some(BridgeError::LoadFailed { .. })
+            source.downcast_ref::<IpcError>(),
+            Some(IpcError::LoadFailed { .. })
         ),
         "the load's own error is the source: {source:?}"
     );
@@ -105,8 +105,8 @@ fn a_reload_that_fails_to_load_carries_the_bridge_error_as_its_source() {
     };
     assert!(
         matches!(
-            last.source().and_then(|e| e.downcast_ref::<BridgeError>()),
-            Some(BridgeError::LoadFailed { .. })
+            last.source().and_then(|e| e.downcast_ref::<IpcError>()),
+            Some(IpcError::LoadFailed { .. })
         ),
         "{last:?}"
     );

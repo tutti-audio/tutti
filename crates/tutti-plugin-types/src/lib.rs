@@ -265,7 +265,7 @@ pub use tutti_units::{BarNumber, Seconds};
 pub use any_thread::{AnyThread, Health};
 pub use automation::{ParameterChanges, ParameterPoint, ParameterQueue};
 pub use automation_mode::{AutomationMode, AutomationModeError};
-pub use bridge_error::{BridgeError, BridgeResult, PluginForkError};
+pub use bridge_error::{IpcError, IpcResult, PluginForkError};
 pub use c_string::{
     c_str_prefix, read_c_chars, read_c_str, read_utf16_str, write_c_chars, write_c_str,
     write_utf16_str, write_utf16_units,
@@ -329,7 +329,7 @@ pub use midi::{
 pub use midi_intake::MidiIntake;
 pub use timeouts::{Timeouts, ZeroTimeout};
 pub use tutti_graph::BusRole;
-// In the public `BridgeError::Slab`, so a host matches it without depending on ipc-ffi.
+// In the public `IpcError::Slab`, so a host matches it without depending on ipc-ffi.
 pub use tutti_plugin_ipc_ffi::SlabError;
 pub use wakeups::Wakeups;
 pub use wire_error::{FrameTooLarge, ResultError, SlabAccessError, SlabLayoutError};

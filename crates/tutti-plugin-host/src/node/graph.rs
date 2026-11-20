@@ -741,7 +741,7 @@ mod owed_tests {
         main: MainThreadMarker,
         path: &std::path::Path,
         rate: SampleRate,
-    ) -> tutti_plugin_types::BridgeResult<(InProcessClient<Vst2Loaded>, PluginHandle)> {
+    ) -> tutti_plugin_types::IpcResult<(InProcessClient<Vst2Loaded>, PluginHandle)> {
         crate::load_client::<Vst2Loaded, f32>(
             main,
             &tutti_fixtures::pumped_work(),

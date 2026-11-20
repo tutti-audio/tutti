@@ -59,7 +59,7 @@ pub(super) const ALLOW: &[(&str, &str, &str)] = &[
     (
         "tutti-plugin-types",
         "PluginFailure",
-        "permanent: `source()` is the pointee of an `Arc<BridgeError>`; `#[source]` would expose the `Arc`, which a chain walker cannot downcast to `BridgeError`",
+        "permanent: `source()` is the pointee of an `Arc<IpcError>`; `#[source]` would expose the `Arc`, which a chain walker cannot downcast to `IpcError`",
     ),
 ];
 

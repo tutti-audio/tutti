@@ -49,7 +49,7 @@ use tutti_buffers::FloatWidth;
 use tutti_plugin_ipc::{AudioReply, AudioRequest, SlabLayout, SlabWriter};
 use tutti_plugin_types::Samples;
 use tutti_plugin_types::{
-    BlockStatus, BridgeError, BridgeResult, Features, MidiEventVec, PluginIo, PluginResult,
+    BlockStatus, Features, IpcError, IpcResult, MidiEventVec, PluginIo, PluginResult,
     ProcessOutput, Processor,
 };
 use tutti_plugin_types::{EditWriter, ParameterChanges};
@@ -747,7 +747,7 @@ impl RenderSide {
     ///
     /// The transport fails (the host went away, or sent a frame that does not
     /// decode).
-    pub(crate) fn step(&mut self, io: Option<&mut Box<AudioTransport>>) -> BridgeResult<()> {
+    pub(crate) fn step(&mut self, io: Option<&mut Box<AudioTransport>>) -> IpcResult<()> {
         self.drain();
         self.poll_seat();
         let Some(io) = io else {
@@ -776,7 +776,7 @@ impl RenderSide {
     /// # Errors
     ///
     /// A block's reply cannot be built.
-    pub(crate) fn handle(&mut self, msg: AudioRequest) -> BridgeResult<Option<AudioReply>> {
+    pub(crate) fn handle(&mut self, msg: AudioRequest) -> IpcResult<Option<AudioReply>> {
         match msg {
             AudioRequest::ProcessAudio(data) => {
                 let began = self.informs.begin();
@@ -855,7 +855,7 @@ impl RenderSide {
         fits
     }
 
-    fn handle_process(&mut self, block: AudioBlock<'_>) -> BridgeResult<AudioReply> {
+    fn handle_process(&mut self, block: AudioBlock<'_>) -> IpcResult<AudioReply> {
         // Read before `block` is moved into the pipeline: every reply below
         // echoes it.
         let seq = block.seq;
@@ -984,7 +984,7 @@ pub(crate) struct RenderThread {
     wake: Bell,
     /// Why the audio connection ended, if it did: the thread then only trades
     /// the Processor, until it is stopped.
-    ended: Arc<OnceLock<Arc<BridgeError>>>,
+    ended: Arc<OnceLock<Arc<IpcError>>>,
 }
 
 impl RenderThread {
@@ -1033,7 +1033,7 @@ impl RenderThread {
     }
 
     /// Why the audio connection ended, once it has.
-    pub(crate) fn ended(&self) -> Option<&Arc<BridgeError>> {
+    pub(crate) fn ended(&self) -> Option<&Arc<IpcError>> {
         self.ended.get()
     }
 
@@ -1072,12 +1072,12 @@ pub(crate) enum NotHome {
 /// Records, as the end of the audio connection, a thread that unwinds: the main
 /// loop reads that and ends the session, which a panic that only reached the
 /// join would leave running.
-struct EndedByPanic<'a>(&'a OnceLock<Arc<BridgeError>>);
+struct EndedByPanic<'a>(&'a OnceLock<Arc<IpcError>>);
 
 impl Drop for EndedByPanic<'_> {
     fn drop(&mut self) {
         if std::thread::panicking() {
-            let _ = self.0.set(Arc::new(BridgeError::Other(
+            let _ = self.0.set(Arc::new(IpcError::Other(
                 "the render thread panicked".into(),
             )));
         }
@@ -1102,7 +1102,7 @@ fn run(
     mut side: RenderSide,
     mut audio: Option<Box<AudioTransport>>,
     stop: &StopToken,
-    ended: &OnceLock<Arc<BridgeError>>,
+    ended: &OnceLock<Arc<IpcError>>,
 ) -> RenderSide {
     while !stop.is_stopped() {
         if let Err(error) = side.step(audio.as_mut()) {
@@ -1227,20 +1227,20 @@ mod tests {
     /// A host connection that says a frame has begun and then does what `recv`
     /// is told to: a peer whose frame never completes, or a transport that
     /// breaks.
-    struct Begun<F: FnMut() -> BridgeResult<AudioRequest> + Send>(F);
+    struct Begun<F: FnMut() -> IpcResult<AudioRequest> + Send>(F);
 
-    impl<F: FnMut() -> BridgeResult<AudioRequest> + Send> Transport<AudioRequest, AudioReply>
+    impl<F: FnMut() -> IpcResult<AudioRequest> + Send> Transport<AudioRequest, AudioReply>
         for Begun<F>
     {
-        fn recv(&mut self) -> BridgeResult<AudioRequest> {
+        fn recv(&mut self) -> IpcResult<AudioRequest> {
             (self.0)()
         }
 
-        fn wait_readable(&mut self, _: Option<Duration>, _: &Bell) -> BridgeResult<bool> {
+        fn wait_readable(&mut self, _: Option<Duration>, _: &Bell) -> IpcResult<bool> {
             Ok(true)
         }
 
-        fn send(&mut self, _: &AudioReply) -> BridgeResult<()> {
+        fn send(&mut self, _: &AudioReply) -> IpcResult<()> {
             Ok(())
         }
     }
@@ -1257,7 +1257,7 @@ mod tests {
         let stalled = Begun(move || {
             let _ = inside.send(());
             let _ = released.recv();
-            Err(BridgeError::ProcessCrashed)
+            Err(IpcError::ProcessCrashed)
         });
         let thread = RenderThread::spawn(side, Some(Box::new(stalled))).expect("the thread");
 
@@ -1712,15 +1712,15 @@ mod tests {
     }
 
     impl Transport<AudioRequest, AudioReply> for Replay {
-        fn recv(&mut self) -> BridgeResult<AudioRequest> {
+        fn recv(&mut self) -> IpcResult<AudioRequest> {
             self.frames.read(&mut self.request.as_slice())
         }
 
-        fn wait_readable(&mut self, _: Option<Duration>, _: &Bell) -> BridgeResult<bool> {
+        fn wait_readable(&mut self, _: Option<Duration>, _: &Bell) -> IpcResult<bool> {
             Ok(true)
         }
 
-        fn send(&mut self, msg: &AudioReply) -> BridgeResult<()> {
+        fn send(&mut self, msg: &AudioReply) -> IpcResult<()> {
             let mut sink: &mut [u8] = &mut self.sink;
             self.frames.write(&mut sink, msg)?;
             sink.flush()?;

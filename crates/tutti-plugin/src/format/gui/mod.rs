@@ -7,8 +7,8 @@
 //! lives in its format's host crate.
 
 use tutti_plugin_types::LoadStage;
-use tutti_plugin_types::{BridgeError, BridgeResult, PluginFormat, PluginRef};
 use tutti_plugin_types::{Editor, MainThreadMarker, MainWorkHandle};
+use tutti_plugin_types::{IpcError, IpcResult, PluginFormat, PluginRef};
 
 // The one platform seam, built with a format host: the platform decides how an
 // Audio Unit's editor is loaded (`audio_unit`), and nothing else here names a
@@ -32,7 +32,7 @@ pub(crate) fn load_gui_instance(
     work: &MainWorkHandle,
     plugin: &PluginRef,
     format: PluginFormat,
-) -> BridgeResult<Box<dyn Editor>> {
+) -> IpcResult<Box<dyn Editor>> {
     // A build whose only format here is AU has no arm that reads them.
     let _ = (main, work);
     let path = plugin.path();
@@ -42,7 +42,7 @@ pub(crate) fn load_gui_instance(
         #[cfg(feature = "clap")]
         PluginFormat::Clap => editor::<tutti_clap_host::ClapLoaded>(main, work, plugin, "CLAP"),
         PluginFormat::AudioUnit => platform::audio_unit(main, work, plugin),
-        PluginFormat::Vst2 => Err(BridgeError::LoadFailed {
+        PluginFormat::Vst2 => Err(IpcError::LoadFailed {
             path: Some(path.to_path_buf()),
             stage: LoadStage::Opening,
             reason: "VST2 plugins use the in-process backend (enable the \
@@ -52,7 +52,7 @@ pub(crate) fn load_gui_instance(
         }),
         // `PluginFormat` is `#[non_exhaustive]` and another crate's, so the
         // arm stays even when every format above is compiled in.
-        _ => Err(BridgeError::LoadFailed {
+        _ => Err(IpcError::LoadFailed {
             path: Some(path.to_path_buf()),
             stage: LoadStage::Opening,
             reason: format!("No in-process GUI support for format {format:?}"),
@@ -67,11 +67,11 @@ fn editor<L: tutti_plugin_types::OutOfProcess>(
     work: &MainWorkHandle,
     plugin: &PluginRef,
     format: &str,
-) -> BridgeResult<Box<dyn Editor>>
+) -> IpcResult<Box<dyn Editor>>
 where
     L::Editor: 'static,
 {
-    let editor = L::load_editor(main, work, plugin).map_err(|e| BridgeError::LoadFailed {
+    let editor = L::load_editor(main, work, plugin).map_err(|e| IpcError::LoadFailed {
         path: Some(plugin.path().to_path_buf()),
         stage: LoadStage::Opening,
         reason: format!("{format} GUI-only load failed: {e}"),
@@ -86,8 +86,8 @@ pub(crate) fn load_gui_instance(
     _work: &MainWorkHandle,
     plugin: &PluginRef,
     _format: PluginFormat,
-) -> BridgeResult<Box<dyn Editor>> {
-    Err(BridgeError::LoadFailed {
+) -> IpcResult<Box<dyn Editor>> {
+    Err(IpcError::LoadFailed {
         path: Some(plugin.path().to_path_buf()),
         stage: LoadStage::Opening,
         reason: "In-process GUI support not built (no format feature enabled: \

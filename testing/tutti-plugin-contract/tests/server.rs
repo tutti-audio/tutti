@@ -12,16 +12,15 @@ use std::path::PathBuf;
 use tutti_fixtures::main_thread;
 
 use tutti_buffers::FloatWidth;
-use tutti_plugin::BridgeConfig;
 use tutti_plugin::PluginClient;
 use tutti_plugin_contract::spec::{self, Mode, Param};
 use tutti_plugin_contract::{
     Active, BLOCK, Clap, Format, RATE, Render, Transcript, Vst3, Vst3Cpp, bundle_of, clap_path,
     gesture_edits, patch_mode, prepare, select, vst3_cpp_module, vst3_module,
 };
-use tutti_plugin_ipc::{BridgeConfig as IpcConfig, BridgeEvent, Ipc, Launched};
+use tutti_plugin_ipc::{Ipc, IpcConfig, IpcEvent, Launched};
 use tutti_plugin_types::{
-    BridgeError, BridgeResult, Control, Editor, LoadStage, MainThreadMarker, ParamEdit, SampleRate,
+    Control, Editor, IpcError, IpcResult, LoadStage, MainThreadMarker, ParamEdit, SampleRate,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -30,9 +29,7 @@ fn through_server<F: Format>(path: PathBuf) {
     // SAFETY: set before any thread of this test reads it.
     unsafe { std::env::set_var("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server()) };
     let client = PluginClient::new(
-        BridgeConfig::at(
-            tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source"),
-        ),
+        IpcConfig::at(tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source")),
         &tutti_fixtures::detached_work(),
         &tutti_plugin::catalog::Loadable::uncatalogued(tutti_plugin::catalog::PluginRef::file(
             path,
@@ -116,8 +113,8 @@ fn no_editor(
     _: &tutti_plugin_types::MainWorkHandle,
     plugin: &tutti_plugin_types::PluginRef,
     _: tutti_plugin_types::PluginFormat,
-) -> BridgeResult<Box<dyn Editor>> {
-    Err(BridgeError::LoadFailed {
+) -> IpcResult<Box<dyn Editor>> {
+    Err(IpcError::LoadFailed {
         path: Some(plugin.path().to_path_buf()),
         stage: LoadStage::Opening,
         reason: "these tests load no editor".into(),
@@ -151,7 +148,7 @@ fn served<F: Format>(
     let heard = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let sink = std::sync::Arc::clone(&heard);
     ipc.forward_events(Some(std::sync::Arc::new(move |event| {
-        if let BridgeEvent::ParameterChanged { edit } = event {
+        if let IpcEvent::ParameterChanged { edit } = event {
             sink.lock().unwrap().push(edit);
         }
     })));
