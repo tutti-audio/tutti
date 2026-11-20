@@ -24,6 +24,7 @@ cargo xtask test-all                       # every test tier CI runs
 cargo xtask doc                            # rustdoc as CI runs it
 cargo xtask check-loom                     # clippy under --cfg loom
 cargo xtask check-windows                  # Windows lints from Linux
+cargo xtask test-wasm                      # the web suite under node (needs `wasm-bindgen-cli` at Cargo.lock's version)
 cargo xtask check-wasm                     # clippy for wasm32-unknown-unknown
 cargo xtask deny                           # needs cargo-deny 0.20.2 (`cargo install --locked`)
 ```

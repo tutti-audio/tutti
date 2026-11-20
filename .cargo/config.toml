@@ -1,3 +1,9 @@
 # `--locked`: a recipe never edits Cargo.lock.
 [alias]
 xtask = "run --locked -p xtask --"
+
+# `cargo test --target wasm32-unknown-unknown` runs the test module under node
+# (`cargo xtask test-wasm`). The runner is `wasm-bindgen-cli`'s, at the version
+# `Cargo.lock` pins for `wasm-bindgen`.
+[target.wasm32-unknown-unknown]
+runner = "wasm-bindgen-test-runner"

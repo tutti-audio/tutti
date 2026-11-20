@@ -221,6 +221,16 @@ fn loom_recipes_carry_their_environment() {
     );
 }
 
+/// The web suite is one `cargo test` of the harness crate for wasm32; the runner is
+/// `.cargo/config.toml`'s.
+#[test]
+fn test_wasm_runs_the_web_harness_for_wasm32() {
+    assert_eq!(
+        dry("test-wasm", &[]),
+        ["cargo test --locked --target wasm32-unknown-unknown -p tutti-web-test"]
+    );
+}
+
 /// The web build check is the commands CI's clippy job runs: the platform, rt
 /// and umbrella crates, then the umbrella with every feature the web path uses.
 #[test]

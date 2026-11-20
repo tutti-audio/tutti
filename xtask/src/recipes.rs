@@ -133,9 +133,14 @@ pub(crate) const RECIPES: &[(&str, &str, &str)] = &[
         "the release-profile suites of the lock-free crates",
     ),
     (
+        "test-wasm",
+        "",
+        "run the web suite under node (needs node, `wasm-bindgen-cli` at Cargo.lock's version)",
+    ),
+    (
         "test-all",
         "",
-        "test, test-features, test-doc, test-release",
+        "test, test-features, test-doc, test-release, test-wasm",
     ),
     (
         "check-features",
@@ -609,10 +614,13 @@ impl Planner<'_> {
                 "cargo nextest run --locked --release -p tutti-units -p tutti-rt -p tutti-graph",
             ]),
             "test-all" => {
-                for d in ["test", "test-features", "test-doc", "test-release"] {
+                for d in ["test", "test-features", "test-doc", "test-release", "test-wasm"] {
                     self.dep(d)?;
                 }
             }
+            "test-wasm" => self.lines(&[
+                "cargo test --locked --target wasm32-unknown-unknown -p tutti-web-test",
+            ]),
             "check-features" => self.lines(CHECK_FEATURES),
             "test-features" => self.lines(TEST_FEATURES),
             "miri" => self.lines(MIRI),
@@ -865,7 +873,7 @@ impl Planner<'_> {
                     "gates", "lint", "deny", "check-conformance",
                     "check-features", "package",
                     "check-no-std", "check-loom", "check-wasm", "test", "test-features", "test-doc",
-                    "test-release", "doc",
+                    "test-release", "test-wasm", "doc",
                 ] {
                     self.dep(d)?;
                 }

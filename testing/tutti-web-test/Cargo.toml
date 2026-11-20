@@ -1,0 +1,20 @@
+[package]
+name = "tutti-web-test"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+description = "What a web session runs with no tutti thread, under node (`cargo xtask test-wasm`)"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/tutti-audio/tutti"
+# A harness, never a library anyone depends on.
+publish = false
+
+[lints]
+workspace = true
+
+# The umbrella with the web features (the set `cargo xtask check-wasm` builds): its own
+# dependencies are the ones that build for wasm32, which `tutti`'s native dev-dependencies
+# (a plugin host, a sound card) are not.
+[dev-dependencies]
+tutti = { path = "../../crates/tutti", features = ["sampler", "analyze", "decode-wav", "encode-wav", "export", "midi"] }
+wasm-bindgen-test = "0.3.80"
