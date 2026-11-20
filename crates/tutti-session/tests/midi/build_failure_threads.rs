@@ -1,5 +1,8 @@
 //! A build that fails after the session made its own executor leaves none of its
 //! drive threads running. Linux reads the process's thread names.
+//!
+//! The count covers every `tutti-exec*` thread in the process, so the test relies
+//! on nextest running each test in a process of its own.
 
 use tutti_midi_hardware::MidiHardwareError;
 use tutti_session::{Error, Session};
@@ -36,6 +39,6 @@ fn a_failed_midi_open_leaves_no_drive_thread_running() {
             tutti_platform::Instant::now() < end,
             "a drive thread is left"
         );
-        std::thread::yield_now();
+        std::thread::sleep(std::time::Duration::from_millis(1));
     }
 }

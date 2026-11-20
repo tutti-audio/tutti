@@ -171,11 +171,10 @@ fn midi_through_returns_a_note_on_a_note_off_and_a_burst_of_ten_note_ons() {
     );
 }
 
-/// A note sent after an input is closed and the same device reopened at once is
-/// heard once by the reopened port: closing returns before the old pump has
-/// left the sequencer, and the reopen neither fails nor doubles the delivery.
+/// An input closed and the same device reopened at once reopens, and the
+/// reopened port hears a note sent afterwards.
 #[test]
-fn an_input_reopened_at_once_hears_a_note_once() {
+fn an_input_reopened_at_once_hears_a_note() {
     let inlets = InputInlets::new(EventCapacity::of(256), Duration::from_millis(20));
     let executor = tutti_platform::Executor::new();
     let mut io = MidiSession::open(&executor, Arc::clone(&inlets), MidiHardwareConfig::new())
@@ -209,5 +208,9 @@ fn an_input_reopened_at_once_hears_a_note_once() {
     let on = note_on(m.channel, m.base, 0x8000);
     assert_eq!(sink.queue(&[(Offset::ZERO, on)]).packets(), 1);
     let heard = m.hear(&mut graph, &[(true, m.base)]);
-    assert_eq!(m.mine(&heard), [(true, m.base)], "heard once");
+    assert_eq!(
+        m.mine(&heard),
+        [(true, m.base)],
+        "the reopened port hears it"
+    );
 }
