@@ -869,7 +869,8 @@ fn closing_an_input_without_midi_ci_sends_nothing() {
 /// which speaks for a Function Block, never replaces the device's.
 #[test]
 fn a_ci_peers_product_instance_id_fills_what_the_device_left() {
-    use tutti_midi_ci::{EndpointInfo, ProductInstanceId};
+    use tutti_midi_ci::EndpointInfo;
+    use tutti_ump::ProductInstanceId;
 
     let (mut wire, ours) = midi1_running();
     let mut data = peer_data();

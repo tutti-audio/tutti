@@ -18,6 +18,7 @@ mod simple;
 mod state;
 mod store;
 
+pub use cache::PeCacheScope;
 pub use channels::{PeChannelEntry, PeChannelList, PeCluster};
 pub use client::{
     CallError, CallId, MAX_LIST_ENTRIES, PaginationFault, ResourceAction, ResourceEvent,

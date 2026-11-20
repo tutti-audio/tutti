@@ -5,12 +5,12 @@ use std::net::SocketAddr;
 use std::time::Duration;
 use tutti_platform::Instant;
 
-use tutti_midi_ci::{EndpointName, ProductInstanceId};
 use tutti_midi_network::{
     Client, Command, Credentials, EndpointIdentity, Event, Host, HostConfig, NetworkEndpoint,
     Nonce, SessionConfig, Transmit, parse,
 };
 use tutti_ump::Ump;
+use tutti_ump::{EndpointName, ProductInstanceId};
 
 pub fn identity(name: &str, id: &str) -> EndpointIdentity {
     EndpointIdentity::new(

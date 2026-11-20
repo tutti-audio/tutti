@@ -99,7 +99,7 @@ use super::{
 };
 use tutti_ump::FunctionBlockId;
 
-use crate::name::ProductInstanceId;
+use tutti_ump::ProductInstanceId;
 
 /// How long a Discovery waits for its replies: at least 3 seconds (§5.5.5).
 pub const DISCOVERY_WINDOW: Duration = Duration::from_secs(3);

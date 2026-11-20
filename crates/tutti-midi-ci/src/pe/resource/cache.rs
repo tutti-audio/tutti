@@ -8,13 +8,38 @@ use super::data::PeData;
 use super::request::ResourceTarget;
 use crate::deadline::Pending;
 
+/// What a reply gave: its Property Data and the `totalCount` of its header.
+#[derive(Debug)]
+pub(super) struct Cached {
+    pub(super) data: PeData,
+    pub(super) total_count: Option<u32>,
+}
+
 /// One request's reply: the request is the Resource, its entry and its page.
 #[derive(Debug)]
 struct Held {
     target: ResourceTarget,
     page: Option<PePage>,
-    data: PeData,
+    cached: Cached,
     life: Pending,
+}
+
+/// Whether the `cacheTime`s of a Resource's requests are kept apart or as one
+/// (M2-103 §7.4.3).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum PeCacheScope {
+    /// Each request, each page of a paginated Get, expires by its own
+    /// `cacheTime`: the spec's recommendation.
+    #[default]
+    PerRequest,
+    /// One `cacheTime` per Resource entry, `resId` and all: the data held for an
+    /// entry expires together. The oldest `cacheTime` is retained (M2-103 §7.4.3), read
+    /// strictly: a reply that arrives while data is held cannot lengthen the
+    /// time, and one with a shorter time shortens it, so no page is used past its
+    /// own reply's `cacheTime` or the oldest. A reply that arrives after the time
+    /// held ended finds all the data held dropped, and only it is valid.
+    PerResource,
 }
 
 impl Held {
@@ -27,6 +52,7 @@ impl Held {
 #[derive(Debug, Default)]
 pub(super) struct GetCache {
     held: Vec<Held>,
+    scope: PeCacheScope,
     /// How many times held data was dropped for a change.
     drops: u64,
 }
@@ -36,6 +62,12 @@ impl GetCache {
     /// another was overtaken by a change and its reply is not kept.
     pub(super) fn drops(&self) -> u64 {
         self.drops
+    }
+
+    /// Keeps the replies by `scope` from now on, and drops what is held.
+    pub(super) fn set_scope(&mut self, scope: PeCacheScope) {
+        self.scope = scope;
+        self.clear();
     }
 
     /// Drops what has expired at `now`.
@@ -49,11 +81,11 @@ impl GetCache {
         target: &ResourceTarget,
         page: Option<PePage>,
         now: Instant,
-    ) -> Option<&PeData> {
+    ) -> Option<&Cached> {
         self.held
             .iter()
             .find(|h| h.is(target, page) && !h.life.expired(now))
-            .map(|h| &h.data)
+            .map(|h| &h.cached)
     }
 
     /// Holds the reply to the request for its `time` from `now`, in place of the
@@ -63,19 +95,43 @@ impl GetCache {
         &mut self,
         target: &ResourceTarget,
         page: Option<PePage>,
-        data: PeData,
+        cached: Cached,
         time: PeCacheTime,
         began_at: u64,
         now: Instant,
     ) {
-        self.held
-            .retain(|h| !h.is(target, page) && !h.life.expired(now));
-        if time.as_secs() > 0 && began_at == self.drops {
+        let keeping = time.as_secs() > 0 && began_at == self.drops;
+        let life = keeping.then(|| {
+            let own = Pending::after(now, time.into());
+            if self.scope == PeCacheScope::PerResource {
+                // The entry's time held, this request's own reply included, as the
+                // retain below has not yet dropped it: the reply may not outlive it.
+                self.held
+                    .iter()
+                    .filter(|h| h.target == *target && !h.life.expired(now))
+                    .fold(own, |life, h| life.min(h.life))
+            } else {
+                own
+            }
+        });
+        self.held.retain_mut(|h| {
+            if h.life.expired(now) || h.is(target, page) {
+                return false;
+            }
+            if let Some(life) = life
+                && self.scope == PeCacheScope::PerResource
+                && h.target == *target
+            {
+                h.life = life;
+            }
+            true
+        });
+        if let Some(life) = life {
             self.held.push(Held {
                 target: target.clone(),
                 page,
-                data,
-                life: Pending::after(now, time.into()),
+                cached,
+                life,
             });
         }
     }

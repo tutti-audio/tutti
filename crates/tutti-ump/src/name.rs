@@ -1,19 +1,21 @@
 //! The bounded text of a UMP Stream: Endpoint Name, Product Instance Id and
 //! Function Block Name, held without allocating.
 
-use std::borrow::Cow;
-use std::fmt;
-use std::str::FromStr;
+use alloc::borrow::{Cow, ToOwned};
+use alloc::format;
+use alloc::string::String;
+use core::fmt;
+use core::str::FromStr;
 
 use tutti_units::Text;
 use unicode_normalization::{UnicodeNormalization, is_nfc};
 
-/// Why a text is not a name ([`Name`] reads through [`FromStr`], and
-/// [`MessageText`](crate::MessageText)'s `TryFrom<&str>`).
+/// Why a text is not a name ([`Name`] reads through [`FromStr`]; a MIDI-CI
+/// message text reads through the same error).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum NameError {
     /// The text is longer than `max` bytes (for a name, composed to NFC; for a
-    /// [`MessageText`](crate::MessageText), escaped as it goes on the wire).
+    /// MIDI-CI message text, escaped as it goes on the wire).
     #[error("the text is longer than {max} bytes")]
     TooLong {
         /// The most bytes the type holds.
@@ -282,8 +284,11 @@ impl ProductInstanceId {
             .expect("32 hex digits are printable ASCII and at most 42 bytes")
     }
 
-    pub(crate) fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        Self::parse(std::str::from_utf8(bytes).ok()?).ok()
+    /// The Id a Stream message's `bytes` hold, or `None` for bytes that are
+    /// not UTF-8, longer than 42 or outside `32..=126`.
+    #[must_use]
+    pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        Self::parse(core::str::from_utf8(bytes).ok()?).ok()
     }
 
     /// The text.

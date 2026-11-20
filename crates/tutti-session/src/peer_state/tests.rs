@@ -53,11 +53,11 @@ fn a_state_round_trips_through_serde() {
 #[cfg(feature = "midi-hardware")]
 mod device {
     use super::*;
-    use tutti_midi_ci::ProductInstanceId;
     use tutti_midi_device::{
         DeviceEvent, DeviceInfo, DeviceTable, EndpointId, Identity, Learned, OsChange, OsDevice,
         PortDirection,
     };
+    use tutti_ump::ProductInstanceId;
     use tutti_ump::{DeviceIdentity, ManufacturerId, SoftwareRevision, U7};
 
     /// A listing row of a device the OS calls `name`, under `handle`.

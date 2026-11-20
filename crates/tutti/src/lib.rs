@@ -706,12 +706,12 @@ pub mod midi {
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_ci::{
         ChannelControllers, ChannelsDetail, CiCategories, CiDeviceId, CiPeer, DataControl,
-        DetailsData, DiscoveryData, EnabledMpeZones, InquiryTarget, InstanceIdError,
-        ManufacturerProfile, MaxSysexSize, MessageText, Nak, NakStatus, NameError, NotADataControl,
-        NotADeviceId, NotASysexSize, NotProfileChannels, NoteData, ProcessError, ProcessFeatures,
-        ProductInstanceId, ProfileChange, ProfileDataError, ProfileEntry, ProfileOutcome,
-        ProfileRequest, ProfileRequestError, ProfileState, ProfileTable, ReportRequest,
-        ReportScope, SpecificData, StandardProfile, SystemMessages,
+        DetailsData, DiscoveryData, EnabledMpeZones, InquiryTarget, ManufacturerProfile,
+        MaxSysexSize, MessageText, Nak, NakStatus, NotADataControl, NotADeviceId, NotASysexSize,
+        NotProfileChannels, NoteData, ProcessError, ProcessFeatures, ProfileChange,
+        ProfileDataError, ProfileEntry, ProfileOutcome, ProfileRequest, ProfileRequestError,
+        ProfileState, ProfileTable, ReportRequest, ReportScope, SpecificData, StandardProfile,
+        SystemMessages,
     };
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_ci::{Muid, NotAMuid};
@@ -811,7 +811,7 @@ pub mod midi {
     };
 
     #[cfg(feature = "midi-hardware")]
-    pub use tutti_midi_ci::{EndpointName, Name, Whole};
+    pub use tutti_midi_ci::Whole;
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_device::{
         DeviceId as MidiDeviceId, DeviceInfo, Learned, Match, MidiIdentity, SavedDevice,
@@ -828,6 +828,8 @@ pub mod midi {
         MidiPortError, NoHardware, OutputOptions, PortCause, ProfilePeer, ReportPeer,
         RequestReport, SwitchProfile, WholeProfile, midi_input, midi_output,
     };
+    #[cfg(feature = "midi-hardware")]
+    pub use tutti_ump::{EndpointName, InstanceIdError, Name, NameError, ProductInstanceId};
     /// MIDI-CI Property Exchange (M2-103 and its resource specifications): a
     /// peer's resources, read, written and subscribed to through the session.
     /// Under `plugin` alone it holds only the `MediaType` a `PeerState` carries.

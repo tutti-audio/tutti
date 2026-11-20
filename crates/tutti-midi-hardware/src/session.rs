@@ -52,10 +52,10 @@ use crate::properties::{PropertyAsk, PropertyChange, PropertyPeer};
 use crate::stream::{DeviceStream, InputTiming, Negotiation};
 use crate::{HardwareMidiInputs, InputFault};
 use tutti_graph::EventInletNode;
-use tutti_midi_ci::ProductInstanceId;
 use tutti_midi_ci::{CiDeviceId, ProfileChange, ProfileId};
 use tutti_midi_device::{DeviceId, DeviceInfo, Learned, MidiIdentity, SavedDevice};
 use tutti_midi_runtime::{InputInlets, InputWriters};
+use tutti_ump::ProductInstanceId;
 use tutti_ump::{GroupSpan, MidiGroup};
 
 /// The set of open MIDI inputs, and the endpoints available to open.
