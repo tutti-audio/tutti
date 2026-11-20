@@ -631,8 +631,8 @@ pub mod measure {
     // The dsp types `Error`, the spectrum and `Chroma` name.
     pub use tutti_dsp::{
         BinCount, BinIndex, ChannelWeight, ChannelWeightError, ChannelWeights, ColaGeometry,
-        CosineWindow, FrameCount, FrameIndex, Grid, HopSize, HopSizeError, StftError, StftGeometry,
-        WindowLength, WindowLengthError,
+        CosineWindow, FrameCount, FrameIndex, Grid, HopSize, HopSizeError, MelError, StftError,
+        StftGeometry, WindowLength, WindowLengthError,
     };
 }
 

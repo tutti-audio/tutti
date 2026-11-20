@@ -1,16 +1,14 @@
 use super::*;
-use tutti_units::SampleRate;
 #[cfg(all(feature = "encode-wav", feature = "encode-flac", decode))]
-use {
-    crate::{FlacLevel, IntDepth},
-    tutti_buffers::Interleaved,
-    tutti_buffers::{ChannelLayout, ChannelTopology},
-};
+use crate::{FlacLevel, IntDepth};
+#[cfg(all(feature = "encode-wav", decode))]
+use tutti_buffers::{ChannelLayout, ChannelTopology, Interleaved};
+use tutti_units::SampleRate;
 
 /// `frames` frames over `topology` whose sample at `(c, i)` is
 /// `((i * 7 + c * 3) % 400 - 200) / 256`: a ramp per channel that wraps, and
 /// exact at 16 bits (a whole multiple of 128 / 32768).
-#[cfg(all(feature = "encode-wav", feature = "encode-flac", decode))]
+#[cfg(all(feature = "encode-wav", decode))]
 fn ramp_wave(topology: ChannelTopology, rate: f64, frames: usize) -> Wave {
     let mut wave = Wave::with_topology(topology, SampleRate::of(rate));
     let width = wave.channels();
