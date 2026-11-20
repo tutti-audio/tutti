@@ -180,6 +180,8 @@ pub use tutti_plugin_types::{PluginFailure, PluginRef, PresetError, PresetId, St
 pub use tutti_session::MidiPolicyTarget;
 #[cfg(all(feature = "session", feature = "plugin"))]
 pub use tutti_session::Params as PluginParams;
+#[cfg(all(feature = "session", feature = "analyze", feature = "sampler"))]
+pub use tutti_session::windows_from_signal;
 #[cfg(all(feature = "session", feature = "plugin"))]
 pub use tutti_session::{
     AddPluginError, AnyPlugin, Diagnostics, ListedPreset, LoadPreset, Opened, Plugin, PluginBuses,
@@ -356,7 +358,7 @@ pub mod types {
 /// made from, and the `TempoView` a reader walks it with. What
 /// the tempo target takes.
 pub mod tempo {
-    pub use tutti_tempo::{Cell, CellGrid, CellGridError, TempoError};
+    pub use tutti_tempo::{Cell, CellGrid, CellGridError, FromBeatsError, TempoError};
     pub use tutti_tempo::{TempoMap, TempoMapBuilder, TempoPoint, TempoView, Transition};
     pub use tutti_transport::{ProjectMeter, TempoReader};
 }
