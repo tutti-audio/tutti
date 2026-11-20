@@ -278,6 +278,30 @@ fn gate_stereo_process_is_allocation_free() {
     );
 }
 
+/// A downward expander (a finite ratio) is a gate with a level-dependent closed gain, and runs
+/// without allocating.
+#[test]
+fn expander_process_is_allocation_free() {
+    gate(
+        GateNode::<f32>::from(
+            GateConfig::new(BusTopology::STEREO)
+                .key(KeySource::Sidechain)
+                .controls(GateControls {
+                    threshold: Db::new(-10.0),
+                    attack: Seconds::new(0.001),
+                    hold: Seconds::new(0.010),
+                    release: Seconds::new(0.100),
+                    range: Db::new(-60.0),
+                    ratio: CompressionRatio::new(3.0),
+                    ..GateControls::DEFAULT
+                }),
+        ),
+        0.1,
+        16,
+        2_000,
+    );
+}
+
 /// The key filter's stage, a high-pass on a mono compressor and a band-pass on a stereo one,
 /// runs without allocating.
 #[test]
