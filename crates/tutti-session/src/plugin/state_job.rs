@@ -124,7 +124,8 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
     {
         let (handle, plugin, _, _) = self.state_parts(key)?;
         // blocks: the state save is an IPC round trip.
-        Ok(self.jobs.submit_job(
+        Ok(self.jobs.submit_job_blocking(
+            "tutti-state",
             move |cancel| {
                 if cancel.is_cancelled() {
                     return Err(StateError::Unavailable);

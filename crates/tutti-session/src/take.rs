@@ -1184,7 +1184,8 @@ mod tests {
             .unwrap();
         let ended = Arc::new(Mutex::new(None));
         let into = Arc::clone(&ended);
-        session.jobs.submit_stream(
+        session.jobs.submit_dedicated(
+            "test",
             move |landings: &Landings<Started>| pump.run(landings),
             move |_, landed, _| {
                 if let Stream::Done(end) = landed {

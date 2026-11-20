@@ -40,8 +40,14 @@ use tutti_rt::{Bells, LockExt};
 use crate::job::{Cancel, Job, JobKind, JobOutputQueue, Ticket};
 use crate::{Clock, Session, SessionEvent, WorkerError};
 
-/// A future as the executor takes it.
-type BoxFuture = std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'static>>;
+/// Where a job runs on a threaded executor.
+#[derive(Clone, Copy)]
+enum Place<'a> {
+    /// The shared pool, for a short job.
+    Pool,
+    /// A thread of its own, named: a job that blocks or runs as long as a take.
+    Dedicated(&'a str),
+}
 
 /// The most futures one [`Session::update`] polls on a polled executor: a count,
 /// never a time. A threaded executor polls on its own threads and ignores it;
@@ -204,6 +210,9 @@ pub(crate) struct Jobs {
     closed: Arc<AtomicBool>,
     /// What typed jobs landed, until the collect phase reports it.
     outputs: JobOutputQueue,
+    /// Jobs the executor refused to start, and why: their `Dropped` end lands as
+    /// [`WorkerError::NotStarted`].
+    refused: HashMap<Slot, std::io::ErrorKind>,
     /// Events a [`Job::wait`] updated through, for the app's next update.
     held: Vec<SessionEvent>,
 }
@@ -324,6 +333,7 @@ impl Jobs {
             next: tutti_rt::Mint::new(),
             closed: Arc::new(AtomicBool::new(false)),
             outputs: JobOutputQueue::default(),
+            refused: HashMap::new(),
             held: Vec::new(),
         }
     }
@@ -349,9 +359,39 @@ impl Jobs {
         W: FnOnce(&Cancel) -> R + Send + 'static,
         L: FnOnce(&mut dyn JobSession, Result<R, WorkerError>, Ticket<J>) + Send + 'static,
     {
+        self.submit_job_at(Place::Pool, work, land)
+    }
+
+    /// [`submit_job`](Self::submit_job) for work that blocks: a threaded executor gives
+    /// it a thread named `name`, so the pool never waits behind it.
+    #[cfg_attr(
+        not(feature = "plugin"),
+        expect(
+            dead_code,
+            reason = "the plugin state job (feature `plugin`) is its user"
+        )
+    )]
+    pub(crate) fn submit_job_blocking<J, R, W, L>(&mut self, name: &str, work: W, land: L) -> Job<J>
+    where
+        J: JobKind,
+        R: Send + 'static,
+        W: FnOnce(&Cancel) -> R + Send + 'static,
+        L: FnOnce(&mut dyn JobSession, Result<R, WorkerError>, Ticket<J>) + Send + 'static,
+    {
+        self.submit_job_at(Place::Dedicated(name), work, land)
+    }
+
+    fn submit_job_at<J, R, W, L>(&mut self, place: Place<'_>, work: W, land: L) -> Job<J>
+    where
+        J: JobKind,
+        R: Send + 'static,
+        W: FnOnce(&Cancel) -> R + Send + 'static,
+        L: FnOnce(&mut dyn JobSession, Result<R, WorkerError>, Ticket<J>) + Send + 'static,
+    {
         let (job, ticket) = self.new_job::<J>();
         let cancel = ticket.cancel();
-        self.submit(
+        self.submit_at(
+            place,
             move || {
                 cancel.started();
                 work(&cancel)
@@ -407,7 +447,7 @@ impl Jobs {
     /// Runs `work` on the executor and lands its result in a later
     /// [`Session::update`], on the control thread.
     ///
-    /// `land` (and every lander of [`submit_stream`](Self::submit_stream))
+    /// `land` (and every lander of [`submit_dedicated`](Self::submit_dedicated))
     /// runs on the thread that calls `update()`, which need not be the main
     /// thread: a landing takes no main-thread proof (the plugin reload's does
     /// not), and what must be done on the main
@@ -423,8 +463,37 @@ impl Jobs {
             + Send
             + 'static,
     {
+        self.submit_at(Place::Pool, work, land);
+    }
+
+    /// [`submit`](Self::submit) for work that blocks (a plugin's round trip): a threaded
+    /// executor gives it a thread named `name`, so the pool never waits behind it.
+    #[cfg_attr(
+        not(any(feature = "plugin", feature = "sampler")),
+        expect(dead_code, reason = "the plugin and stream jobs are its users")
+    )]
+    pub(crate) fn submit_blocking<R, W, L>(&mut self, name: &str, work: W, land: L)
+    where
+        R: Send + 'static,
+        W: FnOnce() -> R + Send + 'static,
+        L: FnOnce(&mut dyn JobSession, Result<R, WorkerError>, &mut Vec<SessionEvent>)
+            + Send
+            + 'static,
+    {
+        self.submit_at(Place::Dedicated(name), work, land);
+    }
+
+    fn submit_at<R, W, L>(&mut self, place: Place<'_>, work: W, land: L)
+    where
+        R: Send + 'static,
+        W: FnOnce() -> R + Send + 'static,
+        L: FnOnce(&mut dyn JobSession, Result<R, WorkerError>, &mut Vec<SessionEvent>)
+            + Send
+            + 'static,
+    {
         let mut land = Some(land);
-        self.submit_stream(
+        self.start_stream(
+            place,
             move |_: &Landings<std::convert::Infallible>| work(),
             move |session, landed, events| {
                 let end = match landed {
@@ -439,27 +508,15 @@ impl Jobs {
         );
     }
 
-    /// Runs `work` on the executor, landing each message it sends through
-    /// its [`Landings`] and then its end, exactly once and after every
-    /// message, in later [`Session::update`]s on the control thread.
+    /// Runs `work` on a thread of its own on a threaded executor (named `name`), landing
+    /// each message it sends through its [`Landings`] and then its end, exactly once and
+    /// after every message, in later [`Session::update`]s on the control thread.
     /// `work` sees the landings by reference, so nothing it sends can
-    /// outlive it and follow the end.
+    /// outlive it and follow the end. For work that runs as long as a take.
     ///
-    /// An executor that refuses the future lands [`WorkerError::Dropped`].
-    pub(crate) fn submit_stream<M, R, W, L>(&mut self, work: W, land: L)
-    where
-        M: Send + 'static,
-        R: Send + 'static,
-        W: FnOnce(&Landings<M>) -> R + Send + 'static,
-        L: FnMut(&mut dyn JobSession, Stream<M, R>, &mut Vec<SessionEvent>) + Send + 'static,
-    {
-        self.start_stream(work, land, |executor, future| executor.spawn(future));
-    }
-
-    /// [`submit_stream`](Self::submit_stream) for work that runs as long as a take: the
-    /// threaded executor gives it a thread of its own, named `name`.
+    /// An executor that refuses the future lands [`WorkerError::NotStarted`].
     #[cfg_attr(
-        not(feature = "capture"),
+        not(any(test, feature = "capture")),
         expect(dead_code, reason = "the take's pump (feature `capture`) is its user")
     )]
     pub(crate) fn submit_dedicated<M, R, W, L>(&mut self, name: &str, work: W, land: L)
@@ -469,17 +526,11 @@ impl Jobs {
         W: FnOnce(&Landings<M>) -> R + Send + 'static,
         L: FnMut(&mut dyn JobSession, Stream<M, R>, &mut Vec<SessionEvent>) + Send + 'static,
     {
-        self.start_stream(work, land, |executor, future| {
-            executor.spawn_dedicated(name, None, future)
-        });
+        self.start_stream(Place::Dedicated(name), work, land);
     }
 
-    fn start_stream<M, R, W, L>(
-        &mut self,
-        work: W,
-        mut land: L,
-        spawn: impl FnOnce(&Executor, BoxFuture) -> std::io::Result<()>,
-    ) where
+    fn start_stream<M, R, W, L>(&mut self, place: Place<'_>, work: W, mut land: L)
+    where
         M: Send + 'static,
         R: Send + 'static,
         W: FnOnce(&Landings<M>) -> R + Send + 'static,
@@ -522,9 +573,14 @@ impl Jobs {
             // After every message: they went down the same channel first.
             let _ = landings.tx.send(Arrival::End(id, end));
         });
-        // A refused start drops the future unrun, and `Unfinished` lands it.
-        if let Err(error) = spawn(&self.executor, future) {
-            tracing::warn!("a session job was refused by the executor: {error}");
+        let started = match place {
+            Place::Pool => self.executor.spawn(future),
+            Place::Dedicated(name) => self.executor.spawn_dedicated(name, None, future),
+        };
+        // A refused start drops the future unrun, so `Unfinished` has queued
+        // `Dropped`; `land_jobs` reports the refusal instead.
+        if let Err(error) = started {
+            self.refused.insert(id, error.kind());
         }
     }
 }
@@ -539,6 +595,16 @@ impl<K: crate::AppKey, C: Clock> Session<K, C> {
             let (id, ends) = match &arrival {
                 Arrival::Message(id, _) => (*id, false),
                 Arrival::End(id, _) => (*id, true),
+            };
+            let arrival = match arrival {
+                Arrival::End(id, Err(WorkerError::Dropped)) => {
+                    let end = match self.jobs.refused.remove(&id) {
+                        Some(kind) => WorkerError::NotStarted(kind),
+                        None => WorkerError::Dropped,
+                    };
+                    Arrival::End(id, Err(end))
+                }
+                other => other,
             };
             // Out of the table while it runs: a lander may submit a job.
             let Some(mut lander) = self.jobs.landers.remove(&id) else {
@@ -618,7 +684,8 @@ mod tests {
         let mut s = session(Session::builder());
         let seen = Arc::new(Mutex::new(Vec::new()));
         let into = Arc::clone(&seen);
-        s.jobs.submit_stream(
+        s.jobs.submit_dedicated(
+            "test",
             |landings: &Landings<u32>| {
                 for n in 0..500 {
                     landings.send(n).unwrap();
@@ -743,7 +810,8 @@ mod tests {
         let mut s = session(Session::builder().executor(held.executor()));
         let seen = Arc::new(Mutex::new(None));
         let into = Arc::clone(&seen);
-        s.jobs.submit_stream(
+        s.jobs.submit_dedicated(
+            "test",
             move |landings: &Landings<u8>| {
                 *into.lock().unwrap() = Some((landings.send(7), landings.is_closed()));
             },

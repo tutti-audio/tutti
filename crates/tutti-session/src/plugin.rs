@@ -2194,7 +2194,8 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
             .snapshot_from
             .map(|t| now.saturating_duration_since(t));
         // blocks: a plugin load is an IPC round trip; the plugin lane awaits its reply.
-        self.jobs.submit(
+        self.jobs.submit_blocking(
+            "tutti-reload",
             move || load.run(),
             move |session, ended, out| match ended {
                 Ok(loaded) => session.land_plugin(
@@ -2415,7 +2416,8 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
             if let Some(read) = hosted.param_read.take() {
                 let token = Arc::clone(&hosted.mirror_token);
                 // blocks: the parameter read is an IPC round trip.
-                self.jobs.submit(
+                self.jobs.submit_blocking(
+                    "tutti-params",
                     move || read.run(),
                     move |session, ended, out| match ended {
                         Ok(values) => session.land_plugin(
@@ -2458,7 +2460,8 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
             if let Some((handle, token)) = snapshot {
                 let asked = now;
                 // blocks: the state save is an IPC round trip.
-                self.jobs.submit(
+                self.jobs.submit_blocking(
+                    "tutti-snapshot",
                     move || handle.save_state(StateUse::Project),
                     move |session, ended, out| match ended {
                         Ok(state) => session.land_plugin(

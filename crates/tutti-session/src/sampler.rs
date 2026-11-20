@@ -113,7 +113,8 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
         let id = SamplerLoad::mint(&self.sampler.opens);
         let landed = Arc::clone(&self.sampler.streams);
         // blocks: `Opening::wait` parks on the streamer's reply; the stream lane awaits it.
-        self.jobs.submit(
+        self.jobs.submit_blocking(
+            "tutti-open",
             move || opening.wait(),
             move |_, done, events| {
                 let event = match done {

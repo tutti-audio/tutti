@@ -755,8 +755,10 @@ impl<C: Clock> SessionBuilder<C> {
     ///   report.
     ///
     /// A future the executor drops unrun lands as
-    /// [`WorkerError::Dropped`](crate::WorkerError::Dropped), so an executor that
-    /// refuses work loses none silently. Dropping the session drops its clone of
+    /// [`WorkerError::Dropped`](crate::WorkerError::Dropped), and one it refuses to
+    /// start (a thread the OS would not give) as
+    /// [`WorkerError::NotStarted`](crate::WorkerError::NotStarted), so an executor
+    /// that refuses work loses none silently. Dropping the session drops its clone of
     /// the executor; the last clone of a threaded one joins its threads, so a job
     /// still running then holds the drop until it returns.
     ///

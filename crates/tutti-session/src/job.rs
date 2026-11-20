@@ -142,11 +142,14 @@ pub enum WorkerError {
         /// type.
         message: String,
     },
-    /// The executor did not run the job to its end: it refused the work (a thread
-    /// that could not start), shut down, or dropped the future; or the session ended
-    /// the job unanswered.
+    /// The executor dropped the job unrun or part-way (a shutdown, a host that
+    /// discards the future), or the session ended the job unanswered.
     #[error("the executor dropped a session job without finishing it")]
     Dropped,
+    /// The executor refused to start the job: the OS refused a thread. The work never
+    /// ran.
+    #[error("the executor could not start a session job: {0}")]
+    NotStarted(std::io::ErrorKind),
 }
 
 const PENDING: u8 = 0;
