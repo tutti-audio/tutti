@@ -851,8 +851,8 @@ impl PluginHandle {
     ///
     /// # Errors
     ///
-    /// [`AutomationModeError::Unsupported`] when this hosting carries no
-    /// automation-state advisory (in-process), and otherwise any error of
+    /// [`AutomationModeError::Unsupported`] when the plugin carries no
+    /// automation-state channel, and otherwise any error of
     /// [`AnyThread::set_automation_mode`].
     pub fn set_automation_mode(&self, mode: AutomationMode) -> Result<(), AutomationModeError> {
         self.any_thread.set_automation_mode(mode)

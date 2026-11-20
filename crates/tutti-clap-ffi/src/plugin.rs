@@ -441,6 +441,12 @@ impl Plugin {
         !self.core.exts.preset_load.is_null()
     }
 
+    /// Whether the plugin implements `clap.param-indication`.
+    #[must_use]
+    pub fn supports_param_indication(&self) -> bool {
+        !self.core.exts.param_indication.is_null()
+    }
+
     /// Whether the plugin implements `clap.render`.
     #[must_use]
     pub fn supports_render(&self) -> bool {

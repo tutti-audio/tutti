@@ -126,6 +126,7 @@ impl Vst3Loaded {
         let has_programs = !self.program_lists(main).is_empty();
         features.set(Features::PRESET_LIST, has_programs);
         features.set(Features::PRESET_LOAD, has_programs);
+        features.set(Features::AUTOMATION_STATE, self.has_automation_state(main));
         // `processMode` is a field of every plugin's `ProcessSetup`.
         features.insert(Features::RENDER_MODE);
         features
@@ -482,11 +483,11 @@ impl Control for Vst3Loaded {
         })
     }
 
-    fn set_automation_state(&mut self, main: MainThreadMarker, mode: AutomationMode) {
+    fn set_automation_state(&mut self, main: MainThreadMarker, mode: AutomationMode) -> bool {
         // Encoded onto the `IAutomationState` bitmask here, at the VST3 edge,
-        // by the crate's own SDK-backed conversion; a no-op if the plugin does
+        // by the crate's own SDK-backed conversion; `false` if the plugin does
         // not implement the interface.
-        self.apply_automation_state(main, mode);
+        self.apply_automation_state(main, mode)
     }
 
     /// Nothing is cached: parameters are read live from the controller.
