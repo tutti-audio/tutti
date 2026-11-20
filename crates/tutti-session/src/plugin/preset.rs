@@ -115,8 +115,10 @@ impl<K: AppKey, C: Clock<Float = f32>> Session<K, C> {
     /// on the main thread with [`LoadPreset::run`], then hand its output to
     /// [`apply`](Self::apply). The preset must be one the node's own plugin
     /// listed: the check compares the plugin instance that listed it with the
-    /// node's, so a preset listed by an instance since replaced is refused as
-    /// [`PresetStartError::OtherPlugin`].
+    /// node's. A crash recovery, a reload and a replace each load the plugin
+    /// again, which is another instance, so a preset listed before one is
+    /// refused after it as [`PresetStartError::OtherPlugin`]: list again from
+    /// the node's plugin.
     ///
     /// # Errors
     ///

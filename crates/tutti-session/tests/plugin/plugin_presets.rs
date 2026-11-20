@@ -324,6 +324,72 @@ mod vst3 {
             Err(PresetStartError::OtherPlugin)
         ));
     }
+
+    /// **A crash recovery loads the plugin again, so a preset listed before
+    /// the crash is refused `OtherPlugin` after it**: the new plugin is another
+    /// instance, and the listing belongs to the one that died.
+    #[test]
+    fn a_preset_listed_before_a_crash_recovery_is_another_plugins() {
+        // SAFETY: nextest runs each test in its own process, and this is set
+        // from the test's own thread before the first server is spawned.
+        unsafe { std::env::set_var("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server()) };
+        let module = tutti_fixtures::vst3_module();
+        let bundle = tutti_plugin_types::bundle::bundle_dir_of(
+            &module,
+            tutti_plugin_types::bundle::ModuleKind::Vst3,
+        )
+        .expect("a .vst3 bundle around the module");
+        let (catalog, id, _dir) = crate::pooled::catalog_of(&PluginRef::file(bundle.to_path_buf()));
+        let main = tutti_fixtures::main_thread();
+        let mut s = Session::builder()
+            .outputs_floor(ChannelLayout::STEREO)
+            .plugin_recovery(tutti_session::RecoveryPolicy::default())
+            .build_detached(SampleRate::DEFAULT)
+            .expect("a detached session builds");
+        s.pool(s.plugin_entry(0u64, &id, &catalog)).unwrap();
+        let deadline = tutti_platform::Instant::now() + std::time::Duration::from_secs(60);
+        while s.plugin(&0u64).is_err() {
+            let _ = s.update_on(main);
+            assert!(
+                tutti_platform::Instant::now() < deadline,
+                "the load never landed"
+            );
+            std::thread::yield_now();
+        }
+        let node = s.add_pooled_plugin(&0u64).unwrap();
+        let preset = s
+            .plugin_view(node)
+            .unwrap()
+            .presets(main)
+            .iter()
+            .nth(1)
+            .expect("the plugin lists programs");
+        assert!(s.load_preset(&node, &preset).is_ok(), "listed by this one");
+
+        let before = s.plugin_view(node).unwrap().diagnostics().server_pid();
+        s.plugin_view(node).unwrap().diagnostics().terminate(
+            tutti_plugin_types::TerminationReason::Hung {
+                blocks: 16,
+                held: std::time::Duration::from_secs(5),
+            },
+        );
+        loop {
+            let _ = s.update_on(main);
+            let now = s.plugin_view(node).unwrap().diagnostics().server_pid();
+            if now.is_some() && now != before {
+                break;
+            }
+            assert!(
+                tutti_platform::Instant::now() < deadline,
+                "the plugin never recovered"
+            );
+            std::thread::yield_now();
+        }
+        assert!(matches!(
+            s.load_preset(&node, &preset),
+            Err(PresetStartError::OtherPlugin)
+        ));
+    }
 }
 
 #[cfg(feature = "vst2")]

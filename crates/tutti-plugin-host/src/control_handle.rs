@@ -89,12 +89,14 @@ fn editor_error(error: PluginError) -> EditorError {
     }
 }
 
-/// Which loaded plugin a [`PluginHandle`] reaches ([`PluginHandle::instance`]).
+/// Which plugin instance a [`PluginHandle`] reaches ([`PluginHandle::instance`]):
+/// one created plugin. A handle and its clones share it; a crash recovery, a
+/// reload or a replace loads the plugin again and gets a handle of a new
+/// instance, so ids from before differ from ids after.
 ///
-/// Compares equal for the handle and its clones. It keeps nothing of the plugin
-/// alive, so any thread may hold and drop it.
+/// It keeps nothing of the plugin alive, so any thread may hold and drop it.
 #[derive(Clone, Debug)]
-pub struct InstanceId(std::sync::Weak<AtomicBool>);
+pub struct InstanceId(std::sync::Weak<()>);
 
 impl PartialEq for InstanceId {
     fn eq(&self, other: &Self) -> bool {
@@ -228,6 +230,9 @@ pub struct PluginHandle {
     /// Whether an editor this handle opened is open: shared by every clone, set
     /// by a successful open and cleared by `close_editor`.
     editor_open: Arc<AtomicBool>,
+    /// The plugin instance this handle reaches: made with the handle, shared by
+    /// every clone.
+    instance: Arc<()>,
 }
 
 impl std::fmt::Debug for PluginHandle {
@@ -274,6 +279,7 @@ impl PluginHandle {
             // No subprocess to name unless `with_server_pid` says so.
             server_pid: None,
             editor_open: Arc::new(AtomicBool::new(false)),
+            instance: Arc::new(()),
         }
     }
 
@@ -707,11 +713,12 @@ impl PluginHandle {
         Ok(())
     }
 
-    /// Which loaded plugin this handle reaches: the same for a clone of it, and
-    /// another for a plugin loaded again. It holds no part of the plugin.
+    /// Which plugin instance this handle reaches ([`InstanceId`]): the same for
+    /// a clone of it, and another for any handle made by loading a plugin
+    /// again.
     #[must_use]
     pub fn instance(&self) -> InstanceId {
-        InstanceId(Arc::downgrade(&self.editor_open))
+        InstanceId(Arc::downgrade(&self.instance))
     }
 
     /// Whether an editor opened through this handle (or a clone of it) is open:

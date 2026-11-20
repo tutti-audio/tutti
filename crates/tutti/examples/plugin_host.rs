@@ -13,7 +13,7 @@
 //! that exports several loads the one that was picked); the session loads it,
 //! hosts it, and bounces four beats of it to `out.wav`. An instrument plays a
 //! note; the plugin's first parameter is set and dragged (`params()`); its state is saved with
-//! `state().save()` and written beside the WAV.
+//! `session.save_state(..)` and written beside the WAV.
 //!
 //! The plugin is a [`Plugin`](tutti::Plugin) view (`session.plugin_view(node)`), and what happens to
 //! it is a [`PluginEvent`] in `update()`'s events. The host makes the token on its
