@@ -66,6 +66,20 @@ pub struct TapWriter<F: Float = f32> {
     lost: Arc<AtomicU64>,
     /// Rung after each block written, for a reader that awaits frames.
     bell: Option<Bell>,
+    /// Rings the bell when the writer is gone. Last, so it drops after the rings: the
+    /// reader that wakes finds their writers gone.
+    _gone: RingOnDrop,
+}
+
+/// Rings a bell as it drops.
+struct RingOnDrop(Option<Bell>);
+
+impl Drop for RingOnDrop {
+    fn drop(&mut self) {
+        if let Some(bell) = &self.0 {
+            bell.ring();
+        }
+    }
 }
 
 /// How a tap ends: the latch the editor raises when every node the tap read was
@@ -345,6 +359,7 @@ impl<F: Float> TapReader<F> {
             runs: run_prod,
             next: Frame::ZERO,
             lost,
+            _gone: RingOnDrop(bell.clone()),
             bell,
         };
         (reader, writer)
@@ -374,6 +389,17 @@ impl<F: Float> TapReader<F> {
     #[must_use]
     pub fn source_gone(&self) -> bool {
         self.end.is_raised()
+    }
+
+    /// Whether the writer is gone (its tap closed, or its graph dropped) and no frame
+    /// will be written after what is in the rings. Unlike
+    /// [`source_gone`](Self::source_gone), which the editor raises, a reader that awaits
+    /// a bell asks this too: the writer's drop rings the bell it was opened with.
+    ///
+    /// **Ask before reading the rings**, as for `source_gone`.
+    #[must_use]
+    pub fn writer_gone(&self) -> bool {
+        self.runs.is_disconnected()
     }
 
     /// The tap's id, the one [`Editor::close_tap`](crate::Editor::close_tap)
@@ -593,6 +619,40 @@ impl<F: Float> Source for TapReader<F> {
 mod tests {
     use super::*;
     use crate::arena::Arena;
+
+    /// **A dropped writer rings the bell after its rings are gone**, so the reader that
+    /// wakes reads the writer gone with every frame written before it still there.
+    #[test]
+    fn a_dropped_writer_rings_and_the_reader_reads_it_gone() {
+        use std::future::Future;
+        use std::pin::pin;
+        use std::task::{Context, Poll, Waker};
+
+        let bells = tutti_rt::Bells::new().expect("a tick thread");
+        let (bell, mut listener) = bells.bell();
+        let (mut reader, mut writer) =
+            TapReader::<f32>::named(TapId::of(2), 1, Samples::new(8), Some(bell));
+        writer.push_interleaved(Interleaved::new(&[1.0, 2.0], writer.layout()).unwrap());
+        let mut cx = Context::from_waker(Waker::noop());
+        assert_eq!(pin!(listener.rung()).poll(&mut cx), Poll::Ready(()));
+        assert!(!reader.writer_gone());
+        drop(writer);
+        assert_eq!(
+            pin!(listener.rung()).poll(&mut cx),
+            Poll::Ready(()),
+            "the drop rings"
+        );
+        assert!(reader.writer_gone(), "the ring follows the writer's end");
+        let mut out = [0.0f32; 2];
+        let popped = reader
+            .pop_into(InterleavedMut::new(&mut out, reader.layout()).unwrap())
+            .unwrap();
+        assert_eq!(
+            (popped.get(), out),
+            (2, [1.0, 2.0]),
+            "what was written is still read"
+        );
+    }
 
     /// **A tap rings its bell as it writes a block and when it ends, and not
     /// otherwise.** A reader that awaits frames is woken by the audio thread's

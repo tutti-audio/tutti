@@ -1000,7 +1000,7 @@ impl<F: Float> Pump<F> {
         'pump: while !self.stop.load(Ordering::Acquire) && !landings.is_closed() {
             // The tap's end before its ring, so a frame written before the end
             // is never missed.
-            let gone = self.reader.source_gone();
+            let gone = self.reader.source_gone() || self.reader.writer_gone();
             let run = self.reader.contiguous().get().min(PASS_FRAMES);
             if run == 0 {
                 // Every frame the input played is read and its node is gone:
