@@ -140,12 +140,14 @@ pub(crate) mod wire;
 ///   byte.
 /// - **Version 50** splits the host's and the server's messages by connection
 ///   (`AudioRequest`/`AudioReply` on the audio connection, `ControlRequest`/
-///   `ControlReply`/`News` on the control one, each type with its own frame
-///   cap), and every state chunk (`LoadStateChunk`, `StageStateChunk`,
-///   `StateChunk`) carries the `total` of the whole state, so the receiver
-///   sizes its buffer once and refuses a total over the limit before it
-///   allocates.
-pub const PROTOCOL_VERSION: u32 = 50;
+///   `ControlReply`/`News` on the control one), so a message of the other
+///   connection has no variant to be written as.
+/// - **Version 51** gives each connection's wire types their own frame cap
+///   (`Framed::CAP`), and every state chunk (`LoadStateChunk`,
+///   `StageStateChunk`, `StateChunk`) carries the `total` of the whole state,
+///   so the receiver sizes its buffer once and refuses a total over the limit
+///   before it allocates.
+pub const PROTOCOL_VERSION: u32 = 51;
 
 /// Largest frame body the control connection carries, either way, in bytes.
 ///
