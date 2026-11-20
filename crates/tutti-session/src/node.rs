@@ -274,6 +274,7 @@ param_session_node!(
     FdnNode,
     PlateReverbNode,
     ConvolverNode,
+    NoiseNode,
 );
 param_session_node!(any: tutti_nodes::LfoNode, tutti_nodes::OscillatorNode);
 

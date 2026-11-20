@@ -163,6 +163,7 @@ fn distortion_process_is_allocation_free_fed_and_unfed() {
         ShapeKind::Atan,
         ShapeKind::Softsign,
         ShapeKind::HardClip,
+        ShapeKind::TriangleFold,
         ShapeKind::Crush,
         ShapeKind::SoftCrush,
     ];
@@ -251,6 +252,7 @@ fn distortion_antialiasing_is_allocation_free_fed_and_unfed() {
         ShapeKind::Atan,
         ShapeKind::Softsign,
         ShapeKind::HardClip,
+        ShapeKind::TriangleFold,
         ShapeKind::Crush,
         ShapeKind::SoftCrush,
     ];

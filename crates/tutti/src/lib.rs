@@ -285,10 +285,11 @@ pub mod nodes {
     };
     pub use tutti_nodes::{
         Antialiasing, AutoPanConfig, AutoPanControls, AutoPanKernel, AutoPanNode, AutoPanSet,
-        ChannelOutOfRange, MidSideConfig, MidSideNode, OscillatorWave, PanLaw, PolarityConfig,
-        PolarityError, PolarityNode, RingModConfig, RingModControls, RingModKernel, RingModNode,
-        RingModSet, StereoWidthConfig, StereoWidthKernel, StereoWidthNode, StereoWidthSet,
-        TremoloConfig, TremoloControls, TremoloKernel, TremoloNode, TremoloSet, WidthControls,
+        ChannelOutOfRange, MidSideConfig, MidSideNode, NoiseColour, OscillatorWave, PanLaw,
+        PolarityConfig, PolarityError, PolarityNode, RingModConfig, RingModControls, RingModKernel,
+        RingModNode, RingModSet, StereoWidthConfig, StereoWidthKernel, StereoWidthNode,
+        StereoWidthSet, TremoloConfig, TremoloControls, TremoloKernel, TremoloNode, TremoloSet,
+        WidthControls,
     };
     pub use tutti_nodes::{
         BAND_PARAMS, BellFilterConfig, BellFilterControls, BellFilterNode, BitCrusherConfig,
@@ -310,14 +311,14 @@ pub mod nodes {
         LevellerControls, LevellerNode, LfoClock, LfoConfig, LfoNode, LimiterConfig,
         LimiterControls, LimiterNode, MetronomeMode, ModDelayConfig, ModDelayControls,
         ModDelayLayout, ModDelayLayoutBuilder, ModDelayNode, MultibandBands,
-        MultibandCompressorConfig, MultibandCompressorNode, MultibandControls, NoteEnvelopeConfig,
-        NoteEnvelopeNode, OscillatorConfig, OscillatorNode, OversamplingFactor, PhaserConfig,
-        PhaserControls, PhaserNode, PlateControls, PlateReverbConfig, PlateReverbNode,
-        SOURCE_EVENT_CAPACITY, ShapeKind, SourceNode, SourcePorts, Stages, StagesError, Stagger,
-        StaggerError, SvfControls, SvfFilterConfig, SvfFilterNode, SvfType, Sweep, SweepBuilder,
-        SweepError, SweepRange, SweepRangeError, TiltFilterConfig, TiltFilterControls,
-        TiltFilterNode, TransientControls, TransientShaperConfig, TransientShaperNode, VbapError,
-        VbapPannerConfig, VbapPannerNode,
+        MultibandCompressorConfig, MultibandCompressorNode, MultibandControls, NoiseConfig,
+        NoiseNode, NoteEnvelopeConfig, NoteEnvelopeNode, OscillatorConfig, OscillatorNode,
+        OversamplingFactor, PhaserConfig, PhaserControls, PhaserNode, PlateControls,
+        PlateReverbConfig, PlateReverbNode, SOURCE_EVENT_CAPACITY, ShapeKind, SourceNode,
+        SourcePorts, Stages, StagesError, Stagger, StaggerError, SvfControls, SvfFilterConfig,
+        SvfFilterNode, SvfType, Sweep, SweepBuilder, SweepError, SweepRange, SweepRangeError,
+        TiltFilterConfig, TiltFilterControls, TiltFilterNode, TransientControls,
+        TransientShaperConfig, TransientShaperNode, VbapError, VbapPannerConfig, VbapPannerNode,
     };
     pub use tutti_nodes::{
         BellFilterKernel, BitCrusherKernel, BrickwallKernel, CompressorKernel, Control,
