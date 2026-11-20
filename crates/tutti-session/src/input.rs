@@ -20,7 +20,7 @@
 use std::any::Any;
 use std::sync::Arc;
 
-use tutti_buffers::Float;
+use tutti_buffers::{Float, SampleFormat};
 use tutti_cpal::{AudioHost, DeviceSelector, MONITOR_RING, MicConfig, MicIn};
 use tutti_engine::StreamLatency;
 use tutti_graph::{DECLICK, FadeLaw, InletNode, InletRing};
@@ -57,6 +57,11 @@ pub struct InputConfig {
     /// chosen with [`Fold::select`](tutti_buffers::Fold::select)). `None`: the
     /// first two.
     pub channels: Option<Vec<usize>>,
+    /// The sample format to open the device at, at the graph's rate
+    /// ([`MicConfig::sample_format`]): `None` is `F32` when the device offers
+    /// it. A format the device lacks fails the open with
+    /// [`tutti_cpal::Error::InputFormatUnavailable`].
+    pub sample_format: Option<SampleFormat>,
     /// The depth of the ring into the graph, in time at the input's rate:
     /// shallow on purpose, so a monitored input is heard now and not late. A
     /// longer one rides out a longer stall of the graph's callback at that
@@ -74,6 +79,7 @@ impl Default for InputConfig {
         Self {
             device: DeviceSelector::Default,
             channels: None,
+            sample_format: None,
             capacity: MONITOR_RING,
             offset: Trim::NONE,
         }
@@ -130,6 +136,13 @@ impl InputConfig {
     #[must_use]
     pub fn channels(mut self, channels: &[usize]) -> Self {
         self.channels = Some(channels.to_vec());
+        self
+    }
+
+    /// This config opening the device at `format`.
+    #[must_use]
+    pub fn sample_format(mut self, format: SampleFormat) -> Self {
+        self.sample_format = Some(format);
         self
     }
 
@@ -347,6 +360,7 @@ impl<F: SessionFloat> Inputs<F> {
             host: self.host,
             device: config.device.clone(),
             inputs: config.channels.clone(),
+            sample_format: config.sample_format,
             latency: Some(Arc::clone(&self.latency)),
             monitor_depth: config.capacity,
         }

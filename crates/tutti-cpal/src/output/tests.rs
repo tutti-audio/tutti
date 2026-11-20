@@ -101,3 +101,16 @@ fn starting_a_running_engine_is_an_error() {
     engine.start_with(state, third).expect("starts after stop");
     assert!(third_stream.is_open());
 }
+
+/// **A restart onto another device asks it for the same sample format**: naming
+/// a new device replaces the device and keeps the chosen format.
+#[test]
+fn selecting_another_device_keeps_the_chosen_sample_format() {
+    let mut config =
+        OutputConfig::from(DeviceSelector::named("A")).sample_format(SampleFormat::I16);
+    config.select(DeviceSelector::named("B"));
+    assert_eq!(
+        config,
+        OutputConfig::from(DeviceSelector::named("B")).sample_format(SampleFormat::I16)
+    );
+}
