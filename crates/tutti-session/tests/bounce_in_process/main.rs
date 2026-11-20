@@ -20,7 +20,7 @@ use tutti_session::{
     Bounce, BounceLatency, BounceTail, ExportClock, PeerState, Range, Root, Session, Stem,
 };
 use tutti_tempo::TempoMap;
-use tutti_transport::{OfflineTimeline, OfflineTimelineConfig};
+use tutti_timeline::{OfflineTimeline, OfflineTimelineConfig};
 use tutti_ump::{Message, MidiChannel, NoteNumber, NoteVelocity, Voice2};
 use tutti_units::{Beat, Bpm, SampleRate, Samples, Seconds};
 

@@ -30,7 +30,7 @@
 //! use tutti_plugin_db::PluginDb;
 //! use tutti_units::Samples;
 //! use tutti_graph::NodeKey;
-//! use tutti_transport::TempoReader;
+//! use tutti_timeline::TempoReader;
 //! use tutti_units::Bpm;
 //!
 //! // `sample_rate` is a `SampleRate`, the engine's unit type, not a bare rate

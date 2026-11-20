@@ -33,7 +33,7 @@ use tutti_dsp::DitherShape;
 use tutti_export::{RenderGraph, Setup};
 use tutti_graph::GraphBuilder;
 use tutti_nodes::testing::Const;
-use tutti_transport::FrozenClock;
+use tutti_timeline::FrozenClock;
 use tutti_units::Seconds;
 
 const SR: f64 = 44_100.0;

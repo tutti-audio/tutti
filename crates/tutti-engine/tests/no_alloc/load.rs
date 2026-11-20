@@ -18,7 +18,7 @@ use tutti_graph::NodeKey;
 use tutti_graph::{Editor, Prepare, Unforkable};
 use tutti_graph::{OutPort, Source};
 use tutti_platform::Instant;
-use tutti_transport::Transport;
+use tutti_timeline::Transport;
 use tutti_units::{SampleRate, Samples};
 
 const RATE: f64 = 48_000.0;

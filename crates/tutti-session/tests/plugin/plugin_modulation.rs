@@ -563,7 +563,7 @@ fn an_export_is_the_live_render_on_a_clap_gain() {
 
     use tutti_buffers::ChannelLayout;
     use tutti_session::{Bounce, BounceLatency, BounceTail, ExportClock, Range};
-    use tutti_transport::{OfflineTimeline, OfflineTimelineConfig};
+    use tutti_timeline::{OfflineTimeline, OfflineTimelineConfig};
     use tutti_units::{Beat, Bpm};
 
     const BLOCK: usize = 1_024;

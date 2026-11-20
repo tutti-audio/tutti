@@ -24,7 +24,7 @@ tutti-midi-protocol = { path = "../../crates/tutti-midi-protocol" }
 tutti-nodes = { path = "../../crates/tutti-nodes", default-features = false, features = ["testing"] }
 tutti-polysynth = { path = "../../crates/tutti-polysynth" }
 tutti-sampler = { path = "../../crates/tutti-sampler", features = ["testing"] }
-tutti-transport = { path = "../../crates/tutti-transport" }
+tutti-timeline = { path = "../../crates/tutti-timeline" }
 tutti-buffers = { version = "0.0.1", path = "../../crates/tutti-buffers" }
 tutti-units = { path = "../../crates/tutti-units" }
 tutti-ump = { path = "../../crates/tutti-ump", default-features = false }

@@ -44,7 +44,7 @@ serde_json = "1"
 tutti-plugin-types = { path = "../../crates/tutti-plugin-types", optional = true }
 raw-window-handle = { version = "0.6", optional = true }
 # `plugin`: the constant tempo a plugin node renders under (`tempo`).
-tutti-transport = { path = "../../crates/tutti-transport", optional = true }
+tutti-timeline = { path = "../../crates/tutti-timeline", optional = true }
 # `graph`: the capture sink and rig of the MIDI crates' tests (`event_rig`). Only
 # crates above `tutti-graph` turn it on; in a workspace build the feature
 # unifies, so `tutti-graph`'s own tests may link a second copy of it through this
@@ -68,7 +68,7 @@ graph = ["dep:tutti-graph"]
 # `au_bundle`, the bundle that declares the shared plugin's Audio Unit, and
 # `element_name_retain_count` (macOS).
 au = ["plugin", "dep:tutti-shared-plugin", "dep:coreaudio-sys"]
-plugin = ["dep:tutti-plugin-types", "dep:raw-window-handle", "dep:tutti-transport"]
+plugin = ["dep:tutti-plugin-types", "dep:raw-window-handle", "dep:tutti-timeline"]
 # `vst3_cpp_module` and `bundle_of`: where the C++ twin is.
 vst3-cpp = ["plugin", "dep:tutti-shared-plugin-vst3-cpp"]
 # `sdk_zeroed`: an all-zero VST3 SDK record, for a test to fill in.

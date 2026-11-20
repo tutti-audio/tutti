@@ -1,6 +1,6 @@
 //! The project meter a plugin node reads its time signature and bar with.
 
-use tutti_transport::{ProjectMeter, TimeSignatureSlot, TimeSignatureSlotReader};
+use tutti_timeline::{ProjectMeter, TimeSignatureSlot, TimeSignatureSlotReader};
 
 /// A plugin node's meter: the project meter it reads once per block for the
 /// time-signature and bar fields of the transport it tells the plugin.

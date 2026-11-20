@@ -31,9 +31,8 @@ fn the_declared_bound_is_what_the_list_holds_and_the_intake_takes() {
         SampleRate::of(SAMPLE_RATE),
     )
     .expect("the reference plugin loads in process");
-    let mut node = client.bind(
-        tutti_transport::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
-    );
+    let mut node = client
+        .bind(tutti_timeline::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"));
     // The activation's list holds 256 events (the intake's size), whatever
     // the block the graph is prepared for.
     for frames in [64, 2048, 8192] {

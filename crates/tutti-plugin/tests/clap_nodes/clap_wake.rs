@@ -77,9 +77,8 @@ fn in_process_the_next_block_after_a_request_from_another_thread_runs_the_plugin
         SampleRate::of(SAMPLE_RATE),
     )
     .expect("the reference plugin loads in process");
-    let node = client.bind(
-        tutti_transport::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
-    );
+    let node = client
+        .bind(tutti_timeline::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"));
     let (mut renderer, _controls) = one_plugin_graph(node, 2);
 
     for _ in 0..8 {
@@ -127,7 +126,7 @@ fn served_a_request_while_parked_wakes_the_node() {
     let outputs = probe.client.outputs();
     let (mut renderer, controls) = one_plugin_graph(
         probe.client.bind(
-            tutti_transport::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
+            tutti_timeline::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
         ),
         outputs,
     );

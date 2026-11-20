@@ -71,7 +71,7 @@ pub(super) const LAYERS: &[&[&str]] = &[
         "tutti-voicing",
         "tutti-sf2",
     ],
-    &["tutti-transport", "tutti-plugin-types", "tutti-measure"],
+    &["tutti-timeline", "tutti-plugin-types", "tutti-measure"],
     &[
         "tutti-engine",
         "tutti-nodes",
@@ -150,7 +150,7 @@ const ONLY: &[(&str, &[&str])] = &[
         &["tutti-ump", "tutti-units", "tutti-midi-protocol"],
     ),
     (
-        "tutti-transport",
+        "tutti-timeline",
         &[
             "tutti-music",
             "tutti-units",
@@ -173,7 +173,7 @@ const ONLY: &[(&str, &[&str])] = &[
             "tutti-plugin-ipc",
             "tutti-plugin-types",
             "tutti-rt",
-            "tutti-transport",
+            "tutti-timeline",
             "tutti-units",
             "tutti-au-host",
             "tutti-clap-host",
@@ -210,7 +210,7 @@ const ONLY: &[(&str, &[&str])] = &[
             "tutti-plugin-types",
             "tutti-buffers",
             "tutti-graph",
-            "tutti-transport",
+            "tutti-timeline",
             "tutti-tempo",
             "tutti-music",
             "tutti-units",

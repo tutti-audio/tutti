@@ -47,7 +47,7 @@ tutti-fixtures = { path = "../../testing/tutti-fixtures", features = ["graph"] }
 # `tests/clock_tempo_map.rs` renders the clock through the live engine over a
 # published `TempoMap`. Dev edges only: nothing here depends on the engine.
 tutti-engine = { path = "../tutti-engine" }
-tutti-transport = { path = "../tutti-transport" }
+tutti-timeline = { path = "../tutti-timeline" }
 tutti-tempo = { path = "../tutti-tempo" }
 
 [[bench]]
