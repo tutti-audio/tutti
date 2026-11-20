@@ -22,7 +22,7 @@
 use std::ops::Range;
 use std::sync::Arc;
 use tutti_buffers::{ChannelLayout, ChannelTopology, Speaker};
-use tutti_buffers::{Float, Fold, FoldEnd, FoldError, MonoMut, Planes, Sample, Wave};
+use tutti_buffers::{Float, Fold, FoldEnd, FoldError, MonoMut, Planes, ReadsAs, Sample, Wave};
 use tutti_dsp::cubic_hermite;
 use tutti_graph::fold_to_width;
 use tutti_music::{TimelineSegment, first_frame_at_or_after, snap_to_whole_frame};
@@ -372,6 +372,9 @@ pub(crate) fn hermite_lanes<F: Float>(out: &mut [F], y: [&[F]; 4], t: &[F]) {
 /// each clamped to the wave bounds so edges reuse the nearest valid sample.
 /// Pure arithmetic: no allocation, so this is safe on the RT thread.
 ///
+/// The wave holds `F` or an integer format ([`ReadsAs`]): another float width is
+/// refused at compile time, never narrowed per tap.
+///
 /// Writes every element of `out`, including the silent cases — a caller
 /// never has to pre-zero, and a partial write can never leave a stale channel
 /// from the previous block in a trailing slot.
@@ -404,7 +407,7 @@ pub(crate) fn hermite_lanes<F: Float>(out: &mut [F], y: [&[F]; 4], t: &[F]) {
 /// - a wave already in the frame's order and width is read channel for
 ///   channel, with no fold.
 #[inline]
-pub fn read_frame<S: Sample, F: Float>(
+pub fn read_frame<S: ReadsAs<F>, F: Float>(
     wave: &Arc<Wave<S>>,
     place: &Place<F>,
     position: SamplePosition,
@@ -423,9 +426,7 @@ pub fn read_frame<S: Sample, F: Float>(
     // Every channel index `interpolate_taps` asks for is `< src_ch`, which is
     // what keeps `Wave::at` — an unchecked `self.vec[channel][index]` — from
     // panicking; `tap_indices` keeps the frame index in bounds.
-    interpolate_taps(src_ch, place, frac, out, |c, t| {
-        wave.at(c, taps[t]).convert_to::<F>()
-    });
+    interpolate_taps(src_ch, place, frac, out, |c, t| wave.at(c, taps[t]).read());
 }
 
 /// The four frames [`read_frame`] interpolates `position` from, in a source
@@ -501,7 +502,7 @@ pub(crate) fn split_position<F: Float>(position: SamplePosition) -> (usize, F) {
 ///
 /// Silent for an empty wave, as `read_frame` is.
 #[inline]
-pub(crate) fn read_looped_frame<S: Sample, F: Float>(
+pub(crate) fn read_looped_frame<S: ReadsAs<F>, F: Float>(
     wave: &Arc<Wave<S>>,
     place: &Place<F>,
     span: &LoopSpan,
@@ -521,9 +522,9 @@ pub(crate) fn read_looped_frame<S: Sample, F: Float>(
     let (taps, frac) = span.taps(len, pos, looped);
     interpolate_taps(src_ch, place, frac, out, |c, t| {
         let tap = taps[t];
-        let tail = wave.at(c, tap.frame).convert_to::<F>();
+        let tail = wave.at(c, tap.frame).read();
         match tap.fade {
-            Some((lead, w)) => tutti_dsp::lerp(tail, wave.at(c, lead).convert_to::<F>(), w),
+            Some((lead, w)) => tutti_dsp::lerp(tail, wave.at(c, lead).read(), w),
             None => tail,
         }
     });
@@ -943,6 +944,39 @@ mod tests {
     #[test]
     fn a_resident_f64_ramp_read_at_a_fraction_is_the_closed_form() {
         a_ramp_read_at_a_fraction_is_the_closed_form::<f64>(2.0_f64.powi(-53));
+    }
+
+    /// A mono wave of `samples` read at the whole frame `at` into an `F` voice.
+    fn read_mono_at<S: ReadsAs<F>, F: Float>(samples: &[S], at: f64) -> F {
+        let wave = Arc::new(Wave::from_interleaved(
+            SampleRate::SR_48K,
+            Interleaved::new(samples, ChannelLayout::MONO).unwrap(),
+        ));
+        let place = Place::<F>::for_wave(&wave, ChannelLayout::MONO).expect("a placeable wave");
+        let mut out = [F::ZERO];
+        super::read_frame(&wave, &place, SamplePosition::new(at), &mut out);
+        out[0]
+    }
+
+    /// An integer wave reads as `x / 2^(n-1)` (the `Sample` rule): `i16::MAX`
+    /// is `32767 / 32768` in an `f32` voice and in an `f64` voice, exactly.
+    #[test]
+    fn an_i16_max_reads_as_32767_over_32768_in_f32_and_f64_voices() {
+        let samples = [0, i16::MIN, i16::MAX, 0, 0, 0];
+        assert_eq!(read_mono_at::<_, f32>(&samples, 2.0), 32767.0 / 32768.0);
+        assert_eq!(read_mono_at::<_, f64>(&samples, 2.0), 32767.0 / 32768.0);
+        assert_eq!(read_mono_at::<_, f64>(&samples, 1.0), -1.0);
+    }
+
+    /// An `f32` wave in an `f32` voice reads its samples bit for bit at whole
+    /// frames.
+    #[test]
+    fn an_f32_wave_in_an_f32_voice_reads_its_samples_bit_for_bit() {
+        let samples: Vec<f32> = (0..8).map(|i| 0.1 * i as f32 - 0.3).collect();
+        for (i, &want) in samples.iter().enumerate().take(6).skip(1) {
+            let got = read_mono_at::<_, f32>(&samples, i as f64);
+            assert_eq!(got.to_bits(), want.to_bits(), "frame {i}");
+        }
     }
 
     /// A position a hair under a whole frame reads that frame exactly.
