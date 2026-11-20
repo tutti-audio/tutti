@@ -526,10 +526,15 @@ impl<F: SessionFloat> SessionBuilder<SystemClock<F>> {
 impl<F: SessionFloat> SessionBuilder<crate::DeviceClock<F>> {
     /// Opens the output device at `format`, at its default rate and width
     /// ([`OutputConfig::sample_format`](tutti_cpal::OutputConfig::sample_format)).
-    /// A format the device does not offer fails [`build`](Self::build) with
-    /// [`tutti_cpal::Error::OutputFormatUnavailable`]. The choice holds across a
-    /// restart on the same session; a switch to another device
-    /// ([`Session::into_device`](crate::Session)) opens that device's default.
+    ///
+    /// The choice holds across every restart ([`Session::restart`](crate::Session),
+    /// the device watch's restarts, and a restart onto any other device). A
+    /// device that lacks the format fails that restart with
+    /// [`tutti_cpal::Error::OutputFormatUnavailable`], through the restart's
+    /// usual failure path, and never opens at another format. The same error
+    /// fails [`build`](Self::build). A switch from the system clock
+    /// ([`Session::into_device`](crate::Session)) takes its own
+    /// [`OutputConfig`](tutti_cpal::OutputConfig).
     #[must_use]
     pub fn sample_format(mut self, format: tutti_buffers::SampleFormat) -> Self {
         self.config = self.config.sample_format(format);

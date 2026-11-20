@@ -37,6 +37,12 @@ pub struct OutputConfig {
 }
 
 impl OutputConfig {
+    /// Names `device` instead; the chosen sample format stays, so a restart
+    /// onto another device is asked for the same format.
+    pub(crate) fn select(&mut self, device: DeviceSelector) {
+        self.device = device;
+    }
+
     /// The device it names.
     #[must_use]
     pub fn device(&self) -> &DeviceSelector {
@@ -441,7 +447,7 @@ impl AudioEngine {
     /// built with [`from_spec`](Self::from_spec).
     pub fn select_device(&mut self, sel: DeviceSelector) {
         if let Some((_, current)) = &mut self.target {
-            current.device = sel;
+            current.select(sel);
         }
     }
 

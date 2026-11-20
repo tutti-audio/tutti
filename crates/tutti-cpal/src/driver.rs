@@ -133,7 +133,7 @@ where
     ) -> core::result::Result<(), E> {
         self.host.stop();
         if let Some((_, current)) = &mut self.target {
-            current.device = device.into();
+            current.select(device.into());
         }
         let mut opened = None;
         self.host
@@ -266,7 +266,7 @@ where
     /// Selects a device for the next [`restart`](Self::restart).
     pub fn select_device(&mut self, sel: DeviceSelector) -> &mut Self {
         if let Some((_, current)) = &mut self.target {
-            current.device = sel;
+            current.select(sel);
         }
         self
     }
