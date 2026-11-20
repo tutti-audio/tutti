@@ -1609,6 +1609,7 @@ impl<F: Float> Reference<F> {
             env,
             arrival: self.arrival[&key],
             history: &self.history,
+            meter: None,
         };
         // A crossfade here: the outgoing unit first, on its own copy of the
         // inputs, with no events; what it emits goes nowhere.

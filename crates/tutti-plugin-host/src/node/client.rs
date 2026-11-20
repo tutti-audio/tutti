@@ -992,6 +992,7 @@ mod transport_tests {
             env: e,
             arrival: Latency::ZERO,
             history: TransportHistory::none(),
+            meter: None,
         }
     }
 

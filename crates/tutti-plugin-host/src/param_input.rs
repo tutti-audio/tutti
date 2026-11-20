@@ -257,6 +257,7 @@ mod tests {
             env: &env,
             arrival: Latency::ZERO,
             history: TransportHistory::none(),
+            meter: None,
         };
         let at = |i: usize, ramp: ParamRamp| {
             ParamEvent::ramp(Offset::of(Samples::new(i), Samples::new(len)), ramp)
@@ -325,6 +326,7 @@ mod tests {
             env: &env,
             arrival: Latency::ZERO,
             history: TransportHistory::none(),
+            meter: None,
         };
         let off = |i: usize| Offset::of(Samples::new(i), Samples::new(len));
         let events = [
@@ -409,6 +411,7 @@ mod tests {
             env: &env,
             arrival: Latency::ZERO,
             history: TransportHistory::none(),
+            meter: None,
         };
         take(&[], events, 0, len, 0, &cx, segments, params, |_, _| {});
     }
@@ -507,6 +510,7 @@ mod tests {
             env: &env,
             arrival: Latency::ZERO,
             history: TransportHistory::none(),
+            meter: None,
         };
         let events: Vec<ParamEvent> = (0..300)
             .map(|i| {
@@ -589,6 +593,7 @@ mod tests {
             env: &env,
             arrival: Latency::ZERO,
             history: TransportHistory::none(),
+            meter: None,
         };
         let mut seen = Vec::new();
         take(

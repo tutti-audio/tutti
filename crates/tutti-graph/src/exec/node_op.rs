@@ -22,6 +22,7 @@ use crate::param::{CellValue, ParamInput};
 use crate::plan::{Direct, Form, NodeRec, Plan};
 use crate::rtlog::{LogSink, LogSlots};
 use crate::slots::{AudioSlots, EventSlot, EventSlots, SlotFlags};
+use tutti_music::MeterMap;
 
 /// [`Op::Node`](crate::Op::Node): run `u` for `h.rec`: the plain op for a unit whose mode asks
 /// nothing of it, else the one that applies its mode. Returns whether a
@@ -217,6 +218,7 @@ pub(super) fn fading_node_op<
             env: h.env,
             arrival: h.rec.arrival,
             history: h.history,
+            meter: h.meter,
         };
         x.out
             .as_mut()
@@ -318,6 +320,8 @@ pub(crate) struct Head<'p, 'e> {
     /// block: every participant reads the same one, and nobody writes it
     /// until the block is done.
     pub(crate) history: &'e TransportHistory,
+    /// The project's meter for the block: lent by the host, read-only.
+    pub(crate) meter: Option<&'e MeterMap>,
 }
 
 /// What a node op may write besides its own unit: every buffer through `A`
@@ -601,6 +605,7 @@ pub(super) fn node_op_with<
         log,
         env: h.env,
         history: h.history,
+        meter: h.meter,
         max: h.max,
         frames,
         rec,
@@ -718,6 +723,7 @@ pub(super) struct Extra<'s> {
 pub(super) struct Call<'p, 'e, F: Float> {
     env: &'e Env,
     history: &'e TransportHistory,
+    meter: Option<&'e MeterMap>,
     max: MaxBlock,
     frames: usize,
     rec: &'p NodeRec,
@@ -783,6 +789,7 @@ impl<'p, F: Float> Call<'p, '_, F> {
             env: self.env,
             arrival: self.rec.arrival,
             history: self.history,
+            meter: self.meter,
         }
     }
 
