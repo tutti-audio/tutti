@@ -13,7 +13,7 @@
 //
 // The struct form picks the representation from the raw type. `f64` gives a
 // float quantity: derives `Copy, Clone, Debug, PartialEq, Default`; under
-// `serde` it serializes as its raw and deserializes refusing NaN. Any other raw type gives an integer
+// `serde` it serializes and deserializes as its raw, refusing NaN both ways. Any other raw type gives an integer
 // quantity: those derives plus `Eq, PartialOrd, Ord, Hash`, serde `transparent`.
 //
 // Each ability below is one `(@ability Name ..)` arm, with the traits or
@@ -34,10 +34,21 @@ macro_rules! unit {
         $(#[$m])*
         #[repr(transparent)]
         #[derive(Copy, Clone, Debug, PartialEq, Default)]
-        #[cfg_attr(feature = "serde", derive(serde::Serialize))]
-        #[cfg_attr(feature = "serde", serde(transparent))]
         $v struct $name($fv $raw);
         $(unit!(@ability $ability $name, $raw $(, $arg)?);)*
+
+        /// Writes the raw float, refusing NaN, so a state that saves also loads. An
+        /// infinity is written, as the algebra keeps it.
+        #[cfg(feature = "serde")]
+        impl serde::Serialize for $name {
+            fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+                if self.0.is_nan() {
+                    Err(serde::ser::Error::custom(concat!("a ", stringify!($name), " is never NaN")))
+                } else {
+                    serializer.serialize_f64(self.0)
+                }
+            }
+        }
 
         /// Reads the raw float, refusing NaN: a stored quantity is a number. An
         /// infinity is kept, as the algebra keeps it.
