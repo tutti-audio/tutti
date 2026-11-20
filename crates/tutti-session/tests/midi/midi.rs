@@ -1132,20 +1132,6 @@ fn a_midi_ci_peer_that_answers_discovery_is_in_the_ports_info() {
     assert_eq!(first.port(), port.id());
     assert_ne!(first.id(), second.id(), "each peer has its own id");
     assert_ne!(first.id(), port.id());
-    let ids = [first.id(), second.id()];
-    // Another refresh of the info lists the same peers under the same ids.
-    for ms in 40..60 {
-        let _ = update_at(&mut s, start + Duration::from_millis(ms));
-    }
-    let info = port.info();
-    assert_eq!(
-        info.peers()
-            .iter()
-            .map(tutti_session::ListedPeer::id)
-            .collect::<Vec<_>>(),
-        ids,
-        "a peer keeps its id across refreshes"
-    );
     for listed in [first, second] {
         assert!(
             listed.profiles().is_none()

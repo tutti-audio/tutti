@@ -93,6 +93,10 @@ impl fmt::Display for StateRev {
 }
 
 impl StateId {
+    /// `fullState`: the state that holds the whole of a device's settings
+    /// (M2-111 Appendix A).
+    pub const FULL_STATE: Self = Self(Text::of("fullState"));
+
     /// The `resId` an inquiry for the State names.
     #[must_use]
     pub fn resource_id(&self) -> ResourceId {
@@ -407,6 +411,18 @@ impl PeState {
         self.rev = stamp.rev;
         self.timestamp = stamp.timestamp;
         self
+    }
+}
+
+impl PeData {
+    /// The state this Property Data is.
+    ///
+    /// # Errors
+    ///
+    /// [`PeDataError`] when it is the Property Data of another Resource.
+    pub fn into_state(self) -> Result<PeState, PeDataError> {
+        PeState::try_from(self)
+            .map_err(|_| PeDataError::new("State", PeDataFault::WrongType("State")))
     }
 }
 

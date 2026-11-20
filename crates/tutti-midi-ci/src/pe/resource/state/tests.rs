@@ -823,3 +823,23 @@ fn a_listed_size_past_the_limit_refuses_the_get_before_it_is_sent() {
             .is_ok()
     );
 }
+
+/// M2-111 Appendix A: `fullState` is the id of the state of a device's whole
+/// settings, and a state id of the type's own rules.
+#[test]
+fn the_full_state_id_is_a_state_id_and_a_resource_id() {
+    assert_eq!(StateId::new("fullState"), Some(StateId::FULL_STATE));
+    assert_eq!(StateId::FULL_STATE.resource_id().as_str(), "fullState");
+}
+
+/// The Property Data of State is a state; the data of another Resource is not.
+#[test]
+fn only_the_data_of_state_is_a_state() {
+    let state = PeState::octets(vec![1, 2]);
+    assert_eq!(PeData::State(state.clone()).into_state(), Ok(state));
+    assert!(
+        PeData::LocalOn(crate::PeLocalOn(true))
+            .into_state()
+            .is_err()
+    );
+}

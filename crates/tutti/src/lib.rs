@@ -185,7 +185,7 @@ pub use tutti_session::{
     AddPluginError, AnyPlugin, Diagnostics, ListedPreset, LoadPreset, Opened, Plugin, PluginBuses,
     PluginChange, PluginDeclaration, PluginEvent, PluginHealth, PluginInfo, PluginParamError,
     PluginPresets, PooledPlugin, PortCounts, PresetJobError, PresetJobFailed, RestoreError,
-    TypedParam,
+    RestoreState, SaveState, TypedParam,
 };
 #[cfg(all(feature = "session", feature = "analyze"))]
 pub use tutti_session::{Analyze, AnalyzeError, Audio, AudioContext, AudioInput};
@@ -228,9 +228,6 @@ pub use tutti_session::{OtherPeer, PeerState, SavedPeer};
 pub use tutti_session::{ParamRef, RouteSpec};
 #[cfg(all(feature = "session", feature = "plugin"))]
 pub use tutti_session::{PluginAutomationModeTarget, PluginParamRefusal, PluginParamTarget};
-#[rustfmt::skip]
-#[cfg(all(feature = "session", any(feature = "plugin", feature = "midi-hardware")))]
-pub use tutti_session::{RestoreState, SaveState};
 #[cfg(all(feature = "session", feature = "sampler"))]
 pub use tutti_session::{SamplerEvent, SamplerLoad};
 
@@ -504,6 +501,8 @@ pub mod session {
     };
     #[cfg(feature = "soundfont")]
     pub use tutti_session::{GeneralMidi, SoundFontFile, soundfont};
+    #[cfg(feature = "midi-hardware")]
+    pub use tutti_session::{RestoreState, SaveState};
 }
 
 /// Audio file settings (`tutti-codec`): the `Spec` a file is written with, the

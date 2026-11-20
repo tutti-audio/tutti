@@ -1098,21 +1098,19 @@ fn a_lease_dropped_after_its_port_was_released_sends_nothing() {
 
 // --- A device's state: the fullState of its State resource (M2-111) ---
 
-#[cfg(feature = "plugin")]
 mod state {
     use tutti_midi_ci::{
         CallError, MediaType, OpaqueBody, PeData, PeResource, PeState, PeStateEntry, PeText,
         RequestRefused, ResourceStore, ResourceTarget, StateId,
     };
     use tutti_midi_device::{Learned, SavedDevice};
-    use tutti_plugin_types::StateUse;
     use tutti_session::Peer as _;
     use tutti_session::{PeFailure, PeerError, PeerState, SavedPeer, StateJobFailed};
 
     use super::{Wire, store};
 
     fn full_state() -> StateId {
-        StateId::new("fullState").unwrap()
+        StateId::FULL_STATE
     }
 
     /// A store that serves `fullState` holding `bytes`.
@@ -1151,7 +1149,7 @@ mod state {
     fn a_devices_full_state_is_saved_and_restored_through_its_state_resource() {
         let mut wire = Wire::new(serving(&[1, 2, 3]));
         let device = peer(&wire);
-        let save = device.save_state(StateUse::Project);
+        let save = device.save_state();
         wire.run(60);
         let state = wire.result(&save).expect("landed").expect("saved");
         assert_eq!(state.bytes(), [1, 2, 3]);
@@ -1159,12 +1157,12 @@ mod state {
         assert_eq!(*state.peer(), SavedPeer::Device(device.device().clone()));
 
         let other = PeerState::new(state.peer().clone(), MediaType::OCTET_STREAM, vec![9, 8]);
-        let restore = device.restore_state(&other).expect("the same device");
+        let restore = device.restore_state(other).expect("the same device");
         wire.run(60);
         assert!(matches!(wire.result(&restore), Some(Ok(()))));
         assert_eq!(held(&wire), [9, 8], "the device keeps what was set");
 
-        let again = device.save_state(StateUse::Project);
+        let again = device.save_state();
         wire.run(60);
         let state = wire.result(&again).expect("landed").expect("saved");
         assert_eq!(state.bytes(), [9, 8]);
@@ -1189,7 +1187,7 @@ mod state {
             Learned::new().identified(other_identity),
         );
         let state = PeerState::new(SavedPeer::Device(other), MediaType::OCTET_STREAM, vec![7]);
-        assert!(device.restore_state(&state).is_err());
+        assert!(device.restore_state(state).is_err());
         wire.run(60);
         assert_eq!(held(&wire), [1, 2, 3]);
         assert!(
@@ -1210,13 +1208,13 @@ mod state {
         let named = StateJobFailed::Device(PeerError::Refused(PeFailure::NotSent(
             CallError::Refused(RequestRefused::NotListed(PeResource::State)),
         )));
-        let save = device.save_state(StateUse::Project);
+        let save = device.save_state();
         let state = PeerState::new(
             SavedPeer::Device(device.device().clone()),
             MediaType::OCTET_STREAM,
             vec![1],
         );
-        let restore = device.restore_state(&state).expect("the same device");
+        let restore = device.restore_state(state).expect("the same device");
         wire.run(20);
         assert_eq!(
             wire.result(&save).expect("landed").unwrap_err().to_string(),

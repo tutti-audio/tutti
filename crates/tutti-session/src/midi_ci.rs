@@ -63,7 +63,6 @@ job_kind!(
     pub RequestReport => (), PeerError<Nak>
 );
 
-#[cfg(feature = "plugin")]
 mod state;
 mod subscription;
 
@@ -173,7 +172,6 @@ impl PortLink {
 
     /// A job of kind `K` for `request`, whose answer is the request's own `J`
     /// answer mapped by `map`: queued as [`submit`](Self::submit) does.
-    #[cfg(feature = "plugin")]
     fn submit_mapped<J, K, R, E>(
         &self,
         request: R,
@@ -221,10 +219,6 @@ pub struct ListedPeer {
     /// listed: whose state a [`PeerState`](crate::PeerState) of the peer is.
     device: SavedDevice,
     /// How the peer's requests reach its port.
-    #[cfg_attr(
-        not(feature = "plugin"),
-        expect(dead_code, reason = "the state jobs (feature `plugin`) are its user")
-    )]
     link: PortLink,
     info: CiPeerInfo,
     profiles: Option<ProfilePeer>,

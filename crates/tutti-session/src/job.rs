@@ -378,7 +378,7 @@ impl<J: JobKind> Ticket<J> {
     /// A ticket of this kind that lands what `map` makes of its result on
     /// `target`: the job of `target` is the job of the request the ticket is
     /// given to, so its cancellation and status are the job's.
-    #[cfg(all(feature = "plugin", feature = "midi-hardware"))]
+    #[cfg(feature = "midi-hardware")]
     pub(crate) fn mapped<K: JobKind>(
         target: Ticket<K>,
         map: impl FnOnce(Result<J::Output, J::Error>) -> Result<K::Output, K::Error> + Send + 'static,
