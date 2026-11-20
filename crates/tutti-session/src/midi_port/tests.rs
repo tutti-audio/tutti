@@ -39,8 +39,7 @@ fn the_stamp_stream_is_carried_across_a_closed_output() {
         .expect("builds");
     let _ = s.update();
     let synth = s.midi().devices().remove(0);
-    s.pool(crate::midi_output("synth", synth))
-        .expect("declares");
+    let _out = s.open_midi_output(synth).run().expect("opens");
     let _ = s.update();
     // The device receives JR Timestamps, so the output stamps and its stream moves.
     s.midi.state.ports.outputs[0]
@@ -90,4 +89,26 @@ fn a_lost_reader_reads_its_fault_or_reopen_failed() {
     let fault = InputFault::WaitFailed(tutti_midi_hardware::Errno::new(5));
     assert_eq!(reader_loss(Some(fault)), PortCause::ReaderFailed(fault));
     assert_eq!(reader_loss(None), PortCause::ReopenFailed);
+}
+
+/// **An input node the host removed itself is not kept waiting**: the node
+/// never runs its release block, and the port's retiring entry ends all the
+/// same once the port's handles are dropped.
+#[test]
+fn a_host_removed_input_node_does_not_keep_its_retiring_entry() {
+    let (backend, _fake) =
+        FakeBackend::build_with(vec![persistent_endpoint(1, "Keys")], vec![], usize::MAX);
+    let mut s = Session::builder()
+        .midi_hardware_over(backend, tutti_midi_hardware::MidiHardwareConfig::new())
+        .build()
+        .expect("builds");
+    let _ = s.update();
+    let keys = s.midi().devices().remove(0);
+    let port = s.open_midi_input(keys).expect("opens");
+    let _ = s.update();
+    s.graph().remove(port.node()).expect("the node is there");
+    drop(port);
+    let _ = s.update();
+    let _ = s.update();
+    assert!(s.midi.state.ports.retiring.is_empty());
 }

@@ -6,7 +6,7 @@
 //! `00:00:02:00` is 2 s, beat 4 at 120 bpm; drop-frame labels skip two a minute)
 //! and the time code a locate states.
 
-use crate::common::blocks;
+use crate::common::{Keyed, blocks};
 use std::sync::{Arc, Mutex};
 use tutti_platform::Instant;
 
@@ -16,7 +16,7 @@ use tutti_midi_protocol::{MtcRate, Recipient, SysexDeviceId};
 use tutti_midi_runtime::{ClockKind, MidiOut, SyncMessages};
 use tutti_session::{
     FollowClock, FollowMachineControl, MidiError, MidiReport, Session, SessionEvent, SetRefusal,
-    ValueErrorKind, midi_sink,
+    ValueErrorKind,
 };
 use tutti_timeline::FadeOut;
 use tutti_ump::{Message, MidiGroup, Sysex7Packets, Ump};
@@ -27,7 +27,7 @@ const KEYS: u64 = 1;
 const G: MidiGroup = MidiGroup::FIRST;
 const OURS: SysexDeviceId = SysexDeviceId::of(5);
 
-fn rig() -> (Session, FakeCounters) {
+fn rig() -> (Keyed, FakeCounters) {
     let (backend, fake) = FakeBackend::build_with(vec![endpoint(KEYS, "Keys")], vec![], usize::MAX);
     let mut s = Session::builder()
         .midi_hardware_over(backend, tutti_midi_hardware::MidiHardwareConfig::new())
@@ -36,19 +36,12 @@ fn rig() -> (Session, FakeCounters) {
         .expect("builds");
     let _ = s.update();
     let keys = s.midi().devices().remove(0);
-    s.pool(tutti_session::midi_input("keys", keys))
-        .expect("declares");
-    let _ = s.update();
-    (s, fake)
+    let keys = s.open_midi_input(keys).expect("opens");
+    (Keyed::new(s, keys), fake)
 }
 
-/// The input node of the input port `"keys"`, which a follower reads.
-fn input(s: &Session) -> tutti_graph::NodeKey {
-    s.midi_input(&"keys").expect("loaded").node()
-}
-
-fn follow(s: &mut Session) {
-    let input = input(s);
+fn follow(s: &mut Keyed) {
+    let input = s.input();
     s.midi()
         .follow_machine_control(FollowMachineControl {
             input,
@@ -291,7 +284,7 @@ fn segmented_commands_act_whole_and_a_stray_segment_is_reported() {
 #[test]
 fn machine_control_follows_beside_a_beat_clock_and_owns_no_tempo() {
     let (mut s, fake) = rig();
-    let input = input(&s);
+    let input = s.input();
     s.midi()
         .follow_clock(FollowClock {
             input,
@@ -335,7 +328,7 @@ fn unfollowing_is_reported_and_refused_when_not_following() {
 fn a_group_the_input_does_not_hear_is_refused() {
     let (mut s, _fake) = rig();
     let far = MidiGroup::of(9);
-    let input = input(&s);
+    let input = s.input();
     assert!(matches!(
         s.midi().follow_machine_control(FollowMachineControl {
             input,
@@ -384,14 +377,13 @@ impl Wire {
     }
 }
 
-fn sender(wire: &Wire, to: Recipient) -> Session {
+fn sender(wire: &Wire, to: Recipient) -> (Session, tutti_session::MidiSink) {
     let mut s = Session::builder()
         .sample_rate(SampleRate::of(RATE))
         .build()
         .expect("builds");
     let _ = s.update();
-    s.pool(midi_sink("out", Arc::new(wire.clone())))
-        .expect("declares");
+    let sink = s.open_midi_sink(Arc::new(wire.clone())).run();
     let _ = s.update();
     s.midi_nodes()
         .unwrap()
@@ -404,7 +396,7 @@ fn sender(wire: &Wire, to: Recipient) -> Session {
         });
     blocks(&s, 1);
     let _ = s.update();
-    s
+    (s, sink)
 }
 
 /// **The transport's play, locate and stop go out as MMC** (RP-013 pp.20 and
@@ -414,7 +406,7 @@ fn sender(wire: &Wire, to: Recipient) -> Session {
 #[test]
 fn the_transport_is_sent_as_play_locate_and_stop() {
     let wire = Wire::default();
-    let mut s = sender(&wire, Recipient::Device(SysexDeviceId::of(3)));
+    let (mut s, _sink) = sender(&wire, Recipient::Device(SysexDeviceId::of(3)));
     assert!(wire.messages().is_empty(), "nothing before anything moves");
 
     s.play().unwrap();
@@ -447,7 +439,7 @@ fn the_transport_is_sent_as_play_locate_and_stop() {
 #[test]
 fn a_locate_while_stopped_sends_a_locate_and_no_play() {
     let wire = Wire::default();
-    let mut s = sender(&wire, Recipient::AllCall);
+    let (mut s, _sink) = sender(&wire, Recipient::AllCall);
     s.locate(Beat::new(4.0)).unwrap();
     blocks(&s, 1);
     let _ = s.update();
@@ -466,7 +458,7 @@ fn a_locate_while_stopped_sends_a_locate_and_no_play() {
 #[test]
 fn a_locate_no_time_code_names_is_counted_and_sends_nothing() {
     let wire = Wire::default();
-    let mut s = sender(&wire, Recipient::AllCall);
+    let (mut s, _sink) = sender(&wire, Recipient::AllCall);
     let refused = |s: &Session| s.midi_nodes().unwrap().sync_controls.losses().refused;
     let before = refused(&s);
     s.locate(Beat::new(4_000_000.0)).unwrap();
@@ -484,7 +476,7 @@ fn a_locate_no_time_code_names_is_counted_and_sends_nothing() {
 #[test]
 fn nothing_is_sent_unless_asked_and_it_can_be_stopped() {
     let wire = Wire::default();
-    let mut s = sender(&wire, Recipient::AllCall);
+    let (mut s, _sink) = sender(&wire, Recipient::AllCall);
     s.midi_nodes()
         .unwrap()
         .sync_controls

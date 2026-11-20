@@ -30,6 +30,21 @@ impl Ports {
         false
     }
 
-    /// No output tap to drain.
-    pub(crate) fn drain_outputs(&mut self, _: Option<&OutputTiming>) {}
+    /// No output tap to drain: the graph is not edited.
+    pub(crate) fn drain_outputs<F: tutti_buffers::Float>(
+        &mut self,
+        _: &mut crate::graph::Graph<F>,
+        _: Option<&OutputTiming>,
+    ) -> bool {
+        false
+    }
+
+    /// No output port to close: the graph is not edited.
+    pub(crate) fn close_dropped_outputs<F: tutti_buffers::Float>(
+        &mut self,
+        _: &mut crate::graph::Graph<F>,
+        _: Option<&OutputTiming>,
+    ) -> bool {
+        false
+    }
 }

@@ -10,7 +10,7 @@
 
 use std::collections::BTreeSet;
 
-use crate::common::with_input;
+use crate::common::{Keyed, with_input};
 use tutti_graph::NodeKey;
 use tutti_graph::{Cx, ForkByClone, Io, Node, Prepare, Shape, Status};
 use tutti_midi_runtime::{CHANNELLESS_PORT, MIDI_INPUT_PORTS};
@@ -32,7 +32,7 @@ impl Node for Sink {
     fn reset(&mut self) {}
 }
 
-fn session() -> (Session, NodeKey) {
+fn session() -> (Keyed, NodeKey) {
     with_input(None)
 }
 

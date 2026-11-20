@@ -6,7 +6,7 @@
 //! pointer of `n` is beat `n / 4` (M1 p.27), an MTC position in seconds is a
 //! beat through the tempo map (2 s at 120 bpm is beat 4).
 
-use crate::common::blocks;
+use crate::common::{Keyed, blocks};
 use std::time::Duration;
 use tutti_platform::Instant;
 
@@ -30,12 +30,12 @@ fn system(message: System) -> Ump {
     Message::System(G, message).into()
 }
 
-fn rig() -> (Session, FakeCounters) {
+fn rig() -> (Keyed, FakeCounters) {
     rig_hearing(G)
 }
 
 /// The rig, its input hearing the Groups from the first through `last`.
-fn rig_hearing(last: MidiGroup) -> (Session, FakeCounters) {
+fn rig_hearing(last: MidiGroup) -> (Keyed, FakeCounters) {
     let (backend, fake) = FakeBackend::build_with(vec![endpoint(KEYS, "Keys")], vec![], usize::MAX);
     let mut s = Session::builder()
         .midi_hardware_over(backend, tutti_midi_hardware::MidiHardwareConfig::new())
@@ -45,19 +45,12 @@ fn rig_hearing(last: MidiGroup) -> (Session, FakeCounters) {
         .expect("builds");
     let _ = s.update();
     let keys = s.midi().devices().remove(0);
-    s.pool(tutti_session::midi_input("keys", keys))
-        .expect("declares");
-    let _ = s.update();
-    (s, fake)
+    let keys = s.open_midi_input(keys).expect("opens");
+    (Keyed::new(s, keys), fake)
 }
 
-/// The input node of the input port `"keys"`, which a follower reads.
-fn input(s: &Session) -> tutti_graph::NodeKey {
-    s.midi_input(&"keys").expect("loaded").node()
-}
-
-fn follow(s: &mut Session, kind: ClockKind) {
-    let input = input(s);
+fn follow(s: &mut Keyed, kind: ClockKind) {
+    let input = s.input();
     s.midi()
         .follow_clock(FollowClock {
             input,
@@ -152,7 +145,7 @@ fn start_plays_from_zero_and_stop_stops() {
 fn the_clock_of_the_chosen_group_is_followed_and_no_other() {
     let second = MidiGroup::of(1);
     let (mut s, fake) = rig_hearing(second);
-    let input = input(&s);
+    let input = s.input();
     s.midi()
         .follow_clock(FollowClock {
             input,
@@ -322,7 +315,7 @@ fn a_beat_clock_follower_owns_the_tempo_and_mtc_does_not() {
     let (mut s, _fake) = rig();
     follow(&mut s, ClockKind::Mtc);
     assert!(crate::tempo::set_tempo(&mut s, Bpm::of(100.0)).is_ok());
-    let node = input(&s);
+    let node = s.input();
     s.midi()
         .follow_tempo(FollowTempo {
             input: node,

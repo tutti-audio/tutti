@@ -3,7 +3,7 @@
 //! next block start and publishes the overlay maps, and the engine renders under
 //! them.
 
-use crate::common::{blocks, play, tap};
+use crate::common::{Keyed, blocks, play, tap};
 use std::sync::Arc;
 use tutti_platform::Instant;
 
@@ -23,7 +23,7 @@ const KEYS: u64 = 1;
 
 /// A session over a fake OS with one input device, `Keys`, connected and
 /// wired.
-fn rig_with(groups: Option<MidiGroup>) -> (Session, FakeCounters) {
+fn rig_with(groups: Option<MidiGroup>) -> (Keyed, FakeCounters) {
     let (backend, fake) = FakeBackend::build_with(vec![endpoint(KEYS, "Keys")], vec![], usize::MAX);
     let mut builder = Session::builder()
         .midi_hardware_over(backend, tutti_midi_hardware::MidiHardwareConfig::new());
@@ -36,23 +36,16 @@ fn rig_with(groups: Option<MidiGroup>) -> (Session, FakeCounters) {
         .expect("builds");
     let _ = s.update();
     let keys = s.midi().devices().remove(0);
-    s.pool(tutti_session::midi_input("keys", keys))
-        .expect("declares");
-    let _ = s.update();
-    (s, fake)
+    let keys = s.open_midi_input(keys).expect("opens");
+    (Keyed::new(s, keys), fake)
 }
 
-/// The input node of the input port `"keys"`, which a follower reads.
-fn input(s: &Session) -> tutti_graph::NodeKey {
-    s.midi_input(&"keys").expect("loaded").node()
-}
-
-fn rig() -> (Session, FakeCounters) {
+fn rig() -> (Keyed, FakeCounters) {
     rig_with(None)
 }
 
-fn follow(s: &mut Session, group: MidiGroup, meter: bool) {
-    let input = input(s);
+fn follow(s: &mut Keyed, group: MidiGroup, meter: bool) {
+    let input = s.input();
     s.midi()
         .follow_tempo(FollowTempo {
             input,
@@ -454,7 +447,7 @@ fn a_repeated_tempo_adds_no_point() {
 #[test]
 fn follow_refusals() {
     let (mut s, _fake) = rig();
-    let node = input(&s);
+    let node = s.input();
     assert!(matches!(
         s.midi().follow_tempo(FollowTempo {
             input: node,
@@ -510,7 +503,7 @@ fn a_tempo_staged_before_following_is_dropped_not_published_over_the_restored_ma
     let staged = Arc::new(TempoMap::constant(Bpm::of(90.0)).unwrap());
     s.set(tempo.to(Arc::clone(&staged))).unwrap();
 
-    let input = input(&s);
+    let input = s.input();
     s.midi()
         .follow_tempo(FollowTempo {
             input,

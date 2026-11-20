@@ -14,7 +14,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_engine::{ManualStream, ManualStreamDriver, OutputSpec};
 use tutti_midi_runtime::{MidiClipNode, TimedMidiEvent};
 use tutti_midi_runtime::{MidiOut, Outgoing, OutputLatency, OutputOffset, SendAt, Taken};
-use tutti_session::{EventInPort, LiveSession, Session, midi_sink};
+use tutti_session::{EventInPort, LiveSession, Session};
 use tutti_ump::{Message, MidiGroup, System, Ump};
 use tutti_ump::{MidiChannel, NoteNumber, NoteVelocity, Voice2};
 use tutti_units::{Beat, SampleRate, Samples, Seconds};
@@ -61,15 +61,14 @@ fn spec() -> OutputSpec {
 }
 
 /// A session on a manual stream with its clock running into `wire`.
-fn rig(wire: &Wire) -> (LiveSession, ManualStream) {
+fn rig(wire: &Wire) -> (LiveSession, ManualStream, tutti_session::MidiSink) {
     let (driver, stream) = ManualStreamDriver::new();
     let mut s = Session::builder()
         .device(Default::default())
         .build_device_on(spec(), driver)
         .expect("builds with no device");
     let _ = s.update();
-    s.pool(midi_sink("out", Arc::new(wire.clone())))
-        .expect("declares");
+    let sink = s.open_midi_sink(Arc::new(wire.clone())).run();
     let _ = s.update();
     s.midi_nodes()
         .unwrap()
@@ -80,7 +79,7 @@ fn rig(wire: &Wire) -> (LiveSession, ManualStream) {
             ..tutti_midi_runtime::SyncMessages::OFF
         });
     s.play().expect("room");
-    (s, stream)
+    (s, stream, sink)
 }
 
 /// Renders `blocks` blocks reporting `delay` as the audio output's latency, the
@@ -105,7 +104,7 @@ fn render(stream: &ManualStream, blocks: usize, delay: Option<Duration>) -> Inst
 #[test]
 fn the_clock_is_sent_at_the_time_of_its_frames() {
     let wire = Wire::default();
-    let (mut s, stream) = rig(&wire);
+    let (mut s, stream, _sink) = rig(&wire);
     let latency = Duration::from_millis(1500);
     let last_block = render(&stream, 100, Some(latency));
     let _ = s.update();
@@ -136,7 +135,7 @@ fn an_output_offset_shifts_the_send_times() {
     let latency = Some(Duration::from_millis(1500));
     let newest_after_block = |offset: f64| {
         let wire = Wire::default();
-        let (mut s, stream) = rig(&wire);
+        let (mut s, stream, _sink) = rig(&wire);
         let target = s.midi().output_latency();
         s.set(
             target.to(OutputLatency::new(
@@ -166,7 +165,7 @@ fn an_output_offset_shifts_the_send_times() {
 #[test]
 fn a_written_output_latency_is_the_terms_own_on_a_device_clock() {
     let wire = Wire::default();
-    let (mut s, stream) = rig(&wire);
+    let (mut s, stream, _sink) = rig(&wire);
     let before = s.midi().output_terms().expect("a device session has terms");
     assert_eq!(before.latency, OutputLatency::default());
 
@@ -196,7 +195,7 @@ fn a_written_output_latency_is_the_terms_own_on_a_device_clock() {
 #[test]
 fn an_unreported_audio_latency_is_left_out_and_reported() {
     let wire = Wire::default();
-    let (mut s, stream) = rig(&wire);
+    let (mut s, stream, _sink) = rig(&wire);
     let terms = s.midi().output_terms().expect("a device session has terms");
     assert_eq!(terms.audio_output, None);
     assert!(!terms.is_complete());
@@ -251,7 +250,7 @@ fn an_unreported_audio_latency_is_left_out_and_reported() {
 #[test]
 fn a_clips_notes_are_sent_when_their_frames_are_heard() {
     let wire = Wire::default();
-    let (mut s, stream) = rig(&wire);
+    let (mut s, stream, sink) = rig(&wire);
     s.midi_nodes()
         .unwrap()
         .sync_controls
@@ -278,7 +277,6 @@ fn a_clips_notes_are_sent_when_their_frames_are_heard() {
         note(true, Beat::new(1.0)),
         note(false, Beat::new(2.0)),
     ]));
-    let sink = s.midi_sink(&"out").expect("loaded");
     s.graph()
         .set_sources(EventInPort::new(sink.node(), 0), [clip.events_out()])
         .expect("the sink's node takes events");

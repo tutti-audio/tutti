@@ -23,7 +23,7 @@
 //!
 //! Each kind of entry is a [`PoolEntry`]; `Session::plugin_entry` (feature
 //! `plugin`) declares a plugin, which a node then takes
-//! (`Session::add_pooled_plugin`), and a MIDI port is declared the same way. A
+//! (`Session::add_pooled_plugin`). A
 //! load's outcome lands in [`Session::update`] as a
 //! [`SessionEvent::Pool`](crate::SessionEvent::Pool), and
 //! [`Session::pool_state`] reads where an entry stands.
