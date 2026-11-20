@@ -31,7 +31,7 @@ use crate::kernel::{slice_in, slice_out};
 use crate::ramp::LastGood;
 use crate::tail_clock::{Heard, TailClock, tail_frames};
 use tutti_dsp::Ramp;
-use tutti_dsp::{Convolver, FftFloat, Lerp, MatrixConvolver, MatrixConvolverError};
+use tutti_dsp::{Convolver, FftFloat, Fir, Lerp, MatrixConvolver, MatrixConvolverError};
 
 /// The block a folded node's scratch holds before `prepare` sizes it to the graph's.
 const FOLD_SCRATCH: usize = 512;
@@ -51,6 +51,18 @@ pub(super) fn ring_out(ir_length: Samples) -> Tail {
         // An empty or single-sample IR produces nothing after its input stops.
         0 | 1 => Tail::None,
         n => Tail::Finite(Samples::new(n - 1)),
+    }
+}
+
+/// The tail of an FIR of `ir_length` samples whose peak the node declares as `delay` frames of
+/// its latency: [`ring_out`] less the delay, the frames left once the latency is compensated.
+pub(super) fn ring_after(ir_length: Samples, delay: Samples) -> Tail {
+    match ring_out(ir_length) {
+        Tail::Finite(n) => match n.get().saturating_sub(delay.get()) {
+            0 => Tail::None,
+            left => Tail::Finite(Samples::new(left)),
+        },
+        other => other,
     }
 }
 
@@ -188,6 +200,74 @@ impl<F: FftFloat> Engine<F> {
     }
 }
 
+/// What a linear-phase [`ConvolverNode`] is made from: its width and the [`Fir`] it applies, and
+/// optionally the convolver's block; [`build`](Self::build) makes the node.
+///
+/// The taps of `fir` (odd and symmetric, so the delay of its peak is `fir.delay()`) are applied
+/// independently to each channel, like [`ConvolverNode::shared_ir`], with the delay declared as
+/// latency: the node's latency is the block plus `fir.delay()` and its tail the response's
+/// remaining `fir.delay()` frames, so the graph compensates the delay and the response peaks
+/// at exactly the declared latency. A band that moves is a new [`Fir`] and a new node.
+///
+/// # Example
+///
+/// ```
+/// use tutti_buffers::ChannelLayout;
+/// use tutti_dsp::{LinearPhaseDesign, MatchedBell, Tilt};
+/// use tutti_nodes::{ConvolverNode, FirConvolverConfig};
+/// use tutti_units::{Db, Hz, Q, SampleRate, Samples};
+///
+/// let rate = SampleRate::SR_48K;
+/// let bands = [
+///     MatchedBell::new(Q::new(1.0), Db::new(6.0)).design(Hz::new(1_000.0), rate).unwrap(),
+///     Tilt::new(Db::new(-3.0)).design(Hz::new(4_000.0), rate).unwrap(),
+/// ];
+/// let fir = LinearPhaseDesign::new(Hz::new(100.0)).design(rate, &bands).unwrap();
+/// let node: ConvolverNode<f32> = FirConvolverConfig::new(ChannelLayout::STEREO, &fir)
+///     .build()
+///     .unwrap();
+/// assert_eq!(node.latency_samples().get(), 512 + (fir.len().get() - 1) / 2);
+/// ```
+#[derive(Clone, Copy, Debug)]
+pub struct FirConvolverConfig<'a> {
+    width: ChannelLayout,
+    fir: &'a Fir,
+    block_size: Samples,
+}
+
+impl<'a> FirConvolverConfig<'a> {
+    /// A filter of `width` channels applying `fir`, with a block of 512 frames.
+    #[must_use]
+    pub fn new(width: impl Into<ChannelLayout>, fir: &'a Fir) -> Self {
+        Self {
+            width: width.into(),
+            fir,
+            block_size: Samples::new(512),
+        }
+    }
+
+    /// The convolver's head partition, rounded up to a power of two: the latency the engine
+    /// adds to the filter's own delay.
+    #[must_use]
+    pub fn block_size(self, block_size: Samples) -> Self {
+        Self { block_size, ..self }
+    }
+
+    /// The node, in the float `F` of the graph it runs in.
+    ///
+    /// # Errors
+    ///
+    /// [`ConvolverError::NoChannels`] for a width of no channels and
+    /// [`ConvolverError::TooWide`] past a bus's width.
+    pub fn build<F: FftFloat + Lerp>(self) -> Result<ConvolverNode<F>, ConvolverError> {
+        let taps: Vec<f64> = self.fir.taps().collect();
+        Ok(
+            ConvolverNode::shared_ir(self.width, Mono::new(&taps), self.block_size)?
+                .with_declared_delay(self.fir.delay()),
+        )
+    }
+}
+
 /// Convolution reverb as a graph node, N channels in and M out.
 ///
 /// Built at fixed channel counts with an [`IrLayout`] saying which impulse response each
@@ -242,7 +322,11 @@ pub struct ConvolverNode<F: FftFloat + Lerp> {
     outputs: BusTopology,
     /// The wet path's linear gain, floored at 0.
     gain: Param<Amplitude>,
+    /// The latency the node declares: the engine's block plus [`declared_delay`](Self::declared_delay).
     latency_samples: Samples,
+    /// The delay of the response's peak that the node declares as latency: a linear-phase
+    /// filter's `(N - 1) / 2` ([`FirConvolverConfig`]), zero for any other response.
+    declared_delay: Samples,
     /// The ring-out owed after the last non-silent input frame: the longest IR's, past the
     /// latency. It says when a block is wholly past the tail and the node parks.
     clock: TailClock,
@@ -270,6 +354,7 @@ impl<F: FftFloat + Lerp> std::fmt::Debug for ConvolverNode<F> {
             .field("layout", &self.layout)
             .field("gain", &self.gain)
             .field("latency_samples", &self.latency_samples)
+            .field("declared_delay", &self.declared_delay)
             .field("last", &self.last)
             .field("good", &self.good)
             .finish_non_exhaustive()
@@ -378,12 +463,23 @@ impl<F: FftFloat + Lerp> ConvolverNode<F> {
             outputs,
             gain: Param::new(Amplitude::UNITY),
             latency_samples,
+            declared_delay: Samples::ZERO,
             clock,
             fold,
             mono: Vec::new(),
             last: None,
             good: LastGood::fixed(F::ONE),
         }
+    }
+
+    /// This node with `delay` of its response's peak declared as latency: the latency is the
+    /// engine's block plus `delay`, and the tail and the silence clock count from there.
+    fn with_declared_delay(mut self, delay: Samples) -> Self {
+        let ring = ring_after(self.engine.ir_length(), delay);
+        self.declared_delay = delay;
+        self.latency_samples = self.engine.latency() + delay;
+        self.clock = TailClock::new(tail_frames(ring), self.latency_samples.get() as u64);
+        self
     }
 
     /// `width` unassigned channels: a width a node is built for with no placement stated.
@@ -580,8 +676,8 @@ impl<F: FftFloat + Lerp> ConvolverNode<F> {
         self.gain.store(Amplitude::new(gain.into().get().max(0.0)));
     }
 
-    /// The node's latency in [`Samples`] — one FFT block, the same on every
-    /// output.
+    /// The node's latency in [`Samples`] — one FFT block, plus the declared delay of a
+    /// [`FirConvolverConfig`] node, the same on every output.
     ///
     /// Partitioned convolution cannot emit a sample until its first block is
     /// full, so this delay is inherent. A graph mixing this against a dry path
@@ -800,7 +896,7 @@ impl<F: FftFloat + Lerp> Node<F> for ConvolverNode<F> {
     fn shape(&self) -> Shape {
         Shape::buses(Buses::main(self.inputs), Buses::main(self.outputs))
             .with_latency(Latency::new(self.latency_samples))
-            .with_tail(ring_out(self.engine.ir_length()))
+            .with_tail(ring_after(self.engine.ir_length(), self.declared_delay))
             .with_param_addrs(self.declared_ports().as_slice())
     }
 
@@ -898,6 +994,7 @@ impl<F: FftFloat + Lerp> ParamNode<F> for ConvolverNode<F> {
             outputs: self.outputs,
             gain,
             latency_samples: self.latency_samples,
+            declared_delay: self.declared_delay,
             clock: TailClock::new(self.clock.ceiling(), self.latency_samples.get() as u64),
             fold: self.fold.clone(),
             mono: vec![F::ZERO; self.mono.len()],

@@ -87,20 +87,28 @@ impl UmpSource {
     /// [`Error::EventListFull`] when the message does not fit an event list (a
     /// message is at most 4 words, so it always does).
     pub fn send(&self, ump: &Ump) -> Result<(), Error> {
-        // A single message is at most 4 words, one packet.
-        let mut buffer = [0u32; capacity(1, 4)];
-        let list = EventList::new(
-            &mut buffer,
-            self.protocol,
-            [(MIDI_TIMESTAMP_NOW, ump.words())],
-        )?;
-        // SAFETY: `self.source` is the endpoint `new` created, disposed only on
-        // drop, and `list` points to an initialised event list that outlives the
-        // call, which CoreMIDI copies.
-        let status = unsafe { MIDIReceivedEventList(self.source, list.as_ptr()) };
-
-        OsStatus::check(status).map_err(|status| Error::call(Operation::ReceivedEventList, status))
+        publish(self.source, self.protocol, ump)
     }
+}
+
+/// Publishes one UMP message on the source `endpoint` in `protocol`, delivered now.
+///
+/// `endpoint` is a live source: the caller keeps it alive across the call, and
+/// disposes it only when no call is running. The list CoreMIDI reads is built here and copied by the call.
+pub(crate) fn publish(
+    endpoint: MIDIEndpointRef,
+    protocol: MIDIProtocolID,
+    ump: &Ump,
+) -> Result<(), Error> {
+    // A single message is at most 4 words, one packet.
+    let mut buffer = [0u32; capacity(1, 4)];
+    let list = EventList::new(&mut buffer, protocol, [(MIDI_TIMESTAMP_NOW, ump.words())])?;
+    // SAFETY: `endpoint` is a live source (the caller's contract), and `list`
+    // points to an initialised event list that outlives the call, which CoreMIDI
+    // copies.
+    let status = unsafe { MIDIReceivedEventList(endpoint, list.as_ptr()) };
+
+    OsStatus::check(status).map_err(|status| Error::call(Operation::ReceivedEventList, status))
 }
 
 impl Drop for UmpSource {

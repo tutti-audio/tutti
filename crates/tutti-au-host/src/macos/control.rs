@@ -218,7 +218,7 @@ impl AuLoaded {
     /// `value` in the declared plain units; `None` for a parameter off the
     /// table, which has no range to denormalize against.
     fn denormalize(&self, id: ParamId, value: Normalized) -> Option<f32> {
-        Some(self.ranges.bounds(id.get())?.plain(value) as f32)
+        Some(self.ranges.bounds(id.get())?.word(value))
     }
 
     /// Reads the declared ranges again, after the unit said its parameter list
@@ -246,13 +246,22 @@ impl AuLoaded {
     fn drain_edits(&self, out: &mut Vec<ParamEdit>) {
         let mut queued = Vec::new();
         self.edits.drain(&mut queued);
-        out.extend(queued.into_iter().map(|edit| match edit {
-            Edit::Begin(id) => ParamEdit::Begin(ParamId::new(id)),
-            Edit::End(id) => ParamEdit::End(ParamId::new(id)),
-            Edit::Change(id, plain) => {
-                ParamEdit::change(ParamId::new(id), self.normalize(id, plain))
-            }
+        out.extend(queued.into_iter().filter_map(|edit| match edit {
+            Edit::Begin(id) => Some(ParamEdit::Begin(ParamId::new(id))),
+            Edit::End(id) => Some(ParamEdit::End(ParamId::new(id))),
+            // The unit repeating the narrowing of a host write is not an edit.
+            Edit::Change(id, plain) if self.ranges.absorbs_report(id, plain) => None,
+            Edit::Change(id, plain) => Some(ParamEdit::change(
+                ParamId::new(id),
+                self.normalize(id, plain),
+            )),
         }));
+    }
+
+    /// Forgets every written position: the unit set its own state (a preset, a
+    /// document, a reset), so no value it reports is a host write repeated.
+    pub(crate) fn clear_written(&self) {
+        self.ranges.marks().clear_written();
     }
 
     /// The marks the render sets bits in: the current table's, and every
@@ -427,7 +436,12 @@ impl Control for AuLoaded {
         self.parameter_writable(main, id)?;
         // Declared, so the table has its range.
         if let Some(plain) = self.denormalize(id, value) {
-            let _ = parameters::set(self.unit(), id.get(), plain);
+            // Recorded once the unit took the write: a refused one repeats nothing.
+            if parameters::set(self.unit(), id.get(), plain).is_ok()
+                && let Some(slot) = self.ranges.slot(id.get())
+            {
+                self.ranges.marks().record(slot, value);
+            }
         }
         Ok(())
     }

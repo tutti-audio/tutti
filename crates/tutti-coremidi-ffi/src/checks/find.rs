@@ -5,7 +5,7 @@
 //! when a device comes or goes, so a position read at one moment names another
 //! object at the next.
 
-use crate::unique_id::UniqueId;
+use crate::checks::unique_id::UniqueId;
 
 /// A `MIDIObjectType` of `MIDIServices.h`: `kMIDIObjectType_Source`.
 const OBJECT_TYPE_SOURCE: i32 = 2;

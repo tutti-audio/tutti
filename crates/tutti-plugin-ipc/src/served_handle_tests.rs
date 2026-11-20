@@ -404,7 +404,7 @@ fn trailing_unsolicited_events_dont_poison_next_reply() {
         });
 
     let latency_seen = Arc::new(AtomicUsize::new(0));
-    let param_seen = Arc::new(parking_lot::Mutex::new(None::<(u32, f32)>));
+    let param_seen = Arc::new(parking_lot::Mutex::new(None::<(u32, Normalized)>));
 
     {
         let latency_seen = Arc::clone(&latency_seen);
@@ -416,7 +416,7 @@ fn trailing_unsolicited_events_dont_poison_next_reply() {
                     latency_seen.store(samples.get(), Ordering::Release);
                 }
                 IpcEvent::ParameterChanged { edit } => {
-                    *param_seen.lock() = edit.value().map(|v| (edit.id().get(), v.get() as f32));
+                    *param_seen.lock() = edit.value().map(|v| (edit.id().get(), v));
                 }
                 IpcEvent::TailChanged { .. }
                 | IpcEvent::Resync(_)
@@ -447,7 +447,7 @@ fn trailing_unsolicited_events_dont_poison_next_reply() {
         latency_seen.load(Ordering::Acquire) == 256 && param_seen.lock().is_some()
     });
     assert_eq!(latency_seen.load(Ordering::Acquire), 256);
-    assert_eq!(*param_seen.lock(), Some((7, 0.42)));
+    assert_eq!(*param_seen.lock(), Some((7, Normalized::of(0.42))));
 }
 
 /// A `TailChanged` message arriving on the control stream must reach a
