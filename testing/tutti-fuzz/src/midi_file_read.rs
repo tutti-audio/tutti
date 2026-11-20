@@ -5,7 +5,7 @@ use tutti_midi_file::{MidiFile, Timebase};
 /// A file that reads writes, and what it writes reads back equal to it (the
 /// crate's lossless promise); its events, timeline and tempo maps answer without a panic.
 pub fn midi_file_read(data: &[u8]) {
-    let Ok(file) = MidiFile::from_bytes(data) else {
+    let Ok(file) = MidiFile::read(data.to_vec()) else {
         return;
     };
     match file.timebase() {
@@ -32,7 +32,8 @@ pub fn midi_file_read(data: &[u8]) {
     for track in file.tracks() {
         let _ = track.notes();
     }
-    let bytes = file.to_bytes();
-    let again = MidiFile::from_bytes(&bytes).expect("a file this crate wrote reads back");
+    let mut bytes = Vec::new();
+    file.write(&mut bytes).expect("a Vec takes the write");
+    let again = MidiFile::read(bytes).expect("a file this crate wrote reads back");
     assert_eq!(again, file, "write then read changed the file");
 }

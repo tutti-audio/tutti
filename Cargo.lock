@@ -2896,6 +2896,7 @@ dependencies = [
  "tutti-midi-ci",
  "tutti-midi-protocol",
  "tutti-music",
+ "tutti-platform",
  "tutti-tempo",
  "tutti-ump",
  "tutti-units",
