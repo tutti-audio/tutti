@@ -56,6 +56,7 @@ pub enum PluginApplyError {
 /// `!Send`: the plugin's state is read on the main thread.
 #[must_use = "work does nothing until it runs"]
 pub struct SaveState {
+    gate: Gate,
     handle: PluginHandle,
     plugin: PluginRef,
     state_use: StateUse,
@@ -77,9 +78,13 @@ impl SaveState {
     ///
     /// # Errors
     ///
-    /// The plugin's [`StateError`]: it is gone, busy, refused, or has no state
-    /// route.
+    /// [`StateError::Lost`] when the node was removed or the plugin replaced
+    /// since the value was made (nothing is asked); otherwise the plugin's
+    /// own: it is gone, busy, refused, or has no state route.
     pub fn run(self, main: MainThreadMarker) -> Result<PeerState, StateError> {
+        if self.gate.is_ended() {
+            return Err(StateError::Lost);
+        }
         let bytes = self.handle.save_state_on(main, self.state_use)?;
         Ok(PeerState::of_plugin(self.plugin, bytes))
     }
@@ -90,9 +95,7 @@ impl SaveState {
 /// `!Send`: the plugin's state is loaded on the main thread.
 #[must_use = "work does nothing until it runs"]
 pub struct RestoreState {
-    cut: Cut,
-    node: Key<AnyPlugin>,
-    gate: Gate,
+    landed: Landed,
     handle: PluginHandle,
     state: PeerState,
     main_thread: PhantomData<*const ()>,
@@ -101,7 +104,7 @@ pub struct RestoreState {
 impl fmt::Debug for RestoreState {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RestoreState")
-            .field("node", &self.node)
+            .field("node", &self.landed.node)
             .finish_non_exhaustive()
     }
 }
@@ -113,15 +116,58 @@ impl RestoreState {
     ///
     /// # Errors
     ///
-    /// The plugin's [`StateError`]: it is gone, busy, refused the state
-    /// ([`StateError::Rejected`]) or has no state route.
+    /// [`StateError::Lost`] when the node was removed or the plugin replaced
+    /// since the value was made (the plugin is not asked, so no instance the
+    /// node left receives the state); otherwise the plugin's own: it is gone,
+    /// busy, refused the state ([`StateError::Rejected`]) or has no state
+    /// route.
     pub fn run(self, main: MainThreadMarker) -> Result<RestoredState, StateError> {
+        if self.landed.gate.is_ended() {
+            return Err(StateError::Lost);
+        }
         self.handle.load_state(main, self.state.bytes())?;
-        Ok(RestoredState {
-            cut: self.cut,
-            node: self.node,
-            gate: self.gate,
-        })
+        Ok(RestoredState(self.landed))
+    }
+}
+
+/// Where a plugin took a state or a preset: the session, the node and the
+/// plugin instance the work was cut from. What [`Session::apply`] checks.
+#[derive(Debug)]
+pub(super) struct Landed {
+    pub(super) cut: Cut,
+    node: Key<AnyPlugin>,
+    pub(super) gate: Gate,
+}
+
+impl Landed {
+    pub(super) fn of<K: AppKey, C: Clock>(
+        session: &Session<K, C>,
+        node: Key<AnyPlugin>,
+        gate: Gate,
+    ) -> Self {
+        Self {
+            cut: Cut::of(session),
+            node,
+            gate,
+        }
+    }
+
+    /// Has the session read the parameters of the plugin at the node again,
+    /// when the node still hosts the instance: all or nothing.
+    pub(super) fn apply<K: AppKey, C: Clock>(
+        self,
+        session: &mut Session<K, C>,
+    ) -> Result<(), PluginApplyError> {
+        let hosted = session
+            .graph
+            .plugins
+            .get(&self.node.erase())
+            .ok_or(PluginApplyError::Gone)?;
+        if !hosted.gate.is(&self.gate) {
+            return Err(PluginApplyError::Stale);
+        }
+        hosted.refresh_values();
+        Ok(())
     }
 }
 
@@ -131,18 +177,14 @@ impl RestoreState {
 /// It names the node and the plugin instance it was cut from.
 #[derive(Debug)]
 #[must_use = "a restored state does nothing until it is applied"]
-pub struct RestoredState {
-    cut: Cut,
-    node: Key<AnyPlugin>,
-    gate: Gate,
-}
+pub struct RestoredState(Landed);
 
 impl<F: SessionFloat> Sealed<F> for RestoredState {
     type Applied = ();
     type Error = PluginApplyError;
 
     fn cut(&self) -> &Cut {
-        &self.cut
+        &self.0.cut
     }
 
     fn stale() -> PluginApplyError {
@@ -153,27 +195,8 @@ impl<F: SessionFloat> Sealed<F> for RestoredState {
         self,
         session: &mut Session<K, C>,
     ) -> Result<(), PluginApplyError> {
-        refresh_values(session, self.node, &self.gate)
+        self.0.apply(session)
     }
-}
-
-/// Has the session read the parameters of the plugin at `node` again, when
-/// `gate` is still the instance the node hosts: all or nothing.
-pub(super) fn refresh_values<K: AppKey, C: Clock>(
-    session: &mut Session<K, C>,
-    node: Key<AnyPlugin>,
-    gate: &Gate,
-) -> Result<(), PluginApplyError> {
-    let hosted = session
-        .graph
-        .plugins
-        .get(&node.erase())
-        .ok_or(PluginApplyError::Gone)?;
-    if !hosted.gate.is(gate) {
-        return Err(PluginApplyError::Stale);
-    }
-    hosted.refresh_values();
-    Ok(())
 }
 
 /// `f32` because a plugin format is `f32` at its FFI.
@@ -192,6 +215,7 @@ impl<K: AppKey, C: Clock<Float = f32>> Session<K, C> {
     ) -> Result<SaveState, NoSuchNode> {
         let hosted = self.hosted_at(node)?;
         Ok(SaveState {
+            gate: hosted.gate.clone(),
             handle: hosted.handle.clone(),
             plugin: hosted.plugin.clone(),
             state_use,
@@ -218,9 +242,7 @@ impl<K: AppKey, C: Clock<Float = f32>> Session<K, C> {
             .check_for(&SavedPeer::Plugin(hosted.plugin.clone()))
             .map_err(StateStartError::OtherPeer)?;
         Ok(RestoreState {
-            cut: Cut::of(self),
-            node: *node,
-            gate: hosted.gate.clone(),
+            landed: Landed::of(self, *node, hosted.gate.clone()),
             handle: hosted.handle.clone(),
             state,
             main_thread: PhantomData,

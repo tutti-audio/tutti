@@ -14,8 +14,8 @@ use std::path::PathBuf;
 use tutti_plugin_host::PluginHandle;
 use tutti_plugin_types::{MainThreadMarker, PresetError, PresetId, PresetSupport};
 
-use super::state::{PluginApplyError, refresh_values};
-use super::{AnyPlugin, Gate, HostedPlugin};
+use super::state::{Landed, PluginApplyError};
+use super::{AnyPlugin, HostedPlugin};
 use crate::SessionFloat;
 use crate::apply::{Cut, Sealed};
 use crate::{AppKey, Clock, Key, ListedPreset, NoSuchNode, Session};
@@ -39,9 +39,7 @@ pub enum PresetStartError {
 /// `!Send`: the plugin loads it on the main thread.
 #[must_use = "work does nothing until it runs"]
 pub struct LoadPreset {
-    cut: Cut,
-    node: Key<AnyPlugin>,
-    gate: Gate,
+    landed: Landed,
     handle: PluginHandle,
     id: PresetId,
     needs: Option<PresetSupport>,
@@ -51,7 +49,6 @@ pub struct LoadPreset {
 impl fmt::Debug for LoadPreset {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("LoadPreset")
-            .field("node", &self.node)
             .field("id", &self.id)
             .finish_non_exhaustive()
     }
@@ -70,7 +67,7 @@ impl LoadPreset {
     /// file for a plugin that lists); [`PresetError::Refused`] when it
     /// declined.
     pub fn run(self, main: MainThreadMarker) -> Result<LoadedPreset, PresetError> {
-        if self.gate.is_ended() {
+        if self.landed.gate.is_ended() {
             return Err(PresetError::Lost);
         }
         if self
@@ -80,11 +77,7 @@ impl LoadPreset {
             return Err(PresetError::Unsupported);
         }
         self.handle.load_preset(main, &self.id)?;
-        Ok(LoadedPreset {
-            cut: self.cut,
-            node: self.node,
-            gate: self.gate,
-        })
+        Ok(LoadedPreset(self.landed))
     }
 }
 
@@ -94,18 +87,14 @@ impl LoadPreset {
 /// It names the node and the plugin instance it was cut from.
 #[derive(Debug)]
 #[must_use = "a loaded preset does nothing until it is applied"]
-pub struct LoadedPreset {
-    cut: Cut,
-    node: Key<AnyPlugin>,
-    gate: Gate,
-}
+pub struct LoadedPreset(Landed);
 
 impl<F: SessionFloat> Sealed<F> for LoadedPreset {
     type Applied = ();
     type Error = PluginApplyError;
 
     fn cut(&self) -> &Cut {
-        &self.cut
+        &self.0.cut
     }
 
     fn stale() -> PluginApplyError {
@@ -116,7 +105,7 @@ impl<F: SessionFloat> Sealed<F> for LoadedPreset {
         self,
         session: &mut Session<K, C>,
     ) -> Result<(), PluginApplyError> {
-        refresh_values(session, self.node, &self.gate)
+        self.0.apply(session)
     }
 }
 
@@ -125,7 +114,9 @@ impl<K: AppKey, C: Clock<Float = f32>> Session<K, C> {
     /// The listed `preset`, to load into the plugin hosted at `node`: run it
     /// on the main thread with [`LoadPreset::run`], then hand its output to
     /// [`apply`](Self::apply). The preset must be one the node's own plugin
-    /// listed.
+    /// listed: the check compares the plugin instance that listed it with the
+    /// node's, so a preset listed by an instance since replaced is refused as
+    /// [`PresetStartError::OtherPlugin`].
     ///
     /// # Errors
     ///
@@ -138,13 +129,7 @@ impl<K: AppKey, C: Clock<Float = f32>> Session<K, C> {
         preset: &ListedPreset,
     ) -> Result<LoadPreset, PresetStartError> {
         let hosted = self.hosted_at(node)?;
-        // The plugin the load reaches is the node's: a preset of any other
-        // instance, or of a node no pool entry lists, is refused.
-        let listed_here = hosted
-            .pooled
-            .as_ref()
-            .is_some_and(|link| link.hosted().instance() == preset.plugin);
-        if !listed_here {
+        if preset.plugin != hosted.handle.instance() {
             return Err(PresetStartError::OtherPlugin);
         }
         Ok(self.preset_load(node, hosted, preset.id().clone(), None))
@@ -195,9 +180,7 @@ impl<K: AppKey, C: Clock<Float = f32>> Session<K, C> {
         needs: Option<PresetSupport>,
     ) -> LoadPreset {
         LoadPreset {
-            cut: Cut::of(self),
-            node: *node,
-            gate: hosted.gate.clone(),
+            landed: Landed::of(self, *node, hosted.gate.clone()),
             handle: hosted.handle.clone(),
             id,
             needs,

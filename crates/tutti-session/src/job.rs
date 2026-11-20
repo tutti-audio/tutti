@@ -22,9 +22,9 @@
 //!    [`update`](Session::update) on the control thread and ends with
 //!    `Ticket::land(result)`.
 //! 3. A stage that must run on the main thread is posted to the session's main
-//!    work (`Session::work`); it sets `Ticket::waiting_for_main_thread` first
-//!    and lands its result with `Ticket::land`, checking
-//!    `Ticket::cancelled` before it changes anything.
+//!    work (`Session::work`); it sets `Ticket::set_main_wait` first and lands
+//!    its result with `Ticket::land`, checking `Ticket::cancelled` before it
+//!    changes anything.
 //! 4. Work that needs no worker (a result the session already waits for) takes
 //!    `Jobs::new_job::<Kind>()` and lands through its [`Ticket`] when the
 //!    session has the answer.
@@ -190,12 +190,6 @@ impl Cancel {
     /// The worker began: the job is [`Running`](JobStatus::Running).
     pub(crate) fn started(&self) {
         self.0.status.store(RUNNING, Ordering::Release);
-    }
-
-    /// The job was dropped: its result will not be read.
-    #[cfg_attr(not(test), expect(dead_code, reason = "only the job tests read it"))]
-    pub(crate) fn is_cancelled(&self) -> bool {
-        self.0.cancelled.load(Ordering::Acquire)
     }
 }
 
@@ -443,28 +437,12 @@ impl<J: JobKind> Ticket<J> {
         self.cell.cancelled.load(Ordering::Acquire)
     }
 
-    #[cfg_attr(not(test), expect(dead_code, reason = "only the job tests use it"))]
-    pub(crate) fn waiting_for_main_thread(&self) {
-        self.cell.status.store(WAITING, Ordering::Release);
-    }
-
     /// Marks the job as waiting for the main thread (`true`) or running
     /// (`false`), while it is not done.
     pub(crate) fn set_main_wait(&self, waiting: bool) {
         self.cell
             .status
             .store(if waiting { WAITING } else { RUNNING }, Ordering::Release);
-    }
-
-    /// Runs `effect` and lands its result, unless the job was dropped first:
-    /// then `effect` does not run. A drop after the check lets `effect` finish
-    /// (it is atomic with respect to the drop) and its result is discarded.
-    #[cfg_attr(not(test), expect(dead_code, reason = "only the job tests use it"))]
-    pub(crate) fn complete(self, effect: impl FnOnce() -> Result<J::Output, J::Error>) {
-        if !self.cancelled() {
-            let result = effect();
-            self.land(result);
-        }
     }
 
     /// Queues the result to land in the next update, unless the job was

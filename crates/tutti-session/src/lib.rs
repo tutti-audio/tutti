@@ -249,8 +249,8 @@ pub use peer_state::{OtherPeer, PeerState, SavedPeer};
 pub use plugin::{
     AddPluginError, AnyPlugin, LoadPreset, LoadedPlugin, LoadedPreset, Plugin, PluginApplyError,
     PluginCause, PluginChange, PluginDeclaration, PluginEvent, PluginHealth, PluginInfo,
-    PluginPorts, PoolPluginEntry, PooledPlugin, PortsRefusal, PresetStartError, RestoreError,
-    RestoreState, RestoredState, SaveState, StateRestore, StateStartError, StateView,
+    PluginPorts, PoolPluginEntry, PooledPlugin, PortsRefusal, PresetStartError, RestoreState,
+    RestoredState, SaveState, StateRestore, StateStartError, StateView,
 };
 pub(crate) use pool::Pool;
 pub use pool::{

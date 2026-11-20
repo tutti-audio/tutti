@@ -14,7 +14,7 @@ mod clap {
     use tutti_buffers::MaxBlock;
     use tutti_plugin_types::PluginRef;
     use tutti_plugin_types::{PresetError, PresetSupport};
-    use tutti_session::{AnyPlugin, Key, Peer as _, Session};
+    use tutti_session::{AnyPlugin, Key, Peer as _, PluginApplyError, Session};
     use tutti_units::Samples;
 
     fn loaded() -> (Session, u64, Key<AnyPlugin>) {
@@ -145,6 +145,40 @@ mod clap {
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
     }
+
+    /// **A loaded preset applied after crash recovery replaced the node's
+    /// plugin is refused `Stale`**: the server that took the preset is gone.
+    #[test]
+    fn a_preset_applied_after_a_recovery_replaced_the_plugin_is_stale() {
+        let (mut s, _entry, node) = loaded();
+        let main = tutti_fixtures::main_thread();
+        let loaded = s
+            .load_preset_file(&node, "/nowhere/bright.tutti-preset")
+            .unwrap()
+            .run(main)
+            .expect("the plugin takes the preset");
+        let before = s.plugin_view(node).unwrap().diagnostics().server_pid();
+        s.plugin_view(node).unwrap().diagnostics().terminate(
+            tutti_plugin_types::TerminationReason::Hung {
+                blocks: 16,
+                held: std::time::Duration::from_secs(5),
+            },
+        );
+        let deadline = tutti_platform::Instant::now() + std::time::Duration::from_secs(30);
+        loop {
+            let _ = s.update_on(main);
+            let now = s.plugin_view(node).unwrap().diagnostics().server_pid();
+            if now.is_some() && now != before {
+                break;
+            }
+            assert!(
+                tutti_platform::Instant::now() < deadline,
+                "the plugin never recovered"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert_eq!(s.apply(loaded).unwrap_err(), PluginApplyError::Stale);
+    }
 }
 
 #[cfg(feature = "vst3")]
@@ -152,7 +186,7 @@ mod vst3 {
     use tutti_buffers::ChannelLayout;
     use tutti_plugin_types::PluginRef;
     use tutti_plugin_types::PresetId;
-    use tutti_session::{PHASES, PhaseCx, PoolEvent, SessionEvent};
+    use tutti_session::{PHASES, PhaseCx, PoolEvent, PresetStartError, SessionEvent};
     use tutti_session::{Peer as _, Session};
     use tutti_units::SampleRate;
 
@@ -237,6 +271,58 @@ mod vst3 {
                 .collect();
             assert_eq!(listed, expected);
         }
+    }
+
+    /// **A node inserted with `Graph::insert_plugin`, no pool entry behind it,
+    /// loads a preset its own plugin listed.** The list is read from the node's
+    /// plugin; a preset of another plugin instance is refused.
+    #[test]
+    fn an_unpooled_node_loads_a_preset_its_plugin_listed() {
+        // SAFETY: nextest runs each test in its own process, and this is set
+        // from the test's own thread before the first server is spawned.
+        unsafe { std::env::set_var("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server()) };
+        let module = tutti_fixtures::vst3_module();
+        let bundle = tutti_plugin_types::bundle::bundle_dir_of(
+            &module,
+            tutti_plugin_types::bundle::ModuleKind::Vst3,
+        )
+        .expect("a .vst3 bundle around the module");
+        let client = |rate| {
+            tutti_plugin::PluginClient::new(
+                tutti_plugin_ipc::IpcConfig::at(
+                    tutti_plugin_ipc::unique_socket_path().expect("a random source"),
+                ),
+                tutti_fixtures::executor(),
+                &tutti_fixtures::detached_work(),
+                &tutti_plugin_db::Loadable::uncatalogued(PluginRef::file(bundle.to_path_buf())),
+                rate,
+            )
+            .expect("the shared plugin loads")
+        };
+        let main = tutti_fixtures::main_thread();
+        let mut s = Session::builder()
+            .outputs_floor(ChannelLayout::STEREO)
+            .build_detached(SampleRate::DEFAULT)
+            .expect("a detached session builds");
+        let node = s
+            .graph()
+            .insert_plugin(Box::new(client(SampleRate::DEFAULT)));
+        let other = s
+            .graph()
+            .insert_plugin(Box::new(client(SampleRate::DEFAULT)));
+
+        let listed = s.plugin_view(node).unwrap().presets(main);
+        let preset = listed.iter().nth(1).expect("the plugin lists programs");
+        let loaded = s
+            .load_preset(&node, &preset)
+            .expect("a preset of the node's own plugin")
+            .run(main)
+            .expect("the plugin takes it");
+        s.apply(loaded).expect("the node hosts the plugin");
+        assert!(matches!(
+            s.load_preset(&other, &preset),
+            Err(PresetStartError::OtherPlugin)
+        ));
     }
 }
 

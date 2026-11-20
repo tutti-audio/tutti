@@ -457,10 +457,9 @@ fn an_initial_state_is_restored_and_two_keys_load_two_plugins() {
 
     s.set(target.to(set)).unwrap();
     let state = s
-        .plugin_view(a)
+        .save_state(&a, tutti_plugin_types::StateUse::Project)
         .unwrap()
-        .state()
-        .save(tutti_plugin_types::StateUse::Project)
+        .run(tutti_fixtures::main_thread())
         .expect("a state");
 
     s.pool((
@@ -593,6 +592,44 @@ fn a_saved_state_holds_what_the_plugin_holds_and_refuses_by_name() {
     assert!(
         (read.get() - set.get()).abs() < 1e-6,
         "the saved value, not the default: {read:?}"
+    );
+}
+
+/// **A restored state applied after crash recovery replaced the node's plugin is
+/// refused `Stale`**: the server that took the state is gone, and the plugin
+/// now at the node is a new instance.
+#[test]
+fn a_restore_applied_after_a_recovery_replaced_the_plugin_is_stale() {
+    let (catalog, _dir) = catalog();
+    let main = tutti_fixtures::main_thread();
+    let mut s = session(true);
+    s.pool(s.plugin_entry("a", &first_id(), &catalog)).unwrap();
+    loaded(&mut s, "a");
+    let node = s.add_pooled_plugin(&"a").unwrap();
+    let state = s
+        .save_state(&node, StateUse::Project)
+        .unwrap()
+        .run(main)
+        .expect("a state");
+    let restored = s
+        .restore_state(&node, state)
+        .unwrap()
+        .run(main)
+        .expect("the plugin takes it");
+    let before = pid_of(&s, node);
+    s.plugin_view(node)
+        .unwrap()
+        .diagnostics()
+        .terminate(TerminationReason::Hung {
+            blocks: 16,
+            held: Duration::from_secs(5),
+        });
+    pump_until(&mut s, "the recovered plugin", |s| {
+        pid_of(s, node).is_some() && pid_of(s, node) != before
+    });
+    assert_eq!(
+        s.apply(restored).unwrap_err(),
+        tutti_session::PluginApplyError::Stale
     );
 }
 

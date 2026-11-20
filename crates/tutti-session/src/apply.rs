@@ -92,7 +92,7 @@ pub(crate) use sealed::{Cut, Sealed};
 impl<K: AppKey, C: Clock> Session<K, C> {
     /// Takes back the output of work the app ran, and applies it.
     ///
-    /// Control thread. It never waits: an output whose target is busy comes back in
+    /// Control thread. It never waits: an output whose target can be busy comes back in
     /// its error's `Busy`. The output is cut from the session's state when the
     /// work was made; when that state has moved on (a node removed, a plugin
     /// instance replaced, a streamer gone) the apply refuses by

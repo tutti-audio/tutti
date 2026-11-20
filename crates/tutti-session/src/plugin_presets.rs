@@ -14,7 +14,7 @@ use std::sync::{Arc, OnceLock};
 
 use tutti_plugin_types::{Preset, PresetError, PresetId, PresetSupport};
 
-use crate::ResourceId;
+use tutti_plugin_host::InstanceId;
 
 /// What a plugin does with presets and the list it has, in its
 /// [`PluginInfo`](crate::PluginInfo).
@@ -23,7 +23,7 @@ use crate::ResourceId;
 #[derive(Debug, Clone)]
 pub struct PluginPresets {
     support: PresetSupport,
-    plugin: ResourceId,
+    plugin: InstanceId,
     list: Arc<OnceLock<Vec<Preset>>>,
 }
 
@@ -31,7 +31,7 @@ impl PluginPresets {
     /// The presets of the plugin instance `plugin`, as `support` says. A
     /// plugin that lists none has its (empty) list read at once; any other has
     /// it set once by [`fill`](Self::fill).
-    pub(crate) fn new(support: PresetSupport, plugin: ResourceId) -> Self {
+    pub(crate) fn new(support: PresetSupport, plugin: InstanceId) -> Self {
         let this = Self {
             support,
             plugin,
@@ -91,7 +91,7 @@ impl PluginPresets {
             .into_iter()
             .flatten()
             .map(|preset| ListedPreset {
-                plugin: self.plugin,
+                plugin: self.plugin.clone(),
                 preset: preset.clone(),
             })
     }
@@ -108,7 +108,7 @@ impl PluginPresets {
 /// [`Session::load_preset`](crate::Session::load_preset).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ListedPreset {
-    pub(crate) plugin: ResourceId,
+    pub(crate) plugin: InstanceId,
     preset: Preset,
 }
 
