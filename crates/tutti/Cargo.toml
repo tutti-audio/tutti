@@ -134,6 +134,32 @@ codec = ["dep:tutti-codec"]
 # `encode-*` feature. Implied by `capture`, so it is rarely named directly.
 record = ["session", "tutti-session/record", "encode-wav"]
 
+# --- storage ----------------------------------------------------------------
+#
+# `Serialize`/`Deserialize` on every type a crate under this umbrella offers it on:
+# the app picks the format. Each optional crate's `serde` turns on with that crate
+# (`?`), so this feature pulls in no subsystem of its own.
+serde = [
+    "tutti-units/serde",
+    "tutti-buffers/serde",
+    "tutti-music/serde",
+    "tutti-tempo/serde",
+    "tutti-ump/serde",
+    "tutti-graph/serde",
+    "tutti-nodes/serde",
+    "tutti-sampler?/serde",
+    "tutti-sf2?/serde",
+    "tutti-measure?/serde",
+    "tutti-midi-protocol?/serde",
+    "tutti-midi-ci?/serde",
+    "tutti-midi-device?/serde",
+    "tutti-midi-hardware?/serde",
+    "tutti-plugin-types?/serde",
+    "tutti-plugin-db?/serde",
+    "tutti-plugin?/serde",
+    "tutti-session?/serde",
+]
+
 # --- MIDI, two axes --------------------------------------------------------
 midi = [
     "dep:tutti-midi-protocol",
