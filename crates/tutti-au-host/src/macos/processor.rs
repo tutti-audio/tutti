@@ -808,6 +808,42 @@ impl Processor for AuProcessor {
         self.render(buffer, ctx, out)
     }
 
+    /// A direct `AudioUnitSetParameter` of each parameter's last value, between
+    /// blocks, under the one write policy every route takes: a parameter the
+    /// unit does not declare or declares read-only is counted and skipped.
+    fn flush_parameters(
+        &mut self,
+        changes: &tutti_plugin_types::ParameterChanges,
+    ) -> PluginResult<()> {
+        let table = self.ranges.lend();
+        let mut refused = false;
+        for queue in &changes.queues {
+            let id = queue.param_id.get();
+            if ParamWriteError::check(ParamId::new(id), table.access(id)).is_err() {
+                self.param_points_dropped += queue.points.len() as u64;
+                refused = true;
+                continue;
+            }
+            let (Some(bounds), Some(slot), Some(last)) =
+                (table.bounds(id), table.slot(id), queue.points.last())
+            else {
+                continue;
+            };
+            let plain = bounds.plain(last.value) as f32;
+            if table.is_non_realtime(id) {
+                table.marks().defer(slot, plain);
+            } else {
+                let _ = crate::parameters::set(&self.unit, id, plain);
+                table.marks().tell(slot);
+            }
+        }
+        if refused {
+            Err(PluginError::Block("the unit refused a parameter write"))
+        } else {
+            Ok(())
+        }
+    }
+
     /// Nothing to end: AudioUnitRender has no processing state to stop, and the
     /// next block renders as it would have.
     fn stop(&mut self) {}

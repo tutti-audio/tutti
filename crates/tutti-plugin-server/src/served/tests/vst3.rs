@@ -83,6 +83,8 @@ const ACTIVATION_COUNT_BASE: f32 = 9000.0;
 /// believes.
 fn activations_seen_by_the_plugin(instance: &mut Vst3Instance) -> u32 {
     instance
+        .control_mut()
+        .expect("a live plugin")
         .set_parameter(
             main_thread(),
             tutti_units::ParamId::new(PARAM_MODE),

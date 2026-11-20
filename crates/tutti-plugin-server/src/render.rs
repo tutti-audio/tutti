@@ -53,6 +53,7 @@ use tutti_plugin_types::{
     BlockStatus, BridgeError, BridgeResult, Features, MidiEventVec, PluginIo, PluginResult,
     ProcessOutput, Processor,
 };
+use tutti_plugin_types::{EditWriter, ParameterChanges};
 use tutti_rt::{
     Overflow, PushError, Returned, RingReader, RingWriter, Rt, Tally, TallyWriter, ring, tally,
 };
@@ -127,6 +128,10 @@ pub(crate) trait RenderEnd: Render + Send {
     /// Whether the Processor is here: a block rendered now reaches the plugin
     /// (and drains the writes queued to it).
     fn has_processor(&mut self) -> bool;
+    /// Delivers parameter changes between blocks by the format's own route
+    /// ([`Processor::flush_parameters`]); a plugin whose Processor is not here
+    /// has nothing to deliver them to.
+    fn flush_parameters(&mut self, changes: &ParameterChanges) -> PluginResult<()>;
 }
 
 /// [`RenderEnd`] over the format's Processor, in a handoff.
@@ -189,6 +194,13 @@ impl<P: Processor + 'static> RenderEnd for End<P> {
     fn has_processor(&mut self) -> bool {
         self.rt.held().is_some()
     }
+
+    fn flush_parameters(&mut self, changes: &ParameterChanges) -> PluginResult<()> {
+        match self.rt.held() {
+            Some(processor) => processor.flush_parameters(changes),
+            None => Ok(()),
+        }
+    }
 }
 
 /// What the main thread asks of the render thread. Every value a command
@@ -211,6 +223,10 @@ pub(crate) enum ToRender {
     /// The plugin's parameter output, held in fixed storage: a queue per
     /// parameter, each of room for a block's points.
     Output(Box<ProcessOutput>),
+    /// The writer of the slots the render thread leaves each block's parameter
+    /// values in, for the main thread to tell the plugin's edit controller of
+    /// ([`Session::tick`](crate::session::Session::tick)).
+    Informs(EditWriter),
     /// New figures for the blocks that follow.
     Config(RenderConfig),
     /// The plugin's end: its Processor arrives in it.
@@ -242,6 +258,9 @@ pub(crate) enum Back {
     /// The parameter output a new one replaced.
     #[expect(dead_code, reason = "handed back only to be dropped")]
     Output(Box<ProcessOutput>),
+    /// The writer of the slots a new one replaced.
+    #[expect(dead_code, reason = "handed back only to be dropped")]
+    Informs(EditWriter),
     /// Why the plugin failed a block, for the main thread to log.
     Failure(BlockFault),
     /// A block that reached the plugin after the [`ToRender::Barrier`] of this
@@ -313,9 +332,19 @@ pub(crate) struct RenderLink {
     /// The number of the last barrier sent, and of the last one acknowledged.
     barrier_sent: u64,
     barrier_acked: u64,
+    /// Counts the loads: what the render thread left for the edit controller
+    /// before one is stale ([`Informs`]). One writer, the main thread.
+    informs_loads: TallyWriter<u64>,
 }
 
 impl RenderLink {
+    /// A state or preset load is about to replace the values the blocks so far
+    /// left for the edit controller: they are voided, wherever the render thread
+    /// is in writing them.
+    pub(crate) fn void_informs(&self) {
+        self.informs_loads.add(1);
+    }
+
     /// What wakes the render thread and what it wakes.
     pub(crate) fn ties(&self) -> &Ties {
         &self.ties
@@ -497,6 +526,58 @@ impl RenderLink {
     }
 }
 
+/// Where the render thread leaves each block's last value of each parameter,
+/// for the main thread to tell the plugin's edit controller of.
+///
+/// A state or preset load makes what the slots hold stale. The main thread
+/// counts its loads (a [`Tally`]); the render thread reads the count when a
+/// block begins and, after writing the block's values, ends the epoch if the
+/// count moved meanwhile. A block that began before a load and writes after it
+/// voids its own values; a block that began after it sees the new count at its
+/// start and keeps them, however long the render thread idled before it.
+/// Wait-free.
+pub(crate) struct Informs {
+    writer: Option<EditWriter>,
+    loads: Tally<u64>,
+}
+
+impl Informs {
+    fn new(loads: Tally<u64>) -> Self {
+        Self {
+            writer: None,
+            loads,
+        }
+    }
+
+    /// Installs the writer of the slots, returning the one it replaces for the
+    /// main thread to free.
+    fn install(&mut self, writer: EditWriter) -> Option<EditWriter> {
+        self.writer.replace(writer)
+    }
+
+    /// The loads so far, read as a block begins.
+    pub(crate) fn begin(&self) -> u64 {
+        self.loads.get()
+    }
+
+    /// Leaves each parameter's last value of `changes`, then ends the epoch if
+    /// a load came since `began` ([`begin`](Self::begin)).
+    pub(crate) fn note(&mut self, changes: &ParameterChanges, began: u64) {
+        let Some(writer) = self.writer.as_mut() else {
+            return;
+        };
+        for queue in &changes.queues {
+            if let Some(point) = queue.points.last() {
+                // A parameter the plugin did not list has no slot.
+                let _ = writer.write(queue.param_id, point.value);
+            }
+        }
+        if self.loads.get() != began {
+            writer.reset();
+        }
+    }
+}
+
 /// The render thread's state: what a block is rendered with.
 pub(crate) struct RenderSide {
     commands: RingReader<ToRender>,
@@ -507,6 +588,9 @@ pub(crate) struct RenderSide {
     seat: Option<Box<dyn RenderEnd>>,
     /// The barrier the next block that reaches the plugin acknowledges.
     barrier: Option<u64>,
+    /// Where each block leaves the last value it carried for each parameter,
+    /// for the edit controller.
+    informs: Informs,
     /// What ends the thread's wait: rung by the main thread.
     wake: Bell,
     /// How the thread tells the main thread it has made progress.
@@ -537,6 +621,7 @@ pub(crate) fn link() -> std::io::Result<(RenderLink, RenderSide)> {
         back_refused: back_refused.writer(),
     };
     let pipeline = AudioPipeline::new(failed_blocks.writer());
+    let loads = tally();
     Ok((
         RenderLink {
             ties,
@@ -554,6 +639,7 @@ pub(crate) fn link() -> std::io::Result<(RenderLink, RenderSide)> {
             params: (0, 0),
             barrier_sent: 0,
             barrier_acked: 0,
+            informs_loads: loads.writer(),
         },
         RenderSide {
             commands,
@@ -563,6 +649,7 @@ pub(crate) fn link() -> std::io::Result<(RenderLink, RenderSide)> {
             config,
             seat: None,
             barrier: None,
+            informs: Informs::new(loads),
             wake: render_ties.wake,
             notify: render_ties.notify,
             losses: writers,
@@ -599,6 +686,11 @@ impl RenderSide {
                 ToRender::Output(output) => {
                     let old = self.pipeline.install_output(output);
                     self.give_back(Back::Output(old));
+                }
+                ToRender::Informs(writer) => {
+                    if let Some(old) = self.informs.install(writer) {
+                        self.give_back(Back::Informs(old));
+                    }
                 }
                 ToRender::Config(config) => {
                     self.config = config;
@@ -689,14 +781,32 @@ impl RenderSide {
     pub(crate) fn handle(&mut self, msg: HostMessage) -> BridgeResult<Option<BridgeMessage>> {
         match msg {
             HostMessage::ProcessAudio(data) => {
+                let began = self.informs.begin();
                 let midi = &data.midi_events;
-                self.handle_process(AudioBlock {
+                let reply = self.handle_process(AudioBlock {
                     seq: data.seq,
                     num_samples: data.num_samples,
                     midi,
                     extras: ProcessExtras::of(&data),
-                })
-                .map(Some)
+                })?;
+                // The edit controller is told of what the Processor was, each
+                // parameter's last value of the block, whoever wrote it: the
+                // host's write rode this block as a change on its first frame.
+                self.informs.note(&data.param_changes, began);
+                Ok(Some(reply))
+            }
+            // The host's writes no block has carried, in order with the blocks
+            // on this connection: the plugin has them, through the format's own
+            // route for parameters outside a block, before the answer.
+            HostMessage::ApplyParameters { param_changes } => {
+                let began = self.informs.begin();
+                if let Some(seat) = self.seat.as_mut()
+                    && seat.flush_parameters(&param_changes).is_err()
+                {
+                    self.failures += 1;
+                }
+                self.informs.note(&param_changes, began);
+                Ok(Some(BridgeMessage::ParametersApplied))
             }
             // The plugin forgets its signal history,
             // in order with the blocks on this connection, so a reset is never
@@ -1017,6 +1127,64 @@ fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// What the render thread left for the edit controller: the slots' reader,
+    /// the writer in an [`Informs`], and the main thread's count of loads.
+    fn informs() -> (Informs, tutti_plugin_types::EditReader, TallyWriter<u64>) {
+        let loads = tally();
+        let writer_end = loads.writer();
+        let mut informs = Informs::new(loads);
+        let (writer, reader) = tutti_plugin_types::edit_slots([tutti_units::ParamId::new(1)]);
+        assert!(informs.install(writer).is_none());
+        (informs, reader, writer_end)
+    }
+
+    fn changes_of(value: f64) -> ParameterChanges {
+        let mut changes = ParameterChanges::reserved(1, 1);
+        assert!(changes.add_change(tutti_units::ParamId::new(1), 0, value));
+        changes
+    }
+
+    fn told(reader: &mut tutti_plugin_types::EditReader) -> Vec<f64> {
+        let mut out = Vec::new();
+        reader.drain(|_, value| out.push(value.get()));
+        out
+    }
+
+    /// **A block's last value of a parameter is left for the edit controller**,
+    /// the newest of several blocks.
+    #[test]
+    fn a_blocks_last_value_is_left_for_the_edit_controller() {
+        let (mut informs, mut reader, _) = informs();
+        let began = informs.begin();
+        informs.note(&changes_of(0.25), began);
+        informs.note(&changes_of(0.5), began);
+        assert_eq!(told(&mut reader), [0.5]);
+    }
+
+    /// **A load voids the values a block that began before it writes after
+    /// it**: the block reads the count, the load comes, the block writes, and
+    /// its values do not reach the controller.
+    #[test]
+    fn a_block_that_began_before_a_load_is_voided() {
+        let (mut informs, mut reader, loads) = informs();
+        let began = informs.begin();
+        loads.add(1);
+        informs.note(&changes_of(0.25), began);
+        assert!(told(&mut reader).is_empty(), "the stale block's value");
+    }
+
+    /// **A write after a load, on a render thread that idled between them,
+    /// reaches the controller**: the first block after the load reads the new
+    /// count when it begins, and keeps its values.
+    #[test]
+    fn the_first_write_after_a_load_on_an_idle_render_thread_is_told() {
+        let (mut informs, mut reader, loads) = informs();
+        loads.add(1);
+        let began = informs.begin();
+        informs.note(&changes_of(0.75), began);
+        assert_eq!(told(&mut reader), [0.75]);
+    }
     use crate::transport::AUDIO_REPLY_BYTES;
     use std::io::Write as _;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -1277,6 +1445,9 @@ mod tests {
         fn set_features(&mut self, _: Features) {}
         fn has_processor(&mut self) -> bool {
             true
+        }
+        fn flush_parameters(&mut self, _: &ParameterChanges) -> PluginResult<()> {
+            Ok(())
         }
     }
 

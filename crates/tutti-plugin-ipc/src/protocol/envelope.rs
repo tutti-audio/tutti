@@ -105,13 +105,16 @@ pub enum HostMessage {
     /// Process one audio block. Audio rides the shared `AudioSlab`, in the ring
     /// slot `seq` selects; the payload carries the per-block side-band.
     ProcessAudio(ProcessAudioData),
-    /// Set one parameter to a normalized value.
-    SetParameter {
-        /// Which parameter — opaque handle or positional index, per format.
-        param_id: ParamId,
-        /// Normalized `0.0..=1.0`; the loader maps it into the plugin's domain.
-        #[serde(with = "super::wire::normalized")]
-        value: Normalized,
+    /// Deliver parameter changes outside a block, on the audio connection, in
+    /// order with the blocks: the parameters the host wrote that no block has
+    /// carried, as one point per parameter on the first frame. The server
+    /// applies them through the format's own route for flushing parameters
+    /// (CLAP `params.flush`, VST3 `process` with no samples, a direct set for
+    /// VST2 and AU) between blocks, and answers
+    /// [`ParametersApplied`](BridgeMessage::ParametersApplied).
+    ApplyParameters {
+        /// The changes, each parameter's newest value.
+        param_changes: tutti_plugin_types::ParameterChanges,
     },
     /// Enter or leave an automation gesture, so the plugin can record it.
     SetAutomationState {
@@ -590,4 +593,7 @@ pub enum BridgeMessage {
         /// What it asked.
         request: tutti_plugin_types::TransportRequest,
     },
+    /// The changes of an [`ApplyParameters`](HostMessage::ApplyParameters) are
+    /// in the plugin.
+    ParametersApplied,
 }

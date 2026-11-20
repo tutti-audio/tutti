@@ -298,7 +298,7 @@ tutti-plugin-ipc  setter  crates/tutti-plugin-ipc/src/client/audio/mod.rs::Audio
 tutti-plugin-ipc  setter  crates/tutti-plugin-ipc/src/client/editor_site.rs::EditorSite::set_editor_scale
 tutti-plugin-ipc  setter  crates/tutti-plugin-ipc/src/client/editor_site.rs::EditorSite::set_editor_size
 tutti-plugin-ipc  setter  crates/tutti-plugin-ipc/src/client/plugin_bridge.rs::PluginBridge::set_automation_state_rt
-tutti-plugin-ipc  setter  crates/tutti-plugin-ipc/src/client/plugin_bridge.rs::PluginBridge::set_parameter_rt
+tutti-plugin-ipc  setter  crates/tutti-plugin-ipc/src/client/plugin_bridge.rs::PluginBridge::set_parameter_value
 
 # tutti-plugin-types
 tutti-plugin-types  ctor-result  crates/tutti-plugin-types/src/format.rs::PluginFormat::from_extension

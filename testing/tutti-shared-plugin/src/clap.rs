@@ -483,6 +483,9 @@ unsafe extern "C" fn params_flush(
     };
     for i in 0..unsafe { size(input) } {
         if let Some(Ev::Param { id, value, .. }) = unsafe { decode(get(input, i)) } {
+            // Recorded as a block's is: what the host sent, before anything is
+            // done with it.
+            me.core.log_set_param(id, value);
             me.core.set_param(id, value);
         }
     }

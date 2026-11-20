@@ -21,8 +21,8 @@ use tutti_platform::Instant;
 use tutti_plugin_types::{BridgeError, BridgeResult, ResyncKind, StateError};
 use tutti_plugin_types::{Deadline, MidiIntake};
 use tutti_plugin_types::{ParameterChanges, ParameterPoint, ParameterQueue};
-use tutti_units::ParamId;
 use tutti_units::SampleRate;
+use tutti_units::{Normalized, ParamId};
 
 /// How many block periods the bridge thread will wait for a `ProcessAudio`
 /// reply before abandoning the block.
@@ -213,7 +213,21 @@ impl Owed {
         }
     }
 
-    /// Put what [`carry`](Self::carry) kept into the block about to be sent,
+    /// Keep a host write for the block about to be sent, on its first frame:
+    /// the parameter's latest value, replacing one kept already.
+    /// Bridge thread: may allocate.
+    fn carry_write(&mut self, id: ParamId, value: Normalized) {
+        let point = ParameterPoint {
+            sample_offset: 0,
+            value,
+        };
+        match self.carried.iter_mut().find(|(a, _)| *a == id) {
+            Some((_, kept)) => *kept = point,
+            None => self.carried.push((id, point)),
+        }
+    }
+
+    /// Put what [`carry`](Self::carry) and [`carry_write`](Self::carry_write) kept into the block about to be sent,
     /// on its first frame: a parameter the block moves itself keeps its own
     /// points, preceded by the carried value when its first point is later
     /// than frame 0.
@@ -473,6 +487,8 @@ pub(super) fn handle_audio(
                 return Ok(());
             }
 
+            // What the host wrote since the last block, on its first frame.
+            channels.drain_host_edits(|id, value| owed.carry_write(id, value));
             if !owed.carried.is_empty() {
                 owed.merge_carried(&mut payload.param_changes);
             }
@@ -597,6 +613,33 @@ pub(super) fn handle_audio(
         AudioCommand::Reset => {
             ipc::send(stream, &HostMessage::Reset)?;
         }
+        AudioCommand::Params { done } => {
+            // Taken now, as this lane dequeues it: every block queued before it
+            // has taken what was written before that block, and what is taken
+            // here is newer than all of it.
+            let changes = host_edit_changes(channels);
+            if changes.is_empty() {
+                done.send(true);
+                return Ok(());
+            }
+            // On the block connection, behind every block pushed before it, so
+            // the server has those blocks' writes before these.
+            ipc::send(
+                stream,
+                &HostMessage::ApplyParameters {
+                    param_changes: changes,
+                },
+            )?;
+            let applied = answer(
+                stream,
+                inbox,
+                owed,
+                channels,
+                lifecycle.timeouts().param_wait(),
+                Late::Answer(|m| matches!(m, BridgeMessage::ParametersApplied)),
+            )?;
+            done.send(matches!(applied, Some(BridgeMessage::ParametersApplied)));
+        }
         AudioCommand::Settle { done } => {
             // Two fences, not one. A fence's reply wakes its waiter before the
             // control lane hands the events it read meanwhile to the listener
@@ -673,6 +716,17 @@ fn fence(
     Ok(())
 }
 
+/// The host's writes no block has taken, as one change per parameter on the first
+/// frame: what a flush sends. Taken by the audio lane's thread.
+pub(super) fn host_edit_changes(channels: &Channels) -> ParameterChanges {
+    let taken = channels.take_host_edits();
+    let mut changes = ParameterChanges::reserved(taken.len(), 1);
+    for (id, value) in &taken {
+        let _ = changes.add_change(*id, 0, value.get());
+    }
+    changes
+}
+
 /// The control lane's command, run on its thread: **every request but the
 /// blocks'**, and the plugin's unsolicited news (the server's main thread).
 pub(super) fn handle_control(
@@ -684,9 +738,6 @@ pub(super) fn handle_control(
 ) -> BridgeResult<()> {
     let Lane { stream, owed } = lane;
     match cmd {
-        ControlCommand::SetParameter { param_id, value } => {
-            ipc::send(stream, &HostMessage::SetParameter { param_id, value })?;
-        }
         ControlCommand::SetAutomationState { mode } => {
             ipc::send(stream, &HostMessage::SetAutomationState { mode })?;
         }
