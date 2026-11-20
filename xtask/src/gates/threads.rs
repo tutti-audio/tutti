@@ -96,21 +96,38 @@ fn starts(code: &str) -> Vec<usize> {
             out.push(at);
         }
     }
-    for tail in ["spawn(", "scope(", "Builder::new()"] {
-        let mut from = 0;
-        while let Some(at) = find_word_from(code, "thread", from) {
-            from = at + "thread".len();
-            if code[from..]
-                .strip_prefix("::")
-                .is_some_and(|rest| rest.starts_with(tail))
-            {
-                out.push(at);
-            }
+    // `thread::spawn`, `thread::scope` or `thread::Builder`, called or imported
+    // (`use std::thread::spawn;`, `use std::thread::{scope, Builder};`): an import
+    // is a start, so a bare `spawn(` after it cannot pass unseen.
+    let mut from = 0;
+    while let Some(at) = find_word_from(code, "thread", from) {
+        from = at + "thread".len();
+        let Some(rest) = code[from..].strip_prefix("::") else {
+            continue;
+        };
+        let names_a_start = match rest.strip_prefix('{') {
+            Some(group) => group
+                .split('}')
+                .next()
+                .unwrap_or("")
+                .split(|c: char| !(c.is_alphanumeric() || c == '_'))
+                .any(|word| THREAD_STARTS.contains(&word)),
+            None => THREAD_STARTS.iter().any(|name| {
+                rest.strip_prefix(name).is_some_and(|after| {
+                    !after.starts_with(|c: char| c.is_alphanumeric() || c == '_')
+                })
+            }),
+        };
+        if names_a_start {
+            out.push(at);
         }
     }
     out.sort_unstable();
     out
 }
+
+/// The `std::thread` items that start a thread.
+const THREAD_STARTS: [&str; 3] = ["spawn", "scope", "Builder"];
 
 /// The keys of one file's thread starts.
 fn scan(path: &str, src: &str, whole_file_is_test: bool) -> BTreeSet<String> {
@@ -313,6 +330,36 @@ mod tests {
             assert!(
                 scan(A, &format!("fn run() {{ {body} }}\n"), false).is_empty(),
                 "{body}"
+            );
+        }
+    }
+
+    /// An import of a thread start is itself a start, keyed outside any
+    /// function, so a bare `spawn(` after it cannot pass unseen; importing
+    /// something else from `std::thread` is not.
+    #[test]
+    fn an_imported_thread_start_is_a_start() {
+        for import in [
+            "use std::thread::spawn;",
+            "use std::thread::{self, scope};",
+            "use std::thread::{Builder, sleep};",
+            "use std::thread::spawn as go;",
+        ] {
+            let keys = scan(A, &format!("{import}\nfn run() {{}}\n"), false);
+            assert_eq!(
+                keys.into_iter().collect::<Vec<_>>(),
+                [format!("{A}::-")],
+                "{import}"
+            );
+        }
+        for import in [
+            "use std::thread::{sleep, current};",
+            "use std::thread;",
+            "use std::thread::JoinHandle;",
+        ] {
+            assert!(
+                scan(A, &format!("{import}\nfn run() {{}}\n"), false).is_empty(),
+                "{import}"
             );
         }
     }
