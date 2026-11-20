@@ -175,7 +175,7 @@ impl<S: Sample> Wave<S> {
     }
 
     /// Returns a wave of `f` applied to every sample, with the same rate, topology
-    /// and length, allocating once per channel.
+    /// and length.
     ///
     /// The way to change a wave's storage format with the caller's own rule;
     /// narrowing a float wave is `wave.map(|x| x as f32)`, and widening is

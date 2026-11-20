@@ -169,8 +169,7 @@ fn duration_is_frames_over_rate() {
 /// rate, topology and placement.
 #[test]
 fn widening_an_f32_wave_is_every_sample_as_f64() {
-    let w32 = Wave::with_topology(crate::Bed::Quad.topology(), SampleRate::SR_44K1);
-    let mut w32 = w32;
+    let mut w32 = Wave::with_topology(crate::Bed::Quad.topology(), SampleRate::SR_44K1);
     w32.append(
         Interleaved::new(
             &[
