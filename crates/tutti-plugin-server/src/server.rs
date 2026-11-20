@@ -9,8 +9,11 @@ use crate::render::{NotHome, RenderSide, RenderThread};
 use crate::session::{Reaction, Session};
 use crate::transport::{ControlTransport, Transport, TransportListener};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tutti_platform::StopToken;
-use tutti_plugin_ipc::{AudioReply, ControlFrame, ControlReply, PROTOCOL_VERSION};
+use tutti_plugin_ipc::{
+    AudioReply, ControlFrame, ControlRequest, PROTOCOL_VERSION, ReqId, Request, Working,
+};
 use tutti_plugin_types::MainThreadMarker;
 use tutti_plugin_types::{BridgeError, BridgeResult};
 
@@ -146,7 +149,7 @@ impl PluginServer {
     ///    event loop (`main_loop`), which keeps the plugin's
     ///    `Controller`, its editor and the idle tick.
     ///
-    /// Each phase opens with a [`ControlReply::Ready`] carrying
+    /// Each phase opens with a [`ControlFrame::Ready`] carrying
     /// `PROTOCOL_VERSION`; the host refuses a version it does not know.
     ///
     /// # Errors
@@ -179,9 +182,9 @@ impl PluginServer {
 
         // First connection: handshake.
         let mut handshake = listener.accept()?;
-        handshake.send(&ControlFrame::Reply(ControlReply::Ready {
+        handshake.send(&ControlFrame::Ready {
             protocol_version: PROTOCOL_VERSION,
-        }))?;
+        })?;
         if self.handshake_phase(&mut handshake)? {
             return Ok(());
         }
@@ -193,9 +196,9 @@ impl PluginServer {
             protocol_version: PROTOCOL_VERSION,
         })?;
         let mut control = listener.accept()?;
-        control.send(&ControlFrame::Reply(ControlReply::Ready {
+        control.send(&ControlFrame::Ready {
             protocol_version: PROTOCOL_VERSION,
-        }))?;
+        })?;
         let side = self
             .render
             .take()
@@ -276,29 +279,26 @@ impl PluginServer {
 
     fn handshake_phase(&mut self, transport: &mut ControlTransport) -> BridgeResult<bool> {
         loop {
-            let msg = match transport.recv() {
-                Ok(m) => m,
-                // The host closed the connection, or went away: the phase is over.
+            let Request { id, body } = match transport.recv() {
+                Ok(request) => request,
                 Err(BridgeError::Io(_)) => return Ok(false),
-                // A frame that does not decode (a host of another protocol), or
-                // one past the cap: the cause is the error, not a host that left.
                 Err(e) => return Err(e),
             };
-            // A load says it is restoring a state before it does (the host's wait
-            // changes with it); the transport is the interim sink.
-            let reaction = self.session.handle_with(self.main, msg, &mut |m| {
-                let _ = transport.send(&m.into());
-            })?;
+            let reaction = if matches!(body, ControlRequest::LoadPlugin { .. }) {
+                self.load_working(transport, id, body)?
+            } else {
+                self.session.handle_with(self.main, body, &mut |_| {})?
+            };
             match reaction {
                 Reaction::Shutdown => return Ok(true),
-                Reaction::Reply(m) => {
-                    if transport.send(&m.into()).is_err() {
+                Reaction::Reply(reply) => {
+                    if transport.send(&ControlFrame::Reply { id, reply }).is_err() {
                         return Ok(false);
                     }
                 }
-                Reaction::ReplyMany(ms) => {
-                    for m in ms {
-                        if transport.send(&m.into()).is_err() {
+                Reaction::ReplyMany(replies) => {
+                    for reply in replies {
+                        if transport.send(&ControlFrame::Reply { id, reply }).is_err() {
                             return Ok(false);
                         }
                     }
@@ -308,9 +308,53 @@ impl PluginServer {
         }
     }
 
-    /// The control phase: the main thread's [event loop](crate::main_loop),
-    /// serving the control connection and the editor's idle tick until the
-    /// host leaves.
+    /// A load, with the host told the server is at work on it: once as it
+    /// begins, when it reaches the restore of a staged state, and every
+    /// [`WORKING_PERIOD`] in between by a thread of its own, since the load
+    /// itself is one plugin call that tells nothing. The host's wait for the
+    /// answer restarts on each. The thread has ended before the answer is sent.
+    fn load_working(
+        &mut self,
+        transport: &mut ControlTransport,
+        id: ReqId,
+        body: ControlRequest,
+    ) -> BridgeResult<Reaction> {
+        let restoring = AtomicBool::new(false);
+        let done = StopToken::new();
+        let pulse = transport.pulser();
+        let _ = transport.send(&ControlFrame::Working {
+            id,
+            stage: Working::Opening,
+        });
+        std::thread::scope(|scope| {
+            let beat = pulse.as_ref().map(|pulse| {
+                scope.spawn(|| {
+                    while !done.wait(WORKING_PERIOD) {
+                        let stage = if restoring.load(Ordering::Acquire) {
+                            Working::Restoring
+                        } else {
+                            Working::Opening
+                        };
+                        if pulse(&ControlFrame::Working { id, stage }).is_err() {
+                            break;
+                        }
+                    }
+                })
+            });
+            let reaction = self.session.handle_with(self.main, body, &mut |stage| {
+                if stage == Working::Restoring {
+                    restoring.store(true, Ordering::Release);
+                }
+                let _ = transport.send(&ControlFrame::Working { id, stage });
+            });
+            done.stop();
+            if let Some(beat) = beat {
+                let _ = beat.join();
+            }
+            reaction
+        })
+    }
+
     fn control_phase(
         &mut self,
         transport: &mut ControlTransport,
@@ -329,6 +373,9 @@ impl Drop for PluginServer {
 
 /// How long a stopped render thread is given to return: it ends at its next
 /// step, so this is a thread stuck inside the plugin or in a read.
+/// How often the server tells the host it is at work on a load.
+const WORKING_PERIOD: std::time::Duration = std::time::Duration::from_secs(1);
+
 const RENDER_STOP_PATIENCE: std::time::Duration = std::time::Duration::from_secs(3);
 
 /// How long a server is given to shut down after its host ended, before it is

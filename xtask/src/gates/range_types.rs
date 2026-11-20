@@ -151,6 +151,11 @@ pub(super) const EXCEPTIONS: &[(&str, &str, &str)] = &[
         "permanent: the registry accepts any u32 as a component code (`AuComponentType::Unknown` keeps one raw), so no value is invalid and a printable-ASCII check would refuse real components",
     ),
     (
+        "crates/tutti-plugin-ipc/src/protocol/envelope.rs",
+        "ReqId",
+        "permanent: a request number is any u64; the host numbers its requests and no value is invalid",
+    ),
+    (
         "crates/tutti-plugin-types/src/parameters.rs",
         "ParameterInfo",
         "temporary: a document can set `flags` outside `known` and a `measures` its range does not fit; `serde(try_from)` removes it",

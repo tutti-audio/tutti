@@ -16,11 +16,12 @@ use tutti_plugin_types::{
 use tutti_units::ParamId;
 
 use super::DeclaredCache;
+use crate::Request as WireRequest;
 
 use crate::{
     AudioReply, AudioRequest, AudioSlab, BridgeEvent, ControlFrame, ControlReply, ControlRequest,
     Framed, Ipc, IpcController, IpcParts, IpcProcessor, News, PROTOCOL_VERSION, PluginBridge,
-    ProcessGuard, RING_SLOTS, SlabLayout, unique_socket_path,
+    ProcessGuard, RING_SLOTS, ReqId, SlabLayout, unique_socket_path,
 };
 
 const CEILING: usize = 64;
@@ -45,12 +46,15 @@ fn reply<T: Framed>(stream: &interprocess::local_socket::Stream, message: &T) {
     crate::protocol::frame::write_frame(&mut stream, message).unwrap();
 }
 
-/// Writes an answer or news to the control connection.
-fn reply_control(
-    stream: &interprocess::local_socket::Stream,
-    message: &(impl Clone + Into<ControlFrame>),
-) {
-    reply(stream, &message.clone().into());
+/// Writes the answer to request `id` to the control connection.
+fn reply_control(stream: &interprocess::local_socket::Stream, id: ReqId, reply_to: &ControlReply) {
+    reply(
+        stream,
+        &ControlFrame::Reply {
+            id,
+            reply: reply_to.clone(),
+        },
+    );
 }
 
 /// A record that a thread appends to and another waits on: an append notifies
@@ -227,9 +231,9 @@ fn mock_with(
     let stream = Arc::new(listener.accept().unwrap());
     reply(
         &stream,
-        &ControlFrame::Reply(ControlReply::Ready {
+        &ControlFrame::Ready {
             protocol_version: PROTOCOL_VERSION,
-        }),
+        },
     );
     let received: Received = Arc::default();
     let parameters: Arc<Mutex<Vec<ParameterInfo>>> =
@@ -253,12 +257,15 @@ fn mock_with(
                 let Ok(message) = postcard::from_bytes::<AudioRequest>(&bytes) else {
                     break;
                 };
-                let applied = matches!(message, AudioRequest::ApplyParameters { .. });
+                let applied = match &message {
+                    AudioRequest::ApplyParameters { id, .. } => Some(*id),
+                    _ => None,
+                };
                 log.push(Sent::Audio(message));
                 // The parameters sent between blocks are answered, as the
                 // server's render thread answers them.
-                if applied {
-                    reply(&audio, &AudioReply::ParametersApplied);
+                if let Some(id) = applied {
+                    reply(&audio, &AudioReply::ParametersApplied { id });
                 }
             }
         }
@@ -280,7 +287,8 @@ fn mock_with(
             if stream.read_exact(&mut bytes).is_err() {
                 break;
             }
-            let Ok(message) = postcard::from_bytes::<ControlRequest>(&bytes) else {
+            let Ok(WireRequest { id, body: message }) = postcard::from_bytes::<WireRequest>(&bytes)
+            else {
                 break;
             };
             // Recorded before it is answered: a count read after the reply sees it.
@@ -288,6 +296,7 @@ fn mock_with(
             match &message {
                 ControlRequest::SetSampleRate { rate } => reply_control(
                     &served,
+                    id,
                     &ControlReply::SampleRateSet {
                         rate: *rate,
                         error: None,
@@ -297,6 +306,7 @@ fn mock_with(
                 // into; any other opens at the size the test pins.
                 ControlRequest::OpenEditor { parent, .. } => reply_control(
                     &served,
+                    id,
                     &ControlReply::EditorOpened {
                         result: match parent {
                             Some(0) => Err("the mock plugin has no editor".to_string()),
@@ -307,15 +317,16 @@ fn mock_with(
                 ),
                 ControlRequest::SetupSharedMemory { .. } => {
                     if let Some(layout) = announcing.lock().unwrap().take() {
-                        reply_control(
+                        reply(
                             &served,
-                            &News::PluginIoChanged {
+                            &ControlFrame::News(News::PluginIoChanged {
                                 layout: Some(layout),
-                            },
+                            }),
                         );
                     }
                     reply_control(
                         &served,
+                        id,
                         &if refusing.load(std::sync::atomic::Ordering::Acquire) {
                             ControlReply::Error {
                                 message: "the slab does not open".into(),
@@ -325,17 +336,20 @@ fn mock_with(
                         },
                     )
                 }
-                ControlRequest::SetEditorSize { size } => {
-                    reply_control(&served, &ControlReply::EditorSized { result: Ok(*size) })
-                }
+                ControlRequest::SetEditorSize { size } => reply_control(
+                    &served,
+                    id,
+                    &ControlReply::EditorSized { result: Ok(*size) },
+                ),
                 ControlRequest::LoadStateChunk { last: Some(_), .. } => {
-                    reply_control(&served, &ControlReply::StateLoaded { error: None })
+                    reply_control(&served, id, &ControlReply::StateLoaded { error: None })
                 }
                 ControlRequest::GetParameter { .. } => {
-                    reply_control(&served, &ControlReply::ParameterValue { value: None })
+                    reply_control(&served, id, &ControlReply::ParameterValue { value: None })
                 }
                 ControlRequest::GetParameterList => reply_control(
                     &served,
+                    id,
                     &ControlReply::ParameterList {
                         parameters: answers.lock().unwrap().clone(),
                     },
@@ -1612,7 +1626,7 @@ fn a_flush_rides_the_audio_lane_behind_the_blocks_pushed_before_it() {
         .position(|m| matches!(m, Sent::Control(ControlRequest::GetParameter { .. })))
         .expect("the read");
     assert!(block < flush && flush < read, "{block} {flush} {read}");
-    let Sent::Audio(AudioRequest::ApplyParameters { param_changes }) = &log[flush] else {
+    let Sent::Audio(AudioRequest::ApplyParameters { param_changes, .. }) = &log[flush] else {
         unreachable!()
     };
     assert_eq!(last_change(param_changes, ParamId::new(1)), Some(0.5));

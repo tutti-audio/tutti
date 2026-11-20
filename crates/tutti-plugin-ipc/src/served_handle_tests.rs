@@ -15,7 +15,7 @@ use crate::SlabLayout;
 use crate::unique_socket_path;
 use crate::{
     AudioReply, AudioRequest, ControlFrame, ControlReply, ControlRequest, Framed, News,
-    PROTOCOL_VERSION,
+    PROTOCOL_VERSION, Request,
 };
 use crate::{BridgeEvent, BridgeThread};
 use param_list::ParamList as _;
@@ -116,6 +116,24 @@ fn send_bridge_msg<T: Framed>(stream: &interprocess::local_socket::Stream, msg: 
     crate::write_frame(&mut stream, msg).unwrap();
 }
 
+/// What a scripted server says for a request: its answer, or news.
+enum Say {
+    Reply(ControlReply),
+    News(News),
+}
+
+impl From<ControlReply> for Say {
+    fn from(reply: ControlReply) -> Self {
+        Self::Reply(reply)
+    }
+}
+
+impl From<News> for Say {
+    fn from(news: News) -> Self {
+        Self::News(news)
+    }
+}
+
 /// Accepts the host's audio connection and then its control one, as the
 /// server does (the host connects the second after the first one's `Ready`),
 /// and serves the control one on its own thread with `lane`. The audio
@@ -137,9 +155,9 @@ fn serve_lanes(
     let control = listener.accept().unwrap();
     send_bridge_msg(
         &control,
-        &ControlFrame::Reply(ControlReply::Ready {
+        &ControlFrame::Ready {
             protocol_version: PROTOCOL_VERSION,
-        }),
+        },
     );
     std::thread::Builder::new()
         .name("mock-plugin-server-control".to_string())
@@ -207,15 +225,15 @@ fn handle_with_mock_server(
     let server_thread = serve_lanes(&listener, path, move |stream| {
         loop {
             let msg = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                recv_host_msg::<ControlRequest>(stream)
+                recv_host_msg::<Request>(stream)
             })) {
                 Ok(msg) => msg,
                 Err(_) => break,
             };
-            let response = (respond.lock().unwrap())(msg);
-            if let Some(response) = response
+            let response = (respond.lock().unwrap())(msg.body);
+            if let Some(reply) = response
                 && std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    send_bridge_msg(stream, &ControlFrame::Reply(response))
+                    send_bridge_msg(stream, &ControlFrame::Reply { id: msg.id, reply })
                 }))
                 .is_err()
             {
@@ -251,7 +269,7 @@ fn handle_with_mock_server(
 /// listener, and (2) lets `respond` emit zero-or-more messages per
 /// request — which is what allows scripting trailing unsolicited events.
 fn handle_with_multi_reply_server(
-    respond: impl Fn(ControlRequest) -> Vec<ControlFrame> + Send + 'static,
+    respond: impl Fn(ControlRequest) -> Vec<Say> + Send + 'static,
 ) -> (
     PluginHandle,
     Arc<PluginBridge>,
@@ -295,15 +313,19 @@ fn handle_with_multi_reply_server(
     let server_thread = serve_lanes(&listener, path, move |stream| {
         loop {
             let msg = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                recv_host_msg::<ControlRequest>(stream)
+                recv_host_msg::<Request>(stream)
             })) {
                 Ok(msg) => msg,
                 Err(_) => break,
             };
-            let replies = (respond.lock().unwrap())(msg);
-            for reply in replies {
+            let replies = (respond.lock().unwrap())(msg.body);
+            for said in replies {
+                let frame = match said {
+                    Say::Reply(reply) => ControlFrame::Reply { id: msg.id, reply },
+                    Say::News(news) => ControlFrame::News(news),
+                };
                 if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    send_bridge_msg(stream, &reply)
+                    send_bridge_msg(stream, &frame)
                 }))
                 .is_err()
                 {
@@ -350,13 +372,13 @@ fn trailing_unsolicited_events_dont_poison_next_reply() {
     let (handle, bridge, _bridge_thread, _server_thread) =
         handle_with_multi_reply_server(move |msg| match msg {
             ControlRequest::GetParameterList => vec![
-                ControlFrame::from(ControlReply::ParameterList {
+                Say::from(ControlReply::ParameterList {
                     parameters: vec![ParameterInfo::new(ParamId::new(0), "Vol".to_string())],
                 }),
-                ControlFrame::from(News::LatencyChanged {
+                Say::from(News::LatencyChanged {
                     samples: Samples::new(256),
                 }),
-                ControlFrame::from(News::ParameterChanged {
+                Say::from(News::ParameterChanged {
                     edit: tutti_plugin_types::ParamEdit::change(
                         ParamId::new(7),
                         Normalized::of(0.42),
@@ -364,14 +386,12 @@ fn trailing_unsolicited_events_dont_poison_next_reply() {
                 }),
             ],
             ControlRequest::GetParameter { param_id } if param_id == ParamId::new(0) => {
-                vec![ControlFrame::from(ControlReply::ParameterValue {
+                vec![Say::from(ControlReply::ParameterValue {
                     value: Some(Normalized::of(0.5)),
                 })]
             }
             ControlRequest::GetParameter { .. } => {
-                vec![ControlFrame::from(ControlReply::ParameterValue {
-                    value: None,
-                })]
+                vec![Say::from(ControlReply::ParameterValue { value: None })]
             }
             _ => {
                 // Count any other request as a test failure signal.
@@ -445,15 +465,15 @@ fn a_tail_change_reaches_the_listener() {
     let (handle, bridge, _bridge_thread, _server_thread) =
         handle_with_multi_reply_server(move |msg| match msg {
             ControlRequest::GetParameterList => vec![
-                ControlFrame::from(ControlReply::ParameterList {
+                Say::from(ControlReply::ParameterList {
                     parameters: vec![ParameterInfo::new(ParamId::new(0), "Vol".to_string())],
                 }),
-                ControlFrame::from(News::TailChanged {
+                Say::from(News::TailChanged {
                     tail: PluginTail::Unbounded,
                 }),
             ],
             ControlRequest::GetParameter { .. } => {
-                vec![ControlFrame::from(ControlReply::ParameterValue {
+                vec![Say::from(ControlReply::ParameterValue {
                     value: Some(Normalized::of(0.5)),
                 })]
             }

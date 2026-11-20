@@ -38,6 +38,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tutti_platform::Instant;
 
+use tutti_plugin_ipc::{ControlFrame, Request};
 use tutti_plugin_ipc_ffi::Ready;
 use tutti_plugin_types::{BridgeError, BridgeResult, MainThreadMarker, StateError, Wakeups};
 
@@ -253,13 +254,13 @@ pub(crate) fn serve_every(
         if !readable {
             continue;
         }
-        let msg = transport.recv()?;
-        match session.handle(main, msg)? {
+        let Request { id, body } = transport.recv()?;
+        match session.handle(main, body)? {
             Reaction::Shutdown => return Ok(()),
-            Reaction::Reply(m) => transport.send(&m.into())?,
-            Reaction::ReplyMany(ms) => {
-                for m in ms {
-                    transport.send(&m.into())?;
+            Reaction::Reply(reply) => transport.send(&ControlFrame::Reply { id, reply })?,
+            Reaction::ReplyMany(replies) => {
+                for reply in replies {
+                    transport.send(&ControlFrame::Reply { id, reply })?;
                 }
             }
             Reaction::None => {}

@@ -828,11 +828,14 @@ mod tests {
             let _writer = std::thread::spawn(move || {
                 let mut host =
                     connect_within(&connect_path, Duration::from_millis(200)).expect("connect");
-                let chunk = ControlRequest::LoadStateChunk {
-                    seq: 0,
-                    total: 1 << 20,
-                    last: None,
-                    bytes: vec![0u8; 1 << 20],
+                let chunk = crate::Request {
+                    id: crate::ReqId::new(1),
+                    body: ControlRequest::LoadStateChunk {
+                        seq: 0,
+                        total: 1 << 20,
+                        last: None,
+                        bytes: vec![0u8; 1 << 20],
+                    },
                 };
                 // Far more than any socket buffer holds: the peer reads nothing.
                 let result = (0..256).try_for_each(|_| send(&mut host, &chunk));

@@ -18,7 +18,8 @@ use interprocess::local_socket::Stream;
 use interprocess::local_socket::traits::Stream as _;
 use tutti_buffers::FloatWidth;
 use tutti_plugin_ipc::{
-    AudioReply, ControlFrame, ControlReply, ControlRequest, read_frame, socket_name, write_frame,
+    AudioReply, ControlFrame, ControlReply, ControlRequest, ReqId, Request, Working, read_frame,
+    socket_name, write_frame,
 };
 use tutti_plugin_types::{PluginFormat, PluginId, SampleRate};
 
@@ -64,21 +65,31 @@ fn load_choosing(
 ) -> ControlReply {
     write_frame(
         stream,
-        &ControlRequest::LoadPlugin {
-            path: path.to_path_buf(),
-            format,
-            plugin,
-            sample_rate: SampleRate::SR_48K,
-            block_size: 512,
-            preferred_format: FloatWidth::F32,
-            shm_name: "load-reply".into(),
-            state: None,
+        &Request {
+            id: ReqId::new(1),
+            body: ControlRequest::LoadPlugin {
+                path: path.to_path_buf(),
+                format,
+                plugin,
+                sample_rate: SampleRate::SR_48K,
+                block_size: 512,
+                preferred_format: FloatWidth::F32,
+                shm_name: "load-reply".into(),
+                state: None,
+            },
         },
     )
     .expect("send LoadPlugin");
-    match read_frame(stream).expect("the server answers a load; it did not exit") {
-        ControlFrame::Reply(reply) => reply,
-        ControlFrame::News(news) => panic!("news where the load was answered: {news:?}"),
+    // The server says it is working on a load before it answers.
+    loop {
+        match read_frame(stream).expect("the server answers a load; it did not exit") {
+            ControlFrame::Reply { id, reply } => {
+                assert_eq!(id, ReqId::new(1), "the answer echoes the request's id");
+                return reply;
+            }
+            ControlFrame::Working { id, .. } => assert_eq!(id, ReqId::new(1)),
+            other => panic!("expected the answer to the load, got {other:?}"),
+        }
     }
 }
 
@@ -116,9 +127,57 @@ fn start_server_for_this_process() -> (Server, Stream, PathBuf) {
     let mut stream = connect(&socket, &mut server);
     assert!(matches!(
         read_frame::<_, ControlFrame>(&mut stream),
-        Ok(ControlFrame::Reply(ControlReply::Ready { .. }))
+        Ok(ControlFrame::Ready { .. })
     ));
     (server, stream, socket)
+}
+
+/// **A load is announced as work in progress before it is answered**, under the
+/// request's own id: the host's wait for it restarts on that frame, so a plugin
+/// that opens slowly is waited for, and the answer echoes the same id.
+#[test]
+fn a_load_is_announced_as_working_before_it_is_answered() {
+    let (_not_a_plugin, good) = fixtures();
+    let (server, mut stream) = start_server();
+    write_frame(
+        &mut stream,
+        &Request {
+            id: ReqId::new(41),
+            body: ControlRequest::LoadPlugin {
+                path: good,
+                format: PluginFormat::Clap,
+                plugin: None,
+                sample_rate: SampleRate::SR_48K,
+                block_size: 512,
+                preferred_format: FloatWidth::F32,
+                shm_name: "load-reply".into(),
+                state: None,
+            },
+        },
+    )
+    .expect("send LoadPlugin");
+    match read_frame::<_, ControlFrame>(&mut stream).expect("the server speaks") {
+        ControlFrame::Working { id, stage } => {
+            assert_eq!(id, ReqId::new(41));
+            assert_eq!(stage, Working::Opening);
+        }
+        other => panic!("the first frame of a load is a sign of life, got {other:?}"),
+    }
+    loop {
+        match read_frame::<_, ControlFrame>(&mut stream).expect("the load is answered") {
+            ControlFrame::Working { id, .. } => assert_eq!(id, ReqId::new(41)),
+            ControlFrame::Reply { id, reply } => {
+                assert_eq!(id, ReqId::new(41));
+                assert!(
+                    matches!(reply, ControlReply::PluginLoaded { .. }),
+                    "{reply:?}"
+                );
+                break;
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+    drop(server);
 }
 
 /// A load that fails gets the loader's reason and leaves the server serving.
@@ -153,7 +212,14 @@ fn a_failed_load_is_answered_and_the_server_still_loads_a_good_plugin() {
         "the same server loads a good plugin after a failed one"
     );
 
-    write_frame(&mut stream, &ControlRequest::Shutdown).expect("send Shutdown");
+    write_frame(
+        &mut stream,
+        &Request {
+            id: ReqId::new(2),
+            body: ControlRequest::Shutdown,
+        },
+    )
+    .expect("send Shutdown");
     drop(server);
 }
 
@@ -194,7 +260,14 @@ fn a_load_that_names_a_plugin_loads_that_plugin_in_the_server() {
         "the named plugin loads, not the first"
     );
 
-    write_frame(&mut stream, &ControlRequest::Shutdown).expect("send Shutdown");
+    write_frame(
+        &mut stream,
+        &Request {
+            id: ReqId::new(2),
+            body: ControlRequest::Shutdown,
+        },
+    )
+    .expect("send Shutdown");
     drop(server);
 }
 
@@ -226,7 +299,14 @@ fn a_shutdown_in_the_handshake_releases_the_plugin() {
         ControlReply::PluginLoaded { .. }
     ));
 
-    write_frame(&mut stream, &ControlRequest::Shutdown).expect("send Shutdown");
+    write_frame(
+        &mut stream,
+        &Request {
+            id: ReqId::new(2),
+            body: ControlRequest::Shutdown,
+        },
+    )
+    .expect("send Shutdown");
     let (status, logged) = ended(&mut server);
     // Not 3 (`EXIT_PLUGIN_LEAKED`): the plugin was destroyed, not leaked.
     assert_eq!(status.code(), Some(0), "{status:?}: {logged}");
@@ -290,7 +370,7 @@ fn a_host_that_ends_in_the_control_phase_shuts_the_server_down() {
     let mut handshake = connect(&socket, &mut host);
     assert!(matches!(
         read_frame::<_, ControlFrame>(&mut handshake),
-        Ok(ControlFrame::Reply(ControlReply::Ready { .. }))
+        Ok(ControlFrame::Ready { .. })
     ));
     assert!(matches!(
         load(&mut handshake, &good, PluginFormat::Clap),
@@ -305,7 +385,7 @@ fn a_host_that_ends_in_the_control_phase_shuts_the_server_down() {
     ));
     assert!(matches!(
         read_frame::<_, ControlFrame>(&mut control),
-        Ok(ControlFrame::Reply(ControlReply::Ready { .. }))
+        Ok(ControlFrame::Ready { .. })
     ));
     let (ended, server_ended) = std::sync::mpsc::channel();
     tutti_plugin_ipc_ffi::watch_host(server, move || ended.send(()).expect("listening"))

@@ -11,7 +11,7 @@ pub(crate) mod process;
 pub(crate) mod shm;
 pub(crate) mod wire;
 
-/// Wire protocol version, exchanged in the [`ControlReply::Ready`] handshake.
+/// Wire protocol version, exchanged in the [`ControlFrame::Ready`] handshake.
 ///
 /// Bump on ANY change to the host↔server wire shape (a new or reordered field on
 /// a serialized type), since the wire's codec (postcard) is not self-describing
@@ -145,7 +145,15 @@ pub(crate) mod wire;
 ///   `StateChunk`) carries the `total` of the whole state, so the receiver
 ///   sizes its buffer once and refuses a total over the limit before it
 ///   allocates.
-pub const PROTOCOL_VERSION: u32 = 50;
+/// - **Version 51** numbers the requests: a control request travels as a
+///   `Request` with its `ReqId`, an `ApplyParameters` carries one, and an answer
+///   echoes it (`ControlFrame::Reply`, `ParametersApplied`), so the host matches an
+///   answer to its request by the id and not by the order of the stream. The audio
+///   connection's `Error` is gone (nothing sent it), and the restore notice becomes
+///   `ControlFrame::Working`, which the server also sends while it opens the
+///   plugin, once a second, for the host's wait to restart on; the control
+///   connection's `Ready` is a frame of its own and not a reply.
+pub const PROTOCOL_VERSION: u32 = 51;
 
 /// Largest frame body the control connection carries, either way, in bytes.
 ///
@@ -215,7 +223,8 @@ pub(crate) fn check_protocol_version(got: u32) -> tutti_plugin_types::BridgeResu
 
 pub(crate) use envelope::default_format;
 pub use envelope::{
-    AudioReply, AudioRequest, ControlFrame, ControlReply, ControlRequest, News, StagedState,
+    AudioReply, AudioRequest, ControlFrame, ControlReply, ControlRequest, News, ReqId, Request,
+    StagedState, Working,
 };
 pub use frame::Framed;
 pub use process::ProcessAudioData;
@@ -459,8 +468,11 @@ mod tests {
             0
         );
         assert_eq!(
-            tag(postcard::to_allocvec(&AudioReply::ParametersApplied).unwrap()),
-            3
+            tag(
+                postcard::to_allocvec(&AudioReply::ParametersApplied { id: ReqId::new(1) })
+                    .unwrap()
+            ),
+            2
         );
 
         let control = |m: ControlRequest| tag(postcard::to_allocvec(&m).unwrap());
@@ -491,9 +503,8 @@ mod tests {
         let reply = |m: ControlReply| tag(postcard::to_allocvec(&m).unwrap());
         assert_eq!(reply(ControlReply::ParameterValue { value: None }), 1);
         assert_eq!(reply(ControlReply::SharedMemoryReady), 7);
-        assert_eq!(reply(ControlReply::Shutdown), 10);
-        assert_eq!(reply(ControlReply::RestoringState), 15);
-        assert_eq!(reply(ControlReply::ParameterNormalized { value: None }), 17);
+        assert_eq!(reply(ControlReply::Shutdown), 9);
+        assert_eq!(reply(ControlReply::ParameterNormalized { value: None }), 15);
 
         let news = |m: News| tag(postcard::to_allocvec(&m).unwrap());
         assert_eq!(news(News::PluginParamValuesChanged), 3);
@@ -503,10 +514,26 @@ mod tests {
 
         let frame = |m: ControlFrame| tag(postcard::to_allocvec(&m).unwrap());
         assert_eq!(
-            frame(ControlFrame::Reply(ControlReply::SharedMemoryReady)),
+            frame(ControlFrame::Reply {
+                id: ReqId::new(1),
+                reply: ControlReply::SharedMemoryReady
+            }),
             0
         );
         assert_eq!(frame(ControlFrame::News(News::EditorClosed)), 1);
+        assert_eq!(
+            frame(ControlFrame::Working {
+                id: ReqId::new(1),
+                stage: Working::Opening
+            }),
+            2
+        );
+        assert_eq!(
+            frame(ControlFrame::Ready {
+                protocol_version: 1
+            }),
+            3
+        );
     }
 
     fn is_note_on(ev: &WireMidi) -> bool {

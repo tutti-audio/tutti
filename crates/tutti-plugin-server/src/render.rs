@@ -796,7 +796,7 @@ impl RenderSide {
             // The host's writes no block has carried, in order with the blocks
             // on this connection: the plugin has them, through the format's own
             // route for parameters outside a block, before the answer.
-            AudioRequest::ApplyParameters { param_changes } => {
+            AudioRequest::ApplyParameters { id, param_changes } => {
                 let began = self.informs.begin();
                 if let Some(seat) = self.seat.as_mut()
                     && seat.flush_parameters(&param_changes).is_err()
@@ -804,7 +804,7 @@ impl RenderSide {
                     self.failures += 1;
                 }
                 self.informs.note(&param_changes, began);
-                Ok(Some(AudioReply::ParametersApplied))
+                Ok(Some(AudioReply::ParametersApplied { id }))
             }
             // The plugin forgets its signal history,
             // in order with the blocks on this connection, so a reset is never

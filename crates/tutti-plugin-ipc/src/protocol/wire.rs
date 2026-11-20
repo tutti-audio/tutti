@@ -339,10 +339,10 @@ mod tests {
             rate: SampleRate::SR_48K,
             error: None,
         };
-        // variant 14, 48000.0f64, no error
+        // variant 13, 48000.0f64, no error
         assert_eq!(
             postcard::to_allocvec(&set_reply).unwrap(),
-            [14, 0, 0, 0, 0, 0, 112, 231, 64, 0]
+            [13, 0, 0, 0, 0, 0, 112, 231, 64, 0]
         );
 
         let some = ControlReply::ParameterValue {
@@ -416,7 +416,7 @@ mod tests {
     /// message, in each width and in the optional forms.
     /// **The editor messages are appended after every earlier variant, in the
     /// widths the spec's rules give.** A variant tag is a varint over declaration
-    /// order (`OpenEditor` is 19 of the control requests, `EditorOpened` 18 of the
+    /// order (`OpenEditor` is 19 of the control requests, `EditorOpened` 16 of the
     /// replies); a size is a unit tag then two varints (physical) or two `f64`
     /// (logical), a scale an `f64`, a parent an `Option<u64>`.
     #[test]
@@ -461,7 +461,7 @@ mod tests {
             resize
         );
 
-        let mut opened = vec![18, 0, 1];
+        let mut opened = vec![16, 0, 1];
         opened.extend(size_bytes);
         assert_eq!(
             postcard::to_allocvec(&ControlReply::EditorOpened {
@@ -475,9 +475,9 @@ mod tests {
                 result: Err("x".into())
             })
             .unwrap(),
-            [18, 1, 1, b'x']
+            [16, 1, 1, b'x']
         );
-        let mut sized = vec![19, 0];
+        let mut sized = vec![17, 0];
         sized.extend(size_bytes);
         assert_eq!(
             postcard::to_allocvec(&ControlReply::EditorSized { result: Ok(size) }).unwrap(),

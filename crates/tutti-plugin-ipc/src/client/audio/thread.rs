@@ -15,13 +15,14 @@ use super::ListenerSlot;
 use super::channels::response_ring;
 use super::channels::{Channels, ResponseWriter, Stamped, Waits};
 use super::dispatch::{
-    AudioOwed, Lane, Owed, apply_setting, handle_audio, handle_control, handle_setting, read_news,
+    AudioState, ControlState, Lane, apply_setting, handle_audio, handle_control, handle_setting,
+    read_news, tell,
 };
 use super::lifecycle::Lifecycle;
 use super::messages::{AudioCommand, AudioResponse, BridgeEvent, ControlCommand, Unsolicited};
 use super::payload_pool::PayloadPool;
 use crate::transport::control::{self as ipc, ControlStream, ControlWait};
-use crate::{AudioReply, ControlFrame, ControlReply, ControlRequest};
+use crate::{AudioReply, ControlFrame, ControlRequest};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -134,7 +135,7 @@ fn run_thread(
     } = waits;
     // The response ring's writer is this thread's alone: it lives in the audio
     // lane's state.
-    let mut owed = AudioOwed::new(lifecycle.timeouts().drain, responses);
+    let mut state = AudioState::new(lifecycle.timeouts().drain, responses);
     // A bridge that never connects is as dead as one whose socket drops later,
     // and the audio thread tells them apart only through `is_crashed`. Every
     // exit below must mark the crash: returning silently would leave the flag
@@ -146,7 +147,7 @@ fn run_thread(
         Err(failure) => {
             crash(&lifecycle, &listener, failure);
             // A block queued before the crash was marked is never sent.
-            drain_with_errors(&channels, &mut owed);
+            drain_with_errors(&channels, &mut state);
             drop_controls(&channels);
             return;
         }
@@ -156,7 +157,7 @@ fn run_thread(
             (channels.clone(), lifecycle.clone(), Arc::clone(&listener));
         let lane = Lane {
             stream: control,
-            owed: Owed::new(lifecycle.timeouts().drain),
+            state: ControlState::new(lifecycle.timeouts().drain),
         };
         tutti_platform::spawn_named("plugin-control", None, move |_| {
             control_loop(&channels, &control_wait, &lifecycle, &listener, lane);
@@ -172,7 +173,7 @@ fn run_thread(
                     source: Arc::new(BridgeError::Io(e)),
                 },
             );
-            drain_with_errors(&channels, &mut owed);
+            drain_with_errors(&channels, &mut state);
             drop_controls(&channels);
             return;
         }
@@ -185,7 +186,7 @@ fn run_thread(
         &listener,
         Lane {
             stream: audio,
-            owed,
+            state,
         },
     );
     // The control lane's thread ends on the same condition, rung awake by
@@ -216,7 +217,7 @@ fn connect_lanes(socket_path: &Path) -> Result<(ControlStream, ControlStream), P
     }))?;
     let mut control = connect()?;
     expect_ready(ipc::recv::<ControlFrame>(&mut control).map(|f| match f {
-        ControlFrame::Reply(ControlReply::Ready { protocol_version }) => Ok(protocol_version),
+        ControlFrame::Ready { protocol_version } => Ok(protocol_version),
         other => Err(format!("{other:?}")),
     }))?;
     Ok((audio, control))
@@ -234,7 +235,7 @@ fn audio_loop(
     payloads: &PayloadPool,
     lifecycle: &Lifecycle,
     listener: &ListenerSlot,
-    mut lane: Lane<AudioOwed>,
+    mut lane: Lane<AudioState>,
 ) {
     let mut failed = false;
     while live(lifecycle) {
@@ -284,9 +285,9 @@ fn audio_loop(
         // and queued block, not just one. `None` matches whichever request the
         // audio thread is waiting on. The control lane saw the end when it was
         // not this lane that did: it rang this thread, and this thread answers.
-        lane.owed
+        lane.state
             .respond(channels, AudioResponse::Error { seq: None });
-        drain_with_errors(channels, &mut lane.owed);
+        drain_with_errors(channels, &mut lane.state);
     }
     notify_external_crash(lifecycle, listener);
 }
@@ -307,7 +308,7 @@ fn control_loop(
     wait: &ControlWait,
     lifecycle: &Lifecycle,
     listener: &ListenerSlot,
-    mut lane: Lane<Owed>,
+    mut lane: Lane<ControlState>,
 ) {
     // Unsolicited events read while a request waited for its reply. One
     // buffer for the connection, handed to the listener after each turn.
@@ -394,9 +395,9 @@ fn control_loop(
 /// itself, and the host's wait for the process's end (the guard's) is the
 /// grace. Best effort: a server that cannot be written to is gone or hung, and
 /// the guard kills it at the end of the grace.
-fn say_shutdown(lifecycle: &Lifecycle, lane: &mut Lane<Owed>) {
+fn say_shutdown(lifecycle: &Lifecycle, lane: &mut Lane<ControlState>) {
     if !lifecycle.is_running() && lifecycle.crash_cause().is_none() {
-        let _ = ipc::send(&mut lane.stream, &ControlRequest::Shutdown);
+        let _ = tell(&mut lane.stream, &mut lane.state, ControlRequest::Shutdown);
     }
 }
 
@@ -487,12 +488,12 @@ fn drain_unsolicited(inbox: &mut Unsolicited, channels: &Channels, listener: &Li
 /// Answer every queued block-lane command with an error. A queued chunk is
 /// never sent, so its MIDI is counted dropped; nothing can splice past it, as
 /// the server is gone.
-fn drain_with_errors(channels: &Channels, owed: &mut AudioOwed) {
+fn drain_with_errors(channels: &Channels, state: &mut AudioState) {
     while let Some(cmd) = channels.pop_block() {
         if let AudioCommand::Process(payload) = &cmd {
             channels.note_dropped_midi(payload.midi_events.len() as u64);
         }
-        owed.respond(channels, AudioResponse::Error { seq: None });
+        state.respond(channels, AudioResponse::Error { seq: None });
     }
 }
 
@@ -524,7 +525,7 @@ mod tests {
         let channels = Channels::new(SampleRate::SR_48K, Arc::default())
             .expect("the channels")
             .0;
-        let mut owed = AudioOwed::new(
+        let mut state = AudioState::new(
             tutti_plugin_types::Timeouts::default().drain,
             response_ring().0,
         );
@@ -538,7 +539,7 @@ mod tests {
             }
             assert!(channels.push_block(AudioCommand::Process(payload)));
         }
-        drain_with_errors(&channels, &mut owed);
+        drain_with_errors(&channels, &mut state);
         assert!(channels.pop_block().is_none());
         assert_eq!(channels.dropped_midi_cell().get(), 5);
     }
