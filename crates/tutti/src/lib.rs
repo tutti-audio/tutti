@@ -499,8 +499,8 @@ pub mod session {
     };
     #[cfg(feature = "record")]
     pub use tutti_session::{
-        DitherSink, FinalizeError, Finite, IDLE_PARK, Live, PumpLoop, PumpPass, Recorder,
-        RecorderError,
+        DitherSink, FinalizeError, Finite, IDLE_PARK, Live, NoiseShaping, PumpLoop, PumpPass,
+        Recorder, RecorderError,
     };
     #[cfg(feature = "plugin")]
     pub use tutti_session::{
