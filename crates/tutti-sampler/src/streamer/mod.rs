@@ -28,6 +28,7 @@ mod metrics;
 mod open;
 mod prefetch;
 mod record;
+mod reply;
 mod status;
 mod step;
 mod stream;
@@ -332,7 +333,7 @@ impl<D, F: RingFloat> DiskStreamer<D, F> {
         width: Option<tutti_buffers::ChannelLayout>,
     ) -> PendingOpen<F> {
         let id = StreamId::mint(&self.next_stream);
-        let (reply, answer) = crossbeam_channel::bounded(1);
+        let (reply, answer) = reply::reply();
         // A refused send drops the command and with it `reply`, which is how
         // a gone streamer reaches the caller: the answer is disconnected.
         let _ = self.streamer_tx.send(StreamerCommand::Open {

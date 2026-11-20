@@ -2,7 +2,6 @@
 
 use std::sync::Arc;
 
-use crossbeam_channel::Sender;
 use tutti_buffers::Wave;
 use tutti_platform::Asset;
 
@@ -10,6 +9,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_rt::RingFloat;
 
 use super::open::Opened;
+use super::reply::ReplySender;
 use crate::OpenError;
 
 tutti_rt::id! {
@@ -24,7 +24,7 @@ tutti_rt::id! {
 
 /// Where the streamer answers an open: one cell, written once by the streamer
 /// and read once by [`PendingOpen::poll`](crate::PendingOpen::poll).
-pub(crate) type Reply<F> = Sender<Result<Opened<F>, OpenError>>;
+pub(crate) type Reply<F> = ReplySender<Result<Opened<F>, OpenError>>;
 
 /// What the decode thread made of a file: the whole wave, or why there is none.
 pub(crate) struct Decoded<F: RingFloat>(pub(crate) Result<Arc<Wave<F>>, OpenError>);
