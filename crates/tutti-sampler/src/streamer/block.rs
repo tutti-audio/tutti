@@ -12,10 +12,11 @@ use std::ops::Range;
 use tutti_rt::{Loan, PosClaim, PosFrame, PosReader, Reader};
 use tutti_units::Samples;
 
-use tutti_rt::Bell;
 use super::io::refill::{Refill, needs_refill};
 use super::loops::RingControl;
 use crate::{Direction, Loop};
+use std::sync::Arc;
+use tutti_rt::Bell;
 use tutti_rt::RingFloat;
 
 /// The audio side's two handles on a ring: its position reader and the
@@ -34,7 +35,7 @@ pub(crate) struct RingReader<F: RingFloat> {
 /// What a reader needs to ask the streamer for a refill.
 #[derive(Debug)]
 struct Wake {
-    bell: Bell,
+    bell: Arc<Bell>,
     frames: usize,
 }
 
@@ -49,7 +50,7 @@ impl<F: RingFloat> RingReader<F> {
 
     /// This reader, ringing `bell` when a block finds its ring of `frames`
     /// slots wanting the streamer ([`needs_refill`]).
-    pub(crate) fn ringing(mut self, bell: Bell, frames: usize) -> Self {
+    pub(crate) fn ringing(mut self, bell: Arc<Bell>, frames: usize) -> Self {
         self.wake = Some(Wake { bell, frames });
         self
     }

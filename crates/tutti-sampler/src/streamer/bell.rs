@@ -18,6 +18,8 @@
 //! resolves again at once. Nothing times out: a cell that goes quiet gets its
 //! `reclaim()` on the control side's own tick.
 
+use std::sync::Arc;
+
 use crossbeam_channel::{SendError, Sender};
 use tutti_rt::{Bell, RingFloat};
 
@@ -31,12 +33,15 @@ use super::command::StreamerCommand;
 #[derive(Clone)]
 pub(crate) struct StreamerSender<F: RingFloat> {
     tx: Sender<StreamerCommand<F>>,
-    bell: Bell,
+    bell: Arc<Bell>,
 }
 
 impl<F: RingFloat> StreamerSender<F> {
     pub(crate) fn new(tx: Sender<StreamerCommand<F>>, bell: Bell) -> Self {
-        Self { tx, bell }
+        Self {
+            tx,
+            bell: Arc::new(bell),
+        }
     }
 
     /// Queues `cmd` and rings the bell, waiting while the queue is full.

@@ -38,7 +38,7 @@ pub(super) async fn yield_now() {
 /// The streamer's body: wait for a ring, step until the rings are filled, and end
 /// when `stop` is raised.
 ///
-/// Each ring is followed by `step_until_idle(fill_steps())`: the cycles that fill
+/// Each ring is followed by `step_until_idle`: the cycles that fill
 /// every open ring once from empty. A cycle still [`Busy`](StepOutcome::Busy) after
 /// them yields and goes on. No wake is lost: a ring that lands during a cycle is
 /// kept by the bell, so the next wait resolves at once.
@@ -52,8 +52,7 @@ pub(super) async fn streamer_future<F: RingFloat>(
     loop {
         listener.rung().await;
         while !stop.load(Ordering::Acquire) {
-            let budget = cycle.fill_steps();
-            let outcome = cycle.step_until_idle(&shared, || queue.try_recv().ok(), budget);
+            let outcome = cycle.step_until_idle(&shared, || queue.try_recv().ok());
             if outcome != StepOutcome::Busy {
                 break;
             }

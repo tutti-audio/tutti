@@ -3,12 +3,12 @@
 //! The streamer's work is a loop over one step after its commands: refill the
 //! rings (following each reader to where it plays). It is not asynchronous: it
 //! walks the stream table, decodes from a file, and writes into a ring. What
-//! the thread adds is only the sleeping between cycles, on the
-//! [`Bell`](super::bell::Bell). (What a *command* does to the table is the pure
+//! future adds is only the waiting between cycles, on its bell
+//! ([`bell`](super::bell)). (What a *command* does to the table is the pure
 //! [`step`](super::record::step), not this.)
 //!
 //! This module is that work with the sleeping removed. [`StreamerCycle::step`]
-//! drains the command queue, runs the refill, and reports what the loop should
+//! drains the command queue, polls the whole-file decodes, runs the refill, and reports what the loop should
 //! do next as a [`StepOutcome`]. The loop in [`loop_body`](super::loop_body) is
 //! then the sleeping layer and nothing else.
 //!
@@ -98,17 +98,17 @@ impl<F: RingFloat> StreamerCycle<F> {
         }
     }
 
-    /// Cycles until one reports anything but [`Busy`](StepOutcome::Busy), at most `budget`
-    /// of them; the last outcome. The first cycle runs alone, so a command that
-    /// opens a ring is applied before `budget` is spent on it.
+    /// Cycles until one reports anything but [`Busy`](StepOutcome::Busy), at most
+    /// [`fill_steps`](Self::fill_steps) more after the first; the last outcome. The
+    /// first cycle runs alone, so a command that opens a ring is applied before the
+    /// budget is counted: it covers the ring that open made.
     pub(crate) fn step_until_idle(
         &mut self,
         shared: &Handles<F>,
         mut drain: impl FnMut() -> Option<StreamerCommand<F>>,
-        budget: usize,
     ) -> StepOutcome {
         let mut outcome = self.step(shared, &mut drain);
-        for _ in 1..budget {
+        for _ in 0..self.fill_steps() {
             if outcome != StepOutcome::Busy {
                 break;
             }

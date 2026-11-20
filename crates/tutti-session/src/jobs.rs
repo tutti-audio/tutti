@@ -30,11 +30,14 @@
 use std::any::Any;
 use std::collections::{HashMap, VecDeque};
 use std::fmt;
+use std::future::Future;
 use std::marker::PhantomData;
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
+use std::task::{Context, Poll};
 use std::time::Duration;
 
 use tutti_platform::Executor;
@@ -95,6 +98,32 @@ pub(crate) struct Landings<M> {
     id: Slot,
     closed: Arc<AtomicBool>,
     _message: PhantomData<fn(M)>,
+}
+
+impl<M> Clone for Landings<M> {
+    fn clone(&self) -> Self {
+        Self {
+            tx: self.tx.clone(),
+            id: self.id,
+            closed: Arc::clone(&self.closed),
+            _message: PhantomData,
+        }
+    }
+}
+
+/// A future whose panic is its output: what a job's body is polled as.
+struct Contained<F>(Pin<Box<F>>);
+
+impl<F: Future> Future for Contained<F> {
+    type Output = Result<F::Output, Box<dyn Any + Send>>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        match catch_unwind(AssertUnwindSafe(|| self.0.as_mut().poll(cx))) {
+            Ok(Poll::Pending) => Poll::Pending,
+            Ok(Poll::Ready(output)) => Poll::Ready(Ok(output)),
+            Err(payload) => Poll::Ready(Err(payload)),
+        }
+    }
 }
 
 impl<M: Send + 'static> Landings<M> {
@@ -472,8 +501,8 @@ impl Jobs {
     /// [`submit`](Self::submit) for work that blocks (a plugin's round trip): a threaded
     /// executor gives it a thread named `name`, so the pool never waits behind it.
     #[cfg_attr(
-        not(any(feature = "plugin", feature = "sampler")),
-        expect(dead_code, reason = "the plugin and stream jobs are its users")
+        not(feature = "plugin"),
+        expect(dead_code, reason = "the plugin jobs (feature `plugin`) are its users")
     )]
     pub(crate) fn submit_blocking<R, W, L>(&mut self, name: &str, work: W, land: L)
     where
@@ -532,11 +561,53 @@ impl Jobs {
         self.start_stream(Place::Dedicated(name), work, land);
     }
 
-    fn start_stream<M, R, W, L>(&mut self, place: Place<'_>, work: W, mut land: L)
+    fn start_stream<M, R, W, L>(&mut self, place: Place<'_>, work: W, land: L)
     where
         M: Send + 'static,
         R: Send + 'static,
         W: FnOnce(&Landings<M>) -> R + Send + 'static,
+        L: FnMut(&mut dyn JobSession, Stream<M, R>, &mut Vec<SessionEvent>) + Send + 'static,
+    {
+        self.start(place, move |landings| async move { work(&landings) }, land);
+    }
+
+    /// Runs `future` on the executor as a job whose work awaits (a reply, say), and
+    /// lands its result like [`submit`](Self::submit). The future must not block.
+    #[cfg_attr(
+        not(feature = "sampler"),
+        expect(dead_code, reason = "the stream open (feature `sampler`) is its user")
+    )]
+    pub(crate) fn submit_future<R, Fut, L>(&mut self, future: Fut, land: L)
+    where
+        R: Send + 'static,
+        Fut: Future<Output = R> + Send + 'static,
+        L: FnOnce(&mut dyn JobSession, Result<R, WorkerError>, &mut Vec<SessionEvent>)
+            + Send
+            + 'static,
+    {
+        let mut land = Some(land);
+        self.start(
+            Place::Pool,
+            move |_: Landings<std::convert::Infallible>| future,
+            move |session, landed, events| {
+                let end = match landed {
+                    Stream::Message(never) => match never {},
+                    Stream::Done(result) => Ok(result),
+                    Stream::Failed(failed) => Err(failed),
+                };
+                if let Some(land) = land.take() {
+                    land(session, end, events);
+                }
+            },
+        );
+    }
+
+    fn start<M, R, F, W, L>(&mut self, place: Place<'_>, make: W, mut land: L)
+    where
+        M: Send + 'static,
+        R: Send + 'static,
+        F: Future<Output = R> + Send + 'static,
+        W: FnOnce(Landings<M>) -> F,
         L: FnMut(&mut dyn JobSession, Stream<M, R>, &mut Vec<SessionEvent>) + Send + 'static,
     {
         let id = Slot(self.next.mint().get());
@@ -566,8 +637,10 @@ impl Jobs {
         let mut unfinished = Unfinished {
             end: Some((self.tx.clone(), id)),
         };
+        let body = make(landings.clone());
         let future = Box::pin(async move {
-            let end = catch_unwind(AssertUnwindSafe(|| work(&landings)))
+            let end = Contained(Box::pin(body))
+                .await
                 .map(|result| Box::new(result) as Box<dyn Any + Send>)
                 .map_err(|payload| WorkerError::Panicked {
                     message: panic_message(payload.as_ref()),

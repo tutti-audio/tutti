@@ -112,30 +112,23 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
         let opening = streamer.open(asset, place);
         let id = SamplerLoad::mint(&self.sampler.opens);
         let landed = Arc::clone(&self.sampler.streams);
-        // blocks: `PendingOpen::wait` parks on the streamer's reply, with no deadline: on a
-        // polled executor it stalls `update` for good, since the streamer runs in the same poll.
-        // The streamer lane makes it await the reply.
-        self.jobs.submit_blocking(
-            "tutti-open",
-            move || opening.wait(),
-            move |_, done, events| {
-                let event = match done {
-                    Ok(Ok(opened)) => {
-                        landed.lock_recover().insert(id, opened);
-                        SamplerEvent::Opened { id }
-                    }
-                    Ok(Err(error)) => SamplerEvent::OpenFailed {
-                        id,
-                        error: error.into(),
-                    },
-                    Err(failed) => SamplerEvent::OpenFailed {
-                        id,
-                        error: failed.into(),
-                    },
-                };
-                events.push(event.into());
-            },
-        );
+        self.jobs.submit_future(opening, move |_, done, events| {
+            let event = match done {
+                Ok(Ok(opened)) => {
+                    landed.lock_recover().insert(id, opened);
+                    SamplerEvent::Opened { id }
+                }
+                Ok(Err(error)) => SamplerEvent::OpenFailed {
+                    id,
+                    error: error.into(),
+                },
+                Err(failed) => SamplerEvent::OpenFailed {
+                    id,
+                    error: failed.into(),
+                },
+            };
+            events.push(event.into());
+        });
         Ok(id)
     }
 

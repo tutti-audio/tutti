@@ -8,8 +8,8 @@ use crate::VoiceWindow;
 use crate::testing::loop_frames;
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 use tutti_platform::Instant;
 
@@ -62,11 +62,19 @@ fn cut_flac(dir: &Path) -> PathBuf {
     path
 }
 
+/// A streamer future with what keeps it going: its bells, whose tick thread wakes the
+/// task, and the executor whose thread runs it (a dropped executor ends the future).
+struct Threaded {
+    streamer: DiskStreamer<Running, f32>,
+    _bells: tutti_rt::Bells,
+    _executor: tutti_platform::Executor,
+}
+
 /// The two drivers, so one case runs on both.
 enum Driver {
     Hand(Box<DiskStreamer<Manual<f32>, f32>>),
     /// Its bells, which wake the future's task, live as long as it does.
-    Threaded(DiskStreamer<Running, f32>, tutti_rt::Bells),
+    Threaded(Box<Threaded>),
 }
 
 impl Driver {
@@ -78,7 +86,11 @@ impl Driver {
             let executor = tutti_platform::Executor::threaded();
             let streamer = DiskStreamer::build(rate, config, seams, &executor, &bells)
                 .expect("the future starts");
-            Self::Threaded(streamer, bells)
+            Self::Threaded(Box::new(Threaded {
+                streamer,
+                _bells: bells,
+                _executor: executor,
+            }))
         } else {
             Self::Hand(Box::new(
                 DiskStreamer::<Manual<f32>, f32>::manual_with(rate, config, seams).expect("builds"),
@@ -93,9 +105,8 @@ impl Driver {
                 let opening = s.open(path, Placement::HEAD);
                 wait_for_open(s.as_mut(), opening).expect("the file opens")
             }
-            Self::Threaded(s, _) => {
-                wait_for_open_threaded(s.open(path, Placement::HEAD)).expect("the file opens")
-            }
+            Self::Threaded(t) => wait_for_open_threaded(t.streamer.open(path, Placement::HEAD))
+                .expect("the file opens"),
         };
         self.until("the stream to be primed", || {
             opened.0.status().phase != StreamPhase::Opening
@@ -117,41 +128,6 @@ impl Driver {
             }
             std::thread::sleep(Duration::from_millis(1));
         }
-    }
-}
-
-#[derive(Clone)]
-struct Gate(Arc<(Mutex<bool>, Condvar)>);
-
-impl Gate {
-    fn closed() -> Self {
-        Self(Arc::new((Mutex::new(false), Condvar::new())))
-    }
-
-    /// The hook that waits at the gate.
-    fn hook(&self) -> super::decode::DecodeHook {
-        let gate = Arc::clone(&self.0);
-        Arc::new(move |_path| {
-            let (open, bell) = &*gate;
-            let mut open = open.lock().unwrap();
-            while !*open {
-                open = bell.wait(open).unwrap();
-            }
-        })
-    }
-
-    fn open(&self) {
-        *self.0.0.lock().unwrap() = true;
-        self.0.1.notify_all();
-    }
-}
-
-/// Releases the gate however the test ends, so a failure does not leave a
-/// streamer thread waiting for good. A test holds a clone declared after its
-/// streamer, so the gate opens before the streamer's drop joins its thread.
-impl Drop for Gate {
-    fn drop(&mut self) {
-        self.open();
     }
 }
 
@@ -493,10 +469,10 @@ fn a_decode_in_flight_does_not_stop_another_stream() {
         reader.ring.window().1 > before,
         "the other stream was not refilled while the decode ran"
     );
-    assert!(
-        matches!(opening.poll(), Open::Pending(_)),
-        "the decode is still running"
-    );
+    let opening = match opening.poll() {
+        Open::Pending(again) => again,
+        other => panic!("the decode is still running, yet the open answered: {other:?}"),
+    };
     let _ = sampler.step_until_idle(10_000);
     assert!(
         matches!(opening.poll(), Open::Ready(..)),

@@ -11,18 +11,12 @@ use tutti_platform::Executor;
 
 type Held = Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
 
-/// Polls `future` once and panics if it is not done: a session's job is a closure
-/// in an `async` block, so it completes in one poll.
-///
-/// # Panics
-///
-/// If the future is still pending after its poll.
+/// Polls `future` once. A session's job is a closure in an `async` block, so it
+/// completes in that poll; a future still pending after it (a streamer awaiting
+/// its bell) is dropped, since nothing here wakes it.
 pub fn run_future(mut future: Pin<Box<dyn Future<Output = ()> + Send + 'static>>) {
     let mut cx = Context::from_waker(Waker::noop());
-    assert!(
-        future.as_mut().poll(&mut cx).is_ready(),
-        "a held job awaits something: it should be one closure's poll"
-    );
+    let _ = future.as_mut().poll(&mut cx);
 }
 
 /// A future a [`HeldFutures`] took out of its queue: run it, or drop it unrun.
@@ -30,11 +24,7 @@ pub fn run_future(mut future: Pin<Box<dyn Future<Output = ()> + Send + 'static>>
 pub struct HeldFuture(Held);
 
 impl HeldFuture {
-    /// Polls the future to its end.
-    ///
-    /// # Panics
-    ///
-    /// If it is still pending after one poll.
+    /// Polls the future once, as [`run_future`] does.
     pub fn run(self) {
         run_future(self.0);
     }
@@ -105,12 +95,9 @@ impl HeldFutures {
             .collect()
     }
 
-    /// Takes every waiting future, oldest first, and polls each to its end. Returns how
-    /// many ran. A future that spawns another leaves it for the next call.
-    ///
-    /// # Panics
-    ///
-    /// If a future is still pending after its poll.
+    /// Takes every waiting future, oldest first, and polls each once, as
+    /// [`run_future`] does. Returns how many were taken. A future that spawns another
+    /// leaves it for the next call.
     pub fn run_all(&self) -> usize {
         let futures = self.take();
         let count = futures.len();

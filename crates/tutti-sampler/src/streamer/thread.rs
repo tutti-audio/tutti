@@ -287,7 +287,8 @@ mod tests {
         let bells = Bells::new().expect("a tick thread");
         let built = built(8, &bells);
         let tx = built.command_sender();
-        let streamer = built.start(&Executor::threaded()).expect("the future starts");
+        let executor = Executor::threaded();
+        let streamer = built.start(&executor).expect("the future starts");
 
         for stream in [StreamId::of(90), StreamId::of(91)] {
             tx.try_send(StreamerCommand::Close { stream })
@@ -307,7 +308,8 @@ mod tests {
         let bells = Bells::new().expect("a tick thread");
         let built = built(8, &bells);
         let tx = built.command_sender();
-        let streamer = built.start(&Executor::threaded()).expect("the future starts");
+        let executor = Executor::threaded();
+        let streamer = built.start(&executor).expect("the future starts");
         drop(streamer);
         // Probed without waiting, so a queue that never disconnects fails
         // at the bound rather than filling and blocking the probe.

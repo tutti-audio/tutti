@@ -335,6 +335,12 @@ pub(super) const ALLOW: &[Allow] = &[
     ),
     ty(
         "crates/tutti-codec/",
+        "WaveDecode::open",
+        CTOR,
+        "opening a file for a stepped decode: the failure is the file's, not a value's",
+    ),
+    ty(
+        "crates/tutti-codec/",
         "FileIn::open",
         CTOR,
         "opening a file for decoding: the failure is the file's, not a value's",
@@ -487,13 +493,13 @@ pub(super) const ALLOW: &[Allow] = &[
         "crates/tutti-sampler/",
         "DiskStreamer::start",
         CTOR,
-        "starting the streamer thread: the failure is the OS's, not a value's",
+        "spawning the streamer future: the failure is the executor's (the OS refusing a thread), not a value's",
     ),
     ty(
         "crates/tutti-sampler/",
         "DiskStreamer::manual",
         CTOR,
-        "the hand-stepped streamer: the OS can refuse its worker",
+        "the hand-stepped streamer: the OS can refuse its bell's tick thread",
     ),
     ty(
         "crates/tutti-plugin-types/",

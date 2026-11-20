@@ -1,6 +1,6 @@
 //! Asynchronous disk I/O for audio file streaming.
 //!
-//! A background "streamer" thread decodes from disk into one position-indexed
+//! A background "streamer" future decodes from disk into one position-indexed
 //! ring per stream, which the stream's voice reads on the audio thread (it
 //! never pops: a position, not an order, is what it reads). Nothing here blocks
 //! or allocates on the audio thread — the split is what makes the streaming
@@ -78,25 +78,26 @@ use crate::error::Result;
 use decode::Seams;
 use handlers::Handles;
 use thread::Built;
+use tutti_platform::Asset;
 use tutti_platform::Executor;
 use tutti_rt::Bells;
-use tutti_platform::Asset;
 use tutti_rt::Mint;
 use tutti_rt::RingFloat;
 use tutti_units::SampleRate;
 
-/// The disk-streaming engine: owns the streamer thread that reads files into
-/// per-stream rings for [`DiskVoice`](crate::DiskVoice)s to play.
+/// The disk-streaming engine: owns the streamer future, run by an
+/// [`Executor`], that reads files into per-stream rings for
+/// [`DiskVoice`](crate::DiskVoice)s to play.
 ///
 /// A host builds one at startup with [`start`](Self::start) and holds it for the
-/// lifetime of the audio engine; dropping it stops the streamer thread. A
+/// lifetime of the audio engine; dropping it asks the streamer future to end. A
 /// stream is opened with [`open`](Self::open), whose reply is the stream's
 /// control-side [`Stream`] and the [`StreamReader`] a
 /// [`DiskVoice`](crate::DiskVoice) is built from; [`sample_rate`](Self::sample_rate)
 /// is the session rate it streams at.
 ///
 /// Its type says how it is driven: [`DiskStreamer<Running, f32>`](Running) (the
-/// default, from `new`) on a thread of its own, or, with the `testing`
+/// default, from `start`) as a future on an executor, or, with the `testing`
 /// feature, `DiskStreamer<Manual<f32>, f32>` from `manual`,
 /// stepped by the caller.
 ///
@@ -113,10 +114,18 @@ use tutti_units::SampleRate;
 /// use tutti_sampler::{DiskStreamer, DiskVoice, Open, Placement, Running, VoiceWindow};
 ///
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-/// let streamer = DiskStreamer::<Running, f32>::start(tutti_units::SampleRate::SR_48K, Default::default())?;
+/// let executor = tutti_platform::Executor::threaded();
+/// let bells = tutti_rt::Bells::new()?;
+/// let streamer = DiskStreamer::<Running, f32>::start(
+///     tutti_units::SampleRate::SR_48K,
+///     Default::default(),
+///     &executor,
+///     &bells,
+/// )?;
 ///
-/// // The streamer opens the file on its own thread; the reply is polled, and
-/// // a poll that is not ready hands the `PendingOpen` back.
+/// // The streamer opens the file on its own; the reply is polled, and
+/// // a poll that is not ready hands the `PendingOpen` back (awaiting it is the
+/// // other way to wait).
 /// let mut opening = streamer.open("take_1.wav", Placement::HEAD);
 /// let (stream, reader) = loop {
 ///     match opening.poll() {
@@ -137,12 +146,18 @@ use tutti_units::SampleRate;
 /// # }
 /// ```
 ///
-/// A streamer on its own thread cannot be stepped by hand: the method belongs
+/// A streamer on an executor cannot be stepped by hand: the method belongs
 /// to the other state, so this does not compile.
 ///
 /// ```compile_fail
 /// # fn run() -> tutti_sampler::Result<()> {
-/// let mut streamer = tutti_sampler::DiskStreamer::<tutti_sampler::Running, f32>::start(tutti_units::SampleRate::SR_48K, Default::default())?;
+/// let (executor, bells) = (tutti_platform::Executor::threaded(), tutti_rt::Bells::new()?);
+/// let mut streamer = tutti_sampler::DiskStreamer::<tutti_sampler::Running, f32>::start(
+///     tutti_units::SampleRate::SR_48K,
+///     Default::default(),
+///     &executor,
+///     &bells,
+/// )?;
 /// streamer.step(); // only a `DiskStreamer<Manual<f32>, f32>` steps
 /// # Ok(())
 /// # }
@@ -160,14 +175,14 @@ use tutti_units::SampleRate;
 pub struct DiskStreamer<D, F: RingFloat> {
     streamer_tx: StreamerSender<F>,
     shared: Handles<F>,
-    /// The driver: the thread, which only its drop uses, or the caller's
+    /// The driver: the future's stop handle, which only its drop uses, or the caller's
     /// cycle.
     driver: D,
     /// The next stream's identity, minted here on the control side.
     next_stream: Mint,
 }
 
-// The driver holds a thread handle or a cycle that can't derive `Debug`; print
+// The driver holds a stop handle or a cycle that can't derive `Debug`; print
 // the sample rate and note the live streamer.
 impl<D, F: RingFloat> std::fmt::Debug for DiskStreamer<D, F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -201,7 +216,13 @@ impl<F: RingFloat> DiskStreamer<Running, F> {
         executor: &Executor,
         bells: &Bells,
     ) -> Result<Self> {
-        Self::build(sample_rate.into(), config, Seams::default(), executor, bells)
+        Self::build(
+            sample_rate.into(),
+            config,
+            Seams::default(),
+            executor,
+            bells,
+        )
     }
 
     /// [`start`](Self::start) with what a test replaces: the hooks where a file is
@@ -241,11 +262,11 @@ impl<F: RingFloat> DiskStreamer<Running, F> {
 
 #[cfg(any(test, feature = "testing"))]
 impl<F: RingFloat> DiskStreamer<Manual<F>, F> {
-    /// Creates the streaming engine without spawning the streamer thread;
+    /// Creates the streaming engine without spawning the streamer future;
     /// cycles are then run by hand with `step`.
     /// Requires the `testing` feature.
     ///
-    /// The step is the same one the thread runs, so this is the shipped path
+    /// The step is the same one the future runs, so this is the shipped path
     /// with its sleeping removed rather than a parallel implementation. What it
     /// buys is a streamer whose progress is *counted* instead of waited for: a
     /// test can say "after this many cycles the ring holds audio", where the

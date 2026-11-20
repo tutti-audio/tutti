@@ -140,7 +140,7 @@ pub(crate) struct Opened<F: RingFloat> {
     pub(crate) place: Place<F>,
     pub(crate) width: ChannelLayout,
     /// What the reader rings when its ring wants the streamer.
-    pub(crate) bell: tutti_rt::Bell,
+    pub(crate) bell: Arc<tutti_rt::Bell>,
 }
 
 impl<F: RingFloat> std::fmt::Debug for Opened<F> {

@@ -27,11 +27,11 @@
 
 use std::any::Any;
 use std::future::Future;
-use std::pin::Pin;
-use std::task::{Context, Waker};
-#[cfg(codec)]
+#[cfg(any(test, codec))]
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::pin::Pin;
 use std::sync::{Arc, Mutex};
+use std::task::{Context, Waker};
 
 use crossbeam_channel::TrySendError;
 use tutti_buffers::Wave;
@@ -118,21 +118,23 @@ impl<F: RingFloat> DecodeLane<F> {
         let chunk = DECODE_CHUNK;
         self.active_mut().push(Box::pin(async move {
             #[cfg(test)]
-            if let Some(hook) = &decode_hook {
-                hook(&asset);
-            }
+            let wave = decode_whole(&cache, &metrics, &asset, chunk, decode_hook.as_ref()).await;
+            #[cfg(not(test))]
             let wave = decode_whole(&cache, &metrics, &asset, chunk).await;
             send_decoded(&reports, id, wave).await;
         }));
     }
 
-    /// Polls every decode once, which reads one chunk of each; whether any is still
-    /// running. The streamer polls again after yielding, so the waker is not used.
+    /// Polls every decode once, which reads one chunk of each; whether any ran: one
+    /// that is still running, or one that ended and sent its answer, which the next
+    /// cycle's drain applies. The streamer polls again after yielding, so the waker
+    /// is not used.
     pub(super) fn poll(&mut self) -> bool {
         let mut cx = Context::from_waker(Waker::noop());
         let active = self.active_mut();
+        let before = active.len();
         active.retain_mut(|decode| decode.as_mut().poll(&mut cx).is_pending());
-        !active.is_empty()
+        before > 0
     }
 
     fn active_mut(&mut self) -> &mut Vec<Decode> {
@@ -149,8 +151,21 @@ async fn decode_whole<F: RingFloat>(
     metrics: &Metrics,
     asset: &Asset,
     chunk: Samples,
+    #[cfg(test)] hook: Option<&DecodeHook>,
 ) -> Result<Arc<Wave<F>>, OpenError> {
-    match load_wave(cache, metrics, asset, chunk).await {
+    #[cfg(test)]
+    let hooked = catch_unwind(AssertUnwindSafe(|| {
+        if let Some(hook) = hook {
+            hook(asset);
+        }
+    }));
+    #[cfg(not(test))]
+    let hooked: Result<(), Box<dyn Any + Send>> = Ok(());
+    let loaded = match hooked {
+        Ok(()) => load_wave(cache, metrics, asset, chunk).await,
+        Err(payload) => Err(payload),
+    };
+    match loaded {
         Ok(Some(wave)) => Ok(wave),
         Ok(None) => Err(unreadable(asset)),
         Err(payload) => {

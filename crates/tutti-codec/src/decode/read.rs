@@ -500,8 +500,7 @@ impl<S: Sample> WaveDecode<S> {
                 Some(wave) => wave,
                 none => {
                     let spec = self.decoder.spec();
-                    let rate =
-                        SampleRate::from_hz(spec.rate()).ok_or(DecodeError::NoSampleRate)?;
+                    let rate = SampleRate::from_hz(spec.rate()).ok_or(DecodeError::NoSampleRate)?;
                     let (topology, placement) = topology_of(Some(spec.channels()));
                     none.insert(Wave::with_placement(topology, placement, rate))
                 }

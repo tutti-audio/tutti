@@ -992,6 +992,8 @@ impl<C: Clock> SessionBuilder<C> {
         let sampler = crate::session::parts::SamplerPart::new(
             streamer,
             parts.graph.prepared().sample_rate(),
+            &self.opts.executor,
+            &bells,
         )?;
         let (plugins, _early_work) = crate::session::parts::PluginPart::new(&self.opts.plugins);
         let table = parts.graph.value_table();

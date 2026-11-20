@@ -19,9 +19,9 @@ use super::command::{Decoded, Reply, StreamId, StreamerCommand};
 use super::config::BufferConfig;
 use super::control::StreamFile;
 use super::control_cell::ControlCell;
-use super::decode::{DecodeLane, panic_message};
 #[cfg(test)]
 use super::decode::Seams;
+use super::decode::{DecodeLane, panic_message};
 use super::loops::{LeadIn, Mapping, RingLoop, apply_mapping, buffer_size_for_file};
 use super::metrics::Metrics;
 use super::open::{OpenError, Opened};
@@ -459,8 +459,8 @@ fn build_stream<F: RingFloat>(
     let control = ring.control_cell();
     // The loop and direction the control side asks for: the record reads
     // them, the stream's handle (and the voice node, for a node) publishes.
-    let looping = ControlCell::ringing(None::<Loop>, shared.bell.clone());
-    let direction = ControlCell::ringing(Direction::Forward, shared.bell.clone());
+    let looping = ControlCell::ringing(None::<Loop>, Arc::new(shared.bell.clone()));
+    let direction = ControlCell::ringing(Direction::Forward, Arc::new(shared.bell.clone()));
     let record = Record::new(
         producer,
         Arc::clone(&cells),
@@ -485,7 +485,7 @@ fn build_stream<F: RingFloat>(
             direction,
             place,
             width,
-            bell: shared.bell.clone(),
+            bell: Arc::new(shared.bell.clone()),
         },
     ))
 }

@@ -19,7 +19,7 @@ use tutti_rt::Bell;
 pub struct ControlCell<T> {
     cell: Publisher<T>,
     /// The streamer to wake after a publish; `None` for a resident voice's.
-    bell: Option<Bell>,
+    bell: Option<Arc<Bell>>,
 }
 
 impl<T> ControlCell<T> {
@@ -34,7 +34,7 @@ impl<T> ControlCell<T> {
     }
 
     /// A cell holding `value` whose publishes wake the streamer `bell` rings.
-    pub(crate) fn ringing(value: T, bell: Bell) -> Self {
+    pub(crate) fn ringing(value: T, bell: Arc<Bell>) -> Self {
         Self {
             cell: Publisher::new(value),
             bell: Some(bell),
@@ -106,7 +106,7 @@ mod tests {
 
         let bells = tutti_rt::Bells::new().expect("a tick thread");
         let (bell, mut listener) = bells.bell();
-        let streamed = ControlCell::ringing(0u8, bell);
+        let streamed = ControlCell::ringing(0u8, Arc::new(bell));
         let resident = ControlCell::new(0u8);
         let mut cx = Context::from_waker(Waker::noop());
         resident.publish(1);
