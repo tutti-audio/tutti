@@ -16,6 +16,7 @@
 
 use crate::protocol::frame::{decode_body, decode_prefix, write_frame};
 use crate::{ControlRequest, Framed, ReqId, Request, SlabHandle, SlabLayout};
+use tutti_plugin_ipc_ffi::{Blob, Connection, Lease, Received};
 use tutti_plugin_types::{IpcError, IpcResult};
 
 use super::sys::Wakeup;
@@ -117,9 +118,55 @@ pub fn send_setup(
         slab: slab.wire(),
         layout,
     };
+    send_then(stream, id, body, |conn| slab.send(conn))
+}
+
+/// Writes the request `body`, which announces `blob` ([`Blob::wire`] is in it),
+/// and then the blob, as [`send_setup`] does a slab. The returned [`Lease`] is
+/// held until the server has answered.
+///
+/// # Errors
+///
+/// As [`send_setup`].
+pub fn send_blob(
+    stream: &mut ControlStream,
+    id: ReqId,
+    body: ControlRequest,
+    blob: Blob,
+) -> IpcResult<Lease> {
+    send_then(stream, id, body, |conn| blob.send(conn))
+}
+
+/// Writes `state` as the answer to request `id`: its `StateReady` frame and the
+/// object that follows it, for the mock servers of the tests that serve over
+/// this transport.
+///
+/// # Errors
+///
+/// The object cannot be made, or a write to the stream fails.
+#[cfg(feature = "testing")]
+pub fn send_state_reply(stream: &ControlStream, id: ReqId, state: &[u8]) -> IpcResult<()> {
+    let object = Blob::create(state)?;
+    let reply = crate::ControlReply::StateReady {
+        len: state.len() as u64,
+        blob: object.wire(),
+    };
+    write_frame(&mut &*stream, &crate::ControlFrame::Reply { id, reply })?;
+    let _lease = object
+        .send(super::sys::connection(stream))
+        .map_err(send_failed)?;
+    Ok(())
+}
+
+/// Writes request `body`, then what follows its frame on the stream.
+fn send_then<T>(
+    stream: &mut ControlStream,
+    id: ReqId,
+    body: ControlRequest,
+    then: impl FnOnce(Connection<'_>) -> std::io::Result<T>,
+) -> IpcResult<T> {
     send(stream, &Request { id, body })?;
-    slab.send(super::sys::connection(stream))
-        .map_err(send_failed)
+    then(super::sys::connection(stream)).map_err(send_failed)
 }
 
 /// How long the unbounded [`recv`] entry may wait for a whole frame.
@@ -304,6 +351,9 @@ pub struct PartialFrame {
     body_filled: usize,
     /// Whether the prefix is complete, so `body` is the live stage.
     have_len: bool,
+    /// The blob the last frame read announced, taken from the stream right after
+    /// it; replaced (and so closed) by the next frame read.
+    blob: Option<Received>,
 }
 
 impl PartialFrame {
@@ -315,6 +365,12 @@ impl PartialFrame {
     /// treat the connection as lost.
     pub fn in_progress(&self) -> bool {
         self.prefix_filled > 0 || self.have_len
+    }
+
+    /// The blob the last frame read announced, if it announced one and it has
+    /// not been taken.
+    pub fn take_blob(&mut self) -> Option<Received> {
+        self.blob.take()
     }
 
     /// Back to a frame boundary, once a frame is off the wire (whether or not
@@ -397,7 +453,15 @@ fn recv_by<T: Framed>(
     // boundary whether or not its *contents* decoded. Clearing only on success
     // would leave a decode failure looking like a half-read frame forever.
     partial.clear();
-    msg
+    partial.blob = None;
+    let msg: T = msg?;
+    // The blob a frame announces is the next message on the stream, read before
+    // any other read can reach it. A frame that announces none drops the last's.
+    partial.blob = match msg.blob() {
+        Some(wire) => Some(Blob::receive(super::sys::connection(stream), wire.clone())?),
+        None => None,
+    };
+    Ok(msg)
 }
 
 /// Blocking read with no caller-supplied bound, used for the handshake.
@@ -898,11 +962,9 @@ mod tests {
                     connect_within(&connect_path, Duration::from_millis(200)).expect("connect");
                 let chunk = crate::Request {
                     id: crate::ReqId::new(1),
-                    body: ControlRequest::LoadStateChunk {
-                        seq: 0,
-                        total: 1 << 20,
-                        last: None,
-                        bytes: vec![0u8; 1 << 20],
+                    body: ControlRequest::GetParameterValueFromText {
+                        param_id: tutti_units::ParamId::new(1),
+                        text: "x".repeat(1 << 20),
                     },
                 };
                 // Far more than any socket buffer holds: the peer reads nothing.

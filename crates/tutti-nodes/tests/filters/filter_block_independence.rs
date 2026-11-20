@@ -9,13 +9,16 @@
 
 // These tests pin the `f32` instantiation, the session's audio format, so their tolerances are `f32`'s.
 
+use tutti_buffers::BusTopology;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::Planes;
 use tutti_dsp::{SvfCoefficients, SvfModel};
 use tutti_graph::contract::{drive_input, prepared};
 use tutti_graph::{Env, Node, ParamNode, PlayClock, TransportChanges, TransportPosition};
 use tutti_nodes::{
-    CrossoverNode, EqBandNode, LadderFilterNode, LadderType, SvfControls, SvfFilterNode, SvfType,
+    CrossoverConfig, CrossoverControls, CrossoverNode, EqBandConfig, EqBandNode,
+    LadderFilterConfig, LadderFilterNode, LadderType, SvfControls, SvfFilterConfig, SvfFilterNode,
+    SvfType,
 };
 use tutti_units::{Db, Frame, Hz, Q, Resonance, SampleRate, Samples, UnitAddr, UnitParam};
 
@@ -113,14 +116,11 @@ fn blocks_of_any_length_render_alike_with_signals_and_moved_cells() {
                 ),
             ];
             render(
-                SvfFilterNode::<f32>::with_controls(
-                    ChannelLayout::STEREO,
-                    SvfControls {
-                        ty: SvfType::Bell,
-                        freq: Hz::new(1_000.0),
-                        q: Q::new(1.0),
-                        gain: Db::new(3.0),
-                    },
+                SvfFilterNode::<f32>::from(
+                    SvfFilterConfig::new(ChannelLayout::STEREO, SvfType::Bell)
+                        .freq(Hz::new(1_000.0))
+                        .q(Q::new(1.0))
+                        .gain(Db::new(3.0)),
                 ),
                 block,
                 &inputs,
@@ -133,11 +133,11 @@ fn blocks_of_any_length_render_alike_with_signals_and_moved_cells() {
         let inputs = inputs.clone();
         Box::new(move |block| {
             render(
-                EqBandNode::<f32>::new(
-                    SvfType::HighShelf,
-                    Hz::new(4_000.0),
-                    Q::new(0.8),
-                    Db::new(8.0),
+                EqBandNode::<f32>::from(
+                    EqBandConfig::new(SvfType::HighShelf)
+                        .freq(Hz::new(4_000.0))
+                        .q(Q::new(0.8))
+                        .gain(Db::new(8.0)),
                 ),
                 block,
                 &inputs[..1],
@@ -177,11 +177,10 @@ fn the_ladder_renders_alike_at_every_block_length_with_signals() {
                 ),
             ];
             render(
-                LadderFilterNode::<f32>::with_channels(
-                    ChannelLayout::STEREO,
-                    LadderType::LP24,
-                    Hz::new(1_000.0),
-                    Resonance::new(0.3),
+                LadderFilterNode::<f32>::from(
+                    LadderFilterConfig::new(ChannelLayout::STEREO, LadderType::LP24)
+                        .freq(Hz::new(1_000.0))
+                        .res(Resonance::new(0.3)),
                 ),
                 block,
                 &inputs,
@@ -194,10 +193,10 @@ fn the_ladder_renders_alike_at_every_block_length_with_signals() {
         let inputs = inputs.clone();
         Box::new(move |block| {
             render(
-                LadderFilterNode::<f32>::new(
-                    LadderType::HP12,
-                    Hz::new(2_000.0),
-                    Resonance::new(0.4),
+                LadderFilterNode::<f32>::from(
+                    LadderFilterConfig::new(ChannelLayout::MONO, LadderType::HP12)
+                        .freq(Hz::new(2_000.0))
+                        .res(Resonance::new(0.4)),
                 ),
                 block,
                 &inputs[..1],
@@ -227,8 +226,11 @@ fn a_drive_signal_step_is_in_the_render_within_one_segment() {
         let mut x = vec![0.0f32; 64];
         x[at] = 0.5;
         let signal = drive.map_or_else(|| step.clone(), |d| vec![d; 64]);
-        let node =
-            LadderFilterNode::<f32>::new(LadderType::HP24, Hz::new(1_500.0), Resonance::new(0.2));
+        let node = LadderFilterNode::<f32>::from(
+            LadderFilterConfig::new(ChannelLayout::MONO, LadderType::HP24)
+                .freq(Hz::new(1_500.0))
+                .res(Resonance::new(0.2)),
+        );
         let out = render(node, 64, &[x], &[None, None, Some(signal)], |_| {});
         f64::from(out[0][at])
     };
@@ -259,7 +261,11 @@ fn an_svf_cutoff_step_lands_on_the_grid_point_after_it() {
     let response = |at: usize| -> f32 {
         let mut x = vec![0.0f32; 64];
         x[at] = 1.0;
-        let node = SvfFilterNode::<f32>::new(SvfType::LowPass, Hz::new(old), Q::new(0.707));
+        let node = SvfFilterNode::<f32>::from(
+            SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
+                .freq(Hz::new(old))
+                .q(Q::new(0.707)),
+        );
         let out = render(node, 64, &[x], &[Some(step.clone()), None, None], |_| {});
         out[0][at]
     };
@@ -305,7 +311,11 @@ fn held_cells_render_alike_at_every_block_length() {
         let inputs = inputs.clone();
         Box::new(move |block| {
             render(
-                SvfFilterNode::<f32>::new(SvfType::LowPass, Hz::new(800.0), Q::new(1.2)),
+                SvfFilterNode::<f32>::from(
+                    SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
+                        .freq(Hz::new(800.0))
+                        .q(Q::new(1.2)),
+                ),
                 block,
                 &inputs,
                 &[None, None, None],
@@ -339,7 +349,11 @@ fn a_signal_step_is_in_the_render_within_one_segment() {
         x[at] = 1.0;
         let held = cutoff.map(|c| vec![c as f32; 64]);
         let signals = [Some(held.unwrap_or_else(|| signal.clone())), None, None];
-        let node = SvfFilterNode::<f32>::new(SvfType::LowPass, Hz::new(old), Q::new(0.707));
+        let node = SvfFilterNode::<f32>::from(
+            SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
+                .freq(Hz::new(old))
+                .q(Q::new(0.707)),
+        );
         let out = render(node, 64, &[x], &signals, |_| {});
         f64::from(out[0][at])
     };
@@ -365,10 +379,10 @@ fn the_crossover_renders_alike_at_every_block_length_with_signals() {
         Box::new(move |block| {
             let signals = [Some(sweep(200.0, 1_500.0)), Some(sweep(2_500.0, 9_000.0))];
             render(
-                CrossoverNode::<f32>::new(
-                    ChannelLayout::STEREO,
-                    &[Hz::new(300.0), Hz::new(3_000.0)],
-                )
+                CrossoverNode::<f32>::try_from(CrossoverConfig::new(
+                    BusTopology::STEREO,
+                    CrossoverControls::try_from(&[Hz::new(300.0), Hz::new(3_000.0)][..]).unwrap(),
+                ))
                 .unwrap(),
                 block,
                 &inputs,
@@ -381,10 +395,10 @@ fn the_crossover_renders_alike_at_every_block_length_with_signals() {
         let inputs = inputs.clone();
         Box::new(move |block| {
             render(
-                CrossoverNode::<f32>::new(
-                    ChannelLayout::STEREO,
-                    &[Hz::new(300.0), Hz::new(3_000.0)],
-                )
+                CrossoverNode::<f32>::try_from(CrossoverConfig::new(
+                    BusTopology::STEREO,
+                    CrossoverControls::try_from(&[Hz::new(300.0), Hz::new(3_000.0)][..]).unwrap(),
+                ))
                 .unwrap(),
                 block,
                 &inputs,
@@ -417,7 +431,11 @@ fn a_crossover_signal_step_is_held_to_the_next_grid_point_then_ramps() {
         x[at] = 1.0;
         let held = cutoff.map(|c| vec![c as f32; 64]);
         let signals = [Some(held.unwrap_or_else(|| signal.clone()))];
-        let node = CrossoverNode::<f32>::new(ChannelLayout::MONO, &[Hz::new(old)]).unwrap();
+        let node = CrossoverNode::<f32>::try_from(CrossoverConfig::new(
+            BusTopology::MONO,
+            CrossoverControls::try_from(&[Hz::new(old)][..]).unwrap(),
+        ))
+        .unwrap();
         let out = render(node, 64, &[x], &signals, |_| {});
         f64::from(out[0][at])
     };

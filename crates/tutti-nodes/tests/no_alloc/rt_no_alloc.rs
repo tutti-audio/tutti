@@ -155,7 +155,7 @@ fn folded_six_channel_convolver_process_is_allocation_free() {
 #[test]
 fn distortion_process_is_allocation_free_fed_and_unfed() {
     use tutti_graph::contract::Direct;
-    use tutti_nodes::{DistortionNode, OversamplingFactor, ShapeKind};
+    use tutti_nodes::{DistortionConfig, DistortionNode, OversamplingFactor, ShapeKind};
     use tutti_units::SampleRate;
 
     let kinds = [
@@ -178,9 +178,14 @@ fn distortion_process_is_allocation_free_fed_and_unfed() {
         let mut unfed: Vec<Vec<f32>> = Vec::new();
         for fed in [false, true] {
             let node = match factor {
-                None => DistortionNode::<f32>::with_channels(3u16, kind, Drive::new(2.0)),
-                Some(f) => DistortionNode::<f32>::with_channels(3u16, kind, Drive::new(2.0))
-                    .oversampling(f),
+                None => DistortionNode::<f32>::from(
+                    DistortionConfig::new(3u16, kind).drive(Drive::new(2.0)),
+                ),
+                Some(f) => DistortionNode::<f32>::from(
+                    DistortionConfig::new(3u16, kind)
+                        .drive(Drive::new(2.0))
+                        .oversampling(f),
+                ),
             };
             let mut node = Direct::new(node, SampleRate::SR_48K, 64);
             assert_eq!(
@@ -236,7 +241,9 @@ fn distortion_process_is_allocation_free_fed_and_unfed() {
 #[test]
 fn distortion_antialiasing_is_allocation_free_fed_and_unfed() {
     use tutti_graph::contract::Direct;
-    use tutti_nodes::{Antialiasing, DistortionNode, OversamplingFactor, ShapeKind};
+    use tutti_nodes::{
+        Antialiasing, DistortionConfig, DistortionNode, OversamplingFactor, ShapeKind,
+    };
     use tutti_units::SampleRate;
 
     let kinds = [
@@ -252,13 +259,15 @@ fn distortion_antialiasing_is_allocation_free_fed_and_unfed() {
         for order in [Antialiasing::FirstOrder, Antialiasing::SecondOrder] {
             for oversampled in [false, true] {
                 for fed in [false, true] {
-                    let node = DistortionNode::<f32>::with_channels(3u16, kind, Drive::new(2.0))
+                    let config = DistortionConfig::new(3u16, kind)
+                        .drive(Drive::new(2.0))
                         .antialiasing(order);
-                    let node = if oversampled {
-                        node.oversampling(OversamplingFactor::X4)
+                    let config = if oversampled {
+                        config.oversampling(OversamplingFactor::X4)
                     } else {
-                        node
+                        config
                     };
+                    let node = DistortionNode::<f32>::from(config);
                     let mut node = Direct::new(node, SampleRate::SR_48K, 64);
                     for (c, x) in node.inputs_mut().iter_mut().enumerate() {
                         let x = x.into_samples_mut();

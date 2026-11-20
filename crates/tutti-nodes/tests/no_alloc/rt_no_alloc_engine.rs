@@ -23,7 +23,8 @@ use tutti_graph::{Edge, InPort, OutPort, Source};
 use tutti_graph::{Editor, Prepare};
 use tutti_nodes::testing::Osc;
 use tutti_nodes::{
-    BusStripConfig, BusStripNode, EqBandNode, LimiterConfig, LimiterControls, LimiterNode, SvfType,
+    BusStripConfig, BusStripNode, EqBandConfig, EqBandNode, LimiterConfig, LimiterControls,
+    LimiterNode, SvfType,
 };
 use tutti_timeline::{MotionEvent, Transport};
 use tutti_units::{Db, Hz, Q, SampleRate, Samples};
@@ -43,7 +44,12 @@ fn build_engine_with_chain() -> Engine {
     ed.insert(
         eq,
         "eq",
-        EqBandNode::<f32>::new(SvfType::Bell, Hz::new(1_000.0), Q::new(1.0), Db::new(6.0)),
+        EqBandNode::<f32>::from(
+            EqBandConfig::new(SvfType::Bell)
+                .freq(Hz::new(1_000.0))
+                .q(Q::new(1.0))
+                .gain(Db::new(6.0)),
+        ),
     );
     ed.insert(
         strip,

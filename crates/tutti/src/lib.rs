@@ -268,8 +268,8 @@ pub mod nodes {
         Absorption, AllPass, AllPassForm, Band, BrickwallControls, ChunkSize, DecayTime, Fdn, Fir,
         FirSummary, Full, Gains, HrirMeasurement, HrirSphere, HrtfBinauralError, Inline, Lerp,
         Line, LineModulation, LookaheadError, Matrix, MatrixConvolver, MatrixConvolverConfig,
-        MatrixConvolverError, MaxDecayError, Network, OutputMap as NetworkOutputMap, ResampleError,
-        SimdLanes, SpeakerGeometryError, Stage, Tap, Taps, WaveshaperControls,
+        MatrixConvolverError, MaxDecayError, Network, NetworkOutputMap, ResampleError, SimdLanes,
+        SpeakerGeometryError, Stage, Tap, Taps, WaveshaperControls,
     };
     pub use tutti_dsp::{
         Biquad, Butterworth, ButterworthOrder, ButterworthOrderError, CutResponse, FirError,
@@ -296,22 +296,25 @@ pub mod nodes {
         BitCrusherControls, BitCrusherNode, BrickwallLimiterConfig, BrickwallLimiterNode,
         BusStripConfig, BusStripNode, ChannelTimes, ChannelTimesError, ClickConfig, ClickLevel,
         ClickLevelError, ClickSettings, ClickState, CompressorConfig, CompressorControls,
-        CompressorNode, ConvolverConfig, ConvolverError, ConvolverNode, CrossoverControls,
-        CrossoverError, CrossoverNode, CutAlignment, CutFilterConfig, CutFilterControls,
-        CutFilterNode, DcBlockerConfig, DcBlockerControls, DcBlockerNode, DelayControls,
-        DelayLayout, DelayNode, DistortionNode, DynamicEqConfig, DynamicEqControls, DynamicEqNode,
+        CompressorNode, ConvolverConfig, ConvolverError, ConvolverNode, CrossoverConfig,
+        CrossoverControls, CrossoverError, CrossoverNode, CutAlignment, CutFilterConfig,
+        CutFilterControls, CutFilterNode, DcBlockerConfig, DcBlockerControls, DcBlockerNode,
+        DelayConfig, DelayControls, DelayLayout, DelayLayoutBuilder, DelayLayoutError, DelayNode,
+        DistortionConfig, DistortionNode, DynamicEqConfig, DynamicEqControls, DynamicEqNode,
         DynamicMode, EnvelopeFilterConfig, EnvelopeFilterControls, EnvelopeFilterNode,
-        EnvelopeFollowerNode, EqBandNode, FdnControls, FdnLayout, FdnNode, FirConvolverConfig,
-        FreeverbControls, FreeverbNode, FreezeMode, GateConfig, GateControls, GateNode,
-        HrtfBinauralConfig, HrtfBinauralNode, InterpolationMode, IrLayout, KeyFilter, KeySource,
-        LadderControls, LadderFilterNode, LadderType, LevellerConfig, LevellerControls,
-        LevellerNode, LfoClock, LfoNode, LimiterConfig, LimiterControls, LimiterNode,
-        MetronomeMode, ModDelayControls, ModDelayNode, MultibandBands, MultibandCompressorConfig,
-        MultibandCompressorNode, MultibandControls, NoteEnvelopeNode, OscillatorNode,
-        OversamplingFactor, PhaserControls, PhaserNode, PlateControls, PlateReverbConfig,
-        PlateReverbNode, Routing as FeedbackRouting, RoutingError as FeedbackRoutingError,
-        SOURCE_EVENT_CAPACITY, ShapeKind, SourceNode, SourcePorts, Stages, StagesError, Stagger,
-        StaggerError, SvfControls, SvfFilterNode, SvfType, Sweep, SweepError, SweepRange,
+        EnvelopeFollowerNode, EqBandConfig, EqBandNode, FdnConfig, FdnControls, FdnLayout, FdnNode,
+        FeedbackRouting, FeedbackRoutingBuilder, FeedbackRoutingError, FirConvolverConfig,
+        FreeverbConfig, FreeverbControls, FreeverbNode, FreezeMode, GateConfig, GateControls,
+        GateNode, HrtfBinauralConfig, HrtfBinauralNode, InterpolationMode, IrLayout, KeyFilter,
+        KeySource, LadderControls, LadderFilterConfig, LadderFilterNode, LadderType,
+        LevellerConfig, LevellerControls, LevellerNode, LfoClock, LfoNode, LimiterConfig,
+        LimiterControls, LimiterNode, MetronomeMode, ModDelayConfig, ModDelayControls,
+        ModDelayLayout, ModDelayLayoutBuilder, ModDelayNode, MultibandBands,
+        MultibandCompressorConfig, MultibandCompressorNode, MultibandControls, NoteEnvelopeNode,
+        OscillatorNode, OversamplingFactor, PhaserConfig, PhaserControls, PhaserNode,
+        PlateControls, PlateReverbConfig, PlateReverbNode, SOURCE_EVENT_CAPACITY, ShapeKind,
+        SourceNode, SourcePorts, Stages, StagesError, Stagger, StaggerError, SvfControls,
+        SvfFilterConfig, SvfFilterNode, SvfType, Sweep, SweepBuilder, SweepError, SweepRange,
         SweepRangeError, TiltFilterConfig, TiltFilterControls, TiltFilterNode, TransientControls,
         TransientShaperConfig, TransientShaperNode, VbapError, VbapPannerConfig, VbapPannerNode,
     };
@@ -361,7 +364,7 @@ pub mod types {
     };
     pub use tutti_platform::{
         Asset, Destination, Executor, Identity, Open, Panicked, PriorityRequest, ReadSeek, Sleep,
-        Staged, StagedCommitError, StagedFile, StagedKeep, Stamp,
+        Staged, StagedCommitError, StagedFile, StagedKeep, Stamp, Threads,
     };
     pub use tutti_rt::{
         AtomicCell, AtomicWord, Bell, Bells, Count, Counter, CounterWriter, Drained, Gauge,
@@ -670,10 +673,6 @@ pub mod soundfont {
 /// spawns; build it with `cargo build -p tutti-plugin-server`.
 #[cfg(feature = "plugin")]
 pub mod plugin {
-    pub use tutti_plugin::{
-        AutomationMode, IpcConfig, MainThreadMarker, MainWork, MainWorkHandle, PluginRenderFault,
-        Preset,
-    };
     pub use tutti_plugin_db::ScanBusy;
     pub use tutti_plugin_db::{
         BeforeEpoch, BlacklistedFile, FileFacts, FileFailure, FileRow, FileState, FilesError,
@@ -682,6 +681,7 @@ pub mod plugin {
     pub use tutti_plugin_db::{BindError, BlacklistView, Loadable, PersistError, Resolved};
     pub use tutti_plugin_host::{BlockLosses, RebindError};
     pub use tutti_plugin_ipc::RandomSourceError;
+    pub use tutti_plugin_ipc::{IpcConfig, PluginRenderFault};
     pub use tutti_plugin_types::PresetSupport;
     pub use tutti_plugin_types::bundle::ModuleKind;
     pub use tutti_plugin_types::features::{FeatureReport, Features};
@@ -694,6 +694,9 @@ pub mod plugin {
         StateError, StateHash, TailVerdict, UnknownExtension, Verdict, VersionText, Vst2Category,
         Vst3PlugType, Vst3SubCategories,
     };
+    pub use tutti_plugin_types::{
+        AutomationMode, MainThreadMarker, MainWork, MainWorkHandle, Preset,
+    };
     pub use tutti_plugin_types::{EditorError, LoadStage, TerminationReason};
     pub use tutti_plugin_types::{
         FrameTooLarge, ResultError, SlabAccessError, SlabError, SlabLayoutError,
@@ -705,10 +708,10 @@ pub mod plugin {
     /// The plugin catalog: scanning, the database and the descriptors it
     /// holds.
     pub mod catalog {
-        pub use tutti_plugin::catalog::AudioConfig;
         pub use tutti_plugin_db::{
             CatalogConfig, FormatMismatch, PluginDb, Probed, Scan, ScanPoll, ScanResult,
         };
+        pub use tutti_plugin_ipc::AudioConfig;
         pub use tutti_plugin_types::{
             Described, FourCc, PluginDescriptor, PluginId, PluginIdError, PluginRole, Uid, Widths,
         };

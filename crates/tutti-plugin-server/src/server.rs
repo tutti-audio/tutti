@@ -284,6 +284,10 @@ impl PluginServer {
                 Ok(Incoming::Request(Request { id, body })) => {
                     let reaction = if matches!(body, ControlRequest::LoadPlugin { .. }) {
                         self.load_working(transport, id, body)?
+                    } else if matches!(body, ControlRequest::SaveState { .. }) {
+                        working(transport, id, false, || {
+                            self.session.handle_with(self.main, body, &mut |_| {})
+                        })?
                     } else {
                         self.session.handle_with(self.main, body, &mut |_| {})?
                     };
@@ -291,6 +295,20 @@ impl PluginServer {
                 }
                 Ok(Incoming::SetupSlab { id, layout, slab }) => {
                     (id, self.session.setup_slab(&slab, layout))
+                }
+                Ok(Incoming::LoadState {
+                    id,
+                    state_use,
+                    state,
+                }) => (
+                    id,
+                    working(transport, id, true, || {
+                        self.session.load_state(self.main, &state, state_use)
+                    }),
+                ),
+                Ok(Incoming::StageState { id, state }) => (id, self.session.stage_state(state)),
+                Ok(Incoming::StateRefused { id, staging, error }) => {
+                    (id, self.session.refuse_state(staging, error))
                 }
                 Err(IpcError::Io(_)) => return Ok(false),
                 Err(e) => return Err(e),
@@ -302,11 +320,9 @@ impl PluginServer {
                         return Ok(false);
                     }
                 }
-                Reaction::ReplyMany(replies) => {
-                    for reply in replies {
-                        if transport.send(&ControlFrame::Reply { id, reply }).is_err() {
-                            return Ok(false);
-                        }
+                Reaction::State(state) => {
+                    if crate::transport::send_state(transport, id, &state).is_err() {
+                        return Ok(false);
                     }
                 }
                 Reaction::None => {}
@@ -349,6 +365,27 @@ impl PluginServer {
         let main = self.main;
         crate::main_loop::serve(&mut self.session, transport, main, render)
     }
+}
+
+/// Runs `work` on request `id` with the host told the server is at work on it,
+/// as [`Working::Restoring`] when `restoring` and as [`Working::Opening`]
+/// otherwise, every [`WORKING_PERIOD`]: a plugin's state save or load is one
+/// call that tells nothing, and the host's wait for the answer restarts on each
+/// beat.
+pub(crate) fn working<R>(
+    transport: &ControlTransport,
+    id: ReqId,
+    restoring: bool,
+    work: impl FnOnce() -> R,
+) -> R {
+    let restoring = AtomicBool::new(restoring);
+    beat_while(
+        transport.pulser().as_deref(),
+        WORKING_PERIOD,
+        id,
+        &restoring,
+        work,
+    )
 }
 
 /// Ends a beat when it goes out of scope, however the scope is left.
@@ -404,7 +441,7 @@ impl Drop for PluginServer {
 /// How long a stopped render thread is given to return: it ends at its next
 /// step, so this is a thread stuck inside the plugin or in a read.
 /// How often the server tells the host it is at work on a load.
-const WORKING_PERIOD: Duration = Duration::from_secs(1);
+pub(crate) const WORKING_PERIOD: Duration = Duration::from_secs(1);
 
 const RENDER_STOP_PATIENCE: std::time::Duration = std::time::Duration::from_secs(3);
 

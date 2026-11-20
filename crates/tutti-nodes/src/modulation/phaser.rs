@@ -37,11 +37,10 @@ use crate::kernel::{ControlSignals, Kernel, KernelNode};
 /// default, which widens nothing by itself: a [`Stagger`] (`[0.0, 0.25]` cycles on a stereo
 /// phaser sweeps the sides a quarter cycle apart) is what widens it.
 ///
-/// - [`mono`](Self::mono) and [`stereo`](Self::stereo): `stages` stages sweeping 200 to
-///   4000 Hz, no stagger, at your controls ([`PhaserControls::DEFAULT`]).
-/// - [`new`](Self::new): any width on a checked [`BusTopology`] (an `n`-channel one on the
-///   engine's order for that width is `BusTopology::assumed(n)?`), your own [`SweepRange`] and
-///   [`Stagger`].
+/// Made from a [`PhaserConfig`] (`PhaserNode::try_from`): any width on a checked
+/// [`BusTopology`] (an `n`-channel one on the engine's order for that width is
+/// `BusTopology::assumed(n)?`), `stages` stages sweeping 200 to 4000 Hz with no stagger unless
+/// the config gives its own [`SweepRange`] and [`Stagger`].
 ///
 /// # The controls
 ///
@@ -75,49 +74,72 @@ use crate::kernel::{ControlSignals, Kernel, KernelNode};
 /// `F` is the float of the graph it runs in, and of the chain and the ramps.
 pub type PhaserNode<F> = KernelNode<PhaserKernel<F>>;
 
-impl<F: Float + Lerp> PhaserNode<F> {
+/// What a [`PhaserNode`] is made from: its bus, the all-pass stages per channel, the band the
+/// sweep crosses, the [`Stagger`] of its channels and the controls it starts at.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PhaserConfig {
+    input: BusTopology,
+    stages: Stages,
+    range: SweepRange,
+    stagger: Stagger,
+    controls: PhaserControls,
+}
+
+impl PhaserConfig {
     /// A phaser on the bus `input`, as wide as it, with `stages` all-passes per channel
-    /// sweeping `range`, its channels' sweeps offset by `stagger` and running at
-    /// `controls`.
-    ///
+    /// sweeping [`SweepRange::DEFAULT`], its channels in step, at
+    /// [`PhaserControls::DEFAULT`].
+    #[must_use]
+    pub const fn new(input: BusTopology, stages: Stages) -> Self {
+        Self {
+            input,
+            stages,
+            range: SweepRange::DEFAULT,
+            stagger: Stagger::NONE,
+            controls: PhaserControls::DEFAULT,
+        }
+    }
+
+    /// The band the all-pass centre sweeps across.
+    #[must_use]
+    pub const fn range(mut self, range: SweepRange) -> Self {
+        self.range = range;
+        self
+    }
+
+    /// Offsets the channels' sweeps by `stagger`: a step, or one offset for each channel of
+    /// the bus.
+    #[must_use]
+    pub const fn stagger(mut self, stagger: Stagger) -> Self {
+        self.stagger = stagger;
+        self
+    }
+
+    /// The controls the cells start at.
+    #[must_use]
+    pub const fn controls(mut self, controls: PhaserControls) -> Self {
+        self.controls = controls;
+        self
+    }
+}
+
+/// A phaser built to `config`. Allocates the chain.
+///
+/// A `TryFrom` and not a `From`: a stagger that names an offset for each channel must name
+/// the bus's, which no type of the config can hold on its own. A step fits every width.
+impl<F: Float + Lerp> TryFrom<PhaserConfig> for PhaserNode<F> {
+    type Error = StaggerError;
+
     /// # Errors
     ///
-    /// [`StaggerError::Length`] when `stagger` names an offset for each channel and not for
-    /// `input`'s.
-    pub fn new(
-        input: BusTopology,
-        stages: Stages,
-        range: SweepRange,
-        stagger: Stagger,
-        controls: PhaserControls,
-    ) -> Result<Self, StaggerError> {
+    /// [`StaggerError::Length`] when the stagger names an offset for each channel and not for
+    /// the bus's.
+    fn try_from(config: PhaserConfig) -> Result<Self, StaggerError> {
         Ok(Self::with_kernel(
-            PhaserKernel::new(input, stages, range, stagger)?,
+            PhaserKernel::new(config.input, config.stages, config.range, config.stagger)?,
             PhaserSet,
-            controls,
+            config.controls,
         ))
-    }
-
-    /// A mono phaser of `stages` stages sweeping [`SweepRange::DEFAULT`] at `controls`.
-    #[must_use]
-    pub fn mono(stages: Stages, controls: PhaserControls) -> Self {
-        Self::unstaggered(BusTopology::MONO, stages, controls)
-    }
-
-    /// A stereo phaser of `stages` stages sweeping [`SweepRange::DEFAULT`] at `controls`, its
-    /// channels in step.
-    #[must_use]
-    pub fn stereo(stages: Stages, controls: PhaserControls) -> Self {
-        Self::unstaggered(BusTopology::STEREO, stages, controls)
-    }
-
-    fn unstaggered(input: BusTopology, stages: Stages, controls: PhaserControls) -> Self {
-        Self::with_kernel(
-            PhaserKernel::new(input, stages, SweepRange::DEFAULT, Stagger::NONE)
-                .expect("a step fits any width"),
-            PhaserSet,
-            controls,
-        )
     }
 }
 
@@ -189,7 +211,7 @@ impl<F: Float + Lerp> PhaserKernel<F> {
     /// # Errors
     ///
     /// [`StaggerError::Length`] when `stagger` names an offset for each channel
-    /// ([`Stagger::each`]) and not for the `input`'s.
+    /// ([`Stagger::try_from`] a slice) and not for the `input`'s.
     fn new(
         input: BusTopology,
         stages: Stages,
@@ -352,7 +374,9 @@ mod tests {
     /// cell with it, and the set has the three controls in the kernel's order.
     #[test]
     fn a_fork_starts_from_the_authored_values_and_shares_nothing() {
-        let node = PhaserNode::<f32>::stereo(Stages::of(4), PhaserControls::DEFAULT);
+        let node =
+            PhaserNode::<f32>::try_from(PhaserConfig::new(BusTopology::STEREO, Stages::of(4)))
+                .unwrap();
         assert_eq!(
             node.param_set().params().collect::<Vec<_>>(),
             [UnitParam::Rate, UnitParam::Depth, UnitParam::Feedback]
@@ -366,14 +390,7 @@ mod tests {
     #[test]
     fn the_shape_declares_the_three_controls_no_latency_and_an_unknown_tail() {
         let node = prepared(
-            PhaserNode::<f32>::new(
-                bus(3),
-                Stages::of(5),
-                SweepRange::DEFAULT,
-                Stagger::NONE,
-                PhaserControls::DEFAULT,
-            )
-            .unwrap(),
+            PhaserNode::<f32>::try_from(PhaserConfig::new(bus(3), Stages::of(5))).unwrap(),
             RATE,
             64,
         );
@@ -399,16 +416,10 @@ mod tests {
     /// A stagger that names an offset per channel must name the bus's.
     #[test]
     fn a_stagger_of_the_wrong_length_is_refused_at_construction() {
-        let two = Stagger::each(&[PhaseIncrement::new(0.0), PhaseIncrement::new(0.5)]).unwrap();
-        let new = |w| {
-            PhaserNode::<f32>::new(
-                bus(w),
-                Stages::of(4),
-                SweepRange::DEFAULT,
-                two,
-                PhaserControls::DEFAULT,
-            )
-        };
+        let two =
+            Stagger::try_from(&[PhaseIncrement::new(0.0), PhaseIncrement::new(0.5)][..]).unwrap();
+        let new =
+            |w| PhaserNode::<f32>::try_from(PhaserConfig::new(bus(w), Stages::of(4)).stagger(two));
         assert!(new(2).is_ok());
         assert_eq!(
             new(3).unwrap_err(),
@@ -417,12 +428,8 @@ mod tests {
         // A step, and no stagger, fit any width.
         for width in [1, 2, 6, 16] {
             for any in [Stagger::of_step(PhaseIncrement::new(0.25)), Stagger::NONE] {
-                let node = PhaserNode::<f32>::new(
-                    bus(width),
-                    Stages::of(4),
-                    SweepRange::DEFAULT,
-                    any,
-                    PhaserControls::DEFAULT,
+                let node = PhaserNode::<f32>::try_from(
+                    PhaserConfig::new(bus(width), Stages::of(4)).stagger(any),
                 );
                 assert!(node.is_ok(), "width {width}");
             }
@@ -467,7 +474,10 @@ mod tests {
             .map(|i| (std::f64::consts::TAU * 1_000.0 * i as f64 / RATE.get()).sin() as f32)
             .collect();
         let render = |cell: Option<f32>, signal: Option<f32>| {
-            let node = PhaserNode::<f32>::mono(Stages::of(4), controls);
+            let node = PhaserNode::<f32>::try_from(
+                PhaserConfig::new(BusTopology::MONO, Stages::of(4)).controls(controls),
+            )
+            .unwrap();
             if let Some(v) = cell {
                 assert!(node.param_set().set(UnitParam::Rate, f64::from(v)));
             }
@@ -508,7 +518,14 @@ mod tests {
             feedback: Feedback::NONE,
             ..PhaserControls::DEFAULT
         };
-        let mut node = prepared(PhaserNode::<f32>::mono(Stages::of(4), controls), RATE, 64);
+        let mut node = prepared(
+            PhaserNode::<f32>::try_from(
+                PhaserConfig::new(BusTopology::MONO, Stages::of(4)).controls(controls),
+            )
+            .unwrap(),
+            RATE,
+            64,
+        );
         let x: Vec<f32> = (0..n + 64)
             .map(|i| (std::f64::consts::TAU * 1_000.0 * i as f64 / RATE.get()).sin() as f32)
             .collect();
@@ -540,7 +557,8 @@ mod tests {
             .collect();
         let render = |block: usize, driven: bool| -> Vec<f32> {
             let mut node = prepared(
-                PhaserNode::<f32>::mono(Stages::of(6), PhaserControls::DEFAULT),
+                PhaserNode::<f32>::try_from(PhaserConfig::new(BusTopology::MONO, Stages::of(6)))
+                    .unwrap(),
                 RATE,
                 1_024,
             );
@@ -574,7 +592,9 @@ mod tests {
             .map(|n| ((n * 13 + 5) % 100) as f32 / 50.0 - 1.0)
             .collect();
         let render = |block: usize, moved: bool| -> Vec<f32> {
-            let node = PhaserNode::<f32>::mono(Stages::of(6), PhaserControls::DEFAULT);
+            let node =
+                PhaserNode::<f32>::try_from(PhaserConfig::new(BusTopology::MONO, Stages::of(6)))
+                    .unwrap();
             let set = node.param_set();
             let mut node = prepared(node, RATE, 1_024);
             let mut out = Vec::new();
@@ -602,13 +622,13 @@ mod tests {
     #[test]
     fn feedback_keeps_the_chain_ringing() {
         let ring = |fb: f64| {
-            let node = PhaserNode::<f32>::mono(
-                Stages::of(6),
-                PhaserControls {
+            let node = PhaserNode::<f32>::try_from(
+                PhaserConfig::new(BusTopology::MONO, Stages::of(6)).controls(PhaserControls {
                     feedback: Feedback::new(fb),
                     ..PhaserControls::DEFAULT
-                },
-            );
+                }),
+            )
+            .unwrap();
             let mut node = prepared(node, SampleRate::SR_44K1, 1_024);
             let mut x = [0.0f32; 1_024];
             x[0] = 1.0;
@@ -921,10 +941,24 @@ mod tests {
             }
             out
         };
-        let mut used = prepared(PhaserNode::<f32>::stereo(Stages::of(4), c), RATE, 64);
+        let mut used = prepared(
+            PhaserNode::<f32>::try_from(
+                PhaserConfig::new(BusTopology::STEREO, Stages::of(4)).controls(c),
+            )
+            .unwrap(),
+            RATE,
+            64,
+        );
         blocks(&mut used, 100);
         used.reset();
-        let mut fresh = prepared(PhaserNode::<f32>::stereo(Stages::of(4), c), RATE, 64);
+        let mut fresh = prepared(
+            PhaserNode::<f32>::try_from(
+                PhaserConfig::new(BusTopology::STEREO, Stages::of(4)).controls(c),
+            )
+            .unwrap(),
+            RATE,
+            64,
+        );
         assert_eq!(blocks(&mut used, 0), blocks(&mut fresh, 0));
     }
 
@@ -939,7 +973,9 @@ mod tests {
             .map(|n| ((n * 13 + 5) % 100) as f32 / 50.0 - 1.0)
             .collect();
         let render = |at: usize| -> Vec<f32> {
-            let node = PhaserNode::<f32>::mono(Stages::of(6), PhaserControls::DEFAULT);
+            let node =
+                PhaserNode::<f32>::try_from(PhaserConfig::new(BusTopology::MONO, Stages::of(6)))
+                    .unwrap();
             let set = node.param_set();
             let mut node = prepared(node, RATE, 2_048);
             let mut out = Vec::new();
@@ -977,14 +1013,17 @@ mod tests {
                 .collect()
         };
         let mut used = prepared(
-            PhaserNode::<f32>::mono(Stages::of(4), PhaserControls::DEFAULT),
+            PhaserNode::<f32>::try_from(PhaserConfig::new(BusTopology::MONO, Stages::of(4)))
+                .unwrap(),
             RATE,
             64,
         );
         blocks(&mut used);
         moved(&used);
         used.reset();
-        let fresh = PhaserNode::<f32>::mono(Stages::of(4), PhaserControls::DEFAULT);
+        let fresh =
+            PhaserNode::<f32>::try_from(PhaserConfig::new(BusTopology::MONO, Stages::of(4)))
+                .unwrap();
         moved(&fresh);
         let mut fresh = prepared(fresh, RATE, 64);
         assert_eq!(blocks(&mut used), blocks(&mut fresh));

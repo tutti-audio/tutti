@@ -2179,7 +2179,7 @@ mod tests {
             fn handle(_: &(), _: &Life) {}
         }
         let mut session = Session::builder()
-            .executor(tutti_platform::Executor::polled())
+            .executor(tutti_platform::Executor::new())
             .build_detached(RATE)
             .unwrap();
         let (dc, _) = session
@@ -2437,7 +2437,7 @@ mod tests {
     #[cfg(feature = "plugin")]
     #[test]
     fn an_unannounced_finish_leaves_the_mode_to_the_phase() {
-        use tutti_plugin::RenderMode;
+        use tutti_plugin_types::RenderMode;
         let mut session = session();
         let job = session.bounce_start(short()).unwrap();
         assert_eq!(session.render_mode(), RenderMode::Offline);

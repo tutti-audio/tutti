@@ -806,8 +806,8 @@ impl<S: InFlight> Take<S> {
     /// sink failed or the pump ended without a result. A take with a punch-out that
     /// already ended reports the same way.
     ///
-    /// Never blocks and never joins: on a [`polled`](tutti_platform::Executor::polled)
-    /// executor the pump closes the sink inside the `update` that polls it.
+    /// Never blocks and never joins: on an executor that `update`
+    /// drives, the pump closes the sink inside the `update` that runs it.
     ///
     /// The result is lost when the [`Session`] is gone. A `Take` that outlives its
     /// session, or a session dropped before the take's [`TakeEvent::Finished`] lands,
@@ -825,11 +825,10 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// device does; the module docs say where it is placed.
     ///
     /// The pump is a future that awaits the tap's bell: the audio thread rings it as it
-    /// writes each block, so the pump runs only when there are frames. The threaded
-    /// executor gives it a thread of its own. On a [`polled`](tutti_platform::Executor::polled)
-    /// executor it runs inside [`update`](Self::update)'s poll, which moves what the tap
-    /// holds (at most its ring, a second of frames) into the sink; a host executor that
-    /// does not run it starts nothing.
+    /// writes each block, so the pump runs only when there are frames. A session that
+    /// drives its own executor with threads gives it a thread of its own. On an executor
+    /// that [`update`](Self::update) drives, it runs inside that update, which moves what
+    /// the tap holds (at most its ring, a second of frames) into the sink.
     ///
     /// The tap compiles in the next [`update`](Self::update). The pump drops
     /// what comes before the punch-in; [`TakeEvent::Started`] lands in the

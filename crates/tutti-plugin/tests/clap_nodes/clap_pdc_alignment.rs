@@ -261,7 +261,7 @@ fn the_probe_declares_the_latency_this_suite_expects() {
     let probe = load_probe(SAMPLE_RATE);
 
     assert_eq!(
-        probe.client.latency(),
+        probe.client.controls().latency(),
         Samples::new(PROBE_LATENCY),
         "the host must report the plugin's own declared figure"
     );

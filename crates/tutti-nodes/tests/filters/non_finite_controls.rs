@@ -21,9 +21,10 @@ use tutti_fixtures::Noise;
 use tutti_graph::contract::drive;
 use tutti_graph::{Node, ParamNode, Prepare};
 use tutti_nodes::{
-    ChannelTimes, CompressorConfig, CompressorControls, CompressorNode, DelayControls, DelayLayout,
-    DelayNode, GateConfig, GateControls, GateNode, InterpolationMode, KeySource, LadderFilterNode,
-    LadderType, MaxDelay, ModDelayNode, PhaserControls, PhaserNode, Stages, SvfFilterNode, SvfType,
+    ChannelTimes, CompressorConfig, CompressorControls, CompressorNode, DelayConfig, DelayControls,
+    DelayLayout, DelayNode, GateConfig, GateControls, GateNode, InterpolationMode, KeySource,
+    LadderFilterConfig, LadderFilterNode, LadderType, MaxDelay, ModDelayConfig, ModDelayNode,
+    PhaserConfig, PhaserNode, Stages, SvfFilterConfig, SvfFilterNode, SvfType,
 };
 use tutti_rt::ParamCell;
 use tutti_units::{
@@ -116,11 +117,10 @@ fn svf_ladder_delay_moddelay_phaser_compressor_gate_hold_off_non_finite_controls
     survives_node(
         "svf",
         || {
-            SvfFilterNode::<f32>::with_channels(
-                ChannelLayout::STEREO,
-                SvfType::Bell,
-                Hz::new(900.0),
-                Q::new(1.0),
+            SvfFilterNode::<f32>::from(
+                SvfFilterConfig::new(ChannelLayout::STEREO, SvfType::Bell)
+                    .freq(Hz::new(900.0))
+                    .q(Q::new(1.0)),
             )
         },
         |n| {
@@ -138,11 +138,10 @@ fn svf_ladder_delay_moddelay_phaser_compressor_gate_hold_off_non_finite_controls
     survives_node(
         "ladder",
         || {
-            LadderFilterNode::<f32>::with_channels(
-                ChannelLayout::STEREO,
-                LadderType::LP24,
-                Hz::new(900.0),
-                Resonance::new(0.5),
+            LadderFilterNode::<f32>::from(
+                LadderFilterConfig::new(ChannelLayout::STEREO, LadderType::LP24)
+                    .freq(Hz::new(900.0))
+                    .res(Resonance::new(0.5)),
             )
         },
         |n| {
@@ -160,21 +159,19 @@ fn svf_ladder_delay_moddelay_phaser_compressor_gate_hold_off_non_finite_controls
     survives_node(
         "delay",
         || {
-            let layout = DelayLayout::new(
+            let layout = DelayLayout::builder(
                 BusTopology::STEREO,
                 MaxDelay::of(Seconds::new(0.1)),
                 InterpolationMode::Linear,
             )
-            .with_times(ChannelTimes::each(&[Seconds::new(0.013)]).unwrap())
+            .times(ChannelTimes::try_from(&[Seconds::new(0.013)][..]).unwrap())
+            .build()
             .unwrap();
-            DelayNode::<f32>::from_layout(
-                layout,
-                DelayControls {
-                    time: Seconds::new(0.01),
-                    feedback: Feedback::new(0.5),
-                    cross_feedback: Feedback::new(0.2),
-                },
-            )
+            DelayNode::<f32>::from(DelayConfig::new(layout).controls(DelayControls {
+                time: Seconds::new(0.01),
+                feedback: Feedback::new(0.5),
+                cross_feedback: Feedback::new(0.2),
+            }))
         },
         |n| {
             vec![
@@ -198,7 +195,7 @@ fn svf_ladder_delay_moddelay_phaser_compressor_gate_hold_off_non_finite_controls
     );
     survives_node(
         "chorus",
-        || ModDelayNode::<f32>::chorus(BusTopology::STEREO),
+        || ModDelayNode::<f32>::from(ModDelayConfig::chorus(BusTopology::STEREO)),
         |n| {
             vec![
                 ("rate", n.param_set().cell(UnitParam::Rate).unwrap(), 3.0),
@@ -217,7 +214,10 @@ fn svf_ladder_delay_moddelay_phaser_compressor_gate_hold_off_non_finite_controls
     );
     survives_node(
         "phaser",
-        || PhaserNode::<f32>::stereo(Stages::of(6), PhaserControls::DEFAULT),
+        || {
+            PhaserNode::<f32>::try_from(PhaserConfig::new(BusTopology::STEREO, Stages::of(6)))
+                .unwrap()
+        },
         |n| {
             vec![
                 ("rate", n.param_set().cell(UnitParam::Rate).unwrap(), 2.0),
@@ -336,7 +336,7 @@ fn the_convolver_holds_off_non_finite_controls() {
 /// built an infinitely hard shaper and NaN output (0 * inf) before.
 #[test]
 fn the_distortion_holds_off_non_finite_controls() {
-    use tutti_nodes::{DistortionNode, ShapeKind};
+    use tutti_nodes::{DistortionConfig, DistortionNode, ShapeKind};
     for kind in [
         ShapeKind::Tanh,
         ShapeKind::Atan,
@@ -347,7 +347,11 @@ fn the_distortion_holds_off_non_finite_controls() {
     ] {
         survives_node(
             "distortion",
-            || DistortionNode::<f32>::new(kind, Drive::new(2.0)),
+            || {
+                DistortionNode::<f32>::from(
+                    DistortionConfig::new(ChannelLayout::STEREO, kind).drive(Drive::new(2.0)),
+                )
+            },
             |n| vec![("drive", n.param_set().cell(UnitParam::Drive).unwrap(), 5.0)],
         );
     }
@@ -359,9 +363,12 @@ fn the_distortion_holds_off_non_finite_controls() {
 /// shaper from 0 whatever the constructor built, so this pins the behaviour.
 #[test]
 fn a_distortion_built_with_a_non_finite_drive_renders_finite() {
-    use tutti_nodes::{DistortionNode, ShapeKind};
+    use tutti_nodes::{DistortionConfig, DistortionNode, ShapeKind};
     for bad in BAD {
-        let mut node = DistortionNode::<f32>::new(ShapeKind::Tanh, Drive::new(f64::from(bad)));
+        let mut node = DistortionNode::<f32>::from(
+            DistortionConfig::new(ChannelLayout::STEREO, ShapeKind::Tanh)
+                .drive(Drive::new(f64::from(bad))),
+        );
         node.prepare(&Prepare::new(
             SampleRate::SR_48K,
             MaxBlock::of(Samples::new(64)),

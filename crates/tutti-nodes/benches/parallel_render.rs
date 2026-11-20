@@ -47,7 +47,7 @@ use tutti_graph::WorkerPool;
 use tutti_graph::{Edge, InPort, OutPort, Source};
 use tutti_graph::{Editor, Executor, Prepare, TransportPosition, Unforkable};
 use tutti_nodes::testing::Osc;
-use tutti_nodes::{SvfFilterNode, SvfType};
+use tutti_nodes::{SvfFilterConfig, SvfFilterNode, SvfType};
 use tutti_units::{Hz, Q, SampleRate, Samples};
 
 const SR: f64 = 48_000.0;
@@ -103,10 +103,10 @@ fn wide(lanes: usize, depth: usize, workers: usize) -> Executor {
             ed.insert(
                 k,
                 "svf",
-                SvfFilterNode::<f32>::new(
-                    SvfType::LowPass,
-                    Hz::new(500.0 + (lane * depth + i) as f64 * 3.0),
-                    Q::new(0.7),
+                SvfFilterNode::<f32>::from(
+                    SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
+                        .freq(Hz::new(500.0 + (lane * depth + i) as f64 * 3.0))
+                        .q(Q::new(0.7)),
                 ),
             );
             wire(&mut ed, k, 0, last);
@@ -232,10 +232,10 @@ fn mixed(lanes: usize, depth: usize, fan: usize, light: bool, workers: usize) ->
             ed.insert(
                 k,
                 "svf",
-                SvfFilterNode::<f32>::new(
-                    SvfType::LowPass,
-                    Hz::new(500.0 + (lane * depth + i) as f64 * 3.0),
-                    Q::new(0.7),
+                SvfFilterNode::<f32>::from(
+                    SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
+                        .freq(Hz::new(500.0 + (lane * depth + i) as f64 * 3.0))
+                        .q(Q::new(0.7)),
                 ),
             );
             wire(&mut ed, k, 0, last);

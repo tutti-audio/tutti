@@ -4,19 +4,19 @@
 
 use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
 use tutti_buffers::{Float, Planes};
-use tutti_dsp::{
-    FdnControls, FdnLayout, FreeverbControls, FreezeMode, LadderType, ShapeKind, Stages, SvfType,
-};
+use tutti_dsp::{FdnLayout, FreeverbControls, FreezeMode, LadderType, ShapeKind, Stages, SvfType};
 use tutti_graph::contract::drive_input;
 use tutti_graph::{Env, Node, PlayClock, Prepare, TransportChanges, TransportPosition};
 use tutti_nodes::{
     Antialiasing, AutoPanConfig, AutoPanNode, BrickwallLimiterConfig, BrickwallLimiterNode,
-    CompressorConfig, CompressorControls, CompressorNode, CrossoverNode, DelayControls, DelayNode,
-    DistortionNode, DynamicEqConfig, DynamicEqNode, FdnNode, FreeverbNode, GateConfig,
-    GateControls, GateNode, LadderFilterNode, LimiterConfig, LimiterControls, LimiterNode,
-    MaxDelay, ModDelayNode, MultibandBands, MultibandCompressorConfig, MultibandCompressorNode,
-    PeakDetection, PhaserControls, PhaserNode, PlateReverbConfig, PlateReverbNode, RingModConfig,
-    RingModNode, SvfFilterNode, TremoloConfig, TremoloNode,
+    CompressorConfig, CompressorControls, CompressorNode, CrossoverConfig, CrossoverControls,
+    CrossoverNode, DelayConfig, DelayControls, DelayLayout, DelayNode, DistortionConfig,
+    DistortionNode, DynamicEqConfig, DynamicEqNode, FdnConfig, FdnNode, FreeverbConfig,
+    FreeverbNode, GateConfig, GateControls, GateNode, InterpolationMode, LadderFilterConfig,
+    LadderFilterNode, LimiterConfig, LimiterControls, LimiterNode, MaxDelay, ModDelayConfig,
+    ModDelayNode, MultibandBands, MultibandCompressorConfig, MultibandCompressorNode,
+    PeakDetection, PhaserConfig, PhaserNode, PlateReverbConfig, PlateReverbNode, RingModConfig,
+    RingModNode, SvfFilterConfig, SvfFilterNode, TremoloConfig, TremoloNode,
 };
 use tutti_nodes::{
     BellFilterConfig, BellFilterNode, BitCrusherConfig, BitCrusherNode, ButterworthOrder,
@@ -43,58 +43,71 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
     vec![
         (
             "svf",
-            Box::new(SvfFilterNode::<f32>::new(
-                SvfType::LowPass,
-                Hz::new(1_000.0),
-                Q::new(0.707),
+            Box::new(SvfFilterNode::<f32>::from(
+                SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
+                    .freq(Hz::new(1_000.0))
+                    .q(Q::new(0.707)),
             )),
         ),
         (
             "ladder",
-            Box::new(LadderFilterNode::<f32>::new(
-                LadderType::LP24,
-                Hz::new(1_000.0),
-                Resonance::new(0.5),
+            Box::new(LadderFilterNode::<f32>::from(
+                LadderFilterConfig::new(ChannelLayout::MONO, LadderType::LP24)
+                    .freq(Hz::new(1_000.0))
+                    .res(Resonance::new(0.5)),
             )),
         ),
         (
             "crossover",
             Box::new(
-                CrossoverNode::<f32>::new(ChannelLayout::STEREO, &[Hz::new(1_000.0)]).unwrap(),
+                CrossoverNode::<f32>::try_from(CrossoverConfig::new(
+                    BusTopology::STEREO,
+                    CrossoverControls::try_from(&[Hz::new(1_000.0)][..]).unwrap(),
+                ))
+                .unwrap(),
             ),
         ),
         (
             // A feedback line of a whole number of frames: one sample circulating in it falls
             // on a block's last frame only when the period lines up.
             "delay",
-            Box::new(DelayNode::<f32>::mono(
-                MaxDelay::of(Seconds::new(0.05)),
-                DelayControls {
+            Box::new(DelayNode::<f32>::from(
+                DelayConfig::new(DelayLayout::new(
+                    BusTopology::MONO,
+                    MaxDelay::of(Seconds::new(0.05)),
+                    InterpolationMode::Linear,
+                ))
+                .controls(DelayControls {
                     time: Seconds::new(0.01),
                     feedback: Feedback::new(0.9),
                     ..DelayControls::DEFAULT
-                },
+                }),
             )),
         ),
         (
             "distortion",
-            Box::new(DistortionNode::<f32>::new(ShapeKind::Tanh, Drive::new(4.0))),
+            Box::new(DistortionNode::<f32>::from(
+                DistortionConfig::new(ChannelLayout::STEREO, ShapeKind::Tanh)
+                    .drive(Drive::new(4.0)),
+            )),
         ),
         // The antialiasing's history is the shaper's own state: a non-finite sample enters it
         // as 0, so it is heard at its own frame.
         (
             "distortion first order",
-            Box::new(
-                DistortionNode::<f32>::new(ShapeKind::Tanh, Drive::new(4.0))
+            Box::new(DistortionNode::<f32>::from(
+                DistortionConfig::new(ChannelLayout::STEREO, ShapeKind::Tanh)
+                    .drive(Drive::new(4.0))
                     .antialiasing(Antialiasing::FirstOrder),
-            ),
+            )),
         ),
         (
             "distortion second order",
-            Box::new(
-                DistortionNode::<f32>::new(ShapeKind::Softsign, Drive::new(4.0))
+            Box::new(DistortionNode::<f32>::from(
+                DistortionConfig::new(ChannelLayout::STEREO, ShapeKind::Softsign)
+                    .drive(Drive::new(4.0))
                     .antialiasing(Antialiasing::SecondOrder),
-            ),
+            )),
         ),
         (
             "compressor",
@@ -200,32 +213,37 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
         ),
         (
             "chorus",
-            Box::new(ModDelayNode::<f32>::chorus(BusTopology::MONO)),
+            Box::new(ModDelayNode::<f32>::from(ModDelayConfig::chorus(
+                BusTopology::MONO,
+            ))),
         ),
         (
             "flanger",
-            Box::new(ModDelayNode::<f32>::flanger(BusTopology::MONO)),
+            Box::new(ModDelayNode::<f32>::from(ModDelayConfig::flanger(
+                BusTopology::MONO,
+            ))),
         ),
         (
             "phaser",
-            Box::new(PhaserNode::<f32>::mono(
-                Stages::of(4),
-                PhaserControls::DEFAULT,
-            )),
+            Box::new(
+                PhaserNode::<f32>::try_from(PhaserConfig::new(BusTopology::MONO, Stages::of(4)))
+                    .unwrap(),
+            ),
         ),
         (
             "fdn",
-            Box::new(FdnNode::<f32>::live(
+            Box::new(FdnNode::<f32>::from(FdnConfig::new().layout(
                 FdnLayout::new(8, tutti_dsp::MaxDecay::DEFAULT, FreezeMode::Decaying).unwrap(),
-                FdnControls::DEFAULT,
-            )),
+            ))),
         ),
         (
             "freeverb",
-            Box::new(FreeverbNode::<f32>::live(FreeverbControls {
-                room: Mix::new(0.9),
-                damp: Mix::new(0.2),
-            })),
+            Box::new(FreeverbNode::<f32>::from(FreeverbConfig::new().controls(
+                FreeverbControls {
+                    room: Mix::new(0.9),
+                    damp: Mix::new(0.2),
+                },
+            ))),
         ),
         (
             "plate",

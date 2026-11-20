@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use tutti_platform::Instant;
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::MaxBlock;
 use tutti_graph::NodeKey;
 use tutti_modulation::{Follower, Lfo};
@@ -103,10 +104,10 @@ fn an_unresolved_target_and_an_unfed_follower_are_named() {
 fn no_problems_while_the_declarations_apply() {
     let mut s = session();
     assert_eq!(s.mod_state().problems().count(), 0);
-    let (lp, _) = s.graph().add(tutti_nodes::SvfFilterNode::<f32>::new(
-        tutti_nodes::SvfType::LowPass,
-        Hz::new(1_000.0),
-        tutti_units::Q::new(0.7),
+    let (lp, _) = s.graph().add(tutti_nodes::SvfFilterNode::<f32>::from(
+        tutti_nodes::SvfFilterConfig::new(ChannelLayout::MONO, tutti_nodes::SvfType::LowPass)
+            .freq(Hz::new(1_000.0))
+            .q(tutti_units::Q::new(0.7)),
     ));
     let mut m = s.mods_mut();
     m.range(lp.cutoff(), Hz::new(100.0)..Hz::new(4_000.0))

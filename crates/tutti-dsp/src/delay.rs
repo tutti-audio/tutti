@@ -10,10 +10,13 @@ mod taps;
 mod times;
 
 pub use bank::{DelayBank, DelayRamps, DelaySignals};
-pub use layout::{DELAY_SLEW, DelayControls, DelayLayout, MAX_DELAY_CHANNELS};
+pub use layout::{
+    DELAY_SLEW, DelayControls, DelayLayout, DelayLayoutBuilder, DelayLayoutError,
+    MAX_DELAY_CHANNELS,
+};
 pub use max_delay::{MaxDelay, MaxDelayError};
 pub(crate) use ring::DelayRing;
-pub use routing::{Routing, RoutingError};
+pub use routing::{FeedbackRouting, FeedbackRoutingBuilder, FeedbackRoutingError};
 pub(crate) use taps::{ring_seconds, trips};
 pub use times::{ChannelTimes, ChannelTimesError};
 

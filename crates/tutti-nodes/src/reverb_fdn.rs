@@ -16,7 +16,8 @@ use crate::kernel::{ControlSignals, Kernel, KernelNode};
 ///
 /// A [`KernelNode`] over [`FdnKernel`], the network being [`FdnBank`]'s. Its blend with its
 /// input, for use as an insert, is the graph's mix (`Editor::set_mix`); the node declares no
-/// latency (its pre-delay is part of the wet sound).
+/// latency (its pre-delay is part of the wet sound). Made from an [`FdnConfig`]
+/// (`FdnNode::from`).
 ///
 /// # The controls
 ///
@@ -38,17 +39,53 @@ use crate::kernel::{ControlSignals, Kernel, KernelNode};
 /// modulation reach), so an `f32` graph halves the memory of an `f64` one.
 pub type FdnNode<F> = KernelNode<FdnKernel<F>>;
 
-impl<F: Float + Lerp> FdnNode<F> {
-    /// A network of `layout`, its cells at `controls`. It has no rate until the graph's
-    /// `prepare` gives it one: it declares no latency and an unknown tail before, and
-    /// renders silence. Allocates: build it before the node goes live.
-    #[doc(hidden)]
+/// What an [`FdnNode`] is made from: the network's layout and the controls its cells start at.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FdnConfig {
+    layout: FdnLayout,
+    controls: FdnControls,
+}
+
+impl FdnConfig {
+    /// A network of [`FdnLayout::default`] with its cells at [`FdnControls::DEFAULT`]. It has
+    /// no rate until the graph's `prepare` gives it one: it declares no latency and an unknown
+    /// tail before, and renders silence.
     #[must_use]
-    pub fn live(layout: FdnLayout, controls: FdnControls) -> Self {
+    pub fn new() -> Self {
+        Self {
+            layout: FdnLayout::default(),
+            controls: FdnControls::DEFAULT,
+        }
+    }
+
+    /// The network's lines, their longest decay and whether it can freeze.
+    #[must_use]
+    pub const fn layout(mut self, layout: FdnLayout) -> Self {
+        self.layout = layout;
+        self
+    }
+
+    /// The controls the cells start at.
+    #[must_use]
+    pub const fn controls(mut self, controls: FdnControls) -> Self {
+        self.controls = controls;
+        self
+    }
+}
+
+impl Default for FdnConfig {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<F: Float + Lerp> From<FdnConfig> for FdnNode<F> {
+    /// Allocates: build it before the node goes live.
+    fn from(config: FdnConfig) -> Self {
         let set = FdnSet {
-            freezable: layout.freeze_mode() == FreezeMode::Freezable,
+            freezable: config.layout.freeze_mode() == FreezeMode::Freezable,
         };
-        Self::with_kernel(FdnKernel::new(layout), set, controls)
+        Self::with_kernel(FdnKernel::new(config.layout), set, config.controls)
     }
 }
 

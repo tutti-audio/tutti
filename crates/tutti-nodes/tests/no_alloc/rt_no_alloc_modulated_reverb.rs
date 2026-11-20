@@ -6,8 +6,8 @@
 use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_graph::ParamNode;
 use tutti_nodes::{
-    FreeverbControls, FreeverbNode, ModDelayControls, ModDelayNode, PlateReverbConfig,
-    PlateReverbNode, Stagger, Sweep,
+    FreeverbConfig, FreeverbNode, ModDelayConfig, ModDelayControls, ModDelayLayout, ModDelayNode,
+    PlateReverbConfig, PlateReverbNode, Stagger, Sweep,
 };
 use tutti_units::PhaseIncrement;
 use tutti_units::UnitParam::{
@@ -67,26 +67,28 @@ fn the_swept_delay_corners_are_allocation_free_and_finite() {
     for width in [1u16, 2, 6] {
         for corners in [&CORNERS, &HELD] {
             sweep(
-                || ModDelayNode::<f32>::chorus(bus(width)),
+                || ModDelayNode::<f32>::from(ModDelayConfig::chorus(bus(width))),
                 corners,
                 1.5,
                 None,
             );
             sweep(
-                || ModDelayNode::<f32>::flanger(bus(width)),
+                || ModDelayNode::<f32>::from(ModDelayConfig::flanger(bus(width))),
                 corners,
                 1.5,
                 None,
             );
             sweep(
                 || {
-                    ModDelayNode::<f32>::new(
-                        bus(width),
-                        Sweep::FLANGER,
-                        Stagger::of_step(PhaseIncrement::new(0.37)),
-                        ModDelayControls::FLANGER,
+                    ModDelayNode::<f32>::from(
+                        ModDelayConfig::new(
+                            ModDelayLayout::builder(bus(width), Sweep::FLANGER)
+                                .stagger(Stagger::of_step(PhaseIncrement::new(0.37)))
+                                .build()
+                                .unwrap(),
+                        )
+                        .controls(ModDelayControls::FLANGER),
                     )
-                    .expect("a step fits any width")
                 },
                 corners,
                 1.5,
@@ -95,7 +97,7 @@ fn the_swept_delay_corners_are_allocation_free_and_finite() {
         }
     }
     sweep(
-        || ModDelayNode::<f32>::general_midi_chorus(BusTopology::STEREO),
+        || ModDelayNode::<f32>::from(ModDelayConfig::general_midi_chorus(BusTopology::STEREO)),
         &CORNERS,
         1.5,
         None,
@@ -130,23 +132,28 @@ fn freeverb_corners_are_allocation_free_and_finite() {
     };
     for corners in [&CORNERS, &HELD] {
         sweep(
-            || FreeverbNode::<f32>::live(FreeverbControls::GENERAL_MIDI),
+            || FreeverbNode::<f32>::from(FreeverbConfig::new()),
             corners,
             1.5,
             None,
         );
     }
-    sweep(FreeverbNode::<f32>::general_midi, &HELD, 1.5, None);
+    sweep(
+        || FreeverbNode::<f32>::from(FreeverbConfig::general_midi()),
+        &HELD,
+        1.5,
+        None,
+    );
     // The send has no cells to write: the sweep above drives nothing but its input.
     assert_eq!(
-        FreeverbNode::<f32>::general_midi()
+        FreeverbNode::<f32>::from(FreeverbConfig::general_midi())
             .param_set()
             .params()
             .count(),
         0
     );
     assert_eq!(
-        FreeverbNode::<f32>::live(FreeverbControls::GENERAL_MIDI)
+        FreeverbNode::<f32>::from(FreeverbConfig::new())
             .param_set()
             .params()
             .count(),

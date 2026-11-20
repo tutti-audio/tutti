@@ -70,7 +70,6 @@
 //! LAST Arc drops. Main-thread editor / state / parameter access is on
 //! [`PluginHandle`].
 
-mod capability_view;
 pub(crate) mod fork;
 
 #[cfg(test)]
@@ -92,9 +91,6 @@ mod real_stall_tests;
 #[cfg(all(test, feature = "clap"))]
 mod served_control_tests;
 
-pub use capability_view::TransportView;
-pub(crate) use capability_view::is_declined;
-
 use std::sync::Arc;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::FloatWidth;
@@ -110,10 +106,8 @@ use tutti_plugin_ipc::{
 };
 use tutti_plugin_types::{
     Features, IpcError, IpcResult, LoadStage, LoadedPlugin, MainWorkHandle, MaxBlock,
-    ParameterChanges, PluginDescriptor, PluginInvalidation, PluginRef, PluginTail, Prepare,
-    ResyncClass,
+    ParameterChanges, PluginDescriptor, PluginInvalidation, PluginRef, Prepare, ResyncClass,
 };
-use tutti_units::Normalized;
 use tutti_units::ParamId;
 use tutti_units::{SampleRate, Samples};
 
@@ -597,23 +591,6 @@ impl<S> PluginClient<S> {
         &self.transport_sink
     }
 
-    /// Returns the plugin's reported latency in **frames**: its own figure, without
-    /// the chunk the IPC pipeline adds
-    /// ([`PluginControls::declared_latency`] has both).
-    ///
-    /// RT-safe: one atomic load, no allocation.
-    pub fn latency(&self) -> Samples {
-        self.controls.latency()
-    }
-
-    /// Returns what the plugin currently reports for its tail.
-    ///
-    /// Starts as the value read at load and tracks runtime changes for formats
-    /// that signal them (CLAP).
-    pub fn tail(&self) -> PluginTail {
-        self.controls.tail()
-    }
-
     /// Returns a handle on this node's host-side controls that stays valid
     /// after the node moves into a graph.
     ///
@@ -639,11 +616,6 @@ impl<S> PluginClient<S> {
         &self.loaded
     }
 
-    /// Returns the sample format negotiated with the plugin at load.
-    pub fn format(&self) -> FloatWidth {
-        self.format
-    }
-
     /// Returns the number of audio input ports: main plus sidechain/aux buses.
     pub fn inputs(&self) -> usize {
         self.inputs
@@ -658,64 +630,6 @@ impl<S> PluginClient<S> {
     /// example, the subprocess crashed); the node then outputs silence.
     pub fn is_crashed(&self) -> bool {
         self.bridge.audio().is_crashed()
-    }
-
-    /// How many parameter-change events the plugin sent that the bridge
-    /// dropped, over the client's life: more arrived during one command (a
-    /// preset or state load) than the bridge holds between two listener
-    /// calls, and the oldest went. Each drop also delivers a
-    /// [`PluginRefresh::ParamValues`](tutti_plugin_types::PluginRefresh::ParamValues), so a
-    /// host that re-reads on it loses nothing; latency, tail and resync events
-    /// are never dropped.
-    pub fn dropped_parameter_events(&self) -> u64 {
-        self.bridge.audio().dropped_parameter_events()
-    }
-
-    /// Stores a parameter change for the plugin, sent with its next block: it
-    /// never waits on the block, and a newer write to the parameter replaces one
-    /// no block has taken. The server's own `Control::set_parameter` refuses a
-    /// write to a read-only parameter, and writes nothing; the wire has no reply
-    /// to say so.
-    ///
-    /// Main-thread parameter reads and writes are on
-    /// [`PluginHandle`]; this lets a
-    /// builder set initial values before any handle exists. A control-side call:
-    /// it takes a lock.
-    ///
-    /// # Errors
-    ///
-    /// [`UnknownParam`](tutti_plugin_types::UnknownParam) when the plugin does
-    /// not declare `param_id`.
-    pub fn set_parameter(
-        &self,
-        param_id: ParamId,
-        value: Normalized,
-    ) -> Result<(), tutti_plugin_types::UnknownParam> {
-        self.bridge.set_parameter_value(param_id, value)
-    }
-
-    /// Sends the host [`AutomationMode`](tutti_plugin_types::AutomationMode) to the
-    /// plugin.
-    ///
-    /// RT-safe, fire-and-forget; a no-op for plugins and formats without an
-    /// automation-state concept.
-    pub fn set_automation_state(&self, mode: tutti_plugin_types::AutomationMode) {
-        let _ = self.bridge.set_automation_state_rt(mode);
-    }
-
-    /// Sends the [`RenderMode`](tutti_plugin_types::RenderMode) to the plugin.
-    ///
-    /// Queued on the same command bus as the blocks around it, so the change
-    /// lands between two blocks rather than overtaking one in flight.
-    ///
-    /// Returns whether the command was *queued*, which is not whether the
-    /// plugin honoured it: the server applies it asynchronously, and whether a
-    /// given plugin acts on the mode is the load-time
-    /// [`Features::RENDER_MODE`](tutti_plugin_types::Features) capability the
-    /// caller already has. `false` here means the bridge is crashed or its
-    /// queue is full. The served control answers from any thread.
-    pub fn set_render_mode(&self, mode: tutti_plugin_types::RenderMode) -> bool {
-        self.bridge.audio().set_render_mode(mode)
     }
 
     /// The bridge, for the tests that script or read the server.

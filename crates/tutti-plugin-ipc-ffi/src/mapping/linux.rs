@@ -32,6 +32,10 @@ pub(super) type Slab = OwnedFd;
 
 pub use crate::descriptor::{Connection, SlabWire};
 
+/// Whether the platform rounds an object's length up past what it was sized to
+/// (macOS, to a page): a blob's length is then checked as at least its declared one.
+pub(super) const ROUNDS_UP: bool = false;
+
 /// What the platform keeps beside the mapping: nothing.
 pub(super) type Backing = ();
 
@@ -50,6 +54,20 @@ pub(super) fn create(size: usize) -> Result<(File, Backing, Slab), SlabError> {
 /// The peer's slab as a file to map.
 pub(super) fn open(slab: &Slab) -> Result<(File, Backing), SlabError> {
     Ok((duplicate(slab)?, ()))
+}
+
+/// Writes `bytes` at the start of the freshly made `file`.
+pub(super) fn fill(mut file: &File, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    file.write_all(bytes)
+}
+
+/// Appends the first `len` bytes of `file` to `out`, from the start whatever
+/// offset the descriptor was left at.
+pub(super) fn read_front(mut file: &File, len: usize, out: &mut Vec<u8>) -> std::io::Result<()> {
+    use std::io::{Read, Seek, SeekFrom};
+    file.seek(SeekFrom::Start(0))?;
+    file.take(len as u64).read_to_end(out).map(drop)
 }
 
 /// Checks that `file` is a memory file sealed as [`create`] seals it, and

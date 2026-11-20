@@ -11,7 +11,7 @@ use tutti_buffers::InterleavedMut;
 use tutti_session::Root;
 
 use tutti_music::{BeatsPerBar, MeterChange, MeterMap, NoteValue, TimeSignature};
-use tutti_plugin::catalog::PluginRef;
+use tutti_plugin_types::PluginRef;
 use tutti_session::Session;
 use tutti_units::{Beat, Bpm, SampleRate};
 use tutti_vst2_test_plugin::ProcessCapture;

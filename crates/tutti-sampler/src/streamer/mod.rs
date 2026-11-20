@@ -114,7 +114,7 @@ use tutti_units::SampleRate;
 /// use tutti_sampler::{DiskStreamer, DiskVoice, Open, Placement, Running, VoiceWindow};
 ///
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-/// let executor = tutti_platform::Executor::threaded();
+/// let executor = tutti_platform::Executor::new();
 /// let bells = tutti_rt::Bells::new()?;
 /// let streamer = DiskStreamer::<Running, f32>::start(
 ///     tutti_units::SampleRate::SR_48K,
@@ -151,7 +151,7 @@ use tutti_units::SampleRate;
 ///
 /// ```compile_fail
 /// # fn run() -> tutti_sampler::Result<()> {
-/// let (executor, bells) = (tutti_platform::Executor::threaded(), tutti_rt::Bells::new()?);
+/// let (executor, bells) = (tutti_platform::Executor::new(), tutti_rt::Bells::new()?);
 /// let mut streamer = tutti_sampler::DiskStreamer::<tutti_sampler::Running, f32>::start(
 ///     tutti_units::SampleRate::SR_48K,
 ///     Default::default(),
@@ -200,16 +200,14 @@ impl<F: RingFloat> DiskStreamer<Running, F> {
     ///
     /// Configure with [`DiskStreamerConfig`] (`Default` + struct-update); pass
     /// `Default::default()` for the tuned defaults. Allocates and spawns: control
-    /// thread only. A threaded executor gives the streamer a thread of its own at a
-    /// raised priority; a polled or host executor runs it at the caller's or the
-    /// host's, and a polled one runs it only inside its `poll`.
+    /// thread only. The streamer gets a thread of its own at a raised priority; on the web,
+    /// which has none, it is queued on `executor` and runs only when the caller drives it.
     ///
     /// # Errors
     ///
-    /// [`Error::Spawn`](crate::Error::Spawn) when the executor refuses the future
-    /// (the OS refusing the thread). Every stream and every refill depends on it,
-    /// so there is no streamer to return: a stream command with no consumer would
-    /// stall silently.
+    /// [`Error::Spawn`](crate::Error::Spawn) when the OS refuses the streamer's thread.
+    /// Every stream and every refill depends on it, so there is no streamer to return: a
+    /// stream command with no consumer would stall silently.
     pub fn start(
         sample_rate: impl Into<SampleRate>,
         config: DiskStreamerConfig,
