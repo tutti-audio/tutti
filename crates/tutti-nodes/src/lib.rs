@@ -336,7 +336,9 @@ pub use filter::{
 };
 pub use tutti_dsp::EnvelopeFilterControls;
 pub use tutti_dsp::GraphicBands;
-pub use tutti_dsp::{ButterworthOrder, CutResponse};
+pub use tutti_dsp::{
+    ButterworthOrder, CutResponse, EllipticTolerances, PassbandRipple, StopbandAttenuation,
+};
 // The types in the filter nodes' signatures stay reachable from here; the
 // algorithms behind them (`SvfDesign`, `LadderDesign`, `CrossoverModel`) are
 // `tutti-dsp`'s only.

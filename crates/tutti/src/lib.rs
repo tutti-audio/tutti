@@ -275,9 +275,10 @@ pub mod nodes {
         FrequencyShifterControls, QUADRATURE_ERROR, quadrature_band,
     };
     pub use tutti_dsp::{
-        Biquad, Butterworth, ButterworthOrder, ButterworthOrderError, Cookbook, CutResponse,
-        FirError, LinearPhaseDesign, LinkwitzRiley, Lti, MAX_GRID, MatchedBell, Sos, SosError,
-        System, Tilt,
+        Biquad, Butterworth, ButterworthOrder, ButterworthOrderError, ChebyshevI, ChebyshevII,
+        Cookbook, CutResponse, Elliptic, EllipticTolerances, FirError, LinearPhaseDesign,
+        LinkwitzRiley, Lti, MAX_GRID, MatchedBell, PassbandRipple, PassbandRippleError, Sos,
+        SosError, StopbandAttenuation, StopbandAttenuationError, System, Tilt,
     };
     pub use tutti_dsp::{Lookahead, MaxDecay, MaxDelay, MaxDelayError, PeakDetection};
     pub use tutti_modulation::{
