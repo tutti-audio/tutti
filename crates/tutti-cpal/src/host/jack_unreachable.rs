@@ -1,10 +1,10 @@
 //! JACK, on a build that cannot reach it.
 
 use super::{AudioHost, DeviceHost};
-use crate::error::{Error, Result};
+use crate::error::{DeviceError, Result};
 
 pub(super) fn open() -> Result<DeviceHost> {
-    Err(Error::HostUnavailable {
+    Err(DeviceError::HostUnavailable {
         host: AudioHost::Jack,
         reason: "built without the `jack` feature, or not a JACK platform".into(),
     })
@@ -20,7 +20,7 @@ fn an_unreachable_host_is_refused_rather_than_substituted() {
     assert!(
         matches!(
             err,
-            Error::HostUnavailable {
+            DeviceError::HostUnavailable {
                 host: AudioHost::Jack,
                 ..
             }

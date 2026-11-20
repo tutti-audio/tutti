@@ -6,7 +6,7 @@ use std::sync::Arc;
 use tutti_graph::{NodeKey, PrerollTable};
 use tutti_platform::monotonic_ns;
 use tutti_tempo::TempoMap;
-use tutti_timeline::{FadeOut, MotionEvent, TimedError};
+use tutti_timeline::{FadeOut, MotionCommand, TimedError};
 use tutti_units::{At, Beat, SampleRate, Samples};
 
 use crate::{AppKey, Clock, Playhead, Session};
@@ -63,7 +63,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     ///
     /// [`TimedError::Full`] when the transport's command queue is full; the
     /// event is handed back in it.
-    pub fn play(&self) -> Result<(), TimedError<MotionEvent>> {
+    pub fn play(&self) -> Result<(), TimedError<MotionCommand>> {
         self.transport.handle.play()
     }
 
@@ -73,7 +73,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// # Errors
     ///
     /// [`TimedError::Full`], as [`play`](Self::play).
-    pub fn stop(&self, fade: FadeOut) -> Result<(), TimedError<MotionEvent>> {
+    pub fn stop(&self, fade: FadeOut) -> Result<(), TimedError<MotionCommand>> {
         self.transport.handle.stop(fade)
     }
 
@@ -83,7 +83,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// # Errors
     ///
     /// [`TimedError::Full`], as [`play`](Self::play).
-    pub fn locate(&self, beat: Beat) -> Result<(), TimedError<MotionEvent>> {
+    pub fn locate(&self, beat: Beat) -> Result<(), TimedError<MotionCommand>> {
         self.transport.handle.locate(beat)
     }
 
@@ -98,8 +98,8 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     pub fn schedule(
         &self,
         at: impl Into<At>,
-        event: MotionEvent,
-    ) -> Result<(), TimedError<MotionEvent>> {
+        event: MotionCommand,
+    ) -> Result<(), TimedError<MotionCommand>> {
         self.transport.handle.schedule(at, event)
     }
 

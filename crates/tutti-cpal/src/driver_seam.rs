@@ -19,13 +19,14 @@ use tutti_engine::{
 use tutti_units::{SampleRate, Samples};
 
 use crate::edge::{self, OffsetBinary};
-use crate::error::{Error, Result};
+use crate::error::{DeviceError, Result};
 use crate::owner::Owned;
 
-/// The rate a device reports, or [`Error::InvalidDevice`] when it reports 0 Hz.
+/// The rate a device reports, or [`DeviceError::InvalidDevice`] when it reports 0 Hz.
 pub(crate) fn device_rate(rate: cpal::SampleRate) -> Result<SampleRate> {
-    SampleRate::from_hz(rate)
-        .ok_or_else(|| Error::InvalidDevice("the device reports a sample rate of 0 Hz".into()))
+    SampleRate::from_hz(rate).ok_or_else(|| {
+        DeviceError::InvalidDevice("the device reports a sample rate of 0 Hz".into())
+    })
 }
 
 /// The callback size asked of a device that offers a range: 512 frames
@@ -34,7 +35,7 @@ pub(crate) fn device_rate(rate: cpal::SampleRate) -> Result<SampleRate> {
 pub const PREFERRED_QUANTUM: MaxBlock = MaxBlock::of(Samples::new(512));
 
 /// The [`SampleFormat`] a device's `format` reports in an [`OutputSpec`], or
-/// [`Error::InvalidConfig`] for a type the driver does not build. `I8`, `I16`,
+/// [`DeviceError::InvalidConfig`] for a type the driver does not build. `I8`, `I16`,
 /// `I32`, `F32` and `F64` are themselves; `U8`, `U16` and `U32` are offset
 /// binary and report the signed type of their width.
 pub(crate) fn spec_format(format: cpal::SampleFormat) -> Result<SampleFormat> {
@@ -44,7 +45,7 @@ pub(crate) fn spec_format(format: cpal::SampleFormat) -> Result<SampleFormat> {
         cpal::SampleFormat::I32 | cpal::SampleFormat::U32 => Ok(SampleFormat::I32),
         cpal::SampleFormat::F32 => Ok(SampleFormat::F32),
         cpal::SampleFormat::F64 => Ok(SampleFormat::F64),
-        other => Err(Error::InvalidConfig(format!(
+        other => Err(DeviceError::InvalidConfig(format!(
             "Unsupported sample format: {other:?}"
         ))),
     }
@@ -81,7 +82,7 @@ pub(crate) fn fit(offered: cpal::SampleFormat, wanted: SampleFormat) -> Option<F
 /// Pure, so it is testable with no device.
 ///
 /// # Errors
-/// [`Error::OutputFormatUnavailable`] when no range offers `wanted`.
+/// [`DeviceError::OutputFormatUnavailable`] when no range offers `wanted`.
 pub(crate) fn choose_output_config(
     supported: impl Iterator<Item = cpal::SupportedStreamConfigRange>,
     default: cpal::SupportedStreamConfig,
@@ -101,7 +102,7 @@ pub(crate) fn choose_output_config(
         .filter_map(|r| fit(r.sample_format(), wanted).map(|f| (f, r)))
         .min_by_key(|(f, _)| *f)
         .map(|(_, r)| r.with_sample_rate(rate))
-        .ok_or_else(|| Error::OutputFormatUnavailable {
+        .ok_or_else(|| DeviceError::OutputFormatUnavailable {
             device_name: device_name.to_owned(),
             format: wanted,
         })
@@ -113,7 +114,7 @@ pub(crate) fn spec_from_supported(
     c: &cpal::SupportedStreamConfig,
 ) -> Result<(OutputSpec, cpal::SampleFormat)> {
     if usize::from(c.channels()) > MAX_CHANNELS {
-        return Err(Error::InvalidConfig(format!(
+        return Err(DeviceError::InvalidConfig(format!(
             "the device has {} channels; at most {MAX_CHANNELS} are supported",
             c.channels()
         )));
@@ -180,7 +181,7 @@ impl CpalDriver {
     /// A driver over `device` at the sample type `format` of its config.
     ///
     /// # Errors
-    /// [`Error::InvalidConfig`] for a sample type the driver does not build.
+    /// [`DeviceError::InvalidConfig`] for a sample type the driver does not build.
     pub(crate) fn new(device: cpal::Device, format: cpal::SampleFormat) -> Result<Self> {
         spec_format(format)?;
         Ok(Self { device, format })
@@ -206,7 +207,7 @@ impl RunningStream for CpalStream {
 
 impl<F: Float> StreamDriver<F> for CpalDriver {
     type Running = CpalStream;
-    type Error = Error;
+    type Error = DeviceError;
 
     /// Opens `block` on the device in the device's own sample type. The
     /// graph's `F` converts at the edge by the rule in `Sample`: a signed or
@@ -233,7 +234,7 @@ impl<F: Float> StreamDriver<F> for CpalDriver {
                 // Checked by `CpalDriver::new`.
                 _ => unreachable!("sample format checked at construction"),
             };
-            stream.play().map_err(Error::PlayStream)?;
+            stream.play().map_err(DeviceError::PlayStream)?;
             Ok(stream)
         })
         .map(CpalStream)
@@ -294,7 +295,7 @@ impl CpalDriver {
                 move |err| edge::record(&faults, &err),
                 None,
             )
-            .map_err(Error::BuildStream)
+            .map_err(DeviceError::BuildStream)
     }
 }
 

@@ -1169,7 +1169,7 @@ impl<F: Float> Graph<F> {
     /// # Errors
     ///
     /// What the gather refuses (a graph with no outputs, a node that cannot be
-    /// forked: [`tutti_export::Error::NotForkable`]).
+    /// forked: [`tutti_export::RenderError::NotForkable`]).
     #[cfg(feature = "export")]
     pub(crate) fn gather_for_bounce(
         &self,

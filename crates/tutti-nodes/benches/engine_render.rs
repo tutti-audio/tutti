@@ -55,7 +55,7 @@ use tutti_nodes::testing::Osc;
 use tutti_nodes::{
     BusStripConfig, BusStripNode, EqBandConfig, EqBandNode, SvfFilterConfig, SvfFilterNode, SvfType,
 };
-use tutti_timeline::MotionEvent;
+use tutti_timeline::MotionCommand;
 use tutti_timeline::Transport;
 use tutti_units::SampleRate;
 use tutti_units::{Bpm, Samples};
@@ -115,7 +115,7 @@ fn chain_engine(outputs: usize) -> Engine {
         .expect("within the limits");
 
     transport.settings().set_tempo(Bpm::of(120.0));
-    let _ = transport.motion().try_send(MotionEvent::Play);
+    let _ = transport.motion().try_send(MotionCommand::Play);
     engine
 }
 
