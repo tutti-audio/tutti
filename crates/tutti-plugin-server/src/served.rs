@@ -811,7 +811,7 @@ impl<L: ServerSide> ServerPlugin for Server<L> {
 
     fn set_automation_state(&mut self, main: MainThreadMarker, mode: AutomationMode) {
         if let Some(control) = self.lifecycle.control() {
-            control.set_automation_state(main, mode);
+            let _ = control.set_automation_state(main, mode);
         }
     }
 

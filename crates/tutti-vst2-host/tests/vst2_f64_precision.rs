@@ -1,6 +1,6 @@
 //! `process_f64` must reach `processReplacingF64`, not narrow through f32.
 //!
-//! The host built a `vst::buffer::AudioBuffer<f32>` for both entry points, so
+//! The host built a `vst::AudioBuffer<f32>` for both entry points, so
 //! an f64 block was staged down, rendered at f32, and widened back — while
 //! `Features::F64_AUDIO` told the negotiation layer the chain was 64-bit.
 //! The vendor's `processReplacingF64` call had zero callers in the tree.

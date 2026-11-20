@@ -34,7 +34,7 @@
 //! 9. **Params**: each node op's driven params are in strict port order,
 //!    each a param its unit declares, and each port's event source is a
 //!    read of the op (rules 2–4 cover it like an input). A port has one
-//!    source by construction: its value replaces the base (doc 014 §5.6).
+//!    source by construction: its value replaces the base.
 //!
 //! 8. **Fades** ([`verify_fades`], on a plan *and the delta that installs
 //!    it*): a crossfade's outgoing unit runs on the node op's own input slots
@@ -163,7 +163,7 @@ fn param_reads(plan: &Plan, params: crate::plan::Span) -> impl Iterator<Item = u
 }
 
 /// Each sum op adds at least two addends and at most [`MAX_PORTS`] (a wider
-/// fan-in is a chain of ops, doc 013 "Audio fan-in sums"): one is an alias the
+/// fan-in is a chain of ops): one is an alias the
 /// compiler emits no op for, and the executor's request table holds no more.
 /// A weighted sum may add one (an edge with a gain entry is never an alias),
 /// and lists one lane per addend, within `sum_lanes`, with at least one of

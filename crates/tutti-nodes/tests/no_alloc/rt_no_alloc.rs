@@ -35,6 +35,25 @@ fn convolver_process_is_allocation_free() {
     gate(ConvolverNode::new(Mono::new(&ir), Samples::new(512)));
 }
 #[test]
+fn fir_convolver_process_is_allocation_free() {
+    use tutti_dsp::{LinearPhaseDesign, MatchedBell};
+    use tutti_nodes::FirConvolverConfig;
+    use tutti_units::{Db, Hz, Q};
+
+    let bell = MatchedBell::new(Q::new(1.0), Db::new(6.0))
+        .design(Hz::new(1_000.0), SampleRate::SR_48K)
+        .unwrap();
+    let fir = LinearPhaseDesign::new(Hz::new(100.0))
+        .design(SampleRate::SR_48K, &[bell])
+        .unwrap();
+    gate(
+        FirConvolverConfig::new(tutti_buffers::ChannelLayout::STEREO, &fir)
+            .block_size(Samples::new(64))
+            .build::<f32>()
+            .unwrap(),
+    );
+}
+#[test]
 fn dual_mono_convolver_process_is_allocation_free() {
     use tutti_fixtures::signal::decay_ir;
     use tutti_nodes::ConvolverNode;

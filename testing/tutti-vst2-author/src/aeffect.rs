@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use tutti_vst2_ffi::api::AEffect;
+use tutti_vst2_ffi::AEffect;
 
 use crate::cache::PluginCache;
 use crate::editor::Editor;

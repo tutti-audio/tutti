@@ -115,7 +115,7 @@ pub(crate) struct Options {
     /// The OS MIDI layer's options when it is on
     /// ([`midi_hardware`](Self::midi_hardware)); `None` is no OS MIDI layer.
     #[cfg(feature = "midi-hardware")]
-    midi_hardware: Option<tutti_midi_hardware::MidiHardwareOptions>,
+    midi_hardware: Option<tutti_midi_hardware::MidiHardwareConfig>,
     /// The backend the OS MIDI layer runs over, if not the platform's.
     #[cfg(feature = "midi-hardware")]
     midi_backend: Option<MidiBackend>,
@@ -391,11 +391,10 @@ impl<F: SessionFloat> SessionBuilder<Offline<F>> {
         Self::clock_midi(&parts, &engine);
         self.declare(&mut parts.graph)?;
         let taps = engine.output_taps();
-        let mut engine = engine;
-        let load = engine.take_load_meter();
+        let readings = (engine.load(), engine.blocks());
         let clock = engine.block_clock();
         let mut session = self.session(parts, crate::clock::OfflineEngine { engine }, true)?;
-        session.output.load = load;
+        session.output.readings = Some(readings);
         session.transport.handle.set_clock(clock);
         session.output.taps = Some((taps, layout));
         Ok(session)
@@ -479,7 +478,7 @@ impl<F: SessionFloat> SessionBuilder<SystemClock<F>> {
         let root = self.root_width(layout);
         self.check_placement(root, layout)?;
         let mut parts = self.parts(rate, max_block, Some(max_block), root)?;
-        let mut engine = parts.graph.engine(
+        let engine = parts.graph.engine(
             &parts.transport,
             layout,
             self.opts.device_topology.clone(),
@@ -487,7 +486,7 @@ impl<F: SessionFloat> SessionBuilder<SystemClock<F>> {
         )?;
         Self::clock_midi(&parts, &engine);
         self.declare(&mut parts.graph)?;
-        let load = engine.take_load_meter();
+        let readings = (engine.load(), engine.blocks());
         let taps = engine.output_taps();
         let clock = engine.block_clock();
         let spec = tutti_engine::OutputSpec::new(rate, layout, F::FORMAT).with_quantum(max_block);
@@ -506,7 +505,7 @@ impl<F: SessionFloat> SessionBuilder<SystemClock<F>> {
             },
             true,
         )?;
-        session.output.load = load;
+        session.output.readings = Some(readings);
         session.output.taps = Some((taps, layout));
         // The outputs are timed by the session's one clock reader and the
         // stream's latency, which the timer reports as zero.
@@ -604,7 +603,7 @@ impl<F: SessionFloat> SessionBuilder<crate::DeviceClock<F>> {
         let root = self.root_width(spec.channels);
         self.check_placement(root, spec.channels)?;
         let mut parts = self.parts(spec.sample_rate, LIVE_MAX_BLOCK, spec.quantum, root)?;
-        let mut engine = parts.graph.engine(
+        let engine = parts.graph.engine(
             &parts.transport,
             spec.channels,
             self.opts.device_topology.clone(),
@@ -617,7 +616,7 @@ impl<F: SessionFloat> SessionBuilder<crate::DeviceClock<F>> {
             crate::device::DeviceHandle::vacant(self.opts.host),
             true,
         )?;
-        session.output.load = engine.take_load_meter();
+        session.output.readings = Some((engine.load(), engine.blocks()));
         session.output.taps = Some((engine.output_taps(), spec.channels));
         let clock = engine.block_clock();
         // The outputs are timed by the session's one clock reader and the
@@ -804,13 +803,13 @@ impl<C: Clock> SessionBuilder<C> {
     /// [`Midi::devices`](crate::Midi::devices) and opened by the pool's
     /// [`midi_input`](crate::midi_input) and [`midi_output`](crate::midi_output)
     /// entries, each input feeding the graph through an input node and an event
-    /// inlet of its own, with `options` (where input times come from). Who the
+    /// inlet of its own, with `config` (where input times come from). Who the
     /// session is on the wire (MIDI-CI, its UMP Endpoint) is the session's
     /// [`MidiPolicy`](crate::MidiPolicy). Default off.
     #[cfg(feature = "midi-hardware")]
     #[must_use]
-    pub fn midi_hardware(mut self, options: tutti_midi_hardware::MidiHardwareOptions) -> Self {
-        self.opts.midi_hardware = Some(options);
+    pub fn midi_hardware(mut self, config: tutti_midi_hardware::MidiHardwareConfig) -> Self {
+        self.opts.midi_hardware = Some(config);
         self
     }
 
@@ -823,9 +822,9 @@ impl<C: Clock> SessionBuilder<C> {
     pub fn midi_hardware_over(
         mut self,
         backend: Box<dyn tutti_midi_hardware::MidiEndpoints>,
-        options: tutti_midi_hardware::MidiHardwareOptions,
+        config: tutti_midi_hardware::MidiHardwareConfig,
     ) -> Self {
-        self.opts.midi_hardware = Some(options);
+        self.opts.midi_hardware = Some(config);
         self.opts.midi_backend = Some(MidiBackend(backend));
         self
     }

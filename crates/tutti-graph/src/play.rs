@@ -1,7 +1,7 @@
 //! The graph's **play clock**: a frame count that runs one per frame,
 //! rolling or stopped, restarts at 0 on every play start, and ignores seeks,
 //! loops and tempo. What a free-running (seconds-clocked) modulation layer
-//! reads its phase from (doc 014 §4.3), so its phase is a function of time
+//! reads its phase from, so its phase is a function of time
 //! since the play start, equal live and in an export from the same beat.
 //!
 //! - [`PlayReading`]: the clock at one frame, `(epoch, play)`.

@@ -154,58 +154,44 @@ fn a_pool_load_runs_inside_update() {
     assert_eq!(wave.at(0, LEN - 1), value(LEN - 1));
 }
 
-/// What counts the wakes of a task.
-struct Wakes(std::sync::atomic::AtomicUsize);
-
-impl std::task::Wake for Wakes {
-    fn wake(self: std::sync::Arc<Self>) {
-        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-    }
-}
-
-/// **A dropped session rings its streamer, and the next poll of the streamer's future
-/// ends it.** The session runs on a host executor that keeps every future it is handed.
-/// The streamer's future is polled once, so it waits on its bell with the task's waker
-/// stored; the session is dropped; the next poll ends the future. The wake of the stored
-/// waker itself races the bells' shutdown, and `tutti-rt`'s loom model pins that race;
-/// this asserts it was delivered in the usual case.
+/// **A dropped session ends its streamer: the open stream's source is released.** The
+/// stream is opened from bytes the test also holds, so the source's reference count shows
+/// whether the streamer still holds the stream. The streamer's task waits on its bell;
+/// the session's drop wakes it, and the executor's next poll ends the task and drops the
+/// stream with its source.
 #[test]
-fn a_dropped_session_rings_its_streamer_and_the_next_poll_ends() {
-    use std::future::Future;
-    use std::pin::Pin;
-    use std::sync::{Arc, Mutex};
-    use std::task::{Context, Poll, Waker};
-
-    type Captured = Pin<Box<dyn Future<Output = ()> + Send>>;
-    let captured: Arc<Mutex<Vec<Captured>>> = Arc::default();
-    let keep = Arc::clone(&captured);
-    let s = Session::builder()
+fn a_dropped_session_ends_its_streamer_and_releases_the_streams_source() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let path = dir.path().join("ramp.wav");
+    write_ramp(&path);
+    let bytes: std::sync::Arc<[u8]> = std::fs::read(&path).expect("reads").into();
+    let executor = Executor::polled();
+    let mut s = Session::builder()
         .sample_rate(SampleRate::of(RATE))
-        .executor(Executor::new(move |future| {
-            keep.lock().expect("not poisoned").push(future);
-        }))
+        .executor(executor.clone())
         .build()
-        .expect("a session builds on a host executor");
-    let mut streamer = captured
-        .lock()
-        .expect("not poisoned")
-        .pop()
-        .expect("the session spawned its streamer");
-    let wakes = Arc::new(Wakes(std::sync::atomic::AtomicUsize::new(0)));
-    let waker = Waker::from(Arc::clone(&wakes));
-    let mut cx = Context::from_waker(&waker);
-    assert_eq!(streamer.as_mut().poll(&mut cx), Poll::Pending);
-    assert_eq!(wakes.0.load(std::sync::atomic::Ordering::SeqCst), 0);
-
-    drop(s);
-
+        .expect("a session builds on a polled executor");
+    let id = s
+        .open_stream(std::sync::Arc::clone(&bytes), Placement::HEAD)
+        .expect("a streamer");
+    let landed = updates_until_sampler(&mut s);
     assert!(
-        wakes.0.load(std::sync::atomic::Ordering::SeqCst) > 0,
-        "the session's drop never woke the streamer's task"
+        matches!(landed, Some(SamplerEvent::Opened { id: opened }) if opened == id),
+        "{landed:?}"
     );
+    assert!(
+        std::sync::Arc::strong_count(&bytes) > 1,
+        "the open stream holds its source"
+    );
+    drop(s);
+    assert!(
+        std::sync::Arc::strong_count(&bytes) > 1,
+        "the streamer's task still holds the stream until it is polled"
+    );
+    executor.poll(usize::MAX);
     assert_eq!(
-        streamer.as_mut().poll(&mut cx),
-        Poll::Ready(()),
-        "the woken streamer ends"
+        std::sync::Arc::strong_count(&bytes),
+        1,
+        "the woken streamer ended and dropped the stream"
     );
 }

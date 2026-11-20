@@ -33,7 +33,9 @@
 //!   one as state-variable sections over [`SosCoefficients`].
 //! - **FIR design** (`fir/`): [`FirDesign`] describes a Kaiser windowed-sinc filter (a
 //!   [`FirResponse`], a transition and an attenuation) and designs it at a rate into a
-//!   [`Fir`], failing with a [`FirError`]; [`kaiser_beta`] is the window's parameter.
+//!   [`Fir`], failing with a [`FirError`]; [`LinearPhaseDesign`] takes the product of
+//!   [`Lti`] bands' magnitudes as a target and designs it as a linear-phase [`Fir`];
+//!   [`kaiser_beta`] is the window's parameter.
 //! - **Oversampling** (`oversample/`): [`Oversampling`] describes a cascade of linear-phase
 //!   half-band 2x stages (an [`OversamplingFactor`], an attenuation and a [`Passband`]);
 //!   [`plan`](Oversampling::plan) designs it at a rate into an [`OversamplingPlan`], whose
@@ -46,7 +48,9 @@
 //!   itself) through a [`KeyFilter`] if built with one; the lookahead limiter ([`LimiterBank`],
 //!   its threshold and ceiling [`LimiterSignals`], its lookahead its latency); the brickwall
 //!   clipper ([`BrickwallBank`], its ceiling a per-frame control signal); the transient shaper
-//!   ([`TransientBank`]: one gain from a fast and a slow one-pole envelope); the dynamic EQ
+//!   ([`TransientBank`]: one gain from a fast and a slow one-pole envelope); the loudness
+//!   leveller ([`LevellerBank`]: one gain moving the BS.1770 short-term loudness, over the
+//!   [`ChannelWeight`] of each channel, to a target); the dynamic EQ
 //!   band ([`DynamicEqBank`]: an SVF bell whose gain follows the level of a band-passed key
 //!   through the compressor's static curve, by a [`DynamicMode`]); and the multiband
 //!   compressor ([`MultibandBank`]: a crossover tree per channel and a [`CompressorBank`]
@@ -198,10 +202,11 @@ pub use dither::{DitherNoise, DitherShape};
 pub use dynamics::{
     BandReductions, BandSettings, BankShape, BrickwallBank, BrickwallControls, BrickwallSignals,
     CompressorBank, CompressorControls, CompressorSignals, DynamicEqBank, DynamicEqControls,
-    DynamicMode, GAIN_RAMP, GateBank, GateControls, GateSignals, KeyFilter, KeySource, LimiterBank,
-    LimiterControls, LimiterCurve, LimiterSignals, Lookahead, LookaheadError, MultibandBank,
-    MultibandSettings, MultibandSignals, PeakDetection, TransientBank, TransientControls,
-    TruePeakError, amplitude_to_db, compute_compressor_gain_reduction, compute_limiter_gain,
+    DynamicMode, GAIN_RAMP, GateBank, GateControls, GateSignals, KeyFilter, KeySource,
+    LevellerBank, LevellerControls, LimiterBank, LimiterControls, LimiterCurve, LimiterSignals,
+    Lookahead, LookaheadError, MultibandBank, MultibandSettings, MultibandSignals, PeakDetection,
+    TransientBank, TransientControls, TruePeakError, amplitude_to_db,
+    compute_compressor_gain_reduction, compute_limiter_gain,
 };
 pub use fft::{Complex, Complex32, Complex64, Correlator, FftFloat, FftScratch, RealFft};
 pub use filter::{
@@ -211,7 +216,10 @@ pub use filter::{
     SvfBank, SvfCoefficients, SvfControls, SvfDesign, SvfModel, SvfType, fit_to_rate, ladder_step,
     svf_step,
 };
-pub use fir::{Fir, FirDesign, FirError, FirResponse, MAX_ATTENUATION, kaiser_beta};
+pub use fir::{
+    Fir, FirDesign, FirError, FirResponse, LinearPhaseDesign, MAX_ATTENUATION, MAX_GRID,
+    kaiser_beta,
+};
 pub use interp::{ParabolicPeak, cubic_hermite, lerp, parabolic_peak};
 pub use level::rms;
 pub use loudness::{ChannelWeight, ChannelWeightError, ChannelWeights, channel_weights};

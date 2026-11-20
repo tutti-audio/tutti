@@ -119,6 +119,12 @@ pub struct Transcript {
     /// How many it sent: more than `transports` holds when the plugin kept
     /// only the first.
     pub transports_sent: u32,
+    /// How many times the host told the plugin its automation state: the
+    /// plugin's whole life, not one activation's.
+    pub automation_sent: u32,
+    /// The last raw automation state it was told, in the format's own number
+    /// (0 before any).
+    pub automation_last: u32,
 }
 
 /// A reader over the blob.
@@ -253,6 +259,7 @@ impl Transcript {
                 }
             })
             .collect();
+        let (automation_sent, automation_last) = (c.u32(), c.u32());
         Self {
             mode,
             level,
@@ -267,6 +274,8 @@ impl Transcript {
             overflow,
             transports,
             transports_sent,
+            automation_sent,
+            automation_last,
         }
     }
 

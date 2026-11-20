@@ -1,5 +1,4 @@
-//! Wiring bus to bus (doc 013, "Buses and coercion between declared layouts",
-//! B2): [`BusRef`], [`BusSource`], the spec's `bus_edges`, and the pure
+//! Wiring bus to bus: [`BusRef`], [`BusSource`], the spec's `bus_edges`, and the pure
 //! function that **lowers** a bus edge to weighted lanes.
 //!
 //! A bus edge says "this output bus feeds that input bus". Its meaning is a

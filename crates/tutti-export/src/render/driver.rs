@@ -250,7 +250,7 @@ impl<F: Float> GraphSource<'_, F> {
     /// That is the offline/live split in one line. A `Source`'s pull answers
     /// starved, ended or failed, because it is polled until dry on a clock of
     /// its own. An offline render is driven to a known frame count, so no
-    /// verdict is asked for and this is not a `Source` (doc 025, §5.4).
+    /// verdict is asked for and this is not a `Source`.
     pub(crate) fn render_block(&mut self, want: usize) -> usize {
         let block_size = want.min(self.max_block);
         if block_size == 0 {
