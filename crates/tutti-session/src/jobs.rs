@@ -761,7 +761,7 @@ pub(crate) fn panic_message(payload: &(dyn Any + Send)) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::sync::Mutex;
     use std::sync::mpsc::sync_channel;
@@ -783,10 +783,18 @@ mod tests {
 
     crate::job::job_kind!(Echo => u32, EchoError);
 
-    /// Drops the session's executor with its pending futures unrun, and gives the
-    /// session a fresh polled one.
+    /// Gives the session `fresh` as its executor and drops the old one: the futures
+    /// it still holds are dropped unrun, which ends each of their jobs `Dropped`. The
+    /// caller drops its own clones of the old executor first.
+    pub(crate) fn replace_executor<K: crate::AppKey, C: Clock>(
+        s: &mut Session<K, C>,
+        fresh: Executor,
+    ) {
+        drop(std::mem::replace(&mut s.jobs.executor, fresh));
+    }
+
     fn drop_executor(s: &mut crate::DetachedSession) {
-        drop(std::mem::replace(&mut s.jobs.executor, Executor::polled()));
+        replace_executor(s, Executor::polled());
     }
 
     /// Updates until `done` holds, or panics after a generous wait.

@@ -154,26 +154,44 @@ fn a_pool_load_runs_inside_update() {
     assert_eq!(wave.at(0, LEN - 1), value(LEN - 1));
 }
 
-/// **A dropped session rings its streamer, and the next poll runs it to its end.** The
-/// streamer's future is polled once, so it waits on its bell with the task's waker
-/// stored; the session is dropped, and the drop wakes the task, so the executor's next
-/// poll runs it. The wake itself races the bells' shutdown, and `tutti-rt`'s loom model
-/// pins that race; this asserts it was delivered in the usual case.
+/// **A dropped session ends its streamer: the open stream's source is released.** The
+/// stream is opened from bytes the test also holds, so the source's reference count shows
+/// whether the streamer still holds the stream. The streamer's task waits on its bell;
+/// the session's drop wakes it, and the executor's next poll ends the task and drops the
+/// stream with its source.
 #[test]
-fn a_dropped_session_rings_its_streamer_and_the_next_poll_runs_it() {
+fn a_dropped_session_ends_its_streamer_and_releases_the_streams_source() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let path = dir.path().join("ramp.wav");
+    write_ramp(&path);
+    let bytes: std::sync::Arc<[u8]> = std::fs::read(&path).expect("reads").into();
     let executor = Executor::polled();
-    let s = Session::builder()
+    let mut s = Session::builder()
         .sample_rate(SampleRate::of(RATE))
         .executor(executor.clone())
         .build()
         .expect("a session builds on a polled executor");
-    assert!(executor.poll(usize::MAX) >= 1, "the streamer starts");
-    // The bells' tick thread may wake it again, so the count is a floor.
-
-    drop(s);
-
+    let id = s
+        .open_stream(std::sync::Arc::clone(&bytes), Placement::HEAD)
+        .expect("a streamer");
+    let landed = updates_until_sampler(&mut s);
     assert!(
-        executor.poll(usize::MAX) >= 1,
-        "the session's drop woke the streamer's task, which then ends"
+        matches!(landed, Some(SamplerEvent::Opened { id: opened }) if opened == id),
+        "{landed:?}"
+    );
+    assert!(
+        std::sync::Arc::strong_count(&bytes) > 1,
+        "the open stream holds its source"
+    );
+    drop(s);
+    assert!(
+        std::sync::Arc::strong_count(&bytes) > 1,
+        "the streamer's task still holds the stream until it is polled"
+    );
+    executor.poll(usize::MAX);
+    assert_eq!(
+        std::sync::Arc::strong_count(&bytes),
+        1,
+        "the woken streamer ended and dropped the stream"
     );
 }

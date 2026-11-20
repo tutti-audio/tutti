@@ -2763,6 +2763,14 @@ mod tests {
             out
         }
 
+        /// Drops the jobs that wait unrun, by dropping the executor that holds them:
+        /// each ends `Dropped`, and the end waits for [`land`](Self::land).
+        fn drop_jobs_unrun(&mut self) {
+            let fresh = Executor::polled();
+            drop(std::mem::replace(&mut self.executor, fresh.clone()));
+            crate::jobs::tests::replace_executor(&mut self.session, fresh);
+        }
+
         /// Runs the one job that waits, on another thread, and lands its end.
         fn run_and_land(&mut self) -> Vec<SessionEvent> {
             assert_eq!(self.run_jobs(), 1, "one job waits");
@@ -2809,7 +2817,8 @@ mod tests {
     /// inside the interval ask for nothing; the first at or past it asks
     /// once; while that job is unlanded nothing more is asked, however late
     /// (the job ran, its end is unlanded); landing it stores the bytes and
-    /// restarts the cadence.
+    /// restarts the cadence; a job dropped unrun ends `Dropped` and frees the
+    /// plugin too.
     #[test]
     fn snapshots_are_taken_on_the_interval_one_at_a_time() {
         let mut rig = rig(Some(vec![1, 2, 3]));
@@ -2841,6 +2850,20 @@ mod tests {
         rig.land();
         assert_eq!(rig.plugins_at(6_000), 0, "inside the interval");
         assert_eq!(rig.plugins_at(6_500), 1, "a landed job frees it");
+        // The next job is dropped unrun, and its end lands: the plugin is free
+        // again, on the interval from when it was asked for.
+        rig.land();
+        rig.start_at(12_000);
+        rig.drop_jobs_unrun();
+        let saves = rig.saves.load(Ordering::SeqCst);
+        rig.land();
+        assert_eq!(
+            rig.saves.load(Ordering::SeqCst),
+            saves,
+            "the dropped job never ran"
+        );
+        assert_eq!(rig.plugins_at(12_500), 0, "inside the interval");
+        assert_eq!(rig.plugins_at(13_000), 1, "a dropped job frees it");
     }
 
     /// **A declined save keeps the previous snapshot.** A refusal (the

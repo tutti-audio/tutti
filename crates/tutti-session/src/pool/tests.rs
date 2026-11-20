@@ -137,8 +137,12 @@ fn entry(key: &'static str, probe: Probe) -> Declared<&'static str, Probe> {
 fn events<K: crate::AppKey, C: crate::Clock>(
     session: &mut Session<K, C>,
 ) -> Vec<(&'static str, String)> {
-    session
-        .update()
+    pool_events_of(session.update())
+}
+
+/// The pool events among `events`, as `(key, what)`.
+fn pool_events_of(events: Vec<SessionEvent>) -> Vec<(&'static str, String)> {
+    events
         .into_iter()
         .filter_map(|event| match event {
             SessionEvent::Pool { key, event } => Some((
@@ -315,6 +319,51 @@ fn a_failed_load_reports_and_reads_failed() {
         handle(&s, "a"),
         Err(HandleError::NotLoaded(PoolState::Failed(_)))
     ));
+}
+
+/// A worker whose future the executor dropped unrun ends `Dropped`, and the entry fails
+/// with it. The session's executor is replaced, which drops the load's future.
+#[test]
+fn a_job_dropped_unrun_fails_the_entry() {
+    let (mut s, spawned) = session();
+    let runs = runs();
+    s.pool(entry("a", probe(1, &runs))).unwrap();
+    drop(spawned);
+    crate::jobs::tests::replace_executor(&mut s, Executor::polled());
+    assert!(matches!(s.pool_state(&"a"), Some(PoolState::Loading)));
+    let landed = events(&mut s);
+    assert_eq!(landed.len(), 1);
+    assert!(
+        landed[0].1.contains(&WorkerError::Dropped.to_string()),
+        "{landed:?}"
+    );
+    assert!(matches!(s.pool_state(&"a"), Some(PoolState::Failed(_))));
+    assert_eq!(runs.load(Ordering::SeqCst), 0, "the load never ran");
+}
+
+/// The superseded load's worker ends after the newer one's, and its landing never
+/// wins. The two landings go through the pool's lander in one pass, newer first, as a
+/// worker that finishes last would send them.
+#[test]
+fn a_superseded_load_that_finishes_last_never_wins() {
+    use crate::jobs::JobSession;
+    use crate::pool::Staged;
+    let (mut s, _spawned) = session();
+    let runs = runs();
+    s.pool(entry("a", probe(1, &runs))).unwrap();
+    s.pool(entry("a", probe(2, &runs))).unwrap();
+    // The flights are numbered from 1 in the order the identities were declared.
+    s.land_pool_load(2, None, Ok(Staged::Done(Box::new(200_u32))));
+    s.land_pool_load(1, None, Ok(Staged::Done(Box::new(100_u32))));
+    let mut out = Vec::new();
+    s.pool_events(None, &mut out);
+    assert_eq!(
+        pool_events_of(out),
+        [("a", "loaded".to_owned())],
+        "the superseded landing reports nothing"
+    );
+    assert_eq!(*handle(&s, "a").unwrap().info(), 200, "the newer identity");
+    assert_eq!(state(&s, "a").as_deref(), Some("loaded"));
 }
 
 #[test]
