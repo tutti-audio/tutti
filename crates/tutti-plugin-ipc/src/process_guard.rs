@@ -203,9 +203,9 @@ impl Drop for ProcessGuard {
     /// 2. The drop waits for the task to end, which it does when the process
     ///    is reaped, for the shutdown timeout (none for a server nobody told to
     ///    shut down). A server still running is killed and waited for once
-    ///    more, for [`REAP_PATIENCE`].
+    ///    more, for `REAP_PATIENCE`.
     /// 3. The task is told to stop, and the drop waits for it to end: at its
-    ///    next look, within [`EXIT_SLICE`] (an OS wake or a nap, whichever the
+    ///    next look, within `EXIT_SLICE` (an OS wake or a nap, whichever the
     ///    platform gives). A process the kill did not end is then handed to the
     ///    executor's blocking pool to be reaped there.
     ///
