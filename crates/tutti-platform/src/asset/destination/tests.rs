@@ -5,19 +5,43 @@ use super::Destination;
 
 #[test]
 fn a_str_is_a_path_as_it_is_for_an_asset() {
-    let Destination::Path { path, create_new } = Destination::from("out.wav") else {
+    let Destination::Path(staged) = Destination::from("out.wav") else {
         panic!("a &str is a path");
     };
-    assert_eq!(path.as_ref(), Path::new("out.wav"));
-    assert!(!create_new, "a path replaces by default");
+    assert_eq!(staged.target(), Path::new("out.wav"));
+    assert_eq!(
+        staged.temp().parent(),
+        Some(Path::new("")),
+        "staged beside the target"
+    );
 }
 
 #[test]
-fn create_new_marks_a_path_and_leaves_a_writer_alone() {
-    let Destination::Path { create_new, .. } = Destination::from("out.wav").create_new() else {
-        panic!("a &str is a path");
-    };
-    assert!(create_new);
+fn create_new_refuses_an_existing_file_and_leaves_a_writer_alone() {
+    let dir = tempfile::tempdir().unwrap();
+    let target = dir.path().join("out.bin");
+    std::fs::write(&target, b"old").unwrap();
+    for (destination, refused) in [
+        (Destination::from(&target), false),
+        (Destination::from(&target).create_new(), true),
+    ] {
+        let Destination::Path(staged) = destination else {
+            panic!("a path is a path");
+        };
+        let mut file = staged.open().unwrap();
+        file.write_all(b"new").unwrap();
+        let committed = file.commit();
+        assert_eq!(committed.is_err(), refused);
+        if let Err(error) = committed {
+            assert_eq!(error.kind(), std::io::ErrorKind::AlreadyExists);
+            assert_eq!(std::fs::read(&target).unwrap(), b"old");
+            std::fs::remove_file(error.kept()).unwrap();
+            std::fs::write(&target, b"old").unwrap();
+        } else {
+            assert_eq!(std::fs::read(&target).unwrap(), b"new");
+            std::fs::write(&target, b"old").unwrap();
+        }
+    }
     let mut bytes = Vec::new();
     assert!(matches!(
         Destination::from(&mut bytes).create_new(),

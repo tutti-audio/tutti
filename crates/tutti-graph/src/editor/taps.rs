@@ -53,9 +53,38 @@ impl<F: Float> Editor<F> {
         align: TapAlign,
         capacity: Samples,
     ) -> Result<TapReader<F>, MissingSource> {
+        self.open_tap_ringing(id, sources, align, capacity, None)
+    }
+
+    /// [`open_tap`](Self::open_tap) whose writer rings `bell` after each block it
+    /// writes, whose end rings it too, and whose writer's drop rings it: a reader
+    /// awaiting its frames wakes on the audio thread's ring and never polls.
+    ///
+    /// # Errors
+    ///
+    /// [`MissingSource`] naming the first lane's source that is not in the spec now.
+    pub fn open_tap_with_bell(
+        &mut self,
+        id: TapId,
+        sources: Vec<Source>,
+        align: TapAlign,
+        capacity: Samples,
+        bell: tutti_rt::Bell,
+    ) -> Result<TapReader<F>, MissingSource> {
+        self.open_tap_ringing(id, sources, align, capacity, Some(bell))
+    }
+
+    fn open_tap_ringing(
+        &mut self,
+        id: TapId,
+        sources: Vec<Source>,
+        align: TapAlign,
+        capacity: Samples,
+        bell: Option<tutti_rt::Bell>,
+    ) -> Result<TapReader<F>, MissingSource> {
         self.check_sources(&sources)?;
         self.end_replaced_tap(id);
-        let (reader, writer) = TapReader::named(id, sources.len(), capacity);
+        let (reader, writer) = TapReader::named(id, sources.len(), capacity, bell);
         let opened = TapOpened {
             width: reader.width(),
             end: reader.end_latch(),
@@ -124,7 +153,7 @@ impl<F: Float> Editor<F> {
 
     fn replace_output_tap(&mut self, id: TapId, width: usize, capacity: Samples) -> TapReader<F> {
         self.end_replaced_tap(id);
-        let (reader, writer) = TapReader::named(id, width, capacity);
+        let (reader, writer) = TapReader::named(id, width, capacity, None);
         let opened = TapOpened {
             width: reader.width(),
             end: reader.end_latch(),
@@ -145,7 +174,7 @@ impl<F: Float> Editor<F> {
     fn end_replaced_tap(&mut self, id: TapId) {
         if let Some(Closed { meta, unsent }) = self.taps.close(id) {
             if unsent {
-                meta.end.raise(());
+                meta.end.raise();
             } else {
                 self.link.end_tap(meta.end);
             }

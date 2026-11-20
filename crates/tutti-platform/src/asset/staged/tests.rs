@@ -103,6 +103,7 @@ fn a_refused_commit_keeps_the_complete_file_and_leaves_the_target() {
     assert_eq!(std::fs::read(err.kept()).unwrap(), b"new");
     assert_eq!(std::fs::read(&target).unwrap(), b"old");
     let kept = err.kept().to_path_buf();
+    assert_eq!(err.kind(), ErrorKind::AlreadyExists);
     assert!(err.to_string().contains(&kept.display().to_string()));
     assert_eq!(err.into_source().kind(), ErrorKind::AlreadyExists);
     assert_eq!(

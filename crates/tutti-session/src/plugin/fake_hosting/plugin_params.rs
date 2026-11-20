@@ -1,5 +1,5 @@
 //! A hosted plugin's parameters through the session's views:
-//! `Plugin::params`, `Param`, `TypedParam` and `ParamGesture`, over a fake
+//! `Plugin::params`, `Param`, `Param::try_unit` and `ParamGesture`, over a fake
 //! backend that declares its parameters and records what the host sets (no
 //! `plugin-server`), hosted at a node over `host`.
 
@@ -8,38 +8,56 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use crate::{
-    AnyPlugin, DetachedSession, Key, PluginChange, PluginEvent, PluginParamError,
-    PluginParamRefusal, Session, SessionEvent, SetRefusal, ValueError, ValueErrorKind,
+    AnyPlugin, DetachedSession, Key, PluginChange, PluginEvent, PluginParamRefusal, Session,
+    SessionEvent, SetRefusal, UnitError, ValueError, ValueErrorKind,
 };
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{ForkByClone, NodeKey};
 use tutti_nodes::testing::Const;
 use tutti_plugin_host::{PluginControls, PluginHandle, RefreshSink};
 use tutti_plugin_types::{
-    AnyThread, AutomationMode, AutomationModeError, Health, ParamFlags, ParamUnit, ParameterInfo,
-    PluginFailure, PluginRefresh, PluginTail, RenderMode,
+    AnyThread, AutomationMode, AutomationModeError, Health, LinearRange, ParamFlags, ParamUnit,
+    ParameterInfo, PlainMap, PluginFailure, PluginRefresh, PluginTail, RenderMode,
 };
 use tutti_rt::LockExt;
 use tutti_units::Normalized;
 use tutti_units::ParamId;
-use tutti_units::{Db, Hz, SampleRate, Samples};
+use tutti_units::{Db, Hz, SampleRate, Samples, Seconds, Semitones};
 
 const CUTOFF: ParamId = ParamId::new(1);
 const LEVEL: ParamId = ParamId::new(2);
 const MODE: ParamId = ParamId::new(3);
 const LOCKED: ParamId = ParamId::new(4);
+const TRANSPOSE: ParamId = ParamId::new(5);
+const OPAQUE: ParamId = ParamId::new(6);
+
+/// `cutoff` as the fake declares it: hertz over `20..=20000`, on a line.
+fn cutoff_info() -> ParameterInfo {
+    ParameterInfo::new(CUTOFF, "Cutoff")
+        .with_plain_range(20.0, 20_000.0, 1_000.0)
+        .with_plain_map(PlainMap::Linear(LinearRange::new(20.0, 20_000.0)))
+        .with_measures(Some(ParamUnit::Hertz))
+}
 
 /// What a plugin declares: `cutoff` in hertz over `20..=20000`, `level` in
-/// decibels over `-60..=12`, `mode` with no unit and a read-only `locked`.
+/// decibels over `-60..=12`, `mode` with no unit, a read-only `locked`,
+/// `transpose` in whole semitones over `-12..=12`, and `opaque`, which declares
+/// seconds but no map (the plugin defines it, as a VST3 parameter does).
 fn declared() -> Vec<ParameterInfo> {
     vec![
-        ParameterInfo::new(CUTOFF, "Cutoff")
-            .with_plain_range(20.0, 20_000.0, 1_000.0)
-            .with_measures(Some(ParamUnit::Hertz)),
+        cutoff_info(),
         ParameterInfo::new(LEVEL, "Level")
             .with_plain_range(-60.0, 12.0, 0.0)
+            .with_plain_map(PlainMap::Linear(LinearRange::new(-60.0, 12.0)))
             .with_measures(Some(ParamUnit::Decibels)),
         ParameterInfo::new(MODE, "Mode").with_normalized_default(0.0),
+        ParameterInfo::new(TRANSPOSE, "Transpose")
+            .with_plain_range(-12.0, 12.0, 0.0)
+            .with_plain_map(PlainMap::Stepped(LinearRange::new(-12.0, 12.0)))
+            .with_measures(Some(ParamUnit::Semitones)),
+        ParameterInfo::new(OPAQUE, "Opaque")
+            .with_plain_range(0.0, 10.0, 5.0)
+            .with_measures(Some(ParamUnit::Seconds)),
         ParameterInfo::new(LOCKED, "Locked")
             .with_normalized_default(0.25)
             .with_flags(ParamFlags::READ_ONLY, ParamFlags::READ_ONLY),
@@ -62,7 +80,14 @@ impl Fake {
     fn new() -> Arc<Self> {
         let fake = Arc::new(Self::default());
         *fake.infos.lock_recover() = declared();
-        for (id, value) in [(CUTOFF, 0.5), (LEVEL, 0.25), (MODE, 0.0), (LOCKED, 0.25)] {
+        for (id, value) in [
+            (CUTOFF, 0.5),
+            (LEVEL, 0.25),
+            (MODE, 0.0),
+            (LOCKED, 0.25),
+            (TRANSPOSE, 0.5),
+            (OPAQUE, 0.5),
+        ] {
             fake.values.lock_recover().insert(id, Normalized::of(value));
         }
         fake
@@ -110,6 +135,9 @@ impl AnyThread for Fake {
         id: ParamId,
         value: Normalized,
     ) -> Result<(), tutti_plugin_types::UnknownParam> {
+        if !self.infos.lock_recover().iter().any(|i| i.id() == id) {
+            return Err(tutti_plugin_types::UnknownParam(id));
+        }
         if self.held.load(std::sync::atomic::Ordering::SeqCst) {
             self.pending.lock_recover().push((id, value));
         } else {
@@ -294,139 +322,200 @@ fn a_gesture_on_a_read_only_parameter_never_begins() {
     let locked = s.plugin_view(node).unwrap().params().get(LOCKED).unwrap();
     assert!(matches!(
         locked.edit(),
-        Err(PluginParamError::ReadOnly(id)) if id == LOCKED
+        Err(PluginParamRefusal::ReadOnly(id)) if id == LOCKED
     ));
     assert!(changes(update(&mut s)).is_empty());
     assert!(fake.sets().is_empty());
 }
 
-/// **`typed::<Db>` on a parameter that measures hertz is refused**, once, when
-/// the handle is made; `typed::<Hz>` on it is accepted, and one on a parameter
-/// that declares no unit is refused for that.
+/// **`try_unit::<Db>` on a parameter that measures hertz is `UnitMismatch`**,
+/// once, when the target is made; `try_unit::<Hz>` on it is accepted.
 #[test]
-fn a_typed_handle_of_the_wrong_unit_is_refused() {
+fn a_unit_target_of_the_wrong_unit_is_a_mismatch() {
     let (s, node, _, _) = ready();
     let params = s.plugin_view(node).unwrap().params();
+    let try_unit = |id| params.get(id).unwrap();
     assert!(matches!(
-        params.typed::<Db>(CUTOFF),
-        Err(PluginParamError::UnitMismatch { id, declared: ParamUnit::Hertz, .. }) if id == CUTOFF
+        try_unit(CUTOFF).try_unit::<Db>(),
+        Err(UnitError::UnitMismatch { id, declared: ParamUnit::Hertz, .. }) if id == CUTOFF
     ));
     assert!(matches!(
-        params.typed::<Hz>(LEVEL),
-        Err(PluginParamError::UnitMismatch {
+        try_unit(LEVEL).try_unit::<Hz>(),
+        Err(UnitError::UnitMismatch {
             declared: ParamUnit::Decibels,
             ..
         })
     ));
-    assert!(params.typed::<Hz>(CUTOFF).is_ok());
-    assert!(params.typed::<Db>(LEVEL).is_ok());
-    assert!(matches!(
-        params.typed::<Hz>(MODE),
-        Err(PluginParamError::NoUnit(id)) if id == MODE
-    ));
+    assert!(try_unit(CUTOFF).try_unit::<Hz>().is_ok());
+    assert!(try_unit(LEVEL).try_unit::<Db>().is_ok());
 }
 
-/// **A typed parameter reads and writes in its unit through the plugin's own
-/// map**: the fake's linear map over `20..=20000` is the oracle (`Hz::new(10010)` is
-/// the middle, position `0.5`), a value outside the declared range is refused,
-/// and the position the plugin was given is the one its map names.
+/// **`try_unit` on a parameter with no map is `NoUnit`**: one that declares no
+/// unit, and one that declares a unit but whose map the plugin defines.
 #[test]
-fn a_typed_parameter_goes_through_the_range_and_the_plugins_map() {
-    let (s, node, fake, _) = ready();
-    let cutoff = s
-        .plugin_view(node)
-        .unwrap()
-        .params()
-        .typed::<Hz>(CUTOFF)
-        .unwrap();
+fn a_unit_target_without_a_unit_or_a_map_is_no_unit() {
+    let (s, node, _, _) = ready();
+    let params = s.plugin_view(node).unwrap().params();
+    assert_eq!(
+        params.get(MODE).unwrap().try_unit::<Hz>(),
+        Err(UnitError::NoUnit(MODE))
+    );
+    assert_eq!(
+        params.get(OPAQUE).unwrap().try_unit::<Seconds>(),
+        Err(UnitError::NoUnit(OPAQUE))
+    );
+}
+
+/// The refusal of a value call as a `SetRefusal`, or a panic naming what it
+/// did instead.
+fn set_refusal(result: Result<(), ValueError<&'static str>>) -> SetRefusal {
+    match result {
+        Err(ValueError {
+            kind: ValueErrorKind::Refused(refusal),
+            ..
+        }) => refusal,
+        other => panic!("a refusal was expected: {other:?}"),
+    }
+}
+
+/// **A unit write lands as the line says**: the fake's line over `20..=20000`
+/// is the oracle (`Hz::new(10010)` is the middle, position `0.5`), `get` reads
+/// the value back in hertz, and the position the plugin was given is the one the
+/// line names.
+#[test]
+fn a_linear_unit_write_lands_the_position_the_line_names() {
+    let (mut s, key, fake, _) = session_keyed();
+    let _ = update(&mut s);
+    let cutoff = cutoff(&s, key.erase()).try_unit::<Hz>().unwrap();
     // The fake started it at 0.5: 20 + 19980 / 2.
-    assert_eq!(cutoff.get(), Ok(Hz::new(10_010.0)));
+    assert_eq!(s.get(cutoff).unwrap(), Hz::new(10_010.0));
 
-    cutoff.set(Hz::new(20.0 + 19_980.0 * 0.25)).unwrap();
+    s.set(cutoff.to(Hz::new(20.0 + 19_980.0 * 0.25))).unwrap();
     assert_eq!(fake.sets(), [(CUTOFF, 0.25)]);
-    assert_eq!(
-        cutoff.get(),
-        Ok(Hz::new(5_015.0)),
-        "read-your-writes, in Hz"
-    );
-    assert_eq!(cutoff.param().normalized(), Normalized::of(0.25));
-
-    assert_eq!(
-        cutoff.set(Hz::new(30_000.0)),
-        Err(PluginParamError::OutOfRange(CUTOFF))
-    );
-    assert_eq!(
-        cutoff.set(Hz::new(10.0)),
-        Err(PluginParamError::OutOfRange(CUTOFF))
-    );
-    assert_eq!(fake.sets().len(), 1, "a refused value reaches nothing");
+    assert_eq!(s.get(cutoff).unwrap(), Hz::new(5_015.0), "read-your-writes");
+    assert_eq!(s.get(key.param(CUTOFF)).unwrap(), Normalized::of(0.25));
 }
 
-/// **A typed read of a plugin that stops answering its map is an error**, not
-/// the declared default: the fake declared `1000 Hz` as the default, and once it
-/// answers no plain value `get` names the parameter instead of reading it.
+/// **A stepped unit write lands the position its step names**: a whole step
+/// lands at `(step + 12) / 24`, and a value between two steps reads back as the
+/// nearer one, the way the stepped map rounds.
 #[test]
-fn a_typed_read_of_a_silent_plugin_is_an_error_not_the_default() {
-    let (s, node, fake, _) = ready();
-    let cutoff = s
-        .plugin_view(node)
+fn a_stepped_unit_write_reads_back_the_step_the_map_rounds_to() {
+    let (mut s, key, fake, _) = session_keyed();
+    let _ = update(&mut s);
+    let transpose = s
+        .plugin_view(key)
         .unwrap()
         .params()
-        .typed::<Hz>(CUTOFF)
+        .get(TRANSPOSE)
+        .unwrap()
+        .try_unit::<Semitones>()
         .unwrap();
-    assert_eq!(cutoff.get(), Ok(Hz::new(10_010.0)));
+    s.set(transpose.to(Semitones::new(6.0))).unwrap();
+    assert_eq!(fake.sets(), [(TRANSPOSE, 0.75)]);
+    assert_eq!(s.get(transpose).unwrap(), Semitones::new(6.0));
 
-    fake.infos.lock_recover().clear();
-    assert_eq!(cutoff.get(), Err(PluginParamError::NoPlainValue(CUTOFF)));
+    s.set(transpose.to(Semitones::new(-2.6))).unwrap();
+    assert_eq!(
+        fake.sets()[1],
+        (TRANSPOSE, 0.375),
+        "the plugin is sent the step's position"
+    );
+    assert_eq!(s.get(transpose).unwrap(), Semitones::new(-3.0));
 }
 
-/// **A typed write of a NaN or an infinity is `NotFinite`, not `OutOfRange`**,
-/// and a finite value outside the range is still `OutOfRange`; nothing reaches
-/// the plugin.
+/// **A unit write outside the declared range is `OutOfRange`, and a NaN or an
+/// infinity is `NotFinite`**; nothing reaches the plugin.
 #[test]
-fn a_non_finite_typed_write_is_not_finite_and_out_of_range_stays_out_of_range() {
-    let (s, node, fake, _) = ready();
-    let cutoff = s
-        .plugin_view(node)
-        .unwrap()
-        .params()
-        .typed::<Hz>(CUTOFF)
-        .unwrap();
+fn a_unit_write_outside_the_range_or_not_finite_is_refused() {
+    let (mut s, key, fake, _) = session_keyed();
+    let _ = update(&mut s);
+    let cutoff = cutoff(&s, key.erase()).try_unit::<Hz>().unwrap();
     for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
         assert_eq!(
-            cutoff.set(Hz::new(bad)),
-            Err(PluginParamError::NotFinite(CUTOFF)),
+            set_refusal(s.set(cutoff.to(Hz::new(bad)))),
+            SetRefusal::NotFinite,
             "{bad}"
         );
     }
-    assert_eq!(
-        cutoff.set(Hz::new(30_000.0)),
-        Err(PluginParamError::OutOfRange(CUTOFF))
-    );
+    for out in [30_000.0, 10.0] {
+        assert_eq!(
+            set_refusal(s.set(cutoff.to(Hz::new(out)))),
+            SetRefusal::OutOfRange,
+            "{out}"
+        );
+    }
     assert!(fake.sets().is_empty());
 }
 
-/// **An id the plugin does not declare is refused**, by `get` and by `typed`,
-/// and before the parameters are read nothing resolves.
+/// **The unit is read at every call, never kept by the target**: a rescan that
+/// leaves `cutoff` without its unit refuses both the write and the read of a
+/// target made before it with `NoUnit`, and a rescan that moves its unit to
+/// decibels refuses them as a mismatch.
+#[test]
+fn a_rescan_that_removes_the_unit_refuses_a_unit_target_made_before_it() {
+    let (mut s, key, fake, refresh) = session_keyed();
+    let _ = update(&mut s);
+    let cutoff = cutoff(&s, key.erase()).try_unit::<Hz>().unwrap();
+    s.set(cutoff.to(Hz::new(100.0))).unwrap();
+    let written = s.get(key.param(CUTOFF)).unwrap();
+
+    let rescan = |s: &mut DetachedSession, info: ParameterInfo| {
+        *fake.infos.lock_recover() = vec![info];
+        refresh.fire(PluginRefresh::ParamTitles);
+        let _ = update(s);
+    };
+    rescan(
+        &mut s,
+        ParameterInfo::new(CUTOFF, "Cutoff").with_normalized_default(0.5),
+    );
+    let unit = |refusal| SetRefusal::Plugin(PluginParamRefusal::Unit(refusal));
+    assert_eq!(
+        set_refusal(s.set(cutoff.to(Hz::new(200.0)))),
+        unit(UnitError::NoUnit(CUTOFF))
+    );
+    assert_eq!(
+        set_refusal(s.get(cutoff).map(drop)),
+        unit(UnitError::NoUnit(CUTOFF))
+    );
+    assert_eq!(fake.sets().len(), 1, "the refused write reached nothing");
+    assert_eq!(s.get(key.param(CUTOFF)).unwrap(), written);
+
+    rescan(
+        &mut s,
+        cutoff_info()
+            .with_plain_range(-60.0, 12.0, 0.0)
+            .with_measures(Some(ParamUnit::Decibels)),
+    );
+    assert!(matches!(
+        set_refusal(s.set(cutoff.to(Hz::new(200.0)))),
+        SetRefusal::Plugin(PluginParamRefusal::Unit(UnitError::UnitMismatch {
+            declared: ParamUnit::Decibels,
+            ..
+        }))
+    ));
+}
+
+/// **An id the plugin does not declare is refused**, by `get`, and before the
+/// parameters are read nothing resolves.
 #[test]
 fn an_unknown_id_is_refused_and_an_unread_plugin_resolves_nothing() {
     let (mut s, node, _, _) = session();
     let params = s.plugin_view(node).unwrap().params();
     assert!(!params.is_ready());
-    assert!(matches!(params.get(CUTOFF), Err(PluginParamError::NotRead)));
+    assert!(matches!(
+        params.get(CUTOFF),
+        Err(PluginParamRefusal::NotRead)
+    ));
 
     let _ = update(&mut s);
     let params = s.plugin_view(node).unwrap().params();
     assert!(params.is_ready());
-    assert_eq!(params.len(), 4);
+    assert_eq!(params.len(), 6);
     let unknown = ParamId::new(99);
     assert!(matches!(
         params.get(unknown),
-        Err(PluginParamError::Unknown(id)) if id == unknown
-    ));
-    assert!(matches!(
-        params.typed::<Hz>(unknown),
-        Err(PluginParamError::Unknown(id)) if id == unknown
+        Err(PluginParamRefusal::UnknownParam(id)) if id == unknown
     ));
 }
 
@@ -443,9 +532,7 @@ fn a_rescan_replaces_the_declarations_and_the_values_with_them() {
     // The plugin drops `mode` and gains `shape`, and moves `cutoff`.
     let shape = ParamId::new(7);
     *fake.infos.lock_recover() = vec![
-        ParameterInfo::new(CUTOFF, "Cutoff")
-            .with_plain_range(20.0, 20_000.0, 1_000.0)
-            .with_measures(Some(ParamUnit::Hertz)),
+        cutoff_info(),
         ParameterInfo::new(shape, "Shape").with_normalized_default(0.5),
     ];
     fake.values
@@ -471,7 +558,7 @@ fn a_rescan_replaces_the_declarations_and_the_values_with_them() {
     );
 
     let params = s.plugin_view(node).unwrap().params();
-    assert!(matches!(params.get(MODE), Err(PluginParamError::Unknown(id)) if id == MODE));
+    assert!(matches!(params.get(MODE), Err(PluginParamRefusal::UnknownParam(id)) if id == MODE));
     assert_eq!(params.get(shape).unwrap().normalized(), Normalized::of(0.5));
     assert_eq!(
         params.get(CUTOFF).unwrap().normalized(),
@@ -481,28 +568,21 @@ fn a_rescan_replaces_the_declarations_and_the_values_with_them() {
     assert_eq!(params.len(), 2);
 }
 
-/// **A value the host sets reads back at once**, the text and the plain value
-/// go through the plugin, and a value set from text is the one the plugin read.
+/// **The text and the plain value come from the plugin**: the fake's line is
+/// the oracle for the plain value, and the text follows a write.
 #[test]
 fn text_and_plain_values_go_through_the_plugin() {
-    let (s, node, fake, _) = ready();
-    let level = s.plugin_view(node).unwrap().params().get(LEVEL).unwrap();
-    assert_eq!(level.plain(), Some(-60.0 + 72.0 * 0.25));
+    let (mut s, key, _, _) = session_keyed();
+    let _ = update(&mut s);
+    fn level(s: &DetachedSession, key: Key<AnyPlugin>) -> crate::Param<'_> {
+        s.plugin_view(key).unwrap().params().get(LEVEL).unwrap()
+    }
+    assert_eq!(level(&s, key).plain(), Some(-60.0 + 72.0 * 0.25));
 
-    assert_eq!(level.set_plain(-24.0).unwrap(), Normalized::of(0.5));
-    assert_eq!(level.normalized(), Normalized::of(0.5));
-    assert_eq!(level.text().as_deref(), Some("0.50 units"));
-
-    assert_eq!(level.set_text("0.75 units").unwrap(), Normalized::of(0.75));
-    assert_eq!(level.normalized(), Normalized::of(0.75));
-    assert_eq!(
-        level.set_text("loud"),
-        Err(PluginParamError::UnreadableText {
-            id: LEVEL,
-            text: "loud".into()
-        })
-    );
-    assert_eq!(fake.sets(), [(LEVEL, 0.5), (LEVEL, 0.75)]);
+    s.set(key.param(LEVEL).to(Normalized::of(0.5))).unwrap();
+    assert_eq!(level(&s, key).normalized(), Normalized::of(0.5));
+    assert_eq!(level(&s, key).plain(), Some(-24.0));
+    assert_eq!(level(&s, key).text().as_deref(), Some("0.50 units"));
 }
 
 /// **A plugin parameter is targeted by the same reference a native one is**
@@ -611,7 +691,7 @@ fn a_gesture_spans_updates_and_refuses_once_the_plugin_is_gone() {
     s.remove(node).unwrap();
     assert_eq!(
         gesture.set(Normalized::of(0.9)),
-        Err(PluginParamError::Gone(CUTOFF))
+        Err(PluginParamRefusal::UnknownParam(CUTOFF))
     );
     drop(gesture);
     assert_eq!(fake.sets().len(), 2, "nothing was sent blind");
@@ -634,7 +714,7 @@ fn a_gesture_on_a_parameter_the_rescan_dropped_is_refused() {
     let _ = update(&mut s);
     assert_eq!(
         gesture.set(Normalized::of(0.5)),
-        Err(PluginParamError::Gone(CUTOFF))
+        Err(PluginParamRefusal::UnknownParam(CUTOFF))
     );
 }
 
@@ -852,4 +932,89 @@ fn a_replace_by_another_plugin_has_no_target_until_its_read_lands() {
     assert!(other.sets().is_empty());
     let _ = update(&mut s);
     s.set(key.param(CUTOFF).to(Normalized::of(0.3))).unwrap();
+}
+
+/// **A write to a parameter the plugin dropped is counted as refused, and the
+/// re-read makes the id no target.** The plugin drops `cutoff` and the session
+/// has not read the new list yet, so the write passes the session's check; the
+/// plugin refuses it, the write is counted in the plugin's losses, and after the
+/// read lands `set` fails with `NoSuchTarget`.
+#[test]
+fn a_write_to_a_parameter_a_rescan_dropped_is_counted_and_then_no_target() {
+    let (mut s, key, fake, refresh) = session_keyed();
+    let _ = update(&mut s);
+    let refused = |s: &DetachedSession| s.plugin_view(key).unwrap().losses().refused;
+    assert_eq!(refused(&s), 0);
+
+    *fake.infos.lock_recover() =
+        vec![ParameterInfo::new(MODE, "Mode").with_normalized_default(0.0)];
+    s.set(key.param(CUTOFF).to(Normalized::of(0.8))).unwrap();
+    assert_eq!(refused(&s), 1, "the plugin's refusal is counted");
+    assert!(fake.sets().is_empty(), "the plugin took nothing");
+
+    refresh.fire(PluginRefresh::ParamTitles);
+    let _ = update(&mut s);
+    assert!(no_such_target(
+        s.set(key.param(CUTOFF).to(Normalized::of(0.8)))
+    ));
+    assert_eq!(
+        refused(&s),
+        1,
+        "a write that is refused at the call is not counted"
+    );
+}
+
+/// **One plugin parameter named in two value types in one batch is refused**:
+/// a position write and a hertz write to `cutoff`, in either order, fail at the
+/// second item with `MixedValueTypes` and land nothing; two writes in one type
+/// stay last-wins, landing the analytic position of the last.
+#[test]
+fn a_batch_naming_one_parameter_in_two_units_is_refused() {
+    let (mut s, key, fake, _) = session_keyed();
+    let _ = update(&mut s);
+    let hz = cutoff(&s, key.erase()).try_unit::<Hz>().unwrap();
+    let position = key.param(CUTOFF);
+
+    let Err(error) = s.set((position.to(Normalized::of(0.1)), hz.to(Hz::new(5_015.0)))) else {
+        panic!("a mixed pair is refused");
+    };
+    assert_eq!(
+        (error.at, error.kind),
+        (1, ValueErrorKind::Refused(SetRefusal::MixedValueTypes))
+    );
+    let Err(error) = s.set((hz.to(Hz::new(5_015.0)), position.to(Normalized::of(0.1)))) else {
+        panic!("a mixed pair is refused in the other order");
+    };
+    assert_eq!(error.at, 1);
+    assert_eq!(s.get(position).unwrap(), Normalized::of(0.5));
+    assert!(fake.sets().is_empty(), "a refused batch lands nothing");
+
+    s.set((
+        hz.to(Hz::new(100.0)),
+        hz.to(Hz::new(20.0 + 19_980.0 * 0.75)),
+    ))
+    .unwrap();
+    assert_eq!(fake.sets(), [(CUTOFF, 0.75)]);
+}
+
+/// **A rescan to another range with the unit kept moves a target made before it
+/// to the new map once the re-read lands**: `150 Hz` on `100..=200` is position
+/// `0.5`.
+#[test]
+fn a_rescan_to_another_range_converts_a_target_made_before_it_with_the_new_map() {
+    let (mut s, key, fake, refresh) = session_keyed();
+    let _ = update(&mut s);
+    let cutoff = cutoff(&s, key.erase()).try_unit::<Hz>().unwrap();
+
+    *fake.infos.lock_recover() = vec![
+        cutoff_info()
+            .with_plain_range(100.0, 200.0, 100.0)
+            .with_plain_map(PlainMap::Linear(LinearRange::new(100.0, 200.0))),
+    ];
+    refresh.fire(PluginRefresh::ParamTitles);
+    let _ = update(&mut s);
+
+    s.set(cutoff.to(Hz::new(150.0))).unwrap();
+    assert_eq!(fake.sets(), [(CUTOFF, 0.5)]);
+    assert_eq!(s.get(cutoff).unwrap(), Hz::new(150.0));
 }
