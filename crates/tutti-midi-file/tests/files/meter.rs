@@ -2,6 +2,7 @@
 //! bar and beat: SMF 1.0 section 3.3 gives the numerator and the denominator as a
 //! power of two.
 
+use crate::common::read_bytes;
 use crate::common::{metrical, sequences};
 use tutti_midi_file::MidiFile;
 use tutti_music::{BeatsPerBar, Meter, TimeSignature};
@@ -20,7 +21,7 @@ fn smf(format: u16, tracks: &[&[u8]]) -> MidiFile {
         bytes.extend((body.len() as u32).to_be_bytes());
         bytes.extend(body);
     }
-    MidiFile::from_bytes(&bytes).expect("reads")
+    read_bytes(&bytes).expect("reads")
 }
 
 /// 3/4 at tick 0, then 6/8 from tick 1440 (beat 3, the downbeat of bar 2).

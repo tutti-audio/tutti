@@ -222,11 +222,11 @@ fn with_main_thread(session: crate::DetachedSession) -> crate::DetachedSession {
 }
 
 #[test]
-fn a_worker_stage_runs_on_the_spawners_thread_and_finishes_the_load() {
+fn a_worker_stage_runs_on_the_executors_thread_and_finishes_the_load() {
     let (mut s, spawned) = session();
     let log = Log::default();
     s.pool(declare(&stub("a", How::Worker, &log))).unwrap();
-    assert!(log.entries().is_empty(), "the stage waits for the spawner");
+    assert!(log.entries().is_empty(), "the stage waits for the executor");
     assert_eq!(state(&s, "a").as_deref(), Some("loading"));
     let worker = thread::spawn({
         let spawned = spawned.clone();
@@ -433,7 +433,7 @@ fn at_most_the_configured_worker_stages_run_and_the_rest_start_in_declaration_or
     let spawned = Spawned::default();
     let held = spawned.clone();
     let mut s = Session::builder()
-        .spawn_with(move |job| held.0.lock().unwrap().push(job))
+        .executor(held.executor())
         .build_detached(tutti_units::SampleRate::SR_48K)
         .unwrap();
     let names = ["a", "b", "c", "d", "e"];
@@ -471,7 +471,7 @@ fn the_parallel_cap_is_the_builders() {
     let spawned = Spawned::default();
     let held = spawned.clone();
     let mut s = Session::builder()
-        .spawn_with(move |job| held.0.lock().unwrap().push(job))
+        .executor(held.executor())
         .pool_config(PoolConfig::new().with_parallel_loads(std::num::NonZeroUsize::new(2).unwrap()))
         .build_detached(tutti_units::SampleRate::SR_48K)
         .unwrap();
@@ -486,7 +486,7 @@ fn a_queued_load_superseded_before_it_starts_never_runs() {
     let spawned = Spawned::default();
     let held = spawned.clone();
     let mut s = Session::builder()
-        .spawn_with(move |job| held.0.lock().unwrap().push(job))
+        .executor(held.executor())
         .pool_config(PoolConfig::new().with_parallel_loads(std::num::NonZeroUsize::new(1).unwrap()))
         .build_detached(tutti_units::SampleRate::SR_48K)
         .unwrap();

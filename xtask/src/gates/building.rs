@@ -638,15 +638,9 @@ pub(super) const ALLOW: &[Allow] = &[
     ),
     ty(
         "crates/tutti-midi-file/src/file.rs",
-        "MidiFile::from_bytes",
-        CTOR,
-        "decoding a MIDI file's bytes: the failure is the bytes', not a value's",
-    ),
-    ty(
-        "crates/tutti-midi-file/src/file.rs",
         "MidiFile::read",
         CTOR,
-        "reading a MIDI file from disk: the failure is the file's or the OS's, not a value's",
+        "reading a MIDI file from a source: the failure is the source's or its bytes', not a value's",
     ),
     ty(
         "crates/tutti-midi-hardware/src/devices.rs",

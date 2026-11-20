@@ -2098,7 +2098,6 @@ mod tests {
     #[test]
     fn a_bounce_is_refused_while_a_declared_pool_entry_is_pending() {
         use crate::{Declared, Life, Load, PoolEntry, PoolKey};
-        use std::sync::Mutex;
 
         struct Slow;
         impl PoolEntry for Slow {
@@ -2111,10 +2110,9 @@ mod tests {
             }
             fn handle(_: &(), _: &Life) {}
         }
-        let held = Arc::new(Mutex::new(Vec::new()));
-        let spawned = Arc::clone(&held);
+        let held = tutti_fixtures::HeldFutures::new();
         let mut session = Session::builder()
-            .spawn_with(move |job| spawned.lock().unwrap().push(job))
+            .executor(held.executor())
             .build_detached(RATE)
             .unwrap();
         let (dc, _) = session
@@ -2128,9 +2126,7 @@ mod tests {
             }
             other => panic!("refused naming the pending entry, got {other:?}"),
         }
-        for job in held.lock().unwrap().drain(..) {
-            job.run();
-        }
+        held.run_all();
         let _ = session.update();
         assert!(session.bounce(short()).is_ok(), "landed, so it renders");
     }
