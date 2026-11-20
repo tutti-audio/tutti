@@ -19,6 +19,7 @@ use super::super::limits::{MediaType, ResourceId, ResourceName, SubscribeId};
 use super::super::partial::{JsonPointer, PartialUpdate, PartialValue};
 use super::super::reassemble::{BufferLimit, PeFlowControl, PeReassemblyLimits, StreamLimit};
 use super::super::tree::PeJson;
+use super::cache::PeCacheScope;
 use super::state::StateDevice;
 use super::*;
 use crate::Initiator;
@@ -815,6 +816,14 @@ impl Script {
         script.events.clear();
         script.sent.clear();
         script
+    }
+
+    /// The script with its Initiator keeping the cache `scope`.
+    pub(super) fn cache_scope(self, scope: PeCacheScope) -> Self {
+        Self {
+            init: self.init.cache_scope(scope),
+            ..self
+        }
     }
 
     /// The instant the script began at.
