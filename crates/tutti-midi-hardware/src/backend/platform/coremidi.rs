@@ -1,10 +1,10 @@
 //! The macOS platform: CoreMIDI.
 
 use crate::InputProducerHandle;
-use crate::endpoints::{InputConnection, MidiEndpoints};
+use crate::endpoints::MidiEndpoints;
 use crate::error::Result;
-use crate::virtual_endpoint::{SourceBackend, VirtualProtocol, VirtualSpec};
-use tutti_platform::Executor;
+use crate::virtual_endpoint::{DestinationBackend, SourceBackend, VirtualProtocol, VirtualSpec};
+use tutti_platform::{Executor, MainThreadMarker};
 
 /// Returns this platform's MIDI backend.
 pub(crate) fn active(_executor: &Executor) -> Box<dyn MidiEndpoints> {
@@ -14,8 +14,9 @@ pub(crate) fn active(_executor: &Executor) -> Box<dyn MidiEndpoints> {
 /// Publishes the virtual source `spec` describes.
 pub(crate) fn open_virtual_source(
     spec: &VirtualSpec,
+    main: MainThreadMarker,
 ) -> Result<(Box<dyn SourceBackend>, VirtualProtocol)> {
-    let source = super::coremidi::UmpVirtualSource::open(spec)?;
+    let source = super::coremidi::UmpVirtualSource::open(spec, main)?;
     Ok((Box::new(source), spec.protocol))
 }
 
@@ -24,8 +25,9 @@ pub(crate) fn open_virtual_destination(
     _executor: &Executor,
     spec: &VirtualSpec,
     producer: InputProducerHandle,
-) -> Result<(Box<dyn InputConnection>, VirtualProtocol)> {
-    let destination = super::coremidi::UmpVirtualDestination::open(spec, producer)?;
+    main: MainThreadMarker,
+) -> Result<(Box<dyn DestinationBackend>, VirtualProtocol)> {
+    let destination = super::coremidi::UmpVirtualDestination::open(spec, producer, main)?;
     Ok((Box::new(destination), spec.protocol))
 }
 

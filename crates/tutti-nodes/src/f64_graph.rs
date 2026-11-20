@@ -8,19 +8,20 @@ use crate::test_support::{F64_TOLERANCE, assert_linear, render_f64};
 use crate::{
     AutoPanConfig, AutoPanNode, BellFilterConfig, BellFilterNode, BitCrusherConfig, BitCrusherNode,
     BrickwallLimiterConfig, BrickwallLimiterNode, ButterworthOrder, CompressorConfig,
-    CompressorControls, CompressorNode, CrossoverNode, CutAlignment, CutFilterConfig,
-    CutFilterNode, CutResponse, DcBlockerConfig, DcBlockerNode, DelayNode, DistortionNode,
-    DynamicEqConfig, DynamicEqNode, EnvelopeFilterConfig, EnvelopeFilterNode, FdnNode,
-    FreeverbNode, GateConfig, GateControls, GateNode, LadderFilterNode, LimiterConfig,
-    LimiterControls, LimiterNode, MaxDelay, ModDelayNode, PhaserControls, PhaserNode,
-    PlateReverbConfig, PlateReverbNode, RingModConfig, RingModNode, StereoWidthConfig,
-    StereoWidthNode, SvfFilterNode, TiltFilterConfig, TiltFilterNode, TransientShaperConfig,
-    TransientShaperNode, TremoloConfig, TremoloNode,
+    CompressorControls, CompressorNode, CrossoverConfig, CrossoverControls, CrossoverNode,
+    CutAlignment, CutFilterConfig, CutFilterNode, CutResponse, DcBlockerConfig, DcBlockerNode,
+    DelayConfig, DelayNode, DistortionConfig, DistortionNode, DynamicEqConfig, DynamicEqNode,
+    EnvelopeFilterConfig, EnvelopeFilterNode, FdnConfig, FdnNode, FreeverbConfig, FreeverbNode,
+    GateConfig, GateControls, GateNode, LadderFilterConfig, LadderFilterNode, LimiterConfig,
+    LimiterControls, LimiterNode, MaxDelay, ModDelayConfig, ModDelayNode, PhaserConfig,
+    PhaserControls, PhaserNode, PlateReverbConfig, PlateReverbNode, RingModConfig, RingModNode,
+    StereoWidthConfig, StereoWidthNode, SvfFilterConfig, SvfFilterNode, TiltFilterConfig,
+    TiltFilterNode, TransientShaperConfig, TransientShaperNode, TremoloConfig, TremoloNode,
 };
 use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_dsp::{
-    DelayControls, FdnControls, FdnLayout, FreeverbControls, FreezeMode, LadderType, ShapeKind,
-    Stages, SvfType,
+    DelayControls, DelayLayout, FdnLayout, FreeverbControls, FreezeMode, InterpolationMode,
+    LadderType, ShapeKind, Stages, SvfType,
 };
 use tutti_fixtures::signal::{assert_close_f64, wide_signal};
 use tutti_graph::IntoNode;
@@ -50,12 +51,16 @@ fn on(channels: usize, x: &[f64]) -> Vec<Vec<f64>> {
 fn the_delay_returns_a_wide_signal_sixteen_frames_on() {
     const RATE: SampleRate = SampleRate::of(1_024.0);
     let x = wide_signal(256);
-    let node = DelayNode::<f64>::mono(
-        MaxDelay::of(Seconds::new(0.5)),
-        DelayControls {
+    let node = DelayNode::<f64>::from(
+        DelayConfig::new(DelayLayout::new(
+            BusTopology::MONO,
+            MaxDelay::of(Seconds::new(0.5)),
+            InterpolationMode::Linear,
+        ))
+        .controls(DelayControls {
             time: Seconds::new(16.0 / RATE.get()),
             ..DelayControls::DEFAULT
-        },
+        }),
     );
     let want: Vec<f64> = (0..256usize)
         .map(|n| n.checked_sub(16).map_or(0.0, |k| x[k]))
@@ -149,7 +154,9 @@ fn the_distortion_is_the_softsign_curve_of_a_wide_signal() {
     let x = wide_signal(300);
     let h = 1.7;
     let want: Vec<f64> = x.iter().map(|&x| h * x / (1.0 + (h * x).abs())).collect();
-    let node = DistortionNode::<f64>::new(ShapeKind::Softsign, Drive::new(1.7));
+    let node = DistortionNode::<f64>::from(
+        DistortionConfig::new(ChannelLayout::STEREO, ShapeKind::Softsign).drive(Drive::new(1.7)),
+    );
     assert_close_f64(&render(node, RATE, &on(1, &x))[0], &want, F64_TOLERANCE);
 }
 
@@ -217,7 +224,11 @@ fn the_filters_pass_a_wide_constant_at_unity_gain() {
     let held = vec![DC; FRAMES];
     let input = on(1, &held);
     let settled = |out: Vec<Vec<f64>>| out[0][FRAMES - 1];
-    let svf = SvfFilterNode::<f64>::new(SvfType::LowPass, Hz::new(1_000.0), Q::new(0.707));
+    let svf = SvfFilterNode::<f64>::from(
+        SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
+            .freq(Hz::new(1_000.0))
+            .q(Q::new(0.707)),
+    );
     assert!(
         (settled(render(svf, RATE, &input)) - DC).abs() <= F64_TOLERANCE,
         "svf"
@@ -258,13 +269,13 @@ fn the_filters_pass_a_wide_constant_at_unity_gain() {
         (settled(render(envelope, RATE, &input)) - DC).abs() <= F64_TOLERANCE,
         "envelope"
     );
-    let phaser = PhaserNode::<f64>::mono(
-        Stages::of(4),
-        PhaserControls {
+    let phaser = PhaserNode::<f64>::try_from(
+        PhaserConfig::new(BusTopology::MONO, Stages::of(4)).controls(PhaserControls {
             feedback: Feedback::new(0.0),
             ..PhaserControls::DEFAULT
-        },
-    );
+        }),
+    )
+    .unwrap();
     assert!(
         (settled(render(phaser, RATE, &input)) - DC).abs() <= F64_TOLERANCE,
         "phaser"
@@ -276,7 +287,11 @@ fn the_filters_pass_a_wide_constant_at_unity_gain() {
 fn the_crossover_bands_sum_to_a_wide_constant() {
     const DC: f64 = 0x2000_0001 as f64 / 2_147_483_648.0;
     const FRAMES: usize = 16_384;
-    let node = CrossoverNode::<f64>::new(ChannelLayout::MONO, &[Hz::new(1_000.0)]).unwrap();
+    let node = CrossoverNode::<f64>::try_from(CrossoverConfig::new(
+        BusTopology::MONO,
+        CrossoverControls::try_from(&[Hz::new(1_000.0)][..]).unwrap(),
+    ))
+    .unwrap();
     let out = render(node, RATE, &on(1, &vec![DC; FRAMES]));
     let sum = out[0][FRAMES - 1] + out[1][FRAMES - 1];
     assert!((sum - DC).abs() <= F64_TOLERANCE, "{sum} against {DC}");
@@ -288,8 +303,11 @@ fn the_crossover_bands_sum_to_a_wide_constant() {
 fn the_ladder_settles_a_wide_constant_to_its_saturation() {
     const DC: f64 = 0x2000_0001 as f64 / 2_147_483_648.0;
     const FRAMES: usize = 4_096;
-    let node =
-        LadderFilterNode::<f64>::new(LadderType::LP24, Hz::new(5_000.0), Resonance::new(0.0));
+    let node = LadderFilterNode::<f64>::from(
+        LadderFilterConfig::new(ChannelLayout::MONO, LadderType::LP24)
+            .freq(Hz::new(5_000.0))
+            .res(Resonance::new(0.0)),
+    );
     let out = render(node, RATE, &on(1, &vec![DC; FRAMES]));
     assert!(
         (out[0][FRAMES - 1] - DC.tanh()).abs() <= F64_TOLERANCE,
@@ -304,13 +322,17 @@ fn the_ladder_settles_a_wide_constant_to_its_saturation() {
 fn the_linear_nodes_satisfy_superposition() {
     assert_linear(
         || {
-            DelayNode::<f64>::mono(
-                MaxDelay::of(Seconds::new(0.05)),
-                DelayControls {
+            DelayNode::<f64>::from(
+                DelayConfig::new(DelayLayout::new(
+                    BusTopology::MONO,
+                    MaxDelay::of(Seconds::new(0.05)),
+                    InterpolationMode::Linear,
+                ))
+                .controls(DelayControls {
                     time: Seconds::new(0.01),
                     feedback: Feedback::new(0.6),
                     ..DelayControls::DEFAULT
-                },
+                }),
             )
         },
         RATE,
@@ -318,23 +340,26 @@ fn the_linear_nodes_satisfy_superposition() {
         2_400,
     );
     assert_linear(
-        || ModDelayNode::<f64>::chorus(tutti_buffers::BusTopology::MONO),
-        RATE,
-        1,
-        2_400,
-    );
-    assert_linear(
-        || PhaserNode::<f64>::mono(Stages::of(4), PhaserControls::DEFAULT),
+        || ModDelayNode::<f64>::from(ModDelayConfig::chorus(tutti_buffers::BusTopology::MONO)),
         RATE,
         1,
         2_400,
     );
     assert_linear(
         || {
-            FreeverbNode::<f64>::live(FreeverbControls {
+            PhaserNode::<f64>::try_from(PhaserConfig::new(BusTopology::MONO, Stages::of(4)))
+                .unwrap()
+        },
+        RATE,
+        1,
+        2_400,
+    );
+    assert_linear(
+        || {
+            FreeverbNode::<f64>::from(FreeverbConfig::new().controls(FreeverbControls {
                 room: Mix::new(0.7),
                 damp: Mix::new(0.3),
-            })
+            }))
         },
         SampleRate::SR_44K1,
         1,
@@ -348,10 +373,9 @@ fn the_linear_nodes_satisfy_superposition() {
     );
     assert_linear(
         || {
-            FdnNode::<f64>::live(
+            FdnNode::<f64>::from(FdnConfig::new().layout(
                 FdnLayout::new(8, tutti_dsp::MaxDecay::DEFAULT, FreezeMode::Decaying).unwrap(),
-                FdnControls::DEFAULT,
-            )
+            ))
         },
         SampleRate::SR_44K1,
         1,
@@ -364,13 +388,25 @@ fn the_linear_nodes_satisfy_superposition() {
         2_400,
     );
     assert_linear(
-        || SvfFilterNode::<f64>::new(SvfType::BandPass, Hz::new(1_000.0), Q::new(2.0)),
+        || {
+            SvfFilterNode::<f64>::from(
+                SvfFilterConfig::new(ChannelLayout::MONO, SvfType::BandPass)
+                    .freq(Hz::new(1_000.0))
+                    .q(Q::new(2.0)),
+            )
+        },
         RATE,
         1,
         2_400,
     );
     assert_linear(
-        || CrossoverNode::<f64>::new(ChannelLayout::STEREO, &[Hz::new(1_000.0)]).unwrap(),
+        || {
+            CrossoverNode::<f64>::try_from(CrossoverConfig::new(
+                BusTopology::STEREO,
+                CrossoverControls::try_from(&[Hz::new(1_000.0)][..]).unwrap(),
+            ))
+            .unwrap()
+        },
         RATE,
         2,
         2_400,

@@ -7,18 +7,18 @@ use std::collections::BTreeSet;
 
 /// Which way a device is being enumerated.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum Direction {
+pub enum DeviceDirection {
     /// A playback device.
     Output,
     /// A capture device.
     Input,
 }
 
-impl std::fmt::Display for Direction {
+impl std::fmt::Display for DeviceDirection {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
-            Direction::Output => "output",
-            Direction::Input => "input",
+            DeviceDirection::Output => "output",
+            DeviceDirection::Input => "input",
         })
     }
 }
@@ -133,19 +133,19 @@ impl Snapshot {
 
     /// The devices of `direction`.
     #[must_use]
-    pub fn devices(&self, direction: Direction) -> &[DeviceId] {
+    pub fn devices(&self, direction: DeviceDirection) -> &[DeviceId] {
         match direction {
-            Direction::Output => &self.outputs,
-            Direction::Input => &self.inputs,
+            DeviceDirection::Output => &self.outputs,
+            DeviceDirection::Input => &self.inputs,
         }
     }
 
     /// The default of `direction`.
     #[must_use]
-    pub fn default_of(&self, direction: Direction) -> Option<&DeviceId> {
+    pub fn default_of(&self, direction: DeviceDirection) -> Option<&DeviceId> {
         match direction {
-            Direction::Output => self.default_output.as_ref(),
-            Direction::Input => self.default_input.as_ref(),
+            DeviceDirection::Output => self.default_output.as_ref(),
+            DeviceDirection::Input => self.default_input.as_ref(),
         }
     }
 }
@@ -154,11 +154,11 @@ impl Snapshot {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DeviceChange {
     /// A device is listed that was not.
-    Appeared(Direction, DeviceId),
+    Appeared(DeviceDirection, DeviceId),
     /// A device is no longer listed.
-    Vanished(Direction, DeviceId),
+    Vanished(DeviceDirection, DeviceId),
     /// The default of a direction moved; `None`: there is none now.
-    DefaultChanged(Direction, Option<DeviceId>),
+    DefaultChanged(DeviceDirection, Option<DeviceId>),
 }
 
 /// The devices seen at the last [`apply`](Self::apply). Before the first,
@@ -183,7 +183,7 @@ impl DeviceRoster {
 
     /// Whether `id` was present in `direction` at the last snapshot.
     #[must_use]
-    pub fn contains(&self, direction: Direction, id: &DeviceId) -> bool {
+    pub fn contains(&self, direction: DeviceDirection, id: &DeviceId) -> bool {
         self.seen.devices(direction).contains(id)
     }
 
@@ -192,7 +192,7 @@ impl DeviceRoster {
     /// list order), then a moved default.
     pub fn apply(&mut self, next: Snapshot) -> Vec<DeviceChange> {
         let mut out = Vec::new();
-        for direction in [Direction::Output, Direction::Input] {
+        for direction in [DeviceDirection::Output, DeviceDirection::Input] {
             let before = self.seen.devices(direction);
             let after = next.devices(direction);
             let before_set: BTreeSet<&DeviceId> = before.iter().collect();

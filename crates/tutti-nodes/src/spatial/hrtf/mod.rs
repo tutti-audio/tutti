@@ -9,4 +9,4 @@
 
 mod node;
 
-pub use node::HrtfBinauralNode;
+pub use node::{HrtfBinauralConfig, HrtfBinauralNode};

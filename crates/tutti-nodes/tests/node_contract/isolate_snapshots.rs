@@ -18,13 +18,15 @@ use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_graph::ParamNode;
 use tutti_graph::contract::IsolateRow;
 use tutti_nodes::{
-    AutoPanConfig, AutoPanNode, BrickwallLimiterConfig, BrickwallLimiterNode, BusStripNode,
-    ChannelTimes, CompressorConfig, CompressorControls, CompressorNode, DelayControls, DelayLayout,
-    DelayNode, DistortionNode, DynamicEqConfig, DynamicEqNode, EqBandNode, GateConfig,
-    GateControls, GateNode, InterpolationMode, KeySource, LadderFilterNode, LadderType, LfoNode,
-    LfoShape, LimiterConfig, LimiterControls, LimiterNode, MaxDelay, ModDelayNode, PhaserControls,
-    PhaserNode, RingModConfig, RingModNode, ShapeKind, Stages, SvfControls, SvfFilterNode, SvfType,
-    TremoloConfig, TremoloNode,
+    AutoPanConfig, AutoPanNode, BrickwallLimiterConfig, BrickwallLimiterNode, BusStripConfig,
+    BusStripNode, ChannelTimes, CompressorConfig, CompressorControls, CompressorNode,
+    ConvolverNode, DelayConfig, DelayControls, DelayLayout, DelayNode, DistortionConfig,
+    DistortionNode, DynamicEqConfig, DynamicEqNode, EqBandConfig, EqBandNode, GateConfig,
+    GateControls, GateNode, InterpolationMode, KeySource, LadderFilterConfig, LadderFilterNode,
+    LadderType, LfoNode, LfoShape, LimiterConfig, LimiterControls, LimiterNode, MaxDelay,
+    ModDelayConfig, ModDelayNode, PhaserConfig, PhaserControls, PhaserNode, RingModConfig,
+    RingModNode, ShapeKind, Stages, SvfFilterConfig, SvfFilterNode, SvfType, TremoloConfig,
+    TremoloNode,
 };
 use tutti_nodes::{
     BellFilterConfig, BellFilterNode, BitCrusherConfig, BitCrusherNode, ButterworthOrder,
@@ -153,21 +155,19 @@ fn brickwall_limiter() {
 #[test]
 fn delay_line() {
     IsolateRow::new("DelayNode (stereo, ping-pong)", || {
-        let layout = DelayLayout::new(
+        let layout = DelayLayout::builder(
             BusTopology::STEREO,
             MaxDelay::of(Seconds::new(1.0)),
             InterpolationMode::Linear,
         )
-        .with_times(ChannelTimes::each(&[Seconds::new(0.07)]).unwrap())
+        .times(ChannelTimes::try_from(&[Seconds::new(0.07)][..]).unwrap())
+        .build()
         .unwrap();
-        DelayNode::<f32>::from_layout(
-            layout,
-            DelayControls {
-                time: Seconds::new(0.05),
-                feedback: Feedback::new(0.5_f64),
-                cross_feedback: Feedback::new(0.3_f64),
-            },
-        )
+        DelayNode::<f32>::from(DelayConfig::new(layout).controls(DelayControls {
+            time: Seconds::new(0.05),
+            feedback: Feedback::new(0.5_f64),
+            cross_feedback: Feedback::new(0.3_f64),
+        }))
     })
     .control("delay time", |d| {
         assert!(d.param_set().set(UnitParam::DelayTime, 0.08));
@@ -184,7 +184,9 @@ fn delay_line() {
 #[test]
 fn distortion() {
     IsolateRow::new("DistortionNode (stereo)", || {
-        DistortionNode::<f32>::new(ShapeKind::Tanh, Drive::new(2.0))
+        DistortionNode::<f32>::from(
+            DistortionConfig::new(ChannelLayout::STEREO, ShapeKind::Tanh).drive(Drive::new(2.0)),
+        )
     })
     .control("drive", |d| {
         assert!(d.param_set().set(UnitParam::Drive, 8.0))
@@ -441,7 +443,7 @@ fn lfo() {
 #[test]
 fn chorus() {
     IsolateRow::new("ModDelayNode (stereo chorus)", || {
-        ModDelayNode::<f32>::chorus(BusTopology::STEREO)
+        ModDelayNode::<f32>::from(ModDelayConfig::chorus(BusTopology::STEREO))
     })
     .control("rate", |c| assert!(c.param_set().set(UnitParam::Rate, 3.0)))
     .control("depth", |c| {
@@ -456,13 +458,13 @@ fn chorus() {
 #[test]
 fn phaser() {
     IsolateRow::new("PhaserNode (stereo, 4 stages)", || {
-        PhaserNode::<f32>::stereo(
-            Stages::of(4),
-            PhaserControls {
+        PhaserNode::<f32>::try_from(
+            PhaserConfig::new(BusTopology::STEREO, Stages::of(4)).controls(PhaserControls {
                 feedback: Feedback::new(0.3_f64),
                 ..PhaserControls::DEFAULT
-            },
+            }),
         )
+        .unwrap()
     })
     .control("rate", |p| assert!(p.param_set().set(UnitParam::Rate, 3.0)))
     .control("depth", |p| {
@@ -503,10 +505,10 @@ fn plate_reverb() {
 #[test]
 fn ladder() {
     IsolateRow::new("LadderFilterNode (LP12)", || {
-        LadderFilterNode::<f32>::new(
-            LadderType::LP12,
-            Hz::new(1_000.0),
-            Resonance::new_clamped(0.3),
+        LadderFilterNode::<f32>::from(
+            LadderFilterConfig::new(ChannelLayout::MONO, LadderType::LP12)
+                .freq(Hz::new(1_000.0))
+                .res(Resonance::new_clamped(0.3)),
         )
     })
     .control("cutoff", |l| {
@@ -527,35 +529,34 @@ fn ladder() {
 /// unit tests run it).
 #[test]
 fn svf() {
-    tutti_graph::contract::assert_param_fork(SvfFilterNode::<f32>::with_controls(
-        ChannelLayout::MONO,
-        SvfControls {
-            ty: SvfType::Bell,
-            freq: Hz::new(1_000.0),
-            q: Q::new(0.7),
-            gain: Db::new(6.0),
-        },
+    tutti_graph::contract::assert_param_fork(SvfFilterNode::<f32>::from(
+        SvfFilterConfig::new(ChannelLayout::MONO, SvfType::Bell)
+            .freq(Hz::new(1_000.0))
+            .q(Q::new(0.7))
+            .gain(Db::new(6.0)),
     ));
 }
 
 #[test]
 fn eq_band() {
-    tutti_graph::contract::assert_param_fork(EqBandNode::<f32>::new(
-        SvfType::Bell,
-        Hz::new(1_000.0),
-        Q::new(0.7),
-        Db::new(6.0),
+    tutti_graph::contract::assert_param_fork(EqBandNode::<f32>::from(
+        EqBandConfig::new(SvfType::Bell)
+            .freq(Hz::new(1_000.0))
+            .q(Q::new(0.7))
+            .gain(Db::new(6.0)),
     ));
 }
 
 #[test]
 fn bus_strip() {
-    IsolateRow::new("BusStripNode (stereo)", BusStripNode::stereo)
-        .control("volume", |s| s.set_volume(Amplitude::new(0.5)))
-        .control("balance", |s| {
-            assert!(ParamNode::<f32>::param_set(s).set(UnitParam::Balance, -0.7))
-        })
-        .check();
+    IsolateRow::new("BusStripNode (stereo)", || {
+        BusStripNode::from(BusStripConfig::new(BusTopology::STEREO))
+    })
+    .control("volume", |s| s.volume().store(Amplitude::new(0.5)))
+    .control("balance", |s| {
+        assert!(ParamNode::<f32>::param_set(s).set(UnitParam::Balance, -0.7))
+    })
+    .check();
 }
 #[test]
 fn fir_convolver() {
@@ -570,17 +571,17 @@ fn fir_convolver() {
         .design(SampleRate::SR_48K, &[tilt])
         .unwrap();
     IsolateRow::new("ConvolverNode (FirConvolverConfig)", move || {
-        FirConvolverConfig::new(tutti_buffers::ChannelLayout::MONO, &fir)
-            .block_size(Samples::new(64))
-            .build::<f32>()
-            .unwrap()
+        ConvolverNode::<f32>::try_from(
+            FirConvolverConfig::new(tutti_buffers::BusTopology::MONO, &fir)
+                .block_size(Samples::new(64)),
+        )
+        .unwrap()
     })
-    .control("gain", |c| c.set_gain(Amplitude::new(0.3)))
+    .control("gain", |c| c.gain().store(Amplitude::new(0.3)))
     .check();
 }
 #[test]
 fn convolver() {
-    use tutti_nodes::ConvolverNode;
     // A short decaying tail: a fixed LCG, so the IR is the same every run.
     let ir: Vec<f32> = (0..512u32)
         .map(|n| {
@@ -590,8 +591,20 @@ fn convolver() {
         })
         .collect();
     IsolateRow::new("ConvolverNode (mono)", move || {
-        ConvolverNode::new(Mono::new(&ir), Samples::new(64))
+        mono_node(Mono::new(&ir), Samples::new(64))
     })
-    .control("gain", |c| c.set_gain(Amplitude::new(0.3)))
+    .control("gain", |c| c.gain().store(Amplitude::new(0.3)))
     .check();
+}
+
+/// A one-channel convolver over `ir`.
+fn mono_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::Sample>(
+    ir: tutti_buffers::Mono<'_, S>,
+    block_size: tutti_units::Samples,
+) -> tutti_nodes::ConvolverNode<F> {
+    tutti_nodes::ConvolverNode::try_from(
+        tutti_nodes::ConvolverConfig::new(tutti_buffers::BusTopology::MONO, &[ir])
+            .block_size(block_size),
+    )
+    .expect("one response on a mono bus")
 }

@@ -22,7 +22,7 @@ use crate::error::Result;
 use crate::output::FileTarget;
 use crate::process::dither_shape;
 use crate::render::{PlaneSource, REPLAY_BLOCK, RenderPlan, Replay};
-use crate::{Error, Written};
+use crate::{RenderError, Written};
 use std::path::Path;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::{
@@ -146,7 +146,7 @@ struct EncoderSink<S> {
     layout: ChannelLayout,
     /// Frames the encoder accepted, which is what the file holds.
     frames: Samples,
-    error: Option<Error>,
+    error: Option<RenderError>,
     format: std::marker::PhantomData<S>,
 }
 
@@ -175,14 +175,14 @@ impl<S: Sample> Sink for EncoderSink<S> {
             return Err(SinkFailed);
         }
         if block.layout() != self.layout {
-            self.error = Some(Error::from(std::io::Error::new(
+            self.error = Some(RenderError::from(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 "a block of another width than the encoder's",
             )));
             return Err(SinkFailed);
         }
         self.encoder.write(block).map_err(|e| {
-            self.error = Some(Error::from(e));
+            self.error = Some(RenderError::from(e));
             SinkFailed
         })?;
         self.frames += block.frames();
@@ -231,7 +231,7 @@ impl<F: Float> Quantized<F> {
     }
 
     /// The error the encoder stashed when it refused a write.
-    fn take_error(&mut self) -> Option<Error> {
+    fn take_error(&mut self) -> Option<RenderError> {
         match self {
             Self::Float(sink) => sink.error.take(),
             Self::Int16(sink) => sink.get_mut().error.take(),
@@ -320,7 +320,7 @@ impl<F: FftFloat> Chain<F> {
         let layout = target.channels();
         let ch = usize::from(layout.count());
         if ch == 0 {
-            return Err(crate::Error::UnsupportedChannels);
+            return Err(crate::RenderError::UnsupportedChannels);
         }
         let resampler = resampler_for(target, source_rate, ch)?;
         Ok(Self {
@@ -376,7 +376,7 @@ impl<F: FftFloat> Chain<F> {
     }
 
     /// The error the encoder stashed when it refused a write.
-    fn failure(&mut self) -> Error {
+    fn failure(&mut self) -> RenderError {
         failure_of(&mut self.sink)
     }
 
@@ -387,9 +387,9 @@ impl<F: FftFloat> Chain<F> {
     }
 }
 
-fn failure_of<F: Float>(sink: &mut Quantized<F>) -> Error {
+fn failure_of<F: Float>(sink: &mut Quantized<F>) -> RenderError {
     sink.take_error()
-        .unwrap_or_else(|| Error::from(std::io::Error::other("the encoder refused a write")))
+        .unwrap_or_else(|| RenderError::from(std::io::Error::other("the encoder refused a write")))
 }
 
 /// Interleave the resampler's output planes, apply the gain, hand them on, and
@@ -409,7 +409,7 @@ fn emit_planes<F: Float>(
         }
     }
     let r = Interleaved::new(staging, layout)
-        .map_err(Error::from)
+        .map_err(RenderError::from)
         .and_then(|block| sink.write(block).map_err(|_| failure_of(sink)));
     for p in out.iter_mut() {
         p.clear();

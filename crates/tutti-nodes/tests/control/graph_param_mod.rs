@@ -21,12 +21,10 @@
 
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
-use tutti_buffers::MaxBlock;
-use tutti_buffers::{Mono, Planes};
+use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock, Mono, Planes};
 use tutti_fixtures::Noise;
 
 use atomic_float::AtomicF64;
-use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_curve::Law;
 use tutti_graph::NodeKey;
 use tutti_graph::{
@@ -36,11 +34,12 @@ use tutti_graph::{
 use tutti_modulation::{Amount, Clock, ControlProgram, Layer, LayerId, Polarity, Waveform};
 use tutti_nodes::automation::ControlLaneNode;
 use tutti_nodes::{
-    BrickwallLimiterConfig, BrickwallLimiterNode, BusStripNode, CompressorConfig,
-    CompressorControls, CompressorNode, DelayControls, DelayNode, DistortionNode, GateConfig,
-    GateControls, GateNode, InterpolationMode, KeySource, LadderFilterNode, LadderType,
-    LimiterConfig, LimiterControls, LimiterNode, MaxDelay, ModDelayNode, PhaserControls,
-    PhaserNode, ShapeKind, Stages, Stagger, SvfFilterNode, SvfType, SweepRange,
+    BrickwallLimiterConfig, BrickwallLimiterNode, BusStripConfig, BusStripNode, CompressorConfig,
+    CompressorControls, CompressorNode, DelayConfig, DelayControls, DelayLayout, DelayNode,
+    DistortionConfig, DistortionNode, GateConfig, GateControls, GateNode, InterpolationMode,
+    KeySource, LadderFilterConfig, LadderFilterNode, LadderType, LimiterConfig, LimiterControls,
+    LimiterNode, MaxDelay, ModDelayConfig, ModDelayNode, PhaserConfig, PhaserNode, ShapeKind,
+    Stages, SvfFilterConfig, SvfFilterNode, SvfType,
 };
 use tutti_rt::ParamCell;
 use tutti_units::{
@@ -72,16 +71,18 @@ fn bursts(seed: u32) -> Vec<f32> {
 
 /// A delay `w` channels wide: 10 ms of line, a 0.3 ms time and half feedback.
 fn delay_of(w: usize) -> DelayNode<f32> {
-    DelayNode::<f32>::new(
-        BusTopology::assumed(ChannelLayout::try_from(w).expect("a test width is small"))
-            .expect("at most one bus wide"),
-        MaxDelay::of(Seconds::new(0.01)),
-        InterpolationMode::Linear,
-        DelayControls {
+    DelayNode::<f32>::from(
+        DelayConfig::new(DelayLayout::new(
+            BusTopology::assumed(ChannelLayout::try_from(w).expect("a test width is small"))
+                .expect("at most one bus wide"),
+            MaxDelay::of(Seconds::new(0.01)),
+            InterpolationMode::Linear,
+        ))
+        .controls(DelayControls {
             time: Seconds::new(0.0003),
             feedback: Feedback::new(0.5),
             cross_feedback: Feedback::NONE,
-        },
+        }),
     )
 }
 
@@ -230,14 +231,11 @@ fn render_mix(node: NodeParts<()>, mix: MixIs) -> Vec<Vec<f32>> {
 
 /// A phaser of `w` channels, four stages, at its default sweep and controls.
 fn phaser_of_width(w: usize) -> PhaserNode<f32> {
-    PhaserNode::<f32>::new(
+    PhaserNode::<f32>::try_from(PhaserConfig::new(
         BusTopology::assumed(ChannelLayout::try_from(w).expect("a test width is small"))
             .expect("at most one bus wide"),
         Stages::of(4),
-        SweepRange::DEFAULT,
-        Stagger::NONE,
-        PhaserControls::DEFAULT,
-    )
+    ))
     .expect("a step fits any width")
 }
 
@@ -266,19 +264,23 @@ struct Case {
 
 fn cases() -> Vec<Case> {
     fn svf(w: usize) -> SvfFilterNode<f32> {
-        SvfFilterNode::with_channels(
-            ChannelLayout::try_from(w).expect("a test width is small"),
-            SvfType::LowPass,
-            Hz::new(1_000.0),
-            Q::new(0.707),
+        SvfFilterNode::from(
+            SvfFilterConfig::new(
+                ChannelLayout::try_from(w).expect("a test width is small"),
+                SvfType::LowPass,
+            )
+            .freq(Hz::new(1_000.0))
+            .q(Q::new(0.707)),
         )
     }
     fn ladder(w: usize) -> LadderFilterNode<f32> {
-        LadderFilterNode::with_channels(
-            ChannelLayout::try_from(w).expect("a test width is small"),
-            LadderType::LP24,
-            Hz::new(1_000.0),
-            Resonance::new(0.3),
+        LadderFilterNode::from(
+            LadderFilterConfig::new(
+                ChannelLayout::try_from(w).expect("a test width is small"),
+                LadderType::LP24,
+            )
+            .freq(Hz::new(1_000.0))
+            .res(Resonance::new(0.3)),
         )
     }
     fn delay(w: usize) -> DelayNode<f32> {
@@ -429,10 +431,12 @@ fn cases() -> Vec<Case> {
             name: "distortion drive",
             param: UnitParam::Drive,
             make: |w, v| {
-                let n = DistortionNode::<f32>::with_channels(
-                    ChannelLayout::try_from(w).expect("a test width is small"),
-                    ShapeKind::Tanh,
-                    Drive::new(1.0),
+                let n = DistortionNode::<f32>::from(
+                    DistortionConfig::new(
+                        ChannelLayout::try_from(w).expect("a test width is small"),
+                        ShapeKind::Tanh,
+                    )
+                    .drive(Drive::new(1.0)),
                 );
                 if let Some(v) = v {
                     assert!(n.param_set().set(UnitParam::Drive, f64::from(v)));
@@ -521,14 +525,14 @@ fn cases() -> Vec<Case> {
             name: "strip volume",
             param: UnitParam::Volume,
             make: |w, v| {
-                let n = BusStripNode::new(
+                let n = BusStripNode::from(BusStripConfig::new(
                     ChannelLayout::try_from(w)
                         .ok()
                         .and_then(BusTopology::assumed)
                         .expect("a test width fits a bus"),
-                );
+                ));
                 if let Some(v) = v {
-                    n.set_volume(Amplitude::new(f64::from(v)));
+                    n.volume().store(Amplitude::new(f64::from(v)));
                 }
                 parts_of(n)
             },
@@ -540,12 +544,12 @@ fn cases() -> Vec<Case> {
             name: "strip balance",
             param: UnitParam::Balance,
             make: |w, v| {
-                let n = BusStripNode::new(
+                let n = BusStripNode::from(BusStripConfig::new(
                     ChannelLayout::try_from(w)
                         .ok()
                         .and_then(BusTopology::assumed)
                         .expect("a test width fits a bus"),
-                );
+                ));
                 if let Some(v) = v {
                     assert!(ParamNode::<f32>::param_set(&n).set(UnitParam::Balance, f64::from(v)));
                 }
@@ -599,10 +603,10 @@ fn block_rate_cases() -> Vec<Case> {
         )
     }
     fn chorus(w: usize) -> ModDelayNode<f32> {
-        ModDelayNode::<f32>::chorus(
+        ModDelayNode::<f32>::from(ModDelayConfig::chorus(
             BusTopology::assumed(ChannelLayout::try_from(w).expect("a test width is small"))
                 .expect("at most one bus wide"),
-        )
+        ))
     }
     fn phaser(w: usize) -> PhaserNode<f32> {
         phaser_of_width(w)
@@ -613,11 +617,13 @@ fn block_rate_cases() -> Vec<Case> {
             name: "svf gain",
             param: UnitParam::GainDb,
             make: |w, v| {
-                let n = SvfFilterNode::<f32>::with_channels(
-                    ChannelLayout::try_from(w).expect("a test width is small"),
-                    SvfType::Bell,
-                    Hz::new(1_000.0),
-                    Q::new(0.707),
+                let n = SvfFilterNode::<f32>::from(
+                    SvfFilterConfig::new(
+                        ChannelLayout::try_from(w).expect("a test width is small"),
+                        SvfType::Bell,
+                    )
+                    .freq(Hz::new(1_000.0))
+                    .q(Q::new(0.707)),
                 );
                 if let Some(v) = v {
                     assert!(n.param_set().set(UnitParam::GainDb, f64::from(v)));
@@ -786,12 +792,12 @@ fn block_rate_cases() -> Vec<Case> {
             name: "flanger depth",
             param: UnitParam::Depth,
             make: |w, v| {
-                let n = ModDelayNode::<f32>::flanger(
+                let n = ModDelayNode::<f32>::from(ModDelayConfig::flanger(
                     BusTopology::assumed(
                         ChannelLayout::try_from(w).expect("a test width is small"),
                     )
                     .expect("at most one bus wide"),
-                );
+                ));
                 if let Some(v) = v {
                     assert!(n.param_set().set(UnitParam::Depth, f64::from(v)));
                 }
@@ -930,23 +936,23 @@ fn mix_cases() -> Vec<MixCase> {
         MixCase {
             name: "chorus mix",
             make: |w| {
-                parts_of(ModDelayNode::<f32>::chorus(
+                parts_of(ModDelayNode::<f32>::from(ModDelayConfig::chorus(
                     BusTopology::assumed(
                         ChannelLayout::try_from(w).expect("a test width is small"),
                     )
                     .expect("at most one bus wide"),
-                ))
+                )))
             },
         },
         MixCase {
             name: "flanger mix",
             make: |w| {
-                parts_of(ModDelayNode::<f32>::flanger(
+                parts_of(ModDelayNode::<f32>::from(ModDelayConfig::flanger(
                     BusTopology::assumed(
                         ChannelLayout::try_from(w).expect("a test width is small"),
                     )
                     .expect("at most one bus wide"),
-                ))
+                )))
             },
         },
         MixCase {
@@ -962,7 +968,7 @@ fn mix_cases() -> Vec<MixCase> {
             name: "convolver mix",
             make: |w| {
                 parts_of(
-                    tutti_nodes::ConvolverNode::shared_ir(
+                    shared_ir_node(
                         ChannelLayout::try_from(w).expect("a test width is small"),
                         Mono::new(&[0.0, 0.0, 1.0, -0.5]),
                         Samples::new(64),
@@ -1019,10 +1025,8 @@ fn each_fed_mix_is_the_one_the_graph_blends() {
 /// output of a modulated drive, from the unmodulated node.
 fn plain_distortion(d: f64) -> Vec<f32> {
     render(
-        parts_of(DistortionNode::<f32>::with_channels(
-            1u16,
-            ShapeKind::Tanh,
-            Drive::new(d),
+        parts_of(DistortionNode::<f32>::from(
+            DistortionConfig::new(1u16, ShapeKind::Tanh).drive(Drive::new(d)),
         )),
         None,
         noise,
@@ -1036,7 +1040,9 @@ fn plain_distortion(d: f64) -> Vec<f32> {
 /// lose.
 #[test]
 fn an_authored_write_moves_the_base_under_modulation() {
-    let node = DistortionNode::<f32>::with_channels(1u16, ShapeKind::Tanh, Drive::new(1.0));
+    let node = DistortionNode::<f32>::from(
+        DistortionConfig::new(1u16, ShapeKind::Tanh).drive(Drive::new(1.0)),
+    );
     let cell: Arc<AtomicF64> = tutti_graph::ParamNode::param_set(&node)
         .cell(UnitParam::Drive)
         .expect("a distortion has a drive")
@@ -1087,7 +1093,9 @@ fn an_authored_write_moves_the_base_under_modulation() {
 /// value past it clamps to the higher bound.
 #[test]
 fn a_crossed_range_is_survivable() {
-    let node = DistortionNode::<f32>::with_channels(1u16, ShapeKind::Tanh, Drive::new(1.0));
+    let node = DistortionNode::<f32>::from(
+        DistortionConfig::new(1u16, ShapeKind::Tanh).drive(Drive::new(1.0)),
+    );
     let mut g = GraphBuilder::new(ChannelLayout::MONO, ChannelLayout::MONO);
     let (n, _) = g.add_with_controls(node);
     g.connect_input(0, n, 0).connect_output(n, 0, 0);
@@ -1116,7 +1124,9 @@ fn a_crossed_range_is_survivable() {
 /// stateful node's state would survive), with no step reaching the output.
 #[test]
 fn an_unmodulated_param_adds_nothing_to_the_plan() {
-    let node = DistortionNode::<f32>::with_channels(1u16, ShapeKind::Tanh, Drive::new(1.0));
+    let node = DistortionNode::<f32>::from(
+        DistortionConfig::new(1u16, ShapeKind::Tanh).drive(Drive::new(1.0)),
+    );
     let mut g = GraphBuilder::new(ChannelLayout::MONO, ChannelLayout::MONO);
     let (n, _) = g.add_with_controls(node);
     g.connect_input(0, n, 0).connect_output(n, 0, 0);
@@ -1192,7 +1202,9 @@ fn an_unmodulated_param_adds_nothing_to_the_plan() {
 /// so nothing fades in.
 #[test]
 fn a_fork_modulates_as_the_live_graph_does() {
-    let node = DistortionNode::<f32>::with_channels(1u16, ShapeKind::Tanh, Drive::new(1.0));
+    let node = DistortionNode::<f32>::from(
+        DistortionConfig::new(1u16, ShapeKind::Tanh).drive(Drive::new(1.0)),
+    );
     let mut g = GraphBuilder::new(ChannelLayout::MONO, ChannelLayout::MONO);
     let (n, _) = g.add_with_controls(node);
     g.connect_input(0, n, 0).connect_output(n, 0, 0);
@@ -1222,4 +1234,19 @@ fn a_fork_modulates_as_the_live_graph_does() {
             "frame {i}: the fork plays the lane's drive 3"
         );
     }
+}
+
+fn unassigned_bus(width: impl Into<tutti_buffers::ChannelLayout>) -> tutti_buffers::BusTopology {
+    tutti_buffers::BusTopology::unassigned(width.into()).expect("a test width fits a bus")
+}
+
+/// `width` unassigned channels sharing the response `ir`.
+fn shared_ir_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::Sample>(
+    width: impl Into<tutti_buffers::ChannelLayout>,
+    ir: tutti_buffers::Mono<'_, S>,
+    block_size: tutti_units::Samples,
+) -> Result<tutti_nodes::ConvolverNode<F>, tutti_nodes::ConvolverError> {
+    tutti_nodes::ConvolverNode::try_from(
+        tutti_nodes::ConvolverConfig::new(unassigned_bus(width), &[ir]).block_size(block_size),
+    )
 }

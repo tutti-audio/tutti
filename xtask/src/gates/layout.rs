@@ -160,6 +160,27 @@ const ONLY: &[(&str, &[&str])] = &[
             "tutti-tempo",
         ],
     ),
+    // The facade over the hosting: the generic host, the wire, the catalog and
+    // the vocabulary, the graph a plugin is a node of, and the format hosts an
+    // in-process load or an editor needs.
+    (
+        "tutti-plugin",
+        &[
+            "tutti-buffers",
+            "tutti-graph",
+            "tutti-plugin-db",
+            "tutti-plugin-host",
+            "tutti-plugin-ipc",
+            "tutti-plugin-types",
+            "tutti-rt",
+            "tutti-timeline",
+            "tutti-units",
+            "tutti-au-host",
+            "tutti-clap-host",
+            "tutti-vst2-host",
+            "tutti-vst3-host",
+        ],
+    ),
     // The probe client's child guard and its host-pid variable.
     (
         "tutti-plugin-db",

@@ -28,7 +28,7 @@ use tutti_graph::{
     NodeParts, ParamNode, ParamSet, Params, Prepare, Shape, Status,
 };
 use tutti_nodes::testing::{Const, Osc, Sink};
-use tutti_nodes::{SvfFilterNode, SvfType};
+use tutti_nodes::{SvfFilterConfig, SvfFilterNode, SvfType};
 use tutti_rt::LockExt;
 use tutti_rt::Param;
 use tutti_session::BufferMaster;
@@ -130,10 +130,10 @@ fn refused(session: &mut DetachedSession, bounce: Bounce<NodeKey, BufferMaster>)
 fn chain(session: &mut DetachedSession) -> NodeKey {
     let graph = session.graph();
     let (osc, _) = graph.add(ForkByClone(Osc::saw(Hz::new(110.0))));
-    let (filter, _params) = graph.add(SvfFilterNode::new(
-        SvfType::LowPass,
-        Hz::new(800.0),
-        Q::new(1.0),
+    let (filter, _params) = graph.add(SvfFilterNode::from(
+        SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
+            .freq(Hz::new(800.0))
+            .q(Q::new(1.0)),
     ));
     graph
         .set_sources_unfaded(InPort::new(filter, 0), [OutPort::new(osc, 0)])
@@ -161,10 +161,10 @@ fn chain_fresh(seconds: f64) -> (Vec<Vec<f32>>, Vec<Vec<f32>>) {
     let render = |master: bool| {
         let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::STEREO);
         let osc = g.add(Osc::saw(Hz::new(110.0)));
-        let (filter, _params) = g.add_with_controls(SvfFilterNode::new(
-            SvfType::LowPass,
-            Hz::new(800.0),
-            Q::new(1.0),
+        let (filter, _params) = g.add_with_controls(SvfFilterNode::from(
+            SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
+                .freq(Hz::new(800.0))
+                .q(Q::new(1.0)),
         ));
         g.connect(osc, 0, filter, 0).connect_output(filter, 0, 0);
         g.connect_output(if master { osc } else { filter }, 0, 1);
@@ -730,7 +730,7 @@ fn an_unforkable_node_refuses_the_export_by_key() {
         BounceError::NotForkable { node: key } => {
             assert_eq!(key, mic.erase());
             assert!(
-                tutti_export::Error::NotForkable { key }
+                tutti_export::RenderError::NotForkable { key }
                     .to_string()
                     .contains(&format!("{:?}", mic.erase())),
                 "the message names it"

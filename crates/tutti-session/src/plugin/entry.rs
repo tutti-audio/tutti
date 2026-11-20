@@ -31,11 +31,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use tutti_buffers::ChannelLayout;
-use tutti_plugin::catalog::{
-    AudioConfig, BindError, Catalog, Hosting, Loadable, PluginDescriptor, PluginId, PluginRef,
-};
+use tutti_plugin::catalog::ResolvedHosting;
+use tutti_plugin_db::{BindError, Catalog, Hosting, Loadable};
 use tutti_plugin_host::PluginHandle;
+use tutti_plugin_ipc::AudioConfig;
 use tutti_plugin_types::{Features, IpcError, MainThreadMarker, MainWorkHandle, PluginFailure};
+use tutti_plugin_types::{PluginDescriptor, PluginId, PluginRef};
 use tutti_rt::LockExt;
 use tutti_units::SampleRate;
 
@@ -43,8 +44,8 @@ use super::{AnyPlugin, HostPlugin, Mirror, Open, Origin, PluginLoad, PluginLoade
 use crate::PluginPresets;
 use crate::peer::{ResourceIds, sealed};
 use crate::{
-    Declared, GiveUp, HandleError, Hold, HoldKind, IntoPool, Key, Life, Load, LoadError, Peer,
-    PoolEntry, PoolKey, PoolSet, Presence, ReplaceRefused, Resource, ResourceId, Session,
+    Declared, GiveUp, HandleError, Hold, HoldKind, IntoPool, Key, Life, LoadError, Peer, PoolEntry,
+    PoolKey, PoolLoad, PoolSet, Presence, ReplaceRefused, Resource, ResourceId, Session,
 };
 use crate::{OtherPeer, PeerState, SavedPeer};
 
@@ -280,7 +281,7 @@ pub enum PluginCause {
     GaveUp(GiveUp),
 }
 
-/// A plugin the pool loaded: [`PoolEntry::Loaded`] of [`PluginEntry`].
+/// A plugin the pool loaded: [`PoolEntry::Loaded`] of [`PoolPluginEntry`].
 ///
 /// An opened plugin that no graph holds yet, its parameter mirror, and what
 /// the handles read of it. The parts that only the main thread may drop
@@ -323,7 +324,10 @@ impl LoadedPlugin {
             mirror,
         } = open;
         let plugin = plugin.map_err(plugin_failed)?;
-        let hosting = plugin.hosting();
+        let hosting = match plugin.hosting() {
+            ResolvedHosting::OutOfProcess => Hosting::OutOfProcess,
+            ResolvedHosting::InProcess => Hosting::InProcess,
+        };
         let served = hosting == Hosting::OutOfProcess;
         let handle = plugin.handle().clone();
         let ports = ports_of(&handle);
@@ -441,7 +445,7 @@ fn plugin_failed(error: IpcError) -> LoadError {
 /// Its identity is the [`PluginId`] and the [`Hosting`]; its initial state is
 /// applied by the load and never compared.
 #[derive(Clone, Debug)]
-pub struct PluginEntry {
+pub struct PoolPluginEntry {
     id: PluginId,
     resolved: Result<Loadable, BindError>,
     hosting: Hosting,
@@ -449,7 +453,7 @@ pub struct PluginEntry {
     cx: Context,
 }
 
-impl PoolEntry for PluginEntry {
+impl PoolEntry for PoolPluginEntry {
     type Identity = (PluginId, Hosting);
     type Loaded = LoadedPlugin;
     type Handle = PooledPlugin;
@@ -458,13 +462,13 @@ impl PoolEntry for PluginEntry {
         (self.id.clone(), self.hosting)
     }
 
-    fn load(&self) -> Load<LoadedPlugin> {
+    fn load(&self) -> PoolLoad<LoadedPlugin> {
         let cx = self.cx.clone();
         let loadable = match &self.resolved {
             Ok(loadable) => loadable.clone().hosting(self.hosting),
             Err(unresolved) => {
                 let unresolved = unresolved.clone();
-                return Load::on_worker(move || Err(LoadError::Unresolved(unresolved)));
+                return PoolLoad::on_worker(move || Err(LoadError::Unresolved(unresolved)));
             }
         };
         let placement = tutti_plugin::catalog::placement(&loadable);
@@ -476,14 +480,16 @@ impl PoolEntry for PluginEntry {
             work: cx.work.clone(),
         };
         match placement {
-            Err(refused) => Load::on_worker(move || Err(plugin_failed(refused))),
+            Err(refused) => PoolLoad::on_worker(move || Err(plugin_failed(refused))),
             // The worker checks the catalog's refusal and leaves the open for
             // the main thread, which an in-process plugin is confined to.
-            Ok(Hosting::InProcess) => Load::on_worker_then_main(
+            Ok(ResolvedHosting::InProcess) => PoolLoad::on_worker_then_main(
                 move || Ok(request.run()),
                 move |loaded: PluginLoaded, main| land(&cx, loaded, Some(main)),
             ),
-            Ok(_) => Load::on_worker(move || land(&cx, request.run(), None)),
+            Ok(ResolvedHosting::OutOfProcess) => {
+                PoolLoad::on_worker(move || land(&cx, request.run(), None))
+            }
         }
     }
 
@@ -516,7 +522,7 @@ fn land(
 #[derive(Clone, Debug)]
 pub struct PluginDeclaration<K> {
     key: K,
-    entry: PluginEntry,
+    entry: PoolPluginEntry,
 }
 
 impl<K> PluginDeclaration<K> {
@@ -658,7 +664,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
     ) -> PluginDeclaration<P> {
         PluginDeclaration {
             key,
-            entry: PluginEntry {
+            entry: PoolPluginEntry {
                 id: id.clone(),
                 resolved: catalog.resolve(id).bind(),
                 hosting: Hosting::Auto,
@@ -685,7 +691,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
     where
         P: crate::AppKey,
     {
-        self.pool.entries.handle::<P, PluginEntry>(key)
+        self.pool.entries.handle::<P, PoolPluginEntry>(key)
     }
 
     /// Puts the plugin of the entry under `key` in the graph, unwired: its
@@ -714,7 +720,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
         if self
             .pool
             .entries
-            .loaded::<P, PluginEntry>(key)?
+            .loaded::<P, PoolPluginEntry>(key)?
             .standing
             .lost()
         {
@@ -735,7 +741,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
         if linked {
             return Err(AddPluginError::Installed(key.clone()));
         }
-        let loaded = self.pool.entries.loaded::<P, PluginEntry>(key)?;
+        let loaded = self.pool.entries.loaded::<P, PoolPluginEntry>(key)?;
         let Some(install) = loaded.take_install() else {
             return Err(AddPluginError::Installed(key.clone()));
         };
@@ -805,7 +811,8 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
         }) else {
             return Swap::Done;
         };
-        let Some((generation, loaded)) = self.pool.entries.landing_of::<PluginEntry>(key) else {
+        let Some((generation, loaded)) = self.pool.entries.landing_of::<PoolPluginEntry>(key)
+        else {
             return Swap::Done;
         };
         if !loaded.has_install() {

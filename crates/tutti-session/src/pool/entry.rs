@@ -48,7 +48,7 @@ pub trait PoolEntry<S: Float = f32>: Send + 'static {
     fn identity(&self) -> Self::Identity;
 
     /// The job that loads the entry, described and not started.
-    fn load(&self) -> Load<Self::Loaded, S>;
+    fn load(&self) -> PoolLoad<Self::Loaded, S>;
 
     /// The asset the load reads, for a kind whose value comes from one.
     ///
@@ -117,7 +117,7 @@ pub enum Retention<T> {
 /// - [`ready`](Self::ready): no stage; the value lands when the pool declares
 ///   the entry.
 #[must_use = "a load runs when the pool declares its entry"]
-pub struct Load<T, S: Float = f32> {
+pub struct PoolLoad<T, S: Float = f32> {
     pub(crate) step: Step<T, S>,
     /// Whether a worker stage hands on to a main-thread stage.
     main: bool,
@@ -242,7 +242,7 @@ impl Staged {
     }
 }
 
-impl<T: Send + 'static, S: Float> Load<T, S> {
+impl<T: Send + 'static, S: Float> PoolLoad<T, S> {
     /// A load that finishes in one stage: `work`, on a thread of the session's
     /// executor.
     pub fn on_worker(work: impl FnOnce() -> Result<T, LoadError> + Send + 'static) -> Self {
@@ -313,7 +313,7 @@ impl<T: Send + 'static, S: Float> Load<T, S> {
         self.main
     }
 
-    pub(crate) fn erase(self) -> Load<Value, S> {
+    pub(crate) fn erase(self) -> PoolLoad<Value, S> {
         let step = match self.step {
             Step::Ready(value) => Step::Ready(Box::new(value) as Value),
             Step::Worker(work) => Step::Worker(work),
@@ -321,16 +321,16 @@ impl<T: Send + 'static, S: Float> Load<T, S> {
                 open(cx).map(|done| Box::new(done) as Value)
             })),
         };
-        Load {
+        PoolLoad {
             step,
             main: self.main,
         }
     }
 }
 
-impl<T, S: Float> fmt::Debug for Load<T, S> {
+impl<T, S: Float> fmt::Debug for PoolLoad<T, S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Load").finish_non_exhaustive()
+        f.debug_struct("PoolLoad").finish_non_exhaustive()
     }
 }
 
@@ -420,7 +420,7 @@ pub enum LoadError {
     /// The plugin's id names no plugin of the catalog, or several.
     #[cfg(feature = "plugin")]
     #[error(transparent)]
-    Unresolved(tutti_plugin::catalog::BindError),
+    Unresolved(tutti_plugin_db::BindError),
     /// The landed plugin has other ports than the node over the entry, which
     /// keeps the plugin it has.
     #[cfg(feature = "plugin")]
@@ -457,7 +457,7 @@ impl<T: Eq + fmt::Debug + Send + 'static> ErasedIdentity for T {
 }
 
 /// What loads an entry again: the kind's `load`, kept for a retry.
-pub(crate) type Reload<S> = Box<dyn Fn() -> Load<Value, S> + Send>;
+pub(crate) type Reload<S> = Box<dyn Fn() -> PoolLoad<Value, S> + Send>;
 
 /// Another owner of a loaded value, for an entry declared with
 /// [`Declared::shared`].
@@ -469,7 +469,7 @@ pub(crate) struct Item<K, S: Float> {
     pub(crate) kind: TypeId,
     pub(crate) identity: Box<dyn ErasedIdentity>,
     /// The load, described when the set was made.
-    pub(crate) load: Load<Value, S>,
+    pub(crate) load: PoolLoad<Value, S>,
     pub(crate) reload: Reload<S>,
     pub(crate) lost: fn(&Value) -> bool,
     pub(crate) retain: fn(Value) -> Option<Value>,
@@ -556,7 +556,7 @@ impl<K, E> Declared<K, E, Sharing> {
     /// fails to build at the [`pool`](crate::Session::pool) call.
     ///
     /// ```
-    /// use tutti_session::{Declared, Life, Load, PoolEntry, Session};
+    /// use tutti_session::{Declared, Life, PoolLoad, PoolEntry, Session};
     ///
     /// struct Kind;
     /// impl PoolEntry for Kind {
@@ -564,8 +564,8 @@ impl<K, E> Declared<K, E, Sharing> {
     ///     type Loaded = u32;
     ///     type Handle = ();
     ///     fn identity(&self) {}
-    ///     fn load(&self) -> Load<u32> {
-    ///         Load::ready(0)
+    ///     fn load(&self) -> PoolLoad<u32> {
+    ///         PoolLoad::ready(0)
     ///     }
     ///     fn handle(_: &u32, _: &Life) {}
     /// }
@@ -578,7 +578,7 @@ impl<K, E> Declared<K, E, Sharing> {
     /// With a `Loaded` that is not `Clone` the same call is refused:
     ///
     /// ```compile_fail,E0277
-    /// use tutti_session::{Declared, Life, Load, PoolEntry, Session};
+    /// use tutti_session::{Declared, Life, PoolLoad, PoolEntry, Session};
     ///
     /// struct NotClone;
     /// struct Kind;
@@ -587,8 +587,8 @@ impl<K, E> Declared<K, E, Sharing> {
     ///     type Loaded = NotClone;
     ///     type Handle = ();
     ///     fn identity(&self) {}
-    ///     fn load(&self) -> Load<NotClone> {
-    ///         Load::ready(NotClone)
+    ///     fn load(&self) -> PoolLoad<NotClone> {
+    ///         PoolLoad::ready(NotClone)
     ///     }
     ///     fn handle(_: &NotClone, _: &Life) {}
     /// }

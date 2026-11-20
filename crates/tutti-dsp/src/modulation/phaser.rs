@@ -15,6 +15,8 @@
 //! and retargets each channel's ramp across it, so the cut of the blocks does not move the
 //! render.
 
+use core::ops::RangeInclusive;
+
 use tutti_buffers::{ChannelLayout, MAX_CHANNELS};
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_units::{Depth, Feedback, Hz};
@@ -47,7 +49,7 @@ impl Stages {
 /// The band the all-pass centre sweeps across: its trough `min` and its peak `max`, in
 /// [`Hz`].
 ///
-/// A range-checked value: [`new`](Self::new) refuses a bound that is not finite, a `min`
+/// A range-checked value: [`TryFrom`] a range of [`Hz`] refuses a bound that is not finite, a `min`
 /// under [`FLOOR`](Self::FLOOR) (20 Hz) and a `min` above the `max`, and never clamps. What
 /// depends on the **rate** stays the member's: the sweep's top is held at 0.90 of Nyquist
 /// there, a wider margin than the filters take because several all-pass stages compound
@@ -91,13 +93,7 @@ impl SweepRange {
     /// The default sweep: 200 to 4000 Hz.
     pub const DEFAULT: Self = Self::of(Hz::new(200.0), Hz::new(4_000.0));
 
-    /// A sweep from `min` to `max`.
-    ///
-    /// # Errors
-    ///
-    /// [`SweepRangeError::NotFinite`], [`BelowFloor`](SweepRangeError::BelowFloor) and
-    /// [`Order`](SweepRangeError::Order).
-    pub const fn new(min: Hz, max: Hz) -> Result<Self, SweepRangeError> {
+    const fn checked(min: Hz, max: Hz) -> Result<Self, SweepRangeError> {
         let (lo, hi) = (min.get(), max.get());
         if !(lo.is_finite() && hi.is_finite()) {
             return Err(SweepRangeError::NotFinite { min, max });
@@ -115,10 +111,10 @@ impl SweepRange {
     ///
     /// # Panics
     ///
-    /// If [`new`](Self::new) refuses it.
+    /// If the range is refused ([`TryFrom`]).
     #[must_use]
     pub const fn of(min: Hz, max: Hz) -> Self {
-        match Self::new(min, max) {
+        match Self::checked(min, max) {
             Ok(r) => r,
             Err(_) => panic!("a sweep range is finite, from 20 Hz up and in order"),
         }
@@ -135,6 +131,19 @@ impl SweepRange {
     #[must_use]
     pub const fn max(&self) -> Hz {
         self.max
+    }
+}
+
+/// A sweep from the start to the end of `range`, in [`Hz`].
+impl TryFrom<RangeInclusive<Hz>> for SweepRange {
+    type Error = SweepRangeError;
+
+    /// # Errors
+    ///
+    /// [`SweepRangeError::NotFinite`], [`BelowFloor`](SweepRangeError::BelowFloor) and
+    /// [`Order`](SweepRangeError::Order).
+    fn try_from(range: RangeInclusive<Hz>) -> Result<Self, SweepRangeError> {
+        Self::checked(*range.start(), *range.end())
     }
 }
 

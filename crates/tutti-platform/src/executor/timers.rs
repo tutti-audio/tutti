@@ -177,8 +177,9 @@ impl Timer {
     }
 }
 
-/// A deadline as a future: `Ok(())` once [`Instant::now`] is at or past it and a driver
-/// fired it, `Err(`[`Shutdown`]`)` if its executor shut down first.
+/// A deadline as a future: `Ok(())` when polled at or past its deadline,
+/// `Err(`[`Shutdown`]`)` when polled before it once its executor has shut down. A driver
+/// firing the deadline is what wakes it.
 ///
 /// Made by [`Executor::sleep_until`](super::Executor::sleep_until) or
 /// [`Timer::sleep_until`]. Dropping a pending

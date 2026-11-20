@@ -22,8 +22,9 @@ use crate::capability::OsEndpoint;
 use crate::devices::ChangeSink;
 use crate::endpoints::{DeviceOut, InputConnection, MidiEndpoints, NoWatch, Watch};
 use crate::error::{MidiHardwareError, Result};
-use crate::virtual_endpoint::{SourceBackend, VirtualProtocol, VirtualSpec};
+use crate::virtual_endpoint::{DestinationBackend, SourceBackend, VirtualProtocol, VirtualSpec};
 use tutti_midi_device::EndpointId;
+use tutti_platform::{Executor, MainThreadMarker};
 
 /// Why every call here fails, in the error a caller will surface.
 const REASON: &str = "no MIDI backend on this platform (alsa-lib < 1.2.10)";
@@ -72,15 +73,18 @@ const VIRTUAL_REASON: &str = "no virtual MIDI endpoints on this platform (no MID
 /// Refuses: there is no virtual source to publish.
 pub(crate) fn open_virtual_source(
     _spec: &VirtualSpec,
+    _main: MainThreadMarker,
 ) -> Result<(Box<dyn SourceBackend>, VirtualProtocol)> {
     Err(MidiHardwareError::Unsupported(VIRTUAL_REASON))
 }
 
 /// Refuses: there is no virtual destination to publish.
 pub(crate) fn open_virtual_destination(
+    _executor: &Executor,
     _spec: &VirtualSpec,
     _producer: InputProducerHandle,
-) -> Result<(Box<dyn InputConnection>, VirtualProtocol)> {
+    _main: MainThreadMarker,
+) -> Result<(Box<dyn DestinationBackend>, VirtualProtocol)> {
     Err(MidiHardwareError::Unsupported(VIRTUAL_REASON))
 }
 

@@ -162,7 +162,7 @@ const RATE: SampleRate = SampleRate::of(SAMPLE_RATE as f64);
 
 fn make_node() -> HrtfBinauralNode<f32> {
     let bytes = synthetic_itd_ild_sphere();
-    let node = HrtfBinauralNode::<f32>::new(&bytes, RATE).expect("synthetic sphere parses");
+    let node = hrtf::<f32>(&bytes).expect("synthetic sphere parses");
     prepared(node, RATE, 64)
 }
 
@@ -548,4 +548,15 @@ fn a_direction_change_crossfades_without_a_jump() {
         (end_l - front_l).abs() > 1.0,
         "the left ear never left straight ahead's {front_l}"
     );
+}
+
+/// A binaural node over the sphere in `bytes`, prepared at `rate`.
+fn hrtf<F: tutti_dsp::FftFloat>(
+    bytes: &[u8],
+) -> Result<tutti_nodes::HrtfBinauralNode<F>, tutti_dsp::HrtfBinauralError> {
+    Ok(tutti_nodes::HrtfBinauralNode::from(
+        tutti_nodes::HrtfBinauralConfig::new(std::sync::Arc::new(
+            tutti_dsp::HrirSphere::from_bytes(bytes)?,
+        )),
+    ))
 }

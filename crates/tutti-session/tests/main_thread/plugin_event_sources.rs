@@ -17,8 +17,9 @@ use tutti_clap_test_plugin::{
     CMD_REGISTER_FD, CMD_REGISTER_TIMER, ClapProbe, ClapSwitch, GuiMode, Site,
 };
 use tutti_fixtures::StandInWindow;
-use tutti_plugin::catalog::{Hosting, PluginRef};
+use tutti_plugin_db::Hosting;
 use tutti_plugin_types::ContentScale;
+use tutti_plugin_types::PluginRef;
 use tutti_session::{Editor, Session};
 use tutti_units::Samples;
 

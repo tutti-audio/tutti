@@ -13,8 +13,9 @@ use super::listener::Listener;
 use tutti_alsa_ffi::{
     Blocking, Client, Event, PortCaps, PortEntry, PortId, PortKind, Read, UmpVersion,
 };
+use tutti_fixtures::main_thread;
 use tutti_fixtures::midi::{
-    m1_cc, m1_note_on, note_on, per_note_pitch_bend, program_change, registered,
+    device_identity, m1_cc, m1_note_on, note_on, per_note_pitch_bend, program_change, registered,
 };
 use tutti_graph::EventCapacity;
 use tutti_midi_device::FunctionBlock;
@@ -22,6 +23,7 @@ use tutti_midi_hardware::{
     HardwareMidiInputs, VirtualDestination, VirtualProtocol, VirtualSource, VirtualSpec,
 };
 use tutti_midi_runtime::InputInlets;
+use tutti_platform::MainThreadMarker;
 use tutti_ump::{
     Bank, BlockDirection, CCNumber, FirstGroup, FunctionBlockId, GroupSpan, Message, MidiChannel,
     Protocol, Rpn, U7, UiHint, Ump, Utility, Voice1,
@@ -30,9 +32,18 @@ use tutti_ump::{BlockName, EndpointName};
 
 const PATIENCE: Duration = Duration::from_secs(30);
 
+/// The main-thread proof for an endpoint that declares no Function Blocks: such an
+/// endpoint is no main-thread object on any backend, so the fixture's stand-in is
+/// enough. Never use it for one with blocks (`tests/virtual_blocks`).
+fn plain_endpoint_main() -> MainThreadMarker {
+    main_thread()
+}
+
 fn spec(tag: &str) -> VirtualSpec {
     VirtualSpec::new(
         EndpointName::new(&format!("tutti-virt-{}-{tag}", std::process::id())).unwrap(),
+        device_identity(),
+        None,
     )
 }
 
@@ -83,7 +94,7 @@ fn read(peer: &Client, count: usize) -> Vec<Ump> {
 #[test]
 fn a_subscriber_receives_what_a_virtual_source_sends_in_order() {
     let spec = spec("source");
-    let source = VirtualSource::open(&spec).expect("a virtual source");
+    let source = VirtualSource::open(&spec, plain_endpoint_main()).expect("a virtual source");
     let (peer, port) = peer(PortCaps::WRITE);
     let found = find(&peer, &spec).expect("the source is listed");
     peer.connect_from(port, found.address).expect("subscribes");
@@ -109,8 +120,8 @@ fn a_virtual_destination_delivers_what_a_client_sends_to_the_graph_in_order() {
     let (producer, inlet) = ports.open_input_port("virtual");
     listener.attach(inlet);
     let executor = tutti_platform::Executor::new();
-    let destination =
-        VirtualDestination::open(&executor, &spec, producer).expect("a virtual destination");
+    let destination = VirtualDestination::open(&executor, &spec, producer, plain_endpoint_main())
+        .expect("a virtual destination");
     let (peer, port) = peer(PortCaps::READ);
     let found = find(&peer, &spec).expect("the destination is listed");
     peer.connect_to(port, found.address).expect("subscribes");
@@ -136,8 +147,8 @@ fn jr_messages_a_client_sends_are_not_heard_by_an_arrival_port() {
     let (producer, inlet) = ports.open_input_port("virtual");
     listener.attach(inlet);
     let executor = tutti_platform::Executor::new();
-    let _destination =
-        VirtualDestination::open(&executor, &spec, producer).expect("a virtual destination");
+    let _destination = VirtualDestination::open(&executor, &spec, producer, plain_endpoint_main())
+        .expect("a virtual destination");
     let (peer, port) = peer(PortCaps::READ);
     let found = find(&peer, &spec).expect("the destination is listed");
     peer.connect_to(port, found.address).expect("subscribes");
@@ -173,15 +184,20 @@ fn block() -> FunctionBlock {
 fn the_published_endpoint_record_carries_the_protocol_and_the_blocks() {
     let source_spec = spec("record-source").block(block());
     let dest_spec = spec("record-destination").block(block());
-    let source = VirtualSource::open(&source_spec).expect("a virtual source");
+    let source =
+        VirtualSource::open(&source_spec, plain_endpoint_main()).expect("a virtual source");
     let inlets = InputInlets::new(EventCapacity::of(8), Duration::ZERO);
     let ports = HardwareMidiInputs::new(inlets);
     let producer = ports.open_input_port("virtual").0;
     let executor = tutti_platform::Executor::new();
     let destination =
-        VirtualDestination::open(&executor, &dest_spec, producer).expect("a destination");
+        VirtualDestination::open(&executor, &dest_spec, producer, plain_endpoint_main())
+            .expect("a destination");
     assert_eq!(source.protocol(), VirtualProtocol::Midi2);
     assert_eq!(destination.protocol(), VirtualProtocol::Midi2);
+    // The sequencer publishes the spec's own numbers, which `blocks` reports.
+    assert_eq!(source.blocks(), [block().id()]);
+    assert_eq!(destination.blocks(), [block().id()]);
 
     let (peer, _) = peer(PortCaps::READ);
     for spec in [&source_spec, &dest_spec] {
@@ -215,7 +231,8 @@ fn a_midi1_destination_reports_midi1_and_its_messages_arrive_widened() {
     let (producer, inlet) = ports.open_input_port("virtual");
     listener.attach(inlet);
     let executor = tutti_platform::Executor::new();
-    let destination = VirtualDestination::open(&executor, &spec, producer).expect("a destination");
+    let destination = VirtualDestination::open(&executor, &spec, producer, plain_endpoint_main())
+        .expect("a destination");
     assert_eq!(destination.protocol(), VirtualProtocol::Midi1);
 
     let (peer, port) = peer(PortCaps::READ);
@@ -238,7 +255,7 @@ fn a_midi1_destination_reports_midi1_and_its_messages_arrive_widened() {
 #[test]
 fn a_midi2_note_sent_into_a_midi1_source_arrives_as_a_midi1_note() {
     let spec = spec("translate").protocol(VirtualProtocol::Midi1);
-    let source = VirtualSource::open(&spec).expect("a virtual source");
+    let source = VirtualSource::open(&spec, plain_endpoint_main()).expect("a virtual source");
     assert_eq!(source.protocol(), VirtualProtocol::Midi1);
     let (peer, port) = peer_in(PortCaps::WRITE, UmpVersion::Midi1);
     let found = find(&peer, &spec).expect("listed");
@@ -258,7 +275,7 @@ fn a_midi2_note_sent_into_a_midi1_source_arrives_as_a_midi1_note() {
 #[test]
 fn a_message_with_no_midi1_form_is_refused_by_a_midi1_source() {
     let spec = spec("noform").protocol(VirtualProtocol::Midi1);
-    let source = VirtualSource::open(&spec).expect("a virtual source");
+    let source = VirtualSource::open(&spec, plain_endpoint_main()).expect("a virtual source");
     let (peer, port) = peer_in(PortCaps::WRITE, UmpVersion::Midi1);
     let found = find(&peer, &spec).expect("listed");
     peer.connect_from(port, found.address).expect("subscribes");
@@ -289,7 +306,7 @@ fn a_message_with_no_midi1_form_is_refused_by_a_midi1_source() {
 #[test]
 fn a_program_change_with_a_bank_reaches_a_midi1_subscriber_as_bank_select_and_program() {
     let spec = spec("bank").protocol(VirtualProtocol::Midi1);
-    let source = VirtualSource::open(&spec).expect("a virtual source");
+    let source = VirtualSource::open(&spec, plain_endpoint_main()).expect("a virtual source");
     let (peer, port) = peer_in(PortCaps::WRITE, UmpVersion::Midi1);
     let found = find(&peer, &spec).expect("listed");
     peer.connect_from(port, found.address).expect("subscribes");
@@ -319,7 +336,7 @@ fn a_program_change_with_a_bank_reaches_a_midi1_subscriber_as_bank_select_and_pr
 #[test]
 fn a_registered_controller_reaches_a_midi1_subscriber_as_the_rpn_sequence() {
     let spec = spec("rpn").protocol(VirtualProtocol::Midi1);
-    let source = VirtualSource::open(&spec).expect("a virtual source");
+    let source = VirtualSource::open(&spec, plain_endpoint_main()).expect("a virtual source");
     let (peer, port) = peer_in(PortCaps::WRITE, UmpVersion::Midi1);
     let found = find(&peer, &spec).expect("listed");
     peer.connect_from(port, found.address).expect("subscribes");
@@ -354,7 +371,7 @@ fn a_registered_controller_reaches_a_midi1_subscriber_as_the_rpn_sequence() {
 #[test]
 fn a_midi1_note_sent_into_a_midi2_source_arrives_widened() {
     let spec = spec("widen");
-    let source = VirtualSource::open(&spec).expect("a virtual source");
+    let source = VirtualSource::open(&spec, plain_endpoint_main()).expect("a virtual source");
     let (peer, port) = peer(PortCaps::WRITE);
     let found = find(&peer, &spec).expect("listed");
     peer.connect_from(port, found.address).expect("subscribes");
@@ -365,4 +382,20 @@ fn a_midi1_note_sent_into_a_midi2_source_arrives_widened() {
     let got = read(&peer, 1);
     let want = note_on(MidiChannel::of(2), 60, 0x8000);
     assert_eq!(got[0], want);
+}
+
+/// A sender outlives its source and refuses by name once the source is dropped,
+/// on a platform where the endpoint goes with the source: the sequencer's port
+/// is gone, so another client no longer sees it.
+#[test]
+fn a_sender_outlives_its_source_and_refuses_by_name() {
+    let spec = spec("sender-gone");
+    let source = VirtualSource::open(&spec, plain_endpoint_main()).expect("a virtual source");
+    let sender = source.sender();
+    assert!(sender.send(note_on(MidiChannel::of(1), 60, 0x8000)).is_ok());
+    drop(source);
+    assert!(matches!(
+        sender.send(note_on(MidiChannel::of(1), 60, 0x8000)),
+        Err(tutti_midi_hardware::MidiHardwareError::EndpointGone)
+    ));
 }

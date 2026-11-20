@@ -22,7 +22,6 @@ use tutti_buffers::Float;
 use tutti_graph::Node;
 use tutti_graph::ParamNode;
 use tutti_graph::contract::Direct;
-use tutti_nodes::HrtfBinauralNode;
 use tutti_nodes::testing::aim;
 use tutti_rt::SplitMix64;
 use tutti_units::{ArcDegrees, Azimuth, Elevation, SampleRate};
@@ -138,8 +137,7 @@ fn bench(c: &mut Criterion) {
         for ir_len in [128usize, 512] {
             g.throughput(Throughput::Elements(BLOCK as u64));
             let bytes = sphere_bytes(ir_len);
-            let node = HrtfBinauralNode::<f32>::new(&bytes, SampleRate::of(f64::from(RATE)))
-                .expect("the sphere parses");
+            let node = hrtf::<f32>(&bytes).expect("the sphere parses");
             let params = node.param_set();
             aim(&params, Azimuth::new(20.0), Elevation::new(10.0));
             let mut d = Direct::new(node, SampleRate::of(f64::from(RATE)), BLOCK);
@@ -174,3 +172,14 @@ fn bench(c: &mut Criterion) {
 
 criterion_group!(benches, bench);
 criterion_main!(benches);
+
+/// A binaural node over the sphere in `bytes`, prepared at `rate`.
+fn hrtf<F: tutti_dsp::FftFloat>(
+    bytes: &[u8],
+) -> Result<tutti_nodes::HrtfBinauralNode<F>, tutti_dsp::HrtfBinauralError> {
+    Ok(tutti_nodes::HrtfBinauralNode::from(
+        tutti_nodes::HrtfBinauralConfig::new(std::sync::Arc::new(
+            tutti_dsp::HrirSphere::from_bytes(bytes)?,
+        )),
+    ))
+}

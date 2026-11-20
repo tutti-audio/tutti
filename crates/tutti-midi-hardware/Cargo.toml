@@ -63,3 +63,12 @@ tutti-fixtures = { path = "../../testing/tutti-fixtures", features = ["graph"] }
 
 [package.metadata.docs.rs]
 all-features = true
+
+# macOS 15's UMP Endpoint with Function Blocks is a main-thread object: this target
+# owns `main()`, which is the process's main thread under cargo (the default
+# harness runs each test on a worker thread). `tutti_fixtures::main_thread_cases`
+# answers nextest's command line.
+[[test]]
+name = "virtual_blocks"
+path = "tests/virtual_blocks/main.rs"
+harness = false

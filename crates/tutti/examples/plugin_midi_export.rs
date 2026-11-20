@@ -75,7 +75,7 @@ fn load(
     if let Some(unsaved) = catalog.take_persist_error() {
         return Err(unsaved.into());
     }
-    if let Some(failure) = scanned.failures.first() {
+    if let Some(failure) = scanned.failures().first() {
         return Err(format!("the plugin did not probe: {failure:?}").into());
     }
     let entry = catalog.entries().next().ok_or("the file lists no plugin")?;

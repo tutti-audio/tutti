@@ -79,7 +79,11 @@
 //! ```
 
 use std::sync::Arc;
-use tutti_buffers::Interleaved;
+use tutti_buffers::{BusTopology, ChannelLayout, Interleaved, InterleavedMut, MaxBlock, Mono};
+use tutti_nodes::{
+    BusStripConfig, BusStripNode, ConvolverConfig, ConvolverNode, LimiterConfig, LimiterControls,
+    LimiterNode,
+};
 
 /// How the sampler voices transpose, and whether the reverb is in the
 /// scene.
@@ -123,10 +127,7 @@ impl Variant {
     }
 }
 
-use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
-use tutti_buffers::{InterleavedMut, Mono};
 use tutti_graph::{Cost, Cx, Event, Io, Node, Offset, Prepare, Shape, Status, Unforkable};
-use tutti_nodes::{BusStripNode, ConvolverNode, LimiterConfig, LimiterControls, LimiterNode};
 use tutti_platform::Instant;
 use tutti_polysynth::{Adsr, FilterType, OscillatorType, PolySynth, SynthConfig};
 use tutti_rt::SplitMix64;
@@ -312,11 +313,13 @@ fn scene(block: usize, workers: Workers, variant: Variant) -> Session {
     let tracks: Vec<_> = strips
         .into_iter()
         .map(|src| {
-            let (strip, _) = s.graph().add(BusStripNode::stereo());
+            let (strip, _) = s
+                .graph()
+                .add(BusStripNode::from(BusStripConfig::new(BusTopology::STEREO)));
             connect_stereo(&mut s, strip, 0, src);
             if reverb {
-                let send = BusStripNode::stereo();
-                send.set_volume(Db::new(-12.0).to_amplitude());
+                let send = BusStripNode::from(BusStripConfig::new(BusTopology::STEREO));
+                send.volume().store(Db::new(-12.0).to_amplitude());
                 let (send, _) = s.graph().add(send);
                 connect_stereo(&mut s, send, 0, src);
                 sends.push(send);
@@ -329,18 +332,25 @@ fn scene(block: usize, workers: Workers, variant: Variant) -> Session {
     if reverb {
         let (l, r) = (ir(1), ir(2));
         let (conv, _) = s.graph().add(
-            ConvolverNode::per_channel(&[Mono::new(&l), Mono::new(&r)], Samples::new(PARTITION))
-                .unwrap(),
+            ConvolverNode::try_from(
+                ConvolverConfig::new(BusTopology::STEREO, &[Mono::new(&l), Mono::new(&r)])
+                    .block_size(Samples::new(PARTITION)),
+            )
+            .unwrap(),
         );
         for send in &sends {
             add_stereo(&mut s, conv, *send);
         }
-        let (ret, _) = s.graph().add(BusStripNode::stereo());
+        let (ret, _) = s
+            .graph()
+            .add(BusStripNode::from(BusStripConfig::new(BusTopology::STEREO)));
         connect_stereo(&mut s, ret, 0, conv);
         sums.push(ret);
     }
 
-    let (master, _) = s.graph().add(BusStripNode::stereo());
+    let (master, _) = s
+        .graph()
+        .add(BusStripNode::from(BusStripConfig::new(BusTopology::STEREO)));
     for strip in &sums {
         add_stereo(&mut s, master, *strip);
     }

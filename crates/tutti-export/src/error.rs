@@ -1,21 +1,21 @@
 //! What an export can fail with.
 //!
-//! One `#[non_exhaustive]` [`Error`](enum@Error) for the whole crate — every stage (plan,
+//! One `#[non_exhaustive]` [`RenderError`](enum@RenderError) for the whole crate — every stage (plan,
 //! render, resample, dither, encode) reports through it, so a caller matches one
 //! type whichever entry point it used.
 
 use crate::TargetError;
 use std::io;
-use thiserror::Error;
+
 use tutti_buffers::ChannelLayout;
 
 /// Anything that can go wrong rendering or writing an export.
 ///
 /// `#[non_exhaustive]`: the codecs behind the `encode-*` features each bring their
 /// own failure modes, so a caller must keep a wildcard arm.
-#[derive(Error, Debug)]
+#[derive(thiserror::Error, Debug)]
 #[non_exhaustive]
-pub enum Error {
+pub enum RenderError {
     /// The sink failed: the output file could not be created, written (a full
     /// disk) or moved into place.
     #[error("I/O error: {0}")]
@@ -200,12 +200,12 @@ pub enum Error {
         /// Crashed or timed out.
         kind: tutti_graph::ForkFaultKind,
         /// The unit's own account (for a plugin, a
-        /// `tutti_plugin::PluginRenderFault`).
+        /// `tutti_plugin_ipc::PluginRenderFault`).
         cause: tutti_graph::ForkCause,
     },
 }
 
-/// Why audio cannot be normalized ([`Error::Unmeasurable`]).
+/// Why audio cannot be normalized ([`RenderError::Unmeasurable`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Unmeasured {
@@ -243,8 +243,8 @@ impl std::fmt::Display for Unmeasured {
     }
 }
 
-/// A config the export cannot act on ([`Error::InvalidConfig`]).
-#[derive(Error, Debug, Clone, PartialEq)]
+/// A config the export cannot act on ([`RenderError::InvalidConfig`]).
+#[derive(thiserror::Error, Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub enum ConfigError {
     /// The graph's editor does not feed its executor.
@@ -271,7 +271,7 @@ pub enum ConfigError {
     Root(tutti_graph::RootError),
 }
 
-impl From<tutti_codec::Error> for Error {
+impl From<tutti_codec::Error> for RenderError {
     fn from(error: tutti_codec::Error) -> Self {
         match error {
             tutti_codec::Error::Io(e) => Self::Io(e),
@@ -280,6 +280,6 @@ impl From<tutti_codec::Error> for Error {
     }
 }
 
-/// `std::result::Result` with this crate's [`Error`](enum@Error) as the error
+/// `std::result::Result` with this crate's [`RenderError`](enum@RenderError) as the error
 /// type.
-pub type Result<T> = std::result::Result<T, Error>;
+pub type Result<T> = std::result::Result<T, RenderError>;

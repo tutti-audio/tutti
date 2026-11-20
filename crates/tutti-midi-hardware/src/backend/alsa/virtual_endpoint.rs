@@ -18,7 +18,8 @@ use tutti_ump::{EndpointInfoNotification, FunctionBlockCount, FunctionBlocks, Pr
 use super::input::{self, AlsaInput};
 use crate::InputProducerHandle;
 use crate::error::{MidiHardwareError, Result};
-use crate::virtual_endpoint::{SourceBackend, VirtualProtocol, VirtualSpec};
+use crate::virtual_endpoint::{SenderBackend, SourceBackend, VirtualProtocol, VirtualSpec};
+use std::sync::{Arc, Weak};
 
 /// The sequencer's version for a protocol.
 fn version_of(protocol: VirtualProtocol) -> UmpVersion {
@@ -87,17 +88,28 @@ fn publish(client: &Client, spec: &VirtualSpec, protocol: VirtualProtocol) -> Re
 
 /// A virtual source: the client's readable, subscribable port.
 pub(crate) struct AlsaVirtualSource {
-    // `Client` is `Send` and not `Sync`; sends are rare and short.
-    inner: std::sync::Mutex<(Client, PortId)>,
+    // `Client` is `Send` and not `Sync`; sends are rare and short. The senders
+    // hold it weakly, so the endpoint goes with the source.
+    inner: Arc<std::sync::Mutex<(Client, PortId)>>,
+}
+
+/// A send on a virtual source's client, which it does not keep alive.
+struct AlsaSender(Weak<std::sync::Mutex<(Client, PortId)>>);
+
+impl SenderBackend for AlsaSender {
+    fn send(&self, ump: &Ump) -> Result<()> {
+        let inner = self.0.upgrade().ok_or(MidiHardwareError::EndpointGone)?;
+        // A poisoned lock guards a client handle and a port number, which a
+        // panic cannot leave half-written.
+        let inner = inner.lock_recover();
+        inner.0.send_to_subscribers(inner.1, ump)?;
+        Ok(())
+    }
 }
 
 impl SourceBackend for AlsaVirtualSource {
-    fn send(&self, ump: &Ump) -> Result<()> {
-        // A poisoned lock guards a client handle and a port number, which a
-        // panic cannot leave half-written.
-        let inner = self.inner.lock_recover();
-        inner.0.send_to_subscribers(inner.1, ump)?;
-        Ok(())
+    fn sender(&self) -> Arc<dyn SenderBackend> {
+        Arc::new(AlsaSender(Arc::downgrade(&self.inner)))
     }
 }
 
@@ -112,7 +124,7 @@ pub(crate) fn source(spec: &VirtualSpec) -> Result<(AlsaVirtualSource, VirtualPr
     publish(&client, spec, protocol)?;
     Ok((
         AlsaVirtualSource {
-            inner: std::sync::Mutex::new((client, port)),
+            inner: Arc::new(std::sync::Mutex::new((client, port))),
         },
         protocol,
     ))

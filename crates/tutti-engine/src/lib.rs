@@ -57,7 +57,7 @@
 //! use tutti_buffers::InterleavedMut;
 //! use tutti_graph::NodeKey;
 //! use tutti_engine::Engine;
-//! use tutti_timeline::{MotionEvent, Timeline, Transport};
+//! use tutti_timeline::{MotionCommand, Timeline, Transport};
 //! use tutti_graph::{Cx, Editor, ForkByClone, Io, Node, Prepare, Shape, Status};
 //!
 //! // A node reads the transport from each block's `Env`. This one puts the beat
@@ -104,7 +104,7 @@
 //! transport.settings().set_tempo(Bpm::of(90.0));
 //! transport
 //!     .motion()
-//!     .try_send(MotionEvent::play_from(Beat::new(8.0)))
+//!     .try_send(MotionCommand::play_from(Beat::new(8.0)))
 //!     .expect("the motion queue has room at startup");
 //!
 //! let mut block = vec![0.0f32; 256 * 2];

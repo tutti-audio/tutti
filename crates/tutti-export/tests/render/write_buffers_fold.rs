@@ -11,7 +11,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::Float;
 use tutti_buffers::{ChannelTopology, Speaker};
 use tutti_codec::{Format, Pcm};
-use tutti_export::{ConfigError, Error, Rendered};
+use tutti_export::{ConfigError, RenderError, Rendered};
 use tutti_units::SampleRate;
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -96,7 +96,7 @@ fn a_width_it_cannot_place_is_an_error_not_a_drop() {
     )
     .expect_err("five unordered channels have no place in two");
     assert!(
-        matches!(err, Error::InvalidConfig(ConfigError::Placement(_))),
+        matches!(err, RenderError::InvalidConfig(ConfigError::Placement(_))),
         "{err:?}"
     );
     assert!(!path.exists(), "nothing was written");

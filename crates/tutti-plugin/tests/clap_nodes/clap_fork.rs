@@ -37,9 +37,10 @@ use tutti_graph::{
 };
 use tutti_graph::{OutPort, Source};
 use tutti_plugin::PluginClient;
-use tutti_plugin::{IpcConfig, PluginRenderFault, Timeouts};
 use tutti_plugin_host::PluginHandle;
+use tutti_plugin_ipc::{IpcConfig, PluginRenderFault};
 use tutti_plugin_types::PluginForkError;
+use tutti_plugin_types::Timeouts;
 use tutti_timeline::{OfflineTimeline, OfflineTimelineConfig, render_graph};
 use tutti_ump::{Address, Message, NoteNumber, NoteVelocity, Voice2};
 use tutti_units::Normalized;
@@ -126,7 +127,8 @@ fn a_fork_renders_like_the_live_instance_from_its_state() {
     let probe = load_probe(SAMPLE_RATE);
     probe
         .client
-        .set_parameter(GAIN, gain_at(-6.0))
+        .handle()
+        .send_parameter(GAIN, gain_at(-6.0))
         .expect("a declared parameter");
 
     let fork = probe
@@ -194,7 +196,8 @@ fn a_fork_and_the_live_instance_do_not_reach_each_other() {
     let handle: PluginHandle = probe.handle.clone();
     probe
         .client
-        .set_parameter(GAIN, gain_at(-6.0))
+        .handle()
+        .send_parameter(GAIN, gain_at(-6.0))
         .expect("a declared parameter");
 
     let fork = probe
@@ -211,7 +214,8 @@ fn a_fork_and_the_live_instance_do_not_reach_each_other() {
     // After the fork: the live instance moves to -15 dB.
     probe
         .client
-        .set_parameter(GAIN, gain_at(-15.0))
+        .handle()
+        .send_parameter(GAIN, gain_at(-15.0))
         .expect("a declared parameter");
 
     const MIN_FORK_BLOCKS: usize = 40;
@@ -397,7 +401,8 @@ fn a_graph_holding_a_plugin_forks_and_renders_offline() {
     let probe = load_probe(SAMPLE_RATE);
     probe
         .client
-        .set_parameter(GAIN, gain_at(-6.0))
+        .handle()
+        .send_parameter(GAIN, gain_at(-6.0))
         .expect("a declared parameter");
 
     let prepare = Prepare::new(
@@ -506,7 +511,7 @@ fn a_fork_whose_server_hangs_is_a_timed_out_fault() {
             t.call = Duration::from_secs(1);
             t
         },
-        ..IpcConfig::at(tutti_plugin::unique_socket_path().expect("the OS has a random source"))
+        ..IpcConfig::at(tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source"))
     };
     let probe = load_probe_with(config, SAMPLE_RATE);
     let _hang = ProbeEnv::new().block_from(5);
@@ -725,12 +730,13 @@ fn an_export_through_a_failing_fork_fails_by_name() {
             t.call = Duration::from_secs(1);
             t
         },
-        ..IpcConfig::at(tutti_plugin::unique_socket_path().expect("the OS has a random source"))
+        ..IpcConfig::at(tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source"))
     };
     let probe = load_probe_with(config, SAMPLE_RATE);
     probe
         .client
-        .set_parameter(GAIN, gain_at(-6.0))
+        .handle()
+        .send_parameter(GAIN, gain_at(-6.0))
         .expect("a declared parameter");
     let (live, _exec) = live_graph(probe.client);
 
@@ -738,7 +744,7 @@ fn an_export_through_a_failing_fork_fails_by_name() {
     assert!(healthy.planes()[0].iter().any(|&s| s != 0.0), "audible");
 
     let failed = |kind: ForkFaultKind| match export_through_a_fork(&live) {
-        Err(tutti_export::Error::ForkFailed {
+        Err(tutti_export::RenderError::ForkFailed {
             key,
             kind: got,
             cause,
@@ -896,7 +902,7 @@ fn a_chord_larger_than_a_chunk_ends_and_the_export_counts_the_loss() {
     };
     let err = render(tutti_export::EventLossPolicy::Fail).expect_err("144 note-ons were lost");
     assert!(
-        matches!(err, tutti_export::Error::EventsDropped { count: 144 }),
+        matches!(err, tutti_export::RenderError::EventsDropped { count: 144 }),
         "{err:?}"
     );
     let rendered = render(tutti_export::EventLossPolicy::Allow).expect("allowed");
@@ -1360,7 +1366,8 @@ fn a_live_fork_of_a_served_plugin_told_offline_is_offline() {
     assert!(
         probe
             .client
-            .set_render_mode(tutti_plugin_types::RenderMode::Offline),
+            .handle()
+            .announce_render_mode(tutti_plugin_types::RenderMode::Offline),
         "the live plugin takes the mode"
     );
     // Forked through the graph in `ForkMode::Live`, prepared in realtime: the
@@ -1399,7 +1406,8 @@ fn a_served_restore_loads_the_preset_and_the_state_into_a_fresh_served_instance(
     let probe = load_probe(SAMPLE_RATE);
     probe
         .client
-        .set_parameter(GAIN, gain_at(-6.0))
+        .handle()
+        .send_parameter(GAIN, gain_at(-6.0))
         .expect("a declared parameter");
     let state = probe
         .handle
@@ -1448,10 +1456,12 @@ fn an_export_of_plugins_is_bit_identical_on_a_pool() {
     let a = load_probe(SAMPLE_RATE);
     let b = load_probe(SAMPLE_RATE);
     a.client
-        .set_parameter(GAIN, gain_at(-6.0))
+        .handle()
+        .send_parameter(GAIN, gain_at(-6.0))
         .expect("a declared parameter");
     b.client
-        .set_parameter(GAIN, gain_at(-12.0))
+        .handle()
+        .send_parameter(GAIN, gain_at(-12.0))
         .expect("a declared parameter");
     let (mut live, _exec) = Editor::new(Prepare::new(
         SampleRate::of(SAMPLE_RATE),

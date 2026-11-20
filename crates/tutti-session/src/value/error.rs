@@ -108,7 +108,7 @@ pub enum PluginParamRefusal {
 }
 
 /// Why a plugin parameter is not a target in a tutti unit
-/// ([`Param::try_unit`](crate::Param::try_unit)), or no longer is: the
+/// ([`PluginParam::try_unit`](crate::PluginParam::try_unit)), or no longer is: the
 /// plugin's declaration is read at every write, so a rescan can end it.
 #[cfg(feature = "plugin")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Error)]

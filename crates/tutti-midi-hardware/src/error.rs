@@ -149,10 +149,16 @@ pub enum MidiHardwareError {
     NoMidi1Form(#[from] tutti_ump::NoMidi1Form),
 
     /// A virtual endpoint declared Function Blocks, and the platform cannot
-    /// publish them: its endpoints carry a name and a protocol only. The same
-    /// spec without blocks opens.
+    /// publish them: its endpoints carry a name and a protocol only (macOS before
+    /// 15, which has no `MIDIUMPMutableEndpoint`). The same spec without blocks
+    /// opens.
     #[error("this platform cannot publish Function Blocks on a virtual endpoint")]
     VirtualBlocksUnsupported,
+
+    /// A send on a virtual endpoint that was dropped: its
+    /// [`VirtualSender`](crate::VirtualSender) outlived it.
+    #[error("the virtual endpoint was dropped")]
+    EndpointGone,
     // NOTE: there is deliberately no `File(tutti_midi_file::Error)` variant.
     // A parse failure is not a port failure — a consumer that reads files owns
     // that error itself (`tutti_midi_file::Error`, which this crate does not

@@ -167,7 +167,7 @@ fn the_block_read_is_the_same_at_any_block_length() {
     let mut streamer = DiskStreamer::manual(SampleRate::of(SR), DiskStreamerConfig::default())
         .expect("streamer builds");
     let openings: Vec<_> = (0..8)
-        .map(|_| streamer.open(&path, crate::Placement::HEAD))
+        .map(|_| streamer.open(&path, crate::StreamStart::HEAD))
         .collect();
     assert!(
         streamer.step_until_idle(512) < 512,

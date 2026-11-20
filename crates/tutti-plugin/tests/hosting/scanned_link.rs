@@ -3,9 +3,11 @@
 
 #![cfg(all(feature = "clap", unix))]
 
-use tutti_plugin::catalog::{Catalog, CatalogConfig, Hosting, Locator, Plugin, PluginId};
+use tutti_plugin::catalog::Plugin;
+use tutti_plugin_db::{Catalog, CatalogConfig, Hosting};
 use tutti_plugin_db::{PluginDb, ScanPoll};
 use tutti_plugin_types::PluginFormat;
+use tutti_plugin_types::{Locator, PluginId};
 
 /// **A scanned link to a differently named target loads by its catalog
 /// key**: the row is CLAP though its file is `libfoo.so`, so the load that
@@ -38,7 +40,7 @@ fn a_scanned_link_to_a_differently_named_target_loads_by_its_catalog_key() {
         },
     );
     let result = result.expect("the wait ended on a result");
-    assert!(result.failures.is_empty(), "{:?}", result.failures);
+    assert!(result.failures().is_empty(), "{:?}", result.failures());
     let (listed, _) = catalog.iter().next().expect("the link is one row");
     assert_eq!(listed.path(), tutti_plugin_db::canonical_path(&target));
     let id = listed.id().cloned().expect("the scan read the plugin's id");
@@ -52,8 +54,8 @@ fn a_scanned_link_to_a_differently_named_target_loads_by_its_catalog_key() {
     assert_eq!(loadable.format(), Ok(PluginFormat::Clap));
     let mut env = tutti_fixtures::ScopedEnv::new();
     env.set("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server());
-    let plugin = Plugin::open(
-        None,
+    let plugin = Plugin::open_served(
+        &tutti_plugin_ipc::AudioConfig::default(),
         &tutti_fixtures::detached_work(),
         &loadable,
         tutti_units::SampleRate::SR_48K,

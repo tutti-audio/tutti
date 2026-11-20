@@ -6,8 +6,9 @@ use crate::support::clap_probe;
 use std::time::Duration;
 use tutti_buffers::MaxBlock;
 use tutti_platform::Instant;
-use tutti_plugin::catalog::{Hosting, PluginRef};
+use tutti_plugin_db::Hosting;
 use tutti_plugin_types::IpcError;
+use tutti_plugin_types::PluginRef;
 use tutti_session::{LoadError, PoolEvent, Session, SessionEvent};
 use tutti_units::Samples;
 
@@ -147,7 +148,9 @@ fn vst2_asked_for_out_of_process_is_refused_at_load() {
         None,
     ) {
         Err(LoadError::Plugin(error)) => match &*error {
-            IpcError::NotOutOfProcess { format, .. } => assert_eq!(*format, "VST2"),
+            IpcError::NotOutOfProcess { format, .. } => {
+                assert_eq!(*format, tutti_plugin_types::PluginFormat::Vst2)
+            }
             other => panic!("expected NotOutOfProcess, got {other:?}"),
         },
         other => panic!("expected NotOutOfProcess, got {other:?}"),

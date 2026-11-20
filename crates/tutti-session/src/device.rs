@@ -296,7 +296,7 @@ impl<K: crate::AppKey, F: SessionFloat> Session<K, DeviceClock<F>> {
         topology: Option<ChannelTopology>,
     ) -> std::result::Result<DeviceRestarted, RestartError>
     where
-        D::Error: Into<tutti_cpal::Error>,
+        D::Error: Into<tutti_cpal::DeviceError>,
     {
         let outcome = self.check_restart(max_block).and_then(|()| {
             let previous = self.device().graph_rate();
@@ -559,7 +559,7 @@ impl<F: SessionFloat> Device<F> {
     /// What the driver's `open` reports.
     pub fn start_with<D: StreamDriver<F>>(&mut self, driver: D) -> Result<()>
     where
-        D::Error: Into<tutti_cpal::Error>,
+        D::Error: Into<tutti_cpal::DeviceError>,
     {
         Ok(self.driver.start_with(driver)?)
     }
@@ -578,7 +578,7 @@ impl<F: SessionFloat> Device<F> {
     pub fn devices() -> Result<impl Iterator<Item = DeviceId>> {
         let snapshot = tutti_cpal::DeviceHost::open(tutti_cpal::AudioHost::Default)?.snapshot()?;
         Ok(snapshot
-            .devices(tutti_cpal::Direction::Output)
+            .devices(tutti_cpal::DeviceDirection::Output)
             .to_vec()
             .into_iter())
     }
@@ -748,21 +748,21 @@ pub enum DeviceEvent {
     /// running). The stream's own loss is [`SessionEvent::Fault`].
     Lost {
         /// Which way it played or captured.
-        direction: tutti_cpal::Direction,
+        direction: tutti_cpal::DeviceDirection,
         /// The device.
         id: DeviceId,
     },
     /// A device is listed that was not (the first look lists them all).
     Appeared {
         /// Which way it plays or captures.
-        direction: tutti_cpal::Direction,
+        direction: tutti_cpal::DeviceDirection,
         /// The device.
         id: DeviceId,
     },
     /// The host's default device moved; `None`: there is none now.
     DefaultChanged {
         /// Which direction's default.
-        direction: tutti_cpal::Direction,
+        direction: tutti_cpal::DeviceDirection,
         /// The new default.
         id: Option<DeviceId>,
     },
@@ -801,7 +801,7 @@ pub enum DeviceEvent {
     OutputsListed(Vec<DeviceId>),
     /// The listing started with [`Session::list_outputs`] failed. Reported
     /// once.
-    OutputsListFailed(tutti_cpal::Error),
+    OutputsListFailed(tutti_cpal::DeviceError),
     /// The listing started with [`Session::list_outputs`] has not answered
     /// after 5 s of [`PhaseCx::now`](crate::PhaseCx::now): the host's
     /// enumeration is stuck or slow. Reported once; the listing goes on waiting.

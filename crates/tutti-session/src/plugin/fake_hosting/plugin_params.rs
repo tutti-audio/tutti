@@ -1,5 +1,5 @@
 //! A hosted plugin's parameters through the session's views:
-//! `Plugin::params`, `Param`, `Param::try_unit` and `ParamGesture`, over a fake
+//! `Plugin::params`, `PluginParam`, `PluginParam::try_unit` and `ParamGesture`, over a fake
 //! backend that declares its parameters and records what the host sets (no
 //! `plugin-server`), hosted at a node over `host`.
 
@@ -165,8 +165,8 @@ impl AnyThread for Fake {
     fn save_state(
         &self,
         _: tutti_plugin_types::StateUse,
-    ) -> Result<Vec<u8>, tutti_plugin::error::StateError> {
-        Err(tutti_plugin::error::StateError::NoStateRoute)
+    ) -> Result<Vec<u8>, tutti_plugin_types::StateError> {
+        Err(tutti_plugin_types::StateError::NoStateRoute)
     }
     fn set_render_mode(&self, _mode: RenderMode) -> bool {
         false
@@ -223,7 +223,7 @@ fn session_keyed() -> (DetachedSession, Key<AnyPlugin>, Arc<Fake>, RefreshSink) 
         &mut s,
         node,
         handle,
-        tutti_plugin::catalog::PluginRef::file("fake.clap"),
+        tutti_plugin_types::PluginRef::file("fake.clap"),
     );
     s.commit();
     (s, key, fake, refresh)
@@ -255,7 +255,7 @@ fn ready() -> (DetachedSession, NodeKey, Arc<Fake>, RefreshSink) {
     (s, node, fake, refresh)
 }
 
-fn cutoff(s: &DetachedSession, node: NodeKey) -> crate::Param<'_> {
+fn cutoff(s: &DetachedSession, node: NodeKey) -> crate::PluginParam<'_> {
     s.plugin_view(node).unwrap().params().get(CUTOFF).unwrap()
 }
 
@@ -574,7 +574,7 @@ fn a_rescan_replaces_the_declarations_and_the_values_with_them() {
 fn text_and_plain_values_go_through_the_plugin() {
     let (mut s, key, _, _) = session_keyed();
     let _ = update(&mut s);
-    fn level(s: &DetachedSession, key: Key<AnyPlugin>) -> crate::Param<'_> {
+    fn level(s: &DetachedSession, key: Key<AnyPlugin>) -> crate::PluginParam<'_> {
         s.plugin_view(key).unwrap().params().get(LEVEL).unwrap()
     }
     assert_eq!(level(&s, key).plain(), Some(-60.0 + 72.0 * 0.25));
@@ -586,7 +586,7 @@ fn text_and_plain_values_go_through_the_plugin() {
 }
 
 /// **A plugin parameter is targeted by the same reference a native one is**
-/// (`modulation`): `Param::target` is the `ParamRef` a route takes.
+/// (`modulation`): `PluginParam::target` is the `ParamRef` a route takes.
 #[test]
 fn a_plugin_parameter_targets_a_modulation_route_through_a_param_ref() {
     let (s, node, _, _) = ready();
@@ -598,7 +598,7 @@ fn a_plugin_parameter_targets_a_modulation_route_through_a_param_ref() {
 }
 
 /// **A plugin's key names a parameter as a route's target** (`modulation`):
-/// `key.param(id)` is the reference `Param::target` gives, and a route onto it
+/// `key.param(id)` is the reference `PluginParam::target` gives, and a route onto it
 /// is declared and read back through the key, as a native param's is.
 #[test]
 fn a_plugin_key_names_a_parameter_a_route_targets() {
@@ -806,15 +806,15 @@ fn a_read_only_parameter_is_refused() {
 /// refused third item lands nothing, and the same batch without it lands all.
 #[test]
 fn a_batch_over_plugin_and_native_params_lands_nothing_when_one_is_refused() {
-    use tutti_nodes::{SvfFilterNode, SvfType};
+    use tutti_nodes::{SvfFilterConfig, SvfFilterNode, SvfType};
     use tutti_units::Q;
 
     let (mut s, key, fake, _) = session_keyed();
     let _ = update(&mut s);
-    let (lp, _) = s.graph().add(SvfFilterNode::<f32>::new(
-        SvfType::LowPass,
-        Hz::new(800.0),
-        Q::new(0.707),
+    let (lp, _) = s.graph().add(SvfFilterNode::<f32>::from(
+        SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
+            .freq(Hz::new(800.0))
+            .q(Q::new(0.707)),
     ));
     s.commit();
 
@@ -882,7 +882,7 @@ fn replace_with(s: &mut DetachedSession, node: NodeKey, fake: &Arc<Fake>, plugin
     );
     let (controls, _) =
         PluginControls::new(Samples::new(0), PluginTail::default(), SampleRate::SR_48K);
-    let plugin = tutti_plugin::catalog::PluginRef::file(plugin);
+    let plugin = tutti_plugin_types::PluginRef::file(plugin);
     let hosted = s.graph.plugins.get_mut(&node).expect("a hosted plugin");
     let outgoing = hosted.replace_hosted(handle, (*controls).clone(), plugin);
     outgoing.retire().settle(node, &mut s.graph.graveyard);

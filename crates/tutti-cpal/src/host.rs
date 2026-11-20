@@ -7,8 +7,8 @@
 
 use cpal::traits::{DeviceTrait, HostTrait};
 
-use crate::error::{Error, Result};
-use crate::roster::{DeviceId, Direction, Snapshot};
+use crate::error::{DeviceError, Result};
+use crate::roster::{DeviceDirection, DeviceId, Snapshot};
 use crate::supported::SupportedConfig;
 
 // JACK is reachable only on Linux and the BSDs with the `jack` feature: one
@@ -41,7 +41,7 @@ mod jack;
 /// Every variant exists on every platform, so a configuration struct holding
 /// an `AudioHost` has the same shape on Linux, macOS and Windows (cpal's own
 /// `HostId` is generated per target). Asking for a host this build cannot
-/// reach fails at runtime with [`Error::HostUnavailable`]; use
+/// reach fails at runtime with [`DeviceError::HostUnavailable`]; use
 /// [`available_hosts`] to list the ones that work.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 #[non_exhaustive]
@@ -52,7 +52,7 @@ pub enum AudioHost {
     /// JACK, on Linux and the BSDs.
     ///
     /// Needs this crate's `jack` feature. Elsewhere, or without the feature,
-    /// opening it returns [`Error::HostUnavailable`].
+    /// opening it returns [`DeviceError::HostUnavailable`].
     Jack,
 }
 
@@ -71,7 +71,7 @@ impl std::fmt::Display for AudioHost {
 /// selection survives a hot-plug of another card (a position would not). It
 /// does not follow a device unplugged and replugged under a new name.
 ///
-/// An id that matches nothing is an error ([`Error::InvalidDevice`]), never a
+/// An id that matches nothing is an error ([`DeviceError::InvalidDevice`]), never a
 /// fallback to the default device.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 pub enum DeviceSelector {
@@ -120,7 +120,7 @@ impl DeviceHost {
     /// Opens a platform host.
     ///
     /// # Errors
-    /// [`Error::HostUnavailable`] when this build cannot reach `which` — the
+    /// [`DeviceError::HostUnavailable`] when this build cannot reach `which` — the
     /// feature is off, the platform has no such host, or the server is not
     /// running.
     pub fn open(which: AudioHost) -> Result<Self> {
@@ -146,7 +146,7 @@ impl DeviceHost {
     /// name. Blocks as long as the host's enumeration does.
     ///
     /// # Errors
-    /// [`Error::DevicesError`] if the host cannot enumerate.
+    /// [`DeviceError::DevicesError`] if the host cannot enumerate.
     pub fn snapshot(&self) -> Result<Snapshot> {
         let name = |d: cpal::Device| device_name(&d).unwrap_or_default();
         let default_output = self.inner.default_output_device().map(name);
@@ -154,11 +154,11 @@ impl DeviceHost {
         Ok(Snapshot::from_names(
             self.inner
                 .output_devices()
-                .map_err(Error::DevicesError)?
+                .map_err(DeviceError::DevicesError)?
                 .map(name),
             self.inner
                 .input_devices()
-                .map_err(Error::DevicesError)?
+                .map_err(DeviceError::DevicesError)?
                 .map(name),
             default_output.as_deref(),
             default_input.as_deref(),
@@ -172,24 +172,24 @@ impl DeviceHost {
     /// Blocks as long as the host's query does.
     ///
     /// # Errors
-    /// [`Error::InvalidDevice`] when `sel` names no device or the device's
-    /// configs cannot be queried; [`Error::DevicesError`] if the host cannot
+    /// [`DeviceError::InvalidDevice`] when `sel` names no device or the device's
+    /// configs cannot be queried; [`DeviceError::DevicesError`] if the host cannot
     /// enumerate.
     pub fn supported_configs(
         &self,
-        direction: Direction,
+        direction: DeviceDirection,
         sel: &DeviceSelector,
     ) -> Result<Vec<SupportedConfig>> {
         let device = self.device(direction, sel)?;
         let name = device_name(&device).unwrap_or_default();
         let unqueryable = |e: cpal::Error| {
-            Error::InvalidDevice(format!("cannot query {name:?} {direction} configs: {e}"))
+            DeviceError::InvalidDevice(format!("cannot query {name:?} {direction} configs: {e}"))
         };
         Ok(match direction {
-            Direction::Output => {
+            DeviceDirection::Output => {
                 SupportedConfig::list(device.supported_output_configs().map_err(unqueryable)?)
             }
-            Direction::Input => {
+            DeviceDirection::Input => {
                 SupportedConfig::list(device.supported_input_configs().map_err(unqueryable)?)
             }
         })
@@ -198,34 +198,34 @@ impl DeviceHost {
     /// Resolve a selector to a device. **The only place a device is resolved.**
     pub(crate) fn device(
         &self,
-        direction: Direction,
+        direction: DeviceDirection,
         sel: &DeviceSelector,
     ) -> Result<cpal::Device> {
         let list = || -> Result<Vec<cpal::Device>> {
             Ok(match direction {
-                Direction::Output => self
+                DeviceDirection::Output => self
                     .inner
                     .output_devices()
-                    .map_err(Error::DevicesError)?
+                    .map_err(DeviceError::DevicesError)?
                     .collect(),
-                Direction::Input => self
+                DeviceDirection::Input => self
                     .inner
                     .input_devices()
-                    .map_err(Error::DevicesError)?
+                    .map_err(DeviceError::DevicesError)?
                     .collect(),
             })
         };
         let what = match direction {
-            Direction::Output => "output",
-            Direction::Input => "input",
+            DeviceDirection::Output => "output",
+            DeviceDirection::Input => "input",
         };
 
         match sel {
             DeviceSelector::Default => match direction {
-                Direction::Output => self.inner.default_output_device(),
-                Direction::Input => self.inner.default_input_device(),
+                DeviceDirection::Output => self.inner.default_output_device(),
+                DeviceDirection::Input => self.inner.default_input_device(),
             }
-            .ok_or_else(|| Error::InvalidDevice(format!("No {what} device available"))),
+            .ok_or_else(|| DeviceError::InvalidDevice(format!("No {what} device available"))),
 
             // An unknown id is an error rather than a fall back to the
             // default: silently playing out of the wrong device is the
@@ -234,7 +234,7 @@ impl DeviceHost {
                 .into_iter()
                 .filter(|d| device_name(d).is_ok_and(|n| n == id.name()))
                 .nth(id.ordinal())
-                .ok_or_else(|| Error::InvalidDevice(format!("no {what} device {id}"))),
+                .ok_or_else(|| DeviceError::InvalidDevice(format!("no {what} device {id}"))),
         }
     }
 }

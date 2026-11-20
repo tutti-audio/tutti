@@ -190,7 +190,7 @@ fn run(
         }
         ProbeOutcome::Failed(refusal) => Err(refusal.into()),
         // `ProbeOutcome` is `#[non_exhaustive]`: an outcome from a newer probe.
-        other => Err(ResultError::Malformed(format!("an unknown outcome: {other:?}")).into()),
+        _ => Err(ResultError::UnknownOutcome.into()),
     }
 }
 
@@ -258,10 +258,10 @@ mod tests {
         )
     }
 
-    /// A probe that does not finish by the deadline is killed and reaped, and the
-    /// caller is told it timed out.
+    /// A probe a stop ends is killed and reaped, and the caller is told it was
+    /// cancelled.
     #[test]
-    fn a_probe_that_hangs_is_killed_at_the_deadline() {
+    fn a_cancelled_probe_is_killed_and_reaped() {
         let dir = TempDir::new().unwrap();
         let fifo = dir.path().join("pid");
         assert!(
@@ -446,12 +446,6 @@ mod tests {
         for timeout in [secs(1), secs(15), secs(180), secs(3600)] {
             assert!(run_budget(timeout) < timeout, "{timeout:?}");
         }
-    }
-
-    /// The default allows a cold plugin well past the old five seconds.
-    #[test]
-    fn the_default_deadline_is_fifteen_seconds() {
-        assert_eq!(DEFAULT_PROBE_TIMEOUT, Duration::from_secs(15));
     }
 
     /// The result file is in a directory of the probe's own, not a predictable

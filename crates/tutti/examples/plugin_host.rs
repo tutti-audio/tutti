@@ -68,7 +68,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ScanPoll::Died => return Err("the scan's worker died".into()),
         }
     };
-    eprintln!("scanned {} plugin file(s)", scanned.scanned);
+    eprintln!("scanned {} plugin file(s)", scanned.scanned());
     //    The scan's save runs on its own thread; a failure is kept for the app.
     if let Some(unsaved) = catalog.take_persist_error() {
         return Err(unsaved.into());

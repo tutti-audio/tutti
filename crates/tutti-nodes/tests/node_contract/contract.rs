@@ -23,12 +23,13 @@
 //!
 //! Every row is a graph node (`Row::new`).
 
+use tutti_buffers::BusTopology;
 use tutti_buffers::Mono;
-use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_graph::contract::{Detect, Excite, Row};
 use tutti_graph::contract_tests;
 use tutti_nodes::{
-    CrossoverNode, DelayControls, DelayNode, LimiterConfig, LimiterControls, LimiterNode, MaxDelay,
+    CrossoverConfig, CrossoverControls, CrossoverNode, DelayConfig, DelayControls, DelayLayout,
+    DelayNode, InterpolationMode, LimiterConfig, LimiterControls, LimiterNode, MaxDelay,
     MultibandBands, MultibandCompressorConfig, MultibandCompressorNode,
 };
 use tutti_units::{Db, Feedback, Hz, Samples, Seconds};
@@ -88,13 +89,17 @@ fn delay_line_row() -> Row {
     Row::new(
         "DelayNode (zero delay)",
         || {
-            Box::new(DelayNode::<f32>::mono(
-                MaxDelay::of(Seconds::new(1.0_f64)),
-                DelayControls {
+            Box::new(DelayNode::<f32>::from(
+                DelayConfig::new(DelayLayout::new(
+                    BusTopology::MONO,
+                    MaxDelay::of(Seconds::new(1.0_f64)),
+                    InterpolationMode::Linear,
+                ))
+                .controls(DelayControls {
                     time: Seconds::new(0.0_f64),
                     feedback: Feedback::new(0.0_f64),
                     ..DelayControls::DEFAULT
-                },
+                }),
             ))
         },
         impulse(0),
@@ -109,7 +114,15 @@ fn delay_line_row() -> Row {
 fn crossover_row() -> Row {
     Row::new(
         "CrossoverNode<f32> (stereo, 2 bands, right low band)",
-        || Box::new(CrossoverNode::<f32>::new(ChannelLayout::STEREO, &[Hz::new(1_000.0)]).unwrap()),
+        || {
+            Box::new(
+                CrossoverNode::<f32>::try_from(CrossoverConfig::new(
+                    BusTopology::STEREO,
+                    CrossoverControls::try_from(&[Hz::new(1_000.0)][..]).unwrap(),
+                ))
+                .unwrap(),
+            )
+        },
         impulse(1),
         Detect::Threshold(0.0),
     )
@@ -140,7 +153,6 @@ contract_tests!(audio stereo_limiter => stereo_limiter_row());
 contract_tests!(audio delay_line => delay_line_row());
 mod convolution {
     use super::*;
-    use tutti_nodes::ConvolverNode;
 
     /// A unit-impulse IR, so the wet path is a pure delay of the block: the
     /// response is the impulse, `256` frames late. The FFT leaves noise far under
@@ -150,7 +162,7 @@ mod convolution {
     fn convolver_row() -> Row {
         Row::new(
             "ConvolverNode (256-frame block)",
-            move || Box::new(ConvolverNode::new(Mono::new(&[1.0]), Samples::new(256))),
+            move || Box::new(mono_node(Mono::new(&[1.0]), Samples::new(256))),
             impulse(0),
             Detect::Threshold(1e-3),
         )
@@ -158,4 +170,16 @@ mod convolution {
     }
 
     contract_tests!(audio convolver => convolver_row());
+}
+
+/// A one-channel convolver over `ir`.
+fn mono_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::Sample>(
+    ir: tutti_buffers::Mono<'_, S>,
+    block_size: tutti_units::Samples,
+) -> tutti_nodes::ConvolverNode<F> {
+    tutti_nodes::ConvolverNode::try_from(
+        tutti_nodes::ConvolverConfig::new(tutti_buffers::BusTopology::MONO, &[ir])
+            .block_size(block_size),
+    )
+    .expect("one response on a mono bus")
 }
