@@ -4,17 +4,18 @@ mod fft;
 mod sinc;
 mod streaming;
 
-pub use fft::FftResampler;
+use fft::FftResampler;
 pub use sinc::WindowedSinc;
-pub use streaming::{ChunkSize, StreamingResampler, needs_resampling, resampled_frames};
+pub use streaming::{
+    ChunkSize, StreamingResampler, StreamingResamplerConfig, needs_resampling, resampled_frames,
+};
 
-/// Why an [`FftResampler`] could not be built or fed.
+/// Why a [`StreamingResampler`] could not be built or fed.
 #[derive(Debug, Clone, Copy, PartialEq, thiserror::Error)]
 #[non_exhaustive]
 pub enum ResampleError {
     /// A rate that is not a finite value of at least 0.5 Hz and under 2^32 Hz.
-    /// Not raised by [`FftResampler`] itself, which takes integer rates: it is
-    /// for callers converting a floating-point rate on the way in.
+    /// Raised where a floating-point rate is narrowed to the converter's whole Hz.
     #[error("invalid sample rate: {hz} Hz")]
     InvalidRate {
         /// The rejected rate.
@@ -61,9 +62,6 @@ pub enum ResampleError {
         /// The chunk count the carry should have drained within.
         chunks: usize,
     },
-    /// The channel count is more than a `ChannelLayout` holds.
-    #[error(transparent)]
-    Layout(#[from] tutti_buffers::LayoutError),
     /// A view handed to a streaming resampler is not as wide as the resampler.
     #[error("a view of {got} channels was pushed into a resampler of {expected}")]
     WidthMismatch {

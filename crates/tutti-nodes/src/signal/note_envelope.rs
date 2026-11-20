@@ -30,22 +30,39 @@ use super::{SourceNode, SourcePorts};
 /// leaves it.
 pub type NoteEnvelopeNode = SourceNode<NoteAdsr>;
 
-impl SourceNode<NoteAdsr> {
+/// What a [`NoteEnvelopeNode`] is made from: the source id it sends as and its ADSR.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct NoteEnvelopeConfig {
+    source: SourceId,
+    adsr: Adsr,
+}
+
+impl NoteEnvelopeConfig {
     /// A note envelope of `adsr`, sending as `source`.
     #[must_use]
-    pub fn new(source: SourceId, adsr: Adsr) -> Self {
-        Self::with_source(source, NoteAdsr::new(adsr), ChannelLayout::EMPTY)
+    pub const fn new(source: SourceId, adsr: Adsr) -> Self {
+        Self { source, adsr }
     }
 
-    /// The node `decl` describes (what `tutti_modulation::compile` gives each
-    /// note envelope): `None` when `decl` is not a note envelope. The rate
-    /// comes at `prepare`.
+    /// The config `decl` describes (what `tutti_modulation::compile` gives each note
+    /// envelope): `None` when `decl` is not a note envelope.
     #[must_use]
     pub fn from_decl(decl: &SignalSource) -> Option<Self> {
         match decl.kind {
             SignalKind::NoteEnvelope { adsr } => Some(Self::new(decl.id, adsr)),
             SignalKind::Follower { .. } => None,
         }
+    }
+}
+
+/// The envelope of `config`; its rate comes at `prepare`.
+impl From<NoteEnvelopeConfig> for NoteEnvelopeNode {
+    fn from(config: NoteEnvelopeConfig) -> Self {
+        Self::with_source(
+            config.source,
+            NoteAdsr::new(config.adsr),
+            ChannelLayout::EMPTY,
+        )
     }
 }
 

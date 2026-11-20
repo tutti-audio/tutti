@@ -28,7 +28,7 @@ use tutti_midi_runtime::MidiInputNode;
 use tutti_session::Stamp;
 use tutti_session::{EventInPort, MidiRouteRule, Session};
 use tutti_sf2::SoundFont;
-use tutti_soundfont::{Settings, SoundFontUnit};
+use tutti_soundfont::Settings;
 use tutti_ump::MidiChannel;
 use tutti_units::{Beat, BeatDuration, SampleRate, Samples};
 
@@ -46,7 +46,7 @@ fn soundfont() -> Arc<SoundFont> {
 
 /// An offline stereo session with a SoundFont synth on the outputs.
 fn rig() -> (Session, NodeKey) {
-    let unit = SoundFontUnit::new(soundfont(), Settings::new()).expect("builds the unit");
+    let unit = Settings::new().build(soundfont()).expect("builds the unit");
     let mut s = Session::builder()
         .sample_rate(RATE)
         .max_block(MaxBlock::of(Samples::new(128)))

@@ -31,8 +31,10 @@ use tutti_graph::{
     Editor, EventOut, GraphBuilder, IntoNode, NodeMix, NodeParts, ParamIn, ParamNode, ParamRange,
     Prepare, Renderer, declick_frames,
 };
-use tutti_modulation::{Amount, Clock, ControlProgram, Layer, LayerId, Polarity, Waveform};
-use tutti_nodes::automation::ControlLaneNode;
+use tutti_modulation::{
+    Amount, Clock, ControlProgram, ControlProgramBuilder, Layer, LayerId, Polarity, Waveform,
+};
+use tutti_nodes::automation::{ControlLaneNode, UnitLaneConfig};
 use tutti_nodes::{
     BrickwallLimiterConfig, BrickwallLimiterNode, BusStripConfig, BusStripNode, CompressorConfig,
     CompressorControls, CompressorNode, DelayConfig, DelayControls, DelayLayout, DelayNode,
@@ -114,8 +116,15 @@ fn konst(depth: f64) -> Layer {
 /// have been committed); one without sends its knob, unranged.
 fn drive(ed: &mut Editor, at: ParamIn, knob: impl Into<ParamCell>, layers: Vec<Layer>) {
     let range = (!layers.is_empty()).then(|| ed.param_range_cell(at).expect("committed"));
-    let program = ControlProgram::new(None, layers, vec![]).expect("a valid program");
-    let lane = ControlLaneNode::for_unit(at.param, program, Some(knob.into()), range);
+    let program = ControlProgramBuilder::new()
+        .layers(layers)
+        .build()
+        .expect("a valid program");
+    let mut config = UnitLaneConfig::new(at.param, program).knob(knob.into());
+    if let Some(range) = range {
+        config = config.range(range);
+    }
+    let lane = ControlLaneNode::from(config);
     ed.insert(LANE, "lane", lane);
     ed.spec_mut().connect_param(
         at,
@@ -1137,11 +1146,9 @@ fn an_unmodulated_param_adds_nothing_to_the_plan() {
         ))
         .expect("builds");
     // The lane is in the graph, unconnected, from the start.
-    let lane = ControlLaneNode::for_unit(
-        UnitParam::Drive,
-        ControlProgram::default(),
-        Some(Arc::new(AtomicF64::new(5.0)).into()),
-        None,
+    let lane = ControlLaneNode::from(
+        UnitLaneConfig::new(UnitParam::Drive, ControlProgram::default())
+            .knob(Arc::new(AtomicF64::new(5.0)).into()),
     );
     let controls = r.editor_mut().insert(LANE, "lane", lane).controls;
     r.editor_mut().commit().expect("commits");

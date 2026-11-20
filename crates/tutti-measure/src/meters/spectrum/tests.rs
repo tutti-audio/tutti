@@ -2,6 +2,7 @@ use super::*;
 use crate::fold_uneven;
 use crate::test_rng::uniform;
 use std::f64::consts::TAU;
+use tutti_dsp::{HopSize, WindowLength};
 use tutti_rt::SplitMix64;
 use tutti_units::Samples;
 use tutti_units::{Amplitude, SampleRate};
@@ -18,7 +19,11 @@ fn band(min: f64, max: f64) -> FrequencyBand {
 }
 
 fn geometry(size: usize, hop: usize) -> StftGeometry {
-    StftGeometry::new(SampleRate::of(RATE), Samples::new(size), Samples::new(hop)).unwrap()
+    StftGeometry::new(
+        SampleRate::of(RATE),
+        WindowLength::new(Samples::new(size)).unwrap(),
+        HopSize::new(Samples::new(hop)).unwrap(),
+    )
 }
 
 fn config(size: usize, hop: usize) -> SpectrumConfig {

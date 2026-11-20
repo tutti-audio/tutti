@@ -11,6 +11,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Waker};
+use std::time::Duration;
 
 use super::{lock, os};
 use crate::Instant;
@@ -117,19 +118,74 @@ impl Timers {
         fired
     }
 
-    /// Refuses further sleeps and drops the wakers of those waiting.
+    /// Closes the queue and wakes every sleep waiting: each resolves on its next poll, and
+    /// so does every sleep made or polled afterwards.
     pub(super) fn close(&self) {
-        let mut state = lock(&self.state);
-        state.closed = true;
-        state.due = Due::default();
+        let due = {
+            let mut state = lock(&self.state);
+            state.closed = true;
+            std::mem::take(&mut state.due)
+        };
+        for (_, waker) in due.wakers {
+            waker.wake();
+        }
     }
 }
 
-/// A deadline as a future: resolves once [`Instant::now`] is at or past it.
+/// The executor a [`Sleep`] waits on shut down before its deadline came due.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("the executor has shut down")]
+pub struct Shutdown;
+
+/// A handle to an executor's deadlines that keeps nothing of the executor alive.
 ///
-/// Made by [`Executor::sleep_until`](super::Executor::sleep_until). Dropping a pending
-/// `Sleep` removes it from the executor's queue and drops its waker. A `Sleep` whose
-/// executor has dropped never resolves.
+/// Made by [`Executor::timer`](super::Executor::timer). `Clone` shares it, and a future
+/// may hold one: it holds the deadline queue only, never the executor, its threads or its
+/// queue, so it never delays the executor's [shutdown](super::Executor#shutdown). Its
+/// sleeps are the executor's own ([`Executor::sleep_until`](super::Executor::sleep_until)
+/// is this type's).
+///
+/// A [`Sleep`] resolves at once with `Err(`[`Shutdown`]`)` once its executor has shut down;
+/// nothing fires deadlines after that.
+#[derive(Clone, Debug)]
+pub struct Timer {
+    timers: Arc<Timers>,
+}
+
+impl Timer {
+    pub(super) fn new(timers: &Arc<Timers>) -> Self {
+        Self {
+            timers: Arc::clone(timers),
+        }
+    }
+
+    /// A future that resolves once [`Instant::now`] is at or past `deadline`; a deadline
+    /// already past resolves on its first poll.
+    ///
+    /// A driver of the executor fires it, so its resolution is the cadence of whoever
+    /// drives. Dropping the [`Sleep`] before it resolves removes it from the queue. It
+    /// resolves at once with `Err(`[`Shutdown`]`)` once the executor has shut down;
+    /// nothing fires deadlines after that.
+    pub fn sleep_until(&self, deadline: Instant) -> Sleep {
+        Sleep::new(&self.timers, deadline)
+    }
+
+    /// A future that resolves `duration` from now: [`sleep_until`](Self::sleep_until) of
+    /// that instant.
+    pub fn sleep(&self, duration: Duration) -> Sleep {
+        self.sleep_until(Instant::now() + duration)
+    }
+}
+
+/// A deadline as a future: `Ok(())` when polled at or past its deadline,
+/// `Err(`[`Shutdown`]`)` when polled before it once its executor has shut down. A driver
+/// firing the deadline is what wakes it.
+///
+/// Made by [`Executor::sleep_until`](super::Executor::sleep_until) or
+/// [`Timer::sleep_until`]. Dropping a pending
+/// `Sleep` removes it from the executor's queue and drops its waker. A `Sleep` resolves at
+/// once with `Err(Shutdown)` once its executor has shut down; nothing fires deadlines
+/// after that.
 #[derive(Debug)]
 #[must_use = "a Sleep does nothing unless awaited"]
 pub struct Sleep {
@@ -161,23 +217,24 @@ impl Sleep {
 }
 
 impl Future for Sleep {
-    type Output = ();
+    type Output = Result<(), Shutdown>;
 
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         if Instant::now() >= self.deadline {
             self.cancel();
-            return Poll::Ready(());
+            return Poll::Ready(Ok(()));
         }
         let timers = Arc::clone(&self.timers);
         let mut state = lock(&timers.state);
-        if !state.closed {
-            let earliest = state.due.next_deadline();
-            let id = state.due.arm(self.id, self.deadline, cx.waker());
-            let armed = self.id.replace(id) != Some(id);
-            drop(state);
-            if armed && earliest.is_none_or(|earliest| self.deadline < earliest) {
-                timers.parked.unpark_all();
-            }
+        if state.closed {
+            return Poll::Ready(Err(Shutdown));
+        }
+        let earliest = state.due.next_deadline();
+        let id = state.due.arm(self.id, self.deadline, cx.waker());
+        let armed = self.id.replace(id) != Some(id);
+        drop(state);
+        if armed && earliest.is_none_or(|earliest| self.deadline < earliest) {
+            timers.parked.unpark_all();
         }
         Poll::Pending
     }
