@@ -30,6 +30,7 @@ use tutti_buffers::{
 };
 use tutti_codec::{FileEncoder, FinalizedFile, IntDepth, Spec};
 use tutti_dsp::{DitherSink, FftFloat, StreamingResampler, needs_resampling, resampled_frames};
+use tutti_platform::Staged;
 use tutti_units::{Amplitude, SampleRate, Samples};
 
 /// The rate the file is written at: the resample target, else the rate it is
@@ -63,7 +64,13 @@ pub(crate) fn open_file<F: FftFloat>(
 ) -> Result<Chain<F>> {
     let spec = spec(target, source_rate);
     let planned = resampled_frames(source_rate, spec.rate(), plan.output_length);
-    let encoder = FileEncoder::create_planned(&spec, target.path(), planned)?;
+    let staged = Staged::new(target.path());
+    let staged = if target.refuses_existing() {
+        staged.create_new()
+    } else {
+        staged
+    };
+    let encoder = FileEncoder::create_planned_staged(&spec, staged, planned)?;
     Chain::new(target, source_rate, encoder)
 }
 

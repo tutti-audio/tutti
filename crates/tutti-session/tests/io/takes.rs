@@ -855,3 +855,84 @@ fn dropping_a_session_wakes_a_take_pump_on_a_host_executor() {
     );
     drop(take);
 }
+
+/// Runs a polled take of the ramp into `target` to its end and returns the
+/// session's events.
+fn record_polled(target: TakeTarget) -> Vec<SessionEvent> {
+    let mut rig = rig_on(
+        InputConfig::default(),
+        Samples::new(0),
+        tutti_platform::Executor::polled(),
+    );
+    rig.step(256);
+    let take = rig
+        .session
+        .record(&rig.input, Punch::now(), target)
+        .expect("armed");
+    rig.steps_until(started);
+    for _ in 0..16 {
+        rig.step(BLOCK);
+    }
+    take.finish();
+    rig.steps_until(finished);
+    rig.events
+}
+
+/// The names in `dir`, sorted.
+fn names(dir: &tempfile::TempDir) -> Vec<std::ffi::OsString> {
+    let mut names: Vec<_> = std::fs::read_dir(dir.path())
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .collect();
+    names.sort();
+    names
+}
+
+/// **A take with `create_new` onto an existing file ends `Failed` with an
+/// `AlreadyExists` commit, the path keeps its old bytes, and the file kept
+/// beside it holds the take's frames.** The ramp the test pushed is frame `i`
+/// is `[i, -i]`, so the kept file's frames count up by one from its first.
+#[test]
+fn a_create_new_take_onto_an_existing_file_keeps_the_take_and_leaves_the_path() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = wav(&dir, "taken.wav");
+    std::fs::write(&path, b"old bytes").unwrap();
+    let events = record_polled(TakeTarget::wav(path.clone()).create_new());
+    let [SessionEvent::Take(TakeEvent::Failed { error, .. })] = events
+        .iter()
+        .filter(|e| matches!(e, SessionEvent::Take(_)))
+        .skip(1)
+        .collect::<Vec<_>>()
+        .as_slice()
+    else {
+        panic!("not a lone Failed after Started: {events:?}");
+    };
+    let TakeError::Commit(commit) = error else {
+        panic!("not a commit failure: {error:?}");
+    };
+    assert_eq!(commit.kind(), std::io::ErrorKind::AlreadyExists);
+    assert_eq!(std::fs::read(&path).unwrap(), b"old bytes");
+    let kept = commit.kept();
+    assert_eq!(kept.parent(), path.parent(), "kept beside the path");
+    let frames = read(kept);
+    assert!(!frames.is_empty(), "the kept file holds no frame");
+    let first = frames[0][0];
+    for (k, frame) in frames.iter().enumerate() {
+        let want = first + k as f32;
+        assert_eq!(*frame, [want, -want], "kept frame {k}");
+    }
+    assert_eq!(names(&dir).len(), 2, "the path and the kept file only");
+}
+
+/// **A take without `create_new` replaces what is at its path and leaves no
+/// temporary file beside it.**
+#[test]
+fn a_take_replaces_an_existing_file_and_leaves_nothing_beside_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = wav(&dir, "taken.wav");
+    std::fs::write(&path, b"old bytes").unwrap();
+    let events = record_polled(TakeTarget::wav(path.clone()));
+    let done = recorded(&events);
+    assert_eq!(read(&path).len(), done.frames().get());
+    assert_eq!(names(&dir), [std::ffi::OsString::from("taken.wav")]);
+}

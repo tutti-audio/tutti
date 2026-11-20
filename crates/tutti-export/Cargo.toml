@@ -29,6 +29,8 @@ tutti-rt = { version = "0.0.1", path = "../tutti-rt", default-features = false }
 # blocks. No features of its own: a consumer names the `encode-*` formats it
 # writes on `tutti-codec`; this crate's tests turn them all on below.
 tutti-codec = { version = "0.0.1", path = "../tutti-codec" }
+# The staged file a target is written to, whose `create_new` a target forwards.
+tutti-platform = { version = "0.0.1", path = "../tutti-platform" }
 # The graph: `RenderGraph` is a forked or built
 # `Editor`/`Executor` pair, the only thing an export renders. Acyclic:
 # tutti-graph depends on no tutti crate but tutti-units, tutti-rt and tutti-ump.

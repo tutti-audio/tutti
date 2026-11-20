@@ -302,19 +302,36 @@ impl FileEncoder {
     /// [`Error::WavTooLarge`] when `frames` is past [`crate::Format::max_frames`] for
     /// the spec's width; otherwise as [`create`](Self::create).
     pub fn create_planned(spec: &Spec, path: impl AsRef<Path>, frames: Samples) -> Result<Self> {
-        check_planned(spec, frames)?;
-        Self::create(spec, path)
+        Self::create_planned_staged(spec, Staged::new(path.as_ref()), frames)
     }
 
     /// Starts the file `staged` stands for: its temporary is created here and
-    /// `staged` decides at the commit whether an existing target is replaced.
-    pub(crate) fn create_staged(spec: &Spec, staged: Staged) -> Result<Self> {
+    /// `staged` decides at the commit whether an existing target is replaced
+    /// ([`Staged::create_new`] refuses it, and the commit then fails with
+    /// [`Error::Commit`] of kind `AlreadyExists`, keeping the file).
+    ///
+    /// # Errors
+    ///
+    /// As [`create`](Self::create).
+    pub fn create_staged(spec: &Spec, staged: Staged) -> Result<Self> {
         // Created before the header is written: a failure from here on drops
         // the file, which removes the temporary.
         let sink = BufWriter::new(staged.open()?);
         Ok(Self {
             encoder: Encoder::create(spec, sink)?,
         })
+    }
+
+    /// As [`create_staged`](Self::create_staged) for a file that will hold
+    /// `frames` frames, refused as [`create_planned`](Self::create_planned)
+    /// refuses a count too long, before the temporary exists.
+    ///
+    /// # Errors
+    ///
+    /// As [`create_planned`](Self::create_planned).
+    pub fn create_planned_staged(spec: &Spec, staged: Staged, frames: Samples) -> Result<Self> {
+        check_planned(spec, frames)?;
+        Self::create_staged(spec, staged)
     }
 
     /// As [`Encoder::limit_frames`].
