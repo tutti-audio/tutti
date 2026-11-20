@@ -13,10 +13,9 @@
 //! let (stream, reader) = session.apply(opened)?;
 //! ```
 //!
-//! What a file is, resident or streamed, is the pool's: an
-//! `audio_file` entry (with a `tutti-codec` decoder on) reads as an
-//! `AudioEntry`, and a streamed one names the path
-//! [`open_stream`](Session::open_stream) opens.
+//! What a file is, resident or streamed, is [`Session::load_audio`]'s (with a
+//! `tutti-codec` decoder on): a [`LoadedAudio`](crate::LoadedAudio) holds the
+//! wave or names the file [`open_stream`](Session::open_stream) opens.
 
 use tutti_platform::Asset;
 use tutti_sampler::{AdoptError, OpenError, Stream, StreamReader, StreamStart};

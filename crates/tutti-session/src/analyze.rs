@@ -42,7 +42,7 @@ const CHUNK_FRAMES: Samples = Samples::new(16_384);
 ///
 /// Converts from what the session already holds: an [`Arc<Wave<S>>`](Wave) or
 /// a [`Wave<S>`]; with a decoder, an [`Asset`] or a path; and with a decoder and
-/// feature `sampler`, a pooled `AudioEntry`. An asset, and a streamed entry, are decoded
+/// feature `sampler`, a `LoadedAudio`. An asset, and a streamed load, are decoded
 /// chunk by chunk into `S` as the analysis runs.
 #[derive(Clone, Debug)]
 #[non_exhaustive]
@@ -88,11 +88,11 @@ impl<S: Float> From<&std::path::Path> for Audio<S> {
 }
 
 #[cfg(all(feature = "sampler", codec))]
-impl<S: Float> From<crate::AudioEntry<S>> for Audio<S> {
-    fn from(entry: crate::AudioEntry<S>) -> Self {
-        match entry {
-            crate::AudioEntry::Resident(wave) => Self::Wave(wave),
-            crate::AudioEntry::Streamed(info) => Self::File(info.asset().clone()),
+impl<S: Float> From<crate::LoadedAudio<S>> for Audio<S> {
+    fn from(audio: crate::LoadedAudio<S>) -> Self {
+        match audio.data() {
+            crate::AudioData::Resident(wave) => Self::Wave(Arc::clone(wave)),
+            crate::AudioData::Streamed(_) => Self::File(audio.asset().clone()),
         }
     }
 }
