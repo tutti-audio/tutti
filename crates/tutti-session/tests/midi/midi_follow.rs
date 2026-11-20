@@ -30,7 +30,7 @@ fn rig_with(groups: Option<MidiGroup>) -> (Session, FakeCounters) {
     if let Some(last) = groups {
         builder = builder.midi_groups(last);
     }
-    let mut s = builder
+    let (mut s, _bg) = builder
         .sample_rate(SampleRate::of(RATE))
         .build()
         .expect("builds");

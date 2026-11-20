@@ -4,7 +4,7 @@
 //! [`Session::record`] arms a take on an [`Input`]. It opens a plan tap on the
 //! input's inlet node, so the take is made of what the graph was given, frame
 //! for frame on the graph's own clock ([`TapReader::next_frame`]), and runs the
-//! pump into a sink on the session's executor, which the audio thread wakes by a
+//! pump into a sink on the session's background, which the audio thread wakes by a
 //! bell as the tap fills. Nothing is resampled or shifted
 //! in the file: where the take belongs is metadata, a [`Placement`] the take
 //! states term by term.
@@ -60,7 +60,7 @@ use tutti_rt::{Bell, Listener};
 use tutti_tempo::TempoMap;
 use tutti_units::{At, Beat, Frame, SampleRate, Samples, Seconds};
 
-use crate::WorkerError;
+use crate::BackgroundError;
 use crate::jobs::{Landings, Stream, StreamRun};
 use crate::{Input, Session, SessionEvent, Trim};
 
@@ -667,7 +667,7 @@ pub enum TakeError {
     NotStarted(std::io::ErrorKind),
     /// The take's job panicked or was dropped by the executor.
     #[error("the take's job did not finish: {0}")]
-    Job(#[from] WorkerError),
+    Job(#[from] BackgroundError),
     /// The take was finished (or its handle dropped) before its punch-in was
     /// reached: it holds nothing.
     #[error("the take ended before its punch-in")]
@@ -806,8 +806,8 @@ impl<S: InFlight> Take<S> {
     /// sink failed or the pump ended without a result. A take with a punch-out that
     /// already ended reports the same way.
     ///
-    /// Never blocks and never joins: on an executor that `update`
-    /// drives, the pump closes the sink inside the `update` that runs it.
+    /// Never blocks and never joins: the pump closes the sink when the session's
+    /// [`Background`](crate::Background) next runs it.
     ///
     /// The result is lost when the [`Session`] is gone. A `Take` that outlives its
     /// session, or a session dropped before the take's [`TakeEvent::Finished`] lands,
@@ -820,15 +820,16 @@ impl<S: InFlight> Take<S> {
 
 impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// Arms a take on `input`: opens a plan tap on its inlet node and runs the
-    /// pump into `target` on the session's executor. The take records what the
+    /// pump into `target` on the session's background. The take records what the
     /// graph is given by the input, so it is on the graph's clock whatever the
     /// device does; the module docs say where it is placed.
     ///
     /// The pump is a future that awaits the tap's bell: the audio thread rings it as it
-    /// writes each block, so the pump runs only when there are frames. A session that
-    /// drives its own executor with threads gives it a thread of its own. On an executor
-    /// that [`update`](Self::update) drives, it runs inside that update, which moves what
-    /// the tap holds (at most its ring, a second of frames) into the sink.
+    /// writes each block, so the pump runs only when there are frames. It gets a thread
+    /// of its own where the platform has threads; otherwise the
+    /// [`Background`](crate::Background)'s drive runs it, and each drive moves what the
+    /// tap holds (at most its ring, a second of frames) into the sink: drive at least
+    /// once a frame while recording.
     ///
     /// The tap compiles in the next [`update`](Self::update). The pump drops
     /// what comes before the punch-in; [`TakeEvent::Started`] lands in the
@@ -1374,7 +1375,7 @@ mod tests {
             shared: Arc::default(),
             stop: Arc::default(),
         };
-        let mut session = Session::builder()
+        let (mut session, _bg) = Session::builder()
             .build_detached(SampleRate::SR_48K)
             .unwrap();
         let ended = Arc::new(Mutex::new(None));

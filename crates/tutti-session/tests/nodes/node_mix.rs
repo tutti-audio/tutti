@@ -50,7 +50,7 @@ struct Rig {
 
 /// `Const(A) -> Halve -> output 0`, committed once.
 fn rig() -> Rig {
-    let mut s = Session::builder().build().expect("builds");
+    let (mut s, _bg) = Session::builder().build().expect("builds");
     let g = s.graph();
     let (a, _) = g.add(ForkByClone(Const::mono(A)));
     let (halve, _) = g.add(ForkByClone(Halve));
@@ -281,7 +281,7 @@ fn a_refused_replace_keeps_the_last_plan_until_the_mix_or_mode_is_set_back() {
 /// need no pass, so they land.
 #[test]
 fn a_node_with_no_pass_refuses_a_bypass_and_a_blend_and_lands_nothing() {
-    let mut s = Session::builder().build().expect("builds");
+    let (mut s, _bg) = Session::builder().build().expect("builds");
     let g = s.graph();
     let (a, _) = g.add(ForkByClone(Const::mono(A)));
     let (q, _) = g.add(ForkByClone(Quarter));

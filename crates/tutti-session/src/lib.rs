@@ -20,7 +20,7 @@
 //! use tutti_nodes::testing::Osc;
 //! use tutti_session::{Root, Session};
 //!
-//! let mut s = Session::builder()
+//! let (mut s, _background) = Session::builder()
 //!     .outputs_floor(ChannelLayout::MONO)
 //!     .outputs(ChannelLayout::MONO).max_block(MaxBlock::of(Samples::new(512))).build()
 //!     .unwrap();
@@ -40,14 +40,31 @@
 //! returns the [`SessionEvent`]s they raised: [`Phase::Collect`] lands what
 //! the session's jobs sent and frees what the audio thread retired,
 //! [`Phase::Commit`] compiles and sends an edited graph, and the phases around
-//! them serve plugins, modulation, MIDI and reclamation.
+//! them serve plugins, modulation, MIDI and reclamation. `update` only lands
+//! results and commits edits: it runs no background work, so calling it at the
+//! frame's rate is enough, and what it lands is as fresh as the work behind it.
 //!
 //! The audio thread runs the other loop: every block it renders the newest
 //! plan it has been handed, without waiting for the control thread.
 //!
+//! A third party does the background work: every `build` returns the session with its
+//! [`Background`], which runs what the session queues (a file load, a plugin round
+//! trip, the disk streamer's refills, a take's pump). Nothing runs while no one
+//! drives it: a native app starts threads once with
+//! `background.spawn_threads(std::thread::available_parallelism()?)?`, and a web
+//! page or a game's frame loop bounds each frame's share by a count,
+//! `while budget_left() && background.try_tick() {}`. A plugin's round trip, a take's
+//! pump and the disk streamer have threads of their own where the platform has
+//! threads, and start at once; every other job waits for the `Background`. A
+//! live recording or stream is fed only as often as the `Background` runs on a web
+//! page, so a frame loop there drives it at least every 10 to 20 ms. [`Job::wait`] takes the `&mut Background`, so a
+//! blocking wait always has its driver. Dropping the `Background` stops its threads
+//! and drops the work still queued, which ends its jobs
+//! [`BackgroundError::Dropped`].
+//!
 //! Between the two there are queues and no mutable state. A commit travels
 //! to the audio thread over the editor's queue, retired values travel back
-//! over its return queue, and a job on the session's executor reports over a
+//! over its return queue, and a job on the session's background reports over a
 //! channel that [`Phase::Collect`] drains. A call on the [`Graph`] only stages
 //! an edit, in the graph value the control thread holds
 //! ([`Graph::is_edited`] says whether one waits); nothing reaches the audio
@@ -61,6 +78,7 @@
 
 #[cfg(feature = "analyze")]
 mod analyze;
+mod background;
 #[cfg(feature = "export")]
 mod bounce;
 mod builder;
@@ -69,7 +87,6 @@ mod bypass;
 mod clock;
 #[cfg(feature = "device")]
 mod device;
-mod drive;
 #[cfg(feature = "plugin")]
 mod editor;
 mod error;
@@ -150,6 +167,7 @@ mod watch;
 pub use analyze::{
     Analyze, AnalyzeError, Analyzer, AnalyzerError, Audio, AudioContext, AudioInput, BindError,
 };
+pub use background::Background;
 #[cfg(feature = "export")]
 pub use bounce::{
     AnyStem, Bounce, BounceConfigError, BounceError, BounceHandle, BounceJob, BounceLatency,
@@ -190,7 +208,7 @@ pub use graph::{
 pub use input::{Input, InputConfig, InputOpener, OpenedInput, Trim};
 #[cfg(feature = "midi")]
 pub use instrument::{AddedInstrument, AnyNode, InstrumentHandle, NotInstrument};
-pub use job::{Job, JobId, JobKind, JobOutput, JobStatus, WaitError, WorkerError};
+pub use job::{BackgroundError, Job, JobId, JobKind, JobOutput, JobStatus, WaitError};
 pub use key::{
     Bus, BusSink, Channel, Connection, Edge, Event, EventEdge, EventInPort, EventOutPort,
     EventTapPort, Fanin, InPort, Inlet, Key, MainBus, MainSink, OutPort, Outlet, Root,

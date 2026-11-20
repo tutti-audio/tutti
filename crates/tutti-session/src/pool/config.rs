@@ -10,7 +10,7 @@ use std::num::NonZeroUsize;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct PoolConfig {
-    /// How many worker stages run at once. The rest wait, in declaration
+    /// How many background stages run at once. The rest wait, in declaration
     /// order, and start as running ones land. Stages on the main thread or the
     /// session's own thread are not counted: they run in
     /// [`update`](crate::Session::update). Default 4.
@@ -25,7 +25,7 @@ pub struct PoolConfig {
 }
 
 impl PoolConfig {
-    /// The defaults: four worker stages at once, eight live holds.
+    /// The defaults: four background stages at once, eight live holds.
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -34,7 +34,7 @@ impl PoolConfig {
         }
     }
 
-    /// At most `loads` worker stages run at once.
+    /// At most `loads` background stages run at once.
     #[must_use]
     pub const fn with_parallel_loads(mut self, loads: NonZeroUsize) -> Self {
         self.parallel_loads = loads;

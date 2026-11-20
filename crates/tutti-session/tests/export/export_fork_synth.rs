@@ -111,7 +111,7 @@ fn sf2(font: &Arc<SoundFont>) -> SoundFontUnit<f32> {
 /// params of its own (`SoundFontUnit`) or one a param write reaches
 /// (`PolySynth`).
 fn session_with<N: tutti_session::SessionNode>(unit: N) -> (DetachedSession, NodeKey) {
-    let mut session = Session::builder()
+    let (mut session, _bg) = Session::builder()
         .inputs(ChannelLayout::EMPTY)
         .outputs_floor(ChannelLayout::STEREO)
         .build_detached(SampleRate::DEFAULT)
@@ -254,7 +254,7 @@ fn an_exported_polysynth_plays_its_clip() {
 #[test]
 fn a_param_on_a_synth_reaches_it_and_its_fork() {
     let peak = |volume: Option<f64>| {
-        let mut session = Session::builder()
+        let (mut session, _bg) = Session::builder()
             .inputs(ChannelLayout::EMPTY)
             .outputs_floor(ChannelLayout::STEREO)
             .build_detached(SampleRate::DEFAULT)

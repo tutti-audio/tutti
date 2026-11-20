@@ -50,10 +50,13 @@ fn read_capture() -> ProcessCapture {
 /// beat 3.5.
 #[test]
 fn an_in_process_vst2_plugin_is_given_the_project_meter() {
-    let mut s = Session::builder()
+    let (mut s, mut background) = Session::builder()
         .outputs_floor(ChannelLayout::STEREO)
         .build_detached(RATE)
         .expect("a detached session builds");
+    background
+        .spawn_threads(std::num::NonZeroUsize::MIN)
+        .expect("a background thread starts");
     s.set(
         s.transport_handle()
             .meter()

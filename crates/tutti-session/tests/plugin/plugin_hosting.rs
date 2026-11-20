@@ -11,11 +11,17 @@ use tutti_plugin_types::IpcError;
 use tutti_session::{LoadError, PoolEvent, Session, SessionEvent};
 use tutti_units::Samples;
 
-fn session() -> Session {
-    Session::builder()
+/// An offline session with one background thread running: the loads here are
+/// background work, and the tests update until they land.
+fn session() -> (Session, tutti_session::Background) {
+    let (s, mut background) = Session::builder()
         .max_block(MaxBlock::of(Samples::new(512)))
         .build()
-        .expect("an offline session builds")
+        .expect("an offline session builds");
+    background
+        .spawn_threads(std::num::NonZeroUsize::MIN)
+        .expect("a background thread starts");
+    (s, background)
 }
 
 /// Names the server the test's plugin is served by. It is the first thing a
@@ -38,7 +44,7 @@ fn a_blacklisted_plugin_does_not_resolve_and_loads_once_unblacklisted() {
     let plugin = PluginRef::file(&path);
     let (mut catalog, id, _dir) = catalog_of(&plugin);
     catalog.blacklist(&path, "SIGSEGV during probe");
-    let mut s = session();
+    let (mut s, _bg) = session();
     let main = tutti_fixtures::main_thread();
 
     match s.load_entry_blocking(main, &catalog, &id, Hosting::Auto, None) {
@@ -71,20 +77,17 @@ fn outcome(s: &mut Session, main: tutti_plugin_types::MainThreadMarker) -> PoolE
     }
 }
 
-/// A session on a polled executor the test shares: the futures it is handed wait
-/// until the test polls the executor, or the session's `update` does.
-fn holding() -> (Session, tutti_platform::Executor) {
-    let executor = tutti_platform::Executor::new();
-    let s = Session::builder()
+/// A session whose background the test drives: the futures it is handed wait until the
+/// test runs the `Background`.
+fn holding() -> (Session, tutti_session::Background) {
+    Session::builder()
         .max_block(MaxBlock::of(Samples::new(512)))
-        .executor(executor.clone())
         .build()
-        .expect("an offline session builds");
-    (s, executor)
+        .expect("an offline session builds")
 }
 
-fn run_held(executor: &tutti_platform::Executor) {
-    executor.run_until_stalled();
+fn run_held(background: &mut tutti_session::Background) {
+    background.run_until_stalled();
 }
 
 /// **The blacklist is asked when the load runs, not when the entry is built**:
@@ -102,11 +105,11 @@ fn the_blacklist_is_asked_when_the_load_runs() {
     let main = tutti_fixtures::main_thread();
 
     // Blacklisted before the load runs, and still: refused.
-    let (mut s, executor) = holding();
+    let (mut s, mut background) = holding();
     let _ = s.update_on(main);
     s.pool(s.plugin_entry(0u64, &id, &catalog)).unwrap();
     catalog.blacklist(&path, "hung in its load");
-    run_held(&executor);
+    run_held(&mut background);
     match outcome(&mut s, main) {
         PoolEvent::Failed(LoadError::Plugin(error)) => match &*error {
             IpcError::Blacklisted { reason, .. } => assert_eq!(reason, "hung in its load"),
@@ -119,12 +122,12 @@ fn the_blacklist_is_asked_when_the_load_runs() {
     // keeps no descriptors, so its entry is built before the blacklist.
     assert!(catalog.unblacklist(&path));
     probe(&mut catalog, &path);
-    let (mut s, executor) = holding();
+    let (mut s, mut background) = holding();
     let _ = s.update_on(main);
     s.pool(s.plugin_entry(0u64, &id, &catalog)).unwrap();
     catalog.blacklist(&path, "hung in its load");
     assert!(catalog.unblacklist(&path));
-    run_held(&executor);
+    run_held(&mut background);
     assert!(
         matches!(outcome(&mut s, main), PoolEvent::Loaded),
         "an unblacklisted plugin was refused"
@@ -138,7 +141,7 @@ fn the_blacklist_is_asked_when_the_load_runs() {
 fn vst2_asked_for_out_of_process_is_refused_at_load() {
     let plugin = PluginRef::file(tutti_fixtures::vst2_probe());
     let (catalog, id, _dir) = catalog_of(&plugin);
-    let mut s = session();
+    let (mut s, _bg) = session();
     match s.load_entry_blocking(
         tutti_fixtures::main_thread(),
         &catalog,
@@ -161,7 +164,7 @@ fn vst2_asked_for_out_of_process_is_refused_at_load() {
 fn a_clap_plugin_asked_in_process_is_hosted_here() {
     set_server("/nonexistent/plugin-server");
     let plugin = PluginRef::file(clap_probe());
-    let mut s = session();
+    let (mut s, _bg) = session();
     let node = s
         .load_plugin_blocking(
             tutti_fixtures::main_thread(),

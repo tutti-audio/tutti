@@ -16,7 +16,7 @@ use tutti_units::{Beat, BeatDuration};
 
 #[test]
 fn velocity_keeps_its_full_width() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let seen = Seen::default();
     let (tap, ()) = s.graph().add(Tap(Arc::clone(&seen)));
     let mut events = note(60, MF, Beat::new(0.0), BeatDuration::new(1.0)).to_vec();

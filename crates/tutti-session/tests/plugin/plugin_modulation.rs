@@ -50,15 +50,18 @@ fn set_env(key: &str, value: impl AsRef<std::ffi::OsStr>) {
 
 /// A detached stereo session at 48 kHz, the probe's server in the
 /// environment.
-fn detached() -> DetachedSession {
+fn detached() -> (DetachedSession, tutti_session::Background) {
     set_env("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server());
-    // The executor is polled: a job runs in the `Collect` that polls it, and lands
-    // there.
-    Session::builder()
-        .executor(tutti_platform::Executor::new())
+    // One background thread runs the pool's loads, which the helpers here update
+    // until they land.
+    let (s, mut background) = Session::builder()
         .outputs_floor(ChannelLayout::STEREO)
         .build_detached(RATE)
-        .expect("a detached session builds")
+        .expect("a detached session builds");
+    background
+        .spawn_threads(std::num::NonZeroUsize::MIN)
+        .expect("a background thread starts");
+    (s, background)
 }
 
 /// Loads the probe into `s` and puts it on the outputs.
@@ -79,8 +82,8 @@ fn add_probe_keyed(s: &mut DetachedSession) -> (u64, tutti_session::Key<tutti_se
 }
 
 /// A virtual clock for the session's phases, and the plugin changes they
-/// reported: a parameter read or a reload is a job on the session's polled
-/// executor, run and landed in the next frame's collect.
+/// reported: a parameter read or a reload is a job with a thread of its own, landed in
+/// the collect of a frame after it ends.
 struct Drive {
     now: Instant,
     told: Vec<&'static str>,
@@ -199,7 +202,7 @@ fn a_modulation_lane_on_the_plugin_survives_its_replacement() {
     set_env("TUTTI_CLAP_PROBE_ONCE_FILE", &once);
     set_env("TUTTI_CLAP_PROBE_CRASH_ON_BLOCK", "8");
     set_env("TUTTI_CLAP_PROBE_APPLY_GAIN", "1");
-    let mut s = detached();
+    let (mut s, _bg) = detached();
     let mut drive = Drive::new();
     let node = add_probe(&mut s);
     drive.update(&mut s);
@@ -266,7 +269,7 @@ fn a_modulation_lane_on_the_plugin_survives_its_replacement() {
 /// lane leaves the graph with it.
 #[test]
 fn a_crossfaded_plugin_keeps_its_lane_and_a_removed_one_drops_it() {
-    let mut s = detached();
+    let (mut s, _bg) = detached();
     let mut drive = Drive::new();
     let node = add_probe(&mut s);
     drive.update(&mut s);
@@ -357,7 +360,7 @@ fn near(v: Option<Normalized>, want: f64) -> bool {
 /// the played value), and the plugin hears the knob plus the route (0.25).
 #[test]
 fn a_set_under_a_lane_writes_the_knob() {
-    let mut s = detached();
+    let (mut s, _bg) = detached();
     let mut drive = Drive::new();
     let node = add_probe(&mut s);
     drive.update(&mut s);
@@ -408,7 +411,7 @@ fn a_set_under_a_lane_writes_the_knob() {
 /// hears it plus the route, not the raw value.
 #[test]
 fn a_set_right_after_the_lane_is_added_writes_the_knob() {
-    let mut s = detached();
+    let (mut s, _bg) = detached();
     let mut drive = Drive::new();
     let node = add_probe(&mut s);
     drive.update(&mut s);
@@ -441,7 +444,7 @@ fn a_set_right_after_the_lane_is_added_writes_the_knob() {
 /// lane's knob is not written, and the plugin takes the value raw.
 #[test]
 fn a_set_after_the_lane_is_removed_goes_to_the_plugin() {
-    let mut s = detached();
+    let (mut s, _bg) = detached();
     let mut drive = Drive::new();
     let node = add_probe(&mut s);
     drive.update(&mut s);
@@ -490,7 +493,7 @@ fn a_read_landing_under_a_lane_keeps_the_knob_in_the_mirror() {
     // plugin answers `clap.preset-load` only when asked.
     crate::pooled::prime(&PluginRef::file(clap_probe()));
     set_env("TUTTI_CLAP_PROBE_PRESET_LOAD", "1");
-    let mut s = detached();
+    let (mut s, _bg) = detached();
     let mut drive = Drive::new();
     let (entry, node) = add_probe_keyed(&mut s);
     drive.update(&mut s);
@@ -572,7 +575,7 @@ fn an_export_is_the_live_render_on_a_clap_gain() {
     crate::pooled::prime(&PluginRef::file(clap_probe()));
     set_env("TUTTI_CLAP_PROBE_RENDER_MODE", "2");
     set_env("TUTTI_CLAP_PROBE_APPLY_GAIN", "1");
-    let mut s = detached();
+    let (mut s, _bg) = detached();
     let mut drive = Drive::new();
     let node = add_probe(&mut s);
     drive.update(&mut s);

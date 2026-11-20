@@ -39,10 +39,10 @@
 //! # Stages
 //!
 //! A [`Load`] has one to two stages, each on a named thread: a worker of the
-//! session's executor ([`Load::on_worker`]), a worker and then the main thread
+//! session's background ([`Load::on_worker`]), a worker and then the main thread
 //! ([`Load::on_worker_then_main`]), the session's own thread
 //! ([`Load::on_session`]), or none ([`Load::ready`]). At most
-//! [`PoolConfig::parallel_loads`] worker stages run at once; the rest wait in
+//! [`PoolConfig::parallel_loads`] background stages run at once; the rest wait in
 //! declaration order. A stage on the main thread or the session's thread runs
 //! in an [`update`](Session::update) on it.
 //!
@@ -99,7 +99,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// Declares what the session keeps loaded: the whole set, each time.
     ///
     /// The set is diffed against the one declared before, by key and by
-    /// identity. A new key starts a load on the session's executor; a key whose
+    /// identity. A new key starts a load on the session's background; a key whose
     /// identity is unchanged keeps its entry, loaded once; a key whose
     /// identity changed reloads, its old value staying until the new one
     /// lands; a key the set no longer names is held while a node or a snapshot
@@ -116,7 +116,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// update in the order the set names them, then the releases, by key within a key type.
     /// An outcome that landed while its entry was held is reported when the
     /// pool declares the entry again. At most
-    /// [`PoolConfig::parallel_loads`] worker stages run at once.
+    /// [`PoolConfig::parallel_loads`] background stages run at once.
     ///
     /// # Errors
     ///
@@ -224,7 +224,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// reload with one. An entry whose asset can no longer be opened keeps what
     /// it has, and is named as unreadable. An entry with no identity (its file
     /// could not be stamped when it loaded) loads again once its asset has one,
-    /// and that load's worker stage takes it; a kind whose load has no worker
+    /// and that load's background stage takes it; a kind whose load has no worker
     /// stage takes none, so it loads again at every refresh. An asset of bytes
     /// never changes, so it never reloads, and an asset that never has an
     /// identity is not watched.

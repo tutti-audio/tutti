@@ -9,7 +9,7 @@ use tutti_nodes::{
 use tutti_session::{Session, ValueErrorKind};
 use tutti_units::{Mix, Samples, Seconds, Tail, UnitAddr, UnitParam};
 
-fn session() -> Session {
+fn session() -> (Session, tutti_session::Background) {
     Session::builder()
         .max_block(MaxBlock::of(Samples::new(256)))
         .build()
@@ -20,7 +20,7 @@ fn session() -> Session {
 /// and the freeze is addressable only where the design can freeze.
 #[test]
 fn a_write_reaches_the_decay_it_names() {
-    let mut s = session();
+    let (mut s, _bg) = session();
     let (node, cells) = s.graph().add::<FdnNode<f32>>(FdnNode::<f32>::live(
         FdnLayout::new(8, MaxDecay::DEFAULT, FreezeMode::Freezable).unwrap(),
         FdnControls::DEFAULT,
@@ -48,7 +48,7 @@ fn a_write_reaches_the_decay_it_names() {
 /// freeze (the room at its longest decay), unbounded for one that can.
 #[test]
 fn the_graph_sees_each_reverbs_ceiling() {
-    let mut s = session();
+    let (mut s, _bg) = session();
     let (plain, _) = s.graph().add::<FdnNode<f32>>(FdnNode::<f32>::live(
         FdnLayout::default(),
         FdnControls::DEFAULT,
@@ -70,7 +70,7 @@ fn the_graph_sees_each_reverbs_ceiling() {
 /// finite ceiling it declares (the longest decay and pre-delay).
 #[test]
 fn the_plate_is_a_session_node_with_its_params_and_ceiling() {
-    let mut s = session();
+    let (mut s, _bg) = session();
     let (node, cells) = s
         .graph()
         .add::<PlateReverbNode<f32>>(PlateReverbNode::<f32>::from(PlateReverbConfig::new()));

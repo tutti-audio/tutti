@@ -226,8 +226,8 @@ fn add_stereo(
 
 /// The scene the module docs describe, on `workers` render threads, its
 /// transport rolling.
-fn scene(block: usize, workers: Workers, variant: Variant) -> Session {
-    let mut s = Session::builder()
+fn scene(block: usize, workers: Workers, variant: Variant) -> (Session, tutti_session::Background) {
+    let (mut s, bg) = Session::builder()
         .render_workers(workers)
         .sample_rate(SampleRate::of(RATE))
         .max_block(MaxBlock::of(Samples::new(block)))
@@ -357,7 +357,7 @@ fn scene(block: usize, workers: Workers, variant: Variant) -> Session {
     }
     let _ = s.update();
     s.play().expect("room");
-    s
+    (s, bg)
 }
 
 /// The 512-frame cycle: the convolver's partition, and the vocoder's
@@ -377,7 +377,7 @@ struct Figures {
 }
 
 fn measure(block: usize, workers: Workers, variant: Variant) -> Figures {
-    let s = scene(block, workers, variant);
+    let (s, _bg) = scene(block, workers, variant);
     let counter = s.blocks().expect("an offline engine");
     let mut out = vec![0.0f32; block * 2];
     let blocks = |span: Seconds| span.to_samples(SampleRate::of(RATE)).get().div_ceil(block);

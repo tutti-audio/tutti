@@ -34,7 +34,7 @@ fn spec_at(rate: f64) -> OutputSpec {
 #[test]
 fn the_session_publishes_the_meter_and_taps_its_callback_feeds() {
     let (driver, stream) = ManualStreamDriver::new();
-    let mut session = Session::builder()
+    let (mut session, _bg) = Session::builder()
         .device(Default::default())
         .build_device_on(spec_at(48_000.0), driver)
         .expect("builds with no device");
@@ -79,7 +79,7 @@ fn the_session_publishes_the_meter_and_taps_its_callback_feeds() {
 #[test]
 fn the_session_reads_the_load_its_callback_measures() {
     let (driver, stream) = ManualStreamDriver::new();
-    let session = Session::builder()
+    let (session, _bg) = Session::builder()
         .device(Default::default())
         .build_device_on(spec_at(48_000.0), driver)
         .expect("builds with no device");
@@ -102,7 +102,7 @@ fn the_session_reads_the_load_its_callback_measures() {
 #[test]
 fn a_rerate_keeps_the_published_compensation_in_step_with_the_plan() {
     let (driver, old) = ManualStreamDriver::new();
-    let mut s = Session::builder()
+    let (mut s, _bg) = Session::builder()
         .device(Default::default())
         .build_device_on(spec_at(48_000.0), driver)
         .expect("builds with no device");
@@ -231,7 +231,7 @@ fn policy() -> DevicePolicy {
 #[test]
 fn the_watch_reports_what_the_host_lists() {
     let (driver, _stream) = ManualStreamDriver::new();
-    let mut session = Session::builder()
+    let (mut session, _bg) = Session::builder()
         .device(Default::default())
         .build_device_on(spec_at(48_000.0), driver)
         .unwrap();
@@ -291,7 +291,7 @@ fn the_watch_reports_what_the_host_lists() {
 #[test]
 fn following_the_default_restarts_and_reports_the_rate() {
     let (driver, _stream) = ManualStreamDriver::new();
-    let mut session = Session::builder()
+    let (mut session, _bg) = Session::builder()
         .device(Default::default())
         .build_device_on(spec_at(44_100.0), driver)
         .unwrap();
@@ -344,7 +344,7 @@ fn following_the_default_restarts_and_reports_the_rate() {
 #[test]
 fn an_explicit_device_is_not_replaced_by_the_default() {
     let (driver, stream) = ManualStreamDriver::new();
-    let mut session = Session::builder()
+    let (mut session, _bg) = Session::builder()
         .device(Default::default())
         .build_device_on(spec_at(48_000.0), driver)
         .unwrap();
@@ -379,7 +379,7 @@ fn an_explicit_device_is_not_replaced_by_the_default() {
 #[test]
 fn a_disconnect_fault_asks_for_a_restart_once() {
     let (driver, stream) = ManualStreamDriver::new();
-    let mut session = Session::builder()
+    let (mut session, _bg) = Session::builder()
         .device(Default::default())
         .build_device_on(spec_at(48_000.0), driver)
         .unwrap();
@@ -411,7 +411,7 @@ fn a_disconnect_fault_asks_for_a_restart_once() {
 #[test]
 fn a_flapping_device_is_not_restarted_on_every_change() {
     let (driver, stream) = ManualStreamDriver::new();
-    let mut session = Session::builder()
+    let (mut session, _bg) = Session::builder()
         .device(Default::default())
         .build_device_on(spec_at(48_000.0), driver)
         .unwrap();
@@ -448,7 +448,7 @@ fn a_flapping_device_is_not_restarted_on_every_change() {
 #[test]
 fn a_refused_restart_keeps_the_old_spec_and_is_retried_later() {
     let (driver, _stream) = ManualStreamDriver::new();
-    let mut session = Session::builder()
+    let (mut session, _bg) = Session::builder()
         .device(Default::default())
         .build_device_on(spec_at(48_000.0), driver)
         .unwrap();
@@ -498,7 +498,7 @@ fn a_refused_restart_keeps_the_old_spec_and_is_retried_later() {
 #[test]
 fn a_restart_that_stopped_the_stream_is_retried() {
     let (driver, _stream) = ManualStreamDriver::new();
-    let mut live = Session::builder()
+    let (mut live, _bg) = Session::builder()
         .device(Default::default())
         .build_device_on(spec_at(48_000.0), driver)
         .unwrap();
@@ -545,7 +545,7 @@ fn a_restart_that_stopped_the_stream_is_retried() {
 #[test]
 fn a_stale_wanted_restart_does_not_replace_a_later_choice() {
     let (driver, _stream) = ManualStreamDriver::new();
-    let mut live = Session::builder()
+    let (mut live, _bg) = Session::builder()
         .device(Default::default())
         .build_device_on(spec_at(48_000.0), driver)
         .unwrap();
@@ -593,7 +593,7 @@ fn a_stale_wanted_restart_does_not_replace_a_later_choice() {
 #[test]
 fn a_fault_after_a_restart_is_reported_again() {
     let (driver, _first) = ManualStreamDriver::new();
-    let mut session = Session::builder()
+    let (mut session, _bg) = Session::builder()
         .device(Default::default())
         .build_device_on(spec_at(48_000.0), driver)
         .unwrap();
@@ -630,7 +630,7 @@ fn a_fault_after_a_restart_is_reported_again() {
 #[test]
 fn a_host_can_hold_restarts() {
     let (driver, _stream) = ManualStreamDriver::new();
-    let mut session = Session::builder()
+    let (mut session, _bg) = Session::builder()
         .device(Default::default())
         .build_device_on(spec_at(48_000.0), driver)
         .unwrap();
@@ -660,7 +660,7 @@ fn a_host_can_hold_restarts() {
 #[test]
 fn a_stalled_backend_run_becomes_a_lost_stream() {
     let (driver, stream) = ManualStreamDriver::new();
-    let mut session = Session::builder()
+    let (mut session, _bg) = Session::builder()
         .device(Default::default())
         .build_device_on(spec_at(48_000.0), driver)
         .unwrap();
@@ -700,7 +700,7 @@ fn the_render_worker_start_hook_runs_once_per_live_helper() {
     let seen = Arc::new(Mutex::new(Vec::new()));
     let hook = Arc::clone(&seen);
     let (driver, stream) = ManualStreamDriver::new();
-    let session = Session::builder()
+    let (session, _bg) = Session::builder()
         .render_workers(Workers::of(4))
         .render_worker_start(move |i| hook.lock().unwrap().push(i))
         .device(Default::default())
@@ -727,7 +727,7 @@ fn per_core_workers_start_a_helper_for_every_core_but_the_callbacks() {
     let seen = Arc::new(Mutex::new(Vec::new()));
     let hook = Arc::clone(&seen);
     let (driver, stream) = ManualStreamDriver::new();
-    let live = Session::builder()
+    let (live, _bg) = Session::builder()
         .render_workers(Workers::PerCore)
         .render_worker_start(move |i| hook.lock().unwrap().push(i))
         .device(Default::default())
@@ -760,7 +760,7 @@ fn indices_after(seen: &Mutex<Vec<usize>>, n: usize) -> Vec<usize> {
 #[test]
 fn the_heard_tap_reopens_at_the_width_of_the_device_after_a_restart() {
     let (driver, _old) = ManualStreamDriver::new();
-    let mut s = Session::builder()
+    let (mut s, _bg) = Session::builder()
         .device(Default::default())
         .build_device_on(spec_at(48_000.0), driver)
         .expect("builds with no device");
@@ -810,7 +810,7 @@ fn the_heard_tap_reopens_at_the_width_of_the_device_after_a_restart() {
 #[test]
 fn the_session_lists_the_outputs_once_and_retries_a_failed_start() {
     let (driver, _stream) = ManualStreamDriver::new();
-    let mut session = Session::builder()
+    let (mut session, _bg) = Session::builder()
         .device(Default::default())
         .build_device_on(spec_at(48_000.0), driver)
         .unwrap();
@@ -849,7 +849,7 @@ fn a_restart_onto_a_device_that_cannot_place_the_declared_root_is_refused() {
         )
     };
     let (driver, _stream) = ManualStreamDriver::new();
-    let mut session = Session::builder()
+    let (mut session, _bg) = Session::builder()
         .root_topology(tutti_buffers::ChannelTopology::unassigned(
             ChannelLayout::QUAD,
         ))
@@ -896,7 +896,7 @@ fn a_restart_states_or_assumes_the_new_devices_placement() {
         tutti_buffers::SampleFormat::F32,
     );
     let (driver, _stream) = ManualStreamDriver::new();
-    let mut session = Session::builder()
+    let (mut session, _bg) = Session::builder()
         .device(Default::default())
         .build_device_on(spec_at(48_000.0), driver)
         .unwrap();
@@ -952,7 +952,7 @@ fn a_refused_declaration_is_retried_on_a_restart() {
     use tutti_session::RootTopologyStatus;
     let buses = tutti_buffers::ChannelTopology::unassigned(ChannelLayout::QUAD);
     let (driver, _stream) = ManualStreamDriver::new();
-    let mut session = Session::builder()
+    let (mut session, _bg) = Session::builder()
         .device(Default::default())
         .build_device_on(spec_at(48_000.0), driver)
         .unwrap();
@@ -989,7 +989,7 @@ fn a_waiting_declaration_the_device_no_longer_places_is_refused_and_retried_on_a
     let buses = tutti_buffers::ChannelTopology::unassigned(ChannelLayout::QUAD);
     let stereo = tutti_buffers::ChannelTopology::assumed(ChannelLayout::STEREO);
     let (driver, stream) = ManualStreamDriver::new();
-    let mut session = Session::builder()
+    let (mut session, _bg) = Session::builder()
         .device(Default::default())
         .build_device_on(wide.clone(), driver)
         .unwrap();
@@ -1076,7 +1076,7 @@ impl Node for AlwaysPanics {
 #[test]
 fn a_panic_in_the_render_is_a_device_fault_event() {
     let (driver, stream) = ManualStreamDriver::new();
-    let mut session = Session::builder()
+    let (mut session, _bg) = Session::builder()
         .device(Default::default())
         .build_device_on(spec_at(48_000.0), driver)
         .expect("builds with no device");
@@ -1155,7 +1155,7 @@ fn start_when_listed(retry_startup: bool) -> Vec<DeviceSelector> {
             "the stream runs after the start"
         );
         // The session takes the same source over.
-        let mut live = live;
+        let (mut live, _bg) = live;
         live.watch_devices(watch.into_source(), policy());
     } else {
         assert!(ran.is_none(), "retry_startup is off: no start");
@@ -1198,7 +1198,7 @@ fn a_restart_onto_a_device_the_map_does_not_fit_is_refused_and_keeps_the_map() {
         )
     };
     let (driver, _stream) = ManualStreamDriver::new();
-    let mut session = Session::builder()
+    let (mut session, _bg) = Session::builder()
         .device(Default::default())
         .build_device_on(spec(6), driver)
         .unwrap();

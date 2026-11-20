@@ -16,7 +16,7 @@ use tutti_units::{Depth, Hz, Mix, Q, Samples, UnitParam};
 use crate::common::probe::ProbeUnit;
 use crate::mod_lanes::{master, render, rig, settle};
 
-fn session() -> Session {
+fn session() -> (Session, tutti_session::Background) {
     Session::builder()
         .outputs(tutti_buffers::ChannelLayout::STEREO)
         .max_block(MaxBlock::of(Samples::new(256)))
@@ -29,7 +29,7 @@ fn session() -> Session {
 /// undeclared. A NaN or infinite bound is refused as not finite.
 #[test]
 fn a_backwards_or_nan_range_is_refused_and_declares_nothing() {
-    let mut s = session();
+    let (mut s, _bg) = session();
     let (lp, _) = s.graph().add(SvfFilterNode::<f32>::new(
         SvfType::LowPass,
         Hz::new(1_000.0),
@@ -78,7 +78,7 @@ fn a_backwards_or_nan_range_is_refused_and_declares_nothing() {
 /// their own units.
 #[test]
 fn a_typed_range_declares_the_target_an_untyped_ref_names() {
-    let mut s = session();
+    let (mut s, _bg) = session();
     let (lp, _) = s.graph().add(SvfFilterNode::<f32>::new(
         SvfType::LowPass,
         Hz::new(1_000.0),
@@ -111,7 +111,7 @@ fn a_typed_range_keeps_bounds_f32_cannot_hold() {
     let (lo, hi) = (100.0 + 1.0 / 1_048_576.0, 4_000.0 + 1.0 / 1_048_576.0);
     assert_ne!(f64::from(lo as f32), lo, "f32 loses the lower bound");
     assert_ne!(f64::from(hi as f32), hi, "f32 loses the upper bound");
-    let mut s = session();
+    let (mut s, _bg) = session();
     let (lp, _) = s.graph().add(SvfFilterNode::<f32>::new(
         SvfType::LowPass,
         Hz::new(1_000.0),
@@ -128,7 +128,7 @@ fn a_typed_range_keeps_bounds_f32_cannot_hold() {
 /// has one writer, the target.
 #[test]
 fn a_second_declaration_keeps_the_range_the_target_holds() {
-    let mut s = session();
+    let (mut s, _bg) = session();
     let (lp, _) = s.graph().add(SvfFilterNode::<f32>::new(
         SvfType::LowPass,
         Hz::new(1_000.0),
@@ -160,7 +160,7 @@ fn a_second_declaration_keeps_the_range_the_target_holds() {
 /// range is in `Mix`.
 #[test]
 fn a_range_write_is_refused_at_the_call() {
-    let mut s = session();
+    let (mut s, _bg) = session();
     let (lp, _) = s.graph().add(SvfFilterNode::<f32>::new(
         SvfType::LowPass,
         Hz::new(1_000.0),
@@ -283,7 +283,7 @@ fn a_range_write_republishes_no_program() {
 /// update in between: the targets go with the node, not at the next update.
 #[test]
 fn a_range_and_a_depth_of_a_removed_node_are_refused_at_the_call() {
-    let mut s = session();
+    let (mut s, _bg) = session();
     let (lp, _) = s.graph().add(SvfFilterNode::<f32>::new(
         SvfType::LowPass,
         Hz::new(1_000.0),

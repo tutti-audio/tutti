@@ -16,7 +16,7 @@ use support::{Noisy, SITE, rt_events};
 #[test]
 fn a_node_that_logs_on_the_audio_thread_emits_a_tracing_event_on_the_next_update() {
     let (driver, stream) = ManualStreamDriver::new();
-    let mut session = Session::builder()
+    let (mut session, _bg) = Session::builder()
         .device(Default::default())
         .build_device_on(
             OutputSpec::new(
@@ -71,7 +71,7 @@ fn a_node_that_logs_on_the_audio_thread_emits_a_tracing_event_on_the_next_update
 #[test]
 fn nothing_is_logged_when_no_subscriber_takes_the_target() {
     let (driver, stream) = ManualStreamDriver::new();
-    let mut session = Session::builder()
+    let (mut session, _bg) = Session::builder()
         .device(Default::default())
         .build_device_on(
             OutputSpec::new(

@@ -18,7 +18,7 @@ use tutti_units::{Amplitude, Hz, SampleRate, Samples};
 const RATE: SampleRate = SampleRate::SR_48K;
 const BLOCK: usize = 64;
 
-fn offline() -> Session {
+fn offline() -> (Session, tutti_session::Background) {
     Session::builder()
         .sample_rate(RATE)
         .build()
@@ -52,7 +52,7 @@ fn peaks(blocks: &PeakBlocks) -> Vec<f64> {
 /// block, as each 48-sample block holds a whole cycle.
 #[test]
 fn a_sine_of_half_amplitude_yields_a_peak_of_half_per_item() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let (osc, _) = s.graph().add(ForkByClone(
         Osc::sine(Hz::new(1000.0)).with_amplitude(Amplitude::new(0.5)),
     ));
@@ -80,7 +80,7 @@ fn a_sine_of_half_amplitude_yields_a_peak_of_half_per_item() {
 /// A constant 0.25 has a peak of 0.25 in every block, live and offline.
 #[test]
 fn live_and_offline_finish_at_the_constants_peak() {
-    let mut s = offline();
+    let (mut s, mut bg) = offline();
     let (src, _) = s.graph().add(ForkByClone(Const::mono(0.25)));
     let analyzer: Analyzer<_> = s
         .graph()
@@ -93,7 +93,7 @@ fn live_and_offline_finish_at_the_constants_peak() {
 
     let wave = Wave::from_mono(RATE, Mono::new(&[0.25f32; 10 * BLOCK]));
     let job = s.analyze(wave, peak_blocks(BLOCK));
-    let offline = job.wait(&mut s).expect("the wave analyzes");
+    let offline = job.wait(&mut s, &mut bg).expect("the wave analyzes");
 
     assert_eq!(peaks(&live), [0.25; 10]);
     assert_eq!(peaks(&offline), [0.25; 10]);
@@ -101,7 +101,7 @@ fn live_and_offline_finish_at_the_constants_peak() {
 
 #[test]
 fn a_source_missing_at_open_is_missing_source() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let (src, _) = s.graph().add(ForkByClone(Const::mono(0.25)));
     s.remove(src).unwrap();
     let refused = s
@@ -119,7 +119,7 @@ fn a_source_missing_at_open_is_missing_source() {
 /// and the tap is not opened: the next tap is the first the session names.
 #[test]
 fn a_config_the_context_refuses_opens_no_tap() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let (src, _) = s.graph().add(ForkByClone(Const::mono(0.25)));
     let refused = s
         .graph()
@@ -132,7 +132,7 @@ fn a_config_the_context_refuses_opens_no_tap() {
     );
     let next = s.graph().taps().open_output(Samples::new(64)).unwrap().id();
 
-    let mut fresh = offline();
+    let (mut fresh, _bg) = offline();
     let first = fresh
         .graph()
         .taps()
@@ -146,7 +146,7 @@ fn a_config_the_context_refuses_opens_no_tap() {
 /// opened.
 #[test]
 fn a_view_the_tap_width_cannot_make_opens_no_tap() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let (src, _) = s.graph().add(ForkByClone(Const::mono(0.25)));
     let scope = VectorscopeConfig::new(NonZeroUsize::MIN);
     let refused = s
@@ -159,7 +159,7 @@ fn a_view_the_tap_width_cannot_make_opens_no_tap() {
         "{refused:?}"
     );
     let next = s.graph().taps().open_output(Samples::new(64)).unwrap().id();
-    let mut fresh = offline();
+    let (mut fresh, _bg) = offline();
     let first = fresh
         .graph()
         .taps()
@@ -177,7 +177,7 @@ fn a_view_the_tap_width_cannot_make_opens_no_tap() {
 /// the NaN reaches the tap for a few blocks after it is taken out.
 #[test]
 fn a_nan_block_is_counted_refused_and_the_next_blocks_items_arrive() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let (nan, _) = s.graph().add(ForkByClone(Const::mono(f32::NAN)));
     let (finite, _) = s.graph().add(ForkByClone(Const::mono(0.25)));
     let (through, _) = s.graph().add(ForkByClone(Through::mono()));
@@ -215,7 +215,7 @@ fn a_nan_block_is_counted_refused_and_the_next_blocks_items_arrive() {
 /// rendered minus the capacity.
 #[test]
 fn lost_counts_the_frames_rendered_past_the_capacity() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let (src, _) = s.graph().add(ForkByClone(Const::mono(0.25)));
     let mut analyzer = s
         .graph()
@@ -236,7 +236,7 @@ fn lost_counts_the_frames_rendered_past_the_capacity() {
 /// yields nothing more. The removal fades out, and the fade finishes at an update.
 #[test]
 fn the_analyzer_ends_after_its_source_is_removed() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let (src, _) = s.graph().add(ForkByClone(Const::mono(0.25)));
     let mut analyzer = s
         .graph()

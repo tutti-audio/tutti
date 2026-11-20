@@ -13,7 +13,7 @@ use tutti_session::{
 };
 use tutti_units::Amplitude;
 
-fn offline() -> Session {
+fn offline() -> (Session, tutti_session::Background) {
     Session::builder().build().expect("builds")
 }
 
@@ -31,12 +31,12 @@ fn first_frame(s: &mut Session) -> [f32; 2] {
 /// root at gain 1.0, so (0.5) is heard as (0.5, 0.5).
 #[test]
 fn a_main_bus_feeds_the_roots_channels_in_order() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let (stereo, _) = s.graph().add(ForkByClone(Const::frame(&[0.25, 0.5])));
     s.graph().connect(stereo, Root).unwrap().unfaded();
     assert_eq!(first_frame(&mut s), [0.25, 0.5]);
 
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let (mono, _) = s.graph().add(ForkByClone(Const::mono(0.5)));
     s.graph().connect(mono, Root).unwrap().unfaded();
     assert_eq!(first_frame(&mut s), [0.5, 0.5]);
@@ -46,7 +46,7 @@ fn a_main_bus_feeds_the_roots_channels_in_order() {
 /// undeclared one: (0.5) is heard as (0.5, 0.5).
 #[test]
 fn a_mono_bus_feeds_both_channels_of_a_declared_stereo_root() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     s.declare_root_topology(Some(ChannelTopology::assumed(ChannelLayout::STEREO)))
         .expect("a stereo root");
     let (mono, _) = s.graph().add(ForkByClone(Const::mono(0.5)));
@@ -59,7 +59,7 @@ fn a_mono_bus_feeds_both_channels_of_a_declared_stereo_root() {
 /// could feed, so the fold fails, the refusal names it, and nothing is stored.
 #[test]
 fn a_bus_with_no_place_on_the_root_is_refused() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     s.declare_root_topology(Some(ChannelTopology::unassigned(ChannelLayout::STEREO)))
         .expect("an unassigned stereo root");
     let (mono, _) = s.graph().add(ForkByClone(Const::mono(0.5)));
@@ -76,7 +76,7 @@ fn a_bus_with_no_place_on_the_root_is_refused() {
 /// stored.
 #[test]
 fn a_bus_wider_than_the_root_is_refused() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let (wide, _) = s.graph().add(ForkByClone(Const::frame(&[1.0, 2.0, 3.0])));
     let _ = s.update();
     let root_width = s.graph_ref().outputs();
@@ -95,7 +95,7 @@ fn a_bus_wider_than_the_root_is_refused() {
 /// node's, an input past it, a root channel past the outputs; none is stored.
 #[test]
 fn a_port_that_is_not_there_is_refused() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let (src, _) = s.graph().add(ForkByClone(Const::mono(0.5)));
     let (through, _) = s.graph().add(ForkByClone(Through::mono()));
     let _ = s.update();
@@ -124,7 +124,7 @@ fn a_port_that_is_not_there_is_refused() {
 /// the call added out again.
 #[test]
 fn a_connections_gain_weights_the_edge_it_added() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let (src, _) = s.graph().add(ForkByClone(Const::mono(0.5)));
     s.graph()
         .connect(src.out(0), Root::output(0))
@@ -166,7 +166,7 @@ fn a_connections_gain_weights_the_edge_it_added() {
 /// there, and `disconnect_all` takes out the rest.
 #[test]
 fn disconnect_removes_one_edge_and_disconnect_all_the_rest() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let (a, _) = s.graph().add(ForkByClone(Const::mono(0.5)));
     let (b, _) = s.graph().add(ForkByClone(Const::mono(0.25)));
     let sink = Root::output(0);
@@ -196,7 +196,7 @@ fn disconnect_removes_one_edge_and_disconnect_all_the_rest() {
 /// channel wired by hand alone.
 #[test]
 fn a_main_bus_disconnects_what_it_connected() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let (src, _) = s.graph().add(ForkByClone(Const::frame(&[0.25, 0.5])));
     let (through, _) = s
         .graph()
@@ -220,7 +220,7 @@ fn a_main_bus_disconnects_what_it_connected() {
 /// edge, and the second call changes nothing.
 #[test]
 fn a_key_and_its_erasure_are_one_node() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let (src, _) = s.graph().add(ForkByClone(Const::mono(0.5)));
     s.graph().connect(src, Root).unwrap().unfaded();
     let _ = s.update();

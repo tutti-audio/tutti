@@ -1,16 +1,17 @@
-//! A session on an executor that `update` drives: its jobs run inside `update`, and its
-//! streamer on the thread of its own that `spawn_dedicated` gives it, so a stream opens,
-//! primes and bounces with no thread but those and the bells' tick.
+//! A session whose `Background` the test drives: its jobs run when the test runs the
+//! `Background` and land in `update`, and its streamer has the thread of its own that
+//! `spawn_dedicated` gives it, so a stream opens, primes and bounces with no thread but
+//! those and the bells' tick.
 
 use std::path::Path;
 use std::time::Duration;
 
 use tutti_buffers::ChannelLayout;
-use tutti_platform::{Executor, Instant};
+use tutti_platform::Instant;
 use tutti_sampler::{Clip, Placement, StreamPhase};
 use tutti_session::{
-    AudioEntry, Bounce, BounceLatency, BounceTail, PoolState, Range, Root, SamplerEvent,
-    SamplerLoad, Session, SessionEvent, audio_file,
+    AudioEntry, Background, Bounce, BounceLatency, BounceTail, PoolState, Range, Root,
+    SamplerEvent, SamplerLoad, Session, SessionEvent, audio_file,
 };
 use tutti_units::{Beat, SampleRate, Seconds};
 
@@ -43,17 +44,17 @@ fn write_ramp(path: &Path) {
     w.finalize().expect("writes");
 }
 
-fn session() -> Session {
+fn session() -> (Session, Background) {
     Session::builder()
         .sample_rate(SampleRate::of(RATE))
-        .executor(Executor::new())
         .build()
-        .expect("a session builds on a polled executor")
+        .expect("a session builds with a background the test drives")
 }
 
-/// Updates until a sampler event lands.
-fn updates_until_sampler(s: &mut Session) -> Option<SamplerEvent> {
+/// Drives the background and updates until a sampler event lands.
+fn updates_until_sampler(s: &mut Session, background: &mut Background) -> Option<SamplerEvent> {
     for _ in 0..UPDATES {
+        background.run_until_stalled();
         for event in s.update() {
             if let SessionEvent::Sampler(event) = event {
                 return Some(event);
@@ -71,9 +72,9 @@ fn updates_prime_an_open_streams_ring() {
     let dir = tempfile::tempdir().expect("a temp dir");
     let path = dir.path().join("ramp.wav");
     write_ramp(&path);
-    let mut s = session();
+    let (mut s, mut bg) = session();
     let id = s.open_stream(&path, Placement::HEAD).expect("a streamer");
-    let landed = updates_until_sampler(&mut s);
+    let landed = updates_until_sampler(&mut s, &mut bg);
     assert!(
         matches!(landed, Some(SamplerEvent::Opened { id: opened }) if opened == id),
         "{landed:?}"
@@ -99,9 +100,9 @@ fn a_bounce_of_a_streamed_ramp_at_unity_reproduces_the_files_frames() {
     let dir = tempfile::tempdir().expect("a temp dir");
     let path = dir.path().join("ramp.wav");
     write_ramp(&path);
-    let mut s = session();
+    let (mut s, mut bg) = session();
     let id: SamplerLoad = s.open_stream(&path, Placement::HEAD).expect("a streamer");
-    let landed = updates_until_sampler(&mut s);
+    let landed = updates_until_sampler(&mut s, &mut bg);
     assert!(
         matches!(landed, Some(SamplerEvent::Opened { id: opened }) if opened == id),
         "{landed:?}"
@@ -134,20 +135,23 @@ fn a_bounce_of_a_streamed_ramp_at_unity_reproduces_the_files_frames() {
     }
 }
 
-/// **A pool load runs inside `update`.** A resident `audio_file` entry lands as
-/// `Loaded` with the ramp's frames, and nothing ran before the first update.
+/// **A pool load runs in the background's drive and lands in `update`.** A resident
+/// `audio_file` entry is not loaded by an update alone, and lands as `Loaded` with the
+/// ramp's frames once the `Background` has run it.
 #[test]
-fn a_pool_load_runs_inside_update() {
+fn a_pool_load_runs_in_the_drive_and_lands_in_update() {
     let dir = tempfile::tempdir().expect("a temp dir");
     let path = dir.path().join("ramp.wav");
     write_ramp(&path);
-    let mut s = session();
+    let (mut s, mut bg) = session();
     s.pool(audio_file("ramp", &path)).expect("a declaration");
+    let _ = s.update();
     assert!(
         !matches!(s.pool_state(&"ramp"), Some(PoolState::Loaded)),
-        "nothing runs outside update"
+        "an update runs no background work"
     );
     for _ in 0..UPDATES {
+        bg.run_until_stalled();
         let _ = s.update();
         if matches!(s.pool_state(&"ramp"), Some(PoolState::Loaded)) {
             break;
@@ -171,16 +175,11 @@ fn a_dropped_session_ends_its_streamer_and_releases_the_streams_source() {
     let path = dir.path().join("ramp.wav");
     write_ramp(&path);
     let bytes: std::sync::Arc<[u8]> = std::fs::read(&path).expect("reads").into();
-    let executor = Executor::new();
-    let mut s = Session::builder()
-        .sample_rate(SampleRate::of(RATE))
-        .executor(executor.clone())
-        .build()
-        .expect("a session builds on a polled executor");
+    let (mut s, mut bg) = session();
     let id = s
         .open_stream(std::sync::Arc::clone(&bytes), Placement::HEAD)
         .expect("a streamer");
-    let landed = updates_until_sampler(&mut s);
+    let landed = updates_until_sampler(&mut s, &mut bg);
     assert!(
         matches!(landed, Some(SamplerEvent::Opened { id: opened }) if opened == id),
         "{landed:?}"
@@ -200,5 +199,5 @@ fn a_dropped_session_ends_its_streamer_and_releases_the_streams_source() {
         1,
         "the woken streamer never ended and dropped the stream"
     );
-    drop(executor);
+    drop(bg);
 }

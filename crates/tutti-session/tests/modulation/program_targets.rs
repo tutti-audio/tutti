@@ -363,7 +363,7 @@ fn a_target_the_source_does_not_have_is_refused_at_the_call() {
 /// side only lends.
 #[test]
 fn blocks_adopting_a_republished_program_and_curve_do_not_allocate() {
-    let mut s = tutti_session::Session::builder()
+    let (mut s, _bg) = tutti_session::Session::builder()
         .max_block(tutti_buffers::MaxBlock::of(tutti_units::Samples::new(128)))
         .build()
         .expect("builds");

@@ -8,10 +8,10 @@ use std::thread::{self, ThreadId};
 
 use tutti_platform::MainThreadMarker;
 
-use super::{Spawned, events, session, state, took};
+use super::{Background, events, session, state, took};
 use crate::{
-    Declared, HandleError, JobStatus, Life, Load, LoadError, PoolConfig, PoolEntry, PoolError,
-    PoolOutcome, Presence, RetryError, Session, WorkerError,
+    BackgroundError, Declared, HandleError, JobStatus, Life, Load, LoadError, PoolConfig,
+    PoolEntry, PoolError, PoolOutcome, Presence, RetryError, Session,
 };
 
 /// What ran, and on which thread, in the order it ran.
@@ -71,7 +71,7 @@ struct Made {
     lost: Arc<AtomicBool>,
 }
 
-/// What the worker stage hands the main stage: it logs where it is dropped.
+/// What the background stage hands the main stage: it logs where it is dropped.
 struct Output {
     log: Log,
     name: &'static str,
@@ -125,7 +125,7 @@ impl PoolEntry for Stub {
         } = self.clone();
         let made = move || {
             if fail.load(Ordering::SeqCst) {
-                Err(LoadError::Job(WorkerError::Dropped))
+                Err(LoadError::Job(BackgroundError::Dropped))
             } else {
                 Ok(Arc::new(Made {
                     value: version,
@@ -223,17 +223,14 @@ fn with_main_thread(session: crate::DetachedSession) -> crate::DetachedSession {
 
 #[test]
 fn a_worker_stage_runs_on_the_executors_thread_and_finishes_the_load() {
-    let (mut s, spawned) = session();
+    let (mut s, mut bg) = session();
     let log = Log::default();
     s.pool(declare(&stub("a", How::Worker, &log))).unwrap();
     assert!(log.entries().is_empty(), "the stage waits for the executor");
     assert_eq!(state(&s, "a").as_deref(), Some("loading"));
-    let worker = thread::spawn({
-        let spawned = spawned.clone();
-        move || {
-            spawned.run_until_stalled();
-            thread::current().id()
-        }
+    let (worker, _bg) = thread::spawn(move || {
+        bg.run_until_stalled();
+        (thread::current().id(), bg)
     })
     .join()
     .unwrap();
@@ -245,11 +242,11 @@ fn a_worker_stage_runs_on_the_executors_thread_and_finishes_the_load() {
 
 #[test]
 fn a_worker_then_main_stage_waits_for_the_main_thread_then_runs_on_it_with_the_workers_output() {
-    let (s, spawned) = session();
+    let (s, mut bg) = session();
     let mut s = with_main_thread(s);
     let log = Log::default();
     s.pool(declare(&stub("a", How::Main, &log))).unwrap();
-    spawned.run_until_stalled();
+    bg.run_until_stalled();
     assert!(events(&mut s).is_empty(), "no main thread in this update");
     assert_eq!(state(&s, "a").as_deref(), Some("waiting-for-main"));
     assert_eq!(log.entries(), ["worker a"], "the main stage has not run");
@@ -279,11 +276,11 @@ fn a_worker_then_main_stage_waits_for_the_main_thread_then_runs_on_it_with_the_w
 #[test]
 fn a_load_superseded_between_its_stages_drops_the_workers_output_on_the_main_thread_and_never_runs_its_main_stage()
  {
-    let (s, spawned) = session();
+    let (s, mut bg) = session();
     let mut s = with_main_thread(s);
     let log = Log::default();
     s.pool(declare(&stub("a", How::Main, &log))).unwrap();
-    spawned.run_until_stalled();
+    bg.run_until_stalled();
     let _ = events(&mut s);
     assert_eq!(state(&s, "a").as_deref(), Some("waiting-for-main"));
     // Another identity: the load between its stages is superseded.
@@ -304,20 +301,20 @@ fn a_load_superseded_between_its_stages_drops_the_workers_output_on_the_main_thr
         "dropped on the main thread"
     );
     assert_eq!(log.count("main a"), 0, "the main stage never ran");
-    spawned.run_until_stalled();
+    bg.run_until_stalled();
     assert_eq!(events(&mut s), [("a", "loaded".to_owned())]);
     assert_eq!(made(&s, "a").unwrap().value, 2, "the new load landed");
 }
 
 #[test]
 fn a_load_cancelled_while_its_worker_runs_drops_the_workers_output_on_the_main_thread() {
-    let (s, spawned) = session();
+    let (s, mut bg) = session();
     let mut s = with_main_thread(s);
     let log = Log::default();
     s.pool(declare(&stub("a", How::Main, &log))).unwrap();
     // Undeclared and released while the worker has not run.
     s.pool::<&'static str>(()).unwrap();
-    spawned.run_until_stalled();
+    bg.run_until_stalled();
     let _ = s.update(); // the worker's output lands on this thread, which is not main
     assert_eq!(log.entries(), ["worker a"]);
     assert_eq!(
@@ -332,7 +329,7 @@ fn a_load_cancelled_while_its_worker_runs_drops_the_workers_output_on_the_main_t
 
 #[test]
 fn a_pool_with_a_main_stage_and_no_main_thread_is_refused_at_the_call_applying_nothing() {
-    let (mut s, spawned) = session();
+    let (mut s, mut bg) = session();
     let log = Log::default();
     let refused = s.pool((
         declare(&stub("plain", How::Worker, &log)),
@@ -340,7 +337,7 @@ fn a_pool_with_a_main_stage_and_no_main_thread_is_refused_at_the_call_applying_n
     ));
     assert_eq!(refused, Err(PoolError::NeedsMainThread("plugin")));
     assert_eq!(state(&s, "plain"), None, "nothing of the set applied");
-    assert!(spawned.run_until_stalled() == 0, "no load started");
+    assert!(bg.run_until_stalled() == 0, "no load started");
     assert!(events(&mut s).is_empty());
     // A worker-only set is not refused.
     s.pool(declare(&stub("plain", How::Worker, &log))).unwrap();
@@ -356,14 +353,11 @@ fn a_main_stage_is_accepted_once_an_update_has_run_on_a_main_thread() {
 
 #[test]
 fn a_session_stage_runs_in_update_on_the_session_thread_with_no_worker() {
-    let (mut s, spawned) = session();
+    let (mut s, mut bg) = session();
     let log = Log::default();
     s.pool(declare(&stub("a", How::Session, &log))).unwrap();
     assert_eq!(state(&s, "a").as_deref(), Some("opening"));
-    assert!(
-        spawned.run_until_stalled() == 0,
-        "a session stage has no worker"
-    );
+    assert!(bg.run_until_stalled() == 0, "a session stage has no worker");
     assert!(log.entries().is_empty(), "it runs in update, not in pool");
     assert_eq!(events(&mut s), [("a", "loaded".to_owned())]);
     assert_eq!(
@@ -377,7 +371,7 @@ fn a_session_stage_runs_in_update_on_the_session_thread_with_no_worker() {
 
 #[test]
 fn a_session_stage_that_panics_fails_its_entry_and_not_the_update() {
-    let (mut s, _) = session();
+    let (mut s, mut bg) = session();
     struct Panics;
     impl PoolEntry for Panics {
         type Identity = ();
@@ -390,11 +384,12 @@ fn a_session_stage_that_panics_fails_its_entry_and_not_the_update() {
         fn handle(_: &(), _: &Life) {}
     }
     s.pool(Declared::new("a", Panics)).unwrap();
+    bg.run_until_stalled();
     assert_eq!(
         events(&mut s),
         [(
             "a",
-            "failed: a session job panicked: the port is gone".to_owned()
+            "failed: background work panicked: the port is gone".to_owned()
         )]
     );
 }
@@ -414,14 +409,14 @@ fn a_ready_load_lands_at_the_declaration_with_the_value_it_was_given() {
             Arc::clone(loaded)
         }
     }
-    let (mut s, spawned) = session();
+    let (mut s, mut bg) = session();
     let given = Arc::new(Made {
         value: 7,
         lost: Arc::default(),
     });
     s.pool(Declared::new("a", Provided(Arc::clone(&given))))
         .unwrap();
-    assert!(spawned.run_until_stalled() == 0, "no stage runs anywhere");
+    assert!(bg.run_until_stalled() == 0, "no stage runs anywhere");
     assert_eq!(state(&s, "a").as_deref(), Some("loaded"), "at once");
     assert!(Arc::ptr_eq(
         &s.pool.entries.handle::<_, Provided>(&"a").unwrap(),
@@ -430,11 +425,10 @@ fn a_ready_load_lands_at_the_declaration_with_the_value_it_was_given() {
     assert_eq!(events(&mut s), [("a", "loaded".to_owned())]);
 }
 
-/// A session on a polled executor that runs one worker stage at a time: the next
-/// starts when the last one's landing is reported, so it lands in a later update.
-fn one_at_a_time() -> crate::DetachedSession {
+/// A session that runs one background stage at a time: the next starts when the last
+/// one's landing is reported, so it lands in a later update.
+fn one_at_a_time() -> (crate::DetachedSession, Background) {
     Session::builder()
-        .executor(Spawned::new())
         .pool_config(PoolConfig::new().with_parallel_loads(std::num::NonZeroUsize::new(1).unwrap()))
         .build_detached(tutti_units::SampleRate::SR_48K)
         .unwrap()
@@ -443,23 +437,22 @@ fn one_at_a_time() -> crate::DetachedSession {
 #[test]
 fn at_most_the_configured_worker_stages_run_and_the_rest_start_in_declaration_order_as_they_land() {
     let log = Log::default();
-    let spawned = Spawned::new();
-    let mut s = Session::builder()
-        .executor(spawned.clone())
+    let (mut s, mut bg) = Session::builder()
         .build_detached(tutti_units::SampleRate::SR_48K)
         .unwrap();
     let names = ["a", "b", "c", "d", "e"];
     s.pool(names.map(|name| declare(&stub(name, How::Worker, &log))))
         .unwrap();
     assert_eq!(state(&s, "e").as_deref(), Some("loading"), "e waits");
-    assert!(spawned.try_tick(), "a, the first queued, runs");
+    assert!(bg.try_tick(), "a, the first queued, runs");
     assert_eq!(
         log.entries(),
         ["worker a"],
         "nothing starts until a stage lands in an update"
     );
-    // The update runs the other three queued stages, which are all the default
-    // allows at once, and lands the four.
+    // The drive runs the other three queued stages, which are all the default
+    // allows at once, and the update lands the four.
+    assert_eq!(bg.run_until_stalled(), 3, "the other three start together");
     assert_eq!(
         events(&mut s),
         ["a", "b", "c", "d"].map(|key| (key, "loaded".to_owned())),
@@ -470,7 +463,7 @@ fn at_most_the_configured_worker_stages_run_and_the_rest_start_in_declaration_or
         ["worker a", "worker b", "worker c", "worker d"]
     );
     assert_eq!(
-        spawned.run_until_stalled(),
+        bg.run_until_stalled(),
         1,
         "the landings start the next in line"
     );
@@ -484,23 +477,19 @@ fn at_most_the_configured_worker_stages_run_and_the_rest_start_in_declaration_or
 #[test]
 fn the_parallel_cap_is_the_builders() {
     let log = Log::default();
-    let spawned = Spawned::new();
-    let mut s = Session::builder()
-        .executor(spawned.clone())
+    let (mut s, mut bg) = Session::builder()
         .pool_config(PoolConfig::new().with_parallel_loads(std::num::NonZeroUsize::new(2).unwrap()))
         .build_detached(tutti_units::SampleRate::SR_48K)
         .unwrap();
     s.pool(["a", "b", "c"].map(|name| declare(&stub(name, How::Worker, &log))))
         .unwrap();
-    assert_eq!(spawned.run_until_stalled(), 2);
+    assert_eq!(bg.run_until_stalled(), 2);
 }
 
 #[test]
 fn a_queued_load_superseded_before_it_starts_never_runs() {
     let log = Log::default();
-    let spawned = Spawned::new();
-    let mut s = Session::builder()
-        .executor(spawned.clone())
+    let (mut s, mut bg) = Session::builder()
         .pool_config(PoolConfig::new().with_parallel_loads(std::num::NonZeroUsize::new(1).unwrap()))
         .build_detached(tutti_units::SampleRate::SR_48K)
         .unwrap();
@@ -510,29 +499,26 @@ fn a_queued_load_superseded_before_it_starts_never_runs() {
     ))
     .unwrap();
     s.pool(declare(&stub("a", How::Worker, &log))).unwrap(); // b undeclared
-    assert_eq!(spawned.run_until_stalled(), 1, "only a started");
+    assert_eq!(bg.run_until_stalled(), 1, "only a started");
     let _ = s.update();
-    assert!(
-        spawned.run_until_stalled() == 0,
-        "b, released, is not started"
-    );
+    assert!(bg.run_until_stalled() == 0, "b, released, is not started");
     assert_eq!(log.entries(), ["worker a"]);
 }
 
 #[test]
 fn retry_loads_a_failed_entry_again_with_its_identity() {
-    let (mut s, spawned) = session();
+    let (mut s, mut bg) = session();
     let log = Log::default();
     let entry = stub("a", How::Worker, &log);
     entry.fail.store(true, Ordering::SeqCst);
     s.pool(declare(&entry)).unwrap();
-    spawned.run_until_stalled();
+    bg.run_until_stalled();
     let _ = events(&mut s);
     assert_eq!(state(&s, "a").as_deref(), Some("failed"));
     entry.fail.store(false, Ordering::SeqCst);
     assert_eq!(s.retry(&"a"), Ok(()));
     assert_eq!(state(&s, "a").as_deref(), Some("loading"));
-    spawned.run_until_stalled();
+    bg.run_until_stalled();
     assert_eq!(events(&mut s), [("a", "loaded".to_owned())]);
     assert_eq!(log.count("worker a"), 2, "loaded again");
     assert_eq!(made(&s, "a").unwrap().value, 1, "with the same identity");
@@ -540,11 +526,11 @@ fn retry_loads_a_failed_entry_again_with_its_identity() {
 
 #[test]
 fn retry_reopens_a_loaded_entry_its_kind_reads_as_lost() {
-    let (mut s, spawned) = session();
+    let (mut s, mut bg) = session();
     let log = Log::default();
     let entry = stub("a", How::Worker, &log);
     s.pool(declare(&entry)).unwrap();
-    spawned.run_until_stalled();
+    bg.run_until_stalled();
     let _ = events(&mut s);
     let before = made(&s, "a").unwrap();
     assert_eq!(
@@ -559,7 +545,7 @@ fn retry_reopens_a_loaded_entry_its_kind_reads_as_lost() {
         Arc::ptr_eq(&made(&s, "a").unwrap(), &before),
         "until it lands"
     );
-    spawned.run_until_stalled();
+    bg.run_until_stalled();
     assert_eq!(events(&mut s), [("a", "reloaded".to_owned())]);
     let after = made(&s, "a").unwrap();
     assert!(!Arc::ptr_eq(&after, &before));
@@ -568,7 +554,7 @@ fn retry_reopens_a_loaded_entry_its_kind_reads_as_lost() {
 
 #[test]
 fn retry_names_the_key_it_refuses() {
-    let (mut s, spawned) = session();
+    let (mut s, mut bg) = session();
     let log = Log::default();
     assert_eq!(s.retry(&"nobody"), Err(RetryError::NotPooled("nobody")));
     s.pool(declare(&stub("a", How::Worker, &log))).unwrap();
@@ -577,7 +563,7 @@ fn retry_names_the_key_it_refuses() {
         Err(RetryError::NotFailed("a")),
         "still loading"
     );
-    spawned.run_until_stalled();
+    bg.run_until_stalled();
     let _ = events(&mut s);
     assert_eq!(s.retry(&"a"), Err(RetryError::NotFailed("a")), "loaded");
     s.pool::<&'static str>(()).unwrap();
@@ -591,7 +577,7 @@ fn retry_names_the_key_it_refuses() {
 #[test]
 fn pool_loaded_lands_once_every_declared_entry_has_an_outcome_and_reports_each() {
     let log = Log::default();
-    let mut s = one_at_a_time();
+    let (mut s, mut bg) = one_at_a_time();
     let bad = stub("b", How::Worker, &log);
     bad.fail.store(true, Ordering::SeqCst);
     s.pool((
@@ -602,6 +588,7 @@ fn pool_loaded_lands_once_every_declared_entry_has_an_outcome_and_reports_each()
     .unwrap();
     let loaded = s.pool_loaded::<&'static str>();
     assert_ne!(loaded.status(), JobStatus::Done, "nothing has an outcome");
+    bg.run_until_stalled();
     let mut events = s.update();
     assert!(
         took(&mut events, &loaded).is_none(),
@@ -610,6 +597,7 @@ fn pool_loaded_lands_once_every_declared_entry_has_an_outcome_and_reports_each()
     assert_eq!(state(&s, "a").as_deref(), Some("loaded"));
     assert_eq!(state(&s, "c").as_deref(), Some("loaded"));
     assert_eq!(state(&s, "b").as_deref(), Some("loading"));
+    bg.run_until_stalled();
     let mut events = s.update();
     let report = took(&mut events, &loaded)
         .expect("every entry has an outcome")
@@ -630,7 +618,7 @@ fn pool_loaded_lands_once_every_declared_entry_has_an_outcome_and_reports_each()
 #[test]
 fn pool_loaded_lands_in_the_update_that_settles_the_last_entry_and_a_dropped_one_ends_its_wait() {
     let log = Log::default();
-    let mut s = one_at_a_time();
+    let (mut s, mut bg) = one_at_a_time();
     s.pool((
         declare(&stub("a", How::Worker, &log)),
         declare(&stub("b", How::Worker, &log)),
@@ -641,9 +629,11 @@ fn pool_loaded_lands_in_the_update_that_settles_the_last_entry_and_a_dropped_one
     assert_eq!(s.pool.entries.waiting(), 2);
     drop(dropped);
     // The update lands a and starts b.
+    bg.run_until_stalled();
     let _ = s.update();
     assert_eq!(s.pool.entries.waiting(), 1, "a dropped handle's wait ended");
     assert_ne!(loaded.status(), JobStatus::Done);
+    bg.run_until_stalled();
     let mut events = s.update();
     assert_eq!(
         loaded.status(),
@@ -661,15 +651,15 @@ fn pool_loaded_lands_in_the_update_that_settles_the_last_entry_and_a_dropped_one
 
 #[test]
 fn pool_loaded_waits_for_the_main_thread_while_an_entry_is_in_a_main_stage() {
-    let (s, spawned) = session();
+    let (s, mut bg) = session();
     let mut s = with_main_thread(s);
     let log = Log::default();
     s.pool(declare(&stub("a", How::Main, &log))).unwrap();
     let job = s.pool_loaded::<&'static str>();
-    spawned.run_until_stalled();
+    bg.run_until_stalled();
     // This thread is not the process's main thread: the wait would never end.
     assert!(matches!(
-        job.wait(&mut s),
+        job.wait(&mut s, &mut bg),
         Err(crate::PoolJobError::Wait(crate::WaitError::NeedsMainThread))
     ));
     assert_eq!(job.status(), JobStatus::WaitingForMainThread);
@@ -677,17 +667,17 @@ fn pool_loaded_waits_for_the_main_thread_while_an_entry_is_in_a_main_stage() {
 
 #[test]
 fn an_empty_pool_reports_at_once() {
-    let (mut s, _) = session();
+    let (mut s, mut bg) = session();
     let loaded = s.pool_loaded::<&'static str>();
     assert!(
-        loaded.wait(&mut s).unwrap().is_empty(),
+        loaded.wait(&mut s, &mut bg).unwrap().is_empty(),
         "nothing is pending"
     );
 }
 
 #[test]
 fn a_kind_that_shares_loads_once_for_two_keys_of_one_identity_and_both_read_the_same_value() {
-    let (mut s, spawned) = session();
+    let (mut s, mut bg) = session();
     let log = Log::default();
     let first = stub("a", How::Worker, &log);
     let second = Stub {
@@ -696,7 +686,7 @@ fn a_kind_that_shares_loads_once_for_two_keys_of_one_identity_and_both_read_the_
     };
     s.pool((Declared::shared("a", first), Declared::shared("b", second)))
         .unwrap();
-    assert_eq!(spawned.run_until_stalled(), 1, "one load");
+    assert_eq!(bg.run_until_stalled(), 1, "one load");
     assert_eq!(
         events(&mut s),
         [("a", "loaded".to_owned()), ("b", "loaded".to_owned())]
@@ -710,11 +700,11 @@ fn a_kind_that_shares_loads_once_for_two_keys_of_one_identity_and_both_read_the_
 
 #[test]
 fn a_key_of_a_sharing_kind_declared_after_the_load_landed_takes_the_loaded_value() {
-    let (mut s, spawned) = session();
+    let (mut s, mut bg) = session();
     let log = Log::default();
     let entry = stub("a", How::Worker, &log);
     s.pool(Declared::shared("a", entry.clone())).unwrap();
-    spawned.run_until_stalled();
+    bg.run_until_stalled();
     let _ = events(&mut s);
     let again = Stub {
         name: "b",
@@ -722,7 +712,7 @@ fn a_key_of_a_sharing_kind_declared_after_the_load_landed_takes_the_loaded_value
     };
     s.pool((Declared::shared("a", entry), Declared::shared("b", again)))
         .unwrap();
-    assert!(spawned.run_until_stalled() == 0, "no second load");
+    assert!(bg.run_until_stalled() == 0, "no second load");
     assert_eq!(state(&s, "b").as_deref(), Some("loaded"), "at once");
     assert!(Arc::ptr_eq(
         &made(&s, "a").unwrap(),
@@ -733,7 +723,7 @@ fn a_key_of_a_sharing_kind_declared_after_the_load_landed_takes_the_loaded_value
 
 #[test]
 fn a_shared_load_still_lands_for_the_key_that_remains_when_the_other_is_undeclared() {
-    let (mut s, spawned) = session();
+    let (mut s, mut bg) = session();
     let log = Log::default();
     let first = stub("a", How::Worker, &log);
     let second = Stub {
@@ -746,7 +736,7 @@ fn a_shared_load_still_lands_for_the_key_that_remains_when_the_other_is_undeclar
     ))
     .unwrap();
     s.pool(Declared::shared("b", second)).unwrap();
-    spawned.run_until_stalled();
+    bg.run_until_stalled();
     assert_eq!(
         events(&mut s),
         [("b", "loaded".to_owned()), ("a", "released".to_owned())]
@@ -756,7 +746,7 @@ fn a_shared_load_still_lands_for_the_key_that_remains_when_the_other_is_undeclar
 
 #[test]
 fn a_kind_that_does_not_share_loads_once_per_key_even_with_one_identity() {
-    let (mut s, spawned) = session();
+    let (mut s, mut bg) = session();
     let log = Log::default();
     let first = stub("a", How::Worker, &log);
     let second = Stub {
@@ -765,7 +755,7 @@ fn a_kind_that_does_not_share_loads_once_per_key_even_with_one_identity() {
     };
     s.pool((Declared::new("a", first), Declared::new("b", second)))
         .unwrap();
-    assert_eq!(spawned.run_until_stalled(), 2, "one instance per key");
+    assert_eq!(bg.run_until_stalled(), 2, "one instance per key");
     let _ = events(&mut s);
     assert_eq!(log.count("worker a") + log.count("worker b"), 2);
     assert!(
@@ -776,19 +766,15 @@ fn a_kind_that_does_not_share_loads_once_per_key_even_with_one_identity() {
 
 #[test]
 fn a_worker_stage_whose_entry_was_released_still_frees_its_capacity() {
-    let (mut s, spawned) = session();
+    let (mut s, mut bg) = session();
     let log = Log::default();
     s.pool(["a", "b", "c", "d", "e"].map(|name| declare(&stub(name, How::Worker, &log))))
         .unwrap();
     s.pool::<&'static str>(()).unwrap();
-    spawned.run_until_stalled();
+    bg.run_until_stalled();
     let _ = s.update();
     s.pool(declare(&stub("z", How::Worker, &log))).unwrap();
-    assert_eq!(
-        spawned.run_until_stalled(),
-        1,
-        "the four running stages ended"
-    );
+    assert_eq!(bg.run_until_stalled(), 1, "the four running stages ended");
 }
 
 /// Worker outputs the pool leaked (and, with `plugin`, those a collector could
@@ -806,11 +792,11 @@ fn stranded_total() -> u64 {
 
 #[test]
 fn a_handles_presence_reads_lost_exactly_when_the_kind_says_lost_and_retry_follows_it() {
-    let (mut s, spawned) = session();
+    let (mut s, mut bg) = session();
     let log = Log::default();
     let entry = stub("a", How::Worker, &log);
     s.pool(declare(&entry)).unwrap();
-    spawned.run_until_stalled();
+    bg.run_until_stalled();
     let _ = events(&mut s);
     let handle = s.pool.entries.handle::<_, Stub>(&"a").unwrap();
     assert_eq!(handle.presence(), Presence::Live);
@@ -847,24 +833,24 @@ fn a_panic_in_a_main_stage_fails_its_entry_and_not_the_update() {
         }
         fn handle(_: &(), _: &Life) {}
     }
-    let (s, spawned) = session();
+    let (s, mut bg) = session();
     let mut s = with_main_thread(s);
     s.pool(Declared::new("a", Panics)).unwrap();
-    spawned.run_until_stalled();
+    bg.run_until_stalled();
     let _ = s.update();
     let (mut s, (), _) = on_main(s, |s, main| s.pool_main_stages(main));
     assert_eq!(
         events(&mut s),
         [(
             "a",
-            "failed: a session job panicked: the plugin aborted".to_owned()
+            "failed: background work panicked: the plugin aborted".to_owned()
         )]
     );
 }
 
 #[test]
 fn a_key_joining_a_shared_load_already_waiting_for_the_main_thread_waits_with_it() {
-    let (s, spawned) = session();
+    let (s, mut bg) = session();
     let mut s = with_main_thread(s);
     let log = Log::default();
     let first = stub("a", How::Main, &log);
@@ -873,7 +859,7 @@ fn a_key_joining_a_shared_load_already_waiting_for_the_main_thread_waits_with_it
         ..first.clone()
     };
     s.pool(Declared::shared("a", first.clone())).unwrap();
-    spawned.run_until_stalled();
+    bg.run_until_stalled();
     let _ = s.update();
     assert_eq!(state(&s, "a").as_deref(), Some("waiting-for-main"));
     s.pool((Declared::shared("a", first), Declared::shared("b", second)))
@@ -883,7 +869,7 @@ fn a_key_joining_a_shared_load_already_waiting_for_the_main_thread_waits_with_it
         Some("waiting-for-main"),
         "joined it"
     );
-    assert!(spawned.run_until_stalled() == 0, "no second worker");
+    assert!(bg.run_until_stalled() == 0, "no second worker");
     let (mut s, (), _) = on_main(s, |s, main| s.pool_main_stages(main));
     assert_eq!(
         events(&mut s),
@@ -898,7 +884,7 @@ fn a_key_joining_a_shared_load_already_waiting_for_the_main_thread_waits_with_it
 
 #[test]
 fn a_shared_key_whose_identity_changes_mid_flight_leaves_the_shared_load_and_gets_its_own() {
-    let (mut s, spawned) = session();
+    let (mut s, mut bg) = session();
     let log = Log::default();
     let first = stub("a", How::Worker, &log);
     let second = Stub {
@@ -916,11 +902,7 @@ fn a_shared_key_whose_identity_changes_mid_flight_leaves_the_shared_load_and_get
     };
     s.pool((Declared::shared("a", first), Declared::shared("b", changed)))
         .unwrap();
-    assert_eq!(
-        spawned.run_until_stalled(),
-        2,
-        "the shared load, and b's own"
-    );
+    assert_eq!(bg.run_until_stalled(), 2, "the shared load, and b's own");
     assert_eq!(
         events(&mut s),
         [("a", "loaded".to_owned()), ("b", "loaded".to_owned())]
@@ -931,11 +913,11 @@ fn a_shared_key_whose_identity_changes_mid_flight_leaves_the_shared_load_and_get
 
 #[test]
 fn a_loaded_value_its_kind_reads_as_lost_is_not_copied_to_a_key_that_shares_its_identity() {
-    let (mut s, spawned) = session();
+    let (mut s, mut bg) = session();
     let log = Log::default();
     let entry = stub("a", How::Worker, &log);
     s.pool(Declared::shared("a", entry.clone())).unwrap();
-    spawned.run_until_stalled();
+    bg.run_until_stalled();
     let _ = events(&mut s);
     entry.lost.store(true, Ordering::SeqCst);
     let again = Stub {
@@ -945,7 +927,7 @@ fn a_loaded_value_its_kind_reads_as_lost_is_not_copied_to_a_key_that_shares_its_
     };
     s.pool((Declared::shared("a", entry), Declared::shared("b", again)))
         .unwrap();
-    assert_eq!(spawned.run_until_stalled(), 1, "b loads for itself");
+    assert_eq!(bg.run_until_stalled(), 1, "b loads for itself");
 }
 
 /// A stage dropped off the main thread: its output must not drop there.
@@ -994,10 +976,10 @@ fn a_stage_dropped_off_the_main_thread_hands_its_output_to_the_collector_which_d
 }
 
 fn session_with_pending_output(queued: bool, log: &Log) -> crate::DetachedSession {
-    let (s, spawned) = session();
+    let (s, mut bg) = session();
     let mut s = with_main_thread(s);
     s.pool(declare(&stub("a", How::Main, log))).unwrap();
-    spawned.run_until_stalled();
+    bg.run_until_stalled();
     if queued {
         let _ = s.update(); // the output lands in the pool's main queue
     }
@@ -1021,7 +1003,7 @@ fn a_session_dropped_off_the_main_thread_leaks_the_output_waiting_in_the_pool_an
 
 #[test]
 fn a_pending_entry_that_starts_to_share_does_not_leave_a_shared_flight_without_a_share() {
-    let (mut s, spawned) = session();
+    let (mut s, mut bg) = session();
     let log = Log::default();
     let entry = stub("a", How::Worker, &log);
     let sharer = Stub {
@@ -1034,7 +1016,7 @@ fn a_pending_entry_that_starts_to_share_does_not_leave_a_shared_flight_without_a
     s.pool(Declared::shared("a", entry.clone())).unwrap();
     s.pool((Declared::shared("a", entry), Declared::shared("b", sharer)))
         .unwrap();
-    spawned.run_until_stalled();
+    bg.run_until_stalled();
     assert_eq!(
         events(&mut s),
         [("a", "loaded".to_owned()), ("b", "loaded".to_owned())],
@@ -1065,13 +1047,14 @@ fn recorder() -> (
 
 #[test]
 fn when_loaded_runs_once_in_the_update_the_entry_lands_in_the_order_asked() {
-    let (mut s, _spawned) = session();
+    let (mut s, mut bg) = session();
     let log = Log::default();
     s.pool(declare(&stub("a", How::Worker, &log))).unwrap();
     let (seen, run) = recorder();
     s.when_loaded(&"a", run("first")).unwrap();
     s.when_loaded(&"a", run("second")).unwrap();
     assert!(seen.lock().unwrap().is_empty(), "the load has not landed");
+    bg.run_until_stalled();
     assert_eq!(events(&mut s), [("a", "loaded".to_owned())]);
     assert_eq!(
         *seen.lock().unwrap(),
@@ -1084,10 +1067,10 @@ fn when_loaded_runs_once_in_the_update_the_entry_lands_in_the_order_asked() {
 
 #[test]
 fn when_loaded_over_a_loaded_entry_runs_in_the_next_update() {
-    let (mut s, spawned) = session();
+    let (mut s, mut bg) = session();
     let log = Log::default();
     s.pool(declare(&stub("a", How::Worker, &log))).unwrap();
-    spawned.run_until_stalled();
+    bg.run_until_stalled();
     let _ = s.update();
     let (seen, run) = recorder();
     s.when_loaded(&"a", run("late")).unwrap();
@@ -1098,14 +1081,14 @@ fn when_loaded_over_a_loaded_entry_runs_in_the_next_update() {
 
 #[test]
 fn when_loaded_waits_through_a_failure_and_runs_when_a_retry_lands() {
-    let (mut s, spawned) = session();
+    let (mut s, mut bg) = session();
     let log = Log::default();
     let entry = stub("a", How::Worker, &log);
     entry.fail.store(true, Ordering::SeqCst);
     s.pool(declare(&entry)).unwrap();
     let (seen, run) = recorder();
     s.when_loaded(&"a", run("run")).unwrap();
-    spawned.run_until_stalled();
+    bg.run_until_stalled();
     let _ = s.update();
     assert_eq!(state(&s, "a").as_deref(), Some("failed"));
     assert!(
@@ -1114,23 +1097,23 @@ fn when_loaded_waits_through_a_failure_and_runs_when_a_retry_lands() {
     );
     entry.fail.store(false, Ordering::SeqCst);
     s.retry(&"a").unwrap();
-    spawned.run_until_stalled();
+    bg.run_until_stalled();
     let _ = s.update();
     assert_eq!(*seen.lock().unwrap(), ["run while loaded"]);
 }
 
 #[test]
 fn when_loaded_is_dropped_when_its_entry_is_released() {
-    let (mut s, spawned) = session();
+    let (mut s, mut bg) = session();
     let log = Log::default();
     s.pool(declare(&stub("a", How::Worker, &log))).unwrap();
     let (seen, run) = recorder();
     s.when_loaded(&"a", run("run")).unwrap();
     s.pool::<&'static str>(()).unwrap();
-    spawned.run_until_stalled();
+    bg.run_until_stalled();
     let _ = s.update();
     s.pool(declare(&stub("a", How::Worker, &log))).unwrap();
-    spawned.run_until_stalled();
+    bg.run_until_stalled();
     let _ = s.update();
     assert!(
         seen.lock().unwrap().is_empty(),
@@ -1140,7 +1123,7 @@ fn when_loaded_is_dropped_when_its_entry_is_released() {
 
 #[test]
 fn when_loaded_names_a_key_the_pool_does_not_declare_at_the_call() {
-    let (mut s, _spawned) = session();
+    let (mut s, _bg) = session();
     let (_, run) = recorder();
     assert_eq!(
         s.when_loaded(&"a", run("run")),
@@ -1150,14 +1133,14 @@ fn when_loaded_names_a_key_the_pool_does_not_declare_at_the_call() {
 
 #[test]
 fn a_when_loaded_run_whose_entry_an_earlier_run_released_is_dropped() {
-    let (mut s, spawned) = session();
+    let (mut s, mut bg) = session();
     let log = Log::default();
     s.pool((
         declare(&stub("a", How::Worker, &log)),
         declare(&stub("b", How::Worker, &log)),
     ))
     .unwrap();
-    spawned.run_until_stalled();
+    bg.run_until_stalled();
     let _ = s.update();
     let ran = Arc::new(Mutex::new(Vec::new()));
     let (first, second) = (Arc::clone(&ran), Arc::clone(&ran));
@@ -1176,10 +1159,10 @@ fn a_when_loaded_run_whose_entry_an_earlier_run_released_is_dropped() {
 
 #[test]
 fn a_when_loaded_run_asked_inside_a_run_waits_for_the_next_update() {
-    let (mut s, spawned) = session();
+    let (mut s, mut bg) = session();
     let log = Log::default();
     s.pool(declare(&stub("a", How::Worker, &log))).unwrap();
-    spawned.run_until_stalled();
+    bg.run_until_stalled();
     let _ = s.update();
     let count = Arc::new(Mutex::new(0));
     let inner = Arc::clone(&count);

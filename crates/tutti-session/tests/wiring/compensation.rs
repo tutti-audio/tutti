@@ -19,7 +19,7 @@ use tutti_units::{Db, SampleRate, Samples};
 
 const RATE: SampleRate = SampleRate::SR_44K1;
 
-fn detached() -> DetachedSession {
+fn detached() -> (DetachedSession, tutti_session::Background) {
     Session::builder()
         .outputs_floor(ChannelLayout::STEREO)
         .build_detached(RATE)
@@ -62,7 +62,7 @@ fn skewed(s: &mut DetachedSession) -> (tutti_graph::NodeKey, Samples) {
 /// total is zero and the table has a zero per output.
 #[test]
 fn a_graph_with_no_latency_reports_none() {
-    let mut s = detached();
+    let (mut s, _bg) = detached();
     let (a, _) = s.graph().add(ForkByClone(Const::mono(1.0)));
     s.graph()
         .set_sources(Root::output(0), [OutPort::new(a, 0)])
@@ -92,7 +92,7 @@ fn a_graph_with_no_latency_reports_none() {
 /// wired to.
 #[test]
 fn the_published_figures_are_the_plans_and_nothing_is_spliced_in() {
-    let mut s = detached();
+    let (mut s, _bg) = detached();
     let (_, lat) = skewed(&mut s);
     let authored = [
         s.graph_ref().sources(Root::output(0)).unwrap(),
@@ -139,7 +139,7 @@ fn the_published_figures_are_the_plans_and_nothing_is_spliced_in() {
 /// must survive an update with no edit.
 #[test]
 fn an_update_with_no_edit_publishes_nothing() {
-    let mut s = detached();
+    let (mut s, _bg) = detached();
     skewed(&mut s);
     let _ = s.update();
     assert!(!s.graph_ref().is_edited());
@@ -176,12 +176,12 @@ fn the_latency_fold_and_the_compiled_plan_agree() {
         f
     }
 
-    let mut s = detached();
+    let (mut s, _bg) = detached();
     let (_, lat) = skewed(&mut s);
     let _ = s.update();
     assert_eq!(figures(&s).1, lat);
 
-    let mut s = detached();
+    let (mut s, _bg) = detached();
     let (a, _) = s.graph().add(ForkByClone(Const::mono(1.0)));
     s.graph().connect(a, Root).unwrap();
     let _ = s.update();
@@ -195,7 +195,7 @@ fn the_latency_fold_and_the_compiled_plan_agree() {
 /// publishes its figures.
 #[test]
 fn a_re_prepare_republishes_the_figures_once_it_resumes() {
-    let mut s = detached();
+    let (mut s, _bg) = detached();
     let (a, _) = s.graph().add(ForkByClone(Const::mono(1.0)));
     let (eff, _) = s.graph().add(limiter());
     s.graph()

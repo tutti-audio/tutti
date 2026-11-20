@@ -36,7 +36,7 @@ fn feed(session: &mut Session, values: &[f32]) {
     }
 }
 
-fn offline(builder: SessionBuilder, device: u16) -> Session {
+fn offline(builder: SessionBuilder, device: u16) -> (Session, tutti_session::Background) {
     builder
         .sample_rate(RATE)
         .outputs(ChannelLayout::from(device))
@@ -58,7 +58,7 @@ fn last_frame(session: &mut Session, device: u16, frames: usize) -> Vec<f32> {
 /// root is: a tap on the root reads the six channels as fed.
 #[test]
 fn monitoring_changes_what_is_heard_and_never_the_root() {
-    let mut s = offline(Session::builder(), 6);
+    let (mut s, _bg) = offline(Session::builder(), 6);
     feed(&mut s, &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
     let mut tap = s
         .graph()
@@ -99,7 +99,7 @@ fn monitoring_changes_what_is_heard_and_never_the_root() {
 /// device. Nothing is kept.
 #[test]
 fn a_policy_that_does_not_fit_the_device_is_refused_when_set() {
-    let s = offline(Session::builder(), 2);
+    let (s, _bg) = offline(Session::builder(), 2);
     let map = OutputPolicy {
         monitor: Some(Bed::Stereo.topology()),
         map: OutputMap::channels([2, 3]).unwrap(),
@@ -141,7 +141,7 @@ fn a_policy_that_does_not_fit_the_device_is_refused_when_set() {
 /// A session with no engine has no device to route to.
 #[test]
 fn a_detached_session_has_nothing_to_route() {
-    let s = Session::builder().build_detached(RATE).unwrap();
+    let (s, _bg) = Session::builder().build_detached(RATE).unwrap();
     assert_eq!(
         refused(s.set(s.policy::<OutputPolicy>().to(OutputPolicy::default()))),
         OutputPolicyError::Detached
@@ -152,7 +152,7 @@ fn a_detached_session_has_nothing_to_route() {
 /// rest, live, applied by `update`: the frames in between are the ramp.
 #[test]
 fn a_mute_and_a_dim_ramp_and_settle() {
-    let mut s = offline(Session::builder(), 2);
+    let (mut s, _bg) = offline(Session::builder(), 2);
     feed(&mut s, &[1.0, 1.0]);
     assert_eq!(last_frame(&mut s, 2, 64), [1.0, 1.0]);
 
@@ -207,7 +207,7 @@ fn a_mute_and_a_dim_ramp_and_settle() {
 #[test]
 fn a_level_that_is_not_a_gain_is_refused_when_set() {
     use tutti_buffers::{FoldError, FoldLevel, FoldLevels};
-    let s = offline(Session::builder(), 2);
+    let (s, _bg) = offline(Session::builder(), 2);
     let policy = OutputPolicy {
         levels: FoldLevels {
             surround: Amplitude::new(f64::NAN),

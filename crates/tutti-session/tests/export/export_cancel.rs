@@ -53,7 +53,7 @@ struct Rig {
 }
 
 fn rig(at: usize) -> Rig {
-    let mut session = Session::builder().build_detached(RATE).unwrap();
+    let (mut session, _bg) = Session::builder().build_detached(RATE).unwrap();
     let blocks = Arc::new(AtomicUsize::new(0));
     let handle = Arc::new(OnceLock::new());
     let node = CancelAt {

@@ -2,7 +2,7 @@
 //! files check ([`RefreshPool`]).
 
 use crate::job::job_kind;
-use crate::{PoolReport, RefreshReport, WaitError, WorkerError};
+use crate::{BackgroundError, PoolReport, RefreshReport, WaitError};
 
 /// Why a pool job ended without its result.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, thiserror::Error)]
@@ -10,7 +10,7 @@ use crate::{PoolReport, RefreshReport, WaitError, WorkerError};
 pub enum PoolJobError {
     /// The worker did not finish.
     #[error(transparent)]
-    Worker(#[from] WorkerError),
+    Worker(#[from] BackgroundError),
     /// The wait could not run.
     #[error(transparent)]
     Wait(#[from] WaitError),

@@ -14,7 +14,12 @@ use f64_nodes::{Dc, FINE, Gain};
 
 const BLOCK: usize = 64;
 
-fn session(workers: Workers) -> Session<&'static str, Offline<f64>> {
+fn session(
+    workers: Workers,
+) -> (
+    Session<&'static str, Offline<f64>>,
+    tutti_session::Background,
+) {
     Session::builder()
         .float::<f64>()
         .outputs(ChannelLayout::MONO)
@@ -28,7 +33,7 @@ fn session(workers: Workers) -> Session<&'static str, Offline<f64>> {
 /// `FINE` through `lanes` gains into the root: set each lane's gain to
 /// `0.125 * (lane + 1)` with `Session::set`, render one block and return it.
 fn render(workers: Workers, lanes: usize) -> Vec<f64> {
-    let mut s = session(workers);
+    let (mut s, _bg) = session(workers);
     let (dc, _) = s.graph().add(ForkByClone(Dc(FINE)));
     let mut gains = Vec::new();
     for _ in 0..lanes {
@@ -61,7 +66,7 @@ fn an_f64_session_renders_a_figure_f32_rounds_away_through_a_set_gain() {
     // Setup: `f32` loses the figure, so a pass is not a rounded one.
     assert_ne!(f64::from(FINE as f32), FINE, "FINE is not an f32");
     assert_ne!(f64::from((0.75 * FINE) as f32), 0.75 * FINE);
-    let mut s = session(Workers::SERIAL);
+    let (mut s, _bg) = session(Workers::SERIAL);
     let (dc, _) = s.graph().add(ForkByClone(Dc(FINE)));
     let (gain, _) = s.graph().add(Params(Gain(Param::new(Amplitude::new(1.0)))));
     s.graph()

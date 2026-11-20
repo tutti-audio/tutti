@@ -17,7 +17,7 @@ const A: f32 = 0.25;
 const B: f32 = 0.5;
 const C: f32 = 0.125;
 
-fn offline() -> Session {
+fn offline() -> (Session, tutti_session::Background) {
     Session::builder().build().expect("builds")
 }
 
@@ -40,7 +40,7 @@ struct Rig {
 }
 
 fn rig() -> Rig {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let g = s.graph();
     let (a, _) = g.add(ForkByClone(Const::mono(A)));
     let (b, _) = g.add(ForkByClone(Const::mono(B)));

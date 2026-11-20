@@ -72,12 +72,12 @@
 //!   its mirror, and (`modulation`) into the knob of the lane on that
 //!   parameter when it has one (doc 014 §8.2). A mirror rebuilt by a crossfade
 //!   to another plugin, or by a rescan the plugin announced, is read as a job
-//!   on the session's executor (`SessionBuilder::executor`): one round trip
+//!   on the session's [`Background`](crate::Background): one round trip
 //!   per parameter, landed in a later [`Session::update`]. Until then the
 //!   mirror is not ready, and a lane on the plugin waits for it.
 //! - **Snapshots.** A healthy plugin's state is captured every
 //!   `snapshot_interval` (8 s by default, set on the `SessionBuilder`) of
-//!   `now`, as a job on the same executor (a blocking round trip), landed in a later
+//!   `now`, as a job on the same background (a blocking round trip), landed in a later
 //!   update. One is in flight per plugin at most: the landing holds the
 //!   plugin's snapshot token until it lands, whether the job ran, panicked or
 //!   was dropped.
@@ -99,13 +99,13 @@
 //! - **Death.** The node stays in the graph, silent, with its wiring and
 //!   every lane fed to it; [`PluginChange::Reloading`].
 //! - **Load.** When the backoff passes, the existing `PluginLoad` (with
-//!   the last good state as its state) is submitted to the executor as a job.
+//!   the last good state as its state) is submitted to the background as a job.
 //!   Its landing, in a later `Session::update` and on whatever thread runs it
 //!   (no main-thread proof: a served replacement opens off the main thread,
 //!   and one that came back unopened for the main thread is a failed attempt),
 //!   swaps the loaded plugin in at the same node (`Graph::replace_plugin`)
 //!   and keeps the record: the last good state, its age, the failure
-//!   history. A job the executor drops is [`RecoveryFailure::ReloadDropped`],
+//!   history. A job the background drops is [`RecoveryFailure::ReloadDropped`],
 //!   one that panics [`RecoveryFailure::ReloadPanicked`]: a failed attempt.
 //! - **Reported.** [`PluginChange::Recovered`] says whether the state
 //!   came back and how old it was; a spent budget is
@@ -165,9 +165,9 @@ pub use state_job::{RestoreState, SaveState, StateJobError, StateJobFailed};
 use crate::jobs::{Landing, PluginLanding};
 use crate::plugin_diagnostics::Figures;
 use crate::{
-    Diagnostics, GiveUp, HangDetector, Key, OtherPeer, Params, PeerState, PluginBuses, PortCounts,
-    Recovery, RecoveryAction, RecoveryEvent, RecoveryFailure, ReloadCause, SavedPeer, Session,
-    SessionEvent, WorkerError,
+    BackgroundError, Diagnostics, GiveUp, HangDetector, Key, OtherPeer, Params, PeerState,
+    PluginBuses, PortCounts, Recovery, RecoveryAction, RecoveryEvent, RecoveryFailure, ReloadCause,
+    SavedPeer, Session, SessionEvent,
 };
 
 /// How often a healthy plugin's state is captured, by default: 8 s.
@@ -1058,7 +1058,7 @@ impl HostedPlugin {
     /// the incoming plugin, from its handle (where its reports now arrive),
     /// not yet ready: its values are read by a job (one round trip per
     /// parameter, so not on the calling thread), which the next
-    /// `Phase::Plugins` submits to the session's executor.
+    /// `Phase::Plugins` submits to the session's background.
     /// The outgoing mirror's report callback was on the outgoing handle,
     /// which reports nothing here once it is gone.
     ///
@@ -2203,8 +2203,8 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
             .snapshot_from
             .map(|t| now.saturating_duration_since(t));
         // blocks: a plugin load is an IPC round trip, bounded by the load deadlines.
-        // On a polled executor `spawn_dedicated` runs inside `update`'s poll, so this job stalls
-        // `update` until the plugin lane makes it await its reply.
+        // Where a thread cannot start (the web) `spawn_dedicated` queues the job for the
+        // `Background`'s drive, which it stalls until the plugin lane makes it await its reply.
         self.jobs.submit_blocking(
             "tutti-reload",
             move || load.run(),
@@ -2236,7 +2236,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
         &mut self,
         node: NodeKey,
         token: &Arc<()>,
-        failed: WorkerError,
+        failed: BackgroundError,
         out: &mut Vec<SessionEvent>,
     ) {
         let now = self.plugins.now;
@@ -2249,7 +2249,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
             return;
         }
         let cause = match failed {
-            WorkerError::Panicked { message } => RecoveryFailure::ReloadPanicked { message },
+            BackgroundError::Panicked { message } => RecoveryFailure::ReloadPanicked { message },
             // `Dropped`, and any end a later version names: no replacement
             // came of the job.
             _ => RecoveryFailure::ReloadDropped,
@@ -2427,8 +2427,9 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
             if let Some(read) = hosted.param_read.take() {
                 let token = Arc::clone(&hosted.mirror_token);
                 // blocks: the parameter read is an IPC round trip, bounded by `param_wait`.
-                // On a polled executor `spawn_dedicated` runs inside `update`'s poll, so this job
-                // stalls `update` until the plugin lane makes it await its reply.
+                // Where a thread cannot start (the web) `spawn_dedicated` queues the job for the
+                // `Background`'s drive, which it stalls until the plugin lane makes it await its
+                // reply.
                 self.jobs.submit_blocking(
                     "tutti-params",
                     move || read.run(),
@@ -2473,8 +2474,9 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
             if let Some((handle, token)) = snapshot {
                 let asked = now;
                 // blocks: the state save is an IPC round trip, bounded by `state_wait`.
-                // On a polled executor `spawn_dedicated` runs inside `update`'s poll, so this job
-                // stalls `update` until the plugin lane makes it await its reply.
+                // Where a thread cannot start (the web) `spawn_dedicated` queues the job for the
+                // `Background`'s drive, which it stalls until the plugin lane makes it await its
+                // reply.
                 self.jobs.submit_blocking(
                     "tutti-snapshot",
                     move || handle.save_state(StateUse::Project),
@@ -2536,15 +2538,14 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
 mod tests {
     //! The record's own rules over a fake backend (no `plugin-server`):
     //! the snapshot cadence and its one-in-flight token, a declined save,
-    //! and a failing plugin's skipped snapshot. The session's executor is polled
-    //! and shared with the test, so a job waits until the test runs it. The death, the render mode
+    //! and a failing plugin's skipped snapshot. Each job runs on a thread of its own and
+    //! its end waits until the test lands it. The death, the render mode
     //! and the export are pinned end to end over the CLAP test plugin, in
     //! `tests/plugin/plugin.rs`.
 
     use super::*;
     use crate::RecoveryPolicy;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-    use tutti_platform::Executor;
     use tutti_plugin_types::ParameterInfo;
     use tutti_units::Normalized;
     use tutti_units::ParamId;
@@ -2647,18 +2648,16 @@ mod tests {
         saves: Arc<AtomicUsize>,
         dead: Arc<AtomicBool>,
         t0: Instant,
-        /// The session's polled executor: a job it was handed waits here until
-        /// the test polls it.
-        executor: Executor,
+        /// The session's driver, which no test runs: every job here blocks, so each
+        /// has a thread of its own, and its end waits for [`land`](Rig::land).
+        _background: crate::Background,
     }
 
     /// A detached session snapshotting every second, hosting a fake that
     /// answers `state` at a dc node.
     fn rig(state: Option<Vec<u8>>) -> Rig {
-        let executor = Executor::new();
-        let mut session = Session::builder()
+        let (mut session, background) = Session::builder()
             .snapshot_interval(Duration::from_secs(1))
-            .executor(executor.clone())
             .build_detached(SampleRate::SR_48K)
             .unwrap();
         let saves = Arc::new(AtomicUsize::new(0));
@@ -2697,7 +2696,7 @@ mod tests {
             saves,
             dead,
             t0: Instant::now(),
-            executor,
+            _background: background,
         }
     }
 
@@ -2733,39 +2732,43 @@ mod tests {
             out
         }
 
-        /// `Phase::Plugins` at `t0 + ms`; the jobs it submitted wait on the
-        /// executor.
+        /// `Phase::Plugins` at `t0 + ms`; the jobs it submitted run on threads of their
+        /// own, and their ends wait for [`land`](Self::land).
         fn start_at(&mut self, ms: u64) {
             let _ = self.events_at(ms);
         }
 
-        /// Runs the jobs that wait, on another thread: how many there were. Their
-        /// ends wait for [`land`](Self::land).
-        fn run_jobs(&self) -> usize {
-            let executor = self.executor.clone();
-            std::thread::spawn(move || executor.run_until_stalled())
-                .join()
-                .unwrap()
+        /// The jobs submitted and not yet landed.
+        fn running(&self) -> usize {
+            crate::jobs::tests::running(&self.session.jobs)
         }
 
-        /// `Phase::Plugins` at `t0 + ms`, then the jobs it submitted run: how
-        /// many there were.
+        /// `Phase::Plugins` at `t0 + ms`: how many jobs it submitted.
         fn plugins_at(&mut self, ms: u64) -> usize {
+            let before = self.running();
             self.start_at(ms);
-            self.run_jobs()
+            self.running() - before
         }
 
-        /// `Phase::Collect`: what the jobs sent lands; the events it reported.
+        /// `Phase::Collect` until every submitted job has landed: the events it
+        /// reported. A guard against a job that never ends.
         fn land(&mut self) -> Vec<SessionEvent> {
             let mut out = Vec::new();
-            let cx = crate::PhaseCx::at(self.t0);
-            self.session.run_phase(crate::Phase::Collect, cx, &mut out);
-            out
+            let deadline = Instant::now() + Duration::from_secs(10);
+            loop {
+                let cx = crate::PhaseCx::at(self.t0);
+                self.session.run_phase(crate::Phase::Collect, cx, &mut out);
+                if self.running() == 0 {
+                    return out;
+                }
+                assert!(Instant::now() < deadline, "a job never ended");
+                std::thread::yield_now();
+            }
         }
 
-        /// Runs the one job that waits, on another thread, and lands its end.
+        /// Lands the one job that waits.
         fn run_and_land(&mut self) -> Vec<SessionEvent> {
-            assert_eq!(self.run_jobs(), 1, "one job waits");
+            assert_eq!(self.running(), 1, "one job waits");
             self.land()
         }
 
@@ -3160,7 +3163,7 @@ mod tests {
 
         rig.start_at(0);
         rig.start_at(10);
-        assert_eq!(rig.run_jobs(), 1, "the read is submitted once, as a job");
+        assert_eq!(rig.running(), 1, "the read is submitted once, as a job");
         rig.land();
         assert_eq!(
             rig.session.graph.plugins[&rig.node].param_value(ParamId::new(3)),
@@ -3229,8 +3232,9 @@ mod tests {
             "the mirror is not ready"
         );
 
-        rig.start_at(10);
+        // The list answers before the next phase submits the read again.
         unlisted.store(false, Ordering::SeqCst);
+        rig.start_at(10);
         rig.run_and_land();
         assert_eq!(
             rig.session.graph.plugins[&rig.node].param_value(ParamId::new(3)),
@@ -3248,8 +3252,8 @@ mod tests {
     #[test]
     fn a_reload_job_that_ends_without_a_result_is_a_failed_attempt() {
         for failed in [
-            WorkerError::Dropped,
-            WorkerError::Panicked {
+            BackgroundError::Dropped,
+            BackgroundError::Panicked {
                 message: "boom".into(),
             },
         ] {
@@ -3285,9 +3289,12 @@ mod tests {
                 panic!("the next attempt is scheduled: {out:?}");
             };
             match (&failed, cause) {
-                (WorkerError::Dropped, ReloadCause::Attempt(RecoveryFailure::ReloadDropped)) => {}
                 (
-                    WorkerError::Panicked { message },
+                    BackgroundError::Dropped,
+                    ReloadCause::Attempt(RecoveryFailure::ReloadDropped),
+                ) => {}
+                (
+                    BackgroundError::Panicked { message },
                     ReloadCause::Attempt(RecoveryFailure::ReloadPanicked { message: got }),
                 ) => assert_eq!(got, message),
                 other => panic!("{other:?}"),
@@ -3357,9 +3364,11 @@ mod tests {
         let loadable = Loadable::uncatalogued(plugin.clone()).under(&catalog);
         let mut rig = rig(None);
         rig.recovering(plugin, loadable);
-        rig.start_at(0);
 
+        // The reload's own thread starts at once, so the catalog is told before the
+        // phase submits it.
         catalog.blacklist(&file, "crashed the scanner");
+        rig.start_at(0);
         let events = rig.run_and_land();
         std::fs::remove_file(&file).ok();
 
@@ -3382,8 +3391,7 @@ mod tests {
     }
 
     /// **A reload job that outlives its node lands nowhere, silently.** The
-    /// executor holds the job; the node is removed; the job then runs and its end
-    /// lands: no event, and no failure recorded for a node that is gone.
+    /// job is submitted; the node is removed; the job's end then lands: no event, and no failure recorded for a node that is gone.
     #[cfg(feature = "clap")]
     #[test]
     fn a_reload_job_that_outlives_its_node_lands_quietly() {

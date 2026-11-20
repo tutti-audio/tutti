@@ -14,11 +14,11 @@
 //! [`JobKind`] is sealed: a kind is added here, in four steps.
 //!
 //! 1. Name the kind and its answer with `job_kind!`: the unit struct, its
-//!    `Output` and its `Error`. The error converts from [`WorkerError`] and
+//!    `Output` and its `Error`. The error converts from [`BackgroundError`] and
 //!    [`WaitError`] (`#[from]` variants).
 //! 2. In the session call, start the work with `Jobs::submit_job::<Kind, _, _, _>(work,
 //!    land)` and return the [`Job`] it gives. `work` runs on the session's
-//!    executor and may read its [`Cancel`]; `land` runs in the next
+//!    background and may read its [`Cancel`]; `land` runs in the next
 //!    [`update`](Session::update) on the control thread and ends with
 //!    `Ticket::land(result)`.
 //! 3. A stage that must run on the main thread is posted to the session's main
@@ -30,7 +30,7 @@
 //!    session has the answer.
 //!
 //! A [`Ticket`] that is dropped without landing ends the job: [`Job::wait`]
-//! answers [`WorkerError::Dropped`].
+//! answers [`BackgroundError::Dropped`].
 
 use std::any::Any;
 use std::fmt;
@@ -40,12 +40,11 @@ use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Waker};
-use std::time::Duration;
 
 use tutti_rt::LockExt;
 use tutti_rt::Mint;
 
-use crate::{Clock, Session, SessionEvent};
+use crate::{Background, Clock, Session, SessionEvent};
 
 pub(crate) mod sealed {
     /// Keeps [`JobKind`](super::JobKind) the crate's to implement.
@@ -57,9 +56,9 @@ pub trait JobKind: sealed::Sealed + 'static {
     /// What the job lands on success.
     type Output: Send + 'static;
     /// Why it ended without: the kind's own typed error. A worker that
-    /// panicked or was dropped ([`WorkerError`]) and a [`Job::wait`] that could
+    /// panicked or was dropped ([`BackgroundError`]) and a [`Job::wait`] that could
     /// not wait ([`WaitError`]) convert in by `From`.
-    type Error: std::error::Error + From<WorkerError> + From<WaitError> + Send + 'static;
+    type Error: std::error::Error + From<BackgroundError> + From<WaitError> + Send + 'static;
 }
 
 /// Declares a job kind: the unit struct and its sealed [`JobKind`] impl.
@@ -131,24 +130,24 @@ pub enum WaitError {
     AlreadyLanded,
 }
 
-/// Why a job's worker ended without a result.
+/// Why a job's background work ended without a result.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, thiserror::Error)]
 #[non_exhaustive]
-pub enum WorkerError {
+pub enum BackgroundError {
     /// The work panicked; `message` is the panic's, when it was a string.
-    #[error("a session job panicked: {message}")]
+    #[error("background work panicked: {message}")]
     Panicked {
         /// The panic's message, or a placeholder for a payload of another
         /// type.
         message: String,
     },
-    /// The executor dropped the job unrun or part-way (a shutdown, a host that
+    /// The background work was dropped unrun or part-way (a shutdown, a host that
     /// discards the future), or the session ended the job unanswered.
-    #[error("the executor dropped a session job without finishing it")]
+    #[error("background work was dropped without finishing")]
     Dropped,
-    /// The executor refused to start the job: the OS refused a thread. The work never
+    /// The background work could not start: the OS refused a thread. The work never
     /// ran.
-    #[error("the executor could not start a session job: {0}")]
+    #[error("background work could not start: {0}")]
     NotStarted(std::io::ErrorKind),
 }
 
@@ -227,6 +226,12 @@ impl<J: JobKind> Job<J> {
     /// The events of those updates stay queued for the app's next `update()`,
     /// in order: a wait delays them, it loses none.
     ///
+    /// Between updates it waits on the `background` that runs the session's work: with
+    /// threads started ([`Background::spawn_threads`]) it blocks until something lands;
+    /// with none it runs the queue itself with [`Background::try_tick`], in slices
+    /// bounded by a count, so the wait always has its driver. Pass the `Background`
+    /// `build` returned with this session.
+    ///
     /// Waiting takes `&self`: an error does not cancel the job. Call it on the
     /// session that made the job.
     ///
@@ -239,17 +244,18 @@ impl<J: JobKind> Job<J> {
     /// The result is taken: a later [`JobOutput::take`] of the job answers `None`,
     /// and a second `wait`, or one after the app took the job's
     /// [`SessionEvent::JobDone`], answers [`WaitError::AlreadyLanded`]. A worker
-    /// that panicked lands as [`WorkerError::Panicked`], so a wait never hangs
-    /// on it, nor on a job the executor dropped or whose session side ended
-    /// unanswered ([`WorkerError::Dropped`]).
+    /// that panicked lands as [`BackgroundError::Panicked`], so a wait never hangs
+    /// on it, nor on a job the background dropped or whose session side ended
+    /// unanswered ([`BackgroundError::Dropped`]).
     ///
     /// # Errors
     ///
-    /// The kind's own error, or a [`WorkerError`] or [`WaitError`] converted
+    /// The kind's own error, or a [`BackgroundError`] or [`WaitError`] converted
     /// into it.
     pub fn wait<K: crate::AppKey, C: Clock>(
         &self,
         session: &mut Session<K, C>,
+        background: &mut Background,
     ) -> Result<J::Output, J::Error> {
         loop {
             // Read before the update: an ended ticket has already queued its
@@ -276,10 +282,10 @@ impl<J: JobKind> Job<J> {
                 return Err(if self.status() == JobStatus::Done {
                     WaitError::AlreadyLanded.into()
                 } else {
-                    WorkerError::Dropped.into()
+                    BackgroundError::Dropped.into()
                 });
             }
-            session.jobs.block(WAIT_SLICE);
+            background.step(&mut session.jobs);
         }
     }
 }
@@ -316,14 +322,11 @@ impl<J: JobKind> Future for Job<J> {
             return Poll::Ready(Err(WaitError::AlreadyLanded.into()));
         }
         if this.cell.ended.load(Ordering::Acquire) {
-            return Poll::Ready(Err(WorkerError::Dropped.into()));
+            return Poll::Ready(Err(BackgroundError::Dropped.into()));
         }
         Poll::Pending
     }
 }
-
-/// How long [`Job::wait`] blocks on the arrivals between two updates.
-const WAIT_SLICE: Duration = Duration::from_millis(1);
 
 impl<J: JobKind> Drop for Job<J> {
     fn drop(&mut self) {

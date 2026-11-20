@@ -18,7 +18,7 @@ const BLOCK: usize = 128;
 /// A4 in twelve-tone equal temperament, the note-69 reference.
 const A4_HZ: f64 = 440.0;
 
-fn session() -> OfflineSession<&'static str, f64> {
+fn session() -> (OfflineSession<&'static str, f64>, tutti_session::Background) {
     Session::builder()
         .float::<f64>()
         .sample_rate(RATE)
@@ -85,7 +85,7 @@ fn rising_crossings(samples: &[f64]) -> usize {
 /// silent before the note.
 #[test]
 fn an_f64_synth_instrument_sounds_the_notes_frequency() {
-    let mut session = session();
+    let (mut session, _bg) = session();
     let AddedInstrument { mut handle, .. } = session
         .add_instrument(sine_synth())
         .expect("a synth is an instrument");
@@ -113,7 +113,7 @@ fn an_f64_synth_instrument_sounds_the_notes_frequency() {
 /// `f64` the unit gives, with nothing narrowed on the way.
 #[test]
 fn an_f64_instrument_gain_scales_a_held_sine_linearly() {
-    let mut session = session();
+    let (mut session, _bg) = session();
     let AddedInstrument { mut handle, .. } = session
         .add_instrument(sine_synth())
         .expect("a synth is an instrument");
@@ -140,7 +140,7 @@ fn an_f64_general_midi_rig_is_silent_then_renders_a_finite_note() {
     let font = Arc::new(SoundFont::open(path.as_path()).expect("the test font parses"));
     let unit = SoundFontUnit::<f64>::new(font, Settings::new()).expect("builds");
 
-    let mut session = session();
+    let (mut session, _bg) = session();
     let mut gm = session.add_general_midi(unit).expect("a SoundFont unit");
     for channel in 0..2 {
         session

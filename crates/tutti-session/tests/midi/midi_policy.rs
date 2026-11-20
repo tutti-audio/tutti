@@ -59,7 +59,7 @@ fn wired(last_group: u8) -> (Session, FakeCounters) {
 /// As [`wired`], with the session opened with `config`.
 fn wired_with(last_group: u8, config: MidiHardwareConfig) -> (Session, FakeCounters) {
     let (backend, fake) = FakeBackend::build_with(vec![], vec![], usize::MAX);
-    let mut s = Session::builder()
+    let (mut s, _bg) = Session::builder()
         .midi_hardware_over(backend, config)
         .midi_groups(MidiGroup::of(last_group))
         .sample_rate(SampleRate::of(48_000.0))
@@ -401,7 +401,7 @@ fn a_ci_send_the_device_refuses_counts_on_the_input_port() {
 /// and the policy in force is kept; presenting nothing is always accepted.
 #[test]
 fn an_identity_is_refused_on_a_session_with_no_os_midi_layer() {
-    let s = Session::builder()
+    let (s, _bg) = Session::builder()
         .sample_rate(SampleRate::of(48_000.0))
         .build()
         .expect("builds");

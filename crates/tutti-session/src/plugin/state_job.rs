@@ -3,7 +3,7 @@
 //! later [`update`](Session::update) or is waited for ([`Job::wait`]).
 //!
 //! A save is a round trip to the plugin, so it starts on a worker of the
-//! session's executor, which asks the plugin's
+//! session's background, which asks the plugin's
 //! [`AnyThread`](tutti_plugin_types::AnyThread) save. A served plugin answers
 //! it there. An in-process plugin's save runs on the **main thread**, through
 //! the session's main work: the worker waits for it, so the app must keep
@@ -32,7 +32,7 @@ use tutti_plugin_types::{PluginRefresh, StateUse};
 use super::entry::{Hosted, PluginEntry};
 use super::{PluginRef, PluginSignal, queue};
 use crate::job::job_kind;
-use crate::{HandleError, Job, PoolKey, Session, WaitError, WorkerError};
+use crate::{BackgroundError, HandleError, Job, PoolKey, Session, WaitError};
 use crate::{OtherPeer, PeerState, SavedPeer};
 
 /// Why [`Session::save_state`] or [`Session::restore_state`] started no job.
@@ -92,7 +92,7 @@ pub enum StateJobFailed {
     State(#[from] StateError),
     /// The worker did not finish.
     #[error(transparent)]
-    Worker(#[from] WorkerError),
+    Worker(#[from] BackgroundError),
     /// The wait could not run ([`Job::wait`]).
     #[error(transparent)]
     Wait(#[from] WaitError),
@@ -102,7 +102,7 @@ pub enum StateJobFailed {
 impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
     /// Saves the state of the plugin in the node over the entry under `key`,
     /// for `state_use` ([`StateUse::Project`] is the state a project keeps).
-    /// The round trip starts on the session's executor and the state lands in a
+    /// The round trip starts on the session's background and the state lands in a
     /// later [`update`](Self::update), or [`Job::wait`] returns it. An in-process plugin saves on the main
     /// thread, through the session's main work: keep calling `update` there,
     /// or the save ends as [`StateJobFailed::State`] with
@@ -124,8 +124,8 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
     {
         let (handle, plugin, _, _) = self.state_parts(key)?;
         // blocks: the state save is an IPC round trip, bounded by `state_wait`.
-        // On a polled executor `spawn_dedicated` runs inside `update`'s poll, so this job stalls
-        // `update` until the plugin lane makes it await its reply.
+        // Where a thread cannot start (the web) `spawn_dedicated` queues the job for the
+        // `Background`'s drive, which it stalls until the plugin lane makes it await its reply.
         Ok(self.jobs.submit_job_blocking(
             "tutti-state",
             move |cancel| {

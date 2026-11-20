@@ -86,11 +86,14 @@ struct Rig {
 /// the first commit, so its unit starts steady in it (no fade).
 fn rig(mode: NodeMode) -> Rig {
     set_server();
-    let mut s = Session::builder()
+    let (mut s, mut background) = Session::builder()
         .sample_rate(RATE)
         .max_block(MaxBlock::of(Samples::new(BLOCK)))
         .build()
         .expect("an offline session builds");
+    background
+        .spawn_threads(std::num::NonZeroUsize::MIN)
+        .expect("a background thread starts");
     let plugin = s
         .load_plugin_blocking(
             tutti_fixtures::main_thread(),

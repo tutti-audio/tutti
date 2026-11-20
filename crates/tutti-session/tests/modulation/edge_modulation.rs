@@ -27,7 +27,7 @@ const BLOCK: usize = 128;
 const A: f32 = 0.5;
 const B: f32 = 0.25;
 
-fn offline() -> Session {
+fn offline() -> (Session, tutti_session::Background) {
     Session::builder()
         .sample_rate(SampleRate::of(RATE))
         .build()
@@ -100,7 +100,7 @@ fn mixer(s: &mut Session) -> Edge {
 /// lane's source goes (the declick).
 #[test]
 fn a_route_onto_an_edge_modulates_the_sum_by_the_analytic_amount() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let edge = mixer(&mut s);
     settle(&mut s);
     let plain = render(&mut s, 2);
@@ -161,7 +161,7 @@ fn a_route_onto_an_edge_modulates_the_sum_by_the_analytic_amount() {
 /// base moves to 0.25; gone, the base `0.25`.
 #[test]
 fn the_base_is_the_lanes_knob_and_a_route_returns_to_it() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let edge = mixer(&mut s);
     settle(&mut s);
     s.set(gain(&s, edge).to(Amplitude::new(0.5))).unwrap();
@@ -199,7 +199,7 @@ fn the_base_is_the_lanes_knob_and_a_route_returns_to_it() {
 /// An edge target keys once per edge, apart from a param's, and is no param.
 #[test]
 fn an_edge_target_keys_apart_and_goes_with_its_node() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let edge = mixer(&mut s);
     let key = s.mods_mut().key(edge);
     assert_eq!(

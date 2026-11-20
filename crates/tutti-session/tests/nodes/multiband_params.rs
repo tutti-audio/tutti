@@ -59,7 +59,7 @@ fn rig() -> (
     Key<MultibandCompressorNode<f32>>,
     MultibandControls,
 ) {
-    let mut s = Session::builder()
+    let (mut s, _bg) = Session::builder()
         .sample_rate(SampleRate::of(RATE))
         .build()
         .expect("builds");

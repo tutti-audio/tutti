@@ -29,7 +29,7 @@ const OURS: SysexDeviceId = SysexDeviceId::of(5);
 
 fn rig() -> (Session, FakeCounters) {
     let (backend, fake) = FakeBackend::build_with(vec![endpoint(KEYS, "Keys")], vec![], usize::MAX);
-    let mut s = Session::builder()
+    let (mut s, _bg) = Session::builder()
         .midi_hardware_over(backend, tutti_midi_hardware::MidiHardwareConfig::new())
         .sample_rate(SampleRate::of(RATE))
         .build()
@@ -384,8 +384,8 @@ impl Wire {
     }
 }
 
-fn sender(wire: &Wire, to: Recipient) -> Session {
-    let mut s = Session::builder()
+fn sender(wire: &Wire, to: Recipient) -> (Session, tutti_session::Background) {
+    let (mut s, bg) = Session::builder()
         .sample_rate(SampleRate::of(RATE))
         .build()
         .expect("builds");
@@ -404,7 +404,7 @@ fn sender(wire: &Wire, to: Recipient) -> Session {
         });
     blocks(&s, 1);
     let _ = s.update();
-    s
+    (s, bg)
 }
 
 /// **The transport's play, locate and stop go out as MMC** (RP-013 pp.20 and
@@ -414,7 +414,7 @@ fn sender(wire: &Wire, to: Recipient) -> Session {
 #[test]
 fn the_transport_is_sent_as_play_locate_and_stop() {
     let wire = Wire::default();
-    let mut s = sender(&wire, Recipient::Device(SysexDeviceId::of(3)));
+    let (mut s, _bg) = sender(&wire, Recipient::Device(SysexDeviceId::of(3)));
     assert!(wire.messages().is_empty(), "nothing before anything moves");
 
     s.play().unwrap();
@@ -447,7 +447,7 @@ fn the_transport_is_sent_as_play_locate_and_stop() {
 #[test]
 fn a_locate_while_stopped_sends_a_locate_and_no_play() {
     let wire = Wire::default();
-    let mut s = sender(&wire, Recipient::AllCall);
+    let (mut s, _bg) = sender(&wire, Recipient::AllCall);
     s.locate(Beat::new(4.0)).unwrap();
     blocks(&s, 1);
     let _ = s.update();
@@ -466,7 +466,7 @@ fn a_locate_while_stopped_sends_a_locate_and_no_play() {
 #[test]
 fn a_locate_no_time_code_names_is_counted_and_sends_nothing() {
     let wire = Wire::default();
-    let mut s = sender(&wire, Recipient::AllCall);
+    let (mut s, _bg) = sender(&wire, Recipient::AllCall);
     let refused = |s: &Session| s.midi_nodes().unwrap().sync_controls.losses().refused;
     let before = refused(&s);
     s.locate(Beat::new(4_000_000.0)).unwrap();
@@ -484,7 +484,7 @@ fn a_locate_no_time_code_names_is_counted_and_sends_nothing() {
 #[test]
 fn nothing_is_sent_unless_asked_and_it_can_be_stopped() {
     let wire = Wire::default();
-    let mut s = sender(&wire, Recipient::AllCall);
+    let (mut s, _bg) = sender(&wire, Recipient::AllCall);
     s.midi_nodes()
         .unwrap()
         .sync_controls

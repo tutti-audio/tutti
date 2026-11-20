@@ -15,7 +15,7 @@ use tutti_session::{
 };
 use tutti_units::{Depth, Hz, Samples, UnitParam};
 
-fn session() -> Session {
+fn session() -> (Session, tutti_session::Background) {
     Session::builder()
         .outputs(tutti_buffers::ChannelLayout::STEREO)
         .max_block(MaxBlock::of(Samples::new(256)))
@@ -38,7 +38,7 @@ fn update_at(s: &mut Session, now: Instant) -> Vec<SessionEvent> {
 /// and the event the warning raises is the same `Problem`.
 #[test]
 fn an_unresolved_target_and_an_unfed_follower_are_named() {
-    let mut s = session();
+    let (mut s, _bg) = session();
     let ghost = ParamRef::unit(NodeKey(999), UnitParam::Cutoff);
     let mut m = s.mods_mut();
     m.range_raw(ghost, 0.0, 1_000.0).unwrap();
@@ -101,7 +101,7 @@ fn an_unresolved_target_and_an_unfed_follower_are_named() {
 /// declarations on a node that is there once committed.
 #[test]
 fn no_problems_while_the_declarations_apply() {
-    let mut s = session();
+    let (mut s, _bg) = session();
     assert_eq!(s.mod_state().problems().count(), 0);
     let (lp, _) = s.graph().add(tutti_nodes::SvfFilterNode::<f32>::new(
         tutti_nodes::SvfType::LowPass,

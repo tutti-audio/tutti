@@ -13,7 +13,7 @@ use tutti_units::SampleRate;
 const RATE: f64 = 48_000.0;
 
 /// An offline session at `RATE`, stereo, graph blocks of up to 1 024 frames.
-fn offline() -> Session {
+fn offline() -> (Session, tutti_session::Background) {
     Session::builder()
         .sample_rate(SampleRate::of(RATE))
         .build()
@@ -58,7 +58,7 @@ fn a_sampler_node_added_to_the_graph_follows_the_sessions_tempo_map() {
         .expect("a placeable wave");
     let mut pool = VoicePool::new();
     pool.insert(SlotId(1), source, Playback::default());
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let map =
         TempoMap::new(
             [(0.0, 120.0), (1.0, 60.0)]

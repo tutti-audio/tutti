@@ -100,7 +100,7 @@ fn refused(events: &[SessionEvent]) -> bool {
 /// goes through.
 #[test]
 fn a_narrower_reinsert_reports_what_it_dropped_and_keeps_the_rest() {
-    let mut s = Session::builder().build().expect("builds");
+    let (mut s, _bg) = Session::builder().build().expect("builds");
     let g = s.graph();
     let (a, _) = g.add(ForkByClone(Const::mono(A)));
     let (b, _) = g.add(ForkByClone(Const::mono(B)));
@@ -202,7 +202,7 @@ fn a_narrower_reinsert_reports_what_it_dropped_and_keeps_the_rest() {
 /// **A wider re-insert, and a re-insert at the same width, report nothing.**
 #[test]
 fn a_wider_reinsert_reports_nothing() {
-    let mut s = Session::builder().build().expect("builds");
+    let (mut s, _bg) = Session::builder().build().expect("builds");
     let g = s.graph();
     let (a, _) = g.add(ForkByClone(Const::mono(A)));
     let (x, _) = g.add(ForkByClone(Pass::<1, 1>));
@@ -243,7 +243,7 @@ fn a_wider_reinsert_reports_nothing() {
 /// exist.
 #[test]
 fn a_feed_naming_a_lost_event_output_is_not_written_back() {
-    let mut s = Session::builder().build().expect("builds");
+    let (mut s, _bg) = Session::builder().build().expect("builds");
     let g = s.graph();
     let (src, _) = g.add(ForkByClone(Ports::<0, 2>));
     let (other, _) = g.add(ForkByClone(Ports::<0, 1>));
@@ -312,7 +312,7 @@ impl Node for Bused {
 /// **A bus edge into or out of a lost bus is reported as the app wired it.**
 #[test]
 fn a_narrower_reinsert_reports_the_bus_edges_it_dropped() {
-    let mut s = Session::builder().build().expect("builds");
+    let (mut s, _bg) = Session::builder().build().expect("builds");
     let g = s.graph();
     let (a, _) = g.add(ForkByClone(Bused { aux: true }));
     let (y, _) = g.add(ForkByClone(Bused { aux: true }));
@@ -357,7 +357,7 @@ fn a_narrower_reinsert_reports_the_bus_edges_it_dropped() {
 /// **A root feed from a lost bus is reported as `(source, Root)`.**
 #[test]
 fn a_narrower_reinsert_reports_the_root_feed_it_dropped() {
-    let mut s = Session::builder().build().expect("builds");
+    let (mut s, _bg) = Session::builder().build().expect("builds");
     let g = s.graph();
     let (y, _) = g.add(ForkByClone(Bused { aux: true }));
     s.declare_root_topology(Some(ChannelTopology::assumed(ChannelLayout::STEREO)))
@@ -394,7 +394,7 @@ fn a_narrower_reinsert_reports_the_root_feed_it_dropped() {
 /// cut, the update that lands the commit reports the dropped edge, once.
 #[test]
 fn unwired_waits_for_the_commit_that_lands() {
-    let mut s = Session::builder().build().expect("builds");
+    let (mut s, _bg) = Session::builder().build().expect("builds");
     let g = s.graph();
     let (a, _) = g.add(ForkByClone(Const::mono(A)));
     let (x, _) = g.add(ForkByClone(Pass::<2, 1>));

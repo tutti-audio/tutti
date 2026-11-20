@@ -26,7 +26,7 @@ const KEYS: u32 = 1;
 
 fn session() -> (Session, FakeCounters) {
     let (backend, fake) = FakeBackend::build_with(vec![], vec![], usize::MAX);
-    let s = Session::builder()
+    let (s, _bg) = Session::builder()
         .midi_hardware_over(backend, tutti_midi_hardware::MidiHardwareConfig::new())
         .sample_rate(SampleRate::of(48_000.0))
         .block_dates(BlockDates::Frames)

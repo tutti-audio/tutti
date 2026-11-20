@@ -93,9 +93,9 @@ pub enum RecorderError {
     #[error("the recording thread could not be spawned")]
     Spawn(#[source] std::io::Error),
 
-    /// The recording thread panicked.
-    #[error(transparent)]
-    Panicked(#[from] tutti_platform::Panicked),
+    /// The recording thread panicked; the payload is the panic's message.
+    #[error("the recording thread panicked: {0}")]
+    Panicked(String),
 }
 
 /// Why [`PumpLoop::finalize`] did not end cleanly.
@@ -732,7 +732,7 @@ impl<K> Recorder<K> {
         self.handle.take().map(|handle| {
             handle
                 .join()
-                .unwrap_or_else(|panicked| Err(RecorderError::Panicked(panicked)))
+                .unwrap_or_else(|panicked| Err(RecorderError::Panicked(panicked.message)))
         })
     }
 }

@@ -38,11 +38,15 @@ fn closes() -> u32 {
     count
 }
 
-fn session() -> DetachedSession {
-    Session::builder()
+fn session() -> (DetachedSession, tutti_session::Background) {
+    let (session, mut background) = Session::builder()
         .outputs_floor(ChannelLayout::STEREO)
         .build_detached(RATE)
-        .expect("a detached session builds")
+        .expect("a detached session builds");
+    background
+        .spawn_threads(std::num::NonZeroUsize::MIN)
+        .expect("a background thread starts");
+    (session, background)
 }
 
 /// A probe plugin loaded in `session`, then removed from it and let go of by the session:
@@ -68,7 +72,7 @@ fn loaded_and_released(session: &mut DetachedSession, main: MainThreadMarker) ->
 /// runs one close, and the other's runs the other: the plugin counts them.
 fn a_sessions_update_runs_only_its_own_plugins_closes() {
     let main = tutti_fixtures::main_thread();
-    let (mut a, mut b) = (session(), session());
+    let ((mut a, _bg_a), (mut b, _bg_b)) = (session(), session());
     let before = closes();
     let (handle_a, handle_b) = (
         loaded_and_released(&mut a, main),
@@ -96,7 +100,7 @@ fn a_sessions_update_runs_only_its_own_plugins_closes() {
 /// has handed its close to the session; `close` runs it, and the plugin counts it.
 fn close_runs_the_closes_the_session_is_owed() {
     let main = tutti_fixtures::main_thread();
-    let mut session = session();
+    let (mut session, _bg) = session();
     let before = closes();
     let handle = loaded_and_released(&mut session, main);
     std::thread::spawn(move || drop(handle)).join().unwrap();
@@ -111,7 +115,7 @@ fn close_runs_the_closes_the_session_is_owed() {
 /// rises by that many.
 fn a_session_dropped_off_the_main_thread_counts_its_stranded_closes() {
     let main = tutti_fixtures::main_thread();
-    let mut session = session();
+    let (mut session, _bg) = session();
     for _ in 0..2 {
         session
             .load_plugin_blocking(main, Spec::new(PluginRef::file(probe())))

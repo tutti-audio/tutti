@@ -14,7 +14,7 @@ use tutti_units::{SampleRate, Samples, Tail};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 
-fn offline_session() -> Session {
+fn offline_session() -> (Session, tutti_session::Background) {
     Session::builder()
         .sample_rate(RATE)
         .max_block(MaxBlock::of(Samples::new(128)))
@@ -43,7 +43,7 @@ fn source(session: &Session, node: NodeKey, port: usize) -> OutPort {
 /// stereo in and out (its sum is the graph's, so it is two inputs, not six).
 #[test]
 fn the_setup_adds_a_chorus_a_reverb_and_a_fader_of_the_right_widths() {
-    let mut session = offline_session();
+    let (mut session, _bg) = offline_session();
     let gm = session.add_general_midi(unit()).expect("a SoundFont unit");
     let graph = session.graph_ref();
     assert_eq!(
@@ -81,7 +81,7 @@ fn the_setup_adds_a_chorus_a_reverb_and_a_fader_of_the_right_widths() {
 /// sums it, in no order the test relies on).
 #[test]
 fn the_sends_feed_the_effects_and_the_effects_feed_the_fader() {
-    let mut session = offline_session();
+    let (mut session, _bg) = offline_session();
     let gm = session.add_general_midi(unit()).expect("a SoundFont unit");
     let unit = gm.instrument().node().erase();
     let strip = gm.instrument().out();
@@ -121,7 +121,7 @@ fn the_sends_feed_the_effects_and_the_effects_feed_the_fader() {
 /// a second setup does not take the first's.
 #[test]
 fn the_setup_does_not_take_the_graphs_outputs() {
-    let mut session = offline_session();
+    let (mut session, _bg) = offline_session();
     session.add_general_midi(unit()).expect("a SoundFont unit");
     for channel in 0..session.graph_ref().outputs() {
         assert_eq!(
@@ -137,7 +137,7 @@ fn the_setup_does_not_take_the_graphs_outputs() {
 /// the fader's none (the graph's sum has no tail of its own).
 #[test]
 fn every_stage_declares_its_own_tail() {
-    let mut session = offline_session();
+    let (mut session, _bg) = offline_session();
     let gm = session.add_general_midi(unit()).expect("a SoundFont unit");
     let _ = session.update();
     let graph = session.graph_ref();
@@ -192,7 +192,7 @@ fn a_note_through_the_setup_rings_out_within_the_summed_tails() {
         .expect("the built font parses"),
     );
     let unit = SoundFontUnit::new(font, Settings::new()).expect("builds");
-    let mut session = offline_session();
+    let (mut session, _bg) = offline_session();
     let mut gm = session.add_general_midi(unit).expect("a SoundFont unit");
     session
         .graph()
@@ -290,7 +290,7 @@ fn short_release_setup() -> (Session, GeneralMidi<f32>) {
         .expect("the built font parses"),
     );
     let unit = SoundFontUnit::new(font, Settings::new()).expect("builds");
-    let mut session = offline_session();
+    let (mut session, _bg) = offline_session();
     let gm = session.add_general_midi(unit).expect("a SoundFont unit");
     for c in 0..2 {
         session
@@ -396,7 +396,7 @@ fn muting_the_setup_silences_the_wet_path_too() {
 /// left, and the node count is back to what it was.
 #[test]
 fn removing_the_setup_leaves_nothing() {
-    let mut session = offline_session();
+    let (mut session, _bg) = offline_session();
     let before = session.graph_ref().node_count();
     let gm = session.add_general_midi(unit()).expect("a SoundFont unit");
     let nodes = [

@@ -48,7 +48,7 @@ impl SessionNode for Dressed {
 
 #[test]
 fn the_pair_a_node_names_is_the_one_played() {
-    let mut session = crate::instrument_support::rig::offline_session();
+    let (mut session, _bg) = crate::instrument_support::rig::offline_session();
     let AddedInstrument { handle, .. } = session
         .add_instrument(Dressed(ForkByClone(Five)))
         .expect("five outputs and an event input");
@@ -63,7 +63,7 @@ fn the_pair_a_node_names_is_the_one_played() {
 /// is connected, then plays the same pair.
 #[test]
 fn only_add_instrument_wires_the_strip_to_the_master() {
-    let mut session = crate::instrument_support::rig::offline_session();
+    let (mut session, _bg) = crate::instrument_support::rig::offline_session();
     let AddedInstrument { handle, .. } = session
         .add_instrument_unwired(Dressed(ForkByClone(Five)))
         .expect("an instrument");
@@ -97,7 +97,7 @@ fn a_pair_past_the_outputs_is_refused() {
             tutti_session::Reclaims::Nothing
         }
     }
-    let mut session = crate::instrument_support::rig::offline_session();
+    let (mut session, _bg) = crate::instrument_support::rig::offline_session();
     match session.add_instrument(Short) {
         Err(tutti_session::Error::NotInstrument {
             why: tutti_session::NotInstrument::NoOutput(5),
@@ -114,7 +114,7 @@ fn a_pair_past_the_outputs_is_refused() {
 #[test]
 fn the_handle_counts_what_its_queue_dropped() {
     use tutti_units::Frame;
-    let mut session = crate::instrument_support::rig::offline_session();
+    let (mut session, _bg) = crate::instrument_support::rig::offline_session();
     let AddedInstrument { handle, .. } = session
         .add_instrument(Dressed(ForkByClone(Five)))
         .expect("an instrument");
@@ -146,7 +146,7 @@ fn the_handle_counts_what_its_queue_dropped() {
 #[test]
 fn a_wide_root_is_fed_from_the_main_pair_not_the_sends() {
     use tutti_session::OutPort;
-    let mut session = crate::instrument_support::rig::offline_session();
+    let (mut session, _bg) = crate::instrument_support::rig::offline_session();
     let AddedInstrument { handle, .. } = session
         .add_instrument_unwired(Dressed(ForkByClone(Five)))
         .expect("an instrument");

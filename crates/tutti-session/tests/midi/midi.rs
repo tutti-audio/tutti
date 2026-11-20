@@ -89,7 +89,7 @@ fn plan_nodes(s: &Session) -> usize {
 /// / 48 kHz is frame 8 000, inside a block.
 #[test]
 fn a_clip_plays_its_note_on_its_frame() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let (synth, seen) = tap(&mut s);
     s.midi()
         .play_clip(
@@ -108,7 +108,7 @@ fn a_clip_plays_its_note_on_its_frame() {
 /// `stop_clip` empties it and keeps it.
 #[test]
 fn a_clip_edit_updates_in_place() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let (synth, seen) = tap(&mut s);
     s.midi()
         .play_clip(
@@ -145,7 +145,7 @@ fn a_clip_edit_updates_in_place() {
 /// 120 BPM / 48 kHz.
 #[test]
 fn a_clip_starts_at_the_beat_it_is_given() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let (synth, seen) = tap(&mut s);
     s.midi()
         .play_clip(
@@ -162,7 +162,7 @@ fn a_clip_starts_at_the_beat_it_is_given() {
 /// **A start that is not a finite beat is refused, and nothing is made.**
 #[test]
 fn a_clip_start_that_is_not_finite_is_refused() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let (synth, _) = tap(&mut s);
     let nan = Beat::new(0.0 / std::hint::black_box(0.0));
     for bad in [nan, Beat::new(f64::INFINITY)] {
@@ -181,7 +181,7 @@ fn a_clip_start_that_is_not_finite_is_refused() {
 /// **Stopping a clip a target does not have names the target.**
 #[test]
 fn stopping_a_clip_that_is_not_there_names_the_target() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let (synth, _) = tap(&mut s);
     assert!(matches!(
         s.midi().stop_clip(synth),
@@ -211,10 +211,10 @@ fn a_loaded_track_plays_its_events_at_their_beats() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("one.mid");
     file.write(&path).unwrap();
-    let mut s = offline();
+    let (mut s, mut bg) = offline();
     let (synth, seen) = tap(&mut s);
     let job = s.midi().load_midi(path);
-    let loaded = job.wait(&mut s).unwrap();
+    let loaded = job.wait(&mut s, &mut bg).unwrap();
     s.midi()
         .play_track(synth, loaded.track(0).unwrap())
         .unwrap();
@@ -227,7 +227,7 @@ fn a_loaded_track_plays_its_events_at_their_beats() {
 /// and one not in the graph.
 #[test]
 fn a_target_without_an_event_input_takes_no_clip() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let (dc, _) = s
         .graph()
         .add(tutti_graph::ForkByClone(tutti_nodes::testing::Const::mono(
@@ -250,7 +250,7 @@ fn a_target_without_an_event_input_takes_no_clip() {
 /// nodes play the new node, and the removed one hears nothing.
 #[test]
 fn a_clip_and_a_live_input_survive_a_re_bind() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let (old, old_seen) = tap(&mut s);
     s.midi()
         .play_clip(
@@ -310,7 +310,7 @@ fn a_clip_and_a_live_input_survive_a_re_bind() {
 /// rather than a second writer on the ring.
 #[test]
 fn a_live_inputs_keys_send_in_order_and_are_handed_out_once() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let (target, seen) = tap(&mut s);
     let mut keys = s.midi().input(target).unwrap();
     assert!(
@@ -516,8 +516,8 @@ impl tutti_midi_runtime::MidiOut for Refusing {
 
 /// The builder's clock, enabled, rolling for half a second into the
 /// `midi_sink` entry declared on `sink`: its Beat Clock reaches the sink's node.
-fn clocked(sink: Arc<dyn tutti_midi_runtime::MidiOut>) -> Session {
-    let mut s = offline();
+fn clocked(sink: Arc<dyn tutti_midi_runtime::MidiOut>) -> (Session, tutti_session::Background) {
+    let (mut s, bg) = offline();
     s.pool(midi_sink("out", sink)).expect("declares");
     let _ = s.update(); // the sink's node, loaded and committed
     s.midi_nodes()
@@ -529,7 +529,7 @@ fn clocked(sink: Arc<dyn tutti_midi_runtime::MidiOut>) -> Session {
             ..tutti_midi_runtime::SyncMessages::OFF
         });
     roll(&s, 24_000);
-    s
+    (s, bg)
 }
 
 /// **A sink is drained to with stamping off**: the `MidiOut` phase hands the
@@ -538,7 +538,7 @@ fn clocked(sink: Arc<dyn tutti_midi_runtime::MidiOut>) -> Session {
 #[test]
 fn a_sink_is_drained_to_stamping_off() {
     let count = Arc::new(AtomicUsize::new(0));
-    let mut s = clocked(Arc::new(CountingSink(Arc::clone(&count))));
+    let (mut s, _bg) = clocked(Arc::new(CountingSink(Arc::clone(&count))));
     let _ = s.update();
     assert!(
         count.load(Ordering::SeqCst) > 0,
@@ -550,7 +550,7 @@ fn a_sink_is_drained_to_stamping_off() {
 /// **A sink that refuses events has them counted in its own losses.**
 #[test]
 fn a_refusing_sink_counts_what_it_refused() {
-    let mut s = clocked(Arc::new(Refusing));
+    let (mut s, _bg) = clocked(Arc::new(Refusing));
     let _ = s.update();
     let losses = s.midi_sink(&"out").unwrap().losses();
     assert!(
@@ -598,25 +598,33 @@ fn the_sessions_midi_nodes_keep_their_reclaimers() {
 
 /// A session over a fake OS with no devices, and the handle that plugs some.
 #[cfg(feature = "midi-hardware")]
-fn hot_plug_session() -> (Session, tutti_midi_hardware::test_support::FakeCounters) {
+fn hot_plug_session() -> (
+    Session,
+    tutti_session::Background,
+    tutti_midi_hardware::test_support::FakeCounters,
+) {
     let (backend, fake) =
         tutti_midi_hardware::test_support::FakeBackend::build_with(vec![], vec![], usize::MAX);
-    let s = Session::builder()
+    let (s, background) = Session::builder()
         .midi_hardware_over(backend, tutti_midi_hardware::MidiHardwareConfig::new())
         .sample_rate(SampleRate::of(RATE))
         .build()
         .expect("builds");
-    (s, fake)
+    (s, background, fake)
 }
 
 /// As [`hot_plug_session`], with MIDI-CI under `identity` from the start.
 #[cfg(feature = "midi-hardware")]
 pub(crate) fn hot_plug_session_ci(
     identity: tutti_ump::DeviceIdentity,
-) -> (Session, tutti_midi_hardware::test_support::FakeCounters) {
-    let (mut s, fake) = hot_plug_session();
-    present(&mut s, identity);
-    (s, fake)
+) -> (
+    Session,
+    tutti_session::Background,
+    tutti_midi_hardware::test_support::FakeCounters,
+) {
+    let mut session = hot_plug_session();
+    present(&mut session.0, identity);
+    session
 }
 
 /// The policy that presents `identity` on every MIDI device, named "Session".
@@ -668,7 +676,7 @@ pub(crate) fn plug(
 #[cfg(feature = "midi-hardware")]
 #[test]
 fn a_device_that_comes_and_goes_is_a_session_event() {
-    let (mut s, fake) = hot_plug_session();
+    let (mut s, _bg, fake) = hot_plug_session();
     assert!(device_events(&s.update()).is_empty(), "nothing yet");
 
     plug(&fake, 1, "Keys", PortDirection::Input);
@@ -700,7 +708,7 @@ fn keyboards() -> (
         vec![],
         usize::MAX,
     );
-    let mut s = Session::builder()
+    let (mut s, _bg) = Session::builder()
         .midi_hardware_over(backend, tutti_midi_hardware::MidiHardwareConfig::new())
         .sample_rate(SampleRate::of(RATE))
         .build()
@@ -859,7 +867,7 @@ fn a_devices_arrival_is_placed_on_the_engines_clock() {
 #[cfg(feature = "midi-hardware")]
 #[test]
 fn a_dead_device_watch_is_reported_once() {
-    let (mut s, fake) = hot_plug_session();
+    let (mut s, _bg, fake) = hot_plug_session();
     let failed = |events: &[SessionEvent]| {
         events
             .iter()
@@ -891,7 +899,7 @@ fn a_dead_device_watch_is_reported_once() {
 #[test]
 fn a_remembered_device_resolves_through_the_session() {
     use tutti_session::{PortCause, Presence, midi_input};
-    let (mut s, fake) = hot_plug_session();
+    let (mut s, _bg, fake) = hot_plug_session();
     plug(&fake, 1, "Keys", PortDirection::Input);
     let _ = s.update();
     let saved = s.midi().devices().remove(0);
@@ -923,7 +931,7 @@ fn a_hand_wired_event_edge_survives_the_sequencers_feed() {
         v
     };
     let input = |synth| EventInPort::new(synth, 0);
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let (synth, seen) = tap(&mut s);
     let (other, _) = tap(&mut s);
     let (hand, _) = s.graph().add(MidiClipNode::new(note(
@@ -981,7 +989,7 @@ fn a_hand_wired_event_edge_survives_the_sequencers_feed() {
 /// nothing.
 #[test]
 fn a_port_that_loses_events_is_reported() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let (synth, _seen) = tap(&mut s);
     let chord = (0..1_100u32).map(|i| {
         TimedMidiEvent::new(
@@ -1031,7 +1039,7 @@ fn a_midi_ci_peer_that_answers_discovery_is_in_the_ports_info() {
     };
 
     // Off unless the app says who it is, with an id it registered.
-    let (mut s, fake) = hot_plug_session_ci(tutti_ump::DeviceIdentity {
+    let (mut s, _bg, fake) = hot_plug_session_ci(tutti_ump::DeviceIdentity {
         manufacturer: tutti_ump::ManufacturerId::NON_COMMERCIAL,
         family: [tutti_ump::U7::of(1); 2],
         model: [tutti_ump::U7::of(2); 2],
@@ -1158,7 +1166,7 @@ fn a_midi_ci_peers_profiles_are_listed_and_switched_through_the_session() {
         model: [U7::of(2); 2],
         revision: tutti_ump::SoftwareRevision::from([U7::of(3); 4]),
     };
-    let (mut s, fake) = hot_plug_session_ci(identity(ManufacturerId::NON_COMMERCIAL));
+    let (mut s, mut bg, fake) = hot_plug_session_ci(identity(ManufacturerId::NON_COMMERCIAL));
     plug(&fake, 7, "Wire", PortDirection::Duplex);
     let _ = s.update();
     connect(&mut s, &["wire"]);
@@ -1347,7 +1355,7 @@ fn a_midi_ci_peers_profiles_are_listed_and_switched_through_the_session() {
         },
     );
     assert_eq!(
-        stale.disable().wait(&mut s),
+        stale.disable().wait(&mut s, &mut bg),
         Err(tutti_session::PeerError::Disconnected),
         "a Profile the peer no longer lists fails at the call"
     );
@@ -1356,12 +1364,12 @@ fn a_midi_ci_peers_profiles_are_listed_and_switched_through_the_session() {
     let gone = c.disable();
     fake.unplug(raw);
     assert_eq!(
-        gone.wait(&mut s),
+        gone.wait(&mut s, &mut bg),
         Err(tutti_session::PeerError::Disconnected)
     );
     // A request on a lost port fails at the call.
     assert_eq!(
-        c.disable().wait(&mut s),
+        c.disable().wait(&mut s, &mut bg),
         Err(tutti_session::PeerError::Disconnected)
     );
     // The device returns with no peers found yet: a request made from the old
@@ -1370,7 +1378,7 @@ fn a_midi_ci_peers_profiles_are_listed_and_switched_through_the_session() {
     let _ = s.update();
     assert_eq!(port.presence(), tutti_session::Presence::Live);
     assert_eq!(
-        c.disable().wait(&mut s),
+        c.disable().wait(&mut s, &mut bg),
         Err(tutti_session::PeerError::Disconnected)
     );
     // A request on a released port fails at the call.
@@ -1381,7 +1389,7 @@ fn a_midi_ci_peers_profiles_are_listed_and_switched_through_the_session() {
     let _ = s.update();
     assert_eq!(port.presence(), tutti_session::Presence::Closed);
     assert_eq!(
-        c.disable().wait(&mut s),
+        c.disable().wait(&mut s, &mut bg),
         Err(tutti_session::PeerError::Released)
     );
 }
@@ -1682,7 +1690,7 @@ fn a_devices_enabling_the_mpe_profile_switches_its_inputs_rules() {
     use tutti_session::ListedProfile;
     use tutti_ump::{CCNumber, Message, Voice2};
 
-    let (mut s, fake) = hot_plug_session_ci(tutti_ump::DeviceIdentity {
+    let (mut s, _bg, fake) = hot_plug_session_ci(tutti_ump::DeviceIdentity {
         manufacturer: tutti_ump::ManufacturerId::NON_COMMERCIAL,
         family: [tutti_ump::U7::of(1); 2],
         model: [tutti_ump::U7::of(2); 2],
@@ -1856,7 +1864,7 @@ fn a_midi_ci_peers_message_report_is_asked_for_through_the_session() {
         model: [U7::of(2); 2],
         revision: tutti_ump::SoftwareRevision::from([U7::of(3); 4]),
     };
-    let (mut s, fake) = hot_plug_session_ci(identity(ManufacturerId::NON_COMMERCIAL));
+    let (mut s, mut bg, fake) = hot_plug_session_ci(identity(ManufacturerId::NON_COMMERCIAL));
     plug(&fake, 7, "Wire", PortDirection::Duplex);
     let _ = s.update();
     connect(&mut s, &["wire"]);
@@ -2004,13 +2012,13 @@ fn a_midi_ci_peers_message_report_is_asked_for_through_the_session() {
     let gone = handle.request(ReportRequest::new(DataControl::Full, asked));
     fake.unplug(raw);
     assert_eq!(
-        gone.wait(&mut s),
+        gone.wait(&mut s, &mut bg),
         Err(tutti_session::PeerError::Disconnected)
     );
     assert_eq!(
         handle
             .request(ReportRequest::new(DataControl::Full, asked))
-            .wait(&mut s),
+            .wait(&mut s, &mut bg),
         Err(tutti_session::PeerError::Disconnected)
     );
     plug(&fake, 7, "Wire", PortDirection::Duplex);
@@ -2018,7 +2026,7 @@ fn a_midi_ci_peers_message_report_is_asked_for_through_the_session() {
     assert_eq!(
         handle
             .request(ReportRequest::new(DataControl::Full, asked))
-            .wait(&mut s),
+            .wait(&mut s, &mut bg),
         Err(tutti_session::PeerError::Disconnected)
     );
 }
@@ -2093,7 +2101,7 @@ fn declare_dev(s: &mut Session) {
 fn an_output_port_stamps_as_the_devices_configuration_says() {
     use tutti_ump::{Message, Protocol, Stream, StreamConfig};
 
-    let (mut s, fake) = hot_plug_session();
+    let (mut s, _bg, fake) = hot_plug_session();
     plug(&fake, 7, "Dev", PortDirection::Duplex);
     let _ = s.update();
     let raw = EndpointId::from_raw(7);
@@ -2150,7 +2158,7 @@ fn an_output_port_stamps_as_the_devices_configuration_says() {
 fn a_device_that_receives_jr_has_every_message_prefixed_by_a_timestamp() {
     use tutti_ump::{Message, Protocol, Stream, StreamConfig, Utility};
 
-    let (mut s, fake) = hot_plug_session();
+    let (mut s, _bg, fake) = hot_plug_session();
     plug(&fake, 7, "Dev", PortDirection::Duplex);
     let _ = s.update();
     let raw = EndpointId::from_raw(7);
@@ -2201,7 +2209,7 @@ fn the_output_latency_is_written_and_read_through_its_target() {
     use tutti_midi_runtime::{OutputLatency, OutputOffset};
     use tutti_units::Seconds;
 
-    let mut s = Session::builder()
+    let (mut s, _bg) = Session::builder()
         .sample_rate(SampleRate::SR_48K)
         .build()
         .expect("builds");

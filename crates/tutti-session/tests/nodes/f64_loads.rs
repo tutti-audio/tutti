@@ -28,12 +28,19 @@ fn value(i: usize) -> f32 {
     (i as f32 + 1.0) * 1e-5
 }
 
-fn session() -> tutti_session::OfflineSession<&'static str, f64> {
-    Session::builder()
+fn session() -> (
+    tutti_session::OfflineSession<&'static str, f64>,
+    tutti_session::Background,
+) {
+    let (session, mut background) = Session::builder()
         .float::<f64>()
         .sample_rate(SampleRate::of(RATE))
         .build()
-        .expect("an f64 session builds")
+        .expect("an f64 session builds");
+    background
+        .spawn_threads(std::num::NonZeroUsize::MIN)
+        .expect("a background thread starts");
+    (session, background)
 }
 
 fn write_ramp(path: &std::path::Path) {
@@ -93,7 +100,7 @@ fn a_pooled_resident_wave_holds_f64_frames_and_its_clip_plays_them() {
     let dir = tempfile::tempdir().expect("a temp dir");
     let path = dir.path().join("ramp64.wav");
     write_f64_ramp(&path);
-    let mut s = session();
+    let (mut s, _bg) = session();
     s.pool(audio_file("ramp", &path)).expect("a declaration");
     until(&mut s, "the entry", |s, _| {
         matches!(s.pool_state(&"ramp"), Some(PoolState::Loaded)).then_some(())
@@ -131,7 +138,7 @@ fn an_f64_session_streams_a_file_into_f64_frames() {
     let dir = tempfile::tempdir().expect("a temp dir");
     let path = dir.path().join("ramp.wav");
     write_ramp(&path);
-    let mut s = session();
+    let (mut s, _bg) = session();
     s.open_stream(&path, Placement::HEAD).expect("a streamer");
     let id = until(&mut s, "the open", |_, events| {
         events.into_iter().find_map(|event| match event {

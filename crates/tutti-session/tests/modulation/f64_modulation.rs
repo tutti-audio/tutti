@@ -22,7 +22,7 @@ const BLOCK: usize = 128;
 #[test]
 fn a_route_onto_a_param_scales_an_f64_render_by_the_analytic_gain() {
     assert_ne!(f64::from(FINE as f32), FINE, "f32 would round FINE away");
-    let mut s = Session::builder()
+    let (mut s, _bg) = Session::builder()
         .float::<f64>()
         .sample_rate(SampleRate::SR_48K)
         .build()

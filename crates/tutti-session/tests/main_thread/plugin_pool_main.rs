@@ -81,11 +81,15 @@ fn catalog() -> (Catalog, tempfile::TempDir) {
     (catalog, dir)
 }
 
-fn session() -> Session {
-    Session::builder()
+fn session() -> (Session, tutti_session::Background) {
+    let (session, mut background) = Session::builder()
         .max_block(MaxBlock::of(Samples::new(512)))
         .build()
-        .expect("an offline session builds")
+        .expect("an offline session builds");
+    background
+        .spawn_threads(std::num::NonZeroUsize::MIN)
+        .expect("a background thread starts");
+    (session, background)
 }
 
 /// Updates, on this (the main) thread, until the key's next pool event.
@@ -112,7 +116,7 @@ fn next_event<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>>(
 /// process, live, and its node is hosted here.
 fn an_in_process_plugin_lands_in_an_update_on_the_main_thread() {
     let (catalog, _dir) = catalog();
-    let mut s = session();
+    let (mut s, _bg) = session();
     s.pool(
         s.plugin_entry("verb", &id(), &catalog)
             .hosting(Hosting::InProcess),
@@ -142,7 +146,7 @@ fn an_in_process_plugin_lands_in_an_update_on_the_main_thread() {
 /// `NeedsMainThread` naming the key.
 fn an_in_process_plugin_needs_the_main_thread_and_is_refused_without_one() {
     let (catalog, _dir) = catalog();
-    let s = session();
+    let (s, _bg) = session();
     let in_process = s
         .plugin_entry("verb", &id(), &catalog)
         .hosting(Hosting::InProcess);
@@ -174,7 +178,7 @@ fn an_in_process_plugin_needs_the_main_thread_and_is_refused_without_one() {
 fn a_released_in_process_plugin_is_closed_on_the_main_thread() {
     probe().thread_reset();
     let (catalog, _dir) = catalog();
-    let mut s = session();
+    let (mut s, _bg) = session();
     s.pool(
         s.plugin_entry("verb", &id(), &catalog)
             .hosting(Hosting::InProcess),
@@ -215,7 +219,7 @@ fn a_released_in_process_plugin_is_closed_on_the_main_thread() {
 fn a_released_in_process_plugin_on_the_main_thread_is_closed_in_place() {
     probe().thread_reset();
     let (catalog, _dir) = catalog();
-    let mut s = session();
+    let (mut s, _bg) = session();
     s.pool(
         s.plugin_entry("verb", &id(), &catalog)
             .hosting(Hosting::InProcess),
@@ -256,7 +260,7 @@ fn events_of(s: &mut Session, key: &'static str) -> Vec<PoolEvent> {
 /// update on the main thread, and the node is the second plugin after it.
 fn a_changed_identity_swaps_an_in_process_node() {
     let (catalog, _dir) = catalog();
-    let mut s = session();
+    let (mut s, _bg) = session();
     s.pool(
         s.plugin_entry("fx", &id(), &catalog)
             .hosting(Hosting::InProcess),
@@ -292,7 +296,7 @@ fn a_changed_identity_swaps_an_in_process_node() {
 /// its plugin**, as a served one does.
 fn an_in_process_swap_to_other_ports_fails_the_entry() {
     let (catalog, _dir) = catalog();
-    let mut s = session();
+    let (mut s, _bg) = session();
     s.pool(
         s.plugin_entry("fx", &id(), &catalog)
             .hosting(Hosting::InProcess),
@@ -350,10 +354,13 @@ fn an_in_process_swap_to_other_ports_fails_the_entry() {
 /// main thread's next update swaps.
 fn an_in_process_swap_waits_for_the_main_thread() {
     let (catalog, _dir) = catalog();
-    let mut s = Session::builder()
+    let (mut s, mut background) = Session::builder()
         .max_block(MaxBlock::of(Samples::new(512)))
         .build_detached(SampleRate::SR_48K)
         .expect("a detached session builds");
+    background
+        .spawn_threads(std::num::NonZeroUsize::MIN)
+        .expect("a background thread starts");
     s.pool(
         s.plugin_entry("fx", &id(), &catalog)
             .hosting(Hosting::InProcess),
@@ -414,7 +421,7 @@ fn restore_round_trip(hosting: Hosting) {
     let mut env = tutti_fixtures::ScopedEnv::new();
     env.set("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server());
     let (catalog, _dir) = catalog();
-    let mut s = session();
+    let (mut s, mut bg) = session();
     s.pool(s.plugin_entry("verb", &id(), &catalog).hosting(hosting))
         .unwrap();
     assert!(matches!(next_event(&mut s, "verb"), PoolEvent::Loaded));
@@ -462,7 +469,7 @@ fn restore_round_trip(hosting: Hosting) {
     let saving = s
         .save_state(&"verb", tutti_plugin_types::StateUse::Project)
         .expect("a node holds the plugin");
-    let state = saving.wait(&mut s).expect("a state");
+    let state = saving.wait(&mut s, &mut bg).expect("a state");
 
     set(&s, 0.1);
     blocks(&mut s);
@@ -472,7 +479,7 @@ fn restore_round_trip(hosting: Hosting) {
         JobStatus::WaitingForMainThread,
         "it runs in an update on the main thread"
     );
-    restoring.wait(&mut s).expect("applied");
+    restoring.wait(&mut s, &mut bg).expect("applied");
     // The mirror is read again by a job the next updates land.
     let deadline = Instant::now() + Duration::from_secs(30);
     while (knob(&s) - 0.9).abs() > 1e-6 {
@@ -518,7 +525,7 @@ fn rebound(layout: u32) -> Rebound {
     probe().set(ClapSwitch::PortLayout, layout);
     probe().set(ClapSwitch::RenderMode, 2);
     let (catalog, _dir) = catalog();
-    let mut s = session();
+    let (mut s, _bg) = session();
     s.pool(
         s.plugin_entry("verb", &id(), &catalog)
             .hosting(Hosting::InProcess),
@@ -790,10 +797,13 @@ fn a_port_change_during_a_sample_rate_change_ends_with_the_new_ports() {
     probe().set(ClapSwitch::PortLayout, 0);
     probe().set(ClapSwitch::RenderMode, 2);
     let (catalog, _dir) = catalog();
-    let mut s = Session::builder()
+    let (mut s, mut background) = Session::builder()
         .max_block(MaxBlock::of(Samples::new(512)))
         .build_detached(SampleRate::SR_48K)
         .expect("a detached session builds");
+    background
+        .spawn_threads(std::num::NonZeroUsize::MIN)
+        .expect("a background thread starts");
     s.pool(
         s.plugin_entry("fx", &id(), &catalog)
             .hosting(Hosting::InProcess),
@@ -933,7 +943,7 @@ fn a_served_plugin_that_grows_its_ports_gets_a_wider_node() {
     env.set("TUTTI_CLAP_PROBE_PORT_CHANGE_FILE", port_change_file());
     env.set("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server());
     let (catalog, _dir) = catalog();
-    let mut s = session();
+    let (mut s, _bg) = session();
     s.pool(
         s.plugin_entry("verb", &id(), &catalog)
             .hosting(Hosting::OutOfProcess),
@@ -981,7 +991,7 @@ fn an_inserted_served_plugin_that_grows_its_ports_gets_a_wider_node() {
     env.set("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server());
     env.set("TUTTI_CLAP_PROBE_RENDER_MODE", "2");
     env.set("TUTTI_CLAP_PROBE_PORT_CHANGE_FILE", port_change_file());
-    let mut s = session();
+    let (mut s, _bg) = session();
     let client = tutti_plugin::PluginClient::new(
         tutti_plugin::IpcConfig::at(
             tutti_plugin::unique_socket_path().expect("the OS has a random source"),

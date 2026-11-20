@@ -10,7 +10,7 @@ use tutti_graph::NodeKey;
 use tutti_nodes::testing::{Const, Through};
 use tutti_session::{ConnectError, OutPort, Root, Session};
 
-fn offline() -> Session {
+fn offline() -> (Session, tutti_session::Background) {
     Session::builder().build().expect("builds")
 }
 
@@ -35,7 +35,7 @@ fn feed_root(s: &mut Session, node: NodeKey) {
 /// per-channel wiring.
 #[test]
 fn connect_wires_each_channel_to_its_own() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let (src, _) = s.graph().add(ForkByClone(Const::frame(&[0.25, 0.5])));
     let (through, _) = s
         .graph()
@@ -51,7 +51,7 @@ fn connect_wires_each_channel_to_its_own() {
 /// **`chain` connects each node to the next**: source, two pass-throughs.
 #[test]
 fn chain_connects_each_node_to_the_next() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let (src, _) = s.graph().add(ForkByClone(Const::frame(&[0.25, 0.5])));
     let (a, _) = s
         .graph()
@@ -75,7 +75,7 @@ fn chain_connects_each_node_to_the_next() {
 /// first; it replaces nothing.
 #[test]
 fn connect_adds_to_what_feeds_the_input() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let (one, _) = s.graph().add(ForkByClone(Const::frame(&[0.25, 0.125])));
     let (two, _) = s.graph().add(ForkByClone(Const::frame(&[0.5, 0.25])));
     let (sink, _) = s
@@ -92,7 +92,7 @@ fn connect_adds_to_what_feeds_the_input() {
 /// a zero fill; a chain refuses at its bad link with nothing wired before it.
 #[test]
 fn a_width_mismatch_is_refused_and_stores_nothing() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let (mono, _) = s.graph().add(ForkByClone(Const::mono(0.5)));
     let (stereo, _) = s
         .graph()
@@ -127,7 +127,7 @@ fn a_width_mismatch_is_refused_and_stores_nothing() {
 /// **A node cannot feed itself, and an absent node is named.**
 #[test]
 fn a_node_that_is_not_there_or_feeds_itself_is_refused() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let (a, _) = s
         .graph()
         .add(ForkByClone(Through::new(ChannelLayout::STEREO)));
@@ -152,7 +152,7 @@ fn a_node_that_is_not_there_or_feeds_itself_is_refused() {
 fn topology_shows_the_edge_a_connect_wrote() {
     use tutti_graph::{Edge, InPort, OutPort as RawOut, Source};
 
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let (src, _) = s.graph().add(ForkByClone(Const::frame(&[0.25, 0.5])));
     let (through, _) = s
         .graph()

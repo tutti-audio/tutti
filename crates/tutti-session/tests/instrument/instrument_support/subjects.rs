@@ -35,7 +35,7 @@ impl Subject for Poly {
             },
             ..SynthConfig::default()
         });
-        let mut session = offline_session();
+        let (mut session, _bg) = offline_session();
         let AddedInstrument { handle, .. } = session
             .add_instrument(synth)
             .expect("a synth is an instrument");
@@ -63,7 +63,7 @@ impl Subject for Soundfont {
         let font =
             std::sync::Arc::new(SoundFont::open(path.as_path()).expect("the test font parses"));
         let unit = SoundFontUnit::new(font, settings).expect("builds");
-        let mut session = offline_session();
+        let (mut session, _bg) = offline_session();
         let AddedInstrument { handle, .. } = session
             .add_instrument(unit)
             .expect("a SoundFont unit is an instrument");
@@ -89,17 +89,24 @@ impl Plugin {
         // SAFETY: nextest runs every test in its own process and this runs
         // before the first server is spawned, on the test's own thread.
         unsafe { std::env::set_var("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server()) };
-        let mut session = offline_session();
+        // One background thread runs the pool's load while this call waits for it. The pair
+        // is kept whole and its session moved out at the end: a copy of a session is a
+        // large stack frame in a debug build.
+        let mut pair = offline_session();
+        pair.1
+            .spawn_threads(std::num::NonZeroUsize::MIN)
+            .expect("a background thread starts");
         let plugin = tutti_plugin::catalog::PluginRef::file(path);
         let request = match state {
             Some(bytes) => Spec::new(plugin.clone())
                 .restoring(tutti_session::PeerState::of_plugin(plugin, bytes)),
             None => Spec::new(plugin),
         };
-        let node = session
+        let node = pair
+            .0
             .load_plugin_blocking(tutti_fixtures::main_thread(), request)
             .expect("the plugin loads");
-        (session, node)
+        (pair.0, node)
     }
 
     /// The state that puts the shared plugin in `Notes` mode: its mode

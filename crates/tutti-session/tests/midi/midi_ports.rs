@@ -25,7 +25,7 @@ const RATE: f64 = 48_000.0;
 /// A session over a fake OS with no devices, and the handle that plugs some.
 fn session() -> (Session, FakeCounters) {
     let (backend, fake) = FakeBackend::build_with(vec![], vec![], usize::MAX);
-    let s = Session::builder()
+    let (s, _bg) = Session::builder()
         .midi_hardware_over(backend, tutti_midi_hardware::MidiHardwareConfig::new())
         .sample_rate(SampleRate::of(RATE))
         .build()
@@ -439,7 +439,7 @@ fn a_session_without_the_hardware_layer_fails_the_load_by_name() {
     let _ = with.update();
     let keys = device(&mut with, "Keys");
 
-    let mut s = Session::builder().build().expect("builds");
+    let (mut s, _bg) = Session::builder().build().expect("builds");
     declare(&mut s, &[("keys", &keys)], &[]);
     let _ = s.update();
     let Some(PoolState::Failed(LoadError::Midi(error))) = s.pool_state(&"keys") else {
@@ -1002,7 +1002,7 @@ fn a_midi2_protocol_output_port_sends_no_active_sensing() {
 #[test]
 fn an_output_port_counts_what_its_device_refused() {
     let (backend, fake) = FakeBackend::build_with(vec![], vec![], 0);
-    let mut s = Session::builder()
+    let (mut s, _bg) = Session::builder()
         .midi_hardware_over(backend, tutti_midi_hardware::MidiHardwareConfig::new())
         .sample_rate(SampleRate::of(RATE))
         .build()

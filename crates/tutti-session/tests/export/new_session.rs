@@ -13,7 +13,7 @@ use tutti_units::{SampleRate, Seconds};
 /// panicking.
 #[test]
 fn a_session_from_new_bounces_a_node_and_renders() {
-    let mut session = Session::new(SampleRate::SR_48K).expect("builds");
+    let (mut session, _bg) = Session::new(SampleRate::SR_48K).expect("builds");
     let (node, _) = session
         .graph()
         .add(ForkByClone(Const::new(0.25, ChannelLayout::STEREO)));

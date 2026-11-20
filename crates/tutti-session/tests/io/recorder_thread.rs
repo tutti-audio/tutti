@@ -350,7 +350,7 @@ fn a_starving_source_is_ended_only_by_stop() {
 /// **A panic on the pump thread becomes an error, not a lost take.**
 ///
 /// The join maps the pump's panic to
-/// [`RecorderError::Panicked`], reading "thread `tutti-recorder` panicked:
+/// [`RecorderError::Panicked`], reading "the recording thread panicked:
 /// {message}".
 ///
 /// Safe to run only because this repo uses nextest, which gives every test its
@@ -385,7 +385,7 @@ fn a_panicking_source_surfaces_as_a_recording_thread_panic() {
 
     assert_eq!(
         err.to_string(),
-        "thread `tutti-recorder` panicked: the source fell over mid-take"
+        "the recording thread panicked: the source fell over mid-take"
     );
     assert!(
         polled.load(Ordering::Acquire) >= 1,

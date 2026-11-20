@@ -45,7 +45,7 @@ impl Node for Halve {
     fn reset(&mut self) {}
 }
 
-fn offline() -> Session {
+fn offline() -> (Session, tutti_session::Background) {
     Session::builder().build().expect("builds")
 }
 
@@ -109,7 +109,7 @@ fn figure(s: &mut Session, m: f32, what: &str) {
 /// source goes (the declick), not to WET.
 #[test]
 fn a_route_onto_a_mix_modulates_around_the_base_the_mix_target_writes() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let node = rig(&mut s);
     settle(&mut s);
     s.set(node.mix().to(Mix::new(0.25))).expect("a node");
@@ -158,7 +158,7 @@ fn a_route_onto_a_mix_modulates_around_the_base_the_mix_target_writes() {
 /// from an edge's, and is no param.
 #[test]
 fn a_mix_target_keys_apart_from_a_param_of_its_node() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let node = rig(&mut s);
     let key = s.mods_mut().key(MixRef::of(node));
     assert_eq!(key, s.mods_mut().key(ModTarget::Mix(MixRef::of(node))));
@@ -173,7 +173,7 @@ fn a_mix_target_keys_apart_from_a_param_of_its_node() {
 /// declared on it, so the target is not left unresolved.
 #[test]
 fn a_removed_node_takes_its_mix_route_with_it() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let node = rig(&mut s);
     let mix = MixRef::of(node);
     let mut m = s.mods_mut();
@@ -216,7 +216,7 @@ impl Node for Spread {
 /// guess. The node itself runs.
 #[test]
 fn a_route_onto_the_mix_of_a_node_with_no_pass_is_refused() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let g = s.graph();
     let (a, _) = g.add(ForkByClone(Const::mono(A)));
     let (spread, _) = g.add(ForkByClone(Spread));

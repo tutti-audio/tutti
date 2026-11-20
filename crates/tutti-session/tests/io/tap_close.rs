@@ -15,8 +15,8 @@ use tutti_session::{CloseError, DetachedSession, OutPort, Root, Session};
 use tutti_units::{SampleRate, Samples};
 
 /// A detached one-output session playing a constant 0.25.
-fn session() -> DetachedSession {
-    let mut s = Session::builder()
+fn session() -> (DetachedSession, tutti_session::Background) {
+    let (mut s, bg) = Session::builder()
         .outputs_floor(ChannelLayout::MONO)
         .build_detached(SampleRate::SR_48K)
         .expect("builds");
@@ -24,14 +24,14 @@ fn session() -> DetachedSession {
     s.graph()
         .set_sources_unfaded(Root::output(0), [OutPort::new(dc, 0)])
         .unwrap();
-    s
+    (s, bg)
 }
 
 /// The whole point of the seam: a host gets the reader from the graph, and it
 /// sees what the session rendered since the open.
 #[test]
 fn opening_a_tap_yields_a_reader_that_sees_the_rendered_frames() {
-    let mut s = session();
+    let (mut s, _bg) = session();
     let mut out = [0.0f32];
     s.render_frame(InterleavedMut::one_frame(&mut out).unwrap());
     let mut reader = s
@@ -58,7 +58,7 @@ fn opening_a_tap_yields_a_reader_that_sees_the_rendered_frames() {
 /// with no tap op.
 #[test]
 fn closing_the_tap_stops_the_copy() {
-    let mut s = session();
+    let (mut s, _bg) = session();
     let mut reader = s
         .graph()
         .taps()
@@ -90,7 +90,7 @@ fn closing_the_tap_stops_the_copy() {
 /// a later open returns starts empty: a tap flows from its commit.
 #[test]
 fn a_session_without_a_tap_renders_untouched() {
-    let mut s = session();
+    let (mut s, _bg) = session();
     let mut out = [0.0f32];
     s.render_frame(InterleavedMut::one_frame(&mut out).unwrap());
     assert_eq!(out[0], 0.25);

@@ -114,11 +114,14 @@ fn session_with_probe_at(
             set(mode);
         }
     }
-    let mut session = Session::builder()
+    let (mut session, mut background) = Session::builder()
         .inputs(ChannelLayout::EMPTY)
         .outputs_floor(ChannelLayout::STEREO)
         .build_detached(SampleRate::DEFAULT)
         .expect("a detached session builds");
+    background
+        .spawn_threads(std::num::NonZeroUsize::MIN)
+        .expect("a background thread starts");
     session.graph().set_sample_rate(SampleRate::of(RATE));
     let probe = session
         .load_plugin_blocking(

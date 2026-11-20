@@ -17,12 +17,16 @@ use tutti_units::{SampleRate, Samples};
 const RATE: SampleRate = SampleRate::SR_48K;
 const BLOCK: usize = 512;
 
-fn offline() -> Session {
-    Session::builder()
+fn offline() -> (Session, tutti_session::Background) {
+    let (session, mut background) = Session::builder()
         .sample_rate(RATE)
         .max_block(MaxBlock::of(Samples::new(BLOCK)))
         .build()
-        .expect("an offline session builds")
+        .expect("an offline session builds");
+    background
+        .spawn_threads(std::num::NonZeroUsize::MIN)
+        .expect("a background thread starts");
+    (session, background)
 }
 
 fn render_block(s: &Session) {
@@ -52,7 +56,7 @@ mod clap {
         if let Some(layout) = layout {
             set_env("TUTTI_CLAP_PROBE_PORT_LAYOUT", layout);
         }
-        let mut s = offline();
+        let (mut s, _bg) = offline();
         let node = s
             .load_plugin_blocking(
                 tutti_fixtures::main_thread(),
@@ -202,7 +206,7 @@ mod vst2 {
     #[test]
     fn midi_past_the_nodes_input_bound_is_reported_as_dropped_events() {
         use tutti_session::SessionEvent;
-        let mut s = offline();
+        let (mut s, _bg) = offline();
         let node = s
             .load_plugin_blocking(
                 tutti_fixtures::main_thread(),

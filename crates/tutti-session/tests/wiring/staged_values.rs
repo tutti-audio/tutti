@@ -11,7 +11,7 @@ use tutti_tempo::TempoMap;
 use tutti_transport::LoopRegion;
 use tutti_units::{Beat, Bpm, Samples};
 
-fn offline() -> Session {
+fn offline() -> (Session, tutti_session::Background) {
     Session::builder()
         .max_block(MaxBlock::of(Samples::new(512)))
         .build()
@@ -36,7 +36,7 @@ fn region(start: f64, end: f64, armed: bool) -> LoopRegion {
 /// has applied it.**
 #[test]
 fn a_loop_set_and_updated_is_the_transports_region() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let looping = s.transport_handle().looping();
     s.set(looping.to(region(2.0, 6.0, true))).unwrap();
     let _ = s.update();
@@ -49,7 +49,7 @@ fn a_loop_set_and_updated_is_the_transports_region() {
 /// published.
 #[test]
 fn a_loop_read_before_the_update_is_the_pending_region() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let looping = s.transport_handle().looping();
     let default = s.get(looping).unwrap();
     assert!(!default.is_armed(), "the base is the transport's reading");
@@ -67,7 +67,7 @@ fn a_loop_read_before_the_update_is_the_pending_region() {
 /// not the engine's earlier one; once a block applies it the reading agrees.
 #[test]
 fn a_loop_read_after_the_update_and_before_a_block_is_the_region_sent() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let looping = s.transport_handle().looping();
     s.set(looping.to(region(2.0, 6.0, true))).unwrap();
     let _ = s.update();
@@ -85,7 +85,7 @@ fn a_loop_read_after_the_update_and_before_a_block_is_the_region_sent() {
 /// the one edit that carries both.
 #[test]
 fn a_loop_written_disarmed_disarms_and_keeps_the_bounds() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let looping = s.transport_handle().looping();
     s.set(looping.to(region(2.0, 6.0, true))).unwrap();
     let _ = s.update();
@@ -104,7 +104,7 @@ fn a_loop_written_disarmed_disarms_and_keeps_the_bounds() {
 /// side only lends.
 #[test]
 fn blocks_adopting_published_tempo_meter_and_loop_do_not_allocate() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let handle = s.transport_handle();
     s.set((
         handle

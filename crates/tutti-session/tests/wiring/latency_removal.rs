@@ -18,7 +18,7 @@ use tutti_units::{Db, SampleRate, Samples};
 
 #[test]
 fn the_published_latency_shrinks_when_the_latency_bearing_node_leaves() {
-    let mut s = Session::builder()
+    let (mut s, _bg) = Session::builder()
         .outputs_floor(ChannelLayout::STEREO)
         .build_detached(SampleRate::SR_48K)
         .expect("builds");

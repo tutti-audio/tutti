@@ -1,4 +1,4 @@
-//! Running the pool's loads: the worker stages the executor takes, the stages
+//! Running the pool's loads: the background stages the executor takes, the stages
 //! on the main thread and on the session's own, and the landings.
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -9,11 +9,11 @@ use crate::jobs::panic_message;
 use crate::pool::entry::{LoadError, Step, Value};
 use crate::pool::open::OpenCx;
 use crate::pool::table::{Opening, Start, Worker};
-use crate::{Session, WorkerError};
+use crate::{BackgroundError, Session};
 
 /// A panic in a stage the session runs itself, as a load's failure.
 fn panicked(payload: &(dyn std::any::Any + Send)) -> LoadError {
-    LoadError::Job(WorkerError::Panicked {
+    LoadError::Job(BackgroundError::Panicked {
         message: panic_message(payload),
     })
 }
@@ -31,7 +31,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
         self.pool_pump();
     }
 
-    /// Starts queued worker stages while fewer than the configured number run.
+    /// Starts queued background stages while fewer than the configured number run.
     /// Each landing starts the next.
     pub(crate) fn pool_pump(&mut self) {
         while let Some(Worker {

@@ -51,7 +51,7 @@ impl SessionNode for Tap {
 }
 
 /// An offline session at 48 kHz, stereo: the builder's MIDI nodes in.
-pub fn offline() -> Session {
+pub fn offline() -> (Session, tutti_session::Background) {
     Session::builder().build().expect("builds")
 }
 
@@ -110,7 +110,7 @@ pub fn with_input(groups: Option<tutti_ump::MidiGroup>) -> (Session, NodeKey) {
     if let Some(last) = groups {
         builder = builder.midi_groups(last);
     }
-    let mut s = builder.build().expect("builds");
+    let (mut s, _bg) = builder.build().expect("builds");
     let _ = s.update();
     let keys = s.midi().devices().remove(0);
     s.pool(tutti_session::midi_input("input", keys))

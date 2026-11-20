@@ -40,7 +40,7 @@ pub(crate) struct Checked {
     pub(crate) now: Result<Option<Identity>, io::ErrorKind>,
 }
 
-/// Takes each asset's identity again. This is the refresh's worker stage.
+/// Takes each asset's identity again. This is the refresh's background stage.
 ///
 /// An asset with no identity is read by opening it: one that does not open is
 /// unreadable, and one that does is not watched.

@@ -20,7 +20,7 @@ use crate::{DetachedSession, Job, Session};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 
-fn session() -> DetachedSession {
+fn session() -> (DetachedSession, crate::Background) {
     Session::builder().build_detached(RATE).unwrap()
 }
 
@@ -43,18 +43,19 @@ fn peak_blocks(samples_per_block: usize) -> PeakConfig {
 
 fn land<A, S: Float>(
     session: &mut DetachedSession,
+    background: &mut crate::Background,
     job: &Job<Analyze<A, S>>,
 ) -> Result<<A::Meter as Meter>::Output, AnalyzeError>
 where
     A: tutti_measure::Measure<S> + 'static,
     <A::Meter as Meter>::Output: Send + 'static,
 {
-    job.wait(session)
+    job.wait(session, background)
 }
 
 #[test]
 fn a_sine_of_half_amplitude_has_a_peak_of_half_in_memory() {
-    let mut s = session();
+    let (mut s, mut bg) = session();
     // 1 kHz at 48 kHz: 48 samples a cycle, a sample on every crest.
     let samples = signal::sine(
         Hz::new(1000.0),
@@ -64,14 +65,14 @@ fn a_sine_of_half_amplitude_has_a_peak_of_half_in_memory() {
     );
     let wave = Wave::from_mono(RATE, Mono::new(&samples));
     let job = s.analyze(wave, peak_blocks(512));
-    let blocks = land(&mut s, &job).unwrap();
+    let blocks = land(&mut s, &mut bg, &job).unwrap();
     assert!((peak_of(&blocks) - 0.5).abs() < 1e-6);
 }
 
 #[cfg(codec)]
 #[test]
 fn a_sine_of_half_amplitude_has_a_peak_of_half_streamed_from_a_file() {
-    let mut s = session();
+    let (mut s, mut bg) = session();
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("sine.wav");
     let samples = signal::sine(
@@ -82,7 +83,7 @@ fn a_sine_of_half_amplitude_has_a_peak_of_half_streamed_from_a_file() {
     );
     write(&path, RATE, 1, &samples);
     let job = s.analyze::<f32, _>(path.as_path(), peak_blocks(512));
-    let blocks = land(&mut s, &job).unwrap();
+    let blocks = land(&mut s, &mut bg, &job).unwrap();
     assert!((peak_of(&blocks) - 0.5).abs() < 1e-6);
     // 48 000 frames in blocks of 512: 93 whole blocks and a part.
     assert_eq!(blocks.blocks_per_channel(), 94);
@@ -91,7 +92,7 @@ fn a_sine_of_half_amplitude_has_a_peak_of_half_streamed_from_a_file() {
 #[cfg(codec)]
 #[test]
 fn a_peak_past_the_first_chunks_is_found_in_its_block_across_chunk_edges() {
-    let mut s = session();
+    let (mut s, mut bg) = session();
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("clicks.wav");
     // Blocks of 1000 frames straddle every chunk edge (16 384 is no multiple).
@@ -101,7 +102,7 @@ fn a_peak_past_the_first_chunks_is_found_in_its_block_across_chunk_edges() {
     samples[late] = -0.75;
     write(&path, RATE, 1, &samples);
     let job = s.analyze::<f32, _>(path, peak_blocks(1000));
-    let blocks = land(&mut s, &job).unwrap();
+    let blocks = land(&mut s, &mut bg, &job).unwrap();
     let found: Vec<(usize, f64)> = blocks
         .channel(0)
         .unwrap()
@@ -116,7 +117,7 @@ fn a_peak_past_the_first_chunks_is_found_in_its_block_across_chunk_edges() {
 #[cfg(codec)]
 #[test]
 fn a_stereo_file_keeps_each_channels_peak() {
-    let mut s = session();
+    let (mut s, mut bg) = session();
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("stereo.wav");
     let frames = 2 * CHUNK_FRAMES + 10;
@@ -125,7 +126,7 @@ fn a_stereo_file_keeps_each_channels_peak() {
     samples[2 * (frames - 1) + 1] = 0.125;
     write(&path, RATE, 2, &samples);
     let job = s.analyze::<f32, _>(path, peak_blocks(256));
-    let blocks = land(&mut s, &job).unwrap();
+    let blocks = land(&mut s, &mut bg, &job).unwrap();
     let peak = |channel: usize| {
         blocks
             .channel(channel)
@@ -140,14 +141,14 @@ fn a_stereo_file_keeps_each_channels_peak() {
 #[cfg(codec)]
 #[test]
 fn a_band_above_the_files_nyquist_fails_the_job_with_the_meters_error() {
-    let mut s = session();
+    let (mut s, mut bg) = session();
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("narrow.wav");
     let rate = SampleRate::SR_8K;
     write(&path, rate, 1, &vec![0.0; 8_000]);
     let band = FrequencyBand::new(Hz::new(100.0), Hz::new(20_000.0)).unwrap();
     let job = s.analyze::<f32, _>(path, ChromaConfig::new().band(band));
-    let failed = land(&mut s, &job).unwrap_err();
+    let failed = land(&mut s, &mut bg, &job).unwrap_err();
     assert!(
         matches!(
             failed,
@@ -159,10 +160,10 @@ fn a_band_above_the_files_nyquist_fails_the_job_with_the_meters_error() {
 
 #[test]
 fn a_stereo_analysis_of_mono_audio_fails_with_the_widths() {
-    let mut s = session();
+    let (mut s, mut bg) = session();
     let wave = Wave::from_mono(RATE, Mono::new(&[0.0; 64]));
     let job = s.analyze(wave, VectorscopeConfig::new(NonZeroUsize::MIN));
-    let failed = land(&mut s, &job).unwrap_err();
+    let failed = land(&mut s, &mut bg, &job).unwrap_err();
     assert!(
         matches!(
             failed,
@@ -177,17 +178,17 @@ fn a_stereo_analysis_of_mono_audio_fails_with_the_widths() {
 #[cfg(codec)]
 #[test]
 fn a_file_that_cannot_be_opened_fails_with_the_decode_error() {
-    let mut s = session();
+    let (mut s, mut bg) = session();
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("missing.wav");
     let job = s.analyze::<f32, _>(path, peak_blocks(512));
-    let failed = land(&mut s, &job).unwrap_err();
+    let failed = land(&mut s, &mut bg, &job).unwrap_err();
     assert!(matches!(failed, AnalyzeError::Decode(_)), "{failed:?}");
 }
 
 #[test]
 fn a_mono_analysis_of_stereo_audio_reads_the_fold_of_its_channels() {
-    let mut s = session();
+    let (mut s, mut bg) = session();
     // Equal loud channels over frames 1000..2000 of 40 000: whatever the fold's
     // gain, the folded signal is loud there and nowhere else.
     let mut wave = Wave::new(2, RATE);
@@ -202,7 +203,7 @@ fn a_mono_analysis_of_stereo_audio_reads_the_fold_of_its_channels() {
     }
     let config = SilenceConfig::new(FiniteLevel::of(Db::new(-40.0)), Seconds::new(0.01));
     let job = s.analyze(wave, config);
-    let regions = land(&mut s, &job).unwrap();
+    let regions = land(&mut s, &mut bg, &job).unwrap();
     let spans: Vec<_> = regions
         .iter()
         .map(|region| (region.start().get(), region.end().get()))
@@ -244,17 +245,13 @@ fn a_job_dropped_before_its_worker_starts_pushes_no_chunk_and_lands_nothing() {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    let executor = tutti_platform::Executor::new();
-    let mut s = Session::builder()
-        .executor(executor.clone())
-        .build_detached(RATE)
-        .unwrap();
+    let (mut s, mut bg) = session();
     let pushed = Arc::new(AtomicUsize::new(0));
     // Ten chunks long: a worker that ignored the drop would push ten.
     let wave = Wave::from_mono(RATE, Mono::new(&vec![0.0; 10 * CHUNK_FRAMES]));
     let job = s.analyze(wave, Counting(Arc::clone(&pushed)));
     drop(job);
-    executor.run_until_stalled();
+    bg.run_until_stalled();
     assert_eq!(pushed.load(Ordering::SeqCst), 0);
     let landed = s
         .update()
@@ -266,11 +263,11 @@ fn a_job_dropped_before_its_worker_starts_pushes_no_chunk_and_lands_nothing() {
 
 #[test]
 fn a_job_that_is_not_dropped_pushes_every_chunk() {
-    let mut s = session();
+    let (mut s, mut bg) = session();
     let pushed = std::sync::Arc::default();
     let wave = Wave::from_mono(RATE, Mono::new(&vec![0.0; 2 * CHUNK_FRAMES + 1]));
     let job = s.analyze(wave, Counting(std::sync::Arc::clone(&pushed)));
-    assert_eq!(land(&mut s, &job).unwrap(), 3);
+    assert_eq!(land(&mut s, &mut bg, &job).unwrap(), 3);
 }
 
 /// An analysis that reads a stereo pair as planes and keeps each channel's peak.
@@ -311,7 +308,7 @@ impl Meter for ChannelPeaksMeter {
 
 #[test]
 fn a_stereo_wave_reads_each_channels_peak_through_its_own_planes() {
-    let mut s = session();
+    let (mut s, mut bg) = session();
     let mut wave = Wave::new(2, RATE);
     for frame in 0..(2 * CHUNK_FRAMES + 5) {
         let (left, right) = match frame {
@@ -323,13 +320,13 @@ fn a_stereo_wave_reads_each_channels_peak_through_its_own_planes() {
             .unwrap();
     }
     let job = s.analyze(wave, ChannelPeaks);
-    assert_eq!(land(&mut s, &job).unwrap(), [0.5, 0.25]);
+    assert_eq!(land(&mut s, &mut bg, &job).unwrap(), [0.5, 0.25]);
 }
 
 #[cfg(codec)]
 #[test]
 fn a_stereo_file_reads_each_channels_peak_through_deinterleaved_planes() {
-    let mut s = session();
+    let (mut s, mut bg) = session();
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("planes.wav");
     let mut samples = vec![0.0f32; 2 * (CHUNK_FRAMES + 20)];
@@ -337,7 +334,7 @@ fn a_stereo_file_reads_each_channels_peak_through_deinterleaved_planes() {
     samples[2 * (CHUNK_FRAMES + 11) + 1] = -0.25;
     write(&path, RATE, 2, &samples);
     let job = s.analyze(path, ChannelPeaks);
-    assert_eq!(land(&mut s, &job).unwrap(), [0.5, 0.25]);
+    assert_eq!(land(&mut s, &mut bg, &job).unwrap(), [0.5, 0.25]);
 }
 
 /// An analysis in the audio's own format: the largest absolute sample of a
@@ -381,19 +378,19 @@ impl<S: Float> Meter for MaxAbsMeter<S> {
 
 #[test]
 fn an_f64_wave_reports_a_value_f32_cannot_hold_exactly_through_an_f64_measure() {
-    let mut s = session();
+    let (mut s, mut bg) = session();
     // 1 + 2^-40 is exact in f64 and rounds to 1.0 in f32.
     let value = 1.0 + 2.0f64.powi(-40);
     assert_ne!(f64::from(value as f32), value);
     let wave: Wave<f64> = Wave::from_mono(RATE, Mono::new(&[0.0, value, -0.5]));
     let job = s.analyze(wave, MaxAbs);
-    assert_eq!(job.wait(&mut s).unwrap(), value);
+    assert_eq!(job.wait(&mut s, &mut bg).unwrap(), value);
 }
 
 #[cfg(codec)]
 #[test]
 fn a_full_scale_i16_file_decoded_into_f32_peaks_at_32767_over_32768() {
-    let mut s = session();
+    let (mut s, mut bg) = session();
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("full_scale.wav");
     let spec = hound::WavSpec {
@@ -408,5 +405,5 @@ fn a_full_scale_i16_file_decoded_into_f32_peaks_at_32767_over_32768() {
     }
     w.finalize().unwrap();
     let job = s.analyze::<f32, _>(path, MaxAbs);
-    assert_eq!(job.wait(&mut s).unwrap(), 32767.0 / 32768.0);
+    assert_eq!(job.wait(&mut s, &mut bg).unwrap(), 32767.0 / 32768.0);
 }

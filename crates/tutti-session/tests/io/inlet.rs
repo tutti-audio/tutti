@@ -10,7 +10,7 @@ use tutti_units::{SampleRate, Samples};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 
-fn offline() -> Session {
+fn offline() -> (Session, tutti_session::Background) {
     Session::builder()
         .sample_rate(RATE)
         .build()
@@ -21,7 +21,7 @@ fn offline() -> Session {
 /// silence once the ring runs dry.
 #[test]
 fn pushed_frames_reach_the_outputs_in_order() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let (key, mut producer) = s
         .graph()
         .open_inlet(ChannelLayout::STEREO, Samples::new(256), RATE)
@@ -65,7 +65,7 @@ fn pushed_frames_reach_the_outputs_in_order() {
 /// rates, and nothing is opened.
 #[test]
 fn a_producer_at_another_rate_is_refused() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let _ = s.update();
     let err = s
         .graph()
@@ -94,7 +94,7 @@ fn a_producer_at_another_rate_is_refused() {
 /// one at the graph's is added.
 #[test]
 fn add_inlet_checks_the_rate_the_ring_carries() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let _ = s.update();
     let (ring, _writer) =
         InletRing::pair(ChannelLayout::STEREO, Samples::new(64), SampleRate::SR_44K1);
@@ -119,7 +119,7 @@ fn add_inlet_checks_the_rate_the_ring_carries() {
 fn an_f64_inlet_carries_a_figure_f32_rounds_away() {
     const FINE: f64 = 1.0 + 1.0 / 1_099_511_627_776.0;
     assert_ne!(f64::from(FINE as f32), FINE, "f32 would round FINE away");
-    let mut s = Session::builder()
+    let (mut s, _bg) = Session::builder()
         .float::<f64>()
         .sample_rate(RATE)
         .build()

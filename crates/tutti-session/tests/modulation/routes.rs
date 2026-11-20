@@ -11,7 +11,7 @@ use tutti_session::{
 };
 use tutti_units::{Depth, Hz, Q, Samples};
 
-fn session() -> Session {
+fn session() -> (Session, tutti_session::Background) {
     Session::builder()
         .outputs(tutti_buffers::ChannelLayout::STEREO)
         .max_block(MaxBlock::of(Samples::new(256)))
@@ -34,7 +34,7 @@ fn filter(s: &mut Session) -> ParamRef {
 /// every listing.
 #[test]
 fn routes_and_sources_are_found_again() {
-    let mut s = session();
+    let (mut s, _bg) = session();
     let (a, b) = (filter(&mut s), filter(&mut s));
     let mut m = s.mods_mut();
     m.range_raw(a, 0.0, 1.0).unwrap();
@@ -114,7 +114,7 @@ fn routes_and_sources_are_found_again() {
 /// once, the others at the update.
 #[test]
 fn a_route_is_edited_through_its_view() {
-    let mut s = session();
+    let (mut s, _bg) = session();
     let a = filter(&mut s);
     let mut m = s.mods_mut();
     m.range_raw(a, 0.0, 1.0).unwrap();
@@ -157,7 +157,7 @@ fn reading_the_declarations_needs_only_a_shared_session() {
     fn routes_in(s: &Session) -> usize {
         s.mods().routes().count()
     }
-    assert_eq!(routes_in(&session()), 0);
+    assert_eq!(routes_in(&session().0), 0);
 }
 
 /// **A take on a target with no automation is refused, naming the target**,
@@ -170,7 +170,7 @@ fn recording_where_nothing_is_automated_is_refused() {
     use tutti_session::{AutomationTake, NoAutomation};
     use tutti_units::Hz;
 
-    let mut s = session();
+    let (mut s, _bg) = session();
     let (lp, _) = s.graph().add(SvfFilterNode::<f32>::new(
         SvfType::LowPass,
         Hz::new(1_000.0),

@@ -33,7 +33,7 @@ use feed::{Bind, Chunk, View};
 pub use live::{Analyzer, AnalyzerError};
 
 use crate::job::{Cancel, sealed};
-use crate::{AppKey, Clock, Job, JobKind, Session, WaitError, WorkerError};
+use crate::{AppKey, BackgroundError, Clock, Job, JobKind, Session, WaitError};
 
 /// Frames decoded, and pushed to the meter, at a time.
 const CHUNK_FRAMES: Samples = Samples::new(16_384);
@@ -116,7 +116,7 @@ pub enum AnalyzeError {
     Bind(#[from] BindError),
     /// The worker did not finish.
     #[error(transparent)]
-    Worker(#[from] WorkerError),
+    Worker(#[from] BackgroundError),
     /// The wait could not run ([`Job::wait`]).
     #[error(transparent)]
     Wait(#[from] WaitError),
@@ -270,7 +270,7 @@ where
     loop {
         // A dropped job reads nothing more: its result is discarded.
         if cancel.is_cancelled() {
-            return Err(WorkerError::Dropped.into());
+            return Err(BackgroundError::Dropped.into());
         }
         reader.next(&mut chunk)?;
         if chunk.is_empty() {

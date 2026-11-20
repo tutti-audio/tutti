@@ -27,7 +27,7 @@ use tutti_units::{Latency, UnitParam};
 const RATE: SampleRate = SampleRate::SR_48K;
 
 /// A detached session `outputs` wide at 48 kHz: the executor on this side.
-fn detached(outputs: usize) -> DetachedSession {
+fn detached(outputs: usize) -> (DetachedSession, tutti_session::Background) {
     Session::builder()
         .outputs_floor(ChannelLayout::clamped(outputs))
         .build_detached(RATE)
@@ -200,7 +200,7 @@ impl<const IN: u16, const OUT: u16> Node for Events<IN, OUT> {
 /// back is total and lossless.
 #[test]
 fn every_source_reads_back_as_written() {
-    let mut s = Session::builder()
+    let (mut s, _bg) = Session::builder()
         .inputs(ChannelLayout::MONO)
         .outputs_floor(ChannelLayout::STEREO)
         .build_detached(RATE)
@@ -238,7 +238,7 @@ fn every_source_reads_back_as_written() {
 /// set to no sources, a cleared sink, and a fresh or widened root. `planned_compensation` is `None` when the spec does not validate.
 #[test]
 fn every_setter_stores_silence_as_the_empty_set() {
-    let mut s = detached(2);
+    let (mut s, _bg) = detached(2);
     let graph = s.graph();
     let (sink, _) = graph.add(ForkByClone(Through::mono()));
     let (src, _) = graph.add(ForkByClone(Const::frame(&[1.0, 2.0])));
@@ -284,7 +284,7 @@ fn every_setter_stores_silence_as_the_empty_set() {
 /// no-op rather than a panic.
 #[test]
 fn removing_a_node_twice_names_what_was_not_there() {
-    let mut s = detached(1);
+    let (mut s, _bg) = detached(1);
     let (node, _) = s.graph().add(ForkByClone(Const::mono(1.0)));
     assert!(s.graph_ref().contains(node));
     assert_eq!(s.remove(node), Ok(()));
@@ -305,7 +305,7 @@ fn removing_a_node_twice_names_what_was_not_there() {
 /// changes nothing: the graph is not marked edited.
 #[test]
 fn removing_a_stranger_changes_nothing() {
-    let mut s = detached(1);
+    let (mut s, _bg) = detached(1);
     let _ = s.update();
     let stranger = tutti_graph::NodeKey(u64::MAX);
     assert_eq!(s.remove(stranger), Err(RemoveError::NoSuchNode(stranger)));
@@ -373,7 +373,7 @@ fn root_width_takes_the_wider_side_within_the_scratch_bounds() {
 /// commit, and the plan it sends is a new one.
 #[test]
 fn an_edit_between_updates_is_committed_by_the_next() {
-    let mut s = detached(1);
+    let (mut s, _bg) = detached(1);
     let (a, _) = s.graph().add(ForkByClone(Const::mono(1.0)));
     s.graph()
         .set_sources_unfaded(Root::output(0), [OutPort::new(a, 0)])
@@ -409,7 +409,7 @@ fn an_edit_between_updates_is_committed_by_the_next() {
 /// is the same `Arc`, and no commit was counted.
 #[test]
 fn an_update_with_no_edit_sends_no_plan() {
-    let mut s = detached(1);
+    let (mut s, _bg) = detached(1);
     let (a, _) = s.graph().add(ForkByClone(Const::mono(1.0)));
     s.graph()
         .set_sources_unfaded(Root::output(0), [OutPort::new(a, 0)])
@@ -435,7 +435,7 @@ fn an_update_with_no_edit_sends_no_plan() {
 /// with a message to parse: the caller matches `NoSuchNode(node)`.
 #[test]
 fn a_crossfade_on_a_removed_node_is_refused_naming_it() {
-    let mut s = detached(1);
+    let (mut s, _bg) = detached(1);
     let (knob, _) = s.graph().add(Params(Knob::new()));
     s.graph().remove(knob).unwrap();
     let refused = s
@@ -459,7 +459,7 @@ fn a_crossfade_on_a_removed_node_is_refused_naming_it() {
 /// without the wait the new unit would be lost.
 #[test]
 fn a_crossfade_refused_busy_during_a_re_prepare_lands_on_a_later_update() {
-    let mut s = detached(1);
+    let (mut s, _bg) = detached(1);
     let mut side = s.graph().take_audio_side();
     let (knob, old) = s.graph().add(Params(Knob::new()));
     s.graph()
@@ -530,7 +530,7 @@ fn a_crossfade_refused_busy_during_a_re_prepare_lands_on_a_later_update() {
 fn removing_a_node_purges_the_crossfades_parked_on_it() {
     use std::sync::Arc;
 
-    let mut s = detached(1);
+    let (mut s, _bg) = detached(1);
     let mut side = s.graph().take_audio_side();
     let (knob, _) = s.graph().add(Params(Knob::new()));
     assert!(s.update().is_empty());
@@ -566,7 +566,7 @@ fn removing_a_node_purges_the_crossfades_parked_on_it() {
 /// update will ever take it).
 #[test]
 fn a_crossfade_on_a_poisoned_graph_is_refused() {
-    let mut s = detached(1);
+    let (mut s, _bg) = detached(1);
     let (knob, _) = s.graph().add(Params(Knob::new()));
     s.graph().add(Unforkable(Grenade));
     let _ = s.update();
@@ -597,7 +597,7 @@ fn a_crossfade_on_a_poisoned_graph_is_refused() {
 /// (The modulated paths are `mod_lanes.rs`'.)
 #[test]
 fn every_param_write_path_reaches_a_fork() {
-    let mut s = detached(2);
+    let (mut s, _bg) = detached(2);
     let (k0, _) = s.graph().add(Params(Knob::new()));
     let (k1, c1) = s.graph().add(Params(Knob::new()));
     s.graph()
@@ -631,7 +631,7 @@ fn every_param_write_path_reaches_a_fork() {
 /// and the graph's event edges are their union.
 #[test]
 fn move_feeds_moves_every_feeders_sources() {
-    let mut s = detached(1);
+    let (mut s, _bg) = detached(1);
     let g = s.graph();
     let (old, _) = g.add(ForkByClone(Events::<1, 0>));
     let (new, _) = g.add(ForkByClone(Events::<1, 0>));
@@ -696,7 +696,7 @@ fn pull(s: &Session, layout: ChannelLayout, frames: usize, block: usize) -> Vec<
 /// at).
 #[test]
 fn an_offline_session_renders_a_sines_analytic_rms() {
-    let mut s = Session::builder()
+    let (mut s, _bg) = Session::builder()
         .sample_rate(RATE)
         .outputs(ChannelLayout::MONO)
         .max_block(MaxBlock::of(Samples::new(512)))
@@ -734,7 +734,7 @@ fn an_offline_session_renders_a_sines_analytic_rms() {
 #[test]
 fn a_latent_branch_is_compensated_on_the_other_to_the_sample() {
     const N: usize = 37;
-    let mut s = Session::builder()
+    let (mut s, _bg) = Session::builder()
         .sample_rate(RATE)
         .max_block(MaxBlock::of(Samples::new(256)))
         .build()
@@ -785,7 +785,7 @@ fn a_latent_branch_is_compensated_on_the_other_to_the_sample() {
 fn a_removal_a_commit_and_an_update_run_on_any_thread() {
     // The test thread is the process's main thread; the work below is not on it.
     let _main = tutti_fixtures::main_thread();
-    let mut s = detached(1);
+    let (mut s, _bg) = detached(1);
     let (dc, _) = s.graph().add(ForkByClone(Const::mono(0.5)));
     let _ = s.update();
 
@@ -895,7 +895,7 @@ fn replace_under_a_held_borrow(controls: &PublishedControls) {
 /// is not swept.
 #[test]
 fn the_update_sweeps_each_nodes_reclaimer_while_it_is_in_the_graph() {
-    let mut s = detached(1);
+    let (mut s, _bg) = detached(1);
     let (node, first) = s.graph().add(Published::new());
     s.graph()
         .set_sources_unfaded(Root::output(0), [OutPort::new(node, 0)])
@@ -994,7 +994,7 @@ fn park_a_retired_slot(s: &mut DetachedSession, handle: &tutti_sampler::VoicePoo
 #[cfg(feature = "sampler")]
 #[test]
 fn the_update_frees_the_slots_a_graph_pool_retired() {
-    let mut s = detached(1);
+    let (mut s, _bg) = detached(1);
     let (pool, handle) = s.graph().add(tutti_sampler::VoicePool::new());
     let (bare, bare_handle) = tutti_sampler::VoicePool::new().with_handle();
     let (bare, ()) = s.graph().add(tutti_graph::Unforkable(bare));

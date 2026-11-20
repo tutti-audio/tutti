@@ -31,11 +31,15 @@ fn write_ramp(path: &Path) {
     tutti_fixtures::signal::write_wav_f32(path, SampleRate::of(RATE), 1, &samples);
 }
 
-fn session() -> Session {
-    Session::builder()
+fn session() -> (Session, tutti_session::Background) {
+    let (session, mut background) = Session::builder()
         .sample_rate(SampleRate::of(RATE))
         .build()
-        .expect("builds")
+        .expect("builds");
+    background
+        .spawn_threads(std::num::NonZeroUsize::MIN)
+        .expect("a background thread starts");
+    (session, background)
 }
 
 /// The sampler events `update()` lands until `want` of them have, in order.
@@ -61,7 +65,7 @@ fn an_open_lands_opened_with_the_calls_id() {
     let dir = tempfile::tempdir().expect("a temp dir");
     let path = dir.path().join("ramp.wav");
     write_ramp(&path);
-    let mut s = session();
+    let (mut s, _bg) = session();
     let first = s.open_stream(&path, Placement::HEAD).expect("a streamer");
     let second = s.open_stream(&path, Placement::HEAD).expect("a streamer");
     assert_ne!(first, second);
@@ -89,7 +93,7 @@ fn an_open_lands_opened_with_the_calls_id() {
 #[test]
 fn a_missing_file_lands_open_failed_with_the_typed_error() {
     let dir = tempfile::tempdir().expect("a temp dir");
-    let mut s = session();
+    let (mut s, _bg) = session();
     let id = s
         .open_stream(dir.path().join("absent.wav"), Placement::HEAD)
         .expect("a streamer");
@@ -110,9 +114,12 @@ fn a_missing_file_lands_open_failed_with_the_typed_error() {
 /// A session with no disk streamer refuses an open at the call.
 #[test]
 fn a_session_without_a_streamer_refuses_an_open_at_the_call() {
-    let mut s = Session::builder()
+    let (mut s, mut background) = Session::builder()
         .build_detached(SampleRate::of(RATE))
         .expect("builds");
+    background
+        .spawn_threads(std::num::NonZeroUsize::MIN)
+        .expect("a background thread starts");
     let dir = tempfile::tempdir().expect("a temp dir");
     assert!(matches!(
         s.open_stream(dir.path().join("a.wav"), Placement::HEAD),
@@ -123,7 +130,7 @@ fn a_session_without_a_streamer_refuses_an_open_at_the_call() {
 /// The clip over the file's `audio_file` entry, declared in `tier`: the wave of
 /// a resident entry, the stream a streamed entry's path opens.
 fn clip_of(path: &Path, streamed: bool) -> tutti_sampler::Clip<f32> {
-    let mut s = session();
+    let (mut s, _bg) = session();
     let entry = audio_file("ramp", path);
     s.pool(if streamed { entry.streamed() } else { entry })
         .expect("a declaration");
@@ -153,7 +160,7 @@ fn clip_of(path: &Path, streamed: bool) -> tutti_sampler::Clip<f32> {
 /// Renders `clip` at beat 0 on a rolling session for `frames` frames,
 /// waiting first for a streamed clip's ring to prime.
 fn play(clip: tutti_sampler::Clip<f32>, frames: usize) -> Vec<f32> {
-    let mut s = session();
+    let (mut s, _bg) = session();
     let (key, handle) = s.graph().add(clip);
     s.graph()
         .set_sources(Root::output(0), [OutPort::new(key, 0)])
@@ -272,7 +279,7 @@ fn auto_streams_a_file_past_the_threshold_and_holds_a_short_one() {
     }
     w.finalize().expect("finalizes");
 
-    let mut s = session();
+    let (mut s, _bg) = session();
     s.pool((
         audio_file("short", &short).auto(),
         audio_file("long", &long).auto(),
@@ -299,7 +306,7 @@ fn the_threshold_is_part_of_the_identity() {
     let dir = tempfile::tempdir().expect("a temp dir");
     let path = dir.path().join("ramp.wav");
     write_ramp(&path);
-    let mut s = session();
+    let (mut s, _bg) = session();
     s.pool(audio_file("a", &path).auto())
         .expect("a declaration");
     settle(&mut s, "a");

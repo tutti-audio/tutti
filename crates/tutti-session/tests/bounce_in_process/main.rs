@@ -26,12 +26,16 @@ use tutti_units::{Beat, Bpm, SampleRate, Samples, Seconds};
 const RATE: SampleRate = SampleRate::SR_48K;
 
 /// An offline session at [`RATE`] with blocks of up to 128 frames.
-fn offline_session() -> Session {
-    Session::builder()
+fn offline_session() -> (Session, tutti_session::Background) {
+    let (session, mut background) = Session::builder()
         .sample_rate(RATE)
         .max_block(MaxBlock::of(Samples::new(128)))
         .build()
-        .expect("an offline session builds")
+        .expect("an offline session builds");
+    background
+        .spawn_threads(std::num::NonZeroUsize::MIN)
+        .expect("a background thread starts");
+    (session, background)
 }
 
 /// The state that puts the shared plugin in `Notes` mode: its mode parameter set,
@@ -51,7 +55,7 @@ fn notes_state() -> Vec<u8> {
 fn an_in_process_instrument_without_a_live_render_mode_bounces_its_clip() {
     let real = tutti_fixtures::cdylib("tutti_shared_plugin", "tutti-shared-plugin");
     let plugin = PluginRef::file(tutti_fixtures::publish_with_extension(&real, "clap"));
-    let mut session = offline_session();
+    let (mut session, _bg) = offline_session();
     let request = Spec::new(plugin.clone())
         .hosting(Hosting::InProcess)
         .restoring(PeerState::of_plugin(plugin, notes_state()));

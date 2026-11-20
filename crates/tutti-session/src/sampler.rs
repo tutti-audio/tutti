@@ -1,4 +1,4 @@
-//! The session's sampler: a disk stream opened on the session's executor, and
+//! The session's sampler: a disk stream opened on the session's background, and
 //! what lands from it in [`Session::update`](crate::Session::update).
 //!
 //! The streamer opens a file on a thread of its own, so an open takes as long
@@ -22,7 +22,7 @@ use tutti_sampler::{OpenError, Placement, Stream, StreamReader};
 
 use tutti_rt::LockExt;
 
-use crate::WorkerError;
+use crate::BackgroundError;
 use crate::{Session, SessionEvent};
 
 tutti_rt::id! {
@@ -78,14 +78,14 @@ pub enum SamplerError {
     /// streamer thread is gone.
     #[error(transparent)]
     Open(#[from] OpenError),
-    /// The open's job did not finish: it panicked, or the executor dropped it.
+    /// The open's job did not finish: it panicked, or the background dropped it.
     #[error(transparent)]
-    Job(#[from] WorkerError),
+    Job(#[from] BackgroundError),
 }
 
 impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// Opens `path` as a disk stream, its reader starting at `place`, on the
-    /// session's executor. Returns at once; the stream lands as
+    /// session's background. Returns at once; the stream lands as
     /// [`SamplerEvent::Opened`] with the returned id in a later
     /// [`update`](Self::update), on the thread that calls `update()`. A file
     /// that cannot be opened lands as [`SamplerEvent::OpenFailed`], a job that

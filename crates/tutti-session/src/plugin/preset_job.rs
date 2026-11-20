@@ -17,7 +17,7 @@ use tutti_plugin_types::{MainThreadMarker, PluginRefresh, PresetError, PresetId,
 use super::state_job::NodeLookup;
 use super::{PluginSignal, queue};
 use crate::job::job_kind;
-use crate::{HandleError, Job, ListedPreset, ResourceId, Session, WaitError, WorkerError};
+use crate::{BackgroundError, HandleError, Job, ListedPreset, ResourceId, Session, WaitError};
 
 /// Why [`Session::load_preset`] or [`Session::load_preset_file`] started no job.
 #[derive(Clone, Debug, thiserror::Error)]
@@ -61,7 +61,7 @@ pub enum PresetJobFailed {
     Preset(#[from] PresetError),
     /// The worker did not finish.
     #[error(transparent)]
-    Worker(#[from] WorkerError),
+    Worker(#[from] BackgroundError),
     /// The wait could not run ([`Job::wait`]).
     #[error(transparent)]
     Wait(#[from] WaitError),

@@ -15,7 +15,7 @@ use tutti_units::SampleRate;
 
 const RATE: f64 = 48_000.0;
 
-fn offline() -> Session {
+fn offline() -> (Session, tutti_session::Background) {
     Session::builder()
         .sample_rate(SampleRate::of(RATE))
         .build()
@@ -66,7 +66,7 @@ impl Node for Slow {
 
 #[test]
 fn one_event_per_update_with_the_blocks_silenced_since_the_last() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     assert!(silenced(&s.update()).is_empty(), "nothing rendered");
     good_block(&s);
     assert!(silenced(&s.update()).is_empty(), "a good block is no event");
@@ -89,7 +89,7 @@ fn one_event_per_update_with_the_blocks_silenced_since_the_last() {
 /// session says nothing.
 #[test]
 fn over_budget_alone_is_no_event() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let (slow, _) = s.graph().add(ForkByClone(Slow));
     s.graph()
         .set_sources(Root::output(0), [OutPort::new(slow, 0)])

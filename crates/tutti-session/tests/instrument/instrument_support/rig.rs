@@ -29,7 +29,7 @@ pub struct Rig {
     pub origin: usize,
 }
 
-pub fn offline_session() -> Session {
+pub fn offline_session() -> (Session, tutti_session::Background) {
     Session::builder()
         .sample_rate(RATE)
         .max_block(MaxBlock::of(Samples::new(BLOCK)))

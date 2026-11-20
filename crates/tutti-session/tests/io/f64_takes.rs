@@ -61,7 +61,7 @@ fn an_f64_take_reads_back_as_a_clip_holding_a_figure_f32_rounds_away() {
     let writer: Writer = Writer::default();
     let (driver, stream): (_, ManualStream<f64>) = ManualStreamDriver::<f64>::new();
     let spec = OutputSpec::new(SampleRate::SR_48K, ChannelLayout::STEREO, SampleFormat::F64);
-    let mut session = Session::builder()
+    let (mut session, _bg) = Session::builder()
         .float::<f64>()
         .input_opener(Opener(Arc::clone(&writer)))
         .device(Default::default())

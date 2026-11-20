@@ -19,7 +19,7 @@ use tutti_units::SampleRate;
 #[test]
 fn a_blocked_enumeration_does_not_hold_the_update_and_lands_when_it_answers() {
     let (driver, _stream) = ManualStreamDriver::new();
-    let mut s = Session::builder()
+    let (mut s, _bg) = Session::builder()
         .device(Default::default())
         .build_device_on(
             OutputSpec::new(
@@ -70,7 +70,7 @@ fn a_blocked_enumeration_does_not_hold_the_update_and_lands_when_it_answers() {
 #[test]
 fn a_failed_listing_reports_the_typed_error() {
     let (driver, _stream) = ManualStreamDriver::new();
-    let mut s = Session::builder()
+    let (mut s, _bg) = Session::builder()
         .device(Default::default())
         .build_device_on(
             OutputSpec::new(

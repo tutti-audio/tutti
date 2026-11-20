@@ -2,7 +2,7 @@
 
 The main entry point for building an application on tutti: one object that holds a graph of audio processors, a playback clock and, optionally, a sound device.
 
-It can render offline, play to a sound card, or hand the audio work to you. Most people will use it through the `tutti` crate.
+It can render offline, play to a sound card, or hand the audio work to you. A build gives you the session and its `Background`, which runs the loading and decoding the session starts: start its threads, or let your frame loop run it a little at a time. Most people will use it through the `tutti` crate.
 
 This crate is part of [tutti](https://github.com/tutti-audio/tutti), a real-time audio engine for Rust.
 

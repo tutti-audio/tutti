@@ -49,7 +49,7 @@ struct Rig {
 
 /// `Const(A) -> Halve -> output 0`, committed once.
 fn rig() -> Rig {
-    let mut s = Session::builder().build().expect("builds");
+    let (mut s, _bg) = Session::builder().build().expect("builds");
     let g = s.graph();
     let (a, _) = g.add(ForkByClone(Const::mono(A)));
     let (halve, _) = g.add(ForkByClone(Halve));

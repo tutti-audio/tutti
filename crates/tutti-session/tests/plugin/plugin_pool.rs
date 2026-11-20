@@ -97,18 +97,28 @@ fn layout(mode: &str) {
 }
 
 /// An offline session with `recovery` as its policy (`None`: recovery off).
-fn session_with(recovery: Option<RecoveryPolicy>) -> Session {
+fn session_with(recovery: Option<RecoveryPolicy>) -> (Session, tutti_session::Background) {
     servers();
     let builder = Session::builder().max_block(MaxBlock::of(Samples::new(BLOCK)));
-    match recovery {
+    let (session, mut background) = match recovery {
         Some(policy) => builder.plugin_recovery(policy),
         None => builder.no_plugin_recovery(),
     }
     .build()
-    .expect("an offline session builds")
+    .expect("an offline session builds");
+    start(&mut background);
+    (session, background)
 }
 
-fn session(recovery: bool) -> Session {
+/// Starts one background thread: the pool's loads are background work, and the helpers
+/// here update until they land.
+fn start(background: &mut tutti_session::Background) {
+    background
+        .spawn_threads(std::num::NonZeroUsize::MIN)
+        .expect("a background thread starts");
+}
+
+fn session(recovery: bool) -> (Session, tutti_session::Background) {
     session_with(recovery.then(RecoveryPolicy::default))
 }
 
@@ -206,7 +216,7 @@ fn loaded<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>>(
 #[test]
 fn a_served_plugin_lands_through_the_pool() {
     let (catalog, _dir) = catalog();
-    let mut s = session(true);
+    let (mut s, _bg) = session(true);
     s.pool(s.plugin_entry("verb", &second_id(), &catalog))
         .expect("a served load needs no main thread");
     assert!(matches!(s.pool_state(&"verb"), Some(PoolState::Loading)));
@@ -239,7 +249,7 @@ fn a_served_plugin_lands_through_the_pool() {
 #[test]
 fn an_id_the_catalog_lacks_fails_its_load() {
     let (catalog, _dir) = catalog();
-    let mut s = session(true);
+    let (mut s, _bg) = session(true);
     let absent = PluginId::Clap("com.example.absent".into());
     s.pool(s.plugin_entry("gone", &absent, &catalog)).unwrap();
     let event = until(&mut s, "the failure", |k, _| *k == "gone");
@@ -256,7 +266,7 @@ fn an_id_the_catalog_lacks_fails_its_load() {
 #[test]
 fn an_initial_state_of_another_plugin_is_refused() {
     let (catalog, _dir) = catalog();
-    let s = session(true);
+    let (s, _bg) = session(true);
     let state_of = |id: &PluginId| {
         let entry = catalog
             .entries()
@@ -279,7 +289,7 @@ fn an_initial_state_of_another_plugin_is_refused() {
 #[test]
 fn a_dead_server_with_recovery_off_is_lost_and_retry_reloads() {
     let (catalog, _dir) = catalog();
-    let mut s = session(false);
+    let (mut s, _bg) = session(false);
     s.pool(s.plugin_entry("verb", &first_id(), &catalog))
         .unwrap();
     loaded(&mut s, "verb");
@@ -399,7 +409,7 @@ fn recovery_keeps_a_plugin_live_until_it_gives_up() {
             });
     };
 
-    let mut s = session(true);
+    let (mut s, _bg) = session(true);
     s.pool(s.plugin_entry("verb", &first_id(), &catalog))
         .unwrap();
     loaded(&mut s, "verb");
@@ -417,7 +427,7 @@ fn recovery_keeps_a_plugin_live_until_it_gives_up() {
         "recovering reads live"
     );
 
-    let mut s = session_with(Some(RecoveryPolicy {
+    let (mut s, _bg) = session_with(Some(RecoveryPolicy {
         max_failures: 0,
         ..RecoveryPolicy::default()
     }));
@@ -441,7 +451,7 @@ fn recovery_keeps_a_plugin_live_until_it_gives_up() {
 fn an_initial_state_is_restored_and_two_keys_load_two_plugins() {
     const CUTOFF: ParamId = ParamId::new(101);
     let (catalog, _dir) = catalog();
-    let mut s = session(true);
+    let (mut s, _bg) = session(true);
     s.pool(s.plugin_entry("a", &first_id(), &catalog)).unwrap();
     loaded(&mut s, "a");
     let a = s.add_pooled_plugin(&"a").unwrap();
@@ -496,7 +506,7 @@ fn an_initial_state_is_restored_and_two_keys_load_two_plugins() {
 fn a_state_job_saves_what_the_plugin_holds_and_refuses_by_name() {
     const CUTOFF: ParamId = ParamId::new(101);
     let (catalog, _dir) = catalog();
-    let mut s = session(true);
+    let (mut s, mut bg) = session(true);
     s.pool((
         s.plugin_entry("a", &first_id(), &catalog),
         s.plugin_entry("idle", &first_id(), &catalog),
@@ -546,7 +556,7 @@ fn a_state_job_saves_what_the_plugin_holds_and_refuses_by_name() {
         .save_state(&"a", StateUse::Project)
         .expect("a node holds the plugin");
     assert_ne!(saving.status(), JobStatus::Done, "it lands in an update");
-    let state = saving.wait(&mut s).expect("a state");
+    let state = saving.wait(&mut s, &mut bg).expect("a state");
     assert_eq!(
         state.media_type().as_str(),
         "application/x-clap-state",
@@ -564,7 +574,7 @@ fn a_state_job_saves_what_the_plugin_holds_and_refuses_by_name() {
     let duplicate = s
         .save_state(&"a", StateUse::Duplicate)
         .expect("a node holds the plugin")
-        .wait(&mut s)
+        .wait(&mut s, &mut bg)
         .expect("a duplicate state");
     assert_eq!(
         duplicate.bytes()[CONTEXT_BYTE],
@@ -601,7 +611,7 @@ fn a_state_job_saves_what_the_plugin_holds_and_refuses_by_name() {
 #[test]
 fn a_state_job_of_a_dead_plugin_lands_the_plugins_refusal() {
     let (catalog, _dir) = catalog();
-    let mut s = session(false);
+    let (mut s, mut bg) = session(false);
     s.pool(s.plugin_entry("a", &first_id(), &catalog)).unwrap();
     loaded(&mut s, "a");
     let node = s.add_pooled_plugin(&"a").unwrap();
@@ -615,7 +625,7 @@ fn a_state_job_of_a_dead_plugin_lands_the_plugins_refusal() {
     let saving = s
         .save_state(&"a", StateUse::Project)
         .expect("the node is still there");
-    let landed = saving.wait(&mut s);
+    let landed = saving.wait(&mut s, &mut bg);
     assert!(
         matches!(
             landed,
@@ -632,7 +642,7 @@ fn a_state_job_of_a_dead_plugin_lands_the_plugins_refusal() {
 #[test]
 fn a_swap_to_a_plugin_with_other_ports_fails_the_entry() {
     let (catalog, _dir) = catalog();
-    let mut s = session(true);
+    let (mut s, _bg) = session(true);
     s.pool(s.plugin_entry("fx", &first_id(), &catalog)).unwrap();
     loaded(&mut s, "fx");
     let node = s.add_pooled_plugin(&"fx").unwrap();
@@ -677,7 +687,7 @@ fn a_swap_to_a_plugin_with_other_ports_fails_the_entry() {
 #[test]
 fn a_changed_identity_swaps_the_node() {
     let (catalog, _dir) = catalog();
-    let mut s = session(true);
+    let (mut s, _bg) = session(true);
     s.pool(s.plugin_entry("fx", &first_id(), &catalog)).unwrap();
     loaded(&mut s, "fx");
     let node = s.add_pooled_plugin(&"fx").unwrap();
@@ -714,7 +724,7 @@ fn a_changed_identity_swaps_the_node() {
 #[test]
 fn a_node_holds_its_entry_until_it_is_removed() {
     let (catalog, _dir) = catalog();
-    let mut s = session(true);
+    let (mut s, _bg) = session(true);
     s.pool(s.plugin_entry("fx", &first_id(), &catalog)).unwrap();
     loaded(&mut s, "fx");
     let node = s.add_pooled_plugin(&"fx").unwrap();
@@ -751,35 +761,47 @@ impl Node for Grenade {
 
 /// A session with no output, whose audio side a test can take (a re-prepare
 /// then waits for it).
-fn detached() -> DetachedSession {
+fn detached() -> (DetachedSession, tutti_session::Background) {
     detached_with(Some(RecoveryPolicy::default()))
 }
 
 /// [`detached`] with `recovery` as its policy (`None`: recovery off).
-fn detached_with(recovery: Option<RecoveryPolicy>) -> DetachedSession {
+fn detached_with(recovery: Option<RecoveryPolicy>) -> (DetachedSession, tutti_session::Background) {
     servers();
     let builder = Session::builder().max_block(MaxBlock::of(Samples::new(BLOCK)));
-    match recovery {
+    let (session, mut background) = match recovery {
         Some(policy) => builder.plugin_recovery(policy),
         None => builder.no_plugin_recovery(),
     }
     .build_detached(SampleRate::SR_48K)
-    .expect("a detached session builds")
+    .expect("a detached session builds");
+    start(&mut background);
+    (session, background)
 }
 
 /// One session with the first plugin loaded and in a node, under key `fx`.
-fn with_node(catalog: &Catalog) -> (Session, tutti_session::Key<tutti_session::AnyPlugin>) {
+fn with_node(
+    catalog: &Catalog,
+) -> (
+    Session,
+    tutti_session::Background,
+    tutti_session::Key<tutti_session::AnyPlugin>,
+) {
     with_node_in(session(true), catalog)
 }
 
 fn with_node_in<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>>(
-    mut s: Session<K, C>,
+    (mut s, background): (Session<K, C>, tutti_session::Background),
     catalog: &Catalog,
-) -> (Session<K, C>, tutti_session::Key<tutti_session::AnyPlugin>) {
+) -> (
+    Session<K, C>,
+    tutti_session::Background,
+    tutti_session::Key<tutti_session::AnyPlugin>,
+) {
     s.pool(s.plugin_entry("fx", &first_id(), catalog)).unwrap();
     loaded(&mut s, "fx");
     let node = s.add_pooled_plugin(&"fx").unwrap();
-    (s, node)
+    (s, background, node)
 }
 
 fn pid_of<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>>(
@@ -809,7 +831,7 @@ fn declare_with_layout(
 #[test]
 fn a_swap_to_the_same_totals_in_other_buses_fails_the_entry() {
     let (catalog, _dir) = catalog();
-    let (mut s, node) = with_node(&catalog);
+    let (mut s, _bg, node) = with_node(&catalog);
     declare_with_layout(&mut s, &catalog, &second_id(), Hosting::Auto, "3");
     let events = until_all(&mut s, "the failure", "fx");
     let [
@@ -838,7 +860,7 @@ fn a_swap_to_the_same_totals_in_other_buses_fails_the_entry() {
 #[test]
 fn a_retry_after_a_refused_swap_swaps_the_node() {
     let (catalog, _dir) = catalog();
-    let (mut s, node) = with_node(&catalog);
+    let (mut s, _bg, node) = with_node(&catalog);
     let first = pid_of(&s, node);
     declare_with_layout(&mut s, &catalog, &second_id(), Hosting::Auto, "1");
     let events = until_all(&mut s, "the failure", "fx");
@@ -874,7 +896,7 @@ fn a_retry_after_a_refused_swap_swaps_the_node() {
 #[test]
 fn a_later_identity_is_the_one_the_node_ends_on() {
     let (catalog, _dir) = catalog();
-    let (mut s, node) = with_node(&catalog);
+    let (mut s, _bg, node) = with_node(&catalog);
     let first = pid_of(&s, node);
     declare_with_layout(&mut s, &catalog, &second_id(), Hosting::Auto, "1");
     let events = until_all(&mut s, "the failure", "fx");
@@ -905,7 +927,7 @@ fn repreparing<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>>(
 #[test]
 fn a_swap_waits_for_the_graph_and_ends_on_the_last_identity() {
     let (catalog, _dir) = catalog();
-    let (mut s, node) = with_node_in(detached(), &catalog);
+    let (mut s, _bg, node) = with_node_in(detached(), &catalog);
     let first = pid_of(&s, node);
     let mut side = repreparing(&mut s);
 
@@ -961,7 +983,7 @@ fn a_swap_waits_for_the_graph_and_ends_on_the_last_identity() {
 #[test]
 fn a_node_removed_while_its_swap_waits_leaves_the_plugin_to_the_entry() {
     let (catalog, _dir) = catalog();
-    let (mut s, node) = with_node_in(detached(), &catalog);
+    let (mut s, _bg, node) = with_node_in(detached(), &catalog);
     let mut side = repreparing(&mut s);
     s.pool(s.plugin_entry("fx", &second_id(), &catalog))
         .unwrap();
@@ -992,7 +1014,7 @@ fn a_node_removed_while_its_swap_waits_leaves_the_plugin_to_the_entry() {
 #[test]
 fn a_graph_that_refuses_the_swap_fails_the_entry() {
     let (catalog, _dir) = catalog();
-    let (mut s, node) = with_node(&catalog);
+    let (mut s, _bg, node) = with_node(&catalog);
     s.graph().add(Unforkable(Grenade));
     // The session's executor is local, so both halves of the re-prepare run
     // here and the grenade's panic has poisoned the editor when this returns.
@@ -1024,7 +1046,7 @@ fn a_graph_that_refuses_the_swap_fails_the_entry() {
 #[test]
 fn a_plugin_that_dies_during_a_re_prepare_is_silenced_when_it_resumes() {
     let (catalog, _dir) = catalog();
-    let (mut s, node) = with_node_in(detached_with(None), &catalog);
+    let (mut s, _bg, node) = with_node_in(detached_with(None), &catalog);
     let tail = s
         .graph_ref()
         .node_tail(node)
@@ -1073,7 +1095,7 @@ mod process {
     #[test]
     fn a_plugin_dead_before_its_node_is_lost_and_refuses_one() {
         let (catalog, _dir) = catalog();
-        let mut s = session(true);
+        let (mut s, _bg) = session(true);
         s.pool(s.plugin_entry("verb", &first_id(), &catalog))
             .unwrap();
         loaded(&mut s, "verb");
@@ -1101,7 +1123,7 @@ mod process {
     #[test]
     fn a_removed_node_leaves_the_entry_without_a_plugin_and_frees_its_server() {
         let (catalog, _dir) = catalog();
-        let mut s = session(true);
+        let (mut s, _bg) = session(true);
         s.pool(s.plugin_entry("fx", &first_id(), &catalog)).unwrap();
         loaded(&mut s, "fx");
         let node = s.add_pooled_plugin(&"fx").unwrap();
@@ -1137,7 +1159,7 @@ mod process {
     #[test]
     fn a_removed_served_plugin_is_dropped_with_no_graveyard_entry() {
         let (catalog, _dir) = catalog();
-        let mut s = session(true);
+        let (mut s, _bg) = session(true);
         s.pool(s.plugin_entry("fx", &first_id(), &catalog)).unwrap();
         loaded(&mut s, "fx");
         let node = s.add_pooled_plugin(&"fx").unwrap();
@@ -1189,7 +1211,7 @@ fn dropped_events_at_the_node_accumulate_across_a_reload_of_its_plugin() {
             .sum()
     };
     let (catalog, _dir) = catalog();
-    let (mut s, node) = with_node(&catalog);
+    let (mut s, _bg, node) = with_node(&catalog);
     s.graph().connect(node, Root).unwrap();
     let (inlet, mut writer) = s.graph().open_event_inlet(EventCapacity::of(512));
     s.graph()

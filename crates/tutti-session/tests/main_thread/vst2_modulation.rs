@@ -32,10 +32,13 @@ fn vst2_probe() -> std::path::PathBuf {
 /// A detached stereo session at 48 kHz with the probe loaded in process, on
 /// the outputs, its parameter values read.
 fn session_with_probe() -> (DetachedSession, NodeKey) {
-    let mut s = Session::builder()
+    let (mut s, mut background) = Session::builder()
         .outputs_floor(ChannelLayout::STEREO)
         .build_detached(RATE)
         .expect("a detached session builds");
+    background
+        .spawn_threads(std::num::NonZeroUsize::MIN)
+        .expect("a background thread starts");
     let node = s
         .load_plugin_blocking(
             tutti_fixtures::main_thread(),

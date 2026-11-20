@@ -64,7 +64,7 @@ fn rewired(events: &[SessionEvent]) -> Vec<(NodeKey, Wired, Wired)> {
 /// nothing, there is no node left to notify.
 #[test]
 fn a_connect_and_the_loss_of_the_last_source_are_each_reported_once() {
-    let mut s = Session::builder().build().expect("builds");
+    let (mut s, _bg) = Session::builder().build().expect("builds");
     let g = s.graph();
     let (a, _) = g.add(ForkByClone(Const::mono(0.5)));
     let (x, _) = g.add(ForkByClone(Bused));

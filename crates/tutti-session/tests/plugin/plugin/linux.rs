@@ -17,7 +17,7 @@ fn a_reload_that_fails_to_load_carries_the_bridge_error_as_its_source() {
     std::fs::copy(clap_probe(), &copy).expect("a copy of the reference plugin");
     // The copy is probed before the session's variables are set.
     crate::pooled::prime(&PluginRef::file(&copy));
-    let mut s = session_built(&[("TUTTI_CLAP_PROBE_CRASH_ON_BLOCK", "40")], |b| {
+    let (mut s, _bg) = session_built(&[("TUTTI_CLAP_PROBE_CRASH_ON_BLOCK", "40")], |b| {
         b.plugin_recovery(tutti_session::RecoveryPolicy {
             max_failures: 2,
             backoff: Duration::from_millis(1),
@@ -133,11 +133,11 @@ fn process_ended(pid: u32) -> bool {
 #[test]
 fn a_plugin_that_stops_answering_is_ended_and_replaced() {
     let once = once_file("recovery-hang.once");
-    // The reload runs in the first frame's collect after the death is reported:
-    // the drive checks the hung server is gone before that frame's jobs run.
+    // The reload's thread starts when the death is reported: the drive checks the hung
+    // server is gone in the frame that submitted it.
     let hung_pid = Arc::new(std::sync::atomic::AtomicU32::new(0));
     let pid_cell = Arc::clone(&hung_pid);
-    let mut s = session_built(
+    let (mut s, _bg) = session_built(
         &[
             PASSTHROUGH,
             ("TUTTI_CLAP_PROBE_ONCE_FILE", &once),

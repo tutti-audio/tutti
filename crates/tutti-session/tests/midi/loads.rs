@@ -19,10 +19,14 @@ use tutti_session::{
 };
 use tutti_units::{Beat, SampleRate, Seconds};
 
-fn session() -> DetachedSession {
-    Session::builder()
+fn session() -> (DetachedSession, tutti_session::Background) {
+    let (session, mut background) = Session::builder()
         .build_detached(SampleRate::SR_48K)
-        .expect("builds")
+        .expect("builds");
+    background
+        .spawn_threads(std::num::NonZeroUsize::MIN)
+        .expect("a background thread starts");
+    (session, background)
 }
 
 /// Set Tempo, 120 beats a minute (500 000 microseconds a quarter), at tick 0.
@@ -66,9 +70,13 @@ fn write(dir: &Path, name: &str, bytes: &[u8]) -> PathBuf {
 }
 
 /// Loads the file at `path` and waits for it.
-fn load(s: &mut DetachedSession, path: PathBuf) -> Result<LoadedMidi, LoadMidiError> {
+fn load(
+    s: &mut DetachedSession,
+    background: &mut tutti_session::Background,
+    path: PathBuf,
+) -> Result<LoadedMidi, LoadMidiError> {
     let job = s.midi().load_midi(path);
-    job.wait(s)
+    job.wait(s, background)
 }
 
 /// A file held only as bytes loads as the file at its path does: the same
@@ -82,9 +90,9 @@ fn a_midi_file_loads_from_bytes_as_its_tracks() {
             track(&[&note(0, 64), &note(0, 67)]),
         ],
     );
-    let mut s = session();
+    let (mut s, mut bg) = session();
     let job = s.midi().load_midi(bytes);
-    let loaded = job.wait(&mut s).expect("loads");
+    let loaded = job.wait(&mut s, &mut bg).expect("loads");
     assert_eq!(loaded.file().tracks().len(), 2);
     assert_eq!(loaded.track(1).unwrap().events.len(), 4);
     let tempo = loaded.tempo().expect("one timeline");
@@ -103,7 +111,8 @@ fn a_format_1_file_lands_each_track_with_its_clip_and_the_shared_timeline() {
             track(&[&note(0, 64), &note(0, 67)]),
         ],
     );
-    let loaded = load(&mut session(), write(dir.path(), "f1.mid", &bytes)).expect("loads");
+    let (mut s, mut bg) = session();
+    let loaded = load(&mut s, &mut bg, write(dir.path(), "f1.mid", &bytes)).expect("loads");
 
     assert_eq!(loaded.file().tracks().len(), 2);
     // A note is its note-on and its note-off.
@@ -137,7 +146,8 @@ fn a_format_2_file_has_no_common_timeline_and_each_track_its_own_tempo() {
             track(&[&TEMPO_60, &note(0, 62)]),
         ],
     );
-    let loaded = load(&mut session(), write(dir.path(), "f2.mid", &bytes)).expect("loads");
+    let (mut s, mut bg) = session();
+    let loaded = load(&mut s, &mut bg, write(dir.path(), "f2.mid", &bytes)).expect("loads");
 
     assert_eq!(loaded.tempo().unwrap_err(), NoCommonTimelineError::PerTrack);
     assert_eq!(loaded.meter().unwrap_err(), NoCommonTimelineError::PerTrack);
@@ -154,7 +164,8 @@ fn a_track_past_the_end_is_no_such_track() {
         1,
         &[track(&[&TEMPO_120, &THREE_FOUR]), track(&[&note(0, 60)])],
     );
-    let loaded = load(&mut session(), write(dir.path(), "two.mid", &bytes)).expect("loads");
+    let (mut s, mut bg) = session();
+    let loaded = load(&mut s, &mut bg, write(dir.path(), "two.mid", &bytes)).expect("loads");
     assert_eq!(
         loaded.track(2).unwrap_err(),
         TrackError::NoSuch {
@@ -170,7 +181,8 @@ fn a_track_past_the_end_is_no_such_track() {
 fn a_repaired_file_reports_what_the_read_added() {
     let dir = tempfile::tempdir().unwrap();
     let bytes = smf(0, &[track(&[&note(0, 60)])]);
-    let loaded = load(&mut session(), write(dir.path(), "bare.mid", &bytes)).expect("loads");
+    let (mut s, mut bg) = session();
+    let loaded = load(&mut s, &mut bg, write(dir.path(), "bare.mid", &bytes)).expect("loads");
     let report = loaded.report();
     assert_eq!(
         report.normalized,
@@ -199,7 +211,8 @@ fn an_event_with_no_packet_is_reported_at_its_beat() {
         0,
         &[track(&[&TEMPO_120, &THREE_FOUR, &escape, &note(0, 60)])],
     );
-    let loaded = load(&mut session(), write(dir.path(), "esc.mid", &bytes)).expect("loads");
+    let (mut s, mut bg) = session();
+    let loaded = load(&mut s, &mut bg, write(dir.path(), "esc.mid", &bytes)).expect("loads");
     let dropped = &loaded.report().dropped;
     assert_eq!(dropped.len(), 1);
     assert_eq!((dropped[0].track, dropped[0].beat), (0, Beat::new(0.5)));
@@ -217,7 +230,8 @@ fn a_time_signature_no_meter_holds_is_reported_at_its_beat() {
     let mut zero = zero.to_vec();
     zero.push(8);
     let bytes = smf(0, &[track(&[&TEMPO_120, &zero])]);
-    let loaded = load(&mut session(), write(dir.path(), "zero.mid", &bytes)).expect("loads");
+    let (mut s, mut bg) = session();
+    let loaded = load(&mut s, &mut bg, write(dir.path(), "zero.mid", &bytes)).expect("loads");
     let refused = &loaded.report().refused_time_signatures;
     assert_eq!(refused.len(), 1);
     assert_eq!((refused[0].0, refused[0].1.beat), (None, Beat::new(2.0)));
@@ -233,7 +247,8 @@ fn a_file_in_smpte_time_lands_and_says_why_it_has_no_clip_or_timeline() {
     let dir = tempfile::tempdir().unwrap();
     // -25 frames a second, 40 ticks a frame (`E7 28`).
     let bytes = b"MThd\0\0\0\x06\0\0\0\x01\xE7\x28MTrk\0\0\0\x04\0\xFF\x2F\0";
-    let loaded = load(&mut session(), write(dir.path(), "smpte.mid", bytes)).expect("loads");
+    let (mut s, mut bg) = session();
+    let loaded = load(&mut s, &mut bg, write(dir.path(), "smpte.mid", bytes)).expect("loads");
     assert_eq!(loaded.track(0).unwrap_err(), TrackError::SmpteTiming);
     assert_eq!(
         loaded.tempo().unwrap_err(),
@@ -248,7 +263,8 @@ fn a_file_in_smpte_time_lands_and_says_why_it_has_no_clip_or_timeline() {
 #[test]
 fn a_missing_file_lands_a_read_error() {
     let dir = tempfile::tempdir().unwrap();
-    let outcome = load(&mut session(), dir.path().join("none.mid"));
+    let (mut s, mut bg) = session();
+    let outcome = load(&mut s, &mut bg, dir.path().join("none.mid"));
     assert!(
         matches!(outcome, Err(LoadMidiError::Read(_))),
         "{outcome:?}"
@@ -278,7 +294,7 @@ fn two_loads_land_in_update_each_for_its_own_job() {
             ])],
         ),
     );
-    let mut s = session();
+    let (mut s, _bg) = session();
     let (ja, jb) = (s.midi().load_midi(a), s.midi().load_midi(b));
     assert_ne!(ja.id(), jb.id());
     let (mut got_a, mut got_b) = (None, None);
@@ -325,7 +341,7 @@ mod soundfont {
 
     #[test]
     fn a_soundfont_entry_loads_a_font_a_unit_is_built_from() {
-        let mut s = session();
+        let (mut s, _bg) = session();
         s.pool(soundfont(
             "gm",
             tutti_fixtures::asset("soundfonts/TimGM6mb.sf2"),
@@ -340,7 +356,7 @@ mod soundfont {
     #[test]
     fn a_soundfont_entry_loads_from_bytes() {
         let bytes = std::fs::read(tutti_fixtures::asset("soundfonts/TimGM6mb.sf2")).unwrap();
-        let mut s = session();
+        let (mut s, _bg) = session();
         s.pool(soundfont("gm", bytes)).unwrap();
         assert!(matches!(settled(&mut s, "gm"), PoolState::Loaded));
         assert!(!s.soundfont(&"gm").unwrap().presets().is_empty());
@@ -351,7 +367,7 @@ mod soundfont {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("junk.sf2");
         std::fs::write(&path, b"this is not a RIFF file at all").unwrap();
-        let mut s = session();
+        let (mut s, _bg) = session();
         s.pool(soundfont("junk", path)).unwrap();
         assert!(matches!(
             settled(&mut s, "junk"),

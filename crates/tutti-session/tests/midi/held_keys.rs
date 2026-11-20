@@ -61,7 +61,7 @@ fn offs(seen: &Seen) -> usize {
 /// A clip holds note 60 for a long time; mid-note the host re-aims it.
 #[test]
 fn retarget_with_a_held_clip_note() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let (a, a_seen) = tap(&mut s);
     let (b, b_seen) = tap(&mut s);
     s.midi()
@@ -111,7 +111,7 @@ fn retarget_with_a_held_clip_note() {
 /// The host's routes move a held key from one sink to another, then to none.
 #[test]
 fn set_routes_with_a_held_key() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let mail = Arc::new(Mutex::new(Vec::new()));
     let (src, ()) = s.graph().add(Src(Arc::clone(&mail)));
     let (a, a_seen) = tap(&mut s);
@@ -188,7 +188,7 @@ impl SessionNode for GroupSrc {
 /// the keys stay held and whatever Group 1 sends.
 #[test]
 fn a_group_route_cut_with_keys_held_ends_them_at_the_next_block_then_nothing() {
-    let mut s = Session::builder()
+    let (mut s, _bg) = Session::builder()
         .midi_groups(MidiGroup::of(1))
         .build()
         .expect("builds");

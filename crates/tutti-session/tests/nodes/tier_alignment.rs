@@ -75,11 +75,14 @@ fn render(tier: Tier) -> (Vec<f32>, Vec<f32>, Samples) {
     let path = dir.path().join("ramp.wav");
     write_ramp(&path);
 
-    let mut s = Session::builder()
+    let (mut s, mut background) = Session::builder()
         .sample_rate(SampleRate::of(RATE))
         .outputs(ChannelLayout::QUAD)
         .build()
         .expect("builds");
+    background
+        .spawn_threads(std::num::NonZeroUsize::MIN)
+        .expect("a background thread starts");
 
     // The latent path, on output 2.
     let (src, _) = s.graph().add(ForkByClone(Const::mono(1.0)));

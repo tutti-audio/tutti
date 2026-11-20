@@ -12,7 +12,7 @@ use tutti_session::{OutPort, Root, Session, SetRefusal, ValueErrorKind};
 use tutti_tempo::TempoMap;
 use tutti_units::{Amplitude, Beat, Bpm, SampleRate};
 
-fn offline() -> Session {
+fn offline() -> (Session, tutti_session::Background) {
     Session::builder()
         .sample_rate(SampleRate::SR_48K)
         .build()
@@ -31,7 +31,7 @@ fn ramped() -> TempoMap {
 /// A write of a map is read back whole, and a constant tempo is a one-step map.
 #[test]
 fn a_tempo_map_written_is_the_map_read_back() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let tempo = s.transport_handle().tempo();
     let map = Arc::new(ramped());
     s.set(tempo.to(Arc::clone(&map))).unwrap();
@@ -94,10 +94,11 @@ fn accents(peaks: &[f32]) -> Vec<bool> {
 /// next downbeat to beat 3.
 #[test]
 fn the_clicks_accent_follows_the_transports_meter() {
-    let four_four = accents(&peaks(&mut offline(), 4));
+    let (mut four_four_session, _four_four_bg) = offline();
+    let four_four = accents(&peaks(&mut four_four_session, 4));
     assert_eq!(four_four, [true, false, false, false]);
 
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     s.set(
         s.transport_handle()
             .meter()
@@ -114,7 +115,7 @@ fn the_clicks_accent_follows_the_transports_meter() {
 /// `NotFinite`; each lands nothing, and both ends are taken.
 #[test]
 fn a_click_volume_outside_the_unit_range_is_refused_and_lands_nothing() {
-    let s = offline();
+    let (s, _bg) = offline();
     let volume = s.click().volume();
     s.set(volume.to(Amplitude::new(0.25))).unwrap();
     for (bad, refusal) in [
@@ -138,7 +139,7 @@ fn a_click_volume_outside_the_unit_range_is_refused_and_lands_nothing() {
 /// click level is not written, and the error names the level's position.
 #[test]
 fn a_batch_with_a_refused_click_volume_lands_nothing() {
-    let s = offline();
+    let (s, _bg) = offline();
     let tempo = s.transport_handle().tempo();
     let before = s.get(tempo).unwrap();
     let refused = s
@@ -157,7 +158,7 @@ fn a_batch_with_a_refused_click_volume_lands_nothing() {
 /// at once, each of the four modes.
 #[test]
 fn the_click_mode_is_read_back_for_each_mode() {
-    let s = offline();
+    let (s, _bg) = offline();
     let mode = s.click().mode();
     assert_eq!(s.get(mode).unwrap(), MetronomeMode::Off, "the default");
     for written in [

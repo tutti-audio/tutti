@@ -22,7 +22,7 @@ const STEP: usize = 32;
 /// A port's connect crossfade: `DECLICK` at 48 kHz.
 const DECLICK: usize = 240;
 
-fn offline() -> Session {
+fn offline() -> (Session, tutti_session::Background) {
     Session::builder()
         .sample_rate(SampleRate::of(RATE))
         .build()
@@ -49,7 +49,7 @@ fn render(s: &mut Session, frames: usize) -> [Vec<f32>; 2] {
 /// and the node reads it: the render shows each band's own value.
 #[test]
 fn a_write_reaches_the_index_it_names() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let (node, _) = s.graph().add(Params(Bands::new(100.0, 500.0)));
     s.graph()
         .set_sources_unfaded(Root::output(0), [OutPort::new(node, 0)])
@@ -87,7 +87,7 @@ fn a_write_reaches_the_index_it_names() {
 /// The graph declares each index modulatable on its own.
 #[test]
 fn the_graph_declares_each_index() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let (node, _) = s.graph().add(Params(Bands::new(0.0, 0.0)));
     let _ = s.update();
     assert!(s.graph().declares_param(node, BAND0).unwrap());
@@ -113,7 +113,7 @@ fn the_graph_declares_each_index() {
 /// reconciler to the lane's knob and port.
 #[test]
 fn a_route_to_index_1_does_not_touch_index_0() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let (node, _) = s.graph().add(Params(Bands::new(100.0, 500.0)));
     s.graph()
         .set_sources_unfaded(Root::output(0), [OutPort::new(node, 0)])

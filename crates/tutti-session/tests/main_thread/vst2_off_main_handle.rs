@@ -24,10 +24,13 @@ use tutti_units::SampleRate;
 /// saved on the main thread, and the parameter is the value written first.
 fn a_pool_thread_is_answered_while_the_main_thread_updates_the_session() {
     let main = tutti_fixtures::main_thread();
-    let mut session = Session::builder()
+    let (mut session, mut background) = Session::builder()
         .outputs_floor(ChannelLayout::STEREO)
         .build_detached(SampleRate::SR_48K)
         .expect("a detached session builds");
+    background
+        .spawn_threads(std::num::NonZeroUsize::MIN)
+        .expect("a background thread starts");
     let node = session
         .load_plugin_blocking(
             main,

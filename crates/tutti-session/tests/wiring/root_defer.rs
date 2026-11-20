@@ -20,8 +20,8 @@ const BLOCK: usize = 64;
 const FADE: usize = 240;
 
 /// A stereo session whose root is fed (0.25, 0.75), the plan installed.
-fn session() -> Session {
-    let mut s = Session::builder()
+fn session() -> (Session, tutti_session::Background) {
+    let (mut s, bg) = Session::builder()
         .sample_rate(SampleRate::SR_48K)
         .max_block(MaxBlock::of(Samples::new(BLOCK)))
         .build()
@@ -33,7 +33,7 @@ fn session() -> Session {
             .unwrap();
     }
     let _ = s.update();
-    s
+    (s, bg)
 }
 
 /// One update, then one block rendered; the update's events and the block.
@@ -133,7 +133,7 @@ fn start_fade(s: &mut Session) -> tutti_graph::TapReader {
 /// holds exactly the frames rendered since the announcement.
 #[test]
 fn a_redeclare_of_another_width_mid_fade_applies_with_everything_that_reads_the_root() {
-    let mut s = session();
+    let (mut s, _bg) = session();
     let mut mono_tap = start_fade(&mut s);
     s.declare_root_topology(Some(root(4))).expect("quad");
     assert_eq!(s.requested_root_topology(), Some(&root(4)));
@@ -215,7 +215,7 @@ fn a_redeclare_of_another_width_mid_fade_applies_with_everything_that_reads_the_
 /// root's 0.25.
 #[test]
 fn two_redeclares_mid_fade_apply_the_newest_once() {
-    let mut s = session();
+    let (mut s, _bg) = session();
     let _tap = start_fade(&mut s);
     s.declare_root_topology(Some(root(4))).expect("quad");
     let _ = block(&mut s);
@@ -249,7 +249,7 @@ fn two_redeclares_mid_fade_apply_the_newest_once() {
 #[test]
 fn a_waiting_declaration_is_pending_until_it_applies() {
     use tutti_session::RootTopologyStatus;
-    let mut s = session();
+    let (mut s, _bg) = session();
     let _tap = start_fade(&mut s);
     assert_eq!(s.root_topology_status(), RootTopologyStatus::Applied);
     s.declare_root_topology(Some(root(4))).expect("quad");
@@ -269,7 +269,7 @@ fn a_waiting_declaration_is_pending_until_it_applies() {
 #[test]
 fn a_refused_newer_declaration_leaves_the_waiting_one_to_apply() {
     use tutti_session::RootTopologyStatus;
-    let mut s = session();
+    let (mut s, _bg) = session();
     let _tap = start_fade(&mut s);
     s.declare_root_topology(Some(root(4))).expect("quad");
     let buses = ChannelTopology::unassigned(ChannelLayout::from_count(4));
@@ -294,7 +294,7 @@ fn a_refused_newer_declaration_leaves_the_waiting_one_to_apply() {
 /// alone.
 #[test]
 fn a_hard_redeclare_mid_fade_applies_at_once_and_drops_the_waiting_one() {
-    let mut s = session();
+    let (mut s, _bg) = session();
     let _tap = start_fade(&mut s);
     s.declare_root_topology(Some(root(6))).expect("5.1");
     s.declare_root_topology(Some(root(4)))
@@ -353,7 +353,7 @@ fn swapped() -> ChannelTopology {
 /// by the law: `left = 0.25 (1 - s) + 0.75 s`, `right = 0.75 (1 - s) + 0.25 s`.
 #[test]
 fn a_bus_fed_root_redeclared_mid_fade_keeps_its_fold_until_the_fade_ends() {
-    let mut s = Session::builder()
+    let (mut s, _bg) = Session::builder()
         .sample_rate(SampleRate::SR_48K)
         .max_block(MaxBlock::of(Samples::new(BLOCK)))
         .root_topology(root(2))

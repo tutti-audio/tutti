@@ -6,7 +6,7 @@ use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_session::{BlockDates, Session};
 use tutti_units::{SampleRate, Samples};
 
-fn session(dates: BlockDates, rate: f64) -> Session {
+fn session(dates: BlockDates, rate: f64) -> (Session, tutti_session::Background) {
     Session::builder()
         .sample_rate(SampleRate::of(rate))
         .max_block(MaxBlock::of(Samples::new(512)))
@@ -25,7 +25,7 @@ fn render(s: &Session) {
 #[test]
 fn frames_date_the_sessions_blocks_by_the_frames_rendered() {
     for rate in [48_000u64, 44_100] {
-        let s = session(BlockDates::Frames, rate as f64);
+        let (s, _bg) = session(BlockDates::Frames, rate as f64);
         assert_eq!(s.playhead().at(), None, "nothing is dated before a block");
         render(&s);
         let origin = s.playhead().at().expect("block 0 is dated");
@@ -41,7 +41,7 @@ fn frames_date_the_sessions_blocks_by_the_frames_rendered() {
 /// **`Os` dates never go back.**
 #[test]
 fn os_dates_never_go_back() {
-    let s = session(BlockDates::Os, 48_000.0);
+    let (s, _bg) = session(BlockDates::Os, 48_000.0);
     let mut last = i64::MIN;
     for _ in 0..20 {
         render(&s);

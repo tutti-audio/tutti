@@ -25,7 +25,7 @@ const RATE: f64 = 48_000.0;
 
 /// An offline session at `RATE`, stereo, graph blocks of up to 1 024 frames
 /// (the live engine's `LIVE_MAX_BLOCK`).
-fn offline() -> Session {
+fn offline() -> (Session, tutti_session::Background) {
     Session::builder()
         .sample_rate(SampleRate::of(RATE))
         .build()
@@ -70,7 +70,7 @@ fn run(s: &Session, frames: usize, block: usize, seek: bool) -> Vec<f32> {
 ///
 /// The click has no inputs: it reads its block's `Env`.
 fn render_click(frames: usize) -> Vec<f32> {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     s.set((
         s.click().mode().to(MetronomeMode::Always),
         s.click().volume().to(Amplitude::new(1.0)),
@@ -138,7 +138,7 @@ fn the_graph_runs_at_the_rate_it_was_built_at() {
 /// at its 44.1 kHz default would say 22 050.
 #[test]
 fn the_transport_converts_at_the_sessions_rate() {
-    let s = offline();
+    let (s, _bg) = offline();
     assert_eq!(s.sample_rate(), SampleRate::of(RATE));
     let beat = (s.tempo_map())
         .view(s.sample_rate())
@@ -183,7 +183,7 @@ fn voice(cents: f64) -> tutti_sampler::VoicePool<f32> {
 /// outputs, the transport rolling from the first block: `frames` stereo
 /// frames in `block`-frame device blocks.
 fn render_voice(cents: f64, frames: usize, block: usize) -> Vec<f32> {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let (voice, _handle) = s.graph().add(tutti_graph::Unforkable(voice(cents)));
     for port in 0..2 {
         s.graph()
@@ -283,7 +283,7 @@ fn a_voice_plays_in_time_at_every_device_block_size() {
 /// one block per call; a detached session has no engine and no readings.
 #[test]
 fn an_offline_render_feeds_the_load_and_the_block_counts() {
-    let s = offline();
+    let (s, _bg) = offline();
     let mut block = vec![0.0f32; 128 * 2];
     for _ in 0..4 {
         s.render(&mut InterleavedMut::new(&mut block, ChannelLayout::STEREO).unwrap());
@@ -291,7 +291,7 @@ fn an_offline_render_feeds_the_load_and_the_block_counts() {
     assert_eq!(s.blocks().expect("an offline engine").get().blocks, 4);
     let mean = s.load().expect("an offline engine").get().get();
     assert!(mean > 0.0, "a render takes some time");
-    let detached = Session::builder()
+    let (detached, _bg) = Session::builder()
         .build_detached(SampleRate::of(RATE))
         .expect("builds");
     assert!(detached.load().is_none());
@@ -304,7 +304,7 @@ fn an_offline_render_feeds_the_load_and_the_block_counts() {
 /// engine fed it).
 #[test]
 fn an_offline_render_feeds_the_master_meter() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let mut meter = s.take_master_meter().expect("declared at the build");
     let (dc, _) = s.graph().add(ForkByClone(Const::mono(0.5)));
     s.graph()
@@ -321,7 +321,7 @@ fn an_offline_render_feeds_the_master_meter() {
     assert!((r[1].rms.get() - 0.5).abs() < 1e-6, "{r:?}");
     assert_eq!(r[0].frames, Samples::new(128));
 
-    let mut detached = Session::builder()
+    let (mut detached, _bg) = Session::builder()
         .outputs_floor(ChannelLayout::MONO)
         .build_detached(SampleRate::of(RATE))
         .expect("builds");
@@ -346,7 +346,7 @@ fn an_offline_render_feeds_the_master_meter() {
 /// what is checked).
 #[test]
 fn opening_a_tap_or_meter_on_a_missing_source_is_refused() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let (a, _) = s.graph().add(ForkByClone(Const::mono(0.5)));
     let ghost = tutti_graph::NodeKey(0xdead);
     assert_eq!(
@@ -406,7 +406,7 @@ fn opening_a_tap_or_meter_on_a_missing_source_is_refused() {
 /// reader's meter is closed by the Reclaim phase and its op leaves the plan.
 #[test]
 fn a_track_meter_reads_a_nodes_port_and_goes_with_the_node() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let (a, _) = s.graph().add(ForkByClone(Const::mono(0.5)));
     let (b, _) = s.graph().add(ForkByClone(Const::mono(0.25)));
     s.graph()
@@ -452,7 +452,7 @@ fn a_dropped_meter_reader_leaves_the_plan_at_the_reclaim_phase() {
             .filter(|op| matches!(op, Op::Meter { .. }))
             .count()
     };
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let (a, _) = s.graph().add(ForkByClone(Const::mono(0.5)));
     let track = s.graph().meters().open_node(a).expect("the sources exist");
     let _ = s.update();
@@ -484,7 +484,7 @@ fn closing_a_meter_names_one_that_is_not_open() {
             .filter(|op| matches!(op, Op::Meter { .. }))
             .count()
     };
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let (a, _) = s.graph().add(ForkByClone(Const::mono(0.5)));
     let track = s.graph().meters().open_node(a).expect("the sources exist");
     let _ = s.update();
@@ -515,7 +515,7 @@ fn closing_a_meter_names_one_that_is_not_open() {
 /// none opened, is `NotOpen`, and a detached session says it has no engine.
 #[test]
 fn closing_the_heard_tap_names_one_that_is_not_open() {
-    let s = offline();
+    let (s, _bg) = offline();
     assert_eq!(
         s.close_output_tap(),
         Err(tutti_session::SessionOutputTapError::Tap(
@@ -537,7 +537,7 @@ fn closing_the_heard_tap_names_one_that_is_not_open() {
         "closed already"
     );
     drop(tap);
-    let detached = Session::builder()
+    let (detached, _bg) = Session::builder()
         .build_detached(SampleRate::of(RATE))
         .expect("builds");
     assert_eq!(
@@ -551,7 +551,7 @@ fn closing_the_heard_tap_names_one_that_is_not_open() {
 /// value (a constant 0.5 on the left, silence on the right), in order.
 #[test]
 fn an_offline_render_feeds_an_output_tap() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let (dc, _) = s.graph().add(ForkByClone(Const::mono(0.5)));
     s.graph()
         .set_sources_unfaded(Root::output(0), [OutPort::new(dc, 0)])
@@ -586,7 +586,7 @@ fn an_offline_render_feeds_an_output_tap() {
 /// the new source from the next commit on.
 #[test]
 fn an_output_tap_follows_a_rewired_output() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let (a, _) = s.graph().add(ForkByClone(Const::mono(0.5)));
     let (b, _) = s.graph().add(ForkByClone(Const::mono(0.25)));
     s.graph()
@@ -631,7 +631,7 @@ fn a_dropped_reader_leaves_the_plan_at_the_reclaim_phase() {
             .filter(|op| matches!(op, Op::Tap { .. }))
             .count()
     };
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let tap = s
         .graph()
         .taps()
@@ -654,7 +654,7 @@ fn a_dropped_reader_leaves_the_plan_at_the_reclaim_phase() {
 /// taps are fed too: the tap is an op in the plan, not the engine's.
 #[test]
 fn a_detached_render_feeds_a_tap() {
-    let mut s = Session::builder()
+    let (mut s, _bg) = Session::builder()
         .outputs_floor(ChannelLayout::MONO)
         .build_detached(SampleRate::of(RATE))
         .expect("builds");
@@ -723,7 +723,7 @@ impl tutti_graph::Node for Gated {
 #[test]
 fn a_tap_steps_at_a_transport_stop_where_the_output_fades() {
     use tutti_units::{At, Frame};
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let (gate, _) = s.graph().add(tutti_graph::Unforkable(Gated));
     s.graph()
         .set_sources_unfaded(Root::output(0), [OutPort::new(gate, 0)])
@@ -788,7 +788,7 @@ fn a_tap_steps_at_a_transport_stop_where_the_output_fades() {
 #[test]
 fn the_heard_tap_carries_the_fade_at_a_stop() {
     use tutti_units::{At, Frame};
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let (gate, _) = s.graph().add(tutti_graph::Unforkable(Gated));
     s.graph()
         .set_sources_unfaded(Root::output(0), [OutPort::new(gate, 0)])
@@ -858,7 +858,7 @@ fn the_heard_tap_carries_the_fade_at_a_stop() {
 /// live tap.
 #[test]
 fn render_feeds_the_heard_tap_and_a_fork_does_not() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let (dc, _) = s.graph().add(ForkByClone(Const::mono(0.5)));
     s.graph()
         .set_sources_unfaded(Root::output(0), [OutPort::new(dc, 0)])
@@ -890,7 +890,7 @@ fn render_feeds_the_heard_tap_and_a_fork_does_not() {
     assert_eq!(tap.available(), Samples::new(64), "the fork wrote nothing");
     assert_eq!(out, [0.5, 0.5]);
     tap.take_lost();
-    let detached = Session::builder()
+    let (detached, _bg) = Session::builder()
         .build_detached(SampleRate::of(RATE))
         .expect("builds");
     assert_eq!(
@@ -906,7 +906,7 @@ fn render_feeds_the_heard_tap_and_a_fork_does_not() {
 /// writer also checks (`read_is_held`).
 #[test]
 fn a_dropped_heard_reader_frees_the_tap() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let tap = s
         .open_output_tap(Samples::new(64))
         .expect("an engine")

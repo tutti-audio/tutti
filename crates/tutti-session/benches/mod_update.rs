@@ -31,7 +31,7 @@ use tutti_units::{BeatsPerCycle, Depth, Hz, Q};
 const UPDATES: usize = 2_000;
 
 fn scene(n: usize, modulated: bool) -> (Session, Vec<Key<SvfFilterNode<f32>>>) {
-    let mut s = Session::builder()
+    let (mut s, _bg) = Session::builder()
         .max_block(MaxBlock::of(Samples::new(512)))
         .build()
         .expect("builds");

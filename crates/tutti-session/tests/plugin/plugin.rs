@@ -60,7 +60,7 @@ fn set_env(key: &str, value: impl AsRef<std::ffi::OsStr>) {
 
 /// An offline stereo session at 48 kHz, its servers' environment set:
 /// the server's path, the offline extra, and `extra`.
-fn session(extra: &[(&str, &str)]) -> Session {
+fn session(extra: &[(&str, &str)]) -> (Session, tutti_session::Background) {
     session_built(extra, |b| b)
 }
 
@@ -68,7 +68,7 @@ fn session(extra: &[(&str, &str)]) -> Session {
 fn session_built(
     extra: &[(&str, &str)],
     build: impl FnOnce(tutti_session::SessionBuilder) -> tutti_session::SessionBuilder,
-) -> Session {
+) -> (Session, tutti_session::Background) {
     // The probe of the plugin's file runs before any fault variable is set.
     crate::pooled::prime(&PluginRef::file(clap_probe()));
     set_env("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server());
@@ -79,14 +79,17 @@ fn session_built(
     for (key, value) in extra {
         set_env(key, value);
     }
-    // The executor is polled: a job runs in the `Collect` that polls it and lands
-    // there, in a deterministic order. A test that wants another executor says so
-    // in `build`.
-    build(Session::builder().executor(tutti_platform::Executor::new()))
+    let (s, mut background) = build(Session::builder())
         .sample_rate(RATE)
         .max_block(MaxBlock::of(Samples::new(BLOCK)))
         .build()
-        .expect("an offline session builds")
+        .expect("an offline session builds");
+    // One background thread runs the pool's loads, which the helpers here update
+    // until they land.
+    background
+        .spawn_threads(std::num::NonZeroUsize::MIN)
+        .expect("a background thread starts");
+    (s, background)
 }
 
 /// Loads the probe into `s` (blocking), unwired.
@@ -190,7 +193,7 @@ fn wired_probe(s: &mut Session) -> (NodeKey, Samples) {
 /// the token and runs the phase again: back to realtime, with no update.
 #[test]
 fn an_export_announces_offline_before_its_first_block_and_realtime_after() {
-    let mut s = session(&[]);
+    let (mut s, _bg) = session(&[]);
     let (node, base) = wired_probe(&mut s);
     let offline = base + Samples::new(OFFLINE_EXTRA);
 
@@ -214,7 +217,7 @@ fn an_export_announces_offline_before_its_first_block_and_realtime_after() {
 /// nothing is announced from a drop (it may be a worker's).
 #[test]
 fn a_dropped_export_job_restores_realtime_on_the_next_update() {
-    let mut s = session(&[]);
+    let (mut s, _bg) = session(&[]);
     let (node, base) = wired_probe(&mut s);
     let offline = base + Samples::new(OFFLINE_EXTRA);
 
@@ -249,7 +252,7 @@ fn a_dropped_export_job_restores_realtime_on_the_next_update() {
 /// plugin.
 #[test]
 fn a_plugin_added_mid_export_is_told_offline() {
-    let mut s = session(&[]);
+    let (mut s, _bg) = session(&[]);
     let (dc, _) = s
         .graph()
         .add(ForkByClone(tutti_nodes::testing::Const::mono(0.0)));
@@ -283,7 +286,7 @@ fn a_plugin_added_mid_export_is_told_offline() {
 /// after reports it again.
 #[test]
 fn a_plugin_dead_for_the_window_stays_silent_at_its_node_and_is_reported_once() {
-    let mut s = session_built(&[("TUTTI_CLAP_PROBE_CRASH_ON_BLOCK", "1")], |b| {
+    let (mut s, _bg) = session_built(&[("TUTTI_CLAP_PROBE_CRASH_ON_BLOCK", "1")], |b| {
         b.no_plugin_recovery()
     });
     let (node, _) = wired_probe(&mut s);
@@ -394,7 +397,7 @@ impl tutti_graph::Node for DropWitness {
 /// this one: every drop of the fork's witness is this thread's.
 #[test]
 fn export_leftovers_drop_on_the_main_thread() {
-    let mut s = session(&[]);
+    let (mut s, _bg) = session(&[]);
     let drops: Arc<Mutex<Vec<std::thread::ThreadId>>> = Arc::default();
     let (witness, _) = s.graph().add(ForkByClone(DropWitness(Arc::clone(&drops))));
     let probe = add_probe(&mut s);
@@ -476,13 +479,13 @@ fn renders_sound(s: &mut Session) -> bool {
 }
 
 /// A virtual clock for the session's phases, and every event they reported
-/// (the jobs' landings included: the session's executor is polled, so a job
-/// submitted in a frame runs and lands in that frame's `Phase::Collect`).
+/// (the jobs' landings included: a job submitted in a frame has a thread of its own and
+/// lands in a `Phase::Collect` after it ends).
 struct Drive {
     now: Instant,
     events: Vec<SessionEvent>,
     /// Checked in every frame once a `Reloading` has been reported, after the
-    /// plugins' phase submitted the reload and before the `Collect` that runs it.
+    /// plugins' phase submitted the reload.
     at_reload: Option<Box<dyn Fn()>>,
     /// Whether a `Reloading` has been reported.
     reload_reported: bool,
@@ -521,7 +524,7 @@ impl Drive {
             check();
         }
         self.events.extend(out);
-        // The jobs it submitted run, and what they sent lands.
+        // What the jobs sent so far lands.
         s.run_phase(Phase::Collect, PhaseCx::at(self.now), &mut self.events);
         // The commit that puts a replacement into the executor's plan, and the
         // collect that frees the plan's old unit on this thread.
@@ -557,7 +560,7 @@ impl Drive {
 fn a_crashed_plugin_comes_back_at_its_node_with_its_last_state() {
     const EXTRA: usize = 48;
     let once = once_file("recovery-crash.once");
-    let mut s = session_built(
+    let (mut s, _bg) = session_built(
         &[
             PASSTHROUGH,
             APPLY_GAIN,
@@ -595,13 +598,7 @@ fn a_crashed_plugin_comes_back_at_its_node_with_its_last_state() {
         std::thread::sleep(Duration::from_millis(5));
     }
     let t0 = Instant::now();
-    for at in [0, 2_000] {
-        let cx = PhaseCx::at(t0 + Duration::from_millis(at));
-        // The snapshot job runs in the collect's poll, and lands there.
-        s.run_phase(Phase::Plugins, cx, &mut Vec::new());
-        s.run_phase(Phase::Collect, cx, &mut Vec::new());
-    }
-    assert!(s.plugin_view(node).unwrap().state().last_good().is_some());
+    snapshot_at(&mut s, node, t0);
     let total_before = s.latency();
 
     // Render into the crash, then through the recovery.
@@ -734,7 +731,7 @@ fn a_crashed_plugin_comes_back_at_its_node_with_its_last_state() {
 /// the node and its record kept, and no `PluginChange::Died`.
 #[test]
 fn a_plugin_that_crashes_every_time_is_given_up_on() {
-    let mut s = session_built(&[("TUTTI_CLAP_PROBE_CRASH_ON_BLOCK", "1")], |b| {
+    let (mut s, _bg) = session_built(&[("TUTTI_CLAP_PROBE_CRASH_ON_BLOCK", "1")], |b| {
         b.plugin_recovery(tutti_session::RecoveryPolicy {
             max_failures: 2,
             backoff: Duration::from_millis(1),
@@ -813,7 +810,7 @@ fn a_plugin_that_crashes_every_time_is_given_up_on() {
 #[test]
 fn a_reload_completes_with_no_host_code_but_update() {
     let once = once_file("recovery-update-only.once");
-    let mut s = session_built(
+    let (mut s, _bg) = session_built(
         &[
             PASSTHROUGH,
             ("TUTTI_CLAP_PROBE_ONCE_FILE", &once),
@@ -880,7 +877,7 @@ fn a_reload_completes_with_no_host_code_but_update() {
 #[test]
 fn a_killed_server_reads_died_then_reloading() {
     let once = once_file("health-died-reloading.once");
-    let mut s = session_built(
+    let (mut s, _bg) = session_built(
         &[
             ("TUTTI_CLAP_PROBE_ONCE_FILE", &once),
             ("TUTTI_CLAP_PROBE_CRASH_ON_BLOCK", "1"),
@@ -967,7 +964,7 @@ fn quick_reload_policy() -> tutti_session::RecoveryPolicy {
 #[test]
 fn a_plugin_that_stops_answering_is_declared_hung_with_recovery_off() {
     let once = once_file("recovery-off-hang.once");
-    let mut s = session_built(
+    let (mut s, _bg) = session_built(
         &[
             PASSTHROUGH,
             ("TUTTI_CLAP_PROBE_ONCE_FILE", &once),
@@ -1027,7 +1024,7 @@ fn a_plugin_that_stops_answering_is_declared_hung_with_recovery_off() {
 /// seconds; both totals did rise (else the test proves nothing).
 #[test]
 fn a_slow_plugin_that_still_answers_is_not_declared_hung() {
-    let mut s = session_built(
+    let (mut s, _bg) = session_built(
         &[PASSTHROUGH, ("TUTTI_CLAP_PROBE_STALL_US", "80000")],
         |b| {
             b.plugin_hang(quick_hang_policy())
@@ -1081,7 +1078,7 @@ fn a_slow_plugin_that_still_answers_is_not_declared_hung() {
 #[test]
 fn a_replacement_with_other_ports_is_refused_and_the_graph_stays_editable() {
     let once = once_file("recovery-ports.once");
-    let mut s = session_built(
+    let (mut s, _bg) = session_built(
         &[
             ("TUTTI_CLAP_PROBE_ONCE_FILE", &once),
             ("TUTTI_CLAP_PROBE_CRASH_ON_BLOCK", "1"),
@@ -1187,14 +1184,30 @@ fn a_replacement_with_other_ports_is_refused_and_the_graph_stays_editable() {
 /// Captures a snapshot of `node` at once, as a host's worker would (the
 /// session's snapshot cadence is 1 s here, driven by the virtual clock).
 fn snapshot_now(s: &mut Session, node: NodeKey) {
-    let t0 = Instant::now();
+    snapshot_at(s, node, Instant::now());
+}
+
+/// Takes a snapshot of `node` on the virtual clock from `t0`: the first phase starts the
+/// clock, the second, 2 s on, submits the save, and the collects after it land it.
+fn snapshot_at(s: &mut Session, node: NodeKey, t0: Instant) {
     for at in [0, 2_000] {
-        let cx = PhaseCx::at(t0 + Duration::from_millis(at));
-        // The snapshot job runs in the collect's poll, and lands there.
-        s.run_phase(Phase::Plugins, cx, &mut Vec::new());
-        s.run_phase(Phase::Collect, cx, &mut Vec::new());
+        s.run_phase(
+            Phase::Plugins,
+            PhaseCx::at(t0 + Duration::from_millis(at)),
+            &mut Vec::new(),
+        );
     }
-    assert!(s.plugin_view(node).unwrap().state().last_good().is_some());
+    // A guard against a save that never ends.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while s.plugin_view(node).unwrap().state().last_good().is_none() {
+        assert!(Instant::now() < deadline, "the snapshot never landed");
+        s.run_phase(
+            Phase::Collect,
+            PhaseCx::at(t0 + Duration::from_millis(2_000)),
+            &mut Vec::new(),
+        );
+        std::thread::yield_now();
+    }
 }
 
 fn recovered_state(drive: &Drive) -> Vec<tutti_session::StateRestore> {
@@ -1220,7 +1233,7 @@ fn recovered_state(drive: &Drive) -> Vec<tutti_session::StateRestore> {
 #[test]
 fn a_snapshot_that_kills_the_load_is_withheld_from_the_next_attempt() {
     let once = once_file("recovery-withheld.once");
-    let mut s = session_built(
+    let (mut s, _bg) = session_built(
         &[
             PASSTHROUGH,
             APPLY_GAIN,
@@ -1338,7 +1351,7 @@ fn a_snapshot_that_kills_the_load_is_withheld_from_the_next_attempt() {
 /// would have used the snapshot again.
 #[test]
 fn a_plugin_that_dies_soon_after_restoring_loses_the_snapshot() {
-    let mut s = session_built(&[("TUTTI_CLAP_PROBE_CRASH_ON_BLOCK", "3")], |b| {
+    let (mut s, _bg) = session_built(&[("TUTTI_CLAP_PROBE_CRASH_ON_BLOCK", "3")], |b| {
         b.snapshot_interval(Duration::from_secs(1))
             .plugin_recovery(tutti_session::RecoveryPolicy {
                 max_failures: 5,
@@ -1383,7 +1396,7 @@ fn a_plugin_that_dies_soon_after_restoring_loses_the_snapshot() {
 #[test]
 fn an_export_during_the_recovery_window_is_refused() {
     let once = once_file("recovery-export.once");
-    let mut s = session_built(
+    let (mut s, _bg) = session_built(
         &[
             ("TUTTI_CLAP_PROBE_ONCE_FILE", &once),
             ("TUTTI_CLAP_PROBE_CRASH_ON_BLOCK", "1"),
@@ -1464,7 +1477,7 @@ impl tutti_graph::Node for CancelOnSecondBlock {
 #[test]
 fn a_cancelled_export_frees_the_token_and_the_forked_server() {
     use std::sync::atomic::AtomicUsize;
-    let mut s = session(&[]);
+    let (mut s, _bg) = session(&[]);
     let probe = add_probe(&mut s);
     let blocks = Arc::new(AtomicUsize::new(0));
     let handle = Arc::new(std::sync::OnceLock::new());
@@ -1523,7 +1536,7 @@ fn a_cancelled_export_frees_the_token_and_the_forked_server() {
 /// again), none is withheld.
 #[test]
 fn a_death_after_a_refused_restore_does_not_withhold_the_snapshot() {
-    let mut s = session_built(
+    let (mut s, _bg) = session_built(
         &[
             ("TUTTI_CLAP_PROBE_CRASH_ON_BLOCK", "3"),
             ("TUTTI_CLAP_PROBE_REFUSE_STATE_LOAD", "1"),

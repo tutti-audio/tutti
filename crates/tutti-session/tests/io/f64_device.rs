@@ -23,7 +23,7 @@ fn an_f64_device_session_renders_a_figure_f32_rounds_away_to_its_stream() {
     assert_ne!(f64::from((0.75 * FINE) as f32), 0.75 * FINE);
     let (driver, stream) = ManualStreamDriver::<f64>::new();
     let spec = OutputSpec::new(SampleRate::SR_48K, ChannelLayout::MONO, SampleFormat::F64);
-    let mut s = Session::builder()
+    let (mut s, _bg) = Session::builder()
         .float::<f64>()
         .outputs_floor(ChannelLayout::MONO)
         .device(Default::default())
@@ -60,7 +60,7 @@ fn an_f64_device_session_switches_to_the_timer_and_keeps_rendering_fine() {
     assert_ne!(f64::from(FINE as f32), FINE);
     let (driver, stream) = ManualStreamDriver::<f64>::new();
     let spec = OutputSpec::new(SampleRate::SR_48K, ChannelLayout::MONO, SampleFormat::F64);
-    let mut live = Session::builder()
+    let (mut live, _bg) = Session::builder()
         .float::<f64>()
         .outputs_floor(ChannelLayout::MONO)
         .device(Default::default())

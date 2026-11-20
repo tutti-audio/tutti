@@ -23,7 +23,9 @@
 //! use tutti::nodes::{LfoNode, LfoShape};
 //! use tutti::{ChannelLayout, Hz, InterleavedMut, Root, SampleRate, Session};
 //!
-//! let mut session = Session::new(SampleRate::SR_48K).expect("a session builds");
+//! // A build returns the session and its `Background`, which runs the loading and
+//! // decoding the session queues: this session queues none.
+//! let (mut session, _background) = Session::new(SampleRate::SR_48K).expect("a session builds");
 //!
 //! // A 440 Hz sine into the session's output. The node's own controls come back
 //! // with its key; they set its parameters live.
@@ -360,8 +362,8 @@ pub mod types {
         beats_per_sample, first_frame_at_or_after, frames_per_beat, snap_to_whole_frame,
     };
     pub use tutti_platform::{
-        Asset, Destination, Executor, Identity, Open, Panicked, PriorityRequest, ReadSeek, Sleep,
-        Staged, StagedCommitError, StagedFile, StagedKeep, Stamp, Threads,
+        Asset, Destination, Identity, Open, ReadSeek, Staged, StagedCommitError, StagedFile,
+        StagedKeep, Stamp,
     };
     pub use tutti_rt::{
         AtomicCell, AtomicWord, Bell, Bells, Count, Counter, CounterWriter, Drained, Gauge,
@@ -473,7 +475,7 @@ pub mod session {
     };
     // The pool.
     pub use tutti_session::Load as PoolLoad;
-    pub use tutti_session::WorkerError;
+    pub use tutti_session::{Background, BackgroundError};
     pub use tutti_session::{
         Declared, HandleError, IntoPool, Life, LoadError, OpenCx, Owned, PoolConfig, PoolEntry,
         PoolError, PoolEvent, PoolJobError, PoolKey, PoolLoaded, PoolOutcome, PoolReport, PoolSet,

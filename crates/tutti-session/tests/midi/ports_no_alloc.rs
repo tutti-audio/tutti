@@ -40,7 +40,7 @@ fn an_input_and_an_output_port_render_without_allocating() {
         vec![persistent_endpoint(10, "Synth")],
         usize::MAX,
     );
-    let mut s = Session::builder()
+    let (mut s, _bg) = Session::builder()
         .midi_hardware_over(backend, tutti_midi_hardware::MidiHardwareConfig::new())
         .build()
         .expect("builds");

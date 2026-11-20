@@ -105,7 +105,7 @@ fn handle_with(cause: Option<PluginFailure>) -> PluginHandle {
 /// A detached session with a fake plugin (reporting `cause`) hosted at a dc
 /// node.
 fn session_with(cause: Option<PluginFailure>) -> (DetachedSession, NodeKey) {
-    let mut s = Session::builder()
+    let (mut s, _bg) = Session::builder()
         .outputs_floor(ChannelLayout::STEREO)
         .build_detached(SampleRate::DEFAULT)
         .expect("a detached session builds");
@@ -162,7 +162,7 @@ fn observe(s: &mut DetachedSession, frames: usize) -> Vec<(NodeKey, PluginFailur
 #[test]
 fn a_non_plugin_node_never_marks_the_graph_edited() {
     let _ = tutti_fixtures::main_thread();
-    let mut s = Session::builder()
+    let (mut s, _bg) = Session::builder()
         .outputs_floor(ChannelLayout::STEREO)
         .build_detached(SampleRate::DEFAULT)
         .expect("a detached session builds");
@@ -313,7 +313,7 @@ fn session_reporting() -> (
     )
     .with_refresh_sink(refresh.clone())
     .with_invalidate_sink(invalidate.clone());
-    let mut s = Session::builder()
+    let (mut s, _bg) = Session::builder()
         .outputs_floor(ChannelLayout::STEREO)
         .build_detached(SampleRate::DEFAULT)
         .expect("a detached session builds");

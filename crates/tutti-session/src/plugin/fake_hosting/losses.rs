@@ -98,7 +98,7 @@ impl Counters {
 /// A detached session with the fake plugin at a node, given a node's counters.
 fn hosted() -> (DetachedSession, NodeKey, Counters, FakePlugin) {
     let (handle, fake) = handle();
-    let mut s = Session::builder()
+    let (mut s, _bg) = Session::builder()
         .outputs_floor(ChannelLayout::STEREO)
         .build_detached(SampleRate::DEFAULT)
         .expect("a detached session builds");

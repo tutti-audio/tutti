@@ -59,9 +59,7 @@ fn session_with_output() -> (
     Arc<Mutex<Option<ThreadId>>>,
     Arc<AtomicBool>,
 ) {
-    let executor = tutti_platform::Executor::new();
-    let mut session = Session::builder()
-        .executor(executor.clone())
+    let (mut session, mut background) = Session::builder()
         .build_detached(SampleRate::SR_48K)
         .expect("a detached session builds");
     let dropped_on = Arc::default();
@@ -75,7 +73,7 @@ fn session_with_output() -> (
             },
         ))
         .expect("this is the main thread");
-    executor.run_until_stalled();
+    background.run_until_stalled();
     (session, dropped_on, dropped)
 }
 
@@ -120,7 +118,7 @@ impl PoolEntry for Dual {
         let made = move || {
             if fail.load(Ordering::SeqCst) {
                 Err(tutti_session::LoadError::Job(
-                    tutti_session::WorkerError::Dropped,
+                    tutti_session::BackgroundError::Dropped,
                 ))
             } else {
                 Ok(Arc::new(1))
@@ -139,21 +137,18 @@ impl PoolEntry for Dual {
     }
 }
 
-fn held_session() -> (DetachedSession, tutti_platform::Executor) {
-    let executor = tutti_platform::Executor::new();
-    let session = Session::builder()
-        .executor(executor.clone())
+fn held_session() -> (DetachedSession, tutti_session::Background) {
+    Session::builder()
         .build_detached(SampleRate::SR_48K)
-        .expect("a detached session builds");
-    (session, executor)
+        .expect("a detached session builds")
 }
 
-fn run_held(executor: &tutti_platform::Executor) -> usize {
-    executor.run_until_stalled()
+fn run_held(background: &mut tutti_session::Background) -> usize {
+    background.run_until_stalled()
 }
 
 fn retry_of_a_main_stage_load_is_refused_off_the_main_thread_until_an_update_ran_on_it() {
-    let (mut session, executor) = held_session();
+    let (mut session, mut background) = held_session();
     let fail = Arc::new(AtomicBool::new(true));
     let entry = |fail: &Arc<AtomicBool>| {
         Declared::new(
@@ -165,7 +160,7 @@ fn retry_of_a_main_stage_load_is_refused_off_the_main_thread_until_an_update_ran
         )
     };
     session.pool(entry(&fail)).expect("on the main thread");
-    run_held(&executor);
+    run_held(&mut background);
     // The failure lands in an update that is not on the main thread.
     let mut session = thread::spawn(move || {
         let _ = session.update();
@@ -179,7 +174,7 @@ fn retry_of_a_main_stage_load_is_refused_off_the_main_thread_until_an_update_ran
 }
 
 fn a_key_whose_load_needs_no_main_thread_does_not_join_a_flight_that_does_off_the_main_thread() {
-    let (mut session, executor) = held_session();
+    let (mut session, mut background) = held_session();
     let fail = Arc::new(AtomicBool::new(false));
     let served = move |name, main| {
         Declared::shared(
@@ -191,7 +186,7 @@ fn a_key_whose_load_needs_no_main_thread_does_not_join_a_flight_that_does_off_th
         )
     };
     session.pool(served("a", true)).expect("on the main thread");
-    assert_eq!(run_held(&executor), 1, "a's load started");
+    assert_eq!(run_held(&mut background), 1, "a's load started");
     // On another thread, a is declared again in its served form and b joins in
     // that form: a's flight waits for a main thread this call has not got.
     let again = served.clone();
@@ -203,12 +198,12 @@ fn a_key_whose_load_needs_no_main_thread_does_not_join_a_flight_that_does_off_th
     })
     .join()
     .unwrap();
-    assert_eq!(run_held(&executor), 1, "b started its own load");
+    assert_eq!(run_held(&mut background), 1, "b started its own load");
     // On the main thread b joins a's flight instead.
     session
         .pool((served("a", false), served("b", false), served("c", false)))
         .unwrap();
-    assert_eq!(run_held(&executor), 0, "c joined a flight");
+    assert_eq!(run_held(&mut background), 0, "c joined a flight");
 }
 
 pub(crate) const CASES: &[(&str, fn())] = tutti_fixtures::cases!["pool_main";

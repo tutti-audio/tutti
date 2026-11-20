@@ -34,7 +34,7 @@ impl MidiOut for Wire {
 #[test]
 fn the_midi_clock_reaches_the_output_on_the_timers_blocks() {
     let wire = Wire::default();
-    let mut system = Session::builder()
+    let (mut system, _bg) = Session::builder()
         .sample_rate(SampleRate::SR_48K)
         .max_block(MaxBlock::of(Samples::new(480)))
         .system_clock()

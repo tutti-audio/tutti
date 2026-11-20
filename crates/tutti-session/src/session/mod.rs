@@ -143,7 +143,7 @@ impl Session<&'static str, Offline> {
     /// # Errors
     ///
     /// As [`SessionBuilder::build`](crate::SessionBuilder::build).
-    pub fn new(rate: SampleRate) -> crate::Result<Self> {
+    pub fn new(rate: SampleRate) -> crate::Result<(Self, crate::Background)> {
         Self::builder().sample_rate(rate).build()
     }
 }

@@ -76,14 +76,14 @@ fn render_stem(
 }
 
 /// A detached stereo session whose graph is at the export's rate.
-fn session() -> DetachedSession {
-    let mut session = Session::builder()
+fn session() -> (DetachedSession, tutti_session::Background) {
+    let (mut session, bg) = Session::builder()
         .inputs(ChannelLayout::EMPTY)
         .outputs_floor(ChannelLayout::STEREO)
         .build_detached(SampleRate::DEFAULT)
         .expect("a detached session builds");
     session.graph().set_sample_rate(SampleRate::of(RATE));
-    session
+    (session, bg)
 }
 
 /// A timeline at `tempo` BPM from beat 0, at the export's rate.
@@ -113,7 +113,7 @@ fn on(seconds: f64, clock: &Arc<OfflineTimeline>) -> Bounce<NodeKey, BufferMaste
 fn a_node_export_follows_a_90_bpm_timeline() {
     let tone = |i: usize| (std::f32::consts::TAU * 440.0 * i as f32 / RATE as f32).sin();
 
-    let mut session = session();
+    let (mut session, _bg) = session();
     let mut wave = tutti_buffers::Wave::new(1, SampleRate::of(RATE));
     for i in 0..RATE as usize {
         wave.append(Interleaved::new(&[tone(i)], wave.layout()).unwrap())
@@ -256,7 +256,7 @@ fn a_disk_voice_exports_its_file_from_its_beat_and_matches_memory() {
     // A stream serves one live voice, so each of the two has its own.
     let ((_streamer, reader), (_other, other_reader)) = (streamer_on(&path), streamer_on(&path));
 
-    let mut session = session();
+    let (mut session, _bg) = session();
     let (disk_node, memory_node): (NodeKey, NodeKey) = {
         let bare = disk_voice(reader, 3.0);
         let wrapped = node_of(VoiceSource::Disk(disk_voice(other_reader, 3.0)));
@@ -317,7 +317,7 @@ fn a_node_export_of_a_disk_voice_plays_its_file() {
     write_ramp(&path, RATE as u32, 4_800);
     let (_streamer, reader) = streamer_on(&path);
 
-    let mut session = session();
+    let (mut session, _bg) = session();
     let voice = {
         let voice = node_of(VoiceSource::Disk(disk_voice(reader, 1.0)));
         session.graph().add(voice).0
@@ -345,7 +345,7 @@ fn a_disk_voice_at_another_rate_exports_resampled() {
     write_ramp(&path, 24_000, 24_000);
     let (_streamer, reader) = streamer_on(&path);
 
-    let mut session = session();
+    let (mut session, _bg) = session();
     {
         let voice = disk_voice(reader, 1.0);
         let (node, _) = session.graph().add(voice);
@@ -396,7 +396,7 @@ fn live_disk_playback_is_untouched_while_its_voice_exports() {
     let ((mut streamer, _stream), reader) = streamer_on(&path);
     let live_clock = timeline(120.0);
 
-    let mut session = session();
+    let (mut session, _bg) = session();
     let (node, _) = session.graph().add(disk_voice(reader, 0.0));
     session.graph().connect(node, Root).unwrap();
     session.render_frame(InterleavedMut::one_frame(&mut [0.0, 0.0]).unwrap());
@@ -484,7 +484,7 @@ fn an_export_leaves_nothing_open_behind_it() {
     write_ramp(&path, RATE as u32, 4_800);
     let (_streamer, reader) = streamer_on(&path);
 
-    let mut session = session();
+    let (mut session, _bg) = session();
     {
         let voice = disk_voice(reader, 0.0);
         let (node, _) = session.graph().add(voice);
@@ -512,7 +512,7 @@ fn a_disk_voice_whose_file_cannot_be_read_fails_the_export_by_name() {
     write_ramp(&path, RATE as u32, 4_800);
     let (_streamer, reader) = streamer_on(&path);
 
-    let mut session = session();
+    let (mut session, _bg) = session();
     let clip = {
         let voice = disk_voice(reader, 0.0);
         let (node, _) = session.graph().add(voice);

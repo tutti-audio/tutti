@@ -33,7 +33,7 @@ impl Ports {
 fn the_stamp_stream_is_carried_across_a_closed_output() {
     let (backend, fake) =
         FakeBackend::build_with(vec![], vec![persistent_endpoint(10, "Synth")], usize::MAX);
-    let mut s = Session::builder()
+    let (mut s, _bg) = Session::builder()
         .midi_hardware_over(backend, tutti_midi_hardware::MidiHardwareConfig::new())
         .build()
         .expect("builds");

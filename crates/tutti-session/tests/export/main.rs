@@ -33,7 +33,7 @@ mod export_parallel;
 mod bounce_sampler;
 // A session on a polled executor: its streamer and jobs run inside `update`.
 #[cfg(all(feature = "export", feature = "sampler"))]
-mod polled_streaming;
+mod driven_streaming;
 // A sampler voice (memory and disk) exported through a fork.
 #[cfg(all(feature = "export", feature = "sampler"))]
 mod export_fork_sampler;

@@ -14,8 +14,11 @@ use f64_nodes::{Dc, FINE, Gain};
 
 /// A detached `f64` session of `0.75 * FINE` on one output: a gain set through
 /// `Session::set`, so the fork starts from the value set.
-fn session() -> tutti_session::DetachedSession<&'static str, f64> {
-    let mut s = Session::builder()
+fn session() -> (
+    tutti_session::DetachedSession<&'static str, f64>,
+    tutti_session::Background,
+) {
+    let (mut s, bg) = Session::builder()
         .float::<f64>()
         .outputs_floor(ChannelLayout::MONO)
         .build_detached(SampleRate::SR_48K)
@@ -32,7 +35,7 @@ fn session() -> tutti_session::DetachedSession<&'static str, f64> {
         .unfaded();
     let _ = s.update();
     s.set(gain.volume().to(Amplitude::new(0.75))).unwrap();
-    s
+    (s, bg)
 }
 
 /// **A bounce into memory holds `0.75 * FINE` in every frame, as `f64`.**
@@ -40,7 +43,8 @@ fn session() -> tutti_session::DetachedSession<&'static str, f64> {
 fn an_f64_bounce_into_planes_keeps_the_figure_f32_rounds_away() {
     // Setup: `f32` loses the figure, so a pass is not a rounded one.
     assert_ne!(f64::from((0.75 * FINE) as f32), 0.75 * FINE);
-    let planes = session()
+    let (mut s, _bg) = session();
+    let planes = s
         .bounce(
             Bounce::project()
                 .range(Range::Seconds(Seconds::new(0.0), Seconds::new(0.01)))
@@ -65,14 +69,14 @@ fn an_f64_bounce_into_planes_keeps_the_figure_f32_rounds_away() {
 fn an_f64_bounce_to_a_float64_file_reads_back_exactly() {
     let dir = tempfile::tempdir().expect("dir");
     let path = dir.path().join("out.wav");
-    session()
-        .bounce(
-            Bounce::project()
-                .range(Range::Seconds(Seconds::new(0.0), Seconds::new(0.01)))
-                .master(&path, Format::Wav(Pcm::Float64))
-                .tail(BounceTail::None),
-        )
-        .expect("the f64 bounce runs");
+    let (mut s, _bg) = session();
+    s.bounce(
+        Bounce::project()
+            .range(Range::Seconds(Seconds::new(0.0), Seconds::new(0.01)))
+            .master(&path, Format::Wav(Pcm::Float64))
+            .tail(BounceTail::None),
+    )
+    .expect("the f64 bounce runs");
     let wave = tutti_codec::read_wave::<f64>(&path).expect("the file reads back");
     let samples = wave.channel(0).samples();
     assert!(!samples.is_empty());

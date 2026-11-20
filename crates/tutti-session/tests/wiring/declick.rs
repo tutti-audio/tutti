@@ -25,7 +25,7 @@ fn smooth(j: usize) -> f64 {
     x * x * x * (6.0 * x * x - 15.0 * x + 10.0)
 }
 
-fn session() -> DetachedSession {
+fn session() -> (DetachedSession, tutti_session::Background) {
     Session::builder()
         .outputs_floor(ChannelLayout::STEREO)
         .build_detached(SampleRate::SR_48K)
@@ -50,7 +50,7 @@ fn frames(s: &mut DetachedSession, n: usize) -> Vec<f32> {
 #[test]
 fn a_connect_fades_in_and_reaches_unity_at_declick() {
     assert_eq!(declick_frames(SampleRate::SR_48K).get(), SPAN);
-    let mut s = session();
+    let (mut s, _bg) = session();
     let (src, _) = s.graph().add(ForkByClone(Const::mono(1.0)));
     s.graph().connect(src.out(0), Root::output(0)).unwrap();
     let _ = s.update();
@@ -89,7 +89,7 @@ fn a_connect_fades_in_and_reaches_unity_at_declick() {
 /// no commit to settle.
 #[test]
 fn hard_connects_at_full_weight_at_once() {
-    let mut s = session();
+    let (mut s, _bg) = session();
     let (src, _) = s.graph().add(ForkByClone(Const::mono(1.0)));
     s.graph()
         .connect(src.out(0), Root::output(0))
@@ -114,7 +114,7 @@ fn hard_connects_at_full_weight_at_once() {
 /// edge is no source of its sink from the call on, and it leaves the plan after.
 #[test]
 fn a_disconnect_fades_out_inside_the_span_and_leaves_the_plan() {
-    let mut s = session();
+    let (mut s, _bg) = session();
     let (src, _) = s.graph().add(ForkByClone(Const::mono(1.0)));
     s.graph()
         .connect(src.out(0), Root::output(0))
@@ -158,7 +158,7 @@ fn a_disconnect_fades_out_inside_the_span_and_leaves_the_plan() {
 /// leaves no fade behind.
 #[test]
 fn disconnect_hard_cuts_and_an_unheard_edge_just_goes() {
-    let mut s = session();
+    let (mut s, _bg) = session();
     let (src, _) = s.graph().add(ForkByClone(Const::mono(1.0)));
     s.graph()
         .connect(src.out(0), Root::output(0))
@@ -185,7 +185,7 @@ fn disconnect_hard_cuts_and_an_unheard_edge_just_goes() {
 /// had, without a step.
 #[test]
 fn a_reconnect_during_a_fade_out_rises_from_where_it_was() {
-    let mut s = session();
+    let (mut s, _bg) = session();
     let (src, _) = s.graph().add(ForkByClone(Const::mono(1.0)));
     s.graph()
         .connect(src.out(0), Root::output(0))
@@ -216,7 +216,7 @@ fn a_reconnect_during_a_fade_out_rises_from_where_it_was() {
 /// node's output fades out before the node goes.
 #[test]
 fn set_sources_and_remove_fade_what_leaves() {
-    let mut s = session();
+    let (mut s, _bg) = session();
     let (a, _) = s.graph().add(ForkByClone(Const::mono(1.0)));
     let (b, _) = s.graph().add(ForkByClone(Const::mono(2.0)));
     let sink = Root::output(0);

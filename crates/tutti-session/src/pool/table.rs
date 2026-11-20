@@ -29,9 +29,9 @@ use crate::{Clock, PoolLoaded, SessionEvent};
 pub enum PoolState {
     /// Declared; its load has not landed: it waits for a worker (at most
     /// [`PoolConfig::parallel_loads`](crate::PoolConfig::parallel_loads) run at
-    /// once) or its worker stage runs.
+    /// once) or its background stage runs.
     Loading,
-    /// Declared; its worker stage is done and its stage on the main thread
+    /// Declared; its background stage is done and its stage on the main thread
     /// waits for an [`update`](crate::Session::update) on it.
     WaitingForMainThread,
     /// Declared; its stage on the session's thread waits for the next
@@ -298,7 +298,7 @@ struct Flight {
     loaded_from: Option<Identity>,
 }
 
-/// A worker stage the pool let start: its flight, the stage, and the asset whose
+/// A background stage the pool let start: its flight, the stage, and the asset whose
 /// identity the worker takes before running it.
 pub(crate) struct Worker {
     pub(crate) flight: u64,
@@ -306,7 +306,7 @@ pub(crate) struct Worker {
     pub(crate) asset: Option<Asset>,
 }
 
-/// A worker stage waiting for a free worker.
+/// A background stage waiting for a free worker.
 struct Queued {
     flight: u64,
     work: Box<dyn FnOnce() -> Result<Staged, LoadError> + Send>,
@@ -761,7 +761,7 @@ impl<A: crate::AppKey, C: Clock> Pool<A, C> {
         })
     }
 
-    /// Queues a worker stage behind the ones waiting.
+    /// Queues a background stage behind the ones waiting.
     pub(crate) fn enqueue(
         &mut self,
         flight: u64,
@@ -770,7 +770,7 @@ impl<A: crate::AppKey, C: Clock> Pool<A, C> {
         self.queue.push_back(Queued { flight, work });
     }
 
-    /// The next worker stage to start, if fewer than the configured number run:
+    /// The next background stage to start, if fewer than the configured number run:
     /// it counts as running from here. A stage no entry waits on any more is
     /// never started.
     pub(crate) fn next_worker(&mut self) -> Option<Worker> {
@@ -802,7 +802,7 @@ impl<A: crate::AppKey, C: Clock> Pool<A, C> {
         }
     }
 
-    /// A started worker stage ended.
+    /// A started background stage ended.
     pub(crate) fn worker_ended(&mut self) {
         self.running -= 1;
     }
@@ -815,7 +815,7 @@ impl<A: crate::AppKey, C: Clock> Pool<A, C> {
         std::mem::take(&mut self.openings)
     }
 
-    /// A flight's worker stage ended with a stage for the main thread: it
+    /// A flight's background stage ended with a stage for the main thread: it
     /// waits there, whether or not an entry still wants it.
     pub(crate) fn stage_main(&mut self, flight: u64, stage: MainStage) {
         if let Some(flight_) = self.flights.get_mut(&flight) {

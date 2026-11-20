@@ -1019,7 +1019,7 @@ mod tests {
             ChannelLayout::STEREO,
             tutti_buffers::SampleFormat::F32,
         );
-        let mut session = Session::builder()
+        let (mut session, _bg) = Session::builder()
             .device(Default::default())
             .build_device_on(spec, driver)
             .expect("builds with no device");

@@ -52,7 +52,7 @@ fn heard(seen: &Seen, pick: impl Fn(&tutti_ump::Ump) -> Option<u8>) -> Vec<(u64,
 /// A clip on a tap, started and rendered a block, so its note 60 is sounding
 /// (its Note Off is far off).
 fn sounding() -> (Session, tutti_session::Key<MidiClipNode>, Seen) {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let (synth, seen) = tap(&mut s);
     s.midi()
         .play_clip(
@@ -74,7 +74,7 @@ fn sounding() -> (Session, tutti_session::Key<MidiClipNode>, Seen) {
 /// it, so that is the note heard, at frame 8 000.
 #[test]
 fn a_clip_written_through_its_target_plays_from_the_next_block() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let (synth, seen) = tap(&mut s);
     s.midi()
         .play_clip(
@@ -211,7 +211,7 @@ fn harmony_session() -> (
     tutti_session::Key<HarmonyNode>,
     Arc<Mutex<Vec<(u64, Harmony)>>>,
 ) {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let seen = Arc::default();
     let (tap, ()) = s.graph().add(HarmonyTap(Arc::clone(&seen)));
     let (harmony, _) = s.graph().add(HarmonyNode::new([]));
@@ -309,7 +309,7 @@ impl Node for Count {
 /// clip, the re-stated chord) run in it.
 #[test]
 fn blocks_adopting_written_values_do_not_allocate() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let notes = Arc::new(AtomicUsize::new(0));
     let chords = Arc::new(AtomicUsize::new(0));
     let (note_sink, _) = s.graph().add(ForkByClone(Count(Arc::clone(&notes))));
@@ -366,7 +366,7 @@ fn blocks_adopting_written_values_do_not_allocate() {
 /// node it replaced still hold the clip it had.
 #[test]
 fn a_write_after_a_clip_is_replaced_reaches_the_new_node() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let (synth, seen) = tap(&mut s);
     let (clip, old) = s.graph().add(MidiClipNode::new(note(
         60,
@@ -408,7 +408,7 @@ fn a_write_after_a_clip_is_replaced_reaches_the_new_node() {
 /// the one it had.
 #[test]
 fn play_clip_after_the_clips_node_was_removed_directly_is_refused() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let (synth, _seen) = tap(&mut s);
     s.midi()
         .play_clip(
@@ -465,7 +465,7 @@ fn writing_the_clip_in_force_by_pointer_cuts_no_note() {
 /// holds the clip in force**; the update gives the node the written one.
 #[test]
 fn a_clip_written_is_pending_until_the_update_publishes_it() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let (synth, _seen) = tap(&mut s);
     let (clip, controls) = s.graph().add(MidiClipNode::new(note(
         60,
@@ -499,7 +499,7 @@ fn a_clip_written_is_pending_until_the_update_publishes_it() {
 /// updates after, and the written clip is freed (no handle on it remains).
 #[test]
 fn a_pending_clip_write_to_a_removed_node_never_publishes_and_is_freed() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let (clip, controls) = s.graph().add(MidiClipNode::new(note(
         60,
         MF,

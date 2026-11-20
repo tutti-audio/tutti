@@ -110,7 +110,7 @@ fn export(workers: Workers) -> (Rendered, usize) {
 /// `BRANCHES` for the sum): the master's planes first and then each stem's,
 /// and the number of distinct threads that ran a branch.
 fn export_with(workers: Workers, stems: &[usize]) -> (Vec<Rendered>, usize) {
-    let mut session = Session::builder()
+    let (mut session, _bg) = Session::builder()
         .render_workers(workers)
         .build_detached(RATE)
         .unwrap();

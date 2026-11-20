@@ -38,7 +38,7 @@ fn spec_with(rate: f64, channels: usize) -> OutputSpec {
 /// pre-rolls by the limiter's latency.
 fn engine() -> (LiveSession, ManualStream, NodeKey, NodeKey) {
     let (driver, stream) = ManualStreamDriver::new();
-    let mut s = Session::builder()
+    let (mut s, _bg) = Session::builder()
         .device(Default::default())
         .build_device_on(spec_at(OLD), driver)
         .expect("builds with no device");

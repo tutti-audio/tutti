@@ -40,7 +40,7 @@ impl Node for Every4 {
 }
 
 fn session() -> (DetachedSession, EventOutPort) {
-    let mut s = Session::builder()
+    let (mut s, _bg) = Session::builder()
         .outputs_floor(ChannelLayout::MONO)
         .build_detached(SampleRate::SR_48K)
         .expect("builds");

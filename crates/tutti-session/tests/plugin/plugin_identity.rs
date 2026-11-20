@@ -31,14 +31,18 @@ fn second_id() -> &'static str {
         .expect("utf-8")
 }
 
-fn session() -> Session {
+fn session() -> (Session, tutti_session::Background) {
     // SAFETY: nextest runs each test in its own process, and this is set before
     // the first server is spawned, from the test's own thread.
     unsafe { std::env::set_var("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server()) };
-    Session::builder()
+    let (session, mut background) = Session::builder()
         .max_block(MaxBlock::of(Samples::new(512)))
         .build()
-        .expect("an offline session builds")
+        .expect("an offline session builds");
+    background
+        .spawn_threads(std::num::NonZeroUsize::MIN)
+        .expect("a background thread starts");
+    (session, background)
 }
 
 /// What a scan reports for the bundle's plugin `id`.
@@ -61,7 +65,7 @@ fn entry_ref(path: &std::path::Path, id: &str) -> PluginRef {
 #[test]
 fn the_second_plugin_of_a_bundle_loads_by_its_entry() {
     let path = clap_probe();
-    let mut s = session();
+    let (mut s, _bg) = session();
     let main = tutti_fixtures::main_thread();
 
     let second = s
@@ -91,7 +95,7 @@ fn a_state_is_refused_by_another_plugin() {
     let path = clap_probe();
     let first_ref = entry_ref(&path, first_id());
     let second_ref = entry_ref(&path, second_id());
-    let mut s = session();
+    let (mut s, _bg) = session();
     let main = tutti_fixtures::main_thread();
     let first = s
         .load_plugin_blocking(main, Spec::new(first_ref.clone()))

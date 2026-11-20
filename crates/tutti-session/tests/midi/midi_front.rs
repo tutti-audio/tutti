@@ -72,7 +72,7 @@ impl Node for Latent {
 /// second drain is empty; and the tap target heard both as well.
 #[test]
 fn a_take_records_the_live_input_on_its_frames_and_the_target_still_hears_it() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let seen = Seen::default();
     let (target, ()) = s.graph().add(Tap(Arc::clone(&seen)));
     let (latent, ()) = s.graph().add(ForkByClone(Latent));
@@ -108,7 +108,7 @@ fn a_take_records_the_live_input_on_its_frames_and_the_target_still_hears_it() {
 /// that feeds the instrument, wherever its keys came from.
 #[test]
 fn a_take_of_an_instrument_records_what_its_handle_plays() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let mut synth = s
         .add_instrument(Probe(ForkByClone(Five)))
         .expect("an instrument")
@@ -139,7 +139,7 @@ fn a_take_of_an_instrument_records_what_its_handle_plays() {
 /// for a second is refused by name, and nothing is opened.
 #[test]
 fn an_instrument_has_its_handles_keys_and_no_second_live_input() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let synth = s
         .add_instrument(Probe(ForkByClone(Five)))
         .expect("an instrument")
@@ -163,7 +163,7 @@ fn an_instrument_has_its_handles_keys_and_no_second_live_input() {
 /// hands out no live keys (the test above). Nothing is opened by the refusal.
 #[test]
 fn a_node_whose_live_input_has_its_keys_is_not_made_an_instrument() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let (node, ()) = s.graph().add(Probe(ForkByClone(Five)));
     let key = node.erase();
     let _keys = s.midi().input(key).expect("the live input's keys");
@@ -187,7 +187,7 @@ fn a_node_whose_live_input_has_its_keys_is_not_made_an_instrument() {
 /// `NodeKey` has not).
 #[test]
 fn an_instruments_typed_key_takes_a_wire_of_the_callers_own() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let synth = s
         .add_instrument(Probe(ForkByClone(Five)))
         .expect("an instrument")
@@ -208,7 +208,7 @@ fn an_instruments_typed_key_takes_a_wire_of_the_callers_own() {
 /// A target that takes no MIDI cannot be recorded.
 #[test]
 fn recording_a_target_with_no_event_input_is_refused() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let (dc, _) = s
         .graph()
         .add(ForkByClone(tutti_nodes::testing::Const::mono(0.5)));
@@ -291,7 +291,7 @@ fn play_for(s: &mut Session, blocks: usize) {
 /// as the pedal of every channel of its zone (M1-100 section 2.3.1).
 #[test]
 fn a_clip_plays_through_the_sessions_mpe_mode() {
-    let mut s = Session::builder()
+    let (mut s, _bg) = Session::builder()
         .mpe_mode(midi::lower_zone(3))
         .sample_rate(SampleRate::SR_48K)
         .build()
@@ -326,7 +326,7 @@ fn a_clip_plays_through_the_sessions_mpe_mode() {
 /// added afterwards.)
 #[test]
 fn the_mpe_mode_reaches_a_clip_already_in_the_graph() {
-    let mut s = crate::common::offline();
+    let (mut s, _bg) = crate::common::offline();
     let (target, seen) = crate::common::tap(&mut s);
     s.midi()
         .play_clip(target, Beat::new(0.0), mpe_clip())
@@ -356,7 +356,7 @@ fn the_mpe_mode_reaches_a_clip_already_in_the_graph() {
 /// transform still feeds it).
 #[test]
 fn a_clips_transform_goes_with_the_clip_and_follows_a_retarget() {
-    let mut s = crate::common::offline();
+    let (mut s, _bg) = crate::common::offline();
     let (first, _) = crate::common::tap(&mut s);
     let (second, seen) = crate::common::tap(&mut s);
     let before = s.graph().node_count();
@@ -428,7 +428,7 @@ mod hardware {
 
     fn session() -> (Session, FakeCounters) {
         let (backend, fake) = FakeBackend::build_with(vec![], vec![], usize::MAX);
-        let s = Session::builder()
+        let (s, _bg) = Session::builder()
             .midi_hardware_over(backend, tutti_midi_hardware::MidiHardwareConfig::new())
             .sample_rate(SampleRate::SR_48K)
             .build()
@@ -485,7 +485,7 @@ mod hardware {
     /// fails to load by name (`midi_ports`).
     #[test]
     fn a_session_with_no_os_layer_lists_nothing() {
-        let mut bare = offline();
+        let (mut bare, _bg) = offline();
         assert!(bare.midi().devices().is_empty());
     }
 

@@ -2152,13 +2152,13 @@ mod tests {
     }
 
     /// A detached session whose outputs hear a dc node: something to bounce.
-    fn session() -> crate::DetachedSession {
-        let mut session = Session::builder().build_detached(RATE).unwrap();
+    fn session() -> (crate::DetachedSession, crate::Background) {
+        let (mut session, bg) = Session::builder().build_detached(RATE).unwrap();
         let (dc, _) = session
             .graph()
             .add(ForkByClone(tutti_nodes::testing::Const::mono(0.0)));
         session.graph().connect(dc, Root).unwrap();
-        session
+        (session, bg)
     }
 
     /// **A bounce refuses while a declared pool entry is pending**, naming it,
@@ -2178,10 +2178,7 @@ mod tests {
             }
             fn handle(_: &(), _: &Life) {}
         }
-        let mut session = Session::builder()
-            .executor(tutti_platform::Executor::new())
-            .build_detached(RATE)
-            .unwrap();
+        let (mut session, mut bg) = Session::builder().build_detached(RATE).unwrap();
         let (dc, _) = session
             .graph()
             .add(ForkByClone(tutti_nodes::testing::Const::mono(0.0)));
@@ -2193,6 +2190,7 @@ mod tests {
             }
             other => panic!("refused naming the pending entry, got {other:?}"),
         }
+        bg.run_until_stalled();
         let _ = session.update();
         assert!(session.bounce(short()).is_ok(), "landed, so it renders");
     }
@@ -2207,7 +2205,7 @@ mod tests {
     /// hold its level, not silence.
     #[test]
     fn a_bounce_renders_an_edit_no_update_has_committed() {
-        let mut session = session();
+        let (mut session, _bg) = session();
         let (half, _) = session
             .graph()
             .add(ForkByClone(tutti_nodes::testing::Const::mono(0.5)));
@@ -2364,7 +2362,7 @@ mod tests {
     /// token is held after.
     #[test]
     fn a_bounce_that_misses_what_it_needs_is_refused_before_it_forks() {
-        let mut session = session();
+        let (mut session, _bg) = session();
         fn refused<M: Master>(
             session: &mut crate::DetachedSession,
             b: Bounce<NodeKey, M, f32>,
@@ -2392,7 +2390,7 @@ mod tests {
         assert_eq!(chosen(None, looped), Ok(Range::Loop));
         assert_eq!(chosen(None, None), Err(BounceConfigError::NoRange));
 
-        let mut session = session();
+        let (mut session, _bg) = session();
         let until = Bounce::project()
             .master_buffers()
             .range(Range::Until(Beat::new(2.0)));
@@ -2406,7 +2404,7 @@ mod tests {
     /// is 0 to 0.03. After the render the reading is the last one, 1.0.
     #[test]
     fn the_sessions_steps_are_reported_as_preparing() {
-        let mut session = session();
+        let (mut session, _bg) = session();
         let seen: Arc<Mutex<Vec<Progress>>> = Arc::default();
         let job_handle: Arc<Mutex<Option<BounceHandle>>> = Arc::default();
         let (into, handle) = (Arc::clone(&seen), Arc::clone(&job_handle));
@@ -2438,7 +2436,7 @@ mod tests {
     #[test]
     fn an_unannounced_finish_leaves_the_mode_to_the_phase() {
         use tutti_plugin::RenderMode;
-        let mut session = session();
+        let (mut session, _bg) = session();
         let job = session.bounce_start(short()).unwrap();
         assert_eq!(session.render_mode(), RenderMode::Offline);
         session.finish_bounce_unannounced(job.run()).unwrap();
@@ -2478,7 +2476,7 @@ mod tests {
         use tutti_units::Db;
         const DURATION: usize = 480;
         const LATENCY: usize = 240;
-        let mut session = session();
+        let (mut session, _bg) = session();
         let (dc, _) = session
             .graph()
             .add(ForkByClone(tutti_nodes::testing::Const::mono(0.25)));
@@ -2524,7 +2522,7 @@ mod tests {
     /// observes it while the render's transport is stopped; a hook does.
     #[test]
     fn a_frozen_bounces_timeline_is_stopped_at_beat_zero() {
-        let mut session = session();
+        let (mut session, _bg) = session();
         let seen: Arc<Mutex<Option<(bool, tutti_units::Beat)>>> = Arc::default();
         let into = Arc::clone(&seen);
         session
@@ -2544,7 +2542,7 @@ mod tests {
     /// tempo of the session's map (a set tempo, not a default 120).
     #[test]
     fn the_default_clock_starts_at_the_ranges_first_beat_on_the_projects_tempo() {
-        let mut session = session();
+        let (mut session, _bg) = session();
         session
             .set(
                 session
@@ -2579,7 +2577,7 @@ mod tests {
     /// forks, so the fork's tempo map is the one written, not the one in force.
     #[test]
     fn a_bounce_after_a_tempo_set_renders_the_new_tempo_without_an_update() {
-        let mut session = session();
+        let (mut session, _bg) = session();
         let before = session.tempo_map();
         let written = Arc::new(tutti_tempo::TempoMap::constant(Bpm::of(75.0)).unwrap());
         session
@@ -2608,7 +2606,7 @@ mod tests {
     /// for want of a range.
     #[test]
     fn a_bounce_after_a_loop_set_renders_the_loop_without_an_update() {
-        let mut session = session();
+        let (mut session, _bg) = session();
         let region = tutti_transport::LoopRegion::new(
             tutti_music::LoopRange::new(Beat::new(0.0), Beat::new(2.0)).unwrap(),
             true,
@@ -2633,7 +2631,7 @@ mod tests {
     /// bound, are not one long stall.
     #[test]
     fn a_leaked_bounce_is_warned_about_once() {
-        let mut session = session();
+        let (mut session, _bg) = session();
         let collect = |session: &mut crate::DetachedSession, at: Instant| {
             session.run_phase(Phase::Collect, PhaseCx::at(at), &mut Vec::new());
             session.bounce.stall_warnings

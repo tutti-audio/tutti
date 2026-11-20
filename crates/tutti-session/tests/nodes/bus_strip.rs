@@ -31,7 +31,7 @@ impl Node for Src {
     fn reset(&mut self) {}
 }
 
-fn offline(builder: SessionBuilder, device: u16) -> Session {
+fn offline(builder: SessionBuilder, device: u16) -> (Session, tutti_session::Background) {
     builder
         .outputs(ChannelLayout::from(device))
         .max_block(MaxBlock::of(Samples::new(64)))
@@ -56,7 +56,7 @@ fn heard(s: &mut Session, device: u16) -> Vec<f32> {
 /// alone.
 #[test]
 fn a_mono_source_reaches_both_sides_of_a_stereo_strip() {
-    let mut s = offline(Session::builder(), 2);
+    let (mut s, _bg) = offline(Session::builder(), 2);
     let g = s.graph();
     let (src, _) = g.add(Unforkable(Src {
         values: vec![0.5],
@@ -78,7 +78,7 @@ fn a_mono_source_reaches_both_sides_of_a_stereo_strip() {
 #[test]
 fn a_stereo_strip_feeds_a_declared_surround_root() {
     let five_one = ChannelTopology::assumed(ChannelLayout::from(6u16));
-    let mut s = offline(Session::builder().root_topology(five_one), 6);
+    let (mut s, _bg) = offline(Session::builder().root_topology(five_one), 6);
     let g = s.graph();
     let (src, _) = g.add(Unforkable(Src {
         values: vec![0.25, 0.75],
@@ -96,7 +96,7 @@ fn a_stereo_strip_feeds_a_declared_surround_root() {
 /// strip takes it, and a mono strip refuses it by name and writes nothing.
 #[test]
 fn a_strip_without_a_pair_refuses_a_balance_by_name() {
-    let mut s = offline(Session::builder(), 2);
+    let (mut s, _bg) = offline(Session::builder(), 2);
     let (stereo, _) = s.graph().add(BusStripNode::stereo());
     let (mono, _) = s.graph().add(BusStripNode::mono());
     s.set(stereo.balance().to(Balance::new(0.5)))

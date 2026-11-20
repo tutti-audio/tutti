@@ -41,10 +41,13 @@ fn session_with_open_editor(command: u32) -> (Session, Editor) {
     probe.set_gui_mode(GuiMode::Embeddable);
     probe.thread_reset();
     probe.thread_command(command);
-    let mut s = Session::builder()
+    let (mut s, mut background) = Session::builder()
         .max_block(MaxBlock::of(Samples::new(512)))
         .build()
         .expect("an offline session builds");
+    background
+        .spawn_threads(std::num::NonZeroUsize::MIN)
+        .expect("a background thread starts");
     let plugin = PluginRef::file(clap_probe());
     let node = s
         .load_plugin_blocking(

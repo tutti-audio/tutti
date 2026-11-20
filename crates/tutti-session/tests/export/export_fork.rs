@@ -42,18 +42,18 @@ use tutti_units::{Amplitude, Hz, Q, SampleRate, Samples, Seconds, Tail};
 const RATE: f64 = 48_000.0;
 
 /// A detached stereo session whose graph is at the export's rate.
-fn session() -> DetachedSession {
+fn session() -> (DetachedSession, tutti_session::Background) {
     session_with_outputs(2)
 }
 
-fn session_with_outputs(outputs: usize) -> DetachedSession {
-    let mut session = Session::builder()
+fn session_with_outputs(outputs: usize) -> (DetachedSession, tutti_session::Background) {
+    let (mut session, bg) = Session::builder()
         .inputs(ChannelLayout::EMPTY)
         .outputs_floor(ChannelLayout::clamped(outputs))
         .build_detached(SampleRate::DEFAULT)
         .expect("a detached session builds");
     session.graph().set_sample_rate(SampleRate::of(RATE));
-    session
+    (session, bg)
 }
 
 /// A bounce of the mix into memory for `seconds`: stereo at `rate`, on a
@@ -206,7 +206,7 @@ fn chain_fresh(seconds: f64) -> (Vec<Vec<f32>>, Vec<Vec<f32>>) {
 ///
 #[test]
 fn exports_render_their_graph_as_wired_fresh() {
-    let mut session = session();
+    let (mut session, _bg) = session();
     let filter = chain(&mut session);
     let forked_master = render(&mut session, buffers(0.25));
     let forked_node = stem_of(&mut session, filter, 0.25);
@@ -281,7 +281,7 @@ impl Node for Late {
 /// append silence.
 #[test]
 fn latency_and_tail_come_from_the_graph() {
-    let mut session = session();
+    let (mut session, _bg) = session();
     let (late, _) = session.graph().add(ForkByClone(Late { pos: 0 }));
     session.graph().connect(late, Root).unwrap().unfaded();
     let seconds = 0.01;
@@ -298,7 +298,7 @@ fn latency_and_tail_come_from_the_graph() {
     assert_eq!(planes[0][0], 1.0, "the latency was not trimmed");
     assert!(planes[0].iter().all(|&s| s == 1.0), "a step from frame 0");
 
-    let mut session = self::session();
+    let (mut session, _bg) = self::session();
     let (unknown, _) = session.graph().add(Counter {
         n: Arc::new(AtomicU64::new(0)),
     });
@@ -323,7 +323,7 @@ fn latency_and_tail_come_from_the_graph() {
 /// would land on frame `LATE`.
 #[test]
 fn the_trim_is_read_after_the_prepare_hook() {
-    let mut session = session();
+    let (mut session, _bg) = session();
     let (dc, _) = session.graph().add(ForkByClone(Const::mono(0.5)));
     session.graph().connect(dc, Root).unwrap().unfaded();
     let request = buffers(0.01).latency(BounceLatency::Graph).edit(Box::new(
@@ -352,7 +352,7 @@ fn the_trim_is_read_after_the_prepare_hook() {
 /// writable; the job checks the pair before it seals it.
 #[test]
 fn a_prepare_hook_that_swaps_the_editor_fails_the_export() {
-    let mut session = session();
+    let (mut session, _bg) = session();
     let (dc, _) = session.graph().add(ForkByClone(Const::mono(0.5)));
     session.graph().connect(dc, Root).unwrap().unfaded();
     let request = buffers(0.01).edit(Box::new(|prepared: PreparedGraph<'_>| {
@@ -373,7 +373,7 @@ fn a_prepare_hook_that_swaps_the_editor_fails_the_export() {
 /// a bounce that also names a stem — not that the stem's node is unheard.
 #[test]
 fn a_graph_with_no_outputs_says_so() {
-    let mut session = session_with_outputs(0);
+    let (mut session, _bg) = session_with_outputs(0);
     let (node, _) = session.graph().add(ForkByClone(Osc::sine(Hz::new(220.0))));
     for with_stem in [false, true] {
         let bounce = if with_stem {
@@ -397,7 +397,7 @@ fn a_graph_with_no_outputs_says_so() {
 /// node has not (or none at all). A node the outputs do hear is rendered.
 #[test]
 fn an_unrenderable_stem_is_refused_by_name() {
-    let mut session = session();
+    let (mut session, _bg) = session();
     let (wired, _) = session.graph().add(ForkByClone(Const::mono(0.5)));
     session.graph().connect(wired, Root).unwrap().unfaded();
     // `Sink::mono()` consumes one channel and produces nothing.
@@ -447,7 +447,7 @@ fn an_unrenderable_stem_is_refused_by_name() {
 /// A one-second-free session with a constant 0.5 on the outputs: a graph a
 /// hook's edit is told apart from by its level.
 fn graph_with_one_node_on() -> (DetachedSession, NodeKey) {
-    let mut session = session();
+    let (mut session, _bg) = session();
     let (node, _) = session.graph().add(ForkByClone(Const::mono(0.5)));
     session.graph().connect(node, Root).unwrap().unfaded();
     (session, node.erase())
@@ -635,7 +635,7 @@ impl Node for Counter {
 /// test by design.
 #[test]
 fn live_playback_continues_unaffected_while_an_export_renders() {
-    let mut session = session();
+    let (mut session, _bg) = session();
     let (node, _) = session.graph().add(Counter {
         n: Arc::new(AtomicU64::new(0)),
     });
@@ -700,7 +700,7 @@ impl Node for Mic {
 /// the routed node's.
 #[test]
 fn an_unrouted_unforkable_node_does_not_refuse_a_master_export() {
-    let mut session = session();
+    let (mut session, _bg) = session();
     let (_mic, _) = session.graph().add(tutti_graph::Unforkable(Mic));
     let (dc, _) = session.graph().add(ForkByClone(Const::mono(0.25)));
     session.graph().connect(dc, Root).unwrap().unfaded();
@@ -714,7 +714,7 @@ fn an_unrouted_unforkable_node_does_not_refuse_a_master_export() {
 /// which holds every node an output hears.
 #[test]
 fn an_unforkable_node_refuses_the_export_by_key() {
-    let mut session = session();
+    let (mut session, _bg) = session();
     let (mic, _) = session.graph().add(tutti_graph::Unforkable(Mic));
     let (osc, _) = session.graph().add(ForkByClone(Osc::sine(Hz::new(220.0))));
     session
@@ -753,7 +753,7 @@ fn an_unforkable_node_refuses_the_export_by_key() {
 /// file that looks complete.
 #[test]
 fn a_live_audio_inlet_refuses_the_bounce_by_key() {
-    let mut session = session();
+    let (mut session, _bg) = session();
     let (ring, _producer) = tutti_graph::InletRing::pair(
         ChannelLayout::STEREO,
         Samples::new(256),
@@ -915,7 +915,7 @@ tutti_graph::declare_params!([] Level, n { Volume => Amplitude = &n.0 });
 /// `a_gathered_fork_is_the_live_graph_at_the_gather`.
 #[test]
 fn an_export_does_not_wait_for_a_slow_fork_and_takes_no_later_edit() {
-    let mut session = session();
+    let (mut session, _bg) = session();
     let (node, cell, release, built) = slow(0.5);
     let (slow_node, _) = session.graph().add(node);
     let (level, _) = session
@@ -1063,7 +1063,7 @@ fn all_main(what: &str, at: &Mutex<Vec<ThreadId>>) {
 /// own. A slow deferred source beside it keeps the job busy for a while.
 #[test]
 fn a_main_thread_only_fork_builds_and_drops_on_the_main_thread() {
-    let mut session = session();
+    let (mut session, _bg) = session();
     let threads = Arc::<Threads>::default();
     let (pinned, _) = session.graph().add(PinnedNode(Arc::clone(&threads)));
     let (node, _cell, release, _built) = slow(0.5);
@@ -1105,7 +1105,7 @@ fn a_main_thread_only_fork_builds_and_drops_on_the_main_thread() {
 /// `drop_bounce_leftovers` drops it on the main thread. No render happened.
 #[test]
 fn a_dropped_export_job_drops_its_fork_on_the_main_thread() {
-    let mut session = session();
+    let (mut session, _bg) = session();
     let threads = Arc::<Threads>::default();
     let (pinned, _) = session.graph().add(PinnedNode(Arc::clone(&threads)));
     session
@@ -1195,7 +1195,7 @@ impl IntoNode for Broken {
 /// graph is.
 #[test]
 fn a_fork_build_that_fails_names_its_node_and_drops_on_the_main_thread() {
-    let mut session = session();
+    let (mut session, _bg) = session();
     let threads = Arc::<Threads>::default();
     let (pinned, _) = session.graph().add(PinnedNode(Arc::clone(&threads)));
     let (broken, _) = session.graph().add(Broken);
@@ -1254,7 +1254,7 @@ fn witnessed(drops: &Arc<Mutex<Vec<ThreadId>>>) -> Bounce<NodeKey, BufferMaster>
 #[test]
 fn a_prepare_edit_that_never_runs_drops_on_the_main_thread() {
     // A build that fails.
-    let mut session = session();
+    let (mut session, _bg) = session();
     let (broken, _) = session.graph().add(Broken);
     session.graph().connect(broken, Root).unwrap().unfaded();
     let drops: Arc<Mutex<Vec<ThreadId>>> = Arc::default();
@@ -1271,7 +1271,7 @@ fn a_prepare_edit_that_never_runs_drops_on_the_main_thread() {
     all_main("dropped (failed build)", &drops);
 
     // A job dropped before it ran.
-    let mut session = self::session();
+    let (mut session, _bg) = self::session();
     let (dc, _) = session.graph().add(ForkByClone(Const::mono(0.5)));
     session.graph().connect(dc, Root).unwrap().unfaded();
     let drops: Arc<Mutex<Vec<ThreadId>>> = Arc::default();

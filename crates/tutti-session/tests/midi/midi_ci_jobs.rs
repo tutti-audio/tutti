@@ -39,7 +39,7 @@ struct Wire {
 
 impl Wire {
     fn new(switch: Reply, report: Reply) -> Self {
-        let (mut s, fake) = hot_plug_session_ci(DeviceIdentity {
+        let (mut s, _bg, fake) = hot_plug_session_ci(DeviceIdentity {
             manufacturer: ManufacturerId::NON_COMMERCIAL,
             family: [U7::of(1); 2],
             model: [U7::of(2); 2],

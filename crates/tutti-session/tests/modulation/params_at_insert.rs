@@ -28,7 +28,7 @@ use common::probe::ProbeUnit;
 
 const BASE: f64 = 5.0;
 
-fn session() -> Session {
+fn session() -> (Session, tutti_session::Background) {
     Session::builder()
         .outputs(ChannelLayout::MONO)
         .build()
@@ -74,7 +74,7 @@ fn assert_knob_is(s: &Session, node: NodeKey, cell: impl Into<ParamCell>) {
 
 #[test]
 fn add_addresses_a_hosts_param_node() {
-    let mut s = session();
+    let (mut s, _bg) = session();
     let unit = ProbeUnit::of(UnitParam::Drive, BASE);
     let cell = unit.knob();
     let (node, _) = s.graph().add(unit);
@@ -84,7 +84,7 @@ fn add_addresses_a_hosts_param_node() {
 
 #[test]
 fn add_addresses_an_engine_node() {
-    let mut s = session();
+    let (mut s, _bg) = session();
     let node = DistortionNode::<f32>::new(ShapeKind::Tanh, Drive::new(BASE));
     let cell: Arc<AtomicF64> = tutti_graph::ParamNode::param_set(&node)
         .cell(UnitParam::Drive)
@@ -99,7 +99,7 @@ fn add_addresses_an_engine_node() {
 /// write into it moves the knob, and one into the outgoing node's does not.
 #[test]
 fn a_crossfade_hands_the_lane_the_incoming_nodes_cell() {
-    let mut s = session();
+    let (mut s, _bg) = session();
     let outgoing = ProbeUnit::of(UnitParam::Drive, BASE);
     let old = outgoing.knob();
     let (node, _) = s.graph().add(outgoing);

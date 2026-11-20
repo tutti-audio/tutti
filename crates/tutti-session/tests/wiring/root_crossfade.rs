@@ -17,8 +17,8 @@ use tutti_units::{SampleRate, Samples};
 const FADE: usize = 240;
 
 /// A stereo session whose root is fed (0.25, 0.75), the plan installed.
-fn session() -> Session {
-    let mut s = Session::builder()
+fn session() -> (Session, tutti_session::Background) {
+    let (mut s, bg) = Session::builder()
         .sample_rate(SampleRate::SR_48K)
         .max_block(MaxBlock::of(Samples::new(64)))
         .build()
@@ -30,7 +30,7 @@ fn session() -> Session {
             .unwrap();
     }
     let _ = block(&mut s);
-    s
+    (s, bg)
 }
 
 /// One 64-frame block after the session commits: its right channel.
@@ -56,7 +56,7 @@ fn smootherstep(x: f64) -> f64 {
 /// the 240 frames, and 0.25 from then on.
 #[test]
 fn a_declared_root_change_crossfades_over_the_declick() {
-    let mut s = session();
+    let (mut s, _bg) = session();
     s.declare_root_topology(Some(ChannelTopology::assumed(ChannelLayout::MONO)))
         .expect("a mono root");
     let mut right = Vec::new();
@@ -77,7 +77,7 @@ fn a_declared_root_change_crossfades_over_the_declick() {
 /// **`.unfaded()` cuts**: the new root is the whole mix from the first frame.
 #[test]
 fn a_hard_declaration_cuts_at_the_block() {
-    let mut s = session();
+    let (mut s, _bg) = session();
     s.declare_root_topology(Some(ChannelTopology::assumed(ChannelLayout::MONO)))
         .expect("a mono root")
         .unfaded();

@@ -53,7 +53,7 @@ const DECLICK: usize = 240;
 /// A detached session of `outputs` channels at 48 kHz, its audio side taken:
 /// the executor on this side, played in device-sized blocks.
 pub(crate) fn rig(outputs: usize) -> (DetachedSession, AudioSide) {
-    let mut s = Session::builder()
+    let (mut s, _bg) = Session::builder()
         .outputs_floor(ChannelLayout::clamped(outputs))
         .build_detached(SampleRate::DEFAULT)
         .expect("builds");
@@ -1176,7 +1176,7 @@ fn a_depth_slider_keeps_phase() {
 /// (The unmodulated paths are `graph.rs`' test of the same name).
 #[test]
 fn a_fork_renders_a_modulated_param_as_live_does() {
-    let mut s = Session::builder()
+    let (mut s, _bg) = Session::builder()
         .outputs_floor(ChannelLayout::STEREO)
         .build_detached(SampleRate::of(RATE))
         .expect("builds");

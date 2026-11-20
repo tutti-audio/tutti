@@ -19,7 +19,7 @@ use tutti_session::{DetachedSession, Losses, OutPort, Root, Session, Stamp};
 use tutti_ump::{MidiChannel, U7, Ump};
 use tutti_units::{Frame, SampleRate};
 
-fn session() -> DetachedSession {
+fn session() -> (DetachedSession, tutti_session::Background) {
     Session::builder()
         .outputs_floor(ChannelLayout::MONO)
         .build_detached(SampleRate::SR_48K)
@@ -55,7 +55,7 @@ fn drain(tap: &mut EventTapReader) -> Vec<(u64, u8)> {
 /// graph edited, and a producer needs no rate.
 #[test]
 fn pushed_events_come_out_at_their_frames() {
-    let mut s = session();
+    let (mut s, _bg) = session();
     let _ = s.update();
     assert!(!s.graph().is_edited());
     let (key, mut writer) = s.graph().open_event_inlet(EventCapacity::of(64));
@@ -110,7 +110,7 @@ impl Node for Hear {
 /// is silent: it hears none of what the live graph is pushed.
 #[test]
 fn an_export_fork_is_accepted_and_silent() {
-    let mut s = session();
+    let (mut s, _bg) = session();
     let (key, mut writer) = s.graph().open_event_inlet(EventCapacity::of(8));
     let (hear, ()) = s.graph().add(ForkByClone(Hear));
     s.graph()
@@ -141,7 +141,7 @@ fn an_export_fork_is_accepted_and_silent() {
 /// nothing.
 #[test]
 fn an_event_edge_is_cut_with_one_commit_and_not_faded() {
-    let mut s = session();
+    let (mut s, _bg) = session();
     let (key, mut writer) = s.graph().open_event_inlet(EventCapacity::of(8));
     let (hear, ()) = s.graph().add(ForkByClone(Hear));
     s.graph()

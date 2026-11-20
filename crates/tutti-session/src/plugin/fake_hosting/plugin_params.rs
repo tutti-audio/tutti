@@ -213,8 +213,8 @@ fn session_keyed() -> (DetachedSession, Key<AnyPlugin>, Arc<Fake>, RefreshSink) 
         Default::default(),
     )
     .with_refresh_sink(refresh.clone());
-    let mut s = Session::builder()
-        .executor(tutti_platform::Executor::new())
+    // Every job here blocks, so it has a thread of its own and needs no driver.
+    let (mut s, _background) = Session::builder()
         .outputs_floor(ChannelLayout::STEREO)
         .build_detached(SampleRate::DEFAULT)
         .expect("a detached session builds");
@@ -240,12 +240,30 @@ fn plugin_events(events: Vec<SessionEvent>) -> Vec<PluginEvent> {
         .collect()
 }
 
-/// An update that submits a parameter read (the next update polls it) and
-/// one that lands it; the plugin events both reported.
+/// An update that submits a parameter read, and the updates after it until the read
+/// has landed; the plugin events they reported. A guard against a job that never ends.
 fn update(s: &mut DetachedSession) -> Vec<PluginEvent> {
     let mut reported = plugin_events(s.update());
-    reported.extend(plugin_events(s.update()));
+    reported.extend(settle(s));
     reported
+}
+
+/// Updates until every submitted job has landed; the plugin events they reported. A
+/// guard against a job that never ends.
+fn settle(s: &mut DetachedSession) -> Vec<PluginEvent> {
+    let mut reported = Vec::new();
+    let deadline = tutti_platform::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        reported.extend(plugin_events(s.update()));
+        if crate::jobs::tests::running(&s.jobs) == 0 {
+            return reported;
+        }
+        assert!(
+            tutti_platform::Instant::now() < deadline,
+            "a job never ended"
+        );
+        std::thread::yield_now();
+    }
 }
 
 /// A session whose parameters are read.
@@ -550,7 +568,7 @@ fn a_rescan_replaces_the_declarations_and_the_values_with_them() {
         s.plugin_view(node).unwrap().params().get(MODE).is_ok(),
         "not yet"
     );
-    events.extend(plugin_events(s.update()));
+    events.extend(settle(&mut s));
     assert!(
         changes(events)
             .iter()

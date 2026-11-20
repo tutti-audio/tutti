@@ -15,14 +15,14 @@ use tutti_units::{Beat, PlaybackRate, SampleRate, Samples, Seconds};
 
 const RATE: f64 = 48_000.0;
 
-fn session() -> DetachedSession {
-    let mut session = Session::builder()
+fn session() -> (DetachedSession, tutti_session::Background) {
+    let (mut session, bg) = Session::builder()
         .inputs(ChannelLayout::EMPTY)
         .outputs_floor(ChannelLayout::STEREO)
         .build_detached(SampleRate::DEFAULT)
         .expect("a detached session builds");
     session.graph().set_sample_rate(SampleRate::of(RATE));
-    session
+    (session, bg)
 }
 
 /// A mono wave of `frames` frames of `level`, at the session's rate.
@@ -56,7 +56,7 @@ fn length_of(session: &mut DetachedSession, seconds: f64) -> usize {
 /// unbounded tail rendered the tail's cap (ten seconds) after it.
 #[test]
 fn a_placed_clip_adds_no_tail_to_the_range() {
-    let mut session = session();
+    let (mut session, _bg) = session();
     let (clip, _) = session
         .graph()
         .add(Clip::new(constant(2 * RATE as usize, 0.25)).expect("a placeable wave"));
@@ -72,7 +72,7 @@ fn a_placed_clip_adds_no_tail_to_the_range() {
 fn a_free_running_voice_rings_out_its_wave() {
     let frames = 12_000;
     let at = |speed: f64, looped: Option<Loop>| {
-        let mut session = session();
+        let (mut session, _bg) = session();
         let mut source = MemorySource::new(constant(frames, 0.25)).expect("a placeable wave");
         source.set_speed(PlaybackRate::clamped(speed));
         source.set_loop(looped);
@@ -85,7 +85,7 @@ fn a_free_running_voice_rings_out_its_wave() {
     assert_eq!(at(2.0, None), second + frames / 2);
 
     let looped = Loop::new(Samples::new(0)..Samples::new(frames)).expect("a loop");
-    let mut session = session();
+    let (mut session, _bg) = session();
     let mut source = MemorySource::new(constant(frames, 0.25)).expect("a placeable wave");
     source.set_loop(Some(looped));
     let (voice, _) = session.graph().add(source);
@@ -109,7 +109,7 @@ fn a_free_running_voice_rings_out_its_wave() {
 /// inserted before the pool joins the graph is in the bounce, at its level.
 #[test]
 fn a_pool_built_with_its_voices_bounces_them() {
-    let mut session = session();
+    let (mut session, _bg) = session();
     let mut pool = VoicePool::new();
     let source = MemorySource::placed(
         constant(RATE as usize, 0.25),
@@ -142,7 +142,7 @@ fn a_pool_built_with_its_voices_bounces_them() {
 /// control-side holds a copy: a fork would render them as silence.
 #[test]
 fn a_pool_driven_through_its_handle_refuses_the_bounce_by_key() {
-    let mut session = session();
+    let (mut session, _bg) = session();
     let (pool, handle) = session.graph().add(VoicePool::new());
     session.graph().connect(pool, Root).unwrap().unfaded();
     let source = MemorySource::placed(

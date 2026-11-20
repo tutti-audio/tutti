@@ -42,7 +42,10 @@ fn heard(session: &mut Session, device: u16) -> Vec<f32> {
     out[..usize::from(device)].to_vec()
 }
 
-fn offline(builder: SessionBuilder, device: u16) -> Result<Session, Error> {
+fn offline(
+    builder: SessionBuilder,
+    device: u16,
+) -> Result<(Session, tutti_session::Background), Error> {
     builder
         .sample_rate(RATE)
         .outputs(ChannelLayout::from(device))
@@ -58,7 +61,7 @@ fn buses(n: u16) -> ChannelTopology {
 /// declaration's width, not the device's.
 #[test]
 fn a_declared_unassigned_root_keeps_its_buses_by_index() {
-    let mut s = offline(Session::builder().root_topology(buses(4)), 6).unwrap();
+    let (mut s, _bg) = offline(Session::builder().root_topology(buses(4)), 6).unwrap();
     assert_eq!(s.graph_ref().outputs(), 4);
     assert_eq!(s.root_topology(), Some(&buses(4)));
     feed(&mut s, &[0.1, 0.2, 0.3, 0.4]);
@@ -72,7 +75,7 @@ fn a_declared_unassigned_root_keeps_its_buses_by_index() {
 #[test]
 fn a_declared_surround_root_folds_by_the_surround_rules() {
     let five_one = ChannelTopology::assumed(ChannelLayout::from(6u16));
-    let mut s = offline(Session::builder().root_topology(five_one), 2).unwrap();
+    let (mut s, _bg) = offline(Session::builder().root_topology(five_one), 2).unwrap();
     assert_eq!(s.graph_ref().outputs(), 6);
     feed(&mut s, &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
     assert_eq!(
@@ -105,14 +108,15 @@ fn a_declared_surround_root_folds_by_the_surround_rules() {
 /// quad: as before this existed.
 #[test]
 fn an_undeclared_root_is_as_it_was() {
-    let mut s = offline(Session::builder().outputs_floor(ChannelLayout::QUAD), 6).unwrap();
+    let (mut s, _bg) = offline(Session::builder().outputs_floor(ChannelLayout::QUAD), 6).unwrap();
     assert_eq!(s.root_topology(), None);
     assert_eq!(s.graph_ref().outputs(), 6, "the device floors the root");
     feed(&mut s, &[0.1, 0.2, 0.3, 0.4]);
     assert_eq!(heard(&mut s, 6), [0.1, 0.2, 0.3, 0.4, 0.0, 0.0]);
 
     // A project of four on a stereo device is quad, folded at -3 dB.
-    let mut quad = offline(Session::builder().outputs_floor(ChannelLayout::QUAD), 2).unwrap();
+    let (mut quad, _bg) =
+        offline(Session::builder().outputs_floor(ChannelLayout::QUAD), 2).unwrap();
     assert_eq!(quad.graph_ref().outputs(), 4);
     feed(&mut quad, &[0.1, 0.2, 0.3, 0.4]);
     assert_eq!(
@@ -125,7 +129,7 @@ fn an_undeclared_root_is_as_it_was() {
 /// leaves the session as it was.
 #[test]
 fn an_unplaceable_declaration_is_refused() {
-    let refused = |r: Result<Session, Error>| match r {
+    let refused = |r: Result<(Session, tutti_session::Background), Error>| match r {
         Err(Error::Output(e)) => e,
         other => panic!("expected Output, got {:?}", other.map(|_| ())),
     };
@@ -155,7 +159,7 @@ fn an_unplaceable_declaration_is_refused() {
     ));
 
     // After the build.
-    let mut s = offline(Session::builder(), 2).unwrap();
+    let (mut s, _bg) = offline(Session::builder(), 2).unwrap();
     assert!(matches!(
         s.declare_root_topology(Some(buses(4))),
         Err(Error::Output(FoldError::Unplaced { channel: 2, .. }))
@@ -169,7 +173,7 @@ fn an_unplaceable_declaration_is_refused() {
 /// it, and taking it back leaves the root at four, quad again.
 #[test]
 fn a_declaration_sets_the_roots_width_and_the_width_cannot_leave_it() {
-    let mut s = offline(Session::builder(), 6).unwrap();
+    let (mut s, _bg) = offline(Session::builder(), 6).unwrap();
     assert_eq!(s.graph_ref().outputs(), 6);
     s.declare_root_topology(Some(buses(4))).unwrap();
     assert_eq!(s.graph_ref().outputs(), 4);
@@ -203,7 +207,7 @@ fn a_declaration_sets_the_roots_width_and_the_width_cannot_leave_it() {
 /// request is the same again once it is in force.
 #[test]
 fn a_refusal_is_a_status_not_a_log_line() {
-    let mut s = offline(Session::builder(), 2).unwrap();
+    let (mut s, _bg) = offline(Session::builder(), 2).unwrap();
     assert_eq!(s.root_topology_status(), RootTopologyStatus::Applied);
     let e = s.declare_root_topology(Some(buses(4))).unwrap_err();
     let Error::Output(refusal) = e else { panic!() };
@@ -239,7 +243,7 @@ fn a_refusal_is_a_status_not_a_log_line() {
 /// themselves).
 #[test]
 fn declaring_the_same_topology_again_changes_nothing() {
-    let mut s = offline(Session::builder().root_topology(buses(4)), 6).unwrap();
+    let (mut s, _bg) = offline(Session::builder().root_topology(buses(4)), 6).unwrap();
     let _ = s.update();
     let sent = s.graph_ref().testing().commits_sent();
     s.declare_root_topology(Some(buses(4))).unwrap();
@@ -271,7 +275,7 @@ fn an_export_is_placed_from_the_declaration() {
         let rendered = s.bounce(request).unwrap().into_master();
         rendered.planes().iter().map(|p| p[0]).collect::<Vec<_>>()
     };
-    let mut declared = Session::builder()
+    let (mut declared, _bg) = Session::builder()
         .root_topology(buses(4))
         .build_detached(RATE)
         .unwrap();
@@ -287,7 +291,7 @@ fn an_export_is_placed_from_the_declaration() {
 /// was told.
 #[test]
 fn the_output_device_reads_stated_or_assumed() {
-    let assumed = offline(Session::builder(), 6).unwrap();
+    let (assumed, _bg) = offline(Session::builder(), 6).unwrap();
     let placed = assumed.output_device().expect("an engine renders it");
     assert_eq!(placed.placement, Placement::Assumed);
     assert_eq!(
@@ -304,12 +308,12 @@ fn the_output_device_reads_stated_or_assumed() {
         Speaker::BackRight,
     ])
     .unwrap();
-    let stated = offline(Session::builder().device_topology(wired.clone()), 6).unwrap();
+    let (stated, _bg) = offline(Session::builder().device_topology(wired.clone()), 6).unwrap();
     let placed = stated.output_device().unwrap();
     assert_eq!(placed.placement, Placement::Stated);
     assert_eq!(placed.topology, wired);
 
-    let detached = Session::builder().build_detached(RATE).unwrap();
+    let (detached, _bg) = Session::builder().build_detached(RATE).unwrap();
     assert_eq!(detached.output_device(), None, "no engine, no device");
 }
 
@@ -319,10 +323,10 @@ fn the_output_device_reads_stated_or_assumed() {
 #[test]
 fn a_stated_device_receives_the_root_by_speaker() {
     let swapped = ChannelTopology::new([Speaker::FrontRight, Speaker::FrontLeft]).unwrap();
-    let mut s = offline(Session::builder().device_topology(swapped), 2).unwrap();
+    let (mut s, _bg) = offline(Session::builder().device_topology(swapped), 2).unwrap();
     feed(&mut s, &[0.25, 0.75]);
     assert_eq!(heard(&mut s, 2), [0.75, 0.25]);
-    let mut plain = offline(Session::builder(), 2).unwrap();
+    let (mut plain, _bg) = offline(Session::builder(), 2).unwrap();
     feed(&mut plain, &[0.25, 0.75]);
     assert_eq!(heard(&mut plain, 2), [0.25, 0.75]);
 }
@@ -348,7 +352,7 @@ fn a_statement_of_another_width_than_the_device_is_refused() {
 /// channels on a three-channel device would drop two.
 #[test]
 fn a_commit_with_no_fold_into_the_device_is_refused_by_name() {
-    let mut s = offline(
+    let (mut s, _bg) = offline(
         Session::builder().outputs_floor(ChannelLayout::from(3u16)),
         3,
     )
@@ -372,7 +376,7 @@ fn a_commit_with_no_fold_into_the_device_is_refused_by_name() {
 /// that renders the new plan has the new root's fold, not the old one's.
 #[test]
 fn a_root_declared_after_the_build_folds_from_the_plan_that_carries_it() {
-    let mut s = offline(Session::builder(), 6).unwrap();
+    let (mut s, _bg) = offline(Session::builder(), 6).unwrap();
     feed(&mut s, &[0.1, 0.2, 0.3, 0.4, 0.0, 0.0]);
     s.declare_root_topology(Some(buses(4))).unwrap().unfaded();
     assert_eq!(heard(&mut s, 6), [0.1, 0.2, 0.3, 0.4, 0.0, 0.0]);
@@ -385,7 +389,7 @@ fn a_root_declared_after_the_build_folds_from_the_plan_that_carries_it() {
 /// commit of any width is sent, since no block is ever folded.
 #[test]
 fn a_session_with_no_engine_commits_every_width() {
-    let mut s = Session::builder().build_detached(RATE).unwrap();
+    let (mut s, _bg) = Session::builder().build_detached(RATE).unwrap();
     s.graph().widen_outputs(5).unwrap();
     assert_eq!(s.commit(), Committed::Sent);
     assert_eq!(s.graph_ref().outputs(), 5);
@@ -397,7 +401,7 @@ fn a_session_with_no_engine_commits_every_width() {
 /// one block frees the room.
 #[test]
 fn a_declaration_past_the_pending_roots_is_refused_by_name() {
-    let mut s = offline(Session::builder(), 6).unwrap();
+    let (mut s, _bg) = offline(Session::builder(), 6).unwrap();
     let mut refused = None;
     for i in 0..(tutti_engine::MAX_PENDING_ROOTS + 2) {
         // Alternate, so each declaration is a new root.

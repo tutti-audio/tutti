@@ -34,11 +34,14 @@ fn session_with_plugin() -> (Session, tutti_graph::NodeKey) {
     // SAFETY: nextest runs each test in its own process, and this is set from
     // the test's own thread before the first server is spawned.
     unsafe { std::env::set_var("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server()) };
-    let mut s = Session::builder()
+    let (mut s, mut background) = Session::builder()
         .sample_rate(SampleRate::SR_48K)
         .max_block(MaxBlock::of(Samples::new(BLOCK)))
         .build()
         .expect("an offline session builds");
+    background
+        .spawn_threads(std::num::NonZeroUsize::MIN)
+        .expect("a background thread starts");
     let file = plugin_file();
     let plugin = s
         .load_plugin_blocking(

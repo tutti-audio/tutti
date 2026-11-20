@@ -63,7 +63,7 @@ fn spec() -> OutputSpec {
 /// A session on a manual stream with its clock running into `wire`.
 fn rig(wire: &Wire) -> (LiveSession, ManualStream) {
     let (driver, stream) = ManualStreamDriver::new();
-    let mut s = Session::builder()
+    let (mut s, _bg) = Session::builder()
         .device(Default::default())
         .build_device_on(spec(), driver)
         .expect("builds with no device");

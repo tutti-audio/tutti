@@ -22,7 +22,7 @@ fn bounced(
         Bounce<tutti_graph::NodeKey, tutti_session::FileMaster>,
     ) -> Bounce<tutti_graph::NodeKey, tutti_session::FileMaster>,
 ) -> Vec<i32> {
-    let mut session = Session::builder()
+    let (mut session, _bg) = Session::builder()
         .inputs(ChannelLayout::EMPTY)
         .outputs_floor(ChannelLayout::STEREO)
         .build_detached(SampleRate::SR_48K)

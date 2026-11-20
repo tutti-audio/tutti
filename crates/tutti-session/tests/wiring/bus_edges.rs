@@ -16,7 +16,7 @@ use tutti_session::{
 
 const BLOCK: usize = 64;
 
-fn offline() -> Session {
+fn offline() -> (Session, tutti_session::Background) {
     Session::builder().build().expect("builds")
 }
 
@@ -97,7 +97,7 @@ struct Rig {
 /// A stereo source (`0.25`, `0.75`), a mono source of `0.125`, and a mono
 /// pass-through feeding output 0, committed once.
 fn rig() -> Rig {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let g = s.graph();
     let (stereo, _) = g.add(Unforkable(Src {
         values: vec![0.25, 0.75],
@@ -305,7 +305,7 @@ fn stereo_block(s: &mut Session) -> [Vec<f32>; 2] {
 /// A 5.1 source (FL .5, FR .25, C .125, LFE 0, Ls .0625, Rs .03125) and a
 /// declared stereo root, committed once.
 fn root_rig() -> (Session, NodeKey) {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     s.declare_root_topology(Some(smpte(2))).expect("stereo");
     let (src, _) = s.graph().add(Unforkable(Src {
         values: vec![0.5, 0.25, 0.125, 0.0, 0.0625, 0.03125],
@@ -369,7 +369,7 @@ fn an_undeclared_root_refuses_a_bus_edge() {
 /// the next refusal is reported again.
 #[test]
 fn a_refused_commit_is_an_event_of_its_update() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     s.declare_root_topology(Some(smpte(2))).expect("stereo");
     let (src, _) = s.graph().add(Unforkable(Src {
         values: vec![0.25, 0.75],
@@ -423,7 +423,7 @@ fn a_refused_commit_is_an_event_of_its_update() {
 /// longer folds to is a refused commit, the plan sent last standing.
 #[test]
 fn a_redeclared_root_relowers_its_edges_and_a_misfit_refuses_the_commit() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     s.declare_root_topology(Some(smpte(2))).expect("stereo");
     let (src, _) = s.graph().add(Unforkable(Src {
         values: vec![0.25, 0.75],

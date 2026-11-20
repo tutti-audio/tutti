@@ -28,10 +28,13 @@ mod clap {
             // The reference plugin answers `clap.preset-load` only when asked.
             std::env::set_var("TUTTI_CLAP_PROBE_PRESET_LOAD", "1");
         }
-        let mut s = Session::builder()
+        let (mut s, mut background) = Session::builder()
             .max_block(MaxBlock::of(Samples::new(512)))
             .build()
             .expect("an offline session builds");
+        background
+            .spawn_threads(std::num::NonZeroUsize::MIN)
+            .expect("a background thread starts");
         let (entry, node) = s
             .load_plugin_keyed(
                 tutti_fixtures::main_thread(),
@@ -175,11 +178,13 @@ mod vst3 {
         .expect("a .vst3 bundle around the module");
         let plugin = PluginRef::file(bundle.to_path_buf());
         let (catalog, id, _dir) = crate::pooled::catalog_of(&plugin);
-        let mut s = Session::builder()
-            .executor(tutti_platform::Executor::new())
+        let (mut s, mut background) = Session::builder()
             .outputs_floor(ChannelLayout::STEREO)
             .build_detached(SampleRate::DEFAULT)
             .expect("a detached session builds");
+        background
+            .spawn_threads(std::num::NonZeroUsize::MIN)
+            .expect("a background thread starts");
         s.pool(s.plugin_entry(0u64, &id, &catalog)).unwrap();
 
         // Phases with no proof of the main thread: nothing runs main work.
@@ -253,20 +258,23 @@ mod vst2 {
     };
     use tutti_units::SampleRate;
 
-    fn probe_with(programs: &str) -> (DetachedSession, u64, ScopedEnv) {
+    fn probe_with(programs: &str) -> (DetachedSession, tutti_session::Background, u64, ScopedEnv) {
         let mut env = ScopedEnv::new();
         env.set("TUTTI_VST2_PROBE_PROGRAMS", programs);
-        let mut s = Session::builder()
+        let (mut s, mut background) = Session::builder()
             .outputs_floor(ChannelLayout::STEREO)
             .build_detached(SampleRate::DEFAULT)
             .expect("a detached session builds");
+        background
+            .spawn_threads(std::num::NonZeroUsize::MIN)
+            .expect("a background thread starts");
         let (entry, _) = s
             .load_plugin_keyed(
                 tutti_fixtures::main_thread(),
                 Spec::new(PluginRef::file(tutti_fixtures::vst2_probe().to_path_buf())),
             )
             .expect("the in-process VST2 loads");
-        (s, entry, env)
+        (s, background, entry, env)
     }
 
     /// **A listed preset loads by the id it was listed with.** A list of the
@@ -276,7 +284,7 @@ mod vst2 {
     /// `Unsupported`.
     #[test]
     fn a_listed_preset_loads_by_its_id() {
-        let (mut s, entry, _env) = probe_with("3");
+        let (mut s, _bg, entry, _env) = probe_with("3");
         let main = tutti_fixtures::main_thread();
         let info = s.plugin(&entry).unwrap().info();
         let presets = info.presets();
@@ -313,7 +321,7 @@ mod vst2 {
     /// `Unsupported` too.
     #[test]
     fn a_plugin_with_no_programs_has_no_presets() {
-        let (mut s, entry, _env) = probe_with("0");
+        let (mut s, _bg, entry, _env) = probe_with("0");
         let info = s.plugin(&entry).unwrap().info();
         assert_eq!(info.presets().support(), PresetSupport::None);
         assert!(info.presets().is_empty());
@@ -331,7 +339,7 @@ mod vst2 {
     /// is refused at the call and nothing is sent.
     #[test]
     fn a_preset_of_another_plugin_is_refused_at_the_call() {
-        let (mut s, entry, _env) = probe_with("3");
+        let (mut s, _bg, entry, _env) = probe_with("3");
         let foreign = s
             .plugin(&entry)
             .unwrap()
@@ -360,6 +368,7 @@ mod vst2 {
     /// reload.
     fn declared() -> (
         DetachedSession,
+        tutti_session::Background,
         tutti_plugin::catalog::Catalog,
         tutti_plugin::catalog::PluginId,
         u64,
@@ -369,16 +378,19 @@ mod vst2 {
     ) {
         let mut env = ScopedEnv::new();
         env.set("TUTTI_VST2_PROBE_PROGRAMS", "3");
-        let mut s = Session::builder()
+        let (mut s, mut background) = Session::builder()
             .outputs_floor(ChannelLayout::STEREO)
             .build_detached(SampleRate::DEFAULT)
             .expect("a detached session builds");
+        background
+            .spawn_threads(std::num::NonZeroUsize::MIN)
+            .expect("a background thread starts");
         let plugin = PluginRef::file(tutti_fixtures::vst2_probe().to_path_buf());
         let (catalog, id, dir) = crate::pooled::catalog_of(&plugin);
         let main = tutti_fixtures::main_thread();
         let key = s.declare_entry(main, &catalog, &id, Hosting::Auto, None);
         let node = s.await_entry(main, key).expect("the VST2 loads").erase();
-        (s, catalog, id, key, node, env, dir)
+        (s, background, catalog, id, key, node, env, dir)
     }
 
     /// **A preset of a reloaded plugin is refused until the node has it.** The
@@ -389,7 +401,7 @@ mod vst2 {
     /// listed still loads.
     #[test]
     fn a_preset_of_a_landed_reload_is_refused_until_the_swap() {
-        let (mut s, catalog, id, key, _node, _env, _dir) = declared();
+        let (mut s, _bg, catalog, id, key, _node, _env, _dir) = declared();
         let main = tutti_fixtures::main_thread();
         let old = s
             .plugin(&key)
@@ -450,7 +462,7 @@ mod vst2 {
     /// is gone, so nothing is asked.
     #[test]
     fn a_load_for_a_removed_node_lands_lost() {
-        let (mut s, _catalog, _id, key, node, _env, _dir) = declared();
+        let (mut s, _bg, _catalog, _id, key, node, _env, _dir) = declared();
         let third = s
             .plugin(&key)
             .unwrap()
@@ -472,7 +484,7 @@ mod vst2 {
     /// never asked, so its own current program is where it was.
     #[test]
     fn a_dropped_load_is_not_run() {
-        let (mut s, _catalog, _id, key, _node, _env, _dir) = declared();
+        let (mut s, _bg, _catalog, _id, key, _node, _env, _dir) = declared();
         let main = tutti_fixtures::main_thread();
         let third = s
             .plugin(&key)

@@ -45,7 +45,7 @@ fn hosting_as(backend: Inert, served: bool) -> (DetachedSession, NodeKey, FakePl
         Default::default(),
         Default::default(),
     );
-    let mut s = Session::builder()
+    let (mut s, _bg) = Session::builder()
         .outputs_floor(ChannelLayout::STEREO)
         .build_detached(SampleRate::DEFAULT)
         .expect("a detached session builds");

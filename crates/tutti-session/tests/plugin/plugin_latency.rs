@@ -40,13 +40,17 @@ fn set_server() {
 /// An offline stereo session at 48 kHz whose block is the plugin's pipeline
 /// chunk ([`BLOCK`]: with no device callback size known, a plugin ships its
 /// chunk at the graph's `MaxBlock`).
-fn offline() -> Session {
+fn offline() -> (Session, tutti_session::Background) {
     set_server();
-    Session::builder()
+    let (session, mut background) = Session::builder()
         .sample_rate(RATE)
         .max_block(MaxBlock::of(Samples::new(BLOCK)))
         .build()
-        .expect("an offline session builds")
+        .expect("an offline session builds");
+    background
+        .spawn_threads(std::num::NonZeroUsize::MIN)
+        .expect("a background thread starts");
+    (session, background)
 }
 
 fn add_probe_on_outputs(s: &mut Session) -> tutti_graph::NodeKey {
@@ -72,7 +76,7 @@ fn add_probe_on_outputs(s: &mut Session) -> tutti_graph::NodeKey {
 /// after frame).
 #[test]
 fn a_plugins_latency_is_the_sessions_and_follows_the_plugin() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let node = add_probe_on_outputs(&mut s);
 
     assert_eq!(
@@ -119,7 +123,7 @@ fn a_plugins_latency_is_the_sessions_and_follows_the_plugin() {
 /// phase leaves it alone while the plugin's figure stands.
 #[test]
 fn a_plugins_tail_ceiling_is_the_plugins_claim() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let node = add_probe_on_outputs(&mut s);
     assert_eq!(
         s.graph_ref().node_tail(node).unwrap(),
@@ -168,7 +172,7 @@ fn a_latency_the_plugin_reports_reaches_the_graph() {
     crate::pooled::prime(&PluginRef::file(clap_probe()));
     // SAFETY: as `set_server`: before the first server, from the test's thread.
     unsafe { std::env::set_var("TUTTI_CLAP_PROBE_OFFLINE_EXTRA_LATENCY", "300") };
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let node = add_probe_on_outputs(&mut s);
     let own = tutti_clap_test_plugin::REPORTED_LATENCY_SAMPLES as usize;
     assert_eq!(
@@ -255,7 +259,7 @@ fn a_crossfaded_plugins_latency_is_the_incoming_ones() {
             .recv_timeout(std::time::Duration::from_secs(30))
             .expect("the plugin announced its latency");
     }
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let node = add_probe_on_outputs(&mut s);
     let outgoing_handle = s.plugin_view(node).expect("hosted").handle().clone();
     told(&outgoing_handle, tutti_plugin_types::RenderMode::Offline);
@@ -320,10 +324,13 @@ fn a_restart_to_another_callback_size_re_declares_a_plugins_latency() {
     }
     set_server();
     let (driver, stream) = ManualStreamDriver::new();
-    let mut s = Session::builder()
+    let (mut s, mut background) = Session::builder()
         .device(Default::default())
         .build_device_on(spec(512), driver)
         .expect("builds with no device");
+    background
+        .spawn_threads(std::num::NonZeroUsize::MIN)
+        .expect("a background thread starts");
 
     let client = PluginClient::new(
         tutti_plugin::IpcConfig::at(
@@ -373,12 +380,15 @@ fn a_restart_to_another_callback_size_re_declares_a_plugins_latency() {
 #[test]
 fn a_clock_switch_re_declares_a_plugins_latency_and_keeps_its_handle() {
     set_server();
-    let mut s = Session::builder()
+    let (mut s, mut background) = Session::builder()
         .sample_rate(RATE)
         .max_block(MaxBlock::of(Samples::new(480)))
         .system_clock()
         .build()
         .expect("builds");
+    background
+        .spawn_threads(std::num::NonZeroUsize::MIN)
+        .expect("a background thread starts");
     let client = PluginClient::new(
         tutti_plugin::IpcConfig::at(
             tutti_plugin::unique_socket_path().expect("the OS has a random source"),

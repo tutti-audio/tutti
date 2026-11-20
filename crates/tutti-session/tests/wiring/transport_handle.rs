@@ -7,7 +7,7 @@ use tutti_session::{Session, TransportHandle};
 use tutti_transport::{FadeOut, LoopRegion, MotionEvent, TimedError};
 use tutti_units::{At, Beat, Bpm, Frame, Samples};
 
-fn offline() -> Session {
+fn offline() -> (Session, tutti_session::Background) {
     Session::builder()
         .max_block(MaxBlock::of(Samples::new(1_000)))
         .build()
@@ -28,7 +28,7 @@ const _: () = assert_send_clone::<TransportHandle>();
 /// next block reads rolling and the playhead has moved past the origin.
 #[test]
 fn a_handle_on_another_thread_rolls_the_session_transport() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     crate::tempo::set_tempo(&mut s, Bpm::of(60.0)).expect("not following");
     let handle = s.transport_handle();
     std::thread::spawn(move || handle.play().unwrap())
@@ -44,7 +44,7 @@ fn a_handle_on_another_thread_rolls_the_session_transport() {
 /// a stop from a thread, the playhead holds.
 #[test]
 fn a_handle_stop_halts_a_session_play() {
-    let s = offline();
+    let (s, _bg) = offline();
     s.play().unwrap();
     render(&s, 2);
     let handle = s.transport_handle();
@@ -62,7 +62,7 @@ fn a_handle_stop_halts_a_session_play() {
 /// as the session refuses it, and the refusal hands the event back.
 #[test]
 fn a_handle_refuses_a_beat_play_while_stopped() {
-    let s = offline();
+    let (s, _bg) = offline();
     let handle = s.transport_handle();
     let refused = std::thread::spawn(move || handle.schedule(Beat::new(1.0), MotionEvent::Play))
         .join()
@@ -82,7 +82,7 @@ fn a_handle_refuses_a_beat_play_while_stopped() {
 /// refuse one.
 #[test]
 fn the_session_and_its_handles_share_the_rolling_record() {
-    let s = offline();
+    let (s, _bg) = offline();
     let handle = s.transport_handle();
     s.play().unwrap();
     handle.schedule(Beat::new(4.0), MotionEvent::Play).unwrap();
@@ -98,7 +98,7 @@ fn the_session_and_its_handles_share_the_rolling_record() {
 /// refused.
 #[test]
 fn a_next_block_schedule_updates_the_rolling_record() {
-    let s = offline();
+    let (s, _bg) = offline();
     let handle = s.transport_handle();
     handle.schedule(At::NextBlock, MotionEvent::Play).unwrap();
     assert!(handle.schedule(Beat::new(4.0), MotionEvent::Play).is_ok());
@@ -117,7 +117,7 @@ fn a_next_block_schedule_updates_the_rolling_record() {
 /// transport.
 #[test]
 fn a_stop_sent_after_a_rendered_play_refuses_a_beat_play() {
-    let s = offline();
+    let (s, _bg) = offline();
     s.play().unwrap();
     render(&s, 2);
     assert!(s.playhead().playing());
@@ -133,7 +133,7 @@ fn a_stop_sent_after_a_rendered_play_refuses_a_beat_play() {
 /// fires:** after the render that fires it, a beat play is accepted.
 #[test]
 fn a_play_timed_at_a_frame_counts_as_rolling_once_rendered() {
-    let s = offline();
+    let (s, _bg) = offline();
     let handle = s.transport_handle();
     handle
         .schedule(Frame::new(1_000), MotionEvent::Play)
@@ -150,7 +150,7 @@ fn a_play_timed_at_a_frame_counts_as_rolling_once_rendered() {
 /// **A handle reads and cancels the timed commands in flight.**
 #[test]
 fn a_handle_counts_and_cancels_scheduled_commands() {
-    let s = offline();
+    let (s, _bg) = offline();
     let handle = s.transport_handle();
     handle
         .schedule(Frame::new(48_000), MotionEvent::Play)
@@ -165,7 +165,7 @@ fn a_handle_counts_and_cancels_scheduled_commands() {
 /// **A handle reads the loop region the session sets and disarms.**
 #[test]
 fn a_handle_reads_the_loop_region() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let handle = s.transport_handle();
     let range = LoopRange::try_from(Beat::new(0.0)..Beat::new(1.0)).unwrap();
     let looping = handle.looping();

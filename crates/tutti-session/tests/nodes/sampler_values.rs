@@ -14,7 +14,7 @@ const RATE: f64 = 48_000.0;
 /// Frames a beat takes at the session's 120 BPM and 48 kHz.
 const BEAT: usize = 24_000;
 
-fn offline() -> Session {
+fn offline() -> (Session, tutti_session::Background) {
     Session::builder()
         .sample_rate(SampleRate::of(RATE))
         .build()
@@ -84,7 +84,7 @@ fn placed(
 /// 24 000.
 #[test]
 fn a_window_set_is_pending_until_the_update_then_places_the_voice() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let (clip, handle) = placed(&mut s, Beat::new(2.0));
     let beat_one = Some(VoiceWindow::from(Beat::new(1.0)));
 
@@ -106,7 +106,7 @@ fn a_window_set_is_pending_until_the_update_then_places_the_voice() {
         "nothing before the update"
     );
 
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let (clip, handle) = placed(&mut s, Beat::new(2.0));
     s.set(clip.window().to(beat_one)).unwrap();
     let _ = s.update();
@@ -159,7 +159,7 @@ fn left(s: &Session, frames: usize) -> Vec<f32> {
 /// ramp's end on.
 #[test]
 fn play_on_a_placed_voice_is_refused_and_a_free_running_one_plays_its_own_cursor() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let (clip, handle) = placed_ramp(&mut s);
     s.play().expect("room");
     let placed: Vec<f32> = left(&s, 1_024);
@@ -192,7 +192,7 @@ fn play_on_a_placed_voice_is_refused_and_a_free_running_one_plays_its_own_cursor
 /// the cell's `seq` moves by one, and holds the second.
 #[test]
 fn two_window_writes_before_an_update_publish_once_and_the_second_wins() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let (clip, handle) = placed(&mut s, Beat::new(2.0));
     let before = handle.window_cell().seq();
     let second = Some(VoiceWindow::from(Beat::new(3.0)));
@@ -211,7 +211,7 @@ fn two_window_writes_before_an_update_publish_once_and_the_second_wins() {
 /// target is gone.
 #[test]
 fn a_pending_window_write_to_a_removed_node_never_publishes() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let (clip, handle) = placed(&mut s, Beat::new(2.0));
     let (seq, in_force) = (handle.window_cell().seq(), handle.window_cell().current());
     s.set(clip.window().to(None)).unwrap();
@@ -231,7 +231,7 @@ fn a_pending_window_write_to_a_removed_node_never_publishes() {
 /// **A block that adopts a written window allocates nothing.**
 #[test]
 fn a_block_adopting_a_written_window_does_not_allocate() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let (clip, _) = placed(&mut s, Beat::new(2.0));
     s.play().expect("room");
     let _ = render(&s, 1_024);
@@ -274,7 +274,7 @@ impl Rig {
     fn new(streamed: bool) -> Self {
         let dir = tempfile::tempdir().expect("a temp dir");
         let samples: Vec<f32> = (0..LEN).map(ramp).collect();
-        let mut s = offline();
+        let (mut s, _bg) = offline();
         let (clip, streamer) = if streamed {
             let path = dir.path().join("ramp.wav");
             tutti_fixtures::signal::write_wav_f32(&path, SampleRate::of(RATE), 1, &samples);
@@ -850,7 +850,7 @@ fn a_speed_set_mid_play_reads_a_streamed_placed_voice_at_twice_the_position() {
 /// from the cursor, never a restart and never a jump.
 #[test]
 fn a_speed_set_mid_play_continues_a_free_running_voice_from_its_cursor() {
-    let mut s = offline();
+    let (mut s, _bg) = offline();
     let (clip, handle) = placed_ramp(&mut s);
     s.set(clip.window().to(None)).unwrap();
     let _ = s.update();

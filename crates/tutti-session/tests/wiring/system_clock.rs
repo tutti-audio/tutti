@@ -15,7 +15,7 @@ use tutti_units::{SampleRate, Samples};
 
 const BLOCK: usize = 480;
 
-fn system() -> SystemSession {
+fn system() -> (SystemSession, tutti_session::Background) {
     Session::builder()
         .sample_rate(SampleRate::SR_48K)
         .max_block(MaxBlock::of(Samples::new(BLOCK)))
@@ -30,7 +30,7 @@ fn system() -> SystemSession {
 /// the only thing that called the engine.
 #[test]
 fn a_system_session_renders_its_graph_with_no_device() {
-    let mut system = system();
+    let (mut system, _bg) = system();
     let s = &mut system;
     let (level, _) = s.graph().add(ForkByClone(Const::mono(0.25)));
     for port in 0..2 {
@@ -75,7 +75,7 @@ fn a_system_session_renders_its_graph_with_no_device() {
 /// fault count of a fresh system session is zero.
 #[test]
 fn a_fresh_system_session_has_no_faults() {
-    let system = system();
+    let (system, _bg) = system();
     assert_eq!(system.faults().count(), 0);
 }
 
@@ -104,7 +104,7 @@ impl Node for AlwaysPanics {
 /// own on a loaded machine, which are other events.
 #[test]
 fn a_panic_on_the_timer_thread_is_reported_once_as_a_fault_event() {
-    let mut system = system();
+    let (mut system, _bg) = system();
     let (node, _) = system.graph().add(ForkByClone(AlwaysPanics));
     system
         .graph()
@@ -140,7 +140,7 @@ fn a_panic_on_the_timer_thread_is_reported_once_as_a_fault_event() {
 /// bump re-reported the panic.)
 #[test]
 fn an_overrun_after_a_reported_panic_is_its_own_event_and_not_the_panic_again() {
-    let mut system = system();
+    let (mut system, _bg) = system();
     let faults = system.faults();
     let kinds = |events: &[SessionEvent]| -> Vec<StreamFaultKind> {
         events
@@ -174,7 +174,7 @@ fn an_overrun_after_a_reported_panic_is_its_own_event_and_not_the_panic_again() 
 /// first update after the build has nothing to say of the stream.
 #[test]
 fn a_fresh_system_session_reports_no_fault_event() {
-    let mut system = system();
+    let (mut system, _bg) = system();
     let events = system.update();
     assert!(
         events.iter().all(|e| !matches!(e, SessionEvent::Fault(_))),

@@ -77,7 +77,7 @@ fn scene(with_limiter: bool) -> Scene {
 
 /// [`scene`], with the waveshaper at `drive`.
 fn scene_driven(with_limiter: bool, drive: f64) -> Scene {
-    let mut session = Session::builder()
+    let (mut session, _bg) = Session::builder()
         .outputs_floor(ChannelLayout::STEREO)
         .build_detached(SampleRate::DEFAULT)
         .expect("builds");

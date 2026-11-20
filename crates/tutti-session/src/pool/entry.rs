@@ -10,7 +10,7 @@ use tutti_buffers::Float;
 use tutti_platform::{Asset, MainThreadMarker};
 
 use crate::pool::open::OpenCx;
-use crate::{PeerError, Presence, WorkerError};
+use crate::{BackgroundError, PeerError, Presence};
 
 /// What the session holds of a loaded entry, whatever its kind.
 pub(crate) type Value = Box<dyn Any + Send>;
@@ -110,16 +110,16 @@ pub enum Retention<T> {
 ///
 /// - [`on_worker`](Self::on_worker): one stage on a thread of the session's
 ///   executor, which finishes the load there.
-/// - [`on_worker_then_main`](Self::on_worker_then_main): a worker stage whose
+/// - [`on_worker_then_main`](Self::on_worker_then_main): a background stage whose
 ///   output goes by value to a stage on the main thread, which finishes it.
 /// - [`on_session`](Self::on_session): one stage on the session's own thread,
-///   inside [`Session::update`](crate::Session::update), with no worker stage.
+///   inside [`Session::update`](crate::Session::update), with no background stage.
 /// - [`ready`](Self::ready): no stage; the value lands when the pool declares
 ///   the entry.
 #[must_use = "a load runs when the pool declares its entry"]
 pub struct Load<T, S: Float = f32> {
     pub(crate) step: Step<T, S>,
-    /// Whether a worker stage hands on to a main-thread stage.
+    /// Whether a background stage hands on to a main-thread stage.
     main: bool,
 }
 
@@ -130,7 +130,7 @@ pub(crate) enum Step<T, S: Float> {
     Session(Box<dyn FnOnce(&mut OpenCx<'_, S>) -> Result<T, LoadError> + Send>),
 }
 
-/// What a worker stage hands on: the finished value, or the main-thread stage
+/// What a background stage hands on: the finished value, or the main-thread stage
 /// that finishes it.
 pub(crate) enum Staged {
     Done(Value),
@@ -146,7 +146,7 @@ pub(crate) type Defer = Arc<dyn Fn(Box<dyn FnOnce(MainThreadMarker) + Send>) + S
 static STRANDED: AtomicU64 = AtomicU64::new(0);
 
 /// How many worker outputs the pool leaked, process-wide since the process
-/// began: outputs of a load's worker stage that were dropped off the main
+/// began: outputs of a load's background stage that were dropped off the main
 /// thread with no main-work collector to hand them to
 /// (`tutti_plugin_types::MainWork::stranded` counts those a collector could not
 /// run). A diagnostic only.
@@ -254,8 +254,8 @@ impl<T: Send + 'static, S: Float> Load<T, S> {
         }
     }
 
-    /// A load of a worker stage and then a main-thread stage: `work` runs on a
-    /// thread of the session's executor, and its output `W` goes by value to
+    /// A load of a background stage and then a main-thread stage: `work` runs on a
+    /// thread of the session's background, and its output `W` goes by value to
     /// `main`, which runs on the main thread in an
     /// [`update`](crate::Session::update) on it and makes the loaded value.
     ///
@@ -287,7 +287,7 @@ impl<T: Send + 'static, S: Float> Load<T, S> {
 
     /// A load that is one stage on the session's own thread, run inside the
     /// [`update`](crate::Session::update) after the entry is declared, with no
-    /// worker stage. `open` is given what the session thread owns that an open
+    /// background stage. `open` is given what the session thread owns that an open
     /// needs ([`OpenCx`]); the entry reads
     /// [`PoolState::Opening`](crate::PoolState::Opening) until it runs.
     pub fn on_session(
@@ -435,9 +435,9 @@ pub enum LoadError {
     #[cfg(feature = "plugin")]
     #[error("the node could not swap to the landed plugin: {0}")]
     PluginSwap(Arc<crate::CrossfadeRefused>),
-    /// The load's job did not finish: it panicked, or the executor dropped it.
+    /// The load's job did not finish: it panicked, or the background dropped it.
     #[error(transparent)]
-    Job(#[from] WorkerError),
+    Job(#[from] BackgroundError),
 }
 
 /// An erased identity: compared with another of the same kind.

@@ -20,7 +20,7 @@ use crate::Session;
 /// `tests/midi/midi.rs` (`midi-hardware`), a plugin's meter by `plugin.rs`.
 #[test]
 fn an_update_frees_what_a_block_held_across_a_replacement() {
-    let mut s = Session::builder()
+    let (mut s, _bg) = Session::builder()
         .outputs_floor(ChannelLayout::MONO)
         .build_detached(SampleRate::SR_48K)
         .expect("builds");
@@ -51,7 +51,7 @@ fn an_update_frees_what_a_block_held_across_a_replacement() {
     assert!(gone.upgrade().is_none(), "the meter is freed");
 }
 
-fn detached() -> Session<&'static str, crate::Detached> {
+fn detached() -> (Session<&'static str, crate::Detached>, crate::Background) {
     Session::builder()
         .outputs_floor(ChannelLayout::MONO)
         .build_detached(SampleRate::SR_48K)
@@ -69,7 +69,7 @@ fn meter_of(numerator: u32) -> Arc<MeterMap> {
 /// the second value**: the meter cell's sequence moves by one.
 #[test]
 fn a_slot_written_twice_before_an_update_publishes_once_with_the_second_value() {
-    let mut s = detached();
+    let (mut s, _bg) = detached();
     let _ = s.update();
     let mut reader = s.transport.settings().project_meter().reader();
     let seq = reader.lend().seq();
@@ -89,7 +89,7 @@ fn a_slot_written_twice_before_an_update_publishes_once_with_the_second_value() 
 /// the old meter and tempo until the update publishes.
 #[test]
 fn a_read_before_the_update_is_the_pending_value_and_the_audio_side_reads_the_old_one() {
-    let mut s = detached();
+    let (mut s, _bg) = detached();
     let _ = s.update();
     let mut meters = s.transport.settings().project_meter().reader();
     let mut tempos = s.transport.settings().tempo_reader();
@@ -123,7 +123,7 @@ fn a_read_before_the_update_is_the_pending_value_and_the_audio_side_reads_the_ol
 /// lends both after the update sees both new, and before it both old.
 #[test]
 fn a_batch_of_tempo_and_meter_lands_in_one_update() {
-    let mut s = detached();
+    let (mut s, _bg) = detached();
     let _ = s.update();
     let mut meters = s.transport.settings().project_meter().reader();
     let mut tempos = s.transport.settings().tempo_reader();
@@ -155,7 +155,7 @@ fn a_batch_of_tempo_and_meter_lands_in_one_update() {
 #[test]
 fn a_refused_write_stages_nothing() {
     use crate::{SetRefusal, ValueErrorKind};
-    let mut s = detached();
+    let (mut s, _bg) = detached();
     let _ = s.update();
     // A live tempo owns the map: `check` refuses a tempo write.
     s.midi
@@ -193,7 +193,7 @@ fn a_refused_write_stages_nothing() {
 #[cfg(feature = "midi")]
 #[test]
 fn an_update_frees_the_mpe_mode_a_block_held_across_a_replacement() {
-    let mut s = Session::builder()
+    let (mut s, _bg) = Session::builder()
         .outputs_floor(ChannelLayout::MONO)
         .build_detached(SampleRate::SR_48K)
         .expect("builds");

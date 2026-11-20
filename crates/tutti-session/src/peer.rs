@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use thiserror::Error;
 
-use crate::{WaitError, WorkerError};
+use crate::{BackgroundError, WaitError};
 
 /// A resource's identity in one session: unique among every token the session
 /// has handed out, and never reused.
@@ -190,7 +190,7 @@ pub enum PeerError<E> {
     /// The job's work ended without an answer (the session ended it, or it
     /// panicked).
     #[error(transparent)]
-    Worker(#[from] WorkerError),
+    Worker(#[from] BackgroundError),
     /// [`Job::wait`](crate::Job::wait) could not wait for the answer.
     #[error(transparent)]
     Wait(#[from] WaitError),

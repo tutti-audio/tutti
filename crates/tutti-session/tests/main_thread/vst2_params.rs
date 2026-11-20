@@ -39,10 +39,13 @@ fn probe_answering_properties() -> (libloading::Library, std::path::PathBuf) {
 
 fn session_with_probe() -> (DetachedSession, NodeKey, libloading::Library) {
     let (image, probe) = probe_answering_properties();
-    let mut s = Session::builder()
+    let (mut s, mut background) = Session::builder()
         .outputs_floor(ChannelLayout::STEREO)
         .build_detached(SampleRate::DEFAULT)
         .expect("a detached session builds");
+    background
+        .spawn_threads(std::num::NonZeroUsize::MIN)
+        .expect("a background thread starts");
     let node = s
         .load_plugin_blocking(
             tutti_fixtures::main_thread(),

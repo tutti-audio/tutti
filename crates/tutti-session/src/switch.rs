@@ -553,7 +553,7 @@ mod tests {
     #[test]
     fn a_double_failure_on_the_card_leaves_it_stopped_agreeing_with_the_graph() {
         let (driver, _stream) = ManualStreamDriver::new();
-        let live = Session::builder()
+        let (live, _bg) = Session::builder()
             .device(Default::default())
             .build_device_on(spec(SampleRate::SR_48K, 256), driver)
             .expect("builds with no device");
@@ -577,7 +577,7 @@ mod tests {
     /// what the graph is prepared at**: the rate and the block.
     #[test]
     fn a_poisoned_graph_on_the_timer_leaves_it_stopped_agreeing_with_the_graph() {
-        let mut s = Session::builder()
+        let (mut s, _bg) = Session::builder()
             .sample_rate(SampleRate::SR_48K)
             .max_block(MaxBlock::of(Samples::new(480)))
             .system_clock()

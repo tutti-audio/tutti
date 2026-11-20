@@ -35,7 +35,7 @@ fn system_builder() -> tutti_session::SessionBuilder<tutti_session::SystemClock>
         .system_clock()
 }
 
-fn system() -> SystemSession {
+fn system() -> (SystemSession, tutti_session::Background) {
     system_builder().build().expect("a timer thread starts")
 }
 
@@ -83,7 +83,7 @@ fn wait_past(s: &mut SystemSession, than: u64) -> u64 {
 /// card's first blocks render.
 #[test]
 fn a_system_session_switches_to_a_device_and_its_graph_plays_there() {
-    let mut s = system();
+    let (mut s, _bg) = system();
     wire_constant(&mut s, 0.25);
     play(&s);
     let (driver, stream) = ManualStreamDriver::new();
@@ -107,7 +107,7 @@ fn a_system_session_switches_to_a_device_and_its_graph_plays_there() {
 #[test]
 fn a_device_session_switches_to_the_timer_and_its_graph_keeps_rendering() {
     let (driver, stream) = ManualStreamDriver::new();
-    let mut live = Session::builder()
+    let (mut live, _bg) = Session::builder()
         .device(Default::default())
         .build_device_on(stereo(SampleRate::SR_48K), driver)
         .expect("builds with no device");
@@ -150,7 +150,7 @@ fn a_device_session_switches_to_the_timer_and_its_graph_keeps_rendering() {
 /// the session's playhead goes on moving.
 #[test]
 fn a_device_that_will_not_open_returns_the_session_running_on_its_old_clock() {
-    let mut s = system();
+    let (mut s, _bg) = system();
     play(&s);
     let before = wait_past(&mut s, 0);
     let err = s
@@ -170,7 +170,7 @@ fn a_device_that_will_not_open_returns_the_session_running_on_its_old_clock() {
 /// never opened, and the timer renders on.
 #[test]
 fn a_root_the_device_cannot_place_is_refused_before_the_timer_stops() {
-    let mut s = system_builder()
+    let (mut s, _bg) = system_builder()
         .outputs(ChannelLayout::from(6u16))
         .root_topology(ChannelTopology::unassigned(ChannelLayout::from(6u16)))
         .build()
@@ -197,7 +197,7 @@ fn a_root_the_device_cannot_place_is_refused_before_the_timer_stops() {
 /// session is handed back running on the timer.
 #[test]
 fn a_graph_that_no_longer_compiles_fails_the_switch_and_the_timer_runs_again() {
-    let mut s = system();
+    let (mut s, _bg) = system();
     play(&s);
     let (osc, _) = s.graph().add(ForkByClone(Const::mono(0.1)));
     let (lim, _) = s.graph().add(ForkByClone(Through::mono()));
@@ -267,7 +267,7 @@ impl tutti_graph::Node for Grenade {
 /// back stopped with the error, its host in its slot.
 #[test]
 fn a_poisoned_graph_comes_back_stopped() {
-    let mut s = system();
+    let (mut s, _bg) = system();
     play(&s);
     s.graph().add(tutti_graph::Unforkable(Grenade));
     let _ = s.update();
@@ -300,7 +300,7 @@ fn a_poisoned_graph_comes_back_stopped() {
 #[test]
 fn the_transport_resumes_where_the_last_block_ended_going_to_the_timer() {
     let (driver, stream) = ManualStreamDriver::new();
-    let mut live = Session::builder()
+    let (mut live, _bg) = Session::builder()
         .device(Default::default())
         .build_device_on(stereo(SampleRate::SR_48K), driver)
         .expect("builds with no device");
@@ -326,7 +326,7 @@ fn the_transport_resumes_where_the_last_block_ended_going_to_the_timer() {
 /// playhead reads the frame a block started at).
 #[test]
 fn the_transport_resumes_where_the_last_block_ended_going_to_the_device() {
-    let mut s = system();
+    let (mut s, _bg) = system();
     play(&s);
     let timer_ran = wait_past(&mut s, 3 * BLOCK as u64);
     let (driver, stream) = ManualStreamDriver::new();
@@ -350,7 +350,7 @@ fn the_transport_resumes_where_the_last_block_ended_going_to_the_device() {
 /// transport's rate with the graph's.
 #[test]
 fn a_switch_to_a_device_at_another_rate_reports_the_change() {
-    let s = system();
+    let (s, _bg) = system();
     let (driver, _stream) = ManualStreamDriver::new();
     let mut live = s
         .into_device_on(stereo(SampleRate::SR_44K1), driver)
@@ -378,7 +378,7 @@ fn the_output_policy_carries_over_and_a_card_the_map_does_not_fit_is_refused() {
     use tutti_buffers::Bed;
     use tutti_engine::OutputMap;
     use tutti_session::OutputPolicy;
-    let mut s = system_builder()
+    let (mut s, _bg) = system_builder()
         .outputs(ChannelLayout::from(6u16))
         .build()
         .expect("builds");
@@ -479,7 +479,7 @@ impl tutti_engine::StreamDriver for UnstartableTimer {
 /// graph is at the old rate again and the timer renders blocks.
 #[test]
 fn a_card_that_fails_to_open_after_the_stop_returns_the_session_running_on_the_timer() {
-    let mut s = system();
+    let (mut s, _bg) = system();
     play(&s);
     let before = wait_past(&mut s, 0);
     let err = s
@@ -513,7 +513,7 @@ fn a_card_that_fails_to_open_after_the_stop_returns_the_session_running_on_the_t
 #[test]
 fn a_timer_that_fails_to_start_returns_the_session_running_on_the_card() {
     let (driver, stream) = ManualStreamDriver::new();
-    let live = Session::builder()
+    let (live, _bg) = Session::builder()
         .device(Default::default())
         .build_device_on(stereo(SampleRate::SR_48K), driver)
         .expect("builds with no device");
@@ -552,7 +552,7 @@ fn a_timer_that_fails_to_start_returns_the_session_running_on_the_card() {
 /// switch**: the card's start clears the record, so the session reads it first.
 #[test]
 fn a_fault_no_update_read_is_reported_after_the_switch() {
-    let s = system();
+    let (s, _bg) = system();
     s.faults().record_overrun("the timer fell behind");
     let (driver, _card) = ManualStreamDriver::new();
     let mut live = s
@@ -574,7 +574,7 @@ fn a_fault_no_update_read_is_reported_after_the_switch() {
 #[test]
 fn a_restart_report_no_update_read_is_reported_after_the_switch() {
     let (driver, _stream) = ManualStreamDriver::new();
-    let mut live = Session::builder()
+    let (mut live, _bg) = Session::builder()
         .device(Default::default())
         .build_device_on(stereo(SampleRate::SR_48K), driver)
         .expect("builds with no device");
@@ -708,7 +708,7 @@ fn hand_overs(log: &[std::thread::ThreadId]) -> (usize, bool) {
 fn the_old_driver_renders_its_last_block_before_the_new_one_its_first() {
     let log = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     // The timer, then a card on a thread of its own.
-    let mut s = system();
+    let (mut s, _bg) = system();
     let (node, _) = s.graph().add(ForkByClone(Renderer {
         log: log.clone(),
         inside: Default::default(),
@@ -764,7 +764,7 @@ mod midi_ports {
     fn timer_with_port() -> (SystemSession, FakeCounters) {
         let (backend, fake) =
             FakeBackend::build_with(vec![endpoint(1, "Keys")], vec![], usize::MAX);
-        let mut s = system_builder()
+        let (mut s, _bg) = system_builder()
             .midi_hardware_over(backend, tutti_midi_hardware::MidiHardwareConfig::new())
             .build()
             .expect("builds");

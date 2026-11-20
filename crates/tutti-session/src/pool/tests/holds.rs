@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use tutti_units::SampleRate;
 
-use super::{Spawned, events, state};
+use super::{Background, events, state};
 use crate::pool::table::{Hold, HoldKind};
 use crate::{Declared, Life, Load, PoolConfig, PoolEntry, PoolKey, Retention, Session};
 
@@ -71,14 +71,12 @@ impl PoolEntry for Shared {
     }
 }
 
-fn session(config: PoolConfig) -> (crate::DetachedSession, Spawned) {
-    let spawned = Spawned::new();
-    let session = Session::builder()
+fn session(config: PoolConfig) -> (crate::DetachedSession, Background) {
+    let (session, bg) = Session::builder()
         .pool_config(config)
-        .executor(spawned.clone())
         .build_detached(SampleRate::SR_48K)
         .unwrap();
-    (session, spawned)
+    (session, bg)
 }
 
 fn device(key: &'static str, loads: &Arc<AtomicUsize>) -> Declared<&'static str, Device> {
@@ -99,7 +97,7 @@ fn life(session: &crate::DetachedSession, key: &'static str) -> Life {
 /// then undeclares them: the pool holds only what the holds keep.
 fn held(
     s: &mut crate::DetachedSession,
-    spawned: &Spawned,
+    bg: &mut Background,
     loads: &Arc<AtomicUsize>,
     keys: &[&'static str],
 ) -> (Vec<Life>, Vec<Hold>) {
@@ -110,7 +108,7 @@ fn held(
     )
     .unwrap();
     // The parallel cap starts the rest as running loads land.
-    while spawned.run_until_stalled() > 0 {
+    while bg.run_until_stalled() > 0 {
         let _ = events(s);
     }
     let lives = keys.iter().map(|key| life(s, key)).collect();
@@ -129,9 +127,9 @@ fn held(
 
 #[test]
 fn a_snapshot_hold_past_the_depth_parks_a_kind_that_releases_and_the_newest_stay_live() {
-    let (mut s, spawned) = session(PoolConfig::new().with_live_holds(2));
+    let (mut s, mut bg) = session(PoolConfig::new().with_live_holds(2));
     let loads = Arc::new(AtomicUsize::new(0));
-    let (lives, _holds) = held(&mut s, &spawned, &loads, &["a", "b", "c"]);
+    let (lives, _holds) = held(&mut s, &mut bg, &loads, &["a", "b", "c"]);
     let _ = events(&mut s);
     assert!(lives[0].is_closed(), "the oldest hold's entry parked");
     assert!(
@@ -150,10 +148,10 @@ fn a_snapshot_hold_past_the_depth_parks_a_kind_that_releases_and_the_newest_stay
 
 #[test]
 fn the_default_depth_is_eight_holds() {
-    let (mut s, spawned) = session(PoolConfig::new());
+    let (mut s, mut bg) = session(PoolConfig::new());
     let loads = Arc::new(AtomicUsize::new(0));
     let keys = ["k0", "k1", "k2", "k3", "k4", "k5", "k6", "k7", "k8"];
-    let (lives, _holds) = held(&mut s, &spawned, &loads, &keys);
+    let (lives, _holds) = held(&mut s, &mut bg, &loads, &keys);
     let _ = events(&mut s);
     let closed: Vec<bool> = lives.iter().map(Life::is_closed).collect();
     assert_eq!(
@@ -165,9 +163,9 @@ fn the_default_depth_is_eight_holds() {
 
 #[test]
 fn recalling_a_parked_entry_loads_it_again_and_a_live_one_adopts_with_no_load() {
-    let (mut s, spawned) = session(PoolConfig::new().with_live_holds(1));
+    let (mut s, mut bg) = session(PoolConfig::new().with_live_holds(1));
     let loads = Arc::new(AtomicUsize::new(0));
-    let (lives, _holds) = held(&mut s, &spawned, &loads, &["old", "new"]);
+    let (lives, _holds) = held(&mut s, &mut bg, &loads, &["old", "new"]);
     let _ = events(&mut s);
     assert!(lives[0].is_closed() && !lives[1].is_closed());
     assert_eq!(loads.load(Ordering::SeqCst), 2);
@@ -180,7 +178,7 @@ fn recalling_a_parked_entry_loads_it_again_and_a_live_one_adopts_with_no_load() 
         Some("loading"),
         "reloading from the park"
     );
-    spawned.run_until_stalled();
+    bg.run_until_stalled();
     assert_eq!(events(&mut s), [("old", "loaded".to_owned())]);
     assert_eq!(
         loads.load(Ordering::SeqCst),
@@ -197,10 +195,10 @@ fn recalling_a_parked_entry_loads_it_again_and_a_live_one_adopts_with_no_load() 
 
 #[test]
 fn a_node_hold_never_parks_however_old() {
-    let (mut s, spawned) = session(PoolConfig::new().with_live_holds(0));
+    let (mut s, mut bg) = session(PoolConfig::new().with_live_holds(0));
     let loads = Arc::new(AtomicUsize::new(0));
     s.pool(device("a", &loads)).unwrap();
-    spawned.run_until_stalled();
+    bg.run_until_stalled();
     let _ = events(&mut s);
     let handle = life(&s, "a");
     let _hold = s
@@ -215,7 +213,7 @@ fn a_node_hold_never_parks_however_old() {
 
 #[test]
 fn a_kind_that_keeps_its_value_is_not_parked_past_the_depth() {
-    let (mut s, spawned) = session(PoolConfig::new().with_live_holds(0));
+    let (mut s, mut bg) = session(PoolConfig::new().with_live_holds(0));
     let loads = Arc::new(AtomicUsize::new(0));
     s.pool(Declared::new(
         "a",
@@ -224,7 +222,7 @@ fn a_kind_that_keeps_its_value_is_not_parked_past_the_depth() {
         },
     ))
     .unwrap();
-    spawned.run_until_stalled();
+    bg.run_until_stalled();
     let _ = events(&mut s);
     let handle = s.pool.entries.handle::<_, Shared>(&"a").unwrap();
     let _hold = s
@@ -242,15 +240,15 @@ fn a_kind_that_keeps_its_value_is_not_parked_past_the_depth() {
         },
     ))
     .unwrap();
-    assert!(spawned.run_until_stalled() == 0, "adopted with no load");
+    assert!(bg.run_until_stalled() == 0, "adopted with no load");
     assert_eq!(loads.load(Ordering::SeqCst), 1);
 }
 
 #[test]
 fn the_last_hold_of_a_parked_entry_releases_it() {
-    let (mut s, spawned) = session(PoolConfig::new().with_live_holds(0));
+    let (mut s, mut bg) = session(PoolConfig::new().with_live_holds(0));
     let loads = Arc::new(AtomicUsize::new(0));
-    let (lives, holds) = held(&mut s, &spawned, &loads, &["a"]);
+    let (lives, holds) = held(&mut s, &mut bg, &loads, &["a"]);
     let _ = events(&mut s);
     assert!(lives[0].is_closed(), "parked");
     drop(holds);

@@ -15,7 +15,7 @@ const RATE: SampleRate = SampleRate::SR_48K;
 /// 10 ms at 48 kHz.
 const FRAMES: usize = 480;
 
-fn session() -> DetachedSession {
+fn session() -> (DetachedSession, tutti_session::Background) {
     Session::builder()
         .inputs(ChannelLayout::EMPTY)
         .outputs_floor(ChannelLayout::STEREO)
@@ -52,7 +52,7 @@ fn a_create_new_bounce_onto_an_existing_master_keeps_the_bounce_and_leaves_the_p
     let dir = tempfile::tempdir().unwrap();
     let master = dir.path().join("master.wav");
     std::fs::write(&master, b"old bytes").unwrap();
-    let mut session = session();
+    let (mut session, _bg) = session();
     let (node, _) = session.graph().add(ForkByClone(Const::mono(0.5)));
     session.graph().connect(node, Root).unwrap();
     let error = session
@@ -80,7 +80,7 @@ fn a_bounce_replaces_an_existing_master_and_leaves_nothing_beside_it() {
     let dir = tempfile::tempdir().unwrap();
     let master = dir.path().join("master.wav");
     std::fs::write(&master, b"old bytes").unwrap();
-    let mut session = session();
+    let (mut session, _bg) = session();
     let (node, _) = session.graph().add(ForkByClone(Const::mono(0.5)));
     session.graph().connect(node, Root).unwrap();
     session

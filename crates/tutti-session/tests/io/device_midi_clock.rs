@@ -70,7 +70,7 @@ fn clock(
 #[test]
 fn a_restart_re_rates_the_midi_clock() {
     let (driver, old) = ManualStreamDriver::new();
-    let mut s = Session::builder()
+    let (mut s, _bg) = Session::builder()
         .device(Default::default())
         .build_device_on(spec_at(OLD), driver)
         .expect("builds with no device");

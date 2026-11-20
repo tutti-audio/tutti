@@ -92,7 +92,7 @@ impl InputOpener<f64> for Capture {
 /// A live session at 48 kHz whose inputs open through the test's capture.
 fn live(record: &Arc<Mutex<Record>>) -> (LiveSession, ManualStream) {
     let (driver, stream) = ManualStreamDriver::new();
-    let live = Session::builder()
+    let (live, _bg) = Session::builder()
         .input_opener(Capture(Arc::clone(record)))
         .device(Default::default())
         .build_device_on(spec_at(48_000.0), driver)
@@ -401,7 +401,7 @@ fn a_capture_refusing_the_sessions_width_fails_the_add_input_call() {
         ChannelLayout::STEREO,
         tutti_buffers::SampleFormat::F64,
     );
-    let mut session = Session::builder()
+    let (mut session, _bg) = Session::builder()
         .float::<f64>()
         .input_opener(Capture(Arc::clone(&record)))
         .device(Default::default())

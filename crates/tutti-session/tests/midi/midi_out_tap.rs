@@ -45,8 +45,8 @@ impl Wire {
 }
 
 /// A session with its clock enabled and a stamping-off sink on `wire`.
-fn rig(wire: &Wire) -> Session {
-    let mut s = Session::builder()
+fn rig(wire: &Wire) -> (Session, tutti_session::Background) {
+    let (mut s, bg) = Session::builder()
         .sample_rate(SampleRate::of(RATE))
         .build()
         .expect("builds");
@@ -63,7 +63,7 @@ fn rig(wire: &Wire) -> Session {
         .expect("declares");
     let _ = s.update();
     s.play().expect("room");
-    s
+    (s, bg)
 }
 
 fn render(s: &Session, frames: usize) {
@@ -90,7 +90,7 @@ fn ticks(batch: &[UmpAt]) -> Vec<u32> {
 #[test]
 fn the_clock_reaches_the_output_in_order_on_its_frames() {
     let wire = Wire::default();
-    let mut s = rig(&wire);
+    let (mut s, _bg) = rig(&wire);
     render(&s, 24_000);
     let _ = s.update();
     let batches = wire.batches();
@@ -117,7 +117,7 @@ fn the_clock_reaches_the_output_in_order_on_its_frames() {
 #[test]
 fn a_full_tap_counts_what_it_drops() {
     let wire = Wire::default();
-    let mut s = rig(&wire);
+    let (mut s, _bg) = rig(&wire);
     let clock = s.midi_nodes().unwrap().sync;
     let mut all = s
         .graph()
@@ -179,7 +179,7 @@ fn a_full_tap_counts_what_it_drops() {
 #[test]
 fn reopening_one_tap_leaves_the_others_fed() {
     let wire = Wire::default();
-    let mut s = rig(&wire);
+    let (mut s, _bg) = rig(&wire);
     let clock = s.midi_nodes().unwrap().sync;
     let mut first = s
         .graph()
@@ -230,7 +230,7 @@ fn reopening_one_tap_leaves_the_others_fed() {
 #[test]
 fn a_clip_fed_to_a_sinks_node_arrives_on_its_frames() {
     let wire = Wire::default();
-    let mut s = rig(&wire);
+    let (mut s, _bg) = rig(&wire);
     s.midi_nodes()
         .unwrap()
         .sync_controls
@@ -268,7 +268,7 @@ fn a_clip_fed_to_a_sinks_node_arrives_on_its_frames() {
 #[test]
 fn a_sink_is_a_pool_entry_that_a_new_sink_replaces() {
     let first: Arc<dyn MidiOut> = Arc::new(Wire::default());
-    let mut s = Session::builder()
+    let (mut s, _bg) = Session::builder()
         .sample_rate(SampleRate::of(RATE))
         .build()
         .expect("builds");
@@ -306,7 +306,7 @@ fn a_sink_is_a_pool_entry_that_a_new_sink_replaces() {
 #[test]
 fn releasing_the_entry_ends_the_sink() {
     let wire = Wire::default();
-    let mut s = rig(&wire);
+    let (mut s, _bg) = rig(&wire);
     let sink = s.midi_sink(&"out").expect("loaded");
     render(&s, 4_096);
     let _ = s.update();
@@ -335,7 +335,7 @@ fn releasing_the_entry_ends_the_sink() {
 #[test]
 fn a_stamped_sink_stamps_at_the_new_rate_after_a_re_rate() {
     let wire = Wire::default();
-    let mut s = Session::builder()
+    let (mut s, _bg) = Session::builder()
         .sample_rate(SampleRate::of(RATE))
         .build()
         .expect("builds");

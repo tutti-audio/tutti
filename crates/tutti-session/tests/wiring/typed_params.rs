@@ -14,7 +14,7 @@ use tutti_rt::Param;
 use tutti_session::{DetachedSession, Session, ValueErrorKind};
 use tutti_units::{Db, Hz, Q, SampleRate, Seconds, UnitAddr, UnitParam};
 
-fn detached() -> DetachedSession {
+fn detached() -> (DetachedSession, tutti_session::Background) {
     Session::builder()
         .outputs_floor(ChannelLayout::MONO)
         .build_detached(SampleRate::SR_48K)
@@ -27,7 +27,7 @@ fn detached() -> DetachedSession {
 /// node's `_at` method, held in `modulation/indexed_params.rs`.)
 #[test]
 fn a_keys_param_methods_name_their_kind_and_index() {
-    let mut s = detached();
+    let (mut s, _bg) = detached();
     let (lp, _) = s.graph().add(SvfFilterNode::<f32>::new(
         SvfType::LowPass,
         Hz::new(1_000.0),
@@ -44,7 +44,7 @@ fn a_keys_param_methods_name_their_kind_and_index() {
 /// the filter's own control reads what `set` wrote.
 #[test]
 fn a_write_reaches_the_cell_the_key_names() {
-    let mut s = detached();
+    let (mut s, _bg) = detached();
     let (lp, controls) = s.graph().add(SvfFilterNode::<f32>::new(
         SvfType::LowPass,
         Hz::new(1_000.0),
@@ -79,7 +79,7 @@ fn a_write_reaches_the_cell_the_key_names() {
 /// params). Nothing is written.
 #[test]
 fn a_write_to_a_missing_node_or_param_is_no_such_target() {
-    let mut s = detached();
+    let (mut s, _bg) = detached();
     let (lp, _) = s.graph().add(SvfFilterNode::<f32>::new(
         SvfType::LowPass,
         Hz::new(1_000.0),
@@ -162,7 +162,7 @@ tutti_graph::declare_params!([] Mine, n { Cutoff => Hz = &n.cutoff });
 /// gives, and a fork of it starts from the value set.
 #[test]
 fn a_params_wrapped_node_is_addressed_and_forks_from_its_values() {
-    let mut s = detached();
+    let (mut s, _bg) = detached();
     let (mine, controls) = s.graph().add(Params(Mine {
         cutoff: Param::new(Hz::new(100.0)),
     }));

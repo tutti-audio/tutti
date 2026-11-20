@@ -17,8 +17,8 @@ use tutti_units::{SampleRate, Samples};
 const BLOCK: usize = 64;
 
 /// A stereo session whose root is fed (0.25, 0.75), the plan installed.
-fn session() -> Session {
-    let mut s = Session::builder()
+fn session() -> (Session, tutti_session::Background) {
+    let (mut s, bg) = Session::builder()
         .sample_rate(SampleRate::SR_48K)
         .max_block(MaxBlock::of(Samples::new(BLOCK)))
         .build()
@@ -30,7 +30,7 @@ fn session() -> Session {
             .unwrap();
     }
     let _ = s.update();
-    s
+    (s, bg)
 }
 
 /// One update, then one block rendered; the update's events.
@@ -87,7 +87,7 @@ fn drain(tap: &mut tutti_graph::TapReader) -> (Vec<f32>, bool) {
 /// 0.25 (the mono root keeps channel 0).
 #[test]
 fn a_root_width_change_reopens_the_root_tap_and_closes_the_old_reader() {
-    let mut s = session();
+    let (mut s, _bg) = session();
     let mut old = s
         .graph()
         .taps()
@@ -156,7 +156,7 @@ fn a_root_width_change_reopens_the_root_tap_and_closes_the_old_reader() {
 /// not the width, so no event arrives and the reader keeps reading.
 #[test]
 fn a_declaration_that_keeps_the_width_leaves_the_tap_alone() {
-    let mut s = session();
+    let (mut s, _bg) = session();
     let mut tap = s
         .graph()
         .taps()
@@ -179,7 +179,7 @@ fn a_declaration_that_keeps_the_width_leaves_the_tap_alone() {
 /// the source being constant, the rms); the old handle reads closed.
 #[test]
 fn the_taken_master_meter_reopens_with_the_new_width() {
-    let mut s = session();
+    let (mut s, _bg) = session();
     let old = s.take_master_meter().expect("held");
     assert_eq!(old.channels(), 2);
     let _ = block(&mut s);
@@ -211,7 +211,7 @@ fn the_taken_master_meter_reopens_with_the_new_width() {
 /// reader is the new one.
 #[test]
 fn a_meter_nobody_took_is_replaced_without_an_event() {
-    let mut s = session();
+    let (mut s, _bg) = session();
     s.declare_root_topology(Some(mono()))
         .expect("a mono root")
         .unfaded();
@@ -226,7 +226,7 @@ fn a_meter_nobody_took_is_replaced_without_an_event() {
 /// width, and the first reader never existed outside the graph.
 #[test]
 fn only_the_last_of_two_changes_before_an_update_is_reported() {
-    let mut s = session();
+    let (mut s, _bg) = session();
     let mut old = s
         .graph()
         .taps()
@@ -253,7 +253,7 @@ fn only_the_last_of_two_changes_before_an_update_is_reported() {
 /// superseded ends.
 #[test]
 fn a_second_reopen_before_the_claim_replaces_the_held_reader() {
-    let mut s = session();
+    let (mut s, _bg) = session();
     let _old = s
         .graph()
         .taps()
@@ -282,7 +282,7 @@ fn a_second_reopen_before_the_claim_replaces_the_held_reader() {
 /// updates and is claimable then, with frames from the commit on.
 #[test]
 fn an_unclaimed_reader_survives_ignored_updates_and_is_claimed_later() {
-    let mut s = session();
+    let (mut s, _bg) = session();
     let _old = s
         .graph()
         .taps()
@@ -306,7 +306,7 @@ fn an_unclaimed_reader_survives_ignored_updates_and_is_claimed_later() {
 /// **A claim of an id nothing was reopened under is an error at the call.**
 #[test]
 fn a_claim_of_an_unknown_id_is_refused() {
-    let mut s = session();
+    let (mut s, _bg) = session();
     let id = RootReader::Tap(TapId::of(99));
     assert_eq!(s.take_reopened(id).unwrap_err(), NotReopened(id));
 }
@@ -316,7 +316,7 @@ fn a_claim_of_an_unknown_id_is_refused() {
 /// wide: the tap has the root's width and is not reopened.
 #[test]
 fn a_tap_that_has_the_roots_width_after_a_widen_and_a_declaration_is_not_reopened() {
-    let mut s = session();
+    let (mut s, _bg) = session();
     let mut tap = s
         .graph()
         .taps()
@@ -344,7 +344,7 @@ fn a_tap_that_has_the_roots_width_after_a_widen_and_a_declaration_is_not_reopene
 /// did not move the root's width.
 #[test]
 fn a_tap_narrower_than_the_declared_root_is_reopened_at_its_width() {
-    let mut s = session();
+    let (mut s, _bg) = session();
     let old = s
         .graph()
         .taps()
@@ -368,7 +368,7 @@ fn a_tap_narrower_than_the_declared_root_is_reopened_at_its_width() {
 /// the reader the reopen superseded reads `Ended`.
 #[test]
 fn closing_a_tap_drops_the_reader_held_for_it() {
-    let mut s = session();
+    let (mut s, _bg) = session();
     let mut old = s
         .graph()
         .taps()
@@ -394,7 +394,7 @@ fn closing_a_tap_drops_the_reader_held_for_it() {
 /// refused, and the superseded handle reads closed.
 #[test]
 fn closing_the_master_meter_drops_the_reader_held_for_it() {
-    let mut s = session();
+    let (mut s, _bg) = session();
     let old = s.take_master_meter().expect("held");
     let id = old.id();
     let _ = block(&mut s);

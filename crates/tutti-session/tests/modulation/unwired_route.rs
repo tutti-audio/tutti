@@ -40,7 +40,7 @@ fn render(s: &mut Session) -> Vec<f32> {
 /// no commit is refused, and the other output is untouched.
 #[test]
 fn a_route_onto_a_dropped_edge_reads_unresolved() {
-    let mut s = Session::builder().build().expect("builds");
+    let (mut s, _bg) = Session::builder().build().expect("builds");
     let g = s.graph();
     let (a, _) = g.add(ForkByClone(Const::mono(0.25)));
     let (p, _) = g.add(ForkByClone(Pulse {

@@ -14,7 +14,7 @@ use support::{Noisy, SITE, rt_events};
 
 #[test]
 fn a_node_that_logs_in_a_bounce_emits_a_tracing_event_through_the_export_path() {
-    let mut session = Session::builder()
+    let (mut session, _bg) = Session::builder()
         .inputs(ChannelLayout::EMPTY)
         .outputs_floor(ChannelLayout::STEREO)
         .build_detached(SampleRate::DEFAULT)
