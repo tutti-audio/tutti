@@ -21,7 +21,7 @@ use tutti_graph::{
     Cx, Editor, EventOut, GraphBuilder, Io, Node, ParamIn, ParamNode, ParamRange, ParamSet,
     Prepare, Renderer, Shape, Status, Unforkable,
 };
-use tutti_graph::{OutPort, Source};
+use tutti_graph::{OutPort, PortSource};
 use tutti_modulation::{
     Amount, Clock, ControlProgram, Layer, LayerId, LfoShape, Polarity, Waveform,
 };
@@ -126,7 +126,7 @@ fn an_lfo_lane_sweeps_around_a_real_filters_cutoff_cell() {
     ed.insert(probe, "probe", Unforkable(Probe));
     ed.spec_mut()
         .topology
-        .set_outputs(vec![Source::Node(OutPort {
+        .set_outputs(vec![PortSource::Node(OutPort {
             node: probe,
             port: 0,
         })]);

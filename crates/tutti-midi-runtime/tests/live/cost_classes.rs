@@ -13,7 +13,7 @@ use tutti_graph::{
     Cost, Cx, Editor, EventCapacity, EventInletNode, EventKind, Executor, ForkByClone, Io, Node,
     Prepare, Schedule, Shape, Status, TransportPosition, Unforkable,
 };
-use tutti_graph::{OutPort, Source};
+use tutti_graph::{OutPort, PortSource};
 use tutti_midi_runtime::{HarmonyNode, MidiClipNode, MidiInputNode, SyncOut, TimedMidiEvent};
 use tutti_ump::{Message, MidiChannel, NoteNumber, NoteVelocity, Ump, Voice2};
 use tutti_units::{Beat, Bpm, SampleRate, Samples};
@@ -110,7 +110,7 @@ fn graph(workers: usize, declared: bool) -> (Executor, Vec<common::Sink>, Vec<Se
             let log = Seen::default();
             ed.insert(sink, "recorder", ForkByClone(Recorder(Arc::clone(&log))));
             seen.push(log);
-            outputs.push(Source::Node(OutPort {
+            outputs.push(PortSource::Node(OutPort {
                 node: sink,
                 port: 0,
             }));

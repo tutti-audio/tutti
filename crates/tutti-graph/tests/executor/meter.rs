@@ -17,7 +17,7 @@ use tutti_graph::{
     Forked, IntoNode, Io, Level, MeterReader, Node, NodeParts, Op, Shape, Status,
     TransportPosition, Unforkable,
 };
-use tutti_graph::{Edge, InPort, OutPort, Source};
+use tutti_graph::{Edge, InPort, OutPort, PortSource};
 use tutti_graph::{MeterId, MeterSpec, NodeKey};
 use tutti_units::{Beat, Bpm, Samples};
 
@@ -48,8 +48,8 @@ impl IntoNode for Forkable {
 
 const MAX_BLOCK: usize = 1024;
 
-fn out(node: u64) -> Source {
-    Source::Node(OutPort {
+fn out(node: u64) -> PortSource {
+    PortSource::Node(OutPort {
         node: NodeKey(node),
         port: 0,
     })
@@ -388,7 +388,7 @@ fn a_reader_dropped_is_pruned_and_its_cells_freed_off_the_audio_thread() {
 fn a_reader_dropped_on_the_audio_thread_panics() {
     let mut r = rig(1, false);
     let m =
-        r.ed.open_meter(MeterId::of(1), MeterSpec::raw(vec![Source::Zero]))
+        r.ed.open_meter(MeterId::of(1), MeterSpec::raw(vec![PortSource::Zero]))
             .expect("the sources exist");
     let _inside = tutti_rt::RtScope::enter();
     drop(m);
@@ -471,7 +471,7 @@ fn output_bits(workers: usize, master: bool, track: bool) -> Vec<u32> {
                 node: NodeKey(lag),
                 port: 0,
             },
-            vec![Edge::Direct(Source::Global(0))],
+            vec![Edge::Direct(PortSource::Global(0))],
         );
         t.edges.insert(
             InPort {
@@ -563,7 +563,7 @@ fn a_narrowed_node_silences_the_lanes_past_its_width_and_commits() {
         }),
     );
     let port = |p| {
-        Source::Node(OutPort {
+        PortSource::Node(OutPort {
             node: NodeKey(1),
             port: p,
         })
@@ -736,7 +736,7 @@ fn a_meter_cannot_change_its_width_under_its_cells() {
     else {
         panic!("open");
     };
-    sources.push(Source::Zero);
+    sources.push(PortSource::Zero);
     assert_eq!(
         r.ed.commit(),
         Err(CommitError::MeterWidth {
@@ -752,7 +752,7 @@ fn a_meter_cannot_change_its_width_under_its_cells() {
             .expect("the sources exist");
     r.ed.spec_mut()
         .topology
-        .set_outputs(vec![Source::Zero; tutti_buffers::MAX_CHANNELS + 1]);
+        .set_outputs(vec![PortSource::Zero; tutti_buffers::MAX_CHANNELS + 1]);
     assert!(matches!(
         r.ed.commit(),
         Err(CommitError::MeterWidth { meter, .. }) if meter == MeterId::of(2)

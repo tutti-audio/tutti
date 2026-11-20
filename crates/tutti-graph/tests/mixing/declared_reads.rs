@@ -14,7 +14,7 @@ use common::prepare;
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{
     Cx, Editor, EventOut, Executor, IntoNode, Io, Law, Node, NodeKey, NodeParts, OutPort,
-    ParamEvent, ParamIn, ParamInput, ParamNode, ParamSegment, ParamSet, Prepare, Shape, Source,
+    ParamEvent, ParamIn, ParamInput, ParamNode, ParamSegment, ParamSet, PortSource, Prepare, Shape,
     Status, TransportPosition, declare_params, param_parts,
 };
 use tutti_rt::Param;
@@ -135,7 +135,7 @@ fn render(to: &[(UnitAddr, f64)]) -> [Vec<f32>; 4] {
     );
     ed.spec_mut().topology.set_outputs(
         (0..4)
-            .map(|port| Source::Node(OutPort { node: NODE, port }))
+            .map(|port| PortSource::Node(OutPort { node: NODE, port }))
             .collect::<Vec<_>>(),
     );
     for &(addr, _) in to {

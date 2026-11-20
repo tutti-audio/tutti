@@ -23,7 +23,7 @@ use tutti_graph::{
     Editor, EventEdge, EventIn, EventOut, ForkMode, ForkTarget, Law, ParamKind, ParamRamp,
     ParamSegment, Prepare,
 };
-use tutti_graph::{OutPort, Source};
+use tutti_graph::{OutPort, PortSource};
 use tutti_modulation::ControlProgram;
 use tutti_nodes::automation::{Breakpoint, ControlLaneNode, Curve, Trajectory};
 use tutti_timeline::{OfflineTimeline, OfflineTimelineConfig, render_graph};
@@ -94,7 +94,7 @@ fn automation_reaches_the_plugin_through_its_event_input() {
     );
     live.spec_mut()
         .topology
-        .set_outputs(vec![Source::Node(OutPort { node: key, port: 0 })]);
+        .set_outputs(vec![PortSource::Node(OutPort { node: key, port: 0 })]);
     let timeline = Arc::new(OfflineTimeline::new(&OfflineTimelineConfig {
         sample_rate: SampleRate::of(SAMPLE_RATE),
         ..Default::default()
@@ -168,7 +168,7 @@ fn render_gain(
     }
     live.spec_mut()
         .topology
-        .set_outputs(vec![Source::Node(OutPort {
+        .set_outputs(vec![PortSource::Node(OutPort {
             node: PLUGIN,
             port: 0,
         })]);

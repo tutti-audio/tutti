@@ -17,7 +17,7 @@ use tutti_buffers::InterleavedMut;
 use tutti_engine::Engine;
 use tutti_graph::NodeKey;
 use tutti_graph::{Cx, Editor, Executor, Io, Node, Prepare, Shape, Status, Unforkable};
-use tutti_graph::{OutPort, Source};
+use tutti_graph::{OutPort, PortSource};
 use tutti_music::{LoopRange, first_frame_at_or_after};
 use tutti_tempo::{TempoMap, TempoPoint, Transition};
 use tutti_timeline::{
@@ -65,7 +65,7 @@ fn graph(log: &Log) -> (Editor, Executor) {
     ed.insert(NodeKey(1), "beats", Unforkable(BeatLog(Arc::clone(log))));
     ed.spec_mut()
         .topology
-        .set_outputs(vec![Source::Node(OutPort {
+        .set_outputs(vec![PortSource::Node(OutPort {
             node: NodeKey(1),
             port: 0,
         })]);

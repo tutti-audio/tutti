@@ -31,7 +31,7 @@
 //! use tutti_polysynth::{
 //!     Adsr, FilterType, OscillatorType, PolySynth, SynthConfig,
 //! };
-//! use tutti_graph::{OutPort, Source};
+//! use tutti_graph::{OutPort, PortSource};
 //! use tutti_units::{Amplitude, Hz, Resonance, SampleRate, Samples, Seconds, UnitParam};
 //! use tutti_graph::NodeKey;
 //! use tutti_graph::{Editor, Prepare};
@@ -59,7 +59,7 @@
 //! let synth_key = NodeKey(1);
 //! let params = editor.insert(synth_key, "synth", synth).controls;
 //! editor.spec_mut().topology.set_outputs((0..2)
-//!     .map(|port| Source::Node(OutPort { node: synth_key, port })));
+//!     .map(|port| PortSource::Node(OutPort { node: synth_key, port })));
 //! editor.commit().expect("a one-node graph commits");
 //!
 //! // Its controls: the live params, by address.

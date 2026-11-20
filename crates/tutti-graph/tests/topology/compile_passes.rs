@@ -15,7 +15,7 @@ use tutti_graph::{
     PortKind, Shape, Shapes, Unforkable, compile,
 };
 use tutti_graph::{
-    Edge, Feed, FeedbackFrom, InPort, InputDelay, Invalid, NodeSpec, OutPort, Source,
+    Edge, Feed, FeedbackFrom, InPort, InputDelay, Invalid, NodeSpec, OutPort, PortSource,
 };
 use tutti_graph::{NodeKey, Topology, delays, latency_plan};
 use tutti_units::{Latency, SampleRate, Samples, Tail};
@@ -46,7 +46,8 @@ fn out(node: NodeKey, port: u16) -> OutPort {
 }
 
 fn edge(t: &mut Topology, sink: InPort, from: OutPort) {
-    t.edges.insert(sink, vec![Edge::Direct(Source::Node(from))]);
+    t.edges
+        .insert(sink, vec![Edge::Direct(PortSource::Node(from))]);
 }
 
 /// `topology_compile.rs`'s thirteen shapes, verbatim.
@@ -57,7 +58,7 @@ fn shapes() -> Vec<(&'static str, Topology)> {
     t.nodes.insert(A, spec("dc", 0, 1));
     t.nodes.insert(B, spec("gain", 1, 1));
     edge(&mut t, at(B, 0), out(A, 0));
-    t.set_outputs(vec![Source::Node(out(B, 0))]);
+    t.set_outputs(vec![PortSource::Node(out(B, 0))]);
     all.push(("chain", t));
 
     let mut t = Topology::default();
@@ -66,7 +67,10 @@ fn shapes() -> Vec<(&'static str, Topology)> {
     t.nodes.insert(C, spec("gain", 1, 1));
     edge(&mut t, at(B, 0), out(A, 0));
     edge(&mut t, at(C, 0), out(A, 0));
-    t.set_outputs(vec![Source::Node(out(B, 0)), Source::Node(out(C, 0))]);
+    t.set_outputs(vec![
+        PortSource::Node(out(B, 0)),
+        PortSource::Node(out(C, 0)),
+    ]);
     all.push(("fan_out", t));
 
     let mut t = Topology::default();
@@ -75,7 +79,7 @@ fn shapes() -> Vec<(&'static str, Topology)> {
     t.nodes.insert(C, spec("sum", 2, 1));
     edge(&mut t, at(C, 0), out(A, 0));
     edge(&mut t, at(C, 1), out(B, 0));
-    t.set_outputs(vec![Source::Node(out(C, 0))]);
+    t.set_outputs(vec![PortSource::Node(out(C, 0))]);
     all.push(("mix_fan_in", t));
 
     let mut t = Topology::default();
@@ -87,7 +91,7 @@ fn shapes() -> Vec<(&'static str, Topology)> {
     edge(&mut t, at(C, 0), out(A, 0));
     edge(&mut t, at(D, 0), out(B, 0));
     edge(&mut t, at(D, 1), out(C, 0));
-    t.set_outputs(vec![Source::Node(out(D, 0))]);
+    t.set_outputs(vec![PortSource::Node(out(D, 0))]);
     all.push(("diamond", t));
 
     let mut t = Topology::default();
@@ -100,7 +104,7 @@ fn shapes() -> Vec<(&'static str, Topology)> {
     edge(&mut t, at(C, 0), out(A, 0));
     edge(&mut t, at(D, 0), out(B, 0));
     edge(&mut t, at(D, 1), out(C, 0));
-    t.set_outputs(vec![Source::Node(out(D, 0))]);
+    t.set_outputs(vec![PortSource::Node(out(D, 0))]);
     all.push(("pdc_diamond", t));
 
     let mut t = Topology::default();
@@ -111,12 +115,15 @@ fn shapes() -> Vec<(&'static str, Topology)> {
         .insert(C, spec("gain", 1, 1).with_latency(Samples::new(64)));
     edge(&mut t, at(B, 0), out(A, 0));
     edge(&mut t, at(C, 0), out(B, 0));
-    t.set_outputs(vec![Source::Node(out(C, 0))]);
+    t.set_outputs(vec![PortSource::Node(out(C, 0))]);
     all.push(("serial_latency", t));
 
     let mut t = Topology::default();
     t.nodes.insert(A, spec("dc", 0, 2));
-    t.set_outputs(vec![Source::Node(out(A, 0)), Source::Node(out(A, 1))]);
+    t.set_outputs(vec![
+        PortSource::Node(out(A, 0)),
+        PortSource::Node(out(A, 1)),
+    ]);
     all.push(("multi_output", t));
 
     let mut t = Topology {
@@ -125,22 +132,25 @@ fn shapes() -> Vec<(&'static str, Topology)> {
     };
     t.nodes.insert(A, spec("fan", 2, 2));
     t.edges
-        .insert(at(A, 0), vec![Edge::Direct(Source::Global(0))]);
+        .insert(at(A, 0), vec![Edge::Direct(PortSource::Global(0))]);
     t.edges
-        .insert(at(A, 1), vec![Edge::Direct(Source::Global(1))]);
-    t.set_outputs(vec![Source::Node(out(A, 0)), Source::Node(out(A, 1))]);
+        .insert(at(A, 1), vec![Edge::Direct(PortSource::Global(1))]);
+    t.set_outputs(vec![
+        PortSource::Node(out(A, 0)),
+        PortSource::Node(out(A, 1)),
+    ]);
     all.push(("global_input", t));
 
     let mut t = Topology::default();
     t.nodes.insert(A, spec("dc", 0, 1));
     t.nodes.insert(B, spec("sum", 2, 1));
     edge(&mut t, at(B, 0), out(A, 0));
-    t.set_outputs(vec![Source::Node(out(B, 0))]);
+    t.set_outputs(vec![PortSource::Node(out(B, 0))]);
     all.push(("zero_sourced_port", t));
 
     let mut t = Topology::default();
     t.nodes.insert(A, spec("dc", 0, 1));
-    t.set_outputs(vec![Source::Node(out(A, 0)), Source::Zero]);
+    t.set_outputs(vec![PortSource::Node(out(A, 0)), PortSource::Zero]);
     all.push(("silent_output_channel", t));
 
     let mut t = Topology::default();
@@ -149,7 +159,7 @@ fn shapes() -> Vec<(&'static str, Topology)> {
     for port in 0..6 {
         edge(&mut t, at(B, port), out(A, port));
     }
-    t.set_outputs((0..6).map(|p| Source::Node(out(B, p))));
+    t.set_outputs((0..6).map(|p| PortSource::Node(out(B, p))));
     all.push(("six_channel", t));
 
     let mut t = Topology::default();
@@ -164,7 +174,7 @@ fn shapes() -> Vec<(&'static str, Topology)> {
     );
     edge(&mut t, at(B, 0), out(A, 0));
     edge(&mut t, at(C, 0), out(B, 0));
-    t.set_outputs(vec![Source::Node(out(C, 0))]);
+    t.set_outputs(vec![PortSource::Node(out(C, 0))]);
     all.push(("tail_chain", t));
 
     let mut t = Topology::default();
@@ -172,7 +182,7 @@ fn shapes() -> Vec<(&'static str, Topology)> {
     t.nodes
         .insert(B, spec("gain", 1, 1).with_latency(Samples::new(999)));
     edge(&mut t, at(B, 0), out(A, 0));
-    t.set_outputs(vec![Source::Node(out(A, 0))]);
+    t.set_outputs(vec![PortSource::Node(out(A, 0))]);
     all.push(("orphan_branch", t));
 
     all
@@ -252,15 +262,18 @@ fn one_source_is_an_alias_and_a_fan_in_is_a_sum_op() {
     t.nodes.insert(B, spec("dc", 0, 1));
     t.nodes.insert(C, spec("sum", 2, 1));
     edge(&mut t, at(C, 0), out(A, 0));
-    t.set_outputs(vec![Source::Node(out(C, 0))]);
+    t.set_outputs(vec![PortSource::Node(out(C, 0))]);
     assert_eq!(sums(&t), 0, "one source and none are aliases");
 
-    t.connect(at(C, 0), Edge::Direct(Source::Node(out(B, 0))));
+    t.connect(at(C, 0), Edge::Direct(PortSource::Node(out(B, 0))));
     assert_eq!(sums(&t), 1, "two sources at a port");
 
-    assert!(t.disconnect(at(C, 0), Edge::Direct(Source::Node(out(B, 0)))));
+    assert!(t.disconnect(at(C, 0), Edge::Direct(PortSource::Node(out(B, 0)))));
     assert_eq!(sums(&t), 0, "back to one source: an alias again");
-    t.outputs = vec![vec![Source::Node(out(C, 0)), Source::Node(out(A, 0))]];
+    t.outputs = vec![vec![
+        PortSource::Node(out(C, 0)),
+        PortSource::Node(out(A, 0)),
+    ]];
     assert_eq!(sums(&t), 1, "two sources at an output channel");
 
     // 65 addends: 64 in the first op, the chain's result and one more.
@@ -269,9 +282,9 @@ fn one_source_is_an_alias_and_a_fan_in_is_a_sum_op() {
     for k in 0..65u32 {
         let n = NodeKey(100 + u64::from(k));
         t.nodes.insert(n, spec("dc", 0, 1));
-        t.connect(at(C, 0), Edge::Direct(Source::Node(out(n, 0))));
+        t.connect(at(C, 0), Edge::Direct(PortSource::Node(out(n, 0))));
     }
-    t.set_outputs(vec![Source::Node(out(C, 0))]);
+    t.set_outputs(vec![PortSource::Node(out(C, 0))]);
     assert_eq!(sums(&t), 2, "a chain of two ops");
 }
 
@@ -417,7 +430,7 @@ fn a_diamond_of_3_and_7_delays_the_short_branch_by_4() {
     edge(&mut t, at(C, 0), out(A, 0));
     edge(&mut t, at(D, 0), out(B, 0));
     edge(&mut t, at(D, 1), out(C, 0));
-    t.set_outputs(vec![Source::Node(out(D, 0))]);
+    t.set_outputs(vec![PortSource::Node(out(D, 0))]);
     let plan = compiled(&t);
     let delays: Vec<_> = plan.delays().iter().map(|d| (d.key, d.len)).collect();
     assert_eq!(
@@ -425,7 +438,7 @@ fn a_diamond_of_3_and_7_delays_the_short_branch_by_4() {
         vec![(
             DelayKey::Audio {
                 at: at(D, 0),
-                from: Source::Node(out(B, 0)),
+                from: PortSource::Node(out(B, 0)),
             },
             Samples::new(4)
         )]
@@ -637,7 +650,7 @@ fn a_chain_reuses_slots() {
         t.nodes.insert(w[1], spec("gain", 1, 1));
         edge(&mut t, at(w[1], 0), out(w[0], 0));
     }
-    t.set_outputs(vec![Source::Node(out(keys[39], 0))]);
+    t.set_outputs(vec![PortSource::Node(out(keys[39], 0))]);
     let plan = compiled(&t);
     plan.verify().expect("sound");
     // Zero slot + at most two alternating coloured slots.
@@ -660,7 +673,10 @@ fn colouring_respects_the_partial_order_not_the_serial_one() {
     t.nodes.insert(B, spec("gain", 1, 1));
     t.nodes.insert(C, spec("dc", 0, 1));
     edge(&mut t, at(B, 0), out(A, 0));
-    t.set_outputs(vec![Source::Node(out(B, 0)), Source::Node(out(C, 0))]);
+    t.set_outputs(vec![
+        PortSource::Node(out(B, 0)),
+        PortSource::Node(out(C, 0)),
+    ]);
     let plan = compiled(&t);
     assert_eq!(
         plan.order(),
@@ -691,7 +707,10 @@ fn in_place_spec(ports_read_twice: bool) -> (GraphSpec, Shapes) {
     if ports_read_twice {
         edge(&mut t, at(B, 1), out(A, 0));
     }
-    t.set_outputs(vec![Source::Node(out(B, 0)), Source::Node(out(B, 1))]);
+    t.set_outputs(vec![
+        PortSource::Node(out(B, 0)),
+        PortSource::Node(out(B, 1)),
+    ]);
     let shapes: Shapes = [
         (A, Shape::source_unassigned(ChannelLayout::MONO)),
         (
@@ -747,7 +766,7 @@ fn in_place_aliasing_happens_exactly_when_legal() {
     let mut shapes = shapes;
     g.topology.nodes.insert(C, spec("gain", 1, 1));
     edge(&mut g.topology, at(C, 0), out(A, 0));
-    g.topology.outputs.push(vec![Source::Node(out(C, 0))]);
+    g.topology.outputs.push(vec![PortSource::Node(out(C, 0))]);
     shapes.insert(C, Shape::through_unassigned(ChannelLayout::MONO));
     let plan = compile(
         &g.validate().unwrap(),
@@ -774,7 +793,7 @@ fn chains_coarsen_into_one_task() {
         t.nodes.insert(w[1], spec("gain", 1, 1));
         edge(&mut t, at(w[1], 0), out(w[0], 0));
     }
-    t.set_outputs(vec![Source::Node(out(keys[9], 0))]);
+    t.set_outputs(vec![PortSource::Node(out(keys[9], 0))]);
     let plan = compiled(&t);
     assert_eq!(plan.tasks().len(), 1, "10 nodes + output op, one chain");
     assert_eq!(plan.task_activation(), &[0]);
@@ -839,7 +858,7 @@ fn the_delta_moves_only_what_changed() {
     assert_eq!(delta.store_len, 3);
 }
 
-/// A `Source::Global` input that merges with a latent path **is** delayed
+/// A `PortSource::Global` input that merges with a latent path **is** delayed
 /// to align, like any other merge-point source, and the compiler and
 /// `latency::delays` agree on it.
 #[test]
@@ -855,13 +874,13 @@ fn a_global_input_merging_with_a_latent_path_is_delayed() {
     edge(&mut t, at(B, 0), out(A, 0));
     edge(&mut t, at(C, 0), out(B, 0));
     t.edges
-        .insert(at(C, 1), vec![Edge::Direct(Source::Global(0))]);
-    t.set_outputs(vec![Source::Node(out(C, 0))]);
+        .insert(at(C, 1), vec![Edge::Direct(PortSource::Global(0))]);
+    t.set_outputs(vec![PortSource::Node(out(C, 0))]);
 
     let plan = compiled(&t);
     let key = DelayKey::Audio {
         at: at(C, 1),
-        from: Source::Global(0),
+        from: PortSource::Global(0),
     };
     assert_eq!(plan.delay(key), Samples::new(48));
     // The pure pass agrees.
@@ -905,7 +924,7 @@ fn an_event_source_counts_toward_arrival_in_both_solves() {
     t.nodes.insert(B, spec("dc", 0, 1));
     t.nodes.insert(C, spec("gain", 1, 1));
     edge(&mut t, at(C, 0), out(B, 0));
-    t.set_outputs(vec![Source::Node(out(C, 0))]);
+    t.set_outputs(vec![PortSource::Node(out(C, 0))]);
     let mut g = GraphSpec::new(t.clone());
     g.connect_events(
         EventIn { node: C, port: 0 },
@@ -936,7 +955,7 @@ fn an_event_source_counts_toward_arrival_in_both_solves() {
 
     let key = DelayKey::Audio {
         at: at(C, 0),
-        from: Source::Node(out(B, 0)),
+        from: PortSource::Node(out(B, 0)),
     };
     assert_eq!(
         plan.delay(key),

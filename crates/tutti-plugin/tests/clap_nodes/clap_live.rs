@@ -36,7 +36,7 @@ use tutti_buffers::InterleavedMut;
 use tutti_engine::Engine;
 use tutti_graph::NodeKey;
 use tutti_graph::{Cx, Editor, Io, Node, Prepare, Shape, Status, Unforkable};
-use tutti_graph::{Edge, InPort, OutPort, Source};
+use tutti_graph::{Edge, InPort, OutPort, PortSource};
 use tutti_plugin_ipc::RING_SLOTS;
 use tutti_timeline::Transport;
 use tutti_units::{SampleRate, Samples, Tail};
@@ -193,12 +193,15 @@ fn run_live(rate: f64, quantum: usize, blocks: usize, burst_at: Option<usize>) -
                 node: key,
                 port: port as u16,
             },
-            vec![Edge::Direct(Source::Node(OutPort { node: src, port: 0 }))],
+            vec![Edge::Direct(PortSource::Node(OutPort {
+                node: src,
+                port: 0,
+            }))],
         );
     }
     ed.spec_mut()
         .topology
-        .set_outputs(vec![Source::Node(OutPort { node: key, port: 0 })]);
+        .set_outputs(vec![PortSource::Node(OutPort { node: key, port: 0 })]);
     ed.commit().expect("the graph compiles");
     let declared = ed.spec().topology.nodes[&key].latency;
 

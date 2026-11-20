@@ -32,7 +32,7 @@
 //!
 //! ```rust,no_run
 //! use tutti_buffers::MaxBlock;
-//! use tutti_graph::{OutPort, Source};
+//! use tutti_graph::{OutPort, PortSource};
 //! use tutti_units::{SampleRate, Samples};
 //! use tutti_graph::NodeKey;
 //! use tutti_graph::{Editor, Prepare};
@@ -53,7 +53,7 @@
 //! let key = NodeKey(1);
 //! editor.insert(key, "piano", unit);
 //! editor.spec_mut().topology.set_outputs((0..2)
-//!     .map(|port| Source::Node(OutPort { node: key, port })));
+//!     .map(|port| PortSource::Node(OutPort { node: key, port })));
 //! editor.commit()?;
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```

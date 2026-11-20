@@ -11,7 +11,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use crate::NodeKey;
-use crate::{Edge, FeedbackFrom, InPort, OutPort, Sink, Source, Topology};
+use crate::{Edge, FeedbackFrom, InPort, OutPort, PortSink, PortSource, Topology};
 
 use crate::CompileError;
 use crate::editor::{CommitError, Editor};
@@ -629,7 +629,7 @@ impl Error for ForkError {
 /// let prepare = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(256)));
 /// let (mut editor, _exec) = Editor::new(prepare);
 /// editor.insert(NodeKey(1), "silence", ForkByClone(Silence));
-/// editor.spec_mut().topology.set_outputs([tutti_graph::Source::Node(
+/// editor.spec_mut().topology.set_outputs([tutti_graph::PortSource::Node(
 ///     tutti_graph::OutPort { node: NodeKey(1), port: 0 },
 /// )]);
 /// assert!(editor.fork(ForkTarget::Node(NodeKey(1)), ForkMode::Live, prepare).is_ok());
@@ -709,7 +709,7 @@ impl<F: Float, N: Node<F> + Clone + Send + 'static> IntoNode<F> for ForkByClone<
 /// let prepare = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(256)));
 /// let (mut editor, _exec) = Editor::new(prepare);
 /// editor.insert(NodeKey(1), "silence", Unforkable(Silence));
-/// editor.spec_mut().topology.set_outputs([tutti_graph::Source::Node(
+/// editor.spec_mut().topology.set_outputs([tutti_graph::PortSource::Node(
 ///     tutti_graph::OutPort { node: NodeKey(1), port: 0 },
 /// )]);
 /// assert_eq!(
@@ -951,7 +951,7 @@ impl<F: Float> Editor<F> {
                 // Clamp, not wrap (see `Editor::fork`'s docs).
                 let outputs = (0..live.topology.outputs.len())
                     .map(|c| {
-                        vec![Source::Node(OutPort {
+                        vec![PortSource::Node(OutPort {
                             node: key,
                             port: (c as u16).min(outs - 1),
                         })]
@@ -1140,7 +1140,7 @@ impl<F: Float> Editor<F> {
                 .iter()
                 .flatten()
                 .filter_map(|s| match s {
-                    Source::Node(p) => Some(p.node),
+                    PortSource::Node(p) => Some(p.node),
                     _ => None,
                 })
                 .chain(
@@ -1148,7 +1148,7 @@ impl<F: Float> Editor<F> {
                     // heard through it: roots too.
                     live.gains
                         .iter()
-                        .filter(|(id, _)| matches!(id.sink, Sink::Output(_)))
+                        .filter(|(id, _)| matches!(id.sink, PortSink::Output(_)))
                         .filter_map(|(_, g)| g.source.map(|s| s.node)),
                 ),
         )
@@ -1194,7 +1194,7 @@ impl<F: Float> Editor<F> {
                 )
                 .flat_map(|(_, es)| es)
                 .filter_map(|e| match *e {
-                    Edge::Direct(Source::Node(p))
+                    Edge::Direct(PortSource::Node(p))
                     | Edge::Feedback(FeedbackFrom { from: p, .. }) => Some(p.node),
                     Edge::Direct(_) => None,
                 });
@@ -1216,7 +1216,7 @@ impl<F: Float> Editor<F> {
             let gains = spec
                 .gains
                 .iter()
-                .filter(|(id, _)| matches!(id.sink, Sink::Port(at) if at.node == node))
+                .filter(|(id, _)| matches!(id.sink, PortSink::Port(at) if at.node == node))
                 .filter_map(|(_, g)| g.source.map(|s| s.node));
             for from in audio
                 .chain(events)

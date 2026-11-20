@@ -400,7 +400,7 @@ fn lane_graph(max: usize) -> (tutti_graph::Editor, tutti_graph::Executor) {
     use std::sync::Arc;
     use tutti_graph::NodeKey;
     use tutti_graph::{EventOut, ParamIn, Prepare, Unforkable};
-    use tutti_graph::{OutPort, Source};
+    use tutti_graph::{OutPort, PortSource};
     use tutti_modulation::ControlProgram;
     use tutti_nodes::automation::Exponent;
     use tutti_nodes::automation::{Breakpoint, ControlLaneNode, Curve, Law, Trajectory};
@@ -455,7 +455,7 @@ fn lane_graph(max: usize) -> (tutti_graph::Editor, tutti_graph::Executor) {
             },
             EventOut { node: l, port: 0 },
         );
-        outputs.push(Source::Node(OutPort { node: p, port: 0 }));
+        outputs.push(PortSource::Node(OutPort { node: p, port: 0 }));
     }
     ed.spec_mut().topology.set_outputs(outputs);
     ed.commit().expect("commits");
@@ -751,7 +751,7 @@ fn lanes_200(
 ) {
     use tutti_graph::NodeKey;
     use tutti_graph::{EventOut, ParamIn, ParamRange, Prepare, Unforkable};
-    use tutti_graph::{OutPort, Source};
+    use tutti_graph::{OutPort, PortSource};
     use tutti_units::Samples;
     let (mut ed, exec) = tutti_graph::Editor::new(Prepare::new(
         SampleRate::SR_48K,
@@ -767,7 +767,7 @@ fn lanes_200(
             ed.spec_mut()
                 .topology
                 .outputs
-                .push(vec![Source::Node(OutPort {
+                .push(vec![PortSource::Node(OutPort {
                     node: NodeKey(1000 + j),
                     port: p,
                 })]);
@@ -1027,7 +1027,7 @@ fn signal_graph(max: usize) -> (tutti_graph::Editor, tutti_graph::Executor) {
     use atomic_float::AtomicF64;
     use std::sync::Arc;
     use tutti_graph::NodeKey;
-    use tutti_graph::{Edge, InPort, OutPort, Source};
+    use tutti_graph::{Edge, InPort, OutPort, PortSource};
     use tutti_graph::{EventEdge, EventIn, EventOut, ForkByClone, ParamIn, ParamRange, Prepare};
     use tutti_modulation::{
         Adsr, Amount, ControlProgram, InputLayer, Law, LayerId, Polarity, SourceId,
@@ -1049,7 +1049,7 @@ fn signal_graph(max: usize) -> (tutti_graph::Editor, tutti_graph::Executor) {
         ed.spec_mut()
             .topology
             .outputs
-            .push(vec![Source::Node(OutPort {
+            .push(vec![PortSource::Node(OutPort {
                 node: probe(k),
                 port: 0,
             })]);
@@ -1079,7 +1079,7 @@ fn signal_graph(max: usize) -> (tutti_graph::Editor, tutti_graph::Executor) {
             for port in 0..2 {
                 ed.spec_mut().topology.edges.insert(
                     InPort { node, port },
-                    vec![Edge::Direct(Source::Node(OutPort { node: src, port }))],
+                    vec![Edge::Direct(PortSource::Node(OutPort { node: src, port }))],
                 );
             }
         } else {
@@ -1306,7 +1306,7 @@ fn signal_sources_are_allocation_free_serial_and_on_a_pool() {
 #[test]
 fn an_apply_that_republishes_is_allocation_free_on_the_audio_thread() {
     use tutti_graph::NodeKey;
-    use tutti_graph::{Edge, InPort, OutPort, Source};
+    use tutti_graph::{Edge, InPort, OutPort, PortSource};
     use tutti_graph::{Editor, ForkByClone, Prepare, TransportPosition};
     use tutti_modulation::{
         Clock, Declarations, Law, Polarity, RouteDecl, RouteKey, RouteTarget, Source as ModSource,
@@ -1374,9 +1374,12 @@ fn an_apply_that_republishes_is_allocation_free_on_the_audio_thread() {
             node: filter,
             port: 0,
         },
-        vec![Edge::Direct(Source::Node(OutPort { node: saw, port: 0 }))],
+        vec![Edge::Direct(PortSource::Node(OutPort {
+            node: saw,
+            port: 0,
+        }))],
     );
-    topology.set_outputs(vec![Source::Node(OutPort {
+    topology.set_outputs(vec![PortSource::Node(OutPort {
         node: filter,
         port: 0,
     })]);

@@ -12,7 +12,7 @@ use tutti_graph::NodeKey;
 use tutti_graph::{
     Cost, Cx, Editor, Executor, Io, Node, Prepare, Schedule, Shape, Status, WorkerPool,
 };
-use tutti_graph::{Edge, InPort, OutPort, Source};
+use tutti_graph::{Edge, InPort, OutPort, PortSource};
 use tutti_graph::{TransportPosition as BlockTransport, Unforkable};
 use tutti_nodes::{ClickNode, ClickSettings, MetronomeMode};
 use tutti_timeline::Transport;
@@ -116,7 +116,7 @@ fn graph(workers: usize, declared: bool) -> Executor {
                 node: SUM,
                 port: k as u16 * 2 + c,
             };
-            let from = Source::Node(OutPort { node: key, port: c });
+            let from = PortSource::Node(OutPort { node: key, port: c });
             ed.spec_mut()
                 .topology
                 .edges
@@ -125,7 +125,7 @@ fn graph(workers: usize, declared: bool) -> Executor {
     }
     ed.spec_mut()
         .topology
-        .set_outputs((0..2).map(|port| Source::Node(OutPort { node: SUM, port })));
+        .set_outputs((0..2).map(|port| PortSource::Node(OutPort { node: SUM, port })));
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();

@@ -14,7 +14,7 @@ use tutti_graph::{
     Cx, Editor, EventOut, Executor, ForkByClone, Io, Node, NodeKey, ParamIn, ParamInput,
     ParamRange, Prepare, Shape, Status, TransportChanges, TransportPosition,
 };
-use tutti_graph::{OutPort, Source};
+use tutti_graph::{OutPort, PortSource};
 use tutti_modulation::{Amount, Clock, ControlProgram, Layer, LayerId, Polarity, Waveform};
 use tutti_music::FrameClock;
 use tutti_nodes::automation::ControlLaneNode;
@@ -72,7 +72,7 @@ fn rig(azimuth: ParamRange, elevation: ParamRange) -> (Editor, Executor) {
         ed.spec_mut()
             .topology
             .outputs
-            .push(vec![Source::Node(OutPort {
+            .push(vec![PortSource::Node(OutPort {
                 node: NodeKey(PROBE),
                 port: c,
             })]);

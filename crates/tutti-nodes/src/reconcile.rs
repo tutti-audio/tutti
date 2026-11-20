@@ -18,9 +18,9 @@ use tutti_buffers::Float;
 use tutti_graph::NodeKey;
 use tutti_graph::{
     CommitError, EdgeGain, EdgeId, Editor, EventEdge, EventIn, EventKind, EventOut, ForkByClone,
-    NodeMix, ParamIn, ParamRange, ParamRangeCell, PassError, ScheduleError, Sink,
+    NodeMix, ParamIn, ParamRange, ParamRangeCell, PassError, PortSink, ScheduleError,
 };
-use tutti_graph::{Edge, InPort, OutPort, Source};
+use tutti_graph::{Edge, InPort, OutPort, PortSource};
 use tutti_modulation::{
     CompileError, Compiled, ControlProgram, Declarations, LayerId, RouteDecl, RouteKey,
     RouteTarget, SignalKind, SignalSource, Source as ModSource, SourceId, SourceKey, TargetDecl,
@@ -309,8 +309,8 @@ impl Bind {
             Self::Native { at, .. } | Self::Mix { at, .. } => Some(at.node),
             Self::Foreign { to, .. } => Some(to.node),
             Self::Edge { id, .. } => match id.sink {
-                Sink::Port(at) => Some(at.node),
-                Sink::Output(_) => None,
+                PortSink::Port(at) => Some(at.node),
+                PortSink::Output(_) => None,
             },
         }
     }
@@ -1432,7 +1432,7 @@ impl Modulation {
             .flat_map(|(at, es)| es.iter().map(move |e| (at, e)))
         {
             // A feedback edge is a declared cycle, delayed: not a path.
-            if let Edge::Direct(Source::Node(p)) = edge {
+            if let Edge::Direct(PortSource::Node(p)) = edge {
                 link(p.node, at.node);
             }
         }
@@ -1451,7 +1451,7 @@ impl Modulation {
         // A lane driving the gain of an edge into a port runs before the
         // node.
         for (id, g) in &spec.gains {
-            if let (Sink::Port(at), Some(from)) = (id.sink, g.source) {
+            if let (PortSink::Port(at), Some(from)) = (id.sink, g.source) {
                 link(from.node, at.node);
             }
         }
@@ -1565,7 +1565,7 @@ fn wire_feed<F: Float>(editor: &mut Editor<F>, key: NodeKey, feed: Option<Feed>)
             for port in 0..width {
                 t.edges.insert(
                     InPort { node: key, port },
-                    vec![Edge::Direct(Source::Node(OutPort { node: from, port }))],
+                    vec![Edge::Direct(PortSource::Node(OutPort { node: from, port }))],
                 );
             }
         }
@@ -1592,7 +1592,7 @@ fn unwire_feed<F: Float>(
             let t = &mut editor.spec_mut().topology;
             for port in 0..width.count() {
                 let at = InPort { node: key, port };
-                let ours = Edge::Direct(Source::Node(OutPort { node: from, port }));
+                let ours = Edge::Direct(PortSource::Node(OutPort { node: from, port }));
                 t.disconnect(at, ours);
             }
         }

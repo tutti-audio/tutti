@@ -492,7 +492,7 @@ fn a_clip_into_a_synth_is_allocation_free() {
         }),
     );
     ed.spec_mut().topology.set_outputs((0..2).map(|port| {
-        tutti_graph::Source::Node(tutti_graph::OutPort {
+        tutti_graph::PortSource::Node(tutti_graph::OutPort {
             node: NodeKey(2),
             port,
         })
