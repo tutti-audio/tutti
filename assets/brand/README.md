@@ -14,7 +14,7 @@ Everyone together, which is what *tutti* means.
 | `tutti-wordmark-{black,white}.svg` | The name alone |
 | `tutti-lockup-horizontal-{black,white}.svg` | Mark and name side by side: the default |
 | `tutti-lockup-stacked-{black,white}.svg` | Mark above name, for square spaces |
-| `tutti-banner-{light,dark}.svg` | The README banner: the mark beside the reeded-glass name |
+| `tutti-banner-{light,dark}.svg` | The README banner: the name alone, in reeded glass |
 | `tutti-avatar.png` | Organisation avatar, 1024 px, the mark inside a round crop's safe area |
 | `favicon.ico`, `icon-192.png`, `icon-512.png`, `apple-touch-icon.png` | Site icons |
 | `tutti-icon-square{,-white,-dark}.png` | Square icon, mark only, 1024 px, on paper, white or ink: avatars and app icons; sized to stay whole in a round crop |

@@ -3,7 +3,7 @@
 <h1>
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/brand/tutti-banner-dark.svg">
-    <img alt="tutti" src="assets/brand/tutti-banner-light.svg" width="640">
+    <img alt="tutti" src="assets/brand/tutti-banner-light.svg" width="440">
   </picture>
 </h1>
 
