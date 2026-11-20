@@ -43,7 +43,9 @@ pub enum AnalyzerError {
 /// Generic over the analysis `A`, never boxed: [`Meter`] is not object-safe.
 /// Drain it from a thread of your own, never the audio thread. Dropping it
 /// leaves the tap open until the session's next
-/// [`Reclaim`](crate::Phase::Reclaim) phase, which closes it.
+/// [`Reclaim`](crate::Phase::Reclaim) phase, which closes it. It is read on
+/// one thread: [`lost`](Self::lost) keeps its total in a `Cell`, so an
+/// `Analyzer` is `Send` and not `Sync`.
 pub struct Analyzer<A: Measure<F>, F: Float = f32> {
     reader: TapReader<F>,
     meter: A::Meter,
@@ -54,6 +56,7 @@ pub struct Analyzer<A: Measure<F>, F: Float = f32> {
     lost: std::cell::Cell<Samples>,
     refused: Samples,
     ended: bool,
+    failed: bool,
 }
 
 impl<A: Measure<F>, F: Float> std::fmt::Debug for Analyzer<A, F> {
@@ -63,6 +66,7 @@ impl<A: Measure<F>, F: Float> std::fmt::Debug for Analyzer<A, F> {
             .field("lost", &self.lost.get())
             .field("refused", &self.refused)
             .field("ended", &self.ended)
+            .field("failed", &self.failed)
             .finish_non_exhaustive()
     }
 }
@@ -97,6 +101,7 @@ where
             lost: std::cell::Cell::new(Samples::ZERO),
             refused: Samples::ZERO,
             ended: false,
+            failed: false,
         })
     }
 
@@ -106,7 +111,7 @@ where
     /// A chunk the meter refuses (a NaN or an infinity, which a node may pass
     /// on) is skipped and counted ([`refused`](Self::refused)); the chunks
     /// after it are shown as usual. Once the tap has ended
-    /// ([`is_ended`](Self::is_ended)) there is nothing more.
+    /// ([`is_ended`](Self::is_ended)) or failed ([`is_failed`](Self::is_failed)) there is nothing more.
     pub fn try_iter(&mut self) -> impl Iterator<Item = <A::Meter as Meter>::Item> + '_ {
         self.drain();
         self.items.drain(..)
@@ -123,14 +128,19 @@ where
 
     /// Pops the tap empty into the meter, a chunk at a time.
     fn drain(&mut self) {
-        while !self.ended {
+        while !self.ended && !self.failed {
             let frames = self.reader.available().min(CHUNK_FRAMES);
+            // The chunk holds `CHUNK_FRAMES` of the tap's width, so a fill of at
+            // most that many frames is in range; one that is not is a fault of
+            // the analyzer, reported as one.
             let Ok(buffer) = self.chunk.fill(frames) else {
+                self.failed = true;
                 return;
             };
             match self.reader.pull(buffer) {
                 Pull::Frames(read) => self.chunk.truncate(read),
-                Pull::Ended | Pull::Failed => self.ended = true,
+                Pull::Ended => self.ended = true,
+                Pull::Failed => self.failed = true,
                 Pull::Starved => return,
             }
             if !self.chunk.is_empty() {
@@ -173,5 +183,16 @@ impl<A: Measure<F>, F: Float> Analyzer<A, F> {
     #[must_use]
     pub fn is_ended(&self) -> bool {
         self.ended
+    }
+
+    /// Whether the tap failed: a pull the tap refused (a chunk of another
+    /// width than the tap's) or a chunk out of range. It is a fault, not an
+    /// end: the frames before it were shown, and nothing more is read. The
+    /// chunk is built at the tap's width when it opens, so no input of the
+    /// app's reaches it; it is reported, never folded into
+    /// [`is_ended`](Self::is_ended).
+    #[must_use]
+    pub fn is_failed(&self) -> bool {
+        self.failed
     }
 }
