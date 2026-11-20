@@ -12,7 +12,7 @@ use tutti_buffers::{
 use tutti_buffers::{Fold, Interleaved, InterleavedMut, MonoMut, Planes, PlanesMut};
 
 fn smpte(n: u16) -> ChannelTopology {
-    ChannelTopology::assumed(ChannelLayout::from(n))
+    ChannelTopology::default_for(ChannelLayout::from(n))
 }
 
 /// 12 -> 2 is the summed group, 6 -> 1 the mono mix, the permutation and

@@ -88,7 +88,7 @@ where
     ) -> Result<Self, AnalyzerError> {
         let layout = ChannelLayout::from_count(width);
         let meter = analysis.measure(A::Context::from_audio(rate, layout))?;
-        let mut chunk = Chunk::new(&ChannelTopology::assumed(layout));
+        let mut chunk = Chunk::new(&ChannelTopology::default_for(layout));
         // An empty chunk shows whether the meter's view of this width exists.
         chunk.fill(Samples::ZERO)?;
         <<A::Meter as Meter>::Input<'_> as View<'_, F>>::view(&mut chunk)?;

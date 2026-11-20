@@ -38,14 +38,14 @@ fn speaker(flag: Position) -> Speaker {
 /// a mono file `FRONT_LEFT`, and the engine's mono is the centre. An ambisonic
 /// set of up to third order is stated too: symphonia's is ACN with SN3D. A
 /// container that states a count and no placement (discrete channels) is
-/// [`ChannelTopology::assumed`] at that count and [`Assumed`](Placement::Assumed).
-/// A container that states no channels at all is assumed stereo; a track
+/// [`ChannelTopology::default_for`] at that count and [`Default`](Placement::Default).
+/// A container that states no channels at all is stereo by default; a track
 /// whose decoder then reports another set is read from that set.
 pub(super) fn topology_of(channels: Option<&Channels>) -> (ChannelTopology, Placement) {
-    let assumed = |count: usize| {
+    let default = |count: usize| {
         (
-            ChannelTopology::assumed(ChannelLayout::clamped(count)),
-            Placement::Assumed,
+            ChannelTopology::default_for(ChannelLayout::clamped(count)),
+            Placement::Default,
         )
     };
     match channels {
@@ -67,8 +67,8 @@ pub(super) fn topology_of(channels: Option<&Channels>) -> (ChannelTopology, Plac
             ChannelTopology::unassigned(ChannelLayout::clamped(labels.len())),
             Placement::Stated,
         ),
-        Some(channels) if channels.count() > 0 => assumed(channels.count()),
-        Some(_) | None => assumed(2),
+        Some(channels) if channels.count() > 0 => default(channels.count()),
+        Some(_) | None => default(2),
     }
 }
 

@@ -76,7 +76,7 @@ fn a_mono_source_reaches_both_sides_of_a_stereo_strip() {
 /// front left and right, and the other four speakers are silent.
 #[test]
 fn a_stereo_strip_feeds_a_declared_surround_root() {
-    let five_one = ChannelTopology::assumed(ChannelLayout::from(6u16));
+    let five_one = ChannelTopology::default_for(ChannelLayout::from(6u16));
     let mut s = offline(Session::builder().root_topology(five_one), 6);
     let g = s.graph();
     let (src, _) = g.add(Unforkable(Src {

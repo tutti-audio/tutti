@@ -62,13 +62,13 @@ fn eq_gain(gain: Db) -> Db {
 }
 
 /// The bus a filter built for a width runs on: the engine's order for it
-/// ([`BusTopology::assumed`]).
+/// ([`BusTopology::default_for`]).
 ///
 /// # Panics
 ///
 /// Past 16 channels: a filter is one bus.
 fn filter_bus(width: ChannelLayout) -> BusTopology {
-    BusTopology::assumed(width).expect("a filter is at most 16 channels wide")
+    BusTopology::default_for(width).expect("a filter is at most 16 channels wide")
 }
 
 #[cfg(test)]

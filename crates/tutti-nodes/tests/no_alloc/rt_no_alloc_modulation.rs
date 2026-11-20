@@ -102,7 +102,7 @@ fn beat_synced_lfo_process_is_allocation_free() {
 fn delay(width: u16, time: f64, feedback: f64, cross: f64) -> DelayNode<f32> {
     DelayNode::<f32>::from(
         DelayConfig::new(DelayLayout::new(
-            BusTopology::assumed(ChannelLayout::from(width)).expect("a test width is one bus"),
+            BusTopology::default_for(ChannelLayout::from(width)).expect("a test width is one bus"),
             MaxDelay::of(Seconds::new(2.0)),
             InterpolationMode::Linear,
         ))
@@ -135,7 +135,7 @@ fn wide_6ch_delay_node_process_is_allocation_free() {
 
 /// A bus of `width` channels on the engine's order.
 fn bus(width: u16) -> BusTopology {
-    BusTopology::assumed(ChannelLayout::from(width)).expect("a test width is one bus")
+    BusTopology::default_for(ChannelLayout::from(width)).expect("a test width is one bus")
 }
 
 #[test]

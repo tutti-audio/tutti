@@ -157,7 +157,8 @@ impl<F: Float + SimdLanes + Lerp> From<DynamicEqConfig> for DynamicEqNode<F> {
     ///
     /// Past 16 channels: a band is one bus.
     fn from(config: DynamicEqConfig) -> Self {
-        let input = BusTopology::assumed(config.width).expect("a band is at most 16 channels wide");
+        let input =
+            BusTopology::default_for(config.width).expect("a band is at most 16 channels wide");
         Self::with_kernel(
             DynamicEqKernel::new(input, config.key, config.mode),
             DynamicEqSet,

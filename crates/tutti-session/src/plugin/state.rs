@@ -38,7 +38,7 @@ pub enum StateStartError {
 
 /// Why [`Session::apply`] refused the output of a restore or a preset load:
 /// nothing changed.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
 #[non_exhaustive]
 pub enum PluginApplyError {
     /// The output was cut from another session, or from a plugin instance the

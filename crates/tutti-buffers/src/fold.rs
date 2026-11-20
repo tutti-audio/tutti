@@ -310,7 +310,7 @@ impl<F: Float> Row<F> {
 /// channel). [`frame`](Self::frame) is the same fold over one frame, on raw
 /// slices. None of them allocate, so all are safe on the audio thread. A fold
 /// places channels by *speaker*, never by width: a width alone is not a
-/// placement (see [`ChannelTopology`]); [`ChannelTopology::assumed`] says what
+/// placement (see [`ChannelTopology`]); [`ChannelTopology::default_for`] says what
 /// a bare width is taken to mean.
 ///
 /// `F` is the float the gains and the sums are in: `f32` by default, `f64`
