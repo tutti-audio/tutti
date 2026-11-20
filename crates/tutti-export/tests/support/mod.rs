@@ -113,13 +113,22 @@ impl ExportConfig {
         normalize: Option<Normalize>,
     ) -> FileTarget {
         let target = FileTarget::new(path, self.encode.format, self.encode.channels);
-        match &self.encode.topology {
+        let target = match &self.encode.topology {
             Some(topology) => target.topology(topology.clone()),
             None => target,
+        };
+        let target = match self.resample {
+            Some(resample) => target.resample(resample),
+            None => target,
+        };
+        let target = match self.dither {
+            Some(shape) => target.dither(shape),
+            None => target.no_dither(),
+        };
+        match normalize {
+            Some(normalize) => target.normalize(NormalizeSpec::own(normalize)),
+            None => target,
         }
-        .resample(self.resample)
-        .dither(self.dither)
-        .normalize(normalize.map(NormalizeSpec::own))
     }
 
     /// The planes: `encode.channels` wide.

@@ -23,7 +23,8 @@ const VENDOR: &str = "Tutti";
 const PRODUCT: &str = "Tutti VST2 Host";
 
 /// The vendor version `audioMasterGetVendorVersion` answers: this crate's own version as
-/// `major * 10000 + minor * 100 + patch`.
+/// `major * 10000 + minor * 100 + patch`: minor and patch take two decimal digits each, and
+/// tutti's versions stay under 100 in both.
 const VENDOR_VERSION: isize = version_part(env!("CARGO_PKG_VERSION_MAJOR")) * 10_000
     + version_part(env!("CARGO_PKG_VERSION_MINOR")) * 100
     + version_part(env!("CARGO_PKG_VERSION_PATCH"));

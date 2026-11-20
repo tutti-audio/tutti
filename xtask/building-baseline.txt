@@ -115,9 +115,6 @@ tutti-engine  ctor-result  crates/tutti-engine/src/routing.rs::OutputMap::channe
 tutti-export  ctor-result  crates/tutti-export/src/graph.rs::RenderGraph::assemble
 tutti-export  ctor-result  crates/tutti-export/src/job.rs::Job::new
 tutti-export  ctor-result  crates/tutti-export/src/rendered.rs::Rendered::new
-tutti-export  option-arg  crates/tutti-export/src/output.rs::FileTarget::dither
-tutti-export  option-arg  crates/tutti-export/src/output.rs::FileTarget::normalize
-tutti-export  option-arg  crates/tutti-export/src/output.rs::FileTarget::resample
 
 # tutti-graph
 tutti-graph  with-prefix  crates/tutti-graph/src/param_event.rs::ParamRamp::with_shape
@@ -415,8 +412,6 @@ tutti-session  ctor-result  crates/tutti-session/src/recorder.rs::Recorder::star
 tutti-session  ctor-result  crates/tutti-session/src/recorder.rs::Recorder::start_finite_with_capacity
 tutti-session  ctor-result  crates/tutti-session/src/recorder.rs::Recorder::start_with_capacity
 tutti-session  ctor-result  crates/tutti-session/src/session/mod.rs::Session::new
-tutti-session  option-arg  crates/tutti-session/src/bounce.rs::Bounce::root_topology
-tutti-session  option-arg  crates/tutti-session/src/builder.rs::SessionBuilder::plugin_recovery
 
 # tutti-sf2
 

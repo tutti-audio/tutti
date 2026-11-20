@@ -20,11 +20,14 @@ impl Case {
 
     fn target(&self, path: &Path) -> FileTarget {
         let target = FileTarget::new(path, Format::Wav(self.pcm), self.channels);
-        match &self.topology {
+        let target = match &self.topology {
             Some(topology) => target.topology(topology.clone()),
             None => target,
+        };
+        match self.resample {
+            Some(resample) => target.resample(resample),
+            None => target,
         }
-        .resample(self.resample)
     }
 }
 

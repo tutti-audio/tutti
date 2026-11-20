@@ -506,7 +506,13 @@ fn the_host_names_itself_to_a_plugin_that_asks() {
         ask_host_string(MASTER_GET_PRODUCT_STRING),
         (1, "Tutti VST2 Host".into())
     );
-    assert_eq!(ask_host(MASTER_GET_VENDOR_VERSION), 1);
+    let part = |digits: &str| digits.parse::<isize>().unwrap();
+    assert_eq!(
+        ask_host(MASTER_GET_VENDOR_VERSION),
+        part(env!("CARGO_PKG_VERSION_MAJOR")) * 10_000
+            + part(env!("CARGO_PKG_VERSION_MINOR")) * 100
+            + part(env!("CARGO_PKG_VERSION_PATCH"))
+    );
 }
 
 /// The host reports no input or output latency of its own (`audioMasterGetInputLatency` and

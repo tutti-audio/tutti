@@ -1,7 +1,12 @@
 use super::*;
 use crate::test_sink::Full;
 use crate::{Error, SpecError};
-use std::io::{Cursor, Seek, Write};
+use std::io::Cursor;
+#[cfg(any(
+    all(feature = "encode-wav", feature = "decode-wav"),
+    feature = "encode-aiff"
+))]
+use std::io::{Seek, Write};
 use tutti_units::SampleRate;
 
 /// Every format this build writes, at 16 bits where it has a width, with the

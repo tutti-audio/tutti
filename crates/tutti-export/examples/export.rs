@@ -175,7 +175,7 @@ fn main() -> tutti_export::Result<()> {
         flac,
         ChannelLayout::STEREO,
     )
-    .normalize(Some(NormalizeSpec::own(Normalize::lufs(Db::new(-14.0)))));
+    .normalize(NormalizeSpec::own(Normalize::lufs(Db::new(-14.0))));
     let written = render_one(
         &mut tone(),
         &job,

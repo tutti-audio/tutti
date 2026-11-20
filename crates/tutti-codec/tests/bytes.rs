@@ -17,7 +17,9 @@
 use std::io::Cursor;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::Interleaved;
-use tutti_codec::{Encoder, FileEncoder, Format, Spec};
+#[cfg(all(feature = "encode-flac", feature = "encode-wav"))]
+use tutti_codec::FileEncoder;
+use tutti_codec::{Encoder, Format, Spec};
 use tutti_units::SampleRate;
 
 /// `frames` interleaved frames of `channels`: a 1024-step sawtooth offset per
