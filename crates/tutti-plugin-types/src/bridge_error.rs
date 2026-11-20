@@ -75,8 +75,8 @@ pub enum IpcError {
     NotOutOfProcess {
         /// The plugin file.
         path: PathBuf,
-        /// The format's name, as a user knows it.
-        format: &'static str,
+        /// The plugin's format.
+        format: crate::PluginFormat,
     },
 
     /// The plugin's format cannot be hosted in this process by this build: the
@@ -89,8 +89,8 @@ pub enum IpcError {
     NotInProcess {
         /// The plugin file.
         path: PathBuf,
-        /// The format's name, as a user knows it.
-        format: &'static str,
+        /// The plugin's format.
+        format: crate::PluginFormat,
     },
 
     /// The plugin names no id and its file's extension names no plugin format,

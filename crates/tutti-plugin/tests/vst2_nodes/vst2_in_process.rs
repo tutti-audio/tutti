@@ -234,7 +234,7 @@ fn open_routes_a_vst2_to_the_in_process_backend() {
     // environment concurrently.
     unsafe { std::env::set_var("TUTTI_VST2_PROBE_EDITOR", "1") };
     let plugin = tutti_plugin::catalog::Plugin::open(
-        Some(main_thread()),
+        main_thread(),
         &tutti_fixtures::pumped_work(),
         &tutti_plugin_db::Loadable::uncatalogued(tutti_plugin_types::PluginRef::file(
             staged.clone(),
@@ -331,7 +331,7 @@ fn the_node_carries_midi_on_its_event_ports() {
             std::env::set_var("TUTTI_VST2_PROBE_MIDI_OUTPUTS", outputs);
         }
         let plugin = tutti_plugin::catalog::Plugin::open(
-            Some(main_thread()),
+            main_thread(),
             &tutti_fixtures::pumped_work(),
             &tutti_plugin_db::Loadable::uncatalogued(tutti_plugin_types::PluginRef::file(
                 staged.clone(),

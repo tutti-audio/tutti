@@ -216,7 +216,7 @@ impl Scanner {
         let mut targets = Vec::new();
         for (file, format) in files {
             let file = file.as_ref();
-            if !FileFacts::read_as(file, Some(format)).exists {
+            if !FileFacts::read_as(file, Some(format)).exists() {
                 return Err(FilesError::Missing(file.to_path_buf()));
             }
             targets.push((file.to_path_buf(), format));
@@ -470,7 +470,7 @@ impl Job {
 
         let total = plugin_paths.len();
 
-        let mut result = ScanResult::with_total(total);
+        let mut result = ScanResult::default();
         for (i, (path, format)) in plugin_paths.iter().enumerate() {
             if stop.is_stopped() {
                 return result;
@@ -493,24 +493,18 @@ impl Job {
             } else {
                 facts::classify(self.snapshot.row(&key), &facts)
             };
-            let (outcome, change, failure) = match decision {
+            let (outcome, change) = match decision {
                 ScanDecision::Blacklisted => {
                     debug!("skipping blacklisted plugin: {:?}", path);
-                    (ScanOutcome::Blacklisted, None, None)
+                    (ScanOutcome::Blacklisted, None)
                 }
                 ScanDecision::UpToDate => {
                     debug!("skipping up-to-date plugin: {:?}", path);
-                    (ScanOutcome::UpToDate, None, None)
+                    (ScanOutcome::UpToDate, None)
                 }
                 ScanDecision::Probe => self.probe_one(stop, path, &key, *format, &facts),
             };
-            result = result.tally(outcome);
-            if let Some(failure) = failure {
-                result.failures.push(FileFailure {
-                    path: key.clone(),
-                    failure,
-                });
-            }
+            result.files.push(ScannedFile { path: key, outcome });
             if let Some(change) = change
                 && !sink(change)
             {
@@ -520,7 +514,10 @@ impl Job {
 
         info!(
             "scan complete: {} scanned, {} new, {} failed, {} blacklisted",
-            result.scanned, result.new, result.failed, result.blacklisted
+            result.scanned(),
+            result.added(),
+            result.failed(),
+            result.blacklisted()
         );
 
         result
@@ -546,7 +543,7 @@ impl Job {
         key: &Path,
         format: PluginFormat,
         facts: &FileFacts,
-    ) -> (ScanOutcome, Option<RowChange>, Option<ProbeFailure>) {
+    ) -> (ScanOutcome, Option<RowChange>) {
         if let Err(e) = self.pedal.arm(path) {
             warn!("failed to arm dead-man's pedal: {e}");
         }
@@ -554,34 +551,30 @@ impl Job {
         self.pedal.disarm(path);
         // A probe a stop ended says nothing about the plugin.
         if stop.is_stopped() {
-            return (ScanOutcome::Failed, None, None);
+            return (ScanOutcome::Cancelled, None);
         }
         match probed {
             Ok(plugins) => {
                 match FileRow::probed(format, facts).plugins(plugins).build() {
-                    Ok(row) => (ScanOutcome::New, Some(RowChange::put(key, row)), None),
+                    Ok(row) => (ScanOutcome::New, Some(RowChange::put(key, row))),
                     // A probe that read the file as another format than it was asked
                     // for says nothing worth recording: the file is retried.
                     Err(mismatch) => {
                         warn!("probe of {path:?} contradicts its format: {mismatch}");
                         let refusal = ProbeRefusal::Describe(mismatch.to_string());
                         (
-                            ScanOutcome::Failed,
+                            ScanOutcome::Failed(ProbeFailure::from(ProbeError::Refused(refusal))),
                             None,
-                            Some(ProbeFailure::from(ProbeError::Refused(refusal))),
                         )
                     }
                 }
             }
             Err(failure) if failure.blacklistable() => {
                 warn!("failed to probe plugin {:?}: {}", path, failure.reason());
+                let row = FileRow::blacklisted(failure.reason(), facts);
                 (
-                    ScanOutcome::NewlyBlacklisted,
-                    Some(RowChange::put(
-                        key,
-                        FileRow::blacklisted(failure.reason(), facts),
-                    )),
-                    Some(failure),
+                    ScanOutcome::NewlyBlacklisted(failure),
+                    Some(RowChange::put(key, row)),
                 )
             }
             // A refusal or the environment's failure (no `plugin-probe`, a stale
@@ -589,41 +582,45 @@ impl Job {
             // nothing and retry once it is fixed.
             Err(failure) => {
                 warn!("failed to probe plugin {:?}: {}", path, failure.reason());
-                (ScanOutcome::Failed, None, Some(failure))
+                (ScanOutcome::Failed(failure), None)
             }
         }
     }
 }
 
-/// Per-plugin outcome tallied into `ScanResult`.
-#[derive(Clone, Copy)]
-enum ScanOutcome {
+/// What a scan did with one file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ScanOutcome {
+    /// Probed, and recorded as a new or updated row.
     New,
-    Failed,
-    /// Already blacklisted before this scan; skipped.
-    Blacklisted,
-    /// Blacklisted *by* this scan: a crash or a timeout.
-    NewlyBlacklisted,
+    /// Recorded and unchanged since: not probed.
     UpToDate,
+    /// Blacklisted before this scan and unchanged since: not probed.
+    Blacklisted,
+    /// Blacklisted *by* this scan: the probe crashed or hung.
+    NewlyBlacklisted(ProbeFailure),
+    /// The probe failed in a way that says nothing about the plugin: nothing is
+    /// recorded and the file is retried.
+    Failed(ProbeFailure),
+    /// A stop ended the probe.
+    Cancelled,
 }
 
-/// Summary of a completed scan.
-#[derive(Debug, Clone)]
+/// One file of a scan and what became of it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScannedFile {
+    /// The file, by the path its row is keyed by.
+    pub path: PathBuf,
+    /// What the scan did with it.
+    pub outcome: ScanOutcome,
+}
+
+/// A completed scan: every file it reached, in the order they were probed. The
+/// counts are read off them.
+#[derive(Debug, Clone, Default)]
 pub struct ScanResult {
-    /// Total plugins examined (including skipped).
-    pub scanned: usize,
-    /// Newly added or updated records.
-    pub new: usize,
-    /// Plugins that failed to load (including those newly blacklisted).
-    pub failed: usize,
-    /// Plugins that were blacklisted (previously or newly).
-    pub blacklisted: usize,
-    /// Plugins this scan added to the blacklist because they crashed or hung. Surface this so a UI can tell the user something was hidden
-    /// and point at [`PluginDb::unblacklist`] / [`PluginDb::clear_blacklist`].
-    pub newly_blacklisted: usize,
-    /// Every file whose probe failed, with the reason, in the order they were
-    /// probed. `failed` counts these.
-    pub failures: Vec<FileFailure>,
+    files: Vec<ScannedFile>,
 }
 
 /// A probe failure: the typed account of what went wrong.
@@ -677,33 +674,74 @@ pub struct FileFailure {
 }
 
 impl ScanResult {
-    fn with_total(scanned: usize) -> Self {
-        Self {
-            scanned,
-            new: 0,
-            failed: 0,
-            blacklisted: 0,
-            newly_blacklisted: 0,
-            failures: Vec::new(),
-        }
+    /// Every file the scan reached, in the order they were probed.
+    #[must_use]
+    pub fn files(&self) -> &[ScannedFile] {
+        &self.files
     }
 
-    fn tally(mut self, outcome: ScanOutcome) -> Self {
-        match outcome {
-            ScanOutcome::New => self.new += 1,
-            ScanOutcome::Failed => self.failed += 1,
-            ScanOutcome::Blacklisted => self.blacklisted += 1,
-            // A newly blacklisted plugin is both a failure this scan and a
-            // blacklist entry going forward; count it in both tallies so
-            // `failed` still means "did not load".
-            ScanOutcome::NewlyBlacklisted => {
-                self.failed += 1;
-                self.blacklisted += 1;
-                self.newly_blacklisted += 1;
-            }
-            ScanOutcome::UpToDate => {}
-        }
-        self
+    /// Total plugin files examined (including skipped).
+    #[must_use]
+    pub fn scanned(&self) -> usize {
+        self.files.len()
+    }
+
+    /// Newly added or updated records.
+    #[must_use]
+    pub fn added(&self) -> usize {
+        self.count(|outcome| matches!(outcome, ScanOutcome::New))
+    }
+
+    /// Plugins that failed to load (including those newly blacklisted).
+    #[must_use]
+    pub fn failed(&self) -> usize {
+        self.count(|outcome| {
+            matches!(
+                outcome,
+                ScanOutcome::Failed(_) | ScanOutcome::NewlyBlacklisted(_)
+            )
+        })
+    }
+
+    /// Plugins that were blacklisted (previously or newly).
+    #[must_use]
+    pub fn blacklisted(&self) -> usize {
+        self.count(|outcome| {
+            matches!(
+                outcome,
+                ScanOutcome::Blacklisted | ScanOutcome::NewlyBlacklisted(_)
+            )
+        })
+    }
+
+    /// Plugins this scan added to the blacklist because they crashed or hung.
+    /// Surface this so a UI can tell the user something was hidden and point at
+    /// [`PluginDb::unblacklist`] / [`PluginDb::clear_blacklist`].
+    #[must_use]
+    pub fn newly_blacklisted(&self) -> usize {
+        self.count(|outcome| matches!(outcome, ScanOutcome::NewlyBlacklisted(_)))
+    }
+
+    /// Every file whose probe failed, with the reason, in the order they were
+    /// probed. [`failed`](Self::failed) counts these.
+    #[must_use]
+    pub fn failures(&self) -> Vec<FileFailure> {
+        self.files
+            .iter()
+            .filter_map(|file| match &file.outcome {
+                ScanOutcome::Failed(failure) | ScanOutcome::NewlyBlacklisted(failure) => {
+                    Some(FileFailure {
+                        path: file.path.clone(),
+                        failure: failure.clone(),
+                    })
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn count(&self, of: impl Fn(&ScanOutcome) -> bool) -> usize {
+        self.files.iter().filter(|file| of(&file.outcome)).count()
     }
 }
 
@@ -897,8 +935,8 @@ mod tests {
 
         let mut db = PluginDb::new();
         let result = scan_dirs(&scanner_for(dir.path()), &mut db, &[plugins_dir], no_save).unwrap();
-        assert_eq!(result.scanned, 2);
-        assert_eq!(result.new + result.failed, 2);
+        assert_eq!(result.scanned(), 2);
+        assert_eq!(result.added() + result.failed(), 2);
         assert_eq!(db.len(), 2);
     }
 
@@ -923,7 +961,7 @@ mod tests {
         assert_eq!(
             scan_dirs(&scanner, &mut db, &owned, no_save)
                 .unwrap()
-                .scanned,
+                .scanned(),
             1
         );
 
@@ -932,14 +970,16 @@ mod tests {
         assert_eq!(
             scan_dirs(&scanner, &mut db, [as_str], no_save)
                 .unwrap()
-                .scanned,
+                .scanned(),
             1
         );
 
         let mut db = PluginDb::new();
         let lazy = owned.iter().filter(|p| p.exists());
         assert_eq!(
-            scan_dirs(&scanner, &mut db, lazy, no_save).unwrap().scanned,
+            scan_dirs(&scanner, &mut db, lazy, no_save)
+                .unwrap()
+                .scanned(),
             1
         );
     }
@@ -960,16 +1000,16 @@ mod tests {
 
         let result = scan_dirs(&scanner_for(dir.path()), &mut db, &[plugins_dir], no_save).unwrap();
 
-        assert_eq!(result.scanned, 2);
+        assert_eq!(result.scanned(), 2);
         assert_eq!(
-            result.blacklisted - result.newly_blacklisted,
+            result.blacklisted() - result.newly_blacklisted(),
             1,
             "exactly one plugin was hidden before this scan started"
         );
         // `new + failed`, not `+ newly_blacklisted`: `tally` counts a newly
         // blacklisted plugin in both `failed` and `newly_blacklisted`. A scanner
         // that probed the blacklisted file anyway would land it in one of these.
-        assert_eq!(result.new + result.failed, 1);
+        assert_eq!(result.added() + result.failed(), 1);
     }
 
     /// **A file whose time changed loses its measurement with its row, and one
@@ -1000,8 +1040,9 @@ mod tests {
                     latency: LatencyVerdict::Honest,
                 },
             });
-            let mut facts = FileFacts::read(plugin);
-            facts.mtime = mtime.or(facts.mtime);
+            let facts = FileFacts::Present {
+                mtime: mtime.or(FileFacts::read(plugin).mtime()),
+            };
             FileRow::probed(PluginFormat::Vst3, &facts)
                 .plugins(vec![Described {
                     id: Some(PluginId::Vst3(Uid::new([1; 16]))),
@@ -1054,8 +1095,8 @@ mod tests {
 
         let result = scan_dirs(&scanner_for(dir.path()), &mut db, &[plugins_dir], no_save).unwrap();
 
-        assert_eq!(result.scanned, 1);
-        assert_eq!(result.new, 0);
+        assert_eq!(result.scanned(), 1);
+        assert_eq!(result.added(), 0);
     }
 
     #[test]
@@ -1086,7 +1127,7 @@ mod tests {
             .spawn(&mut db, [&plugins_dir], no_save)
             .unwrap();
         let result = scan.drain(&mut db).expect("the worker finishes");
-        assert_eq!(result.new + result.failed, 2);
+        assert_eq!(result.added() + result.failed(), 2);
 
         let updates: Vec<_> = scan.progress().collect();
         assert_eq!(updates.len(), 3, "{updates:?}");
@@ -1123,7 +1164,7 @@ mod tests {
             .unwrap();
         let result = scan.drain(&mut db).expect("Done arrives with a full queue");
 
-        assert_eq!(result.new, files);
+        assert_eq!(result.added(), files);
         assert_eq!(db.len(), files);
         // One discovery and one probe per file were sent; the queue holds the last
         // `PROGRESS_CAPACITY` of them.
@@ -1345,8 +1386,8 @@ mod tests {
         let second = scan_dirs(&scanner, &mut db, [&plugins_dir], no_save).unwrap();
 
         assert_eq!(calls.load(Ordering::SeqCst), 1);
-        assert_eq!(second.scanned, 1);
-        assert_eq!(second.new, 0);
+        assert_eq!(second.scanned(), 1);
+        assert_eq!(second.added(), 0);
     }
 
     /// A changed file is probed again and its row replaced, not added to.
@@ -1365,7 +1406,7 @@ mod tests {
         let second = scan_dirs(&scanner, &mut db, [&plugins_dir], no_save).unwrap();
 
         assert_eq!(calls.load(Ordering::SeqCst), 2);
-        assert_eq!(second.new, 1);
+        assert_eq!(second.added(), 1);
         assert_eq!(db.len(), 1);
         assert_eq!(db.row(&plugin).unwrap().mtime, Some(at(1_000_000_007)));
     }
@@ -1385,13 +1426,13 @@ mod tests {
 
         let second = scan_dirs(&scanner, &mut db, [&plugins_dir], no_save).unwrap();
 
-        assert_eq!(second.scanned, 1);
+        assert_eq!(second.scanned(), 1);
         assert_eq!(calls.load(Ordering::SeqCst), 2, "only the two first probes");
         assert!(db.row(&gone).is_some(), "the stale row stays");
 
         let present = db
             .rows()
-            .filter(|(path, _)| FileFacts::read(path).exists)
+            .filter(|(path, _)| FileFacts::read(path).exists())
             .map(|(path, _)| path.to_path_buf())
             .collect();
         assert_eq!(db.prune_missing(&present), vec![gone.clone()]);
@@ -1411,13 +1452,13 @@ mod tests {
         let mut db = PluginDb::new();
 
         let first = scan_dirs(&scanner, &mut db, [&plugins_dir], no_save).unwrap();
-        assert_eq!(first.newly_blacklisted, 1);
+        assert_eq!(first.newly_blacklisted(), 1);
         assert!(db.is_blacklisted(&plugin));
         assert_eq!(db.plugins().count(), 0);
 
         let second = scan_dirs(&scanner, &mut db, [&plugins_dir], no_save).unwrap();
         assert_eq!(calls.load(Ordering::SeqCst), 1, "the second scan skips it");
-        assert_eq!(second.blacklisted - second.newly_blacklisted, 1);
+        assert_eq!(second.blacklisted() - second.newly_blacklisted(), 1);
 
         set_mtime(&plugin, 1_000_000_009);
         scan_dirs(&scanner, &mut db, [&plugins_dir], no_save).unwrap();
@@ -1488,7 +1529,7 @@ mod tests {
         assert!(matches!(row.state, FileState::Blacklisted { .. }));
         assert!(db.is_blacklisted(&fatal));
         assert!(!pedal_file.exists());
-        assert_eq!(result.blacklisted - result.newly_blacklisted, 1);
+        assert_eq!(result.blacklisted() - result.newly_blacklisted(), 1);
         assert_eq!(calls.load(Ordering::SeqCst), 1, "only `fine` is probed");
         assert!(db.row(&fine).is_some());
     }
@@ -1511,9 +1552,8 @@ mod tests {
         }
         let mut db = PluginDb::new();
         for p in [&a, &b] {
-            let facts = FileFacts {
+            let facts = FileFacts::Present {
                 mtime: Some(at(old)),
-                ..FileFacts::read(p)
             };
             let stale = vec![described("old")];
             db.apply(RowChange::put(
@@ -1565,7 +1605,7 @@ mod tests {
 
         release_tx.send(()).unwrap();
         let result = scan.wait(&mut db).expect("the worker finishes");
-        assert_eq!(result.new, 2);
+        assert_eq!(result.added(), 2);
         assert!(whole(&db, first) && whole(&db, second));
         assert_eq!(db.row(second).unwrap().mtime, Some(at(new)));
     }
@@ -1755,7 +1795,7 @@ mod tests {
         task._worker.token().stop();
         let result = task.wait(&mut db).expect("the worker finishes");
 
-        assert!(result.failures.is_empty(), "{result:?}");
+        assert!(result.failures().is_empty(), "{result:?}");
         assert_eq!(db.row(&file), Some(&before));
         assert!(!db.is_blacklisted(&file));
     }
@@ -1772,7 +1812,7 @@ mod tests {
         assert_eq!(
             scan_dirs(&scanner, &mut db, [&plugins_dir], no_save)
                 .unwrap()
-                .new,
+                .added(),
             1
         );
         assert_eq!(calls.load(Ordering::SeqCst), 1);
@@ -1787,7 +1827,7 @@ mod tests {
             2,
             "the current row is probed again"
         );
-        assert_eq!((result.scanned, result.new), (1, 1));
+        assert_eq!((result.scanned(), result.added()), (1, 1));
         assert!(db.row(&file).is_some());
     }
 
@@ -1888,7 +1928,7 @@ mod tests {
 
         let result = scan_dirs(&scanner, &mut db, [&plugins_dir], failing_save).unwrap();
 
-        assert_eq!(result.new, 1);
+        assert_eq!(result.added(), 1);
         assert_eq!(calls.load(Ordering::SeqCst), 1);
         assert_eq!(std::fs::read(&pedal_file).unwrap(), b"/plugins/crashy.vst3");
         assert!(db.is_blacklisted(Path::new("/plugins/crashy.vst3")));

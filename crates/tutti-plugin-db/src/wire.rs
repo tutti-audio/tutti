@@ -223,12 +223,10 @@ mod tests {
     use tutti_units::{Db, SampleRate, Samples};
 
     fn row(name: &str) -> FileRow {
-        let facts = FileFacts {
-            exists: true,
+        let facts = FileFacts::Present {
             mtime: crate::mtime::Mtime::new(
                 std::time::UNIX_EPOCH + std::time::Duration::new(1_700_000_000, 123),
             ),
-            format: Some(PluginFormat::Vst3),
         };
         FileRow::probed(PluginFormat::Vst3, &facts)
             .plugins(vec![Described::new(
@@ -251,11 +249,7 @@ mod tests {
     }
 
     fn no_file() -> FileFacts {
-        FileFacts {
-            exists: false,
-            mtime: None,
-            format: None,
-        }
+        FileFacts::Missing
     }
 
     /// The record as text, `version` first as the writer emits it.

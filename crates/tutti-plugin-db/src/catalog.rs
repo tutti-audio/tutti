@@ -29,7 +29,7 @@
 //! loop {
 //!     match catalog.try_apply(&mut scan) {
 //!         ScanPoll::Running => std::thread::sleep(std::time::Duration::from_millis(10)),
-//!         ScanPoll::Done(result) => break println!("{} new", result.new),
+//!         ScanPoll::Done(result) => break println!("{} new", result.added()),
 //!         ScanPoll::Died => break,
 //!     }
 //! }
@@ -277,10 +277,10 @@ impl Catalog {
     /// What a scan's probe does: measures if the catalog was told to, and lists
     /// a file by its name when `plugin-probe` is missing.
     fn scanning(&self) -> Probing {
-        Probing {
-            measure: self.config.measuring,
-            state: None,
-            fallback: true,
+        if self.config.measuring {
+            Probing::Measure { state: None }
+        } else {
+            Probing::Describe { fallback: true }
         }
     }
 
@@ -367,7 +367,7 @@ impl Catalog {
     ///     }
     ///     match plugins.try_apply(&mut scan) {
     ///         ScanPoll::Running => std::thread::sleep(std::time::Duration::from_millis(10)),
-    ///         ScanPoll::Done(result) => break println!("{} new", result.new),
+    ///         ScanPoll::Done(result) => break println!("{} new", result.added()),
     ///         ScanPoll::Died => break,
     ///     }
     /// }
@@ -410,9 +410,10 @@ impl Catalog {
         }
         let format = PluginFormat::from_path(path)
             .ok_or_else(|| FilesError::UnrecognizedFormat(path.to_path_buf()))?;
-        let probing = Probing {
-            fallback: false,
-            ..self.scanning()
+        let probing = if self.config.measuring {
+            Probing::Measure { state: None }
+        } else {
+            Probing::Describe { fallback: false }
         };
         self.spawn_file(probing, path, format)
     }
@@ -533,7 +534,7 @@ impl Catalog {
         let mut found: Vec<PluginRef> = self
             .db
             .plugins()
-            .filter(|p| p.id == Some(id) && FileFacts::read(p.path).exists)
+            .filter(|p| p.id == Some(id) && FileFacts::read(p.path).exists())
             .map(|p| p.plugin_ref())
             .collect();
         found.sort_by(|a, b| a.path().cmp(b.path()));
@@ -689,13 +690,11 @@ impl Catalog {
         plugin: &PluginRef,
         state: Option<&Path>,
     ) -> std::result::Result<Scan, FilesError> {
-        let probing = Probing {
-            measure: true,
+        let probing = Probing::Measure {
             state: state.map(|file| ProbeState {
                 file: file.to_path_buf(),
                 plugin: plugin.id().cloned(),
             }),
-            fallback: false,
         };
         let format = plugin
             .format()
@@ -763,7 +762,7 @@ impl Catalog {
         let present: HashSet<PathBuf> = self
             .db
             .rows()
-            .filter(|(path, _)| FileFacts::read(path).exists)
+            .filter(|(path, _)| FileFacts::read(path).exists())
             .map(|(path, _)| path.to_path_buf())
             .collect();
         self.change_with(|db, _| db.prune_missing(&present))
