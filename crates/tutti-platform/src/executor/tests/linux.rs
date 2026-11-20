@@ -41,3 +41,47 @@ fn spawn_dedicated_passes_the_priority_request_to_its_thread() {
         PriorityOutcome::Refused { .. } => assert_eq!(raised, plain),
     }
 }
+
+/// Counts the `WARN` events of the thread it is set on.
+struct CountWarns(Arc<AtomicUsize>);
+
+impl tracing::Subscriber for CountWarns {
+    fn enabled(&self, _: &tracing::Metadata<'_>) -> bool {
+        true
+    }
+    fn new_span(&self, _: &tracing::span::Attributes<'_>) -> tracing::span::Id {
+        tracing::span::Id::from_u64(1)
+    }
+    fn record(&self, _: &tracing::span::Id, _: &tracing::span::Record<'_>) {}
+    fn record_follows_from(&self, _: &tracing::span::Id, _: &tracing::span::Id) {}
+    fn event(&self, event: &tracing::Event<'_>) {
+        if *event.metadata().level() == tracing::Level::WARN {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+    fn enter(&self, _: &tracing::span::Id) {}
+    fn exit(&self, _: &tracing::span::Id) {}
+}
+
+/// An OS that refuses the priority gets one warning, and the thread still runs and
+/// `spawn_dedicated` still returns `Ok`; one that grants it logs nothing. An unprivileged
+/// run is refused `Highest` (nice -20), so the refused arm is the usual one.
+#[test]
+#[cfg_attr(miri, ignore = "reads /proc and calls the OS scheduler")]
+fn a_refused_dedicated_priority_warns_once_and_the_thread_runs() {
+    let executor = Executor::new();
+    let warns = Arc::new(AtomicUsize::new(0));
+    let task = tracing::subscriber::with_default(CountWarns(Arc::clone(&warns)), || {
+        executor.spawn_dedicated(
+            "tutti-test-refused",
+            Some(PriorityRequest::Highest),
+            async { 7 },
+        )
+    });
+    assert_eq!(wait(task.expect("a refused priority is not an error")), 7);
+    let outcome = thread::spawn(|| crate::request_priority(PriorityRequest::Highest))
+        .join()
+        .unwrap();
+    let expected = usize::from(!outcome.is_granted());
+    assert_eq!(warns.load(Ordering::SeqCst), expected);
+}
