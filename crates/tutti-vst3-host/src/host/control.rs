@@ -246,6 +246,11 @@ impl Vst3Loaded {
 }
 
 impl Control for Vst3Loaded {
+    /// The controller alone is what a loaded plugin has: a write is the inform.
+    fn inform_controller(&mut self, main: MainThreadMarker, id: ParamId, value: Normalized) {
+        let _ = Control::set_parameter(self, main, id, value);
+    }
+
     fn info(&self) -> &PluginDescriptor {
         self.descriptor.get_or_init(|| PluginDescriptor {
             widths: Some(Loaded::widths(self)),

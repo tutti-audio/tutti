@@ -19,6 +19,7 @@ mod client;
 mod control_backend;
 mod fork;
 mod graph;
+mod host_edits;
 mod instance;
 mod loader;
 mod off_main_wait;
