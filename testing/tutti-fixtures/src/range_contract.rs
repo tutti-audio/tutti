@@ -66,7 +66,8 @@ where
 ///
 /// For each valid raw, the value serialises as the bare raw and deserialises
 /// back to itself. For each invalid raw, deserialising refuses. NaN and
-/// infinity reach serde as JSON `null`.
+/// infinity reach serde as JSON `null`, and so does a raw whose own
+/// serialisation refuses it (a NaN unit).
 ///
 /// # Panics
 ///
@@ -92,8 +93,10 @@ where
         );
     }
     for &r in c.invalid {
-        // JSON writes NaN and infinity as `null`, which must be refused too.
-        let json = serde_json::to_string(&r).unwrap();
+        // JSON writes NaN and infinity as `null`, which must be refused too. A
+        // raw that cannot be written at all (a unit refuses NaN) reaches the
+        // type as that same `null`.
+        let json = serde_json::to_string(&r).unwrap_or_else(|_| "null".to_owned());
         assert!(
             serde_json::from_str::<T>(&json).is_err(),
             "deserialize accepted {r:?}"
