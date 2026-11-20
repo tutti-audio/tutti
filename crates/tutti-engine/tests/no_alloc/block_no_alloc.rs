@@ -29,7 +29,7 @@ use tutti_buffers::MaxBlock;
 use tutti_engine::{AudioCallbackState, Engine, MAX_FRAMES, OutputBlock, process_audio};
 use tutti_graph::{Edge, InPort, OutPort, Source};
 use tutti_graph::{Editor, MeterReader, Prepare, TapReader};
-use tutti_graph::{MeterId, MeterSpec, NodeKey, TapAlign, TapId};
+use tutti_graph::{MeterId, MeterSpec, NodeKey, TapId, TapOptions};
 use tutti_nodes::testing::Osc;
 use tutti_nodes::{SvfFilterNode, SvfType};
 use tutti_transport::{MotionEvent, Transport};
@@ -98,8 +98,7 @@ fn rolling_state_with(
         ed.open_tap(
             TapId::of(1),
             sources,
-            TapAlign::ToOutput,
-            Samples::new(MAX_FRAMES),
+            TapOptions::new(Samples::new(MAX_FRAMES)),
         )
         .expect("the sources exist")
     });

@@ -14,7 +14,7 @@ use tutti_graph::ForkByClone;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::Op;
-use tutti_graph::TapAlign;
+use tutti_graph::{TapAlign, TapOptions};
 use tutti_nodes::MetronomeMode;
 use tutti_nodes::testing::Const;
 use tutti_session::{CloseError, MissingSource, OutPort, Root, Session};
@@ -355,7 +355,10 @@ fn opening_a_tap_or_meter_on_a_missing_source_is_refused() {
     assert_eq!(
         s.graph()
             .taps()
-            .open(&[OutPort::new(a, 1)], TapAlign::Raw, Samples::new(64))
+            .open(
+                &[OutPort::new(a, 1)],
+                TapOptions::new(Samples::new(64)).align(TapAlign::Raw)
+            )
             .err(),
         Some(MissingSource::Port {
             node: a.erase(),

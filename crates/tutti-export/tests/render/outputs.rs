@@ -23,7 +23,7 @@ use tutti_export::{
 };
 use tutti_graph::{
     Cx, Editor, Executor, ForkByClone, GraphBuilder, Io, Node, NodeKey, OutPort, Prepare, Shape,
-    Source, Status, TapAlign, TapId, TapReader,
+    Source, Status, TapId, TapOptions, TapReader,
 };
 use tutti_nodes::testing::{Const, Osc};
 use tutti_transport::FrozenClock;
@@ -76,12 +76,7 @@ impl Rig {
             .collect();
         let reader = self
             .editor
-            .open_tap(
-                TapId::of(id),
-                sources,
-                TapAlign::ToOutput,
-                Samples::new(2048),
-            )
+            .open_tap(TapId::of(id), sources, TapOptions::new(Samples::new(2048)))
             .expect("the node exists");
         self.editor.commit().expect("commits");
         self.executor.apply_pending();
