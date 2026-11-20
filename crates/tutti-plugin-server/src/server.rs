@@ -534,35 +534,6 @@ mod beat_tests {
         assert!(seen.iter().filter(|s| **s == Working::Restoring).count() >= 3);
     }
 
-    /// **A state request is beaten over the real control connection**: while the
-    /// work runs, the host reads `Working` frames for the request (as `Restoring`
-    /// for a load, `Opening` for a save), and the work waits on three of them, so
-    /// a beat that never came leaves it waiting.
-    #[cfg(unix)]
-    #[test]
-    fn working_beats_a_state_request_over_the_connection() {
-        use crate::transport::SocketTransport;
-        use std::os::fd::OwnedFd;
-        use std::os::unix::net::UnixStream;
-        use tutti_plugin_ipc::read_frame;
-        for restoring in [true, false] {
-            let (mut host, server) = UnixStream::pair().expect("socket pair");
-            let transport: SocketTransport<crate::transport::Incoming, ControlFrame> =
-                SocketTransport::new(crate::main_loop::Stream::from(OwnedFd::from(server)));
-            let seen = working(&transport, ID, restoring, || {
-                (0..3)
-                    .map(|_| stage_of(&read_frame::<_, ControlFrame>(&mut host).expect("a beat")))
-                    .collect::<Vec<_>>()
-            });
-            let want = if restoring {
-                Working::Restoring
-            } else {
-                Working::Opening
-            };
-            assert_eq!(seen, [want; 3]);
-        }
-    }
-
     /// **The beat has ended when the work's result is returned**: nothing is
     /// sent after `beat_while` returns, which is what keeps a `Working` from
     /// following the answer to the load it describes.

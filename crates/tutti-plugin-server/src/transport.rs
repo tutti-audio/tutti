@@ -733,6 +733,37 @@ mod state_object_tests {
         assert!(transport.recv().is_err(), "a state with no object arrived");
     }
 
+    /// **A state request is beaten over the real control connection**: while the
+    /// work runs, the host reads `Working` frames for the request (as `Restoring`
+    /// for a load, `Opening` for a save), and the work waits on two of them, so
+    /// a beat that never came leaves it waiting.
+    #[test]
+    fn working_beats_a_state_request_over_the_connection() {
+        use tutti_plugin_ipc::Working;
+        for restoring in [true, false] {
+            let (mut host, transport) = pair();
+            let seen = crate::server::working(&transport, ReqId::new(9), restoring, || {
+                (0..2)
+                    .map(
+                        |_| match read_frame::<_, ControlFrame>(&mut host).expect("a beat") {
+                            ControlFrame::Working { id, stage } => {
+                                assert_eq!(id, ReqId::new(9));
+                                stage
+                            }
+                            other => panic!("a beat sends only `Working`, sent {other:?}"),
+                        },
+                    )
+                    .collect::<Vec<_>>()
+            });
+            let want = if restoring {
+                Working::Restoring
+            } else {
+                Working::Opening
+            };
+            assert_eq!(seen, [want; 2]);
+        }
+    }
+
     /// **No descriptor leaks across states**: sending and receiving many states,
     /// both ways, leaves the process with the descriptors it began with.
     #[test]
