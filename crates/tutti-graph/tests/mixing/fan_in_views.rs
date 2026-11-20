@@ -1,4 +1,4 @@
-//! Audio fan-in, the views (doc 013, "Audio fan-in sums", staging item 2):
+//! Audio fan-in, the views:
 //! the latency and tail views and the reference interpreter read a **set** of
 //! sources per input port and per output channel. Every topology here is
 //! built by hand and driven through the pure passes and the reference, never

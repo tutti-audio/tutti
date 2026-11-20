@@ -1,5 +1,4 @@
-//! The parallel executor renders **bit for bit** what the serial one does
-//! (doc 013, "The parallel executor"): on a graph with fan-out, fan-in, PDC rings, event
+//! The parallel executor renders **bit for bit** what the serial one does: on a graph with fan-out, fan-in, PDC rings, event
 //! fan-in, compiler-owned param ports (ramp and segment events, one source
 //! behind its own latency), a feedback loop and scheduled commands, for
 //! every worker count in `common::WORKERS` and block schedules from one frame

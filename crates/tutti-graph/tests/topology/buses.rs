@@ -1,5 +1,4 @@
-//! Buses on a node's `Shape` (doc 013, "Buses and coercion between declared
-//! layouts", B1): a grouping over the ports that nothing else reads yet.
+//! Buses on a node's `Shape`: a grouping over the ports that nothing else reads yet.
 //!
 //! From the spec: what an unassigned shape builds for a width, how declared buses
 //! cover the ports, and that declaring them changes nothing the compiler

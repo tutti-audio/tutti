@@ -24,7 +24,7 @@ use crate::plan::Direct;
 /// ([`SharedFlags`]) there. Two impls rather than atomics everywhere: a
 /// `Relaxed` atomic is a plain byte move, but the compiler may not forward
 /// a store to a later load through it, and on a chain of cheap nodes that
-/// measured about 2.5 ns a node (doc 013, "The parallel executor").
+/// measured about 2.5 ns a node.
 pub(crate) trait SlotFlags {
     /// Slot `s`'s flags.
     fn get(&self, s: u32) -> u8;

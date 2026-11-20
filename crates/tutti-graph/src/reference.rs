@@ -68,7 +68,7 @@
 //!   differently with a hint than without one diverges, which is the
 //!   point.
 //!
-//! - **Bypass and mute** (doc 013, "Bypass and mute are graph state"): each
+//! - **Bypass and mute**: each
 //!   node's mode is kept per key beside the unit map, in its own types
 //!   (`RefMode`), and moved by [`set_mode`](Reference::set_mode) —
 //!   `Editor::set_mode`'s contract, read at the start of the next block. A
@@ -284,7 +284,7 @@ pub struct Reference<F: Float = f32> {
     /// last graph: they override the graph's.
     ranges: BTreeMap<ParamIn, ParamRange>,
     /// The weight each edge gain's lane was given by the last block it ran
-    /// (the `w_prev` of doc 013, "Edge gain"), kept while the graph keeps the
+    /// (`w_prev`), kept while the graph keeps the
     /// edge's entry. The reference's own bookkeeping: none of the executor's.
     lane_prev: BTreeMap<EdgeId, F>,
     /// Edge gains moved by [`set_edge_gain`](Self::set_edge_gain) since the
@@ -3060,8 +3060,7 @@ enum RefWeight<F: Float> {
 /// alias, so a `-0.0` stays), anything else is the left fold
 /// `((+0.0 + w_0 * a_0) + w_1 * a_1) + ..` in `F`, one rounding per add
 /// and per multiply, each lane weighted by
-/// `w[i] = from + (to - from) * ((i + 1) / frames)` (doc 013, "Audio fan-in sums", points 1 and 2, and "Edge
-/// gain"). Skips nothing, silent addends and a weight of `1.0` or `0.0`
+/// `w[i] = from + (to - from) * ((i + 1) / frames)`. Skips nothing, silent addends and a weight of `1.0` or `0.0`
 /// included: the executor skips the silent ones and takes no multiply at
 /// `1.0`, and must agree.
 fn sum_addends<F: Float>(mut addends: Vec<RefAddend<F>>, frames: usize) -> Vec<F> {

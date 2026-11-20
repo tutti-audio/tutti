@@ -1,5 +1,4 @@
-//! The cost model (doc 013, compiler step 6; "The cost model and
-//! coarsening").
+//! The cost model.
 //!
 //! The compiler estimates every op's work per block from what the node
 //! declared ([`Shape::cost`](crate::Shape::cost)) and its channel count, as
@@ -55,8 +54,7 @@
 //! # The constants
 //!
 //! Work is counted in **units of about a nanosecond of one core** on the
-//! machine the constants were calibrated on (doc 013, "The cost model and coarsening":
-//! a 4-core container, `tutti-nodes`' `parallel_render` bench). Only their
+//! machine the constants were calibrated on. Only their
 //! ratios matter to a decision: a faster core shrinks node work and
 //! dispatch alike. They are a speed decision only — the parallel render is
 //! bit for bit the serial one, so a wrong estimate never changes a sample.
@@ -110,8 +108,7 @@ impl Cost {
 
 /// An estimate of work per block, affine in the block length:
 /// `fixed + per_frame × frames`, in the cost model's units (about a
-/// nanosecond of one core; see the module docs of `cost.rs` in doc 013,
-/// "The cost model and coarsening").
+/// nanosecond of one core; see the module docs of `cost.rs`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Work {
     /// Work per block whatever its length.
@@ -201,8 +198,7 @@ const fn meter_work(lanes: u64) -> Work {
 
 /// A sum of `addends`, `weighted` of them lanes with a gain: a copy's fixed
 /// cost, and one unit per addend per frame, two for a weighted one (a
-/// multiply and an add; doc 013, "Audio fan-in sums", point 6, and "Edge
-/// gain"). An estimate; `graph_render` measures it.
+/// multiply and an add). An estimate; `graph_render` measures it.
 const fn sum_work(addends: u64, weighted: u64) -> Work {
     Work {
         fixed: COPY.fixed,

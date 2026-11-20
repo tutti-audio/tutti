@@ -1,5 +1,4 @@
-//! Bypass, mute and mix as graph state (doc 013, "Bypass and mute are graph
-//! state"): [`NodeMode`], a node's [`Mix`] (its blend with the aligned input),
+//! Bypass, mute and mix as graph state: [`NodeMode`], a node's [`Mix`] (its blend with the aligned input),
 //! the cell they are stored in, and the state the executor keeps to apply
 //! them.
 //!
@@ -123,8 +122,7 @@ use crate::pass::Pass;
 use crate::spec::EventOut;
 use tutti_buffers::Float;
 
-/// What the graph does with a node (doc 013, "Bypass and mute are graph
-/// state"): a state the graph holds for any node, a plugin included. See the
+/// What the graph does with a node: a state the graph holds for any node, a plugin included. See the
 /// module docs of `src/mode.rs` for what each mode makes of the node's outputs.
 ///
 /// - **`Active`**: the node runs.
@@ -202,8 +200,7 @@ pub enum ModeError {
     },
 }
 
-/// A node's [`Mix`] as the spec holds it (doc 013, "Bypass and mute are graph
-/// state", M4): the blend of the node's output with its aligned input,
+/// A node's [`Mix`] as the spec holds it: the blend of the node's output with its aligned input,
 /// `out = y * m + x̂ * (1 - m)`. [`Mix::WET`] (all of the node's output) is
 /// the canonical absent entry of [`GraphSpec::mixes`](crate::GraphSpec::mixes).
 ///

@@ -143,7 +143,7 @@ pub struct GraphSpec {
     /// source. A port with no entry, or an entry with no source, reads its
     /// base.
     pub params: BTreeMap<ParamIn, ParamMod>,
-    /// Edge gains (doc 013, "Edge gain"): an entry makes the edge a
+    /// Edge gains: an entry makes the edge a
     /// **weighted lane** of its sink's sum. An edge with no entry is plain.
     ///
     /// The entry is structural: adding or removing one recompiles, because a
@@ -153,22 +153,21 @@ pub struct GraphSpec {
     /// whose edge does not exist is refused by [`validate`](Self::validate);
     /// [`disconnect`](Self::disconnect) removes the edge's entry with it.
     pub gains: BTreeMap<EdgeId, EdgeGain>,
-    /// What the graph does with each node (doc 013, "Bypass and mute are
-    /// graph state"); absent is [`NodeMode::Active`]. A control, not a
+    /// What the graph does with each node; absent is [`NodeMode::Active`]. A control, not a
     /// rewire: [`Editor::set_mode`](crate::Editor::set_mode) changes it
     /// without a new plan, and a commit that differs only in modes sends
     /// nothing. An entry for a node that is not in the topology is refused by
     /// [`validate`](Self::validate).
     pub modes: BTreeMap<NodeKey, NodeMode>,
     /// How much of each node's output a node's output is blended with its aligned
-    /// input (doc 013, "Bypass and mute are graph state", M4): the node's
+    /// input: the node's
     /// [`Mix`]; absent is [`Mix::WET`],
     /// all of the node's output. A control, as a mode is
     /// ([`Editor::set_mix`](crate::Editor::set_mix) sends no commit), and an
     /// entry for a node that is not in the topology, or one outside `0..=1`,
     /// is refused by [`validate`](Self::validate).
     pub mixes: BTreeMap<NodeKey, NodeMix>,
-    /// Bus edges (doc 013, "Buses and coercion between declared layouts"):
+    /// Bus edges:
     /// the sources of each sink bus, as a set kept in source order
     /// ([`connect_bus`](Self::connect_bus)). A bus edge is a fold between two
     /// declared layouts, and it needs the nodes' shapes to mean anything:
@@ -178,8 +177,7 @@ pub struct GraphSpec {
     /// [`Editor::commit`](crate::Editor::commit) lowers for you. An empty
     /// `Vec` is the same as an absent key.
     pub bus_edges: BTreeMap<BusRef, Vec<BusFeed>>,
-    /// The declared topology of the root, the graph's outputs, as a bus (doc
-    /// 013, "Buses", B4): what a bus edge into the root folds to. `None` is
+    /// The declared topology of the root, the graph's outputs, as a bus: what a bus edge into the root folds to. `None` is
     /// undeclared. Every root the engine renders is at most
     /// [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS) wide, which is a bus's
     /// width. The session keeps it in step with its root declaration.
@@ -406,7 +404,7 @@ impl GraphSpec {
     /// Drives param port `at` from event output `from`, in place of any
     /// source it had (which is returned). A port has at most one event
     /// source: its value is the param's value, and summing two is a node's
-    /// job (a control lane, doc 014).
+    /// job (a control lane).
     ///
     /// The port must be one its node declares
     /// ([`Shape::params`](crate::Shape::params)), or `compile` refuses it
@@ -430,7 +428,7 @@ impl GraphSpec {
     ///   [`Node::param_base`](crate::Node::param_base) and ramped linearly
     ///   across the block, landing exactly on the new value at its last frame,
     ///   so a fader move does not zipper.
-    /// - **The event source replaces the base** (doc 014 §5.6). Its
+    /// - **The event source replaces the base**. Its
     ///   [`ParamRamp`](crate::ParamRamp)s and
     ///   [`ParamSegment`](crate::ParamSegment)s addressed to the param are
     ///   the param's own value, sample-accurate, from the source's first
@@ -461,8 +459,7 @@ impl GraphSpec {
     ///   lane's `LaneControls::resync`).
     /// - **A fresh unit hears nothing held.** A unit placed by a commit (a
     ///   fork's included) starts with no ramp, so a source must send its
-    ///   current value on its first block for the port to read it (doc 014
-    ///   §10: a control lane does, having nothing in flight; a hand-wired
+    ///   current value on its first block for the port to read it (a control lane does, having nothing in flight; a hand-wired
     ///   source answers [`EventKind::Resync`](crate::EventKind::Resync) or
     ///   drives the knob instead).
     /// - **A crossfade's base.** A [`replace`](crate::Editor::replace) with a

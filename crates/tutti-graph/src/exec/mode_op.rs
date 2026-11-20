@@ -1,5 +1,4 @@
-//! The node op of a unit whose mode asks something of it (`mode.rs`, doc 013
-//! "Bypass and mute are graph state"): feeding its bypass line, running a fade
+//! The node op of a unit whose mode asks something of it (`mode.rs`): feeding its bypass line, running a fade
 //! between modes, muting, and parking.
 //!
 //! Written once, generic over the slots like every op, so the serial and the

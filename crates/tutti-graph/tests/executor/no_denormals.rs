@@ -1,6 +1,5 @@
 //! Every node runs inside `with_no_denormals`, on the serial executor and on
-//! every participant of a pool, helpers included (doc 013, "The parallel
-//! executor"; `tutti_platform::with_no_denormals`).
+//! every participant of a pool, helpers included.
 //!
 //! The graph is `PROBES` independent nodes, each busy for a few tens of
 //! microseconds so that helpers find work. A probe multiplies the smallest

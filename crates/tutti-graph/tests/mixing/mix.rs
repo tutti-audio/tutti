@@ -1,5 +1,4 @@
-//! A node's blend with its aligned input is graph state (doc 013, "Bypass and
-//! mute are graph state", stage M4): `Mix`, set with `Editor::set_mix`,
+//! A node's blend with its aligned input is graph state: `Mix`, set with `Editor::set_mix`,
 //! applied by the executor to any node as `out = y * m + x̂ * (1 - m)`.
 //!
 //! Every figure is analytic: the ends are the node's output or the aligned

@@ -107,7 +107,7 @@ pub enum Kind {
         burst: u32,
         cap: u32,
     },
-    /// A lane for an edge gain (doc 013, "Edge gain"): on every frame that is
+    /// A lane for an edge gain: on every frame that is
     /// a multiple of `period` it steps the gain it drives to
     /// [`driver_value`] (a zero-length ramp addressed to `EdgeGain::ADDR`).
     /// It declares `latency` frames of processing latency it does not
@@ -151,8 +151,7 @@ pub enum Kind {
         latency: usize,
         tail: Tail,
     },
-    /// `inner`, declaring these buses on its shape (doc 013, "Buses and
-    /// coercion between declared layouts"): the node behaves as `inner` and
+    /// `inner`, declaring these buses on its shape: the node behaves as `inner` and
     /// only its `Shape::buses_in` / `buses_out` differ.
     Bused {
         inner: Box<Kind>,

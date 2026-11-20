@@ -1,4 +1,4 @@
-//! Indexed param addresses (doc 013, "Param addresses"): a node with two
+//! Indexed param addresses: a node with two
 //! params of one kind, `Threshold` at index 0 and at index 1, each its own
 //! cell, its own param port and its own modulation target.
 //!

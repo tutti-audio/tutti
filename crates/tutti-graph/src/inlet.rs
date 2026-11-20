@@ -189,8 +189,7 @@ impl<F: Float> Node<F> for InletNode<F> {
             .with_tail(Tail::Unbounded)
             // A block copy out of the ring: measured 0.4-0.6 ns per frame and
             // channel, against a gain's 0.05 and `SvfFilterNode`'s 4.0 on the
-            // same box, under the boundary (doc 013, "The cost model and
-            // coarsening").
+            // same box, under the boundary.
             .with_cost(Cost::Light)
     }
 

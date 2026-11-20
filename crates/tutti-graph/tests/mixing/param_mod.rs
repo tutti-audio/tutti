@@ -1,6 +1,6 @@
 //! Compiler-owned param ports:
 //! a node declares its params in its `Shape`, a spec drives each from at
-//! most one event output (a control lane's, doc 014), and the compiler fuses
+//! most one event output (a control lane's), and the compiler fuses
 //! the source's ramps and segments, the base and the clamp into one step of
 //! the node's op.
 //!
@@ -33,7 +33,7 @@
 //!   regenerations.
 //!
 //! Audio-rate param sources, several sources summed on one port and their
-//! shaping LUTs are gone (doc 014 §10, §11): a lane sums and shapes before it
+//! shaping LUTs are gone: a lane sums and shapes before it
 //! sends, and audio-rate modulation is a node's own audio input. The
 //! sample-accuracy contract row is `tests/executor/contract.rs`'s `param_echo`, and
 //! the allocation gate `tests/rt_no_alloc.rs`'s
@@ -736,8 +736,7 @@ fn a_fade_keeps_the_params_it_declares() {
     );
 }
 
-/// **A bypassed node's params go on stepping** (doc 013, "Bypass and mute are
-/// graph state"): a parked node is not called, but its param ports follow the
+/// **A bypassed node's params go on stepping**: a parked node is not called, but its param ports follow the
 /// timeline as a skipped node's do, so a source that spoke while the node was
 /// out is heard when it comes back. The source steps `Cutoff` to 7 at frame
 /// 300, while the probe is parked; un-bypassed at frame 640 it reads 7 once
@@ -832,7 +831,7 @@ fn an_event_sources_held_value_survives_an_edit_to_its_node() {
     assert!(out[0].iter().all(|&x| x == 500.0), "the port holds");
 }
 
-/// The port rule (doc 014 §5.6): an event source **replaces** the base.
+/// The port rule: an event source **replaces** the base.
 /// A knob at 1000 with a step to 500 at frame 10 reads 1000 until frame
 /// 10 and exactly 500.0 from it on (automation replaces the knob); a knob
 /// move under it changes nothing; a first ramp starts from the base at its
@@ -905,8 +904,7 @@ fn an_event_source_replaces_the_base_from_its_first_event() {
 /// (and hands it back), the port follows the new one after the declick,
 /// and disconnecting the one no longer there is a no-op.
 ///
-/// A port's source is one `Option<EventOut>`, so two cannot be represented
-/// (§10).
+/// A port's source is one `Option<EventOut>`, so two cannot be represented.
 #[test]
 fn a_second_event_source_replaces_the_first() {
     let (cutoff, q) = (Cell::new(0.0), Cell::new(0.0));
@@ -941,7 +939,7 @@ fn a_second_event_source_replaces_the_first() {
 /// retuned longer). The held value is the port's, not the delay line's.
 ///
 /// Ported: the source was an audio step whose delay ring
-/// had to be filled with its last value; audio sources are gone (§10), and
+/// had to be filled with its last value; there are no audio sources, and
 /// an event delay carries only events, so the property is now that the
 /// port keeps what it holds.
 #[test]
@@ -1023,9 +1021,9 @@ impl Node for LatentHold {
 /// and `latency::plan` over the whole spec (`GraphSpec`'s `LatencyGraph`,
 /// what a latency readout folds) reports the same total.
 ///
-/// Added in doc 014 §12.6: the differential's reference shares the
-/// compiler's arrival, so nothing pinned the spec's fold of param sources
-/// (`compile_passes.rs` pins its event sources).
+/// The differential's reference shares the compiler's arrival, so this test pins
+/// the spec's fold of param sources (`compile_passes.rs` pins its event
+/// sources).
 #[test]
 fn a_param_source_counts_toward_arrival_in_both_solves() {
     let (cutoff, q) = (Cell::new(0.0), Cell::new(0.0));
@@ -1062,7 +1060,7 @@ fn a_param_source_counts_toward_arrival_in_both_solves() {
 /// A stand-in for a control lane: a source that sends its value (a step on
 /// `Cutoff` and on `Q`) on its first block after `prepare`, and on no other.
 /// A fork prepares its copy, so a forked one speaks at the fork's frame 0:
-/// the fork requirement (doc 014 §10).
+/// the fork requirement.
 #[derive(Clone)]
 struct OnFirstBlock {
     cutoff: f64,
@@ -1790,12 +1788,8 @@ fn a_started_sources_ramp_replacing_a_segment_on_its_frame_starts_from_its_held_
 /// A segment replaces the base, frame by frame: before the segment's first
 /// event the port is the base, from it on the segment, never both.
 ///
-/// Changed in doc 014 §12.2 (was `a_segment_sums_with_other_modulators_through_its_shaping`):
-/// the segment went through a `-2x` LUT and summed with the base; an event
-/// source now replaces the base and takes no shaping. Changed in doc 014
-/// §12.6 (was `a_segment_replaces_the_base_and_audio_offsets_add`): the audio
-/// modulator added beside it is gone with audio-rate param sources (§10,
-/// §11).
+/// An event source replaces the base and takes no shaping, and a param takes no
+/// audio-rate source.
 #[test]
 fn a_segment_replaces_the_base() {
     const TOL: f64 = 1e-5;
@@ -2065,9 +2059,8 @@ fn a_bad_range_move_is_refused() {
 /// the ramp has got to, frame for frame — having run on, unclamped, the
 /// whole time.
 ///
-/// Changed in doc 014 §12.2: the ramp ran from 0 and the port read base +
-/// ramp; an event source now replaces the base, and its first ramp starts
-/// from the base.
+/// An event source replaces the base, and its first ramp starts from the
+/// base.
 #[test]
 fn a_shrinking_range_rewrites_neither_the_base_nor_a_ramp() {
     const BASE: f32 = 0.5;
@@ -2434,7 +2427,7 @@ fn run_differential(g: &Gen) {
                 Err(r) => ev(200 + r as u64),
             };
             if e.when == step {
-                // One source per port (doc 014 §5.6): a later edge on the
+                // One source per port: a later edge on the
                 // port replaces whichever it had.
                 ed.spec_mut().connect_param(at, from);
                 if let Some((lo, hi)) = e.range {

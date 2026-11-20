@@ -367,8 +367,7 @@ impl<F: Float> GraphBuilder<F> {
     }
 
     /// Adds `from`'s output `from_port` to the sources of `to`'s input
-    /// `to_port`. A port holds a **set** of sources, which the graph sums
-    /// (doc 013, "Audio fan-in sums"): a second `connect` to the same port
+    /// `to_port`. A port holds a **set** of sources, which the graph sums: a second `connect` to the same port
     /// adds a second addend and does not replace the first, and the same
     /// source twice is one source. To feed a port from exactly one source
     /// use [`set_source`](Self::set_source).

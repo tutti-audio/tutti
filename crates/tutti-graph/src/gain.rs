@@ -1,4 +1,4 @@
-//! Edge gain (doc 013, "Edge gain: a mixer is a weighted sum"): [`EdgeGain`],
+//! Edge gain: [`EdgeGain`],
 //! the spec data beside an edge, and the executor's side of a weighted lane
 //! (its cell, its state across blocks, and the weighted sum kernel).
 //!

@@ -423,7 +423,7 @@ pub enum Op {
         dst: u32,
     },
     /// Sum several audio slots into one: the fan-in of a port or an output
-    /// channel (doc 013, "Audio fan-in sums"). The value is the left fold
+    /// channel. The value is the left fold
     /// `((+0.0 + a_0) + a_1) + ..` in `f32`, one rounding per add, over the
     /// addends in source order; an addend flagged silent adds nothing and is
     /// skipped. `dst` may be the first addend's own slot (the in-place form,
@@ -436,8 +436,7 @@ pub enum Op {
         /// Audio slot written.
         dst: u32,
     },
-    /// A [`Sum`](Self::Sum) with at least one **weighted lane** (doc 013,
-    /// "Edge gain"): the value is the left fold `((+0.0 + w_0 * a_0) + w_1 *
+    /// A [`Sum`](Self::Sum) with at least one **weighted lane**: the value is the left fold `((+0.0 + w_0 * a_0) + w_1 *
     /// a_1) + ..` in `f32`, a multiply and an add per lane, never fused. A
     /// lane whose weight is exactly `1.0` runs the plain add. Silent addends
     /// are skipped whatever their weight, and a weight of `0.0` is not
@@ -565,7 +564,7 @@ pub struct ParamPortOp {
     /// Its index in the node's declared params
     /// ([`Shape::params`](crate::Shape::params)), or [`MIX_PORT`](Self::MIX_PORT):
     /// the node's [`Mix`](tutti_units::Mix), which no node declares and the
-    /// mode state runs (doc 013, "Bypass and mute are graph state", M4b).
+    /// mode state runs.
     pub port: u16,
     /// The param.
     pub param: UnitAddr,

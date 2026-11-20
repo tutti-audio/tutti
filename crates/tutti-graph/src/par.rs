@@ -1,6 +1,6 @@
 //! The parallel executor: a block's tasks run across a [`Pool`]'s threads.
 //!
-//! Doc 013 §4, "Executor, parallel", and "The parallel executor". The plan already carries
+//! The plan already carries
 //! everything a schedule needs, computed by the pure compiler: the ops fused
 //! into **tasks** (chains run back to back on one thread), the task DAG as
 //! CSR successor rows, each task's **activation count** (its distinct
@@ -38,8 +38,7 @@
 //!
 //! A node that shares mutable state with another node *outside* the graph's
 //! ports (two nodes behind one `Arc<Mutex<_>>`, say) is not covered: the
-//! executor orders only what the graph declares. Doc 013 states this as part
-//! of the node contract.
+//! executor orders only what the graph declares.
 //!
 //! # Safety without `unsafe`
 //!
@@ -443,7 +442,7 @@ impl<F: Float> Shared<'_, '_, F> {
         }
         let _rt = RtScope::enter();
         // Per participant, per block: a plugin on this thread may have
-        // cleared it since the last one (doc 013's pitfalls).
+        // cleared it since the last one.
         with_no_denormals(|| {
             let Ok(mut ws) = self.workers.try_claim(w) else {
                 return;

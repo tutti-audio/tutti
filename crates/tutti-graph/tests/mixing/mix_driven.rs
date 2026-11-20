@@ -1,5 +1,4 @@
-//! A node's mix is a modulation target (doc 013, "Bypass and mute are graph
-//! state", stage M4b): an event output (a control lane) drives it through
+//! A node's mix is a modulation target: an event output (a control lane) drives it through
 //! `GraphSpec::connect_param` at `NodeMix::ADDR`, with the param port's rules,
 //! its source is aligned to the node (`DelayKey::ParamEvent`), and the mix cell
 //! is the lane's one knob (`Editor::mix_cell`).
