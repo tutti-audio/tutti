@@ -168,3 +168,47 @@ fn many_stagings_of_one_target_all_differ() {
             .starts_with(".a.wav.")
     }));
 }
+
+/// **A kept file stays at the path `keep` returns with the bytes written, and
+/// the target is untouched.**
+#[test]
+fn a_kept_file_holds_the_written_bytes_and_the_target_is_untouched() {
+    let dir = tempfile::tempdir().unwrap();
+    let target = dir.path().join("a.bin");
+    std::fs::write(&target, b"old").unwrap();
+    let kept = stage(Staged::new(&target), b"partial").keep();
+    assert_ne!(kept, target);
+    assert_eq!(std::fs::read(&kept).unwrap(), b"partial");
+    assert_eq!(std::fs::read(&target).unwrap(), b"old");
+    assert_eq!(names(dir.path()).len(), 2);
+}
+
+/// **A file whose keeper was used outlives its drop**, as a writer that lost
+/// the file to an error needs.
+#[test]
+fn a_file_whose_keeper_fired_is_left_by_its_drop() {
+    let dir = tempfile::tempdir().unwrap();
+    let target = dir.path().join("a.bin");
+    let file = stage(Staged::new(&target), b"partial");
+    let temp = file.temp().to_path_buf();
+    file.keeper().keep();
+    drop(file);
+    assert_eq!(std::fs::read(&temp).unwrap(), b"partial");
+    assert!(!target.exists());
+}
+
+#[test]
+fn a_path_converts_to_the_staging_of_that_target() {
+    let dir = tempfile::tempdir().unwrap();
+    let target = dir.path().join("a.bin");
+    for staged in [
+        Staged::from(target.as_path()),
+        Staged::from(target.clone()),
+        Staged::from(&target),
+        Staged::from(target.to_str().unwrap()),
+    ] {
+        stage(staged, b"x").commit().unwrap();
+        assert_eq!(std::fs::read(&target).unwrap(), b"x");
+        std::fs::remove_file(&target).unwrap();
+    }
+}

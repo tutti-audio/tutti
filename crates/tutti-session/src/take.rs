@@ -44,6 +44,7 @@
 //! silence the inlet played.
 
 use std::fmt;
+use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
@@ -51,9 +52,10 @@ use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use thiserror::Error;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::{Float, Interleaved, InterleavedMut, Sink, SinkFailed};
-use tutti_codec::{FileOut, Format, Spec};
+use tutti_codec::{FileEncoder, Format, Spec};
 use tutti_engine::StreamLatency;
 use tutti_graph::{MissingSource, NodeKey, TapAlign, TapReader};
+use tutti_platform::{Staged, StagedCommitError};
 use tutti_rt::{Bell, Listener};
 use tutti_tempo::TempoMap;
 use tutti_units::{At, Beat, Frame, SampleRate, Samples, Seconds};
@@ -175,7 +177,13 @@ pub struct Window {
 
 /// Where a take goes: a file, or a sink of the caller's.
 ///
-/// A file is written by [`FileOut`] in the format given. To dither, wrap a
+/// A file is encoded in the format given and staged: it is written to a
+/// temporary file beside its path and put in place when the take ends, so the
+/// path holds either what it held before or the whole take. A take that fails
+/// before then removes the temporary. A commit that fails ends the take with
+/// [`TakeError::Commit`], which keeps the whole file at
+/// [`kept`](StagedCommitError::kept) and leaves the path alone; the app owns
+/// the kept file, and nothing removes it. To dither, wrap a
 /// file's sink yourself ([`DitherSink`](crate::DitherSink)) and give it to
 /// [`sink`](Self::sink); such a take has no path, so no
 /// [`clip`](Recorded::clip).
@@ -184,17 +192,26 @@ pub struct TakeTarget<F: Float = f32> {
 }
 
 enum TargetKind<F: Float> {
-    File { path: PathBuf, format: Format },
+    File {
+        path: PathBuf,
+        format: Format,
+        create_new: bool,
+    },
     Sink(Box<dyn DynSink<F>>),
 }
 
 impl<F: Float> fmt::Debug for TakeTarget<F> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.kind {
-            TargetKind::File { path, format } => f
+            TargetKind::File {
+                path,
+                format,
+                create_new,
+            } => f
                 .debug_struct("TakeTarget::File")
                 .field("path", path)
                 .field("format", format)
+                .field("create_new", create_new)
                 .finish(),
             TargetKind::Sink(_) => f.debug_struct("TakeTarget::Sink").finish_non_exhaustive(),
         }
@@ -209,6 +226,7 @@ impl<F: Float> TakeTarget<F> {
             kind: TargetKind::File {
                 path: path.into(),
                 format,
+                create_new: false,
             },
         }
     }
@@ -217,6 +235,21 @@ impl<F: Float> TakeTarget<F> {
     /// whole in [`file`](Self::file) with `Pcm::Float64`.
     pub fn wav(path: impl Into<PathBuf>) -> Self {
         Self::file(path, Format::Wav(tutti_codec::Pcm::Float32))
+    }
+
+    /// Refuses a path that already exists instead of replacing it: the take
+    /// is still written beside the path, and the commit that finds the path
+    /// taken ends the take with [`TakeError::Commit`] of kind
+    /// [`AlreadyExists`](std::io::ErrorKind::AlreadyExists). The path is left
+    /// alone and the whole take is kept at the error's
+    /// [`kept`](StagedCommitError::kept), the app's to move or delete. A sink
+    /// target writes no file, so this does nothing to it.
+    #[must_use]
+    pub fn create_new(mut self) -> Self {
+        if let TargetKind::File { create_new, .. } = &mut self.kind {
+            *create_new = true;
+        }
+        self
     }
 
     /// A sink of the caller's. It must be as wide as the input and at the
@@ -600,11 +633,30 @@ pub enum TakeError {
     /// The file could not be created.
     #[error("the take's file could not be created: {0}")]
     Open(#[source] Arc<tutti_codec::Error>),
-    /// The sink failed: a write, or closing it (for a WAV, the header is then
-    /// left unpatched and the file unreadable). What was written before the
+    /// The finished file could not be put in place (the path exists under
+    /// [`TakeTarget::create_new`], or the file system refused the move). The
+    /// whole take is kept at [`kept`](StagedCommitError::kept) and the path is
+    /// untouched; the file is the app's to move or delete.
+    #[error(transparent)]
+    Commit(#[from] StagedCommitError),
+    /// The sink failed: a write, or closing it. What was written before the
     /// failure is in the sink.
+    ///
+    /// A take written to a file keeps the file beside its path in `unfinished`
+    /// (a full disk on a write, a failed header or close) and leaves the path alone: the frames so far are
+    /// there, and the app owns the file, to move or delete. It is unfinished:
+    /// a FLAC or Ogg Vorbis file may end in a cut frame or page, and a WAV's or
+    /// AIFF's header states the whole frames on disk only if
+    /// [`header_describes_frames`](tutti_codec::Unfinished::header_describes_frames) says so.
+    /// `unfinished` is `None` for a sink of the caller's.
     #[error("the take's sink failed")]
-    Sink(#[source] Arc<dyn std::error::Error + Send + Sync>),
+    Sink {
+        /// The sink's own error.
+        #[source]
+        source: Arc<dyn std::error::Error + Send + Sync>,
+        /// The file kept, for a file target.
+        unfinished: Option<tutti_codec::Unfinished>,
+    },
     /// The sink refused a write, yet its `finalize` reported no error: it broke
     /// [`Sink`]'s contract, which has `finalize` report the first failure.
     #[error("the sink refused a write and its finalize reported no error")]
@@ -953,9 +1005,25 @@ fn open_target<F: Float>(
     rate: SampleRate,
 ) -> Result<(Box<dyn DynSink<F>>, Option<PathBuf>), TakeError> {
     match target.kind {
-        TargetKind::File { path, format } => {
-            let file = FileOut::create(&Spec::of_width(format, layout, rate), &path)
+        TargetKind::File {
+            path,
+            format,
+            create_new,
+        } => {
+            let staged = Staged::new(&path);
+            let staged = if create_new {
+                staged.create_new()
+            } else {
+                staged
+            };
+            let encoder = FileEncoder::create(&Spec::of_width(format, layout, rate), staged)
                 .map_err(|e| TakeError::Open(Arc::new(e)))?;
+            let file = StagedSink {
+                encoder,
+                layout,
+                failed: false,
+                sample: PhantomData,
+            };
             Ok((Box::new(file), Some(path)))
         }
         TargetKind::Sink(sink) => {
@@ -967,6 +1035,77 @@ fn open_target<F: Float>(
             }
             Ok((sink, None))
         }
+    }
+}
+
+/// A staged file as the [`Sink`] a take writes: whole frames at the take's
+/// width, the encoder keeping the first write failure for
+/// [`finalize`](Sink::finalize), which closes the file and puts it in place.
+struct StagedSink<F> {
+    encoder: FileEncoder,
+    layout: ChannelLayout,
+    /// A write failed: later writes are refused, and the encoder reports the
+    /// first failure at [`finalize`](Sink::finalize), keeping the file.
+    failed: bool,
+    sample: PhantomData<fn(F)>,
+}
+
+/// How a [`StagedSink`] ended without its file in place.
+#[derive(Debug, Error)]
+enum StagedClosed {
+    /// The finished file could not be put in place; it is kept.
+    #[error(transparent)]
+    Commit(StagedCommitError),
+    /// A write or the close failed; the unfinished file is kept.
+    #[error("{source}")]
+    Failed {
+        #[source]
+        source: tutti_codec::Error,
+        unfinished: tutti_codec::Unfinished,
+    },
+}
+
+impl<F: Float> Sink for StagedSink<F> {
+    type Sample = F;
+    type Error = StagedClosed;
+
+    fn layout(&self) -> ChannelLayout {
+        self.layout
+    }
+
+    fn write(&mut self, frames: Interleaved<'_, F>) -> Result<(), SinkFailed> {
+        if self.failed {
+            return Err(SinkFailed);
+        }
+        self.encoder.write(frames).map_err(|_| {
+            self.failed = true;
+            SinkFailed
+        })
+    }
+
+    fn finalize(self) -> Result<(), Self::Error> {
+        self.encoder.finish_keeping().map_err(|kept| match kept {
+            tutti_codec::Kept::Commit(commit) => StagedClosed::Commit(commit),
+            tutti_codec::Kept::Unfinished { source, unfinished } => {
+                StagedClosed::Failed { source, unfinished }
+            }
+        })
+    }
+}
+
+/// A sink's failure to finalize as the take's: a commit's is
+/// [`TakeError::Commit`], which names the file it kept.
+fn closing_failed(error: SinkClosed) -> TakeError {
+    match error.downcast_ref::<StagedClosed>() {
+        Some(StagedClosed::Commit(commit)) => TakeError::Commit(commit.clone()),
+        Some(StagedClosed::Failed { source, unfinished }) => TakeError::Sink {
+            source: Arc::new(source.clone()),
+            unfinished: Some(unfinished.clone()),
+        },
+        None => TakeError::Sink {
+            source: error,
+            unfinished: None,
+        },
     }
 }
 
@@ -1099,7 +1238,7 @@ impl<F: Float> Pump<F> {
         }
         let closed = self.sink.finalize();
         if let Err(error) = closed {
-            return Err(TakeError::Sink(error));
+            return Err(closing_failed(error));
         }
         if failed {
             return Err(TakeError::SinkRefused);

@@ -49,8 +49,8 @@ use crate::spec::Spec;
 /// closing.
 ///
 /// The file is written in place, not staged beside its path like
-/// [`FileEncoder::create`](crate::FileEncoder::create): a take cut short by a fault or a crash is a
-/// recording worth keeping, which a staged file removes. For WAV, the writer's drop patches the header, so a
+/// [`FileEncoder::create`](crate::FileEncoder::create): a recording cut short by a fault or a crash is
+/// worth keeping, which a staged file removes. For WAV, the writer's drop patches the header, so a
 /// take dropped without finalizing (a pump thread that panicked) still
 /// opens.
 ///
