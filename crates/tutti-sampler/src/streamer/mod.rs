@@ -56,6 +56,7 @@ pub use block::Block;
 pub(crate) use block::RingReader;
 pub use control::StreamFile;
 pub use control_cell::ControlCell;
+use decode::Stage;
 pub use decode::{OpenStream, OpenedStream};
 pub use open::{AdoptError, OpenError, RefusedStreamStart, StreamReader, StreamStart};
 pub(crate) use status::StatusCell;
@@ -391,43 +392,56 @@ impl<D, F: RingFloat> DiskStreamer<D, F> {
     /// the streamer, which feeds it from then on. The stream is the control
     /// thread's handle and the reader the voice's, by value.
     ///
-    /// Control thread: it allocates the ring, and waits while the streamer's
-    /// command queue is full, as every stream command does.
+    /// Control thread: it allocates the ring. It never waits: a full command
+    /// queue gives the open back as [`AdoptError::Busy`], to adopt again once
+    /// the streamer has taken what it holds.
     ///
     /// # Errors
     ///
     /// [`AdoptError::Placement`] when the file's channels cannot be placed into the
-    /// voice's width ([`open_stream_into`](Self::open_stream_into)), and
-    /// [`AdoptError::StreamerGone`] when the streamer is gone: nothing is left running
-    /// in either case.
+    /// voice's width ([`open_stream_into`](Self::open_stream_into)),
+    /// [`AdoptError::StreamerGone`] when the streamer is gone, and
+    /// [`AdoptError::Busy`] when its queue is full: nothing is left running in
+    /// any case.
     pub fn adopt(
         &self,
         opened: OpenedStream<F>,
-    ) -> std::result::Result<(Stream<F>, StreamReader<F>), AdoptError> {
+    ) -> std::result::Result<(Stream<F>, StreamReader<F>), AdoptError<F>> {
         let OpenedStream {
             asset,
             start,
             width,
-            source,
+            stage,
         } = opened;
-        let id = StreamId::mint(&self.next_stream);
-        let (record, parts) = build_stream(
-            id,
-            asset,
-            start.frame(),
-            width,
-            source,
-            &self.shared,
-            &self.config,
-        )
-        .map_err(AdoptError::Placement)?;
-        self.streamer_tx
-            .send(StreamerCommand::Adopt(Box::new(record)))
-            .map_err(|_| AdoptError::StreamerGone)?;
-        Ok(open::serve(
-            parts,
-            StreamerPort::new(self.streamer_tx.clone()),
-        ))
+        let (record, parts) = match stage {
+            Stage::Read(source) => build_stream(
+                StreamId::mint(&self.next_stream),
+                asset.clone(),
+                start.frame(),
+                width,
+                source,
+                &self.shared,
+                &self.config,
+            )
+            .map(|(record, parts)| (Box::new(record), parts))
+            .map_err(AdoptError::Placement)?,
+            Stage::Built(record, parts) => (record, parts),
+        };
+        match self.streamer_tx.try_send(StreamerCommand::Adopt(record)) {
+            Ok(()) => Ok(open::serve(
+                parts,
+                StreamerPort::new(self.streamer_tx.clone()),
+            )),
+            Err(crossbeam_channel::TrySendError::Full(StreamerCommand::Adopt(record))) => {
+                Err(AdoptError::Busy(Box::new(OpenedStream {
+                    asset,
+                    start,
+                    width,
+                    stage: Stage::Built(record, parts),
+                })))
+            }
+            Err(_) => Err(AdoptError::StreamerGone),
+        }
     }
 
     /// The session rate: the one the streamer was built with, or the one

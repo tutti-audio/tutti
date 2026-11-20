@@ -94,18 +94,26 @@ fn open(
     let reader = opening
         .run()
         .map_err(Refusal::Read)
-        .and_then(|read| streamer.adopt(read).map_err(Refusal::Adopt));
+        .and_then(|read| streamer.adopt(read).map_err(placed));
     if reader.is_ok() {
         assert!(streamer.step_until_idle(1_000) < 1_000, "the ring primes");
     }
     (streamer, reader)
 }
 
-/// Why a file did not become a stream: the read refused it, or the adopt did.
+/// Why a file did not become a stream: the read refused it, or the adopt's placement did.
 #[derive(Debug, PartialEq)]
 enum Refusal {
     Read(OpenError),
-    Adopt(AdoptError),
+    Placed(PlaceError),
+}
+
+/// The placement refusal of an adopt; any other refusal is a failure of the test.
+fn placed(error: AdoptError<f32>) -> Refusal {
+    match error {
+        AdoptError::Placement(error) => Refusal::Placed(error),
+        other => panic!("expected a placement refusal, got {other:?}"),
+    }
 }
 
 /// A hand-stepped streamer and the handle of the stream it streams: both are
@@ -233,9 +241,10 @@ fn a_five_one_file_into_a_five_wide_voice_is_refused() {
     assert!(
         matches!(
             refused,
-            Some(Refusal::Adopt(AdoptError::Placement(PlaceError::Fold(
-                FoldError::Unplaced { channel: 5, .. }
-            ))))
+            Some(Refusal::Placed(PlaceError::Fold(FoldError::Unplaced {
+                channel: 5,
+                ..
+            })))
         ),
         "{refused:?}"
     );
@@ -244,7 +253,7 @@ fn a_five_one_file_into_a_five_wide_voice_is_refused() {
         .open_stream_into(&path, StreamStart::HEAD, ChannelLayout::from(5u16))
         .run()
         .expect("the file reads");
-    assert_eq!(streamer.adopt(read).err().map(Refusal::Adopt), refused);
+    assert_eq!(streamer.adopt(read).err().map(placed), refused);
     let opening = streamer.open_stream_into(&path, StreamStart::HEAD, ChannelLayout::STEREO);
     let (_stereo_stream, stereo) =
         wait_for_open(&mut streamer, opening).expect("5.1 folds to stereo");

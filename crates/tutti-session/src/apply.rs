@@ -71,9 +71,20 @@ mod sealed {
 /// float: the other is a type error. Its result is the output's `Applied`, and
 /// its refusal the output's `Error`, which has a `Stale` variant for an output
 /// cut from an older state of the session.
-pub trait Apply<F: SessionFloat>: sealed::Sealed<F> {}
+pub trait Apply<F: SessionFloat>:
+    sealed::Sealed<F, Applied = <Self as Apply<F>>::Applied, Error = <Self as Apply<F>>::Error>
+{
+    /// What a successful apply returns.
+    type Applied;
+    /// Why an apply refused: `Stale` for an output of another session or an
+    /// older state, and whatever else applying it can refuse.
+    type Error;
+}
 
-impl<F: SessionFloat, T: sealed::Sealed<F>> Apply<F> for T {}
+impl<F: SessionFloat, T: sealed::Sealed<F>> Apply<F> for T {
+    type Applied = <T as sealed::Sealed<F>>::Applied;
+    type Error = <T as sealed::Sealed<F>>::Error;
+}
 
 pub(crate) use sealed::Cut;
 #[cfg(feature = "sampler")]
@@ -82,7 +93,8 @@ pub(crate) use sealed::Sealed;
 impl<K: AppKey, C: Clock> Session<K, C> {
     /// Takes back the output of work the app ran, and applies it.
     ///
-    /// Control thread. The output is cut from the session's state when the
+    /// Control thread. It never waits: an output whose target is busy comes back in
+    /// its error's `Busy`. The output is cut from the session's state when the
     /// work was made; when that state has moved on (an entry released,
     /// declared again or loaded again, a newer refresh) the apply refuses by
     /// name (`Error::Stale`) and changes nothing. An output of another session

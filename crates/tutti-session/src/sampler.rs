@@ -39,9 +39,9 @@ pub enum SamplerError {
 
 /// Why a read file did not become a stream ([`Session::apply`] of an
 /// [`OpenedStream`]).
-#[derive(Clone, Debug, PartialEq, thiserror::Error)]
+#[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
-pub enum OpenStreamError {
+pub enum OpenStreamError<F: SessionFloat> {
     /// The file was read for another session, which cannot serve it here:
     /// open it again from this one.
     #[error("the file was read for another session: open it again")]
@@ -53,12 +53,20 @@ pub enum OpenStreamError {
     /// The session's streamer is gone, so nothing would feed the stream.
     #[error("the session's disk streamer is gone")]
     StreamerGone,
+    /// The streamer's command queue is full. Nothing was lost: apply this output
+    /// again after the next [`update`](Session::update).
+    #[error("the session's disk streamer is busy: apply the file again after the next update")]
+    Busy(OpenedStream<F>),
 }
 
 /// The session's name for what the streamer refused to adopt.
-fn adopt_refusal(error: AdoptError) -> OpenStreamError {
+fn adopt_refusal<F: SessionFloat>(cut: Cut, error: AdoptError<F>) -> OpenStreamError<F> {
     match error {
         AdoptError::Placement(error) => OpenStreamError::Place(error),
+        AdoptError::Busy(opened) => OpenStreamError::Busy(OpenedStream {
+            cut,
+            opened: *opened,
+        }),
         // `AdoptError` is `non_exhaustive`: what it may yet name is a streamer that
         // cannot take the stream.
         AdoptError::StreamerGone | _ => OpenStreamError::StreamerGone,
@@ -128,26 +136,29 @@ pub struct OpenedStream<F: SessionFloat> {
 
 impl<F: SessionFloat> Sealed<F> for OpenedStream<F> {
     type Applied = (Stream<F>, StreamReader<F>);
-    type Error = OpenStreamError;
+    type Error = OpenStreamError<F>;
 
     fn cut(&self) -> &Cut {
         &self.cut
     }
 
-    fn stale() -> OpenStreamError {
+    fn stale() -> OpenStreamError<F> {
         OpenStreamError::Stale
     }
 
     fn apply_to<K: AppKey, C: Clock<Float = F>>(
         self,
         session: &mut Session<K, C>,
-    ) -> Result<(Stream<F>, StreamReader<F>), OpenStreamError> {
+    ) -> Result<(Stream<F>, StreamReader<F>), OpenStreamError<F>> {
+        let Self { cut, opened } = self;
         let streamer = session
             .sampler
             .streamer
             .as_ref()
             .ok_or(OpenStreamError::StreamerGone)?;
-        streamer.adopt(self.opened).map_err(adopt_refusal)
+        streamer
+            .adopt(opened)
+            .map_err(|error| adopt_refusal(cut, error))
     }
 }
 
@@ -156,8 +167,9 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// `start`: the work the app runs ([`OpenStream::run`]) and hands back to
     /// [`apply`](Self::apply). The voice is as wide as the file
     /// (`tutti_sampler::voice_width`). The session is not touched until the
-    /// apply, which waits while the streamer's command queue is full, as every
-    /// stream command does.
+    /// apply, which never waits: a full streamer queue gives the output back in
+    /// [`OpenStreamError::Busy`], to apply again after the next
+    /// [`update`](Self::update).
     ///
     /// # Errors
     ///

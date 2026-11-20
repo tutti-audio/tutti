@@ -25,6 +25,8 @@ use super::command::StreamId;
 use super::metrics::Metrics;
 #[cfg(codec)]
 use super::metrics::ReadMeter;
+use super::open::Opened;
+use super::record::Record;
 use crate::{OpenError, StreamStart};
 use tutti_rt::RingFloat;
 
@@ -145,7 +147,7 @@ impl<F: RingFloat> OpenStream<F> {
             asset: self.asset,
             start: self.start,
             width: self.width,
-            source,
+            stage: Stage::Read(source),
         })
     }
 
@@ -207,7 +209,14 @@ pub struct OpenedStream<F: RingFloat> {
     pub(super) asset: Asset,
     pub(super) start: StreamStart,
     pub(super) width: Option<ChannelLayout>,
-    pub(super) source: Source<F>,
+    pub(super) stage: Stage<F>,
+}
+
+/// How far an open has come: the file read, or the stream built from it and
+/// waiting for room in the streamer's queue.
+pub(super) enum Stage<F: RingFloat> {
+    Read(Source<F>),
+    Built(Box<Record<F>>, Opened<F>),
 }
 
 impl<F: RingFloat> std::fmt::Debug for OpenedStream<F> {

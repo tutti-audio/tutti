@@ -20,6 +20,7 @@ use super::cells::Cells;
 use super::command::StreamId;
 use super::control::StreamFile;
 use super::control_cell::ControlCell;
+use super::decode::OpenedStream;
 use super::loops::RingControl;
 use super::prefetch::SharedReader;
 use super::status::StatusCell;
@@ -104,9 +105,9 @@ pub enum OpenError {
 }
 
 /// Why a read file did not become a stream ([`DiskStreamer::adopt`](crate::DiskStreamer::adopt)).
-#[derive(Clone, Debug, PartialEq, thiserror::Error)]
+#[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
-pub enum AdoptError {
+pub enum AdoptError<F: RingFloat> {
     /// The file's channels cannot be placed into the voice's width: a channel
     /// no speaker names (a `Speaker::Unknown` in its topology), or a
     /// narrowing with an unordered end (a 5.1 file into 5 channels).
@@ -115,6 +116,10 @@ pub enum AdoptError {
     /// The streamer thread is gone, so nothing would feed the stream.
     #[error("the streamer thread is gone")]
     StreamerGone,
+    /// The streamer's command queue is full. Nothing was lost: the open comes
+    /// back to adopt again once the streamer has taken what it holds.
+    #[error("the streamer's queue is full: adopt the open again")]
+    Busy(Box<OpenedStream<F>>),
 }
 
 /// What building a stream makes besides its record: everything the audio side's

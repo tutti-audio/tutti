@@ -53,8 +53,8 @@ impl<F: RingFloat> StreamerSender<F> {
         Ok(())
     }
 
-    /// [`send`](Self::send) that refuses instead of waiting (tests).
-    #[cfg(test)]
+    /// [`send`](Self::send) that refuses instead of waiting: what the app's door
+    /// uses, which must not block.
     pub(crate) fn try_send(
         &self,
         cmd: StreamerCommand<F>,

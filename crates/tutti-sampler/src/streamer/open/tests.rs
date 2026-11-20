@@ -176,7 +176,45 @@ fn an_adopt_on_a_gone_streamer_fails_with_streamer_gone() {
         .open_stream(&path, StreamStart::HEAD)
         .run()
         .expect("reading does not need the streamer");
-    assert_eq!(streamer.adopt(opened).err(), Some(AdoptError::StreamerGone));
+    assert!(matches!(
+        streamer.adopt(opened).err(),
+        Some(AdoptError::StreamerGone)
+    ));
+}
+
+/// Variant `Busy`: an adopt never waits. With the streamer's queue full (nothing steps
+/// it) an adopt gives the open back unchanged; once the streamer has run, the same open
+/// adopts, and the streamer holds exactly the streams that were served.
+#[test]
+fn an_adopt_on_a_full_queue_gives_the_open_back_and_applies_after_a_step() {
+    let (_dir, path) = constant_file(0.25);
+    let mut streamer = manual();
+    let mut served = Vec::new();
+    let busy = loop {
+        let opened = streamer
+            .open_stream(&path, StreamStart::HEAD)
+            .run()
+            .expect("the file reads");
+        match streamer.adopt(opened) {
+            Ok(pair) => served.push(pair),
+            Err(AdoptError::Busy(opened)) => break *opened,
+            Err(other) => panic!("expected a full queue, got {other:?}"),
+        }
+        assert!(served.len() < 10_000, "the queue never filled");
+    };
+    let _ = streamer.step();
+    assert_eq!(
+        streamer.driver.open_streams(),
+        served.len(),
+        "the refused open is not a stream"
+    );
+    let (stream, reader) = streamer.adopt(busy).expect("room after the streamer ran");
+    assert_eq!(stream.id(), reader.id());
+    let _ = streamer.step();
+    assert_eq!(streamer.driver.open_streams(), served.len() + 1);
+    // The streams close into a queue that no step drains: end the streamer first, so
+    // each close is refused at once rather than waiting for room.
+    drop(streamer);
 }
 
 /// Two opens, the second read before

@@ -84,7 +84,10 @@ fn a_file_read_for_another_session_is_stale() {
         .expect("a streamer")
         .run()
         .expect("reads");
-    assert_eq!(b.apply(opened).err(), Some(OpenStreamError::Stale));
+    assert!(matches!(
+        b.apply(opened).err(),
+        Some(OpenStreamError::Stale)
+    ));
 }
 
 /// A session with no disk streamer refuses an open at the call.
