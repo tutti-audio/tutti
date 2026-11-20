@@ -1,0 +1,47 @@
+# Thread starts outside `tutti-platform` that have not yet become futures (`cargo xtask check-threads`).
+#
+# Background work is a std `Future` on `tutti_platform::Executor`, and a blocking OS edge goes
+# through `Executor::spawn_dedicated`. This file only shrinks: the gate fails on a thread start
+# with no row, on a row with no start (delete it with the code it names), and on a malformed
+# row, so no row is added. The audio side (the graph's render workers and the engine's timer)
+# is named in the gate, not here.
+#
+# One `<crate>  <target>  <key>  <owner>` row per function that starts a thread.
+# crate   the package the key is in
+# target  what the site becomes: `spawn` (a future on the executor's pool) or
+#         `spawn_dedicated` (a future on a thread of its own, for a blocking OS edge)
+# key     `<file>::<fn>` for a free function, `<file>::<Owner>::<fn>` for a method; no line
+#         numbers; several starts in one function share a row
+# owner   the lane that migrates it: core-foundation, core-engine, plugin or midi
+
+# core-foundation
+tutti-codec  spawn  crates/tutti-codec/src/flac.rs::FrameWriter::start  core-foundation
+tutti-codec  spawn_dedicated  crates/tutti-codec/src/vorbis.rs::VorbisWriter::create  core-foundation
+tutti-rt  spawn_dedicated  crates/tutti-rt/src/bells/tick_thread.rs::Tick::start  core-foundation
+
+# core-engine
+tutti-cpal  spawn_dedicated  crates/tutti-cpal/src/listing.rs::DeviceListing::spawn_with  core-engine
+tutti-cpal  spawn_dedicated  crates/tutti-cpal/src/owner.rs::Owned::spawn  core-engine
+tutti-cpal  spawn_dedicated  crates/tutti-cpal/src/poller.rs::DevicePoller::spawn  core-engine
+tutti-session  spawn  crates/tutti-session/src/recorder.rs::Recorder::spawn  core-engine
+
+# plugin
+tutti-plugin-db  spawn  crates/tutti-plugin-db/src/catalog.rs::Catalog::save_in_background  plugin
+tutti-plugin-db  spawn_dedicated  crates/tutti-plugin-db/src/scanner.rs::Scanner::start  plugin
+tutti-plugin-ipc  spawn_dedicated  crates/tutti-plugin-ipc/src/client/audio/thread.rs::IpcThread::spawn  plugin
+tutti-plugin-ipc  spawn_dedicated  crates/tutti-plugin-ipc/src/client/audio/thread.rs::run_thread  plugin
+tutti-plugin-ipc  spawn_dedicated  crates/tutti-plugin-ipc/src/process_guard.rs::ProcessGuard::launched  plugin
+tutti-plugin-ipc  spawn_dedicated  crates/tutti-plugin-ipc/src/process_guard.rs::reap_elsewhere  plugin
+tutti-plugin-ipc-ffi  spawn_dedicated  crates/tutti-plugin-ipc-ffi/src/exit/host_watch.rs::watch_host  plugin
+tutti-plugin-ipc-ffi  spawn  crates/tutti-plugin-ipc-ffi/src/exit/host_watch.rs::watch_spawner  plugin
+tutti-plugin-server  spawn_dedicated  crates/tutti-plugin-server/src/render.rs::RenderThread::spawn  plugin
+tutti-plugin-server  spawn  crates/tutti-plugin-server/src/server.rs::beat_while  plugin
+
+# midi
+tutti-midi-hardware  spawn_dedicated  crates/tutti-midi-hardware/src/backend/alsa/input.rs::start  midi
+tutti-midi-hardware  spawn_dedicated  crates/tutti-midi-hardware/src/backend/alsa/watch.rs::start  midi
+tutti-midi-hardware  spawn_dedicated  crates/tutti-midi-hardware/src/backend/coremidi/watch.rs::start_hub  midi
+tutti-midi-hardware  spawn  crates/tutti-midi-hardware/src/backend/legacy_port/poll.rs::start  midi
+tutti-midi-hardware  spawn_dedicated  crates/tutti-midi-hardware/src/backend/winmm/output.rs::open  midi
+tutti-midi-hardware  spawn  crates/tutti-midi-hardware/src/sensing.rs::Heartbeat::start  midi
+tutti-winmm-ffi  spawn_dedicated  crates/tutti-winmm-ffi/src/os/input.rs::MidiIn::open  midi

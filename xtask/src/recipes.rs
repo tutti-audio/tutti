@@ -286,6 +286,11 @@ pub(crate) const RECIPES: &[(&str, &str, &str)] = &[
         "a quantity has one width and data is generic over the graph's float: a crossing is a named place, bar the rows of xtask/width-baseline.txt",
     ),
     (
+        "check-threads",
+        "",
+        "background work is a future on tutti_platform::Executor: a thread start outside tutti-platform is a row of xtask/threads-baseline.txt or one of the gate's two real-time sites",
+    ),
+    (
         "check-session-api",
         "",
         "tutti-session's public API has no `run` or `*_blocking`, and only the rows of xtask/session-api-allow.txt hold a MainThreadMarker",
@@ -711,6 +716,7 @@ impl Planner<'_> {
             "check-test-time" => self.out.push(Step::Gate(Gate::TestTime)),
             "check-units-bare" => self.out.push(Step::Gate(Gate::UnitsBare)),
             "check-width" => self.out.push(Step::Gate(Gate::Width)),
+            "check-threads" => self.out.push(Step::Gate(Gate::Threads)),
             "check-conformance" => self.out.push(Step::Gate(Gate::Conformance)),
             "conformance" => {
                 let o = options(name, args, &["--results", "--out"])?;
@@ -849,6 +855,7 @@ impl Planner<'_> {
                     "check-passive-tests", "check-alloc-binaries", "check-buffers",
                     "check-building", "check-umbrella", "check-logging", "check-test-time",
                     "check-session-api", "check-values", "check-units-bare", "check-width",
+                    "check-threads",
                 ] {
                     self.dep(d)?;
                 }
