@@ -14,7 +14,7 @@ use std::path::PathBuf;
 use tutti_plugin_host::PluginHandle;
 use tutti_plugin_types::{MainThreadMarker, PluginRefresh, PresetError, PresetId, PresetSupport};
 
-use super::state_job::NodeLookup;
+use super::state::NodeLookup;
 use super::{PluginSignal, queue};
 use crate::job::job_kind;
 use crate::{HandleError, Job, ListedPreset, ResourceId, Session, WaitError, WorkerError};

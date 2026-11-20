@@ -151,6 +151,12 @@ impl<T> ThreadHandle<T> {
         self.stop.clone()
     }
 
+    /// The thread's name, as given to [`spawn_named`].
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
     /// Whether the body has returned or panicked. Never blocks.
     #[must_use]
     pub fn is_finished(&self) -> bool {

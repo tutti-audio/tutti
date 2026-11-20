@@ -1,5 +1,6 @@
-//! The reverbs' audio-thread paths allocate nothing: the banks' `retarget`, `process` and
-//! `tail_of`, and the network design in place.
+//! The reverbs' and the phase vocoder's audio-thread paths allocate nothing: the banks' `retarget`,
+//! `process` and `tail_of`, the network design in place, and the vocoder's `retarget`,
+//! `input_needed` and `process`.
 //!
 //! The crate carries no `assert_no_alloc` dev-dependency,
 //! so this binary counts allocations with its own global allocator, per thread.
@@ -108,4 +109,45 @@ fn the_fdns_design_into_needs_no_network_sized_stack() {
         })
         .unwrap();
     assert_eq!(handle.join().unwrap(), 1);
+}
+
+/// The phase vocoder's `retarget`, `input_needed` and `process` allocate nothing, with every
+/// control moving each block (hostile ones among them) and every block fed what it asks, after
+/// the one `PhaseVocoder::new` that sizes it.
+#[test]
+fn the_phase_vocoder_retargets_and_renders_without_allocating() {
+    use tutti_buffers::{ChannelLayout, Planes, PlanesMut};
+    use tutti_dsp::{
+        ColaGeometry, HopSize, PhaseVocoder, PhaseVocoderControls, StftGeometry, WindowLength,
+    };
+    use tutti_units::{Cents, Samples, StretchFactor};
+
+    let geometry = ColaGeometry::try_from(StftGeometry::new(
+        SampleRate::SR_48K,
+        WindowLength::new(Samples::new(1024)).unwrap(),
+        HopSize::new(Samples::new(256)).unwrap(),
+    ))
+    .unwrap();
+    let mut vocoder = PhaseVocoder::<f32>::new(ChannelLayout::STEREO, geometry);
+    let source: Vec<f32> = (0..8192).map(|n| (n as f32 * 0.05).sin()).collect();
+    let (mut left, mut right) = (vec![0.0f32; 300], vec![0.0f32; 300]);
+    for block in 0..96u32 {
+        let c = PhaseVocoderControls {
+            stretch: StretchFactor::new([1.0, 0.3, 3.7, f64::NAN][(block % 4) as usize]),
+            pitch: Cents::new([0.0, -2400.0, 1200.0, f64::INFINITY][(block / 4 % 4) as usize]),
+        };
+        let n = allocations(|| {
+            vocoder.retarget(&c);
+            let needed = vocoder
+                .input_needed(Samples::new(300))
+                .get()
+                .min(source.len());
+            let counts = vocoder.process(
+                Planes::new(&[&source[..needed], &source[..needed]]).unwrap(),
+                PlanesMut::new(&mut [&mut left, &mut right]).unwrap(),
+            );
+            std::hint::black_box(counts);
+        });
+        assert_eq!(n, 0, "block {block} allocated");
+    }
 }

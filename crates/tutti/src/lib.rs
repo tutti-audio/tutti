@@ -185,10 +185,10 @@ pub use tutti_session::PluginParams;
 pub use tutti_session::windows_from_signal;
 #[cfg(all(feature = "session", feature = "plugin"))]
 pub use tutti_session::{
-    AddPluginError, AnyPlugin, Diagnostics, ListedPreset, LoadPreset, Opened, Plugin, PluginBuses,
-    PluginChange, PluginDeclaration, PluginEvent, PluginHealth, PluginInfo, PluginPresets,
-    PooledPlugin, PortCounts, PresetJobError, PresetJobFailed, RestoreError, RestoreState,
-    SaveState,
+    AddPluginError, AnyPlugin, Diagnostics, ListedPreset, LoadPreset, Opened, Plugin,
+    PluginApplyError, PluginBuses, PluginChange, PluginDeclaration, PluginEvent, PluginHealth,
+    PluginInfo, PluginPresets, PooledPlugin, PortCounts, PresetJobError, PresetJobFailed,
+    RestoreError, RestoreState, RestoredState, SaveState, StateStartError,
 };
 #[cfg(all(feature = "session", feature = "analyze"))]
 pub use tutti_session::{
@@ -281,6 +281,7 @@ pub mod nodes {
         SosError, StopbandAttenuation, StopbandAttenuationError, System, Tilt,
     };
     pub use tutti_dsp::{Lookahead, MaxDecay, MaxDelay, MaxDelayError, PeakDetection};
+    pub use tutti_dsp::{PhaseVocoder, PhaseVocoderControls, StreamCounts};
     pub use tutti_modulation::{
         ControlProgram, InputLayer, Layer, LfoShape, SignalSource, SourceId, Waveform,
     };
@@ -544,8 +545,7 @@ pub mod session {
     pub use tutti_session::{
         Editor, EditorCallError, GiveUp, HangPolicy, LoadedPlugin, ParamGesture, PluginCause,
         PluginParam, PluginPorts, PoolPluginEntry, PortsRefusal, Recovery, RecoveryAction,
-        RecoveryEvent, RecoveryFailure, RecoveryPolicy, ReloadCause, StateJobError, StateJobFailed,
-        StateRestore, StateView,
+        RecoveryEvent, RecoveryFailure, RecoveryPolicy, ReloadCause, StateRestore, StateView,
     };
     #[cfg(feature = "soundfont")]
     pub use tutti_session::{GeneralMidi, LoadSoundFont, LoadedSoundFont};
@@ -629,9 +629,9 @@ pub mod measure {
     };
     // The dsp types `Error`, the spectrum and `Chroma` name.
     pub use tutti_dsp::{
-        BinCount, BinIndex, ChannelWeight, ChannelWeightError, ChannelWeights, CosineWindow,
-        FrameCount, FrameIndex, Grid, HopSize, HopSizeError, StftError, WindowLength,
-        WindowLengthError,
+        BinCount, BinIndex, ChannelWeight, ChannelWeightError, ChannelWeights, ColaGeometry,
+        CosineWindow, FrameCount, FrameIndex, Grid, HopSize, HopSizeError, MelError, StftError,
+        StftGeometry, WindowLength, WindowLengthError,
     };
 }
 

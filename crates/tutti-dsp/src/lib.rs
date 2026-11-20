@@ -99,7 +99,9 @@
 //! - **STFT vocabulary** (`stft/`): [`CosineWindow`] and the [`Window`] trait,
 //!   [`StftGeometry`] (a [`WindowLength`], a [`HopSize`], shape and rate), the
 //!   [`ColaGeometry`] an inverse accepts, and [`Grid`] with its typed indices; [`StftError`] is
-//!   what a [`Grid`] or a [`ColaGeometry`] refuses with.
+//!   what a [`Grid`] or a [`ColaGeometry`] refuses with. [`PhaseVocoder`] stretches and
+//!   shifts the pitch of any width on a [`ColaGeometry`], one phase solution for all channels,
+//!   pulled by its output (`input_needed`, then `process`) under [`PhaseVocoderControls`].
 //! - **Resampling** (`resample/`): [`WindowedSinc`] and [`StreamingResampler`] (made from a
 //!   [`StreamingResamplerConfig`], sized by a [`ChunkSize`], failing with a [`ResampleError`]).
 //! - **Dither** (`dither/`): [`DitherNoise`] ([`DitherShape`]) and [`DitherSink`], the
@@ -123,6 +125,9 @@
 //!   how much a frame differs from the one before ([`spectral_flux`],
 //!   [`high_frequency_content`], [`complex_domain_deviation`], [`spectral_energy`]), and
 //!   [`bin_magnitude`], the modulus they take of a bin.
+//! - **Mel bank, DCT-II and MFCC** (`mel.rs`, `dct.rs`, `mfcc.rs`): [`MelFilterbank`]
+//!   (from a [`MelConfig`], in a [`MelScale`] and [`MelNorm`]), the orthonormal [`Dct2`], and
+//!   [`Mfcc`], the cepstral coefficients of one magnitude spectrum.
 //! - **Sequence decoding** (`viterbi.rs`, `beat.rs`, `sequence.rs`): [`sticky_viterbi`], the best
 //!   state path when every switch costs the same; [`track_beat_frames`], beat placement by
 //!   dynamic programming over a novelty curve (Ellis, 2007); the [`median`] of a set and the
@@ -156,6 +161,7 @@ mod comb;
 mod control_rate;
 mod convolver;
 mod dc_block;
+mod dct;
 mod delay;
 mod design;
 mod dither;
@@ -184,6 +190,8 @@ mod stereo;
 mod tremolo;
 mod waveshape;
 
+mod mel;
+mod mfcc;
 mod model;
 mod resample;
 mod reverb;
@@ -208,6 +216,7 @@ pub use convolver::{
     Convolver, IrSpectra, MatrixConvolver, MatrixConvolverConfig, MatrixConvolverError,
 };
 pub use dc_block::{DC_CORNER, DcBlocker, DcBlockerControls, MIN_DC_CORNER};
+pub use dct::Dct2;
 pub(crate) use delay::delay_step;
 pub use delay::{
     ChannelTimes, ChannelTimesError, DELAY_SLEW, DelayBank, DelayControls, DelayLayout,
@@ -245,6 +254,10 @@ pub use frequency_shifter::{
 pub use interp::{ParabolicPeak, cubic_hermite, lerp, parabolic_peak};
 pub use level::rms;
 pub use loudness::{ChannelWeight, ChannelWeightError, ChannelWeights, channel_weights};
+pub use mel::{
+    MelBandCount, MelBandCountError, MelConfig, MelError, MelFilterbank, MelNorm, MelScale,
+};
+pub use mfcc::Mfcc;
 pub use model::{DecayTime, Lti, MaxDecay, MaxDecayError, System, TAIL_FLOOR};
 pub use modulation::allpass::{allpass_complement, sweep_hz};
 pub use modulation::mod_delay::{
@@ -304,6 +317,7 @@ pub use stft::geometry::{
     ColaGeometry, HopSize, HopSizeError, StftGeometry, WindowLength, WindowLengthError,
 };
 pub use stft::grid::{BinCount, BinIndex, FrameCount, FrameIndex, Grid};
+pub use stft::vocoder::{PhaseVocoder, PhaseVocoderControls, StreamCounts};
 pub use stft::window::{CosineWindow, Window};
 pub use tremolo::{AutoPan, AutoPanControls, Tremolo, TremoloControls};
 pub use viterbi::sticky_viterbi;

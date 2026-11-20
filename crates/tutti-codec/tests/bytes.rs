@@ -24,6 +24,7 @@ use tutti_units::SampleRate;
 
 /// `frames` interleaved frames of `channels`: a 1024-step sawtooth offset per
 /// channel, plus a 15-bit hash scaled by 1/16, every term exact in `f32`.
+#[cfg(any(feature = "encode-wav", feature = "encode-flac"))]
 fn input(channels: usize, frames: usize) -> Vec<f32> {
     (0..frames)
         .flat_map(|i| {
@@ -37,6 +38,7 @@ fn input(channels: usize, frames: usize) -> Vec<f32> {
 
 /// The file `format` writes for `frames` frames of the input, as one block cut
 /// in two.
+#[cfg(any(feature = "encode-wav", feature = "encode-flac"))]
 fn written(format: Format, channels: u16, frames: usize) -> Vec<u8> {
     let layout = ChannelLayout::from(channels);
     let spec = Spec::of_width(format, layout, SampleRate::SR_44K1);
