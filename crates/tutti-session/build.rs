@@ -1,6 +1,6 @@
 //! Defines `cfg(codec)`: `tutti-codec` was built with at least one `decode-*`
 //! feature (it reports that through its `links` metadata), so a file can be
-//! decoded and an `audio_file` entry can be loaded.
+//! decoded and a `load_audio` can run.
 
 fn main() {
     println!("cargo::rustc-check-cfg=cfg(codec)");

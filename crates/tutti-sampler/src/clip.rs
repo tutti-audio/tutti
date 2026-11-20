@@ -38,8 +38,8 @@ use crate::{
 /// streamer reads ahead, for a file too long to hold). Every builder method
 /// reads the same on both, and both play what the file holds at the same
 /// frames. The sampler never picks the tier: the caller does, by the
-/// constructor it calls (the session's `audio_file` entry, resident or
-/// `.streamed()`, says which a file is declared as).
+/// constructor it calls (the session's `load_audio` handle says which a file
+/// was loaded as: a wave, or a header to stream).
 ///
 /// A resident clip's width is the wave's own (placed by the wave's
 /// [`topology`](Wave::topology), as every [`MemorySource`] places it; at most
