@@ -3,7 +3,7 @@ use crate::CosineWindow;
 use crate::Window;
 use crate::fft::Complex64;
 use core::f64::consts::TAU;
-use tutti_units::SampleRate;
+use tutti_units::{Hz, SampleRate};
 
 const RATE: f64 = 48_000.0;
 const WINDOW: usize = 2048;
@@ -83,29 +83,23 @@ fn f64s<F: FftFloat>(x: &[F]) -> Vec<f64> {
     x.iter().map(|&v| v.into()).collect()
 }
 
-/// The Hann-windowed DFT of `x` at exactly `f` Hz: `sum w[n] x[n] e^{-j 2 pi f n / RATE}`.
+/// The Hann-windowed DFT of `x` at exactly `f` Hz.
 fn tone(x: &[f64], f: f64) -> Complex64 {
-    let m = x.len();
-    let mut sum = Complex64::new(0.0, 0.0);
-    for (n, &v) in x.iter().enumerate() {
-        let w = 0.5 - 0.5 * (TAU * n as f64 / m as f64).cos();
-        let a = -TAU * f * n as f64 / RATE;
-        sum += Complex64::new(v * w * a.cos(), v * w * a.sin());
-    }
-    sum
+    let (re, im) = tutti_fixtures::signal::hann_dft(x, Hz::new(f), SampleRate::SR_48K);
+    Complex64::new(re, im)
 }
 
-/// The frequency of the sine in `x`, to within `measure` samples of it: the phase advance of
-/// its exact-bin DFT at `near` between two segments `STEP` apart, read as a deviation from
-/// `near` (unambiguous within `RATE / (2 STEP)` Hz).
+/// The frequency of the sine in `x`, to within `measure` samples of it, by the phase advance
+/// of its exact-bin DFT between two segments 4096 samples apart.
 fn frequency(x: &[f64], near: f64, measure: usize) -> f64 {
-    const STEP: usize = 4096;
-    let (a, b) = (&x[..measure], &x[STEP..STEP + measure]);
-    let advance = (tone(b, near) * tone(a, near).conj()).arg();
-    let expected = TAU * near * STEP as f64 / RATE;
-    let deviation =
-        (advance - expected + core::f64::consts::PI).rem_euclid(TAU) - core::f64::consts::PI;
-    near + deviation * RATE / (TAU * STEP as f64)
+    tutti_fixtures::signal::sine_frequency(
+        x,
+        Hz::new(near),
+        SampleRate::SR_48K,
+        Samples::new(measure),
+        Samples::new(4096),
+    )
+    .get()
 }
 
 /// The power outside the fundamental's main lobe over the power inside it, in dB, of the
@@ -133,12 +127,9 @@ fn f32_transform_error() -> f64 {
     2.0 * (WINDOW as f64).log2() * f64::from(f32::EPSILON)
 }
 
-/// The leakage of a Hann window of `length` samples at the negative-frequency image of a tone
-/// at `f`, `2 f` away, relative to the window's gain at the tone: the closed form
-/// `|sin(pi v) / (pi v (1 - v^2))|` at `v` bins, bounded by `1 / (pi v (v^2 - 1))`.
+/// The leakage of a Hann window of `length` samples at the image of a tone at `f`.
 fn hann_image(f: f64, length: usize) -> f64 {
-    let v = 2.0 * f * length as f64 / RATE;
-    1.0 / (core::f64::consts::PI * v * (v * v - 1.0))
+    tutti_fixtures::signal::hann_image_leak(Hz::new(f), Samples::new(length), SampleRate::SR_48K)
 }
 
 /// Feeds `source` as the graph does: `block` input frames per `block` output frames, whatever
@@ -439,4 +430,52 @@ fn a_reset_leaves_silence() {
     v.reset();
     let out = drive_blocks(&mut v, &[vec![0.0f32; 8192]], 256);
     assert!(out[0].iter().all(|&x| x == 0.0));
+}
+
+/// In fixed-rate mode every call takes `n` input frames and gives `n` output frames, for any
+/// `n` and the pitch anywhere in range, however it jumps between calls: it is changed at every
+/// call, the extremes alternating with a sweep across the range in steps of 337 cents.
+#[test]
+fn fixed_rate_takes_n_and_gives_n_under_any_pitch_at_any_block_size() {
+    for block in [1, 64, 480, 5000] {
+        let mut v = PhaseVocoder::<f32>::fixed_rate(ChannelLayout::MONO, geometry());
+        let source = sine::<f32>(1500.0, 0.5, 0.0, 120_000);
+        for (i, start) in (0..source.len() - block).step_by(block).enumerate() {
+            let cents = match i % 4 {
+                0 => -2400.0 + ((i * 337) % 4801) as f64,
+                1 => -2400.0,
+                2 => 2400.0 - ((i * 337) % 4801) as f64,
+                _ => 2400.0,
+            };
+            v.retarget(&controls(1.0, cents));
+            let input = vec![source[start..start + block].to_vec()];
+            let mut out = vec![vec![0.0f32; block]];
+            let counts = v.process(
+                Planes::from_vecs(&input).unwrap(),
+                PlanesMut::from_vecs(&mut out).unwrap(),
+            );
+            assert_eq!(
+                (counts.produced.get(), counts.consumed.get()),
+                (block, block),
+                "block {block}, call {i} at {cents} cents"
+            );
+        }
+    }
+}
+
+/// The fixed-rate latency is the window, a frame, and the lead: one frame of step, the cubic
+/// read's reach and a frame of rounding at the lowest ratio of 1/4.
+#[test]
+fn fixed_rate_latency_is_the_window_and_the_lead() {
+    let v = PhaseVocoder::<f32>::fixed_rate(ChannelLayout::MONO, geometry());
+    assert_eq!(v.latency().get(), WINDOW + 1 + 4 * HOP + 12 + 1);
+}
+
+/// The stretch of a fixed-rate vocoder is held at unity.
+#[test]
+fn fixed_rate_ignores_the_stretch() {
+    let mut v = PhaseVocoder::<f32>::fixed_rate(ChannelLayout::MONO, geometry());
+    let at_unity = v.input_needed(Samples::new(5000));
+    v.retarget(&controls(2.0, 0.0));
+    assert_eq!(v.input_needed(Samples::new(5000)), at_unity);
 }

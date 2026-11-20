@@ -8,10 +8,12 @@
 //! [`PhaseVocoder::process`] takes input and fills output, using what it needs and keeping up
 //! to its ring's room of what it was given beyond that. A source whose ratio varies (the
 //! sampler's voice) asks, reads exactly that many frames from wherever its cursor is, and
-//! calls `process`. A graph effect at unity hands `process` each block's input and output as
-//! they come: [`PhaseVocoder::new`] starts the stream with [`latency`](PhaseVocoder::latency)
-//! frames of silence ahead, which is what makes `n` input frames always enough for `n` output
-//! frames at unity, whatever the block size and wherever it falls on the hop.
+//! calls `process`. A graph effect hands `process` each block's input and output as they come
+//! and builds the vocoder with [`PhaseVocoder::fixed_rate`], which starts the stream with
+//! [`latency`](PhaseVocoder::latency) frames of silence ahead: `n` input frames are then always
+//! enough for `n` output frames under any pitch, whatever the block size and wherever it falls
+//! on the hop. ([`PhaseVocoder::new`] leads the stream with the window alone, which is enough
+//! at unity.)
 //!
 //! # Algorithm
 //!
@@ -27,7 +29,9 @@
 //! - *Pitch* is the stretch by the pitch ratio followed by a cubic read of the finished output
 //!   at that ratio per output frame ([`cubic_hermite`]; a whole position reads the frame
 //!   itself), so a shift is a resample of a stretch, and a change of either applies at the next
-//!   frame with the phase accumulators carrying on.
+//!   frame with the phase accumulators carrying on. A hop of the finished output is read at
+//!   the step it was made at, so the input a frame spans and the output it fills agree
+//!   however the controls move in between.
 
 mod lock;
 #[cfg(test)]
@@ -105,13 +109,6 @@ impl Cursor {
         self.last_start = Some(start);
         self.finished += hop;
     }
-
-    /// The finished frames a read of `n` output frames needs: through the last read
-    /// position's cubic neighbours.
-    fn finished_for(&self, n: usize, step: ReadRate) -> usize {
-        let last = self.read + step.advance(Samples::new(n - 1));
-        libm::floor(last.get()) as usize + 3
-    }
 }
 
 /// A phase vocoder over `width` channels in the float `F`.
@@ -178,6 +175,13 @@ pub struct PhaseVocoder<F: FftFloat> {
     advance: ReadRate,
     /// How far the cubic read moves through the finished output per output frame: `ratio`.
     step: ReadRate,
+    /// The `step` in force when each hop of the finished output was made, by hop index modulo
+    /// its length: a hop is read at the step it was made at, so the input a frame spans and the
+    /// output it fills agree whatever the controls do in between.
+    steps: Vec<ReadRate>,
+    /// The frames of silence the stream is led with beyond the window's: nonzero in the
+    /// fixed-rate mode, which also holds the stretch at unity.
+    lead: usize,
 }
 
 impl<F: FftFloat> std::fmt::Debug for PhaseVocoder<F> {
@@ -192,9 +196,39 @@ impl<F: FftFloat> std::fmt::Debug for PhaseVocoder<F> {
 }
 
 impl<F: FftFloat> PhaseVocoder<F> {
-    /// A vocoder of `width` channels on `geometry`, at unity.
+    /// A vocoder of `width` channels on `geometry`, at unity, pulled by its output (see the
+    /// module docs): the caller asks [`input_needed`](Self::input_needed) per block.
     #[must_use]
     pub fn new(width: ChannelLayout, geometry: ColaGeometry) -> Self {
+        Self::with_lead(width, geometry, 0)
+    }
+
+    /// A vocoder of `width` channels on `geometry` that runs at a fixed rate: every call of
+    /// [`process`](Self::process) takes `n` input frames and gives `n` output frames, for any
+    /// `n` and any [`pitch`](PhaseVocoderControls::pitch) in range, however it changes between
+    /// calls. The stretch is held at unity (its control is ignored).
+    ///
+    /// A frame steps through the input by up to `hop / floor` frames, `floor` being the lowest
+    /// ratio of the step (a shift two octaves down, or `hop / window`), and the cubic read
+    /// looks three finished frames ahead, which is `3 / floor` input frames. The stream is led
+    /// with silence by that much more than the window's, and [`latency`](Self::latency)
+    /// includes it, so an input frame the next frame needs is always already given.
+    #[must_use]
+    pub fn fixed_rate(width: ChannelLayout, geometry: ColaGeometry) -> Self {
+        let geometry_ = StftGeometry::from(geometry);
+        let (size, hop) = (
+            geometry_.window().get() as f64,
+            geometry_.hop().get() as f64,
+        );
+        let floor = Cents::new(-MAX_PITCH.get())
+            .to_pitch_ratio()
+            .max(hop / size);
+        // One frame's step, the cubic read's reach, and a frame of rounding.
+        let lead = libm::ceil(hop / floor + 3.0 / floor) as usize + 1;
+        Self::with_lead(width, geometry, lead)
+    }
+
+    fn with_lead(width: ChannelLayout, geometry: ColaGeometry, lead: usize) -> Self {
         let geometry = StftGeometry::from(geometry);
         let (size, hop) = (geometry.window().get(), geometry.hop().get());
         let width = usize::from(width.count());
@@ -210,6 +244,7 @@ impl<F: FftFloat> PhaseVocoder<F> {
                 w * w
             })
             .sum();
+        let finished_len = (6 * hop + 8).next_power_of_two();
         let mut vocoder = Self {
             geometry,
             scratch: plan.new_scratch(),
@@ -217,10 +252,10 @@ impl<F: FftFloat> PhaseVocoder<F> {
             frame: vec![F::ZERO; size],
             spectra: vec![vec![zero; bins]; width],
             lock: PhaseLock::new(bins),
-            input: vec![vec![F::ZERO; (2 * size + 2 * hop + 8).next_power_of_two()]; width],
+            input: vec![vec![F::ZERO; (2 * size + 2 * hop + 8 + lead).next_power_of_two()]; width],
             sum: vec![vec![F::ZERO; size.next_power_of_two()]; width],
             energy: vec![F::ZERO; size.next_power_of_two()],
-            finished: vec![vec![F::ZERO; (6 * hop + 8).next_power_of_two()]; width],
+            finished: vec![vec![F::ZERO; finished_len]; width],
             energy_floor: F::from_design(1e-3 * full),
             window,
             cursor: Cursor {
@@ -232,6 +267,8 @@ impl<F: FftFloat> PhaseVocoder<F> {
             },
             advance: ReadRate::UNITY,
             step: ReadRate::UNITY,
+            steps: vec![ReadRate::UNITY; (finished_len / hop).max(1)],
+            lead,
         };
         vocoder.reset();
         vocoder
@@ -247,7 +284,7 @@ impl<F: FftFloat> PhaseVocoder<F> {
     /// output, not this figure.
     #[must_use]
     pub fn latency(&self) -> Samples {
-        Samples::new(self.geometry.window().get() + 1)
+        Samples::new(self.geometry.window().get() + 1 + self.lead)
     }
 
     /// Reads `controls` from the next hop on; the phase history carries on. No allocation.
@@ -261,6 +298,8 @@ impl<F: FftFloat> PhaseVocoder<F> {
             .map_or(1.0, |s| {
                 s.clamp(StretchFactor::MIN.get(), StretchFactor::MAX.get())
             });
+        // A fixed-rate vocoder takes as many frames as it gives: no stretch.
+        let stretch = if self.lead == 0 { stretch } else { 1.0 };
         let pitch = Some(controls.pitch.get())
             .filter(|c| c.is_finite())
             .map_or(0.0, |c| c.clamp(-MAX_PITCH.get(), MAX_PITCH.get()));
@@ -303,13 +342,13 @@ impl<F: FftFloat> PhaseVocoder<F> {
         let mut left = output.get();
         while left > 0 {
             let n = left.min(hop);
-            let need = cursor.finished_for(n, self.step);
+            let need = self.finished_for(cursor.read, n);
             while cursor.finished < need {
                 let start = cursor.next_start();
                 required = start + size;
                 cursor.frame_done(start, hop, self.advance);
             }
-            cursor.read += self.step.advance(Samples::new(n));
+            cursor.read = self.walk(cursor.read, n, |_, _, _, _| {});
             left -= n;
         }
         Samples::new(required.saturating_sub(self.cursor.fed))
@@ -338,7 +377,7 @@ impl<F: FftFloat> PhaseVocoder<F> {
         let mut produced = 0;
         'chunks: while produced < wanted {
             let n = (wanted - produced).min(hop);
-            let need = self.cursor.finished_for(n, self.step);
+            let need = self.finished_for(self.cursor.read, n);
             while self.cursor.finished < need {
                 let start = self.cursor.next_start();
                 let required = start + size;
@@ -409,6 +448,8 @@ impl<F: FftFloat> PhaseVocoder<F> {
         for (i, &w) in self.window.iter().enumerate() {
             self.energy[(self.cursor.finished + i) & mask] += w * w;
         }
+        let slot = self.cursor.finished / hop % self.steps.len();
+        self.steps[slot] = self.step;
         self.finish_hop();
         self.cursor.frame_done(start, hop, self.advance);
     }
@@ -433,26 +474,69 @@ impl<F: FftFloat> PhaseVocoder<F> {
         }
     }
 
-    /// Writes `count` output frames from `at`, reading the finished output at the step: a
-    /// cubic read between its frames, and the frame itself on a whole position.
+    /// The step a read at hop `index` of the finished output moves by: the one it was made at,
+    /// or the one in force for a hop not yet made.
+    fn step_of(&self, index: usize) -> ReadRate {
+        if index < self.cursor.finished / self.geometry.hop().get() {
+            self.steps[index % self.steps.len()]
+        } else {
+            self.step
+        }
+    }
+
+    /// Moves a read from `from` through `count` output frames, calling `each(position, step,
+    /// frames, offset)` for every run of frames in one hop of the finished output, whose first
+    /// frame reads at `position` and the rest `step` apart. Returns where the read ends.
+    fn walk(
+        &self,
+        from: SamplePosition,
+        count: usize,
+        mut each: impl FnMut(SamplePosition, ReadRate, usize, usize),
+    ) -> SamplePosition {
+        let hop = self.geometry.hop().get();
+        let mut position = from;
+        let mut done = 0;
+        while done < count {
+            let index = libm::floor(position.get()) as usize / hop;
+            let step = self.step_of(index);
+            let to_edge = ((index + 1) * hop) as f64 - position.get();
+            let run = (libm::ceil(to_edge / step.get()) as usize).clamp(1, count - done);
+            each(position, step, run, done);
+            position += step.advance(Samples::new(run));
+            done += run;
+        }
+        position
+    }
+
+    /// The finished frames a read of `n` output frames from `from` needs: through the last
+    /// read position's cubic neighbours.
+    fn finished_for(&self, from: SamplePosition, n: usize) -> usize {
+        let last = self.walk(from, n - 1, |_, _, _, _| {});
+        libm::floor(last.get()) as usize + 3
+    }
+
+    /// Writes `count` output frames from `at`, reading the finished output at the step each hop
+    /// was made at: a cubic read between its frames, and the frame itself on a whole position.
     fn read_output(&mut self, output: &mut PlanesMut<'_, '_, F>, at: usize, count: usize) {
         let mask = self.finished[0].len() - 1;
-        let start = self.cursor.read;
-        for (c, ring) in self.finished.iter().enumerate().take(output.channels()) {
-            let mut plane = output.plane_mut(c);
-            let out = &mut plane.samples_mut()[at..at + count];
-            for (i, y) in out.iter_mut().enumerate() {
-                let position = start + self.step.advance(Samples::new(i));
-                let whole = libm::floor(position.get()) as usize;
-                let t = position.fract();
-                let tap = |offset: usize| ring[whole.wrapping_add(offset).wrapping_sub(1) & mask];
-                *y = if t == 0.0 {
-                    tap(1)
-                } else {
-                    cubic_hermite(tap(0), tap(1), tap(2), tap(3), F::from_design(t))
-                };
+        let end = self.walk(self.cursor.read, count, |position, step, run, offset| {
+            for (c, ring) in self.finished.iter().enumerate().take(output.channels()) {
+                let mut plane = output.plane_mut(c);
+                let out = &mut plane.samples_mut()[at + offset..at + offset + run];
+                for (i, y) in out.iter_mut().enumerate() {
+                    let position = position + step.advance(Samples::new(i));
+                    let whole = libm::floor(position.get()) as usize;
+                    let t = position.fract();
+                    let tap =
+                        |offset: usize| ring[whole.wrapping_add(offset).wrapping_sub(1) & mask];
+                    *y = if t == 0.0 {
+                        tap(1)
+                    } else {
+                        cubic_hermite(tap(0), tap(1), tap(2), tap(3), F::from_design(t))
+                    };
+                }
             }
-        }
-        self.cursor.read = start + self.step.advance(Samples::new(count));
+        });
+        self.cursor.read = end;
     }
 }
