@@ -5,9 +5,8 @@
 //! or a convolution reverb carrying an impulse response routinely exceeds
 //! 64 MiB. So state travels as chunks of at most
 //! [`STATE_CHUNK_BYTES`]: each frame stays
-//! small, and the *total* is bounded separately by [`MAX_STATE_BYTES`]: every
-//! chunk carries it, so the receiver sizes its buffer once and refuses a total
-//! over the limit before it allocates.
+//! small, and the *total* is bounded separately on reassembly by
+//! [`MAX_STATE_BYTES`].
 //!
 //! Both directions use the same two helpers, because the hazard is symmetric:
 //! the host reassembles what a plugin produced, and the server reassembles what
@@ -42,16 +41,13 @@ pub fn split(data: &[u8]) -> impl Iterator<Item = (u32, bool, &[u8])> {
 /// Accumulates a chunk sequence, refusing a malformed or oversized one.
 ///
 /// Stateful rather than a fold over a collected `Vec` because the whole point
-/// is to stop *before* the bytes are all in memory. The first chunk's `total`
-/// is checked against the limit and reserved in one fallible allocation
-/// ([`Vec::try_reserve_exact`]); no later chunk grows the buffer.
+/// is to stop *before* the bytes are all in memory: collecting first and
+/// checking after would allocate exactly what the limit exists to prevent.
 #[derive(Debug)]
 pub struct Reassembler {
     buf: Vec<u8>,
     next_seq: u32,
     done: bool,
-    /// The `total` the first chunk declared, which every chunk repeats.
-    total: u64,
     /// Ceiling on the reassembled total. A field rather than a direct read of
     /// `MAX_STATE_BYTES` so the refusal path is reachable from a test without
     /// allocating a gigabyte to reach it.
@@ -91,37 +87,13 @@ pub enum ChunkError {
         /// The `seq` of the empty chunk.
         seq: u32,
     },
-    /// The declared total exceeds [`MAX_STATE_BYTES`] (or the reassembler's
-    /// limit): refused on the first chunk, before any allocation.
+    /// The accumulated total exceeded [`MAX_STATE_BYTES`].
     #[error("state is {bytes} bytes, over the {limit}-byte limit")]
     TooLarge {
-        /// The declared total.
+        /// Total after this chunk — what the state would have been.
         bytes: usize,
         /// The limit it exceeded.
         limit: usize,
-    },
-    /// The buffer for the declared total could not be allocated.
-    #[error("no room for a state of {bytes} bytes")]
-    NoRoom {
-        /// The declared total.
-        bytes: usize,
-    },
-    /// A chunk's `total` is not the one the first chunk declared.
-    #[error("state chunk declares a total of {got} bytes where {expected} were declared")]
-    TotalChanged {
-        /// The total the first chunk declared.
-        expected: u64,
-        /// The total this chunk declares.
-        got: u64,
-    },
-    /// The chunks carry more bytes than the declared total, or the last one
-    /// ends short of it.
-    #[error("state chunks carry {got} bytes where {total} were declared")]
-    NotTotal {
-        /// The bytes the chunks carry, up to the one that broke it.
-        got: usize,
-        /// The declared total.
-        total: u64,
     },
 }
 
@@ -136,29 +108,23 @@ impl Reassembler {
             buf: Vec::new(),
             next_seq: 0,
             done: false,
-            total: 0,
             limit,
         }
     }
 
     /// Takes one chunk, returning `Ok(true)` when the sequence is complete.
     ///
+    /// The size check runs against the *projected* total before extending, so
+    /// an over-limit sequence is refused without ever allocating the bytes that
+    /// would have broken it.
+    ///
     /// # Errors
     ///
-    /// [`ChunkError::OutOfOrder`] for a chunk whose `seq` is not the next
-    /// expected one (or that arrives after `last`); [`ChunkError::Empty`] for
-    /// a chunk before `last` with no bytes; [`ChunkError::TooLarge`] and
-    /// [`ChunkError::NoRoom`] on the first chunk, for a total over the limit
-    /// or one that cannot be reserved; [`ChunkError::TotalChanged`] for a
-    /// chunk whose `total` differs from the first's; [`ChunkError::NotTotal`]
-    /// for bytes past the total, or a `last` chunk that ends short of it.
-    pub fn push(
-        &mut self,
-        seq: u32,
-        total: u64,
-        last: bool,
-        bytes: &[u8],
-    ) -> Result<bool, ChunkError> {
+    /// Returns [`ChunkError::OutOfOrder`] for a chunk whose `seq` is not the
+    /// next expected one (or that arrives after `last`),
+    /// [`ChunkError::Empty`] for a chunk before `last` with no bytes, and
+    /// [`ChunkError::TooLarge`] when the total would exceed the limit.
+    pub fn push(&mut self, seq: u32, last: bool, bytes: &[u8]) -> Result<bool, ChunkError> {
         if self.done || seq != self.next_seq {
             return Err(ChunkError::OutOfOrder {
                 got: seq,
@@ -168,29 +134,11 @@ impl Reassembler {
         if bytes.is_empty() && !last {
             return Err(ChunkError::Empty { seq });
         }
-        if seq == 0 {
-            let wanted = usize::try_from(total).unwrap_or(usize::MAX);
-            if wanted > self.limit {
-                return Err(ChunkError::TooLarge {
-                    bytes: wanted,
-                    limit: self.limit,
-                });
-            }
-            self.buf
-                .try_reserve_exact(wanted)
-                .map_err(|_| ChunkError::NoRoom { bytes: wanted })?;
-            self.total = total;
-        } else if total != self.total {
-            return Err(ChunkError::TotalChanged {
-                expected: self.total,
-                got: total,
-            });
-        }
-        let held = self.buf.len().saturating_add(bytes.len());
-        if held as u64 > self.total || (last && held as u64 != self.total) {
-            return Err(ChunkError::NotTotal {
-                got: held,
-                total: self.total,
+        let projected = self.buf.len().saturating_add(bytes.len());
+        if projected > self.limit {
+            return Err(ChunkError::TooLarge {
+                bytes: projected,
+                limit: self.limit,
             });
         }
         self.buf.extend_from_slice(bytes);
@@ -199,8 +147,9 @@ impl Reassembler {
         Ok(last)
     }
 
-    /// The reassembled bytes. Call after [`push`](Self::push) returned
-    /// `Ok(true)`.
+    /// Returns the reassembled state.
+    ///
+    /// Only meaningful once [`push`](Self::push) returned `Ok(true)`.
     #[must_use]
     pub fn into_inner(self) -> Vec<u8> {
         self.buf
@@ -211,18 +160,11 @@ impl Reassembler {
 mod tests {
     use super::*;
 
-    /// A sequence that has `data` as its whole state.
-    fn feed(r: &mut Reassembler, data: &[u8]) -> Result<bool, ChunkError> {
-        let mut done = Ok(false);
-        for (seq, last, bytes) in split(data) {
-            done = r.push(seq, data.len() as u64, last, bytes);
-            done.as_ref()
-                .map_err(|e| format!("{e}"))
-                .expect("well-formed");
-        }
-        done
-    }
-
+    /// An empty state must still terminate its sequence.
+    ///
+    /// The regression this guards is a hang, not a wrong value: `[].chunks(n)`
+    /// yields nothing, so a receiver waiting for `last` would wait out its
+    /// deadline and report a timeout for a plugin that merely had no state.
     #[test]
     fn an_empty_state_is_one_terminating_chunk() {
         let chunks: Vec<_> = split(&[]).collect();
@@ -241,6 +183,11 @@ mod tests {
         assert!(chunks[0].2.is_empty(), "an empty state must carry no bytes");
     }
 
+    /// Split then reassemble is the identity, across the chunk boundary.
+    ///
+    /// Sizes straddle `STATE_CHUNK_BYTES` deliberately: an off-by-one in
+    /// `div_ceil` or in the `end` clamp shows up only at an exact multiple or
+    /// one past it, and a single mid-range size would miss both.
     #[test]
     fn split_then_reassemble_round_trips() {
         for len in [
@@ -253,7 +200,12 @@ mod tests {
         ] {
             let data: Vec<u8> = (0..len).map(|i| (i % 251) as u8).collect();
             let mut r = Reassembler::default();
-            assert_eq!(feed(&mut r, &data), Ok(true), "len {len} never set `last`");
+            let mut finished = false;
+            for (seq, last, bytes) in split(&data) {
+                assert!(!finished, "chunks kept coming after `last` at len {len}");
+                finished = r.push(seq, last, bytes).expect("well-formed sequence");
+            }
+            assert!(finished, "sequence for len {len} never set `last`");
             assert_eq!(
                 r.into_inner(),
                 data,
@@ -266,14 +218,14 @@ mod tests {
     #[test]
     fn a_skipped_chunk_is_refused() {
         let mut r = Reassembler::default();
-        r.push(0, 3, false, b"a").expect("first chunk");
+        r.push(0, false, b"a").expect("first chunk");
         assert_eq!(
-            r.push(2, 3, true, b"c"),
+            r.push(2, true, b"c"),
             Err(ChunkError::OutOfOrder {
                 got: 2,
                 expected: 1
             }),
-            "a skipped chunk was accepted: the plugin would receive a blob \
+            "a skipped chunk was accepted — the plugin would receive a blob \
              with a hole in it and try to parse it"
         );
     }
@@ -281,105 +233,57 @@ mod tests {
     /// A chunk after `last` is refused.
     ///
     /// Distinct from a gap: the sequence numbers are contiguous, so only the
-    /// `done` latch catches it.
+    /// `done` latch catches it. Without that latch a peer could append to a
+    /// state the receiver had already considered complete.
     #[test]
     fn a_chunk_after_last_is_refused() {
         let mut r = Reassembler::default();
-        assert!(r.push(0, 1, true, b"a").expect("first chunk"));
+        assert!(r.push(0, true, b"a").expect("first chunk"));
         assert!(
-            matches!(r.push(1, 1, true, b"b"), Err(ChunkError::OutOfOrder { .. })),
+            matches!(r.push(1, true, b"b"), Err(ChunkError::OutOfOrder { .. })),
             "a chunk after `last` was accepted, extending a completed state"
         );
     }
 
-    /// **A total over the limit is refused on the first chunk, and nothing is
-    /// allocated for it**: the buffer's capacity is what is asserted, as an
-    /// implementation that reserves first and checks after returns the same
-    /// error having already allocated.
+    /// The limit is enforced on the projected total, before the bytes land.
+    ///
+    /// Refusal must happen on the chunk that *would* cross the line, not after
+    /// it has been appended — the whole point of checking a projection is that
+    /// the over-limit allocation never happens. So the assertion is on the
+    /// buffer as much as on the error: an implementation that extends first and
+    /// checks after returns the same `Err` while having already allocated.
     #[test]
-    fn a_total_over_the_limit_is_refused_before_it_is_allocated() {
+    fn an_oversized_sequence_is_refused_before_it_is_allocated() {
         let mut r = Reassembler::with_limit(10);
+        assert!(!r.push(0, false, &[0u8; 8]).expect("under the limit"));
         assert_eq!(
-            r.push(0, 11, false, &[0u8; 4]),
+            r.push(1, true, &[0u8; 3]),
             Err(ChunkError::TooLarge {
                 bytes: 11,
                 limit: 10
             }),
-            "a state declared at 11 bytes was accepted under a 10-byte limit"
+            "a sequence totalling 11 bytes was accepted under a 10-byte limit"
         );
-        assert_eq!(r.buf.capacity(), 0, "the refused total was reserved anyway");
-    }
-
-    /// A total no allocator can give is refused as a value, not an abort:
-    /// `try_reserve_exact` reports it where `Vec::reserve` would end the
-    /// process.
-    #[test]
-    fn a_total_that_cannot_be_reserved_is_refused_not_aborted() {
-        let mut r = Reassembler::with_limit(usize::MAX);
         assert_eq!(
-            r.push(0, isize::MAX as u64, false, b"a"),
-            Err(ChunkError::NoRoom {
-                bytes: isize::MAX as usize
-            })
+            r.buf.len(),
+            8,
+            "the refused chunk was appended anyway — the check runs after the \
+             extend, so the allocation the limit exists to prevent already \
+             happened"
         );
     }
 
-    /// One reservation carries the whole state: later chunks never grow the
-    /// buffer, so the doubling a 1 GiB state would cost is gone.
-    #[test]
-    fn the_first_chunk_reserves_the_whole_total_and_no_chunk_regrows_it() {
-        let data = vec![7u8; STATE_CHUNK_BYTES * 2 + 5];
-        let mut r = Reassembler::default();
-        let mut capacity = None;
-        for (seq, last, bytes) in split(&data) {
-            r.push(seq, data.len() as u64, last, bytes).expect("chunk");
-            let held = *capacity.get_or_insert(r.buf.capacity());
-            assert_eq!(r.buf.capacity(), held, "chunk {seq} regrew the buffer");
-        }
-        assert_eq!(capacity, Some(data.len()), "reserved exactly the total");
-    }
-
-    /// A chunk that declares another total than the first is refused.
-    #[test]
-    fn a_changed_total_is_refused() {
-        let mut r = Reassembler::default();
-        r.push(0, 4, false, b"ab").expect("first chunk");
-        assert_eq!(
-            r.push(1, 9, true, b"cd"),
-            Err(ChunkError::TotalChanged {
-                expected: 4,
-                got: 9
-            })
-        );
-    }
-
-    /// The bytes must add up to the declared total: a `last` chunk that ends
-    /// short, and one that runs past it, are both refused.
-    #[test]
-    fn chunks_that_do_not_add_up_to_the_total_are_refused() {
-        let mut short = Reassembler::default();
-        short.push(0, 6, false, b"ab").expect("first chunk");
-        assert_eq!(
-            short.push(1, 6, true, b"cd"),
-            Err(ChunkError::NotTotal { got: 4, total: 6 })
-        );
-
-        let mut long = Reassembler::default();
-        long.push(0, 3, false, b"ab").expect("first chunk");
-        assert_eq!(
-            long.push(1, 3, false, b"cd"),
-            Err(ChunkError::NotTotal { got: 4, total: 3 })
-        );
-    }
-
-    /// A state of exactly the limit is accepted: pairs with the refusal above
-    /// so the comparison is pinned in both directions.
+    /// A chunk that fits exactly is accepted.
+    ///
+    /// Pairs with the test above so the comparison is pinned in both
+    /// directions: `>` and `>=` both reject the oversized case, and only this
+    /// catches the one that also rejects a legitimate state of exactly the
+    /// maximum size.
     #[test]
     fn a_sequence_of_exactly_the_limit_is_accepted() {
         let mut r = Reassembler::with_limit(10);
         assert!(
-            r.push(0, 10, true, &[0u8; 10])
-                .expect("exactly at the limit"),
+            r.push(0, true, &[0u8; 10]).expect("exactly at the limit"),
             "a state of exactly the limit must complete"
         );
         assert_eq!(r.into_inner().len(), 10);
@@ -391,10 +295,10 @@ mod tests {
     #[test]
     fn an_empty_chunk_before_the_last_is_refused() {
         let mut r = Reassembler::default();
-        r.push(0, 1, false, b"a").expect("first chunk");
-        assert_eq!(r.push(1, 1, false, b""), Err(ChunkError::Empty { seq: 1 }));
+        r.push(0, false, b"a").expect("first chunk");
+        assert_eq!(r.push(1, false, b""), Err(ChunkError::Empty { seq: 1 }));
 
         let mut empty = Reassembler::default();
-        assert_eq!(empty.push(0, 0, true, b""), Ok(true), "the empty state");
+        assert_eq!(empty.push(0, true, b""), Ok(true), "the empty state");
     }
 }

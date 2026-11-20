@@ -2,13 +2,13 @@
 //! local socket (Unix domain socket on Unix, named pipe on Windows).
 //!
 //! Wire: `[u32 big-endian length][postcard payload]` both directions, with the body capped at
-//! the message type's own cap ([`Framed::CAP`]) — the length arrives from the peer, so it
+//! [`MAX_FRAME_BYTES`](crate::MAX_FRAME_BYTES) — the length arrives from the peer, so it
 //! is checked before it is believed, in both `send` and `recv`. EOF at either end surfaces as
 //! [`BridgeError::ProcessCrashed`], and so does a length prefix over the cap: a peer that cannot
 //! frame has desynchronised the stream, and there is no resynchronisation point to recover to.
 //!
 //! **Two independent bounds, because they answer different questions.**
-//! the cap bounds how *much* a peer can make the host
+//! [`MAX_FRAME_BYTES`](crate::MAX_FRAME_BYTES) bounds how *much* a peer can make the host
 //! allocate; the deadline in [`read_exact_by`] bounds how *long* a peer can make it wait. A size
 //! cap alone does not bound time — an under-cap frame delivered one byte per receive timeout is
 //! still unbounded, because `SO_RCVTIMEO` restarts on every syscall while `read_exact` loops. Both
@@ -151,7 +151,7 @@ const POLL_INTERVAL: Duration = Duration::from_millis(250);
 /// Measured on a `UnixStream` pair: a 300 ms receive timeout survived 2.3 s of
 /// one-byte-per-200 ms dribble, and the ceiling scales with the frame size, so
 /// a legitimate under-cap frame is as exploitable as an over-cap one. That is
-/// why the frame cap does not close this on its own.
+/// why [`MAX_FRAME_BYTES`](crate::MAX_FRAME_BYTES) does not close this on its own.
 ///
 /// The deadline is **total**, not per-syscall, and progress does not extend it.
 /// That is the whole point: a peer controls the pacing but not the wall clock.
@@ -333,7 +333,7 @@ fn recv_by<T: Framed>(
         // talking to, and the stream is desynchronised. `pump` turns it into
         // `crash()`. A send the host itself declines is **not** a crash; see
         // [`send`].
-        let len = decode_prefix(partial.prefix, T::CAP).map_err(|e| {
+        let len = decode_prefix(partial.prefix).map_err(|e| {
             tracing::warn!("plugin server sent a {e}; treating it as a crash");
             BridgeError::ProcessCrashed
         })?;
@@ -830,7 +830,6 @@ mod tests {
                     connect_within(&connect_path, Duration::from_millis(200)).expect("connect");
                 let chunk = ControlRequest::LoadStateChunk {
                     seq: 0,
-                    total: 1 << 20,
                     last: None,
                     bytes: vec![0u8; 1 << 20],
                 };

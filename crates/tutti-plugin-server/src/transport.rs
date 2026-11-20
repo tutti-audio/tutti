@@ -10,26 +10,26 @@ use std::marker::PhantomData;
 use std::time::Duration;
 use tutti_platform::Instant;
 use tutti_plugin_ipc::{
-    AUDIO_REPLY_FRAME_BYTES, AUDIO_REQUEST_FRAME_BYTES, AudioReply, AudioRequest, ControlFrame,
-    ControlRequest, FrameBuf, Framed, read_frame, write_frame,
+    AudioReply, AudioRequest, ControlFrame, ControlRequest, FrameBuf, Framed, MAX_FRAME_BYTES,
+    read_frame, write_frame,
 };
-use tutti_plugin_types::{BridgeResult, Deadline};
+use tutti_plugin_types::{BridgeResult, Deadline, MIDI_STACK_CAPACITY};
 
 use crate::main_loop::Bell;
 use crate::main_loop::{Listener as PlatformListener, Stream as PlatformStream};
 
-/// The longest request the audio connection takes: the protocol's own cap for
-/// a block's request ([`AUDIO_REQUEST_FRAME_BYTES`]). A block's request carries
+/// The longest request the audio connection takes: whatever the protocol
+/// allows ([`MAX_FRAME_BYTES`]). A block's request carries
 /// automation at the host's point budget for the activated block and queue
 /// count, which is megabytes at a large block, so the buffer holds the whole
 /// bound rather than a guess. The memory is zeroed pages the OS maps on first
 /// touch: a connection that never carries a large block never makes them
 /// resident.
-const AUDIO_REQUEST_BYTES: usize = AUDIO_REQUEST_FRAME_BYTES;
+const AUDIO_REQUEST_BYTES: usize = MAX_FRAME_BYTES;
 
 /// The longest reply the audio connection sends, in bytes: a block's reply
 /// with its MIDI at the cap, each event at the most its varints take.
-pub(crate) const AUDIO_REPLY_BYTES: usize = AUDIO_REPLY_FRAME_BYTES;
+pub(crate) const AUDIO_REPLY_BYTES: usize = MIDI_STACK_CAPACITY * 32 + 256;
 
 /// The audio connection's transport: blocks in, block replies out.
 pub(crate) type AudioTransport = dyn Transport<AudioRequest, AudioReply>;
@@ -175,7 +175,7 @@ impl SocketTransport<AudioRequest, AudioReply> {
 impl<In: Framed, Out: Framed> Transport<In, Out> for SocketTransport<In, Out> {
     fn recv(&mut self) -> BridgeResult<In> {
         // The frame is bounded before it is allocated (see
-        // [`CONTROL_FRAME_BYTES`](tutti_plugin_ipc::CONTROL_FRAME_BYTES)). The server is the more exposed end: it loads
+        // [`MAX_FRAME_BYTES`](tutti_plugin_ipc::MAX_FRAME_BYTES)). The server is the more exposed end: it loads
         // untrusted plugin binaries, and one that corrupts its memory could
         // otherwise turn a bad length into a 4 GiB allocation.
         //
@@ -280,7 +280,7 @@ mod recv_tests {
     use std::io::Write;
     use std::os::fd::OwnedFd;
     use std::os::unix::net::UnixStream;
-    use tutti_plugin_ipc::{CONTROL_FRAME_BYTES, ControlRequest};
+    use tutti_plugin_ipc::{ControlRequest, MAX_FRAME_BYTES};
     use tutti_plugin_types::BridgeError;
 
     /// A length prefix over the cap is a framing violation by the host, not
@@ -296,10 +296,10 @@ mod recv_tests {
             .expect("read timeout");
         let mut transport: SocketTransport<ControlRequest, ControlFrame> =
             SocketTransport::new(PlatformStream::from(OwnedFd::from(server)));
-        let len = u32::try_from(CONTROL_FRAME_BYTES + 1).expect("the cap fits a u32 prefix");
+        let len = u32::try_from(MAX_FRAME_BYTES + 1).expect("the cap fits a u32 prefix");
         host.write_all(&len.to_be_bytes()).expect("write prefix");
         match transport.recv() {
-            Err(BridgeError::FrameTooLarge(e)) => assert_eq!(e.len, CONTROL_FRAME_BYTES + 1),
+            Err(BridgeError::FrameTooLarge(e)) => assert_eq!(e.len, MAX_FRAME_BYTES + 1),
             other => panic!("expected FrameTooLarge, got {other:?}"),
         }
     }

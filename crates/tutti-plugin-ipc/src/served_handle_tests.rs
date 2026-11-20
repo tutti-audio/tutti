@@ -492,7 +492,6 @@ fn a_tail_change_reaches_the_listener() {
 fn handle_save_state_roundtrip() {
     let (handle, _bridge_handle, _server_thread) = handle_with_mock_server(|msg| match msg {
         ControlRequest::SaveState { .. } => Some(ControlReply::StateChunk {
-            total: 4,
             seq: 0,
             last: true,
             bytes: vec![0xDE, 0xAD, 0xBE, 0xEF],

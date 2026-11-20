@@ -1,10 +1,9 @@
-//! The one framing of the lane sockets, shared by the host and the
+//! The one framing of the control socket, shared by the host and the
 //! subprocess.
 //!
 //! A frame is a four-byte big-endian length, then that many bytes of
 //! [postcard](https://docs.rs/postcard), which encode exactly one message.
-//! The length is bounded by the message type's own cap ([`Framed::CAP`], one
-//! per lane and direction) on both ends: a sender refuses
+//! The length is bounded by [`MAX_FRAME_BYTES`] on both ends: a sender refuses
 //! to emit a frame its peer must reject (and never lets a cast truncate the
 //! prefix, which would desynchronise a stream that has no resynchronisation
 //! point), and a receiver refuses an advertised length before allocating for
@@ -28,45 +27,35 @@ use tutti_plugin_types::{BridgeError, BridgeResult, FrameTooLarge};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
-use super::{AUDIO_REPLY_FRAME_BYTES, AUDIO_REQUEST_FRAME_BYTES, CONTROL_FRAME_BYTES};
+use super::MAX_FRAME_BYTES;
 use super::{AudioReply, AudioRequest, ControlFrame, ControlRequest};
 
-/// A wire type with the longest frame its lane carries it in.
-///
-/// The cap is the type's, so a read or a write of a message cannot be given
-/// another lane's: the control lane's messages are held to
-/// [`CONTROL_FRAME_BYTES`] and a block's reply to [`AUDIO_REPLY_FRAME_BYTES`].
-pub trait Framed: Serialize + DeserializeOwned {
-    /// The most body bytes a frame of this type may advertise or carry.
-    const CAP: usize;
-}
+/// A message of one of the connections' wire types: the bound of every read and
+/// write of a frame, so a function over frames takes only what a connection
+/// carries.
+pub trait Framed: Serialize + DeserializeOwned {}
 
-impl Framed for AudioRequest {
-    const CAP: usize = AUDIO_REQUEST_FRAME_BYTES;
-}
-impl Framed for AudioReply {
-    const CAP: usize = AUDIO_REPLY_FRAME_BYTES;
-}
-impl Framed for ControlRequest {
-    const CAP: usize = CONTROL_FRAME_BYTES;
-}
-impl Framed for ControlFrame {
-    const CAP: usize = CONTROL_FRAME_BYTES;
-}
+impl Framed for AudioRequest {}
+impl Framed for AudioReply {}
+impl Framed for ControlRequest {}
+impl Framed for ControlFrame {}
 
-/// The error for a frame of `len` bytes, over `cap`.
-const fn too_large(len: usize, cap: usize) -> FrameTooLarge {
-    FrameTooLarge { len, limit: cap }
+/// The error for a frame of `len` bytes, over [`MAX_FRAME_BYTES`].
+const fn too_large(len: usize) -> FrameTooLarge {
+    FrameTooLarge {
+        len,
+        limit: MAX_FRAME_BYTES,
+    }
 }
 
 /// The length prefix for a body of `body_len` bytes.
 ///
 /// # Errors
 ///
-/// [`FrameTooLarge`] when `body_len` is over `cap`.
-pub fn encode_prefix(body_len: usize, cap: usize) -> std::result::Result<[u8; 4], FrameTooLarge> {
-    if body_len > cap {
-        return Err(too_large(body_len, cap));
+/// [`FrameTooLarge`] when `body_len` is over [`MAX_FRAME_BYTES`].
+pub fn encode_prefix(body_len: usize) -> std::result::Result<[u8; 4], FrameTooLarge> {
+    if body_len > MAX_FRAME_BYTES {
+        return Err(too_large(body_len));
     }
     // The cap is checked at compile time to fit a `u32` (the `const _` below).
     Ok((body_len as u32).to_be_bytes())
@@ -76,12 +65,12 @@ pub fn encode_prefix(body_len: usize, cap: usize) -> std::result::Result<[u8; 4]
 ///
 /// # Errors
 ///
-/// [`FrameTooLarge`] when it is over `cap`; no body is to be
+/// [`FrameTooLarge`] when it is over [`MAX_FRAME_BYTES`]; no body is to be
 /// read or allocated for it.
-pub fn decode_prefix(prefix: [u8; 4], cap: usize) -> std::result::Result<usize, FrameTooLarge> {
+pub fn decode_prefix(prefix: [u8; 4]) -> std::result::Result<usize, FrameTooLarge> {
     let len = u32::from_be_bytes(prefix) as usize;
-    if len > cap {
-        return Err(too_large(len, cap));
+    if len > MAX_FRAME_BYTES {
+        return Err(too_large(len));
     }
     Ok(len)
 }
@@ -142,7 +131,7 @@ pub fn write_frame<W: Write, T: Framed>(w: &mut W, msg: &T) -> BridgeResult<()> 
             .map_err(codec)
             .and_then(|out| {
                 *frame = out;
-                Ok(encode_prefix(frame.len() - 4, T::CAP)?)
+                Ok(encode_prefix(frame.len() - 4)?)
             })
             .and_then(|prefix| {
                 frame[..4].copy_from_slice(&prefix);
@@ -165,7 +154,7 @@ pub fn write_frame<W: Write, T: Framed>(w: &mut W, msg: &T) -> BridgeResult<()> 
 pub fn read_frame<R: Read, T: Framed>(r: &mut R) -> BridgeResult<T> {
     let mut prefix = [0u8; 4];
     r.read_exact(&mut prefix)?;
-    let len = decode_prefix(prefix, T::CAP)?;
+    let len = decode_prefix(prefix)?;
     IN.with_borrow_mut(|body| {
         body.clear();
         body.resize(len, 0);
@@ -205,13 +194,13 @@ pub struct FrameBuf {
 
 impl FrameBuf {
     /// Buffers for inbound bodies of up to `inbound` bytes and outbound
-    /// bodies of up to `outbound`; a message type's own [`Framed::CAP`] still
-    /// bounds each frame. Allocates: build it off the audio thread.
+    /// bodies of up to `outbound`, each at most [`MAX_FRAME_BYTES`], the most
+    /// a frame may carry. Allocates: build it off the audio thread.
     #[must_use]
     pub fn new(inbound: usize, outbound: usize) -> Self {
         Self {
-            inbound: vec![0; inbound].into_boxed_slice(),
-            outbound: vec![0; outbound + PREFIX_BYTES].into_boxed_slice(),
+            inbound: vec![0; inbound.min(MAX_FRAME_BYTES)].into_boxed_slice(),
+            outbound: vec![0; outbound.min(MAX_FRAME_BYTES) + PREFIX_BYTES].into_boxed_slice(),
         }
     }
 
@@ -220,13 +209,13 @@ impl FrameBuf {
     /// # Errors
     ///
     /// An I/O error on EOF or a short read; `FrameTooLarge` for an advertised
-    /// length over the inbound capacity (or the type's [`Framed::CAP`]), before any
+    /// length over the inbound capacity (or [`MAX_FRAME_BYTES`]), before any
     /// body is read; a codec error for a body that does not decode as exactly
     /// one message.
     pub fn read<R: Read, T: Framed>(&mut self, r: &mut R) -> BridgeResult<T> {
         let mut prefix = [0u8; PREFIX_BYTES];
         r.read_exact(&mut prefix)?;
-        let len = decode_prefix(prefix, T::CAP)?;
+        let len = decode_prefix(prefix)?;
         if len > self.inbound.len() {
             return Err(FrameTooLarge {
                 len,
@@ -248,7 +237,7 @@ impl FrameBuf {
     pub fn write<W: Write, T: Framed>(&mut self, w: &mut W, msg: &T) -> BridgeResult<()> {
         let (prefix, body) = self.outbound.split_at_mut(PREFIX_BYTES);
         let len = postcard::to_slice(msg, body).map_err(codec)?.len();
-        prefix.copy_from_slice(&encode_prefix(len, T::CAP)?);
+        prefix.copy_from_slice(&encode_prefix(len)?);
         w.write_all(&self.outbound[..PREFIX_BYTES + len])?;
         Ok(w.flush()?)
     }
@@ -257,28 +246,36 @@ impl FrameBuf {
 /// The bytes of a frame's length prefix.
 const PREFIX_BYTES: usize = 4;
 
-/// The bounds the lane caps have to sit between, checked at compile time.
+/// The two bounds `MAX_FRAME_BYTES` has to sit between, checked at compile time.
 ///
-/// A `const` block rather than a `#[test]`: every operand is a constant, so a
-/// bad cap fails the build rather than one test binary.
+/// A `const` block rather than a `#[test]`: both operands are constants, so
+/// there is nothing to observe at runtime that the compiler cannot settle
+/// first, and a bad cap should fail the build rather than one test binary.
+/// (Clippy says the same thing via `assertions_on_constants`.)
 const _: () = {
     // `encode_prefix` writes `body_len as u32`. That cast is only safe because
-    // the guard above it rejects everything larger. The audio request cap is
-    // the largest of the three.
+    // the guard above it rejects everything larger, so this asserts the premise the
+    // cast depends on. Raise the constant past `u32::MAX` and the guard stops
+    // covering the truncation it was written to prevent — silently, since the
+    // cast itself never fails.
     assert!(
-        CONTROL_FRAME_BYTES <= AUDIO_REQUEST_FRAME_BYTES
-            && AUDIO_REPLY_FRAME_BYTES <= AUDIO_REQUEST_FRAME_BYTES
-            && AUDIO_REQUEST_FRAME_BYTES <= u32::MAX as usize,
-        "a lane cap exceeds what a u32 length prefix can carry, so \
+        MAX_FRAME_BYTES <= u32::MAX as usize,
+        "MAX_FRAME_BYTES exceeds what a u32 length prefix can carry, so \
          `body_len as u32` in `encode_prefix` can still truncate and desynchronise \
          the stream"
     );
-    // The control cap leaves room for the largest message the control lane
-    // carries: a state chunk of `STATE_CHUNK_BYTES` and its header.
+
+    // The cap must also leave room for the largest message the protocol
+    // defines. The binding case is a plugin state chunk (`LoadState` /
+    // `StateData`), which for a sample-based instrument reaches single-digit
+    // MiB. A cap below that would turn preset loading into a connection
+    // failure — the regression a "tighten it until nothing complains" edit
+    // would cause, and one no test in this crate would catch, since none sends
+    // a realistically large state chunk.
     assert!(
-        CONTROL_FRAME_BYTES >= super::STATE_CHUNK_BYTES + 1024,
-        "the control cap is below a state chunk, so `save_state`/`load_state` would \
-         fail on real plugins"
+        MAX_FRAME_BYTES >= 16 * 1024 * 1024,
+        "MAX_FRAME_BYTES is below the state chunk a sampler can legitimately \
+         produce, so `save_state`/`load_state` would fail on real plugins"
     );
 };
 
@@ -286,18 +283,10 @@ const _: () = {
 mod tests {
     use super::*;
 
-    impl Framed for u8 {
-        const CAP: usize = 64;
-    }
-    impl Framed for u16 {
-        const CAP: usize = 64;
-    }
-    impl Framed for (u32, [u8; 3]) {
-        const CAP: usize = 64;
-    }
-    impl Framed for [u8; 8] {
-        const CAP: usize = 64;
-    }
+    impl Framed for u8 {}
+    impl Framed for u16 {}
+    impl Framed for (u32, [u8; 3]) {}
+    impl Framed for [u8; 8] {}
 
     /// **The frame is a big-endian `u32` length and the postcard body.** Bytes
     /// written out by hand for a `u16` message, so a change of prefix width or
@@ -360,49 +349,31 @@ mod tests {
         }
     }
 
-    /// **Each lane's cap is inclusive on both halves, and a length over it
-    /// names the length and that lane's cap.** The decode side refuses before
-    /// any body is read; the lanes' caps differ, and a length one lane takes
-    /// another refuses.
+    /// **The cap is inclusive on both halves, and a length over it names the
+    /// length.** The decode side refuses before any body is read.
     #[test]
-    fn each_lane_cap_is_inclusive_and_over_it_is_typed() {
-        for cap in [
-            AudioRequest::CAP,
-            AudioReply::CAP,
-            ControlRequest::CAP,
-            ControlFrame::CAP,
-        ] {
-            let at = u32::try_from(cap).unwrap();
-            assert_eq!(decode_prefix(at.to_be_bytes(), cap), Ok(cap));
-            assert_eq!(
-                decode_prefix((at + 1).to_be_bytes(), cap),
-                Err(too_large(cap + 1, cap))
-            );
-            assert_eq!(encode_prefix(cap, cap), Ok(at.to_be_bytes()));
-            assert_eq!(encode_prefix(cap + 1, cap), Err(too_large(cap + 1, cap)));
-        }
+    fn the_cap_is_inclusive_and_over_it_is_typed() {
+        let at = u32::try_from(MAX_FRAME_BYTES).unwrap();
+        assert_eq!(decode_prefix(at.to_be_bytes()), Ok(MAX_FRAME_BYTES));
+        assert_eq!(
+            decode_prefix((at + 1).to_be_bytes()),
+            Err(too_large(MAX_FRAME_BYTES + 1))
+        );
+        assert_eq!(encode_prefix(MAX_FRAME_BYTES), Ok(at.to_be_bytes()));
+        assert_eq!(
+            encode_prefix(MAX_FRAME_BYTES + 1),
+            Err(too_large(MAX_FRAME_BYTES + 1))
+        );
     }
 
-    /// **The caps differ by lane:** a block's request may be megabytes of
-    /// automation, a block's reply is bounded by its MIDI, and the control
-    /// lane holds a state chunk. A reply the audio lane takes at its cap is
-    /// refused one byte over, though the control lane would take it.
+    /// An oversize prefix on a stream is refused with no body present, and the
+    /// error is the connection-failed form carrying the length.
     #[test]
-    fn the_lanes_hold_different_caps() {
-        let over_audio_reply = u32::try_from(AudioReply::CAP + 1).unwrap().to_be_bytes();
-        match read_frame::<_, AudioReply>(&mut over_audio_reply.as_slice()) {
-            Err(BridgeError::FrameTooLarge(e)) => {
-                assert_eq!((e.len, e.limit), (AudioReply::CAP + 1, AudioReply::CAP));
-            }
+    fn read_frame_refuses_an_oversize_prefix_without_a_body() {
+        let prefix = u32::try_from(MAX_FRAME_BYTES + 1).unwrap().to_be_bytes();
+        match read_frame::<_, u16>(&mut prefix.as_slice()) {
+            Err(BridgeError::FrameTooLarge(e)) => assert_eq!(e.len, MAX_FRAME_BYTES + 1),
             other => panic!("expected FrameTooLarge, got {other:?}"),
         }
-        let mut control = over_audio_reply.as_slice();
-        assert!(
-            !matches!(
-                read_frame::<_, ControlFrame>(&mut control),
-                Err(BridgeError::FrameTooLarge(_))
-            ),
-            "a length the control lane's cap holds is not refused for its size"
-        );
     }
 }

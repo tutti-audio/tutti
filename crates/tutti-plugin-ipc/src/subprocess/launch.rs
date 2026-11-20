@@ -434,7 +434,6 @@ fn stage_state(
             stream,
             &ControlRequest::StageStateChunk {
                 seq,
-                total: state.len() as u64,
                 last,
                 bytes: bytes.to_vec(),
             },

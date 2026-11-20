@@ -223,7 +223,7 @@ pub enum ControlRequest {
     /// State is the only message whose size a plugin chooses, and it routinely
     /// exceeds what a single frame may carry — see [`MAX_STATE_BYTES`]. So it
     /// travels as a sequence rather than one `LoadState`, and the receiver
-    /// reassembles. Every frame stays under [`CONTROL_FRAME_BYTES`], so the
+    /// reassembles. Every frame stays under [`MAX_FRAME_BYTES`], so the
     /// allocation and deadline bounds on the wire are untouched by a large
     /// state.
     ///
@@ -232,14 +232,10 @@ pub enum ControlRequest {
     /// hand the plugin a corrupt blob it would then try to parse.
     ///
     /// [`MAX_STATE_BYTES`]: tutti_plugin_types::MAX_STATE_BYTES
-    /// [`CONTROL_FRAME_BYTES`]: crate::CONTROL_FRAME_BYTES
+    /// [`MAX_FRAME_BYTES`]: crate::MAX_FRAME_BYTES
     LoadStateChunk {
         /// Position in the sequence, starting at 0 and incrementing by one.
         seq: u32,
-        /// The length in bytes of the whole state, the same in every chunk: the
-        /// receiver sizes its buffer once from it, and refuses a total over its
-        /// limit before it allocates.
-        total: u64,
         /// `Some` on the final chunk, naming what the whole state is restored
         /// for, and `None` on every other: the sequence names its use once. A
         /// one-chunk state is `Some` on `seq` 0.
@@ -317,10 +313,6 @@ pub enum ControlRequest {
     StageStateChunk {
         /// Position in the sequence, starting at 0 and incrementing by one.
         seq: u32,
-        /// The length in bytes of the whole state, the same in every chunk: the
-        /// receiver sizes its buffer once from it, and refuses a total over its
-        /// limit before it allocates.
-        total: u64,
         /// Whether this is the final chunk.
         last: bool,
         /// Opaque, format-defined bytes. Never interpret them host-side.
@@ -437,10 +429,6 @@ pub enum ControlReply {
     StateChunk {
         /// Position in the sequence, starting at 0 and incrementing by one.
         seq: u32,
-        /// The length in bytes of the whole state, the same in every chunk: the
-        /// receiver sizes its buffer once from it, and refuses a total over its
-        /// limit before it allocates.
-        total: u64,
         /// Whether this is the final chunk.
         last: bool,
         /// Opaque, format-defined bytes. Never interpret them host-side.
