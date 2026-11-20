@@ -6,7 +6,7 @@
 //! read back from the code under test.
 
 use crate::common::{self, metrical, sequences};
-use crate::common::{ToBytes, read_bytes};
+use crate::common::{encoded, read_bytes};
 use crate::support::{Division, RawEvent, build_smf};
 use std::sync::Arc;
 
@@ -450,8 +450,8 @@ fn an_eight_bit_divided_message_and_an_unknown_packet_are_listed() {
         MidiChannel::FIRST.into(),
         Voice2::ChannelPressure(tutti_ump::ControlValue::MIN),
     );
-    let clip = read_bytes(
-        MidiFile::clip(
+    let clip = read_bytes(encoded(
+        &MidiFile::clip(
             DIVISION,
             Track::new()
                 .push(Tick(0), FileEvent::Unknown(tutti_ump::Unknown(reserved)))
@@ -459,9 +459,8 @@ fn an_eight_bit_divided_message_and_an_unknown_packet_are_listed() {
                 .push(Tick(0), known)
                 .unwrap(),
         )
-        .unwrap()
-        .to_bytes(),
-    )
+        .unwrap(),
+    ))
     .unwrap();
     let timeline = metrical(&clip).timeline();
     assert_eq!(timeline.packets.len(), 1);
@@ -537,7 +536,7 @@ fn a_refused_track_list_names_the_rule_and_where() {
 
 // ---- bytes in and out ------------------------------------------------------
 
-/// A byte slice reads back the file `to_bytes` gives.
+/// A byte slice reads back the file `write` gives.
 #[test]
 fn a_file_round_trips_through_a_slice() {
     let f = file(vec![
@@ -551,7 +550,7 @@ fn a_file_round_trips_through_a_slice() {
                 U7::of(100),
             ),
     ]);
-    let out = f.to_bytes();
+    let out = encoded(&f);
     assert_eq!(read_bytes(&out).unwrap(), f);
     // Bytes of neither container are refused.
     assert!(matches!(

@@ -8,7 +8,7 @@
 //! reading of the bytes, never on the bytes.
 
 use crate::common::{self, metrical, sequences, track, unspecified};
-use crate::common::{ToBytes, read_bytes};
+use crate::common::{encoded, read_bytes};
 use crate::support::{Division, RawEvent, build_smf};
 use tutti_fixtures::{RangeContract, check_range_contract};
 
@@ -222,7 +222,7 @@ fn every_event_kind_survives_a_read_and_a_write() {
         assert_eq!(at(23).1, FileEvent::Escape(vec![1, 2, 3].into()));
         assert_eq!(at(24).0, Tick(20 + u64::from(BEAT)));
 
-        let written = file.to_bytes();
+        let written = encoded(&file);
         // SMF 1.0 section 2.1: the header's format word, after the chunk type
         // "MThd" and the length 6.
         assert_eq!(&written[8..10], &format.to_be_bytes());
@@ -251,7 +251,7 @@ fn the_end_of_a_track_is_kept() {
         metrical(&file).beat_at(metrical(&file).end()),
         Beat::new(4.0)
     );
-    assert_eq!(read(&file.to_bytes()).tracks()[0].end(), Tick(1920));
+    assert_eq!(read(&encoded(&file)).tracks()[0].end(), Tick(1920));
 }
 
 /// A delta on a non-note event advances the clock: the note after a SysEx a
@@ -294,7 +294,7 @@ fn format_2_keeps_its_sequences_apart() {
             ],
         ],
     ));
-    assert_eq!(&file.to_bytes()[8..10], &[0, 2]);
+    assert_eq!(&encoded(&file)[8..10], &[0, 2]);
     assert!(
         file.timebase().metrical().is_none(),
         "no one timeline to ask"
@@ -458,7 +458,7 @@ fn the_tempo_map_follows_the_file() {
     assert_eq!(metrical(&file).beat_at(Tick(480)), Beat::new(1.0));
     // And it comes back out: the tempo events are events of the track.
     assert_eq!(
-        metrical(&read(&file.to_bytes())).seconds_at(beats(8.0)),
+        metrical(&read(&encoded(&file))).seconds_at(beats(8.0)),
         metrical(&file).seconds_at(beats(8.0))
     );
 }
@@ -562,7 +562,7 @@ fn a_zero_tempo_is_not_a_tempo_and_an_absurd_one_is_read_as_written() {
     assert_eq!(points[1].tempo, Bpm::of(60_000_000.0));
     assert!((points[2].tempo.get() - 60_000_000.0 / 16_777_215.0).abs() < 1e-12);
     // The zero is written back.
-    assert_eq!(read(&file.to_bytes()), file);
+    assert_eq!(read(&encoded(&file)), file);
 }
 
 /// Writing a tempo above the wire's range writes the fastest quarter, 1 us,
@@ -836,7 +836,7 @@ fn a_velocity_zero_note_on_closes_the_note() {
 fn a_velocity_zero_note_on_stays_a_note_on_in_the_file() {
     let file = read(&smf(0, &[vec![RawEvent::note_on(0, 0, 60, 0)]]));
     assert_eq!(unspecified(&file, 0)[0].1, on(0, 60, 0));
-    assert_eq!(read(&file.to_bytes()), file);
+    assert_eq!(read(&encoded(&file)), file);
 }
 
 // ---- building a file -----------------------------------------------------
@@ -859,7 +859,7 @@ fn the_writer_frames_a_file_as_the_spec_bytes() {
     )
     .unwrap();
     assert_eq!(
-        file.to_bytes(),
+        encoded(&file),
         [
             // MThd, length 6, format 1, two tracks, 480 ticks per quarter.
             0x4D, 0x54, 0x68, 0x64, 0, 0, 0, 6, 0, 1, 0, 2, 0x01, 0xE0, //
@@ -936,7 +936,7 @@ fn an_other_meta_event_of_every_allowed_kind_writes_and_reads_back_equal() {
         })
         .collect();
     let file = crate::common::format0(SMF_DIVISION, events.into_iter().collect()).unwrap();
-    assert_eq!(read(&file.to_bytes()), file);
+    assert_eq!(read(&encoded(&file)), file);
 }
 
 /// What an SMF cannot hold is refused rather than dropped on write: a packet,
@@ -986,7 +986,7 @@ fn an_event_longer_than_28_bits_is_too_large() {
 fn the_widest_delta_round_trips() {
     let file =
         crate::common::format0(SMF_DIVISION, track(vec![(0x0FFF_FFFF, on(0, 60, 1))])).unwrap();
-    assert_eq!(read(&file.to_bytes()), file);
+    assert_eq!(read(&encoded(&file)), file);
 }
 
 /// A file written to a path reads back from it, and a path that is not there

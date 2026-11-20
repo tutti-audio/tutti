@@ -9,7 +9,7 @@
 //! packets the conversion makes survive them.
 
 use crate::common::{self, metrical, note, track};
-use crate::common::{ToBytes, read_bytes};
+use crate::common::{encoded, read_bytes};
 use crate::support::{Division, RawEvent, build_smf};
 use core::num::NonZeroU8;
 use tutti_midi_file::{
@@ -270,7 +270,7 @@ fn the_first_set_tempo_has_the_delta_clockstamp_of_start_of_clip() {
         ),
         (480, note(0, 60)),
     ]);
-    let bytes = metrical(&smf).to_clip().unwrap().clip.to_bytes();
+    let bytes = encoded(&metrical(&smf).to_clip().unwrap().clip);
     let words: Vec<u32> = bytes[8..]
         .as_chunks::<4>()
         .0
@@ -831,7 +831,7 @@ fn the_clip_round_trips_through_its_bytes() {
     )
     .unwrap();
     let clip = metrical(&smf).to_clip().unwrap().clip;
-    let again = read_bytes(clip.to_bytes()).unwrap();
+    let again = read_bytes(encoded(&clip)).unwrap();
     assert_eq!(again, clip);
 }
 
@@ -1077,7 +1077,7 @@ fn a_zero_tempo_is_dropped_and_is_not_the_first_tempo() {
 fn a_tempo_that_snaps_to_tick_zero_is_the_only_one_there() {
     let smf = format0(vec![(5, tempo_event(1_000_000)), (50, note(0, 60))]);
     let clip = metrical(&smf).to_clip().unwrap().clip;
-    let again = read_bytes(clip.to_bytes()).unwrap();
+    let again = read_bytes(encoded(&clip)).unwrap();
     assert_eq!(again, clip);
     assert_eq!(
         flex_events(&again, is_tempo),
@@ -1091,7 +1091,7 @@ fn a_tempo_that_snaps_to_tick_zero_is_the_only_one_there() {
 fn a_signature_that_snaps_to_tick_zero_is_the_only_one_there() {
     let smf = format0(vec![(5, signature_meta(3, 2)), (50, note(0, 60))]);
     let clip = metrical(&smf).to_clip().unwrap().clip;
-    let again = read_bytes(clip.to_bytes()).unwrap();
+    let again = read_bytes(encoded(&clip)).unwrap();
     assert_eq!(again, clip);
     let [sig, _] = signature_events(3, 2, 8, 24);
     assert_eq!(flex_events(&again, is_signature), [(0, sig)]);

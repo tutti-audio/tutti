@@ -3,7 +3,7 @@
 //! (`support`, which shares no code with the crate).
 
 use crate::common::{self, metrical, note, track, unspecified, without_defaults};
-use crate::common::{ToBytes, read_bytes};
+use crate::common::{encoded, read_bytes};
 use crate::support::{Division, RawEvent, build_smf};
 use tutti_midi_file::{
     DropReason, FileEvent, Meta, MicrosPerQuarter, MidiFile, ReadError, SmfDivision, SmfFormat,
@@ -94,8 +94,8 @@ fn a_quantity_writes_to_its_bytes() {
                 }),
             )]),
         )
-        .unwrap()
-        .to_bytes();
+        .unwrap();
+        let written = encoded(&written);
         let written = without_defaults(&written);
         // 14-byte header, 8-byte track header, then the delta.
         assert_eq!(written.get(22..22 + bytes.len()), Some(bytes), "{value:#x}");
@@ -350,7 +350,7 @@ fn a_longer_meta_event_is_written_back_as_it_was() {
         0x00, 0xFF, 0x59, 0x03, 0xFD, 0x01, 0x99, //
         0x00, 0xFF, 0x2F, 0x00,
     ]);
-    let back = read_bytes(&bytes).unwrap().to_bytes();
+    let back = encoded(&read_bytes(&bytes).unwrap());
     assert_eq!(back, bytes);
 }
 
@@ -379,9 +379,8 @@ fn an_end_of_track_that_is_not_last_is_refused() {
 
 fn track_body(events: Vec<(u64, FileEvent)>) -> Vec<u8> {
     let track = track(events);
-    let bytes = crate::common::format0(SMF_DIVISION, track)
-        .unwrap()
-        .to_bytes();
+    let bytes = crate::common::format0(SMF_DIVISION, track).unwrap();
+    let bytes = encoded(&bytes);
     without_defaults(bytes.get(22..).unwrap())
 }
 
@@ -494,7 +493,7 @@ fn a_written_file_reads_back_equal() {
         vec![track, crate::common::track(vec![(0, note(1, 60))])],
     )
     .unwrap();
-    let back = read_bytes(file.to_bytes()).unwrap();
+    let back = read_bytes(encoded(&file)).unwrap();
     assert_eq!(back.tracks(), file.tracks());
     assert_eq!(metrical(&back).ticks_per_quarter(), DIVISION);
 }
@@ -531,7 +530,7 @@ fn a_typed_meta_event_with_data_its_type_does_not_define_is_kept_malformed() {
         };
         assert_eq!((malformed.kind(), malformed.data()), (kind, data));
         // Written back as the file had it, and read as the same.
-        let written = read.to_bytes();
+        let written = encoded(&read);
         let mut event = vec![0xFF, kind, data.len() as u8];
         event.extend_from_slice(data);
         assert!(
@@ -619,7 +618,7 @@ fn every_text_meta_type_reads_and_writes_back() {
             FileEvent::Meta(Meta::text(kind, "x")),
             "{meta_type:#x}"
         );
-        assert_eq!(without_defaults(&read.to_bytes()), bytes, "{meta_type:#x}");
+        assert_eq!(without_defaults(&encoded(&read)), bytes, "{meta_type:#x}");
     }
     for meta_type in [0x02, 0x03] {
         let bytes = file(vec![RawEvent::new(0, vec![0xFF, meta_type, 1, b'x'])]);
@@ -632,7 +631,7 @@ fn every_text_meta_type_reads_and_writes_back() {
             track.name_bytes()
         };
         assert_eq!(field, Some(&b"x"[..]), "{meta_type:#x}");
-        assert_eq!(without_defaults(&read.to_bytes()), bytes, "{meta_type:#x}");
+        assert_eq!(without_defaults(&encoded(&read)), bytes, "{meta_type:#x}");
     }
 }
 
@@ -649,7 +648,7 @@ fn every_format_word_reads_and_writes_back() {
         };
         let bytes = build_smf(word, Division::Metrical(TPQ), &tracks);
         let read = read_bytes(&bytes).unwrap();
-        assert_eq!(read.to_bytes()[8..10], word.to_be_bytes(), "format {word}");
+        assert_eq!(encoded(&read)[8..10], word.to_be_bytes(), "format {word}");
     }
 }
 
@@ -670,9 +669,8 @@ fn each_track_chunk_length_is_the_length_of_its_body() {
         (0x0FFF_FFFF, note(0, 64)),
     ]);
     let plain = track(vec![(0, note(1, 60))]);
-    let bytes = crate::common::format1(SMF_DIVISION, vec![busy, plain])
-        .unwrap()
-        .to_bytes();
+    let bytes = crate::common::format1(SMF_DIVISION, vec![busy, plain]).unwrap();
+    let bytes = encoded(&bytes);
     // The header chunk is 14 bytes; each track chunk is a type, a length, a body.
     let mut at = 14;
     let mut chunks = 0;
@@ -770,7 +768,7 @@ fn the_spec_format_0_example_reads_as_its_figures_and_writes_back_byte_for_byte(
     assert_eq!(events[1], (Tick(0), tempo_500000()));
     let at: Vec<u64> = events.iter().map(|(t, _)| t.0).collect();
     assert_eq!(at, [0, 0, 0, 0, 0, 0, 0, 96, 192, 384, 384, 384, 384]);
-    assert_eq!(file.to_bytes(), EXAMPLE_FORMAT_0);
+    assert_eq!(encoded(&file), EXAMPLE_FORMAT_0);
 }
 
 /// The spec's format 1 example reads as four tracks, the first holding the
@@ -786,7 +784,7 @@ fn the_spec_format_1_example_reads_as_four_tracks_and_writes_back_byte_for_byte(
     assert_eq!(tempo_track.events()[0], (Tick(0), four_four()));
     assert_eq!(tempo_track.events()[1], (Tick(0), tempo_500000()));
     assert_eq!(tempo_track.end(), Tick(384));
-    assert_eq!(file.to_bytes(), EXAMPLE_FORMAT_1);
+    assert_eq!(encoded(&file), EXAMPLE_FORMAT_1);
 }
 
 /// The spec's SysEx examples: the transmitted message `F0 43 12 00 07 F7` is
@@ -808,7 +806,7 @@ fn the_spec_sysex_examples_read_as_their_events_and_write_back() {
             FileEvent::SysEx(common::complete(&[0x43, 0x12, 0x00, 0x07]))
         )]
     );
-    assert_eq!(without_defaults(&read.to_bytes()), whole);
+    assert_eq!(without_defaults(&encoded(&read)), whole);
 
     let packets = raw_track(&[
         0x00, 0xF0, 0x03, 0x43, 0x12, 0x00, //
@@ -834,7 +832,7 @@ fn the_spec_sysex_examples_read_as_their_events_and_write_back() {
             ),
         ]
     );
-    assert_eq!(without_defaults(&read.to_bytes()), packets);
+    assert_eq!(without_defaults(&encoded(&read)), packets);
 }
 
 /// The spec's Time Signature example: 6/8 with a click every three eighth
@@ -858,7 +856,7 @@ fn the_spec_time_signature_example_is_six_eight_with_36_clocks_a_click() {
             extra: Box::default(),
         })
     );
-    assert_eq!(without_defaults(&read.to_bytes()), bytes);
+    assert_eq!(without_defaults(&encoded(&read)), bytes);
 }
 
 /// The spec's Key Signature: `sf` is -7 flats to 7 sharps (negative in two's
@@ -891,11 +889,7 @@ fn a_key_signature_is_seven_flats_to_seven_sharps_and_a_mode() {
                 }),
                 "{sharps} {minor}"
             );
-            assert_eq!(
-                without_defaults(&read.to_bytes()),
-                bytes,
-                "{sharps} {minor}"
-            );
+            assert_eq!(without_defaults(&encoded(&read)), bytes, "{sharps} {minor}");
         }
     }
 }
@@ -954,5 +948,5 @@ fn text_bytes_with_the_high_bit_set_read_and_write_back_unchanged() {
             bytes: Box::new([0xE9, b'a']),
         })
     );
-    assert_eq!(without_defaults(&read.to_bytes()), bytes);
+    assert_eq!(without_defaults(&encoded(&read)), bytes);
 }

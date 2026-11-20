@@ -5,7 +5,7 @@ use std::path::Path;
 
 use tutti_midi_file::{MidiFile, SmfDivision, WriteError};
 
-use crate::common::{ToBytes, track};
+use crate::common::{encoded, track};
 
 fn file(tpq: u16) -> MidiFile {
     crate::common::format0(SmfDivision::per_quarter(tpq), track(vec![])).unwrap()
@@ -26,7 +26,7 @@ fn a_write_to_a_new_path_creates_exactly_the_files_bytes_and_no_temp() {
     let path = dir.path().join("a.mid");
     let f = file(480);
     f.write(&path).unwrap();
-    assert_eq!(std::fs::read(&path).unwrap(), f.to_bytes());
+    assert_eq!(std::fs::read(&path).unwrap(), encoded(&f));
     assert_eq!(entries(dir.path()), ["a.mid"]);
     assert_eq!(MidiFile::read(&path).unwrap(), f);
 }
@@ -56,7 +56,7 @@ fn the_default_write_replaces_the_old_file_with_the_new_bytes_and_leaves_no_temp
     std::fs::write(&path, b"old").unwrap();
     let f = file(96);
     f.write(&path).unwrap();
-    assert_eq!(std::fs::read(&path).unwrap(), f.to_bytes());
+    assert_eq!(std::fs::read(&path).unwrap(), encoded(&f));
     assert_eq!(MidiFile::read(&path).unwrap(), f);
     assert_eq!(entries(dir.path()), ["a.mid"]);
 }
