@@ -5,8 +5,8 @@
 
 use tutti_plugin::catalog::Plugin;
 use tutti_plugin_db::{Hosting, Loadable};
-use tutti_plugin_types::PluginRef;
 use tutti_plugin_types::{IpcError, SampleRate};
+use tutti_plugin_types::{PluginFormat, PluginRef};
 
 const RATE: f64 = 48_000.0;
 
@@ -21,13 +21,13 @@ fn a_vst2_plugin_asked_for_out_of_process_is_refused_at_load() {
     env.set("TUTTI_PLUGIN_SERVER", "/nonexistent/plugin-server");
     for name in ["Synth.vst", "Legacy.dll", "Old.so"] {
         let plugin = Loadable::uncatalogued(PluginRef::file(name)).hosting(Hosting::OutOfProcess);
-        match Plugin::open(
-            None,
+        match Plugin::open_served(
+            &tutti_plugin_ipc::AudioConfig::default(),
             &tutti_fixtures::detached_work(),
             &plugin,
             SampleRate::of(RATE),
         ) {
-            Err(IpcError::NotOutOfProcess { format, .. }) => assert_eq!(format, "VST2"),
+            Err(IpcError::NotOutOfProcess { format, .. }) => assert_eq!(format, PluginFormat::Vst2),
             Err(other) => panic!("{name}: expected NotOutOfProcess, got {other:?}"),
             Ok(_) => panic!("{name}: a VST2 file must not be served"),
         }
@@ -37,6 +37,7 @@ fn a_vst2_plugin_asked_for_out_of_process_is_refused_at_load() {
 #[cfg(feature = "clap")]
 mod clap {
     use super::*;
+    use tutti_plugin::catalog::ResolvedHosting;
 
     fn clap(hosting: Hosting) -> Loadable {
         Loadable::uncatalogued(PluginRef::file(tutti_fixtures::clap_probe())).hosting(hosting)
@@ -54,14 +55,14 @@ mod clap {
     #[test]
     fn auto_serves_a_clap_plugin() {
         let _env = with_server();
-        let plugin = Plugin::open(
-            None,
+        let plugin = Plugin::open_served(
+            &tutti_plugin_ipc::AudioConfig::default(),
             &tutti_fixtures::detached_work(),
             &clap(Hosting::Auto),
             SampleRate::of(RATE),
         )
         .expect("the reference plugin loads through a server");
-        assert_eq!(plugin.hosting(), Hosting::OutOfProcess);
+        assert_eq!(plugin.hosting(), ResolvedHosting::OutOfProcess);
         assert!(plugin.handle().server_pid().is_some());
     }
 
@@ -69,47 +70,34 @@ mod clap {
     #[test]
     fn out_of_process_serves_a_clap_plugin() {
         let _env = with_server();
-        let plugin = Plugin::open(
-            None,
+        let plugin = Plugin::open_served(
+            &tutti_plugin_ipc::AudioConfig::default(),
             &tutti_fixtures::detached_work(),
             &clap(Hosting::OutOfProcess),
             SampleRate::of(RATE),
         )
         .expect("the reference plugin loads through a server");
-        assert_eq!(plugin.hosting(), Hosting::OutOfProcess);
+        assert_eq!(plugin.hosting(), ResolvedHosting::OutOfProcess);
         assert!(plugin.handle().server_pid().is_some());
     }
 
     /// **`InProcess` loads the same plugin in the host's process**: no server
-    /// is looked for (none can be found here), the plugin is the one asked for
-    /// and the load needs the main thread, which a caller without it is told.
+    /// is looked for (none can be found here) and the plugin is the one asked for.
     #[test]
     fn in_process_hosts_a_clap_plugin_here() {
         let mut env = tutti_fixtures::ScopedEnv::new();
         env.set("TUTTI_PLUGIN_SERVER", "/nonexistent/plugin-server");
         let asked = clap(Hosting::InProcess);
 
-        match Plugin::open(
-            None,
-            &tutti_fixtures::detached_work(),
-            &asked,
-            SampleRate::of(RATE),
-        ) {
-            Err(IpcError::LoadFailed { reason, .. }) => {
-                assert!(reason.contains("main thread"), "{reason}");
-            }
-            other => panic!("an in-process load without the main thread: {other:?}"),
-        }
-
         let main = tutti_fixtures::main_thread();
         let plugin = Plugin::open(
-            Some(main),
+            main,
             &tutti_fixtures::detached_work(),
             &asked,
             SampleRate::of(RATE),
         )
         .expect("the reference plugin loads in this process");
-        assert_eq!(plugin.hosting(), Hosting::InProcess);
+        assert_eq!(plugin.hosting(), ResolvedHosting::InProcess);
         assert_eq!(plugin.handle().server_pid(), None);
         assert_eq!(
             plugin.plugin().id(),
@@ -127,16 +115,18 @@ mod clap {
 #[cfg(feature = "vst2")]
 #[test]
 fn auto_hosts_a_vst2_plugin_in_process() {
+    use tutti_plugin::catalog::ResolvedHosting;
     // The probe is a plain cdylib; a host meets VST2 under a `.vst` name.
-    let staged = std::env::temp_dir().join("tutti-hosting-auto.vst");
+    let dir = tempfile::tempdir().expect("a scratch directory");
+    let staged = dir.path().join("hosting-auto.vst");
     std::fs::copy(tutti_fixtures::vst2_probe(), &staged).expect("stage the probe as a .vst");
     let main = tutti_fixtures::main_thread();
     let plugin = Plugin::open(
-        Some(main),
+        main,
         &tutti_fixtures::detached_work(),
         &Loadable::uncatalogued(PluginRef::file(&staged)),
         SampleRate::of(RATE),
     )
     .expect("the reference VST2 plugin loads in this process");
-    assert_eq!(plugin.hosting(), Hosting::InProcess);
+    assert_eq!(plugin.hosting(), ResolvedHosting::InProcess);
 }

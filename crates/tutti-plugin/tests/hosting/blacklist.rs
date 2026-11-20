@@ -38,8 +38,8 @@ fn an_uncatalogued_plugin_does_not_consult_a_blacklist() {
     let plugins = catalog_over(&path, PluginFormat::Vst3, None);
     assert!(plugins.is_blacklisted(&path), "fixture should be recorded");
 
-    let err = Plugin::open(
-        None,
+    let err = Plugin::open_served(
+        &tutti_plugin_ipc::AudioConfig::default(),
         &tutti_fixtures::detached_work(),
         &Loadable::uncatalogued(PluginRef::file(&path)),
         SampleRate::SR_48K,
@@ -66,8 +66,8 @@ fn a_plugin_blacklisted_after_its_resolve_is_refused_at_the_load() {
 
     plugins.blacklist(&path, "crashed while scanning");
 
-    let err = Plugin::open(
-        None,
+    let err = Plugin::open_served(
+        &tutti_plugin_ipc::AudioConfig::default(),
         &tutti_fixtures::detached_work(),
         &loadable,
         SampleRate::SR_48K,

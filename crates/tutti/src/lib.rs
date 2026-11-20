@@ -676,7 +676,8 @@ pub mod plugin {
     pub use tutti_plugin_db::ScanBusy;
     pub use tutti_plugin_db::{
         BeforeEpoch, BlacklistedFile, FileFacts, FileFailure, FileRow, FileState, FilesError,
-        Mtime, PluginEntry, ProbeFailure, RowChange, ScanError, ScanProgress,
+        Mtime, PluginEntry, ProbeFailure, RowChange, ScanError, ScanOutcome, ScanProgress,
+        ScannedFile,
     };
     pub use tutti_plugin_db::{BindError, BlacklistView, Loadable, PersistError, Resolved};
     pub use tutti_plugin_host::{BlockLosses, RebindError};

@@ -190,7 +190,7 @@ fn run(
         }
         ProbeOutcome::Failed(refusal) => Err(refusal.into()),
         // `ProbeOutcome` is `#[non_exhaustive]`: an outcome from a newer probe.
-        other => Err(ResultError::Malformed(format!("an unknown outcome: {other:?}")).into()),
+        _ => Err(ResultError::UnknownOutcome.into()),
     }
 }
 

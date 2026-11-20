@@ -74,7 +74,8 @@ pub(crate) fn encode_result(outcome: &ProbeOutcome) -> Vec<u8> {
 /// [`ResultError::Truncated`] if the file is cut short, [`ResultError::BadMagic`]
 /// if it is not a result, [`ResultError::ProtocolMismatch`] if it is a result of
 /// another version, [`ResultError::Malformed`] if the payload does not
-/// decode or is followed by more bytes.
+/// decode, and [`ResultError::TrailingFile`] or [`ResultError::TrailingPayload`] if
+/// bytes follow it.
 ///
 /// # Panics
 ///
@@ -103,14 +104,12 @@ pub(crate) fn decode_result(bytes: &[u8]) -> Result<ProbeOutcome, ResultError> {
         return Err(ResultError::Truncated);
     }
     if (payload.len() as u64) > len {
-        return Err(ResultError::Malformed("bytes after the payload".into()));
+        return Err(ResultError::TrailingFile);
     }
     match postcard::take_from_bytes(payload) {
         Ok((outcome, [])) => Ok(outcome),
-        Ok(_) => Err(ResultError::Malformed(
-            "bytes after the outcome in its payload".into(),
-        )),
-        Err(e) => Err(ResultError::Malformed(e.to_string())),
+        Ok(_) => Err(ResultError::TrailingPayload),
+        Err(e) => Err(ResultError::Malformed(e)),
     }
 }
 
@@ -162,7 +161,7 @@ pub fn read_result(result: &Path) -> Result<Option<ProbeOutcome>, ResultError> {
     match std::fs::read(result) {
         Ok(bytes) => decode_result(&bytes).map(Some),
         Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
-        Err(e) => Err(ResultError::Io(e.to_string())),
+        Err(e) => Err(ResultError::Io(e.kind())),
     }
 }
 
@@ -255,10 +254,7 @@ mod tests {
         );
         let mut extra = encode_result(&described());
         extra.push(0);
-        assert!(matches!(
-            decode_result(&extra),
-            Err(ResultError::Malformed(_))
-        ));
+        assert_eq!(decode_result(&extra), Err(ResultError::TrailingFile));
     }
 
     /// A payload whose declared length covers bytes after the outcome is
@@ -271,10 +267,7 @@ mod tests {
         bytes.push(VERSION);
         bytes.extend_from_slice(&(payload.len() as u64).to_le_bytes());
         bytes.extend_from_slice(&payload);
-        assert!(matches!(
-            decode_result(&bytes),
-            Err(ResultError::Malformed(m)) if m.contains("after the outcome")
-        ));
+        assert_eq!(decode_result(&bytes), Err(ResultError::TrailingPayload));
     }
 
     /// **A result of another format version is a version mismatch, not a bad
