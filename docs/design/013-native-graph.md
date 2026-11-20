@@ -20,7 +20,7 @@ distinguishes anything: the design's title and this file's name keep it,
 but the code and the crate docs say "the graph" (see
 [Rewrite order, by payoff](#rewrite-order-by-payoff)).
 `tutti-core` has since been split: `Transport`, `TransportAudio` and the clocks
-are `tutti-transport`'s, the meters `tutti-metering`'s, `Engine` `tutti-engine`'s,
+are `tutti-timeline`'s, the meters `tutti-metering`'s, `Engine` `tutti-engine`'s,
 and `MAX_ROOT_CHANNELS` `tutti-graph`'s. Where the record below says
 `tutti-core`, it means the crate as it was then.
 The work that does not need the graph is in too: the misreported-latency
@@ -1460,7 +1460,7 @@ Seven gaps had to close before the flip:
    the new one only from then, and `report_tail` is clamped to the ceiling the
    executor holds.
 5. **`TransportClock` cannot sit inside a graph engine**, yet ClickNode and
-   hosts read its `BEAT_PORTS`. `EnvClock` (tutti-transport,
+   hosts read its `BEAT_PORTS`. `EnvClock` (tutti-timeline,
    beside `TransportClock`) is a native `Node` that emits the same
    `BEAT_PORTS` samples from each block's `Env`: per segment, the host's
    beat stepped frame by frame with the clock's own arithmetic
@@ -1650,7 +1650,7 @@ nothing to move):
 | `VbapPannerNode` | tutti-nodes | azimuth, elevation, spread, width (the inner panner holds none; the node passes them in per block) | detaches all | yes | `spatial_param_fork::vbap_forks_from_its_params` |
 | `HrtfBinauralNode` | tutti-nodes | azimuth, elevation, blend | detaches all | yes | `spatial_param_fork::hrtf_forks_from_its_params` |
 | `ClickNode` | tutti-nodes | `Arc<ClickSettings>` (volume, mode, meter); the live transport's play, count-in and record flags | fresh settings at the current values; flags frozen | yes | `click::…::isolate_snapshots_settings_and_session_flags` |
-| `TransportClock` | tutti-transport | pause, seek, loop, writeback, steady time (the tempo is the published map, which the engine lends per block) | `ClockLinks::severed`: a fork always rolls | yes | `clock::…::a_derived_stream_severs_live_position_writeback` |
+| `TransportClock` | tutti-timeline | pause, seek, loop, writeback, steady time (the tempo is the published map, which the engine lends per block) | `ClockLinks::severed`: a fork always rolls | yes | `clock::…::a_derived_stream_severs_live_position_writeback` |
 | `MemorySource` | tutti-sampler | gain; the live timeline (re-pointed by `rebind_offline`) | detaches gain | yes | `isolate_snapshots_gain` |
 | `stretch::Unit` | tutti-sampler | the vocoder bank (stretch and pitch cells are private per clone) | fresh bank | yes | `isolate_snapshots_stretch_and_pitch` |
 | `VoiceNode` | tutti-sampler | command channel, cursor, its voice and stretch | severs all | as its voice | — (controls arrive as commands; `a_render_clone_steals_no_commands`) |
@@ -1855,7 +1855,7 @@ re-rated. `RenderGraph::fork` turns `ForkError::NotForkable { key }` into
 `RenderGraph::reported_latency` / `reported_tail` answer for either
 backend: the graph's from `Plan::total_latency` and `graph_tail` over its
 topology, and they go into `RenderConfig` as before, so trim and tail are
-one code path. Glue in tutti-transport: `RenderClock` gained a **required**
+one code path. Glue in tutti-timeline: `RenderClock` gained a **required**
 `graph_block` (a moving clock that defaulted to "stopped at 0" would desync
 the graph's `Env` from its clip readers silently) and a provided
 `render_graph` — snapshot, `process_with_changes`, advance — which
@@ -5379,8 +5379,8 @@ no node holds a `Timeline`. What that left behind is gone:
   timeline each `rebind_offline` read; no `ForkSource` read it after those
   went (the plugin and VST2 forks and the disk voice match only the
   variant). `ForkMode` lost its lifetime.
-- **`Timeline`, `OfflineClock` and `OfflineTransport` are tutti-transport's
-  again** (`tutti_transport`): tutti-graph no longer names them, so
+- **`Timeline`, `OfflineClock` and `OfflineTransport` are tutti-timeline's
+  again** (`tutti_timeline`): tutti-graph no longer names them, so
   tutti-types does not hold them. `OfflineTransport` is what an export hands
   its `PrepareEdit` (`PreparedGraph::ctx`), still built only from an
   `OfflineClock`.

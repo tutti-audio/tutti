@@ -81,7 +81,6 @@ tutti-dsp  ctor-result  crates/tutti-dsp/src/convolver/matrix.rs::MatrixConvolve
 tutti-dsp  ctor-result  crates/tutti-dsp/src/delay/routing.rs::Routing::new
 tutti-dsp  ctor-result  crates/tutti-dsp/src/delay/routing.rs::Routing::normalized
 tutti-dsp  ctor-result  crates/tutti-dsp/src/delay/times.rs::ChannelTimes::each
-tutti-dsp  ctor-result  crates/tutti-dsp/src/dynamics/multiband.rs::MultibandBank::new
 tutti-dsp  ctor-result  crates/tutti-dsp/src/filter/crossover/controls.rs::CrossoverControls::new
 tutti-dsp  ctor-result  crates/tutti-dsp/src/filter/crossover/controls.rs::CrossoverControls::ordered
 tutti-dsp  ctor-result  crates/tutti-dsp/src/filter/crossover/model.rs::CrossoverModel::designed
@@ -199,18 +198,6 @@ tutti-nodes  node-ctor  crates/tutti-nodes/src/delay.rs::DelayNode::new
 tutti-nodes  node-ctor  crates/tutti-nodes/src/delay.rs::DelayNode::stereo
 tutti-nodes  node-ctor  crates/tutti-nodes/src/distortion.rs::DistortionNode::new
 tutti-nodes  node-ctor  crates/tutti-nodes/src/distortion.rs::DistortionNode::with_channels
-tutti-nodes  node-ctor  crates/tutti-nodes/src/dynamics/brickwall.rs::BrickwallLimiterNode::new
-tutti-nodes  node-ctor  crates/tutti-nodes/src/dynamics/brickwall.rs::BrickwallLimiterNode::with_bus
-tutti-nodes  node-ctor  crates/tutti-nodes/src/dynamics/compressor.rs::CompressorNode::mono
-tutti-nodes  node-ctor  crates/tutti-nodes/src/dynamics/compressor.rs::CompressorNode::new
-tutti-nodes  node-ctor  crates/tutti-nodes/src/dynamics/compressor.rs::CompressorNode::stereo
-tutti-nodes  node-ctor  crates/tutti-nodes/src/dynamics/gate.rs::GateNode::mono
-tutti-nodes  node-ctor  crates/tutti-nodes/src/dynamics/gate.rs::GateNode::new
-tutti-nodes  node-ctor  crates/tutti-nodes/src/dynamics/gate.rs::GateNode::stereo
-tutti-nodes  node-ctor  crates/tutti-nodes/src/dynamics/limiter.rs::LimiterNode::mono
-tutti-nodes  node-ctor  crates/tutti-nodes/src/dynamics/limiter.rs::LimiterNode::new
-tutti-nodes  node-ctor  crates/tutti-nodes/src/dynamics/limiter.rs::LimiterNode::stereo
-tutti-nodes  node-ctor  crates/tutti-nodes/src/dynamics/multiband.rs::MultibandCompressorNode::new
 tutti-nodes  node-ctor  crates/tutti-nodes/src/filter/crossover.rs::CrossoverNode::new
 tutti-nodes  node-ctor  crates/tutti-nodes/src/filter/eq_band.rs::EqBandNode::new
 tutti-nodes  node-ctor  crates/tutti-nodes/src/filter/ladder.rs::LadderFilterNode::new
@@ -253,7 +240,6 @@ tutti-nodes  ctor-result  crates/tutti-nodes/src/convolution/node.rs::ConvolverN
 tutti-nodes  ctor-result  crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::from_layout
 tutti-nodes  ctor-result  crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::per_channel
 tutti-nodes  ctor-result  crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::shared_ir
-tutti-nodes  ctor-result  crates/tutti-nodes/src/dynamics/multiband.rs::MultibandCompressorNode::new
 tutti-nodes  ctor-result  crates/tutti-nodes/src/filter/crossover.rs::CrossoverNode::new
 tutti-nodes  ctor-result  crates/tutti-nodes/src/modulation/mod_delay.rs::ModDelayNode::new
 tutti-nodes  ctor-result  crates/tutti-nodes/src/modulation/phaser.rs::PhaserNode::new
@@ -425,16 +411,16 @@ tutti-soundfont  ctor-result  crates/tutti-soundfont/src/lib.rs::SoundFontUnit::
 tutti-tempo  ctor-result  crates/tutti-tempo/src/map.rs::TempoMap::constant
 tutti-tempo  ctor-result  crates/tutti-tempo/src/map.rs::TempoMap::new
 
-# tutti-transport
-tutti-transport  setter  crates/tutti-transport/src/audio.rs::TransportAudio::set_playhead
-tutti-transport  setter  crates/tutti-transport/src/clock.rs::TransportClock::set_sample_rate
-tutti-transport  setter  crates/tutti-transport/src/handle.rs::Transport::set_sample_rate
-tutti-transport  setter  crates/tutti-transport/src/project_meter.rs::ProjectMeter::set_meter
-tutti-transport  setter  crates/tutti-transport/src/settings.rs::TransportSettings::set_in_preroll
-tutti-transport  setter  crates/tutti-transport/src/settings.rs::TransportSettings::set_recording
-tutti-transport  setter  crates/tutti-transport/src/settings.rs::TransportSettings::set_tempo
-tutti-transport  setter  crates/tutti-transport/src/settings.rs::TransportSettings::set_tempo_map
-tutti-transport  ctor-result  crates/tutti-transport/src/tempo_reader.rs::TempoReader::constant
+# tutti-timeline
+tutti-timeline  setter  crates/tutti-timeline/src/audio.rs::TransportAudio::set_playhead
+tutti-timeline  setter  crates/tutti-timeline/src/clock.rs::TransportClock::set_sample_rate
+tutti-timeline  setter  crates/tutti-timeline/src/handle.rs::Transport::set_sample_rate
+tutti-timeline  setter  crates/tutti-timeline/src/project_meter.rs::ProjectMeter::set_meter
+tutti-timeline  setter  crates/tutti-timeline/src/settings.rs::TransportSettings::set_in_preroll
+tutti-timeline  setter  crates/tutti-timeline/src/settings.rs::TransportSettings::set_recording
+tutti-timeline  setter  crates/tutti-timeline/src/settings.rs::TransportSettings::set_tempo
+tutti-timeline  setter  crates/tutti-timeline/src/settings.rs::TransportSettings::set_tempo_map
+tutti-timeline  ctor-result  crates/tutti-timeline/src/tempo_reader.rs::TempoReader::constant
 
 # tutti-ump
 tutti-ump  chain-result  crates/tutti-ump/src/midi_translation.rs::Message::try_to_midi1

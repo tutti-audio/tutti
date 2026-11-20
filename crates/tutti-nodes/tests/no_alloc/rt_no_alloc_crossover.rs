@@ -7,10 +7,12 @@
 //! `ParamSet` before each block, so they take the ramped path (a coefficient
 //! solve every few samples), a solo's mute ramp and a bypass.
 
-use tutti_buffers::ChannelLayout;
+use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_graph::contract::BlockRig;
 use tutti_graph::{IntoNode, ParamNode};
-use tutti_nodes::{BAND_PARAMS, CrossoverNode, MultibandCompressorNode};
+use tutti_nodes::{
+    BAND_PARAMS, CrossoverNode, MultibandBands, MultibandCompressorConfig, MultibandCompressorNode,
+};
 use tutti_units::{Hz, SampleRate};
 use tutti_units::{UnitAddr, UnitParam};
 
@@ -71,9 +73,12 @@ fn crossover_node_with_a_moving_frequency_is_allocation_free() {
 #[test]
 fn multiband_compressor_process_is_allocation_free() {
     for bands in 2..=4 {
-        let node = MultibandCompressorNode::<f32>::new(ChannelLayout::STEREO, bands).unwrap();
+        let node = MultibandCompressorNode::<f32>::from(MultibandCompressorConfig::new(
+            BusTopology::STEREO,
+            MultibandBands::new(bands).unwrap(),
+        ));
         let set = node.param_set();
-        for b in 0..bands as u8 {
+        for b in 0..bands {
             assert!(set.set(UnitAddr::new(UnitParam::Threshold, b), -24.0));
             assert!(set.set(UnitAddr::new(UnitParam::Ratio, b), 4.0));
             assert!(set.set(UnitAddr::new(UnitParam::GainDb, b), 3.0));
@@ -86,7 +91,10 @@ fn multiband_compressor_process_is_allocation_free() {
 fn multiband_compressor_with_moving_params_is_allocation_free() {
     // Four bands: every band param, every crossover and both toggles are
     // written each block (27 ports and 8 toggle cells).
-    let node = MultibandCompressorNode::<f32>::new(ChannelLayout::from_count(6), 4).unwrap();
+    let node = MultibandCompressorNode::<f32>::from(MultibandCompressorConfig::new(
+        BusTopology::assumed(ChannelLayout::from_count(6)).unwrap(),
+        MultibandBands::of(4),
+    ));
     let mut hz = 120.0f32;
     gate(node, move |controls, i| {
         let set = controls.params();

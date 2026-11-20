@@ -30,7 +30,7 @@ use tutti_session::{
     Bounce, BounceError, BounceLatency, BounceTail, DetachedSession, ExportClock, InPort, OutPort,
     Range, Session, Stem,
 };
-use tutti_transport::{OfflineTimeline, OfflineTimelineConfig};
+use tutti_timeline::{OfflineTimeline, OfflineTimelineConfig};
 use tutti_ump::MidiChannel;
 use tutti_units::{Beat, Bpm, SampleRate, Seconds};
 

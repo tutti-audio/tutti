@@ -130,8 +130,8 @@ fn scene_map(blocks: usize) -> tutti_tempo::TempoMap {
 }
 
 /// A reader of [`scene_map`], for the nodes under test.
-fn scene_tempo() -> tutti_transport::TempoReader {
-    tutti_transport::TempoReader::fixed(std::sync::Arc::new(scene_map(64)))
+fn scene_tempo() -> tutti_timeline::TempoReader {
+    tutti_timeline::TempoReader::fixed(std::sync::Arc::new(scene_map(64)))
 }
 
 /// Render `blocks` scenes of `block` frames through `rig`, one block per call;
@@ -340,7 +340,7 @@ fn a_plugin_behind_a_latent_path_sees_the_transport_its_input_was_rendered_at() 
 
 /// 120 to 180 BPM over the first four beats, tempo linear in time: it climbs
 /// 60 / 76 800 BPM per frame at 48 kHz and is 150 at beat 1.8.
-fn ramp_tempo() -> tutti_transport::TempoReader {
+fn ramp_tempo() -> tutti_timeline::TempoReader {
     use tutti_tempo::{TempoMap, TempoPoint, Transition};
     let map = TempoMap::new([
         TempoPoint {
@@ -355,7 +355,7 @@ fn ramp_tempo() -> tutti_transport::TempoReader {
         },
     ])
     .expect("a map");
-    tutti_transport::TempoReader::fixed(std::sync::Arc::new(map))
+    tutti_timeline::TempoReader::fixed(std::sync::Arc::new(map))
 }
 
 /// **The plugin is told the project map's tempo and CLAP its slope**, through
@@ -425,7 +425,7 @@ fn event_echo(out: &[f32]) -> Vec<[f64; 5]> {
 
 /// 120 to 180 BPM over beats 0 to 4 (tempo linear in time, 1.6 s), then 180
 /// to 60 over four more (2 s), then a step.
-fn two_ramps() -> tutti_transport::TempoReader {
+fn two_ramps() -> tutti_timeline::TempoReader {
     use tutti_tempo::{TempoMap, TempoPoint, Transition};
     let point = |beat: f64, bpm: f64, transition| TempoPoint {
         beat: Beat::new(beat),
@@ -438,7 +438,7 @@ fn two_ramps() -> tutti_transport::TempoReader {
         point(8.0, 60.0, Transition::Step),
     ])
     .expect("a map");
-    tutti_transport::TempoReader::fixed(std::sync::Arc::new(map))
+    tutti_timeline::TempoReader::fixed(std::sync::Arc::new(map))
 }
 
 /// **The plugin is told a ramp's end inside a chunk by a transport event**,

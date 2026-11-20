@@ -18,8 +18,10 @@ use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_graph::IntoNode;
 use tutti_graph::contract::BlockRig;
 use tutti_nodes::{
-    BrickwallLimiterNode, CompressorControls, CompressorNode, GateControls, GateNode, KeyFilter,
-    KeySource, LimiterControls, LimiterNode, Lookahead, MultibandCompressorNode, PeakDetection,
+    BrickwallLimiterConfig, BrickwallLimiterNode, CompressorConfig, CompressorControls,
+    CompressorNode, GateConfig, GateControls, GateNode, KeyFilter, KeySource, LimiterConfig,
+    LimiterControls, LimiterNode, Lookahead, MultibandBands, MultibandCompressorConfig,
+    MultibandCompressorNode, PeakDetection,
 };
 use tutti_units::{CompressionRatio, Db, SampleRate, Seconds};
 
@@ -56,16 +58,16 @@ fn gate<N: IntoNode>(node: N, amplitude: f32, warm: usize, blocks: usize) {
 fn compressor_mono_process_is_allocation_free() {
     // 2 inputs (audio + sidechain), 1 output.
     gate(
-        CompressorNode::<f32>::new(
-            BusTopology::MONO,
-            KeySource::Sidechain,
-            CompressorControls {
-                threshold: Db::new(-20.0),
-                ratio: CompressionRatio::new(4.0),
-                attack: Seconds::new(0.005),
-                release: Seconds::new(0.050),
-                ..CompressorControls::DEFAULT
-            },
+        CompressorNode::<f32>::from(
+            CompressorConfig::new(BusTopology::MONO)
+                .key(KeySource::Sidechain)
+                .controls(CompressorControls {
+                    threshold: Db::new(-20.0),
+                    ratio: CompressionRatio::new(4.0),
+                    attack: Seconds::new(0.005),
+                    release: Seconds::new(0.050),
+                    ..CompressorControls::DEFAULT
+                }),
         ),
         0.7,
         16,
@@ -77,17 +79,17 @@ fn compressor_mono_process_is_allocation_free() {
 fn compressor_stereo_process_is_allocation_free() {
     // 4 inputs (L, R, SC-L, SC-R), 2 outputs, linked gain.
     gate(
-        CompressorNode::<f32>::new(
-            BusTopology::STEREO,
-            KeySource::Sidechain,
-            CompressorControls {
-                threshold: Db::new(-18.0),
-                knee: Db::new(6.0),
-                ratio: CompressionRatio::new(3.0),
-                attack: Seconds::new(0.003),
-                release: Seconds::new(0.080),
-                ..CompressorControls::DEFAULT
-            },
+        CompressorNode::<f32>::from(
+            CompressorConfig::new(BusTopology::STEREO)
+                .key(KeySource::Sidechain)
+                .controls(CompressorControls {
+                    threshold: Db::new(-18.0),
+                    knee: Db::new(6.0),
+                    ratio: CompressionRatio::new(3.0),
+                    attack: Seconds::new(0.003),
+                    release: Seconds::new(0.080),
+                    ..CompressorControls::DEFAULT
+                }),
         ),
         0.8,
         16,
@@ -106,17 +108,19 @@ fn compressor_fed_threshold_and_moving_cells_are_allocation_free() {
     use tutti_units::UnitParam;
 
     let mut node = Direct::new(
-        CompressorNode::<f32>::new(
-            tutti_buffers::BusTopology::assumed(tutti_buffers::ChannelLayout::from(6u16))
-                .expect("at most one bus wide"),
-            KeySource::Sidechain,
-            CompressorControls {
+        CompressorNode::<f32>::from(
+            CompressorConfig::new(
+                tutti_buffers::BusTopology::assumed(tutti_buffers::ChannelLayout::from(6u16))
+                    .expect("at most one bus wide"),
+            )
+            .key(KeySource::Sidechain)
+            .controls(CompressorControls {
                 threshold: Db::new(-20.0),
                 ratio: CompressionRatio::new(4.0),
                 attack: Seconds::new(0.003),
                 release: Seconds::new(0.08),
                 ..CompressorControls::DEFAULT
-            },
+            }),
         ),
         SampleRate::SR_48K,
         64,
@@ -151,11 +155,13 @@ fn compressor_fed_threshold_and_moving_cells_are_allocation_free() {
 fn limiter_node_process_is_allocation_free() {
     // Warm-up fills the lookahead ring and primes the deque; over ceiling.
     gate(
-        LimiterNode::<f32>::stereo(LimiterControls {
-            threshold: Db::new(-3.0),
-            ceiling: Db::new(-0.3),
-            ..LimiterControls::DEFAULT
-        }),
+        LimiterNode::<f32>::from(LimiterConfig::new(BusTopology::STEREO).controls(
+            LimiterControls {
+                threshold: Db::new(-3.0),
+                ceiling: Db::new(-0.3),
+                ..LimiterControls::DEFAULT
+            },
+        )),
         1.5,
         32,
         2_000,
@@ -166,12 +172,15 @@ fn limiter_node_process_is_allocation_free() {
 fn true_peak_limiter_node_process_is_allocation_free() {
     // The 4x up-samplers and their buffers are built at prepare; a block only fills them.
     gate(
-        LimiterNode::<f32>::stereo(LimiterControls {
-            threshold: Db::new(-3.0),
-            ceiling: Db::new(-0.3),
-            ..LimiterControls::DEFAULT
-        })
-        .detection(PeakDetection::TruePeak),
+        LimiterNode::<f32>::from(
+            LimiterConfig::new(BusTopology::STEREO)
+                .detection(PeakDetection::TruePeak)
+                .controls(LimiterControls {
+                    threshold: Db::new(-3.0),
+                    ceiling: Db::new(-0.3),
+                    ..LimiterControls::DEFAULT
+                }),
+        ),
         1.5,
         32,
         2_000,
@@ -184,14 +193,15 @@ fn limiter_node_wide_6ch_process_is_allocation_free() {
     // the first block; the linked-gain wide path must not allocate per
     // buffer.
     gate(
-        LimiterNode::<f32>::new(
-            BusTopology::assumed(ChannelLayout::from(6u16)).expect("at most one bus wide"),
-            Lookahead::DEFAULT,
-            LimiterControls {
+        LimiterNode::<f32>::from(
+            LimiterConfig::new(
+                BusTopology::assumed(ChannelLayout::from(6u16)).expect("at most one bus wide"),
+            )
+            .controls(LimiterControls {
                 threshold: Db::new(-3.0),
                 ceiling: Db::new(-0.3),
                 ..LimiterControls::DEFAULT
-            },
+            }),
         ),
         1.5,
         32,
@@ -202,10 +212,10 @@ fn limiter_node_wide_6ch_process_is_allocation_free() {
 #[test]
 fn brickwall_limiter_wide_6ch_process_is_allocation_free() {
     gate(
-        BrickwallLimiterNode::<f32>::with_bus(
+        BrickwallLimiterNode::<f32>::from(BrickwallLimiterConfig::new(
             BusTopology::unassigned(ChannelLayout::from(6u16)).unwrap(),
             Db::new(-0.3),
-        ),
+        )),
         1.5,
         1,
         5_000,
@@ -215,7 +225,10 @@ fn brickwall_limiter_wide_6ch_process_is_allocation_free() {
 #[test]
 fn brickwall_limiter_process_is_allocation_free() {
     gate(
-        BrickwallLimiterNode::<f32>::new(Db::new(-0.3)),
+        BrickwallLimiterNode::<f32>::from(BrickwallLimiterConfig::new(
+            BusTopology::STEREO,
+            Db::new(-0.3),
+        )),
         1.5,
         1,
         5_000,
@@ -226,17 +239,17 @@ fn brickwall_limiter_process_is_allocation_free() {
 fn gate_mono_process_is_allocation_free() {
     // 2 inputs (audio + sidechain), 1 output.
     gate(
-        GateNode::<f32>::new(
-            BusTopology::MONO,
-            KeySource::Sidechain,
-            GateControls {
-                threshold: Db::new(-40.0),
-                attack: Seconds::new(0.001),
-                hold: Seconds::new(0.010),
-                release: Seconds::new(0.100),
-                range: Db::new(-60.0),
-                ..GateControls::DEFAULT
-            },
+        GateNode::<f32>::from(
+            GateConfig::new(BusTopology::MONO)
+                .key(KeySource::Sidechain)
+                .controls(GateControls {
+                    threshold: Db::new(-40.0),
+                    attack: Seconds::new(0.001),
+                    hold: Seconds::new(0.010),
+                    release: Seconds::new(0.100),
+                    range: Db::new(-60.0),
+                    ..GateControls::DEFAULT
+                }),
         ),
         0.5,
         16,
@@ -247,17 +260,17 @@ fn gate_mono_process_is_allocation_free() {
 #[test]
 fn gate_stereo_process_is_allocation_free() {
     gate(
-        GateNode::<f32>::new(
-            BusTopology::STEREO,
-            KeySource::Sidechain,
-            GateControls {
-                threshold: Db::new(-40.0),
-                attack: Seconds::new(0.001),
-                hold: Seconds::new(0.010),
-                release: Seconds::new(0.100),
-                range: Db::new(-80.0),
-                ..GateControls::DEFAULT
-            },
+        GateNode::<f32>::from(
+            GateConfig::new(BusTopology::STEREO)
+                .key(KeySource::Sidechain)
+                .controls(GateControls {
+                    threshold: Db::new(-40.0),
+                    attack: Seconds::new(0.001),
+                    hold: Seconds::new(0.010),
+                    release: Seconds::new(0.100),
+                    range: Db::new(-80.0),
+                    ..GateControls::DEFAULT
+                }),
         ),
         0.6,
         16,
@@ -273,18 +286,18 @@ fn compressor_key_filter_process_is_allocation_free() {
         (BusTopology::MONO, KeyFilter::HighPass, 0.7),
         (BusTopology::STEREO, KeyFilter::BandPass, 0.6),
     ] {
-        let node = CompressorNode::<f32>::new(
-            topology,
-            KeySource::Sidechain,
-            CompressorControls {
-                threshold: Db::new(-20.0),
-                ratio: CompressionRatio::new(4.0),
-                attack: Seconds::new(0.005),
-                release: Seconds::new(0.050),
-                ..CompressorControls::DEFAULT
-            },
-        )
-        .key_filter(filter);
+        let node = CompressorNode::<f32>::from(
+            CompressorConfig::new(topology)
+                .key(KeySource::Sidechain)
+                .key_filter(filter)
+                .controls(CompressorControls {
+                    threshold: Db::new(-20.0),
+                    ratio: CompressionRatio::new(4.0),
+                    attack: Seconds::new(0.005),
+                    release: Seconds::new(0.050),
+                    ..CompressorControls::DEFAULT
+                }),
+        );
         gate(node, amplitude, 16, 2_000);
     }
 }
@@ -295,19 +308,19 @@ fn gate_key_filter_process_is_allocation_free() {
         (BusTopology::MONO, KeyFilter::HighPass, 0.5),
         (BusTopology::STEREO, KeyFilter::BandPass, 0.6),
     ] {
-        let node = GateNode::<f32>::new(
-            topology,
-            KeySource::Sidechain,
-            GateControls {
-                threshold: Db::new(-60.0),
-                attack: Seconds::new(0.001),
-                hold: Seconds::new(0.010),
-                release: Seconds::new(0.100),
-                range: Db::new(-20.0),
-                ..GateControls::DEFAULT
-            },
-        )
-        .key_filter(filter);
+        let node = GateNode::<f32>::from(
+            GateConfig::new(topology)
+                .key(KeySource::Sidechain)
+                .key_filter(filter)
+                .controls(GateControls {
+                    threshold: Db::new(-60.0),
+                    attack: Seconds::new(0.001),
+                    hold: Seconds::new(0.010),
+                    release: Seconds::new(0.100),
+                    range: Db::new(-20.0),
+                    ..GateControls::DEFAULT
+                }),
+        );
         gate(node, amplitude, 16, 2_000);
     }
 }
@@ -321,11 +334,13 @@ fn gate_key_filter_process_is_allocation_free() {
 /// the deque happens before they measure.
 #[test]
 fn limiter_node_burst_and_release_are_allocation_free() {
-    let node = LimiterNode::<f32>::stereo(LimiterControls {
-        threshold: Db::new(-3.0),
-        ceiling: Db::new(-0.3),
-        ..LimiterControls::DEFAULT
-    });
+    let node = LimiterNode::<f32>::from(LimiterConfig::new(BusTopology::STEREO).controls(
+        LimiterControls {
+            threshold: Db::new(-3.0),
+            ceiling: Db::new(-0.3),
+            ..LimiterControls::DEFAULT
+        },
+    ));
     let (mut rig, _controls) = BlockRig::new(node, SampleRate::SR_48K, 64);
     let fill = |rig: &mut BlockRig, amplitude: f32| {
         for c in rig.inputs_mut().iter_mut() {
@@ -365,10 +380,10 @@ fn brickwall_limiter_fed_ceiling_process_is_allocation_free() {
     use tutti_graph::contract::Direct;
 
     let mut node = Direct::new(
-        BrickwallLimiterNode::<f32>::with_bus(
+        BrickwallLimiterNode::<f32>::from(BrickwallLimiterConfig::new(
             BusTopology::unassigned(ChannelLayout::from(6u16)).unwrap(),
             Db::new(-0.3),
-        ),
+        )),
         SampleRate::SR_48K,
         64,
     );
@@ -405,10 +420,10 @@ fn brickwall_limiter_moving_cell_and_hostile_signal_are_allocation_free() {
     use tutti_units::UnitParam;
 
     let mut node = Direct::new(
-        BrickwallLimiterNode::<f32>::with_bus(
+        BrickwallLimiterNode::<f32>::from(BrickwallLimiterConfig::new(
             BusTopology::unassigned(ChannelLayout::from(6u16)).unwrap(),
             Db::new(-0.3),
-        ),
+        )),
         SampleRate::SR_48K,
         64,
     );
@@ -445,10 +460,11 @@ fn limiter_node_fed_ceiling_and_threshold_process_is_allocation_free() {
     use tutti_graph::contract::Direct;
 
     let mut node = Direct::new(
-        LimiterNode::<f32>::new(
-            BusTopology::assumed(ChannelLayout::from(6u16)).expect("at most one bus wide"),
-            Lookahead::DEFAULT,
-            LimiterControls::DEFAULT,
+        LimiterNode::<f32>::from(
+            LimiterConfig::new(
+                BusTopology::assumed(ChannelLayout::from(6u16)).expect("at most one bus wide"),
+            )
+            .controls(LimiterControls::DEFAULT),
         ),
         SampleRate::SR_48K,
         64,
@@ -493,11 +509,13 @@ fn limiter_node_fed_ceiling_and_threshold_process_is_allocation_free() {
 fn a_limiter_cloned_mid_release_processes_allocation_free() {
     use tutti_graph::contract::Direct;
 
-    let node = LimiterNode::<f32>::stereo(LimiterControls {
-        threshold: Db::new(-3.0),
-        ceiling: Db::new(-0.3),
-        ..LimiterControls::DEFAULT
-    });
+    let node = LimiterNode::<f32>::from(LimiterConfig::new(BusTopology::STEREO).controls(
+        LimiterControls {
+            threshold: Db::new(-3.0),
+            ceiling: Db::new(-0.3),
+            ..LimiterControls::DEFAULT
+        },
+    ));
     let mut d = Direct::new(node, SampleRate::SR_48K, 64);
     let fill = |d: &mut Direct<LimiterNode<f32>>, amplitude: f32| {
         for c in d.inputs_mut().iter_mut() {
@@ -732,10 +750,10 @@ fn the_compressor_corners_are_allocation_free_and_finite() {
         for corners in [&CORNERS, &CLAMPED, &HUGE_KNEE] {
             sweep(
                 || {
-                    CompressorNode::<f32>::new(
-                        bus,
-                        KeySource::Sidechain,
-                        CompressorControls::DEFAULT,
+                    CompressorNode::<f32>::from(
+                        CompressorConfig::new(bus)
+                            .key(KeySource::Sidechain)
+                            .controls(CompressorControls::DEFAULT),
                     )
                 },
                 corners,
@@ -743,7 +761,11 @@ fn the_compressor_corners_are_allocation_free_and_finite() {
                 key,
             );
             sweep(
-                || CompressorNode::<f32>::new(bus, KeySource::Own, CompressorControls::DEFAULT),
+                || {
+                    CompressorNode::<f32>::from(
+                        CompressorConfig::new(bus).controls(CompressorControls::DEFAULT),
+                    )
+                },
                 corners,
                 1.5,
                 None,
@@ -774,13 +796,19 @@ fn the_gate_corners_are_allocation_free_and_finite() {
     for width in [1u16, 2, 6] {
         let bus = BusTopology::assumed(ChannelLayout::from(width)).expect("one bus");
         sweep(
-            || GateNode::<f32>::new(bus, KeySource::Sidechain, GateControls::DEFAULT),
+            || {
+                GateNode::<f32>::from(
+                    GateConfig::new(bus)
+                        .key(KeySource::Sidechain)
+                        .controls(GateControls::DEFAULT),
+                )
+            },
             &CORNERS,
             1.5,
             Some(usize::from(width)),
         );
         sweep(
-            || GateNode::<f32>::new(bus, KeySource::Own, GateControls::DEFAULT),
+            || GateNode::<f32>::from(GateConfig::new(bus).controls(GateControls::DEFAULT)),
             &CORNERS,
             1.5,
             None,
@@ -856,10 +884,10 @@ fn the_limiter_corners_are_allocation_free_finite_and_under_the_ceiling() {
             for corners in [&CORNERS, &HOSTILE, &HOSTILE_BASE, &INFINITE] {
                 sweep(
                     || {
-                        LimiterNode::<f32>::new(
-                            bus,
-                            Lookahead::of(lookahead),
-                            LimiterControls::DEFAULT,
+                        LimiterNode::<f32>::from(
+                            LimiterConfig::new(bus)
+                                .lookahead(Lookahead::of(lookahead))
+                                .controls(LimiterControls::DEFAULT),
                         )
                     },
                     corners,
@@ -895,7 +923,12 @@ fn the_brickwall_corners_are_allocation_free_finite_and_under_the_ceiling() {
         let bus = BusTopology::unassigned(ChannelLayout::from(width)).expect("one bus");
         for corners in [&CORNERS, &EXTREMES] {
             sweep(
-                || BrickwallLimiterNode::<f32>::with_bus(bus, Db::new(0.0)),
+                || {
+                    BrickwallLimiterNode::<f32>::from(BrickwallLimiterConfig::new(
+                        bus,
+                        Db::new(0.0),
+                    ))
+                },
                 corners,
                 1.5,
                 None,
@@ -1004,8 +1037,10 @@ fn the_multiband_corners_are_allocation_free_and_finite() {
             for corners in [&MOVING, &HOSTILE, &CLAMPED, &HUGE_KNEE] {
                 sweep(
                     || {
-                        MultibandCompressorNode::<f32>::new(ChannelLayout::from(width), bands)
-                            .unwrap()
+                        MultibandCompressorNode::<f32>::from(MultibandCompressorConfig::new(
+                            BusTopology::assumed(ChannelLayout::from(width)).unwrap(),
+                            MultibandBands::new(bands).unwrap(),
+                        ))
                     },
                     corners,
                     1.5,

@@ -138,7 +138,7 @@ fn a_refused_rate_is_silent_visible_and_retried() {
 
     let mut unit = Rig::new(
         probe.client.bind(
-            tutti_transport::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
+            tutti_timeline::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
         ),
         LOAD_RATE,
         BLOCK,

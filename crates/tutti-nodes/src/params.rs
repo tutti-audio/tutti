@@ -469,20 +469,6 @@ impl<S: ControlSet> Params<S> {
             .fold(set, |set, (&addr, cell)| set.param(addr, cell))
     }
 
-    /// The set the cells are of.
-    pub(crate) fn set(&self) -> &S {
-        &self.set
-    }
-
-    /// The controls the cells hold now, each read once.
-    pub(crate) fn held(&self) -> S::Controls {
-        let mut values = [0.0f64; MAX_CONTROLS];
-        for (v, cell) in values.iter_mut().zip(&self.cells) {
-            *v = cell.load(Acquire);
-        }
-        self.set.assemble(&values[..self.cells.len()])
-    }
-
     /// The base of the `k`th address ([`Node::param_base`](tutti_graph::Node::param_base)): its cell's value.
     pub(crate) fn base(&self, k: usize) -> Option<f64> {
         self.cells.get(k).map(|c| c.load(Acquire))
@@ -734,7 +720,6 @@ mod tests {
         assert_ne!(f64::from(FINE as f32), FINE, "setup: f32 loses FINE");
         let params = Params::new(One, &0.0);
         params.cells[0].store(FINE, Relaxed);
-        assert_eq!(params.held().to_bits(), FINE.to_bits());
         assert_eq!(params.base(0).map(f64::to_bits), Some(FINE.to_bits()));
     }
 }
