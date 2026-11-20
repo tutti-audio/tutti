@@ -139,7 +139,7 @@ pub enum Feeder {
     /// A host's declarations.
     Declared,
     /// The session's MIDI clock, which feeds every output port
-    /// (`midi_output`, feature `midi-hardware`).
+    /// (`open_midi_output`, feature `midi-hardware`).
     Clock,
 }
 
