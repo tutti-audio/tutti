@@ -491,11 +491,10 @@ fn per_resource_a_second_reply_to_the_same_request_does_not_renew_the_first() {
     assert!(get_at(&mut script, &page(0), secs(10), Some(100)));
 }
 
-// The pages a walk joins are what the peer sent, not what the held data encodes
-// to: a property the page carries beyond the type's (here a manufacturer's, and
-// one that is not) is as it was in a walk from the cache.
+// A walk from the cache ends with the pages' entries, a manufacturer's `x-` property
+// among them, and asks the peer for nothing.
 #[test]
-fn a_walk_from_the_cache_joins_the_pages_as_the_peer_sent_them() {
+fn a_walk_from_the_cache_keeps_a_manufacturer_property() {
     let mut script = Script::new(&paginating_list());
     let pages = |script: &mut Script| {
         let id = script.last_get_id();
@@ -604,11 +603,11 @@ fn a_walk_page_overtaken_by_a_set_is_not_cached() {
     assert_eq!(sent_gets(&script) - sent, 1);
 }
 
-// A walk of a custom List Resource, whose data is the JSON as it came: the second
-// walk, from the cache, sends nothing and ends with the pages as the peer sent them.
+// The second walk of a custom List Resource is served from the cache: it sends
+// nothing and ends with the same pages.
 /// Spec: m2-103/7.4.3#3
 #[test]
-fn a_walk_of_a_custom_list_from_the_cache_returns_the_pages_as_sent() {
+fn a_walk_of_a_custom_list_is_served_from_the_cache() {
     let resource = custom("X-ScoreList");
     let list = PeResourceList::new().with(
         ResourceEntry::builder(resource.clone())

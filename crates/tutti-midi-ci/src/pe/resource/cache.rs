@@ -4,7 +4,6 @@
 use tutti_platform::Instant;
 
 use super::super::header::{PeCacheTime, PePage};
-use super::super::tree::PeJson;
 use super::data::PeData;
 use super::request::ResourceTarget;
 use crate::deadline::Pending;
@@ -13,9 +12,6 @@ use crate::deadline::Pending;
 #[derive(Debug)]
 pub(super) struct Cached {
     pub(super) data: PeData,
-    /// The reply's JSON as it came, which a walk joins: a re-encoding of `data`
-    /// would not be what the peer sent.
-    pub(super) json: Option<PeJson>,
     pub(super) total_count: Option<u32>,
 }
 

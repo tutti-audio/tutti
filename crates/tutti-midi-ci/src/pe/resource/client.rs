@@ -685,16 +685,10 @@ impl ResourceInitiator {
             } => {
                 let cache_time = reply.as_ref().ok().and_then(|r| r.header.cache_time);
                 let total_count = reply.as_ref().ok().and_then(|r| r.header.total_count);
-                let json = cache_time
-                    .filter(|t| t.as_secs() > 0)
-                    .and(reply.as_ref().ok())
-                    .filter(|r| r.header.media_type.is_none())
-                    .and_then(|r| parse(r).ok());
                 let result = reply.and_then(|r| decode(target.resource(), &r));
                 if let (Ok(data), Some(time)) = (&result, cache_time) {
                     let cached = Cached {
                         data: data.clone(),
-                        json,
                         total_count,
                     };
                     self.cache.keep(&target, page, cached, time, drops, now);
@@ -813,7 +807,6 @@ impl ResourceInitiator {
         {
             let cached = Cached {
                 data,
-                json: Some(page.clone()),
                 total_count: Some(*total),
             };
             let (target, asked, drops) = (walk.target.clone(), walk.asked, walk.drops);
@@ -845,10 +838,12 @@ impl ResourceInitiator {
     ) -> Result<(), PeError> {
         loop {
             let page = walk.next_page();
+            // The walk rebuilds the page's JSON from its decoded data, which round-trips
+            // for every decoded type: `x-` properties are kept, opaque JSON is as sent.
             let held = self
                 .cache
                 .fresh(&walk.target, Some(page), now)
-                .and_then(|c| Some((c.json.clone()?, c.total_count?)));
+                .and_then(|c| Some((c.data.to_json()?, c.total_count?)));
             if let Some(held) = held {
                 match walk.step(Ok(held)) {
                     Stepped::More => continue,
