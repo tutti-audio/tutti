@@ -62,17 +62,20 @@ fn first_block_meter(map: MeterMap, start: f64) -> Option<BlockMeter> {
 }
 
 /// **A block's transport carries the meter in force at its first frame and
-/// the bar line its bars are counted from.** Under 4/4 then 7/8 from beat 8
-/// (a bar of 3.5 quarters), beat 9 is in the bar from 8, and beat 12 in the
-/// bar from 8 + 3.5 = 11.5.
+/// the bar line its bars are counted from.** Under 4/4 then 7/8 from beat 8,
+/// rolling from beat 9 or from beat 12 (in the bar from 8 + 3.5 = 11.5) the
+/// bars are counted from the change at 8; rolling from beat 5 they are 4/4
+/// bars from beat 0, with the change ahead.
 #[test]
 fn the_block_carries_the_meter_in_force_and_its_bar_start() {
     let seven_eight = TimeSignature::of(7, 8);
-    for (start, bar_start) in [(9.0, 8.0), (12.0, 11.5)] {
-        let map = four_four_then(8.0, seven_eight);
+    let change = MeterChange::new(Beat::new(8.0), seven_eight);
+    let in_seven = BlockMeter::new(seven_eight, Beat::new(8.0), None);
+    let in_four = BlockMeter::new(TimeSignature::of(4, 4), Beat::new(0.0), Some(change));
+    for (start, want) in [(9.0, in_seven), (12.0, in_seven), (5.0, in_four)] {
         assert_eq!(
-            first_block_meter(map, start),
-            Some(BlockMeter::new(seven_eight, Beat::new(bar_start), None)),
+            first_block_meter(four_four_then(8.0, seven_eight), start),
+            Some(want),
             "rolling from beat {start}"
         );
     }
@@ -80,27 +83,26 @@ fn the_block_carries_the_meter_in_force_and_its_bar_start() {
 
 /// **A meter change inside the block is carried as the next change.** Rolling
 /// from beat 7.99 under 4/4 then 3/4 from beat 8: the block is in the 4/4
-/// bar from beat 4, and the change is 0.01 beat = 240 frames in, inside the
+/// bars from beat 0, and the change is 0.01 beat = 240 frames in, inside the
 /// 256-frame block.
 #[test]
 fn a_meter_change_inside_the_block_is_the_next_change() {
     let three_four = TimeSignature::of(3, 4);
     let map = four_four_then(8.0, three_four);
-    assert!((8.0 - 7.99) * 24_000.0 < 256.0, "inside the block");
     assert_eq!(
         first_block_meter(map, 7.99),
         Some(BlockMeter::new(
             TimeSignature::of(4, 4),
-            Beat::new(4.0),
+            Beat::new(0.0),
             Some(MeterChange::new(Beat::new(8.0), three_four))
         ))
     );
 }
 
 /// **Each piece after a tempo step carries the meter at its own beat.** Under
-/// 3/4 from beat 0 (a bar of 3 quarters), a step to 151 BPM at the beat frame
-/// 20 111 reaches at 120 BPM lands inside a block, and its piece's bar line is
-/// the multiple of 3 at or before that beat.
+/// 4/4 then 3/4 from beat 0.5, a step to 151 BPM at the beat frame 20 111
+/// reaches at 120 BPM (beat 0.838) lands inside a block, and its piece is in
+/// the 3/4 bars counted from beat 0.5.
 #[test]
 fn a_piece_after_a_tempo_step_carries_the_meter_at_its_beat() {
     let transport = Transport::new(SampleRate::of(SR));
@@ -108,10 +110,7 @@ fn a_piece_after_a_tempo_step_carries_the_meter_at_its_beat() {
     transport
         .settings()
         .project_meter()
-        .set_meter(MeterMap::new([MeterChange::new(
-            Beat::new(0.0),
-            three_four,
-        )]));
+        .set_meter(four_four_then(0.5, three_four));
     let step_beat = beat_of_frame(20_111, 120.0, SR);
     transport
         .settings()
@@ -131,10 +130,9 @@ fn a_piece_after_a_tempo_step_carries_the_meter_at_its_beat() {
         .collect();
     assert!(!pieces.is_empty(), "the step lands inside a block");
     for piece in pieces {
-        let bar_start = 3.0 * (piece.beat().get() / 3.0).floor();
         assert_eq!(
             piece.meter(),
-            Some(BlockMeter::new(three_four, Beat::new(bar_start), None)),
+            Some(BlockMeter::new(three_four, Beat::new(0.5), None)),
             "piece at beat {}",
             piece.beat().get()
         );
@@ -162,7 +160,8 @@ fn the_count_in_of_the_settings_reaches_the_block() {
 
 /// **An offline timeline stamps the meter it is given, and none otherwise.**
 /// Rendering from beat 12 under 4/4 then 7/8 from beat 8, each block is in
-/// the bar from 11.5; a timeline without a meter hands the graph none.
+/// the 7/8 bars counted from 8; a timeline without a meter hands the graph
+/// none.
 #[test]
 fn an_offline_timeline_stamps_the_meter_it_is_given() {
     let seven_eight = TimeSignature::of(7, 8);
@@ -189,7 +188,7 @@ fn an_offline_timeline_stamps_the_meter_it_is_given() {
     };
     assert_eq!(
         first_meter(timeline().meter(Arc::new(four_four_then(8.0, seven_eight)))),
-        Some(BlockMeter::new(seven_eight, Beat::new(11.5), None))
+        Some(BlockMeter::new(seven_eight, Beat::new(8.0), None))
     );
     assert_eq!(first_meter(timeline()), None);
 }

@@ -92,7 +92,8 @@ const _: () = assert!(JUMPS > MAX_TRANSPORT_CHANGES + 1);
 /// # Size, and the cost of a query
 ///
 /// Fixed, whatever the reach: [`JUMPS`](Self::JUMPS) = 256 pieces inline,
-/// about 104 bytes each (some 26 KiB, no heap). Nothing is sized from the
+/// about 144 bytes each (some 36 KiB), in one allocation the executor makes
+/// when it is built, on the control side. Nothing is sized from the
 /// plan, so a recompile changes nothing here, and the audio thread never
 /// allocates or frees.
 ///
@@ -640,10 +641,10 @@ mod tests {
             std::mem::size_of::<TransportHistory>(),
             std::mem::size_of::<[Piece; JUMPS]>() + 2 * std::mem::size_of::<usize>()
         );
-        // The documented figure: about 104 bytes a piece (the transport and
-        // the play clock), some 26 KiB.
+        // The documented figure: about 144 bytes a piece (the transport with
+        // its meter, and the play clock), some 36 KiB.
         let size = std::mem::size_of::<TransportHistory>();
-        assert!((24 * 1024..=28 * 1024).contains(&size), "{size} bytes");
+        assert!((34 * 1024..=38 * 1024).contains(&size), "{size} bytes");
     }
 
     /// A burst of more than `JUMPS` seeks, one per one-frame block: the ring

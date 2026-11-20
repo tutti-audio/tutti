@@ -5,7 +5,8 @@
 //! block's transport changes, with the host's own clock
 //! ([`Env::for_each_beat`](tutti_graph::Env::for_each_beat)) — the play and record state from
 //! the same pieces, the count-in flag and the meter off the same transport
-//! ([`TransportPosition::count_in`], [`TransportPosition::meter`]), and its own
+//! ([`TransportPosition::count_in`](tutti_graph::TransportPosition::count_in),
+//! [`TransportPosition::meter`](tutti_graph::TransportPosition::meter)), and its own
 //! settings (volume, mode) from [`ClickSettings`].
 //!
 //! # Why the beat comes from `Env`, not the transport's atomic

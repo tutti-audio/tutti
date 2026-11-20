@@ -14,38 +14,26 @@ fn map() -> MeterMap {
     ])
 }
 
-/// **A block meter names the signature in force, the bar line its bars are
-/// counted from and the change after it.** Beat 9.0 is in the 7/8 bar from
-/// 8.0 with no change after it; beat 5.0 is in the 4/4 bar from 4.0, with the
-/// change at 8.0 ahead; pre-roll at beat -1.0 is in the 4/4 bar from -4.0, and
-/// the map's entry at beat 0 (a change begins a bar, even to the same
-/// signature) is the next change.
+/// **A block meter names the signature in force, the change it counts bars
+/// from and the change after it.** Beat 9.0 is in the 7/8 bars counted from
+/// 8.0 with no change after it; beats 5.0 and -1.0 (pre-roll) are in the 4/4
+/// bars counted from the map's first change, beat 0, with the change at 8.0
+/// ahead; and at the change itself the new meter is in force.
 #[test]
 fn a_block_meter_is_the_signature_bar_line_and_next_change_at_a_beat() {
     let four = TimeSignature::of(4, 4);
     let seven = TimeSignature::of(7, 8);
     let change = MeterChange::new(Beat::new(8.0), seven);
-    assert_eq!(
-        BlockMeter::of(&map(), Beat::new(9.0)),
-        BlockMeter::new(seven, Beat::new(8.0), None)
-    );
-    assert_eq!(
-        BlockMeter::of(&map(), Beat::new(5.0)),
-        BlockMeter::new(four, Beat::new(4.0), Some(change))
-    );
-    assert_eq!(
-        BlockMeter::of(&map(), Beat::new(-1.0)),
-        BlockMeter::new(
-            four,
-            Beat::new(-4.0),
-            Some(MeterChange::new(Beat::new(0.0), four))
-        )
-    );
-    // At the change itself the new meter is in force and nothing is ahead.
-    assert_eq!(
-        BlockMeter::of(&map(), Beat::new(8.0)),
-        BlockMeter::new(seven, Beat::new(8.0), None)
-    );
+    let from_zero = BlockMeter::new(four, Beat::new(0.0), Some(change));
+    let in_seven = BlockMeter::new(seven, Beat::new(8.0), None);
+    for (beat, want) in [
+        (9.0, in_seven),
+        (5.0, from_zero),
+        (-1.0, from_zero),
+        (8.0, in_seven),
+    ] {
+        assert_eq!(BlockMeter::of(&map(), Beat::new(beat)), want, "beat {beat}");
+    }
 }
 
 /// **A transport built by a constructor has no meter and is not counting in;

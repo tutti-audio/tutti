@@ -1092,8 +1092,9 @@ pub struct TransportPosition {
 ///
 /// `Copy` and allocation-free, so the host stamps it on the audio thread
 /// ([`BlockMeter::of`]). It describes the position it rides on, from that
-/// position's first frame: the signature in force there, a bar line its bars
-/// are counted from, and the next meter change after it. Only the **first**
+/// position's first frame: the signature in force there, the bar line its bars
+/// are counted from (the change that put it in force), and the next meter
+/// change after it. Only the **first**
 /// change is carried; a second change that falls inside the same block is
 /// carried by the next block, which is stamped from its own first frame.
 /// A loop wrap inside a block is not a change here: a block that wraps into
@@ -1107,7 +1108,7 @@ pub struct BlockMeter {
 
 impl BlockMeter {
     /// The meter `signature`, its bars counted from the downbeat at
-    /// `bar_start` (any bar line of that signature), changing at
+    /// `bar_start` (the change that put it in force), changing at
     /// `next_change` if the host has one ahead (a change always begins a
     /// bar).
     #[must_use]
@@ -1123,18 +1124,22 @@ impl BlockMeter {
         }
     }
 
-    /// The meter `map` has in force at `beat`, and the first change after
-    /// it. Allocation-free: two binary searches.
+    /// The meter `map` has in force at `beat`, counted from the change that
+    /// put it in force, and the first change after it. Allocation-free: one
+    /// binary search. The same for every beat of one segment of the map, so
+    /// a block's meter is unchanged from block to block between changes.
     #[must_use]
     pub fn of(map: &MeterMap, beat: Beat) -> Self {
-        let here = map.bar_at(beat);
         let changes = map.changes();
+        // The map's first change is at or before beat 0, and holds for every
+        // beat before it (pre-roll), as `MeterMap::at` does.
+        let in_force = changes
+            .partition_point(|c| c.beat <= beat)
+            .saturating_sub(1);
         Self {
-            signature: here.signature,
-            bar_start: here.bar_start,
-            next_change: changes
-                .get(changes.partition_point(|c| c.beat <= beat))
-                .copied(),
+            signature: changes[in_force].signature,
+            bar_start: changes[in_force].beat,
+            next_change: changes.get(in_force + 1).copied(),
         }
     }
 
@@ -1143,8 +1148,8 @@ impl BlockMeter {
         self.signature
     }
 
-    /// A bar line of [`signature`](Self::signature): the bars are counted
-    /// from here.
+    /// The beat the change that put [`signature`](Self::signature) in force
+    /// is on, a bar line: the bars are counted from here.
     pub const fn bar_start(&self) -> Beat {
         self.bar_start
     }
