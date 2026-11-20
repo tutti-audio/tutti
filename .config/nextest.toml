@@ -32,7 +32,6 @@ slow-timeout = { period = "30s", terminate-after = 2 }
 [test-groups]
 sequencer = { max-threads = 4 }
 gs-synth = { max-threads = 1 }
-ump-endpoint = { max-threads = 1 }
 
 [[profile.default.overrides]]
 filter = 'package(tutti-midi-hardware) and test(/backend::alsa::tests::/)'
@@ -44,13 +43,6 @@ test-group = 'sequencer'
 [[profile.default.overrides]]
 filter = 'test(/^synth_open::/)'
 test-group = 'gs-synth'
-
-# CoreMIDI refused to enable a macOS 15 UMP Endpoint (`EnableUmpEndpoint`,
-# OSStatus -10844) on CI's Macs while other cases of the suite created theirs in
-# parallel processes. The cases that create one run one at a time in a copy.
-[[profile.default.overrides]]
-filter = 'binary_id(tutti-coremidi-ffi::ump_endpoint) or binary_id(tutti-midi-hardware::virtual_blocks)'
-test-group = 'ump-endpoint'
 
 # `cargo xtask conformance` joins each test's result to the spec rows it tags.
 # CI runs the plugin test tiers with this profile and uploads the file per OS.
