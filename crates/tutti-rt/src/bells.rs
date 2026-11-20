@@ -63,6 +63,12 @@
 //! waker, then a fence, then its load of `shut`: either the last pass finds
 //! the waker, or the poll sees `shut` and removes it itself.
 //!
+//! Only a ring that happens-before the drop is delivered. A ring concurrent
+//! with it can land after the last pass read the bell unrung: its waker is
+//! released unwoken, and the future stays parked under an executor that
+//! outlives the set. An owner that rings at shutdown drops what rings before
+//! the [`Bells`].
+//!
 //! The model in `tests/bells_loom.rs` runs this code.
 //!
 //! # Drops
@@ -185,7 +191,8 @@ impl Shared {
 /// Dropping it stops the tick thread, if there is one, and joins it. A bell
 /// rung before the drop wakes its waiting future; a future still waiting on an
 /// unrung bell is never woken again, and its waker is released. After the drop
-/// a wait poll stores no waker.
+/// a wait poll stores no waker. Only a ring that happens-before the drop is
+/// delivered, so drop what rings at shutdown first.
 #[must_use]
 pub struct Bells {
     shared: Arc<Shared>,
