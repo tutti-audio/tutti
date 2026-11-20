@@ -23,13 +23,13 @@
 //!
 //! Every row is a graph node (`Row::new`).
 
-use tutti_buffers::ChannelLayout;
 use tutti_buffers::Mono;
+use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_graph::contract::{Detect, Excite, Row};
 use tutti_graph::contract_tests;
 use tutti_nodes::{
-    CrossoverNode, DelayControls, DelayNode, LimiterControls, LimiterNode, MaxDelay,
-    MultibandCompressorNode,
+    CrossoverNode, DelayControls, DelayNode, LimiterConfig, LimiterControls, LimiterNode, MaxDelay,
+    MultibandBands, MultibandCompressorConfig, MultibandCompressorNode,
 };
 use tutti_units::{Db, Feedback, Hz, Samples, Seconds};
 
@@ -45,11 +45,13 @@ fn limiter_row() -> Row {
     Row::new(
         "LimiterNode (mono, 5 ms lookahead)",
         || {
-            Box::new(LimiterNode::<f32>::mono(LimiterControls {
-                threshold: Db::new(-3.0),
-                ceiling: Db::new(-0.3),
-                ..LimiterControls::DEFAULT
-            }))
+            Box::new(LimiterNode::<f32>::from(
+                LimiterConfig::new(BusTopology::MONO).controls(LimiterControls {
+                    threshold: Db::new(-3.0),
+                    ceiling: Db::new(-0.3),
+                    ..LimiterControls::DEFAULT
+                }),
+            ))
         },
         impulse(0),
         Detect::Threshold(0.0),
@@ -63,11 +65,13 @@ fn stereo_limiter_row() -> Row {
     Row::new(
         "LimiterNode (stereo, right channel)",
         || {
-            Box::new(LimiterNode::<f32>::stereo(LimiterControls {
-                threshold: Db::new(-3.0),
-                ceiling: Db::new(-0.3),
-                ..LimiterControls::DEFAULT
-            }))
+            Box::new(LimiterNode::<f32>::from(
+                LimiterConfig::new(BusTopology::STEREO).controls(LimiterControls {
+                    threshold: Db::new(-3.0),
+                    ceiling: Db::new(-0.3),
+                    ..LimiterControls::DEFAULT
+                }),
+            ))
         },
         impulse(1),
         Detect::Threshold(0.0),
@@ -117,7 +121,11 @@ fn crossover_row() -> Row {
 fn multiband_row() -> Row {
     Row::new(
         "MultibandCompressorNode<f32> (stereo, 3 bands, right channel)",
-        || Box::new(MultibandCompressorNode::<f32>::new(ChannelLayout::STEREO, 3).unwrap()),
+        || {
+            Box::new(MultibandCompressorNode::<f32>::from(
+                MultibandCompressorConfig::new(BusTopology::STEREO, MultibandBands::of(3)),
+            ))
+        },
         impulse(1),
         Detect::Threshold(0.0),
     )

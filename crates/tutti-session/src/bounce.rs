@@ -2482,12 +2482,14 @@ mod tests {
         let (dc, _) = session
             .graph()
             .add(ForkByClone(tutti_nodes::testing::Const::mono(0.25)));
-        let (lim, _) = session.graph().add(tutti_nodes::LimiterNode::<f32>::mono(
-            tutti_nodes::LimiterControls {
-                threshold: Db::new(-6.0),
-                ceiling: Db::new(-1.0),
-                ..tutti_nodes::LimiterControls::DEFAULT
-            },
+        let (lim, _) = session.graph().add(tutti_nodes::LimiterNode::<f32>::from(
+            tutti_nodes::LimiterConfig::new(tutti_buffers::BusTopology::MONO).controls(
+                tutti_nodes::LimiterControls {
+                    threshold: Db::new(-6.0),
+                    ceiling: Db::new(-1.0),
+                    ..tutti_nodes::LimiterControls::DEFAULT
+                },
+            ),
         ));
         session
             .graph()
