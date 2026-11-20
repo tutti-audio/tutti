@@ -2,33 +2,32 @@
 //!
 //! What is pinned here:
 //!
-//! - the engine stamps each block's transport with the meter in force at its
-//!   first frame (the signature and a bar line to count from) and the next
-//!   change after it, under the project's meter, and each piece after a
-//!   tempo step with the meter at its own beat;
 //! - the count-in flag of the transport's settings reaches the block;
-//! - an offline timeline stamps the meter it is given;
-//! - `ClickNode`, reading both from its `Env`, accents the downbeat of the
-//!   bar a meter change begins, on the change's frame, and sounds under the
-//!   count-in.
+//! - the project's meter, lent once per block, reaches `ClickNode` through
+//!   `Cx::meter`: it accents the downbeat of the bar a meter change begins, on
+//!   the change's frame, live and in an offline render, and it keeps counting
+//!   the right bars through a loop whose range holds a meter change, on every
+//!   pass;
+//! - the click sounds under the count-in.
 //!
-//! The oracles are arithmetic on the map: a bar of `n/d` is `4n/d` quarter
-//! notes from the change that put it in force, and at 120 BPM and 48 kHz a
-//! beat is 24 000 frames.
+//! The oracles are arithmetic on the map: at 120 BPM and 48 kHz a beat is
+//! 24 000 frames, and a click is heard a frame after its beat (its first
+//! sample is `sin(0)`).
 
 use std::sync::{Arc, Mutex};
 use tutti_buffers::{ChannelLayout, MaxBlock, Planes, PlanesMut};
 use tutti_engine::Engine;
-use tutti_graph::{BlockMeter, Editor, Executor, NodeKey, OutPort, Prepare, Source};
+use tutti_graph::{Editor, Executor, NodeKey, OutPort, Prepare, Source};
+use tutti_music::LoopRange;
 use tutti_music::{MeterChange, MeterMap, TimeSignature};
 use tutti_nodes::{ClickNode, ClickNodeConfig, ClickSettings, MetronomeMode};
 use tutti_timeline::{
-    MotionCommand, OfflineTimeline, OfflineTimelineConfig, Transport, render_graph,
+    LoopEdit, MotionCommand, OfflineTimeline, OfflineTimelineConfig, Transport, render_graph,
 };
-use tutti_units::{Amplitude, Beat, SampleRate, Samples};
+use tutti_units::{Amplitude, At, Beat, SampleRate, Samples};
 
 use super::env_beat::{SR, env_graph, onsets, render};
-use crate::support::{beat_of_frame, step_map};
+use crate::support::step_map;
 
 /// 4/4 from beat 0, then `signature` from `at`.
 fn four_four_then(at: f64, signature: TimeSignature) -> MeterMap {
@@ -45,98 +44,6 @@ fn logging(transport: &Transport) -> (Engine, Arc<Mutex<Vec<tutti_graph::Env>>>)
     let engine = Engine::new(transport, &mut ed, exec, tutti_engine::BlockDates::Os)
         .expect("within the limits");
     (engine, log)
-}
-
-/// The first block's transport meter, rolling from `start` under `map`.
-fn first_block_meter(map: MeterMap, start: f64) -> Option<BlockMeter> {
-    let transport = Transport::new(SampleRate::of(SR));
-    transport.settings().project_meter().set_meter(map);
-    let (engine, log) = logging(&transport);
-    transport
-        .motion()
-        .try_send(MotionCommand::play_from(Beat::new(start)))
-        .expect("room");
-    render(&engine, ChannelLayout::MONO, 256);
-    let first = log.lock().expect("log")[0].transport;
-    first.meter()
-}
-
-/// **A block's transport carries the meter in force at its first frame and
-/// the bar line its bars are counted from.** Under 4/4 then 7/8 from beat 8,
-/// rolling from beat 9 or from beat 12 (in the bar from 8 + 3.5 = 11.5) the
-/// bars are counted from the change at 8; rolling from beat 5 they are 4/4
-/// bars from beat 0, with the change ahead.
-#[test]
-fn the_block_carries_the_meter_in_force_and_its_bar_start() {
-    let seven_eight = TimeSignature::of(7, 8);
-    let change = MeterChange::new(Beat::new(8.0), seven_eight);
-    let in_seven = BlockMeter::new(seven_eight, Beat::new(8.0), None);
-    let in_four = BlockMeter::new(TimeSignature::of(4, 4), Beat::new(0.0), Some(change));
-    for (start, want) in [(9.0, in_seven), (12.0, in_seven), (5.0, in_four)] {
-        assert_eq!(
-            first_block_meter(four_four_then(8.0, seven_eight), start),
-            Some(want),
-            "rolling from beat {start}"
-        );
-    }
-}
-
-/// **A meter change inside the block is carried as the next change.** Rolling
-/// from beat 7.99 under 4/4 then 3/4 from beat 8: the block is in the 4/4
-/// bars from beat 0, and the change is 0.01 beat = 240 frames in, inside the
-/// 256-frame block.
-#[test]
-fn a_meter_change_inside_the_block_is_the_next_change() {
-    let three_four = TimeSignature::of(3, 4);
-    let map = four_four_then(8.0, three_four);
-    assert_eq!(
-        first_block_meter(map, 7.99),
-        Some(BlockMeter::new(
-            TimeSignature::of(4, 4),
-            Beat::new(0.0),
-            Some(MeterChange::new(Beat::new(8.0), three_four))
-        ))
-    );
-}
-
-/// **Each piece after a tempo step carries the meter at its own beat.** Under
-/// 4/4 then 3/4 from beat 0.5, a step to 151 BPM at the beat frame 20 111
-/// reaches at 120 BPM (beat 0.838) lands inside a block, and its piece is in
-/// the 3/4 bars counted from beat 0.5.
-#[test]
-fn a_piece_after_a_tempo_step_carries_the_meter_at_its_beat() {
-    let transport = Transport::new(SampleRate::of(SR));
-    let three_four = TimeSignature::of(3, 4);
-    transport
-        .settings()
-        .project_meter()
-        .set_meter(four_four_then(0.5, three_four));
-    let step_beat = beat_of_frame(20_111, 120.0, SR);
-    transport
-        .settings()
-        .set_tempo_map(step_map(&[(0.0, 120.0), (step_beat, 151.0)]));
-    let (engine, log) = logging(&transport);
-    transport
-        .motion()
-        .try_send(MotionCommand::play_from(Beat::new(0.0)))
-        .expect("room");
-    for _ in 0..60 {
-        render(&engine, ChannelLayout::MONO, 512);
-    }
-    let log = log.lock().expect("log");
-    let pieces: Vec<_> = log
-        .iter()
-        .flat_map(|env| env.changes.as_slice().iter().map(|c| c.to))
-        .collect();
-    assert!(!pieces.is_empty(), "the step lands inside a block");
-    for piece in pieces {
-        assert_eq!(
-            piece.meter(),
-            Some(BlockMeter::new(three_four, Beat::new(0.5), None)),
-            "piece at beat {}",
-            piece.beat().get()
-        );
-    }
 }
 
 /// **The count-in flag of the transport's settings is the block's.** Off, then
@@ -158,46 +65,10 @@ fn the_count_in_of_the_settings_reaches_the_block() {
     assert_eq!(counted, [false, true]);
 }
 
-/// **An offline timeline stamps the meter it is given, and none otherwise.**
-/// Rendering from beat 12 under 4/4 then 7/8 from beat 8, each block is in
-/// the 7/8 bars counted from 8; a timeline without a meter hands the graph
-/// none.
-#[test]
-fn an_offline_timeline_stamps_the_meter_it_is_given() {
-    let seven_eight = TimeSignature::of(7, 8);
-    let timeline = || {
-        OfflineTimeline::new(&OfflineTimelineConfig {
-            start_beat: Beat::new(12.0),
-            tempo_map: step_map(&[(0.0, 120.0)]),
-            sample_rate: SampleRate::of(SR),
-            loop_range: None,
-        })
-    };
-    let first_meter = |timeline: OfflineTimeline| {
-        let log = Arc::new(Mutex::new(Vec::new()));
-        let (_ed, mut exec) = env_graph(512, &log);
-        let mut out = vec![0.0f32; 256];
-        render_graph(
-            &timeline,
-            &mut exec,
-            Planes::default(),
-            PlanesMut::new(&mut [&mut out[..]]).unwrap(),
-        );
-        let first = log.lock().expect("log")[0].transport;
-        first.meter()
-    };
-    assert_eq!(
-        first_meter(timeline().meter(Arc::new(four_four_then(8.0, seven_eight)))),
-        Some(BlockMeter::new(seven_eight, Beat::new(8.0), None))
-    );
-    assert_eq!(first_meter(timeline()), None);
-}
-
 // ---- the metronome -----------------------------------------------------------
 
-/// The click at full volume on the global outputs, in `mode`, under
-/// `transport`.
-fn click_engine(transport: &Transport, mode: MetronomeMode) -> Engine {
+/// The click at full volume on the global outputs, in `mode`.
+fn click_graph(mode: MetronomeMode) -> (Editor, Executor) {
     let settings = Arc::new(ClickSettings::new());
     settings.mode().store(mode);
     settings.set_volume(tutti_nodes::ClickLevel::of(Amplitude::new(1.0)));
@@ -215,7 +86,19 @@ fn click_engine(transport: &Transport, mode: MetronomeMode) -> Engine {
         .topology
         .set_outputs((0..2).map(|port| Source::Node(OutPort { node: CLICK, port })));
     ed.commit().expect("commits");
+    (ed, exec)
+}
+
+/// The click graph as a live engine under `transport`.
+fn click_engine(transport: &Transport, mode: MetronomeMode) -> Engine {
+    let (mut ed, exec) = click_graph(mode);
     Engine::new(transport, &mut ed, exec, tutti_engine::BlockDates::Os).expect("within the limits")
+}
+
+/// Whether each click of `stereo` at `onsets` is an accent: an accent peaks
+/// at 1.0 and the other clicks at 0.7.
+fn accents(stereo: &[f32], onsets: &[usize]) -> Vec<bool> {
+    peaks(stereo, onsets).iter().map(|&p| p > 0.85).collect()
 }
 
 /// The click's loudest sample in the 1 440 frames (30 ms, its length) from
@@ -257,8 +140,10 @@ fn the_click_accents_the_bar_a_meter_change_begins_on_its_frame() {
     }
     let got = onsets(&out);
     assert_eq!(got, [1, 24_001, 36_001, 60_001, 84_001, 108_001]);
-    let accents: Vec<bool> = peaks(&out, &got).iter().map(|&p| p > 0.85).collect();
-    assert_eq!(accents, [false, false, true, false, false, true]);
+    assert_eq!(
+        accents(&out, &got),
+        [false, false, true, false, false, true]
+    );
 }
 
 /// **The click sounds under the transport's count-in.** In `PrerollOnly` it
@@ -279,5 +164,94 @@ fn the_click_sounds_while_the_transport_counts_in() {
     assert!(
         during[..200].iter().any(|&s| s != 0.0),
         "sounding within the first frames of the count-in"
+    );
+}
+
+/// **An offline render lends the timeline's meter, and the click accents the
+/// same bars.** The same clicks as the live render above, from beat 5, under
+/// an `OfflineTimeline` given the map; with none given the click counts 4/4,
+/// where beat 6.5 is no downbeat and beat 8 is.
+#[test]
+fn an_offline_click_counts_the_timelines_meter() {
+    let render_offline = |meter: Option<MeterMap>| {
+        let mut timeline = OfflineTimeline::new(&OfflineTimelineConfig {
+            start_beat: Beat::new(5.0),
+            tempo_map: step_map(&[(0.0, 120.0)]),
+            sample_rate: SampleRate::of(SR),
+            loop_range: None,
+        });
+        if let Some(meter) = meter {
+            timeline = timeline.meter(Arc::new(meter));
+        }
+        let (_ed, mut exec) = click_graph(MetronomeMode::Always);
+        let mut out = Vec::new();
+        for _ in 0..235 {
+            let mut planes = vec![vec![0.0f32; 512]; 2];
+            render_graph(
+                &timeline,
+                &mut exec,
+                Planes::default(),
+                PlanesMut::from_vecs(&mut planes).expect("two planes"),
+            );
+            for f in 0..512 {
+                out.extend([planes[0][f], planes[1][f]]);
+            }
+        }
+        out
+    };
+    let under = render_offline(Some(four_four_then(6.5, TimeSignature::of(3, 4))));
+    let got = onsets(&under);
+    assert_eq!(got, [1, 24_001, 36_001, 60_001, 84_001, 108_001]);
+    assert_eq!(
+        accents(&under, &got),
+        [false, false, true, false, false, true]
+    );
+    // Beats 5 to 10: 4/4's only downbeat in range is 8 (frame 72 000).
+    let bare = render_offline(None);
+    let got = onsets(&bare);
+    assert_eq!(got, [1, 24_001, 48_001, 72_001, 96_001, 120_001]);
+    assert_eq!(
+        accents(&bare, &got),
+        [false, false, false, true, false, false]
+    );
+}
+
+/// **A loop whose range holds a meter change accents the right bars on every
+/// pass.** Looping beats 5 to 8 under 4/4 then 3/4 from beat 6: beat 6 begins
+/// a 3/4 bar and is accented on each pass, 5 and 7 are not, and the wrap back
+/// to 5 (a block that wraps reads both meters) clicks again. A pass is 72 000
+/// frames; clicks on 5, 6, 7, 5, 6, 7, 5.
+#[test]
+fn a_loop_across_a_meter_change_accents_the_same_bars_on_each_pass() {
+    let transport = Transport::new(SampleRate::of(SR));
+    transport
+        .settings()
+        .project_meter()
+        .set_meter(four_four_then(6.0, TimeSignature::of(3, 4)));
+    let engine = click_engine(&transport, MetronomeMode::Always);
+    transport
+        .motion()
+        .schedule(
+            At::NextBlock,
+            LoopEdit::over(LoopRange::new(Beat::new(5.0), Beat::new(8.0)).expect("ordered")),
+        )
+        .expect("room");
+    transport
+        .motion()
+        .try_send(MotionCommand::play_from(Beat::new(5.0)))
+        .expect("room");
+    let mut out = Vec::new();
+    for _ in 0..293 {
+        out.extend(render(&engine, ChannelLayout::STEREO, 512));
+    }
+    let got = onsets(&out);
+    assert_eq!(
+        got,
+        [1, 24_001, 48_001, 72_001, 96_001, 120_001, 144_001],
+        "a click on each beat of both passes"
+    );
+    assert_eq!(
+        accents(&out, &got),
+        [false, true, false, false, true, false, false]
     );
 }

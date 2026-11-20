@@ -404,20 +404,20 @@ pub mod tempo {
 /// a program that builds one directly depends on `tutti-graph`.
 pub mod graph {
     pub use tutti_graph::{
-        BlockMeter, BusIn, BusOut, Channel, Chase, CompileError, ConstantMask, Continuity,
-        CycleEdge, Due, Edge, Event, EventKind, EventOrderError, EventRejected, EventWriter,
-        ForkBuild, ForkCause, ForkFaultKind, ForkHealth, ForkMode, ForkSource, Forked,
-        GraphInvalid, Harmony, HarmonyKind, InPlaceMask, NodeParts, Offset, ParamEvent, ParamInput,
-        ParamKind, ParamMod, ParamPorts, ParamPortsError, ParamRamp, ParamRange, ParamRangeCell,
-        ParamRangeReader, ParamSegment, Pass, PlayClock, RenderMode, Resolution, SilenceMask, Sink,
-        SortedEvents, Source, SubBlocks, TransportChange, TransportChangeRejected,
-        TransportChanges, TransportHistory, TransportPosition, UmpAt, VerifyError, Wake, WiredMask,
-    };
-    pub use tutti_graph::{
         Bus, BusRole, Buses, Cost, Cx, Env, ForkByClone, HasParam, HasParams, InBus, Inputs,
         IntoNode, Io, Node, OutBus, Outputs, ParamFork, ParamNode, ParamSet, ParamSetBuilder,
         ParamUnit, Params, Prepare, RtLevel, RtRecord, RtTarget, RtValue, Scalar, Shape, Status,
         Unforkable, declare_params, param_parts,
+    };
+    pub use tutti_graph::{
+        BusIn, BusOut, Channel, Chase, CompileError, ConstantMask, Continuity, CycleEdge, Due,
+        Edge, Event, EventKind, EventOrderError, EventRejected, EventWriter, ForkBuild, ForkCause,
+        ForkFaultKind, ForkHealth, ForkMode, ForkSource, Forked, GraphInvalid, Harmony,
+        HarmonyKind, InPlaceMask, NodeParts, Offset, ParamEvent, ParamInput, ParamKind, ParamMod,
+        ParamPorts, ParamPortsError, ParamRamp, ParamRange, ParamRangeCell, ParamRangeReader,
+        ParamSegment, Pass, PlayClock, RenderMode, Resolution, SilenceMask, Sink, SortedEvents,
+        Source, SubBlocks, TransportChange, TransportChangeRejected, TransportChanges,
+        TransportHistory, TransportPosition, UmpAt, VerifyError, Wake, WiredMask,
     };
     pub use tutti_graph::{EdgeGain, FeedbackFrom, Invalid, NodeMix, RangeView};
 }

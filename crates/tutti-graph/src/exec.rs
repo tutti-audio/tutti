@@ -377,10 +377,8 @@ pub struct RootFade {
 struct Clock {
     frame: Frame,
     /// The transport over the last frames, for nodes behind a latent path
-    /// (`Cx::transport_at`). Fed every block, whatever it renders. Boxed,
-    /// when the executor is built on the control side, so the executor
-    /// stays small to move: the history is some 36 KiB.
-    history: Box<TransportHistory>,
+    /// (`Cx::transport_at`). Fed every block, whatever it renders.
+    history: TransportHistory,
     /// The graph's play clock (`src/play.rs`): kept here, handed to every
     /// node in its `Env`, published for the editor.
     play: PlayState,
@@ -480,7 +478,7 @@ impl<F: Float> Executor<F> {
             state: State::empty(prepare.max_block().get()),
             clock: Clock {
                 frame: Frame::ZERO,
-                history: Box::new(TransportHistory::new()),
+                history: TransportHistory::new(),
                 play: PlayState::new(ends.play),
             },
             dropped: Dropped::new(),

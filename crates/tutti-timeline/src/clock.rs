@@ -366,23 +366,20 @@ impl TransportClock {
         from: &tutti_graph::TransportPosition,
         map: Option<&TempoMap>,
         cap: usize,
-        stamp: impl Fn(tutti_graph::TransportPosition) -> tutti_graph::TransportPosition,
     ) -> UpcomingTempo {
         let (Some(map), true) = (map, from.playing) else {
             return UpcomingTempo::NONE;
         };
         self.walk
             .ahead(map, &self.clock, frames, from.looping, cap, |clock| {
-                stamp(
-                    tutti_graph::TransportPosition::counted(
-                        true,
-                        clock.tempo(),
-                        clock.origin(),
-                        from.looping,
-                    )
-                    .with_recording(from.recording())
-                    .counting_in(from.count_in()),
+                tutti_graph::TransportPosition::counted(
+                    true,
+                    clock.tempo(),
+                    clock.origin(),
+                    from.looping,
                 )
+                .with_recording(from.recording())
+                .counting_in(from.count_in())
             })
     }
 

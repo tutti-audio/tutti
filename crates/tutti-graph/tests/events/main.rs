@@ -9,7 +9,6 @@ use assert_no_alloc::AllocDisabler;
 static ALLOC: AllocDisabler = AllocDisabler;
 
 mod arrival_transport;
-mod block_meter;
 mod commands;
 mod event_inlet;
 mod event_loss;

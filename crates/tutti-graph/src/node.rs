@@ -21,7 +21,7 @@ use std::num::NonZeroU32;
 
 use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
 
-use tutti_music::{FrameClock, LoopRange, MeterChange, MeterMap, SegmentOrigin, TimeSignature};
+use tutti_music::{FrameClock, LoopRange, MeterMap, SegmentOrigin};
 use tutti_units::{Beat, Bpm, Frame, Latency, SampleRate, Samples, Tail, UnitAddr, UnitParam};
 
 use crate::bus::{Buses, PortSpan};
@@ -1073,91 +1073,11 @@ pub struct TransportPosition {
     /// it with [`counting_in`](Self::counting_in), read it with
     /// [`count_in`](Self::count_in).
     count_in: bool,
-    /// The meter in force at the block's first frame, or `None` when the
-    /// host has none. Set with [`metered`](Self::metered), read with
-    /// [`meter`](Self::meter).
-    meter: Option<BlockMeter>,
     /// Where the block's first frame is: a bare beat, a frame count on the
     /// host's segment, or one walked on from a bare beat. Private, so the
     /// beat and the frame count it is derived from cannot disagree:
     /// [`beat`](Self::beat) *computes* the beat of a counted position.
     position: Position,
-}
-
-/// The meter a block's transport is under: what the metronome (or any node
-/// that counts bars) needs to place a bar line without the project's whole
-/// meter map.
-///
-/// `Copy` and allocation-free, so the host stamps it on the audio thread
-/// ([`BlockMeter::of`]). It describes the position it rides on, from that
-/// position's first frame: the signature in force there, the bar line its bars
-/// are counted from (the change that put it in force), and the next meter
-/// change after it. Only the **first**
-/// change is carried; a second change that falls inside the same block is
-/// carried by the next block, which is stamped from its own first frame.
-/// A loop wrap inside a block is not a change here: a block that wraps into
-/// a different meter reads that meter from the next block.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct BlockMeter {
-    signature: TimeSignature,
-    bar_start: Beat,
-    next_change: Option<MeterChange>,
-}
-
-impl BlockMeter {
-    /// The meter `signature`, its bars counted from the downbeat at
-    /// `bar_start` (the change that put it in force), changing at
-    /// `next_change` if the host has one ahead (a change always begins a
-    /// bar).
-    #[must_use]
-    pub const fn new(
-        signature: TimeSignature,
-        bar_start: Beat,
-        next_change: Option<MeterChange>,
-    ) -> Self {
-        Self {
-            signature,
-            bar_start,
-            next_change,
-        }
-    }
-
-    /// The meter `map` has in force at `beat`, counted from the change that
-    /// put it in force, and the first change after it. Allocation-free: one
-    /// binary search. The same for every beat of one segment of the map, so
-    /// a block's meter is unchanged from block to block between changes.
-    #[must_use]
-    pub fn of(map: &MeterMap, beat: Beat) -> Self {
-        let changes = map.changes();
-        // The map's first change is at or before beat 0, and holds for every
-        // beat before it (pre-roll), as `MeterMap::at` does.
-        let in_force = changes
-            .partition_point(|c| c.beat <= beat)
-            .saturating_sub(1);
-        Self {
-            signature: changes[in_force].signature,
-            bar_start: changes[in_force].beat,
-            next_change: changes.get(in_force + 1).copied(),
-        }
-    }
-
-    /// The signature in force at the first frame.
-    pub const fn signature(&self) -> TimeSignature {
-        self.signature
-    }
-
-    /// The beat the change that put [`signature`](Self::signature) in force
-    /// is on, a bar line: the bars are counted from here.
-    pub const fn bar_start(&self) -> Beat {
-        self.bar_start
-    }
-
-    /// The first meter change after the first frame, wherever it falls: a
-    /// node that reaches its beat switches to it, and counts that signature's
-    /// bars from the change.
-    pub const fn next_change(&self) -> Option<MeterChange> {
-        self.next_change
-    }
 }
 
 /// A transport's position at the block's first frame. See
@@ -1189,7 +1109,6 @@ impl TransportPosition {
             looping,
             recording: false,
             count_in: false,
-            meter: None,
             position: Position::At(beat),
         }
     }
@@ -1214,7 +1133,6 @@ impl TransportPosition {
             looping,
             recording: false,
             count_in: false,
-            meter: None,
             position: Position::Counted(origin),
         }
     }
@@ -1244,25 +1162,6 @@ impl TransportPosition {
     /// it.
     pub const fn count_in(&self) -> bool {
         self.count_in
-    }
-
-    /// This transport, with the [`meter`](Self::meter) in force at its
-    /// first frame.
-    #[must_use]
-    pub const fn metered(self, meter: BlockMeter) -> Self {
-        Self {
-            meter: Some(meter),
-            ..self
-        }
-    }
-
-    /// The meter in force at the first frame of this position (the block's,
-    /// or the piece's after a [`TransportChange`]), or `None` when the host
-    /// has none. A walked position ([`Env::transport_at`]) keeps the meter
-    /// of the position it was walked from: a meter change further on is
-    /// [`BlockMeter::next_change`].
-    pub const fn meter(&self) -> Option<BlockMeter> {
-        self.meter
     }
 
     /// This transport, at `beat` instead (the block's first frame its own
@@ -1525,6 +1424,21 @@ pub struct Cx<'a> {
     /// block's first frame. [`TransportHistory::none`] where nothing is
     /// kept.
     pub history: &'a TransportHistory,
+    /// The project's meter for this block, lent once per block by the host
+    /// that renders it. `None` where the host has no meter (a hand-built
+    /// `Cx`), which a node counting bars reads as 4/4 from beat 0 (see
+    /// [`meter`](Self::meter)).
+    pub meter: Option<&'a MeterMap>,
+}
+
+impl<'a> Cx<'a> {
+    /// The project's meter for this block, or `None` when the host has none:
+    /// a node counting bars then counts 4/4 from beat 0. One map per block,
+    /// read at any beat the block visits, so a loop wrap and any number of
+    /// meter changes inside the block are exact.
+    pub const fn meter(&self) -> Option<&'a MeterMap> {
+        self.meter
+    }
 }
 
 impl Cx<'_> {

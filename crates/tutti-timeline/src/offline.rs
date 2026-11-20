@@ -9,7 +9,6 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use tutti_rt::LockExt;
 use tutti_tempo::TempoMap;
 
-use super::project_meter::stamp_meter;
 use super::walk::TempoWalk;
 use atomic_float::AtomicF64;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -122,8 +121,9 @@ pub struct OfflineTimeline {
     /// The active loop region, validated at construction — so `advance()` needs
     /// no `end > start` guard of its own.
     loop_range: Option<LoopRange>,
-    /// The meter every position this timeline reports carries, or `None`
-    /// for a render with no meter (a node then counts 4/4 bars).
+    /// The meter a render under this timeline lends its nodes
+    /// ([`RenderClock::meter`](super::RenderClock::meter)), or `None` for a
+    /// render with no meter (a node then counts 4/4 bars).
     meter: Option<Arc<MeterMap>>,
 }
 
@@ -163,10 +163,10 @@ impl OfflineTimeline {
         }
     }
 
-    /// This timeline reporting `meter` in every position it hands a graph
-    /// ([`TransportPosition::meter`](tutti_graph::TransportPosition::meter)),
-    /// so a metronome in the render counts the project's bars. It keeps the
-    /// map it is given: a later edit to the project's meter does not reach it.
+    /// This timeline lending `meter` to the graph it renders
+    /// ([`RenderClock::meter`](super::RenderClock::meter)), so a metronome in
+    /// the render counts the project's bars. It keeps the map it is given: a
+    /// later edit to the project's meter does not reach it.
     #[must_use]
     pub fn meter(self, meter: Arc<MeterMap>) -> Self {
         Self {
@@ -263,16 +263,12 @@ impl OfflineTimeline {
     /// The transport of `clock`'s frame: rolling, at the tempo and segment the
     /// clock stands on, looping over this timeline's region.
     fn transport(&self, clock: &FrameClock) -> tutti_graph::TransportPosition {
-        let at = tutti_graph::TransportPosition::counted(
+        tutti_graph::TransportPosition::counted(
             true,
             clock.tempo(),
             clock.origin(),
             self.loop_range,
-        );
-        match &self.meter {
-            Some(meter) => stamp_meter(at, meter),
-            None => at,
-        }
+        )
     }
 
     /// The next block of at most `frames` frames as the graph takes it: its
@@ -386,6 +382,10 @@ impl super::RenderClock for OfflineTimeline {
         usize,
     ) {
         self.block(frames)
+    }
+
+    fn meter(&self) -> Option<&MeterMap> {
+        self.meter.as_deref()
     }
 }
 

@@ -1467,13 +1467,18 @@ impl<F: Float> GraphRender<F> {
             gain_old: chunks.next().expect("a chunk for the old root's gains"),
             gain_new: chunks.next().expect("a chunk for the new root's gains"),
         };
-        self.exec.render_applied(
-            len,
-            transport,
-            changes,
-            &[],
-            &mut outs[..rendered.min(ROOT_BANKS * MAX_CHANNELS)],
-        );
+        // The project's meter, lent once for this block and dropped with it.
+        {
+            let meter = self.transport.meter();
+            self.exec.render_applied(
+                len,
+                transport,
+                changes,
+                &[],
+                &mut outs[..rendered.min(ROOT_BANKS * MAX_CHANNELS)],
+                Some(&*meter),
+            );
+        }
         // The block that ends the fade is the old root's last: from here the
         // new root is the oldest in use.
         self.installed.store(

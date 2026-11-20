@@ -3,8 +3,8 @@
 //! The block's transport and every hosted plugin read the same musical meter,
 //! once per block. Each reader reads **one** cell whose identity is fixed when
 //! it is built: the transport's audio side the project's own ([`ProjectMeter`],
-//! stamped on each position as a [`BlockMeter`], which the metronome reads
-//! from its block), a plugin node its own [`TimeSignatureSlot`]. A slot follows
+//! lent once per rendered block and handed to every node through
+//! `Cx::meter`), a plugin node its own [`TimeSignatureSlot`]. A slot follows
 //! at most one project meter, and a [`ProjectMeter::set_meter`] publishes into
 //! the project's cell and into every following slot before it returns.
 //!
@@ -25,16 +25,8 @@
 
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
 
-use tutti_graph::{BlockMeter, TransportPosition};
 use tutti_music::MeterMap;
 use tutti_rt::{Loan, LockExt, Publisher, Reader};
-
-/// `at`, stamped with the meter `map` has in force at its first frame: what
-/// every position a block's walk reports carries
-/// ([`TransportPosition::meter`]). Allocation-free.
-pub(crate) fn stamp_meter(at: TransportPosition, map: &MeterMap) -> TransportPosition {
-    at.metered(BlockMeter::of(map, at.beat()))
-}
 
 /// What a following node reads: the project's meter, or none (the node then
 /// reads 4/4 from bar 0).

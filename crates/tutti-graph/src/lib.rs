@@ -739,10 +739,9 @@ pub use loss::EventLoss;
 pub use meter::{Level, MeterReader, MeterWriter};
 pub use mode::{MixError, ModeError, NodeMix, NodeMode};
 pub use node::{
-    BlockMeter, Chase, ConstantMask, Cx, Env, InPlaceMask, IntoNode, MAX_PORTS,
-    MAX_TRANSPORT_CHANGES, Node, NodeParts, Prepare, Resolution, Scratch, Shape, SilenceMask,
-    Status, TransportChange, TransportChangeRejected, TransportChanges, TransportPosition, Wired,
-    WiredMask,
+    Chase, ConstantMask, Cx, Env, InPlaceMask, IntoNode, MAX_PORTS, MAX_TRANSPORT_CHANGES, Node,
+    NodeParts, Prepare, Resolution, Scratch, Shape, SilenceMask, Status, TransportChange,
+    TransportChangeRejected, TransportChanges, TransportPosition, Wired, WiredMask,
 };
 pub use par::Pool;
 pub use param::{

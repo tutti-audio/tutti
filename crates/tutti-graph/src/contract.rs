@@ -1891,6 +1891,7 @@ pub fn drive_input_params<F: Float>(
         env,
         arrival: Latency::ZERO,
         history: TransportHistory::none(),
+        meter: None,
     };
     let max = Prepare::new(env.sample_rate, MaxBlock::of(Samples::new(frames))).max_block();
     let reported = std::cell::Cell::new(None);
@@ -2551,6 +2552,7 @@ impl<N: Node<F> + ?Sized, F: Float> Direct<N, F> {
             env,
             arrival: Latency::ZERO,
             history: TransportHistory::none(),
+            meter: None,
         };
         let max = Prepare::new(self.rate, MaxBlock::of(Samples::new(self.frames))).max_block();
         let io = Io::new(

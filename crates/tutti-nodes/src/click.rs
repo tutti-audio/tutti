@@ -4,10 +4,10 @@
 //! **per frame** from its block's [`Env`] — walked piece by piece across the
 //! block's transport changes, with the host's own clock
 //! ([`Env::for_each_beat`](tutti_graph::Env::for_each_beat)) — the play and record state from
-//! the same pieces, the count-in flag and the meter off the same transport
-//! ([`TransportPosition::count_in`](tutti_graph::TransportPosition::count_in),
-//! [`TransportPosition::meter`](tutti_graph::TransportPosition::meter)), and its own
-//! settings (volume, mode) from [`ClickSettings`].
+//! the same pieces, the count-in flag off the same transport
+//! ([`TransportPosition::count_in`](tutti_graph::TransportPosition::count_in)), the
+//! project's meter from [`Cx::meter`], and its own settings (volume, mode) from
+//! [`ClickSettings`].
 //!
 //! # Why the beat comes from `Env`, not the transport's atomic
 //!
@@ -22,18 +22,13 @@
 //! whose beat first reaches it. A start or a stop inside a block gates the
 //! click on its frame too, not at the block's start.
 //!
-//! # The meter rides on the block's transport
+//! # The meter is lent by the block
 //!
-//! The host stamps each block's transport (and each piece after a transport
-//! change) with the [`BlockMeter`] in force at its first frame: the signature,
-//! a bar line to count its bars from, and the next meter change. The node
-//! counts bars from that, and from the change once its beat reaches it, so
-//! the accent is the bar's downbeat under the meter the host played. A
-//! transport with no meter counts 4/4 bars from beat 0.
-//!
-//! Only the first change after a piece's first frame is carried, and a loop
-//! wrap inside a block does not carry the meter at the loop's start: the next
-//! block, stamped from its own first frame, reads it.
+//! The host lends the project's [`MeterMap`] once per block through
+//! [`Cx::meter`]. The node reads it at every beat it walks, so a loop wrap and
+//! any number of meter changes inside a block count bars exactly, and the
+//! accent is the bar's downbeat under the meter the host played. A block with
+//! no meter counts 4/4 from beat 0.
 
 use atomic_float::AtomicF64;
 use std::sync::Arc;
@@ -41,10 +36,10 @@ use std::sync::atomic::Ordering;
 use tutti_buffers::BusTopology;
 use tutti_buffers::Float;
 use tutti_graph::{
-    BlockMeter, Cx, Env, ForkCause, ForkMode, ForkSource, Forked, IntoNode, Io, Node, NodeParts,
-    Prepare, Shape, Status, declare_params,
+    Cx, Env, ForkCause, ForkMode, ForkSource, Forked, IntoNode, Io, Node, NodeParts, Prepare,
+    Shape, Status, declare_params,
 };
-use tutti_music::{Meter, TimeSignature};
+use tutti_music::{Meter, MeterMap, TimeSignature};
 use tutti_rt::{AtomicCell, atomic_word};
 use tutti_units::Tail;
 use tutti_units::{
@@ -269,9 +264,6 @@ impl<F: Float> From<ClickNodeConfig> for ClickNode<F> {
 }
 
 impl<F: Float> ClickNode<F> {
-    /// The meter a block with none is counted under: 4/4 from beat 0.
-    const FOUR_FOUR: BlockMeter = BlockMeter::new(TimeSignature::of(4, 4), Beat::new(0.0), None);
-
     /// A node over `settings`.
     fn over(settings: Arc<ClickSettings>) -> Self {
         Self {
@@ -361,8 +353,8 @@ impl<F: Float> ClickNode<F> {
         self.last_click_onset = None;
     }
 
-    /// Retrigger if `beat` has crossed into a new notated beat under `meter`:
-    /// the block's, or the change's once `beat` reaches it.
+    /// Retrigger if `beat` has crossed into a new notated beat under `meter`
+    /// (`None`: 4/4 from beat 0).
     ///
     /// The index counts *notated* beats, not quarter notes: in 7/8 that is an
     /// eighth, so the metronome clicks seven times per bar rather than four.
@@ -379,7 +371,7 @@ impl<F: Float> ClickNode<F> {
         latched_until: &mut Beat,
         click_pos: &mut usize,
         is_accent: &mut bool,
-        meter: &BlockMeter,
+        meter: Option<&MeterMap>,
         beat: Beat,
     ) {
         if let Some(onset) = *last_click_onset
@@ -389,20 +381,16 @@ impl<F: Float> ClickNode<F> {
             return;
         }
 
-        // The bars are counted from the block's bar line, or from the change
-        // once `beat` has reached it: a change always begins a bar.
-        let (signature, origin) = match meter.next_change() {
-            Some(change) if beat >= change.beat => (change.signature, change.beat),
-            _ => (meter.signature(), meter.bar_start()),
+        let position = match meter {
+            Some(map) => map.bar_at(beat),
+            None => TimeSignature::default().bar_at(beat),
         };
-        let position = signature.bar_at(Beat::new((beat - origin).get()));
 
         // Identify the beat by the *onset it belongs to*, not by a running
         // count. The onset is unambiguous everywhere
         // and needs no global numbering.
-        let onset = origin
-            + (position.bar_start - Beat::new(0.0))
-            + signature.beat_length() * (position.beat.get() - 1) as f64;
+        let onset = position.bar_start
+            + position.signature.beat_length() * (position.beat.get() - 1) as f64;
 
         // Inequality, not `>`: a backward jump from a loop wrap must retrigger
         // too. The epsilon is for float drift in the accumulated playhead, well
@@ -426,9 +414,13 @@ impl<F: Float> ClickNode<F> {
         // simply short). Measured from the onset actually latched, so a
         // within-epsilon non-change keeps the span it already had.
         let latched = last_click_onset.unwrap_or(onset);
-        let next_onset = latched + signature.beat_length();
-        *latched_until = match meter.next_change() {
-            Some(change) if beat < change.beat && change.beat < next_onset => change.beat,
+        let next_onset = latched + position.signature.beat_length();
+        let changes = meter.map_or(&[][..], |m| m.changes());
+        let next_change = changes
+            .get(changes.partition_point(|c| c.beat <= latched))
+            .map(|c| c.beat);
+        *latched_until = match next_change {
+            Some(change) if change < next_onset => change,
             _ => next_onset,
         };
     }
@@ -436,8 +428,8 @@ impl<F: Float> ClickNode<F> {
     /// Drop the cached span, so the next onset check consults the meter.
     ///
     /// Called at the top of every block, which is all it takes for a
-    /// changed meter to reach the node: the block's transport carries the
-    /// meter, and this is the only thing derived from it that outlives one.
+    /// republished meter to reach the node: the meter is lent per block, and
+    /// this is the only thing derived from it that outlives one.
     #[inline]
     fn forget_latch(&mut self) {
         self.latched_until = Beat::new(f64::NEG_INFINITY);
@@ -473,11 +465,11 @@ impl<F: Float> ClickNode<F> {
     /// Render `env`'s block into `left` and `right`.
     ///
     /// The mode and the volume are read once per block — a UI write lands at
-    /// the next block, never mid-block. The beat is per frame, and the play,
-    /// record and count-in state and the meter per piece of the block
+    /// the next block, never mid-block. The beat and the meter are read per
+    /// frame, and the play, record and count-in state per piece of the block
     /// ([`Env::segments`]): a stop inside the block silences the click from
     /// its frame, and a start sounds the beat it lands on, on its frame.
-    fn render(&mut self, env: &Env, left: &mut [F], right: &mut [F]) {
+    fn render(&mut self, env: &Env, meter: Option<&MeterMap>, left: &mut [F], right: &mut [F]) {
         let mode = self.settings.mode().load();
         // The level narrows to the render's format once per block.
         let volume = F::from_unit(self.settings.volume().get());
@@ -490,7 +482,6 @@ impl<F: Float> ClickNode<F> {
                 right[range].fill(F::ZERO);
                 continue;
             }
-            let meter = piece.transport.meter().unwrap_or(Self::FOUR_FOUR);
             let Self {
                 click_normal,
                 click_accent,
@@ -506,7 +497,7 @@ impl<F: Float> ClickNode<F> {
                     latched_until,
                     click_pos,
                     is_accent,
-                    &meter,
+                    meter,
                     beat,
                 );
                 let sample =
@@ -552,7 +543,7 @@ impl<F: Float> Node<F> for ClickNode<F> {
         let (Some(left), Some(right)) = (channels.next(), channels.next()) else {
             return Status::Modified;
         };
-        self.render(cx.env, left, right);
+        self.render(cx.env, cx.meter(), left, right);
         Status::Modified
     }
 
@@ -610,8 +601,7 @@ impl<F: Float> IntoNode<F> for ClickNode<F> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tutti_buffers::Planes;
-    use tutti_graph::contract::{drive_input, prepared};
+    use tutti_graph::contract::prepared;
     use tutti_graph::{Offset, TransportChanges};
     use tutti_music::FrameClock;
     use tutti_music::{BeatsPerBar, MeterChange, MeterMap, NoteValue, TimeSignature};
@@ -721,11 +711,21 @@ mod tests {
         }
     }
 
-    /// One block, as `[left, right]`.
+    /// One block under the meter `meter` (`None`: 4/4), as `[left, right]`.
+    fn block_under(
+        node: &mut ClickNode<f32>,
+        env: &Env,
+        meter: Option<&MeterMap>,
+    ) -> [Vec<f32>; 2] {
+        let frames = env.block_len.get();
+        let (mut left, mut right) = (vec![0.0; frames], vec![0.0; frames]);
+        node.render(env, meter, &mut left, &mut right);
+        [left, right]
+    }
+
+    /// One block with no meter, as `[left, right]`.
     fn block(node: &mut ClickNode<f32>, env: &Env) -> [Vec<f32>; 2] {
-        let out = drive_input(node, env, Planes::default(), &[], &[]).audio;
-        let [l, r]: [Vec<f32>; 2] = out.try_into().expect("stereo");
-        [l, r]
+        block_under(node, env, None)
     }
 
     /// One frame at `beat`, as a `[left, right]` pair.
@@ -744,18 +744,9 @@ mod tests {
         (settings, node)
     }
 
-    /// `t` stamped with the meter `map` has in force at its beat, as the host
-    /// stamps a block's transport.
-    fn metered(
-        t: tutti_graph::TransportPosition,
-        map: &MeterMap,
-    ) -> tutti_graph::TransportPosition {
-        t.metered(BlockMeter::of(map, t.beat()))
-    }
-
     /// One frame at `beat` under the meter `map`, as a `[left, right]` pair.
     fn frame_under(node: &mut ClickNode<f32>, map: &MeterMap, deck: Deck, beat: f64) -> [f32; 2] {
-        let [l, r] = block(node, &env(SR, 1, metered(held(deck, beat), map)));
+        let [l, r] = block_under(node, &env(SR, 1, held(deck, beat)), Some(map));
         [l[0], r[0]]
     }
 
@@ -975,7 +966,7 @@ mod tests {
         node.click_pos = node.click_normal.len();
 
         // Frame `i` carries beat `2 + i/100`, so the change at 2.5 is frame 50.
-        let [left, _] = block(&mut node, &env(SR, 64, metered(hundredths_from(2.0), &map)));
+        let [left, _] = block_under(&mut node, &env(SR, 64, hundredths_from(2.0)), Some(&map));
 
         assert_eq!(
             node.last_click_onset,
@@ -989,48 +980,38 @@ mod tests {
         assert_eq!(first_sound, Some(51), "clicked on the change's frame");
     }
 
-    /// A block carries only the first meter change after its first frame: a
-    /// second change inside the same block is counted from the next block's
-    /// first frame, on its own bar line. The first change lands on its frame,
-    /// and after the next block the node counts bars from the second change,
-    /// never from the first's grid.
+    /// Two meter changes inside one block are each accented on their own
+    /// frame: the first at 2.5 (frame 50 of a block carrying beat `2 + i/100`)
+    /// and the second at 2.75 (frame 75), the click of each beginning where
+    /// its bar does. A click is silent on its onset frame (`sin(0)`), so the
+    /// accent's samples follow from the next one.
     #[test]
-    fn a_second_change_in_one_block_is_counted_from_the_next_block() {
+    fn two_meter_changes_in_one_block_are_each_accented_on_their_frame() {
         let (settings, mut node) = make_click();
         settings.mode().store(MetronomeMode::Always);
         set_volume(&settings, Amplitude::new(1.0));
         let map = MeterMap::new([
             MeterChange::new(Beat::new(0.0), TimeSignature::default()),
             MeterChange::new(Beat::new(2.5), TimeSignature::of(3, 4)),
-            MeterChange::new(Beat::new(2.55), TimeSignature::of(7, 8)),
+            MeterChange::new(Beat::new(2.75), TimeSignature::of(7, 8)),
         ]);
         node.last_click_onset = Some(Beat::new(2.0));
         node.click_pos = node.click_normal.len();
 
-        // Frame `i` carries beat `2 + i/100`: the changes are frames 50 and 55.
-        let first = metered(hundredths_from(2.0), &map);
-        let [left, _] = block(&mut node, &env(SR, 64, first));
-        assert_eq!(
-            left.iter().position(|&s| s != 0.0),
-            Some(51),
-            "the first change clicks on its frame"
-        );
-        assert_eq!(
-            node.last_click_onset,
-            Some(Beat::new(2.5)),
-            "the second change is not in this block's meter"
-        );
+        let [left, _] = block_under(&mut node, &env(SR, 100, hundredths_from(2.0)), Some(&map));
 
-        let second = metered(hundredths_from(2.64), &map);
-        let _ = block(&mut node, &env(SR, 10, second));
+        let accent = node.click_accent.clone();
+        assert_eq!(&left[50..75], &accent[..25], "the first change's click");
         assert_eq!(
-            node.last_click_onset,
-            Some(Beat::new(2.55)),
-            "the next block counts bars from the second change"
+            &left[75..96],
+            &accent[..21],
+            "the second restarts it on frame 75"
         );
+        assert_eq!(node.last_click_onset, Some(Beat::new(2.75)));
+        assert!(node.is_accent);
     }
 
-    /// A block stamped with another meter is counted under it from its first
+    /// A block under another meter is counted under it from its first
     /// frame, not from whenever the playhead leaves the span the old meter drew.
     #[test]
     fn a_new_blocks_meter_is_counted_from_its_first_frame() {
@@ -1047,10 +1028,7 @@ mod tests {
             Beat::new(0.0),
             TimeSignature::new(BeatsPerBar::of(3), NoteValue::SIXTEENTH),
         )]);
-        let _ = block(
-            &mut node,
-            &env(SR, 10, metered(hundredths_from(2.64), &map)),
-        );
+        let _ = block_under(&mut node, &env(SR, 10, hundredths_from(2.64)), Some(&map));
         assert_eq!(
             node.last_click_onset,
             Some(Beat::new(2.5)),
