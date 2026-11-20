@@ -521,7 +521,7 @@ fn a_disk_voice_whose_file_cannot_be_read_fails_the_export_by_name() {
     };
     std::fs::remove_file(&path).expect("removes");
     match session.bounce(on(0.2, &timeline(120.0))) {
-        Err(BounceError::Export(tutti_export::Error::ForkFailed { key, kind, cause })) => {
+        Err(BounceError::Export(tutti_export::RenderError::ForkFailed { key, kind, cause })) => {
             assert_eq!(key, clip.erase());
             assert_eq!(kind, tutti_graph::ForkFaultKind::Failed);
             assert!(

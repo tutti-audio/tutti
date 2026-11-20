@@ -26,7 +26,7 @@ use tutti_nodes::{
     BusStripConfig, BusStripNode, EqBandConfig, EqBandNode, LimiterConfig, LimiterControls,
     LimiterNode, SvfType,
 };
-use tutti_timeline::{MotionEvent, Transport};
+use tutti_timeline::{MotionCommand, Transport};
 use tutti_units::{Db, Hz, Q, SampleRate, Samples};
 
 /// Build an [`Engine`] whose graph is `sine → bell EQ → strip → limiter`,
@@ -97,7 +97,7 @@ fn build_engine_with_chain() -> Engine {
         .expect("within the limits");
     // Every commit is sent; the editor only had to outlive the setup.
     drop(ed);
-    let _ = transport.motion().try_send(MotionEvent::Play);
+    let _ = transport.motion().try_send(MotionCommand::Play);
     engine
 }
 

@@ -32,7 +32,7 @@ use crate::render::{
     FileChannels, REPLAY_BLOCK, RenderPlan, Replay, check_loss, drive, with_source,
 };
 use crate::spill::{Spill, SpillBudget};
-use crate::{ConfigError, Error, Job, RenderGraph, Rendered, Result, Unmeasured};
+use crate::{ConfigError, Job, RenderError, RenderGraph, Rendered, Result, Unmeasured};
 
 /// A tap an output reads: the reader, and the planes one block of its lanes
 /// is drained into.
@@ -165,16 +165,16 @@ pub(crate) fn render_outputs<F: FftFloat>(
 /// output that does not measure, and two files with one path.
 fn check_outputs<F: Float>(outputs: &[Output<F>]) -> Result<()> {
     if outputs.is_empty() {
-        return Err(Error::NoOutputs);
+        return Err(RenderError::NoOutputs);
     }
     for (i, output) in outputs.iter().enumerate() {
-        let target_error = |why| Error::Target { output: i, why };
+        let target_error = |why| RenderError::Target { output: i, why };
         let (width, file) = match output.target() {
             Target::File(f) => (f.channels(), Some(f)),
             Target::Buffers(b) => (b.channels(), None),
         };
         if width.count() == 0 {
-            return Err(Error::UnsupportedChannels);
+            return Err(RenderError::UnsupportedChannels);
         }
         if let crate::Feed::Tap { reader, lanes } = output.feed()
             && reader.layout() != lanes.topology().width()
@@ -254,10 +254,12 @@ fn open_lanes<F: FftFloat>(
                 let fold = channels
                     .fold_from(usize::from(width.count()), Some(lanes.topology()))
                     .map_err(|e| match e {
-                        Error::InvalidConfig(ConfigError::Placement(why)) => Error::Target {
-                            output: i,
-                            why: TargetError::Placement(why),
-                        },
+                        RenderError::InvalidConfig(ConfigError::Placement(why)) => {
+                            RenderError::Target {
+                                output: i,
+                                why: TargetError::Placement(why),
+                            }
+                        }
                         other => other,
                     })?;
                 let planes = vec![vec![F::ZERO; max_block]; reader.width()];
@@ -310,7 +312,7 @@ fn open_lanes<F: FftFloat>(
 /// (`vec![Vec::with_capacity(n); ch]` would clone ONE empty Vec `ch` times,
 /// and a clone does not carry capacity.)
 fn reserve_planes<F: Float>(plan: &RenderPlan, layout: ChannelLayout) -> Result<Vec<Vec<F>>> {
-    let too_large = || Error::RenderTooLarge {
+    let too_large = || RenderError::RenderTooLarge {
         frames: plan.output_length,
         channels: layout,
     };
@@ -336,10 +338,10 @@ fn drain_tap<F: Float>(output: usize, tap: &mut TapFeed<F>, n: usize) -> Result<
         .pop_planes(planes.slice_mut(Samples::ZERO..Samples::new(n)))?;
     let lost = tap.reader.take_lost();
     if lost.get() > 0 {
-        return Err(Error::TapOverrun { output, lost });
+        return Err(RenderError::TapOverrun { output, lost });
     }
     if got.get() < n {
-        return Err(Error::TapStarved { output });
+        return Err(RenderError::TapStarved { output });
     }
     Ok(())
 }
@@ -520,7 +522,7 @@ fn measure<F: FftFloat>(
     control: &mut Control<'_>,
 ) -> Result<Outcome<(Reading, Samples)>> {
     let out_rate = output_rate(&waiting.target, rate);
-    let unmeasurable = |reason: Unmeasured| Error::Unmeasurable {
+    let unmeasurable = |reason: Unmeasured| RenderError::Unmeasurable {
         output: Some(output),
         channels: layout,
         sample_rate: out_rate,
@@ -595,7 +597,7 @@ pub(crate) struct PendingFile<F: FftFloat> {
 ///
 /// Returns each file that landed with what its chain counted, in the order
 /// given. A rename that fails after others landed is
-/// [`Error::NotCommitted`], naming what landed, which is kept: nothing is
+/// [`RenderError::NotCommitted`], naming what landed, which is kept: nothing is
 /// rolled back. One that fails before any landed is the rename's own error.
 /// The file whose rename failed is kept beside its path and named by the
 /// error ([`tutti_codec::Error::Commit`]); every other file that did not land
@@ -633,7 +635,7 @@ pub(crate) fn finalize_files<F: FftFloat>(
             Ok(clipped) => landed.push((index, path, clipped)),
             Err(cause) if landed.is_empty() => return Err(cause.into()),
             Err(cause) => {
-                return Err(Error::NotCommitted {
+                return Err(RenderError::NotCommitted {
                     landed: landed.into_iter().map(|(_, path, _)| path).collect(),
                     cause,
                 });

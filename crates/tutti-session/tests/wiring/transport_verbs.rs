@@ -5,7 +5,7 @@ use tutti_buffers::InterleavedMut;
 use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_music::LoopRange;
 use tutti_session::Session;
-use tutti_timeline::{FadeOut, MotionEvent};
+use tutti_timeline::{FadeOut, MotionCommand};
 use tutti_timeline::{LoopRegion, TimedError};
 use tutti_units::{Beat, Bpm, Frame, SampleRate, Samples};
 
@@ -54,7 +54,7 @@ fn locate_play_and_stop_move_the_playhead_on_the_set_tempo() {
 fn a_scheduled_play_starts_on_its_frame() {
     let mut s = offline();
     crate::tempo::set_tempo(&mut s, Bpm::of(60.0)).expect("not following");
-    s.schedule(Frame::new(24_000), MotionEvent::Play).unwrap();
+    s.schedule(Frame::new(24_000), MotionCommand::Play).unwrap();
     render(&s, 48_000);
     let beat = s.playhead().beat().get();
     assert!((beat - (0.5 - BLOCK_BEATS)).abs() < 1e-3, "{beat}");
@@ -66,7 +66,7 @@ fn a_scheduled_play_starts_on_its_frame() {
 fn a_stop_scheduled_at_a_beat_halts_there() {
     let mut s = offline();
     crate::tempo::set_tempo(&mut s, Bpm::of(60.0)).expect("not following");
-    s.schedule(Beat::new(1.0), MotionEvent::stop_unfaded())
+    s.schedule(Beat::new(1.0), MotionCommand::stop_unfaded())
         .unwrap();
     s.play().unwrap();
     render(&s, 3_000);
@@ -198,10 +198,10 @@ fn a_play_at_a_beat_on_a_stopped_transport_is_refused() {
     crate::tempo::set_tempo(&mut s, Bpm::of(60.0)).expect("not following");
 
     assert_eq!(
-        s.schedule(Beat::new(1.0), MotionEvent::Play),
-        Err(TimedError::BeatWhileStopped(MotionEvent::Play))
+        s.schedule(Beat::new(1.0), MotionCommand::Play),
+        Err(TimedError::BeatWhileStopped(MotionCommand::Play))
     );
-    let roll = MotionEvent::play_from(Beat::new(0.0));
+    let roll = MotionCommand::play_from(Beat::new(0.0));
     assert_eq!(
         s.schedule(Beat::new(2.0), roll),
         Err(TimedError::BeatWhileStopped(roll))
@@ -213,10 +213,10 @@ fn a_play_at_a_beat_on_a_stopped_transport_is_refused() {
     );
 
     assert!(
-        s.schedule(Beat::new(4.0), MotionEvent::stop_unfaded())
+        s.schedule(Beat::new(4.0), MotionCommand::stop_unfaded())
             .is_ok()
     );
-    assert!(s.schedule(Frame::new(48_000), MotionEvent::Play).is_ok());
+    assert!(s.schedule(Frame::new(48_000), MotionCommand::Play).is_ok());
 }
 
 /// **A play at a beat straight after `play()` is taken**, before any block has
@@ -228,7 +228,7 @@ fn a_play_at_a_beat_right_after_play_is_taken_and_fires() {
     let mut s = offline();
     crate::tempo::set_tempo(&mut s, Bpm::of(60.0)).expect("not following");
     s.play().unwrap();
-    s.schedule(Beat::new(1.0), MotionEvent::Play).unwrap();
+    s.schedule(Beat::new(1.0), MotionCommand::Play).unwrap();
     // The play and the timed play, neither applied yet.
     assert_eq!(s.transport_handle().scheduled_outstanding(), 2);
     render(&s, 24_000);
@@ -238,5 +238,5 @@ fn a_play_at_a_beat_right_after_play_is_taken_and_fires() {
 
     s.stop(FadeOut::Immediate).unwrap();
     render(&s, 2_000);
-    assert!(s.schedule(Beat::new(9.0), MotionEvent::Play).is_err());
+    assert!(s.schedule(Beat::new(9.0), MotionCommand::Play).is_err());
 }

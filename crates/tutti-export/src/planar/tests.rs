@@ -1,5 +1,5 @@
 use super::append;
-use crate::Error;
+use crate::RenderError;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::{BufferError, Interleaved};
 
@@ -12,7 +12,7 @@ fn append_refuses_a_width_mismatch_and_appends_nothing() {
     let err = append(block, &mut planes).unwrap_err();
     assert!(matches!(
         err,
-        Error::Buffer(BufferError::WidthMismatch { .. })
+        RenderError::Buffer(BufferError::WidthMismatch { .. })
     ));
     assert!(planes.iter().all(Vec::is_empty));
 }

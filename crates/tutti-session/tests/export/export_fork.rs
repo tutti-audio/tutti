@@ -730,7 +730,7 @@ fn an_unforkable_node_refuses_the_export_by_key() {
         BounceError::NotForkable { node: key } => {
             assert_eq!(key, mic.erase());
             assert!(
-                tutti_export::Error::NotForkable { key }
+                tutti_export::RenderError::NotForkable { key }
                     .to_string()
                     .contains(&format!("{:?}", mic.erase())),
                 "the message names it"
