@@ -15,16 +15,17 @@ use tutti_buffers::MaxBlock;
 use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_fixtures::midi;
 use tutti_graph::contract::{BlockRig, Direct};
-use tutti_graph::{IntoNode, Node, ParamNode, ParamSet};
+use tutti_graph::{IntoNode, Node, ParamNode, ParamSet, TransportPosition};
+use tutti_music::{NoteDuration, NoteModifier, NoteValue};
 use tutti_nodes::{
     ChannelTimes, DelayConfig, DelayControls, DelayLayout, DelayNode, FeedbackRouting,
     InterpolationMode, LfoConfig, LfoNode, LfoShape, MaxDelay, ModDelayConfig, ModDelayNode,
-    PhaserConfig, PhaserNode, Stages, Stagger, SweepRange,
+    NoteTimes, PhaserConfig, PhaserNode, Stages, Stagger, SweepRange,
 };
 use tutti_ump::{MidiChannel, U7};
 use tutti_units::{
-    Ballistics, BeatsPerCycle, Feedback, Hz, ParamId, PhaseIncrement, Real, SampleRate, Seconds,
-    UnitParam,
+    Ballistics, Beat, BeatsPerCycle, Bpm, Feedback, Hz, ParamId, PhaseIncrement, Real, SampleRate,
+    Seconds, UnitParam,
 };
 
 /// A node through `BlockRig`: its inputs an alternating signal of
@@ -1641,6 +1642,74 @@ fn the_delay_corners_are_allocation_free() {
             assert!(cells.set(UnitParam::CrossFeedback, if i & 2 == 2 { 1.0 } else { 0.0 }));
         },
     );
+}
+
+/// A tempo-synced delay: its times follow a tempo that moves every block, from a crawl to a
+/// sprint, and the retarget and the ramps it aims allocate nothing. 400 blocks of the input
+/// are run before the gate is armed, so the loop walks real DSP.
+#[test]
+fn the_synced_delay_following_a_moving_tempo_is_allocation_free_and_finite() {
+    let notes = [
+        NoteDuration::new(NoteValue::SIXTEENTH, NoteModifier::Triplet),
+        NoteDuration::new(NoteValue::of(64), NoteModifier::Dotted),
+    ];
+    let layout = DelayLayout::builder(
+        BusTopology::STEREO,
+        MaxDelay::of(MaxDelay::CAP),
+        InterpolationMode::CubicHermite,
+    )
+    .synced(NoteTimes::try_from(&notes[..]).expect("two notes"))
+    .build()
+    .unwrap();
+    let node = DelayNode::<f32>::from(DelayConfig::new(layout).controls(DelayControls {
+        feedback: Feedback::new(0.5),
+        cross_feedback: Feedback::new(0.25),
+        ..DelayControls::DEFAULT
+    }));
+    let mut rig = Direct::new(node, SampleRate::SR_48K, 64);
+    for c in rig.inputs_mut().iter_mut() {
+        for (i, x) in c.into_samples_mut().iter_mut().enumerate() {
+            *x = if i % 2 == 0 { INPUT } else { -INPUT };
+        }
+    }
+    let tempo_at = |i: usize| Bpm::of(if i.is_multiple_of(2) { 20.0 } else { 300.0 });
+    let mut heard = 0.0f32;
+    for i in 0..400 {
+        rig.set_transport(TransportPosition::new(
+            true,
+            tempo_at(i),
+            Beat::new(0.0),
+            None,
+        ));
+        rig.block();
+        heard += rig
+            .output()
+            .plane(0)
+            .samples()
+            .iter()
+            .map(|s| s.abs())
+            .sum::<f32>();
+    }
+    assert!(heard > 1e-6, "the delay rendered silence");
+    let (mut peak, mut finite) = (0.0f32, true);
+    assert_no_alloc::assert_no_alloc(|| {
+        for i in 0..400 {
+            rig.set_transport(TransportPosition::new(
+                true,
+                tempo_at(i),
+                Beat::new(0.0),
+                None,
+            ));
+            rig.block();
+            for c in 0..2 {
+                for s in rig.output().plane(c).samples() {
+                    finite &= s.is_finite();
+                    peak = peak.max(s.abs());
+                }
+            }
+        }
+    });
+    assert!(finite && peak <= loop_bound(), "peak {peak}");
 }
 
 /// The phaser at the corners of everything it is built to and told: the fewest and the most

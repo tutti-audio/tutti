@@ -4,7 +4,6 @@ use core::num::NonZeroU64;
 
 use tutti_rt::Mint;
 
-use crate::pool::{RefreshError, RefreshReport, RefreshedPool};
 use crate::{AppKey, Clock, Session, SessionFloat};
 
 /// Which session an output was cut from: unique in the process.
@@ -31,6 +30,7 @@ mod sealed {
 
     impl Cut {
         /// A cut from `session`, made when the session makes the value.
+        #[cfg(feature = "sampler")]
         pub(crate) const fn of<K: AppKey, C: Clock>(session: &Session<K, C>) -> Self {
             Self {
                 session: session.id,
@@ -86,17 +86,16 @@ impl<F: SessionFloat, T: sealed::Sealed<F>> Apply<F> for T {
     type Error = <T as sealed::Sealed<F>>::Error;
 }
 
-pub(crate) use sealed::Cut;
 #[cfg(any(feature = "sampler", feature = "plugin"))]
-pub(crate) use sealed::Sealed;
+pub(crate) use sealed::{Cut, Sealed};
 
 impl<K: AppKey, C: Clock> Session<K, C> {
     /// Takes back the output of work the app ran, and applies it.
     ///
     /// Control thread. It never waits: an output whose target is busy comes back in
     /// its error's `Busy`. The output is cut from the session's state when the
-    /// work was made; when that state has moved on (an entry released,
-    /// declared again or loaded again, a newer refresh) the apply refuses by
+    /// work was made; when that state has moved on (a node removed, a plugin
+    /// instance replaced, a streamer gone) the apply refuses by
     /// name (`Error::Stale`) and changes nothing. An output of another session
     /// is stale here. Run the work again to get an
     /// output of the current state.
@@ -114,27 +113,5 @@ impl<K: AppKey, C: Clock> Session<K, C> {
             return Err(<D as sealed::Sealed<C::Float>>::stale());
         }
         sealed::Sealed::<C::Float>::apply_to(done, self)
-    }
-}
-
-impl<F: SessionFloat> sealed::Sealed<F> for RefreshedPool {
-    type Applied = RefreshReport;
-    type Error = RefreshError;
-
-    fn cut(&self) -> &Cut {
-        &self.cut
-    }
-
-    fn stale() -> RefreshError {
-        RefreshError::Stale
-    }
-
-    fn apply_to<K: AppKey, C: Clock<Float = F>>(
-        self,
-        session: &mut Session<K, C>,
-    ) -> Result<RefreshReport, RefreshError> {
-        let (starts, refreshed) = session.pool.entries.reload_changed(self.checked)?;
-        session.pool_start(starts);
-        Ok(refreshed)
     }
 }

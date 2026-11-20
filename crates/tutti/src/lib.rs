@@ -304,8 +304,8 @@ pub mod nodes {
         CrossoverConfig, CrossoverControls, CrossoverError, CrossoverNode, CutAlignment,
         CutFilterConfig, CutFilterControls, CutFilterNode, DcBlockerConfig, DcBlockerControls,
         DcBlockerNode, DelayConfig, DelayControls, DelayLayout, DelayLayoutBuilder,
-        DelayLayoutError, DelayNode, DistortionConfig, DistortionNode, DynamicEqConfig,
-        DynamicEqControls, DynamicEqNode, DynamicMode, EnvelopeFilterConfig,
+        DelayLayoutError, DelayNode, DelayTiming, DistortionConfig, DistortionNode,
+        DynamicEqConfig, DynamicEqControls, DynamicEqNode, DynamicMode, EnvelopeFilterConfig,
         EnvelopeFilterControls, EnvelopeFilterNode, EnvelopeFollowerConfig, EnvelopeFollowerNode,
         EqBandConfig, EqBandNode, FdnConfig, FdnControls, FdnLayout, FdnNode, FeedbackRouting,
         FeedbackRoutingBuilder, FeedbackRoutingError, FirConvolverConfig, FreeverbConfig,
@@ -316,13 +316,14 @@ pub mod nodes {
         LevellerNode, LfoClock, LfoConfig, LfoNode, LimiterConfig, LimiterControls, LimiterNode,
         MetronomeMode, ModDelayConfig, ModDelayControls, ModDelayLayout, ModDelayLayoutBuilder,
         ModDelayNode, MultibandBands, MultibandCompressorConfig, MultibandCompressorNode,
-        MultibandControls, NoteEnvelopeConfig, NoteEnvelopeNode, OscillatorConfig, OscillatorNode,
-        OversamplingFactor, PhaserConfig, PhaserControls, PhaserNode, PlateControls,
-        PlateReverbConfig, PlateReverbNode, SOURCE_EVENT_CAPACITY, ShapeKind, SourceNode,
-        SourcePorts, Stages, StagesError, Stagger, StaggerError, SvfControls, SvfFilterConfig,
-        SvfFilterNode, SvfType, Sweep, SweepBuilder, SweepError, SweepRange, SweepRangeError,
-        TiltFilterConfig, TiltFilterControls, TiltFilterNode, TransientControls,
-        TransientShaperConfig, TransientShaperNode, VbapError, VbapPannerConfig, VbapPannerNode,
+        MultibandControls, NoteEnvelopeConfig, NoteEnvelopeNode, NoteTimes, NoteTimesError,
+        OscillatorConfig, OscillatorNode, OversamplingFactor, PhaserConfig, PhaserControls,
+        PhaserNode, PlateControls, PlateReverbConfig, PlateReverbNode, SOURCE_EVENT_CAPACITY,
+        ShapeKind, SourceNode, SourcePorts, Stages, StagesError, Stagger, StaggerError,
+        SvfControls, SvfFilterConfig, SvfFilterNode, SvfType, Sweep, SweepBuilder, SweepError,
+        SweepRange, SweepRangeError, TiltFilterConfig, TiltFilterControls, TiltFilterNode,
+        TransientControls, TransientShaperConfig, TransientShaperNode, VbapError, VbapPannerConfig,
+        VbapPannerNode,
     };
     pub use tutti_nodes::{
         BellFilterKernel, BitCrusherKernel, BrickwallKernel, CompressorKernel, Control,
@@ -369,8 +370,9 @@ pub mod types {
     pub use tutti_music::{
         Adsr, BarPosition, BeatsPerBar, FRAME_TOLERANCE, FrameClock, InvalidBeatsPerBar,
         InvalidNoteValue, LoopRange, LoopRangeError, MeterChange, NotOnMidiScale, Note,
-        NoteNumberOutOfRange, NoteValue, Pass, PassEnd, PitchClass, SegmentOrigin, TimelineSegment,
-        beats_per_sample, first_frame_at_or_after, frames_per_beat, snap_to_whole_frame,
+        NoteDuration, NoteModifier, NoteNumberOutOfRange, NoteValue, Pass, PassEnd, PitchClass,
+        SegmentOrigin, TimelineSegment, beats_per_sample, first_frame_at_or_after, frames_per_beat,
+        snap_to_whole_frame,
     };
     pub use tutti_platform::{
         Asset, Destination, Executor, Identity, Open, Panicked, PriorityRequest, ReadSeek,
@@ -485,8 +487,8 @@ pub mod session {
     pub use tutti_session::{
         Apply, Declared, HandleError, IntoPool, Life, LoadError, OpenCx, Owned, PoolConfig,
         PoolEntry, PoolError, PoolEvent, PoolJobError, PoolKey, PoolLoaded, PoolOutcome,
-        PoolReport, PoolSet, PoolState, RefreshError, RefreshPool, RefreshReport, RefreshedPool,
-        Retention, RetryError, Sharing, WhenLoadedError, stranded_loads,
+        PoolReport, PoolSet, PoolState, Retention, RetryError, Sharing, WhenLoadedError,
+        stranded_loads,
     };
 
     #[cfg(feature = "export")]
@@ -508,7 +510,7 @@ pub mod session {
     };
     #[cfg(any(feature = "capture", feature = "midi"))]
     pub use tutti_session::{Start, TakeLatency, Trim};
-    // The `audio_file` entry decodes a file, so it needs a decoder.
+    // `load_audio` decodes a file, so it needs a decoder.
     #[cfg(feature = "midi")]
     pub use tutti_session::MidiNodes;
     #[cfg(all(
@@ -520,7 +522,7 @@ pub mod session {
             feature = "decode-ogg"
         )
     ))]
-    pub use tutti_session::{AudioEntry, AudioFile, StreamInfo, Tier, audio_file};
+    pub use tutti_session::{AudioData, LoadAudio, LoadedAudio, Tier};
     pub use tutti_session::{
         AutomationTake, MixRef, ModInput, ModKeys, ModRefusal, ModRouteId, ModSourceId, ModState,
         ModTarget, Mods, ModsView, NoAutomation, NoSuchModRoute, NoSuchModSource, Problem, Ranged,
@@ -543,7 +545,7 @@ pub mod session {
         RecoveryEvent, RecoveryFailure, RecoveryPolicy, ReloadCause, StateRestore, StateView,
     };
     #[cfg(feature = "soundfont")]
-    pub use tutti_session::{GeneralMidi, SoundFontFile, soundfont};
+    pub use tutti_session::{GeneralMidi, LoadSoundFont, LoadedSoundFont};
 }
 
 /// Audio file settings (`tutti-codec`): the `Spec` a file is written with, the

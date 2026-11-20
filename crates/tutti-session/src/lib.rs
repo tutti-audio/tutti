@@ -91,6 +91,12 @@ mod jobs;
 mod key;
 #[cfg(any(feature = "capture", feature = "midi"))]
 mod latency;
+#[cfg(all(feature = "sampler", codec))]
+mod load_audio;
+#[cfg(feature = "soundfont")]
+mod load_soundfont;
+#[cfg(any(all(feature = "sampler", codec), feature = "soundfont"))]
+mod loaded;
 #[cfg(feature = "midi")]
 mod midi;
 #[cfg(feature = "midi-hardware")]
@@ -202,6 +208,10 @@ pub use key::{
 };
 #[cfg(any(feature = "capture", feature = "midi"))]
 pub use latency::{Start, TakeLatency, Trim};
+#[cfg(all(feature = "sampler", codec))]
+pub use load_audio::{AudioData, LoadAudio, LoadedAudio, Tier};
+#[cfg(feature = "soundfont")]
+pub use load_soundfont::{LoadSoundFont, LoadedSoundFont};
 #[cfg(feature = "midi")]
 pub use midi::{Midi, MidiRouteId, MidiRouteRule, Stamping};
 #[cfg(feature = "midi-hardware")]
@@ -243,18 +253,13 @@ pub use plugin::{
     RestoreState, RestoredState, SaveState, StateRestore, StateStartError, StateView,
 };
 pub(crate) use pool::Pool;
-#[cfg(all(feature = "sampler", codec))]
-pub use pool::{AudioEntry, AudioFile, StreamInfo, Tier, audio_file};
 pub use pool::{
     Declared, HandleError, IntoPool, Life, LoadError, OpenCx, Owned, PoolConfig, PoolEntry,
     PoolError, PoolEvent, PoolJobError, PoolKey, PoolLoad, PoolLoaded, PoolOutcome, PoolReport,
-    PoolSet, PoolState, RefreshError, RefreshPool, RefreshReport, RefreshedPool, Retention,
-    RetryError, Sharing, WhenLoadedError, stranded_loads,
+    PoolSet, PoolState, Retention, RetryError, Sharing, WhenLoadedError, stranded_loads,
 };
 #[cfg(feature = "plugin")]
 pub(crate) use pool::{Hold, HoldKind};
-#[cfg(feature = "soundfont")]
-pub use pool::{SoundFontFile, soundfont};
 
 #[cfg(feature = "plugin")]
 use hang::HangDetector;
