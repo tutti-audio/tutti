@@ -157,7 +157,7 @@ fn chain_fresh(seconds: f64) -> (Vec<Vec<f32>>, Vec<Vec<f32>>) {
         BufferTarget, Control, Job, Output, Produced, RenderGraph, Setup, render_one,
     };
     use tutti_graph::GraphBuilder;
-    use tutti_transport::FrozenClock;
+    use tutti_timeline::FrozenClock;
     let render = |master: bool| {
         let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::STEREO);
         let osc = g.add(Osc::saw(Hz::new(110.0)));
@@ -499,7 +499,7 @@ fn a_prepare_hook_reaches_the_graph_that_gets_rendered() {
 /// land on a 120 BPM playhead that nothing advances.
 #[test]
 fn the_prepare_hook_sees_the_callers_timeline() {
-    use tutti_transport::{OfflineTimeline, OfflineTimelineConfig};
+    use tutti_timeline::{OfflineTimeline, OfflineTimelineConfig};
 
     let (mut session, node) = graph_with_one_node_on();
     // A deliberately un-default transport: neither 120 BPM nor beat 0.
@@ -538,7 +538,7 @@ fn the_prepare_hook_sees_the_callers_timeline() {
 /// **A master export's `prepare` hook sees the caller's timeline too.**
 #[test]
 fn a_master_exports_prepare_hook_sees_the_callers_timeline() {
-    use tutti_transport::{OfflineTimeline, OfflineTimelineConfig};
+    use tutti_timeline::{OfflineTimeline, OfflineTimelineConfig};
 
     let (mut session, _node) = graph_with_one_node_on();
     let timeline = Arc::new(OfflineTimeline::new(&OfflineTimelineConfig {

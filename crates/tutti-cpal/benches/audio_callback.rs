@@ -25,7 +25,7 @@ use tutti_graph::{Editor, Prepare, TapReader};
 use tutti_graph::{NodeKey, TapId, TapOptions};
 use tutti_graph::{OutPort, Source};
 use tutti_nodes::testing::Osc;
-use tutti_transport::Transport;
+use tutti_timeline::Transport;
 use tutti_units::SampleRate;
 use tutti_units::{Hz, Samples};
 

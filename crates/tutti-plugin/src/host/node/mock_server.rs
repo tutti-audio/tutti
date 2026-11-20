@@ -20,7 +20,7 @@ use tutti_plugin_types::{
     ParameterInfo, PluginBus, PluginClass, PluginDescriptor, PluginTail, Prepare, PresetId,
 };
 use tutti_tempo::{TempoMap, TempoPoint, Transition};
-use tutti_transport::TempoReader;
+use tutti_timeline::TempoReader;
 use tutti_units::ParamId;
 use tutti_units::{Beat, Bpm, SampleRate, Samples};
 

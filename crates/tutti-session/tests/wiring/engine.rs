@@ -18,7 +18,7 @@ use tutti_graph::{TapAlign, TapOptions};
 use tutti_nodes::MetronomeMode;
 use tutti_nodes::testing::Const;
 use tutti_session::{CloseError, MissingSource, OutPort, Root, Session};
-use tutti_transport::MotionEvent;
+use tutti_timeline::MotionEvent;
 use tutti_units::{Amplitude, Beat, SampleRate, Samples};
 
 const RATE: f64 = 48_000.0;
@@ -51,8 +51,8 @@ fn run(s: &Session, frames: usize, block: usize, seek: bool) -> Vec<f32> {
                     tutti_units::At::NextBlock,
                     MotionEvent::Locate {
                         beat: tutti_units::Beat::new(0.75),
-                        fade: tutti_transport::FadeOut::Immediate,
-                        then: tutti_transport::AfterLocate::Keep,
+                        fade: tutti_timeline::FadeOut::Immediate,
+                        then: tutti_timeline::AfterLocate::Keep,
                     },
                 )
                 .expect("room");

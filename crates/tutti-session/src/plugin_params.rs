@@ -1,8 +1,8 @@
 //! A hosted plugin's parameters as views:
-//! [`Params`], [`Param`] and [`ParamGesture`].
+//! [`PluginParams`], [`Param`] and [`ParamGesture`].
 //!
 //! Every one of them borrows the session through [`Plugin`](crate::Plugin), so
-//! none can outlive what it names. The descriptors a [`Params`] shows are the
+//! none can outlive what it names. The descriptors a [`PluginParams`] shows are the
 //! session's own, read at load and read again when the plugin announces a
 //! session's own, read at load and read again when the plugin announces a
 //! rescan ([`PluginChange::ParamsRescanned`](crate::PluginChange::ParamsRescanned),
@@ -10,7 +10,7 @@
 //! is a job on the session's background and lands in [`Session::update`](crate::Session::update), which
 //! takes `&mut Session`. So **a handle cannot be stale**: holding one across
 //! an update is a borrow error, and what a host keeps across updates is the
-//! `ParamId`, resolved again with [`Params::get`] (which refuses an id the
+//! `ParamId`, resolved again with [`PluginParams::get`] (which refuses an id the
 //! plugin stopped declaring). No generation counter is checked, because there
 //! is no state to check it against.
 //!
@@ -124,12 +124,12 @@ impl Driven {
 
 /// A hosted plugin's parameters, lent by [`Plugin::params`](crate::Plugin::params).
 #[derive(Debug, Clone, Copy)]
-pub struct Params<'a> {
+pub struct PluginParams<'a> {
     node: NodeKey,
     hosted: &'a HostedPlugin,
 }
 
-impl<'a> Params<'a> {
+impl<'a> PluginParams<'a> {
     pub(crate) fn new(node: NodeKey, hosted: &'a HostedPlugin) -> Self {
         Self { node, hosted }
     }
@@ -190,14 +190,14 @@ impl<'a> Params<'a> {
     }
 }
 
-/// One parameter of a hosted plugin, resolved by [`Params::get`].
+/// One parameter of a hosted plugin, resolved by [`PluginParams::get`].
 ///
 /// `Copy`, and good for as long as the borrow of the session it came from: see
 /// the module docs for why that is as long as the parameter list can stay
 /// as it is.
 #[derive(Debug, Clone, Copy)]
 pub struct Param<'a> {
-    params: Params<'a>,
+    params: PluginParams<'a>,
     /// Where the parameter is in the mirror's list: valid while the read that
     /// made it is the mirror's, which the borrow guarantees.
     position: usize,

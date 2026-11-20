@@ -14,7 +14,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_export::{CancelToken, Control, Error, EventLossPolicy, Progress, RenderGraph, Setup};
 use tutti_graph::{Cx, Event, GraphBuilder, Io, Node, Prepare, Shape, Status};
 use tutti_nodes::testing::Osc;
-use tutti_transport::FrozenClock;
+use tutti_timeline::FrozenClock;
 use tutti_ump::Ump;
 use tutti_units::Seconds;
 use tutti_units::{Hz, SampleRate};

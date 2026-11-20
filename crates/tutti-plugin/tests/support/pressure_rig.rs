@@ -161,7 +161,7 @@ fn load_units(
         let (ins, outs) = (probe.client.inputs(), probe.client.outputs());
         let mut unit = GraphUnit::new(
             probe.client.bind(
-                tutti_transport::TempoReader::constant(tutti_units::Bpm::of(120.0))
+                tutti_timeline::TempoReader::constant(tutti_units::Bpm::of(120.0))
                     .expect("a tempo"),
             ),
             ins,

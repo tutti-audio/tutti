@@ -8,7 +8,7 @@ use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_engine::{AudioCallbackState, Engine, MAX_FRAMES};
 use tutti_graph::{Editor, NodeKey, OutPort, Prepare, Source};
 use tutti_nodes::testing::Const;
-use tutti_transport::Transport;
+use tutti_timeline::Transport;
 
 /// A block over a graph holding `level` on both channels of a stereo device.
 fn block(level: f32) -> OutputBlock<f32> {

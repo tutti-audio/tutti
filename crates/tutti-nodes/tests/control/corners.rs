@@ -8,7 +8,7 @@ use tutti_graph::{
     Cx, EventOut, GraphBuilder, IntoNode, Io, Node, NodeParts, ParamEvent, ParamIn, ParamSegment,
     Prepare, Shape, Status,
 };
-use tutti_nodes::{CompressorControls, CompressorNode, KeySource};
+use tutti_nodes::{CompressorConfig, CompressorControls, CompressorNode};
 use tutti_units::{CompressionRatio, Db, SampleRate, Samples, Seconds, UnitParam};
 
 /// Sends each `(absolute frame, segment)` on its frame.
@@ -59,7 +59,8 @@ fn render(sends: Vec<(u64, ParamSegment)>, block: usize) -> Vec<f32> {
         tutti_buffers::ChannelLayout::MONO,
     );
     let NodeParts { node, fork, .. } =
-        CompressorNode::<f32>::new(BusTopology::MONO, KeySource::Own, controls).into_parts();
+        CompressorNode::<f32>::from(CompressorConfig::new(BusTopology::MONO).controls(controls))
+            .into_parts();
     let c = g.add(NodeParts {
         node,
         controls: (),

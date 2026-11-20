@@ -20,7 +20,7 @@ bytemuck = { version = "1.16", default-features = false }
 # A spill file that cannot be removed is logged, not an error: the render's
 # outcome is already decided.
 tracing.workspace = true
-tutti-transport = { version = "0.0.1", path = "../tutti-transport" }
+tutti-timeline = { version = "0.0.1", path = "../tutti-timeline" }
 tutti-buffers = { version = "0.0.1", path = "../tutti-buffers" }
 tutti-units = { version = "0.0.1", path = "../tutti-units", default-features = false }
 tutti-music = { version = "0.0.1", path = "../tutti-music", default-features = false }

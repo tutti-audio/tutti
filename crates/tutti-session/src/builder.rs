@@ -8,7 +8,7 @@ use tutti_buffers::MAX_CHANNELS;
 use tutti_buffers::{ChannelLayout, ChannelTopology, MaxBlock};
 use tutti_graph::NodeKey;
 use tutti_nodes::{ClickNode, ClickSettings};
-use tutti_transport::Transport;
+use tutti_timeline::Transport;
 use tutti_units::SampleRate;
 
 use crate::graph::{Graph, LIVE_MAX_BLOCK};

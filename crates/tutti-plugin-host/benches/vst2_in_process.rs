@@ -49,7 +49,7 @@ fn unit() -> Direct<PluginNode<Vst2Loaded>> {
     )
     .expect("the reference VST2 plugin must be built — see tutti-fixtures");
     let tempo =
-        tutti_transport::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo");
+        tutti_timeline::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo");
     Direct::new(unit.bind(tempo), SampleRate::of(SR), BLOCK)
 }
 

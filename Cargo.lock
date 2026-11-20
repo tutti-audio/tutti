@@ -2528,7 +2528,7 @@ dependencies = [
  "tutti-shared-plugin",
  "tutti-soundfont",
  "tutti-tempo",
- "tutti-transport",
+ "tutti-timeline",
  "tutti-ump",
  "tutti-units",
 ]
@@ -2728,7 +2728,7 @@ dependencies = [
  "tutti-nodes",
  "tutti-platform",
  "tutti-rt",
- "tutti-transport",
+ "tutti-timeline",
  "tutti-units",
 ]
 
@@ -2771,7 +2771,7 @@ dependencies = [
  "tutti-platform",
  "tutti-rt",
  "tutti-tempo",
- "tutti-transport",
+ "tutti-timeline",
  "tutti-ump",
  "tutti-units",
 ]
@@ -2799,7 +2799,7 @@ dependencies = [
  "tutti-rt",
  "tutti-sampler",
  "tutti-tempo",
- "tutti-transport",
+ "tutti-timeline",
  "tutti-ump",
  "tutti-units",
 ]
@@ -2822,7 +2822,7 @@ dependencies = [
  "tutti-rt",
  "tutti-shared-plugin",
  "tutti-shared-plugin-vst3-cpp",
- "tutti-transport",
+ "tutti-timeline",
  "tutti-ump",
  "tutti-units",
  "vst3",
@@ -3025,7 +3025,7 @@ dependencies = [
  "tutti-platform",
  "tutti-rt",
  "tutti-tempo",
- "tutti-transport",
+ "tutti-timeline",
  "tutti-ump",
  "tutti-units",
 ]
@@ -3078,7 +3078,7 @@ dependencies = [
  "tutti-nodes",
  "tutti-platform",
  "tutti-rt",
- "tutti-transport",
+ "tutti-timeline",
  "tutti-ump",
  "tutti-units",
  "wide",
@@ -3136,7 +3136,7 @@ dependencies = [
  "tutti-plugin-types",
  "tutti-rt",
  "tutti-tempo",
- "tutti-transport",
+ "tutti-timeline",
  "tutti-ump",
  "tutti-units",
  "tutti-vst2-host",
@@ -3218,7 +3218,7 @@ dependencies = [
  "tutti-plugin-types",
  "tutti-rt",
  "tutti-tempo",
- "tutti-transport",
+ "tutti-timeline",
  "tutti-ump",
  "tutti-units",
  "tutti-vst2-host",
@@ -3418,7 +3418,7 @@ dependencies = [
  "tutti-rt",
  "tutti-sampler",
  "tutti-tempo",
- "tutti-transport",
+ "tutti-timeline",
  "tutti-units",
 ]
 
@@ -3470,7 +3470,7 @@ dependencies = [
  "tutti-shared-plugin",
  "tutti-soundfont",
  "tutti-tempo",
- "tutti-transport",
+ "tutti-timeline",
  "tutti-ump",
  "tutti-units",
  "tutti-vst2-test-plugin",
@@ -3546,7 +3546,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "tutti-transport"
+name = "tutti-timeline"
 version = "0.0.1"
 dependencies = [
  "atomic_float",
@@ -3603,7 +3603,7 @@ dependencies = [
  "tutti-nodes",
  "tutti-polysynth",
  "tutti-sampler",
- "tutti-transport",
+ "tutti-timeline",
  "tutti-ump",
  "tutti-units",
 ]

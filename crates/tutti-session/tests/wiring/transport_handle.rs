@@ -4,7 +4,7 @@ use tutti_buffers::InterleavedMut;
 use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_music::LoopRange;
 use tutti_session::{Session, TransportHandle};
-use tutti_transport::{FadeOut, LoopRegion, MotionEvent, TimedError};
+use tutti_timeline::{FadeOut, LoopRegion, MotionEvent, TimedError};
 use tutti_units::{At, Beat, Bpm, Frame, Samples};
 
 fn offline() -> (Session, tutti_session::Background) {

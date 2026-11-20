@@ -8,7 +8,7 @@ use tutti_buffers::{ChannelLayout, InterleavedMut, MaxBlock};
 use tutti_music::{LoopRange, MeterChange, MeterMap, TimeSignature};
 use tutti_session::Session;
 use tutti_tempo::TempoMap;
-use tutti_transport::LoopRegion;
+use tutti_timeline::LoopRegion;
 use tutti_units::{Beat, Bpm, Samples};
 
 fn offline() -> (Session, tutti_session::Background) {

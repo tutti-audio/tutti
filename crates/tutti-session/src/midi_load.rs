@@ -20,7 +20,7 @@ use tutti_midi_file::{
 use tutti_midi_runtime::{ClipEvents, TimedMidiEvent};
 use tutti_platform::Asset;
 use tutti_tempo::TempoMap;
-use tutti_transport::ProjectMeter;
+use tutti_timeline::ProjectMeter;
 use tutti_ump::TicksPerQuarterNote;
 use tutti_units::Beat;
 

@@ -10,7 +10,7 @@ use tutti_dsp::DitherShape;
 use tutti_export::{Normalize, RenderGraph, Setup};
 use tutti_graph::GraphBuilder;
 use tutti_nodes::testing::{Const, Osc};
-use tutti_transport::FrozenClock;
+use tutti_timeline::FrozenClock;
 use tutti_units::Seconds;
 use tutti_units::{Db, Hz, SampleRate};
 

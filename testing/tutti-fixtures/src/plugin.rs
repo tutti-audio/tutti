@@ -15,8 +15,8 @@ use tutti_plugin_types::{Loaded, MainWork, MainWorkHandle, PluginError, Prepare,
 /// # Panics
 ///
 /// Panics when the tempo reader cannot be built, which a constant 120 BPM never is.
-pub fn tempo() -> tutti_transport::TempoReader {
-    tutti_transport::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo")
+pub fn tempo() -> tutti_timeline::TempoReader {
+    tutti_timeline::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo")
 }
 
 /// A [`MainWorkHandle`] whose collector is gone: for a test that loads a plugin

@@ -7,16 +7,17 @@
 use crate::test_support::{F64_TOLERANCE, assert_linear, render_f64};
 use crate::{
     AutoPanConfig, AutoPanNode, BellFilterConfig, BellFilterNode, BitCrusherConfig, BitCrusherNode,
-    BrickwallLimiterNode, ButterworthOrder, CompressorControls, CompressorNode, CrossoverNode,
-    CutAlignment, CutFilterConfig, CutFilterNode, CutResponse, DcBlockerConfig, DcBlockerNode,
-    DelayNode, DistortionNode, DynamicEqConfig, DynamicEqNode, EnvelopeFilterConfig,
-    EnvelopeFilterNode, FdnNode, FreeverbNode, GateControls, GateNode, LadderFilterNode,
+    BrickwallLimiterConfig, BrickwallLimiterNode, ButterworthOrder, CompressorConfig,
+    CompressorControls, CompressorNode, CrossoverNode, CutAlignment, CutFilterConfig,
+    CutFilterNode, CutResponse, DcBlockerConfig, DcBlockerNode, DelayNode, DistortionNode,
+    DynamicEqConfig, DynamicEqNode, EnvelopeFilterConfig, EnvelopeFilterNode, FdnNode,
+    FreeverbNode, GateConfig, GateControls, GateNode, LadderFilterNode, LimiterConfig,
     LimiterControls, LimiterNode, MaxDelay, ModDelayNode, PhaserControls, PhaserNode,
     PlateReverbConfig, PlateReverbNode, RingModConfig, RingModNode, StereoWidthConfig,
     StereoWidthNode, SvfFilterNode, TiltFilterConfig, TiltFilterNode, TransientShaperConfig,
     TransientShaperNode, TremoloConfig, TremoloNode,
 };
-use tutti_buffers::ChannelLayout;
+use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_dsp::{
     DelayControls, FdnControls, FdnLayout, FreeverbControls, FreezeMode, LadderType, ShapeKind,
     Stages, SvfType,
@@ -67,11 +68,13 @@ fn the_delay_returns_a_wide_signal_sixteen_frames_on() {
 #[test]
 fn the_limiter_under_its_threshold_returns_a_wide_signal_a_lookahead_late() {
     let x = wide_signal(4_800);
-    let node = LimiterNode::<f64>::mono(LimiterControls {
-        threshold: Db::new(0.0),
-        ceiling: Db::new(0.0),
-        ..LimiterControls::DEFAULT
-    });
+    let node = LimiterNode::<f64>::from(LimiterConfig::new(BusTopology::MONO).controls(
+        LimiterControls {
+            threshold: Db::new(0.0),
+            ceiling: Db::new(0.0),
+            ..LimiterControls::DEFAULT
+        },
+    ));
     let mut d = Direct::<_, f64>::with_format(node, RATE, x.len());
     let latency = tutti_graph::Node::<f64>::shape(&*d.node)
         .latency
@@ -95,26 +98,31 @@ fn the_limiter_under_its_threshold_returns_a_wide_signal_a_lookahead_late() {
 fn the_dynamics_that_do_nothing_return_a_wide_signal_as_it_is() {
     let x = wide_signal(4_800);
     let input = on(1, &x);
-    let compressor = CompressorNode::<f64>::mono(CompressorControls {
-        threshold: Db::new(0.0),
-        knee: Db::new(6.0),
-        ratio: CompressionRatio::new(4.0),
-        attack: Seconds::new(0.002),
-        release: Seconds::new(0.05),
-        makeup: Db::new(0.0),
-        ..CompressorControls::DEFAULT
-    });
+    let compressor = CompressorNode::<f64>::from(
+        CompressorConfig::new(BusTopology::MONO).controls(CompressorControls {
+            threshold: Db::new(0.0),
+            knee: Db::new(6.0),
+            ratio: CompressionRatio::new(4.0),
+            attack: Seconds::new(0.002),
+            release: Seconds::new(0.05),
+            makeup: Db::new(0.0),
+            ..CompressorControls::DEFAULT
+        }),
+    );
     assert_close_f64(&render(compressor, RATE, &input)[0], &x, F64_TOLERANCE);
-    let gate = GateNode::<f64>::mono(GateControls {
+    let gate = GateNode::<f64>::from(GateConfig::new(BusTopology::MONO).controls(GateControls {
         threshold: Db::new(-40.0),
         attack: Seconds::new(0.0),
         hold: Seconds::new(0.0),
         release: Seconds::new(0.0),
         range: Db::new(-80.0),
         ..GateControls::DEFAULT
-    });
+    }));
     assert_close_f64(&render(gate, RATE, &input)[0], &x, F64_TOLERANCE);
-    let brickwall = BrickwallLimiterNode::<f64>::new(Db::new(0.0));
+    let brickwall = BrickwallLimiterNode::<f64>::from(BrickwallLimiterConfig::new(
+        BusTopology::STEREO,
+        Db::new(0.0),
+    ));
     assert_close_f64(&render(brickwall, RATE, &input)[0], &x, F64_TOLERANCE);
     let shaper = TransientShaperNode::<f64>::from(TransientShaperConfig::new(ChannelLayout::MONO));
     assert_close_f64(&render(shaper, RATE, &input)[0], &x, F64_TOLERANCE);

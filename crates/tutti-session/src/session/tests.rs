@@ -3,7 +3,7 @@ use std::sync::Arc;
 use tutti_buffers::ChannelLayout;
 use tutti_music::{MeterChange, MeterMap, TimeSignature};
 use tutti_tempo::TempoMap;
-use tutti_transport::TimeSignatureSlot;
+use tutti_timeline::TimeSignatureSlot;
 use tutti_units::{Beat, SampleRate};
 
 use crate::Session;
