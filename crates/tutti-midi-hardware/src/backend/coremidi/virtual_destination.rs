@@ -9,10 +9,7 @@
 //!
 //! [`UmpVirtualDestination`] hands every received UMP message to a callback.
 //! The endpoint and its receive block are `tutti-coremidi-ffi`'s
-//! (`UmpDestination`): the safe `coremidi` wrapper's
-//! `virtual_destination_with_protocol` reads the null reference constant
-//! CoreMIDI passes a virtual destination as a reference, and so aborts on the
-//! first packet. This module names the endpoint and puts its errors in this
+//! (`UmpDestination`); this module names the endpoint and puts its errors in this
 //! crate's.
 //!
 //! CoreMIDI delivers a packet as a *packed word stream*: several concatenated

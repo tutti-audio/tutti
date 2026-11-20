@@ -1380,6 +1380,11 @@ pub fn widths_report_the_declared_precision<F: Format>() {
         "the shared plugin declares 64-bit audio: widths {widths:?}"
     );
     assert!(widths.accepts(FloatWidth::F32), "every plugin takes 32-bit");
+    assert_eq!(
+        loaded.info().widths,
+        Some(spec::WIDTHS),
+        "the loaded plugin's descriptor carries its widths, as the scan record does"
+    );
     let settled = widths.negotiate(FloatWidth::F64);
     assert_eq!(settled, FloatWidth::F64);
     assert_eq!(widths.negotiate(FloatWidth::F32), FloatWidth::F32);

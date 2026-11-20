@@ -328,8 +328,9 @@ pub mod types {
     };
     pub use tutti_platform::{Asset, Destination, Identity, Open, Panicked, ReadSeek, Stamp};
     pub use tutti_rt::{
-        AtomicCell, AtomicWord, Count, Counter, CounterWriter, Drained, Gauge, GaugeWriter,
-        LevelSpan, PosFrame, Reading, Reclaim, RingFloat, RingSample, Tally, TallyWriter, Words,
+        AtomicCell, AtomicWord, Bell, Bells, Count, Counter, CounterWriter, Drained, Gauge,
+        GaugeWriter, LevelSpan, Listener, PosFrame, Reading, Reclaim, RingFloat, RingSample, Tally,
+        TallyWriter, Words,
     };
     pub use tutti_rt::{AtomicSampleRate, Mint, Param, Param64, ParamCell};
     pub use tutti_units::{
@@ -672,7 +673,7 @@ pub mod plugin {
             CatalogConfig, FormatMismatch, PluginDb, Probed, Scan, ScanPoll, ScanResult,
         };
         pub use tutti_plugin_types::{
-            Described, FourCc, PluginDescriptor, PluginId, PluginIdError, PluginRole, Uid,
+            Described, FourCc, PluginDescriptor, PluginId, PluginIdError, PluginRole, Uid, Widths,
         };
     }
 }

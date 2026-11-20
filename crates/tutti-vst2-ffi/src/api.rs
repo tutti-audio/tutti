@@ -765,72 +765,6 @@ impl<'a> PluginEvents<'a> {
     }
 }
 
-impl Events {
-    #[inline]
-    pub(crate) fn events_raw(&self) -> &[*const Event] {
-        use std::slice;
-        // A negative count is no events.
-        let len = usize::try_from(self.num_events).unwrap_or(0);
-        // SAFETY: VST2 ABI: `events` is a variable-length array and the host allocates
-        // `num_events` contiguous pointers from `events[0]`; `*mut Event` and
-        // `*const Event` share a layout. The count is the sender's word and is not
-        // otherwise checked (the allocation behind a `&Events` cannot be measured).
-        unsafe { slice::from_raw_parts(&self.events[0] as *const *mut _ as *const *const _, len) }
-    }
-
-    #[inline]
-    pub(crate) fn events_raw_mut(&mut self) -> &mut [*const SysExEvent] {
-        use std::slice;
-        // SAFETY: as in `events_raw`: the allocation holds `num_events` contiguous
-        // pointers from `events[0]` (`SendEventBuffer` allocates exactly this), and
-        // `&mut self` gives exclusive access. A negative count is no events.
-        unsafe {
-            slice::from_raw_parts_mut(
-                &mut self.events[0] as *mut *mut _ as *mut *const _,
-                usize::try_from(self.num_events).unwrap_or(0),
-            )
-        }
-    }
-
-    /// Use this in your impl of process_events() to process the incoming midi events.
-    ///
-    /// # Example
-    /// ```no_run
-    /// # use tutti_vst2_ffi::plugin::{Info, Plugin, HostCallback};
-    /// # use tutti_vst2_ffi::buffer::{AudioBuffer, SendEventBuffer};
-    /// # use tutti_vst2_ffi::host::Host;
-    /// # use tutti_vst2_ffi::api;
-    /// # use tutti_vst2_ffi::event::{Event, MidiEvent};
-    /// # struct ExamplePlugin { host: HostCallback, send_buf: SendEventBuffer }
-    /// # impl Plugin for ExamplePlugin {
-    /// #     fn new(host: HostCallback) -> Self { Self { host, send_buf: Default::default() } }
-    /// #
-    /// #     fn get_info(&self) -> Info { Default::default() }
-    /// #
-    /// fn process_events(&mut self, events: &api::Events) {
-    ///     for e in events.events() {
-    ///         match e {
-    ///             Event::Midi(MidiEvent { data, .. }) => {
-    ///                 // ...
-    ///             }
-    ///             _ => ()
-    ///         }
-    ///     }
-    /// }
-    /// # }
-    /// ```
-    #[inline]
-    #[allow(clippy::needless_lifetimes)]
-    pub fn events<'a>(&'a self) -> impl Iterator<Item = crate::event::Event<'a>> {
-        self.events_raw()
-            .iter()
-            .filter(|ptr| !ptr.is_null())
-            // SAFETY: VST2 ABI: each non-null entry of the host's event array points at a
-            // valid event of the type its `event_type` names.
-            .map(|ptr| unsafe { crate::event::Event::from_raw_event(*ptr) })
-    }
-}
-
 /// The type of event that has occurred. See `api::Event.event_type`.
 #[repr(i32)]
 #[derive(Copy, Clone, Debug)]
@@ -1235,102 +1169,8 @@ bitflags! {
 
 #[cfg(test)]
 mod tests {
-    use super::super::event;
     use super::*;
     use std::mem;
-
-    // This container is used because we have to store somewhere the events
-    // that are pointed to by raw pointers in the events object. We heap allocate
-    // the event so the pointer in events stays consistent when the container is moved.
-    pub struct EventContainer {
-        stored_event: Box<Event>,
-        pub events: Events,
-    }
-
-    // A convenience method which creates an api::Events object representing a midi event.
-    // This represents code that might be found in a VST host using this API.
-    fn encode_midi_message_as_events(message: [u8; 3]) -> EventContainer {
-        let midi_event: MidiEvent = MidiEvent {
-            event_type: EventType::Midi,
-            byte_size: mem::size_of::<MidiEvent>() as i32,
-            delta_frames: 0,
-            flags: 0,
-            note_length: 0,
-            note_offset: 0,
-            midi_data: [message[0], message[1], message[2]],
-            _midi_reserved: 0,
-            detune: 0,
-            note_off_velocity: 0,
-            _reserved1: 0,
-            _reserved2: 0,
-        };
-        // SAFETY: `MidiEvent` and `Event` are both 32-byte `#[repr(C)]` structs (sizes
-        // are checked by `transmute`) with the same leading fields, and any bit pattern
-        // of `MidiEvent`'s integer fields is valid for `Event`'s byte array.
-        let mut event: Event = unsafe { std::mem::transmute(midi_event) };
-        event.event_type = EventType::Midi;
-
-        let events = Events {
-            num_events: 1,
-            _reserved: 0,
-            events: [&mut event, &mut event], // Second one is a dummy
-        };
-        let mut ec = EventContainer {
-            stored_event: Box::new(event),
-            events,
-        };
-        ec.events.events[0] = &mut *(ec.stored_event); // Overwrite ptrs, since we moved the event into ec
-        ec
-    }
-
-    #[test]
-    fn encode_and_decode_gives_back_original_message() {
-        let message: [u8; 3] = [35, 16, 22];
-        let encoded = encode_midi_message_as_events(message);
-        assert_eq!(encoded.events.num_events, 1);
-        assert_eq!(encoded.events.events.len(), 2);
-        let e_vec: Vec<event::Event> = encoded.events.events().collect();
-        assert_eq!(e_vec.len(), 1);
-
-        match e_vec[0] {
-            event::Event::Midi(event::MidiEvent { data, .. }) => {
-                assert_eq!(data, message);
-            }
-            _ => {
-                panic!("Not a midi event!");
-            }
-        };
-    }
-
-    // We check here that calling events() on an api::Events object
-    // does not mutate the underlying events.
-    #[test]
-    fn message_survives_calling_events() {
-        let message: [u8; 3] = [35, 16, 22];
-        let encoded = encode_midi_message_as_events(message);
-
-        for e in encoded.events.events() {
-            match e {
-                event::Event::Midi(event::MidiEvent { data, .. }) => {
-                    assert_eq!(data, message);
-                }
-                _ => {
-                    panic!("Not a midi event!");
-                }
-            }
-        }
-
-        for e in encoded.events.events() {
-            match e {
-                event::Event::Midi(event::MidiEvent { data, .. }) => {
-                    assert_eq!(data, message);
-                }
-                _ => {
-                    panic!("Not a midi event!"); // FAILS here!
-                }
-            }
-        }
-    }
 
     /// Pin the wire size of every struct the *plugin* fills in for us.
     ///
@@ -1423,30 +1263,5 @@ mod tests {
         assert_eq!(ParameterFlags::SUPPORTS_DISPLAY_CATEGORY.bits(), 1 << 5);
         assert_eq!(ParameterFlags::CAN_RAMP.bits(), 1 << 6);
         assert_eq!(MidiProgramFlags::IS_OMNI.bits(), 1);
-    }
-
-    /// A negative event count is no events, not `usize::MAX` of them.
-    #[test]
-    fn a_negative_event_count_is_empty() {
-        let events = Events {
-            num_events: -3,
-            _reserved: 0,
-            events: [std::ptr::null_mut(); 2],
-        };
-        assert_eq!(events.events().count(), 0);
-        let mut events = events;
-        events.num_events = i32::MIN;
-        assert_eq!(events.events().count(), 0);
-    }
-
-    /// A null entry in the event array is skipped, not read.
-    #[test]
-    fn a_null_event_entry_is_skipped() {
-        let events = Events {
-            num_events: 2,
-            _reserved: 0,
-            events: [std::ptr::null_mut(); 2],
-        };
-        assert_eq!(events.events().count(), 0);
     }
 }

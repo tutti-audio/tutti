@@ -157,7 +157,7 @@ jobs:
       # The web target: `tutti-platform` and the umbrella must keep building for it. A build check; it does not run
       # the code. The target comes from `rust-toolchain.toml`.
       - name: clippy (wasm32)
-        run: cargo clippy --locked --target wasm32-unknown-unknown -p tutti-platform -p tutti --lib -- -D warnings
+        run: cargo clippy --locked --target wasm32-unknown-unknown -p tutti-platform -p tutti-rt -p tutti --lib -- -D warnings
 
   # Lints what the Linux job cannot see: `#[cfg(windows)]` blocks, and casts that differ by platform (the vst3
   # bindings type SDK enum constants `c_uint` on unix and `c_int` on Windows). A native runner, because

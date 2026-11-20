@@ -1,10 +1,9 @@
 //! [`Guard`]: the panic guard of an input's driver callback.
 //!
-//! CoreMIDI calls the input callback on its own thread, through an Objective-C
-//! block: a panic that unwinds out of the closure unwinds through C frames
-//! that are not built to be unwound, which is undefined behaviour or an abort
-//! of the whole process (the safe `coremidi` crate does not catch it). The
-//! pump of an ALSA input is a Rust thread of ours, where a panic only ends the
+//! Windows Multimedia calls the input callback on the driver's thread: a panic
+//! that unwinds out of the closure unwinds through C frames that are not built
+//! to be unwound, which is undefined behaviour or an abort of the whole process.
+//! The pump of an ALSA input is a Rust thread of ours, where a panic only ends the
 //! thread, but it ends it with the input still held and reading as alive. So
 //! both run their body through a guard: a panic is caught at the callback's
 //! edge and raises the input's [`FaultLatch`], which marks the input dead

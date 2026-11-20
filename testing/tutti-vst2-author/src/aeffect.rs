@@ -3,13 +3,11 @@
 
 use std::sync::Arc;
 
-use tutti_vst2_ffi::{
-    api::AEffect,
-    editor::Editor,
-    plugin::{Info, Plugin, PluginParameters},
-};
+use tutti_vst2_ffi::api::AEffect;
 
 use crate::cache::PluginCache;
+use crate::editor::Editor;
+use crate::plugin::{Info, Plugin, PluginParameters};
 
 /// The plugin-side view of an `AEffect` this crate created.
 ///
