@@ -166,12 +166,13 @@ pub use entry::{
 pub use preset::{LoadPreset, LoadedPreset, PresetStartError};
 pub use state::{PluginApplyError, RestoreState, RestoredState, SaveState, StateStartError};
 
+use crate::SavedPeer;
 use crate::jobs::{Landing, PluginLanding};
 use crate::plugin_diagnostics::Figures;
 use crate::{
-    Diagnostics, GiveUp, HangDetector, Key, PeerState, PluginBuses, PluginParams, PortCounts,
-    Recovery, RecoveryAction, RecoveryEvent, RecoveryFailure, ReloadCause, Session, SessionEvent,
-    WorkerError,
+    Diagnostics, GiveUp, HangDetector, Key, OtherPeer, PeerState, PluginBuses, PluginParams,
+    PortCounts, Recovery, RecoveryAction, RecoveryEvent, RecoveryFailure, ReloadCause, Session,
+    SessionEvent, WorkerError,
 };
 
 /// How often a healthy plugin's state is captured, by default: 8 s.
@@ -1590,7 +1591,7 @@ pub struct StateView<'a> {
 impl<'a> StateView<'a> {
     /// The last state captured while the plugin was healthy: the
     /// crash-recovery copy a reload restores, up to a snapshot interval
-    /// stale. A project is saved with [`Session::save_state`], not from this.
+    /// stale. A project is saved from [`save`](Self::save), not from this.
     pub fn last_good(&self) -> Option<&'a PeerState> {
         self.hosted.snapshot.as_ref()
     }
@@ -1603,6 +1604,48 @@ impl<'a> StateView<'a> {
     pub fn withheld(&self) -> Option<&'a PeerState> {
         self.hosted.withheld.as_ref()
     }
+
+    /// Saves the plugin's state for `state_use` now, as a blocking round trip
+    /// to it (ten seconds at worst; an in-process plugin's is run by the main
+    /// thread's next tick, see the module docs).
+    ///
+    /// # Errors
+    ///
+    /// The plugin's [`StateError`]: it is gone, busy, refused, or has no state
+    /// route.
+    pub fn save(&self, state_use: StateUse) -> Result<PeerState, StateError> {
+        let bytes = self.hosted.handle.save_state(state_use)?;
+        Ok(PeerState::of_plugin(self.hosted.plugin.clone(), bytes))
+    }
+
+    /// Restores `state` into the plugin. The parameter mirror is read again by
+    /// the next `Phase::Plugins`, whatever values the state moved.
+    ///
+    /// # Errors
+    ///
+    /// [`RestoreError::OtherPeer`] when `state` was saved from another peer
+    /// (nothing is sent to the plugin); otherwise the plugin's own
+    /// [`RestoreError::State`].
+    pub fn restore(&self, main: MainThreadMarker, state: &PeerState) -> Result<(), RestoreError> {
+        state
+            .check_for(&SavedPeer::Plugin(self.hosted.plugin.clone()))
+            .map_err(RestoreError::OtherPeer)?;
+        self.hosted.handle.load_state(main, state.bytes())?;
+        self.hosted.refresh_values();
+        Ok(())
+    }
+}
+
+/// Why [`StateView::restore`] restored nothing.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum RestoreError {
+    /// The state was saved from another peer: nothing was sent to the plugin.
+    #[error(transparent)]
+    OtherPeer(OtherPeer),
+    /// The plugin was asked and could not restore it.
+    #[error(transparent)]
+    State(#[from] StateError),
 }
 
 /// `Phase::RenderMode`'s record: the mode last announced.

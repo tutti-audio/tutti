@@ -117,8 +117,8 @@ fn round_trip(s: &Session, node: NodeKey) {
     let _ = s
         .plugin_view(node)
         .expect("hosted")
-        .handle()
-        .save_state(tutti_plugin_types::StateUse::Project);
+        .state()
+        .save(tutti_plugin_types::StateUse::Project);
 }
 
 /// Waits (up to 10 s) for the probe's latency to read `want`: the

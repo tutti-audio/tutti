@@ -457,9 +457,10 @@ fn an_initial_state_is_restored_and_two_keys_load_two_plugins() {
 
     s.set(target.to(set)).unwrap();
     let state = s
-        .save_state(&a, tutti_plugin_types::StateUse::Project)
+        .plugin_view(a)
         .unwrap()
-        .run(tutti_fixtures::main_thread())
+        .state()
+        .save(tutti_plugin_types::StateUse::Project)
         .expect("a state");
 
     s.pool((

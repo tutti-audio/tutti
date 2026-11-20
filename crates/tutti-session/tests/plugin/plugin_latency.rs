@@ -430,8 +430,8 @@ fn a_clock_switch_re_declares_a_plugins_latency_and_keeps_its_handle() {
     assert!(
         live.plugin_view(node)
             .expect("hosted")
-            .handle()
-            .save_state(tutti_plugin_types::StateUse::Project)
+            .state()
+            .save(tutti_plugin_types::StateUse::Project)
             .is_ok(),
         "the handle still answers"
     );
@@ -444,8 +444,8 @@ fn a_clock_switch_re_declares_a_plugins_latency_and_keeps_its_handle() {
         system
             .plugin_view(node)
             .expect("hosted")
-            .handle()
-            .save_state(tutti_plugin_types::StateUse::Project)
+            .state()
+            .save(tutti_plugin_types::StateUse::Project)
             .is_ok(),
         "and on the timer"
     );
@@ -467,6 +467,6 @@ fn round_trip(s: &Session, node: tutti_graph::NodeKey) {
     let _ = s
         .plugin_view(node)
         .expect("hosted")
-        .handle()
-        .save_state(tutti_plugin_types::StateUse::Project);
+        .state()
+        .save(tutti_plugin_types::StateUse::Project);
 }

@@ -146,9 +146,11 @@ impl Subject for Plugin {
             .session
             .plugin_view(rig.node)
             .ok()?
-            .handle()
-            .save_state(tutti_plugin_types::StateUse::Project)
-            .expect("the plugin saves its state");
+            .state()
+            .save(tutti_plugin_types::StateUse::Project)
+            .expect("the plugin saves its state")
+            .bytes()
+            .to_vec();
         // Not `complete()`: its overflow flag is also set by more blocks than the
         // log keeps, and a case this long renders more. The events are few.
         Some(tutti_shared_plugin::transcript::Transcript::parse(
