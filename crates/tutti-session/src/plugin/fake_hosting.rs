@@ -19,6 +19,7 @@ mod editor;
 mod losses;
 mod plugin_health;
 mod plugin_params;
+mod plugin_state;
 
 /// `handle` (the plugin `plugin`) hosted at `node`, which a test added to the
 /// graph and which hosts nothing yet.

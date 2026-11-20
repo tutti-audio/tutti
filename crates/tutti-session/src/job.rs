@@ -193,10 +193,7 @@ impl Cancel {
     }
 
     /// The job was dropped: its result will not be read.
-    #[cfg_attr(
-        not(any(test, feature = "plugin")),
-        expect(dead_code, reason = "the plugin state jobs (feature `plugin`) read it")
-    )]
+    #[cfg_attr(not(test), expect(dead_code, reason = "only the job tests read it"))]
     pub(crate) fn is_cancelled(&self) -> bool {
         self.0.cancelled.load(Ordering::Acquire)
     }

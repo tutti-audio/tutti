@@ -155,7 +155,7 @@ mod lost;
 mod rebind;
 pub use rebind::PortsRefusal;
 mod preset_job;
-mod state_job;
+mod state;
 pub(crate) use lost::Lost;
 
 use entry::PooledLink;
@@ -164,14 +164,15 @@ pub use entry::{
     PoolPluginEntry, PooledPlugin,
 };
 pub use preset_job::{LoadPreset, PresetJobError, PresetJobFailed};
-pub use state_job::{RestoreState, SaveState, StateJobError, StateJobFailed};
+pub use state::{PluginApplyError, RestoreState, RestoredState, SaveState, StateStartError};
 
+use crate::SavedPeer;
 use crate::jobs::{Landing, PluginLanding};
 use crate::plugin_diagnostics::Figures;
 use crate::{
     Diagnostics, GiveUp, HangDetector, Key, OtherPeer, PeerState, PluginBuses, PluginParams,
-    PortCounts, Recovery, RecoveryAction, RecoveryEvent, RecoveryFailure, ReloadCause, SavedPeer,
-    Session, SessionEvent, WorkerError,
+    PortCounts, Recovery, RecoveryAction, RecoveryEvent, RecoveryFailure, ReloadCause, Session,
+    SessionEvent, WorkerError,
 };
 
 /// How often a healthy plugin's state is captured, by default: 8 s.
@@ -964,6 +965,17 @@ impl Gate {
         self.0.lock_recover().ended = true;
     }
 
+    /// Whether the plugin is gone: removed or replaced.
+    pub(crate) fn is_ended(&self) -> bool {
+        self.0.lock_recover().ended
+    }
+
+    /// Whether `other` is this same plugin instance's gate: a replaced plugin
+    /// has a gate of its own.
+    pub(crate) fn is(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+
     /// The ids the mirror declares now (a read landed).
     pub(crate) fn declare(&self, mirror: &tutti_plugin_host::PluginParamValues) {
         self.0.lock_recover().declared = mirror.descriptors().iter().map(|p| p.id()).collect();
@@ -1325,10 +1337,14 @@ impl HostedPlugin {
     /// plugin's own would arrive: a load the host made moves values the plugin
     /// may not report, and the next `Phase::Plugins` reads them again.
     pub(crate) fn refresh_values(&self) {
-        queue(
-            &self.notices,
-            PluginSignal::Refresh(PluginRefresh::ParamValues),
-        );
+        let mut waiting = self.notices.lock_recover();
+        // One read serves every request made before the next phase.
+        if !waiting
+            .iter()
+            .any(|signal| matches!(signal, PluginSignal::Refresh(PluginRefresh::ParamValues)))
+        {
+            waiting.push(PluginSignal::Refresh(PluginRefresh::ParamValues));
+        }
     }
 
     /// Whether the plugin reacts to the host's automation mode.
@@ -1474,8 +1490,9 @@ impl<'a> Plugin<'a> {
         self.hosted.losses()
     }
 
-    /// The plugin's saved states: the last good one, the withheld one, a save
-    /// now, and a restore.
+    /// The plugin's saved states: the last good one and the withheld one.
+    /// A save now and a restore are [`Session::save_state`] and
+    /// [`Session::restore_state`].
     pub fn state(&self) -> StateView<'a> {
         StateView {
             hosted: self.hosted,
@@ -1551,8 +1568,9 @@ impl<'a> Plugin<'a> {
     }
 }
 
-/// A hosted plugin's states ([`Plugin::state`]): what the session holds
-/// of them, a save now, and a restore.
+/// A hosted plugin's states ([`Plugin::state`]): what the session holds of
+/// them. A save now and a restore are [`Session::save_state`] and
+/// [`Session::restore_state`].
 #[derive(Debug, Clone, Copy)]
 pub struct StateView<'a> {
     hosted: &'a HostedPlugin,
@@ -1577,8 +1595,7 @@ impl<'a> StateView<'a> {
 
     /// Saves the plugin's state for `state_use` now, as a blocking round trip
     /// to it (ten seconds at worst; an in-process plugin's is run by the main
-    /// thread's next tick, see the module docs). A pooled plugin's state goes through
-    /// [`Session::save_state`], a job that lands in an update.
+    /// thread's next tick, see the module docs).
     ///
     /// # Errors
     ///
@@ -1590,8 +1607,7 @@ impl<'a> StateView<'a> {
     }
 
     /// Restores `state` into the plugin. The parameter mirror is read again by
-    /// the next `Phase::Plugins`, whatever values the state moved. A pooled
-    /// plugin's state goes through [`Session::restore_state`], a job.
+    /// the next `Phase::Plugins`, whatever values the state moved.
     ///
     /// # Errors
     ///
