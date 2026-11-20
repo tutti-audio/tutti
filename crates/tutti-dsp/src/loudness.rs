@@ -84,8 +84,8 @@ pub enum ChannelWeightError {
 /// # Errors
 ///
 /// [`ChannelWeightError::Ambisonic`] for an ambisonic topology and
-/// [`ChannelWeightError::Unplaced`] for speakers that are not a [`Bed`](tutti_buffers::Bed)'s,
-/// which no empty topology is.
+/// [`ChannelWeightError::Unplaced`] for speakers that are not a [`Bed`](tutti_buffers::Bed)'s
+/// (an empty topology is no bed).
 pub fn channel_weights(topology: &ChannelTopology) -> Result<ChannelWeights, ChannelWeightError> {
     let speakers = topology.positions().ok_or(ChannelWeightError::Ambisonic)?;
     let unplaced = ChannelWeightError::Unplaced {
@@ -104,7 +104,8 @@ pub fn channel_weights(topology: &ChannelTopology) -> Result<ChannelWeights, Cha
                 .ok_or(unplaced)
         })
         .collect::<Result<Box<[_]>, _>>()?;
-    ChannelWeights::new(weights.iter().copied()).ok_or(unplaced)
+    // A bed has speakers, so the set is not empty.
+    Ok(ChannelWeights(weights))
 }
 
 #[cfg(test)]

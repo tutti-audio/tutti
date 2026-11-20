@@ -10,6 +10,7 @@ mod gain_pass;
 mod gate;
 mod key_filter;
 mod key_source;
+mod leveller;
 mod limiter;
 mod lookahead;
 mod multiband;
@@ -27,6 +28,7 @@ pub(crate) use gain_pass::{floored, key_levels};
 pub use gate::{GateBank, GateControls, GateSignals};
 pub use key_filter::KeyFilter;
 pub use key_source::KeySource;
+pub use leveller::{LevellerBank, LevellerControls};
 pub use limiter::{
     LimiterBank, LimiterControls, LimiterSignals, Lookahead, LookaheadError, PeakDetection,
     TruePeakError,
