@@ -10,7 +10,8 @@
 //!
 //! [`Default`] is threaded on a native target and polled on the web.
 //!
-//! This is not an async runtime: it has no timers and no I/O reactor.
+//! Time is a future too: [`Executor::sleep_until`] resolves at a deadline, fired by the
+//! form's timer (see [`Sleep`]). This is not an async runtime: it has no I/O reactor.
 
 use std::collections::VecDeque;
 use std::fmt;
@@ -23,9 +24,16 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError, Weak, mpsc};
 use std::task::{Context, Poll, Wake, Waker};
 use std::thread::{self, Thread};
+use std::time::Duration;
 
+use crate::Instant;
 use crate::priority::PriorityRequest;
 use crate::thread::{ThreadHandle, spawn_named};
+
+mod timers;
+
+pub use timers::Sleep;
+use timers::{Drive, Timers};
 
 #[cfg_attr(not(target_arch = "wasm32"), path = "executor/native.rs")]
 #[cfg_attr(target_arch = "wasm32", path = "executor/wasm.rs")]
@@ -66,6 +74,16 @@ fn lock<T: ?Sized>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 /// tutti's own futures never hold a clone, and a spawner passes a future what it needs
 /// instead. A long-lived future ends on its own stop flag before the executor drops.
 ///
+/// # Timers
+///
+/// [`sleep_until`](Self::sleep_until) is fired by the form's own timer. The threaded
+/// form and a host executor on a native target start a timer thread with the first
+/// sleep; it sleeps to the earliest deadline, wakes the due sleeps, never runs a future,
+/// and is joined when the executor drops. The polled form, and a host executor on the
+/// web (which has no threads), fire nothing between polls: every
+/// [`poll`](Self::poll) first wakes the sleeps whose deadline has passed, so a sleep's
+/// resolution is the cadence of `poll`.
+///
 /// # Not on the audio thread
 ///
 /// No future is polled on the audio thread, and a [`Waker`]'s `wake` may allocate or
@@ -85,6 +103,7 @@ fn lock<T: ?Sized>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 #[derive(Clone, Debug)]
 pub struct Executor {
     kind: Arc<Kind>,
+    timers: Arc<Timers>,
 }
 
 enum Kind {
@@ -366,6 +385,7 @@ impl Executor {
     pub fn threaded() -> Self {
         Self {
             kind: Arc::new(Kind::Threaded(Threaded::new())),
+            timers: Arc::new(Timers::new(Drive::Thread)),
         }
     }
 
@@ -378,6 +398,7 @@ impl Executor {
     pub fn polled() -> Self {
         Self {
             kind: Arc::new(Kind::Polled(Arc::new(Ready::default()))),
+            timers: Arc::new(Timers::new(Drive::Poll)),
         }
     }
 
@@ -389,6 +410,7 @@ impl Executor {
     ) -> Self {
         Self {
             kind: Arc::new(Kind::Host(Box::new(spawn))),
+            timers: Arc::new(Timers::new(os::HOST_DRIVE)),
         }
     }
 
@@ -432,10 +454,47 @@ impl Executor {
         }
     }
 
+    /// A future that resolves once [`Instant::now`] is at or past `deadline`; a deadline
+    /// already past resolves on its first poll.
+    ///
+    /// The executor's timer fires it: a timer thread on the threaded form and a native
+    /// host executor, [`poll`](Self::poll) on the polled form and a host executor on the
+    /// web (see the type's *Timers* section). Dropping the [`Sleep`] before it resolves
+    /// removes it from the timer.
+    ///
+    /// ```
+    /// use std::time::Duration;
+    /// use tutti_platform::{Executor, Instant};
+    ///
+    /// let executor = Executor::polled();
+    /// let (tx, rx) = std::sync::mpsc::channel();
+    /// let sleep = executor.sleep_until(Instant::now());
+    /// executor
+    ///     .spawn(async move {
+    ///         sleep.await;
+    ///         tx.send("due").unwrap();
+    ///     })
+    ///     .unwrap();
+    /// executor.poll(8);
+    /// assert_eq!(rx.try_recv(), Ok("due"));
+    /// ```
+    pub fn sleep_until(&self, deadline: Instant) -> Sleep {
+        self.timers.sleep_until(deadline)
+    }
+
+    /// A future that resolves `duration` from now: [`sleep_until`](Self::sleep_until) of
+    /// that instant.
+    pub fn sleep(&self, duration: Duration) -> Sleep {
+        self.sleep_until(Instant::now() + duration)
+    }
+
     /// Polls up to `max` futures that were woken before the call, on this thread, and
     /// returns how many it polled. A future that wakes itself while polled runs again
-    /// on the next call. Only the polled form does anything; the others return 0.
+    /// on the next call. Before polling it wakes the sleeps whose deadline has passed,
+    /// when the caller drives the timers (polled form, web host executor). Only the
+    /// polled form runs futures; the others return 0.
     pub fn poll(&self, max: usize) -> usize {
+        self.timers.fire_if_polled();
         match &*self.kind {
             Kind::Polled(ready) => ready.poll(max),
             Kind::Threaded(_) | Kind::Host(_) => 0,
