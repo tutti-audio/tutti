@@ -478,7 +478,10 @@ pub struct Unfinished {
 
 /// Writes the lengths of the frames on disk into an unfinished file's header,
 /// for a format that states them.
-#[cfg_attr(not(encode), allow(unused_variables, unreachable_code))]
+#[cfg_attr(
+    not(any(feature = "encode-wav", feature = "encode-aiff")),
+    allow(unused_variables, unreachable_code)
+)]
 fn patch_header(spec: &Spec, file: &mut std::fs::File) -> std::io::Result<()> {
     match spec.format() {
         #[cfg(feature = "encode-wav")]

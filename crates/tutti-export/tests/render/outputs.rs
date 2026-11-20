@@ -107,7 +107,7 @@ fn job(frames: usize) -> Job {
 }
 
 fn wav(path: &std::path::Path, pcm: Pcm) -> FileTarget {
-    FileTarget::new(path, Format::Wav(pcm), ChannelLayout::STEREO).dither(None)
+    FileTarget::new(path, Format::Wav(pcm), ChannelLayout::STEREO).no_dither()
 }
 
 fn flac(path: &std::path::Path, depth: IntDepth) -> FileTarget {
@@ -119,7 +119,7 @@ fn flac(path: &std::path::Path, depth: IntDepth) -> FileTarget {
         },
         ChannelLayout::STEREO,
     )
-    .dither(None)
+    .no_dither()
 }
 
 fn planes(produced: Produced) -> Vec<Vec<f32>> {
@@ -526,8 +526,7 @@ fn stems_that_take_the_masters_gain_still_sum_to_it() {
         .map(|n| dir.path().join(n))
         .collect();
     let float = |path: &std::path::Path, spec| {
-        FileTarget::new(path, Format::Wav(Pcm::Float32), ChannelLayout::STEREO)
-            .normalize(Some(spec))
+        FileTarget::new(path, Format::Wav(Pcm::Float32), ChannelLayout::STEREO).normalize(spec)
     };
     let mut produced = render(
         &mut graph,
@@ -686,7 +685,11 @@ fn outputs_that_contradict_each_other_are_named_errors() {
     let dir = tempfile::tempdir().unwrap();
     let mode = Normalize::peak(Db::new(-6.0));
     let file = |n: &str, spec: Option<NormalizeSpec>| {
-        Output::master(wav(&dir.path().join(n), Pcm::Int16).normalize(spec))
+        let target = wav(&dir.path().join(n), Pcm::Int16);
+        Output::master(match spec {
+            Some(spec) => target.normalize(spec),
+            None => target,
+        })
     };
     let run = |outputs: Vec<Output>| {
         render(
@@ -767,7 +770,7 @@ fn an_unmeasurable_output_names_its_index() {
                     Format::Wav(Pcm::Float32),
                     ChannelLayout::STEREO,
                 )
-                .normalize(Some(NormalizeSpec::own(Normalize::peak(Db::new(-6.0))))),
+                .normalize(NormalizeSpec::own(Normalize::peak(Db::new(-6.0)))),
             ),
             Output::tap(
                 reader,
@@ -777,7 +780,7 @@ fn an_unmeasurable_output_names_its_index() {
                     Format::Wav(Pcm::Float32),
                     ChannelLayout::STEREO,
                 )
-                .normalize(Some(NormalizeSpec::own(Normalize::peak(Db::new(-6.0))))),
+                .normalize(NormalizeSpec::own(Normalize::peak(Db::new(-6.0)))),
             ),
         ],
         &mut Control::none(),
@@ -853,7 +856,7 @@ fn a_lufs_output_with_no_placement_is_refused_before_the_render() {
     let dir = tempfile::tempdir().unwrap();
     let mut graph = wide(3);
     let lufs = file_of(&dir.path().join("l.wav"), 3)
-        .normalize(Some(NormalizeSpec::own(Normalize::lufs(Db::new(-23.0)))));
+        .normalize(NormalizeSpec::own(Normalize::lufs(Db::new(-23.0))));
     let err = render(
         &mut graph,
         &job(2_000),
@@ -898,8 +901,7 @@ fn tone(width: u16) -> RenderGraph {
 fn a_peak_output_with_no_placement_reaches_its_target_and_reports_no_loudness() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("p.wav");
-    let target =
-        file_of(&path, 3).normalize(Some(NormalizeSpec::own(Normalize::peak(Db::new(-12.0)))));
+    let target = file_of(&path, 3).normalize(NormalizeSpec::own(Normalize::peak(Db::new(-12.0))));
     let written = render(
         &mut tone(3),
         &job(48_000),
@@ -936,7 +938,7 @@ fn a_peak_output_with_no_placement_reaches_its_target_and_reports_no_loudness() 
 fn a_peak_output_with_an_assumed_placement_reports_its_weighted_loudness() {
     let dir = tempfile::tempdir().unwrap();
     let target = file_of(&dir.path().join("p.wav"), 6)
-        .normalize(Some(NormalizeSpec::own(Normalize::peak(Db::new(-12.0)))));
+        .normalize(NormalizeSpec::own(Normalize::peak(Db::new(-12.0))));
     let written = render(
         &mut tone(6),
         &job(48_000),

@@ -46,7 +46,7 @@ fn run(budget: usize, dir: &std::path::Path) -> (crate::Written, Vec<Vec<f32>>, 
         tutti_codec::Format::Wav(Pcm::Float32),
         ChannelLayout::STEREO,
     )
-    .normalize(Some(NormalizeSpec::own(Normalize::peak(Db::new(-6.0)))));
+    .normalize(NormalizeSpec::own(Normalize::peak(Db::new(-6.0))));
     let produced = render_outputs(
         &mut graph(),
         &job,
@@ -133,7 +133,7 @@ fn a_cancelled_or_failed_render_removes_its_spill() {
                 tutti_codec::Format::Wav(Pcm::Float32),
                 ChannelLayout::STEREO,
             )
-            .normalize(Some(NormalizeSpec::own(Normalize::peak(Db::new(-6.0))))),
+            .normalize(NormalizeSpec::own(Normalize::peak(Db::new(-6.0)))),
         )
     };
 

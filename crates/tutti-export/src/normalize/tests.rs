@@ -61,7 +61,11 @@ mod headroom {
     use tutti_codec::{Format, Pcm};
 
     fn config(pcm: Pcm, dither: Option<DitherShape>) -> FileTarget {
-        FileTarget::new("unused.wav", Format::Wav(pcm), ChannelLayout::STEREO).dither(dither)
+        let target = FileTarget::new("unused.wav", Format::Wav(pcm), ChannelLayout::STEREO);
+        match dither {
+            Some(shape) => target.dither(shape),
+            None => target.no_dither(),
+        }
     }
 
     /// dBFS of `1 - lsbs / 2^(bits - 1)`: `lsbs` LSBs below full scale.
