@@ -124,8 +124,8 @@ use tutti_buffers::{Float, FoldError, Interleaved, InterleavedMut, Planes};
 use tutti_platform::Instant;
 use tutti_rt::{AudioThreadCell, Counter, Gauge, Reader, RtScope};
 #[cfg(doc)]
-use tutti_transport::MotionFsm;
-use tutti_transport::{
+use tutti_timeline::MotionFsm;
+use tutti_timeline::{
     AudioTaken, FadeOut, IMMEDIATE_RESERVE, MotionEvent, SCHEDULE_CAPACITY, Scheduled,
     TransportAudio, TransportCommand,
 };
@@ -152,7 +152,7 @@ pub enum GraphEngineError {
     /// Another engine holds `transport`'s audio side (its motion machine,
     /// playhead and commands): one built over it, or over a clone of it, is
     /// still alive. Two would both consume every seek and both write the
-    /// playhead ([`Transport::audio`](tutti_transport::Transport::audio)).
+    /// playhead ([`Transport::audio`](tutti_timeline::Transport::audio)).
     #[error("{0}")]
     TransportHeld(AudioTaken),
 }
@@ -415,7 +415,7 @@ impl<F: Float> Engine<F> {
     ///
     /// The same as [`with_capacity`](Self::with_capacity).
     pub fn new(
-        transport: &tutti_transport::Transport,
+        transport: &tutti_timeline::Transport,
         editor: &mut Editor<F>,
         executor: Executor<F>,
         dates: BlockDates,
@@ -432,7 +432,7 @@ impl<F: Float> Engine<F> {
     /// `Env` from `transport`: the frame is the executor's clock, which
     /// tracks device time, and the transport snapshot comes from the
     /// [`TransportAudio`] the engine takes from `transport`
-    /// ([`Transport::audio`](tutti_transport::Transport::audio)) and drives, so
+    /// ([`Transport::audio`](tutti_timeline::Transport::audio)) and drives, so
     /// it publishes the playhead, steady time and tempo in force.
     ///
     /// **Bounds the editor** ([`Editor::set_limits`]) to at most
@@ -444,7 +444,7 @@ impl<F: Float> Engine<F> {
     /// can slip in beside it.
     ///
     /// **One engine per transport.** The engine holds `transport`'s one audio
-    /// side ([`Transport::audio`](tutti_transport::Transport::audio)): the
+    /// side ([`Transport::audio`](tutti_timeline::Transport::audio)): the
     /// playhead writer and the motion machine, which applies
     /// [`MotionFsm`]'s commands. While this engine is alive, another built
     /// over the same transport, or a clone of it, is refused with
@@ -475,7 +475,7 @@ impl<F: Float> Engine<F> {
     ///   than [`MAX_CHANNELS`] global outputs or a `MaxBlock` above the
     ///   capacity.
     pub fn with_capacity(
-        transport: &tutti_transport::Transport,
+        transport: &tutti_timeline::Transport,
         editor: &mut Editor<F>,
         executor: Executor<F>,
         capacity: Samples,
@@ -1612,8 +1612,8 @@ mod tests {
     use tutti_buffers::MaxBlock;
     use tutti_buffers::Placement;
     use tutti_graph::Prepare;
-    use tutti_transport::Timeline;
-    use tutti_transport::{MotionEvent, Transport};
+    use tutti_timeline::Timeline;
+    use tutti_timeline::{MotionEvent, Transport};
     use tutti_units::{Amplitude, Bpm};
 
     /// `GraphEngineError` is an `Error` a caller can box and move; the bound is
@@ -1629,7 +1629,7 @@ mod tests {
     /// deterministically.
     struct Racing<'a> {
         inner: GraphPieces,
-        settings: &'a tutti_transport::TransportSettings,
+        settings: &'a tutti_timeline::TransportSettings,
     }
 
     impl Pieces for Racing<'_> {
@@ -1890,7 +1890,7 @@ mod tests {
     fn a_locate_on_the_first_frame_is_taken_once_and_a_wrap_counted_once() {
         use tutti_buffers::ChannelLayout;
         use tutti_music::LoopRange;
-        use tutti_transport::LoopEdit;
+        use tutti_timeline::LoopEdit;
         use tutti_units::Beat;
         let engine_for = |transport: &Transport| {
             let (mut ed, exec) = Editor::new(Prepare::new(
@@ -1975,7 +1975,7 @@ mod tests {
             .motion()
             .schedule(
                 At::Frame(Frame::new(700)),
-                tutti_transport::MotionEvent::stop(),
+                tutti_timeline::MotionEvent::stop(),
             )
             .expect("room");
         let walk = engine.walk(

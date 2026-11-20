@@ -131,8 +131,8 @@ impl Setup {
 /// A clip reader reads the transport at any frame of its block from its
 /// `Env`.
 ///
-/// [`RenderClock::graph_block`]: tutti_transport::RenderClock::graph_block
-/// [`render_graph`]: tutti_transport::render_graph
+/// [`RenderClock::graph_block`]: tutti_timeline::RenderClock::graph_block
+/// [`render_graph`]: tutti_timeline::render_graph
 ///
 /// # Latency and tail
 ///
@@ -145,7 +145,7 @@ impl Setup {
 /// # Example
 ///
 /// ```
-/// use tutti_transport::FrozenClock;
+/// use tutti_timeline::FrozenClock;
 /// use tutti_units::{Hz, SampleRate, Samples, Seconds};
 /// use tutti_export::{render_one, BufferTarget, Control, Job, Output, Produced, RenderGraph, Setup};
 /// use tutti_graph::GraphBuilder;

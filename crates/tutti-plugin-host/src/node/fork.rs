@@ -137,7 +137,7 @@ pub(super) struct Fork<L: InProcess, F: Float> {
     /// fork reads its bars with, as installed when it forks.
     transport: TransportFeed,
     /// The live node's tempo reader, cloned for each fork (control side).
-    tempo: tutti_transport::TempoReader,
+    tempo: tutti_timeline::TempoReader,
     /// The live node's parameter delivery: what it has delivered, read when
     /// it forks, before its state.
     delivery: Arc<DeliveryCounters>,

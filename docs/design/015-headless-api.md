@@ -352,7 +352,7 @@ plugin crates, and `core/` is the floor.
 
 | Edge | Always or feature | Why |
 |---|---|---|
-| `tutti-types`, `tutti-graph`, `tutti-transport`, `tutti-metering`, `tutti-engine` | always | the graph, transport, meters and engine |
+| `tutti-types`, `tutti-graph`, `tutti-timeline`, `tutti-metering`, `tutti-engine` | always | the graph, transport, meters and engine |
 | `tutti-nodes` | always | click, control lanes, `Modulation` |
 | `tracing` | always | logging; what `GraphRuntime`'s `bevy_log` calls become |
 | `tutti-cpal` | `device` | the sound card; off means offline only, with no ALSA headers |
@@ -1060,7 +1060,7 @@ midi = ["dep:tutti-midi-types", "dep:tutti-midi-file", "dep:tutti-midi-runtime",
   `default = ["session"]` never turns on `device`, and a headless default
   build links neither `tutti-cpal` nor ALSA.
 - **The cost of the default** is the session's own code. Its always-on
-  edges (`tutti-types`, `tutti-graph`, `tutti-transport`, `tutti-metering`, `tutti-engine`, `tutti-nodes`) are
+  edges (`tutti-types`, `tutti-graph`, `tutti-timeline`, `tutti-metering`, `tutti-engine`, `tutti-nodes`) are
   already always-on edges of `tutti`; `tracing` is the one new crate.
 - The comment in `crates/tutti/Cargo.toml` that reads "`default = []`, as
   on every other member" is replaced by the one above.

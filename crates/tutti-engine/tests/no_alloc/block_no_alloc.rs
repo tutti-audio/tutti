@@ -32,7 +32,7 @@ use tutti_graph::{Editor, MeterReader, Prepare, TapReader};
 use tutti_graph::{MeterId, MeterSpec, NodeKey, TapId, TapOptions};
 use tutti_nodes::testing::Osc;
 use tutti_nodes::{SvfFilterNode, SvfType};
-use tutti_transport::{MotionEvent, Transport};
+use tutti_timeline::{MotionEvent, Transport};
 use tutti_units::{Bpm, Hz, Q, SampleRate, Samples};
 const SAMPLE_RATE: f64 = 48_000.0;
 

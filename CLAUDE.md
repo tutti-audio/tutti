@@ -318,7 +318,7 @@ adapter is [tutti-audio/bevy-tutti](https://github.com/tutti-audio/bevy-tutti).
 4. `tutti-rt`, `tutti-midi-device`
 5. `tutti-graph`, `tutti-dsp`, `tutti-modulation`, `tutti-codec`,
    `tutti-tempo`, `tutti-voicing`, `tutti-sf2`, `tutti-midi-network`
-6. `tutti-transport`, `tutti-plugin-types`, `tutti-measure`
+6. `tutti-timeline`, `tutti-plugin-types`, `tutti-measure`
 7. `tutti-engine`, `tutti-nodes`, `tutti-midi-runtime`, `tutti-midi-file`, `tutti-clap-ffi`,
    `tutti-vst3-ffi`, `tutti-au-ffi`, `tutti-vst2-ffi`, `tutti-plugin-db`, `tutti-plugin-ipc`
 8. `tutti-cpal`, `tutti-export`, `tutti-sampler`, `tutti-polysynth`, `tutti-soundfont`,

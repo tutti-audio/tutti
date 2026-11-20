@@ -75,7 +75,7 @@ use tutti_export::{
 use tutti_graph::{CommitError, Editor, MissingSource, NodeKey, OutPort, TapId, TapOptions};
 use tutti_rt::LockExt;
 use tutti_tempo::TempoMap;
-use tutti_transport::{OfflineTimeline, OfflineTimelineConfig, OfflineTransport, RenderClock};
+use tutti_timeline::{OfflineTimeline, OfflineTimelineConfig, OfflineTransport, RenderClock};
 use tutti_units::{Beat, Frame, SampleRate, Samples, Seconds};
 
 use crate::Session;
@@ -968,7 +968,7 @@ impl ExportClock {
     /// What the renderer advances.
     fn render_clock(&self) -> Arc<dyn RenderClock> {
         match &self.0 {
-            Clock::Frozen => Arc::new(tutti_transport::FrozenClock),
+            Clock::Frozen => Arc::new(tutti_timeline::FrozenClock),
             Clock::Timeline { clock, .. } => Arc::clone(clock),
         }
     }
@@ -999,9 +999,9 @@ impl std::fmt::Debug for ExportClock {
 struct Stopped(Arc<TempoMap>);
 
 /// The frozen render's timeline: only the render reads it.
-impl tutti_transport::OfflineClock for Stopped {}
+impl tutti_timeline::OfflineClock for Stopped {}
 
-impl tutti_transport::Timeline for Stopped {
+impl tutti_timeline::Timeline for Stopped {
     fn beat(&self) -> tutti_units::Beat {
         tutti_units::Beat::new(0.0)
     }
@@ -2611,7 +2611,7 @@ mod tests {
     #[test]
     fn a_bounce_after_a_loop_set_renders_the_loop_without_an_update() {
         let mut session = session();
-        let region = tutti_transport::LoopRegion::new(
+        let region = tutti_timeline::LoopRegion::new(
             tutti_music::LoopRange::new(Beat::new(0.0), Beat::new(2.0)).unwrap(),
             true,
         );

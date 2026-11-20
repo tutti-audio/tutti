@@ -6,7 +6,7 @@
 //! refused.
 
 use tutti_music::LoopRange;
-use tutti_transport::{LoopEdit, LoopRegion};
+use tutti_timeline::{LoopEdit, LoopRegion};
 use tutti_units::Beat;
 
 #[test]

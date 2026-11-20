@@ -17,7 +17,7 @@
 //! ## What this crate does not own
 //!
 //! - **The transport.** `Transport`, its motion state machine and timed commands
-//!   are `tutti-transport`'s; the engine holds the transport's `TransportAudio` and
+//!   are `tutti-timeline`'s; the engine holds the transport's `TransportAudio` and
 //!   applies what the transport schedules.
 //! - **Level metering.** A meter is an op in the compiled plan, on the outputs or
 //!   any node's port (`tutti-graph`'s `Editor::open_meter`, `MeterReader`), per
@@ -57,7 +57,7 @@
 //! use tutti_buffers::InterleavedMut;
 //! use tutti_graph::NodeKey;
 //! use tutti_engine::Engine;
-//! use tutti_transport::{MotionEvent, Timeline, Transport};
+//! use tutti_timeline::{MotionEvent, Timeline, Transport};
 //! use tutti_graph::{Cx, Editor, ForkByClone, Io, Node, Prepare, Shape, Status};
 //!
 //! // A node reads the transport from each block's `Env`. This one puts the beat

@@ -145,7 +145,7 @@ pub use tutti_rt::PushError;
 // The engine's health: a `Gauge<Load>` and a `Counter<BlockCounts>`.
 #[cfg(feature = "session")]
 pub use tutti_engine::{BlockCounts, Load};
-pub use tutti_transport::{
+pub use tutti_timeline::{
     AfterLocate, FadeOut, LoopRegion, MotionEvent, MotionState, TransportCommand,
 };
 
@@ -390,7 +390,7 @@ pub mod types {
 pub mod tempo {
     pub use tutti_tempo::{Cell, CellGrid, CellGridError, FromBeatsError, TempoError};
     pub use tutti_tempo::{TempoMap, TempoMapBuilder, TempoPoint, TempoView, Transition};
-    pub use tutti_transport::{ProjectMeter, TempoReader};
+    pub use tutti_timeline::{ProjectMeter, TempoReader};
 }
 
 /// What a node author names (`tutti-graph`): the `Node` contract and the
@@ -468,7 +468,7 @@ pub mod session {
         RootTopologyStatus, SessionNode, SessionOutputTapError, Taps, TempoError, Weighted, Wire,
         root_width,
     };
-    pub use tutti_transport::{
+    pub use tutti_timeline::{
         AudioTaken, LoopEdit, OfflineTimeline, OfflineTimelineConfig, OfflineTransport, TimedError,
         Timeline,
     };

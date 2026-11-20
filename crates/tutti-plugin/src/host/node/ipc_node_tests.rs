@@ -522,7 +522,7 @@ fn block_env_with(frame: u64, len: usize, playing: bool, bpm: Bpm, beat: Beat) -
 /// `third`'s transport, and returns the chunk 128..256 as the server was sent
 /// it.
 fn chunk_across_the_third_block(
-    map: tutti_transport::TempoReader,
+    map: tutti_timeline::TempoReader,
     first: impl Fn(u64) -> (Bpm, Beat),
     third: (bool, Bpm, Beat),
 ) -> ProcessAudioData {
@@ -610,7 +610,7 @@ fn a_tempo_ramp_across_a_block_boundary_reaches_the_server_as_its_slope() {
         tempo: Bpm::of(bpm),
         transition: shape,
     };
-    let map = tutti_transport::TempoReader::fixed(std::sync::Arc::new(
+    let map = tutti_timeline::TempoReader::fixed(std::sync::Arc::new(
         TempoMap::new(vec![
             point(0.0, 120.0, Transition::RampTime { end: None }),
             point(100.0, 90.0, Transition::Step),

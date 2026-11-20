@@ -25,7 +25,7 @@ use tutti_graph::{
     Node, NodeParts, Prepare, Shape, Status,
 };
 use tutti_graph::{OutPort, Source};
-use tutti_transport::FrozenClock;
+use tutti_timeline::FrozenClock;
 use tutti_units::{Db, SampleRate};
 
 const RATE: SampleRate = SampleRate::SR_48K;

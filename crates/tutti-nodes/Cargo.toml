@@ -46,7 +46,7 @@ tutti-curve = { version = "0.0.1", path = "../tutti-curve" }
 
 # `ClickNode` reads the count-in flag off a `Transport` and follows a
 # `ProjectMeter`.
-tutti-transport = { version = "0.0.1", path = "../tutti-transport" }
+tutti-timeline = { version = "0.0.1", path = "../tutti-timeline" }
 
 # `VbapError`.
 thiserror = { workspace = true, features = ["std"] }
