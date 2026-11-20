@@ -5,7 +5,7 @@
 //! broken and an upmix export came to panic, both with a green suite. Every test
 //! here fails against the code as it was.
 //!
-//! The cases below write WAV, FLAC, Ogg and AIFF (the dev-dependency on
+//! The cases below write WAV, FLAC and AIFF (the dev-dependency on
 //! `tutti-codec` turns every encoder on). `hound` decodes the results back.
 //!
 //! Every graph here is built with `tutti_graph::GraphBuilder` and rendered
@@ -16,7 +16,7 @@ use crate::support::{EncodeConfig, ExportConfig, RenderConfig};
 use tutti_buffers::{Bed, ChannelLayout, ChannelTopology, Mono};
 
 use crate::support::{render_to_buffers, render_to_file};
-use tutti_codec::{FlacLevel, Format, IntDepth, Pcm, Quality};
+use tutti_codec::{FlacLevel, Format, IntDepth, Pcm};
 use tutti_export::{RenderGraph, Resample, Setup};
 use tutti_graph::{Cx, ForkByClone, GraphBuilder, Io, Node, Prepare, Shape, Status};
 use tutti_nodes::testing::{Const, Osc};
@@ -55,13 +55,6 @@ fn flac() -> Format {
     }
 }
 
-/// Ogg Vorbis at the default quality.
-fn vorbis() -> Format {
-    Format::Vorbis {
-        quality: Quality::default(),
-    }
-}
-
 fn config(format: Format, layout: ChannelLayout) -> ExportConfig {
     ExportConfig {
         render: RenderConfig {
@@ -79,12 +72,11 @@ fn config(format: Format, layout: ChannelLayout) -> ExportConfig {
 }
 
 #[test]
-fn all_four_formats_export() {
+fn all_three_formats_export() {
     let d = tempfile::tempdir().unwrap();
     for (f, ext) in [
         (Format::Wav(Pcm::Int24), "wav"),
         (flac(), "flac"),
-        (vorbis(), "ogg"),
         (Format::Aiff(Pcm::Int24), "aiff"),
     ] {
         let p = d.path().join(format!("a.{ext}"));
@@ -547,7 +539,6 @@ fn normalized_audio_can_be_written_to_every_format() {
     for (format, ext) in [
         (Format::Wav(Pcm::Int24), "wav"),
         (flac(), "flac"),
-        (vorbis(), "ogg"),
         (Format::Aiff(Pcm::Int24), "aiff"),
     ] {
         s.encode.format = format;
@@ -605,16 +596,6 @@ fn a_resample_reaches_every_format_not_just_wav() {
         (flac_frames as i64 - 48_000).abs() < 512,
         "flac: header says 48000 but payload holds {flac_frames} frames \
          (44100 means the resample was skipped)"
-    );
-
-    // Ogg: same property, read from the final page's granule position.
-    s.encode.format = vorbis();
-    let po = d.path().join("r.ogg");
-    render_to_file(dc(RATE), &s, &FrozenClock, &po).unwrap();
-    let ogg_frames = ogg_granule(&po);
-    assert!(
-        (ogg_frames as i64 - 48_000).abs() < 2048,
-        "ogg: header says 48000 but granule reports {ogg_frames} frames"
     );
 }
 
@@ -909,48 +890,6 @@ fn flac_frame_count(path: &std::path::Path) -> u64 {
         | (si[15] as u64) << 16
         | (si[16] as u64) << 8
         | (si[17] as u64)
-}
-
-/// Granule position of the last Ogg page — the total frames encoded.
-///
-/// Walks pages by seeking the `OggS` capture pattern rather than stepping
-/// blindly: a page body can contain those four bytes, and a naive walk that
-/// mis-steps once reads a random eight bytes as a granule (it reported 3830784
-/// for a 96000-frame file while I was writing this).
-fn ogg_granule(path: &std::path::Path) -> u64 {
-    let b = std::fs::read(path).unwrap();
-    let mut last = 0i64;
-    let mut i = 0usize;
-    while let Some(off) = find_from(&b, b"OggS", i) {
-        if off + 27 > b.len() {
-            break;
-        }
-        let gran = i64::from_le_bytes(b[off + 6..off + 14].try_into().unwrap());
-        let segs = b[off + 26] as usize;
-        if off + 27 + segs > b.len() {
-            break;
-        }
-        // -1 marks a page that completes no packet; it is not a frame count.
-        if gran >= 0 {
-            last = gran;
-        }
-        let body: usize = b[off + 27..off + 27 + segs]
-            .iter()
-            .map(|&s| s as usize)
-            .sum();
-        i = off + 27 + segs + body;
-    }
-    last as u64
-}
-
-fn find_from(hay: &[u8], needle: &[u8], from: usize) -> Option<usize> {
-    if from >= hay.len() {
-        return None;
-    }
-    hay[from..]
-        .windows(needle.len())
-        .position(|w| w == needle)
-        .map(|p| p + from)
 }
 
 /// Silence cannot be normalized. Owner decision (lane E1): exact silence is

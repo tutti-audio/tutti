@@ -645,7 +645,7 @@ pub enum TakeError {
     /// A take written to a file keeps the file beside its path in `unfinished`
     /// (a full disk on a write, a failed header or close) and leaves the path alone: the frames so far are
     /// there, and the app owns the file, to move or delete. It is unfinished:
-    /// a FLAC or Ogg Vorbis file may end in a cut frame or page, and a WAV's or
+    /// a FLAC file may end in a cut frame, and a WAV's or
     /// AIFF's header states the whole frames on disk only if
     /// [`header_describes_frames`](tutti_codec::Unfinished::header_describes_frames) says so.
     /// `unfinished` is `None` for a sink of the caller's.

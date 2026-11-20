@@ -338,4 +338,4 @@ adapter is [tutti-audio/bevy-tutti](https://github.com/tutti-audio/bevy-tutti).
   `tutti-codec`'s decode module, `winnow` in the listed parser modules, `web_time` and
   `thread_priority` in `tutti-platform`).
 - A codec format is a cargo feature (`encode-*`, `decode-*`), none on by default; a decode
-  feature pulls no encoder, and the C Vorbis library is `encode-vorbis`'s alone.
+  feature pulls no encoder.

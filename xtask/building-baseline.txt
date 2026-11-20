@@ -61,7 +61,6 @@ tutti-codec  ctor-result  crates/tutti-codec/src/file_out.rs::FileOut::create
 tutti-codec  ctor-result  crates/tutti-codec/src/flac.rs::FlacWriter::create
 tutti-codec  ctor-result  crates/tutti-codec/src/format.rs::Format::from_extension
 tutti-codec  ctor-result  crates/tutti-codec/src/format.rs::Format::from_path
-tutti-codec  ctor-result  crates/tutti-codec/src/vorbis.rs::VorbisWriter::create
 tutti-codec  ctor-result  crates/tutti-codec/src/wav.rs::WavWriter::create
 
 # tutti-cpal

@@ -461,10 +461,7 @@ impl<F: Float> Replay<F> for PlaneSource<'_, F> {
 /// The frames the replay of planes hands out per block: 64, which only paces
 /// the encoder.
 ///
-/// Not raised to the graph's block: Ogg Vorbis's bytes depend on how its
-/// input is split into `encode_audio_block` calls, so this size is part of
-/// what a replayed Ogg export writes, and a 1024-frame replay measured no
-/// faster for the PCM formats.
+/// Not raised to the graph's block: a 1024-frame replay measured no faster.
 pub(crate) const REPLAY_BLOCK: usize = 64;
 
 /// Pull the whole render out of `src`, gating each block, handing every block

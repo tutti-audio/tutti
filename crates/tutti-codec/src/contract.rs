@@ -28,18 +28,15 @@ fn block(samples: &[f32]) -> Interleaved<'_> {
 }
 
 /// Runs the cases against one format. `make` starts a writer of it in a sink;
-/// `deterministic` is whether the same input always gives the same bytes (Ogg
-/// stamps a random stream serial, so it does not); `recovers` is whether a
+/// `recovers` is whether a
 /// writer can close the file after its sink refused a write (FLAC cannot: the
-/// frame that was refused is gone, and the writer waits for it).
+/// frame that was refused is gone).
 macro_rules! contract {
-    ($name:ident, $format:expr, $deterministic:expr, $recovers:expr, $make:expr) => {
+    ($name:ident, $format:expr, $recovers:expr, $make:expr) => {
         mod $name {
             use super::*;
 
-            fn make<S: Write + Seek + Send + 'static>(
-                sink: S,
-            ) -> Result<impl FormatWriter<Sink = S>> {
+            fn make<S: Write + Seek>(sink: S) -> Result<impl FormatWriter<Sink = S>> {
                 ($make)(&spec($format), sink)
             }
 
@@ -52,24 +49,17 @@ macro_rules! contract {
             }
 
             /// A take cut into blocks of any size, empty ones included, is the
-            /// file the whole take is (Ogg: still a finished, non-empty stream,
-            /// the empty block not ending it).
+            /// file the whole take is.
             #[test]
             fn blocks_of_any_size_make_the_same_file() {
                 let all = input(10_000);
                 let whole = file(&[&all]);
                 let cut = file(&[&all[..2], &[], &all[2..9_000], &all[9_000..]]);
-                if $deterministic {
-                    assert_eq!(whole, cut);
-                } else {
-                    assert!(cut.len() > 1_000, "a finished stream");
-                    let (a, b) = (whole.len() as f64, cut.len() as f64);
-                    assert!((a - b).abs() / a < 0.1, "{a} bytes whole, {b} cut");
-                }
+                assert_eq!(whole, cut);
             }
 
             /// A take of no frames is a file: a header that opens with its
-            /// format's magic (`RIFF`, `FORM`, `fLaC`, `OggS`).
+            /// format's magic (`RIFF`, `FORM`, `fLaC`).
             #[test]
             fn zero_frames_is_a_file() {
                 let sink = make(Cursor::new(Vec::new())).unwrap().finish().unwrap();
@@ -86,9 +76,6 @@ macro_rules! contract {
             /// longer file, down to the last partial block.
             #[test]
             fn a_longer_take_is_a_longer_file() {
-                if !$deterministic {
-                    return; // an Ogg stream is paged: sizes jump
-                }
                 let all = input(4_196);
                 assert!(file(&[&all]).len() > file(&[&all[..4_096 * 2]]).len());
             }
@@ -186,7 +173,6 @@ contract!(
     wav,
     Format::Wav(crate::Pcm::Int24),
     true,
-    true,
     |spec: &Spec, sink| crate::WavWriter::create(spec, crate::Pcm::Int24, sink)
 );
 
@@ -194,7 +180,6 @@ contract!(
 contract!(
     aiff,
     Format::Aiff(crate::Pcm::Int16),
-    true,
     true,
     |spec: &Spec, sink| crate::AiffWriter::create(spec, crate::Pcm::Int16, sink)
 );
@@ -206,7 +191,6 @@ contract!(
         depth: crate::IntDepth::Int16,
         level: crate::FlacLevel::Standard
     },
-    true,
     false,
     |spec: &Spec, sink| crate::FlacWriter::create(
         spec,
@@ -214,15 +198,4 @@ contract!(
         crate::FlacLevel::Standard,
         sink
     )
-);
-
-#[cfg(feature = "encode-vorbis")]
-contract!(
-    vorbis,
-    Format::Vorbis {
-        quality: crate::Quality::LOWEST
-    },
-    false,
-    true,
-    |spec: &Spec, sink| crate::VorbisWriter::create(spec, crate::Quality::LOWEST, sink)
 );

@@ -1,15 +1,14 @@
 #![doc = include_str!("../README.md")]
-//! **The audio file codecs**: WAV, AIFF, FLAC and Ogg Vorbis out behind one
+//! **The audio file codecs**: WAV, AIFF and FLAC out behind one
 //! `Encoder`, over any `Write + Seek` sink; WAV, FLAC, MP3 and Ogg in as a
 //! [`Wave`](tutti_buffers::Wave) or a streaming `FileIn`.
 //!
 //! ## What is here
 //!
 //! - `Format` names the container and carries only the settings it accepts:
-//!   `Wav(Pcm)`, `Aiff(Pcm)`, `Flac { depth: IntDepth, level: FlacLevel }` and
-//!   `Vorbis { quality: Quality }`. FLAC at float and Ogg at a sample width are not
-//!   expressible. Each variant exists only with its feature (`encode-wav`, `encode-aiff`, `encode-flac`,
-//!   `encode-vorbis`), none on by default.
+//!   `Wav(Pcm)`, `Aiff(Pcm)` and `Flac { depth: IntDepth, level: FlacLevel }`. FLAC at float is not
+//!   expressible. Each variant exists only with its feature (`encode-wav`, `encode-aiff`,
+//!   `encode-flac`), none on by default.
 //! - `Spec` is what a file is written as: the format, the speakers (the topology,
 //!   which is also the width) and the rate. `Spec::of_width` takes a width and
 //!   states the engine's order for it.
@@ -76,8 +75,6 @@ mod pcm;
 mod spec;
 #[cfg(test)]
 mod test_sink;
-#[cfg(feature = "encode-vorbis")]
-mod vorbis;
 #[cfg(feature = "encode-wav")]
 mod wav;
 #[cfg(any(feature = "encode-wav", decode))]
@@ -97,11 +94,9 @@ pub use error::{Codec, Error, Result, SpecError};
 pub use file_out::FileOut;
 #[cfg(feature = "encode-flac")]
 pub use flac::FlacWriter;
-pub use format::{FlacLevel, Format, Quality, QualityOutOfRange};
+pub use format::{FlacLevel, Format};
 pub use pcm::{IntDepth, Pcm};
 pub use spec::Spec;
-#[cfg(feature = "encode-vorbis")]
-pub use vorbis::VorbisWriter;
 #[cfg(feature = "encode-wav")]
 pub use wav::WavWriter;
 #[cfg(encode)]
