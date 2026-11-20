@@ -347,7 +347,7 @@ impl PluginControls {
     }
 
     /// Commands the audio side could not hand to the plugin's bridge: a full
-    /// command queue refused a parameter, reset or rate command, or a block
+    /// command queue refused a reset or rate command, or a block
     /// found no payload or no room for its parameter buffer, so the block was
     /// refused. The command is lost (a block plays as silence). Telemetry
     /// beside [`skipped_chunks`](Self::skipped_chunks): an overloaded plugin or

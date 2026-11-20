@@ -335,6 +335,12 @@ pub(super) const ALLOW: &[Allow] = &[
     ),
     ty(
         "crates/tutti-codec/",
+        "WaveDecode::open",
+        CTOR,
+        "opening a file for a stepped decode: the failure is the file's, not a value's",
+    ),
+    ty(
+        "crates/tutti-codec/",
         "FileIn::open",
         CTOR,
         "opening a file for decoding: the failure is the file's, not a value's",

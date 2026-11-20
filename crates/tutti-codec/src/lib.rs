@@ -88,7 +88,7 @@ mod writer;
 #[cfg(feature = "encode-aiff")]
 pub use aiff::AiffWriter;
 #[cfg(decode)]
-pub use decode::{FileIn, WaveMetadata, read_wave, read_wave_metadata};
+pub use decode::{FileIn, WaveDecode, WaveMetadata, read_wave, read_wave_metadata};
 pub use decode::{can_decode, decodable_extensions};
 pub use decode_error::DecodeError;
 pub use encoder::{Encoder, FileEncoder, Finalized, FinalizedFile};

@@ -145,7 +145,7 @@ impl PluginBridge {
     /// editor. Realtime-safe; says whether it was delivered.
     pub fn set_automation_state_rt(&self, mode: tutti_plugin_types::AutomationMode) -> Delivered {
         // Deliver to BOTH the audio subprocess AND the in-process GUI instance
-        // (mirrors `set_parameter_rt`). The automation-state advisory drives
+        // (mirrors `set_parameter_value`). The automation-state advisory drives
         // editor UI feedback (a glowing knob ring), which lives in the GUI
         // instance — so a GUI-only delivery would leave it unlit. The audio
         // instance also receives it for formats that gate DSP on it. Both sides

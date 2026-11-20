@@ -133,7 +133,12 @@ pub(crate) mod wire;
 ///   changes, and is sent as its own message only ahead of a request that
 ///   observes the plugin (its state, a parameter's value). The server applies it
 ///   through the format's own route for parameters outside a block.
-pub const PROTOCOL_VERSION: u32 = 48;
+/// - **Version 49** adds `plain_map` to a parameter (`PlainMap`: the line between
+///   the declared ends, or the line on its integers; absent when the plugin
+///   defines the map), a field of every entry of `ParameterList`, so a
+///   version-48 server's list reads differently from the first parameter's last
+///   byte.
+pub const PROTOCOL_VERSION: u32 = 49;
 
 /// Largest control-socket frame body either end will allocate for, in bytes.
 ///
