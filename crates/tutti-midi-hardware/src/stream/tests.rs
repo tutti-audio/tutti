@@ -13,7 +13,6 @@ use std::sync::Arc;
 use std::time::Duration;
 use tutti_fixtures::midi;
 use tutti_graph::UmpAt;
-use tutti_midi_ci::{BlockName, EndpointName};
 use tutti_midi_device::{
     Capabilities, DeviceId, EndpointId, FunctionBlock, MAX_ATTEMPTS, PortDirection, STEP_TIMEOUT,
     Supports,
@@ -24,6 +23,7 @@ use tutti_ump::{
     BlockDirection, FirstGroup, FunctionBlockId, GroupSpan, Message, SoftwareRevision, Stream,
     SysexAssembler, SysexStep,
 };
+use tutti_ump::{BlockName, EndpointName};
 
 /// A fake duplex device `raw` and the session that opened its input.
 struct Wire {
@@ -1053,8 +1053,8 @@ fn a_midi1_device_that_answers_an_identity_request_is_learned_and_checked_agains
 /// equal Product Instance Id is what makes a saved device the same unit.
 #[test]
 fn an_endpoint_that_answers_declares_its_identity_and_product_instance_id() {
-    use tutti_midi_ci::ProductInstanceId;
     use tutti_midi_device::{Learned, Match};
+    use tutti_ump::ProductInstanceId;
 
     let device = offering_both()
         .identified(identity())

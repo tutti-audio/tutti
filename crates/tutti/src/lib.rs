@@ -180,6 +180,8 @@ pub use tutti_plugin_types::{PluginFailure, PluginRef, PresetError, PresetId, St
 pub use tutti_session::MidiPolicyTarget;
 #[cfg(all(feature = "session", feature = "plugin"))]
 pub use tutti_session::Params as PluginParams;
+#[cfg(all(feature = "session", feature = "analyze", feature = "sampler"))]
+pub use tutti_session::windows_from_signal;
 #[cfg(all(feature = "session", feature = "plugin"))]
 pub use tutti_session::{
     AddPluginError, AnyPlugin, Diagnostics, ListedPreset, LoadPreset, Opened, Plugin, PluginBuses,
@@ -358,7 +360,7 @@ pub mod types {
 /// made from, and the `TempoView` a reader walks it with. What
 /// the tempo target takes.
 pub mod tempo {
-    pub use tutti_tempo::{Cell, CellGrid, CellGridError, TempoError};
+    pub use tutti_tempo::{Cell, CellGrid, CellGridError, FromBeatsError, TempoError};
     pub use tutti_tempo::{TempoMap, TempoMapBuilder, TempoPoint, TempoView, Transition};
     pub use tutti_transport::{ProjectMeter, TempoReader};
 }
@@ -706,12 +708,12 @@ pub mod midi {
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_ci::{
         ChannelControllers, ChannelsDetail, CiCategories, CiDeviceId, CiPeer, DataControl,
-        DetailsData, DiscoveryData, EnabledMpeZones, InquiryTarget, InstanceIdError,
-        ManufacturerProfile, MaxSysexSize, MessageText, Nak, NakStatus, NameError, NotADataControl,
-        NotADeviceId, NotASysexSize, NotProfileChannels, NoteData, ProcessError, ProcessFeatures,
-        ProductInstanceId, ProfileChange, ProfileDataError, ProfileEntry, ProfileOutcome,
-        ProfileRequest, ProfileRequestError, ProfileState, ProfileTable, ReportRequest,
-        ReportScope, SpecificData, StandardProfile, SystemMessages,
+        DetailsData, DiscoveryData, EnabledMpeZones, InquiryTarget, ManufacturerProfile,
+        MaxSysexSize, MessageText, Nak, NakStatus, NotADataControl, NotADeviceId, NotASysexSize,
+        NotProfileChannels, NoteData, ProcessError, ProcessFeatures, ProfileChange,
+        ProfileDataError, ProfileEntry, ProfileOutcome, ProfileRequest, ProfileRequestError,
+        ProfileState, ProfileTable, ReportRequest, ReportScope, SpecificData, StandardProfile,
+        SystemMessages,
     };
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_ci::{Muid, NotAMuid};
@@ -811,7 +813,7 @@ pub mod midi {
     };
 
     #[cfg(feature = "midi-hardware")]
-    pub use tutti_midi_ci::{EndpointName, Name, Whole};
+    pub use tutti_midi_ci::Whole;
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_device::{
         DeviceId as MidiDeviceId, DeviceInfo, Learned, Match, MidiIdentity, SavedDevice,
@@ -828,6 +830,8 @@ pub mod midi {
         MidiPortError, NoHardware, OutputOptions, PortCause, ProfilePeer, ReportPeer,
         RequestReport, SwitchProfile, WholeProfile, midi_input, midi_output,
     };
+    #[cfg(feature = "midi-hardware")]
+    pub use tutti_ump::{EndpointName, InstanceIdError, Name, NameError, ProductInstanceId};
     /// MIDI-CI Property Exchange (M2-103 and its resource specifications): a
     /// peer's resources, read, written and subscribed to through the session.
     /// Under `plugin` alone it holds only the `MediaType` a `PeerState` carries.

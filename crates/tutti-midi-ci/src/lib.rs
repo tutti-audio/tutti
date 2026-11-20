@@ -31,15 +31,13 @@
 //! ([`RotaryControl`]) Profiles are the same kind of table, and [`Gm2FunctionBlock`]
 //! and [`Gm2SingleChannel`] say whether a peer has General MIDI 2 enabled.
 //!
-//! The checked names a UMP Endpoint and a MIDI-CI Product Instance Id carry
-//! ([`EndpointName`], [`BlockName`], [`ProductInstanceId`]) live here too: the
-//! Discovery messages carry the same text.
 #![forbid(unsafe_code)]
 
 use std::vec::Vec;
 
 use tutti_ump::{
-    MidiChannel, MidiGroup, Sysex7Packets, SysexError, U7, U28, UNIVERSAL_NON_REAL_TIME, Ump,
+    MidiChannel, MidiGroup, ProductInstanceId, Sysex7Packets, SysexError, U7, U28,
+    UNIVERSAL_NON_REAL_TIME, Ump,
 };
 
 mod articulation;
@@ -57,7 +55,6 @@ mod handshake;
 mod initiate;
 mod initiator;
 mod link;
-mod name;
 mod pe;
 mod process;
 mod process_initiator;
@@ -96,10 +93,6 @@ pub use initiator::{
     EnabledMpeZones, ProfileAction, ProfileChange, ProfileEntry, ProfileInitiator, ProfileOutcome,
     ProfileRequest, ProfileRequestError, ProfileTable,
 };
-pub use name::{
-    BLOCK_NAME_BYTES, BlockName, ENDPOINT_NAME_BYTES, EndpointName, INSTANCE_ID_BYTES,
-    InstanceIdError, Name, NameError, ProductInstanceId,
-};
 #[cfg(feature = "serde")]
 pub use pe::SavedStateError;
 pub use pe::{
@@ -113,11 +106,11 @@ pub use pe::{
     PE_JSON_MAX_DEPTH, PE_MAX_CHUNK_DATA_LEN, PE_MAX_HEADER_LEN, PE_TIMEOUT, PaginationFault,
     ParamPath, PartialError, PartialUpdate, PartialValue, PeAction, PeAllCtrlEntry, PeAllCtrlList,
     PeAnswer, PeBankProgram, PeBasicChannelRx, PeBasicChannelTx, PeBodyError, PeBuffered,
-    PeCacheTime, PeCall, PeCapabilities, PeCapabilitiesFailure, PeChCtrlEntry, PeChCtrlList,
-    PeChange, PeChannel, PeChannelEntry, PeChannelList, PeChannelMode, PeChunk, PeChunkError,
-    PeCiMessage, PeCluster, PeColumn, PeController, PeCtrl, PeCtrlMapEntry, PeCtrlMapList,
-    PeCurrentMode, PeData, PeDataError, PeDataFault, PeDecimal, PeDeviceInfo, PeEncoding,
-    PeEndedBy, PeError, PeExpired, PeExtensions, PeExternalSync, PeExtra, PeExtraError,
+    PeCacheScope, PeCacheTime, PeCall, PeCapabilities, PeCapabilitiesFailure, PeChCtrlEntry,
+    PeChCtrlList, PeChange, PeChannel, PeChannelEntry, PeChannelList, PeChannelMode, PeChunk,
+    PeChunkError, PeCiMessage, PeCluster, PeColumn, PeController, PeCtrl, PeCtrlMapEntry,
+    PeCtrlMapList, PeCurrentMode, PeData, PeDataError, PeDataFault, PeDecimal, PeDeviceInfo,
+    PeEncoding, PeEndedBy, PeError, PeExpired, PeExtensions, PeExternalSync, PeExtra, PeExtraError,
     PeFlowControl, PeGet, PeHeader, PeHeaderError, PeHeaderTooLong, PeHeld, PeInitiator, PeJson,
     PeJsonError, PeJsonSchema, PeKind, PeLink, PeLocalOn, PeMessage, PeMessageKind, PeMidiMode,
     PeModeEntry, PeModeList, PeNotification, PeObject, PeOpaque, PeOutcome, PePage, PeProgramEntry,

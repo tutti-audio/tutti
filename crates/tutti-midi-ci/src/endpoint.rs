@@ -9,7 +9,7 @@
 
 use tutti_ump::{U7, U14};
 
-use crate::name::ProductInstanceId;
+use tutti_ump::ProductInstanceId;
 
 /// What an Inquiry: Endpoint asks for (§5.7.1, Table 10).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

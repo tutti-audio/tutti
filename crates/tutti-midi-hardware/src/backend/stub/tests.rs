@@ -37,7 +37,7 @@ fn devices_over_the_stub_is_empty_and_quiet() {
 /// the named error rather than returning an endpoint that does nothing.
 #[test]
 fn virtual_endpoints_report_unsupported() {
-    let spec = VirtualSpec::new(tutti_midi_ci::EndpointName::new("tutti-stub").unwrap());
+    let spec = VirtualSpec::new(tutti_ump::EndpointName::new("tutti-stub").unwrap());
     assert!(matches!(
         open_virtual_source(&spec),
         Err(MidiHardwareError::Unsupported(_))

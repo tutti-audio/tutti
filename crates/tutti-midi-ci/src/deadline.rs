@@ -6,7 +6,7 @@ use std::time::Duration;
 use tutti_platform::Instant;
 
 /// A wait that ends at an instant: reached when `now` is at or past it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct Pending {
     deadline: Instant,
 }

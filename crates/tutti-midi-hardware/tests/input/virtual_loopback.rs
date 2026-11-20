@@ -10,13 +10,13 @@ use super::listener::Listener;
 
 use tutti_fixtures::midi::note_on;
 use tutti_graph::{EventCapacity, Offset};
-use tutti_midi_ci::EndpointName;
 use tutti_midi_device::DeviceInfo;
 use tutti_midi_hardware::{
     MidiHardwareOptions, MidiSession, VirtualDestination, VirtualProtocol, VirtualSource,
     VirtualSpec,
 };
 use tutti_midi_runtime::InputInlets;
+use tutti_ump::EndpointName;
 use tutti_ump::{MidiChannel, Ump};
 
 const PATIENCE: Duration = Duration::from_secs(30);

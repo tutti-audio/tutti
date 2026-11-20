@@ -26,7 +26,9 @@ tutti-units = { version = "0.0.1", path = "../tutti-units", default-features = f
 # `Normalized`'s scaling rounds with `libm`'s pure-Rust `round`, so the result does not depend on the platform's C math library.
 libm = "0.2.15"
 thiserror.workspace = true
-serde = { version = "1", optional = true, default-features = false, features = ["derive"] }
+# M2-104 section 1.8: a name is held in NFC. Pure Rust, no `std`.
+unicode-normalization = { workspace = true }
+serde = { version = "1", optional = true, default-features = false, features = ["derive", "alloc"] }
 
 [dev-dependencies]
 serde_json = "1"

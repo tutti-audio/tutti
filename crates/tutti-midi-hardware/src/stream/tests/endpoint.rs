@@ -6,8 +6,9 @@ use super::ci::{GROUP_0, ci_sent, peer, peer_declaring, polled};
 use super::*;
 use crate::{CiChange, Polled, ProfilesChange};
 use tutti_midi_ci::CiCategories;
-use tutti_midi_ci::{CiMessage, ProductInstanceId};
+use tutti_midi_ci::CiMessage;
 use tutti_midi_device::MidiIdentity;
+use tutti_ump::ProductInstanceId;
 use tutti_ump::{BlockFilter, BlockSelect, DiscoveryFilter, Form, UmpVersion};
 
 const ASKING: UmpVersion = UmpVersion { major: 1, minor: 1 };
