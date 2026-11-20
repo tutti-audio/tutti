@@ -153,3 +153,59 @@ fn a_pool_load_runs_inside_update() {
     assert_eq!(wave.len().get(), LEN);
     assert_eq!(wave.at(0, LEN - 1), value(LEN - 1));
 }
+
+/// What counts the wakes of a task.
+struct Wakes(std::sync::atomic::AtomicUsize);
+
+impl std::task::Wake for Wakes {
+    fn wake(self: std::sync::Arc<Self>) {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+/// **Dropping a session wakes the streamer's task, so a host executor that outlives
+/// the session ends it.** The session runs on a host executor that keeps every future
+/// it is handed. The streamer's future is polled once, so it waits on its bell with the
+/// task's waker stored; the session is dropped; the waker has been woken by then, and
+/// the next poll ends the future. A wake lost with the bells would leave the task, and
+/// everything its future holds, alive for good.
+#[test]
+fn dropping_a_session_wakes_the_streamer_task_on_a_host_executor() {
+    use std::future::Future;
+    use std::pin::Pin;
+    use std::sync::{Arc, Mutex};
+    use std::task::{Context, Poll, Waker};
+
+    type Captured = Pin<Box<dyn Future<Output = ()> + Send>>;
+    let captured: Arc<Mutex<Vec<Captured>>> = Arc::default();
+    let keep = Arc::clone(&captured);
+    let s = Session::builder()
+        .sample_rate(SampleRate::of(RATE))
+        .executor(Executor::new(move |future| {
+            keep.lock().expect("not poisoned").push(future);
+        }))
+        .build()
+        .expect("a session builds on a host executor");
+    let mut streamer = captured
+        .lock()
+        .expect("not poisoned")
+        .pop()
+        .expect("the session spawned its streamer");
+    let wakes = Arc::new(Wakes(std::sync::atomic::AtomicUsize::new(0)));
+    let waker = Waker::from(Arc::clone(&wakes));
+    let mut cx = Context::from_waker(&waker);
+    assert_eq!(streamer.as_mut().poll(&mut cx), Poll::Pending);
+    assert_eq!(wakes.0.load(std::sync::atomic::Ordering::SeqCst), 0);
+
+    drop(s);
+
+    assert!(
+        wakes.0.load(std::sync::atomic::Ordering::SeqCst) > 0,
+        "the session's drop never woke the streamer's task"
+    );
+    assert_eq!(
+        streamer.as_mut().poll(&mut cx),
+        Poll::Ready(()),
+        "the woken streamer ends"
+    );
+}
