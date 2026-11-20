@@ -31,7 +31,3 @@ tutti-plugin-ipc  spawn_dedicated  crates/tutti-plugin-ipc/src/client/audio/thre
 tutti-plugin-server  spawn_dedicated  crates/tutti-plugin-server/src/render.rs::RenderThread::spawn  plugin
 tutti-plugin-server  spawn  crates/tutti-plugin-server/src/server.rs::beat_while  plugin
 
-# midi
-tutti-midi-hardware  spawn_dedicated  crates/tutti-midi-hardware/src/backend/coremidi/watch.rs::start_hub  midi
-tutti-midi-hardware  spawn_dedicated  crates/tutti-midi-hardware/src/backend/winmm/output.rs::open  midi
-tutti-winmm-ffi  spawn_dedicated  crates/tutti-winmm-ffi/src/os/input.rs::MidiIn::open  midi

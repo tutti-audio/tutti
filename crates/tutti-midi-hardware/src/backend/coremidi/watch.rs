@@ -36,7 +36,7 @@ use crate::endpoints::{NoWatch, Watch};
 use crate::error::{MidiHardwareError, MidiThread, Result};
 use tutti_coremidi_ffi::{SharedClient, run_notifications};
 use tutti_midi_device::OsDevice;
-use tutti_platform::spawn_named;
+use tutti_platform::Executor;
 
 /// How often a hub whose run loop has no notification source looks again by
 /// itself: the fallback for a process whose first CoreMIDI client was not the hub's.
@@ -121,6 +121,13 @@ pub(super) fn client() -> Result<SharedClient> {
     started().map(|(_, client)| client)
 }
 
+/// The executor of the hub's one future: process-wide, started on first use and
+/// never dropped, so the hub's thread is never told to stop.
+fn hub_executor() -> &'static Executor {
+    static EXECUTOR: std::sync::OnceLock<Executor> = std::sync::OnceLock::new();
+    EXECUTOR.get_or_init(Executor::new)
+}
+
 fn start_hub() -> Result<(&'static Hub, SharedClient)> {
     {
         let hub: &'static Hub = Box::leak(Box::new(Hub {
@@ -128,27 +135,32 @@ fn start_hub() -> Result<(&'static Hub, SharedClient)> {
             next: AtomicU64::new(0),
         }));
         let (ready, started) = mpsc::channel();
-        // The hub thread lives as long as the process: no owner stops it.
-        spawn_named(MidiThread::DeviceWatch.name(), None, move |_| {
-            let client = SharedClient::start("tutti-midi-watch", move |notification| {
-                if notification.changes_devices() {
-                    hub.notify();
-                }
-            });
-            let _ = ready.send(client.clone());
-            // The client lives as long as the process.
-            let Ok(client) = client else {
-                return;
-            };
-            // The loop runs for the thread's life; where it has no notification
-            // source, its timer has the watches look.
-            run_notifications(client, IDLE_LOOK, move || hub.notify());
-        })
-        .map_err(|source| MidiHardwareError::Spawn {
-            thread: MidiThread::DeviceWatch,
-            source,
-        })?
-        .detach();
+        // The hub's run loop lives as long as the process: CoreMIDI's client is
+        // never disposed and notifications go to the loop of the thread that made
+        // it, so no owner stops the hub or moves it to another thread. Its own
+        // executor is process-wide for the same reason, and is never dropped. The
+        // loop is a synchronous call that never awaits, on the future's own thread.
+        hub_executor()
+            .spawn_dedicated(MidiThread::DeviceWatch.name(), None, async move {
+                let client = SharedClient::start("tutti-midi-watch", move |notification| {
+                    if notification.changes_devices() {
+                        hub.notify();
+                    }
+                });
+                let _ = ready.send(client.clone());
+                // The client lives as long as the process.
+                let Ok(client) = client else {
+                    return;
+                };
+                // The loop runs for the thread's life; where it has no
+                // notification source, its timer has the watches look.
+                run_notifications(client, IDLE_LOOK, move || hub.notify());
+            })
+            .map_err(|source| MidiHardwareError::Spawn {
+                thread: MidiThread::DeviceWatch,
+                source,
+            })?
+            .detach();
         match started.recv() {
             Ok(Ok(client)) => Ok((hub, client)),
             Ok(Err(error)) => Err(error.into()),

@@ -28,10 +28,10 @@
 use std::cell::UnsafeCell;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
+use std::sync::mpsc;
 use std::sync::{Arc, Mutex, PoisonError};
-use std::thread::JoinHandle;
 use std::time::Duration;
-use tutti_platform::Instant;
+use tutti_platform::{Executor, Instant, Task};
 
 use windows_sys::Win32::Media::Audio::{
     CALLBACK_FUNCTION, HMIDIIN, MIDIHDR, midiInAddBuffer, midiInClose, midiInOpen,
@@ -172,7 +172,15 @@ pub struct MidiIn {
     /// Taken by `Drop`.
     owner: Option<Owner<'static, Shared>>,
     handle: HMIDIIN,
-    worker: Option<JoinHandle<()>>,
+    worker: Option<Worker>,
+}
+
+/// The worker's future on a dedicated thread of the executor, and the end of a
+/// channel its sender (held by the future) closes when the future ends.
+struct Worker {
+    task: Task<()>,
+    /// Behind a `Mutex` so `MidiIn` stays `Sync`; read only by `Drop`.
+    ended: Mutex<mpsc::Receiver<()>>,
 }
 
 impl std::fmt::Debug for MidiIn {
@@ -183,7 +191,7 @@ impl std::fmt::Debug for MidiIn {
 
 // SAFETY: the `HMIDIIN` is a token for a driver object; winmm takes it from any
 // thread, and `MidiIn` uses it only in `Drop`, once. The rest of `MidiIn` is
-// `Send` (an `Arc` of `Sync` state and a `JoinHandle`).
+// `Send` (an `Arc` of `Sync` state and the worker's task).
 unsafe impl Send for MidiIn {}
 
 fn header_size() -> u32 {
@@ -196,7 +204,8 @@ impl MidiIn {
     ///
     /// The handler is called from a thread winmm owns, one call at a time, and
     /// must return quickly and call no winmm function. Buffers are handed back
-    /// to winmm by a thread of this input's own, never by the callback.
+    /// to winmm by a future on a dedicated thread of `executor`, never by the
+    /// callback.
     ///
     /// `handler` is dropped when the last reference to the input's state goes,
     /// which can be on winmm's thread after the `MidiIn` has been dropped (a
@@ -221,6 +230,7 @@ impl MidiIn {
     /// gone), a buffer's preparation, `midiInStart`, or the worker's or its
     /// wake event's creation.
     pub fn open(
+        executor: &Executor,
         port: &InputPort,
         handler: impl FnMut(Event<'_>) + Send + 'static,
     ) -> Result<Self, Error> {
@@ -280,18 +290,25 @@ impl MidiIn {
         };
         let worker = {
             let shared = Arc::clone(&shared);
-            // A raw thread: the worker stops by the input's own wake and closing
-            // flag and is joined (or forgotten when the wake fails) in a fixed
-            // order with the port's close, and `spawn_named`'s handle would own a
-            // second stop and join, and a priority request, beside them.
-            std::thread::Builder::new()
-                .name("tutti-winmm-in".to_string())
-                .spawn(move || requeue(&shared, wait))
+            // The worker stops by the input's own wake and closing flag, and
+            // `Drop` waits for it to end before it closes the port: the future
+            // holds `ended`, which closes when the future ends or is dropped.
+            let (ended_tx, ended) = mpsc::channel::<()>();
+            let task = executor
+                .spawn_dedicated("tutti-winmm-in", None, async move {
+                    let _ended = ended_tx;
+                    requeue(&shared, wait);
+                })
+                .map_err(|source| Error::Os {
+                    operation: OsOperation::SpawnInputWorker,
+                    source,
+                })?;
+            Worker {
+                task,
+                ended: Mutex::new(ended),
+            }
         };
-        input.worker = Some(worker.map_err(|source| Error::Os {
-            operation: OsOperation::SpawnInputWorker,
-            source,
-        })?);
+        input.worker = Some(worker);
         for buffer in &shared.buffers {
             // SAFETY: `header` is this buffer's header, whose `lpData` is its
             // bytes; both live in `Shared`, which this input and the registry
@@ -329,22 +346,28 @@ impl Drop for MidiIn {
         let shared = owner.slot();
         // No callback that looks the id up from here on finds the input.
         let closing = owner.begin_close(LEAVE_BOUND);
-        // The worker queues no buffer after it has been joined. A wake that
-        // failed would leave the join waiting for ever, so the worker is left
-        // running and, with the port still open, nothing is freed.
+        // The worker queues no buffer after it has ended. A wake that failed
+        // would leave that wait for ever, so the task is detached, the worker
+        // is left running and, with the port still open, nothing is freed.
         if let Err(e) = shared.worker.wake() {
             tracing::warn!(
                 "winmm MIDI input: the worker could not be woken, so the port is left open: {e}"
             );
-            std::mem::forget(self.worker.take());
+            if let Some(worker) = self.worker.take() {
+                worker.task.detach();
+            }
             drop(closing.leak());
             return;
         }
-        if let Some(worker) = self.worker.take()
-            && worker.join().is_err()
-        {
-            // The worker panicked; it queues nothing more.
-            tracing::warn!("winmm MIDI input: the worker panicked");
+        if let Some(worker) = self.worker.take() {
+            // Returns when the worker's future has ended (or been dropped
+            // unrun), which closes the channel: the wake above is what ends it.
+            let _ = worker
+                .ended
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .recv();
+            drop(worker.task);
         }
         // Callbacks that found the input before it was removed finish. This
         // loop is the only place that reads the clock.

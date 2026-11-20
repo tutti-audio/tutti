@@ -1,7 +1,7 @@
 //! Reading MIDI 1.0 from a winmm input.
 
 use std::sync::Arc;
-use tutti_platform::Instant;
+use tutti_platform::{Executor, Instant};
 
 use super::super::legacy_port::anchor::Anchor;
 use super::super::legacy_port::bytes::ByteIn;
@@ -38,7 +38,11 @@ impl InputConnection for WinMmInput {
 /// [`MidiHardwareError::Os`] from the port's opening. The endpoint's `open_input`
 /// turns `MmResult::Allocated`, another application holding the port, into
 /// [`MidiHardwareError::InUse`].
-pub(super) fn open(port: &InputPort, mut producer: InputProducerHandle) -> Result<WinMmInput> {
+pub(super) fn open(
+    executor: &Executor,
+    port: &InputPort,
+    mut producer: InputProducerHandle,
+) -> Result<WinMmInput> {
     let died = Arc::new(FaultLatch::<InputFault>::new());
     let guard = Guard::new(Arc::clone(&died));
     let closed = Arc::clone(&died);
@@ -52,7 +56,7 @@ pub(super) fn open(port: &InputPort, mut producer: InputProducerHandle) -> Resul
     };
     // winmm calls this on its own thread, and a panic must not leave it: the
     // guard catches it and ends the input.
-    let port = MidiIn::open(port, move |event| {
+    let port = MidiIn::open(executor, port, move |event| {
         guard.run(|| {
             let seen = Instant::now();
             match event {
