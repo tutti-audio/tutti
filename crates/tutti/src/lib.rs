@@ -141,8 +141,10 @@ pub use tutti_graph::{
     InletNode, InletRing, Level, Losses, MeterReader, NodeMode, Stamp, TapAlign, TapEvent, TapId,
     TapOptions, TapReader, TapWriter,
 };
-pub use tutti_metering::{LoadMeter, LoadReading};
 pub use tutti_rt::PushError;
+// The engine's health: a `Gauge<Load>` and a `Counter<BlockCounts>`.
+#[cfg(feature = "session")]
+pub use tutti_engine::{BlockCounts, Load};
 pub use tutti_transport::{
     AfterLocate, FadeOut, LoopRegion, MotionEvent, MotionState, TransportCommand,
 };
@@ -430,9 +432,9 @@ pub mod session {
         SupportedConfig,
     };
     pub use tutti_engine::{
-        BackendErrorKind, GraphEngineError, Lagging, OutputLevelError, OutputLevels, OutputMap,
-        OutputMapError, OutputSpec, OutputStrip, Routing, RoutingError, StartError, StreamFault,
-        StreamFaultKind, StreamFaults, StreamLatency, TimerError,
+        BackendErrorKind, GraphEngineError, LOAD_MEAN_TIME_CONSTANT, Lagging, OutputLevelError,
+        OutputLevels, OutputMap, OutputMapError, OutputSpec, OutputStrip, Routing, RoutingError,
+        StartError, StreamFault, StreamFaultKind, StreamFaults, StreamLatency, TimerError,
     };
     #[cfg(feature = "export")]
     pub use tutti_export::{
@@ -447,7 +449,6 @@ pub mod session {
         BusFeed, BusFold, BusSide, EdgeFade, EdgeId, EventCapacityError, EventIn, EventOut,
         ForkError, InletCounts, Instrument, MeterId, ParamIn, PrerollTable, RootError, RootId,
     };
-    pub use tutti_metering::LoadRecorder;
     pub use tutti_modulation::PeriodPoint;
     #[cfg(feature = "device")]
     pub use tutti_session::ClockError;

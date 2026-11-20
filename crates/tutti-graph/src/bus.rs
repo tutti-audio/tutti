@@ -3,7 +3,7 @@
 //! A [`Shape`](crate::Shape)'s `audio_in` and `audio_out` count channels, and
 //! each channel is a port. A bus is a **grouping over those ports** that says
 //! where its channels sit: bus `b` is the run of ports after the earlier
-//! buses' (doc 013, "Buses and coercion between declared layouts"). Nothing
+//! buses'. Nothing
 //! about a port changes: a bus is what a fold between two declared layouts
 //! will be built from, and nothing the compiler or the executor reads yet.
 

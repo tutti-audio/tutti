@@ -788,9 +788,8 @@ impl<F: Float> Editor<F> {
     ///   event edges, resolution marks, param edges and parameter values
     ///   are copied; generations start again at 0. A driven param reads its
     ///   base until its (forked) event source first sends, with no declick:
-    ///   **a fresh source sends its current value on its first block** (doc
-    ///   014 §10). A control lane does (it has nothing in flight); a
-    ///   hand-wired source either answers
+    ///   **a fresh source sends its current value on its first block**. A control lane does (it has
+    ///   nothing in flight); a hand-wired source either answers
     ///   [`EventKind::Resync`](crate::EventKind::Resync), which a host
     ///   schedules into the fork's executor as into the live one, or drives
     ///   the param's knob instead, which a fork copies.

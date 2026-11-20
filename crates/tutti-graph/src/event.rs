@@ -34,7 +34,7 @@ pub enum EventKind {
     /// A chord or scale taking effect.
     Harmony(Harmony),
     /// A request to an **event source**: re-send where it stands, from this
-    /// event's frame, as a resumed segment (doc 014 §6). What a sink that
+    /// event's frame, as a resumed segment. What a sink that
     /// starts reading a source late (a control lane whose program newly
     /// reads a held note envelope) needs, since a source sends only when it
     /// moves. Delivered by [`Editor::schedule`](crate::Editor::schedule),

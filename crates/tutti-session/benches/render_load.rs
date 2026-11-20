@@ -1,6 +1,7 @@
 //! **How a heavy session's blocks sit against their deadline**, serial and on
-//! the worker pool, read from the engine's own load meter
-//! (`Session::load_meter`).
+//! the worker pool: each block's load is the bench's own timing of
+//! `Session::render` over the block's budget, and the blocks over budget are
+//! the engine's own count (`Session::blocks`).
 //!
 //! Render-ahead (an anticipative partition rendered a block or more early)
 //! only helps when blocks miss their deadline because a *few* cost far more
@@ -126,6 +127,7 @@ use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_buffers::{InterleavedMut, Mono};
 use tutti_graph::{Cost, Cx, Event, Io, Node, Offset, Prepare, Shape, Status, Unforkable};
 use tutti_nodes::{BusStripNode, ConvolverNode, LimiterControls, LimiterNode};
+use tutti_platform::Instant;
 use tutti_polysynth::{Adsr, FilterType, OscillatorType, PolySynth, SynthConfig};
 use tutti_rt::SplitMix64;
 use tutti_sampler::{MemorySource, Playback, SlotId, VoicePool, VoiceWindow};
@@ -376,7 +378,7 @@ struct Figures {
 
 fn measure(block: usize, workers: Workers, variant: Variant) -> Figures {
     let s = scene(block, workers, variant);
-    let meter = s.load_meter().expect("an offline engine");
+    let counter = s.blocks().expect("an offline engine");
     let mut out = vec![0.0f32; block * 2];
     let blocks = |span: Seconds| span.to_samples(SampleRate::of(RATE)).get().div_ceil(block);
     let warm = blocks(WARM);
@@ -386,17 +388,20 @@ fn measure(block: usize, workers: Workers, variant: Variant) -> Figures {
     let n = blocks(MEASURED);
     let mut loads = Vec::with_capacity(n);
     let mut peak_out = 0.0f32;
-    meter.reset();
+    let before = counter.get();
+    let budget = Seconds::new(block as f64 / RATE);
     for _ in 0..n {
+        let start = Instant::now();
         s.render(&mut InterleavedMut::new(&mut out, ChannelLayout::STEREO).unwrap());
-        loads.push(meter.peek().last);
+        loads.push((Seconds::new(start.elapsed().as_secs_f64()) / budget) as f32);
         peak_out = out.iter().fold(peak_out, |m, x| m.max(x.abs()));
     }
-    let over = loads.iter().filter(|&&l| l > 1.0).count();
+    let counted = counter.get();
+    let over = (counted.over_budget - before.over_budget) as usize;
     assert_eq!(
-        over as u64,
-        meter.peek().over_budget,
-        "the meter's own count"
+        counted.blocks - before.blocks,
+        n as u64,
+        "the engine timed every block rendered"
     );
     let positions = (PARTITION / block).max(1);
     let mut phase = vec![(0.0f32, 0usize); positions];

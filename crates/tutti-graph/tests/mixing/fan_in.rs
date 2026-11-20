@@ -1,4 +1,4 @@
-//! Audio fan-in, the op (doc 013, "Audio fan-in sums", staging item 3): several
+//! Audio fan-in, the op: several
 //! sources wired to one input port, or to one global output channel, are
 //! **summed** by `Op::Sum`, in `Edge` order, as the left fold
 //! `((+0.0 + a_0) + a_1) + ..` in `f32`; one source is an alias and none is

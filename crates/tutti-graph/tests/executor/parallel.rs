@@ -1,10 +1,10 @@
-//! The parallel executor renders **bit for bit** what the serial one does
-//! (doc 013, "The parallel executor"): on a graph with fan-out, fan-in, PDC rings, event
-//! fan-in, compiler-owned param ports (ramp and segment events, one source
-//! behind its own latency), a feedback loop and scheduled commands, for
-//! every worker count in `common::WORKERS` and block schedules from one frame
-//! to the prepared maximum, ragged ones included — and the same on an
-//! offline fork of it (the graph export renders).
+//! The parallel executor renders **bit for bit** what the serial one does: on a
+//! graph with fan-out, fan-in, PDC rings, event fan-in, compiler-owned param
+//! ports (ramp and segment events, one source behind its own latency), a
+//! feedback loop and scheduled commands, for every worker count in
+//! `common::WORKERS` and block schedules from one frame to the prepared
+//! maximum, ragged ones included — and the same on an offline fork of it (the
+//! graph export renders).
 //!
 //! The differential suite (`tests/differential.rs`) holds the parallel
 //! executor to the reference interpreter on random graphs as well; this file

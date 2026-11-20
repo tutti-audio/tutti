@@ -209,7 +209,6 @@ pub(super) fn owner(krate: &str) -> Option<&'static str> {
         "tutti-polysynth",
         "tutti-soundfont",
         "tutti-sf2",
-        "tutti-metering",
     ];
     const MIDI_CRATES: &[&str] = &["tutti-ump", "tutti-voicing"];
     const PLUGIN_CRATES: &[&str] = &[
