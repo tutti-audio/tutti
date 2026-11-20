@@ -3,17 +3,33 @@
 
 use tutti_buffers::ChannelLayout;
 use tutti_graph::contract::BlockRig;
-use tutti_nodes::{ButterworthOrder, CutAlignment, CutFilterConfig, CutFilterNode, CutResponse};
-use tutti_units::{SampleRate, UnitParam};
+use tutti_nodes::{
+    ButterworthOrder, CutAlignment, CutFilterConfig, CutFilterNode, CutResponse,
+    EllipticTolerances, PassbandRipple, StopbandAttenuation,
+};
+use tutti_units::{Db, SampleRate, UnitParam};
 
 /// 16 warm-up blocks, then 2 000 blocks under `assert_no_alloc`, the cutoff moved before each.
 #[test]
 fn cut_filter_process_is_allocation_free_with_the_cutoff_moving() {
-    let config = CutFilterConfig::new(
-        ChannelLayout::STEREO,
-        CutResponse::LowPass,
-        CutAlignment::LinkwitzRiley(ButterworthOrder::of(8)),
-    );
+    cut_filter_is_allocation_free(CutAlignment::LinkwitzRiley(ButterworthOrder::of(8)));
+}
+
+/// The same for the elliptic alignment: the Jacobi functions of each design run on the stack.
+#[test]
+fn elliptic_cut_filter_process_is_allocation_free_with_the_cutoff_moving() {
+    cut_filter_is_allocation_free(CutAlignment::Elliptic {
+        order: ButterworthOrder::of(8),
+        tolerances: EllipticTolerances::new(
+            PassbandRipple::new(Db::new(0.5)).unwrap(),
+            StopbandAttenuation::new(Db::new(60.0)).unwrap(),
+        )
+        .unwrap(),
+    });
+}
+
+fn cut_filter_is_allocation_free(alignment: CutAlignment) {
+    let config = CutFilterConfig::new(ChannelLayout::STEREO, CutResponse::LowPass, alignment);
     let (mut rig, controls) = BlockRig::new(CutFilterNode::from(config), SampleRate::SR_48K, 64);
     for (c, ch) in rig.inputs_mut().iter_mut().enumerate() {
         let ch = ch.into_samples_mut();

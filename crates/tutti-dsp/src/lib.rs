@@ -27,8 +27,9 @@
 //!   its transcendentals call `libm`, so results do not depend on the platform's C math
 //!   library.
 //! - **Cascaded sections** (`sos/`): [`Sos`], a list of [`Biquad`]s, an [`Lti`] whose
-//!   [`tail`](System::tail) is the whole cascade's; the closed-form [`Butterworth`] and
-//!   [`LinkwitzRiley`] designs (6 to 96 dB per octave), the [`MatchedBell`] peaking
+//!   [`tail`](System::tail) is the whole cascade's; the closed-form [`Butterworth`],
+//!   [`ChebyshevI`], [`ChebyshevII`], [`Elliptic`] and [`LinkwitzRiley`] designs (up to 96 dB
+//!   per octave of asymptotic slope), the [`MatchedBell`] peaking
 //!   equalizer, the [`Tilt`] shelf, the BS.1770 [`KWeighting`] and [`SosBank`], which runs
 //!   one as state-variable sections over [`SosCoefficients`].
 //! - **FIR design** (`fir/`): [`FirDesign`] describes a Kaiser windowed-sinc filter (a
@@ -268,8 +269,10 @@ pub use ring_mod::{RingModControls, RingModulator};
 pub use sequence::{local_maxima, median, median_of_sorted};
 pub use smoother::smooth_toward;
 pub use sos::{
-    Butterworth, ButterworthOrder, ButterworthOrderError, CutResponse, KWeighting, LinkwitzRiley,
-    MAX_GAIN_MAGNITUDE, MAX_SECTIONS, MatchedBell, Sos, SosBank, SosCoefficients, SosError, Tilt,
+    Butterworth, ButterworthOrder, ButterworthOrderError, ChebyshevI, ChebyshevII, CutResponse,
+    Elliptic, EllipticTolerances, KWeighting, LinkwitzRiley, MAX_GAIN_MAGNITUDE, MAX_SECTIONS,
+    MatchedBell, PassbandRipple, PassbandRippleError, Sos, SosBank, SosCoefficients, SosError,
+    StopbandAttenuation, StopbandAttenuationError, Tilt,
 };
 pub use spatial::{
     HRTF_LATENCY, HRTF_STEP, HrirMeasurement, HrirSphere, HrtfBinaural, HrtfBinauralError,
