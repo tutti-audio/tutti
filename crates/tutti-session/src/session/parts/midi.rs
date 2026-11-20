@@ -12,7 +12,7 @@ use tutti_platform::Instant;
 
 use tutti_buffers::Float;
 use tutti_graph::NodeKey;
-use tutti_transport::MotionEvent;
+use tutti_timeline::MotionEvent;
 use tutti_units::{SampleRate, Samples};
 
 use super::TransportPart;

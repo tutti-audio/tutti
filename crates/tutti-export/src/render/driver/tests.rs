@@ -6,7 +6,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::{Interleaved, Planes};
 use tutti_graph::GraphBuilder;
 use tutti_tempo::TempoMap;
-use tutti_transport::{FrozenClock, OfflineTimeline, OfflineTimelineConfig};
+use tutti_timeline::{FrozenClock, OfflineTimeline, OfflineTimelineConfig};
 use tutti_ump::Ump;
 use tutti_units::{Beat, Bpm, SampleRate};
 

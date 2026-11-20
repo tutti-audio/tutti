@@ -7,7 +7,7 @@
           - crates/tutti-engine/**
           - crates/tutti-units/**
           - crates/tutti-music/**
-          - crates/tutti-transport/**
+          - crates/tutti-timeline/**
           - crates/tutti-tempo/**
           - crates/tutti-curve/**
           - crates/tutti-buffers/**

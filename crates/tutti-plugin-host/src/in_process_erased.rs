@@ -11,7 +11,7 @@ use crate::{
 };
 use tutti_graph::{IntoNode, NodeParts};
 use tutti_plugin_types::{InProcess, Layout, MainThreadMarker, RenderMode};
-use tutti_transport::TempoReader;
+use tutti_timeline::TempoReader;
 
 /// What a loaded in-process client offers a host, whatever its format.
 trait ClientOps: Send {

@@ -55,13 +55,13 @@ impl Applied {
 /// so a second audio side cannot be assembled around it:
 ///
 /// ```compile_fail,E0624
-/// let t = tutti_transport::Transport::new(48_000.0);
+/// let t = tutti_timeline::Transport::new(48_000.0);
 /// let _ = t.motion().audio();
 /// ```
 ///
 /// ```compile_fail,E0277
 /// fn is_clone<T: Clone>() {}
-/// is_clone::<tutti_transport::TransportAudio>();
+/// is_clone::<tutti_timeline::TransportAudio>();
 /// ```
 pub struct TransportAudio {
     motion: MotionAudio,
@@ -286,7 +286,7 @@ impl TransportAudio {
     ///
     /// ```
     /// use tutti_units::{Beat, SampleRate};
-    /// use tutti_transport::{Timeline, Transport};
+    /// use tutti_timeline::{Timeline, Transport};
     /// let transport = Transport::new(SampleRate::SR_48K);
     /// let mut audio = transport.audio(SampleRate::SR_48K).expect("the only audio side");
     /// audio.set_playhead(Beat::new(4.0));

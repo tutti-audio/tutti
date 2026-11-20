@@ -50,7 +50,7 @@ tutti-music = { version = "0.0.1", path = "../tutti-music", default-features = f
 # a map that changes, how long the playhead took from a clip's start to now is
 # the map's, not the current tempo's.
 tutti-tempo = { version = "0.0.1", path = "../tutti-tempo" }
-tutti-transport = { version = "0.0.1", path = "../tutti-transport" }
+tutti-timeline = { version = "0.0.1", path = "../tutti-timeline" }
 # `spawn_named`, `PriorityRequest`: the disk streamer's thread.
 tutti-platform = { version = "0.0.1", path = "../tutti-platform" }
 tutti-rt = { version = "0.0.1", path = "../tutti-rt" }

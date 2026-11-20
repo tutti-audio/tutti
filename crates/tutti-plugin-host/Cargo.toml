@@ -22,7 +22,7 @@ dpi.workspace = true
 # host, no `tutti-plugin`.
 tutti-plugin-types = { version = "0.0.1", path = "../tutti-plugin-types" }
 tutti-graph = { version = "0.0.1", path = "../tutti-graph" }
-tutti-transport = { version = "0.0.1", path = "../tutti-transport" }
+tutti-timeline = { version = "0.0.1", path = "../tutti-timeline" }
 tutti-tempo = { version = "0.0.1", path = "../tutti-tempo" }
 tutti-units = { version = "0.0.1", path = "../tutti-units" }
 tutti-music = { version = "0.0.1", path = "../tutti-music" }

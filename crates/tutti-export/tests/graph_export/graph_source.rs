@@ -38,8 +38,8 @@ use tutti_export::{Error, GRAPH_MAX_BLOCK, Normalize, RenderGraph, Rendered, Res
 use tutti_graph::{Cx, GraphBuilder, Io, Node, Prepare, Shape, Status, Unforkable};
 use tutti_nodes::testing::{Const, Osc, vbap_mix};
 use tutti_tempo::TempoMap;
-use tutti_transport::FrozenClock;
-use tutti_transport::{OfflineTimeline, OfflineTimelineConfig};
+use tutti_timeline::FrozenClock;
+use tutti_timeline::{OfflineTimeline, OfflineTimelineConfig};
 use tutti_units::{Amplitude, Azimuth, Beat, Bpm, Hz, SampleRate};
 use tutti_units::{Db, Samples};
 

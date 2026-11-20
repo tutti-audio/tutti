@@ -436,7 +436,7 @@ impl Plugin {
     /// Returns `false` if the plugin declared it does not want a transport
     /// snapshot.
     #[must_use = "a false return means the plugin declined this input and nothing was installed"]
-    pub fn set_meter(&self, meter: tutti_transport::ProjectMeter) -> bool {
+    pub fn set_meter(&self, meter: tutti_timeline::ProjectMeter) -> bool {
         if !self.accepts(Features::TRANSPORT) {
             return false;
         }
@@ -491,9 +491,9 @@ impl Plugin {
     /// `InProcessClient::bind` for an in-process one. The result is the graph
     /// node ([`BoundPlugin`]); `Session::add_pooled_plugin` binds every plugin with
     /// the session's reader, and a host with no session passes a
-    /// [`TempoReader::fixed`](tutti_transport::TempoReader::fixed) one.
+    /// [`TempoReader::fixed`](tutti_timeline::TempoReader::fixed) one.
     #[must_use]
-    pub fn bind(self, tempo: tutti_transport::TempoReader) -> BoundPlugin {
+    pub fn bind(self, tempo: tutti_timeline::TempoReader) -> BoundPlugin {
         self.bind_with_rebinder(tempo).0
     }
 
@@ -503,7 +503,7 @@ impl Plugin {
     #[must_use]
     pub fn bind_with_rebinder(
         self,
-        tempo: tutti_transport::TempoReader,
+        tempo: tutti_timeline::TempoReader,
     ) -> (BoundPlugin, PluginRebinder) {
         let (bound, rebinder) = match self.placed {
             Placed::Served(c) => {

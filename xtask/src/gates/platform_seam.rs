@@ -190,7 +190,7 @@ pub(super) fn owner(krate: &str) -> Option<&'static str> {
         "tutti-graph",
         "tutti-engine",
         "tutti-session",
-        "tutti-transport",
+        "tutti-timeline",
         "tutti-tempo",
         "tutti-curve",
         "tutti-buffers",
