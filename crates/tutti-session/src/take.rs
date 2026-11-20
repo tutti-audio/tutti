@@ -643,7 +643,7 @@ pub enum TakeError {
     /// failure is in the sink.
     ///
     /// A take written to a file keeps the file beside its path in `unfinished`
-    /// (a full disk, say) and leaves the path alone: the frames so far are
+    /// (a full disk on a write, a failed header or close) and leaves the path alone: the frames so far are
     /// there, and the app owns the file, to move or delete. It is unfinished:
     /// a FLAC or Ogg Vorbis file may end in a cut frame or page, and a WAV's or
     /// AIFF's header states the whole frames on disk only if
@@ -1021,7 +1021,7 @@ fn open_target<F: Float>(
             let file = StagedSink {
                 encoder,
                 layout,
-                failure: None,
+                failed: false,
                 sample: PhantomData,
             };
             Ok((Box::new(file), Some(path)))
@@ -1044,9 +1044,9 @@ fn open_target<F: Float>(
 struct StagedSink<F> {
     encoder: FileEncoder,
     layout: ChannelLayout,
-    /// The first write failure, which [`finalize`](Sink::finalize) reports with
-    /// the file it kept.
-    failure: Option<tutti_codec::Error>,
+    /// A write failed: later writes are refused, and the encoder reports the
+    /// first failure at [`finalize`](Sink::finalize), keeping the file.
+    failed: bool,
     sample: PhantomData<fn(F)>,
 }
 
@@ -1056,16 +1056,13 @@ enum StagedClosed {
     /// The finished file could not be put in place; it is kept.
     #[error(transparent)]
     Commit(StagedCommitError),
-    /// A write failed; the unfinished file is kept.
+    /// A write or the close failed; the unfinished file is kept.
     #[error("{source}")]
-    Write {
+    Failed {
         #[source]
         source: tutti_codec::Error,
         unfinished: tutti_codec::Unfinished,
     },
-    /// Closing the file failed; it is removed.
-    #[error(transparent)]
-    Close(tutti_codec::Error),
 }
 
 impl<F: Float> Sink for StagedSink<F> {
@@ -1077,26 +1074,22 @@ impl<F: Float> Sink for StagedSink<F> {
     }
 
     fn write(&mut self, frames: Interleaved<'_, F>) -> Result<(), SinkFailed> {
-        if self.failure.is_some() {
+        if self.failed {
             return Err(SinkFailed);
         }
-        self.encoder.write(frames).map_err(|error| {
-            self.failure = Some(error);
+        self.encoder.write(frames).map_err(|_| {
+            self.failed = true;
             SinkFailed
         })
     }
 
     fn finalize(self) -> Result<(), Self::Error> {
-        match self.failure {
-            Some(source) => Err(StagedClosed::Write {
-                source,
-                unfinished: self.encoder.keep_unfinished(),
-            }),
-            None => self.encoder.finish().map_err(|error| match error {
-                tutti_codec::Error::Commit(commit) => StagedClosed::Commit(commit),
-                other => StagedClosed::Close(other),
-            }),
-        }
+        self.encoder.finish_keeping().map_err(|kept| match kept {
+            tutti_codec::Kept::Commit(commit) => StagedClosed::Commit(commit),
+            tutti_codec::Kept::Unfinished { source, unfinished } => {
+                StagedClosed::Failed { source, unfinished }
+            }
+        })
     }
 }
 
@@ -1105,13 +1098,9 @@ impl<F: Float> Sink for StagedSink<F> {
 fn closing_failed(error: SinkClosed) -> TakeError {
     match error.downcast_ref::<StagedClosed>() {
         Some(StagedClosed::Commit(commit)) => TakeError::Commit(commit.clone()),
-        Some(StagedClosed::Write { source, unfinished }) => TakeError::Sink {
+        Some(StagedClosed::Failed { source, unfinished }) => TakeError::Sink {
             source: Arc::new(source.clone()),
             unfinished: Some(unfinished.clone()),
-        },
-        Some(StagedClosed::Close(source)) => TakeError::Sink {
-            source: Arc::new(source.clone()),
-            unfinished: None,
         },
         None => TakeError::Sink {
             source: error,

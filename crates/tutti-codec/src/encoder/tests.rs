@@ -556,3 +556,52 @@ fn an_aiff_kept_unfinished_holds_exactly_the_frames_written() {
     drop(file);
     assert_eq!(read(&kept.path), (5_000, samples));
 }
+
+/// **A file whose encoder failed is kept by `finish_keeping`, with the frames
+/// written before the failure, and the path is untouched.** The failure is a
+/// block of the wrong width, which every format refuses and the encoder
+/// reports at the close.
+#[cfg(all(feature = "encode-wav", feature = "decode-wav"))]
+#[test]
+fn a_failed_encoder_finishes_keeping_the_frames_written_before_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("take");
+    let spec = spec(Format::Wav(crate::Pcm::Float32), 2);
+    let mut encoder = FileEncoder::create(&spec, &path).unwrap();
+    encoder
+        .write(Interleaved::new(&saw(2, 3_000), spec.layout()).unwrap())
+        .unwrap();
+    let wrong = [0.0f32; 3];
+    assert!(
+        encoder
+            .write(Interleaved::new(&wrong, ChannelLayout::from(3u8)).unwrap())
+            .is_err()
+    );
+    let Err(Kept::Unfinished { source, unfinished }) = encoder.finish_keeping() else {
+        panic!("not kept unfinished");
+    };
+    assert!(matches!(source, Error::BlockWidth { .. }), "{source:?}");
+    assert!(unfinished.header_patched);
+    assert!(!path.exists(), "the path is untouched");
+    assert_eq!(listing(dir.path()).len(), 1, "only the kept file");
+    let wave = crate::read_wave::<f32>(&unfinished.path).unwrap();
+    assert_eq!(wave.len().get(), 3_000);
+}
+
+/// **`finish_keeping` of a whole file puts it in place and leaves nothing
+/// beside it**: the keeper it sets is released.
+#[test]
+fn finish_keeping_a_whole_file_commits_it_and_leaves_no_temporary() {
+    let dir = tempfile::tempdir().unwrap();
+    for (ext, format) in formats() {
+        let path = dir.path().join(format!("take.{ext}"));
+        let spec = spec(format, 2);
+        let mut encoder = FileEncoder::create(&spec, &path).unwrap();
+        encoder
+            .write(Interleaved::new(&saw(2, 2_000), spec.layout()).unwrap())
+            .unwrap();
+        encoder.finish_keeping().unwrap();
+        assert_eq!(listing(dir.path()), [format!("take.{ext}")], "{ext}");
+        std::fs::remove_file(&path).unwrap();
+    }
+}

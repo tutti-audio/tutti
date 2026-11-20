@@ -520,7 +520,7 @@ pub mod codec {
         feature = "encode-vorbis"
     ))]
     pub use tutti_codec::write_wave;
-    pub use tutti_codec::{Codec, Error, Unfinished};
+    pub use tutti_codec::{Codec, Error, Kept, Unfinished};
     pub use tutti_codec::{
         DecodeError, FlacLevel, IntDepth, Quality, QualityOutOfRange, Spec, SpecError, can_decode,
         decodable_extensions,

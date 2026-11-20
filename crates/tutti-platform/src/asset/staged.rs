@@ -200,6 +200,11 @@ impl StagedFile {
 
 /// A handle to a [`StagedFile`] that makes it outlive its drop
 /// ([`StagedFile::keeper`]).
+///
+/// A format writer owns the file's sink and drops it when it fails, so the
+/// caller no longer holds the file to [`keep`](StagedFile::keep). The handle is
+/// a flag shared with the file that survives that drop: set it before the
+/// writer runs, and the drop leaves the file if the writer is lost.
 #[derive(Clone, Debug)]
 pub struct StagedKeep(Arc<AtomicBool>);
 
@@ -208,6 +213,12 @@ impl StagedKeep {
     /// removed.
     pub fn keep(&self) {
         self.0.store(true, Ordering::Release);
+    }
+
+    /// The file is removed when it is dropped again, as if
+    /// [`keep`](Self::keep) had not been called.
+    pub fn release(&self) {
+        self.0.store(false, Ordering::Release);
     }
 }
 
