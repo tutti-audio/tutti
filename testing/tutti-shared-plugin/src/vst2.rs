@@ -242,6 +242,13 @@ impl Shared {
         });
     }
 
+    /// Asks the host for its automation state (`audioMasterGetAutomationState`),
+    /// the one way a VST2 plugin learns it, once per block, and records the answer.
+    fn ask_automation(&self) {
+        self.core
+            .log_automation(self.host.get_automation_state() as u32);
+    }
+
     fn run<S: Sample + num_traits::Float>(&mut self, buffer: &mut AudioBuffer<S>) {
         let frames = buffer.samples();
         let (inputs, mut outputs) = buffer.split();
@@ -251,6 +258,7 @@ impl Shared {
         );
         let mut dsp = self.dsp.lock_recover();
         self.ask_time();
+        self.ask_automation();
         let scratch = self
             .core
             .stage(&mut dsp, frames, |c, i| inputs.get(c)[i], nin);

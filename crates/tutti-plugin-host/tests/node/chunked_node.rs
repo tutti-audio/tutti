@@ -903,6 +903,33 @@ fn a_block_with_a_non_finite_sample_is_counted_in_the_nodes_controls() {
     }
 }
 
+/// **A plugin with no automation-state channel is refused with `Unsupported`**:
+/// the recording plugin keeps `Control`'s default, which tells nothing, so the
+/// handle's call answers the refusal and does not pretend it was delivered.
+#[test]
+fn a_plugin_without_an_automation_channel_is_refused_with_unsupported() {
+    use tutti_plugin_types::{AutomationMode, AutomationModeError, MainWork};
+
+    let (collector, work) = MainWork::new();
+    let _pump = tutti_fixtures::pump(collector);
+    let rig = Rig::new(None, Features::TRANSPORT);
+    ROUTE.with(|r| *r.borrow_mut() = Some(rig));
+    let (_client, handle): (InProcessClient<Rec>, _) = load_client::<Rec, f32>(
+        main_thread(),
+        &work,
+        &tutti_plugin_types::PluginRef::file(Path::new("rec")),
+        SR,
+    )
+    .expect("the recording plugin loads");
+    let refused = handle
+        .set_automation_mode(AutomationMode::Writing)
+        .expect_err("the plugin has no channel");
+    assert!(
+        matches!(refused, AutomationModeError::Unsupported { .. }),
+        "{refused:?}"
+    );
+}
+
 /// **A panic out of an in-process plugin's call is observed as death**: the
 /// handle's status is `Dead` with a `PluginFailure::Panicked` cause, which is
 /// what the session turns into `PluginChange::Died`, and the listeners hear

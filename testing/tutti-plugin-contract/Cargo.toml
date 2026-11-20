@@ -47,7 +47,7 @@ required-features = ["server"]
 name = "probe"
 required-features = ["server"]
 
-# `tests/automation_state.rs` loads plugins through the in-process handle.
+# `tests/automation_state.rs` loads the shared plugin through the in-process handle.
 [[test]]
 name = "automation_state"
 required-features = ["server"]

@@ -1107,6 +1107,46 @@ pub fn transport_reaches_the_plugin<F: Format>() {
     );
 }
 
+/// The host's automation mode reaches the plugin in the format's own channel
+/// (VST3 `IAutomationState`, CLAP `param-indication`, VST2
+/// `audioMasterGetAutomationState`): each mode is told, a block runs (a VST2
+/// plugin asks once per block), and the plugin's transcript holds the raw state
+/// the spec names for the mode as the last it was told.
+///
+/// # Panics
+///
+/// Panics when an assertion of the case fails.
+pub fn the_automation_mode_reaches_the_plugin<F: Format>() {
+    use tutti_plugin_types::AutomationMode;
+    let mut a = active_in::<F>(Mode::Tag);
+    let mut told_before = transcript::<F, _>(a.controller_mut()).automation_sent;
+    for mode in [
+        AutomationMode::Off,
+        AutomationMode::Reading,
+        AutomationMode::Writing,
+        AutomationMode::ReadWriting,
+        AutomationMode::Off,
+    ] {
+        assert!(
+            a.controller_mut().set_automation_state(main_thread(), mode),
+            "the plugin takes no automation state: {mode:?} was not told"
+        );
+        a.silent(BLOCK);
+        let t = transcript::<F, _>(a.controller_mut());
+        let (_, raw) = F::SURFACE
+            .automation
+            .iter()
+            .find(|(m, _)| *m == mode)
+            .expect("the spec names the raw state of every mode");
+        assert_eq!(t.automation_last, *raw, "{mode:?}: the last raw state told");
+        assert!(
+            t.automation_sent > told_before,
+            "{mode:?}: the host told the plugin nothing"
+        );
+        told_before = t.automation_sent;
+    }
+}
+
 /// A transport change inside a block is told at its frame, after the block's
 /// own: CLAP has an event for it (`CLAP_EVENT_TRANSPORT`); VST3 and VST2 have
 /// none, and are gaps.

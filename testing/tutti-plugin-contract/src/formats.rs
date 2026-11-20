@@ -168,6 +168,15 @@ impl Format for Au {
             },
         ),
         (
+            "the_automation_mode_reaches_the_plugin",
+            Gap {
+                why: "an Audio Unit has no host-to-plugin automation mode: the headers \
+                      (`AudioUnitProperties.h`, `AUComponent.h`, `AUAudioUnit.h`) define no property \
+                      or call by which a host announces reading or writing automation",
+                fails_with: "takes no automation state",
+            },
+        ),
+        (
             "widths_report_the_declared_precision",
             Gap {
                 why: "an AUv2 unit has no 64-bit render: it reports 32-bit only",
