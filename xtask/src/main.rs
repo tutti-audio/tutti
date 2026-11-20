@@ -218,6 +218,25 @@ fn execute(step: &Step, ctx: &Ctx) -> Result<(), u8> {
                 Err(1)
             }
         }
+        Step::RequireWasmRunner => {
+            let lock = std::fs::read_to_string(ctx.root.join("Cargo.lock")).map_err(|e| {
+                eprintln!("xtask: cannot read Cargo.lock: {e}");
+                1
+            })?;
+            let out = process::Command::new("wasm-bindgen-test-runner")
+                .arg("--version")
+                .output()
+                .map_err(|e| {
+                    eprintln!(
+                        "xtask: wasm-bindgen-test-runner is not installed ({e}); run: cargo install --locked wasm-bindgen-cli --version <the wasm-bindgen version in Cargo.lock>"
+                    );
+                    1
+                })?;
+            recipes::check_wasm_runner(&lock, &String::from_utf8_lossy(&out.stdout)).map_err(|m| {
+                eprintln!("xtask: {m}");
+                1
+            })
+        }
         Step::RequireCargoDeny => {
             let ok = process::Command::new("cargo")
                 .args(["deny", "--version"])
