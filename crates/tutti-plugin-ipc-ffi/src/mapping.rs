@@ -86,16 +86,49 @@ pub struct MappingWriter {
     mapping: Arc<SharedMapping>,
 }
 
+/// The start of every slab name this module makes.
+const NAME_PREFIX: &str = "tutti_plugin-";
+
 /// What a peer needs to open a slab made by [`MappingWriter::create`]: handed
 /// out by `create`, sent to the peer, and taken by [`MappingWriter::open`].
 ///
 /// Opaque: its contents are private to this module, so nothing outside can
-/// read or construct one. It serializes as the one value a peer needs; a
-/// peer's bytes that name nothing fail at `open`, never as a default.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// read or construct one. A handle decoded from a peer's bytes is checked as it
+/// is decoded (a name this module could not have made does not decode), so a
+/// peer cannot point `open` at another path.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(try_from = "WireName")]
 pub struct SlabHandle {
     /// The backing file's name in the platform's shared directory.
     name: String,
+}
+
+/// A handle as it travels: the name alone, unchecked until it becomes one.
+#[derive(Deserialize)]
+struct WireName(String);
+
+impl TryFrom<WireName> for SlabHandle {
+    type Error = String;
+
+    fn try_from(WireName(name): WireName) -> Result<Self, String> {
+        let spelled = name.strip_prefix(NAME_PREFIX).is_some_and(|rest| {
+            !rest.is_empty()
+                && rest
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+        });
+        if spelled {
+            Ok(Self { name })
+        } else {
+            Err(format!("{name:?} is not a slab name"))
+        }
+    }
+}
+
+impl Serialize for SlabHandle {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.name)
+    }
 }
 
 impl SlabHandle {
@@ -107,7 +140,7 @@ impl SlabHandle {
         getrandom::fill(&mut bytes).map_err(SlabError::Name)?;
         Ok(Self {
             name: format!(
-                "tutti_plugin-{}-{}-{:016x}",
+                "{NAME_PREFIX}{}-{}-{:016x}",
                 std::process::id(),
                 COUNT.fetch_add(1, Ordering::Relaxed),
                 u64::from_ne_bytes(bytes),
@@ -382,6 +415,26 @@ mod tests {
         assert_ne!(ha.name, hb.name);
     }
 
+    /// A handle decoded from a peer's bytes is a name this module could have
+    /// made: one that climbs out of the shared directory, or is empty, does not
+    /// decode, and one `create` made does.
+    #[test]
+    fn a_decoded_handle_must_be_a_name_create_could_have_made() {
+        let decode = |name: &str| SlabHandle::try_from(WireName(name.to_owned()));
+        let (_w, made) = MappingWriter::create(SLAB_HEADER_BYTES + 16).unwrap();
+        assert!(decode(&made.name).is_ok(), "a made name is refused");
+        for bad in [
+            "",
+            "tutti_plugin-",
+            "../etc/passwd",
+            "tutti_plugin-/../x",
+            "tutti_plugin-a/b",
+            "other-1-2-3",
+        ] {
+            assert!(decode(bad).is_err(), "{bad:?} decoded");
+        }
+    }
+
     /// A symlink planted at the handle's name is refused by `open`
     /// (`O_NOFOLLOW`), and `create` never reuses an existing name.
     #[cfg(unix)]
@@ -459,7 +512,7 @@ mod tests {
 
     /// The backing files of this process's slabs, by name.
     fn slab_files() -> Vec<String> {
-        let prefix = format!("tutti_tutti_plugin-{}-", std::process::id());
+        let prefix = format!("tutti_{NAME_PREFIX}{}-", std::process::id());
         let dir = platform::path("x").parent().unwrap().to_owned();
         let mut names: Vec<String> = std::fs::read_dir(dir)
             .unwrap()
