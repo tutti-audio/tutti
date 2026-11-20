@@ -251,13 +251,13 @@ fn operand_after(code: &str, from: usize) -> &str {
 }
 
 /// A function: where its body is and what it is keyed by.
-struct Func {
-    start: usize,
-    close: usize,
-    key: String,
+pub(super) struct Func {
+    pub(super) start: usize,
+    pub(super) close: usize,
+    pub(super) key: String,
 }
 
-fn functions(code: &str) -> Vec<Func> {
+pub(super) fn functions(code: &str) -> Vec<Func> {
     let blocks = blocks(code);
     let mut out = Vec::new();
     let mut from = 0;

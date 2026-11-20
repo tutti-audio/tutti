@@ -5,7 +5,8 @@
 //! value's JSON spelling pinned both ways; [`noise`], a seeded stimulus, and
 //! [`Fnv`], a bit hash; [`HeldFutures`], a host executor a test steps by hand;
 //! [`wait_until`], a bounded wait for another thread, and [`unique_name`], a name
-//! for what the OS shares; and [`sf2`], a SoundFont built in memory.
+//! for what the OS shares; [`macos_major`], the macOS release a test runs on;
+//! and [`sf2`], a SoundFont built in memory.
 //!
 //! A test finds a repo file through [`repo_root`] and [`asset`], never through
 //! a relative `..` path, so moving a crate never changes what a test reads.
@@ -58,6 +59,7 @@ mod event_rig;
 mod held;
 mod links;
 mod machine_lock;
+mod macos;
 mod main_thread;
 pub mod midi;
 mod names;
@@ -88,6 +90,7 @@ pub use env::{ScopedEnv, cases};
 pub use event_rig::{BlockClock, EventRig, Output, Seen, Sink, heard};
 pub use held::{HeldFuture, HeldFutures, inline_executor, run_future};
 pub use machine_lock::{MachineLock, machine_lock};
+pub use macos::macos_major;
 pub use main_thread::{main_thread, main_thread_cases};
 #[cfg(feature = "plugin")]
 pub use plugin::{

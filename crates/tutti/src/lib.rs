@@ -190,7 +190,9 @@ pub use tutti_session::{
     SaveState,
 };
 #[cfg(all(feature = "session", feature = "analyze"))]
-pub use tutti_session::{Analyze, AnalyzeError, Audio, AudioContext, AudioInput};
+pub use tutti_session::{
+    Analyze, AnalyzeError, Analyzer, AnalyzerError, Audio, AudioContext, AudioInput, BindError,
+};
 #[cfg(feature = "session")]
 pub use tutti_session::{
     AnyAssign, AnyTarget, Assign, AutomationTarget, ClickTargets, ClickVolumeTarget, CurveTarget,
@@ -333,8 +335,8 @@ pub mod types {
         beats_per_sample, first_frame_at_or_after, frames_per_beat, snap_to_whole_frame,
     };
     pub use tutti_platform::{
-        Asset, Destination, Executor, Identity, Open, Panicked, PriorityRequest, ReadSeek, Staged,
-        StagedCommitError, StagedFile, StagedKeep, Stamp,
+        Asset, Destination, Executor, Identity, Open, Panicked, PriorityRequest, ReadSeek, Sleep,
+        Staged, StagedCommitError, StagedFile, StagedKeep, Stamp,
     };
     pub use tutti_rt::{
         AtomicCell, AtomicWord, Bell, Bells, Count, Counter, CounterWriter, Drained, Gauge,
@@ -402,8 +404,9 @@ pub mod session {
     pub use tutti_cpal::MicConfig;
     #[cfg(feature = "device")]
     pub use tutti_cpal::{
-        DeviceChange, DeviceListing, DeviceRoster, DeviceSelector, Direction as DeviceDirection,
-        Listed, Snapshot, SnapshotSource,
+        DeviceChange, DeviceHost, DeviceListing, DeviceRoster, DeviceSelector,
+        Direction as DeviceDirection, Listed, OutputConfig, Snapshot, SnapshotSource,
+        SupportedConfig,
     };
     pub use tutti_engine::{
         BackendErrorKind, GraphEngineError, Lagging, OutputLevelError, OutputLevels, OutputMap,
@@ -497,8 +500,8 @@ pub mod session {
     };
     #[cfg(feature = "record")]
     pub use tutti_session::{
-        DitherSink, FinalizeError, Finite, IDLE_PARK, Live, PumpLoop, PumpPass, Recorder,
-        RecorderError,
+        DitherSink, FinalizeError, Finite, IDLE_PARK, Live, NoiseShaping, PumpLoop, PumpPass,
+        Recorder, RecorderError,
     };
     #[cfg(feature = "plugin")]
     pub use tutti_session::{

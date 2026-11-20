@@ -31,7 +31,7 @@ mod x11;
 use crate::main_loop::Bell;
 use crate::render::{RenderSide, RenderThread};
 use crate::session::Session;
-use crate::transport::{Alone, SocketTransport, Transport};
+use crate::transport::{Alone, Incoming, SocketTransport, Transport};
 
 /// One thing the scripted host does.
 #[allow(clippy::large_enum_variant)] // a test script, built once
@@ -93,7 +93,7 @@ impl Script {
     }
 }
 
-impl Transport<Request, ControlFrame> for Script {
+impl Transport<Incoming, ControlFrame> for Script {
     fn wait_readable(&mut self, timeout: Option<Duration>, _: &Bell) -> IpcResult<bool> {
         let timeout = timeout.expect("the loop waits for a bounded time");
         if let Some(on_wait) = self.on_wait.as_mut() {
@@ -103,7 +103,7 @@ impl Transport<Request, ControlFrame> for Script {
         self.wait_inner(timeout)
     }
 
-    fn recv(&mut self) -> IpcResult<Request> {
+    fn recv(&mut self) -> IpcResult<Incoming> {
         self.recv_inner()
     }
 
@@ -156,15 +156,15 @@ impl Script {
         }
     }
 
-    fn recv_inner(&mut self) -> IpcResult<Request> {
+    fn recv_inner(&mut self) -> IpcResult<Incoming> {
         self.message_due_by = None;
         match self.steps.pop_front() {
             Some(Step::Send(body)) => {
                 self.sent += 1;
-                Ok(Request {
+                Ok(Incoming::Request(Request {
                     id: ReqId::new(self.sent),
                     body,
-                })
+                }))
             }
             _ => Err(IpcError::Io(std::io::Error::new(
                 std::io::ErrorKind::BrokenPipe,
@@ -240,7 +240,8 @@ fn session() -> (Fixture, tutti_plugin_ipc::SlabWriter) {
     let (creator, handle) = AudioSlab::create(layout.clone()).expect("slab");
     session
         .render
-        .attach_slab(AudioSlab::open(&handle, layout).expect("slab"));
+        .attach_slab(AudioSlab::open(&handle, layout).expect("slab"))
+        .expect("the render thread takes the slab");
     let (host_end, server_end) = UnixStream::pair().expect("socket pair");
     (
         Fixture {

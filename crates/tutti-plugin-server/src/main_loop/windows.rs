@@ -15,6 +15,11 @@ pub(crate) use bell::Bell;
 pub(crate) type Listener = interprocess::local_socket::Listener;
 pub(crate) type Stream = interprocess::local_socket::Stream;
 
+/// What a slab is received over on `stream`: nothing, as its name is in the frame.
+pub(crate) fn connection(_: &Stream) -> tutti_plugin_ipc_ffi::Connection<'_> {
+    tutti_plugin_ipc_ffi::Connection::detached()
+}
+
 /// The reactor. A named pipe has no descriptor to add the plugin's to, so it
 /// holds nothing.
 #[derive(Debug, Default)]

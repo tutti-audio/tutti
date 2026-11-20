@@ -167,6 +167,7 @@ impl Subject for Plugin {
         Chunks {
             missed: d.missed_chunks(),
             late: d.late_chunks(),
+            refused: d.refused_chunks(),
             skipped: d.skipped_chunks(),
         }
     }

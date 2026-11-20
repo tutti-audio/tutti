@@ -10,6 +10,7 @@ use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
+use tutti_plugin_ipc_ffi::Connection;
 
 /// Converts a host-chosen socket path into the local-socket name for this
 /// platform.
@@ -26,6 +27,12 @@ use std::time::Duration;
 // there.
 pub fn socket_name(socket: &Path) -> std::io::Result<Name<'static>> {
     socket.to_owned().to_fs_name::<GenericFilePath>()
+}
+
+/// What a slab is sent over on `stream`: the socket's descriptor.
+pub(crate) fn connection(stream: &ControlStream) -> Connection<'_> {
+    let Stream::UdSocket(socket) = stream;
+    socket.as_fd()
 }
 
 /// The longest socket path every Unix takes: `sun_path` is 104 bytes on macOS

@@ -93,7 +93,8 @@
 //! - **Resampling** (`resample/`): [`WindowedSinc`], [`FftResampler`] (failing with a
 //!   [`ResampleError`]) and [`StreamingResampler`], sized by a [`ChunkSize`].
 //! - **Dither** (`dither/`): [`DitherNoise`] ([`DitherShape`]) and [`DitherSink`], the
-//!   `tutti_buffers::Sink` adapter that dithers on its way to a fixed-point format.
+//!   `tutti_buffers::Sink` adapter that dithers on its way to a fixed-point format, with
+//!   [`NoiseShaping`] as its optional error feedback.
 //! - **Oscillator** (`oscillator.rs`): [`Oscillator`], a sine, or a saw, square or triangle
 //!   band-limited by PolyBLEP and PolyBLAMP ([`OscillatorWave`]).
 //! - **Stereo and utility** (`polarity.rs`, `stereo.rs`, `pan.rs`): [`Polarity`], the
@@ -193,6 +194,7 @@ pub use delay::{
     DelayRamps, DelaySignals, InterpolationMode, MAX_DELAY_CHANNELS, MaxDelay, MaxDelayError,
     Routing, RoutingError,
 };
+pub use dither::shaping::NoiseShaping;
 pub use dither::sink::DitherSink;
 pub use dither::{DitherNoise, DitherShape};
 pub use dynamics::{

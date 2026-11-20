@@ -44,7 +44,7 @@
 //!   fixed.
 
 use tutti_buffers::ChannelLayout;
-use tutti_cpal::{AudioEngine, DeviceHost, DeviceSelector, TuttiDriver};
+use tutti_cpal::{AudioEngine, DeviceHost, DeviceSelector, OutputConfig, TuttiDriver};
 use tutti_engine::{OutputSpec, StreamDriver, TimerDriver};
 use tutti_units::SampleRate;
 
@@ -193,17 +193,21 @@ impl<K: crate::AppKey, F: crate::SessionFloat> Session<K, SystemClock<F>> {
     /// # Errors
     ///
     /// A [`ClockError`] whose error is [`Error::Device`] when the device cannot
-    /// be found or opened, [`Error::Unplaceable`], [`Error::MapUnplaceable`],
+    /// be found or opened (a chosen
+    /// [`sample_format`](OutputConfig::sample_format) the device lacks is
+    /// [`tutti_cpal::Error::OutputFormatUnavailable`]), [`Error::Unplaceable`], [`Error::MapUnplaceable`],
     /// [`Error::Reprepare`] or [`Error::RunsPending`] when the graph cannot
     /// take the device **before the timer stops**, the re-prepare's or the
     /// card's own failure after it, and [`Error::SwitchNotUndone`] when the
     /// timer could not be started again.
     pub fn into_device(
         self,
-        device: DeviceSelector,
+        device: impl Into<OutputConfig>,
     ) -> std::result::Result<LiveSession<K, F>, ClockError<Self>> {
+        let config = device.into();
+        let device = config.device().clone();
         let opened = DeviceHost::open(self.running.audio_host).and_then(|host| {
-            let engine = AudioEngine::open(host, device.clone())?;
+            let engine = AudioEngine::open(host, config)?;
             let resolved = engine.resolve_device()?;
             Ok((engine, resolved))
         });

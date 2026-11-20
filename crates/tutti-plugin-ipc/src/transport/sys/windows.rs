@@ -10,6 +10,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tutti_platform::Instant;
+use tutti_plugin_ipc_ffi::Connection;
 
 /// Converts a host-chosen socket path into the local-socket name for this
 /// platform.
@@ -240,4 +241,9 @@ impl Wakeup {
 
     /// Nothing to put back: peeking leaves no state on the handle.
     pub(super) fn disarm(self, _: &mut ControlStream) {}
+}
+
+/// What a slab is sent over on `stream`: nothing, as its name is in the frame.
+pub(crate) fn connection(_: &ControlStream) -> Connection<'_> {
+    Connection::detached()
 }

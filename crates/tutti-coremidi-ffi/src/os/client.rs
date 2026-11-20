@@ -118,7 +118,8 @@ unsafe extern "C" fn notify(message: *const MIDINotification, context: *mut c_vo
 pub(crate) fn test_client() -> SharedClient {
     use std::sync::OnceLock;
     static CLIENT: OnceLock<Result<SharedClient, Error>> = OnceLock::new();
-    CLIENT
+    *CLIENT
         .get_or_init(|| SharedClient::start("tutti-ffi-test", |_| {}))
+        .as_ref()
         .expect("CoreMIDI client")
 }
