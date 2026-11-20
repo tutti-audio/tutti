@@ -29,7 +29,7 @@ use crate::kernel::{ControlSignals, Kernel, KernelNode};
 /// or [`flanger`](ModDelayConfig::flanger) preset it is a stereo chorus or flanger.
 ///
 /// Made from a [`ModDelayConfig`] (`ModDelayNode::from`) on a checked [`BusTopology`] (an
-/// `n`-channel one on the engine's order for that width is `BusTopology::assumed(n)?`, which
+/// `n`-channel one on the engine's order for that width is `BusTopology::default_for(n)?`, which
 /// refuses a width past one bus): a preset starting at its controls
 /// ([`ModDelayControls::CHORUS`] and kin), or a [`Sweep`] and a [`Stagger`] of your own.
 ///
@@ -364,7 +364,7 @@ mod tests {
     const SR: f64 = 48_000.0;
 
     fn bus(width: u16) -> BusTopology {
-        BusTopology::assumed(ChannelLayout::from(width)).expect("a test width is one bus")
+        BusTopology::default_for(ChannelLayout::from(width)).expect("a test width is one bus")
     }
 
     fn controls(rate: f64, depth: f64, feedback: f64) -> ModDelayControls {

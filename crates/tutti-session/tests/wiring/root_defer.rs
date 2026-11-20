@@ -45,7 +45,7 @@ fn block(s: &mut Session) -> (Vec<SessionEvent>, Vec<[f32; 2]>) {
 }
 
 fn root(n: u16) -> ChannelTopology {
-    ChannelTopology::assumed(ChannelLayout::from_count(n))
+    ChannelTopology::default_for(ChannelLayout::from_count(n))
 }
 
 fn mono() -> ChannelTopology {

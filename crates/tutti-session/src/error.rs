@@ -346,7 +346,7 @@ pub enum Error {
 
     /// The graph root has no place on the output device a restart opened: the
     /// root in force at `width` channels has no fold into the device's
-    /// `device` channels as they are stated or assumed (a root with a channel
+    /// `device` channels as they are stated or default (a root with a channel
     /// no speaker names, or one wider than a device where either width has no
     /// order). Nothing moved, and the stream is left stopped
     /// (`LiveSession::restart`).

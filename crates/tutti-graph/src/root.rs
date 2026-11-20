@@ -116,7 +116,7 @@ pub enum RootError {
 /// known: a device, a file, a node's outputs.
 ///
 /// The destination is taken to be the engine's own order for its width
-/// ([`ChannelTopology::assumed`]): mono, stereo, quad, 5.1, 7.1 and 7.1.4. A
+/// ([`ChannelTopology::default_for`]): mono, stereo, quad, 5.1, 7.1 and 7.1.4. A
 /// destination that states its placement is [`fold_to_topology`].
 ///
 /// # Errors
@@ -126,7 +126,7 @@ pub fn fold_to_width<F: Float>(
     src: &ChannelTopology,
     dst: ChannelLayout,
 ) -> Result<Fold<F>, FoldError> {
-    fold_to_topology(src, &ChannelTopology::assumed(dst))
+    fold_to_topology(src, &ChannelTopology::default_for(dst))
 }
 
 /// Builds the fold from `src` into `dst`. A mono source lands on the centre of
@@ -140,7 +140,7 @@ pub fn fold_to_width<F: Float>(
 ///   independent buses, so channel `i` stays channel `i` ([`Fold::by_index`]):
 ///   a wider destination is zero-filled and a narrower one is an error, never
 ///   a matrix. A caller that reads a bare count in the engine's order says so
-///   with [`ChannelTopology::assumed`] before it calls;
+///   with [`ChannelTopology::default_for`] before it calls;
 /// - a destination with no named speaker (3, 5, 7, 9 to 11, 13 and up
 ///   unassigned) takes channels by index too, and a narrowing is
 ///   [`FoldError::Unplaced`], never a truncation;

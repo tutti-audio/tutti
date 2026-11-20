@@ -38,8 +38,8 @@ fn gains(mono: bool, a0: f64, b0: f64) -> VbapGains {
 
 fn stereo_to_mono<F: Float>() -> Fold<F> {
     Fold::between(
-        &ChannelTopology::assumed(ChannelLayout::STEREO),
-        &ChannelTopology::assumed(ChannelLayout::MONO),
+        &ChannelTopology::default_for(ChannelLayout::STEREO),
+        &ChannelTopology::default_for(ChannelLayout::MONO),
     )
     .unwrap()
 }

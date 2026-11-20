@@ -206,7 +206,7 @@ mod tests {
 
     /// 5.1 decodes to the engine's own channel order.
     ///
-    /// Pinned against `ChannelTopology::assumed` rather than a hand-written list:
+    /// Pinned against `ChannelTopology::default_for` rather than a hand-written list:
     /// the point is that VST3's derived order and the engine's SMPTE order
     /// *agree* for this layout, which is why 5.1 needs no channel remapping.
     #[test]
@@ -214,7 +214,7 @@ mod tests {
         let decoded = from_arrangement(SpeakerArr::k51);
         assert_eq!(
             decoded,
-            ChannelTopology::assumed(ChannelLayout::from(6u16)),
+            ChannelTopology::default_for(ChannelLayout::from(6u16)),
             "VST3's k51 and the engine's SMPTE 5.1 must be the same channel order"
         );
         assert_eq!(decoded.lfe_index(), Some(3));
@@ -287,7 +287,7 @@ mod tests {
     ///
     /// `k71Music` is the 7.1 whose extra pair sits beyond the 5.1 core
     /// (`vstspeaker.h:170-173`), which is what the engine's SMPTE 7.1 describes.
-    /// Pinned against `ChannelTopology::assumed` rather than a literal so the two orders are
+    /// Pinned against `ChannelTopology::default_for` rather than a literal so the two orders are
     /// asserted to *agree*, which is what makes 7.1 need no channel remapping.
     ///
     /// The other width a low-bits mask gets wrong: `(1<<8)-1` adds the front
@@ -297,7 +297,7 @@ mod tests {
         let decoded = from_arrangement(SpeakerArr::k71Music);
         assert_eq!(
             decoded,
-            ChannelTopology::assumed(ChannelLayout::from(8u16)),
+            ChannelTopology::default_for(ChannelLayout::from(8u16)),
             "k71Music and the engine's SMPTE 7.1 must be the same channel order"
         );
         assert_eq!(decoded.lfe_index(), Some(3));
@@ -373,7 +373,7 @@ mod tests {
     /// placement range — while the engine's one-channel bus is `FrontCenter`.
     #[test]
     fn the_mono_marker_decodes_to_the_engines_mono() {
-        let engine_mono = ChannelTopology::assumed(ChannelLayout::MONO);
+        let engine_mono = ChannelTopology::default_for(ChannelLayout::MONO);
         assert_ne!(
             SpeakerArr::kMono,
             kSpeakerC,

@@ -47,7 +47,7 @@ pub(crate) fn folded_node<F: FftFloat + Lerp, S: Sample>(
     block_size: Samples,
 ) -> Result<ConvolverNode<F>, ConvolverError> {
     let width = ChannelLayout::try_from(irs.len()).expect("a test width fits a layout");
-    let bus = BusTopology::assumed(width).expect("a test width fits a bus");
+    let bus = BusTopology::default_for(width).expect("a test width fits a bus");
     ConvolverNode::try_from(
         ConvolverConfig::new(bus, irs)
             .folded()

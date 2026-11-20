@@ -8,7 +8,7 @@ use crate::delay::times::ChannelTimesError;
 const MAX: MaxDelay = MaxDelay::of(Seconds::new(1.0));
 
 fn bus(width: u16) -> BusTopology {
-    BusTopology::assumed(width.into()).expect("a test width is one bus")
+    BusTopology::default_for(width.into()).expect("a test width is one bus")
 }
 
 /// A stereo delay: the default swap routing, the channels linked in time.

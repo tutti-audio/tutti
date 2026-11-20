@@ -47,7 +47,7 @@ fn a_main_bus_feeds_the_roots_channels_in_order() {
 #[test]
 fn a_mono_bus_feeds_both_channels_of_a_declared_stereo_root() {
     let mut s = offline();
-    s.declare_root_topology(Some(ChannelTopology::assumed(ChannelLayout::STEREO)))
+    s.declare_root_topology(Some(ChannelTopology::default_for(ChannelLayout::STEREO)))
         .expect("a stereo root");
     let (mono, _) = s.graph().add(ForkByClone(Const::mono(0.5)));
     s.graph().connect(mono, Root).unwrap().unfaded();

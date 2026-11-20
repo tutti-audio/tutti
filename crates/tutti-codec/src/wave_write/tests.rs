@@ -32,7 +32,7 @@ fn ramp_wave(topology: ChannelTopology, rate: f64, frames: usize) -> Wave {
 fn a_written_wave_reads_back_as_itself() {
     use crate::{Pcm, read_wave};
     let dir = tempfile::tempdir().unwrap();
-    let stereo = || ChannelTopology::assumed(ChannelLayout::STEREO);
+    let stereo = || ChannelTopology::default_for(ChannelLayout::STEREO);
     let cases = [
         ("stereo.wav", Format::Wav(Pcm::Int16), stereo()),
         ("float.wav", Format::Wav(Pcm::Float32), stereo()),
@@ -195,14 +195,14 @@ fn an_integer_wave_written_to_a_non_seek_writer_reads_back_exactly() {
 
 /// A wave written as WAV and read back is equal to the original: the same
 /// samples, rate and speakers are the same wave, whether the original's
-/// topology was stated or only assumed from its channel count.
+/// topology was stated or the default layout for its channel count.
 #[cfg(all(feature = "encode-wav", decode))]
 #[test]
 fn a_wave_written_as_wav_reads_back_equal() {
     use crate::{Pcm, read_wave};
     let (_, mono) = long_int_wave();
     let stereo = ramp_wave(
-        ChannelTopology::assumed(ChannelLayout::STEREO),
+        ChannelTopology::default_for(ChannelLayout::STEREO),
         44_100.0,
         500,
     );

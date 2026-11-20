@@ -360,7 +360,7 @@ fn a_narrower_reinsert_reports_the_root_feed_it_dropped() {
     let mut s = Session::builder().build().expect("builds");
     let g = s.graph();
     let (y, _) = g.add(ForkByClone(Bused { aux: true }));
-    s.declare_root_topology(Some(ChannelTopology::assumed(ChannelLayout::STEREO)))
+    s.declare_root_topology(Some(ChannelTopology::default_for(ChannelLayout::STEREO)))
         .expect("stereo");
     let g = s.graph();
     g.connect(y.bus_out(0), Root).unwrap().unfaded();

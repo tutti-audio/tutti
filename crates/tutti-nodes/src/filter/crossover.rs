@@ -451,7 +451,7 @@ mod tests {
         // 11 channels x 6 bands = 66 ports.
         assert!(matches!(
             CrossoverNode::<f32>::try_from(CrossoverConfig::new(
-                BusTopology::assumed(ChannelLayout::from_count(11)).unwrap(),
+                BusTopology::default_for(ChannelLayout::from_count(11)).unwrap(),
                 CrossoverControls::try_from(
                     &[
                         Hz::new(1.0),
@@ -467,7 +467,7 @@ mod tests {
         ));
         assert!(
             CrossoverNode::<f32>::try_from(CrossoverConfig::new(
-                BusTopology::assumed(ChannelLayout::from_count(10)).unwrap(),
+                BusTopology::default_for(ChannelLayout::from_count(10)).unwrap(),
                 CrossoverControls::try_from(
                     &[
                         Hz::new(1.0),

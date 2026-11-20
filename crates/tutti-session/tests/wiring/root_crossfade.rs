@@ -57,7 +57,7 @@ fn smootherstep(x: f64) -> f64 {
 #[test]
 fn a_declared_root_change_crossfades_over_the_declick() {
     let mut s = session();
-    s.declare_root_topology(Some(ChannelTopology::assumed(ChannelLayout::MONO)))
+    s.declare_root_topology(Some(ChannelTopology::default_for(ChannelLayout::MONO)))
         .expect("a mono root");
     let mut right = Vec::new();
     for _ in 0..5 {
@@ -78,7 +78,7 @@ fn a_declared_root_change_crossfades_over_the_declick() {
 #[test]
 fn a_hard_declaration_cuts_at_the_block() {
     let mut s = session();
-    s.declare_root_topology(Some(ChannelTopology::assumed(ChannelLayout::MONO)))
+    s.declare_root_topology(Some(ChannelTopology::default_for(ChannelLayout::MONO)))
         .expect("a mono root")
         .unfaded();
     assert!(block(&mut s).iter().all(|&r| r == 0.25));
