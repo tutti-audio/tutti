@@ -28,8 +28,6 @@ tutti-plugin-db  spawn  crates/tutti-plugin-db/src/catalog.rs::Catalog::save_in_
 tutti-plugin-db  spawn_dedicated  crates/tutti-plugin-db/src/scanner.rs::Scanner::start  plugin
 tutti-plugin-ipc  spawn_dedicated  crates/tutti-plugin-ipc/src/client/audio/thread.rs::IpcThread::spawn  plugin
 tutti-plugin-ipc  spawn_dedicated  crates/tutti-plugin-ipc/src/client/audio/thread.rs::run_thread  plugin
-tutti-plugin-ipc  spawn_dedicated  crates/tutti-plugin-ipc/src/process_guard.rs::ProcessGuard::launched  plugin
-tutti-plugin-ipc  spawn_dedicated  crates/tutti-plugin-ipc/src/process_guard.rs::reap_elsewhere  plugin
 tutti-plugin-server  spawn_dedicated  crates/tutti-plugin-server/src/render.rs::RenderThread::spawn  plugin
 tutti-plugin-server  spawn  crates/tutti-plugin-server/src/server.rs::beat_while  plugin
 

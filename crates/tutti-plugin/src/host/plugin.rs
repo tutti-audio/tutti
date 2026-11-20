@@ -7,6 +7,7 @@
 //! note expression, reached here through capability accessors.
 
 use crate::host::placement::{ResolvedHosting, placement};
+use tutti_platform::Executor;
 use tutti_plugin_db::Loadable;
 use tutti_plugin_types::PluginRef;
 use tutti_plugin_types::{MainThreadMarker, MainWorkHandle};
@@ -66,7 +67,14 @@ enum Placed {
 /// let file = PluginRef::file("/usr/lib/vst3/MyPlugin.vst3");
 /// let (_collector, work) = tutti_plugin_types::MainWork::new();
 /// let loadable = Loadable::uncatalogued(file);
-/// let plugin = Plugin::open_served(&AudioConfig::default(), &work, &loadable, SampleRate::SR_48K)?;
+/// let executor = tutti_platform::Executor::new();
+/// let plugin = Plugin::open_served(
+///     &AudioConfig::default(),
+///     &executor,
+///     &work,
+///     &loadable,
+///     SampleRate::SR_48K,
+/// )?;
 /// println!("{} ({:?})", plugin.descriptor().name, plugin.descriptor().class.role());
 /// if plugin.loaded().features.contains(Features::MIDI_IN) {
 ///     // wire a MIDI source to the node's event input
@@ -122,7 +130,8 @@ impl Plugin {
     ///     .resolve(&"vst3.00112233-44556677-8899AABB-CCDDEEFF".parse::<PluginId>()?)
     ///     .bind()?;
     /// let (_collector, work) = tutti_plugin_types::MainWork::new();
-    /// let plugin = Plugin::open(main, &work, &foo, tutti_units::SampleRate::SR_48K)?;
+    /// let executor = tutti_platform::Executor::new();
+    /// let plugin = Plugin::open(main, &executor, &work, &foo, tutti_units::SampleRate::SR_48K)?;
     /// # Ok(()) }
     /// ```
     ///
@@ -135,7 +144,8 @@ impl Plugin {
     /// editor and audio processor into one instance, and every other format in
     /// a `plugin-server` subprocess with an IPC bridge. This call blocks while
     /// the subprocess starts and the plugin loads, so call it off the audio
-    /// thread.
+    /// thread. `executor` runs the subprocess's exit watch, and a fork of the
+    /// served plugin keeps it for its own.
     ///
     /// The load asks `plugin`'s blacklist where it opens the plugin, so a plugin
     /// blacklisted since it was resolved is refused.
@@ -147,13 +157,14 @@ impl Plugin {
     /// refusals of [`placement`].
     pub fn open(
         main: MainThreadMarker,
+        executor: &Executor,
         work: &MainWorkHandle,
         plugin: &Loadable,
         sample_rate: SampleRate,
     ) -> IpcResult<Self> {
         match placement(plugin)? {
             ResolvedHosting::OutOfProcess => {
-                Self::open_served(&AudioConfig::default(), work, plugin, sample_rate)
+                Self::open_served(&AudioConfig::default(), executor, work, plugin, sample_rate)
             }
             ResolvedHosting::InProcess => Self::open_in_process(main, work, plugin, sample_rate),
         }
@@ -176,11 +187,12 @@ impl Plugin {
     /// [`IpcError::NotOutOfProcess`]: tutti_plugin_types::IpcError::NotOutOfProcess
     pub fn open_served(
         audio: &AudioConfig,
+        executor: &Executor,
         work: &MainWorkHandle,
         plugin: &Loadable,
         sample_rate: SampleRate,
     ) -> IpcResult<Self> {
-        Self::serve(audio, work, plugin, sample_rate, None).map(|(plugin, _)| plugin)
+        Self::serve(audio, executor, work, plugin, sample_rate, None).map(|(plugin, _)| plugin)
     }
 
     /// [`open_served`](Self::open_served), restoring `state` into the plugin
@@ -194,12 +206,13 @@ impl Plugin {
     /// The same as [`open_served`](Self::open_served).
     pub fn open_served_restoring(
         audio: &AudioConfig,
+        executor: &Executor,
         work: &MainWorkHandle,
         plugin: &Loadable,
         sample_rate: SampleRate,
         state: &[u8],
     ) -> IpcResult<(Self, Result<(), RestoreRefused>)> {
-        Self::serve(audio, work, plugin, sample_rate, Some(state))
+        Self::serve(audio, executor, work, plugin, sample_rate, Some(state))
             .map(|(plugin, restored)| (plugin, restored.unwrap_or(Ok(()))))
     }
 
@@ -241,13 +254,20 @@ impl Plugin {
 
     fn serve(
         audio: &AudioConfig,
+        executor: &Executor,
         work: &MainWorkHandle,
         plugin: &Loadable,
         sample_rate: SampleRate,
         state: Option<&[u8]>,
     ) -> IpcResult<(Self, Option<Result<(), RestoreRefused>>)> {
-        let (client, restored) =
-            PluginClient::open(audio.to_bridge_config()?, work, plugin, sample_rate, state)?;
+        let (client, restored) = PluginClient::open(
+            audio.to_bridge_config()?,
+            executor,
+            work,
+            plugin,
+            sample_rate,
+            state,
+        )?;
         let handle = client.handle();
         let restored = restored.map(|restored| restored.map_err(RestoreRefused::Served));
         Ok((Self::from_subprocess(client, handle), restored))

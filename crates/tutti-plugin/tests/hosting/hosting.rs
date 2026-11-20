@@ -23,6 +23,7 @@ fn a_vst2_plugin_asked_for_out_of_process_is_refused_at_load() {
         let plugin = Loadable::uncatalogued(PluginRef::file(name)).hosting(Hosting::OutOfProcess);
         match Plugin::open_served(
             &tutti_plugin_ipc::AudioConfig::default(),
+            tutti_fixtures::executor(),
             &tutti_fixtures::detached_work(),
             &plugin,
             SampleRate::of(RATE),
@@ -57,6 +58,7 @@ mod clap {
         let _env = with_server();
         let plugin = Plugin::open_served(
             &tutti_plugin_ipc::AudioConfig::default(),
+            tutti_fixtures::executor(),
             &tutti_fixtures::detached_work(),
             &clap(Hosting::Auto),
             SampleRate::of(RATE),
@@ -72,6 +74,7 @@ mod clap {
         let _env = with_server();
         let plugin = Plugin::open_served(
             &tutti_plugin_ipc::AudioConfig::default(),
+            tutti_fixtures::executor(),
             &tutti_fixtures::detached_work(),
             &clap(Hosting::OutOfProcess),
             SampleRate::of(RATE),
@@ -92,6 +95,7 @@ mod clap {
         let main = tutti_fixtures::main_thread();
         let plugin = Plugin::open(
             main,
+            tutti_fixtures::executor(),
             &tutti_fixtures::detached_work(),
             &asked,
             SampleRate::of(RATE),
@@ -123,6 +127,7 @@ fn auto_hosts_a_vst2_plugin_in_process() {
     let main = tutti_fixtures::main_thread();
     let plugin = Plugin::open(
         main,
+        tutti_fixtures::executor(),
         &tutti_fixtures::detached_work(),
         &Loadable::uncatalogued(PluginRef::file(&staged)),
         SampleRate::of(RATE),

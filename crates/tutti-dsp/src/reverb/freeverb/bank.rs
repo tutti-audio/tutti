@@ -36,15 +36,15 @@
 //! about `u` a trip whatever the form.
 
 use tutti_buffers::{Float, Planes, PlanesMut};
-use tutti_units::{Feedback, Gain, Mix, SampleRate, Seconds, Tail};
+use tutti_units::{Feedback, Gain, Mix, SampleRate, Samples, Seconds, Tail};
 
 use super::design::FreeverbControls;
-use crate::delay::{DelayRing, ring_seconds, trips};
+use crate::delay::{ring_seconds, trips};
 use crate::reverb::{CHUNK, ramp};
-use crate::{Lerp, Ramp, Steps, TAIL_FLOOR};
+use crate::{AllPassFilter, AllPassForm, CombFilter, CombForm, Lerp, Ramp, Steps, TAIL_FLOOR};
 
 /// The all-pass feedback.
-const ALLPASS_FEEDBACK: Gain = Gain::new(0.5);
+const ALLPASS_FEEDBACK: Feedback = Feedback::new(0.5);
 /// How many frames longer the right channel's lines are, at 44.1 kHz.
 const STEREO_SPREAD: usize = 23;
 /// The comb lengths of the left channel at 44.1 kHz.
@@ -134,11 +134,23 @@ impl<F: Float + Lerp> FreeverbBank<F> {
             (
                 COMBS
                     .iter()
-                    .map(|&t| CombFilter::new(scale_tuning(rate, t + spread)))
+                    .map(|&t| {
+                        CombFilter::new(
+                            CombForm::Feedback,
+                            Samples::new(scale_tuning(rate, t + spread)),
+                            Feedback::NONE,
+                        )
+                    })
                     .collect::<Vec<_>>(),
                 ALL_PASSES
                     .iter()
-                    .map(|&t| AllPassFilter::new(scale_tuning(rate, t + spread)))
+                    .map(|&t| {
+                        AllPassFilter::new(
+                            AllPassForm::Freeverb,
+                            Samples::new(scale_tuning(rate, t + spread)),
+                            ALLPASS_FEEDBACK,
+                        )
+                    })
                     .collect::<Vec<_>>(),
             )
         };
@@ -153,9 +165,6 @@ impl<F: Float + Lerp> FreeverbBank<F> {
         };
         let (feedback, damp) = design(&START);
         bank.set_combs(feedback, damp);
-        for apf in bank.all_passes.iter_mut().flatten() {
-            apf.feedback = F::from_unit(ALLPASS_FEEDBACK);
-        }
         bank
     }
 
@@ -174,10 +183,10 @@ impl<F: Float + Lerp> FreeverbBank<F> {
     /// Back to silence, the chunks counted from here. No allocation.
     pub fn reset(&mut self) {
         for cf in self.combs.iter_mut().flatten() {
-            cf.mute();
+            cf.reset();
         }
         for apf in self.all_passes.iter_mut().flatten() {
-            apf.mute();
+            apf.reset();
         }
         self.into = 0;
     }
@@ -193,9 +202,7 @@ impl<F: Float + Lerp> FreeverbBank<F> {
     /// Sets every comb's loop gain and damping. The damping's complement is `1 - damp`.
     fn set_combs(&mut self, feedback: F, damp: F) {
         for cf in self.combs.iter_mut().flatten() {
-            cf.feedback = feedback;
-            cf.damp1 = damp;
-            cf.damp2 = F::ONE - damp;
+            cf.retune(feedback, damp);
         }
     }
 
@@ -224,13 +231,13 @@ impl<F: Float + Lerp> FreeverbBank<F> {
     fn ring(&self, loop_gain: Feedback) -> Tail {
         let longest = self.combs[1]
             .iter()
-            .map(|c| c.buffer.len())
+            .map(|c| c.delay().get())
             .max()
             .unwrap_or(0);
         let comb = ring_seconds(longest, trips(loop_gain.get(), TAIL_FLOOR), self.rate);
         let chain = self.all_passes[1]
             .iter()
-            .map(|a| a.buffer.len())
+            .map(|a| a.delay().get())
             .map(|d| ring_seconds(d, trips(ALLPASS_FEEDBACK.get(), TAIL_FLOOR), self.rate));
         let total = chain.fold(comb, |sum, s| Seconds::new(sum.get() + s.get()));
         Tail::Finite(total.to_samples_ceil(self.rate))
@@ -293,78 +300,13 @@ impl<F: Float + Lerp> FreeverbBank<F> {
         {
             out.fill(F::ZERO);
             for cf in combs {
-                cf.process(input, self.gain, out);
+                for (o, &x) in out.iter_mut().zip(input) {
+                    *o += cf.tick(x * self.gain);
+                }
             }
             for apf in all_passes {
                 apf.process(out);
             }
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-struct CombFilter<F> {
-    buffer: DelayRing<F>,
-    filter_store: F,
-
-    feedback: F,
-    damp1: F,
-    damp2: F,
-}
-
-impl<F: Float> CombFilter<F> {
-    fn new(buffer_size: usize) -> Self {
-        Self {
-            buffer: DelayRing::new(buffer_size),
-            filter_store: F::ZERO,
-            feedback: F::ZERO,
-            damp1: F::ZERO,
-            damp2: F::ZERO,
-        }
-    }
-
-    fn mute(&mut self) {
-        self.buffer.clear();
-        self.filter_store = F::ZERO;
-    }
-
-    fn process(&mut self, input_block: &[F], input_gain: F, output_block: &mut [F]) {
-        for (out, &x) in output_block.iter_mut().zip(input_block) {
-            let input = x * input_gain;
-            let output = self.buffer.oldest();
-            self.filter_store = (output * self.damp2) + (self.filter_store * self.damp1);
-            self.buffer
-                .push(input + (self.filter_store * self.feedback));
-            *out += output;
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-struct AllPassFilter<F> {
-    buffer: DelayRing<F>,
-
-    feedback: F,
-}
-
-impl<F: Float> AllPassFilter<F> {
-    fn new(buffer_size: usize) -> Self {
-        Self {
-            buffer: DelayRing::new(buffer_size),
-            feedback: F::ZERO,
-        }
-    }
-
-    fn mute(&mut self) {
-        self.buffer.clear();
-    }
-
-    fn process(&mut self, block: &mut [F]) {
-        for sample in block {
-            let input = *sample;
-            let bufout = self.buffer.oldest();
-            *sample = bufout - input;
-            self.buffer.push(input + (bufout * self.feedback));
         }
     }
 }
