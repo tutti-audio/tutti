@@ -6,7 +6,7 @@ use tutti_fixtures::unique_name;
 use tutti_graph::{EventCapacity, Offset};
 use tutti_midi_device::FunctionBlock;
 use tutti_midi_hardware::{
-    MidiHardwareError, MidiHardwareOptions, MidiSession, VirtualDestination, VirtualSource,
+    MidiHardwareError, MidiHardwareConfig, MidiSession, VirtualDestination, VirtualSource,
     VirtualSpec,
 };
 use tutti_midi_runtime::InputInlets;
@@ -123,7 +123,7 @@ pub fn a_destination_with_function_blocks_is_listed_with_those_blocks() {
     let name = unique_name("tutti-vdst-blocks");
     let spec = two_blocks(&name);
     let inlets = InputInlets::new(EventCapacity::of(8), Duration::ZERO);
-    let session = MidiSession::open(inlets, MidiHardwareOptions::new()).expect("a session");
+    let session = MidiSession::open(inlets, MidiHardwareConfig::new()).expect("a session");
     let (producer, _inlet) = std::sync::Arc::clone(session.ports()).open_input_port("virtual");
     let opened = VirtualDestination::open(&spec, producer, main_thread());
     if !has_ump_endpoints() {
@@ -203,7 +203,7 @@ pub fn what_is_written_to_a_sources_destination_is_counted_as_refused() {
     }
     let source = opened.expect("macOS 15 opens the source");
     let inlets = InputInlets::new(EventCapacity::of(8), Duration::ZERO);
-    let session = MidiSession::open(inlets, MidiHardwareOptions::new()).expect("a session");
+    let session = MidiSession::open(inlets, MidiHardwareConfig::new()).expect("a session");
     tutti_fixtures::wait_until("the destination is listed", PATIENCE, || {
         session.outputs().iter().any(|d| d.name.contains(name))
     });
