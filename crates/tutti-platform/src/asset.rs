@@ -8,5 +8,5 @@ mod stamp;
 
 pub use destination::Destination;
 pub use source::{Asset, Identity, Open, ReadSeek};
-pub use staged::Staged;
+pub use staged::{Staged, StagedFile};
 pub use stamp::Stamp;

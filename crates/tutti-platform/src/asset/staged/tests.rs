@@ -1,7 +1,7 @@
 use std::io::{ErrorKind, Write};
 use std::path::Path;
 
-use super::Staged;
+use super::{Staged, StagedFile};
 
 fn names(dir: &Path) -> Vec<String> {
     std::fs::read_dir(dir)
@@ -10,8 +10,10 @@ fn names(dir: &Path) -> Vec<String> {
         .collect()
 }
 
-fn stage(staged: &Staged, bytes: &[u8]) {
-    staged.open().unwrap().write_all(bytes).unwrap();
+fn stage(staged: Staged, bytes: &[u8]) -> StagedFile {
+    let mut file = staged.open().unwrap();
+    file.write_all(bytes).unwrap();
+    file
 }
 
 #[test]
@@ -23,8 +25,7 @@ fn a_committed_write_leaves_only_the_target_with_the_bytes() {
         if create_new {
             staged = staged.create_new();
         }
-        stage(&staged, b"whole");
-        staged.commit().unwrap();
+        stage(staged, b"whole").commit().unwrap();
         assert_eq!(std::fs::read(&target).unwrap(), b"whole");
         assert_eq!(names(dir.path()), ["a.bin"], "create_new = {create_new}");
     }
@@ -35,19 +36,45 @@ fn a_dropped_write_leaves_no_temporary_and_the_target_untouched() {
     let dir = tempfile::tempdir().unwrap();
     let target = dir.path().join("a.bin");
     std::fs::write(&target, b"old").unwrap();
-    let staged = Staged::new(&target);
-    stage(&staged, b"new");
+    let file = stage(Staged::new(&target), b"new");
     assert_eq!(names(dir.path()).len(), 2);
-    drop(staged);
+    drop(file);
     assert_eq!(names(dir.path()), ["a.bin"]);
     assert_eq!(std::fs::read(&target).unwrap(), b"old");
 }
 
 #[test]
-fn a_dropped_staging_that_never_opened_is_a_clean_drop() {
+fn a_staging_that_never_opened_creates_nothing() {
     let dir = tempfile::tempdir().unwrap();
     drop(Staged::new(&dir.path().join("a.bin")));
     assert!(names(dir.path()).is_empty());
+}
+
+/// A write still in a `BufWriter` reaches the target once the writer is handed
+/// back and the file committed: the hand-back flushes, the commit syncs.
+#[test]
+fn a_buffered_write_is_in_the_target_after_the_hand_back_and_commit() {
+    let dir = tempfile::tempdir().unwrap();
+    let target = dir.path().join("a.bin");
+    let mut writer = std::io::BufWriter::new(Staged::new(&target).open().unwrap());
+    writer.write_all(b"buffered").unwrap();
+    assert_eq!(std::fs::metadata(writer.get_ref().temp()).unwrap().len(), 0);
+    writer.into_inner().unwrap().commit().unwrap();
+    assert_eq!(std::fs::read(&target).unwrap(), b"buffered");
+    assert_eq!(names(dir.path()), ["a.bin"]);
+}
+
+/// A staged file seeks and overwrites, as a header back-patch needs.
+#[test]
+fn a_staged_file_seeks_and_overwrites() {
+    use std::io::{Seek, SeekFrom};
+    let dir = tempfile::tempdir().unwrap();
+    let target = dir.path().join("a.bin");
+    let mut file = stage(Staged::new(&target), b"abcdef");
+    file.seek(SeekFrom::Start(1)).unwrap();
+    file.write_all(b"XY").unwrap();
+    file.commit().unwrap();
+    assert_eq!(std::fs::read(&target).unwrap(), b"aXYdef");
 }
 
 #[test]
@@ -55,9 +82,7 @@ fn the_default_commit_replaces_an_existing_target() {
     let dir = tempfile::tempdir().unwrap();
     let target = dir.path().join("a.bin");
     std::fs::write(&target, b"old").unwrap();
-    let staged = Staged::new(&target);
-    stage(&staged, b"new");
-    staged.commit().unwrap();
+    stage(Staged::new(&target), b"new").commit().unwrap();
     assert_eq!(std::fs::read(&target).unwrap(), b"new");
     assert_eq!(names(dir.path()), ["a.bin"]);
 }
@@ -67,9 +92,9 @@ fn create_new_refuses_an_existing_target_and_cleans_up() {
     let dir = tempfile::tempdir().unwrap();
     let target = dir.path().join("a.bin");
     std::fs::write(&target, b"old").unwrap();
-    let staged = Staged::new(&target).create_new();
-    stage(&staged, b"new");
-    let err = staged.commit().unwrap_err();
+    let err = stage(Staged::new(&target).create_new(), b"new")
+        .commit()
+        .unwrap_err();
     assert_eq!(err.kind(), ErrorKind::AlreadyExists);
     assert_eq!(std::fs::read(&target).unwrap(), b"old");
     assert_eq!(names(dir.path()), ["a.bin"]);
@@ -79,13 +104,9 @@ fn create_new_refuses_an_existing_target_and_cleans_up() {
 fn create_new_refuses_a_target_that_appears_after_the_staging() {
     let dir = tempfile::tempdir().unwrap();
     let target = dir.path().join("a.bin");
-    let staged = Staged::new(&target).create_new();
-    stage(&staged, b"new");
+    let file = stage(Staged::new(&target).create_new(), b"new");
     std::fs::write(&target, b"raced").unwrap();
-    assert_eq!(
-        staged.commit().unwrap_err().kind(),
-        ErrorKind::AlreadyExists
-    );
+    assert_eq!(file.commit().unwrap_err().kind(), ErrorKind::AlreadyExists);
     assert_eq!(std::fs::read(&target).unwrap(), b"raced");
 }
 
@@ -95,10 +116,12 @@ fn create_new_refuses_a_target_that_appears_after_the_staging() {
 #[test]
 fn a_temporary_that_cannot_be_removed_does_not_fail_the_drop() {
     let dir = tempfile::tempdir().unwrap();
-    let staged = Staged::new(&dir.path().join("a.wav"));
-    std::fs::create_dir(staged.temp()).unwrap();
-    let path = staged.temp().to_path_buf();
-    drop(staged);
+    let file = stage(Staged::new(&dir.path().join("a.wav")), b"x");
+    let path = file.temp().to_path_buf();
+    // Replaced behind the file's back by a directory, which `remove_file` cannot remove.
+    std::fs::remove_file(&path).unwrap();
+    std::fs::create_dir(&path).unwrap();
+    drop(file);
     assert!(path.is_dir(), "the leftover is still there");
 }
 

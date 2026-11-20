@@ -327,7 +327,7 @@ pub mod types {
         beats_per_sample, first_frame_at_or_after, frames_per_beat, snap_to_whole_frame,
     };
     pub use tutti_platform::{
-        Asset, Destination, Identity, Open, Panicked, ReadSeek, Staged, Stamp,
+        Asset, Destination, Identity, Open, Panicked, ReadSeek, Staged, StagedFile, Stamp,
     };
     pub use tutti_rt::{
         AtomicCell, AtomicWord, Bell, Bells, Count, Counter, CounterWriter, Drained, Gauge,

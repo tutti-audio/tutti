@@ -28,12 +28,9 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::{
     Float, I24, Interleaved, InterleavedMut, Planes, Sample, Sink, SinkFailed, convert,
 };
-use tutti_codec::{Encoder, Finalized, IntDepth, Spec};
+use tutti_codec::{FileEncoder, FinalizedFile, IntDepth, Spec};
 use tutti_dsp::{DitherSink, FftFloat, StreamingResampler, needs_resampling, resampled_frames};
 use tutti_units::{Amplitude, SampleRate, Samples};
-
-/// The encoder of a file made beside its path.
-type FileEncoder = Encoder<std::io::BufWriter<std::fs::File>>;
 
 /// The rate the file is written at: the resample target, else the rate it is
 /// rendered at.
@@ -66,14 +63,14 @@ pub(crate) fn open_file<F: FftFloat>(
 ) -> Result<Chain<F>> {
     let spec = spec(target, source_rate);
     let planned = resampled_frames(source_rate, spec.rate(), plan.output_length);
-    let encoder = Encoder::create_file_planned(&spec, target.path(), planned)?;
+    let encoder = FileEncoder::create_planned(&spec, target.path(), planned)?;
     Chain::new(target, source_rate, encoder)
 }
 
 /// What a [`Chain`] finalized into: the file closed beside its path and not
 /// yet put in place, and what the pass counted of it.
 pub(crate) struct Closed {
-    file: Finalized<std::io::BufWriter<std::fs::File>>,
+    file: FinalizedFile,
     clipped: u64,
     frames: Samples,
 }
@@ -81,7 +78,7 @@ pub(crate) struct Closed {
 impl Closed {
     /// Puts the file in place.
     pub(crate) fn commit(self) -> tutti_codec::Result<Landed> {
-        self.file.commit().map(|_| Landed {
+        self.file.commit().map(|()| Landed {
             clipped: self.clipped,
             frames: self.frames,
         })

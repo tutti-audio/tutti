@@ -1,9 +1,9 @@
 //! Writing a [`Wave`] as a file.
 
 use crate::encoder::check_planned;
-use crate::{Encoder, Format, Result, Spec};
+use crate::{Encoder, FileEncoder, Format, Result, Spec};
 use std::io::{Cursor, Seek, Write};
-use tutti_buffers::{InterleavedMut, Sample, Wave, interleave};
+use tutti_buffers::{Interleaved, InterleavedMut, Sample, Wave, interleave};
 use tutti_platform::{Destination, Staged};
 use tutti_units::Samples;
 
@@ -15,7 +15,7 @@ const WRITE_CHUNK: usize = 8192;
 /// file).
 ///
 /// - A path is written beside itself and renamed over it when whole, as
-///   [`Encoder::create_file`] does, so a failure leaves what was at the path as
+///   [`FileEncoder::create`] does, so a failure leaves what was at the path as
 ///   it was. An existing file is replaced unless the destination is
 ///   [`create_new`](Destination::create_new), which refuses it with an
 ///   [`Error::Io`](crate::Error::Io) of kind
@@ -69,7 +69,7 @@ pub fn write_wave<'a, S: Sample>(
             } else {
                 staged
             };
-            write_all(wave, Encoder::create_staged(&spec, staged)?).map(drop)
+            write_file(wave, FileEncoder::create_staged(&spec, staged)?)
         }
         Destination::Writer(writer) => {
             check_planned(&spec, wave.len())?;
@@ -82,11 +82,11 @@ pub fn write_wave<'a, S: Sample>(
     }
 }
 
-/// Feeds `wave` to `encoder` in chunks and finishes it.
-fn write_all<S: Sample, W: Write + Seek + Send + 'static>(
+/// Feeds `wave` to `write` in chunks.
+fn feed<S: Sample>(
     wave: &Wave<S>,
-    mut encoder: Encoder<W>,
-) -> Result<W> {
+    mut write: impl FnMut(Interleaved<'_, f32>) -> Result<()>,
+) -> Result<()> {
     let layout = wave.layout();
     let mut rest = wave.planes();
     let mut chunk = vec![0.0f32; layout.interleaved_len(Samples::new(WRITE_CHUNK))];
@@ -95,9 +95,24 @@ fn write_all<S: Sample, W: Write + Seek + Send + 'static>(
         let len = layout.interleaved_len(head.frames());
         let mut out = InterleavedMut::new(&mut chunk[..len], layout)?;
         interleave(head, out.reborrow())?;
-        encoder.write(out.as_interleaved())?;
+        write(out.as_interleaved())?;
         rest = tail;
     }
+    Ok(())
+}
+
+/// Feeds `wave` to a plain-sink `encoder` and finishes it.
+fn write_all<S: Sample, W: Write + Seek + Send + 'static>(
+    wave: &Wave<S>,
+    mut encoder: Encoder<W>,
+) -> Result<W> {
+    feed(wave, |block| encoder.write(block))?;
+    encoder.finish()
+}
+
+/// Feeds `wave` to a file `encoder` and finishes it, putting the file in place.
+fn write_file<S: Sample>(wave: &Wave<S>, mut encoder: FileEncoder) -> Result<()> {
+    feed(wave, |block| encoder.write(block))?;
     encoder.finish()
 }
 

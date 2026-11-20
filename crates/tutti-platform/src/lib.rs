@@ -29,8 +29,8 @@
 //!   path's carries its [`Stamp`]). [`Destination`] is where one write goes: a
 //!   path, written staged and replacing by default (or refusing an existing file
 //!   with [`create_new`](Destination::create_new)), or a borrowed writer;
-//!   [`Staged`] is the temporary beside a path that a destination writes
-//!   through, committed by rename. The path implementations fail at `open` on
+//!   [`Staged`] opens the temporary beside a path that a destination writes
+//!   through, a [`StagedFile`] that syncs, closes and renames on `commit`. The path implementations fail at `open` on
 //!   the web.
 //! - [`with_no_denormals`] — runs a closure with subnormals flushed to zero and
 //!   restores the mode after, unwinding included.
@@ -71,7 +71,7 @@ mod priority;
 mod sleep;
 mod thread;
 
-pub use asset::{Asset, Destination, Identity, Open, ReadSeek, Staged, Stamp};
+pub use asset::{Asset, Destination, Identity, Open, ReadSeek, Staged, StagedFile, Stamp};
 pub use clock::monotonic_ns;
 pub use denormals::with_no_denormals;
 pub use executor::Executor;

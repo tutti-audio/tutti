@@ -70,7 +70,7 @@ fn a_file_appears_at_its_path_only_when_finished() {
         let path = dir.path().join(format!("take.{ext}"));
         std::fs::write(&path, b"previous").unwrap();
         let spec = spec(format, 2);
-        let mut encoder = Encoder::create_file(&spec, &path).unwrap();
+        let mut encoder = FileEncoder::create(&spec, &path).unwrap();
         encoder
             .write(Interleaved::new(&saw(2, 5_000), spec.layout()).unwrap())
             .unwrap();
@@ -101,13 +101,13 @@ fn an_aborted_encoder_removes_its_file_and_leaves_the_path_alone() {
         std::fs::write(&path, b"previous").unwrap();
         let spec = spec(format, 2);
 
-        let mut encoder = Encoder::create_file(&spec, &path).unwrap();
+        let mut encoder = FileEncoder::create(&spec, &path).unwrap();
         encoder
             .write(Interleaved::new(&saw(2, 5_000), spec.layout()).unwrap())
             .unwrap();
         encoder.abort();
 
-        let mut dropped = Encoder::create_file(&spec, &path).unwrap();
+        let mut dropped = FileEncoder::create(&spec, &path).unwrap();
         dropped
             .write(Interleaved::new(&saw(2, 5_000), spec.layout()).unwrap())
             .unwrap();
@@ -128,7 +128,7 @@ fn a_refused_block_leaves_nothing_behind_once_dropped() {
     for (ext, format) in formats() {
         let path = dir.path().join(format!("take.{ext}"));
         let spec = spec(format, 2);
-        let mut encoder = Encoder::create_file(&spec, &path).unwrap();
+        let mut encoder = FileEncoder::create(&spec, &path).unwrap();
         let err = encoder
             .write(Interleaved::new(&saw(1, 100), ChannelLayout::MONO).unwrap())
             .expect_err("a mono block is not stereo");
@@ -156,13 +156,13 @@ fn a_spec_that_cannot_be_written_is_refused_without_a_file() {
     for (ext, format) in formats() {
         let path = dir.path().join(format!("take.{ext}"));
         let zero_width = spec(format, 0);
-        let err = Encoder::create_file(&zero_width, &path).expect_err("no channels");
+        let err = FileEncoder::create(&zero_width, &path).expect_err("no channels");
         assert!(
             matches!(err, Error::Spec(SpecError::ZeroChannels)),
             "{ext}: {err}"
         );
         let zero_rate = at_rate(format, 0.4);
-        let err = Encoder::create_file(&zero_rate, &path).expect_err("no rate");
+        let err = FileEncoder::create(&zero_rate, &path).expect_err("no rate");
         assert!(
             matches!(err, Error::Spec(SpecError::SampleRate(_))),
             "{ext}: {err}"
@@ -259,6 +259,7 @@ fn an_encoder_can_move_to_another_thread() {
     fn is_send<T: Send>() {}
     is_send::<Encoder<Cursor<Vec<u8>>>>();
     is_send::<Encoder<std::io::BufWriter<std::fs::File>>>();
+    is_send::<FileEncoder>();
 }
 
 /// A WAV file that outgrows its limit mid-take (after the up-front check
@@ -274,7 +275,7 @@ fn a_file_that_crosses_its_limit_is_never_put_in_place() {
     let spec = spec(Format::Wav(crate::Pcm::Int16), 2);
 
     // Dropped after the failed write: nothing left.
-    let mut encoder = Encoder::create_file(&spec, &path).unwrap().limit_frames(6);
+    let mut encoder = FileEncoder::create(&spec, &path).unwrap().limit_frames(6);
     let err = encoder
         .write(Interleaved::new(&saw(2, 8), spec.layout()).unwrap())
         .expect_err("8 frames cross a limit of 6");
@@ -287,7 +288,7 @@ fn a_file_that_crosses_its_limit_is_never_put_in_place() {
     assert_eq!(listing(dir.path()), ["take.wav"]);
 
     // Finished after the failed write: the first error, nothing put in place.
-    let mut encoder = Encoder::create_file(&spec, &path).unwrap().limit_frames(6);
+    let mut encoder = FileEncoder::create(&spec, &path).unwrap().limit_frames(6);
     let first = encoder
         .write(Interleaved::new(&saw(2, 8), spec.layout()).unwrap())
         .unwrap_err();
@@ -310,7 +311,7 @@ fn a_planned_length_past_the_limit_is_refused_before_the_file_exists() {
     let spec = spec(format, 2);
     let limit = format.max_frames(spec.layout()).unwrap();
 
-    let err = Encoder::create_file_planned(&spec, &path, Samples::new(limit as usize + 1))
+    let err = FileEncoder::create_planned(&spec, &path, Samples::new(limit as usize + 1))
         .map(drop)
         .expect_err("one frame past the limit");
     assert!(
@@ -320,7 +321,7 @@ fn a_planned_length_past_the_limit_is_refused_before_the_file_exists() {
     assert_eq!(std::fs::read(&path).unwrap(), b"previous");
     assert_eq!(listing(dir.path()), ["take.wav"], "no temporary was made");
 
-    Encoder::create_file_planned(&spec, &path, Samples::new(limit as usize))
+    FileEncoder::create_planned(&spec, &path, Samples::new(limit as usize))
         .expect("the limit itself fits");
 }
 
@@ -401,7 +402,7 @@ fn a_finalized_file_waits_for_its_commit() {
         let spec = spec(format, 2);
 
         let write = |path: &std::path::Path| {
-            let mut encoder = Encoder::create_file(&spec, path).unwrap();
+            let mut encoder = FileEncoder::create(&spec, path).unwrap();
             encoder
                 .write(Interleaved::new(&saw(2, 5_000), spec.layout()).unwrap())
                 .unwrap();
@@ -438,7 +439,7 @@ fn a_commit_that_cannot_rename_removes_the_temporary() {
     for (ext, format) in formats() {
         let path = dir.path().join(format!("take.{ext}"));
         let spec = spec(format, 2);
-        let mut encoder = Encoder::create_file(&spec, &path).unwrap();
+        let mut encoder = FileEncoder::create(&spec, &path).unwrap();
         encoder
             .write(Interleaved::new(&saw(2, 5_000), spec.layout()).unwrap())
             .unwrap();

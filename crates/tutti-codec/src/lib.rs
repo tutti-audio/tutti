@@ -14,9 +14,10 @@
 //!   which is also the width) and the rate. `Spec::of_width` takes a width and
 //!   states the engine's order for it.
 //! - `Encoder` is `create(spec, sink)`, a fallible `write(block)` and `finish()`.
-//!   `Encoder::create_file` writes beside the path and moves the file into place
-//!   on `finish`; dropping the encoder first removes it, and so does `finish` after a
-//!   failed `write`.
+//!   `FileEncoder::create` writes beside the path and moves the file into place
+//!   on `finish` (which returns `()`: the file is synced and closed first, so
+//!   nothing holds it open); dropping the encoder first removes it, and so does
+//!   `finish` after a failed `write`.
 //! - `FileOut` is the file sink, `FileIn`'s mirror: a `Sink` over an
 //!   `Encoder`, created from a `Spec` and a path, for any `Format` the build can
 //!   write. It keeps whole frames only, keeps the first write error (later
@@ -90,7 +91,7 @@ pub use aiff::AiffWriter;
 pub use decode::{FileIn, WaveMetadata, read_wave, read_wave_metadata};
 pub use decode::{can_decode, decodable_extensions};
 pub use decode_error::DecodeError;
-pub use encoder::{Encoder, Finalized};
+pub use encoder::{Encoder, FileEncoder, Finalized, FinalizedFile};
 pub use error::{Codec, Error, Result, SpecError};
 pub use file_out::FileOut;
 #[cfg(feature = "encode-flac")]

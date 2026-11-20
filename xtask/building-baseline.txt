@@ -57,8 +57,8 @@ tutti-clap-host  setter  crates/tutti-clap-host/src/instance/thread_pool.rs::Cla
 # tutti-codec
 tutti-codec  ctor-result  crates/tutti-codec/src/aiff.rs::AiffWriter::create
 tutti-codec  ctor-result  crates/tutti-codec/src/encoder.rs::Encoder::create
-tutti-codec  ctor-result  crates/tutti-codec/src/encoder.rs::Encoder::create_file
-tutti-codec  ctor-result  crates/tutti-codec/src/encoder.rs::Encoder::create_file_planned
+tutti-codec  ctor-result  crates/tutti-codec/src/encoder.rs::FileEncoder::create
+tutti-codec  ctor-result  crates/tutti-codec/src/encoder.rs::FileEncoder::create_planned
 tutti-codec  ctor-result  crates/tutti-codec/src/file_out.rs::FileOut::create
 tutti-codec  ctor-result  crates/tutti-codec/src/flac.rs::FlacWriter::create
 tutti-codec  ctor-result  crates/tutti-codec/src/format.rs::Format::from_extension
