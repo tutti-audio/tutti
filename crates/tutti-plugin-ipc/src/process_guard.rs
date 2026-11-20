@@ -121,12 +121,16 @@ impl ProcessGuard {
         let wait = process.exit_wait();
         let process = Arc::new(Mutex::new(Some(process)));
         let flow = Arc::new(ExitFlow::default());
-        let exit = executor.spawn_dedicated("plugin-exit", None, {
-            let process = Arc::clone(&process);
-            let watch = Arc::clone(&watch);
-            let flow = Arc::clone(&flow);
-            async move { declare_exit(&process, &wait, &watch, &flow) }
-        })?;
+        let exit = executor.spawn_dedicated(
+            "plugin-exit",
+            None,
+            exit_task(
+                Arc::clone(&process),
+                wait,
+                Arc::clone(&watch),
+                Finish(Arc::clone(&flow)),
+            ),
+        )?;
         Ok(Self {
             launched: Some(Launched {
                 process,
@@ -307,6 +311,17 @@ fn pause(slice: Duration) {
     sleep_until_ns(monotonic_ns().saturating_add(nanos));
 }
 
+/// The exit task's future. `finish` is held by the future from its creation,
+/// so a future dropped before its first poll raises the latch as well.
+fn exit_task(
+    process: Arc<Mutex<Option<Reaped>>>,
+    wait: ExitWait,
+    watch: Arc<ServerWatch>,
+    finish: Finish,
+) -> impl std::future::Future<Output = ()> + Send + 'static {
+    async move { declare_exit(&process, &wait, &watch, finish) }
+}
+
 /// The exit task: declares the process's end to `watch`. It waits on the OS in
 /// slices until the process has ended (and then reads its status), or `flow`
 /// says stop, and sets `flow`'s `done` as it ends.
@@ -314,9 +329,9 @@ fn declare_exit(
     process: &Mutex<Option<Reaped>>,
     wait: &ExitWait,
     watch: &ServerWatch,
-    flow: &Arc<ExitFlow>,
+    finish: Finish,
 ) {
-    let _finish = Finish(Arc::clone(flow));
+    let flow = Arc::clone(&finish.0);
     while !flow.stop.load(Ordering::Acquire) {
         if !wait.wait(EXIT_SLICE, pause) {
             continue;
@@ -482,6 +497,28 @@ mod tests {
             reaped_by(&launched.flow, &launched.process, HANG_GUARD),
             "the killed server is reaped by the exit task"
         );
+    }
+
+    /// **An exit task dropped before its first poll still raises the latch**,
+    /// so a drop that waits for the task's end never waits for one that never ran.
+    #[test]
+    fn an_exit_task_dropped_unpolled_raises_its_latch() {
+        let mut child = sleeper().spawn().expect("sleep spawns");
+        let wait = ExitWait::of(&child);
+        let flow = Arc::new(ExitFlow::default());
+        let task = exit_task(
+            Arc::new(Mutex::new(None)),
+            wait,
+            Arc::new(ServerWatch::new()),
+            Finish(Arc::clone(&flow)),
+        );
+        assert!(!flow.done.load(Ordering::Acquire));
+
+        drop(task);
+
+        assert!(flow.wait_done(HANG_GUARD), "the latch was never raised");
+        child.kill().expect("the sleeper is killed");
+        child.wait().expect("reaped");
     }
 
     /// **A reap that cannot be started leaves the child**: the child is killed
