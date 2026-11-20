@@ -113,6 +113,7 @@ pub struct FileTarget {
     pub(crate) resample: Option<Resample>,
     pub(crate) dither: Option<DitherShape>,
     pub(crate) normalize: Option<NormalizeSpec>,
+    create_new: bool,
 }
 
 impl FileTarget {
@@ -128,6 +129,7 @@ impl FileTarget {
             resample: None,
             dither: Some(DitherShape::Triangular),
             normalize: None,
+            create_new: false,
         }
     }
 
@@ -171,6 +173,23 @@ impl FileTarget {
     pub fn normalize(mut self, normalize: Option<NormalizeSpec>) -> Self {
         self.normalize = normalize;
         self
+    }
+
+    /// Refuses a path that already exists instead of replacing it. The file is
+    /// still written beside the path; the refusal is the commit's, which fails
+    /// with a [`tutti_codec::Error::Commit`] of kind `AlreadyExists`, leaves
+    /// what is at the path alone and keeps the complete file at the error's
+    /// `kept` path for the caller.
+    #[must_use]
+    pub fn create_new(mut self) -> Self {
+        self.create_new = true;
+        self
+    }
+
+    /// Whether an existing path is refused ([`create_new`](Self::create_new)).
+    #[must_use]
+    pub(crate) fn refuses_existing(&self) -> bool {
+        self.create_new
     }
 
     /// Where the file lands.

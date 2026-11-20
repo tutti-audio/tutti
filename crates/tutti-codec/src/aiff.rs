@@ -14,7 +14,7 @@ use crate::pcm::Pcm;
 use crate::spec::Spec;
 use crate::writer::FormatWriter;
 use aifc::{AifcWriteInfo, AifcWriter, FileFormat, SampleFormat};
-use std::io::{Seek, Write};
+use std::io::{Read, Seek, SeekFrom, Write};
 use tutti_buffers::{I24, Interleaved, Sample};
 
 /// Writes an AIFF (or AIFF-C) file through the [`FormatWriter`] contract.
@@ -119,4 +119,66 @@ impl<W: Write + Seek> FormatWriter for AiffWriter<W> {
             .map_err(|e| Error::encoding(Codec::Aiff, format!("finalization failed: {e:?}")))?;
         Ok(self.writer.into_inner())
     }
+}
+
+/// Makes the unfinished AIFF `file`, whose samples are `block_align` bytes a
+/// frame, a readable one: the chunks are walked from the start, and the COMM
+/// frame count, the SSND size and the FORM size are written for the whole
+/// frames the file holds on disk; a torn last frame is cut off.
+///
+/// The sizes `aifc` writes at `finalize` are its own; this writes the same
+/// fields from the file's length.
+pub(crate) fn patch_unfinished(file: &mut std::fs::File, block_align: u64) -> std::io::Result<()> {
+    let len = file.metadata()?.len();
+    let (mut comm, mut ssnd) = (None, None);
+    let mut at = 12u64;
+    while at + 8 <= len && ssnd.is_none() {
+        let mut head = [0u8; 8];
+        file.seek(SeekFrom::Start(at))?;
+        file.read_exact(&mut head)?;
+        let size = u64::from(u32::from_be_bytes([head[4], head[5], head[6], head[7]]));
+        match &head[..4] {
+            b"COMM" => comm = Some(at + 8),
+            b"SSND" => ssnd = Some(at),
+            _ => {}
+        }
+        at += 8 + size + (size & 1);
+    }
+    let (Some(comm), Some(ssnd)) = (comm, ssnd) else {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "no COMM and SSND chunks to patch",
+        ));
+    };
+    // The SSND chunk's offset and block size fields precede its samples, and
+    // `offset` bytes more come before the first frame.
+    let mut offset = [0u8; 4];
+    file.seek(SeekFrom::Start(ssnd + 8))?;
+    file.read_exact(&mut offset)?;
+    let offset = u64::from(u32::from_be_bytes(offset));
+    let first = ssnd + 16 + offset;
+    let frames = len.saturating_sub(first) / block_align;
+    let end = first + frames * block_align;
+    let size = |value: u64| {
+        u32::try_from(value).map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "a size past what AIFF's 32-bit fields hold",
+            )
+        })
+    };
+    let (form, count, chunk) = (
+        size(end - 8)?,
+        size(frames)?,
+        size(8 + offset + frames * block_align)?,
+    );
+    let put = |file: &mut std::fs::File, at: u64, value: u32| -> std::io::Result<()> {
+        file.seek(SeekFrom::Start(at))?;
+        file.write_all(&value.to_be_bytes())
+    };
+    put(file, 4, form)?;
+    put(file, comm + 2, count)?;
+    put(file, ssnd + 4, chunk)?;
+    file.set_len(end)?;
+    file.sync_all()
 }

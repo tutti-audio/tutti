@@ -1,7 +1,7 @@
 use super::*;
 use crate::test_sink::Full;
 use crate::{Error, SpecError};
-use std::io::Cursor;
+use std::io::{Cursor, Seek, Write};
 use tutti_units::SampleRate;
 
 /// Every format this build writes, at 16 bits where it has a width, with the
@@ -462,4 +462,208 @@ fn a_commit_that_cannot_rename_keeps_the_file() {
         std::fs::remove_file(e.kept()).unwrap();
         std::fs::remove_dir(&path).unwrap();
     }
+}
+
+/// Writes `frames` frames of the sawtooth as 32-bit float in `format`, then a
+/// block of the wrong width, which fails the encoder, and finishes keeping:
+/// returns the directory, what was kept, the samples written and the path.
+#[cfg(any(feature = "encode-wav", feature = "encode-aiff"))]
+fn kept_unfinished(
+    format: Format,
+    frames: usize,
+) -> (tempfile::TempDir, Unfinished, Vec<f32>, std::path::PathBuf) {
+    kept_unfinished_of(format, saw(2, frames))
+}
+
+/// As [`kept_unfinished`], for the interleaved stereo `samples`.
+#[cfg(any(feature = "encode-wav", feature = "encode-aiff"))]
+fn kept_unfinished_of(
+    format: Format,
+    samples: Vec<f32>,
+) -> (tempfile::TempDir, Unfinished, Vec<f32>, std::path::PathBuf) {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("take");
+    let spec = spec(format, 2);
+    let mut encoder = FileEncoder::create(&spec, &path).unwrap();
+    encoder
+        .write(Interleaved::new(&samples, spec.layout()).unwrap())
+        .unwrap();
+    let wrong = [0.0f32; 3];
+    assert!(
+        encoder
+            .write(Interleaved::new(&wrong, ChannelLayout::from(3u8)).unwrap())
+            .is_err()
+    );
+    let Err(Kept::Unfinished { unfinished, .. }) = encoder.finish_keeping() else {
+        panic!("not kept unfinished");
+    };
+    (dir, unfinished, samples, path)
+}
+
+/// **A WAV kept unfinished decodes to exactly the frames written**, with their
+/// values, and the path is untouched. A torn last frame (one stray byte
+/// appended) is cut off by the same patch.
+#[cfg(all(feature = "encode-wav", feature = "decode-wav"))]
+#[test]
+fn a_wav_kept_unfinished_holds_exactly_the_frames_written() {
+    let format = Format::Wav(crate::Pcm::Float32);
+    let (dir, kept, samples, path) = kept_unfinished(format, 5_000);
+    assert!(kept.header_describes_frames);
+    assert!(!path.exists(), "the path is untouched");
+    assert_eq!(listing(dir.path()).len(), 1, "only the kept file");
+    let wave = crate::read_wave::<f32>(&kept.path).unwrap();
+    let decoded: Vec<f32> = (0..5_000)
+        .flat_map(|i| (0..2).map(move |c| (c, i)))
+        .map(|(c, i)| wave.channel(c).samples()[i])
+        .collect();
+    assert_eq!(wave.len().get(), 5_000);
+    assert_eq!(decoded, samples);
+
+    let spec = spec(format, 2);
+    let mut file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&kept.path)
+        .unwrap();
+    file.seek(std::io::SeekFrom::End(0)).unwrap();
+    file.write_all(&[0x7F]).unwrap();
+    patch_header(&spec, &mut file).unwrap();
+    drop(file);
+    assert_eq!(
+        crate::read_wave::<f32>(&kept.path).unwrap().len().get(),
+        5_000
+    );
+}
+
+/// **An AIFF-C kept unfinished decodes to exactly the frames written**, with
+/// their values, read by the `aifc` reader (the codec has no AIFF decoder). A
+/// torn last frame (three stray bytes) is cut off by the same patch.
+#[cfg(feature = "encode-aiff")]
+#[test]
+fn an_aiff_kept_unfinished_holds_exactly_the_frames_written() {
+    let format = Format::Aiff(crate::Pcm::Float32);
+    let (_dir, kept, samples, path) = kept_unfinished(format, 5_000);
+    assert!(kept.header_describes_frames);
+    assert!(!path.exists(), "the path is untouched");
+    let read = |path: &std::path::Path| -> (u32, Vec<f32>) {
+        let mut reader = aifc::AifcReader::new(std::fs::File::open(path).unwrap()).unwrap();
+        let frames = reader.info().comm_num_sample_frames;
+        let values = reader
+            .samples()
+            .unwrap()
+            .map(|s| match s.unwrap() {
+                aifc::Sample::F32(v) => v,
+                other => panic!("not f32: {other:?}"),
+            })
+            .collect();
+        (frames, values)
+    };
+    assert_eq!(read(&kept.path), (5_000, samples.clone()));
+
+    let spec = spec(format, 2);
+    let mut file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&kept.path)
+        .unwrap();
+    file.seek(std::io::SeekFrom::End(0)).unwrap();
+    file.write_all(&[1, 2, 3]).unwrap();
+    patch_header(&spec, &mut file).unwrap();
+    drop(file);
+    assert_eq!(read(&kept.path), (5_000, samples));
+}
+
+/// **A file whose encoder failed is kept by `finish_keeping`, with the frames
+/// written before the failure, and the path is untouched.** The failure is a
+/// block of the wrong width, which every format refuses and the encoder
+/// reports at the close.
+#[cfg(all(feature = "encode-wav", feature = "decode-wav"))]
+#[test]
+fn a_failed_encoder_finishes_keeping_the_frames_written_before_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("take");
+    let spec = spec(Format::Wav(crate::Pcm::Float32), 2);
+    let mut encoder = FileEncoder::create(&spec, &path).unwrap();
+    encoder
+        .write(Interleaved::new(&saw(2, 3_000), spec.layout()).unwrap())
+        .unwrap();
+    let wrong = [0.0f32; 3];
+    assert!(
+        encoder
+            .write(Interleaved::new(&wrong, ChannelLayout::from(3u8)).unwrap())
+            .is_err()
+    );
+    let Err(Kept::Unfinished { source, unfinished }) = encoder.finish_keeping() else {
+        panic!("not kept unfinished");
+    };
+    assert!(matches!(source, Error::BlockWidth { .. }), "{source:?}");
+    assert!(unfinished.header_describes_frames);
+    assert!(!path.exists(), "the path is untouched");
+    assert_eq!(listing(dir.path()).len(), 1, "only the kept file");
+    let wave = crate::read_wave::<f32>(&unfinished.path).unwrap();
+    assert_eq!(wave.len().get(), 3_000);
+}
+
+/// **`finish_keeping` of a whole file puts it in place and leaves nothing
+/// beside it**: the keeper it sets is released.
+#[test]
+fn finish_keeping_a_whole_file_commits_it_and_leaves_no_temporary() {
+    let dir = tempfile::tempdir().unwrap();
+    for (ext, format) in formats() {
+        let path = dir.path().join(format!("take.{ext}"));
+        let spec = spec(format, 2);
+        let mut encoder = FileEncoder::create(&spec, &path).unwrap();
+        encoder
+            .write(Interleaved::new(&saw(2, 2_000), spec.layout()).unwrap())
+            .unwrap();
+        encoder.finish_keeping().unwrap();
+        assert_eq!(listing(dir.path()), [format!("take.{ext}")], "{ext}");
+        std::fs::remove_file(&path).unwrap();
+    }
+}
+
+/// **A plain integer AIFF (no FVER chunk) kept unfinished decodes to exactly
+/// the frames written**, with their values, and a torn last frame (three stray
+/// bytes) is cut off by the same patch. The samples are whole 16-bit codes over
+/// 32768, so the read back codes are those written.
+#[cfg(feature = "encode-aiff")]
+#[test]
+fn an_integer_aiff_kept_unfinished_holds_exactly_the_frames_written() {
+    let format = Format::Aiff(crate::Pcm::Int16);
+    let codes: Vec<i16> = (0..10_000)
+        .map(|i| (i * 7 % 2_000 - 1_000) as i16)
+        .collect();
+    let samples: Vec<f32> = codes.iter().map(|&c| f32::from(c) / 32_768.0).collect();
+    let (_dir, kept, _, path) = kept_unfinished_of(format, samples);
+    assert!(kept.header_describes_frames);
+    assert!(!path.exists(), "the path is untouched");
+    let read = |path: &std::path::Path| -> (aifc::FileFormat, u32, Vec<i16>) {
+        let mut reader = aifc::AifcReader::new(std::fs::File::open(path).unwrap()).unwrap();
+        let info = reader.info();
+        let values = reader
+            .samples()
+            .unwrap()
+            .map(|s| match s.unwrap() {
+                aifc::Sample::I16(v) => v,
+                other => panic!("not i16: {other:?}"),
+            })
+            .collect();
+        (info.file_format, info.comm_num_sample_frames, values)
+    };
+    assert_eq!(
+        read(&kept.path),
+        (aifc::FileFormat::Aiff, 5_000, codes.clone())
+    );
+
+    let spec = spec(format, 2);
+    let mut file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&kept.path)
+        .unwrap();
+    file.seek(std::io::SeekFrom::End(0)).unwrap();
+    file.write_all(&[1, 2, 3]).unwrap();
+    patch_header(&spec, &mut file).unwrap();
+    drop(file);
+    assert_eq!(read(&kept.path), (aifc::FileFormat::Aiff, 5_000, codes));
 }
