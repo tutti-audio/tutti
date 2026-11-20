@@ -203,7 +203,7 @@ impl<F: Float + SimdLanes> Player<F> {
 
     /// Builds a player over `font` on the grid `render`.
     fn at(font: &Arc<SoundFont>, settings: Settings, render: Render) -> Result<Self> {
-        let polyphony = settings.polyphony();
+        let polyphony = settings.polyphony;
 
         let mut presets: HashMap<i32, usize> = HashMap::new();
         let mut min_preset_id = i32::MAX;
@@ -250,7 +250,7 @@ impl<F: Float + SimdLanes> Player<F> {
             channels,
             allocator: VoiceAllocator::new(voice_config(polyphony.voices())),
             voices: Voices::new(&render, polyphony.get()),
-            universal: UniversalReader::new(settings.group(), settings.device()),
+            universal: UniversalReader::new(settings.group, settings.device),
             master_applied: MasterGain::UNITY,
             block: std::array::from_fn(|_| vec![F::ZERO; render.block_len()]),
             block_heard: Heard::default(),
@@ -263,7 +263,7 @@ impl<F: Float + SimdLanes> Player<F> {
 
     /// The Group this player's sixteen channels are.
     pub(crate) fn group(&self) -> MidiGroup {
-        self.settings.group()
+        self.settings.group
     }
 
     /// The preset `channel` plays: its bank and program, else General MIDI's

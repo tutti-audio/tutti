@@ -32,7 +32,7 @@ fn font() -> Arc<SoundFont> {
 }
 
 fn unit() -> SoundFontUnit<f32> {
-    SoundFontUnit::new(font(), Settings::new()).expect("builds")
+    Settings::new().build(font()).expect("builds")
 }
 
 /// A clip playing middle C at `frame` into the unit, both at key 1 and 2,

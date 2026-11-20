@@ -21,11 +21,11 @@ use std::sync::Arc;
 use tutti_graph::NodeKey;
 use tutti_graph::{
     Editor, EventEdge, EventIn, EventOut, ForkMode, ForkTarget, Law, ParamKind, ParamRamp,
-    ParamSegment, Prepare,
+    ParamRange, ParamSegment, Prepare,
 };
 use tutti_graph::{OutPort, PortSource};
 use tutti_modulation::ControlProgram;
-use tutti_nodes::automation::{Breakpoint, ControlLaneNode, Curve, Trajectory};
+use tutti_nodes::automation::{Breakpoint, ControlLaneNode, Curve, ForeignLaneConfig, Trajectory};
 use tutti_timeline::{OfflineTimeline, OfflineTimelineConfig, render_graph};
 use tutti_units::{At, Beat, Frame, SampleRate, Samples};
 
@@ -65,12 +65,11 @@ fn automation_reaches_the_plugin_through_its_event_input() {
         .render_mode(render::TAG_ONLY)
         .gain_enabled(true);
     let probe = load_probe(SAMPLE_RATE);
-    let automation = ControlLaneNode::by_id(
+    let automation = ControlLaneNode::from(ForeignLaneConfig::new(
         GAIN,
         ControlProgram::from_curve(Arc::new(Constant(0.75))),
-        None,
-        (0.0, 1.0),
-    );
+        ParamRange::new(0.0, 1.0),
+    ));
     let prepare = Prepare::new(
         SampleRate::of(SAMPLE_RATE),
         MaxBlock::of(Samples::new(BLOCK)),
@@ -377,12 +376,11 @@ fn a_lane_drives_a_plugin_parameter_along_its_curve() {
     ));
     // 120 BPM at 48 kHz: 24 000 frames a beat, so frame 1500.
     env.add_breakpoint(Breakpoint::new(Beat::new(0.0625), Hz::new(0.75)));
-    let lane = ControlLaneNode::by_id(
+    let lane = ControlLaneNode::from(ForeignLaneConfig::new(
         GAIN,
         ControlProgram::from_curve(Arc::new(env.clone())),
-        None,
-        (0.0, 1.0),
-    );
+        ParamRange::new(0.0, 1.0),
+    ));
     let (out, latency) = render_gain(Some(lane), &[], 10);
     let beat = |f: usize| Beat::new(f as f64 / 24_000.0);
     follows(

@@ -6,7 +6,14 @@
 
 use std::num::NonZeroUsize;
 
+use std::sync::Arc;
+
+use crate::SoundFontUnit;
+use crate::player::Player;
+use tutti_buffers::Float;
+use tutti_dsp::SimdLanes;
 use tutti_midi_protocol::SysexDeviceId;
+use tutti_sf2::SoundFont;
 use tutti_ump::MidiGroup;
 
 /// The most voices a unit sounds at once: 1 to [`MAX`](Self::MAX).
@@ -90,26 +97,27 @@ impl From<Polyphony> for usize {
     }
 }
 
-/// What a [`SoundFontUnit`](crate::SoundFontUnit) is built with: start from
-/// [`new`](Self::new) and change what differs with the `with_*` methods.
+/// What a [`SoundFontUnit`] is built with: start from [`new`](Self::new), change what differs
+/// with [`polyphony`](Self::polyphony), [`group`](Self::group) and [`device`](Self::device), and
+/// finish with [`build`](Self::build), which makes the unit over a decoded SoundFont.
 ///
 /// The rate is not here: a unit renders at the rate its graph prepares it at.
 ///
-/// A unit plays one Group's sixteen channels ([`with_group`](Self::with_group),
-/// the first by default): a Group is a channel space of its own (M2-104 section
-/// 2.1.2, Appendix B.1), so another Group's messages are not this unit's.
+/// A unit plays one Group's sixteen channels ([`group`](Self::group), the first by default): a
+/// Group is a channel space of its own (M2-104 section 2.1.2, Appendix B.1), so another
+/// Group's messages are not this unit's.
 ///
 /// ```
 /// use tutti_soundfont::{Polyphony, Settings};
 ///
-/// let settings = Settings::new().with_polyphony(Polyphony::of(16));
-/// assert_eq!(settings.polyphony().get(), 16);
+/// let settings = Settings::new().polyphony(Polyphony::of(16));
+/// assert_ne!(settings, Settings::new());
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Settings {
-    polyphony: Polyphony,
-    group: MidiGroup,
-    device: SysexDeviceId,
+    pub(crate) polyphony: Polyphony,
+    pub(crate) group: MidiGroup,
+    pub(crate) device: SysexDeviceId,
 }
 
 impl Default for Settings {
@@ -131,14 +139,14 @@ impl Settings {
 
     /// These settings with `polyphony` voices at most sounding at once.
     #[must_use]
-    pub const fn with_polyphony(mut self, polyphony: Polyphony) -> Self {
+    pub const fn polyphony(mut self, polyphony: Polyphony) -> Self {
         self.polyphony = polyphony;
         self
     }
 
     /// These settings playing the channels of `group`, and no other Group's.
     #[must_use]
-    pub const fn with_group(mut self, group: MidiGroup) -> Self {
+    pub const fn group(mut self, group: MidiGroup) -> Self {
         self.group = group;
         self
     }
@@ -149,26 +157,27 @@ impl Settings {
     /// and Off). Master Volume and Balance keep what arrives on this id apart
     /// from what arrives on the all-call (M1 p.57).
     #[must_use]
-    pub const fn with_device(mut self, device: SysexDeviceId) -> Self {
+    pub const fn device(mut self, device: SysexDeviceId) -> Self {
         self.device = device;
         self
     }
 
-    /// The device id this unit answers to besides the all-call.
-    #[must_use]
-    pub const fn device(&self) -> SysexDeviceId {
-        self.device
-    }
-
-    /// The Group this unit plays.
-    #[must_use]
-    pub const fn group(&self) -> MidiGroup {
-        self.group
-    }
-
-    /// The most voices sounding at once.
-    #[must_use]
-    pub const fn polyphony(&self) -> Polyphony {
-        self.polyphony
+    /// A unit of float `F` over a decoded `SoundFont`, sharing it when given an `Arc` rather
+    /// than copying it.
+    ///
+    /// The unit renders at 44.1 kHz until its graph prepares it at the graph's rate ("The
+    /// rate" on [`SoundFontUnit`]). Allocates the voices and reads every zone of the font
+    /// once (for the tail), so call it off the audio thread.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoPlayablePreset`](crate::Error::NoPlayablePreset) for a font none of whose presets has a MIDI bank
+    /// and program.
+    pub fn build<F: Float + SimdLanes>(
+        self,
+        soundfont: impl Into<Arc<SoundFont>>,
+    ) -> crate::Result<SoundFontUnit<F>> {
+        let player = Player::new(&soundfont.into(), self)?;
+        Ok(SoundFontUnit::from_player(player, 0))
     }
 }

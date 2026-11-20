@@ -18,7 +18,7 @@
 
 use tutti_units::Samples;
 
-use crate::stft::error::{Result, StftError};
+use crate::stft::error::StftError;
 
 macro_rules! grid_newtype {
     ($(#[$m:meta])* $name:ident) => {
@@ -111,13 +111,17 @@ pub struct Grid<T> {
     bins: BinCount,
 }
 
-impl<T> Grid<T> {
-    /// Wraps `data` as a `frames × bins` grid.
-    ///
-    /// # Errors
-    /// Returns [`StftError::GridShapeMismatch`] unless
-    /// `data.len() == frames * bins`.
-    pub fn new(data: Vec<T>, frames: FrameCount, bins: BinCount) -> Result<Self> {
+/// Wraps `data` as a `frames × bins` grid.
+///
+/// The conversion depends on the data's length and the shape together: the length must be
+/// `frames * bins`.
+///
+/// # Errors
+/// Returns [`StftError::GridShapeMismatch`] unless `data.len() == frames * bins`.
+impl<T> TryFrom<(Vec<T>, FrameCount, BinCount)> for Grid<T> {
+    type Error = StftError;
+
+    fn try_from((data, frames, bins): (Vec<T>, FrameCount, BinCount)) -> Result<Self, StftError> {
         let expected = frames.get() * bins.get();
         if data.len() != expected {
             return Err(StftError::GridShapeMismatch {
@@ -128,7 +132,9 @@ impl<T> Grid<T> {
         }
         Ok(Self { data, frames, bins })
     }
+}
 
+impl<T> Grid<T> {
     /// A grid of `data` in this grid's shape. The caller derives `data` from
     /// this grid's own values, one for one; a length that differs is a bug in
     /// the caller, caught in debug builds.

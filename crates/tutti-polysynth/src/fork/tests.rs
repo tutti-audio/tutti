@@ -71,12 +71,12 @@ fn the_synth_forks_as_a_param_node() {
 #[test]
 fn a_fork_takes_the_authored_volume_at_the_fork() {
     let at = |before: f32, after: f32| {
-        let mut live = saw();
+        let live = saw();
         let source = ParamFork::new(&live);
         let set = source.params().clone();
         set.set(UnitParam::Volume, f64::from(before));
         // A modulation driver's composite in the live cell: not authored.
-        live.set_volume(tutti_units::Amplitude::new(f64::from(before) * 3.0));
+        set.set(UnitParam::Volume, f64::from(before) * 3.0);
         let fork = source.fork_node();
         set.set(UnitParam::Volume, f64::from(after));
         peak(fork, 4_096)

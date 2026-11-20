@@ -42,7 +42,7 @@
 //!
 //! let soundfont = SoundFont::open("piano.sf2")?;
 //!
-//! let mut unit = SoundFontUnit::<f32>::new(soundfont, Settings::new())?;
+//! let mut unit = Settings::new().build::<f32>(soundfont)?;
 //! unit.program_change(MidiChannel::FIRST, U7::of(0)); // channel 0 → program 0
 //!
 //! // Into the graph: no audio input, five outputs, one MIDI event input (wire a
@@ -204,10 +204,9 @@ pub use settings::{Polyphony, PolyphonyError, Settings};
 mod fork;
 mod node;
 
-use std::sync::Arc;
 use tutti_graph::{EventKind, SubBlocks};
 use tutti_midi_protocol::channel_voice;
-use tutti_sf2::{Preset, SoundFont};
+use tutti_sf2::Preset;
 use tutti_ump::{Attribute, MidiChannel, NoteNumber, NoteVelocity, U7, Ump, Voice2};
 use tutti_units::{SampleRate, Seconds, Tail};
 
@@ -239,7 +238,7 @@ pub const SYNTH_BLOCK_FRAMES: usize = Render::BLOCK;
 /// `tutti_nodes::FreeverbNode`) summed back with the dry pair by the graph's
 /// fan-in (the setup's fader holds all three as sources); `tutti-session`'s `Session::add_general_midi` wires all of
 /// that. A send with nothing to send is reported silent in the block's status
-/// (`Status::Masked`), and a unit with no voice sounding is `Status::Idle`. Build it with [`new`](Self::new), pick a preset with
+/// (`Status::Masked`), and a unit with no voice sounding is `Status::Idle`. Build it with [`Settings::build`](crate::Settings::build), pick a preset with
 /// [`select`](Self::select) (a preset's bank and program) or
 /// [`program_change`](Self::program_change), then insert it into a graph
 /// (it implements `tutti_graph::Node` and `tutti_graph::IntoNode`, with no
@@ -281,7 +280,7 @@ pub const SYNTH_BLOCK_FRAMES: usize = Render::BLOCK;
 /// use tutti_soundfont::{Settings, SoundFontUnit};
 ///
 /// let soundfont = SoundFont::open("piano.sf2")?;
-/// let mut unit = SoundFontUnit::<f32>::new(soundfont, Settings::new())?;
+/// let mut unit = Settings::new().build::<f32>(soundfont)?;
 /// unit.program_change(MidiChannel::FIRST, U7::of(0));
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
@@ -308,7 +307,7 @@ pub const SYNTH_BLOCK_FRAMES: usize = Render::BLOCK;
 /// # The rate
 ///
 /// A player's voices are built against a rate and cannot be re-rated in place.
-/// [`new`](Self::new) builds at 44.1 kHz; the node's `prepare` swaps in a
+/// [`Settings::build`](crate::Settings::build) builds at 44.1 kHz; the node's `prepare` swaps in a
 /// player at the graph's rate (control thread, keeping the presets and
 /// channel state), and a rate outside 16 to 192 kHz leaves it at its own. The
 /// rate is the graph's: nothing here names one.
@@ -342,23 +341,6 @@ impl<F: Float + SimdLanes> SoundFontUnit<F> {
             player,
             planes: std::array::from_fn(|_| vec![F::ZERO; buffers]),
         }
-    }
-
-    /// Creates a unit over a decoded `SoundFont`, sharing it when given an
-    /// `Arc` rather than copying it.
-    ///
-    /// The unit renders at 44.1 kHz until its graph prepares it at the graph's
-    /// rate ("The rate" on [`SoundFontUnit`]). Allocates the voices and reads
-    /// every zone of the font once (for the tail), so call it off the audio
-    /// thread.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::NoPlayablePreset`] for a font none of whose presets has
-    /// a MIDI bank and program.
-    pub fn new(soundfont: impl Into<Arc<SoundFont>>, settings: Settings) -> Result<Self> {
-        let player = Player::new(&soundfont.into(), settings)?;
-        Ok(Self::from_player(player, 0))
     }
 
     /// Returns the rate this unit renders at: its settings' rate at
@@ -489,13 +471,13 @@ impl<F: Float + SimdLanes> SoundFontUnit<F> {
     ///
     /// A MIDI 1.0 channel voice message is read as the MIDI 2.0 one it means
     /// ([`channel_voice`]), so the player reads one form. Only the unit's own
-    /// Group is read ([`Settings::with_group`]): a message in another Group
+    /// Group is read ([`Settings::group`]): a message in another Group
     /// addresses another channel space (M2-104 Appendix B.1), so it is not
     /// this unit's, whichever channel it names.
     ///
     /// The Group's System Exclusive is read too
     /// ([`Player::universal`](crate::player::Player)): a Universal message
-    /// addressed to this unit ([`Settings::with_device`]) or to all of them is
+    /// addressed to this unit ([`Settings::device`]) or to all of them is
     /// the note logic's. This is a sink, so a message that is neither (a clock,
     /// a manufacturer's sysex, one `decode` cannot frame) is unused, not an
     /// error.

@@ -24,7 +24,7 @@ pub enum PortamentoMode {
     /// overlap reach the same voice.
     LegatoOnly,
     /// No glide: every note starts at its own pitch. The default, and the value
-    /// that makes `set_target` snap rather than ramp.
+    /// that makes `retarget` snap rather than ramp.
     #[default]
     Off,
 }
@@ -161,7 +161,11 @@ pub struct Portamento {
 
 impl Portamento {
     /// A glider at rest on `at`.
-    pub fn new(config: PortamentoConfig, sample_rate: impl Into<SampleRate>, at: Hz) -> Self {
+    pub(crate) fn new(
+        config: PortamentoConfig,
+        sample_rate: impl Into<SampleRate>,
+        at: Hz,
+    ) -> Self {
         Self {
             config,
             glide: Glide::Idle {
@@ -172,7 +176,9 @@ impl Portamento {
         }
     }
 
-    pub fn set_target(&mut self, freq: impl Into<Hz>, is_legato: bool) {
+    /// Moves to `freq`: a glide from where it stands when the config's mode asks for one
+    /// (`is_legato` says the note overlaps the last), a jump otherwise.
+    pub(crate) fn retarget(&mut self, freq: impl Into<Hz>, is_legato: bool) {
         let freq = freq.into();
         let should_glide = match self.config.mode {
             PortamentoMode::Off => false,
@@ -219,7 +225,7 @@ impl Portamento {
     /// a glide the MIDI stream asked for (Portamento On/Off and Portamento
     /// Control, which `tutti-voicing` resolves to a source key and a time). A
     /// glide of no time, or between equal pitches, is a jump.
-    pub fn begin(&mut self, from: Hz, to: Hz, time: Seconds) {
+    pub(crate) fn begin(&mut self, from: Hz, to: Hz, time: Seconds) {
         let glide_samples = time.get() * self.sample_rate.get();
         self.glide = if from == to || glide_samples <= 0.0 {
             Glide::Idle {
@@ -240,7 +246,7 @@ impl Portamento {
     /// The glide's pitch over the pitch it is gliding to: what a voice multiplies
     /// its own pitch (a per-note tuning, the bend) by. 1 once it has arrived.
     #[inline]
-    pub fn ratio(&self) -> f64 {
+    pub(crate) fn ratio(&self) -> f64 {
         match self.glide {
             Glide::Idle { .. } => 1.0,
             Glide::Gliding { to, current, .. } => current / to,
@@ -250,7 +256,7 @@ impl Portamento {
     /// One frame of the glide: the reference [`advance`](Self::advance) is
     /// pinned against (`advance_is_that_many_ticks`).
     #[cfg(test)]
-    pub fn tick(&mut self) -> Hz {
+    pub(crate) fn tick(&mut self) -> Hz {
         match self.glide {
             Glide::Idle { target, .. } => target,
             Glide::Gliding {
@@ -275,7 +281,7 @@ impl Portamento {
     /// the pitch once, at the progress the last computing tick reached: the
     /// two logarithms and the exponential a tick evaluates are kept only by
     /// the tick after them, so the intermediate ones are dead work.
-    pub fn advance(&mut self, frames: usize) -> Hz {
+    pub(crate) fn advance(&mut self, frames: usize) -> Hz {
         let Glide::Gliding {
             from,
             to,
@@ -324,7 +330,7 @@ impl Portamento {
 
     /// The pitch the glide is at.
     #[inline]
-    pub fn current(&self) -> Hz {
+    pub(crate) fn current(&self) -> Hz {
         match self.glide {
             Glide::Idle { current, .. } | Glide::Gliding { current, .. } => current,
         }
@@ -340,11 +346,11 @@ impl Portamento {
     }
 
     #[inline]
-    pub fn is_gliding(&self) -> bool {
+    pub(crate) fn is_gliding(&self) -> bool {
         matches!(self.glide, Glide::Gliding { .. })
     }
 
-    pub fn reset(&mut self, freq: impl Into<Hz>) {
+    pub(crate) fn reset(&mut self, freq: impl Into<Hz>) {
         let freq = freq.into();
         self.glide = Glide::Idle {
             current: freq,
@@ -352,7 +358,7 @@ impl Portamento {
         };
     }
 
-    pub fn set_sample_rate(&mut self, sample_rate: impl Into<SampleRate>) {
+    pub(crate) fn prepare(&mut self, sample_rate: impl Into<SampleRate>) {
         self.sample_rate = sample_rate.into();
     }
 }

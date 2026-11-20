@@ -9,7 +9,7 @@ use crate::{AllocationStrategy, PortamentoConfig, Tuning, UnisonConfig, VoiceMod
 use tutti_midi_protocol::SysexDeviceId;
 use tutti_music::Adsr;
 use tutti_ump::MidiGroup;
-use tutti_units::{Depth, Hz, Normalized, Q, Resonance, Semitones};
+use tutti_units::{Amplitude, Depth, Hz, Normalized, Q, Resonance, Semitones};
 
 /// The waveform every sub-voice of every voice generates.
 ///
@@ -257,6 +257,12 @@ pub struct SynthConfig {
     /// Master Volume and Balance keep what arrives on this id apart from what
     /// arrives on the all-call (M1 p.57). Default [`SysexDeviceId::DEFAULT`].
     pub device: SysexDeviceId,
+    /// The master output gain the synth starts at, a linear [`Amplitude`]: `1.0` (the
+    /// default) is unity, `0.0` silence, and values above unity boost; a negative one
+    /// reads as 0. Applied once per block to the summed mix, not per voice. Once the synth
+    /// is in a graph its gain is its `ParamSet` entry, `Volume`, which a host writes and a
+    /// modulation lane takes as its knob.
+    pub volume: Amplitude,
 }
 
 impl SynthConfig {
@@ -280,6 +286,7 @@ impl Default for SynthConfig {
             filter_mod: FilterModConfig::default(),
             group: MidiGroup::FIRST,
             device: SysexDeviceId::DEFAULT,
+            volume: Amplitude::UNITY,
         }
     }
 }

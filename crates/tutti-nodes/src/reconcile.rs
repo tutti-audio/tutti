@@ -29,8 +29,10 @@ use tutti_modulation::{
 use tutti_rt::{Param, ParamCell};
 use tutti_units::{At, Depth, ParamAddr, ParamId};
 
-use crate::automation::{ControlLaneNode, LaneControls};
-use crate::signal::{EnvelopeFollowerNode, NoteEnvelopeNode};
+use crate::automation::{ControlLaneNode, ForeignLaneConfig, LaneControls, UnitLaneConfig};
+use crate::signal::{
+    EnvelopeFollowerConfig, EnvelopeFollowerNode, NoteEnvelopeConfig, NoteEnvelopeNode,
+};
 
 /// A `ModHost` resolves the host's modulation keys to graph nodes.
 ///
@@ -80,7 +82,7 @@ pub enum Target {
     /// plugin's): the event input of `node` the lane feeds, and the knob the
     /// lane's own cell starts at (the plugin's value as the host mirrors
     /// it). Later writes go through the lane's
-    /// [`LaneControls::set_value`] ([`Modulation::lane`]).
+    /// [`LaneControls::store`] ([`Modulation::lane`]).
     Foreign {
         /// The node hosting the parameter.
         node: NodeKey,
@@ -96,7 +98,7 @@ pub enum Target {
     /// ([`Editor::edge_gain_cell`]), as a native target's is the node's
     /// `Param`: the base the lane's offsets add to, in the gain's own units
     /// (`1.0` is unity), written by whoever sets the edge's gain
-    /// (`Editor::set_edge_gain`, [`LaneControls::set_value`]: one cell, so one
+    /// (`Editor::set_edge_gain`, [`LaneControls::store`]: one cell, so one
     /// writer). A route modulates around the base and its removal returns to
     /// it. The edge's entry is made when the target first resolves (an edge
     /// with none is a plain addend), and the lane is built once the commit
@@ -112,7 +114,7 @@ pub enum Target {
     /// `0..=1`). Its knob is the node's own mix cell
     /// ([`Editor::mix_cell`]), as an edge's is its gain cell: the base the
     /// lane's offsets add to, written by whoever sets the mix
-    /// ([`Editor::set_mix`], [`LaneControls::set_value`]: one cell, so one
+    /// ([`Editor::set_mix`], [`LaneControls::store`]: one cell, so one
     /// writer). A route modulates around the base and its removal returns to
     /// it. The lane is built once a commit has placed the node's unit.
     Mix {
@@ -976,16 +978,19 @@ impl Modulation {
             let replacing = rebuilt.contains(&source);
             match plan.decl.kind {
                 SignalKind::Follower { .. } => {
-                    let mut node = EnvelopeFollowerNode::from_decl(&plan.decl, plan.width)
-                        .expect("a follower's declaration");
+                    let mut node = EnvelopeFollowerNode::from(
+                        EnvelopeFollowerConfig::from_decl(plan.width, &plan.decl)
+                            .expect("a follower's declaration"),
+                    );
                     if replacing {
                         node = node.replacing();
                     }
                     editor.insert(plan.key, "envelope-follower", ForkByClone(node));
                 }
                 SignalKind::NoteEnvelope { .. } => {
-                    let mut node =
-                        NoteEnvelopeNode::from_decl(&plan.decl).expect("a note envelope's");
+                    let mut node = NoteEnvelopeNode::from(
+                        NoteEnvelopeConfig::from_decl(&plan.decl).expect("a note envelope's"),
+                    );
                     if replacing {
                         node = node.replacing();
                     }
@@ -1046,8 +1051,14 @@ impl Modulation {
                         .set_param_range(*at, ParamRange::new(min, max))
                         .expect("checked: a node, and compile refuses a NaN bound");
                     let cell = editor.param_range_cell(*at);
-                    let node =
-                        ControlLaneNode::for_unit(at.param, program.clone(), knob.clone(), cell);
+                    let mut config = UnitLaneConfig::new(at.param, program.clone());
+                    if let Some(knob) = knob.clone() {
+                        config = config.knob(knob);
+                    }
+                    if let Some(cell) = cell {
+                        config = config.range(cell);
+                    }
+                    let node = ControlLaneNode::from(config);
                     let controls = editor.insert(key, "control-lane", node).controls;
                     editor
                         .spec_mut()
@@ -1058,11 +1069,10 @@ impl Modulation {
                     editor
                         .set_edge_gain_range(*id, ParamRange::new(min, max))
                         .expect("checked: the edge, and compile refuses a NaN bound");
-                    let node = ControlLaneNode::for_unit(
-                        EdgeGain::ADDR,
-                        program.clone(),
-                        Some(knob.clone()),
-                        Some(range.clone()),
+                    let node = ControlLaneNode::from(
+                        UnitLaneConfig::new(EdgeGain::ADDR, program.clone())
+                            .knob(knob.clone())
+                            .range(range.clone()),
                     );
                     let controls = editor.insert(key, "control-lane", node).controls;
                     editor
@@ -1074,11 +1084,10 @@ impl Modulation {
                     editor
                         .set_param_range(*at, ParamRange::new(min, max))
                         .expect("checked: the node, and compile refuses a NaN bound");
-                    let node = ControlLaneNode::for_unit(
-                        NodeMix::ADDR,
-                        program.clone(),
-                        Some(knob.clone()),
-                        Some(range.clone()),
+                    let node = ControlLaneNode::from(
+                        UnitLaneConfig::new(NodeMix::ADDR, program.clone())
+                            .knob(knob.clone())
+                            .range(range.clone()),
                     );
                     let controls = editor.insert(key, "control-lane", node).controls;
                     editor
@@ -1087,7 +1096,12 @@ impl Modulation {
                     controls
                 }
                 Bind::Foreign { to, id, knob, .. } => {
-                    let node = ControlLaneNode::by_id(*id, program.clone(), *knob, (min, max));
+                    let mut config =
+                        ForeignLaneConfig::new(*id, program.clone(), ParamRange::new(min, max));
+                    if let Some(knob) = *knob {
+                        config = config.knob(knob);
+                    }
+                    let node = ControlLaneNode::from(config);
                     let controls = editor.insert(key, "control-lane", node).controls;
                     editor
                         .spec_mut()

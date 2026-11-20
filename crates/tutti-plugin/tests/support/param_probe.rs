@@ -13,12 +13,13 @@
 #![allow(dead_code)]
 
 use std::time::Duration;
+use tutti_graph::ParamRange;
 
 use tutti_platform::Instant;
 
 use tutti_clap_test_plugin::EXTRA_PARAM_BASE;
 use tutti_modulation::ControlProgram;
-use tutti_nodes::automation::{ControlLaneNode, LaneControls};
+use tutti_nodes::automation::{ControlLaneNode, ForeignLaneConfig, LaneControls};
 use tutti_plugin::PluginClient;
 use tutti_plugin_host::PluginHandle;
 use tutti_units::ParamId;
@@ -33,13 +34,11 @@ pub fn extra(i: usize) -> ParamId {
 /// A host's value for plugin parameter `id`: a foreign control lane whose
 /// knob is at `value`, in the plugin's normalisation (doc 014 §5). It sends
 /// its knob on its first block and whenever the knob moves
-/// (`LaneControls::set_value`), and again on `LaneControls::resync`.
+/// (`LaneControls::store`), and again on `LaneControls::resync`.
 pub fn knob(id: ParamId, value: f32) -> ControlLaneNode {
-    ControlLaneNode::by_id(
-        id,
-        ControlProgram::default(),
-        Some(f64::from(value)),
-        (0.0, 1.0),
+    ControlLaneNode::from(
+        ForeignLaneConfig::new(id, ControlProgram::default(), ParamRange::new(0.0, 1.0))
+            .knob(f64::from(value)),
     )
 }
 

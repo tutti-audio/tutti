@@ -150,7 +150,7 @@ impl EdgeGain {
     /// `UnitParam` kind is new), so the events that drive it name this one
     /// fixed address and are read by the lane they are wired to. A control
     /// lane for an edge is built with
-    /// `ControlLaneNode::for_unit(EdgeGain::ADDR, ..)`.
+    /// `UnitLaneConfig::new(EdgeGain::ADDR, ..)`.
     pub const ADDR: UnitAddr = UnitAddr::first(UnitParam::Volume);
 
     /// The range a new entry gets: finite, so `w * s` cannot meet infinity,
@@ -210,7 +210,7 @@ impl Hash for EdgeGain {
 /// The cell holds the base as an `f64` (an `AtomicF64`, the [`Amplitude`]'s own
 /// width, which is what a control lane's knob is). **The base is the lane's
 /// knob, and the cell is its one writer's**: [`Editor::set_edge_gain`] and a
-/// route's `LaneControls::set_value` store into the same cell, so a routed
+/// route's `LaneControls::store` writes into the same cell, so a routed
 /// modulation moves around the base and the base is what the gain returns to. The
 /// range is the param port's own cell ([`ParamRanges`] over the one address
 /// [`EdgeGain::ADDR`]), so the driven step clamps to it as a port does and a
