@@ -110,13 +110,6 @@ pub struct Session<K: AppKey = &'static str, C: Clock = Offline> {
     /// What modulation applied, and the session's own declarations.
     pub(crate) mods: crate::modulation::ModSession,
     /// The disk streamer and the streams the opens landed.
-    #[cfg_attr(
-        not(any(feature = "sampler", feature = "device")),
-        expect(
-            dead_code,
-            reason = "a stream open (feature `sampler`) and a device restart (feature `device`) read it"
-        )
-    )]
     pub(crate) sampler: SamplerPart<C::Float>,
     /// The output-device listing.
     pub(crate) devices: DevicePart,

@@ -1,27 +1,19 @@
-//! The streamer sleeps until a source rings its bell, one
-//! case per source (the table in [`bell`](super::bell)'s docs).
+//! The streamer awaits its bell until a source rings it, one case per source (the
+//! table in [`bell`](super::bell)'s docs).
 //!
-//! Every case starts the streamer with a **60 s backstop** and allows 10 s: a
-//! streamer that does what the test waits for inside the bound was rung, since
-//! nothing else would have woken it for a minute. Each case first waits until
-//! the thread is parked, so the unpark, and not a cycle that happened to be
-//! running, is what wakes it. The command source and shutdown are
-//! `thread.rs`'s tests.
+//! The streamer future has no timer: nothing but a ring wakes it, so a case that
+//! sees the streamer do what it waits for inside the bound was rung. The command
+//! source and shutdown are `thread.rs`'s tests.
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
-use tutti_platform::Instant;
+use tutti_platform::{Executor, Instant};
 
+use tutti_rt::Bells;
 use tutti_units::{SampleRate, Samples};
 
-use super::bell::Bell;
-use super::config::BufferConfig;
 use super::contained::constant_file;
-use super::decode::Seams;
 use super::status::StreamPhase;
-use super::thread::Built;
 use super::*;
 use crate::testing::wait_for_open_threaded;
 
@@ -31,17 +23,22 @@ use crate::testing::wait_for_open_threaded;
 const RATE: u32 = 4_000;
 const BOUND: Duration = Duration::from_secs(10);
 
-/// A threaded streamer whose backstop is 60 s, and its bell.
-fn parked_streamer(seams: Seams) -> (DiskStreamer<Running, f32>, Arc<Bell>) {
-    let built = Built::new(
-        256,
+/// What keeps the streamer's future alive: its bells, and the executor whose thread
+/// runs it (a dropped executor ends it).
+type Rig = (Bells, Executor);
+
+/// A streamer future on a threaded executor, and what keeps it going.
+fn streamer() -> (DiskStreamer<Running, f32>, Rig) {
+    let bells = Bells::new().expect("a tick thread");
+    let executor = Executor::threaded();
+    let streamer = DiskStreamer::start(
         SampleRate::of(f64::from(RATE)),
-        BufferConfig::default(),
-        seams,
+        DiskStreamerConfig::default(),
+        &executor,
+        &bells,
     )
-    .with_backstop(Duration::from_secs(60));
-    let bell = Arc::clone(&built.shared().bell);
-    (DiskStreamer::from_built(built).expect("starts"), bell)
+    .expect("starts");
+    (streamer, (bells, executor))
 }
 
 fn until(bound: Duration, mut done: impl FnMut() -> bool) -> bool {
@@ -55,39 +52,30 @@ fn until(bound: Duration, mut done: impl FnMut() -> bool) -> bool {
     done()
 }
 
-fn until_asleep(bell: &Bell) {
-    assert!(
-        until(BOUND, || bell.is_parked()),
-        "the streamer never went to sleep"
-    );
-}
-
-/// A stream on the long file, primed and the streamer asleep again, with the
-/// window it holds.
+/// A stream on the long file, primed, with the window it holds.
 fn primed(
     path: &Path,
 ) -> (
     DiskStreamer<Running, f32>,
-    Arc<Bell>,
+    Rig,
     Stream<f32>,
     StreamReader<f32>,
     u64,
 ) {
-    let (streamer, bell) = parked_streamer(Seams::default());
+    let (streamer, bells) = streamer();
     let (stream, reader) =
         wait_for_open_threaded(streamer.open(path, Placement::HEAD)).expect("opens");
     assert!(
         until(BOUND, || stream.status().phase != StreamPhase::Opening),
         "the stream never primed"
     );
-    until_asleep(&bell);
     let (from, to) = reader.ring.window();
     assert_eq!(from, 0);
     assert!(
         to < 160_000,
         "setup: the window must not hold the whole file"
     );
-    (streamer, bell, stream, reader, to)
+    (streamer, bells, stream, reader, to)
 }
 
 fn long_file(dir: &Path) -> PathBuf {
@@ -99,24 +87,23 @@ fn claim(reader: &mut StreamReader<f32>, play: u64) {
     drop(reader.block(Samples::new(play as usize), [none.clone(), none]));
 }
 
-/// **An open wakes a sleeping streamer**: the open's command rings, the
-/// streamer answers, well inside the backstop.
+/// **An open wakes an idle streamer**: the open's command rings, the streamer
+/// answers.
 #[test]
-fn an_open_wakes_a_sleeping_streamer() {
+fn an_open_wakes_an_idle_streamer() {
     let dir = tempfile::tempdir().expect("a temp dir");
     let path = long_file(dir.path());
-    let (streamer, bell) = parked_streamer(Seams::default());
-    until_asleep(&bell);
+    let (streamer, _bells) = streamer();
     let _ = wait_for_open_threaded(streamer.open(&path, Placement::HEAD)).expect("opens");
 }
 
-/// **A ring below its refill threshold wakes a sleeping streamer**: the
+/// **A ring below its refill threshold wakes an idle streamer**: the
 /// reader plays on inside its window until fewer than three quarters of the
 /// ring are ahead of it, and its block rings; the streamer extends the window.
 #[test]
-fn a_ring_below_threshold_wakes_a_sleeping_streamer() {
+fn a_ring_below_threshold_wakes_an_idle_streamer() {
     let dir = tempfile::tempdir().expect("a temp dir");
-    let (_streamer, _bell, _stream, mut reader, to) = primed(&long_file(dir.path()));
+    let (_streamer, _bells, _stream, mut reader, to) = primed(&long_file(dir.path()));
     claim(&mut reader, to / 2);
     assert!(
         until(BOUND, || reader.ring.window().1 > to),
@@ -124,13 +111,13 @@ fn a_ring_below_threshold_wakes_a_sleeping_streamer() {
     );
 }
 
-/// **A jump outside the window wakes a sleeping streamer**: the reader seeks
+/// **A jump outside the window wakes an idle streamer**: the reader seeks
 /// far past the window's end, and its block rings; the streamer moves the
 /// window to hold it.
 #[test]
-fn a_jump_outside_the_window_wakes_a_sleeping_streamer() {
+fn a_jump_outside_the_window_wakes_an_idle_streamer() {
     let dir = tempfile::tempdir().expect("a temp dir");
-    let (_streamer, _bell, _stream, mut reader, to) = primed(&long_file(dir.path()));
+    let (_streamer, _bells, _stream, mut reader, to) = primed(&long_file(dir.path()));
     let play = to + 40_001;
     claim(&mut reader, play);
     assert!(
@@ -142,75 +129,17 @@ fn a_jump_outside_the_window_wakes_a_sleeping_streamer() {
     );
 }
 
-/// What holds a decode open until the test releases it, and says when it got
-/// there.
-struct Gate {
-    entered: AtomicBool,
-    released: Mutex<bool>,
-    changed: Condvar,
-}
-
-impl Gate {
-    fn new() -> Arc<Self> {
-        Arc::new(Self {
-            entered: AtomicBool::new(false),
-            released: Mutex::new(false),
-            changed: Condvar::new(),
-        })
-    }
-
-    fn hook(self: &Arc<Self>) -> super::decode::DecodeHook {
-        let gate = Arc::clone(self);
-        Arc::new(move |_path| {
-            gate.entered.store(true, Ordering::SeqCst);
-            let held = gate.released.lock().unwrap();
-            let _ = gate
-                .changed
-                .wait_timeout_while(held, Duration::from_secs(30), |released| !*released)
-                .unwrap();
-        })
-    }
-
-    fn release(&self) {
-        *self.released.lock().unwrap() = true;
-        self.changed.notify_all();
-    }
-}
-
-/// **The decode lane's answer wakes a sleeping streamer**: the open of a file
-/// that cannot seek is handed to the lane, the streamer goes back to sleep with
-/// the decode held, and the lane's reply (a command on the streamer's own
-/// queue) rings it.
-#[test]
-fn a_decode_reply_wakes_a_sleeping_streamer() {
-    let dir = tempfile::tempdir().expect("a temp dir");
-    let path = super::contained::mp3(dir.path());
-    let gate = Gate::new();
-    let (streamer, bell) = parked_streamer(Seams {
-        decode_hook: Some(gate.hook()),
-        ..Seams::default()
-    });
-    let opening = streamer.open(&path, Placement::HEAD);
-    assert!(
-        until(BOUND, || gate.entered.load(Ordering::SeqCst)),
-        "the lane never started the decode"
-    );
-    until_asleep(&bell);
-    gate.release();
-    let _ = wait_for_open_threaded(opening).expect("opens");
-}
-
 /// **A voice's ring is allocation-free and wait-free on the audio thread**: a
 /// reader that asks for the streamer on every block (it alternates between a
 /// seek past the window and one back before it, so each block finds the ring
 /// wanting a refill) claims two thousand blocks inside `assert_no_alloc`, with
-/// the streamer thread parked on the bell for the first of them and running for
-/// the rest (so both the unpark and the already-awake path are taken). The
+/// the streamer idle for the first of them and running for the rest (so both the
+/// ring that wakes it and the ring of an awake one are taken). The
 /// allocator's trap covers frees too.
 #[test]
 fn a_voices_ring_is_allocation_free() {
     let dir = tempfile::tempdir().expect("a temp dir");
-    let (_streamer, _bell, _stream, mut reader, to) = primed(&long_file(dir.path()));
+    let (_streamer, _bells, _stream, mut reader, to) = primed(&long_file(dir.path()));
     let far = to + 40_001;
     assert_no_alloc::assert_no_alloc(|| {
         for i in 0..2_000 {

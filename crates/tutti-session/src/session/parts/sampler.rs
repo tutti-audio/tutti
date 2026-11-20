@@ -6,7 +6,8 @@
     expect(dead_code, reason = "a device restart (feature `device`) is the user")
 )]
 
-use tutti_rt::Mint;
+use tutti_platform::Executor;
+use tutti_rt::{Bells, Mint};
 use tutti_sampler::{DiskStreamer, DiskStreamerConfig, Running};
 use tutti_units::SampleRate;
 
@@ -28,9 +29,19 @@ pub(crate) struct SamplerPart<F: SessionFloat> {
 
 impl<F: SessionFloat> SamplerPart<F> {
     /// The part for a graph at `rate`, with a streamer when `streamer` is set.
-    pub(crate) fn new(streamer: bool, rate: SampleRate) -> crate::Result<Self> {
+    pub(crate) fn new(
+        streamer: bool,
+        rate: SampleRate,
+        executor: &Executor,
+        bells: &Bells,
+    ) -> crate::Result<Self> {
         let streamer = if streamer {
-            Some(DiskStreamer::start(rate, DiskStreamerConfig::default())?)
+            Some(DiskStreamer::start(
+                rate,
+                DiskStreamerConfig::default(),
+                executor,
+                bells,
+            )?)
         } else {
             None
         };
@@ -39,6 +50,14 @@ impl<F: SessionFloat> SamplerPart<F> {
             opens: Mint::new(),
             streams: Default::default(),
         })
+    }
+
+    /// The streamer's cycle for this update: it sweeps every ring's retired controls,
+    /// which no voice rings for.
+    pub(crate) fn wake(&self) {
+        if let Some(streamer) = &self.streamer {
+            streamer.wake();
+        }
     }
 
     /// Every open stream's ratio (file rate / session rate) is re-derived, so
