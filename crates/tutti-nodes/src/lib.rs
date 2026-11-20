@@ -31,7 +31,9 @@
 //!   gate read a typed `KeySource`, through an optional `KeyFilter`; the limiter reports its
 //!   lookahead as latency), and
 //!   `TransientShaperNode` (the attack and the sustain of a signal raised or lowered apart,
-//!   one linked gain from a fast and a slow envelope), and
+//!   one linked gain from a fast and a slow envelope), `LevellerNode` (a loudness leveller:
+//!   one linked gain moving the BS.1770 short-term loudness to a target, within a boost and a
+//!   cut and held under a gate), and
 //!   `MultibandCompressorNode` (2 to 4 bands, a linked
 //!   compressor per band of a Linkwitz-Riley crossover, a hand-written node over
 //!   `tutti_dsp::MultibandBank`). Every setting is an indexed param: a
@@ -212,7 +214,8 @@
 //! - Delay: [`DelayNode`] over `tutti_dsp::DelayBank`, built to a [`DelayLayout`], with
 //!   [`InterpolationMode`] and [`MaxDelay`].
 //! - Dynamics: [`CompressorNode`], [`GateNode`], [`LimiterNode`],
-//!   [`BrickwallLimiterNode`], [`TransientShaperNode`], and [`MultibandCompressorNode`] (2 to 4
+//!   [`BrickwallLimiterNode`], [`TransientShaperNode`], [`LevellerNode`] (made from a
+//!   [`LevellerConfig`], which can refuse a bus with no placement) and [`MultibandCompressorNode`] (2 to 4
 //!   bands over a Linkwitz-Riley crossover, every setting an indexed param: see
 //!   [`BAND_PARAMS`]) with its [`MultibandControls`].
 //! - Modulation effects: [`ModDelayNode`] (over `tutti_dsp::ModDelayBank`, its [`Sweep`] and
@@ -327,15 +330,16 @@ mod dynamics;
 pub use dynamics::{
     BAND_PARAMS, BrickwallKernel, BrickwallLimiterNode, BrickwallSet, CompressorKernel,
     CompressorNode, CompressorSet, DynamicEqConfig, DynamicEqKernel, DynamicEqNode, DynamicEqSet,
-    GateKernel, GateNode, GateSet, LimiterKernel, LimiterNode, LimiterSet, MultibandCompressorNode,
-    MultibandControls, TransientShaperConfig, TransientShaperKernel, TransientShaperNode,
-    TransientShaperSet,
+    GateKernel, GateNode, GateSet, LevellerConfig, LevellerKernel, LevellerNode, LevellerSet,
+    LimiterKernel, LimiterNode, LimiterSet, MultibandCompressorNode, MultibandControls,
+    TransientShaperConfig, TransientShaperKernel, TransientShaperNode, TransientShaperSet,
 };
 // The types in the dynamics nodes' constructors: the controls a node is built at, and the
 // key a compressor or a gate listens to.
 pub use tutti_dsp::{
-    CompressorControls, DynamicEqControls, DynamicMode, GateControls, KeyFilter, KeySource,
-    LimiterControls, Lookahead, PeakDetection, TransientControls,
+    ChannelWeightError, CompressorControls, DynamicEqControls, DynamicMode, GateControls,
+    KeyFilter, KeySource, LevellerControls, LimiterControls, Lookahead, PeakDetection,
+    TransientControls,
 };
 
 // Utilities: polarity, mid/side and stereo width.

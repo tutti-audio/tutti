@@ -29,7 +29,7 @@
 //!
 //! # Weighted by placement
 //!
-//! A config takes a [`ChannelTopology`], and each speaker's weight is read from
+//! A config takes a [`ChannelTopology`], and each speaker's weight ([`channel_weights`]) is read from
 //! where it stands (ITU-R BS.1770-5, Annex 3, Table 4): 1.41 when its elevation
 //! is under 30 degrees and its azimuth is within 60 to 120 degrees either side,
 //! else 1.0; the LFE adds no loudness (its peak still counts). The angles are the bed's own
@@ -45,7 +45,8 @@ use core::marker::PhantomData;
 use ebur128::{Channel, EbuR128, Mode};
 use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_buffers::{Interleaved, Sample};
-use tutti_units::{Amplitude, Db, Direction, SampleRate, Samples};
+use tutti_dsp::{ChannelWeight, ChannelWeightError, channel_weights};
+use tutti_units::{Amplitude, Db, SampleRate, Samples};
 
 use crate::convert::{BLOCK, Discard, all_finite, for_blocks, run_len};
 use crate::{Error, Measure, Meter, Result};
@@ -117,46 +118,22 @@ impl<S: Sample> Measure<S> for LoudnessConfig {
     }
 }
 
-/// BS.1770-5 Table 4's weight is 1.41 for a speaker in the horizontal band
-/// (elevation within 30 degrees, exclusive) and 60 to 120 degrees to either
-/// side, and 1.0 elsewhere. The label is one `ebur128` weighs the same: the
-/// surround labels carry 1.41 and the rest 1.0.
-fn label_at(direction: Direction) -> Channel {
-    let azimuth = direction.azimuth.get();
-    let beside = direction.elevation.get().abs() < 30.0 && (60.0..=120.0).contains(&azimuth.abs());
-    match (beside, azimuth) {
-        (true, a) if a > 0.0 => Channel::LeftSurround,
-        (true, _) => Channel::RightSurround,
-        (false, a) if a > 0.0 => Channel::Left,
-        (false, a) if a < 0.0 => Channel::Right,
-        (false, _) => Channel::Center,
-    }
-}
-
-/// The label of every channel of `topology`, in channel order: the LFE unused,
-/// every other speaker by [`label_at`] its bed's direction.
+/// The label of every channel of `topology`, in channel order: the one `ebur128` weighs as
+/// [`channel_weights`] does (the surround labels carry 1.41, the rest 1.0, the LFE is unused).
 fn channel_labels(topology: &ChannelTopology) -> Result<Box<[Channel]>> {
-    let speakers = topology.positions().ok_or(Error::AmbisonicLoudness)?;
-    let bed = topology.bed().ok_or(Error::UnplacedLoudnessChannels {
-        width: topology.width(),
+    let weights = channel_weights(topology).map_err(|e| match e {
+        ChannelWeightError::Ambisonic => Error::AmbisonicLoudness,
+        ChannelWeightError::Unplaced { width } => Error::UnplacedLoudnessChannels { width },
+        _ => Error::MeterUnavailable,
     })?;
-    speakers
+    Ok(weights
         .iter()
-        .map(|&speaker| {
-            if speaker.is_lfe() {
-                return Ok(Channel::Unused);
-            }
-            // A side/back counterpart stands for the bed's own spelling of it
-            // (`Bed::from_topology`).
-            let direction = bed
-                .direction(speaker)
-                .or_else(|| speaker.counterpart().and_then(|c| bed.direction(c)))
-                .ok_or(Error::UnplacedLoudnessChannels {
-                    width: topology.width(),
-                })?;
-            Ok(label_at(direction))
+        .map(|w| match w {
+            ChannelWeight::Silent => Channel::Unused,
+            ChannelWeight::Unity => Channel::Left,
+            ChannelWeight::Surround => Channel::LeftSurround,
         })
-        .collect()
+        .collect())
 }
 
 /// An EBU R128 reading.
