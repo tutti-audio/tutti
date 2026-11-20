@@ -10,7 +10,7 @@ use tutti_plugin_db::PluginEntry;
 use tutti_plugin_types::PluginFormat;
 use tutti_plugin_types::{PluginClass, PluginDescriptor, StateUse};
 use tutti_plugin_types::{PluginId, PluginRef};
-use tutti_session::{PeerState, RestoreError, SavedPeer, Session};
+use tutti_session::{PeerState, SavedPeer, Session, StateStartError};
 use tutti_units::Samples;
 
 /// The plugin a state names.
@@ -101,10 +101,9 @@ fn a_state_is_refused_by_another_plugin() {
         .expect("loads");
 
     let from_first = s
-        .plugin_view(first)
+        .save_state(&first, StateUse::Project)
         .unwrap()
-        .state()
-        .save(StateUse::Project)
+        .run(main)
         .expect("saves");
     // The catalog names a plugin by its file's canonical path.
     assert_eq!(
@@ -118,10 +117,9 @@ fn a_state_is_refused_by_another_plugin() {
         "in its own file"
     );
     let from_second = s
-        .plugin_view(second)
+        .save_state(&second, StateUse::Project)
         .unwrap()
-        .state()
-        .save(StateUse::Project)
+        .run(main)
         .expect("saves");
 
     // The entry's declaration. The key an entry is declared under is never
@@ -150,16 +148,19 @@ fn a_state_is_refused_by_another_plugin() {
     );
 
     // The hosted plugin.
-    let hosted = s.plugin_view(second).unwrap();
-    let refused = hosted
-        .state()
-        .restore(main, &from_first)
+    let refused = s
+        .restore_state(&second, from_first.clone())
         .expect_err("a hosted plugin refuses another's state");
-    assert!(matches!(refused, RestoreError::OtherPeer(_)), "{refused:?}");
-    hosted
-        .state()
-        .restore(main, &from_second)
-        .expect("and takes its own");
+    assert!(
+        matches!(refused, StateStartError::OtherPeer(_)),
+        "{refused:?}"
+    );
+    let restored = s
+        .restore_state(&second, from_second)
+        .expect("and takes its own")
+        .run(main)
+        .expect("the plugin takes it");
+    s.apply(restored).expect("the node hosts the plugin");
     assert_eq!(
         from_first.media_type().as_str(),
         "application/x-clap-state",
