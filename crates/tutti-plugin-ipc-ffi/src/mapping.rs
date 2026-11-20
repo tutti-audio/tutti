@@ -46,6 +46,8 @@
 //! The backing's platform is one module, chosen once below: what the memory is,
 //! how it travels, and what keeps it from outliving its last mapping.
 
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+compile_error!("the audio slab is supported on Linux, macOS and Windows only");
 #[cfg(target_os = "linux")]
 #[path = "mapping/linux.rs"]
 mod platform;
@@ -58,7 +60,7 @@ mod platform;
 
 use crate::SlabError;
 use crate::header::{SLAB_HEADER_BYTES, SlabHeader};
-use memmap2::MmapRaw;
+use memmap2::{MmapOptions, MmapRaw};
 pub use platform::{Connection, SlabWire};
 use std::fs::File;
 use std::sync::Arc;
@@ -155,7 +157,7 @@ impl MappingWriter {
     /// slab from a layout that always includes the header.
     pub fn create(size: usize) -> Result<(Self, SlabHandle), SlabError> {
         let (file, backing, slab) = platform::create(size)?;
-        let writer = Self::map(file, backing)?;
+        let writer = Self::map(file, backing, size)?;
         // Stamp before anyone can open it: the peer gets the handle only
         // after this returns, and `initialize` releases the magic last so an
         // opener that sees the magic sees a fully written header.
@@ -197,20 +199,25 @@ impl MappingWriter {
                 expected: size,
             });
         }
-        let writer = Self::map(file, backing)?;
+        let writer = Self::map(file, backing, size)?;
         writer.mapping.header().validate()?;
         Ok(writer)
     }
 
-    fn map(file: File, backing: platform::Backing) -> Result<Self, SlabError> {
+    fn map(file: File, backing: platform::Backing, size: usize) -> Result<Self, SlabError> {
         // The memory is sized once, in `create`, before any peer holds it. On
         // Linux a received descriptor is checked sealed against shrinking
         // before it is mapped (`verify`), so no process can fault this mapping
         // by truncating the memory. Where the platform has no seals, shrinking
         // is a fault of the peer holding the descriptor, as is scribbling on it
         // (the module's argument).
-        let map =
-            MmapRaw::map_raw(&file).map_err(|source| SlabError::File { op: "map", source })?;
+        // Exactly the layout's `size`, not the object's length: where the platform
+        // rounds an object up (macOS, to a page) the mapping still ends where the
+        // layout does.
+        let map = MmapOptions::new()
+            .len(size)
+            .map_raw(&file)
+            .map_err(|source| SlabError::File { op: "map", source })?;
         Ok(Self {
             mapping: Arc::new(SharedMapping::new(map, backing)),
         })

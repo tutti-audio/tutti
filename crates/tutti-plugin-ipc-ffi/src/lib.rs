@@ -113,6 +113,13 @@ pub enum SlabError {
     /// message was cut short: all that arrived is closed.
     #[error("more than one descriptor, or a cut control message, arrived with the slab")]
     ExtraDescriptors,
+    /// The byte that carries a slab's descriptor is not the mark: the stream is
+    /// out of step with the sender, and any descriptor that came is closed.
+    #[error("the slab's descriptor byte is {found:#x}, not the mark")]
+    BadMark {
+        /// The byte received.
+        found: u8,
+    },
     /// The OS failed or the peer closed while the slab's descriptor was received.
     #[error("failed to receive the slab's descriptor: {source}")]
     Transfer {

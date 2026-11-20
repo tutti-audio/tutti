@@ -86,6 +86,10 @@ pub(crate) fn recv(
     if got.bytes == 0 {
         return Err(transfer(std::io::ErrorKind::UnexpectedEof.into()));
     }
+    if byte[0] != MARK {
+        // Not the byte a descriptor rides on: the stream is out of step.
+        return Err(SlabError::BadMark { found: byte[0] });
+    }
     if got.flags.contains(ReturnFlags::CTRUNC) || fds.len() > 1 {
         return Err(SlabError::ExtraDescriptors);
     }
@@ -152,6 +156,33 @@ mod tests {
         let mut back = [0u8; 16];
         peer.mapping().read(SLAB_HEADER_BYTES, &mut back);
         assert_eq!(back, [9u8; 16]);
+    }
+
+    /// A byte that is not the descriptor's mark is refused by name, with its
+    /// descriptor closed: the stream is out of step with the sender.
+    #[test]
+    fn a_byte_that_is_not_the_mark_is_refused_and_its_descriptor_closed() {
+        let (a, b) = UnixStream::pair().unwrap();
+        let (x, _x) = UnixStream::pair().unwrap();
+        let fds = [x.as_fd()];
+        let mut space = [MaybeUninit::uninit(); rustix::cmsg_space!(ScmRights(1))];
+        let mut control = SendAncillaryBuffer::new(&mut space);
+        assert!(control.push(SendAncillaryMessage::ScmRights(&fds)));
+        sendmsg(
+            &a,
+            &[IoSlice::new(&[MARK ^ 1])],
+            &mut control,
+            SendFlags::empty(),
+        )
+        .unwrap();
+        let before = open_fds();
+        let err = recv(b.as_fd(), RecvFlags::empty(), Duration::from_secs(5))
+            .expect_err("the wrong byte");
+        assert!(
+            matches!(err, SlabError::BadMark { found } if found == MARK ^ 1),
+            "{err}"
+        );
+        assert_eq!(open_fds(), before, "the refused descriptor stayed open");
     }
 
     /// A byte with no descriptor beside it is refused by name.
