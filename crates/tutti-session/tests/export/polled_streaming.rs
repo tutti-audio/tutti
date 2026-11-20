@@ -1,10 +1,12 @@
-//! A session on a polled executor: its streamer and its jobs run inside `update`,
-//! so a stream opens, primes and bounces with no thread but the bells' tick.
+//! A session on an executor that `update` drives: its jobs run inside `update`, and its
+//! streamer on the thread of its own that `spawn_dedicated` gives it, so a stream opens,
+//! primes and bounces with no thread but those and the bells' tick.
 
 use std::path::Path;
+use std::time::Duration;
 
 use tutti_buffers::ChannelLayout;
-use tutti_platform::Executor;
+use tutti_platform::{Executor, Instant};
 use tutti_sampler::{Clip, Placement, StreamPhase};
 use tutti_session::{
     AudioEntry, Bounce, BounceLatency, BounceTail, PoolState, Range, Root, SamplerEvent,
@@ -44,7 +46,7 @@ fn write_ramp(path: &Path) {
 fn session() -> Session {
     Session::builder()
         .sample_rate(SampleRate::of(RATE))
-        .executor(Executor::polled())
+        .executor(Executor::new())
         .build()
         .expect("a session builds on a polled executor")
 }
@@ -62,9 +64,8 @@ fn updates_until_sampler(s: &mut Session) -> Option<SamplerEvent> {
     None
 }
 
-/// **An open stream is primed by updates.** Nothing runs between updates: the
-/// streamer answers the open inside one, the open's job lands inside a later one,
-/// and the ring is filled by then.
+/// **An open stream is primed.** The streamer answers the open on its own thread, the
+/// open's job lands inside a later update, and the ring fills.
 #[test]
 fn updates_prime_an_open_streams_ring() {
     let dir = tempfile::tempdir().expect("a temp dir");
@@ -78,10 +79,15 @@ fn updates_prime_an_open_streams_ring() {
         "{landed:?}"
     );
     let (stream, _reader) = s.take_stream(id).expect("the landed stream");
+    // A hang guard by deadline: the streamer's thread primes the ring on its own.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while stream.status().phase == StreamPhase::Opening && Instant::now() < deadline {
+        std::thread::park_timeout(Duration::from_millis(1));
+    }
     assert_ne!(
         stream.status().phase,
         StreamPhase::Opening,
-        "the ring is primed"
+        "the ring is never primed"
     );
 }
 
@@ -157,15 +163,15 @@ fn a_pool_load_runs_inside_update() {
 /// **A dropped session ends its streamer: the open stream's source is released.** The
 /// stream is opened from bytes the test also holds, so the source's reference count shows
 /// whether the streamer still holds the stream. The streamer's task waits on its bell;
-/// the session's drop wakes it, and the executor's next poll ends the task and drops the
-/// stream with its source.
+/// the session's drop wakes it, and its thread ends the task and drops the stream with its
+/// source.
 #[test]
 fn a_dropped_session_ends_its_streamer_and_releases_the_streams_source() {
     let dir = tempfile::tempdir().expect("a temp dir");
     let path = dir.path().join("ramp.wav");
     write_ramp(&path);
     let bytes: std::sync::Arc<[u8]> = std::fs::read(&path).expect("reads").into();
-    let executor = Executor::polled();
+    let executor = Executor::new();
     let mut s = Session::builder()
         .sample_rate(SampleRate::of(RATE))
         .executor(executor.clone())
@@ -184,14 +190,15 @@ fn a_dropped_session_ends_its_streamer_and_releases_the_streams_source() {
         "the open stream holds its source"
     );
     drop(s);
-    assert!(
-        std::sync::Arc::strong_count(&bytes) > 1,
-        "the streamer's task still holds the stream until it is polled"
-    );
-    executor.poll(usize::MAX);
+    // A hang guard by deadline: the streamer's thread is woken by the bell.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while std::sync::Arc::strong_count(&bytes) > 1 && Instant::now() < deadline {
+        std::thread::park_timeout(Duration::from_millis(1));
+    }
     assert_eq!(
         std::sync::Arc::strong_count(&bytes),
         1,
-        "the woken streamer ended and dropped the stream"
+        "the woken streamer never ended and dropped the stream"
     );
+    drop(executor);
 }

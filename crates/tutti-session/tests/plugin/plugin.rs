@@ -82,7 +82,7 @@ fn session_built(
     // The executor is polled: a job runs in the `Collect` that polls it and lands
     // there, in a deterministic order. A test that wants another executor says so
     // in `build`.
-    build(Session::builder().executor(tutti_platform::Executor::polled()))
+    build(Session::builder().executor(tutti_platform::Executor::new()))
         .sample_rate(RATE)
         .max_block(MaxBlock::of(Samples::new(BLOCK)))
         .build()
@@ -824,9 +824,8 @@ fn a_reload_completes_with_no_host_code_but_update() {
                 backoff: Duration::from_millis(1),
                 ..Default::default()
             })
-            // The threaded executor runs each job on a thread of its own pool:
-            // nothing here touches a job but to start it.
-            .executor(tutti_platform::Executor::threaded())
+            // The session's own threads run each job: nothing here touches a job but
+            // to start it.
         },
     );
     let (node, _) = wired_probe(&mut s);

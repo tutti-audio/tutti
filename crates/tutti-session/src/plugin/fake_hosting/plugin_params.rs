@@ -214,7 +214,7 @@ fn session_keyed() -> (DetachedSession, Key<AnyPlugin>, Arc<Fake>, RefreshSink) 
     )
     .with_refresh_sink(refresh.clone());
     let mut s = Session::builder()
-        .executor(tutti_platform::Executor::polled())
+        .executor(tutti_platform::Executor::new())
         .outputs_floor(ChannelLayout::STEREO)
         .build_detached(SampleRate::DEFAULT)
         .expect("a detached session builds");
@@ -806,15 +806,15 @@ fn a_read_only_parameter_is_refused() {
 /// refused third item lands nothing, and the same batch without it lands all.
 #[test]
 fn a_batch_over_plugin_and_native_params_lands_nothing_when_one_is_refused() {
-    use tutti_nodes::{SvfFilterNode, SvfType};
+    use tutti_nodes::{SvfFilterConfig, SvfFilterNode, SvfType};
     use tutti_units::Q;
 
     let (mut s, key, fake, _) = session_keyed();
     let _ = update(&mut s);
-    let (lp, _) = s.graph().add(SvfFilterNode::<f32>::new(
-        SvfType::LowPass,
-        Hz::new(800.0),
-        Q::new(0.707),
+    let (lp, _) = s.graph().add(SvfFilterNode::<f32>::from(
+        SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
+            .freq(Hz::new(800.0))
+            .q(Q::new(0.707)),
     ));
     s.commit();
 

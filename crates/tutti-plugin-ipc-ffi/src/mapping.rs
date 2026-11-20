@@ -58,8 +58,11 @@ mod platform;
 #[path = "mapping/windows.rs"]
 mod platform;
 
+mod blob;
+
 use crate::SlabError;
 use crate::header::{SLAB_HEADER_BYTES, SlabHeader};
+pub use blob::{Blob, BlobWire, Lease, Received};
 use memmap2::{MmapOptions, MmapRaw};
 pub use platform::{Connection, SlabWire};
 use std::fs::File;

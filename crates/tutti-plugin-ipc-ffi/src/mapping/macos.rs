@@ -3,7 +3,12 @@
 //!
 //! The object has a name only for the instant between `shm_open` and
 //! `shm_unlink`, so nothing opens it by name and nothing outlives its holders.
-//! It is memory, not a file the kernel writes back. There are no seals on this
+//! It is memory, not a file the kernel writes back. It supports neither `read` nor
+//! `write` (both are `ENXIO`), so a blob is written and read through a mapping,
+//! which is sound because XNU refuses a second `ftruncate` (the tests pin it): no
+//! holder can shrink the object under the mapping. A descriptor that is not a
+//! shared memory object is refused, a regular file included, because its holder
+//! could shrink it under the mapping. There are no seals on this
 //! platform; the object is sized by one `ftruncate`, and the tests pin that no
 //! later `ftruncate` is accepted.
 //!
@@ -24,6 +29,7 @@
 
 use crate::SlabError;
 use crate::descriptor::{self, duplicate, file_error};
+use memmap2::MmapOptions;
 use rustix::fs::{Mode, ftruncate};
 use rustix::io::{FdFlags, fcntl_setfd};
 use rustix::net::RecvFlags;
@@ -45,6 +51,10 @@ const DESCRIPTOR_PATIENCE: Duration = Duration::from_secs(2);
 pub(super) type Slab = OwnedFd;
 
 pub use crate::descriptor::{Connection, SlabWire};
+
+/// Whether the platform rounds an object's length up past what it was sized to
+/// (macOS, to a page): a blob's length is then checked as at least its declared one.
+pub(super) const ROUNDS_UP: bool = true;
 
 /// What the platform keeps beside the mapping: nothing.
 pub(super) type Backing = ();
@@ -94,10 +104,54 @@ pub(super) fn open(slab: &Slab) -> Result<(File, Backing), SlabError> {
     Ok((duplicate(slab)?, ()))
 }
 
-/// Nothing to check beyond the length the caller checks: this platform has no
-/// seals to look for.
-pub(super) fn verify(_: &File, _: usize) -> Result<(), SlabError> {
+/// Writes `bytes` at the start of the freshly made `file`, through a mapping:
+/// a shared memory object refuses `write` here. The mapping is sound because the
+/// object is sized once and XNU refuses a second `ftruncate`, so no holder can
+/// shrink it under the mapping. Nothing is mapped for no bytes (a zero-length
+/// `mmap` is `EINVAL`).
+pub(super) fn fill(file: &File, bytes: &[u8]) -> std::io::Result<()> {
+    if bytes.is_empty() {
+        return Ok(());
+    }
+    let map = MmapOptions::new().len(bytes.len()).map_raw(file)?;
+    // SAFETY: the mapping is `bytes.len()` long and `map` is the only view this
+    // process holds of it; `bytes` is our own buffer, so the ranges do not
+    // overlap. No peer holds the object yet, and none can shrink it (above).
+    unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), map.as_mut_ptr(), bytes.len()) };
     Ok(())
+}
+
+/// Appends the first `len` bytes of `file` to `out`, through a read-only mapping
+/// (`read` is refused as `write` is). The caller has checked the object is at
+/// least `len` long, and a holder cannot shrink it (see [`fill`]). The bytes are
+/// copied once with no reference formed over them, as a peer holding the object
+/// may write it.
+pub(super) fn read_front(file: &File, len: usize, out: &mut Vec<u8>) -> std::io::Result<()> {
+    if len == 0 {
+        return Ok(());
+    }
+    let map = MmapOptions::new().len(len).map_raw_read_only(file)?;
+    let at = out.len();
+    out.resize(at + len, 0);
+    // SAFETY: the mapping is `len` long and `out` has `len` bytes of its own
+    // from `at`; they are distinct allocations, so the ranges do not overlap.
+    unsafe { std::ptr::copy_nonoverlapping(map.as_ptr(), out.as_mut_ptr().add(at), len) };
+    Ok(())
+}
+
+/// Checks that `file` is a shared memory object, not a regular file, pipe,
+/// socket, directory or device: this platform has no seals to look for, so the
+/// descriptor's type is all it can say. XNU reports a POSIX shared memory object
+/// with no file type bits, and only that is accepted: a regular file could be
+/// shrunk by its holder under the mapping (XNU refuses a second `ftruncate` of
+/// shared memory only); the length is the caller's check.
+pub(super) fn verify(file: &File, _: usize) -> Result<(), SlabError> {
+    use rustix::fs::{FileType, fstat};
+    let stat = fstat(file).map_err(file_error("read the type of"))?;
+    match FileType::from_raw_mode(stat.st_mode) {
+        FileType::Unknown => Ok(()),
+        _ => Err(SlabError::NotSharedMemory),
+    }
 }
 
 pub(super) fn wire(_: &Slab) -> SlabWire {
@@ -118,6 +172,31 @@ pub(super) fn receive(conn: Connection<'_>, _: SlabWire) -> Result<Slab, SlabErr
 
 #[cfg(test)]
 mod tests {
+    /// **A regular file is refused**: its holder could `ftruncate` it under the
+    /// mapping, which a shared memory object does not allow.
+    #[test]
+    fn a_regular_file_is_refused() {
+        let path = std::env::temp_dir().join(format!("tutti-ffi-regular-{}", std::process::id()));
+        let file = File::options()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(&path)
+            .unwrap();
+        std::fs::remove_file(&path).unwrap();
+        assert!(matches!(verify(&file, 0), Err(SlabError::NotSharedMemory)));
+    }
+
+    /// **A descriptor that is not a memory object is refused by name**: a socket
+    /// end sent where a blob was announced does not read.
+    #[test]
+    fn a_descriptor_that_is_not_shared_memory_is_refused() {
+        let (a, _b) = std::os::unix::net::UnixStream::pair().unwrap();
+        let file = File::from(OwnedFd::from(a));
+        assert!(matches!(verify(&file, 0), Err(SlabError::NotSharedMemory)));
+    }
+
     use super::super::SlabHandle;
     use super::*;
     use crate::MappingWriter;

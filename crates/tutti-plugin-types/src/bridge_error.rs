@@ -420,7 +420,6 @@ mod tests {
     #[test]
     fn a_state_failure_keeps_its_typed_cause_both_ways() {
         let stalled = StateError::Stalled {
-            bytes: 7,
             after: Duration::from_millis(250),
         };
         match IpcError::from(PluginError::StateFailed(stalled.clone())) {
@@ -576,10 +575,9 @@ mod tests {
             ),
             (
                 Box::new(IpcError::State(StateError::Stalled {
-                    bytes: 3,
                     after: Duration::from_secs(2),
                 })),
-                "stalled after 3 bytes",
+                "stalled: no answer within 2000ms",
             ),
             (
                 Box::new(IpcError::Editor(EditorError::PluginCrashed)),

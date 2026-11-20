@@ -75,7 +75,7 @@ fn outcome(s: &mut Session, main: tutti_plugin_types::MainThreadMarker) -> PoolE
 /// A session on a polled executor the test shares: the futures it is handed wait
 /// until the test polls the executor, or the session's `update` does.
 fn holding() -> (Session, tutti_platform::Executor) {
-    let executor = tutti_platform::Executor::polled();
+    let executor = tutti_platform::Executor::new();
     let s = Session::builder()
         .max_block(MaxBlock::of(Samples::new(512)))
         .executor(executor.clone())
@@ -85,7 +85,7 @@ fn holding() -> (Session, tutti_platform::Executor) {
 }
 
 fn run_held(executor: &tutti_platform::Executor) {
-    executor.poll(usize::MAX);
+    executor.run_until_stalled();
 }
 
 /// **The blacklist is asked when the load runs, not when the entry is built**:

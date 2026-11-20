@@ -114,22 +114,16 @@ pub(super) enum ControlCommand {
     SetTrackInfo {
         info: Box<tutti_plugin_types::TrackInfo>,
     },
-    /// Chunked state read.
-    ///
-    /// `progress` is advanced per chunk so the waiting caller can tell a slow
-    /// transfer from a stalled one; see [`StateProgress`](super::progress::StateProgress).
+    /// The plugin's state, as one object the server sends.
     SaveState {
         state_use: StateUse,
-        progress: super::progress::StateProgress,
         reply: Reply<std::result::Result<Vec<u8>, StateError>>,
     },
-    /// Chunked state write. `progress` carries the same meaning as on
-    /// [`SaveState`](Self::SaveState) — bytes handed to the socket rather than
-    /// bytes received.
+    /// A state for the plugin, made into the object that is sent.
     LoadState {
         state_use: StateUse,
-        data: Vec<u8>,
-        progress: super::progress::StateProgress,
+        len: u64,
+        blob: tutti_plugin_ipc_ffi::Blob,
         reply: Reply<std::result::Result<(), StateError>>,
     },
     GetParameterList {

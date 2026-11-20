@@ -20,5 +20,5 @@ mod mod_delay;
 mod phaser;
 mod sweep_clock;
 
-pub use mod_delay::{ModDelayKernel, ModDelayNode, ModDelaySet};
-pub use phaser::{PhaserKernel, PhaserNode, PhaserSet};
+pub use mod_delay::{ModDelayConfig, ModDelayKernel, ModDelayNode, ModDelaySet};
+pub use phaser::{PhaserConfig, PhaserKernel, PhaserNode, PhaserSet};

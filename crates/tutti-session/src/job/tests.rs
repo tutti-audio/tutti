@@ -28,13 +28,13 @@ fn session(builder: SessionBuilder) -> DetachedSession {
 /// A session on a polled executor the test shares: its futures wait until the test
 /// polls the executor, or the session's `update` does.
 fn polled() -> (DetachedSession, Executor) {
-    let executor = Executor::polled();
+    let executor = Executor::new();
     let s = session(Session::builder().executor(executor.clone()));
     (s, executor)
 }
 
 fn run_all(executor: &Executor) {
-    executor.poll(usize::MAX);
+    executor.run_until_stalled();
 }
 
 fn echo(s: &mut DetachedSession, n: u32) -> Job<Echo> {
@@ -261,7 +261,7 @@ fn a_save_job_dropped_before_its_worker_starts_does_the_round_trip_never() {
 
 #[test]
 fn an_awaited_job_resolves_in_the_poll_after_the_update_that_landed_it() {
-    let executor = tutti_platform::Executor::polled();
+    let executor = tutti_platform::Executor::new();
     let mut s = session(Session::builder().executor(executor.clone()));
     let job = echo(&mut s, 7);
     let got = Arc::new(Mutex::new(None));
@@ -270,20 +270,24 @@ fn an_awaited_job_resolves_in_the_poll_after_the_update_that_landed_it() {
         .spawn(async move {
             *into.lock().unwrap() = Some(job.await);
         })
-        .unwrap();
+        .detach();
     let events = s.update();
     assert!(got.lock().unwrap().is_none(), "the update only landed it");
     assert!(
         landings(&events).is_empty(),
         "an awaited job's landing is the future's, not an event"
     );
-    assert_eq!(executor.poll(8), 1, "the landing woke the awaiting future");
+    assert_eq!(
+        executor.run_until_stalled(),
+        1,
+        "the landing woke the awaiting future"
+    );
     assert_eq!(got.lock().unwrap().take(), Some(Ok(7)));
 }
 
 #[test]
 fn an_awaited_job_whose_landing_the_collect_phase_reported_answers_already_landed() {
-    let executor = tutti_platform::Executor::polled();
+    let executor = tutti_platform::Executor::new();
     let mut s = session(Session::builder().executor(executor.clone()));
     let job = echo(&mut s, 7);
     let _events = s.update();
@@ -293,8 +297,8 @@ fn an_awaited_job_whose_landing_the_collect_phase_reported_answers_already_lande
         .spawn(async move {
             *into.lock().unwrap() = Some(job.await);
         })
-        .unwrap();
-    assert_eq!(executor.poll(8), 1);
+        .detach();
+    assert_eq!(executor.run_until_stalled(), 1);
     assert_eq!(
         got.lock().unwrap().take(),
         Some(Err(EchoError::Wait(WaitError::AlreadyLanded)))
