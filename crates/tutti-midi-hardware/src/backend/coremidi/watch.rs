@@ -128,9 +128,9 @@ fn start_hub() -> Result<(&'static Hub, SharedClient)> {
             next: AtomicU64::new(0),
         }));
         let (ready, started) = mpsc::channel();
-        // CoreMIDI delivers the process-wide client's notifications on the run loop
-        // of the thread that created it; the client is never disposed, so the hub
-        // lives for the process.
+        // The hub is a process-static CoreMIDI client whose notification loop never
+        // returns, so its thread outlives every `Executor`, and no owner stops it
+        // (`check-threads` exempts this file).
         spawn_named(MidiThread::DeviceWatch.name(), None, move |_| {
             let client = SharedClient::start("tutti-midi-watch", move |notification| {
                 if notification.changes_devices() {

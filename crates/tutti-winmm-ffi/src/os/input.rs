@@ -207,6 +207,12 @@ impl MidiIn {
     /// to winmm by a future on a dedicated thread of `executor`, never by the
     /// callback.
     ///
+    /// The worker blocks on a wait it cannot interrupt but by its wake, so it
+    /// cannot see its executor shut down: an input still open when its executor
+    /// drops costs the executor's shutdown bound, and the thread is then detached
+    /// with a warning (it ends when the input drops). Drop an input before its
+    /// executor.
+    ///
     /// `handler` is dropped when the last reference to the input's state goes,
     /// which can be on winmm's thread after the `MidiIn` has been dropped (a
     /// callback that was inside when the drop finished leaves last), so its
@@ -348,9 +354,9 @@ impl Drop for MidiIn {
         let closing = owner.begin_close(LEAVE_BOUND);
         // `midiInClose` runs only after the worker has ended, because a closed
         // handle may be reused by another port and the worker queues buffers on
-        // it. A wake that failed
-        // would leave that wait for ever, so the task is detached, the worker
-        // is left running and, with the port still open, nothing is freed.
+        // it. A wake that failed would leave that wait for ever, so the task is
+        // detached, the worker is left running and, with the port still open,
+        // nothing is freed.
         if let Err(e) = shared.worker.wake() {
             tracing::warn!(
                 "winmm MIDI input: the worker could not be woken, so the port is left open: {e}"
@@ -444,7 +450,7 @@ fn requeue(shared: &Slot<Shared>, mut wait: TimerWaiter) {
                 let handle = shared.handle.load(Ordering::Acquire);
                 // SAFETY: the header is prepared and has been returned to us
                 // by the callback that set `done`; `handle` is the open port,
-                // which is not closed until this thread has been joined.
+                // which is not closed until this thread has ended.
                 let code = unsafe { midiInAddBuffer(handle, buffer.header(), header_size()) };
                 if code != 0 {
                     shared.dead.store(true, Ordering::Release);

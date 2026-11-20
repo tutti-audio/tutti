@@ -63,3 +63,17 @@ fn the_synth_is_sent_every_event_at_its_time_and_opens_again_after_a_close() {
         );
     }
 }
+
+/// An output dropped after its `Devices` has the port closed when the drop
+/// returns: the synth takes one client, so a reopen at once is not `InUse`.
+#[test]
+fn an_output_dropped_after_its_devices_frees_the_synth_for_an_immediate_reopen() {
+    let devices = Devices::open(&tutti_platform::Executor::new()).unwrap();
+    let id = synth(&devices).id;
+    let out = devices.open_output(&id).expect("the synth opens");
+    drop(devices);
+    drop(out);
+    let devices = Devices::open(&tutti_platform::Executor::new()).unwrap();
+    let again = devices.open_output(&id);
+    assert!(again.is_ok(), "the synth opens again: {:?}", again.err());
+}

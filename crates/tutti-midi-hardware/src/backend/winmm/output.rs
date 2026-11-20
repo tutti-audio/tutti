@@ -1,6 +1,7 @@
 //! Sending MIDI 1.0 to a winmm output, each event at its time.
 
-use std::sync::Arc;
+use std::sync::mpsc;
+use std::sync::{Arc, Mutex, PoisonError};
 use tutti_platform::Instant;
 
 use super::super::legacy_port::bytes::{ByteOut, Wire};
@@ -25,13 +26,19 @@ struct Shared {
 
 /// An open winmm output, as a [`MidiOut`]: a future on a dedicated thread of the
 /// executor holds each event until its time and sends in order. Dropping it
-/// stops the sender and closes the port as the sender ends, without waiting for
-/// it; events not yet due are dropped.
+/// stops the sender, waits for it to end and closes the port; events not yet due
+/// are dropped.
+///
+/// The sender blocks on a wait it cannot interrupt but by its wake, so it cannot
+/// see its executor shut down: an output still open when its executor drops costs
+/// the executor's shutdown bound, and the thread is then detached with a warning
+/// (it ends when the output drops). Drop an output before its executor.
 pub struct WinMmOutput {
     shared: Arc<Shared>,
-    /// The sender's future. Dropping it after the wake cancels the future once it
-    /// returns from the timer's wait.
     task: Option<Task<()>>,
+    /// Closed when the sender's future ends; behind a `Mutex` so the output stays
+    /// `Sync`, and read only by `Drop`.
+    ended: Mutex<mpsc::Receiver<()>>,
 }
 
 impl MidiOut for WinMmOutput {
@@ -83,10 +90,18 @@ impl Drop for WinMmOutput {
         if let Err(e) = self.shared.wake.wake() {
             tracing::warn!("winmm MIDI output wake: {e}");
         }
-        // The wake above ends the sender's wait, and the sender returns because
-        // the mailbox is stopped, not because the task is cancelled: its body is
-        // synchronous inside the async block and never awaits. The task drops
-        // second.
+        // The port closes as the sender ends (it owns it), so the drop waits for
+        // that: a reopen at once finds the device free. The platform has no
+        // blocking wait on a `Task`: this returns when the sender's future has
+        // ended, which closes the channel, and the wake above is what ends it. The
+        // sender returns because the mailbox is stopped, not because the task is
+        // cancelled: its body is synchronous inside the async block and never
+        // awaits. The task drops second.
+        let _ = self
+            .ended
+            .get_mut()
+            .unwrap_or_else(PoisonError::into_inner)
+            .recv();
         drop(self.task.take());
     }
 }
@@ -122,10 +137,12 @@ pub(super) fn open(executor: &Executor, port: &OutputPort) -> Result<WinMmOutput
     let (wake, wait) = waitable_timer()?;
     let (mailbox, losses) = Mailbox::new();
     let shared = Arc::new(Shared { mailbox, wake });
+    let (ended_tx, ended) = mpsc::channel::<()>();
     let task = executor
         .spawn_dedicated(MidiThread::MidiOut.name(), None, {
             let shared = Arc::clone(&shared);
             async move {
+                let _ended = ended_tx;
                 thread(port, wait, losses, &shared);
             }
         })
@@ -136,5 +153,6 @@ pub(super) fn open(executor: &Executor, port: &OutputPort) -> Result<WinMmOutput
     Ok(WinMmOutput {
         shared,
         task: Some(task),
+        ended: Mutex::new(ended),
     })
 }

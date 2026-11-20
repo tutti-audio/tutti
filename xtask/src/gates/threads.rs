@@ -3,7 +3,7 @@
 //!
 //! A blocking OS edge goes through `Executor::spawn_dedicated`. The threads that exist
 //! today are rows of [`LIST`] that only shrink, each migrating to a future; the audio
-//! side is named in [`REALTIME`].
+//! side and the CoreMIDI hub are named in [`EXEMPT`].
 //!
 //! **Where it reads.** Every `crates/*/src/**/*.rs`, comments and literals blanked, except
 //! `crates/tutti-platform/src` (the executor), `tests`, `benches` and `examples`
@@ -17,9 +17,9 @@
 //! `<file>::-` for a start outside any function. Several starts in one function share a
 //! row.
 //!
-//! **The real-time rule** is not baselined: a [`Realtime`] entry names a file whose
-//! thread starts are the audio side's, with its reason. An entry that covers no start
-//! fails, like a stale row.
+//! **The exemptions** are not baselined: an [`Exempt`] entry names a file whose thread
+//! starts are not the executor's to take (the audio side's, or a process-lifetime OS
+//! client's), with its reason. An entry that covers no start fails, like a stale row.
 //!
 //! **List.** [`LIST`] holds `<crate>  <target>  <key>  <owner>` lines, `#` and blank lines
 //! aside: the target is `spawn` or `spawn_dedicated` (what the site becomes), the owner a
@@ -43,19 +43,23 @@ const TARGETS: [&str; 2] = ["spawn", "spawn_dedicated"];
 const OWNERS: [&str; 4] = ["core-foundation", "core-engine", "plugin", "midi"];
 
 /// A file whose thread starts are the audio side's.
-pub(crate) struct Realtime {
+pub(crate) struct Exempt {
     pub(crate) file: &'static str,
     pub(crate) reason: &'static str,
 }
 
-/// The real-time sites the executor does not take: a thread there must not allocate, lock
-/// or wait on a waker.
-pub(crate) const REALTIME: &[Realtime] = &[
-    Realtime {
+/// The files whose thread starts the executor does not take: the audio side's (a thread
+/// there must not allocate, lock or wait on a waker) and the CoreMIDI hub's.
+pub(crate) const EXEMPT: &[Exempt] = &[
+    Exempt {
+        file: "crates/tutti-midi-hardware/src/backend/coremidi/watch.rs",
+        reason: "the CoreMIDI hub: a process-static client whose notification loop never returns, so its thread outlives every Executor",
+    },
+    Exempt {
         file: "crates/tutti-graph/src/pool.rs",
         reason: "the graph's real-time render workers: they must not allocate, lock or wait on a waker",
     },
-    Realtime {
+    Exempt {
         file: "crates/tutti-engine/src/timer.rs",
         reason: "the deviceless audio clock: it paces and renders blocks against OS deadlines",
     },
@@ -197,7 +201,7 @@ fn parse(text: &str) -> Result<BTreeMap<String, String>, Vec<String>> {
     }
 }
 
-pub(super) fn check(tree: &dyn Tree, realtime: &[Realtime], min_files: usize) -> Report {
+pub(super) fn check(tree: &dyn Tree, exempt: &[Exempt], min_files: usize) -> Report {
     let mut r = Report::default();
     let Some(text) = tree.read(LIST) else {
         r.fail(format!("check-threads: FAIL: {LIST} is missing"));
@@ -228,7 +232,7 @@ pub(super) fn check(tree: &dyn Tree, realtime: &[Realtime], min_files: usize) ->
     for (path, text) in &files {
         let whole = reached.contains(path) || test_named(path);
         for key in scan(path, text, whole) {
-            match realtime.iter().position(|a| a.file == path) {
+            match exempt.iter().position(|a| a.file == path) {
                 Some(i) => {
                     used.insert(i);
                 }
@@ -240,7 +244,7 @@ pub(super) fn check(tree: &dyn Tree, realtime: &[Realtime], min_files: usize) ->
     }
     let unlisted: Vec<_> = sites.iter().filter(|k| !rows.contains_key(*k)).collect();
     let stale: Vec<_> = rows.keys().filter(|k| !sites.contains(*k)).collect();
-    let unused: Vec<_> = (0..realtime.len()).filter(|i| !used.contains(i)).collect();
+    let unused: Vec<_> = (0..exempt.len()).filter(|i| !used.contains(i)).collect();
     if unlisted.is_empty() && stale.is_empty() && unused.is_empty() {
         r.say("check-threads: OK");
     }
@@ -260,19 +264,19 @@ pub(super) fn check(tree: &dyn Tree, realtime: &[Realtime], min_files: usize) ->
     }
     if !unused.is_empty() {
         r.fail(
-            "check-threads: FAIL (a real-time site of the gate holds no thread start; delete it):",
+            "check-threads: FAIL (an exempt file of the gate holds no thread start; delete it):",
         );
         for i in unused {
-            r.fail(format!("  {}", realtime[i].file));
+            r.fail(format!("  {}", exempt[i].file));
         }
     }
     for &i in &used {
-        let a = &realtime[i];
-        r.say(format!("check-threads: real-time {}: {}", a.file, a.reason));
+        let a = &exempt[i];
+        r.say(format!("check-threads: exempt {}: {}", a.file, a.reason));
     }
     let spawn = rows.values().filter(|v| *v == "spawn").count();
     r.say(format!(
-        "check-threads: {} thread starts, {} rows in {LIST} ({spawn} to spawn, {} to spawn_dedicated), {} real-time files",
+        "check-threads: {} thread starts, {} rows in {LIST} ({spawn} to spawn, {} to spawn_dedicated), {} exempt files",
         sites.len(),
         rows.len(),
         rows.len() - spawn,
@@ -290,7 +294,7 @@ mod tests {
     const A: &str = "crates/tutti-a/src/lib.rs";
     const ROW: &str = "tutti-a  spawn_dedicated  crates/tutti-a/src/lib.rs::run  plugin\n";
 
-    fn run(list: &str, rt: &[Realtime], files: &[(&str, &str)]) -> Report {
+    fn run(list: &str, rt: &[Exempt], files: &[(&str, &str)]) -> Report {
         let mut all = vec![(LIST, list)];
         all.extend_from_slice(files);
         check(&Mem::with(&all), rt, 0)
@@ -410,10 +414,14 @@ mod tests {
         let files = [
             ("crates/tutti-graph/src/pool.rs", SRC),
             ("crates/tutti-engine/src/timer.rs", SRC),
+            (
+                "crates/tutti-midi-hardware/src/backend/coremidi/watch.rs",
+                SRC,
+            ),
         ];
-        let r = run("", REALTIME, &files);
+        let r = run("", EXEMPT, &files);
         assert!(r.passed(), "{:?}", r.findings);
-        let r = run("", REALTIME, &files[..1]);
+        let r = run("", EXEMPT, &files[..1]);
         assert!(!r.passed());
         assert!(
             r.findings
