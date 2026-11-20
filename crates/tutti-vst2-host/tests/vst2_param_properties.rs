@@ -1108,7 +1108,7 @@ fn a_plugins_echo_of_a_host_write_is_not_reported() {
 #[test]
 fn parameter_text_answers_for_the_f64_written_and_not_for_one_an_f32_step_away() {
     let _guard = lock_probe();
-    let (mut instance, _path) = load_probe();
+    let (instance, _path) = load_probe();
     let written = Normalized::of(0.1 + 1e-12);
     assert!(instance.loaded().write_parameter(pid(0), written));
     let word = written.get() as f32;
