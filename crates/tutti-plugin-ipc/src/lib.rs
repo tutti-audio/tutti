@@ -62,8 +62,8 @@ mod served_handle_tests;
 
 pub(crate) use batcher::Batcher;
 pub(crate) use batcher::{BlockPayload, Chunks};
-pub(crate) use client::audio::BridgeListener;
 pub(crate) use client::audio::HarmonyInputs;
+pub(crate) use client::audio::IpcListener;
 pub use client::audio::{AudioBridge, IpcEvent, IpcThread, Replies};
 pub(crate) use client::audio::{BATCH_OUTCOMES, BatchOutcome};
 pub use client::{EditorLoader, EditorSite, PluginBridge};

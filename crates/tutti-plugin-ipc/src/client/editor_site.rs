@@ -35,7 +35,7 @@ pub struct EditorSite {
 #[derive(Debug)]
 enum Site {
     InProcess(Box<InProcessEditor>),
-    Served(Box<ServerEditor>),
+    Server(Box<ServerEditor>),
 }
 
 /// The editor-only instance in this process: loaded with the [`EditorLoader`]
@@ -100,7 +100,7 @@ impl EditorSite {
                 baseline: Mutex::new(None),
                 mirror: GuiMirror::new(),
             })),
-            None => Site::Served(Box::new(ServerEditor {
+            None => Site::Server(Box::new(ServerEditor {
                 audio: audio.clone(),
                 remote: Mutex::new(IpcEditor::new(audio.clone())),
             })),
@@ -124,7 +124,7 @@ impl EditorSite {
     ) -> std::result::Result<Size, EditorError> {
         match &self.site {
             Site::InProcess(site) => site.open_editor(main, parent, scale),
-            Site::Served(site) => site.open_editor(main, parent, scale),
+            Site::Server(site) => site.open_editor(main, parent, scale),
         }
     }
 
@@ -143,7 +143,7 @@ impl EditorSite {
     ) -> std::result::Result<(), EditorError> {
         match &self.site {
             Site::InProcess(site) => site.open_floating_editor(main),
-            Site::Served(site) => site.open_floating_editor(main),
+            Site::Server(site) => site.open_floating_editor(main),
         }
     }
 
@@ -152,7 +152,7 @@ impl EditorSite {
     pub fn close_editor(&self, main: MainThreadMarker) -> bool {
         match &self.site {
             Site::InProcess(site) => site.close_editor(main),
-            Site::Served(site) => site.close_editor(main),
+            Site::Server(site) => site.close_editor(main),
         }
     }
 
@@ -183,7 +183,7 @@ impl EditorSite {
     pub fn editor_idle(&self, main: MainThreadMarker) {
         match &self.site {
             Site::InProcess(site) => site.editor_idle(main),
-            Site::Served(site) => site.editor_idle(main),
+            Site::Server(site) => site.editor_idle(main),
         }
     }
 
@@ -191,7 +191,7 @@ impl EditorSite {
     pub fn editor_capabilities(&self, main: MainThreadMarker) -> EditorCapabilities {
         match &self.site {
             Site::InProcess(site) => site.editor_capabilities(main),
-            Site::Served(site) => site.editor_capabilities(main),
+            Site::Server(site) => site.editor_capabilities(main),
         }
     }
 
@@ -207,7 +207,7 @@ impl EditorSite {
     ) -> std::result::Result<Size, EditorError> {
         match &self.site {
             Site::InProcess(site) => site.set_editor_size(main, requested),
-            Site::Served(site) => site.set_editor_size(main, requested),
+            Site::Server(site) => site.set_editor_size(main, requested),
         }
     }
 
@@ -224,7 +224,7 @@ impl EditorSite {
     ) -> std::result::Result<(), EditorError> {
         match &self.site {
             Site::InProcess(site) => site.set_editor_scale(main, scale),
-            Site::Served(site) => site.set_editor_scale(main, scale),
+            Site::Server(site) => site.set_editor_scale(main, scale),
         }
     }
 
@@ -232,7 +232,7 @@ impl EditorSite {
     pub fn poll_editor_resize_request(&self, main: MainThreadMarker) -> Option<Size> {
         match &self.site {
             Site::InProcess(site) => site.poll_editor_resize_request(main),
-            Site::Served(site) => site.poll_editor_resize_request(main),
+            Site::Server(site) => site.poll_editor_resize_request(main),
         }
     }
 
@@ -242,7 +242,7 @@ impl EditorSite {
     pub fn mirror_refused_cell(&self) -> Option<Tally<u64>> {
         match &self.site {
             Site::InProcess(site) => Some(site.mirror.refused.clone()),
-            Site::Served(_) => None,
+            Site::Server(_) => None,
         }
     }
 

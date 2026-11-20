@@ -140,12 +140,14 @@ pub(crate) mod wire;
 ///   byte.
 /// - **Version 50** splits the host's and the server's messages by connection
 ///   (`AudioRequest`/`AudioReply` on the audio connection, `ControlRequest`/
-///   `ControlReply`/`News` on the control one, each type with its own frame
-///   cap), and every state chunk (`LoadStateChunk`, `StageStateChunk`,
-///   `StateChunk`) carries the `total` of the whole state, so the receiver
-///   sizes its buffer once and refuses a total over the limit before it
-///   allocates.
-/// - **Version 51** numbers the requests: a control request travels as a
+///   `ControlReply`/`News` on the control one), so a message of the other
+///   connection has no variant to be written as.
+/// - **Version 51** gives each connection's wire types their own frame cap
+///   (`Framed::CAP`), and every state chunk (`LoadStateChunk`,
+///   `StageStateChunk`, `StateChunk`) carries the `total` of the whole state,
+///   so the receiver sizes its buffer once and refuses a total over the limit
+///   before it allocates.
+/// - **Version 52** numbers the requests: a control request travels as a
 ///   `Request` with its `ReqId`, an `ApplyParameters` carries one, and an answer
 ///   echoes it (`ControlFrame::Reply`, `ParametersApplied`), so the host matches an
 ///   answer to its request by the id and not by the order of the stream. The audio
@@ -153,7 +155,7 @@ pub(crate) mod wire;
 ///   `ControlFrame::Working`, which the server also sends while it opens the
 ///   plugin, once a second, for the host's wait to restart on; the control
 ///   connection's `Ready` is a frame of its own and not a reply.
-pub const PROTOCOL_VERSION: u32 = 51;
+pub const PROTOCOL_VERSION: u32 = 52;
 
 /// Largest frame body the control connection carries, either way, in bytes.
 ///

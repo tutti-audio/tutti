@@ -1,5 +1,9 @@
 //! A host executor a test steps by hand: it holds every future it is handed, and the
 //! test runs them when it chooses.
+//!
+//! These are for jobs that are one closure's poll. A future that awaits a bell (the
+//! streamer, an open) is not one: a test that has such a future uses
+//! `Executor::polled()` and drives it with the session's `update`.
 
 use std::fmt;
 use std::future::Future;
@@ -11,30 +15,21 @@ use tutti_platform::Executor;
 
 type Held = Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
 
-/// Polls `future` once and panics if it is not done: a session's job is a closure
-/// in an `async` block, so it completes in one poll.
-///
-/// # Panics
-///
-/// If the future is still pending after its poll.
+/// Polls `future` once, for a job that is one closure's poll. A session's job is a closure in an `async` block, so it
+/// completes in that poll; a future still pending after it (a streamer awaiting
+/// its bell) is dropped, since nothing here wakes it.
 pub fn run_future(mut future: Pin<Box<dyn Future<Output = ()> + Send + 'static>>) {
     let mut cx = Context::from_waker(Waker::noop());
-    assert!(
-        future.as_mut().poll(&mut cx).is_ready(),
-        "a held job awaits something: it should be one closure's poll"
-    );
+    let _ = future.as_mut().poll(&mut cx);
 }
 
-/// A future a [`HeldFutures`] took out of its queue: run it, or drop it unrun.
+/// A future a [`HeldFutures`] took out of its queue: run it, or drop it unrun. For a job
+/// that is one closure's poll.
 #[must_use = "a future neither run nor kept is dropped unrun"]
 pub struct HeldFuture(Held);
 
 impl HeldFuture {
-    /// Polls the future to its end.
-    ///
-    /// # Panics
-    ///
-    /// If it is still pending after one poll.
+    /// Polls the future once, as [`run_future`] does.
     pub fn run(self) {
         run_future(self.0);
     }
@@ -47,6 +42,7 @@ impl fmt::Debug for HeldFuture {
 }
 
 /// An [`Executor`] that holds the futures it is given, until [`run_all`](Self::run_all).
+/// For jobs that are one closure's poll: it never wakes a pending future.
 ///
 /// Clones share one queue.
 #[derive(Clone, Default)]
@@ -105,12 +101,9 @@ impl HeldFutures {
             .collect()
     }
 
-    /// Takes every waiting future, oldest first, and polls each to its end. Returns how
-    /// many ran. A future that spawns another leaves it for the next call.
-    ///
-    /// # Panics
-    ///
-    /// If a future is still pending after its poll.
+    /// Takes every waiting future, oldest first, and polls each once, as
+    /// [`run_future`] does. Returns how many were taken. A future that spawns another
+    /// leaves it for the next call.
     pub fn run_all(&self) -> usize {
         let futures = self.take();
         let count = futures.len();
@@ -126,7 +119,7 @@ impl HeldFutures {
     }
 }
 
-/// An executor that runs each future to its end inside the spawn call, on the caller's
+/// An executor for jobs that are one closure's poll: it runs each future inside the spawn call, on the caller's
 /// thread: a job runs before the call that started it returns.
 #[must_use]
 pub fn inline_executor() -> Executor {

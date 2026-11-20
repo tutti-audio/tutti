@@ -118,9 +118,9 @@ fn await_reply<T>(
 /// Listener for plugin-originated unsolicited events. Invoked on either lane's
 /// thread (plain OS threads, so it can be called concurrently) — blocking is
 /// OK, but prefer posting to a channel and returning promptly.
-pub(crate) type BridgeListener = Arc<dyn Fn(IpcEvent) + Send + Sync>;
+pub(crate) type IpcListener = Arc<dyn Fn(IpcEvent) + Send + Sync>;
 
-pub(super) type ListenerSlot = Arc<Mutex<Option<BridgeListener>>>;
+pub(super) type ListenerSlot = Arc<Mutex<Option<IpcListener>>>;
 
 /// The audio side of a served plugin: the realtime-safe command and response
 /// bus to the server, and the control-thread queries answered over it. Clone
@@ -268,7 +268,7 @@ impl AudioBridge {
     /// `None` to clear. The callback runs on a lane's thread after each
     /// dispatched command: the control lane's for the plugin's news, either's
     /// for a crash.
-    pub fn set_listener(&self, listener: Option<BridgeListener>) {
+    pub fn set_listener(&self, listener: Option<IpcListener>) {
         *self.listener.lock() = listener;
     }
 

@@ -14,7 +14,6 @@ categories = ["multimedia::audio", "parser-implementations"]
 workspace = true
 
 [dependencies]
-tempfile = "3.27"
 thiserror = { workspace = true, features = ["std"] }
 
 tutti-midi-ci = { version = "0.0.1", path = "../tutti-midi-ci" }
@@ -29,6 +28,7 @@ winnow = { workspace = true }
 unicode-normalization = { workspace = true }
 
 [dev-dependencies]
+tempfile = "3.27"
 tutti-fixtures = { path = "../../testing/tutti-fixtures" }
 
 [package.metadata.docs.rs]

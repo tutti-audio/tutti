@@ -84,6 +84,11 @@ impl Staged {
         &self.temp
     }
 
+    /// The path the file is put in place at.
+    pub fn target(&self) -> &Path {
+        &self.target
+    }
+
     /// Creates the temporary and opens it for writing.
     ///
     /// # Errors
@@ -191,6 +196,12 @@ impl StagedCommitError {
     /// Where the complete file is kept.
     pub fn kept(&self) -> &Path {
         &self.kept
+    }
+
+    /// The kind of the file system's error: [`io::ErrorKind::AlreadyExists`]
+    /// when [`create_new`](Staged::create_new) refused an existing target.
+    pub fn kind(&self) -> io::ErrorKind {
+        self.source.kind()
     }
 
     /// The file system's error.

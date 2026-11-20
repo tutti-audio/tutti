@@ -8,15 +8,15 @@
 
 use std::marker::PhantomData;
 use std::ops::Range;
-use std::sync::Arc;
 
 use tutti_rt::{Loan, PosClaim, PosFrame, PosReader, Reader};
 use tutti_units::Samples;
 
-use super::bell::Bell;
 use super::io::refill::{Refill, needs_refill};
 use super::loops::RingControl;
 use crate::{Direction, Loop};
+use std::sync::Arc;
+use tutti_rt::Bell;
 use tutti_rt::RingFloat;
 
 /// The audio side's two handles on a ring: its position reader and the
@@ -82,7 +82,7 @@ impl<F: RingFloat> RingReader<F> {
                 end,
             );
             if !matches!(need, Refill::Satisfied { .. }) {
-                wake.bell.ring_refill();
+                wake.bell.ring();
             }
         }
         Block {

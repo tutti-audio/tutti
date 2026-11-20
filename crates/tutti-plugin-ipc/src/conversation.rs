@@ -142,10 +142,17 @@ impl<K: Copy + Eq, T: Copy> Conversation<K, T> {
         }
     }
 
-    /// Gives `key` a new window from `now`, replacing the one it was opened
-    /// with: what the server is doing has changed what a reasonable wait is.
-    /// The ceiling stands. `false` when `key` is not awaited.
-    pub(crate) fn restart(&mut self, key: K, now: Instant, window: Duration) -> bool {
+    /// Gives `key` a new window and a new ceiling from `now`, replacing those it
+    /// was opened with: what the server is doing has changed what a reasonable
+    /// wait, and the most it may be kept waiting, are. `false` when `key` is not
+    /// awaited.
+    pub(crate) fn restart(
+        &mut self,
+        key: K,
+        now: Instant,
+        window: Duration,
+        ceiling: Duration,
+    ) -> bool {
         match self
             .entries
             .iter_mut()
@@ -153,6 +160,7 @@ impl<K: Copy + Eq, T: Copy> Conversation<K, T> {
         {
             Some(entry) => {
                 entry.window = window;
+                entry.ceiling = Deadline::after(now, ceiling);
                 entry.deadline = Deadline::after(now, window).sooner(entry.ceiling);
                 true
             }
@@ -361,21 +369,31 @@ mod tests {
         assert_eq!(c.left(1, at(t, 1)), Some(Duration::from_secs(29)));
     }
 
-    /// **A restart replaces the window**, even with a shorter one, and the
-    /// ceiling still stands.
+    /// **A restart replaces the window and the ceiling**, even with shorter
+    /// ones, and the new ceiling then stands.
     #[test]
-    fn a_restart_replaces_the_window_and_the_ceiling_stands() {
+    fn a_restart_replaces_the_window_and_the_ceiling() {
         let (mut c, t) = conversation();
         c.open(1, 'a', t, Duration::from_secs(30), Duration::from_secs(40));
-        assert!(c.restart(1, at(t, 5), Duration::from_secs(10)));
+        assert!(c.restart(
+            1,
+            at(t, 5),
+            Duration::from_secs(10),
+            Duration::from_secs(12)
+        ));
         assert_eq!(c.left(1, at(t, 5)), Some(Duration::from_secs(10)));
-        assert!(c.restart(1, at(t, 35), Duration::from_secs(100)));
+        assert!(c.restart(
+            1,
+            at(t, 35),
+            Duration::from_secs(100),
+            Duration::from_secs(50)
+        ));
         assert_eq!(
             c.left(1, at(t, 35)),
-            Some(Duration::from_secs(5)),
-            "ceiling 40 s"
+            Some(Duration::from_secs(50)),
+            "the ceiling is 50 s from the restart, past the first one's 40 s"
         );
-        assert!(!c.restart(9, t, WINDOW), "no such request");
+        assert!(!c.restart(9, t, WINDOW, CEILING), "no such request");
     }
 
     /// **Only a request's own frames move its deadline**: a frame for another

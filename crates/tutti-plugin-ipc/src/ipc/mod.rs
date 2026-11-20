@@ -63,9 +63,8 @@ use tutti_units::ParamId;
 
 use crate::subprocess::swap_slab;
 use crate::{
-    AudioSlab, Batcher, BridgeListener, EditorLoader, IpcConfig, IpcEvent, LoadRequest,
-    OfflineWait, PluginBridge, ProcessGuard, Replies, Restore, SlabWriter, launch,
-    unique_socket_path,
+    AudioSlab, Batcher, EditorLoader, IpcConfig, IpcEvent, IpcListener, LoadRequest, OfflineWait,
+    PluginBridge, ProcessGuard, Replies, Restore, SlabWriter, launch, unique_socket_path,
 };
 
 /// Where a served plugin came from: what [`Ipc::reopen_restoring`] launches
@@ -169,7 +168,7 @@ struct Events {
     latency: AtomicUsize,
     tail: Mutex<PluginTail>,
     requests: Mutex<Vec<Request>>,
-    forward: Mutex<Option<BridgeListener>>,
+    forward: Mutex<Option<IpcListener>>,
     /// What the plugin's request to be processed again raises, from the
     /// bridge's thread ([`Control::bind_wake`](tutti_plugin_types::Control::bind_wake)).
     wake: OnceLock<ProcessWake>,
@@ -684,7 +683,7 @@ impl Ipc {
     /// parameter the plugin moved, a resync, a refused rate, a crash) to
     /// `listener` as well. Invoked on the bridge thread: cheap, and never
     /// blocking. `None` stops forwarding.
-    pub fn forward_events(&self, listener: Option<BridgeListener>) {
+    pub fn forward_events(&self, listener: Option<IpcListener>) {
         *self.link.events.forward.lock_recover() = listener;
     }
 

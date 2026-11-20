@@ -31,7 +31,7 @@ mod x11;
 use crate::main_loop::Bell;
 use crate::render::{RenderSide, RenderThread};
 use crate::session::Session;
-use crate::transport::{SocketTransport, Transport};
+use crate::transport::{Alone, SocketTransport, Transport};
 
 /// One thing the scripted host does.
 #[allow(clippy::large_enum_variant)] // a test script, built once
@@ -202,7 +202,7 @@ impl HostEnd {
 struct Fixture {
     session: Session,
     side: Option<RenderSide>,
-    audio: Option<SocketTransport<AudioRequest, AudioReply>>,
+    audio: Option<SocketTransport<AudioRequest, AudioReply, Alone>>,
     host: Option<HostEnd>,
 }
 
