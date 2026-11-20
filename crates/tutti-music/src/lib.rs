@@ -9,6 +9,8 @@
 //! - **Notes**: `Note` and `PitchClass`, twelve-tone equal temperament with a
 //!   fallible conversion to and from a MIDI number, and `Adsr`, the four stages
 //!   of an envelope.
+//! - **Durations**: `NoteDuration`, a note value with a plain, dotted or triplet
+//!   `NoteModifier`, converted to beats.
 //! - **Meter**: `TimeSignature`, the `MeterMap` timeline of changes, and the
 //!   `Meter` trait that turns a `Beat` into a bar and a beat within it. Pure
 //!   musical math, so it layers *over* a transport rather than living inside one.
@@ -57,12 +59,14 @@ extern crate alloc;
 // Private: everything public in these is re-exported at the root below, so the
 // module path would be a second name for a type that already has one.
 mod adsr;
+mod duration;
 mod frame_clock;
 mod meter;
 mod note;
 mod timeline;
 
 pub use adsr::Adsr;
+pub use duration::{NoteDuration, NoteModifier};
 pub use note::{NotOnMidiScale, Note, NoteNumberOutOfRange, PitchClass};
 
 // The frame is the source of truth for time: the one frame↔beat conversion,

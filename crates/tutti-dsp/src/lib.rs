@@ -196,9 +196,9 @@ pub use dc_block::{DC_CORNER, DcBlocker, DcBlockerControls, MIN_DC_CORNER};
 pub(crate) use delay::delay_step;
 pub use delay::{
     ChannelTimes, ChannelTimesError, DELAY_SLEW, DelayBank, DelayControls, DelayLayout,
-    DelayLayoutBuilder, DelayLayoutError, DelayLine, DelayRamps, DelaySignals, FeedbackRouting,
-    FeedbackRoutingBuilder, FeedbackRoutingError, InterpolationMode, MAX_DELAY_CHANNELS, MaxDelay,
-    MaxDelayError,
+    DelayLayoutBuilder, DelayLayoutError, DelayLine, DelayRamps, DelaySignals, DelayTiming,
+    FeedbackRouting, FeedbackRoutingBuilder, FeedbackRoutingError, InterpolationMode,
+    MAX_DELAY_CHANNELS, MaxDelay, MaxDelayError, NoteTimes, NoteTimesError,
 };
 pub use dither::shaping::NoiseShaping;
 pub use dither::sink::DitherSink;

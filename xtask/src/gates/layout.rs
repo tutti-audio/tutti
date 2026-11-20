@@ -256,7 +256,10 @@ const ONLY: &[(&str, &[&str])] = &[
             "tutti-platform",
         ],
     ),
-    ("tutti-dsp", &["tutti-units", "tutti-buffers", "tutti-rt"]),
+    (
+        "tutti-dsp",
+        &["tutti-units", "tutti-music", "tutti-buffers", "tutti-rt"],
+    ),
     ("tutti-curve", &["tutti-units"]),
     ("tutti-buffers", &["tutti-units"]),
     (
