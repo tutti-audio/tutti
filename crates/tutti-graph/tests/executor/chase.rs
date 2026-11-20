@@ -1,5 +1,4 @@
-//! The chase (`Node::chase`, doc 013, "Nodes communicate only through
-//! ports"): a replaced node writes its state for its successor, and the
+//! The chase (`Node::chase`): a replaced node writes its state for its successor, and the
 //! executor delivers it once, at offset 0 of the successor's first block,
 //! ahead of every other event there.
 

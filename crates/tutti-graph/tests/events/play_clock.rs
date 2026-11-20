@@ -1,4 +1,4 @@
-//! The play clock (doc 014 §4.3) as the executor keeps it: one per frame,
+//! The play clock as the executor keeps it: one per frame,
 //! rolling or stopped; restarted at 0 in a fresh epoch on the frame of every
 //! stopped→playing transition, between blocks or inside one; untouched by a
 //! seek or a stop; read at a node's input time behind a latent path
@@ -270,7 +270,7 @@ fn a_latent_node_reads_the_clock_at_its_input_time() {
 
 /// A fork's clock starts at 0, in an epoch of its own, however long the
 /// live graph has played: an export's free-running phase starts from its
-/// own first frame (doc 014 §4.3), and the fork's readings never name a
+/// own first frame, and the fork's readings never name a
 /// live play start.
 #[test]
 fn a_fork_starts_its_clock_at_zero() {

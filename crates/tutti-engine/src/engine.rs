@@ -26,7 +26,7 @@
 //! and need no cut, so they are never deferred.) Commands due on one frame
 //! apply in send order.
 //!
-//! **A tempo map of steps cuts the block too** (doc 020, stage 3): each step is
+//! **A tempo map of steps cuts the block too**: each step is
 //! a change on the frame it falls on, taken beside the commands. It is not a
 //! command, so it is never deferred: a block that needs more changes than it
 //! holds ends before the one that does not fit, and the rest renders as the
@@ -380,7 +380,7 @@ impl<F: Float> GraphRender<F> {
     /// Publishes one render call's start: the OS time it began at
     /// (`os_ns`), the frame it renders first, and `first`, the transport at
     /// that frame (after the commands due on it), for producer threads that
-    /// hold an OS time and for the session's one-read playhead (doc 030, R2).
+    /// hold an OS time and for the session's one-read playhead.
     /// `frames` is the whole call's length.
     fn publish_call(
         &mut self,
@@ -1094,8 +1094,7 @@ struct Walk {
     /// The declick gain's events in this block.
     gain: GainPlan,
     /// How many of the block's frames this walk covers: all of them, unless a
-    /// tempo step would have been the block's ninth change, where it ends
-    /// (doc 020, section 2.3).
+    /// tempo step would have been the block's ninth change, where it ends.
     frames: usize,
 }
 

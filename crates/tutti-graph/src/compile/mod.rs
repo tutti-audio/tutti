@@ -47,7 +47,7 @@
 //! 9. **Place** units: `NodeKey` → dense [`UnitIdx`], diffed against `prev`
 //!    into a [`Delta`].
 //!
-//! Doc 013's step 6, the serial-vs-parallel decision, is
+//! The serial-vs-parallel decision is
 //! `Plan::schedule`: pure arithmetic on what step 7 totals, made when the
 //! plan meets a pool (the pool's participant count is not the compiler's
 //! to know).
@@ -236,7 +236,7 @@ pub enum CompileError {
     /// A bus edge could not be lowered against the shapes: a node's bus is
     /// gone or its topology no longer folds into the other's (a node replaced
     /// by one with another layout), or a lane overlaps an edge. Never a
-    /// silent drop (doc 013, "Buses and coercion between declared layouts").
+    /// silent drop.
     #[error("{0}")]
     Bus(crate::BusError),
 }
@@ -780,8 +780,7 @@ pub fn compile(
         // Audio inputs: every source of a port through its own PDC delay
         // when it needs one, then the sum in **source order** (`Edge`'s `Ord`,
         // not the order the spec listed them in), so two specs that list the
-        // same sources differently render alike (doc 013, "Audio fan-in
-        // sums", point 2). One source is the value itself, none is silence.
+        // same sources differently render alike. One source is the value itself, none is silence.
         let mut ain = Vec::with_capacity(shape.audio_in().count() as usize);
         for port in 0..shape.audio_in().count() {
             let at = InPort { node: key, port };
@@ -811,8 +810,7 @@ pub fn compile(
                     }
                     Edge::Feedback(f) => ARef::Fb(fb_index(audio_fb_key(f), &audio_fb)),
                 };
-                // An edge with a gain entry is a weighted lane (doc 013,
-                // "Edge gain").
+                // An edge with a gain entry is a weighted lane.
                 let id = EdgeId {
                     sink: Sink::Port(at),
                     from: edge,
@@ -1034,8 +1032,7 @@ pub fn compile(
         if sources.len() > 1 || sources.iter().any(|&s| lane_of(s).is_some()) {
             // A summed channel (or one whose source is weighted): each source
             // is delayed to the output time on its own, as an op of its own,
-            // then summed; the `Output` op carries no ring (doc 013, "Audio
-            // fan-in sums", point 3).
+            // then summed; the `Output` op carries no ring.
             let refs: Vec<Addend> = sources
                 .iter()
                 .map(|&source| {
@@ -1913,7 +1910,7 @@ fn align_event(em: &mut Emitted, v: u32, by: Samples, key: DelayKey) -> u32 {
 }
 
 /// One addend of a sum: the value, and the edge whose gain weights it when
-/// the edge has an entry (doc 013, "Edge gain").
+/// the edge has an entry.
 #[derive(Clone, Copy)]
 struct Addend {
     r: ARef,
@@ -1932,8 +1929,8 @@ struct GainDrive {
 }
 
 /// Sum `refs` (already in source order) into one audio value: the left fold
-/// `((+0.0 + a_0) + a_1) + ..` (doc 013, "Audio fan-in sums", point 2), each
-/// weighted addend `acc + w * a` (doc 013, "Edge gain").
+/// `((+0.0 + a_0) + a_1) + ..`, each
+/// weighted addend `acc + w * a`.
 ///
 /// Silence (`ARef::Zero`) adds nothing and is dropped; none left is silence,
 /// one plain one is itself (an alias, no op). A weighted one is an op even
