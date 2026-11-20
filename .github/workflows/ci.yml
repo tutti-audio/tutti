@@ -77,7 +77,7 @@ jobs:
       - run: cargo xtask check-paths tutti_measure align beat chord chroma features key loudness notes onset peaks pitch silence spectrum stereo tempo transform vectorscope xcorr yin
       - run: cargo xtask check-paths tutti_timeline beat_walk clock fsm handle loop_region motion offline project_meter settings state timed timeline
       - run: cargo xtask check-paths tutti_engine engine error
-      - run: cargo xtask check-paths tutti_codec aiff decode encoder error flac format pcm spec staged vorbis wav wave
+      - run: cargo xtask check-paths tutti_codec aiff decode encoder error flac format pcm spec staged wav wave
       - run: cargo xtask check-paths tutti_sf2 bank binary_reader error four_cc generator generator_type instrument instrument_info instrument_region loop_mode preset preset_info preset_region read_counter sample_header soundfont soundfont_info soundfont_parameters soundfont_sampledata soundfont_version zone zone_info
       - run: cargo xtask check-paths tutti_soundfont array_math bi_quad_filter channel chorus envelope_stage error fork lfo modulation_envelope node oscillator patch player region_ex region_pair render reverb settings soundfont_math voice voices volume_envelope
       # `stretch` and `testing` are public and left out of the list.
@@ -98,7 +98,6 @@ jobs:
       - run: cargo xtask check-guards
       - run: cargo xtask check-ffi
       - run: cargo xtask check-errors
-      # Includes `cargo tree` checks, such as that `export` alone reaches no C library.
       - run: cargo xtask check-layout
       - run: cargo xtask check-range-types
       - run: cargo xtask check-hosting
@@ -159,11 +158,11 @@ jobs:
       - name: clippy (wasm32)
         run: cargo clippy --locked --target wasm32-unknown-unknown -p tutti-platform -p tutti-rt -p tutti --lib -- -D warnings
       - name: clippy (wasm32, web features)
-        run: cargo clippy --locked --target wasm32-unknown-unknown -p tutti --lib --features sampler,soundfont,synth,analyze,decode-wav,decode-flac,decode-mp3,decode-ogg,encode-wav,encode-aiff,export,record,midi -- -D warnings
+        run: cargo clippy --locked --target wasm32-unknown-unknown -p tutti --lib --features sampler,soundfont,synth,analyze,decode-wav,decode-flac,decode-mp3,decode-ogg,encode-wav,encode-flac,encode-aiff,export,record,midi -- -D warnings
 
   # Lints what the Linux job cannot see: `#[cfg(windows)]` blocks, and casts that differ by platform (the vst3
   # bindings type SDK enum constants `c_uint` on unix and `c_int` on Windows). A native runner, because
-  # `cargo xtask check-windows` cannot reach `ogg_next_sys` or `tutti-vst3-host`'s `conformance` build, which need
+  # `cargo xtask check-windows` cannot reach `tutti-vst3-host`'s `conformance` build, which needs
   # real MSVC headers. The job also runs the tests of the two MIDI crates (`tutti-winmm-ffi`, `tutti-midi-hardware`)
   # against the runner's own winmm, with a virtual audio driver installed so the GS Wavetable Synth opens, and the
   # plugin IPC transport's (`tutti-plugin-ipc-ffi` and `tutti-plugin-ipc`'s `transport::`: named pipes, the mapped

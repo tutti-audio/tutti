@@ -11,8 +11,7 @@ use tutti_units::Samples;
 const WRITE_CHUNK: usize = 8192;
 
 /// Writes `wave` as a file of `format` to `dest`, at its own rate and with its
-/// own topology (the speaker mask of a WAV, the channel order of an Ogg Vorbis
-/// file).
+/// own topology (the speaker mask of a WAV).
 ///
 /// - A path is written beside itself and renamed over it when whole, as
 ///   [`FileEncoder::create`] does, so a failure leaves what was at the path as
@@ -69,8 +68,8 @@ pub fn write_wave<'a, S: Sample>(
         }
         Destination::Writer(writer) => {
             check_planned(&spec, wave.len())?;
-            // The Vorbis encoder's thread owns its sink, so a borrowed writer
-            // cannot be the encoder's: the file is encoded into an owned cursor.
+            // A borrowed writer need not seek: the file is encoded into an owned
+            // cursor and handed over whole.
             let file = write_all(wave, Encoder::create(&spec, Cursor::new(Vec::new()))?)?;
             writer.write_all(file.get_ref())?;
             Ok(())
@@ -98,10 +97,7 @@ fn feed<S: Sample>(
 }
 
 /// Feeds `wave` to a plain-sink `encoder` and finishes it.
-fn write_all<S: Sample, W: Write + Seek + Send + 'static>(
-    wave: &Wave<S>,
-    mut encoder: Encoder<W>,
-) -> Result<W> {
+fn write_all<S: Sample, W: Write + Seek>(wave: &Wave<S>, mut encoder: Encoder<W>) -> Result<W> {
     feed(wave, |block| encoder.write(block))?;
     encoder.finish()
 }

@@ -69,7 +69,7 @@
 //! | `tutti::graph` | what a node author names: `Node`, `Shape`, `Io`, `Prepare`, `Env`, `ForkByClone`, `Unforkable`, `declare_params!` | always |
 //! | `tutti::session` | the session's host plumbing: phases, recovery, main-thread plugin sessions, the pool, handles and errors a host reads | `session` |
 //! | `tutti::midi` | the common MIDI path: files, messages, keys, routes, devices, profiles | `midi` |
-//! | `tutti::codec` | audio file settings: `Spec`, `Quality`, `FlacLevel`, `IntDepth` and the decode errors | `codec` |
+//! | `tutti::codec` | audio file settings: `Spec`, `FlacLevel`, `IntDepth` and the decode errors | `codec` |
 //! | `tutti::sampler` | sample playback voices and loops | `sampler` |
 //! | `tutti::measure` | the analyses `Session::analyze` runs: loudness, peaks, silence, onsets, spectrum, chroma, the vectorscope | `analyze` |
 //! | `tutti::modulation` | modulation sources, curves and their errors | always |
@@ -94,9 +94,8 @@
 //! - `jack` — JACK output through `tutti-cpal` (links libjack; implies `device`).
 //! - `decode-wav`, `decode-flac`, `decode-mp3`, `decode-ogg` — audio file decoders (each implies `codec` and
 //!   turns on the same decoder in `tutti-codec`; a sampler decodes through it).
-//! - `encode-wav`, `encode-flac`, `encode-aiff`, `encode-vorbis` — the encoders
-//!   a `Format` names (each implies `codec`; none implies `export`, and
-//!   `encode-vorbis` is the one path to a C library).
+//! - `encode-wav`, `encode-flac`, `encode-aiff` — the encoders
+//!   a `Format` names (each implies `codec`; none implies `export`).
 //! - `codec` — `tutti::codec`, `Wave`. Implied by every decode and encode feature.
 //! - `record` — the session's `Recorder` and its pump loop, device-free. Implied by `capture`.
 //! - `capture` — live audio input from the sound card: `Session::add_input`, takes, mic capture
@@ -539,7 +538,7 @@ pub mod session {
 }
 
 /// Audio file settings (`tutti-codec`): the `Spec` a file is written with, the
-/// quality, bit depth and FLAC level a `Format` takes, and the decode errors.
+/// bit depth and FLAC level a `Format` takes, and the decode errors.
 /// The decoders, encoders and `FileIn`/`FileOut` are `tutti-codec`'s. Feature
 /// `codec`.
 #[cfg(feature = "codec")]
@@ -547,14 +546,12 @@ pub mod codec {
     #[cfg(any(
         feature = "encode-wav",
         feature = "encode-flac",
-        feature = "encode-aiff",
-        feature = "encode-vorbis"
+        feature = "encode-aiff"
     ))]
     pub use tutti_codec::write_wave;
     pub use tutti_codec::{Codec, Error, Kept, Unfinished};
     pub use tutti_codec::{
-        DecodeError, FlacLevel, IntDepth, Quality, QualityOutOfRange, Spec, SpecError, can_decode,
-        decodable_extensions,
+        DecodeError, FlacLevel, IntDepth, Spec, SpecError, can_decode, decodable_extensions,
     };
     #[cfg(any(
         feature = "decode-wav",

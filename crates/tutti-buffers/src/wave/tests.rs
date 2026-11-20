@@ -1,5 +1,5 @@
 use super::*;
-use crate::Speaker;
+use crate::{Bed, Speaker};
 use crate::{I24, interleave};
 
 const STEREO: ChannelLayout = ChannelLayout::STEREO;
@@ -222,4 +222,26 @@ fn mapping_an_f64_wave_with_a_cast_is_every_sample_cast() {
             assert_eq!(w32.at(c, i), w64.at(c, i) as f32);
         }
     }
+}
+
+/// Equality is samples, rate and speakers: the same wave with its topology
+/// stated or assumed is equal, and a different sample, rate or speaker is not.
+#[test]
+fn equality_ignores_where_the_topology_came_from() {
+    let stated = || Wave::with_topology(Bed::Mono.topology(), SampleRate::SR_48K);
+    let assumed = || Wave::<f32>::new(1, SampleRate::SR_48K);
+    let fill = |mut w: Wave<f32>, v: f32| {
+        w.append(Interleaved::new(&[v, 0.5], ChannelLayout::MONO).unwrap())
+            .unwrap();
+        w
+    };
+    let (a, b) = (fill(stated(), 0.25), fill(assumed(), 0.25));
+    assert_ne!(a.placement(), b.placement());
+    assert_eq!(a, b);
+    assert_ne!(a, fill(assumed(), 0.75), "a sample differs");
+    let mut other_rate = Wave::<f32>::new(1, SampleRate::SR_44K1);
+    other_rate
+        .append(Interleaved::new(&[0.25, 0.5], ChannelLayout::MONO).unwrap())
+        .unwrap();
+    assert_ne!(a, other_rate, "the rate differs");
 }

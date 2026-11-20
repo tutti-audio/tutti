@@ -115,15 +115,12 @@ analyze = ["dep:tutti-measure"]
 soundfont = ["midi", "dep:tutti-soundfont", "dep:tutti-sf2", "dep:tutti-dsp"]
 synth = ["midi", "dep:tutti-polysynth"]
 # Export. `export` is the offline renderer and WAV, which is pure Rust; FLAC and
-# AIFF are pure Rust and opt-in (`encode-flac`, `encode-aiff`), and `encode-vorbis` is the one path to C (the
-# Vorbis library, `ogg_next_sys`). `cargo xtask check-layout` holds that a build
-# with `export` alone reaches no C.
+# AIFF are pure Rust and opt-in (`encode-flac`, `encode-aiff`).
 export = ["dep:tutti-export", "dep:tutti-dsp", "encode-wav"]
 # The encoders `tutti-codec` writes, under the codec's own names; none implies `export`.
 encode-wav = ["tutti-codec/encode-wav"]
 encode-flac = ["tutti-codec/encode-flac"]
 encode-aiff = ["tutti-codec/encode-aiff"]
-encode-vorbis = ["tutti-codec/encode-vorbis"]
 plugin = [
     "dep:tutti-plugin",
     "dep:tutti-plugin-db",
