@@ -74,8 +74,6 @@ struct Fake {
     /// Writes the host made while `held`, which the plugin has not taken yet.
     held: std::sync::atomic::AtomicBool,
     pending: Mutex<Vec<(ParamId, Normalized)>>,
-    /// How many times its parameter list was asked for.
-    reads: std::sync::atomic::AtomicUsize,
 }
 
 impl Fake {
@@ -104,10 +102,6 @@ impl Fake {
     }
 
     /// Makes the plugin take the writes held back, in order.
-    fn reads(&self) -> usize {
-        self.reads.load(std::sync::atomic::Ordering::SeqCst)
-    }
-
     fn take_held(&self) {
         self.held.store(false, std::sync::atomic::Ordering::SeqCst);
         for (id, value) in std::mem::take(&mut *self.pending.lock_recover()) {
@@ -131,7 +125,6 @@ impl Fake {
 
 impl AnyThread for Fake {
     fn parameter_descriptors(&self) -> Option<Vec<ParameterInfo>> {
-        self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         Some(self.infos.lock_recover().clone())
     }
     fn parameter_value(&self, id: ParamId) -> Option<Normalized> {
@@ -255,56 +248,22 @@ fn update(s: &mut DetachedSession) -> Vec<PluginEvent> {
     reported
 }
 
-/// Updates until every hosted plugin's parameter mirror is ready, which a landed read
-/// makes it; the plugin events they reported. A guard against a read that never lands.
+/// Updates until every submitted job has landed; the plugin events they reported. A
+/// guard against a job that never ends.
 fn settle(s: &mut DetachedSession) -> Vec<PluginEvent> {
     let mut reported = Vec::new();
     let deadline = tutti_platform::Instant::now() + std::time::Duration::from_secs(10);
     loop {
         reported.extend(plugin_events(s.update()));
-        if s.graph
-            .plugins
-            .values()
-            .all(|hosted| hosted.mirror.is_ready())
-        {
+        if s.jobs.landers.is_empty() {
             return reported;
         }
         assert!(
             tutti_platform::Instant::now() < deadline,
-            "a read never landed"
+            "a job never ended"
         );
         std::thread::yield_now();
     }
-}
-
-/// An update that hears a rescan notice and submits the read, and the updates after it
-/// until the plugin has been asked for its list again (`reads` was `before`) and the
-/// read's end has had every chance to land; the plugin events they reported. No event
-/// says the read landed, so the last part is a count of updates, never a time. A guard
-/// against a read that never runs.
-fn update_rescan(s: &mut DetachedSession, fake: &Fake, before: usize) -> Vec<PluginEvent> {
-    let mut reported = plugin_events(s.update());
-    reported.extend(after_read(s, fake, before));
-    reported
-}
-
-/// The updates [`update_rescan`] runs after the first.
-fn after_read(s: &mut DetachedSession, fake: &Fake, before: usize) -> Vec<PluginEvent> {
-    let mut reported = Vec::new();
-    let deadline = tutti_platform::Instant::now() + std::time::Duration::from_secs(10);
-    while fake.reads() == before {
-        assert!(
-            tutti_platform::Instant::now() < deadline,
-            "a rescan's read never ran"
-        );
-        reported.extend(plugin_events(s.update()));
-        std::thread::yield_now();
-    }
-    for _ in 0..20_000 {
-        reported.extend(plugin_events(s.update()));
-        std::thread::yield_now();
-    }
-    reported
 }
 
 /// A session whose parameters are read.
@@ -521,9 +480,8 @@ fn a_rescan_that_removes_the_unit_refuses_a_unit_target_made_before_it() {
 
     let rescan = |s: &mut DetachedSession, info: ParameterInfo| {
         *fake.infos.lock_recover() = vec![info];
-        let before = fake.reads();
         refresh.fire(PluginRefresh::ParamTitles);
-        let _ = update_rescan(s, &fake, before);
+        let _ = update(s);
     };
     rescan(
         &mut s,
@@ -601,7 +559,6 @@ fn a_rescan_replaces_the_declarations_and_the_values_with_them() {
     fake.values
         .lock_recover()
         .insert(shape, Normalized::of(0.5));
-    let before = fake.reads();
     refresh.fire(PluginRefresh::ParamTitles);
 
     // The notice is heard by this update, which submits the read; the old
@@ -611,7 +568,7 @@ fn a_rescan_replaces_the_declarations_and_the_values_with_them() {
         s.plugin_view(node).unwrap().params().get(MODE).is_ok(),
         "not yet"
     );
-    events.extend(after_read(&mut s, &fake, before));
+    events.extend(settle(&mut s));
     assert!(
         changes(events)
             .iter()
@@ -714,9 +671,8 @@ fn a_gesture_spans_updates_and_refuses_once_the_plugin_is_gone() {
     let gesture = cutoff(&s, node).edit().unwrap();
     let mut heard = changes(update(&mut s));
     // A rescan lands in between; the parameter is still declared.
-    let before = fake.reads();
     refresh.fire(PluginRefresh::ParamTitles);
-    heard.extend(changes(update_rescan(&mut s, &fake, before)));
+    heard.extend(changes(update(&mut s)));
     gesture.set(Normalized::of(0.3)).unwrap();
     heard.extend(changes(update(&mut s)));
     gesture.set(Normalized::of(0.6)).unwrap();
@@ -772,9 +728,8 @@ fn a_gesture_on_a_parameter_the_rescan_dropped_is_refused() {
     let gesture = cutoff(&s, node).edit().unwrap();
     *fake.infos.lock_recover() =
         vec![ParameterInfo::new(MODE, "Mode").with_normalized_default(0.0)];
-    let before = fake.reads();
     refresh.fire(PluginRefresh::ParamTitles);
-    let _ = update_rescan(&mut s, &fake, before);
+    let _ = update(&mut s);
     assert_eq!(
         gesture.set(Normalized::of(0.5)),
         Err(PluginParamRefusal::UnknownParam(CUTOFF))
@@ -919,14 +874,8 @@ fn a_state_load_replaces_the_values_written_before_it() {
         .lock_recover()
         .insert(CUTOFF, Normalized::of(0.1));
     refresh.fire(PluginRefresh::ParamValues);
-    let deadline = tutti_platform::Instant::now() + std::time::Duration::from_secs(10);
-    while s.get(key.param(CUTOFF)).unwrap() != Normalized::of(0.1) {
-        assert!(
-            tutti_platform::Instant::now() < deadline,
-            "the values read never landed"
-        );
-        let _ = update(&mut s);
-    }
+    let _ = update(&mut s);
+    let _ = update(&mut s);
     assert_eq!(s.get(key.param(CUTOFF)).unwrap(), Normalized::of(0.1));
 }
 
@@ -1021,9 +970,8 @@ fn a_write_to_a_parameter_a_rescan_dropped_is_counted_and_then_no_target() {
     assert_eq!(refused(&s), 1, "the plugin's refusal is counted");
     assert!(fake.sets().is_empty(), "the plugin took nothing");
 
-    let before = fake.reads();
     refresh.fire(PluginRefresh::ParamTitles);
-    let _ = update_rescan(&mut s, &fake, before);
+    let _ = update(&mut s);
     assert!(no_such_target(
         s.set(key.param(CUTOFF).to(Normalized::of(0.8)))
     ));
@@ -1081,9 +1029,8 @@ fn a_rescan_to_another_range_converts_a_target_made_before_it_with_the_new_map()
             .with_plain_range(100.0, 200.0, 100.0)
             .with_plain_map(PlainMap::Linear(LinearRange::new(100.0, 200.0))),
     ];
-    let before = fake.reads();
     refresh.fire(PluginRefresh::ParamTitles);
-    let _ = update_rescan(&mut s, &fake, before);
+    let _ = update(&mut s);
 
     s.set(cutoff.to(Hz::new(150.0))).unwrap();
     assert_eq!(fake.sets(), [(CUTOFF, 0.5)]);

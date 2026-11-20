@@ -179,10 +179,10 @@ pub(crate) enum Stream<M, R> {
 
 /// A running job's place in the lander table.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-struct Slot(u64);
+pub(crate) struct Slot(u64);
 
 /// What crosses from a worker to the control thread.
-enum Arrival {
+pub(crate) enum Arrival {
     #[cfg_attr(
         not(any(test, feature = "capture")),
         expect(
@@ -195,7 +195,8 @@ enum Arrival {
 }
 
 /// A job's lander, typed away: it downcasts what its own work sent.
-type Lander = Box<dyn FnMut(&mut dyn JobSession, Arrival, &mut Vec<SessionEvent>) + Send>;
+pub(crate) type Lander =
+    Box<dyn FnMut(&mut dyn JobSession, Arrival, &mut Vec<SessionEvent>) + Send>;
 
 /// The channel a job's messages and ends come back on, read only by the
 /// control thread (`update` and `Job::wait`): off the audio thread, unbounded.
@@ -233,7 +234,9 @@ pub(crate) struct Jobs {
     bells: Bells,
     tx: Sender<Arrival>,
     arrivals: Arrivals,
-    landers: HashMap<Slot, Lander>,
+    /// One entry per job submitted and not yet landed, registered by the submitting call
+    /// on the control thread.
+    pub(crate) landers: HashMap<Slot, Lander>,
     next: tutti_rt::Mint,
     closed: Arc<AtomicBool>,
     /// What typed jobs landed, until the collect phase reports it.
