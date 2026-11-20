@@ -100,7 +100,7 @@ pub use interleaved::{Frames, FramesMut, Interleaved, InterleavedMut};
 pub use max_block::{InvalidMaxBlock, MaxBlock};
 pub use mono::{Mono, MonoMut};
 pub use planes::{PlaneIter, PlaneIterMut, Planes, PlanesMut};
-pub use sample::{ByWidth, Float, FloatWidth, NotAFloat, OverFloat, ReadsAs, Sample, SampleFormat};
+pub use sample::{ByWidth, Float, FloatWidth, NotAFloat, OverFloat, Sample, SampleFormat};
 pub use stereo::StereoPlanes;
 pub use topology::{ChannelTopology, Placement, Speaker, Speakers, TopologyError};
 pub use wave::Wave;

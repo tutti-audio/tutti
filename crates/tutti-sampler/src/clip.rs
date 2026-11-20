@@ -94,7 +94,7 @@ impl<F: SamplerFloat> Clip<F> {
     ///
     /// The wave is held at the clip's own float width. Another width is the
     /// caller's to state, with `Wave::<f64>::from(&wave)` to widen or
-    /// `wave.map(|x| x as f32)` to narrow ([`ReadsAs`](tutti_buffers::ReadsAs) has the rule):
+    /// `wave.map(|x| x as f32)` to narrow:
     ///
     /// ```compile_fail
     /// use std::sync::Arc;
