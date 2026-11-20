@@ -18,6 +18,8 @@ use std::sync::Arc;
 use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_buffers::{Float, Wave};
 use tutti_measure::{Measure, Meter};
+#[cfg(codec)]
+use tutti_platform::Asset;
 use tutti_units::{SampleRate, Samples};
 
 pub use feed::{AudioContext, AudioInput};
@@ -30,20 +32,20 @@ use crate::{AppKey, Clock, Job, JobKind, Session, WaitError, WorkerError};
 const CHUNK_FRAMES: Samples = Samples::new(16_384);
 
 /// The audio an analysis reads, in the sample format `S` the measure asks for:
-/// a wave in memory or a file on disk.
+/// a wave in memory or an [`Asset`] to decode.
 ///
 /// Converts from what the session already holds: an [`Arc<Wave<S>>`](Wave) or
-/// a [`Wave<S>`]; with a decoder, a path; and with a decoder and feature
-/// `sampler`, a pooled `AudioEntry`. A path, and a streamed entry, are decoded
+/// a [`Wave<S>`]; with a decoder, an [`Asset`] or a path; and with a decoder and
+/// feature `sampler`, a pooled `AudioEntry`. An asset, and a streamed entry, are decoded
 /// chunk by chunk on the job's worker into `S`.
 #[derive(Clone, Debug)]
 #[non_exhaustive]
 pub enum Audio<S: Float = f32> {
     /// A wave in memory, read in its own format.
     Wave(Arc<Wave<S>>),
-    /// A file, decoded on the worker as the analysis folds it.
+    /// A file or bytes, decoded on the worker as the analysis folds it.
     #[cfg(codec)]
-    File(std::path::PathBuf),
+    File(Asset),
 }
 
 impl<S: Float> From<Wave<S>> for Audio<S> {
@@ -59,16 +61,23 @@ impl<S: Float> From<Arc<Wave<S>>> for Audio<S> {
 }
 
 #[cfg(codec)]
+impl<S: Float> From<Asset> for Audio<S> {
+    fn from(asset: Asset) -> Self {
+        Self::File(asset)
+    }
+}
+
+#[cfg(codec)]
 impl<S: Float> From<std::path::PathBuf> for Audio<S> {
     fn from(path: std::path::PathBuf) -> Self {
-        Self::File(path)
+        Asset::from(path).into()
     }
 }
 
 #[cfg(codec)]
 impl<S: Float> From<&std::path::Path> for Audio<S> {
     fn from(path: &std::path::Path) -> Self {
-        Self::File(path.to_path_buf())
+        Asset::from(path).into()
     }
 }
 
@@ -77,7 +86,7 @@ impl<S: Float> From<crate::AudioEntry<S>> for Audio<S> {
     fn from(entry: crate::AudioEntry<S>) -> Self {
         match entry {
             crate::AudioEntry::Resident(wave) => Self::Wave(wave),
-            crate::AudioEntry::Streamed(info) => Self::File(info.path().to_path_buf()),
+            crate::AudioEntry::Streamed(info) => Self::File(info.asset().clone()),
         }
     }
 }
@@ -202,7 +211,9 @@ impl<'w, S: Float> Reader<'w, S> {
                 at: Samples::ZERO,
             },
             #[cfg(codec)]
-            Audio::File(path) => Self::File(Box::new(tutti_codec::FileIn::<S>::open(path)?)),
+            Audio::File(asset) => {
+                Self::File(Box::new(tutti_codec::FileIn::<S>::open(asset.clone())?))
+            }
         })
     }
 

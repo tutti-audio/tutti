@@ -1,10 +1,10 @@
 //! Writing a [`Wave`] as a file.
 
 use crate::encoder::check_planned;
-use crate::{Encoder, Format, Result, Spec};
+use crate::{Encoder, FileEncoder, Format, Result, Spec};
 use std::io::{Cursor, Seek, Write};
-use tutti_buffers::{InterleavedMut, Sample, Wave, interleave};
-use tutti_platform::Destination;
+use tutti_buffers::{Interleaved, InterleavedMut, Sample, Wave, interleave};
+use tutti_platform::{Destination, Staged};
 use tutti_units::Samples;
 
 /// Frames written to the encoder at a time by [`write_wave`].
@@ -15,8 +15,13 @@ const WRITE_CHUNK: usize = 8192;
 /// file).
 ///
 /// - A path is written beside itself and renamed over it when whole, as
-///   [`Encoder::create_file`] does, so a failure leaves what was at the path as
-///   it was.
+///   [`FileEncoder::create`] does, so a failure leaves what was at the path as
+///   it was. An existing file is replaced unless the destination is
+///   [`create_new`](Destination::create_new), which refuses it with an
+///   [`Error::Commit`](crate::Error::Commit) whose source kind is
+///   [`AlreadyExists`](std::io::ErrorKind::AlreadyExists). A failed commit
+///   keeps the complete file at the error's `kept` path, the caller's to move
+///   or delete.
 /// - A writer (`&mut W` for any [`Write`]; a `Vec<u8>` is appended
 ///   to) is encoded into memory first and then handed over in one `write_all`,
 ///   so it needs no `Seek` and never holds a partial file from an encode error.
@@ -58,11 +63,16 @@ pub fn write_wave<'a, S: Sample>(
 ) -> Result<()> {
     let spec = Spec::new(format, wave.topology().clone(), wave.sample_rate());
     match dest.into() {
-        Destination::Path(path) => write_all(
-            wave,
-            Encoder::create_file_planned(&spec, &path, wave.len())?,
-        )
-        .map(drop),
+        Destination::Path { path, create_new } => {
+            check_planned(&spec, wave.len())?;
+            let staged = Staged::new(&path);
+            let staged = if create_new {
+                staged.create_new()
+            } else {
+                staged
+            };
+            write_file(wave, FileEncoder::create_staged(&spec, staged)?)
+        }
         Destination::Writer(writer) => {
             check_planned(&spec, wave.len())?;
             // The Vorbis encoder's thread owns its sink, so a borrowed writer
@@ -74,11 +84,11 @@ pub fn write_wave<'a, S: Sample>(
     }
 }
 
-/// Feeds `wave` to `encoder` in chunks and finishes it.
-fn write_all<S: Sample, W: Write + Seek + Send + 'static>(
+/// Feeds `wave` to `write` in chunks.
+fn feed<S: Sample>(
     wave: &Wave<S>,
-    mut encoder: Encoder<W>,
-) -> Result<W> {
+    mut write: impl FnMut(Interleaved<'_, f32>) -> Result<()>,
+) -> Result<()> {
     let layout = wave.layout();
     let mut rest = wave.planes();
     let mut chunk = vec![0.0f32; layout.interleaved_len(Samples::new(WRITE_CHUNK))];
@@ -87,9 +97,24 @@ fn write_all<S: Sample, W: Write + Seek + Send + 'static>(
         let len = layout.interleaved_len(head.frames());
         let mut out = InterleavedMut::new(&mut chunk[..len], layout)?;
         interleave(head, out.reborrow())?;
-        encoder.write(out.as_interleaved())?;
+        write(out.as_interleaved())?;
         rest = tail;
     }
+    Ok(())
+}
+
+/// Feeds `wave` to a plain-sink `encoder` and finishes it.
+fn write_all<S: Sample, W: Write + Seek + Send + 'static>(
+    wave: &Wave<S>,
+    mut encoder: Encoder<W>,
+) -> Result<W> {
+    feed(wave, |block| encoder.write(block))?;
+    encoder.finish()
+}
+
+/// Feeds `wave` to a file `encoder` and finishes it, putting the file in place.
+fn write_file<S: Sample>(wave: &Wave<S>, mut encoder: FileEncoder) -> Result<()> {
+    feed(wave, |block| encoder.write(block))?;
     encoder.finish()
 }
 

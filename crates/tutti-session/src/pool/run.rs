@@ -1,4 +1,4 @@
-//! Running the pool's loads: the worker stages the spawner takes, the stages
+//! Running the pool's loads: the worker stages the executor takes, the stages
 //! on the main thread and on the session's own, and the landings.
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -8,7 +8,6 @@ use tutti_platform::MainThreadMarker;
 use crate::jobs::panic_message;
 use crate::pool::entry::{LoadError, Step, Value};
 use crate::pool::open::OpenCx;
-use crate::pool::stamp::Stamp;
 use crate::pool::table::{Opening, Start, Worker};
 use crate::{Session, WorkerError};
 
@@ -35,24 +34,29 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// Starts queued worker stages while fewer than the configured number run.
     /// Each landing starts the next.
     pub(crate) fn pool_pump(&mut self) {
-        while let Some(Worker { flight, work, file }) = self.pool.entries.next_worker() {
+        while let Some(Worker {
+            flight,
+            work,
+            asset,
+        }) = self.pool.entries.next_worker()
+        {
             let defer = self.plugins.main_deferral();
             // A main stage the worker made drops its output on the main thread
             // wherever the stage itself is dropped: the jobs' channel, a session
             // that ends.
-            // The stamp is taken before the load reads the file, so a change
+            // The identity is taken before the load reads the asset, so a change
             // during the read shows at the next refresh.
             self.jobs.submit(
                 move || {
-                    let stamp = file.and_then(|file| Stamp::of(&file).ok());
-                    (stamp, work().map(|staged| staged.deferring(defer)))
+                    let loaded_from = asset.and_then(|asset| asset.identity());
+                    (loaded_from, work().map(|staged| staged.deferring(defer)))
                 },
                 move |session, done, _| {
-                    let (stamp, done) = match done {
-                        Ok((stamp, done)) => (stamp, done),
+                    let (loaded_from, done) = match done {
+                        Ok((loaded_from, done)) => (loaded_from, done),
                         Err(failed) => (None, Err(LoadError::Job(failed))),
                     };
-                    session.land_pool_load(flight, stamp, done);
+                    session.land_pool_load(flight, loaded_from, done);
                 },
             );
         }

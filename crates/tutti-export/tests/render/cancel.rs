@@ -252,12 +252,11 @@ fn a_finished_render_replaces_the_old_file() {
     }
 }
 
-/// A render that fails after its temporary exists (here the rename: the
-/// target is a directory) is an error, the target is untouched and the
-/// temporary is gone. A target in a directory that cannot hold the file
-/// still errors.
+/// A render whose rename fails (the target is a directory) is a commit error,
+/// the target is untouched, and the finished file is kept where the error
+/// names it. A target in a directory that cannot hold the file still errors.
 #[test]
-fn a_failed_write_leaves_the_target_and_no_temporary() {
+fn a_failed_rename_leaves_the_target_and_keeps_the_file() {
     for (format, ext) in formats() {
         let dir = tempfile::tempdir().unwrap();
         let target = dir.path().join(format!("d.{ext}"));
@@ -265,9 +264,17 @@ fn a_failed_write_leaves_the_target_and_no_temporary() {
         std::fs::write(target.join("keep"), b"x").unwrap();
         let err = render_to_file(graph(), &config(format), &FrozenClock, &target)
             .expect_err("a directory cannot be replaced by a file");
-        assert!(matches!(err, tutti_export::Error::Io(_)), "{ext}: {err}");
+        let tutti_export::Error::Encode(tutti_codec::Error::Commit(commit)) = &err else {
+            panic!("{ext}: a failed rename is a commit error, got {err}");
+        };
         assert!(target.join("keep").exists(), "{ext}");
-        assert_eq!(names(dir.path()), [format!("d.{ext}")], "{ext}");
+        let kept = commit.kept().to_path_buf();
+        assert_eq!(kept.parent(), Some(dir.path()), "{ext}");
+        assert!(std::fs::metadata(&kept).unwrap().len() > 0, "{ext}");
+        let kept_name = kept.file_name().unwrap().to_string_lossy().into_owned();
+        let mut expected = vec![format!("d.{ext}"), kept_name];
+        expected.sort();
+        assert_eq!(names(dir.path()), expected, "{ext}");
 
         let missing = dir.path().join("no-such-dir").join(format!("m.{ext}"));
         let err = render_to_file(graph(), &config(format), &FrozenClock, &missing)

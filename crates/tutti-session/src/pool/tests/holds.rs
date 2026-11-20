@@ -76,7 +76,7 @@ fn session(config: PoolConfig) -> (crate::DetachedSession, Spawned) {
     let held = spawned.clone();
     let session = Session::builder()
         .pool_config(config)
-        .spawn_with(move |job| held.0.lock().unwrap().push(job))
+        .executor(held.executor())
         .build_detached(SampleRate::SR_48K)
         .unwrap();
     (session, spawned)

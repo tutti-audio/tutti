@@ -328,10 +328,14 @@ pub mod types {
         NoteNumberOutOfRange, NoteValue, Pass, PassEnd, PitchClass, SegmentOrigin, TimelineSegment,
         beats_per_sample, first_frame_at_or_after, frames_per_beat, snap_to_whole_frame,
     };
-    pub use tutti_platform::{Asset, Destination, Identity, Open, Panicked, ReadSeek, Stamp};
+    pub use tutti_platform::{
+        Asset, Destination, Executor, Identity, Open, Panicked, PriorityRequest, ReadSeek, Staged,
+        StagedCommitError, StagedFile, Stamp,
+    };
     pub use tutti_rt::{
-        AtomicCell, AtomicWord, Count, Counter, CounterWriter, Drained, Gauge, GaugeWriter,
-        LevelSpan, PosFrame, Reading, Reclaim, RingFloat, RingSample, Tally, TallyWriter, Words,
+        AtomicCell, AtomicWord, Bell, Bells, Count, Counter, CounterWriter, Drained, Gauge,
+        GaugeWriter, LevelSpan, Listener, PosFrame, Reading, Reclaim, RingFloat, RingSample, Tally,
+        TallyWriter, Words,
     };
     pub use tutti_rt::{AtomicSampleRate, Mint, Param, Param64, ParamCell};
     pub use tutti_units::{
@@ -438,13 +442,13 @@ pub mod session {
     };
     // The pool.
     pub use tutti_session::Load as PoolLoad;
+    pub use tutti_session::WorkerError;
     pub use tutti_session::{
         Declared, HandleError, IntoPool, Life, LoadError, OpenCx, Owned, PoolConfig, PoolEntry,
         PoolError, PoolEvent, PoolJobError, PoolKey, PoolLoaded, PoolOutcome, PoolReport, PoolSet,
         PoolState, RefreshPool, RefreshReport, Retention, RetryError, Sharing, WhenLoadedError,
         stranded_loads,
     };
-    pub use tutti_session::{Task, WorkerError};
 
     #[cfg(feature = "export")]
     pub use tutti_dsp::FftFloat;
@@ -674,7 +678,7 @@ pub mod plugin {
             CatalogConfig, FormatMismatch, PluginDb, Probed, Scan, ScanPoll, ScanResult,
         };
         pub use tutti_plugin_types::{
-            Described, FourCc, PluginDescriptor, PluginId, PluginIdError, PluginRole, Uid,
+            Described, FourCc, PluginDescriptor, PluginId, PluginIdError, PluginRole, Uid, Widths,
         };
     }
 }

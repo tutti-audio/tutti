@@ -149,7 +149,7 @@ const ONLY: &[(&str, &[&str])] = &[
     // The staged files' `Mint` and the encoders' worker threads (`spawn_named`).
     (
         "tutti-codec",
-        &["tutti-units", "tutti-buffers", "tutti-rt", "tutti-platform"],
+        &["tutti-units", "tutti-buffers", "tutti-platform"],
     ),
     ("tutti-tempo", &["tutti-units", "tutti-music"]),
     (

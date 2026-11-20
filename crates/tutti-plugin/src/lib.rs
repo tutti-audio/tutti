@@ -444,7 +444,7 @@ pub mod catalog {
     };
     pub use tutti_plugin_host::Commit;
     pub use tutti_plugin_ipc::AudioConfig;
-    pub use tutti_plugin_types::{PluginDescriptor, PluginId, PluginRef, PluginRole};
+    pub use tutti_plugin_types::{PluginDescriptor, PluginId, PluginRef, PluginRole, Widths};
 }
 
 // The graph node of a served plugin and its two states. The control handle,

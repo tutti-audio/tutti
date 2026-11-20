@@ -874,8 +874,7 @@ mod tests {
                 zones: vec![vec![(generator::RELEASE_VOL_ENV, release)]],
             }],
         );
-        tutti_sf2::SoundFont::from_reader(&mut std::io::Cursor::new(file))
-            .expect("the built SoundFont parses")
+        tutti_sf2::SoundFont::open(file).expect("the built SoundFont parses")
     }
 
     /// The left mix gain of a voice at `rate` the `last`th chunk after its key-off over the

@@ -19,14 +19,19 @@
 //!   thread whose body gets a [`StopToken`]; its [`ThreadHandle`] stops and
 //!   joins on drop (or within a bound, `stop_within`) and reports a panic once
 //!   ([`Panicked`]).
+//! - [`Executor`] — where tutti's background futures run: on threads, on a caller's
+//!   `poll`, or on a host's executor.
 //! - [`MainThreadMarker`] — proof that the holder is on the process's main
 //!   thread, made only where the OS says so (`!Send`, `!Sync`).
 //! - [`Asset`] — where bytes come from, as every file entry point takes it
 //!   (`impl Into<Asset>`): a path or shared bytes, or an app's own [`Open`]
 //!   source that opens again and again, with an [`Identity`] to cache by (a
 //!   path's carries its [`Stamp`]). [`Destination`] is where one write goes: a
-//!   path, written staged, or a borrowed writer. The path implementation fails
-//!   at `open` on the web.
+//!   path, written staged and replacing by default (or refusing an existing file
+//!   with [`create_new`](Destination::create_new)), or a borrowed writer;
+//!   [`Staged`] opens the temporary beside a path that a destination writes
+//!   through, a [`StagedFile`] that syncs, closes and renames on `commit`, keeping the file in a [`StagedCommitError`] if that fails. The path implementations fail at `open` on
+//!   the web.
 //! - [`with_no_denormals`] — runs a closure with subnormals flushed to zero and
 //!   restores the mode after, unwinding included.
 //!
@@ -60,14 +65,18 @@
 mod asset;
 mod clock;
 mod denormals;
+mod executor;
 mod main_thread;
 mod priority;
 mod sleep;
 mod thread;
 
-pub use asset::{Asset, Destination, Identity, Open, ReadSeek, Stamp};
+pub use asset::{
+    Asset, Destination, Identity, Open, ReadSeek, Staged, StagedCommitError, StagedFile, Stamp,
+};
 pub use clock::monotonic_ns;
 pub use denormals::with_no_denormals;
+pub use executor::Executor;
 pub use main_thread::MainThreadMarker;
 pub use priority::{PriorityOutcome, PriorityRequest, Scheduling, request_priority};
 pub use sleep::sleep_until_ns;

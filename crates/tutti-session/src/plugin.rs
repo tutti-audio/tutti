@@ -72,12 +72,12 @@
 //!   its mirror, and (`modulation`) into the knob of the lane on that
 //!   parameter when it has one (doc 014 §8.2). A mirror rebuilt by a crossfade
 //!   to another plugin, or by a rescan the plugin announced, is read as a job
-//!   on the session's spawner (`SessionBuilder::spawn_with`): one round trip
+//!   on the session's executor (`SessionBuilder::executor`): one round trip
 //!   per parameter, landed in a later [`Session::update`]. Until then the
 //!   mirror is not ready, and a lane on the plugin waits for it.
 //! - **Snapshots.** A healthy plugin's state is captured every
 //!   `snapshot_interval` (8 s by default, set on the `SessionBuilder`) of
-//!   `now`, as a job on the same spawner (a blocking round trip), landed in a later
+//!   `now`, as a job on the same executor (a blocking round trip), landed in a later
 //!   update. One is in flight per plugin at most: the landing holds the
 //!   plugin's snapshot token until it lands, whether the job ran, panicked or
 //!   was dropped.
@@ -99,13 +99,13 @@
 //! - **Death.** The node stays in the graph, silent, with its wiring and
 //!   every lane fed to it; [`PluginChange::Reloading`].
 //! - **Load.** When the backoff passes, the existing `PluginLoad` (with
-//!   the last good state as its state) is submitted to the spawner as a job.
+//!   the last good state as its state) is submitted to the executor as a job.
 //!   Its landing, in a later `Session::update` and on whatever thread runs it
 //!   (no main-thread proof: a served replacement opens off the main thread,
 //!   and one that came back unopened for the main thread is a failed attempt),
 //!   swaps the loaded plugin in at the same node (`Graph::replace_plugin`)
 //!   and keeps the record: the last good state, its age, the failure
-//!   history. A job the spawner drops is [`RecoveryFailure::ReloadDropped`],
+//!   history. A job the executor drops is [`RecoveryFailure::ReloadDropped`],
 //!   one that panics [`RecoveryFailure::ReloadPanicked`]: a failed attempt.
 //! - **Reported.** [`PluginChange::Recovered`] says whether the state
 //!   came back and how old it was; a spent budget is
@@ -1060,7 +1060,7 @@ impl HostedPlugin {
     /// the incoming plugin, from its handle (where its reports now arrive),
     /// not yet ready: its values are read by a job (one round trip per
     /// parameter, so not on the calling thread), which the next
-    /// `Phase::Plugins` submits to the session's spawner.
+    /// `Phase::Plugins` submits to the session's executor.
     /// The outgoing mirror's report callback was on the outgoing handle,
     /// which reports nothing here once it is gone.
     ///
@@ -2204,7 +2204,11 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
         let snapshot_age = hosted
             .snapshot_from
             .map(|t| now.saturating_duration_since(t));
-        self.jobs.submit(
+        // blocks: a plugin load is an IPC round trip, bounded by the load deadlines.
+        // On a polled executor `spawn_dedicated` runs inside `update`'s poll, so this job stalls
+        // `update` until the plugin lane makes it await its reply.
+        self.jobs.submit_blocking(
+            "tutti-reload",
             move || load.run(),
             move |session, ended, out| match ended {
                 Ok(loaded) => session.land_plugin(
@@ -2228,7 +2232,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
         );
     }
 
-    /// The reload's job ended without a result (the spawner dropped it, or it
+    /// The reload's job ended without a result (the executor dropped it, or it
     /// panicked): a failed attempt, unless the attempt no longer applies.
     pub(crate) fn reload_job_failed(
         &mut self,
@@ -2424,7 +2428,11 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
 
             if let Some(read) = hosted.param_read.take() {
                 let token = Arc::clone(&hosted.mirror_token);
-                self.jobs.submit(
+                // blocks: the parameter read is an IPC round trip, bounded by `param_wait`.
+                // On a polled executor `spawn_dedicated` runs inside `update`'s poll, so this job
+                // stalls `update` until the plugin lane makes it await its reply.
+                self.jobs.submit_blocking(
+                    "tutti-params",
                     move || read.run(),
                     move |session, ended, out| match ended {
                         Ok(values) => session.land_plugin(
@@ -2466,7 +2474,11 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
             }
             if let Some((handle, token)) = snapshot {
                 let asked = now;
-                self.jobs.submit(
+                // blocks: the state save is an IPC round trip, bounded by `state_wait`.
+                // On a polled executor `spawn_dedicated` runs inside `update`'s poll, so this job
+                // stalls `update` until the plugin lane makes it await its reply.
+                self.jobs.submit_blocking(
+                    "tutti-snapshot",
                     move || handle.save_state(StateUse::Project),
                     move |session, ended, out| match ended {
                         Ok(state) => session.land_plugin(
@@ -2526,14 +2538,15 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
 mod tests {
     //! The record's own rules over a fake backend (no `plugin-server`):
     //! the snapshot cadence and its one-in-flight token, a declined save,
-    //! and a failing plugin's skipped snapshot. The session's spawner is a
+    //! and a failing plugin's skipped snapshot. The session's executor is a
     //! queue the test drains, so it runs, drops or holds each job. The death, the render mode
     //! and the export are pinned end to end over the CLAP test plugin, in
     //! `tests/plugin/plugin.rs`.
 
     use super::*;
-    use crate::{RecoveryPolicy, Task};
+    use crate::RecoveryPolicy;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use tutti_fixtures::{HeldFuture, HeldFutures};
     use tutti_plugin_types::ParameterInfo;
     use tutti_units::Normalized;
     use tutti_units::ParamId;
@@ -2636,18 +2649,17 @@ mod tests {
         saves: Arc<AtomicUsize>,
         dead: Arc<AtomicBool>,
         t0: Instant,
-        /// What the session's spawner was handed and nobody has taken.
-        held: Arc<Mutex<Vec<Task>>>,
+        /// What the session's executor was handed and nobody has taken.
+        held: HeldFutures,
     }
 
     /// A detached session snapshotting every second, hosting a fake that
     /// answers `state` at a dc node.
     fn rig(state: Option<Vec<u8>>) -> Rig {
-        let held: Arc<Mutex<Vec<Task>>> = Arc::default();
-        let queue = Arc::clone(&held);
+        let held = HeldFutures::new();
         let mut session = Session::builder()
             .snapshot_interval(Duration::from_secs(1))
-            .spawn_with(move |job| queue.lock_recover().push(job))
+            .executor(held.executor())
             .build_detached(SampleRate::SR_48K)
             .unwrap();
         let saves = Arc::new(AtomicUsize::new(0));
@@ -2723,9 +2735,9 @@ mod tests {
         }
 
         /// `Phase::Plugins` at `t0 + ms`: the jobs it submitted.
-        fn plugins_at(&mut self, ms: u64) -> Vec<Task> {
+        fn plugins_at(&mut self, ms: u64) -> Vec<HeldFuture> {
             let _ = self.events_at(ms);
-            std::mem::take(&mut *self.held.lock_recover())
+            self.held.take()
         }
 
         /// `Phase::Collect`: what the jobs sent lands; the events it reported.
@@ -2737,7 +2749,7 @@ mod tests {
         }
 
         /// Runs `job` on another thread, and lands its end.
-        fn run_and_land(&mut self, job: Task) -> Vec<SessionEvent> {
+        fn run_and_land(&mut self, job: HeldFuture) -> Vec<SessionEvent> {
             std::thread::spawn(move || job.run()).join().unwrap();
             self.land()
         }
@@ -3107,7 +3119,7 @@ mod tests {
     /// the incoming plugin, read off the control thread.** Right after the
     /// crossfade the mirror is not ready (a lane waits rather than start
     /// from the outgoing plugin's value); the next `Phase::Plugins` submits
-    /// the read to the spawner as a job, once; the job runs on another thread
+    /// the read to the executor as a job, once; the job runs on another thread
     /// and lands the incoming plugin's values in a later update. A read asked for before a
     /// second crossfade lands nowhere. The read goes through the incoming
     /// handle, which `PluginParamValues::start` also gives the mirror's
@@ -3223,7 +3235,7 @@ mod tests {
     }
 
     /// **A reload job that ends without a result is a failed attempt, named by
-    /// how it ended.** A job the spawner dropped is `ReloadDropped`, one that
+    /// how it ended.** A job the executor dropped is `ReloadDropped`, one that
     /// panicked `ReloadPanicked` with its message; either schedules the next
     /// attempt (`Reloading`). The end of an attempt that was already replaced
     /// (its token is not the record's any more) changes nothing.
@@ -3364,7 +3376,7 @@ mod tests {
     }
 
     /// **A reload job that outlives its node lands nowhere, silently.** The
-    /// spawner holds the job; the node is removed; the job then runs and its end
+    /// executor holds the job; the node is removed; the job then runs and its end
     /// lands: no event, and no failure recorded for a node that is gone.
     #[cfg(feature = "clap")]
     #[test]

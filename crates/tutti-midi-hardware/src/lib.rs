@@ -234,10 +234,14 @@ mod devices;
 mod endpoints;
 mod error;
 mod fault;
-// Only a native backend's callback runs through it; the stub has none.
+// Only the ALSA and Windows Multimedia callbacks run through it: the stub has none,
+// and CoreMIDI's port catches a panic in its own.
 #[cfg_attr(
-    midi_backend = "none",
-    allow(dead_code, reason = "only a native backend has a driver callback")
+    any(midi_backend = "none", midi_backend = "coremidi"),
+    allow(
+        dead_code,
+        reason = "only the ALSA and Windows Multimedia backends use it"
+    )
 )]
 mod guard;
 mod peer;

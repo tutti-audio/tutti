@@ -1,11 +1,9 @@
 //! A virtual MIDI source on CoreMIDI, in the UMP protocol the spec asks for.
 //!
-//! The safe `coremidi` wrapper only exposes a MIDI-1.0 virtual source
-//! (`MIDISourceCreate`), whose only send path is legacy packet bytes: a
-//! MIDI-2-only message (per-note controllers, JR Timestamps) cannot reach the
-//! wire through it. A UMP endpoint is created with `MIDISourceCreateWithProtocol`;
-//! the raw CoreMIDI calls for it are `tutti-coremidi-ffi`'s (`UmpSource`), and
-//! this module names the endpoint and puts its errors in this crate's.
+//! A UMP endpoint is created with `MIDISourceCreateWithProtocol` and sends UMP words,
+//! so a MIDI-2-only message (per-note controllers, JR Timestamps) reaches the wire;
+//! the raw CoreMIDI calls for it are `tutti-coremidi-ffi`'s (`UmpSource`), and this
+//! module names the endpoint and puts its errors in this crate's.
 //!
 //! [`UmpVirtualSource`] owns the endpoint, disposed on drop.
 

@@ -88,7 +88,9 @@ fn file() -> Result<MidiFile, Box<dyn std::error::Error>> {
         })
         .collect();
     let built = MidiFile::smf(SMF_DIVISION, Layout::Format0(LeadTrack::new(track)))?;
-    Ok(MidiFile::from_bytes(&built.to_bytes())?)
+    let mut bytes = Vec::new();
+    built.write(&mut bytes)?;
+    Ok(MidiFile::read(bytes)?)
 }
 
 fn run() -> Result<Outcome, Box<dyn std::error::Error>> {

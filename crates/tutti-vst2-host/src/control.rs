@@ -8,7 +8,8 @@ use tutti_plugin_types::{
     AutomationMode, ContentScale, Control, EditorPresence, EditorWindow, Features, KeyEvent,
     KeyUse, LoadedPlugin, ModifierConvention, ParamAccess, ParamEdit, ParamWriteError,
     ParameterInfo, PluginBus, PluginBuses, PluginClass, PluginDescriptor, PluginError,
-    PluginResult, Preset, PresetId, RenderMode, RenderModeSupport, Request, StateUse, WindowHandle,
+    PluginResult, Preset, PresetId, RenderMode, RenderModeSupport, Request, StateUse, Widths,
+    WindowHandle,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -66,6 +67,7 @@ pub(crate) fn descriptor_of(info: &PluginInfo) -> PluginDescriptor {
         },
         editor: EditorPresence::measured(info.has_editor),
         measured: None,
+        widths: Some(Widths::new(info.supports_f64)),
     }
 }
 
