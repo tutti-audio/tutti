@@ -21,7 +21,7 @@ use common::{Kind, Pair, TestNode, bits, input_signal, prepare};
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{
     Cx, Edge, Editor, Executor, FeedbackFrom, GraphSpec, InPort, Io, Node, NodeKey, Op, OutPort,
-    Plan, Prepare, Shape, Source, Status, Topology, TransportPosition, Unforkable, compile,
+    Plan, PortSource, Prepare, Shape, Status, Topology, TransportPosition, Unforkable, compile,
 };
 use tutti_units::Samples;
 
@@ -38,8 +38,8 @@ fn at(node: u64, port: u16) -> InPort {
     }
 }
 
-fn out(node: u64) -> Source {
-    Source::Node(OutPort {
+fn out(node: u64) -> PortSource {
+    PortSource::Node(OutPort {
         node: key(node),
         port: 0,
     })
@@ -357,8 +357,8 @@ fn a_global_source_is_an_addend() {
     let kinds: Vec<Kind> = vec![dc(0.25), Kind::Thru { width: 1 }];
     let (nt, map) = nodes(&kinds);
     t.nodes = nt.nodes;
-    t.outputs = vec![vec![Source::Global(0), out(1)]];
-    t.connect(at(2, 0), Edge::Direct(Source::Global(0)));
+    t.outputs = vec![vec![PortSource::Global(0), out(1)]];
+    t.connect(at(2, 0), Edge::Direct(PortSource::Global(0)));
     t.connect(at(2, 0), direct(1));
     t.outputs.push(vec![out(2)]);
     let got = render_both(&t, &map, 3);

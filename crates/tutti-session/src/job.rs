@@ -194,11 +194,8 @@ impl Cancel {
 
     /// The job was dropped: its result will not be read.
     #[cfg_attr(
-        not(any(test, feature = "plugin", feature = "analyze")),
-        expect(
-            dead_code,
-            reason = "the plugin state jobs (feature `plugin`) and analyze read it"
-        )
+        not(any(test, feature = "plugin")),
+        expect(dead_code, reason = "the plugin state jobs (feature `plugin`) read it")
     )]
     pub(crate) fn is_cancelled(&self) -> bool {
         self.0.cancelled.load(Ordering::Acquire)
@@ -471,6 +468,13 @@ impl<J: JobKind> Ticket<J> {
     /// Runs `effect` and lands its result, unless the job was dropped first:
     /// then `effect` does not run. A drop after the check lets `effect` finish
     /// (it is atomic with respect to the drop) and its result is discarded.
+    #[cfg_attr(
+        not(any(test, feature = "plugin")),
+        expect(
+            dead_code,
+            reason = "the plugin state and preset jobs (feature `plugin`) land through it"
+        )
+    )]
     pub(crate) fn complete(self, effect: impl FnOnce() -> Result<J::Output, J::Error>) {
         if !self.cancelled() {
             let result = effect();

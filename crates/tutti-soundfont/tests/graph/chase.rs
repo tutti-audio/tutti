@@ -10,7 +10,7 @@ use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_fixtures::midi;
 use tutti_graph::{
     Buses, Chase, Cx, Editor, EventCapacity, EventEdge, EventIn, EventInletNode, EventInletWriter,
-    EventKind, EventOut, Executor, Fade, FadeLaw, Io, Node, OutPort, Prepare, Shape, Source,
+    EventKind, EventOut, Executor, Fade, FadeLaw, Io, Node, OutPort, PortSource, Prepare, Shape,
     Status, TransportPosition, Unforkable,
 };
 use tutti_graph::{NodeKey, Stamp};
@@ -36,7 +36,7 @@ fn font() -> Arc<SoundFont> {
 }
 
 fn unit() -> SoundFontUnit<f32> {
-    SoundFontUnit::new(font(), Settings::new()).expect("builds")
+    Settings::new().build(font()).expect("builds")
 }
 
 fn cc(channel: u8, controller: u8, value: u8) -> Ump {
@@ -80,7 +80,7 @@ impl Rig {
             }),
         );
         ed.spec_mut().topology.set_outputs((0..2).map(|port| {
-            Source::Node(OutPort {
+            PortSource::Node(OutPort {
                 node: NodeKey(2),
                 port,
             })

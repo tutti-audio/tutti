@@ -2,7 +2,7 @@
 
 use std::io;
 use thiserror::Error;
-use tutti_buffers::{ChannelLayout, ChannelTopology};
+use tutti_buffers::ChannelLayout;
 
 /// Anything that can go wrong creating, writing or finishing an encode.
 ///
@@ -126,21 +126,6 @@ pub enum SpecError {
         /// The most the format holds.
         max: u16,
     },
-    /// A file of 3 to 8 channels that Ogg Vorbis cannot place: the format
-    /// fixes what those widths mean (Vorbis I, 4.3.9), and the spec's topology
-    /// is not that layout (a width the engine places by no order names no
-    /// speakers).
-    #[error(
-        "Ogg Vorbis gives {channels} channels a fixed speaker layout, and this file's \
-         topology ({topology:?}) is not it; state the speakers (or use a width past 8, \
-         whose order is the application's)"
-    )]
-    VorbisLayout {
-        /// The file's width.
-        channels: u16,
-        /// The topology the spec stated.
-        topology: ChannelTopology,
-    },
 }
 
 /// The codec behind an [`Error::Encoding`].
@@ -151,8 +136,6 @@ pub enum Codec {
     Flac,
     /// AIFF and AIFF-C.
     Aiff,
-    /// Ogg Vorbis.
-    Ogg,
 }
 
 impl std::fmt::Display for Codec {
@@ -160,22 +143,14 @@ impl std::fmt::Display for Codec {
         f.write_str(match self {
             Self::Flac => "FLAC",
             Self::Aiff => "AIFF",
-            Self::Ogg => "Ogg",
         })
     }
 }
 
 impl Error {
     #[cfg_attr(
-        not(any(
-            feature = "encode-flac",
-            feature = "encode-aiff",
-            feature = "encode-vorbis"
-        )),
-        expect(
-            dead_code,
-            reason = "only the flac, aiff and vorbis encoders report this"
-        )
+        not(any(feature = "encode-flac", feature = "encode-aiff")),
+        expect(dead_code, reason = "only the flac and aiff encoders report this")
     )]
     pub(crate) fn encoding(codec: Codec, detail: impl Into<String>) -> Self {
         Self::Encoding {

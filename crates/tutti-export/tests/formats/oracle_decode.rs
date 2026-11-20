@@ -5,8 +5,8 @@
 //!
 //! The oracle is [`symphonia`], a pure-Rust demuxer/decoder family that shares
 //! no code with this crate's encoders. `tutti-export` writes WAV through
-//! `tutti-codec`'s own writer, FLAC with `flacenc`, AIFF with `aifc` and Ogg with `vorbis_rs`; symphonia
-//! reads all four with its own parsers, its own bit readers and its own scale
+//! `tutti-codec`'s own writer, FLAC with `flacenc` and AIFF with `aifc`; symphonia
+//! reads all three with its own parsers, its own bit readers and its own scale
 //! conventions. It has no knowledge of tutti's quantizer, so a disagreement is
 //! evidence about the encoder rather than a shared bug reflected back.
 //!
@@ -17,7 +17,7 @@
 //! present already is also why this dev-dep is nearly free — see the PR body.)
 //!
 //! This is the question the existing Rust suite cannot ask. `roundtrip.rs`
-//! reads files back with `hound`, which only speaks WAV, so FLAC, AIFF and Ogg
+//! reads files back with `hound`, which only speaks WAV, so FLAC and AIFF
 //! are checked by frame count and header alone — never by content. An encoder
 //! that wrote a correctly-sized file full of the wrong samples passes every one
 //! of those assertions.
@@ -34,14 +34,8 @@
 //! swallow the bug. Both sides are therefore quantized back to integers at the
 //! file's own depth and those integers are compared exactly.
 //!
-//! Ogg Vorbis is lossy, so no such claim exists for it. The bound there is
-//! spectral and stated in the test: 20 Hz on the recovered tone (a
-//! zero-crossing estimate over a windowed slice, far tighter than any codec
-//! failure) and 1 dB of level (Vorbis at default quality holds a pure tone to
-//! well under that).
 
 use crate::support::{EncodeConfig, ExportConfig, RenderConfig};
-use tutti_fixtures::signal::rms_f64;
 
 use symphonia::core::codecs::audio::AudioDecoderOptions;
 use symphonia::core::formats::probe::Hint;
@@ -52,7 +46,7 @@ use tutti_units::Seconds;
 
 use crate::support::render_to_file;
 use tutti_buffers::ChannelLayout;
-use tutti_codec::{FlacLevel, Format, Pcm, Quality};
+use tutti_codec::{FlacLevel, Format, Pcm};
 use tutti_export::{RenderGraph, Setup};
 use tutti_graph::GraphBuilder;
 use tutti_nodes::testing::{Const, Osc};
@@ -174,21 +168,6 @@ fn decode(path: &std::path::Path, ext: &str) -> (u32, usize, Vec<f32>) {
     (rate, channels, out)
 }
 
-/// FFT-free frequency estimate by zero crossings — enough to tell 1 kHz from
-/// anything a broken codec would produce, and it needs no extra dependency.
-fn dominant_freq(samples: &[f32], channels: usize, rate: f64) -> f64 {
-    let mono: Vec<f32> = samples.chunks(channels).map(|f| f[0]).collect();
-    // Skip the codec's ramp-in.
-    let s = &mono[mono.len() / 4..mono.len() * 3 / 4];
-    let mut crossings = 0usize;
-    for w in s.windows(2) {
-        if w[0] <= 0.0 && w[1] > 0.0 {
-            crossings += 1;
-        }
-    }
-    crossings as f64 * rate / s.len() as f64
-}
-
 /// The FLAC must hold what the WAV holds.
 ///
 /// This is the exact question the export README says the Rust suite cannot ask,
@@ -304,58 +283,6 @@ fn aiff_and_wav_agree_sample_for_sample() {
             );
         }
     }
-}
-
-/// Ogg is lossy, so the claim is spectral: the tone survives at the right
-/// frequency and roughly the right level.
-#[test]
-fn ogg_preserves_the_tone() {
-    let d = tempfile::tempdir().unwrap();
-    let wav = d.path().join("tone.wav");
-    let ogg = d.path().join("tone.ogg");
-    render_to_file(
-        sine_graph(1000.0),
-        &config(Format::Wav(Pcm::Float32)),
-        &FrozenClock,
-        &wav,
-    )
-    .unwrap();
-    render_to_file(
-        sine_graph(1000.0),
-        &config(Format::Vorbis {
-            quality: Quality::default(),
-        }),
-        &FrozenClock,
-        &ogg,
-    )
-    .unwrap();
-
-    let (wr, wc, ws) = decode(&wav, "wav");
-    let (or, oc, os) = decode(&ogg, "ogg");
-    assert_eq!(wr, or, "sample rate differs");
-    assert_eq!(wc, oc, "channel count differs");
-
-    let wf = dominant_freq(&ws, wc, wr as f64);
-    let of = dominant_freq(&os, oc, or as f64);
-    // Zero-crossing estimate over a windowed slice: a few Hz of slack, far
-    // tighter than any codec failure would be.
-    assert!(
-        (wf - 1000.0).abs() < 20.0,
-        "the WAV control is not 1 kHz ({wf} Hz) — the harness is broken, not the codec"
-    );
-    assert!(
-        (of - wf).abs() < 20.0,
-        "Ogg tone came back at {of} Hz, WAV at {wf} Hz"
-    );
-
-    // Vorbis at default quality holds level to well under a dB on a pure tone.
-    let wl = rms_f64(&ws);
-    let ol = rms_f64(&os);
-    let db = 20.0 * (ol / wl).log10();
-    assert!(
-        db.abs() < 1.0,
-        "Ogg level moved by {db} dB relative to the WAV (rms {ol} vs {wl})"
-    );
 }
 
 /// `Flac::compression_level` reaches the encoder: every level decodes to

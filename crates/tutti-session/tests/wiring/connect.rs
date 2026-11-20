@@ -150,7 +150,7 @@ fn a_node_that_is_not_there_or_feeds_itself_is_refused() {
 /// an unwired port has none.
 #[test]
 fn topology_shows_the_edge_a_connect_wrote() {
-    use tutti_graph::{Edge, InPort, OutPort as RawOut, Source};
+    use tutti_graph::{Edge, InPort, OutPort as RawOut, PortSource};
 
     let mut s = offline();
     let (src, _) = s.graph().add(ForkByClone(Const::frame(&[0.25, 0.5])));
@@ -168,7 +168,7 @@ fn topology_shows_the_edge_a_connect_wrote() {
                 node: through.erase(),
                 port: c,
             }),
-            Some(&vec![Edge::Direct(Source::Node(RawOut {
+            Some(&vec![Edge::Direct(PortSource::Node(RawOut {
                 node: src.erase(),
                 port: c
             }))]),

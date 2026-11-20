@@ -137,7 +137,7 @@ fn scaled(input: usize, ratio: f64) -> usize {
 /// at all: `false` when both are the same whole rate in Hz, which is the
 /// rate the converter and a codec's header speak, so two rates that write
 /// the same header are one rate. A float comparison would turn on an ULP.
-/// A rate [`StreamingResampler::new`] refuses is not an identity either.
+/// A rate [`StreamingResampler::try_from`] refuses is not an identity either.
 #[must_use]
 pub fn needs_resampling(source_rate: SampleRate, target_rate: SampleRate) -> bool {
     match (whole_hz(source_rate.get()), whole_hz(target_rate.get())) {
@@ -197,35 +197,65 @@ pub struct StreamingResampler<F: FftFloat = f32> {
     out_scratch: Vec<Vec<F>>,
 }
 
-impl<F: FftFloat> StreamingResampler<F> {
-    /// Both rates are [`SampleRate`], which every caller already holds;
-    /// the narrowing to the converter's integer rates happens once, here,
-    /// at its boundary.
+/// What a [`StreamingResampler`] is made from: the width of the signal, the rate it comes at
+/// and the rate it goes to, and the chunking of its FFT blocks.
+///
+/// `StreamingResampler::try_from(config)` depends on the two rates together: each is narrowed
+/// once to the converter's whole Hz (at least 0.5 Hz and under 2^32 Hz), and the pair's
+/// repeating unit must fit an FFT block of the supported size.
+///
+/// # Errors
+///
+/// [`ResampleError`] for a rate that is not finite, at least 0.5 Hz and under 2^32 Hz, or for a
+/// rate pair whose block exceeds the supported size.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct StreamingResamplerConfig {
+    width: ChannelLayout,
+    source_rate: SampleRate,
+    target_rate: SampleRate,
+    chunk: ChunkSize,
+}
+
+impl StreamingResamplerConfig {
+    /// A converter of a `width`-wide signal from `source_rate` to `target_rate`, in chunks of
+    /// [`ChunkSize::N1024`].
     ///
-    /// This does not make a transposition a compile error: the two
-    /// arguments are the same type, so swapping them still builds
-    /// (verified). Only a `SourceRate`/`TargetRate` split would catch it,
-    /// and two names for one behaviour is not a type. What is gained is one
+    /// The two arguments are the same type, so swapping them still builds: what is gained is one
     /// derivation of the ratio, from values that never lost precision.
-    ///
-    /// # Errors
-    /// [`ResampleError`] for a rate that is not finite, at least 0.5 Hz and
-    /// under 2^32 Hz, or for what [`FftResampler::new`] refuses.
-    pub fn new(
-        channels: usize,
+    #[must_use]
+    pub const fn new(
+        width: ChannelLayout,
         source_rate: SampleRate,
         target_rate: SampleRate,
-        chunk: ChunkSize,
-    ) -> Result<Self, ResampleError> {
-        // Every scratch view is then buildable, so `drain_chunks` cannot fail on one.
-        ChannelLayout::try_from(channels)?;
-        let (source_hz, target_hz) = (source_rate.get(), target_rate.get());
+    ) -> Self {
+        Self {
+            width,
+            source_rate,
+            target_rate,
+            chunk: ChunkSize::N1024,
+        }
+    }
+
+    /// The input frames per FFT chunk and how finely each is subdivided.
+    #[must_use]
+    pub const fn chunk(mut self, chunk: ChunkSize) -> Self {
+        self.chunk = chunk;
+        self
+    }
+}
+
+impl<F: FftFloat> TryFrom<StreamingResamplerConfig> for StreamingResampler<F> {
+    type Error = ResampleError;
+
+    fn try_from(config: StreamingResamplerConfig) -> Result<Self, ResampleError> {
+        let channels = usize::from(config.width.count());
+        let (source_hz, target_hz) = (config.source_rate.get(), config.target_rate.get());
         let (source_int, target_int) = (whole_hz(source_hz)?, whole_hz(target_hz)?);
         let inner = FftResampler::new(
             source_int,
             target_int,
-            chunk.chunk().get(),
-            chunk.sub_chunks(),
+            config.chunk.chunk().get(),
+            config.chunk.sub_chunks(),
             channels,
         )?;
         let skip = inner.output_delay();
@@ -242,7 +272,9 @@ impl<F: FftFloat> StreamingResampler<F> {
             out_scratch,
         })
     }
+}
 
+impl<F: FftFloat> StreamingResampler<F> {
     /// Feed one block of planar input; append whatever output it completes.
     ///
     /// # Errors

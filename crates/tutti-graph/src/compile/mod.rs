@@ -21,7 +21,7 @@
 //! 4. **Latency solve** — `arrival = max(departures)`, `departure = arrival +
 //!    own`: `crate::delays`' solve, over the spec (its
 //!    `LatencyGraph` impl lists event and param sources). **Event and param
-//!    edges count toward arrival**, and **a `Source::Global` input is a
+//!    edges count toward arrival**, and **a `PortSource::Global` input is a
 //!    merge-point source**, delayed to the node's arrival like any other.
 //!
 //!    Emits a `Delay` op per mismatched audio port and per mismatched event
@@ -61,7 +61,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::NodeKey;
 use crate::NodeMix;
-use crate::{Edge, EdgeId, FeedbackFrom, InPort, OutPort, Sink, Source};
+use crate::{Edge, EdgeId, FeedbackFrom, InPort, OutPort, PortSink, PortSource};
 use tutti_buffers::ChannelLayout;
 use tutti_units::{Latency, Samples, Tail};
 
@@ -222,7 +222,7 @@ pub enum CompileError {
     #[error("gain of an edge into {sink:?}: source {from:?} is not an output of its node")]
     GainSourceOutOfRange {
         /// The sink of the edge whose gain it drives.
-        sink: Sink,
+        sink: PortSink,
         /// The source.
         from: EventOut,
     },
@@ -600,7 +600,7 @@ pub fn compile(
         .iter()
         .flat_map(|(at, es)| es.iter().map(move |e| (at, e)))
     {
-        if let Edge::Direct(Source::Node(p)) = *edge {
+        if let Edge::Direct(PortSource::Node(p)) = *edge {
             let (s, d) = (dense[&p.node], dense[&at.node]);
             preds[d].push(s);
             labelled.push((s, d, CycleEdge::Audio(at)));
@@ -626,7 +626,7 @@ pub fn compile(
     // the sum at that port, so before the node. (One into an output channel
     // feeds nothing a node reads.)
     for (&id, gain) in graph.gains() {
-        if let (Sink::Port(at), Some(from)) = (id.sink, gain.source) {
+        if let (PortSink::Port(at), Some(from)) = (id.sink, gain.source) {
             let (src, d) = (dense[&from.node], dense[&at.node]);
             preds[d].push(src);
             labelled.push((src, d, CycleEdge::Gain { at, from }));
@@ -747,11 +747,11 @@ pub fn compile(
         .values()
         .flatten()
         .filter_map(|e| match *e {
-            Edge::Direct(Source::Global(ch)) => Some(ch),
+            Edge::Direct(PortSource::Global(ch)) => Some(ch),
             _ => None,
         })
         .chain(topology.outputs.iter().flatten().filter_map(|s| match *s {
-            Source::Global(ch) => Some(ch),
+            PortSource::Global(ch) => Some(ch),
             _ => None,
         }))
         .collect();
@@ -792,14 +792,14 @@ pub fn compile(
                     // Silence adds nothing, bit for bit (the sum starts at
                     // `+0.0`); `validate` refuses it in a set, so this is a
                     // raw write's.
-                    Edge::Direct(Source::Zero) => continue,
-                    Edge::Direct(from @ (Source::Global(_) | Source::Node(_))) => {
+                    Edge::Direct(PortSource::Zero) => continue,
+                    Edge::Direct(from @ (PortSource::Global(_) | PortSource::Node(_))) => {
                         // A global input arrives at zero: it is a merge-point
                         // source like any other (see the module docs, step 4).
                         let (v, dep) = match from {
-                            Source::Global(ch) => (global_val[&ch], Latency::ZERO),
-                            Source::Node(p) => (audio_out_val[&p], departure(dense[&p.node])),
-                            Source::Zero => unreachable!("matched above"),
+                            PortSource::Global(ch) => (global_val[&ch], Latency::ZERO),
+                            PortSource::Node(p) => (audio_out_val[&p], departure(dense[&p.node])),
+                            PortSource::Zero => unreachable!("matched above"),
                         };
                         align_audio(
                             &mut em,
@@ -812,7 +812,7 @@ pub fn compile(
                 };
                 // An edge with a gain entry is a weighted lane.
                 let id = EdgeId {
-                    sink: Sink::Port(at),
+                    sink: PortSink::Port(at),
                     from: edge,
                 };
                 let gain = graph.gains().get(&id);
@@ -1016,15 +1016,15 @@ pub fn compile(
     let mut output_refs: Vec<ARef> = Vec::with_capacity(topology.outputs.len());
     for (channel, sources) in topology.outputs.iter().enumerate() {
         let channel = channel as u16;
-        let mut sources: Vec<Source> = sources
+        let mut sources: Vec<PortSource> = sources
             .iter()
             .copied()
-            .filter(|s| *s != Source::Zero)
+            .filter(|s| *s != PortSource::Zero)
             .collect();
         sources.sort();
-        let lane_of = |source: Source| {
+        let lane_of = |source: PortSource| {
             let id = EdgeId {
-                sink: Sink::Output(channel),
+                sink: PortSink::Output(channel),
                 from: Edge::Direct(source),
             };
             graph.gains().contains_key(&id).then_some(id)
@@ -1037,9 +1037,9 @@ pub fn compile(
                 .iter()
                 .map(|&source| {
                     let (v, dep) = match source {
-                        Source::Node(p) => (audio_out_val[&p], departure(dense[&p.node])),
-                        Source::Global(ch) => (global_val[&ch], Latency::ZERO),
-                        Source::Zero => unreachable!("filtered above"),
+                        PortSource::Node(p) => (audio_out_val[&p], departure(dense[&p.node])),
+                        PortSource::Global(ch) => (global_val[&ch], Latency::ZERO),
+                        PortSource::Zero => unreachable!("filtered above"),
                     };
                     let r = align_audio(
                         &mut em,
@@ -1076,17 +1076,17 @@ pub fn compile(
             em.read_aref(src, op);
             continue;
         }
-        let source = &sources.first().copied().unwrap_or(Source::Zero);
+        let source = &sources.first().copied().unwrap_or(PortSource::Zero);
         let mut src = match *source {
-            Source::Node(p) => ARef::Val(audio_out_val[&p]),
-            Source::Global(ch) => ARef::Val(global_val[&ch]),
-            Source::Zero => ARef::Zero,
+            PortSource::Node(p) => ARef::Val(audio_out_val[&p]),
+            PortSource::Global(ch) => ARef::Val(global_val[&ch]),
+            PortSource::Zero => ARef::Zero,
         };
         let d = match (graph.root_bank(), source) {
             (Some(bank), _) if usize::from(channel) >= bank.base => match source {
-                Source::Node(p) => departure(dense[&p.node]).gap_to(bank_total),
-                Source::Global(_) => Latency::ZERO.gap_to(bank_total),
-                Source::Zero => Samples::ZERO,
+                PortSource::Node(p) => departure(dense[&p.node]).gap_to(bank_total),
+                PortSource::Global(_) => Latency::ZERO.gap_to(bank_total),
+                PortSource::Zero => Samples::ZERO,
             },
             _ => solved.compensation().for_channel(usize::from(channel)),
         };
@@ -1163,15 +1163,15 @@ pub fn compile(
         let mut srcs = Vec::with_capacity(sources.len());
         for (lane, source) in sources.iter().enumerate() {
             let (mut src, dep) = match *source {
-                Source::Node(p) => match (audio_out_val.get(&p), dense.get(&p.node)) {
+                PortSource::Node(p) => match (audio_out_val.get(&p), dense.get(&p.node)) {
                     (Some(&v), Some(&n)) => (ARef::Val(v), departure(n)),
                     _ => (ARef::Zero, Latency::ZERO),
                 },
-                Source::Global(ch) => match global_val.get(&ch) {
+                PortSource::Global(ch) => match global_val.get(&ch) {
                     Some(&v) => (ARef::Val(v), Latency::ZERO),
                     None => (ARef::Zero, Latency::ZERO),
                 },
-                Source::Zero => (ARef::Zero, Latency::ZERO),
+                PortSource::Zero => (ARef::Zero, Latency::ZERO),
             };
             if align == crate::TapAlign::ToOutput && src != ARef::Zero {
                 let d = dep.gap_to(total);
@@ -1291,15 +1291,15 @@ pub fn compile(
                 let mut srcs = Vec::with_capacity(sources.len());
                 for (lane, source) in sources.iter().enumerate() {
                     let (mut src, dep) = match *source {
-                        Source::Node(p) => match (audio_out_val.get(&p), dense.get(&p.node)) {
+                        PortSource::Node(p) => match (audio_out_val.get(&p), dense.get(&p.node)) {
                             (Some(&v), Some(&n)) => (ARef::Val(v), departure(n)),
                             _ => (ARef::Zero, Latency::ZERO),
                         },
-                        Source::Global(ch) => match global_val.get(&ch) {
+                        PortSource::Global(ch) => match global_val.get(&ch) {
                             Some(&v) => (ARef::Val(v), Latency::ZERO),
                             None => (ARef::Zero, Latency::ZERO),
                         },
-                        Source::Zero => (ARef::Zero, Latency::ZERO),
+                        PortSource::Zero => (ARef::Zero, Latency::ZERO),
                     };
                     if *align == crate::TapAlign::ToOutput
                         && let ARef::Val(v) = src
@@ -1819,7 +1819,7 @@ pub fn compile(
 /// output, a tap lane or a meter lane.
 fn consumed_outputs(topology: &crate::Topology) -> BTreeSet<OutPort> {
     let edges = topology.edges.values().flatten().filter_map(|e| match *e {
-        Edge::Direct(Source::Node(p)) => Some(p),
+        Edge::Direct(PortSource::Node(p)) => Some(p),
         Edge::Feedback(f) => Some(f.from),
         Edge::Direct(_) => None,
     });
@@ -1837,7 +1837,7 @@ fn consumed_outputs(topology: &crate::Topology) -> BTreeSet<OutPort> {
         .chain(&topology.outputs)
         .flatten()
         .filter_map(|s| match *s {
-            Source::Node(p) => Some(p),
+            PortSource::Node(p) => Some(p),
             _ => None,
         });
     edges.chain(lanes).collect()

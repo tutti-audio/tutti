@@ -35,6 +35,18 @@ pub(super) async fn yield_now() {
     .await;
 }
 
+/// The queue's receiving end, which frees what is still queued when the future
+/// ends. A queued command can hold a stream's record, and the queue outlives the
+/// future while any stream's handle holds a sender: the record is dropped here, which
+/// tells its stream the streamer is gone.
+struct Queue<F: RingFloat>(Receiver<StreamerCommand<F>>);
+
+impl<F: RingFloat> Drop for Queue<F> {
+    fn drop(&mut self) {
+        while self.0.try_recv().is_ok() {}
+    }
+}
+
 /// The streamer's body: wait for a ring, step until the rings are filled, and end
 /// when `stop` is raised.
 ///
@@ -49,10 +61,11 @@ pub(super) async fn streamer_future<F: RingFloat>(
     mut listener: Listener,
     stop: Arc<AtomicBool>,
 ) {
+    let queue = Queue(queue);
     loop {
         listener.rung().await;
         while !stop.load(Ordering::Acquire) {
-            let outcome = cycle.step_until_idle(&shared, || queue.try_recv().ok());
+            let outcome = cycle.step_until_idle(&shared, || queue.0.try_recv().ok());
             if outcome != StepOutcome::Busy {
                 break;
             }

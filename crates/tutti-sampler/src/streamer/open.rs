@@ -1,22 +1,15 @@
-//! Opening a stream: the request ([`StreamStart`]), the reply ([`PendingOpen`],
-//! [`Open`], [`OpenError`]) and what the reply carries: the control side's
+//! Opening a stream: the request ([`StreamStart`]), its refusals ([`OpenError`],
+//! [`AdoptError`]) and what an adopted stream is made of: the control side's
 //! [`Stream`] and the audio side's one [`StreamReader`].
 //!
-//! The ring's width comes from the file's header, so the ring is built on the
-//! streamer's thread after the probe, and a file that cannot seek is decoded
-//! whole before it can be. The reader therefore cannot be the return value of
-//! `open`; it is the **reply** of one open: a cell the streamer writes once
-//! and [`PendingOpen::poll`] reads once, consuming the `PendingOpen`. There is nothing
-//! to look a reader up by, so a reader cannot be taken twice (`poll` takes
-//! `self`), cannot be taken before the stream exists (`Pending` carries the
-//! `PendingOpen` back), and cannot be another open's (the reply is this open's).
+//! The ring's width comes from the file's header, so the ring is built after the
+//! file is read ([`OpenStream::run`](crate::OpenStream::run)), on the control thread
+//! ([`DiskStreamer::adopt`](crate::DiskStreamer::adopt)). The reader is the value of
+//! that adopt, with the stream: it cannot be taken twice, cannot exist before the
+//! stream does, and cannot be another open's.
 
 use std::ops::Range;
 use std::sync::Arc;
-
-use std::future::Future;
-use std::pin::Pin;
-use std::task::{Context, Poll};
 
 use tutti_buffers::ChannelLayout;
 use tutti_rt::{PosReader, Publisher};
@@ -27,6 +20,7 @@ use super::cells::Cells;
 use super::command::StreamId;
 use super::control::StreamFile;
 use super::control_cell::ControlCell;
+use super::decode::OpenedStream;
 use super::loops::RingControl;
 use super::prefetch::SharedReader;
 use super::status::StatusCell;
@@ -35,7 +29,6 @@ use crate::voice::Direction;
 use crate::voice::interp::Place;
 use crate::{Loop, PlaceError};
 use tutti_rt::RingFloat;
-use tutti_rt::{OneshotReceiver, Unanswered};
 
 /// Where in the file a stream's reader starts, in file frames.
 ///
@@ -99,7 +92,7 @@ impl From<StreamStart> for f64 {
     }
 }
 
-/// Why an open failed.
+/// Why a file could not be read for an open ([`OpenStream::run`](crate::OpenStream::run)).
 #[derive(Clone, Debug, PartialEq, thiserror::Error)]
 #[non_exhaustive]
 pub enum OpenError {
@@ -109,19 +102,29 @@ pub enum OpenError {
     /// The file is not audio this build can decode.
     #[error("the file is not audio this build can decode")]
     Format,
+}
+
+/// Why a read file did not become a stream ([`DiskStreamer::adopt`](crate::DiskStreamer::adopt)).
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum AdoptError<F: RingFloat> {
     /// The file's channels cannot be placed into the voice's width: a channel
     /// no speaker names (a `Speaker::Unknown` in its topology), or a
     /// narrowing with an unordered end (a 5.1 file into 5 channels).
     #[error("the file cannot be placed: {0}")]
     Placement(#[source] PlaceError),
-    /// The streamer thread is gone, so the open was never answered.
+    /// The streamer thread is gone, so nothing would feed the stream.
     #[error("the streamer thread is gone")]
     StreamerGone,
+    /// The streamer's command queue is full. Nothing was lost: the open comes
+    /// back to adopt again once the streamer has taken what it holds.
+    #[error("the streamer's queue is full: adopt the open again")]
+    Busy(Box<OpenedStream<F>>),
 }
 
-/// What the streamer answers an open with: everything the audio side's
-/// [`StreamReader`] is built from but the registered control reader, which the
-/// control thread registers ([`PendingOpen::poll`]).
+/// What building a stream makes besides its record: everything the audio side's
+/// [`StreamReader`] is built from but the registered control reader, which
+/// [`serve`] registers.
 pub(crate) struct Opened<F: RingFloat> {
     pub(crate) id: StreamId,
     pub(crate) ring: SharedReader<F>,
@@ -151,132 +154,27 @@ impl<F: RingFloat> std::fmt::Debug for Opened<F> {
     }
 }
 
-/// An open the streamer has not answered yet.
+/// The stream and its reader, from what building a stream made.
 ///
-/// [`poll`](Self::poll) consumes it: the stream and its reader are the reply,
-/// and a reply is received once.
-///
-/// ```compile_fail
-/// # use tutti_sampler::PendingOpen;
-/// # fn twice(opening: PendingOpen<f32>) {
-/// let _ = opening.poll();
-/// let _ = opening.poll(); // `poll` took `opening` by value
-/// # }
-/// ```
-///
-/// Its compiling twin polls the `PendingOpen` it is handed back instead:
-///
-/// ```
-/// # use tutti_sampler::{Open, PendingOpen};
-/// # fn again(opening: PendingOpen<f32>) {
-/// if let Open::Pending(opening) = opening.poll() {
-///     let _ = opening.poll();
-/// }
-/// # }
-/// ```
-///
-/// Dropping a `PendingOpen` abandons the open: the streamer closes the stream it
-/// opened.
-#[derive(Debug)]
-#[must_use = "an open nobody polls is abandoned"]
-pub struct PendingOpen<F: RingFloat> {
-    id: StreamId,
-    reply: OneshotReceiver<Result<Opened<F>, OpenError>>,
-    /// The streamer's command queue, which the stream it answers with sends
-    /// on.
+/// Registers the reader's control cell before it returns (that allocates, so
+/// it is here and not on the audio thread).
+pub(super) fn serve<F: RingFloat>(
+    opened: Opened<F>,
     port: StreamerPort<F>,
-}
-
-impl<F: RingFloat> PendingOpen<F> {
-    pub(crate) fn new(
-        id: StreamId,
-        reply: OneshotReceiver<Result<Opened<F>, OpenError>>,
-        port: StreamerPort<F>,
-    ) -> Self {
-        Self { id, reply, port }
-    }
-
-    /// The stream this open is for.
-    pub fn id(&self) -> StreamId {
-        self.id
-    }
-
-    /// Whether the streamer has answered. Never blocks; control thread.
-    ///
-    /// `Ready` registers the reader's control cell before it returns (that
-    /// allocates, so it is here and not on the audio thread).
-    pub fn poll(self) -> Open<F> {
-        match self.reply.try_recv() {
-            Ok(Ok(opened)) => self.ready(opened),
-            Ok(Err(error)) => Open::Failed(error),
-            Err(Unanswered::Empty) => Open::Pending(self),
-            // The streamer dropped the reply unanswered: its future is gone.
-            Err(Unanswered::Disconnected) => Open::Failed(OpenError::StreamerGone),
-        }
-    }
-
-    fn ready(self, opened: Opened<F>) -> Open<F> {
-        Self::ready_with(self.port, opened)
-    }
-
-    fn ready_with(port: StreamerPort<F>, opened: Opened<F>) -> Open<F> {
-        Open::Ready(
-            Stream::new(
-                opened.id,
-                port,
-                Arc::clone(&opened.status),
-                Arc::clone(&opened.cells),
-                Arc::clone(&opened.file),
-                opened.control.clone(),
-                opened.looping.clone(),
-                opened.direction.clone(),
-            ),
-            StreamReader::new(opened),
-        )
-    }
-}
-
-/// Awaiting an open resolves with the stream and its reader once the streamer
-/// answers, and wakes the task when it does: the open as a future, where
-/// [`poll`](PendingOpen::poll) is for a caller that has other work between looks.
-///
-/// # Errors
-///
-/// The open's own failure, as the streamer answered it; [`OpenError::StreamerGone`]
-/// when the streamer's future ends first.
-impl<F: RingFloat> Future for PendingOpen<F> {
-    type Output = Result<(Stream<F>, StreamReader<F>), OpenError>;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let this = self.get_mut();
-        match this.reply.poll_recv(cx) {
-            Poll::Pending => Poll::Pending,
-            Poll::Ready(Ok(Ok(opened))) => {
-                // `ready` takes the port by value: a spent `PendingOpen` is not
-                // polled again.
-                let port = this.port.clone();
-                let Open::Ready(stream, reader) = Self::ready_with(port, opened) else {
-                    unreachable!("`ready_with` answers `Ready`")
-                };
-                Poll::Ready(Ok((stream, reader)))
-            }
-            Poll::Ready(Ok(Err(error))) => Poll::Ready(Err(error)),
-            Poll::Ready(Err(_)) => Poll::Ready(Err(OpenError::StreamerGone)),
-        }
-    }
-}
-
-/// An open's answer.
-#[derive(Debug)]
-#[must_use = "a dropped `Pending` abandons the open; a dropped `Stream` closes it"]
-pub enum Open<F: RingFloat> {
-    /// Not answered yet: poll the `PendingOpen` again.
-    Pending(PendingOpen<F>),
-    /// The stream is open: the handle is the control thread's, and the reader
-    /// is the voice's, by value. Dropping the [`Stream`] ends the stream.
-    Ready(Stream<F>, StreamReader<F>),
-    /// The stream did not open, and will not.
-    Failed(OpenError),
+) -> (Stream<F>, StreamReader<F>) {
+    (
+        Stream::new(
+            opened.id,
+            port,
+            Arc::clone(&opened.status),
+            Arc::clone(&opened.cells),
+            Arc::clone(&opened.file),
+            opened.control.clone(),
+            opened.looping.clone(),
+            opened.direction.clone(),
+        ),
+        StreamReader::new(opened),
+    )
 }
 
 /// The audio side's one reader of a stream: the ring's position reader and
@@ -305,7 +203,7 @@ pub struct StreamReader<F: RingFloat> {
     id: StreamId,
     pub(crate) ring: SharedReader<F>,
     /// The position reader and the control's reader, registered together on
-    /// the control side ([`PendingOpen::poll`]): registering allocates.
+    /// the control side ([`serve`]): registering allocates.
     pub(crate) reader: RingReader<F>,
     pub(crate) cells: Arc<Cells>,
     /// What a fork of the voice plays, and whether its stream is still served.

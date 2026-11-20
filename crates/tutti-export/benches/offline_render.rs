@@ -13,7 +13,7 @@
 //!
 //! `encode/` writes real files into a `tempfile::TempDir`, and is
 //! track-only: never gate it. Its cost is dominated by the page cache and
-//! by third-party encoders (`hound`, `flacenc`, `vorbis_rs`), so a regression
+//! by third-party encoders (`hound`, `flacenc`), so a regression
 //! in it usually says something about the machine. It is here because the
 //! render/encode split is the useful diagnostic: when an export is slow,
 //! `encode` minus `render` at matching settings says which half to look at.
@@ -215,19 +215,13 @@ fn bench_encode(c: &mut Criterion) {
     let mut group = c.benchmark_group("encode");
     group.throughput(Throughput::Elements((0.25 * SR) as u64));
 
-    let formats: [(&str, Format); 3] = [
+    let formats: [(&str, Format); 2] = [
         ("wav", Format::Wav(Pcm::Int24)),
         (
             "flac",
             Format::Flac {
                 depth: tutti_codec::IntDepth::Int24,
                 level: tutti_codec::FlacLevel::default(),
-            },
-        ),
-        (
-            "ogg",
-            Format::Vorbis {
-                quality: tutti_codec::Quality::default(),
             },
         ),
     ];

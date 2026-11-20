@@ -52,7 +52,7 @@
 //! The diagram above, as a [`Topology`](crate::Topology):
 //!
 //! ```
-//! use tutti_graph::{Edge, Feed, InPort, InputDelay, NodeSpec, OutPort, Source};
+//! use tutti_graph::{Edge, Feed, InPort, InputDelay, NodeSpec, OutPort, PortSource};
 //! use tutti_graph::delays;
 //! use tutti_units::{SampleRate, Samples};
 //! use tutti_buffers::ChannelLayout;
@@ -60,7 +60,7 @@
 //!
 //! let (a, limiter, b, mixer) = (NodeKey(1), NodeKey(2), NodeKey(3), NodeKey(4));
 //! let (mono, stereo) = (ChannelLayout::MONO, ChannelLayout::STEREO);
-//! let out = |node| Edge::Direct(Source::Node(OutPort { node, port: 0 }));
+//! let out = |node| Edge::Direct(PortSource::Node(OutPort { node, port: 0 }));
 //!
 //! let mut g = Topology::default();
 //! g.nodes.insert(a, NodeSpec::new("src", ChannelLayout::EMPTY, mono));
@@ -70,7 +70,7 @@
 //! g.connect(InPort { node: limiter, port: 0 }, out(a));
 //! g.connect(InPort { node: mixer, port: 0 }, out(limiter));
 //! g.connect(InPort { node: mixer, port: 1 }, out(b));
-//! g.set_outputs([Source::Node(OutPort { node: mixer, port: 0 })]);
+//! g.set_outputs([PortSource::Node(OutPort { node: mixer, port: 0 })]);
 //!
 //! let d = delays(&g, SampleRate::SR_48K);
 //! // The mixer's port 1 waits 512 frames for the limiter on port 0.
@@ -530,7 +530,7 @@ mod tests {
         nodes: Vec<(Samples, Vec<Feed<usize>>)>,
         /// Per node: its other (event or param) sources.
         others: Vec<Vec<usize>>,
-        /// Source feeding each output channel.
+        /// PortSource feeding each output channel.
         outputs: Vec<Option<usize>>,
     }
 

@@ -11,7 +11,7 @@ use std::fmt;
 use std::future::Future;
 use std::io;
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 use std::time::Duration;
 
 use crate::Instant;
@@ -20,8 +20,8 @@ use crate::priority::PriorityRequest;
 mod timers;
 
 pub use async_task::Task;
-pub use timers::Sleep;
 use timers::Timers;
+pub use timers::{Shutdown, Sleep, Timer};
 
 #[cfg_attr(not(target_arch = "wasm32"), path = "executor/native.rs")]
 #[cfg_attr(target_arch = "wasm32", path = "executor/wasm.rs")]
@@ -75,7 +75,12 @@ fn lock<T: ?Sized>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 /// blocking pool's idle threads end, and every task still pending is dropped. A future
 /// that holds an `Executor` clone keeps the executor alive, so that drop never comes:
 /// tutti's own futures never hold a clone, and a spawner passes a future what it needs
-/// instead. A long-lived future ends on its own stop flag before the executor drops.
+/// instead. A long-lived future ends on its own stop flag before the executor drops. A
+/// future that needs deadlines holds a [`Timer`], which keeps nothing alive, and a future
+/// that spawns later holds a [`WeakExecutor`] and upgrades only for the spawn.
+///
+/// The executor's deadline queue closes with it: every [`Sleep`] pending wakes and resolves
+/// `Err(`[`Shutdown`]`)`, and one made or polled later does at once; nothing fires deadlines after that.
 ///
 /// # Not on the audio thread
 ///
@@ -131,6 +136,34 @@ impl Drop for Handle {
 impl Default for Executor {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// A handle to an [`Executor`] that keeps nothing alive, made by
+/// [`Executor::downgrade`]: the `Weak` of the executor's `Arc`.
+///
+/// Work that is queued or handed out before it runs (a load the app runs later, a task
+/// that starts a dedicated watch) holds one instead of a clone, so the executor still
+/// shuts down when its last clone drops. [`upgrade`](Self::upgrade) gives a clone back
+/// while the executor lives, and `None` once it has shut down.
+#[derive(Clone)]
+pub struct WeakExecutor {
+    handle: Weak<Handle>,
+}
+
+impl WeakExecutor {
+    /// A clone of the executor while one of its clones is alive, `None` once it has shut
+    /// down. Hold the clone only as long as the work that needs it: a clone kept in a
+    /// task on the executor keeps the executor alive.
+    #[must_use]
+    pub fn upgrade(&self) -> Option<Executor> {
+        self.handle.upgrade().map(|handle| Executor { handle })
+    }
+}
+
+impl fmt::Debug for WeakExecutor {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("WeakExecutor").finish_non_exhaustive()
     }
 }
 
@@ -197,6 +230,9 @@ impl Executor {
     /// # Errors
     ///
     /// The OS's refusal to start the thread (native only). The future is not run.
+    ///
+    /// The OS refusing `priority` is not an error: the thread runs at the priority it has,
+    /// one `tracing::warn!` names the thread and the refusal, and this returns `Ok`.
     pub fn spawn_dedicated<T: Send + 'static>(
         &self,
         name: &str,
@@ -210,7 +246,8 @@ impl Executor {
     /// already past resolves on its first poll.
     ///
     /// A driver fires it, so its resolution is the cadence of whoever drives. Dropping the
-    /// [`Sleep`] before it resolves removes it from the queue.
+    /// [`Sleep`] before it resolves removes it from the queue. It resolves at once with
+    /// `Err(`[`Shutdown`]`)` once this executor has shut down.
     ///
     /// ```
     /// use tutti_platform::{Executor, Instant};
@@ -221,13 +258,33 @@ impl Executor {
     /// assert!(task.is_finished());
     /// ```
     pub fn sleep_until(&self, deadline: Instant) -> Sleep {
-        Sleep::new(&self.handle.shared.timers, deadline)
+        self.timer().sleep_until(deadline)
     }
 
     /// A future that resolves `duration` from now: [`sleep_until`](Self::sleep_until) of
     /// that instant.
     pub fn sleep(&self, duration: Duration) -> Sleep {
-        self.sleep_until(Instant::now() + duration)
+        self.timer().sleep(duration)
+    }
+
+    /// A [`Timer`] on this executor's deadlines, for a future that needs a deadline and
+    /// must not hold the executor.
+    ///
+    /// The timer holds the deadline queue only: it keeps the executor, its threads and its
+    /// queue from nothing, so the executor still shuts down when its last clone drops, and
+    /// a [`Sleep`] it made resolves at once with `Err(`[`Shutdown`]`)` from then on.
+    pub fn timer(&self) -> Timer {
+        Timer::new(&self.handle.shared.timers)
+    }
+
+    /// A [`WeakExecutor`] on this executor, for work that must reach the executor later
+    /// without keeping it alive: it upgrades to a clone while a clone lives, and gives
+    /// `None` once the executor has shut down.
+    #[must_use]
+    pub fn downgrade(&self) -> WeakExecutor {
+        WeakExecutor {
+            handle: Arc::downgrade(&self.handle),
+        }
     }
 
     /// Fires the due sleeps, then runs ready tasks on this thread until none is ready, and

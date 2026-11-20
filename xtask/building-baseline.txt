@@ -61,7 +61,6 @@ tutti-codec  ctor-result  crates/tutti-codec/src/file_out.rs::FileOut::create
 tutti-codec  ctor-result  crates/tutti-codec/src/flac.rs::FlacWriter::create
 tutti-codec  ctor-result  crates/tutti-codec/src/format.rs::Format::from_extension
 tutti-codec  ctor-result  crates/tutti-codec/src/format.rs::Format::from_path
-tutti-codec  ctor-result  crates/tutti-codec/src/vorbis.rs::VorbisWriter::create
 tutti-codec  ctor-result  crates/tutti-codec/src/wav.rs::WavWriter::create
 
 # tutti-cpal
@@ -71,13 +70,6 @@ tutti-cpal  ctor-result  crates/tutti-cpal/src/mic.rs::MicIn::open
 tutti-curve  with-prefix  crates/tutti-curve/src/trajectory.rs::Trajectory::with_range
 
 # tutti-dsp
-tutti-dsp  with-prefix  crates/tutti-dsp/src/stft/geometry.rs::StftGeometry::with_window_fn
-tutti-dsp  ctor-result  crates/tutti-dsp/src/resample/fft.rs::FftResampler::new
-tutti-dsp  ctor-result  crates/tutti-dsp/src/resample/streaming.rs::StreamingResampler::new
-tutti-dsp  ctor-result  crates/tutti-dsp/src/stft/geometry.rs::StftGeometry::cola
-tutti-dsp  ctor-result  crates/tutti-dsp/src/stft/geometry.rs::StftGeometry::cola_with
-tutti-dsp  ctor-result  crates/tutti-dsp/src/stft/geometry.rs::StftGeometry::new
-tutti-dsp  ctor-result  crates/tutti-dsp/src/stft/grid.rs::Grid::new
 
 # tutti-engine
 tutti-engine  with-prefix  crates/tutti-engine/src/routing.rs::OutputLevels::with_dim
@@ -140,38 +132,12 @@ tutti-midi-runtime  node-ctor  crates/tutti-midi-runtime/src/schedule/clip_node.
 tutti-midi-runtime  node-ctor  crates/tutti-midi-runtime/src/schedule/harmony_node.rs::HarmonyNode::new
 
 # tutti-modulation
-tutti-modulation  ctor-result  crates/tutti-modulation/src/program.rs::ControlProgram::new
 
 # tutti-music
 tutti-music  setter  crates/tutti-music/src/frame_clock.rs::FrameClock::set_sample_rate
 tutti-music  setter  crates/tutti-music/src/frame_clock.rs::FrameClock::set_tempo
 
 # tutti-nodes
-tutti-nodes  with-prefix  crates/tutti-nodes/src/lfo.rs::LfoNode::with_beat_sync
-tutti-nodes  with-prefix  crates/tutti-nodes/src/lfo.rs::LfoNode::with_depth
-tutti-nodes  with-prefix  crates/tutti-nodes/src/lfo.rs::LfoNode::with_phase_offset
-tutti-nodes  with-prefix  crates/tutti-nodes/src/lfo.rs::LfoNode::with_rate
-tutti-nodes  with-prefix  crates/tutti-nodes/src/lfo.rs::LfoNode::with_seed
-tutti-nodes  with-prefix  crates/tutti-nodes/src/oscillator.rs::OscillatorNode::with_level
-tutti-nodes  setter  crates/tutti-nodes/src/automation/control_lane.rs::LaneControls::set_value
-tutti-nodes  setter  crates/tutti-nodes/src/automation/recording.rs::Recorder::set_config
-tutti-nodes  setter  crates/tutti-nodes/src/automation/recording.rs::Recorder::set_mode
-tutti-nodes  setter  crates/tutti-nodes/src/oscillator.rs::OscillatorNode::set_frequency
-tutti-nodes  setter  crates/tutti-nodes/src/oscillator.rs::OscillatorNode::set_level
-tutti-nodes  node-ctor  crates/tutti-nodes/src/automation/control_lane.rs::ControlLaneNode::by_id
-tutti-nodes  node-ctor  crates/tutti-nodes/src/automation/control_lane.rs::ControlLaneNode::for_unit
-tutti-nodes  node-ctor  crates/tutti-nodes/src/automation/lane.rs::AutomationLaneNode::new
-tutti-nodes  node-ctor  crates/tutti-nodes/src/click.rs::ClickNode::new
-tutti-nodes  node-ctor  crates/tutti-nodes/src/kernel.rs::KernelNode::with_kernel
-tutti-nodes  node-ctor  crates/tutti-nodes/src/lfo.rs::LfoNode::new
-tutti-nodes  node-ctor  crates/tutti-nodes/src/oscillator.rs::OscillatorNode::saw
-tutti-nodes  node-ctor  crates/tutti-nodes/src/oscillator.rs::OscillatorNode::sine
-tutti-nodes  node-ctor  crates/tutti-nodes/src/oscillator.rs::OscillatorNode::square
-tutti-nodes  node-ctor  crates/tutti-nodes/src/oscillator.rs::OscillatorNode::triangle
-tutti-nodes  node-ctor  crates/tutti-nodes/src/signal/follower.rs::SourceNode::from_decl
-tutti-nodes  node-ctor  crates/tutti-nodes/src/signal/follower.rs::SourceNode::new
-tutti-nodes  node-ctor  crates/tutti-nodes/src/signal/note_envelope.rs::SourceNode::from_decl
-tutti-nodes  node-ctor  crates/tutti-nodes/src/signal/note_envelope.rs::SourceNode::new
 
 # tutti-plugin
 
@@ -239,9 +205,6 @@ tutti-plugin-types  option-arg  crates/tutti-plugin-types/src/parameters.rs::Par
 tutti-plugin-types  option-arg  crates/tutti-plugin-types/src/parameters.rs::ParameterInfo::with_role
 
 # tutti-polysynth
-tutti-polysynth  setter  crates/tutti-polysynth/src/polysynth.rs::PolySynth::set_volume
-tutti-polysynth  setter  crates/tutti-polysynth/src/portamento.rs::Portamento::set_sample_rate
-tutti-polysynth  setter  crates/tutti-polysynth/src/portamento.rs::Portamento::set_target
 
 # tutti-sampler
 tutti-sampler  with-prefix  crates/tutti-sampler/src/clip.rs::Clip::with_tempo
@@ -321,10 +284,6 @@ tutti-session  ctor-result  crates/tutti-session/src/session/mod.rs::Session::ne
 # tutti-sf2
 
 # tutti-soundfont
-tutti-soundfont  with-prefix  crates/tutti-soundfont/src/settings.rs::Settings::with_device
-tutti-soundfont  with-prefix  crates/tutti-soundfont/src/settings.rs::Settings::with_group
-tutti-soundfont  with-prefix  crates/tutti-soundfont/src/settings.rs::Settings::with_polyphony
-tutti-soundfont  ctor-result  crates/tutti-soundfont/src/lib.rs::SoundFontUnit::new
 
 # tutti-tempo
 tutti-tempo  ctor-result  crates/tutti-tempo/src/map.rs::TempoMap::constant

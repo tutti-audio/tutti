@@ -42,7 +42,7 @@ use tutti_graph::NodeKey;
 use tutti_graph::{
     Cost, Cx, Editor, Executor, Io, Node, Prepare, Shape, Status, TransportPosition,
 };
-use tutti_graph::{Edge, InPort, OutPort, Source};
+use tutti_graph::{Edge, InPort, OutPort, PortSource};
 use tutti_graph::{ForkByClone, Unforkable};
 use tutti_nodes::{BusStripConfig, BusStripNode};
 use tutti_units::{Amplitude, SampleRate, Samples};
@@ -349,14 +349,14 @@ fn graph(kind: Kind, variant: Variant, members: usize, frames: usize) -> Executo
     let feed = |ed: &mut Editor, node: NodeKey, port: u16, c: usize| {
         ed.spec_mut().topology.edges.insert(
             InPort { node, port },
-            vec![Edge::Direct(Source::Global(c as u16))],
+            vec![Edge::Direct(PortSource::Global(c as u16))],
         );
     };
     match variant {
         Variant::None => {
             for _ in 0..members {
                 for c in 0..w {
-                    outputs.push(Source::Global(c as u16));
+                    outputs.push(PortSource::Global(c as u16));
                 }
             }
         }
@@ -378,7 +378,7 @@ fn graph(kind: Kind, variant: Variant, members: usize, frames: usize) -> Executo
                 }
                 for c in 0..w {
                     feed(&mut ed, k, c as u16, c);
-                    outputs.push(Source::Node(OutPort {
+                    outputs.push(PortSource::Node(OutPort {
                         node: k,
                         port: c as u16,
                     }));
@@ -409,7 +409,7 @@ fn graph(kind: Kind, variant: Variant, members: usize, frames: usize) -> Executo
                 for c in 0..w {
                     let port = (m * w + c) as u16;
                     feed(&mut ed, k, port, c);
-                    outputs.push(Source::Node(OutPort { node: k, port }));
+                    outputs.push(PortSource::Node(OutPort { node: k, port }));
                 }
             }
         }

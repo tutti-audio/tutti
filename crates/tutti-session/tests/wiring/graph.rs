@@ -233,7 +233,7 @@ fn every_source_reads_back_as_written() {
     }
 }
 
-/// Silence is stored as the empty set, never as a `Source::Zero` (which the
+/// Silence is stored as the empty set, never as a `PortSource::Zero` (which the
 /// compiler's validation refuses), whichever call wrote it: a port or output
 /// set to no sources, a cleared sink, and a fresh or widened root. `planned_compensation` is `None` when the spec does not validate.
 #[test]

@@ -47,7 +47,7 @@ use tutti_fixtures::machine_lock;
 use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_graph::{GraphBuilder, Prepare, Renderer};
-use tutti_graph::{OutPort, Source};
+use tutti_graph::{OutPort, PortSource};
 use tutti_nodes::testing::Through;
 use tutti_plugin::{Bound, PluginClient};
 use tutti_plugin_host::PluginControls;
@@ -191,11 +191,11 @@ fn two_paths(plugin: PluginClient<Bound>) -> Rig {
     // alone cannot produce.
 
     for port in 0..plugin_inputs {
-        g.set_source(key, port, Source::Global(0));
+        g.set_source(key, port, PortSource::Global(0));
     }
-    g.set_source(dry, 0, Source::Global(0));
-    g.add_output(0, Source::Node(OutPort { node: key, port: 0 }));
-    g.add_output(0, Source::Node(OutPort { node: dry, port: 0 }));
+    g.set_source(dry, 0, PortSource::Global(0));
+    g.add_output(0, PortSource::Node(OutPort { node: key, port: 0 }));
+    g.add_output(0, PortSource::Node(OutPort { node: dry, port: 0 }));
     finish(g, key, controls)
 }
 
@@ -207,9 +207,9 @@ fn plugin_alone(plugin: PluginClient<Bound>) -> Rig {
     let mut g = GraphBuilder::new(ChannelLayout::MONO, ChannelLayout::MONO);
     let (key, controls) = g.add_with_controls(plugin);
     for port in 0..plugin_inputs {
-        g.set_source(key, port, Source::Global(0));
+        g.set_source(key, port, PortSource::Global(0));
     }
-    g.set_output(0, Source::Node(OutPort { node: key, port: 0 }));
+    g.set_output(0, PortSource::Node(OutPort { node: key, port: 0 }));
     finish(g, key, controls)
 }
 

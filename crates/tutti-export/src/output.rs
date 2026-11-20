@@ -133,8 +133,8 @@ impl FileTarget {
         }
     }
 
-    /// Which speaker each file channel feeds: for the WAV speaker mask, Ogg
-    /// Vorbis's channel order and the fold onto the file. It replaces the
+    /// Which speaker each file channel feeds: for the WAV speaker mask
+    /// and the fold onto the file. It replaces the
     /// width [`new`](Self::new) was given: the file is as wide as the
     /// topology, and without one it has the engine's order for the width
     /// ([`Written::placement`] reports which).
@@ -153,7 +153,7 @@ impl FileTarget {
 
     /// The noise added when an integer width is quantized: triangular unless
     /// this or [`no_dither`](Self::no_dither) says otherwise. A format with no
-    /// integer width (`Pcm::Float32`, Ogg Vorbis) ignores it.
+    /// integer width (`Pcm::Float32`) ignores it.
     #[must_use]
     pub fn dither(mut self, shape: DitherShape) -> Self {
         self.dither = Some(shape);

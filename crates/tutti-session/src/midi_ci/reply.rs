@@ -5,7 +5,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use tutti_rt::{OneshotReceiver, OneshotSender, SenderGone, oneshot};
+use tutti_platform::{OneshotReceiver, OneshotSender, RecvError, oneshot};
 
 use super::PeFailure;
 use crate::job::Ticket;
@@ -67,7 +67,7 @@ impl<T> Future for PeerReply<T> {
             Poll::Pending => Poll::Pending,
             Poll::Ready(Ok(answer)) => Poll::Ready(answer),
             // The sender went without answering: the session ended it.
-            Poll::Ready(Err(SenderGone)) => Poll::Ready(Err(PeerError::Disconnected)),
+            Poll::Ready(Err(RecvError)) => Poll::Ready(Err(PeerError::Disconnected)),
         }
     }
 }

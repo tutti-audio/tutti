@@ -13,7 +13,7 @@ use common::{Kind, TestNode, prepare};
 use tutti_buffers::{BusTopology, ChannelLayout, ChannelTopology};
 use tutti_graph::{
     Bus, BusRef, BusRole, BusSource, Buses, Cx, Edge, Editor, Executor, InPort, Io, Node, NodeKey,
-    NodeMode, OutPort, Prepare, Shape, Source, Status, TransportPosition, Unforkable,
+    NodeMode, OutPort, PortSource, Prepare, Shape, Status, TransportPosition, Unforkable,
 };
 use tutti_units::{Latency, Mix, Samples};
 
@@ -104,7 +104,7 @@ fn rig(workers: usize) -> (Editor, Executor) {
                     node: key(n),
                     port: c,
                 },
-                Edge::Direct(Source::Global(c)),
+                Edge::Direct(PortSource::Global(c)),
             );
         }
     }
@@ -115,7 +115,7 @@ fn rig(workers: usize) -> (Editor, Executor) {
     .expect("5.1 folds into stereo");
     ed.set_mode(key(3), NodeMode::Bypassed).expect("folds");
     ed.set_mix(key(4), Mix::DRY).expect("a mix");
-    let out = |n: u64, port: u16| Source::Node(OutPort { node: key(n), port });
+    let out = |n: u64, port: u16| PortSource::Node(OutPort { node: key(n), port });
     ed.spec_mut().topology.set_outputs(vec![
         out(2, 0),
         out(2, 1),

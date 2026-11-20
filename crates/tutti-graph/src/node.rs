@@ -21,7 +21,7 @@ use std::num::NonZeroU32;
 
 use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
 
-use tutti_music::{FrameClock, LoopRange, SegmentOrigin};
+use tutti_music::{FrameClock, LoopRange, MeterMap, SegmentOrigin};
 use tutti_units::{Beat, Bpm, Frame, Latency, SampleRate, Samples, Tail, UnitAddr, UnitParam};
 
 use crate::bus::{Buses, PortSpan};
@@ -1067,6 +1067,12 @@ pub struct TransportPosition {
     /// [`recording`](Self::recording). Private, like the position, so a
     /// transport is only ever built through its constructors.
     recording: bool,
+    /// Whether the transport is in its count-in: session state like
+    /// `recording`, carried because the metronome sounds under it
+    /// (`PrerollOnly`, `RecordingOnly`). `false` from every constructor; set
+    /// it with [`counting_in`](Self::counting_in), read it with
+    /// [`count_in`](Self::count_in).
+    count_in: bool,
     /// Where the block's first frame is: a bare beat, a frame count on the
     /// host's segment, or one walked on from a bare beat. Private, so the
     /// beat and the frame count it is derived from cannot disagree:
@@ -1102,6 +1108,7 @@ impl TransportPosition {
             tempo,
             looping,
             recording: false,
+            count_in: false,
             position: Position::At(beat),
         }
     }
@@ -1125,6 +1132,7 @@ impl TransportPosition {
             tempo,
             looping,
             recording: false,
+            count_in: false,
             position: Position::Counted(origin),
         }
     }
@@ -1141,6 +1149,19 @@ impl TransportPosition {
     /// `kVstTransportRecording`, VST3 `kRecording`, CLAP `IS_RECORDING`).
     pub const fn recording(&self) -> bool {
         self.recording
+    }
+
+    /// This transport, with [`count_in`](Self::count_in) set to `count_in`.
+    #[must_use]
+    pub const fn counting_in(self, count_in: bool) -> Self {
+        Self { count_in, ..self }
+    }
+
+    /// Whether the transport is in its count-in: session state rather than
+    /// motion. The metronome's `PrerollOnly` and `RecordingOnly` modes read
+    /// it.
+    pub const fn count_in(&self) -> bool {
+        self.count_in
     }
 
     /// This transport, at `beat` instead (the block's first frame its own
@@ -1403,6 +1424,12 @@ pub struct Cx<'a> {
     /// block's first frame. [`TransportHistory::none`] where nothing is
     /// kept.
     pub history: &'a TransportHistory,
+    /// The project's meter for this block, lent once per block by the host
+    /// that renders it, or `None` where the host has none (a hand-built
+    /// `Cx`): a node counting bars then counts 4/4 from beat 0. One map per
+    /// block, read at any beat the block visits, so a loop wrap and any
+    /// number of meter changes inside the block are exact.
+    pub meter: Option<&'a MeterMap>,
 }
 
 impl Cx<'_> {

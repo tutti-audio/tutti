@@ -1,9 +1,11 @@
 //! A one-shot channel: one control-side thread answers once and the asker reads
-//! once, by [`try_recv`](OneshotReceiver::try_recv) or by awaiting.
+//! once, by awaiting.
 //!
-//! A send wakes the receiver's [`Waker`]. The sender is never the audio thread, so the wake may
-//! do what a `Waker` does.
+//! A send wakes the receiver's [`Waker`]. The sender is never the audio thread, so
+//! the wake may do what a `Waker` does.
 
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::task::{Context, Poll, Waker};
 
@@ -25,26 +27,25 @@ pub struct OneshotSender<T> {
     shared: Shared<T>,
 }
 
-/// The receiving end: reads the answer once.
+/// The receiving end: a future that resolves to the answer.
 pub struct OneshotReceiver<T> {
     shared: Shared<T>,
 }
 
-/// The sender dropped without answering: what a poll finds when nothing will
-/// ever come.
+/// The sender dropped without answering: nothing will ever come.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct SenderGone;
+pub struct RecvError;
 
-/// Nothing to read: the answer has not come, or never will.
-#[derive(Debug, PartialEq, Eq, Hash)]
-pub enum Unanswered {
-    /// Not sent yet.
-    Empty,
-    /// The sender dropped without sending.
-    Disconnected,
+impl std::fmt::Display for RecvError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("the sender was dropped without answering")
+    }
 }
 
+impl std::error::Error for RecvError {}
+
 /// A sender and its receiver.
+#[must_use]
 pub fn oneshot<T>() -> (OneshotSender<T>, OneshotReceiver<T>) {
     let shared = Arc::new(Mutex::new(State {
         value: None,
@@ -96,26 +97,16 @@ impl<T> Drop for OneshotSender<T> {
 }
 
 impl<T> OneshotReceiver<T> {
-    /// The answer if it came.
+    /// Reads the answer if it came; pending stores the task's waker.
     ///
     /// # Errors
     ///
-    /// [`Unanswered`] when it has not, or never will.
-    pub fn try_recv(&self) -> Result<T, Unanswered> {
-        let mut state = lock(&self.shared);
-        match state.value.take() {
-            Some(value) => Ok(value),
-            None if state.sender_gone => Err(Unanswered::Disconnected),
-            None => Err(Unanswered::Empty),
-        }
-    }
-
-    /// [`try_recv`](Self::try_recv) for a future: pending stores the task's waker.
-    pub fn poll_recv(&self, cx: &mut Context<'_>) -> Poll<Result<T, SenderGone>> {
+    /// [`RecvError`] when the sender dropped without answering.
+    pub fn poll_recv(&self, cx: &mut Context<'_>) -> Poll<Result<T, RecvError>> {
         let mut state = lock(&self.shared);
         match state.value.take() {
             Some(value) => Poll::Ready(Ok(value)),
-            None if state.sender_gone => Poll::Ready(Err(SenderGone)),
+            None if state.sender_gone => Poll::Ready(Err(RecvError)),
             None => {
                 state.waker = Some(cx.waker().clone());
                 Poll::Pending
@@ -124,9 +115,17 @@ impl<T> OneshotReceiver<T> {
     }
 }
 
-impl<T> Drop for OneshotReceiver<T> {
-    fn drop(&mut self) {
-        lock(&self.shared).receiver_gone = true;
+impl<T> Future for OneshotReceiver<T> {
+    type Output = Result<T, RecvError>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        self.poll_recv(cx)
+    }
+}
+
+impl<T> std::fmt::Debug for OneshotSender<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OneshotSender").finish_non_exhaustive()
     }
 }
 
@@ -136,9 +135,9 @@ impl<T> std::fmt::Debug for OneshotReceiver<T> {
     }
 }
 
-impl<T> std::fmt::Debug for OneshotSender<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("OneshotSender").finish_non_exhaustive()
+impl<T> Drop for OneshotReceiver<T> {
+    fn drop(&mut self) {
+        lock(&self.shared).receiver_gone = true;
     }
 }
 
@@ -156,13 +155,28 @@ mod tests {
         }
     }
 
+    fn counting() -> (Arc<Count>, Waker) {
+        let count = Arc::new(Count(AtomicUsize::new(0)));
+        let waker = Waker::from(Arc::clone(&count));
+        (count, waker)
+    }
+
+    /// A value sent before the receiver is polled is read by the first poll.
+    #[test]
+    fn a_value_sent_before_the_poll_is_read_by_it() {
+        let (tx, rx) = oneshot::<u8>();
+        tx.send(5).unwrap();
+        let (_, waker) = counting();
+        let mut cx = Context::from_waker(&waker);
+        assert_eq!(rx.poll_recv(&mut cx), Poll::Ready(Ok(5)));
+    }
+
     /// A send wakes the task that polled the receiver pending, once, and the poll
     /// after it reads the value.
     #[test]
     fn a_send_wakes_the_pending_task_and_the_next_poll_reads_it() {
         let (tx, rx) = oneshot::<u8>();
-        let count = Arc::new(Count(AtomicUsize::new(0)));
-        let waker = Waker::from(Arc::clone(&count));
+        let (count, waker) = counting();
         let mut cx = Context::from_waker(&waker);
         assert_eq!(rx.poll_recv(&mut cx), Poll::Pending);
         tx.send(7).unwrap();
@@ -170,17 +184,17 @@ mod tests {
         assert_eq!(rx.poll_recv(&mut cx), Poll::Ready(Ok(7)));
     }
 
-    /// A sender dropped unanswered disconnects the receiver, and wakes its task.
+    /// A sender dropped unanswered ends the receiver with `RecvError`, and wakes its
+    /// task.
     #[test]
-    fn a_dropped_sender_disconnects_and_wakes() {
+    fn a_dropped_sender_ends_the_receiver_with_a_recv_error_and_wakes() {
         let (tx, rx) = oneshot::<u8>();
-        let count = Arc::new(Count(AtomicUsize::new(0)));
-        let waker = Waker::from(Arc::clone(&count));
+        let (count, waker) = counting();
         let mut cx = Context::from_waker(&waker);
         assert_eq!(rx.poll_recv(&mut cx), Poll::Pending);
         drop(tx);
         assert_eq!(count.0.load(Ordering::SeqCst), 1);
-        assert_eq!(rx.try_recv(), Err(Unanswered::Disconnected));
+        assert_eq!(rx.poll_recv(&mut cx), Poll::Ready(Err(RecvError)));
     }
 
     /// A send to a dropped receiver hands the value back.

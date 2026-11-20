@@ -129,14 +129,14 @@ fn the_declared_shape_matches_what_the_graph_is_told() {
 fn the_inlet_refuses_to_fork() {
     use crate::NodeKey;
     use crate::{Editor, ForkError, ForkMode, ForkTarget};
-    use crate::{OutPort, Source};
+    use crate::{OutPort, PortSource};
 
     let (node, _prod) = ring_with(&[[1.0, 2.0]]);
     let prepare = Prepare::new(RATE, MaxBlock::of(Samples::new(64)));
     let (mut editor, _exec) = Editor::new(prepare);
     editor.insert(NodeKey(7), "inlet", node);
     editor.spec_mut().topology.set_outputs((0..2).map(|port| {
-        Source::Node(OutPort {
+        PortSource::Node(OutPort {
             node: NodeKey(7),
             port,
         })
@@ -211,6 +211,7 @@ fn process_over(node: &mut InletNode, planes: usize, frames: usize, fill: f32) -
         env: &env,
         arrival: tutti_units::Latency::ZERO,
         history: crate::TransportHistory::none(),
+        meter: None,
     };
     let max = Prepare::new(RATE, MaxBlock::of(Samples::new(frames))).max_block();
     let io = Io::new(

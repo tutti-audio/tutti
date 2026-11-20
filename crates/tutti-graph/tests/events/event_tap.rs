@@ -26,8 +26,8 @@ use tutti_graph::{CloseError, EventCapacity, EventTapId, EventTapReader};
 use tutti_graph::{
     Cx, Edge, Editor, Event, EventEdge, EventIn, EventKind, EventOut, Executor, ForkByClone,
     ForkCause, ForkMode, ForkSource, ForkTarget, Forked, InPort, IntoNode, Io, MissingSource, Node,
-    NodeKey, NodeParts, Offset, Op, OutPort, Prepare, Shape, Source, Status, TapAlign, TapEvent,
-    TransportPosition, note_off_room,
+    NodeKey, NodeParts, Offset, Op, OutPort, PortSource, Prepare, Shape, Status, TapAlign,
+    TapEvent, TransportPosition, note_off_room,
 };
 use tutti_ump::{MidiChannel, U7, Ump};
 use tutti_units::{Frame, Latency, Samples};
@@ -136,8 +136,8 @@ impl Node for Script {
     fn reset(&mut self) {}
 }
 
-fn out(node: u64) -> Source {
-    Source::Node(OutPort {
+fn out(node: u64) -> PortSource {
+    PortSource::Node(OutPort {
         node: NodeKey(node),
         port: 0,
     })

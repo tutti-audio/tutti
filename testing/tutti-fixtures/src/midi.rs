@@ -18,15 +18,15 @@ use tutti_ump::{
 };
 use tutti_units::Semitones;
 
-/// A Device Identity for a test endpoint: the non-commercial manufacturer id
-/// (M2-104 §7.10) with a family, model and revision whose two 7-bit bytes differ,
-/// so a swapped byte shows.
+/// A Device Identity for a test endpoint: a 21-bit manufacturer id (`00 21 09`,
+/// M2-104 §7.10) with a family, model and revision of which every byte differs,
+/// so a swapped or shifted byte shows.
 pub fn device_identity() -> DeviceIdentity {
     DeviceIdentity {
-        manufacturer: ManufacturerId::NON_COMMERCIAL,
-        family: [U7::of(1), U7::of(2)],
-        model: [U7::of(3), U7::of(4)],
-        revision: SoftwareRevision::from([1, 2, 3, 4].map(U7::of)),
+        manufacturer: ManufacturerId::of(0x8000 | 0x2109),
+        family: [U7::of(0x11), U7::of(0x22)],
+        model: [U7::of(0x33), U7::of(0x44)],
+        revision: SoftwareRevision::from([0x55, 0x66, 0x77, 0x7F].map(U7::of)),
     }
 }
 

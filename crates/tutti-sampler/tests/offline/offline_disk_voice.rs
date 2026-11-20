@@ -76,7 +76,7 @@ fn streamer_with(
     config: tutti_sampler::DiskStreamerConfig,
 ) -> (Rig, StreamReader<f32>) {
     let mut streamer = DiskStreamer::manual(SampleRate::of(SR), config).expect("builds");
-    let opening = streamer.open(asset, StreamStart::HEAD);
+    let opening = streamer.open_stream(asset, StreamStart::HEAD);
     let (stream, reader) = wait_for_open(&mut streamer, opening).expect("the file opens");
     (Rig { streamer, stream }, reader)
 }
@@ -760,7 +760,7 @@ fn a_fork_matches_the_memory_tier_bit_for_bit() {
             // own file whole — evicting the first, which the fork then pages.
             let other = dir.path().join("other.wav");
             write_ramp(&other, SR as u32, 1_000);
-            let opening = rig.streamer.open(&other, StreamStart::HEAD);
+            let opening = rig.streamer.open_stream(&other, StreamStart::HEAD);
             let (second, second_reader) =
                 wait_for_open(&mut rig.streamer, opening).expect("the file opens");
             second

@@ -19,8 +19,8 @@ use common::{Kind, Pair, TestNode, bits, input_signal, prepare};
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{
     CommitError, Cx, Edge, EdgeGain, EdgeId, Editor, Executor, ForkByClone, ForkMode, ForkTarget,
-    GraphInvalid, GraphSpec, InPort, Io, Node, NodeKey, Op, OutPort, Plan, Prepare, Renderer,
-    Shape, Sink, Source, Status, Topology, TransportPosition, Unforkable, ValidGraph, compile,
+    GraphInvalid, GraphSpec, InPort, Io, Node, NodeKey, Op, OutPort, Plan, PortSink, PortSource,
+    Prepare, Renderer, Shape, Status, Topology, TransportPosition, Unforkable, ValidGraph, compile,
 };
 use tutti_units::Amplitude;
 
@@ -37,8 +37,8 @@ fn at(node: u64, port: u16) -> InPort {
     }
 }
 
-fn out(node: u64) -> Source {
-    Source::Node(OutPort {
+fn out(node: u64) -> PortSource {
+    PortSource::Node(OutPort {
         node: key(node),
         port: 0,
     })
@@ -59,7 +59,7 @@ fn amp(v: f32) -> Amplitude {
 /// Edge `node → (sink, 0)` of a pass-through sink.
 fn port_edge(sink: u64, from: u64) -> EdgeId {
     EdgeId {
-        sink: Sink::Port(at(sink, 0)),
+        sink: PortSink::Port(at(sink, 0)),
         from: direct(from),
     }
 }
@@ -67,7 +67,7 @@ fn port_edge(sink: u64, from: u64) -> EdgeId {
 /// Edge `node → output 0`.
 fn output_edge(from: u64) -> EdgeId {
     EdgeId {
-        sink: Sink::Output(0),
+        sink: PortSink::Output(0),
         from: direct(from),
     }
 }
@@ -642,7 +642,7 @@ fn set_edge_gain_leaves_the_plan_untouched_and_lands_next_block() {
 fn set_edge_gain_refuses_what_a_commit_would() {
     let mut rig = Rig::new(0.5);
     let missing = EdgeId {
-        sink: Sink::Output(0),
+        sink: PortSink::Output(0),
         from: direct(9),
     };
     assert_eq!(

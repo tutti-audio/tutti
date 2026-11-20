@@ -77,6 +77,15 @@ pub(super) fn check_gain(gain: Db) -> Result<Db, SosError> {
     }
 }
 
+/// `q` when it is finite and above 0.
+pub(super) fn check_q(q: Q) -> Result<Q, SosError> {
+    if q.get().is_finite() && q.get() > 0.0 {
+        Ok(q)
+    } else {
+        Err(SosError::QOutOfRange { q })
+    }
+}
+
 /// The root of the amplitude gain of `db` decibels, `10^(db / 40)`: the `A` of a bell and a tilt.
 pub(super) fn gain_root(db: Db) -> f64 {
     Db::new(db.get() / 2.0).to_amplitude().get()

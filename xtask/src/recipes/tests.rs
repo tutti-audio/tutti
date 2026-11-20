@@ -221,6 +221,49 @@ fn loom_recipes_carry_their_environment() {
     );
 }
 
+/// The web suite is one `cargo test` of the harness crate for wasm32; the runner is
+/// `.cargo/config.toml`'s.
+#[test]
+fn test_wasm_runs_the_web_harness_for_wasm32() {
+    assert_eq!(
+        dry("test-wasm", &[]),
+        [
+            "wasm-bindgen-test-runner --version == Cargo.lock's wasm-bindgen, or fail",
+            "cargo test --locked --target wasm32-unknown-unknown -p tutti-web-test"
+        ]
+    );
+}
+
+const LOCK: &str = "[[package]]\nname = \"wasm-bindgen\"\nversion = \"0.2.130\"\n\n[[package]]\nname = \"wasm-bindgen-macro\"\nversion = \"0.2.99\"\n";
+
+/// A runner at the locked `wasm-bindgen` version passes.
+#[test]
+fn a_wasm_runner_at_the_locked_version_passes() {
+    assert_eq!(
+        check_wasm_runner(LOCK, "wasm-bindgen-test-runner 0.2.130\n"),
+        Ok(())
+    );
+}
+
+/// A runner at another version fails by name, with the install command for the locked one.
+#[test]
+fn a_wasm_runner_at_another_version_fails_with_the_install_command() {
+    assert_eq!(
+        check_wasm_runner(LOCK, "wasm-bindgen-test-runner 0.2.128\n"),
+        Err("wasm-bindgen-test-runner 0.2.128 does not match Cargo.lock's wasm-bindgen 0.2.130: install it with cargo install --locked wasm-bindgen-cli --version 0.2.130".to_owned())
+    );
+}
+
+/// A lock with no `wasm-bindgen` package (a similarly named one is not it) fails.
+#[test]
+fn a_lock_with_no_wasm_bindgen_fails() {
+    let lock = "[[package]]\nname = \"wasm-bindgen-macro\"\nversion = \"0.2.99\"\n";
+    assert_eq!(
+        check_wasm_runner(lock, "wasm-bindgen-test-runner 0.2.99"),
+        Err("Cargo.lock has no wasm-bindgen package".to_owned())
+    );
+}
+
 /// The web build check is the commands CI's clippy job runs: the platform, rt
 /// and umbrella crates, then the umbrella with every feature the web path uses.
 #[test]
@@ -229,7 +272,7 @@ fn check_wasm_lints_the_platform_crate_the_rt_crate_and_the_umbrella_with_the_we
         dry("check-wasm", &[]),
         [
             "cargo clippy --locked --target wasm32-unknown-unknown -p tutti-platform -p tutti-rt -p tutti --lib -- -D warnings",
-            "cargo clippy --locked --target wasm32-unknown-unknown -p tutti --lib --features sampler,soundfont,synth,analyze,decode-wav,decode-flac,decode-mp3,decode-ogg,encode-wav,encode-aiff,export,record,midi -- -D warnings",
+            "cargo clippy --locked --target wasm32-unknown-unknown -p tutti --lib --features sampler,soundfont,synth,analyze,decode-wav,decode-flac,decode-mp3,decode-ogg,encode-wav,encode-flac,encode-aiff,export,record,midi -- -D warnings",
         ]
     );
 }

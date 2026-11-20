@@ -44,10 +44,6 @@ fn virtual_endpoints_report_unsupported() {
     );
     // The stub publishes nothing, so the stand-in marker is enough.
     let main = tutti_fixtures::main_thread();
-    assert!(matches!(
-        open_virtual_source(&spec, main),
-        Err(MidiHardwareError::Unsupported(_))
-    ));
     let inlets = tutti_midi_runtime::InputInlets::new(
         tutti_graph::EventCapacity::of(8),
         std::time::Duration::ZERO,
@@ -55,7 +51,7 @@ fn virtual_endpoints_report_unsupported() {
     let ports = crate::HardwareMidiInputs::new(inlets);
     let producer = ports.open_input_port("virtual").0;
     assert!(matches!(
-        open_virtual_destination(&spec, producer, main),
+        open_virtual_endpoint(&spec, producer, main),
         Err(MidiHardwareError::Unsupported(_))
     ));
 }

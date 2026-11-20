@@ -12,7 +12,7 @@ use tutti_buffers::MaxBlock;
 use tutti_buffers::SampleFormat;
 use tutti_engine::{AudioCallbackState, Engine, OutputSpec};
 use tutti_graph::NodeKey;
-use tutti_graph::{Edge, InPort, OutPort, Source};
+use tutti_graph::{Edge, InPort, OutPort, PortSource};
 use tutti_graph::{Editor, Prepare};
 use tutti_nodes::testing::{Const, Osc};
 use tutti_nodes::{SvfFilterConfig, SvfFilterNode, SvfType};
@@ -42,7 +42,7 @@ pub fn graph_engine(transport: &Transport, build: impl FnOnce(&mut Editor)) -> E
 pub fn fan(ed: &mut Editor, node: NodeKey, outputs: usize) {
     ed.spec_mut()
         .topology
-        .set_outputs(vec![Source::Node(OutPort { node, port: 0 }); outputs]);
+        .set_outputs(vec![PortSource::Node(OutPort { node, port: 0 }); outputs]);
 }
 
 /// A rolling transport driving a sine through a filter, at `outputs` width.
@@ -68,7 +68,7 @@ pub fn rolling_state(outputs: usize) -> (Transport, Arc<AudioCallbackState>) {
                 node: filter,
                 port: 0,
             },
-            vec![Edge::Direct(Source::Node(OutPort {
+            vec![Edge::Direct(PortSource::Node(OutPort {
                 node: source,
                 port: 0,
             }))],

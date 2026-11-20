@@ -11,8 +11,8 @@ use tutti_graph::testing as common;
 
 use common::{Kind, TestNode, declick, prepare};
 use tutti_graph::{
-    Edge, EdgeGain, EdgeId, Editor, Executor, Fade, FadeLaw, NodeKey, OutPort, Renderer, RootFade,
-    Sink, Source, TransportPosition, Unforkable,
+    Edge, EdgeGain, EdgeId, Editor, Executor, Fade, FadeLaw, NodeKey, OutPort, PortSink,
+    PortSource, Renderer, RootFade, TransportPosition, Unforkable,
 };
 use tutti_units::{Amplitude, Latency, Samples};
 
@@ -25,8 +25,8 @@ fn key(n: u64) -> NodeKey {
     NodeKey(n)
 }
 
-fn source(n: u64) -> Source {
-    Source::Node(OutPort {
+fn source(n: u64) -> PortSource {
+    PortSource::Node(OutPort {
         node: key(n),
         port: 0,
     })
@@ -529,7 +529,7 @@ fn a_carried_commit_that_removes_an_old_source_drops_it_from_the_bank_and_keeps_
         &[1, 2],
     );
     let weighted = EdgeId {
-        sink: Sink::Output(1),
+        sink: PortSink::Output(1),
         from: Edge::Direct(source(2)),
     };
     r.editor_mut()

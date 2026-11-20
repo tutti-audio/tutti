@@ -16,8 +16,8 @@ use std::collections::BTreeMap;
 use common::{Kind, Pair, SpecBehaviour, bits, driver_value, input_signal, prepare};
 use tutti_graph::{
     CompileError, Edge, EdgeId, Editor, EventOut, ForkCause, ForkMode, ForkSource, Forked,
-    GraphInvalid, GraphSpec, InPort, IntoNode, Node, NodeKey, NodeParts, OutPort, ParamRange, Sink,
-    Source, Topology, Unforkable, ValidGraph, compile,
+    GraphInvalid, GraphSpec, InPort, IntoNode, Node, NodeKey, NodeParts, OutPort, ParamRange,
+    PortSink, PortSource, Topology, Unforkable, ValidGraph, compile,
 };
 use tutti_units::{Amplitude, Samples, Tail};
 
@@ -35,8 +35,8 @@ fn at(node: u64) -> InPort {
     }
 }
 
-fn out(node: u64) -> Source {
-    Source::Node(OutPort {
+fn out(node: u64) -> PortSource {
+    PortSource::Node(OutPort {
         node: key(node),
         port: 0,
     })
@@ -126,8 +126,8 @@ impl Rig {
     fn edge(&self, from: u64) -> EdgeId {
         EdgeId {
             sink: match self.at {
-                Where::Port => Sink::Port(at_port(self.sink)),
-                Where::Output => Sink::Output(0),
+                Where::Port => PortSink::Port(at_port(self.sink)),
+                Where::Output => PortSink::Output(0),
             },
             from: Edge::Direct(out(from)),
         }
@@ -433,7 +433,7 @@ fn connect_edge_gain_refusals() {
     // 1. No such edge.
     let mut rig = Rig::new(&[dc(1.0), driver(0)], &[1], Where::Port);
     let ghost = EdgeId {
-        sink: Sink::Port(at_port(3)),
+        sink: PortSink::Port(at_port(3)),
         from: Edge::Direct(out(2)),
     };
     rig.spec.connect_edge_gain(ghost, lane_out(2));
@@ -518,7 +518,7 @@ fn a_source_is_structural_and_a_range_is_a_control() {
     ed.insert(key(2), "driver", Forkable(driver(0)));
     ed.spec_mut().topology.outputs = vec![vec![out(1)]];
     let id = EdgeId {
-        sink: Sink::Output(0),
+        sink: PortSink::Output(0),
         from: Edge::Direct(out(1)),
     };
     ed.set_edge_gain(id, amp(1.0)).expect("the edge exists");
@@ -582,7 +582,7 @@ fn a_fork_carries_the_driven_lane() {
     ed.insert(key(2), "driver", Forkable(driver(0)));
     ed.spec_mut().topology.outputs = vec![vec![out(1)]];
     let id = EdgeId {
-        sink: Sink::Output(0),
+        sink: PortSink::Output(0),
         from: Edge::Direct(out(1)),
     };
     ed.set_edge_gain(id, amp(1.0)).expect("edge");

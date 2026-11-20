@@ -9,7 +9,7 @@ fn test_no_glide() {
     };
     let mut porta = Portamento::new(config, SampleRate::SR_44K1, Hz::new(440.0));
 
-    porta.set_target(Hz::new(880.0), false);
+    porta.retarget(Hz::new(880.0), false);
     assert!((porta.tick().get() - 880.0).abs() < 0.01);
     assert!(!porta.is_gliding());
 }
@@ -24,7 +24,7 @@ fn test_always_glide() {
     let mut porta = Portamento::new(config, SampleRate::SR_44K1, Hz::new(440.0));
 
     porta.reset(Hz::new(440.0));
-    porta.set_target(Hz::new(880.0), false);
+    porta.retarget(Hz::new(880.0), false);
 
     // Should start near 440
     let first = porta.tick();
@@ -51,12 +51,12 @@ fn test_legato_only() {
     porta.reset(Hz::new(440.0));
 
     // Non-legato should not glide
-    porta.set_target(Hz::new(880.0), false);
+    porta.retarget(Hz::new(880.0), false);
     assert!(!porta.is_gliding());
     assert!((porta.current().get() - 880.0).abs() < 0.01);
 
     // Legato should glide
-    porta.set_target(Hz::new(440.0), true);
+    porta.retarget(Hz::new(440.0), true);
     assert!(porta.is_gliding());
 }
 
@@ -76,7 +76,7 @@ fn test_curve_shapes() {
         let mut porta = Portamento::new(config, SampleRate::SR_44K1, Hz::new(440.0));
 
         porta.reset(Hz::new(440.0));
-        porta.set_target(Hz::new(880.0), false);
+        porta.retarget(Hz::new(880.0), false);
 
         // Run to completion
         while porta.is_gliding() {
@@ -113,7 +113,7 @@ fn advance_is_that_many_ticks() {
         for target in [587.0, 311.13, 1234.5, 97.3, 2093.0] {
             for p in [&mut by_tick, &mut by_advance] {
                 p.reset(Hz::new(220.0));
-                p.set_target(Hz::new(target), false);
+                p.retarget(Hz::new(target), false);
             }
             for steps in [0usize, 1, 7, 16, 0, 19, 3, 16, 16] {
                 let mut want = by_tick.current();
@@ -267,7 +267,7 @@ fn a_constant_rate_glide_scales_with_the_interval_and_floors_at_a_tenth() {
             rate,
             Hz::new(from),
         );
-        porta.set_target(Hz::new(to), false);
+        porta.retarget(Hz::new(to), false);
         let mut frames = 0u32;
         while porta.is_gliding() {
             porta.advance(1);
@@ -302,7 +302,7 @@ fn a_glider_rests_on_the_pitch_it_is_given() {
     assert!(!porta.is_gliding());
     assert_eq!(porta.current(), Hz::new(330.0));
     assert_eq!(porta.ratio(), 1.0);
-    porta.set_target(Hz::new(660.0), false);
+    porta.retarget(Hz::new(660.0), false);
     assert!(porta.is_gliding());
     assert_eq!(
         porta.current(),

@@ -39,7 +39,7 @@ use tutti_units::Amplitude;
 
 use crate::gain::{EdgeFade, EdgeGain};
 use crate::spec::GraphSpec;
-use crate::{Edge, EdgeId, InPort, NodeKey, OutPort, Shapes, Sink, Source};
+use crate::{Edge, EdgeId, InPort, NodeKey, OutPort, PortSink, PortSource, Shapes};
 
 /// One bus of one node: bus `bus` of `node`'s declared
 /// [`Shape::buses_in`](crate::Shape::buses_in) (as a sink) or
@@ -369,7 +369,7 @@ impl GraphSpec {
         };
         let (sink_topology, sink_first) = to.resolve(sink_shape.buses_in()).ok_or(no_sink)?;
         self.fold_lanes(shapes, from, sink_topology, fold, |c| {
-            Sink::Port(InPort {
+            PortSink::Port(InPort {
                 node: to.node,
                 port: (sink_first + c) as u16,
             })
@@ -391,7 +391,7 @@ impl GraphSpec {
         // The engine's roots are at most `MAX_CHANNELS` wide, a bus's width, so
         // a root with no `BusTopology` is one never declared.
         let root = self.root.ok_or(BusError::RootUndeclared)?;
-        self.fold_lanes(shapes, from, root, fold, |c| Sink::Output(c as u16))
+        self.fold_lanes(shapes, from, root, fold, |c| PortSink::Output(c as u16))
             .map_err(|error| match error {
                 LaneError::Bus(e) => e,
                 LaneError::Fold(error) => BusError::RootFold { from, error },
@@ -406,7 +406,7 @@ impl GraphSpec {
         from: BusSource,
         sink: BusTopology,
         by: BusFold,
-        at: impl Fn(usize) -> Sink,
+        at: impl Fn(usize) -> PortSink,
     ) -> Result<Vec<(EdgeId, Amplitude)>, LaneError> {
         let (source_topology, source_first, source_node) = match from {
             BusSource::Node(bus) => {
@@ -441,11 +441,11 @@ impl GraphSpec {
         for c in 0..usize::from(sink.layout().count()) {
             for (k, gain) in fold.contributions(c) {
                 let source = match source_node {
-                    Some(node) => Source::Node(OutPort {
+                    Some(node) => PortSource::Node(OutPort {
                         node,
                         port: (source_first + k) as u16,
                     }),
-                    None => Source::Global(k as u16),
+                    None => PortSource::Global(k as u16),
                 };
                 lanes.push((
                     EdgeId {
@@ -524,10 +524,10 @@ impl GraphSpec {
             // the same lane are caught too.
             spec.check_lane(id)?;
             match (id.sink, id.from) {
-                (Sink::Port(at), from) => {
+                (PortSink::Port(at), from) => {
                     spec.topology.connect(at, from);
                 }
-                (Sink::Output(c), Edge::Direct(source)) => {
+                (PortSink::Output(c), Edge::Direct(source)) => {
                     // The root is as wide as its declaration; a shorter
                     // output list is widened in the lowered value only.
                     let c = usize::from(c);
@@ -536,7 +536,7 @@ impl GraphSpec {
                     }
                     spec.topology.connect_output(c, source);
                 }
-                (Sink::Output(_), Edge::Feedback(_)) => {
+                (PortSink::Output(_), Edge::Feedback(_)) => {
                     unreachable!("a bus lane is a direct edge");
                 }
             }

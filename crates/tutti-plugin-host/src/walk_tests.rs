@@ -101,6 +101,7 @@ impl Rig {
                 env,
                 arrival: self.arrival,
                 history: TransportHistory::none(),
+                meter: None,
             };
             {
                 let mut block = self.source.block(Features::TRANSPORT);

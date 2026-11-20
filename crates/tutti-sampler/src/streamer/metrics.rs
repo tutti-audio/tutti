@@ -28,9 +28,9 @@ use tutti_units::Seconds;
 /// Disk read throughput, the sole input varifill takes from measurement rather
 /// than from the ring's own fill level.
 ///
-/// The figure is one atomic: the decode thread, the only place a read is
-/// timed, publishes it ([`ReadMeter`] computes it) and the streamer thread
-/// reads it to size a refill. There is no lock, so a refill never waits for a
+/// The figure is one atomic: the thread that times a read publishes it
+/// ([`ReadMeter`] computes it) and the streamer thread reads it to size a
+/// refill. There is no lock, so a refill never waits for a
 /// measurement and no sample is dropped to avoid waiting.
 #[derive(Default)]
 pub struct Metrics {
@@ -39,7 +39,7 @@ pub struct Metrics {
 }
 
 impl Metrics {
-    /// A meter reporting a read rate of zero until the decode thread
+    /// A meter reporting a read rate of zero until a read
     /// publishes one.
     pub fn new() -> Self {
         Self::default()
@@ -58,8 +58,7 @@ impl Metrics {
 }
 
 /// Sliding window throughput tracker (1-second window), owned by the one
-/// thread that times reads (the decode thread) and published through
-/// [`Metrics`].
+/// thread that times a read and published through [`Metrics`].
 pub(super) struct ReadMeter {
     recent_reads: Vec<(u64, Instant)>,
     window: Seconds,

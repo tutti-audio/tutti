@@ -28,7 +28,11 @@
 //!   [`spawn`](Executor::spawn) returns a [`Task`] that cancels on drop;
 //!   [`unblock`](Executor::unblock) runs a blocking closure off the drive;
 //!   [`spawn_dedicated`](Executor::spawn_dedicated) gives a long-lived future a thread
-//!   of its own; [`Executor::sleep_until`] is a deadline as a future ([`Sleep`]).
+//!   of its own; [`Executor::sleep_until`] is a deadline as a future ([`Sleep`]);
+//!   [`Executor::timer`] gives a [`Timer`] that makes them and keeps nothing alive, and
+//!   [`Executor::downgrade`] a [`WeakExecutor`] that reaches the executor while it lives.
+//! - [`oneshot`] — a value one side sends and a future resolves to, control side only
+//!   ([`OneshotSender`], [`OneshotReceiver`]; [`RecvError`] when the sender is dropped).
 //! - [`MainThreadMarker`] — proof that the holder is on the process's main
 //!   thread, made only where the OS says so (`!Send`, `!Sync`).
 //! - [`Asset`] — where bytes come from, as every file entry point takes it
@@ -77,6 +81,7 @@ mod denormals;
 #[cfg(not(loom))]
 mod executor;
 mod main_thread;
+mod oneshot;
 mod priority;
 mod sleep;
 mod thread;
@@ -90,6 +95,7 @@ pub use denormals::with_no_denormals;
 #[cfg(not(loom))]
 pub use executor::*;
 pub use main_thread::MainThreadMarker;
+pub use oneshot::{OneshotReceiver, OneshotSender, RecvError, oneshot};
 pub use priority::{PriorityOutcome, PriorityRequest, Scheduling, request_priority};
 pub use sleep::sleep_until_ns;
 pub use thread::{Panicked, StopToken, ThreadHandle, spawn_named};

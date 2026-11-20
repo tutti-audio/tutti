@@ -14,10 +14,12 @@ use tutti_graph::{
     Cx, Editor, EventOut, Executor, ForkByClone, Io, Node, NodeKey, ParamIn, ParamInput,
     ParamRange, Prepare, Shape, Status, TransportChanges, TransportPosition,
 };
-use tutti_graph::{OutPort, Source};
-use tutti_modulation::{Amount, Clock, ControlProgram, Layer, LayerId, Polarity, Waveform};
+use tutti_graph::{OutPort, PortSource};
+use tutti_modulation::{
+    Amount, Clock, ControlProgram, ControlProgramBuilder, Layer, LayerId, Polarity, Waveform,
+};
 use tutti_music::FrameClock;
-use tutti_nodes::automation::ControlLaneNode;
+use tutti_nodes::automation::{ControlLaneNode, UnitLaneConfig};
 use tutti_units::{ArcDegrees, Azimuth, Beat, Bpm, Depth, SampleRate, Samples, UnitParam};
 
 const RATE: f64 = 48_000.0;
@@ -72,7 +74,7 @@ fn rig(azimuth: ParamRange, elevation: ParamRange) -> (Editor, Executor) {
         ed.spec_mut()
             .topology
             .outputs
-            .push(vec![Source::Node(OutPort {
+            .push(vec![PortSource::Node(OutPort {
                 node: NodeKey(PROBE),
                 port: c,
             })]);
@@ -88,11 +90,10 @@ fn rig(azimuth: ParamRange, elevation: ParamRange) -> (Editor, Executor) {
 /// Wires a lane over `program` to `param` of the probe, with `knob` as its
 /// base.
 fn lane(ed: &mut Editor, key: u64, param: UnitParam, program: &ControlProgram, knob: f64) {
-    let node = ControlLaneNode::for_unit(
-        param,
-        program.clone(),
-        Some(Arc::new(AtomicF64::new(knob)).into()),
-        Some(ed.param_range_cell(at(param)).expect("committed")),
+    let node = ControlLaneNode::from(
+        UnitLaneConfig::new(param, program.clone())
+            .knob(Arc::new(AtomicF64::new(knob)).into())
+            .range(ed.param_range_cell(at(param)).expect("committed")),
     );
     ed.insert(NodeKey(key), "lane", node);
     ed.spec_mut().connect_param(
@@ -160,7 +161,10 @@ fn constant(depth: f64) -> Layer {
 #[test]
 fn a_modulated_bearing_across_180_wraps_not_clamps() {
     let (mut ed, mut exec) = rig(ParamRange::UNBOUNDED, ParamRange::UNBOUNDED);
-    let program = ControlProgram::new(None, vec![constant(0.1)], vec![]).expect("valid");
+    let program = ControlProgramBuilder::new()
+        .layers(vec![constant(0.1)])
+        .build()
+        .expect("valid");
     lane(&mut ed, 1, UnitParam::Azimuth, &program, 170.0);
     ed.commit().expect("commits");
     let [az, _] = roll(&mut ed, &mut exec, 0.0, 256, 3);
@@ -177,7 +181,10 @@ fn a_modulated_bearing_across_180_wraps_not_clamps() {
 fn a_bearings_modulation_depth_scales_by_the_arcs_length() {
     let arc = ParamRange::arc(Azimuth::new(180.0), ArcDegrees::new(20.0));
     let (mut ed, mut exec) = rig(arc, ParamRange::UNBOUNDED);
-    let program = ControlProgram::new(None, vec![constant(0.1)], vec![]).expect("valid");
+    let program = ControlProgramBuilder::new()
+        .layers(vec![constant(0.1)])
+        .build()
+        .expect("valid");
     lane(&mut ed, 1, UnitParam::Azimuth, &program, 178.0);
     ed.commit().expect("commits");
     let [az, _] = roll(&mut ed, &mut exec, 0.0, 256, 3);
@@ -194,14 +201,20 @@ fn a_bearings_modulation_depth_scales_by_the_arcs_length() {
 #[test]
 fn a_modulated_height_is_clamped_as_ever() {
     let (mut ed, mut exec) = rig(ParamRange::UNBOUNDED, ParamRange::new(-90.0, 90.0));
-    let program = ControlProgram::new(None, vec![constant(0.2)], vec![]).expect("valid");
+    let program = ControlProgramBuilder::new()
+        .layers(vec![constant(0.2)])
+        .build()
+        .expect("valid");
     lane(&mut ed, 1, UnitParam::Elevation, &program, 80.0);
     ed.commit().expect("commits");
     let [_, el] = roll(&mut ed, &mut exec, 0.0, 256, 3);
     assert!(el[512..].iter().all(|&v| v == 90.0), "{:?}", &el[512..516]);
     // And 0.05 of it (9) gives 89, a plain sum.
     let (mut ed, mut exec) = rig(ParamRange::UNBOUNDED, ParamRange::new(-90.0, 90.0));
-    let program = ControlProgram::new(None, vec![constant(0.05)], vec![]).expect("valid");
+    let program = ControlProgramBuilder::new()
+        .layers(vec![constant(0.05)])
+        .build()
+        .expect("valid");
     lane(&mut ed, 1, UnitParam::Elevation, &program, 80.0);
     ed.commit().expect("commits");
     let [_, el] = roll(&mut ed, &mut exec, 0.0, 256, 3);
@@ -214,7 +227,11 @@ fn seam_program() -> ControlProgram {
     let mut curve = Trajectory::new();
     curve.add_breakpoint(Breakpoint::new(Beat::new(0.0), Azimuth::new(170.0)));
     curve.add_breakpoint(Breakpoint::new(Beat::new(4.0), Azimuth::new(-170.0)));
-    ControlProgram::new(Some(Arc::new(curve)), vec![constant(0.0)], vec![]).expect("valid")
+    ControlProgramBuilder::new()
+        .automation(Arc::new(curve))
+        .layers(vec![constant(0.0)])
+        .build()
+        .expect("valid")
 }
 
 /// Rolling through beat 2, where the curve is at the seam, an azimuth lane

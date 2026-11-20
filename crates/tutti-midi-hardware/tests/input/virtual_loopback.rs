@@ -13,8 +13,7 @@ use tutti_fixtures::midi::{device_identity, note_on};
 use tutti_graph::{EventCapacity, Offset};
 use tutti_midi_device::DeviceInfo;
 use tutti_midi_hardware::{
-    MidiHardwareConfig, MidiSession, VirtualDestination, VirtualProtocol, VirtualSource,
-    VirtualSpec,
+    MidiHardwareConfig, MidiSession, VirtualEndpoint, VirtualProtocol, VirtualSpec,
 };
 use tutti_midi_runtime::InputInlets;
 use tutti_platform::MainThreadMarker;
@@ -70,13 +69,15 @@ fn notes() -> Vec<Ump> {
         .collect()
 }
 
-/// What a virtual source is sent arrives at a session input connected to it, in
+/// What a virtual endpoint is sent arrives at a session input connected to it, in
 /// order.
 #[test]
-fn what_a_virtual_source_sends_reaches_a_session_input_in_order() {
-    let spec = spec("source");
-    let source = VirtualSource::open(&spec, plain_endpoint_main()).expect("a virtual source");
+fn what_a_virtual_endpoint_sends_reaches_a_session_input_in_order() {
+    let spec = spec("send");
     let (mut io, mut graph) = session();
+    let (producer, _inlet) = Arc::clone(io.ports()).open_input_port("virtual");
+    let endpoint =
+        VirtualEndpoint::open(&spec, producer, plain_endpoint_main()).expect("a virtual endpoint");
     let device = listed(|| io.inputs(), &spec);
     let tutti_midi_hardware::Connected::Opened(inlet) =
         io.connect_input(&device.id).expect("connects")
@@ -86,25 +87,25 @@ fn what_a_virtual_source_sends_reaches_a_session_input_in_order() {
     graph.attach(inlet);
     // A probe on a key no test asserts on, so a late one is never a test note.
     let probe = note_on(MidiChannel::of(1), 59, 0x8000);
-    graph.ready(|| source.send(probe).expect("sends"), PATIENCE);
+    graph.ready(|| endpoint.send(probe).expect("sends"), PATIENCE);
 
     let sent = notes();
     for ump in &sent {
-        source.send(*ump).expect("sends");
+        endpoint.send(*ump).expect("sends");
     }
     assert_eq!(graph.hear(sent.len(), PATIENCE), sent);
 }
 
-/// What a session output sends to a virtual destination arrives at the
-/// destination's producer, in order, as the events of a device input.
+/// What a session output sends to a virtual endpoint arrives at the
+/// endpoint's producer, in order, as the events of a device input.
 #[test]
-fn what_a_session_output_sends_reaches_a_virtual_destination_in_order() {
-    let spec = spec("destination");
+fn what_a_session_output_sends_reaches_a_virtual_endpoint_in_order() {
+    let spec = spec("receive");
     let (io, mut graph) = session();
     let (producer, inlet) = Arc::clone(io.ports()).open_input_port("virtual");
     graph.attach(inlet);
-    let destination = VirtualDestination::open(&spec, producer, plain_endpoint_main())
-        .expect("a virtual destination");
+    let endpoint =
+        VirtualEndpoint::open(&spec, producer, plain_endpoint_main()).expect("a virtual endpoint");
     let device = listed(|| io.outputs(), &spec);
     let mut out = io.connect_output(&device.id).expect("connects");
     graph.ready(
@@ -119,24 +120,24 @@ fn what_a_session_output_sends_reaches_a_virtual_destination_in_order() {
         assert_eq!(out.queue(&[(Offset::ZERO, *ump)]).packets(), 1);
     }
     assert_eq!(graph.hear(sent.len(), PATIENCE), sent);
-    assert!(destination.is_alive());
+    assert!(endpoint.is_alive());
 }
 
-/// A MIDI 1.0 destination receives MIDI 1.0 (the session's output translates for
+/// A MIDI 1.0 endpoint receives MIDI 1.0 (the session's output translates for
 /// it) and the graph's input node translates it as it does a MIDI 1.0 device's:
 /// the 16-bit velocity `0x8100` is the 7-bit `0x40` on the wire and `0x8000`
 /// after translation (M2-115).
 /// Spec: m2-115/2.3#1
 #[test]
-fn a_midi1_destination_delivers_what_the_input_node_widens() {
+fn a_midi1_endpoint_delivers_what_the_input_node_widens() {
     let spec = spec("midi1").protocol(VirtualProtocol::Midi1);
     let inlets = InputInlets::new(EventCapacity::of(64), Duration::ZERO);
     let mut graph = Listener::over_input(&inlets);
     let io = MidiSession::open(inlets, MidiHardwareConfig::new()).expect("a session");
     let (producer, inlet) = Arc::clone(io.ports()).open_input_port("virtual");
     graph.attach(inlet);
-    let _destination = VirtualDestination::open(&spec, producer, plain_endpoint_main())
-        .expect("a virtual destination");
+    let _endpoint =
+        VirtualEndpoint::open(&spec, producer, plain_endpoint_main()).expect("a virtual endpoint");
     let device = listed(|| io.outputs(), &spec);
     let mut out = io.connect_output(&device.id).expect("connects");
     graph.ready(

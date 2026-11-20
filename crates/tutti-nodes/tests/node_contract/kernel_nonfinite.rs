@@ -24,6 +24,7 @@ use tutti_nodes::{
     EnvelopeFilterConfig, EnvelopeFilterNode, LevellerConfig, LevellerNode, TiltFilterConfig,
     TiltFilterNode, TransientShaperConfig, TransientShaperNode,
 };
+use tutti_nodes::{GraphicBands, GraphicEqConfig, GraphicEqNode};
 use tutti_rt::SplitMix64;
 use tutti_units::{
     BitDepth, Db, Drive, Feedback, Frame, HoldFactor, Hz, Mix, Q, Resonance, SampleRate, Samples,
@@ -147,6 +148,13 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
                 Hz::new(2_000.0),
                 Q::new(2.0),
                 Db::new(6.0),
+            ))),
+        ),
+        (
+            "graphic eq",
+            Box::new(GraphicEqNode::from(GraphicEqConfig::new(
+                BusTopology::STEREO,
+                GraphicBands::ThirdOctave,
             ))),
         ),
         (
@@ -347,7 +355,7 @@ mod logged {
     use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
     use tutti_graph::{
         Cx, Edge, Editor, Executor, InPort, IntoNode, Io, LogFilter, Node, NodeKey, OutPort,
-        Prepare, RtLevel, RtLogReaders, RtRecord, RtValue, Shape, Source, Status,
+        PortSource, Prepare, RtLevel, RtLogReaders, RtRecord, RtValue, Shape, Status,
         TransportPosition, Unforkable,
     };
     use tutti_nodes::{
@@ -412,10 +420,10 @@ mod logged {
         for port in 0..2u16 {
             topology.edges.insert(
                 InPort { node: fx, port },
-                vec![Edge::Direct(Source::Node(OutPort { node: src, port }))],
+                vec![Edge::Direct(PortSource::Node(OutPort { node: src, port }))],
             );
         }
-        topology.set_outputs((0..2).map(|port| Source::Node(OutPort { node: fx, port })));
+        topology.set_outputs((0..2).map(|port| PortSource::Node(OutPort { node: fx, port })));
         ed.commit().expect("commits");
         exec.apply_pending();
         ed.collect();

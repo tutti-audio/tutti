@@ -44,10 +44,6 @@ tutti-graph = { version = "0.0.1", path = "../tutti-graph" }
 # `tutti_nodes::automation`.
 tutti-curve = { version = "0.0.1", path = "../tutti-curve" }
 
-# `ClickNode` reads the count-in flag off a `Transport` and follows a
-# `ProjectMeter`.
-tutti-timeline = { version = "0.0.1", path = "../tutti-timeline" }
-
 # `VbapError`.
 thiserror = { workspace = true, features = ["std"] }
 serde = { version = "1", optional = true, default-features = false, features = ["derive"] }
@@ -64,6 +60,7 @@ criterion.workspace = true
 wide = { version = "1.6", default-features = false }
 tutti-graph = { path = "../tutti-graph", features = ["contract"] }
 tutti-engine = { path = "../tutti-engine" }
+tutti-timeline = { path = "../tutti-timeline" }
 # `Instant`, the one clock type.
 tutti-platform = { path = "../tutti-platform" }
 
