@@ -7,8 +7,14 @@
 //! takes ([`AudioInput`]). A file is decoded one chunk at a time and never
 //! held whole; a wave in memory is cut into the same chunks, so the two tiers
 //! land the same output.
+//!
+//! The same binding serves a live [`Analyzer`]: a tap opened by
+//! [`Taps::analyzer`](crate::Taps::analyzer), which binds the meter to the
+//! graph's rate and the tap's width and shows it what the tap holds each time
+//! the app drains it.
 
 mod feed;
+mod live;
 #[cfg(test)]
 mod tests;
 
@@ -24,6 +30,7 @@ use tutti_units::{SampleRate, Samples};
 
 pub use feed::{AudioContext, AudioInput};
 use feed::{Bind, Chunk, View};
+pub use live::{Analyzer, AnalyzerError};
 
 use crate::job::{Cancel, sealed};
 use crate::{AppKey, Clock, Job, JobKind, Session, WaitError, WorkerError};

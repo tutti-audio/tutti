@@ -64,8 +64,8 @@ impl<'w, S: Float> Chunk<'w, S> {
         self.held = Layout::Planar(held);
     }
 
-    /// The interleaved buffer to decode `frames` frames into.
-    #[cfg(codec)]
+    /// The interleaved buffer to fill with `frames` frames (decoded, or popped
+    /// from a tap).
     pub(crate) fn fill(&mut self, frames: Samples) -> Result<InterleavedMut<'_, S>, AnalyzeError> {
         self.held = Layout::Interleaved;
         self.data.clear();
@@ -75,7 +75,6 @@ impl<'w, S: Float> Chunk<'w, S> {
     }
 
     /// Keeps the first `frames` frames of what was decoded.
-    #[cfg(codec)]
     pub(crate) fn truncate(&mut self, frames: Samples) {
         self.data.truncate(self.layout.interleaved_len(frames));
     }
@@ -85,7 +84,8 @@ impl<'w, S: Float> Chunk<'w, S> {
         self.frames() == Samples::ZERO
     }
 
-    fn frames(&self) -> Samples {
+    /// The frames the chunk holds.
+    pub(crate) fn frames(&self) -> Samples {
         match &self.held {
             Layout::Planar(planes) => planes
                 .first()

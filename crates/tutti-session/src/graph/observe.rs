@@ -15,6 +15,8 @@ use tutti_units::Samples;
 use tutti_buffers::Float;
 
 use super::Graph;
+#[cfg(feature = "analyze")]
+use crate::{Analyzer, AnalyzerError, AudioContext, AudioInput};
 use crate::{EventTapPort, OutPort};
 
 /// What a reader of the root is named by: the id of the tap or of the meter.
@@ -138,6 +140,42 @@ impl<F: Float> Taps<'_, F> {
         let reader = self.graph.editor.open_tap(id, sources, options)?;
         self.graph.edited = true;
         Ok(reader)
+    }
+
+    /// Opens a tap on `sources` ([`open`](Self::open)) and an [`Analyzer`] over
+    /// it: the meter `analysis` builds, bound to the graph's rate and the tap's
+    /// width, fed what the tap holds each time the app drains it
+    /// ([`Analyzer::try_iter`]). The analysis is bound the way
+    /// [`Session::analyze`](crate::Session::analyze) binds it to a wave
+    /// ([`AudioContext`], [`AudioInput`]).
+    ///
+    /// `options` are the tap's: its capacity, its alignment and a bell it rings
+    /// after each block it writes, which an app that awaits frames passes and
+    /// awaits ([`Bell`](tutti_rt::Bell)). A rate change after the open is not
+    /// followed.
+    ///
+    /// # Errors
+    ///
+    /// [`AnalyzerError::Measure`] when the analysis cannot be bound to the
+    /// graph's rate and the tap's width, [`AnalyzerError::Layout`] when the
+    /// tap's width has no view of the kind the meter takes, and
+    /// [`AnalyzerError::MissingSource`] for a source that is not in the graph
+    /// now. Nothing is opened on an error.
+    #[cfg(feature = "analyze")]
+    pub fn analyzer<A>(
+        &mut self,
+        sources: &[OutPort],
+        analysis: A,
+        options: TapOptions,
+    ) -> Result<Analyzer<A, F>, AnalyzerError>
+    where
+        A: tutti_measure::Measure<F>,
+        A::Context: AudioContext,
+        for<'a> <A::Meter as tutti_measure::Meter>::Input<'a>: AudioInput<'a, F>,
+    {
+        let rate = self.graph.editor.prepare().sample_rate();
+        let width = u16::try_from(sources.len()).unwrap_or(u16::MAX);
+        Analyzer::open(rate, width, &analysis, || self.open(sources, options))
     }
 
     /// A tap on the graph's global outputs, aligned: lane `c` is output
