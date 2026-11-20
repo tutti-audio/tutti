@@ -99,7 +99,9 @@
 //! - **STFT vocabulary** (`stft/`): [`CosineWindow`] and the [`Window`] trait,
 //!   [`StftGeometry`] (a [`WindowLength`], a [`HopSize`], shape and rate), the
 //!   [`ColaGeometry`] an inverse accepts, and [`Grid`] with its typed indices; [`StftError`] is
-//!   what a [`Grid`] or a [`ColaGeometry`] refuses with.
+//!   what a [`Grid`] or a [`ColaGeometry`] refuses with. [`PhaseVocoder`] stretches and
+//!   shifts the pitch of any width on a [`ColaGeometry`], one phase solution for all channels,
+//!   pulled by its output (`input_needed`, then `process`) under [`PhaseVocoderControls`].
 //! - **Resampling** (`resample/`): [`WindowedSinc`] and [`StreamingResampler`] (made from a
 //!   [`StreamingResamplerConfig`], sized by a [`ChunkSize`], failing with a [`ResampleError`]).
 //! - **Dither** (`dither/`): [`DitherNoise`] ([`DitherShape`]) and [`DitherSink`], the
@@ -315,6 +317,7 @@ pub use stft::geometry::{
     ColaGeometry, HopSize, HopSizeError, StftGeometry, WindowLength, WindowLengthError,
 };
 pub use stft::grid::{BinCount, BinIndex, FrameCount, FrameIndex, Grid};
+pub use stft::vocoder::{PhaseVocoder, PhaseVocoderControls, StreamCounts};
 pub use stft::window::{CosineWindow, Window};
 pub use tremolo::{AutoPan, AutoPanControls, Tremolo, TremoloControls};
 pub use viterbi::sticky_viterbi;
