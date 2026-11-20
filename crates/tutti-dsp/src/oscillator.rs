@@ -16,7 +16,7 @@
 //! naive form folds back below Nyquist.
 
 use tutti_buffers::Float;
-use tutti_units::{Hz, PhaseIncrement, PhaseStep, RunningPhase, SampleRate};
+use tutti_units::{Hz, Phase, PhaseIncrement, PhaseStep, RunningPhase, SampleRate};
 
 /// The shape an [`Oscillator`] reads its phase through.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -150,6 +150,15 @@ impl Oscillator {
         Self {
             wave,
             phase: RunningPhase::START,
+        }
+    }
+
+    /// An oscillator of `wave` at `phase`: a sine at 0.25 is the cosine of the one at 0.
+    #[must_use]
+    pub fn at(wave: OscillatorWave, phase: Phase) -> Self {
+        Self {
+            wave,
+            phase: RunningPhase::at(phase),
         }
     }
 

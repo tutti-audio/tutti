@@ -9,6 +9,7 @@ static ALLOC: AllocDisabler = AllocDisabler;
 
 mod rt_no_alloc;
 mod rt_no_alloc_bit_crusher;
+mod rt_no_alloc_comb_shifter;
 mod rt_no_alloc_convolver;
 mod rt_no_alloc_crossover;
 mod rt_no_alloc_cut_filter;
