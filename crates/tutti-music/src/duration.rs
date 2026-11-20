@@ -20,9 +20,10 @@ pub enum NoteModifier {
 /// [`NoteModifier`], as a tempo-synced delay or LFO names its time.
 ///
 /// Every pair is a duration a score can write, so no value is refused: a third of a
-/// beat is a triplet eighth, and a fraction a note cannot be (1/3 of a whole note) is not
-/// a `NoteDuration`. A quarter note is one beat ([`QUARTER`](Self::QUARTER)); the beats
-/// of any other are [`to_beat_duration`](Self::to_beat_duration).
+/// beat is a triplet eighth, and a fraction a note cannot be (1/5 of a whole note, a
+/// quintuplet) is not a `NoteDuration`. A quarter note is one beat
+/// ([`QUARTER`](Self::QUARTER)); the beats of any other are
+/// [`to_beat_duration`](Self::to_beat_duration).
 ///
 /// ```
 /// use tutti_music::{NoteDuration, NoteModifier, NoteValue};
@@ -100,33 +101,24 @@ impl From<NoteValue> for NoteDuration {
 mod tests {
     use super::*;
 
-    /// The beats of a written note are the score's: a quarter is 1, a whole 4, a dotted
-    /// quarter 3/2, a triplet eighth 1/3, a dotted eighth 3/4, a sixty-fourth 1/16.
-    #[test]
-    fn written_notes_have_their_beats() {
-        let beats = |v: NoteValue, m| NoteDuration::new(v, m).to_beat_duration().get();
-        assert_eq!(beats(NoteValue::QUARTER, NoteModifier::Plain), 1.0);
-        assert_eq!(beats(NoteValue::WHOLE, NoteModifier::Plain), 4.0);
-        assert_eq!(beats(NoteValue::HALF, NoteModifier::Plain), 2.0);
-        assert_eq!(beats(NoteValue::QUARTER, NoteModifier::Dotted), 1.5);
-        assert_eq!(beats(NoteValue::EIGHTH, NoteModifier::Dotted), 0.75);
-        assert_eq!(beats(NoteValue::EIGHTH, NoteModifier::Plain), 0.5);
-        assert_eq!(beats(NoteValue::of(64), NoteModifier::Plain), 1.0 / 16.0);
-        assert_eq!(beats(NoteValue::EIGHTH, NoteModifier::Triplet), 1.0 / 3.0);
-        assert_eq!(beats(NoteValue::QUARTER, NoteModifier::Triplet), 2.0 / 3.0);
-    }
-
     /// The beats are the score's fractions exactly, as `f64` rounds them, including the
-    /// ones a multiplication order could break: a quarter is 1, a dotted eighth 3/4, a
-    /// quarter triplet 2/3, a whole 4 and a sixty-fourth triplet 1/24. `From` agrees with
-    /// `to_beat_duration` on every pair.
+    /// ones a multiplication order could break: a quarter is 1, a whole 4, a half 2, an
+    /// eighth 1/2, a sixty-fourth 1/16, a dotted quarter 3/2, a dotted eighth 3/4, a half
+    /// triplet 4/3, a quarter triplet 2/3, a triplet eighth 1/3 and a sixty-fourth triplet
+    /// 1/24. `From` agrees with `to_beat_duration` on every pair.
     #[test]
     fn the_beats_are_the_exact_fractions_and_from_agrees() {
         let cases = [
             (NoteValue::QUARTER, NoteModifier::Plain, 1.0),
-            (NoteValue::EIGHTH, NoteModifier::Dotted, 3.0 / 4.0),
-            (NoteValue::QUARTER, NoteModifier::Triplet, 2.0 / 3.0),
             (NoteValue::WHOLE, NoteModifier::Plain, 4.0),
+            (NoteValue::HALF, NoteModifier::Plain, 2.0),
+            (NoteValue::EIGHTH, NoteModifier::Plain, 1.0 / 2.0),
+            (NoteValue::of(64), NoteModifier::Plain, 1.0 / 16.0),
+            (NoteValue::QUARTER, NoteModifier::Dotted, 3.0 / 2.0),
+            (NoteValue::EIGHTH, NoteModifier::Dotted, 3.0 / 4.0),
+            (NoteValue::HALF, NoteModifier::Triplet, 4.0 / 3.0),
+            (NoteValue::QUARTER, NoteModifier::Triplet, 2.0 / 3.0),
+            (NoteValue::EIGHTH, NoteModifier::Triplet, 1.0 / 3.0),
             (NoteValue::of(64), NoteModifier::Triplet, 1.0 / 24.0),
         ];
         for (value, modifier, beats) in cases {
