@@ -17,7 +17,8 @@ use tutti_midi_runtime::MidiOut;
 
 use crate::Session;
 use crate::midi::{
-    Claim, Held, LossReaders, LossWriters, OutputTiming, Stamping, UmpOut, drain_events, loss_cells,
+    Claim, Held, LossReaders, LossWriters, OutputTiming, Stamping, Sweepable, UmpOut, drain_events,
+    loss_cells, sweep_dropped,
 };
 
 // --- The shared record ---
@@ -66,7 +67,8 @@ impl MidiSink {
 
 impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// A request to open `sink` as an output: wire what it should receive to
-    /// its [`node`](MidiSink::node). [`run`](OpenMidiSink::run) opens it, and it
+    /// its [`node`](MidiSink::node). Nothing opens until
+    /// [`run`](OpenMidiSink::run) is called, and the sink
     /// closes when every clone of the handle is dropped, at the next
     /// [`update`](Self::update) or open.
     pub fn open_midi_sink(&mut self, sink: Arc<dyn MidiOut>) -> OpenMidiSink<'_, K, C> {
@@ -187,25 +189,29 @@ impl Sinks {
         self.close_dropped(graph, timing)
     }
 
-    /// The sinks whose handles were all dropped, closed: what their taps held
-    /// is sent, and the nodes leave the graph. Whether the graph was edited.
+    /// The sinks whose handles were all dropped, closed: what their node
+    /// rendered before the drop is sent, and the node leaves the graph. Whether
+    /// the graph was edited.
     pub(crate) fn close_dropped<F: tutti_buffers::Float>(
         &mut self,
         graph: &mut crate::graph::Graph<F>,
         timing: Option<&OutputTiming>,
     ) -> bool {
-        let mut edited = false;
-        self.ports.retain_mut(|port| {
-            let held = port.claim.is_held();
-            if !held {
-                port.drain(timing);
-                // A host that removed the node itself leaves nothing to take.
-                let _ = graph.remove(port.node);
-                edited = true;
-            }
-            held
-        });
-        edited
+        sweep_dropped(&mut self.ports, graph, timing)
+    }
+}
+
+impl Sweepable for SinkPort {
+    fn is_held(&self) -> bool {
+        self.claim.is_held()
+    }
+
+    fn node(&self) -> NodeKey {
+        self.node
+    }
+
+    fn drain(&mut self, timing: Option<&OutputTiming>) {
+        SinkPort::drain(self, timing);
     }
 }
 

@@ -560,6 +560,38 @@ pub(crate) struct Claim<S> {
     pub(crate) node: NodeKey,
 }
 
+/// A port or sink that is swept when its handles are all dropped.
+pub(crate) trait Sweepable {
+    /// Whether a handle lives.
+    fn is_held(&self) -> bool;
+    /// The output node.
+    fn node(&self) -> NodeKey;
+    /// Reads the tap dry and sends it on.
+    fn drain(&mut self, timing: Option<&OutputTiming>);
+}
+
+/// Closes the `ports` whose handles were all dropped: what their taps held is
+/// sent first, and then their nodes leave the graph. Whether the graph was
+/// edited.
+pub(crate) fn sweep_dropped<P: Sweepable, F: Float>(
+    ports: &mut Vec<P>,
+    graph: &mut Graph<F>,
+    timing: Option<&OutputTiming>,
+) -> bool {
+    let mut edited = false;
+    ports.retain_mut(|port| {
+        let held = port.is_held();
+        if !held {
+            port.drain(timing);
+            // A host that removed the node itself leaves nothing to take.
+            let _ = graph.remove(port.node());
+            edited = true;
+        }
+        held
+    });
+    edited
+}
+
 /// The session's side of a [`Claim`]: a weak reference, so a port or sink is
 /// held exactly as long as some handle of it lives.
 #[derive(Debug)]
@@ -738,6 +770,9 @@ pub(crate) struct MidiState {
     /// audio output's latency. `None` offline, where every event
     /// is sent at once.
     output_clock: Option<OutputClockSource>,
+    /// The `now` of the last [`midi_out_phase`](Self::midi_out_phase): the time
+    /// an open's final drain of a dropped output is timed by.
+    last_now: Option<Instant>,
     /// The outputs' own latency and offset ([`Midi::output_latency`]).
     output_latency: LatencyCell,
     /// The session's subscription to the device list: `Phase::Poll` reads it
@@ -1010,6 +1045,7 @@ impl MidiState {
     pub(crate) fn midi_out_phase<F: Float>(&mut self, graph: &mut Graph<F>, now: Instant) -> bool {
         // A graph re-rated outside the device hook (`Graph::set_sample_rate`)
         // is followed here, before this update's events are read.
+        self.last_now = Some(now);
         let mut edited = self.follow_rate(graph, now);
         let timing = self.output_timing(now);
         edited |= self.sinks.drain(graph, timing.as_ref());
@@ -1131,13 +1167,27 @@ impl<'a, F: Float> Midi<'a, F> {
 }
 
 impl<F: Float> Midi<'_, F> {
-    /// Closes the ports and sinks whose handles were all dropped: what their
-    /// taps held is sent first, and an input's connection to its device ends,
-    /// so a device they held can be opened again by the call that follows.
+    /// Closes the ports and sinks whose handles were all dropped, so a device
+    /// they held can be opened again by the call that follows. An input leaves
+    /// through [`Ports::retire`](crate::midi_port::Ports), which `update`'s poll
+    /// runs as well; an output or a sink leaves through the sweep that
+    /// `update`'s `Phase::MidiOut` runs as well, which first sends what its
+    /// node rendered before the drop (an event queued in the block just before
+    /// the drop can be lost). That final drain is timed by the `now` of the last
+    /// `update`, so it is placed as that update's drain would have been; before
+    /// any `update` there is no output clock and it is sent at once.
+    ///
+    /// The graph edits go uncommitted here: the next `update` commits them.
     pub(crate) fn close_dropped(&mut self) {
-        let timing = self.state.output_timing(Instant::now());
-        self.state.sinks.close_dropped(self.graph, timing.as_ref());
-        self.state
+        let timing = self
+            .state
+            .last_now
+            .and_then(|now| self.state.output_timing(now));
+        // The sweeps' `edited` results are not read: the graph is edited in
+        // place, and the next `update` commits it.
+        let _ = self.state.sinks.close_dropped(self.graph, timing.as_ref());
+        let _ = self
+            .state
             .ports
             .close_dropped_outputs(self.graph, timing.as_ref());
         #[cfg(feature = "midi-hardware")]
