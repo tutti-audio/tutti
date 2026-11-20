@@ -132,6 +132,8 @@ mod rt_log;
 #[cfg(feature = "sampler")]
 mod sampler;
 mod session;
+#[cfg(all(feature = "analyze", feature = "sampler"))]
+mod signal_windows;
 #[cfg(feature = "device")]
 mod switch;
 #[cfg(feature = "capture")]
@@ -276,6 +278,8 @@ pub use session::ModInput;
 pub use session::{
     AppKey, CrossfadeControls, PHASES, Phase, PhaseCx, RootTopologyStatus, Session, SessionEvent,
 };
+#[cfg(all(feature = "analyze", feature = "sampler"))]
+pub use signal_windows::windows_from_signal;
 #[cfg(feature = "device")]
 pub use switch::ClockError;
 #[cfg(feature = "capture")]
